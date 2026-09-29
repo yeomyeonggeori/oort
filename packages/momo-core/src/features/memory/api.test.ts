@@ -305,7 +305,14 @@ describe("memory browser items", () => {
       if (init?.method === "PATCH") {
         expect(JSON.parse(String(init.body))).toEqual({ body: "새 문구", kind: "fact" });
         return jsonResponse(200, {
-          item: itemWire({ id: ITEM_NEW, origin: "curated", supersedesId: ITEM, kind: "fact" }),
+          item: itemWire({
+            id: ITEM_NEW,
+            origin: "curated",
+            supersedesId: ITEM,
+            kind: "fact",
+            editedByMemberId: "m1",
+            editedAtMs: 1_800_000_009_000,
+          }),
           evidence: [{ messageId: MSG, channelId: CH, seq: 7 }],
           supersededId: ITEM,
         });
@@ -315,7 +322,13 @@ describe("memory browser items", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const edited = await editMemoryItem(WS, ITEM, { body: "새 문구", kind: "fact" });
-    expect(edited.item).toMatchObject({ id: ITEM_NEW, origin: "curated", supersedesId: ITEM });
+    expect(edited.item).toMatchObject({
+      id: ITEM_NEW,
+      origin: "curated",
+      supersedesId: ITEM,
+      editedByMemberId: "m1",
+      editedAtMs: 1_800_000_009_000,
+    });
     expect(edited.supersededId).toBe(ITEM);
     expect(edited.evidence).toHaveLength(1);
     expect(await forgetMemoryItem(WS, ITEM)).toBe(3);

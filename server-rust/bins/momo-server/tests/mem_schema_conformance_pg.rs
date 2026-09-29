@@ -1986,6 +1986,11 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
             ] {
                 // momo_app: SELECT (RLS-gated) everywhere; INSERT/UPDATE/DELETE only on its own
                 // settings. TRUNCATE / REFERENCES / TRIGGER nowhere (#3186 M-1).
+                // `mem_suppress` (#3208 M-5): its policies name mem_definer only, so momo_app reads
+                // zero rows whether or not a bootstrap re-grant left it a table SELECT — not asserted.
+                if role == "momo_app" && table == "mem_suppress" && privilege == "SELECT" {
+                    continue;
+                }
                 let allowed = role == "momo_app"
                     && (privilege == "SELECT"
                         || (table == "mem_settings"
@@ -2001,6 +2006,9 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
             }
             // Column-level grants are a side door around the table-level revokes (#3186 M-3).
             for privilege in ["SELECT", "INSERT", "UPDATE", "REFERENCES"] {
+                if role == "momo_app" && table == "mem_suppress" && privilege == "SELECT" {
+                    continue;
+                }
                 let allowed = role == "momo_app"
                     && (privilege == "SELECT"
                         || (table == "mem_settings" && matches!(privilege, "INSERT" | "UPDATE")));
@@ -2033,17 +2041,43 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
         );
     }
     for (signature, name) in &functions {
+        if name == "mem_edit_item" || name == "mem_forget_item" {
+            // #3208: the API's write entry points are PUBLIC EXECUTE on purpose (the same shape as
+            // `mem_search_items`: no dependence on role-creation order); what protects them is the
+            // in-function `session_user` guard and the actor derived from `app.member_id`, both
+            // exercised (and sabotaged) in mem_browser_conformance_pg. Pin the state so a change
+            // in either direction is noticed.
+            let public_exec: bool = sqlx::query_scalar(
+                "SELECT has_function_privilege('public', $1::regprocedure, 'EXECUTE')",
+            )
+            .bind(signature)
+            .fetch_one(su)
+            .await
+            .expect("public execute");
+            assert!(
+                public_exec,
+                "{when}: PUBLIC must be able to EXECUTE {signature}"
+            );
+            for role in &roles {
+                let has: bool = sqlx::query_scalar(
+                    "SELECT has_function_privilege($1, $2::regprocedure, 'EXECUTE')",
+                )
+                .bind(role)
+                .bind(signature)
+                .fetch_one(su)
+                .await
+                .expect("has_function_privilege");
+                assert!(has, "{when}: {role} EXECUTE {signature} (via PUBLIC)");
+            }
+            continue;
+        }
         if name == "mem_digest_evidence_ok"
             || name == "mem_item_evidence_ok"
             || name == "mem_search_items"
-            || name == "mem_edit_item"
-            || name == "mem_forget_item"
         {
             // The RLS policies call the evidence helpers as the reading role; `mem_search_items`
             // is the API entry point (session_user guard inside; the worker-only twin is
-            // `mem_search_items_for`, which the loop covers). `mem_edit_item` / `mem_forget_item`
-            // (#3208) are the API's write entry points: PUBLIC EXECUTE with the same session_user
-            // guard, the actor derived from `app.member_id` — mem_item_edit_conformance covers them.
+            // `mem_search_items_for`, which the loop covers).
             continue;
         }
         let public_grants: i64 = sqlx::query_scalar(

@@ -789,14 +789,21 @@ fn settle_mem_read<T>(context: &str, outcome: DbRejectable<T>) -> Result<T, ApiE
     }
 }
 
-/// SQLSTATE → HTTP for `mem_edit_item` / `mem_forget_item` **only**, applied to that one call.
-/// `None` = not one of theirs → the caller propagates the error (500).
+/// SQLSTATE → HTTP for errors **raised by** `mem_edit_item` / `mem_forget_item` themselves, applied to
+/// that one call. Every `RAISE` in those functions carries the message prefix `mem_edit_item:` /
+/// `mem_forget_item:` (migration 105); an error without it — a grant regression, an RLS denial, a
+/// CHECK or index violation — is not the function speaking and stays a 500 (#3189 M-2 / L-1).
+/// `None` = not one of theirs → the caller propagates the error.
 fn map_item_write_error(error: &DbError) -> Option<ApiError> {
     let DbError::Sqlx(momo_db::sqlx::Error::Database(db)) = error else {
         return None;
     };
+    let message = db.message();
+    if !(message.starts_with("mem_edit_item:") || message.starts_with("mem_forget_item:")) {
+        return None;
+    }
     Some(match db.code().as_deref()? {
-        // Not an active human of this workspace / not the API session.
+        // Not an active human of this workspace / not the API session / a guest.
         "42501" => ApiError::forbidden("not allowed to change memory items"),
         // Missing **or unreadable** — one answer, so existence never leaks.
         "P0002" => ApiError::not_found(ITEM_NOT_FOUND),
@@ -805,12 +812,8 @@ fn map_item_write_error(error: &DbError) -> Option<ApiError> {
             axum::http::StatusCode::CONFLICT,
             "memory item is no longer current; reload it",
         ),
-        // Same live item already exists.
-        "23505" => ApiError::new(
-            axum::http::StatusCode::CONFLICT,
-            "an identical memory item already exists",
-        ),
-        // Nothing changed / a value the schema rejects (length, kind, credential-shaped text).
+        // Nothing to change (same text, or an identical live item — deliberately one answer) or
+        // a value the function rejects (length, kind, credential-shaped text).
         "22023" | "23514" => ApiError::new(
             axum::http::StatusCode::UNPROCESSABLE_ENTITY,
             "memory item text or kind is not allowed",
@@ -845,6 +848,11 @@ pub struct ItemDto {
     pub superseded_by_id: Option<String>,
     pub confidence: f32,
     pub source_count: i32,
+    /// Curated items only: who wrote the current text, and when.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edited_by_member_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edited_at_ms: Option<i64>,
     /// Search results only: the keyword score, best first.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score: Option<f32>,
@@ -868,6 +876,8 @@ fn item_dto(item: &MemItem, score: Option<f32>) -> ItemDto {
         superseded_by_id: item.superseded_by_id.map(|id| id.to_string()),
         confidence: item.confidence,
         source_count: item.source_count,
+        edited_by_member_id: item.edited_by_member_id.map(|id| id.to_string()),
+        edited_at_ms: item.edited_at.map(epoch_ms),
         score,
     }
 }
@@ -1038,6 +1048,9 @@ pub async fn list_items(
             .ok_or_else(|| ApiError::bad_request("status must be active, history or all"))?,
     };
     let search = trimmed(&query.q).map(str::to_string);
+    if search.as_deref().is_some_and(|q| q.contains('\0')) {
+        return Err(ApiError::bad_request("invalid search text"));
+    }
     if search.is_some() && !matches!(status, ItemStatus::Active) {
         return Err(ApiError::bad_request(
             "search covers current items only; drop status or use active",
@@ -1080,6 +1093,7 @@ pub async fn list_items(
                 let mut rows = list_items_in_tx(
                     conn,
                     &ItemListFilter {
+                        viewer: member_id,
                         channel_id,
                         kind: kind.as_deref(),
                         status,
@@ -1216,7 +1230,8 @@ pub async fn edit_item(
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let item_id = path_uuid(&item, "invalid item id")?;
     let body = request.body.trim().to_string();
-    if body.is_empty() || body.chars().count() > ITEM_BODY_MAX_CHARS {
+    // A NUL byte is not storable in Postgres text (it would surface as an internal error).
+    if body.is_empty() || body.chars().count() > ITEM_BODY_MAX_CHARS || body.contains('\0') {
         return Err(ApiError::new(
             axum::http::StatusCode::UNPROCESSABLE_ENTITY,
             "memory item text must be 1 to 600 characters",

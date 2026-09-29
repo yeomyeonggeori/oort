@@ -3595,9 +3595,12 @@ paths:
         every evidence channel, or, for a personal item, its owner. This is the
         same rule as reading, evaluated in the database; there is no admin
         override. Anyone else, and a nonexistent id, gets an identical 404.
-        A version that was already retired, or replaced, is a 409 (reload). The
-        text must be 1–600 characters, differ from the current one, and must not
-        look like a credential (422).
+        Channel (and workspace) `guest` members can read but not edit: 403. A
+        version that was already retired, or replaced, is a 409 (reload). The
+        text must be 1–600 characters (no NUL), differ from the current one, and
+        must not look like a credential (422). An identical live item in the same
+        channel is refused with the same generic 422 as "unchanged" — deliberately
+        not a distinguishable 409, so a hidden item's existence is not revealed.
       security:
         - bearerAuth: []
       parameters:
@@ -3637,13 +3640,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: The item is no longer current (already edited/retired), or an identical live item exists.
+          description: The item is no longer current (already edited/retired).
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "422":
-          description: Empty, over-long, unchanged or credential-shaped text, or an unknown field.
+          description: Empty, over-long, unchanged, duplicate or credential-shaped text (or one containing NUL), or an unknown field.
           content:
             application/json:
               schema:
@@ -3656,8 +3659,11 @@ paths:
       summary: Forget an item — permanent deletion.
       description: >
         ADR-0196 D9/D10 「잊기 = 즉시 영구 삭제」. The item, its older (edited-away)
-        versions and their evidence links are **deleted**, not hidden; the event
-        ledger keeps only ids. There is no undo. Same permission and the same 404
+        versions, dead/retired twins with the same text and their evidence links
+        are **deleted**, not hidden; the event ledger keeps only ids. The text's
+        hash is remembered (hash only) so extraction does not re-create it; digest
+        (summary) bodies may still carry the fact until they are regenerated, so a
+        client must not promise the fact can never reappear. Guests get 403. There is no undo. Same permission and the same 404
         as edit. Forgetting a version that has a newer one is a 409 — forget the
         newest version, which removes the whole chain.
       security:
@@ -12106,6 +12112,8 @@ components:
         supersededById: {type: string, format: uuid, description: The version that replaced this one.}
         confidence: {type: number, format: float}
         sourceCount: {type: integer, format: int32}
+        editedByMemberId: {type: string, format: uuid, description: "Curated items only: the member who wrote the current text."}
+        editedAtMs: {type: integer, format: int64, description: "Curated items only: when they wrote it."}
         score: {type: number, format: float, description: Search results only, best first.}
 
     MemoryItemListResponse:

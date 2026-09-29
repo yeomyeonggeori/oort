@@ -552,13 +552,22 @@ pub struct MemItem {
     pub superseded_by_id: Option<Uuid>,
     pub confidence: f32,
     pub source_count: i32,
+    /// Curated items only: who wrote the current text (the `edited` event's actor) and when.
+    pub edited_by_member_id: Option<Uuid>,
+    pub edited_at: Option<DateTime<Utc>>,
 }
 
 const ITEM_COLS: &str = "i.id, i.channel_id, i.space_kind, i.kind, i.origin, i.body, \
      i.subject_key, i.valid_from, i.valid_to, i.recorded_at, i.retired_at, i.retired_reason, \
      i.supersedes_id, \
      (SELECT s.id FROM mem_item s WHERE s.supersedes_id = i.id LIMIT 1) AS superseded_by_id, \
-     i.confidence, i.source_count";
+     i.confidence, i.source_count, \
+     (SELECT e.actor_member_id FROM mem_event e WHERE e.target_kind = 'item' \
+        AND e.target_id = i.id AND e.action = 'edited' AND i.origin = 'curated' \
+        ORDER BY e.created_at, e.id LIMIT 1) AS edited_by_member_id, \
+     (SELECT e.created_at FROM mem_event e WHERE e.target_kind = 'item' \
+        AND e.target_id = i.id AND e.action = 'edited' AND i.origin = 'curated' \
+        ORDER BY e.created_at, e.id LIMIT 1) AS edited_at";
 
 fn item_from_row(row: &sqlx::postgres::PgRow) -> Result<MemItem, sqlx::Error> {
     Ok(MemItem {
@@ -578,6 +587,8 @@ fn item_from_row(row: &sqlx::postgres::PgRow) -> Result<MemItem, sqlx::Error> {
         superseded_by_id: row.try_get("superseded_by_id")?,
         confidence: row.try_get("confidence")?,
         source_count: row.try_get("source_count")?,
+        edited_by_member_id: row.try_get("edited_by_member_id")?,
+        edited_at: row.try_get("edited_at")?,
     })
 }
 
@@ -619,6 +630,12 @@ pub fn clamp_mem_item_limit(requested: Option<i64>) -> i64 {
 /// Selector for the item list. Every field only chooses *which* rows; visibility is the policy's.
 #[derive(Debug, Clone, Copy)]
 pub struct ItemListFilter<'a> {
+    /// The reader (the credential's member). Used only to **narrow** the scan to the channels they
+    /// are an active member of (and their own personal space), the way `mem_search_items_core`
+    /// does — `channel_id = ANY(array)` is leakproof, so it runs before the read policy and stops
+    /// the policy function from being evaluated on every row of the workspace. It is not a
+    /// permission check: the read policy still decides what is visible.
+    pub viewer: Uuid,
     pub channel_id: Option<Uuid>,
     pub kind: Option<&'a str>,
     pub status: ItemStatus,
@@ -632,6 +649,12 @@ pub async fn list_items_in_tx(
     conn: &mut PgConnection,
     filter: &ItemListFilter<'_>,
 ) -> Result<Vec<MemItem>, DbError> {
+    let member_channels: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT channel_id FROM membership WHERE member_id = $1 AND left_at IS NULL",
+    )
+    .bind(filter.viewer)
+    .fetch_all(&mut *conn)
+    .await?;
     let sql = format!(
         "SELECT {ITEM_COLS} FROM mem_item i \
           WHERE ($1::uuid IS NULL OR i.channel_id = $1) \
@@ -640,6 +663,7 @@ pub async fn list_items_in_tx(
                  OR ($3 = 'active' AND i.retired_at IS NULL) \
                  OR ($3 = 'history' AND i.retired_at IS NOT NULL)) \
             AND ($4::timestamptz IS NULL OR (i.recorded_at, i.id) < ($4, $5)) \
+            AND (i.channel_id = ANY($7) OR (i.space_kind = 'personal' AND i.owner_member_id = $8)) \
           ORDER BY i.recorded_at DESC, i.id DESC \
           LIMIT $6"
     );
@@ -655,6 +679,8 @@ pub async fn list_items_in_tx(
         .bind(filter.before.map(|(at, _)| at))
         .bind(filter.before.map(|(_, id)| id).unwrap_or_else(Uuid::nil))
         .bind(filter.limit)
+        .bind(&member_channels)
+        .bind(filter.viewer)
         .fetch_all(&mut *conn)
         .await?;
     rows.iter()
@@ -805,8 +831,9 @@ pub async fn list_item_events_in_tx(
 /// the actor from `app.member_id`, refuses anyone who may not read the item with `P0002` (the same
 /// answer as a missing id), and re-checks everything itself — the caller passes no member.
 /// SQLSTATEs the caller maps: `42501` (not an active human / wrong session), `P0002` (not found
-/// or not readable), `55000` (already retired), `22023` (nothing changed), `23514` (invalid body
-/// or kind), `23505` (identical live item exists).
+/// or not readable), `55000` (already retired), `22023` (nothing changed, or an identical live item exists — one answer for both),
+/// `23514` (invalid body or kind). Only errors whose message starts with `mem_edit_item:` are the
+/// function's own; the caller must not map any other database error.
 pub async fn edit_item_in_tx(
     conn: &mut PgConnection,
     item_id: Uuid,

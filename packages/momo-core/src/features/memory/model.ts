@@ -286,7 +286,8 @@ export function parseMemorySettings(value: unknown): MemorySettings {
 // absent from a list and a 404 everywhere else, identical to a missing id, so
 // the client must not try to tell "hidden" from "gone". Edit and forget are
 // permitted to anyone who can read the item (ADR D9); anyone else gets that same
-// 404. Forget deletes for good — there is no undo and no "forgotten" state.
+// 404. Forget deletes for good — there is no undo and no "forgotten" state. UI copy must not
+// promise a forgotten fact can never reappear: summaries may still carry it until regenerated.
 // -----------------------------------------------------------------------------
 
 export type MemoryItemKind = "decision" | "fact" | "commitment" | "preference" | "procedure";
@@ -323,6 +324,9 @@ export interface MemoryItem {
   supersededById?: string;
   confidence: number;
   sourceCount: number;
+  /** Curated items only: who wrote the current text, and when. */
+  editedByMemberId?: string;
+  editedAtMs?: number;
   /** Search results only, best first. */
   score?: number;
 }
@@ -437,6 +441,10 @@ export function parseMemoryItem(value: unknown): MemoryItem | null {
   if (supersedesId !== undefined) item.supersedesId = supersedesId;
   const supersededById = str(value, "supersededById");
   if (supersededById !== undefined) item.supersededById = supersededById;
+  const editedByMemberId = str(value, "editedByMemberId");
+  if (editedByMemberId !== undefined) item.editedByMemberId = editedByMemberId;
+  const editedAtMs = num(value, "editedAtMs");
+  if (editedAtMs !== undefined) item.editedAtMs = editedAtMs;
   const score = num(value, "score");
   if (score !== undefined) item.score = score;
   return item;

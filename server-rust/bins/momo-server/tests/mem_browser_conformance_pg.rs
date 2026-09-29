@@ -16,6 +16,10 @@
 //! | `agents_suspended_members_and_wrong_sessions_are_refused` | agent bearer 403, suspended 403, definer session guard |
 //! | `each_new_guard_is_load_bearing` | sabotage of every guard in 105 (RED) |
 //! | `member_id_is_not_left_on_the_pooled_connection` | LOCAL GUC after success/refusal |
+//! | `forget_sweeps_dead_twins_and_suppresses_reextraction` | M-1 twins, M-5 suppression (hash only), M-4 indexes |
+//! | `editing_to_a_twins_text_reveals_nothing_and_a_dead_twin_gives_way` | M-2 |
+//! | `guests_read_but_do_not_change_and_curated_items_name_their_editor` | M-6 |
+//! | `only_the_functions_own_errors_are_mapped_and_nul_is_refused` | L-1, L-4 |
 //!
 //! `#[ignore]` — needs a real Postgres:
 //!
@@ -352,6 +356,20 @@ async fn worker_item(
     body: &str,
     evidence: &[Uuid],
 ) -> Uuid {
+    worker_item_try(worker, ws, digest, kind, body, evidence)
+        .await
+        .expect("a new item")
+}
+
+/// Like [`worker_item`], but `None` when `mem_add_item` skipped the row (duplicate or suppressed).
+async fn worker_item_try(
+    worker: &PgPool,
+    ws: Uuid,
+    digest: Uuid,
+    kind: &str,
+    body: &str,
+    evidence: &[Uuid],
+) -> Option<Uuid> {
     let mut tx = worker.begin().await.expect("begin");
     sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
         .bind(ws.to_string())
@@ -369,7 +387,7 @@ async fn worker_item(
     .await
     .unwrap_or_else(|e| panic!("mem_add_item: {e}"));
     tx.commit().await.expect("commit");
-    id.expect("a new item")
+    id
 }
 
 /// A window digest over `msgs` (consecutive seqs of one channel) and one item on top of it.
@@ -475,7 +493,7 @@ async fn build_world(su: &PgPool, worker: &PgPool) -> World {
         "INSERT INTO mem_item (id, workspace_id, space_kind, channel_id, kind, origin, body, \
          valid_from, content_hash, extractor_version, source_count) \
          VALUES ($1, $2, 'channel', $3, 'fact', 'extracted', $4, now(), \
-                 encode(sha256(convert_to($4, 'UTF8')), 'hex'), 'forged', 2)",
+                 encode(sha256(convert_to('fact:' || $4, 'UTF8')), 'hex'), 'forged', 2)",
     )
     .bind(multi)
     .bind(ws)
@@ -653,6 +671,72 @@ async fn probe_all(
         .await,
         send(http, reqwest::Method::DELETE, &url, token, None).await,
     ]
+}
+
+/// PATCH the id with bodies whose refusal must not depend on whether the id exists or is hidden:
+/// plain, credential-shaped, over-long, NUL, and `same_text` (the text of the hidden item itself).
+async fn probe_edit_variants(
+    http: &reqwest::Client,
+    base: &str,
+    ws: Uuid,
+    id: Uuid,
+    token: &str,
+    same_text: &str,
+) -> Vec<(u16, Value)> {
+    let url = item_url(base, ws, id);
+    let mut out = Vec::new();
+    for body in [
+        "몰래 고쳐 쓴 본문".to_string(),
+        "토큰 sk-abcdefghijklmnopqrstuvwxyz123456 기록".to_string(),
+        "가".repeat(601),
+        "널\u{0}문자".to_string(),
+        same_text.to_string(),
+    ] {
+        out.push(
+            send(
+                http,
+                reqwest::Method::PATCH,
+                &url,
+                token,
+                Some(json!({ "body": body })),
+            )
+            .await,
+        );
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// restore-on-panic for the sabotage tests
+// ---------------------------------------------------------------------------
+
+static RESTORE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Queue SQL that undoes a sabotage; [`guarded`] runs the queue even if the scenario panics.
+fn register_restore(sql: String) {
+    RESTORE.lock().expect("restore queue").push(sql);
+}
+
+async fn restore_all(su: &PgPool) {
+    let queued: Vec<String> = std::mem::take(&mut *RESTORE.lock().expect("restore queue"));
+    for sql in queued.into_iter().rev() {
+        sqlx::raw_sql(&sql)
+            .execute(su)
+            .await
+            .expect("restore sabotage");
+    }
+}
+
+/// Run `scenario` in its own task so a panic cannot skip the restore, then re-raise it.
+async fn guarded<F>(su: &PgPool, scenario: F)
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    let outcome = tokio::spawn(scenario).await;
+    restore_all(su).await;
+    if let Err(error) = outcome {
+        std::panic::resume_unwind(error.into_panic());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -911,6 +995,50 @@ async fn hidden_items_are_absent_or_404_with_no_oracle() {
         .await
         .expect("delete a source");
     assert_eq!(probe_all(&http, &base, w.ws, w.a1, &bob).await, nothing);
+
+    // L-5: the refusal of an edit does not depend on the body either — credential-shaped, over-long,
+    // NUL, and the hidden item's own text all get the answer a nonexistent id gets.
+    let random = Uuid::new_v4();
+    for (hidden, text) in [
+        (w.multi, MULTI_BODY),
+        (w.s1_item, S1_BODY),
+        (w.personal, PERSONAL_BODY),
+        (w.a1, A1_BODY),
+    ] {
+        let want = probe_edit_variants(&http, &base, w.ws, random, &bob, text).await;
+        assert_eq!(
+            probe_edit_variants(&http, &base, w.ws, hidden, &bob, text).await,
+            want,
+            "{hidden}: edit variants must not tell hidden from missing"
+        );
+    }
+    // a hidden *retired* item is a 404 too (retired items are readable history only to readers).
+    sqlx::query("UPDATE mem_item SET retired_at = now(), retired_reason = 'edited' WHERE id = $1")
+        .bind(w.multi)
+        .execute(&su)
+        .await
+        .expect("retire multi");
+    assert_eq!(probe_all(&http, &base, w.ws, w.multi, &bob).await, nothing);
+    let (status, _) = get(&http, &item_url(&base, w.ws, w.multi), &alice).await;
+    assert_eq!(status, 200, "its readers still see the history");
+    let (_, history) = get(
+        &http,
+        &format!("{}?status=history", items_url(&base, w.ws)),
+        &bob,
+    )
+    .await;
+    assert!(!item_ids(&history).contains(&w.multi.to_string()));
+    // a member who left the channel loses the list at once (narrowing + policy agree).
+    sqlx::query("UPDATE membership SET left_at = now() WHERE channel_id = $1 AND member_id = $2")
+        .bind(w.p1)
+        .bind(w.erin.id)
+        .execute(&su)
+        .await
+        .expect("erin leaves");
+    let erin = login(&http, &base, w.ws, &w.erin.email).await;
+    let (status, body) = get(&http, &items_url(&base, w.ws), &erin).await;
+    assert_eq!(status, 200);
+    assert!(item_ids(&body).is_empty(), "{body}");
 }
 
 async fn edit(
@@ -1114,7 +1242,8 @@ async fn edit_supersedes_and_keeps_the_evidence() {
     )
     .await;
     assert_eq!(status, 409);
-    // an identical live item in the channel is a 409, not a silent duplicate: a2 -> a3's text.
+    // an identical live item in the channel is refused with the generic 422 (M-2: never a distinguishable
+    // 409): a2 -> a3's text.
     let (status, _) = edit(
         &http,
         &base,
@@ -1124,7 +1253,7 @@ async fn edit_supersedes_and_keeps_the_evidence() {
         json!({"body": A3_BODY, "kind": "commitment"}),
     )
     .await;
-    assert_eq!(status, 409);
+    assert_eq!(status, 422);
     // the new (curated) item can itself be edited: a chain.
     let (status, second) = edit(
         &http,
@@ -1466,6 +1595,7 @@ async fn sabotage(su: &PgPool, signature: &str, edits: &[(&str, &str)]) -> Strin
         );
         text = text.replace(from, to);
     }
+    register_restore(original.clone());
     sqlx::raw_sql(&text)
         .execute(su)
         .await
@@ -1507,6 +1637,11 @@ async fn each_new_guard_is_load_bearing() {
     let worker = worker_pool().await;
     let w = build_world(&su, &worker).await;
     let app = momo_app_pool(2).await;
+    // Every sabotage queues its own undo; `guarded` runs the queue even when a case panics.
+    guarded(&su.clone(), guard_cases(su, worker, app, w)).await;
+}
+
+async fn guard_cases(su: PgPool, worker: PgPool, app: PgPool, w: World) {
     let edit_sig = "public.mem_edit_item(uuid, text, text)";
     let forget_sig = "public.mem_forget_item(uuid)";
     let new_text = "가드 시험용 새 본문 zebraquartz";
@@ -1717,7 +1852,7 @@ async fn each_new_guard_is_load_bearing() {
         &su,
         forget_sig,
         &[(
-            "DELETE FROM public.mem_item i WHERE i.id = ANY (v_chain)",
+            "DELETE FROM public.mem_item i WHERE i.id = ANY (v_all)",
             "DELETE FROM public.mem_item i WHERE i.id = o.id",
         )],
     )
@@ -1852,6 +1987,230 @@ async fn each_new_guard_is_load_bearing() {
     )
     .await;
     assert!(good.is_ok(), "restored edit works: {good:?}");
+
+    // ---- review round (PR #3209) ------------------------------------------------------------
+    // M-2: a *dead* identical item (its source message was deleted) must not block an edit — the
+    // edit marks it stale and goes on. Sabotage the liveness test and the edit is wrongly refused.
+    let (dead_y, dead_msgs) = seed_item(
+        &su,
+        &worker,
+        w.ws,
+        w.p1,
+        w.alice.id,
+        "fact",
+        "죽은 항목 dragonpear 사실 기록",
+        1,
+    )
+    .await;
+    sqlx::query("UPDATE message SET deleted_at = now(), state = 'deleted' WHERE id = $1")
+        .bind(dead_msgs[0].0)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (editee, _) = seed_item(
+        &su,
+        &worker,
+        w.ws,
+        w.p1,
+        w.alice.id,
+        "fact",
+        "고칠 대상 항목 cranberrydust 기록",
+        1,
+    )
+    .await;
+    let to_dead_text = edit_as(w.bob.id, editee, "죽은 항목 dragonpear 사실 기록");
+    assert!(
+        as_member(&app, w.ws, w.bob.id, &to_dead_text).await.is_ok(),
+        "shipped: a dead twin does not block the edit"
+    );
+    let original = sabotage(
+        &su,
+        edit_sig,
+        &[("IF public.mem_item_live(v_twin) THEN", "IF true THEN")],
+    )
+    .await;
+    let blocked = as_member(&app, w.ws, w.bob.id, &to_dead_text).await;
+    restore(&su, &original).await;
+    println!("RED [edit: dead twin]: shipped -> Ok; sabotaged (liveness ignored) -> {blocked:?}");
+    assert_eq!(blocked, Err("22023".to_string()));
+    let _ = dead_y;
+
+    // M-1: forget removes stale / retired twins of the same text; sabotage the twin sweep and the
+    // dead twin's body stays in the table.
+    let twin_case = |label: &'static str| {
+        let (su, worker, app) = (su.clone(), worker.clone(), app.clone());
+        let (ws, p1, alice, bob) = (w.ws, w.p1, w.alice.id, w.bob.id);
+        async move {
+            let (x, _) = seed_item(
+                &su,
+                &worker,
+                ws,
+                p1,
+                alice,
+                "fact",
+                &format!("쌍둥이 시험 {label} raspberrylime"),
+                1,
+            )
+            .await;
+            sqlx::query(
+                "INSERT INTO mem_item (workspace_id, space_kind, channel_id, kind, origin, body, valid_from, \
+                 content_hash, extractor_version, source_count, stale) \
+                 SELECT workspace_id, space_kind, channel_id, kind, origin, body, valid_from, content_hash, \
+                        'twin', source_count, true FROM mem_item WHERE id = $1",
+            )
+            .bind(x)
+            .execute(&su)
+            .await
+            .unwrap();
+            let mut tx = app.begin().await.unwrap();
+            sqlx::query("SELECT set_config('app.workspace_id', $1, true), set_config('app.member_id', $2, true)")
+                .bind(ws.to_string())
+                .bind(bob.to_string())
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            let removed: i32 = sqlx::query_scalar("SELECT mem_forget_item($1)")
+                .bind(x)
+                .fetch_one(&mut *tx)
+                .await
+                .unwrap();
+            tx.commit().await.unwrap();
+            let left: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM mem_item WHERE workspace_id = $1 AND body LIKE $2",
+            )
+            .bind(ws)
+            .bind(format!("%{label}%"))
+            .fetch_one(&su)
+            .await
+            .unwrap();
+            (removed, left)
+        }
+    };
+    assert_eq!(twin_case("shipped").await, (2, 0));
+    let original = sabotage(
+        &su,
+        forget_sig,
+        &[("AND (t.stale OR t.retired_at IS NOT NULL)", "AND false")],
+    )
+    .await;
+    let (removed, left) = twin_case("sabotaged").await;
+    restore(&su, &original).await;
+    println!("RED [forget: dead twins]: shipped -> (2 removed, 0 bodies left); sabotaged -> ({removed} removed, {left} bodies left)");
+    assert_eq!((removed, left), (1, 1));
+
+    // M-5: forget then re-extract the same text. Sabotage the trigger, then the suppress insert.
+    let reextract = |label: &'static str| {
+        let (su, worker, app) = (su.clone(), worker.clone(), app.clone());
+        let (ws, p1, alice, bob) = (w.ws, w.p1, w.alice.id, w.bob.id);
+        async move {
+            let body = format!("재추출 시험 {label} blueberrymoss 결정");
+            let (x, _) = seed_item(&su, &worker, ws, p1, alice, "decision", &body, 1).await;
+            let mut tx = app.begin().await.unwrap();
+            sqlx::query("SELECT set_config('app.workspace_id', $1, true), set_config('app.member_id', $2, true)")
+                .bind(ws.to_string())
+                .bind(bob.to_string())
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            sqlx::query_scalar::<_, i32>("SELECT mem_forget_item($1)")
+                .bind(x)
+                .fetch_one(&mut *tx)
+                .await
+                .unwrap();
+            tx.commit().await.unwrap();
+            let m = seed_message(&su, ws, p1, alice).await;
+            let d = worker_digest(&worker, ws, p1, m.1, m.1, &[m.0])
+                .await
+                .unwrap();
+            worker_item_try(&worker, ws, d, "decision", &body, &[m.0]).await
+        }
+    };
+    assert_eq!(
+        reextract("shipped").await,
+        None,
+        "a forgotten text is not re-created"
+    );
+    register_restore(
+        "DROP TRIGGER IF EXISTS mem_item_suppressed ON mem_item; \
+         CREATE TRIGGER mem_item_suppressed BEFORE INSERT ON mem_item \
+         FOR EACH ROW EXECUTE FUNCTION mem_item_suppressed_guard();"
+            .to_string(),
+    );
+    sqlx::raw_sql("DROP TRIGGER mem_item_suppressed ON mem_item")
+        .execute(&su)
+        .await
+        .unwrap();
+    let recreated = reextract("no-trigger").await;
+    restore_all(&su).await;
+    println!("RED [suppress: trigger]: shipped -> None; trigger dropped -> {recreated:?}");
+    assert!(recreated.is_some());
+    let original = sabotage(
+        &su,
+        forget_sig,
+        &[(
+            "ON CONFLICT DO NOTHING;",
+            "AND false ON CONFLICT DO NOTHING;",
+        )],
+    )
+    .await;
+    let recreated = reextract("no-record").await;
+    restore(&su, &original).await;
+    println!(
+        "RED [suppress: forget records the hash]: sabotaged forget -> re-extraction {recreated:?}"
+    );
+    assert!(recreated.is_some());
+
+    // M-6: guests read but do not change memory (channel guest and workspace guest).
+    let (g_item, _) = seed_item(
+        &su,
+        &worker,
+        w.ws,
+        w.p1,
+        w.alice.id,
+        "fact",
+        "손님 시험 항목 gooseberrybark 기록",
+        1,
+    )
+    .await;
+    let chan_guest = seed_human(&su, w.ws, "member").await;
+    join(&su, w.ws, w.p1, chan_guest.id, "guest").await;
+    let ws_guest = seed_human(&su, w.ws, "guest").await;
+    join(&su, w.ws, w.p1, ws_guest.id, "member").await;
+    for guest in [chan_guest.id, ws_guest.id] {
+        let e = edit_as(guest, g_item, "손님이 고친 본문 kiwifern");
+        let f = format!("SELECT mem_forget_item('{}')::text", g_item);
+        assert_eq!(
+            as_member(&app, w.ws, guest, &e).await,
+            Err("42501".to_string())
+        );
+        assert_eq!(
+            as_member(&app, w.ws, guest, &f).await,
+            Err("42501".to_string())
+        );
+    }
+    for (sig, sql_for) in [(edit_sig, 0), (forget_sig, 1)] {
+        let original = sabotage(
+            &su,
+            sig,
+            &[
+                ("ms.role = 'guest'", "false"),
+                ("wm.role = 'guest'", "false"),
+            ],
+        )
+        .await;
+        let mut acted = Vec::new();
+        for guest in [chan_guest.id, ws_guest.id] {
+            let sql = if sql_for == 0 {
+                edit_as(guest, g_item, "손님이 고친 본문 kiwifern")
+            } else {
+                format!("SELECT mem_forget_item('{}')::text", g_item)
+            };
+            acted.push(as_member(&app, w.ws, guest, &sql).await.is_ok());
+        }
+        restore(&su, &original).await;
+        println!("RED [guest refusal, {sig}]: sabotaged -> channel guest acted = {}, workspace guest acted = {}", acted[0], acted[1]);
+        assert_eq!(acted, vec![true, true]);
+    }
 }
 
 #[tokio::test]
@@ -1925,4 +2284,369 @@ async fn member_id_is_not_left_on_the_pooled_connection() {
         "carol must not inherit bob's reads"
     );
     let _ = (&w.outsider, &w.ws_b, &w.dm);
+}
+
+// ---------------------------------------------------------------------------
+// review round (PR #3209): M-1..M-6, L-1, L-4
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn forget_sweeps_dead_twins_and_suppresses_reextraction() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let worker = worker_pool().await;
+    let w = build_world(&su, &worker).await;
+    let app = momo_app_pool(2).await;
+    let base = start_server(app.clone()).await;
+    let http = reqwest::Client::new();
+    let bob = login(&http, &base, w.ws, &w.bob.email).await;
+
+    // X plus two dead twins of the same text: a stale one and a retired one (M-1).
+    let text = "잊을 항목 raspberrylime 결정 기록";
+    let (x, _) = seed_item(&su, &worker, w.ws, w.p1, w.alice.id, "decision", text, 1).await;
+    for (stale, retired) in [(true, false), (false, true)] {
+        sqlx::query(
+            "INSERT INTO mem_item (workspace_id, space_kind, channel_id, kind, origin, body, valid_from, \
+             content_hash, extractor_version, source_count, stale, retired_at, retired_reason) \
+             SELECT workspace_id, space_kind, channel_id, kind, origin, body, valid_from, content_hash, \
+                    'twin', source_count, $2, CASE WHEN $3 THEN now() END, CASE WHEN $3 THEN 'decayed' END \
+               FROM mem_item WHERE id = $1",
+        )
+        .bind(x)
+        .bind(stale)
+        .bind(retired)
+        .execute(&su)
+        .await
+        .expect("twin");
+    }
+    let (status, gone) = send(
+        &http,
+        reqwest::Method::DELETE,
+        &item_url(&base, w.ws, x),
+        &bob,
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, &gone["forgottenCount"]),
+        (200, &json!(3)),
+        "{gone}"
+    );
+    let bodies: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM mem_item WHERE workspace_id = $1 AND body LIKE '%raspberrylime%'",
+    )
+    .bind(w.ws)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        bodies, 0,
+        "no body of the forgotten text stays in the DB (D10)"
+    );
+
+    // M-5: only a hash is remembered; re-extraction skips it, other text is unaffected.
+    let (hash_rows, ws_rows): (i64, i64) = sqlx::query_as(
+        "SELECT count(*), count(*) FILTER (WHERE workspace_id = $1) FROM mem_suppress WHERE workspace_id = $1",
+    )
+    .bind(w.ws)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!((hash_rows, ws_rows), (1, 1));
+    let cols: Vec<String> = sqlx::query_scalar(
+        "SELECT column_name::text FROM information_schema.columns WHERE table_name = 'mem_suppress' ORDER BY 1",
+    )
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        cols,
+        ["channel_id", "content_hash", "created_at", "workspace_id"],
+        "hash only, no text"
+    );
+    let m = seed_message(&su, w.ws, w.p1, w.alice.id).await;
+    let d = worker_digest(&worker, w.ws, w.p1, m.1, m.1, &[m.0])
+        .await
+        .unwrap();
+    assert_eq!(
+        worker_item_try(&worker, w.ws, d, "decision", text, &[m.0]).await,
+        None,
+        "extraction skips a suppressed hash"
+    );
+    let m2 = seed_message(&su, w.ws, w.p1, w.alice.id).await;
+    let d2 = worker_digest(&worker, w.ws, w.p1, m2.1, m2.1, &[m2.0])
+        .await
+        .unwrap();
+    assert!(
+        worker_item_try(
+            &worker,
+            w.ws,
+            d2,
+            "decision",
+            "전혀 다른 새 결정 tangerinesalt",
+            &[m2.0]
+        )
+        .await
+        .is_some(),
+        "other text is not suppressed"
+    );
+    // a person who deliberately writes the text again (curated edit) is not blocked.
+    let (status, _) = edit(
+        &http,
+        &base,
+        w.ws,
+        w.a2,
+        &bob,
+        json!({"body": text, "kind": "decision"}),
+    )
+    .await;
+    assert_eq!(status, 200, "a deliberate curated edit is exempt");
+
+    // the API role sees and writes nothing in mem_suppress, whatever table grant it holds.
+    let seen = as_member(
+        &app,
+        w.ws,
+        w.bob.id,
+        "SELECT count(*)::text FROM mem_suppress",
+    )
+    .await;
+    assert!(
+        matches!(seen.as_ref().map(String::as_str), Ok("0")) || seen == Err("42501".to_string()),
+        "momo_app must not see suppression rows: {seen:?}"
+    );
+    let wrote = as_member(
+        &app,
+        w.ws,
+        w.bob.id,
+        &format!(
+            "WITH i AS (INSERT INTO mem_suppress (workspace_id, channel_id, content_hash) \
+             VALUES ('{}', '{}', 'x') RETURNING 1) SELECT count(*)::text FROM i",
+            w.ws, w.p1
+        ),
+    )
+    .await;
+    assert_eq!(wrote, Err("42501".to_string()));
+    // M-4: the two partial indexes exist.
+    let idx: Vec<(String, String)> = sqlx::query_as(
+        "SELECT indexname::text, indexdef FROM pg_indexes WHERE tablename = 'mem_item' \
+           AND indexname IN ('mem_item_supersedes_idx', 'mem_item_merged_into_idx') ORDER BY 1",
+    )
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(idx.len(), 2);
+    assert!(
+        idx[0].1.contains("merged_into_id IS NOT NULL")
+            && idx[1].1.contains("supersedes_id IS NOT NULL"),
+        "{idx:?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn editing_to_a_twins_text_reveals_nothing_and_a_dead_twin_gives_way() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let worker = worker_pool().await;
+    let w = build_world(&su, &worker).await;
+    let base = start_server(momo_app_pool(4).await).await;
+    let http = reqwest::Client::new();
+    let bob = login(&http, &base, w.ws, &w.bob.email).await;
+
+    // live twins: one bob can read (a1's text) and one he cannot (the multi-channel item, same kind),
+    // plus "unchanged" and a disallowed value: one generic 422 for all of them.
+    let unchanged = edit(&http, &base, w.ws, w.a3, &bob, json!({"body": A3_BODY})).await;
+    assert_eq!(unchanged.0, 422);
+    let readable_twin = edit(
+        &http,
+        &base,
+        w.ws,
+        w.a3,
+        &bob,
+        json!({"body": A1_BODY, "kind": "decision"}),
+    )
+    .await;
+    let hidden_twin = edit(
+        &http,
+        &base,
+        w.ws,
+        w.a3,
+        &bob,
+        json!({"body": MULTI_BODY, "kind": "fact"}),
+    )
+    .await;
+    let disallowed = edit(
+        &http,
+        &base,
+        w.ws,
+        w.a3,
+        &bob,
+        json!({"body": "sk-abcdefghijklmnopqrstuvwxyz123456"}),
+    )
+    .await;
+    assert_eq!(readable_twin, unchanged);
+    assert_eq!(
+        hidden_twin, unchanged,
+        "a hidden identical item must look like any other refusal"
+    );
+    assert_eq!(disallowed, unchanged);
+    assert!(item_row_exists(&su, &w.multi.to_string()).await);
+
+    // a dead twin (its source message was deleted) is marked stale and the edit goes through.
+    let dead_text = "죽은 항목 dragonpear 사실 기록";
+    let (dead, msgs) = seed_item(&su, &worker, w.ws, w.p1, w.alice.id, "fact", dead_text, 1).await;
+    sqlx::query("UPDATE message SET deleted_at = now(), state = 'deleted' WHERE id = $1")
+        .bind(msgs[0].0)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, edited) = edit(&http, &base, w.ws, w.a2, &bob, json!({"body": dead_text})).await;
+    assert_eq!(status, 200, "{edited}");
+    let stale: bool = sqlx::query_scalar("SELECT stale FROM mem_item WHERE id = $1")
+        .bind(dead)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert!(stale, "the dead twin was marked stale");
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn guests_read_but_do_not_change_and_curated_items_name_their_editor() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let worker = worker_pool().await;
+    let w = build_world(&su, &worker).await;
+    let base = start_server(momo_app_pool(4).await).await;
+    let http = reqwest::Client::new();
+    let bob = login(&http, &base, w.ws, &w.bob.email).await;
+    let chan_guest = seed_human(&su, w.ws, "member").await;
+    join(&su, w.ws, w.p1, chan_guest.id, "guest").await;
+    let ws_guest = seed_human(&su, w.ws, "guest").await;
+    join(&su, w.ws, w.p1, ws_guest.id, "member").await;
+
+    for guest in [&chan_guest, &ws_guest] {
+        let token = login(&http, &base, w.ws, &guest.email).await;
+        let (status, list) = get(&http, &items_url(&base, w.ws), &token).await;
+        assert_eq!(status, 200);
+        assert!(
+            item_ids(&list).contains(&w.a2.to_string()),
+            "guests read (RLS)"
+        );
+        assert_eq!(
+            get(&http, &item_url(&base, w.ws, w.a2), &token).await.0,
+            200
+        );
+        let (s, _) = edit(
+            &http,
+            &base,
+            w.ws,
+            w.a2,
+            &token,
+            json!({"body": "손님이 고친 본문 kiwifern"}),
+        )
+        .await;
+        assert_eq!(s, 403, "a guest may not edit");
+        let (s, _) = send(
+            &http,
+            reqwest::Method::DELETE,
+            &item_url(&base, w.ws, w.a2),
+            &token,
+            None,
+        )
+        .await;
+        assert_eq!(s, 403, "a guest may not forget");
+        assert!(item_row_exists(&su, &w.a2.to_string()).await);
+    }
+
+    // the editor is named on curated items only.
+    let (_, before) = get(&http, &item_url(&base, w.ws, w.a2), &bob).await;
+    assert!(before["item"].get("editedByMemberId").is_none());
+    let (status, edited) = edit(
+        &http,
+        &base,
+        w.ws,
+        w.a2,
+        &bob,
+        json!({"body": "밥이 고친 본문 kiwifern 확정"}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(edited["item"]["editedByMemberId"], w.bob.id.to_string());
+    assert!(edited["item"]["editedAtMs"].as_i64().unwrap() > 0);
+    let new_id = Uuid::parse_str(edited["item"]["id"].as_str().unwrap()).unwrap();
+    let (_, detail) = get(&http, &item_url(&base, w.ws, new_id), &bob).await;
+    assert_eq!(detail["item"]["editedByMemberId"], w.bob.id.to_string());
+    let (_, list) = get(&http, &items_url(&base, w.ws), &bob).await;
+    let row = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["id"] == new_id.to_string())
+        .unwrap();
+    assert_eq!(row["editedByMemberId"], w.bob.id.to_string());
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn only_the_functions_own_errors_are_mapped_and_nul_is_refused() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let worker = worker_pool().await;
+    let w = build_world(&su, &worker).await;
+    let base = start_server(momo_app_pool(4).await).await;
+    let http = reqwest::Client::new();
+    let bob = login(&http, &base, w.ws, &w.bob.email).await;
+
+    // L-4: NUL in the text is a 422 at the route (and in a search, a 400) — never a 500.
+    let (s, _) = edit(
+        &http,
+        &base,
+        w.ws,
+        w.a2,
+        &bob,
+        json!({"body": "널\u{0}문자"}),
+    )
+    .await;
+    assert_eq!(s, 422);
+    let (s, _) = get(&http, &format!("{}?q=%00abc", items_url(&base, w.ws)), &bob).await;
+    assert_eq!(s, 400);
+
+    // L-1: a privilege regression makes the *database* say 42501 — that is a 500, not a 403.
+    let (ws, a2, a3) = (w.ws, w.a2, w.a3);
+    let (su2, base2, http2, bob2) = (su.clone(), base.clone(), http.clone(), bob.clone());
+    guarded(&su, async move {
+        register_restore(
+            "GRANT UPDATE (retired_at, retired_reason) ON mem_item TO mem_definer; \
+             GRANT DELETE ON mem_item TO mem_definer;"
+                .to_string(),
+        );
+        sqlx::raw_sql("REVOKE UPDATE (retired_at, retired_reason) ON mem_item FROM mem_definer; REVOKE DELETE ON mem_item FROM mem_definer;")
+            .execute(&su2)
+            .await
+            .unwrap();
+        let (s, _) = edit(&http2, &base2, ws, a2, &bob2, json!({"body": "권한 회귀 시험 문구 lemonash"})).await;
+        println!("RED [L-1 edit]: mem_definer lost UPDATE(retired_*) -> HTTP {s} (a mapped 42501 would be 403)");
+        assert_eq!(s, 500, "an unmapped database 42501 stays a 500");
+        let (s, _) = send(&http2, reqwest::Method::DELETE, &item_url(&base2, ws, a3), &bob2, None).await;
+        println!("RED [L-1 forget]: mem_definer lost DELETE -> HTTP {s}");
+        assert_eq!(s, 500);
+    })
+    .await;
+    // restored: the writes work again.
+    let (s, _) = edit(
+        &http,
+        &base,
+        w.ws,
+        w.a2,
+        &bob,
+        json!({"body": "권한 복구 뒤 문구 lemonash"}),
+    )
+    .await;
+    assert_eq!(s, 200);
 }
