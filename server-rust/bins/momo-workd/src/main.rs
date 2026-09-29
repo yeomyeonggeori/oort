@@ -56,6 +56,7 @@ async fn main() {
                             "hostId": state.host_id,
                             "ownerMemberId": state.owner_member_id,
                             "workspaceId": state.workspace_id,
+                            "hostKeyFingerprint": cli::host_key_fingerprint(&state.public_key),
                         })
                     );
                 })

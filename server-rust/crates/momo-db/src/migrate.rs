@@ -490,6 +490,11 @@ mod tests {
     /// agent's model comes from, `agent` | `instance_default`, with a one-time
     /// backfill of the seed placeholder. No table or policy is added.
     ///
+    /// 099 is #3167's drop of the first-generation Memory Plane (ADR-0196 D11):
+    /// 027/028/030/035 tables, function, workspace consent columns and the
+    /// audit unique index. No table or policy is added. The `vector`
+    /// extension stays for team memory v2. schema_v0.sql is not modified.
+    ///
     /// 100 is #3161's team-memory M1 schema (ADR-0196 D3/D6/D7/D9):
     /// `mem_digest`, `mem_evidence`, `mem_cursor`, `mem_serving`, `mem_settings`
     /// (all ENABLE + FORCE RLS, per-command policies) and the SQL functions

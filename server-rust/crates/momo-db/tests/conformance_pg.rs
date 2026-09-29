@@ -151,6 +151,47 @@ async fn migration_runner_applies_all_66_and_matches_schema() {
         "expected many FORCE-RLS tables (D2 #6), got {forced}"
     );
 
+    // #3167 / ADR-0196 D11: migration 099 removed the first-generation Memory
+    // Plane (027/028/030/035). Nothing may bring an old object back, and the
+    // `vector` extension must survive for team memory v2 (M3).
+    let legacy: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM (
+           SELECT c.relname::text AS name FROM pg_class c
+            WHERE c.relnamespace = 'public'::regnamespace
+              AND c.relname IN ('memory_item','memory_source_ref','memory_visibility_grant',
+                                'memory_lifecycle_event','memory_candidate',
+                                'memory_extraction_cursor','workspace_memory_policy',
+                                'context_packet')
+           UNION ALL
+           SELECT p.proname::text FROM pg_proc p
+            WHERE p.pronamespace = 'public'::regnamespace
+              AND p.proname IN ('memory_search_hybrid','reject_context_packet_mutation')
+           UNION ALL
+           SELECT a.attname::text FROM pg_attribute a
+            WHERE a.attrelid = 'public.workspace'::regclass AND NOT a.attisdropped
+              AND a.attname LIKE 'memory_external_provider_consent%'
+           UNION ALL
+           SELECT i.indexname::text FROM pg_indexes i
+            WHERE i.indexname = 'audit_log_memory_extraction_consent_required_once'
+         ) legacy ORDER BY name",
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .unwrap();
+    assert!(
+        legacy.is_empty(),
+        "first-generation Memory Plane objects must stay dropped (099); found {legacy:?}"
+    );
+    let vector_ext: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname='vector')")
+            .fetch_one(&mut *conn)
+            .await
+            .unwrap();
+    assert!(
+        vector_ext,
+        "the pgvector extension must be kept for team memory v2"
+    );
+
     println!(
         "conformance: {} migrations applied; outbox_kind={labels:?}; FORCE-RLS tables={forced}",
         migs.len()

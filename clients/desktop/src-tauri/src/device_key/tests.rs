@@ -872,3 +872,30 @@ fn a_host_register_for_a_malformed_key_is_never_shown() {
     assert!(error.starts_with("device_key_payload_rejected"), "{error}");
     assert_eq!((fake.confirms, fake.signs), (0, 0));
 }
+
+#[test]
+fn a_mac_more_than_five_minutes_off_the_server_is_told_before_the_dialog() {
+    let server = 1_790_000_000_000_i64;
+    let minute = 60_000;
+    // Inside the window, on either side, and exactly at its edge: signs.
+    for offset in [0, 4 * minute, -4 * minute, 5 * minute, -5 * minute] {
+        assert_eq!(
+            check_host_register_clock(Some(server), server + offset),
+            Ok(()),
+            "{offset}"
+        );
+    }
+    // No clock from the server: nothing is signed either, so nothing to refuse.
+    assert_eq!(
+        check_host_register_clock(None, server + 60 * minute),
+        Ok(())
+    );
+    // Past it: a named code, the direction and the size, short enough for the
+    // answer line (120 characters).
+    let fast = check_host_register_clock(Some(server), server + 7 * minute + 1).unwrap_err();
+    assert!(fast.starts_with("device_clock_skew:"), "{fast}");
+    assert!(fast.contains("8분") && fast.contains("빠릅니다"), "{fast}");
+    let slow = check_host_register_clock(Some(server), server - 6 * minute).unwrap_err();
+    assert!(slow.contains("6분") && slow.contains("느립니다"), "{slow}");
+    assert!(fast.chars().count() <= 120 && slow.chars().count() <= 120);
+}
