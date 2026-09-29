@@ -83,6 +83,7 @@ pub mod partial;
 pub mod payload;
 pub mod provider;
 pub mod responses;
+pub mod serving;
 pub mod sse;
 pub mod stream;
 pub mod summary;
@@ -743,6 +744,22 @@ impl AgentWorker {
         // (GC-8, #2949) — so the rule and the tool are offered together or not
         // at all.
         let momo_tools = payload.enabled_tools();
+        // #3163 — team memory. The database decides who asked and what may ride this answer;
+        // any error or timeout here yields `None` and the reply is built exactly as before.
+        let memory_block = serving::serve(
+            &self.pool,
+            &self.config.memory,
+            self.config.utc_offset_minutes,
+            job.workspace_id,
+            run_id,
+            payload.channel_id,
+            payload
+                .recent_messages
+                .iter()
+                .filter_map(|message| message.seq)
+                .min(),
+        )
+        .await;
         let assembled = assemble(
             &payload.recent_messages,
             payload.agent_member_id,
@@ -760,6 +777,7 @@ impl AgentWorker {
                 // byte rather than a turn carrying an emptied block.
                 report_protocol: self.config.report_protocol_block(),
                 card_suggest: momo_agent::card_suggest::card_suggest_directive(&momo_tools),
+                memory: memory_block.as_deref(),
             },
             self.config.max_context_chars,
         );

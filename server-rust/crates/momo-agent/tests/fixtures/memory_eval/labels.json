@@ -612,7 +612,7 @@
       },
       {
         "id": "no_cross_channel_text",
-        "rule": "for every member and channel, context holds no canary from another channel"
+        "rule": "for every member and channel, context holds no canary from another channel (ADR-0196 D6-4: except the invoker's own 1:1 agent DM, where their readable channels apply)"
       },
       {
         "id": "public_control_visible",

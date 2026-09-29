@@ -2337,9 +2337,10 @@ fn migration_path() -> PathBuf {
         .join("../../../server/Migrations/101_mem_lockdown_hardening.sql")
 }
 
-/// The allow-list self-check lives in 102 (101 is merged and stays untouched, #3191 M-6).
+/// The allow-list self-check lives in the newest migration that adds a definer function: 103
+/// (#3163). 101 and 102 are merged and stay untouched (#3191 M-6); each later list is a superset.
 fn worker_migration_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../server/Migrations/102_mem_worker.sql")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../server/Migrations/103_mem_serving.sql")
 }
 
 /// M-1: the lock block is one text in three files. Compared byte for byte (stronger than a
@@ -2464,7 +2465,7 @@ async fn lock_block_also_locks_views_and_materialized_views() {
 }
 
 /// L-1: the SECURITY DEFINER functions owned by mem_definer are exactly this list.
-const DEFINER_ALLOW_LIST: [&str; 17] = [
+const DEFINER_ALLOW_LIST: [&str; 20] = [
     "mem_adjust_tokens",
     "mem_advance_cursor",
     "mem_apply_digest",
@@ -2480,6 +2481,9 @@ const DEFINER_ALLOW_LIST: [&str; 17] = [
     "mem_message_changed",
     "mem_record_serving",
     "mem_reserve_tokens",
+    "mem_serve_candidates",
+    "mem_serve_requester",
+    "mem_serving_of",
     "mem_stale_digests",
     "mem_token_budget",
 ];
@@ -2512,7 +2516,7 @@ async fn security_definer_functions_owned_by_mem_definer_are_allow_listed() {
         owned,
         DEFINER_ALLOW_LIST.to_vec(),
         "a SECURITY DEFINER function owned by mem_definer must be added to the allow-list \
-         here and in 102_mem_worker.sql on purpose"
+         here and in 103_mem_serving.sql on purpose"
     );
     // The migration's own self-check passes on the good state ...
     let check = tail_block(&worker_migration_path(), "-- ── L-1", None);

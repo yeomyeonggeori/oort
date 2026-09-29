@@ -427,7 +427,7 @@ fn clip_chars(text: &str, max: usize) -> String {
 }
 
 /// Keep a body from closing the data block it sits in.
-fn defang(text: &str) -> String {
+pub(crate) fn defang(text: &str) -> String {
     text.replace("</대화", "<\u{200b}/대화")
         .replace("</요약들", "<\u{200b}/요약들")
 }
