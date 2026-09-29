@@ -44,6 +44,23 @@ import {
   rowPressedBackground,
   UnreadDivider,
 } from '../src/features/conversation/MessageRow';
+import {MissedDigestCardView} from '../src/features/memory/MissedDigestCard';
+import {MemoryDigestSheet} from '../src/features/memory/MemoryDigestSheet';
+import {MemoryPauseSection} from '../src/features/memory/MemoryPauseSection';
+import {memoryKeys} from '../src/features/memory/queries';
+import {
+  receiptSheetModel,
+  type MissedCardState,
+} from '../src/features/memory/model';
+import {
+  RECEIPT_SHEET_TITLE,
+  receiptSheetSummary,
+} from '../src/features/memory/copy';
+import type {
+  MemoryDigest,
+  MemoryReceipt,
+  MemorySettings,
+} from '@momo/core/features/memory/model';
 import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
 import {SpawnHostChoice} from '../src/features/inbox/SpawnHostChoice';
 import {ApprovalDecision} from '../src/features/inbox/ApprovalDecision';
@@ -1073,6 +1090,71 @@ const AI_CONNECT_LINK: ProviderLink = {
   keyConfigured: true,
   updatedAtMs: Date.UTC(2026, 10, 12),
   diagnostics: [],
+};
+
+// ---- #3166 MEM-M1: 놓친 대화 요약 카드 · 「기억 n개 참고」 칩 · 일시정지 -----------------
+//
+//   MEMORY-CARD-READY    안 읽은 동안 요약(3줄 + 근거 + 더 보기)
+//   MEMORY-CARD-STATES   로딩 · 오류 · 요약 전 · 요약할 게 없음 · 꺼짐 (한 장에)
+//   MEMORY-CHIP          에이전트 답 밑의 「기억 n개 참고」 칩(영수증은 캐시 씨앗)
+//   MEMORY-SHEET         칩 시트 — 보류 개수가 있을 때
+//   MEMORY-SHEET-PLAIN   칩 시트 — 보류 없음, 목록이 실린 수보다 짧을 때
+//   MEMORY-PAUSE         프로필 시트의 「기억」 묶음(개인 일시정지)
+//
+// 서버 값은 만들어 낸 것이다(runtime-unverified): 실제 요약 데이터와 실기기는 없다.
+const MEMORY_WS = 'measure-ws';
+const MEMORY_CH = '00000000-0000-7000-8000-0000000000c1';
+const MEMORY_RUN = '00000000-0000-7000-8000-0000000000d1';
+function memoryDigest(id: string, from: number, body: string, evidence: number[]): MemoryDigest {
+  return {
+    id,
+    channelId: MEMORY_CH,
+    level: 'window',
+    fromSeq: from,
+    toSeq: from + 9,
+    body,
+    sourceCount: 10,
+    createdAtMs: NOW - 3_600_000,
+    evidence: evidence.map(seq => ({
+      messageId: `00000000-0000-7000-8000-00000000${seq.toString().padStart(4, '0')}`,
+      channelId: MEMORY_CH,
+      seq,
+    })),
+  };
+}
+const MEMORY_DIGESTS: MemoryDigest[] = [
+  memoryDigest('d1', 11, '- 배포 일정이 금요일 오후로 정해졌어요.\n- 롤백 절차는 지난주 문서 그대로 가기로 했어요.', [14, 18]),
+  memoryDigest('d2', 21, '- 김인턴이 스테이징 점검 결과를 공유했고, 결제 화면 오류 한 건이 남았어요.', [24]),
+];
+const MEMORY_READY: MissedCardState = {kind: 'ready', digests: MEMORY_DIGESTS, partial: false};
+const MEMORY_RECEIPT: MemoryReceipt = {
+  runId: MEMORY_RUN,
+  channelId: MEMORY_CH,
+  servedCount: 3,
+  digestIds: ['d1', 'd2'],
+  digests: MEMORY_DIGESTS,
+  withheldCount: 1,
+  budgetChars: 6000,
+  usedChars: 1800,
+  createdAtMs: NOW,
+};
+const MEMORY_SETTINGS: MemorySettings = {
+  workspace: {enabled: true, paused: false, resetEpoch: 0},
+  channels: [],
+  me: {paused: false},
+};
+const MEMORY_TURN: Message = {
+  id: '00000000-0000-7000-8000-0000000000e1',
+  channelId: MEMORY_CH,
+  seq: 31,
+  hlcTs: 31,
+  hlcCount: 0,
+  authorMemberId: AGENT,
+  type: 'text',
+  body: '배포는 금요일 오후로 잡혀 있고, 롤백 절차는 지난주 문서를 그대로 따르면 돼요.',
+  state: 'sent',
+  createdAtMs: NOW,
+  props: {schema: 'momo.agent_gateway.timeline.v0', run_id: MEMORY_RUN},
 };
 
 function Frame({label, children}: {label: string; children: React.ReactNode}) {
@@ -2975,6 +3057,105 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             }
             composer={<AiConnectCardWithComposer />}
           />
+        </Frame>
+      );
+    }
+    case 'memory-card-ready':
+      return (
+        <Frame label="안 읽은 동안 — 요약 (#3166)">
+          <MissedDigestCardView
+            state={MEMORY_READY}
+            onDismiss={() => {}}
+            onMore={() => {}}
+            onOpenEvidence={() => {}}
+          />
+          <MessageRow
+            message={{...MESSAGE, seq: 25, body: '스테이징 점검 결과 공유드려요.'}}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+        </Frame>
+      );
+    case 'memory-card-states': {
+      const stateFrames: [string, MissedCardState][] = [
+        ['로딩', {kind: 'loading'}],
+        ['오류', {kind: 'error'}],
+        ['아직 요약 전', {kind: 'notSummarized'}],
+        ['요약할 게 없음', {kind: 'empty'}],
+        ['꺼짐 (내 일시정지)', {kind: 'off', cause: 'me'}],
+        ['일부만 요약됨', {kind: 'ready', digests: MEMORY_DIGESTS.slice(0, 1), partial: true}],
+      ];
+      return (
+        <Frame label="안 읽은 동안 — 상태 여섯 (#3166)">
+          <ScrollView>
+            {stateFrames.map(([label, state]) => (
+              <View key={label}>
+                <Text style={styles.label}>{label}</Text>
+                <MissedDigestCardView
+                  state={state}
+                  onDismiss={() => {}}
+                  onRetry={() => {}}
+                  onMore={() => {}}
+                  onOpenEvidence={() => {}}
+                />
+              </View>
+            ))}
+          </ScrollView>
+        </Frame>
+      );
+    }
+    case 'memory-chip': {
+      harnessClient.setQueryData(memoryKeys.receipt(MEMORY_WS, MEMORY_RUN), MEMORY_RECEIPT);
+      return (
+        <Frame label="기억 n개 참고 — 에이전트 답 (#3166)">
+          <MessageRow
+            message={MEMORY_TURN}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            actions={{
+              myMemberId: SELF,
+              onToggleReaction: async () => {},
+              onEdit: async () => {},
+              onDelete: async () => {},
+              workspaceId: MEMORY_WS,
+              onOpenMemoryEvidence: () => {},
+            }}
+          />
+        </Frame>
+      );
+    }
+    case 'memory-sheet':
+    case 'memory-sheet-plain': {
+      const receipt: MemoryReceipt =
+        name === 'memory-sheet'
+          ? MEMORY_RECEIPT
+          : {...MEMORY_RECEIPT, servedCount: 3, withheldCount: undefined};
+      const model = receiptSheetModel(receipt);
+      return (
+        <Frame label={name === 'memory-sheet' ? '칩 시트 — 보류 있음 (#3166)' : '칩 시트 — 목록이 더 짧음 (#3166)'}>
+          <MemoryDigestSheet
+            title={RECEIPT_SHEET_TITLE}
+            summary={receiptSheetSummary(model.count)}
+            digests={model.digests}
+            withheld={model.withheld}
+            listShorter={model.listShorter}
+            onClose={() => {}}
+            onOpenEvidence={() => {}}
+          />
+        </Frame>
+      );
+    }
+    case 'memory-pause': {
+      harnessClient.setQueryData(memoryKeys.settings(MEMORY_WS), MEMORY_SETTINGS);
+      return (
+        <Frame label="프로필 시트 — 기억 (#3166)">
+          <ScrollView>
+            <MemoryPauseSection workspaceId={MEMORY_WS} />
+          </ScrollView>
         </Frame>
       );
     }

@@ -79,6 +79,7 @@ import {StatusPage} from './StatusPage';
 import {DEVICE_KEY_TITLE, deviceKeyCopy} from '../deviceKey/copy';
 import {DeviceKeyPanel} from '../deviceKey/DeviceKeyPanel';
 import {useDeviceKey} from '../deviceKey/useDeviceKey';
+import {MemoryPauseSection} from '../memory/MemoryPauseSection';
 
 // =============================================================================
 // 내 프로필 시트 — 대화 목록 머리의 아바타가 여는 곳 (#2702).
@@ -642,6 +643,8 @@ function ProfilePage({
           </Sentence>
         ) : null}
       </GroupSection>
+
+      <MemoryPauseSection workspaceId={workspaceId} />
 
       <GroupSection label="연결">
         <GroupRow
