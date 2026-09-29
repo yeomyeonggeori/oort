@@ -60,7 +60,8 @@ export const PERMISSION_PREVIEW_BLOCK_LINE: Readonly<Record<PermissionPreviewBlo
     "미리보기에 화면에 그대로 보일 수 없는 글자가 있어 허락할 수 없어요. 거부하거나 호스트에서 결정해 주세요.",
   truncated:
     "미리보기가 길어 잘렸어요. 전체를 보지 않고는 허락할 수 없어요. 거부하거나 호스트에서 결정해 주세요.",
-  unavailable: "미리보기를 받아 오지 못해 허락할 수 없어요. 연결을 확인한 뒤 다시 열거나, 거부해 주세요.",
+  unavailable:
+    "미리보기를 받아 오지 못해 허락할 수 없어요. 연결이 돌아오면 다시 받아 와요. 거부는 지금도 할 수 있어요.",
 };
 
 export const PERMISSION_PREVIEW_LOADING_LINE = "미리보기를 확인하는 중이에요.";
@@ -97,17 +98,37 @@ export const PERMISSION_PREVIEW_KIND_LABEL: Readonly<Record<PermissionPreviewKin
 };
 
 /**
+ * 미리보기 칸의 필드 순서: 실행되는 **입력**이 먼저, 에이전트가 쓴 제목이 마지막이다.
+ * 데스크탑 확인 창(`payload.rs` `preview_full_text`: [입력] → [위치] → [제목])과 같은
+ * 순서다 — 제목 안의 줄바꿈으로 가짜 「입력」을 만들어 진짜 입력을 밀어내지 못하게
+ * (#3128 보안 검수 M, design-review H2). 두 쪽 시험이 같은 순서를 잰다.
+ */
+export const PERMISSION_PREVIEW_FIELD_ORDER = ["input", "locations", "title"] as const;
+
+const FIELD_LABEL = { input: "입력", locations: "위치", title: "제목" } as const;
+
+/**
  * 미리보기 칸의 줄들: 필드를 **그대로** 보여 준다(확인이 전제한 것 — 렌더가 곧
- * 해시한 바이트다). 빈 필드는 줄을 만들지 않는다.
+ * 해시한 바이트다). 빈 필드는 줄을 만들지 않는다. 카드는 필드 글 앞에 표지가 결코
+ * 갖지 않는 여백 선을 그린다(글은 바꾸지 않는다).
  */
 export function permissionPreviewRows(
   preview: PermissionPreview
 ): Array<{ key: "title" | "locations" | "input"; label: string; text: string }> {
-  const rows: Array<{ key: "title" | "locations" | "input"; label: string; text: string }> = [];
-  if (preview.title !== "") rows.push({ key: "title", label: "제목", text: preview.title });
-  if (preview.locations !== "") rows.push({ key: "locations", label: "위치", text: preview.locations });
-  if (preview.input !== "") rows.push({ key: "input", label: "입력", text: preview.input });
-  return rows;
+  return PERMISSION_PREVIEW_FIELD_ORDER.filter((key) => preview[key] !== "").map((key) => ({
+    key,
+    label: FIELD_LABEL[key],
+    text: preview[key],
+  }));
+}
+
+/**
+ * 허락이 이 요청에서 다시 열릴 수 없는 막힘인가(모양·해시·잘림·미리보기 없음). 이때
+ * 카드는 허락을 주 버튼으로 그리지 않는다 — 누를 수 있는 것은 거부뿐이다(design-review
+ * M1). 받는 중·조회 실패는 다시 열릴 수 있어 그대로 둔다.
+ */
+export function permissionAllowGone(gate: PermissionPreviewGate): boolean {
+  return gate.state === "blocked" && gate.reason !== "unavailable";
 }
 
 /**

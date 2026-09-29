@@ -94,6 +94,8 @@ export function usePermissionPreviewGate(
     enabled: permission !== null,
     staleTime: Infinity,
     retry: 1,
+    // A failed read tries again on its own (the card's sentence says so).
+    refetchInterval: (query) => (query.state.status === "error" ? 15_000 : false),
   });
   return permissionPreviewGate(
     permission?.previewSha256 ?? null,

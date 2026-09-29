@@ -4,6 +4,7 @@ import { permissionPreviewSha256, type PermissionPreview } from "./permissionPre
 import {
   PERMISSION_ASK_UNVERIFIED,
   PERMISSION_PREVIEW_BLOCK_LINE,
+  permissionAllowGone,
   permissionGateAsk,
   permissionPreviewGate,
   permissionPreviewRows,
@@ -95,11 +96,21 @@ describe("permissionPreviewGate (#3128)", () => {
     }
   });
 
-  it("rows are the fields verbatim, empty ones left out", () => {
+  it("rows are the fields verbatim, input first (the desktop sheet's order), empty ones left out", () => {
     expect(permissionPreviewRows(honest)).toEqual([
-      { key: "title", label: "제목", text: honest.title },
       { key: "input", label: "입력", text: honest.input },
+      { key: "title", label: "제목", text: honest.title },
     ]);
-    expect(permissionPreviewRows(cut).map((r) => r.text)).toEqual([cut.title, cut.locations, cut.input]);
+    // Same order as `payload.rs` `preview_full_text` ([입력] → [위치] → [제목]),
+    // pinned there by `a_field_cannot_fake_a_dialog_heading`.
+    expect(permissionPreviewRows(cut).map((r) => r.label)).toEqual(["입력", "위치", "제목"]);
+    expect(permissionPreviewRows(cut).map((r) => r.text)).toEqual([cut.input, cut.locations, cut.title]);
+  });
+
+  it("only a block that cannot lift takes the allow off the primary slot", () => {
+    expect(permissionAllowGone({ state: "loading" })).toBe(false);
+    expect(permissionAllowGone(permissionPreviewGate(honestHash, { status: "error" }))).toBe(false);
+    expect(permissionAllowGone(permissionPreviewGate(cutHash, read(cut, cutHash)))).toBe(true);
+    expect(permissionAllowGone(permissionPreviewGate(null, read(null)))).toBe(true);
   });
 });

@@ -23,6 +23,7 @@ import {
 import {
   PERMISSION_PREVIEW_KIND_LABEL,
   PERMISSION_PREVIEW_LOADING_LINE,
+  permissionAllowGone,
   permissionGateAsk,
   permissionPreviewGate,
   permissionPreviewRows,
@@ -37,7 +38,15 @@ import {
 } from '@momo/core/lib/api';
 import {useQuery} from '@tanstack/react-query';
 import React, {useEffect, useMemo, useState} from 'react';
-import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
+import {
+  AccessibilityInfo,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import {PrimaryButton, SectionLabel, Sentence} from '../../design/atoms';
 import {usePalette, useStyles} from '../../design/theme';
@@ -176,6 +185,8 @@ export function usePermissionPreviewGate(
     enabled: enabled && permission !== null,
     staleTime: Infinity,
     retry: 1,
+    // A failed read tries again on its own (the card's sentence says so).
+    refetchInterval: query => (query.state.status === 'error' ? 15_000 : false),
   });
   return permissionPreviewGate(
     permission?.previewSha256 ?? null,
@@ -372,6 +383,20 @@ function PermissionCard({
   // #3118 H1: the question comes from the checked preview, never agent.status.
   const ask = permissionGateAsk(preview);
   const checked = preview.state === 'ready' ? preview : null;
+  // No allow can come back for this request: 거부 is the one action (design-review M1).
+  const allowGone = permissionAllowGone(preview);
+  const blockLine =
+    preview.state === 'loading'
+      ? PERMISSION_PREVIEW_LOADING_LINE
+      : preview.state === 'blocked'
+        ? preview.line
+        : null;
+  // VoiceOver has no live regions: say the reason when it changes (design-review L3).
+  useEffect(() => {
+    if (blockLine && preview.state === 'blocked' && Platform.OS === 'ios') {
+      AccessibilityInfo.announceForAccessibility(blockLine);
+    }
+  }, [blockLine, preview.state]);
   const shown =
     preview.state === 'ready'
       ? preview.preview
@@ -472,6 +497,8 @@ function PermissionCard({
               {PERMISSION_PREVIEW_KIND_LABEL[shown.kind]}
             </Text>
             {permissionPreviewRows(shown).map(row => (
+              // The gutter rule is on the text only: a label never has it, so
+              // a line break inside a field cannot pass for a label (H2).
               <View key={row.key} style={styles.previewRow}>
                 <Text style={styles.previewLabel}>{row.label}</Text>
                 <Text
@@ -483,6 +510,13 @@ function PermissionCard({
               </View>
             ))}
           </View>
+        ) : preview.state === 'loading' && !outcome ? (
+          // Holds the card's height while the read runs, so 거부 does not jump
+          // when the preview lands (design-review M2).
+          <View
+            style={[styles.previewBox, styles.previewReserve]}
+            testID="work-permission-preview-reserve"
+          />
         ) : null}
         {outcome ? (
           <Sentence
@@ -500,14 +534,23 @@ function PermissionCard({
             ) : null}
             {asking ? null : (
               <>
-                <PrimaryButton
-                  label="이번 한 번 허락"
-                  busyLabel="Face ID 확인 중"
-                  busy={busy === 'once'}
-                  disabled={!allowable || (busy !== null && busy !== 'once')}
-                  onPress={() => void allow('once')}
-                  testID="work-permission-allow"
-                />
+                {allowGone ? (
+                  <SecondaryButton
+                    label="이번 한 번 허락"
+                    disabled
+                    onPress={() => {}}
+                    testID="work-permission-allow"
+                  />
+                ) : (
+                  <PrimaryButton
+                    label="이번 한 번 허락"
+                    busyLabel="Face ID 확인 중"
+                    busy={busy === 'once'}
+                    disabled={!allowable || (busy !== null && busy !== 'once')}
+                    onPress={() => void allow('once')}
+                    testID="work-permission-allow"
+                  />
+                )}
                 <SecondaryButton
                   label="이 세션 동안 허락"
                   disabled={!allowable || busy !== null}
@@ -769,12 +812,16 @@ const buildStyles = (color: Palette) =>
       fontWeight: '600',
     },
     previewRow: {gap: space.xs},
+    previewReserve: {minHeight: TOUCH_TARGET * 3},
     previewLabel: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
     preview: {
       fontFamily: 'Menlo',
       fontSize: font.meta,
       lineHeight: line.meta,
       color: color.text,
+      borderLeftWidth: 2,
+      borderLeftColor: color.textFaint,
+      paddingLeft: space.sm,
     },
     outcome: {fontSize: font.label, lineHeight: line.label, color: color.text},
     hint: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
