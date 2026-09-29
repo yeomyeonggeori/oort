@@ -2210,6 +2210,7 @@ fn signed_at(
         nonce,
         InputMode::Queue,
         None,
+        PermissionScope::Once,
     )
 }
 
@@ -2240,6 +2241,28 @@ fn signed_decision_over(
         Uuid::new_v4(),
         InputMode::Queue,
         Some(preview_sha256),
+        PermissionScope::Once,
+    )
+}
+
+/// #3095: the owner's allow for 「이 세션 동안」, signed over the relayed preview.
+fn signed_session_decision(h: &Harness, control: WorkControl, device: &Device) -> WorkControl {
+    let request = control.payload["request_event_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let hash = relayed_preview_sha256(h, &request);
+    let now = now_ms();
+    signed_full(
+        control,
+        device,
+        None,
+        now,
+        now + 5 * 60 * 1000,
+        Uuid::new_v4(),
+        InputMode::Queue,
+        Some(&hash),
+        PermissionScope::Session,
     )
 }
 
@@ -2267,6 +2290,7 @@ fn signed_input(control: WorkControl, device: &Device, mode: InputMode) -> WorkC
         Uuid::new_v4(),
         mode,
         None,
+        PermissionScope::Once,
     )
 }
 
@@ -2280,6 +2304,7 @@ fn signed_full(
     nonce: Uuid,
     mode: InputMode,
     preview_sha256: Option<&str>,
+    scope: PermissionScope,
 ) -> WorkControl {
     let payload = control.payload.clone();
     let text = |key: &str| payload[key].as_str().unwrap().to_string();
@@ -2307,7 +2332,7 @@ fn signed_full(
             request_event_id: Uuid::parse_str(&text("request_event_id")).unwrap(),
             option_id: option_id.as_deref().unwrap(),
             option_kind: option_kind.as_deref().unwrap(),
-            scope: PermissionScope::Once,
+            scope,
             // #3118: an allow names the preview the host relayed.
             preview_sha256: Some(preview_sha256.expect("sign a decision with signed_decision")),
         },
@@ -2332,7 +2357,7 @@ fn signed_full(
         "deviceKeyId": device.id, "devicePublicKey": device.public(),
         "endorsement": endorsement,
         "nonce": nonce, "issuedAtMs": issued_at_ms, "expiresAtMs": expires_at_ms,
-        "mode": mode.as_str(), "scope": "once",
+        "mode": mode.as_str(), "scope": scope.as_str(),
         "agentMemberId": AGENT, "folderId": FOLDER,
         "signature": signature,
     }));
@@ -3901,7 +3926,7 @@ async fn refused_spawn(h: &mut Harness, tool: &str) -> ControlAck {
 }
 
 #[tokio::test]
-async fn inv_38_a_claude_spawn_runs_as_the_chosen_profile_and_never_as_an_inherited_one() {
+async fn inv_43_a_claude_spawn_runs_as_the_chosen_profile_and_never_as_an_inherited_one() {
     let mut h = harness(&[("claude", &[])]);
     // No choice: the default account, and none of the host's redirects.
     one_turn(&mut h, "claude").await;
@@ -3946,7 +3971,7 @@ async fn inv_38_a_claude_spawn_runs_as_the_chosen_profile_and_never_as_an_inheri
 }
 
 #[tokio::test]
-async fn inv_38b_a_cleared_choice_is_the_default_account_again() {
+async fn inv_43b_a_cleared_choice_is_the_default_account_again() {
     let mut h = harness(&[("claude", &[])]);
     make_profile(&h, "claude", "Work");
     choose(&h, "claude", Some("Work"));
@@ -3958,7 +3983,7 @@ async fn inv_38b_a_cleared_choice_is_the_default_account_again() {
 }
 
 #[tokio::test]
-async fn inv_39_a_chosen_account_that_cannot_be_used_refuses_and_never_falls_back() {
+async fn inv_44_a_chosen_account_that_cannot_be_used_refuses_and_never_falls_back() {
     let mut h = harness(&[("claude", &[])]);
     make_profile(&h, "claude", "Work");
     choose(&h, "claude", Some("Work"));
@@ -4022,7 +4047,7 @@ async fn inv_39_a_chosen_account_that_cannot_be_used_refuses_and_never_falls_bac
 }
 
 #[tokio::test]
-async fn inv_40_a_codex_spawn_runs_in_the_chosen_profile_home_under_the_same_conditions() {
+async fn inv_45_a_codex_spawn_runs_in_the_chosen_profile_home_under_the_same_conditions() {
     use std::os::unix::fs::PermissionsExt as _;
     let mut h = harness_with(&[(
         "codex",
@@ -4084,7 +4109,7 @@ async fn inv_40_a_codex_spawn_runs_in_the_chosen_profile_home_under_the_same_con
 }
 
 #[tokio::test]
-async fn inv_41_the_server_cannot_pick_the_account_through_the_spawn() {
+async fn inv_46_the_server_cannot_pick_the_account_through_the_spawn() {
     // The account is this Mac's choice; the spawn (and so its device
     // signature) carries none. Whatever a relay adds to the payload is not
     // read.
@@ -4113,7 +4138,7 @@ async fn inv_41_the_server_cannot_pick_the_account_through_the_spawn() {
 }
 
 #[tokio::test]
-async fn inv_42_a_chosen_account_that_is_not_signed_in_says_so() {
+async fn inv_47_a_chosen_account_that_is_not_signed_in_says_so() {
     // The adapter answers ACP `auth_required` at `session/new`. With a chosen
     // profile that is `profile_login_required`; without one it stays the
     // adapter failure it always was.
@@ -4128,4 +4153,261 @@ async fn inv_42_a_chosen_account_that_is_not_signed_in_says_so() {
         refused_spawn(&mut h, "claude").await,
         ControlAck::refused("profile_login_required")
     );
+}
+
+// ---------------------------------------------------------------------------
+// #3095 — 「이 세션 동안」 (ADR-0146 증보, D-8)
+// ---------------------------------------------------------------------------
+
+fn requested_count(h: &Harness) -> usize {
+    h.server
+        .events()
+        .iter()
+        .filter(|event| event.event_type == "approval.requested")
+        .count()
+}
+
+fn auto_allowed(h: &Harness) -> Vec<AcpEvent> {
+    h.server
+        .events()
+        .into_iter()
+        .filter(|event| event.event_type == "approval.auto_allowed")
+        .collect()
+}
+
+/// The request the host relayed last (its event id).
+fn last_request(h: &Harness) -> String {
+    h.server
+        .events()
+        .into_iter()
+        .rev()
+        .find(|event| event.event_type == "approval.requested")
+        .expect("a relayed request")
+        .event_id
+        .to_string()
+}
+
+/// A queued owner input, signed (R2).
+async fn say(h: &mut Harness, root: &Device, session: Uuid, text: &str) {
+    let input = signed(
+        control(h, "input", h.owner, Some(session), json!({ "text": text })),
+        root,
+        None,
+    );
+    assert_eq!(poll_and_ack(h, &input).await, ControlAck::ok(Some(session)));
+}
+
+/// The owner's signed 「이 세션 동안」 allow answers the request in front of it
+/// and covers the same command for the rest of the session: no card, no
+/// control, one `approval.auto_allowed` per automatic allow (never an
+/// `approval.decided`, which closes a pending card on every client). A
+/// different command is asked about, a rejection changes nothing, and
+/// retiring the epoch (the app's `pin_root`, a revoked key, a ratchet reset)
+/// ends the grant.
+#[tokio::test]
+async fn inv_38_r2_a_signed_session_allow_covers_the_same_command_and_nothing_else() {
+    let mut h = harness_r2(&[("claude", &["--permission"])]);
+    let root = Device::new(1);
+    pin(&h, &root);
+    let request = signed(spawn(&h, "claude", "first"), &root, None);
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+    wait_for("the first request", || requested_count(&h) == 1).await;
+    let first = last_request(&h);
+    let first_hash = relayed_preview_sha256(&h, &first);
+
+    let allow = signed_session_decision(
+        &h,
+        decision(&h, h.owner, session, &first, "allow-once", "allow_once"),
+        &root,
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &allow).await,
+        ControlAck::ok(Some(session))
+    );
+    wait_for("the first answer", || permission_outcomes(&h).len() == 1).await;
+    assert!(
+        auto_allowed(&h).is_empty(),
+        "the first allow is the owner's"
+    );
+
+    // The same command again: answered without a card.
+    say(&mut h, &root, session, "again").await;
+    wait_for("the automatic allow", || permission_outcomes(&h).len() == 2).await;
+    assert_eq!(
+        permission_outcomes(&h)[1],
+        json!({"outcome": "selected", "optionId": "allow-once"})
+    );
+    assert_eq!(requested_count(&h), 1, "no second card");
+    let auto = auto_allowed(&h);
+    assert_eq!(auto.len(), 1);
+    assert_eq!(auto[0].payload["tool_kind"], "execute");
+    assert_eq!(auto[0].payload["scope"], "session");
+    assert_eq!(auto[0].payload["preview_sha256"], json!(first_hash));
+    assert!(
+        h.server
+            .events()
+            .iter()
+            .all(|event| event.event_type != "approval.decided"),
+        "an automatic allow must not close anyone's pending card"
+    );
+
+    // Another command: asked about, and the grant does not move.
+    say(&mut h, &root, session, "something different").await;
+    wait_for("the different command's card", || requested_count(&h) == 2).await;
+    assert_eq!(permission_outcomes(&h).len(), 2, "the agent waits");
+    let second = last_request(&h);
+    let reject = decision(&h, h.owner, session, &second, "reject-once", "reject_once");
+    assert_eq!(
+        poll_and_ack(&mut h, &reject).await,
+        ControlAck::ok(Some(session))
+    );
+    wait_for("the rejection", || permission_outcomes(&h).len() == 3).await;
+    assert_eq!(permission_outcomes(&h)[2]["outcome"], "selected");
+    assert_eq!(permission_outcomes(&h)[2]["optionId"], "reject-once");
+    say(&mut h, &root, session, "again, after a rejection").await;
+    wait_for("still covered", || permission_outcomes(&h).len() == 4).await;
+    assert_eq!(requested_count(&h), 2);
+    assert_eq!(auto_allowed(&h).len(), 2);
+
+    // The grant ends with the epoch.
+    h.controls.sessions().grant_epoch().retire_all();
+    say(&mut h, &root, session, "again, after a reset").await;
+    wait_for("asked again", || requested_count(&h) == 3).await;
+    assert_eq!(permission_outcomes(&h).len(), 4, "the agent waits");
+    assert_eq!(auto_allowed(&h).len(), 2);
+}
+
+/// The scope is read only from the envelope this host verified. A once-signed
+/// allow, an envelope nobody verified (R2 not latched), a payload that says
+/// `session`, and a rejection carrying the word all leave nothing behind.
+#[tokio::test]
+async fn inv_39_r2_only_a_verified_session_signature_makes_a_grant() {
+    // (a) signed once, payload says session: once.
+    let mut h = harness_r2(&[("claude", &["--permission"])]);
+    let root = Device::new(1);
+    pin(&h, &root);
+    let request = signed(spawn(&h, "claude", "first"), &root, None);
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+    wait_for("the request", || requested_count(&h) == 1).await;
+    let first = last_request(&h);
+    let mut once = signed_decision(
+        &h,
+        decision(&h, h.owner, session, &first, "allow-once", "allow_once"),
+        &root,
+    );
+    once.payload["scope"] = json!("session");
+    assert_eq!(
+        poll_and_ack(&mut h, &once).await,
+        ControlAck::ok(Some(session))
+    );
+    wait_for("the answer", || permission_outcomes(&h).len() == 1).await;
+    say(&mut h, &root, session, "again").await;
+    wait_for("asked again", || requested_count(&h) == 2).await;
+    assert!(auto_allowed(&h).is_empty());
+    assert_eq!(permission_outcomes(&h).len(), 1, "the agent waits");
+
+    // (b) a session scope swapped into a once-signed envelope never verifies.
+    let second = last_request(&h);
+    let mut swapped = signed_decision(
+        &h,
+        decision(&h, h.owner, session, &second, "allow-once", "allow_once"),
+        &root,
+    );
+    swapped.human_signature.as_mut().unwrap()["scope"] = json!("session");
+    assert_eq!(
+        poll_and_ack(&mut h, &swapped).await,
+        ControlAck::refused("device_signature_invalid")
+    );
+    assert_eq!(permission_outcomes(&h).len(), 1);
+
+    // (c) a rejection with a session envelope leaves nothing either.
+    let mut reject = decision(&h, h.owner, session, &second, "reject-once", "reject_once");
+    reject.human_signature = Some(json!({ "scope": "session" }));
+    assert_eq!(
+        poll_and_ack(&mut h, &reject).await,
+        ControlAck::ok(Some(session))
+    );
+    wait_for("the rejection", || permission_outcomes(&h).len() == 2).await;
+    say(&mut h, &root, session, "again, after a rejection").await;
+    wait_for("asked again", || requested_count(&h) == 3).await;
+    assert!(auto_allowed(&h).is_empty());
+}
+
+#[tokio::test]
+async fn inv_40_r2_not_latched_an_unverified_session_envelope_is_a_single_allow() {
+    // The host has not latched R2: the envelope is never looked at, so a
+    // `session` scope in it (or none) is no grant. There is no unsigned path
+    // to 「이 세션 동안」.
+    let mut h = harness_latching(&[("claude", &["--permission"])]);
+    let request = spawn(&h, "claude", "first");
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+    wait_for("the request", || requested_count(&h) == 1).await;
+    let first = last_request(&h);
+    let mut allow = decision(&h, h.owner, session, &first, "allow-once", "allow_once");
+    allow.human_signature = Some(json!({ "scope": "session" }));
+    allow.payload["scope"] = json!("session");
+    assert_eq!(
+        poll_and_ack(&mut h, &allow).await,
+        ControlAck::ok(Some(session))
+    );
+    wait_for("the answer", || permission_outcomes(&h).len() == 1).await;
+    let more = control(
+        &h,
+        "input",
+        h.owner,
+        Some(session),
+        json!({ "text": "again" }),
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &more).await,
+        ControlAck::ok(Some(session))
+    );
+    wait_for("asked again", || requested_count(&h) == 2).await;
+    assert!(auto_allowed(&h).is_empty());
+    assert_eq!(permission_outcomes(&h).len(), 1, "the agent waits");
+}
+
+/// #3095 (security review M1): a root-signed device revocation relayed by the
+/// server ends every 「이 세션 동안」 grant of the host - a revoked key's
+/// allowance must not stay behind. A relayed revocation that is refused
+/// retires nothing.
+#[tokio::test]
+async fn inv_41_r2_a_relayed_revocation_ends_session_grants() {
+    let mut h = harness_r2(&[("claude", &["--permission"])]);
+    let root = Device::new(1);
+    let phone = Device::new(2);
+    pin(&h, &root);
+    let request = signed(spawn(&h, "claude", "first"), &root, None);
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+    wait_for("the first request", || requested_count(&h) == 1).await;
+    let first = last_request(&h);
+    let allow = signed_session_decision(
+        &h,
+        decision(&h, h.owner, session, &first, "allow-once", "allow_once"),
+        &root,
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &allow).await,
+        ControlAck::ok(Some(session))
+    );
+    wait_for("the first answer", || permission_outcomes(&h).len() == 1).await;
+
+    // A revocation the root did not sign is dropped: the grant lives.
+    let mut forged = revocation(&h, &root, &phone, true);
+    forged["signature"] = revocation(&h, &phone, &phone, true)["signature"].clone();
+    h.server.revocations.lock().unwrap().push(forged);
+    say(&mut h, &root, session, "again").await;
+    wait_for("still covered", || permission_outcomes(&h).len() == 2).await;
+    assert_eq!(requested_count(&h), 1);
+
+    // The root's genuine revocation, relayed: the grant is gone.
+    h.server
+        .revocations
+        .lock()
+        .unwrap()
+        .push(revocation(&h, &root, &phone, true));
+    say(&mut h, &root, session, "again, after a revocation").await;
+    wait_for("asked again", || requested_count(&h) == 2).await;
+    assert_eq!(permission_outcomes(&h).len(), 2, "the agent waits");
+    assert_eq!(auto_allowed(&h).len(), 1);
 }

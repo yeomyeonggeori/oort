@@ -9,6 +9,7 @@
 - 증보: **2026-09-29 (#3117)** — workd 서명 요구를 켜는 제품 경로(D-10 이행, E10 검수 B1). 서버 신호로 켜지고 서버가 끌 수 없는 래칫. 결재 인용: R2 결재 「전부 권장대로」(2026-09-28)의 D-10 「보안 경계는 workd」 이행. 결정은 바꾸지 않았다. 아래 「증보 2026-09-29 — workd 서명 요구 래칫」 절.
 - 증보: **2026-09-29 (#3118, R2 H1)** — 허락 서명이 사람이 본 미리보기를 묶는다. host가 권한 요청의 미리보기와 그 해시를 싣고, `momo.human.control.v3`의 permission 본문이 그 해시를 한 줄 더 서명하며, host는 자기 해시와 대조한다(migration 097, 소유자 전용 미리보기 조회). 결재 인용: R2 결재 성재 2026-09-28 「전부 권장대로」의 D-5 이행 + E10 검수(#3030) H1. 아래 「증보 2026-09-29 — 허락이 미리보기를 묶는다」 절.
 - 증보: **2026-09-29 (#3119)** — 폰(`ios`) 키는 QR 연결 계보에서만 등록·승인·재결속한다(E10 검수 H2). D-6 ②를 서버에서 강제하는 결정 변경이다. 결재 인용: 성재 2026-09-29 「QR 연결로만 등록」(이슈 #3119 코멘트). 아래 「증보 2026-09-29 — 폰 키는 QR 연결로만」 절.
+- 증보: **2026-09-29 (#3095, R2-E8 후속)** — 「이 세션 동안」 허락의 범위 규칙과 host의 기억. 서버는 서명된 `scope=session` allow를 받고(400 `permission_scope_unsupported` 해제), host는 같은 세션에서 범위 규칙이 덮는 요청만 묻지 않고 허락한다. 결재 인용: R2 결재 성재 2026-09-28 「전부 권장대로」의 D-8 「이 세션 동안 허용은 R2에서 서명과 함께 폰에도 연다」. 범위 규칙 자체는 D-8이 정하지 않아 이 증보가 보수적으로 정한다(결정 변경이 아니라 D-8의 이행). 아래 「증보 2026-09-29 — 이 세션 동안 허락」 절.
 - 관련: **ADR-0145**(Rust/Axum 재작성 — 이 서명은 그 위에 얹힌다), ADR-0004(자격증명 비유입), ADR-0101(에이전트 신원), ADR-0139/0140(workd — 이미 Ed25519 서명 보유), `docs/architecture/invariants-in-rust.md`(D2 — 이 서명이 불변식을 안 건드림을 교차검증)
 - 발단: 서버 스택 재검토에서 "oort가 buzz에서 취할 만한 한 가지 = 에이전트 행동의 암호학적 provenance"로 식별 → 성재가 B안에 포함 지시 + **범위를 "상태 전이까지 넓게"로 결정**.
 
@@ -347,7 +348,7 @@ momo.human.control.v1
 |---|---|---|
 | 기기 키 등록·목록·폐기 | 로그인 세션이 자기 기기의 공개키(`alg`, platform, label)를 올린다. 다른 멤버 키 등록은 거부한다. 폐기는 `revoked_at`만 쓴다. 승인서 없는 폰 키는 「지시 불가」 상태다. **E2 구현 정정(#3022 보안 검수 H1):** 뿌리 후보(`macos`) 키 등록은 현재 비밀번호 재입력을 요구하고, QR 연결 세션에서는 받지 않는다(훔친 refresh 토큰만으로 뿌리를 만들 수 없게) | E2 #3022 |
 | 기기 승인(교차 서명) | 뿌리 키의 `device_endorse.v1` 승인서를 저장·전달한다. 폐기서 `device_revoke.v1`도 같은 경로로 전달한다 | E2 #3022 · E4 #3024 |
-| host 등록 서명 | member-scope host 등록에 `host_register` 서명을 요구한다. **E2 구현(#3022):** 보낸 서명은 항상 검증하고, 요구는 `MOMO_HOST_REGISTER_SIGNATURE_REQUIRED`(기본 꺼짐, D-11)로 켠다. 서명문의 `instance_id`는 `MOMO_INSTANCE_ID`이며 E3 발급 라우트가 같은 값을 내려 준다 | E2 #3022 |
+| host 등록 서명 | member-scope host 등록에 `host_register` 서명을 요구한다. **E2 구현(#3022):** 보낸 서명은 항상 검증하고, 요구는 `MOMO_HOST_REGISTER_SIGNATURE_REQUIRED`(기본 꺼짐, D-11)로 켠다. 서명문의 `instance_id`는 `MOMO_INSTANCE_ID`이며 E3 발급 라우트가 같은 값을 내려 준다. **클라이언트 배선(#3120):** `momo-workd register --sign-stdin`이 host 키를 만든 뒤 자기 부모(데스크탑 셸)에게 표준입출력 한 줄로 서명을 청한다. 셸은 워크스페이스와 라벨을 자기 값으로 채우고, 자식이 준 host 공개키만 받는다. 네이티브 확인 창이 host 키 지문·키 전체·host id 전체·라벨을 모두 보일 때만(하나라도 빠지면 `device_key_dialog_incomplete`) Touch ID로 서명한다. 웹뷰의 `device_key_sign_control`은 `host_register`를 계속 거부한다. 뿌리 키가 묶이지 않은 맥은 서명 없이 등록하므로, 플래그를 켠 서버는 그 맥의 등록을 403으로 거부한다 | E2 #3022, 배선 #3120 |
 | 서명 지시 | `input`(queue·interrupt)·`spawn`·`permission` 허용을 서명과 함께 받는다. 오프라인 host는 정직하게 거부한다. `client_msg_id` = nonce 멱등 | E3 #3023 · E7 #3027 |
 | 서버 인스턴스 id | 클라이언트가 `instance_id`로 되돌릴 값을 내려 준다 | E1 #3021 · E3 #3023 |
 
@@ -602,3 +603,54 @@ E10 검수(H2)는 D-6 ②의 전제가 서버에서 강제되지 않는다고 �
 - `device_key_conformance_pg::r3127_a_lineage_holds_one_phone_key_and_a_replacement_needs_the_mac`: 승인된 폰 계보(회전 후 토큰 포함)에 두 번째 `ios` 키 409·행 미기록, 승인된 키는 그대로. 옛 키가 폐기되기 전에는 새 키도 409. 맥이 서명 폐기서로 끊으면 새 키가 등록되고 `unendorsed`이며 맥 승인 뒤 지시 가능. QR 재연결은 새 계보라 등록된다.
 - `r3127_a_second_live_phone_key_is_never_a_candidate_and_a_rebind_cannot_add_one`: 중복 두 키 모두 승인 409, 하나를 폐기하면 나머지가 승인된다. 이미 폰 키가 있는 계보로의 rebind는 409.
 - `r3127_concurrent_registrations_on_one_lineage_leave_one_key`: 동시 4건 × 6회에서 정확히 1건만 201.
+
+## 증보 2026-09-29 — 이 세션 동안 허락 (#3095, R2-E8 후속)
+
+결재 인용: 성재 2026-09-28 「전부 권장대로」(R2 결재) — D-8 표의 「「이 세션 동안」 허용 | 필요, R2에서 폰에도 연다 | 범위 값을 `permission` 본문에 넣는다」의 이행. D-8은 범위가 서명 본문에 들어간다는 것과 서명이 필요하다는 것만 정했다. 「무엇을 덮는가」는 정하지 않았으므로 이 절이 좁게 정한다. 넓히려면 별도 결재가 필요하다.
+
+### 결정
+
+- **서명 필수, 서명 없는 길 없음.** 범위 값은 서명된 문장(`momo.human.control.v3` permission 본문의 `scope` 줄)에만 있다. 서버는 검증에 통과한 서명의 범위를 쓰고 요청 본문이나 payload의 말을 쓰지 않는다. host도 자기가 검증한 봉투의 `scope`만 읽는다(R2가 켜져 있고 `check_signature`가 통과했을 때). 검증하지 않은 봉투, R2가 켜지지 않은 host, payload의 `scope`, 거부(`reject_once`) 결정은 모두 「이번 한 번」이다.
+- **서버 수용.** allow(`allow_once`) + 서명 `scope=session` + **member host**일 때만 받는다. `reject_*`에 session 범위 서명이 붙으면 400 `permission_kind_refused`, member host가 아닌 host면 400 `permission_scope_unsupported`이고 서명은 소비되지 않는다. 검증된 범위는 `work_control.human_scope` 열, host가 받는 봉투, 소유자 기기에 가는 `approval.decided`의 `scope`, 감사 `work.permission.decided`의 `scope`에 남는다. `permission` 컨트롤의 payload는 닫힌 세 키 그대로다(migration 092). 새 migration은 없다.
+- **범위 규칙(host).** 허락은 그 세션의 작업 안에서만 산다. 이후 같은 세션의 `session/request_permission`을 묻지 않고 `allow_once`로 답하는 조건은 도구 종류별로 다르다.
+
+| 도구 종류 | 이후 요청이 덮이는 조건 |
+|---|---|
+| `execute` | 제목과 입력(명령)이 바이트 단위로 같다 |
+| `read`, `search` | 모든 위치가 허락된 요청이 건드린 디렉터리(위치들의 가장 깊은 공통 디렉터리. 루트를 세어 다섯 성분 이상이어야 하고 — `/Users/me/project/src`부터이며 `~/Documents`나 홈은 안 된다 — 그 디렉터리 자체에 숨김·민감 성분이 없어야 한다) 아래다 |
+| `edit` | 위치 집합이 허락된 파일들과 정확히 같다 |
+| `delete`, `move`, `fetch`, `think`, `switch_mode`, `other` | 일반화하지 않는다. 허락은 소유자가 본 그 요청 하나에만 쓰인다 |
+
+  - 경로는 `canonicalize`(심볼릭 링크 해소, `..` 제거)한 뒤 비교한다. 상대 경로, `..` 성분, 해소되지 않는 경로는 다시 묻는다. 허락된 디렉터리 아래의 숨김 성분(`.ssh`, `.env`, `.git`)과 이름이 비밀을 말하는 성분(부분 문자열 일치: `secret`, `credential`, `password`, `token`, `key`, `pem`, `cookie`, `wallet`, `keychain`, `auth`, `id_rsa` …)은 다시 묻는다. 잘린 미리보기(`truncated`)는 만들지도 덮지도 않는다.
+  - 자동 허락은 에이전트가 제시한 `allow_once` 선택지로만 답한다. `allow_always`는 고르지 않는다. 그 선택지가 없으면 묻는다.
+  - 한 세션은 허락을 여덟 개까지 기억한다(가장 오래된 것이 밀린다).
+- **미리보기 해시와의 관계.** 첫 허락은 v3 서명이 그 요청의 미리보기 해시를 묶는다(#3118 그대로). 이후 자동 허락은 그 요청 하나를 묶은 해시가 아니라 위 범위 규칙으로 판단한다. 해시를 범위 규칙의 열쇠로 쓰지 않은 이유는 같은 명령이 매번 같은 해시를 갖지 않을 수 있고(제목·위치 변화), 해시는 「본 것」의 동일성이지 「같은 종류」의 판정이 아니기 때문이다. 자동 허락마다 덮은 요청의 미리보기 해시를 기록한다.
+- **소멸.** 아래 어느 하나로 사라진다. 기억은 세션 태스크에 있으므로 세션이 끝나면(에이전트 종료, `kill`, 서버 종료, host 해지·401) 함께 사라지고, 나머지는 host 전체의 세대 번호(`GrantEpoch`)를 올려 모든 허락을 무효로 한다.
+  - 세션 종료(모든 원인)와 host 해지.
+  - 로컬 앱의 `pin_root`(뿌리 재결속), `revoke_device`(기기 폐기), `reset_signature_requirement`(래칫 재설정)와 서버가 중계한 기기 폐기서의 적용. 해지된 키의 「이 세션 동안」이 살아 남지 않는다.
+  - `reset-root`는 host 프로세스가 없을 때 하는 명령이라 기억도 이미 없다.
+- **사람에게 알림과 감사.** 자동 허락은 host가 세션 스트림에 `approval.auto_allowed`(`scope`, `tool_kind`, `preview_sha256`) 이벤트를 **먼저** 올리고, 서버가 기록에 성공한 뒤에만 에이전트에게 답한다(기록 없는 자동 허락은 없다. 기록이 실패하면 소유자에게 묻는 길로 간다). 서버는 그 이벤트를 세션 스레드에 남기고 감사 `work.permission.auto_allowed`(`momo.work_permission.auto_allowed.v1`)를 쓴다. `approval.decided`를 쓰지 않는 이유는 모든 클라이언트가 그 이벤트를 「대기 중 카드가 답을 받았다」로 읽어 다른 도구 종류의 대기 카드를 닫기 때문이다. 알 수 없는 이벤트 종류는 공유 코어가 무시한다(`KNOWN_TYPES`·`ACP_TYPES`). 앱의 자동 허락 표시는 UXUI 후속이다.
+
+### 새 공개 API 선언 (ADR-0100)
+
+| 표면 | 변경 | 이슈 |
+|---|---|---|
+| `POST …/work-sessions/{session}/permission-decisions` | 서명 `scope=session` allow를 member host에서 받는다. reject에 붙으면 400 `permission_kind_refused`, member host가 아니면 400 `permission_scope_unsupported`(뜻이 「서버가 아직 받지 않는다」에서 「이 host는 받지 않는다」로 좁아졌다) | #3095 |
+| 세션 이벤트 | 새 종류 `approval.auto_allowed`(host → 서버). `approval.decided`는 서버 발행 이벤트에 `scope`를 더한다 | #3095 |
+| 감사 | `work.permission.auto_allowed`, `work.permission.decided`의 `scope` | #3095 |
+
+새 migration은 없다. 공유 코어 `SCOPE_UNSUPPORTED_LINE`의 문장은 옛 뜻이라 UXUI 후속에서 고친다.
+
+### 남는 위험
+
+- **범위 규칙은 에이전트가 신고한 미리보기를 본다(독립 검수 M2).** ACP 권한 요청은 협조적인 에이전트의 신고다. 악의적 에이전트가 `read`로 신고하고 다른 일을 하면 세션 내내 묻지 않고 허락된다. 이 한계는 한 번짜리 허락에도 있었으나 세션 허락은 그것을 「본 요청 하나」에서 「세션 내내」로 넓힌다. 그래서 일반화를 `execute` 동일 명령·`read`/`search` 디렉터리·`edit` 동일 파일로 좁혔고, 실제 동작의 격리는 D6(host의 격리)이 맡는다.
+- 세션 허락에는 시간 제한이 없다(세션이 끝나거나 세대가 오르면 끝난다). 오래 사는 세션의 시간 제한은 후속에서 소유자에게 묻고 정한다.
+- 서명 검증과 기억 사이(마이크로초)에 로컬 앱의 폐기가 끼어들면 그 허락이 폐기 뒤 세대로 찍힐 수 있다. 다음 폐기나 세션 종료가 끊는다.
+- 경로 판정은 host가 본 파일 시스템을 기준으로 하는 최선의 노력이다. 판정과 에이전트의 실제 접근 사이의 경합(TOCTOU)은 막지 못한다. 그래서 `read`/`search` 범위는 디렉터리 아래로, `edit`은 정확한 파일로 좁혔고, 파괴적·외부 종류는 일반화하지 않았다.
+- `execute`의 「같은 명령」은 명령 문자열의 동일성이다. 같은 문자열이 다른 작업 디렉터리나 환경에서 다른 효과를 낼 수 있다는 점은 D6(host의 격리)이 막는 범위이지 이 규칙이 막지 않는다.
+
+### 시험
+
+- `momo-workd` `session_grant`(단위 10건): 종류별 범위 규칙, `..`·심볼릭 링크·상대 경로, 얕은 디렉터리, 파괴적 종류, 잘린 미리보기, 세대 무효화, 개수 한도.
+- `momo-workd` `invariants` inv_38(같은 명령 자동 허락·다른 명령 재질문·거부 후 유지·세대 올림 뒤 재질문·`approval.decided` 미사용), inv_39(once 서명·session 봉투 바꿔치기·거부, 모두 기억 없음), inv_40(R2 미고정 host의 미검증 봉투), inv_41(중계된 폐기서가 허락을 끊고 위조 폐기서는 끊지 않음), `control_socket` 단위 시험(`pin_root`·`reset_signature_requirement`가 세대를 올리고 거부된 op는 올리지 않음).
+- `momo-server` `human_control_conformance_pg::a_signed_session_allow_is_accepted_and_carries_its_scope`와 `every_misplaced_signed_allow_is_refused_by_name`의 범위 바꿔치기 두 건·거부에 붙은 session.

@@ -516,24 +516,71 @@ pub async fn register_host(
     bearer: &str,
     display_name: &str,
     public_key_b64: &str,
+    registration: Option<&Value>,
 ) -> Result<RegisteredHost, ClientError> {
     let http = http_client()?;
+    let mut body = json!({
+        // ADR-0188 D3: a desktop host is always the registering person's own.
+        "scope": "member",
+        "type": "workd",
+        "displayName": display_name.trim(),
+        "publicKey": public_key_b64,
+        "capabilities": { "acp": true, "terminal_attach": false },
+    });
+    if let Some(registration) = registration {
+        // #3120: the root key's `host_register` statement, exactly as the
+        // owner's app signed it; the server rebuilds and verifies it.
+        body["registration"] = registration.clone();
+    }
     let response = http
         .post(format!("{base}/v1/workspaces/{workspace_id}/work-hosts"))
         .bearer_auth(bearer)
-        .json(&json!({
-            // ADR-0188 D3: a desktop host is always the registering person's own.
-            "scope": "member",
-            "type": "workd",
-            "displayName": display_name.trim(),
-            "publicKey": public_key_b64,
-            "capabilities": { "acp": true, "terminal_attach": false },
-        }))
+        .json(&body)
         .send()
         .await
         .map_err(|error| ClientError::Transport(error.to_string()))?;
     let bytes = read_response(response).await?;
     Ok(decode::<WorkHostResponse>(&bytes)?.work_host)
+}
+
+/// What a device needs to sign a `host_register` statement this instance
+/// accepts (`GET …/device-keys/signing-context`, #3023). Only the fields the
+/// register handshake uses.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SigningContext {
+    pub instance_id: String,
+    pub server_time_ms: i64,
+    #[serde(default)]
+    pub host_register_signature_required: bool,
+}
+
+/// The owner's signing context, with the owner's token (the same one the
+/// registration itself uses). `Ok(None)` when the instance has none (503
+/// `instance_id_unconfigured`, or a build without the route): nothing signed
+/// could verify there, so the registration goes unsigned and the server
+/// decides.
+pub async fn fetch_signing_context(
+    base: &str,
+    workspace_id: Uuid,
+    bearer: &str,
+) -> Result<Option<SigningContext>, ClientError> {
+    let http = http_client()?;
+    let response = http
+        .get(format!(
+            "{base}/v1/workspaces/{workspace_id}/device-keys/signing-context"
+        ))
+        .bearer_auth(bearer)
+        .send()
+        .await
+        .map_err(|error| ClientError::Transport(error.to_string()))?;
+    match read_response(response).await {
+        Ok(bytes) => Ok(Some(decode::<SigningContext>(&bytes)?)),
+        Err(ClientError::Status {
+            status: 503 | 404, ..
+        }) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(test)]
