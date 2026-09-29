@@ -357,6 +357,9 @@ describe("signed allow (golden work-permission-decision `session_scope_signed`)"
     const golden = caseOf(DECISION, "session_scope_signed");
     const failure = permissionFailure(new ApiError(golden.status, "", golden.code));
     expect(failure).toEqual({ closed: false, text: SCOPE_UNSUPPORTED_LINE });
+    // #3149: the server takes 「이 세션 동안」 now; this answer means THIS HOST does not (not a member's machine).
+    expect(SCOPE_UNSUPPORTED_LINE).toContain("이 호스트는 세션 허락을 받지 않아요");
+    expect(SCOPE_UNSUPPORTED_LINE).not.toContain("이 서버");
   });
 
   it("the sent line says which scope went", () => {

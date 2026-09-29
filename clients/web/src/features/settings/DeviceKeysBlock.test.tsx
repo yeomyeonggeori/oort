@@ -379,6 +379,7 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
       expect(text).toContain("QR로 연결할 때 폰이 알린 이름과 같습니다");
       expect(text).toContain("믿을 것은 지문입니다");
       expect(text).toContain(PHONE_LABEL);
+      expect(q(host, "device-key-endorse-name-warning")).toBeNull();
     });
 
     it("연결된 기기 목록에 없는 이름이면 승인하지 말라고 말한다", async () => {
@@ -393,6 +394,11 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
       expect(q(host, "device-key-endorse-origin")!.textContent).toContain(
         "연결된 기기 목록에 없습니다"
       );
+      // #3154 M2: the mismatch is a warning block, not a grey aside; the match is not.
+      const warning = q(host, "device-key-endorse-name-warning")!;
+      expect(warning.textContent).toContain("승인하지 않아야 합니다");
+      expect(warning.className).toContain("text-danger");
+      expect(warning.className).toContain("font-medium");
     });
 
     it("목록을 못 읽으면 대조하지 못했다고만 말하고 일치한다고 하지 않는다", async () => {
