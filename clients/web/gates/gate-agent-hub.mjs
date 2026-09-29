@@ -1,13 +1,11 @@
 #!/usr/bin/env node
 // GATE: MOMO-652 workspace agent hub.
 //
-// The three scenarios intentionally skew roster, memory, and history response
+// The three scenarios intentionally skew roster and history response
 // timing. A late response must stay attached to its lower-cased agent/query key
 // instead of replacing whichever agent or section is visible when it arrives.
 //
 // Named red proofs, run only from a throwaway worktree:
-//   AGENT_HUB_GATE_PROVE_RED_INVALIDATE=1 npm run gate:agent-hub
-//     expected failure: "memory invalidate round-trip"
 //   AGENT_HUB_GATE_PROVE_RED_HISTORY=1 npm run gate:agent-hub
 //     expected failure: "history cursor page"
 //   AGENT_HUB_GATE_PROVE_RED_PAUSE=1 npm run gate:agent-hub
@@ -31,12 +29,9 @@ const memberId = "00000000-0000-7000-8000-000000000101";
 const agentId = "AAAAAAAA-AAAA-7AAA-8AAA-AAAAAAAAA652";
 const otherAgentId = "BBBBBBBB-BBBB-7BBB-8BBB-BBBBBBBBB652";
 const channelId = "00000000-0000-7000-8000-000000000201";
-const memoryId = "CCCCCCCC-CCCC-7CCC-8CCC-CCCCCCCCCC01";
 const runNewest = "DDDDDDDD-DDDD-7DDD-8DDD-DDDDDDDDDD01";
 const runMiddle = "DDDDDDDD-DDDD-7DDD-8DDD-DDDDDDDDDD02";
 const runOldest = "DDDDDDDD-DDDD-7DDD-8DDD-DDDDDDDDDD03";
-const proveRedInvalidate =
-  process.env.AGENT_HUB_GATE_PROVE_RED_INVALIDATE === "1";
 const proveRedHistory =
   process.env.AGENT_HUB_GATE_PROVE_RED_HISTORY === "1";
 const proveRedPause = process.env.AGENT_HUB_GATE_PROVE_RED_PAUSE === "1";
@@ -125,22 +120,6 @@ function profile(id, paused = false) {
   };
 }
 
-const memory = {
-  id: memoryId,
-  workspaceId,
-  scope: "agent",
-  agentMemberId: agentId,
-  kind: "preference",
-  body: "배포 판단에는 테스트 결과와 되돌리기 절차를 함께 제시합니다.",
-  confidence: 0.92,
-  validAtMs: 1_785_238_400_000,
-  createdByKind: "human",
-  createdByMemberId: memberId,
-  createdAtMs: 1_785_238_400_000,
-  updatedAtMs: 1_785_238_400_000,
-  sourceRefs: [{ messageId: "EEEEEEEE-EEEE-7EEE-8EEE-EEEEEEEEEE01", channelId }],
-};
-
 const runs = [
   {
     id: runNewest,
@@ -175,9 +154,9 @@ const runs = [
 ];
 
 const timings = [
-  { name: "roster-memory-history", roster: 20, memory: 160, history: 300 },
-  { name: "history-roster-memory", roster: 180, memory: 300, history: 20 },
-  { name: "memory-history-roster", roster: 300, memory: 20, history: 160 },
+  { name: "roster-history-a", roster: 20, history: 300 },
+  { name: "history-roster-b", roster: 180, history: 20 },
+  { name: "history-roster-c", roster: 300, history: 160 },
 ];
 
 function json(route, body, status = 200) {
@@ -256,7 +235,6 @@ async function installRealtimeSocket(page) {
 async function installRoutes(context, timing) {
   const state = {
     paused: false,
-    invalidated: false,
     historyCalls: 0,
   };
   await context.route("**/v1/**", async (route) => {
@@ -341,32 +319,6 @@ async function installRoutes(context, timing) {
       const body = request.postDataJSON();
       if (!proveRedPause) state.paused = body.paused === true;
       return json(route, { profile: profile(agentId, state.paused) });
-    }
-    if (path.endsWith("/memories/search")) {
-      await wait(timing.memory);
-      return json(route, { hits: state.invalidated ? [] : [{ memory, score: 0.98 }] });
-    }
-    if (path.endsWith("/memories") && request.method() === "GET") {
-      await wait(timing.memory);
-      return json(route, { memories: state.invalidated ? [] : [memory] });
-    }
-    if (path.endsWith(`/${memoryId.toLowerCase()}/invalidate`) ||
-        path.toLowerCase().endsWith(`/${memoryId.toLowerCase()}/invalidate`)) {
-      if (!proveRedInvalidate) state.invalidated = true;
-      return json(route, { memory: { ...memory, invalidAtMs: Date.now() } });
-    }
-    if (path.toLowerCase().endsWith(`/${memoryId.toLowerCase()}/grants`)) {
-      return json(route, {
-        grants: [{
-          id: "FFFFFFFF-FFFF-7FFF-8FFF-FFFFFFFFFF01",
-          workspaceId,
-          memoryId,
-          granteeKind: "agent",
-          granteeId: otherAgentId,
-          grantedBy: memberId,
-          createdAtMs: 1_785_238_400_000,
-        }],
-      });
     }
     if (path.toLowerCase().endsWith(`/${agentId.toLowerCase()}/runs`)) {
       state.historyCalls += 1;
@@ -464,13 +416,6 @@ async function exerciseScenario(browser, timing, interactive) {
     );
   }
 
-  await page.getByTestId("agent-hub-tab-memory").click();
-  await page.getByTestId("agent-memory-list").waitFor();
-  const memoryRowId = await page.getByTestId("agent-memory-row").getAttribute("data-memory-id");
-  if (memoryRowId !== memoryId.toLowerCase()) {
-    throw new Error(`${timing.name}: delayed memory landed on the wrong agent`);
-  }
-
   await page.getByTestId("agent-hub-tab-history").click();
   await page.getByTestId("agent-history-list").waitFor();
   const runIds = await page
@@ -493,17 +438,6 @@ async function exerciseScenario(browser, timing, interactive) {
     await page.getByTestId("agent-history-row").first().click();
     await page.getByRole("dialog").waitFor();
     await page.getByRole("button", { name: "상세 닫기" }).click();
-
-    await page.getByTestId("agent-hub-tab-memory").click();
-    await page.getByTestId("agent-memory-invalidate").click();
-    await page.getByTestId("agent-memory-invalidate-confirm").click();
-    await page.waitForTimeout(timing.memory + 300);
-    const invalidationEmpty = await page.getByTestId("agent-memory-empty").count();
-    if (!state.invalidated || invalidationEmpty !== 1) {
-      throw new Error(
-        `memory invalidate round-trip: expected empty refetch, state=${state.invalidated}, empty=${invalidationEmpty}`
-      );
-    }
 
     await page.getByTestId("agent-hub-tab-profile").click();
     const effortSelect = page.getByTestId("agent-hub-routing-effort");
@@ -579,7 +513,7 @@ async function main() {
     "GATE PASS: agent roster, profile 404, narrow detail, tab width, effort readiness,"
   );
   console.log(
-    "           memory invalidation, history cursor, pause projection, and three skewed timings stayed agent-scoped."
+    "           history cursor, pause projection, and three skewed timings stayed agent-scoped."
   );
 }
 

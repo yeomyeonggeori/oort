@@ -6,8 +6,11 @@ import type { RosterMember } from "@momo/core/lib/api";
 import type {
   MemoryDigest,
   MemoryDigestPage,
+  MemoryItem,
+  MemoryProposal,
   MemorySettings,
 } from "@momo/core/features/memory/model";
+import { ShellNavProvider, type ShellNavValue } from "@/app/shellNav";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 
 // Shared mount + fixtures for the team-memory component tests (#3165). Realistic
@@ -18,6 +21,12 @@ export const CH = "00000000-0000-7000-8000-000000000201";
 export const OTHER_CH = "00000000-0000-7000-8000-000000000202";
 export const ME = "00000000-0000-7000-8000-000000000101";
 export const RUN = "00000000-0000-7000-8000-000000000501";
+export const AGENT = "00000000-0000-7000-8000-000000000102";
+export const JIHOON = "00000000-0000-7000-8000-000000000103";
+export const PROPOSAL = "00000000-0000-7000-8000-000000000601";
+export const ITEM = "00000000-0000-7000-8000-000000000701";
+export const MSG_A = "00000000-0000-7000-8000-000000000801";
+export const MSG_B = "00000000-0000-7000-8000-000000000802";
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -65,14 +74,20 @@ export function settings(over: Partial<MemorySettings> = {}): MemorySettings {
   };
 }
 
-function rosterMember(role: RosterMember["role"]): RosterMember {
+function rosterMember(
+  role: RosterMember["role"],
+  id = ME,
+  kind: RosterMember["kind"] = "human",
+  displayName = "곽성재",
+  handle = "seongjae"
+): RosterMember {
   return {
-    id: ME,
+    id,
     workspaceId: WS,
-    kind: "human",
+    kind,
     status: "active",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName,
+    handle,
     role,
     channelCount: 0,
     channelIds: [],
@@ -104,9 +119,20 @@ function sessionValue(): SessionContextValue {
   };
 }
 
+const SHELL_NAV: ShellNavValue = {
+  isMobile: false,
+  drawerOpen: false,
+  openDrawer: () => undefined,
+  closeDrawer: () => undefined,
+};
+
 export function mount(
   element: ReactElement,
-  options: { role?: RosterMember["role"] } = {}
+  options: {
+    role?: RosterMember["role"];
+    route?: string;
+    mobile?: boolean;
+  } = {}
 ): { host: HTMLElement; client: QueryClient } {
   const client = new QueryClient({
     defaultOptions: {
@@ -114,7 +140,14 @@ export function mount(
       mutations: { retry: false },
     },
   });
-  client.setQueryData(["roster", WS], [rosterMember(options.role ?? "member")]);
+  client.setQueryData(
+    ["roster", WS],
+    [
+      rosterMember(options.role ?? "member"),
+      rosterMember("member", JIHOON, "human", "박지훈", "jihoon"),
+      rosterMember("member", AGENT, "agent", "김인턴", "kim-intern"),
+    ]
+  );
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -124,7 +157,15 @@ export function mount(
     createElement(
       SessionProvider,
       { value: sessionValue() },
-      createElement(MemoryRouter, null, element)
+      createElement(
+        ShellNavProvider,
+        { value: { ...SHELL_NAV, isMobile: options.mobile === true } },
+        createElement(
+          MemoryRouter,
+          { initialEntries: [options.route ?? "/"] },
+          element
+        )
+      )
     )
   );
   act(() => root?.render(tree));
@@ -149,5 +190,53 @@ export function click(el: Element | null): void {
   if (!el) throw new Error("element to click is missing");
   act(() => {
     (el as HTMLElement).click();
+  });
+}
+
+export function proposal(over: Partial<MemoryProposal> = {}): MemoryProposal {
+  return {
+    id: PROPOSAL,
+    channelId: CH,
+    runId: RUN,
+    agentMemberId: AGENT,
+    requesterMemberId: JIHOON,
+    kind: "decision",
+    status: "pending",
+    text: "결제 재시도 큐는 크기를 두 배로 늘려서 운영하기로 했어요.",
+    evidenceMessageIds: [MSG_A, MSG_B],
+    evidence: [
+      { messageId: MSG_A, seq: 41, authorMemberId: JIHOON },
+      { messageId: MSG_B, seq: 42, authorMemberId: ME },
+    ],
+    callerIsRequester: false,
+    createdAtMs: 1_800_000_000_000,
+    expiresAtMs: 1_801_200_000_000,
+    ...over,
+  };
+}
+
+export function item(over: Partial<MemoryItem> = {}): MemoryItem {
+  return {
+    id: ITEM,
+    channelId: CH,
+    spaceKind: "channel",
+    kind: "decision",
+    origin: "confirmed",
+    body: "결제 재시도 큐는 크기를 두 배로 늘려서 운영하기로 했어요.",
+    validFromMs: 1_800_000_000_000,
+    recordedAtMs: 1_800_000_000_000,
+    confidence: 0.9,
+    sourceCount: 2,
+    ...over,
+  };
+}
+
+export function type(el: HTMLInputElement | HTMLTextAreaElement | null, value: string): void {
+  if (!el) throw new Error("field to type into is missing");
+  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+  act(() => {
+    setter?.call(el, value);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
   });
 }

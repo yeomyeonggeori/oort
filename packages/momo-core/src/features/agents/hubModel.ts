@@ -2,7 +2,6 @@ import type {
   AgentProfile,
   AgentRunStatus,
   AgentRunSummary,
-  MemoryScope,
   RosterMember,
 } from "../../lib/api";
 import { isStaleSignal, type AgentWorkingSignal } from "./workingSignal";
@@ -25,7 +24,7 @@ import { isStaleSignal, type AgentWorkingSignal } from "./workingSignal";
  * 다르기 때문이다 — 연결을 만드는 것은 한 번에 끝나는 흐름이고, 해제는 provider
  * 설정을 오가며 며칠에 걸쳐 확인하는 장부다.
  */
-export type AgentHubSection = "profile" | "memory" | "history" | "connection";
+export type AgentHubSection = "profile" | "history" | "connection";
 
 export function normalizedId(value: string): string {
   return value.toLowerCase();
@@ -84,26 +83,6 @@ export function runStatusLabel(status: AgentRunStatus): string {
   return RUN_STATUS_LABELS[status];
 }
 
-const MEMORY_SCOPE_LABELS: Record<MemoryScope, string> = {
-  member: "멤버",
-  agent: "에이전트",
-  workspace: "워크스페이스",
-  conversation: "대화",
-};
-
-export function memoryScopeLabel(scope: MemoryScope): string {
-  return MEMORY_SCOPE_LABELS[scope];
-}
-
-const MEMORY_KIND_LABELS: Record<string, string> = {
-  fact: "사실",
-  preference: "선호",
-};
-
-export function memoryKindLabel(kind: string): string {
-  return MEMORY_KIND_LABELS[kind] ?? kind;
-}
-
 // ---- 프로필 카드: 모델 · 추론 강도 · 상태 ------------------------------------
 //
 // Three facts a person checks before they mention an agent, and each of them can
@@ -158,17 +137,4 @@ export function lifecycleLabel(
   if (profilePending) return "상태 확인 중";
   if (profileFailed) return "상태 확인 실패";
   return profile?.paused ? "일시정지" : "활성";
-}
-
-export function canInvalidateMemory(
-  role: RosterMember["role"],
-  viewerMemberId: string,
-  createdByMemberId: string | undefined
-): boolean {
-  return (
-    role === "owner" ||
-    role === "admin" ||
-    (createdByMemberId !== undefined &&
-      normalizedId(createdByMemberId) === normalizedId(viewerMemberId))
-  );
 }
