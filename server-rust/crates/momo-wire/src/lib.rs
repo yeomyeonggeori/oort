@@ -19,6 +19,7 @@
 
 pub mod human_control;
 pub mod payload;
+pub mod permission_preview;
 pub mod provenance;
 pub mod signing;
 

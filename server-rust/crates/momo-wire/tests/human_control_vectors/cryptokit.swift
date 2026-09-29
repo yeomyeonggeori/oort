@@ -1,5 +1,5 @@
 // CryptoKit half of the #3021 shared vectors (ADR-0146 개정 2026-09-28 D-5;
-// momo.human.control.v2 #3027).
+// momo.human.control.v2 #3027; v3 #3118).
 // Invoked by generate.mjs: `swift cryptokit.swift <vectors.json>`.
 //
 // Builds every case's content bytes and signed payload **independently** in
@@ -85,13 +85,24 @@ func contentBytes(_ c: [String: Any], schema: String) throws -> Data {
     switch try str(c["kind"]) {
     case "input":
         text = nfc(try str(c["text"]))
-    case "spawn" where schema == "momo.human.control.v2":
+    case "spawn" where schema == "momo.human.control.v2" || schema == "momo.human.control.v3":
         // v2 (#3027): the tool and the channel, before the free-text prompt.
         text = "\(try uuid(c["agent_member_id"]))\n\(try str(c["folder_id"]))\n\(try str(c["tool"]))\n\(try uuid(c["channel_id"]))\n\(nfc(try str(c["first_prompt"])))"
     case "spawn":
         text = "\(try uuid(c["agent_member_id"]))\n\(try str(c["folder_id"]))\n\(nfc(try str(c["first_prompt"])))"
     case "permission":
-        text = "\(try uuid(c["request_event_id"]))\n\(try str(c["option_id"]))\n\(try str(c["option_kind"]))\n\(try str(c["scope"]))"
+        let base = "\(try uuid(c["request_event_id"]))\n\(try str(c["option_id"]))\n\(try str(c["option_kind"]))\n\(try str(c["scope"]))"
+        if schema == "momo.human.control.v3" {
+            // v3 (#3118): the preview's hash, as the host computed it.
+            let hash = try str(c["preview_sha256"])
+            guard hash.count == 64, hash.allSatisfy({ "0123456789abcdef".contains($0) }) else {
+                throw VectorError.bad("preview_sha256")
+            }
+            text = "\(base)\n\(hash)"
+        } else {
+            guard c["preview_sha256"] == nil else { throw VectorError.bad("only v3 binds a preview") }
+            text = base
+        }
     case "bundle_manifest":
         text = try canonicalJson(c["manifest"]!)
     case "host_register":
@@ -107,7 +118,7 @@ func payload(_ tc: [String: Any]) throws -> Data {
     let f = tc["fields"] as! [String: Any]
     var lines = [schema]
     switch schema {
-    case "momo.human.control.v1", "momo.human.control.v2":
+    case "momo.human.control.v1", "momo.human.control.v2", "momo.human.control.v3":
         let c = tc["content"] as! [String: Any]
         let kind = try str(c["kind"])
         let session = f["session_id"] is NSNull ? "-" : try uuid(f["session_id"])

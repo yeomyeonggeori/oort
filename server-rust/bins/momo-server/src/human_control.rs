@@ -293,6 +293,8 @@ mod tests {
             endorsed_at_ms: endorsed.then_some(1),
             endorser_live: endorsed,
             lineage_live: true,
+            linked_session: endorsed,
+            linked_from_mac: endorsed,
             created_at_ms: 0,
             revoked_at_ms: None,
             revoked_reason: None,

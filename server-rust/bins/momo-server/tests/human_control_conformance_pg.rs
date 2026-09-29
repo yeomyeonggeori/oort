@@ -21,6 +21,7 @@
 //! | `a_resume_onto_a_member_host_is_refused_while_signatures_are_required` | drop the resume refusal |
 //! | `host_register_spends_its_nonce_and_records_provenance` | drop the nonce or the provenance on the signed registration |
 //! | `the_signing_context_serves_the_one_instance_id_and_the_clock` | serve a second source, or drop the 503 |
+//! | `a_previewed_allow_must_name_the_stored_preview` (#3118) | rebuild the allow without the stored preview hash (a v2 allow or an allow over another preview then passes), broadcast the preview, or serve it to someone other than the owner |
 //!
 //! `#[ignore]` — needs a real Postgres plus the runtime roles:
 //!
@@ -48,7 +49,9 @@ use momo_db::{with_tenant_tx, DbError, PgPool};
 use momo_messaging::{create_channel, ChannelKind, NewChannel};
 use momo_server::config::DeviceKeySettings;
 use momo_server::{build_app, AppState, RealtimeAdvert};
-use momo_wire::human_control::{ControlContent, DeviceEndorse, DeviceKeyAlg, HumanControl};
+use momo_wire::human_control::{
+    ControlContent, ControlSchema, DeviceEndorse, DeviceKeyAlg, HumanControl,
+};
 use momo_wire::human_control::{InputMode, PermissionScope};
 use p256::ecdsa::signature::Signer as _;
 use p256::ecdsa::{Signature, SigningKey};
@@ -229,7 +232,6 @@ struct Stage {
     base: String,
     workspace: Uuid,
     person: Uuid,
-    person_email: String,
     access: String,
     other_access: String,
     other: Uuid,
@@ -288,6 +290,36 @@ async fn login(http: &reqwest::Client, base: &str, workspace: Uuid, email: &str)
         .expect("login");
     assert_eq!(response.status().as_u16(), 200, "seeded human logs in");
     let body: Value = response.json().await.expect("login body");
+    body["accessToken"].as_str().expect("access").to_string()
+}
+
+/// A phone QR-linked (ADR-0180) from the sign-in `desktop_access` — since #3119
+/// the only kind of sign-in a phone key registers on. Its access token.
+async fn link_phone(http: &reqwest::Client, base: &str, desktop_access: &str) -> String {
+    let host = base.trim_start_matches("http://");
+    let issued = http
+        .post(format!("{base}/v1/auth/device-link"))
+        .bearer_auth(desktop_access)
+        .header("host", host)
+        .header("x-forwarded-proto", "http")
+        .send()
+        .await
+        .expect("issue device link");
+    assert_eq!(issued.status().as_u16(), 201, "issue device link");
+    let voucher = issued.json::<Value>().await.expect("link body")["token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    let redeemed = http
+        .post(format!("{base}/v1/auth/device-link/redeem"))
+        .header("host", host)
+        .header("x-forwarded-proto", "http")
+        .json(&json!({ "token": voucher, "device": { "name": "폰", "platform": "ios" } }))
+        .send()
+        .await
+        .expect("redeem device link");
+    assert_eq!(redeemed.status().as_u16(), 200, "redeem device link");
+    let body: Value = redeemed.json().await.expect("redeem body");
     body["accessToken"].as_str().expect("access").to_string()
 }
 
@@ -390,7 +422,26 @@ impl Stage {
 
     /// The host relays an `approval.requested`; returns its event id.
     async fn permission_request(&self, session: Uuid) -> Uuid {
+        self.permission_request_with(session, None).await
+    }
+
+    /// … optionally with the host's preview and its hash (#3118).
+    async fn permission_request_with(&self, session: Uuid, preview: Option<&Value>) -> Uuid {
         let event_id = Uuid::new_v4();
+        let mut payload = json!({
+            "run_id": session, "work_session_id": session,
+            "channel_id": self.channel,
+            "action": "requested", "action_type": "tool_call", "status": "pending",
+            "options": [
+                {"option_id": "allow-once", "kind": "allow_once", "name": "Allow once"},
+                {"option_id": "reject-once", "kind": "reject_once", "name": "Reject"}
+            ]
+        });
+        if let Some(preview) = preview {
+            payload["preview"] = preview.clone();
+            payload["preview_sha256"] =
+                json!(momo_wire::permission_preview::preview_sha256(preview).unwrap());
+        }
         let (status, body) = self
             .host_request(
                 "PATCH",
@@ -400,15 +451,7 @@ impl Stage {
                     "type": "approval.requested",
                     "v": 1,
                     "ts": now_ms(),
-                    "payload": {
-                        "run_id": session, "work_session_id": session,
-                        "channel_id": self.channel,
-                        "action": "requested", "action_type": "tool_call", "status": "pending",
-                        "options": [
-                            {"option_id": "allow-once", "kind": "allow_once", "name": "Allow once"},
-                            {"option_id": "reject-once", "kind": "reject_once", "name": "Reject"}
-                        ]
-                    }
+                    "payload": payload,
                 }})),
             )
             .await;
@@ -430,7 +473,42 @@ impl Stage {
         issued_at_ms: i64,
         instance_id: &str,
     ) -> Value {
+        self.permission_statement_over(
+            key,
+            key_id,
+            host,
+            session,
+            request_event_id,
+            (option_id, option_kind),
+            nonce,
+            issued_at_ms,
+            instance_id,
+            None,
+        )
+    }
+
+    /// A permission statement; with `preview_sha256` a v3 one (#3118), without
+    /// the v2 one a request relayed with no preview is answered by.
+    #[allow(clippy::too_many_arguments)]
+    fn permission_statement_over(
+        &self,
+        key: &DeviceKeyPair,
+        key_id: Uuid,
+        host: Uuid,
+        session: Uuid,
+        request_event_id: Uuid,
+        (option_id, option_kind): (&str, &str),
+        nonce: Uuid,
+        issued_at_ms: i64,
+        instance_id: &str,
+        preview_sha256: Option<&str>,
+    ) -> Value {
         let expires_at_ms = issued_at_ms + 5 * 60 * 1000;
+        let schema = if preview_sha256.is_some() {
+            ControlSchema::V3
+        } else {
+            ControlSchema::V2
+        };
         let bytes = HumanControl {
             instance_id,
             workspace_id: self.workspace,
@@ -446,9 +524,10 @@ impl Stage {
                 option_id,
                 option_kind,
                 scope: PermissionScope::Once,
+                preview_sha256,
             },
         }
-        .signed_bytes()
+        .signed_bytes_as(schema)
         .expect("permission bytes");
         json!({
             "deviceKeyId": key_id,
@@ -574,7 +653,6 @@ async fn stage_with(config: DeviceKeySettings) -> Stage {
         base,
         workspace,
         person,
-        person_email: person_email.clone(),
         access,
         other_access,
         other,
@@ -609,10 +687,11 @@ async fn stage_with(config: DeviceKeySettings) -> Stage {
         .await;
     assert_eq!(status, 201, "register root: {body}");
     stage.root_id = Uuid::parse_str(body["deviceKey"]["id"].as_str().unwrap()).unwrap();
+    let phone_access = link_phone(&stage.http, &stage.base, &stage.access).await;
     let (status, body) = stage
         .post(
             &stage.keys_path(),
-            &stage.access,
+            &phone_access,
             json!({ "alg": "p256", "publicKey": stage.phone.public_b64, "platform": "ios",
                     "label": "폰" }),
         )
@@ -880,6 +959,139 @@ async fn a_signed_allow_rides_on_the_control_and_is_recorded_once() {
     assert_eq!(s.controls_of(session).await, 1);
 }
 
+/// #3118 (ADR-0146 증보, R2 H1): a request the host relayed with a preview is
+/// allowed only by a v3 statement naming the **stored** preview hash. A v2
+/// allow (no preview line) and an allow over a preview the server showed
+/// instead are refused by name, and the preview never reaches the thread.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_previewed_allow_must_name_the_stored_preview() {
+    use momo_wire::permission_preview::{preview_sha256, PermissionPreview};
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    let session = s.session().await;
+    let preview = PermissionPreview {
+        kind: "execute".into(),
+        title: "Run `git push --force origin main`".into(),
+        locations: String::new(),
+        input: r#"{"command":"git push --force origin main"}"#.into(),
+        truncated: false,
+    }
+    .to_value();
+    let hash = preview_sha256(&preview).unwrap();
+    let request = s.permission_request_with(session, Some(&preview)).await;
+
+    // Stored for the owner, never broadcast: the thread message has the hash
+    // and not the command.
+    let (stored_preview, stored_hash): (Option<Value>, Option<String>) = sqlx::query_as(
+        "SELECT preview, preview_sha256 FROM work_permission_request WHERE request_event_id = $1",
+    )
+    .bind(request)
+    .fetch_one(&s.su)
+    .await
+    .unwrap();
+    assert_eq!(stored_preview.as_ref(), Some(&preview));
+    assert_eq!(stored_hash.as_deref(), Some(hash.as_str()));
+    let leaked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE channel_id = $1 \
+            AND (props::text LIKE '%git push%' OR coalesce(body, '') LIKE '%git push%')",
+    )
+    .bind(s.channel)
+    .fetch_one(&s.su)
+    .await
+    .unwrap();
+    assert_eq!(leaked, 0, "the preview is the owner's, not the thread's");
+    // 097: a preview never stands without its hash, nor a hash without its
+    // preview (a NULL hash once passed the CHECK — `NULL ~ …` is NULL).
+    for (preview_sql, hash_sql) in [
+        ("'{}'::jsonb", "NULL"),
+        ("NULL", "repeat('a', 64)"),
+        ("'{}'::jsonb", "repeat('A', 64)"),
+    ] {
+        let refused = sqlx::query(&format!(
+            "INSERT INTO work_permission_request \
+               (workspace_id, work_session_id, host_id, channel_id, request_event_id, \
+                options, expires_at, preview, preview_sha256) \
+             SELECT workspace_id, work_session_id, host_id, channel_id, gen_random_uuid(), \
+                    options, now(), {preview_sql}, {hash_sql} \
+               FROM work_permission_request WHERE request_event_id = $1"
+        ))
+        .bind(request)
+        .execute(&s.su)
+        .await;
+        assert!(
+            refused.is_err(),
+            "{preview_sql} / {hash_sql} must violate the preview CHECK"
+        );
+    }
+    let with_hash: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE channel_id = $1 AND props::text LIKE '%' || $2 || '%'",
+    )
+    .bind(s.channel)
+    .bind(&hash)
+    .fetch_one(&s.su)
+    .await
+    .unwrap();
+    assert_eq!(with_hash, 1, "the thread's event carries the hash");
+
+    // The owner reads it; another member of the room cannot.
+    let path = format!(
+        "/v1/workspaces/{}/work-sessions/{session}/permission-requests/{request}",
+        s.workspace
+    );
+    let (status, read) = s.call(reqwest::Method::GET, &path, &s.access, None).await;
+    assert_eq!(status, 200, "{read}");
+    assert_eq!(read["preview"], preview);
+    assert_eq!(read["permissionRequest"]["previewSha256"], json!(hash));
+    assert_eq!(read["options"][0]["optionId"], "allow-once");
+    let (status, _) = s
+        .call(reqwest::Method::GET, &path, &s.other_access, None)
+        .await;
+    assert_eq!(status, 404, "a non-owner learns nothing");
+
+    let sign = |preview_sha256: Option<&str>| {
+        s.permission_statement_over(
+            &s.phone,
+            s.phone_id,
+            s.host,
+            session,
+            request,
+            ("allow-once", "allow_once"),
+            Uuid::new_v4(),
+            now_ms(),
+            INSTANCE_ID,
+            preview_sha256,
+        )
+    };
+    let decide = |signature: Value| {
+        json!({ "requestEventId": request, "optionId": "allow-once", "kind": "allow_once",
+                "humanSignature": signature })
+    };
+    // A v2 allow — no preview line — does not stand for a previewed request.
+    let (status, answer) = s.decide(session, decide(sign(None))).await;
+    assert_eq!(status, 403, "{answer}");
+    assert_eq!(code(&answer), Some("device_signature_invalid"), "{answer}");
+    // Nor does an allow over the preview a server showed instead.
+    let mut shown = preview.clone();
+    shown["kind"] = json!("read");
+    shown["title"] = json!("Read README.md");
+    let shown_hash = preview_sha256(&shown).unwrap();
+    let (status, answer) = s.decide(session, decide(sign(Some(&shown_hash)))).await;
+    assert_eq!(status, 403, "{answer}");
+    assert_eq!(code(&answer), Some("device_signature_invalid"), "{answer}");
+    assert_eq!(s.request_status(request).await, "pending");
+    assert_eq!(s.controls_of(session).await, 0);
+    // The allow over what the host relayed is the one that works.
+    let (status, answer) = s.decide(session, decide(sign(Some(&hash)))).await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(
+        answer["permissionRequest"]["previewSha256"],
+        json!(hash),
+        "{answer}"
+    );
+    assert_eq!(s.request_status(request).await, "approved");
+}
+
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn every_misplaced_signed_allow_is_refused_by_name() {
@@ -917,10 +1129,11 @@ async fn every_misplaced_signed_allow_is_refused_by_name() {
 
     // An unendorsed phone key (승인서 없는 폰 키).
     let bare = DeviceKeyPair::new("bare phone");
+    let bare_phone = link_phone(&s.http, &s.base, &s.access).await;
     let (status, body) = s
         .post(
             &s.keys_path(),
-            &s.access,
+            &bare_phone,
             json!({ "alg": "p256", "publicKey": bare.public_b64, "platform": "ios", "label": "새 폰" }),
         )
         .await;
@@ -1185,8 +1398,8 @@ async fn every_misplaced_signed_allow_is_refused_by_name() {
 async fn a_phone_allow_falls_with_its_roots_sign_in() {
     let _lock = test_lock().await;
     let s = stage(true).await;
-    // The phone signs in on its own lineage and registers there.
-    let phone_access = login(&s.http, &s.base, s.workspace, &s.person_email).await;
+    // The phone links on its own lineage (QR, #3119) and registers there.
+    let phone_access = link_phone(&s.http, &s.base, &s.access).await;
     let handset = DeviceKeyPair::new("second phone");
     let (status, body) = s
         .post(
