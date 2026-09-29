@@ -108,6 +108,9 @@ import { WelcomeKickoffStage } from "@/features/welcome/WelcomeKickoffStage";
 import { PhoneLinkChannelCard } from "@/features/welcome/PhoneLinkChannelCard";
 import type { AiConnectLine } from "@momo/core/features/commands/registry";
 import { AiConnectCard, AiConnectSuggestion } from "./AiConnectCard";
+import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
+import { wantsMissedSummary } from "@momo/core/features/memory/presentation";
+import { MissedSummary } from "@/features/memory/MissedSummary";
 import { CommandSuggestSlot } from "@/features/timeline/commandSuggestSlot";
 import { registerLocalCardHost } from "./localCards";
 import { shouldMountPhoneLinkCard } from "@/features/welcome/phoneLinkCard";
@@ -1287,6 +1290,28 @@ export function ChatShell() {
             onRetryMessages={timeline.reload}
           />
         )}
+
+        {/* 놓친 대화 요약 (ADR-0196 D12 V1, #3165). 목록 밖, 타임라인 위 띠다:
+            가상 리스트의 키·높이 계산에 끼지 않는다. 기준은 채널을 **열 때**
+            얼려 둔 커서와 머리(`openedWith`)다. 살아 있는 커서는 기록이 화면에
+            오르자마자 머리로 밀려서, 그것으로 물으면 늘 빈 페이지가 온다. */}
+        {stressCount === 0 &&
+          channelId !== null &&
+          openedWith !== null &&
+          wantsMissedSummary({
+            provided: isSurfaceProvided("teamMemory"),
+            channelId,
+            unreadCount: timelineUnread.unreadCount,
+          }) && (
+            <MissedSummary
+              key={`${channelId}:${openedWith.lastReadSeq ?? 0}`}
+              workspaceId={workspaceId}
+              channelId={channelId}
+              lastReadSeq={openedWith.lastReadSeq}
+              headSeq={openedWith.latestSeq}
+              onJump={onJumpToMessage}
+            />
+          )}
 
         <div
           // `timeline-inset`(DS2-6): 넓은 창에서 좌우 8을 더해 메시지 행(px-4)이

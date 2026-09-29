@@ -17,6 +17,9 @@ import { hasRenderableBody } from "@momo/core/features/timeline/bodySlot";
 import { CascadeNotice } from "./CascadeNotice";
 import { NoticeActionLink } from "./NoticeActionLink";
 import { turnRecordRunId } from "@momo/core/features/timeline/cascadeModel";
+import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
+import { MemoryReceiptChip } from "@/features/memory/MemoryReceiptChip";
+import { receiptRunIdFor } from "@/features/memory/receiptGate";
 import { rowPresentation } from "@momo/core/features/timeline/rowModel";
 import { streamStopMark } from "@momo/core/features/timeline/streamStop";
 // 구분선의 판정은 코어가 갖는다 — 폰이 같은 값을 소비한다 (U1 M-2).
@@ -413,6 +416,12 @@ export function MessageRow({
   const name = author?.displayName ?? message.authorMemberId.slice(0, 8);
   const owner = isAgent ? memberFor(directory, author?.ownerHumanId) : null;
   const deleted = message.state === "deleted";
+  const receiptRunId = receiptRunIdFor({
+    message,
+    isAgent,
+    deleted,
+    provided: isSurfaceProvided("teamMemory"),
+  });
   const failed = message.state === "failed";
   // 살릴 본문이 실제로 있는가 (이슈 #1465 → #1478). 자격(`keepsBody`)과 다른
   // 물음이고, 왜 `trim()`인지와 부재·빈 문자열·공백이 각각 몇 픽셀이었는지는
@@ -991,6 +1000,17 @@ export function MessageRow({
             purpose: whichever of the two took the slot, a turn served by the
             second provider says so. Renders nothing for every other row. */}
         <CascadeNotice runId={turnRecordRunId(message)} />
+        {/* 「기억 n개 참고」(ADR-0196 D12 V2, #3165). 정착한 턴 기록 한 줄에만 단다:
+            한 run이 쓴 행은 여럿이라 `run_id`만 보면 같은 칩이 세 번 나온다(위
+            CascadeNotice와 같은 좁힘). 영수증이 없으면 칩도 없다. */}
+        {receiptRunId !== null && (
+          <MemoryReceiptChip
+            workspaceId={workspaceId}
+            runId={receiptRunId}
+            channelId={message.channelId}
+            onJump={onJumpToMessage}
+          />
+        )}
         {/* 꼬리는 한 줄이고, **그 한 줄은 칩 위에 있다** (R2 M6 + U1 H-6).
             R1은 「수정됨」과 「답글 N개」와 칩을 각각 자기 띠에 올려서, 한 줄짜리
             메시지 아래에 그 메시지보다 높은 세 겹의 꼬리가 쌓였다 — 본문이 자기

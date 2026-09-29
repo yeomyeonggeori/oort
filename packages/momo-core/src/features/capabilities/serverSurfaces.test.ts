@@ -58,7 +58,12 @@ describe("표면 판정표", () => {
     // 이 줄이 재는 것은 **표의 값**이지 서버의 사실이 아니다. 그 사실을 못으로
     // 박는 것은 라우터 소스를 직접 읽는 웹 스위트(clients/web 의
     // `features/agents/agentRunHistoryRoutes.test.ts`)이고, 둘은 함께 읽어야 한다.
-    for (const id of ["messageSearch", "approvals", "agentRunHistory"] as const) {
+    for (const id of [
+      "messageSearch",
+      "approvals",
+      "agentRunHistory",
+      "teamMemory",
+    ] as const) {
       expect(isSurfaceProvided(id)).toBe(true);
     }
     for (const id of [
