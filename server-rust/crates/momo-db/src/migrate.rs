@@ -500,19 +500,24 @@ mod tests {
     /// (all ENABLE + FORCE RLS, per-command policies) and the SQL functions
     /// `mem_can_read_channel` / `mem_can_read_channels`. Re-runnable statements.
     /// schema_v0.sql is not modified.
+    ///
+    /// 101 is #3186's mem_* lockdown hardening (no schema objects): momo_app
+    /// loses TRUNCATE/REFERENCES/TRIGGER on `mem_settings`, PUBLIC ACLs and
+    /// runtime-role `mem_definer` membership are revoked, views/matviews are
+    /// walked, plus membership and SECURITY DEFINER allow-list self-checks.
     #[test]
-    fn discovers_contiguous_migrations_001_to_100() {
+    fn discovers_contiguous_migrations_001_to_101() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            100,
-            "expected 100 migrations under {}",
+            101,
+            "expected 101 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 100);
+        assert_eq!(migrations.last().unwrap().version, 101);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {
