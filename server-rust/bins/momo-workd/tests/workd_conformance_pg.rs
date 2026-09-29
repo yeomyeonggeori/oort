@@ -48,6 +48,7 @@
 //! | `wdc_4_a_member_host_takes_its_owner_and_kill_only` | the agent's spawn request is refused (`remote_host_kill_only`) and an agent-origin dispatched spawn is never delivered, while the owner's resume completes and an agent's `kill` is delivered; no seed on the wire |
 //! | `wdc_6_the_owner_decides_a_permission_request_once_and_nobody_else_can` | ADR-0188 D5 (#3000): the agent's request becomes a `work_permission_request` row (FORCE RLS); an agent bearer (the owner's own agent), a teammate, an `allow_always` (by kind or by an option id relabelled `allow_once`), an instruction and an unknown request are refused and the agent keeps waiting; the owner's `allow_once` becomes a `permission` control the host acks, the agent gets exactly that option, the server's `approval.decided` and an audit row are written; the same decision again is 200 with one control, a different one 409; a lapsed request is 409 and `expired`; ending the session cancels what is pending and answers the agent `cancelled` |
 //! | `wdc_7_r2_signed_resume_then_queue_and_interrupt_end_to_end` | #3027, R2 on at both ends (server flag, host `require_human_signatures` with the root pinned): the owner's resume signed over its successor session runs on the real binary; a signed `queue` sent through `POST …/instructions` waits behind the hung first turn, a signed `interrupt` cancels it (ACP `session/cancel`) and runs next, then the queued one; both instructions are session-thread messages keyed by their nonce |
+//! | `wdc_8_r2_the_product_path_latches_the_host_and_the_server_cannot_undo_it` | #3117 (E10 검수 B1): the config the desktop app writes (no `require_human_signatures`), `run` with the control socket. The server flag on and no root: the socket reports the half state (`serverRequired` true, `required` false). `pin_root` on the socket → the next poll latches R2. A control row the server inserts unsigned, and a signed instruction whose envelope is stripped in the DB, are refused (`device_signature_required`) and reach no agent; a signed resume runs. The server restarted with the flag off: an unsigned input is still refused, and after a host restart the server's own unsigned resume is refused too. Only `reset_signature_requirement` on the socket lowers it: the next unsigned resume runs |
 //! | `wdc_5_a_workspace_host_is_not_served` | a workspace-scoped host registered through the API by the workspace owner: `momo-workd run` refuses it (exit 2) and sends nothing |
 
 use std::net::SocketAddr;
@@ -293,6 +294,25 @@ impl Recorder {
 struct Server {
     base: String,
     recorder: Recorder,
+    address: SocketAddr,
+    shutdown: Option<tokio::sync::oneshot::Sender<()>>,
+    task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Server {
+    /// Stop serving and close every connection (a keep-alive one too, so a
+    /// host's next request reaches whatever is bound here next).
+    async fn stop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        if let Some(task) = self.task.take() {
+            tokio::time::timeout(Duration::from_secs(15), task)
+                .await
+                .expect("the server drains its connections")
+                .expect("the server task");
+        }
+    }
 }
 
 async fn start_server(pool: PgPool) -> Server {
@@ -302,6 +322,16 @@ async fn start_server(pool: PgPool) -> Server {
 async fn start_server_with(
     pool: PgPool,
     device_keys: momo_server::config::DeviceKeySettings,
+) -> Server {
+    start_server_at(pool, device_keys, "127.0.0.1:0".parse().unwrap()).await
+}
+
+/// The same router bound at `address` — a restart of the server a host
+/// already knows (#3117: the operator switches a flag back).
+async fn start_server_at(
+    pool: PgPool,
+    device_keys: momo_server::config::DeviceKeySettings,
+    address: SocketAddr,
 ) -> Server {
     let _ = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::WARN)
@@ -313,7 +343,7 @@ async fn start_server_with(
         "ws://127.0.0.1:8000/connection/websocket".to_string(),
     )
     .with_device_keys(device_keys);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+    let listener = tokio::net::TcpListener::bind(address)
         .await
         .expect("bind momo-server");
     let address: SocketAddr = listener.local_addr().expect("server address");
@@ -322,12 +352,20 @@ async fn start_server_with(
         recorder.clone(),
         record,
     ));
-    tokio::spawn(async move {
-        let _ = axum::serve(listener, app).await;
+    let (shutdown, stopped) = tokio::sync::oneshot::channel::<()>();
+    let task = tokio::spawn(async move {
+        let _ = axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = stopped.await;
+            })
+            .await;
     });
     Server {
         base: format!("http://{address}"),
         recorder,
+        address,
+        shutdown: Some(shutdown),
+        task: Some(task),
     }
 }
 
@@ -713,12 +751,33 @@ impl Workd {
     }
 
     fn start(&mut self) -> u32 {
-        let log = std::fs::File::create(&self.log).unwrap();
+        self.start_with(&[])
+    }
+
+    /// `run` as the desktop app starts it (#2778): with the control socket.
+    /// The test binary is unsigned, so the socket takes it as a peer only
+    /// with `--dev-unsigned-peer` (fences 1–2 still hold).
+    fn start_with_socket(&mut self, socket: &Path) -> u32 {
+        self.start_with(&[
+            std::ffi::OsStr::new("--control-socket"),
+            socket.as_os_str(),
+            std::ffi::OsStr::new("--dev-unsigned-peer"),
+        ])
+    }
+
+    fn start_with(&mut self, extra: &[&std::ffi::OsStr]) -> u32 {
+        // Appended, so a restart keeps the earlier log lines.
+        let log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.log)
+            .unwrap();
         let child = tokio::process::Command::new(WORKD)
             .args(["run", "--config"])
             .arg(&self.config)
             .arg("--dev-key-file")
             .arg(&self.key)
+            .args(extra)
             .env("MOMO_WORKD_LOG", "momo_workd=debug,info")
             // #2630 F1: fake credentials in the host's own environment; no
             // agent and no command an agent runs may see them.
@@ -2194,7 +2253,11 @@ struct RootKey {
 
 impl RootKey {
     fn new() -> RootKey {
-        let signing = p256::ecdsa::SigningKey::from_slice(&[27; 32]).expect("scalar");
+        RootKey::from_scalar(27)
+    }
+
+    fn from_scalar(byte: u8) -> RootKey {
+        let signing = p256::ecdsa::SigningKey::from_slice(&[byte; 32]).expect("scalar");
         let point = signing.verifying_key().to_sec1_point(true);
         RootKey {
             public_b64: base64::engine::general_purpose::STANDARD.encode(point.as_bytes()),
@@ -2486,4 +2549,447 @@ async fn wdc_7_r2_signed_resume_then_queue_and_interrupt_end_to_end() {
         assert_eq!(body.as_deref(), Some(text));
     }
     workd.stop().await;
+}
+
+// ---------------------------------------------------------------------------
+// #3117 — what switches R2 on, on the product path (E10 검수 B1)
+// ---------------------------------------------------------------------------
+
+/// A private 0700 folder under /tmp for the control socket (`sun_path` is 104
+/// bytes; the Workd folder under `$TMPDIR` is too long on macOS).
+struct SocketFolder(PathBuf);
+
+impl SocketFolder {
+    fn new() -> Self {
+        let dir = PathBuf::from(format!(
+            "/tmp/w3117-{}",
+            &Uuid::new_v4().simple().to_string()[..12]
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        Self(dir)
+    }
+
+    fn sock(&self) -> PathBuf {
+        self.0.join("workd.sock")
+    }
+}
+
+impl Drop for SocketFolder {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// One request on the control socket, as the desktop app sends it.
+async fn ask_socket(path: &Path, request: Value) -> Value {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    let mut stream = tokio::net::UnixStream::connect(path)
+        .await
+        .expect("connect the control socket");
+    stream
+        .write_all(format!("{request}\n").as_bytes())
+        .await
+        .unwrap();
+    let mut out = String::new();
+    tokio::time::timeout(Duration::from_secs(5), stream.read_to_string(&mut out))
+        .await
+        .expect("the socket answers")
+        .unwrap();
+    serde_json::from_str(out.trim()).expect("one JSON line")
+}
+
+async fn socket_signatures(path: &Path) -> Value {
+    ask_socket(path, json!({"op": "status"})).await["humanSignatures"].clone()
+}
+
+fn signal(workd: &Workd, signal: libc::c_int) {
+    let pid = workd
+        .child
+        .as_ref()
+        .and_then(|child| child.id())
+        .expect("running") as libc::pid_t;
+    // SAFETY: plain syscall on our own child.
+    assert_eq!(unsafe { libc::kill(pid, signal) }, 0);
+}
+
+/// Every envelope column of a control set to NULL — what a server or DB
+/// operator can do to a signed row (095 keeps them all set or all NULL).
+async fn strip_envelope(su: &PgPool, control: Uuid) {
+    let stripped = sqlx::query(
+        "UPDATE work_control SET device_key_id = NULL, human_instance_id = NULL, \
+           human_nonce = NULL, human_issued_at_ms = NULL, human_expires_at_ms = NULL, \
+           human_mode = NULL, human_scope = NULL, human_spawn_agent_member_id = NULL, \
+           human_spawn_folder_id = NULL, human_signature = NULL \
+         WHERE id = $1 AND human_signature IS NOT NULL",
+    )
+    .bind(control)
+    .execute(su)
+    .await
+    .expect("strip the envelope")
+    .rows_affected();
+    assert_eq!(stripped, 1, "the control was signed");
+}
+
+async fn wait_for_ack_label(
+    su: &PgPool,
+    fixture: &Fixture,
+    workd: &Workd,
+    control: Uuid,
+) -> String {
+    wait_until("the control's ack", workd, || async {
+        match control_state(su, control).await.0.as_str() {
+            "acked" | "failed" => Some(
+                ack_error_label(su, fixture, control)
+                    .await
+                    .unwrap_or_default(),
+            ),
+            _ => None,
+        }
+    })
+    .await
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn wdc_8_r2_the_product_path_latches_the_host_and_the_server_cannot_undo_it() {
+    use momo_wire::human_control::{ControlContent, HumanControl, InputMode};
+
+    // The control socket is macOS only (the peer is checked by code
+    // signature); elsewhere `run --control-socket` refuses to start.
+    if !cfg!(target_os = "macos") {
+        eprintln!("wdc_8: the control socket needs macOS; skipped");
+        return;
+    }
+
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed_fixture(&su, &app_pool).await;
+    let flag = |on: bool| momo_server::config::DeviceKeySettings {
+        instance_id: Some(INSTANCE_3027.to_string()),
+        human_control_signature_required: on,
+        ..Default::default()
+    };
+    let mut server = start_server_with(app_pool.clone(), flag(true)).await;
+    let base = server.base.clone();
+    let base = base.as_str();
+    let http = reqwest::Client::new();
+    let token = login(&http, base, &fixture).await;
+    let workspace = fixture.workspace;
+
+    // The config exactly as the desktop app's `build_config` writes it: no
+    // `require_human_signatures` (the test only adds its poll intervals).
+    let mut workd = Workd::new(base, &fixture, &[("claude", &[])]);
+    let written: Value = serde_json::from_slice(&std::fs::read(&workd.config).unwrap()).unwrap();
+    assert!(written.get("require_human_signatures").is_none());
+    let registered = workd.register(&token).await;
+    let host = Uuid::parse_str(registered["hostId"].as_str().expect("hostId")).unwrap();
+    let folder = SocketFolder::new();
+    let socket = folder.sock();
+    workd.start_with_socket(&socket);
+    wait_until("the host to heartbeat", &workd, || async {
+        host_row(&http, base, &token, &fixture, host).await["lastSeenAtMs"]
+            .as_i64()
+            .map(|_| ())
+    })
+    .await;
+
+    // ---- the server requires signatures, no root here: the half state -----
+    let half = wait_until("the server's word on the socket", &workd, || async {
+        let status = socket_signatures(&socket).await;
+        (status["serverRequired"] == true).then_some(status)
+    })
+    .await;
+    assert_eq!(half["required"], false, "{half}");
+    assert_eq!(half["requiredBy"], Value::Null, "{half}");
+    assert_eq!(half["rootKeyId"], Value::Null, "{half}");
+    assert!(!workd
+        .dir
+        .join("state")
+        .join(momo_workd::signature_requirement::REQUIRED_FILE)
+        .exists());
+    eprintln!("wdc_8: server on, no root → {half}");
+
+    // ---- the app pins its root on the socket: the next poll latches -------
+    let root = RootKey::from_scalar(31);
+    let response = http
+        .post(format!("{base}/v1/workspaces/{workspace}/device-keys"))
+        .bearer_auth(&token)
+        .json(
+            &json!({ "alg": "p256", "publicKey": root.public_b64, "platform": "macos",
+                       "label": "맥", "currentPassword": TEST_PASSWORD }),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201, "the root key registers");
+    let body: Value = response.json().await.unwrap();
+    let root_id = Uuid::parse_str(body["deviceKey"]["id"].as_str().unwrap()).unwrap();
+    let pinned = ask_socket(
+        &socket,
+        json!({"op": "pin_root", "keyId": root_id, "alg": "p256", "publicKey": root.public_b64}),
+    )
+    .await;
+    assert_eq!(pinned, json!({"ok": true, "pinned": true}));
+    let latched = wait_until("the host to latch R2", &workd, || async {
+        let status = socket_signatures(&socket).await;
+        (status["required"] == true).then_some(status)
+    })
+    .await;
+    assert_eq!(latched["requiredBy"], "server", "{latched}");
+    assert!(latched["latchedSinceMs"].as_i64().is_some(), "{latched}");
+    eprintln!("wdc_8: root pinned → {latched}");
+
+    // ---- a signed resume runs ----------------------------------------------
+    let signed_resume = |label: &'static str| {
+        let http = http.clone();
+        let token = token.clone();
+        let su = su.clone();
+        let root = &root;
+        let fixture = &fixture;
+        async move {
+            let old_laptop = register_idle_member_host(&http, base, &token, fixture).await;
+            let created: Value = http
+                .post(format!("{base}/v1/workspaces/{workspace}/work-sessions"))
+                .bearer_auth(&token)
+                .json(&json!({ "channelId": fixture.channel, "hostId": old_laptop,
+                               "tool": "claude", "label": label }))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            let source = Uuid::parse_str(created["workSession"]["id"].as_str().unwrap()).unwrap();
+            orphan_session(&su, source).await;
+            let successor = Uuid::new_v4();
+            let issued = now_ms_3027();
+            let nonce = Uuid::new_v4();
+            let bytes = HumanControl {
+                instance_id: INSTANCE_3027,
+                workspace_id: workspace,
+                member_id: fixture.owner,
+                device_key_id: root_id,
+                host_id: host,
+                session_id: Some(successor),
+                nonce,
+                issued_at_ms: issued,
+                expires_at_ms: issued + 5 * 60 * 1000,
+                content: ControlContent::Spawn {
+                    agent_member_id: fixture.agent,
+                    folder_id: "repo",
+                    tool: "claude",
+                    channel_id: fixture.channel,
+                    first_prompt: label,
+                },
+            }
+            .signed_bytes()
+            .unwrap();
+            let resumed = http
+                .post(format!(
+                    "{base}/v1/workspaces/{workspace}/work-sessions/{source}/resume"
+                ))
+                .bearer_auth(&token)
+                .json(
+                    &json!({ "targetHostId": host, "sessionId": successor, "humanSignature": {
+                        "deviceKeyId": root_id, "nonce": nonce, "issuedAtMs": issued,
+                        "expiresAtMs": issued + 5 * 60 * 1000, "agentMemberId": fixture.agent,
+                        "folderId": "repo", "signature": root.sign(&bytes),
+                    }}),
+                )
+                .send()
+                .await
+                .unwrap();
+            accepted_resume(&su, fixture, host, resumed).await
+        }
+    };
+    let (session, spawn) = signed_resume("signed first turn").await;
+    wait_until("the signed resume to run", &workd, || async {
+        (control_state(&su, spawn).await == ("acked".to_string(), Some(session))).then_some(())
+    })
+    .await;
+    wait_until("the first turn", &workd, || async {
+        (stub_prompts(&workd, "claude").len() == 1).then_some(())
+    })
+    .await;
+
+    // ---- what the server inserts unsigned is refused ------------------------
+    let unsigned = insert_control(
+        &su,
+        &fixture,
+        host,
+        fixture.owner,
+        Some(session),
+        "input",
+        json!({"text": "inserted unsigned by the server"}),
+    )
+    .await;
+    assert_eq!(
+        wait_for_ack_label(&su, &fixture, &workd, unsigned).await,
+        "device_signature_required"
+    );
+
+    // ---- a signed instruction whose envelope the DB loses is refused -------
+    signal(&workd, libc::SIGSTOP);
+    let issued = now_ms_3027();
+    let nonce = Uuid::new_v4();
+    let text = "signed, then stripped";
+    let bytes = HumanControl {
+        instance_id: INSTANCE_3027,
+        workspace_id: workspace,
+        member_id: fixture.owner,
+        device_key_id: root_id,
+        host_id: host,
+        session_id: Some(session),
+        nonce,
+        issued_at_ms: issued,
+        expires_at_ms: issued + 5 * 60 * 1000,
+        content: ControlContent::Input {
+            mode: InputMode::Queue,
+            text,
+        },
+    }
+    .signed_bytes()
+    .unwrap();
+    let sent = http
+        .post(format!(
+            "{base}/v1/workspaces/{workspace}/work-sessions/{session}/instructions"
+        ))
+        .bearer_auth(&token)
+        .json(
+            &json!({ "text": text, "mode": "queue", "clientMsgId": nonce,
+            "humanSignature": { "deviceKeyId": root_id, "nonce": nonce, "issuedAtMs": issued,
+                "expiresAtMs": issued + 5 * 60 * 1000, "mode": "queue",
+                "signature": root.sign(&bytes) }}),
+        )
+        .send()
+        .await
+        .unwrap();
+    let sent_status = sent.status();
+    let sent: Value = sent.json().await.unwrap();
+    assert_eq!(sent_status, 201, "{sent}");
+    let stripped = Uuid::parse_str(sent["workControl"]["id"].as_str().unwrap()).unwrap();
+    strip_envelope(&su, stripped).await;
+    signal(&workd, libc::SIGCONT);
+    assert_eq!(
+        wait_for_ack_label(&su, &fixture, &workd, stripped).await,
+        "device_signature_required"
+    );
+
+    // ---- the operator switches the server flag back ------------------------
+    server.stop().await;
+    let address = server.address;
+    let _server_off = start_server_at(app_pool.clone(), flag(false), address).await;
+    let off = wait_until("the server's `false` on the socket", &workd, || async {
+        let status = socket_signatures(&socket).await;
+        (status["serverRequired"] == false).then_some(status)
+    })
+    .await;
+    assert_eq!(
+        off["required"], true,
+        "the server's `false` lowers nothing: {off}"
+    );
+    let after_off = insert_control(
+        &su,
+        &fixture,
+        host,
+        fixture.owner,
+        Some(session),
+        "input",
+        json!({"text": "unsigned after the server said false"}),
+    )
+    .await;
+    assert_eq!(
+        wait_for_ack_label(&su, &fixture, &workd, after_off).await,
+        "device_signature_required"
+    );
+
+    // ---- a host restart: the latch is read back; the server's own ----------
+    // unsigned resume (legal on the server with the flag off) is refused.
+    assert_eq!(workd.stop().await, Some(0));
+    workd.start_with_socket(&socket);
+    let restarted = wait_until("the restarted host's status", &workd, || async {
+        match tokio::net::UnixStream::connect(&socket).await {
+            Ok(_) => Some(socket_signatures(&socket).await),
+            Err(_) => None,
+        }
+    })
+    .await;
+    assert_eq!(restarted["required"], true, "{restarted}");
+    assert_eq!(restarted["requiredBy"], "server", "{restarted}");
+    let (refused_session, refused_spawn) = accepted_resume(
+        &su,
+        &fixture,
+        host,
+        owner_resume(
+            &su,
+            &http,
+            base,
+            &token,
+            &fixture,
+            host,
+            "claude",
+            "unsigned resume",
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(
+        wait_for_ack_label(&su, &fixture, &workd, refused_spawn).await,
+        "device_signature_required"
+    );
+    let _ = refused_session;
+
+    // Nothing the host refused reached an agent.
+    let prompts = stub_prompts(&workd, "claude");
+    for refused in [
+        "inserted unsigned by the server",
+        "signed, then stripped",
+        "unsigned after the server said false",
+        "unsigned resume",
+    ] {
+        assert!(
+            !prompts.iter().any(|prompt| prompt.contains(refused)),
+            "{refused:?} reached the agent: {prompts:?}"
+        );
+    }
+
+    // ---- only the local reset lowers it --------------------------------------
+    let reset = ask_socket(&socket, json!({"op": "reset_signature_requirement"})).await;
+    assert_eq!(reset, json!({"ok": true, "required": false}));
+    let lowered = socket_signatures(&socket).await;
+    assert_eq!(lowered["required"], false, "{lowered}");
+    assert_eq!(lowered["serverRequired"], false, "{lowered}");
+    let (session_after, spawn_after) = accepted_resume(
+        &su,
+        &fixture,
+        host,
+        owner_resume(
+            &su,
+            &http,
+            base,
+            &token,
+            &fixture,
+            host,
+            "claude",
+            "after the local reset",
+        )
+        .await,
+    )
+    .await;
+    wait_until("the unsigned resume after the reset", &workd, || async {
+        (control_state(&su, spawn_after).await == ("acked".to_string(), Some(session_after)))
+            .then_some(())
+    })
+    .await;
+    wait_until("its first turn", &workd, || async {
+        stub_prompts(&workd, "claude")
+            .iter()
+            .any(|prompt| prompt.contains("after the local reset"))
+            .then_some(())
+    })
+    .await;
+    eprintln!("wdc_8: server off + restart → still required; local reset → unsigned resume runs");
+    assert_eq!(workd.stop().await, Some(0));
 }

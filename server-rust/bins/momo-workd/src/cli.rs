@@ -44,6 +44,7 @@ use crate::human_trust::{HumanTrust, TrustIdentity};
 use crate::keystore::{HostKey, KeyStore, KeyStoreError};
 use crate::policy::{AdapterKind, CodexHome};
 use crate::session::{SessionManager, SessionSettings};
+use crate::signature_requirement::SignatureRequirement;
 
 /// The environment variable `register` reads the owner's token from.
 pub const REGISTER_TOKEN_ENV: &str = "MOMO_WORKD_REGISTER_TOKEN";
@@ -384,6 +385,9 @@ fn remove_trust_files(config: &WorkdConfig) -> Result<(), CliError> {
     for name in [
         crate::human_trust::TRUST_FILE,
         crate::human_trust::NONCE_FILE,
+        // A new registration is a new host: the server latches R2 again
+        // once it requires signatures and a root is pinned (#3117).
+        crate::signature_requirement::REQUIRED_FILE,
     ] {
         let path = state_folder(config).join(name);
         match std::fs::remove_file(&path) {
@@ -517,12 +521,21 @@ pub async fn run(
     );
     let health = Arc::new(HostHealth::default());
     let stop = Arc::new(tokio::sync::Notify::new());
+    // #3117: whether R2 is required — the owner's config, or the server's
+    // word latched earlier (an unreadable latch counts as latched).
+    let requirement =
+        SignatureRequirement::open(&state_folder(&config), config.require_human_signatures);
+    let required_at_start = requirement.required();
+    let requirement = Arc::new(std::sync::Mutex::new(requirement));
     // ADR-0146 개정 (#3024): the pinned root and the nonce ledger. Opened even
     // with R2 off, so the desktop app can pin its root before R2 is switched on.
     let trust = match HumanTrust::open(&state_folder(&config), trust_identity(&state)) {
         Ok(trust) => trust,
         // R2 off must not change whether the host starts (#3024 review L2).
-        Err(error) if !config.require_human_signatures => {
+        // R2 on (config or latch) and no readable trust state: refuse to start.
+        // An R2 latch that arrives later with such a state finds no root and
+        // does not latch (`signature_requirement`).
+        Err(error) if !required_at_start => {
             tracing::warn!(error = %error, "device trust state unreadable; R2 is off, continuing");
             HumanTrust::empty(&state_folder(&config), trust_identity(&state))
         }
@@ -539,12 +552,20 @@ pub async fn run(
             health: health.clone(),
             stop: stop.clone(),
             trust: trust.clone(),
-            human_signatures_required: config.require_human_signatures,
+            requirement: requirement.clone(),
         },
     )?;
-    let mut controls = ControlLoop::new(api.clone(), sessions, state.owner_member_id);
-    if config.require_human_signatures {
+    // Always with the requirement (#3117): R2 is on while it says so, and the
+    // server's `humanControlSignatureRequired` can latch it on — never off.
+    let mut controls = ControlLoop::new(api.clone(), sessions, state.owner_member_id)
+        .with_signature_requirement(trust.clone(), requirement.clone());
+    if let Some(by) = requirement
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .required_by()
+    {
         tracing::info!(
+            required_by = by.label(),
             root_pinned = trust
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
@@ -552,7 +573,6 @@ pub async fn run(
                 .is_some(),
             "R2: spawns, inputs and allows need the owner's device signature"
         );
-        controls = controls.with_human_trust(trust.clone());
     }
     let mut heartbeat = tokio::spawn(heartbeat_loop(
         api.clone(),

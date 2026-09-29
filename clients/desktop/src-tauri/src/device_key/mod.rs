@@ -614,6 +614,10 @@ pub struct HostPin {
     /// The running host is this workspace's and this member's.
     pub matches: bool,
     pub pinned_root_key_id: Option<String>,
+    /// `enforced` · `server_only` · `off` ([`crate::work_host::HostTrust::signature_enforcement`],
+    /// #3117). `server_only` is the half state: the server requires device
+    /// signatures and this Mac's host does not enforce them yet.
+    pub signature_enforcement: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -659,6 +663,7 @@ fn status_of(worker: &Worker, workspace_id: Option<Uuid>) -> DeviceKeyStatus {
             .ok()
             .map(|service| match service.host_trust() {
                 Ok(Some(trust)) => HostPin {
+                    signature_enforcement: trust.signature_enforcement(),
                     running: true,
                     matches: workspace_id.map(|w| w.to_string()) == Some(trust.workspace_id)
                         && root.as_ref().map(|r| r.member_id.to_string())
@@ -669,6 +674,7 @@ fn status_of(worker: &Worker, workspace_id: Option<Uuid>) -> DeviceKeyStatus {
                     running: false,
                     matches: false,
                     pinned_root_key_id: None,
+                    signature_enforcement: "off",
                 },
             })
     };

@@ -207,6 +207,266 @@ fn plan_entry(entry: &Value) -> Option<Value> {
     Some(json!({"content": content, "status": status, "priority": priority}))
 }
 
+// ---- permission preview (#3118, ADR-0146 증보 H1 · ADR-0188 D5) -----------
+
+/// Most tool calls remembered per session for their preview: a permission
+/// request names one by `toolCallId`, and ACP lets the request carry only a
+/// partial update of the call the agent announced before.
+pub const MAX_REMEMBERED_TOOL_CALLS: usize = 64;
+
+/// Fold a `tool_call` / `tool_call_update` notification's fields into what
+/// this session remembers of that call. Later non-null fields win (ACP
+/// `ToolCallUpdate` semantics). Returns `false` for anything else.
+pub fn remember_tool_call(calls: &mut Vec<(String, Map<String, Value>)>, params: &Value) -> bool {
+    let Some(update) = params.get("update").and_then(Value::as_object) else {
+        return false;
+    };
+    if !matches!(
+        update.get("sessionUpdate").and_then(Value::as_str),
+        Some("tool_call") | Some("tool_call_update")
+    ) {
+        return false;
+    }
+    let Some(id) = update.get("toolCallId").and_then(Value::as_str) else {
+        return false;
+    };
+    merge_tool_call(calls, id, update);
+    true
+}
+
+fn merge_tool_call(
+    calls: &mut Vec<(String, Map<String, Value>)>,
+    id: &str,
+    fields: &Map<String, Value>,
+) {
+    let index = match calls.iter().position(|(known, _)| known == id) {
+        Some(index) => index,
+        None => {
+            if calls.len() >= MAX_REMEMBERED_TOOL_CALLS {
+                calls.remove(0);
+            }
+            calls.push((id.to_string(), Map::new()));
+            calls.len() - 1
+        }
+    };
+    let entry = &mut calls[index].1;
+    for key in ["title", "kind", "locations", "rawInput"] {
+        if let Some(value) = fields.get(key).filter(|value| !value.is_null()) {
+            entry.insert(key.to_string(), value.clone());
+        }
+    }
+}
+
+/// The preview of one `session/request_permission` (#3118): the tool call it
+/// names, as this session knows it, with the request's own fields on top —
+/// sanitised the way ADR-0188 D5 says. The host is the preview's source; the
+/// hash of [`momo_wire::permission_preview::PermissionPreview::to_value`] is
+/// what an owner's allow must name.
+pub fn permission_preview(
+    calls: &mut Vec<(String, Map<String, Value>)>,
+    params: &Value,
+) -> momo_wire::permission_preview::PermissionPreview {
+    let request = params
+        .get("toolCall")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let fields = match request.get("toolCallId").and_then(Value::as_str) {
+        Some(id) => {
+            merge_tool_call(calls, id, &request);
+            calls
+                .iter()
+                .find(|(known, _)| known == id)
+                .map(|(_, fields)| fields.clone())
+                .unwrap_or_default()
+        }
+        None => request,
+    };
+    let kind = fields
+        .get("kind")
+        .and_then(Value::as_str)
+        .map(tool_kind)
+        .unwrap_or("other");
+    let title = fields
+        .get("title")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let locations: Vec<String> = fields
+        .get("locations")
+        .and_then(Value::as_array)
+        .map(|locations| {
+            locations
+                .iter()
+                .filter_map(|location| {
+                    let path = location.get("path").and_then(Value::as_str)?;
+                    Some(match location.get("line").and_then(Value::as_u64) {
+                        Some(line) => format!("{path}:{line}"),
+                        None => path.to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let input = match fields.get("rawInput") {
+        None | Some(Value::Null) => String::new(),
+        Some(Value::String(text)) => text.clone(),
+        Some(value) => value.to_string(),
+    };
+    let mut truncated = false;
+    let mut field = |text: &str| {
+        let (bounded, cut) = preview_field(text);
+        truncated |= cut;
+        bounded
+    };
+    let title = field(title);
+    let locations = field(&locations.join("\n"));
+    let input = field(&input);
+    momo_wire::permission_preview::PermissionPreview {
+        kind: kind.to_string(),
+        title,
+        locations,
+        input,
+        truncated,
+    }
+}
+
+/// One preview field: invisible and direction characters removed — the
+/// relay's set, the credential scan's invisible set, and the line and
+/// paragraph separators, so an app's display sanitiser finds nothing left to
+/// neutralise and shows exactly the hashed bytes — credential shapes masked,
+/// then at most [`MAX_FIELD_CHARS`] characters with head and tail kept.
+/// Returns whether it was cut.
+fn preview_field(text: &str) -> (String, bool) {
+    let visible: String = text
+        .chars()
+        .filter(|character| {
+            !is_disallowed(*character)
+                && !crate::redact::is_invisible(*character)
+                && !matches!(character, '\u{2028}' | '\u{2029}')
+        })
+        .collect();
+    let masked = mask_display_shapes(&redact_credentials(&visible));
+    let cut = masked.chars().count() > MAX_FIELD_CHARS;
+    (bound_field(&masked, MAX_FIELD_CHARS), cut)
+}
+
+/// The credential shapes an app's display sanitiser masks
+/// (`@momo/core` `agentPane.ts` `CREDENTIAL_PATTERNS`), masked here too — each
+/// at least as widely — so the app finds nothing left to mask and shows the
+/// hashed bytes unchanged (#3118 security review M1). A preview the app would
+/// alter cannot be allowed, so without this an honest `curl -H "Authorization:
+/// Bearer …"` request could never be allowed from a phone. Runs after
+/// [`redact_credentials`], whose marks match none of these shapes.
+fn mask_display_shapes(text: &str) -> String {
+    fn word(c: char) -> bool {
+        c.is_ascii_alphanumeric() || c == '_'
+    }
+    fn run(rest: &str, allowed: impl Fn(char) -> bool) -> usize {
+        rest.chars()
+            .take_while(|c| allowed(*c))
+            .map(char::len_utf8)
+            .sum()
+    }
+    fn alnum(c: char) -> bool {
+        c.is_ascii_alphanumeric()
+    }
+    fn b64url(c: char) -> bool {
+        c.is_ascii_alphanumeric() || c == '_' || c == '-'
+    }
+    /// `(bytes kept before the mask, bytes masked)` of a shape starting here.
+    fn shape(rest: &str) -> Option<(usize, usize)> {
+        let prefixed = |prefix: &str, allowed: fn(char) -> bool, min: usize| {
+            let tail = rest.strip_prefix(prefix)?;
+            let n = run(tail, allowed);
+            (tail[..n].chars().count() >= min).then_some((0, prefix.len() + n))
+        };
+        if let Some(hit) = prefixed("sk-", b64url, 16) {
+            return Some(hit);
+        }
+        for p in ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"] {
+            if let Some(hit) = prefixed(p, alnum, 20) {
+                return Some(hit);
+            }
+        }
+        if let Some(hit) = prefixed("github_pat_", word, 20) {
+            return Some(hit);
+        }
+        for p in ["xoxa-", "xoxb-", "xoxp-", "xoxo-", "xoxs-", "xoxr-"] {
+            if let Some(hit) = prefixed(p, |c| c.is_ascii_alphanumeric() || c == '-', 10) {
+                return Some(hit);
+            }
+        }
+        if let Some(hit) = prefixed("AKIA", |c| c.is_ascii_digit() || c.is_ascii_uppercase(), 16) {
+            return Some(hit);
+        }
+        if let Some(hit) = prefixed("AIza", b64url, 30) {
+            return Some(hit);
+        }
+        if let Some(tail) = rest.strip_prefix("eyJ") {
+            let mut at = 0;
+            let mut ok = true;
+            for part in 0..3 {
+                let n = run(&tail[at..], b64url);
+                // The first part's 8 include nothing of `eyJ`, as in the core.
+                if tail[at..at + n].len() < 8 {
+                    ok = false;
+                    break;
+                }
+                at += n;
+                if part < 2 {
+                    if !tail[at..].starts_with('.') {
+                        ok = false;
+                        break;
+                    }
+                    at += 1;
+                }
+            }
+            if ok {
+                return Some((0, 3 + at));
+            }
+        }
+        if rest
+            .get(..6)
+            .is_some_and(|p| p.eq_ignore_ascii_case("bearer"))
+        {
+            let after = &rest[6..];
+            let spaces = run(after, char::is_whitespace);
+            if spaces > 0 {
+                let token = &after[spaces..];
+                let n = run(token, |c| {
+                    c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '~' | '+' | '/' | '-')
+                });
+                if n >= 16 {
+                    let pad = run(&token[n..], |c| c == '=');
+                    return Some((6 + spaces, n + pad));
+                }
+            }
+        }
+        None
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut previous: Option<char> = None;
+    let mut index = 0;
+    while index < text.len() {
+        let rest = &text[index..];
+        let at_boundary = !previous.is_some_and(word);
+        if at_boundary {
+            if let Some((keep, masked)) = shape(rest) {
+                out.push_str(&rest[..keep]);
+                out.push_str(REDACTED_CREDENTIAL);
+                index += keep + masked;
+                previous = Some(']');
+                continue;
+            }
+        }
+        let c = rest.chars().next().expect("index < len");
+        out.push(c);
+        previous = Some(c);
+        index += c.len_utf8();
+    }
+    out
+}
+
 /// Remove characters that change how text renders without being visible:
 /// bidi embeddings/overrides/isolates and marks, zero-width space and word
 /// joiner family, BOM, Mongolian vowel separator, and C0/C1 controls other than
@@ -481,6 +741,112 @@ mod tests {
         assert_eq!(open_private_key_block("-----BEGIN OPENSSH PRIV"), Some(0));
         assert_eq!(open_private_key_block(PEM), None);
         assert_eq!(open_private_key_block("no key"), None);
+    }
+
+    /// #3118: the preview is the request's tool call as the session knows
+    /// it, sanitised, masked and bounded — and its hash moves with each field.
+    #[test]
+    fn a_permission_preview_is_the_named_tool_call_sanitised() {
+        let mut calls = Vec::new();
+        assert!(remember_tool_call(
+            &mut calls,
+            &update(json!({"sessionUpdate": "tool_call", "toolCallId": "call-1",
+                "title": "Run `cat ~/.ssh/id_ed25519`", "kind": "execute",
+                "locations": [{"path": "/home/me/.ssh/id_ed25519", "line": 3}],
+                "rawInput": {"command": "cat ~/.ssh/id_ed25519"}}))
+        ));
+        // The request carries a partial update: its title wins, the rest is
+        // what the agent announced.
+        let preview = permission_preview(
+            &mut calls,
+            &json!({"toolCall": {"toolCallId": "call-1",
+                "title": "Run \u{202E}`cat x`\u{2028} ghp_0123456789abcdefghijklmnopqrstuvwxyz"}}),
+        );
+        assert_eq!(preview.kind, "execute");
+        assert_eq!(
+            preview.title,
+            format!("Run `cat x` {REDACTED_CREDENTIAL}"),
+            "direction and separator characters removed, the token masked"
+        );
+        assert_eq!(preview.locations, "/home/me/.ssh/id_ed25519:3");
+        assert_eq!(preview.input, r#"{"command":"cat ~/.ssh/id_ed25519"}"#);
+        assert!(!preview.truncated);
+        let hash = momo_wire::permission_preview::preview_sha256(&preview.to_value()).unwrap();
+        assert_eq!(hash.len(), 64);
+
+        // An unknown call and a bare request still give a preview (of what
+        // there is); a long input is cut and says so.
+        let bare = permission_preview(&mut calls, &json!({}));
+        assert_eq!(
+            (bare.kind.as_str(), bare.title.as_str(), bare.truncated),
+            ("other", "", false)
+        );
+        let long = permission_preview(
+            &mut calls,
+            &json!({"toolCall": {"toolCallId": "call-2", "kind": "sudo",
+                "rawInput": "y".repeat(MAX_FIELD_CHARS + 10)}}),
+        );
+        assert_eq!(long.kind, "other");
+        assert!(long.truncated);
+        assert_eq!(long.input.chars().count(), MAX_FIELD_CHARS);
+        assert!(momo_wire::permission_preview::validate_preview(&long.to_value()).is_ok());
+    }
+
+    /// #3118 security review M1: every shape the app's display sanitiser
+    /// masks is masked by the host first, so an honest preview reaches the
+    /// app unchanged by display and can be allowed.
+    #[test]
+    fn the_preview_masks_every_shape_the_app_would() {
+        let samples = [
+            (
+                "Bearer",
+                "curl -H 'Authorization: Bearer abcdefghijklmnopqrst' x",
+            ),
+            ("bearer lower", "bearer abcdefghijklmnop=="),
+            ("sk-16", "key sk-abcdefghijklmnop end"),
+            ("sk-proj", "sk-proj-abcdefghijklmnop"),
+            ("gh", "ghp_abcdefghijklmnopqrst"),
+            ("github_pat", "github_pat_abcdefghijklmnopqrst"),
+            ("slack", "xoxb-1234567890"),
+            ("aws", "AKIAABCDEFGHIJKLMNOP"),
+            ("google", "AIzaabcdefghijklmnopqrstuvwxyz0123"),
+            ("jwt short", "eyJabcdefgh.abcdefgh.abcdefgh"),
+        ];
+        for (what, sample) in samples {
+            let (field, _) = preview_field(sample);
+            assert!(field.contains(REDACTED_CREDENTIAL), "{what}: {field}");
+            for needle in ["abcdefghijklmnop", "1234567890", "ABCDEFGHIJKLMNOP"] {
+                assert!(!field.contains(needle), "{what}: {field}");
+            }
+        }
+        // Words that merely contain a prefix, and short tokens, are left alone.
+        for text in [
+            "risk-assessment-for-the-quarter",
+            "task-abcdefghijklmnopq",
+            "Bearer short",
+            "한글 설정.md를 고쳐요 ✅ bé",
+        ] {
+            assert_eq!(preview_field(text).0, text);
+        }
+    }
+
+    #[test]
+    fn remembered_tool_calls_are_bounded() {
+        let mut calls = Vec::new();
+        for n in 0..(MAX_REMEMBERED_TOOL_CALLS + 5) {
+            remember_tool_call(
+                &mut calls,
+                &update(
+                    json!({"sessionUpdate": "tool_call", "toolCallId": format!("c{n}"), "title": "t"}),
+                ),
+            );
+        }
+        assert_eq!(calls.len(), MAX_REMEMBERED_TOOL_CALLS);
+        assert_eq!(calls[0].0, "c5");
+        assert!(!remember_tool_call(
+            &mut calls,
+            &update(json!({"sessionUpdate": "plan", "entries": []}))
+        ));
     }
 
     #[test]

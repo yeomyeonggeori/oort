@@ -19,13 +19,21 @@
 //! ## Checking a control ([`HumanTrust::check_control`])
 //!
 //! The host never takes the server's word for what was signed. It rebuilds the
-//! 13 `momo.human.control.v2` lines from **the control it would act on** — its
+//! 13 `momo.human.control.v3` lines from **the control it would act on** — its
 //! workspace, requester, target host, session, kind, and the payload text /
 //! label / tool / permission decision and, for a spawn, its channel — plus the
 //! envelope's own fields (instance id, key id, nonce, times, mode, scope, spawn
-//! agent and folder), and verifies the device signature over those bytes. A v1
-//! statement is accepted for every kind but a spawn (same bytes apart from the
-//! first line; `HumanControl::verify_any`, #3027). Then:
+//! agent and folder), and verifies the device signature over those bytes. A v2
+//! statement is accepted for every kind but a permission, and a v1 one for an
+//! input (same bytes apart from the first line; `HumanControl::verify_any`,
+//! #3027).
+//!
+//! A permission allow is rebuilt with **the preview hash this host computed**
+//! when it relayed the request (#3118, R2 H1;
+//! [`crate::session::SessionManager::permission_preview_sha256`]), never with
+//! anything the server sent: the owner's statement must name the preview the
+//! host itself read from the agent. A request this host has no preview for is
+//! not one it is waiting on (`permission_request_unknown`). Then:
 //!
 //! 1. the key is the pinned root, or carries a `device_endorse.v1` signed by
 //!    the pinned root over **this** public key, workspace and owner;
@@ -549,8 +557,21 @@ impl HumanTrust {
     }
 
     /// ADR-0146 D-10: verify the person's signature on `control` and consume
-    /// its nonce. `Ok` means the host may act on exactly this control.
+    /// its nonce. `Ok` means the host may act on exactly this control. A
+    /// `permission` control needs [`Self::check_control_with_preview`].
     pub fn check_control(&mut self, control: &WorkControl, now_ms: i64) -> Result<(), Refusal> {
+        self.check_control_with_preview(control, None, now_ms)
+    }
+
+    /// [`Self::check_control`], with the preview hash this host relayed for
+    /// the `permission` control's request (#3118) — `None` when it relayed no
+    /// such request, which is refused for a permission.
+    pub fn check_control_with_preview(
+        &mut self,
+        control: &WorkControl,
+        permission_preview_sha256: Option<&str>,
+        now_ms: i64,
+    ) -> Result<(), Refusal> {
         let raw = control
             .human_signature
             .as_ref()
@@ -627,12 +648,17 @@ impl HumanTrust {
                 ) else {
                     return Err(Refusal::InvalidControl);
                 };
+                // #3118: the hash of the preview THIS host relayed. A request
+                // it is not waiting on has none.
+                let preview_sha256 =
+                    permission_preview_sha256.ok_or(Refusal::PermissionRequestUnknown)?;
                 (
                     ControlContent::Permission {
                         request_event_id,
                         option_id,
                         option_kind,
                         scope,
+                        preview_sha256: Some(preview_sha256),
                     },
                     control.session_id,
                 )
