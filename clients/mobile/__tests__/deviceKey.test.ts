@@ -134,7 +134,7 @@ describe('on a phone with a Secure Enclave', () => {
   it('passes the caller bytes through as base64 and returns raw r‖s', async () => {
     const phone = secureEnclavePhone();
     const m = load(phone);
-    const message = new TextEncoder().encode('momo.human.control.v1\nanything');
+    const message = new TextEncoder().encode('momo.human.control.v2\nanything');
     const sig = await m.signWithDeviceKey(message);
     expect(sig.length).toBe(64);
     expect(phone.sign).toHaveBeenCalledWith(

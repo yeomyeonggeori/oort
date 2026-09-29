@@ -11,15 +11,15 @@ import {hex, sha256, utf8} from './sha256';
 // (Face ID) to sign them. The byte recipe is the one the shared vectors fix
 // (`__tests__/fixtures/human-control-signing.vectors.json`, #3021; Rust
 // `momo_wire::human_control`, the generator `generate.mjs`), and
-// `__tests__/humanControl.test.ts` rebuilds every v1 case from its inputs.
+// `__tests__/humanControl.test.ts` rebuilds every v2 and v3 case from its inputs.
 //
 // The schema is an ARGUMENT, not a constant. A schema this file has no recipe
 // for is refused before anything is hashed. #3028 (E8) added `v2` here and to
 // the native allow-list together (ADR-0146 증보 R2-E7): the same 13-line frame;
 // a v2 spawn binds the tool and the channel and may name a resume's successor
-// session. The phone SIGNS v2 (`PHONE_SIGNING_SCHEMA`); v1 stays as a recipe
-// for the E1 vectors. A v1 spawn is refused here — the server and the host
-// refuse it too, so signing one would only ever fail after Face ID.
+// session. The phone SIGNS v2 (`PHONE_SIGNING_SCHEMA`). #3096 dropped the v1
+// recipe here and v1 from the native allow-list: nothing the phone signs is v1
+// any more, and a v1 spawn could only fail after Face ID.
 //
 // #3128 (ADR-0146 증보 2026-09-29, R2 H1 · #3118) added `v3`: the same frame,
 // and a `permission` body gains a fifth line — the SHA-256 of the host's
@@ -35,7 +35,6 @@ import {hex, sha256, utf8} from './sha256';
 // =============================================================================
 
 export const HUMAN_CONTROL_SCHEMAS = [
-  'momo.human.control.v1',
   'momo.human.control.v2',
   'momo.human.control.v3',
 ] as const;
@@ -132,11 +131,6 @@ export function humanControlContentBytes(
     case 'input':
       return utf8(content.text.normalize('NFC'));
     case 'spawn':
-      if (schema === 'momo.human.control.v1') {
-        throw new HumanControlInputError(
-          'a v1 spawn is refused by the server and the host; sign v2',
-        );
-      }
       return utf8(
         [
           line('agentMemberId', content.agentMemberId),

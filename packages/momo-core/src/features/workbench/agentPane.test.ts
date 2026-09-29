@@ -253,3 +253,61 @@ describe("pane bindings (this device)", () => {
     expect(list.map((s) => s.id)).toEqual(["b", "a"]);
   });
 });
+
+describe("approval.auto_allowed (#3095 / #3152)", () => {
+  const SHA = "a".repeat(64);
+  const auto = (tool_kind = "read", over: Record<string, unknown> = {}) =>
+    ev("approval.auto_allowed", {
+      action: "auto_allowed",
+      status: "approved",
+      scope: "session",
+      tool_kind,
+      preview_sha256: SHA,
+      ...over,
+    });
+
+  it("shows one line per automatic allow and counts none as skipped", () => {
+    const m = agentPaneModel({ session: session(), events: [auto("execute")], truncated: false, viewerMemberId: OWNER, hostName: null });
+    expect(m.skipped).toBe(0);
+    expect(m.feed).toHaveLength(1);
+    expect(m.feed[0]).toMatchObject({ type: "line", kind: "approval", state: "done" });
+    expect((m.feed[0] as { text: { text: string } }).text.text).toBe("세션 허락으로 자동 허락됨 · 명령 실행");
+  });
+
+  it("does NOT close a pending card of another tool kind (the approval.decided confusion)", () => {
+    const events = [tool("bash", "npm test"), ask([ONCE, REJECT]), auto("read")];
+    const p = pendingPermission(events, session());
+    expect(p?.allow).toEqual({ kind: "allow_once", optionId: "o1" });
+    const m = agentPaneModel({ session: session(), events, truncated: false, viewerMemberId: OWNER, hostName: null });
+    expect(m.permission).not.toBeNull();
+    expect(m.status).toBe("waiting");
+    // the pending approval line stays pending; the auto line sits beside it.
+    const lines = m.feed.filter((f) => f.type === "line");
+    expect(lines.map((l) => l.type === "line" && [l.state, l.text.text])).toEqual([
+      ["pending", "승인을 요청함"],
+      ["done", "세션 허락으로 자동 허락됨 · 파일 읽기"],
+    ]);
+    // ...whereas a real decision does close it (control for the assertion above)
+    expect(pendingPermission([...events, ev("approval.decided", { action: "decided", status: "approved" })], session())).toBeNull();
+  });
+
+  it("prints only fixed phrases for tool_kind, never the host's string", () => {
+    const m = agentPaneModel({ session: session(), events: [auto("<script>x</script>"), auto("__proto__"), auto("edit")], truncated: false, viewerMemberId: OWNER, hostName: null });
+    expect(m.feed.map((f) => f.type === "line" && f.text.text)).toEqual([
+      "세션 허락으로 자동 허락됨 · 도구 사용",
+      "세션 허락으로 자동 허락됨 · 도구 사용",
+      "세션 허락으로 자동 허락됨 · 파일 수정",
+    ]);
+  });
+
+  it("an event that is not the session-scope approved shape is not shown as an allow", () => {
+    const m = agentPaneModel({
+      session: session(),
+      events: [auto("read", { scope: "once" }), auto("read", { status: "rejected" })],
+      truncated: false,
+      viewerMemberId: OWNER,
+      hostName: null,
+    });
+    expect(m.feed).toHaveLength(0);
+  });
+});

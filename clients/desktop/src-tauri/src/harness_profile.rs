@@ -164,6 +164,13 @@ fn is_invisible(c: char) -> bool {
             | '\u{1160}'
             | '\u{3164}'
             | '\u{FFA0}'
+            // Combining grapheme joiner, variation selectors, tag characters and the
+            // blank braille cell: they draw nothing, so two labels that look the same
+            // would be two folders. The same set workd's `check_label` refuses (#3157).
+            | '\u{034F}'
+            | '\u{FE00}'..='\u{FE0F}'
+            | '\u{E0000}'..='\u{E007F}'
+            | '\u{2800}'
             // Line/paragraph separators and non-ASCII spaces: 「a b」 and
             // 「a\u{00A0}b」 must not become two folders.
             | '\u{2028}'
@@ -470,7 +477,36 @@ pub async fn harness_profile_status(
     tauri::async_runtime::spawn_blocking(move || {
         let home = current_home()?;
         let (dir, env) = existing_profile(&home, &profile.harness, &profile.label)?;
-        harness_status::probe_profile(&profile.harness, env, &dir, &home)
+        probe_folder(&profile.harness, env, &dir, &home)
+    })
+    .await
+    .map_err(|e| format!("status did not run: {e}"))?
+}
+
+/// The one place a profile folder is probed: the checked folder of either lane.
+fn probe_folder(
+    harness: &str,
+    env: &'static str,
+    dir: &Path,
+    home: &Path,
+) -> Result<harness_status::LocalHarnessProbe, String> {
+    harness_status::probe_profile(harness, env, dir, home)
+}
+
+/// The status command against this Mac's 「원격 작업」 account folder (#3157,
+/// ADR-0191 D1 A lane): the shell asks workd for the folder over the code-signed
+/// socket and believes only the path it computes itself. The webview names a
+/// harness and a label, as for a local profile.
+#[tauri::command]
+pub async fn harness_profile_remote_status(
+    app: tauri::AppHandle,
+    profile: ProfileRef,
+) -> Result<harness_status::LocalHarnessProbe, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let home = current_home()?;
+        let (env, dir) =
+            crate::work_host::remote_profile_for_pty(&app, &profile.harness, &profile.label)?;
+        probe_folder(&profile.harness, env, &dir, &home)
     })
     .await
     .map_err(|e| format!("status did not run: {e}"))?
@@ -956,6 +992,13 @@ mod tests {
             "a\u{00A0}b",
             "a\u{2028}b",
             "a\u{3000}b",
+            // #3157: parity with workd's `check_label` (remote-account folders).
+            "a\u{034F}b",
+            "a\u{FE0F}",
+            "a\u{FE00}b",
+            "a\u{E0041}b",
+            "a\u{E007F}",
+            "a\u{2800}b",
         ] {
             assert!(check_label(bad).is_err(), "{bad:?}");
         }

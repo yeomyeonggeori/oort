@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { compile } from "tailwindcss";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EmptyInvite, Skeleton } from "../features/common/States";
 
 /**
@@ -99,10 +99,43 @@ async function loadStylesheet(id: string, base: string) {
   return { path, base: dirname(path), content: readFileSync(path, "utf8") };
 }
 
-async function buildCss(candidates: string[]): Promise<string> {
-  const compiler = await compile(TOKENS_CSS, { base: HERE, loadStylesheet });
-  return compiler.build(candidates);
+// #3100: the compiled CSS is a pure function of the candidate list, and the
+// Tailwind compile is the dominant per-test cost under CPU contention (it sat
+// inside the 20s per-test budget). Memoize per file; output is byte-identical.
+const cssCache = new Map<string, Promise<string>>();
+function buildCss(candidates: string[]): Promise<string> {
+  const key = candidates.join("\u0000");
+  let hit = cssCache.get(key);
+  if (!hit) {
+    hit = (async () => {
+      const compiler = await compile(TOKENS_CSS, { base: HERE, loadStylesheet });
+      return compiler.build(candidates);
+    })();
+    cssCache.set(key, hit);
+  }
+  return hit;
 }
+
+// #3100: one Chromium per file instead of one per test. Launch is paid in the
+// hook (own budget), not inside a test's 20s timeout; every test still gets a
+// fresh context+page, so no state is shared between cases.
+let sharedBrowser: Promise<import("playwright").Browser> | null = null;
+function getBrowser(): Promise<import("playwright").Browser> {
+  if (!sharedBrowser) {
+    sharedBrowser = import("playwright").then(({ chromium }) => chromium.launch());
+  }
+  return sharedBrowser;
+}
+beforeAll(async () => {
+  if (!chromiumAvailable) return;
+  await getBrowser();
+}, 120_000);
+afterAll(async () => {
+  if (!sharedBrowser) return;
+  const browser = await sharedBrowser;
+  sharedBrowser = null;
+  await browser.close();
+}, 60_000);
 
 const SKEL_CANDIDATES = [
   "skel",
@@ -177,21 +210,43 @@ async function withSkelPage(
   },
   run: (page: import("playwright").Page) => Promise<void>
 ): Promise<void> {
-  const { chromium } = await import("playwright");
   const css = await buildCss(SKEL_CANDIDATES);
-  const browser = await chromium.launch();
+  const browser = await getBrowser();
+  const context = await browser.newContext({
+    reducedMotion: options.reducedMotion ?? "no-preference",
+  });
   try {
-    const page = await browser.newPage({
-      reducedMotion: options.reducedMotion ?? "no-preference",
-    });
+    const page = await context.newPage();
     const markup = productMarkup(options.ready ?? false, options.site ?? "sidebar");
     await page.setContent(
       `<!doctype html><html><head><style>${css}</style></head><body>${markup}</body></html>`
     );
     await run(page);
   } finally {
-    await browser.close();
+    await context.close();
   }
+}
+
+let harnessBundle: Promise<string> | null = null;
+function harnessJs(): Promise<string> {
+  harnessBundle ??= (async () => {
+    const esbuild = await import("esbuild");
+    const bundled = await esbuild.build({
+      absWorkingDir: WEB_ROOT,
+      entryPoints: [HARNESS],
+      bundle: true,
+      write: false,
+      format: "iife",
+      platform: "browser",
+      jsx: "automatic",
+      alias: { "@": SRC, "@momo/core": CORE_SRC },
+      logLevel: "silent",
+    });
+    const js = bundled.outputFiles[0]?.text;
+    if (!js) throw new Error("esbuild produced no skel harness");
+    return js;
+  })();
+  return harnessBundle;
 }
 
 async function withReactSkelPage(
@@ -201,35 +256,22 @@ async function withReactSkelPage(
   },
   run: (page: import("playwright").Page) => Promise<void>
 ): Promise<void> {
-  const esbuild = await import("esbuild");
-  const bundled = await esbuild.build({
-    absWorkingDir: WEB_ROOT,
-    entryPoints: [HARNESS],
-    bundle: true,
-    write: false,
-    format: "iife",
-    platform: "browser",
-    jsx: "automatic",
-    alias: { "@": SRC, "@momo/core": CORE_SRC },
-    logLevel: "silent",
-  });
-  const js = bundled.outputFiles[0]?.text;
-  if (!js) throw new Error("esbuild produced no skel harness");
+  const js = await harnessJs();
   const css = await buildCss(SKEL_CANDIDATES);
-  const { chromium } = await import("playwright");
-  const browser = await chromium.launch();
+  const browser = await getBrowser();
+  const context = await browser.newContext({
+    reducedMotion: options.reducedMotion ?? "no-preference",
+    viewport: options.viewport,
+  });
   try {
-    const page = await browser.newPage({
-      reducedMotion: options.reducedMotion ?? "no-preference",
-      viewport: options.viewport,
-    });
+    const page = await context.newPage();
     await page.setContent(
       `<!doctype html><html><head><style>${css}</style></head><body><div id="root"></div><script>${js}</script></body></html>`
     );
     await page.getByTestId("skel-arrive").waitFor({ state: "visible" });
     await run(page);
   } finally {
-    await browser.close();
+    await context.close();
   }
 }
 
@@ -341,6 +383,42 @@ async function traceHostHeight(
       opacityTransitionEnd: Math.round(opacityTransitionEnd),
     };
   }, { shape, arrive, mode });
+}
+
+/**
+ * #3100: the ladder asserts a per-FRAME step (|Δh| ≤ 12px per frame), which
+ * is only a statement about the product when frames arrive at display
+ * cadence. A starved renderer skips frames and the same smooth transition
+ * shows a bigger step (measured under load: 13/14/15/17 vs cap 12). A trace
+ * with a frame gap above STARVED_FRAME_MS therefore says nothing about the
+ * product and is re-taken on a fresh page (up to TRACE_ATTEMPTS). Unlike a
+ * looser cap this cannot hide a real pop: a product that jumps fails on every
+ * clean-cadence attempt, and if no attempt is clean the last one is asserted
+ * as-is (it fails loudly, it is never skipped).
+ */
+const STARVED_FRAME_MS = 40;
+const TRACE_ATTEMPTS = 6;
+
+function maxFrameGap(trace: HeightTrace): number {
+  let gap = 0;
+  for (let i = 1; i < trace.samples.length; i += 1) {
+    gap = Math.max(gap, trace.samples[i]!.t - trace.samples[i - 1]!.t);
+  }
+  return gap;
+}
+
+async function traceCleanCadence(
+  shape: TraceShape,
+  viewport: { width: number; height: number }
+): Promise<HeightTrace> {
+  let last: HeightTrace | null = null;
+  for (let attempt = 0; attempt < TRACE_ATTEMPTS; attempt += 1) {
+    await withReactSkelPage({ viewport }, async (page) => {
+      last = await traceHostHeight(page, shape);
+    });
+    if (maxFrameGap(last!) <= STARVED_FRAME_MS) return last!;
+  }
+  return last!;
 }
 
 function formatTrace(samples: HeightSample[]): string {
@@ -478,6 +556,33 @@ async function readProbe(
   );
 }
 
+/**
+ * #3100: replaces `waitForTimeout(400)` before counting transition events.
+ * A fixed wall-clock window measured the machine: under load the transition
+ * had not even started 400ms after the flip, so a count of 1 read as 0. Wait
+ * on the page's own clock instead: two frames (style recalc has run, so every
+ * transition the flip causes has fired `transitionrun`), then until the
+ * element's own transitions have finished, then two more frames.
+ */
+async function settleTransitions(
+  page: import("playwright").Page,
+  selector: string
+): Promise<void> {
+  await page.locator(selector).evaluate(async (node) => {
+    const frames = (n: number) =>
+      new Promise<void>((done) => {
+        const step = (left: number) =>
+          left <= 0 ? done() : requestAnimationFrame(() => step(left - 1));
+        step(n);
+      });
+    await frames(2);
+    await Promise.all(
+      node.getAnimations().map((animation) => animation.finished.catch(() => undefined))
+    );
+    await frames(2);
+  });
+}
+
 async function setReady(
   page: import("playwright").Page,
   ready: boolean
@@ -600,7 +705,7 @@ describe("UX-R1c runtime — one number per case, product host", () => {
         expect(await page.locator(".skel-content").count()).toBe(1);
         await armTransitionProbe(page, '[data-skel="content"]');
         await setReady(page, true);
-        await page.waitForTimeout(400);
+        await settleTransitions(page, '[data-skel="content"]');
         const events = await readProbe(page, '[data-skel="content"]');
         const count = events.filter(
           (event) => event.type === "transitionrun" && event.propertyName === "opacity"
@@ -617,7 +722,7 @@ describe("UX-R1c runtime — one number per case, product host", () => {
       await withSkelPage({}, async (page) => {
         await armTransitionProbe(page, '[data-skel="content"]');
         await setReady(page, true);
-        await page.waitForTimeout(400);
+        await settleTransitions(page, '[data-skel="content"]');
         const events = await readProbe(page, '[data-skel="content"]');
         const count = events.filter(
           (event) => event.type === "transitionrun" && event.propertyName === "filter"
@@ -743,7 +848,7 @@ describe("UX-R1c runtime — one number per case, product host", () => {
         });
         await armTransitionProbe(page, '[data-skel="content"]');
         await setReady(page, true);
-        await page.waitForTimeout(400);
+        await settleTransitions(page, '[data-skel="content"]');
         const events = await readProbe(page, '[data-skel="content"]');
         const count = events.filter((event) => event.type === "transitionrun")
           .length;
@@ -759,7 +864,7 @@ describe("UX-R1c runtime — one number per case, product host", () => {
       await withSkelPage({ reducedMotion: "reduce" }, async (page) => {
         await armTransitionProbe(page, '[data-skel="content"]');
         await setReady(page, true);
-        await page.waitForTimeout(400);
+        await settleTransitions(page, '[data-skel="content"]');
         const events = await readProbe(page, '[data-skel="content"]');
         const count = events.filter((event) => event.type === "transitionrun")
           .length;
@@ -791,7 +896,18 @@ describe("UX-R1c runtime — React-mounted Skeleton (ready via state)", () => {
   it.skipIf(!chromiumAvailable)(
     "React ready false→true: content opacity and filter transitionrun are 1; is-settled after transitionend",
     async () => {
-      await withReactSkelPage({}, async (page) => {
+      // #3100: is-settled has two legitimate triggers, bars' opacity
+      // transitionend and a 400ms fallback timer. When the renderer is so
+      // starved that the fallback wins the race (settled >= 390ms after the
+      // click on the page clock with no transitionend seen), this run cannot
+      // say anything about the transitionend path, so it is re-taken on a
+      // fresh page. A product that settles on a timer *instead of*
+      // transitionend fails on the clean attempts, and when no attempt is
+      // clean the last one is asserted as-is (fails loudly, never skipped).
+      const ATTEMPTS = 6;
+      for (let attempt = 1; attempt <= ATTEMPTS; attempt += 1) {
+        let retry = false;
+        await withReactSkelPage({}, async (page) => {
         const sidebar = page.locator('[data-skel-shape="sidebar"]');
         expect(await sidebar.locator(".skel-content").count()).toBe(1);
         await armTransitionProbe(
@@ -807,6 +923,19 @@ describe("UX-R1c runtime — React-mounted Skeleton (ready via state)", () => {
             target.__end += 1;
           });
         });
+        await sidebar
+          .locator('[data-testid="skeleton"]')
+          .evaluate((node) => {
+            const w = window as unknown as { __c?: number; __s?: number };
+            document
+              .querySelector('[data-testid="skel-arrive"]')
+              ?.addEventListener("click", () => (w.__c = performance.now()), true);
+            new MutationObserver(() => {
+              if (w.__s === undefined && node.classList.contains("is-settled")) {
+                w.__s = performance.now();
+              }
+            }).observe(node, { attributes: true, attributeFilter: ["class"] });
+          });
         await page.getByTestId("skel-arrive").click();
         await page.waitForFunction(() => {
           const host = document.querySelector(
@@ -817,6 +946,18 @@ describe("UX-R1c runtime — React-mounted Skeleton (ready via state)", () => {
         const barsEnd = await sidebar.locator('[data-skel="bars"]').evaluate(
           (node) => (node as HTMLElement & { __end: number }).__end
         );
+        const clock = await page.evaluate(() => {
+          const w = window as unknown as { __c?: number; __s?: number };
+          return { click: w.__c ?? -1, settled: w.__s ?? -1 };
+        });
+        if (
+          attempt < ATTEMPTS &&
+          barsEnd === 0 &&
+          clock.settled - clock.click >= 390
+        ) {
+          retry = true;
+          return;
+        }
         expect(barsEnd, "is-settled must follow bars opacity transitionend").toBe(
           1
         );
@@ -835,9 +976,11 @@ describe("UX-R1c runtime — React-mounted Skeleton (ready via state)", () => {
         ).length;
         expect(opacityRuns, `events=${JSON.stringify(events)}`).toBe(1);
         expect(filterRuns, `events=${JSON.stringify(events)}`).toBe(1);
-      });
+        });
+        if (!retry) return;
+      }
     },
-    30_000
+    60_000
   );
 
   it.skipIf(!chromiumAvailable)(
@@ -847,86 +990,88 @@ describe("UX-R1c runtime — React-mounted Skeleton (ready via state)", () => {
         const host = page.locator(
           '[data-skel-shape="sidebar"] [data-testid="skeleton"]'
         );
+        // #3100: the old form slept 200ms of *test-runner* wall clock and then
+        // asserted "not settled yet"; under load the sleep itself overran 400ms.
+        // Timestamp both ends on the page's own clock instead: click, and the
+        // frame is-settled first appears. The fallback is a 400ms timer, so
+        // settle can never precede click + 400 (minus rounding) unless the
+        // product shortened it or settles early some other way.
         await host.evaluate((node) => {
+          const w = window as unknown as { __t?: { click: number; settled: number } };
+          w.__t = { click: -1, settled: -1 };
           node.addEventListener(
             "transitionend",
             (event) => event.stopImmediatePropagation(),
             true
           );
+          document
+            .querySelector('[data-testid="skel-arrive"]')
+            ?.addEventListener(
+              "click",
+              () => {
+                w.__t!.click = performance.now();
+              },
+              true
+            );
+          new MutationObserver(() => {
+            if (w.__t!.settled < 0 && node.classList.contains("is-settled")) {
+              w.__t!.settled = performance.now();
+            }
+          }).observe(node, { attributes: true, attributeFilter: ["class"] });
         });
         await page.getByTestId("skel-arrive").click();
-        await page.waitForTimeout(200);
-        const early = await host.evaluate((node) =>
-          node.classList.contains("is-settled")
+        await page.waitForFunction(
+          () =>
+            (window as unknown as { __t: { settled: number } }).__t.settled >= 0
         );
-        expect(early, "must not settle before the 400ms fallback").toBe(false);
-        await page.waitForFunction(() => {
-          const node = document.querySelector(
-            '[data-skel-shape="sidebar"] [data-testid="skeleton"]'
-          );
-          return node?.classList.contains("is-settled") === true;
-        });
+        const t = await page.evaluate(
+          () => (window as unknown as { __t: { click: number; settled: number } }).__t
+        );
+        expect(t.click, "click probe must have fired").toBeGreaterThan(0);
+        expect(
+          t.settled - t.click,
+          "must not settle before the 400ms fallback (page clock)"
+        ).toBeGreaterThanOrEqual(390);
       });
     },
-    30_000
   );
 
   it.skipIf(!chromiumAvailable)(
     "Drafts empty: host height steps ≤12px, monotonic, frozen after is-settled",
     async () => {
-      await withReactSkelPage(
-        { viewport: { width: 390, height: 800 } },
-        async (page) => {
-          const samples = await traceHostHeight(page, "drafts");
-          assertHeightLadder(samples, "drafts-empty");
-        }
-      );
+      const samples = await traceCleanCadence("drafts", { width: 390, height: 800 });
+      assertHeightLadder(samples, "drafts-empty");
     },
-    30_000
+    60_000
   );
 
   it.skipIf(!chromiumAvailable)(
     "sidebar 2-channel: host height steps ≤12px, monotonic, frozen after is-settled",
     async () => {
-      await withReactSkelPage(
-        { viewport: { width: 390, height: 800 } },
-        async (page) => {
-          const samples = await traceHostHeight(page, "sidebar");
-          assertHeightLadder(samples, "sidebar-2ch");
-        }
-      );
+      const samples = await traceCleanCadence("sidebar", { width: 390, height: 800 });
+      assertHeightLadder(samples, "sidebar-2ch");
     },
-    30_000
+    60_000
   );
 
   it.skipIf(!chromiumAvailable)(
     "sidebar 5-channel grow: host height steps ≤12px, monotonic, height transitionend fires",
     async () => {
-      await withReactSkelPage(
-        { viewport: { width: 390, height: 800 } },
-        async (page) => {
-          const samples = await traceHostHeight(page, "sidebar5");
-          assertHeightLadder(samples, "sidebar-5ch");
-        }
-      );
+      const samples = await traceCleanCadence("sidebar5", { width: 390, height: 800 });
+      assertHeightLadder(samples, "sidebar-5ch");
     },
-    30_000
+    60_000
   );
 
   it.skipIf(!chromiumAvailable)(
     "sidebar 12-channel grow: host height steps ≤12px, monotonic, height transitionend fires",
     async () => {
-      await withReactSkelPage(
-        { viewport: { width: 390, height: 800 } },
-        async (page) => {
-          const samples = await traceHostHeight(page, "sidebar12");
-          // 224px on --motion-standard ease-out peaks ~30px/frame at 120Hz.
-          // Cap 64 still fails the unanimated 224 jump; 12 would fail the ladder.
-          assertHeightLadder(samples, "sidebar-12ch", 64);
-        }
-      );
+      const samples = await traceCleanCadence("sidebar12", { width: 390, height: 800 });
+      // 224px on --motion-standard ease-out peaks ~30px/frame at 120Hz.
+      // Cap 64 still fails the unanimated 224 jump; 12 would fail the ladder.
+      assertHeightLadder(samples, "sidebar-12ch", 64);
     },
-    30_000
+    60_000
   );
 
   it.skipIf(!chromiumAvailable)(
@@ -943,7 +1088,29 @@ describe("UX-R1c runtime — React-mounted Skeleton (ready via state)", () => {
             );
             return host?.classList.contains("is-sizing") === true;
           });
-          await page.waitForTimeout(120);
+          // #3100: was `waitForTimeout(120)` — a wall-clock guess at "mid-flight"
+          // that under load landed after the shrink ended ("must still be
+          // mid-flight" false failure). Park every running height transition at
+          // 50% on the page's own timeline so the state is exactly mid-flight
+          // regardless of how starved the frames are.
+          await drafts.locator('[data-testid="skeleton"]').evaluate((node) => {
+            const running = (node as HTMLElement)
+              .getAnimations()
+              .filter(
+                (animation) =>
+                  (animation as CSSTransition).transitionProperty === "height"
+              );
+            if (running.length === 0) {
+              throw new Error("no running height transition to park mid-flight");
+            }
+            for (const animation of running) {
+              animation.pause();
+              const duration = Number(
+                animation.effect?.getComputedTiming().duration ?? 0
+              );
+              animation.currentTime = duration / 2;
+            }
+          });
           const clip = await drafts
             .locator('[data-testid="skeleton"]')
             .evaluate((node) => {

@@ -40,7 +40,7 @@ import Security
 // Hardening before stage 2 (review of #3043, M-1..M-4):
 //
 //   5. Only instruction payloads are signed (M-3). `sign` refuses any message
-//      that is not exactly a 13-line `momo.human.control.v1`/`v2`/`v3` payload with
+//      that is not exactly a 13-line `momo.human.control.v2`/`v3` payload with
 //      no control character, so the key is not an oracle for arbitrary bytes.
 //      Endorsements and revocations (`device_endorse.v1`/`device_revoke.v1`)
 //      are signed by the root Mac only (ADR-0146 D-6/D-7) and refused here
@@ -200,12 +200,13 @@ public struct MomoDeviceKeyStore {
   /// `device_endorse.v1`/`device_revoke.v1` are the root Mac's (ADR-0146
   /// D-6/D-7), so the phone key refuses them. `control.v2` (#3027 E7, #3028
   /// E8) is what the phone signs: the same 13-line frame, a spawn binding the
-  /// tool, the channel and a resume's session. v1 stays for input/permission
-  /// statements the server still accepts. `control.v3` (#3118 → #3128) is
+  /// tool, the channel and a resume's session. v1 left this list in #3096: the
+  /// phone signs input and spawn as v2 and an allow as v3, so a v1 statement
+  /// (which cannot bind a spawn's channel or tool) is refused before Face ID.
+  /// `control.v3` (#3118 → #3128) is
   /// what an allow is signed as: the same 13-line frame, its permission body
   /// binding the hash of the host's preview the card checked and showed.
   public static let signingSchemas: [String: Int] = [
-    "momo.human.control.v1": 13,
     "momo.human.control.v2": 13,
     "momo.human.control.v3": 13,
     "momo.human.device_rebind.v1": 7,

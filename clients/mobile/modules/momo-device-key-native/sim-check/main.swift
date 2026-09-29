@@ -48,18 +48,27 @@ let payloads: [(String, Data)] = cases.compactMap { c in
 }
 check(payloads.count == cases.count && payloads.count >= 8, "read \(payloads.count) E1 vector payloads")
 func schemaOf(_ p: Data) -> String { String(decoding: p.prefix(while: { $0 != 0x0A }), as: UTF8.self) }
-let phonePayloads = payloads.filter { schemaOf($0.1) == "momo.human.control.v1" }
+let v1Payloads = payloads.filter { schemaOf($0.1) == "momo.human.control.v1" }
 let rootMacPayloads = payloads.filter { schemaOf($0.1) != "momo.human.control.v1" }
-check(phonePayloads.count >= 6, "vectors carry \(phonePayloads.count) control.v1 payloads")
+check(v1Payloads.count >= 6, "vectors carry \(v1Payloads.count) control.v1 payloads")
+// #3096: v1 left the phone's allow-list (the server and host took v1 only
+// while the phone had nothing newer). These 13-line vectors are kept as
+// SHAPE samples — the allow-list reads the schema line and the line count,
+// never the content — relabelled v2, the schema the phone signs input as.
+// The real v2/v3 bytes are checked from the v3 vectors below.
+let phonePayloads: [(String, Data)] = v1Payloads.map { name, payload in
+  (name, Data(String(decoding: payload, as: UTF8.self)
+    .replacingOccurrences(of: "momo.human.control.v1", with: "momo.human.control.v2").utf8))
+}
 check(
   Set(rootMacPayloads.map { schemaOf($0.1) }) == ["momo.human.device_endorse.v1", "momo.human.device_revoke.v1"],
   "vectors carry the root-Mac endorse/revoke payloads")
 check(
   MomoDeviceKeyStore.signingSchemas == [
-    "momo.human.control.v1": 13, "momo.human.control.v2": 13, "momo.human.control.v3": 13,
+    "momo.human.control.v2": 13, "momo.human.control.v3": 13,
     "momo.human.device_rebind.v1": 7,
   ],
-  "the phone allows only momo.human.control.v1/v2/v3 (13 lines) and its own device_rebind.v1 (7 lines)")
+  "the phone allows only momo.human.control.v2/v3 (13 lines) and its own device_rebind.v1 (7 lines)")
 
 // ---- #3103: the rebind letter momo-wire printed (argv[2]) --------------------
 guard CommandLine.arguments.count > 2,
@@ -124,6 +133,10 @@ func rejects(_ data: Data) -> Bool {
 for (name, payload) in phonePayloads {
   check(!rejects(payload), "accepts vector \(name)")
 }
+// #3096: a real v1 statement is refused before Face ID.
+for (name, payload) in v1Payloads {
+  check(rejects(payload), "rejects v1 vector \(name)")
+}
 check(!rejects(rebind), "accepts the momo-wire device_rebind.v1 letter (7 lines)")
 let rebindText = String(decoding: rebind, as: UTF8.self)
 check(rejects(rebind + Data("\nx".utf8)), "rejects a rebind letter with an 8th line")
@@ -153,8 +166,8 @@ var mutations: [(String, Data)] = [
   ("trailing newline", control + Data([0x0A])),
   ("extra line", control + Data("\nx".utf8)),
   ("one line short", Data(controlText.split(separator: "\n").dropLast().joined(separator: "\n").utf8)),
-  ("schema v4", Data(controlText.replacingOccurrences(of: "momo.human.control.v1", with: "momo.human.control.v4").utf8)),
-  ("schema with suffix", Data(controlText.replacingOccurrences(of: "momo.human.control.v1\n", with: "momo.human.control.v1x\n").utf8)),
+  ("schema v4", Data(controlText.replacingOccurrences(of: "momo.human.control.v2", with: "momo.human.control.v4").utf8)),
+  ("schema with suffix", Data(controlText.replacingOccurrences(of: "momo.human.control.v2\n", with: "momo.human.control.v2x\n").utf8)),
   ("leading space", Data(" ".utf8) + control),
   ("CR line breaks", Data(controlText.replacingOccurrences(of: "\n", with: "\r\n").utf8)),
   ("NUL inside", Data(controlText.replacingOccurrences(of: "input", with: "in\u{0}put").utf8)),
@@ -165,7 +178,7 @@ var mutations: [(String, Data)] = [
 // A control payload relabelled as endorse keeps 13 lines: refused by count.
 mutations.append(
   ("control lines under endorse schema",
-   Data(controlText.replacingOccurrences(of: "momo.human.control.v1", with: "momo.human.device_endorse.v1").utf8)))
+   Data(controlText.replacingOccurrences(of: "momo.human.control.v2", with: "momo.human.device_endorse.v1").utf8)))
 for (name, bad) in mutations {
   check(rejects(bad), "rejects payload: \(name)")
 }

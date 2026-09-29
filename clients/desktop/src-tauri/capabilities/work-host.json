@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "work-host",
-  "description": "This Mac as a work host (ADR-0188 D2 · R1, #2778): the five work_host_* commands that start, stop, register and forget the bundled momo-workd sidecar. For the main window's own webview (label `main`) on the bundled (local) origin only, macOS only (the sidecar and its code-signature check exist there only). Scoped by webview like pty.json so a child webview does not inherit it. No `remote` entry: a page from the network must never register this Mac as a host.",
+  "description": "This Mac as a work host (ADR-0188 D2 · R1, #2778): the seven work_host_* commands that start, stop, register and forget the bundled momo-workd sidecar and choose this Mac's 「원격 작업」 account (set it / prepare its folder, #3157; the webview names a harness and a label, never a path). For the main window's own webview (label `main`) on the bundled (local) origin only, macOS only (the sidecar and its code-signature check exist there only). Scoped by webview like pty.json so a child webview does not inherit it. No `remote` entry: a page from the network must never register this Mac as a host.",
   "webviews": [
     "main"
   ],
@@ -13,6 +13,8 @@
     "allow-work-host-register",
     "allow-work-host-start",
     "allow-work-host-stop",
-    "allow-work-host-forget"
+    "allow-work-host-forget",
+    "allow-work-host-set-remote-profile",
+    "allow-work-host-prepare-remote-profile"
   ]
 }

@@ -32,7 +32,12 @@ import {
   DEVICE_KEYS_QUERY_KEY,
   deviceKeyFingerprint,
   hostDeliveryCopy,
+  PHONE_NAME_ORIGIN_COPY,
+  PHONE_NAME_UNVERIFIED,
+  phoneNameOrigin,
+  registeredAtCopy,
 } from "./deviceKeysShared";
+import { linkedDevicesQuery } from "./linkedDevicesQuery";
 import { ConfirmButton, Field, StatusChip, Subsection } from "./SettingsFields";
 
 // Reading this as: settings for internal team users on web+Tauri,
@@ -762,6 +767,10 @@ function PhoneKeyRow({
   const [revokeAsking, setRevokeAsking] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const label = phone.label.trim() || "이름 없는 폰";
+  // #3145: read only while the approve panel is open (the list is the settings
+  // page's own cache; a failed read says "could not compare", never a guess).
+  const linked = useQuery({ ...linkedDevicesQuery(), enabled: asking });
+  const nameOrigin = phoneNameOrigin(phone, linked.data);
   const noFingerprintId = useId();
   const startRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -960,7 +969,7 @@ function PhoneKeyRow({
           }}
         >
           <p className="break-keep text-body text-ink">
-            방금 이 계정에 연결한 폰이 맞는지 확인하고 승인하세요. 이 폰 키의 지문입니다.
+            방금 이 계정에 연결한 폰이 맞는지 확인하고 승인해야 합니다. 이 폰 키의 지문입니다.
           </p>
           {fingerprint ? (
             <p
@@ -975,8 +984,35 @@ function PhoneKeyRow({
               지문을 계산하지 못해 지금은 승인할 수 없습니다.
             </p>
           )}
+          <div className="flex min-w-0 flex-col gap-px" data-testid="device-key-endorse-origin">
+            <p className="break-keep text-meta text-ink" data-testid="device-key-endorse-registered">
+              <span className="text-ink-muted">등록 시각</span>{" "}
+              {registeredAtCopy(phone.createdAtMs, Date.now())}
+            </p>
+            <p
+              className="break-keep break-words text-meta text-ink"
+              data-testid="device-key-endorse-name"
+              data-name-origin={nameOrigin}
+            >
+              <span className="text-ink-muted">이름</span> {label}
+            </p>
+            {nameOrigin === "notInLinks" ? (
+              // #3154 M2: 이름이 연결 목록에 없다는 것은 다른 폰일 수 있다는 신호다 —
+              // 회색 보조 글씨 속에 묻히지 않게 위험 바탕·굵은 글씨로 세운다.
+              <p
+                className="mt-1 break-keep rounded-sm border border-danger/40 bg-danger-soft px-2 py-1.5 text-meta font-medium text-danger"
+                data-testid="device-key-endorse-name-warning"
+                role="note"
+              >
+                {PHONE_NAME_ORIGIN_COPY[nameOrigin]}
+              </p>
+            ) : (
+              <p className="break-keep text-meta text-ink-muted">{PHONE_NAME_ORIGIN_COPY[nameOrigin]}</p>
+            )}
+            <p className="break-keep text-meta text-ink-muted">{PHONE_NAME_UNVERIFIED}</p>
+          </div>
           <p className="break-keep text-meta text-ink-muted">
-            승인하면 이 맥이 확인 창을 띄우고 Touch ID로 서명합니다. 확인 창의 지문도 같은지 보세요.
+            승인하면 이 맥이 확인 창을 띄우고 Touch ID로 서명합니다. 확인 창의 지문도 같은지 확인해야 합니다.
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button
