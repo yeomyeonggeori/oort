@@ -2822,6 +2822,10 @@ async fn r3127_a_lineage_holds_one_phone_key_and_a_replacement_needs_the_mac() {
     assert_eq!(w.live_phone_keys_on(&stolen).await, 1);
     // The approved key is untouched.
     assert_eq!(w.key_view(&mac, phone_id).await["canInstruct"], true);
+    // The phone's own retry after a lost response is still 「already registered」.
+    let (status, body) = w.register_key(&stolen, &handset, "ios", "기기").await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(code(&body), Some("device_key_already_registered"));
 
     // Face ID re-enrolled: the phone's new key is refused just the same — the
     // old row is still live on the server — until the Mac revokes it.

@@ -480,33 +480,43 @@ async fn other_live_phone_key_id(
     workspace_id: Uuid,
     session_id: Uuid,
     exclude: Option<Uuid>,
+    exclude_public_key: Option<&str>,
 ) -> Result<Option<Uuid>, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT id FROM member_device_key \
           WHERE workspace_id = $1 AND session_id = $2 AND platform = 'ios' \
             AND revoked_at IS NULL AND ($3::uuid IS NULL OR id <> $3) \
+            AND ($4::text IS NULL OR public_key <> $4) \
           LIMIT 1",
     )
     .bind(workspace_id)
     .bind(session_id)
     .bind(exclude)
+    .bind(exclude_public_key)
     .fetch_optional(&mut *conn)
     .await
 }
 
 /// Register-side gate (#3127): take the lineage's phone-key slot and report
-/// whether it is already held by a live `ios` key.
+/// whether it is already held by a live `ios` key **other than the one being
+/// registered** — the same public key on the same lineage is a retry after a
+/// lost response and reaches the insert's `already registered` answer.
 pub async fn lineage_has_live_phone_key_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     session_id: Uuid,
+    registering_public_key: &str,
 ) -> Result<bool, sqlx::Error> {
     lock_phone_key_slot(conn, workspace_id, session_id).await?;
-    Ok(
-        other_live_phone_key_id(conn, workspace_id, session_id, None)
-            .await?
-            .is_some(),
+    Ok(other_live_phone_key_id(
+        conn,
+        workspace_id,
+        session_id,
+        None,
+        Some(registering_public_key),
     )
+    .await?
+    .is_some())
 }
 
 /// Whether the sign-in `session_id` of `member_id` was minted by redeeming a
@@ -681,7 +691,7 @@ pub async fn endorse_device_key_in_tx(
     // race or from before the rule — is never approved while the other lives.
     // The Mac revokes one (D-7) and approves the one it means.
     lock_phone_key_slot(conn, workspace_id, target.session_id).await?;
-    if other_live_phone_key_id(conn, workspace_id, target.session_id, Some(target.id))
+    if other_live_phone_key_id(conn, workspace_id, target.session_id, Some(target.id), None)
         .await?
         .is_some()
     {
@@ -1002,7 +1012,7 @@ pub async fn rebind_device_key_in_tx(
     // #3127: the destination lineage keeps one phone key.
     if key.platform == DEVICE_KEY_PLATFORM_IOS && key.session_id != caller_session {
         lock_phone_key_slot(conn, workspace_id, caller_session).await?;
-        if other_live_phone_key_id(conn, workspace_id, caller_session, Some(key.id))
+        if other_live_phone_key_id(conn, workspace_id, caller_session, Some(key.id), None)
             .await?
             .is_some()
         {

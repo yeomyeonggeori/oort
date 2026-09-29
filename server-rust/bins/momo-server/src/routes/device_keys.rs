@@ -329,7 +329,7 @@ pub async fn register(
             // approval candidate; a legitimate replacement first has the old
             // key revoked by the Mac (D-7) or links the phone by QR again.
             if new.platform == DEVICE_KEY_PLATFORM_IOS
-                && lineage_has_live_phone_key_in_tx(conn, workspace_id, session_id)
+                && lineage_has_live_phone_key_in_tx(conn, workspace_id, session_id, &new.public_key)
                     .await
                     .map_err(DbError::from)?
             {
