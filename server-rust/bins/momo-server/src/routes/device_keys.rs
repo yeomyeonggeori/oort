@@ -160,7 +160,7 @@ fn not_active() -> ApiError {
 
 /// `GET /v1/workspaces/{ws}/device-keys/signing-context` → 200 (#3023).
 ///
-/// The `instance_id` line of every `momo.human.control.v1` statement is this
+/// The `instance_id` line of every `momo.human.control.v2` statement is this
 /// instance's `MOMO_INSTANCE_ID`, served verbatim — the one source the
 /// `host_register` check (#3022) and every signed instruction verify against;
 /// a client never builds it from a URL (D-5). `serverTimeMs` is the clock the

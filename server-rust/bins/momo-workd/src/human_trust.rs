@@ -24,9 +24,8 @@
 //! label / tool / permission decision and, for a spawn, its channel — plus the
 //! envelope's own fields (instance id, key id, nonce, times, mode, scope, spawn
 //! agent and folder), and verifies the device signature over those bytes. A v2
-//! statement is accepted for every kind but a permission, and a v1 one for an
-//! input (same bytes apart from the first line; `HumanControl::verify_any`,
-//! #3027).
+//! statement is accepted for every kind but a permission; a v1 one for none
+//! (`HumanControl::verify_any`; #3154 retired it, both signers sign v2/v3).
 //!
 //! A permission allow is rebuilt with **the preview hash this host computed**
 //! when it relayed the request (#3118, R2 H1;

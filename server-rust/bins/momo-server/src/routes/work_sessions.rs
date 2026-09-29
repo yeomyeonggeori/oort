@@ -1963,11 +1963,120 @@ pub const CODE_RESUME_SIGNATURE_INCOMPLETE: &str = "resume_signature_incomplete"
 /// 409 when the signed successor session id is already taken (#3027).
 pub const CODE_RESUME_SESSION_TAKEN: &str = "resume_session_id_taken";
 
+/// 403 when a signed resume names an agent other than the resumed session's
+/// (or the session names none the server can vouch for) (#3154).
+pub const CODE_RESUME_AGENT_MISMATCH: &str = "resume_agent_mismatch";
+
 /// A resume the owner signed (#3027): the successor id is the statement's
 /// session line.
 struct SignedResume {
     successor_id: Uuid,
     signature: crate::dto::HumanSignatureRequest,
+}
+
+/// The successor a signed resume already created, when this request is its
+/// retry (#3154). `None` for anything that is not exactly that.
+async fn signed_resume_replay_in_tx(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    source_session_id: Uuid,
+    target_host_id: Uuid,
+    channel_id: Uuid,
+    signed: &SignedResume,
+) -> Result<Option<WorkSessionDetail>, T3Error> {
+    let Some((existing, _)) =
+        lock_work_session_detail_in_tx(conn, workspace_id, signed.successor_id).await?
+    else {
+        return Ok(None);
+    };
+    if existing.member_id != member_id
+        || existing.host_id != target_host_id
+        || existing.resumed_from_session_id != Some(source_session_id)
+    {
+        return Ok(None);
+    }
+    // The same person may only be told about a session of a room they are in.
+    if !is_active_channel_member_in_tx(conn, workspace_id, channel_id, member_id).await? {
+        return Ok(None);
+    }
+    let carries_nonce: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM work_control \
+          WHERE workspace_id = $1 AND session_id = $2 AND kind = 'spawn' \
+            AND requester_member_id = $3 AND human_nonce = $4)",
+    )
+    .bind(workspace_id)
+    .bind(signed.successor_id)
+    .bind(member_id)
+    .bind(signed.signature.nonce)
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(momo_db::DbError::from)?;
+    Ok(carries_nonce.then_some(existing))
+}
+
+/// Whether `signed_agent` is the agent of the session being resumed (#3154).
+///
+/// The session row names no agent, so the server's own record is read, in
+/// order of trust: the agent an earlier **signed** spawn of this session
+/// named (a resume of a resume — the owner's own statement), else the latest
+/// agent id the host reported on the session's events. Either way the id must
+/// be a live `agent` member of this workspace. A session with neither, or a
+/// request that names another agent, is refused: the only client that signs a
+/// resume already refuses to sign without an agent read from the session's
+/// events (`RESUME_AGENT_UNKNOWN_LINE`), so nothing that works today breaks.
+async fn signed_agent_matches_source_in_tx(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    source_session_id: Uuid,
+    root_message_id: Uuid,
+    signed_agent: Option<Uuid>,
+) -> Result<bool, T3Error> {
+    let Some(signed_agent) = signed_agent else {
+        return Ok(false);
+    };
+    let from_control: Option<Uuid> = sqlx::query_scalar(
+        "SELECT human_spawn_agent_member_id FROM work_control \
+          WHERE workspace_id = $1 AND session_id = $2 AND kind = 'spawn' \
+            AND human_spawn_agent_member_id IS NOT NULL \
+          ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(workspace_id)
+    .bind(source_session_id)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(momo_db::DbError::from)?;
+    let recorded = match from_control {
+        Some(agent) => Some(agent),
+        None => {
+            let reported: Option<String> = sqlx::query_scalar(
+                "SELECT props->'event'->>'agent_member_id' FROM message \
+                  WHERE workspace_id = $1 AND root_id = $2 \
+                    AND props->>'kind' = 'work_session_event' \
+                    AND props->'event'->>'agent_member_id' IS NOT NULL \
+                  ORDER BY seq DESC LIMIT 1",
+            )
+            .bind(workspace_id)
+            .bind(root_message_id)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(momo_db::DbError::from)?;
+            reported.and_then(|raw| Uuid::parse_str(raw.trim()).ok())
+        }
+    };
+    if recorded != Some(signed_agent) {
+        return Ok(false);
+    }
+    let live_agent: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM member \
+          WHERE workspace_id = $1 AND id = $2 AND kind = 'agent' AND deleted_at IS NULL)",
+    )
+    .bind(workspace_id)
+    .bind(signed_agent)
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(momo_db::DbError::from)?;
+    Ok(live_agent)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2004,6 +2113,29 @@ async fn resume_in_tx(
     else {
         return Ok(Err(ApiError::not_found("work session not found")));
     };
+    // #3154: a retry of a signed resume that already went through. The
+    // client keeps the same successor id and signature after a lost response
+    // (#3153); by then the source is `ended`, so without this the retry meets
+    // "only an orphaned work session can resume" and a resume that worked is
+    // reported as failed. The successor must be this member's, on this
+    // target, resumed from this very source, and its spawn must carry this
+    // very nonce — nothing else is answered with an existing session. No
+    // writes, no re-verification: the nonce was spent by the first request.
+    if let Some(signed) = signed {
+        if let Some(existing) = signed_resume_replay_in_tx(
+            conn,
+            workspace_id,
+            member_id,
+            source_session_id,
+            target_host_id,
+            source.channel_id,
+            signed,
+        )
+        .await?
+        {
+            return Ok(Ok(existing));
+        }
+    }
     if !work_tool_is_enabled_in_tx(conn, workspace_id, &source.tool).await? {
         return Ok(Err(ApiError::bad_request(
             "work tool is not registered or enabled",
@@ -2079,6 +2211,26 @@ async fn resume_in_tx(
             momo_t3::work_control::REFUSAL_REMOTE_HOST_SHELL,
             "a shell cannot be resumed onto a member-scoped work host",
         )));
+    }
+    // #3154 (ADR-0146 「서명 재개」 남은 것): the agent the owner signs for is
+    // the agent of the session being resumed. Before the slot and before the
+    // nonce, so a refused agent spends neither.
+    if let Some(signed) = signed {
+        if !signed_agent_matches_source_in_tx(
+            conn,
+            workspace_id,
+            source_session_id,
+            source.root_message_id,
+            signed.signature.agent_member_id,
+        )
+        .await?
+        {
+            return Ok(Err(ApiError::coded(
+                StatusCode::FORBIDDEN,
+                CODE_RESUME_AGENT_MISMATCH,
+                "the signed agent is not the agent of the session being resumed",
+            )));
+        }
     }
     if let Err(error) = acquire_slot_in_tx(conn, workspace_id, member_id, target_host_id).await {
         return Ok(Err(match error {

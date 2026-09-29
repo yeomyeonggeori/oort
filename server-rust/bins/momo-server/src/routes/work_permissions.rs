@@ -36,7 +36,7 @@
 //!
 //! ## R2 — the owner's device signature (ADR-0146 개정 D-8 · D-10, #3023)
 //!
-//! A decision may carry `humanSignature`: the owner's `momo.human.control.v1`
+//! A decision may carry `humanSignature`: the owner's `momo.human.control.v2`
 //! statement (`kind=permission`) over the stored request event id, the stored
 //! option id and kind, and the scope. It is verified whenever it is sent
 //! ([`crate::human_control`]), against the session's host and session — never

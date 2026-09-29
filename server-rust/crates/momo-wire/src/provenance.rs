@@ -388,7 +388,7 @@ pub const ENTITY_WORK_CONTROL: &str = "work_control";
 pub const ENTITY_WORK_HOST_REGISTER: &str = "work_host.register";
 
 /// The person's half of [`record_provenance`] (ADR-0146 개정 2026-09-28, D-1 ·
-/// D-5 · D-10, #3023): a `momo.human.control.v1` statement signed by a device
+/// D-5 · D-10, #3023): a `momo.human.control.v2` statement signed by a device
 /// key (P-256, `alg = 'p256'`), recorded in the same transaction as the write
 /// it authorized.
 ///
