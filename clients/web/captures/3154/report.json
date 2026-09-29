@@ -1,0 +1,118 @@
+{
+  "scenes": [
+    "approve-confirm-1280-light",
+    "approve-origin-none-1280-light",
+    "approve-confirm-390-light",
+    "approve-origin-none-390-light",
+    "approve-confirm-1280-dark",
+    "approve-origin-none-1280-dark",
+    "approve-confirm-390-dark",
+    "approve-origin-none-390-dark"
+  ],
+  "checks": [
+    {
+      "name": "approve-confirm-1280-light bound=true",
+      "ok": true,
+      "detail": {
+        "bound": "true"
+      }
+    },
+    {
+      "name": "approve-confirm 등록 시각 줄",
+      "ok": true
+    },
+    {
+      "name": "approve-confirm-1280-light 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "approve-origin-none-1280-light bound=true",
+      "ok": true,
+      "detail": {
+        "bound": "true"
+      }
+    },
+    {
+      "name": "approve-origin-none-1280-light 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "approve-confirm-390-light bound=true",
+      "ok": true,
+      "detail": {
+        "bound": "true"
+      }
+    },
+    {
+      "name": "approve-confirm 등록 시각 줄",
+      "ok": true
+    },
+    {
+      "name": "approve-confirm-390-light 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "approve-origin-none-390-light bound=true",
+      "ok": true,
+      "detail": {
+        "bound": "true"
+      }
+    },
+    {
+      "name": "approve-origin-none-390-light 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "approve-confirm-1280-dark bound=true",
+      "ok": true,
+      "detail": {
+        "bound": "true"
+      }
+    },
+    {
+      "name": "approve-confirm 등록 시각 줄",
+      "ok": true
+    },
+    {
+      "name": "approve-confirm-1280-dark 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "approve-origin-none-1280-dark bound=true",
+      "ok": true,
+      "detail": {
+        "bound": "true"
+      }
+    },
+    {
+      "name": "approve-origin-none-1280-dark 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "approve-confirm-390-dark bound=true",
+      "ok": true,
+      "detail": {
+        "bound": "true"
+      }
+    },
+    {
+      "name": "approve-confirm 등록 시각 줄",
+      "ok": true
+    },
+    {
+      "name": "approve-confirm-390-dark 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "approve-origin-none-390-dark bound=true",
+      "ok": true,
+      "detail": {
+        "bound": "true"
+      }
+    },
+    {
+      "name": "approve-origin-none-390-dark 가로 넘침 0",
+      "ok": true
+    }
+  ]
+}
