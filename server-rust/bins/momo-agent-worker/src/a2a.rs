@@ -692,6 +692,7 @@ mod tests {
             handle: "atlas".into(),
             display_name: "아틀라스".into(),
             base_model: "hermes-agent".into(),
+            base_model_source: momo_agent::ModelSource::Agent,
             model_pref: None,
             effort_pref: None,
             system_prompt: None,

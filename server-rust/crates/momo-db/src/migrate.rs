@@ -485,19 +485,23 @@ mod tests {
     /// `work_permission_request.preview` / `preview_sha256` with a both-or-none
     /// CHECK. No table or policy is added. Re-runnable statements.
     /// schema_v0.sql is not modified.
+    ///
+    /// 098 is #3147's `agent.model_source` (ADR-0147 증보 2026-09-29): where an
+    /// agent's model comes from, `agent` | `instance_default`, with a one-time
+    /// backfill of the seed placeholder. No table or policy is added.
     #[test]
-    fn discovers_contiguous_migrations_001_to_097() {
+    fn discovers_contiguous_migrations_001_to_098() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            97,
-            "expected 97 migrations under {}",
+            98,
+            "expected 98 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 97);
+        assert_eq!(migrations.last().unwrap().version, 98);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

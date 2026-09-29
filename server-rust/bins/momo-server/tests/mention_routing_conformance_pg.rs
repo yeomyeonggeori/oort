@@ -1693,6 +1693,252 @@ async fn b52_4_a_created_agent_joins_the_roster_and_becomes_mentionable() {
 }
 
 // ---------------------------------------------------------------------------
+// #3147 — where an agent's model comes from
+// ---------------------------------------------------------------------------
+//
+// | test | revert that makes it red |
+// |---|---|
+// | `m3147_1_the_model_source_is_chosen_at_create_edited_by_the_profile_and_rides_the_job` | drop `model_source` from the create insert, the profile PUT, or the mention job payload |
+// | `m3147_2_098_backfills_the_placeholder_as_instance_default_and_everything_else_as_agent` | change the 098 backfill predicate or the column default |
+
+async fn model_source_of_job(su: &PgPool, workspace: Uuid, agent: Uuid) -> Value {
+    let jobs = agent_jobs_for(su, workspace).await;
+    let job = jobs
+        .iter()
+        .rev()
+        .find(|job| {
+            job.4["agent_member_id"].as_str().map(str::to_lowercase) == Some(agent.to_string())
+        })
+        .unwrap_or_else(|| panic!("a job for {agent}: {jobs:?}"));
+    job.4["model_source"].clone()
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn m3147_1_the_model_source_is_chosen_at_create_edited_by_the_profile_and_rides_the_job() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, &tenant).await;
+
+    let create = |handle: &'static str, extra: Value| {
+        let mut body = json!({
+            "displayName": handle, "handle": handle, "model": "stored-placeholder",
+            "baseUrl": "https://gateway.example.com/v1",
+            "profile": {"instructions": "", "enabledTools": []},
+        });
+        body.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        let http = http.clone();
+        let url = format!("{base}/v1/workspaces/{}/agents", tenant.workspace);
+        let token = token.clone();
+        async move {
+            let response = http
+                .post(url)
+                .bearer_auth(token)
+                .json(&body)
+                .send()
+                .await
+                .unwrap();
+            let status = response.status();
+            let value: Value = response.json().await.unwrap_or(Value::Null);
+            (status.as_u16(), value)
+        }
+    };
+    let id_of = |value: &Value| Uuid::parse_str(value["agent"]["id"].as_str().unwrap()).unwrap();
+    let source_column = |agent: Uuid| {
+        let su = su.clone();
+        async move {
+            sqlx::query_scalar::<_, String>("SELECT model_source FROM agent WHERE member_id = $1")
+                .bind(agent)
+                .fetch_one(&su)
+                .await
+                .unwrap()
+        }
+    };
+
+    // Default: the model is the agent's own choice.
+    let (status, own) = create("owna", json!({})).await;
+    assert_eq!(status, 201);
+    let own = id_of(&own);
+    assert_eq!(source_column(own).await, "agent");
+    // Opt in to following the instance default.
+    let (status, follower) = create("follower", json!({"modelSource": "instance_default"})).await;
+    assert_eq!(status, 201);
+    let follower = id_of(&follower);
+    assert_eq!(source_column(follower).await, "instance_default");
+    // Anything outside the vocabulary is refused, not stored.
+    let (status, _) = create("bogus", json!({"modelSource": "team"})).await;
+    assert_eq!(status, 400);
+
+    join_channel(&su, &tenant, own).await;
+    join_channel(&su, &tenant, follower).await;
+    send_message(
+        &http,
+        &base,
+        &token,
+        &tenant,
+        Uuid::new_v4(),
+        "@owna @follower 안녕",
+    )
+    .await;
+    assert_eq!(
+        model_source_of_job(&su, tenant.workspace, own).await,
+        json!("agent")
+    );
+    assert_eq!(
+        model_source_of_job(&su, tenant.workspace, follower).await,
+        json!("instance_default"),
+        "the follower's job says so — the worker never guesses from the name"
+    );
+
+    // Edit through the profile: the follower picks its own model, and the
+    // profile read shows it. Omitting the key later leaves it unchanged.
+    let put = |agent: Uuid, body: Value| {
+        let http = http.clone();
+        let url = format!(
+            "{base}/v1/workspaces/{}/agents/{agent}/profile",
+            tenant.workspace
+        );
+        let token = token.clone();
+        async move {
+            let response = http
+                .put(url)
+                .bearer_auth(token)
+                .json(&body)
+                .send()
+                .await
+                .unwrap();
+            let status = response.status().as_u16();
+            (
+                status,
+                response.json::<Value>().await.unwrap_or(Value::Null),
+            )
+        }
+    };
+    let (status, profile) = put(
+        follower,
+        json!({"instructions": "", "enabledTools": [], "modelSource": "agent"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{profile}");
+    assert_eq!(profile["profile"]["modelSource"], json!("agent"));
+    assert_eq!(source_column(follower).await, "agent");
+    let (status, profile) = put(follower, json!({"instructions": "x", "enabledTools": []})).await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        profile["profile"]["modelSource"],
+        json!("agent"),
+        "absent = unchanged"
+    );
+    let (status, _) = put(
+        follower,
+        json!({"instructions": "", "enabledTools": [], "modelSource": "nope"}),
+    )
+    .await;
+    assert_eq!(status, 400);
+    let (status, profile) = put(
+        follower,
+        json!({"instructions": "", "enabledTools": [], "modelSource": "instance_default"}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(profile["profile"]["modelSource"], json!("instance_default"));
+}
+
+fn scratch_migrations_dir_below_098() -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("m3147-mig-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for entry in std::fs::read_dir(default_migrations_dir()).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        if name.ends_with(".sql") && name.as_str() < "098" {
+            std::fs::copy(&path, dir.join(&name)).unwrap();
+        }
+    }
+    dir
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn m3147_2_098_backfills_the_placeholder_as_instance_default_and_everything_else_as_agent() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let scratch = format!("m3147_{}", Uuid::new_v4().simple());
+    sqlx::query(&format!("CREATE DATABASE {scratch}"))
+        .execute(&su)
+        .await
+        .unwrap();
+    let (server, _) = database_url()
+        .rsplit_once('/')
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .unwrap();
+    let scratch_url = format!("{server}/{scratch}");
+
+    // Everything before 098, then agents exactly as a live instance has them.
+    let below = scratch_migrations_dir_below_098();
+    run_migrations(&scratch_url, &below, SeedMode::None).expect("apply migrations below 098");
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&scratch_url)
+        .await
+        .unwrap();
+    let workspace = Uuid::new_v4();
+    sqlx::query("INSERT INTO workspace (id, slug, name) VALUES ($1, $2, $2)")
+        .bind(workspace)
+        .bind(workspace.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let mut expected = Vec::new();
+    for (model, want) in [
+        ("hermes-agent", "instance_default"),
+        ("gpt-5.6-sol", "agent"),
+        ("Hermes-Agent", "agent"),
+    ] {
+        let agent = Uuid::new_v4();
+        sqlx::query("INSERT INTO member (id, workspace_id, kind, display_name, handle) VALUES ($1, $2, 'agent', $3, $3)")
+            .bind(agent).bind(workspace).bind(agent.to_string()).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO agent (member_id, workspace_id, model, base_url) VALUES ($1, $2, $3, 'https://gateway.invalid/v1')")
+            .bind(agent).bind(workspace).bind(model).execute(&pool).await.unwrap();
+        expected.push((agent, want));
+    }
+    assert!(
+        sqlx::query("SELECT model_source FROM agent LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .is_err(),
+        "the column does not exist before 098"
+    );
+
+    run_migrations(&scratch_url, &default_migrations_dir(), SeedMode::None).expect("apply 098");
+    for (agent, want) in expected {
+        let got: String = sqlx::query_scalar("SELECT model_source FROM agent WHERE member_id = $1")
+            .bind(agent)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(got, want, "agent {agent}");
+    }
+    // The vocabulary is closed in the database as well.
+    assert!(sqlx::query("UPDATE agent SET model_source = 'team'")
+        .execute(&pool)
+        .await
+        .is_err());
+    pool.close().await;
+    sqlx::query(&format!("DROP DATABASE {scratch}"))
+        .execute(&su)
+        .await
+        .unwrap();
+    let _ = std::fs::remove_dir_all(below);
+}
+
+// ---------------------------------------------------------------------------
 // B13 — implicit addressing in a 1:1 DM (QA H7)
 // ---------------------------------------------------------------------------
 //
