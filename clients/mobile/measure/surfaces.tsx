@@ -3498,7 +3498,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
 //   -momoMeasure DEVICE-KEY-PENDING · LIGHT-DEVICE-KEY-PENDING · …
 //   (pending approved revoked invalidated biometryoff unregistered unsupported
 //    servererror registering reconnect reconnecting live profile
-//    replace-blocked-old replace-blocked-refused)
+//    replace-blocked-old replace-blocked-refused; `<이름>@<y>` = y pt 스크롤)
 
 const DK_KEY = 'A2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW';
 const DK_FINGERPRINT = '5BAF F89D E7DE 5C1D 7B61';
@@ -3705,8 +3705,12 @@ function SignedWorkSurface({which}: {which: string}): React.JSX.Element {
   );
 }
 
-function DeviceKeySurface({which}: {which: string}): React.JSX.Element {
+function DeviceKeySurface({which: rawWhich}: {which: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  // #3154 M1: `replace-blocked-old@900` 은 시트를 900pt 스크롤한 자리를 찍는다
+  // (AX-XXL 에서 지문이 접힌 아래에 있어 한 장으로는 끝까지 보이지 않는다).
+  const [which, scroll] = rawWhich.split('@');
+  const initialScrollY = scroll ? Number(scroll) : undefined;
   if (which === 'profile') {
     // 프로필 시트의 「연결 › 지시 기기」 줄. 줄은 씨앗을 뿌린 두 질의를 읽는다.
     harnessClient.setQueryData(DEVICE_KEY_LOCAL_QUERY_KEY, {status: 'ready', publicKey: DK_KEY});
@@ -3779,7 +3783,7 @@ function DeviceKeySurface({which}: {which: string}): React.JSX.Element {
             <LiveDeviceKeySheet />
           </QueryClientProvider>
         ) : (
-          <LinkSheetBody state={dkState(which)} onClose={() => {}} />
+          <LinkSheetBody state={dkState(which)} onClose={() => {}} initialScrollY={initialScrollY} />
         )}
       </PageSheet>
     </View>

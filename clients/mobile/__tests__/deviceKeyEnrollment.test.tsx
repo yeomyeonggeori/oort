@@ -22,8 +22,12 @@ import {
   replaceInvalidatedKey,
   type DeviceKeyView,
 } from '../src/deviceKey/enrollment';
-import {deviceKeyCopy, QR_LINK_STEPS} from '../src/features/deviceKey/copy';
-import {DeviceKeyLinkGate} from '../src/features/deviceKey/DeviceKeyLinkSheet';
+import {deviceKeyCopy, QR_LINK_STEPS, REFUSED_WARNING} from '../src/features/deviceKey/copy';
+import {
+  DeviceKeyLinkGate,
+  LINK_SHEET_INTRO,
+  linkSheetIntro,
+} from '../src/features/deviceKey/DeviceKeyLinkSheet';
 import {DeviceKeyPanel} from '../src/features/deviceKey/DeviceKeyPanel';
 import {resetPlaceHeldForTests, useDeviceKey} from '../src/features/deviceKey/useDeviceKey';
 import {deviceLinkDevice} from '../src/features/deviceLink/deviceIdentity';
@@ -675,20 +679,42 @@ describe('#3145 — 계보당 폰 키 1개: the old key is not deleted while the
     it('registerRefused: tells the person to check the Mac list for a key they did not make, and retries by enroll()', () => {
       const state = panelFor({kind: 'replaceBlocked', reason: 'registerRefused', fingerprint: null});
       expect(screen.getByTestId('device-key-detail').props.children).toContain('등록 시각');
-      expect(screen.getByTestId('device-key-detail').props.children).toContain('내가 등록한 것이 아니면');
+      // #3154 M3: the do-not-approve sentence is its own emphasised block, not a
+      // clause buried in the detail paragraph.
+      expect(screen.getByTestId('device-key-detail').props.children).not.toContain('내가 등록한 것이 아니면');
+      expect(screen.getByTestId('device-key-warning')).toBeTruthy();
+      expect(screen.getByText(REFUSED_WARNING)).toBeTruthy();
       expect(screen.queryByTestId('device-key-fingerprint')).toBeNull();
       fireEvent.press(screen.getByTestId('device-key-action-reenroll-refused'));
       expect(state.enroll).toHaveBeenCalledTimes(1);
       expect(state.replace).not.toHaveBeenCalled();
     });
 
-    it('speaks 합니다체', () => {
+    it('speaks 합니다체, and does not name a cause it cannot know (Face ID)', () => {
       for (const reason of ['oldKey', 'registerRefused'] as const) {
         const copy = deviceKeyCopy({kind: 'replaceBlocked', reason, fingerprint: null});
-        for (const sentence of [copy.headline, copy.detail, ...(copy.steps ?? [])]) {
-          expect(sentence).toMatch(/(니다|세요|합니다)\.$/);
+        const all = [copy.headline, copy.detail, copy.warning, ...(copy.steps ?? [])];
+        for (const sentence of all.filter((v): v is string => !!v)) {
+          expect(sentence).toMatch(/니다\.$/);
+          expect(sentence).not.toMatch(/세요/);
         }
       }
+      const old = deviceKeyCopy({kind: 'replaceBlocked', reason: 'oldKey', fingerprint: null});
+      expect(old.detail).not.toContain('Face ID가 바뀌어');
+      expect(old.detail).toContain('보입니다');
+    });
+
+    it('the link sheet does not say 「QR 연결을 마쳤습니다」 above a screen that says the key is blocked', () => {
+      const blocked: DeviceKeyView[] = [
+        {kind: 'replaceBlocked', reason: 'oldKey', fingerprint: null},
+        {kind: 'replaceBlocked', reason: 'registerRefused', fingerprint: null},
+        {kind: 'biometryOff'},
+        {kind: 'invalidated'},
+        {kind: 'serverError', fingerprint: SHARED_FINGERPRINT},
+        {kind: 'unsupported'},
+      ];
+      for (const view of blocked) expect(linkSheetIntro(view)).not.toBe(LINK_SHEET_INTRO);
+      expect(linkSheetIntro({kind: 'unregistered', fingerprint: null})).toBe(LINK_SHEET_INTRO);
     });
   });
 
