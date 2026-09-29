@@ -148,6 +148,7 @@ pub mod error;
 pub mod hosted_dm;
 pub mod hosted_notice;
 pub mod korean;
+pub mod memory;
 pub mod mention;
 pub mod provisioning;
 pub mod routing;

@@ -13,7 +13,9 @@
 //! (`memoryContextBlock`, Swift :115-136). The pgvector memory plane has no Rust
 //! owner yet, so injecting a half-ported block would put unverifiable text in
 //! front of every turn. The payload field is ignored, not silently dropped —
-//! see the PR body's deviation list.
+//! see the PR body's deviation list. Team memory v2 (#3163, ADR-0196) fills a
+//! different slot: [`SystemBlocks::memory`], built in [`crate::serving`] from the
+//! database's own audience decision, never from `memory_refs`.
 
 use uuid::Uuid;
 
@@ -138,6 +140,11 @@ pub struct SystemBlocks<'a> {
     /// the profile offered that tool. A rule about behaviour like the protocol,
     /// kept as its own turn for the same reason.
     pub card_suggest: Option<&'a str>,
+    /// The team-memory block (#3163): delimited, defanged summaries. **Data, not rules**, so it
+    /// is the last `system` block — no rule of the server's sits downstream of text that came
+    /// from channel content. Like the others it rides outside the conversation budget trim (it
+    /// has its own budget, enforced where it is built: [`crate::serving`]).
+    pub memory: Option<&'a str>,
 }
 
 /// Build the chat array for one turn.
@@ -176,6 +183,9 @@ pub fn assemble(
     }
     if let Some(directive) = blocks.card_suggest.map(str::trim).filter(|d| !d.is_empty()) {
         head.push(ChatMessage::system(directive));
+    }
+    if let Some(memory) = blocks.memory.map(str::trim).filter(|m| !m.is_empty()) {
+        head.push(ChatMessage::system(memory));
     }
 
     let mut turns: Vec<Turn> = if recent_messages.is_empty() {
@@ -673,6 +683,7 @@ mod tests {
                 now: Some("현재 시각: 2026-09-27"),
                 report_protocol: Some(crate::completion_report::REPORT_PROTOCOL_BLOCK),
                 card_suggest: Some(directive),
+                memory: None,
             },
             20,
         );
@@ -691,6 +702,44 @@ mod tests {
         assert!(
             without.messages.iter().all(|m| m.content != directive),
             "no tool, no rule"
+        );
+    }
+    /// #3163 — the memory block is the LAST `system` turn (data sits downstream of every rule),
+    /// and the conversation budget trims history, not it.
+    #[test]
+    fn the_memory_block_is_the_last_system_turn_and_outside_the_trim() {
+        let window = vec![
+            message(1, Some(5), None, &"가".repeat(200)),
+            message(2, Some(5), Some("성재"), "@hermes 지난주에 뭐 정했지?"),
+        ];
+        let out = assemble(
+            &window,
+            Uuid::from_u128(AGENT),
+            Some(Uuid::from_u128(2)),
+            "unused",
+            Some("you are hermes"),
+            SystemBlocks {
+                now: Some("현재 시각: 2026-09-29"),
+                report_protocol: Some("규칙"),
+                card_suggest: None,
+                memory: Some("<기억 참고자료>\n요약\n</기억 참고자료>"),
+            },
+            20,
+        );
+        let systems: Vec<&str> = out
+            .messages
+            .iter()
+            .take_while(|m| m.role == "system")
+            .map(|m| m.content.as_str())
+            .collect();
+        assert_eq!(
+            systems.last().copied(),
+            Some("<기억 참고자료>\n요약\n</기억 참고자료>")
+        );
+        assert_eq!(systems.len(), 4, "prompt, now, protocol, memory");
+        assert_eq!(
+            out.dropped_count, 1,
+            "history trimmed, the memory block was not"
         );
     }
 }
