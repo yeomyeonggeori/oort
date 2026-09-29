@@ -46,6 +46,14 @@ jest.mock('@momo/core/features/memory/api', () => ({
   getMemorySettings: (ws: string) => mockSettings(ws),
   getRunMemoryReceipt: (ws: string, run: string) => mockReceipt(ws, run),
   patchMyMemorySettings: (ws: string, paused: boolean) => mockPatchMe(ws, paused),
+  // 답 밑의 제안 카드(#3171)가 부르는 자리. 이 파일은 제안을 시험하지 않으므로 빈 목록.
+  listMemoryProposals: async () => [],
+  acceptMemoryProposal: async () => {
+    throw new Error('not used');
+  },
+  rejectMemoryProposal: async () => {
+    throw new Error('not used');
+  },
 }));
 
 const WS = 'ws-1';
