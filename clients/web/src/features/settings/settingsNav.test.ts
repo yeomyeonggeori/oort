@@ -33,7 +33,7 @@ describe("settingsNav", () => {
       SETTINGS_SECTIONS.filter((item) => item.group === "워크스페이스").map(
         (item) => item.label
       )
-    ).toEqual(["워크스페이스", "앱", "멤버와 초대"]);
+    ).toEqual(["워크스페이스", "기억", "앱", "멤버와 초대"]);
     expect(
       SETTINGS_SECTIONS.filter((item) => item.group === "연결").map(
         (item) => item.label
@@ -63,7 +63,12 @@ describe("settingsNav", () => {
       "updates",
       "ai",
     ]);
-    expect(idsIn("워크스페이스")).toEqual(["workspace", "plugins", "members"]);
+    expect(idsIn("워크스페이스")).toEqual([
+      "workspace",
+      "memory",
+      "plugins",
+      "members",
+    ]);
     expect(idsIn("연결")).toEqual([
       "agents",
       "code",

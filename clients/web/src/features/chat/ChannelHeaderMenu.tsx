@@ -8,6 +8,8 @@ import {
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
 import { ChannelTopicDialog } from "@/features/channels/ChannelContextControls";
+import { ChannelMemoryDialog } from "@/features/memory/ChannelMemoryDialog";
+import { canChangeWorkspaceMemory } from "@momo/core/features/memory/presentation";
 import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
 import {
   ChannelActionMenuItems,
@@ -91,6 +93,7 @@ export function ChannelHeaderMenu({
   const pendingHandOffRef = useRef<ChannelActionKey | null>(null);
   const [open, setOpen] = useState(false);
   const [topicOpen, setTopicOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   const topic = normalizeChannelTopic(channel.topic ?? "");
   const menuLabel = channelActionMenuLabel(title, channel);
 
@@ -140,6 +143,7 @@ export function ChannelHeaderMenu({
             // 복귀가 다이얼로그 auto-focus와 같은 틱에서 싸운다 (#1865 H-3).
             event.preventDefault();
             if (pending === "topic") setTopicOpen(true);
+            if (pending === "memory") setMemoryOpen(true);
             if (pending === "leave") actions.leave.open();
           }}
         >
@@ -161,6 +165,19 @@ export function ChannelHeaderMenu({
         testId="channel-leave-confirm"
         opener={triggerRef.current}
       />
+
+      {/* 열릴 때만 세운다: 닫힌 다이얼로그가 세션·질의 훅을 끌고 다닐 이유가 없다. */}
+      {memoryOpen && (
+        <ChannelMemoryDialog
+          workspaceId={workspaceId}
+          channelId={channel.id}
+          channelTitle={title}
+          canChange={canChangeWorkspaceMemory(selfRole)}
+          open={memoryOpen}
+          onOpenChange={setMemoryOpen}
+          opener={triggerRef}
+        />
+      )}
 
       {topic !== "" && (
         <ChannelTopicDialog
