@@ -882,3 +882,18 @@ describe('#3129 — a sign-in that is not a QR link', () => {
     expect(other.unlinked).toBe(false);
   });
 });
+
+describe('#3129 — the link sheet after a QR no Mac made', () => {
+  it('does not say the link is done next to 「QR 연결 필요」', async () => {
+    serverRows = [row({publicKey: KEY, linkedSession: true, linkedFromMac: false})];
+    mockNative = phone({key: KEY});
+    noteConnectRoute('qr');
+    renderGate();
+    await waitFor(() =>
+      expect(screen.getByTestId('device-key-badge').props.children).toBe('QR 연결 필요'),
+    );
+    expect(screen.getByTestId('device-key-link-intro').props.children).toBe(
+      '대화와 알림은 연결됐습니다.',
+    );
+  });
+});
