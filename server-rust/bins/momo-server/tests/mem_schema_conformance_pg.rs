@@ -2036,10 +2036,14 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
         if name == "mem_digest_evidence_ok"
             || name == "mem_item_evidence_ok"
             || name == "mem_search_items"
+            || name == "mem_edit_item"
+            || name == "mem_forget_item"
         {
             // The RLS policies call the evidence helpers as the reading role; `mem_search_items`
             // is the API entry point (session_user guard inside; the worker-only twin is
-            // `mem_search_items_for`, which the loop covers).
+            // `mem_search_items_for`, which the loop covers). `mem_edit_item` / `mem_forget_item`
+            // (#3208) are the API's write entry points: PUBLIC EXECUTE with the same session_user
+            // guard, the actor derived from `app.member_id` — mem_item_edit_conformance covers them.
             continue;
         }
         let public_grants: i64 = sqlx::query_scalar(
@@ -2345,7 +2349,8 @@ fn migration_path() -> PathBuf {
 /// The allow-list self-check is restated by every migration that adds a definer function (101 and 102
 /// are merged and stay untouched, #3191 M-6); the newest one is the one that matches the real state.
 fn worker_migration_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../server/Migrations/104_mem_item.sql")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../server/Migrations/105_mem_item_edit.sql")
 }
 
 /// M-1: the lock block is one text in three files. Compared byte for byte (stronger than a
@@ -2470,7 +2475,7 @@ async fn lock_block_also_locks_views_and_materialized_views() {
 }
 
 /// L-1: the SECURITY DEFINER functions owned by mem_definer are exactly this list.
-const DEFINER_ALLOW_LIST: [&str; 28] = [
+const DEFINER_ALLOW_LIST: [&str; 30] = [
     "mem_add_item",
     "mem_adjust_tokens",
     "mem_advance_cursor",
@@ -2484,6 +2489,8 @@ const DEFINER_ALLOW_LIST: [&str; 28] = [
     "mem_digest_live",
     "mem_digest_rollup_inputs",
     "mem_drop_digest",
+    "mem_edit_item",
+    "mem_forget_item",
     "mem_item_audience_ok",
     "mem_item_evidence_ok",
     "mem_item_live",
@@ -2529,7 +2536,7 @@ async fn security_definer_functions_owned_by_mem_definer_are_allow_listed() {
         owned,
         DEFINER_ALLOW_LIST.to_vec(),
         "a SECURITY DEFINER function owned by mem_definer must be added to the allow-list \
-         here and in the newest migration's allow-list (104_mem_item.sql) on purpose"
+         here and in the newest migration's allow-list (105_mem_item_edit.sql) on purpose"
     );
     // The migration's own self-check passes on the good state ...
     let check = tail_block(&worker_migration_path(), "-- ── L-1", None);

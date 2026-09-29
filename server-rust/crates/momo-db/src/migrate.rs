@@ -514,19 +514,23 @@ mod tests {
     /// RLS; the event log is append-only), the FK on `mem_evidence.item_id`, the add-only write
     /// function `mem_add_item` (momo_memory only), the read helpers and audience rule, and the
     /// pg_trgm keyword search.
+    /// 105 is #3208's memory-browser writes (ADR-0196 D9/D10): the API-callable definer functions
+    /// `mem_edit_item` (new curated item supersedes the old, evidence kept) and `mem_forget_item`
+    /// (permanent delete of the item and its older versions), plus the narrow `mem_definer`
+    /// privilege widening they need (UPDATE of `retired_at`/`retired_reason`, DELETE).
     #[test]
-    fn discovers_contiguous_migrations_001_to_104() {
+    fn discovers_contiguous_migrations_001_to_105() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            104,
-            "expected 104 migrations under {}",
+            105,
+            "expected 105 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 104);
+        assert_eq!(migrations.last().unwrap().version, 105);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

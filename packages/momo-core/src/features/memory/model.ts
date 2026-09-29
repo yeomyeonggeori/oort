@@ -279,6 +279,245 @@ export function parseMemorySettings(value: unknown): MemorySettings {
   };
 }
 
+// -----------------------------------------------------------------------------
+// Memory browser (ADR-0196 D9 / D12 V4, #3208) — items, evidence, events.
+//
+// The same rule as digests: the server decides visibility. A hidden item is
+// absent from a list and a 404 everywhere else, identical to a missing id, so
+// the client must not try to tell "hidden" from "gone". Edit and forget are
+// permitted to anyone who can read the item (ADR D9); anyone else gets that same
+// 404. Forget deletes for good — there is no undo and no "forgotten" state.
+// -----------------------------------------------------------------------------
+
+export type MemoryItemKind = "decision" | "fact" | "commitment" | "preference" | "procedure";
+export type MemoryItemOrigin = "extracted" | "confirmed" | "curated" | "synthesized";
+export type MemoryItemSpace = "channel" | "personal";
+/** `active` = current items (default); `history` = retired but readable (e.g. edited-away versions). */
+export type MemoryItemStatus = "active" | "history" | "all";
+
+export const MEMORY_ITEM_KINDS: readonly MemoryItemKind[] = [
+  "decision",
+  "fact",
+  "commitment",
+  "preference",
+  "procedure",
+];
+
+export interface MemoryItem {
+  id: string;
+  channelId: string;
+  spaceKind: MemoryItemSpace;
+  kind: MemoryItemKind;
+  origin: MemoryItemOrigin;
+  body: string;
+  subjectKey?: string;
+  validFromMs: number;
+  validToMs?: number;
+  recordedAtMs: number;
+  retiredAtMs?: number;
+  /** Why it was retired (`edited` keeps it as history). */
+  retiredReason?: string;
+  /** The version this one replaced. */
+  supersedesId?: string;
+  /** The version that replaced this one. */
+  supersededById?: string;
+  confidence: number;
+  sourceCount: number;
+  /** Search results only, best first. */
+  score?: number;
+}
+
+export interface MemoryItemPage {
+  items: MemoryItem[];
+  /** Absent on the last page and for a search (no cursor). */
+  nextCursor?: string;
+}
+
+export interface MemoryItemDetail {
+  item: MemoryItem;
+  evidence: MemoryEvidenceLink[];
+}
+
+export interface MemoryItemEvent {
+  id: string;
+  /** `created` | `edited` | `superseded` | … */
+  action: string;
+  actorMemberId?: string;
+  /** Ids, kinds and counts only — the ledger never holds memory text. */
+  detail: Record<string, unknown>;
+  createdAtMs: number;
+}
+
+export interface EditedMemoryItem {
+  /** The new curated item. */
+  item: MemoryItem;
+  evidence: MemoryEvidenceLink[];
+  /** The item it replaced (now history). */
+  supersededId: string;
+}
+
+export interface ListMemoryItemsOptions {
+  channelId?: string;
+  kind?: MemoryItemKind;
+  status?: MemoryItemStatus;
+  /** Keyword search over current items; ranked, no cursor, at most 50 hits. */
+  q?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface EditMemoryItemInput {
+  /** 1–600 characters. */
+  body: string;
+  kind?: MemoryItemKind;
+}
+
+function isItemKind(value: string | undefined): value is MemoryItemKind {
+  return (
+    value === "decision" ||
+    value === "fact" ||
+    value === "commitment" ||
+    value === "preference" ||
+    value === "procedure"
+  );
+}
+
+function isItemOrigin(value: string | undefined): value is MemoryItemOrigin {
+  return (
+    value === "extracted" || value === "confirmed" || value === "curated" || value === "synthesized"
+  );
+}
+
+export function parseMemoryItem(value: unknown): MemoryItem | null {
+  const id = str(value, "id");
+  const channelId = str(value, "channelId");
+  const spaceKind = str(value, "spaceKind");
+  const kind = str(value, "kind");
+  const origin = str(value, "origin");
+  const body = str(value, "body");
+  const validFromMs = num(value, "validFromMs");
+  const recordedAtMs = num(value, "recordedAtMs");
+  const confidence = num(value, "confidence");
+  const sourceCount = num(value, "sourceCount");
+  if (
+    id === undefined ||
+    channelId === undefined ||
+    (spaceKind !== "channel" && spaceKind !== "personal") ||
+    !isItemKind(kind) ||
+    !isItemOrigin(origin) ||
+    body === undefined ||
+    validFromMs === undefined ||
+    recordedAtMs === undefined ||
+    confidence === undefined ||
+    sourceCount === undefined
+  ) {
+    return null;
+  }
+  const item: MemoryItem = {
+    id,
+    channelId,
+    spaceKind,
+    kind,
+    origin,
+    body,
+    validFromMs,
+    recordedAtMs,
+    confidence,
+    sourceCount,
+  };
+  const subjectKey = str(value, "subjectKey");
+  if (subjectKey !== undefined) item.subjectKey = subjectKey;
+  const validToMs = num(value, "validToMs");
+  if (validToMs !== undefined) item.validToMs = validToMs;
+  const retiredAtMs = num(value, "retiredAtMs");
+  if (retiredAtMs !== undefined) item.retiredAtMs = retiredAtMs;
+  const retiredReason = str(value, "retiredReason");
+  if (retiredReason !== undefined) item.retiredReason = retiredReason;
+  const supersedesId = str(value, "supersedesId");
+  if (supersedesId !== undefined) item.supersedesId = supersedesId;
+  const supersededById = str(value, "supersededById");
+  if (supersededById !== undefined) item.supersededById = supersededById;
+  const score = num(value, "score");
+  if (score !== undefined) item.score = score;
+  return item;
+}
+
+function requireItem(value: unknown): MemoryItem {
+  const item = parseMemoryItem(value);
+  if (item === null) throw new WireShapeError();
+  return item;
+}
+
+function requireEvidence(source: unknown): MemoryEvidenceLink[] {
+  const rows = arrayField(source, "evidence");
+  if (rows === null) throw new WireShapeError();
+  const links: MemoryEvidenceLink[] = [];
+  for (const row of rows) {
+    const link = parseMemoryEvidenceLink(row);
+    if (link === null) throw new WireShapeError();
+    links.push(link);
+  }
+  return links;
+}
+
+export function parseMemoryItemPage(value: unknown): MemoryItemPage {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  const rows = arrayField(source, "items");
+  if (rows === null) throw new WireShapeError();
+  const page: MemoryItemPage = { items: rows.map(requireItem) };
+  const nextCursor = str(source, "nextCursor");
+  if (nextCursor !== undefined) page.nextCursor = nextCursor;
+  return page;
+}
+
+export function parseMemoryItemDetail(value: unknown): MemoryItemDetail {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  return { item: requireItem(source.item), evidence: requireEvidence(source) };
+}
+
+export function parseMemoryItemEvidence(value: unknown): MemoryEvidenceLink[] {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  return requireEvidence(source);
+}
+
+export function parseMemoryItemEvents(value: unknown): MemoryItemEvent[] {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  const rows = arrayField(source, "events");
+  if (rows === null) throw new WireShapeError();
+  return rows.map((row) => {
+    const id = str(row, "id");
+    const action = str(row, "action");
+    const createdAtMs = num(row, "createdAtMs");
+    const detail = record(record(row)?.detail);
+    if (id === undefined || action === undefined || createdAtMs === undefined || detail === null) {
+      throw new WireShapeError();
+    }
+    const event: MemoryItemEvent = { id, action, detail, createdAtMs };
+    const actorMemberId = str(row, "actorMemberId");
+    if (actorMemberId !== undefined) event.actorMemberId = actorMemberId;
+    return event;
+  });
+}
+
+export function parseEditedMemoryItem(value: unknown): EditedMemoryItem {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  const supersededId = str(source, "supersededId");
+  if (supersededId === undefined) throw new WireShapeError();
+  return { item: requireItem(source.item), evidence: requireEvidence(source), supersededId };
+}
+
+/** How many item rows a forget removed (the item plus its older versions). */
+export function parseForgottenCount(value: unknown): number {
+  const count = num(value, "forgottenCount");
+  if (count === undefined) throw new WireShapeError();
+  return count;
+}
+
 /**
  * The missed-conversation card shows nothing until the worker has caught up to
  * the reader's cursor; `summarizedThroughSeq` tells "nothing to summarize" from

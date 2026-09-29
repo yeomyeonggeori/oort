@@ -520,9 +520,340 @@ pub async fn search_items_in_tx(
         .collect())
 }
 
+// ---------------------------------------------------------------------------
+// memory browser: items (#3208, ADR-0196 D9 / D12 V4)
+// ---------------------------------------------------------------------------
+//
+// Reads are RLS only (`mem_item` / `mem_evidence` / `mem_event` read policies; the viewer is
+// `app.member_id`, bound by [`bind_mem_reader_guc`]). No statement below re-derives "may this
+// member read it" — the `WHERE` clauses select *which* rows were asked for. The two writes are
+// the definer functions of migration 105; they derive the actor from `app.member_id` themselves.
+
+/// One `mem_item` the caller can read.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemItem {
+    pub id: Uuid,
+    pub channel_id: Uuid,
+    /// `channel` | `personal`.
+    pub space_kind: String,
+    pub kind: String,
+    /// `extracted` | `confirmed` | `curated` | `synthesized`.
+    pub origin: String,
+    pub body: String,
+    pub subject_key: Option<String>,
+    pub valid_from: DateTime<Utc>,
+    pub valid_to: Option<DateTime<Utc>>,
+    pub recorded_at: DateTime<Utc>,
+    pub retired_at: Option<DateTime<Utc>>,
+    pub retired_reason: Option<String>,
+    /// The version this one replaced (an edit).
+    pub supersedes_id: Option<Uuid>,
+    /// The version that replaced this one (set on a retired-by-edit item).
+    pub superseded_by_id: Option<Uuid>,
+    pub confidence: f32,
+    pub source_count: i32,
+}
+
+const ITEM_COLS: &str = "i.id, i.channel_id, i.space_kind, i.kind, i.origin, i.body, \
+     i.subject_key, i.valid_from, i.valid_to, i.recorded_at, i.retired_at, i.retired_reason, \
+     i.supersedes_id, \
+     (SELECT s.id FROM mem_item s WHERE s.supersedes_id = i.id LIMIT 1) AS superseded_by_id, \
+     i.confidence, i.source_count";
+
+fn item_from_row(row: &sqlx::postgres::PgRow) -> Result<MemItem, sqlx::Error> {
+    Ok(MemItem {
+        id: row.try_get("id")?,
+        channel_id: row.try_get("channel_id")?,
+        space_kind: row.try_get("space_kind")?,
+        kind: row.try_get("kind")?,
+        origin: row.try_get("origin")?,
+        body: row.try_get("body")?,
+        subject_key: row.try_get("subject_key")?,
+        valid_from: row.try_get("valid_from")?,
+        valid_to: row.try_get("valid_to")?,
+        recorded_at: row.try_get("recorded_at")?,
+        retired_at: row.try_get("retired_at")?,
+        retired_reason: row.try_get("retired_reason")?,
+        supersedes_id: row.try_get("supersedes_id")?,
+        superseded_by_id: row.try_get("superseded_by_id")?,
+        confidence: row.try_get("confidence")?,
+        source_count: row.try_get("source_count")?,
+    })
+}
+
+/// Which lifecycle the list shows. `forgotten` items are deleted, and `wrong` ones are hidden by
+/// the read rule, so neither is reachable through any status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemStatus {
+    /// Not retired (the default).
+    Active,
+    /// Retired but still readable (`edited`, and later `merged` / `decayed` / `source_*`).
+    History,
+    All,
+}
+
+impl ItemStatus {
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "active" => Some(Self::Active),
+            "history" => Some(Self::History),
+            "all" => Some(Self::All),
+            _ => None,
+        }
+    }
+}
+
+/// The item kinds (`mem_item_kind_ck`).
+pub const MEM_ITEM_KINDS: [&str; 5] = ["decision", "fact", "commitment", "preference", "procedure"];
+
+pub const MEM_ITEM_LIMIT_DEFAULT: i64 = 20;
+pub const MEM_ITEM_LIMIT_MAX: i64 = 100;
+
+pub fn clamp_mem_item_limit(requested: Option<i64>) -> i64 {
+    match requested {
+        Some(value) if value > 0 => value.min(MEM_ITEM_LIMIT_MAX),
+        _ => MEM_ITEM_LIMIT_DEFAULT,
+    }
+}
+
+/// Selector for the item list. Every field only chooses *which* rows; visibility is the policy's.
+#[derive(Debug, Clone, Copy)]
+pub struct ItemListFilter<'a> {
+    pub channel_id: Option<Uuid>,
+    pub kind: Option<&'a str>,
+    pub status: ItemStatus,
+    /// Keyset: strictly older than `(recorded_at, id)` in `recorded_at DESC, id DESC` order.
+    pub before: Option<(DateTime<Utc>, Uuid)>,
+    pub limit: i64,
+}
+
+/// Items, newest first. Which of them the caller may see is entirely the read policy's decision.
+pub async fn list_items_in_tx(
+    conn: &mut PgConnection,
+    filter: &ItemListFilter<'_>,
+) -> Result<Vec<MemItem>, DbError> {
+    let sql = format!(
+        "SELECT {ITEM_COLS} FROM mem_item i \
+          WHERE ($1::uuid IS NULL OR i.channel_id = $1) \
+            AND ($2::text IS NULL OR i.kind = $2) \
+            AND ($3::text = 'all' \
+                 OR ($3 = 'active' AND i.retired_at IS NULL) \
+                 OR ($3 = 'history' AND i.retired_at IS NOT NULL)) \
+            AND ($4::timestamptz IS NULL OR (i.recorded_at, i.id) < ($4, $5)) \
+          ORDER BY i.recorded_at DESC, i.id DESC \
+          LIMIT $6"
+    );
+    let status = match filter.status {
+        ItemStatus::Active => "active",
+        ItemStatus::History => "history",
+        ItemStatus::All => "all",
+    };
+    let rows = sqlx::query(&sql)
+        .bind(filter.channel_id)
+        .bind(filter.kind)
+        .bind(status)
+        .bind(filter.before.map(|(at, _)| at))
+        .bind(filter.before.map(|(_, id)| id).unwrap_or_else(Uuid::nil))
+        .bind(filter.limit)
+        .fetch_all(&mut *conn)
+        .await?;
+    rows.iter()
+        .map(item_from_row)
+        .collect::<Result<_, _>>()
+        .map_err(DbError::from)
+}
+
+/// The items a keyword search matched, with their full rows and the search order/score.
+/// `mem_search_items` (RLS-equivalent, see [`search_items_in_tx`]) picks and ranks; the rows are
+/// then read back **through the read policy again** so the response carries the same shape as the
+/// list, and `channel_id` / `kind` narrow the hits. Search covers live items only (the function
+/// skips retired ones), so it takes no status.
+pub async fn search_item_rows_in_tx(
+    conn: &mut PgConnection,
+    query: &str,
+    channel_id: Option<Uuid>,
+    kind: Option<&str>,
+    limit: Option<i64>,
+) -> Result<Vec<(MemItem, f32)>, DbError> {
+    let hits = search_items_in_tx(conn, query, limit).await?;
+    if hits.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<Uuid> = hits.iter().map(|hit| hit.id).collect();
+    let sql = format!(
+        "SELECT {ITEM_COLS} FROM mem_item i \
+          WHERE i.id = ANY($1) \
+            AND ($2::uuid IS NULL OR i.channel_id = $2) \
+            AND ($3::text IS NULL OR i.kind = $3)"
+    );
+    let rows = sqlx::query(&sql)
+        .bind(&ids)
+        .bind(channel_id)
+        .bind(kind)
+        .fetch_all(&mut *conn)
+        .await?;
+    let mut by_id = std::collections::HashMap::new();
+    for row in &rows {
+        let item = item_from_row(row)?;
+        by_id.insert(item.id, item);
+    }
+    Ok(hits
+        .iter()
+        .filter_map(|hit| by_id.remove(&hit.id).map(|item| (item, hit.score)))
+        .collect())
+}
+
+/// One item by id; `None` when it does not exist **or** the policy hides it (the caller cannot
+/// tell which — a 404 either way).
+pub async fn get_item_in_tx(
+    conn: &mut PgConnection,
+    item_id: Uuid,
+) -> Result<Option<MemItem>, DbError> {
+    let sql = format!("SELECT {ITEM_COLS} FROM mem_item i WHERE i.id = $1");
+    let row = sqlx::query(&sql)
+        .bind(item_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    row.as_ref()
+        .map(item_from_row)
+        .transpose()
+        .map_err(DbError::from)
+}
+
+/// One evidence link of an item: the source message to link back to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemItemEvidence {
+    pub item_id: Uuid,
+    pub message_id: Uuid,
+    pub channel_id: Uuid,
+    pub seq: i64,
+}
+
+/// Evidence links for items the caller has already read, in message order. `mem_evidence` has its
+/// own read policy (the caller must read the evidence channel).
+pub async fn evidence_for_items_in_tx(
+    conn: &mut PgConnection,
+    item_ids: &[Uuid],
+) -> Result<Vec<MemItemEvidence>, DbError> {
+    if item_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows = sqlx::query(
+        "SELECT e.item_id, e.message_id, e.channel_id, m.seq \
+           FROM mem_evidence e \
+           JOIN message m ON m.id = e.message_id AND m.workspace_id = e.workspace_id \
+          WHERE e.item_id = ANY($1) \
+          ORDER BY e.item_id, m.seq, e.message_id",
+    )
+    .bind(item_ids)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(MemItemEvidence {
+                item_id: row.try_get("item_id")?,
+                message_id: row.try_get("message_id")?,
+                channel_id: row.try_get("channel_id")?,
+                seq: row.try_get("seq")?,
+            })
+        })
+        .collect::<Result<_, sqlx::Error>>()
+        .map_err(DbError::from)
+}
+
+/// One `mem_event` row of an item (ids and counts only — the ledger never holds text).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemItemEvent {
+    pub id: Uuid,
+    /// `created` | `edited` | `superseded` | ...
+    pub action: String,
+    pub actor_member_id: Option<Uuid>,
+    pub detail: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+}
+
+/// The lifecycle of one item, oldest first. The `mem_event` read policy shows an item's events only
+/// to someone who can read the item.
+pub async fn list_item_events_in_tx(
+    conn: &mut PgConnection,
+    item_id: Uuid,
+) -> Result<Vec<MemItemEvent>, DbError> {
+    let rows = sqlx::query(
+        "SELECT id, action, actor_member_id, detail, created_at FROM mem_event \
+          WHERE target_kind = 'item' AND target_id = $1 \
+          ORDER BY created_at, id",
+    )
+    .bind(item_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(MemItemEvent {
+                id: row.try_get("id")?,
+                action: row.try_get("action")?,
+                actor_member_id: row.try_get("actor_member_id")?,
+                detail: row.try_get("detail")?,
+                created_at: row.try_get("created_at")?,
+            })
+        })
+        .collect::<Result<_, sqlx::Error>>()
+        .map_err(DbError::from)
+}
+
+/// Edit an item (ADR-0196 D4/D9): `mem_edit_item` adds a new `curated` item that supersedes the
+/// old one and retires the old one as `edited`; the new item's id is returned. The function derives
+/// the actor from `app.member_id`, refuses anyone who may not read the item with `P0002` (the same
+/// answer as a missing id), and re-checks everything itself — the caller passes no member.
+/// SQLSTATEs the caller maps: `42501` (not an active human / wrong session), `P0002` (not found
+/// or not readable), `55000` (already retired), `22023` (nothing changed), `23514` (invalid body
+/// or kind), `23505` (identical live item exists).
+pub async fn edit_item_in_tx(
+    conn: &mut PgConnection,
+    item_id: Uuid,
+    body: &str,
+    kind: Option<&str>,
+) -> Result<Uuid, DbError> {
+    let id: Uuid = sqlx::query_scalar("SELECT mem_edit_item($1, $2, $3)")
+        .bind(item_id)
+        .bind(body)
+        .bind(kind)
+        .fetch_one(&mut *conn)
+        .await?;
+    Ok(id)
+}
+
+/// Forget an item (ADR-0196 D9/D10): `mem_forget_item` permanently deletes it and its older
+/// versions and their evidence links, leaving only ids in `mem_event`. Returns how many item rows
+/// were removed. SQLSTATEs: `42501`, `P0002` (not found / not readable), `55000` (a newer version
+/// exists — forget that one).
+pub async fn forget_item_in_tx(conn: &mut PgConnection, item_id: Uuid) -> Result<i32, DbError> {
+    let removed: i32 = sqlx::query_scalar("SELECT mem_forget_item($1)")
+        .bind(item_id)
+        .fetch_one(&mut *conn)
+        .await?;
+    Ok(removed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn item_status_parses_the_three_values_only() {
+        assert_eq!(ItemStatus::parse("active"), Some(ItemStatus::Active));
+        assert_eq!(ItemStatus::parse("history"), Some(ItemStatus::History));
+        assert_eq!(ItemStatus::parse("all"), Some(ItemStatus::All));
+        assert_eq!(ItemStatus::parse("forgotten"), None);
+        assert_eq!(ItemStatus::parse(""), None);
+    }
+
+    #[test]
+    fn item_limit_clamps_to_default_and_max() {
+        assert_eq!(clamp_mem_item_limit(None), MEM_ITEM_LIMIT_DEFAULT);
+        assert_eq!(clamp_mem_item_limit(Some(-1)), MEM_ITEM_LIMIT_DEFAULT);
+        assert_eq!(clamp_mem_item_limit(Some(5)), 5);
+        assert_eq!(clamp_mem_item_limit(Some(9_999)), MEM_ITEM_LIMIT_MAX);
+    }
 
     #[test]
     fn digest_limit_clamps_to_default_and_max() {

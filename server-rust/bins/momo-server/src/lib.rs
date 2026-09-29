@@ -855,6 +855,26 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/memory/settings",
             patch(routes::memory::patch_channel_settings),
         )
+        // ADR-0196 D9 / D12 V4 / #3208 — the memory browser: item list + search, detail, evidence,
+        // event ledger, edit (supersede) and forget (permanent delete). Human only, RLS decides.
+        .route(
+            "/v1/workspaces/{ws}/memory/items",
+            get(routes::memory::list_items),
+        )
+        .route(
+            "/v1/workspaces/{ws}/memory/items/{id}",
+            get(routes::memory::get_item)
+                .patch(routes::memory::edit_item)
+                .delete(routes::memory::forget_item),
+        )
+        .route(
+            "/v1/workspaces/{ws}/memory/items/{id}/evidence",
+            get(routes::memory::get_item_evidence),
+        )
+        .route(
+            "/v1/workspaces/{ws}/memory/items/{id}/events",
+            get(routes::memory::get_item_events),
+        )
         // ADR-0175 / #1888 — personal message reminders. Human-only, owner
         // scoped, no outbox fan-out (v1 is a client poll).
         .route(

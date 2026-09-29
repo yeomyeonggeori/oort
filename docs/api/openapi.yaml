@@ -121,11 +121,14 @@ tags:
       v1 has no outbox fan-out — clients poll the list.
   - name: memory
     description: >
-      ADR-0196 team memory v2 (M1) — channel/thread digests with evidence links,
-      the per-run receipt behind the 「기억 n개 참고」 chip, and the switches
-      (workspace, channel exclude/pause, personal pause). Human-only. Visibility
-      and write authority are decided by database row-level security, not by the
-      handler: a row the caller may not read is simply absent.
+      ADR-0196 team memory v2 — channel/thread digests with evidence links,
+      the per-run receipt behind the 「기억 n개 참고」 chip, the switches
+      (workspace, channel exclude/pause, personal pause), and (M2) the memory
+      browser: items with list/search, detail, evidence, event ledger, edit and
+      forget. Human-only. Visibility and write authority are decided by database
+      row-level security and the definer functions, not by the handler: a row the
+      caller may not read is simply absent, and a write on one is a 404 identical
+      to a missing id (no existence oracle).
   - name: sidebar
     description: >
       ADR-0177 member-owned sidebar organization — custom sections, channel
@@ -3456,6 +3459,327 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "422":
           description: Unknown field or a value the schema rejects.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/memory/items:
+    get:
+      tags: [memory]
+      operationId: listMemoryItems
+      summary: Memory browser — items the caller may read, or a keyword search.
+      description: >
+        ADR-0196 D9/D12 V4 (#3208). Without `q`: newest first (`recordedAt desc,
+        id desc`) with a keyset `nextCursor`, filtered by `channelId`, `kind` and
+        `status` (`active` = not retired, the default; `history` = retired but
+        still readable, e.g. edited-away versions; `all`). With `q`: the ranked
+        keyword search (`mem_search_items`) over **current** items — at most 50
+        hits, no cursor, `status` must be `active`; each hit carries a `score`.
+        **Visibility is row-level security** (the same rule as digests): an item
+        whose stored channel or any evidence channel the caller cannot read, whose
+        evidence was edited or deleted, that is stale, or that lives in someone
+        else's personal space is simply absent. A channel the caller cannot read
+        answers an empty list with 200 — never 403/404, and never a count that
+        would hint at hidden items. Forgotten items are deleted and appear nowhere.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: channelId
+          in: query
+          schema: {type: string, format: uuid}
+        - name: kind
+          in: query
+          schema:
+            $ref: "#/components/schemas/MemoryItemKind"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, history, all]
+            default: active
+        - name: q
+          in: query
+          description: Keyword search text (cut to 200 characters). Incompatible with `cursor` and with a `status` other than `active`.
+          schema: {type: string}
+        - name: cursor
+          in: query
+          description: Opaque `nextCursor` of the previous page.
+          schema: {type: string}
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: The item page (possibly empty).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryItemListResponse"
+        "400":
+          description: Invalid channel id, kind, status, cursor, or a search combined with a cursor/non-active status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive (e.g. suspended) membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/memory/items/{itemId}:
+    get:
+      tags: [memory]
+      operationId: getMemoryItem
+      summary: One memory item with its evidence back-links.
+      description: >
+        An item the caller may not read — hidden by row-level security, forgotten
+        (deleted) or nonexistent — is a 404; the cases are indistinguishable.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/MemoryItemId"
+      responses:
+        "200":
+          description: The item and its evidence.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryItemDetailResponse"
+        "400":
+          description: Invalid item id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Item not found or not readable by the caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    patch:
+      tags: [memory]
+      operationId: editMemoryItem
+      summary: Edit an item — a new curated item supersedes it; the old one stays as history.
+      description: >
+        ADR-0196 D4/D9. **Add-only**: the server inserts a new item
+        (`origin=curated`, `supersedesId` = this item, same channel/space/evidence
+        links) and retires this one as `edited`, logging `edited`/`superseded`
+        events (ids only) and an audit row in the same transaction. **Who may**
+        (D9 「근거 채널 멤버」): anyone who can read the item — its stored channel and
+        every evidence channel, or, for a personal item, its owner. This is the
+        same rule as reading, evaluated in the database; there is no admin
+        override. Anyone else, and a nonexistent id, gets an identical 404.
+        A version that was already retired, or replaced, is a 409 (reload). The
+        text must be 1–600 characters, differ from the current one, and must not
+        look like a credential (422).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/MemoryItemId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EditMemoryItemRequest"
+      responses:
+        "200":
+          description: The new item, its evidence, and the id it superseded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EditMemoryItemResponse"
+        "400":
+          description: Invalid item id or kind.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Item not found or not readable by the caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The item is no longer current (already edited/retired), or an identical live item exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Empty, over-long, unchanged or credential-shaped text, or an unknown field.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    delete:
+      tags: [memory]
+      operationId: forgetMemoryItem
+      summary: Forget an item — permanent deletion.
+      description: >
+        ADR-0196 D9/D10 「잊기 = 즉시 영구 삭제」. The item, its older (edited-away)
+        versions and their evidence links are **deleted**, not hidden; the event
+        ledger keeps only ids. There is no undo. Same permission and the same 404
+        as edit. Forgetting a version that has a newer one is a 409 — forget the
+        newest version, which removes the whole chain.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/MemoryItemId"
+      responses:
+        "200":
+          description: How many item rows were removed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ForgetMemoryItemResponse"
+        "400":
+          description: Invalid item id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Item not found or not readable by the caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: A newer version exists; forget the newest version.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/memory/items/{itemId}/evidence:
+    get:
+      tags: [memory]
+      operationId: getMemoryItemEvidence
+      summary: The source messages of an item, for links back to them.
+      description: Message ids with channel and seq only — never message text. 404 like the item.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/MemoryItemId"
+      responses:
+        "200":
+          description: The evidence links, in message order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryItemEvidenceResponse"
+        "400":
+          description: Invalid item id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Item not found or not readable by the caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/memory/items/{itemId}/events:
+    get:
+      tags: [memory]
+      operationId: getMemoryItemEvents
+      summary: The lifecycle ledger of an item, oldest first.
+      description: >
+        `created`, `edited`, `superseded`, ... with the acting member and a
+        `detail` of ids, kinds and counts — never memory text. Visible only to
+        someone who can read the item (404 otherwise). A forgotten item's events
+        are no longer readable.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/MemoryItemId"
+      responses:
+        "200":
+          description: The events.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryItemEventsResponse"
+        "400":
+          description: Invalid item id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Item not found or not readable by the caller.
           content:
             application/json:
               schema:
@@ -8944,6 +9268,14 @@ components:
       schema:
         type: string
         format: uuid
+    MemoryItemId:
+      name: itemId
+      in: path
+      required: true
+      description: UUIDv7 team-memory item id (ADR-0196 `mem_item`; not the legacy `memoryId`).
+      schema:
+        type: string
+        format: uuid
     HuddleId:
       name: huddleId
       in: path
@@ -11747,6 +12079,107 @@ components:
       required: [receipt]
       properties:
         receipt: {$ref: "#/components/schemas/MemoryReceipt"}
+
+    MemoryItemKind:
+      type: string
+      enum: [decision, fact, commitment, preference, procedure]
+
+    MemoryItem:
+      type: object
+      required: [id, channelId, spaceKind, kind, origin, body, validFromMs, recordedAtMs, confidence, sourceCount]
+      properties:
+        id: {type: string, format: uuid}
+        channelId: {type: string, format: uuid, description: The one channel (a personal item's DM) the item is stored in.}
+        spaceKind: {type: string, enum: [channel, personal]}
+        kind: {$ref: "#/components/schemas/MemoryItemKind"}
+        origin: {type: string, enum: [extracted, confirmed, curated, synthesized]}
+        body: {type: string, maxLength: 600}
+        subjectKey: {type: string}
+        validFromMs: {type: integer, format: int64}
+        validToMs: {type: integer, format: int64}
+        recordedAtMs: {type: integer, format: int64}
+        retiredAtMs: {type: integer, format: int64}
+        retiredReason:
+          type: string
+          description: Present on history items, e.g. `edited` (kept as history) — forgotten items are deleted, not retired.
+        supersedesId: {type: string, format: uuid, description: The version this one replaced.}
+        supersededById: {type: string, format: uuid, description: The version that replaced this one.}
+        confidence: {type: number, format: float}
+        sourceCount: {type: integer, format: int32}
+        score: {type: number, format: float, description: Search results only, best first.}
+
+    MemoryItemListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/MemoryItem"}
+        nextCursor: {type: string, description: Absent on the last page and for a search.}
+
+    MemoryItemDetailResponse:
+      type: object
+      required: [item, evidence]
+      properties:
+        item: {$ref: "#/components/schemas/MemoryItem"}
+        evidence:
+          type: array
+          items: {$ref: "#/components/schemas/MemoryEvidenceLink"}
+
+    MemoryItemEvidenceResponse:
+      type: object
+      required: [evidence]
+      properties:
+        evidence:
+          type: array
+          items: {$ref: "#/components/schemas/MemoryEvidenceLink"}
+
+    MemoryItemEvent:
+      type: object
+      required: [id, action, detail, createdAtMs]
+      properties:
+        id: {type: string, format: uuid}
+        action:
+          type: string
+          description: "`created`, `edited`, `superseded`, ..."
+        actorMemberId: {type: string, format: uuid}
+        detail:
+          type: object
+          additionalProperties: true
+          description: Ids, kinds and counts only — never memory text.
+        createdAtMs: {type: integer, format: int64}
+
+    MemoryItemEventsResponse:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          items: {$ref: "#/components/schemas/MemoryItemEvent"}
+
+    EditMemoryItemRequest:
+      type: object
+      additionalProperties: false
+      required: [body]
+      properties:
+        body: {type: string, minLength: 1, maxLength: 600}
+        kind: {$ref: "#/components/schemas/MemoryItemKind"}
+
+    EditMemoryItemResponse:
+      type: object
+      required: [item, evidence, supersededId]
+      properties:
+        item: {$ref: "#/components/schemas/MemoryItem"}
+        evidence:
+          type: array
+          items: {$ref: "#/components/schemas/MemoryEvidenceLink"}
+        supersededId: {type: string, format: uuid}
+
+    ForgetMemoryItemResponse:
+      type: object
+      required: [forgottenCount]
+      properties:
+        forgottenCount: {type: integer, format: int32, description: Item rows permanently removed — the item plus its older versions.}
 
     WorkspaceMemorySettings:
       type: object

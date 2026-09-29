@@ -127,12 +127,15 @@ pub use member_rename::{
     DisplayNameRename, HandleChangeRejected, HandleRename, MEMBER_RENAMED_BROADCAST_TYPE,
 };
 pub use memory::{
-    bind_mem_reader_guc, clamp_mem_digest_limit, digests_by_ids_in_tx, evidence_for_digests_in_tx,
-    get_digest_in_tx, get_serving_in_tx, last_read_seq_in_tx, list_digests_in_tx,
-    list_settings_in_tx, search_items_in_tx, summarized_through_seq_in_tx,
-    upsert_channel_settings_in_tx, upsert_member_settings_in_tx, upsert_workspace_settings_in_tx,
-    DigestListFilter, MemDigest, MemEvidence, MemItemHit, MemServing, MemSettingsRow,
-    MEM_DIGEST_LIMIT_DEFAULT, MEM_DIGEST_LIMIT_MAX, MEM_ITEM_SEARCH_LIMIT_DEFAULT,
+    bind_mem_reader_guc, clamp_mem_digest_limit, clamp_mem_item_limit, digests_by_ids_in_tx,
+    edit_item_in_tx, evidence_for_digests_in_tx, evidence_for_items_in_tx, forget_item_in_tx,
+    get_digest_in_tx, get_item_in_tx, get_serving_in_tx, last_read_seq_in_tx, list_digests_in_tx,
+    list_item_events_in_tx, list_items_in_tx, list_settings_in_tx, search_item_rows_in_tx,
+    search_items_in_tx, summarized_through_seq_in_tx, upsert_channel_settings_in_tx,
+    upsert_member_settings_in_tx, upsert_workspace_settings_in_tx, DigestListFilter,
+    ItemListFilter, ItemStatus, MemDigest, MemEvidence, MemItem, MemItemEvent, MemItemEvidence,
+    MemItemHit, MemServing, MemSettingsRow, MEM_DIGEST_LIMIT_DEFAULT, MEM_DIGEST_LIMIT_MAX,
+    MEM_ITEM_KINDS, MEM_ITEM_LIMIT_DEFAULT, MEM_ITEM_LIMIT_MAX, MEM_ITEM_SEARCH_LIMIT_DEFAULT,
     MEM_ITEM_SEARCH_LIMIT_MAX,
 };
 pub use message::{

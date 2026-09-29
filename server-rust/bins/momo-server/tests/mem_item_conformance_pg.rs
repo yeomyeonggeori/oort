@@ -2783,10 +2783,12 @@ async fn secret_shapes_prose_passwords_and_retired_items() {
 
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
-async fn the_definer_may_only_mark_stale_and_the_deny_policies_are_restrictive() {
+async fn the_definer_may_only_mark_stale_retire_and_delete_and_the_deny_policies_are_restrictive() {
     let (su, _app, wk, w) = setup().await;
     let it = seed_items(&su, &wk, &w).await;
-    // L-5: mem_definer's UPDATE is limited to `stale` by a column privilege ...
+    // L-5: mem_definer's UPDATE is limited to `stale` and (since 105, #3208: an edit retires the old
+    // version) `retired_at` / `retired_reason` by column privileges; it may DELETE (a forget). The body
+    // and every other column stay unwritable ...
     let as_definer = |sql: String| {
         let su = su.clone();
         let ws = w.ws;
@@ -2816,6 +2818,14 @@ async fn the_definer_may_only_mark_stale_and_the_deny_policies_are_restrictive()
             it.gen_item
         ))
         .await,
+        Ok(1)
+    );
+    assert_eq!(
+        as_definer(format!(
+            "UPDATE mem_item SET confidence = 0 WHERE id = '{}'",
+            it.gen_item
+        ))
+        .await,
         Err("42501".to_string())
     );
     assert_eq!(
@@ -2828,7 +2838,7 @@ async fn the_definer_may_only_mark_stale_and_the_deny_policies_are_restrictive()
     );
     assert_eq!(
         as_definer(format!("DELETE FROM mem_item WHERE id = '{}'", it.gen_item)).await,
-        Err("42501".to_string())
+        Ok(1)
     );
     // ... and a permissive write policy added for the API role later cannot open the door (RESTRICTIVE deny).
     let attempt = |drop_restrictive: bool| {
