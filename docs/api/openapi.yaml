@@ -10110,6 +10110,11 @@ components:
           type: string
           minLength: 1
           maxLength: 200
+          description: >-
+            With `modelSource: instance_default` this is only the fallback that
+            runs when the team's 기본 AI row names no model.
+        modelSource:
+          $ref: "#/components/schemas/AgentModelSource"
         baseUrl:
           type: string
           format: uri
@@ -10147,11 +10152,29 @@ components:
         profile:
           $ref: "#/components/schemas/AgentProfileInput"
 
+    AgentModelSource:
+      type: string
+      enum: [agent, instance_default]
+      description: >-
+        Where the agent's model comes from (#3147, ADR-0147 증보 2026-09-29).
+        `agent`: `model` is the agent's own choice and the team's 기본 AI row
+        never applies (create default). `instance_default`: the agent follows
+        the instance default — the team row applies. An explicit request
+        `routing.model` or an applied `modelPref` is always the agent's choice.
+        The resolved value rides every `agent_job` payload as `model_source`.
+
     AgentProfileInput:
       type: object
       additionalProperties: false
       required: [instructions]
       properties:
+        modelSource:
+          allOf:
+            - $ref: "#/components/schemas/AgentModelSource"
+          description: >-
+            On a profile PUT: sets `agent.model_source`; omitted leaves it
+            unchanged. Ignored on the create body's `profile` (the create body's
+            own `modelSource` decides).
         instructions:
           type: string
           description: UTF-8 content is limited to 8192 bytes by the server.
@@ -10197,8 +10220,9 @@ components:
       type: object
       required:
         [agentMemberId, workspaceId, instructions, enabledTools, triggers, paused,
-         version, updatedBy, updatedAtMs]
+         version, updatedBy, updatedAtMs, modelSource]
       properties:
+        modelSource: {$ref: "#/components/schemas/AgentModelSource"}
         agentMemberId: {type: string, format: uuid}
         workspaceId: {type: string, format: uuid}
         instructions: {type: string}

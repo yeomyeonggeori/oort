@@ -12,6 +12,7 @@
 //! | test | revert that makes it red |
 //! |---|---|
 //! | `the_model_precedence_is_agent_then_team_row_then_env_default` | apply the row over an agent's own model, or stop applying it to an agent on the instance default, or ignore `model_id` |
+//! | `the_model_source_decides_not_the_models_name` | decide by comparing the payload model with `AGENT_MODEL` again (#3146 heuristic), or treat an absent `model_source` as `instance_default` |
 //! | `a_row_on_a_chain_hop_calls_that_hop_and_no_other` | keep calling the head link for a position >= 1 |
 //! | `a_row_whose_link_changed_refuses_honestly_and_calls_no_model` | drop the label comparison, or fall back to the head link / `AGENT_MODEL` when it fails |
 //! | `the_summary_row_is_the_welcome_openers_and_the_team_row_is_the_mentions` | read one role for both jobs |
@@ -264,10 +265,12 @@ async fn seed(su: &PgPool, agent_model: &str) -> Tenant {
 
 /// A mention turn exactly as the send route freezes it. `model` is what the
 /// server stamped on the payload (the agent's resolved model).
-async fn enqueue_mention(pool: &PgPool, t: &Tenant, model: &str) -> Uuid {
+/// `source` is the payload's `model_source` (`None`: the key is absent).
+async fn enqueue_mention(pool: &PgPool, t: &Tenant, model: &str, source: Option<&str>) -> Uuid {
     let (workspace_id, channel_id, human, agent) =
         (t.workspace_id, t.channel_id, t.human_id, t.agent_id);
     let model = model.to_string();
+    let source = source.map(str::to_string);
     with_tenant_tx(pool, workspace_id, move |conn| {
         Box::pin(async move {
             let sent = send_message_in_tx(
@@ -307,6 +310,7 @@ async fn enqueue_mention(pool: &PgPool, t: &Tenant, model: &str) -> Uuid {
                     "trigger_message_id": sent.message.id,
                     "trigger_message_seq": sent.message.seq,
                     "model": model,
+                    "model_source": source,
                     "prompt": "정리해 줘",
                     "recent_messages": [{
                         "message_id": sent.message.id, "channel_id": channel_id,
@@ -330,10 +334,11 @@ async fn enqueue_mention(pool: &PgPool, t: &Tenant, model: &str) -> Uuid {
     .expect("enqueue mention")
 }
 
-async fn enqueue_welcome(pool: &PgPool, t: &Tenant, model: &str) {
+async fn enqueue_welcome(pool: &PgPool, t: &Tenant, model: &str, source: Option<&str>) {
     let (workspace_id, channel_id, human, agent) =
         (t.workspace_id, t.channel_id, t.human_id, t.agent_id);
     let model = model.to_string();
+    let source = source.map(str::to_string);
     with_tenant_tx(pool, workspace_id, move |conn| {
         Box::pin(async move {
             emit_outbox(
@@ -347,6 +352,7 @@ async fn enqueue_welcome(pool: &PgPool, t: &Tenant, model: &str) {
                     "agent_member_id": agent,
                     "author_member_id": human,
                     "model": model,
+                    "model_source": source,
                     "prompt": "첫 인사",
                     "welcome_kind": "opener",
                     "created_from": WELCOME_JOB_CREATED_FROM,
@@ -458,7 +464,7 @@ async fn the_model_precedence_is_agent_then_team_row_then_env_default() {
     // Tier 3: no row — the turn runs on the instance default, as before.
     let provider = Arc::new(MockChatProvider::echo());
     let w = worker(&provider).await;
-    enqueue_mention(&su, &t, INSTANCE_DEFAULT).await;
+    enqueue_mention(&su, &t, INSTANCE_DEFAULT, Some("instance_default")).await;
     assert_eq!(drain(&w).await.answered, 1);
     assert_eq!(provider.calls()[0].model, INSTANCE_DEFAULT, "tier 3");
 
@@ -475,7 +481,7 @@ async fn the_model_precedence_is_agent_then_team_row_then_env_default() {
     .await;
     let provider = Arc::new(MockChatProvider::echo());
     let w = worker(&provider).await;
-    enqueue_mention(&su, &t, INSTANCE_DEFAULT).await;
+    enqueue_mention(&su, &t, INSTANCE_DEFAULT, Some("instance_default")).await;
     assert_eq!(drain(&w).await.answered, 1);
     let call = &provider.calls()[0];
     assert_eq!(call.model, "team-model-x", "tier 2 beats AGENT_MODEL");
@@ -485,7 +491,7 @@ async fn the_model_precedence_is_agent_then_team_row_then_env_default() {
     // never an override (brief §4.2).
     let provider = Arc::new(MockChatProvider::echo());
     let w = worker(&provider).await;
-    enqueue_mention(&su, &t, "agent-own-model").await;
+    enqueue_mention(&su, &t, "agent-own-model", Some("agent")).await;
     assert_eq!(drain(&w).await.answered, 1);
     assert_eq!(provider.calls()[0].model, "agent-own-model", "tier 1");
 
@@ -493,7 +499,7 @@ async fn the_model_precedence_is_agent_then_team_row_then_env_default() {
     put_row(&su, t.human_id, DefaultAiRole::TeamAgent, 0, HEAD_URL, None).await;
     let provider = Arc::new(MockChatProvider::echo());
     let w = worker(&provider).await;
-    enqueue_mention(&su, &t, INSTANCE_DEFAULT).await;
+    enqueue_mention(&su, &t, INSTANCE_DEFAULT, Some("instance_default")).await;
     assert_eq!(drain(&w).await.answered, 1);
     assert_eq!(provider.calls()[0].model, INSTANCE_DEFAULT);
 
@@ -509,9 +515,82 @@ async fn the_model_precedence_is_agent_then_team_row_then_env_default() {
     .await;
     let provider = Arc::new(MockChatProvider::echo());
     let w = worker(&provider).await;
-    enqueue_mention(&su, &t, "").await;
+    enqueue_mention(&su, &t, "", Some("instance_default")).await;
     assert_eq!(drain(&w).await.answered, 1);
     assert_eq!(provider.calls()[0].model, "team-model-x");
+    leave_instance_empty(&su).await;
+}
+
+/// #3147 — the payload's `model_source` decides, not the model's name.
+///
+/// Under #3146's heuristic ("payload model empty or == `AGENT_MODEL`") case (a)
+/// applied the row to an agent that deliberately chose the instance's own model
+/// name, and case (b) skipped the row for an agent that follows the instance
+/// default but stores another placeholder name.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn the_model_source_decides_not_the_models_name() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, INSTANCE_DEFAULT).await;
+    seed_links(&su, t.human_id, false).await;
+    put_row(
+        &su,
+        t.human_id,
+        DefaultAiRole::TeamAgent,
+        0,
+        HEAD_URL,
+        Some("team-model-x"),
+    )
+    .await;
+    put_row(
+        &su,
+        t.human_id,
+        DefaultAiRole::Summary,
+        0,
+        HEAD_URL,
+        Some("summary-model"),
+    )
+    .await;
+
+    // (a) The agent CHOSE a model that happens to be named like AGENT_MODEL: its
+    // own choice stands, the row is not applied.
+    let provider = Arc::new(MockChatProvider::echo());
+    let w = worker(&provider).await;
+    enqueue_mention(&su, &t, INSTANCE_DEFAULT, Some("agent")).await;
+    assert_eq!(drain(&w).await.answered, 1);
+    assert_eq!(provider.calls()[0].model, INSTANCE_DEFAULT, "(a)");
+
+    // (b) The agent follows the instance default but stores another name: the row
+    // applies although the name is not AGENT_MODEL.
+    let provider = Arc::new(MockChatProvider::echo());
+    let w = worker(&provider).await;
+    enqueue_mention(&su, &t, "stored-placeholder", Some("instance_default")).await;
+    assert_eq!(drain(&w).await.answered, 1);
+    assert_eq!(provider.calls()[0].model, "team-model-x", "(b)");
+
+    // (c) No `model_source` key (a job enqueued before #3147): never guessed from
+    // the name — the row is not applied.
+    let provider = Arc::new(MockChatProvider::echo());
+    let w = worker(&provider).await;
+    enqueue_mention(&su, &t, INSTANCE_DEFAULT, None).await;
+    assert_eq!(drain(&w).await.answered, 1);
+    assert_eq!(provider.calls()[0].model, INSTANCE_DEFAULT, "(c)");
+
+    // (d) The same fact governs the welcome opener (summary row).
+    let provider = Arc::new(MockChatProvider::echo());
+    let w = worker(&provider).await;
+    enqueue_welcome(&su, &t, INSTANCE_DEFAULT, Some("agent")).await;
+    drain(&w).await;
+    enqueue_welcome(&su, &t, "stored-placeholder", Some("instance_default")).await;
+    drain(&w).await;
+    let models: Vec<String> = provider.calls().into_iter().map(|c| c.model).collect();
+    assert_eq!(
+        models,
+        vec![INSTANCE_DEFAULT.to_string(), "summary-model".to_string()],
+        "(d)"
+    );
     leave_instance_empty(&su).await;
 }
 
@@ -535,7 +614,7 @@ async fn a_row_on_a_chain_hop_calls_that_hop_and_no_other() {
 
     let provider = Arc::new(MockChatProvider::echo());
     let w = worker(&provider).await;
-    enqueue_mention(&su, &t, INSTANCE_DEFAULT).await;
+    enqueue_mention(&su, &t, INSTANCE_DEFAULT, Some("instance_default")).await;
     assert_eq!(drain(&w).await.answered, 1);
     let calls = provider.calls();
     assert_eq!(calls.len(), 1);
@@ -574,7 +653,7 @@ async fn a_row_whose_link_changed_refuses_honestly_and_calls_no_model() {
 
     let provider = Arc::new(MockChatProvider::echo());
     let w = worker(&provider).await;
-    let run_id = enqueue_mention(&su, &t, INSTANCE_DEFAULT).await;
+    let run_id = enqueue_mention(&su, &t, INSTANCE_DEFAULT, Some("instance_default")).await;
     drain(&w).await;
 
     assert!(
@@ -634,7 +713,7 @@ async fn a_row_whose_link_changed_refuses_honestly_and_calls_no_model() {
     .await;
     let provider = Arc::new(MockChatProvider::echo());
     let w = worker(&provider).await;
-    let run_id = enqueue_mention(&su, &t, INSTANCE_DEFAULT).await;
+    let run_id = enqueue_mention(&su, &t, INSTANCE_DEFAULT, Some("instance_default")).await;
     drain(&w).await;
     assert!(provider.calls().is_empty());
     assert_eq!(
@@ -654,7 +733,7 @@ async fn a_row_whose_link_changed_refuses_honestly_and_calls_no_model() {
     .await;
     let provider = Arc::new(MockChatProvider::echo());
     let w = worker(&provider).await;
-    let run_id = enqueue_mention(&su, &t, INSTANCE_DEFAULT).await;
+    let run_id = enqueue_mention(&su, &t, INSTANCE_DEFAULT, Some("instance_default")).await;
     drain(&w).await;
     assert!(provider.calls().is_empty());
     assert_eq!(
@@ -665,7 +744,7 @@ async fn a_row_whose_link_changed_refuses_honestly_and_calls_no_model() {
     // And an agent with its own model is not touched by a broken team row.
     let provider = Arc::new(MockChatProvider::echo());
     let w = worker(&provider).await;
-    enqueue_mention(&su, &t, "agent-own-model").await;
+    enqueue_mention(&su, &t, "agent-own-model", Some("agent")).await;
     assert_eq!(drain(&w).await.answered, 1);
     assert_eq!(provider.calls()[0].model, "agent-own-model");
     leave_instance_empty(&su).await;
@@ -701,9 +780,9 @@ async fn the_summary_row_is_the_welcome_openers_and_the_team_row_is_the_mentions
 
     let provider = Arc::new(MockChatProvider::echo());
     let w = worker(&provider).await;
-    enqueue_welcome(&su, &t, INSTANCE_DEFAULT).await;
+    enqueue_welcome(&su, &t, INSTANCE_DEFAULT, Some("instance_default")).await;
     drain(&w).await;
-    enqueue_mention(&su, &t, INSTANCE_DEFAULT).await;
+    enqueue_mention(&su, &t, INSTANCE_DEFAULT, Some("instance_default")).await;
     drain(&w).await;
     let models: Vec<String> = provider.calls().into_iter().map(|c| c.model).collect();
     assert_eq!(
@@ -720,7 +799,7 @@ async fn the_summary_row_is_the_welcome_openers_and_the_team_row_is_the_mentions
     let provider = Arc::new(MockChatProvider::echo());
     let w = worker(&provider).await;
     let t2 = seed(&su, INSTANCE_DEFAULT).await;
-    enqueue_welcome(&su, &t2, INSTANCE_DEFAULT).await;
+    enqueue_welcome(&su, &t2, INSTANCE_DEFAULT, Some("instance_default")).await;
     drain(&w).await;
     assert_eq!(provider.calls()[0].model, INSTANCE_DEFAULT);
     leave_instance_empty(&su).await;

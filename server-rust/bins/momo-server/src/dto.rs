@@ -3773,6 +3773,10 @@ pub struct CreateAgentRequest {
     pub display_name: String,
     pub handle: String,
     pub model: String,
+    /// #3147: `"agent"` (default) or `"instance_default"` — follow the team's
+    /// 기본 AI; `model` is then only the fallback.
+    #[serde(default, alias = "model_source")]
+    pub model_source: Option<String>,
     #[serde(alias = "base_url")]
     pub base_url: String,
     #[serde(default, alias = "system_prompt")]
@@ -3801,6 +3805,11 @@ pub struct AgentProfileInput {
     pub enabled_tools: Option<Vec<String>>,
     #[serde(default)]
     pub triggers: Option<Value>,
+    /// #3147: on a profile PUT, `"agent"` / `"instance_default"` sets where the
+    /// agent's model comes from; absent leaves it unchanged. Ignored on create
+    /// (the create body's own `modelSource` decides).
+    #[serde(default, alias = "model_source")]
+    pub model_source: Option<String>,
 }
 
 /// Swift `AgentMemberDTO` (:339-343).
@@ -4157,6 +4166,8 @@ pub struct AgentProfileDto {
     pub version: i32,
     pub updated_by: String,
     pub updated_at_ms: i64,
+    /// #3147: `"agent"` or `"instance_default"`.
+    pub model_source: &'static str,
 }
 
 /// Swift `AgentProfileResponse` (:577-579).

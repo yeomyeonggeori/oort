@@ -151,6 +151,47 @@ pub fn reject_credential_shaped_fields(value: &Value, path: &str) -> Result<(), 
     }
 }
 
+/// Where an agent's model comes from (#3147, ADR-0147 증보 2026-09-29).
+///
+/// `agent.model` is `NOT NULL`, so the column alone cannot tell "the operator
+/// picked this model" from "the placeholder stored because nothing was picked".
+/// The source says which one it is, and it travels on the `agent_job` payload
+/// (`model_source`) so the worker never has to guess from the model's name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelSource {
+    /// The agent's own choice (its `model`, an applied `model_pref`, or an
+    /// explicit request `routing.model`). The team's 「기본 AI」 row never applies.
+    Agent,
+    /// The agent follows the instance default: the team's 「기본 AI」 row applies,
+    /// and `model` is only what runs when the row names no model.
+    InstanceDefault,
+}
+
+impl ModelSource {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Agent => "agent",
+            Self::InstanceDefault => "instance_default",
+        }
+    }
+
+    /// The closed vocabulary; anything else is not a source.
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "agent" => Some(Self::Agent),
+            "instance_default" => Some(Self::InstanceDefault),
+            _ => None,
+        }
+    }
+
+    /// A stored column value. An unknown value reads as the agent's own choice —
+    /// the fail-closed direction (the team row is not applied to a model nobody
+    /// declared as a default); the column CHECK keeps that unreachable.
+    pub fn from_column(raw: &str) -> Self {
+        Self::parse(raw).unwrap_or(Self::Agent)
+    }
+}
+
 /// Swift `AgentRoutes.normalizedModel` (:88-94).
 pub fn normalized_model(raw: &str) -> Result<String, AgentSpecInvalid> {
     let value = raw.trim();
@@ -314,6 +355,9 @@ pub struct NewAgentMember {
     pub display_name: String,
     pub handle: String,
     pub model: String,
+    /// #3147: whether `model` is the agent's own choice or only the stored
+    /// placeholder of "follow the instance default".
+    pub model_source: ModelSource,
     /// Already through `momo_settings::validated_base_url`.
     pub base_url: String,
     pub system_prompt: Option<String>,
@@ -388,8 +432,8 @@ pub async fn create_agent_identity_in_tx(
     sqlx::query(
         "INSERT INTO agent \
            (member_id, workspace_id, model, base_url, system_prompt, \
-            tool_schema, config, owner_human_id) \
-         VALUES ($1, $2, $3, $4, $5, '[]'::jsonb, $6, $7)",
+            tool_schema, config, owner_human_id, model_source) \
+         VALUES ($1, $2, $3, $4, $5, '[]'::jsonb, $6, $7, $8)",
     )
     .bind(agent_id)
     .bind(workspace_id)
@@ -398,6 +442,7 @@ pub async fn create_agent_identity_in_tx(
     .bind(input.system_prompt.as_deref())
     .bind(&input.config)
     .bind(input.owner_human_id)
+    .bind(input.model_source.as_str())
     .execute(&mut *conn)
     .await?;
 
@@ -435,6 +480,8 @@ pub struct AgentProfile {
     pub version: i32,
     pub updated_by: Uuid,
     pub updated_at_ms: i64,
+    /// `agent.model_source` (#3147) — not an `agent_profile` column, read with it.
+    pub model_source: ModelSource,
 }
 
 fn decode_profile(
@@ -465,11 +512,38 @@ fn decode_profile(
         version: row.try_get("version")?,
         updated_by: row.try_get("updated_by")?,
         updated_at_ms: updated_at.timestamp_millis(),
+        model_source: ModelSource::from_column(
+            &row.try_get::<Option<String>, _>("model_source")?
+                .unwrap_or_default(),
+        ),
     })
 }
 
+/// Set `agent.model_source` (#3147). `false` when no such agent exists in the
+/// workspace (the caller's 404); the profile PUT calls this **before** its
+/// upsert so the returned profile already shows the new source.
+pub async fn set_agent_model_source_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    source: ModelSource,
+) -> Result<bool, DbError> {
+    let done = sqlx::query(
+        "UPDATE agent SET model_source = $3 WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .bind(source.as_str())
+    .execute(&mut *conn)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
 const PROFILE_COLS: &str = "instructions, model_pref, effort_pref, enabled_tools, triggers, \
-     paused, version, updated_by, updated_at";
+     paused, version, updated_by, updated_at, \
+     (SELECT a.model_source FROM agent a \
+       WHERE a.member_id = agent_profile.agent_member_id \
+         AND a.workspace_id = agent_profile.workspace_id) AS model_source";
 
 /// The agent's own `agent.model` + its workspace's `settings` — the two inputs
 /// the ADR-0131 D2 allow-list needs, read inside the transaction that is about

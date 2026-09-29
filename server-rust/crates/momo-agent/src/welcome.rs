@@ -17,6 +17,7 @@ use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
 use crate::mention::{effective_system_prompt, max_output_tokens};
+use crate::provisioning::ModelSource;
 use crate::run::{RunTrigger, WelcomeKind};
 
 /// ADR-0181 D8. Orchestrator reviews the copy.
@@ -39,6 +40,8 @@ pub struct WelcomeTarget {
     pub channel_id: Uuid,
     pub prompt: String,
     pub model: String,
+    /// `agent.model_source` (#3147).
+    pub model_source: ModelSource,
     pub system_prompt: Option<String>,
     pub tool_schema: Value,
     pub config: Value,
@@ -254,6 +257,7 @@ pub async fn resolve_welcome_target_in_tx(
         channel_id,
         prompt: stored_prompt(&settings),
         model: agent.model,
+        model_source: agent.model_source,
         system_prompt: agent.system_prompt,
         tool_schema: agent.tool_schema,
         config: agent.config,
@@ -268,6 +272,7 @@ pub async fn resolve_welcome_target_in_tx(
 struct WelcomeAgent {
     member_id: Uuid,
     model: String,
+    model_source: ModelSource,
     system_prompt: Option<String>,
     tool_schema: Value,
     config: Value,
@@ -297,7 +302,7 @@ async fn load_welcome_agent_in_tx(
     subscription_agents_enabled: bool,
 ) -> Result<Option<WelcomeAgent>, DbError> {
     let rows = sqlx::query(
-        "SELECT m.id, a.model, a.system_prompt, a.max_run_steps, a.tool_schema, a.config, \
+        "SELECT m.id, a.model, a.model_source, a.system_prompt, a.max_run_steps, a.tool_schema, a.config, \
                 ap.instructions, ap.enabled_tools, ap.version AS profile_version, \
                 EXISTS (SELECT 1 FROM agent_card_registration acr \
                          WHERE acr.workspace_id = m.workspace_id \
@@ -380,6 +385,7 @@ async fn load_welcome_agent_in_tx(
         let agent = WelcomeAgent {
             member_id: row.try_get("id")?,
             model: row.try_get("model")?,
+            model_source: ModelSource::from_column(&row.try_get::<String, _>("model_source")?),
             system_prompt: effective_system_prompt(
                 base_system_prompt.as_deref(),
                 profile_instructions.as_deref(),
@@ -451,6 +457,7 @@ pub fn welcome_job_payload(
     );
     payload.insert("author_member_id".into(), json!(upper(member_id)));
     payload.insert("model".into(), json!(target.model));
+    payload.insert("model_source".into(), json!(target.model_source.as_str()));
     payload.insert("prompt".into(), json!(target.prompt));
     payload.insert("recent_messages".into(), json!([]));
     payload.insert("tools".into(), target.tool_schema.clone());
@@ -506,6 +513,7 @@ mod tests {
             "agent_member_id",
             "author_member_id",
             "model",
+            "model_source",
             "prompt",
             "recent_messages",
             "tools",
@@ -529,6 +537,7 @@ mod tests {
             channel_id: Uuid::from_u128(4),
             prompt: "안녕".into(),
             model: "gpt-4".into(),
+            model_source: ModelSource::Agent,
             system_prompt: Some("be kind".into()),
             tool_schema: json!([]),
             config: json!({}),

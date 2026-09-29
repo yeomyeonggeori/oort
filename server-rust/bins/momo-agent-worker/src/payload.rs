@@ -41,6 +41,12 @@ pub struct AgentJobPayload {
     /// "fall back to `AGENT_MODEL`", matching Swift's `?? ""` decode.
     #[serde(default)]
     pub model: String,
+    /// #3147: where `model` came from — `"agent"` (a choice) or
+    /// `"instance_default"` (the agent follows the instance default). Absent
+    /// (a job enqueued before this key existed) reads as `agent`: the team's
+    /// 「기본 AI」 row is applied only on the explicit fact, never guessed.
+    #[serde(default)]
+    pub model_source: Option<String>,
     /// ADR-0134 D2 reasoning effort, recorded on `usage_ledger.effort`.
     #[serde(default)]
     pub effort: Option<String>,
@@ -140,6 +146,12 @@ impl AgentJobPayload {
         } else {
             trimmed
         }
+    }
+
+    /// Whether this turn's model is *not* the agent's own choice, i.e. the agent
+    /// follows the instance default and the team 「기본 AI」 row applies (#3147).
+    pub fn follows_instance_default(&self) -> bool {
+        self.model_source.as_deref() == Some("instance_default")
     }
 
     /// The declared tools as the provider wants them: an array, or empty.
@@ -322,6 +334,7 @@ mod tests {
             status: "pending".into(),
             expires_at: None,
             agent_model: "gpt-5".into(),
+            agent_model_source: momo_agent::ModelSource::Agent,
             run_input: json!({"prompt": "정리해줘"}),
             step_count: 4,
             max_steps: 12,
