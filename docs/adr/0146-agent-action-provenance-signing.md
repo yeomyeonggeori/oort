@@ -347,7 +347,7 @@ momo.human.control.v1
 |---|---|---|
 | 기기 키 등록·목록·폐기 | 로그인 세션이 자기 기기의 공개키(`alg`, platform, label)를 올린다. 다른 멤버 키 등록은 거부한다. 폐기는 `revoked_at`만 쓴다. 승인서 없는 폰 키는 「지시 불가」 상태다. **E2 구현 정정(#3022 보안 검수 H1):** 뿌리 후보(`macos`) 키 등록은 현재 비밀번호 재입력을 요구하고, QR 연결 세션에서는 받지 않는다(훔친 refresh 토큰만으로 뿌리를 만들 수 없게) | E2 #3022 |
 | 기기 승인(교차 서명) | 뿌리 키의 `device_endorse.v1` 승인서를 저장·전달한다. 폐기서 `device_revoke.v1`도 같은 경로로 전달한다 | E2 #3022 · E4 #3024 |
-| host 등록 서명 | member-scope host 등록에 `host_register` 서명을 요구한다. **E2 구현(#3022):** 보낸 서명은 항상 검증하고, 요구는 `MOMO_HOST_REGISTER_SIGNATURE_REQUIRED`(기본 꺼짐, D-11)로 켠다. 서명문의 `instance_id`는 `MOMO_INSTANCE_ID`이며 E3 발급 라우트가 같은 값을 내려 준다 | E2 #3022 |
+| host 등록 서명 | member-scope host 등록에 `host_register` 서명을 요구한다. **E2 구현(#3022):** 보낸 서명은 항상 검증하고, 요구는 `MOMO_HOST_REGISTER_SIGNATURE_REQUIRED`(기본 꺼짐, D-11)로 켠다. 서명문의 `instance_id`는 `MOMO_INSTANCE_ID`이며 E3 발급 라우트가 같은 값을 내려 준다. **클라이언트 배선(#3120):** `momo-workd register --sign-stdin`이 host 키를 만든 뒤 자기 부모(데스크탑 셸)에게 표준입출력 한 줄로 서명을 청한다. 셸은 워크스페이스와 라벨을 자기 값으로 채우고, 자식이 준 host 공개키만 받는다. 네이티브 확인 창이 host 키 지문·키 전체·host id 전체·라벨을 모두 보일 때만(하나라도 빠지면 `device_key_dialog_incomplete`) Touch ID로 서명한다. 웹뷰의 `device_key_sign_control`은 `host_register`를 계속 거부한다. 뿌리 키가 묶이지 않은 맥은 서명 없이 등록하므로, 플래그를 켠 서버는 그 맥의 등록을 403으로 거부한다 | E2 #3022, 배선 #3120 |
 | 서명 지시 | `input`(queue·interrupt)·`spawn`·`permission` 허용을 서명과 함께 받는다. 오프라인 host는 정직하게 거부한다. `client_msg_id` = nonce 멱등 | E3 #3023 · E7 #3027 |
 | 서버 인스턴스 id | 클라이언트가 `instance_id`로 되돌릴 값을 내려 준다 | E1 #3021 · E3 #3023 |
 

@@ -924,12 +924,65 @@ fn short_id(id: Uuid) -> String {
     text[text.len() - 8..].to_string()
 }
 
+/// The `host_register` dialog (security review H5, #3120): the person is
+/// vouching for a host key with the root key, so the dialog shows the host
+/// key (its fingerprint in the body, every character in the scrolling view),
+/// the host id candidate in full and the label, and nothing about "이 맥" or
+/// "다른 호스트" (the host does not exist yet).
+fn host_register_summary(request: &ControlRequest) -> Summary {
+    let ControlContent::HostRegister {
+        host_public_key_b64,
+        host_id,
+        label,
+    } = &request.content
+    else {
+        unreachable!("only called for host_register")
+    };
+    Summary {
+        title: "oort: 이 맥의 작업 호스트 등록에 서명합니다".into(),
+        body: format!(
+            "호스트 키 지문: {}\n호스트 ID: {host_id}\n이름: 「{}」\n워크스페이스 {}\n방금 이 맥에서 시작한 등록일 때만 서명하세요. 서명하면 이 호스트가 내 이름으로 지시를 받을 수 있게 됩니다.",
+            fingerprint(host_public_key_b64).unwrap_or_else(|| "(읽을 수 없음)".into()),
+            nfc(label),
+            short_id(request.workspace_id),
+        ),
+        confirm: "서명".into(),
+        full_text: Some(format!("호스트 공개키 전체\n{host_public_key_b64}")),
+    }
+}
+
+/// Whether `summary` shows everything a `host_register` signature covers:
+/// the key's fingerprint, the whole key, the whole host id and the label.
+/// `sign_statement` refuses to ask, let alone sign, when one is missing.
+pub fn host_register_dialog_complete(summary: &Summary, content: &ControlContent) -> bool {
+    let ControlContent::HostRegister {
+        host_public_key_b64,
+        host_id,
+        label,
+    } = content
+    else {
+        return true;
+    };
+    let fingerprint_shown = fingerprint(host_public_key_b64)
+        .is_some_and(|fingerprint| summary.body.contains(&fingerprint));
+    fingerprint_shown
+        && summary.body.contains(&host_id.to_string())
+        && summary.body.contains(&nfc(label))
+        && summary
+            .full_text
+            .as_ref()
+            .is_some_and(|full| full.contains(host_public_key_b64.as_str()))
+}
+
 impl Statement {
     /// `local_host`: the host id this Mac is registered as, so "이 맥" can be
     /// named instead of an id.
     pub fn summary(&self, local_host: Option<Uuid>) -> Summary {
         match self {
             Statement::Control { request, .. } => {
+                if let ControlContent::HostRegister { .. } = &request.content {
+                    return host_register_summary(request);
+                }
                 let host = if Some(request.host_id) == local_host {
                     format!("이 맥 ({})", short_id(request.host_id))
                 } else {
@@ -1033,19 +1086,11 @@ impl Statement {
                             }],
                             None,
                         ),
-                        ControlContent::HostRegister {
-                            label,
-                            host_public_key_b64,
-                            ..
-                        } => (
-                            "호스트 등록",
-                            vec![format!(
-                                "「{}」, 호스트 키 {}",
-                                first_line(label),
-                                host_public_key_b64.chars().take(12).collect::<String>()
-                            )],
-                            None,
-                        ),
+                        // Built by `host_register_summary` above; a dialog that
+                        // cannot show all of it is refused (`sign_statement`).
+                        ControlContent::HostRegister { .. } => {
+                            unreachable!("host_register returns its own summary")
+                        }
                     };
                 let mut body = format!("대상: {target}");
                 for line in lines {
