@@ -127,6 +127,8 @@ import {
 import {useRealtime} from '../realtime/RealtimeProvider';
 import {useSession} from '../session/useSession';
 import {useDmDeliveryHint} from '../features/conversation/useDmDeliveryHint';
+import type {MemoryEvidenceLink} from '@momo/core/features/memory/model';
+import {MissedDigestCard} from '../features/memory/MissedDigestCard';
 
 /** 비어 있는 영수증 표. 첫 값이자 채널이 바뀔 때 돌아가는 자리다. */
 const NO_RECEIPTS: ReadonlyMap<string, ApprovalReceipt> = new Map();
@@ -494,6 +496,22 @@ export default function ConversationScreen({
     unreadFor(readStates.byChannel, channelId),
   );
   const boundary = boundaryRef.current;
+
+  // ---- 팀 기억 요약 카드의 자격과 머리 seq (#3166) ----------------------------
+  // 사람끼리의 DM은 서버가 기본으로 요약하지 않는다(ADR-0196 D9). 「아직 요약 전」이라고
+  // 영영 말하게 되므로 아예 세우지 않는다. 에이전트와의 DM은 그 사람의 개인 공간이라 선다.
+  const memoryEligible =
+    channel !== null && (channel.kind !== 'dm' || dmAgent !== null);
+  // 채널 머리: 서버 읽기 상태의 `latestSeq`와 화면에 든 최대 seq 중 큰 쪽. 워커가 여기까지
+  // 따라왔는지로 「요약 전」과 「요약할 게 없음」을 가른다.
+  const loadedHeadSeq = useMemo(
+    () => timeline.state.messages.reduce((top, m) => Math.max(top, m.seq), 0),
+    [timeline.state.messages],
+  );
+  const memoryHeadSeq = Math.max(
+    loadedHeadSeq,
+    unreadFor(readStates.byChannel, channelId)?.latestSeq ?? 0,
+  );
 
   // ---- 방문, 그리고 그 방문의 명시 열람 (ADR-0178 D6, #1964) -----------------
   //
@@ -1008,6 +1026,22 @@ export default function ConversationScreen({
     [requestJump],
   );
 
+  /**
+   * 요약 카드·「기억 n개 참고」 시트의 근거 → 그 메시지 (#3166).
+   *
+   * 여섯 번째 호출자이고 **같은 기계**를 탄다. 근거는 채널의 seq를 나르므로 못 찾았을
+   * 때 「더 위쪽에 있다」를 단정한다. 스레드가 열려 있으면 그 판이 채널을 덮고 있으니
+   * 판을 접고 채널에서 찾는다(스레드 안 답글이면 판 자신이 먼저 잡는다: `ThreadPanel`).
+   */
+  const openMemoryEvidence = useCallback(
+    (link: MemoryEvidenceLink) => {
+      setThread(null);
+      setThreadLanding(null);
+      requestJump('memory', link.messageId, link.seq);
+    },
+    [requestJump],
+  );
+
   // ---- ADE 카드의 「대화로」 (#1193) -----------------------------------------
   //
   // 세 번째 호출자이고, **같은 기계**를 탄다(위 둘과 같은 규율). 다른 점은 하나
@@ -1269,8 +1303,12 @@ export default function ConversationScreen({
       onJumpToQuoted,
       onLongPressUsed: hint.markUsed,
       onOpenProfile: showMemberProfile,
+      workspaceId,
+      onOpenMemoryEvidence: openMemoryEvidence,
     }),
     [
+      workspaceId,
+      openMemoryEvidence,
       member.id,
       toggleReaction,
       togglePin,
@@ -1627,6 +1665,19 @@ export default function ConversationScreen({
                 />
               </View>
             ) : null}
+            {/* 안 읽은 동안 요약 (#3166, plan.md §5 V1). 목록 밖·위에 선다 — 타임라인
+                꼬리가 아니다: 돌아온 사람이 처음 읽을 자리이고, 닫을 수 있다. 경계는
+                구분선과 같은 얼린 스냅샷이다. */}
+            {boundary !== null && memoryEligible ? (
+              <MissedDigestCard
+                workspaceId={workspaceId}
+                channelId={channelId}
+                sinceSeq={boundary.lastReadSeq}
+                unreadCount={boundary.unreadCount}
+                headSeq={memoryHeadSeq}
+                onOpenEvidence={openMemoryEvidence}
+              />
+            ) : null}
             <Timeline
               approvalGates={approvalGates}
               approvalReceipts={approvalReceipts}
@@ -1774,6 +1825,15 @@ export default function ConversationScreen({
           onReplySent={bumpSelfSend}
           onOpenProfile={showMemberProfile}
           onReaderTookList={onReaderTookList}
+          memory={
+            boundary !== null && memoryEligible
+              ? {
+                  sinceSeq: boundary.lastReadSeq,
+                  headSeq: memoryHeadSeq,
+                  onOpenEvidenceOutside: openMemoryEvidence,
+                }
+              : undefined
+          }
         />
       ) : null}
 

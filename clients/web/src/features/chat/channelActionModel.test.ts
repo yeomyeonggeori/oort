@@ -411,3 +411,45 @@ describe("섹션으로 이동", () => {
     expect(channelActionKeepsMenuOpen("move-to-section")).toBe(false);
   });
 });
+
+describe("기억 설정 항목 (ADR-0196 D9, #3165)", () => {
+  const base = { selfRole: "member" as const, unreadCount: 0 };
+
+  it("서버가 팀 기억을 싣지 않으면 항목이 없다", () => {
+    const off = channelActionAvailability({ channel: channel(), ...base });
+    expect(off.memory).toBe(false);
+    expect(keysOf(channelActionItemsForSurface("header", off, REST))).not.toContain("memory");
+  });
+
+  it("싣는 서버에서는 헤더 메뉴에만, 알림과 나가기 사이에 선다", () => {
+    const on = channelActionAvailability({
+      channel: channel({ topic: "결제 팀 공지" }),
+      selfRole: "owner",
+      unreadCount: 2,
+      hasMemorySettings: true,
+    });
+    expect(keysOf(channelActionItemsForSurface("header", on, REST))).toEqual([
+      "topic",
+      "mute",
+      "memory",
+      "leave",
+    ]);
+    expect(keysOf(channelActionItemsForSurface("row", on, REST))).not.toContain("memory");
+    const item = channelActionItemsForSurface("header", on, REST).find((i) => i.key === "memory");
+    expect(item?.label).toBe("기억 설정");
+    expect(item?.testKey).toBe("memory-settings");
+  });
+
+  it("DM에는 내놓지 않는다: 사람끼리의 DM은 요약에서 빠지는 게 기본이다", () => {
+    const dm = channelActionAvailability({
+      channel: channel({ kind: "dm" }),
+      ...base,
+      hasMemorySettings: true,
+    });
+    expect(dm.memory).toBe(false);
+  });
+
+  it("다이얼로그로 넘기는 항목이라 고르면 메뉴가 닫힌다", () => {
+    expect(channelActionKeepsMenuOpen("memory")).toBe(false);
+  });
+});

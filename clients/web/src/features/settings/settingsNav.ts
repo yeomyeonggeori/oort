@@ -22,6 +22,7 @@ export type SettingsSectionId =
   | "agents"
   | "code"
   | "workspace"
+  | "memory"
   | "plugins"
   | "events"
   | "usage"
@@ -65,6 +66,14 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   // 자물쇠로 가른다.
   { id: "ai", label: "AI 연결", group: "개인" },
   { id: "workspace", label: "워크스페이스", group: "워크스페이스" },
+  // 팀 기억(ADR-0196 D9, #3165): 내 일시정지는 누구나, 팀 스위치는 관리자만 —
+  // 권한은 섹션이 서버 답과 역할로 가른다. 서버가 싣지 않으면 목차에서 접힌다.
+  {
+    id: "memory",
+    label: "기억",
+    group: "워크스페이스",
+    surface: "teamMemory",
+  },
   { id: "plugins", label: "앱", group: "워크스페이스" },
   { id: "members", label: "멤버와 초대", group: "워크스페이스" },
   { id: "agents", label: "에이전트 자격", group: "연결" },

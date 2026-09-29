@@ -77,6 +77,7 @@ import {
   reactionFailureMessage,
 } from '@momo/core/features/timeline/actionCopy';
 import type {ReactionChip} from '@momo/core/features/timeline/reactions';
+import type {MemoryEvidenceLink} from '@momo/core/features/memory/model';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
@@ -147,6 +148,8 @@ import {
 } from '@momo/core/features/timeline/completionReportCard';
 import {QuoteBlock, quoteAccessibilityPhrase} from './Quote';
 import {useLongPress} from './useLongPress';
+import {turnRecordRunId} from '@momo/core/features/timeline/cascadeModel';
+import {MemoryReceiptChip} from '../memory/MemoryReceiptChip';
 
 // =============================================================================
 // One row of the conversation.
@@ -1952,6 +1955,15 @@ export interface MessageRowActions {
   onLongPressUsed?: () => void;
   /** 작성자 신원을 연다. 사람은 프로필 시트, 에이전트는 기존 상세 표면으로 간다. */
   onOpenProfile?: (memberId: string) => void;
+  /**
+   * 에이전트 답 밑의 「기억 n개 참고」 칩이 영수증을 읽을 워크스페이스 (#3166).
+   * 없으면 칩을 세우지 않는다(측정 하네스처럼 서버가 없는 표면). 행 props가 아니라
+   * `actions`에 실은 이유: `actions`는 이미 동일성으로 비교되므로 memo 비교자를 건드리지
+   * 않는다.
+   */
+  workspaceId?: string;
+  /** 칩 시트의 근거를 누르면 그 메시지로 데려간다. */
+  onOpenMemoryEvidence?: (link: MemoryEvidenceLink) => void;
 }
 
 export interface MessageRowProps {
@@ -2469,6 +2481,7 @@ function MessageRowInner({
   // 「고정됨」을 다는 창은 프레임이 도착하기까지의 몇 밀리초뿐이고, 그 몇 밀리초에
   // 하는 말은 이미 참이 아니다.
   const showsPinMark = pinned === true && !deleted;
+  const memoryRunId = turnRecordRunId(message);
   // ADR-0155 — 멈춘 답. 왜 이 낱말인지·왜 accent 가 아닌지는 코어의
   // `streamStop.ts` 헤더에 있다. 묘비에는 그리지 않는다: 저자가 지운 메시지에
   // 대고 「중단됨」이라고 말하는 것은 이미 없는 본문을 서술하는 것이다.
@@ -2822,6 +2835,16 @@ function MessageRowInner({
         ) : null}
 
         <Chips chips={chips} onToggle={actions ? onChipPress : undefined} />
+
+        {/* 이 답이 참고한 기억 (#3166). 정착한 에이전트 턴 기록에만 서고, 참고한 것이
+            없으면 칩 자신이 아무것도 그리지 않는다. */}
+        {!deleted && actions?.workspaceId && memoryRunId !== null ? (
+          <MemoryReceiptChip
+            workspaceId={actions.workspaceId}
+            runId={memoryRunId}
+            onOpenEvidence={actions.onOpenMemoryEvidence}
+          />
+        ) : null}
 
         {rowReceipt ? (
           // 성공의 자리. 실패와 같은 상자를 쓰지 않는다 — 테두리도 danger 색도
