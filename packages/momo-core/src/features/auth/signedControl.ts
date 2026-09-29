@@ -18,6 +18,7 @@
 // =============================================================================
 
 import {
+  ApiError,
   decideWorkPermission,
   resumeWorkSession,
   sendWorkInstruction,
@@ -211,6 +212,102 @@ export async function signedAllow(input: {
   });
 }
 
+// ---- a resend after a lost response is the same statement (R2-E8 Low, #3096) ----
+//
+// The instruction route answers a repeated nonce with the original control
+// (`replayed: true`, ADR-0146 D-8 「재시도는 재생이 아니다」) — but only when the
+// resend carries the SAME nonce and signature. A resend that signs anew mints a
+// new nonce, and a response lost after the server committed became two
+// instructions. So a signed input the server may have received is kept here,
+// keyed by what it says, and the next send of the same text to the same session
+// reuses it: no second Face ID / Touch ID, and the server tells the two apart.
+//
+// Kept only for a failure that does not prove the server refused (a network
+// error, a 5xx, a timeout, a body this app could not read). Any named 4xx
+// refusal drops it, so `instruction_nonce_reused` and the signature refusals
+// still sign afresh, as their sentence promises. Memory only: an app restart
+// signs anew, which is the person pressing send on a new day.
+
+/** A signature this close to expiring is not resent: it would be refused. */
+const RESEND_MARGIN_MS = 30_000;
+
+interface SignedInput {
+  nonce: string;
+  humanSignature: HumanSignatureRequest;
+}
+
+const unconfirmedInputs = new Map<string, SignedInput>();
+
+/** Test seam. */
+export function resetUnconfirmedInputsForTests(): void {
+  unconfirmedInputs.clear();
+}
+
+function inputKey(
+  workspaceId: string,
+  sessionId: string,
+  mode: WorkInstructionMode,
+  text: string
+): string {
+  return JSON.stringify([workspaceId, sessionId, mode, text]);
+}
+
+/** True when the server may have received the request: only a named 4xx proves it did not act. */
+export function mayHaveReachedServer(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return true;
+  return error.status >= 500 || error.status === 408;
+}
+
+/**
+ * The signed input for this text: the kept one while it is still valid,
+ * otherwise a fresh signature. A signer refusal (Face ID cancelled) throws.
+ */
+async function signedInputFor(input: {
+  workspaceId: string;
+  session: SessionRef;
+  mode: WorkInstructionMode;
+  text: string;
+  signer: HumanControlSigner;
+}): Promise<SignedInput> {
+  const key = inputKey(input.workspaceId, input.session.id, input.mode, input.text);
+  const kept = unconfirmedInputs.get(key);
+  if (kept) {
+    if (kept.humanSignature.expiresAtMs - Date.now() > RESEND_MARGIN_MS) return kept;
+    unconfirmedInputs.delete(key);
+  }
+  const nonce = newNonce();
+  const humanSignature = await input.signer.sign({
+    hostId: input.session.hostId,
+    sessionId: input.session.id,
+    nonce,
+    content: { kind: "input", mode: input.mode, text: input.text },
+  });
+  return { nonce, humanSignature };
+}
+
+async function postSignedInput(input: {
+  workspaceId: string;
+  session: SessionRef;
+  mode: WorkInstructionMode;
+  text: string;
+  signed: SignedInput;
+}): Promise<void> {
+  const key = inputKey(input.workspaceId, input.session.id, input.mode, input.text);
+  try {
+    await sendWorkInstruction(input.workspaceId, input.session.id, {
+      text: input.text,
+      mode: input.mode,
+      clientMsgId: input.signed.nonce,
+      humanSignature: input.signed.humanSignature,
+    });
+    unconfirmedInputs.delete(key);
+  } catch (error) {
+    if (mayHaveReachedServer(error)) unconfirmedInputs.set(key, input.signed);
+    else unconfirmedInputs.delete(key);
+    throw error;
+  }
+}
+
 /** A signed instruction on the instruction route. Never throws. */
 export async function signedInstruction(input: {
   workspaceId: string;
@@ -221,25 +318,14 @@ export async function signedInstruction(input: {
 }): Promise<Delivery> {
   // The server signs over NFC and refuses anything else (golden text_not_nfc).
   const text = input.text.normalize("NFC");
-  const nonce = newNonce();
-  let humanSignature: HumanSignatureRequest;
+  let signed: SignedInput;
   try {
-    humanSignature = await input.signer.sign({
-      hostId: input.session.hostId,
-      sessionId: input.session.id,
-      nonce,
-      content: { kind: "input", mode: input.mode, text },
-    });
+    signed = await signedInputFor({ ...input, text });
   } catch (error) {
     return notDelivered("sign", error);
   }
   try {
-    await sendWorkInstruction(input.workspaceId, input.session.id, {
-      text,
-      mode: input.mode,
-      clientMsgId: nonce,
-      humanSignature,
-    });
+    await postSignedInput({ ...input, text, signed });
     return { state: "sent" };
   } catch (error) {
     return notDelivered("server", error);
@@ -270,15 +356,9 @@ export async function rejectWithInstruction(input: {
   signer: HumanControlSigner;
 }): Promise<RejectWithInstructionOutcome> {
   const text = input.text.normalize("NFC");
-  const nonce = newNonce();
-  let humanSignature: HumanSignatureRequest;
+  let signed: SignedInput;
   try {
-    humanSignature = await input.signer.sign({
-      hostId: input.session.hostId,
-      sessionId: input.session.id,
-      nonce,
-      content: { kind: "input", mode: "queue", text },
-    });
+    signed = await signedInputFor({ ...input, text, mode: "queue" });
   } catch (error) {
     return { state: "not_sent", text: instructionFailureLine(error), error };
   }
@@ -292,12 +372,7 @@ export async function rejectWithInstruction(input: {
     return { state: "reject_failed", error };
   }
   try {
-    await sendWorkInstruction(input.workspaceId, input.session.id, {
-      text,
-      mode: "queue",
-      clientMsgId: nonce,
-      humanSignature,
-    });
+    await postSignedInput({ ...input, text, mode: "queue", signed });
     return { state: "rejected", instruction: { state: "sent" } };
   } catch (error) {
     return { state: "rejected", instruction: notDelivered("server", error) };

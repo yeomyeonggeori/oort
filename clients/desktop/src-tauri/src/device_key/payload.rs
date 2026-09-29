@@ -953,8 +953,8 @@ impl Statement {
                             agent_member_id,
                             folder_id,
                             tool,
+                            channel_id,
                             first_prompt,
-                            ..
                         } => (
                             if request.session_id.is_some() {
                                 "이어서 하기"
@@ -968,6 +968,10 @@ impl Statement {
                                     first_line(tool),
                                     first_line(folder_id)
                                 ),
+                                // R2-E8 보안 Low (#3096): the channel the
+                                // session thread lives in is bound by the
+                                // signature (v2); the dialog names it.
+                                format!("채널 {}", short_id(*channel_id)),
                                 format!(
                                     "첫 지시: {} ({})",
                                     first_line(first_prompt),

@@ -178,7 +178,7 @@ describe('MomoDeviceKeyStore — hardening before stage 2', () => {
     );
   });
 
-  it('allows only momo.human.control.v1/v2/v3 and its own device_rebind.v1, with their vector line counts', () => {
+  it('allows only momo.human.control.v2/v3 and its own device_rebind.v1 (v1 is retired, #3096), with their vector line counts', () => {
     // ADR-0146 D-6/D-7: endorse/revoke are signed by the root Mac, never the phone.
     const control = vectors.cases.filter(
       c => c.schema === 'momo.human.control.v1',
@@ -194,7 +194,6 @@ describe('MomoDeviceKeyStore — hardening before stage 2', () => {
       fromSwift[m[1]] = Number(m[2]);
     }
     expect(fromSwift).toEqual({
-      'momo.human.control.v1': 13,
       'momo.human.control.v2': 13,
       'momo.human.control.v3': 13,
       'momo.human.device_rebind.v1': 7,

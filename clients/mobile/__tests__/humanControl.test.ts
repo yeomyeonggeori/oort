@@ -8,7 +8,8 @@ import {hex, sha256} from '../src/deviceKey/sha256';
 // =============================================================================
 // #3026 stage 2 — the phone's signing call path builds the exact E1 bytes.
 //
-// Every `momo.human.control.v1` case of the shared vectors (#3021) is rebuilt
+// Every `momo.human.control.v2` and `v3` case of the shared vectors (#3027,
+// #3118) is rebuilt
 // here from its INPUTS (schema, fields, content) and compared byte for byte
 // with the payload Rust, Swift and WebCrypto agreed on — and the vector's own
 // signatures are verified over the bytes this file built, so "equal" cannot be
@@ -73,8 +74,8 @@ const PHONE_KINDS = new Set(['input', 'spawn', 'permission']);
 const controlCases = vectors.cases.filter(
   c => c.schema === 'momo.human.control.v1' && PHONE_KINDS.has(String(c.content.kind)),
 );
-/** v1 bytes the phone can still build: a v1 spawn is refused (#3028). */
-const v1Buildable = controlCases.filter(c => c.content.kind !== 'spawn');
+// #3096: v1 is retired on the phone — `controlCases` (the #3021 v1 vectors) now
+// only prove that a v1 statement is refused, and give free-text samples.
 
 // #3028: the E7 v2 vectors (docs/api, #3027), read in place.
 const vectorsV2 = JSON.parse(
@@ -172,32 +173,20 @@ function p256Verify(publicKeyB64: string, payload: Uint8Array, sigB64: string): 
   );
 }
 
-describe('momo.human.control.v1 bytes — rebuilt from the shared vectors', () => {
+describe('momo.human.control.v1 — retired on the phone (#3096)', () => {
   it('covers every phone kind in the vector file', () => {
     expect(new Set(controlCases.map(c => c.content.kind))).toEqual(PHONE_KINDS);
   });
 
-  it.each(v1Buildable.map(c => [c.name, c] as const))(
-    '%s: content_sha256 and the payload match byte for byte',
+  it.each(controlCases.map(c => [c.name, c] as const))(
+    '%s: no v1 recipe — nothing is hashed, nothing reaches Face ID',
     (_name, c) => {
-      const content = toContent(c);
-      expect(hex(sha256(humanControlContentBytes(c.schema, content)))).toBe(
-        c.content_sha256,
-      );
-      const payload = humanControlPayload(c.schema, toFields(c), content);
-      expect(Buffer.from(payload).toString('utf8')).toBe(c.payload);
-    },
-  );
-
-  it.each(v1Buildable.map(c => [c.name, c] as const))(
-    '%s: the vector signatures verify over the bytes built here',
-    (_name, c) => {
-      const payload = humanControlPayload(c.schema, toFields(c), toContent(c));
-      const signatures = signaturesOf(c);
-      expect(signatures.length).toBeGreaterThan(0);
-      for (const s of signatures) {
-        expect(p256Verify(s.publicKey, payload, s.signature)).toBe(true);
-      }
+      expect(() =>
+        humanControlContentBytes(c.schema, toContent(c)),
+      ).toThrow(HumanControlInputError);
+      expect(() =>
+        humanControlPayload(c.schema, toFields(c), toContent(c)),
+      ).toThrow(/no recipe for schema momo\.human\.control\.v1/);
     },
   );
 
@@ -208,7 +197,7 @@ describe('momo.human.control.v1 bytes — rebuilt from the shared vectors', () =
   });
 
   it('refuses a field that would move the lines', () => {
-    const c = controlCases[0];
+    const c = v2Cases.find(x => x.content.kind === 'input')!;
     const fields = {...toFields(c), hostId: 'host\nforged'};
     expect(() => humanControlPayload(c.schema, fields, toContent(c))).toThrow(
       HumanControlInputError,
@@ -225,24 +214,17 @@ describe('momo.human.control.v1 bytes — rebuilt from the shared vectors', () =
     ).toThrow(HumanControlInputError);
   });
 
-  it('knows v1, v2 and v3, and refuses a schema it has no recipe for', () => {
+  it('knows v2 and v3 only, and refuses a schema it has no recipe for', () => {
     expect(HUMAN_CONTROL_SCHEMAS).toEqual([
-      'momo.human.control.v1',
       'momo.human.control.v2',
       'momo.human.control.v3',
     ]);
-    const c = controlCases[0];
+    const c = v2Cases.find(x => x.content.kind === 'input')!;
     expect(() =>
       humanControlPayload('momo.human.control.v4', toFields(c), toContent(c)),
     ).toThrow(HumanControlInputError);
   });
 
-  it('refuses a v1 spawn: the server and the host take only v2 spawns (#3027)', () => {
-    const spawn = controlCases.find(c => c.content.kind === 'spawn')!;
-    expect(() =>
-      humanControlPayload('momo.human.control.v1', toFields(spawn), toContent(spawn)),
-    ).toThrow(HumanControlInputError);
-  });
 });
 
 describe('momo.human.control.v2 bytes — rebuilt from the E7 vectors (#3028)', () => {
@@ -373,13 +355,13 @@ describe('signHumanControl — the call path', () => {
   });
 
   it('signs the vector bytes with the server clock, a Face ID reason, and returns the route body', async () => {
-    const c = controlCases.find(x => x.name === 'control_input_queue_nfc')!;
+    const c = v2Cases.find(x => x.name === 'control_v2_input_queue_nfc')!;
     const f = toFields(c);
     // The phone's clock runs 90 s behind the server; it read the context 5 s ago.
     const readAt = CONTEXT.serverTimeMs - 90_000 - 5_000;
     const localNow = readAt + 5_000;
     const result = await signHumanControl({
-      schema: 'momo.human.control.v1',
+      schema: 'momo.human.control.v2',
       context: {...CONTEXT, serverTimeMs: f.issuedAtMs},
       contextReadAtMs: readAt,
       now: () => localNow,
@@ -398,7 +380,7 @@ describe('signHumanControl — the call path', () => {
     const [messageB64, reason] = mockNative!.sign.mock.calls[0];
     const signed = Buffer.from(base64ToBytes(messageB64)!).toString('utf8');
     const expected = humanControlPayload(
-      'momo.human.control.v1',
+      'momo.human.control.v2',
       {...f, issuedAtMs: result.issuedAtMs, expiresAtMs: result.expiresAtMs},
       toContent(c),
     );
@@ -406,7 +388,7 @@ describe('signHumanControl — the call path', () => {
     expect(signed.split('\n')[1]).toBe(CONTEXT.instanceId);
     expect(reason).toBe(SIGN_REASONS.input);
     expect(result).toEqual({
-      schema: 'momo.human.control.v1',
+      schema: 'momo.human.control.v2',
       deviceKeyId: f.deviceKeyId,
       nonce: f.nonce,
       issuedAtMs: result.issuedAtMs,
@@ -433,30 +415,33 @@ describe('signHumanControl — the call path', () => {
     expect(s.agentMemberId).toBe(spawn.content.agent_member_id);
     expect(s.folderId).toBe(spawn.content.folder_id);
     expect(mockNative!.sign.mock.calls[0][1]).toBe(SIGN_REASONS.spawn);
-    const permission = controlCases.find(x => x.content.kind === 'permission')!;
+    const permission = v2Cases.find(x => x.content.kind === 'permission')!;
     const p = await signHumanControl({...base, sessionId: 's', content: toContent(permission)});
     expect(p.scope).toBe('session');
     expect(p.mode).toBeUndefined();
   });
 
-  it('refuses an unknown schema before Face ID is raised', async () => {
-    const c = controlCases[0];
-    await expect(
-      signHumanControl({
-        schema: 'momo.human.control.v4',
-        context: CONTEXT,
-        contextReadAtMs: 0,
-        workspaceId: 'w',
-        memberId: 'm',
-        deviceKeyId: 'k',
-        hostId: 'h',
-        sessionId: 's',
-        nonce: 'n',
-        content: toContent(c),
-      }),
-    ).rejects.toBeInstanceOf(HumanControlInputError);
-    expect(mockNative!.sign).not.toHaveBeenCalled();
-  });
+  it.each(['momo.human.control.v4', 'momo.human.control.v1'])(
+    'refuses %s before Face ID is raised',
+    async schema => {
+      const c = v2Cases.find(x => x.content.kind === 'input')!;
+      await expect(
+        signHumanControl({
+          schema,
+          context: CONTEXT,
+          contextReadAtMs: 0,
+          workspaceId: 'w',
+          memberId: 'm',
+          deviceKeyId: 'k',
+          hostId: 'h',
+          sessionId: 's',
+          nonce: 'n',
+          content: toContent(c),
+        }),
+      ).rejects.toBeInstanceOf(HumanControlInputError);
+      expect(mockNative!.sign).not.toHaveBeenCalled();
+    },
+  );
 
   it('asks Face ID in 해요체', () => {
     for (const reason of Object.values(SIGN_REASONS)) {
