@@ -187,6 +187,16 @@ pub fn leak_violations(factory: Factory<'_>, corpus: &Corpus) -> R<Vec<String>> 
         if all_surfaces(&*b, Who::X, &c.token)?.contains(&c.token) {
             v.push(format!("left_member_sees_none: X still saw {}", c.token));
         }
+        // ...nor does an agent answer to X: not even in X's own DM, where the union of what X can
+        // read applies (ADR-0196 D6-4) — a channel X has left is no longer one X can read.
+        if b.agent_context(Who::X, Channel::DmXAgent)?
+            .contains(&c.token)
+        {
+            v.push(format!(
+                "left_member_sees_none: X's DM context still carried {}",
+                c.token
+            ));
+        }
     }
 
     // 4

@@ -2,7 +2,7 @@
 -- 103_mem_serving.sql — #3163 / ADR-0196 (팀 기억 v2) M1 서빙: 요약을 에이전트 컨텍스트에 싣는다
 --
 -- 에이전트 워커가 한 턴의 컨텍스트를 만들 때 「이 답에 실어도 되는 요약」을 읽는 DB 면.
--- 새 테이블은 없다(mem_serving 은 100 의 것). 새 함수 둘, 전부 SECURITY DEFINER · 소유자
+-- 새 테이블은 없다(mem_serving 은 100 의 것). 새 함수 셋, 전부 SECURITY DEFINER · 소유자
 -- mem_definer · EXECUTE 는 momo_memory 에만(워커가 tx 마다 SET LOCAL ROLE momo_memory 로 부른다).
 --
 --   mem_serve_requester   이 run 의 「묻는 사람」. 잡 페이로드가 아니라 DB 가 정한다(M-2):
@@ -27,8 +27,10 @@
 --   * 순서: 이 run 이 스레드 안이면 그 스레드 요약 먼저 → 답 채널 자신의 요약 → 최근 구간(to_seq)
 --     순. p_before_seq 는 대화 창이 이미 싣는 구간(창의 가장 오래된 seq)보다 앞에서 시작하는
 --     답 채널 요약만 남긴다(중복 절감이지 권한이 아니다).
---   * 보류 개수는 스캔 범위가 있다: 요청자가 읽을 수 있는 가장 최근 요약 200개(SCAN). 그보다 오래된
---     것은 서빙에도 보류에도 세지 않는다. RLS 가 가린(읽을 수 없는) 행은 세지 않는다(D7).
+--   * 스캔 범위(F3): 답 채널 자신의 최근 요약 200개와, 요청자가 멤버인 다른 채널의 최근 요약 200개를
+--     따로 잡는다(다른 채널이 답 채널 요약을 밀어낼 수 없다). 보류 개수는 후자 안에서만 센다 —
+--     그보다 오래된 것은 서빙에도 보류에도 세지 않는다. RLS 가 가릴(요청자가 멤버가 아닌) 채널의
+--     행은 보지도 세지도 않는다(D7).
 --
 -- 재실행 가능한 문장만 쓴다. schema_v0.sql · 100~102 는 고치지 않는다.
 -- =============================================================================
@@ -71,6 +73,26 @@ AS $$
    LIMIT 1
 $$;
 
+-- F3: 서빙 스캔용 부분 인덱스. 답 채널 스캔도, 요청자의 다른 채널 스캔(채널 목록으로 이 인덱스를
+-- 채널마다 탐)도 이 하나를 쓴다(EXPLAIN 은 PR 본문). 워크스페이스 전체 최신순 인덱스는 플래너가
+-- 쓰지 않아 만들지 않았다.
+CREATE INDEX IF NOT EXISTS mem_digest_home_idx
+  ON mem_digest (workspace_id, channel_id, created_at DESC, id DESC) WHERE NOT stale;
+
+-- F2: 이 run 의 영수증에 기록된 요약 id(없으면 NULL). 재시도가 23505 를 만났을 때 처음 기록과
+-- 지금 만든 블록이 같은지 비교하려고 워커가 읽는다.
+CREATE OR REPLACE FUNCTION mem_serving_of(p_run_id uuid)
+RETURNS uuid[]
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+  SELECT s.digest_ids FROM public.mem_serving s
+   WHERE s.run_id = p_run_id
+     AND s.workspace_id = nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid
+$$;
+
 -- ── 서빙 후보 ──────────────────────────────────────────────────────────────────
 -- 항상 최소 한 행을 돌려준다(실을 게 없어도 보류 개수를 알리기 위해: digest_id 가 NULL). 스위치가
 -- 걸렸거나 요청자가 없으면 행이 없다.
@@ -79,6 +101,7 @@ CREATE OR REPLACE FUNCTION mem_serve_candidates(
   p_run_id uuid, p_before_seq bigint, p_limit integer, p_body_max integer)
 RETURNS TABLE (
   requester_member_id uuid,
+  answer_channel_id   uuid,
   digest_id           uuid,
   digest_channel_id   uuid,
   thread_root_id      uuid,
@@ -136,21 +159,35 @@ BEGIN
    WHERE tm.id = v_trigger AND tm.workspace_id = v_ws;
 
   RETURN QUERY
-  WITH readable AS (
-    -- SCAN: 요청자가 지금 읽을 수 있는 가장 최근 요약 200개.
-    SELECT d.*
-      FROM public.mem_digest d
-     WHERE d.workspace_id = v_ws
-       AND NOT d.stale
-       AND public.mem_member_can_read(d.channel_id, v_req)
-       AND public.mem_channel_switch(d.channel_id)
-       AND public.mem_digest_live(d.id)
-       AND NOT EXISTS (
-         SELECT 1 FROM public.mem_evidence ev
-          WHERE ev.digest_id = d.id AND ev.workspace_id = v_ws
-            AND NOT public.mem_member_can_read(ev.channel_id, v_req))
+  WITH cheap_home AS (
+    -- F3: the answer channel's own digests are scanned on their own, so digests of other channels
+    -- can never push them out of the window. Cheap predicates + LIMIT first (index
+    -- mem_digest_home_idx); the heavy per-row checks run on at most 200 rows below.
+    SELECT d.* FROM public.mem_digest d
+     WHERE d.workspace_id = v_ws AND d.channel_id = v_channel AND NOT d.stale
      ORDER BY d.created_at DESC, d.id DESC
      LIMIT 200
+  ), cheap_other AS (
+    -- The requester's other channels (never the answer channel): the withheld count in a group
+    -- channel, the served union in a 1:1 agent DM. Bounded to their 200 most recent non-stale
+    -- digests (index mem_digest_home_idx, per channel). Digests of channels the requester is not in are not
+    -- even looked at: RLS would hide them and D7 says hidden rows are not counted.
+    SELECT d.* FROM public.mem_digest d
+     WHERE d.workspace_id = v_ws AND NOT d.stale AND d.channel_id <> v_channel
+       AND d.channel_id IN (SELECT ms.channel_id FROM public.membership ms
+                             WHERE ms.workspace_id = v_ws AND ms.member_id = v_req
+                               AND ms.left_at IS NULL)
+     ORDER BY d.created_at DESC, d.id DESC
+     LIMIT 200
+  ), readable AS (
+    SELECT c.* FROM (SELECT * FROM cheap_home UNION ALL SELECT * FROM cheap_other) c
+     WHERE public.mem_member_can_read(c.channel_id, v_req)
+       AND public.mem_channel_switch(c.channel_id)
+       AND public.mem_digest_live(c.id)
+       AND NOT EXISTS (
+         SELECT 1 FROM public.mem_evidence ev
+          WHERE ev.digest_id = c.id AND ev.workspace_id = v_ws
+            AND NOT public.mem_member_can_read(ev.channel_id, v_req))
   ), scored AS (
     SELECT rd.*, public.mem_digest_audience_ok(rd.id, v_channel, v_req) AS servable
       FROM readable rd
@@ -174,7 +211,7 @@ BEGIN
        AND NOT EXISTS (SELECT 1 FROM scored x
                         WHERE NOT x.servable AND s.id = ANY (x.source_digest_ids))
   )
-  SELECT v_req, t.id, t.channel_id, t.thread_root_id, t.level, t.from_seq, t.to_seq,
+  SELECT v_req, v_channel, t.id, t.channel_id, t.thread_root_id, t.level, t.from_seq, t.to_seq,
          (SELECT pg_catalog.min(m.created_at) FROM public.mem_evidence ev
             JOIN public.message m ON m.id = ev.message_id AND m.workspace_id = ev.workspace_id
            WHERE ev.digest_id = t.id AND ev.workspace_id = v_ws),
@@ -196,6 +233,7 @@ DECLARE f text;
 BEGIN
   FOREACH f IN ARRAY ARRAY[
     'mem_serve_requester(uuid)',
+    'mem_serving_of(uuid)',
     'mem_serve_candidates(uuid, bigint, integer, integer)'
   ] LOOP
     EXECUTE format('ALTER FUNCTION %s OWNER TO mem_definer', f);
@@ -215,6 +253,7 @@ DECLARE
   runtime_roles text[] := ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin'];
   worker_only text[] := ARRAY[
     'mem_serve_requester(uuid)',
+    'mem_serving_of(uuid)',
     'mem_serve_candidates(uuid, bigint, integer, integer)'
   ];
 BEGIN
@@ -244,7 +283,7 @@ BEGIN
   END LOOP;
 END $$;
 
--- ── L-1: mem_definer 소유 SECURITY DEFINER 함수 허용 목록 (102 것 + 이 파일의 2개) ───────
+-- ── L-1: mem_definer 소유 SECURITY DEFINER 함수 허용 목록 (102 것 + 이 파일의 3개) ───────
 -- 102 는 머지된 마이그레이션이라 고치지 않는다. 새 정의자 함수를 만들면 이 목록과 시험
 -- (mem_schema_conformance_pg.rs 의 DEFINER_ALLOW_LIST)에 이름을 올려야 한다. 목록 밖 함수는
 -- RLS 를 우회하는 새 통로이므로 여기서 멈춘다.
@@ -258,7 +297,7 @@ DECLARE
     'mem_channel_eligible', 'mem_cursor_state', 'mem_digest_index', 'mem_stale_digests',
     'mem_drop_digest', 'mem_token_budget', 'mem_reserve_tokens', 'mem_adjust_tokens',
     'mem_message_changed',
-    'mem_serve_requester', 'mem_serve_candidates'
+    'mem_serve_requester', 'mem_serve_candidates', 'mem_serving_of'
   ];
 BEGIN
   FOR f IN SELECT p.oid::regprocedure::text FROM pg_proc p

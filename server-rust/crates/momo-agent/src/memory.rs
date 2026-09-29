@@ -377,6 +377,9 @@ pub struct ServeDigest {
 /// The database's answer to "what may this run's answer carry, for whom".
 #[derive(Debug, Clone)]
 pub struct ServeCandidates {
+    /// The channel the answer goes to — read from the run row by the database, never taken from
+    /// the job payload (#3163 F6).
+    pub answer_channel: Uuid,
     /// Who asked — derived in SQL from the run row (never from the job payload).
     pub requester: Uuid,
     /// In serving order (thread first, then this channel, then most recent).
@@ -395,7 +398,7 @@ pub async fn serve_candidates(
     body_max: i32,
 ) -> Result<Option<ServeCandidates>, DbError> {
     let rows = sqlx::query(
-        "SELECT requester_member_id, digest_id, digest_channel_id, thread_root_id, level, \
+        "SELECT requester_member_id, answer_channel_id, digest_id, digest_channel_id, thread_root_id, level, \
                 from_seq, to_seq, covered_from, covered_to, body, withheld_count \
            FROM mem_serve_candidates($1, $2, $3, $4)",
     )
@@ -409,6 +412,7 @@ pub async fn serve_candidates(
         return Ok(None);
     };
     let requester: Uuid = first.get("requester_member_id");
+    let answer_channel: Uuid = first.get("answer_channel_id");
     let withheld: i32 = first.get("withheld_count");
     let digests = rows
         .iter()
@@ -428,10 +432,22 @@ pub async fn serve_candidates(
         })
         .collect();
     Ok(Some(ServeCandidates {
+        answer_channel,
         requester,
         digests,
         withheld,
     }))
+}
+
+/// The digest ids already recorded on `run_id`'s receipt, `None` when there is no receipt.
+pub async fn serving_of(
+    conn: &mut PgConnection,
+    run_id: Uuid,
+) -> Result<Option<Vec<Uuid>>, DbError> {
+    Ok(sqlx::query_scalar("SELECT mem_serving_of($1)")
+        .bind(run_id)
+        .fetch_one(&mut *conn)
+        .await?)
 }
 
 /// Write the run's receipt (`mem_serving`). Re-checks the audience rule for every digest, so a

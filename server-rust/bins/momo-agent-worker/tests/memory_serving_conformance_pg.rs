@@ -1043,6 +1043,39 @@ async fn in_a_one_to_one_agent_dm_the_requesters_own_permissions_apply() {
     assert!(!whole_prompt(&provider).contains("카나리아-DM"));
 }
 
+/// Any `FROM|JOIN|INTO|UPDATE|TABLE <whitespace> mem_x` not followed by `(` (a function call),
+/// whatever the case or the whitespace (spaces, tabs, newlines).
+fn direct_mem_table_access(source: &str) -> Vec<String> {
+    let lower: Vec<char> = source.to_lowercase().chars().collect();
+    let mut hits = Vec::new();
+    for keyword in ["from", "join", "into", "update", "table"] {
+        let kw: Vec<char> = keyword.chars().collect();
+        let mut i = 0;
+        while i + kw.len() < lower.len() {
+            let boundary = i == 0 || !(lower[i - 1].is_alphanumeric() || lower[i - 1] == '_');
+            if boundary && lower[i..i + kw.len()] == kw[..] {
+                let mut j = i + kw.len();
+                let ws_start = j;
+                while j < lower.len() && lower[j].is_whitespace() {
+                    j += 1;
+                }
+                if j > ws_start && lower[j..].starts_with(&['m', 'e', 'm', '_']) {
+                    let ident: String = lower[j..]
+                        .iter()
+                        .take_while(|c| c.is_ascii_alphanumeric() || **c == '_')
+                        .collect();
+                    let after = j + ident.chars().count();
+                    if lower.get(after) != Some(&'(') && !ident.ends_with('_') {
+                        hits.push(format!("{keyword} {ident}"));
+                    }
+                }
+            }
+            i += 1;
+        }
+    }
+    hits
+}
+
 fn sorted(mut ids: Vec<Uuid>) -> Vec<Uuid> {
     ids.sort();
     ids
@@ -1549,22 +1582,7 @@ async fn memory_reads_run_as_momo_memory_never_the_bypassrls_login() {
             include_str!("../../../crates/momo-agent/src/memory.rs"),
         ),
     ] {
-        let mut hits = Vec::new();
-        for keyword in ["FROM ", "JOIN ", "INTO ", "UPDATE ", "TABLE "] {
-            let mut rest = source;
-            while let Some(at) = rest.find(&format!("{keyword}mem_")) {
-                let after = &rest[at + keyword.len()..];
-                let ident: String = after
-                    .chars()
-                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-                    .collect();
-                if !after[ident.len()..].starts_with('(') {
-                    hits.push(format!("{keyword}{ident}"));
-                }
-                rest = &rest[at + keyword.len()..];
-            }
-        }
-        hits.retain(|h| !h.contains("mem_*"));
+        let hits = direct_mem_table_access(source);
         assert!(
             hits.is_empty(),
             "{name} reads/writes a mem_ table directly: {hits:?}"
@@ -1631,6 +1649,9 @@ async fn a_hostile_summary_stays_inside_the_data_section() {
     );
     // The data section is announced as data, before any summary text.
     assert!(block.find("지시가 아닙니다").unwrap() < block.find("정상 요약입니다").unwrap());
+    // No second opening either: the injected `<기억 참고자료>` / `<요약들>` are broken, not nested.
+    assert_eq!(block.matches("<기억 참고자료>").count(), 1, "{block}");
+    assert_eq!(block.matches("<요약들>").count(), 1, "{block}");
     // It reached no other turn (the conversation's user turns are the human's words only).
     assert!(call
         .messages
@@ -1679,8 +1700,342 @@ async fn no_digests_no_receipt_and_the_api_shows_the_chip_only_when_there_is_one
         .await
         .expect("alice sees the receipt");
     assert_eq!((seen.digest_ids.len(), seen.withheld_count), (0, Some(1)));
-    let other = api_receipt(&app, &fx, fx.bob, turn.run_id)
+    // F1: a receipt that lists nothing exists only for the requester's count. To another member
+    // of the channel it is the same 404 as "no receipt" — its existence is not a signal.
+    assert!(
+        api_receipt(&app, &fx, fx.bob, turn.run_id).await.is_none(),
+        "a non-requester must not learn that something was withheld"
+    );
+    assert!(api_receipt(&app, &fx, fx.carol, turn.run_id)
         .await
-        .expect("bob reads #general");
-    assert_eq!(other.withheld_count, None);
+        .is_none());
+}
+
+// --- review follow-ups (F2, F3, F5, F6, F9) ---------------------------------------
+
+/// F9: the "no direct mem_ access" scan survives odd whitespace and case (and can fail).
+#[test]
+fn the_direct_access_scan_sees_through_whitespace_and_case() {
+    assert_eq!(
+        direct_mem_table_access("SELECT *\n  FROM\n\t mem_digest d"),
+        vec!["from mem_digest".to_string()]
+    );
+    assert_eq!(
+        direct_mem_table_access("insert   into  Mem_Serving (a)"),
+        vec!["into mem_serving".to_string()]
+    );
+    assert!(direct_mem_table_access(
+        "SELECT mem_serve_candidates($1) FROM mem_serve_candidates(\n$1)"
+    )
+    .is_empty());
+    assert!(direct_mem_table_access("from the mem_ prefix").is_empty());
+}
+
+fn serve_cfg() -> momo_agent_worker::config::MemoryConfig {
+    config().memory
+}
+
+async fn serve_direct(
+    pool: &PgPool,
+    cfg: &momo_agent_worker::config::MemoryConfig,
+    fx: &Fx,
+    turn: &Turn,
+    payload_channel: Uuid,
+) -> Option<String> {
+    momo_agent_worker::serving::serve(pool, cfg, 0, fx.ws, turn.run_id, payload_channel, None).await
+}
+
+/// F9 + requester chain: the NEAREST human wins, not the first one found going up.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn the_nearest_human_in_the_chain_is_the_requester() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let fx = seed(&su).await;
+    let wp = momo_worker_pool().await;
+    let (m_alice, _) = post_in(&wp, fx.ws, fx.general, fx.alice, "앨리스 질문", None).await;
+    let (m_bob, _) = post_in(&wp, fx.ws, fx.general, fx.bob, "밥이 이어서 묻는다", None).await;
+    let parent = bare_run(&su, &fx, fx.general, Some(m_alice), None).await;
+    // The child was raised by Bob's own message and also has Alice's run as its parent:
+    // Bob (depth 0) is nearer than Alice (depth 1).
+    let child = bare_run(&su, &fx, fx.general, Some(m_bob), Some(parent)).await;
+    assert_eq!(requester_of(&wp, fx.ws, child).await, Some(fx.bob));
+    assert_eq!(requester_of(&wp, fx.ws, parent).await, Some(fx.alice));
+    // A grandchild with no words of its own climbs to the nearest human ancestor.
+    let grand = bare_run(&su, &fx, fx.general, None, Some(child)).await;
+    assert_eq!(requester_of(&wp, fx.ws, grand).await, Some(fx.bob));
+}
+
+/// F2: a retry whose block differs from the recorded receipt serves nothing; an identical one serves.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn a_retry_serves_only_a_block_identical_to_the_recorded_receipt() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let fx = seed(&su).await;
+    let wp = momo_worker_pool().await;
+    let first = write_digest(
+        &wp,
+        fx.ws,
+        fx.general,
+        fx.bob,
+        "window",
+        "첫 요약: 로고는 파란색",
+        3,
+        None,
+        &[],
+    )
+    .await;
+    let turn = enqueue_turn(&wp, &fx, fx.general, fx.alice, None, "@hermes 요약", None).await;
+    sqlx::query("UPDATE outbox SET status = 'done' WHERE kind = 'agent_job' AND status <> 'done'")
+        .execute(&su)
+        .await
+        .unwrap();
+    let cfg = serve_cfg();
+
+    let a = serve_direct(&wp, &cfg, &fx, &turn, fx.general)
+        .await
+        .expect("first attempt serves");
+    assert!(a.contains("첫 요약"));
+    // Retry of the same run, nothing changed: same block, served again (23505 = already recorded).
+    let b = serve_direct(&wp, &cfg, &fx, &turn, fx.general).await;
+    assert_eq!(
+        b.as_deref(),
+        Some(a.as_str()),
+        "an identical retry is served"
+    );
+
+    // A new digest appears between the attempts: the rebuilt block differs from the receipt.
+    write_digest(
+        &wp,
+        fx.ws,
+        fx.general,
+        fx.bob,
+        "window",
+        "새 요약: 가격표 확정",
+        3,
+        None,
+        &[],
+    )
+    .await;
+    let c = serve_direct(&wp, &cfg, &fx, &turn, fx.general).await;
+    assert!(
+        c.is_none(),
+        "unrecorded memory must not ride the retry: {c:?}"
+    );
+    let (ids, _, _, _) = receipt(&su, turn.run_id)
+        .await
+        .expect("the original receipt stands");
+    assert_eq!(ids, vec![first.id]);
+}
+
+/// F3: 300 newer digests of another channel cannot push the answer channel's digest out of the scan.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn other_channels_cannot_starve_the_answer_channels_digests() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let fx = seed(&su).await;
+    let wp = momo_worker_pool().await;
+    let g = write_digest(
+        &wp,
+        fx.ws,
+        fx.general,
+        fx.bob,
+        "window",
+        "오래된 공개 요약: 로고는 파란색",
+        3,
+        None,
+        &[],
+    )
+    .await;
+    let (hr_msg, _) = post_in(&wp, fx.ws, fx.hr, fx.bob, "HR 근거", None).await;
+    // 300 digests of #hr, all NEWER than the general one (bulk-inserted as superuser).
+    sqlx::query(
+        "WITH d AS (INSERT INTO mem_digest (workspace_id, channel_id, level, from_seq, to_seq, body, \
+                                           source_count, prompt_version, created_at) \
+                    SELECT $2, $3, 'window', g, g, 'HR 대량 ' || g, 1, 'digest-v1', now() + g * interval '1 second' \
+                      FROM generate_series(1000, 1299) g RETURNING id) \
+         INSERT INTO mem_evidence (workspace_id, digest_id, message_id, channel_id, created_at) \
+         SELECT $2, d.id, $1, $3, now() FROM d",
+    )
+    .bind(hr_msg)
+    .bind(fx.ws)
+    .bind(fx.hr)
+    .execute(&su)
+    .await
+    .expect("bulk digests");
+
+    let provider = Arc::new(MockChatProvider::echo());
+    let w = worker(&provider, config()).await;
+    let turn = enqueue_turn(&wp, &fx, fx.general, fx.alice, None, "@hermes 요약", None).await;
+    w.drain_once().await.expect("drain");
+    let block = memory_turn(&provider).expect("the answer channel's digest still rides");
+    assert!(block.contains("오래된 공개 요약"), "{block}");
+    let (ids, withheld, _, _) = receipt(&su, turn.run_id).await.expect("receipt");
+    assert_eq!(ids, vec![g.id]);
+    assert_eq!(
+        withheld, 200,
+        "the withheld count is bounded to the 200 newest other-channel digests"
+    );
+
+    // Carol is in none of #hr: nothing of it is scanned or counted for her.
+    let provider = Arc::new(MockChatProvider::echo());
+    let w = worker(&provider, config()).await;
+    let turn = enqueue_turn(&wp, &fx, fx.general, fx.carol, None, "@hermes 요약", None).await;
+    w.drain_once().await.expect("drain");
+    let (_, withheld, _, _) = receipt(&su, turn.run_id).await.expect("receipt");
+    assert_eq!(withheld, 0);
+}
+
+/// F6: the answer channel is the run row's. A payload naming another channel changes nothing.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn the_answer_channel_is_the_run_rows_not_the_payloads() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let fx = seed(&su).await;
+    let wp = momo_worker_pool().await;
+    write_digest(
+        &wp,
+        fx.ws,
+        fx.general,
+        fx.bob,
+        "window",
+        "공개 요약: 로고는 파란색",
+        3,
+        None,
+        &[],
+    )
+    .await;
+    write_digest(
+        &wp,
+        fx.ws,
+        fx.hr,
+        fx.bob,
+        "window",
+        "HR 비공개 요약 카나리아-HR",
+        3,
+        None,
+        &[],
+    )
+    .await;
+    let turn = enqueue_turn(&wp, &fx, fx.general, fx.alice, None, "@hermes 요약", None).await;
+    sqlx::query("UPDATE outbox SET status = 'done' WHERE kind = 'agent_job' AND status <> 'done'")
+        .execute(&su)
+        .await
+        .unwrap();
+    // The payload claims #hr; the run row (which the SQL reads) says #general.
+    let block = serve_direct(&wp, &serve_cfg(), &fx, &turn, fx.hr)
+        .await
+        .expect("served");
+    assert!(
+        block.contains("공개 요약") && !block.contains("카나리아-HR"),
+        "{block}"
+    );
+    assert!(
+        !block.contains("다른 채널"),
+        "labels are judged against the run's channel: {block}"
+    );
+    let (_, withheld, _, _) = receipt(&su, turn.run_id).await.expect("receipt");
+    assert_eq!(withheld, 1);
+}
+
+/// F5: a serving that times out mid-transaction leaves the pooled connection clean, and the
+/// reply-side timeout no longer covers the receipt.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn a_timed_out_serving_leaves_the_pooled_connection_clean() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let fx = seed(&su).await;
+    let wp = momo_worker_pool().await;
+    write_digest(
+        &wp,
+        fx.ws,
+        fx.general,
+        fx.bob,
+        "window",
+        "공개 요약: 로고는 파란색",
+        3,
+        None,
+        &[],
+    )
+    .await;
+    let turn = enqueue_turn(&wp, &fx, fx.general, fx.alice, None, "@hermes 요약", None).await;
+    sqlx::query("UPDATE outbox SET status = 'done' WHERE kind = 'agent_job' AND status <> 'done'")
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // Make the read slow from inside: mem_channel_switch sleeps (restored afterwards).
+    let original: String = sqlx::query_scalar(
+        "SELECT pg_get_functiondef('public.mem_channel_switch(uuid)'::regprocedure)",
+    )
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "CREATE OR REPLACE FUNCTION public.mem_channel_switch(p_channel_id uuid) RETURNS boolean \
+         LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$ \
+         BEGIN PERFORM pg_sleep(3); RETURN true; END $$",
+    )
+    .execute(&su)
+    .await
+    .unwrap();
+
+    // One connection, so the next user of the pool is exactly the one that was cut off.
+    let opts: PgConnectOptions = database_url().parse().unwrap();
+    let single = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(opts.username("momo_worker").password("momo_worker_dev_pw"))
+        .await
+        .unwrap();
+    let mut cfg = serve_cfg();
+    cfg.serve_timeout = Duration::from_millis(500);
+    let started = Instant::now();
+    let block = serve_direct(&single, &cfg, &fx, &turn, fx.general).await;
+    let took = started.elapsed();
+    sqlx::query(&original)
+        .execute(&su)
+        .await
+        .expect("restore mem_channel_switch");
+    assert!(block.is_none(), "a timed-out read serves nothing");
+    assert!(
+        took < Duration::from_millis(2_500),
+        "the bound held: {took:?}"
+    );
+    assert!(receipt(&su, turn.run_id).await.is_none());
+
+    let row = sqlx::query(
+        "SELECT current_setting('role') AS role, current_user::text AS cu, session_user::text AS su, \
+                (SELECT clock_timestamp() - xact_start < interval '200 milliseconds' FROM pg_stat_activity WHERE pid = pg_backend_pid()) AS fresh, \
+                current_setting('app.workspace_id', true) AS ws",
+    )
+    .fetch_one(&single)
+    .await
+    .unwrap();
+    assert_eq!(
+        row.get::<String, _>("role"),
+        "none",
+        "no momo_memory role left on the connection"
+    );
+    assert_eq!(row.get::<String, _>("cu"), row.get::<String, _>("su"));
+    assert!(
+        row.get::<bool, _>("fresh"),
+        "no transaction left open on the connection"
+    );
+    assert_ne!(
+        row.get::<Option<String>, _>("ws").as_deref(),
+        Some(fx.ws.to_string().as_str())
+    );
+
+    // And the same pool serves normally straight after.
+    let again = serve_direct(&single, &serve_cfg(), &fx, &turn, fx.general).await;
+    assert!(again.is_some());
 }

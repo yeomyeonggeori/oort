@@ -2465,7 +2465,7 @@ async fn lock_block_also_locks_views_and_materialized_views() {
 }
 
 /// L-1: the SECURITY DEFINER functions owned by mem_definer are exactly this list.
-const DEFINER_ALLOW_LIST: [&str; 19] = [
+const DEFINER_ALLOW_LIST: [&str; 20] = [
     "mem_adjust_tokens",
     "mem_advance_cursor",
     "mem_apply_digest",
@@ -2483,6 +2483,7 @@ const DEFINER_ALLOW_LIST: [&str; 19] = [
     "mem_reserve_tokens",
     "mem_serve_candidates",
     "mem_serve_requester",
+    "mem_serving_of",
     "mem_stale_digests",
     "mem_token_budget",
 ];
