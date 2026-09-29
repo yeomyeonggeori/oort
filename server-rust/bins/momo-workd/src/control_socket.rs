@@ -434,7 +434,10 @@ pub fn respond(line: &str, identity: &HostIdentity, shared: &SocketShared) -> Va
                 return json!({"ok": false, "error": "invalid_root_key"});
             };
             match lock_trust().pin_root(key_id, alg, public_key, crate::client::now_ms()) {
-                Ok(pinned) => json!({"ok": true, "pinned": pinned}),
+                Ok(pinned) => {
+                    shared.grants.retire_all();
+                    json!({"ok": true, "pinned": pinned})
+                }
                 Err(error) => json!({"ok": false, "error": error}),
             }
         }
@@ -445,14 +448,20 @@ pub fn respond(line: &str, identity: &HostIdentity, shared: &SocketShared) -> Va
             match lock_trust()
                 .apply_revocation(revocation, crate::human_trust::RevocationSource::LocalApp)
             {
-                Ok(()) => json!({"ok": true}),
+                Ok(()) => {
+                    shared.grants.retire_all();
+                    json!({"ok": true})
+                }
                 Err(error) => json!({"ok": false, "error": error}),
             }
         }
         Some("reset_signature_requirement") => {
             let mut requirement = shared.requirement.lock().unwrap_or_else(|p| p.into_inner());
             match requirement.reset() {
-                Ok(()) => json!({"ok": true, "required": requirement.required()}),
+                Ok(()) => {
+                    shared.grants.retire_all();
+                    json!({"ok": true, "required": requirement.required()})
+                }
                 Err(error) => {
                     tracing::error!(error = %error, "could not reset the signature requirement");
                     json!({"ok": false, "error": "requirement_unavailable"})
@@ -638,6 +647,7 @@ mod tests {
             requirement: Arc::new(std::sync::Mutex::new(
                 crate::signature_requirement::SignatureRequirement::open(dir, false),
             )),
+            grants: crate::session_grant::GrantEpoch::default(),
         }
     }
 
