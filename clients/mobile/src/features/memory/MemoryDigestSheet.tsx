@@ -180,7 +180,7 @@ const buildStyles = (color: Palette) =>
       marginBottom: space.md,
     },
     head: {flexDirection: 'row', alignItems: 'flex-start', gap: space.sm},
-    headText: {flex: 1, gap: space.xs, paddingBottom: space.md},
+    headText: {flex: 1, gap: space.xs, paddingBottom: space.md, paddingTop: space.xs},
     title: {fontSize: font.body, color: color.text, fontWeight: '700'},
     summary: {fontSize: font.label, lineHeight: line.label, color: color.textMuted},
     close: {
@@ -197,7 +197,7 @@ const buildStyles = (color: Palette) =>
       borderTopColor: color.border,
     },
     itemLine: {fontSize: font.label, lineHeight: line.label, color: color.text},
-    itemMeta: {fontSize: font.meta, lineHeight: line.meta, color: color.textFaint},
+    itemMeta: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
     note: {
       fontSize: font.meta,
       lineHeight: line.meta,

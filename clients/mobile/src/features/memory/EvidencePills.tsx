@@ -51,7 +51,9 @@ const buildStyles = (color: Palette) =>
       flexDirection: 'row',
       flexWrap: 'wrap',
       alignItems: 'center',
-      gap: space.sm,
+      columnGap: space.sm,
+      // 줄이 접혀도 위아래 hitSlop(8)이 겹치지 않게 slop 두 배만큼 벌린다.
+      rowGap: space.lg,
     },
     pill: {
       minHeight: PILL_HEIGHT,
@@ -65,5 +67,5 @@ const buildStyles = (color: Palette) =>
     },
     pressed: {opacity: 0.6},
     pillLabel: {fontSize: font.meta, color: color.accentText, fontWeight: '600'},
-    rest: {fontSize: font.meta, color: color.textFaint},
+    rest: {fontSize: font.meta, color: color.textMuted},
   });

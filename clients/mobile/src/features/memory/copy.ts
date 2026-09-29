@@ -97,3 +97,4 @@ export const MEMORY_PAUSE_RETRY = '다시 불러오기';
 export const MEMORY_ADMIN_ROW = '팀·채널 기억 설정';
 export const MEMORY_ADMIN_DETAIL =
   '팀 전체 스위치와 채널별 제외는 데스크탑에서 바꿀 수 있어요.';
+export const MEMORY_PAUSE_CHECKING = '기억 설정을 확인하고 있어요.';

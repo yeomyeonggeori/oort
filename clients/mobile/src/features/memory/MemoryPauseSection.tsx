@@ -6,6 +6,7 @@ import {usePalette, useStyles} from '../../design/theme';
 import {
   MEMORY_ADMIN_DETAIL,
   MEMORY_ADMIN_ROW,
+  MEMORY_PAUSE_CHECKING,
   MEMORY_PAUSE_DETAIL_OFF,
   MEMORY_PAUSE_DETAIL_ON,
   MEMORY_PAUSE_LABEL,
@@ -37,7 +38,7 @@ export function MemoryPauseSection({
   const detail = pause.loadFailed
     ? MEMORY_PAUSE_LOAD_FAILED
     : !pause.ready
-      ? '기억 설정을 확인하고 있어요.'
+      ? MEMORY_PAUSE_CHECKING
       : pause.paused
         ? MEMORY_PAUSE_DETAIL_ON
         : MEMORY_PAUSE_DETAIL_OFF;
