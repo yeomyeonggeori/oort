@@ -475,7 +475,45 @@ async fn stage() -> Stage {
         .await;
     assert_eq!(status, 201, "{body}");
     let root_id = Uuid::parse_str(body["deviceKey"]["id"].as_str().unwrap()).unwrap();
-    let (status, body) = w
+    // #3119: a phone key registers only on a QR-linked sign-in.
+    let host_header = w.base.trim_start_matches("http://").to_string();
+    let issued: Value = w
+        .http
+        .post(format!("{}/v1/auth/device-link", w.base))
+        .bearer_auth(&w.access)
+        .header("host", &host_header)
+        .header("x-forwarded-proto", "http")
+        .send()
+        .await
+        .expect("issue device link")
+        .json()
+        .await
+        .expect("link body");
+    let redeemed: Value = w
+        .http
+        .post(format!("{}/v1/auth/device-link/redeem", w.base))
+        .header("host", &host_header)
+        .header("x-forwarded-proto", "http")
+        .json(&json!({ "token": issued["token"], "device": { "name": "폰", "platform": "ios" } }))
+        .send()
+        .await
+        .expect("redeem device link")
+        .json()
+        .await
+        .expect("redeem body");
+    let phone_session = World {
+        access: redeemed["accessToken"]
+            .as_str()
+            .expect("access")
+            .to_string(),
+        http: w.http.clone(),
+        base: w.base.clone(),
+        workspace: w.workspace,
+        person: w.person,
+        channel: w.channel,
+        host: w.host,
+    };
+    let (status, body) = phone_session
         .post(
             &format!("/v1/workspaces/{workspace}/device-keys"),
             json!({ "alg": "p256", "publicKey": phone.public_b64, "platform": "ios", "label": "폰" }),

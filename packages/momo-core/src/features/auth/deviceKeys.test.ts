@@ -3,6 +3,7 @@ import { ApiError } from "../../lib/api";
 import { WireShapeError } from "../../lib/wire";
 import { installCoreHost, resetCoreHost } from "../../runtime/host";
 import {
+  DEVICE_KEY_REFUSAL,
   DeviceKeyRebindError,
   deviceKeyErrorMessage,
   deviceKeyServerMessage,
@@ -287,6 +288,30 @@ describe("deviceKeys views", () => {
     expect(phoneKeys(keys).map((k) => k.id)).toEqual(["b", "a"]);
     expect(rootRowFor(keys, MAC_KEY)).toEqual({ row: keys[3], lineageLive: true });
     expect(rootRowFor(keys, PHONE_KEY)).toBeUndefined();
+  });
+
+  it("offers no phone the server will not let a root approve, and keeps an approved one marked (#3119)", () => {
+    const rows = [
+      parseDeviceKey(row({ id: "qr", linkedSession: true, linkedFromMac: true, createdAtMs: 5 })),
+      parseDeviceKey(row({ id: "password", linkedSession: false, linkedFromMac: false, createdAtMs: 4 })),
+      parseDeviceKey(row({ id: "self-qr", linkedSession: true, linkedFromMac: false, createdAtMs: 3 })),
+      parseDeviceKey(
+        row({
+          id: "approved-before",
+          state: "endorsed",
+          canInstruct: true,
+          linkedSession: false,
+          linkedFromMac: false,
+          createdAtMs: 2,
+        })
+      ),
+      parseDeviceKey(row({ id: "older-server", createdAtMs: 1 })),
+    ];
+    expect(phoneKeys(rows).map((k) => k.id)).toEqual(["qr", "approved-before", "older-server"]);
+    expect(rows[3]!.linkedSession).toBe(false);
+    expect(rows[4]!.linkedSession).toBeUndefined();
+    expect(deviceKeyServerMessage(DEVICE_KEY_REFUSAL.requiresLinkedSession, "x")).toContain("QR");
+    expect(deviceKeyServerMessage(DEVICE_KEY_REFUSAL.linkNotFromMac, "x")).toContain("QR");
   });
 
   it("finds a root row on an ended sign-in as a row that must move, not a new registration (#3103)", () => {

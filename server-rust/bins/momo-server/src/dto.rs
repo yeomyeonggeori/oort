@@ -957,6 +957,13 @@ pub struct DeviceKeyDto {
     /// The key's sign-in can still rotate (#3097). `false` on a live key means
     /// it signs nothing until it is moved onto a live sign-in (`rebind`).
     pub lineage_live: bool,
+    /// The key's sign-in came from redeeming a QR device link (#3119). A phone
+    /// key without it is never an approval candidate; one approved before the
+    /// rule keeps its approval and is shown as 「QR 아님」.
+    pub linked_session: bool,
+    /// That QR link was issued from a sign-in holding (or that held) a Mac key
+    /// of the same member — the only phone keys a root may approve (#3119).
+    pub linked_from_mac: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub endorsed_by_key_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

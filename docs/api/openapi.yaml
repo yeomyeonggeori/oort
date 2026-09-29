@@ -3274,6 +3274,12 @@ paths:
         candidate (`state: root`); an `ios` key starts `unendorsed` and cannot
         instruct until a root endorses it. The server's root is advisory: the
         host Mac's workd pins the real root (D-10).
+        **QR 연결로만 (#3119, ADR-0146 D-6 증보 2026-09-29).** An `ios` key is
+        registered only from a sign-in minted by redeeming a QR device link
+        (ADR-0180) — a web or password sign-in, a phone signed in by address
+        included, is 403 `device_key_requires_linked_session` and writes
+        nothing. A rebind moves an `ios` key only from such a sign-in to such a
+        sign-in (same code).
       security:
         - bearerAuth: []
       parameters:
@@ -3311,9 +3317,11 @@ paths:
             member named (`device_key_member_mismatch`), a root key without the
             right password (`device_root_password_required`), a root key
             from (or rebound into) a QR-linked session
-            (`device_root_linked_session`), or a rebind letter that does not
-            verify under the key, names another sign-in, or is more than
-            ±5 min off (`device_signature_invalid`).
+            (`device_root_linked_session`), a phone key from — or rebound
+            to or from — a sign-in that is not QR-linked
+            (`device_key_requires_linked_session`, #3119), or a rebind letter
+            that does not verify under the key, names another sign-in, or is
+            more than ±5 min off (`device_signature_invalid`).
           content:
             application/json:
               schema:
@@ -3414,6 +3422,10 @@ paths:
         root must be a live, unendorsed `macos` key of the caller; the target a
         live, unendorsed `ios` key of the caller. The canonical low-s signature
         is stored. Mac-to-Mac endorsement is the next stage.
+        Since #3119 the target's sign-in must be QR-linked
+        (`linkedSession`, else `device_key_requires_linked_session`) and its QR
+        issued from a sign-in that holds or held a `macos` key of the caller
+        (`linkedFromMac`, else `device_key_link_not_from_mac`).
       security:
         - bearerAuth: []
       parameters:
@@ -3448,7 +3460,10 @@ paths:
         "403":
           description: >
             `device_signature_invalid`, `device_root_not_eligible`,
-            `device_key_member_mismatch`, or `device_key_revoked`.
+            `device_key_member_mismatch`, `device_key_revoked`,
+            `device_key_requires_linked_session` (the phone key's sign-in is
+            not QR-linked, #3119) or `device_key_link_not_from_mac` (its QR
+            was not issued from a Mac sign-in, #3119).
           content:
             application/json:
               schema:
@@ -11390,7 +11405,7 @@ components:
     DeviceKey:
       type: object
       required:
-        [id, workspaceId, memberId, alg, publicKey, platform, label, state, canInstruct, current, lineageLive, createdAtMs]
+        [id, workspaceId, memberId, alg, publicKey, platform, label, state, canInstruct, current, lineageLive, linkedSession, linkedFromMac, createdAtMs]
       properties:
         id:
           type: string
@@ -11429,6 +11444,18 @@ components:
           description: >
             The key's sign-in can still rotate (#3097). A live key with
             `lineageLive: false` signs nothing until it is moved with `rebind`.
+        linkedSession:
+          type: boolean
+          description: >
+            #3119 — the key's sign-in was minted by redeeming a QR device link.
+            An `ios` key without it is never an approval candidate; one
+            approved before #3119 keeps its approval and is shown as 「QR 아님」.
+        linkedFromMac:
+          type: boolean
+          description: >
+            #3119 — that QR link was issued from a sign-in holding (or that
+            held) a `macos` key of the same member. Only such phone keys can be
+            endorsed.
         endorsedByKeyId:
           type: string
           format: uuid
