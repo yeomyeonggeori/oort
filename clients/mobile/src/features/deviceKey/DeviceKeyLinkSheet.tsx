@@ -20,6 +20,7 @@ import {
   consumeQrKeyEnrollment,
   qrKeyEnrollmentArmed,
 } from '../onboarding/phoneFlow';
+import type {DeviceKeyView} from '../../deviceKey/enrollment';
 import {DEVICE_KEY_TITLE} from './copy';
 import {DeviceKeyPanel, hasDeviceKeyAction} from './DeviceKeyPanel';
 import {useDeviceKey, type DeviceKeyState} from './useDeviceKey';
@@ -49,6 +50,25 @@ export const LINK_SHEET_INTRO = 'QR 연결을 마쳤습니다.';
 /** #3129 design-review M1: a QR no Mac made links chat and alerts only — 「마쳤습니다」
  *  next to 「QR 연결 필요」 would contradict itself. */
 export const LINK_SHEET_INTRO_UNLINKED = '대화와 알림은 연결됐습니다.';
+
+/**
+ * #3154 L3: 위쪽 문장은 QR 연결의 결과이지 키의 결과가 아니다. 아래 판이 「맥 확인
+ * 필요」·「Face ID 필요」·오류를 말하는데 위가 「마쳤습니다」면 한 화면이 스스로
+ * 모순된다. 연결도 키도 잘 가는 상태에서만 「마쳤습니다」, 나머지는 어느 쪽에서든
+ * 참인 「대화와 알림은 연결됐습니다」다.
+ */
+export function linkSheetIntro(view: DeviceKeyView): string {
+  switch (view.kind) {
+    case 'loading':
+    case 'unregistered':
+      return LINK_SHEET_INTRO;
+    case 'pending':
+    case 'approved':
+      return view.biometryOff ? LINK_SHEET_INTRO_UNLINKED : LINK_SHEET_INTRO;
+    default:
+      return LINK_SHEET_INTRO_UNLINKED;
+  }
+}
 
 export function DeviceKeyLinkGate(): React.JSX.Element | null {
   const {workspaceId} = useSession();
@@ -85,9 +105,12 @@ export function DeviceKeyLinkGate(): React.JSX.Element | null {
 export function LinkSheetBody({
   state,
   onClose,
+  initialScrollY,
 }: {
   state: DeviceKeyState;
   onClose: () => void;
+  /** 캡처 전용(#3154 M1): 큰 글씨에서 시트를 스크롤한 자리를 사진으로 남긴다. */
+  initialScrollY?: number;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
@@ -123,6 +146,7 @@ export function LinkSheetBody({
         </View>
       </View>
       <ScrollView
+        contentOffset={initialScrollY ? {x: 0, y: initialScrollY} : undefined}
         contentContainerStyle={[
           styles.content,
           {paddingBottom: Math.max(insets.bottom, space.lg) + space.lg},
@@ -130,7 +154,7 @@ export function LinkSheetBody({
         testID="device-key-link-scroll"
       >
         <Sentence style={styles.intro} testID="device-key-link-intro">
-          {state.view.kind === 'unlinked' ? LINK_SHEET_INTRO_UNLINKED : LINK_SHEET_INTRO}
+          {linkSheetIntro(state.view)}
         </Sentence>
         <DeviceKeyPanel state={state} />
         {/* 다음 행동이 있으면 판의 채움 버튼이 주인이다 — 닫기는 머리의 「닫기」

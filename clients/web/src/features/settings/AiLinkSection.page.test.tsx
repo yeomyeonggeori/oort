@@ -391,7 +391,7 @@ describe("기본 AI 팀 줄 저장 = default-ai 서버 답 (#3042)", () => {
     await rtlWaitFor(() =>
       expect((q("ai-default-teamAgent-select") as HTMLSelectElement).value).toBe("link:0:gpt-4o")
     );
-    expect(q("ai-defaults-team-foot")?.textContent).toContain("팀 줄의 선택은 서버에 저장돼요.");
+    expect(q("ai-defaults-team-foot")?.textContent).toContain("모델을 직접 고른 에이전트는 자기 모델을 써요.");
   });
 
   it("default-ai 가 403이면 확인한 뒤에도 칸이 없다(서버 판정)", async () => {

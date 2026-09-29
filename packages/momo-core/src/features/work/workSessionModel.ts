@@ -14,6 +14,9 @@ import { isWorkHostUsableBy } from "../capabilities/serverSurfaces";
 //   agent.partial      text_delta
 //   approval.requested action, action_type, status, options
 //   approval.decided   action, status, option_id
+//   approval.auto_allowed  action, status, scope, tool_kind, preview_sha256
+//                      (#3095: answered from the owner's 「이 세션 동안」 grant;
+//                      never closes a pending card)
 // and anything whose key CONTAINS command/output/cwd/path/raw/env/_meta is
 // rejected outright. So `MomoACPSessionCard`'s `_meta.acp.toolCallId` grammar
 // has no web equivalent: there are no per-call ids here, and a tool call is
@@ -261,6 +264,24 @@ export function toolPhrase(toolName: string | undefined, state: WorkRowState): s
   return DEFAULT_TOOL_PHRASE[tense];
 }
 
+// ---- automatic allow (#3095) ------------------------------------------------
+
+const AUTO_ALLOWED_WHAT: Readonly<Record<string, string>> = {
+  read: "파일 읽기",
+  search: "검색",
+  execute: "명령 실행",
+  edit: "파일 수정",
+};
+
+/** Fixed phrases only: `tool_kind` is host-supplied, so it is looked up, never printed. */
+export function autoAllowedHeadline(toolKind: unknown): string {
+  const what =
+    typeof toolKind === "string" && Object.prototype.hasOwnProperty.call(AUTO_ALLOWED_WHAT, toolKind)
+      ? AUTO_ALLOWED_WHAT[toolKind]
+      : "도구 사용";
+  return `세션 허락으로 자동 허락됨 · ${what}`;
+}
+
 // ---- event parsing ----------------------------------------------------------
 
 const ACP_TYPES: ReadonlySet<string> = new Set([
@@ -268,6 +289,7 @@ const ACP_TYPES: ReadonlySet<string> = new Set([
   "agent.partial",
   "approval.requested",
   "approval.decided",
+  "approval.auto_allowed",
 ]);
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -505,6 +527,23 @@ export function foldSessionEvents(
           headline: toolPhrase(tool.toolName, "pending"),
         };
       }
+      continue;
+    }
+
+    if (event.type === "approval.auto_allowed") {
+      // #3095: nothing was pending. This is its own line and deliberately does
+      // not touch `pendingApprovalIndex`/`openToolIndex`: a card waiting for a
+      // different tool kind stays open, exactly as `approval.decided` would NOT
+      // let it. Only the server's exact shape counts (scope `session`,
+      // status `approved`); anything else is not shown as an allow.
+      if (payload.scope !== "session" || payload.status !== "approved") continue;
+      rows.push({
+        id: event.eventId,
+        kind: "approval",
+        state: "done",
+        atMs: event.atMs,
+        headline: autoAllowedHeadline(payload.tool_kind),
+      });
       continue;
     }
 

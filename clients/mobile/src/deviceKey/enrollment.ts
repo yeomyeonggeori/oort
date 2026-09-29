@@ -57,6 +57,15 @@ export type DeviceKeyView =
   | {kind: 'biometryOff'}
   /** Face ID re-enrolled — the key can never sign again (D-2). */
   | {kind: 'invalidated'}
+  /** #3145 (#3127 「계보당 폰 키 1개」, ADR-0146 증보 2026-09-29): a new key
+   *  cannot be registered while this sign-in still holds a live phone key.
+   *  `oldKey` — the server row of the invalidated key is still live (found
+   *  before anything is deleted; `fingerprint` is the OLD key's, the one the
+   *  Mac lists); `registerRefused` — the server said 409
+   *  `device_key_lineage_has_phone_key` on the new key (`fingerprint` is null:
+   *  it is the OTHER key that holds the place). Either way the Mac revokes the
+   *  old key, or the phone links by QR again. */
+  | {kind: 'replaceBlocked'; reason: 'oldKey' | 'registerRefused'; fingerprint: string | null}
   /** No key yet, or a key the server has no row for. */
   | {kind: 'unregistered'; fingerprint: string | null}
   | {kind: 'pending'; fingerprint: string; row: DeviceKey; biometryOff: boolean}
@@ -86,11 +95,25 @@ export interface LocalDeviceKey {
 /** Reads the enclave side. A module absent from this build is `unsupported`. */
 export async function readLocalDeviceKey(): Promise<LocalDeviceKey> {
   const status = await deviceKeyStatus();
+  if (status === 'invalidated') {
+    // #3145: an invalidated handle usually still opens, and its public key is
+    // how the server's row for it is found (a replacement may be blocked by
+    // that row). A handle that will not open has no readable key: null.
+    return {status, publicKey: await invalidatedPublicKey()};
+  }
   if (status !== 'ready' && status !== 'biometryUnavailable') {
     return {status, publicKey: null};
   }
   const key = await deviceKeyPublicKey();
   return {status, publicKey: key?.publicKey ?? null};
+}
+
+async function invalidatedPublicKey(): Promise<string | null> {
+  try {
+    return (await deviceKeyPublicKey())?.publicKey ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** The row for `publicKey`: the live one when there is one, otherwise the
@@ -119,13 +142,28 @@ export function deriveDeviceKeyView(input: {
    * restart, until the server says so.
    */
   signInUnlinked?: boolean;
+  /** #3145: the server answered 409 `device_key_lineage_has_phone_key` on the
+   *  last registration of a key it has no row for. */
+  lineageHasPhoneKey?: boolean;
 }): DeviceKeyView {
   const view = deriveFromSources(input);
+  if (
+    input.lineageHasPhoneKey &&
+    (view.kind === 'unregistered' || view.kind === 'revoked')
+  ) {
+    return {kind: 'replaceBlocked', reason: 'registerRefused', fingerprint: null};
+  }
   if (!input.signInUnlinked) return view;
   if (view.kind === 'unregistered' || view.kind === 'revoked') {
     return {kind: 'unlinked', reason: 'address', fingerprint: view.fingerprint};
   }
   return view;
+}
+
+/** A live phone row on a live sign-in: the one the server counts against the
+ *  lineage (#3127). A row on an ended sign-in is another lineage's. */
+export function holdsThePlace(row: DeviceKey): boolean {
+  return row.state !== 'revoked' && row.lineageLive;
 }
 
 function deriveFromSources(input: {
@@ -147,8 +185,20 @@ function deriveFromSources(input: {
   switch (local.status) {
     case 'unsupported':
       return {kind: 'unsupported'};
-    case 'invalidated':
-      return {kind: 'invalidated'};
+    case 'invalidated': {
+      if (local.publicKey === null) return {kind: 'invalidated'};
+      // #3145: the old key's row decides whether replacing is possible yet.
+      if (rowsError) return {kind: 'invalidated'};
+      if (!rows) return {kind: 'loading'};
+      const old = rowForPublicKey(rows, local.publicKey);
+      return old && holdsThePlace(old)
+        ? {
+            kind: 'replaceBlocked',
+            reason: 'oldKey',
+            fingerprint: deviceKeyFingerprint(local.publicKey),
+          }
+        : {kind: 'invalidated'};
+    }
     case 'absent':
       return {kind: 'unregistered', fingerprint: null};
     case 'biometryUnavailable':
@@ -192,17 +242,26 @@ export type EnrollOutcome =
   | {kind: 'registered'; publicKey: string}
   | {kind: 'unsupported'}
   | {kind: 'biometryOff'}
-  | {kind: 'invalidated'};
+  | {kind: 'invalidated'}
+  /** #3145: nothing was deleted — the old key's row still holds the place. */
+  | {kind: 'replaceBlocked'};
 
 /** A failure with a sentence for the person. */
 export class EnrollError extends Error {
   /** #3129: the server said this sign-in is not a QR link — the panel turns
    *  to 「QR 연결 필요」 instead of offering the same refused button again. */
   readonly unlinked: boolean;
-  constructor(message: string, options: {unlinked?: boolean} = {}) {
+  /** #3145: the server said 409 `device_key_lineage_has_phone_key` — the panel
+   *  turns to the two ways out (the Mac revokes the old key, or a new QR). */
+  readonly lineageHasPhoneKey: boolean;
+  constructor(
+    message: string,
+    options: {unlinked?: boolean; lineageHasPhoneKey?: boolean} = {},
+  ) {
     super(message);
     this.name = 'EnrollError';
     this.unlinked = options.unlinked ?? false;
+    this.lineageHasPhoneKey = options.lineageHasPhoneKey ?? false;
   }
 }
 
@@ -252,6 +311,13 @@ function enrollFailure(error: unknown): EnrollError {
     if (error.code === DEVICE_KEY_REFUSAL.signatureInvalid) {
       return new EnrollError(
         '서버가 이 폰의 서명을 받지 않았습니다. 폰의 시계가 맞는지 확인하고 다시 시도하세요.',
+      );
+    }
+    // #3127/#3145: this sign-in still holds a phone key.
+    if (error.code === DEVICE_KEY_REFUSAL.lineageHasPhoneKey) {
+      return new EnrollError(
+        '이 연결에는 이미 폰 키가 있습니다. 맥에서 이전 키를 끊거나 QR로 다시 연결하세요.',
+        {lineageHasPhoneKey: true},
       );
     }
     // #3119 「QR 연결로만 등록」: a phone signed in by address.
@@ -396,6 +462,15 @@ async function createOrReuse(): Promise<string> {
  * The person pressed 「새 키로 다시 등록」 on an invalidated key. Re-reads the
  * status first: only a key the enclave has PROVEN unusable is deleted
  * (`native.ts` `invalidated`), so a stale screen cannot delete a good key.
+ *
+ * #3145 (#3127): the enclave holds ONE key, so "register the new key, then
+ * delete the old" cannot be done — the old key must go before a new one can
+ * exist. What can be done is to not delete while the server would refuse the
+ * replacement: the old key's row is looked up first, and while it still holds
+ * this sign-in's place (the Mac has not revoked it) nothing is deleted and the
+ * outcome is `replaceBlocked`. The 409 at registration (the row could not be
+ * read, or another key took the place) leaves the NEW key here, unregistered,
+ * and `enroll` retries the registration without deleting anything.
  */
 export async function replaceInvalidatedKey(input: {
   workspaceId: string;
@@ -409,6 +484,12 @@ export async function replaceInvalidatedKey(input: {
   }
   if (status !== 'invalidated') return enrollDeviceKey(input);
   try {
+    const {publicKey} = await readLocalDeviceKey();
+    if (publicKey !== null) {
+      const rows = await listDeviceKeys(input.workspaceId);
+      const old = rowForPublicKey(rows, publicKey);
+      if (old && holdsThePlace(old)) return {kind: 'replaceBlocked'};
+    }
     await deleteDeviceKey();
   } catch (error) {
     throw enrollFailure(error);

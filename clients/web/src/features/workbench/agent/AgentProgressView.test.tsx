@@ -126,6 +126,29 @@ const click = (el: HTMLElement | null) =>
     el!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   });
 
+describe("approval.auto_allowed line (#3152)", () => {
+  const auto = (kind: string) =>
+    ev("approval.auto_allowed", {
+      action: "auto_allowed",
+      status: "approved",
+      scope: "session",
+      tool_kind: kind,
+      preview_sha256: "d".repeat(64),
+    });
+
+  it("reads 「세션 허락으로 자동 허락됨」 with what was covered, and does not take down a waiting card", () => {
+    const decide = vi.fn(async () => undefined);
+    render(model([tool("bash", "npm install"), ask([ONCE, REJECT]), auto("read")]), { decide, reply: null });
+    const rows = [...host!.querySelectorAll<HTMLElement>('.agent-row[data-kind="approval"]')].map((r) => r.textContent);
+    expect(rows.some((t) => t?.includes("세션 허락으로 자동 허락됨 · 파일 읽기"))).toBe(true);
+    // the card that asks about a different tool kind is still there, with both buttons.
+    expect(q('[data-testid="agent-permission"]')).not.toBeNull();
+    expect(q('[data-testid="agent-permission-allow"]')).not.toBeNull();
+    expect(q('[data-testid="agent-permission-reject"]')).not.toBeNull();
+    expect(decide).not.toHaveBeenCalled();
+  });
+});
+
 describe("permission card", () => {
   it("never decides on mount, re-render, re-delivery or time passing", async () => {
     const decide = vi.fn(async () => undefined);

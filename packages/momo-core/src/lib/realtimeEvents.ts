@@ -623,7 +623,8 @@ export type WorkSessionACPType =
   | "agent.status"
   | "agent.partial"
   | "approval.requested"
-  | "approval.decided";
+  | "approval.decided"
+  | "approval.auto_allowed";
 
 export interface WorkSessionLifecycleFrame {
   type: "work.session.started" | "work.session.ended";
@@ -767,6 +768,7 @@ const WORK_ACP_TYPES: ReadonlySet<string> = new Set<WorkSessionACPType>([
   "agent.partial",
   "approval.requested",
   "approval.decided",
+  "approval.auto_allowed",
 ]);
 
 /** A publication carrying a projected ACP event for a work session. */

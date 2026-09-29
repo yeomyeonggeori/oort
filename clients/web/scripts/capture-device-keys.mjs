@@ -243,6 +243,17 @@ const SCENES = [
     act: async (page) => {
       await page.getByTestId("device-key-endorse-start").click();
       await page.getByTestId("device-key-endorse-fingerprint").waitFor();
+      // #3145: registered time and where the name comes from.
+      await page.locator('[data-testid="device-key-endorse-name"][data-name-origin="matchesLink"]').waitFor();
+      check("approve-confirm 등록 시각 줄", (await page.getByTestId("device-key-endorse-registered").innerText()).includes("10분 전"));
+    },
+  },
+  {
+    name: "approve-origin-none", status: local(), expectBound: true,
+    keys: [rootRow, keyRow({ label: "아이폰", createdAtMs: Date.now() - 45_000 })],
+    act: async (page) => {
+      await page.getByTestId("device-key-endorse-start").click();
+      await page.locator('[data-testid="device-key-endorse-name"][data-name-origin="notInLinks"]').waitFor();
     },
   },
   {

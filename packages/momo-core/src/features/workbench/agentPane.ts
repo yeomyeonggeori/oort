@@ -478,7 +478,13 @@ const AGENT_STATUS_LABEL: Readonly<Record<SessionStatus, string>> = {
   stopped: "호스트 연결 끊김",
 };
 
-const KNOWN_TYPES = new Set(["agent.status", "agent.partial", "approval.requested", "approval.decided"]);
+const KNOWN_TYPES = new Set([
+  "agent.status",
+  "agent.partial",
+  "approval.requested",
+  "approval.decided",
+  "approval.auto_allowed",
+]);
 
 /** 값이 잘못된 이벤트를 걸러 센다. 던지지 않는다. */
 function wellFormed(event: WorkSessionEvent): boolean {

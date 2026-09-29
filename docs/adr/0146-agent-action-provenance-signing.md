@@ -440,8 +440,8 @@ momo.human.control.v1
 |---|---|---|
 | 서버(momo-auth `verify_human_control_in_tx`) | v2, 그리고 spawn 외 v1 | 이 증보 |
 | workd(`human_trust::check_control`) | v2, 그리고 spawn 외 v1 | 이 증보 |
-| 폰 네이티브 모듈(#3066) | v1만 허용 | spawn(새 작업·재개)을 서명하려면 허용 목록을 `momo.human.control.v2`로 옮겨야 한다(UXUI 후속). input·permission은 지금도 받는다 |
-| 데스크탑 Tauri(E5 #3025, track/uxui #3076) | control.v1(다섯 종류 모두), device_endorse.v1, device_revoke.v1 | spawn(새 작업·재개)은 control.v2로 옮겨야 서버·host가 받는다. 폐기서는 v1도 받지만(전달되면 id만 폐기), 공개키 결속을 위해 device_revoke.v2로 옮긴다(UXUI 후속). input·permission·host_register는 v1 그대로 받는다 |
+| 폰 네이티브 모듈(#3066) | (이 절 작성 때) v1만 허용 | **갱신: 아래 「버전 정합 (갱신)」이 현행이다.** 폰은 v2·v3만 허용한다(#3096) |
+| 데스크탑 Tauri(E5 #3025, track/uxui #3076) | (이 절 작성 때) control.v1(다섯 종류 모두), device_endorse.v1, device_revoke.v1 | **갱신: 아래 「버전 정합 (갱신)」이 현행이다.** 데스크탑은 control v2·v3, device_revoke.v2를 서명한다(#3094·#3136) |
 
 ### 남은 것
 
@@ -530,16 +530,18 @@ E10 검수(B1)는 D-10의 보안 경계인 workd 검증을 켜는 길이 제품�
 |---|---|---|
 | 서버 | v3; v2(미리보기 있는 permission 제외); v1(spawn·미리보기 있는 permission 제외) | 이 증보 |
 | workd | 같음. permission은 자기 원장의 해시로만 다시 만든다 | 이 증보 |
-| 폰 네이티브 모듈 | v1만 허용 | permission 허락을 v3로 옮겨야 한다(uxui 후속, #3117 켜기 전 필수) |
-| 데스크탑 Tauri | control.v1 | 같음. 확인 창에 미리보기를 보여야 한다(#3076 잔여, uxui 후속) |
+| 폰 네이티브 모듈 | **v2(input·spawn)·v3(permission)만 허용.** v1은 Face ID 전에 거부한다 | #3094가 v2를, #3128(#3136)이 v3를 넣었고, #3096이 v1을 뺐다 |
+| 데스크탑 Tauri | **v2(input·spawn), v3(permission)**; `device_endorse.v1`, **`device_revoke.v2`** | 확인 창이 v3 허락의 미리보기 전체를 보이고(#3128), spawn 창이 도구·채널·재개 세션을 보인다(#3096). v1 control·v1 폐기는 허용 목록에서 뺐다(#3094) |
+
+- 서버·workd가 v1을 받는 것은 옛 폰·맥 빌드를 위해서다. 새 빌드는 v1을 서명하지 않으므로, 옛 빌드가 사라지면 서버·workd의 v1 허용을 걷을 수 있다(엔진 후속).
 
 - 공유 벡터: `docs/api/human-control-signing-v3.vectors.json`(permission 두 사례는 미리보기 객체·정규 바이트·해시를 함께 싣는다). WebCrypto·CryptoKit(소프트웨어 + Secure Enclave) 서명을 Rust가 다시 검증한다. 코어의 사본 `packages/momo-core/src/features/workbench/__fixtures__/permission-preview.vectors.json`은 Rust가 벡터와 같은지 확인한다.
 
 ### 남은 것 (uxui 후속)
 
-- 폰·데스크탑 서명기의 v3 permission 본문. 폰 Swift 허용 목록과 `humanControl.ts`, 데스크탑 `payload.rs`를 옮긴다.
-- 폰 권한 카드와 데스크탑 칸이 미리보기를 소유자 조회로 받는다. `checkPermissionPreview`가 통과할 때만 허락 버튼을 연다.
-- 데스크탑 네이티브 확인 창에 같은 미리보기를 보인다(#3076·#3094 잔여).
+- ~~폰·데스크탑 서명기의 v3 permission 본문~~ — 끝났다(#3128, #3136).
+- ~~폰 권한 카드와 데스크탑 칸이 미리보기를 소유자 조회로 받는다~~ — 끝났다(#3128, #3136).
+- ~~데스크탑 네이티브 확인 창에 같은 미리보기를 보인다~~ — 끝났다(#3128, #3136).
 - 잘린 미리보기를 펼칠 전체 미리보기 조회는 없다. 잘린 요청은 거부하거나 맥 앞에서 결정한다.
 
 ## 증보 2026-09-29 — 폰 키는 QR 연결로만 (#3119)

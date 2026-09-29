@@ -43,6 +43,7 @@ import { Input } from "@/design/ui/input";
 import { KomettoGuide } from "@/features/onboarding/guide/KomettoGuide";
 import { loadBrowserMirror } from "@/features/workbench/local/localSessions";
 import { LocalTerminalPane } from "@/features/workbench/local/LocalTerminalPane";
+import { remoteProfileLoginLine } from "@momo/core/features/settings/remoteWorkProfile";
 import {
   PROFILE_LOGIN_SPAWN_DETAIL,
   profileLoginLine,
@@ -50,6 +51,7 @@ import {
 import {
   desktopPty,
   detectLocalHarnesses,
+  harnessProfileRemoteStatus,
   harnessProfileStatus,
   openTerminalApp,
 } from "@/lib/tauri";
@@ -77,6 +79,7 @@ export interface HarnessLoginFixture {
 export function HarnessLoginDialog({
   harness,
   profile = null,
+  remote = false,
   method = "browser",
   onClose,
   onConnected,
@@ -93,6 +96,11 @@ export function HarnessLoginDialog({
    * 폴더로 돌린 상태 명령이다. 없으면 이 맥의 기본 위치(온보딩·채팅 카드).
    */
   profile?: string | null;
+  /**
+   * `profile`이 이 맥의 「원격 작업」 계정 라벨이다(#3157). 셸이 workd의 원격 작업용
+   * 폴더로 로그인하고, 완료 판정도 그 폴더의 상태 명령이다. 기본 AI 표가 연다.
+   */
+  remote?: boolean;
   /**
    * 연결된 뒤 모달이 닫힐 때 초점을 받을 곳. 연 단추가 사라지는 목록(다시 로그인)이
    * 쓴다. 없으면 AI 연결 화면의 그 줄 라디오, 그것도 없으면 연 단추.
@@ -120,9 +128,10 @@ export function HarnessLoginDialog({
     >
       {harness !== null && (
         <LoginDialogBody
-          key={`${harness}/${profile ?? ""}`}
+          key={`${harness}/${profile ?? ""}/${remote ? "remote" : "local"}`}
           harness={harness}
           profile={profile}
+          remote={remote}
           focusAfterConnected={focusAfterConnected}
           onLoginEnded={onLoginEnded}
           method={fixture?.method ?? method}
@@ -141,6 +150,7 @@ const IDLE_STATE = { status: { phase: "waiting" } as HarnessLoginPhase, paneId: 
 function useController(
   harness: LocalHarnessId,
   profile: string | null,
+  remote: boolean,
   method: HarnessLoginMethod,
   fixture: HarnessLoginFixture | null,
   onLoginEnded: ((ended: boolean) => void) | undefined
@@ -161,9 +171,15 @@ function useController(
               detect:
                 profile === null
                   ? detectLocalHarnesses
-                  : async () => [await harnessProfileStatus({ harness, label: profile })],
+                  : async () => [
+                      await (remote ? harnessProfileRemoteStatus : harnessProfileStatus)({
+                        harness,
+                        label: profile,
+                      }),
+                    ],
             },
-            profile
+            profile,
+            remote
           ),
     // 한 번 열린 모달은 한 컨트롤러를 쓴다(방법 바꾸기는 retry가 한다).
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -184,6 +200,7 @@ function useController(
 function LoginDialogBody({
   harness,
   profile,
+  remote,
   focusAfterConnected,
   onLoginEnded,
   method,
@@ -194,6 +211,7 @@ function LoginDialogBody({
 }: {
   harness: LocalHarnessId;
   profile: string | null;
+  remote: boolean;
   focusAfterConnected: (() => HTMLElement | null) | undefined;
   onLoginEnded: ((ended: boolean) => void) | undefined;
   method: HarnessLoginMethod;
@@ -202,7 +220,7 @@ function LoginDialogBody({
   onFallbackStarted: (harness: LocalHarnessId) => void;
   fixture: HarnessLoginFixture | null;
 }) {
-  const controller = useController(harness, profile, method, fixture, onLoginEnded);
+  const controller = useController(harness, profile, remote, method, fixture, onLoginEnded);
   const live = useSyncExternalStore(
     controller?.subscribe ?? noopSubscribe,
     controller?.getState ?? (() => IDLE_STATE),
@@ -255,6 +273,7 @@ function LoginDialogBody({
       data-testid="harness-login-dialog"
       data-phase={status.phase}
       data-profile={profile ?? undefined}
+      data-lane={remote ? "remote" : undefined}
       onEscapeKeyDown={() => onClose()}
       onOpenAutoFocus={(event) => {
         event.preventDefault();
@@ -288,7 +307,7 @@ function LoginDialogBody({
       {/* 어느 계정 폴더에 로그인하는지(프로필이 둘 이상이면 헷갈린다). */}
       {profile !== null && (
         <p className="break-keep text-meta text-ink-muted [overflow-wrap:anywhere]" data-testid="harness-login-profile">
-          {profileLoginLine(harness, profile)}
+          {remote ? remoteProfileLoginLine(harness, profile) : profileLoginLine(harness, profile)}
         </p>
       )}
 

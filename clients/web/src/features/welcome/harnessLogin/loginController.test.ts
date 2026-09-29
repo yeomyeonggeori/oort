@@ -187,6 +187,25 @@ describe("loginController (가짜 CLI)", () => {
     login.dispose();
   });
 
+  it("원격 작업 계정(#3157): remoteLogin 줄에 라벨만 싣는다. 경로도, 로컬 프로필 줄도 아니다", async () => {
+    const cli = fakeCli(LOGGED_IN);
+    const login = createLoginController("claude", "browser", cli.deps, "회사", true);
+    login.open();
+    await flush();
+    expect(cli.spawns).toEqual([
+      { program: { kind: "remoteLogin", id: "claude", method: "browser", profile: "회사" }, cols: 80, rows: 24 },
+    ]);
+    login.dispose();
+    // 라벨 없는 원격 로그인은 만들지 않는다: 기본 위치 줄로 조용히 떨어지지 않는다.
+    const plain = fakeCli(LOGGED_IN);
+    const noLabel = createLoginController("claude", "browser", plain.deps, null, true);
+    noLabel.open();
+    await flush();
+    expect(plain.spawns).toEqual([]);
+    expect(noLabel.getState().status).toEqual({ phase: "failed", reason: "spawn" });
+    noLabel.dispose();
+  });
+
   it("whenEnded: 취소 뒤 로그인 CLI가 정말 끝나야 true, 끝나지 않으면 제한 시간 뒤 false (#2996 M-1)", async () => {
     vi.useFakeTimers();
     const cli = fakeCli(NEEDS_LOGIN);

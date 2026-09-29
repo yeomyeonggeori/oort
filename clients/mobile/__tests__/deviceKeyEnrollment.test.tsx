@@ -22,10 +22,14 @@ import {
   replaceInvalidatedKey,
   type DeviceKeyView,
 } from '../src/deviceKey/enrollment';
-import {deviceKeyCopy, QR_LINK_STEPS} from '../src/features/deviceKey/copy';
-import {DeviceKeyLinkGate} from '../src/features/deviceKey/DeviceKeyLinkSheet';
+import {deviceKeyCopy, QR_LINK_STEPS, REFUSED_WARNING} from '../src/features/deviceKey/copy';
+import {
+  DeviceKeyLinkGate,
+  LINK_SHEET_INTRO,
+  linkSheetIntro,
+} from '../src/features/deviceKey/DeviceKeyLinkSheet';
 import {DeviceKeyPanel} from '../src/features/deviceKey/DeviceKeyPanel';
-import {useDeviceKey} from '../src/features/deviceKey/useDeviceKey';
+import {resetPlaceHeldForTests, useDeviceKey} from '../src/features/deviceKey/useDeviceKey';
 import {deviceLinkDevice} from '../src/features/deviceLink/deviceIdentity';
 import {noteConnectRoute, resetConnectRoute} from '../src/features/onboarding/phoneFlow';
 import {SessionProvider, useSession} from '../src/session/useSession';
@@ -175,6 +179,7 @@ beforeEach(async () => {
   sessionPort.applyLogin(LOGIN_BODY);
   await keychainSettled();
   resetConnectRoute();
+  resetPlaceHeldForTests();
   mockNative = phone();
   calls = [];
   serverRows = [];
@@ -554,6 +559,225 @@ describe('replaceInvalidatedKey — the person pressed 「새 키로 다시 등�
     serverRows = [row()];
     await replaceInvalidatedKey({workspaceId: WS, label: LABEL()});
     expect(mockNative.remove).not.toHaveBeenCalled();
+  });
+});
+
+// ---- #3145 — replacing a key while the sign-in still holds the old one ---------
+
+describe('#3145 — 계보당 폰 키 1개: the old key is not deleted while the server would refuse the new one', () => {
+  const OLD_ROW = () => row({publicKey: OTHER_KEY, state: 'endorsed', canInstruct: true});
+
+  it('does NOT delete an invalidated key whose row still holds the place', async () => {
+    mockNative = phone({key: OTHER_KEY, status: 'invalidated'});
+    serverRows = [OLD_ROW()];
+    const outcome = await replaceInvalidatedKey({workspaceId: WS, label: LABEL()});
+    expect(outcome).toEqual({kind: 'replaceBlocked'});
+    expect(mockNative.remove).not.toHaveBeenCalled();
+    expect(mockNative.create).not.toHaveBeenCalled();
+    expect(posts()).toHaveLength(0);
+  });
+
+  it.each([
+    ['revoked by the Mac', {state: 'revoked' as const}],
+    ['on an ended sign-in (another lineage)', {lineageLive: false}],
+  ])('deletes and replaces once the old row is %s', async (_name, change) => {
+    mockNative = phone({key: OTHER_KEY, status: 'invalidated'});
+    serverRows = [{...OLD_ROW(), ...change}];
+    const outcome = await replaceInvalidatedKey({workspaceId: WS, label: LABEL()});
+    expect(outcome).toEqual({kind: 'registered', publicKey: KEY});
+    expect(mockNative.remove).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not delete when the list cannot be read (it cannot know)', async () => {
+    mockNative = phone({key: OTHER_KEY, status: 'invalidated'});
+    listFails = true;
+    await expect(replaceInvalidatedKey({workspaceId: WS, label: LABEL()})).rejects.toBeInstanceOf(
+      EnrollError,
+    );
+    expect(mockNative.remove).not.toHaveBeenCalled();
+  });
+
+  it('a 409 at registration leaves the NEW key here and marks the error', async () => {
+    mockNative = phone({key: OTHER_KEY, status: 'invalidated'});
+    registerStatus = 409;
+    registerCode = 'device_key_lineage_has_phone_key';
+    const error = await replaceInvalidatedKey({workspaceId: WS, label: LABEL()}).catch(e => e);
+    expect(error).toBeInstanceOf(EnrollError);
+    expect(error.lineageHasPhoneKey).toBe(true);
+    expect(error.unlinked).toBe(false);
+    expect(error.message).toContain('맥에서 이전 키를 끊거나 QR로 다시 연결');
+    expect(mockNative.remove).toHaveBeenCalledTimes(1);
+    expect(mockNative.create).toHaveBeenCalledTimes(1);
+    // The retry registers the key that is there — nothing more is deleted.
+    registerStatus = 201;
+    const retry = await enrollDeviceKey({workspaceId: WS, label: LABEL()});
+    expect(retry).toEqual({kind: 'registered', publicKey: KEY});
+    expect(mockNative.remove).toHaveBeenCalledTimes(1);
+    expect(mockNative.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks only that code', async () => {
+    registerStatus = 409;
+    registerCode = 'device_key_already_registered';
+    const other = await enrollDeviceKey({workspaceId: WS, label: 'x'}).catch(e => e);
+    expect(other.lineageHasPhoneKey).toBe(false);
+  });
+
+  describe('the view', () => {
+    const invalidated = {status: 'invalidated' as const, publicKey: OTHER_KEY};
+    const derive = (over: Partial<Parameters<typeof deriveDeviceKeyView>[0]>) =>
+      deriveDeviceKeyView({local: invalidated, localError: null, rows: [], rowsError: null, ...over});
+
+    it('an invalidated key with a live row is 「맥 확인 필요」, with the OLD key fingerprint', () => {
+      const view = derive({rows: [OLD_ROW()]});
+      expect(view).toMatchObject({kind: 'replaceBlocked', reason: 'oldKey'});
+      expect(view.kind === 'replaceBlocked' && view.fingerprint).toMatch(/^[0-9A-F]{4}( [0-9A-F]{4}){4}$/);
+    });
+
+    it('turns back to the plain replacement once the Mac revoked it', () => {
+      expect(derive({rows: [{...OLD_ROW(), state: 'revoked'}]})).toEqual({kind: 'invalidated'});
+      expect(derive({rows: []})).toEqual({kind: 'invalidated'});
+    });
+
+    it('waits for the list rather than showing a button that may be refused', () => {
+      expect(derive({rows: undefined}).kind).toBe('loading');
+      expect(derive({rows: undefined, rowsError: new Error('x')}).kind).toBe('invalidated');
+    });
+
+    it('an invalidated key whose handle will not open (no public key) stays as it was', () => {
+      expect(derive({local: {status: 'invalidated', publicKey: null}, rows: [OLD_ROW()]})).toEqual({
+        kind: 'invalidated',
+      });
+    });
+
+    it('the server 409 turns an unregistered key into the same screen, nothing else', () => {
+      const ready = {status: 'ready' as const, publicKey: KEY};
+      expect(derive({local: ready, rows: [], lineageHasPhoneKey: true})).toEqual({
+        kind: 'replaceBlocked',
+        reason: 'registerRefused',
+        fingerprint: null,
+      });
+      expect(derive({local: ready, rows: [row()], lineageHasPhoneKey: true}).kind).toBe('pending');
+    });
+  });
+
+  describe('on screen', () => {
+    it('oldKey: says what to do on the Mac, shows the old fingerprint, offers 「다시 확인」 only', () => {
+      const state = panelFor({kind: 'replaceBlocked', reason: 'oldKey', fingerprint: SHARED_FINGERPRINT});
+      expect(screen.getByTestId('device-key-badge').props.children).toBe('맥 확인 필요');
+      const steps = screen.getAllByTestId('device-key-step').map(n => n.props.children);
+      expect(steps[0]).toContain('설정 › 기기 › 지시 서명');
+      expect(steps[1]).toContain('지시 권한 끊기');
+      expect(screen.getByTestId('device-key-detail').props.children).toContain('QR');
+      expect(shownFingerprint()).toBe(SHARED_FINGERPRINT);
+      expect(screen.getByText('이전 키 지문')).toBeTruthy();
+      expect(screen.queryByTestId('device-key-action-replace')).toBeNull();
+      fireEvent.press(screen.getByTestId('device-key-action-recheck'));
+      expect(state.refresh).toHaveBeenCalledTimes(1);
+    });
+
+    it('registerRefused: tells the person to check the Mac list for a key they did not make, and retries by enroll()', () => {
+      const state = panelFor({kind: 'replaceBlocked', reason: 'registerRefused', fingerprint: null});
+      expect(screen.getByTestId('device-key-detail').props.children).toContain('등록 시각');
+      // #3154 M3: the do-not-approve sentence is its own emphasised block, not a
+      // clause buried in the detail paragraph.
+      expect(screen.getByTestId('device-key-detail').props.children).not.toContain('내가 등록한 것이 아니면');
+      expect(screen.getByTestId('device-key-warning')).toBeTruthy();
+      expect(screen.getByText(REFUSED_WARNING)).toBeTruthy();
+      expect(screen.queryByTestId('device-key-fingerprint')).toBeNull();
+      fireEvent.press(screen.getByTestId('device-key-action-reenroll-refused'));
+      expect(state.enroll).toHaveBeenCalledTimes(1);
+      expect(state.replace).not.toHaveBeenCalled();
+    });
+
+    it('speaks 합니다체, and does not name a cause it cannot know (Face ID)', () => {
+      for (const reason of ['oldKey', 'registerRefused'] as const) {
+        const copy = deviceKeyCopy({kind: 'replaceBlocked', reason, fingerprint: null});
+        const all = [copy.headline, copy.detail, copy.warning, ...(copy.steps ?? [])];
+        for (const sentence of all.filter((v): v is string => !!v)) {
+          expect(sentence).toMatch(/니다\.$/);
+          expect(sentence).not.toMatch(/세요/);
+        }
+      }
+      const old = deviceKeyCopy({kind: 'replaceBlocked', reason: 'oldKey', fingerprint: null});
+      expect(old.detail).not.toContain('Face ID가 바뀌어');
+      expect(old.detail).toContain('보입니다');
+    });
+
+    it('the link sheet does not say 「QR 연결을 마쳤습니다」 above a screen that says the key is blocked', () => {
+      const blocked: DeviceKeyView[] = [
+        {kind: 'replaceBlocked', reason: 'oldKey', fingerprint: null},
+        {kind: 'replaceBlocked', reason: 'registerRefused', fingerprint: null},
+        {kind: 'biometryOff'},
+        {kind: 'invalidated'},
+        {kind: 'serverError', fingerprint: SHARED_FINGERPRINT},
+        {kind: 'unsupported'},
+      ];
+      for (const view of blocked) expect(linkSheetIntro(view)).not.toBe(LINK_SHEET_INTRO);
+      expect(linkSheetIntro({kind: 'unregistered', fingerprint: null})).toBe(LINK_SHEET_INTRO);
+    });
+  });
+
+  describe('end to end through the hook', () => {
+    function Probe() {
+      const state = useDeviceKey(WS, {poll: false});
+      return <DeviceKeyPanel state={state} />;
+    }
+    function renderProbe() {
+      const client = new QueryClient({
+        defaultOptions: {queries: {retry: false, gcTime: 0}, mutations: {gcTime: 0}},
+      });
+      return render(
+        <QueryClientProvider client={client}>
+          <Probe />
+        </QueryClientProvider>,
+      );
+    }
+
+    it('an invalidated key still held by the Mac is explained at once and one press deletes nothing', async () => {
+      mockNative = phone({key: OTHER_KEY, status: 'invalidated'});
+      serverRows = [OLD_ROW()];
+      renderProbe();
+      await waitFor(() =>
+        expect(screen.getByTestId('device-key-badge').props.children).toBe('맥 확인 필요'),
+      );
+      expect(mockNative.remove).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('device-key-action-replace')).toBeNull();
+    });
+
+    it('after the Mac revokes it, 「다시 확인」 opens 「새 키로 다시 등록」', async () => {
+      mockNative = phone({key: OTHER_KEY, status: 'invalidated'});
+      serverRows = [OLD_ROW()];
+      renderProbe();
+      await waitFor(() => expect(screen.getByTestId('device-key-action-recheck')).toBeTruthy());
+      serverRows = [{...OLD_ROW(), state: 'revoked'}];
+      fireEvent.press(screen.getByTestId('device-key-action-recheck'));
+      await waitFor(() => expect(screen.getByTestId('device-key-action-replace')).toBeTruthy());
+    });
+
+    it('a 409 after the press keeps the explanation on screen, and it survives a remount', async () => {
+      mockNative = phone({key: OTHER_KEY, status: 'invalidated'});
+      registerStatus = 409;
+      registerCode = 'device_key_lineage_has_phone_key';
+      const first = renderProbe();
+      await waitFor(() => expect(screen.getByTestId('device-key-action-replace')).toBeTruthy());
+      fireEvent.press(screen.getByTestId('device-key-action-replace'));
+      await waitFor(() =>
+        expect(screen.getByTestId('device-key-badge').props.children).toBe('맥 확인 필요'),
+      );
+      expect(screen.queryByTestId('device-key-failure')).toBeNull();
+      first.unmount();
+      renderProbe();
+      await waitFor(() =>
+        expect(screen.getByTestId('device-key-badge').props.children).toBe('맥 확인 필요'),
+      );
+      // …and once the Mac has made room, the retry goes through and the screen clears.
+      registerStatus = 201;
+      fireEvent.press(screen.getByTestId('device-key-action-reenroll-refused'));
+      await waitFor(() =>
+        expect(screen.getByTestId('device-key-badge').props.children).toBe('승인 전'),
+      );
+    });
   });
 });
 
