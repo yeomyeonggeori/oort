@@ -1,6 +1,6 @@
 import {requireOptionalNativeModule} from 'expo-modules-core';
 
-import {NSE_KEYCHAIN_ACCESS_GROUP} from '../storage/secureSession';
+import {NSE_KEYCHAIN_ACCESS_GROUP} from '../storage/keychainGroups';
 
 // =============================================================================
 // The two values only the native build knows (goal RN-N1).

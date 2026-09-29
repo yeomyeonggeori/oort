@@ -8,8 +8,13 @@ import {
 import type {SessionPort} from '@momo/core/runtime/host';
 import {ACCESSIBLE, getGenericPassword, resetGenericPassword, setGenericPassword} from 'react-native-keychain';
 import {refreshKeySupported, signRefreshProof} from '../deviceKey/refreshKey';
+import {keychainAccessGroup} from '../push/native';
 import {withBackgroundTask} from '../lib/backgroundTask';
+import {appOnlyGroupFrom} from './keychainGroups';
 import {NON_SECRET_KEYS, nonSecretStore} from './kv';
+
+// Kept exported from here: `gate/harness` and tests import it from this module.
+export {NSE_KEYCHAIN_ACCESS_GROUP} from './keychainGroups';
 
 // =============================================================================
 // Session persistence on iOS (ADR-0137 D7). Split by SECRECY, not convenience —
@@ -44,24 +49,28 @@ import {NON_SECRET_KEYS, nonSecretStore} from './kv';
 // could otherwise land out of order and leave the REVOKED token stored, which
 // costs a sign-in on the next launch.
 //
-// ## The NSE seam — settled by 이행 순서 5 (goal RN-N1, 2026-08-03)
+// ## The NSE seam — settled by 이행 순서 5 (RN-N1), narrowed by #3121
 //
-// The extension reads its session through a keychain ACCESS GROUP
-// (`kSecAttrAccessGroup` = `$(AppIdentifierPrefix)app.momo.ios.shared`,
-// `ios/MomoPushKit/PushNotification.swift:73`). That entitlement now exists on
-// both targets, so the group is finally usable.
+// The notification extension reads ONE keychain item, through the shared access
+// group (`src/push/pushFetchSession.ts`, `ios/MomoPushKit/PushNotification.swift`).
+// Since #3121 that item is NOT this session: it is a `push_fetch` token minted
+// by `POST /v1/auth/push-fetch-token` — two read routes, no refresh half
+// (ADR-0188 §8.7). The access token stays in memory, and the REFRESH token below
+// is written to the APP-ONLY group (`app.momo.ios.devicekey`, declared by the
+// app's entitlements and not the extension's), so the extension has no credential
+// that can be spent for a new session.
 //
-// **The refresh token below still does NOT carry it, on purpose.** Only one
-// value has to cross into the extension — the short-lived fetch session — and
-// `src/push/pushFetchSession.ts` writes exactly that, under its own service and
-// account. Putting the REFRESH token in the shared group would hand the
-// extension a credential it has no use for, in exchange for nothing.
+// Why the group is named on every call: with a `keychain-access-groups`
+// entitlement present, an item written WITHOUT an explicit group lands in the
+// first group listed, and the first group listed is the shared one (its order is
+// pinned so that pre-#3121 items did not move). Leaving the group implicit would
+// put the refresh token exactly where this change is taking it out of.
 //
-// One consequence worth knowing: with a `keychain-access-groups` entitlement
-// present, items written WITHOUT an explicit group land in the first group in
-// that list rather than the app-identifier group. The writes below are therefore
-// in the shared group by default on device. Harmless — both binaries are ours —
-// but it is a change in where they live, and it happens on device only.
+// Installs from before #3121 hold the refresh token in the shared group. The
+// first launch after the upgrade copies it to the app-only group and only then
+// deletes the shared copy (`migrateFromShared`); if any step fails the session
+// simply keeps working from where it is and the next launch tries again. A
+// failed move never signs anyone out.
 // =============================================================================
 
 /** Keychain service name. Distinct from the Swift kit's so the two can coexist
@@ -72,19 +81,6 @@ import {NON_SECRET_KEYS, nonSecretStore} from './kv';
  *  on purpose, so asking it whether the write worked can only ever get an answer
  *  laundered through the same catch that hid the failure. */
 export const KEYCHAIN_SERVICE = 'app.momo.ios.rn.session';
-
-/**
- * The access group the notification extension reads from, WITHOUT the team
- * prefix — the prefix is injected at build time and only the native side knows
- * it (`src/push/native.ts`).
- *
- * Consumed by `keychainAccessGroup()`, which refuses to hand out a group that
- * does not end with this string. That check is the reason the constant is
- * exported rather than inlined: it is the one place JS states which group it
- * believes in, so a divergence between the entitlements files and this codebase
- * fails loudly instead of writing to a group nobody reads.
- */
-export const NSE_KEYCHAIN_ACCESS_GROUP = 'app.momo.ios.shared';
 
 /** The keychain stores one credential; the username half is a fixed label. */
 const KEYCHAIN_ACCOUNT = 'refreshToken';
@@ -143,11 +139,21 @@ export function keychainSettled(): Promise<unknown> {
   return keychainWrites;
 }
 
+/** The two team-prefixed groups, or null where the native side cannot name them
+ *  (a simulator without the plist key, Jest). Null means "no group", as before. */
+function resolveGroups(): {shared: string; appOnly: string} | null {
+  const shared = keychainAccessGroup();
+  const appOnly = appOnlyGroupFrom(shared);
+  return shared && appOnly ? {shared, appOnly} : null;
+}
+
 async function storeToken(token: string): Promise<boolean> {
   try {
+    const groups = resolveGroups();
     const result = await setGenericPassword(KEYCHAIN_ACCOUNT, token, {
       service: KEYCHAIN_SERVICE,
       accessible: KEYCHAIN_ACCESSIBLE,
+      ...(groups ? {accessGroup: groups.appOnly} : {}),
     });
     return result !== false;
   } catch {
@@ -155,15 +161,88 @@ async function storeToken(token: string): Promise<boolean> {
   }
 }
 
-async function loadToken(): Promise<string | null> {
+async function readFrom(accessGroup?: string): Promise<string | null> {
   try {
-    const result = await getGenericPassword({service: KEYCHAIN_SERVICE});
+    const result = await getGenericPassword({
+      service: KEYCHAIN_SERVICE,
+      ...(accessGroup ? {accessGroup} : {}),
+    });
     return result === false ? null : result.password;
   } catch {
     return null;
   }
 }
 
+/** Where a loaded token was found. `shared` is the pre-#3121 location. */
+type Loaded = {token: string; source: 'app-only' | 'shared' | 'default'};
+
+async function loadToken(): Promise<Loaded | null> {
+  const groups = resolveGroups();
+  if (!groups) {
+    const token = await readFrom();
+    return token ? {token, source: 'default'} : null;
+  }
+  const appOnly = await readFrom(groups.appOnly);
+  if (appOnly) {
+    return {token: appOnly, source: 'app-only'};
+  }
+  const shared = await readFrom(groups.shared);
+  if (shared) {
+    return {token: shared, source: 'shared'};
+  }
+  // An item from a build older than the shared group sits in the app's own
+  // default group, which the extension cannot read: usable, nothing to move.
+  const legacy = await readFrom();
+  return legacy ? {token: legacy, source: 'default'} : null;
+}
+
+/**
+ * Move a refresh token found in the shared group to the app-only group.
+ *
+ * Order is the whole point: write the new copy, READ IT BACK, and only then
+ * delete the shared one — and that delete names the shared group explicitly,
+ * because a delete with no group would sweep both. Any failure returns with the
+ * shared copy intact; the caller has already adopted the token, so nobody is
+ * signed out, and the next launch retries.
+ */
+async function migrateFromShared(token: string): Promise<void> {
+  const groups = resolveGroups();
+  if (!groups) {
+    return;
+  }
+  try {
+    if (!(await storeToken(token))) {
+      return;
+    }
+    if ((await readFrom(groups.appOnly)) !== token) {
+      return;
+    }
+    await sweepShared();
+  } catch {
+    // Retried at the next launch.
+  }
+}
+
+/** Delete a leftover shared-group copy. Names the shared group explicitly, so
+ *  it can never touch the app-only copy. */
+async function sweepShared(): Promise<void> {
+  const groups = resolveGroups();
+  if (!groups) {
+    return;
+  }
+  try {
+    await resetGenericPassword({
+      service: KEYCHAIN_SERVICE,
+      accessGroup: groups.shared,
+    });
+  } catch {
+    // Retried at the next launch.
+  }
+}
+
+/** Delete every copy, in whichever group it sits: with no group named the
+ *  delete matches across all the groups this app can see, which is what a
+ *  sign-out wants (and what a migration must never do). */
 async function clearToken(): Promise<boolean> {
   try {
     return await resetGenericPassword({service: KEYCHAIN_SERVICE});
@@ -213,10 +292,17 @@ async function hydrate(): Promise<void> {
   if (!metadata) {
     return;
   }
-  const refreshToken = await loadToken();
-  if (refreshToken) {
-    persisted = {refreshToken, ...metadata};
+  const loaded = await loadToken();
+  if (loaded) {
+    persisted = {refreshToken: loaded.token, ...metadata};
     notify();
+    if (loaded.source === 'shared') {
+      queueKeychain(() => migrateFromShared(loaded.token));
+    } else if (loaded.source === 'app-only') {
+      // A previous launch may have written the new copy and died before the
+      // delete. The app-only copy is the truth; drop any shared leftover.
+      queueKeychain(sweepShared);
+    }
     return;
   }
   // Half a session is no session: metadata alone cannot resume, and a token

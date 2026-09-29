@@ -27,7 +27,9 @@ import {
   readPushGate,
   type PushGate,
 } from './notifications';
+import {createPushFetchKeeper} from './pushFetchKeeper';
 import {clearPushFetchSession, publishPushFetchSession} from './pushFetchSession';
+import {mintPushFetchToken} from './pushFetchToken';
 import {useAppIconBadge} from './appBadge';
 import {registerWithRetry} from './registration';
 import {tapArrival, tapResponseKey, type TapArrival} from './tapArrival';
@@ -220,30 +222,35 @@ export default function PushProvider({
   }, [workspaceId, granted]);
 
   // ---- 2. Keep the extension's session fresh ------------------------------
+  // What the extension holds is a push-fetch token minted for it (#3121), not
+  // this session's access token: see pushFetchToken.ts. The keeper mints when
+  // there is none or half its life is gone, and otherwise a session change (the
+  // access token rotating every ~15 minutes) is a no-op.
   useEffect(() => {
-    const publish = () => {
-      const accessToken = getAccessToken();
-      if (!accessToken) return;
-      void publishPushFetchSession({
-        baseUrl: absoluteApiBase(),
-        workspaceId,
-        accessToken,
-      }).then(outcome => {
-        if (outcome.kind === 'published') return;
+    const keeper = createPushFetchKeeper({
+      hasSession: () => getAccessToken() !== null,
+      mint: mintPushFetchToken,
+      now: Date.now,
+      publish: async fetchToken => {
+        const outcome = await publishPushFetchSession({
+          baseUrl: absoluteApiBase(),
+          workspaceId,
+          fetchToken,
+        });
+        if (outcome.kind === 'published') return true;
         // Loud, because from here on every notification shows the placeholder
         // and nothing else reports it.
         console.error(
           `${LOG} extension session NOT published (${outcome.kind}) — notifications will stay as placeholders`,
           outcome.kind === 'failed' ? outcome.reason : keychainAccessGroup(),
         );
-      });
-    };
+        return false;
+      },
+    });
+    const ensure = () => void keeper.ensureFresh(workspaceId);
 
-    publish();
-    // The access token rotates roughly every 15 minutes. A stale copy makes the
-    // extension's fetch 401, which it cannot distinguish from an empty message
-    // and reports as the same placeholder.
-    return subscribeSession(publish);
+    ensure();
+    return subscribeSession(ensure);
   }, [workspaceId]);
 
   // ---- 3. The one foreground retry ----------------------------------------

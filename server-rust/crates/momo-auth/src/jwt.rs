@@ -68,7 +68,7 @@ pub enum AuthError {
 /// Swift's `jwt.verify(_:)` is likewise typ-agnostic; each route decides which
 /// `typ` it accepts right after (`AuthMiddleware` :107-118 wants `access`,
 /// `AuthRoutes.refresh` :144-152 wants `refresh`).
-fn decode_app_claims(token: &str, hmac_secret: &str) -> Result<AppClaims, AuthError> {
+pub(crate) fn decode_app_claims(token: &str, hmac_secret: &str) -> Result<AppClaims, AuthError> {
     // Default HS256 validation requires and checks `exp` (parity with Swift's
     // `exp.verifyNotExpired()`); no audience claim is used.
     let validation = Validation::new(Algorithm::HS256);
@@ -82,7 +82,7 @@ fn decode_app_claims(token: &str, hmac_secret: &str) -> Result<AppClaims, AuthEr
 
 /// Resolve verified claims into a [`Principal`]. A `sub`/`ws` that is not a
 /// UUID is [`AuthError::MalformedClaims`], never a silently defaulted id.
-fn principal_from_claims(claims: AppClaims) -> Result<Principal, AuthError> {
+pub(crate) fn principal_from_claims(claims: AppClaims) -> Result<Principal, AuthError> {
     let member_id = Uuid::parse_str(&claims.sub).map_err(|_| AuthError::MalformedClaims)?;
     let workspace_id = Uuid::parse_str(&claims.ws).map_err(|_| AuthError::MalformedClaims)?;
 
