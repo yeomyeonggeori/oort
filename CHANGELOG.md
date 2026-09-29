@@ -11,6 +11,35 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-09-29
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.14>. Tag target: `main=41d91d68`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Six database migrations since 0.1.13 (092–097): the schema goes from 091 to 097 on the api pre-deploy. They add six tables (`work_permission_request`, `provider_default_ai`, `member_device_key`, `human_control_nonce`, `session_refresh_key`, `refresh_proof_nonce`), each with FORCE row-level security and one policy, nullable signature columns on `work_control`, and `action_signature.alg` (existing rows read `ed25519`); there is no data backfill. Rolling the app image back to 0.1.13 keeps schema 097: 0.1.13 does not read the new tables or columns, its writes satisfy the rewritten checks, and its migrate runner skips the six ledger rows it does not know.
+
+### Added
+- Server: the owner decides a work session's permission requests. A member host relays an ACP permission request as a `work_permission_request` row; `POST …/work-sessions/{session}/permission-decisions` lets the session owner pick allow-once or reject-once exactly once, and the decision travels to the host as a `permission` control in the same transaction. The host's closed preview of the request is stored with its SHA-256, served only to the owner at `GET …/permission-requests/{request}`, and only its hash is broadcast. (#3000, #3118, ADR-0188 D5)
+- Web and desktop: the work tab's A pane shows ACP plan and tool-call cards and a permission card wired to the decision route. (#2779, #3013)
+- Server: "Default AI" team rows. `GET/PUT /v1/provider/default-ai` (operator only) store which team link position and model id answer for team agents and for channel summaries; the row holds no key material and a personal subscription can never be a team row. "Check connection" now returns the provider's model ids. (#3009, ADR-0147 amendment 2026-09-28)
+- Web and desktop: Settings › AI connections has a "Default AI" table by function, separating personal rows (kept on this device) from the operator's team rows (saved on the server), with a fallback sentence per row; a new local terminal session follows the personal default. (#2881, #3042, #3010)
+- Server: a person's device signing keys (ADR-0146 amendment 2026-09-28, R2). `…/device-keys` registers, lists, endorses and revokes P-256 keys bound to the sign-in lineage; ending a lineage revokes its keys. Signed human instructions (`momo.human.control.v1`–`v3`) are verified with a one-time nonce and kept as provenance, and `…/device-keys/signing-context` gives clients the instance id. Requiring signatures stays off: `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED` and `MOMO_HOST_REGISTER_SIGNATURE_REQUIRED` default to false, and without `MOMO_INSTANCE_ID` the signing context answers 503 `instance_id_unconfigured`. (#3021, #3022, #3023, #3027, #3068, #3097, #3118, #3119)
+- Server: refresh tokens can be sender-constrained. A native client binds a separate refresh key to its lineage and proves it on each refresh; a proven re-presentation of a spent token recovers the lineage instead of logging out. `MOMO_REFRESH_PROOF_MODE` defaults to `observe`, where an unproven refresh behaves as before. (#3079)
+- Web: a browser tab says an instruction or an allow needs the phone or desktop app, and signature errors read by reason. (#3029)
+
+### Changed
+- Security: re-presenting a spent refresh token more than 30 seconds after it was used ends the whole lineage for QR-linked (phone) sessions; password sign-ins keep the previous behavior unless `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=true`. A re-presentation inside the grace window gets the same pair again. (#3022, #3074)
+- Web: refresh-token rotation is coordinated across tabs and windows with a lock, a re-read and storage propagation, so a late tab no longer spends an earlier tab's token. (#3067)
+- Server: a chain hop's stored key is bound to its origin — changing the origin without a new key is 409. Notification rules accept a partial `PATCH`. (#3040, #3012)
+- Server: the provider egress guard moved into the `momo-egress` crate, and the worker's DNS precheck is bounded; the b26_1 usage summary window uses the database clock. (#2976, #2950)
+
+### Fixed
+- Server: one lock order for session rows, so linking a QR device no longer deadlocks against a lineage revocation. (#3107)
+- Server image: the web stage copies the `docs/api` contract JSON (goldens and signing vectors) that web tests import, with a guard for any other out-of-tree import. (#3037, #3123)
+- Web and desktop: open work surfaces keep a grace period when the host drops, the phone re-reads notification rules right before writing, and Settings screens were tidied. (#2893, #3064)
+
+### Not in this release
+- The server image carries the permission bridge, default AI rows, device-key and signed-instruction routes, refresh proofs (api) and the web bundle's permission cards, default AI table and browser guidance. The Secure Enclave keys, Touch ID/Face ID signing, the `momo-workd` root pinning and signature ratchet, refresh proofs from native clients and background refresh completion ship in desktop and iOS builds (#3025, #3026, #3028, #3063, #3076, #3078, #3084, #3088, #3098, #3103, #3106, #3117), not in the image. No desktop or iOS build is part of this release.
+- Signature requirements are not switched on for `oort-team`; `MOMO_INSTANCE_ID` is not set there yet.
+- runtime-unverified: signed instructions and permission decisions from a real phone or Mac against the team instance, a real refresh proof, and default AI rows answering through a real provider.
+
 ## [0.1.13] - 2026-09-27
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.13>. Tag target: `main=168ee323`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. No database migration since 0.1.12: the schema stays at 091 and upgrading swaps the images only, so rolling back to 0.1.12 needs no schema change.
