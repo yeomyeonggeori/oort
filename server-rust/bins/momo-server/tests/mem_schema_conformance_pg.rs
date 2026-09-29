@@ -109,10 +109,31 @@ fn ensure_schema_and_roles() {
     *ready = true;
 }
 
+fn sql_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../infra/rust/sql")
+}
+
+/// Run SQL text through psql in one transaction; Ok(()) or Err(stderr).
+fn run_sql_text(sql: &str) -> Result<(), String> {
+    let output = Command::new(resolve_psql())
+        .arg(database_url())
+        .args(["-v", "ON_ERROR_STOP=1"])
+        .arg("--no-psqlrc")
+        .arg("--quiet")
+        .arg("--single-transaction")
+        .arg("-c")
+        .arg(sql)
+        .output()
+        .expect("spawn psql");
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).into_owned())
+    }
+}
+
 fn run_sql_file(name: &str) {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../infra/rust/sql")
-        .join(name);
+    let path = sql_dir().join(name);
     let status = Command::new(resolve_psql())
         .arg(database_url())
         .args(["-v", "ON_ERROR_STOP=1"])
@@ -1943,19 +1964,32 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
     roles.push("momo_memory".to_string());
     let tables: Vec<String> = sqlx::query_scalar(
         "SELECT c.relname::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
-          WHERE n.nspname = 'public' AND c.relkind IN ('r','p') AND c.relname LIKE 'mem\\_%' ORDER BY 1",
+          WHERE n.nspname = 'public' AND c.relkind IN ('r','p','v','m') AND c.relname LIKE 'mem\\_%' ORDER BY 1",
     )
     .fetch_all(su)
     .await
     .expect("tables");
     assert!(tables.len() >= 5, "{when}: mem_* tables: {tables:?}");
-    for role in &roles {
+    // PUBLIC is checked like a role (`has_*_privilege('public', ...)`): it may hold nothing.
+    let mut holders = roles.clone();
+    holders.push("public".to_string());
+    for role in &holders {
         for table in &tables {
-            for privilege in ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE"] {
-                // momo_app: SELECT (RLS-gated) everywhere; direct writes only on its own settings.
+            for privilege in [
+                "SELECT",
+                "INSERT",
+                "UPDATE",
+                "DELETE",
+                "TRUNCATE",
+                "REFERENCES",
+                "TRIGGER",
+            ] {
+                // momo_app: SELECT (RLS-gated) everywhere; INSERT/UPDATE/DELETE only on its own
+                // settings. TRUNCATE / REFERENCES / TRIGGER nowhere (#3186 M-1).
                 let allowed = role == "momo_app"
                     && (privilege == "SELECT"
-                        || (table == "mem_settings" && privilege != "TRUNCATE"));
+                        || (table == "mem_settings"
+                            && matches!(privilege, "INSERT" | "UPDATE" | "DELETE")));
                 let has: bool = sqlx::query_scalar("SELECT has_table_privilege($1, $2, $3)")
                     .bind(role)
                     .bind(format!("public.{table}"))
@@ -1964,6 +1998,23 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
                     .await
                     .expect("has_table_privilege");
                 assert_eq!(has, allowed, "{when}: {role} {privilege} on {table}");
+            }
+            // Column-level grants are a side door around the table-level revokes (#3186 M-3).
+            for privilege in ["SELECT", "INSERT", "UPDATE", "REFERENCES"] {
+                let allowed = role == "momo_app"
+                    && (privilege == "SELECT"
+                        || (table == "mem_settings" && matches!(privilege, "INSERT" | "UPDATE")));
+                let has: bool = sqlx::query_scalar("SELECT has_any_column_privilege($1, $2, $3)")
+                    .bind(role)
+                    .bind(format!("public.{table}"))
+                    .bind(privilege)
+                    .fetch_one(su)
+                    .await
+                    .expect("has_any_column_privilege");
+                assert_eq!(
+                    has, allowed,
+                    "{when}: {role} column-level {privilege} on {table}"
+                );
             }
         }
     }
@@ -1994,7 +2045,7 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
         .await
         .expect("acl");
         assert_eq!(public_grants, 0, "{when}: PUBLIC can execute {signature}");
-        for role in &roles {
+        for role in &holders {
             let has: bool = sqlx::query_scalar(
                 "SELECT has_function_privilege($1, $2::regprocedure, 'EXECUTE')",
             )
@@ -2023,6 +2074,23 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
             "{when}: {role} membership of momo_memory"
         );
     }
+    // #3186 M-3: nobody but a superuser (who is a member of everything) is a member of
+    // mem_definer, and momo_worker is the only non-superuser member of momo_memory. PUBLIC
+    // cannot be a role member; its privileges are the `public` rows above.
+    let outsiders: Vec<String> = sqlx::query_scalar(
+        "SELECT rolname::text FROM pg_roles WHERE NOT rolsuper \
+            AND ((rolname <> 'mem_definer' AND pg_has_role(oid, 'mem_definer', 'MEMBER')) \
+              OR (rolname NOT IN ('momo_worker', 'momo_memory') \
+                  AND pg_has_role(oid, 'momo_memory', 'MEMBER'))) \
+          ORDER BY 1",
+    )
+    .fetch_all(su)
+    .await
+    .expect("membership outsiders");
+    assert!(
+        outsiders.is_empty(),
+        "{when}: unexpected members of mem_definer / momo_memory: {outsiders:?}"
+    );
     let (usage, set): (bool, bool) = sqlx::query_as(
         "SELECT pg_has_role('momo_worker', 'momo_memory', 'USAGE'), pg_has_role('momo_worker', 'momo_memory', 'SET')",
     )
@@ -2239,4 +2307,379 @@ async fn a_digest_with_fewer_evidence_rows_than_source_count_is_hidden() {
     )
     .await;
     assert!(inputs.is_empty(), "not a rollup input either");
+}
+
+// ---------------------------------------------------------------------------
+// #3186: lock-block identity, GRANT ALL recovery, views, definer allow-list, sabotage
+// ---------------------------------------------------------------------------
+
+/// The text between the BEGIN/END markers of one file.
+fn lock_region(path: &std::path::Path) -> String {
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
+    assert_eq!(
+        text.matches("-- BEGIN mem-lockdown").count(),
+        1,
+        "{path:?}: exactly one BEGIN marker"
+    );
+    assert_eq!(
+        text.matches("-- END mem-lockdown").count(),
+        1,
+        "{path:?}: exactly one END marker"
+    );
+    let start = text.find("-- BEGIN mem-lockdown").expect("begin");
+    let end = text.find("-- END mem-lockdown").expect("end") + "-- END mem-lockdown".len();
+    assert!(start < end, "{path:?}: markers in order");
+    text[start..end].to_string()
+}
+
+fn migration_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../server/Migrations/101_mem_lockdown_hardening.sql")
+}
+
+/// M-1: the lock block is one text in three files. Compared byte for byte (stronger than a
+/// hash); the digest is printed so the PR can quote it.
+#[test]
+fn lock_block_is_identical_in_migration_and_both_bootstraps() {
+    let migration = lock_region(&migration_path());
+    let roles = lock_region(&sql_dir().join("bootstrap_roles.sql"));
+    let runtime = lock_region(&sql_dir().join("bootstrap_runtime_roles.sql"));
+    assert!(migration.len() > 2000, "the extracted block is not empty");
+    assert!(migration.contains("relkind IN ('r', 'p', 'v', 'm')"));
+    for (name, other) in [
+        ("bootstrap_roles.sql", &roles),
+        ("bootstrap_runtime_roles.sql", &runtime),
+    ] {
+        if &migration != other {
+            let line = migration
+                .lines()
+                .zip(other.lines())
+                .position(|(a, b)| a != b)
+                .map_or_else(|| "length".to_string(), |i| format!("line {}", i + 1));
+            panic!("migration 101 and {name} differ at {line} of the lock block");
+        }
+    }
+}
+
+/// M-1: after `GRANT ALL ON ALL TABLES ... TO momo_app` (and the other runtime roles, PUBLIC and
+/// the two internal roles) a bootstrap re-run locks everything again.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn grant_all_then_bootstrap_locks_the_memory_tables_again() {
+    let (su, _app, _w) = setup().await;
+    assert_privilege_matrix(&su, "before GRANT ALL").await;
+    for file in ["bootstrap_roles.sql", "bootstrap_runtime_roles.sql"] {
+        su_exec(
+            &su,
+            "GRANT ALL ON ALL TABLES IN SCHEMA public TO momo_app, momo_relay, momo_worker, momo_notifier",
+        )
+        .await;
+        // PUBLIC only on the memory tables: opening PUBLIC on the whole schema would leak into
+        // the other tests of this shared database.
+        su_exec(
+            &su,
+            "GRANT ALL ON mem_digest, mem_evidence, mem_cursor, mem_serving, mem_settings TO PUBLIC",
+        )
+        .await;
+        su_exec(&su, "GRANT momo_memory TO momo_app").await;
+        su_exec(&su, "GRANT mem_definer TO momo_relay").await;
+        su_exec(
+            &su,
+            "GRANT EXECUTE ON FUNCTION public.mem_apply_digest(uuid, uuid, text, bigint, bigint, text, uuid[], text, text, text, uuid[], timestamptz[], timestamptz) TO PUBLIC, momo_app, momo_relay",
+        )
+        .await;
+        su_exec(
+            &su,
+            "GRANT INSERT (id), UPDATE (id), REFERENCES (id) ON mem_digest TO momo_app, momo_worker",
+        )
+        .await;
+        // The damage is real: the door is open before the bootstrap runs (else this proves nothing).
+        let probe: bool = sqlx::query_scalar(
+            "SELECT has_table_privilege('momo_app', 'public.mem_settings', 'TRUNCATE') \
+                AND has_table_privilege('momo_app', 'public.mem_digest', 'INSERT') \
+                AND pg_has_role('momo_app', 'momo_memory', 'MEMBER') \
+                AND pg_has_role('momo_relay', 'mem_definer', 'MEMBER') \
+                AND has_any_column_privilege('momo_worker', 'public.mem_digest', 'UPDATE') \
+                AND has_function_privilege('momo_app', 'public.mem_apply_digest(uuid, uuid, text, bigint, bigint, text, uuid[], text, text, text, uuid[], timestamptz[], timestamptz)', 'EXECUTE') \
+                AND has_function_privilege('public', 'public.mem_apply_digest(uuid, uuid, text, bigint, bigint, text, uuid[], text, text, text, uuid[], timestamptz[], timestamptz)', 'EXECUTE')",
+        )
+        .fetch_one(&su)
+        .await
+        .expect("damage probe");
+        assert!(probe, "{file}: GRANT ALL must actually open the door first");
+        run_sql_file(file);
+        assert_privilege_matrix(&su, &format!("GRANT ALL, then {file}")).await;
+    }
+    su_exec(
+        &su,
+        "REVOKE TRUNCATE, REFERENCES, TRIGGER ON ALL TABLES IN SCHEMA public FROM momo_app, momo_relay, momo_worker, momo_notifier",
+    )
+    .await;
+}
+
+/// L-5: views and materialized views named mem_* are walked by the lock block too.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn lock_block_also_locks_views_and_materialized_views() {
+    let (su, _app, _w) = setup().await;
+    su_exec(&su, "DROP VIEW IF EXISTS mem_probe_view").await;
+    su_exec(&su, "DROP MATERIALIZED VIEW IF EXISTS mem_probe_mv").await;
+    su_exec(
+        &su,
+        "CREATE VIEW mem_probe_view AS SELECT id FROM mem_digest",
+    )
+    .await;
+    su_exec(
+        &su,
+        "CREATE MATERIALIZED VIEW mem_probe_mv AS SELECT 1 AS x",
+    )
+    .await;
+    for object in ["mem_probe_view", "mem_probe_mv"] {
+        su_exec(
+            &su,
+            &format!(
+                "GRANT ALL ON {object} TO momo_app, momo_relay, momo_worker, momo_notifier, PUBLIC"
+            ),
+        )
+        .await;
+        let open: bool = sqlx::query_scalar(
+            "SELECT has_table_privilege('momo_relay', $1, 'SELECT') AND has_table_privilege('public', $1, 'SELECT')",
+        )
+        .bind(format!("public.{object}"))
+        .fetch_one(&su)
+        .await
+        .expect("open probe");
+        assert!(open, "{object}: opened first");
+    }
+    run_sql_file("bootstrap_roles.sql");
+    // The matrix loops relkind r, p, v, m, so it covers both probes (and would fail on them).
+    assert_privilege_matrix(&su, "views and matviews after bootstrap").await;
+    su_exec(&su, "DROP VIEW mem_probe_view").await;
+    su_exec(&su, "DROP MATERIALIZED VIEW mem_probe_mv").await;
+}
+
+/// L-1: the SECURITY DEFINER functions owned by mem_definer are exactly this list.
+const DEFINER_ALLOW_LIST: [&str; 8] = [
+    "mem_advance_cursor",
+    "mem_apply_digest",
+    "mem_channel_switch",
+    "mem_digest_audience_ok",
+    "mem_digest_evidence_ok",
+    "mem_digest_live",
+    "mem_digest_rollup_inputs",
+    "mem_record_serving",
+];
+
+/// The `DO` block that starts at `marker`, up to (not including) `until` or the end of the file.
+fn tail_block(path: &std::path::Path, marker: &str, until: Option<&str>) -> String {
+    let text = std::fs::read_to_string(path).expect("read");
+    let start = text
+        .find(marker)
+        .unwrap_or_else(|| panic!("{marker} in {path:?}"));
+    let rest = &text[start..];
+    match until {
+        Some(u) => rest[..rest.find(u).unwrap_or_else(|| panic!("{u} in {path:?}"))].to_string(),
+        None => rest.to_string(),
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn security_definer_functions_owned_by_mem_definer_are_allow_listed() {
+    let (su, _app, _w) = setup().await;
+    let owned: Vec<String> = sqlx::query_scalar(
+        "SELECT p.proname::text FROM pg_proc p WHERE p.prosecdef \
+            AND pg_get_userbyid(p.proowner) = 'mem_definer' ORDER BY 1",
+    )
+    .fetch_all(&su)
+    .await
+    .expect("definer functions");
+    assert_eq!(
+        owned,
+        DEFINER_ALLOW_LIST.to_vec(),
+        "a SECURITY DEFINER function owned by mem_definer must be added to the allow-list \
+         here and in 101_mem_lockdown_hardening.sql on purpose"
+    );
+    // The migration's own self-check passes on the good state ...
+    let check = tail_block(&migration_path(), "-- ── L-1", None);
+    run_sql_text(&check).expect("allow-list check passes on the real state");
+    // ... and fails, loudly, when a stranger function is owned by mem_definer (sabotage; the
+    // single transaction rolls the rogue function back).
+    let rogue = format!(
+        "CREATE FUNCTION public.mem_rogue() RETURNS int LANGUAGE sql SECURITY DEFINER \
+         SET search_path = pg_catalog AS $f$ SELECT 1 $f$; \
+         ALTER FUNCTION public.mem_rogue() OWNER TO mem_definer; {check}"
+    );
+    let err = run_sql_text(&rogue).expect_err("a rogue definer function must be refused");
+    assert!(
+        err.contains("mem_rogue") && err.contains("allow-list"),
+        "RED output: {err}"
+    );
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM pg_proc WHERE proname = 'mem_rogue'")
+        .fetch_one(&su)
+        .await
+        .expect("count");
+    assert_eq!(left, 0, "the sabotage rolled back");
+}
+
+/// L-4: the membership self-check in the bootstrap files can fail, and fails loudly.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn membership_self_check_fails_loudly() {
+    let (_su, _app, _w) = setup().await;
+    for file in ["bootstrap_roles.sql", "bootstrap_runtime_roles.sql"] {
+        let check = tail_block(
+            &sql_dir().join(file),
+            "-- Membership self-check",
+            Some("-- END mem-lockdown"),
+        );
+        run_sql_text(&check)
+            .unwrap_or_else(|e| panic!("{file}: check passes on the good state: {e}"));
+        for (damage, expect) in [
+            (
+                "GRANT mem_definer TO momo_app",
+                "runtime role momo_app must not be a member of mem_definer",
+            ),
+            (
+                "GRANT mem_definer TO momo_relay",
+                "runtime role momo_relay must not be a member of mem_definer",
+            ),
+            (
+                "GRANT momo_memory TO momo_notifier",
+                "runtime role momo_notifier must not be a member of momo_memory",
+            ),
+            (
+                "GRANT momo_memory TO momo_worker WITH INHERIT TRUE",
+                "momo_worker must hold momo_memory with INHERIT FALSE",
+            ),
+        ] {
+            let err = run_sql_text(&format!("{damage}; {check}"))
+                .expect_err("the membership check must refuse this");
+            assert!(
+                err.contains(expect),
+                "{file}: `{damage}` -> RED output: {err}"
+            );
+        }
+    }
+    // Nothing leaked: the sabotage ran inside single transactions that aborted.
+    assert_privilege_matrix(&_su, "after membership sabotage").await;
+}
+
+/// L-3: the read policy of `mem_digest` calls `mem_digest_evidence_ok`, which itself reads
+/// `mem_digest` as `mem_definer`. Two things stop that from recursing: the
+/// `current_user = 'mem_definer'` branch in `mem_digest_sel`, and the `mem_digest_sel_definer`
+/// policy (`TO mem_definer`), which Postgres ORs in and folds (`A OR (A AND B)` -> `A`).
+/// Each sabotage runs in a transaction that rolls back.
+///   * guard removed alone   -> still safe today (the definer arm absorbs it): the guard is
+///     defence in depth, and this test pins that so nobody assumes it is the only stop;
+///   * guard AND definer arm removed -> the read recurses: SQLSTATE 54001 (stack depth) here
+///     (42P17 on builds that detect the cycle while planning). That is the RED.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn recursion_guard_in_the_digest_policy_is_load_bearing() {
+    let (su, _app, w) = setup().await;
+    let policy: String = sqlx::query_scalar(
+        "SELECT qual FROM pg_policies WHERE tablename = 'mem_digest' AND policyname = 'mem_digest_sel'",
+    )
+    .fetch_one(&su)
+    .await
+    .expect("policy");
+    assert!(
+        policy.contains("mem_definer"),
+        "the real policy carries the guard: {policy}"
+    );
+    let definer_arm: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_policies WHERE tablename = 'mem_digest' AND policyname = 'mem_digest_sel_definer'",
+    )
+    .fetch_one(&su)
+    .await
+    .expect("definer arm");
+    assert_eq!(definer_arm, 1, "the definer read policy exists");
+    // A row must exist so the policy function is actually evaluated.
+    seed_digest(&su, w.ws, w.p1, w.m_p1.1, &[(w.m_p1.0, w.p1)]).await;
+
+    #[derive(Clone, Copy, PartialEq)]
+    enum Sabotage {
+        None,
+        GuardOnly,
+        GuardAndDefinerArm,
+    }
+    let attempt = |sabotage: Sabotage| {
+        let su = su.clone();
+        let ws = w.ws;
+        async move {
+            let mut tx = su.begin().await.expect("begin");
+            if sabotage != Sabotage::None {
+                for drop in [
+                    "DROP POLICY mem_digest_sel ON mem_digest",
+                    "DROP POLICY mem_digest_sel_definer ON mem_digest",
+                ] {
+                    sqlx::query(drop).execute(&mut *tx).await.expect("drop");
+                }
+                sqlx::query(
+                    "CREATE POLICY mem_digest_sel ON mem_digest FOR SELECT USING ( \
+                       workspace_id = nullif(current_setting('app.workspace_id', true), '')::uuid \
+                       AND NOT stale AND mem_digest_evidence_ok(id))",
+                )
+                .execute(&mut *tx)
+                .await
+                .expect("sabotaged policy");
+                if sabotage == Sabotage::GuardOnly {
+                    sqlx::query(
+                        "CREATE POLICY mem_digest_sel_definer ON mem_digest FOR SELECT TO mem_definer \
+                         USING (workspace_id = nullif(current_setting('app.workspace_id', true), '')::uuid)",
+                    )
+                    .execute(&mut *tx)
+                    .await
+                    .expect("definer arm");
+                }
+            }
+            sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+                .bind(ws.to_string())
+                .execute(&mut *tx)
+                .await
+                .expect("guc");
+            sqlx::query("SET LOCAL ROLE momo_app")
+                .execute(&mut *tx)
+                .await
+                .expect("set role");
+            let result = sqlx::query_scalar::<_, i64>("SELECT count(*) FROM mem_digest")
+                .fetch_one(&mut *tx)
+                .await;
+            let _ = tx.rollback().await;
+            result
+        }
+    };
+
+    let control = attempt(Sabotage::None).await;
+    assert!(control.is_ok(), "guarded policy reads fine: {control:?}");
+    let guard_only = attempt(Sabotage::GuardOnly).await;
+    assert!(
+        guard_only.is_ok(),
+        "guard removed alone stays safe behind the definer arm: {guard_only:?}"
+    );
+    let err = attempt(Sabotage::GuardAndDefinerArm)
+        .await
+        .expect_err("without the guard and the definer arm the policy must recurse");
+    let text = format!("{err}");
+    eprintln!("L-3 sabotage RED output: [{}] {text}", sqlstate(&err));
+    assert!(
+        ["42P17", "54001"].contains(&sqlstate(&err).as_str()),
+        "RED output: {text}"
+    );
+    // The sabotage rolled back: guard and definer arm are still there.
+    let after: String = sqlx::query_scalar(
+        "SELECT qual FROM pg_policies WHERE tablename = 'mem_digest' AND policyname = 'mem_digest_sel'",
+    )
+    .fetch_one(&su)
+    .await
+    .expect("policy");
+    assert!(after.contains("mem_definer"), "restored: {after}");
+    let arm_after: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_policies WHERE tablename = 'mem_digest' AND policyname = 'mem_digest_sel_definer'",
+    )
+    .fetch_one(&su)
+    .await
+    .expect("arm");
+    assert_eq!(arm_after, 1, "definer arm restored");
 }
