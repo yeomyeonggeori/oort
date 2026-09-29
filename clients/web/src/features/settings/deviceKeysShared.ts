@@ -71,7 +71,7 @@ export function phoneNameOrigin(
 export const PHONE_NAME_ORIGIN_COPY: Record<PhoneNameOrigin, string> = {
   matchesLink: "이 이름은 QR로 연결할 때 폰이 알린 이름과 같습니다.",
   notInLinks:
-    "이 이름은 연결된 기기 목록에 없습니다. 방금 내가 연결한 폰이 아니라면 승인하지 마세요.",
+    "이 이름은 연결된 기기 목록에 없습니다. 방금 내가 연결한 폰이 아니라면 승인하지 않아야 합니다.",
   unknown: "연결된 기기 목록을 불러오지 못해 이름을 대조하지 못했습니다.",
 };
 
