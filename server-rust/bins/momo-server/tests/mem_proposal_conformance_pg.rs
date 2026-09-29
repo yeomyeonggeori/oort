@@ -1561,7 +1561,7 @@ async fn an_agent_cannot_propose_what_it_could_not_cite() {
         assert!(matches!(out, Ok(Some(_))), "{label}: sabotaged: {out:?}");
     }
     // The two walls for a channel the agent is not in are independent.
-    let tx = sabotage_tx(
+    let mut tx = sabotage_tx(
         &su,
         PROPOSE_FN,
         &[(
@@ -2985,7 +2985,7 @@ async fn a_forgotten_text_is_neither_proposed_again_nor_accepted() {
     eprintln!("RED [accept check + trigger removed]: sabotaged -> {resurrected:?} (a forgotten text is an item again)");
     assert!(resurrected.is_ok());
     // RED 3: without the propose check a proposal with the forgotten text is created.
-    let tx = sabotage_tx(
+    let mut tx = sabotage_tx(
         &su,
         PROPOSE_FN,
         &[(
@@ -2994,6 +2994,12 @@ async fn a_forgotten_text_is_neither_proposed_again_nor_accepted() {
         )],
     )
     .await;
+    // (the still-pending twin would otherwise dedupe the proposal; drop it inside the rolled-back tx)
+    sqlx::query("DELETE FROM mem_proposal WHERE id = $1")
+        .bind(pid)
+        .execute(&mut *tx)
+        .await
+        .expect("drop the pending twin");
     let proposed = propose_in(tx, w.ws, run, "decision", text, &[m1]).await;
     eprintln!("RED [propose check removed]: shipped -> Ok(None); sabotaged -> {proposed:?}");
     assert!(matches!(proposed, Ok(Some(_))));
