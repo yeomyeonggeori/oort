@@ -990,7 +990,7 @@ function PhoneKeyRow({
               {registeredAtCopy(phone.createdAtMs, Date.now())}
             </p>
             <p
-              className="break-keep text-meta text-ink"
+              className="break-keep break-words text-meta text-ink"
               data-testid="device-key-endorse-name"
               data-name-origin={nameOrigin}
             >
