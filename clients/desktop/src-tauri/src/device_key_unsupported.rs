@@ -49,3 +49,8 @@ pub async fn device_key_deliver_revocation() -> Result<(), String> {
 pub async fn device_key_sign_rebind() -> Result<(), String> {
     Err(UNSUPPORTED.into())
 }
+
+#[tauri::command]
+pub async fn device_key_reset_signature_requirement() -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}

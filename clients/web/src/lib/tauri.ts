@@ -493,7 +493,28 @@ export interface DesktopDeviceKeyStatus {
   fingerprint: string | null;
   root: { keyId: string; memberId: string; publicKey: string } | null;
   reuseWindowSeconds: number;
-  host: { running: boolean; matches: boolean; pinnedRootKeyId: string | null } | null;
+  host: DesktopHostPin | null;
+}
+
+/** `device_key::HostPin` — this Mac's workd, as it says it. */
+export interface DesktopHostPin {
+  running: boolean;
+  /** The host is this workspace's and this bound root's member's. */
+  matches: boolean;
+  pinnedRootKeyId: string | null;
+  /**
+   * R2 on this host (#3117): `enforced` refuses unsigned instructions,
+   * `server_only` is the half state (the server requires signatures, this host
+   * does not yet — no root pinned), `off` neither. Absent from a shell before
+   * #3117.
+   */
+  signatureEnforcement?: "enforced" | "server_only" | "off";
+  /** The host is this workspace's, with or without a bound root (#3129). */
+  workspaceMatches?: boolean;
+  /** What the server last told the host; null before its first answer. */
+  serverRequiresSignatures?: boolean | null;
+  /** Why the host enforces. */
+  signaturesRequiredBy?: "config" | "server" | "unreadable" | null;
 }
 
 /** `device_key_sign_control`'s request (`payload::ControlRequest`). A spawn
@@ -622,6 +643,18 @@ export const desktopDeviceKey = {
   }): Promise<{ keyId: string; publicKey: string; signedAtMs: number; signature: string }> {
     if (!IS_TAURI) throw "unsupported_platform";
     return invoke("device_key_sign_rebind", { request });
+  },
+  /**
+   * Lower this Mac's workd signature latch (#3129; `reset_signature_requirement`,
+   * #3117). The shell asks in its native dialog first — this page cannot
+   * lower it quietly; a "no" is `device_key_declined`. `required` is what the
+   * host says right after (its own config can keep it on). A server that still
+   * requires signatures latches it again on the next poll: read the status
+   * again, never assume it is off.
+   */
+  async resetSignatureRequirement(workspaceId: string): Promise<{ required: boolean }> {
+    if (!IS_TAURI) throw "unsupported_platform";
+    return invoke("device_key_reset_signature_requirement", { request: { workspaceId } });
   },
 };
 

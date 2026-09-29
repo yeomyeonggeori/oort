@@ -4,12 +4,14 @@ import {useEffect} from 'react';
 
 import {
   deriveDeviceKeyView,
+  EnrollError,
   enrollDeviceKey,
   readLocalDeviceKey,
   replaceInvalidatedKey,
   type DeviceKeyView,
 } from '../../deviceKey/enrollment';
 import {deviceLinkDevice} from '../deviceLink/deviceIdentity';
+import {lastConnectRoute} from '../onboarding/phoneFlow';
 
 // =============================================================================
 // The 「지시 기기」 state as the screens read it (#3026 stage 2).
@@ -86,15 +88,6 @@ export function useDeviceKey(
     },
   });
 
-  const view = deriveDeviceKeyView({
-    local: local.data,
-    localError: local.error,
-    rows: hasKey ? rows.data : undefined,
-    // A failed background re-read (the approval poll) keeps the last list the
-    // server gave: 「불러오지 못했습니다」 is for when there is nothing to show.
-    rowsError: hasKey && rows.data === undefined ? rows.error : null,
-  });
-
   const settle = () => {
     void client.invalidateQueries({queryKey: DEVICE_KEY_LOCAL_QUERY_KEY});
     void client.invalidateQueries({queryKey: DEVICE_KEYS_QUERY_KEY(workspaceId)});
@@ -108,6 +101,23 @@ export function useDeviceKey(
     mutationFn: () => replaceInvalidatedKey({workspaceId, label}),
     onSettled: settle,
   });
+
+  // #3129: an address login (or an invite) this run, or the server's word on
+  // the last try — this sign-in is not a QR link and cannot register a key.
+  const route = lastConnectRoute();
+  const signInUnlinked =
+    route === 'signIn' ||
+    route === 'join' ||
+    (enroll.error instanceof EnrollError && enroll.error.unlinked);
+  const view = deriveDeviceKeyView({
+    local: local.data,
+    localError: local.error,
+    rows: hasKey ? rows.data : undefined,
+    // A failed background re-read (the approval poll) keeps the last list the
+    // server gave: 「불러오지 못했습니다」 is for when there is nothing to show.
+    rowsError: hasKey && rows.data === undefined ? rows.error : null,
+    signInUnlinked,
+  });
   const reconnectId =
     autoReconnect && view.kind === 'reconnect' && !view.biometryOff ? view.row.id : null;
   const enrollMutate = enroll.mutate;
@@ -118,8 +128,15 @@ export function useDeviceKey(
     enrollMutate();
   }, [reconnectId, enrollBusy, enrollMutate]);
   const last = replace.submittedAt > enroll.submittedAt ? replace : enroll;
-  const failure =
-    last.error instanceof Error ? last.error.message : last.error ? String(last.error) : null;
+  // The 「QR 연결 필요」 panel already says what the refusal said.
+  const saidByView = last.error instanceof EnrollError && last.error.unlinked;
+  const failure = saidByView
+    ? null
+    : last.error instanceof Error
+      ? last.error.message
+      : last.error
+        ? String(last.error)
+        : null;
 
   return {
     view,
