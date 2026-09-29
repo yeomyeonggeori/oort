@@ -59,6 +59,15 @@ where
                 sqlx::query("SET LOCAL ROLE momo_memory")
                     .execute(&mut *conn)
                     .await?;
+                // A stuck apply must not hold FOR KEY SHARE locks on message rows (which
+                // block a member's edit) for long: bounded waits, bounded statements. A lock
+                // timeout is 55P03 and is handled like "held by another worker": skip, next sweep.
+                sqlx::query("SET LOCAL lock_timeout = '5s'")
+                    .execute(&mut *conn)
+                    .await?;
+                sqlx::query("SET LOCAL statement_timeout = '60s'")
+                    .execute(&mut *conn)
+                    .await?;
                 Ok(())
             })
         },
@@ -410,16 +419,15 @@ const SOURCE_COLS: &str = "m.id, m.seq, m.root_id, a.display_name AS author_name
 
 /// The same liveness rule everywhere: a text message with a body, not deleted.
 ///
-/// A DM (M-3, ADR-0196 D9) only counts from the moment its agent joined: what the two humans
+/// A DM (M-3, ADR-0196 D9) only counts from the moment its latest current member joined: what the two humans
 /// said to each other before is never read (`mem_apply_digest` refuses it as evidence too).
 /// A `streaming` marker older than 30 minutes is a crashed writer, not a live stream (M-5).
 const LIVE: &str = "m.type = 'text' AND m.deleted_at IS NULL AND m.state <> 'deleted' \
      AND m.body IS NOT NULL AND btrim(m.body) <> '' \
      AND (NOT EXISTS (SELECT 1 FROM channel dc WHERE dc.id = m.channel_id AND dc.kind = 'dm') \
           OR m.created_at >= (SELECT max(dx.joined_at) FROM membership dx \
-                                JOIN member dm ON dm.id = dx.member_id AND dm.workspace_id = dx.workspace_id \
                                WHERE dx.channel_id = m.channel_id AND dx.workspace_id = m.workspace_id \
-                                 AND dx.left_at IS NULL AND dm.kind = 'agent'))";
+                                 AND dx.left_at IS NULL))";
 
 fn source_message(row: &sqlx::postgres::PgRow) -> SourceMessage {
     SourceMessage {

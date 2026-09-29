@@ -75,8 +75,11 @@ const AUDIT_THROTTLE_HOURS: i32 = 6;
 /// Stale digests looked at per workspace per sweep.
 const STALE_BATCH: i32 = 200;
 
-/// Placeholder for a body that looks like a credential. The message stays evidence.
+/// Stored instead of a digest body when the model's output looks like a credential. The
+/// digest and its evidence are still written, so the cursor moves.
 const SUMMARY_WITHHELD: &str = "[요약에 민감정보가 섞여 저장하지 않았습니다]";
+/// Sent to the model instead of a message body that looks like a credential. The message
+/// stays evidence.
 const SECRET_PLACEHOLDER: &str = "[민감정보로 보여 가려진 메시지]";
 
 // ---------------------------------------------------------------------------

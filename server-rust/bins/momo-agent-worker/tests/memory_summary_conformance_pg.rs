@@ -2253,3 +2253,182 @@ async fn a_streaming_marker_older_than_thirty_minutes_no_longer_blocks_the_curso
     );
     reset_instance(&su).await;
 }
+
+// --- re-review round (#3191): H-A, M-i, M-ii, L-i -------------------------------------
+
+/// H-A: `mem_definer` may lock a message row (`FOR KEY SHARE`, needed by `mem_apply_digest`)
+/// but can never change one. The row-lock policy must be RESTRICTIVE: `ws_isolation` is a
+/// PERMISSIVE `FOR ALL TO PUBLIC` policy, so a permissive `WITH CHECK (false)` would be OR-ed
+/// away (the reviewer's `UPDATE 1`).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn mem_definer_can_lock_a_message_row_but_never_change_it() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let fx = seed(&su).await;
+    let wp = momo_worker_pool().await;
+    let (msg, _) = post(&wp, &fx, fx.human, "원문").await;
+
+    for update in [
+        "UPDATE message SET id = id WHERE id = $1",
+        "UPDATE message SET id = gen_random_uuid() WHERE id = $1",
+    ] {
+        let mut tx = su.begin().await.unwrap();
+        sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+            .bind(fx.ws.to_string())
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("SET LOCAL ROLE mem_definer")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let locked: Option<Uuid> =
+            sqlx::query_scalar("SELECT id FROM message WHERE id = $1 FOR KEY SHARE")
+                .bind(msg)
+                .fetch_optional(&mut *tx)
+                .await
+                .expect("FOR KEY SHARE still works for mem_definer");
+        assert_eq!(locked, Some(msg));
+        let err = sqlx::query(update)
+            .bind(msg)
+            .execute(&mut *tx)
+            .await
+            .expect_err(&format!(
+                "RED output: mem_definer changed a message: {update}"
+            ));
+        let code = err
+            .as_database_error()
+            .and_then(|e| e.code().map(|c| c.to_string()));
+        assert_eq!(code.as_deref(), Some("42501"), "{err}");
+        tx.rollback().await.unwrap();
+    }
+    let still: i64 = sqlx::query_scalar("SELECT count(*) FROM message WHERE id = $1")
+        .bind(msg)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(still, 1);
+    reset_instance(&su).await;
+}
+
+/// M-ii: every memory tx is bounded, so a stuck apply cannot hold key-share locks (which
+/// block a member's edit) for long.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn memory_transactions_carry_lock_and_statement_timeouts() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let fx = seed(&su).await;
+    let wp = momo_worker_pool().await;
+    let (lock, stmt): (String, String) = mem::with_memory_tx(&wp, fx.ws, |conn| {
+        Box::pin(async move {
+            let lock: String = sqlx::query_scalar("SELECT current_setting('lock_timeout')")
+                .fetch_one(&mut *conn)
+                .await?;
+            let stmt: String = sqlx::query_scalar("SELECT current_setting('statement_timeout')")
+                .fetch_one(&mut *conn)
+                .await?;
+            Ok((lock, stmt))
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!((lock.as_str(), stmt.as_str()), ("5s", "1min"));
+    reset_instance(&su).await;
+}
+
+/// M-i: a DM is read only from the moment its *latest* current member joined — a human who
+/// (re)joined late does not expose what was said before either.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn a_dm_is_read_only_after_its_latest_member_joined_humans_included() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let fx = seed(&su).await;
+    configure_summary_row(&su, fx.human).await;
+    let wp = momo_worker_pool().await;
+    let dm = new_channel(&su, fx.ws, "dm", &[fx.human, fx.agent]).await;
+    for body in ["재가입 전 하나", "재가입 전 둘", "재가입 전 셋"] {
+        post_in(&wp, fx.ws, dm, fx.agent, body).await;
+    }
+    sqlx::query(
+        "UPDATE membership SET joined_at = now() + interval '1 second' \
+          WHERE channel_id = $1 AND member_id = $2",
+    )
+    .bind(dm)
+    .bind(fx.human)
+    .execute(&su)
+    .await
+    .unwrap();
+    tokio::time::sleep(Duration::from_millis(1_300)).await;
+    for body in ["재가입 후 하나", "재가입 후 둘", "재가입 후 셋"] {
+        post_in(&wp, fx.ws, dm, fx.human, body).await;
+    }
+    let provider = Recorder::new();
+    let worker = worker_with(&provider, memory_config()).await;
+    worker.summary_sweep().await;
+    assert_eq!(provider.count(), 1);
+    let prompt = provider.prompt(0);
+    assert!(prompt.contains("재가입 후 하나"));
+    assert!(
+        !prompt.contains("재가입 전"),
+        "RED output: history from before the human joined was summarised"
+    );
+    reset_instance(&su).await;
+}
+
+/// L-i: the edit trigger sets the tenant GUC for its own update. When there was none before
+/// (a maintenance script), it must not leave `''` behind — `ws_isolation` casts the GUC with
+/// `::uuid` and `''::uuid` is an error for every later statement of that transaction.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn the_edit_trigger_does_not_leave_an_empty_tenant_guc_behind() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let fx = seed(&su).await;
+    configure_summary_row(&su, fx.human).await;
+    let wp = momo_worker_pool().await;
+    let mut ids = Vec::new();
+    for body in ["하나", "둘", "셋"] {
+        ids.push(post(&wp, &fx, fx.human, body).await);
+    }
+    let provider = Recorder::new();
+    let worker = worker_with(&provider, memory_config()).await;
+    assert_eq!(worker.summary_sweep().await.windows, 1);
+
+    // A fresh connection: the GUC was never set.
+    let mut tx = su.begin().await.unwrap();
+    let before: Option<String> =
+        sqlx::query_scalar("SELECT current_setting('app.workspace_id', true)")
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert!(before.is_none_or(|v| v.is_empty()));
+    sqlx::query("UPDATE message SET body = '고침', edited_at = now() WHERE id = $1")
+        .bind(ids[1].0)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let after: String = sqlx::query_scalar("SELECT current_setting('app.workspace_id', true)")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(
+        after,
+        fx.ws.to_string(),
+        "RED output: the trigger left {after:?} behind"
+    );
+    tx.commit().await.unwrap();
+    let stale: bool = sqlx::query_scalar("SELECT stale FROM mem_digest WHERE channel_id = $1")
+        .bind(fx.channel)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert!(stale, "the digest was still staled with no GUC set");
+    reset_instance(&su).await;
+}

@@ -62,12 +62,16 @@ GRANT CREATE ON SCHEMA public TO mem_definer;
 
 -- H-1: mem_apply_digest 가 근거 메시지 행을 FOR KEY SHARE 로 잠그려면 PG 는 UPDATE 권한(한
 -- 컬럼이라도)과 UPDATE 정책의 USING 을 요구한다. 잠금 전용이다: 컬럼 권한은 id 하나뿐이고,
--- 정책의 WITH CHECK (false) 라 mem_definer 는 어떤 메시지도 실제로 바꿀 수 없다.
+-- 아래 RESTRICTIVE 정책이 mem_definer 의 UPDATE 를 전부 거부한다. 스키마의 ws_isolation 은
+-- PERMISSIVE(FOR ALL TO PUBLIC) 라 PERMISSIVE 정책에 WITH CHECK (false) 를 붙여도 OR 로
+-- 합쳐져 아무것도 막지 못한다 — 그래서 RESTRICTIVE(AND) 여야 한다. FOR KEY SHARE 는 USING 만
+-- 평가하므로 USING (true) 는 잠금을 통과시키고(워크스페이스 한정은 ws_isolation 이 이미 함),
+-- WITH CHECK (false) 는 새 행 값이 무엇이든 UPDATE 를 실패시킨다.
 GRANT UPDATE (id) ON message TO mem_definer;
 DROP POLICY IF EXISTS message_mem_row_lock ON message;
-CREATE POLICY message_mem_row_lock ON message FOR UPDATE TO mem_definer
-  USING (workspace_id = nullif(current_setting('app.workspace_id', true), '')::uuid)
-  WITH CHECK (false);
+DROP POLICY IF EXISTS message_mem_no_write ON message;
+CREATE POLICY message_mem_no_write ON public.message AS RESTRICTIVE FOR UPDATE TO mem_definer
+  USING (true) WITH CHECK (false);
 
 -- ── 요약해도 되는 채널인가 ──────────────────────────────────────────────────────────
 -- 워크스페이스·채널 스위치(mem_channel_switch) + 보관 안 됨 + DM 규칙.
@@ -296,7 +300,12 @@ BEGIN
      AND EXISTS (SELECT 1 FROM public.mem_evidence e
                   WHERE e.digest_id = d.id AND e.workspace_id = d.workspace_id
                     AND e.message_id = OLD.id);
-  PERFORM pg_catalog.set_config('app.workspace_id', COALESCE(v_prev, ''), true);
+  -- 원래 값이 있으면 되돌린다. 없었으면(NULL) 되돌릴 수 없다: 커스텀 GUC 는 한 번 정해지면
+  -- 빈 문자열이 되는데, 스키마의 ws_isolation 은 ''::uuid 캐스트에서 22P02 로 죽는다.
+  -- 그래서 NULL/'' 이었던 경우에는 이 행의 워크스페이스로 남겨 둔다(같은 tx 안, 더 안전한 값).
+  IF v_prev IS NOT NULL AND v_prev <> '' THEN
+    PERFORM pg_catalog.set_config('app.workspace_id', v_prev, true);
+  END IF;
   RETURN NEW;
 END
 $$;
@@ -375,13 +384,12 @@ BEGIN
          AND m.seq BETWEEN p_from_seq AND p_to_seq
          AND m.deleted_at IS NULL AND m.state <> 'deleted'
          AND (p_thread_root_id IS NULL OR m.id = p_thread_root_id OR m.root_id = p_thread_root_id)
-         -- M-3: DM 은 에이전트가 합류한 뒤의 메시지만 근거가 될 수 있다(소급 요약 금지).
+         -- M-3: DM 은 현재 활성 멤버 모두가 합류한 뒤(가장 늦은 합류 이후)의 메시지만 근거가 될 수 있다(소급 요약 금지).
          AND (NOT EXISTS (SELECT 1 FROM public.channel dc WHERE dc.id = m.channel_id AND dc.kind = 'dm')
               OR m.created_at >= (
                    SELECT pg_catalog.max(x.joined_at) FROM public.membership x
-                     JOIN public.member am ON am.id = x.member_id AND am.workspace_id = x.workspace_id
                     WHERE x.channel_id = m.channel_id AND x.workspace_id = m.workspace_id
-                      AND x.left_at IS NULL AND am.kind = 'agent'))
+                      AND x.left_at IS NULL))
      ) <> v_n THEN
     RAISE EXCEPTION 'mem_apply_digest: evidence message is not a live message of this channel/range/thread'
       USING ERRCODE = '23503';
