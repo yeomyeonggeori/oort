@@ -2836,12 +2836,10 @@ impl AgentWorker {
     /// none of its own.
     ///
     /// Precedence: the agent's own model > the operator's row > `AGENT_MODEL`.
-    /// `agent.model` is `NOT NULL`, so the payload always names one; the only
-    /// value that is *not* a choice is the instance default itself (the seed
-    /// agent, and any agent created with the placeholder). A model equal to
-    /// `AGENT_MODEL` (or empty) is therefore the "no own model" case and the
-    /// row applies; any other model is the agent's own and the row is not even
-    /// read.
+    /// `agent.model` is `NOT NULL`, so the model's name cannot say whether it was
+    /// chosen. The server says so on the payload (`model_source`, #3147): only
+    /// `instance_default` applies the row; `agent` (or an absent key) never reads
+    /// it — even when the agent's model happens to equal `AGENT_MODEL`.
     ///
     /// The row names a cascade position and the endpoint label it had when
     /// chosen. Position 0 is the head link this turn already resolved; a
@@ -2855,8 +2853,7 @@ impl AgentWorker {
         run_id: Uuid,
         head: &ResolvedTransport,
     ) -> DefaultAiOutcome {
-        let own_model = payload.model.trim();
-        if !own_model.is_empty() && own_model != self.config.default_model {
+        if !payload.follows_instance_default() {
             return DefaultAiOutcome::NotApplicable;
         }
         let role = if payload.is_welcome() {

@@ -1,5 +1,5 @@
 -- =============================================================================
--- 098_drop_legacy_memory_plane.sql — #3167 (ADR-0196 D11, MEM-M1)
+-- 099_drop_legacy_memory_plane.sql — #3167 (ADR-0196 D11, MEM-M1)
 --
 -- Removes the first-generation Memory Plane (ADR-0129) that migrations 027,
 -- 028, 030 and 035 created. Team memory v2 (ADR-0196) starts from a clean

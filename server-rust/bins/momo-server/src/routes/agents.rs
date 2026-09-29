@@ -55,9 +55,9 @@ use axum::{Extension, Json};
 use momo_agent::{
     agent_owner_in_tx, allowed_agent_models, create_agent_identity_in_tx, default_enabled_tools,
     load_agent_model_policy_in_tx, load_agent_profile_in_tx, normalized_model,
-    normalized_system_prompt, set_agent_paused_in_tx, upsert_agent_profile_in_tx,
-    validate_agent_profile, validated_config, AgentCreation, AgentProfile, AgentProfileSpec,
-    AgentSpecInvalid, NewAgentMember,
+    normalized_system_prompt, set_agent_model_source_in_tx, set_agent_paused_in_tx,
+    upsert_agent_profile_in_tx, validate_agent_profile, validated_config, AgentCreation,
+    AgentProfile, AgentProfileSpec, AgentSpecInvalid, ModelSource, NewAgentMember,
 };
 use momo_auth::{is_hosted_agent_activated_in_tx, Principal, HOSTED_CONNECTION_MANAGED_CODE};
 use momo_db::audit::{write_audit, AuditEntry};
@@ -97,7 +97,14 @@ fn profile_dto(profile: &AgentProfile) -> AgentProfileDto {
         version: profile.version,
         updated_by: profile.updated_by.to_string(),
         updated_at_ms: profile.updated_at_ms,
+        model_source: profile.model_source.as_str(),
     }
+}
+
+/// #3147: the closed `modelSource` vocabulary, or a 400.
+fn parse_model_source(raw: &str) -> Result<ModelSource, ApiError> {
+    ModelSource::parse(raw)
+        .ok_or_else(|| ApiError::bad_request("modelSource must be one of agent, instance_default"))
 }
 
 /// Validate a profile body. `omitted_tools` is what an absent `enabledTools`
@@ -149,6 +156,10 @@ pub async fn create(
         .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?
         .ok_or_else(|| ApiError::bad_request("handle is required"))?;
     let model = normalized_model(&request.model).map_err(spec_error)?;
+    let model_source = match request.model_source.as_deref() {
+        Some(raw) => parse_model_source(raw)?,
+        None => ModelSource::Agent,
+    };
     let base_url = validated_base_url(
         &request.base_url,
         &state.settings.environment,
@@ -170,6 +181,7 @@ pub async fn create(
         display_name,
         handle,
         model,
+        model_source,
         base_url,
         system_prompt,
         config,
@@ -277,6 +289,7 @@ pub async fn create(
                             json!({
                                 "handle": agent.handle,
                                 "model": input.model,
+                                "model_source": input.model_source.as_str(),
                                 "endpoint_label": input.base_url,
                                 "owner_human_id": input.owner_human_id.to_string(),
                                 "channel_memberships_created": channel_memberships_created,
@@ -410,6 +423,11 @@ pub async fn put_profile(
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let agent_member_id = path_uuid(&agent, "invalid agent id")?;
     let spec = validated_profile(&request, &[])?;
+    let model_source = request
+        .model_source
+        .as_deref()
+        .map(parse_model_source)
+        .transpose()?;
     let actor_member_id = principal.member_id;
     let via_token_id = audit_via_token_id(&principal);
 
@@ -438,6 +456,13 @@ pub async fn put_profile(
                         .any(|entry| entry == model_pref)
                     {
                         return Ok(Err(spec_error(AgentSpecInvalid::ModelPrefNotAllowed)));
+                    }
+                }
+                if let Some(source) = model_source {
+                    if !set_agent_model_source_in_tx(conn, workspace_id, agent_member_id, source)
+                        .await?
+                    {
+                        return Ok(Err(ApiError::not_found("agent profile target not found")));
                     }
                 }
                 let Some(stored) = upsert_agent_profile_in_tx(
@@ -473,6 +498,7 @@ pub async fn put_profile(
                                 "enabled_tool_count": stored.enabled_tools.len(),
                                 "has_model_pref": stored.model_pref.is_some(),
                                 "has_effort_pref": stored.effort_pref.is_some(),
+                                "model_source": stored.model_source.as_str(),
                                 "mention_enabled": true,
                             }),
                         ),
@@ -767,6 +793,7 @@ mod tests {
             effort_pref: Some("max".into()),
             enabled_tools: Some(vec![]),
             triggers: None,
+            model_source: None,
         };
         let error = validated_profile(&unusable, &[]).expect_err("hermes-fast cannot do max");
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
@@ -786,6 +813,7 @@ mod tests {
             effort_pref: None,
             enabled_tools: Some(vec![]),
             triggers: None,
+            model_source: None,
         };
         let spec = validated_profile(&input, &[]).expect("valid");
         assert_eq!(spec.triggers, json!({"mention": true}));

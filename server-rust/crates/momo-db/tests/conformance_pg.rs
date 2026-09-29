@@ -151,7 +151,7 @@ async fn migration_runner_applies_all_66_and_matches_schema() {
         "expected many FORCE-RLS tables (D2 #6), got {forced}"
     );
 
-    // #3167 / ADR-0196 D11: migration 098 removed the first-generation Memory
+    // #3167 / ADR-0196 D11: migration 099 removed the first-generation Memory
     // Plane (027/028/030/035). Nothing may bring an old object back, and the
     // `vector` extension must survive for team memory v2 (M3).
     let legacy: Vec<String> = sqlx::query_scalar(
@@ -180,7 +180,7 @@ async fn migration_runner_applies_all_66_and_matches_schema() {
     .unwrap();
     assert!(
         legacy.is_empty(),
-        "first-generation Memory Plane objects must stay dropped (098); found {legacy:?}"
+        "first-generation Memory Plane objects must stay dropped (099); found {legacy:?}"
     );
     let vector_ext: bool =
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname='vector')")

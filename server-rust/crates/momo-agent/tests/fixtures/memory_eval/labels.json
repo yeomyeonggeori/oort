@@ -1,0 +1,947 @@
+{
+  "channels": [
+    {
+      "kind": "public",
+      "members": [
+        "a-minjun",
+        "b-seoyeon",
+        "x-jiho",
+        "y-harin",
+        "z-doyun",
+        "kim-intern",
+        "deploy-bot"
+      ],
+      "name": "general"
+    },
+    {
+      "kind": "private",
+      "members": [
+        "x-jiho",
+        "y-harin"
+      ],
+      "name": "hr"
+    },
+    {
+      "kind": "dm",
+      "members": [
+        "x-jiho",
+        "kim-intern"
+      ],
+      "name": "dm-x-agent"
+    }
+  ],
+  "commitments": [
+    {
+      "evidence": "m0009",
+      "owner": "b-seoyeon",
+      "task": "배포 체크리스트 정리"
+    },
+    {
+      "evidence": "m0020",
+      "owner": "y-harin",
+      "task": "온보딩 문서 갱신"
+    },
+    {
+      "evidence": "m0038",
+      "owner": "y-harin",
+      "task": "장애 회고 초안 작성"
+    },
+    {
+      "evidence": "m0054",
+      "owner": "b-seoyeon",
+      "task": "스테이징 DB 백업 확인"
+    },
+    {
+      "evidence": "m0070",
+      "owner": "x-jiho",
+      "task": "릴리스 노트 작성"
+    },
+    {
+      "evidence": "m0087",
+      "owner": "b-seoyeon",
+      "task": "고객 인터뷰 일정 잡기"
+    },
+    {
+      "evidence": "m0106",
+      "owner": "b-seoyeon",
+      "task": "디자인 토큰 점검"
+    },
+    {
+      "evidence": "m0121",
+      "owner": "b-seoyeon",
+      "task": "알림 문구 검수"
+    },
+    {
+      "evidence": "m0138",
+      "owner": "y-harin",
+      "task": "성능 측정 리포트"
+    },
+    {
+      "evidence": "m0151",
+      "owner": "y-harin",
+      "task": "테스트 픽스처 정리"
+    },
+    {
+      "evidence": "m0169",
+      "owner": "x-jiho",
+      "task": "보안 패치 적용"
+    },
+    {
+      "evidence": "m0183",
+      "owner": "x-jiho",
+      "task": "분기 로드맵 초안"
+    },
+    {
+      "evidence": "m0201",
+      "owner": "y-harin",
+      "task": "번역 용어집 갱신"
+    },
+    {
+      "evidence": "m0215",
+      "owner": "b-seoyeon",
+      "task": "모니터링 대시보드 정비"
+    },
+    {
+      "evidence": "m0230",
+      "owner": "x-jiho",
+      "task": "신규 입사자 계정 발급"
+    },
+    {
+      "evidence": "m0249",
+      "owner": "y-harin",
+      "task": "데모 시나리오 작성"
+    },
+    {
+      "evidence": "m0263",
+      "owner": "y-harin",
+      "task": "라이선스 목록 점검"
+    },
+    {
+      "evidence": "m0280",
+      "owner": "a-minjun",
+      "task": "권한 설정 감사"
+    },
+    {
+      "evidence": "m0295",
+      "owner": "x-jiho",
+      "task": "API 문서 검토"
+    },
+    {
+      "evidence": "m0308",
+      "owner": "b-seoyeon",
+      "task": "회의록 요약 공유"
+    }
+  ],
+  "decisions": [
+    {
+      "changed": true,
+      "current": "목요일",
+      "periods": [
+        {
+          "evidence": "m0012",
+          "valid_from_minute": 1000,
+          "valid_to_minute": 21000,
+          "value": "화요일"
+        },
+        {
+          "evidence": "m0301",
+          "valid_from_minute": 21000,
+          "valid_to_minute": null,
+          "value": "목요일"
+        }
+      ],
+      "topic": "배포 요일"
+    },
+    {
+      "changed": false,
+      "current": "오전 10시",
+      "periods": [
+        {
+          "evidence": "m0021",
+          "valid_from_minute": 1700,
+          "valid_to_minute": null,
+          "value": "오전 10시"
+        }
+      ],
+      "topic": "스탠드업 시간"
+    },
+    {
+      "changed": false,
+      "current": "1명",
+      "periods": [
+        {
+          "evidence": "m0033",
+          "valid_from_minute": 2400,
+          "valid_to_minute": null,
+          "value": "1명"
+        }
+      ],
+      "topic": "코드 리뷰 최소 승인 수"
+    },
+    {
+      "changed": true,
+      "current": "화상으로",
+      "periods": [
+        {
+          "evidence": "m0043",
+          "valid_from_minute": 3100,
+          "valid_to_minute": 23250,
+          "value": "문서로"
+        },
+        {
+          "evidence": "m0331",
+          "valid_from_minute": 23250,
+          "valid_to_minute": null,
+          "value": "화상으로"
+        }
+      ],
+      "topic": "주간 회고 진행 방식"
+    },
+    {
+      "changed": false,
+      "current": "2주",
+      "periods": [
+        {
+          "evidence": "m0052",
+          "valid_from_minute": 3800,
+          "valid_to_minute": null,
+          "value": "2주"
+        }
+      ],
+      "topic": "스프린트 길이"
+    },
+    {
+      "changed": false,
+      "current": "release/next",
+      "periods": [
+        {
+          "evidence": "m0063",
+          "valid_from_minute": 4500,
+          "valid_to_minute": null,
+          "value": "release/next"
+        }
+      ],
+      "topic": "릴리스 브랜치 이름"
+    },
+    {
+      "changed": true,
+      "current": "격주",
+      "periods": [
+        {
+          "evidence": "m0073",
+          "valid_from_minute": 5200,
+          "valid_to_minute": 25500,
+          "value": "주 1회"
+        },
+        {
+          "evidence": "m0357",
+          "valid_from_minute": 25500,
+          "valid_to_minute": null,
+          "value": "격주"
+        }
+      ],
+      "topic": "장애 대응 당번 교대 주기"
+    },
+    {
+      "changed": false,
+      "current": "수요일",
+      "periods": [
+        {
+          "evidence": "m0082",
+          "valid_from_minute": 5900,
+          "valid_to_minute": null,
+          "value": "수요일"
+        }
+      ],
+      "topic": "디자인 리뷰 요일"
+    },
+    {
+      "changed": false,
+      "current": "30일",
+      "periods": [
+        {
+          "evidence": "m0094",
+          "valid_from_minute": 6600,
+          "valid_to_minute": null,
+          "value": "30일"
+        }
+      ],
+      "topic": "로그 보관 기간"
+    },
+    {
+      "changed": true,
+      "current": "매일 새벽",
+      "periods": [
+        {
+          "evidence": "m0104",
+          "valid_from_minute": 7300,
+          "valid_to_minute": 27750,
+          "value": "매주 월요일"
+        },
+        {
+          "evidence": "m0384",
+          "valid_from_minute": 27750,
+          "valid_to_minute": null,
+          "value": "매일 새벽"
+        }
+      ],
+      "topic": "스테이징 초기화 주기"
+    },
+    {
+      "changed": false,
+      "current": "노션",
+      "periods": [
+        {
+          "evidence": "m0116",
+          "valid_from_minute": 8000,
+          "valid_to_minute": null,
+          "value": "노션"
+        }
+      ],
+      "topic": "사내 위키 도구"
+    },
+    {
+      "changed": false,
+      "current": "24시간",
+      "periods": [
+        {
+          "evidence": "m0126",
+          "valid_from_minute": 8700,
+          "valid_to_minute": null,
+          "value": "24시간"
+        }
+      ],
+      "topic": "고객 문의 1차 응답 목표"
+    },
+    {
+      "changed": true,
+      "current": "iOS 17",
+      "periods": [
+        {
+          "evidence": "m0135",
+          "valid_from_minute": 9400,
+          "valid_to_minute": 30000,
+          "value": "iOS 16"
+        },
+        {
+          "evidence": "m0395",
+          "valid_from_minute": 30000,
+          "valid_to_minute": null,
+          "value": "iOS 17"
+        }
+      ],
+      "topic": "모바일 최소 지원 버전"
+    },
+    {
+      "changed": false,
+      "current": "20분",
+      "periods": [
+        {
+          "evidence": "m0145",
+          "valid_from_minute": 10100,
+          "valid_to_minute": null,
+          "value": "20분"
+        }
+      ],
+      "topic": "CI 타임아웃"
+    },
+    {
+      "changed": false,
+      "current": "팀장이 지정",
+      "periods": [
+        {
+          "evidence": "m0158",
+          "valid_from_minute": 10800,
+          "valid_to_minute": null,
+          "value": "팀장이 지정"
+        }
+      ],
+      "topic": "온보딩 버디 배정"
+    },
+    {
+      "changed": true,
+      "current": "새벽 5시",
+      "periods": [
+        {
+          "evidence": "m0166",
+          "valid_from_minute": 11500,
+          "valid_to_minute": 32250,
+          "value": "새벽 3시"
+        },
+        {
+          "evidence": "m0396",
+          "valid_from_minute": 32250,
+          "valid_to_minute": null,
+          "value": "새벽 5시"
+        }
+      ],
+      "topic": "정기 백업 시각"
+    },
+    {
+      "changed": false,
+      "current": "허용",
+      "periods": [
+        {
+          "evidence": "m0178",
+          "valid_from_minute": 12200,
+          "valid_to_minute": null,
+          "value": "허용"
+        }
+      ],
+      "topic": "점심 회의 허용"
+    },
+    {
+      "changed": false,
+      "current": "분기마다",
+      "periods": [
+        {
+          "evidence": "m0187",
+          "valid_from_minute": 12900,
+          "valid_to_minute": null,
+          "value": "분기마다"
+        }
+      ],
+      "topic": "피처 플래그 정리 주기"
+    },
+    {
+      "changed": true,
+      "current": "300줄",
+      "periods": [
+        {
+          "evidence": "m0197",
+          "valid_from_minute": 13600,
+          "valid_to_minute": 34500,
+          "value": "500줄"
+        },
+        {
+          "evidence": "m0397",
+          "valid_from_minute": 34500,
+          "valid_to_minute": null,
+          "value": "300줄"
+        }
+      ],
+      "topic": "PR 크기 상한"
+    },
+    {
+      "changed": false,
+      "current": "한국어",
+      "periods": [
+        {
+          "evidence": "m0207",
+          "valid_from_minute": 14300,
+          "valid_to_minute": null,
+          "value": "한국어"
+        }
+      ],
+      "topic": "문서 언어"
+    },
+    {
+      "changed": false,
+      "current": "반기",
+      "periods": [
+        {
+          "evidence": "m0218",
+          "valid_from_minute": 15000,
+          "valid_to_minute": null,
+          "value": "반기"
+        }
+      ],
+      "topic": "보안 점검 주기"
+    },
+    {
+      "changed": true,
+      "current": "꺼짐",
+      "periods": [
+        {
+          "evidence": "m0227",
+          "valid_from_minute": 15700,
+          "valid_to_minute": 36750,
+          "value": "켜짐"
+        },
+        {
+          "evidence": "m0398",
+          "valid_from_minute": 36750,
+          "valid_to_minute": null,
+          "value": "꺼짐"
+        }
+      ],
+      "topic": "알림 소리 기본값"
+    },
+    {
+      "changed": false,
+      "current": "커뮤니티",
+      "periods": [
+        {
+          "evidence": "m0237",
+          "valid_from_minute": 16400,
+          "valid_to_minute": null,
+          "value": "커뮤니티"
+        }
+      ],
+      "topic": "베타 테스터 모집 채널"
+    },
+    {
+      "changed": false,
+      "current": "센트리",
+      "periods": [
+        {
+          "evidence": "m0248",
+          "valid_from_minute": 17100,
+          "valid_to_minute": null,
+          "value": "센트리"
+        }
+      ],
+      "topic": "에러 리포트 도구"
+    },
+    {
+      "changed": true,
+      "current": "1주 전",
+      "periods": [
+        {
+          "evidence": "m0257",
+          "valid_from_minute": 17800,
+          "valid_to_minute": 39000,
+          "value": "3일 전"
+        },
+        {
+          "evidence": "m0399",
+          "valid_from_minute": 39000,
+          "valid_to_minute": null,
+          "value": "1주 전"
+        }
+      ],
+      "topic": "휴가 신청 마감"
+    },
+    {
+      "changed": false,
+      "current": "공지 채널",
+      "periods": [
+        {
+          "evidence": "m0267",
+          "valid_from_minute": 18500,
+          "valid_to_minute": null,
+          "value": "공지 채널"
+        }
+      ],
+      "topic": "월간 리포트 담당 채널"
+    },
+    {
+      "changed": false,
+      "current": "70퍼센트",
+      "periods": [
+        {
+          "evidence": "m0276",
+          "valid_from_minute": 19200,
+          "valid_to_minute": null,
+          "value": "70퍼센트"
+        }
+      ],
+      "topic": "테스트 커버리지 목표"
+    },
+    {
+      "changed": true,
+      "current": "헤더에",
+      "periods": [
+        {
+          "evidence": "m0286",
+          "valid_from_minute": 19900,
+          "valid_to_minute": 41250,
+          "value": "URL 경로에"
+        },
+        {
+          "evidence": "m0400",
+          "valid_from_minute": 41250,
+          "valid_to_minute": null,
+          "value": "헤더에"
+        }
+      ],
+      "topic": "API 버전 정책"
+    },
+    {
+      "changed": false,
+      "current": "월 1회",
+      "periods": [
+        {
+          "evidence": "m0297",
+          "valid_from_minute": 20600,
+          "valid_to_minute": null,
+          "value": "월 1회"
+        }
+      ],
+      "topic": "데모 데이 주기"
+    },
+    {
+      "changed": false,
+      "current": "반년 뒤",
+      "periods": [
+        {
+          "evidence": "m0305",
+          "valid_from_minute": 21300,
+          "valid_to_minute": null,
+          "value": "반년 뒤"
+        }
+      ],
+      "topic": "아카이브 채널 정리"
+    }
+  ],
+  "leak": {
+    "assertions": [
+      {
+        "id": "z_sees_no_hr",
+        "rule": "Z (not in #hr) gets 0 hr canaries from browser, search and receipts"
+      },
+      {
+        "id": "x_sees_hr",
+        "rule": "X (member of #hr) does see the hr canaries (positive control)"
+      },
+      {
+        "id": "left_member_sees_none",
+        "rule": "after X's left_at is set, X gets 0 hr canaries"
+      },
+      {
+        "id": "deleted_source_hidden",
+        "rule": "after the source message is deleted, no surface returns its canary"
+      },
+      {
+        "id": "general_call_excludes_hr",
+        "rule": "X calling the agent in #general: no hr/dm text in the answer context"
+      },
+      {
+        "id": "dm_context_has_dm_fact",
+        "rule": "X's DM with the agent does carry the DM fact, and Y never sees it"
+      },
+      {
+        "id": "no_cross_channel_text",
+        "rule": "for every member and channel, context holds no canary from another channel"
+      },
+      {
+        "id": "public_control_visible",
+        "rule": "Z sees the public #general controls (a backend returning nothing must not pass)"
+      }
+    ],
+    "canaries": [
+      {
+        "channel": "hr",
+        "in_thread": false,
+        "message": "m0041",
+        "readable_by": [
+          "x-jiho",
+          "y-harin"
+        ],
+        "token": "청록고래"
+      },
+      {
+        "channel": "hr",
+        "in_thread": false,
+        "message": "m0077",
+        "readable_by": [
+          "x-jiho",
+          "y-harin"
+        ],
+        "token": "보라수달"
+      },
+      {
+        "channel": "hr",
+        "in_thread": false,
+        "message": "m0117",
+        "readable_by": [
+          "x-jiho",
+          "y-harin"
+        ],
+        "token": "주황여우"
+      },
+      {
+        "channel": "hr",
+        "in_thread": false,
+        "message": "m0152",
+        "readable_by": [
+          "x-jiho",
+          "y-harin"
+        ],
+        "token": "남색부엉이"
+      },
+      {
+        "channel": "hr",
+        "in_thread": false,
+        "message": "m0189",
+        "readable_by": [
+          "x-jiho",
+          "y-harin"
+        ],
+        "token": "연두사슴"
+      },
+      {
+        "channel": "hr",
+        "in_thread": true,
+        "message": "m0224",
+        "readable_by": [
+          "x-jiho",
+          "y-harin"
+        ],
+        "token": "분홍펭귄"
+      },
+      {
+        "channel": "dm-x-agent",
+        "in_thread": false,
+        "message": "m0056",
+        "readable_by": [
+          "x-jiho",
+          "kim-intern"
+        ],
+        "token": "은빛여우"
+      },
+      {
+        "channel": "dm-x-agent",
+        "in_thread": false,
+        "message": "m0102",
+        "readable_by": [
+          "x-jiho",
+          "kim-intern"
+        ],
+        "token": "하늘고래"
+      },
+      {
+        "channel": "dm-x-agent",
+        "in_thread": false,
+        "message": "m0147",
+        "readable_by": [
+          "x-jiho",
+          "kim-intern"
+        ],
+        "token": "초록곰"
+      }
+    ],
+    "controls": [
+      {
+        "channel": "general",
+        "message": "m0084",
+        "token": "공개별빛"
+      },
+      {
+        "channel": "general",
+        "message": "m0143",
+        "token": "공개모래"
+      }
+    ]
+  },
+  "members": [
+    "a-minjun",
+    "b-seoyeon",
+    "x-jiho",
+    "y-harin",
+    "z-doyun",
+    "kim-intern",
+    "deploy-bot"
+  ],
+  "meta": {
+    "bless": "MEMORY_EVAL_BLESS=1 cargo test -p momo-agent --test memory_eval",
+    "corpus_fingerprint": "fnv1a64:a7dbea1ecd3bc36e",
+    "generator": "server-rust/crates/momo-agent/tests/eval_kit/corpus.rs",
+    "message_count": 400,
+    "seed": "0x4d454d3000003160",
+    "synthetic_only": true
+  },
+  "must_not_store": {
+    "agent_replies_as_evidence": [
+      "m0023",
+      "m0096",
+      "m0172",
+      "m0243",
+      "m0312",
+      "m0372"
+    ],
+    "bot_output_as_evidence": [
+      "m0010",
+      "m0031",
+      "m0049",
+      "m0071",
+      "m0091",
+      "m0113",
+      "m0133",
+      "m0155",
+      "m0175",
+      "m0195",
+      "m0216",
+      "m0234",
+      "m0256",
+      "m0274",
+      "m0292",
+      "m0315",
+      "m0333",
+      "m0349",
+      "m0365",
+      "m0380"
+    ],
+    "secret_shaped": [
+      "m0028",
+      "m0069",
+      "m0112",
+      "m0157",
+      "m0199",
+      "m0240",
+      "m0281",
+      "m0321"
+    ]
+  },
+  "queries": [
+    {
+      "expected": "목요일",
+      "text": "지금 배포 요일는?",
+      "topic": "배포 요일"
+    },
+    {
+      "expected": "오전 10시",
+      "text": "스탠드업 시간 지금 뭐로 했지?",
+      "topic": "스탠드업 시간"
+    },
+    {
+      "expected": "1명",
+      "text": "코드 리뷰 최소 승인 수, 현재 기준으로 알려줘",
+      "topic": "코드 리뷰 최소 승인 수"
+    },
+    {
+      "expected": "화상으로",
+      "text": "지금 주간 회고 진행 방식는?",
+      "topic": "주간 회고 진행 방식"
+    },
+    {
+      "expected": "2주",
+      "text": "스프린트 길이 지금 뭐로 했지?",
+      "topic": "스프린트 길이"
+    },
+    {
+      "expected": "release/next",
+      "text": "릴리스 브랜치 이름, 현재 기준으로 알려줘",
+      "topic": "릴리스 브랜치 이름"
+    },
+    {
+      "expected": "격주",
+      "text": "지금 장애 대응 당번 교대 주기는?",
+      "topic": "장애 대응 당번 교대 주기"
+    },
+    {
+      "expected": "수요일",
+      "text": "디자인 리뷰 요일 지금 뭐로 했지?",
+      "topic": "디자인 리뷰 요일"
+    },
+    {
+      "expected": "30일",
+      "text": "로그 보관 기간, 현재 기준으로 알려줘",
+      "topic": "로그 보관 기간"
+    },
+    {
+      "expected": "매일 새벽",
+      "text": "지금 스테이징 초기화 주기는?",
+      "topic": "스테이징 초기화 주기"
+    },
+    {
+      "expected": "노션",
+      "text": "사내 위키 도구 지금 뭐로 했지?",
+      "topic": "사내 위키 도구"
+    },
+    {
+      "expected": "24시간",
+      "text": "고객 문의 1차 응답 목표, 현재 기준으로 알려줘",
+      "topic": "고객 문의 1차 응답 목표"
+    },
+    {
+      "expected": "iOS 17",
+      "text": "지금 모바일 최소 지원 버전는?",
+      "topic": "모바일 최소 지원 버전"
+    },
+    {
+      "expected": "20분",
+      "text": "CI 타임아웃 지금 뭐로 했지?",
+      "topic": "CI 타임아웃"
+    },
+    {
+      "expected": "팀장이 지정",
+      "text": "온보딩 버디 배정, 현재 기준으로 알려줘",
+      "topic": "온보딩 버디 배정"
+    },
+    {
+      "expected": "새벽 5시",
+      "text": "지금 정기 백업 시각는?",
+      "topic": "정기 백업 시각"
+    },
+    {
+      "expected": "허용",
+      "text": "점심 회의 허용 지금 뭐로 했지?",
+      "topic": "점심 회의 허용"
+    },
+    {
+      "expected": "분기마다",
+      "text": "피처 플래그 정리 주기, 현재 기준으로 알려줘",
+      "topic": "피처 플래그 정리 주기"
+    },
+    {
+      "expected": "300줄",
+      "text": "지금 PR 크기 상한는?",
+      "topic": "PR 크기 상한"
+    },
+    {
+      "expected": "한국어",
+      "text": "문서 언어 지금 뭐로 했지?",
+      "topic": "문서 언어"
+    },
+    {
+      "expected": "반기",
+      "text": "보안 점검 주기, 현재 기준으로 알려줘",
+      "topic": "보안 점검 주기"
+    },
+    {
+      "expected": "꺼짐",
+      "text": "지금 알림 소리 기본값는?",
+      "topic": "알림 소리 기본값"
+    },
+    {
+      "expected": "커뮤니티",
+      "text": "베타 테스터 모집 채널 지금 뭐로 했지?",
+      "topic": "베타 테스터 모집 채널"
+    },
+    {
+      "expected": "센트리",
+      "text": "에러 리포트 도구, 현재 기준으로 알려줘",
+      "topic": "에러 리포트 도구"
+    },
+    {
+      "expected": "1주 전",
+      "text": "지금 휴가 신청 마감는?",
+      "topic": "휴가 신청 마감"
+    },
+    {
+      "expected": "공지 채널",
+      "text": "월간 리포트 담당 채널 지금 뭐로 했지?",
+      "topic": "월간 리포트 담당 채널"
+    },
+    {
+      "expected": "70퍼센트",
+      "text": "테스트 커버리지 목표, 현재 기준으로 알려줘",
+      "topic": "테스트 커버리지 목표"
+    },
+    {
+      "expected": "헤더에",
+      "text": "지금 API 버전 정책는?",
+      "topic": "API 버전 정책"
+    },
+    {
+      "expected": "월 1회",
+      "text": "데모 데이 주기 지금 뭐로 했지?",
+      "topic": "데모 데이 주기"
+    },
+    {
+      "expected": "반년 뒤",
+      "text": "아카이브 채널 정리, 현재 기준으로 알려줘",
+      "topic": "아카이브 채널 정리"
+    }
+  ],
+  "thresholds": {
+    "changed_decision_timeline_closed": 1.0,
+    "current_decision_accuracy_min": 0.9,
+    "korean_search_fixture": "owned by #3159 (50 query pairs); not duplicated here",
+    "korean_search_recall_at_10_min": 0.8,
+    "leaks": 0,
+    "provenance_exists": 1.0,
+    "provenance_supported_min": 0.95
+  }
+}
