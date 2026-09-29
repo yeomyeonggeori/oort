@@ -28,7 +28,7 @@
 --    (지우려면 편집이 아니라 잊기다: 사슬 전체를 지운다.)
 --  * 근거는 옛 항목 것을 그대로 옮긴다(created_at 까지 — 읽기 규칙의 「근거 뒤 수정」 비교가 느슨해지지
 --    않게). 편집자가 그 근거를 전부 읽을 수 있는지는 mem_item_readable_by 가 이미 확인했다(저장 채널·모든
---    근거 채널·메시지 생존). 락 순서는 mem_add_item 과 같다: 근거 메시지 행 FOR KEY SHARE → 채널 advisory.
+--    근거 채널·메시지 생존). mem_item 행 FOR UPDATE 를 먼저 잡고, 그다음 mem_add_item 과 같은 순서(근거 메시지 행 FOR KEY SHARE → 채널 advisory 공유 잠금)로 잡는다 — 뒤의 둘은 공유 모드라 mem_add_item 과 서로 막지 않는다.
 --  * 새 본문도 mem_add_item 과 같은 마지막 방어선을 지난다: 1..600자, 시크릿 모양 거부, content_hash 같은 식.
 --  * 이벤트: 새 행 'edited'({supersedes}), 옛 행 'superseded'({superseded_by}). 본문·발췌 없음(id·종류만).
 --
