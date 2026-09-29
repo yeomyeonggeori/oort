@@ -292,6 +292,15 @@ pub async fn get_serving_in_tx(
     .bind(run_id)
     .fetch_optional(&mut *conn)
     .await?;
+    // #3163 F1: a receipt that lists nothing exists only to carry the requester's withheld
+    // count. To anyone else its very existence would leak one bit ("something was withheld"),
+    // so a non-requester gets the same 404 as "no receipt".
+    let row = row.filter(|row| {
+        let withheld: Option<i32> = row.try_get("withheld_count").ok().flatten();
+        let digests: Vec<Uuid> = row.try_get("digest_ids").unwrap_or_default();
+        let items: Vec<Uuid> = row.try_get("item_ids").unwrap_or_default();
+        withheld.is_some() || !digests.is_empty() || !items.is_empty()
+    });
     row.map(|row| {
         Ok(MemServing {
             run_id: row.try_get("run_id")?,

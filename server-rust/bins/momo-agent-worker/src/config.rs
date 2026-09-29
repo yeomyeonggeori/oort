@@ -117,6 +117,165 @@ pub struct WorkerConfig {
     /// alternative to parsing an unexpected fence is printing raw JSON into a
     /// channel — worse than the card the operator declined.
     pub report_protocol_enabled: bool,
+    /// #3162 — the team-memory summary loop (`MEMORY_*` keys).
+    pub memory: MemoryConfig,
+}
+
+/// The team-memory summary loop's knobs (#3162, ADR-0196 D10, plan §6.1/§6.6). Every default
+/// is the plan's number; an operator can only make the loop slower, cheaper or off.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemoryConfig {
+    /// `MEMORY_SUMMARY_ENABLED` (**on**; `0|false|no|off` turns it off). On means "runs when the
+    /// team 「기본 AI」 summary row resolves" — with no row it records a visible
+    /// `mem.summary.unconfigured` audit row and calls no model.
+    pub enabled: bool,
+    /// `MEMORY_SUMMARY_POLL_SECONDS` (60) — how often a sweep looks for work.
+    pub poll_interval: Duration,
+    /// `MEMORY_WINDOW_MIN_MESSAGES` (40) — new top-level messages that trigger a window.
+    pub window_min_messages: i64,
+    /// `MEMORY_WINDOW_IDLE_MIN_MESSAGES` (5) and `MEMORY_WINDOW_IDLE_SECONDS` (1800) — a smaller
+    /// pile that has gone quiet.
+    pub window_idle_min_messages: i64,
+    pub window_idle_seconds: i64,
+    /// `MEMORY_WINDOW_MAX_MESSAGES` (60) and `MEMORY_PROMPT_MAX_CHARS` (16000) bound one call.
+    pub window_max_messages: i64,
+    pub prompt_max_chars: usize,
+    /// Longest slice of one message put in the prompt (chars).
+    pub message_max_chars: usize,
+    /// `MEMORY_THREAD_MIN_REPLIES` (15) / `MEMORY_THREAD_IDLE_MIN_REPLIES` (3) — a thread's own trigger
+    /// (idle uses `window_idle_seconds`).
+    pub thread_min_replies: i64,
+    pub thread_idle_min_replies: i64,
+    /// `MEMORY_SUMMARY_MAX_OUTPUT_TOKENS` (800).
+    pub max_output_tokens: i32,
+    /// `MEMORY_LEASE_SECONDS` (300) — a channel lease; renewed before every model call.
+    pub lease_seconds: f64,
+    /// `MEMORY_DAILY_TOKEN_CAP` (300000) — used when the workspace set no `daily_token_cap`.
+    pub daily_token_cap: i64,
+    /// `MEMORY_BACKFILL_DAYS` (14) — a never-summarised channel starts this far back.
+    pub backfill_days: i32,
+    /// `MEMORY_ROLLUP_DAYS` (8) / `MEMORY_ROLLUP_WEEKS` (5) / `MEMORY_ROLLUP_HOUR` (4) — how far back a
+    /// day/week rollup is looked for, and the local hour after which a finished day is rolled up.
+    pub rollup_days: i64,
+    pub rollup_weeks: i64,
+    pub rollup_hour: i64,
+    /// `MEMORY_WINDOWS_PER_CHANNEL` (3) — windows one channel gets per sweep (a backlog drains
+    /// over several sweeps instead of monopolising the loop).
+    pub windows_per_channel: usize,
+    /// `MEMORY_APPLY_RETRIES` (3) — re-reads after 40001/23503 before leaving it to the next sweep.
+    pub apply_retries: usize,
+    /// `MEMORY_REGEN_MIN_INTERVAL_SECONDS` (900) — a stale digest is regenerated only when it
+    /// is at least this old, so repeated edits cannot burn the workspace token cap.
+    pub regen_min_interval_seconds: i32,
+    /// `MEMORY_MAX_CHANNELS` (2000) — channels one sweep looks at.
+    pub max_channels: i64,
+    /// `MEMORY_SERVE_ENABLED` (**on**; `0|false|no|off` turns it off) — put eligible summaries in
+    /// an agent turn's context (#3163). Independent of the summary loop: turning the loop off
+    /// does not stop already-written summaries from being served (the workspace / channel /
+    /// personal switches do that).
+    pub serve_enabled: bool,
+    /// `MEMORY_SERVE_BUDGET_CHARS` (3000) — the memory block's own budget, apart from the
+    /// conversation window's `max_context_chars`. It counts the whole rendered block (frame,
+    /// labels, bodies). ADR-0196 D7 sets 3,000 for the summary section; the item and profile
+    /// sections (M2) get their own.
+    pub serve_budget_chars: usize,
+    /// `MEMORY_SERVE_MAX_DIGESTS` (12) — candidates the database returns per turn.
+    pub serve_max_digests: i32,
+    /// `MEMORY_SERVE_TIMEOUT_MS` (3000) — the whole serving step (read + receipt). Past it the
+    /// reply goes out without memory; a slow database never delays an answer beyond this.
+    pub serve_timeout: Duration,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> MemoryConfig {
+        MemoryConfig {
+            enabled: true,
+            poll_interval: Duration::from_secs(60),
+            window_min_messages: 40,
+            window_idle_min_messages: 5,
+            window_idle_seconds: 30 * 60,
+            window_max_messages: 60,
+            prompt_max_chars: 16_000,
+            message_max_chars: 1_000,
+            thread_min_replies: 15,
+            thread_idle_min_replies: 3,
+            max_output_tokens: 800,
+            lease_seconds: 300.0,
+            daily_token_cap: 300_000,
+            backfill_days: 14,
+            rollup_days: 8,
+            rollup_weeks: 5,
+            rollup_hour: 4,
+            windows_per_channel: 3,
+            apply_retries: 3,
+            regen_min_interval_seconds: 900,
+            max_channels: 2_000,
+            serve_enabled: true,
+            serve_budget_chars: 3_000,
+            serve_max_digests: 12,
+            serve_timeout: Duration::from_millis(3_000),
+        }
+    }
+}
+
+impl MemoryConfig {
+    pub fn from_env() -> Result<MemoryConfig, ConfigError> {
+        let d = MemoryConfig::default();
+        Ok(MemoryConfig {
+            enabled: report_protocol_enabled(env("MEMORY_SUMMARY_ENABLED").as_deref()),
+            poll_interval: Duration::from_secs(
+                env_number("MEMORY_SUMMARY_POLL_SECONDS", d.poll_interval.as_secs())?.max(1),
+            ),
+            window_min_messages: env_number("MEMORY_WINDOW_MIN_MESSAGES", d.window_min_messages)?
+                .max(1),
+            window_idle_min_messages: env_number(
+                "MEMORY_WINDOW_IDLE_MIN_MESSAGES",
+                d.window_idle_min_messages,
+            )?
+            .max(1),
+            window_idle_seconds: env_number("MEMORY_WINDOW_IDLE_SECONDS", d.window_idle_seconds)?
+                .max(1),
+            window_max_messages: env_number("MEMORY_WINDOW_MAX_MESSAGES", d.window_max_messages)?
+                .clamp(2, 200),
+            prompt_max_chars: env_number("MEMORY_PROMPT_MAX_CHARS", d.prompt_max_chars)?.max(500),
+            message_max_chars: d.message_max_chars,
+            thread_min_replies: env_number("MEMORY_THREAD_MIN_REPLIES", d.thread_min_replies)?
+                .max(1),
+            thread_idle_min_replies: env_number(
+                "MEMORY_THREAD_IDLE_MIN_REPLIES",
+                d.thread_idle_min_replies,
+            )?
+            .max(1),
+            max_output_tokens: env_number("MEMORY_SUMMARY_MAX_OUTPUT_TOKENS", d.max_output_tokens)?
+                .max(1),
+            lease_seconds: env_number("MEMORY_LEASE_SECONDS", d.lease_seconds)?.max(5.0),
+            daily_token_cap: env_number("MEMORY_DAILY_TOKEN_CAP", d.daily_token_cap)?.max(0),
+            backfill_days: env_number("MEMORY_BACKFILL_DAYS", d.backfill_days)?.max(1),
+            rollup_days: env_number("MEMORY_ROLLUP_DAYS", d.rollup_days)?.clamp(1, 60),
+            rollup_weeks: env_number("MEMORY_ROLLUP_WEEKS", d.rollup_weeks)?.clamp(1, 26),
+            rollup_hour: env_number("MEMORY_ROLLUP_HOUR", d.rollup_hour)?.clamp(0, 23),
+            windows_per_channel: env_number("MEMORY_WINDOWS_PER_CHANNEL", d.windows_per_channel)?
+                .max(1),
+            apply_retries: env_number("MEMORY_APPLY_RETRIES", d.apply_retries)?,
+            regen_min_interval_seconds: env_number(
+                "MEMORY_REGEN_MIN_INTERVAL_SECONDS",
+                d.regen_min_interval_seconds,
+            )?,
+            max_channels: env_number("MEMORY_MAX_CHANNELS", d.max_channels)?.max(1),
+            serve_enabled: report_protocol_enabled(env("MEMORY_SERVE_ENABLED").as_deref()),
+            serve_budget_chars: env_number("MEMORY_SERVE_BUDGET_CHARS", d.serve_budget_chars)?
+                .clamp(200, 20_000),
+            serve_max_digests: env_number("MEMORY_SERVE_MAX_DIGESTS", d.serve_max_digests)?
+                .clamp(1, 50),
+            serve_timeout: Duration::from_millis(
+                env_number(
+                    "MEMORY_SERVE_TIMEOUT_MS",
+                    d.serve_timeout.as_millis() as u64,
+                )?
+                .clamp(200, 30_000),
+            ),
+        })
+    }
 }
 
 /// Real UTC offsets run from -12:00 to +14:00.
@@ -224,6 +383,7 @@ impl WorkerConfig {
             report_protocol_enabled: report_protocol_enabled(
                 env("AGENT_REPORT_PROTOCOL_ENABLED").as_deref(),
             ),
+            memory: MemoryConfig::from_env()?,
         })
     }
 
@@ -249,6 +409,7 @@ impl WorkerConfig {
             utc_offset_minutes: 540,
             egress: momo_settings::EgressPolicy::default(),
             report_protocol_enabled: true,
+            memory: MemoryConfig::default(),
         }
     }
 

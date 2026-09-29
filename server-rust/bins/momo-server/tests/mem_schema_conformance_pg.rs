@@ -2337,6 +2337,12 @@ fn migration_path() -> PathBuf {
         .join("../../../server/Migrations/101_mem_lockdown_hardening.sql")
 }
 
+/// The allow-list self-check lives in the newest migration that adds a definer function: 103
+/// (#3163). 101 and 102 are merged and stay untouched (#3191 M-6); each later list is a superset.
+fn worker_migration_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../server/Migrations/103_mem_serving.sql")
+}
+
 /// M-1: the lock block is one text in three files. Compared byte for byte (stronger than a
 /// hash); the digest is printed so the PR can quote it.
 #[test]
@@ -2459,15 +2465,27 @@ async fn lock_block_also_locks_views_and_materialized_views() {
 }
 
 /// L-1: the SECURITY DEFINER functions owned by mem_definer are exactly this list.
-const DEFINER_ALLOW_LIST: [&str; 8] = [
+const DEFINER_ALLOW_LIST: [&str; 20] = [
+    "mem_adjust_tokens",
     "mem_advance_cursor",
     "mem_apply_digest",
+    "mem_channel_eligible",
     "mem_channel_switch",
+    "mem_cursor_state",
     "mem_digest_audience_ok",
     "mem_digest_evidence_ok",
+    "mem_digest_index",
     "mem_digest_live",
     "mem_digest_rollup_inputs",
+    "mem_drop_digest",
+    "mem_message_changed",
     "mem_record_serving",
+    "mem_reserve_tokens",
+    "mem_serve_candidates",
+    "mem_serve_requester",
+    "mem_serving_of",
+    "mem_stale_digests",
+    "mem_token_budget",
 ];
 
 /// The `DO` block that starts at `marker`, up to (not including) `until` or the end of the file.
@@ -2498,10 +2516,10 @@ async fn security_definer_functions_owned_by_mem_definer_are_allow_listed() {
         owned,
         DEFINER_ALLOW_LIST.to_vec(),
         "a SECURITY DEFINER function owned by mem_definer must be added to the allow-list \
-         here and in 101_mem_lockdown_hardening.sql on purpose"
+         here and in 103_mem_serving.sql on purpose"
     );
     // The migration's own self-check passes on the good state ...
-    let check = tail_block(&migration_path(), "-- ── L-1", None);
+    let check = tail_block(&worker_migration_path(), "-- ── L-1", None);
     run_sql_text(&check).expect("allow-list check passes on the real state");
     // ... and fails, loudly, when a stranger function is owned by mem_definer (sabotage; the
     // single transaction rolls the rogue function back).

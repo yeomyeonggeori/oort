@@ -83,8 +83,10 @@ pub mod partial;
 pub mod payload;
 pub mod provider;
 pub mod responses;
+pub mod serving;
 pub mod sse;
 pub mod stream;
+pub mod summary;
 pub mod tool_exec;
 
 use std::future::Future;
@@ -396,6 +398,9 @@ pub struct AgentWorker {
     refresher: Arc<dyn TokenRefresher>,
     config: WorkerConfig,
     link_cache: ProviderLinkCache,
+    /// #3162 — the memory summary loop's process-local state (lease token, per-channel
+    /// memo, audit throttle). Nothing durable lives here.
+    summary: summary::SummaryState,
 }
 
 impl AgentWorker {
@@ -451,11 +456,18 @@ impl AgentWorker {
                 entry: Mutex::new(None),
                 ttl,
             },
+            summary: summary::SummaryState::new(),
         }
     }
 
     pub fn pool(&self) -> &PgPool {
         &self.pool
+    }
+
+    /// The memory summary loop's process-local state (lease token, memo). Exposed so the
+    /// conformance suite can start a sweep "as after a restart" and tell two workers apart.
+    pub fn summary_state(&self) -> &summary::SummaryState {
+        &self.summary
     }
 
     pub fn config(&self) -> &WorkerConfig {
@@ -732,6 +744,22 @@ impl AgentWorker {
         // (GC-8, #2949) — so the rule and the tool are offered together or not
         // at all.
         let momo_tools = payload.enabled_tools();
+        // #3163 — team memory. The database decides who asked and what may ride this answer;
+        // any error or timeout here yields `None` and the reply is built exactly as before.
+        let memory_block = serving::serve(
+            &self.pool,
+            &self.config.memory,
+            self.config.utc_offset_minutes,
+            job.workspace_id,
+            run_id,
+            payload.channel_id,
+            payload
+                .recent_messages
+                .iter()
+                .filter_map(|message| message.seq)
+                .min(),
+        )
+        .await;
         let assembled = assemble(
             &payload.recent_messages,
             payload.agent_member_id,
@@ -749,6 +777,7 @@ impl AgentWorker {
                 // byte rather than a turn carrying an emptied block.
                 report_protocol: self.config.report_protocol_block(),
                 card_suggest: momo_agent::card_suggest::card_suggest_directive(&momo_tools),
+                memory: memory_block.as_deref(),
             },
             self.config.max_context_chars,
         );
@@ -2861,6 +2890,20 @@ impl AgentWorker {
         } else {
             DefaultAiRole::TeamAgent
         };
+        self.resolve_default_ai_role(role, Some(run_id), head).await
+    }
+
+    /// The 「기본 AI」 row of `role` against the head transport — the part of
+    /// [`resolve_default_ai`](AgentWorker::resolve_default_ai) that has nothing to do with
+    /// an agent job, so the memory summary worker (#3162, role `summary`) shares the
+    /// label comparison, the chain-hop decrypt and the honest-failure shape instead of
+    /// re-deriving them. `NotApplicable` = no stored row for the role.
+    async fn resolve_default_ai_role(
+        &self,
+        role: DefaultAiRole,
+        run_id: Option<Uuid>,
+        head: &ResolvedTransport,
+    ) -> DefaultAiOutcome {
         let (rows, chain) = {
             let mut conn = match self.pool.acquire().await {
                 Ok(conn) => conn,
@@ -2924,7 +2967,7 @@ impl AgentWorker {
             // A hop whose key will not open is a link that is not there.
             return unresolved(Some(now));
         };
-        tracing::debug!(run_id = %run_id, position = row.link_position, "default ai row: chain hop");
+        tracing::debug!(run_id = ?run_id, position = row.link_position, "default ai row: chain hop");
         DefaultAiOutcome::Applied {
             hop_transport: Some(ResolvedTransport {
                 endpoint: ProviderEndpoint {
@@ -3300,8 +3343,22 @@ impl AgentWorker {
     // loop
     // -----------------------------------------------------------------------
 
-    /// Run until `shutdown` resolves: NOTIFY-driven drains with a poll fallback.
+    /// Run until `shutdown` resolves: NOTIFY-driven drains with a poll fallback, and — beside
+    /// them, on its own schedule — the memory summary loop (#3162).
+    ///
+    /// The two loops share this process (one `momo_worker` credential, one guarded HTTP
+    /// client, one provider-link cache) but never wait on each other: a summary sweep can
+    /// spend minutes in model calls and must not delay an agent's reply.
     pub async fn run(&self, shutdown: impl Future<Output = ()>) {
+        let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
+        let jobs = async {
+            self.run_jobs(shutdown).await;
+            let _ = stop_tx.send(true);
+        };
+        tokio::join!(jobs, self.run_summary_loop(stop_rx));
+    }
+
+    async fn run_jobs(&self, shutdown: impl Future<Output = ()>) {
         tracing::info!(
             poll_interval_ms = self.config.poll_interval.as_millis() as u64,
             claim_batch = self.config.claim_batch_size,
