@@ -53,17 +53,14 @@ export function SettingsToggleRow({
     <label
       htmlFor={testId}
       className={cn(
-        "flex min-w-0 items-start gap-3 border-b border-line p-3 last:border-b-0",
-        // 잠긴 행은 눌리는 행처럼 보이면 안 된다: 포인터·hover·눌림을 걷고 글자를
-        // 한 단계 물린다. 켜진 색조(checked)는 그대로 둔다(상태는 계속 읽혀야 한다).
-        disabled
-          ? cn("cursor-default text-ink-muted", checked && "bg-accent-soft")
-          : cn(
-              "cursor-pointer",
-              checked
-                ? "bg-accent-soft active:bg-surface-pressed"
-                : "hover:bg-surface-hover active:bg-surface-pressed"
-            )
+        "flex min-w-0 cursor-pointer items-start gap-3 border-b border-line p-3 last:border-b-0",
+        // 잠긴 행은 눌리는 행처럼 보이면 안 된다(design-review #3165 M-5): 안의 입력이
+        // disabled 이면 포인터·hover·눌림 채움을 걷고 글자를 한 단계 물린다. 켜진 색조는
+        // 그대로 둔다(상태는 계속 읽혀야 한다). 기존 분기 문자열은 건드리지 않고 덧붙인다.
+        "has-[:disabled]:cursor-default has-[:disabled]:text-ink-muted has-[:disabled]:hover:bg-transparent has-[:disabled]:active:bg-transparent",
+        checked
+          ? "bg-accent-soft active:bg-surface-pressed"
+          : "hover:bg-surface-hover active:bg-surface-pressed"
       )}
       data-state={checked ? "on" : "off"}
     >
@@ -79,10 +76,7 @@ export function SettingsToggleRow({
         data-testid={testId}
       />
       <span className="flex min-w-0 flex-col gap-px">
-        <span
-          id={nameId}
-          className={cn("text-body", disabled ? "text-ink-muted" : "text-ink")}
-        >
+        <span id={nameId} className="text-body text-inherit">
           {name}
         </span>
         <span id={descId} className="break-keep text-meta text-ink-muted">
