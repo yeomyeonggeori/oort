@@ -26,6 +26,11 @@ use uuid::Uuid;
 
 const VECTORS: &str = include_str!("../../../../docs/api/human-control-signing.vectors.json");
 const VECTORS_V2: &str = include_str!("../../../../docs/api/human-control-signing-v2.vectors.json");
+const VECTORS_V3: &str = include_str!("../../../../docs/api/human-control-signing-v3.vectors.json");
+
+/// A well-formed preview hash no vector preview has.
+const OTHER_PREVIEW_SHA256: &str =
+    "1111111111111111111111111111111111111111111111111111111111111111";
 
 fn doc() -> Value {
     serde_json::from_str(VECTORS).expect("vectors parse")
@@ -35,11 +40,16 @@ fn doc_v2() -> Value {
     serde_json::from_str(VECTORS_V2).expect("v2 vectors parse")
 }
 
+fn doc_v3() -> Value {
+    serde_json::from_str(VECTORS_V3).expect("v3 vectors parse")
+}
+
 /// The control schema a case is written in (`None` for endorse / revoke).
 fn schema_of(tc: &Value) -> Option<ControlSchema> {
     match s(tc, "schema") {
         "momo.human.control.v1" => Some(ControlSchema::V1),
         "momo.human.control.v2" => Some(ControlSchema::V2),
+        "momo.human.control.v3" => Some(ControlSchema::V3),
         _ => None,
     }
 }
@@ -83,6 +93,8 @@ fn content(c: &Value) -> ControlContent<'_> {
                 "session" => PermissionScope::Session,
                 x => panic!("scope {x}"),
             },
+            // v3 (#3118) cases carry the preview's hash.
+            preview_sha256: c["preview_sha256"].as_str(),
         },
         "bundle_manifest" => ControlContent::BundleManifest {
             manifest: &c["manifest"],
@@ -142,7 +154,7 @@ fn revoke(tc: &Value) -> DeviceRevoke {
 
 fn rebuild(tc: &Value) -> Vec<u8> {
     match s(tc, "schema") {
-        "momo.human.control.v1" | "momo.human.control.v2" => control(tc)
+        "momo.human.control.v1" | "momo.human.control.v2" | "momo.human.control.v3" => control(tc)
             .signed_bytes_as(schema_of(tc).unwrap())
             .expect("control bytes"),
         "momo.human.device_endorse.v1" => endorse(tc).signed_bytes().expect("endorse bytes"),
@@ -173,10 +185,11 @@ fn sigs(tc: &Value) -> Vec<Sig> {
         .collect()
 }
 
-/// v1 cases then v2 cases.
+/// v1 cases, then v2, then v3.
 fn cases() -> Vec<Value> {
     let mut all = doc()["cases"].as_array().expect("cases").clone();
     all.extend(doc_v2()["cases"].as_array().expect("v2 cases").clone());
+    all.extend(doc_v3()["cases"].as_array().expect("v3 cases").clone());
     all
 }
 
@@ -294,9 +307,11 @@ fn every_recorded_signature_verifies() {
         // The typed verifiers agree with the raw one.
         let x = &sigs(&tc)[0];
         match s(&tc, "schema") {
-            "momo.human.control.v1" | "momo.human.control.v2" => control(&tc)
-                .verify_as(schema_of(&tc).unwrap(), &x.key, &x.sig)
-                .map(|_| ()),
+            "momo.human.control.v1" | "momo.human.control.v2" | "momo.human.control.v3" => {
+                control(&tc)
+                    .verify_as(schema_of(&tc).unwrap(), &x.key, &x.sig)
+                    .map(|_| ())
+            }
             "momo.human.device_endorse.v1" => endorse(&tc).verify(&x.key, &x.sig).map(|_| ()),
             "momo.human.device_revoke.v2" => revoke(&tc)
                 .verify_v2(s(&tc["fields"], "target_public_key_b64"), &x.key, &x.sig)
@@ -305,7 +320,8 @@ fn every_recorded_signature_verifies() {
         }
         .expect("typed verify");
     }
-    assert_eq!(n, 24 + 21 + 3);
+    // v1 8 cases, v2 7 + revoke v2, v3 7 (#3118) — × 3 signers.
+    assert_eq!(n, 24 + 21 + 3 + 21);
 }
 
 /// What a verifier accepts ([`HumanControl::verify_any`]): every v2 statement;
@@ -346,6 +362,11 @@ fn verify_any_takes_v2_and_only_the_v1_kinds_that_mean_the_same() {
         for x in sigs(&tc) {
             let verdict = statement.verify_any(&x.key, &x.sig);
             match (schema, kind.as_str()) {
+                (ControlSchema::V3, _) => {
+                    let v = verdict.unwrap_or_else(|e| panic!("{name}: {e}"));
+                    assert_eq!(v.schema, ControlSchema::V3, "{name}");
+                    assert_eq!(v.signed_bytes, rebuild(&tc), "{name}");
+                }
                 (ControlSchema::V2, _) => {
                     let v = verdict.unwrap_or_else(|e| panic!("{name}: {e}"));
                     assert_eq!(v.schema, ControlSchema::V2, "{name}");
@@ -377,6 +398,136 @@ fn verify_any_takes_v2_and_only_the_v1_kinds_that_mean_the_same() {
             "control_host_register"
         ]
     );
+}
+
+/// #3118 (R2 H1): the v3 permission line is the hash of the preview the case
+/// carries — the same canonical form the host builds and the app recomputes
+/// (`momo_wire::permission_preview`, `permissionPreview.ts`) — and an allow
+/// signed over one preview proves nothing about another, nor does a v2 allow
+/// stand for a previewed request.
+#[test]
+fn a_v3_allow_is_bound_to_the_preview_it_names() {
+    use momo_wire::permission_preview::{preview_canonical_bytes, preview_sha256};
+    let v3 = doc_v3()["cases"].as_array().unwrap().clone();
+    let permissions: Vec<&Value> = v3
+        .iter()
+        .filter(|tc| s(&tc["content"], "kind") == "permission")
+        .collect();
+    assert_eq!(permissions.len(), 2);
+    for tc in &permissions {
+        let name = s(tc, "name");
+        let c = &tc["content"];
+        assert_eq!(
+            String::from_utf8(preview_canonical_bytes(&c["preview"]).unwrap()).unwrap(),
+            s(c, "preview_canonical"),
+            "{name}"
+        );
+        assert_eq!(
+            preview_sha256(&c["preview"]).unwrap(),
+            s(c, "preview_sha256"),
+            "{name}"
+        );
+        // The server swaps the preview: the host rebuilds with its own hash of
+        // what it relayed, and the person's signature is over another one.
+        let mut swapped = c["preview"].clone();
+        swapped["title"] = Value::from("Read README.md");
+        swapped["kind"] = Value::from("read");
+        let swapped_hash = preview_sha256(&swapped).unwrap();
+        let statement = control(tc);
+        let ControlContent::Permission {
+            request_event_id,
+            option_id,
+            option_kind,
+            scope,
+            ..
+        } = statement.content
+        else {
+            unreachable!()
+        };
+        for x in sigs(tc) {
+            assert!(statement.verify_any(&x.key, &x.sig).is_ok(), "{name}");
+            let other = HumanControl {
+                content: ControlContent::Permission {
+                    request_event_id,
+                    option_id,
+                    option_kind,
+                    scope,
+                    preview_sha256: Some(&swapped_hash),
+                },
+                ..statement.clone()
+            };
+            assert_eq!(
+                other.verify_any(&x.key, &x.sig),
+                Err(HumanSigningError::BadSignature),
+                "{name} / {}: an allow over one preview verified for another",
+                x.signer
+            );
+        }
+    }
+    // A v2 allow — the phone and desktop signers until they move to v3 — is
+    // not accepted for a request that has a preview.
+    let v2 = doc_v2()["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tc| s(tc, "name") == "control_v2_permission_session")
+        .unwrap()
+        .clone();
+    let legacy = control(&v2);
+    let ControlContent::Permission {
+        request_event_id,
+        option_id,
+        option_kind,
+        scope,
+        preview_sha256: None,
+    } = legacy.content
+    else {
+        panic!("a v2 case carries no preview");
+    };
+    let previewed = HumanControl {
+        content: ControlContent::Permission {
+            request_event_id,
+            option_id,
+            option_kind,
+            scope,
+            preview_sha256: Some(s(&permissions[1]["content"], "preview_sha256")),
+        },
+        ..legacy.clone()
+    };
+    for x in sigs(&v2) {
+        assert!(legacy.verify_any(&x.key, &x.sig).is_ok());
+        assert_eq!(
+            previewed.verify_any(&x.key, &x.sig),
+            Err(HumanSigningError::BadSignature),
+            "{}: a v2 allow stood for a previewed request",
+            x.signer
+        );
+    }
+}
+
+/// #3118: the core's copy of the v3 previews (the TS half of the preview hash,
+/// `packages/momo-core/.../permissionPreview.test.ts`) is exactly the vectors'.
+#[test]
+fn the_cores_preview_fixture_is_the_v3_vectors() {
+    let core: Value = serde_json::from_str(include_str!(
+        "../../../../packages/momo-core/src/features/workbench/__fixtures__/permission-preview.vectors.json"
+    ))
+    .unwrap();
+    let expected: Vec<Value> = doc_v3()["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|tc| s(&tc["content"], "kind") == "permission")
+        .map(|tc| {
+            serde_json::json!({
+                "name": tc["name"],
+                "preview": tc["content"]["preview"],
+                "preview_canonical": tc["content"]["preview_canonical"],
+                "preview_sha256": tc["content"]["preview_sha256"],
+            })
+        })
+        .collect();
+    assert_eq!(core["cases"].as_array().unwrap(), &expected);
 }
 
 /// Guard against a tool NFC-normalizing the vectors file: the NFC case must
@@ -425,8 +576,8 @@ fn every_line_is_load_bearing() {
         }
     }
     // v1: 6 controls × 13 + endorse 7 + revoke 6 = 91 lines; v2: 7 × 13 = 91
-    // + revoke v2 7. × 3 signers.
-    assert_eq!(checked, (91 + 91 + 7) * 3);
+    // + revoke v2 7; v3: 7 × 13 = 91. × 3 signers.
+    assert_eq!(checked, (91 + 91 + 7 + 91) * 3);
 }
 
 /// Changing any one structured input — including every content field — makes
@@ -453,7 +604,7 @@ fn every_structured_field_is_load_bearing() {
             }
         };
         match s(&tc, "schema") {
-            "momo.human.control.v1" | "momo.human.control.v2" => {
+            "momo.human.control.v1" | "momo.human.control.v2" | "momo.human.control.v3" => {
                 let schema = schema_of(&tc).unwrap();
                 let base = control(&tc);
                 let mut muts: Vec<(&str, HumanControl)> = vec![
@@ -596,7 +747,7 @@ fn every_structured_field_is_load_bearing() {
                             ),
                         ];
                         // v2 binds the tool and the channel (v1 does not encode them).
-                        if schema == ControlSchema::V2 {
+                        if schema != ControlSchema::V1 {
                             v.push((
                                 "tool",
                                 ControlContent::Spawn {
@@ -625,48 +776,69 @@ fn every_structured_field_is_load_bearing() {
                         option_id,
                         option_kind,
                         scope,
-                    } => vec![
-                        (
-                            "request_event_id",
-                            ControlContent::Permission {
-                                request_event_id: other,
-                                option_id,
-                                option_kind,
-                                scope: *scope,
-                            },
-                        ),
-                        (
-                            "option_id",
-                            ControlContent::Permission {
-                                request_event_id: *request_event_id,
-                                option_id: "reject-once",
-                                option_kind,
-                                scope: *scope,
-                            },
-                        ),
-                        (
-                            "option_kind",
-                            ControlContent::Permission {
-                                request_event_id: *request_event_id,
-                                option_id,
-                                option_kind: "allow_always",
-                                scope: *scope,
-                            },
-                        ),
-                        (
-                            "scope",
-                            ControlContent::Permission {
-                                request_event_id: *request_event_id,
-                                option_id,
-                                option_kind,
-                                scope: if *scope == PermissionScope::Once {
-                                    PermissionScope::Session
-                                } else {
-                                    PermissionScope::Once
+                        preview_sha256,
+                    } => {
+                        let mut v = vec![
+                            (
+                                "request_event_id",
+                                ControlContent::Permission {
+                                    request_event_id: other,
+                                    option_id,
+                                    option_kind,
+                                    scope: *scope,
+                                    preview_sha256: *preview_sha256,
                                 },
-                            },
-                        ),
-                    ],
+                            ),
+                            (
+                                "option_id",
+                                ControlContent::Permission {
+                                    request_event_id: *request_event_id,
+                                    option_id: "reject-once",
+                                    option_kind,
+                                    scope: *scope,
+                                    preview_sha256: *preview_sha256,
+                                },
+                            ),
+                            (
+                                "option_kind",
+                                ControlContent::Permission {
+                                    request_event_id: *request_event_id,
+                                    option_id,
+                                    option_kind: "allow_always",
+                                    scope: *scope,
+                                    preview_sha256: *preview_sha256,
+                                },
+                            ),
+                            (
+                                "scope",
+                                ControlContent::Permission {
+                                    request_event_id: *request_event_id,
+                                    option_id,
+                                    option_kind,
+                                    scope: if *scope == PermissionScope::Once {
+                                        PermissionScope::Session
+                                    } else {
+                                        PermissionScope::Once
+                                    },
+                                    preview_sha256: *preview_sha256,
+                                },
+                            ),
+                        ];
+                        // v3 (#3118): the preview line — another preview's hash.
+                        if preview_sha256.is_some() {
+                            v.push((
+                                "preview_sha256",
+                                ControlContent::Permission {
+                                    request_event_id: *request_event_id,
+                                    option_id,
+                                    option_kind,
+                                    scope: *scope,
+                                    preview_sha256: Some(OTHER_PREVIEW_SHA256),
+                                },
+                            ));
+                        }
+                        v
+                    }
                     ControlContent::BundleManifest { .. } => {
                         vec![(
                             "manifest",
@@ -888,9 +1060,11 @@ fn every_structured_field_is_load_bearing() {
     // (9+1) + host_register (8+2+1) + endorse 5 + revoke 5.
     // v2: input×2 (9+3 each) + spawn×2 (9+5 each: tool, channel_id) +
     // permission (9+4) + manifest (9+1) + host_register (8+2+1).
+    // v3: input (9+3) + spawn×2 (9+5 each) + permission×2 (9+5 each: the
+    // preview line too) + manifest (9+1) + host_register (8+2+1).
     assert_eq!(
         checked,
-        (24 + 12 + 13 + 10 + 11 + 5 + 5) + (24 + 28 + 13 + 10 + 11) + 7
+        (24 + 12 + 13 + 10 + 11 + 5 + 5) + (24 + 28 + 13 + 10 + 11) + 7 + (12 + 28 + 28 + 10 + 11)
     );
 }
 
@@ -937,7 +1111,7 @@ fn high_s_is_normalized_then_verified() {
             );
         }
     }
-    assert_eq!(high + low, 24 + 21 + 3);
+    assert_eq!(high + low, 24 + 21 + 3 + 21);
     eprintln!("recorded signatures: {high} high-s, {low} low-s (flipped variants cover both)");
 }
 

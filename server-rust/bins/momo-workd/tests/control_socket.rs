@@ -77,7 +77,9 @@ fn serve(path: &Path, policy: PeerPolicy) -> (tokio::task::JoinHandle<()>, Arc<N
         health: Arc::new(HostHealth::default()),
         stop: stop.clone(),
         trust: Arc::new(std::sync::Mutex::new(trust)),
-        human_signatures_required: false,
+        requirement: Arc::new(std::sync::Mutex::new(
+            momo_workd::signature_requirement::SignatureRequirement::off(),
+        )),
     };
     let task = tokio::spawn(socket.serve(identity, shared));
     (task, stop)

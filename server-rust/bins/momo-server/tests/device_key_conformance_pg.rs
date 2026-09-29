@@ -28,6 +28,9 @@
 //! | `a_reused_roots_key_is_mute_until_its_own_letter_moves_it` | **#3097** — skip the rebind letter's `verify`, drop the key's lineage check from `host_register` / the phone's endorser, or answer a dead-lineage key with `already_registered` |
 //! | `a_rebind_letter_is_single_use_and_only_ever_moves_a_dead_lineages_key` | **#3097** — drop the `LineageLive` refusal, or build the letter from anything but the caller's own sign-in |
 //! | `a_phone_key_moves_to_its_new_link_with_its_approval_and_logout_still_ends_it` | **#3097** — mint a new row (new id, no approval) on rebind, or let a root move into a linked session |
+//! | `h2_a_phone_key_is_registered_only_on_a_qr_linked_sign_in` | **#3119** — drop the register route's linked check, drop the endorse `linked_from_mac` check, match any consumed link of the member instead of the key's lineage, or any Mac key instead of the issuer's lineage |
+//! | `h2_a_pre_rule_phone_key_is_never_a_candidate_and_an_approved_one_is_marked` | **#3119** — drop the endorse `linked_session` check, or let an `ios` rebind leave a non-linked lineage |
+//! | `h2_a_phone_key_moves_only_from_a_link_to_a_link` | **#3119** — let an `ios` rebind land on a non-linked sign-in |
 //!
 //! `#[ignore]` — needs a real Postgres plus the runtime roles:
 //!
@@ -736,7 +739,7 @@ async fn a_mac_key_is_a_root_and_a_phone_key_cannot_instruct_until_endorsed() {
     let _lock = test_lock().await;
     let w = world().await;
     let mac = w.person().await;
-    let phone = w.person().await;
+    let phone = w.link_phone(&mac, "아이폰").await;
     let root = DeviceKeyPair::new("mac");
     let handset = DeviceKeyPair::new("phone");
 
@@ -796,10 +799,12 @@ async fn a_key_is_only_ever_the_callers_own() {
     let w = world().await;
     let mine = w.person().await;
     let theirs = w.other().await;
+    let my_phone = w.link_phone(&mine, "기기").await;
+    let their_handset = w.link_phone(&theirs, "기기").await;
     let root = DeviceKeyPair::new("mac");
     let handset = DeviceKeyPair::new("phone");
     let root_id = w.key(&mine, &root, "macos").await;
-    let phone_id = w.key(&mine, &handset, "ios").await;
+    let phone_id = w.key(&my_phone, &handset, "ios").await;
 
     // Naming another member in the body.
     let fresh = DeviceKeyPair::new("fresh");
@@ -815,7 +820,7 @@ async fn a_key_is_only_ever_the_callers_own() {
     assert_eq!(code(&body), Some("device_key_member_mismatch"));
 
     // Registering a key that is live under someone else.
-    let (status, body) = w.register_key(&theirs, &handset, "ios", "").await;
+    let (status, body) = w.register_key(&their_handset, &handset, "ios", "").await;
     assert_eq!(status, 409, "{body}");
     assert_eq!(code(&body), Some("device_key_already_registered"));
 
@@ -830,7 +835,7 @@ async fn a_key_is_only_ever_the_callers_own() {
     assert_eq!(status, 403, "{body}");
     assert_eq!(code(&body), Some("device_key_member_mismatch"));
     let their_phone = DeviceKeyPair::new("their phone");
-    let their_phone_id = w.key(&theirs, &their_phone, "ios").await;
+    let their_phone_id = w.key(&their_handset, &their_phone, "ios").await;
     let signature = w.endorsement(w.other_id, &root, root_id, &their_phone, "기기");
     let (status, body) = w
         .endorse(&theirs, their_phone_id, root_id, &signature)
@@ -851,10 +856,11 @@ async fn an_endorsement_verifies_against_the_stored_rows_only() {
     let _lock = test_lock().await;
     let w = world().await;
     let session = w.person().await;
+    let phone = w.link_phone(&session, "기기").await;
     let root = DeviceKeyPair::new("mac");
     let handset = DeviceKeyPair::new("phone");
     let root_id = w.key(&session, &root, "macos").await;
-    let phone_id = w.key(&session, &handset, "ios").await; // stored label 기기
+    let phone_id = w.key(&phone, &handset, "ios").await; // stored label 기기
 
     let expect_refused = |status: u16, body: &Value, want: &str| {
         assert_eq!(code(body), Some(want), "{status} {body}");
@@ -883,7 +889,7 @@ async fn an_endorsement_verifies_against_the_stored_rows_only() {
 
     // A phone is not a root, even an endorsed one.
     let second = DeviceKeyPair::new("second phone");
-    let second_id = w.key(&session, &second, "ios").await;
+    let second_id = w.key(&phone, &second, "ios").await;
     let signature = w.endorsement(w.person_id, &handset, phone_id, &second, "기기");
     let (status, body) = w.endorse(&session, second_id, phone_id, &signature).await;
     expect_refused(status, &body, "device_root_not_eligible");
@@ -916,7 +922,7 @@ async fn an_endorsement_verifies_against_the_stored_rows_only() {
     let lone_root = DeviceKeyPair::new("lone mac");
     let lone_root_id = w.key(&root_session, &lone_root, "macos").await;
     let third = DeviceKeyPair::new("third phone");
-    let third_id = w.key(&session, &third, "ios").await;
+    let third_id = w.key(&phone, &third, "ios").await;
     let signature = w.endorsement(w.person_id, &lone_root, lone_root_id, &third, "기기");
     let (status, _) = w
         .endorse(&session, third_id, lone_root_id, &signature)
@@ -933,7 +939,7 @@ async fn an_endorsement_verifies_against_the_stored_rows_only() {
         "an endorsement from a revoked root no longer counts"
     );
     let fourth = DeviceKeyPair::new("fourth phone");
-    let fourth_id = w.key(&session, &fourth, "ios").await;
+    let fourth_id = w.key(&phone, &fourth, "ios").await;
     let signature = w.endorsement(w.person_id, &lone_root, lone_root_id, &fourth, "기기");
     let (status, body) = w
         .endorse(&session, fourth_id, lone_root_id, &signature)
@@ -947,10 +953,11 @@ async fn a_signed_revocation_is_kept_and_a_forged_one_refused() {
     let _lock = test_lock().await;
     let w = world().await;
     let session = w.person().await;
+    let phone = w.link_phone(&session, "기기").await;
     let root = DeviceKeyPair::new("mac");
     let handset = DeviceKeyPair::new("phone");
     let root_id = w.key(&session, &root, "macos").await;
-    let phone_id = w.key(&session, &handset, "ios").await;
+    let phone_id = w.key(&phone, &handset, "ios").await;
     let at = now_ms();
     // #3068: v2 letters name the revoked public key (the phone's).
     let letter = |signer: &DeviceKeyPair, target: Uuid, member: Uuid| {
@@ -1033,8 +1040,10 @@ async fn logout_revokes_the_sessions_key_and_a_rotation_keeps_it() {
     let w = world().await;
     let session = w.person().await;
     let bystander = w.person().await;
-    let key_id = w.key(&session, &DeviceKeyPair::new("phone"), "ios").await;
-    let other_key = w.key(&bystander, &DeviceKeyPair::new("mac"), "macos").await;
+    let key_id = w.key(&session, &DeviceKeyPair::new("mac"), "macos").await;
+    let other_key = w
+        .key(&bystander, &DeviceKeyPair::new("mac 2"), "macos")
+        .await;
 
     let (status, rotated) = w.rotate(&session).await;
     assert_eq!(status, 200);
@@ -1127,12 +1136,15 @@ async fn unlinking_a_phone_revokes_its_key() {
 async fn a_member_wide_session_end_revokes_every_key() {
     let _lock = test_lock().await;
     let w = world().await;
-    let phone = w.person().await;
     let desktop = w.person().await;
+    let phone = w.link_phone(&desktop, "기기").await;
     let phone_key = w.key(&phone, &DeviceKeyPair::new("phone"), "ios").await;
     let mac_key = w.key(&desktop, &DeviceKeyPair::new("mac"), "macos").await;
     let theirs = w.other().await;
-    let their_key = w.key(&theirs, &DeviceKeyPair::new("theirs"), "ios").await;
+    let their_phone = w.link_phone(&theirs, "기기").await;
+    let their_key = w
+        .key(&their_phone, &DeviceKeyPair::new("theirs"), "ios")
+        .await;
 
     let (status, body) = w
         .call(
@@ -1180,7 +1192,7 @@ async fn an_access_token_outliving_its_logout_cannot_register_a_key() {
     // so it still authenticates — but its lineage is over.
     assert!(w.access_works(&first.access).await, "precondition");
     let (status, body) = w
-        .register_key(&first, &DeviceKeyPair::new("late"), "ios", "")
+        .register_key(&first, &DeviceKeyPair::new("late"), "macos", "")
         .await;
     assert_eq!(status, 409, "{body}");
     assert_eq!(code(&body), Some("session_lineage_ended"));
@@ -1194,7 +1206,7 @@ async fn a_reused_refresh_token_ends_the_whole_lineage() {
     let w = world_with(sweep_all()).await;
     let stolen = w.person().await;
     let bystander = w.person().await;
-    let key_id = w.key(&stolen, &DeviceKeyPair::new("phone"), "ios").await;
+    let key_id = w.key(&stolen, &DeviceKeyPair::new("mac"), "macos").await;
 
     // The thief rotates first.
     let (status, thief) = w.rotate(&stolen).await;
@@ -1263,7 +1275,7 @@ async fn a_lost_rotation_response_is_answered_again_with_the_same_pair() {
     let _lock = test_lock().await;
     let w = world_with(sweep_all()).await;
     let held = w.person().await;
-    let key_id = w.key(&held, &DeviceKeyPair::new("desk"), "ios").await;
+    let key_id = w.key(&held, &DeviceKeyPair::new("desk"), "macos").await;
 
     let (status, lost) = w.rotate(&held).await;
     assert_eq!(status, 200);
@@ -1358,7 +1370,7 @@ async fn a_spent_token_is_not_reissued_once_its_successor_moved_on_or_the_window
     // the successor's `iat` and fail the reissue for the wrong reason, leaving
     // the window check itself untested.
     let a = w.person().await;
-    let key_id = w.key(&a, &DeviceKeyPair::new("late"), "ios").await;
+    let key_id = w.key(&a, &DeviceKeyPair::new("late"), "macos").await;
     let (_, b) = w.rotate(&a).await;
     let b = b.unwrap();
     // The same wait covers a reissued pair held by two parties (review L3):
@@ -1532,7 +1544,8 @@ async fn host_register_refuses_every_forged_or_misplaced_signature() {
     let root = DeviceKeyPair::new("mac");
     let root_id = w.key(&session, &root, "macos").await;
     let handset = DeviceKeyPair::new("phone");
-    let phone_id = w.key(&session, &handset, "ios").await;
+    let phone = w.link_phone(&session, "기기").await;
+    let phone_id = w.key(&phone, &handset, "ios").await;
     let signature = w.endorsement(w.person_id, &root, root_id, &handset, "기기");
     assert_eq!(
         w.endorse(&session, phone_id, root_id, &signature).await.0,
@@ -1785,9 +1798,10 @@ async fn a_root_key_needs_the_password_and_a_password_sign_in() {
     }
     let (status, body) = w.register_key(&session, &root, "macos", "맥").await;
     assert_eq!(status, 201, "the password makes it a root: {body}");
-    // A phone key needs no password.
+    // A phone key needs no password — but a QR-linked sign-in (#3119).
+    let phone = w.link_phone(&session, "기기").await;
     let (status, _) = w
-        .register_key(&session, &DeviceKeyPair::new("phone"), "ios", "")
+        .register_key(&phone, &DeviceKeyPair::new("phone"), "ios", "")
         .await;
     assert_eq!(status, 201);
 
@@ -1829,7 +1843,7 @@ async fn a_root_whose_sign_in_expired_signs_nothing() {
     let _lock = test_lock().await;
     let w = world_with(flag(true)).await;
     let mac = w.person().await;
-    let phone = w.person().await;
+    let phone = w.link_phone(&mac, "기기").await;
     let root = DeviceKeyPair::new("mac");
     let root_id = w.key(&mac, &root, "macos").await;
     let handset = DeviceKeyPair::new("phone");
@@ -1972,7 +1986,7 @@ async fn an_endorsement_letter_is_used_once_and_a_lost_root_can_be_replaced() {
     let handset = DeviceKeyPair::new("phone");
 
     // Endorse, revoke by letter, re-register the same key, replay the letter.
-    let phone = w.person().await;
+    let phone = w.link_phone(&mac, "기기").await;
     let first_id = w.key(&phone, &handset, "ios").await;
     let letter = w.endorsement(w.person_id, &root, root_id, &handset, "기기");
     assert_eq!(w.endorse(&mac, first_id, root_id, &letter).await.0, 200);
@@ -2112,9 +2126,10 @@ async fn a_member_host_is_handed_its_owners_signed_revocation_letters() {
     let root = DeviceKeyPair::new("mac");
     let root_id = w.key(&session, &root, "macos").await;
     let handset = DeviceKeyPair::new("phone");
-    let phone_id = w.key(&session, &handset, "ios").await;
+    let phone = w.link_phone(&session, "기기").await;
+    let phone_id = w.key(&phone, &handset, "ios").await;
     // A session-end revocation (no letter) is not relayed.
-    let other_phone = w.person().await;
+    let other_phone = w.link_phone(&session, "기기 2").await;
     w.key(&other_phone, &DeviceKeyPair::new("other"), "ios")
         .await;
     w.logout(&other_phone).await;
@@ -2191,7 +2206,7 @@ async fn a_reused_roots_key_is_mute_until_its_own_letter_moves_it() {
     let mac = w.person().await;
     let root = DeviceKeyPair::new("mac");
     let root_id = w.key(&mac, &root, "macos").await;
-    let phone = w.person().await;
+    let phone = w.link_phone(&mac, "기기").await;
     let handset = DeviceKeyPair::new("phone");
     let phone_id = w.key(&phone, &handset, "ios").await;
     let letter = w.endorsement(w.person_id, &root, root_id, &handset, "기기");
@@ -2506,4 +2521,219 @@ async fn a_phone_key_moves_to_its_new_link_with_its_approval_and_logout_still_en
         w.key_row(phone_id).await,
         (Some("logout".to_string()), true)
     );
+}
+
+// ---------------------------------------------------------------------------
+// #3119 — R2 H2: 「QR 연결로만 등록」 (ADR-0146 D-6 증보 2026-09-29)
+// ---------------------------------------------------------------------------
+
+impl World {
+    /// A phone key row as it stood before #3119: registered straight into the
+    /// member's password sign-in `session` (the route refuses that shape now).
+    async fn legacy_phone_key(&self, session: &Session, key: &DeviceKeyPair) -> Uuid {
+        let session_id = self.session_id(session).await;
+        sqlx::query_scalar(
+            "INSERT INTO member_device_key \
+               (workspace_id, member_id, session_id, alg, public_key, platform, label) \
+             VALUES ($1, $2, $3, 'p256', $4, 'ios', '기기') RETURNING id",
+        )
+        .bind(self.workspace)
+        .bind(self.person_id)
+        .bind(session_id)
+        .bind(&key.public_b64)
+        .fetch_one(&self.su)
+        .await
+        .expect("seed a pre-#3119 phone key")
+    }
+
+    async fn live_rows_for(&self, key: &DeviceKeyPair) -> i64 {
+        sqlx::query_scalar(
+            "SELECT count(*) FROM member_device_key WHERE public_key = $1 AND revoked_at IS NULL",
+        )
+        .bind(&key.public_b64)
+        .fetch_one(&self.su)
+        .await
+        .expect("count key rows")
+    }
+}
+
+/// The H2 attack and its closure. A stolen web / password-login refresh token
+/// plants nothing; a stolen token that issues a QR and redeems it itself gets
+/// a linked sign-in, but no root approves a phone its Mac never linked.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn h2_a_phone_key_is_registered_only_on_a_qr_linked_sign_in() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let mac = w.person().await;
+    // A phone of this member is linked first, so "some link exists" cannot
+    // pass for "this sign-in is a link".
+    let phone = w.link_phone(&mac, "아이폰").await;
+
+    // A password sign-in (the web tab, a phone signed in by address) — also
+    // after a rotation, which is what a stolen refresh token yields.
+    let planted = DeviceKeyPair::new("planted");
+    let stolen = w.person().await;
+    let (_, rotated) = w.rotate(&stolen).await;
+    for session in [&stolen, &rotated.unwrap()] {
+        let (status, body) = w
+            .register_key(session, &planted, "ios", "성재의 iPhone")
+            .await;
+        assert_eq!(status, 403, "{body}");
+        assert_eq!(code(&body), Some("device_key_requires_linked_session"));
+    }
+    assert_eq!(w.live_rows_for(&planted).await, 0, "nothing was written");
+
+    // A QR-linked phone registers — before the Mac holds a root, too.
+    let handset = DeviceKeyPair::new("phone");
+    let (status, body) = w.register_key(&phone, &handset, "ios", "기기").await;
+    assert_eq!(status, 201, "{body}");
+    assert_eq!(body["deviceKey"]["linkedSession"], true, "{body}");
+    assert_eq!(body["deviceKey"]["linkedFromMac"], false, "no Mac key yet");
+    let phone_id = Uuid::parse_str(body["deviceKey"]["id"].as_str().unwrap()).unwrap();
+    let root = DeviceKeyPair::new("mac");
+    let root_id = w.key(&mac, &root, "macos").await;
+    let view = w.key_view(&mac, phone_id).await;
+    assert_eq!(
+        view["linkedFromMac"], true,
+        "the issuing sign-in now holds one"
+    );
+    assert_eq!(
+        w.key_view(&mac, root_id).await["linkedSession"],
+        false,
+        "a root is a password sign-in's"
+    );
+
+    // The stolen token links a "phone" of its own and registers on it.
+    let self_linked = w.link_phone(&stolen, "성재의 iPhone").await;
+    let (status, body) = w
+        .register_key(&self_linked, &planted, "ios", "성재의 iPhone")
+        .await;
+    assert_eq!(status, 201, "{body}");
+    assert_eq!(body["deviceKey"]["linkedSession"], true);
+    assert_eq!(body["deviceKey"]["linkedFromMac"], false, "{body}");
+    let planted_id = Uuid::parse_str(body["deviceKey"]["id"].as_str().unwrap()).unwrap();
+    // The owner clicks 「승인」 on it anyway: refused, by name.
+    let letter = w.endorsement(w.person_id, &root, root_id, &planted, "성재의 iPhone");
+    let (status, body) = w.endorse(&mac, planted_id, root_id, &letter).await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(code(&body), Some("device_key_link_not_from_mac"));
+    assert_eq!(w.key_view(&mac, planted_id).await["state"], "unendorsed");
+
+    // The Mac's own phone is approved.
+    let letter = w.endorsement(w.person_id, &root, root_id, &handset, "기기");
+    let (status, body) = w.endorse(&mac, phone_id, root_id, &letter).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["deviceKey"]["canInstruct"], true);
+}
+
+/// Keys registered before the rule: an unapproved one is never a candidate,
+/// an approved one keeps its approval and reads 「QR 아님」, and neither moves.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn h2_a_pre_rule_phone_key_is_never_a_candidate_and_an_approved_one_is_marked() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let mac = w.person().await;
+    let root = DeviceKeyPair::new("mac");
+    let root_id = w.key(&mac, &root, "macos").await;
+    let by_address = w.person().await; // a phone signed in by address
+
+    let pending = DeviceKeyPair::new("pending legacy");
+    let pending_id = w.legacy_phone_key(&by_address, &pending).await;
+    let letter = w.endorsement(w.person_id, &root, root_id, &pending, "기기");
+    let (status, body) = w.endorse(&mac, pending_id, root_id, &letter).await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(code(&body), Some("device_key_requires_linked_session"));
+    let view = w.key_view(&mac, pending_id).await;
+    assert_eq!(view["state"], "unendorsed");
+    assert_eq!(view["linkedSession"], false);
+
+    // Approved before the rule (the letter is genuine; only the time moved).
+    let approved = DeviceKeyPair::new("approved legacy");
+    let approved_id = w.legacy_phone_key(&by_address, &approved).await;
+    let letter = w.endorsement(w.person_id, &root, root_id, &approved, "기기");
+    sqlx::query(
+        "UPDATE member_device_key \
+            SET endorsed_by_key_id = $2, endorsement_sig = $3, endorsed_at = now() \
+          WHERE id = $1",
+    )
+    .bind(approved_id)
+    .bind(root_id)
+    .bind(&letter)
+    .execute(&w.su)
+    .await
+    .expect("seed a pre-#3119 approval");
+    let view = w.key_view(&mac, approved_id).await;
+    assert_eq!(view["state"], "endorsed", "kept: {view}");
+    assert_eq!(view["canInstruct"], true);
+    assert_eq!(view["linkedSession"], false, "and marked 「QR 아님」");
+
+    // Its sign-in ends without revoking it: it cannot move, not even into a
+    // QR-linked sign-in with its own valid letter.
+    sqlx::query(
+        "UPDATE token SET revoked_at = now() \
+          WHERE session_id = (SELECT session_id FROM member_device_key WHERE id = $1) \
+            AND revoked_at IS NULL",
+    )
+    .bind(approved_id)
+    .execute(&w.su)
+    .await
+    .expect("end the address sign-in out of band");
+    let phone = w.link_phone(&mac, "기기").await;
+    let session = w.session_id(&phone).await;
+    let (status, body) = w
+        .rebind(
+            &phone,
+            &approved,
+            "ios",
+            w.rebind_letter(&approved, approved_id, session, now_ms()),
+        )
+        .await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(code(&body), Some("device_key_requires_linked_session"));
+    assert_eq!(w.key_view(&mac, approved_id).await["lineageLive"], false);
+}
+
+/// A linked phone's key moves only onto another QR-linked sign-in.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn h2_a_phone_key_moves_only_from_a_link_to_a_link() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let mac = w.person().await;
+    let phone = w.link_phone(&mac, "기기").await;
+    let handset = DeviceKeyPair::new("phone");
+    let phone_id = w.key(&phone, &handset, "ios").await;
+    reuse_lineage(&w, &phone).await;
+    assert_eq!(w.key_row(phone_id).await, (None, false));
+
+    // A password sign-in holding the key's own valid letter: refused.
+    let by_address = w.person().await;
+    let session = w.session_id(&by_address).await;
+    let (status, body) = w
+        .rebind(
+            &by_address,
+            &handset,
+            "ios",
+            w.rebind_letter(&handset, phone_id, session, now_ms()),
+        )
+        .await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(code(&body), Some("device_key_requires_linked_session"));
+
+    // A new QR link: it moves.
+    let phone2 = w.link_phone(&mac, "기기").await;
+    let session2 = w.session_id(&phone2).await;
+    let (status, body) = w
+        .rebind(
+            &phone2,
+            &handset,
+            "ios",
+            w.rebind_letter(&handset, phone_id, session2, now_ms()),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["deviceKey"]["linkedSession"], true);
+    assert_eq!(body["deviceKey"]["current"], true);
 }

@@ -13,6 +13,13 @@
 //! public key under a new key id (a re-login, #3078) is rebound here too —
 //! and only here.
 //!
+//! `status` also says whether the host **requires** device signatures, why,
+//! and what the server last said (#3117, [`crate::signature_requirement`]):
+//! the server can latch the requirement on but never off. The latch is lowered
+//! only here, by `reset_signature_requirement` — a local, explicit act of the
+//! code-signed app. It does not touch the pinned root (`reset-root` is a CLI
+//! command, not an op).
+//!
 //! ## Who may connect
 //!
 //! Three fences, each checked for every connection:
@@ -44,7 +51,13 @@
 //! ```text
 //! → {"op":"status"}
 //! ← {"ok":true,"hostId":"…","workspaceId":"…","ownerMemberId":"…",
-//!    "version":"…","heartbeat":{"lastOkAtMs":…,"lastAttemptAtMs":…,"failing":false}}
+//!    "version":"…","heartbeat":{"lastOkAtMs":…,"lastAttemptAtMs":…,"failing":false},
+//!    "humanSignatures":{"required":bool,"requiredBy":"config"|"server"|"unreadable"|null,
+//!       "latchedSinceMs":…|null,"latchSaved":bool,"serverRequired":bool|null,
+//!       "rootKeyId":…|null,"rootPublicKey":…|null}}
+//!   `serverRequired: true` with `required: false` is the half state: the
+//!   server requires signatures and this host does not enforce them yet (no
+//!   root pinned). It latches on the first poll after `pin_root`.
 //! → {"op":"shutdown"}
 //! ← {"ok":true}
 //! → {"op":"pin_root","keyId":"…","alg":"p256","publicKey":"<b64 33-byte SEC1>"}
@@ -55,6 +68,8 @@
 //! → {"op":"revoke_device","revocation":{"workspaceId","memberId","rootKeyId",
 //!    "targetKeyId","revokedAtMs","signature","targetPublicKey"}}
 //! ← {"ok":true}
+//! → {"op":"reset_signature_requirement"}
+//! ← {"ok":true,"required":bool}   (still true when the owner's config says so)
 //! ```
 
 use std::io;
@@ -374,6 +389,7 @@ pub fn respond(line: &str, identity: &HostIdentity, shared: &SocketShared) -> Va
     match request.get("op").and_then(Value::as_str) {
         Some("status") => {
             let heartbeat = shared.health.snapshot();
+            let requirement = shared.requirement.lock().unwrap_or_else(|p| p.into_inner());
             let (root_key_id, root_public_key) = lock_trust()
                 .root()
                 .map(|root| (root.key_id, root.public_key.clone()))
@@ -390,7 +406,11 @@ pub fn respond(line: &str, identity: &HostIdentity, shared: &SocketShared) -> Va
                     "failing": heartbeat.failing,
                 },
                 "humanSignatures": {
-                    "required": shared.human_signatures_required,
+                    "required": requirement.required(),
+                    "requiredBy": requirement.required_by().map(|by| by.label()),
+                    "latchedSinceMs": requirement.latched_since_ms(),
+                    "latchSaved": requirement.latch_saved(),
+                    "serverRequired": requirement.server_required(),
                     "rootKeyId": root_key_id,
                     // The pin's identity (#3078): the app compares this, not
                     // the id, to tell a re-login from another key.
@@ -427,6 +447,16 @@ pub fn respond(line: &str, identity: &HostIdentity, shared: &SocketShared) -> Va
             {
                 Ok(()) => json!({"ok": true}),
                 Err(error) => json!({"ok": false, "error": error}),
+            }
+        }
+        Some("reset_signature_requirement") => {
+            let mut requirement = shared.requirement.lock().unwrap_or_else(|p| p.into_inner());
+            match requirement.reset() {
+                Ok(()) => json!({"ok": true, "required": requirement.required()}),
+                Err(error) => {
+                    tracing::error!(error = %error, "could not reset the signature requirement");
+                    json!({"ok": false, "error": "requirement_unavailable"})
+                }
             }
         }
         _ => json!({"ok": false, "error": "unknown_op"}),
@@ -605,7 +635,9 @@ mod tests {
                 )
                 .unwrap(),
             )),
-            human_signatures_required: false,
+            requirement: Arc::new(std::sync::Mutex::new(
+                crate::signature_requirement::SignatureRequirement::open(dir, false),
+            )),
         }
     }
 
@@ -626,6 +658,8 @@ mod tests {
         assert_eq!(status["hostId"], Uuid::from_u128(1).to_string());
         assert_eq!(status["heartbeat"]["lastOkAtMs"], Value::Null);
         assert_eq!(status["humanSignatures"]["required"], false);
+        assert_eq!(status["humanSignatures"]["requiredBy"], Value::Null);
+        assert_eq!(status["humanSignatures"]["serverRequired"], Value::Null);
         assert_eq!(status["humanSignatures"]["rootKeyId"], Value::Null);
         assert_eq!(status["humanSignatures"]["rootPublicKey"], Value::Null);
         health.heartbeat_accepted();
@@ -649,6 +683,58 @@ mod tests {
         assert_eq!(
             respond(r#"{"op":"shutdown"}"#, &identity(), &shared)["ok"],
             true
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn only_the_local_op_lowers_a_latched_requirement() {
+        let dir = scratch();
+        let shared = shared(&dir);
+        let status =
+            || respond(r#"{"op":"status"}"#, &identity(), &shared)["humanSignatures"].clone();
+        // The server's word without a root: the half state, reported.
+        shared
+            .requirement
+            .lock()
+            .unwrap()
+            .note_server(true, false, 5)
+            .unwrap();
+        assert_eq!(status()["required"], false);
+        assert_eq!(status()["serverRequired"], true);
+        // With a root: latched.
+        shared
+            .requirement
+            .lock()
+            .unwrap()
+            .note_server(true, true, 6)
+            .unwrap();
+        assert_eq!(status()["required"], true);
+        assert_eq!(status()["requiredBy"], "server");
+        assert_eq!(status()["latchedSinceMs"], 6);
+        // The server takes it back: still required.
+        shared
+            .requirement
+            .lock()
+            .unwrap()
+            .note_server(false, true, 7)
+            .unwrap();
+        assert_eq!(status()["required"], true);
+        assert_eq!(status()["serverRequired"], false);
+        // The local op lowers it, and it stays lowered after a restart.
+        assert_eq!(
+            respond(
+                r#"{"op":"reset_signature_requirement"}"#,
+                &identity(),
+                &shared
+            ),
+            json!({"ok": true, "required": false})
+        );
+        assert_eq!(status()["required"], false);
+        let reopened = self::shared(&dir);
+        assert_eq!(
+            respond(r#"{"op":"status"}"#, &identity(), &reopened)["humanSignatures"]["required"],
+            false
         );
         let _ = std::fs::remove_dir_all(dir);
     }

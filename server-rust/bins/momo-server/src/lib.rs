@@ -1021,6 +1021,13 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/work-sessions/{session}/permission-decisions",
             post(routes::work_permissions::decide),
         )
+        // #3118 (ADR-0188 D5): the owner's read of one request's preview.
+        // Same boundary: human bearer only, never host-signable, absent from
+        // `momo_auth::required_agent_scope`.
+        .route(
+            "/v1/workspaces/{ws}/work-sessions/{session}/permission-requests/{request}",
+            get(routes::work_permissions::preview),
+        )
         // ADR-0146 개정 D-5b (#3027): the owner's signed instruction. Same
         // boundary as the decision route: human bearer only, never signable
         // by a host, absent from `momo_auth::required_agent_scope`.
