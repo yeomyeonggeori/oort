@@ -59,7 +59,7 @@
 - **외부 출시 항목**(ADR-0187 D6): 그록봇 VM 발행 이미지 재실측(E2E-A), Railway 밖 플랫폼 경로 확장, 외부 셀프호스터 모집, 하네스 복붙 설치의 외부 재현, AX-5 #2511·AX-8 #2514 → 목표 A 뒤.
 - **Android**: iOS App Store 뒤(ADR-0137 결정 6).
 - **VM/그록봇 릴레이 축**: SH-8 — 외부 출시 단계에서 재개.
-- **buzz 제품축 6종 판정**(forum·projects·terminal·mesh-compute·workflows·agent-memory): 외부 출시 뒤 재취사.
+- **buzz 제품축 6종 판정**(forum·projects·terminal·mesh-compute·workflows): 외부 출시 뒤 재취사. **agent-memory는 제외한다** — 성재 2026-09-29 「M1뿐만 아니라 M3까지 완성하고 출시하고 싶어. 나머진 권장대로」로 팀 기억 v2 M1~M3(#3158~#3174, [ADR-0196](docs/adr/0196-team-memory-v2.md))를 목표 A 안으로 당겼다. 그래프 뷰(M4)만 목표 A 밖.
 - **웹·데스크탑 UX 잔여 파도**(UX-R·DS 잔여): 목표 A 동안은 내부 테스트 불편으로 올라온 것만 한다.
 - **Enterprise Trust**(위협 모델·SBOM·시크릿 스캔·VDP·보안 백서, MOMO-140): ADR-0187 §3이 외부·엔터프라이즈 출시로 연기를 제안했다. 성재 확인 전까지는 M7-S S-8로 남는다.
 

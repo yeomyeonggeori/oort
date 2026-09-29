@@ -24,9 +24,8 @@
 //! label / tool / permission decision and, for a spawn, its channel — plus the
 //! envelope's own fields (instance id, key id, nonce, times, mode, scope, spawn
 //! agent and folder), and verifies the device signature over those bytes. A v2
-//! statement is accepted for every kind but a permission, and a v1 one for an
-//! input (same bytes apart from the first line; `HumanControl::verify_any`,
-//! #3027).
+//! statement is accepted for every kind but a permission; a v1 one for none
+//! (`HumanControl::verify_any`; #3154 retired it, both signers sign v2/v3).
 //!
 //! A permission allow is rebuilt with **the preview hash this host computed**
 //! when it relayed the request (#3118, R2 H1;
@@ -759,10 +758,6 @@ impl HumanTrust {
         // 4. Fresh on this host's clock.
         check_control_window(envelope.issued_at_ms, envelope.expires_at_ms, now_ms)
             .map_err(|_| Refusal::DeviceSignatureExpired)?;
-        // What this host does not run yet is refused before a nonce is spent.
-        if envelope.scope.as_deref() == Some("session") && control.kind == "permission" {
-            return Err(Refusal::UnsupportedControl);
-        }
         // 5. The nonce, on disk before anything is done.
         let mut ledger = self.ledger.clone();
         ledger

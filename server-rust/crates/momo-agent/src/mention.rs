@@ -34,6 +34,7 @@ use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
 use crate::effort::{known_level, supports};
+use crate::provisioning::ModelSource;
 use crate::routing::{RequestedRouting, RoutingInvalid};
 
 /// `agent_run.input.schema` for a mention-triggered run (Swift :2244).
@@ -93,6 +94,8 @@ pub struct MentionCandidate {
     pub display_name: String,
     /// `agent.model` — the allow-list's floor and the resolution's fallback.
     pub base_model: String,
+    /// `agent.model_source` (#3147): whether `base_model` is a choice at all.
+    pub base_model_source: ModelSource,
     pub model_pref: Option<String>,
     pub effort_pref: Option<String>,
     /// The **effective** system prompt: policy preamble + (interaction safety) +
@@ -166,7 +169,7 @@ pub async fn load_mention_candidates_in_tx(
 ) -> Result<Vec<MentionCandidate>, DbError> {
     let rows = sqlx::query(
         "SELECT m.id, m.handle, m.display_name, \
-                a.model, a.system_prompt, a.max_run_steps, a.tool_schema, a.config, \
+                a.model, a.model_source, a.system_prompt, a.max_run_steps, a.tool_schema, a.config, \
                 w.settings AS workspace_settings, \
                 ap.instructions, ap.model_pref, ap.effort_pref, ap.enabled_tools, \
                 ap.version AS profile_version, \
@@ -287,6 +290,10 @@ pub async fn load_mention_candidates_in_tx(
             handle: row.try_get("handle").map_err(DbError::from)?,
             display_name: row.try_get("display_name").map_err(DbError::from)?,
             base_model: row.try_get("model").map_err(DbError::from)?,
+            base_model_source: ModelSource::from_column(
+                &row.try_get::<String, _>("model_source")
+                    .map_err(DbError::from)?,
+            ),
             model_pref: row.try_get("model_pref").map_err(DbError::from)?,
             effort_pref: row.try_get("effort_pref").map_err(DbError::from)?,
             system_prompt: effective_system_prompt(
@@ -482,6 +489,10 @@ pub fn allowed_agent_models(base_model: &str, workspace_settings: &Value) -> Vec
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MentionRouting {
     pub model: String,
+    /// #3147: `Agent` when the model was chosen (request `routing.model`, an
+    /// applied `model_pref`, or the agent's own `model`); `InstanceDefault` only
+    /// when nothing was chosen and the agent follows the instance default.
+    pub model_source: ModelSource,
     pub effort: Option<String>,
     /// A profile `model_pref` that the workspace allow-list did not permit. Never
     /// a client error — it is audited and the base model runs (ADR-0131 D2).
@@ -510,31 +521,40 @@ pub fn resolve_mention_routing(
 ) -> Result<MentionRouting, RoutingInvalid> {
     let allowed = allowed_agent_models(&candidate.base_model, &candidate.workspace_settings);
 
-    let (model, ignored_model_pref) = match requested.and_then(|routing| routing.model.as_deref()) {
-        Some(explicit) => {
-            // Same allow-list as the inherited path below, read from the same
-            // helper, so the two tiers cannot drift into permitting different
-            // sets of the same workspace's models.
-            if !allowed.iter().any(|entry| entry == explicit) {
-                return Err(RoutingInvalid::ModelNotAllowed);
-            }
-            (explicit.to_string(), None)
-        }
-        None => {
-            let preference = candidate
-                .model_pref
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty());
-            match preference {
-                Some(preference) if allowed.iter().any(|entry| entry == preference) => {
-                    (preference.to_string(), None)
+    let (model, model_source, ignored_model_pref) =
+        match requested.and_then(|routing| routing.model.as_deref()) {
+            Some(explicit) => {
+                // Same allow-list as the inherited path below, read from the same
+                // helper, so the two tiers cannot drift into permitting different
+                // sets of the same workspace's models.
+                if !allowed.iter().any(|entry| entry == explicit) {
+                    return Err(RoutingInvalid::ModelNotAllowed);
                 }
-                Some(preference) => (candidate.base_model.clone(), Some(preference.to_string())),
-                None => (candidate.base_model.clone(), None),
+                (explicit.to_string(), ModelSource::Agent, None)
             }
-        }
-    };
+            None => {
+                let preference = candidate
+                    .model_pref
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty());
+                match preference {
+                    Some(preference) if allowed.iter().any(|entry| entry == preference) => {
+                        (preference.to_string(), ModelSource::Agent, None)
+                    }
+                    Some(preference) => (
+                        candidate.base_model.clone(),
+                        candidate.base_model_source,
+                        Some(preference.to_string()),
+                    ),
+                    None => (
+                        candidate.base_model.clone(),
+                        candidate.base_model_source,
+                        None,
+                    ),
+                }
+            }
+        };
 
     let (effort, ignored_effort_pref) = match requested
         .and_then(|routing| routing.effort.as_deref())
@@ -565,6 +585,7 @@ pub fn resolve_mention_routing(
 
     Ok(MentionRouting {
         model,
+        model_source,
         effort,
         ignored_model_pref,
         ignored_effort_pref,
@@ -708,6 +729,9 @@ pub fn mention_job_payload(
     // ADR-0134 D4: the RESOLVED model is always on the payload — never hidden —
     // so "who ran on what" is answerable without replaying the chain.
     payload.insert("model".into(), json!(routing.model));
+    // #3147: where that model came from, so the worker applies the team's
+    // 「기본 AI」 row on the fact, not on a guess from the model's name.
+    payload.insert("model_source".into(), json!(routing.model_source.as_str()));
     payload.insert("prompt".into(), json!(trigger.body));
     payload.insert("recent_messages".into(), json!(recent_messages));
     payload.insert("tools".into(), candidate.tool_schema.clone());
@@ -909,6 +933,7 @@ mod tests {
             handle: "hermes".into(),
             display_name: "hermes".into(),
             base_model: "hermes-agent".into(),
+            base_model_source: ModelSource::Agent,
             model_pref: None,
             effort_pref: None,
             system_prompt: Some("prompt".into()),
@@ -1041,6 +1066,51 @@ mod tests {
             allowed_agent_models("gpt-5.7-vega", &json!({})),
             vec!["gpt-5.7-vega".to_string()],
             "an unmeasured id must not bootstrap the whole catalog"
+        );
+    }
+
+    /// #3147 — the source on the payload is the RESOLVED one: an explicit request
+    /// model or an applied `model_pref` is a choice even on an agent that follows
+    /// the instance default; only an untouched base model keeps the column's value.
+    #[test]
+    fn the_resolved_model_source_is_agent_unless_the_base_model_ran_on_a_default() {
+        let mut agent = candidate();
+        agent.base_model_source = ModelSource::InstanceDefault;
+        agent.workspace_settings = json!({"allowed_agent_models": ["hermes-fast", "hermes-agent"]});
+
+        let inherited = resolve_mention_routing(&agent, None).unwrap();
+        assert_eq!(inherited.model_source, ModelSource::InstanceDefault);
+
+        let requested = RequestedRouting {
+            model: Some("hermes-fast".into()),
+            effort: None,
+        };
+        let explicit = resolve_mention_routing(&agent, Some(&requested)).unwrap();
+        assert_eq!(
+            explicit.model_source,
+            ModelSource::Agent,
+            "a request choice"
+        );
+
+        agent.model_pref = Some("hermes-fast".into());
+        let preferred = resolve_mention_routing(&agent, None).unwrap();
+        assert_eq!(
+            preferred.model_source,
+            ModelSource::Agent,
+            "an applied pref"
+        );
+
+        // A pref the allow-list refuses is ignored: the base model runs, still
+        // following the default.
+        agent.model_pref = Some("not-allowed".into());
+        let ignored = resolve_mention_routing(&agent, None).unwrap();
+        assert_eq!(ignored.model_source, ModelSource::InstanceDefault);
+
+        agent.base_model_source = ModelSource::Agent;
+        agent.model_pref = None;
+        assert_eq!(
+            resolve_mention_routing(&agent, None).unwrap().model_source,
+            ModelSource::Agent
         );
     }
 
@@ -1487,6 +1557,7 @@ mod tests {
             "trigger_message_id",
             "trigger_message_seq",
             "model",
+            "model_source",
             "prompt",
             "recent_messages",
             "tools",
@@ -1522,6 +1593,7 @@ mod tests {
         };
         let routing = MentionRouting {
             model: "hermes-agent".into(),
+            model_source: ModelSource::Agent,
             effort: Some("low".into()),
             ignored_model_pref: None,
             ignored_effort_pref: None,

@@ -80,6 +80,8 @@ fn serve(path: &Path, policy: PeerPolicy) -> (tokio::task::JoinHandle<()>, Arc<N
         requirement: Arc::new(std::sync::Mutex::new(
             momo_workd::signature_requirement::SignatureRequirement::off(),
         )),
+        state_folder: path.parent().expect("socket folder").to_path_buf(),
+        grants: momo_workd::session_grant::GrantEpoch::default(),
     };
     let task = tokio::spawn(socket.serve(identity, shared));
     (task, stop)

@@ -74,11 +74,12 @@
 //!   owner's words join (#3024 review M2). A fresh spawn still writes `-`.
 //!
 //! Every other kind is byte-identical to v1 apart from the first line.
-//! Verifiers ([`HumanControl::verify_any`]) therefore accept a v1 statement
-//! for those kinds — nothing a v1 signature says differs from the v2 one —
-//! and refuse a v1 `spawn`, which never bound the tool or the channel. (The
-//! phone's native signer allows `momo.human.control.v1` only until its
-//! allowlist moves; input and permission keep working meanwhile.)
+//! Verifiers ([`HumanControl::verify_any`]) accepted a v1 statement for those
+//! kinds while the signers moved — nothing a v1 signature says differs from
+//! the v2 one — and always refused a v1 `spawn`, which never bound the tool or
+//! the channel. **Since #3154 they refuse v1 altogether**: the phone
+//! (#3028, #3153) and the desktop (#3028) sign v2 and v3 only, and no build a
+//! team runs signs v1.
 //!
 //! ## high-s: normalize, then verify (one rule, fixed here)
 //!
@@ -124,10 +125,10 @@ use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization as _;
 use uuid::Uuid;
 
-/// Retired for `spawn`; still accepted for `input` / `permission` (see the
-/// module docs, v2).
+/// Retired (#3154): no verifier accepts it. Kept for the E1 vectors, which
+/// build v1 bytes to prove they are refused (see the module docs, v2).
 pub const HUMAN_CONTROL_SCHEMA_V1: &str = "momo.human.control.v1";
-/// R2-E7 #3027. Still accepted for every kind but a previewed `permission`.
+/// R2-E7 #3027. Accepted for every kind but a previewed `permission`.
 pub const HUMAN_CONTROL_SCHEMA_V2: &str = "momo.human.control.v2";
 /// The current control schema (#3118): a `permission` binds its preview.
 pub const HUMAN_CONTROL_SCHEMA_V3: &str = "momo.human.control.v3";
@@ -534,8 +535,11 @@ impl HumanControl<'_> {
                 ..
             }
         );
-        let spawn = matches!(self.content, ControlContent::Spawn { .. });
-        let mut schemas = Vec::with_capacity(3);
+        // #3154: v1 is not a schema a verifier accepts any more. The phone
+        // and the desktop sign v2 (input, spawn) and v3 (permission); the
+        // variant stays so the vectors can still build v1 bytes and prove
+        // that they are refused.
+        let mut schemas = Vec::with_capacity(2);
         // A permission without a preview has no v3 body.
         if !matches!(
             self.content,
@@ -548,9 +552,6 @@ impl HumanControl<'_> {
         }
         if !previewed {
             schemas.push(ControlSchema::V2);
-            if !spawn {
-                schemas.push(ControlSchema::V1);
-            }
         }
         let mut first_error = None;
         for schema in schemas {

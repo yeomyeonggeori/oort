@@ -33,9 +33,8 @@
 //!    `momo.human.control.v3` is checked; a v2 statement is accepted for every
 //!    kind but a permission whose request carries a preview (#3118: a v3
 //!    allow binds the stored preview hash, so what the owner saw is part of
-//!    the statement), and a v1 one for `input` / a preview-less `permission`
-//!    only, whose v1 bytes say the same thing (`HumanControl::verify_any`) —
-//!    never for a spawn.
+//!    the statement). `momo.human.control.v1` is refused for every kind
+//!    (#3154): the phone and the desktop sign v2 and v3 only.
 //!    Text must already be NFC: the host refuses any other spelling (#3024
 //!    L4), so the server does too.
 //! 4. **The time window** (D-9): ±5 min around the server clock, lifetime
@@ -180,7 +179,7 @@ pub struct ControlTarget<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedHumanControl {
     pub key: DeviceKeyRecord,
-    /// The schema that verified (v2, or v1 for input/permission).
+    /// The schema that verified (v2 or v3).
     pub schema: ControlSchema,
     pub instance_id: String,
     pub nonce: Uuid,

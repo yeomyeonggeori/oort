@@ -119,6 +119,13 @@ tags:
     description: >
       ADR-0175 personal message reminders (later-alert). Human-only owner CRUD.
       v1 has no outbox fan-out — clients poll the list.
+  - name: memory
+    description: >
+      ADR-0196 team memory v2 (M1) — channel/thread digests with evidence links,
+      the per-run receipt behind the 「기억 n개 참고」 chip, and the switches
+      (workspace, channel exclude/pause, personal pause). Human-only. Visibility
+      and write authority are decided by database row-level security, not by the
+      handler: a row the caller may not read is simply absent.
   - name: sidebar
     description: >
       ADR-0177 member-owned sidebar organization — custom sections, channel
@@ -320,6 +327,46 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: Missing scope or member no longer active.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/auth/push-fetch-token:
+    post:
+      tags: [auth]
+      operationId: authPushFetchToken
+      summary: Mint the notification extension's narrow token (ADR-0188 §8.7, #3121).
+      description: >
+        Human access bearer only. Returns a `typ = push_fetch` token that the
+        phone parks in the keychain group its notification extension reads. It
+        can call exactly `GET /v1/workspaces/{ws}/channels/{ch}/messages` and
+        `GET /v1/workspaces/{ws}/roster` of its own workspace (403 anywhere
+        else, before any query), has no refresh half, cannot mint another, and
+        lives 6 hours or until the session it was minted under can no longer
+        rotate (logout with its refresh half, refresh-reuse sweep, password
+        change, suspension, removal) - whichever is first.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Token minted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushFetchTokenResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller is not a signed-in person (agent bearer, work host, or the push-fetch token itself).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The session has no lineage yet (a pre-088 session); refresh and ask again.
           content:
             application/json:
               schema:
@@ -3056,6 +3103,366 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/channels/{channelId}/memory/digests:
+    get:
+      tags: [memory]
+      operationId: listMemoryDigests
+      summary: Summaries (digests) of a channel or thread, newest first.
+      description: >
+        ADR-0196 D6/D12. The 「안 읽은 동안」 missed-conversation card reads this
+        with `sinceLastRead=true`, which anchors at the caller's own read cursor
+        (`read_state.last_read_seq`); `sinceSeq` sets an explicit anchor and the
+        larger of the two wins (`afterSeq` echoes the effective value). Only
+        digests reaching past the anchor are returned (`toSeq > afterSeq`).
+        Without `threadRootId` the channel-level digests are listed; with it, that
+        thread's. **Visibility is row-level security**: a digest whose stored
+        channel or any evidence channel the caller cannot read, whose evidence was
+        edited or deleted, or that is stale (awaiting regeneration) is absent. A
+        channel the caller cannot read therefore answers an empty list with 200 —
+        never 403 or 404, so existence is not confirmed. Each digest carries its
+        evidence message ids (`messageId`, `channelId`, `seq`) for links back to
+        the source messages. Keyset pagination over `(toSeq desc, id desc)` via
+        `nextCursor`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - name: level
+          in: query
+          schema:
+            type: string
+            enum: [window, day, week]
+        - name: threadRootId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: sinceSeq
+          in: query
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+            default: 0
+        - name: sinceLastRead
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: cursor
+          in: query
+          description: Opaque `nextCursor` of the previous page.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: The digest page (possibly empty).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryDigestListResponse"
+        "400":
+          description: Invalid id, level, sinceSeq, sinceLastRead or cursor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive (e.g. suspended) membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/memory/digests/{digestId}:
+    get:
+      tags: [memory]
+      operationId: getMemoryDigest
+      summary: One digest with its evidence links.
+      description: >
+        A digest the caller may not read — hidden by row-level security or
+        nonexistent — is a 404; the two are indistinguishable.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: digestId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The digest.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryDigestResponse"
+        "400":
+          description: Invalid digest id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Digest not found or not readable by the caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/agent-runs/{runId}/memory-receipt:
+    get:
+      tags: [memory]
+      operationId: getRunMemoryReceipt
+      summary: What memory an agent run was served (the 「기억 n개 참고」 chip).
+      description: >
+        ADR-0196 D7. `servedCount` is the chip's n; `digests` lists the served
+        digests **the caller can read today** (with evidence) for the popover —
+        a served digest that was edited, deleted or hidden since is absent from
+        `digests`/`digestIds` but still counted. `withheldCount` (memory the
+        requester could see but the answer channel's audience rule kept out — a
+        count only, never content) is present **only for the run's requester**, i.e. the
+        author of the message that triggered the run. A run with no receipt, or
+        whose answer channel the caller cannot read, is a 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The receipt.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryReceiptResponse"
+        "400":
+          description: Invalid run id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No receipt for this run, or not readable by the caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/memory/settings:
+    get:
+      tags: [memory]
+      operationId: getMemorySettings
+      summary: The memory switches the caller can see.
+      description: >
+        Workspace row (defaults when never written: enabled, not paused, epoch 0),
+        the rows of channels the caller can read, and the caller's own personal
+        pause. Rows are filtered by row-level security.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The visible settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemorySettingsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    patch:
+      tags: [memory]
+      operationId: patchWorkspaceMemorySettings
+      summary: Set the workspace memory switch (owner/admin).
+      description: >
+        `enabled` is the workspace switch (D9); `paused` stops collection and
+        serving while keeping the data. At least one field is required; unknown
+        fields are rejected. Owner/admin only — the write policy decides, and a
+        denial is 403. Audited (`memory.settings.updated`).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchWorkspaceMemorySettingsRequest"
+      responses:
+        "200":
+          description: The workspace settings after the change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceMemorySettings"
+        "400":
+          description: Empty patch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not a workspace owner/admin, agent bearer, or inactive membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Unknown field or a value the schema rejects.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/memory/settings/me:
+    patch:
+      tags: [memory]
+      operationId: patchMyMemorySettings
+      summary: Pause or resume memory for the caller alone.
+      description: >
+        The member is always the credential's; the body has no member field and
+        rejects unknown ones. The write policy additionally pins the row to the
+        caller. Audited.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchMyMemorySettingsRequest"
+      responses:
+        "200":
+          description: The caller's personal settings after the change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberMemorySettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Missing `paused` or an unknown field.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/memory/settings:
+    patch:
+      tags: [memory]
+      operationId: patchChannelMemorySettings
+      summary: Exclude or pause memory for one channel (channel/workspace admin).
+      description: >
+        `excluded` keeps the channel out of summaries entirely; `paused` stops
+        collection and serving while keeping the data. At least one field is
+        required. The caller must be able to read the channel and be a workspace
+        or channel owner/admin; otherwise 403 — also for a channel that does not
+        exist, which is indistinguishable from one the caller cannot read.
+        Audited.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchChannelMemorySettingsRequest"
+      responses:
+        "200":
+          description: The channel's settings after the change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelMemorySettings"
+        "400":
+          description: Invalid channel id or empty patch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not an admin who can read this channel, agent bearer, or inactive membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Unknown field or a value the schema rejects.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /v1/workspaces/{workspaceId}/channels/{channelId}/huddles:
     post:
       tags: [huddles]
@@ -3280,6 +3687,12 @@ paths:
         included, is 403 `device_key_requires_linked_session` and writes
         nothing. A rebind moves an `ios` key only from such a sign-in to such a
         sign-in (same code).
+        **계보당 폰 키 1개 (#3127).** A sign-in lineage holds at most one live
+        `ios` key: a second one, or a rebind onto a lineage that already holds
+        one, is 409 `device_key_lineage_has_phone_key` and writes nothing. A
+        replacement (Face ID re-enrolled, the old key unusable) starts with the
+        Mac's signed revocation of the old key, or with the phone linking by QR
+        again; the new key then starts unendorsed and needs the Mac's approval.
       security:
         - bearerAuth: []
       parameters:
@@ -3331,8 +3744,9 @@ paths:
             The public key is already live in this workspace on a live sign-in
             (`device_key_already_registered`; also a rebind of such a key), it
             is the caller's on an ended sign-in and must be moved with `rebind`
-            (`device_key_rebind_required`), or this sign-in has ended
-            (`session_lineage_ended`).
+            (`device_key_rebind_required`), this sign-in already holds a live
+            phone key (`device_key_lineage_has_phone_key`, #3127), or this
+            sign-in has ended (`session_lineage_ended`).
         "404":
           description: A rebind of a public key with no live row (`device_key_not_found`) — register it fresh.
           content:
@@ -3425,7 +3839,9 @@ paths:
         Since #3119 the target's sign-in must be QR-linked
         (`linkedSession`, else `device_key_requires_linked_session`) and its QR
         issued from a sign-in that holds or held a `macos` key of the caller
-        (`linkedFromMac`, else `device_key_link_not_from_mac`).
+        (`linkedFromMac`, else `device_key_link_not_from_mac`). Since #3127 a
+        target whose sign-in holds another live `ios` key is 409
+        `device_key_lineage_has_phone_key`: the Mac revokes one first.
       security:
         - bearerAuth: []
       parameters:
@@ -3475,7 +3891,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: "`device_key_not_endorsable` — revoked, a Mac, or already endorsed."
+          description: "`device_key_not_endorsable` — revoked, a Mac, or already endorsed; `device_key_lineage_has_phone_key` — the target's sign-in holds another live phone key (#3127)."
           content:
             application/json:
               schema:
@@ -4824,9 +5240,9 @@ paths:
         "400":
           description: >
             `error.code` permission_kind_refused (kind is not allow_once or
-            reject_once), permission_option_invalid (optionId is not an offered
+            reject_once, or a signed scope `session` on a reject), permission_option_invalid (optionId is not an offered
             option of that kind), permission_instruction_unsupported, or
-            permission_scope_unsupported (a signed scope `session` before E8).
+            permission_scope_unsupported (a signed scope `session` for a non-member host; #3095 opened 「이 세션 동안」 for member hosts).
           content:
             application/json:
               schema:
@@ -9469,6 +9885,22 @@ components:
           type: string
           format: uuid
 
+    PushFetchTokenResponse:
+      type: object
+      required: [token, expiresAtMs, ttlSeconds, workspaceId]
+      properties:
+        token:
+          type: string
+          description: A `typ = push_fetch` JWT. Not an access token; refused everywhere but the two reads above.
+        expiresAtMs:
+          type: integer
+          format: int64
+        ttlSeconds:
+          type: integer
+        workspaceId:
+          type: string
+          format: uuid
+
     Member:
       type: object
       description: Minimal member identity as returned by login/join.
@@ -10045,6 +10477,11 @@ components:
           type: string
           minLength: 1
           maxLength: 200
+          description: >-
+            With `modelSource: instance_default` this is only the fallback that
+            runs when the team's 기본 AI row names no model.
+        modelSource:
+          $ref: "#/components/schemas/AgentModelSource"
         baseUrl:
           type: string
           format: uri
@@ -10082,11 +10519,29 @@ components:
         profile:
           $ref: "#/components/schemas/AgentProfileInput"
 
+    AgentModelSource:
+      type: string
+      enum: [agent, instance_default]
+      description: >-
+        Where the agent's model comes from (#3147, ADR-0147 증보 2026-09-29).
+        `agent`: `model` is the agent's own choice and the team's 기본 AI row
+        never applies (create default). `instance_default`: the agent follows
+        the instance default — the team row applies. An explicit request
+        `routing.model` or an applied `modelPref` is always the agent's choice.
+        The resolved value rides every `agent_job` payload as `model_source`.
+
     AgentProfileInput:
       type: object
       additionalProperties: false
       required: [instructions]
       properties:
+        modelSource:
+          allOf:
+            - $ref: "#/components/schemas/AgentModelSource"
+          description: >-
+            On a profile PUT: sets `agent.model_source`; omitted leaves it
+            unchanged. Ignored on the create body's `profile` (the create body's
+            own `modelSource` decides).
         instructions:
           type: string
           description: UTF-8 content is limited to 8192 bytes by the server.
@@ -10132,8 +10587,9 @@ components:
       type: object
       required:
         [agentMemberId, workspaceId, instructions, enabledTools, triggers, paused,
-         version, updatedBy, updatedAtMs]
+         version, updatedBy, updatedAtMs, modelSource]
       properties:
+        modelSource: {$ref: "#/components/schemas/AgentModelSource"}
         agentMemberId: {type: string, format: uuid}
         workspaceId: {type: string, format: uuid}
         instructions: {type: string}
@@ -11214,6 +11670,138 @@ components:
           type: array
           items: {$ref: "#/components/schemas/Reminder"}
         nextCursor: {type: string, format: uuid}
+
+    MemoryEvidenceLink:
+      type: object
+      required: [messageId, channelId, seq]
+      properties:
+        messageId: {type: string, format: uuid}
+        channelId: {type: string, format: uuid}
+        seq: {type: integer, format: int64, description: Channel sequence of the source message.}
+
+    MemoryDigest:
+      type: object
+      required: [id, channelId, level, fromSeq, toSeq, body, sourceCount, createdAtMs, evidence]
+      properties:
+        id: {type: string, format: uuid}
+        channelId: {type: string, format: uuid}
+        threadRootId: {type: string, format: uuid}
+        level: {type: string, enum: [window, day, week]}
+        fromSeq: {type: integer, format: int64}
+        toSeq: {type: integer, format: int64}
+        body: {type: string}
+        sourceCount: {type: integer, format: int32, description: Number of evidence messages.}
+        model: {type: string}
+        createdAtMs: {type: integer, format: int64}
+        evidence:
+          type: array
+          items: {$ref: "#/components/schemas/MemoryEvidenceLink"}
+
+    MemoryDigestListResponse:
+      type: object
+      required: [digests, afterSeq]
+      properties:
+        digests:
+          type: array
+          items: {$ref: "#/components/schemas/MemoryDigest"}
+        afterSeq:
+          type: integer
+          format: int64
+          description: Effective anchor; every digest has `toSeq > afterSeq`.
+        summarizedThroughSeq:
+          type: integer
+          format: int64
+          description: How far the summary worker has processed the channel. Absent when it has not started or the channel is unreadable.
+        nextCursor: {type: string}
+
+    MemoryDigestResponse:
+      type: object
+      required: [digest]
+      properties:
+        digest: {$ref: "#/components/schemas/MemoryDigest"}
+
+    MemoryReceipt:
+      type: object
+      required: [runId, channelId, servedCount, digestIds, digests, budgetChars, usedChars, createdAtMs]
+      properties:
+        runId: {type: string, format: uuid}
+        channelId: {type: string, format: uuid}
+        servedCount: {type: integer, format: int32, description: Everything the run was served (the chip's n).}
+        digestIds:
+          type: array
+          description: Served digests the caller can read today.
+          items: {type: string, format: uuid}
+        digests:
+          type: array
+          items: {$ref: "#/components/schemas/MemoryDigest"}
+        withheldCount:
+          type: integer
+          format: int32
+          description: Requester only. Memory left out by the answer channel's audience rule — count only, no content.
+        budgetChars: {type: integer, format: int32}
+        usedChars: {type: integer, format: int32}
+        createdAtMs: {type: integer, format: int64}
+
+    MemoryReceiptResponse:
+      type: object
+      required: [receipt]
+      properties:
+        receipt: {$ref: "#/components/schemas/MemoryReceipt"}
+
+    WorkspaceMemorySettings:
+      type: object
+      required: [enabled, paused, resetEpoch]
+      properties:
+        enabled: {type: boolean}
+        paused: {type: boolean}
+        dailyTokenCap: {type: integer, format: int32}
+        resetEpoch: {type: integer, format: int64, description: Read only.}
+
+    ChannelMemorySettings:
+      type: object
+      required: [channelId, excluded, paused]
+      properties:
+        channelId: {type: string, format: uuid}
+        excluded: {type: boolean}
+        paused: {type: boolean}
+
+    MemberMemorySettings:
+      type: object
+      required: [paused]
+      properties:
+        paused: {type: boolean}
+
+    MemorySettingsResponse:
+      type: object
+      required: [workspace, channels, me]
+      properties:
+        workspace: {$ref: "#/components/schemas/WorkspaceMemorySettings"}
+        channels:
+          type: array
+          description: Channels with an explicit row that the caller can read.
+          items: {$ref: "#/components/schemas/ChannelMemorySettings"}
+        me: {$ref: "#/components/schemas/MemberMemorySettings"}
+
+    PatchWorkspaceMemorySettingsRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        enabled: {type: boolean}
+        paused: {type: boolean}
+
+    PatchChannelMemorySettingsRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        excluded: {type: boolean}
+        paused: {type: boolean}
+
+    PatchMyMemorySettingsRequest:
+      type: object
+      additionalProperties: false
+      required: [paused]
+      properties:
+        paused: {type: boolean}
 
     CreateChannelRequest:
       type: object

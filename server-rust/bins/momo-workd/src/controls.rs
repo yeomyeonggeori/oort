@@ -167,8 +167,12 @@ impl ControlLoop {
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
                 .apply_revocation(&revocation, RevocationSource::Relayed);
-            if let Err(label) = result {
-                tracing::warn!(error = label, "relayed device revocation refused");
+            match result {
+                // #3095: a revoked key's 「이 세션 동안」 must not outlive it.
+                Ok(()) => self.sessions.grant_epoch().retire_all(),
+                Err(label) => {
+                    tracing::warn!(error = label, "relayed device revocation refused");
+                }
             }
         }
     }
@@ -386,12 +390,26 @@ impl ControlLoop {
         ) else {
             return Err(Refusal::InvalidControl);
         };
+        // #3095: 「이 세션 동안」 is read ONLY from the owner's signed envelope
+        // that this host verified (R2 on, `check_signature` passed) — never
+        // from the payload. Otherwise the allow is one-shot, whatever the
+        // server wrote. Same precedent as the instruction's `interrupt`.
+        let remember = self.human.is_some()
+            && self.signatures_required()
+            && kind == "allow_once"
+            && control
+                .human_signature
+                .as_ref()
+                .and_then(|envelope| envelope.get("scope"))
+                .and_then(serde_json::Value::as_str)
+                == Some("session");
         self.sessions
             .permission(
                 session_id,
                 request_event_id,
                 option_id.to_string(),
                 kind.to_string(),
+                remember,
             )
             .await
     }
@@ -433,6 +451,12 @@ pub struct SocketShared {
     /// Reported by `status`, and lowered by `reset_signature_requirement`
     /// (#3117): whether this host enforces device signatures, and why.
     pub requirement: Arc<Mutex<SignatureRequirement>>,
+    /// The host state folder: where `set_remote_profile` saves the choice
+    /// ([`crate::profile`], #3033).
+    pub state_folder: std::path::PathBuf,
+    /// #3095: `pin_root`, `revoke_device` and `reset_signature_requirement`
+    /// retire every 「이 세션 동안」 grant through it.
+    pub grants: crate::session_grant::GrantEpoch,
 }
 
 /// The heartbeat's last outcome, which the desktop app reads through the

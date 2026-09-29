@@ -1948,6 +1948,7 @@ mod tests {
             status: "pending".to_string(),
             expires_at: None,
             agent_model: "hermes-agent".to_string(),
+            agent_model_source: momo_agent::ModelSource::Agent,
             run_input: json!({}),
             step_count: 0,
             max_steps: 50,

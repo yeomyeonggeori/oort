@@ -327,6 +327,13 @@ function enrollFailure(error: unknown): EnrollError {
         {unlinked: true},
       );
     }
+    // #3127: this sign-in already holds a phone key (the old one is not
+    // revoked yet). The Mac revokes it, or the phone links by QR again.
+    if (error.code === DEVICE_KEY_REFUSAL.lineageHasPhoneKey) {
+      return new EnrollError(
+        '이 연결에는 이미 폰 키가 있습니다. 맥에서 이전 키를 끊거나 QR로 다시 연결하세요.',
+      );
+    }
     if (error.code === DEVICE_KEY_REFUSAL.notFound) {
       return new EnrollError(
         '서버에 이 키가 더 이상 없습니다. 다시 시도하면 새로 등록합니다.',

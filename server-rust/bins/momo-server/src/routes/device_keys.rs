@@ -45,11 +45,11 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Extension, Json};
 use momo_auth::device_key::{
-    endorse_device_key_in_tx, insert_device_key_in_tx, list_member_device_keys_in_tx,
-    load_device_key_in_tx, rebind_device_key_in_tx, rebindable_key_id_in_tx,
-    revoke_device_key_signed_in_tx, session_is_device_linked_in_tx, validated_new_device_key,
-    verify_own_password_in_tx, DeviceKeyRecord, DeviceKeyRefusal, DEVICE_KEY_PLATFORM_IOS,
-    DEVICE_KEY_PLATFORM_MACOS, REFUSAL_DEVICE_KEY_ALREADY_REGISTERED,
+    endorse_device_key_in_tx, insert_device_key_in_tx, lineage_has_live_phone_key_in_tx,
+    list_member_device_keys_in_tx, load_device_key_in_tx, rebind_device_key_in_tx,
+    rebindable_key_id_in_tx, revoke_device_key_signed_in_tx, session_is_device_linked_in_tx,
+    validated_new_device_key, verify_own_password_in_tx, DeviceKeyRecord, DeviceKeyRefusal,
+    DEVICE_KEY_PLATFORM_IOS, DEVICE_KEY_PLATFORM_MACOS, REFUSAL_DEVICE_KEY_ALREADY_REGISTERED,
     REFUSAL_DEVICE_KEY_MEMBER_MISMATCH, REFUSAL_DEVICE_KEY_REBIND_REQUIRED,
     REFUSAL_DEVICE_ROOT_LINKED_SESSION, REFUSAL_DEVICE_ROOT_PASSWORD_REQUIRED,
     REFUSAL_SESSION_LINEAGE_ENDED,
@@ -101,6 +101,10 @@ pub(crate) fn refusal_error(refusal: DeviceKeyRefusal) -> ApiError {
         DeviceKeyRefusal::LinkNotFromMac => (
             StatusCode::FORBIDDEN,
             "this phone was linked by a QR no Mac sign-in issued; link it again from your Mac",
+        ),
+        DeviceKeyRefusal::LineageHasPhoneKey => (
+            StatusCode::CONFLICT,
+            "this sign-in already holds a phone key; revoke it from your Mac or link the phone again by QR",
         ),
         DeviceKeyRefusal::Revoked => (StatusCode::FORBIDDEN, "the device key is revoked"),
         DeviceKeyRefusal::SignatureInvalid => (
@@ -156,7 +160,7 @@ fn not_active() -> ApiError {
 
 /// `GET /v1/workspaces/{ws}/device-keys/signing-context` → 200 (#3023).
 ///
-/// The `instance_id` line of every `momo.human.control.v1` statement is this
+/// The `instance_id` line of every `momo.human.control.v2` statement is this
 /// instance's `MOMO_INSTANCE_ID`, served verbatim — the one source the
 /// `host_register` check (#3022) and every signed instruction verify against;
 /// a client never builds it from a URL (D-5). `serverTimeMs` is the clock the
@@ -319,6 +323,17 @@ pub async fn register(
                 .map_err(DbError::from)?
             {
                 return Ok(Err(lineage_ended()));
+            }
+            // One phone key per sign-in lineage (#3127). A second key on a
+            // lineage is what a stolen phone refresh token would plant as an
+            // approval candidate; a legitimate replacement first has the old
+            // key revoked by the Mac (D-7) or links the phone by QR again.
+            if new.platform == DEVICE_KEY_PLATFORM_IOS
+                && lineage_has_live_phone_key_in_tx(conn, workspace_id, session_id, &new.public_key)
+                    .await
+                    .map_err(DbError::from)?
+            {
+                return Ok(Err(refusal_error(DeviceKeyRefusal::LineageHasPhoneKey)));
             }
             let Some(key_id) =
                 insert_device_key_in_tx(conn, workspace_id, member_id, session_id, &new)

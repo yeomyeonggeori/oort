@@ -86,7 +86,7 @@
 //! A stolen refresh token could otherwise register a stranger's box as the
 //! victim's host. So a member-scoped registration may carry `registration`:
 //! the member's **root device key** (a live, unendorsed `macos` key — D-6 ①)
-//! signing `momo.human.control.v1` with `kind=host_register` over the host
+//! signing `momo.human.control.v2` with `kind=host_register` over the host
 //! public key, the host id candidate and the display name. The server rebuilds
 //! the statement from its own instance id (`MOMO_INSTANCE_ID`) and the rows this
 //! request writes, checks the ±5 min / 10 min window, verifies, and creates the
