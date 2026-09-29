@@ -37,6 +37,9 @@ GRANT SELECT, INSERT, UPDATE ON mem_usage TO mem_definer;
 ALTER TABLE mem_usage ENABLE ROW LEVEL SECURITY;
 ALTER TABLE mem_usage FORCE ROW LEVEL SECURITY;
 
+-- L-3: 접근 의도 = 「워크스페이스 관리자만 RLS 로 읽기」. momo_app 의 SELECT 권한은 공용 잠금
+-- 블록(부트스트랩)이 모든 mem_* 에 남기는 것과 같고, 정책이 관리자·같은 워크스페이스로 좁힌다.
+-- 쓰기는 없다(정의자 함수만). 시험이 관리자/비관리자/타 워크스페이스를 확인한다.
 DROP POLICY IF EXISTS mem_usage_sel ON mem_usage;
 CREATE POLICY mem_usage_sel ON mem_usage FOR SELECT
   USING (
@@ -57,12 +60,22 @@ CREATE POLICY mem_usage_upd ON mem_usage FOR UPDATE TO mem_definer
 GRANT USAGE ON SCHEMA public TO mem_definer;
 GRANT CREATE ON SCHEMA public TO mem_definer;
 
+-- H-1: mem_apply_digest 가 근거 메시지 행을 FOR KEY SHARE 로 잠그려면 PG 는 UPDATE 권한(한
+-- 컬럼이라도)과 UPDATE 정책의 USING 을 요구한다. 잠금 전용이다: 컬럼 권한은 id 하나뿐이고,
+-- 정책의 WITH CHECK (false) 라 mem_definer 는 어떤 메시지도 실제로 바꿀 수 없다.
+GRANT UPDATE (id) ON message TO mem_definer;
+DROP POLICY IF EXISTS message_mem_row_lock ON message;
+CREATE POLICY message_mem_row_lock ON message FOR UPDATE TO mem_definer
+  USING (workspace_id = nullif(current_setting('app.workspace_id', true), '')::uuid)
+  WITH CHECK (false);
+
 -- ── 요약해도 되는 채널인가 ──────────────────────────────────────────────────────────
 -- 워크스페이스·채널 스위치(mem_channel_switch) + 보관 안 됨 + DM 규칙.
 --   * 공개·비공개 채널: 스위치만.
---   * DM: 활성 에이전트가 참여한 DM 만(사람↔에이전트). 사람끼리 DM 은 제외한다 — 「참여자
---     전원이 켜야 포함」하는 옵트인 설정이 아직 없으므로 기본 제외가 유일한 안전한 값이다.
---     참여한 사람 누구라도 개인 일시정지(mem_settings scope=member)면 제외한다.
+--   * DM: 활성 멤버가 정확히 사람 1 + 활성 에이전트 1 인 DM 만(ADR D9: 참여자의 개인 공간).
+--     사람끼리 DM·그룹 DM(3인 이상)·에이전트가 나간 DM 은 제외한다. 에이전트가 합류하기 전의
+--     메시지는 워커의 읽기와 mem_apply_digest 의 근거 검사가 함께 걸러 낸다(사람끼리 대화의 소급 요약 금지).
+--     참여한 사람이 개인 일시정지(mem_settings scope=member)면 제외한다.
 CREATE OR REPLACE FUNCTION mem_channel_eligible(p_channel_id uuid)
 RETURNS boolean
 LANGUAGE sql
@@ -76,12 +89,18 @@ AS $$
        AND (
          c.kind <> 'dm'
          OR (
-           EXISTS (
-             SELECT 1 FROM public.membership x
-               JOIN public.member mm ON mm.id = x.member_id AND mm.workspace_id = x.workspace_id
+           (SELECT pg_catalog.count(*) FROM public.membership x
               WHERE x.channel_id = c.id AND x.workspace_id = c.workspace_id
-                AND x.left_at IS NULL
-                AND mm.kind = 'agent' AND mm.status = 'active' AND mm.deleted_at IS NULL)
+                AND x.left_at IS NULL) = 2
+           AND (SELECT pg_catalog.count(*) FROM public.membership x
+                  JOIN public.member mm ON mm.id = x.member_id AND mm.workspace_id = x.workspace_id
+                 WHERE x.channel_id = c.id AND x.workspace_id = c.workspace_id
+                   AND x.left_at IS NULL
+                   AND mm.kind = 'agent' AND mm.status = 'active' AND mm.deleted_at IS NULL) = 1
+           AND (SELECT pg_catalog.count(*) FROM public.membership x
+                  JOIN public.member mm ON mm.id = x.member_id AND mm.workspace_id = x.workspace_id
+                 WHERE x.channel_id = c.id AND x.workspace_id = c.workspace_id
+                   AND x.left_at IS NULL AND mm.kind <> 'agent') = 1
            AND NOT EXISTS (
              SELECT 1 FROM public.membership x
                JOIN public.mem_settings s
@@ -135,7 +154,7 @@ $$;
 
 -- ── stale 재생성 대상 ──────────────────────────────────────────────────────────────
 -- 창 → 일 → 주 순(하위가 먼저 다시 만들어져야 롤업이 그 위에 선다).
-CREATE OR REPLACE FUNCTION mem_stale_digests(p_limit integer)
+CREATE OR REPLACE FUNCTION mem_stale_digests(p_limit integer, p_min_age_seconds integer)
 RETURNS TABLE (id uuid, channel_id uuid, thread_root_id uuid, level text, from_seq bigint, to_seq bigint)
 LANGUAGE sql
 STABLE
@@ -146,6 +165,8 @@ AS $$
     FROM public.mem_digest d
    WHERE d.workspace_id = nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid
      AND d.stale
+     -- M-1: 같은 요약을 너무 자주 다시 만들지 않는다(수정 폭주 → 토큰 소모 방지).
+     AND d.created_at <= pg_catalog.now() - pg_catalog.make_interval(secs => GREATEST(COALESCE(p_min_age_seconds, 0), 0))
    ORDER BY CASE d.level WHEN 'window' THEN 0 WHEN 'day' THEN 1 ELSE 2 END, d.to_seq
    LIMIT LEAST(GREATEST(COALESCE(p_limit, 50), 1), 500)
 $$;
@@ -312,6 +333,14 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.channel c WHERE c.id = p_channel_id AND c.workspace_id = v_ws) THEN
     RAISE EXCEPTION 'mem_apply_digest: channel not in workspace' USING ERRCODE = '23503';
   END IF;
+  -- H-1: 락 순서는 어디서나 「메시지 행 → 채널 advisory」. 편집 tx 는 메시지 행을 FOR UPDATE 로
+  -- 쥔 채 트리거에서 advisory(exclusive)를 기다린다. 여기서 advisory(shared)를 먼저 쥐고 나중에
+  -- mem_evidence FK 가 같은 행에 FOR KEY SHARE 를 요청하면 교착(40P01)이다. 그래서 근거 행을
+  -- id 순으로 먼저 잠근다(편집이 먼저면 여기서 기다리고, 우리가 먼저면 편집이 커밋까지 기다린다).
+  PERFORM 1 FROM public.message m
+   WHERE m.id = ANY (p_evidence_message_ids) AND m.workspace_id = v_ws AND m.channel_id = p_channel_id
+   ORDER BY m.id
+   FOR KEY SHARE;
   -- L-2: 이 채널의 수정·삭제 트리거(exclusive)와 직렬화한다. 이후 문장은 락을 얻은 뒤의
   -- 새 스냅샷으로 돈다(READ COMMITTED) — 먼저 커밋된 편집은 아래 40001 검사가 잡는다.
   PERFORM pg_catalog.pg_advisory_xact_lock_shared(
@@ -346,6 +375,13 @@ BEGIN
          AND m.seq BETWEEN p_from_seq AND p_to_seq
          AND m.deleted_at IS NULL AND m.state <> 'deleted'
          AND (p_thread_root_id IS NULL OR m.id = p_thread_root_id OR m.root_id = p_thread_root_id)
+         -- M-3: DM 은 에이전트가 합류한 뒤의 메시지만 근거가 될 수 있다(소급 요약 금지).
+         AND (NOT EXISTS (SELECT 1 FROM public.channel dc WHERE dc.id = m.channel_id AND dc.kind = 'dm')
+              OR m.created_at >= (
+                   SELECT pg_catalog.max(x.joined_at) FROM public.membership x
+                     JOIN public.member am ON am.id = x.member_id AND am.workspace_id = x.workspace_id
+                    WHERE x.channel_id = m.channel_id AND x.workspace_id = m.workspace_id
+                      AND x.left_at IS NULL AND am.kind = 'agent'))
      ) <> v_n THEN
     RAISE EXCEPTION 'mem_apply_digest: evidence message is not a live message of this channel/range/thread'
       USING ERRCODE = '23503';
@@ -413,7 +449,7 @@ DECLARE f text;
 BEGIN
   FOREACH f IN ARRAY ARRAY[
     'mem_channel_eligible(uuid)', 'mem_cursor_state(uuid)',
-    'mem_digest_index(uuid, text, bigint)', 'mem_stale_digests(integer)',
+    'mem_digest_index(uuid, text, bigint)', 'mem_stale_digests(integer, integer)',
     'mem_drop_digest(uuid)', 'mem_token_budget(bigint)',
     'mem_reserve_tokens(bigint, bigint)', 'mem_adjust_tokens(bigint)',
     'mem_message_changed()',
@@ -450,7 +486,7 @@ DECLARE
     'mem_channel_eligible(uuid)',
     'mem_cursor_state(uuid)',
     'mem_digest_index(uuid, text, bigint)',
-    'mem_stale_digests(integer)',
+    'mem_stale_digests(integer, integer)',
     'mem_drop_digest(uuid)',
     'mem_token_budget(bigint)',
     'mem_reserve_tokens(bigint, bigint)',
@@ -463,6 +499,11 @@ BEGIN
   FOREACH r IN ARRAY runtime_roles LOOP
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
       EXECUTE format('REVOKE ALL ON TABLE public.mem_usage FROM %I', r);
+      -- L-3: momo_app keeps SELECT only (the admin-read policy narrows it); the shared bootstrap
+      -- block grants exactly the same.
+      IF r = 'momo_app' THEN
+        EXECUTE format('GRANT SELECT ON TABLE public.mem_usage TO %I', r);
+      END IF;
     END IF;
   END LOOP;
   FOREACH f IN ARRAY worker_only LOOP
@@ -495,5 +536,28 @@ BEGIN
             WHERE n.nspname = current_schema() AND p.prosecdef AND p.proname LIKE 'mem\_%'
               AND pg_get_userbyid(p.proowner) <> 'mem_definer' LOOP
     RAISE EXCEPTION 'SECURITY DEFINER function % is not owned by mem_definer', f;
+  END LOOP;
+END $$;
+
+-- ── L-1: mem_definer 소유 SECURITY DEFINER 함수 허용 목록 (101 것 + 이 파일의 9개) ───────
+-- 101 은 머지된 마이그레이션이라 고치지 않는다. 새 정의자 함수를 만들면 이 목록과 시험
+-- (mem_schema_conformance_pg.rs 의 DEFINER_ALLOW_LIST)에 이름을 올려야 한다. 목록 밖 함수는
+-- RLS 를 우회하는 새 통로이므로 여기서 멈춘다.
+DO $$
+DECLARE
+  f text;
+  allow text[] := ARRAY[
+    'mem_digest_evidence_ok', 'mem_digest_live', 'mem_digest_audience_ok',
+    'mem_digest_rollup_inputs', 'mem_channel_switch',
+    'mem_apply_digest', 'mem_advance_cursor', 'mem_record_serving',
+    'mem_channel_eligible', 'mem_cursor_state', 'mem_digest_index', 'mem_stale_digests',
+    'mem_drop_digest', 'mem_token_budget', 'mem_reserve_tokens', 'mem_adjust_tokens',
+    'mem_message_changed'
+  ];
+BEGIN
+  FOR f IN SELECT p.oid::regprocedure::text FROM pg_proc p
+            WHERE p.prosecdef AND pg_get_userbyid(p.proowner) = 'mem_definer'
+              AND p.proname <> ALL (allow) LOOP
+    RAISE EXCEPTION 'SECURITY DEFINER function % owned by mem_definer is not in the allow-list', f;
   END LOOP;
 END $$;

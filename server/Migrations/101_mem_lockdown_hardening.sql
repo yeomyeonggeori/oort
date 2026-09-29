@@ -123,11 +123,7 @@ DECLARE
   allow text[] := ARRAY[
     'mem_digest_evidence_ok', 'mem_digest_live', 'mem_digest_audience_ok',
     'mem_digest_rollup_inputs', 'mem_channel_switch',
-    'mem_apply_digest', 'mem_advance_cursor', 'mem_record_serving',
-    -- 102_mem_worker.sql (#3162)
-    'mem_channel_eligible', 'mem_cursor_state', 'mem_digest_index', 'mem_stale_digests',
-    'mem_drop_digest', 'mem_token_budget', 'mem_reserve_tokens', 'mem_adjust_tokens',
-    'mem_message_changed'
+    'mem_apply_digest', 'mem_advance_cursor', 'mem_record_serving'
   ];
 BEGIN
   FOR f IN SELECT p.oid::regprocedure::text FROM pg_proc p

@@ -2337,6 +2337,11 @@ fn migration_path() -> PathBuf {
         .join("../../../server/Migrations/101_mem_lockdown_hardening.sql")
 }
 
+/// The allow-list self-check lives in 102 (101 is merged and stays untouched, #3191 M-6).
+fn worker_migration_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../server/Migrations/102_mem_worker.sql")
+}
+
 /// M-1: the lock block is one text in three files. Compared byte for byte (stronger than a
 /// hash); the digest is printed so the PR can quote it.
 #[test]
@@ -2507,10 +2512,10 @@ async fn security_definer_functions_owned_by_mem_definer_are_allow_listed() {
         owned,
         DEFINER_ALLOW_LIST.to_vec(),
         "a SECURITY DEFINER function owned by mem_definer must be added to the allow-list \
-         here and in 101_mem_lockdown_hardening.sql on purpose"
+         here and in 102_mem_worker.sql on purpose"
     );
     // The migration's own self-check passes on the good state ...
-    let check = tail_block(&migration_path(), "-- ── L-1", None);
+    let check = tail_block(&worker_migration_path(), "-- ── L-1", None);
     run_sql_text(&check).expect("allow-list check passes on the real state");
     // ... and fails, loudly, when a stranger function is owned by mem_definer (sabotage; the
     // single transaction rolls the rogue function back).

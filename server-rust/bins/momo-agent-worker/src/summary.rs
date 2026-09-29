@@ -39,7 +39,9 @@
 //! called**, a `mem.summary.unconfigured` audit row (reason code, redacted labels, no key) is
 //! written once per workspace per 6 h, and the cursor does not move — so when the operator
 //! fixes the row, the backlog is summarised, not skipped. The worker never falls back to the
-//! agent's model, the env transport, or a personal subscription.
+//! agent's model or a personal subscription. The "team key" is the head of the ADR-0147 cascade
+//! — the instance's provider link, or the env gateway when no link is stored (position 0); that
+//! is the same transport the default-AI rows resolve against, not a fallback.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
@@ -74,6 +76,7 @@ const AUDIT_THROTTLE_HOURS: i32 = 6;
 const STALE_BATCH: i32 = 200;
 
 /// Placeholder for a body that looks like a credential. The message stays evidence.
+const SUMMARY_WITHHELD: &str = "[요약에 민감정보가 섞여 저장하지 않았습니다]";
 const SECRET_PLACEHOLDER: &str = "[민감정보로 보여 가려진 메시지]";
 
 // ---------------------------------------------------------------------------
@@ -435,7 +438,10 @@ fn transcript_line(message: &SourceMessage, max_chars: usize) -> String {
     format!(
         "[{}] {}({}): {}",
         message.seq,
-        message.author_name.replace(['\n', '\r'], " "),
+        defang(&clip_chars(
+            &message.author_name.replace(['\n', '\r'], " "),
+            60
+        )),
         if message.author_is_agent {
             "에이전트"
         } else {
@@ -614,9 +620,10 @@ impl AgentWorker {
                 _ => by_workspace.push((ws, vec![(ch, head)])),
             }
         }
+        let min_age = cfg.regen_min_interval_seconds;
         for (ws, list) in by_workspace {
             let stale = match mem::with_memory_tx(&self.pool, ws, move |conn| {
-                Box::pin(async move { mem::stale_digests(conn, STALE_BATCH).await })
+                Box::pin(async move { mem::stale_digests(conn, STALE_BATCH, min_age).await })
             })
             .await
             {
@@ -1091,13 +1098,25 @@ impl AgentWorker {
 
             // Daily cap, before the model is called (plan §6.6).
             let cap = cfg.daily_token_cap;
+            // M-2: the pause/exclude/DM gate is re-checked in the same memory tx as the
+            // reservation, right before the model call — a pause that lands mid-pass stops
+            // the next call, and nothing is reserved for a call that will not happen.
             let reserved = mem::with_memory_tx(&self.pool, ws, move |conn| {
-                Box::pin(async move { mem::reserve_tokens(conn, estimate, cap).await })
+                Box::pin(async move {
+                    if !mem::channel_eligible(conn, ch).await? {
+                        return Ok(None);
+                    }
+                    Ok(Some(mem::reserve_tokens(conn, estimate, cap).await?))
+                })
             })
             .await;
             match reserved {
-                Ok(true) => {}
-                Ok(false) => {
+                Ok(Some(true)) => {}
+                Ok(None) => {
+                    stats.switched += 1;
+                    return JobOutcome::Switched;
+                }
+                Ok(Some(false)) => {
                     stats.cap_reached += 1;
                     self.record_cap_reached(ws).await;
                     return JobOutcome::CapReached;
@@ -1125,12 +1144,20 @@ impl AgentWorker {
                     return JobOutcome::Failed;
                 }
             };
-            self.settle_tokens(ws, reply.tokens.unwrap_or(estimate) - estimate)
-                .await;
+            // L-4: a provider that under-reports (or omits) usage cannot slip under the cap —
+            // at least half the estimate is charged.
+            let charged = reply.tokens.unwrap_or(estimate).max(estimate / 2);
+            self.settle_tokens(ws, charged - estimate).await;
 
             let token = self.summary.lease_token();
             let lease_secs = cfg.lease_seconds;
-            let body = clip_chars(reply.text.trim(), 6_000);
+            let mut body = clip_chars(reply.text.trim(), 6_000);
+            if mem::looks_like_secret(&body) {
+                // A credential the model echoed is never stored. The digest is written with a
+                // placeholder so the cursor moves (retrying would just burn tokens again).
+                tracing::warn!(channel_id = %ch, "memory: model output looked like a credential; withheld");
+                body = SUMMARY_WITHHELD.to_string();
+            }
             let cursor_to = loaded.cursor_to;
             let (level, thread_root) = (loaded.level, loaded.thread_root);
             let (from_seq, to_seq, read_at) = (loaded.from_seq, loaded.to_seq, loaded.read_at);

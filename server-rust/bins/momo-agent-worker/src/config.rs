@@ -164,6 +164,9 @@ pub struct MemoryConfig {
     pub windows_per_channel: usize,
     /// `MEMORY_APPLY_RETRIES` (3) — re-reads after 40001/23503 before leaving it to the next sweep.
     pub apply_retries: usize,
+    /// `MEMORY_REGEN_MIN_INTERVAL_SECONDS` (900) — a stale digest is regenerated only when it
+    /// is at least this old, so repeated edits cannot burn the workspace token cap.
+    pub regen_min_interval_seconds: i32,
     /// `MEMORY_MAX_CHANNELS` (2000) — channels one sweep looks at.
     pub max_channels: i64,
 }
@@ -190,6 +193,7 @@ impl Default for MemoryConfig {
             rollup_hour: 4,
             windows_per_channel: 3,
             apply_retries: 3,
+            regen_min_interval_seconds: 900,
             max_channels: 2_000,
         }
     }
@@ -234,6 +238,10 @@ impl MemoryConfig {
             windows_per_channel: env_number("MEMORY_WINDOWS_PER_CHANNEL", d.windows_per_channel)?
                 .max(1),
             apply_retries: env_number("MEMORY_APPLY_RETRIES", d.apply_retries)?,
+            regen_min_interval_seconds: env_number(
+                "MEMORY_REGEN_MIN_INTERVAL_SECONDS",
+                d.regen_min_interval_seconds,
+            )?,
             max_channels: env_number("MEMORY_MAX_CHANNELS", d.max_channels)?.max(1),
         })
     }

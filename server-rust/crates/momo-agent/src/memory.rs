@@ -213,14 +213,19 @@ pub struct StaleDigest {
     pub to_seq: i64,
 }
 
+/// Stale digests that are at least `min_age_seconds` old (M-1: a member editing over and over
+/// cannot make the worker regenerate the same digest — and spend tokens — more than once per
+/// interval; a regeneration resets the digest's `created_at`).
 pub async fn stale_digests(
     conn: &mut PgConnection,
     limit: i32,
+    min_age_seconds: i32,
 ) -> Result<Vec<StaleDigest>, DbError> {
     let rows = sqlx::query(
-        "SELECT id, channel_id, thread_root_id, level, from_seq, to_seq FROM mem_stale_digests($1)",
+        "SELECT id, channel_id, thread_root_id, level, from_seq, to_seq FROM mem_stale_digests($1, $2)",
     )
     .bind(limit)
+    .bind(min_age_seconds)
     .fetch_all(&mut *conn)
     .await?;
     Ok(rows
@@ -400,11 +405,21 @@ impl SourceMessage {
 
 const SOURCE_COLS: &str = "m.id, m.seq, m.root_id, a.display_name AS author_name, \
      (a.kind = 'agent') AS author_is_agent, COALESCE(m.body, '') AS body, m.created_at, \
-     m.edited_at, COALESCE((m.props -> 'momo.stream' ->> 'streaming') = 'true', false) AS streaming";
+     m.edited_at, COALESCE((m.props -> 'momo.stream' ->> 'streaming') = 'true', false) \
+     AND m.created_at > now() - interval '30 minutes' AS streaming";
 
 /// The same liveness rule everywhere: a text message with a body, not deleted.
+///
+/// A DM (M-3, ADR-0196 D9) only counts from the moment its agent joined: what the two humans
+/// said to each other before is never read (`mem_apply_digest` refuses it as evidence too).
+/// A `streaming` marker older than 30 minutes is a crashed writer, not a live stream (M-5).
 const LIVE: &str = "m.type = 'text' AND m.deleted_at IS NULL AND m.state <> 'deleted' \
-     AND m.body IS NOT NULL AND btrim(m.body) <> ''";
+     AND m.body IS NOT NULL AND btrim(m.body) <> '' \
+     AND (NOT EXISTS (SELECT 1 FROM channel dc WHERE dc.id = m.channel_id AND dc.kind = 'dm') \
+          OR m.created_at >= (SELECT max(dx.joined_at) FROM membership dx \
+                                JOIN member dm ON dm.id = dx.member_id AND dm.workspace_id = dx.workspace_id \
+                               WHERE dx.channel_id = m.channel_id AND dx.workspace_id = m.workspace_id \
+                                 AND dx.left_at IS NULL AND dm.kind = 'agent'))";
 
 fn source_message(row: &sqlx::postgres::PgRow) -> SourceMessage {
     SourceMessage {
@@ -515,7 +530,7 @@ pub async fn read_channel_window(
     limit: i64,
 ) -> Result<Vec<SourceMessage>, DbError> {
     let sql = format!(
-        "SELECT {SOURCE_COLS} FROM message m JOIN member a ON a.id = m.author_member_id \
+        "SELECT {SOURCE_COLS} FROM message m JOIN member a ON a.id = m.author_member_id AND a.workspace_id = m.workspace_id \
           WHERE m.workspace_id = $1 AND m.channel_id = $2 AND m.root_id IS NULL \
             AND m.seq > $3 AND m.seq <= $4 AND {LIVE} \
             AND ($5::timestamptz IS NULL OR m.created_at < $5) \
@@ -545,7 +560,7 @@ pub async fn read_range(
     limit: i64,
 ) -> Result<Vec<SourceMessage>, DbError> {
     let sql = format!(
-        "SELECT {SOURCE_COLS} FROM message m JOIN member a ON a.id = m.author_member_id \
+        "SELECT {SOURCE_COLS} FROM message m JOIN member a ON a.id = m.author_member_id AND a.workspace_id = m.workspace_id \
           WHERE m.workspace_id = $1 AND m.channel_id = $2 \
             AND m.seq >= $3 AND m.seq <= $4 AND {LIVE} \
             AND (($5::uuid IS NULL AND m.root_id IS NULL) \
@@ -659,7 +674,7 @@ pub async fn read_thread_window(
     limit: i64,
 ) -> Result<Vec<SourceMessage>, DbError> {
     let sql = format!(
-        "SELECT {SOURCE_COLS} FROM message m JOIN member a ON a.id = m.author_member_id \
+        "SELECT {SOURCE_COLS} FROM message m JOIN member a ON a.id = m.author_member_id AND a.workspace_id = m.workspace_id \
           WHERE m.workspace_id = $1 AND m.channel_id = $2 AND {LIVE} \
             AND (m.id = $3 OR (m.root_id = $3 AND m.seq > $4 AND m.seq <= $5)) \
           ORDER BY m.seq LIMIT $6"
