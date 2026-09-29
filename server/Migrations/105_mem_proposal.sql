@@ -41,7 +41,7 @@ ALTER TABLE mem_event DROP CONSTRAINT IF EXISTS mem_event_action_ck;
 ALTER TABLE mem_event ADD CONSTRAINT mem_event_action_ck
   CHECK (action IN
     ('created', 'confirmed', 'edited', 'merged', 'superseded', 'retired', 'forgotten',
-     'served', 'withheld', 'reset', 'proposed', 'rejected'));
+     'served', 'withheld', 'reset', 'proposed', 'rejected', 'expired'));
 
 -- ── 제안 테이블 ────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS mem_proposal (
@@ -221,6 +221,15 @@ BEGIN
     SELECT tm.seq INTO v_trigger_seq FROM public.message tm
      WHERE tm.id = v_trigger AND tm.workspace_id = v_ws AND tm.channel_id = v_channel;
   END IF;
+  -- M-1 (보안 검수): 「지금 대화」의 기준 seq 는 절대 비지 않는다. 트리거가 없는 run(parent_run_id 로 이어진 자식 run)
+  -- 이나 트리거 행을 못 찾는 run 은 「run 이 시작될 때의 채널 머리 seq」를 기준으로 삼는다 — 에이전트가 그 시점에 볼 수
+  -- 있던 최신 메시지다. 창(200개)을 건너뛰는 fail-open 을 두지 않는다. 거부(55000) 대신 폴백을 고른 이유: A2A 위임 자식
+  -- run 도 요청자(사슬)가 있어 정당하게 제안할 수 있고, 머리 seq 는 그 run 이 볼 수 있던 범위의 상한이라 트리거 기준과
+  -- 같은 성질(뒤의 메시지·오래된 메시지 거부)을 유지한다. 빈 채널이면 0 이라 어떤 근거도 통과하지 못한다.
+  IF v_trigger_seq IS NULL THEN
+    SELECT COALESCE(pg_catalog.max(hm.seq), 0) INTO v_trigger_seq FROM public.message hm
+     WHERE hm.workspace_id = v_ws AND hm.channel_id = v_channel AND hm.created_at <= v_run_created;
+  END IF;
 
   -- 락 순서는 어디서나 「메시지 행 → 채널 advisory」(102 H-1).
   PERFORM 1 FROM public.message m
@@ -238,7 +247,7 @@ BEGIN
          -- 에이전트도 요청자도 그 메시지의 채널을 읽을 수 있어야 한다(위의 「같은 채널」과 독립된 벽).
          AND public.mem_member_can_read(m.channel_id, v_agent)
          AND public.mem_member_can_read(m.channel_id, v_req)
-         AND (v_trigger_seq IS NULL OR (m.seq <= v_trigger_seq AND m.seq > v_trigger_seq - 200))
+         AND (m.seq <= v_trigger_seq AND m.seq > v_trigger_seq - 200)
          AND (NOT EXISTS (SELECT 1 FROM public.channel dc WHERE dc.id = m.channel_id AND dc.kind = 'dm')
               OR m.created_at >= (
                    SELECT pg_catalog.max(x.joined_at) FROM public.membership x
@@ -260,15 +269,29 @@ BEGIN
       USING ERRCODE = '23514';
   END IF;
 
+  -- L-2: 같은 채널의 제안은 중복 검사 **전에** 직렬화한다(동시에 같은 내용이 들어와 둘 다 검사를 통과한 뒤 23505 로
+  -- 터지는 길을 막는다). 요율 제한의 카운트도 이 락 아래에서 센다. 아래 INSERT 의 ON CONFLICT 는 두 번째 벽이다.
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('mem_proposal:' || v_channel::text, 0));
+
   -- 같은 채널·같은 내용: 이미 기억하고 있거나 이미 제안 중이면 새로 만들지 않는다.
   v_norm := pg_catalog.lower(pg_catalog.regexp_replace(v_body, '[[:space:]]+', ' ', 'g'));
   v_hash := pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(p_kind || ':' || v_norm, 'UTF8')), 'hex');
-  -- 만료된 대기 제안이 같은 내용을 막지 않게 정리한다(본문·근거 id 를 지우고 거절로 닫는다).
-  UPDATE public.mem_proposal
-     SET status = 'rejected', body = NULL, subject_key = NULL, evidence_message_ids = '{}',
-         decided_by = v_agent, decided_at = pg_catalog.now()
-   WHERE workspace_id = v_ws AND channel_id = v_channel AND content_hash = v_hash
-     AND status = 'pending' AND expires_at <= pg_catalog.now();
+  -- 만료된 대기 제안이 같은 내용을 막지 않게 정리한다(본문·근거 id 를 지우고 거절 껍데기로 닫는다).
+  -- L-7: `decided_by` 는 NOT NULL·shape CHECK 가 결정자를 요구해서 **제안한 에이전트**로 채운다 — 사람의 결정이 아니다.
+  -- 그래서 사건을 `rejected` 가 아니라 `expired`(행위자 = 에이전트, detail.by='expiry')로 남긴다. UI 는 `expired` 이벤트가
+  -- 있는 껍데기를 「사람이 거절함」으로 읽지 말 것(만료 카드는 목록에도 나오지 않는다).
+  WITH closed AS (
+    UPDATE public.mem_proposal
+       SET status = 'rejected', body = NULL, subject_key = NULL, evidence_message_ids = '{}',
+           decided_by = v_agent, decided_at = pg_catalog.now()
+     WHERE workspace_id = v_ws AND channel_id = v_channel AND content_hash = v_hash
+       AND status = 'pending' AND expires_at <= pg_catalog.now()
+    RETURNING id
+  )
+  INSERT INTO public.mem_event (workspace_id, target_kind, target_id, action, actor_member_id, detail)
+  SELECT v_ws, 'proposal', c.id, 'expired', v_agent, pg_catalog.jsonb_build_object('by', 'expiry')
+    FROM closed c;
   IF EXISTS (SELECT 1 FROM public.mem_item i
               WHERE i.workspace_id = v_ws AND i.channel_id = v_channel AND i.content_hash = v_hash
                 AND i.retired_at IS NULL AND NOT i.stale AND public.mem_item_live(i.id))
@@ -278,9 +301,7 @@ BEGIN
     RETURN NULL;
   END IF;
 
-  -- 요율 제한. 같은 에이전트·채널의 제안은 직렬화한다(동시에 여러 개가 한도를 함께 넘지 못하게).
-  PERFORM pg_catalog.pg_advisory_xact_lock(
-    pg_catalog.hashtextextended('mem_proposal:' || v_agent::text || ':' || v_channel::text, 0));
+  -- 요율 제한(위의 채널 락 아래에서 센다: 동시에 여러 개가 한도를 함께 넘지 못한다).
   IF (SELECT pg_catalog.count(*) FROM public.mem_proposal p
        WHERE p.workspace_id = v_ws AND p.run_id = p_run_id) >= 3
      OR (SELECT pg_catalog.count(*) FROM public.mem_proposal p
@@ -299,7 +320,11 @@ BEGIN
     (v_ws, v_channel, p_run_id, v_agent, v_req, p_kind, v_body, v_subject,
      (SELECT pg_catalog.array_agg(e ORDER BY e) FROM pg_catalog.unnest(p_evidence_message_ids) AS e),
      v_hash)
+  ON CONFLICT (workspace_id, channel_id, content_hash) WHERE status = 'pending' DO NOTHING
   RETURNING id INTO v_id;
+  IF v_id IS NULL THEN
+    RETURN NULL;
+  END IF;
   INSERT INTO public.mem_event (workspace_id, target_kind, target_id, action, actor_member_id, detail)
   VALUES (v_ws, 'proposal', v_id, 'proposed', v_agent,
           pg_catalog.jsonb_build_object('run_id', p_run_id, 'kind', p_kind, 'evidence_count', v_n));
@@ -335,7 +360,14 @@ BEGIN
      OR NOT EXISTS (SELECT 1 FROM public.member h
                      WHERE h.id = v_viewer AND h.workspace_id = v_ws AND h.kind = 'human'
                        AND h.status = 'active' AND h.deleted_at IS NULL)
-     OR NOT public.mem_member_can_read(v_channel, v_viewer) THEN
+     OR NOT public.mem_member_can_read(v_channel, v_viewer)
+     -- M-2 (보안 검수, #3209 와 같은 결정): 게스트는 수락·거절할 수 없다 — 워크스페이스 역할이 guest 이거나 이 채널의
+     -- 멤버십 역할이 guest 이면 DB 가 42501 로 거부한다(라우트의 검사는 두 번째 벽). 읽기(목록)는 그대로다.
+     OR EXISTS (SELECT 1 FROM public.workspace_membership wm
+                 WHERE wm.workspace_id = v_ws AND wm.member_id = v_viewer AND wm.role = 'guest')
+     OR EXISTS (SELECT 1 FROM public.membership gm
+                 WHERE gm.workspace_id = v_ws AND gm.channel_id = v_channel AND gm.member_id = v_viewer
+                   AND gm.left_at IS NULL AND gm.role = 'guest') THEN
     RAISE EXCEPTION 'mem_proposal: not allowed' USING ERRCODE = '42501';
   END IF;
   RETURN v_viewer;

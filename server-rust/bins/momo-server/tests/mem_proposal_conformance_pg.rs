@@ -948,8 +948,8 @@ async fn only_a_human_who_can_read_the_channel_may_decide() {
     let second_wall = red(
         "reader clause removed from the decider",
         vec![(
-            "OR NOT public.mem_member_can_read(v_channel, v_viewer) THEN",
-            "OR false THEN",
+            "OR NOT public.mem_member_can_read(v_channel, v_viewer)",
+            "OR false",
         )],
         w.dave,
         None,
@@ -965,8 +965,8 @@ async fn only_a_human_who_can_read_the_channel_may_decide() {
             &su,
             DECIDER_FN,
             &[(
-                "OR NOT public.mem_member_can_read(v_channel, v_viewer) THEN",
-                "OR false THEN",
+                "OR NOT public.mem_member_can_read(v_channel, v_viewer)",
+                "OR false",
             )],
         )
         .await;
@@ -1600,7 +1600,7 @@ async fn an_agent_cannot_propose_what_it_could_not_cite() {
         Err("23503".into()),
         "after the trigger"
     );
-    let tx = sabotage_tx(&su, PROPOSE_FN, &[("AND (v_trigger_seq IS NULL OR (m.seq <= v_trigger_seq AND m.seq > v_trigger_seq - 200))", "AND true")]).await;
+    let tx = sabotage_tx(&su, PROPOSE_FN, &[(WINDOW_CLAUSE, "AND true")]).await;
     let out = propose_in(tx, w.ws, run, "decision", body, &[after]).await;
     eprintln!("RED trigger window removed: {out:?}");
     assert!(matches!(out, Ok(Some(_))), "{out:?}");
@@ -1629,7 +1629,7 @@ async fn an_agent_cannot_propose_what_it_could_not_cite() {
         Err("23503".into()),
         "more than 200 messages back"
     );
-    let tx = sabotage_tx(&su, PROPOSE_FN, &[("AND (v_trigger_seq IS NULL OR (m.seq <= v_trigger_seq AND m.seq > v_trigger_seq - 200))", "AND true")]).await;
+    let tx = sabotage_tx(&su, PROPOSE_FN, &[(WINDOW_CLAUSE, "AND true")]).await;
     let out = propose_in(
         tx,
         w.ws,
@@ -2559,4 +2559,304 @@ async fn served_items_follow_the_audience_rule_and_the_receipt_checks_them() {
         Err("23505".into()),
         "one receipt per run"
     );
+}
+
+// ---------------------------------------------------------------------------
+// security review follow-ups (M-1, M-2, L-2, L-7)
+// ---------------------------------------------------------------------------
+
+const WINDOW_CLAUSE: &str = "AND (m.seq <= v_trigger_seq AND m.seq > v_trigger_seq - 200)";
+
+/// A child run (no trigger of its own; the requester comes up `parent_run_id`).
+async fn child_run(su: &PgPool, w: &W, parent: Uuid) -> Uuid {
+    let id = Uuid::new_v4();
+    su_exec(
+        su,
+        &format!(
+            "INSERT INTO agent_run (id, workspace_id, agent_member_id, channel_id, parent_run_id, status) \
+             VALUES ('{id}', '{}', '{}', '{}', '{parent}', 'running')",
+            w.ws, w.agent, w.general
+        ),
+    )
+    .await;
+    id
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn a_run_without_a_trigger_still_has_a_conversation_window() {
+    let (su, _app, wk, w) = setup().await;
+    let (old, _) = say(
+        &su,
+        w.ws,
+        w.general,
+        w.alice,
+        "아주 오래전에 정한 결정이에요",
+    )
+    .await;
+    fill(&su, w.ws, w.general, w.bob, 210).await;
+    let (recent, _) = say(&su, w.ws, w.general, w.alice, "방금 정한 결정이에요").await;
+    let (parent, _) = mention_run(&su, &w, w.general, w.alice, "@agent 위임해 줘").await;
+    let child = child_run(&su, &w, parent).await;
+
+    // M-1: the trigger-less run's window is anchored at the channel head when it began.
+    assert_eq!(
+        propose(
+            &wk,
+            w.ws,
+            child,
+            "decision",
+            "오래된 근거로 제안해요",
+            &[old]
+        )
+        .await,
+        Err("23503".into()),
+        "a message more than 200 back is not this run's conversation"
+    );
+    let ok = propose(
+        &wk,
+        w.ws,
+        child,
+        "decision",
+        "방금 정한 결정을 제안해요",
+        &[recent],
+    )
+    .await;
+    assert!(
+        matches!(ok, Ok(Some(_))),
+        "a recent message still works: {ok:?}"
+    );
+    // A message that arrives after the run began is not in its conversation either.
+    let (later, _) = say(&su, w.ws, w.general, w.bob, "run 이 끝난 뒤의 메시지예요").await;
+    assert_eq!(
+        propose(
+            &wk,
+            w.ws,
+            child,
+            "decision",
+            "뒤의 메시지로 제안해요",
+            &[later]
+        )
+        .await,
+        Err("23503".into())
+    );
+    // RED: the old fail-open (no anchor => no window) lets the old message through.
+    let mut tx = sabotage_tx(
+        &su,
+        PROPOSE_FN,
+        &[
+            ("IF v_trigger_seq IS NULL THEN", "IF false THEN"),
+            (WINDOW_CLAUSE, "AND (v_trigger_seq IS NULL OR (m.seq <= v_trigger_seq AND m.seq > v_trigger_seq - 200))"),
+        ],
+    )
+    .await;
+    become_role(&mut tx, "momo_memory", w.ws, None).await;
+    let out = sqlx::query_scalar::<_, Option<Uuid>>(&propose_sql(child, "decision", &[old]))
+        .bind("fail-open 으로 오래된 근거를 제안해요")
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| sqlstate(&e));
+    tx.rollback().await.ok();
+    eprintln!("RED trigger-less fail-open restored: {out:?}");
+    assert!(matches!(out, Ok(Some(_))), "{out:?}");
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn guests_read_the_cards_but_never_decide_them() {
+    let (su, app, wk, w) = setup().await;
+    let ws_guest = member(&su, w.ws, "human").await;
+    let ch_guest = member(&su, w.ws, "human").await;
+    let regular = member(&su, w.ws, "human").await;
+    for (m, role) in [
+        (ws_guest, "guest"),
+        (ch_guest, "member"),
+        (regular, "member"),
+    ] {
+        su_exec(&su, &format!("INSERT INTO workspace_membership (workspace_id, member_id, role) VALUES ('{}', '{m}', '{role}')", w.ws)).await;
+        join(&su, w.ws, w.general, m).await;
+    }
+    su_exec(&su, &format!("UPDATE membership SET role = 'guest' WHERE channel_id = '{}' AND member_id = '{ch_guest}'", w.general)).await;
+    let (pid, _) = pending(&su, &wk, &w, "게스트 시험 결정이에요").await;
+
+    // They see the card ...
+    for g in [ws_guest, ch_guest] {
+        assert_eq!(
+            count_as(
+                &app,
+                w.ws,
+                Some(g),
+                "SELECT count(*) FROM mem_proposal WHERE status = 'pending'"
+            )
+            .await,
+            1
+        );
+    }
+    // ... and cannot decide it: the database says no, for either kind of guest.
+    for (label, g) in [("workspace guest", ws_guest), ("channel guest", ch_guest)] {
+        assert_eq!(
+            accept(&app, w.ws, Some(g), pid).await,
+            Err("42501".into()),
+            "{label} accept"
+        );
+        assert_eq!(
+            reject(&app, w.ws, Some(g), pid).await,
+            Err("42501".into()),
+            "{label} reject"
+        );
+    }
+    assert_eq!(
+        su_count(
+            &su,
+            &format!("SELECT count(*) FROM mem_proposal WHERE id = '{pid}' AND status = 'pending'")
+        )
+        .await,
+        1
+    );
+    // RED: each guest clause is what refuses (the accept's own evidence check does not know roles).
+    for (label, g, edit) in [
+        (
+            "workspace-guest clause removed",
+            ws_guest,
+            ("AND wm.role = 'guest')", "AND false)"),
+        ),
+        (
+            "channel-guest clause removed",
+            ch_guest,
+            (
+                "AND gm.left_at IS NULL AND gm.role = 'guest') THEN",
+                "AND false) THEN",
+            ),
+        ),
+    ] {
+        let tx = sabotage_tx(&su, DECIDER_FN, &[edit]).await;
+        let out = decide_in(tx, w.ws, Some(g), "mem_accept_proposal", pid, None).await;
+        eprintln!("RED {label}: accept returns {out:?}");
+        assert!(out.is_ok(), "{label}: {out:?}");
+    }
+    // A regular member of the same channel still decides.
+    accept(&app, w.ws, Some(regular), pid)
+        .await
+        .expect("a member accepts");
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn identical_proposals_race_without_a_unique_violation_and_expiry_is_logged() {
+    let (su, _app, wk, w) = setup().await;
+    let (m, _) = say(
+        &su,
+        w.ws,
+        w.general,
+        w.alice,
+        "동시에 제안될 결정의 근거예요",
+    )
+    .await;
+    // L-2: eight runs propose the same text at once; exactly one row, nobody sees 23505.
+    let mut runs = Vec::new();
+    for _ in 0..8 {
+        let (r, _) = mention_run(&su, &w, w.general, w.alice, "@agent 기억해 줘").await;
+        runs.push(r);
+    }
+    let text = "동시에 들어온 같은 결정이에요";
+    let results = futures_join(&wk, w.ws, &runs, text, m).await;
+    let created = results.iter().filter(|r| matches!(r, Ok(Some(_)))).count();
+    let dup = results.iter().filter(|r| matches!(r, Ok(None))).count();
+    assert_eq!((created, dup), (1, 7), "{results:?}");
+    assert_eq!(su_count(&su, &format!("SELECT count(*) FROM mem_proposal WHERE workspace_id = '{}' AND status = 'pending'", w.ws)).await, 1);
+
+    // L-7: an expired pending proposal is closed out of the way of the same text, as an `expired`
+    // event by the agent (not a human `rejected`).
+    su_exec(&su, &format!("UPDATE mem_proposal SET expires_at = now() - interval '1 second' WHERE workspace_id = '{}'", w.ws)).await;
+    let (again, _) = mention_run(&su, &w, w.general, w.alice, "@agent 다시 제안").await;
+    let fresh = propose(&wk, w.ws, again, "decision", text, &[m]).await;
+    assert!(matches!(fresh, Ok(Some(_))), "{fresh:?}");
+    let shells: Vec<(String, Option<Uuid>, Option<String>)> = sqlx::query_as(
+        "SELECT status, decided_by, body FROM mem_proposal WHERE workspace_id = $1 AND status = 'rejected'",
+    )
+    .bind(w.ws)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(shells, vec![("rejected".to_string(), Some(w.agent), None)]);
+    let events: Vec<(String, Option<Uuid>)> = sqlx::query_as(
+        "SELECT action, actor_member_id FROM mem_event WHERE workspace_id = $1 AND target_kind = 'proposal' AND action IN ('expired', 'rejected')",
+    )
+    .bind(w.ws)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        events,
+        vec![("expired".to_string(), Some(w.agent))],
+        "expiry is not logged as a human rejection"
+    );
+
+    // RED: without the channel lock and the ON CONFLICT the same race surfaces as 23505. The
+    // function is redefined for real (committed, others connect concurrently) and restored after.
+    let original: String = sqlx::query_scalar("SELECT pg_get_functiondef($1::regprocedure)")
+        .bind(PROPOSE_FN)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    let sabotaged = original
+        .replacen(
+            "PERFORM pg_catalog.pg_advisory_xact_lock(\n    pg_catalog.hashtextextended('mem_proposal:' || v_channel::text, 0));",
+            "NULL;",
+            1,
+        )
+        .replacen(
+            "ON CONFLICT (workspace_id, channel_id, content_hash) WHERE status = 'pending' DO NOTHING",
+            "",
+            1,
+        );
+    assert_ne!(sabotaged, original);
+    sqlx::query(&sabotaged)
+        .execute(&su)
+        .await
+        .expect("sabotage");
+    let mut saw_23505 = false;
+    for round in 0..15 {
+        let mut runs = Vec::new();
+        for _ in 0..8 {
+            let (r, _) = mention_run(&su, &w, w.general, w.alice, "@agent 경쟁").await;
+            runs.push(r);
+        }
+        let results = futures_join(
+            &wk,
+            w.ws,
+            &runs,
+            &format!("사보타주 경쟁 {round} 번 결정이에요"),
+            m,
+        )
+        .await;
+        if results.iter().any(|r| matches!(r, Err(c) if c == "23505")) {
+            saw_23505 = true;
+            break;
+        }
+    }
+    sqlx::query(&original).execute(&su).await.expect("restore");
+    eprintln!("RED lock and ON CONFLICT removed: 23505 seen = {saw_23505}");
+    assert!(saw_23505, "the race must surface without the lock");
+}
+
+async fn futures_join(
+    wk: &PgPool,
+    ws: Uuid,
+    runs: &[Uuid],
+    text: &str,
+    evidence: Uuid,
+) -> Vec<Result<Option<Uuid>, String>> {
+    let mut handles = Vec::new();
+    for run in runs {
+        let (wk, run, text) = (wk.clone(), *run, text.to_string());
+        handles.push(tokio::spawn(async move {
+            propose(&wk, ws, run, "decision", &text, &[evidence]).await
+        }));
+    }
+    let mut out = Vec::new();
+    for h in handles {
+        out.push(h.await.expect("join"));
+    }
+    out
 }

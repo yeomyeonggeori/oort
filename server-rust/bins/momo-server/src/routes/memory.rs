@@ -30,7 +30,7 @@
 
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
-use momo_auth::{active_workspace_role, Principal};
+use momo_auth::{active_workspace_role, Principal, WorkspaceRole};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{DbError, PgConnection, PgPool};
 use momo_messaging::{
@@ -627,6 +627,13 @@ pub struct ProposalDto {
     pub subject: Option<String>,
     /// The source messages (ids only; never their text). Empty once decided.
     pub evidence_message_ids: Vec<String>,
+    /// Author and channel sequence of each source message (pending only), so a card can say
+    /// 「밥 · #41」 and link to the message. The text is fetched through the normal message read
+    /// path with `messageId`; this API never carries it.
+    pub evidence: Vec<ProposalEvidenceDto>,
+    /// The caller is the person the agent was answering: the card should warn before a self-accept.
+    /// Advice for the UI only — the server lets any channel member decide (ADR-0196 D9).
+    pub caller_is_requester: bool,
     pub created_at_ms: i64,
     pub expires_at_ms: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -636,6 +643,14 @@ pub struct ProposalDto {
     /// The confirmed item an accepted proposal became.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub item_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposalEvidenceDto {
+    pub message_id: String,
+    pub seq: i64,
+    pub author_member_id: String,
 }
 
 fn proposal_dto(proposal: &MemProposal) -> ProposalDto {
@@ -654,6 +669,16 @@ fn proposal_dto(proposal: &MemProposal) -> ProposalDto {
             .iter()
             .map(|id| id.to_string())
             .collect(),
+        evidence: proposal
+            .evidence
+            .iter()
+            .map(|e| ProposalEvidenceDto {
+                message_id: e.message_id.to_string(),
+                seq: e.seq,
+                author_member_id: e.author_member_id.to_string(),
+            })
+            .collect(),
+        caller_is_requester: proposal.caller_is_requester,
         created_at_ms: epoch_ms(proposal.created_at),
         expires_at_ms: epoch_ms(proposal.expires_at),
         decided_by: proposal.decided_by.map(|id| id.to_string()),
@@ -829,6 +854,15 @@ async fn decide_proposal(
             Box::pin(async move {
                 if let Err(rejection) = require_live_human(conn, workspace_id, member_id).await? {
                     return Ok(Err(rejection));
+                }
+                // M-2: a guest reads the cards but never decides them. The database refuses too
+                // (`mem_proposal_decider`); this is the secondary guard.
+                if active_workspace_role(conn, workspace_id, member_id).await?
+                    == Some(WorkspaceRole::Guest)
+                {
+                    return Ok(Err(ApiError::forbidden(
+                        "guests cannot decide memory proposals",
+                    )));
                 }
                 let item_id = if accept {
                     Some(accept_proposal_in_tx(conn, proposal_id).await?)

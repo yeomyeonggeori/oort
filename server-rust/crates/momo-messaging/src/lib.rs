@@ -133,7 +133,7 @@ pub use memory::{
     list_proposals_in_tx, list_settings_in_tx, reject_proposal_in_tx, search_items_in_tx,
     summarized_through_seq_in_tx, upsert_channel_settings_in_tx, upsert_member_settings_in_tx,
     upsert_workspace_settings_in_tx, DigestListFilter, MemDigest, MemEvidence, MemItemBrief,
-    MemItemHit, MemProposal, MemServing, MemSettingsRow, ProposalListFilter,
+    MemItemHit, MemProposal, MemServing, MemSettingsRow, ProposalEvidence, ProposalListFilter,
     MEM_DIGEST_LIMIT_DEFAULT, MEM_DIGEST_LIMIT_MAX, MEM_ITEM_SEARCH_LIMIT_DEFAULT,
     MEM_ITEM_SEARCH_LIMIT_MAX, MEM_PROPOSAL_LIMIT_DEFAULT, MEM_PROPOSAL_LIMIT_MAX,
 };

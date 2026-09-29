@@ -162,6 +162,8 @@ function proposalWire(overrides: Record<string, unknown> = {}) {
     text: "배포는 2026-10-02 금요일 오후 2시로 정했어요",
     subject: "배포 일정",
     evidenceMessageIds: [MSG],
+    evidence: [{ messageId: MSG, seq: 7, authorMemberId: ALICE }],
+    callerIsRequester: true,
     createdAtMs: 1_800_000_000_000,
     expiresAtMs: 1_801_209_600_000,
     ...overrides,
@@ -218,6 +220,8 @@ describe("memory proposals (#3169)", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ id: PROPOSAL, kind: "decision", status: "pending", runId: RUN });
     expect(rows[0].text).toContain("배포는");
+    expect(rows[0].callerIsRequester).toBe(true);
+    expect(rows[0].evidence).toEqual([{ messageId: MSG, seq: 7, authorMemberId: ALICE }]);
     expect(fetchMock).toHaveBeenCalledWith(
       `https://oort.test/v1/workspaces/${WS}/channels/${CH}/memory/proposals?status=pending&runId=${RUN}&limit=5`,
       expect.anything()
@@ -238,10 +242,13 @@ describe("memory proposals (#3169)", () => {
         .mockResolvedValueOnce(jsonResponse(200, { proposals: [] }))
         .mockResolvedValueOnce(jsonResponse(200, { proposals: [proposalWire({ status: "maybe" })] }))
         .mockResolvedValueOnce(jsonResponse(200, { proposals: [proposalWire({ evidenceMessageIds: [7] })] }))
+        .mockResolvedValueOnce(jsonResponse(200, { proposals: [proposalWire({ evidence: [{ seq: 7 }] })] }))
+        .mockResolvedValueOnce(jsonResponse(200, { proposals: [proposalWire({ callerIsRequester: undefined })] }))
     );
     expect(await listMemoryProposals(WS, CH)).toEqual([]);
-    await expect(listMemoryProposals(WS, CH)).rejects.toBeInstanceOf(WireShapeError);
-    await expect(listMemoryProposals(WS, CH)).rejects.toBeInstanceOf(WireShapeError);
+    for (let n = 0; n < 4; n += 1) {
+      await expect(listMemoryProposals(WS, CH)).rejects.toBeInstanceOf(WireShapeError);
+    }
   });
 
   it("accepts and rejects with a bodiless POST; the decided shell has no text", async () => {
@@ -257,6 +264,7 @@ describe("memory proposals (#3169)", () => {
             text: undefined,
             subject: undefined,
             evidenceMessageIds: [],
+            evidence: [],
             decidedBy: ALICE,
             decidedAtMs: 1_800_000_100_000,
             itemId: ITEM,
@@ -269,6 +277,7 @@ describe("memory proposals (#3169)", () => {
           text: undefined,
           subject: undefined,
           evidenceMessageIds: [],
+          evidence: [],
           decidedBy: ALICE,
           decidedAtMs: 1_800_000_100_000,
         }),

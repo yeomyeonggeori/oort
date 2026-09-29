@@ -3367,7 +3367,7 @@ paths:
       description: >
         ADR-0196 D4 (a person's accept is `origin=confirmed`), D9 (a member of the
         evidence channel), D6-2. **Who may accept:** any active human member who
-        can read the proposal's channel — the requester has no special right, an
+        can read the proposal's channel and is not a guest (workspace or channel role) — the requester has no special right, an
         agent has none. The deciding member is the caller's credential; there is no
         member in the request. The database re-validates every evidence message
         against the caller (in the channel, alive, not edited since the proposal,
@@ -11950,9 +11950,17 @@ components:
       properties:
         receipt: {$ref: "#/components/schemas/MemoryReceipt"}
 
+    MemoryProposalEvidence:
+      type: object
+      required: [messageId, seq, authorMemberId]
+      properties:
+        messageId: {type: string, format: uuid}
+        seq: {type: integer, format: int64}
+        authorMemberId: {type: string, format: uuid}
+
     MemoryProposal:
       type: object
-      required: [id, channelId, agentMemberId, requesterMemberId, kind, status, evidenceMessageIds, createdAtMs, expiresAtMs]
+      required: [id, channelId, agentMemberId, requesterMemberId, kind, status, evidenceMessageIds, evidence, callerIsRequester, createdAtMs, expiresAtMs]
       properties:
         id: {type: string, format: uuid}
         channelId: {type: string, format: uuid}
@@ -11967,6 +11975,18 @@ components:
           type: array
           description: Source messages (ids only). Empty once decided.
           items: {type: string, format: uuid}
+        evidence:
+          type: array
+          description: >
+            Author and channel sequence of each source message (pending only), for a card's
+            「밥 · #41」 line. Ids and numbers only; read the text through the normal message
+            path with `messageId`. This API never carries it.
+          items: {$ref: "#/components/schemas/MemoryProposalEvidence"}
+        callerIsRequester:
+          type: boolean
+          description: >
+            The caller is the person the agent was answering: warn before a self-accept.
+            Advice for the UI; the server lets any non-guest channel member decide.
         createdAtMs: {type: integer, format: int64}
         expiresAtMs: {type: integer, format: int64}
         decidedBy: {type: string, format: uuid}

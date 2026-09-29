@@ -90,6 +90,12 @@ export interface MemoryReceipt {
 /** A 「기억해 둘게요」 proposal (#3169): an agent proposes, a person accepts or rejects. */
 export type MemoryProposalStatus = "pending" | "accepted" | "rejected";
 
+export interface MemoryProposalEvidence {
+  messageId: string;
+  seq: number;
+  authorMemberId: string;
+}
+
 export interface MemoryProposal {
   id: string;
   channelId: string;
@@ -105,6 +111,13 @@ export interface MemoryProposal {
   subject?: string;
   /** Source message ids. Empty once decided. */
   evidenceMessageIds: string[];
+  /**
+   * Author and channel sequence of each source message (pending only) for a card line like
+   * 「밥 · #41」. Ids and numbers only: fetch the text through the normal message path.
+   */
+  evidence: MemoryProposalEvidence[];
+  /** The caller is the person the agent answered: warn before a self-accept (advice only). */
+  callerIsRequester: boolean;
   createdAtMs: number;
   expiresAtMs: number;
   decidedBy?: string;
@@ -305,6 +318,17 @@ export function parseMemoryProposal(value: unknown): MemoryProposal | null {
   const evidenceMessageIds = stringArrayField(value, "evidenceMessageIds");
   const createdAtMs = num(value, "createdAtMs");
   const expiresAtMs = num(value, "expiresAtMs");
+  const callerIsRequester = bool(value, "callerIsRequester");
+  const rawEvidence = arrayField(value, "evidence");
+  if (rawEvidence === null || callerIsRequester === undefined) return null;
+  const evidence: MemoryProposalEvidence[] = [];
+  for (const row of rawEvidence) {
+    const messageId = str(row, "messageId");
+    const seq = num(row, "seq");
+    const authorMemberId = str(row, "authorMemberId");
+    if (messageId === undefined || seq === undefined || authorMemberId === undefined) return null;
+    evidence.push({ messageId, seq, authorMemberId });
+  }
   if (
     id === undefined ||
     channelId === undefined ||
@@ -326,6 +350,8 @@ export function parseMemoryProposal(value: unknown): MemoryProposal | null {
     kind,
     status,
     evidenceMessageIds,
+    evidence,
+    callerIsRequester,
     createdAtMs,
     expiresAtMs,
   };

@@ -1169,6 +1169,17 @@ async fn proposals_are_listed_decided_and_mapped_over_http() {
     assert_eq!(mine["runId"], w.run_p1.to_string());
     assert_eq!(mine["evidenceMessageIds"].as_array().unwrap().len(), 1);
     assert!(mine.get("itemId").is_none() && mine.get("decidedBy").is_none());
+    // L-4: a card can show who said it and where, without any new text on this API.
+    assert_eq!(
+        mine["callerIsRequester"], true,
+        "alice is the person the agent answered"
+    );
+    let evidence = mine["evidence"].as_array().expect("evidence");
+    assert_eq!(evidence.len(), 1);
+    assert_eq!(evidence[0]["messageId"], w.m_p1.0.to_string());
+    assert_eq!(evidence[0]["seq"], w.m_p1.1);
+    assert_eq!(evidence[0]["authorMemberId"], w.alice.id.to_string());
+    assert!(evidence[0].get("body").is_none() && evidence[0].get("text").is_none());
     // bob (a member who is neither the requester nor the first author) sees the card too.
     assert_eq!(
         get(&http, &url, &bob).await.1["proposals"]
@@ -1176,6 +1187,43 @@ async fn proposals_are_listed_decided_and_mapped_over_http() {
             .unwrap()
             .len(),
         2
+    );
+    assert_eq!(
+        get(&http, &url, &bob).await.1["proposals"][0]["callerIsRequester"],
+        false,
+        "bob is not the requester: no self-accept warning"
+    );
+    // M-2: a guest reads the cards but the decision routes refuse them (route guard; the database
+    // refuses too, see mem_proposal_conformance_pg).
+    let guest = seed_human(&su, w.ws, "guest").await;
+    join(&su, w.ws, w.p1, guest.id, "member").await;
+    let guest_token = login(&http, &base, w.ws, &guest.email).await;
+    assert_eq!(
+        get(&http, &url, &guest_token).await.1["proposals"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        post(
+            &http,
+            &decision_url(&base, w.ws, pid, "accept"),
+            &guest_token
+        )
+        .await
+        .0,
+        403
+    );
+    assert_eq!(
+        post(
+            &http,
+            &decision_url(&base, w.ws, pid, "reject"),
+            &guest_token
+        )
+        .await
+        .0,
+        403
     );
     // a non-member sees an empty list (the policy hides the rows), a suspended member is refused.
     let (status, body) = get(&http, &url, &carol).await;

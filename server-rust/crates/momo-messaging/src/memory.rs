@@ -604,11 +604,28 @@ pub struct MemProposal {
     pub decided_by: Option<Uuid>,
     pub decided_at: Option<DateTime<Utc>>,
     pub item_id: Option<Uuid>,
+    /// Is the caller the person the agent was answering? The card warns before a self-accept
+    /// (L-4). Computed in the same query from `app.member_id`; not a permission.
+    pub caller_is_requester: bool,
+    /// Author and channel sequence of each evidence message (pending proposals only), in the
+    /// order of `evidence_message_ids`. Ids and numbers only — the text comes from the normal
+    /// message read path, never from here.
+    pub evidence: Vec<ProposalEvidence>,
+}
+
+/// One evidence message of a pending proposal, without its text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProposalEvidence {
+    pub message_id: Uuid,
+    pub seq: i64,
+    pub author_member_id: Uuid,
 }
 
 const PROPOSAL_COLS: &str = "p.id, p.channel_id, p.run_id, p.agent_member_id, \
      p.requester_member_id, p.kind, p.body, p.subject_key, p.evidence_message_ids, p.status, \
-     p.created_at, p.expires_at, p.decided_by, p.decided_at, p.item_id";
+     p.created_at, p.expires_at, p.decided_by, p.decided_at, p.item_id, \
+     (p.requester_member_id = \
+        nullif(pg_catalog.current_setting('app.member_id', true), '')::uuid) AS caller_is_requester";
 
 fn proposal_from_row(row: &sqlx::postgres::PgRow) -> Result<MemProposal, sqlx::Error> {
     Ok(MemProposal {
@@ -627,7 +644,48 @@ fn proposal_from_row(row: &sqlx::postgres::PgRow) -> Result<MemProposal, sqlx::E
         decided_by: row.try_get("decided_by")?,
         decided_at: row.try_get("decided_at")?,
         item_id: row.try_get("item_id")?,
+        caller_is_requester: row
+            .try_get::<Option<bool>, _>("caller_is_requester")?
+            .unwrap_or(false),
+        evidence: Vec::new(),
     })
+}
+
+/// Fill in `evidence` (author + seq) for the pending proposals in `rows`. A plain read of
+/// `message` for ids the proposal already names; a proposal is visible only to readers of its
+/// channel, and all its evidence lives in that channel.
+async fn attach_evidence(conn: &mut PgConnection, rows: &mut [MemProposal]) -> Result<(), DbError> {
+    let ids: Vec<Uuid> = rows
+        .iter()
+        .flat_map(|p| p.evidence_message_ids.iter().copied())
+        .collect();
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let found = sqlx::query(
+        "SELECT m.id, m.seq, m.author_member_id FROM message m \
+          WHERE m.id = ANY($1) AND m.deleted_at IS NULL",
+    )
+    .bind(&ids)
+    .fetch_all(&mut *conn)
+    .await?;
+    for proposal in rows.iter_mut() {
+        proposal.evidence = proposal
+            .evidence_message_ids
+            .iter()
+            .filter_map(|id| {
+                found
+                    .iter()
+                    .find(|row| row.get::<Uuid, _>("id") == *id)
+                    .map(|row| ProposalEvidence {
+                        message_id: *id,
+                        seq: row.get("seq"),
+                        author_member_id: row.get("author_member_id"),
+                    })
+            })
+            .collect();
+    }
+    Ok(())
 }
 
 /// Which proposals of a channel the caller asks for. These select *rows*, never permission: the
@@ -660,10 +718,13 @@ pub async fn list_proposals_in_tx(
         .bind(filter.limit)
         .fetch_all(&mut *conn)
         .await?;
-    rows.iter()
+    let mut proposals: Vec<MemProposal> = rows
+        .iter()
         .map(proposal_from_row)
         .collect::<Result<_, _>>()
-        .map_err(DbError::from)
+        .map_err(DbError::from)?;
+    attach_evidence(conn, &mut proposals).await?;
+    Ok(proposals)
 }
 
 /// One proposal by id; `None` when it does not exist or the policy hides it.
@@ -676,10 +737,15 @@ pub async fn get_proposal_in_tx(
         .bind(proposal_id)
         .fetch_optional(&mut *conn)
         .await?;
-    row.as_ref()
+    let mut found = row
+        .as_ref()
         .map(proposal_from_row)
         .transpose()
-        .map_err(DbError::from)
+        .map_err(DbError::from)?;
+    if let Some(proposal) = found.as_mut() {
+        attach_evidence(conn, std::slice::from_mut(proposal)).await?;
+    }
+    Ok(found)
 }
 
 /// Accept a proposal (`mem_accept_proposal`, migration 105): the new (or already remembered)
