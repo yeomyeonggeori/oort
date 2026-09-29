@@ -4078,3 +4078,48 @@ async fn inv_40_r2_not_latched_an_unverified_session_envelope_is_a_single_allow(
     assert!(auto_allowed(&h).is_empty());
     assert_eq!(permission_outcomes(&h).len(), 1, "the agent waits");
 }
+
+/// #3095 (security review M1): a root-signed device revocation relayed by the
+/// server ends every 「이 세션 동안」 grant of the host - a revoked key's
+/// allowance must not stay behind. A relayed revocation that is refused
+/// retires nothing.
+#[tokio::test]
+async fn inv_41_r2_a_relayed_revocation_ends_session_grants() {
+    let mut h = harness_r2(&[("claude", &["--permission"])]);
+    let root = Device::new(1);
+    let phone = Device::new(2);
+    pin(&h, &root);
+    let request = signed(spawn(&h, "claude", "first"), &root, None);
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+    wait_for("the first request", || requested_count(&h) == 1).await;
+    let first = last_request(&h);
+    let allow = signed_session_decision(
+        &h,
+        decision(&h, h.owner, session, &first, "allow-once", "allow_once"),
+        &root,
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &allow).await,
+        ControlAck::ok(Some(session))
+    );
+    wait_for("the first answer", || permission_outcomes(&h).len() == 1).await;
+
+    // A revocation the root did not sign is dropped: the grant lives.
+    let mut forged = revocation(&h, &root, &phone, true);
+    forged["signature"] = revocation(&h, &phone, &phone, true)["signature"].clone();
+    h.server.revocations.lock().unwrap().push(forged);
+    say(&mut h, &root, session, "again").await;
+    wait_for("still covered", || permission_outcomes(&h).len() == 2).await;
+    assert_eq!(requested_count(&h), 1);
+
+    // The root's genuine revocation, relayed: the grant is gone.
+    h.server
+        .revocations
+        .lock()
+        .unwrap()
+        .push(revocation(&h, &root, &phone, true));
+    say(&mut h, &root, session, "again, after a revocation").await;
+    wait_for("asked again", || requested_count(&h) == 2).await;
+    assert_eq!(permission_outcomes(&h).len(), 2, "the agent waits");
+    assert_eq!(auto_allowed(&h).len(), 1);
+}

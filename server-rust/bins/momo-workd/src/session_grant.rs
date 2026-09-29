@@ -43,9 +43,11 @@ use momo_wire::permission_preview::PermissionPreview;
 pub const MAX_GRANTS_PER_SESSION: usize = 8;
 /// The most locations a preview may name and still be matched.
 const MAX_LOCATIONS: usize = 16;
-/// A granted directory must be at least this deep (`/Users/me/project` = 4
-/// components with the root; `/Users/me` = 3 and is refused as a home).
-const MIN_DIR_COMPONENTS: usize = 4;
+/// A granted directory must be at least this deep, counting the root:
+/// `/Users/me/project/src` is 5. `/Users/me/Documents` (4) and a home (3) are
+/// refused, so one read of `~/Documents/x.txt` never opens all of Documents
+/// (#3095 security review M3).
+const MIN_DIR_COMPONENTS: usize = 5;
 
 /// The generation every grant is stamped with. Bumping it retires all of them.
 #[derive(Debug, Clone, Default)]
@@ -138,7 +140,9 @@ fn rule_for(preview: &PermissionPreview) -> Option<Rule> {
         kind @ ("read" | "search") => {
             let paths = resolved_locations(&preview.locations)?;
             let dir = common_dir(&paths)?;
-            if dir.components().count() < MIN_DIR_COMPONENTS {
+            if dir.components().count() < MIN_DIR_COMPONENTS
+                || dir.components().any(sensitive_component)
+            {
                 return None;
             }
             Some(Rule::Under {
@@ -187,26 +191,35 @@ fn covers(rule: &Rule, preview: &PermissionPreview) -> bool {
     }
 }
 
+/// Words a name carries when it holds credentials (a substring match, so it
+/// errs toward asking).
+const SENSITIVE_WORDS: [&str; 15] = [
+    "secret",
+    "credential",
+    "password",
+    "passwd",
+    "token",
+    "id_rsa",
+    "id_ed25519",
+    "key",
+    "pem",
+    "cookie",
+    "wallet",
+    "keychain",
+    "auth",
+    "shadow",
+    "netrc",
+];
+
 /// A component below a granted directory that a session grant never opens:
 /// hidden entries (`.ssh`, `.env`, `.git`) and names that say what they hold.
 fn sensitive_component(component: Component<'_>) -> bool {
     let Component::Normal(name) = component else {
-        return true;
+        // The root itself is not a name to judge; `..`, `.` or a prefix is.
+        return !matches!(component, Component::RootDir);
     };
     let name = name.to_string_lossy().to_lowercase();
-    name.starts_with('.')
-        || [
-            "secret",
-            "credential",
-            "password",
-            "passwd",
-            "token",
-            "private",
-            "id_rsa",
-            "id_ed25519",
-        ]
-        .iter()
-        .any(|word| name.contains(word))
+    name.starts_with('.') || SENSITIVE_WORDS.iter().any(|word| name.contains(word))
 }
 
 /// The preview's `locations` (one `path` or `path:line` per line) as resolved
@@ -286,9 +299,10 @@ mod tests {
         }
     }
 
-    /// A real directory tree under the temp dir (canonicalised: /var → /private/var).
+    /// A real directory tree under /var/tmp (canonicalised; a fixed base, so no
+    /// random path component can look like a credential to the rule).
     fn tree(name: &str) -> PathBuf {
-        let dir = std::fs::canonicalize(std::env::temp_dir())
+        let dir = std::fs::canonicalize("/var/tmp")
             .unwrap()
             .join(format!("momo-grant-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -397,13 +411,31 @@ mod tests {
     fn a_shallow_directory_is_never_granted() {
         let epoch = GrantEpoch::default();
         let mut grants = Grants::default();
-        for shallow in ["/etc/hosts", "/tmp", "/"] {
+        for shallow in [
+            "/etc/hosts",
+            "/tmp",
+            "/",
+            "/Users/me/Documents/x.txt",
+            "/home/me/notes.md",
+        ] {
             assert!(
                 !grants.remember(&preview("read", "Read", shallow, ""), &epoch),
                 "{shallow}"
             );
         }
         assert!(grants.is_empty());
+    }
+
+    #[test]
+    fn a_granted_directory_that_is_itself_sensitive_is_never_remembered() {
+        let dir = tree("sens");
+        let epoch = GrantEpoch::default();
+        let mut grants = Grants::default();
+        // `.ssh` is the granted directory itself: reading a file there is
+        // asked about every time.
+        assert!(!grants.remember(&preview("read", "Read", &loc(&dir, ".ssh/id"), ""), &epoch));
+        assert!(grants.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
