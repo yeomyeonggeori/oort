@@ -342,6 +342,72 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
     expect(document.activeElement).toBe(q(host, "device-key-phone-notice"));
   });
 
+  describe("#3145 승인 화면: 등록 시각과 이름의 출처", () => {
+    const NOW = 1_790_550_000_000 + 12 * 60_000;
+    beforeEach(() => {
+      vi.spyOn(Date, "now").mockReturnValue(NOW);
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    async function openApprove() {
+      const host = mount();
+      await waitFor(() => q(host, "device-key-endorse-start") !== null, "phone row");
+      await click(q(host, "device-key-endorse-start"), "start");
+      await waitFor(() => q(host, "device-key-endorse-origin") !== null, "origin");
+      return host;
+    }
+
+    it("등록 시각을 상대 시간과 함께 보인다", async () => {
+      const host = await openApprove();
+      const registered = q(host, "device-key-endorse-registered")!.textContent!;
+      expect(registered).toContain("등록 시각");
+      expect(registered).toContain("12분 전");
+    });
+
+    it("QR 연결 때 알린 이름과 같으면 그렇게 말하되, 이름은 확인된 값이 아니라고 함께 말한다", async () => {
+      core.listLinkedDevices.mockResolvedValue({
+        devices: [{ id: "l1", label: PHONE_LABEL, platform: "ios", linkedAt: 1, current: false }],
+      });
+      const host = await openApprove();
+      await waitFor(
+        () => q(host, "device-key-endorse-name")?.dataset.nameOrigin === "matchesLink",
+        "matches"
+      );
+      const text = q(host, "device-key-endorse-origin")!.textContent!;
+      expect(text).toContain("QR로 연결할 때 폰이 알린 이름과 같습니다");
+      expect(text).toContain("믿을 것은 지문입니다");
+      expect(text).toContain(PHONE_LABEL);
+    });
+
+    it("연결된 기기 목록에 없는 이름이면 승인하지 말라고 말한다", async () => {
+      core.listLinkedDevices.mockResolvedValue({
+        devices: [{ id: "l1", label: "다른 폰", platform: "ios", linkedAt: 1, current: false }],
+      });
+      const host = await openApprove();
+      await waitFor(
+        () => q(host, "device-key-endorse-name")?.dataset.nameOrigin === "notInLinks",
+        "not in links"
+      );
+      expect(q(host, "device-key-endorse-origin")!.textContent).toContain(
+        "연결된 기기 목록에 없습니다"
+      );
+    });
+
+    it("목록을 못 읽으면 대조하지 못했다고만 말하고 일치한다고 하지 않는다", async () => {
+      core.listLinkedDevices.mockRejectedValue(new Error("offline"));
+      const host = await openApprove();
+      await waitFor(
+        () => q(host, "device-key-endorse-name")?.dataset.nameOrigin === "unknown",
+        "unknown"
+      );
+      const text = q(host, "device-key-endorse-origin")!.textContent!;
+      expect(text).toContain("대조하지 못했습니다");
+      expect(text).not.toContain("알린 이름과 같습니다");
+    });
+  });
+
   it("승인 단계는 초점을 패널로 옮기고, 취소하면 승인 버튼으로 돌려놓는다", async () => {
     const host = mount();
     await waitFor(() => q(host, "device-key-endorse-start") !== null, "phone row");
