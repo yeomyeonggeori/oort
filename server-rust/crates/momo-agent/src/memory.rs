@@ -440,6 +440,74 @@ pub async fn serve_candidates(
     }))
 }
 
+/// One item `mem_serve_items` says may ride this answer (#3169).
+#[derive(Debug, Clone)]
+pub struct ServeItem {
+    pub id: Uuid,
+    /// The channel the item is stored in (the answer's own channel, except in the 1:1 agent DM,
+    /// where the requester's permission union applies).
+    pub channel_id: Uuid,
+    /// `channel` | `personal`.
+    pub space_kind: String,
+    /// `decision` | `fact` | `commitment` | `preference` | `procedure`.
+    pub kind: String,
+    /// `extracted` | `confirmed` | `curated` | `synthesized`.
+    pub origin: String,
+    pub body: String,
+    /// The fact's own time (the newest evidence message), not the time it was recorded.
+    pub valid_from: DateTime<Utc>,
+    pub source_count: i32,
+}
+
+/// What the database lets ride this run's answer from the item layer, in relevance order.
+#[derive(Debug, Clone)]
+pub struct ServeItems {
+    pub requester: Uuid,
+    pub answer_channel: Uuid,
+    pub items: Vec<ServeItem>,
+}
+
+/// Items for `run_id`'s answer, or `None` (no rows: a switch is off, no human requester, no
+/// usable query, or nothing matched). The requester, the answer channel and the query all come
+/// from the run row inside the function; nothing here is an input a caller could choose.
+pub async fn serve_items(
+    conn: &mut PgConnection,
+    run_id: Uuid,
+    limit: i32,
+    body_max: i32,
+) -> Result<Option<ServeItems>, DbError> {
+    let rows = sqlx::query(
+        "SELECT requester_member_id, answer_channel_id, item_id, item_channel_id, space_kind, kind, \
+                origin, body, valid_from, source_count \
+           FROM mem_serve_items($1, $2, $3)",
+    )
+    .bind(run_id)
+    .bind(limit)
+    .bind(body_max)
+    .fetch_all(&mut *conn)
+    .await?;
+    let Some(first) = rows.first() else {
+        return Ok(None);
+    };
+    Ok(Some(ServeItems {
+        requester: first.get("requester_member_id"),
+        answer_channel: first.get("answer_channel_id"),
+        items: rows
+            .iter()
+            .map(|row| ServeItem {
+                id: row.get("item_id"),
+                channel_id: row.get("item_channel_id"),
+                space_kind: row.get("space_kind"),
+                kind: row.get("kind"),
+                origin: row.get("origin"),
+                body: row.get("body"),
+                valid_from: row.get("valid_from"),
+                source_count: row.get("source_count"),
+            })
+            .collect(),
+    }))
+}
+
 /// The digest ids already recorded on `run_id`'s receipt, `None` when there is no receipt.
 pub async fn serving_of(
     conn: &mut PgConnection,
@@ -451,25 +519,41 @@ pub async fn serving_of(
         .await?)
 }
 
-/// Write the run's receipt (`mem_serving`). Re-checks the audience rule for every digest, so a
-/// digest that went stale or unreadable between the read and now fails with 23514 and nothing
-/// is recorded. A second call for the same run is 23505.
+/// The digest **and item** ids already recorded on `run_id`'s receipt, `None` when there is no
+/// receipt. A retried job compares both with the block it just built (#3163 F2 covers items too).
+pub async fn serving_record_of(
+    conn: &mut PgConnection,
+    run_id: Uuid,
+) -> Result<Option<(Vec<Uuid>, Vec<Uuid>)>, DbError> {
+    let row =
+        sqlx::query("SELECT served_digest_ids, served_item_ids FROM mem_serving_record_of($1)")
+            .bind(run_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+    Ok(row.map(|row| (row.get("served_digest_ids"), row.get("served_item_ids"))))
+}
+
+/// Write the run's receipt (`mem_serving`). Re-checks the audience rule for every digest and item,
+/// and that `requester` is the run's own, so a digest or item that went stale or unreadable
+/// between the read and now fails with 23514 and nothing is recorded. A second call for the same
+/// run is 23505.
+#[allow(clippy::too_many_arguments)]
 pub async fn record_serving(
     conn: &mut PgConnection,
     run_id: Uuid,
     requester: Uuid,
     digest_ids: &[Uuid],
+    item_ids: &[Uuid],
     withheld: i32,
     budget_chars: i32,
     used_chars: i32,
 ) -> Result<Uuid, DbError> {
-    let none: [Uuid; 0] = [];
     Ok(
         sqlx::query_scalar("SELECT mem_record_serving($1, $2, $3, $4, $5, $6, $7)")
             .bind(run_id)
             .bind(requester)
             .bind(digest_ids)
-            .bind(&none[..])
+            .bind(item_ids)
             .bind(withheld)
             .bind(budget_chars)
             .bind(used_chars)

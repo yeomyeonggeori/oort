@@ -451,7 +451,7 @@ pub(crate) fn defang(text: &str) -> String {
 /// M-5 (#3168): a line's `[n]` number is what an item cites as evidence. A member must not be able
 /// to forge `[7] 대표(사람): …` inside a body or a display name, so square brackets (and carriage
 /// returns) in *content* become full-width look-alikes; only the worker writes real `[n]` markers.
-fn neutralise_markers(text: &str) -> String {
+pub(crate) fn neutralise_markers(text: &str) -> String {
     text.replace('[', "［")
         .replace(']', "］")
         .replace(['\r', '\u{2028}', '\u{2029}'], " ")

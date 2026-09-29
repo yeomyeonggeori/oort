@@ -127,13 +127,15 @@ pub use member_rename::{
     DisplayNameRename, HandleChangeRejected, HandleRename, MEMBER_RENAMED_BROADCAST_TYPE,
 };
 pub use memory::{
-    bind_mem_reader_guc, clamp_mem_digest_limit, digests_by_ids_in_tx, evidence_for_digests_in_tx,
-    get_digest_in_tx, get_serving_in_tx, last_read_seq_in_tx, list_digests_in_tx,
-    list_settings_in_tx, search_items_in_tx, summarized_through_seq_in_tx,
-    upsert_channel_settings_in_tx, upsert_member_settings_in_tx, upsert_workspace_settings_in_tx,
-    DigestListFilter, MemDigest, MemEvidence, MemItemHit, MemServing, MemSettingsRow,
+    accept_proposal_in_tx, bind_mem_reader_guc, clamp_mem_digest_limit, clamp_mem_proposal_limit,
+    digests_by_ids_in_tx, evidence_for_digests_in_tx, get_digest_in_tx, get_proposal_in_tx,
+    get_serving_in_tx, items_by_ids_in_tx, last_read_seq_in_tx, list_digests_in_tx,
+    list_proposals_in_tx, list_settings_in_tx, reject_proposal_in_tx, search_items_in_tx,
+    summarized_through_seq_in_tx, upsert_channel_settings_in_tx, upsert_member_settings_in_tx,
+    upsert_workspace_settings_in_tx, DigestListFilter, MemDigest, MemEvidence, MemItemBrief,
+    MemItemHit, MemProposal, MemServing, MemSettingsRow, ProposalListFilter,
     MEM_DIGEST_LIMIT_DEFAULT, MEM_DIGEST_LIMIT_MAX, MEM_ITEM_SEARCH_LIMIT_DEFAULT,
-    MEM_ITEM_SEARCH_LIMIT_MAX,
+    MEM_ITEM_SEARCH_LIMIT_MAX, MEM_PROPOSAL_LIMIT_DEFAULT, MEM_PROPOSAL_LIMIT_MAX,
 };
 pub use message::{
     agent_auto_reply_streak_in_tx, agent_context_window_in_tx, build_broadcast_payload,

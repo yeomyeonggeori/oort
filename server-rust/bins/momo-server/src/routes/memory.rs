@@ -4,6 +4,9 @@
 //! GET   /v1/workspaces/{ws}/channels/{ch}/memory/digests   missed-conversation list
 //! GET   /v1/workspaces/{ws}/memory/digests/{id}            one digest (+ evidence)
 //! GET   /v1/workspaces/{ws}/agent-runs/{run}/memory-receipt  「기억 n개 참고」 chip
+//! GET   /v1/workspaces/{ws}/channels/{ch}/memory/proposals   「기억해 둘게요」 cards of a channel (#3169)
+//! POST  /v1/workspaces/{ws}/memory/proposals/{id}/accept     a person accepts → a confirmed item
+//! POST  /v1/workspaces/{ws}/memory/proposals/{id}/reject     a person says no
 //! GET   /v1/workspaces/{ws}/memory/settings                switches the caller may see
 //! PATCH /v1/workspaces/{ws}/memory/settings                workspace switch (admin)
 //! PATCH /v1/workspaces/{ws}/channels/{ch}/memory/settings  channel exclude / pause (admin)
@@ -31,11 +34,13 @@ use momo_auth::{active_workspace_role, Principal};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{DbError, PgConnection, PgPool};
 use momo_messaging::{
-    bind_mem_reader_guc, clamp_mem_digest_limit, digests_by_ids_in_tx, evidence_for_digests_in_tx,
-    get_digest_in_tx, get_serving_in_tx, last_read_seq_in_tx, list_digests_in_tx,
-    list_settings_in_tx, summarized_through_seq_in_tx, upsert_channel_settings_in_tx,
-    upsert_member_settings_in_tx, upsert_workspace_settings_in_tx, DigestListFilter, MemDigest,
-    MemEvidence, MemServing, MemSettingsRow,
+    accept_proposal_in_tx, bind_mem_reader_guc, clamp_mem_digest_limit, clamp_mem_proposal_limit,
+    digests_by_ids_in_tx, evidence_for_digests_in_tx, get_digest_in_tx, get_proposal_in_tx,
+    get_serving_in_tx, items_by_ids_in_tx, last_read_seq_in_tx, list_digests_in_tx,
+    list_proposals_in_tx, list_settings_in_tx, reject_proposal_in_tx, summarized_through_seq_in_tx,
+    upsert_channel_settings_in_tx, upsert_member_settings_in_tx, upsert_workspace_settings_in_tx,
+    DigestListFilter, MemDigest, MemEvidence, MemItemBrief, MemProposal, MemServing,
+    MemSettingsRow, ProposalListFilter,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -240,12 +245,40 @@ pub struct ReceiptDto {
     pub digest_ids: Vec<String>,
     /// Those digests, with evidence, for the popover.
     pub digests: Vec<DigestDto>,
+    /// Ids of the served items the caller can read today (#3169).
+    pub item_ids: Vec<String>,
+    /// Those items, for the popover. Items the caller can no longer read are absent.
+    pub items: Vec<ReceiptItemDto>,
     /// Requester only, count only (ADR-0196 D7); absent for everyone else.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub withheld_count: Option<i32>,
     pub budget_chars: i32,
     pub used_chars: i32,
     pub created_at_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceiptItemDto {
+    pub id: String,
+    pub channel_id: String,
+    pub kind: String,
+    pub origin: String,
+    pub body: String,
+    pub valid_from_ms: i64,
+    pub source_count: i32,
+}
+
+fn receipt_item_dto(item: &MemItemBrief) -> ReceiptItemDto {
+    ReceiptItemDto {
+        id: item.id.to_string(),
+        channel_id: item.channel_id.to_string(),
+        kind: item.kind.clone(),
+        origin: item.origin.clone(),
+        body: item.body.clone(),
+        valid_from_ms: epoch_ms(item.valid_from),
+        source_count: item.source_count,
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -499,6 +532,14 @@ pub async fn get_digest(
     }))
 }
 
+/// A receipt with what it names, all read under the caller's row-level security.
+type ReceiptParts = (
+    MemServing,
+    Vec<MemDigest>,
+    Vec<MemEvidence>,
+    Vec<MemItemBrief>,
+);
+
 /// `GET /v1/workspaces/{ws}/agent-runs/{run}/memory-receipt`
 pub async fn get_receipt(
     State(state): State<AppState>,
@@ -510,7 +551,7 @@ pub async fn get_receipt(
     let run_id = path_uuid(&run, "invalid run id")?;
     let member_id = principal.member_id;
 
-    let outcome: DbRejectable<(MemServing, Vec<MemDigest>, Vec<MemEvidence>)> =
+    let outcome: DbRejectable<ReceiptParts> =
         memory_tenant_tx(&state.pool, workspace_id, member_id, move |conn| {
             Box::pin(async move {
                 if let Err(rejection) = require_live_human(conn, workspace_id, member_id).await? {
@@ -522,12 +563,13 @@ pub async fn get_receipt(
                 let digests = digests_by_ids_in_tx(conn, &serving.digest_ids).await?;
                 let ids: Vec<Uuid> = digests.iter().map(|digest| digest.id).collect();
                 let evidence = evidence_for_digests_in_tx(conn, &ids).await?;
-                Ok(Ok((serving, digests, evidence)))
+                let items = items_by_ids_in_tx(conn, &serving.item_ids).await?;
+                Ok(Ok((serving, digests, evidence, items)))
             })
         })
         .await;
 
-    let (serving, digests, evidence) = settle_mem("memory.get_receipt", outcome)?;
+    let (serving, digests, evidence, items) = settle_mem("memory.get_receipt", outcome)?;
     Ok(Json(ReceiptResponse {
         receipt: ReceiptDto {
             run_id: serving.run_id.to_string(),
@@ -538,11 +580,300 @@ pub async fn get_receipt(
                 .iter()
                 .map(|digest| digest_dto(digest, &evidence))
                 .collect(),
+            item_ids: items.iter().map(|item| item.id.to_string()).collect(),
+            items: items.iter().map(receipt_item_dto).collect(),
             withheld_count: serving.withheld_count,
             budget_chars: serving.budget_chars,
             used_chars: serving.used_chars,
             created_at_ms: epoch_ms(serving.created_at),
         },
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// 「기억해 둘게요」 proposals (#3169, ADR-0196 D4/D9)
+// ---------------------------------------------------------------------------
+//
+// An agent only *proposes* (the `memory_suggest` tool); nothing is a memory until a person accepts.
+// Who may decide: any active human member who can read the proposal's channel — ADR-0196 D4 (a
+// person's accept is `origin=confirmed`), D9 (edit / forget = a member of the evidence channel) and
+// D6-2 (read = able to read all the evidence, which is one channel here). The database decides, in
+// `mem_accept_proposal` / `mem_reject_proposal`: the member is `app.member_id` (there is no member
+// in the request), a stranger and an unknown id are the same 42501 → 403 (no existence oracle), and
+// accepting re-validates every evidence message against the *accepter*.
+
+const PROPOSAL_STATUSES: [&str; 3] = ["pending", "accepted", "rejected"];
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposalDto {
+    pub id: String,
+    pub channel_id: String,
+    /// The agent run that proposed it — the reply the card belongs under.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    pub agent_member_id: String,
+    /// The person the agent was answering (derived by the server, not chosen by the agent).
+    pub requester_member_id: String,
+    /// `decision` | `fact` | `commitment` | `preference` | `procedure`.
+    pub kind: String,
+    /// `pending` | `accepted` | `rejected`.
+    pub status: String,
+    /// The proposed memory. **Only while pending**: a decided proposal keeps no text (the accepted
+    /// item holds it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    /// The source messages (ids only; never their text). Empty once decided.
+    pub evidence_message_ids: Vec<String>,
+    pub created_at_ms: i64,
+    pub expires_at_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decided_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decided_at_ms: Option<i64>,
+    /// The confirmed item an accepted proposal became.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item_id: Option<String>,
+}
+
+fn proposal_dto(proposal: &MemProposal) -> ProposalDto {
+    ProposalDto {
+        id: proposal.id.to_string(),
+        channel_id: proposal.channel_id.to_string(),
+        run_id: proposal.run_id.map(|id| id.to_string()),
+        agent_member_id: proposal.agent_member_id.to_string(),
+        requester_member_id: proposal.requester_member_id.to_string(),
+        kind: proposal.kind.clone(),
+        status: proposal.status.clone(),
+        text: proposal.body.clone(),
+        subject: proposal.subject_key.clone(),
+        evidence_message_ids: proposal
+            .evidence_message_ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect(),
+        created_at_ms: epoch_ms(proposal.created_at),
+        expires_at_ms: epoch_ms(proposal.expires_at),
+        decided_by: proposal.decided_by.map(|id| id.to_string()),
+        decided_at_ms: proposal.decided_at.map(epoch_ms),
+        item_id: proposal.item_id.map(|id| id.to_string()),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListProposalsQuery {
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub run_id: Option<String>,
+    #[serde(default)]
+    pub limit: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposalListResponse {
+    pub proposals: Vec<ProposalDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposalDecisionResponse {
+    pub proposal: ProposalDto,
+}
+
+/// SQLSTATE → HTTP for a proposal decision. `42501` covers "not a reader of that channel", "not a
+/// human" and "no such proposal" alike, so the answer never says which proposals exist.
+fn proposal_db_error(context: &str, error: DbError) -> ApiError {
+    if let DbError::Sqlx(momo_db::sqlx::Error::Database(db)) = &error {
+        match db.code().as_deref() {
+            Some("42501") => {
+                return ApiError::forbidden("not allowed to decide this memory proposal")
+            }
+            // already decided, expired, or memory is off / paused / excluded for the channel
+            Some("55000") => {
+                return ApiError::new(
+                    axum::http::StatusCode::CONFLICT,
+                    "this memory proposal can no longer be decided",
+                )
+            }
+            // an evidence message is gone or unreadable, or was edited since the proposal
+            Some("23503") | Some("40001") => {
+                return ApiError::new(
+                    axum::http::StatusCode::CONFLICT,
+                    "the messages behind this memory proposal changed",
+                )
+            }
+            Some("23514") => {
+                return ApiError::new(
+                    axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                    "this memory proposal cannot be remembered as written",
+                )
+            }
+            _ => {}
+        }
+    }
+    ApiError::internal(context, error)
+}
+
+fn settle_proposal<T>(context: &str, outcome: DbRejectable<T>) -> Result<T, ApiError> {
+    match outcome {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(rejection)) => Err(rejection),
+        Err(error) => Err(proposal_db_error(context, error)),
+    }
+}
+
+/// `GET /v1/workspaces/{ws}/channels/{ch}/memory/proposals` — the channel's proposals, newest
+/// first. `status` (default `pending`), `runId` (only one reply's cards), `limit`. A channel the
+/// caller cannot read is an empty list — the read policy hides the rows.
+pub async fn list_proposals(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, channel)): Path<(String, String)>,
+    Query(query): Query<ListProposalsQuery>,
+) -> Result<Json<ProposalListResponse>, ApiError> {
+    require_human(&principal, HUMAN_ONLY)?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let channel_id = path_uuid(&channel, "invalid channel id")?;
+    let status = match query
+        .status
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        None => "pending".to_string(),
+        Some(status) if PROPOSAL_STATUSES.contains(&status) => status.to_string(),
+        Some(_) => {
+            return Err(ApiError::bad_request(
+                "status must be pending, accepted or rejected",
+            ))
+        }
+    };
+    let run_id = match query
+        .run_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        Some(raw) => Some(path_uuid(raw, "invalid run id")?),
+        None => None,
+    };
+    let limit = clamp_mem_proposal_limit(query.limit.as_deref().and_then(|raw| raw.parse().ok()));
+    let member_id = principal.member_id;
+
+    let outcome: DbRejectable<Vec<MemProposal>> =
+        memory_tenant_tx(&state.pool, workspace_id, member_id, move |conn| {
+            Box::pin(async move {
+                if let Err(rejection) = require_live_human(conn, workspace_id, member_id).await? {
+                    return Ok(Err(rejection));
+                }
+                Ok(Ok(list_proposals_in_tx(
+                    conn,
+                    &ProposalListFilter {
+                        channel_id,
+                        status: &status,
+                        run_id,
+                        limit,
+                    },
+                )
+                .await?))
+            })
+        })
+        .await;
+
+    let rows = settle_proposal("memory.list_proposals", outcome)?;
+    Ok(Json(ProposalListResponse {
+        proposals: rows.iter().map(proposal_dto).collect(),
+    }))
+}
+
+/// `POST /v1/workspaces/{ws}/memory/proposals/{id}/accept` — the caller accepts the proposal; it
+/// becomes a `confirmed` memory item. 403 for anyone who may not decide it (and for an unknown id);
+/// 409 when it was already decided, expired, memory is off here, or its evidence changed.
+pub async fn accept_proposal(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, proposal)): Path<(String, String)>,
+) -> Result<Json<ProposalDecisionResponse>, ApiError> {
+    decide_proposal(state, principal, workspace, proposal, true).await
+}
+
+/// `POST /v1/workspaces/{ws}/memory/proposals/{id}/reject` — same authority as accepting.
+pub async fn reject_proposal(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, proposal)): Path<(String, String)>,
+) -> Result<Json<ProposalDecisionResponse>, ApiError> {
+    decide_proposal(state, principal, workspace, proposal, false).await
+}
+
+async fn decide_proposal(
+    state: AppState,
+    principal: Principal,
+    workspace: String,
+    proposal: String,
+    accept: bool,
+) -> Result<Json<ProposalDecisionResponse>, ApiError> {
+    require_human(&principal, HUMAN_ONLY)?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let proposal_id = path_uuid(&proposal, "invalid proposal id")?;
+    let member_id = principal.member_id;
+    let via_token = audit_via_token_id(&principal);
+
+    let outcome: DbRejectable<MemProposal> =
+        memory_tenant_tx(&state.pool, workspace_id, member_id, move |conn| {
+            Box::pin(async move {
+                if let Err(rejection) = require_live_human(conn, workspace_id, member_id).await? {
+                    return Ok(Err(rejection));
+                }
+                let item_id = if accept {
+                    Some(accept_proposal_in_tx(conn, proposal_id).await?)
+                } else {
+                    reject_proposal_in_tx(conn, proposal_id).await?;
+                    None
+                };
+                // Read the decided shell back under the same policy the list uses.
+                let Some(decided) = get_proposal_in_tx(conn, proposal_id).await? else {
+                    return Ok(Err(ApiError::forbidden(
+                        "not allowed to decide this memory proposal",
+                    )));
+                };
+                write_audit(
+                    conn,
+                    &AuditEntry::new(
+                        workspace_id,
+                        if accept {
+                            "memory.proposal.accepted"
+                        } else {
+                            "memory.proposal.rejected"
+                        },
+                    )
+                    .by(member_id)
+                    .target("memory_proposal", proposal_id)
+                    .via_token(via_token)
+                    .with_schema(
+                        "momo.memory.proposal.decided.v1",
+                        serde_json::json!({
+                            "channel_id": decided.channel_id,
+                            "kind": decided.kind,
+                            "agent_member_id": decided.agent_member_id,
+                            "item_id": item_id,
+                        }),
+                    ),
+                )
+                .await?;
+                Ok(Ok(decided))
+            })
+        })
+        .await;
+
+    let decided = settle_proposal("memory.decide_proposal", outcome)?;
+    Ok(Json(ProposalDecisionResponse {
+        proposal: proposal_dto(&decided),
     }))
 }
 
