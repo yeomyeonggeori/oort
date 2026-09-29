@@ -499,14 +499,21 @@ async fn build_world(su: &PgPool) -> World {
     )
     .await;
     let mut runs = Vec::new();
-    for (workspace, channel) in [(ws, s1), (ws, p1), (ws_b, channel_b)] {
+    // #3169: a receipt's requester must be the run's own (derived from its trigger message), so the
+    // two same-workspace runs are triggered by alice's messages, as a mention would be.
+    for (workspace, channel, trigger) in [
+        (ws, s1, Some(m_s1.0)),
+        (ws, p1, Some(m_p1.0)),
+        (ws_b, channel_b, None),
+    ] {
         let run = Uuid::new_v4();
         let agent_member = if workspace == ws { agent } else { bob_b };
+        let trigger = trigger.map_or("NULL".to_string(), |id| format!("'{id}'"));
         su_exec(
             su,
             &format!(
-                "INSERT INTO agent_run (id, workspace_id, agent_member_id, channel_id) \
-                 VALUES ('{run}', '{workspace}', '{agent_member}', '{channel}')"
+                "INSERT INTO agent_run (id, workspace_id, agent_member_id, channel_id, trigger_message_id) \
+                 VALUES ('{run}', '{workspace}', '{agent_member}', '{channel}', {trigger})"
             ),
         )
         .await;
@@ -1330,7 +1337,9 @@ async fn cursor_and_receipts_only_through_their_functions() {
             )
         )
         .await,
-        Err("23514".into()),
+        // #3169: the requester must be the run's own (derived in SQL), so a missing one is a
+        // mismatch (22023) before the audience rule is even asked.
+        Err("22023".into()),
         "no requester"
     );
     // receipts follow the answer channel (D7).
@@ -1986,6 +1995,11 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
             ] {
                 // momo_app: SELECT (RLS-gated) everywhere; INSERT/UPDATE/DELETE only on its own
                 // settings. TRUNCATE / REFERENCES / TRIGGER nowhere (#3186 M-1).
+                // `mem_suppress` (#3208 M-5): its policies name mem_definer only, so momo_app reads
+                // zero rows whether or not a bootstrap re-grant left it a table SELECT — not asserted.
+                if role == "momo_app" && table == "mem_suppress" && privilege == "SELECT" {
+                    continue;
+                }
                 let allowed = role == "momo_app"
                     && (privilege == "SELECT"
                         || (table == "mem_settings"
@@ -2001,6 +2015,9 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
             }
             // Column-level grants are a side door around the table-level revokes (#3186 M-3).
             for privilege in ["SELECT", "INSERT", "UPDATE", "REFERENCES"] {
+                if role == "momo_app" && table == "mem_suppress" && privilege == "SELECT" {
+                    continue;
+                }
                 let allowed = role == "momo_app"
                     && (privilege == "SELECT"
                         || (table == "mem_settings" && matches!(privilege, "INSERT" | "UPDATE")));
@@ -2033,8 +2050,49 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
         );
     }
     for (signature, name) in &functions {
-        if name == "mem_digest_evidence_ok" {
-            continue; // the RLS policy calls it as the reading role
+        if name == "mem_edit_item" || name == "mem_forget_item" {
+            // #3208: the API's write entry points are PUBLIC EXECUTE on purpose (the same shape as
+            // `mem_search_items`: no dependence on role-creation order); what protects them is the
+            // in-function `session_user` guard and the actor derived from `app.member_id`, both
+            // exercised (and sabotaged) in mem_browser_conformance_pg. Pin the state so a change
+            // in either direction is noticed.
+            let public_exec: bool = sqlx::query_scalar(
+                "SELECT has_function_privilege('public', $1::regprocedure, 'EXECUTE')",
+            )
+            .bind(signature)
+            .fetch_one(su)
+            .await
+            .expect("public execute");
+            assert!(
+                public_exec,
+                "{when}: PUBLIC must be able to EXECUTE {signature}"
+            );
+            for role in &roles {
+                let has: bool = sqlx::query_scalar(
+                    "SELECT has_function_privilege($1, $2::regprocedure, 'EXECUTE')",
+                )
+                .bind(role)
+                .bind(signature)
+                .fetch_one(su)
+                .await
+                .expect("has_function_privilege");
+                assert!(has, "{when}: {role} EXECUTE {signature} (via PUBLIC)");
+            }
+            continue;
+        }
+        if name == "mem_digest_evidence_ok"
+            || name == "mem_item_evidence_ok"
+            || name == "mem_search_items"
+            // #3169: the proposal decision entry points (session_user guard + GUC viewer inside) and
+            // the RLS policy helper are PUBLIC on purpose, like their #3168 siblings.
+            || name == "mem_accept_proposal"
+            || name == "mem_reject_proposal"
+            || name == "mem_proposal_evidence_ok"
+        {
+            // The RLS policies call the evidence helpers as the reading role; `mem_search_items`
+            // is the API entry point (session_user guard inside; the worker-only twin is
+            // `mem_search_items_for`, which the loop covers).
+            continue;
         }
         let public_grants: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM pg_proc p, aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a \
@@ -2054,11 +2112,14 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
             .fetch_one(su)
             .await
             .expect("has_function_privilege");
-            assert_eq!(
-                has,
-                role == "momo_memory",
-                "{when}: {role} EXECUTE {signature}"
-            );
+            // `mem_search_items_core` (#3168 M-4) is callable by its owner alone: not even the
+            // worker role may run it, because it takes the serve/browse flag from its caller.
+            // `mem_proposal_decider` (#3169) is an internal helper of the accept / reject
+            // functions and is callable by its owner alone, like `mem_search_items_core`.
+            let expected = role == "momo_memory"
+                && name != "mem_search_items_core"
+                && name != "mem_proposal_decider";
+            assert_eq!(has, expected, "{when}: {role} EXECUTE {signature}");
         }
     }
     // Membership: only momo_worker, without inheritance.
@@ -2337,10 +2398,11 @@ fn migration_path() -> PathBuf {
         .join("../../../server/Migrations/101_mem_lockdown_hardening.sql")
 }
 
-/// The allow-list self-check lives in the newest migration that adds a definer function: 103
-/// (#3163). 101 and 102 are merged and stay untouched (#3191 M-6); each later list is a superset.
+/// The allow-list self-check is restated by every migration that adds a definer function (101 and 102
+/// are merged and stay untouched, #3191 M-6); the newest one is the one that matches the real state.
 fn worker_migration_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../server/Migrations/103_mem_serving.sql")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../server/Migrations/106_mem_item_edit.sql")
 }
 
 /// M-1: the lock block is one text in three files. Compared byte for byte (stronger than a
@@ -2465,7 +2527,9 @@ async fn lock_block_also_locks_views_and_materialized_views() {
 }
 
 /// L-1: the SECURITY DEFINER functions owned by mem_definer are exactly this list.
-const DEFINER_ALLOW_LIST: [&str; 20] = [
+const DEFINER_ALLOW_LIST: [&str; 37] = [
+    "mem_accept_proposal",
+    "mem_add_item",
     "mem_adjust_tokens",
     "mem_advance_cursor",
     "mem_apply_digest",
@@ -2478,12 +2542,27 @@ const DEFINER_ALLOW_LIST: [&str; 20] = [
     "mem_digest_live",
     "mem_digest_rollup_inputs",
     "mem_drop_digest",
+    "mem_edit_item",
+    "mem_forget_item",
+    "mem_item_audience_ok",
+    "mem_item_evidence_ok",
+    "mem_item_live",
+    "mem_item_readable_by",
     "mem_message_changed",
+    "mem_proposal_decider",
+    "mem_proposal_evidence_ok",
+    "mem_propose_item",
     "mem_record_serving",
+    "mem_reject_proposal",
     "mem_reserve_tokens",
+    "mem_search_items",
+    "mem_search_items_core",
+    "mem_search_items_for",
     "mem_serve_candidates",
+    "mem_serve_items",
     "mem_serve_requester",
     "mem_serving_of",
+    "mem_serving_record_of",
     "mem_stale_digests",
     "mem_token_budget",
 ];
@@ -2516,7 +2595,7 @@ async fn security_definer_functions_owned_by_mem_definer_are_allow_listed() {
         owned,
         DEFINER_ALLOW_LIST.to_vec(),
         "a SECURITY DEFINER function owned by mem_definer must be added to the allow-list \
-         here and in 103_mem_serving.sql on purpose"
+         here and in the newest migration's allow-list (106_mem_item_edit.sql) on purpose"
     );
     // The migration's own self-check passes on the good state ...
     let check = tail_block(&worker_migration_path(), "-- ── L-1", None);

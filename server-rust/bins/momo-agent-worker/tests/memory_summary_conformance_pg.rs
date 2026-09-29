@@ -1598,8 +1598,9 @@ async fn the_daily_token_cap_stops_calls_before_the_model() {
     assert_eq!(provider.count(), before);
 
     // Raise it: the same backlog goes through. The mock reports 150 tokens, far below the
-    // estimate, so the L-4 floor (half the estimate) is what gets charged.
-    sqlx::query("UPDATE mem_settings SET daily_token_cap = 1000 WHERE workspace_id = $1")
+    // estimate, so the L-4 floor (half the estimate) is what gets charged. (#3168: a window
+    // call also reserves the item-extraction output allowance, so the estimate is ~1.6k.)
+    sqlx::query("UPDATE mem_settings SET daily_token_cap = 5000 WHERE workspace_id = $1")
         .bind(fx.ws)
         .execute(&su)
         .await

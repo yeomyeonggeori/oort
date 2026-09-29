@@ -1,0 +1,9 @@
+target/
+# 모델 가중치·토크나이저 캐시는 레포에 두지 않는다(~/.cache/momo-scratch/3173/models).
+models/
+*.onnx
+*.onnx_data
+*.safetensors
+*.bin
+*.f32
+fixtures/scale*.jsonl

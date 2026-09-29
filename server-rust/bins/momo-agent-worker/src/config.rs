@@ -169,6 +169,9 @@ pub struct MemoryConfig {
     pub regen_min_interval_seconds: i32,
     /// `MEMORY_MAX_CHANNELS` (2000) — channels one sweep looks at.
     pub max_channels: i64,
+    /// `MEMORY_EXTRACT_ENABLED` (**on**; `0|false|no|off` turns it off) — #3168: the window call
+    /// also returns item candidates (decisions, facts, commitments). Off = digests only, as in M1.
+    pub extract_items: bool,
     /// `MEMORY_SERVE_ENABLED` (**on**; `0|false|no|off` turns it off) — put eligible summaries in
     /// an agent turn's context (#3163). Independent of the summary loop: turning the loop off
     /// does not stop already-written summaries from being served (the workspace / channel /
@@ -181,6 +184,16 @@ pub struct MemoryConfig {
     pub serve_budget_chars: usize,
     /// `MEMORY_SERVE_MAX_DIGESTS` (12) — candidates the database returns per turn.
     pub serve_max_digests: i32,
+    /// `MEMORY_SERVE_ITEMS_ENABLED` (**on**; `0|false|no|off` turns it off) — #3169: also put the
+    /// query-assembled items (decisions, facts, commitments matching the trigger message) in the
+    /// turn. Off = summaries only, as in M1. A kill switch for the item section alone.
+    pub serve_items: bool,
+    /// `MEMORY_SERVE_ITEM_BUDGET_CHARS` (3000) — the item section's own budget (ADR-0196 D7:
+    /// summaries 3,000 + items 3,000 = the 6,000-character memory block). Counts the section's
+    /// whole rendering (frame, labels, bodies). The receipt's `budget_chars` is the sum of both.
+    pub serve_item_budget_chars: usize,
+    /// `MEMORY_SERVE_MAX_ITEMS` (8) — item candidates the database returns per turn.
+    pub serve_max_items: i32,
     /// `MEMORY_SERVE_TIMEOUT_MS` (3000) — the whole serving step (read + receipt). Past it the
     /// reply goes out without memory; a slow database never delays an answer beyond this.
     pub serve_timeout: Duration,
@@ -210,9 +223,13 @@ impl Default for MemoryConfig {
             apply_retries: 3,
             regen_min_interval_seconds: 900,
             max_channels: 2_000,
+            extract_items: true,
             serve_enabled: true,
             serve_budget_chars: 3_000,
             serve_max_digests: 12,
+            serve_items: true,
+            serve_item_budget_chars: 3_000,
+            serve_max_items: 8,
             serve_timeout: Duration::from_millis(3_000),
         }
     }
@@ -262,11 +279,19 @@ impl MemoryConfig {
                 d.regen_min_interval_seconds,
             )?,
             max_channels: env_number("MEMORY_MAX_CHANNELS", d.max_channels)?.max(1),
+            extract_items: report_protocol_enabled(env("MEMORY_EXTRACT_ENABLED").as_deref()),
             serve_enabled: report_protocol_enabled(env("MEMORY_SERVE_ENABLED").as_deref()),
             serve_budget_chars: env_number("MEMORY_SERVE_BUDGET_CHARS", d.serve_budget_chars)?
                 .clamp(200, 20_000),
             serve_max_digests: env_number("MEMORY_SERVE_MAX_DIGESTS", d.serve_max_digests)?
                 .clamp(1, 50),
+            serve_items: report_protocol_enabled(env("MEMORY_SERVE_ITEMS_ENABLED").as_deref()),
+            serve_item_budget_chars: env_number(
+                "MEMORY_SERVE_ITEM_BUDGET_CHARS",
+                d.serve_item_budget_chars,
+            )?
+            .clamp(200, 20_000),
+            serve_max_items: env_number("MEMORY_SERVE_MAX_ITEMS", d.serve_max_items)?.clamp(1, 20),
             serve_timeout: Duration::from_millis(
                 env_number(
                     "MEMORY_SERVE_TIMEOUT_MS",

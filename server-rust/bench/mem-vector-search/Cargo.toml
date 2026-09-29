@@ -1,0 +1,19 @@
+# MEM-M3 (#3173) 평가 스파이크 — 제품 코드 아님. server-rust 워크스페이스 밖의 독립 크레이트(자체 [workspace]
+# + 자체 Cargo.lock)라 워크스페이스 빌드·Cargo.lock·GHCR 고지 번들에 영향이 없다.
+# 채택되면 그때 크레이트로 승격하고 fastembed(Apache-2.0)·ort·모델 가중치 귀속을 NOTICE에 반영한다.
+[package]
+name = "mem-vector-search-bench"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[workspace]
+
+[dependencies]
+fastembed = "=7.1.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3

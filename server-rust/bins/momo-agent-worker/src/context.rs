@@ -140,6 +140,15 @@ pub struct SystemBlocks<'a> {
     /// the profile offered that tool. A rule about behaviour like the protocol,
     /// kept as its own turn for the same reason.
     pub card_suggest: Option<&'a str>,
+    /// The `memory_suggest` rule (#3169), present only when the profile offered that tool —
+    /// [`momo_agent::memory_suggest::MEMORY_SUGGEST_DIRECTIVE`]. A rule about behaviour, so it sits
+    /// before the memory *data* block.
+    pub memory_suggest: Option<&'a str>,
+    /// Print `#<seq> ` before each **person's** message (#3169): the handle the model cites as
+    /// evidence when it calls `memory_suggest`. Off unless that tool is offered — an ordinary
+    /// turn's window is byte-for-byte what it was before. The agent's own turns carry no number
+    /// (an agent's words can never be evidence).
+    pub cite_seq: bool,
     /// The team-memory block (#3163): delimited, defanged summaries. **Data, not rules**, so it
     /// is the last `system` block — no rule of the server's sits downstream of text that came
     /// from channel content. Like the others it rides outside the conversation budget trim (it
@@ -184,6 +193,13 @@ pub fn assemble(
     if let Some(directive) = blocks.card_suggest.map(str::trim).filter(|d| !d.is_empty()) {
         head.push(ChatMessage::system(directive));
     }
+    if let Some(directive) = blocks
+        .memory_suggest
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+    {
+        head.push(ChatMessage::system(directive));
+    }
     if let Some(memory) = blocks.memory.map(str::trim).filter(|m| !m.is_empty()) {
         head.push(ChatMessage::system(memory));
     }
@@ -216,6 +232,10 @@ pub fn assemble(
                 let content = match display {
                     Some(display) => format!("[{display}] {body}"),
                     None => body,
+                };
+                let content = match (blocks.cite_seq, message.seq) {
+                    (true, Some(seq)) => format!("#{seq} {content}"),
+                    _ => content,
                 };
                 Turn {
                     role: "user",
@@ -684,6 +704,7 @@ mod tests {
                 report_protocol: Some(crate::completion_report::REPORT_PROTOCOL_BLOCK),
                 card_suggest: Some(directive),
                 memory: None,
+                ..SystemBlocks::default()
             },
             20,
         );
@@ -723,6 +744,7 @@ mod tests {
                 report_protocol: Some("규칙"),
                 card_suggest: None,
                 memory: Some("<기억 참고자료>\n요약\n</기억 참고자료>"),
+                ..SystemBlocks::default()
             },
             20,
         );
@@ -741,5 +763,51 @@ mod tests {
             out.dropped_count, 1,
             "history trimmed, the memory block was not"
         );
+    }
+
+    // ---- #3169: the evidence handle for memory_suggest ----------------------
+
+    #[test]
+    fn people_carry_a_number_only_when_the_tool_is_offered() {
+        let window = [
+            message(1, Some(7), Some("앨리스"), "배포는 금요일로 해요"),
+            message(2, Some(AGENT), None, "알겠어요"),
+            message(3, Some(8), None, "좋아요"),
+        ];
+        let plain = assemble(
+            &window,
+            Uuid::from_u128(AGENT),
+            Some(Uuid::from_u128(3)),
+            "",
+            None,
+            SystemBlocks::default(),
+            10_000,
+        );
+        assert!(plain.messages.iter().all(|m| !m.content.contains('#')));
+        let cited = assemble(
+            &window,
+            Uuid::from_u128(AGENT),
+            Some(Uuid::from_u128(3)),
+            "",
+            None,
+            SystemBlocks {
+                memory_suggest: Some("규칙"),
+                cite_seq: true,
+                ..SystemBlocks::default()
+            },
+            10_000,
+        );
+        let texts: Vec<&str> = cited.messages.iter().map(|m| m.content.as_str()).collect();
+        assert_eq!(
+            texts[0], "규칙",
+            "the rule is a system turn before the window"
+        );
+        assert!(
+            texts.contains(&"#1 [앨리스] 배포는 금요일로 해요"),
+            "{texts:?}"
+        );
+        assert!(texts.contains(&"#3 좋아요"), "{texts:?}");
+        // The agent's own turn has no number: its words are never evidence.
+        assert!(texts.contains(&"알겠어요"), "{texts:?}");
     }
 }
