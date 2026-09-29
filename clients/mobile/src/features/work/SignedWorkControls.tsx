@@ -448,6 +448,20 @@ function PermissionCard({
         <Sentence style={styles.ask} accessibilityRole="header">
           {ask}
         </Sentence>
+        {/* Why the allow is shut, right under the question: a long preview
+            would push it below the fold (#3128). Hidden once decided. */}
+        {outcome ? null : preview.state === 'loading' ? (
+          <Sentence style={styles.hint} testID="work-permission-preview-loading">
+            {PERMISSION_PREVIEW_LOADING_LINE}
+          </Sentence>
+        ) : preview.state === 'blocked' ? (
+          <Sentence
+            style={styles.hint}
+            testID="work-permission-preview-blocked"
+            accessibilityLiveRegion="polite">
+            {preview.line}
+          </Sentence>
+        ) : null}
         {shown ? (
           // The host's preview, whole and verbatim (0188 D5; design-review
           // B1): the hash Face ID signs is over exactly these characters, so
@@ -479,18 +493,6 @@ function PermissionCard({
           </Sentence>
         ) : (
           <>
-            {preview.state === 'loading' ? (
-              <Sentence style={styles.hint} testID="work-permission-preview-loading">
-                {PERMISSION_PREVIEW_LOADING_LINE}
-              </Sentence>
-            ) : preview.state === 'blocked' ? (
-              <Sentence
-                style={styles.hint}
-                testID="work-permission-preview-blocked"
-                accessibilityLiveRegion="polite">
-                {preview.line}
-              </Sentence>
-            ) : null}
             {!online ? (
               <Sentence style={styles.hint}>
                 오프라인이라 지금은 결정할 수 없어요.

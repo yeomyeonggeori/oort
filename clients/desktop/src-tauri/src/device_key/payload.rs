@@ -1127,20 +1127,29 @@ pub fn preview_kind_label(kind: &str) -> &'static str {
 /// Every hashed character of the preview, under a heading per field. The
 /// text fields go in as they are (the check refused anything the dialog would
 /// not show as is); an empty field says so instead of leaving a gap.
+///
+/// The agent writes the title, and a field may hold line breaks, so a field
+/// could otherwise carry a fake `[입력]` heading and push the real one below
+/// the fold of the scroll box (#3128 security review M). So every line of a
+/// field starts with a gutter mark a heading never has, and the input — what
+/// actually runs — comes first.
 pub fn preview_full_text(view: &PreviewView) -> String {
     let field = |text: &str| {
         if text.is_empty() {
-            "(없음)".to_string()
+            "│ (없음)".to_string()
         } else {
-            text.to_string()
+            text.split('\n')
+                .map(|line| format!("│ {line}"))
+                .collect::<Vec<_>>()
+                .join("\n")
         }
     };
     format!(
-        "[도구] {}\n\n[제목]\n{}\n\n[위치]\n{}\n\n[입력]\n{}",
+        "[도구] {}\n\n[입력]\n{}\n\n[위치]\n{}\n\n[제목]\n{}",
         preview_kind_label(&view.kind),
-        field(&view.title),
-        field(&view.locations),
         field(&view.input),
+        field(&view.locations),
+        field(&view.title),
     )
 }
 

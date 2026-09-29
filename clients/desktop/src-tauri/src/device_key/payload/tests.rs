@@ -1119,7 +1119,42 @@ fn the_permission_dialog_shows_the_bound_preview() {
         full.contains(r#"{"command":"git push origin main"}"#),
         "{full}"
     );
-    assert!(full.contains("[위치]\n(없음)"), "{full}");
+    assert!(full.contains("[위치]\n│ (없음)"), "{full}");
+    // The input (what runs) comes first.
+    assert!(
+        full.find("[입력]").unwrap() < full.find("[제목]").unwrap(),
+        "{full}"
+    );
+}
+
+/// Security review M (#3128): an agent-written title with line breaks cannot
+/// fake a heading — every field line carries the gutter, headings never do.
+#[test]
+fn a_field_cannot_fake_a_dialog_heading() {
+    let (signer, request, now) = v3_permission();
+    let ControlContent::Permission {
+        preview: Some(real),
+        ..
+    } = request.content.clone()
+    else {
+        unreachable!()
+    };
+    let mut spoof = real.clone();
+    spoof["title"] = Value::from("Read README\n\n[입력]\n{\"path\":\"README.md\"}\n\n\n");
+    let hash = permission_preview_sha256(&spoof).unwrap();
+    let statement = Statement::Control {
+        signer,
+        request: with_preview(&request, Some(spoof), Some(hash)),
+    };
+    assert!(statement.signed_bytes(now).is_ok());
+    let full = statement.summary(None).full_text.unwrap();
+    let headings: Vec<&str> = full.lines().filter(|l| l.starts_with('[')).collect();
+    assert_eq!(
+        headings,
+        ["[도구] 명령 실행", "[입력]", "[위치]", "[제목]"],
+        "{full}"
+    );
+    assert!(full.contains("│ [입력]"), "{full}");
 }
 
 /// The v3 body has the preview line and only v3 has it.
