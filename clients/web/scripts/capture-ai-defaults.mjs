@@ -17,6 +17,11 @@
 // OUT_DIR=captures/3064` — 저장 중 칸의 흐림(계산된 opacity 를 재서 0.5 가 아니면
 // 실패), 오프라인(`context.setOffline`: useOffline 의 브라우저 쪽 신호), 연결 순서
 // 블록의 해요체, 390 폭의 한 줄 설정 목록.
+//
+// #3157: `ONLY=remote-ok,remote-refuse-not-found,remote-refuse-refused,remote-refuse-login,
+// remote-reset,remote-login,team-save OUT_DIR=captures/3157` — 원격 작업 행이 이 맥의
+// workd에 넘긴 결말(design 전용 `aiRemote=` 고정값: refuse:<라벨> · reset · login)과
+// 기본 AI 팀 줄의 적용 규칙 문장(#3147).
 // =============================================================================
 
 import { spawn } from "node:child_process";
@@ -286,7 +291,19 @@ async function moveHopOrigin(page) {
   await page.getByTestId("chain-hop").first().evaluate((el) => el.scrollIntoView({ block: "center" }));
 }
 
+/** 원격 작업 행에서 「Claude · 개인」을 고른다(#3157). 결말 줄이 설 때까지 기다린다. */
+const pickRemote = (waitFor) => async (page) => {
+  await page.getByTestId("ai-default-remoteWork-select").selectOption("profile:claude:개인");
+  await page.getByTestId(waitFor).waitFor({ state: "visible" });
+};
+
 const SCENES = [
+  { name: "remote-ok", team: "operator", query: "&aiDefaults=demo&aiRemote=ok", ready: "ai-defaults-team-foot", focus: "ai-default-remoteWork" },
+  { name: "remote-refuse-not-found", team: "operator", query: "&aiDefaults=demo&aiRemote=refuse:profile_not_found", ready: "ai-defaults-team-foot", act: pickRemote("ai-default-remoteWork-error"), focus: "ai-default-remoteWork" },
+  { name: "remote-refuse-refused", team: "operator", query: "&aiDefaults=demo&aiRemote=refuse:profile_refused", ready: "ai-defaults-team-foot", act: pickRemote("ai-default-remoteWork-error"), focus: "ai-default-remoteWork" },
+  { name: "remote-refuse-login", team: "operator", query: "&aiDefaults=demo&aiRemote=refuse:profile_login_required", ready: "ai-defaults-team-foot", act: pickRemote("ai-default-remoteWork-error"), focus: "ai-default-remoteWork" },
+  { name: "remote-reset", team: "operator", query: "&aiDefaults=demo&aiRemote=reset", ready: "ai-defaults-team-foot", act: pickRemote("ai-default-remoteWork-error"), focus: "ai-default-remoteWork" },
+  { name: "remote-login", team: "operator", query: "&aiDefaults=demo&aiRemote=login", ready: "ai-defaults-team-foot", act: pickRemote("harness-login-dialog"), dialog: true },
   { name: "team-save", team: "operator-3042", query: "&aiDefaults=demo", ready: "ai-defaults-team-foot", act: checkConnection, focus: "ai-default-teamAgent" },
   {
     name: "team-save-pending",

@@ -122,6 +122,16 @@ pub enum Program {
         #[serde(default)]
         profile: Option<String>,
     },
+    /// The official CLI's sign-in for this Mac's 「원격 작업」 account (#3157,
+    /// ADR-0191 D1 A lane): the same `LOGIN_COMMANDS` row, run with the folder
+    /// workd keeps that account in. `profile` is only a label — the shell asks
+    /// workd for the folder over the code-signed socket (`pty_spawn`) and
+    /// believes only the path it computes itself; the webview cannot name one.
+    RemoteLogin {
+        id: String,
+        method: LoginMethod,
+        profile: String,
+    },
     /// The official CLI's sign-out: one row of `harness_profile::LOGOUT_COMMANDS`
     /// (ADR-0190 D3-f A2·A5). Always a profile folder — there is no sign-out
     /// of this Mac's default sign-in here.
@@ -194,6 +204,10 @@ pub struct HostFacts {
     pub allowed_shells: Vec<PathBuf>,
     /// The PATH a harness runs with (`harness_path::search_path`).
     pub path: OsString,
+    /// The A-lane folder and variable a remote-account sign-in runs with
+    /// (#3157), asked of workd by `pty_spawn` before planning. `None` for
+    /// every other program.
+    pub remote_profile: Option<(&'static str, PathBuf)>,
 }
 
 /// A validated spawn: an absolute program, its fixed argv, a checked folder.
@@ -257,6 +271,32 @@ pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan,
                 path: Some(host.path.clone()),
                 hooks: false,
                 profile,
+            })
+        }
+        Program::RemoteLogin { id, method, .. } => {
+            if request.cwd.is_some() {
+                return Err("refused: a sign-in runs in the home folder".into());
+            }
+            let row = LOGIN_COMMANDS
+                .iter()
+                .find(|row| row.id == id.as_str() && row.method == *method)
+                .ok_or_else(|| format!("refused: no {method:?} sign-in for {id:?}"))?;
+            // No folder from workd = no sign-in: never the CLI's own default
+            // location (a silent sign-in to the wrong account).
+            let profile = host
+                .remote_profile
+                .clone()
+                .ok_or_else(|| "refused: no remote-work account folder".to_string())?;
+            let program = harness_path::find_on_path(row.id, &host.path)
+                .ok_or_else(|| format!("refused: {id} is not installed on this machine"))?;
+            Ok(SpawnPlan {
+                program,
+                args: row.args.to_vec(),
+                cwd,
+                size,
+                path: Some(host.path.clone()),
+                hooks: false,
+                profile: Some(profile),
             })
         }
         Program::Logout { id, profile } => {
@@ -408,10 +448,14 @@ impl HostFacts {
             shell,
             allowed_shells,
             path: OsString::new(),
+            remote_profile: None,
         };
         if matches!(
             program,
-            Program::Harness { .. } | Program::Login { .. } | Program::Logout { .. }
+            Program::Harness { .. }
+                | Program::Login { .. }
+                | Program::RemoteLogin { .. }
+                | Program::Logout { .. }
         ) {
             facts.path =
                 harness_path::search_path(Some(&facts.home), std::env::var_os("PATH").as_ref());
@@ -928,6 +972,7 @@ impl PtySink for ChannelSink {
 /// `on_exit`.
 #[tauri::command]
 pub async fn pty_spawn(
+    app: tauri::AppHandle,
     state: State<'_, PtyState>,
     request: SpawnRequest,
     on_output: Channel<InvokeResponseBody>,
@@ -938,7 +983,13 @@ pub async fn pty_spawn(
     // openpty/fork block; keep them off the async workers as well as off the
     // main thread.
     tauri::async_runtime::spawn_blocking(move || {
-        let host = HostFacts::current(&request.program)?;
+        let mut host = HostFacts::current(&request.program)?;
+        // A remote-account sign-in runs in the folder workd keeps it in: the
+        // shell asks (code-signed socket), the webview only names the label.
+        if let Program::RemoteLogin { id, profile, .. } = &request.program {
+            host.remote_profile =
+                Some(crate::work_host::remote_profile_for_pty(&app, id, profile)?);
+        }
         let plan = plan_spawn(&request, &host)?;
         let mut cmd = build_command(&plan, std::env::vars_os());
         // The hook wiring is the only argv a harness gets, and it is fixed
@@ -1026,6 +1077,7 @@ mod tests {
             shell: Some("/bin/zsh".into()),
             allowed_shells: vec!["/bin/sh".into(), "/bin/zsh".into()],
             path,
+            remote_profile: None,
         }
     }
 
@@ -2027,7 +2079,74 @@ mod tests {
             shell: Some("/bin/zsh".into()),
             allowed_shells: vec!["/bin/zsh".into()],
             path: bin.as_os_str().to_owned(),
+            remote_profile: None,
         }
+    }
+
+    fn remote_login_request(id: &str, method: LoginMethod, profile: &str) -> SpawnRequest {
+        SpawnRequest {
+            program: Program::RemoteLogin {
+                id: id.into(),
+                method,
+                profile: profile.into(),
+            },
+            cwd: None,
+            cols: 80,
+            rows: 24,
+        }
+    }
+
+    /// #3157: a remote-account sign-in runs the same official command with the
+    /// folder workd named (`host.remote_profile`), never the CLI's default
+    /// location, and the wire form carries a label — a `path` field is not a
+    /// thing the webview can send.
+    #[test]
+    fn a_remote_account_sign_in_runs_in_the_folder_workd_named_or_not_at_all() {
+        let bin = fake_bin();
+        let mut host = profile_host("remote-login", &bin);
+        // No folder from workd: refused, not a quiet default sign-in.
+        let error = plan_spawn(
+            &remote_login_request("claude", LoginMethod::Browser, "회사"),
+            &host,
+        )
+        .unwrap_err();
+        assert!(error.contains("no remote-work account folder"), "{error}");
+
+        let folder = host.home.join("workd-state/profiles/claude/회사");
+        host.remote_profile = Some(("CLAUDE_CONFIG_DIR", folder.clone()));
+        let plan = plan_spawn(
+            &remote_login_request("claude", LoginMethod::Browser, "회사"),
+            &host,
+        )
+        .unwrap();
+        assert_eq!(plan.profile, Some(("CLAUDE_CONFIG_DIR", folder.clone())));
+        assert_eq!(plan.args, vec!["auth", "login", "--claudeai"]);
+        assert!(!plan.hooks);
+        // The folder rides the child's environment as the CLI's config dir.
+        let env = env_of(&build_command(&plan, base(&[("PATH", "/usr/bin")])));
+        assert_eq!(env["CLAUDE_CONFIG_DIR"], folder.to_string_lossy());
+
+        // A sign-in that does not exist stays refused; so does a working folder.
+        assert!(plan_spawn(
+            &remote_login_request("claude", LoginMethod::Device, "회사"),
+            &host
+        )
+        .is_err());
+        let mut with_cwd = remote_login_request("claude", LoginMethod::Browser, "회사");
+        with_cwd.cwd = Some("/tmp".into());
+        assert!(plan_spawn(&with_cwd, &host).is_err());
+
+        // Wire form: label only. A path field is refused by the parser.
+        let ok: Program = serde_json::from_str(
+            r#"{"kind":"remoteLogin","id":"claude","method":"browser","profile":"회사"}"#,
+        )
+        .unwrap();
+        assert!(matches!(ok, Program::RemoteLogin { .. }));
+        assert!(serde_json::from_str::<Program>(
+            r#"{"kind":"remoteLogin","id":"claude","method":"browser","profile":"회사","path":"/tmp/x"}"#
+        )
+        .is_err());
+        std::fs::remove_dir_all(bin).ok();
     }
 
     fn logout_request(id: &str, profile: &str) -> SpawnRequest {

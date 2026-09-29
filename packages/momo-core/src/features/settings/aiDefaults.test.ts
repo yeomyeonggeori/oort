@@ -3,7 +3,6 @@ import {
   AI_DEFAULT_ROWS,
   AI_DEFAULT_ROW_IDS,
   PERSONAL_ROW_IDS,
-  AI_DEFAULTS_NOT_APPLIED,
   forgetAccount,
   localTerminalLaunch,
   modelLine,
@@ -143,9 +142,23 @@ describe("폴백: 저장 값을 조용히 바꾸지 않고 문장으로 말한�
       using: "Claude · 개인",
       note: "새 세션에서 Claude Code를 열면 이 계정으로 떠요",
     });
-    // 원격 작업은 아직 읽는 곳이 없다: 칸 밑에 적용된다고 말하지 않는다.
+    // 원격 작업은 이 맥의 workd가 읽는다(#3157): 칸 밑이 그것을 말한다.
     const remote = resolveRow("remoteWork", { remoteWork: { kind: "profile", harness: "claude", label: "개인" } }, input());
-    expect(remote).toEqual({ state: "ok", using: "Claude · 개인", note: null });
+    expect(remote).toEqual({
+      state: "ok",
+      using: "Claude · 개인",
+      note: "폰에서 시작한 작업은 원격 작업용으로 따로 로그인한 이 계정으로 떠요",
+    });
+    // 원격 작업 폴더는 로컬 폴더와 따로 로그인한다: 로컬 로그인 필요는 이 행의 폴백이 아니다.
+    const needsLocalLogin = resolveRow("remoteWork", { remoteWork: { kind: "profile", harness: "claude", label: "회사" } }, input());
+    expect(needsLocalLogin.state).toBe("ok");
+    // 이 맥 기본 로그인(라벨 없음)은 원격 작업이 쓰지 않는다: 옛 저장 값은 문장으로 말한다.
+    const defaultLogin = resolveRow("remoteWork", { remoteWork: { kind: "profile", harness: "codex", label: null } }, input());
+    expect(defaultLogin).toEqual({
+      state: "fallback",
+      using: "매번 묻기",
+      sentence: "이 맥 기본 로그인은 원격 작업에 쓰지 않아요. 계정을 골라 주세요.",
+    });
   });
 
   it("팀 키 없음: 앱 명령은 막히고 요약은 정적 문구", () => {
@@ -275,8 +288,12 @@ describe("로컬 터미널 새 세션이 저장된 선택을 읽는다 (#3010)",
     }
   });
 
-  it("표 밑 한 줄은 원격 작업만 준비 중이라고 말한다", () => {
-    expect(AI_DEFAULTS_NOT_APPLIED).toContain("원격 작업");
-    expect(AI_DEFAULTS_NOT_APPLIED).not.toContain("터미널");
+  it("원격 작업 선택지에는 라벨 없는 이 맥 기본 로그인이 없다(로컬 터미널에는 있다)", () => {
+    const remote = optionsFor("remoteWork", input()).map((option) => option.key);
+    const local = optionsFor("localTerminal", input()).map((option) => option.key);
+    expect(local.length).toBe(remote.length + 1);
+    expect(remote.every((key) => !key.endsWith(":"))).toBe(true);
+    expect(local.some((key) => key.endsWith(":"))).toBe(true);
+    expect(optionsFor("remoteWork", input()).every((option) => option.ref.kind === "profile" && option.ref.label !== null)).toBe(true);
   });
 });

@@ -140,9 +140,10 @@ describe("기본 AI 표 화면", () => {
     expect(q("ai-default-teamAgent")?.textContent).not.toContain("대답할 수 없어요");
   });
 
-  it("개인 줄 선택이 아직 적용되지 않는다는 사실을 적는다", () => {
+  it("표 밑에 「준비 중」·「적용 전」 줄이 없다: 원격 작업은 이 맥의 workd가 읽는다(#3157)", () => {
     render(AiDefaultsTable, { teamKey: TEAM, operator: true, browserTab: false });
-    expect(q("ai-defaults-not-applied")?.textContent).toContain("준비 중이에요");
+    expect(q("ai-defaults-not-applied")).toBeNull();
+    expect(q("ai-defaults-table")?.parentElement?.textContent).not.toMatch(/원격 작업이 이 선택을 따르는 것은 준비 중/);
   });
 
   it("브라우저 탭에서는 이 맥 계정 줄을 고르지 않는다", () => {
@@ -213,10 +214,14 @@ describe("기본 AI 표 팀 줄 저장 (#3042)", () => {
       select.dispatchEvent(new Event("change", { bubbles: true }));
     });
     expect(onChoose).toHaveBeenLastCalledWith("teamAgent", null);
-    // 저장은 되지만 적용은 준비 중이라고 말한다.
-    expect(q("ai-defaults-team-foot")?.textContent).toBe(
-      "팀 줄의 선택은 서버에 저장돼요. 팀 에이전트와 요약이 이 선택을 따르는 것은 준비 중이에요."
+    // #3147: 서버가 이 선택을 읽는다. 「준비 중」이라 말하지 않고 적용 규칙을 적는다.
+    // 채널 요약은 워커 경로가 없어 따른다고 말하지 않는다.
+    const foot = q("ai-defaults-team-foot")?.textContent ?? "";
+    expect(foot).toBe(
+      "모델을 직접 고른 에이전트는 자기 모델을 써요. 고르지 않은 에이전트의 대답은 팀 에이전트 줄을, 첫 인사는 채널 요약 줄을 따라요. 채널 요약 자체는 아직 이 선택을 따르지 않아요."
     );
+    expect(foot).not.toContain("준비 중");
+    expect(foot).not.toContain("아직 적용");
   });
 
   it("목록을 주지 않는 연결을 고르면 기본 모델만이라고 말한다", () => {

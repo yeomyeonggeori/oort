@@ -61,7 +61,12 @@ export function createLoginController(
    * oort 프로필 라벨(#2878, 시안 §3·§4). 있으면 셸이 그 폴더를 CLI의 설정 폴더로
    * 넘긴다(ADR-0190 D3-f A1·A3). 없으면 이 맥의 기본 위치다.
    */
-  profile: string | null = null
+  profile: string | null = null,
+  /**
+   * `profile`이 이 맥의 「원격 작업」 계정 라벨이다(#3157). 셸이 그 폴더를 workd에게
+   * 묻고, 없으면 로그인하지 않는다(기본 위치로 조용히 넘어가지 않는다).
+   */
+  remote = false
 ) {
   const setTimer = deps.setTimer ?? ((run, ms) => setTimeout(run, ms));
   const clearTimer =
@@ -170,11 +175,19 @@ export function createLoginController(
       if (id !== null) void deps.pty.kill(id).catch(() => undefined);
     }, HARNESS_LOGIN_TIMEOUT_MS);
 
+    // 원격 작업 로그인은 계정 라벨이 있어야 한다: 없으면 기본 위치 로그인으로 조용히
+    // 떨어지지 않고 시작 실패로 둔다(#3157).
+    if (remote && profile === null) {
+      settle({ phase: "failed", reason: "spawn" });
+      return;
+    }
     sessions.setPendingProgram(
       paneId,
       profile === null
         ? { kind: "login", id: harness, method }
-        : { kind: "login", id: harness, method, profile }
+        : remote
+          ? { kind: "remoteLogin", id: harness, method, profile }
+          : { kind: "login", id: harness, method, profile }
     );
     void sessions.ensure(paneId, HIDDEN_COLS, HIDDEN_ROWS).catch(() => {
       settle({ phase: "failed", reason: "spawn" });
