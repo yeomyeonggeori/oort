@@ -66,5 +66,16 @@
 - (−) 쿼터 스냅샷 host 서명 ingest가 서버 새 표면이다. 새 테이블이면 RLS 대상이다.
 - 파생 이슈: #2777(프로필 폴더·로그인), #2781(쿼터 ingest·게이지), #2782(폰 한도 카드).
 
+## 구현 계약: 원격 작업의 계정 (2026-09-29, #3033)
+
+D1 「A 레인 프로필」과 조건 1·8의 workd 쪽 구현이다. D1 본문은 바꾸지 않고 「폰·서버는 host가 발급한 불투명 프로필 id만 보낸다」를 이렇게 좁힌다.
+
+- **계정은 이 맥의 선택이지 요청의 값이 아니다.** 「원격 작업」 행(기기 저장)은 이 맥의 데스크탑이 코드서명 제어 소켓으로 workd에 넘긴다(`set_remote_profile`, 하네스별 라벨 하나 또는 `null`). workd는 host state 폴더의 `remote-profiles.json`(0600)에 저장하고 spawn마다 읽는다. spawn 본문·기기 서명·서버는 계정도 경로도 싣지 않는다. 그래서 서명 본문(v2·v3)은 바뀌지 않고, 릴레이가 계정을 바꿀 길이 없다. 폰이 spawn마다 계정을 고르는 것은 이 계약 밖이다(하려면 host가 발급한 id와 서명 본문 확장이 함께 필요하다 — 별도 결정).
+- **A 레인 프로필 폴더 = `<state>/profiles/<harness>/<label>/`(0700).** `prepare_remote_profile`이 단계마다 0700으로 만들고(링크를 지나지 않는다) 소유자가 공식 CLI로 로그인할 정확한 경로 문자열을 돌려준다. Claude 키체인 항목이 그 문자열의 해시로 정해지므로 spawn이 세팅하는 `CLAUDE_CONFIG_DIR`은 같은 문자열이다(끝 슬래시 없음, 마지막 단계는 resolve하지 않음). 로컬 L 프로필 폴더는 쓰지 않는다.
+- **spawn마다 검사:** 라벨 규칙(로컬과 같음), `profiles`부터 모든 단계가 진짜 디렉터리(링크 거부)·이 사용자 것·0700, 디스크의 이름이 라벨과 바이트 단위로 같음, 허용 폴더와 겹치지 않음. Claude는 조건 8의 설정 항목(`settings.local.json`, `CLAUDE.md`, `agents/`, `commands/`, `skills/`, `plugins/`, `hooks/` 등)과 hooks·MCP·`permissions.allow`·`env`·헬퍼 명령이 든 `settings.json`을 거부한다. **원문의 「host가 spawn마다 다시 쓰는 settings.json」은 다시 쓰지 않고 거부로 구현한다** — 원격 Claude는 설정 파일을 읽지 않으므로(`settingSources: []`, §8.3의 설정은 `session/new` `_meta`로 간다) 다시 쓸 이유가 없다. Codex는 프로필 폴더를 `CODEX_HOME`으로 삼아 `prepare_codex_home`(조건 1)을 그대로 통과해야 한다.
+- **env:** `CLAUDE_CONFIG_DIR`은 `AGENT_ENV_ALLOWLIST`에 넣지 않는다(넣으면 host의 상속 값이 통과한다). host가 검사한 폴더로만, 허용목록 위에 덮어쓴다. `CLAUDE_SECURESTORAGE_CONFIG_DIR`·`ANTHROPIC_CONFIG_DIR`·`ANTHROPIC_PROFILE`은 허용목록 밖이라 계속 넘어가지 않는다(로컬 터미널의 `STRIPPED_ENV`가 빼는 같은 변수들이다).
+- **읽기·쓰기 금지(Claude):** 모든 A 레인 프로필(`<state>/profiles`, 설정된 경로와 OS가 resolve한 경로 둘 다)은 Claude 세션의 `Read`·`Edit` 거부 규칙(`//절대경로/**`)과 sandbox 자격 거부 목록에 든다. 세션이 다른 계정의 자격을 읽지도, 자기 프로필에 설정을 심지도 못한다. **잔여 위험(수용):** Codex 세션은 이 거부를 걸지 못한다(읽기 전용 sandbox가 디스크 전체를 읽는다) — 원격 Codex가 다른 프로필의 `auth.json`을 읽을 수 있다. 조건 1의 「자격 복사 금지」와 §8.1의 sandbox 수용 범위 안이며, Codex 파일시스템 읽기 제한은 후속으로 다룬다. 같은 사용자의 다른 프로세스가 선택 파일을 지우거나 프로필을 만드는 것은 이 계약의 위협 모델 밖이다(0600은 다른 사용자만 막는다).
+- **조용한 기본 계정 폴백 금지:** 라벨이 정해져 있으면 그 프로필로 뜨거나 거부한다. 거부 라벨은 `profile_not_found`(폴더 없음), `profile_refused`(위 검사 실패·선택 파일 읽기 실패), `profile_login_required`(Codex `auth.json` 없음, 또는 어댑터가 ACP `auth_required`(-32000)로 답함), Codex 폴더의 `AGENTS.md`·`rules/` 등은 `codex_home_refused`. 이 라벨은 방에 `work.control.acked`로 보이며(`set_remote_profile`은 선택 파일이 읽히지 않을 때의 해제가 모든 하네스를 「선택 없음」으로 되돌리면 `reset: true`로 알린다 — 조용하지 않다) 클라이언트가 「매번 묻기」로 돌아가는 근거다. 알려진 한계: 로그아웃된 Claude 프로필이 `auth_required` 대신 다른 방식으로 실패하면 `agent_start_failed`로 보인다(키체인을 읽지 않는다 — D2).
+
 ## 결재 기록
 - **2026-09-26 성재:** 「전부 권장대로 가자」. Q5 권장안 「계정 스왑은 한 사람의 자기 계정들 사이, 새 칸으로 이어서, 전환은 기록. 한도 도달 시 기본은 묻기, 자동 전환은 옵트인」을 확정했다.

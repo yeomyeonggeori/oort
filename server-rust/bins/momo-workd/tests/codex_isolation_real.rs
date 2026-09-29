@@ -131,7 +131,7 @@ fn codex_process_env(f: &Fixture) -> Vec<(String, String)> {
         executable: PathBuf::from("/unused/codex-acp"),
         args: Vec::new(),
     };
-    let mut env = policy::launch_spec(&entry, &f.repo, host, &f.codex).env;
+    let mut env = policy::launch_spec(&entry, &f.repo, host, &f.codex, None).env;
     env.push(("ZZ_LEAKED_TOKEN".into(), "zz-fake-leaked-2630".into()));
     env
 }

@@ -2,7 +2,7 @@
 //! the peer's code signature. Nothing else — **no TCP, not even loopback**.
 //!
 //! The desktop app starts `momo-workd run --control-socket <path>` as its
-//! child and asks it four things over this socket: `status` (who this host is
+//! child and asks it a few things over this socket: `status` (who this host is
 //! and whether the server is taking its heartbeat), `shutdown`, and — R2,
 //! ADR-0146 개정 D-6·D-7 (#3024) — `pin_root` (hand over the public half of
 //! the app's Secure Enclave key, once) and `revoke_device` (a root-signed
@@ -70,6 +70,17 @@
 //! ← {"ok":true}
 //! → {"op":"reset_signature_requirement"}
 //! ← {"ok":true,"required":bool}   (still true when the owner's config says so)
+//! → {"op":"prepare_remote_profile","harness":"claude"|"codex","label":"<label>"}
+//! ← {"ok":true,"path":"<state>/profiles/<harness>/<label>"}   (#3033: makes the
+//!    A lane profile folder `0700` — or finds it — and returns the exact path the
+//!    app signs the official CLI in to as `CLAUDE_CONFIG_DIR` / `CODEX_HOME`)
+//! → {"op":"set_remote_profile","harness":"claude"|"codex","label":"<label>"|null}
+//! ← {"ok":true,"reset":bool}     (#3033: this Mac's 「원격 작업」 account — the profile folder
+//!                    remote sessions of that harness run as; `null` clears it.
+//!                    `reset: true`: the choice file was unreadable and the clear
+//!                    reset every harness to no choice)
+//! ← {"ok":false,"error":"invalid_request"|"unknown_harness"|"invalid_label"|
+//!                       "profile_not_found"|"profile_refused"|"profiles_unavailable"}
 //! ```
 
 use std::io;
@@ -455,6 +466,39 @@ pub fn respond(line: &str, identity: &HostIdentity, shared: &SocketShared) -> Va
                 Err(error) => json!({"ok": false, "error": error}),
             }
         }
+        Some("set_remote_profile") => {
+            let (Some(harness), label) = (
+                request.get("harness").and_then(Value::as_str),
+                request.get("label"),
+            ) else {
+                return json!({"ok": false, "error": "invalid_request"});
+            };
+            // A label, or an explicit `null` to clear; anything else (a
+            // missing key, a number) is not a choice.
+            let label = match label {
+                Some(Value::String(label)) => Some(label.as_str()),
+                Some(Value::Null) => None,
+                _ => return json!({"ok": false, "error": "invalid_request"}),
+            };
+            match crate::profile::RemoteProfiles::set(&shared.state_folder, harness, label) {
+                // `reset: true` — the choice file was unreadable and clearing
+                // reset every harness to no choice; the app tells the person.
+                Ok(reset) => json!({"ok": true, "reset": reset}),
+                Err(error) => json!({"ok": false, "error": error.label()}),
+            }
+        }
+        Some("prepare_remote_profile") => {
+            let (Some(harness), Some(label)) = (
+                request.get("harness").and_then(Value::as_str),
+                request.get("label").and_then(Value::as_str),
+            ) else {
+                return json!({"ok": false, "error": "invalid_request"});
+            };
+            match crate::profile::prepare(&shared.state_folder, harness, label) {
+                Ok(path) => json!({"ok": true, "path": path.display().to_string()}),
+                Err(error) => json!({"ok": false, "error": error.label()}),
+            }
+        }
         Some("reset_signature_requirement") => {
             let mut requirement = shared.requirement.lock().unwrap_or_else(|p| p.into_inner());
             match requirement.reset() {
@@ -647,6 +691,7 @@ mod tests {
             requirement: Arc::new(std::sync::Mutex::new(
                 crate::signature_requirement::SignatureRequirement::open(dir, false),
             )),
+            state_folder: dir.to_path_buf(),
             grants: crate::session_grant::GrantEpoch::default(),
         }
     }
@@ -743,6 +788,74 @@ mod tests {
         );
         assert!(epoch() > before, "reset_signature_requirement retires them");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn set_remote_profile_takes_a_label_or_null_and_saves_nothing_else() {
+        let dir = scratch();
+        let shared = shared(&dir);
+        let ask = |request: &str| respond(request, &identity(), &shared);
+        for (request, error) in [
+            (r#"{"op":"set_remote_profile"}"#, "invalid_request"),
+            (
+                r#"{"op":"set_remote_profile","harness":"claude"}"#,
+                "invalid_request",
+            ),
+            (
+                r#"{"op":"set_remote_profile","harness":"claude","label":7}"#,
+                "invalid_request",
+            ),
+            (
+                r#"{"op":"set_remote_profile","harness":"grok","label":"Work"}"#,
+                "unknown_harness",
+            ),
+            (
+                r#"{"op":"set_remote_profile","harness":"claude","label":"../../x"}"#,
+                "invalid_label",
+            ),
+        ] {
+            let answer = ask(request);
+            assert_eq!(answer["ok"], false, "{request}");
+            assert_eq!(answer["error"], error, "{request}");
+        }
+        assert!(
+            !dir.join(crate::profile::PROFILES_FILE).exists(),
+            "a refused choice saved nothing"
+        );
+        // A label with no folder yet is not saved either: sign in first.
+        let answer = ask(r#"{"op":"set_remote_profile","harness":"claude","label":"Work"}"#);
+        assert_eq!(answer["error"], "profile_not_found");
+        // `prepare_remote_profile` makes the folder and names the path to
+        // sign the CLI in to; only then the choice is taken.
+        let prepared = ask(r#"{"op":"prepare_remote_profile","harness":"claude","label":"Work"}"#);
+        assert_eq!(prepared["ok"], true);
+        assert_eq!(
+            prepared["path"],
+            crate::profile::profile_dir(&dir, "claude", "Work")
+                .display()
+                .to_string()
+        );
+        assert_eq!(
+            ask(r#"{"op":"set_remote_profile","harness":"claude","label":"Work"}"#)["ok"],
+            true
+        );
+        for request in [
+            r#"{"op":"prepare_remote_profile","harness":"claude"}"#,
+            r#"{"op":"prepare_remote_profile","label":"Work"}"#,
+        ] {
+            assert_eq!(ask(request)["error"], "invalid_request", "{request}");
+        }
+        assert_eq!(
+            ask(r#"{"op":"prepare_remote_profile","harness":"claude","label":"../x"}"#)["error"],
+            "invalid_label"
+        );
+        // Clearing the choice leaves an empty object: no choice.
+        assert_eq!(
+            ask(r#"{"op":"set_remote_profile","harness":"claude","label":null}"#)["ok"],
+            true
+        );
+        let saved = std::fs::read_to_string(dir.join(crate::profile::PROFILES_FILE)).unwrap();
+        assert_eq!(saved, "{}");
     }
 
     #[test]

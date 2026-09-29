@@ -451,6 +451,9 @@ pub struct SocketShared {
     /// Reported by `status`, and lowered by `reset_signature_requirement`
     /// (#3117): whether this host enforces device signatures, and why.
     pub requirement: Arc<Mutex<SignatureRequirement>>,
+    /// The host state folder: where `set_remote_profile` saves the choice
+    /// ([`crate::profile`], #3033).
+    pub state_folder: std::path::PathBuf,
     /// #3095: `pin_root`, `revoke_device` and `reset_signature_requirement`
     /// retire every 「이 세션 동안」 grant through it.
     pub grants: crate::session_grant::GrantEpoch,

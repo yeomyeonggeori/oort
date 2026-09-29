@@ -81,6 +81,7 @@ struct Options {
     set_mode_reports: Option<String>,
     set_mode_reports_late: bool,
     agent_name: Option<String>,
+    auth_required: bool,
 }
 
 fn parse() -> Options {
@@ -106,6 +107,7 @@ fn parse() -> Options {
         set_mode_reports: None,
         set_mode_reports_late: false,
         agent_name: None,
+        auth_required: false,
     };
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
@@ -113,6 +115,8 @@ fn parse() -> Options {
             "--record" => options.record = args.next(),
             "--mode" => options.mode = args.next().unwrap_or_default(),
             "--no-modes" => options.modes = false,
+            // #3033: `session/new` answers ACP `auth_required` (not signed in).
+            "--auth-required" => options.auth_required = true,
             "--codex-modes" => options.codex_modes = true,
             "--permission" => options.permission = true,
             "--escape-mode" => options.escape_mode = args.next(),
@@ -466,6 +470,10 @@ impl Stub {
                                "agentInfo": {"name": name, "title": "stub", "version": "0"}}),
                     );
                 }
+                Some("session/new") if self.options.auth_required => self.send(json!({
+                    "jsonrpc": "2.0", "id": id,
+                    "error": {"code": -32000, "message": "stub: authentication required"}
+                })),
                 Some("session/new") => {
                     let mut result = json!({"sessionId": "stub-session-1"});
                     if self.options.modes {
@@ -565,6 +573,7 @@ fn main() {
             "INITIAL_AGENT_MODE": std::env::var("INITIAL_AGENT_MODE").ok(),
             "CODEX_CONFIG": std::env::var("CODEX_CONFIG").ok(),
             "CODEX_HOME": std::env::var("CODEX_HOME").ok(),
+            "CLAUDE_CONFIG_DIR": std::env::var("CLAUDE_CONFIG_DIR").ok(),
             "TMPDIR": std::env::var("TMPDIR").ok(),
             "HOME": std::env::var("HOME").ok(),
         },

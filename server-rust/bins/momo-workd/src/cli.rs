@@ -689,6 +689,7 @@ pub async fn run(
             max_sessions: config.max_sessions,
             permission_wait: crate::session::DEFAULT_PERMISSION_WAIT,
             codex,
+            state_folder: state_folder(&config),
         },
     );
     let health = Arc::new(HostHealth::default());
@@ -725,6 +726,7 @@ pub async fn run(
             stop: stop.clone(),
             trust: trust.clone(),
             requirement: requirement.clone(),
+            state_folder: state_folder(&config),
             grants: sessions.grant_epoch(),
         },
     )?;
