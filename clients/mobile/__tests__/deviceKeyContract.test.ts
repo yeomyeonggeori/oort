@@ -178,7 +178,7 @@ describe('MomoDeviceKeyStore — hardening before stage 2', () => {
     );
   });
 
-  it('allows only momo.human.control.v1/v2 and its own device_rebind.v1, with their vector line counts', () => {
+  it('allows only momo.human.control.v1/v2/v3 and its own device_rebind.v1, with their vector line counts', () => {
     // ADR-0146 D-6/D-7: endorse/revoke are signed by the root Mac, never the phone.
     const control = vectors.cases.filter(
       c => c.schema === 'momo.human.control.v1',
@@ -196,6 +196,7 @@ describe('MomoDeviceKeyStore — hardening before stage 2', () => {
     expect(fromSwift).toEqual({
       'momo.human.control.v1': 13,
       'momo.human.control.v2': 13,
+      'momo.human.control.v3': 13,
       'momo.human.device_rebind.v1': 7,
     });
     // #3103: the letter momo-wire printed is exactly that many lines.
@@ -220,6 +221,13 @@ describe('MomoDeviceKeyStore — hardening before stage 2', () => {
         .map(c => c.payload.split('\n').length),
     );
     expect([...v2Counts]).toEqual([13]);
+    // #3128: and the #3118 v3 vectors.
+    const v3 = JSON.parse(
+      readFileSync(join(__dirname, '../../../docs/api/human-control-signing-v3.vectors.json'), 'utf8'),
+    ) as {cases: {schema: string; payload: string}[]};
+    expect(v3.cases.length).toBe(7);
+    expect([...new Set(v3.cases.map(c => c.payload.split('\n').length))]).toEqual([13]);
+    expect([...new Set(v3.cases.map(c => c.schema))]).toEqual(['momo.human.control.v3']);
   });
 
   it('keeps the vector fixture identical to the E1 original once both are here', () => {

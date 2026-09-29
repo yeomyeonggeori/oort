@@ -25,6 +25,17 @@
 //! recipes stay only so the E1 vectors still prove this port; the allow-list
 //! below no longer lets them reach the enclave.
 //!
+//! #3128 (ADR-0146 증보 2026-09-29, R2 H1 · #3118): a **permission** is
+//! signed as `momo.human.control.v3`, whose body has a fifth line, the
+//! SHA-256 of the host's preview (`momo.work_permission.preview.v1`). The
+//! webview hands over the preview it rendered and the hash it computed; this
+//! shell re-validates the closed object, recomputes the hash itself
+//! ([`permission_preview_sha256`]), refuses when the two differ or the preview
+//! was cut, and shows the preview in the native dialog. Every other kind stays
+//! v2: the server and workd accept v2 for them, so an app update does not break
+//! instructions on a host that has not updated yet (the v3 recipe for those
+//! kinds is byte-identical but the first line).
+//!
 //! The same typed statement also produces the native confirmation text
 //! ([`Statement::summary`]), so what the person approves is what is signed —
 //! including the first line of an instruction, which the signed bytes only
@@ -41,6 +52,8 @@ use uuid::Uuid;
 
 pub const HUMAN_CONTROL_SCHEMA_V1: &str = "momo.human.control.v1";
 pub const HUMAN_CONTROL_SCHEMA_V2: &str = "momo.human.control.v2";
+/// #3128: what a permission allow is signed as (the preview hash line).
+pub const HUMAN_CONTROL_SCHEMA_V3: &str = "momo.human.control.v3";
 pub const DEVICE_ENDORSE_SCHEMA_V1: &str = "momo.human.device_endorse.v1";
 /// Kept for the E1 vectors only (tests); never signed (#3028).
 #[cfg_attr(not(test), allow(dead_code))]
@@ -55,14 +68,17 @@ pub const DEVICE_REBIND_SCHEMA_V1: &str = "momo.human.device_rebind.v1";
 /// its own rebind letter (#3103).
 /// v1 control and v1 revocations are NOT here (#3028): the server and workd
 /// refuse a v1 spawn, and a v1 revocation leaves the revoked key unsigned.
-pub const SIGNING_SCHEMAS: [(&str, usize); 4] = [
+/// control v3 (#3128) is here for permission; v2 for the other kinds.
+pub const SIGNING_SCHEMAS: [(&str, usize); 5] = [
     (HUMAN_CONTROL_SCHEMA_V2, 13),
+    (HUMAN_CONTROL_SCHEMA_V3, 13),
     (DEVICE_ENDORSE_SCHEMA_V1, 7),
     (DEVICE_REVOKE_SCHEMA_V2, 7),
     (DEVICE_REBIND_SCHEMA_V1, 7),
 ];
 
-/// Which control recipe. Production signs v2 only; v1 is kept for the E1
+/// Which control recipe. Production signs a permission as v3 and every other
+/// kind as v2 ([`ControlContent::signing_schema`]); v1 is kept for the E1
 /// vectors (the bytes of input·permission·bundle·host_register are the same
 /// but the first line; spawn differs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +87,7 @@ pub enum ControlSchema {
     #[cfg_attr(not(test), allow(dead_code))]
     V1,
     V2,
+    V3,
 }
 
 impl ControlSchema {
@@ -78,6 +95,7 @@ impl ControlSchema {
         match self {
             ControlSchema::V1 => HUMAN_CONTROL_SCHEMA_V1,
             ControlSchema::V2 => HUMAN_CONTROL_SCHEMA_V2,
+            ControlSchema::V3 => HUMAN_CONTROL_SCHEMA_V3,
         }
     }
 }
@@ -186,6 +204,15 @@ pub enum ControlContent {
         option_id: String,
         option_kind: String,
         scope: PermissionScope,
+        /// #3128: the host's closed preview object as the page rendered it
+        /// (the owner's `GET …/permission-requests/{id}`). Required to sign;
+        /// the shell hashes it itself and shows it in the dialog.
+        #[serde(default)]
+        preview: Option<serde_json::Value>,
+        /// #3128: the hash the page computed (`checkPermissionPreview`). Must
+        /// equal the shell's own; the v3 body's fifth line.
+        #[serde(default)]
+        preview_sha256: Option<String>,
     },
     BundleManifest {
         manifest: serde_json::Value,
@@ -222,10 +249,20 @@ impl ControlContent {
         )
     }
 
-    /// v2 only: a spawn MAY name a session (a resume's successor id, #3027).
+    /// v2 and v3: a spawn MAY name a session (a resume's successor id, #3027).
     fn allows_session(&self, schema: ControlSchema) -> bool {
         self.requires_session()
-            || (schema == ControlSchema::V2 && matches!(self, ControlContent::Spawn { .. }))
+            || (schema != ControlSchema::V1 && matches!(self, ControlContent::Spawn { .. }))
+    }
+
+    /// The schema production signs this content as (#3128): a permission
+    /// binds its preview (v3); every other kind stays v2, which the server
+    /// and workd still accept for it.
+    pub fn signing_schema(&self) -> ControlSchema {
+        match self {
+            ControlContent::Permission { .. } => ControlSchema::V3,
+            _ => ControlSchema::V2,
+        }
     }
 
     pub fn canonical_bytes_for(&self, schema: ControlSchema) -> Result<Vec<u8>, PayloadError> {
@@ -247,7 +284,7 @@ impl ControlContent {
                     ControlSchema::V1 => {
                         format!("{agent_member_id}\n{folder_id}\n{}", nfc(first_prompt))
                     }
-                    ControlSchema::V2 => {
+                    ControlSchema::V2 | ControlSchema::V3 => {
                         token("tool", tool)?;
                         format!(
                             "{agent_member_id}\n{folder_id}\n{tool}\n{channel_id}\n{}",
@@ -261,13 +298,28 @@ impl ControlContent {
                 option_id,
                 option_kind,
                 scope,
+                preview_sha256,
+                ..
             } => {
                 token("option_id", option_id)?;
                 token("option_kind", option_kind)?;
-                format!(
+                let head = format!(
                     "{request_event_id}\n{option_id}\n{option_kind}\n{}",
                     scope.as_str()
-                )
+                );
+                // v3 has the preview line and only v3 has it: a v1/v2 body
+                // could not say which preview the person saw (#3118).
+                match (schema, preview_sha256) {
+                    (ControlSchema::V3, Some(hash)) => {
+                        lower_hex_sha256("preview_sha256", hash)?;
+                        format!("{head}\n{hash}")
+                    }
+                    (ControlSchema::V3, None) => {
+                        return Err(PayloadError::Field("preview_sha256", "missing"))
+                    }
+                    (_, None) => head,
+                    (_, Some(_)) => return Err(PayloadError::Field("preview_sha256", "needs v3")),
+                }
             }
             ControlContent::BundleManifest { manifest } => canonical_json(manifest)?,
             ControlContent::HostRegister {
@@ -392,7 +444,7 @@ impl Statement {
     #[cfg(test)]
     pub fn schema(&self) -> &'static str {
         match self {
-            Statement::Control { .. } => HUMAN_CONTROL_SCHEMA_V2,
+            Statement::Control { request, .. } => request.content.signing_schema().as_str(),
             Statement::Endorse { .. } => DEVICE_ENDORSE_SCHEMA_V1,
             Statement::Revoke { .. } => DEVICE_REVOKE_SCHEMA_V2,
             Statement::Rebind { .. } => DEVICE_REBIND_SCHEMA_V1,
@@ -405,6 +457,7 @@ impl Statement {
         let bytes = match self {
             Statement::Control { signer, request } => {
                 check_control_window(request.issued_at_ms, request.expires_at_ms, now_ms)?;
+                check_permission_preview(&request.content)?;
                 control_bytes(signer, request)?
             }
             Statement::Endorse { signer, request } => endorse_bytes(signer, request)?,
@@ -440,9 +493,162 @@ impl Statement {
     }
 }
 
-/// The v2 statement (what production signs).
+/// The statement production signs: v3 for a permission, v2 otherwise.
 pub fn control_bytes(signer: &Signer, request: &ControlRequest) -> Result<Vec<u8>, PayloadError> {
-    control_bytes_for(ControlSchema::V2, signer, request)
+    control_bytes_for(request.content.signing_schema(), signer, request)
+}
+
+// ---- the permission preview (#3128, momo-wire `permission_preview`) ---------
+
+/// `momo.work_permission.preview.v1`.
+pub const PREVIEW_SCHEMA_V1: &str = "momo.work_permission.preview.v1";
+/// Most characters one preview text field carries (ADR-0188 D5).
+pub const PREVIEW_FIELD_MAX_CHARS: usize = 3_500;
+/// The ACP `ToolKind` vocabulary, closed.
+pub const PREVIEW_KINDS: [&str; 10] = [
+    "read",
+    "edit",
+    "delete",
+    "move",
+    "search",
+    "execute",
+    "think",
+    "fetch",
+    "switch_mode",
+    "other",
+];
+const PREVIEW_TEXT_FIELDS: [&str; 3] = ["title", "locations", "input"];
+
+/// A character the app's display would neutralise instead of show — the
+/// `INVISIBLE` set of `@momo/core` `agentPane.ts`, which `checkPermissionPreview`
+/// refuses as `display_altered` — plus the carriage return, which the dialog
+/// would draw as a line break. The host removes every one of these before it
+/// hashes (`momo-workd` `projection::preview_field`), so an honest preview
+/// never carries one; the dialog shows exactly the hashed characters.
+///
+/// Deliberately NOT [`is_hidden_char`]: that set is wider than the host's
+/// (private use, U+2800, …), and an honest preview with such a character would
+/// then be allowable on the phone but never on this Mac (#3118 review M1).
+pub fn is_preview_hidden_char(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x0000..=0x0008
+            | 0x000B..=0x001F
+            | 0x007F..=0x009F
+            | 0x00AD
+            | 0x061C
+            | 0x180E
+            | 0x200B..=0x200F
+            | 0x2028..=0x202E
+            | 0x2060..=0x2064
+            | 0x2066..=0x206F
+            | 0xFEFF
+            | 0xFFF9..=0xFFFB
+    )
+}
+
+/// The preview as the dialog reads it: only after [`permission_preview_sha256`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviewView {
+    pub kind: String,
+    pub title: String,
+    pub locations: String,
+    pub input: String,
+    pub truncated: bool,
+}
+
+/// The closed v1 object (momo-wire `validate_preview`), every text field free
+/// of what the app would not show as is.
+pub fn parse_preview(preview: &serde_json::Value) -> Result<PreviewView, PayloadError> {
+    let object = preview
+        .as_object()
+        .ok_or(PayloadError::Field("preview", "not an object"))?;
+    if object.len() != 6 {
+        return Err(PayloadError::Field("preview", "wrong key set"));
+    }
+    if object.get("schema").and_then(|v| v.as_str()) != Some(PREVIEW_SCHEMA_V1) {
+        return Err(PayloadError::Field("preview", "schema"));
+    }
+    let kind = object
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .filter(|kind| PREVIEW_KINDS.contains(kind))
+        .ok_or(PayloadError::Field("preview", "kind"))?;
+    let mut text = Vec::with_capacity(3);
+    for field in PREVIEW_TEXT_FIELDS {
+        let value = object
+            .get(field)
+            .and_then(|v| v.as_str())
+            .ok_or(PayloadError::Field("preview", "text field"))?;
+        if value.chars().count() > PREVIEW_FIELD_MAX_CHARS {
+            return Err(PayloadError::Field("preview", "text field too long"));
+        }
+        if value.chars().any(is_preview_hidden_char) {
+            return Err(PayloadError::Field("preview", "invisible character"));
+        }
+        text.push(value.to_string());
+    }
+    let truncated = object
+        .get("truncated")
+        .and_then(|v| v.as_bool())
+        .ok_or(PayloadError::Field("preview", "truncated"))?;
+    let input = text.pop().unwrap_or_default();
+    let locations = text.pop().unwrap_or_default();
+    let title = text.pop().unwrap_or_default();
+    Ok(PreviewView {
+        kind: kind.to_string(),
+        title,
+        locations,
+        input,
+        truncated,
+    })
+}
+
+/// Lowercase hex SHA-256 of the preview's canonical bytes (sorted-key compact
+/// JSON, [`canonical_json`]) — the fifth line of a v3 permission body. The
+/// shell computes it; it never takes the page's word for it.
+pub fn permission_preview_sha256(preview: &serde_json::Value) -> Result<String, PayloadError> {
+    parse_preview(preview)?;
+    Ok(hex::encode(Sha256::digest(canonical_json(preview)?)))
+}
+
+/// Before a permission is signed: the page sent a preview and a hash, the
+/// shell's own hash of that preview equals the page's, and the preview was not
+/// cut (ADR-0188 D5: a cut preview cannot be allowed). Other kinds pass.
+pub fn check_permission_preview(content: &ControlContent) -> Result<(), PayloadError> {
+    let ControlContent::Permission {
+        preview,
+        preview_sha256,
+        ..
+    } = content
+    else {
+        return Ok(());
+    };
+    let preview = preview
+        .as_ref()
+        .ok_or(PayloadError::Field("preview", "missing"))?;
+    let claimed = preview_sha256
+        .as_deref()
+        .ok_or(PayloadError::Field("preview_sha256", "missing"))?;
+    let view = parse_preview(preview)?;
+    if permission_preview_sha256(preview)? != claimed {
+        return Err(PayloadError::Field("preview_sha256", "mismatch"));
+    }
+    if view.truncated {
+        return Err(PayloadError::Field("preview", "truncated"));
+    }
+    Ok(())
+}
+
+fn lower_hex_sha256(field: &'static str, value: &str) -> Result<(), PayloadError> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return Err(PayloadError::Field(field, "not a lowercase sha256"));
+    }
+    Ok(())
 }
 
 pub fn control_bytes_for(
@@ -775,9 +981,10 @@ impl Statement {
                             option_id,
                             option_kind,
                             scope,
-                        } => (
-                            "권한 허용",
-                            vec![format!(
+                            preview,
+                            ..
+                        } => {
+                            let mut lines = vec![format!(
                                 "요청 {}, 선택 {} ({}), {}",
                                 short_id(*request_event_id),
                                 first_line(option_id),
@@ -786,9 +993,38 @@ impl Statement {
                                     PermissionScope::Once => "이번 한 번",
                                     PermissionScope::Session => "이 세션 동안",
                                 }
-                            )],
-                            None,
-                        ),
+                            )];
+                            // #3128: the preview whose hash the statement
+                            // signs, whole, in the scrolling view. Only a
+                            // preview that passed `check_permission_preview`
+                            // reaches a dialog (`sign_statement` builds the
+                            // bytes first).
+                            let view = preview.as_ref().and_then(|p| parse_preview(p).ok());
+                            let full_text = match &view {
+                                Some(view) => {
+                                    lines.push(format!(
+                                        "도구: {}, {}",
+                                        preview_kind_label(&view.kind),
+                                        if view.title.trim().is_empty() {
+                                            "제목 없음".to_string()
+                                        } else {
+                                            first_line(&view.title)
+                                        }
+                                    ));
+                                    let places = view.locations.lines().filter(|l| !l.trim().is_empty()).count();
+                                    lines.push(format!(
+                                        "위치 {places}곳, 입력 {}자. 아래 칸이 서명하는 미리보기 전체예요.",
+                                        view.input.chars().count()
+                                    ));
+                                    Some(preview_full_text(view))
+                                }
+                                None => {
+                                    lines.push("미리보기 없음".to_string());
+                                    None
+                                }
+                            };
+                            ("권한 허용", lines, full_text)
+                        }
                         ControlContent::BundleManifest { manifest } => (
                             "설정 묶음 목록",
                             vec![match manifest.get("items").and_then(|v| v.as_array()) {
@@ -870,6 +1106,42 @@ impl Statement {
             },
         }
     }
+}
+
+/// The preview kind in the words the cards use.
+pub fn preview_kind_label(kind: &str) -> &'static str {
+    match kind {
+        "read" => "파일 읽기",
+        "edit" => "파일 고치기",
+        "delete" => "파일 지우기",
+        "move" => "파일 옮기기",
+        "search" => "검색",
+        "execute" => "명령 실행",
+        "think" => "생각 정리",
+        "fetch" => "웹에서 가져오기",
+        "switch_mode" => "모드 바꾸기",
+        _ => "기타 도구",
+    }
+}
+
+/// Every hashed character of the preview, under a heading per field. The
+/// text fields go in as they are (the check refused anything the dialog would
+/// not show as is); an empty field says so instead of leaving a gap.
+pub fn preview_full_text(view: &PreviewView) -> String {
+    let field = |text: &str| {
+        if text.is_empty() {
+            "(없음)".to_string()
+        } else {
+            text.to_string()
+        }
+    };
+    format!(
+        "[도구] {}\n\n[제목]\n{}\n\n[위치]\n{}\n\n[입력]\n{}",
+        preview_kind_label(&view.kind),
+        field(&view.title),
+        field(&view.locations),
+        field(&view.input),
+    )
 }
 
 // ---- field rules (E1) --------------------------------------------------------

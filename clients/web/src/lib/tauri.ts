@@ -523,6 +523,11 @@ export interface DesktopControlRequest {
         optionId: string;
         optionKind: string;
         scope: "once" | "session";
+        /** #3128 (control v3): the host's preview as the card rendered it.
+         * The shell re-hashes it, refuses a cut one and shows it in its dialog. */
+        preview: unknown;
+        /** The page's hash of it; must equal the shell's own. */
+        previewSha256: string;
       }
     | { kind: "bundle_manifest"; manifest: unknown }
     | { kind: "host_register"; hostPublicKeyB64: string; hostId: string; label: string };
@@ -561,7 +566,8 @@ export const desktopDeviceKey = {
     if (!IS_TAURI) throw "unsupported_platform";
     return invoke("device_key_bind_root", { request });
   },
-  /** `momo.human.control.v2` (#3028: the cards, the reply box and resume). */
+  /** `momo.human.control.v2` (#3028: the reply box and resume) and, for an
+   * allow, `momo.human.control.v3` over the checked preview (#3128). */
   async signControl(request: DesktopControlRequest): Promise<{
     deviceKeyId: string;
     devicePublicKey: string;

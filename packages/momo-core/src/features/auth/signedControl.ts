@@ -26,6 +26,7 @@ import {
   type WorkSession,
 } from "../../lib/api";
 import { humanSignatureRefusal } from "./humanSignature";
+import type { PermissionPreview } from "../workbench/permissionPreview";
 
 export type PermissionScope = "once" | "session";
 
@@ -64,6 +65,13 @@ export interface ControlToSign {
   sessionId: string | null;
   nonce: string;
   content: ControlContentToSign;
+  /**
+   * #3128, permission only: the host's preview this app rendered and checked
+   * (`checkPermissionPreview` ok), whose hash is `content.previewSha256`. The
+   * desktop shell re-hashes it and shows it in its native dialog; the phone
+   * signs the hash (Face ID's sheet cannot hold the preview, the card did).
+   */
+  permissionPreview?: PermissionPreview;
 }
 
 /**
@@ -159,8 +167,15 @@ function notDelivered(stage: "sign" | "server", error: unknown): Delivery {
 
 type SessionRef = Pick<WorkSession, "id" | "hostId">;
 
+/** An allow without a checked preview is never signed (#3128). */
+export const ALLOW_NEEDS_PREVIEW_LINE =
+  "미리보기를 확인하지 못해 허락에 서명하지 않았어요. 거부하거나 호스트에서 결정해 주세요.";
+
 /**
- * A signed allow (「이번 한 번」 or 「이 세션 동안」). Throws what the decision
+ * A signed allow (「이번 한 번」 or 「이 세션 동안」), `momo.human.control.v3`
+ * (#3128): it binds the preview the card showed — `preview` is
+ * `permissionPreviewGate`'s `ready` state, and `preview.sha256` the hash this
+ * app recomputed (never the request's word for it). Throws what the decision
  * route or the signer threw; the card reads it with `permissionFailure`.
  */
 export async function signedAllow(input: {
@@ -169,8 +184,12 @@ export async function signedAllow(input: {
   requestEventId: string;
   optionId: string;
   scope: PermissionScope;
+  preview: { preview: PermissionPreview; sha256: string } | null;
   signer: HumanControlSigner;
 }): Promise<void> {
+  if (!input.preview || !/^[0-9a-f]{64}$/.test(input.preview.sha256)) {
+    throw new SignerRefusal(ALLOW_NEEDS_PREVIEW_LINE);
+  }
   const humanSignature = await input.signer.sign({
     hostId: input.session.hostId,
     sessionId: input.session.id,
@@ -181,7 +200,9 @@ export async function signedAllow(input: {
       optionId: input.optionId,
       optionKind: "allow_once",
       scope: input.scope,
+      previewSha256: input.preview.sha256,
     },
+    permissionPreview: input.preview.preview,
   });
   await decideWorkPermission(input.workspaceId, input.session.id, {
     requestEventId: input.requestEventId,
