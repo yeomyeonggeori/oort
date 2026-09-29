@@ -3,7 +3,7 @@
 //!
 //! Items are seeded the way the summary worker (#3162) writes them: a `momo_worker` connection that
 //! has done `SET ROLE momo_memory` calls `mem_apply_digest` + `mem_add_item`. Everything the API
-//! returns is then decided by the migration 104 RLS policies and the 105 definer functions — these
+//! returns is then decided by the migration 104 RLS policies and the 106 definer functions — these
 //! tests prove the routes wire `app.member_id`, answer with no existence oracle, and that every new
 //! guard is load-bearing (each sabotaged in turn; the RED output is printed with `--nocapture`).
 //!
@@ -14,7 +14,7 @@
 //! | `edit_supersedes_and_keeps_the_evidence` | permission (D9), new curated item, old = history, validation, 409s |
 //! | `forget_deletes_for_good_and_hides_everywhere` | permission, chain purge, ledger ids only, search/list/detail gone |
 //! | `agents_suspended_members_and_wrong_sessions_are_refused` | agent bearer 403, suspended 403, definer session guard |
-//! | `each_new_guard_is_load_bearing` | sabotage of every guard in 105 (RED) |
+//! | `each_new_guard_is_load_bearing` | sabotage of every guard in 106 (RED) |
 //! | `member_id_is_not_left_on_the_pooled_connection` | LOCAL GUC after success/refusal |
 //! | `forget_sweeps_dead_twins_and_suppresses_reextraction` | M-1 twins, M-5 suppression (hash only), M-4 indexes |
 //! | `editing_to_a_twins_text_reveals_nothing_and_a_dead_twin_gives_way` | M-2 |

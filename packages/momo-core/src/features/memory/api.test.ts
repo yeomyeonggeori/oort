@@ -5,6 +5,7 @@ import { WireShapeError } from "../../lib/wire";
 import {
   editMemoryItem,
   forgetMemoryItem,
+  acceptMemoryProposal,
   getMemoryDigest,
   getMemoryItem,
   getMemoryItemEvents,
@@ -13,9 +14,11 @@ import {
   getRunMemoryReceipt,
   listMemoryDigests,
   listMemoryItems,
+  listMemoryProposals,
   patchChannelMemorySettings,
   patchMyMemorySettings,
   patchWorkspaceMemorySettings,
+  rejectMemoryProposal,
 } from "./api";
 import { memoryIsCaughtUp } from "./model";
 
@@ -148,6 +151,171 @@ describe("memory reads", () => {
   });
 });
 
+const PROPOSAL = "00000000-0000-7000-8000-000000000601";
+const ITEM = "00000000-0000-7000-8000-000000000701";
+const AGENT = "00000000-0000-7000-8000-000000000801";
+const ALICE = "00000000-0000-7000-8000-000000000802";
+
+function proposalWire(overrides: Record<string, unknown> = {}) {
+  return {
+    id: PROPOSAL,
+    channelId: CH,
+    runId: RUN,
+    agentMemberId: AGENT,
+    requesterMemberId: ALICE,
+    kind: "decision",
+    status: "pending",
+    text: "배포는 2026-10-02 금요일 오후 2시로 정했어요",
+    subject: "배포 일정",
+    evidenceMessageIds: [MSG],
+    evidence: [{ messageId: MSG, seq: 7, authorMemberId: ALICE }],
+    callerIsRequester: true,
+    createdAtMs: 1_800_000_000_000,
+    expiresAtMs: 1_801_209_600_000,
+    ...overrides,
+  };
+}
+
+describe("memory receipt items (#3169)", () => {
+  it("reads the items a run was served, tolerating a server that does not send them", async () => {
+    installHost();
+    const base = {
+      runId: RUN,
+      channelId: CH,
+      servedCount: 1,
+      digestIds: [],
+      digests: [],
+      budgetChars: 6000,
+      usedChars: 300,
+      createdAtMs: 1_800_000_001_000,
+    };
+    const item = {
+      id: ITEM,
+      channelId: CH,
+      kind: "decision",
+      origin: "confirmed",
+      body: "배포는 금요일",
+      validFromMs: 1_800_000_000_000,
+      sourceCount: 2,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(200, { receipt: { ...base, itemIds: [ITEM], items: [item] } }))
+        .mockResolvedValueOnce(jsonResponse(200, { receipt: base }))
+        .mockResolvedValueOnce(
+          jsonResponse(200, { receipt: { ...base, itemIds: [ITEM], items: [{ ...item, kind: "gossip" }] } })
+        )
+    );
+    const withItems = await getRunMemoryReceipt(WS, RUN);
+    expect(withItems.itemIds).toEqual([ITEM]);
+    expect(withItems.items?.[0]).toEqual(item);
+    const legacy = await getRunMemoryReceipt(WS, RUN);
+    expect(legacy.items).toBeUndefined();
+    await expect(getRunMemoryReceipt(WS, RUN)).rejects.toBeInstanceOf(WireShapeError);
+  });
+});
+
+describe("memory proposals (#3169)", () => {
+  it("lists a channel's proposals with the filters it was given", async () => {
+    installHost();
+    const fetchMock = vi.fn(async () => jsonResponse(200, { proposals: [proposalWire()] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const rows = await listMemoryProposals(WS, CH, { status: "pending", runId: RUN, limit: 5 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: PROPOSAL, kind: "decision", status: "pending", runId: RUN });
+    expect(rows[0].text).toContain("배포는");
+    expect(rows[0].callerIsRequester).toBe(true);
+    expect(rows[0].evidence).toEqual([{ messageId: MSG, seq: 7, authorMemberId: ALICE }]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://oort.test/v1/workspaces/${WS}/channels/${CH}/memory/proposals?status=pending&runId=${RUN}&limit=5`,
+      expect.anything()
+    );
+    await listMemoryProposals(WS, CH);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `https://oort.test/v1/workspaces/${WS}/channels/${CH}/memory/proposals`,
+      expect.anything()
+    );
+  });
+
+  it("treats an empty list as empty and refuses a malformed row", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(200, { proposals: [] }))
+        .mockResolvedValueOnce(jsonResponse(200, { proposals: [proposalWire({ status: "maybe" })] }))
+        .mockResolvedValueOnce(jsonResponse(200, { proposals: [proposalWire({ evidenceMessageIds: [7] })] }))
+        .mockResolvedValueOnce(jsonResponse(200, { proposals: [proposalWire({ evidence: [{ seq: 7 }] })] }))
+        .mockResolvedValueOnce(jsonResponse(200, { proposals: [proposalWire({ callerIsRequester: undefined })] }))
+    );
+    expect(await listMemoryProposals(WS, CH)).toEqual([]);
+    for (let n = 0; n < 4; n += 1) {
+      await expect(listMemoryProposals(WS, CH)).rejects.toBeInstanceOf(WireShapeError);
+    }
+  });
+
+  it("accepts and rejects with a bodiless POST; the decided shell has no text", async () => {
+    installHost();
+    const fetchMock = vi.fn(async (input: RequestInit | URL | string, init?: RequestInit) => {
+      const url = String(input);
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({});
+      if (url.endsWith("/accept")) {
+        return jsonResponse(200, {
+          proposal: proposalWire({
+            status: "accepted",
+            text: undefined,
+            subject: undefined,
+            evidenceMessageIds: [],
+            evidence: [],
+            decidedBy: ALICE,
+            decidedAtMs: 1_800_000_100_000,
+            itemId: ITEM,
+          }),
+        });
+      }
+      return jsonResponse(200, {
+        proposal: proposalWire({
+          status: "rejected",
+          text: undefined,
+          subject: undefined,
+          evidenceMessageIds: [],
+          evidence: [],
+          decidedBy: ALICE,
+          decidedAtMs: 1_800_000_100_000,
+        }),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const accepted = await acceptMemoryProposal(WS, PROPOSAL);
+    expect(accepted).toMatchObject({ status: "accepted", itemId: ITEM, decidedBy: ALICE });
+    expect(accepted.text).toBeUndefined();
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `https://oort.test/v1/workspaces/${WS}/memory/proposals/${PROPOSAL}/accept`,
+      expect.anything()
+    );
+    const rejected = await rejectMemoryProposal(WS, PROPOSAL);
+    expect(rejected.status).toBe("rejected");
+    expect(rejected.itemId).toBeUndefined();
+  });
+
+  it("surfaces 403 (may not decide) and 409 (already decided / changed) as ApiError", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(403, { error: { message: "not allowed" } }))
+        .mockResolvedValueOnce(jsonResponse(409, { error: { message: "no longer" } }))
+    );
+    await expect(acceptMemoryProposal(WS, PROPOSAL)).rejects.toMatchObject({ status: 403 });
+    await expect(rejectMemoryProposal(WS, PROPOSAL)).rejects.toMatchObject({ status: 409 });
+  });
+});
+
 describe("memory settings", () => {
   it("reads settings and sends only the fields set", async () => {
     installHost();
@@ -195,12 +363,12 @@ describe("memory settings", () => {
   });
 });
 
-const ITEM = "00000000-0000-7000-8000-000000000601";
-const ITEM_NEW = "00000000-0000-7000-8000-000000000602";
+const BITEM = "00000000-0000-7000-8000-000000000691";
+const BITEM_NEW = "00000000-0000-7000-8000-000000000692";
 
 function itemWire(overrides: Record<string, unknown> = {}) {
   return {
-    id: ITEM,
+    id: BITEM,
     channelId: CH,
     spaceKind: "channel",
     kind: "decision",
@@ -230,7 +398,7 @@ describe("memory browser items", () => {
       limit: 5,
     });
     expect(page.nextCursor).toBe("1.x");
-    expect(page.items[0]).toMatchObject({ id: ITEM, kind: "decision", score: 0.9 });
+    expect(page.items[0]).toMatchObject({ id: BITEM, kind: "decision", score: 0.9 });
     expect(fetchMock).toHaveBeenCalledWith(
       `https://oort.test/v1/workspaces/${WS}/memory/items?channelId=${CH}&kind=decision&status=history&q=%EB%8F%99%EA%B2%B0&cursor=9.y&limit=5`,
       expect.anything()
@@ -268,35 +436,35 @@ describe("memory browser items", () => {
                 id: "e1",
                 action: "superseded",
                 actorMemberId: "m1",
-                detail: { superseded_by: ITEM_NEW },
+                detail: { superseded_by: BITEM_NEW },
                 createdAtMs: 5,
               },
             ],
           });
         }
         return jsonResponse(200, {
-          item: itemWire({ retiredAtMs: 9, retiredReason: "edited", supersededById: ITEM_NEW }),
+          item: itemWire({ retiredAtMs: 9, retiredReason: "edited", supersededById: BITEM_NEW }),
           evidence,
         });
       })
     );
-    const detail = await getMemoryItem(WS, ITEM);
-    expect(detail.item).toMatchObject({ retiredReason: "edited", supersededById: ITEM_NEW });
+    const detail = await getMemoryItem(WS, BITEM);
+    expect(detail.item).toMatchObject({ retiredReason: "edited", supersededById: BITEM_NEW });
     expect(detail.evidence).toEqual(evidence);
-    expect(await getMemoryItemEvidence(WS, ITEM)).toEqual(evidence);
-    expect((await getMemoryItemEvents(WS, ITEM))[0]).toEqual({
+    expect(await getMemoryItemEvidence(WS, BITEM)).toEqual(evidence);
+    expect((await getMemoryItemEvents(WS, BITEM))[0]).toEqual({
       id: "e1",
       action: "superseded",
       actorMemberId: "m1",
-      detail: { superseded_by: ITEM_NEW },
+      detail: { superseded_by: BITEM_NEW },
       createdAtMs: 5,
     });
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => jsonResponse(404, { error: { message: "memory item not found" } }))
     );
-    await expect(getMemoryItem(WS, ITEM)).rejects.toMatchObject({ status: 404 });
-    await expect(getMemoryItemEvents(WS, ITEM)).rejects.toBeInstanceOf(ApiError);
+    await expect(getMemoryItem(WS, BITEM)).rejects.toMatchObject({ status: 404 });
+    await expect(getMemoryItemEvents(WS, BITEM)).rejects.toBeInstanceOf(ApiError);
   });
 
   it("edits with only the fields set and forgets with a count", async () => {
@@ -306,43 +474,43 @@ describe("memory browser items", () => {
         expect(JSON.parse(String(init.body))).toEqual({ body: "새 문구", kind: "fact" });
         return jsonResponse(200, {
           item: itemWire({
-            id: ITEM_NEW,
+            id: BITEM_NEW,
             origin: "curated",
-            supersedesId: ITEM,
+            supersedesId: BITEM,
             kind: "fact",
             editedByMemberId: "m1",
             editedAtMs: 1_800_000_009_000,
           }),
           evidence: [{ messageId: MSG, channelId: CH, seq: 7 }],
-          supersededId: ITEM,
+          supersededId: BITEM,
         });
       }
       expect(init?.method).toBe("DELETE");
       return jsonResponse(200, { forgottenCount: 3 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    const edited = await editMemoryItem(WS, ITEM, { body: "새 문구", kind: "fact" });
+    const edited = await editMemoryItem(WS, BITEM, { body: "새 문구", kind: "fact" });
     expect(edited.item).toMatchObject({
-      id: ITEM_NEW,
+      id: BITEM_NEW,
       origin: "curated",
-      supersedesId: ITEM,
+      supersedesId: BITEM,
       editedByMemberId: "m1",
       editedAtMs: 1_800_000_009_000,
     });
-    expect(edited.supersededId).toBe(ITEM);
+    expect(edited.supersededId).toBe(BITEM);
     expect(edited.evidence).toHaveLength(1);
-    expect(await forgetMemoryItem(WS, ITEM)).toBe(3);
+    expect(await forgetMemoryItem(WS, BITEM)).toBe(3);
   });
 
   it("surfaces 404, 409 and 422 of a write as ApiErrors, and rejects a bad forget body", async () => {
     installHost();
     for (const status of [404, 409, 422]) {
       vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(status, { error: { message: "no" } })));
-      await expect(editMemoryItem(WS, ITEM, { body: "x" })).rejects.toMatchObject({ status });
-      await expect(forgetMemoryItem(WS, ITEM)).rejects.toMatchObject({ status });
+      await expect(editMemoryItem(WS, BITEM, { body: "x" })).rejects.toMatchObject({ status });
+      await expect(forgetMemoryItem(WS, BITEM)).rejects.toMatchObject({ status });
     }
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, {})));
-    await expect(forgetMemoryItem(WS, ITEM)).rejects.toBeInstanceOf(WireShapeError);
-    await expect(editMemoryItem(WS, ITEM, { body: "x" })).rejects.toBeInstanceOf(WireShapeError);
+    await expect(forgetMemoryItem(WS, BITEM)).rejects.toBeInstanceOf(WireShapeError);
+    await expect(editMemoryItem(WS, BITEM, { body: "x" })).rejects.toBeInstanceOf(WireShapeError);
   });
 });

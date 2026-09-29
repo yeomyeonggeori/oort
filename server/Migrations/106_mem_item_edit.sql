@@ -1,5 +1,5 @@
 -- =============================================================================
--- 105_mem_item_edit.sql — #3208 / ADR-0196 (팀 기억 v2) M2: 기억 브라우저의 편집·잊기
+-- 106_mem_item_edit.sql — #3208 / ADR-0196 (팀 기억 v2) M2: 기억 브라우저의 편집·잊기
 --
 -- 새 정의자 함수 둘 (API 세션이 부른다 — 읽기 전용이던 mem_search_items 와 같은 신뢰 경계)
 --   mem_edit_item(항목, 본문, 종류?)   편집 = 새 항목(origin='curated') 추가 + 옛 항목 retired_reason='edited'
@@ -370,7 +370,359 @@ REVOKE CREATE ON SCHEMA public FROM mem_definer;
 -- 늦게 생겨도 부여 순서에 기대지 않는다). 런타임 역할에서 EXECUTE 를 빼는 것은 워커 전용 함수뿐이라
 -- 여기서 하지 않는다. (공용 mem-lockdown 블록은 건드리지 않는다.)
 
--- ── L-1: mem_definer 소유 SECURITY DEFINER 함수 허용 목록 (104 것 + 이 파일의 2개) ─────────────
+-- ── 제안 경로의 억제 검사 (#3210 의 105_mem_proposal.sql 함수에 한 블록씩만 더한 재정의) ─────────────────
+-- 본문은 105 것을 그대로 옮겼고(게스트 규칙·M-1 창 대체·L-2 락 순서 포함) 각 함수에 억제 검사 한 블록만 더했다.
+-- CREATE OR REPLACE 라 소유자·EXECUTE 권한(mem_propose_item = momo_memory, mem_accept_proposal = API)은 그대로다.
+CREATE OR REPLACE FUNCTION mem_propose_item(
+  p_run_id uuid, p_kind text, p_body text, p_subject_key text, p_evidence_message_ids uuid[])
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+DECLARE
+  v_ws uuid := nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid;
+  v_n integer := COALESCE(pg_catalog.cardinality(p_evidence_message_ids), 0);
+  v_body text := pg_catalog.btrim(COALESCE(p_body, ''));
+  v_subject text := nullif(pg_catalog.btrim(COALESCE(p_subject_key, '')), '');
+  v_channel uuid;
+  v_agent uuid;
+  v_trigger uuid;
+  v_status public.run_status;
+  v_run_created timestamptz;
+  v_trigger_seq bigint;
+  v_req uuid;
+  v_norm text;
+  v_hash text;
+  v_id uuid;
+BEGIN
+  IF v_ws IS NULL THEN
+    RAISE EXCEPTION 'mem_propose_item: app.workspace_id is not set' USING ERRCODE = '42501';
+  END IF;
+  IF p_kind IS NULL OR p_kind NOT IN ('decision', 'fact', 'commitment', 'preference', 'procedure') THEN
+    RAISE EXCEPTION 'mem_propose_item: unknown kind' USING ERRCODE = '23514';
+  END IF;
+  IF pg_catalog.char_length(v_body) NOT BETWEEN 1 AND 600 THEN
+    RAISE EXCEPTION 'mem_propose_item: body must be 1..600 characters' USING ERRCODE = '23514';
+  END IF;
+  IF v_subject IS NOT NULL AND pg_catalog.char_length(v_subject) > 80 THEN
+    RAISE EXCEPTION 'mem_propose_item: subject_key is at most 80 characters' USING ERRCODE = '23514';
+  END IF;
+  IF public.mem_looks_like_secret(v_body) OR public.mem_looks_like_secret(COALESCE(v_subject, '')) THEN
+    RAISE EXCEPTION 'mem_propose_item: body looks like a credential' USING ERRCODE = '23514';
+  END IF;
+  IF v_n = 0 OR v_n > 8 THEN
+    RAISE EXCEPTION 'mem_propose_item: 1..8 evidence messages are required' USING ERRCODE = '23514';
+  END IF;
+  IF (SELECT pg_catalog.count(DISTINCT e) FROM pg_catalog.unnest(p_evidence_message_ids) AS e) <> v_n THEN
+    RAISE EXCEPTION 'mem_propose_item: duplicate or NULL evidence message' USING ERRCODE = '23514';
+  END IF;
+
+  -- 에이전트·채널은 run 행에서. 호출자가 정하지 않는다.
+  SELECT r.channel_id, r.agent_member_id, r.trigger_message_id, r.status, r.created_at
+    INTO v_channel, v_agent, v_trigger, v_status, v_run_created
+    FROM public.agent_run r WHERE r.id = p_run_id AND r.workspace_id = v_ws;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'mem_propose_item: run not in workspace' USING ERRCODE = '23503';
+  END IF;
+  IF v_status IN ('succeeded', 'failed', 'cancelled', 'timed_out') THEN
+    RAISE EXCEPTION 'mem_propose_item: the run has ended' USING ERRCODE = '55000';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.member a
+                  WHERE a.id = v_agent AND a.workspace_id = v_ws AND a.kind = 'agent'
+                    AND a.status = 'active' AND a.deleted_at IS NULL) THEN
+    RAISE EXCEPTION 'mem_propose_item: only an active agent proposes' USING ERRCODE = '55000';
+  END IF;
+  v_req := public.mem_serve_requester(p_run_id);
+  IF v_req IS NULL THEN
+    RAISE EXCEPTION 'mem_propose_item: this run has no human requester' USING ERRCODE = '55000';
+  END IF;
+  -- 스위치: 워크스페이스·채널·DM 규칙(mem_channel_eligible) + 요청자의 개인 일시정지.
+  IF NOT public.mem_channel_eligible(v_channel) THEN
+    RAISE EXCEPTION 'mem_propose_item: memory is disabled, paused, excluded or not allowed for this channel'
+      USING ERRCODE = '55000';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.mem_settings s
+              WHERE s.workspace_id = v_ws AND s.scope = 'member'
+                AND s.member_id = v_req AND s.paused) THEN
+    RAISE EXCEPTION 'mem_propose_item: the requester paused memory' USING ERRCODE = '55000';
+  END IF;
+  -- 에이전트도 요청자도 이 채널을 읽을 수 있어야 한다(에이전트가 못 읽는 곳의 메시지를 인용할 수 없다).
+  IF NOT public.mem_member_can_read(v_channel, v_agent)
+     OR NOT public.mem_member_can_read(v_channel, v_req) THEN
+    RAISE EXCEPTION 'mem_propose_item: the agent and the requester must both read the channel'
+      USING ERRCODE = '55000';
+  END IF;
+
+  IF v_trigger IS NOT NULL THEN
+    SELECT tm.seq INTO v_trigger_seq FROM public.message tm
+     WHERE tm.id = v_trigger AND tm.workspace_id = v_ws AND tm.channel_id = v_channel;
+  END IF;
+  -- M-1 (보안 검수): 「지금 대화」의 기준 seq 는 절대 비지 않는다. 트리거가 없는 run(parent_run_id 로 이어진 자식 run)
+  -- 이나 트리거 행을 못 찾는 run 은 「run 이 시작될 때의 채널 머리 seq」를 기준으로 삼는다 — 에이전트가 그 시점에 볼 수
+  -- 있던 최신 메시지다. 창(200개)을 건너뛰는 fail-open 을 두지 않는다. 거부(55000) 대신 폴백을 고른 이유: A2A 위임 자식
+  -- run 도 요청자(사슬)가 있어 정당하게 제안할 수 있고, 머리 seq 는 그 run 이 볼 수 있던 범위의 상한이라 트리거 기준과
+  -- 같은 성질(뒤의 메시지·오래된 메시지 거부)을 유지한다. 빈 채널이면 0 이라 어떤 근거도 통과하지 못한다.
+  IF v_trigger_seq IS NULL THEN
+    SELECT COALESCE(pg_catalog.max(hm.seq), 0) INTO v_trigger_seq FROM public.message hm
+     WHERE hm.workspace_id = v_ws AND hm.channel_id = v_channel AND hm.created_at <= v_run_created;
+  END IF;
+
+  -- 락 순서는 어디서나 「메시지 행 → 채널 advisory」(102 H-1).
+  PERFORM 1 FROM public.message m
+   WHERE m.id = ANY (p_evidence_message_ids) AND m.workspace_id = v_ws AND m.channel_id = v_channel
+   ORDER BY m.id
+   FOR KEY SHARE;
+  PERFORM pg_catalog.pg_advisory_xact_lock_shared(
+    pg_catalog.hashtextextended('mem_digest:' || v_channel::text, 0));
+
+  -- 근거: 이 run 의 채널의 살아 있는 메시지, 트리거 근방(뒤의 것·200개 앞보다 오래된 것은 대화 밖), DM 은 합류 이후만.
+  IF (SELECT pg_catalog.count(*) FROM public.message m
+       WHERE m.id = ANY (p_evidence_message_ids)
+         AND m.channel_id = v_channel AND m.workspace_id = v_ws
+         AND m.deleted_at IS NULL AND m.state <> 'deleted'
+         -- 에이전트도 요청자도 그 메시지의 채널을 읽을 수 있어야 한다(위의 「같은 채널」과 독립된 벽).
+         AND public.mem_member_can_read(m.channel_id, v_agent)
+         AND public.mem_member_can_read(m.channel_id, v_req)
+         AND (m.seq <= v_trigger_seq AND m.seq > v_trigger_seq - 200)
+         AND (NOT EXISTS (SELECT 1 FROM public.channel dc WHERE dc.id = m.channel_id AND dc.kind = 'dm')
+              OR m.created_at >= (
+                   SELECT pg_catalog.max(x.joined_at) FROM public.membership x
+                    WHERE x.channel_id = m.channel_id AND x.workspace_id = m.workspace_id
+                      AND x.left_at IS NULL))
+     ) <> v_n THEN
+    RAISE EXCEPTION 'mem_propose_item: evidence must be live messages of this run''s conversation'
+      USING ERRCODE = '23503';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.message m
+              WHERE m.id = ANY (p_evidence_message_ids)
+                AND m.edited_at IS NOT NULL AND m.edited_at > v_run_created) THEN
+    RAISE EXCEPTION 'mem_propose_item: evidence was edited after the run began' USING ERRCODE = '40001';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.message m
+               JOIN public.member au ON au.id = m.author_member_id AND au.workspace_id = m.workspace_id
+              WHERE m.id = ANY (p_evidence_message_ids) AND au.kind <> 'human') THEN
+    RAISE EXCEPTION 'mem_propose_item: evidence written by an agent or bot cannot support a memory'
+      USING ERRCODE = '23514';
+  END IF;
+
+  -- L-2: 같은 채널의 제안은 중복 검사 **전에** 직렬화한다(동시에 같은 내용이 들어와 둘 다 검사를 통과한 뒤 23505 로
+  -- 터지는 길을 막는다). 요율 제한의 카운트도 이 락 아래에서 센다. 아래 INSERT 의 ON CONFLICT 는 두 번째 벽이다.
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('mem_proposal:' || v_channel::text, 0));
+
+  -- 같은 채널·같은 내용: 이미 기억하고 있거나 이미 제안 중이면 새로 만들지 않는다.
+  v_norm := pg_catalog.lower(pg_catalog.regexp_replace(v_body, '[[:space:]]+', ' ', 'g'));
+  v_hash := pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(p_kind || ':' || v_norm, 'UTF8')), 'hex');
+  -- #3208 M-5: 사람이 잊은 (채널, 해시)는 다시 제안하지 않는다(제안 없음 = NULL, 중복과 같은 답).
+  IF EXISTS (SELECT 1 FROM public.mem_suppress s
+              WHERE s.workspace_id = v_ws AND s.channel_id = v_channel AND s.content_hash = v_hash) THEN
+    RETURN NULL;
+  END IF;
+  -- 만료된 대기 제안이 같은 내용을 막지 않게 정리한다(본문·근거 id 를 지우고 거절 껍데기로 닫는다).
+  -- L-7: `decided_by` 는 NOT NULL·shape CHECK 가 결정자를 요구해서 **제안한 에이전트**로 채운다 — 사람의 결정이 아니다.
+  -- 그래서 사건을 `rejected` 가 아니라 `expired`(행위자 = 에이전트, detail.by='expiry')로 남긴다. UI 는 `expired` 이벤트가
+  -- 있는 껍데기를 「사람이 거절함」으로 읽지 말 것(만료 카드는 목록에도 나오지 않는다).
+  WITH closed AS (
+    UPDATE public.mem_proposal
+       SET status = 'rejected', body = NULL, subject_key = NULL, evidence_message_ids = '{}',
+           decided_by = v_agent, decided_at = pg_catalog.now()
+     WHERE workspace_id = v_ws AND channel_id = v_channel AND content_hash = v_hash
+       AND status = 'pending' AND expires_at <= pg_catalog.now()
+    RETURNING id
+  )
+  INSERT INTO public.mem_event (workspace_id, target_kind, target_id, action, actor_member_id, detail)
+  SELECT v_ws, 'proposal', c.id, 'expired', v_agent, pg_catalog.jsonb_build_object('by', 'expiry')
+    FROM closed c;
+  IF EXISTS (SELECT 1 FROM public.mem_item i
+              WHERE i.workspace_id = v_ws AND i.channel_id = v_channel AND i.content_hash = v_hash
+                AND i.retired_at IS NULL AND NOT i.stale AND public.mem_item_live(i.id))
+     OR EXISTS (SELECT 1 FROM public.mem_proposal p
+                 WHERE p.workspace_id = v_ws AND p.channel_id = v_channel
+                   AND p.content_hash = v_hash AND p.status = 'pending') THEN
+    RETURN NULL;
+  END IF;
+
+  -- 요율 제한(위의 채널 락 아래에서 센다: 동시에 여러 개가 한도를 함께 넘지 못한다).
+  IF (SELECT pg_catalog.count(*) FROM public.mem_proposal p
+       WHERE p.workspace_id = v_ws AND p.run_id = p_run_id) >= 3
+     OR (SELECT pg_catalog.count(*) FROM public.mem_proposal p
+          WHERE p.workspace_id = v_ws AND p.channel_id = v_channel
+            AND p.status = 'pending' AND p.expires_at > pg_catalog.now()) >= 20
+     OR (SELECT pg_catalog.count(*) FROM public.mem_proposal p
+          WHERE p.workspace_id = v_ws AND p.agent_member_id = v_agent
+            AND p.created_at > pg_catalog.now() - interval '1 hour') >= 30 THEN
+    RAISE EXCEPTION 'mem_propose_item: too many proposals' USING ERRCODE = '54000';
+  END IF;
+
+  INSERT INTO public.mem_proposal
+    (workspace_id, channel_id, run_id, agent_member_id, requester_member_id, kind, body,
+     subject_key, evidence_message_ids, content_hash)
+  VALUES
+    (v_ws, v_channel, p_run_id, v_agent, v_req, p_kind, v_body, v_subject,
+     (SELECT pg_catalog.array_agg(e ORDER BY e) FROM pg_catalog.unnest(p_evidence_message_ids) AS e),
+     v_hash)
+  ON CONFLICT (workspace_id, channel_id, content_hash) WHERE status = 'pending' DO NOTHING
+  RETURNING id INTO v_id;
+  IF v_id IS NULL THEN
+    RETURN NULL;
+  END IF;
+  INSERT INTO public.mem_event (workspace_id, target_kind, target_id, action, actor_member_id, detail)
+  VALUES (v_ws, 'proposal', v_id, 'proposed', v_agent,
+          pg_catalog.jsonb_build_object('run_id', p_run_id, 'kind', p_kind, 'evidence_count', v_n));
+  RETURN v_id;
+END
+$$;
+
+CREATE OR REPLACE FUNCTION mem_accept_proposal(p_proposal_id uuid)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+DECLARE
+  v_ws uuid := nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid;
+  v_viewer uuid := public.mem_proposal_decider(p_proposal_id);
+  v_p public.mem_proposal%ROWTYPE;
+  v_n integer;
+  v_ckind public.channel_kind;
+  v_space text := 'channel';
+  v_owner uuid;
+  v_valid_from timestamptz;
+  v_norm text;
+  v_hash text;
+  v_old uuid;
+  v_old_body text;
+  v_item uuid;
+  v_new boolean := false;
+BEGIN
+  SELECT * INTO v_p FROM public.mem_proposal p
+   WHERE p.id = p_proposal_id AND p.workspace_id = v_ws FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'mem_accept_proposal: not allowed' USING ERRCODE = '42501';
+  END IF;
+  IF v_p.status <> 'pending' THEN
+    RAISE EXCEPTION 'mem_accept_proposal: already decided' USING ERRCODE = '55000';
+  END IF;
+  IF v_p.expires_at <= pg_catalog.now() THEN
+    RAISE EXCEPTION 'mem_accept_proposal: the proposal expired' USING ERRCODE = '55000';
+  END IF;
+  v_n := pg_catalog.cardinality(v_p.evidence_message_ids);
+
+  -- 락 순서: 메시지 행 → 채널 advisory(102 H-1).
+  PERFORM 1 FROM public.message m
+   WHERE m.id = ANY (v_p.evidence_message_ids) AND m.workspace_id = v_ws
+   ORDER BY m.id
+   FOR KEY SHARE;
+  PERFORM pg_catalog.pg_advisory_xact_lock_shared(
+    pg_catalog.hashtextextended('mem_digest:' || v_p.channel_id::text, 0));
+  IF NOT public.mem_channel_eligible(v_p.channel_id) THEN
+    RAISE EXCEPTION 'mem_accept_proposal: memory is disabled, paused, excluded or not allowed for this channel'
+      USING ERRCODE = '55000';
+  END IF;
+
+  -- 수락하는 사람이 근거를 전부 읽을 수 있어야 한다. 제안을 믿지 않고 다시 확인한다:
+  --   ① 메시지가 제안 채널의 것이고 ② 지금 살아 있고(삭제·제안 뒤 수정 없음) ③ 수락하는 사람이 그 메시지의 채널을
+  --   읽을 수 있고 ④ 작성자가 사람이며 ⑤ DM 이면 합류 이후. ①과 ③은 서로 독립된 벽이다.
+  IF (SELECT pg_catalog.count(*) FROM public.message m
+       WHERE m.id = ANY (v_p.evidence_message_ids)
+         AND m.workspace_id = v_ws
+         AND m.channel_id = v_p.channel_id
+         AND m.deleted_at IS NULL AND m.state <> 'deleted'
+         AND public.mem_member_can_read(m.channel_id, v_viewer)
+         AND (NOT EXISTS (SELECT 1 FROM public.channel dc WHERE dc.id = m.channel_id AND dc.kind = 'dm')
+              OR m.created_at >= (
+                   SELECT pg_catalog.max(x.joined_at) FROM public.membership x
+                    WHERE x.channel_id = m.channel_id AND x.workspace_id = m.workspace_id
+                      AND x.left_at IS NULL))
+     ) <> v_n THEN
+    RAISE EXCEPTION 'mem_accept_proposal: an evidence message is gone or not readable by the accepter'
+      USING ERRCODE = '23503';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.message m
+              WHERE m.id = ANY (v_p.evidence_message_ids)
+                AND m.edited_at IS NOT NULL AND m.edited_at > v_p.created_at) THEN
+    RAISE EXCEPTION 'mem_accept_proposal: evidence was edited after it was proposed' USING ERRCODE = '40001';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.message m
+               JOIN public.member au ON au.id = m.author_member_id AND au.workspace_id = m.workspace_id
+              WHERE m.id = ANY (v_p.evidence_message_ids) AND au.kind <> 'human') THEN
+    RAISE EXCEPTION 'mem_accept_proposal: evidence written by an agent or bot cannot support a memory'
+      USING ERRCODE = '23514';
+  END IF;
+  IF public.mem_looks_like_secret(v_p.body) OR public.mem_looks_like_secret(COALESCE(v_p.subject_key, '')) THEN
+    RAISE EXCEPTION 'mem_accept_proposal: body looks like a credential' USING ERRCODE = '23514';
+  END IF;
+
+  SELECT c.kind INTO v_ckind FROM public.channel c WHERE c.id = v_p.channel_id AND c.workspace_id = v_ws;
+  IF v_ckind = 'dm' THEN
+    -- mem_channel_eligible 가 사람 정확히 1명 + 활성 에이전트 1명인 DM 만 통과시켰다.
+    v_space := 'personal';
+    SELECT x.member_id INTO STRICT v_owner
+      FROM public.membership x
+      JOIN public.member mm ON mm.id = x.member_id AND mm.workspace_id = x.workspace_id
+     WHERE x.channel_id = v_p.channel_id AND x.workspace_id = v_ws AND x.left_at IS NULL AND mm.kind = 'human';
+  END IF;
+
+  SELECT pg_catalog.max(m.created_at) INTO v_valid_from
+    FROM public.message m WHERE m.id = ANY (v_p.evidence_message_ids);
+  v_norm := pg_catalog.lower(pg_catalog.regexp_replace(pg_catalog.btrim(v_p.body), '[[:space:]]+', ' ', 'g'));
+  v_hash := pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(v_p.kind || ':' || v_norm, 'UTF8')), 'hex');
+  -- #3208 M-5: 잊은 내용의 제안은 수락할 수 없다(삽입 트리거가 조용히 건너뛰면 아래가 NULL 로 이어져 알 수 없는
+  -- 오류가 되므로 먼저 분명히 거절한다. 55000 → API 409, 다른 「더는 결정할 수 없음」 거절과 같은 매핑).
+  IF EXISTS (SELECT 1 FROM public.mem_suppress s
+              WHERE s.workspace_id = v_ws AND s.channel_id = v_p.channel_id AND s.content_hash = v_hash) THEN
+    RAISE EXCEPTION 'mem_accept_proposal: this memory was forgotten' USING ERRCODE = '55000';
+  END IF;
+
+  -- 같은 내용의 살아 있는 항목이 이미 있으면 그것을 가리킨다(추가만: 고치지 않는다). 죽은 옛 행이면 stale 로 내리고 새로 넣는다.
+  SELECT i.id, i.body INTO v_old, v_old_body FROM public.mem_item i
+   WHERE i.workspace_id = v_ws AND i.channel_id = v_p.channel_id AND i.content_hash = v_hash
+     AND i.retired_at IS NULL AND NOT i.stale
+   FOR UPDATE;
+  IF FOUND THEN
+    IF pg_catalog.lower(pg_catalog.regexp_replace(pg_catalog.btrim(v_old_body), '[[:space:]]+', ' ', 'g')) <> v_norm THEN
+      RAISE EXCEPTION 'mem_accept_proposal: content hash collision' USING ERRCODE = '23514';
+    END IF;
+    IF public.mem_item_live(v_old) THEN
+      v_item := v_old;
+    ELSE
+      UPDATE public.mem_item SET stale = true WHERE id = v_old;
+    END IF;
+  END IF;
+
+  IF v_item IS NULL THEN
+    INSERT INTO public.mem_item
+      (workspace_id, space_kind, channel_id, owner_member_id, kind, origin, body, subject_key,
+       valid_from, confidence, forget_after, content_hash, extractor_version, model, source_count)
+    VALUES
+      (v_ws, v_space, v_p.channel_id, v_owner, v_p.kind, 'confirmed', pg_catalog.btrim(v_p.body),
+       v_p.subject_key, v_valid_from, 1, NULL, v_hash, 'proposal-v1', NULL, v_n)
+    RETURNING id INTO v_item;
+    INSERT INTO public.mem_evidence (workspace_id, item_id, message_id, channel_id, created_at)
+    SELECT v_ws, v_item, e, v_p.channel_id, v_p.created_at
+      FROM pg_catalog.unnest(v_p.evidence_message_ids) AS e;
+    INSERT INTO public.mem_event (workspace_id, target_kind, target_id, action, detail)
+    VALUES (v_ws, 'item', v_item, 'created',
+            pg_catalog.jsonb_build_object(
+              'kind', v_p.kind, 'space', v_space, 'origin', 'confirmed', 'proposal_id', p_proposal_id,
+              'source_count', v_n, 'extractor_version', 'proposal-v1'));
+    v_new := true;
+  END IF;
+  INSERT INTO public.mem_event (workspace_id, target_kind, target_id, action, actor_member_id, detail)
+  VALUES (v_ws, 'item', v_item, 'confirmed', v_viewer,
+          pg_catalog.jsonb_build_object(
+            'proposal_id', p_proposal_id, 'agent_member_id', v_p.agent_member_id,
+            'run_id', v_p.run_id, 'duplicate', NOT v_new));
+  UPDATE public.mem_proposal
+     SET status = 'accepted', body = NULL, subject_key = NULL, evidence_message_ids = '{}',
+         decided_by = v_viewer, decided_at = pg_catalog.now(), item_id = v_item
+   WHERE id = p_proposal_id;
+  RETURN v_item;
+END
+$$;
+
+-- ── L-1: mem_definer 소유 SECURITY DEFINER 함수 허용 목록 (104·105 것 + 이 파일의 2개) ─────────────
 -- 새 정의자 함수를 만들면 이 목록과 시험(mem_schema_conformance_pg.rs 의 DEFINER_ALLOW_LIST)에
 -- 이름을 올려야 한다.
 DO $$
@@ -386,6 +738,9 @@ DECLARE
     'mem_serve_requester', 'mem_serve_candidates', 'mem_serving_of',
     'mem_item_evidence_ok', 'mem_item_readable_by', 'mem_item_live', 'mem_item_audience_ok', 'mem_add_item',
     'mem_search_items_core', 'mem_search_items_for', 'mem_search_items', 'mem_looks_like_secret',
+    'mem_proposal_evidence_ok', 'mem_propose_item', 'mem_proposal_decider',
+    'mem_accept_proposal', 'mem_reject_proposal',
+    'mem_serve_items', 'mem_serving_record_of',
     'mem_edit_item', 'mem_forget_item'
   ];
 BEGIN

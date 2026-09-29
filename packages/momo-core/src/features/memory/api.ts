@@ -4,6 +4,9 @@
 //   GET   /v1/workspaces/{ws}/channels/{ch}/memory/digests
 //   GET   /v1/workspaces/{ws}/memory/digests/{id}
 //   GET   /v1/workspaces/{ws}/agent-runs/{run}/memory-receipt
+//   GET   /v1/workspaces/{ws}/channels/{ch}/memory/proposals       「기억해 둘게요」 cards (#3169)
+//   POST  /v1/workspaces/{ws}/memory/proposals/{id}/accept
+//   POST  /v1/workspaces/{ws}/memory/proposals/{id}/reject
 //   GET   /v1/workspaces/{ws}/memory/settings
 //   PATCH /v1/workspaces/{ws}/memory/settings            workspace switch (admin)
 //   PATCH /v1/workspaces/{ws}/memory/settings/me         personal pause
@@ -35,6 +38,8 @@ import {
   parseMemberMemorySettings,
   parseMemoryDigestPage,
   parseMemoryDigestResponse,
+  parseMemoryProposalDecision,
+  parseMemoryProposalList,
   parseMemoryReceiptResponse,
   parseMemorySettings,
   parseWorkspaceMemorySettings,
@@ -47,9 +52,11 @@ import {
   type MemoryItemDetail,
   type MemoryItemEvent,
   type MemoryItemPage,
+  type ListMemoryProposalsOptions,
   type MemberMemorySettings,
   type MemoryDigest,
   type MemoryDigestPage,
+  type MemoryProposal,
   type MemoryReceipt,
   type MemorySettings,
   type PatchChannelMemorySettingsInput,
@@ -109,6 +116,52 @@ export function getRunMemoryReceipt(workspaceId: string, runId: string): Promise
   return memoryRequest(
     `${workspacePath(workspaceId)}/agent-runs/${encodeURIComponent(runId)}/memory-receipt`
   ).then(parseMemoryReceiptResponse);
+}
+
+/**
+ * The 「기억해 둘게요」 proposals of a channel, newest first (default: the pending ones). An agent
+ * only proposes; nothing here is a memory until a person accepts. A channel the caller cannot read
+ * is an empty list, not an error — do not treat empty as "no proposals exist".
+ */
+export function listMemoryProposals(
+  workspaceId: string,
+  channelId: string,
+  options: ListMemoryProposalsOptions = {}
+): Promise<MemoryProposal[]> {
+  const query = new URLSearchParams();
+  if (options.status !== undefined) query.set("status", options.status);
+  if (options.runId !== undefined) query.set("runId", options.runId);
+  if (options.limit !== undefined) query.set("limit", String(options.limit));
+  const suffix = query.toString();
+  const path = `${channelMemoryPath(workspaceId, channelId)}/proposals${suffix === "" ? "" : `?${suffix}`}`;
+  return memoryRequest(path).then(parseMemoryProposalList);
+}
+
+/**
+ * Accept a proposal — it becomes a confirmed memory of the channel. Any active member who can read
+ * the channel may; the deciding member is the credential's (none is sent). 403 when the caller may
+ * not decide (or the id is unknown), 409 when it was already decided, expired, memory is off for the
+ * channel, or its messages changed since.
+ */
+export function acceptMemoryProposal(
+  workspaceId: string,
+  proposalId: string
+): Promise<MemoryProposal> {
+  return memoryRequest(
+    `${workspacePath(workspaceId)}/memory/proposals/${encodeURIComponent(proposalId)}/accept`,
+    { method: "POST", body: JSON.stringify({}) }
+  ).then(parseMemoryProposalDecision);
+}
+
+/** Reject a proposal — nothing is remembered. Same authority and errors as accepting. */
+export function rejectMemoryProposal(
+  workspaceId: string,
+  proposalId: string
+): Promise<MemoryProposal> {
+  return memoryRequest(
+    `${workspacePath(workspaceId)}/memory/proposals/${encodeURIComponent(proposalId)}/reject`,
+    { method: "POST", body: JSON.stringify({}) }
+  ).then(parseMemoryProposalDecision);
 }
 
 export function getMemorySettings(workspaceId: string): Promise<MemorySettings> {

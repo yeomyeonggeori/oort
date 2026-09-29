@@ -184,6 +184,16 @@ pub struct MemoryConfig {
     pub serve_budget_chars: usize,
     /// `MEMORY_SERVE_MAX_DIGESTS` (12) — candidates the database returns per turn.
     pub serve_max_digests: i32,
+    /// `MEMORY_SERVE_ITEMS_ENABLED` (**on**; `0|false|no|off` turns it off) — #3169: also put the
+    /// query-assembled items (decisions, facts, commitments matching the trigger message) in the
+    /// turn. Off = summaries only, as in M1. A kill switch for the item section alone.
+    pub serve_items: bool,
+    /// `MEMORY_SERVE_ITEM_BUDGET_CHARS` (3000) — the item section's own budget (ADR-0196 D7:
+    /// summaries 3,000 + items 3,000 = the 6,000-character memory block). Counts the section's
+    /// whole rendering (frame, labels, bodies). The receipt's `budget_chars` is the sum of both.
+    pub serve_item_budget_chars: usize,
+    /// `MEMORY_SERVE_MAX_ITEMS` (8) — item candidates the database returns per turn.
+    pub serve_max_items: i32,
     /// `MEMORY_SERVE_TIMEOUT_MS` (3000) — the whole serving step (read + receipt). Past it the
     /// reply goes out without memory; a slow database never delays an answer beyond this.
     pub serve_timeout: Duration,
@@ -217,6 +227,9 @@ impl Default for MemoryConfig {
             serve_enabled: true,
             serve_budget_chars: 3_000,
             serve_max_digests: 12,
+            serve_items: true,
+            serve_item_budget_chars: 3_000,
+            serve_max_items: 8,
             serve_timeout: Duration::from_millis(3_000),
         }
     }
@@ -272,6 +285,13 @@ impl MemoryConfig {
                 .clamp(200, 20_000),
             serve_max_digests: env_number("MEMORY_SERVE_MAX_DIGESTS", d.serve_max_digests)?
                 .clamp(1, 50),
+            serve_items: report_protocol_enabled(env("MEMORY_SERVE_ITEMS_ENABLED").as_deref()),
+            serve_item_budget_chars: env_number(
+                "MEMORY_SERVE_ITEM_BUDGET_CHARS",
+                d.serve_item_budget_chars,
+            )?
+            .clamp(200, 20_000),
+            serve_max_items: env_number("MEMORY_SERVE_MAX_ITEMS", d.serve_max_items)?.clamp(1, 20),
             serve_timeout: Duration::from_millis(
                 env_number(
                     "MEMORY_SERVE_TIMEOUT_MS",

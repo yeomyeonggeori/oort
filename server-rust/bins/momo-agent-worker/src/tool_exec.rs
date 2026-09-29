@@ -34,8 +34,8 @@
 //! three properties that chose this tool — see `momo_agent::tools`.
 
 use momo_agent::tools::{
-    ToolCall, ToolResult, CARD_SUGGEST, WORK_SESSION_END, WORK_SESSION_LOGIN_HANDOFF,
-    WORK_SESSION_SPAWN,
+    ToolCall, ToolResult, CARD_SUGGEST, MEMORY_SUGGEST, WORK_SESSION_END,
+    WORK_SESSION_LOGIN_HANDOFF, WORK_SESSION_SPAWN,
 };
 use momo_db::{DbError, PgConnection, PgPool};
 use momo_messaging::{
@@ -119,6 +119,9 @@ pub async fn execute(
         }
         name if name == momo_agent::tools::normalize(CARD_SUGGEST) => {
             card_suggest(pool, context, call).await?
+        }
+        name if name == momo_agent::tools::normalize(MEMORY_SUGGEST) => {
+            memory_suggest(pool, context, call).await?
         }
         // Unreachable while the catalog has one entry, and deliberately not a
         // `panic!`: a catalog entry added without an executor must degrade to a
@@ -242,6 +245,71 @@ async fn card_suggest(
         }
         Err(refusal) => ToolResult::error(&call.call_id, suggestion_refusal_output(refusal)),
     })
+}
+
+/// `memory_suggest` — propose 「기억해 둘게요」 (ADR-0196 D4, #3169).
+///
+/// The agent proposes; a person decides. Two steps, on purpose in two different sessions:
+///
+/// 1. **read tx** (the worker's own session, tenant explicit in the statement): the `#numbers` the
+///    model cited become message ids **of the run's channel** ([`momo_agent::memory_suggest::resolve_evidence`]).
+///    This is a handle→id translation, not a permission check: a number from any other channel
+///    resolves to nothing and the call is refused before the database is asked to store anything.
+/// 2. **memory tx** (`SET LOCAL ROLE momo_memory`): `mem_propose_item`. The agent, the channel and
+///    the requester are the run row's; the database re-checks every evidence message (this run's
+///    channel, near the trigger, live, unedited, written by a person), the switches and the rate
+///    limit. No `mem_*` row is ever touched with the bypass bit on (ADR-0196 D6-6).
+///
+/// No card of its own (`ApprovalReason::SuggestionOnly`): the one write is a *pending* proposal that
+/// nothing reads until a person accepts it. Refusals are `ToolResult::error` — the model must read
+/// them — and store nothing.
+async fn memory_suggest(
+    pool: &PgPool,
+    context: &ToolContext,
+    call: &ToolCall,
+) -> Result<ToolResult, DbError> {
+    use momo_agent::memory as mem;
+    use momo_agent::memory_suggest as ms;
+
+    let suggestion = match ms::validate_suggestion(&call.arguments) {
+        Ok(suggestion) => suggestion,
+        Err(ms::InvalidArguments) => {
+            return Ok(ToolResult::error(
+                &call.call_id,
+                ms::OUTPUT_INVALID_ARGUMENTS,
+            ))
+        }
+    };
+    let (workspace_id, run_id, channel_id) =
+        (context.workspace_id, context.run_id, context.channel_id);
+
+    let seqs = suggestion.evidence_seqs.clone();
+    let resolved = momo_db::with_tenant_tx(pool, workspace_id, move |conn| {
+        Box::pin(async move { ms::resolve_evidence(conn, workspace_id, channel_id, &seqs).await })
+    })
+    .await?;
+    let Some(evidence_ids) = resolved else {
+        return Ok(ToolResult::error(
+            &call.call_id,
+            ms::OUTPUT_UNKNOWN_EVIDENCE,
+        ));
+    };
+
+    let proposed = mem::with_memory_tx_bounded(pool, workspace_id, 2_000, 10_000, move |conn| {
+        Box::pin(async move { ms::propose(conn, run_id, &suggestion, &evidence_ids).await })
+    })
+    .await;
+    match proposed {
+        Ok(Some(_)) => Ok(ToolResult::ok(&call.call_id, ms::OUTPUT_PROPOSED)),
+        Ok(None) => Ok(ToolResult::ok(&call.call_id, ms::OUTPUT_DUPLICATE)),
+        Err(error) => match ms::Refusal::classify(&error) {
+            Some(refusal) => Ok(ToolResult::error(
+                &call.call_id,
+                ms::refusal_output(refusal),
+            )),
+            None => Err(error),
+        },
+    }
 }
 
 /// `work.session.login_handoff` — report how the person's intervention ended
