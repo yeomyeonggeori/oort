@@ -489,19 +489,25 @@ mod tests {
     /// 098 is #3147's `agent.model_source` (ADR-0147 증보 2026-09-29): where an
     /// agent's model comes from, `agent` | `instance_default`, with a one-time
     /// backfill of the seed placeholder. No table or policy is added.
+    ///
+    /// 099 is #3161's team-memory M1 schema (ADR-0196 D3/D6/D7/D9):
+    /// `mem_digest`, `mem_evidence`, `mem_cursor`, `mem_serving`, `mem_settings`
+    /// (all ENABLE + FORCE RLS, per-command policies) and the SQL functions
+    /// `mem_can_read_channel` / `mem_can_read_channels`. Re-runnable statements.
+    /// schema_v0.sql is not modified.
     #[test]
-    fn discovers_contiguous_migrations_001_to_098() {
+    fn discovers_contiguous_migrations_001_to_099() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            98,
-            "expected 98 migrations under {}",
+            99,
+            "expected 99 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 98);
+        assert_eq!(migrations.last().unwrap().version, 99);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {
