@@ -314,6 +314,50 @@ impl World {
     }
 
     /// The offline sweep's own transition, as the owner's old laptop went away.
+    /// A live agent member that the host reported on the session's thread —
+    /// the record a signed resume's agent is checked against (#3154).
+    async fn report_agent(&self, session: Uuid) -> Uuid {
+        let su = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&database_url())
+            .await
+            .expect("superuser");
+        let agent = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+             VALUES ($1, $2, 'agent', $3, $3)",
+        )
+        .bind(agent)
+        .bind(self.workspace)
+        .bind(format!("resume-{}", &agent.simple().to_string()[..8]))
+        .execute(&su)
+        .await
+        .expect("agent member");
+        sqlx::query(
+            "WITH ws AS (SELECT channel_id, root_message_id FROM work_session WHERE id = $1), \
+                  bumped AS ( \
+                    UPDATE channel_seq SET last_seq = last_seq + 1 \
+                     WHERE workspace_id = $2 AND channel_id = (SELECT channel_id FROM ws) \
+                    RETURNING last_seq AS seq) \
+             INSERT INTO message \
+               (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, \
+                props, root_id) \
+             SELECT $2, ws.channel_id, b.seq, 1, 0, $3, 'system', 'agent status', \
+                    jsonb_build_object('kind', 'work_session_event', \
+                                       'event', jsonb_build_object('agent_member_id', $4::text)), \
+                    ws.root_message_id \
+               FROM bumped b, ws",
+        )
+        .bind(session)
+        .bind(self.workspace)
+        .bind(self.person)
+        .bind(agent.to_string())
+        .execute(&su)
+        .await
+        .expect("report the agent");
+        agent
+    }
+
     async fn orphan(&mut self, session: Uuid) {
         let su = PgPoolOptions::new()
             .max_connections(1)
@@ -845,10 +889,10 @@ async fn signed_instructions_and_a_signed_resume_pass_the_hosts_verifier() {
     assert_eq!(status, 201, "{body}");
     let source = Uuid::parse_str(body["workSession"]["id"].as_str().unwrap()).unwrap();
     w.orphan(source).await;
+    let agent = w.report_agent(source).await;
     let successor = Uuid::new_v4();
     let issued = now_ms();
     let nonce = Uuid::new_v4();
-    let agent = Uuid::from_u128(0x3027);
     let bytes = HumanControl {
         instance_id: INSTANCE_ID,
         workspace_id: workspace,

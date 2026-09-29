@@ -192,6 +192,7 @@ impl HostApi for FakeServer {
             return Err(ClientError::Status {
                 status: 409,
                 message: "refused by the test".into(),
+                code: None,
             });
         }
         self.calls
