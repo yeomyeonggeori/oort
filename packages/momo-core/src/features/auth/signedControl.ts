@@ -116,9 +116,12 @@ export function newNonce(): string {
 
 // ---- sentences ---------------------------------------------------------------
 
-/** 400 `permission_scope_unsupported`: the server does not take 「이 세션 동안」 yet. */
+/**
+ * 400 `permission_scope_unsupported`: the host is not a member's own machine, so
+ * it takes no 「이 세션 동안」 grant (#3095 — the server itself accepts the scope).
+ */
 export const SCOPE_UNSUPPORTED_LINE =
-  "이 서버는 아직 「이 세션 동안」 허락을 받지 않아요. 「이번 한 번 허락」으로 보내 주세요.";
+  "이 호스트는 세션 허락을 받지 않아요. 「이번 한 번 허락」으로 보내 주세요.";
 
 /**
  * Why a signed instruction did not arrive, as one sentence. Signature refusals

@@ -80,6 +80,12 @@ function waitingEvents(): WorkSessionEvent[] {
     ),
     status({ tool_call_name: "read_file", detail: "onboarding/copy.ts · 184줄" }, 1),
     status({ tool_call_name: "grep", detail: "「합니다」 4곳, 「웹에서」 1곳" }, 2),
+    // #3152: 소유자의 「이 세션 동안」 허락이 덮은 읽기 — 묻지 않고 지나간 한 줄(대기 카드와 섞이지 않는다).
+    ev(
+      "approval.auto_allowed",
+      { action: "auto_allowed", status: "approved", scope: "session", tool_kind: "read", preview_sha256: "c".repeat(64) },
+      2
+    ),
     ev("agent.partial", { text_delta: "1단계 제목과 설명부터 해요체로 맞출게요. " }, 3),
     ev("agent.partial", { text_delta: "버튼 문구는 그다음에 봅니다." }, 3),
     status({ tool_call_name: "edit_file", detail: "onboarding/copy.ts\n- 워크스페이스를 만듭니다\n+ 워크스페이스를 만들어요\n- 팀원을 초대합니다\n+ 팀원을 초대해요\n(+6 −6)" }, 5),
