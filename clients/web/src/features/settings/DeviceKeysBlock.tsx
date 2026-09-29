@@ -1196,11 +1196,9 @@ function HostSignatureRow({
   if (!copy) return null;
   // The shell rejects with a bare code string (Tauri), typed here as unknown.
   const failure: unknown = reset.error;
-  const error = reset.isError
-    ? failure === "device_key_declined"
-      ? "검증을 끄지 않았습니다."
-      : deviceKeyErrorMessage(failure)
-    : null;
+  // Choosing 취소 in the dialog is the person's answer, not a failure.
+  const declined = reset.isError && failure === "device_key_declined";
+  const error = reset.isError && !declined ? deviceKeyErrorMessage(failure) : null;
   // A local socket call: no server needed, so being offline does not block it.
   const disabled = reset.isPending;
   return (
@@ -1255,9 +1253,9 @@ function HostSignatureRow({
             {error}
           </p>
         )}
-        {notice && (
+        {(notice || declined) && (
           <p className="break-keep text-meta text-ink-muted" role="status">
-            {notice}
+            {declined ? "검증을 끄지 않았습니다." : notice}
           </p>
         )}
       </div>
