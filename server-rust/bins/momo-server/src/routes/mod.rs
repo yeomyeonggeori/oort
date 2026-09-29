@@ -41,6 +41,8 @@ pub mod invites;
 pub mod join;
 /// #1768 — ADR-0128 D2/D3 member lifecycle (role/suspend/remove/bans/channel leave).
 pub mod member_lifecycle;
+/// ADR-0196 / #3164 — team-memory digest + receipt reads and settings (RLS-filtered).
+pub mod memory;
 pub mod messages;
 pub mod notification_rules;
 /// #1767 — operator-issued password reset + self password change.
@@ -51,6 +53,7 @@ pub mod presence;
 pub mod provider_default_ai;
 pub mod provider_link;
 pub mod provider_settings;
+pub mod push_fetch;
 pub mod read_state;
 pub mod realtime;
 pub mod reattach;

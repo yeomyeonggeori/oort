@@ -851,7 +851,7 @@ pub struct RegisterWorkHostRequest {
     pub registration: Option<HostRegisterSignature>,
 }
 
-/// The signed half of a member-scoped host registration (`momo.human.control.v1`
+/// The signed half of a member-scoped host registration (`momo.human.control.v2`
 /// with `kind=host_register`). The server rebuilds the statement from its own
 /// instance id, the caller's workspace and member, and the host key, id and
 /// display name this request registers; only what it cannot know travels here.
@@ -996,7 +996,7 @@ pub struct DeviceKeyListResponse {
 }
 
 /// `GET /v1/workspaces/{ws}/device-keys/signing-context` (#3023, ADR-0146 개정
-/// D-5 · D-9): what a device needs to sign a `momo.human.control.v1` statement
+/// D-5 · D-9): what a device needs to sign a `momo.human.control.v2` statement
 /// this instance will accept.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1026,7 +1026,7 @@ pub struct SigningContextResponse {
     pub session_id: Option<String>,
 }
 
-/// A person's `momo.human.control.v2` (or, but for a spawn, v1) signature sent
+/// A person's `momo.human.control.v2` / `v3` signature sent
 /// beside an instruction
 /// (#3023, ADR-0146 개정 D-5 · D-10). Only what the server cannot derive
 /// travels here: it rebuilds the statement from its own instance id and the
@@ -2647,6 +2647,18 @@ pub struct RealtimeTokenResponse {
     pub member_id: String,
 }
 
+/// `POST /v1/auth/push-fetch-token` response (#3121). `token` is the notification
+/// extension's credential: two read routes, no refresh half
+/// (`momo_auth::push_fetch_token`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushFetchTokenResponse {
+    pub token: String,
+    pub expires_at_ms: i64,
+    pub ttl_seconds: i64,
+    pub workspace_id: String,
+}
+
 /// Centrifugo subscribe-proxy callback body (Swift `SubscribeProxyRequest`,
 /// `DTOs.swift:906-911`).
 ///
@@ -3761,6 +3773,10 @@ pub struct CreateAgentRequest {
     pub display_name: String,
     pub handle: String,
     pub model: String,
+    /// #3147: `"agent"` (default) or `"instance_default"` — follow the team's
+    /// 기본 AI; `model` is then only the fallback.
+    #[serde(default, alias = "model_source")]
+    pub model_source: Option<String>,
     #[serde(alias = "base_url")]
     pub base_url: String,
     #[serde(default, alias = "system_prompt")]
@@ -3789,6 +3805,11 @@ pub struct AgentProfileInput {
     pub enabled_tools: Option<Vec<String>>,
     #[serde(default)]
     pub triggers: Option<Value>,
+    /// #3147: on a profile PUT, `"agent"` / `"instance_default"` sets where the
+    /// agent's model comes from; absent leaves it unchanged. Ignored on create
+    /// (the create body's own `modelSource` decides).
+    #[serde(default, alias = "model_source")]
+    pub model_source: Option<String>,
 }
 
 /// Swift `AgentMemberDTO` (:339-343).
@@ -4145,6 +4166,8 @@ pub struct AgentProfileDto {
     pub version: i32,
     pub updated_by: String,
     pub updated_at_ms: i64,
+    /// #3147: `"agent"` or `"instance_default"`.
+    pub model_source: &'static str,
 }
 
 /// Swift `AgentProfileResponse` (:577-579).

@@ -28,6 +28,8 @@ use serde_json::Value;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
+use crate::provisioning::ModelSource;
+
 /// The `run_status` enum (`001_init.sql:19-21`), in declaration order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunStatus {
@@ -870,6 +872,8 @@ pub async fn live_run_count_in_tx(
 pub struct EligibleAgent {
     /// `agent.model` — the ledger's fallback and the job payload's instruction.
     pub model: String,
+    /// `agent.model_source` (#3147) — rides on the work payload as `model_source`.
+    pub model_source: ModelSource,
     pub max_run_steps: i32,
     pub max_concurrent_runs: i32,
     /// `agent_profile.paused`, defaulted to `false` when the agent has no
@@ -905,7 +909,7 @@ pub async fn load_eligible_agent_in_tx(
     agent_member_id: Uuid,
 ) -> Result<Option<EligibleAgent>, DbError> {
     let row = sqlx::query(
-        "SELECT a.model, a.max_run_steps, a.max_concurrent_runs, \
+        "SELECT a.model, a.model_source, a.max_run_steps, a.max_concurrent_runs, \
                 a.tool_schema, ap.enabled_tools, \
                 COALESCE(ap.paused, false) AS paused \
                 , (EXISTS (SELECT 1 FROM hosted_agent_connection hc \
@@ -953,6 +957,7 @@ pub async fn load_eligible_agent_in_tx(
         .unwrap_or_default();
     Ok(Some(EligibleAgent {
         model: row.try_get("model")?,
+        model_source: ModelSource::from_column(&row.try_get::<String, _>("model_source")?),
         max_run_steps: row.try_get("max_run_steps")?,
         max_concurrent_runs: row.try_get("max_concurrent_runs")?,
         paused: row.try_get("paused")?,

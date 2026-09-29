@@ -6,6 +6,16 @@
 //! momo-workd run      --config workd.json [--dev-key-file PATH]
 //!                     [--control-socket PATH [--dev-unsigned-peer]]
 //! momo-workd forget   --config workd.json [--dev-key-file PATH]
+//! ```
+//!
+//! `register --sign-stdin` (the desktop app, #3120) asks the parent for the
+//! owner's root device key to sign this registration (ADR-0146 개정 D-8):
+//! after the host key exists it prints `{"momoWorkd":"host_register_request",
+//! "hostPublicKey",…}` on stdout and reads one answer line from stdin
+//! (`{"registration":{…}}`, `{"unsigned":true}` or `{"declined":"…"}`). The
+//! pipes are the ones the app made for this child, so nothing else can answer.
+//!
+//! ```text
 //! momo-workd reset-root --config workd.json
 //! ```
 //!
@@ -54,8 +64,12 @@ momo-workd — oort desktop work host (ADR-0188)
 
 usage:
   momo-workd register --config PATH [--dev-key-file PATH] [--force] [--token-stdin]
+                      [--sign-stdin]
       reads the owner's access token from MOMO_WORKD_REGISTER_TOKEN,
-      or from one line on stdin with --token-stdin
+      or from one line on stdin with --token-stdin.
+      --sign-stdin (the desktop app, #3120): after the host key exists, prints
+      one JSON line asking its parent to have the owner's root device key sign
+      this registration, and reads the answer as one stdin line
   momo-workd run --config PATH [--dev-key-file PATH]
                  [--control-socket PATH [--dev-unsigned-peer]]
   momo-workd forget --config PATH [--dev-key-file PATH]
@@ -81,6 +95,9 @@ pub enum Invocation {
         /// environment (#2778 security review M3: another same-user process
         /// can read a child's environment while it runs; a pipe it cannot).
         token_stdin: bool,
+        /// #3120: ask the parent process (the desktop app) for the root
+        /// key's `host_register` signature over the child's stdio.
+        sign_stdin: bool,
     },
     Run {
         config: PathBuf,
@@ -113,6 +130,7 @@ pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
     let mut dev_key_file = None;
     let mut force = false;
     let mut token_stdin = false;
+    let mut sign_stdin = false;
     let mut control_socket = None;
     let mut dev_unsigned_peer = false;
     let mut rest = args[1..].iter();
@@ -129,6 +147,7 @@ pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
             }
             "--force" if command == "register" => force = true,
             "--token-stdin" if command == "register" => token_stdin = true,
+            "--sign-stdin" if command == "register" => sign_stdin = true,
             "--control-socket" if command == "run" => {
                 control_socket = Some(PathBuf::from(value("--control-socket")?))
             }
@@ -140,12 +159,16 @@ pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
     if dev_unsigned_peer && control_socket.is_none() {
         return Err("--dev-unsigned-peer needs --control-socket".to_string());
     }
+    if sign_stdin && !token_stdin {
+        return Err("--sign-stdin needs --token-stdin (both share one stdin)".to_string());
+    }
     Ok(if command == "register" {
         Invocation::Register {
             config,
             dev_key_file,
             force,
             token_stdin,
+            sign_stdin,
         }
     } else if command == "reset-root" {
         Invocation::ResetRoot { config }
@@ -174,6 +197,8 @@ pub enum CliError {
     Register(ClientError),
     #[error("{0}")]
     Usage(String),
+    #[error("registration not signed: {0}")]
+    Signing(String),
     #[error("the server no longer accepts this host (revoked, or its owner left); stopped")]
     Revoked,
     #[cfg(target_os = "macos")]
@@ -233,6 +258,97 @@ async fn blocking<T: Send + 'static>(
         .map_err(|error| KeyStoreError::Keychain(format!("key store task failed: {error}")))?
 }
 
+/// The registering app's answer to "sign this registration" (#3120).
+#[derive(Debug, Clone, PartialEq)]
+pub enum SigningAnswer {
+    /// The `registration` object of the request body, signed by the owner's
+    /// root device key (`dto::HostRegisterSignature`, camelCase).
+    Signed(serde_json::Value),
+    /// This Mac has no root key bound for the workspace: register unsigned
+    /// and let the server decide (`MOMO_HOST_REGISTER_SIGNATURE_REQUIRED`).
+    Unsigned,
+}
+
+/// What the parent needs to build the statement: the one thing only this
+/// process knows (the host public key) and the server's own signing context.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SigningAsk {
+    pub host_public_key: String,
+    pub context: Option<client::SigningContext>,
+    /// Why there is, or is no, `context` (`available` · `unconfigured` ·
+    /// `not_offered`): the parent is told, not left to infer from a null.
+    pub context_state: &'static str,
+}
+
+/// Whoever holds the owner's root device key. The shipped implementation is
+/// the desktop app over this process's stdio ([`StdioSigner`]); tests play the
+/// owner's Secure Enclave.
+#[async_trait::async_trait]
+pub trait RegistrationSigner: Send {
+    /// `Err` is a refusal (the person said no, the dialog could not show the
+    /// whole statement, the parent went away): nothing is registered.
+    async fn sign(&mut self, ask: &SigningAsk) -> Result<SigningAnswer, String>;
+}
+
+/// The parent app over stdio. One JSON line out, one JSON line in; the pipes
+/// are the ones the app created for this very child, so the answer can only
+/// come from the process that launched it (no listener, no path to squat).
+pub struct StdioSigner;
+
+#[async_trait::async_trait]
+impl RegistrationSigner for StdioSigner {
+    async fn sign(&mut self, ask: &SigningAsk) -> Result<SigningAnswer, String> {
+        use std::io::Write as _;
+        let line = serde_json::json!({
+            "momoWorkd": "host_register_request",
+            "hostPublicKey": ask.host_public_key,
+            "instanceId": ask.context.as_ref().map(|c| c.instance_id.clone()),
+            "serverTimeMs": ask.context.as_ref().map(|c| c.server_time_ms),
+            "signingContext": ask.context_state,
+            // What the owner can hold the dialog's fingerprint against: the
+            // same value is printed when the registration completes, and
+            // `momo-workd` never shows a key any other way.
+            "hostKeyFingerprint": host_key_fingerprint(&ask.host_public_key),
+            "hostRegisterSignatureRequired":
+                ask.context.as_ref().is_some_and(|c| c.host_register_signature_required),
+        });
+        let answer = tokio::task::spawn_blocking(move || {
+            let mut out = std::io::stdout().lock();
+            writeln!(out, "{line}").map_err(|e| e.to_string())?;
+            out.flush().map_err(|e| e.to_string())?;
+            drop(out);
+            let mut reply = String::new();
+            let read = std::io::stdin()
+                .read_line(&mut reply)
+                .map_err(|e| e.to_string())?;
+            if read == 0 {
+                return Err("the app closed the pipe without answering".to_string());
+            }
+            Ok(reply)
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        parse_signing_answer(&answer)
+    }
+}
+
+/// `{"registration": {…}}`, `{"unsigned": true}` or `{"declined": "why"}`.
+pub fn parse_signing_answer(line: &str) -> Result<SigningAnswer, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(line.trim()).map_err(|_| "unreadable answer".to_string())?;
+    if let Some(registration) = value.get("registration").filter(|r| r.is_object()) {
+        return Ok(SigningAnswer::Signed(registration.clone()));
+    }
+    if value.get("unsigned").and_then(serde_json::Value::as_bool) == Some(true) {
+        return Ok(SigningAnswer::Unsigned);
+    }
+    let why = value
+        .get("declined")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("declined");
+    Err(why.chars().take(120).collect())
+}
+
 /// Generate a key, keep it, register its public half with the owner's token,
 /// and write the state. Prints the host id; never the key or the token.
 pub async fn register(
@@ -240,6 +356,19 @@ pub async fn register(
     dev_key_file: Option<PathBuf>,
     force: bool,
     token: Option<String>,
+) -> Result<HostState, CliError> {
+    register_signed(config_path, dev_key_file, force, token, None).await
+}
+
+/// [`register`], asking `signer` for the owner's root-key signature first
+/// (ADR-0146 개정 D-8, #3120). Without a signer this is exactly the unsigned
+/// registration of before.
+pub async fn register_signed(
+    config_path: PathBuf,
+    dev_key_file: Option<PathBuf>,
+    force: bool,
+    token: Option<String>,
+    mut signer: Option<&mut dyn RegistrationSigner>,
 ) -> Result<HostState, CliError> {
     let config = WorkdConfig::load(&config_path)?;
     let token = token
@@ -265,46 +394,153 @@ pub async fn register(
         blocking(move || store.store(&key, force)).await?;
     }
 
-    let registered = match client::register_host(
-        &config.server_base(),
-        config.workspace_id,
-        token.trim(),
-        &config.display_name,
-        &public_key,
-    )
-    .await
-    {
-        Ok(registered) => registered,
+    // From here a failure must leave neither a host row pointing at this key
+    // nor this key without a row (#3155 review): `posted` remembers the row
+    // the server made, so every later refusal withdraws it as well as the key.
+    let posted: std::cell::Cell<Option<uuid::Uuid>> = std::cell::Cell::new(None);
+    let attempt = async {
+        let registration = match signer.as_mut() {
+            None => None,
+            Some(signer) => {
+                let lookup = client::fetch_signing_context(
+                    &config.server_base(),
+                    config.workspace_id,
+                    token.trim(),
+                )
+                .await
+                .map_err(CliError::Register)?;
+                if lookup.context().is_none() {
+                    // The one silent fallback there was: say it.
+                    tracing::warn!(
+                        signing_context = lookup.state(),
+                        "this server offers no signing context; registering without the \
+                         owner's signature (the server decides whether that is enough)"
+                    );
+                }
+                let required = lookup
+                    .context()
+                    .is_some_and(|c| c.host_register_signature_required);
+                let ask = SigningAsk {
+                    host_public_key: public_key.clone(),
+                    context_state: lookup.state(),
+                    context: lookup.context().cloned(),
+                };
+                match signer.sign(&ask).await.map_err(CliError::Signing)? {
+                    SigningAnswer::Signed(registration) => Some(registration),
+                    SigningAnswer::Unsigned if required => {
+                        return Err(CliError::Signing(
+                            "device_signature_required: this server needs the root device \
+                             key's signature and this Mac has none bound"
+                                .into(),
+                        ));
+                    }
+                    SigningAnswer::Unsigned => None,
+                }
+            }
+        };
+        let signed_host_id = registration
+            .as_ref()
+            .and_then(|r| r.get("hostId"))
+            .and_then(serde_json::Value::as_str)
+            .and_then(|id| uuid::Uuid::parse_str(id).ok());
+        if registration.is_some() && signed_host_id.is_none() {
+            return Err(CliError::Signing("the signature names no host id".into()));
+        }
+        let registered = client::register_host(
+            &config.server_base(),
+            config.workspace_id,
+            token.trim(),
+            &config.display_name,
+            &public_key,
+            registration.as_ref(),
+        )
+        .await
+        .map_err(CliError::Register)?;
+        posted.set(Some(registered.id));
+        // The row must be the one the owner signed for, not merely a row.
+        if signed_host_id.is_some_and(|id| id != registered.id) {
+            return Err(CliError::Register(ClientError::Decode(
+                "the server registered another host id than the one signed".into(),
+            )));
+        }
+        if registered.public_key != public_key
+            || registered.workspace_id != config.workspace_id
+            || registered.scope != "member"
+            || registered.host_type != "workd"
+        {
+            return Err(CliError::Register(ClientError::Decode(
+                "the server registered a different host than the one requested".into(),
+            )));
+        }
+        let state = HostState {
+            server_url: config.server_base(),
+            workspace_id: registered.workspace_id,
+            host_id: registered.id,
+            owner_member_id: registered.owner_member_id,
+            public_key: public_key.clone(),
+            scope: registered.scope,
+        };
+        state.save(&config.state_path)?;
+        // A new registration is a new root (ADR-0146 개정 D-6): the old pin and
+        // its ledger do not carry over (#3024 review L1).
+        remove_trust_files(&config)?;
+        Ok(state)
+    }
+    .await;
+    let state = match attempt {
+        Ok(state) => state,
         Err(error) => {
-            // No host row points at this key: do not keep it around.
+            if let Some(host_id) = posted.get() {
+                if let Err(revoke) = client::revoke_registered_host(
+                    &config.server_base(),
+                    config.workspace_id,
+                    token.trim(),
+                    host_id,
+                )
+                .await
+                {
+                    // Not silent: the owner can still revoke it by hand.
+                    tracing::warn!(
+                        %host_id,
+                        "could not withdraw the host row of a registration that failed: {revoke}"
+                    );
+                }
+                // The state file may be the half-written one of this attempt.
+                let _ = std::fs::remove_file(&config.state_path);
+            }
             let store = store.clone();
             let _ = blocking(move || store.delete()).await;
-            return Err(CliError::Register(error));
+            return Err(error);
         }
     };
-    if registered.public_key != public_key
-        || registered.workspace_id != config.workspace_id
-        || registered.scope != "member"
-        || registered.host_type != "workd"
-    {
-        return Err(CliError::Register(ClientError::Decode(
-            "the server registered a different host than the one requested".into(),
-        )));
-    }
-    let state = HostState {
-        server_url: config.server_base(),
-        workspace_id: registered.workspace_id,
-        host_id: registered.id,
-        owner_member_id: registered.owner_member_id,
-        public_key,
-        scope: registered.scope,
-    };
-    state.save(&config.state_path)?;
-    // A new registration is a new root (ADR-0146 개정 D-6): the old pin and
-    // its ledger do not carry over (#3024 review L1).
-    remove_trust_files(&config)?;
-    tracing::info!(host_id = %state.host_id, key_store = %store.describe(), "work host registered");
+    tracing::info!(
+        host_id = %state.host_id,
+        key_store = %store.describe(),
+        fingerprint = %host_key_fingerprint(&state.public_key).unwrap_or_default(),
+        "work host registered"
+    );
     Ok(state)
+}
+
+/// The fingerprint a person compares: SHA-256 over the decoded public key, the
+/// first 10 bytes as upper-case hex in five groups of four — the string the
+/// desktop dialog and the web device list show for the same key
+/// (`5BAF F89D E7DE 5C1D 7B61` for the shared vector).
+pub fn host_key_fingerprint(public_key_b64: &str) -> Option<String> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(public_key_b64)
+        .ok()?;
+    let digest = momo_wire::sha256_hex(&bytes);
+    Some(
+        digest[..20]
+            .to_ascii_uppercase()
+            .as_bytes()
+            .chunks(4)
+            .map(|chunk| std::str::from_utf8(chunk).expect("ascii hex"))
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
 }
 
 /// Bind the control socket and serve it on a task (macOS; see
@@ -517,6 +753,7 @@ pub async fn run(
             max_sessions: config.max_sessions,
             permission_wait: crate::session::DEFAULT_PERMISSION_WAIT,
             codex,
+            state_folder: state_folder(&config),
         },
     );
     let health = Arc::new(HostHealth::default());
@@ -553,6 +790,8 @@ pub async fn run(
             stop: stop.clone(),
             trust: trust.clone(),
             requirement: requirement.clone(),
+            state_folder: state_folder(&config),
+            grants: sessions.grant_epoch(),
         },
     )?;
     // Always with the requirement (#3117): R2 is on while it says so, and the
@@ -630,6 +869,7 @@ mod tests {
                 dev_key_file: None,
                 force: true,
                 token_stdin: false,
+                sign_stdin: false,
             }
         );
         assert_eq!(
@@ -686,8 +926,31 @@ mod tests {
                 dev_key_file: None,
                 force: false,
                 token_stdin: true,
+                sign_stdin: false,
             }
         );
+        assert_eq!(
+            parse_args(&args(&[
+                "register",
+                "--token-stdin",
+                "--sign-stdin",
+                "--config",
+                "/c.json"
+            ]))
+            .unwrap(),
+            Invocation::Register {
+                config: "/c.json".into(),
+                dev_key_file: None,
+                force: false,
+                token_stdin: true,
+                sign_stdin: true,
+            }
+        );
+        assert!(
+            parse_args(&args(&["register", "--sign-stdin", "--config", "/c.json"])).is_err(),
+            "the signature answer and the token share one stdin"
+        );
+        assert!(parse_args(&args(&["run", "--config", "/c", "--sign-stdin"])).is_err());
         assert!(parse_args(&args(&["run", "--config", "/c", "--token-stdin"])).is_err());
         assert!(parse_args(&args(&["run"])).is_err());
         assert_eq!(
@@ -713,5 +976,42 @@ mod tests {
         ]))
         .is_err());
         assert_eq!(parse_args(&[]).unwrap(), Invocation::Help);
+    }
+
+    #[test]
+    fn the_parents_answer_is_one_of_three_closed_shapes() {
+        assert_eq!(
+            parse_signing_answer(r#"{"registration":{"hostId":"h"}}"#),
+            Ok(SigningAnswer::Signed(serde_json::json!({"hostId": "h"})))
+        );
+        assert_eq!(
+            parse_signing_answer(r#"{"unsigned":true}"#),
+            Ok(SigningAnswer::Unsigned)
+        );
+        assert_eq!(
+            parse_signing_answer(r#"{"declined":"device_key_declined"}"#),
+            Err("device_key_declined".to_string())
+        );
+        // Anything else is a refusal, never an unsigned registration.
+        for line in [
+            "",
+            "{}",
+            "null",
+            r#"{"unsigned":false}"#,
+            r#"{"registration":"x"}"#,
+        ] {
+            assert!(parse_signing_answer(line).is_err(), "{line:?}");
+        }
+    }
+
+    #[test]
+    fn the_host_key_fingerprint_is_the_shared_one() {
+        // clients/desktop device_key/payload/tests.rs FINGERPRINT_VECTOR and
+        // clients/web deviceKeysShared.test.ts pin the same string.
+        assert_eq!(
+            host_key_fingerprint("A2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW").as_deref(),
+            Some("5BAF F89D E7DE 5C1D 7B61")
+        );
+        assert_eq!(host_key_fingerprint("not base64!"), None);
     }
 }

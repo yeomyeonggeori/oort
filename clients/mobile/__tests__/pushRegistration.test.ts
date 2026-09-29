@@ -118,7 +118,7 @@ describe('the fetch session handed to the extension', () => {
     const outcome = await publishPushFetchSession({
       baseUrl: 'https://oort.local:28001',
       workspaceId: 'ws-1',
-      accessToken: 'token-1',
+      fetchToken: 'token-1',
     });
     expect(outcome.kind).toBe('published');
 
@@ -139,7 +139,7 @@ describe('the fetch session handed to the extension', () => {
     return publishPushFetchSession({
       baseUrl: 'https://oort.local:28001',
       workspaceId: 'ws-1',
-      accessToken: 'token-1',
+      fetchToken: 'token-1',
     }).then(() => {
       const item = keychain.__items.get(PUSH_KEYCHAIN_SERVICE);
       expect(JSON.parse(item.password)).toEqual({
@@ -158,7 +158,7 @@ describe('the fetch session handed to the extension', () => {
     const outcome = await publishPushFetchSession({
       baseUrl: 'https://oort.local:28001',
       workspaceId: 'ws-1',
-      accessToken: 'token-1',
+      fetchToken: 'token-1',
     });
     expect(outcome).toEqual({kind: 'no-access-group'});
     expect(keychain.__items.has(PUSH_KEYCHAIN_SERVICE)).toBe(false);
@@ -168,7 +168,7 @@ describe('the fetch session handed to the extension', () => {
     await publishPushFetchSession({
       baseUrl: 'https://oort.local:28001',
       workspaceId: 'ws-1',
-      accessToken: 'token-1',
+      fetchToken: 'token-1',
     });
     await clearPushFetchSession();
     expect(keychain.__items.has(PUSH_KEYCHAIN_SERVICE)).toBe(false);
@@ -180,7 +180,7 @@ describe('the fetch session handed to the extension', () => {
     await publishPushFetchSession({
       baseUrl: 'https://oort.local:28001',
       workspaceId: 'ws-1',
-      accessToken: 'token-1',
+      fetchToken: 'token-1',
     });
     expect(PUSH_KEYCHAIN_SERVICE).not.toBe('app.momo.ios.rn.session');
     expect(keychain.__items.has('app.momo.ios.rn.session')).toBe(false);

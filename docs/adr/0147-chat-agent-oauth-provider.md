@@ -8,6 +8,7 @@
 - 증보: 2026-09-27 연결 확인(#2960) — `POST /v1/provider/link/test`가 봉인 크레이트를 거쳐 provider에 읽기 전용 GET 한 번을 보낸다. 결정 4의 「momo-server HTTP 0」을 좁힌다. 파일 끝 「증보 2026-09-27 — 연결 확인」 절
 - 증보: 2026-09-28 기본 AI 운영자 행(#3009) — `GET/PUT /v1/provider/default-ai`와 새 테이블 `provider_default_ai`(migration 093), 그리고 연결 확인 응답의 `modelIds`. 연결 확인 증보의 「provider 문자열은 크레이트 밖으로 나가지 않는다」를 모델 id 한 가지만큼 좁힌다. 파일 끝 「증보 2026-09-28 — 기본 AI 운영자 행」 절
 - 증보: 2026-09-28 키는 origin에 묶인다(#3040) — `PUT /v1/provider/link/chain`이 키 없이 hop의 origin을 바꾸면 409 `key_required_for_new_origin`. 파일 끝 「증보 2026-09-28 — 체인 키는 origin에 묶인다」 절
+- 증보: 2026-09-29 에이전트 모델 출처(#3147) — `agent.model_source`(migration 098)와 payload `model_source`가 #3146의 「모델 이름 비교」 휴리스틱을 대체한다. 파일 끝 「증보 2026-09-29 — 에이전트 모델 출처」 절
 - 발단: 티키타카 smoke의 provider 선택에서 성재가 API 키 대신 ChatGPT 구독 OAuth(Codex CLI 방식)를 지정.
 
 ## 결정
@@ -123,10 +124,14 @@
   - 클라이언트는 모델 id를 텍스트로만 그린다. `href`나 URL에 넣지 않는다(허용 문자에 `:`와 `/`가 있다).
   - 페이지가 나뉜 목록(`has_more`)이나 상한을 넘은 목록은 `modelIdsTruncated: true`다.
   - OpenRouter `/key` 확인은 키별 목록이 없어서 `modelIds`를 싣지 않는다. 공개 `/models`는 여전히 부르지 않는다.
+- **워커 연결(#3041, 2026-09-29).** agent-worker가 매 턴 이 행을 읽는다.
+  - 우선순위는 **에이전트 자신의 모델 > 팀 행 `modelId` > `AGENT_MODEL`**이다. `agent.model`은 `NOT NULL`이라 payload는 늘 모델을 싣는다. 그래서 「에이전트 자체 모델이 없다」는 payload 모델이 비었거나 인스턴스 기본(`AGENT_MODEL`)과 같은 경우다(씨앗 에이전트, 자리표시자로 만든 에이전트). 그 밖의 모델은 에이전트의 것이라 행을 읽지도 않는다. 인스턴스 기본과 같은 모델을 일부러 고른 에이전트는 구분할 수 없어 행을 따른다(이탈로 기록).
+  - 역할은 첫 인사(웰컴 opener) 잡이면 `summary`, 그 밖의 대답이면 `teamAgent`다. 채널 요약을 만드는 워커 경로는 아직 없다. 생기면 `summary` 행을 읽는다.
+  - 행의 링크 위치가 **지금도 저장 당시 label을 보일 때만** 쓴다. 위치 0은 이 턴이 푼 머리 링크, 1 이상은 `provider_link_chain` hop이다(hop은 그 hop의 URL·키로 부른다). `modelId`가 `null`이면 턴의 모델을 그대로 둔다.
+  - label이 다르거나 위치가 없거나 hop이 꺼졌거나 키가 열리지 않으면 **모델을 부르지 않는다.** 다른 링크·다른 모델로 넘어가지 않는다. 실행은 `failed`(`error.code: default_ai_unresolved`)로 닫고, 채널에는 #2871 시스템 줄(`props.reason: default_ai_unresolved`, 문 「AI 연결 열기」)을 남기고, 운영자용 audit `provider_default_ai.unresolved`에 역할·위치·저장 label·현재 label(모두 가린 값)만 싣는다.
+  - 행을 읽지 못하면(DB 오류) 추측하지 않고 재시도한다.
 - **범위 밖(후속).**
-  - agent-worker는 아직 이 행을 읽지 않는다. 읽을 때의 우선순위는 **에이전트 자신의 `model` > `teamAgent.modelId` > `AGENT_MODEL`**이다. 팀 행은 기본값이지 에이전트 모델을 덮어쓰지 않는다(§4.2 「에이전트별 모델(F10 유지)」).
-  - 요약·첫 인사 경로가 `summary` 행을 읽는 것도 후속이다.
-  - 웹 표 AA-8이 이 API로 저장하는 것은 uxui 후속이다.
+  - 웹 표 AA-8이 이 API로 저장하는 것과 「저장됐지만 아직 적용 전」 문구 제거는 uxui 후속이다.
 - **검증.**
   - 격리 PG 시험(`provider_probe_conformance_pg.rs`): 비운영자 403, 개인 source의 라우트 400과 CHECK 거부, 행 patch, 체인 이동 감지, audit에 키 없음, 테넌트 트랜잭션 0행·쓰기 거부, 키를 조각내 되돌리는 mock에서 `modelIds`에 조각 없음.
   - 사보타주로 가드마다 빨강을 확인했다. 실제 provider 왕복은 runtime-unverified다.
@@ -146,3 +151,16 @@
 - **worker 대답 경로.** 지금 agent-worker는 `provider_link`(위치 0)만 읽는다(`resolve_transport` → `read_link`). 체인 hop은 읽지 않는다. 그래서 오늘 이 결함은 「연결 확인」으로만 드러났다. 기본 AI 행(#3009 D1)이 위치 1 이상을 가리킬 수 있어서, worker가 체인을 읽게 되면 같은 유출이 대답 경로로 옮겨 간다. 수리는 쓰기 시점에 있으므로 그 경로도 함께 막는다. 머리 행의 다른 쓰기는 worker의 `reseal_link_credential` 하나다. 이 함수는 봉투만 바꾸고 `base_url`은 바꾸지 않는다.
 - **검증.** 격리 PG 시험 `provider_probe_conformance_pg.rs::a_kept_chain_key_is_never_sent_to_a_new_origin`. 운영자 A·B 두 명, 두 origin의 기록 mock을 쓴다. 바꿔치기와 재배치 뒤 연결 확인에서 B의 mock이 A의 키를 0회 받는다. 수리 전 이 시험은 빨갛다. 같은 origin 경로 변경은 키를 유지하고, 새 키와 함께 origin을 바꾸면 audit에 label만 남는다. 사보타주 기록은 PR 본문에 있다.
 - **범위 밖(후속).** 웹 설정의 체인 초안은 저장 hop의 URL을 바꿔도 키를 요구하지 않고, 409를 일반 오류 문장으로 보인다. uxui 후속 이슈로 다룬다.
+
+## 증보 2026-09-29 — 에이전트 모델 출처
+
+- Status: **Accepted**. 결재 인용: planner 편성 #3147(#3146 후속, 「서버 payload에 모델 출처를 실어 휴리스틱 대체」).
+- 기안·구현: Sonnet 5.5 worker(#3147, 엔진).
+- **문제.** `agent.model`은 `NOT NULL`이라 「고른 모델」과 「고르지 않아 채운 자리표시자」를 이름만으로 구분할 수 없다. #3146은 payload 모델이 비었거나 `AGENT_MODEL`과 같으면 팀 행을 적용했다. 인스턴스 기본과 같은 이름을 일부러 고른 에이전트가 행을 따랐고, 자리표시자를 다른 이름으로 저장한 에이전트는 행에 닿지 못했다.
+- **D1. 출처는 사실로 저장한다.** `agent.model_source text NOT NULL DEFAULT 'agent' CHECK IN ('agent','instance_default')`(migration 098). `agent`: `model`이 에이전트의 선택이다. 팀 행은 적용하지 않는다. `instance_default`: 인스턴스 기본을 따른다. 팀 행을 적용하고, `model`은 행이 모델을 지정하지 않을 때 쓰는 대체값이다. `model`은 계속 `NOT NULL`이다(이름을 읽는 모든 경로가 그대로다).
+- **D2. 백필(1회).** 자리표시자 `hermes-agent`(002/006 씨앗, worker `AGENT_MODEL` 기본값)를 저장한 행은 `instance_default`, 나머지는 `agent`다. #3146 휴리스틱을 기본 설정의 인스턴스에서 그대로 옮긴 결과다. `AGENT_MODEL`을 바꿔 운영하는 인스턴스는 프로필 PUT의 `modelSource`로 다시 표시한다. 백필은 컬럼을 추가하는 실행에서만 돈다(재실행이 운영자의 선택을 덮지 않는다).
+- **D3. API.** 생성 `POST …/agents`의 `modelSource`(생략=`agent`), 수정 `PUT …/agents/{agent}/profile`의 `modelSource`(생략=변경 없음). 어휘 밖은 400. 프로필 응답에 `modelSource`. audit `agent.created`·`agent.profile.*`에 값을 싣는다.
+- **D4. payload는 해석된 출처를 싣는다.** 모든 `agent_job` payload(멘션·웰컴·승인 재개·work run)에 `model_source`. 요청의 `routing.model`이나 적용된 `modelPref`는 에이전트가 `instance_default`여도 `agent`다(호출자가 고른 모델을 팀 행이 덮지 않는다). 아무것도 고르지 않은 채 기본 모델이 도는 경우만 컬럼 값을 그대로 싣는다.
+- **D5. worker 판정.** `model_source == "instance_default"`일 때만 행을 읽는다. 키가 없으면(이 증보 이전에 넣은 잡) `agent`로 본다. 이름 비교 휴리스틱은 남기지 않는다. 링크 label 대조·정직한 실패(#3041)는 그대로다.
+- **범위 밖.** 채널 요약을 만드는 워커 경로(`summary` 행)는 기억 기능 계획과 함께 결정한다. 웹 설정 UI(에이전트 모델 선택에 「인스턴스 기본 따르기」, 「아직 적용 전」 문구 제거)는 uxui 후속이다.
+- **검증.** 격리 PG: `default_ai_conformance_pg::the_model_source_decides_not_the_models_name`(같은 이름이어도 출처로 구분), `mention_routing_conformance_pg::m3147_1`(생성·수정·payload), `m3147_2`(098 백필). 사보타주 기록은 PR 본문.

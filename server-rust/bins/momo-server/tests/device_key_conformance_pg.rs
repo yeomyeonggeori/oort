@@ -31,6 +31,9 @@
 //! | `h2_a_phone_key_is_registered_only_on_a_qr_linked_sign_in` | **#3119** — drop the register route's linked check, drop the endorse `linked_from_mac` check, match any consumed link of the member instead of the key's lineage, or any Mac key instead of the issuer's lineage |
 //! | `h2_a_pre_rule_phone_key_is_never_a_candidate_and_an_approved_one_is_marked` | **#3119** — drop the endorse `linked_session` check, or let an `ios` rebind leave a non-linked lineage |
 //! | `h2_a_phone_key_moves_only_from_a_link_to_a_link` | **#3119** — let an `ios` rebind land on a non-linked sign-in |
+//! | `r3127_a_lineage_holds_one_phone_key_and_a_replacement_needs_the_mac` | **#3127** — drop the register slot check, or let a second key ride along after the first is invalidated on the phone (never revoked by the Mac) |
+//! | `r3127_a_second_live_phone_key_is_never_a_candidate_and_a_rebind_cannot_add_one` | **#3127** — drop the endorse or the rebind slot check |
+//! | `r3127_concurrent_registrations_on_one_lineage_leave_one_key` | **#3127** — drop the lineage advisory lock |
 //!
 //! `#[ignore]` — needs a real Postgres plus the runtime roles:
 //!
@@ -889,7 +892,8 @@ async fn an_endorsement_verifies_against_the_stored_rows_only() {
 
     // A phone is not a root, even an endorsed one.
     let second = DeviceKeyPair::new("second phone");
-    let second_id = w.key(&phone, &second, "ios").await;
+    let phone2 = w.link_phone(&session, "기기 2").await;
+    let second_id = w.key(&phone2, &second, "ios").await;
     let signature = w.endorsement(w.person_id, &handset, phone_id, &second, "기기");
     let (status, body) = w.endorse(&session, second_id, phone_id, &signature).await;
     expect_refused(status, &body, "device_root_not_eligible");
@@ -922,7 +926,8 @@ async fn an_endorsement_verifies_against_the_stored_rows_only() {
     let lone_root = DeviceKeyPair::new("lone mac");
     let lone_root_id = w.key(&root_session, &lone_root, "macos").await;
     let third = DeviceKeyPair::new("third phone");
-    let third_id = w.key(&phone, &third, "ios").await;
+    let phone3 = w.link_phone(&session, "기기 3").await;
+    let third_id = w.key(&phone3, &third, "ios").await;
     let signature = w.endorsement(w.person_id, &lone_root, lone_root_id, &third, "기기");
     let (status, _) = w
         .endorse(&session, third_id, lone_root_id, &signature)
@@ -939,7 +944,8 @@ async fn an_endorsement_verifies_against_the_stored_rows_only() {
         "an endorsement from a revoked root no longer counts"
     );
     let fourth = DeviceKeyPair::new("fourth phone");
-    let fourth_id = w.key(&phone, &fourth, "ios").await;
+    let phone4 = w.link_phone(&session, "기기 4").await;
+    let fourth_id = w.key(&phone4, &fourth, "ios").await;
     let signature = w.endorsement(w.person_id, &lone_root, lone_root_id, &fourth, "기기");
     let (status, body) = w
         .endorse(&session, fourth_id, lone_root_id, &signature)
@@ -1849,7 +1855,9 @@ async fn a_root_whose_sign_in_expired_signs_nothing() {
     let handset = DeviceKeyPair::new("phone");
     let phone_id = w.key(&phone, &handset, "ios").await;
     let endorsed = DeviceKeyPair::new("endorsed phone");
-    let endorsed_id = w.key(&phone, &endorsed, "ios").await;
+    // One phone key per lineage (#3127): the approved one is another phone's.
+    let phone2 = w.link_phone(&mac, "기기 2").await;
+    let endorsed_id = w.key(&phone2, &endorsed, "ios").await;
     let letter = w.endorsement(w.person_id, &root, root_id, &endorsed, "기기");
     assert_eq!(w.endorse(&mac, endorsed_id, root_id, &letter).await.0, 200);
     sqlx::query(
@@ -2017,7 +2025,8 @@ async fn an_endorsement_letter_is_used_once_and_a_lost_root_can_be_replaced() {
 
     // The root's sign-in ends; a new root on a new sign-in re-approves.
     let second = DeviceKeyPair::new("second phone");
-    let second_id = w.key(&phone, &second, "ios").await;
+    let phone2 = w.link_phone(&mac, "기기 2").await;
+    let second_id = w.key(&phone2, &second, "ios").await;
     let letter = w.endorsement(w.person_id, &root, root_id, &second, "기기");
     assert_eq!(w.endorse(&mac, second_id, root_id, &letter).await.0, 200);
     w.logout(&mac).await;
@@ -2736,4 +2745,202 @@ async fn h2_a_phone_key_moves_only_from_a_link_to_a_link() {
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["deviceKey"]["linkedSession"], true);
     assert_eq!(body["deviceKey"]["current"], true);
+}
+
+// ---------------------------------------------------------------------------
+// #3127 — one live phone key per QR-linked lineage
+// ---------------------------------------------------------------------------
+
+impl World {
+    async fn live_phone_keys_on(&self, session: &Session) -> i64 {
+        let session_id = self.session_id(session).await;
+        sqlx::query_scalar(
+            "SELECT count(*) FROM member_device_key \
+              WHERE session_id = $1 AND platform = 'ios' AND revoked_at IS NULL",
+        )
+        .bind(session_id)
+        .fetch_one(&self.su)
+        .await
+        .expect("count live phone keys")
+    }
+
+    /// The Mac's signed revocation of `target_id` (whose public key is `target`).
+    async fn signed_revoke(
+        &self,
+        mac: &Session,
+        root: &DeviceKeyPair,
+        root_id: Uuid,
+        target_id: Uuid,
+        target: &DeviceKeyPair,
+    ) -> (u16, Value) {
+        let at = now_ms();
+        let letter = DeviceRevoke {
+            workspace_id: self.workspace,
+            member_id: self.person_id,
+            root_key_id: root_id,
+            target_key_id: target_id,
+            revoked_at_ms: at,
+        };
+        self.post(
+            &format!("{}/{target_id}/revocation", self.keys_path()),
+            &mac.access,
+            json!({ "rootKeyId": root_id, "revokedAtMs": at,
+                    "signature": root.sign(&letter.signed_bytes_v2(&target.public_b64).unwrap()) }),
+        )
+        .await
+    }
+}
+
+/// The #3126 Medium and its closure. A phone's refresh token, stolen, cannot
+/// plant a second phone key on the phone's lineage; the legitimate replacement
+/// (Face ID re-enrolled, old key unusable) goes through the Mac.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn r3127_a_lineage_holds_one_phone_key_and_a_replacement_needs_the_mac() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let mac = w.person().await;
+    let root = DeviceKeyPair::new("mac");
+    let root_id = w.key(&mac, &root, "macos").await;
+    let phone = w.link_phone(&mac, "아이폰").await;
+    let handset = DeviceKeyPair::new("phone");
+    let phone_id = w.key(&phone, &handset, "ios").await;
+    let letter = w.endorsement(w.person_id, &root, root_id, &handset, "기기");
+    let (status, body) = w.endorse(&mac, phone_id, root_id, &letter).await;
+    assert_eq!(status, 200, "{body}");
+
+    // The thief holds the phone's refresh token (also after a rotation).
+    let (_, rotated) = w.rotate(&phone).await;
+    let stolen = rotated.expect("rotated");
+    let planted = DeviceKeyPair::new("planted");
+    let (status, body) = w
+        .register_key(&stolen, &planted, "ios", "성재의 iPhone")
+        .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(code(&body), Some("device_key_lineage_has_phone_key"));
+    assert_eq!(w.live_rows_for(&planted).await, 0, "nothing was written");
+    assert_eq!(w.live_phone_keys_on(&stolen).await, 1);
+    // The approved key is untouched.
+    assert_eq!(w.key_view(&mac, phone_id).await["canInstruct"], true);
+    // The phone's own retry after a lost response is still 「already registered」.
+    let (status, body) = w.register_key(&stolen, &handset, "ios", "기기").await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(code(&body), Some("device_key_already_registered"));
+
+    // Face ID re-enrolled: the phone's new key is refused just the same — the
+    // old row is still live on the server — until the Mac revokes it.
+    let fresh = DeviceKeyPair::new("fresh after Face ID change");
+    let (status, body) = w.register_key(&stolen, &fresh, "ios", "기기").await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(code(&body), Some("device_key_lineage_has_phone_key"));
+
+    // The Mac revokes the invalidated key (D-7); the new key registers, starts
+    // unapproved (「지시 불가」) and needs the Mac's approval again.
+    let (status, body) = w
+        .signed_revoke(&mac, &root, root_id, phone_id, &handset)
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let fresh_id = w.key(&stolen, &fresh, "ios").await;
+    let view = w.key_view(&mac, fresh_id).await;
+    assert_eq!(view["state"], "unendorsed");
+    assert_eq!(view["canInstruct"], false);
+    assert_eq!(w.live_phone_keys_on(&stolen).await, 1);
+    let letter = w.endorsement(w.person_id, &root, root_id, &fresh, "기기");
+    let (status, body) = w.endorse(&mac, fresh_id, root_id, &letter).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["deviceKey"]["canInstruct"], true);
+
+    // Or the phone links by QR again: a new lineage takes its own key.
+    let relinked = w.link_phone(&mac, "아이폰").await;
+    w.key(&relinked, &DeviceKeyPair::new("relinked"), "ios")
+        .await;
+}
+
+/// A duplicate that is already there (a race, or a row from before the rule)
+/// is never approved while its sibling lives; a rebind cannot add one.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn r3127_a_second_live_phone_key_is_never_a_candidate_and_a_rebind_cannot_add_one() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let mac = w.person().await;
+    let root = DeviceKeyPair::new("mac");
+    let root_id = w.key(&mac, &root, "macos").await;
+    let phone = w.link_phone(&mac, "아이폰").await;
+    let first = DeviceKeyPair::new("first");
+    let first_id = w.key(&phone, &first, "ios").await;
+    // A pre-#3127 duplicate, written past the route.
+    let session_id = w.session_id(&phone).await;
+    let second = DeviceKeyPair::new("second");
+    let second_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO member_device_key \
+           (workspace_id, member_id, session_id, alg, public_key, platform, label) \
+         VALUES ($1, $2, $3, 'p256', $4, 'ios', '기기') RETURNING id",
+    )
+    .bind(w.workspace)
+    .bind(w.person_id)
+    .bind(session_id)
+    .bind(&second.public_b64)
+    .fetch_one(&w.su)
+    .await
+    .expect("seed a duplicate phone key");
+    for (id, key) in [(first_id, &first), (second_id, &second)] {
+        let letter = w.endorsement(w.person_id, &root, root_id, key, "기기");
+        let (status, body) = w.endorse(&mac, id, root_id, &letter).await;
+        assert_eq!(status, 409, "{body}");
+        assert_eq!(code(&body), Some("device_key_lineage_has_phone_key"));
+    }
+    // Revoking one lets the Mac approve the other.
+    let (status, body) = w
+        .signed_revoke(&mac, &root, root_id, second_id, &second)
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let letter = w.endorsement(w.person_id, &root, root_id, &first, "기기");
+    let (status, body) = w.endorse(&mac, first_id, root_id, &letter).await;
+    assert_eq!(status, 200, "{body}");
+
+    // A rebind onto a lineage that already holds a phone key is refused.
+    let other_phone = w.link_phone(&mac, "기기 2").await;
+    let other_key = DeviceKeyPair::new("other phone");
+    let other_id = w.key(&other_phone, &other_key, "ios").await;
+    reuse_lineage(&w, &other_phone).await;
+    let target = w.link_phone(&mac, "기기 2 다시").await;
+    w.key(&target, &DeviceKeyPair::new("occupant"), "ios").await;
+    let target_session = w.session_id(&target).await;
+    let (status, body) = w
+        .rebind(
+            &target,
+            &other_key,
+            "ios",
+            w.rebind_letter(&other_key, other_id, target_session, now_ms()),
+        )
+        .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(code(&body), Some("device_key_lineage_has_phone_key"));
+    assert_eq!(w.live_phone_keys_on(&target).await, 1);
+}
+
+/// Two registrations racing on one lineage: exactly one key lands.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn r3127_concurrent_registrations_on_one_lineage_leave_one_key() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let mac = w.person().await;
+    for round in 0..6 {
+        let phone = w.link_phone(&mac, &format!("기기 {round}")).await;
+        let keys: Vec<DeviceKeyPair> = (0..4)
+            .map(|i| DeviceKeyPair::new(&format!("racer {round}.{i}")))
+            .collect();
+        let (a, b, c, d) = tokio::join!(
+            w.register_key(&phone, &keys[0], "ios", "기기"),
+            w.register_key(&phone, &keys[1], "ios", "기기"),
+            w.register_key(&phone, &keys[2], "ios", "기기"),
+            w.register_key(&phone, &keys[3], "ios", "기기"),
+        );
+        let results = [a, b, c, d];
+        let created = results.iter().filter(|(status, _)| *status == 201).count();
+        assert_eq!(created, 1, "round {round}: {results:?}");
+        assert_eq!(w.live_phone_keys_on(&phone).await, 1, "round {round}");
+    }
 }

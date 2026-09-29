@@ -828,6 +828,33 @@ pub fn build_app(state: AppState) -> Router {
                 .put(routes::notification_rules::put)
                 .patch(routes::notification_rules::patch),
         )
+        // ADR-0196 / #3164 — team memory v2: digest + receipt reads and the
+        // settings switches. Human-only; visibility and write authority are the
+        // `mem_*` RLS policies (the transaction binds app.member_id).
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/memory/digests",
+            get(routes::memory::list_digests),
+        )
+        .route(
+            "/v1/workspaces/{ws}/memory/digests/{id}",
+            get(routes::memory::get_digest),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agent-runs/{run}/memory-receipt",
+            get(routes::memory::get_receipt),
+        )
+        .route(
+            "/v1/workspaces/{ws}/memory/settings",
+            get(routes::memory::get_settings).patch(routes::memory::patch_workspace_settings),
+        )
+        .route(
+            "/v1/workspaces/{ws}/memory/settings/me",
+            patch(routes::memory::patch_member_settings),
+        )
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/memory/settings",
+            patch(routes::memory::patch_channel_settings),
+        )
         // ADR-0175 / #1888 — personal message reminders. Human-only, owner
         // scoped, no outbox fan-out (v1 is a client poll).
         .route(
@@ -870,6 +897,12 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/auth/realtime-token",
             post(routes::realtime::issue_token),
+        )
+        // #3121 — the notification extension's narrow token. Minted by the app
+        // from its ordinary session; the extension's own token cannot reach it.
+        .route(
+            "/v1/auth/push-fetch-token",
+            post(routes::push_fetch::issue),
         )
         // ADR-0180 — human issuer only. The phone redeem half is public (below).
         .route(

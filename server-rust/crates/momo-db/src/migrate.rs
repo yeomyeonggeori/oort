@@ -485,19 +485,39 @@ mod tests {
     /// `work_permission_request.preview` / `preview_sha256` with a both-or-none
     /// CHECK. No table or policy is added. Re-runnable statements.
     /// schema_v0.sql is not modified.
+    ///
+    /// 098 is #3147's `agent.model_source` (ADR-0147 증보 2026-09-29): where an
+    /// agent's model comes from, `agent` | `instance_default`, with a one-time
+    /// backfill of the seed placeholder. No table or policy is added.
+    ///
+    /// 099 is #3167's drop of the first-generation Memory Plane (ADR-0196 D11):
+    /// 027/028/030/035 tables, function, workspace consent columns and the
+    /// audit unique index. No table or policy is added. The `vector`
+    /// extension stays for team memory v2. schema_v0.sql is not modified.
+    ///
+    /// 100 is #3161's team-memory M1 schema (ADR-0196 D3/D6/D7/D9):
+    /// `mem_digest`, `mem_evidence`, `mem_cursor`, `mem_serving`, `mem_settings`
+    /// (all ENABLE + FORCE RLS, per-command policies) and the SQL functions
+    /// `mem_can_read_channel` / `mem_can_read_channels`. Re-runnable statements.
+    /// schema_v0.sql is not modified.
+    ///
+    /// 101 is #3186's mem_* lockdown hardening (no schema objects): momo_app
+    /// loses TRUNCATE/REFERENCES/TRIGGER on `mem_settings`, PUBLIC ACLs and
+    /// runtime-role `mem_definer` membership are revoked, views/matviews are
+    /// walked, plus membership and SECURITY DEFINER allow-list self-checks.
     #[test]
-    fn discovers_contiguous_migrations_001_to_097() {
+    fn discovers_contiguous_migrations_001_to_101() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            97,
-            "expected 97 migrations under {}",
+            101,
+            "expected 101 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 97);
+        assert_eq!(migrations.last().unwrap().version, 101);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

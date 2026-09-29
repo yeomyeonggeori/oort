@@ -15,7 +15,10 @@
 //!    ([`policy::check_project_config`]); for Codex, the host's own home is
 //!    ready and signed in, and Codex's own `HOME` holds no skill layer
 //!    ([`policy::prepare_codex_home`], ADR-0188 §8, #2630 F5); the agent gets
-//!    the allowlisted part of the host's environment only (#2630 F1);
+//!    the allowlisted part of the host's environment only (#2630 F1); if this
+//!    Mac chose an account for remote work, its profile folder is checked and
+//!    becomes `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, or the spawn is refused
+//!    ([`crate::profile`], ADR-0191 D1, #3033);
 //! 5. ACP `initialize` — the process must be the adapter its entry names
 //!    ([`policy::AdapterKind::agent_name`]) — then `session/new` with no MCP
 //!    servers and the adapter's isolation switches;
@@ -67,10 +70,14 @@ use crate::client::{
 };
 use crate::config::ToolEntry;
 use crate::policy::{self, AdapterKind, ModeAtOpen, Refusal};
+use crate::profile;
 use crate::projection::{self, chunk_field, Projection, MAX_FIELD_CHARS};
+use crate::session_grant::{GrantEpoch, Grants};
 
 /// ACP protocol version this client speaks.
 pub const ACP_PROTOCOL_VERSION: i64 = 1;
+/// ACP's `auth_required` JSON-RPC error code.
+const ACP_AUTH_REQUIRED: i64 = -32000;
 /// The server's `agent.partial` ceiling (`text_delta` ≤ 4096 bytes).
 pub const MAX_EVENT_TEXT_BYTES: usize = 4_096;
 /// Coalesced answer text is flushed at this size…
@@ -155,6 +162,9 @@ pub struct SessionSettings {
     pub max_sessions: usize,
     /// Codex's host-only home and temp folder (ADR-0188 §8).
     pub codex: policy::CodexHome,
+    /// The host state folder, where the desktop's 「원격 작업」 account choice
+    /// lives ([`crate::profile`], #3033). Read at every spawn.
+    pub state_folder: PathBuf,
     /// How long a bridged permission request waits for its owner
     /// ([`DEFAULT_PERMISSION_WAIT`]).
     pub permission_wait: Duration,
@@ -185,12 +195,18 @@ enum Command {
         request_event_id: Uuid,
         option_id: String,
         kind: String,
+        /// #3095: the owner's VERIFIED 「이 세션 동안」 (never the payload's
+        /// word): remember what this allow covers for the session.
+        remember: bool,
         reply: oneshot::Sender<Result<(), Refusal>>,
     },
 }
 
 /// A permission request relayed to the owner and not yet answered.
 struct PendingPermission {
+    /// What the owner was shown (#3095: a 「이 세션 동안」 allow generalises
+    /// from it).
+    preview: momo_wire::permission_preview::PermissionPreview,
     /// The agent's JSON-RPC request id.
     rpc_id: Value,
     /// What the owner may choose — the agent's own one-time options.
@@ -251,6 +267,7 @@ pub struct SessionManager {
     settings: Arc<SessionSettings>,
     sessions: HashMap<Uuid, SessionHandle>,
     previews: PreviewLedger,
+    grant_epoch: GrantEpoch,
 }
 
 impl SessionManager {
@@ -260,7 +277,14 @@ impl SessionManager {
             settings: Arc::new(settings),
             sessions: HashMap::new(),
             previews: PreviewLedger::default(),
+            grant_epoch: GrantEpoch::default(),
         }
+    }
+
+    /// The generation of every 「이 세션 동안」 grant (#3095). The control
+    /// loop and the local control socket retire grants through it.
+    pub fn grant_epoch(&self) -> GrantEpoch {
+        self.grant_epoch.clone()
     }
 
     /// The preview hash this host relayed for `request_event_id` of
@@ -334,23 +358,39 @@ impl SessionManager {
             .ok_or(Refusal::WorkdirUnavailable)?;
         // Project agent configuration the adapter would apply regardless.
         policy::check_project_config(entry.adapter, &cwd)?;
-        // ADR-0188 §8: Codex runs only from the host's own home, signed in.
+        // #3033 (ADR-0191 D1): this Mac's 「원격 작업」 account, if it chose
+        // one — that profile or a refusal, never the default account.
+        let profile = profile::for_spawn(&self.settings.state_folder, entry.adapter, &cwd)?;
+        // ADR-0188 §8: Codex runs only from the host's own home (or the
+        // chosen profile, which has the same conditions), signed in.
+        let codex = match (&profile, entry.adapter) {
+            (Some(dir), AdapterKind::Codex) => self.settings.codex.with_profile_home(dir.clone()),
+            _ => self.settings.codex.clone(),
+        };
         if entry.adapter == AdapterKind::Codex {
-            if let Err(refusal) = policy::prepare_codex_home(&self.settings.codex, &cwd) {
+            if let Err(refusal) = policy::prepare_codex_home(&codex, &cwd) {
                 if refusal == Refusal::CodexLoginRequired {
                     tracing::warn!(
-                        login = %self.settings.codex.login_command(),
-                        "Codex is not signed in to the host's own home; sign in once with this command"
+                        login = %codex.login_command(),
+                        "Codex is not signed in to the folder remote work runs in; sign in once with this command"
                     );
+                    if profile.is_some() {
+                        return Err(Refusal::ProfileLoginRequired);
+                    }
                 }
                 return Err(refusal);
             }
         }
+        let claude_config_dir = match entry.adapter {
+            AdapterKind::Claude => profile.as_deref(),
+            AdapterKind::Codex => None,
+        };
         let spec = policy::launch_spec(
             &entry,
             &cwd,
             self.settings.parent_env.clone(),
-            &self.settings.codex,
+            &codex,
+            claude_config_dir,
         );
         let mut conn = AcpConnection::spawn(&spec).map_err(|error| {
             tracing::warn!(tool, error = %error, "agent launch failed");
@@ -363,6 +403,8 @@ impl SessionManager {
             entry.adapter,
             &cwd,
             self.settings.acp_start_timeout,
+            profile.is_some(),
+            &profile::protected_roots(&self.settings.state_folder),
         )
         .await
         {
@@ -419,6 +461,8 @@ impl SessionManager {
             permission_wait: self.settings.permission_wait,
             previews: self.previews.clone(),
             tool_calls: Vec::new(),
+            grants: Grants::default(),
+            grant_epoch: self.grant_epoch.clone(),
         };
         let join = tokio::spawn(task.run(receiver));
         self.sessions.insert(
@@ -490,6 +534,7 @@ impl SessionManager {
         request_event_id: Uuid,
         option_id: String,
         kind: String,
+        remember: bool,
     ) -> Result<(), Refusal> {
         self.reap();
         let handle = self
@@ -503,6 +548,7 @@ impl SessionManager {
                 request_event_id,
                 option_id,
                 kind,
+                remember,
                 reply,
             })
             .await
@@ -544,6 +590,8 @@ async fn handshake(
     adapter: AdapterKind,
     cwd: &std::path::Path,
     timeout: Duration,
+    profiled: bool,
+    protected: &[PathBuf],
 ) -> Result<String, Refusal> {
     let initialized = conn
         .request(
@@ -591,13 +639,20 @@ async fn handshake(
     let created = conn
         .request(
             "session/new",
-            policy::session_new_params(adapter, cwd),
+            policy::session_new_params_protecting(adapter, cwd, protected),
             timeout,
         )
         .await
         .map_err(|failure| {
             tracing::warn!(error = %failure, "ACP session/new failed");
-            Refusal::AgentStartFailed
+            // ACP `auth_required` (-32000): a chosen account that is not
+            // signed in says so, and is not "the agent failed to start".
+            match failure {
+                RpcFailure::Error { code, .. } if profiled && code == ACP_AUTH_REQUIRED => {
+                    Refusal::ProfileLoginRequired
+                }
+                _ => Refusal::AgentStartFailed,
+            }
         })?;
     let acp_session_id = created
         .get("sessionId")
@@ -751,6 +806,9 @@ struct SessionTask {
     /// #3118: what the agent announced of its tool calls, for the preview of
     /// a permission request that names one (bounded).
     tool_calls: Vec<(String, Map<String, Value>)>,
+    /// #3095: what the owner allowed 「이 세션 동안」. Ends with this task.
+    grants: Grants,
+    grant_epoch: GrantEpoch,
 }
 
 impl SessionTask {
@@ -782,9 +840,11 @@ impl SessionTask {
                     request_event_id,
                     option_id,
                     kind,
+                    remember,
                     reply,
                 })) => {
-                    let (answer, end) = self.on_owner_decision(request_event_id, &option_id, &kind);
+                    let (answer, end) =
+                        self.on_owner_decision(request_event_id, &option_id, &kind, remember);
                     let _ = reply.send(answer);
                     end
                 }
@@ -917,12 +977,23 @@ impl SessionTask {
             let event_id = Uuid::new_v4();
             // #3118: the host is the preview's source. Its hash is recorded
             // before the request leaves, so no decision can arrive first.
-            let preview = projection::permission_preview(&mut self.tool_calls, params).to_value();
+            let built = projection::permission_preview(&mut self.tool_calls, params);
+            let preview = built.to_value();
+            let preview_value = built;
             let Ok(preview_sha256) = momo_wire::permission_preview::preview_sha256(&preview) else {
                 // Unreachable for a host-built preview; refuse closed.
                 tracing::error!(session_id = %self.session_id, "permission preview did not build; denied");
                 return self.deny_unrelayed(id, &options).await;
             };
+            // #3095: a request the owner's 「이 세션 동안」 covers is answered
+            // here — after the record of it reached the server, so an
+            // automatic allow is never unrecorded.
+            if let Some(end) = self
+                .try_auto_allow(&id, &offered, &preview_value, &preview_sha256)
+                .await
+            {
+                return end;
+            }
             self.previews
                 .insert(self.session_id, event_id, preview_sha256.clone());
             if self
@@ -933,6 +1004,7 @@ impl SessionTask {
                 self.permissions.insert(
                     event_id,
                     PendingPermission {
+                        preview: preview_value,
                         rpc_id: id,
                         offered,
                         deadline: Instant::now() + self.permission_wait,
@@ -944,6 +1016,39 @@ impl SessionTask {
             tracing::warn!(session_id = %self.session_id, "permission request not relayed; denied");
         }
         self.deny_unrelayed(id, &options).await
+    }
+
+    /// #3095: answer `allow_once` without asking when a live grant covers the
+    /// request. `None` = not answered (ask the owner as usual); `Some(end)` =
+    /// answered, and `end` is the session's end if the agent went away.
+    async fn try_auto_allow(
+        &mut self,
+        id: &Value,
+        offered: &[policy::PermissionOption],
+        preview: &momo_wire::permission_preview::PermissionPreview,
+        preview_sha256: &str,
+    ) -> Option<Option<End>> {
+        if !self.grants.covers(preview, &self.grant_epoch) {
+            return None;
+        }
+        // Only the agent's own one-time allow; never an "always" rule.
+        let option = offered.iter().find(|option| option.kind == "allow_once")?;
+        // The record first: no automatic allow without its audit trail.
+        if !self
+            .relay
+            .permission_auto_allowed(&preview.kind, preview_sha256)
+            .await
+        {
+            return None;
+        }
+        tracing::info!(session_id = %self.session_id, tool_kind = %preview.kind, "permission request answered from the owner's session grant");
+        let decision = policy::PermissionDecision::Selected {
+            option_id: option.option_id.clone(),
+        };
+        if self.conn.respond(id.clone(), decision.to_result()).is_err() {
+            return Some(Some(End::AgentExited));
+        }
+        Some(None)
     }
 
     /// Deny a request that could not be relayed (D5 「올릴 수 없는 요청은 즉시
@@ -969,6 +1074,7 @@ impl SessionTask {
         request_event_id: Uuid,
         option_id: &str,
         kind: &str,
+        remember: bool,
     ) -> (Result<(), Refusal>, Option<End>) {
         let Some(pending) = self.permissions.get(&request_event_id) else {
             return (Err(Refusal::PermissionRequestUnknown), None);
@@ -988,6 +1094,12 @@ impl SessionTask {
             .is_err()
         {
             return (Err(Refusal::SessionClosed), Some(End::AgentExited));
+        }
+        // #3095: the allow was the owner's, signed for the session. What it
+        // covers is remembered only after the agent has its answer.
+        if remember && kind == "allow_once" {
+            let remembered = self.grants.remember(&pending.preview, &self.grant_epoch);
+            tracing::info!(session_id = %self.session_id, tool_kind = %pending.preview.kind, remembered, "owner allowed for the session");
         }
         (Ok(()), None)
     }
@@ -1352,6 +1464,21 @@ impl EventRelay {
         fields.insert("preview".into(), preview);
         fields.insert("preview_sha256".into(), json!(preview_sha256));
         self.send_as(event_id, "approval.requested", fields).await
+    }
+
+    /// #3095: a request answered from the owner's 「이 세션 동안」 grant. Its
+    /// own event type — `approval.decided` closes a pending card on every
+    /// client, and nothing is pending here. `true` when the server recorded it.
+    pub async fn permission_auto_allowed(&mut self, tool_kind: &str, preview_sha256: &str) -> bool {
+        self.flush_ready().await;
+        let mut fields = Map::new();
+        fields.insert("action".into(), json!("auto_allowed"));
+        fields.insert("status".into(), json!("approved"));
+        fields.insert("scope".into(), json!("session"));
+        fields.insert("tool_kind".into(), json!(tool_kind));
+        fields.insert("preview_sha256".into(), json!(preview_sha256));
+        self.send_as(Uuid::new_v4(), "approval.auto_allowed", fields)
+            .await
     }
 
     async fn send(&mut self, event_type: &str, fields: Map<String, Value>) {

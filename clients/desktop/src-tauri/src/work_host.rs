@@ -43,6 +43,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::Manager;
+use uuid::Uuid;
 
 /// The sidecar's executable name (`CFBundleExecutable` of the helper bundle).
 pub const SIDECAR_NAME: &str = "momo-workd";
@@ -67,6 +68,8 @@ pub const DEFAULT_WORK_FOLDER: &str = "oort-work";
 /// Longest wait for `momo-workd register` (one HTTPS round trip plus a
 /// keychain write that may show a system prompt).
 const REGISTER_TIMEOUT: Duration = Duration::from_secs(90);
+/// `momo-workd forget` after a register that did not finish.
+const FORGET_TIMEOUT: Duration = Duration::from_secs(20);
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(2);
 const STOP_TIMEOUT: Duration = Duration::from_secs(8);
 
@@ -789,7 +792,24 @@ impl Service<'_> {
             .ok_or_else(|| "sidecar_missing".to_string())
     }
 
-    pub fn register(&self, request: RegisterRequest) -> Result<LocalStatus, String> {
+    /// `sign` answers the child's request for the root key's `host_register`
+    /// signature (#3120); the command wires it to the device key worker.
+    pub fn register(
+        &self,
+        request: RegisterRequest,
+        sign: &mut dyn FnMut(&HostKeyAsk) -> Result<RegistrationAnswer, String>,
+    ) -> Result<LocalStatus, String> {
+        let adapters = find_adapters(&crate::harness_path::current_search_path());
+        self.register_within(request, sign, &adapters, REGISTER_TIMEOUT)
+    }
+
+    fn register_within(
+        &self,
+        request: RegisterRequest,
+        sign: &mut dyn FnMut(&HostKeyAsk) -> Result<RegistrationAnswer, String>,
+        adapters: &[AdapterFound],
+        timeout: Duration,
+    ) -> Result<LocalStatus, String> {
         let sidecar = self.sidecar()?.to_path_buf();
         let _one_at_a_time = self
             .state
@@ -799,13 +819,12 @@ impl Service<'_> {
         if read_registered(&self.layout).is_some() {
             return Err("already_registered".to_string());
         }
-        let adapters = find_adapters(&crate::harness_path::current_search_path());
         let config = build_config(
             &self.layout,
             &request.server_url,
             &request.workspace_id,
             &request.display_name,
-            &adapters,
+            adapters,
         )?;
         if request.access_token.trim().is_empty() {
             return Err("not_signed_in".to_string());
@@ -821,10 +840,14 @@ impl Service<'_> {
             &serde_json::to_vec_pretty(&config).expect("config serializes"),
         )?;
 
+        let workspace_id = Uuid::parse_str(request.workspace_id.trim())
+            .map_err(|_| "invalid_workspace_id".to_string())?;
+        let label = request.display_name.trim().to_string();
         let mut command = Command::new(&sidecar);
         command
             .arg("register")
             .arg("--token-stdin")
+            .arg("--sign-stdin")
             .arg("--config")
             .arg(&self.layout.config)
             .args(key_args(&self.layout, self.development))
@@ -836,8 +859,33 @@ impl Service<'_> {
         // The token crosses a pipe, not the child's environment: another
         // same-user process can read a running child's environment (#2778
         // security review M3), not its stdin.
-        let output =
-            run_with_timeout(command, REGISTER_TIMEOUT, Some(request.access_token.trim()))?;
+        let output = match run_register(
+            command,
+            timeout,
+            request.access_token.trim(),
+            &mut |child_ask| {
+                // The workspace and the label are this shell's own (what it
+                // just wrote to the config), never the child's to choose; the
+                // child supplies the one thing only it knows, its public key.
+                sign(&HostKeyAsk {
+                    workspace_id,
+                    label: label.clone(),
+                    host_public_key: child_ask.host_public_key.clone(),
+                    instance_id: child_ask.instance_id.clone(),
+                    server_time_ms: child_ask.server_time_ms,
+                })
+            },
+        ) {
+            Ok(output) => output,
+            Err(error) => {
+                // A child killed at the deadline never ran its own cleanup,
+                // and it made its key before it did anything else (#3155
+                // review): take the key and its state out now, and the config
+                // this call wrote, so the next attempt starts clean.
+                self.abandon_failed_register();
+                return Err(error);
+            }
+        };
         if !output.0 {
             // The last line of workd's stderr: it never carries the token
             // (workd_conformance_pg `register`), and it says why.
@@ -854,6 +902,29 @@ impl Service<'_> {
         }
         self.start()?;
         Ok(self.status())
+    }
+
+    /// `momo-workd forget` for a registration that did not finish, then the
+    /// config it read. Best effort: the failure being reported is the
+    /// register's, not this. (A row the killed child may already have made on
+    /// the server holds a key that no longer exists; the owner revokes it from
+    /// the host list.)
+    fn abandon_failed_register(&self) {
+        if let Ok(sidecar) = self.sidecar() {
+            let mut command = Command::new(sidecar);
+            command
+                .arg("forget")
+                .arg("--config")
+                .arg(&self.layout.config)
+                .args(key_args(&self.layout, self.development))
+                .env_clear()
+                .envs(child_env())
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            let _ = run_with_timeout(command, FORGET_TIMEOUT, None);
+        }
+        let _ = std::fs::remove_file(&self.layout.config);
     }
 
     pub fn start(&self) -> Result<(), String> {
@@ -976,6 +1047,144 @@ fn run_with_timeout(
     }
 }
 
+/// What `momo-workd register --sign-stdin` prints when it wants the owner's
+/// root key to vouch for its host key (#3120).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChildSigningAsk {
+    pub host_public_key: String,
+    pub instance_id: Option<String>,
+    pub server_time_ms: Option<i64>,
+}
+
+pub use crate::device_key::HostRegisterAnswer as RegistrationAnswer;
+/// The shell's question to the device key worker: [`ChildSigningAsk`] plus
+/// the workspace and label the shell itself registers.
+pub use crate::device_key::HostRegisterAsk as HostKeyAsk;
+
+/// One stdout line of the register child, if it is the signing request.
+pub(crate) fn parse_signing_request(line: &str) -> Option<ChildSigningAsk> {
+    let value: Value = serde_json::from_str(line.trim()).ok()?;
+    if value.get("momoWorkd")?.as_str()? != "host_register_request" {
+        return None;
+    }
+    Some(ChildSigningAsk {
+        host_public_key: value.get("hostPublicKey")?.as_str()?.to_string(),
+        instance_id: value
+            .get("instanceId")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        server_time_ms: value.get("serverTimeMs").and_then(Value::as_i64),
+    })
+}
+
+/// The line the shell answers the child with.
+pub(crate) fn signing_answer_line(answer: &Result<RegistrationAnswer, String>) -> String {
+    match answer {
+        Ok(RegistrationAnswer::Signed(registration)) => json!({ "registration": registration }),
+        Ok(RegistrationAnswer::Unsigned) => json!({ "unsigned": true }),
+        Err(why) => json!({ "declined": why.chars().take(120).collect::<String>() }),
+    }
+    .to_string()
+}
+
+/// `momo-workd register --token-stdin --sign-stdin`: token line in, at most
+/// one signing request out and one answer back, then wait for exit. The clock
+/// runs from the start and again from the answer: the person deciding in the
+/// dialog is not the child hanging.
+fn run_register(
+    mut command: Command,
+    timeout: Duration,
+    token: &str,
+    on_request: &mut dyn FnMut(&ChildSigningAsk) -> Result<RegistrationAnswer, String>,
+) -> Result<(bool, String, String), String> {
+    use std::sync::{mpsc, Arc};
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("start_failed: {error}"))?;
+    let mut stdin = child.stdin.take().ok_or("start_failed: no stdin")?;
+    stdin
+        .write_all(format!("{token}\n").as_bytes())
+        .map_err(|error| format!("start_failed: {error}"))?;
+    // stderr is drained while we wait on stdout: a chatty child must not
+    // fill the pipe and stall.
+    let stderr_text = Arc::new(Mutex::new(String::new()));
+    if let Some(mut err) = child.stderr.take() {
+        let sink = stderr_text.clone();
+        std::thread::spawn(move || {
+            let mut buffer = [0u8; 4096];
+            while let Ok(n) = err.read(&mut buffer) {
+                if n == 0 {
+                    break;
+                }
+                let mut text = sink.lock().unwrap_or_else(|p| p.into_inner());
+                if text.len() < 64 * 1024 {
+                    text.push_str(&String::from_utf8_lossy(&buffer[..n]));
+                }
+            }
+        });
+    }
+    let (lines_tx, lines_rx) = mpsc::channel::<String>();
+    if let Some(out) = child.stdout.take() {
+        std::thread::spawn(move || {
+            use std::io::BufRead as _;
+            for line in std::io::BufReader::new(out).lines().map_while(Result::ok) {
+                if lines_tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    let mut stdout = String::new();
+    let mut deadline = Instant::now() + timeout;
+    let mut stdin = Some(stdin);
+    loop {
+        let wait = deadline.saturating_duration_since(Instant::now());
+        match lines_rx.recv_timeout(wait.min(Duration::from_millis(200))) {
+            Ok(line) => {
+                if let (Some(ask), Some(pipe)) = (parse_signing_request(&line), stdin.as_mut()) {
+                    let answer = on_request(&ask);
+                    let _ =
+                        pipe.write_all(format!("{}\n", signing_answer_line(&answer)).as_bytes());
+                    let _ = pipe.flush();
+                    // One request per registration: EOF after the answer.
+                    stdin = None;
+                    deadline = Instant::now() + timeout;
+                } else {
+                    stdout.push_str(&line);
+                    stdout.push('\n');
+                }
+                continue;
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            // stdout closed: the child is finishing.
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                std::thread::sleep(Duration::from_millis(50))
+            }
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                // Lines that arrived between the last poll and the exit.
+                std::thread::sleep(Duration::from_millis(50));
+                while let Ok(line) = lines_rx.try_recv() {
+                    stdout.push_str(&line);
+                    stdout.push('\n');
+                }
+                let stderr = stderr_text
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .clone();
+                return Ok((status.success(), stdout, stderr));
+            }
+            Ok(None) if Instant::now() < deadline => {}
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("timeout".to_string());
+            }
+        }
+    }
+}
+
 // ---- commands -----------------------------------------------------------------
 
 pub(crate) fn service<'a>(
@@ -1021,7 +1230,13 @@ pub async fn work_host_register(
     app: tauri::AppHandle,
     request: RegisterRequest,
 ) -> Result<LocalStatus, String> {
-    let status = blocking(app.clone(), move |service| service.register(request)).await?;
+    let signer = app.clone();
+    let status = blocking(app.clone(), move |service| {
+        service.register(request, &mut |ask| {
+            crate::device_key::sign_host_register(&signer, ask.clone())
+        })
+    })
+    .await?;
     // Registration starts the host; pin a root bound before it existed (#3025).
     crate::device_key::pin_after_start(&app);
     Ok(status)
@@ -1187,7 +1402,9 @@ mod tests {
             2,
             "the empty check and the stdin line"
         );
-        assert!(code.contains("Some(request.access_token.trim())"));
+        assert!(
+            code.contains("            request.access_token.trim(),\n            &mut |child_ask|")
+        );
         assert!(code.contains(".arg(\"--token-stdin\")"));
         assert!(!code.contains("MOMO_WORKD_REGISTER_TOKEN"));
         let request = RegisterRequest {
@@ -1495,5 +1712,174 @@ mod tests {
         assert!(after.registered.is_none());
         assert!(!layout.dev_key.exists() && !layout.state.exists() && !layout.config.exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ---- #3120: the register child's signing request ---------------------------
+
+    #[test]
+    fn the_signing_request_is_read_from_one_stdout_line_and_only_that_shape() {
+        let ask = parse_signing_request(
+            r#"{"momoWorkd":"host_register_request","hostPublicKey":"K","instanceId":"i","serverTimeMs":5,"hostRegisterSignatureRequired":true}"#,
+        )
+        .unwrap();
+        assert_eq!(ask.host_public_key, "K");
+        assert_eq!(ask.instance_id.as_deref(), Some("i"));
+        assert_eq!(ask.server_time_ms, Some(5));
+        assert!(parse_signing_request(r#"{"hostId":"x"}"#).is_none());
+        assert!(parse_signing_request("not json").is_none());
+        assert!(parse_signing_request(r#"{"momoWorkd":"other"}"#).is_none());
+    }
+
+    fn fake_child(script: &str) -> Command {
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg(script)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        command
+    }
+
+    /// The child prints its request, reads the answer and echoes it on
+    /// stderr; the token is the first stdin line.
+    const ASKING_CHILD: &str = r#"read token; echo "token:$token" >&2
+printf '%s\n' '{"momoWorkd":"host_register_request","hostPublicKey":"K","instanceId":"i","serverTimeMs":5}'
+read answer; echo "answer:$answer" >&2
+echo '{"hostId":"h"}'"#;
+
+    #[test]
+    fn the_answer_reaches_the_child_and_its_result_comes_back() {
+        let mut seen = None;
+        let (ok, stdout, stderr) = run_register(
+            fake_child(ASKING_CHILD),
+            Duration::from_secs(10),
+            "tok",
+            &mut |ask| {
+                seen = Some(ask.clone());
+                Ok(RegistrationAnswer::Signed(
+                    json!({"hostId": "h", "signature": "S"}),
+                ))
+            },
+        )
+        .unwrap();
+        assert!(ok, "{stderr}");
+        assert_eq!(seen.unwrap().host_public_key, "K");
+        assert!(stderr.contains("token:tok"), "{stderr}");
+        assert!(
+            stderr.contains(r#"answer:{"registration":{"hostId":"h","signature":"S"}}"#),
+            "{stderr}"
+        );
+        assert_eq!(stdout.trim(), r#"{"hostId":"h"}"#);
+    }
+
+    #[test]
+    fn a_declined_dialog_is_told_to_the_child_which_then_registers_nothing() {
+        let (_, _, stderr) = run_register(
+            fake_child(ASKING_CHILD),
+            Duration::from_secs(10),
+            "tok",
+            &mut |_| Err("device_key_declined".into()),
+        )
+        .unwrap();
+        assert!(
+            stderr.contains(r#"answer:{"declined":"device_key_declined"}"#),
+            "{stderr}"
+        );
+    }
+
+    #[test]
+    fn a_child_that_never_asks_is_still_waited_for() {
+        let mut asked = false;
+        let (ok, stdout, _) = run_register(
+            fake_child(r#"read token; echo '{"hostId":"h"}'"#),
+            Duration::from_secs(10),
+            "tok",
+            &mut |_| {
+                asked = true;
+                Ok(RegistrationAnswer::Unsigned)
+            },
+        )
+        .unwrap();
+        assert!(ok && !asked);
+        assert_eq!(stdout.trim(), r#"{"hostId":"h"}"#);
+    }
+
+    #[test]
+    fn a_hung_child_is_killed_at_the_deadline() {
+        let started = Instant::now();
+        let error = run_register(
+            fake_child("read token; sleep 30"),
+            Duration::from_millis(400),
+            "tok",
+            &mut |_| Ok(RegistrationAnswer::Unsigned),
+        )
+        .unwrap_err();
+        assert_eq!(error, "timeout");
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    /// A sidecar that hangs on `register` and records what else it is asked.
+    fn fake_sidecar(dir: &Path, marks: &Path) -> PathBuf {
+        let bin = dir.join("fake-workd");
+        std::fs::write(
+            &bin,
+            format!(
+                "#!/bin/sh\ncase \"$1\" in\n  register) read token; sleep 30 ;;\n  *) echo \"$@\" >> '{}' ;;\nesac\n",
+                marks.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        bin
+    }
+
+    #[test]
+    fn a_register_that_times_out_takes_its_key_and_config_with_it() {
+        let dir = std::env::temp_dir().join(format!("oort-reg-timeout-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let marks = dir.join("marks");
+        let layout = layout(&dir);
+        let state = WorkHostState::default();
+        let service = Service {
+            layout: layout.clone(),
+            sidecar: Some(fake_sidecar(&dir, &marks)),
+            development: true,
+            state: &state,
+        };
+        let error = service
+            .register_within(
+                RegisterRequest {
+                    server_url: "https://oort.example.com".into(),
+                    workspace_id: "00000000-0000-0000-0000-00000000000c".into(),
+                    display_name: "맥".into(),
+                    access_token: "tok".into(),
+                },
+                &mut |_| Ok(RegistrationAnswer::Unsigned),
+                &[found("claude")],
+                Duration::from_millis(400),
+            )
+            .unwrap_err();
+        assert_eq!(error, "timeout");
+        let asked = std::fs::read_to_string(&marks).unwrap_or_default();
+        assert!(
+            asked.starts_with("forget --config "),
+            "the killed child's key is forgotten: {asked:?}"
+        );
+        assert!(
+            !layout.config.exists(),
+            "the config this attempt wrote is gone"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_answer_lines_are_closed_shapes() {
+        assert_eq!(
+            signing_answer_line(&Ok(RegistrationAnswer::Unsigned)),
+            r#"{"unsigned":true}"#
+        );
+        assert!(signing_answer_line(&Err("x".repeat(500))).len() < 160);
     }
 }

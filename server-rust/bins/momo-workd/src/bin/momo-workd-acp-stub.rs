@@ -81,6 +81,7 @@ struct Options {
     set_mode_reports: Option<String>,
     set_mode_reports_late: bool,
     agent_name: Option<String>,
+    auth_required: bool,
 }
 
 fn parse() -> Options {
@@ -106,6 +107,7 @@ fn parse() -> Options {
         set_mode_reports: None,
         set_mode_reports_late: false,
         agent_name: None,
+        auth_required: false,
     };
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
@@ -113,6 +115,8 @@ fn parse() -> Options {
             "--record" => options.record = args.next(),
             "--mode" => options.mode = args.next().unwrap_or_default(),
             "--no-modes" => options.modes = false,
+            // #3033: `session/new` answers ACP `auth_required` (not signed in).
+            "--auth-required" => options.auth_required = true,
             "--codex-modes" => options.codex_modes = true,
             "--permission" => options.permission = true,
             "--escape-mode" => options.escape_mode = args.next(),
@@ -358,11 +362,19 @@ impl Stub {
                 {"content": "Report back", "priority": "medium", "status": "pending"}
             ]}),
         );
+        // #3095: a prompt that says "different" runs another command, so a
+        // test can tell a request a session grant covers from one it does not.
+        let command = if text.contains("different") {
+            "ls /tmp"
+        } else {
+            "cat ~/.ssh/id_ed25519"
+        };
+        let title = format!("Run `{command}`");
         self.update(
             &session_id,
             json!({"sessionUpdate": "tool_call", "toolCallId": "call-1",
-                   "title": "Run `cat ~/.ssh/id_ed25519`", "kind": "execute",
-                   "status": "pending", "rawInput": {"command": "cat ~/.ssh/id_ed25519"}}),
+                   "title": title, "kind": "execute",
+                   "status": "pending", "rawInput": {"command": command}}),
         );
         if self.options.permission {
             let request_id = self.next_id;
@@ -373,7 +385,7 @@ impl Stub {
                 "method": "session/request_permission",
                 "params": {
                     "sessionId": session_id,
-                    "toolCall": {"toolCallId": "call-1", "title": "Run `cat ~/.ssh/id_ed25519`", "kind": "execute"},
+                    "toolCall": {"toolCallId": "call-1", "title": title, "kind": "execute"},
                     "options": [
                         {"optionId": "allow-always", "name": "Always Allow", "kind": "allow_always"},
                         {"optionId": "allow-once", "name": "Allow", "kind": "allow_once"},
@@ -458,6 +470,10 @@ impl Stub {
                                "agentInfo": {"name": name, "title": "stub", "version": "0"}}),
                     );
                 }
+                Some("session/new") if self.options.auth_required => self.send(json!({
+                    "jsonrpc": "2.0", "id": id,
+                    "error": {"code": -32000, "message": "stub: authentication required"}
+                })),
                 Some("session/new") => {
                     let mut result = json!({"sessionId": "stub-session-1"});
                     if self.options.modes {
@@ -557,6 +573,7 @@ fn main() {
             "INITIAL_AGENT_MODE": std::env::var("INITIAL_AGENT_MODE").ok(),
             "CODEX_CONFIG": std::env::var("CODEX_CONFIG").ok(),
             "CODEX_HOME": std::env::var("CODEX_HOME").ok(),
+            "CLAUDE_CONFIG_DIR": std::env::var("CLAUDE_CONFIG_DIR").ok(),
             "TMPDIR": std::env::var("TMPDIR").ok(),
             "HOME": std::env::var("HOME").ok(),
         },

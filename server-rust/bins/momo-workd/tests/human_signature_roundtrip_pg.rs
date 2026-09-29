@@ -258,6 +258,19 @@ impl World {
     /// Sign `allow-once` of `request` over the preview the owner's app read,
     /// and have the owner send the decision.
     async fn signed_allow(&self, device: &Device, key_id: Uuid, session: Uuid, request: Uuid) {
+        self.signed_allow_scoped(device, key_id, session, request, PermissionScope::Once)
+            .await
+    }
+
+    /// … for the scope the owner chose (#3095: 「이 세션 동안」).
+    async fn signed_allow_scoped(
+        &self,
+        device: &Device,
+        key_id: Uuid,
+        session: Uuid,
+        request: Uuid,
+        scope: PermissionScope,
+    ) {
         let rendered = self.rendered_preview_sha256(session, request).await;
         let issued = now_ms();
         let nonce = Uuid::new_v4();
@@ -275,7 +288,7 @@ impl World {
                 request_event_id: request,
                 option_id: "allow-once",
                 option_kind: "allow_once",
-                scope: PermissionScope::Once,
+                scope,
                 preview_sha256: Some(&rendered),
             },
         }
@@ -291,7 +304,7 @@ impl World {
                     "requestEventId": request, "optionId": "allow-once", "kind": "allow_once",
                     "humanSignature": {
                         "deviceKeyId": key_id, "nonce": nonce, "issuedAtMs": issued,
-                        "expiresAtMs": issued + 5 * 60 * 1000, "scope": "once",
+                        "expiresAtMs": issued + 5 * 60 * 1000, "scope": scope.as_str(),
                         "signature": device.sign(&bytes),
                     }
                 }),
@@ -301,6 +314,50 @@ impl World {
     }
 
     /// The offline sweep's own transition, as the owner's old laptop went away.
+    /// A live agent member that the host reported on the session's thread —
+    /// the record a signed resume's agent is checked against (#3154).
+    async fn report_agent(&self, session: Uuid) -> Uuid {
+        let su = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&database_url())
+            .await
+            .expect("superuser");
+        let agent = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+             VALUES ($1, $2, 'agent', $3, $3)",
+        )
+        .bind(agent)
+        .bind(self.workspace)
+        .bind(format!("resume-{}", &agent.simple().to_string()[..8]))
+        .execute(&su)
+        .await
+        .expect("agent member");
+        sqlx::query(
+            "WITH ws AS (SELECT channel_id, root_message_id FROM work_session WHERE id = $1), \
+                  bumped AS ( \
+                    UPDATE channel_seq SET last_seq = last_seq + 1 \
+                     WHERE workspace_id = $2 AND channel_id = (SELECT channel_id FROM ws) \
+                    RETURNING last_seq AS seq) \
+             INSERT INTO message \
+               (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, \
+                props, root_id) \
+             SELECT $2, ws.channel_id, b.seq, 1, 0, $3, 'system', 'agent status', \
+                    jsonb_build_object('kind', 'work_session_event', \
+                                       'event', jsonb_build_object('agent_member_id', $4::text)), \
+                    ws.root_message_id \
+               FROM bumped b, ws",
+        )
+        .bind(session)
+        .bind(self.workspace)
+        .bind(self.person)
+        .bind(agent.to_string())
+        .execute(&su)
+        .await
+        .expect("report the agent");
+        agent
+    }
+
     async fn orphan(&mut self, session: Uuid) {
         let su = PgPoolOptions::new()
             .max_connections(1)
@@ -690,6 +747,56 @@ async fn the_servers_envelope_passes_the_hosts_verifier() {
     );
 }
 
+/// #3095: a 「이 세션 동안」 allow the server took (scope `session`, signed by
+/// the phone) reaches the host as the envelope the host's verifier accepts
+/// with that scope in it - and only with it: the same envelope with the scope
+/// turned back to `once` no longer verifies.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_session_allow_reaches_the_host_with_its_scope_and_only_with_it() {
+    let Stage {
+        w,
+        root,
+        root_id,
+        phone,
+        phone_id,
+        session,
+    } = stage().await;
+    let (request, hash) = w.permission_request(session, "git status").await;
+    w.signed_allow_scoped(&phone, phone_id, session, request, PermissionScope::Session)
+        .await;
+    let controls = w.pending().await;
+    assert_eq!(controls.len(), 1, "{controls:?}");
+    let control = controls[0].clone();
+    let envelope = control.human_signature.as_ref().unwrap();
+    assert_eq!(envelope["scope"], "session");
+    assert_eq!(control.payload.as_object().unwrap().len(), 3);
+
+    let identity = TrustIdentity {
+        workspace_id: w.workspace,
+        owner_member_id: w.person,
+        host_id: w.host,
+    };
+    let host = || {
+        let mut t = HumanTrust::open(&trust_dir(), identity).unwrap();
+        t.pin_root(root_id, "p256", &root.public_b64, now_ms())
+            .unwrap();
+        t
+    };
+    let mut once = control.clone();
+    once.human_signature.as_mut().unwrap()["scope"] = json!("once");
+    assert_eq!(
+        host().check_control_with_preview(&once, Some(&hash), now_ms()),
+        Err(Refusal::DeviceSignatureInvalid),
+        "the scope is inside the signature"
+    );
+    assert_eq!(
+        host().check_control_with_preview(&control, Some(&hash), now_ms()),
+        Ok(()),
+        "the host takes a session allow now (it refused it as unsupported before #3095)"
+    );
+}
+
 /// #3027: what the instruction route and the signed resume store is what the
 /// host verifies — and nothing the server could change after the owner signed
 /// survives the host's check.
@@ -782,10 +889,10 @@ async fn signed_instructions_and_a_signed_resume_pass_the_hosts_verifier() {
     assert_eq!(status, 201, "{body}");
     let source = Uuid::parse_str(body["workSession"]["id"].as_str().unwrap()).unwrap();
     w.orphan(source).await;
+    let agent = w.report_agent(source).await;
     let successor = Uuid::new_v4();
     let issued = now_ms();
     let nonce = Uuid::new_v4();
-    let agent = Uuid::from_u128(0x3027);
     let bytes = HumanControl {
         instance_id: INSTANCE_ID,
         workspace_id: workspace,
