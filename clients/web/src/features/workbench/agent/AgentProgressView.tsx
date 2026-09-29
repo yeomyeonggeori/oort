@@ -31,6 +31,15 @@ import {
   type ReplyMode,
   type ToolCardKind,
 } from "@momo/core/features/workbench/agentPane";
+import {
+  PERMISSION_PREVIEW_KIND_LABEL,
+  PERMISSION_PREVIEW_LOADING_LINE,
+  permissionAllowGone,
+  permissionGateAsk,
+  permissionPreviewRows,
+  type PermissionPreviewGate,
+} from "@momo/core/features/workbench/permissionPreviewGate";
+import type { PermissionPreview } from "@momo/core/features/workbench/permissionPreview";
 import { StatusMark } from "../local/SessionList";
 import type { SessionStatus } from "@momo/core/features/workbench/sessionList";
 import type { WorkPermissionDecisionBody } from "@momo/core/lib/api";
@@ -78,6 +87,11 @@ export interface PermissionDecision extends Omit<WorkPermissionDecisionBody, "hu
   sessionId: string;
   /** 허락의 범위. 서명하는 경로만 `session`을 받는다(#3028). */
   scope?: PermissionScope;
+  /**
+   * 서명하는 허락(#3128, control v3): 카드가 보여 주고 확인한 host 미리보기와 앱이
+   * 다시 계산한 해시. 서명 경로는 이것 없이는 서명하지 않는다.
+   */
+  preview?: { preview: PermissionPreview; sha256: string };
 }
 
 export interface RejectWithInstructionRequest {
@@ -169,6 +183,7 @@ export function AgentProgressView({
   actions,
   offline = false,
   instructFrom = "here",
+  previewGate = null,
   className,
 }: {
   model: AgentPaneModel;
@@ -182,6 +197,12 @@ export function AgentProgressView({
    * 권한 카드와 답장 칸이 이 한 값을 함께 읽는다(ADR-0146 개정 D-4, #3029).
    */
   instructFrom?: InstructFrom;
+  /**
+   * 서명하는 표면(#3128): 소유자 조회로 받은 host 미리보기의 허락 문. 있으면 권한
+   * 카드는 추론한 미리보기 대신 이것을 그대로 보이고, `ready`일 때만 허락을 연다.
+   * null이면 서명하지 않는 표면이다(지금 그대로).
+   */
+  previewGate?: PermissionPreviewGate | null;
   className?: string;
 }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
@@ -315,6 +336,7 @@ export function AgentProgressView({
           key={model.permission.requestEventId}
           sessionId={model.sessionId}
           permission={model.permission}
+          gate={previewGate}
           viewerIsOwner={model.viewerIsOwner}
           ownerName={ownerName}
           decide={actions.decide}
@@ -488,9 +510,75 @@ function useLapsed(atMs: number): boolean {
   return lapsed;
 }
 
+/**
+ * 확인한 미리보기 칸이 넘치는가: 줄바꿈 수가 아니라 그려진 높이로 잰다. 긴 입력이
+ * 접혀 두 줄이 되면 줄 수로는 세 줄이어도 제목이 칸 밖에 있다.
+ */
+function useOverflows(ref: React.RefObject<HTMLElement>, key: unknown): string[] | null {
+  const [over, setOver] = useState<string[] | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // 넘치면 칸 밖에 (일부라도) 있는 필드의 이름들. 넘치지 않으면 null.
+    const measure = () => {
+      if (el.scrollHeight <= el.clientHeight + 1) return setOver(null);
+      const box = el.getBoundingClientRect();
+      const hidden = [...el.querySelectorAll<HTMLElement>(".agent-perm-field")]
+        .filter((row) => row.getBoundingClientRect().bottom > box.bottom + 1)
+        .map((row) => row.querySelector("dt")?.textContent ?? "")
+        .filter(Boolean);
+      setOver(hidden);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref, key]);
+  return over;
+}
+
+/** 확인한 host 미리보기: 종류 표지와 필드를 그대로(#3128). 렌더가 곧 해시한 글이다. */
+function GatedPreview({ preview }: { preview: PermissionPreview }) {
+  const boxRef = useRef<HTMLDListElement>(null);
+  const over = useOverflows(boxRef, preview);
+  return (
+    <>
+      {/* 종류는 질문 줄이 이미 말한다(칸의 세 줄을 표지에 쓰지 않는다, design-review H1).
+          표지는 글 옆 칸에, 글 앞에는 표지가 결코 갖지 않는 여백 선(H2). 글은 그대로다. */}
+      <dl
+        ref={boxRef}
+        tabIndex={0}
+        aria-label={`요청 미리보기, ${PERMISSION_PREVIEW_KIND_LABEL[preview.kind]}`}
+        className="agent-perm-code agent-perm-fields focus-visible:focus-ring"
+        data-testid="agent-permission-preview"
+        data-kind={preview.kind}
+      >
+        {permissionPreviewRows(preview).map((row) => (
+          <div key={row.key} className="agent-perm-field">
+            <dt className="agent-perm-field-label">{row.label}</dt>
+            <dd className="agent-perm-field-text" data-testid={`agent-permission-preview-${row.key}`}>
+              {row.text}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {/* 잘린 미리보기는 스크롤해도 전체가 없다: 그때는 막힌 이유 문장만 말한다. */}
+      {over && !preview.truncated ? (
+        <p className="text-timestamp text-ink-muted" data-testid="agent-permission-more">
+          {over.length > 0
+            ? `${over.join("·")}까지 미리보기 칸을 스크롤해서 보세요`
+            : "미리보기 칸을 스크롤해서 끝까지 보세요"}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 function PermissionCard({
   sessionId,
   permission,
+  gate,
   viewerIsOwner,
   ownerName,
   decide,
@@ -505,6 +593,8 @@ function PermissionCard({
 }: {
   sessionId: string;
   permission: PendingPermission;
+  /** 서명하는 표면의 미리보기 허락 문(#3128). null이면 서명하지 않는 표면. */
+  gate: PermissionPreviewGate | null;
   viewerIsOwner: boolean;
   ownerName: string | null;
   decide: AgentPaneActions["decide"];
@@ -536,6 +626,7 @@ function PermissionCard({
   const [outcome, setOutcome] = useState<Outcome>(null);
   const [rejectNote, setRejectNote] = useState("");
   const unavailableId = useId();
+  const previewStateId = useId();
   const rejectNoteId = useId();
   const rejectHintId = useId();
   const allowRef = useRef<HTMLButtonElement>(null);
@@ -577,7 +668,12 @@ function PermissionCard({
       if (el && el.contains(document.activeElement)) onLeave();
     };
   }, [onLeave]);
-  const ask = permission.tool ? permission.tool.headline : PERMISSION_ASK.other;
+  // 서명하는 표면의 질문은 확인한 미리보기의 종류에서만 고른다(#3118 H1: 추론 금지).
+  const ask = gate ? permissionGateAsk(gate) : permission.tool ? permission.tool.headline : PERMISSION_ASK.other;
+  const checked = gate?.state === "ready" ? gate : null;
+  // 이 요청에서 허락이 다시 열릴 수 없으면 허락을 주 버튼으로 그리지 않는다(design-review M1).
+  const allowGone = gate !== null && permissionAllowGone(gate);
+  const shown = gate?.state === "ready" || gate?.state === "blocked" ? gate.preview : null;
 
   if (!viewerIsOwner) {
     return (
@@ -639,6 +735,7 @@ function PermissionCard({
     if (!decide || !choice || busy || cramped || offline) return;
     if (permissionLapsed(permission, Date.now())) return;
     if (kind === "allow_once" && (inApp || !canAllow(permission))) return;
+    if (kind === "allow_once" && gate && !checked) return;
     if (scope === "session" && !sessionScope) return;
     const note = kind === "reject_once" && rejectWithInstruction ? rejectNote.trim() : "";
     setBusy(true);
@@ -675,6 +772,7 @@ function PermissionCard({
         optionId: choice.optionId,
         kind,
         ...(kind === "allow_once" ? { scope } : {}),
+        ...(kind === "allow_once" && checked ? { preview: { preview: checked.preview, sha256: checked.sha256 } } : {}),
       });
       // 칸에 먼저 올린다: 실시간 `approval.decided`가 응답보다 먼저 와 카드가 이미
       // 내려갔어도 결과는 읽힌다(design-review R2 Low).
@@ -694,7 +792,7 @@ function PermissionCard({
   const noRepeat = (event: ReactKeyboardEvent) => {
     if (event.repeat) event.preventDefault();
   };
-  const allowable = canAllow(permission) && !inApp;
+  const allowable = gate ? checked !== null && permission.allow !== null && !inApp : canAllow(permission) && !inApp;
   const unavailable = decide === null;
   // 낮은 칸에서는 요청을 다 보이지 못하므로 결정도 받지 않는다(design-review R3 B1).
   // 연결이 끊기면 결정이 닿았는지 알 길(실시간 `approval.decided`)이 없으므로 잠근다.
@@ -734,12 +832,30 @@ function PermissionCard({
           {reason}
         </p>
       ) : null}
+      {/* #3128: 허락이 닫힌 이유도 질문 바로 밑에 한 줄로(버튼 뒤에 두면 잘린다). */}
+      {gate && !inApp && !blocked && permission.allow !== null && gate.state !== "ready" ? (
+        <p
+          id={previewStateId}
+          aria-live="polite"
+          className="break-keep text-meta text-ink-muted"
+          data-testid="agent-permission-preview-state"
+        >
+          {gate.state === "loading" ? PERMISSION_PREVIEW_LOADING_LINE : gate.line}
+        </p>
+      ) : null}
       {inAppLine ? (
         <p id={unavailableId} className="break-keep text-meta text-ink-muted" data-testid="agent-permission-in-app">
           {ALLOW_IN_APP_LINE}
         </p>
       ) : null}
-      {permission.preview ? (
+      {gate ? (
+        shown ? (
+          <GatedPreview preview={shown} />
+        ) : gate.state === "loading" ? (
+          // 받는 동안 칸의 자리를 지킨다: 거부 버튼이 도착 순간 밀려나지 않게(design-review M2).
+          <div aria-hidden className="agent-perm-code agent-perm-code-reserve" data-testid="agent-permission-preview-reserve" />
+        ) : null
+      ) : permission.preview ? (
         <pre
           tabIndex={0}
           aria-label="요청 미리보기"
@@ -749,7 +865,7 @@ function PermissionCard({
           {permission.preview.text}
         </pre>
       ) : null}
-      {permission.preview && previewLines(permission.preview.text) > PREVIEW_LINES ? (
+      {!gate && permission.preview && previewLines(permission.preview.text) > PREVIEW_LINES ? (
         <p className="text-timestamp text-ink-muted" data-testid="agent-permission-more">
           {`전체 ${previewLines(permission.preview.text)}줄 · 미리보기 칸을 스크롤해서 끝까지 보세요`}
         </p>
@@ -761,9 +877,10 @@ function PermissionCard({
             ref={allowRef}
             type="button"
             size="sm"
+            variant={allowGone ? "ghost" : "default"}
             className="tap-target"
             disabled={blocked || !allowable || busy}
-            aria-describedby={inAppLine ? unavailableId : describedBy}
+            aria-describedby={inAppLine ? unavailableId : gate && !checked && !blocked ? previewStateId : describedBy}
             onClick={() => arm("allow")}
             data-testid="agent-permission-allow"
           >
@@ -774,10 +891,10 @@ function PermissionCard({
               ref={sessionRef}
               type="button"
               size="sm"
-              variant="secondary"
+              variant={allowGone ? "ghost" : "secondary"}
               className="tap-target"
               disabled={blocked || !allowable || busy}
-              aria-describedby={inAppLine ? unavailableId : describedBy}
+              aria-describedby={inAppLine ? unavailableId : gate && !checked && !blocked ? previewStateId : describedBy}
               onClick={() => arm("allow_session")}
               data-testid="agent-permission-allow-session"
             >
@@ -858,7 +975,7 @@ function PermissionCard({
           </div>
         </div>
       )}
-      {!inApp && !allowable && !blocked && permission.allow !== null ? (
+      {!gate && !inApp && !allowable && !blocked && permission.allow !== null ? (
         <p className="text-meta text-ink-muted" data-testid="agent-permission-truncated">
           미리보기가 길어 가운데가 잘렸어요. 전체를 보지 않고는 허락할 수 없어요. 거부하거나 호스트에서 결정하세요.
         </p>

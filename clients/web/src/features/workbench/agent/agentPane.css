@@ -200,6 +200,45 @@
   overflow-y: auto;
 }
 
+/*
+ * 확인한 host 미리보기(#3128): 같은 스크롤 칸 안에 종류 표지와 필드(제목·위치·입력)를
+ * 그대로 쌓는다. 필드 글은 해시한 글 그대로라 줄바꿈·공백을 보존한다.
+ */
+/* 줄 간격 없음: 칸의 세 줄이 반 줄 없이 온전히 보이게(R1 H1과 같은 규칙). */
+.agent-perm-fields {
+  display: grid;
+  gap: 0;
+}
+
+/* 표지 | 글. 표지는 글 옆 칸이라 줄을 먹지 않는다. */
+.agent-perm-field {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--spacing-2);
+  align-items: baseline;
+}
+
+.agent-perm-field-label {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-timestamp);
+  color: var(--ink-muted);
+}
+
+/* 필드 글 앞의 여백 선: 표지는 이 선을 갖지 않으므로 글 안에서 표지를 흉내 낼 수 없다. */
+.agent-perm-field-text {
+  margin: 0;
+  padding-inline-start: var(--spacing-2);
+  border-inline-start: 2px solid var(--line-strong);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 미리보기를 받는 동안의 자리(세 줄 높이). */
+.agent-perm-code-reserve {
+  block-size: calc(var(--text-meta--line-height) * 3);
+}
+
 /* 계획 목록이 펼쳐져 있으면 「지금:」 줄은 목록이 대신한다. */
 .agent-current[data-plan-open] {
   display: none;

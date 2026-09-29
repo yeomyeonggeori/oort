@@ -20,6 +20,7 @@ import {
   rootRowFor,
   submitEndorsement,
   submitRevocation,
+  unapprovablePhoneKeys,
   type DeviceKey,
 } from "./deviceKeys";
 
@@ -312,6 +313,30 @@ describe("deviceKeys views", () => {
     expect(rows[4]!.linkedSession).toBeUndefined();
     expect(deviceKeyServerMessage(DEVICE_KEY_REFUSAL.requiresLinkedSession, "x")).toContain("QR");
     expect(deviceKeyServerMessage(DEVICE_KEY_REFUSAL.linkNotFromMac, "x")).toContain("QR");
+  });
+
+  it("counts the waiting phones no root may approve, and only those (#3129)", () => {
+    const rows = [
+      parseDeviceKey(row({ id: "qr", linkedSession: true, linkedFromMac: true })),
+      parseDeviceKey(row({ id: "password", linkedSession: false, linkedFromMac: false })),
+      parseDeviceKey(row({ id: "self-qr", linkedSession: true, linkedFromMac: false })),
+      parseDeviceKey(
+        row({ id: "approved-before", state: "endorsed", canInstruct: true, linkedSession: false })
+      ),
+      parseDeviceKey(row({ id: "revoked", state: "revoked", linkedSession: false })),
+      parseDeviceKey(row({ id: "older-server" })),
+    ];
+    expect(unapprovablePhoneKeys(rows).map((k) => k.id)).toEqual(["password", "self-qr"]);
+    // Together with the candidates, every live waiting phone is accounted for.
+    const waiting = rows.filter((k) => k.state === "unendorsed").map((k) => k.id);
+    const shown = [...phoneKeys(rows), ...unapprovablePhoneKeys(rows)]
+      .filter((k) => k.state === "unendorsed")
+      .map((k) => k.id);
+    expect(shown.sort()).toEqual(waiting.sort());
+    expect(deviceKeyErrorMessage("work_host_not_running")).toContain("작업 호스트");
+    expect(deviceKeyErrorMessage("workd_refused: requirement_unavailable")).toContain(
+      "작업 호스트"
+    );
   });
 
   it("finds a root row on an ended sign-in as a row that must move, not a new registration (#3103)", () => {
