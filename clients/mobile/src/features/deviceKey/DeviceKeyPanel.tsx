@@ -136,7 +136,11 @@ export function DeviceKeyPanel({
       <GroupSection>
         <View
           accessible
-          accessibilityLabel={`${DEVICE_KEY_TITLE}: ${copy.badge}. ${copy.headline} ${copy.detail}`}
+          accessibilityLabel={`${DEVICE_KEY_TITLE}: ${copy.badge}. ${copy.headline} ${copy.detail}${
+            copy.steps
+              ? ` ${copy.steps.map((step, index) => `${index + 1}. ${step}`).join(' ')}`
+              : ''
+          }`}
           style={styles.status}
           testID="device-key-status"
         >
@@ -167,6 +171,18 @@ export function DeviceKeyPanel({
             <Sentence style={styles.detail} testID="device-key-detail">
               {copy.detail}
             </Sentence>
+          ) : null}
+          {copy.steps ? (
+            <View style={styles.steps} testID="device-key-steps">
+              {copy.steps.map((step, index) => (
+                <View key={index} style={styles.step}>
+                  <Text style={styles.stepNumber}>{index + 1}</Text>
+                  <Sentence style={styles.stepText} testID="device-key-step">
+                    {step}
+                  </Sentence>
+                </View>
+              ))}
+            </View>
           ) : null}
           {revokedFaceIdOff ? (
             <Sentence style={styles.detail} testID="device-key-biometry-note">
@@ -309,6 +325,23 @@ const buildStyles = (color: Palette) =>
     labelMuted: {color: color.textMuted},
     headline: {fontSize: font.body, fontWeight: '600', color: color.text},
     detail: {fontSize: font.label, color: color.textMuted, lineHeight: line.label},
+    // 방법 (#3129): 번호는 본문 첫 줄에 맞춰 선다. 줄이 바뀌면 글만 들여 쓴다.
+    steps: {gap: space.xs, paddingTop: space.xs},
+    step: {flexDirection: 'row', alignItems: 'flex-start', gap: space.sm},
+    stepNumber: {
+      fontSize: font.label,
+      lineHeight: line.label,
+      fontWeight: '600',
+      color: color.textMuted,
+      fontVariant: ['tabular-nums'],
+      minWidth: space.md,
+    },
+    stepText: {
+      flex: 1,
+      fontSize: font.label,
+      lineHeight: line.label,
+      color: color.text,
+    },
     fingerprint: {
       paddingHorizontal: space.lg,
       paddingVertical: space.md,

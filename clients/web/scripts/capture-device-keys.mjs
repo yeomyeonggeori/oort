@@ -11,6 +11,8 @@
 // 셸 쪽이라 여기서 보이지 않는다(runtime-unverified). 키체인도 workd도 건드리지 않는다.
 //
 // 재는 것: 장면마다 `data-device-key-bound`, 가로 넘침 0.
+// #3129: 「QR 아님」·승인 불가 폰, 작업 호스트 서명 검증(켜짐·서버만 켜짐·꺼짐),
+// 해제 단추를 누른 뒤 확인 창 거절. `SCENES_ONLY=qr-,host-`로 일부만 찍는다.
 // =============================================================================
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -23,6 +25,7 @@ import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/device-keys");
 const PORT = Number(process.env.CAPTURE_PORT || 5199);
+const only = (process.env.SCENES_ONLY ?? "").split(",").map((v) => v.trim()).filter(Boolean);
 
 const workspaceId = "00000000-0000-7000-8000-000000000001";
 const memberId = "00000000-0000-7000-8000-000000000101";
@@ -132,6 +135,8 @@ const linked = [
   { id: "link-1", label: "성재의 iPhone 16 Pro", platform: "ios", linkedAt: Date.now() - 600_000, current: false },
 ];
 
+const hostPin = { running: true, matches: true, pinnedRootKeyId: ROOT_ID, workspaceMatches: true };
+
 function local(over = {}) {
   return {
     support: "ready", detail: null, publicKey: MAC_KEY, fingerprint: "7C2E 91A0 4B3F D8E6 1055",
@@ -151,6 +156,8 @@ async function installDesktop(page, status, rebind) {
       convertFileSrc: (p) => p,
       async invoke(cmd) {
         if (cmd === "device_key_status") return status;
+        // #3129: the shell's native dialog, declined (the dialog is AppKit's).
+        if (cmd === "device_key_reset_signature_requirement") throw "device_key_declined";
         // #3103: the shell's native dialog + Touch ID, held open or declined.
         if (cmd === "device_key_sign_rebind") {
           if (rebind === "declined") throw "device_key_declined";
@@ -160,6 +167,13 @@ async function installDesktop(page, status, rebind) {
         if (cmd === "detect_local_harnesses") return { harnesses: [] };
         if (cmd === "detect_hosted_agents") return [];
         if (cmd === "keychain_available") return false;
+        // #3106: the shell keeps the refresh token and answers a handle for it;
+        // no handle reads as 「no session」 and signs the capture out.
+        if (cmd === "keychain_store_refresh_token") {
+          window.__captureHandle = "shell:" + "c".repeat(32);
+          return null;
+        }
+        if (cmd === "keychain_refresh_token_handle") return window.__captureHandle ?? null;
         if (cmd === "deep_link_take_pending") return [];
         if (cmd === "app_version") return "0.1.12";
         if (cmd === "notification_permission") return "denied";
@@ -184,15 +198,15 @@ async function overflowX(page) {
   return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 }
 
-async function shoot(page, tag) {
+async function shoot(page, tag, target = "device-keys") {
   await page.waitForTimeout(250);
-  const block = page.getByTestId("device-keys");
+  const block = page.getByTestId(target);
   await block.scrollIntoViewIfNeeded();
   await page.screenshot({ path: resolve(OUT_DIR, `${tag}.png`), fullPage: false });
   report.scenes.push(tag);
 }
 
-async function scene(browser, origin, { name, scheme, viewport, status, keys, expectBound, act, rebind }) {
+async function scene(browser, origin, { name, scheme, viewport, status, keys, expectBound, act, rebind, target, expectHost }) {
   const tag = `${name}-${viewport.width}-${scheme}`;
   const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce" });
   await installRoutes(context, keys, linked);
@@ -203,13 +217,22 @@ async function scene(browser, origin, { name, scheme, viewport, status, keys, ex
     try { localStorage.setItem("momo.web.server.v1", server); } catch { /* 저장소 없는 캡처 */ }
   }, origin);
   await signIn(page, origin);
-  await page.goto(`${origin}/#/settings?section=devices`);
+  // In-page hash change: a fresh navigation would reload the app, and the
+  // desktop session (no keychain in this double) lives in memory only.
+  await page.evaluate(() => {
+    window.location.hash = "#/settings?section=devices";
+  });
   await page.getByTestId("device-keys").waitFor({ timeout: 15_000 });
   const bound = await page.getByTestId("device-keys").getAttribute("data-device-key-bound");
   check(`${tag} bound=${expectBound}`, bound === String(expectBound), { bound });
+  if (expectHost !== undefined) {
+    const line = page.getByTestId("device-key-host-signatures");
+    const found = expectHost === null ? await line.count() : await line.getAttribute("data-signature-enforcement");
+    check(`${tag} host=${expectHost}`, expectHost === null ? found === 0 : found === expectHost, { found });
+  }
   if (act) await act(page);
   check(`${tag} 가로 넘침 0`, (await overflowX(page)) === 0);
-  await shoot(page, tag);
+  await shoot(page, tag, target);
   await context.close();
 }
 
@@ -251,6 +274,42 @@ const SCENES = [
       await page.getByTestId("device-key-relink-error").waitFor();
     },
   },
+  // #3129 (ADR-0146 D-6 증보 「QR 연결로만」 #3119, 래칫 #3117).
+  {
+    name: "qr-marks",
+    status: local({ host: { ...hostPin, signatureEnforcement: "enforced", serverRequiresSignatures: true, signaturesRequiredBy: "server" } }),
+    keys: [
+      rootRow,
+      { ...endorsed, linkedSession: false, linkedFromMac: false },
+      keyRow({ linkedSession: false, linkedFromMac: false }),
+      keyRow({ id: "019a3c1e-0000-7000-8000-00000000d004", publicKey: "A5y3m8oU6lB9X0QeFJ7a1Z2w3E4r5T6y7U8i9O0p1A2s", label: "민수의 iPhone", linkedSession: true, linkedFromMac: false }),
+    ],
+    expectBound: true, expectHost: "enforced", target: "device-keys-phones",
+  },
+  {
+    name: "host-half",
+    status: local({ root: null, host: { running: true, matches: false, pinnedRootKeyId: null, signatureEnforcement: "server_only", workspaceMatches: true, serverRequiresSignatures: true, signaturesRequiredBy: null } }),
+    keys: [keyRow()], expectBound: false, expectHost: "server_only",
+  },
+  {
+    name: "host-latched",
+    status: local({ host: { ...hostPin, signatureEnforcement: "enforced", serverRequiresSignatures: false, signaturesRequiredBy: "server" } }),
+    keys: [rootRow, endorsed], expectBound: true, expectHost: "enforced",
+  },
+  {
+    name: "host-reset-declined",
+    status: local({ host: { ...hostPin, signatureEnforcement: "enforced", serverRequiresSignatures: false, signaturesRequiredBy: "server" } }),
+    keys: [rootRow, endorsed], expectBound: true, expectHost: "enforced",
+    act: async (page) => {
+      await page.getByTestId("device-key-host-signatures-reset").click();
+      await page.getByTestId("device-key-host-signatures").getByText("검증을 끄지 않았습니다.").waitFor();
+    },
+  },
+  {
+    name: "host-off",
+    status: local({ host: { ...hostPin, signatureEnforcement: "off", serverRequiresSignatures: false, signaturesRequiredBy: null } }),
+    keys: [rootRow, endorsed], expectBound: true, expectHost: "off",
+  },
   {
     name: "unsigned", status: local({ support: "unsigned_build", detail: "device_key_unsigned_build", publicKey: null, fingerprint: null, root: null, host: null }),
     keys: [keyRow()], expectBound: false,
@@ -265,7 +324,10 @@ async function main() {
   try {
     for (const scheme of ["light", "dark"]) {
       for (const viewport of [{ width: 1280, height: 860 }, { width: 390, height: 844 }]) {
-        for (const s of SCENES) await scene(browser, preview.origin, { ...s, scheme, viewport });
+        for (const s of SCENES) {
+          if (only.length && !only.some((prefix) => s.name.startsWith(prefix))) continue;
+          await scene(browser, preview.origin, { ...s, scheme, viewport });
+        }
       }
     }
   } finally {

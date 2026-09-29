@@ -87,6 +87,7 @@ const APP_COMMANDS: &[&str] = &[
     "device_key_sign_revoke",
     "device_key_deliver_revocation",
     "device_key_sign_rebind",
+    "device_key_reset_signature_requirement",
 ];
 
 // The momo-workd helper bundle (`binaries/momo-workd.app`, #3084) is read only

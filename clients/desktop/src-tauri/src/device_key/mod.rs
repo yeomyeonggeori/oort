@@ -15,8 +15,10 @@
 //   device_key_bind_root       after the server registered the key (password
 //                              re-entered in the web UI): remember key id ↔
 //                              workspace, then `pin_root` on this Mac's workd
-//   device_key_sign_control    momo.human.control.v2 (input · spawn ·
-//                              permission; #3028)
+//   device_key_sign_control    momo.human.control.v2 (input · spawn; #3028)
+//                              and v3 for permission (#3128: the shell
+//                              re-hashes the host's preview, shows it in the
+//                              dialog and signs its hash)
 //   device_key_sign_endorse    device_endorse.v1 for a phone key; records
 //                              (key id → public key) in `endorsed.json`
 //   device_key_sign_revoke     device_revoke.v2 over the public key THIS shell
@@ -28,6 +30,11 @@
 //                              left live on an ended sign-in, moves onto the
 //                              current one (the key's own signature, no
 //                              password; ADR-0146 D-7 증보 #3097)
+//   device_key_reset_signature_requirement
+//                              lower this Mac's workd signature latch
+//                              (`reset_signature_requirement`, #3117) — only
+//                              after the native dialog; nothing is signed
+//                              (#3129)
 //
 // Only `capabilities/device-key.json` grants them: the main webview, bundled
 // origin, macOS.
@@ -616,6 +623,14 @@ pub struct HostPin {
     /// #3117). `server_only` is the half state: the server requires device
     /// signatures and this Mac's host does not enforce them yet.
     pub signature_enforcement: &'static str,
+    /// The running host is this workspace's, whoever's root is bound here
+    /// (#3129): the half state is exactly when no root is bound, so `matches`
+    /// cannot say whose host it is then.
+    pub workspace_matches: bool,
+    /// What the server last told the host (`None`: not yet, or an older workd).
+    pub server_requires_signatures: Option<bool>,
+    /// Why the host enforces: `config` · `server` · `unreadable`.
+    pub signatures_required_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -662,6 +677,10 @@ fn status_of(worker: &Worker, workspace_id: Option<Uuid>) -> DeviceKeyStatus {
             .map(|service| match service.host_trust() {
                 Ok(Some(trust)) => HostPin {
                     signature_enforcement: trust.signature_enforcement(),
+                    workspace_matches: workspace_id.map(|w| w.to_string())
+                        == Some(trust.workspace_id.clone()),
+                    server_requires_signatures: trust.server_requires_signatures,
+                    signatures_required_by: trust.signatures_required_by.clone(),
                     running: true,
                     matches: workspace_id.map(|w| w.to_string()) == Some(trust.workspace_id)
                         && root.as_ref().map(|r| r.member_id.to_string())
@@ -673,6 +692,9 @@ fn status_of(worker: &Worker, workspace_id: Option<Uuid>) -> DeviceKeyStatus {
                     matches: false,
                     pinned_root_key_id: None,
                     signature_enforcement: "off",
+                    workspace_matches: false,
+                    server_requires_signatures: None,
+                    signatures_required_by: None,
                 },
             })
     };
@@ -804,7 +826,7 @@ pub async fn device_key_bind_root(
     .await
 }
 
-/// The control kinds `device_key_sign_control` signs today (v2).
+/// The control kinds `device_key_sign_control` signs today (v2; a permission v3).
 pub const SIGNABLE_CONTROL_KINDS: [&str; 3] = ["input", "spawn", "permission"];
 
 #[derive(Debug, Serialize)]
@@ -1073,6 +1095,81 @@ pub async fn device_key_sign_rebind(
             signed_at_ms,
             signature: signed.signature,
         })
+    })
+    .await
+}
+
+// ---- lowering the host's signature latch (#3129) ------------------------------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResetRequirementRequest {
+    pub workspace_id: Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetRequirementOutcome {
+    /// Whether the host still requires signatures right after: its own config
+    /// can keep it on. A server that still requires them latches it again on
+    /// the next poll (≈2 s) — the page reads the status again, it never
+    /// assumes 「꺼짐」.
+    pub required: bool,
+}
+
+/// The dialog before the latch goes down. Fixed text: nothing from the page.
+pub fn reset_requirement_summary() -> Summary {
+    Summary {
+        title: "작업 호스트의 서명 검증을 끌까요?".into(),
+        body: "끄면 이 맥의 작업 호스트가 서명 없는 지시와 권한 허용도 받습니다. \
+               서버가 서명을 요구하면 호스트가 몇 초 안에 스스로 다시 켜고, \
+               작업 호스트 설정이 켜 둔 검증은 꺼지지 않습니다."
+            .into(),
+        confirm: "검증 끄기".into(),
+        full_text: None,
+    }
+}
+
+/// The only way the webview reaches `reset_signature_requirement` (#3129,
+/// ADR-0146 증보 #3117 D-10). The latch is a security boundary a page script
+/// must not lower quietly: the shell's native dialog (`confirm.rs` — drawn by
+/// AppKit, no key confirms, a first-moment click does not count, a decline
+/// cools down) comes first, and a "no" never reaches the socket.
+pub fn reset_after_confirm(
+    confirm: impl FnOnce(&Summary) -> bool,
+    reset: impl FnOnce() -> Result<bool, String>,
+) -> Result<ResetRequirementOutcome, String> {
+    if !confirm(&reset_requirement_summary()) {
+        return Err("device_key_declined".into());
+    }
+    reset().map(|required| ResetRequirementOutcome { required })
+}
+
+#[tauri::command]
+pub async fn device_key_reset_signature_requirement(
+    app: tauri::AppHandle,
+    request: ResetRequirementRequest,
+) -> Result<ResetRequirementOutcome, String> {
+    on_worker(app, move |worker| {
+        let app = worker.app.clone();
+        let state = app.state::<crate::work_host::WorkHostState>();
+        let service = crate::work_host::service(&app, &state)
+            .map_err(|error| format!("work_host_failed: {error}"))?;
+        let trust = service
+            .host_trust()
+            .map_err(|error| error.code())?
+            .ok_or("work_host_not_running")?;
+        if trust.workspace_id != request.workspace_id.to_string() {
+            return Err("work_host_other_workspace".into());
+        }
+        reset_after_confirm(
+            |summary| worker.confirm(summary.clone()),
+            || {
+                service
+                    .reset_signature_requirement()
+                    .map_err(|error| error.code())
+            },
+        )
     })
     .await
 }

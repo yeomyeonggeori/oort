@@ -33,7 +33,7 @@ import {
   signedInstruction,
   type HumanControlSigner,
 } from "@momo/core/features/auth/signedControl";
-import { desktopSigner, useHumanControlSigning } from "@/features/work/signedWork";
+import { desktopSigner, useHumanControlSigning, usePermissionPreviewGate } from "@/features/work/signedWork";
 import { isDesktop } from "@/lib/tauri";
 import { AgentProgressView, type AgentPaneActions } from "./AgentProgressView";
 import { agentPaneStore, useAgentPaneBindings, type AgentPaneStore } from "./agentPanes";
@@ -106,15 +106,17 @@ export function agentRoutes(
   signing: { signer: HumanControlSigner; session: Pick<WorkSession, "id" | "hostId"> } | null = null
 ): AgentPaneActions {
   return {
-    decide: async ({ sessionId, requestEventId, optionId, kind, scope }) => {
+    decide: async ({ sessionId, requestEventId, optionId, kind, scope, preview }) => {
       try {
         if (signing && kind === "allow_once") {
+          // control v3 (#3128): the card's checked preview; without it nothing is signed.
           await signedAllow({
             workspaceId,
             session: signing.session,
             requestEventId,
             optionId,
             scope: scope ?? "once",
+            preview: preview ?? null,
             signer: signing.signer,
           });
         } else {
@@ -195,6 +197,42 @@ export function useInstructFrom(workspaceId: string, enabled: boolean): {
     signed: signing.signed,
     recheck: signing.recheck,
   };
+}
+
+/**
+ * 서명하는 표면(데스크탑 셸 + 서명을 요구하는 서버)의 소유자 칸: 열린 권한 요청의
+ * host 미리보기를 소유자 조회로 받아 허락 문을 만든다(#3128). 그 밖에는 조회하지 않고
+ * 지금 그대로 그린다.
+ */
+function SignedAgentPane({
+  workspaceId,
+  model,
+  signing,
+  ownerName,
+  actions,
+  offline,
+  instructFrom,
+}: {
+  workspaceId: string;
+  model: AgentPaneModel;
+  signing: boolean;
+  ownerName: string | null;
+  actions: AgentPaneActions;
+  offline: boolean;
+  instructFrom: InstructFrom;
+}) {
+  const gated = signing && model.viewerIsOwner && model.permission !== null;
+  const gate = usePermissionPreviewGate(workspaceId, model.sessionId, gated ? model.permission : null);
+  return (
+    <AgentProgressView
+      model={model}
+      ownerName={ownerName}
+      actions={actions}
+      offline={offline}
+      instructFrom={instructFrom}
+      previewGate={gated ? gate : null}
+    />
+  );
 }
 
 /**
@@ -302,8 +340,10 @@ export function useAgentPaneSource(): AgentPaneSource {
               연결이 끊겨 새 진행을 받지 못하고 있어요. 받은 데까지 보여요.
             </p>
           ) : null}
-          <AgentProgressView
+          <SignedAgentPane
+            workspaceId={workspaceId}
             model={entry.model}
+            signing={signer !== null}
             // 세션 소유자의 이름(보는 사람이 아니다). 모르면 「소유자」로 말한다.
             ownerName={entry.ownerId ? memberFor(directory, entry.ownerId)?.displayName ?? null : null}
             actions={agentRoutes(

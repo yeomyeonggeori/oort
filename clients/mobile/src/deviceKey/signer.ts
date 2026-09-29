@@ -3,6 +3,7 @@ import {
   type SigningContext,
 } from '@momo/core/features/auth/deviceKeys';
 import {
+  ALLOW_NEEDS_PREVIEW_LINE,
   SignerRefusal,
   type ControlToSign,
   type HumanControlSigner,
@@ -11,7 +12,7 @@ import {humanSignatureRequestBody} from '@momo/core/lib/api';
 
 import {
   HumanControlInputError,
-  PHONE_SIGNING_SCHEMA,
+  phoneSigningSchema,
   signHumanControl,
   type HumanControlContent,
   type SignHumanControlInput,
@@ -23,7 +24,8 @@ import {DeviceKeyError} from './native';
 //
 // The shared core flow (`@momo/core/features/auth/signedControl`) says WHAT is
 // signed and where it goes; this file only turns one `ControlToSign` into the
-// Face ID call (`signHumanControl`, control v2) and the enclave's refusals into
+// Face ID call (`signHumanControl`: control v2, an allow v3 over the checked
+// preview's hash, #3128) and the enclave's refusals into
 // 해요체 sentences. The desktop app's twin is
 // `clients/web/src/features/work/signedWork.ts`; both are pinned to the same
 // v2 vector bytes (cross test in `__tests__/phoneSigner.test.ts`).
@@ -40,6 +42,9 @@ export function phoneContent(content: ControlToSign['content']): HumanControlCon
         optionId: content.optionId,
         optionKind: content.optionKind,
         scope: content.scope,
+        ...(content.previewSha256 !== undefined
+          ? {previewSha256: content.previewSha256}
+          : {}),
       };
     case 'spawn':
       return {
@@ -68,7 +73,7 @@ export function phoneSignInput(
   contextReadAtMs: number,
 ): SignHumanControlInput {
   return {
-    schema: PHONE_SIGNING_SCHEMA,
+    schema: phoneSigningSchema(control.content.kind),
     context,
     contextReadAtMs,
     workspaceId: identity.workspaceId,
@@ -84,6 +89,9 @@ export function phoneSignInput(
 /** The enclave's and the builder's refusals, as the sentence the card shows. */
 export function phoneSignerRefusal(error: unknown): SignerRefusal {
   if (error instanceof SignerRefusal) return error;
+  if (error instanceof HumanControlInputError && /preview/.test(error.message)) {
+    return new SignerRefusal(ALLOW_NEEDS_PREVIEW_LINE);
+  }
   if (error instanceof HumanControlInputError) {
     return new SignerRefusal(
       '보이지 않는 문자나 올바르지 않은 값이 있어 서명하지 않았어요. 내용을 고친 뒤 다시 보내 주세요.',

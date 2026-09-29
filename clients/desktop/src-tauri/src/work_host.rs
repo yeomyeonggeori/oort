@@ -514,6 +514,9 @@ pub struct HostTrust {
     /// What the server last said (`humanControlSignatureRequired`); `None`
     /// before its first answer, or a workd from before #3117.
     pub server_requires_signatures: Option<bool>,
+    /// Why it enforces: `config` · `server` · `unreadable` (#3117). `None`
+    /// when it does not, or a workd from before #3117.
+    pub signatures_required_by: Option<String>,
 }
 
 impl HostTrust {
@@ -547,6 +550,10 @@ pub fn host_trust_of(status: &Value) -> Option<HostTrust> {
             .map(str::to_string),
         signatures_required: status["humanSignatures"]["required"].as_bool() == Some(true),
         server_requires_signatures: status["humanSignatures"]["serverRequired"].as_bool(),
+        signatures_required_by: status["humanSignatures"]["requiredBy"]
+            .as_str()
+            .filter(|by| matches!(*by, "config" | "server" | "unreadable"))
+            .map(str::to_string),
     })
 }
 
@@ -637,6 +644,23 @@ impl Service<'_> {
             &json!({ "op": "revoke_device", "revocation": revocation }),
         )
         .map(|_| ())
+    }
+
+    /// `reset_signature_requirement` (#3117): lower the latch the server's
+    /// word set. Answers whether the host still requires signatures (its own
+    /// config can). Called only after the native dialog
+    /// ([`crate::device_key::reset_after_confirm`], #3129).
+    pub fn reset_signature_requirement(&self) -> Result<bool, WorkdError> {
+        let pid = self
+            .state
+            .running_pid()
+            .ok_or_else(|| WorkdError::Socket("not_running".into()))?;
+        let answer = ask_workd_request(
+            &self.layout.socket,
+            pid,
+            &json!({ "op": "reset_signature_requirement" }),
+        )?;
+        Ok(answer.get("required") == Some(&Value::Bool(true)))
     }
 
     /// Where this Mac is registered, if it is.

@@ -46,6 +46,9 @@ import {useDeviceKey, type DeviceKeyState} from './useDeviceKey';
 /** 고정 문장은 이것 하나다 — 나머지는 상태마다 판이 말한다(R1 M1: 「맥에서
  *  승인해야 합니다」가 이미 승인된 폰·키를 못 만드는 폰에도 붙었다). */
 export const LINK_SHEET_INTRO = 'QR 연결을 마쳤습니다.';
+/** #3129 design-review M1: a QR no Mac made links chat and alerts only — 「마쳤습니다」
+ *  next to 「QR 연결 필요」 would contradict itself. */
+export const LINK_SHEET_INTRO_UNLINKED = '대화와 알림은 연결됐습니다.';
 
 export function DeviceKeyLinkGate(): React.JSX.Element | null {
   const {workspaceId} = useSession();
@@ -127,7 +130,7 @@ export function LinkSheetBody({
         testID="device-key-link-scroll"
       >
         <Sentence style={styles.intro} testID="device-key-link-intro">
-          {LINK_SHEET_INTRO}
+          {state.view.kind === 'unlinked' ? LINK_SHEET_INTRO_UNLINKED : LINK_SHEET_INTRO}
         </Sentence>
         <DeviceKeyPanel state={state} />
         {/* 다음 행동이 있으면 판의 채움 버튼이 주인이다 — 닫기는 머리의 「닫기」
