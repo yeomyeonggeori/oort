@@ -332,6 +332,8 @@ export const DEVICE_KEY_REFUSAL = {
   requiresLinkedSession: "device_key_requires_linked_session",
   /** #3119: the phone's QR was not issued from a Mac sign-in. */
   linkNotFromMac: "device_key_link_not_from_mac",
+  /** #3127: this sign-in already holds a live phone key; the Mac revokes it or the phone links again. */
+  lineageHasPhoneKey: "device_key_lineage_has_phone_key",
 } as const;
 
 // ---- views ------------------------------------------------------------------
@@ -351,6 +353,21 @@ export function phoneKeys(keys: readonly DeviceKey[]): DeviceKey[] {
         (key.linkedSession !== false && key.linkedFromMac !== false)
     )
     .sort((a, b) => b.createdAtMs - a.createdAtMs);
+}
+
+/**
+ * Waiting phone keys no root may approve (#3129; the server's #3119 rule):
+ * registered on a sign-in that was not a QR link, or from a QR no Mac issued.
+ * `phoneKeys` leaves them out; the Mac says how many there are and why, so a
+ * phone that shows 「QR 연결 필요」 is not simply missing here.
+ */
+export function unapprovablePhoneKeys(keys: readonly DeviceKey[]): DeviceKey[] {
+  return keys.filter(
+    (key) =>
+      key.platform === "ios" &&
+      key.state === "unendorsed" &&
+      (key.linkedSession === false || key.linkedFromMac === false)
+  );
 }
 
 /**
@@ -437,6 +454,12 @@ export function deviceKeyErrorMessage(code: unknown): string {
       return "서버가 이 키를 이 로그인으로 옮기지 않았습니다. 목록을 다시 불러와 다시 시도하세요.";
     case "device_key_no_session":
       return "이 로그인은 키를 옮길 수 없습니다. 로그아웃한 뒤 다시 로그인하세요.";
+    case "work_host_not_running":
+      return "이 맥의 작업 호스트가 켜져 있지 않습니다. 작업 호스트를 켠 뒤 다시 시도하세요.";
+    case "work_host_other_workspace":
+      return "이 맥의 작업 호스트는 다른 워크스페이스 것이라 여기서 바꿀 수 없습니다.";
+    case "workd_refused":
+      return "이 맥의 작업 호스트가 요청을 받지 않았습니다. 다시 시도하세요.";
     case "device_key_endorse_conflict":
       return "이 맥이 이미 다른 키를 이 이름으로 승인했거나 같은 키를 다른 이름으로 승인했습니다. 목록을 다시 불러와 확인하세요.";
     default:

@@ -2,6 +2,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import vectors from "../../../../../docs/api/human-control-signing-v2.vectors.json";
+import vectorsV3 from "../../../../../docs/api/human-control-signing-v3.vectors.json";
+import type { PermissionPreview } from "@momo/core/features/workbench/permissionPreview";
 import instructionGolden from "../../../../../docs/api/work-instruction.golden.json";
 import { SignerRefusal, type ControlToSign } from "@momo/core/features/auth/signedControl";
 import { humanSignatureRequestBody } from "@momo/core/lib/api";
@@ -15,7 +17,9 @@ import {
 
 // #3028 R2-E8 — the desktop app's half of the cross test.
 //
-//   v2 vectors (docs/api, #3027)  →  ControlToSign (what the shared core flow asks)
+//   v2 vectors (docs/api, #3027; input·spawn) and the v3 permission vector
+//   (#3118 → #3128: an allow binds the host's preview)
+//     →  ControlToSign (what the shared core flow asks)
 //     →  shellControlRequest (this file, TS)  →  __fixtures__/desktop-sign-requests.json
 //     →  Rust `payload::ControlRequest` + `control_bytes`  →  the vector's payload bytes
 //
@@ -25,7 +29,7 @@ import {
 // builds the same ControlToSign into the same bytes in
 // `clients/mobile/__tests__/humanControl.test.ts`.
 
-type VectorCase = (typeof vectors.cases)[number];
+type VectorCase = { name: string; schema: string; fields: unknown; content: unknown; payload: string };
 type Content = Record<string, string>;
 
 const FIXTURE = resolve(__dirname, "__fixtures__/desktop-sign-requests.json");
@@ -43,6 +47,7 @@ function controlOf(c: VectorCase): ControlToSign {
             optionId: k.option_id!,
             optionKind: k.option_kind!,
             scope: k.scope as "once" | "session",
+            previewSha256: k.preview_sha256!,
           }
         : {
             kind: "spawn",
@@ -52,18 +57,26 @@ function controlOf(c: VectorCase): ControlToSign {
             channelId: k.channel_id!,
             firstPrompt: k.first_prompt!,
           };
+  const preview = (c.content as { preview?: PermissionPreview }).preview;
   return {
     hostId: String(f.host_id),
     sessionId: typeof f.session_id === "string" ? f.session_id : null,
     nonce: String(f.nonce),
     content,
+    ...(preview ? { permissionPreview: preview } : {}),
   };
 }
 
-/** The kinds a person signs from the app (bundle/host_register are not wired). */
-const APP_CASES = vectors.cases.filter(
-  (c) => c.schema === "momo.human.control.v2" && ["input", "permission", "spawn"].includes((c.content as unknown as Content).kind!)
-);
+/** The kinds a person signs from the app (bundle/host_register are not wired):
+ * input and spawn as v2, an allow as v3 (#3128). The v3 `permission_session`
+ * vector carries a cut preview, which the shell refuses; it is not a request
+ * the app makes. */
+const APP_CASES: VectorCase[] = [
+  ...(vectors.cases as VectorCase[]).filter(
+    (c) => c.schema === "momo.human.control.v2" && ["input", "spawn"].includes((c.content as Content).kind!)
+  ),
+  ...(vectorsV3.cases as VectorCase[]).filter((c) => c.name === "control_v3_permission_once"),
+];
 
 function requests() {
   return APP_CASES.map((c) => {
@@ -83,13 +96,13 @@ function requests() {
   });
 }
 
-describe("desktop sign requests ↔ v2 vectors (cross test with the Rust shell)", () => {
-  it("covers input (queue, interrupt), permission (session), spawn and a resume", () => {
+describe("desktop sign requests ↔ v2/v3 vectors (cross test with the Rust shell)", () => {
+  it("covers input (queue, interrupt), a v3 allow with its preview, spawn and a resume", () => {
     expect(APP_CASES.map((c) => c.name).sort()).toEqual(
       [
         "control_v2_input_interrupt",
         "control_v2_input_queue_nfc",
-        "control_v2_permission_session",
+        "control_v3_permission_once",
         "control_v2_spawn",
         "control_v2_spawn_resume",
       ].sort()
@@ -142,6 +155,32 @@ describe("desktopSigner", () => {
     expect(envelope).toMatchObject({ nonce: control.nonce, mode: "queue", signature: "sig" });
   });
 
+  it("an allow hands the shell the preview and the page's hash; without them the shell is never asked (#3128)", async () => {
+    const perm = controlOf(APP_CASES.find((c) => c.name === "control_v3_permission_once")!);
+    const request = shellControlRequest("ws", "inst", perm, 1, 2);
+    expect(request.content).toMatchObject({
+      kind: "permission",
+      preview: perm.permissionPreview,
+      previewSha256: (perm.content as { previewSha256: string }).previewSha256,
+    });
+    const sign = vi.fn();
+    const signer = desktopSigner("ws", { context: async () => context, sign, now: () => context.serverTimeMs });
+    const bare = { ...perm, permissionPreview: undefined };
+    const error = await signer.sign(bare).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SignerRefusal);
+    expect((error as SignerRefusal).message).toContain("미리보기");
+    expect(sign).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["device_key_payload_rejected: preview_sha256: mismatch", "맞지 않아"],
+    ["device_key_payload_rejected: preview: truncated", "잘려"],
+    ["device_key_payload_rejected: preview: invisible character", "확인할 수 없어"],
+  ])("the shell's preview refusal %s is said as such", (code, words) => {
+    expect(desktopSignerRefusal(code).message).toContain(words);
+    expect(desktopSignerRefusal(code).message).toMatch(/요\.$/);
+  });
+
   it.each([
     ["device_key_declined", true],
     ["device_key_cancelled", true],
@@ -165,15 +204,15 @@ describe("desktopSigner", () => {
     expect(desktopSignerRefusal(code).message).toBe((error as SignerRefusal).message);
   });
 
-  it("a permission envelope carries its scope, a spawn its agent and folder", () => {
-    const perm = controlOf(APP_CASES.find((c) => c.name === "control_v2_permission_session")!);
+  it("a permission envelope carries its scope (never the preview), a spawn its agent and folder", () => {
+    const perm = controlOf(APP_CASES.find((c) => c.name === "control_v3_permission_once")!);
     expect(envelopeFromShell(perm, { deviceKeyId: "k", signature: "s" }, 1, 2)).toEqual({
       deviceKeyId: "k",
       nonce: perm.nonce,
       issuedAtMs: 1,
       expiresAtMs: 2,
       signature: "s",
-      scope: "session",
+      scope: "once",
     });
     const spawn = controlOf(APP_CASES.find((c) => c.name === "control_v2_spawn_resume")!);
     expect(Object.keys(envelopeFromShell(spawn, { deviceKeyId: "k", signature: "s" }, 1, 2)).sort()).toEqual(
