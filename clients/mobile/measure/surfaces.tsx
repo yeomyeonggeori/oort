@@ -3667,6 +3667,27 @@ function DeviceKeySurface({which}: {which: string}): React.JSX.Element {
       </View>
     );
   }
+  if (which === 'profile-page-unlinked') {
+    // #3129: 실제 프로필 안쪽 장 — 주소 로그인으로 등록된 승인 불가 키.
+    harnessClient.setQueryData(DEVICE_KEY_LOCAL_QUERY_KEY, {status: 'ready', publicKey: DK_KEY});
+    harnessClient.setQueryData(DEVICE_KEYS_QUERY_KEY(HARNESS_MEMBER.workspaceId), [
+      {...DK_ROW, linkedSession: false, linkedFromMac: false},
+    ]);
+    return (
+      <View style={styles.fill}>
+        <Shell />
+        <ProfileSheet
+          workspaceId={HARNESS_MEMBER.workspaceId}
+          member={HARNESS_MEMBER}
+          directory={makeDirectory(SHELL_ROSTER)}
+          connected
+          onSignOut={() => {}}
+          onClose={() => {}}
+          initialPage="deviceKey"
+        />
+      </View>
+    );
+  }
   if (which === 'profile-page' || which === 'profile-page-faceid-off') {
     // 실제 프로필 시트의 안쪽 장 — 머리의 「‹ 프로필」까지 배송되는 그대로.
     harnessClient.setQueryData(DEVICE_KEY_LOCAL_QUERY_KEY, {

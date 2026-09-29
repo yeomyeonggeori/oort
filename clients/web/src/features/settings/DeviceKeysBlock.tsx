@@ -1023,6 +1023,10 @@ function PhoneKeyRow({
 
 // ---- phones the server will not let a root approve (#3129) -------------------
 
+/** The phone's own 「QR 연결 필요」 steps (`clients/mobile/.../deviceKey/copy.ts`
+ *  QR_LINK_STEPS), in the same order: the QR is scanned only before sign-in. */
+const QR_RELINK_HOW = "아래 「폰 연결」에서 QR을 만들고, 폰에서 로그아웃한 뒤 첫 화면의 「QR 찍기」로 찍으세요.";
+
 /**
  * An approved phone from before 「QR 연결로만」 (ADR-0146 D-6 증보, #3119): it
  * keeps working; the Mac marks it and recommends a QR re-link. `undefined`
@@ -1033,31 +1037,29 @@ function approvedLinkNote(phone: DeviceKey): { chip: string; detail: string } | 
     return {
       chip: "QR 아님",
       detail:
-        "QR 연결 전 규칙으로 등록된 폰입니다. 지시 권한을 끊고 QR로 다시 연결하는 것을 권합니다.",
+        "QR 연결 전 규칙으로 등록된 폰입니다. 지시 권한을 끊고 다시 연결하는 것을 권합니다. "+QR_RELINK_HOW,
     };
   }
   if (phone.linkedFromMac === false) {
     return {
       chip: "맥 QR 아님",
       detail:
-        "맥이 아닌 곳에서 띄운 QR로 연결된 폰입니다. 지시 권한을 끊고 이 맥의 QR로 다시 연결하는 것을 권합니다.",
+        "맥이 아닌 곳에서 띄운 QR로 연결된 폰입니다. 지시 권한을 끊고 다시 연결하는 것을 권합니다. "+QR_RELINK_HOW,
     };
   }
   return null;
 }
 
 /** Why a waiting phone cannot be approved, in the phone's own words. */
-function unapprovableCopy(phone: DeviceKey): { chip: string; detail: string } {
+function unapprovableCopy(phone: DeviceKey): { detail: string } {
   return phone.linkedSession === false
     ? {
-        chip: "QR 아님",
         detail:
-          "QR로 연결하지 않은 로그인에서 등록된 폰이라 승인할 수 없습니다. 폰에서 로그아웃한 뒤 아래 「폰 연결」의 QR로 다시 연결하세요.",
+          "QR로 연결하지 않은 로그인에서 등록된 폰이라 승인할 수 없습니다. "+QR_RELINK_HOW,
       }
     : {
-        chip: "맥 QR 아님",
         detail:
-          "맥이 아닌 곳에서 띄운 QR로 연결된 폰이라 승인할 수 없습니다. 폰에서 로그아웃한 뒤 아래 「폰 연결」의 QR로 다시 연결하세요.",
+          "맥이 아닌 곳에서 띄운 QR로 연결된 폰이라 승인할 수 없습니다. "+QR_RELINK_HOW,
       };
 }
 
@@ -1075,8 +1077,7 @@ function UnapprovablePhoneRow({ phone }: { phone: DeviceKey }) {
       <div className="flex min-w-0 flex-1 flex-col gap-px">
         <p className="flex min-w-0 flex-wrap items-center gap-2 text-body text-ink">
           <span className="min-w-0 break-keep">{label}</span>
-          <StatusChip tone="muted">승인 불가</StatusChip>
-          <StatusChip tone="warn">{copy.chip}</StatusChip>
+          <StatusChip tone="warn">QR 연결 필요</StatusChip>
         </p>
         {fingerprint && <Fingerprint value={fingerprint} />}
         <p className="break-keep text-meta text-ink-muted">{copy.detail}</p>
@@ -1208,7 +1209,7 @@ function HostSignatureRow({
       data-signature-enforcement={copy.enforcement}
     >
       <Server className="mt-px size-4 shrink-0 text-ink-muted" aria-hidden="true" />
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
+      <div className="flex min-w-0 flex-1 flex-col gap-px">
         <p className="flex min-w-0 flex-wrap items-center gap-2 text-body text-ink">
           <span className="break-keep">작업 호스트 서명 검증</span>
           <StatusChip tone={copy.tone}>{copy.chip}</StatusChip>

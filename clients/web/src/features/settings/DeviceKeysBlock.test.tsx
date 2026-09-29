@@ -619,7 +619,7 @@ describe("#3129 — QR 아님 · 승인 불가 · 작업 호스트 서명 검증
     expect(row.textContent).toContain("지시 기기");
     expect(row.textContent).toContain("QR 아님");
     expect(q(row, "device-key-phone-link-note")?.textContent).toBe(
-      "QR 연결 전 규칙으로 등록된 폰입니다. 지시 권한을 끊고 QR로 다시 연결하는 것을 권합니다."
+      "QR 연결 전 규칙으로 등록된 폰입니다. 지시 권한을 끊고 다시 연결하는 것을 권합니다. 아래 「폰 연결」에서 QR을 만들고, 폰에서 로그아웃한 뒤 첫 화면의 「QR 찍기」로 찍으세요."
     );
     // The recommended next step is the button already on the row.
     expect(q(row, "device-key-revoke")).not.toBeNull();
@@ -647,12 +647,13 @@ describe("#3129 — QR 아님 · 승인 불가 · 작업 호스트 서명 검증
     const host = mount();
     await waitFor(() => q(host, `device-key-unapprovable-${PHONE_ID}`) !== null, "unapprovable");
     const address = q(host, `device-key-unapprovable-${PHONE_ID}`)!;
-    expect(address.textContent).toContain("승인 불가");
-    expect(address.textContent).toContain("QR 아님");
+    // The phone's word for the same state (design-review M1).
+    expect(address.textContent).toContain("QR 연결 필요");
+    expect(address.textContent).toContain("폰에서 로그아웃한 뒤 첫 화면의 「QR 찍기」");
     expect(address.textContent).toContain("QR로 연결하지 않은 로그인에서 등록된 폰이라 승인할 수 없습니다.");
     expect(q(address, "device-key-endorse-start")).toBeNull();
     const selfQr = q(host, `device-key-unapprovable-${OTHER_ID}`)!;
-    expect(selfQr.textContent).toContain("맥 QR 아님");
+    expect(selfQr.textContent).toContain("맥이 아닌 곳에서 띄운 QR");
     expect(q(host, "device-keys-no-phone")).toBeNull();
     expect(q(host, "device-key-endorse-start")).toBeNull();
   });
