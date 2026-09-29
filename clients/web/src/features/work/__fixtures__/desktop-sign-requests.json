@@ -98,7 +98,7 @@
     "payload": "momo.human.control.v2\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d002\n00000000-0000-7000-8000-00000000f001\n00000000-0000-7000-8000-00000000c002\nspawn\n-\n5f2c1a9e-3b4d-4e6f-8a7b-9c0d1e2f3ac1\n1790550002000\n1790550602000\n570400e66bfdf2900a942dd06371491ea495025f3c4b2268edcc4fbc4c92b1c1"
   },
   {
-    "name": "control_v2_permission_session",
+    "name": "control_v3_permission_once",
     "signer": {
       "workspaceId": "00000000-0000-7000-8000-000000000001",
       "memberId": "00000000-0000-7000-8000-000000000101",
@@ -109,17 +109,26 @@
       "instanceId": "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
       "hostId": "00000000-0000-7000-8000-00000000f001",
       "sessionId": "00000000-0000-7000-8000-00000000c001",
-      "nonce": "0b5e8c4d-2f1a-4c3b-9d8e-7f6a5b4c3db3",
+      "nonce": "0b5e8c4d-2f1a-4c3b-9d8e-7f6a5b4cf003",
       "issuedAtMs": 1790550003000,
       "expiresAtMs": 1790550063000,
       "content": {
         "kind": "permission",
-        "requestEventId": "00000000-0000-4000-8000-00000000e001",
+        "requestEventId": "00000000-0000-4000-8000-00000000e003",
         "optionId": "allow-once",
         "optionKind": "allow_once",
-        "scope": "session"
+        "scope": "once",
+        "preview": {
+          "schema": "momo.work_permission.preview.v1",
+          "kind": "execute",
+          "title": "Run `git push origin main`",
+          "locations": "",
+          "input": "{\"command\":\"git push origin main\"}",
+          "truncated": false
+        },
+        "previewSha256": "722d12c20aff8fb180b5923d2ccbb8bc2baca0d8cf774c59d7113e3d303e8512"
       }
     },
-    "payload": "momo.human.control.v2\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d002\n00000000-0000-7000-8000-00000000f001\n00000000-0000-7000-8000-00000000c001\npermission\n-\n0b5e8c4d-2f1a-4c3b-9d8e-7f6a5b4c3db3\n1790550003000\n1790550063000\neac6d4dd5fdc4e8047453a12767587d0d2af8fd93bc664d3b72ea275ce070e0e"
+    "payload": "momo.human.control.v3\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d002\n00000000-0000-7000-8000-00000000f001\n00000000-0000-7000-8000-00000000c001\npermission\n-\n0b5e8c4d-2f1a-4c3b-9d8e-7f6a5b4cf003\n1790550003000\n1790550063000\n460339f76b79fd6e87576c0c6e50f4bae00286c29d2d9a22a81ef1a5ad964e94"
   }
 ]
