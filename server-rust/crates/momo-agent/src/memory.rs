@@ -467,29 +467,9 @@ pub struct ServeItems {
     pub items: Vec<ServeItem>,
 }
 
-/// Items for `run_id`'s answer, or `None` (no rows: a switch is off, no human requester, no
-/// usable query, or nothing matched). The requester, the answer channel and the query all come
-/// from the run row inside the function; nothing here is an input a caller could choose.
-pub async fn serve_items(
-    conn: &mut PgConnection,
-    run_id: Uuid,
-    limit: i32,
-    body_max: i32,
-) -> Result<Option<ServeItems>, DbError> {
-    let rows = sqlx::query(
-        "SELECT requester_member_id, answer_channel_id, item_id, item_channel_id, space_kind, kind, \
-                origin, body, valid_from, source_count \
-           FROM mem_serve_items($1, $2, $3)",
-    )
-    .bind(run_id)
-    .bind(limit)
-    .bind(body_max)
-    .fetch_all(&mut *conn)
-    .await?;
-    let Some(first) = rows.first() else {
-        return Ok(None);
-    };
-    Ok(Some(ServeItems {
+fn serve_items_from_rows(rows: &[sqlx::postgres::PgRow]) -> Option<ServeItems> {
+    let first = rows.first()?;
+    Some(ServeItems {
         requester: first.get("requester_member_id"),
         answer_channel: first.get("answer_channel_id"),
         items: rows
@@ -505,7 +485,124 @@ pub async fn serve_items(
                 source_count: row.get("source_count"),
             })
             .collect(),
-    }))
+    })
+}
+
+const SERVE_ITEM_COLS: &str = "requester_member_id, answer_channel_id, item_id, item_channel_id, \
+     space_kind, kind, origin, body, valid_from, source_count";
+
+/// Items for `run_id`'s answer, or `None` (no rows: a switch is off, no human requester, no
+/// usable query, or nothing matched). The requester, the answer channel and the query all come
+/// from the run row inside the function; nothing here is an input a caller could choose.
+/// Keyword ranking only — the fallback when no query vector is available.
+pub async fn serve_items(
+    conn: &mut PgConnection,
+    run_id: Uuid,
+    limit: i32,
+    body_max: i32,
+) -> Result<Option<ServeItems>, DbError> {
+    let rows = sqlx::query(&format!(
+        "SELECT {SERVE_ITEM_COLS} FROM mem_serve_items($1, $2, $3)"
+    ))
+    .bind(run_id)
+    .bind(limit)
+    .bind(body_max)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(serve_items_from_rows(&rows))
+}
+
+/// The text the database searches with for `run_id`'s answer (the trigger message minus
+/// @mentions, first 400 characters), or `None` when the serving gate is closed (a switch is off,
+/// no human requester, no usable query). The worker embeds exactly this text, so the keyword and
+/// the vector side of a search are asked the same question (#3173).
+pub async fn serve_query(conn: &mut PgConnection, run_id: Uuid) -> Result<Option<String>, DbError> {
+    let query: Option<String> = sqlx::query_scalar("SELECT mem_serve_query($1)")
+        .bind(run_id)
+        .fetch_one(&mut *conn)
+        .await?;
+    Ok(query)
+}
+
+/// [`serve_items`] with a query vector: keyword and vector rankings are fused in SQL (weighted
+/// RRF, keyword x2 : vector x1, k = 60) after the same membership narrowing, `readable_by` and
+/// audience rule have filtered each list. `query_vec` is pgvector text (`[0.1,…]`, 384 numbers);
+/// `min_similarity` is the cosine floor below which a vector neighbour is not a candidate.
+pub async fn serve_items_fused(
+    conn: &mut PgConnection,
+    run_id: Uuid,
+    limit: i32,
+    body_max: i32,
+    query_vec: &str,
+    model: &str,
+    min_similarity: f32,
+) -> Result<Option<ServeItems>, DbError> {
+    let rows = sqlx::query(&format!(
+        "SELECT {SERVE_ITEM_COLS} FROM mem_serve_items_fused($1, $2, $3, $4, $5, $6)"
+    ))
+    .bind(run_id)
+    .bind(limit)
+    .bind(body_max)
+    .bind(query_vec)
+    .bind(model)
+    .bind(min_similarity)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(serve_items_from_rows(&rows))
+}
+
+/// Live items with no embedding for `model` yet, newest first (`mem_items_to_embed`). One path
+/// for new items, edited copies, accepted proposals and the backfill.
+pub async fn items_to_embed(
+    conn: &mut PgConnection,
+    model: &str,
+    limit: i32,
+) -> Result<Vec<(Uuid, String)>, DbError> {
+    let rows = sqlx::query("SELECT item_id, body FROM mem_items_to_embed($1, $2)")
+        .bind(model)
+        .bind(limit)
+        .fetch_all(&mut *conn)
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|row| (row.get("item_id"), row.get("body")))
+        .collect())
+}
+
+/// Store one item's embedding. `Ok(false)`: nothing written (the item was retired or replaced
+/// meanwhile, or the vector already exists).
+pub async fn set_item_embedding(
+    conn: &mut PgConnection,
+    item_id: Uuid,
+    model: &str,
+    vector_text: &str,
+) -> Result<bool, DbError> {
+    let written: bool = sqlx::query_scalar("SELECT mem_set_item_embedding($1, $2, $3)")
+        .bind(item_id)
+        .bind(model)
+        .bind(vector_text)
+        .fetch_one(&mut *conn)
+        .await?;
+    Ok(written)
+}
+
+/// `(live items, items embedded with model)` in the workspace.
+pub async fn embedding_stats(conn: &mut PgConnection, model: &str) -> Result<(i64, i64), DbError> {
+    let row = sqlx::query("SELECT live_items, embedded_items FROM mem_embedding_stats($1)")
+        .bind(model)
+        .fetch_one(&mut *conn)
+        .await?;
+    Ok((row.get("live_items"), row.get("embedded_items")))
+}
+
+/// Workspaces the embedding sweep looks at (ids only; `workspace` is not a `mem_*` table, so the
+/// worker's own role reads it).
+pub async fn workspace_ids(pool: &PgPool, limit: i64) -> Result<Vec<Uuid>, DbError> {
+    let rows = sqlx::query("SELECT id FROM workspace ORDER BY id LIMIT $1")
+        .bind(limit)
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.iter().map(|row| row.get("id")).collect())
 }
 
 /// The digest ids already recorded on `run_id`'s receipt, `None` when there is no receipt.

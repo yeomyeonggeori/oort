@@ -11,8 +11,52 @@
 
 use momo_agent_worker::{AgentWorker, WorkerConfig};
 
+/// `momo-agent-worker --embed-check` — load the memory embedding model from
+/// `MEMORY_EMBED_MODEL_DIR` (default: where the image puts it), embed one Korean sentence and
+/// check the shape. The image build runs it, so a model file that is missing, corrupt or not
+/// loadable by the bundled ONNX Runtime fails the build instead of degrading a running worker
+/// to keyword-only search without anyone noticing. Prints no text, only the verdict.
+fn embed_check() -> Result<(), Box<dyn std::error::Error>> {
+    use momo_embed::TextEmbedder;
+    let cfg = momo_agent_worker::config::MemoryConfig::from_env()?;
+    let started = std::time::Instant::now();
+    let model = momo_embed::OnnxEmbedder::load(
+        std::path::Path::new(&cfg.embed_model_dir),
+        Some(cfg.embed_threads),
+    )?;
+    let loaded_ms = started.elapsed().as_millis();
+    let query = model.embed_query("배포 일정을 미루기로 했나요")?;
+    let passage = model
+        .embed_passages(&[
+            "4월 릴리스는 QA 일정 때문에 다음 달로 연기하기로 결정했어요".to_string(),
+        ])?
+        .remove(0);
+    let unrelated = model
+        .embed_passages(&["점심은 김밥으로 하기로 했어요".to_string()])?
+        .remove(0);
+    let cos = |a: &[f32], b: &[f32]| a.iter().zip(b).map(|(x, y)| x * y).sum::<f32>();
+    let (near, far) = (cos(&query, &passage), cos(&query, &unrelated));
+    let norm = cos(&query, &query);
+    if query.len() != momo_embed::DIMS || (norm - 1.0).abs() > 1e-3 || near <= far {
+        return Err(format!(
+            "embed-check failed: dims={} norm={norm:.4} related={near:.3} unrelated={far:.3}",
+            query.len()
+        )
+        .into());
+    }
+    println!(
+        "embed-check ok model={} dims={} load_ms={loaded_ms} related={near:.3} unrelated={far:.3}",
+        model.model_id(),
+        query.len()
+    );
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().any(|a| a == "--embed-check") {
+        return embed_check();
+    }
     // `RUST_LOG` first, then the prod compose's `LOG_LEVEL`, then `info`.
     let filter = momo_agent_worker::config::log_filter();
     tracing_subscriber::fmt()

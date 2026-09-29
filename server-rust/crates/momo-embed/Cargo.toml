@@ -1,0 +1,25 @@
+[package]
+name = "momo-embed"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# #3173 (MEM-M3, ADR-0196 D8 증보): the local sentence embedder behind team-memory
+# vector search — `intfloat/multilingual-e5-small` (MIT), int8 ONNX, 384 dimensions.
+#
+# Only `momo-agent-worker` depends on this crate. The API process (`momo-server`) must
+# never list it: the ONNX Runtime static library and the 118 MB model live in the worker's
+# address space, and browser search stays keyword-only (ADR-0147: the API process makes no
+# outbound HTTP and loads no model).
+#
+# `default-features = false` drops fastembed's `hf-hub` downloader (and with it the
+# MPL-2.0 `option-ext` crate) and its image models. The model files are NOT fetched at run
+# time: the image build downloads them at a pinned revision and verifies sha256
+# (server-rust/Dockerfile, stage `model-payload`), and this crate only loads a directory.
+# `ort-download-binaries-rustls-tls` fetches the prebuilt ONNX Runtime static library at
+# *build* time (cdn.pyke.io) — the workspace already uses rustls, so no openssl-sys.
+[dependencies]
+fastembed = { version = "=7.1.0", default-features = false, features = ["ort-download-binaries-rustls-tls"] }
+thiserror.workspace = true
+tracing.workspace = true

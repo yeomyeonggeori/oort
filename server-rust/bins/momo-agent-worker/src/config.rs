@@ -197,6 +197,35 @@ pub struct MemoryConfig {
     /// `MEMORY_SERVE_TIMEOUT_MS` (3000) — the whole serving step (read + receipt). Past it the
     /// reply goes out without memory; a slow database never delays an answer beyond this.
     pub serve_timeout: Duration,
+    /// `MEMORY_EMBED_ENABLED` (**on**; `0|false|no|off` turns it off) — #3173: embed items locally
+    /// (multilingual-e5-small, int8) and fuse vector similarity into item serving. On means "when
+    /// the model directory loads": with no model the worker logs once and serves keyword-only, so
+    /// on-by-default costs a self-hoster without the model nothing. Off = M2 behaviour exactly.
+    pub embed_enabled: bool,
+    /// `MEMORY_EMBED_MODEL_DIR` (`/opt/momo/models/e5-small-int8`, where the image puts it) — the
+    /// directory holding `model_qint8.onnx` and the tokenizer files.
+    pub embed_model_dir: String,
+    /// `MEMORY_EMBED_THREADS` (2) — ONNX Runtime intra-op threads; small so embedding never
+    /// starves the reply path.
+    pub embed_threads: usize,
+    /// `MEMORY_EMBED_QUERY_TIMEOUT_MS` (250) — the query embedding's own budget inside
+    /// `serve_timeout`. Past it (or on any error) the reply is served keyword-only.
+    pub embed_query_timeout: Duration,
+    /// `MEMORY_EMBED_MIN_SIMILARITY` (0.80) — cosine floor for a vector neighbour to be a
+    /// candidate at all. e5 similarities are compressed (unrelated text still scores ~0.7), so
+    /// this, not the top-N cut, is what keeps unrelated items out.
+    pub embed_min_similarity: f32,
+    /// `MEMORY_EMBED_POLL_SECONDS` (30) — the embedding sweep's tick (it also wakes when this
+    /// process stores a new item).
+    pub embed_poll_interval: Duration,
+    /// `MEMORY_EMBED_BATCH` (16) — items embedded per model call (smaller = lower peak memory
+    /// and a shorter wait for a serving query queued behind it).
+    pub embed_batch: usize,
+    /// `MEMORY_EMBED_MAX_PER_SWEEP` (200) — items one workspace gets embedded per sweep: the
+    /// backfill's rate limit (a 5,000-item history drains over ~13 minutes at the default poll).
+    pub embed_max_per_sweep: usize,
+    /// `MEMORY_EMBED_MAX_WORKSPACES` (1000) — workspaces one sweep looks at.
+    pub embed_max_workspaces: i64,
 }
 
 impl Default for MemoryConfig {
@@ -231,6 +260,15 @@ impl Default for MemoryConfig {
             serve_item_budget_chars: 3_000,
             serve_max_items: 8,
             serve_timeout: Duration::from_millis(3_000),
+            embed_enabled: true,
+            embed_model_dir: "/opt/momo/models/e5-small-int8".to_string(),
+            embed_threads: 2,
+            embed_query_timeout: Duration::from_millis(250),
+            embed_min_similarity: 0.80,
+            embed_poll_interval: Duration::from_secs(30),
+            embed_batch: 16,
+            embed_max_per_sweep: 200,
+            embed_max_workspaces: 1_000,
         }
     }
 }
@@ -299,6 +337,37 @@ impl MemoryConfig {
                 )?
                 .clamp(200, 30_000),
             ),
+            embed_enabled: report_protocol_enabled(env("MEMORY_EMBED_ENABLED").as_deref()),
+            embed_model_dir: env("MEMORY_EMBED_MODEL_DIR")
+                .filter(|v| !v.trim().is_empty())
+                .unwrap_or(d.embed_model_dir),
+            embed_threads: env_number("MEMORY_EMBED_THREADS", d.embed_threads)?.clamp(1, 16),
+            embed_query_timeout: Duration::from_millis(
+                env_number(
+                    "MEMORY_EMBED_QUERY_TIMEOUT_MS",
+                    d.embed_query_timeout.as_millis() as u64,
+                )?
+                .clamp(20, 2_000),
+            ),
+            embed_min_similarity: {
+                let v: f32 = env_number("MEMORY_EMBED_MIN_SIMILARITY", d.embed_min_similarity)?;
+                if v.is_finite() {
+                    v.clamp(0.0, 1.0)
+                } else {
+                    d.embed_min_similarity
+                }
+            },
+            embed_poll_interval: Duration::from_secs(
+                env_number("MEMORY_EMBED_POLL_SECONDS", d.embed_poll_interval.as_secs())?.max(1),
+            ),
+            embed_batch: env_number("MEMORY_EMBED_BATCH", d.embed_batch)?.clamp(1, 64),
+            embed_max_per_sweep: env_number("MEMORY_EMBED_MAX_PER_SWEEP", d.embed_max_per_sweep)?
+                .clamp(1, 5_000),
+            embed_max_workspaces: env_number(
+                "MEMORY_EMBED_MAX_WORKSPACES",
+                d.embed_max_workspaces,
+            )?
+            .clamp(1, 100_000),
         })
     }
 }
