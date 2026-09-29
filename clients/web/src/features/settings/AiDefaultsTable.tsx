@@ -20,7 +20,7 @@ import {
 import {
   linkUnresolvedSentence,
   TEAM_DEFAULTS_CHECK_FIRST,
-  TEAM_DEFAULTS_NOT_APPLIED,
+  TEAM_DEFAULTS_APPLIED,
   TEAM_DEFAULTS_OFFLINE,
   teamChoiceText,
   teamModelNote,
@@ -119,7 +119,7 @@ export function AiDefaultsTable({
             {!operator
               ? TEAM_FOOT_MEMBER
               : team?.status === "ready"
-                ? TEAM_DEFAULTS_NOT_APPLIED
+                ? TEAM_DEFAULTS_APPLIED
                 : team?.status === "error"
                   ? TEAM_FOOT_OPERATOR
                   : TEAM_FOOT_OPERATOR_LOADING}
