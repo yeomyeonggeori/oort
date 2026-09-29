@@ -169,6 +169,9 @@ pub struct MemoryConfig {
     pub regen_min_interval_seconds: i32,
     /// `MEMORY_MAX_CHANNELS` (2000) — channels one sweep looks at.
     pub max_channels: i64,
+    /// `MEMORY_EXTRACT_ENABLED` (**on**; `0|false|no|off` turns it off) — #3168: the window call
+    /// also returns item candidates (decisions, facts, commitments). Off = digests only, as in M1.
+    pub extract_items: bool,
     /// `MEMORY_SERVE_ENABLED` (**on**; `0|false|no|off` turns it off) — put eligible summaries in
     /// an agent turn's context (#3163). Independent of the summary loop: turning the loop off
     /// does not stop already-written summaries from being served (the workspace / channel /
@@ -210,6 +213,7 @@ impl Default for MemoryConfig {
             apply_retries: 3,
             regen_min_interval_seconds: 900,
             max_channels: 2_000,
+            extract_items: true,
             serve_enabled: true,
             serve_budget_chars: 3_000,
             serve_max_digests: 12,
@@ -262,6 +266,7 @@ impl MemoryConfig {
                 d.regen_min_interval_seconds,
             )?,
             max_channels: env_number("MEMORY_MAX_CHANNELS", d.max_channels)?.max(1),
+            extract_items: report_protocol_enabled(env("MEMORY_EXTRACT_ENABLED").as_deref()),
             serve_enabled: report_protocol_enabled(env("MEMORY_SERVE_ENABLED").as_deref()),
             serve_budget_chars: env_number("MEMORY_SERVE_BUDGET_CHARS", d.serve_budget_chars)?
                 .clamp(200, 20_000),

@@ -105,6 +105,12 @@ L2를 L1과 같은 호출로 뽑는다(`{요약, 항목 후보[]}`) — 비용�
    - 워크스페이스 기억 초기화: `reset_epoch` 증가 + 전량 삭제. 진행 중이던 쓰기는 epoch가 달라 버린다(company-brain `entities.ts:55-63`).
 6. **전 테넌트 폴링 예외 최소화**: 기억 읽기는 API 프로세스(NOBYPASSRLS)의 tx 안에서 한다. 전 테넌트 폴링 예외를 가진 agent-worker 쪽에서 기억 행을 직접 읽지 않는다. 요약 워커가 워터마크·리스를 잡는 경로도 tx마다 `SET LOCAL app.workspace_id`를 건다.
 
+- **증보 (2026-09-30, #3168 M2, 보안 검수 M-2)** — D5 「권한은 검색 SQL 바깥에서 거르지 않는다」와 D6-6 「전 테넌트 폴링 예외 최소화」의 항목(L2) 검색 구현:
+  - **`mem_search_items`(API)는 PUBLIC EXECUTE인 `SECURITY DEFINER` 함수다.** 이유: pg_trgm의 `<%`는 leakproof가 아니라 RLS 아래에서(정의자 포함, FORCE) 정책 함수가 워크스페이스의 **모든 행에 먼저** 돈다. 항목 4.9천 개에서 검색 165 ms(행당 ~30 µs, 선형), 후보를 낱말 유사도로 먼저 좁히는 정의자 판은 같은 데이터에서 26 ms(GIN 인덱스도 같은 이유로 어느 경로에서든 쓰이지 않아 만들지 않았다). PUBLIC이지만 함수 안에서 `session_user`가 `momo_app`(또는 슈퍼유저)이 아니면 42501 — BYPASSRLS 로그인이 GUC를 스스로 정해 본문을 읽는 길을 막는다. 역할이 마이그레이션보다 늦게 생겨도 EXECUTE 부여 순서에 기대지 않으려 함수 안에서 검사한다.
+  - **권한 규칙의 정의는 하나다**: `mem_item_readable_by(항목, 뷰어)`. RLS 정책(`mem_item_evidence_ok`, GUC 뷰어)과 검색 본체가 같은 함수를 부른다. 검색은 그 앞에 「뷰어의 활성 멤버십 채널(개인 공간은 소유자 본인)」 좁히기를 한 번 더 두어(타이밍 오라클 제거, 스캔 축소) 읽을 수 없는 채널의 항목에는 낱말 비교조차 하지 않는다. 그 밖의 **앱 계층 사후 필터는 없다.**
+  - **서빙은 청중 좁히기 없이 돌지 않는다.** 본체 `mem_search_items_core`는 소유자 말고는 EXECUTE할 수 없고(`momo_memory`도 못 부른다), 서빙 진입점 `mem_search_items_for`(워커 전용, 뷰어=요청자를 인자로)는 답 채널이 필수(NULL이면 22023)이며 `mem_item_audience_ok`(D6-4 + 답 채널·요청자 개인 스위치)를 통과한 항목만 돌려준다. 열람(`mem_search_items`)은 답 채널을 받지 않는다.
+  - 시험(`mem_item_conformance_pg`, 격리 PG): 검색 결과 == RLS로 읽히는 행 ∩ 일치(뷰어별 대조), 멤버십 좁히기와 읽기 규칙이 서로 독립된 벽이라는 것(하나씩 제거해 둘 다 빠질 때만 샘), `session_user` 가드 제거 시 `momo_worker`가 읽는 RED, 서빙 좁히기·질의 길이 상한(200자) 제거 RED. 알려진 한계: 지연은 워크스페이스 항목 수에 선형(PR #3200 측정표); M3의 후보 축소·벡터 융합이 다룬다.
+
 ### D7. 서빙 순서·예산·영수증
 
 - **조립 위치**: 서버의 멘션 잡 페이로드 생성(`momo-agent/src/mention.rs:685` `mention_job_payload`, 창은 `message.rs:1906`). API 프로세스 tx 안이라 RLS가 그대로 걸린다.

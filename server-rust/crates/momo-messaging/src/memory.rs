@@ -445,6 +445,81 @@ pub async fn upsert_member_settings_in_tx(
     settings_from_row(&row).map_err(DbError::from)
 }
 
+// ---------------------------------------------------------------------------
+// items (#3168, ADR-0196 D3/D5/D6) — keyword search
+// ---------------------------------------------------------------------------
+
+/// Default / max hits of one item search.
+pub const MEM_ITEM_SEARCH_LIMIT_DEFAULT: i64 = 10;
+pub const MEM_ITEM_SEARCH_LIMIT_MAX: i64 = 50;
+
+/// One `mem_item` the caller can read, as `mem_search_items` returns it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemItemHit {
+    pub id: Uuid,
+    pub channel_id: Uuid,
+    /// `channel` | `personal`.
+    pub space_kind: String,
+    /// `decision` | `fact` | `commitment` | `preference` | `procedure`.
+    pub kind: String,
+    pub body: String,
+    pub valid_from: DateTime<Utc>,
+    /// `None` = still valid.
+    pub valid_to: Option<DateTime<Utc>>,
+    pub recorded_at: DateTime<Utc>,
+    pub score: f32,
+    /// The source messages (ids only; never their text).
+    pub evidence_message_ids: Vec<Uuid>,
+}
+
+/// Keyword search over the items the caller may read (`mem_search_items`, migration 104): the
+/// memory browser's search. **Browsing only**: it takes no audience narrowing. An agent answer that
+/// will be posted to a channel must be served through the worker-only `mem_search_items_for`
+/// (viewer = the requester, answer channel required), never through this function.
+///
+/// `mem_search_items` is a `SECURITY DEFINER` function that refuses any session which is not
+/// `momo_app` (or a superuser) and reads the viewer from `app.member_id` — [`bind_mem_reader_guc`]
+/// must have run first (without it the result is empty). It narrows candidates to the viewer's
+/// channels, scores them by trigram word similarity and then applies the *same* readability rule the
+/// RLS policy uses (`mem_item_readable_by`); this module adds no permission predicate of its own.
+/// The query is cut to 200 characters inside the function.
+pub async fn search_items_in_tx(
+    conn: &mut PgConnection,
+    query: &str,
+    limit: Option<i64>,
+) -> Result<Vec<MemItemHit>, DbError> {
+    let limit = match limit {
+        Some(value) if value > 0 => value.min(MEM_ITEM_SEARCH_LIMIT_MAX),
+        _ => MEM_ITEM_SEARCH_LIMIT_DEFAULT,
+    };
+    let rows = sqlx::query(
+        "SELECT id, channel_id, space_kind, kind, body, valid_from, valid_to, recorded_at, score, \
+                evidence_message_ids \
+           FROM mem_search_items($1, $2::integer)",
+    )
+    .bind(query)
+    .bind(limit as i32)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows
+        .iter()
+        .map(|row| MemItemHit {
+            id: row.get("id"),
+            channel_id: row.get("channel_id"),
+            space_kind: row.get("space_kind"),
+            kind: row.get("kind"),
+            body: row.get("body"),
+            valid_from: row.get("valid_from"),
+            valid_to: row.get("valid_to"),
+            recorded_at: row.get("recorded_at"),
+            score: row.get("score"),
+            evidence_message_ids: row
+                .get::<Option<Vec<Uuid>>, _>("evidence_message_ids")
+                .unwrap_or_default(),
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

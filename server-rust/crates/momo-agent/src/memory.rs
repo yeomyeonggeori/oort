@@ -31,8 +31,9 @@ use momo_db::{with_tenant_tx_prelude, DbError, PgConnection, PgPool};
 use sqlx::Row;
 use uuid::Uuid;
 
-/// Bumped whenever the prompt or the digest shape changes; stored on every digest.
-pub const PROMPT_VERSION: &str = "digest-v1";
+/// Bumped whenever the prompt or the digest shape changes; stored on every digest. `digest-v2`
+/// (#3168): a window prompt that also returns item candidates (`{summary, items[]}`).
+pub const PROMPT_VERSION: &str = "digest-v2";
 
 /// `mem_digest.model_source` for a digest made with the team 「기본 AI」 summary row —
 /// ADR-0147's vocabulary (`agent` | `instance_default`), not a new string.
@@ -960,7 +961,7 @@ pub fn local_day_bounds(
 /// model; a hit replaces the body with a placeholder (the message still counts as evidence,
 /// so deleting it still hides the digest). A conservative token-shape scan, not a guarantee.
 pub fn looks_like_secret(text: &str) -> bool {
-    const PREFIXES: [&str; 12] = [
+    const PREFIXES: [&str; 15] = [
         "sk-",
         "sk_live_",
         "sk_test_",
@@ -973,6 +974,9 @@ pub fn looks_like_secret(text: &str) -> bool {
         "glpat-",
         "AIza",
         "AKIA",
+        "ya29.",
+        "SG.",
+        "whsec_",
     ];
     if text.contains("-----BEGIN") && text.contains("PRIVATE KEY") {
         return true;
@@ -996,6 +1000,60 @@ pub fn looks_like_secret(text: &str) -> bool {
         // JWT: three base64url parts, the first starting `eyJ`.
         token.starts_with("eyJ") && token.matches('.').count() == 2
     }) || has_bearer_credential(text)
+        || has_url_credential(text)
+        || has_prose_password(text)
+}
+
+/// `scheme://user:pass@host` — a password inside a URL.
+fn has_url_credential(text: &str) -> bool {
+    text.match_indices("://").any(|(at, _)| {
+        let scheme_ok = text[..at]
+            .chars()
+            .rev()
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'))
+            .last()
+            .is_some_and(|c| c.is_ascii_alphabetic());
+        let rest = &text[at + 3..];
+        let authority: &str = rest
+            .split(|c: char| c.is_whitespace() || c == '/')
+            .next()
+            .unwrap_or("");
+        scheme_ok
+            && authority.split_once('@').is_some_and(|(userinfo, _)| {
+                userinfo
+                    .split_once(':')
+                    .is_some_and(|(user, pass)| !user.is_empty() && !pass.is_empty())
+            })
+    })
+}
+
+/// Prose such as 「비밀번호는 abc12345」 / "password is hunter22": a password keyword, an optional
+/// connector, then a value whose first six characters are printable ASCII and which holds a digit
+/// or a symbol (so 「비밀번호는 짧게」 and "password is required" are prose, not secrets).
+fn has_prose_password(text: &str) -> bool {
+    const KEYWORDS: [&str; 6] = ["비밀번호", "패스워드", "암호", "password", "passwd", "pwd"];
+    let lower = text.to_lowercase();
+    KEYWORDS.iter().any(|keyword| {
+        lower.match_indices(keyword).any(|(at, _)| {
+            let mut rest = lower[at + keyword.len()..].trim_start();
+            if let Some(stripped) = rest
+                .strip_prefix(['는', '은', '이', '가', ':', '='])
+                .or_else(|| {
+                    let after = rest.strip_prefix("is")?;
+                    after.starts_with(char::is_whitespace).then_some(after)
+                })
+            {
+                rest = stripped.trim_start();
+            }
+            let token = rest.split_whitespace().next().unwrap_or("");
+            let head_ok = token.chars().take(6).count() == 6
+                && token.chars().take(6).all(|c| c.is_ascii_graphic());
+            head_ok
+                && token
+                    .chars()
+                    .any(|c| c.is_ascii_digit() || "!@#$%^&*".contains(c))
+        })
+    })
 }
 
 fn has_bearer_credential(text: &str) -> bool {
@@ -1051,6 +1109,27 @@ mod tests {
             "PR #123 머지했어요 https://github.com/o/r/pull/123",
         ] {
             assert!(!looks_like_secret(prose), "{prose}");
+        }
+    }
+
+    #[test]
+    fn the_shared_secret_shape_list_agrees_with_the_rust_check() {
+        // The same JSON drives the SQL `mem_looks_like_secret` test (momo-server, PG).
+        let shapes: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/memory_secret_shapes.json"))
+                .expect("fixture json");
+        for parts in shapes["positives"].as_array().unwrap() {
+            let text: String = parts
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|p| p.as_str().unwrap())
+                .collect();
+            assert!(looks_like_secret(&text), "should be a secret shape: {text}");
+        }
+        for text in shapes["negatives"].as_array().unwrap() {
+            let text = text.as_str().unwrap();
+            assert!(!looks_like_secret(text), "should be prose: {text}");
         }
     }
 

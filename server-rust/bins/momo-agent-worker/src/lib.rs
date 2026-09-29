@@ -78,6 +78,7 @@ pub mod completion_report;
 pub mod config;
 pub mod context;
 pub mod egress;
+pub mod extract;
 pub mod oauth;
 pub mod partial;
 pub mod payload;

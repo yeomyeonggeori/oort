@@ -15,3 +15,5 @@
 - 시크릿 모양 문자열은 런타임 조립이라 저장소에 없다. 확인용 덤프: `MEMORY_EVAL_DUMP=<dir> cargo test -p momo-agent --test memory_eval optional_corpus_dump`.
 - 라벨 재생성: `MEMORY_EVAL_BLESS=1 cargo test -p momo-agent --test memory_eval committed_labels`.
 - 한국어 검색 축(§8.4, 질의 50쌍)은 #3159 fixture 소유. 여기서 만들지 않고, 그 파일이 정해지면 `labels.json` 의 `thresholds.korean_search_fixture` 를 그 경로로 바꾼다.
+
+- #3168(M2): `product_backend()` 는 등록 방식이다(`register_product_backend`). `momo-agent-worker/tests/memory_eval_items_pg.rs` 가 실제 요약 워커 + 실제 PG 로 items 경로를 등록해 누수 8단정과 수집 정책·출처를 돌린다(격리 PG, `--ignored`). 의사결정 추적(§8.2)·약속 재현은 M3 까지 `NotImplemented`. 단정 7(다른 채널 문구)은 **요청자 본인의 에이전트 DM 에서만** ADR-0196 D6-4 의 권한 합집합을 허용한다(그룹 채널은 그대로 금지).
