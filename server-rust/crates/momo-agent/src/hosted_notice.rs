@@ -78,6 +78,12 @@ pub enum HostedSkipReason {
     /// shape ("why this agent did not answer") and the same line, so the
     /// clients' one door rule (`noticeAction.ts`) opens 설정 › AI 연결.
     ProviderRequired,
+    /// #3041 — the operator's 「기본 AI」 row this turn would run on points at a
+    /// team link that is no longer the one it was chosen on (the chain was
+    /// re-saved, or the position is not one the worker calls). The worker does
+    /// not answer on some other model instead; the line says so and opens the
+    /// same door (설정 › AI 연결) where the operator re-picks the row.
+    DefaultAiUnresolved,
 }
 
 impl HostedSkipReason {
@@ -93,6 +99,7 @@ impl HostedSkipReason {
             Self::DirectMessageNotApprovable => "hosted_dm_not_approvable",
             Self::DirectMessageAwaitingOwner => "hosted_dm_owner_approval_required",
             Self::ProviderRequired => "provider_required",
+            Self::DefaultAiUnresolved => "default_ai_unresolved",
         }
     }
 
@@ -106,7 +113,7 @@ impl HostedSkipReason {
             Self::ConnectionUnavailable | Self::ChannelUnapproved => {
                 Some((HOSTED_SKIP_ACTION_LABEL, HOSTED_SKIP_ACTION_HREF))
             }
-            Self::ProviderRequired => Some((
+            Self::ProviderRequired | Self::DefaultAiUnresolved => Some((
                 PROVIDER_REQUIRED_ACTION_LABEL,
                 PROVIDER_REQUIRED_ACTION_HREF,
             )),
@@ -164,6 +171,10 @@ pub fn hosted_skip_notice_body_with_owner(
         HostedSkipReason::ProviderRequired => format!(
             "{agent_display_name}에게 연결된 AI가 없어서 답하지 못했어요. \
              워크스페이스 관리자가 설정 › AI 연결에서 API 키를 연결할 수 있어요."
+        ),
+        HostedSkipReason::DefaultAiUnresolved => format!(
+            "{agent_display_name}의 기본 AI 연결이 바뀌어서 답하지 못했어요. \
+             다른 모델로 대신 답하지 않았어요. 워크스페이스 관리자가 설정 › AI 연결에서 기본 AI를 다시 고를 수 있어요."
         ),
     }
 }
@@ -230,13 +241,14 @@ pub fn hosted_skip_notice_key(
 mod tests {
     use super::*;
 
-    const ALL_REASONS: [HostedSkipReason; 6] = [
+    const ALL_REASONS: [HostedSkipReason; 7] = [
         HostedSkipReason::DeliveryNotEnabled,
         HostedSkipReason::ConnectionUnavailable,
         HostedSkipReason::ChannelUnapproved,
         HostedSkipReason::DirectMessageNotApprovable,
         HostedSkipReason::DirectMessageAwaitingOwner,
         HostedSkipReason::ProviderRequired,
+        HostedSkipReason::DefaultAiUnresolved,
     ];
 
     #[test]
