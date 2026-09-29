@@ -509,19 +509,22 @@ mod tests {
     /// `mem_usage` (ENABLE + FORCE RLS), worker-only read functions, the daily token budget
     /// functions, the message edit/delete trigger that marks dependent digests stale (security
     /// review L-2) and a `mem_apply_digest` that serialises with it. Re-runnable statements.
+    /// 103 is #3163's serving surface (ADR-0196 D6-4/D7/D9): the worker-only
+    /// `mem_serve_requester` / `mem_serve_candidates` functions (no table), the
+    /// re-runnable lockdown of those two and the extended definer allow-list check.
     #[test]
-    fn discovers_contiguous_migrations_001_to_102() {
+    fn discovers_contiguous_migrations_001_to_103() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            102,
-            "expected 102 migrations under {}",
+            103,
+            "expected 103 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 102);
+        assert_eq!(migrations.last().unwrap().version, 103);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

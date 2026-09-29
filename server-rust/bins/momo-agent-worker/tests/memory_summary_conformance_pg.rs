@@ -1669,6 +1669,9 @@ async fn the_new_worker_functions_are_closed_to_everyone_but_momo_memory() {
         "mem_token_budget(bigint)",
         "mem_reserve_tokens(bigint, bigint)",
         "mem_adjust_tokens(bigint)",
+        // #3163 serving
+        "mem_serve_requester(uuid)",
+        "mem_serve_candidates(uuid, bigint, integer, integer)",
     ] {
         for role in [
             "momo_app",
