@@ -1,6 +1,7 @@
 import { attachParticle } from "../../lib/koreanParticle";
 import type { LocalHarnessAuth, LocalHarnessId } from "../hostedAgents/detect";
 import { LOCAL_HARNESS_IDS } from "../hostedAgents/detect";
+import { REMOTE_WORK_DEFAULT_LOGIN_SENTENCE, REMOTE_WORK_NOTE } from "./remoteWorkProfile";
 import { HARNESS_LABEL } from "../onboarding/aiConnect";
 import { ACCOUNT_LABEL } from "./harnessProfiles";
 
@@ -225,6 +226,9 @@ export function optionsFor(rowId: AiDefaultRowId, input: AiDefaultsInput): AiDef
           return a.label.localeCompare(b.label, "ko");
         });
       for (const account of mine) {
+        // 원격 작업은 이 맥 기본 로그인으로 뜨지 않는다(#3157): workd는 원격 작업용 계정
+        // 폴더(라벨)로만 CLI를 띄운다. 라벨 없는 계정은 이 행의 선택지가 아니다.
+        if (rowId === "remoteWork" && account.label === null) continue;
         const ref: AiCredentialRef = { kind: "profile", harness, label: account.label };
         out.push({
           ref,
@@ -426,6 +430,10 @@ export function resolveRow(
       const name = credentialName(saved, teamKey);
       const account = accountOf(input, saved);
       const where = `이 칸은 「${fallback}」로 넘어가요`;
+      if (rowId === "remoteWork" && saved.label === null) {
+        // 옛 저장 값: 이 맥 기본 로그인은 원격 작업이 쓰지 않는다(#3157).
+        return { state: "fallback", using: fallback, sentence: REMOTE_WORK_DEFAULT_LOGIN_SENTENCE };
+      }
       if (!account) {
         return {
           state: "fallback",
@@ -433,19 +441,21 @@ export function resolveRow(
           sentence: `「${name}」 계정이 이 맥 목록에 없어 ${where}.`,
         };
       }
-      if (account.auth === "needs_login") {
+      // 원격 작업은 계정마다 따로 로그인한 폴더로 뜬다: 이 맥 목록의 로그인 상태(로컬
+      // 폴더)는 그 폴더와 무관하다. 로그인은 선택할 때 확인한다(#3157).
+      if (rowId === "localTerminal" && account.auth === "needs_login") {
         return {
           state: "fallback",
           using: fallback,
           sentence: `「${name}」 계정이 로그인 필요라 ${where}. 다시 로그인하면 돌아와요.`,
         };
       }
-      // 로컬 터미널은 이 선택을 실제로 읽는다(#3010, `localTerminalLaunch`). 원격 작업은
-      // 아직 읽는 곳이 없다: 표 밑 한 줄(`AI_DEFAULTS_NOT_APPLIED`)이 그것을 말한다.
+      // 로컬 터미널은 이 선택을 새 세션에서 읽고(#3010, `localTerminalLaunch`), 원격
+      // 작업은 이 맥의 workd가 읽는다(#3033·#3157, `remoteWorkProfile`).
       const note =
         rowId === "localTerminal"
           ? `새 세션에서 ${attachParticle(HARNESS_LABEL[saved.harness], "object")} 열면 이 계정으로 떠요`
-          : null;
+          : REMOTE_WORK_NOTE;
       return { state: "ok", using: name, note };
     }
     case "teamAgent": {
@@ -516,15 +526,6 @@ export function rowsUsingAccount(
 export function unlinkImpactLead(impact: readonly AiDefaultImpact[]): string | null {
   return impact.length === 0 ? null : "기본 AI에서 이 계정을 고른 칸은 이렇게 돌아가요.";
 }
-
-/**
- * 개인 줄 가운데 로컬 터미널 새 세션은 선택을 읽는다(#3010). 원격 작업은 아직 읽는 곳이
- * 없다: 폰에서 시작한 작업은 이 맥의 `momo-workd`가 띄우고, 그 프로세스에 프로필 폴더를
- * 넘기는 일은 ADR-0191 D1 조건 8(환경 허용목록·red proof)을 지는 엔진 쪽 후속이다. 표가
- * 이미 적용되는 것처럼 말하지 않게 한 줄로 적는다.
- */
-export const AI_DEFAULTS_NOT_APPLIED =
-  "내 설정은 이 기기에만 저장돼요. 원격 작업이 이 선택을 따르는 것은 준비 중이에요.";
 
 export function impactLine(item: AiDefaultImpact): string {
   return `${item.title}: ${item.fallback}`;

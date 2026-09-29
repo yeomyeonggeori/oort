@@ -424,10 +424,11 @@ mod tests {
                 }
                 let calls = src.matches("harness_status::").count();
                 // lib.rs: the command. harness_profile.rs (#2878): the probe
-                // type and the D3-a probe of one checked profile folder.
+                // type and the D3-a probe of one checked profile folder (#3157:
+                // the type in three signatures; still exactly one probe call).
                 let allowed = match name.as_str() {
                     "lib.rs" => 1,
-                    "harness_profile.rs" => 2,
+                    "harness_profile.rs" => 4,
                     _ => 0,
                 };
                 assert_eq!(calls, allowed, "{name} calls into harness_status {calls}x");

@@ -304,6 +304,24 @@ export async function harnessProfileStatus(profile: HarnessProfileRef): Promise<
 }
 
 /**
+ * 이 맥의 「원격 작업」 계정 폴더로 돌린 상태 명령(#3157). 폴더는 셸이 workd에게
+ * 묻는다(`prepare_remote_profile`). 실패하면 「모름」.
+ */
+export async function harnessProfileRemoteStatus(profile: HarnessProfileRef): Promise<LocalHarnessProbe> {
+  const unknown: LocalHarnessProbe = { id: profile.harness, installed: false, auth: "unknown" };
+  if (!IS_TAURI) return unknown;
+  try {
+    const { normalizeLocalHarnessProbes } = await import(
+      "@momo/core/features/hostedAgents/detect"
+    );
+    const raw = await invoke<unknown>("harness_profile_remote_status", { profile });
+    return normalizeLocalHarnessProbes([raw]).find((row) => row.id === profile.harness) ?? unknown;
+  } catch {
+    return unknown;
+  }
+}
+
+/**
  * 폴더 삭제. 셸이 상태 명령을 다시 돌려 「로그인 안 됨」일 때만 지운다. 거부(경로
  * 검사 실패)는 reject, 지우지 않은 결말은 `still_signed_in`·`unknown`.
  */
@@ -339,6 +357,11 @@ export type PtyProgram =
       /** 프로필 라벨(#2878). 없으면 이 맥의 기본 위치. 셸이 폴더를 정한다. */
       profile?: string;
     }
+  /**
+   * 이 맥의 「원격 작업」 계정 폴더로 하는 로그인(#3157, ADR-0191 D1 A 레인). 라벨만
+   * 넘긴다: 폴더는 셸이 workd에게 묻고 자기가 계산한 경로와 같을 때만 믿는다.
+   */
+  | { kind: "remoteLogin"; id: "claude" | "codex"; method: "browser" | "device"; profile: string }
   /** 공식 CLI 로그아웃(ADR-0190 D3-f A2·A5). 늘 oort 프로필이다. */
   | { kind: "logout"; id: "claude" | "codex"; profile: string };
 
@@ -474,6 +497,37 @@ export const desktopWorkHost = {
   async forget(): Promise<LocalWorkHostStatus> {
     if (!IS_TAURI) throw "unsupported_platform";
     return invoke<LocalWorkHostStatus>("work_host_forget");
+  },
+};
+
+/**
+ * 이 맥의 「원격 작업」 계정 선택(#3157, workd `set_remote_profile`·
+ * `prepare_remote_profile`). 웹은 하네스와 라벨만 넘기고 경로는 받지 않는다. 실패는
+ * throw 하지 않고 닫힌 코드(workd 거부 라벨·소켓 코드)로 돌려준다.
+ */
+export const desktopRemoteProfile = {
+  async set(
+    harness: "claude" | "codex",
+    label: string | null
+  ): Promise<{ ok: true; reset: boolean } | { ok: false; code: string }> {
+    if (!IS_TAURI) return { ok: false, code: "unsupported_platform" };
+    const { remoteProfileCodeOf } = await import("@momo/core/features/settings/remoteWorkProfile");
+    try {
+      const answer = await invoke<{ reset?: unknown }>("work_host_set_remote_profile", { harness, label });
+      return { ok: true, reset: answer?.reset === true };
+    } catch (error) {
+      return { ok: false, code: remoteProfileCodeOf(error) };
+    }
+  },
+  async prepare(harness: "claude" | "codex", label: string): Promise<{ ok: true } | { ok: false; code: string }> {
+    if (!IS_TAURI) return { ok: false, code: "unsupported_platform" };
+    const { remoteProfileCodeOf } = await import("@momo/core/features/settings/remoteWorkProfile");
+    try {
+      await invoke<void>("work_host_prepare_remote_profile", { harness, label });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, code: remoteProfileCodeOf(error) };
+    }
   },
 };
 

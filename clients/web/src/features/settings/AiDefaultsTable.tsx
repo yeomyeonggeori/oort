@@ -1,6 +1,6 @@
+import { useEffect } from "react";
 import { Lock } from "lucide-react";
 import {
-  AI_DEFAULTS_NOT_APPLIED,
   AI_DEFAULT_ROWS,
   AI_DEFAULT_UNSET_LABEL,
   credentialKey,
@@ -32,9 +32,19 @@ import {
   type TeamLinkModels,
 } from "@momo/core/features/settings/defaultAi";
 import { cn } from "@/design/lib/cn";
+import { HarnessLoginDialog } from "@/features/welcome/harnessLogin/HarnessLoginDialog";
 import { Select } from "@/design/ui/select";
 import { AiFoot } from "./aiAccountsParts";
-import { useAiDefaults, useMyAccounts, writeAiDefaults } from "./aiDefaultsStore";
+import { readAiDefaults as readAiDefaultsNow, useAiDefaults, useMyAccounts, writeAiDefaults } from "./aiDefaultsStore";
+import {
+  chooseRemoteWorkAccount,
+  remoteLoginClosed,
+  remoteLoginConnected,
+  syncRemoteWorkAccount,
+  useRemoteWork,
+  type RemoteWorkView,
+} from "./remoteWorkStore";
+import { REMOTE_WORK_APPLYING } from "@momo/core/features/settings/remoteWorkProfile";
 
 // Reading this as: settings (AI 연결 · 기본 AI) for internal team users on web+Tauri,
 // density 6/10, motion 1/10 (none added).
@@ -94,8 +104,28 @@ export function AiDefaultsTable({
   const prefs = useAiDefaults();
   const accounts = useMyAccounts();
   const input: AiDefaultsInput = { accounts: accounts ?? [], teamKey, browserTab };
+  const remote = useRemoteWork();
+  // 저장된 원격 작업 계정이 이 맥에 있는지 맞춘다(#3157). 브라우저 탭에는 이 맥이 없다.
+  const savedRemote = prefs.remoteWork;
+  const savedRemoteKey = savedRemote?.kind === "profile" ? `${savedRemote.harness}/${savedRemote.label ?? ""}` : "";
+  useEffect(() => {
+    if (browserTab) return;
+    void syncRemoteWorkAccount(readAiDefaultsNow());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [browserTab, savedRemoteKey]);
   return (
     <>
+      {remote.login && (
+        <HarnessLoginDialog
+          harness={remote.login.harness}
+          profile={remote.login.label}
+          remote
+          onClose={remoteLoginClosed}
+          onConnected={remoteLoginConnected}
+          // 원격 작업 폴더의 로그인은 명령 복사로 대신하지 않는다(다른 폴더에 로그인된다).
+          onFallbackStarted={remoteLoginClosed}
+        />
+      )}
       <ul className="flex min-w-0 flex-col" aria-label="기능마다 부를 AI" data-testid="ai-defaults-table">
         {AI_DEFAULT_ROWS.map((row, index) => (
           <DefaultRow
@@ -106,13 +136,11 @@ export function AiDefaultsTable({
             input={input}
             accountsKnown={accounts !== null}
             team={team}
+            remote={remote}
           />
         ))}
       </ul>
       <AiFoot>{PERSONAL_FOOT}</AiFoot>
-      <AiFoot>
-        <span data-testid="ai-defaults-not-applied">{AI_DEFAULTS_NOT_APPLIED}</span>
-      </AiFoot>
       {operator !== null && (
         <AiFoot>
           <span data-testid="ai-defaults-team-foot" data-operator={operator ? "yes" : "no"}>
@@ -137,6 +165,7 @@ function DefaultRow({
   input,
   accountsKnown,
   team,
+  remote,
 }: {
   row: AiDefaultRow;
   last: boolean;
@@ -144,6 +173,7 @@ function DefaultRow({
   input: AiDefaultsInput;
   accountsKnown: boolean;
   team: TeamDefaultsState | undefined;
+  remote: RemoteWorkView;
 }) {
   const titleId = `ai-default-${row.id}-title`;
   const resolved = resolveRow(row.id, prefs, input);
@@ -193,9 +223,16 @@ function DefaultRow({
           value={value}
           title={fullText}
           className="h-control rounded-md text-meta"
+          // 이 맥에 넘기는 동안(로그인 창 포함)은 두 번째 고름이 끼지 않게 잠근다.
+          disabled={id === "remoteWork" && remote.applying}
           onChange={(event) => {
             const next = event.target.value;
             const picked = options.find((option) => option.key === next)?.ref ?? null;
+            if (id === "remoteWork") {
+              // 이 맥의 workd가 받은 뒤에만 저장한다(거부되면 칸은 이전 값 그대로).
+              void chooseRemoteWorkAccount(picked);
+              return;
+            }
             // 앱 명령의 기본값은 팀 키다: 같은 값을 따로 적어 두지 않는다.
             const store = id === "appCommand" && picked?.kind === "teamKey" ? null : picked;
             writeAiDefaults(withChoice(prefs, id, store));
@@ -221,6 +258,12 @@ function DefaultRow({
       }
       if (id === "appCommand" && resolved.state === "ok") {
         lines.push({ key: "model", text: modelLine({ kind: "teamKey" }, input.teamKey), tone: "muted" });
+      }
+      if (id === "remoteWork") {
+        if (remote.applying) lines.push({ key: "saved", text: REMOTE_WORK_APPLYING, tone: "muted" });
+        else if (remote.note) {
+          lines.push({ key: remote.note.tone === "warn" ? "error" : "saved", text: remote.note.text, tone: remote.note.tone });
+        }
       }
     }
   } else if (

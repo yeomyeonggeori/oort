@@ -140,9 +140,10 @@ describe("기본 AI 표 화면", () => {
     expect(q("ai-default-teamAgent")?.textContent).not.toContain("대답할 수 없어요");
   });
 
-  it("개인 줄 선택이 아직 적용되지 않는다는 사실을 적는다", () => {
+  it("표 밑에 「준비 중」·「적용 전」 줄이 없다: 원격 작업은 이 맥의 workd가 읽는다(#3157)", () => {
     render(AiDefaultsTable, { teamKey: TEAM, operator: true, browserTab: false });
-    expect(q("ai-defaults-not-applied")?.textContent).toContain("준비 중이에요");
+    expect(q("ai-defaults-not-applied")).toBeNull();
+    expect(q("ai-defaults-table")?.parentElement?.textContent).not.toMatch(/원격 작업이 이 선택을 따르는 것은 준비 중/);
   });
 
   it("브라우저 탭에서는 이 맥 계정 줄을 고르지 않는다", () => {
