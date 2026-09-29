@@ -134,6 +134,8 @@ describe("원격 작업 행", () => {
       expect(line?.textContent, code).toContain(lead);
       expect(line?.textContent, code).toContain("다른 계정으로 대신 시작하지 않아요.");
       expect(line?.getAttribute("role")).toBe("alert");
+      // 거부를 말하는 동안 「이 계정으로 떠요」 안내는 서지 않는다.
+      expect(q("ai-default-remoteWork-note"), code).toBeNull();
       expect(window.localStorage.getItem(AI_DEFAULTS_LOCAL_SLOT) ?? "{}", code).not.toContain("개인");
       expect(select().value, code).toBe("");
       // 실패 뒤에 「고르지 않음」으로 지우는 호출(=다른 계정/기본으로의 조용한 이동)이 없다.

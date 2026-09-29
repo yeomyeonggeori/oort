@@ -344,7 +344,8 @@ function DefaultRow({
       lines.push({ key: "model", text: modelLine({ kind: "teamKey" }, input.teamKey), tone: "muted" });
     }
   }
-  if (resolved.state === "ok" && resolved.note) {
+  // 원격 작업 행이 거부를 말하는 동안에는 「이 계정으로 떠요」 안내를 함께 세우지 않는다.
+  if (resolved.state === "ok" && resolved.note && !(row.id === "remoteWork" && remote.note?.tone === "warn")) {
     lines.push({ key: "note", text: resolved.note, tone: "muted" });
   }
   if (resolved.state !== "ok") {

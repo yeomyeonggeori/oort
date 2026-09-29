@@ -220,7 +220,7 @@ export function teamChoiceText(rowId: TeamDefaultRowId, saved: TeamDefaultAiRow 
  * 아직 없어 요약 줄은 첫 인사에만 적용된다: 요약도 따른다고 말하지 않는다.
  */
 export const TEAM_DEFAULTS_APPLIED =
-  "모델을 직접 고른 에이전트는 자기 모델을 써요. 고르지 않은 에이전트의 대답과 첫 인사가 이 선택을 따라요. 채널 요약은 아직 만들지 않아요.";
+  "모델을 직접 고른 에이전트는 자기 모델을 써요. 고르지 않은 에이전트의 대답은 팀 에이전트 줄을, 첫 인사는 채널 요약 줄을 따라요. 채널 요약 자체는 아직 이 선택을 따르지 않아요.";
 
 export const TEAM_DEFAULTS_CHECK_FIRST = "연결 확인을 하면 고를 수 있는 모델이 보여요.";
 

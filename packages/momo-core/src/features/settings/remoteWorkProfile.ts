@@ -109,7 +109,7 @@ export const REMOTE_WORK_DEFAULT_LOGIN_SENTENCE =
 
 /** 로그인 창이 어느 폴더에 로그인하는지: 이 맥 로컬 계정이 아니라 원격 작업용 폴더다. */
 export function remoteProfileLoginLine(harness: LocalHarnessId, label: string): string {
-  return `${myAccountRowTitle({ harness, profile: label })} 계정을 원격 작업용으로 로그인합니다. 폰에서 시작한 작업이 이 로그인으로 떠요. 브라우저에서 이 계정으로 로그인하세요.`;
+  return `${myAccountRowTitle({ harness, profile: label })} 계정을 원격 작업용으로 로그인해요. 폰에서 시작한 작업이 이 로그인으로 실행돼요. 브라우저에서 이 계정으로 로그인해 주세요.`;
 }
 
 const NO_SUBSTITUTE = "다른 계정으로 대신 시작하지 않아요.";
