@@ -358,7 +358,10 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
       "2026-09-29 실측(#3165): server-rust/bins/momo-server/src/lib.rs에 여섯 경로가 등록됨. " +
       "GET …/channels/{ch}/memory/digests, GET …/memory/digests/{id}, " +
       "GET …/agent-runs/{run}/memory-receipt, GET/PATCH …/memory/settings, " +
-      "PATCH …/memory/settings/me, PATCH …/channels/{ch}/memory/settings.",
+      "PATCH …/memory/settings/me, PATCH …/channels/{ch}/memory/settings. " +
+      "2026-09-30 실측(#3208): 기억 브라우저 여섯 경로가 더해짐. GET …/memory/items, " +
+      "GET/PATCH/DELETE …/memory/items/{id}, GET …/memory/items/{id}/evidence, " +
+      "GET …/memory/items/{id}/events.",
   },
   messageSearch: {
     id: "messageSearch",

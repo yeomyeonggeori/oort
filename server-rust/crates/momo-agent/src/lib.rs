@@ -149,6 +149,8 @@ pub mod hosted_dm;
 pub mod hosted_notice;
 pub mod korean;
 pub mod memory;
+pub mod memory_items;
+pub mod memory_suggest;
 pub mod mention;
 pub mod provisioning;
 pub mod routing;

@@ -51,19 +51,87 @@ export interface MemoryDigestPage {
   nextCursor?: string;
 }
 
+export type MemoryItemKind = "decision" | "fact" | "commitment" | "preference" | "procedure";
+export type MemoryItemOrigin = "extracted" | "confirmed" | "curated" | "synthesized";
+
+/** An item a receipt names (#3169), as the caller may read it today. */
+export interface MemoryReceiptItem {
+  id: string;
+  channelId: string;
+  kind: MemoryItemKind;
+  origin: MemoryItemOrigin;
+  body: string;
+  /** The fact's own time (the newest evidence message), not when it was recorded. */
+  validFromMs: number;
+  sourceCount: number;
+}
+
 export interface MemoryReceipt {
   runId: string;
   channelId: string;
-  /** Everything the run was served — the chip's n. */
+  /** Everything the run was served (digests and items) — the chip's n. */
   servedCount: number;
   /** Served digests the caller can read today. */
   digestIds: string[];
   digests: MemoryDigest[];
+  /**
+   * Served items the caller can read today (#3169). Optional only so a fixture or an older
+   * server without the field still parses; the server always sends both (empty when none).
+   */
+  itemIds?: string[];
+  items?: MemoryReceiptItem[];
   /** Requester only; a count, never content. */
   withheldCount?: number;
   budgetChars: number;
   usedChars: number;
   createdAtMs: number;
+}
+
+/** A 「기억해 둘게요」 proposal (#3169): an agent proposes, a person accepts or rejects. */
+export type MemoryProposalStatus = "pending" | "accepted" | "rejected";
+
+export interface MemoryProposalEvidence {
+  messageId: string;
+  seq: number;
+  authorMemberId: string;
+}
+
+export interface MemoryProposal {
+  id: string;
+  channelId: string;
+  /** The agent run that proposed it — the reply the card belongs under. */
+  runId?: string;
+  agentMemberId: string;
+  /** The person the agent was answering (derived by the server). */
+  requesterMemberId: string;
+  kind: MemoryItemKind;
+  status: MemoryProposalStatus;
+  /** The proposed memory. Only while `pending`; a decided proposal keeps no text. */
+  text?: string;
+  subject?: string;
+  /** Source message ids. Empty once decided. */
+  evidenceMessageIds: string[];
+  /**
+   * Author and channel sequence of each source message (pending only) for a card line like
+   * 「밥 · #41」. Ids and numbers only: fetch the text through the normal message path.
+   */
+  evidence: MemoryProposalEvidence[];
+  /** The caller is the person the agent answered: warn before a self-accept (advice only). */
+  callerIsRequester: boolean;
+  createdAtMs: number;
+  expiresAtMs: number;
+  decidedBy?: string;
+  decidedAtMs?: number;
+  /** The confirmed item an accepted proposal became. */
+  itemId?: string;
+}
+
+export interface ListMemoryProposalsOptions {
+  /** Defaults to `pending` on the server. */
+  status?: MemoryProposalStatus;
+  /** Only the proposals of one agent run — the cards under one reply. */
+  runId?: string;
+  limit?: number;
 }
 
 export interface WorkspaceMemorySettings {
@@ -109,6 +177,22 @@ export interface PatchWorkspaceMemorySettingsInput {
 export interface PatchChannelMemorySettingsInput {
   excluded?: boolean;
   paused?: boolean;
+}
+
+const ITEM_KINDS: readonly string[] = ["decision", "fact", "commitment", "preference", "procedure"];
+const ITEM_ORIGINS: readonly string[] = ["extracted", "confirmed", "curated", "synthesized"];
+const PROPOSAL_STATUSES: readonly string[] = ["pending", "accepted", "rejected"];
+
+function isItemKind(value: string | undefined): value is MemoryItemKind {
+  return value !== undefined && ITEM_KINDS.includes(value);
+}
+
+function isItemOrigin(value: string | undefined): value is MemoryItemOrigin {
+  return value !== undefined && ITEM_ORIGINS.includes(value);
+}
+
+function isProposalStatus(value: string | undefined): value is MemoryProposalStatus {
+  return value !== undefined && PROPOSAL_STATUSES.includes(value);
 }
 
 function isLevel(value: string | undefined): value is MemoryDigestLevel {
@@ -202,6 +286,108 @@ export function parseMemoryDigestResponse(value: unknown): MemoryDigest {
   return parsed;
 }
 
+export function parseMemoryReceiptItem(value: unknown): MemoryReceiptItem | null {
+  const id = str(value, "id");
+  const channelId = str(value, "channelId");
+  const kind = str(value, "kind");
+  const origin = str(value, "origin");
+  const body = str(value, "body");
+  const validFromMs = num(value, "validFromMs");
+  const sourceCount = num(value, "sourceCount");
+  if (
+    id === undefined ||
+    channelId === undefined ||
+    !isItemKind(kind) ||
+    !isItemOrigin(origin) ||
+    body === undefined ||
+    validFromMs === undefined ||
+    sourceCount === undefined
+  ) {
+    return null;
+  }
+  return { id, channelId, kind, origin, body, validFromMs, sourceCount };
+}
+
+export function parseMemoryProposal(value: unknown): MemoryProposal | null {
+  const id = str(value, "id");
+  const channelId = str(value, "channelId");
+  const agentMemberId = str(value, "agentMemberId");
+  const requesterMemberId = str(value, "requesterMemberId");
+  const kind = str(value, "kind");
+  const status = str(value, "status");
+  const evidenceMessageIds = stringArrayField(value, "evidenceMessageIds");
+  const createdAtMs = num(value, "createdAtMs");
+  const expiresAtMs = num(value, "expiresAtMs");
+  const callerIsRequester = bool(value, "callerIsRequester");
+  const rawEvidence = arrayField(value, "evidence");
+  if (rawEvidence === null || callerIsRequester === undefined) return null;
+  const evidence: MemoryProposalEvidence[] = [];
+  for (const row of rawEvidence) {
+    const messageId = str(row, "messageId");
+    const seq = num(row, "seq");
+    const authorMemberId = str(row, "authorMemberId");
+    if (messageId === undefined || seq === undefined || authorMemberId === undefined) return null;
+    evidence.push({ messageId, seq, authorMemberId });
+  }
+  if (
+    id === undefined ||
+    channelId === undefined ||
+    agentMemberId === undefined ||
+    requesterMemberId === undefined ||
+    !isItemKind(kind) ||
+    !isProposalStatus(status) ||
+    evidenceMessageIds === null ||
+    createdAtMs === undefined ||
+    expiresAtMs === undefined
+  ) {
+    return null;
+  }
+  const proposal: MemoryProposal = {
+    id,
+    channelId,
+    agentMemberId,
+    requesterMemberId,
+    kind,
+    status,
+    evidenceMessageIds,
+    evidence,
+    callerIsRequester,
+    createdAtMs,
+    expiresAtMs,
+  };
+  const runId = str(value, "runId");
+  if (runId !== undefined) proposal.runId = runId;
+  const text = str(value, "text");
+  if (text !== undefined) proposal.text = text;
+  const subject = str(value, "subject");
+  if (subject !== undefined) proposal.subject = subject;
+  const decidedBy = str(value, "decidedBy");
+  if (decidedBy !== undefined) proposal.decidedBy = decidedBy;
+  const decidedAtMs = num(value, "decidedAtMs");
+  if (decidedAtMs !== undefined) proposal.decidedAtMs = decidedAtMs;
+  const itemId = str(value, "itemId");
+  if (itemId !== undefined) proposal.itemId = itemId;
+  return proposal;
+}
+
+export function parseMemoryProposalList(value: unknown): MemoryProposal[] {
+  const rows = arrayField(record(value), "proposals");
+  if (rows === null) throw new WireShapeError();
+  const proposals: MemoryProposal[] = [];
+  for (const row of rows) {
+    const parsed = parseMemoryProposal(row);
+    if (parsed === null) throw new WireShapeError();
+    proposals.push(parsed);
+  }
+  return proposals;
+}
+
+export function parseMemoryProposalDecision(value: unknown): MemoryProposal {
+  const parsed = parseMemoryProposal(record(value)?.proposal);
+  if (parsed === null) throw new WireShapeError();
+  return parsed;
+}
+
 export function parseMemoryReceiptResponse(value: unknown): MemoryReceipt {
   const source = record(record(value)?.receipt);
   if (source === null) throw new WireShapeError();
@@ -233,6 +419,18 @@ export function parseMemoryReceiptResponse(value: unknown): MemoryReceipt {
     usedChars,
     createdAtMs,
   };
+  const itemIds = stringArrayField(source, "itemIds");
+  if (itemIds !== null) receipt.itemIds = itemIds;
+  const rawItems = arrayField(source, "items");
+  if (rawItems !== null) {
+    const items: MemoryReceiptItem[] = [];
+    for (const row of rawItems) {
+      const parsed = parseMemoryReceiptItem(row);
+      if (parsed === null) throw new WireShapeError();
+      items.push(parsed);
+    }
+    receipt.items = items;
+  }
   const withheldCount = num(source, "withheldCount");
   if (withheldCount !== undefined) receipt.withheldCount = withheldCount;
   return receipt;
@@ -277,6 +475,235 @@ export function parseMemorySettings(value: unknown): MemorySettings {
     channels: channels.map(parseChannelMemorySettings),
     me: parseMemberMemorySettings(source.me),
   };
+}
+
+// -----------------------------------------------------------------------------
+// Memory browser (ADR-0196 D9 / D12 V4, #3208) — items, evidence, events.
+//
+// The same rule as digests: the server decides visibility. A hidden item is
+// absent from a list and a 404 everywhere else, identical to a missing id, so
+// the client must not try to tell "hidden" from "gone". Edit and forget are
+// permitted to anyone who can read the item (ADR D9); anyone else gets that same
+// 404. Forget deletes for good — there is no undo and no "forgotten" state. UI copy must not
+// promise a forgotten fact can never reappear: summaries may still carry it until regenerated.
+// -----------------------------------------------------------------------------
+
+export type MemoryItemSpace = "channel" | "personal";
+/** `active` = current items (default); `history` = retired but readable (e.g. edited-away versions). */
+export type MemoryItemStatus = "active" | "history" | "all";
+
+export const MEMORY_ITEM_KINDS: readonly MemoryItemKind[] = [
+  "decision",
+  "fact",
+  "commitment",
+  "preference",
+  "procedure",
+];
+
+export interface MemoryItem {
+  id: string;
+  channelId: string;
+  spaceKind: MemoryItemSpace;
+  kind: MemoryItemKind;
+  origin: MemoryItemOrigin;
+  body: string;
+  subjectKey?: string;
+  validFromMs: number;
+  validToMs?: number;
+  recordedAtMs: number;
+  retiredAtMs?: number;
+  /** Why it was retired (`edited` keeps it as history). */
+  retiredReason?: string;
+  /** The version this one replaced. */
+  supersedesId?: string;
+  /** The version that replaced this one. */
+  supersededById?: string;
+  confidence: number;
+  sourceCount: number;
+  /** Curated items only: who wrote the current text, and when. */
+  editedByMemberId?: string;
+  editedAtMs?: number;
+  /** Search results only, best first. */
+  score?: number;
+}
+
+export interface MemoryItemPage {
+  items: MemoryItem[];
+  /** Absent on the last page and for a search (no cursor). */
+  nextCursor?: string;
+}
+
+export interface MemoryItemDetail {
+  item: MemoryItem;
+  evidence: MemoryEvidenceLink[];
+}
+
+export interface MemoryItemEvent {
+  id: string;
+  /** `created` | `edited` | `superseded` | … */
+  action: string;
+  actorMemberId?: string;
+  /** Ids, kinds and counts only — the ledger never holds memory text. */
+  detail: Record<string, unknown>;
+  createdAtMs: number;
+}
+
+export interface EditedMemoryItem {
+  /** The new curated item. */
+  item: MemoryItem;
+  evidence: MemoryEvidenceLink[];
+  /** The item it replaced (now history). */
+  supersededId: string;
+}
+
+export interface ListMemoryItemsOptions {
+  channelId?: string;
+  kind?: MemoryItemKind;
+  status?: MemoryItemStatus;
+  /** Keyword search over current items; ranked, no cursor, at most 50 hits. */
+  q?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface EditMemoryItemInput {
+  /** 1–600 characters. */
+  body: string;
+  kind?: MemoryItemKind;
+}
+
+export function parseMemoryItem(value: unknown): MemoryItem | null {
+  const id = str(value, "id");
+  const channelId = str(value, "channelId");
+  const spaceKind = str(value, "spaceKind");
+  const kind = str(value, "kind");
+  const origin = str(value, "origin");
+  const body = str(value, "body");
+  const validFromMs = num(value, "validFromMs");
+  const recordedAtMs = num(value, "recordedAtMs");
+  const confidence = num(value, "confidence");
+  const sourceCount = num(value, "sourceCount");
+  if (
+    id === undefined ||
+    channelId === undefined ||
+    (spaceKind !== "channel" && spaceKind !== "personal") ||
+    !isItemKind(kind) ||
+    !isItemOrigin(origin) ||
+    body === undefined ||
+    validFromMs === undefined ||
+    recordedAtMs === undefined ||
+    confidence === undefined ||
+    sourceCount === undefined
+  ) {
+    return null;
+  }
+  const item: MemoryItem = {
+    id,
+    channelId,
+    spaceKind,
+    kind,
+    origin,
+    body,
+    validFromMs,
+    recordedAtMs,
+    confidence,
+    sourceCount,
+  };
+  const subjectKey = str(value, "subjectKey");
+  if (subjectKey !== undefined) item.subjectKey = subjectKey;
+  const validToMs = num(value, "validToMs");
+  if (validToMs !== undefined) item.validToMs = validToMs;
+  const retiredAtMs = num(value, "retiredAtMs");
+  if (retiredAtMs !== undefined) item.retiredAtMs = retiredAtMs;
+  const retiredReason = str(value, "retiredReason");
+  if (retiredReason !== undefined) item.retiredReason = retiredReason;
+  const supersedesId = str(value, "supersedesId");
+  if (supersedesId !== undefined) item.supersedesId = supersedesId;
+  const supersededById = str(value, "supersededById");
+  if (supersededById !== undefined) item.supersededById = supersededById;
+  const editedByMemberId = str(value, "editedByMemberId");
+  if (editedByMemberId !== undefined) item.editedByMemberId = editedByMemberId;
+  const editedAtMs = num(value, "editedAtMs");
+  if (editedAtMs !== undefined) item.editedAtMs = editedAtMs;
+  const score = num(value, "score");
+  if (score !== undefined) item.score = score;
+  return item;
+}
+
+function requireItem(value: unknown): MemoryItem {
+  const item = parseMemoryItem(value);
+  if (item === null) throw new WireShapeError();
+  return item;
+}
+
+function requireEvidence(source: unknown): MemoryEvidenceLink[] {
+  const rows = arrayField(source, "evidence");
+  if (rows === null) throw new WireShapeError();
+  const links: MemoryEvidenceLink[] = [];
+  for (const row of rows) {
+    const link = parseMemoryEvidenceLink(row);
+    if (link === null) throw new WireShapeError();
+    links.push(link);
+  }
+  return links;
+}
+
+export function parseMemoryItemPage(value: unknown): MemoryItemPage {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  const rows = arrayField(source, "items");
+  if (rows === null) throw new WireShapeError();
+  const page: MemoryItemPage = { items: rows.map(requireItem) };
+  const nextCursor = str(source, "nextCursor");
+  if (nextCursor !== undefined) page.nextCursor = nextCursor;
+  return page;
+}
+
+export function parseMemoryItemDetail(value: unknown): MemoryItemDetail {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  return { item: requireItem(source.item), evidence: requireEvidence(source) };
+}
+
+export function parseMemoryItemEvidence(value: unknown): MemoryEvidenceLink[] {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  return requireEvidence(source);
+}
+
+export function parseMemoryItemEvents(value: unknown): MemoryItemEvent[] {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  const rows = arrayField(source, "events");
+  if (rows === null) throw new WireShapeError();
+  return rows.map((row) => {
+    const id = str(row, "id");
+    const action = str(row, "action");
+    const createdAtMs = num(row, "createdAtMs");
+    const detail = record(record(row)?.detail);
+    if (id === undefined || action === undefined || createdAtMs === undefined || detail === null) {
+      throw new WireShapeError();
+    }
+    const event: MemoryItemEvent = { id, action, detail, createdAtMs };
+    const actorMemberId = str(row, "actorMemberId");
+    if (actorMemberId !== undefined) event.actorMemberId = actorMemberId;
+    return event;
+  });
+}
+
+export function parseEditedMemoryItem(value: unknown): EditedMemoryItem {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  const supersededId = str(source, "supersededId");
+  if (supersededId === undefined) throw new WireShapeError();
+  return { item: requireItem(source.item), evidence: requireEvidence(source), supersededId };
+}
+
+/** How many item rows a forget removed (the item plus its older versions). */
+export function parseForgottenCount(value: unknown): number {
+  const count = num(value, "forgottenCount");
+  if (count === undefined) throw new WireShapeError();
+  return count;
 }
 
 /**

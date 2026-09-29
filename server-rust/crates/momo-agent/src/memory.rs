@@ -31,8 +31,9 @@ use momo_db::{with_tenant_tx_prelude, DbError, PgConnection, PgPool};
 use sqlx::Row;
 use uuid::Uuid;
 
-/// Bumped whenever the prompt or the digest shape changes; stored on every digest.
-pub const PROMPT_VERSION: &str = "digest-v1";
+/// Bumped whenever the prompt or the digest shape changes; stored on every digest. `digest-v2`
+/// (#3168): a window prompt that also returns item candidates (`{summary, items[]}`).
+pub const PROMPT_VERSION: &str = "digest-v2";
 
 /// `mem_digest.model_source` for a digest made with the team 「기본 AI」 summary row —
 /// ADR-0147's vocabulary (`agent` | `instance_default`), not a new string.
@@ -439,6 +440,74 @@ pub async fn serve_candidates(
     }))
 }
 
+/// One item `mem_serve_items` says may ride this answer (#3169).
+#[derive(Debug, Clone)]
+pub struct ServeItem {
+    pub id: Uuid,
+    /// The channel the item is stored in (the answer's own channel, except in the 1:1 agent DM,
+    /// where the requester's permission union applies).
+    pub channel_id: Uuid,
+    /// `channel` | `personal`.
+    pub space_kind: String,
+    /// `decision` | `fact` | `commitment` | `preference` | `procedure`.
+    pub kind: String,
+    /// `extracted` | `confirmed` | `curated` | `synthesized`.
+    pub origin: String,
+    pub body: String,
+    /// The fact's own time (the newest evidence message), not the time it was recorded.
+    pub valid_from: DateTime<Utc>,
+    pub source_count: i32,
+}
+
+/// What the database lets ride this run's answer from the item layer, in relevance order.
+#[derive(Debug, Clone)]
+pub struct ServeItems {
+    pub requester: Uuid,
+    pub answer_channel: Uuid,
+    pub items: Vec<ServeItem>,
+}
+
+/// Items for `run_id`'s answer, or `None` (no rows: a switch is off, no human requester, no
+/// usable query, or nothing matched). The requester, the answer channel and the query all come
+/// from the run row inside the function; nothing here is an input a caller could choose.
+pub async fn serve_items(
+    conn: &mut PgConnection,
+    run_id: Uuid,
+    limit: i32,
+    body_max: i32,
+) -> Result<Option<ServeItems>, DbError> {
+    let rows = sqlx::query(
+        "SELECT requester_member_id, answer_channel_id, item_id, item_channel_id, space_kind, kind, \
+                origin, body, valid_from, source_count \
+           FROM mem_serve_items($1, $2, $3)",
+    )
+    .bind(run_id)
+    .bind(limit)
+    .bind(body_max)
+    .fetch_all(&mut *conn)
+    .await?;
+    let Some(first) = rows.first() else {
+        return Ok(None);
+    };
+    Ok(Some(ServeItems {
+        requester: first.get("requester_member_id"),
+        answer_channel: first.get("answer_channel_id"),
+        items: rows
+            .iter()
+            .map(|row| ServeItem {
+                id: row.get("item_id"),
+                channel_id: row.get("item_channel_id"),
+                space_kind: row.get("space_kind"),
+                kind: row.get("kind"),
+                origin: row.get("origin"),
+                body: row.get("body"),
+                valid_from: row.get("valid_from"),
+                source_count: row.get("source_count"),
+            })
+            .collect(),
+    }))
+}
+
 /// The digest ids already recorded on `run_id`'s receipt, `None` when there is no receipt.
 pub async fn serving_of(
     conn: &mut PgConnection,
@@ -450,25 +519,41 @@ pub async fn serving_of(
         .await?)
 }
 
-/// Write the run's receipt (`mem_serving`). Re-checks the audience rule for every digest, so a
-/// digest that went stale or unreadable between the read and now fails with 23514 and nothing
-/// is recorded. A second call for the same run is 23505.
+/// The digest **and item** ids already recorded on `run_id`'s receipt, `None` when there is no
+/// receipt. A retried job compares both with the block it just built (#3163 F2 covers items too).
+pub async fn serving_record_of(
+    conn: &mut PgConnection,
+    run_id: Uuid,
+) -> Result<Option<(Vec<Uuid>, Vec<Uuid>)>, DbError> {
+    let row =
+        sqlx::query("SELECT served_digest_ids, served_item_ids FROM mem_serving_record_of($1)")
+            .bind(run_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+    Ok(row.map(|row| (row.get("served_digest_ids"), row.get("served_item_ids"))))
+}
+
+/// Write the run's receipt (`mem_serving`). Re-checks the audience rule for every digest and item,
+/// and that `requester` is the run's own, so a digest or item that went stale or unreadable
+/// between the read and now fails with 23514 and nothing is recorded. A second call for the same
+/// run is 23505.
+#[allow(clippy::too_many_arguments)]
 pub async fn record_serving(
     conn: &mut PgConnection,
     run_id: Uuid,
     requester: Uuid,
     digest_ids: &[Uuid],
+    item_ids: &[Uuid],
     withheld: i32,
     budget_chars: i32,
     used_chars: i32,
 ) -> Result<Uuid, DbError> {
-    let none: [Uuid; 0] = [];
     Ok(
         sqlx::query_scalar("SELECT mem_record_serving($1, $2, $3, $4, $5, $6, $7)")
             .bind(run_id)
             .bind(requester)
             .bind(digest_ids)
-            .bind(&none[..])
+            .bind(item_ids)
             .bind(withheld)
             .bind(budget_chars)
             .bind(used_chars)
@@ -960,7 +1045,7 @@ pub fn local_day_bounds(
 /// model; a hit replaces the body with a placeholder (the message still counts as evidence,
 /// so deleting it still hides the digest). A conservative token-shape scan, not a guarantee.
 pub fn looks_like_secret(text: &str) -> bool {
-    const PREFIXES: [&str; 12] = [
+    const PREFIXES: [&str; 15] = [
         "sk-",
         "sk_live_",
         "sk_test_",
@@ -973,6 +1058,9 @@ pub fn looks_like_secret(text: &str) -> bool {
         "glpat-",
         "AIza",
         "AKIA",
+        "ya29.",
+        "SG.",
+        "whsec_",
     ];
     if text.contains("-----BEGIN") && text.contains("PRIVATE KEY") {
         return true;
@@ -996,6 +1084,60 @@ pub fn looks_like_secret(text: &str) -> bool {
         // JWT: three base64url parts, the first starting `eyJ`.
         token.starts_with("eyJ") && token.matches('.').count() == 2
     }) || has_bearer_credential(text)
+        || has_url_credential(text)
+        || has_prose_password(text)
+}
+
+/// `scheme://user:pass@host` — a password inside a URL.
+fn has_url_credential(text: &str) -> bool {
+    text.match_indices("://").any(|(at, _)| {
+        let scheme_ok = text[..at]
+            .chars()
+            .rev()
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'))
+            .last()
+            .is_some_and(|c| c.is_ascii_alphabetic());
+        let rest = &text[at + 3..];
+        let authority: &str = rest
+            .split(|c: char| c.is_whitespace() || c == '/')
+            .next()
+            .unwrap_or("");
+        scheme_ok
+            && authority.split_once('@').is_some_and(|(userinfo, _)| {
+                userinfo
+                    .split_once(':')
+                    .is_some_and(|(user, pass)| !user.is_empty() && !pass.is_empty())
+            })
+    })
+}
+
+/// Prose such as 「비밀번호는 abc12345」 / "password is hunter22": a password keyword, an optional
+/// connector, then a value whose first six characters are printable ASCII and which holds a digit
+/// or a symbol (so 「비밀번호는 짧게」 and "password is required" are prose, not secrets).
+fn has_prose_password(text: &str) -> bool {
+    const KEYWORDS: [&str; 6] = ["비밀번호", "패스워드", "암호", "password", "passwd", "pwd"];
+    let lower = text.to_lowercase();
+    KEYWORDS.iter().any(|keyword| {
+        lower.match_indices(keyword).any(|(at, _)| {
+            let mut rest = lower[at + keyword.len()..].trim_start();
+            if let Some(stripped) = rest
+                .strip_prefix(['는', '은', '이', '가', ':', '='])
+                .or_else(|| {
+                    let after = rest.strip_prefix("is")?;
+                    after.starts_with(char::is_whitespace).then_some(after)
+                })
+            {
+                rest = stripped.trim_start();
+            }
+            let token = rest.split_whitespace().next().unwrap_or("");
+            let head_ok = token.chars().take(6).count() == 6
+                && token.chars().take(6).all(|c| c.is_ascii_graphic());
+            head_ok
+                && token
+                    .chars()
+                    .any(|c| c.is_ascii_digit() || "!@#$%^&*".contains(c))
+        })
+    })
 }
 
 fn has_bearer_credential(text: &str) -> bool {
@@ -1051,6 +1193,27 @@ mod tests {
             "PR #123 머지했어요 https://github.com/o/r/pull/123",
         ] {
             assert!(!looks_like_secret(prose), "{prose}");
+        }
+    }
+
+    #[test]
+    fn the_shared_secret_shape_list_agrees_with_the_rust_check() {
+        // The same JSON drives the SQL `mem_looks_like_secret` test (momo-server, PG).
+        let shapes: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/memory_secret_shapes.json"))
+                .expect("fixture json");
+        for parts in shapes["positives"].as_array().unwrap() {
+            let text: String = parts
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|p| p.as_str().unwrap())
+                .collect();
+            assert!(looks_like_secret(&text), "should be a secret shape: {text}");
+        }
+        for text in shapes["negatives"].as_array().unwrap() {
+            let text = text.as_str().unwrap();
+            assert!(!looks_like_secret(text), "should be prose: {text}");
         }
     }
 

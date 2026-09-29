@@ -159,6 +159,22 @@ pub const WORK_SESSION_LOGIN_HANDOFF: &str = "work.session.login_handoff";
 /// 2026-09-27, #2952 review).
 pub const CARD_SUGGEST: &str = "card_suggest";
 
+/// `memory_suggest` — propose 「기억해 둘게요」 to the channel (ADR-0196 D4/D9, #3169).
+///
+/// Arguments: `{"kind": "decision", "text": "…", "evidence": [12, 14], "subject": "…"?}` and
+/// nothing else — [`crate::memory_suggest::validate_suggestion`] is the whole argument gate and
+/// `mem_propose_item` (migration 105) the whole data gate.
+///
+/// ## Why this one runs without a card of its own (same exception as [`CARD_SUGGEST`])
+///
+/// It makes nothing readable. The one write is a **pending** `mem_proposal` row that search,
+/// serving and the memory browser never read; it becomes a memory only when a person in the
+/// channel accepts it through the API, which re-validates all of its evidence. Gating a
+/// suggestion behind an approval card would put a card in front of the card that asks 「기억할까요?」.
+/// So [`approval_reason`] exempts it **by name**, before any grant is read, and — like
+/// `card_suggest` — it runs only if the agent's profile turned it on ([`exempt_tool_not_enabled`]).
+pub const MEMORY_SUGGEST: &str = "memory_suggest";
+
 /// `approval.action_type` for a tool call, matching Swift
 /// `ApprovalRuntime.pausePlan` (`ApprovalRuntime.swift:36-45`).
 ///
@@ -190,6 +206,7 @@ pub const CATALOG: &[&str] = &[
     WORK_SESSION_SPAWN,
     WORK_SESSION_LOGIN_HANDOFF,
     CARD_SUGGEST,
+    MEMORY_SUGGEST,
 ];
 
 /// Capabilities the product already has that a **future** batch may expose as
@@ -330,6 +347,19 @@ pub fn catalog_definitions() -> Vec<ToolDefinition> {
             // title is not its to write.
             description: "Show the person who asked you a card they can act on              in place — use `ai.connect` when they ask to connect an AI              subscription or a team API key. Put your short answer in `body`;              the card itself is drawn by their app from their own settings, so              do not explain settings steps and never ask for a key, token or              password. The card's title and recipient are set by the server.",
             parameters: card_suggest_parameters(),
+        },
+        ToolDefinition {
+            name: MEMORY_SUGGEST,
+            // Three things change model behaviour: when (only what people clearly settled),
+            // what evidence is (the #numbers in its window), and that it cannot remember by
+            // itself — a person accepts, so it must ask rather than announce.
+            description: "Offer to remember a decision, commitment or fact the people in this \
+             channel clearly settled. Cite the #numbers printed before their messages as \
+             `evidence`. This only makes a proposal: nothing is remembered until a person \
+             accepts it, so ask 「기억해 둘까요?」 and never say you already remembered it. \
+             Never propose guesses, small talk, credentials, or states that live in a \
+             connected tool (PRs, deploys, metrics).",
+            parameters: crate::memory_suggest::parameters(),
         },
     ]
 }
@@ -711,7 +741,9 @@ pub fn approval_reason(tool_name: &str, grants: Option<&[ToolGrant]>) -> Approva
     // ADR-0186 증보 G1 — the one approval-default exception, bound to one name.
     // Checked before the grants are read so that a grant can neither remove it
     // nor be the thing that extends it to anything else.
-    if normalize(tool_name) == normalize(CARD_SUGGEST) {
+    if normalize(tool_name) == normalize(CARD_SUGGEST)
+        || normalize(tool_name) == normalize(MEMORY_SUGGEST)
+    {
         return ApprovalReason::SuggestionOnly;
     }
     let Some(grants) = grants else {
@@ -1219,7 +1251,35 @@ mod tests {
             approval_reason(CARD_SUGGEST, Some(&demanding)),
             ApprovalReason::SuggestionOnly
         );
-        for other in CATALOG.iter().filter(|name| **name != CARD_SUGGEST) {
+        // The second by-name exemption (`memory_suggest`, #3169) is exactly as narrow: a grant
+        // cannot move it, and it lends nothing to a neighbour.
+        for spelling in [MEMORY_SUGGEST, "Memory_Suggest", "  memory-suggest  "] {
+            assert_eq!(
+                approval_reason(spelling, None),
+                ApprovalReason::SuggestionOnly
+            );
+        }
+        let demanding_memory = [ToolGrant {
+            tool_name: MEMORY_SUGGEST.to_string(),
+            approval_policy: Some("require_approval".to_string()),
+            ..ToolGrant::default()
+        }];
+        assert_eq!(
+            approval_reason(MEMORY_SUGGEST, Some(&demanding_memory)),
+            ApprovalReason::SuggestionOnly
+        );
+        for near in [
+            "memory.suggest",
+            "memory_suggestion",
+            "memorysuggest",
+            "memory_add",
+        ] {
+            assert!(requires_approval(near, None), "{near}");
+        }
+        for other in CATALOG
+            .iter()
+            .filter(|name| **name != CARD_SUGGEST && **name != MEMORY_SUGGEST)
+        {
             assert!(requires_approval(other, None), "{other} lost its gate");
             // A grant *named* card_suggest does not reach another tool.
             let borrowed = [ToolGrant {
@@ -1235,6 +1295,36 @@ mod tests {
             assert!(requires_approval(near, None), "{near}");
         }
         assert!(ApprovalReason::SuggestionOnly.as_str() == "suggestion_only");
+    }
+
+    /// `memory_suggest` runs only when the profile offered it: the by-name exemption removes
+    /// the approval backstop, so the profile is what stands in for it (#2959 M3 rule).
+    #[test]
+    fn memory_suggest_runs_only_when_the_profile_turned_it_on() {
+        let off = enabled_tool_definitions(&[CARD_SUGGEST.to_string()]);
+        assert!(exempt_tool_not_enabled(MEMORY_SUGGEST, &off));
+        let on = enabled_tool_definitions(&[MEMORY_SUGGEST.to_string()]);
+        assert!(!exempt_tool_not_enabled(MEMORY_SUGGEST, &on));
+        assert!(is_executable(MEMORY_SUGGEST));
+        assert_eq!(wire_tool_name(MEMORY_SUGGEST), "memory_suggest");
+        // The definition is a closed object; its keys are the ones the gate reads.
+        let definition = catalog_definitions()
+            .into_iter()
+            .find(|definition| definition.name == MEMORY_SUGGEST)
+            .expect("in the catalog");
+        assert_eq!(definition.parameters["additionalProperties"], false);
+        let mut keys: Vec<&str> = definition.parameters["properties"]
+            .as_object()
+            .expect("properties")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        let mut gate = crate::memory_suggest::ARGUMENT_KEYS.to_vec();
+        gate.sort_unstable();
+        assert_eq!(keys, gate);
+        assert!(crate::memory_suggest::directive(&on).is_some());
+        assert!(crate::memory_suggest::directive(&off).is_none());
     }
 
     /// The worker's definition is built from the allow-list, and it is a closed

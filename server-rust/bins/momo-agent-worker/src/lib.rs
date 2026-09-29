@@ -78,6 +78,7 @@ pub mod completion_report;
 pub mod config;
 pub mod context;
 pub mod egress;
+pub mod extract;
 pub mod oauth;
 pub mod partial;
 pub mod payload;
@@ -777,6 +778,9 @@ impl AgentWorker {
                 // byte rather than a turn carrying an emptied block.
                 report_protocol: self.config.report_protocol_block(),
                 card_suggest: momo_agent::card_suggest::card_suggest_directive(&momo_tools),
+                // #3169 — the rule and the `#number` handles ride together with the tool, or not at all.
+                memory_suggest: momo_agent::memory_suggest::directive(&momo_tools),
+                cite_seq: momo_agent::memory_suggest::is_offered(&momo_tools),
                 memory: memory_block.as_deref(),
             },
             self.config.max_context_chars,

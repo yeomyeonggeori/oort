@@ -1,0 +1,4673 @@
+{
+ "queries": {
+  "josa": 10,
+  "two_syllable": 10,
+  "spacing": 10,
+  "english": 10,
+  "typo": 10,
+  "synonym": 12,
+  "translit": 12,
+  "abbrev": 10,
+  "question": 12
+ },
+ "pools": [
+  900,
+  10900,
+  50900
+ ],
+ "pg": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+ "pgvector": "0.8.5",
+ "kw_current_latency_ms": {
+  "900": {
+   "p50": 4.59,
+   "p95": 17.41,
+   "n": 288
+  },
+  "10900": {
+   "p50": 52.6,
+   "p95": 207.27,
+   "n": 288
+  },
+  "50900": {
+   "p50": 235.99,
+   "p95": 940.71,
+   "n": 288
+  }
+ },
+ "probe": {
+  "kw_current": {
+   "top1": 5,
+   "top3": 6,
+   "found": 6,
+   "mrr": 0.458,
+   "ranks": [
+    null,
+    1,
+    null,
+    1,
+    null,
+    null,
+    1,
+    1,
+    null,
+    1,
+    2,
+    null
+   ]
+  }
+ },
+ "quality": {
+  "900": {
+   "kw_current": {
+    "recall@10": 0.557,
+    "mrr": 0.585,
+    "by_kind": {
+     "josa": {
+      "recall@10": 1.0,
+      "mrr": 1.0
+     },
+     "two_syllable": {
+      "recall@10": 1.0,
+      "mrr": 1.0
+     },
+     "spacing": {
+      "recall@10": 0.975,
+      "mrr": 1.0
+     },
+     "english": {
+      "recall@10": 1.0,
+      "mrr": 1.0
+     },
+     "typo": {
+      "recall@10": 0.7,
+      "mrr": 0.763
+     },
+     "synonym": {
+      "recall@10": 0.0,
+      "mrr": 0.0,
+      "word_hit@10": 0.0
+     },
+     "translit": {
+      "recall@10": 0.0,
+      "mrr": 0.0,
+      "word_hit@10": 0.0
+     },
+     "abbrev": {
+      "recall@10": 0.463,
+      "mrr": 0.443,
+      "word_hit@10": 1.0
+     },
+     "question": {
+      "recall@10": 0.177,
+      "mrr": 0.343,
+      "word_hit@10": 0.692
+     }
+    }
+   },
+   "kw_bigram": {
+    "recall@10": 0.423,
+    "mrr": 0.504,
+    "by_kind": {
+     "josa": {
+      "recall@10": 0.55,
+      "mrr": 0.914
+     },
+     "two_syllable": {
+      "recall@10": 1.0,
+      "mrr": 1.0
+     },
+     "spacing": {
+      "recall@10": 1.0,
+      "mrr": 0.95
+     },
+     "english": {
+      "recall@10": 1.0,
+      "mrr": 1.0
+     },
+     "typo": {
+      "recall@10": 0.175,
+      "mrr": 0.387
+     },
+     "synonym": {
+      "recall@10": 0.0,
+      "mrr": 0.0,
+      "word_hit@10": 0.0
+     },
+     "translit": {
+      "recall@10": 0.0,
+      "mrr": 0.0,
+      "word_hit@10": 0.0
+     },
+     "abbrev": {
+      "recall@10": 0.275,
+      "mrr": 0.324,
+      "word_hit@10": 0.81
+     },
+     "question": {
+      "recall@10": 0.052,
+      "mrr": 0.219,
+      "word_hit@10": 0.483
+     }
+    }
+   }
+  },
+  "10900": {
+   "kw_current": {
+    "recall@10": 0.508,
+    "mrr": 0.55,
+    "by_kind": {
+     "josa": {
+      "recall@10": 1.0,
+      "mrr": 1.0
+     },
+     "two_syllable": {
+      "recall@10": 1.0,
+      "mrr": 1.0
+     },
+     "spacing": {
+      "recall@10": 0.963,
+      "mrr": 1.0
+     },
+     "english": {
+      "recall@10": 1.0,
+      "mrr": 1.0
+     },
+     "typo": {
+      "recall@10": 0.688,
+      "mrr": 0.753
+     },
+     "synonym": {
+      "recall@10": 0.0,
+      "mrr": 0.0,
+      "word_hit@10": 0.0
+     },
+     "translit": {
+      "recall@10": 0.0,
+      "mrr": 0.0,
+      "word_hit@10": 0.0
+     },
+     "abbrev": {
+      "recall@10": 0.087,
+      "mrr": 0.283,
+      "word_hit@10": 1.0
+     },
+     "question": {
+      "recall@10": 0.115,
+      "mrr": 0.203,
+      "word_hit@10": 0.883
+     }
+    }
+   },
+   "kw_bigram": {
+    "recall@10": 0.392,
+    "mrr": 0.503,
+    "by_kind": {
+     "josa": {
+      "recall@10": 0.25,
+      "mrr": 0.9
+     },
+     "two_syllable": {
+      "recall@10": 1.0,
+      "mrr": 1.0
+     },
+     "spacing": {
+      "recall@10": 1.0,
+      "mrr": 0.95
+     },
+     "english": {
+      "recall@10": 1.0,
+      "mrr": 1.0
+     },
+     "typo": {
+      "recall@10": 0.175,
+      "mrr": 0.387
+     },
+     "synonym": {
+      "recall@10": 0.0,
+      "mrr": 0.0,
+      "word_hit@10": 0.0
+     },
+     "translit": {
+      "recall@10": 0.0,
+      "mrr": 0.0,
+      "word_hit@10": 0.0
+     },
+     "abbrev": {
+      "recall@10": 0.275,
+      "mrr": 0.324,
+      "word_hit@10": 0.84
+     },
+     "question": {
+      "recall@10": 0.052,
+      "mrr": 0.219,
+      "word_hit@10": 0.817
+     }
+    }
+   }
+  },
+  "50900": {
+   "kw_current": {
+    "recall@10": 0.501,
+    "mrr": 0.54,
+    "by_kind": {
+     "josa": {
+      "recall@10": 1.0,
+      "mrr": 1.0
+     },
+     "two_syllable": {
+      "recall@10": 1.0,
+      "mrr": 1.0
+     },
+     "spacing": {
+      "recall@10": 0.938,
+      "mrr": 1.0
+     },
+     "english": {
+      "recall@10": 1.0,
+      "mrr": 1.0
+     },
+     "typo": {
+      "recall@10": 0.688,
+      "mrr": 0.753
+     },
+     "synonym": {
+      "recall@10": 0.0,
+      "mrr": 0.0,
+      "word_hit@10": 0.0
+     },
+     "translit": {
+      "recall@10": 0.0,
+      "mrr": 0.0,
+      "word_hit@10": 0.0
+     },
+     "abbrev": {
+      "recall@10": 0.062,
+      "mrr": 0.26,
+      "word_hit@10": 1.0
+     },
+     "question": {
+      "recall@10": 0.104,
+      "mrr": 0.142,
+      "word_hit@10": 1.0
+     }
+    }
+   },
+   "kw_bigram": {
+    "recall@10": 0.392,
+    "mrr": 0.503,
+    "by_kind": {
+     "josa": {
+      "recall@10": 0.25,
+      "mrr": 0.9
+     },
+     "two_syllable": {
+      "recall@10": 1.0,
+      "mrr": 1.0
+     },
+     "spacing": {
+      "recall@10": 1.0,
+      "mrr": 0.95
+     },
+     "english": {
+      "recall@10": 1.0,
+      "mrr": 1.0
+     },
+     "typo": {
+      "recall@10": 0.175,
+      "mrr": 0.387
+     },
+     "synonym": {
+      "recall@10": 0.0,
+      "mrr": 0.0,
+      "word_hit@10": 0.0
+     },
+     "translit": {
+      "recall@10": 0.0,
+      "mrr": 0.0,
+      "word_hit@10": 0.0
+     },
+     "abbrev": {
+      "recall@10": 0.275,
+      "mrr": 0.324,
+      "word_hit@10": 0.8
+     },
+     "question": {
+      "recall@10": 0.052,
+      "mrr": 0.219,
+      "word_hit@10": 0.8
+     }
+    }
+   }
+  }
+ },
+ "models": {
+  "e5-small": {
+   "meta": {
+    "batch32_docs_per_s": 897.6974769637619,
+    "batch32_ms_per_doc": 1.1139610232416504,
+    "dim": 384,
+    "docs": 50900,
+    "load_s": 0.500200166,
+    "model": "e5-small",
+    "queries": 96,
+    "query_ms_p50": 3.15525,
+    "query_ms_p95": 4.388541,
+    "single_doc_ms_p50": 4.6667499999999995,
+    "single_doc_ms_p95": 5.3386249999999995
+   },
+   "quality": {
+    "900": {
+     "vector": {
+      "recall@10": 0.604,
+      "mrr": 0.756,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.863,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.562,
+        "mrr": 0.792
+       },
+       "synonym": {
+        "recall@10": 0.135,
+        "mrr": 0.234,
+        "word_hit@10": 0.408
+       },
+       "translit": {
+        "recall@10": 0.208,
+        "mrr": 0.554,
+        "word_hit@10": 0.5
+       },
+       "abbrev": {
+        "recall@10": 0.637,
+        "mrr": 0.864,
+        "word_hit@10": 0.96
+       },
+       "question": {
+        "recall@10": 0.344,
+        "mrr": 0.547,
+        "word_hit@10": 0.867
+       }
+      }
+     },
+     "rrf(vector+kw_current)": {
+      "recall@10": 0.632,
+      "mrr": 0.743,
+      "by_kind": {
+       "josa": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.65,
+        "mrr": 0.82
+       },
+       "synonym": {
+        "recall@10": 0.135,
+        "mrr": 0.234,
+        "word_hit@10": 0.408
+       },
+       "translit": {
+        "recall@10": 0.208,
+        "mrr": 0.554,
+        "word_hit@10": 0.5
+       },
+       "abbrev": {
+        "recall@10": 0.625,
+        "mrr": 0.8,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.312,
+        "mrr": 0.473,
+        "word_hit@10": 0.858
+       }
+      }
+     },
+     "rrf(vector+kw_bigram)": {
+      "recall@10": 0.585,
+      "mrr": 0.707,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.475,
+        "mrr": 0.635
+       },
+       "synonym": {
+        "recall@10": 0.115,
+        "mrr": 0.177,
+        "word_hit@10": 0.342
+       },
+       "translit": {
+        "recall@10": 0.208,
+        "mrr": 0.554,
+        "word_hit@10": 0.5
+       },
+       "abbrev": {
+        "recall@10": 0.512,
+        "mrr": 0.717,
+        "word_hit@10": 0.99
+       },
+       "question": {
+        "recall@10": 0.219,
+        "mrr": 0.468,
+        "word_hit@10": 0.792
+       }
+      }
+     },
+     "rrf_w(vector*1+kw_current*2)": {
+      "recall@10": 0.624,
+      "mrr": 0.739,
+      "by_kind": {
+       "josa": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.688,
+        "mrr": 0.812
+       },
+       "synonym": {
+        "recall@10": 0.135,
+        "mrr": 0.234,
+        "word_hit@10": 0.408
+       },
+       "translit": {
+        "recall@10": 0.208,
+        "mrr": 0.554,
+        "word_hit@10": 0.5
+       },
+       "abbrev": {
+        "recall@10": 0.6,
+        "mrr": 0.779,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.24,
+        "mrr": 0.468,
+        "word_hit@10": 0.8
+       }
+      }
+     },
+     "rrf(vector+kw_current+kw_bigram)": {
+      "recall@10": 0.592,
+      "mrr": 0.696,
+      "by_kind": {
+       "josa": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.512,
+        "mrr": 0.787
+       },
+       "synonym": {
+        "recall@10": 0.115,
+        "mrr": 0.177,
+        "word_hit@10": 0.342
+       },
+       "translit": {
+        "recall@10": 0.208,
+        "mrr": 0.554,
+        "word_hit@10": 0.5
+       },
+       "abbrev": {
+        "recall@10": 0.55,
+        "mrr": 0.642,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.198,
+        "mrr": 0.317,
+        "word_hit@10": 0.733
+       }
+      }
+     }
+    },
+    "10900": {
+     "vector": {
+      "recall@10": 0.493,
+      "mrr": 0.621,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.738,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.875,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.35,
+        "mrr": 0.524
+       },
+       "synonym": {
+        "recall@10": 0.031,
+        "mrr": 0.044,
+        "word_hit@10": 0.333
+       },
+       "translit": {
+        "recall@10": 0.188,
+        "mrr": 0.249,
+        "word_hit@10": 0.617
+       },
+       "abbrev": {
+        "recall@10": 0.425,
+        "mrr": 0.775,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.125,
+        "mrr": 0.262,
+        "word_hit@10": 0.925
+       }
+      }
+     },
+     "rrf(vector+kw_current)": {
+      "recall@10": 0.565,
+      "mrr": 0.64,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.575,
+        "mrr": 0.8
+       },
+       "synonym": {
+        "recall@10": 0.031,
+        "mrr": 0.044,
+        "word_hit@10": 0.333
+       },
+       "translit": {
+        "recall@10": 0.188,
+        "mrr": 0.249,
+        "word_hit@10": 0.617
+       },
+       "abbrev": {
+        "recall@10": 0.487,
+        "mrr": 0.62,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.135,
+        "mrr": 0.308,
+        "word_hit@10": 0.933
+       }
+      }
+     },
+     "rrf(vector+kw_bigram)": {
+      "recall@10": 0.54,
+      "mrr": 0.63,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.725,
+        "mrr": 0.925
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.537,
+        "mrr": 0.745
+       },
+       "synonym": {
+        "recall@10": 0.01,
+        "mrr": 0.021,
+        "word_hit@10": 0.25
+       },
+       "translit": {
+        "recall@10": 0.188,
+        "mrr": 0.249,
+        "word_hit@10": 0.617
+       },
+       "abbrev": {
+        "recall@10": 0.525,
+        "mrr": 0.692,
+        "word_hit@10": 0.93
+       },
+       "question": {
+        "recall@10": 0.135,
+        "mrr": 0.3,
+        "word_hit@10": 0.908
+       }
+      }
+     },
+     "rrf_w(vector*1+kw_current*2)": {
+      "recall@10": 0.574,
+      "mrr": 0.625,
+      "by_kind": {
+       "josa": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.6,
+        "mrr": 0.808
+       },
+       "synonym": {
+        "recall@10": 0.031,
+        "mrr": 0.044,
+        "word_hit@10": 0.333
+       },
+       "translit": {
+        "recall@10": 0.188,
+        "mrr": 0.249,
+        "word_hit@10": 0.617
+       },
+       "abbrev": {
+        "recall@10": 0.487,
+        "mrr": 0.526,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.167,
+        "mrr": 0.26,
+        "word_hit@10": 0.883
+       }
+      }
+     },
+     "rrf(vector+kw_current+kw_bigram)": {
+      "recall@10": 0.561,
+      "mrr": 0.634,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.887,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.6,
+        "mrr": 0.775
+       },
+       "synonym": {
+        "recall@10": 0.01,
+        "mrr": 0.021,
+        "word_hit@10": 0.25
+       },
+       "translit": {
+        "recall@10": 0.188,
+        "mrr": 0.249,
+        "word_hit@10": 0.617
+       },
+       "abbrev": {
+        "recall@10": 0.562,
+        "mrr": 0.65,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.083,
+        "mrr": 0.278,
+        "word_hit@10": 0.892
+       }
+      }
+     }
+    },
+    "50900": {
+     "vector": {
+      "recall@10": 0.43,
+      "mrr": 0.576,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.637,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.825,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.887,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.95,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.275,
+        "mrr": 0.45
+       },
+       "synonym": {
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "word_hit@10": 0.35
+       },
+       "translit": {
+        "recall@10": 0.104,
+        "mrr": 0.168,
+        "word_hit@10": 0.533
+       },
+       "abbrev": {
+        "recall@10": 0.312,
+        "mrr": 0.634,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.094,
+        "mrr": 0.205,
+        "word_hit@10": 0.925
+       }
+      }
+     },
+     "rrf(vector+kw_current)": {
+      "recall@10": 0.504,
+      "mrr": 0.576,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.925,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.95,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.487,
+        "mrr": 0.667
+       },
+       "synonym": {
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "word_hit@10": 0.35
+       },
+       "translit": {
+        "recall@10": 0.104,
+        "mrr": 0.168,
+        "word_hit@10": 0.533
+       },
+       "abbrev": {
+        "recall@10": 0.237,
+        "mrr": 0.442,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.115,
+        "mrr": 0.185,
+        "word_hit@10": 0.958
+       }
+      }
+     },
+     "rrf(vector+kw_bigram)": {
+      "recall@10": 0.486,
+      "mrr": 0.629,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.575,
+        "mrr": 0.925
+       },
+       "two_syllable": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.425,
+        "mrr": 0.761
+       },
+       "synonym": {
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "word_hit@10": 0.25
+       },
+       "translit": {
+        "recall@10": 0.104,
+        "mrr": 0.168,
+        "word_hit@10": 0.533
+       },
+       "abbrev": {
+        "recall@10": 0.45,
+        "mrr": 0.767,
+        "word_hit@10": 0.9
+       },
+       "question": {
+        "recall@10": 0.083,
+        "mrr": 0.322,
+        "word_hit@10": 0.842
+       }
+      }
+     },
+     "rrf_w(vector*1+kw_current*2)": {
+      "recall@10": 0.501,
+      "mrr": 0.564,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.95,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.575,
+        "mrr": 0.679
+       },
+       "synonym": {
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "word_hit@10": 0.35
+       },
+       "translit": {
+        "recall@10": 0.104,
+        "mrr": 0.168,
+        "word_hit@10": 0.533
+       },
+       "abbrev": {
+        "recall@10": 0.062,
+        "mrr": 0.3,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.104,
+        "mrr": 0.197,
+        "word_hit@10": 1.0
+       }
+      }
+     },
+     "rrf(vector+kw_current+kw_bigram)": {
+      "recall@10": 0.536,
+      "mrr": 0.609,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.787,
+        "mrr": 0.933
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.725,
+        "mrr": 0.703
+       },
+       "synonym": {
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "word_hit@10": 0.25
+       },
+       "translit": {
+        "recall@10": 0.104,
+        "mrr": 0.168,
+        "word_hit@10": 0.533
+       },
+       "abbrev": {
+        "recall@10": 0.388,
+        "mrr": 0.603,
+        "word_hit@10": 0.95
+       },
+       "question": {
+        "recall@10": 0.104,
+        "mrr": 0.333,
+        "word_hit@10": 1.0
+       }
+      }
+     }
+    }
+   },
+   "probe": {
+    "vector": {
+     "top1": 10,
+     "top3": 11,
+     "found": 12,
+     "mrr": 0.889,
+     "ranks": [
+      6,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      2,
+      1
+     ]
+    },
+    "rrf(vector+kw_current)": {
+     "top1": 11,
+     "top3": 11,
+     "found": 12,
+     "mrr": 0.931,
+     "ranks": [
+      6,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    }
+   },
+   "hnsw": {
+    "1000": {
+     "build_s": 0.2,
+     "index_bytes": 2056192,
+     "heap_bytes": 2129920,
+     "latency_ms": {
+      "p50": 0.23,
+      "p95": 0.25,
+      "n": 289
+     },
+     "ann_recall@10": 1.0,
+     "filtered_ws_1_of_50": {
+      "plain": {
+       "recall": 1.0,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": false,
+       "latency_ms_p50": 0.13,
+       "latency_ms_p95": 0.15
+      },
+      "iterative_relaxed": {
+       "recall": 1.0,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": false,
+       "latency_ms_p50": 0.12,
+       "latency_ms_p95": 0.14
+      }
+     }
+    },
+    "10000": {
+     "build_s": 0.7,
+     "index_bytes": 20488192,
+     "heap_bytes": 16809984,
+     "latency_ms": {
+      "p50": 0.34,
+      "p95": 0.46,
+      "n": 289
+     },
+     "ann_recall@10": 0.981,
+     "filtered_ws_1_of_50": {
+      "plain": {
+       "recall": 0.084,
+       "mean_rows_returned": 0.84,
+       "uses_hnsw_index": true,
+       "latency_ms_p50": 0.34,
+       "latency_ms_p95": 0.5
+      },
+      "iterative_relaxed": {
+       "recall": 0.992,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": true,
+       "latency_ms_p50": 2.54,
+       "latency_ms_p95": 3.32
+      }
+     }
+    },
+    "50000": {
+     "build_s": 4.1,
+     "index_bytes": 102359040,
+     "heap_bytes": 82362368,
+     "latency_ms": {
+      "p50": 0.4,
+      "p95": 0.72,
+      "n": 289
+     },
+     "ann_recall@10": 0.917,
+     "filtered_ws_1_of_50": {
+      "plain": {
+       "recall": 0.1,
+       "mean_rows_returned": 1.0,
+       "uses_hnsw_index": true,
+       "latency_ms_p50": 0.43,
+       "latency_ms_p95": 0.82
+      },
+      "iterative_relaxed": {
+       "recall": 0.988,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": true,
+       "latency_ms_p50": 4.53,
+       "latency_ms_p95": 6.39
+      }
+     }
+    }
+   }
+  },
+  "e5-small-q8": {
+   "meta": {
+    "batch32_docs_per_s": 710.7399533228017,
+    "batch32_ms_per_doc": 1.4069843623182712,
+    "dim": 384,
+    "docs": 50900,
+    "load_s": 0.452267167,
+    "model": "e5-small-q8",
+    "queries": 96,
+    "query_ms_p50": 2.810208,
+    "query_ms_p95": 4.527,
+    "single_doc_ms_p50": 4.877208,
+    "single_doc_ms_p95": 6.128208
+   },
+   "quality": {
+    "900": {
+     "vector": {
+      "recall@10": 0.604,
+      "mrr": 0.741,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.85,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.938,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.575,
+        "mrr": 0.728
+       },
+       "synonym": {
+        "recall@10": 0.125,
+        "mrr": 0.204,
+        "word_hit@10": 0.4
+       },
+       "translit": {
+        "recall@10": 0.24,
+        "mrr": 0.486,
+        "word_hit@10": 0.525
+       },
+       "abbrev": {
+        "recall@10": 0.65,
+        "mrr": 0.864,
+        "word_hit@10": 0.96
+       },
+       "question": {
+        "recall@10": 0.333,
+        "mrr": 0.581,
+        "word_hit@10": 0.892
+       }
+      }
+     },
+     "rrf(vector+kw_current)": {
+      "recall@10": 0.634,
+      "mrr": 0.74,
+      "by_kind": {
+       "josa": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.662,
+        "mrr": 0.87
+       },
+       "synonym": {
+        "recall@10": 0.125,
+        "mrr": 0.204,
+        "word_hit@10": 0.4
+       },
+       "translit": {
+        "recall@10": 0.24,
+        "mrr": 0.486,
+        "word_hit@10": 0.525
+       },
+       "abbrev": {
+        "recall@10": 0.625,
+        "mrr": 0.803,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.302,
+        "mrr": 0.498,
+        "word_hit@10": 0.867
+       }
+      }
+     },
+     "rrf(vector+kw_bigram)": {
+      "recall@10": 0.582,
+      "mrr": 0.683,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.425,
+        "mrr": 0.626
+       },
+       "synonym": {
+        "recall@10": 0.104,
+        "mrr": 0.137,
+        "word_hit@10": 0.342
+       },
+       "translit": {
+        "recall@10": 0.24,
+        "mrr": 0.486,
+        "word_hit@10": 0.525
+       },
+       "abbrev": {
+        "recall@10": 0.512,
+        "mrr": 0.667,
+        "word_hit@10": 0.99
+       },
+       "question": {
+        "recall@10": 0.219,
+        "mrr": 0.427,
+        "word_hit@10": 0.792
+       }
+      }
+     },
+     "rrf_w(vector*1+kw_current*2)": {
+      "recall@10": 0.626,
+      "mrr": 0.727,
+      "by_kind": {
+       "josa": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.7,
+        "mrr": 0.746
+       },
+       "synonym": {
+        "recall@10": 0.125,
+        "mrr": 0.204,
+        "word_hit@10": 0.4
+       },
+       "translit": {
+        "recall@10": 0.24,
+        "mrr": 0.486,
+        "word_hit@10": 0.525
+       },
+       "abbrev": {
+        "recall@10": 0.588,
+        "mrr": 0.796,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.24,
+        "mrr": 0.507,
+        "word_hit@10": 0.8
+       }
+      }
+     },
+     "rrf(vector+kw_current+kw_bigram)": {
+      "recall@10": 0.59,
+      "mrr": 0.685,
+      "by_kind": {
+       "josa": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.487,
+        "mrr": 0.792
+       },
+       "synonym": {
+        "recall@10": 0.104,
+        "mrr": 0.137,
+        "word_hit@10": 0.342
+       },
+       "translit": {
+        "recall@10": 0.24,
+        "mrr": 0.486,
+        "word_hit@10": 0.525
+       },
+       "abbrev": {
+        "recall@10": 0.537,
+        "mrr": 0.637,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.188,
+        "mrr": 0.329,
+        "word_hit@10": 0.725
+       }
+      }
+     }
+    },
+    "10900": {
+     "vector": {
+      "recall@10": 0.496,
+      "mrr": 0.615,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.738,
+        "mrr": 0.95
+       },
+       "two_syllable": {
+        "recall@10": 0.887,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.95,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.35,
+        "mrr": 0.48
+       },
+       "synonym": {
+        "recall@10": 0.031,
+        "mrr": 0.035,
+        "word_hit@10": 0.392
+       },
+       "translit": {
+        "recall@10": 0.188,
+        "mrr": 0.221,
+        "word_hit@10": 0.642
+       },
+       "abbrev": {
+        "recall@10": 0.438,
+        "mrr": 0.774,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.135,
+        "mrr": 0.325,
+        "word_hit@10": 0.917
+       }
+      }
+     },
+     "rrf(vector+kw_current)": {
+      "recall@10": 0.564,
+      "mrr": 0.642,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.562,
+        "mrr": 0.864
+       },
+       "synonym": {
+        "recall@10": 0.031,
+        "mrr": 0.035,
+        "word_hit@10": 0.392
+       },
+       "translit": {
+        "recall@10": 0.188,
+        "mrr": 0.221,
+        "word_hit@10": 0.642
+       },
+       "abbrev": {
+        "recall@10": 0.487,
+        "mrr": 0.592,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.135,
+        "mrr": 0.336,
+        "word_hit@10": 0.933
+       }
+      }
+     },
+     "rrf(vector+kw_bigram)": {
+      "recall@10": 0.54,
+      "mrr": 0.629,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.688,
+        "mrr": 0.95
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.525,
+        "mrr": 0.708
+       },
+       "synonym": {
+        "recall@10": 0.021,
+        "mrr": 0.018,
+        "word_hit@10": 0.292
+       },
+       "translit": {
+        "recall@10": 0.188,
+        "mrr": 0.221,
+        "word_hit@10": 0.642
+       },
+       "abbrev": {
+        "recall@10": 0.55,
+        "mrr": 0.687,
+        "word_hit@10": 0.93
+       },
+       "question": {
+        "recall@10": 0.146,
+        "mrr": 0.337,
+        "word_hit@10": 0.908
+       }
+      }
+     },
+     "rrf_w(vector*1+kw_current*2)": {
+      "recall@10": 0.568,
+      "mrr": 0.624,
+      "by_kind": {
+       "josa": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.588,
+        "mrr": 0.863
+       },
+       "synonym": {
+        "recall@10": 0.031,
+        "mrr": 0.035,
+        "word_hit@10": 0.392
+       },
+       "translit": {
+        "recall@10": 0.188,
+        "mrr": 0.221,
+        "word_hit@10": 0.642
+       },
+       "abbrev": {
+        "recall@10": 0.45,
+        "mrr": 0.521,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.156,
+        "mrr": 0.253,
+        "word_hit@10": 0.883
+       }
+      }
+     },
+     "rrf(vector+kw_current+kw_bigram)": {
+      "recall@10": 0.56,
+      "mrr": 0.624,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.875,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.613,
+        "mrr": 0.77
+       },
+       "synonym": {
+        "recall@10": 0.021,
+        "mrr": 0.018,
+        "word_hit@10": 0.292
+       },
+       "translit": {
+        "recall@10": 0.188,
+        "mrr": 0.221,
+        "word_hit@10": 0.642
+       },
+       "abbrev": {
+        "recall@10": 0.537,
+        "mrr": 0.633,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.083,
+        "mrr": 0.25,
+        "word_hit@10": 0.892
+       }
+      }
+     }
+    },
+    "50900": {
+     "vector": {
+      "recall@10": 0.424,
+      "mrr": 0.563,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.637,
+        "mrr": 0.95
+       },
+       "two_syllable": {
+        "recall@10": 0.787,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.863,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.95,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.287,
+        "mrr": 0.425
+       },
+       "synonym": {
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "word_hit@10": 0.342
+       },
+       "translit": {
+        "recall@10": 0.094,
+        "mrr": 0.139,
+        "word_hit@10": 0.567
+       },
+       "abbrev": {
+        "recall@10": 0.312,
+        "mrr": 0.634,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.104,
+        "mrr": 0.189,
+        "word_hit@10": 0.942
+       }
+      }
+     },
+     "rrf(vector+kw_current)": {
+      "recall@10": 0.501,
+      "mrr": 0.58,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.912,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.95,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.487,
+        "mrr": 0.667
+       },
+       "synonym": {
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "word_hit@10": 0.342
+       },
+       "translit": {
+        "recall@10": 0.094,
+        "mrr": 0.139,
+        "word_hit@10": 0.567
+       },
+       "abbrev": {
+        "recall@10": 0.237,
+        "mrr": 0.458,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.115,
+        "mrr": 0.232,
+        "word_hit@10": 0.975
+       }
+      }
+     },
+     "rrf(vector+kw_bigram)": {
+      "recall@10": 0.486,
+      "mrr": 0.623,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.588,
+        "mrr": 0.933
+       },
+       "two_syllable": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.438,
+        "mrr": 0.744
+       },
+       "synonym": {
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "word_hit@10": 0.233
+       },
+       "translit": {
+        "recall@10": 0.094,
+        "mrr": 0.139,
+        "word_hit@10": 0.567
+       },
+       "abbrev": {
+        "recall@10": 0.463,
+        "mrr": 0.753,
+        "word_hit@10": 0.91
+       },
+       "question": {
+        "recall@10": 0.073,
+        "mrr": 0.319,
+        "word_hit@10": 0.858
+       }
+      }
+     },
+     "rrf_w(vector*1+kw_current*2)": {
+      "recall@10": 0.5,
+      "mrr": 0.555,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.95,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.575,
+        "mrr": 0.681
+       },
+       "synonym": {
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "word_hit@10": 0.342
+       },
+       "translit": {
+        "recall@10": 0.094,
+        "mrr": 0.139,
+        "word_hit@10": 0.567
+       },
+       "abbrev": {
+        "recall@10": 0.05,
+        "mrr": 0.25,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.115,
+        "mrr": 0.195,
+        "word_hit@10": 1.0
+       }
+      }
+     },
+     "rrf(vector+kw_current+kw_bigram)": {
+      "recall@10": 0.533,
+      "mrr": 0.611,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.762,
+        "mrr": 0.95
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.725,
+        "mrr": 0.753
+       },
+       "synonym": {
+        "recall@10": 0.0,
+        "mrr": 0.0,
+        "word_hit@10": 0.233
+       },
+       "translit": {
+        "recall@10": 0.094,
+        "mrr": 0.139,
+        "word_hit@10": 0.567
+       },
+       "abbrev": {
+        "recall@10": 0.388,
+        "mrr": 0.598,
+        "word_hit@10": 0.95
+       },
+       "question": {
+        "recall@10": 0.104,
+        "mrr": 0.333,
+        "word_hit@10": 1.0
+       }
+      }
+     }
+    }
+   },
+   "probe": {
+    "vector": {
+     "top1": 10,
+     "top3": 11,
+     "found": 12,
+     "mrr": 0.889,
+     "ranks": [
+      6,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      2,
+      1
+     ]
+    },
+    "rrf(vector+kw_current)": {
+     "top1": 11,
+     "top3": 11,
+     "found": 12,
+     "mrr": 0.931,
+     "ranks": [
+      6,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    }
+   },
+   "hnsw": {
+    "1000": {
+     "build_s": 0.2,
+     "index_bytes": 2056192,
+     "heap_bytes": 2129920,
+     "latency_ms": {
+      "p50": 0.23,
+      "p95": 0.25,
+      "n": 289
+     },
+     "ann_recall@10": 1.0,
+     "filtered_ws_1_of_50": {
+      "plain": {
+       "recall": 1.0,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": false,
+       "latency_ms_p50": 0.13,
+       "latency_ms_p95": 0.17
+      },
+      "iterative_relaxed": {
+       "recall": 1.0,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": false,
+       "latency_ms_p50": 0.12,
+       "latency_ms_p95": 0.14
+      }
+     }
+    },
+    "10000": {
+     "build_s": 0.8,
+     "index_bytes": 20488192,
+     "heap_bytes": 16809984,
+     "latency_ms": {
+      "p50": 0.33,
+      "p95": 0.46,
+      "n": 289
+     },
+     "ann_recall@10": 0.972,
+     "filtered_ws_1_of_50": {
+      "plain": {
+       "recall": 0.084,
+       "mean_rows_returned": 0.84,
+       "uses_hnsw_index": true,
+       "latency_ms_p50": 0.34,
+       "latency_ms_p95": 0.47
+      },
+      "iterative_relaxed": {
+       "recall": 0.996,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": true,
+       "latency_ms_p50": 2.56,
+       "latency_ms_p95": 3.3
+      }
+     }
+    },
+    "50000": {
+     "build_s": 4.1,
+     "index_bytes": 102408192,
+     "heap_bytes": 82362368,
+     "latency_ms": {
+      "p50": 0.36,
+      "p95": 0.7,
+      "n": 289
+     },
+     "ann_recall@10": 0.925,
+     "filtered_ws_1_of_50": {
+      "plain": {
+       "recall": 0.104,
+       "mean_rows_returned": 1.04,
+       "uses_hnsw_index": true,
+       "latency_ms_p50": 0.42,
+       "latency_ms_p95": 0.83
+      },
+      "iterative_relaxed": {
+       "recall": 0.98,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": true,
+       "latency_ms_p50": 4.79,
+       "latency_ms_p95": 6.93
+      }
+     }
+    }
+   }
+  },
+  "minilm": {
+   "meta": {
+    "batch32_docs_per_s": 1017.129250051581,
+    "batch32_ms_per_doc": 0.9831592198821218,
+    "dim": 384,
+    "docs": 50900,
+    "load_s": 0.476235167,
+    "model": "minilm",
+    "queries": 96,
+    "query_ms_p50": 2.786791,
+    "query_ms_p95": 4.5545,
+    "single_doc_ms_p50": 3.8655410000000003,
+    "single_doc_ms_p95": 4.7256659999999995
+   },
+   "quality": {
+    "900": {
+     "vector": {
+      "recall@10": 0.245,
+      "mrr": 0.402,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.312,
+        "mrr": 0.607
+       },
+       "two_syllable": {
+        "recall@10": 0.212,
+        "mrr": 0.325
+       },
+       "spacing": {
+        "recall@10": 0.388,
+        "mrr": 0.578
+       },
+       "english": {
+        "recall@10": 0.637,
+        "mrr": 0.845
+       },
+       "typo": {
+        "recall@10": 0.163,
+        "mrr": 0.284
+       },
+       "synonym": {
+        "recall@10": 0.104,
+        "mrr": 0.22,
+        "word_hit@10": 0.392
+       },
+       "translit": {
+        "recall@10": 0.135,
+        "mrr": 0.264,
+        "word_hit@10": 0.567
+       },
+       "abbrev": {
+        "recall@10": 0.25,
+        "mrr": 0.49,
+        "word_hit@10": 0.4
+       },
+       "question": {
+        "recall@10": 0.083,
+        "mrr": 0.124,
+        "word_hit@10": 0.333
+       }
+      }
+     },
+     "rrf(vector+kw_current)": {
+      "recall@10": 0.456,
+      "mrr": 0.632,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.65,
+        "mrr": 0.92
+       },
+       "two_syllable": {
+        "recall@10": 0.637,
+        "mrr": 0.779
+       },
+       "spacing": {
+        "recall@10": 0.713,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.875,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.438,
+        "mrr": 0.595
+       },
+       "synonym": {
+        "recall@10": 0.104,
+        "mrr": 0.22,
+        "word_hit@10": 0.392
+       },
+       "translit": {
+        "recall@10": 0.135,
+        "mrr": 0.264,
+        "word_hit@10": 0.567
+       },
+       "abbrev": {
+        "recall@10": 0.575,
+        "mrr": 0.82,
+        "word_hit@10": 0.81
+       },
+       "question": {
+        "recall@10": 0.167,
+        "mrr": 0.307,
+        "word_hit@10": 0.6
+       }
+      }
+     },
+     "rrf(vector+kw_bigram)": {
+      "recall@10": 0.411,
+      "mrr": 0.586,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.588,
+        "mrr": 0.853
+       },
+       "two_syllable": {
+        "recall@10": 0.613,
+        "mrr": 0.729
+       },
+       "spacing": {
+        "recall@10": 0.713,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.9,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.3,
+        "mrr": 0.612
+       },
+       "synonym": {
+        "recall@10": 0.062,
+        "mrr": 0.143,
+        "word_hit@10": 0.3
+       },
+       "translit": {
+        "recall@10": 0.135,
+        "mrr": 0.264,
+        "word_hit@10": 0.567
+       },
+       "abbrev": {
+        "recall@10": 0.438,
+        "mrr": 0.75,
+        "word_hit@10": 0.74
+       },
+       "question": {
+        "recall@10": 0.135,
+        "mrr": 0.161,
+        "word_hit@10": 0.542
+       }
+      }
+     },
+     "rrf_w(vector*1+kw_current*2)": {
+      "recall@10": 0.516,
+      "mrr": 0.643,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.738,
+        "mrr": 0.925
+       },
+       "two_syllable": {
+        "recall@10": 0.787,
+        "mrr": 0.781
+       },
+       "spacing": {
+        "recall@10": 0.812,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.525,
+        "mrr": 0.67
+       },
+       "synonym": {
+        "recall@10": 0.104,
+        "mrr": 0.22,
+        "word_hit@10": 0.392
+       },
+       "translit": {
+        "recall@10": 0.135,
+        "mrr": 0.264,
+        "word_hit@10": 0.567
+       },
+       "abbrev": {
+        "recall@10": 0.613,
+        "mrr": 0.833,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.188,
+        "mrr": 0.316,
+        "word_hit@10": 0.717
+       }
+      }
+     },
+     "rrf(vector+kw_current+kw_bigram)": {
+      "recall@10": 0.484,
+      "mrr": 0.609,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.738,
+        "mrr": 0.875
+       },
+       "two_syllable": {
+        "recall@10": 0.787,
+        "mrr": 0.781
+       },
+       "spacing": {
+        "recall@10": 0.838,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.375,
+        "mrr": 0.582
+       },
+       "synonym": {
+        "recall@10": 0.062,
+        "mrr": 0.143,
+        "word_hit@10": 0.3
+       },
+       "translit": {
+        "recall@10": 0.135,
+        "mrr": 0.264,
+        "word_hit@10": 0.567
+       },
+       "abbrev": {
+        "recall@10": 0.55,
+        "mrr": 0.783,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.135,
+        "mrr": 0.279,
+        "word_hit@10": 0.6
+       }
+      }
+     }
+    },
+    "10900": {
+     "vector": {
+      "recall@10": 0.139,
+      "mrr": 0.266,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.125,
+        "mrr": 0.353
+       },
+       "two_syllable": {
+        "recall@10": 0.075,
+        "mrr": 0.139
+       },
+       "spacing": {
+        "recall@10": 0.188,
+        "mrr": 0.387
+       },
+       "english": {
+        "recall@10": 0.588,
+        "mrr": 0.845
+       },
+       "typo": {
+        "recall@10": 0.062,
+        "mrr": 0.087
+       },
+       "synonym": {
+        "recall@10": 0.021,
+        "mrr": 0.125,
+        "word_hit@10": 0.392
+       },
+       "translit": {
+        "recall@10": 0.042,
+        "mrr": 0.062,
+        "word_hit@10": 0.533
+       },
+       "abbrev": {
+        "recall@10": 0.2,
+        "mrr": 0.42,
+        "word_hit@10": 0.44
+       },
+       "question": {
+        "recall@10": 0.021,
+        "mrr": 0.083,
+        "word_hit@10": 0.408
+       }
+      }
+     },
+     "rrf(vector+kw_current)": {
+      "recall@10": 0.371,
+      "mrr": 0.582,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.588,
+        "mrr": 0.95
+       },
+       "two_syllable": {
+        "recall@10": 0.588,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.688,
+        "mrr": 0.95
+       },
+       "english": {
+        "recall@10": 0.887,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.325,
+        "mrr": 0.463
+       },
+       "synonym": {
+        "recall@10": 0.021,
+        "mrr": 0.125,
+        "word_hit@10": 0.392
+       },
+       "translit": {
+        "recall@10": 0.042,
+        "mrr": 0.062,
+        "word_hit@10": 0.533
+       },
+       "abbrev": {
+        "recall@10": 0.312,
+        "mrr": 0.833,
+        "word_hit@10": 0.78
+       },
+       "question": {
+        "recall@10": 0.083,
+        "mrr": 0.137,
+        "word_hit@10": 0.708
+       }
+      }
+     },
+     "rrf(vector+kw_bigram)": {
+      "recall@10": 0.324,
+      "mrr": 0.518,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.425,
+        "mrr": 0.717
+       },
+       "two_syllable": {
+        "recall@10": 0.5,
+        "mrr": 0.75
+       },
+       "spacing": {
+        "recall@10": 0.662,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.875,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.175,
+        "mrr": 0.373
+       },
+       "synonym": {
+        "recall@10": 0.021,
+        "mrr": 0.111,
+        "word_hit@10": 0.275
+       },
+       "translit": {
+        "recall@10": 0.042,
+        "mrr": 0.062,
+        "word_hit@10": 0.533
+       },
+       "abbrev": {
+        "recall@10": 0.338,
+        "mrr": 0.8,
+        "word_hit@10": 0.69
+       },
+       "question": {
+        "recall@10": 0.052,
+        "mrr": 0.107,
+        "word_hit@10": 0.692
+       }
+      }
+     },
+     "rrf_w(vector*1+kw_current*2)": {
+      "recall@10": 0.466,
+      "mrr": 0.588,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.887,
+        "mrr": 0.95
+       },
+       "two_syllable": {
+        "recall@10": 0.825,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.875,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.925,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.487,
+        "mrr": 0.579
+       },
+       "synonym": {
+        "recall@10": 0.021,
+        "mrr": 0.125,
+        "word_hit@10": 0.392
+       },
+       "translit": {
+        "recall@10": 0.042,
+        "mrr": 0.062,
+        "word_hit@10": 0.533
+       },
+       "abbrev": {
+        "recall@10": 0.287,
+        "mrr": 0.762,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.094,
+        "mrr": 0.104,
+        "word_hit@10": 0.892
+       }
+      }
+     },
+     "rrf(vector+kw_current+kw_bigram)": {
+      "recall@10": 0.445,
+      "mrr": 0.561,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.463,
+        "mrr": 0.825
+       },
+       "two_syllable": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.912,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.925,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.438,
+        "mrr": 0.445
+       },
+       "synonym": {
+        "recall@10": 0.021,
+        "mrr": 0.111,
+        "word_hit@10": 0.275
+       },
+       "translit": {
+        "recall@10": 0.042,
+        "mrr": 0.062,
+        "word_hit@10": 0.533
+       },
+       "abbrev": {
+        "recall@10": 0.425,
+        "mrr": 0.761,
+        "word_hit@10": 0.94
+       },
+       "question": {
+        "recall@10": 0.062,
+        "mrr": 0.125,
+        "word_hit@10": 0.9
+       }
+      }
+     }
+    },
+    "50900": {
+     "vector": {
+      "recall@10": 0.105,
+      "mrr": 0.202,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.05,
+        "mrr": 0.25
+       },
+       "two_syllable": {
+        "recall@10": 0.025,
+        "mrr": 0.028
+       },
+       "spacing": {
+        "recall@10": 0.113,
+        "mrr": 0.283
+       },
+       "english": {
+        "recall@10": 0.562,
+        "mrr": 0.795
+       },
+       "typo": {
+        "recall@10": 0.013,
+        "mrr": 0.025
+       },
+       "synonym": {
+        "recall@10": 0.021,
+        "mrr": 0.056,
+        "word_hit@10": 0.442
+       },
+       "translit": {
+        "recall@10": 0.01,
+        "mrr": 0.009,
+        "word_hit@10": 0.575
+       },
+       "abbrev": {
+        "recall@10": 0.188,
+        "mrr": 0.383,
+        "word_hit@10": 0.4
+       },
+       "question": {
+        "recall@10": 0.021,
+        "mrr": 0.083,
+        "word_hit@10": 0.45
+       }
+      }
+     },
+     "rrf(vector+kw_current)": {
+      "recall@10": 0.363,
+      "mrr": 0.504,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.625,
+        "mrr": 0.85
+       },
+       "two_syllable": {
+        "recall@10": 0.637,
+        "mrr": 0.833
+       },
+       "spacing": {
+        "recall@10": 0.688,
+        "mrr": 0.9
+       },
+       "english": {
+        "recall@10": 0.9,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.362,
+        "mrr": 0.552
+       },
+       "synonym": {
+        "recall@10": 0.021,
+        "mrr": 0.056,
+        "word_hit@10": 0.442
+       },
+       "translit": {
+        "recall@10": 0.01,
+        "mrr": 0.009,
+        "word_hit@10": 0.575
+       },
+       "abbrev": {
+        "recall@10": 0.163,
+        "mrr": 0.437,
+        "word_hit@10": 0.74
+       },
+       "question": {
+        "recall@10": 0.062,
+        "mrr": 0.153,
+        "word_hit@10": 0.758
+       }
+      }
+     },
+     "rrf(vector+kw_bigram)": {
+      "recall@10": 0.297,
+      "mrr": 0.47,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.287,
+        "mrr": 0.692
+       },
+       "two_syllable": {
+        "recall@10": 0.562,
+        "mrr": 0.558
+       },
+       "spacing": {
+        "recall@10": 0.65,
+        "mrr": 0.9
+       },
+       "english": {
+        "recall@10": 0.863,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.113,
+        "mrr": 0.408
+       },
+       "synonym": {
+        "recall@10": 0.01,
+        "mrr": 0.042,
+        "word_hit@10": 0.317
+       },
+       "translit": {
+        "recall@10": 0.01,
+        "mrr": 0.009,
+        "word_hit@10": 0.575
+       },
+       "abbrev": {
+        "recall@10": 0.3,
+        "mrr": 0.7,
+        "word_hit@10": 0.65
+       },
+       "question": {
+        "recall@10": 0.042,
+        "mrr": 0.163,
+        "word_hit@10": 0.65
+       }
+      }
+     },
+     "rrf_w(vector*1+kw_current*2)": {
+      "recall@10": 0.486,
+      "mrr": 0.502,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.988,
+        "mrr": 0.9
+       },
+       "two_syllable": {
+        "recall@10": 0.963,
+        "mrr": 0.9
+       },
+       "spacing": {
+        "recall@10": 0.938,
+        "mrr": 0.95
+       },
+       "english": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.613,
+        "mrr": 0.628
+       },
+       "synonym": {
+        "recall@10": 0.021,
+        "mrr": 0.056,
+        "word_hit@10": 0.442
+       },
+       "translit": {
+        "recall@10": 0.01,
+        "mrr": 0.009,
+        "word_hit@10": 0.575
+       },
+       "abbrev": {
+        "recall@10": 0.05,
+        "mrr": 0.25,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.094,
+        "mrr": 0.094,
+        "word_hit@10": 1.0
+       }
+      }
+     },
+     "rrf(vector+kw_current+kw_bigram)": {
+      "recall@10": 0.458,
+      "mrr": 0.555,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.35,
+        "mrr": 0.883
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.65,
+        "mrr": 0.654
+       },
+       "synonym": {
+        "recall@10": 0.01,
+        "mrr": 0.042,
+        "word_hit@10": 0.317
+       },
+       "translit": {
+        "recall@10": 0.01,
+        "mrr": 0.009,
+        "word_hit@10": 0.575
+       },
+       "abbrev": {
+        "recall@10": 0.312,
+        "mrr": 0.506,
+        "word_hit@10": 0.84
+       },
+       "question": {
+        "recall@10": 0.094,
+        "mrr": 0.188,
+        "word_hit@10": 0.983
+       }
+      }
+     }
+    }
+   },
+   "probe": {
+    "vector": {
+     "top1": 4,
+     "top3": 7,
+     "found": 12,
+     "mrr": 0.488,
+     "ranks": [
+      4,
+      7,
+      1,
+      1,
+      1,
+      10,
+      10,
+      10,
+      3,
+      1,
+      3,
+      2
+     ]
+    },
+    "rrf(vector+kw_current)": {
+     "top1": 7,
+     "top3": 10,
+     "found": 12,
+     "mrr": 0.724,
+     "ranks": [
+      4,
+      1,
+      1,
+      1,
+      1,
+      10,
+      1,
+      1,
+      3,
+      1,
+      2,
+      2
+     ]
+    }
+   },
+   "hnsw": {
+    "1000": {
+     "build_s": 0.1,
+     "index_bytes": 2056192,
+     "heap_bytes": 2129920,
+     "latency_ms": {
+      "p50": 0.22,
+      "p95": 0.25,
+      "n": 289
+     },
+     "ann_recall@10": 1.0,
+     "filtered_ws_1_of_50": {
+      "plain": {
+       "recall": 1.0,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": false,
+       "latency_ms_p50": 0.12,
+       "latency_ms_p95": 0.15
+      },
+      "iterative_relaxed": {
+       "recall": 1.0,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": false,
+       "latency_ms_p50": 0.12,
+       "latency_ms_p95": 0.15
+      }
+     }
+    },
+    "10000": {
+     "build_s": 0.6,
+     "index_bytes": 20488192,
+     "heap_bytes": 16809984,
+     "latency_ms": {
+      "p50": 0.26,
+      "p95": 0.4,
+      "n": 289
+     },
+     "ann_recall@10": 0.92,
+     "filtered_ws_1_of_50": {
+      "plain": {
+       "recall": 0.082,
+       "mean_rows_returned": 0.82,
+       "uses_hnsw_index": true,
+       "latency_ms_p50": 0.27,
+       "latency_ms_p95": 0.42
+      },
+      "iterative_relaxed": {
+       "recall": 0.982,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": true,
+       "latency_ms_p50": 1.61,
+       "latency_ms_p95": 2.42
+      }
+     }
+    },
+    "50000": {
+     "build_s": 3.0,
+     "index_bytes": 102359040,
+     "heap_bytes": 82362368,
+     "latency_ms": {
+      "p50": 0.29,
+      "p95": 0.56,
+      "n": 289
+     },
+     "ann_recall@10": 0.779,
+     "filtered_ws_1_of_50": {
+      "plain": {
+       "recall": 0.058,
+       "mean_rows_returned": 0.6,
+       "uses_hnsw_index": true,
+       "latency_ms_p50": 0.34,
+       "latency_ms_p95": 0.72
+      },
+      "iterative_relaxed": {
+       "recall": 0.946,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": true,
+       "latency_ms_p50": 2.63,
+       "latency_ms_p95": 4.39
+      }
+     }
+    }
+   }
+  },
+  "e5-base": {
+   "meta": {
+    "batch32_docs_per_s": 403.9074545420581,
+    "batch32_ms_per_doc": 2.475814666836935,
+    "dim": 768,
+    "docs": 50900,
+    "load_s": 0.642115,
+    "model": "e5-base",
+    "queries": 96,
+    "query_ms_p50": 5.020333,
+    "query_ms_p95": 6.391,
+    "single_doc_ms_p50": 6.4055420000000005,
+    "single_doc_ms_p95": 7.0602920000000005
+   },
+   "quality": {
+    "900": {
+     "vector": {
+      "recall@10": 0.638,
+      "mrr": 0.82,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.812,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.925,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.925,
+        "mrr": 0.95
+       },
+       "english": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.55,
+        "mrr": 0.77
+       },
+       "synonym": {
+        "recall@10": 0.365,
+        "mrr": 0.537,
+        "word_hit@10": 0.625
+       },
+       "translit": {
+        "recall@10": 0.323,
+        "mrr": 0.584,
+        "word_hit@10": 0.633
+       },
+       "abbrev": {
+        "recall@10": 0.525,
+        "mrr": 0.917,
+        "word_hit@10": 0.92
+       },
+       "question": {
+        "recall@10": 0.49,
+        "mrr": 0.74,
+        "word_hit@10": 0.958
+       }
+      }
+     },
+     "rrf(vector+kw_current)": {
+      "recall@10": 0.663,
+      "mrr": 0.779,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.637,
+        "mrr": 0.716
+       },
+       "synonym": {
+        "recall@10": 0.365,
+        "mrr": 0.537,
+        "word_hit@10": 0.625
+       },
+       "translit": {
+        "recall@10": 0.323,
+        "mrr": 0.584,
+        "word_hit@10": 0.633
+       },
+       "abbrev": {
+        "recall@10": 0.6,
+        "mrr": 0.733,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.292,
+        "mrr": 0.567,
+        "word_hit@10": 0.892
+       }
+      }
+     },
+     "rrf(vector+kw_bigram)": {
+      "recall@10": 0.624,
+      "mrr": 0.733,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.95,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.425,
+        "mrr": 0.483
+       },
+       "synonym": {
+        "recall@10": 0.354,
+        "mrr": 0.459,
+        "word_hit@10": 0.525
+       },
+       "translit": {
+        "recall@10": 0.323,
+        "mrr": 0.584,
+        "word_hit@10": 0.633
+       },
+       "abbrev": {
+        "recall@10": 0.487,
+        "mrr": 0.758,
+        "word_hit@10": 0.98
+       },
+       "question": {
+        "recall@10": 0.271,
+        "mrr": 0.456,
+        "word_hit@10": 0.825
+       }
+      }
+     },
+     "rrf_w(vector*1+kw_current*2)": {
+      "recall@10": 0.655,
+      "mrr": 0.767,
+      "by_kind": {
+       "josa": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.662,
+        "mrr": 0.706
+       },
+       "synonym": {
+        "recall@10": 0.365,
+        "mrr": 0.537,
+        "word_hit@10": 0.625
+       },
+       "translit": {
+        "recall@10": 0.323,
+        "mrr": 0.584,
+        "word_hit@10": 0.633
+       },
+       "abbrev": {
+        "recall@10": 0.562,
+        "mrr": 0.694,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.219,
+        "mrr": 0.517,
+        "word_hit@10": 0.808
+       }
+      }
+     },
+     "rrf(vector+kw_current+kw_bigram)": {
+      "recall@10": 0.635,
+      "mrr": 0.736,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.562,
+        "mrr": 0.617
+       },
+       "synonym": {
+        "recall@10": 0.354,
+        "mrr": 0.459,
+        "word_hit@10": 0.525
+       },
+       "translit": {
+        "recall@10": 0.323,
+        "mrr": 0.584,
+        "word_hit@10": 0.633
+       },
+       "abbrev": {
+        "recall@10": 0.525,
+        "mrr": 0.713,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.177,
+        "mrr": 0.408,
+        "word_hit@10": 0.683
+       }
+      }
+     }
+    },
+    "10900": {
+     "vector": {
+      "recall@10": 0.458,
+      "mrr": 0.64,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.588,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.775,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.875,
+        "mrr": 0.95
+       },
+       "english": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.25,
+        "mrr": 0.508
+       },
+       "synonym": {
+        "recall@10": 0.219,
+        "mrr": 0.294,
+        "word_hit@10": 0.65
+       },
+       "translit": {
+        "recall@10": 0.125,
+        "mrr": 0.17,
+        "word_hit@10": 0.633
+       },
+       "abbrev": {
+        "recall@10": 0.338,
+        "mrr": 0.673,
+        "word_hit@10": 0.93
+       },
+       "question": {
+        "recall@10": 0.167,
+        "mrr": 0.383,
+        "word_hit@10": 0.95
+       }
+      }
+     },
+     "rrf(vector+kw_current)": {
+      "recall@10": 0.561,
+      "mrr": 0.662,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.875,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.525,
+        "mrr": 0.649
+       },
+       "synonym": {
+        "recall@10": 0.219,
+        "mrr": 0.294,
+        "word_hit@10": 0.65
+       },
+       "translit": {
+        "recall@10": 0.125,
+        "mrr": 0.17,
+        "word_hit@10": 0.633
+       },
+       "abbrev": {
+        "recall@10": 0.463,
+        "mrr": 0.56,
+        "word_hit@10": 0.99
+       },
+       "question": {
+        "recall@10": 0.135,
+        "mrr": 0.494,
+        "word_hit@10": 0.925
+       }
+      }
+     },
+     "rrf(vector+kw_bigram)": {
+      "recall@10": 0.531,
+      "mrr": 0.661,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.637,
+        "mrr": 0.925
+       },
+       "two_syllable": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.512,
+        "mrr": 0.604
+       },
+       "synonym": {
+        "recall@10": 0.177,
+        "mrr": 0.248,
+        "word_hit@10": 0.5
+       },
+       "translit": {
+        "recall@10": 0.125,
+        "mrr": 0.17,
+        "word_hit@10": 0.633
+       },
+       "abbrev": {
+        "recall@10": 0.463,
+        "mrr": 0.77,
+        "word_hit@10": 0.91
+       },
+       "question": {
+        "recall@10": 0.135,
+        "mrr": 0.451,
+        "word_hit@10": 0.908
+       }
+      }
+     },
+     "rrf_w(vector*1+kw_current*2)": {
+      "recall@10": 0.57,
+      "mrr": 0.637,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.55,
+        "mrr": 0.713
+       },
+       "synonym": {
+        "recall@10": 0.219,
+        "mrr": 0.294,
+        "word_hit@10": 0.65
+       },
+       "translit": {
+        "recall@10": 0.125,
+        "mrr": 0.17,
+        "word_hit@10": 0.633
+       },
+       "abbrev": {
+        "recall@10": 0.475,
+        "mrr": 0.516,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.094,
+        "mrr": 0.278,
+        "word_hit@10": 0.883
+       }
+      }
+     },
+     "rrf(vector+kw_current+kw_bigram)": {
+      "recall@10": 0.564,
+      "mrr": 0.642,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.812,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.575,
+        "mrr": 0.683
+       },
+       "synonym": {
+        "recall@10": 0.177,
+        "mrr": 0.248,
+        "word_hit@10": 0.5
+       },
+       "translit": {
+        "recall@10": 0.125,
+        "mrr": 0.17,
+        "word_hit@10": 0.633
+       },
+       "abbrev": {
+        "recall@10": 0.562,
+        "mrr": 0.608,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.094,
+        "mrr": 0.308,
+        "word_hit@10": 0.892
+       }
+      }
+     }
+    },
+    "50900": {
+     "vector": {
+      "recall@10": 0.374,
+      "mrr": 0.57,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.45,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.688,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.825,
+        "mrr": 0.95
+       },
+       "english": {
+        "recall@10": 0.9,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.163,
+        "mrr": 0.207
+       },
+       "synonym": {
+        "recall@10": 0.115,
+        "mrr": 0.211,
+        "word_hit@10": 0.683
+       },
+       "translit": {
+        "recall@10": 0.073,
+        "mrr": 0.094,
+        "word_hit@10": 0.675
+       },
+       "abbrev": {
+        "recall@10": 0.212,
+        "mrr": 0.533,
+        "word_hit@10": 0.92
+       },
+       "question": {
+        "recall@10": 0.104,
+        "mrr": 0.344,
+        "word_hit@10": 0.942
+       }
+      }
+     },
+     "rrf(vector+kw_current)": {
+      "recall@10": 0.487,
+      "mrr": 0.608,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.875,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.95,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.938,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.4,
+        "mrr": 0.675
+       },
+       "synonym": {
+        "recall@10": 0.115,
+        "mrr": 0.211,
+        "word_hit@10": 0.683
+       },
+       "translit": {
+        "recall@10": 0.073,
+        "mrr": 0.094,
+        "word_hit@10": 0.675
+       },
+       "abbrev": {
+        "recall@10": 0.175,
+        "mrr": 0.417,
+        "word_hit@10": 0.97
+       },
+       "question": {
+        "recall@10": 0.104,
+        "mrr": 0.318,
+        "word_hit@10": 0.975
+       }
+      }
+     },
+     "rrf(vector+kw_bigram)": {
+      "recall@10": 0.464,
+      "mrr": 0.636,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.45,
+        "mrr": 0.92
+       },
+       "two_syllable": {
+        "recall@10": 0.95,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.338,
+        "mrr": 0.614
+       },
+       "synonym": {
+        "recall@10": 0.104,
+        "mrr": 0.19,
+        "word_hit@10": 0.558
+       },
+       "translit": {
+        "recall@10": 0.073,
+        "mrr": 0.094,
+        "word_hit@10": 0.675
+       },
+       "abbrev": {
+        "recall@10": 0.45,
+        "mrr": 0.787,
+        "word_hit@10": 0.87
+       },
+       "question": {
+        "recall@10": 0.083,
+        "mrr": 0.37,
+        "word_hit@10": 0.867
+       }
+      }
+     },
+     "rrf_w(vector*1+kw_current*2)": {
+      "recall@10": 0.505,
+      "mrr": 0.576,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.938,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.575,
+        "mrr": 0.646
+       },
+       "synonym": {
+        "recall@10": 0.115,
+        "mrr": 0.211,
+        "word_hit@10": 0.683
+       },
+       "translit": {
+        "recall@10": 0.073,
+        "mrr": 0.094,
+        "word_hit@10": 0.675
+       },
+       "abbrev": {
+        "recall@10": 0.05,
+        "mrr": 0.3,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.104,
+        "mrr": 0.183,
+        "word_hit@10": 1.0
+       }
+      }
+     },
+     "rrf(vector+kw_current+kw_bigram)": {
+      "recall@10": 0.516,
+      "mrr": 0.602,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.662,
+        "mrr": 0.933
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.625,
+        "mrr": 0.65
+       },
+       "synonym": {
+        "recall@10": 0.104,
+        "mrr": 0.19,
+        "word_hit@10": 0.558
+       },
+       "translit": {
+        "recall@10": 0.073,
+        "mrr": 0.094,
+        "word_hit@10": 0.675
+       },
+       "abbrev": {
+        "recall@10": 0.325,
+        "mrr": 0.547,
+        "word_hit@10": 0.93
+       },
+       "question": {
+        "recall@10": 0.115,
+        "mrr": 0.26,
+        "word_hit@10": 1.0
+       }
+      }
+     }
+    }
+   },
+   "probe": {
+    "vector": {
+     "top1": 11,
+     "top3": 11,
+     "found": 12,
+     "mrr": 0.927,
+     "ranks": [
+      8,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "rrf(vector+kw_current)": {
+     "top1": 11,
+     "top3": 11,
+     "found": 12,
+     "mrr": 0.927,
+     "ranks": [
+      8,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    }
+   },
+   "hnsw": {
+    "1000": {
+     "build_s": 0.2,
+     "index_bytes": 4104192,
+     "heap_bytes": 4276224,
+     "latency_ms": {
+      "p50": 0.28,
+      "p95": 0.32,
+      "n": 289
+     },
+     "ann_recall@10": 1.0,
+     "filtered_ws_1_of_50": {
+      "plain": {
+       "recall": 1.0,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": false,
+       "latency_ms_p50": 0.14,
+       "latency_ms_p95": 0.17
+      },
+      "iterative_relaxed": {
+       "recall": 1.0,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": false,
+       "latency_ms_p50": 0.15,
+       "latency_ms_p95": 0.18
+      }
+     }
+    },
+    "10000": {
+     "build_s": 2.7,
+     "index_bytes": 40968192,
+     "heap_bytes": 42532864,
+     "latency_ms": {
+      "p50": 0.51,
+      "p95": 0.66,
+      "n": 289
+     },
+     "ann_recall@10": 0.977,
+     "filtered_ws_1_of_50": {
+      "plain": {
+       "recall": 1.0,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": false,
+       "latency_ms_p50": 0.52,
+       "latency_ms_p95": 0.67
+      },
+      "iterative_relaxed": {
+       "recall": 1.0,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": false,
+       "latency_ms_p50": 0.52,
+       "latency_ms_p95": 0.67
+      }
+     }
+    },
+    "50000": {
+     "build_s": 17.2,
+     "index_bytes": 204701696,
+     "heap_bytes": 210313216,
+     "latency_ms": {
+      "p50": 0.62,
+      "p95": 0.98,
+      "n": 289
+     },
+     "ann_recall@10": 0.927,
+     "filtered_ws_1_of_50": {
+      "plain": {
+       "recall": 1.0,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": false,
+       "latency_ms_p50": 2.44,
+       "latency_ms_p95": 3.11
+      },
+      "iterative_relaxed": {
+       "recall": 1.0,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": false,
+       "latency_ms_p50": 2.43,
+       "latency_ms_p95": 3.11
+      }
+     }
+    }
+   }
+  },
+  "bge-m3": {
+   "meta": {
+    "batch32_docs_per_s": 132.73729508324752,
+    "batch32_ms_per_doc": 7.533677700550098,
+    "dim": 1024,
+    "docs": 50900,
+    "load_s": 1.894259709,
+    "model": "bge-m3",
+    "queries": 96,
+    "query_ms_p50": 14.251750000000001,
+    "query_ms_p95": 18.432582999999997,
+    "single_doc_ms_p50": 17.109584,
+    "single_doc_ms_p95": 19.079208
+   },
+   "quality": {
+    "900": {
+     "vector": {
+      "recall@10": 0.665,
+      "mrr": 0.811,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.9,
+        "mrr": 0.95
+       },
+       "two_syllable": {
+        "recall@10": 0.887,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.887,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.463,
+        "mrr": 0.609
+       },
+       "synonym": {
+        "recall@10": 0.281,
+        "mrr": 0.547,
+        "word_hit@10": 0.592
+       },
+       "translit": {
+        "recall@10": 0.51,
+        "mrr": 0.722,
+        "word_hit@10": 0.858
+       },
+       "abbrev": {
+        "recall@10": 0.713,
+        "mrr": 0.875,
+        "word_hit@10": 0.94
+       },
+       "question": {
+        "recall@10": 0.5,
+        "mrr": 0.692,
+        "word_hit@10": 0.883
+       }
+      }
+     },
+     "rrf(vector+kw_current)": {
+      "recall@10": 0.684,
+      "mrr": 0.796,
+      "by_kind": {
+       "josa": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.625,
+        "mrr": 0.636
+       },
+       "synonym": {
+        "recall@10": 0.281,
+        "mrr": 0.547,
+        "word_hit@10": 0.592
+       },
+       "translit": {
+        "recall@10": 0.51,
+        "mrr": 0.722,
+        "word_hit@10": 0.858
+       },
+       "abbrev": {
+        "recall@10": 0.675,
+        "mrr": 0.783,
+        "word_hit@10": 0.99
+       },
+       "question": {
+        "recall@10": 0.292,
+        "mrr": 0.58,
+        "word_hit@10": 0.833
+       }
+      }
+     },
+     "rrf(vector+kw_bigram)": {
+      "recall@10": 0.637,
+      "mrr": 0.73,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.95,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.388,
+        "mrr": 0.494
+       },
+       "synonym": {
+        "recall@10": 0.25,
+        "mrr": 0.359,
+        "word_hit@10": 0.475
+       },
+       "translit": {
+        "recall@10": 0.51,
+        "mrr": 0.722,
+        "word_hit@10": 0.858
+       },
+       "abbrev": {
+        "recall@10": 0.55,
+        "mrr": 0.742,
+        "word_hit@10": 0.97
+       },
+       "question": {
+        "recall@10": 0.281,
+        "mrr": 0.395,
+        "word_hit@10": 0.792
+       }
+      }
+     },
+     "rrf_w(vector*1+kw_current*2)": {
+      "recall@10": 0.676,
+      "mrr": 0.795,
+      "by_kind": {
+       "josa": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.65,
+        "mrr": 0.688
+       },
+       "synonym": {
+        "recall@10": 0.281,
+        "mrr": 0.547,
+        "word_hit@10": 0.592
+       },
+       "translit": {
+        "recall@10": 0.51,
+        "mrr": 0.722,
+        "word_hit@10": 0.858
+       },
+       "abbrev": {
+        "recall@10": 0.65,
+        "mrr": 0.769,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.208,
+        "mrr": 0.543,
+        "word_hit@10": 0.792
+       }
+      }
+     },
+     "rrf(vector+kw_current+kw_bigram)": {
+      "recall@10": 0.65,
+      "mrr": 0.748,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.512,
+        "mrr": 0.613
+       },
+       "synonym": {
+        "recall@10": 0.25,
+        "mrr": 0.359,
+        "word_hit@10": 0.475
+       },
+       "translit": {
+        "recall@10": 0.51,
+        "mrr": 0.722,
+        "word_hit@10": 0.858
+       },
+       "abbrev": {
+        "recall@10": 0.588,
+        "mrr": 0.748,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.198,
+        "mrr": 0.436,
+        "word_hit@10": 0.708
+       }
+      }
+     }
+    },
+    "10900": {
+     "vector": {
+      "recall@10": 0.526,
+      "mrr": 0.711,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.775,
+        "mrr": 0.933
+       },
+       "two_syllable": {
+        "recall@10": 0.787,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.863,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.325,
+        "mrr": 0.375
+       },
+       "synonym": {
+        "recall@10": 0.177,
+        "mrr": 0.447,
+        "word_hit@10": 0.667
+       },
+       "translit": {
+        "recall@10": 0.323,
+        "mrr": 0.575,
+        "word_hit@10": 0.933
+       },
+       "abbrev": {
+        "recall@10": 0.475,
+        "mrr": 0.683,
+        "word_hit@10": 0.99
+       },
+       "question": {
+        "recall@10": 0.208,
+        "mrr": 0.505,
+        "word_hit@10": 0.95
+       }
+      }
+     },
+     "rrf(vector+kw_current)": {
+      "recall@10": 0.591,
+      "mrr": 0.702,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.487,
+        "mrr": 0.52
+       },
+       "synonym": {
+        "recall@10": 0.177,
+        "mrr": 0.447,
+        "word_hit@10": 0.667
+       },
+       "translit": {
+        "recall@10": 0.323,
+        "mrr": 0.575,
+        "word_hit@10": 0.933
+       },
+       "abbrev": {
+        "recall@10": 0.512,
+        "mrr": 0.59,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.156,
+        "mrr": 0.338,
+        "word_hit@10": 0.95
+       }
+      }
+     },
+     "rrf(vector+kw_bigram)": {
+      "recall@10": 0.561,
+      "mrr": 0.69,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.675,
+        "mrr": 0.933
+       },
+       "two_syllable": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.412,
+        "mrr": 0.514
+       },
+       "synonym": {
+        "recall@10": 0.156,
+        "mrr": 0.299,
+        "word_hit@10": 0.525
+       },
+       "translit": {
+        "recall@10": 0.323,
+        "mrr": 0.575,
+        "word_hit@10": 0.933
+       },
+       "abbrev": {
+        "recall@10": 0.625,
+        "mrr": 0.731,
+        "word_hit@10": 0.9
+       },
+       "question": {
+        "recall@10": 0.125,
+        "mrr": 0.33,
+        "word_hit@10": 0.942
+       }
+      }
+     },
+     "rrf_w(vector*1+kw_current*2)": {
+      "recall@10": 0.59,
+      "mrr": 0.692,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.95,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.55,
+        "mrr": 0.575
+       },
+       "synonym": {
+        "recall@10": 0.177,
+        "mrr": 0.447,
+        "word_hit@10": 0.667
+       },
+       "translit": {
+        "recall@10": 0.323,
+        "mrr": 0.575,
+        "word_hit@10": 0.933
+       },
+       "abbrev": {
+        "recall@10": 0.487,
+        "mrr": 0.551,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.104,
+        "mrr": 0.239,
+        "word_hit@10": 0.892
+       }
+      }
+     },
+     "rrf(vector+kw_current+kw_bigram)": {
+      "recall@10": 0.591,
+      "mrr": 0.685,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.825,
+        "mrr": 0.95
+       },
+       "two_syllable": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.575,
+        "mrr": 0.566
+       },
+       "synonym": {
+        "recall@10": 0.156,
+        "mrr": 0.299,
+        "word_hit@10": 0.525
+       },
+       "translit": {
+        "recall@10": 0.323,
+        "mrr": 0.575,
+        "word_hit@10": 0.933
+       },
+       "abbrev": {
+        "recall@10": 0.6,
+        "mrr": 0.733,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.094,
+        "mrr": 0.234,
+        "word_hit@10": 0.892
+       }
+      }
+     }
+    },
+    "50900": {
+     "vector": {
+      "recall@10": 0.448,
+      "mrr": 0.636,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.613,
+        "mrr": 0.912
+       },
+       "two_syllable": {
+        "recall@10": 0.75,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.825,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 0.975,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.163,
+        "mrr": 0.3
+       },
+       "synonym": {
+        "recall@10": 0.125,
+        "mrr": 0.375,
+        "word_hit@10": 0.725
+       },
+       "translit": {
+        "recall@10": 0.198,
+        "mrr": 0.373,
+        "word_hit@10": 0.925
+       },
+       "abbrev": {
+        "recall@10": 0.4,
+        "mrr": 0.514,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.156,
+        "mrr": 0.399,
+        "word_hit@10": 0.992
+       }
+      }
+     },
+     "rrf(vector+kw_current)": {
+      "recall@10": 0.525,
+      "mrr": 0.637,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.887,
+        "mrr": 0.95
+       },
+       "two_syllable": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.95,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.438,
+        "mrr": 0.51
+       },
+       "synonym": {
+        "recall@10": 0.125,
+        "mrr": 0.375,
+        "word_hit@10": 0.725
+       },
+       "translit": {
+        "recall@10": 0.198,
+        "mrr": 0.373,
+        "word_hit@10": 0.925
+       },
+       "abbrev": {
+        "recall@10": 0.287,
+        "mrr": 0.444,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.104,
+        "mrr": 0.26,
+        "word_hit@10": 0.992
+       }
+      }
+     },
+     "rrf(vector+kw_bigram)": {
+      "recall@10": 0.503,
+      "mrr": 0.66,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.512,
+        "mrr": 0.9
+       },
+       "two_syllable": {
+        "recall@10": 0.925,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.35,
+        "mrr": 0.531
+       },
+       "synonym": {
+        "recall@10": 0.125,
+        "mrr": 0.271,
+        "word_hit@10": 0.575
+       },
+       "translit": {
+        "recall@10": 0.198,
+        "mrr": 0.373,
+        "word_hit@10": 0.925
+       },
+       "abbrev": {
+        "recall@10": 0.537,
+        "mrr": 0.703,
+        "word_hit@10": 0.9
+       },
+       "question": {
+        "recall@10": 0.125,
+        "mrr": 0.361,
+        "word_hit@10": 0.908
+       }
+      }
+     },
+     "rrf_w(vector*1+kw_current*2)": {
+      "recall@10": 0.523,
+      "mrr": 0.621,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.95,
+        "mrr": 1.0
+       },
+       "two_syllable": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 0.963,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.575,
+        "mrr": 0.529
+       },
+       "synonym": {
+        "recall@10": 0.125,
+        "mrr": 0.375,
+        "word_hit@10": 0.725
+       },
+       "translit": {
+        "recall@10": 0.198,
+        "mrr": 0.373,
+        "word_hit@10": 0.925
+       },
+       "abbrev": {
+        "recall@10": 0.05,
+        "mrr": 0.3,
+        "word_hit@10": 1.0
+       },
+       "question": {
+        "recall@10": 0.115,
+        "mrr": 0.194,
+        "word_hit@10": 0.992
+       }
+      }
+     },
+     "rrf(vector+kw_current+kw_bigram)": {
+      "recall@10": 0.556,
+      "mrr": 0.649,
+      "by_kind": {
+       "josa": {
+        "recall@10": 0.787,
+        "mrr": 0.933
+       },
+       "two_syllable": {
+        "recall@10": 0.988,
+        "mrr": 1.0
+       },
+       "spacing": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "english": {
+        "recall@10": 1.0,
+        "mrr": 1.0
+       },
+       "typo": {
+        "recall@10": 0.637,
+        "mrr": 0.628
+       },
+       "synonym": {
+        "recall@10": 0.125,
+        "mrr": 0.271,
+        "word_hit@10": 0.575
+       },
+       "translit": {
+        "recall@10": 0.198,
+        "mrr": 0.373,
+        "word_hit@10": 0.925
+       },
+       "abbrev": {
+        "recall@10": 0.4,
+        "mrr": 0.62,
+        "word_hit@10": 0.94
+       },
+       "question": {
+        "recall@10": 0.115,
+        "mrr": 0.229,
+        "word_hit@10": 1.0
+       }
+      }
+     }
+    }
+   },
+   "probe": {
+    "vector": {
+     "top1": 12,
+     "top3": 12,
+     "found": 12,
+     "mrr": 1.0,
+     "ranks": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "rrf(vector+kw_current)": {
+     "top1": 12,
+     "top3": 12,
+     "found": 12,
+     "mrr": 1.0,
+     "ranks": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    }
+   },
+   "hnsw": {
+    "1000": {
+     "build_s": 0.3,
+     "index_bytes": 8200192,
+     "heap_bytes": 5668864,
+     "latency_ms": {
+      "p50": 1.16,
+      "p95": 1.23,
+      "n": 289
+     },
+     "ann_recall@10": 1.0,
+     "filtered_ws_1_of_50": {
+      "plain": {
+       "recall": 1.0,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": false,
+       "latency_ms_p50": 0.16,
+       "latency_ms_p95": 0.19
+      },
+      "iterative_relaxed": {
+       "recall": 1.0,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": false,
+       "latency_ms_p50": 0.16,
+       "latency_ms_p95": 0.19
+      }
+     }
+    },
+    "10000": {
+     "build_s": 3.7,
+     "index_bytes": 81920000,
+     "heap_bytes": 56410112,
+     "latency_ms": {
+      "p50": 0.62,
+      "p95": 0.78,
+      "n": 289
+     },
+     "ann_recall@10": 0.974,
+     "filtered_ws_1_of_50": {
+      "plain": {
+       "recall": 1.0,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": false,
+       "latency_ms_p50": 0.59,
+       "latency_ms_p95": 0.75
+      },
+      "iterative_relaxed": {
+       "recall": 1.0,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": false,
+       "latency_ms_p50": 0.57,
+       "latency_ms_p95": 0.72
+      }
+     }
+    },
+    "50000": {
+     "build_s": 21.0,
+     "index_bytes": 409387008,
+     "heap_bytes": 279724032,
+     "latency_ms": {
+      "p50": 0.73,
+      "p95": 1.26,
+      "n": 289
+     },
+     "ann_recall@10": 0.92,
+     "filtered_ws_1_of_50": {
+      "plain": {
+       "recall": 1.0,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": false,
+       "latency_ms_p50": 2.9,
+       "latency_ms_p95": 3.43
+      },
+      "iterative_relaxed": {
+       "recall": 1.0,
+       "mean_rows_returned": 10.0,
+       "uses_hnsw_index": false,
+       "latency_ms_p50": 2.92,
+       "latency_ms_p95": 3.59
+      }
+     }
+    }
+   }
+  }
+ },
+ "embedding_warm": {
+  "e5-small": {
+   "batch32_docs_per_s": 783.5082823898788,
+   "batch32_ms_per_doc": 1.2763106944444444,
+   "dim": 384,
+   "docs": 900,
+   "load_s": 0.465818708,
+   "model": "e5-small",
+   "queries": 96,
+   "query_ms_p50": 3.614875,
+   "query_ms_p95": 5.184625,
+   "single_doc_ms_p50": 4.049958,
+   "single_doc_ms_p95": 4.705125,
+   "max_rss_mb_warm_process": 1391,
+   "note": "warm cache; load_s excludes download; 900 docs+96 queries; rss covers whole process incl. ORT arena",
+   "batch32_docs_per_s_50900": 898
+  },
+  "e5-small-q8": {
+   "batch32_docs_per_s": 654.6971457314753,
+   "batch32_ms_per_doc": 1.5274237966666668,
+   "dim": 384,
+   "docs": 900,
+   "load_s": 0.47053125,
+   "model": "e5-small-q8",
+   "queries": 96,
+   "query_ms_p50": 3.439,
+   "query_ms_p95": 5.751708000000001,
+   "single_doc_ms_p50": 4.764375,
+   "single_doc_ms_p95": 6.023334,
+   "max_rss_mb_warm_process": 978,
+   "note": "warm cache; load_s excludes download; 900 docs+96 queries; rss covers whole process incl. ORT arena",
+   "batch32_docs_per_s_50900": 711
+  },
+  "minilm": {
+   "batch32_docs_per_s": 843.0642533805033,
+   "batch32_ms_per_doc": 1.1861492122222224,
+   "dim": 384,
+   "docs": 900,
+   "load_s": 0.51144025,
+   "model": "minilm",
+   "queries": 96,
+   "query_ms_p50": 3.191,
+   "query_ms_p95": 5.035208,
+   "single_doc_ms_p50": 4.414042,
+   "single_doc_ms_p95": 5.4990000000000006,
+   "max_rss_mb_warm_process": 1402,
+   "note": "warm cache; load_s excludes download; 900 docs+96 queries; rss covers whole process incl. ORT arena",
+   "batch32_docs_per_s_50900": 1017
+  },
+  "e5-base": {
+   "batch32_docs_per_s": 341.23795252299493,
+   "batch32_ms_per_doc": 2.930506388888889,
+   "dim": 768,
+   "docs": 900,
+   "load_s": 0.67630075,
+   "model": "e5-base",
+   "queries": 96,
+   "query_ms_p50": 6.250208,
+   "query_ms_p95": 7.930584,
+   "single_doc_ms_p50": 7.668208,
+   "single_doc_ms_p95": 9.161542,
+   "max_rss_mb_warm_process": 2787,
+   "note": "warm cache; load_s excludes download; 900 docs+96 queries; rss covers whole process incl. ORT arena",
+   "batch32_docs_per_s_50900": 404
+  },
+  "bge-m3": {
+   "batch32_docs_per_s": 119.92541903749289,
+   "batch32_ms_per_doc": 8.338515787777776,
+   "dim": 1024,
+   "docs": 900,
+   "load_s": 0.776839708,
+   "model": "bge-m3",
+   "queries": 96,
+   "query_ms_p50": 18.047207999999998,
+   "query_ms_p95": 21.715374999999998,
+   "single_doc_ms_p50": 20.208625,
+   "single_doc_ms_p95": 22.659042,
+   "max_rss_mb_warm_process": 2025,
+   "note": "warm cache; load_s excludes download; 900 docs+96 queries; rss covers whole process incl. ORT arena",
+   "batch32_docs_per_s_50900": 133
+  }
+ },
+ "exact_scan_narrowed_rows": {
+  "e5-small": {
+   "dim": 384,
+   "rows": 50900,
+   "1000_rows_per_workspace": {
+    "p50_ms": 0.49,
+    "p95_ms": 1.02,
+    "plan": [
+     "Limit  (cost=3052.42..3052.44 rows=10 width=12)",
+     "->  Sort  (cost=3052.42..3054.98 rows=1025 width=12)",
+     "Sort Key: ((e <=> '<q>))",
+     "->  Bitmap Heap Scan on v  (cost=12.23..3030.27 rows=1025 width=12)"
+    ],
+    "exact": true
+   },
+   "5000_rows_per_workspace": {
+    "p50_ms": 3.04,
+    "p95_ms": 3.78,
+    "plan": [
+     "Limit  (cost=8808.10..8808.12 rows=10 width=12)",
+     "->  Sort  (cost=8808.10..8820.73 rows=5054 width=12)",
+     "Sort Key: ((e <=> '<q>))",
+     "->  Bitmap Heap Scan on v  (cost=59.46..8698.88 rows=5054 width=12)"
+    ],
+    "exact": true
+   }
+  },
+  "bge-m3": {
+   "dim": 1024,
+   "rows": 50900,
+   "1000_rows_per_workspace": {
+    "p50_ms": 2.1,
+    "p95_ms": 2.79,
+    "plan": [
+     "Limit  (cost=433.76..433.78 rows=10 width=12)",
+     "->  Sort  (cost=433.76..436.32 rows=1025 width=12)",
+     "Sort Key: ((e <=> '<q>))",
+     "->  Bitmap Heap Scan on v  (cost=12.23..411.61 rows=1025 width=12)"
+    ],
+    "exact": true
+   },
+   "5000_rows_per_workspace": {
+    "p50_ms": 9.96,
+    "p95_ms": 10.93,
+    "plan": [
+     "Limit  (cost=635.67..635.69 rows=10 width=12)",
+     "->  Sort  (cost=635.67..648.71 rows=5216 width=12)",
+     "Sort Key: ((e <=> '<q>))",
+     "->  Bitmap Heap Scan on v  (cost=60.71..522.95 rows=5216 width=12)"
+    ],
+    "exact": true
+   }
+  }
+ },
+ "generated": "2026-09-30",
+ "host": "Apple M5 Pro, 18 cores, macOS; CPU only; fastembed 7.1.0 / ort 2.0.0-rc.13 (ONNX Runtime 1.28, CoreML feature linked but CPU EP used by default)"
+}

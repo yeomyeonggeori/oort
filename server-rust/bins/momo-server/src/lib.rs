@@ -843,6 +843,19 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/agent-runs/{run}/memory-receipt",
             get(routes::memory::get_receipt),
         )
+        // #3169 — 「기억해 둘게요」: an agent proposes, a person decides.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/memory/proposals",
+            get(routes::memory::list_proposals),
+        )
+        .route(
+            "/v1/workspaces/{ws}/memory/proposals/{id}/accept",
+            post(routes::memory::accept_proposal),
+        )
+        .route(
+            "/v1/workspaces/{ws}/memory/proposals/{id}/reject",
+            post(routes::memory::reject_proposal),
+        )
         .route(
             "/v1/workspaces/{ws}/memory/settings",
             get(routes::memory::get_settings).patch(routes::memory::patch_workspace_settings),
@@ -854,6 +867,26 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/memory/settings",
             patch(routes::memory::patch_channel_settings),
+        )
+        // ADR-0196 D9 / D12 V4 / #3208 — the memory browser: item list + search, detail, evidence,
+        // event ledger, edit (supersede) and forget (permanent delete). Human only, RLS decides.
+        .route(
+            "/v1/workspaces/{ws}/memory/items",
+            get(routes::memory::list_items),
+        )
+        .route(
+            "/v1/workspaces/{ws}/memory/items/{id}",
+            get(routes::memory::get_item)
+                .patch(routes::memory::edit_item)
+                .delete(routes::memory::forget_item),
+        )
+        .route(
+            "/v1/workspaces/{ws}/memory/items/{id}/evidence",
+            get(routes::memory::get_item_evidence),
+        )
+        .route(
+            "/v1/workspaces/{ws}/memory/items/{id}/events",
+            get(routes::memory::get_item_events),
         )
         // ADR-0175 / #1888 — personal message reminders. Human-only, owner
         // scoped, no outbox fan-out (v1 is a client poll).
