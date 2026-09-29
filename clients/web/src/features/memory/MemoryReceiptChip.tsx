@@ -72,7 +72,7 @@ export function ReceiptChipView({
       <PopoverContent
         align="start"
         data-testid="memory-receipt-popover"
-        className="flex max-h-pane flex-col gap-3 overflow-y-auto"
+        className="flex max-h-pane-md flex-col gap-3 overflow-y-auto"
       >
         <h3 className="text-body font-semibold text-ink">이 답이 참고한 기억</h3>
         {model.digests.length > 0 ? (

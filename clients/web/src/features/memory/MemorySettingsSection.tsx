@@ -112,7 +112,7 @@ export function MemorySettingsSection({
           <SettingsToggleRow
             testId="memory-me-paused"
             name="내 기억 잠시 멈추기"
-            description="멈춰 두면 나에게 보이는 요약과 참고 칩이 이어지지 않아요. 저장된 요약은 그대로 남아요."
+            description="멈춰 두면 내 메시지를 기억에 쓰지 않고, 내가 부른 에이전트도 기억을 참고하지 않아요. 저장된 요약은 그대로 남아요."
             checked={me.paused}
             disabled={offline || busy}
             describedBy={offline ? offlineReasonId : undefined}

@@ -40,7 +40,7 @@ export function MissedSummaryCard({
       aria-label="안 읽은 동안 요약"
       data-testid="missed-summary-card"
       data-state={state.kind}
-      className="mx-4 mb-2 flex min-w-0 flex-col gap-2 rounded-xl border border-line bg-surface px-4 py-3"
+      className="mx-4 my-2 flex min-w-0 flex-col gap-2 rounded-xl border border-line bg-surface px-4 py-3"
     >
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-body font-semibold text-ink">안 읽은 동안</h2>
