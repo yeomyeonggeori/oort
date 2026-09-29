@@ -15,6 +15,7 @@ import {
   channelStarToggleLabel,
   SECTION_MOVE_GROUP_LABEL,
 } from "@momo/core/features/sidebar/sidebarSections";
+import { CHANNEL_MEMORY_SETTINGS_LABEL } from "@momo/core/features/memory/presentation";
 import type { Channel, MembershipRole } from "@momo/core/lib/api";
 
 // =============================================================================
@@ -75,6 +76,7 @@ export type ChannelActionKey =
   | "topic"
   | "mark-read"
   | "mute"
+  | "memory"
   | "star"
   | "move-to-section"
   | "copy-link"
@@ -132,6 +134,11 @@ export interface ChannelActionAvailability {
   topic: boolean;
   markRead: boolean;
   mute: boolean;
+  /**
+   * 「기억 설정」(ADR-0196 D9, #3165). 선택 칸이다: 이 서버가 팀 기억을 싣지
+   * 않으면(`teamMemory` 표면) 항목이 없고, 채워 넣지 않은 호출부는 그대로 없다.
+   */
+  memory?: boolean;
   star: boolean;
   moveToSection: boolean;
   copyLink: boolean;
@@ -178,6 +185,8 @@ export function channelActionAvailability(input: {
   sectionCount?: number;
   /** 별표를 받을 손이 있는가. 없으면 눌러도 아무 일이 없는 항목이 된다. */
   canStar?: boolean;
+  /** 이 서버가 팀 기억을 싣는가. DM 은 요약 제외가 기본이라 여기서도 뺀다. */
+  hasMemorySettings?: boolean;
 }): ChannelActionAvailability {
   const isDm = input.channel.kind === "dm";
   return {
@@ -189,6 +198,7 @@ export function channelActionAvailability(input: {
     // payload 에는 적히는데 화면에는 아무 일도 일어나지 않는다.
     star: !isDm && (input.canStar ?? false),
     mute: true,
+    memory: !isDm && (input.hasMemorySettings ?? false),
     // **DM 은 옮기지 않는다** (ADR-0177 D4). 기본 섹션 두 종은 「채널」과 「DM」
     // 이고 DM 은 그 중 하나에 고정이다 - 커스텀 섹션에 DM 을 넣는 문을 열면
     // 코어의 파생이 그것을 무시하므로(`deriveSidebarSections`), 눌러도 아무 일도
@@ -231,6 +241,13 @@ export function channelActionItems(
       label: channelMuteToggleLabel(state.muted),
       busyLabel: channelMuteToggleBusyLabel(state.muted),
       separatorBefore: items.length > 0 && items[items.length - 1].key === "topic",
+    });
+  }
+  if (available.memory === true) {
+    items.push({
+      key: "memory",
+      testKey: "memory-settings",
+      label: CHANNEL_MEMORY_SETTINGS_LABEL,
     });
   }
   // 무리 셋째: **사이드바를 정리하는 것**(별표 · 배치). 앞의 둘(읽음 · 알림)이
@@ -291,7 +308,7 @@ export function channelActionItems(
 const SURFACE_KEYS: Record<ChannelActionSurface, ReadonlySet<ChannelActionKey>> = {
   // 헤더 ⋮ 는 BZ-2 가 세운 그대로다. 이 티켓은 헤더의 항목을 늘리지 않는다:
   // 채널을 열어 둔 사람에게 「읽음 처리」와 「이름 복사」는 다른 물음이다.
-  header: new Set<ChannelActionKey>(["topic", "mute", "leave"]),
+  header: new Set<ChannelActionKey>(["topic", "mute", "memory", "leave"]),
   // 행 우클릭은 「열지 않고 조작한다」가 전부다.
   // 행 우클릭은 「열지 않고 조작한다」가 전부다. BT-4 의 섹션 배치가 여기 사는
   // 이유도 그것이다 - 채널을 어디에 둘지는 그 채널을 **보지 않고** 정하는 일이고,
@@ -346,6 +363,7 @@ export function channelActionKeepsMenuOpen(key: ChannelActionKey): boolean {
   return (
     key !== "leave" &&
     key !== "topic" &&
+    key !== "memory" &&
     key !== "star" &&
     key !== "move-to-section"
   );

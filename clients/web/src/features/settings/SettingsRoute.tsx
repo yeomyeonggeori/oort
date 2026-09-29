@@ -36,6 +36,7 @@ import { UsageSection } from "./UsageSection";
 import { WebhookSection } from "./WebhookSection";
 import { WorkHostSection } from "./WorkHostSection";
 import { WorkspaceSection } from "./WorkspaceSection";
+import { MemorySettingsSection } from "@/features/memory/MemorySettingsSection";
 import { leaveSettings } from "./settingsReturn";
 import {
   DEFAULT_SETTINGS_SECTION,
@@ -308,6 +309,9 @@ export function SettingsRoute() {
           )}
           {section === "workspace" && (
             <WorkspaceSection workspaceId={workspaceId} offline={offline} />
+          )}
+          {section === "memory" && (
+            <MemorySettingsSection workspaceId={workspaceId} offline={offline} />
           )}
           {section === "plugins" && <PluginSection offline={offline} />}
           {/* No `offline` prop: 사용량 is a read, and the realtime rail being
