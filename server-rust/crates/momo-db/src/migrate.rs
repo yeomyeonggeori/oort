@@ -523,19 +523,24 @@ mod tests {
     /// re-extraction suppression) with its insert trigger and the suppression checks in
     /// `mem_accept_proposal`/`mem_propose_item`, plus the narrow `mem_definer` privilege widening
     /// (UPDATE of `retired_at`/`retired_reason`, DELETE).
+    /// 107 is #3172's consolidation job (ADR-0196 D4/D10): worker-only definer functions for
+    /// duplicate merge, decision-interval closing, decay, source-death retirement, retention and
+    /// pending-proposal purge (all reversible through `mem_event`), `mem_cons_state`/`mem_cons_pair`/
+    /// `mem_suppress_msg`, the `mem.op` marker policies, `mem_proposal.op`, the by-signature
+    /// definer allow-list and the follow-ups of #3200/#3209 (event visibility, forget → digests stale).
     #[test]
-    fn discovers_contiguous_migrations_001_to_106() {
+    fn discovers_contiguous_migrations_001_to_107() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            106,
-            "expected 106 migrations under {}",
+            107,
+            "expected 107 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 106);
+        assert_eq!(migrations.last().unwrap().version, 107);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

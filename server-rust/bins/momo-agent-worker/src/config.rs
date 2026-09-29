@@ -197,6 +197,34 @@ pub struct MemoryConfig {
     /// `MEMORY_SERVE_TIMEOUT_MS` (3000) — the whole serving step (read + receipt). Past it the
     /// reply goes out without memory; a slow database never delays an answer beyond this.
     pub serve_timeout: Duration,
+    /// `MEMORY_CONSOLIDATE_ENABLED` (**on**; `0|false|no|off` turns it off) — #3172: the daily
+    /// consolidation job (merge duplicates, close superseded decisions, decay, retention). Off
+    /// leaves the data as it is; it does not affect the summary loop or serving.
+    pub consolidate_enabled: bool,
+    /// `MEMORY_CONSOLIDATE_POLL_SECONDS` (300) — how often the loop looks for a channel that is due.
+    pub consolidate_poll_interval: Duration,
+    /// `MEMORY_CONSOLIDATE_HOUR` (4) / `MEMORY_CONSOLIDATE_MINUTE` (30) — the workspace-local time of
+    /// the daily slot (plan §6.1: 04:30). A channel runs once per slot, after the slot opens.
+    pub consolidate_hour: i64,
+    pub consolidate_minute: i64,
+    /// `MEMORY_CONSOLIDATE_MAX_CHANNELS` (2000) — channels one sweep looks at.
+    pub consolidate_max_channels: i64,
+    /// `MEMORY_CONSOLIDATE_MAX_CALLS` (30) — model calls one channel may spend per run.
+    pub consolidate_max_calls: usize,
+    /// `MEMORY_CONSOLIDATE_TOKEN_SHARE_PERCENT` (80) — consolidation stops once the workspace's day usage
+    /// reaches this share of the daily cap, so it can never starve the summaries (which stop only at 100 %).
+    pub consolidate_token_share_percent: i64,
+    /// `MEMORY_CONSOLIDATE_MERGE_SIMILARITY` (0.55) / `MEMORY_CONSOLIDATE_CLOSE_SIMILARITY` (0.25) — trigram
+    /// similarity that makes a pair a merge / decision-closing candidate.
+    pub consolidate_merge_similarity: f32,
+    pub consolidate_close_similarity: f32,
+    /// `MEMORY_CONSOLIDATE_MAX_OUTPUT_TOKENS` (40) — a verdict is one word.
+    pub consolidate_max_output_tokens: i32,
+    /// `MEMORY_CONSOLIDATE_RETRY_SECONDS` (1800) — when a run stopped at the token cap, try again after this.
+    pub consolidate_retry_seconds: i32,
+    /// `MEMORY_RETIRED_RETENTION_DAYS` (90) / `MEMORY_WINDOW_RETENTION_DAYS` (90) — retention (plan §6.3, §6.5).
+    pub retired_retention_days: i32,
+    pub window_retention_days: i32,
 }
 
 impl Default for MemoryConfig {
@@ -231,6 +259,19 @@ impl Default for MemoryConfig {
             serve_item_budget_chars: 3_000,
             serve_max_items: 8,
             serve_timeout: Duration::from_millis(3_000),
+            consolidate_enabled: true,
+            consolidate_poll_interval: Duration::from_secs(300),
+            consolidate_hour: 4,
+            consolidate_minute: 30,
+            consolidate_max_channels: 2_000,
+            consolidate_max_calls: 30,
+            consolidate_token_share_percent: 80,
+            consolidate_merge_similarity: 0.55,
+            consolidate_close_similarity: 0.25,
+            consolidate_max_output_tokens: 40,
+            consolidate_retry_seconds: 1_800,
+            retired_retention_days: 90,
+            window_retention_days: 90,
         }
     }
 }
@@ -299,6 +340,53 @@ impl MemoryConfig {
                 )?
                 .clamp(200, 30_000),
             ),
+            consolidate_enabled: report_protocol_enabled(env("MEMORY_CONSOLIDATE_ENABLED").as_deref()),
+            consolidate_poll_interval: Duration::from_secs(
+                env_number(
+                    "MEMORY_CONSOLIDATE_POLL_SECONDS",
+                    d.consolidate_poll_interval.as_secs(),
+                )?
+                .max(1),
+            ),
+            consolidate_hour: env_number("MEMORY_CONSOLIDATE_HOUR", d.consolidate_hour)?.clamp(0, 23),
+            consolidate_minute: env_number("MEMORY_CONSOLIDATE_MINUTE", d.consolidate_minute)?
+                .clamp(0, 59),
+            consolidate_max_channels: env_number(
+                "MEMORY_CONSOLIDATE_MAX_CHANNELS",
+                d.consolidate_max_channels,
+            )?
+            .max(1),
+            consolidate_max_calls: env_number("MEMORY_CONSOLIDATE_MAX_CALLS", d.consolidate_max_calls)?
+                .clamp(1, 500),
+            consolidate_token_share_percent: env_number(
+                "MEMORY_CONSOLIDATE_TOKEN_SHARE_PERCENT",
+                d.consolidate_token_share_percent,
+            )?
+            .clamp(1, 100),
+            consolidate_merge_similarity: env_number(
+                "MEMORY_CONSOLIDATE_MERGE_SIMILARITY",
+                d.consolidate_merge_similarity,
+            )?
+            .clamp(0.1, 1.0),
+            consolidate_close_similarity: env_number(
+                "MEMORY_CONSOLIDATE_CLOSE_SIMILARITY",
+                d.consolidate_close_similarity,
+            )?
+            .clamp(0.05, 1.0),
+            consolidate_max_output_tokens: env_number(
+                "MEMORY_CONSOLIDATE_MAX_OUTPUT_TOKENS",
+                d.consolidate_max_output_tokens,
+            )?
+            .clamp(8, 400),
+            consolidate_retry_seconds: env_number(
+                "MEMORY_CONSOLIDATE_RETRY_SECONDS",
+                d.consolidate_retry_seconds,
+            )?
+            .clamp(60, 86_400),
+            retired_retention_days: env_number("MEMORY_RETIRED_RETENTION_DAYS", d.retired_retention_days)?
+                .clamp(1, 3650),
+            window_retention_days: env_number("MEMORY_WINDOW_RETENTION_DAYS", d.window_retention_days)?
+                .clamp(1, 3650),
         })
     }
 }

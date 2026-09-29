@@ -488,6 +488,21 @@ pub async fn search_items_in_tx(
     query: &str,
     limit: Option<i64>,
 ) -> Result<Vec<MemItemHit>, DbError> {
+    search_items_filtered_in_tx(conn, query, None, None, limit).await
+}
+
+/// [`search_items_in_tx`] with the channel and kind narrowing applied **inside** the database scan
+/// (`mem_search_items(q, n, channel, kind)`, migration 107): the top-N cut happens after the filter, so a
+/// filtered search returns up to `limit` hits of that channel/kind instead of the filtered remainder of
+/// an unfiltered top-N (#3209 L-3). Like the unfiltered call it adds no permission predicate of its own —
+/// the function applies the read rule to every candidate.
+pub async fn search_items_filtered_in_tx(
+    conn: &mut PgConnection,
+    query: &str,
+    channel_id: Option<Uuid>,
+    kind: Option<&str>,
+    limit: Option<i64>,
+) -> Result<Vec<MemItemHit>, DbError> {
     let limit = match limit {
         Some(value) if value > 0 => value.min(MEM_ITEM_SEARCH_LIMIT_MAX),
         _ => MEM_ITEM_SEARCH_LIMIT_DEFAULT,
@@ -495,10 +510,12 @@ pub async fn search_items_in_tx(
     let rows = sqlx::query(
         "SELECT id, channel_id, space_kind, kind, body, valid_from, valid_to, recorded_at, score, \
                 evidence_message_ids \
-           FROM mem_search_items($1, $2::integer)",
+           FROM mem_search_items($1, $2::integer, $3::uuid, $4::text)",
     )
     .bind(query)
     .bind(limit as i32)
+    .bind(channel_id)
+    .bind(kind)
     .fetch_all(&mut *conn)
     .await?;
     Ok(rows
@@ -707,7 +724,7 @@ pub async fn list_proposals_in_tx(
 ) -> Result<Vec<MemProposal>, DbError> {
     let sql = format!(
         "SELECT {PROPOSAL_COLS} FROM mem_proposal p \
-          WHERE p.channel_id = $1 AND p.status = $2 \
+          WHERE p.channel_id = $1 AND p.status = $2 AND p.op = 'add' \
             AND ($3::uuid IS NULL OR p.run_id = $3) \
           ORDER BY p.created_at DESC, p.id DESC LIMIT $4"
     );
@@ -732,7 +749,10 @@ pub async fn get_proposal_in_tx(
     conn: &mut PgConnection,
     proposal_id: Uuid,
 ) -> Result<Option<MemProposal>, DbError> {
-    let sql = format!("SELECT {PROPOSAL_COLS} FROM mem_proposal p WHERE p.id = $1");
+    // `op = 'add'` only: the consolidation job's merge / close proposals (#3172) have no agent, requester
+    // or run, and their card is a later surface — until then they are not listed (accepting one still
+    // works through `mem_accept_proposal`, which dispatches on `op`).
+    let sql = format!("SELECT {PROPOSAL_COLS} FROM mem_proposal p WHERE p.id = $1 AND p.op = 'add'");
     let row = sqlx::query(&sql)
         .bind(proposal_id)
         .fetch_optional(&mut *conn)
@@ -948,8 +968,9 @@ pub async fn list_items_in_tx(
 /// The items a keyword search matched, with their full rows and the search order/score.
 /// `mem_search_items` (RLS-equivalent, see [`search_items_in_tx`]) picks and ranks; the rows are
 /// then read back **through the read policy again** so the response carries the same shape as the
-/// list, and `channel_id` / `kind` narrow the hits. Search covers live items only (the function
-/// skips retired ones), so it takes no status.
+/// list. `channel_id` / `kind` narrow the search **before** the top-N cut (inside `mem_search_items`,
+/// #3209 L-3), not after it. Search covers live items only (the function skips retired ones), so it
+/// takes no status.
 pub async fn search_item_rows_in_tx(
     conn: &mut PgConnection,
     query: &str,
@@ -957,23 +978,13 @@ pub async fn search_item_rows_in_tx(
     kind: Option<&str>,
     limit: Option<i64>,
 ) -> Result<Vec<(MemItem, f32)>, DbError> {
-    let hits = search_items_in_tx(conn, query, limit).await?;
+    let hits = search_items_filtered_in_tx(conn, query, channel_id, kind, limit).await?;
     if hits.is_empty() {
         return Ok(Vec::new());
     }
     let ids: Vec<Uuid> = hits.iter().map(|hit| hit.id).collect();
-    let sql = format!(
-        "SELECT {ITEM_COLS} FROM mem_item i \
-          WHERE i.id = ANY($1) \
-            AND ($2::uuid IS NULL OR i.channel_id = $2) \
-            AND ($3::text IS NULL OR i.kind = $3)"
-    );
-    let rows = sqlx::query(&sql)
-        .bind(&ids)
-        .bind(channel_id)
-        .bind(kind)
-        .fetch_all(&mut *conn)
-        .await?;
+    let sql = format!("SELECT {ITEM_COLS} FROM mem_item i WHERE i.id = ANY($1)");
+    let rows = sqlx::query(&sql).bind(&ids).fetch_all(&mut *conn).await?;
     let mut by_id = std::collections::HashMap::new();
     for row in &rows {
         let item = item_from_row(row)?;
