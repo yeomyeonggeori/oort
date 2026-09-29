@@ -55,6 +55,27 @@ async fn momo_app_pool() -> PgPool {
         .expect("connect as momo_app (bootstrap_roles.sql)")
 }
 
+/// The summary worker's connection: `momo_worker` (BYPASSRLS login) that has done
+/// `SET ROLE momo_memory` — the only role that may run the worker-only functions.
+/// `set_role = false` is the plain `momo_worker` session.
+async fn worker_pool(set_role: bool) -> PgPool {
+    let options: PgConnectOptions = database_url().parse().expect("DATABASE_URL parses");
+    let password =
+        std::env::var("MOMO_WORKER_PASSWORD").unwrap_or_else(|_| "momo_worker_dev_pw".to_string());
+    let mut pool = PgPoolOptions::new().max_connections(4);
+    if set_role {
+        pool = pool.after_connect(|conn, _meta| {
+            Box::pin(async move {
+                sqlx::query("SET ROLE momo_memory").execute(conn).await?;
+                Ok(())
+            })
+        });
+    }
+    pool.connect_with(options.username("momo_worker").password(&password))
+        .await
+        .expect("connect as momo_worker (bootstrap_roles.sql)")
+}
+
 fn resolve_psql() -> PathBuf {
     if let Some(paths) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&paths) {
@@ -84,10 +105,14 @@ fn ensure_schema_and_roles() {
     }
     run_migrations(&database_url(), &default_migrations_dir(), SeedMode::None)
         .expect("apply all migrations");
-    let path = PathBuf::from(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../../infra/rust/sql/bootstrap_roles.sql"
-    ));
+    run_sql_file("bootstrap_roles.sql");
+    *ready = true;
+}
+
+fn run_sql_file(name: &str) {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../infra/rust/sql")
+        .join(name);
     let status = Command::new(resolve_psql())
         .arg(database_url())
         .args(["-v", "ON_ERROR_STOP=1"])
@@ -96,10 +121,13 @@ fn ensure_schema_and_roles() {
         .arg("--single-transaction")
         .arg("-f")
         .arg(path)
+        .env("MOMO_APP_POSTGRES_PASSWORD", "momo_app_dev_pw")
+        .env("RELAY_POSTGRES_PASSWORD", "momo_relay_dev_pw")
+        .env("WORKER_POSTGRES_PASSWORD", "momo_worker_dev_pw")
+        .env("NOTIFIER_POSTGRES_PASSWORD", "momo_notifier_dev_pw")
         .status()
         .expect("spawn psql");
-    assert!(status.success(), "bootstrap_roles.sql failed");
-    *ready = true;
+    assert!(status.success(), "{name} failed");
 }
 
 async fn seed_workspace(su: &PgPool) -> Uuid {
@@ -857,12 +885,49 @@ fn apply_sql(
     let thread = thread
         .map(|t| format!("'{t}'"))
         .unwrap_or_else(|| "NULL".into());
+    let ids: Vec<String> = evidence.iter().map(|e| e.to_string()).collect();
     format!(
         "SELECT mem_apply_digest('{channel}', {thread}, '{level}', {from}, {to}, 'body', {}, \
-         'm', 'agent', 'v1', {})",
+         'm', 'agent', 'v1', {}, @SNAP[{}]@, now())",
         arr(sources),
-        arr(evidence)
+        arr(evidence),
+        ids.join(",")
     )
+}
+
+/// Replace every `@SNAP[id,id]@` marker with the per-message `edited_at` snapshot a worker
+/// would have taken when it read the messages (NULL = never edited), in the same order.
+async fn resolve(su: &PgPool, sql: &str) -> String {
+    let mut out = sql.to_string();
+    while let Some(start) = out.find("@SNAP[") {
+        let end = out[start..].find("]@").expect("marker end") + start;
+        let ids: Vec<Uuid> = out[start + 6..end]
+            .split(',')
+            .filter(|p| !p.is_empty())
+            .map(|p| p.parse().expect("uuid"))
+            .collect();
+        let mut items = Vec::new();
+        for id in &ids {
+            let snap: Option<String> =
+                sqlx::query_scalar("SELECT edited_at::text FROM message WHERE id = $1")
+                    .bind(id)
+                    .fetch_optional(su)
+                    .await
+                    .expect("snapshot")
+                    .flatten();
+            items.push(match snap {
+                Some(t) => format!("'{t}'::timestamptz"),
+                None => "NULL::timestamptz".to_string(),
+            });
+        }
+        let literal = if items.is_empty() {
+            "'{}'::timestamptz[]".to_string()
+        } else {
+            format!("ARRAY[{}]::timestamptz[]", items.join(","))
+        };
+        out.replace_range(start..end + 2, &literal);
+    }
+    out
 }
 
 #[tokio::test]
@@ -880,9 +945,14 @@ async fn apply_digest_validates_what_it_writes() {
     )
     .await;
     let ws = w.ws;
+    let wk = worker_pool(true).await;
     let run = |sql: String| {
-        let app = app.clone();
-        async move { uuid_of(&app, ws, None, &sql).await }
+        let wk = wk.clone();
+        let su = su.clone();
+        async move {
+            let sql = resolve(&su, &sql).await;
+            uuid_of(&wk, ws, None, &sql).await
+        }
     };
 
     // happy path: source_count is derived, not caller-supplied.
@@ -941,11 +1011,15 @@ async fn apply_digest_validates_what_it_writes() {
         Err("23514".into())
     );
     // no tenant GUC at all.
-    let mut tx = app.begin().await.expect("begin");
-    let bare =
-        sqlx::query_scalar::<_, Uuid>(&apply_sql(w.p1, None, "window", s1, s2, &[], &[a1, a2]))
-            .fetch_one(&mut *tx)
-            .await;
+    let mut tx = wk.begin().await.expect("begin");
+    let bare_sql = resolve(
+        &su,
+        &apply_sql(w.p1, None, "window", s1, s2, &[], &[a1, a2]),
+    )
+    .await;
+    let bare = sqlx::query_scalar::<_, Uuid>(&bare_sql)
+        .fetch_one(&mut *tx)
+        .await;
     assert_eq!(bare.map_err(|e| sqlstate(&e)), Err("42501".to_string()));
     tx.rollback().await.expect("rollback");
     // a deleted message cannot become evidence.
@@ -1071,8 +1145,8 @@ async fn apply_digest_validates_what_it_writes() {
             "SELECT id FROM mem_digest_rollup_inputs('{}', NULL, '{target}', {s1}, {s2})",
             w.p1
         );
-        let app = app.clone();
-        async move { ids_of(&app, ws, None, &sql).await }
+        let wk = wk.clone();
+        async move { ids_of(&wk, ws, None, &sql).await }
     };
     assert_eq!(
         inputs("day").await,
@@ -1117,11 +1191,12 @@ async fn cursor_and_receipts_only_through_their_functions() {
     let adv = |channel: Uuid, seq: i64, token: Uuid, secs: i64| {
         format!("SELECT mem_advance_cursor('{channel}', {seq}, '{token}', now() + interval '{secs} seconds')")
     };
+    let wk = worker_pool(true).await;
     let call = |sql: String| {
-        let app = app.clone();
+        let wk = wk.clone();
         let ws = w.ws;
         async move {
-            let mut tx = viewer_tx(&app, ws, None).await;
+            let mut tx = viewer_tx(&wk, ws, None).await;
             match sqlx::query_scalar::<_, i64>(&sql).fetch_one(&mut *tx).await {
                 Ok(v) => {
                     tx.commit().await.expect("commit");
@@ -1179,13 +1254,14 @@ async fn cursor_and_receipts_only_through_their_functions() {
 
     // receipts: channel comes from the run; unknown digest / foreign run / duplicate refused.
     let d = seed_digest(&su, w.ws, w.s1, w.m_s1.1, &[(w.m_s1.0, w.s1)]).await;
+    let alice = w.alice;
     let rec = |run: Uuid, digests: &[Uuid], withheld: i32, budget: i32, used: i32| {
         format!(
-            "SELECT mem_record_serving('{run}', {}, '{{}}'::uuid[], {withheld}, {budget}, {used})",
+            "SELECT mem_record_serving('{run}', '{alice}', {}, '{{}}'::uuid[], {withheld}, {budget}, {used})",
             arr(digests)
         )
     };
-    let r = uuid_of(&app, w.ws, None, &rec(w.run_s1, &[d], 2, 6000, 100))
+    let r = uuid_of(&wk, w.ws, None, &rec(w.run_s1, &[d], 2, 6000, 100))
         .await
         .expect("receipt");
     let ch: Uuid = sqlx::query_scalar("SELECT channel_id FROM mem_serving WHERE id = $1")
@@ -1195,30 +1271,46 @@ async fn cursor_and_receipts_only_through_their_functions() {
         .expect("row");
     assert_eq!(ch, w.s1, "channel_id == agent_run.channel_id");
     assert_eq!(
-        uuid_of(&app, w.ws, None, &rec(w.run_s1, &[d], 0, 10, 1)).await,
+        uuid_of(&wk, w.ws, None, &rec(w.run_s1, &[d], 0, 10, 1)).await,
         Err("23505".into()),
         "one receipt per run"
     );
     assert_eq!(
-        uuid_of(
-            &app,
-            w.ws,
-            None,
-            &rec(w.run_p1, &[Uuid::new_v4()], 0, 10, 1)
-        )
-        .await,
+        uuid_of(&wk, w.ws, None, &rec(w.run_p1, &[Uuid::new_v4()], 0, 10, 1)).await,
         Err("23503".into()),
         "unknown digest"
     );
     assert_eq!(
-        uuid_of(&app, w.ws, None, &rec(w.run_b, &[], 0, 10, 1)).await,
+        uuid_of(&wk, w.ws, None, &rec(w.run_b, &[], 0, 10, 1)).await,
         Err("23503".into()),
         "run of another workspace"
     );
     assert_eq!(
-        uuid_of(&app, w.ws, None, &rec(w.run_p1, &[], 0, 10, 11)).await,
+        uuid_of(&wk, w.ws, None, &rec(w.run_p1, &[], 0, 10, 11)).await,
         Err("23514".into()),
         "used > budget"
+    );
+    // H-B: a digest that the answer channel's audience may not see cannot be recorded
+    // (S1-only evidence into a P1 answer), and a missing requester fails closed.
+    assert_eq!(
+        uuid_of(&wk, w.ws, None, &rec(w.run_p1, &[d], 0, 10, 1)).await,
+        Err("23514".into()),
+        "S1 digest into a P1 answer"
+    );
+    assert_eq!(
+        uuid_of(
+            &wk,
+            w.ws,
+            None,
+            &format!(
+                "SELECT mem_record_serving('{}', NULL, {}, '{{}}'::uuid[], 0, 10, 1)",
+                w.run_s1,
+                arr(&[d])
+            )
+        )
+        .await,
+        Err("23514".into()),
+        "no requester"
     );
     // receipts follow the answer channel (D7).
     assert_eq!(count(&app, w.ws, Some(w.alice), "mem_serving").await, 1);
@@ -1426,20 +1518,21 @@ async fn settings_writes_need_the_right_role() {
     );
 
     // worker-side switch: excluded channel / paused workspace, no viewer needed.
+    let wk = worker_pool(true).await;
     let switch = |c: Uuid| format!("SELECT mem_channel_switch('{c}')");
-    assert!(bool_of(&app, w.ws, None, &switch(w.p1)).await);
+    assert!(bool_of(&wk, w.ws, None, &switch(w.p1)).await);
     assert!(
-        !bool_of(&app, w.ws, None, &switch(w.s1)).await,
+        !bool_of(&wk, w.ws, None, &switch(w.s1)).await,
         "excluded channel"
     );
     su_exec(&su, &format!("UPDATE mem_settings SET paused = true WHERE scope = 'workspace' AND workspace_id = '{}'", w.ws)).await;
     assert!(
-        !bool_of(&app, w.ws, None, &switch(w.p1)).await,
+        !bool_of(&wk, w.ws, None, &switch(w.p1)).await,
         "paused workspace"
     );
     assert!(
         bool_of(
-            &app,
+            &wk,
             w.ws_b,
             None,
             &format!("SELECT mem_channel_switch('{}')", w.channel_b)
@@ -1456,7 +1549,7 @@ async fn settings_writes_need_the_right_role() {
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
 async fn audience_rule_pins_adr_d6_4() {
-    let (su, app, w) = setup().await;
+    let (su, _app, w) = setup().await;
     let (m_p1, s_p1) = w.m_p1;
     let (m_s1, s_s1) = w.m_s1;
     let (m_dm, s_dm) = seed_message(&su, w.ws, w.dm_alice_agent, w.alice).await;
@@ -1471,12 +1564,13 @@ async fn audience_rule_pins_adr_d6_4() {
         &[(m_dm, w.dm_alice_agent)],
     )
     .await;
+    let wk = worker_pool(true).await;
     let aud = |d: Uuid, answer: Uuid, requester: Uuid| {
-        let app = app.clone();
+        let wk = wk.clone();
         let ws = w.ws;
         async move {
             bool_of(
-                &app,
+                &wk,
                 ws,
                 None,
                 &format!("SELECT mem_digest_audience_ok('{d}', '{answer}', '{requester}')"),
@@ -1550,7 +1644,7 @@ async fn audience_rule_pins_adr_d6_4() {
     assert!(!aud(d_s1, w.s1, w.alice).await, "deleted evidence");
     assert!(
         !bool_of(
-            &app,
+            &wk,
             w.ws,
             None,
             &format!(
@@ -1563,7 +1657,7 @@ async fn audience_rule_pins_adr_d6_4() {
     // Another tenant cannot ask about A's digest.
     assert!(
         !bool_of(
-            &app,
+            &wk,
             w.ws_b,
             None,
             &format!(
@@ -1627,4 +1721,522 @@ async fn identity_gucs_do_not_outlive_the_transaction() {
         .await
         .expect("count");
     assert_eq!(n, 0);
+}
+
+// ---------------------------------------------------------------------------
+// worker-only functions (review 2: H-A / H-B) and the privilege matrix (M-A / M-B)
+// ---------------------------------------------------------------------------
+
+/// SECURITY DEFINER functions that ignore `app.member_id`. EXECUTE belongs to `momo_memory`
+/// alone. (`mem_digest_evidence_ok` is the one definer function the RLS policy needs PUBLIC for.)
+const WORKER_ONLY: [&str; 7] = [
+    "mem_apply_digest",
+    "mem_advance_cursor",
+    "mem_record_serving",
+    "mem_digest_rollup_inputs",
+    "mem_channel_switch",
+    "mem_digest_live",
+    "mem_digest_audience_ok",
+];
+const RUNTIME_ROLES: [&str; 5] = [
+    "momo_app",
+    "momo_relay",
+    "momo_worker",
+    "momo_notifier",
+    "momo_platform_admin",
+];
+
+async fn worker_only_calls(su: &PgPool, w: &World, digest: Uuid) -> Vec<(&'static str, String)> {
+    vec![
+        (
+            "mem_apply_digest",
+            resolve(
+                su,
+                &apply_sql(w.p1, None, "window", w.m_p1.1, w.m_p1.1, &[], &[w.m_p1.0]),
+            )
+            .await,
+        ),
+        (
+            "mem_advance_cursor",
+            format!(
+                "SELECT mem_advance_cursor('{}', 0, '{}', now() + interval '1 minute')",
+                w.p1,
+                Uuid::new_v4()
+            ),
+        ),
+        (
+            "mem_record_serving",
+            format!(
+                "SELECT mem_record_serving('{}', '{}', '{{}}'::uuid[], '{{}}'::uuid[], 0, 0, 0)",
+                w.run_p1, w.alice
+            ),
+        ),
+        (
+            "mem_digest_rollup_inputs",
+            format!(
+                "SELECT * FROM mem_digest_rollup_inputs('{}', NULL, 'day', 0, 999999)",
+                w.s1
+            ),
+        ),
+        (
+            "mem_channel_switch",
+            format!("SELECT mem_channel_switch('{}')", w.s1),
+        ),
+        (
+            "mem_digest_live",
+            format!("SELECT mem_digest_live('{digest}')"),
+        ),
+        (
+            "mem_digest_audience_ok",
+            format!(
+                "SELECT mem_digest_audience_ok('{digest}', '{}', '{}')",
+                w.s1, w.alice
+            ),
+        ),
+    ]
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn worker_only_functions_are_closed_to_the_api_and_open_to_momo_memory() {
+    let (su, app, w) = setup().await;
+    // A private digest whose body an API session must never be able to read via a helper.
+    let d_s1 = seed_digest(&su, w.ws, w.s1, w.m_s1.1, &[(w.m_s1.0, w.s1)]).await;
+    sqlx::query("UPDATE mem_digest SET level = 'window', body = 'PRIVATE-BODY' WHERE id = $1")
+        .bind(d_s1)
+        .execute(&su)
+        .await
+        .expect("body");
+    let calls = worker_only_calls(&su, &w, d_s1).await;
+    assert_eq!(calls.len(), WORKER_ONLY.len());
+    let plain_worker = worker_pool(false).await;
+    let memory = worker_pool(true).await;
+
+    for (name, sql) in &calls {
+        // H-A / H-B: an API session (even a channel member) is refused by EXECUTE.
+        assert_eq!(
+            exec(&app, w.ws, Some(w.alice), sql).await,
+            Err("42501".into()),
+            "momo_app must not run {name}"
+        );
+        // ... and so is momo_worker itself: the membership has INHERIT FALSE, so it must
+        // SET ROLE momo_memory (which drops BYPASSRLS) before it can call these.
+        assert_eq!(
+            exec(&plain_worker, w.ws, None, sql).await,
+            Err("42501".into()),
+            "momo_worker without SET ROLE must not run {name}"
+        );
+    }
+    // The leak the review named, spelled out: rollup inputs of a private channel.
+    let leak = format!(
+        "SELECT body FROM mem_digest_rollup_inputs('{}', NULL, 'day', 0, 999999)",
+        w.s1
+    );
+    assert_eq!(
+        exec(&app, w.ws, Some(w.bob), &leak).await,
+        Err("42501".into())
+    );
+    // momo_worker + SET ROLE momo_memory runs every one of them.
+    for (name, sql) in &calls {
+        let outcome = exec(&memory, w.ws, None, sql).await;
+        assert!(outcome.is_ok(), "momo_memory must run {name}: {outcome:?}");
+    }
+    // ... the way #3162 will: `SET LOCAL ROLE` inside its own transaction, BYPASSRLS shed
+    // for the tx only.
+    let mut tx = viewer_tx(&plain_worker, w.ws, None).await;
+    let (before,): (bool,) =
+        sqlx::query_as("SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user")
+            .fetch_one(&mut *tx)
+            .await
+            .expect("before");
+    assert!(before, "plain momo_worker is BYPASSRLS");
+    sqlx::query("SET LOCAL ROLE momo_memory")
+        .execute(&mut *tx)
+        .await
+        .expect("SET LOCAL ROLE momo_memory");
+    let (bypass, who): (bool, String) = sqlx::query_as(
+        "SELECT rolbypassrls, current_user::text FROM pg_roles WHERE rolname = current_user",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .expect("inside");
+    assert_eq!((bypass, who.as_str()), (false, "momo_memory"));
+    let inputs: Vec<String> = sqlx::query_scalar(&leak)
+        .fetch_all(&mut *tx)
+        .await
+        .expect("worker reads its rollup inputs");
+    assert_eq!(inputs, vec!["PRIVATE-BODY".to_string()]);
+    tx.commit().await.expect("commit");
+    let after: String = sqlx::query_scalar("SELECT current_user::text")
+        .fetch_one(&plain_worker)
+        .await
+        .expect("after");
+    assert_eq!(after, "momo_worker");
+
+    // Under momo_memory nothing is readable by table: no table grant, and the tenant GUC
+    // still gates the functions.
+    for table in [
+        "mem_digest",
+        "mem_evidence",
+        "mem_cursor",
+        "mem_serving",
+        "mem_settings",
+        "message",
+    ] {
+        assert_eq!(
+            exec(
+                &memory,
+                w.ws,
+                None,
+                &format!("SELECT count(*) FROM {table}")
+            )
+            .await,
+            Err("42501".into()),
+            "momo_memory has no direct access to {table}"
+        );
+    }
+    let mut bare = memory.begin().await.expect("begin");
+    let none: Vec<Uuid> = sqlx::query_scalar(&format!(
+        "SELECT id FROM mem_digest_rollup_inputs('{}', NULL, 'day', 0, 999999)",
+        w.s1
+    ))
+    .fetch_all(&mut *bare)
+    .await
+    .expect("no GUC");
+    assert!(none.is_empty(), "no app.workspace_id: zero rows");
+    let no_ws = sqlx::query_scalar::<_, Uuid>(&calls[0].1)
+        .fetch_one(&mut *bare)
+        .await;
+    assert_eq!(no_ws.map_err(|e| sqlstate(&e)), Err("42501".to_string()));
+    bare.rollback().await.expect("rollback");
+    // Another tenant's GUC sees nothing of this tenant's private digest.
+    let mut other = viewer_tx(&memory, w.ws_b, None).await;
+    let none: Vec<Uuid> = sqlx::query_scalar(&format!(
+        "SELECT id FROM mem_digest_rollup_inputs('{}', NULL, 'day', 0, 999999)",
+        w.s1
+    ))
+    .fetch_all(&mut *other)
+    .await
+    .expect("other tenant");
+    assert!(none.is_empty());
+    other.rollback().await.expect("rollback");
+}
+
+/// M-A/M-B: every `mem_%` table x every runtime role x every DML privilege, plus the function
+/// and membership side. Loops over pg_class, so a future mem_* table is covered too.
+async fn assert_privilege_matrix(su: &PgPool, when: &str) {
+    let existing: Vec<String> =
+        sqlx::query_scalar("SELECT rolname::text FROM pg_roles WHERE rolname = ANY($1) ORDER BY 1")
+            .bind(
+                RUNTIME_ROLES
+                    .iter()
+                    .map(|r| r.to_string())
+                    .collect::<Vec<_>>(),
+            )
+            .fetch_all(su)
+            .await
+            .expect("roles");
+    for must in ["momo_app", "momo_relay", "momo_worker", "momo_notifier"] {
+        assert!(existing.iter().any(|r| r == must), "{when}: role {must}");
+    }
+    let mut roles = existing.clone();
+    roles.push("momo_memory".to_string());
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT c.relname::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r','p') AND c.relname LIKE 'mem\\_%' ORDER BY 1",
+    )
+    .fetch_all(su)
+    .await
+    .expect("tables");
+    assert!(tables.len() >= 5, "{when}: mem_* tables: {tables:?}");
+    for role in &roles {
+        for table in &tables {
+            for privilege in ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE"] {
+                // momo_app: SELECT (RLS-gated) everywhere; direct writes only on its own settings.
+                let allowed = role == "momo_app"
+                    && (privilege == "SELECT"
+                        || (table == "mem_settings" && privilege != "TRUNCATE"));
+                let has: bool = sqlx::query_scalar("SELECT has_table_privilege($1, $2, $3)")
+                    .bind(role)
+                    .bind(format!("public.{table}"))
+                    .bind(privilege)
+                    .fetch_one(su)
+                    .await
+                    .expect("has_table_privilege");
+                assert_eq!(has, allowed, "{when}: {role} {privilege} on {table}");
+            }
+        }
+    }
+    let functions: Vec<(String, String)> = sqlx::query_as(
+        "SELECT p.oid::regprocedure::text, p.proname::text FROM pg_proc p \
+           JOIN pg_namespace n ON n.oid = p.pronamespace \
+          WHERE n.nspname = 'public' AND p.proname LIKE 'mem\\_%' AND p.prosecdef",
+    )
+    .fetch_all(su)
+    .await
+    .expect("definer functions");
+    for must in WORKER_ONLY {
+        assert!(
+            functions.iter().any(|(_, n)| n == must),
+            "{when}: {must} exists"
+        );
+    }
+    for (signature, name) in &functions {
+        if name == "mem_digest_evidence_ok" {
+            continue; // the RLS policy calls it as the reading role
+        }
+        let public_grants: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_proc p, aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a \
+              WHERE p.oid = $1::regprocedure AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'",
+        )
+        .bind(signature)
+        .fetch_one(su)
+        .await
+        .expect("acl");
+        assert_eq!(public_grants, 0, "{when}: PUBLIC can execute {signature}");
+        for role in &roles {
+            let has: bool = sqlx::query_scalar(
+                "SELECT has_function_privilege($1, $2::regprocedure, 'EXECUTE')",
+            )
+            .bind(role)
+            .bind(signature)
+            .fetch_one(su)
+            .await
+            .expect("has_function_privilege");
+            assert_eq!(
+                has,
+                role == "momo_memory",
+                "{when}: {role} EXECUTE {signature}"
+            );
+        }
+    }
+    // Membership: only momo_worker, without inheritance.
+    for role in &existing {
+        let member: bool = sqlx::query_scalar("SELECT pg_has_role($1, 'momo_memory', 'MEMBER')")
+            .bind(role)
+            .fetch_one(su)
+            .await
+            .expect("member");
+        assert_eq!(
+            member,
+            role == "momo_worker",
+            "{when}: {role} membership of momo_memory"
+        );
+    }
+    let (usage, set): (bool, bool) = sqlx::query_as(
+        "SELECT pg_has_role('momo_worker', 'momo_memory', 'USAGE'), pg_has_role('momo_worker', 'momo_memory', 'SET')",
+    )
+    .fetch_one(su)
+    .await
+    .expect("worker grant");
+    assert_eq!(
+        (usage, set),
+        (false, true),
+        "{when}: INHERIT FALSE, SET TRUE"
+    );
+    let (bypass, login, superuser): (bool, bool, bool) = sqlx::query_as(
+        "SELECT rolbypassrls, rolcanlogin, rolsuper FROM pg_roles WHERE rolname = 'momo_memory'",
+    )
+    .fetch_one(su)
+    .await
+    .expect("momo_memory");
+    assert!(
+        !bypass && !login && !superuser,
+        "{when}: momo_memory attributes"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn runtime_privileges_match_the_lockdown_and_survive_both_bootstraps() {
+    let (su, _app, _w) = setup().await; // migrations, then bootstrap_roles.sql
+    assert_privilege_matrix(&su, "after migrations + bootstrap_roles.sql").await;
+    run_sql_file("bootstrap_roles.sql");
+    assert_privilege_matrix(&su, "bootstrap_roles.sql applied again").await;
+    run_sql_file("bootstrap_runtime_roles.sql");
+    assert_privilege_matrix(&su, "after bootstrap_runtime_roles.sql").await;
+}
+
+// ---------------------------------------------------------------------------
+// mem_apply_digest: read snapshot (M-C), switch (M-D), source_count (L-C)
+// ---------------------------------------------------------------------------
+
+fn with_snapshot(sql: &str, literal: &str) -> String {
+    let start = sql.find("@SNAP[").expect("marker");
+    let end = sql[start..].find("]@").expect("end") + start + 2;
+    format!("{}{}{}", &sql[..start], literal, &sql[end..])
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn apply_digest_rejects_edits_after_the_read_and_honours_the_switch() {
+    let (su, app, w) = setup().await;
+    let wk = worker_pool(true).await;
+    let (a1, s1) = seed_message(&su, w.ws, w.p1, w.alice).await;
+    let (a2, s2) = seed_message(&su, w.ws, w.p1, w.alice).await;
+    let ws = w.ws;
+    let apply = |sql: String| {
+        let wk = wk.clone();
+        async move { uuid_of(&wk, ws, None, &sql).await }
+    };
+    let base = apply_sql(w.p1, None, "window", s1, s2, &[], &[a1, a2]);
+
+    // M-C: the worker reads (snapshot), an edit lands while the model runs, apply refuses.
+    let snapshot_at_read = resolve(&su, &base).await;
+    su_exec(
+        &su,
+        &format!("UPDATE message SET body = 'edited', edited_at = now() WHERE id = '{a1}'"),
+    )
+    .await;
+    assert_eq!(
+        apply(snapshot_at_read.clone()).await,
+        Err("40001".into()),
+        "edit between read and apply"
+    );
+    assert_eq!(count(&app, w.ws, Some(w.bob), "mem_digest").await, 0);
+    // Re-reading (fresh snapshot) succeeds, and the digest is readable...
+    let d = apply(resolve(&su, &base).await)
+        .await
+        .expect("fresh snapshot");
+    assert!(visible_digests(&app, w.ws, Some(w.bob)).await.contains(&d));
+    // ... until the next edit, which hides it again (read policy: edited_at > created_at).
+    su_exec(
+        &su,
+        &format!("UPDATE message SET edited_at = now() WHERE id = '{a2}'"),
+    )
+    .await;
+    assert!(!visible_digests(&app, w.ws, Some(w.bob)).await.contains(&d));
+    // A message deleted after the read cannot be summarised either.
+    let snapshot = resolve(&su, &base).await;
+    su_exec(
+        &su,
+        &format!("UPDATE message SET deleted_at = now(), state = 'deleted' WHERE id = '{a2}'"),
+    )
+    .await;
+    assert_eq!(
+        apply(snapshot).await,
+        Err("23503".into()),
+        "deleted after read"
+    );
+
+    // Malformed snapshots are refused, never silently accepted.
+    let (b1, t1) = seed_message(&su, w.ws, w.p1, w.alice).await;
+    let one = apply_sql(w.p1, None, "window", t1, t1, &[], &[b1]);
+    for (label, sql) in [
+        (
+            "NULL snapshot array",
+            with_snapshot(&one, "NULL::timestamptz[]"),
+        ),
+        (
+            "length mismatch",
+            with_snapshot(&one, "ARRAY[NULL, NULL]::timestamptz[]"),
+        ),
+        (
+            "read_at in the future",
+            resolve(&su, &one)
+                .await
+                .replace(", now())", ", now() + interval '1 hour')"),
+        ),
+        (
+            "snapshot after read_at",
+            with_snapshot(&one, "ARRAY[now() + interval '1 hour']::timestamptz[]"),
+        ),
+    ] {
+        assert_eq!(apply(sql).await, Err("23514".into()), "{label}");
+    }
+    // The evidence carries the read time.
+    let earlier = resolve(&su, &one)
+        .await
+        .replace(", now())", ", now() - interval '5 minutes')");
+    let d2 = apply(earlier).await.expect("read 5 minutes ago");
+    let old: bool = sqlx::query_scalar(
+        "SELECT bool_and(created_at < now() - interval '4 minutes') FROM mem_evidence WHERE digest_id = $1",
+    )
+    .bind(d2)
+    .fetch_one(&su)
+    .await
+    .expect("created_at");
+    assert!(old, "evidence.created_at is the worker's read time");
+
+    // M-D: paused workspace / disabled workspace / excluded or paused channel refuse writes.
+    let (c1, u1) = seed_message(&su, w.ws, w.p1, w.alice).await;
+    let sql = resolve(&su, &apply_sql(w.p1, None, "window", u1, u1, &[], &[c1])).await;
+    for (label, set, reset) in [
+        (
+            "workspace paused",
+            format!("INSERT INTO mem_settings (workspace_id, scope, paused) VALUES ('{}', 'workspace', true)", w.ws),
+            format!("DELETE FROM mem_settings WHERE workspace_id = '{}'", w.ws),
+        ),
+        (
+            "workspace disabled",
+            format!("INSERT INTO mem_settings (workspace_id, scope, enabled) VALUES ('{}', 'workspace', false)", w.ws),
+            format!("DELETE FROM mem_settings WHERE workspace_id = '{}'", w.ws),
+        ),
+        (
+            "channel excluded",
+            format!("INSERT INTO mem_settings (workspace_id, scope, channel_id, excluded) VALUES ('{}', 'channel', '{}', true)", w.ws, w.p1),
+            format!("DELETE FROM mem_settings WHERE workspace_id = '{}'", w.ws),
+        ),
+        (
+            "channel paused",
+            format!("INSERT INTO mem_settings (workspace_id, scope, channel_id, paused) VALUES ('{}', 'channel', '{}', true)", w.ws, w.p1),
+            format!("DELETE FROM mem_settings WHERE workspace_id = '{}'", w.ws),
+        ),
+    ] {
+        su_exec(&su, &set).await;
+        assert_eq!(apply(sql.clone()).await, Err("55000".into()), "{label}");
+        su_exec(&su, &reset).await;
+    }
+    assert!(apply(sql).await.is_ok(), "switch back on: writes resume");
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn a_digest_with_fewer_evidence_rows_than_source_count_is_hidden() {
+    let (su, app, w) = setup().await;
+    let wk = worker_pool(true).await;
+    let (a1, s1) = seed_message(&su, w.ws, w.p1, w.alice).await;
+    let (a2, s2) = seed_message(&su, w.ws, w.p1, w.alice).await;
+    let sql = resolve(
+        &su,
+        &apply_sql(w.p1, None, "window", s1, s2, &[], &[a1, a2]),
+    )
+    .await;
+    let d = uuid_of(&wk, w.ws, None, &sql).await.expect("digest");
+    let live = |q: String| {
+        let wk = wk.clone();
+        let ws = w.ws;
+        async move { bool_of(&wk, ws, None, &q).await }
+    };
+    assert!(visible_digests(&app, w.ws, Some(w.bob)).await.contains(&d));
+    assert!(live(format!("SELECT mem_digest_live('{d}')")).await);
+    // A partial hard delete leaves one of two evidence rows (superuser bypasses RLS here).
+    su_exec(
+        &su,
+        &format!("DELETE FROM mem_evidence WHERE digest_id = '{d}' AND message_id = '{a1}'"),
+    )
+    .await;
+    assert!(
+        !visible_digests(&app, w.ws, Some(w.bob)).await.contains(&d),
+        "reader policy hides a digest short of its evidence"
+    );
+    assert!(!live(format!("SELECT mem_digest_live('{d}')")).await);
+    assert!(
+        !live(format!(
+            "SELECT mem_digest_audience_ok('{d}', '{}', '{}')",
+            w.p1, w.bob
+        ))
+        .await
+    );
+    let inputs = ids_of(
+        &wk,
+        w.ws,
+        None,
+        &format!(
+            "SELECT id FROM mem_digest_rollup_inputs('{}', NULL, 'day', 0, 999999)",
+            w.p1
+        ),
+    )
+    .await;
+    assert!(inputs.is_empty(), "not a rollup input either");
 }

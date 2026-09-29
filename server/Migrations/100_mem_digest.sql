@@ -20,30 +20,44 @@
 -- 뿐이고 `channel.archived_at` 은 읽기에서 보지 않는다. 이 함수는 Rust 규칙보다
 -- 넓지 않고, 검색의 한 줄(멤버가 active·미삭제)만 더 좁힌다.
 --
--- ── 쓰기 계약 (보안 검수 #3185 H1/H2/M3) ───────────────────────────────────────
--- mem_digest / mem_evidence / mem_cursor / mem_serving 은 API 역할(momo_app 등)이
--- 직접 INSERT/UPDATE/DELETE 하지 못한다. (1) 테이블 권한을 회수하고, (2) 쓰기 정책을
--- 전용 역할 mem_definer 에만 붙여 부트스트랩이 권한을 다시 부여해도 RLS 가 막는다.
--- 쓰기는 SECURITY DEFINER 함수만 통과한다:
---   mem_apply_digest      요약 + 근거를 한 번에 검증·기록(멱등 갱신, stale 해제)
+-- ── 쓰기·워커 계약 (보안 검수 #3185 1·2차) ────────────────────────────────────────
+-- 역할이 셋이다.
+--   momo_app      API. mem_* 는 SELECT(RLS 로 좁혀짐)만, mem_settings 만 직접 쓴다.
+--                 워커 전용 함수의 EXECUTE 도, momo_memory 멤버십도 없다.
+--   momo_memory   NOLOGIN · NOSUPERUSER · NOBYPASSRLS. 워커 전용 함수의 EXECUTE 를 가진
+--                 유일한 역할이다. 테이블 권한은 없다(함수가 정의자 권한으로 쓴다).
+--                 `momo_worker` 가 `GRANT momo_memory TO momo_worker WITH INHERIT FALSE,
+--                 SET TRUE` 로 SET ROLE 만 할 수 있고, 상속은 받지 못한다.
+--   mem_definer   NOLOGIN · NOSUPERUSER · NOBYPASSRLS. 함수 소유자. 테이블 소유자가 아니라
+--                 RLS 가 그대로 걸리고, 쓰기 정책이 명시적으로 mem_definer 를 허용한다.
+-- mem_digest / mem_evidence / mem_cursor / mem_serving 은 API 역할이 직접 INSERT/UPDATE/DELETE
+-- 하지 못한다. (1) 테이블 권한 회수, (2) 쓰기 정책을 mem_definer 에만 부여 — 부트스트랩이
+-- 권한을 다시 부여해도 RLS 가 막는다. 쓰기는 SECURITY DEFINER 함수만 통과한다:
+--   mem_apply_digest      요약 + 근거를 한 번에 검증·기록(멱등 갱신, stale 해제).
+--                         근거마다 워커가 읽은 시점의 edited_at 스냅샷을 받아 그 사이 수정되면
+--                         40001 로 거부하고, 스위치(제외·정지)도 확인한다(55000).
 --   mem_advance_cursor    워터마크 전진 + 리스(단조 증가, 채널 헤드 이하)
---   mem_record_serving    run 별 영수증(채널은 agent_run 에서 가져온다)
--- 정의자 역할 mem_definer 는 NOLOGIN · NOSUPERUSER · NOBYPASSRLS 다 — 테이블 소유자도
--- 아니므로 RLS 는 그대로 걸리고, 쓰기 정책이 명시적으로 mem_definer 를 허용한다.
--- 함수는 `search_path = pg_catalog, public, pg_temp` 로 고정하고 객체를 public. 으로
--- 한정하며, 테넌트/읽는 사람은 GUC(app.workspace_id, app.member_id)를 함수 안에서 읽는다.
+--   mem_record_serving    run 별 영수증(채널은 agent_run 에서, 요약마다 청중 규칙을 통과해야 함)
+-- 워커 전용 함수(EXECUTE 는 momo_memory 에만; PUBLIC·momo_app 등 나머지에서 회수):
+--   mem_apply_digest, mem_advance_cursor, mem_record_serving,
+--   mem_digest_rollup_inputs, mem_channel_switch, mem_digest_live, mem_digest_audience_ok
+-- 이들은 읽는 사람(app.member_id)을 보지 않고 정의자 권한으로 돈다 — API 세션이 부르면
+-- 비공개 요약이 새거나 요약·커서·영수증이 위조된다. 그래서 API 역할이 부를 수 없어야 한다.
+-- 함수는 `search_path = pg_catalog, public, pg_temp` 로 고정하고 객체를 public. 으로 한정하며,
+-- 테넌트는 GUC(app.workspace_id)를 함수 안에서 읽는다.
 --
 -- ── 요약 워커(#3162) 계약 ─────────────────────────────────────────────────────
---   * 워커는 tx 마다 SET LOCAL app.workspace_id 를 걸고, mem_* 를 위 쓰기 함수로만
---     기록한다. mem_* 를 BYPASSRLS 역할로 읽거나 쓰지 않는다.
---   * 롤업 입력(일 ← 창, 주 ← 일)은 mem_digest_rollup_inputs() 로 읽는다. 읽는 사람이
---     없는 워커용 정의자 함수이며, 삭제·수정된 근거가 섞인 요약과 stale 은 돌려주지 않는다.
---   * 채널 스위치(워크스페이스 enabled/paused, 채널 excluded/paused)는 mem_channel_switch().
---   * 직접 SELECT 는 읽는 사람(app.member_id)이 있을 때만 행이 보이고, INSERT ... RETURNING 은
---     쓰지 않는다(쓰기 함수가 id 를 돌려준다).
---   * 이 함수들의 EXECUTE 는 PUBLIC 에서 회수했다. 런타임 역할에는 infra/rust/sql/
---     bootstrap_*.sql 이 부여한다. 함수를 부를 수 있는 코드는 요약 본문을 신뢰받는 경로
---     (워커)뿐이어야 한다 — 본문 자체는 DB 가 검증하지 못한다.
+--   * 워커는 tx 마다 `SET LOCAL ROLE momo_memory`(BYPASSRLS 를 그 tx 동안 벗는다)와
+--     `SET LOCAL app.workspace_id` 를 건다. mem_* 를 BYPASSRLS 로 읽거나 쓰지 않는다.
+--     원문 메시지는 momo_worker 본래 권한으로 읽되, 읽은 시점과 메시지별 edited_at 을 기억해
+--     mem_apply_digest 에 넘긴다.
+--   * mem_* 는 위 쓰기 함수로만 기록한다. 롤업 입력(일←창, 주←일)은 mem_digest_rollup_inputs()
+--     로 읽는다(stale·삭제/수정/일부 소실된 근거의 요약은 돌려주지 않는다).
+--     채널 스위치는 mem_channel_switch().
+--   * 영수증은 mem_record_serving(run, 요청자, ...) — 요청자는 agent_run 에 칼럼이 없어
+--     인자로 받는다(멘션 잡이 아는 값). 요약마다 mem_digest_audience_ok 를 통과해야 한다.
+--   * INSERT ... RETURNING 은 쓰지 않는다(쓰기 함수가 id 를 돌려준다).
+--   * 요약 본문 자체는 DB 가 검증하지 못한다 — 함수를 부를 수 있는 코드는 워커뿐이어야 한다.
 --
 -- ── 정책 합성 주의 ────────────────────────────────────────────────────────────
 -- 같은 명령의 PERMISSIVE 정책은 OR 로 합쳐진다. SELECT 는 일반 정책 하나 + mem_definer
@@ -63,6 +77,15 @@ BEGIN
   END IF;
   ALTER ROLE mem_definer NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
 END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_memory') THEN
+    CREATE ROLE momo_memory NOLOGIN;
+  END IF;
+  ALTER ROLE momo_memory NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+END $$;
+GRANT USAGE ON SCHEMA public TO momo_memory;
 
 GRANT USAGE ON SCHEMA public TO mem_definer;
 -- 함수 소유자 변경은 새 소유자의 스키마 CREATE 권한을 요구한다. 아래 끝에서 회수한다.
@@ -313,31 +336,66 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON mem_digest, mem_evidence, mem_cursor, me
   TO mem_definer;
 GRANT SELECT ON mem_settings TO mem_definer;
 
--- ── 정의자 읽기 도우미 (RLS 재귀 방지: mem_digest 를 읽지 않는다) ─────────────────
--- 요약의 읽기 가능 여부. 근거를 읽는 사람의 정책으로 좁히지 않고 전부 본다.
---   저장 채널·모든 근거 채널을 app.member_id 가 읽을 수 있고, 근거가 1개 이상이며,
---   모든 근거가 (그 채널에 속한, 삭제·수정되지 않은) 메시지일 때 true.
---   수정: 근거가 기록된 뒤 메시지가 수정되면 그 요약은 가려진다(재생성 전까지).
-CREATE OR REPLACE FUNCTION mem_digest_evidence_ok(p_digest_id uuid, p_channel_id uuid)
+DROP POLICY IF EXISTS mem_digest_sel ON mem_digest;
+DROP FUNCTION IF EXISTS mem_digest_evidence_ok(uuid, uuid);
+-- ── 정의자 읽기 도우미 ─────────────────────────────────────────────────────────
+-- 요약의 읽기 가능 여부(RLS 정책이 부른다 — 그래서 PUBLIC 이 EXECUTE 한다). 저장 채널은
+-- mem_digest 에서 직접 읽는다(호출자가 채널을 주지 못한다). 저장 채널·모든 근거 채널을
+-- app.member_id 가 읽을 수 있고, 근거가 source_count 개 이상 있으며(일부만 하드 삭제되면
+-- 가려진다), 모든 근거가 (그 채널에 속한, 삭제·수정되지 않은) 메시지일 때 true.
+-- 수정: 근거가 기록된 뒤 메시지가 수정되면 그 요약은 가려진다(재생성 전까지).
+-- 이 함수는 mem_digest 를 읽으므로 정책은 mem_definer 에게는 이 함수를 부르지 않는다(CASE).
+CREATE OR REPLACE FUNCTION mem_digest_evidence_ok(p_digest_id uuid)
 RETURNS boolean
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog, public, pg_temp
 AS $$
-  SELECT public.mem_can_read_channel(p_channel_id)
-     AND EXISTS (
-       SELECT 1 FROM public.mem_evidence ev
-        WHERE ev.digest_id = p_digest_id
-          AND ev.workspace_id = nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid
-     )
-     AND NOT EXISTS (
-       SELECT 1 FROM public.mem_evidence ev
-        WHERE ev.digest_id = p_digest_id
-          AND ev.workspace_id = nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid
-          AND NOT (
-            public.mem_can_read_channel(ev.channel_id)
-            AND EXISTS (
+  SELECT COALESCE((
+    SELECT public.mem_can_read_channel(d.channel_id)
+       AND d.source_count > 0
+       AND (SELECT pg_catalog.count(*) FROM public.mem_evidence ev
+             WHERE ev.digest_id = d.id AND ev.workspace_id = d.workspace_id) >= d.source_count
+       AND NOT EXISTS (
+         SELECT 1 FROM public.mem_evidence ev
+          WHERE ev.digest_id = d.id AND ev.workspace_id = d.workspace_id
+            AND NOT (
+              public.mem_can_read_channel(ev.channel_id)
+              AND EXISTS (
+                SELECT 1 FROM public.message m
+                 WHERE m.id = ev.message_id
+                   AND m.channel_id = ev.channel_id
+                   AND m.workspace_id = ev.workspace_id
+                   AND m.deleted_at IS NULL
+                   AND m.state <> 'deleted'
+                   AND (m.edited_at IS NULL OR m.edited_at <= ev.created_at)
+              )
+            )
+       )
+      FROM public.mem_digest d
+     WHERE d.id = p_digest_id
+       AND d.workspace_id = nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid
+  ), false)
+$$;
+
+-- 읽는 사람 없이(워커 전용): 근거가 source_count 개 이상 있고 전부 살아 있는가
+-- (삭제·수정 안 됨, 그 채널 소속).
+CREATE OR REPLACE FUNCTION mem_digest_live(p_digest_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+  SELECT COALESCE((
+    SELECT d.source_count > 0
+       AND (SELECT pg_catalog.count(*) FROM public.mem_evidence ev
+             WHERE ev.digest_id = d.id AND ev.workspace_id = d.workspace_id) >= d.source_count
+       AND NOT EXISTS (
+         SELECT 1 FROM public.mem_evidence ev
+          WHERE ev.digest_id = d.id AND ev.workspace_id = d.workspace_id
+            AND NOT EXISTS (
               SELECT 1 FROM public.message m
                WHERE m.id = ev.message_id
                  AND m.channel_id = ev.channel_id
@@ -346,37 +404,11 @@ AS $$
                  AND m.state <> 'deleted'
                  AND (m.edited_at IS NULL OR m.edited_at <= ev.created_at)
             )
-          )
-     )
-$$;
-
--- 읽는 사람 없이: 근거가 있고 전부 살아 있는가(삭제·수정 안 됨, 그 채널 소속).
-CREATE OR REPLACE FUNCTION mem_digest_live(p_digest_id uuid)
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = pg_catalog, public, pg_temp
-AS $$
-  SELECT EXISTS (
-       SELECT 1 FROM public.mem_evidence ev
-        WHERE ev.digest_id = p_digest_id
-          AND ev.workspace_id = nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid
-     )
-     AND NOT EXISTS (
-       SELECT 1 FROM public.mem_evidence ev
-        WHERE ev.digest_id = p_digest_id
-          AND ev.workspace_id = nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid
-          AND NOT EXISTS (
-            SELECT 1 FROM public.message m
-             WHERE m.id = ev.message_id
-               AND m.channel_id = ev.channel_id
-               AND m.workspace_id = ev.workspace_id
-               AND m.deleted_at IS NULL
-               AND m.state <> 'deleted'
-               AND (m.edited_at IS NULL OR m.edited_at <= ev.created_at)
-          )
-     )
+       )
+      FROM public.mem_digest d
+     WHERE d.id = p_digest_id
+       AND d.workspace_id = nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid
+  ), false)
 $$;
 
 -- ── 청중 규칙 (ADR-0196 D6-4; #3163 이 쓴다) ───────────────────────────────────
@@ -495,11 +527,12 @@ $$;
 -- 요약 + 근거를 한 번에 기록한다. 같은 (채널, 스레드, 레벨, to_seq) 가 있으면 갱신하고
 -- 근거를 갈아 끼우며 stale 을 푼다. 저장 채널 하나에만 쓴다(D6-1): 모든 근거 메시지는
 -- 그 채널·그 워크스페이스·그 seq 구간·(스레드면 그 스레드)에 속한 살아 있는 메시지여야 한다.
+DROP FUNCTION IF EXISTS mem_apply_digest(uuid, uuid, text, bigint, bigint, text, uuid[], text, text, text, uuid[]);
 CREATE OR REPLACE FUNCTION mem_apply_digest(
   p_channel_id uuid, p_thread_root_id uuid, p_level text,
   p_from_seq bigint, p_to_seq bigint, p_body text,
   p_source_digest_ids uuid[], p_model text, p_model_source text, p_prompt_version text,
-  p_evidence_message_ids uuid[])
+  p_evidence_message_ids uuid[], p_evidence_edited_at timestamptz[], p_read_at timestamptz)
 RETURNS uuid
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -523,6 +556,11 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.channel c WHERE c.id = p_channel_id AND c.workspace_id = v_ws) THEN
     RAISE EXCEPTION 'mem_apply_digest: channel not in workspace' USING ERRCODE = '23503';
   END IF;
+  -- 스위치(D9): 워크스페이스가 꺼졌거나 정지, 채널이 제외·정지면 기록하지 않는다.
+  IF NOT public.mem_channel_switch(p_channel_id) THEN
+    RAISE EXCEPTION 'mem_apply_digest: memory is disabled, paused or excluded for this channel'
+      USING ERRCODE = '55000';
+  END IF;
   IF p_thread_root_id IS NOT NULL AND NOT EXISTS (
        SELECT 1 FROM public.message r
         WHERE r.id = p_thread_root_id AND r.channel_id = p_channel_id
@@ -535,6 +573,14 @@ BEGIN
   IF (SELECT pg_catalog.count(DISTINCT e) FROM pg_catalog.unnest(p_evidence_message_ids) AS e) <> v_n THEN
     RAISE EXCEPTION 'mem_apply_digest: duplicate or NULL evidence message' USING ERRCODE = '23514';
   END IF;
+  -- 워커가 읽은 시점 스냅샷: 근거마다 그때의 edited_at (수정 안 됐으면 NULL 원소).
+  IF p_read_at IS NULL OR p_read_at > pg_catalog.now()
+     OR p_evidence_edited_at IS NULL
+     OR pg_catalog.cardinality(p_evidence_edited_at) <> v_n
+     OR EXISTS (SELECT 1 FROM pg_catalog.unnest(p_evidence_edited_at) AS t(x) WHERE t.x > p_read_at) THEN
+    RAISE EXCEPTION 'mem_apply_digest: bad read snapshot (read_at / per-evidence edited_at)'
+      USING ERRCODE = '23514';
+  END IF;
   -- 근거: 그 채널·워크스페이스·구간(·스레드)의 살아 있는 메시지, 전부.
   IF (SELECT pg_catalog.count(*) FROM public.message m
        WHERE m.id = ANY (p_evidence_message_ids)
@@ -545,6 +591,14 @@ BEGIN
      ) <> v_n THEN
     RAISE EXCEPTION 'mem_apply_digest: evidence message is not a live message of this channel/range/thread'
       USING ERRCODE = '23503';
+  END IF;
+  -- 읽은 뒤 수정됐으면 거부(요약이 옛 본문을 기댄다). 읽은 뒤 삭제됐으면 위 검사가 이미 거부했다.
+  -- 이 검사 뒤 커밋 전에 또 수정돼도 근거의 created_at = 읽은 시점이라 읽기 정책이 그 요약을 가린다.
+  IF EXISTS (SELECT 1
+               FROM ROWS FROM (pg_catalog.unnest(p_evidence_message_ids), pg_catalog.unnest(p_evidence_edited_at)) AS s(mid, snap)
+               JOIN public.message m ON m.id = s.mid
+              WHERE m.edited_at IS DISTINCT FROM s.snap) THEN
+    RAISE EXCEPTION 'mem_apply_digest: evidence was edited after it was read' USING ERRCODE = '40001';
   END IF;
   -- 계보: 창은 하위 요약이 없고, 일/주는 한 단계 아래 요약을 가진다.
   IF p_level = 'window' THEN
@@ -593,8 +647,8 @@ BEGIN
        v_n, v_src, p_model, p_model_source, p_prompt_version)
     RETURNING id INTO v_id;
   END IF;
-  INSERT INTO public.mem_evidence (workspace_id, digest_id, message_id, channel_id)
-  SELECT v_ws, v_id, e, p_channel_id FROM pg_catalog.unnest(p_evidence_message_ids) AS e;
+  INSERT INTO public.mem_evidence (workspace_id, digest_id, message_id, channel_id, created_at)
+  SELECT v_ws, v_id, e, p_channel_id, p_read_at FROM pg_catalog.unnest(p_evidence_message_ids) AS e;
   RETURN v_id;
 END
 $$;
@@ -649,10 +703,11 @@ BEGIN
 END
 $$;
 
--- run 별 영수증. 채널은 agent_run 에서 가져온다(호출자가 정하지 않는다). 서빙한 요약은
--- 이 워크스페이스에 있어야 한다. 같은 run 에 두 번 쓰면 23505.
+-- run 별 영수증. 채널은 agent_run 에서 가져온다(호출자가 정하지 않는다). 요청자는 agent_run 에
+-- 칼럼이 없어 인자로 받는다. 서빙한 요약은 이 워크스페이스에 있고 청중 규칙을 통과해야 한다. 같은 run 에 두 번 쓰면 23505.
+DROP FUNCTION IF EXISTS mem_record_serving(uuid, uuid[], uuid[], integer, integer, integer);
 CREATE OR REPLACE FUNCTION mem_record_serving(
-  p_run_id uuid, p_digest_ids uuid[], p_item_ids uuid[],
+  p_run_id uuid, p_requester_member_id uuid, p_digest_ids uuid[], p_item_ids uuid[],
   p_withheld_count integer, p_budget_chars integer, p_used_chars integer)
 RETURNS uuid
 LANGUAGE plpgsql
@@ -678,6 +733,12 @@ BEGIN
      <> (SELECT pg_catalog.count(DISTINCT x) FROM pg_catalog.unnest(v_digests) AS x) THEN
     RAISE EXCEPTION 'mem_record_serving: unknown digest' USING ERRCODE = '23503';
   END IF;
+  -- 실은 요약은 전부 이 답 채널의 청중 규칙(D6-4)을 통과해야 한다.
+  IF EXISTS (SELECT 1 FROM pg_catalog.unnest(v_digests) AS x(id)
+              WHERE NOT public.mem_digest_audience_ok(x.id, v_channel, p_requester_member_id)) THEN
+    RAISE EXCEPTION 'mem_record_serving: a digest is not servable to this answer channel'
+      USING ERRCODE = '23514';
+  END IF;
   INSERT INTO public.mem_serving
     (workspace_id, run_id, channel_id, digest_ids, item_ids, withheld_count, budget_chars, used_chars)
   VALUES
@@ -693,27 +754,15 @@ DO $$
 DECLARE f text;
 BEGIN
   FOREACH f IN ARRAY ARRAY[
-    'mem_digest_evidence_ok(uuid, uuid)', 'mem_digest_live(uuid)',
+    'mem_digest_evidence_ok(uuid)', 'mem_digest_live(uuid)',
     'mem_digest_audience_ok(uuid, uuid, uuid)',
     'mem_digest_rollup_inputs(uuid, uuid, text, bigint, bigint)',
     'mem_channel_switch(uuid)',
-    'mem_apply_digest(uuid, uuid, text, bigint, bigint, text, uuid[], text, text, text, uuid[])',
+    'mem_apply_digest(uuid, uuid, text, bigint, bigint, text, uuid[], text, text, text, uuid[], timestamptz[], timestamptz)',
     'mem_advance_cursor(uuid, bigint, uuid, timestamptz)',
-    'mem_record_serving(uuid, uuid[], uuid[], integer, integer, integer)'
+    'mem_record_serving(uuid, uuid, uuid[], uuid[], integer, integer, integer)'
   ] LOOP
     EXECUTE format('ALTER FUNCTION %s OWNER TO mem_definer', f);
-  END LOOP;
-  -- 정책이 부르는 읽기 판정만 PUBLIC. 나머지는 런타임 역할에 bootstrap 이 부여한다.
-  FOREACH f IN ARRAY ARRAY[
-    'mem_digest_live(uuid)', 'mem_digest_audience_ok(uuid, uuid, uuid)',
-    'mem_digest_rollup_inputs(uuid, uuid, text, bigint, bigint)',
-    'mem_channel_switch(uuid)',
-    'mem_apply_digest(uuid, uuid, text, bigint, bigint, text, uuid[], text, text, text, uuid[])',
-    'mem_advance_cursor(uuid, bigint, uuid, timestamptz)',
-    'mem_record_serving(uuid, uuid[], uuid[], integer, integer, integer)'
-  ] LOOP
-    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', f);
-    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO mem_definer', f);
   END LOOP;
 END $$;
 REVOKE CREATE ON SCHEMA public FROM mem_definer;
@@ -766,7 +815,7 @@ CREATE POLICY mem_digest_sel ON mem_digest FOR SELECT
   USING (
     workspace_id = nullif(current_setting('app.workspace_id', true), '')::uuid
     AND NOT stale
-    AND mem_digest_evidence_ok(id, channel_id)
+    AND CASE WHEN current_user = 'mem_definer' THEN false ELSE mem_digest_evidence_ok(id) END
   );
 
 -- 근거 행: 그 채널을 읽을 수 있는 사람만(채널·메시지 id 가 새지 않게).
@@ -829,29 +878,68 @@ BEGIN
 END $$;
 
 -- ── 런타임 역할 권한 ────────────────────────────────────────────────────────────
--- 역할이 이 마이그레이션보다 늦게 생기면 infra/rust/sql/bootstrap_*.sql 이 같은 회수·부여를
--- 다시 한다(부트스트랩은 ALL TABLES 를 다시 부여하므로).
+-- 역할이 이 마이그레이션보다 늦게 생기면 infra/rust/sql/bootstrap_*.sql 이 같은 블록을 다시
+-- 돈다(부트스트랩은 ALL TABLES 를 다시 부여하므로). 세 곳의 블록은 글자 그대로 같다.
+-- #3161 team memory lockdown (ADR-0196 D6-6). Identical in 100_mem_digest.sql,
+-- bootstrap_roles.sql and bootstrap_runtime_roles.sql. Runs after the runtime roles exist and
+-- after any ALL TABLES grant. Worker-only functions: EXECUTE for momo_memory only; the
+-- BYPASSRLS roles never touch mem_* rows; momo_app reads (RLS) and edits only its settings.
 DO $$
-DECLARE r text; f text;
+DECLARE
+  r text;
+  t text;
+  f text;
+  runtime_roles text[] := ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin'];
+  worker_only text[] := ARRAY[
+    'mem_apply_digest(uuid, uuid, text, bigint, bigint, text, uuid[], text, text, text, uuid[], timestamptz[], timestamptz)',
+    'mem_advance_cursor(uuid, bigint, uuid, timestamptz)',
+    'mem_record_serving(uuid, uuid, uuid[], uuid[], integer, integer, integer)',
+    'mem_digest_rollup_inputs(uuid, uuid, text, bigint, bigint)',
+    'mem_channel_switch(uuid)',
+    'mem_digest_live(uuid)',
+    'mem_digest_audience_ok(uuid, uuid, uuid)'
+  ];
 BEGIN
-  FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin'] LOOP
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
-      EXECUTE format('REVOKE INSERT, UPDATE, DELETE ON mem_digest, mem_evidence, mem_cursor, mem_serving FROM %I', r);
+  IF to_regclass('public.mem_digest') IS NULL THEN
+    RETURN;
+  END IF;
+  FOR t IN SELECT c.relname::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relname LIKE 'mem\_%' LOOP
+    FOREACH r IN ARRAY runtime_roles LOOP
+      CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+      IF r = 'momo_app' THEN
+        IF t <> 'mem_settings' THEN
+          EXECUTE format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.%I FROM %I', t, r);
+        END IF;
+      ELSE
+        EXECUTE format('REVOKE ALL ON TABLE public.%I FROM %I', t, r);
+      END IF;
+    END LOOP;
+  END LOOP;
+  FOREACH f IN ARRAY worker_only LOOP
+    EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC', f);
+    FOREACH r IN ARRAY runtime_roles LOOP
+      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+        EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM %I', f, r);
+      END IF;
+    END LOOP;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_memory') THEN
+      EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO momo_memory', f);
     END IF;
   END LOOP;
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_app') THEN
-    FOREACH f IN ARRAY ARRAY[
-      'mem_digest_live(uuid)', 'mem_digest_audience_ok(uuid, uuid, uuid)',
-      'mem_digest_rollup_inputs(uuid, uuid, text, bigint, bigint)',
-      'mem_channel_switch(uuid)',
-      'mem_apply_digest(uuid, uuid, text, bigint, bigint, text, uuid[], text, text, text, uuid[])',
-      'mem_advance_cursor(uuid, bigint, uuid, timestamptz)',
-      'mem_record_serving(uuid, uuid[], uuid[], integer, integer, integer)'
-    ] LOOP
-      EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO momo_app', f);
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_memory') THEN
+    FOREACH r IN ARRAY runtime_roles LOOP
+      IF r <> 'momo_worker' AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r)
+         AND pg_has_role(r, 'momo_memory', 'MEMBER') THEN
+        EXECUTE format('REVOKE momo_memory FROM %I', r);
+      END IF;
     END LOOP;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_worker') THEN
+      GRANT momo_memory TO momo_worker WITH INHERIT FALSE, SET TRUE;
+    END IF;
   END IF;
-END $$;
+END
+$$;
 
 -- ── 자기 검사 ─────────────────────────────────────────────────────────────────
 DO $$
@@ -867,9 +955,14 @@ BEGIN
       RAISE EXCEPTION '% is missing FORCE ROW LEVEL SECURITY', t;
     END IF;
   END LOOP;
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mem_definer'
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('mem_definer', 'momo_memory')
               AND (rolbypassrls OR rolsuper OR rolcanlogin)) THEN
-    RAISE EXCEPTION 'mem_definer must be NOLOGIN NOSUPERUSER NOBYPASSRLS';
+    RAISE EXCEPTION 'mem_definer / momo_memory must be NOLOGIN NOSUPERUSER NOBYPASSRLS';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_app')
+     AND (pg_has_role('momo_app', 'momo_memory', 'MEMBER')
+          OR has_function_privilege('momo_app', 'public.mem_apply_digest(uuid, uuid, text, bigint, bigint, text, uuid[], text, text, text, uuid[], timestamptz[], timestamptz)', 'EXECUTE')) THEN
+    RAISE EXCEPTION 'momo_app must not be a momo_memory member or execute worker-only functions';
   END IF;
   FOR f IN SELECT p.proname FROM pg_proc p
              JOIN pg_namespace n ON n.oid = p.pronamespace
