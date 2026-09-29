@@ -33,6 +33,7 @@ import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {
+  ALLOW_SETTLE_MS,
   SignedWorkControlsView,
   usePermissionPreviewGate,
   type SignedWorkActions,
@@ -142,6 +143,36 @@ describe('permission card', () => {
       preview: HOST_PREVIEW,
       sha256: HOST_HASH,
     });
+  });
+
+  it('an allow that opens under the finger takes no press for a moment (design-review R2 H-1)', async () => {
+    const a = actions();
+    const r = view(a, {preview: {state: 'loading'}});
+    const now = jest.spyOn(Date, 'now');
+    now.mockReturnValue(1_000_000);
+    r.rerender(
+      <SignedWorkControlsView
+        permission={PERMISSION}
+        preview={READY}
+        ended={false}
+        online
+        block={null}
+        actions={a}
+        fallbackReject={null}
+        now={() => PERMISSION.atMs + 1_000}
+      />,
+    );
+    now.mockReturnValue(1_000_000 + ALLOW_SETTLE_MS - 1);
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('work-permission-allow-session'));
+    });
+    expect(a.allow).not.toHaveBeenCalled();
+    now.mockReturnValue(1_000_000 + ALLOW_SETTLE_MS);
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('work-permission-allow-session'));
+    });
+    expect(a.allow).toHaveBeenCalledTimes(1);
+    now.mockRestore();
   });
 
   it('shows the host preview verbatim and asks from its kind — nothing inferred (#3118 H1)', () => {
@@ -317,9 +348,13 @@ describe('owner read → gate (#3128)', () => {
     const a = actions();
     mount(a);
     await screen.findByTestId('work-permission-preview');
+    // The allow just opened under the finger: it settles first (R2 H-1).
+    const opened = Date.now();
+    const now = jest.spyOn(Date, 'now').mockReturnValue(opened + ALLOW_SETTLE_MS + 1);
     await act(async () => {
       fireEvent.press(screen.getByTestId('work-permission-allow'));
     });
+    now.mockRestore();
     expect(a.allow).toHaveBeenCalledWith(PERMISSION, 'once', {preview: HOST_PREVIEW, sha256: HOST_HASH});
   });
 });

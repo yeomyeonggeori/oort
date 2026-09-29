@@ -514,12 +514,21 @@ function useLapsed(atMs: number): boolean {
  * 확인한 미리보기 칸이 넘치는가: 줄바꿈 수가 아니라 그려진 높이로 잰다. 긴 입력이
  * 접혀 두 줄이 되면 줄 수로는 세 줄이어도 제목이 칸 밖에 있다.
  */
-function useOverflows(ref: React.RefObject<HTMLElement>, key: unknown): boolean {
-  const [over, setOver] = useState(false);
+function useOverflows(ref: React.RefObject<HTMLElement>, key: unknown): string[] | null {
+  const [over, setOver] = useState<string[] | null>(null);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const measure = () => setOver(el.scrollHeight > el.clientHeight + 1);
+    // 넘치면 칸 밖에 (일부라도) 있는 필드의 이름들. 넘치지 않으면 null.
+    const measure = () => {
+      if (el.scrollHeight <= el.clientHeight + 1) return setOver(null);
+      const box = el.getBoundingClientRect();
+      const hidden = [...el.querySelectorAll<HTMLElement>(".agent-perm-field")]
+        .filter((row) => row.getBoundingClientRect().bottom > box.bottom + 1)
+        .map((row) => row.querySelector("dt")?.textContent ?? "")
+        .filter(Boolean);
+      setOver(hidden);
+    };
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(measure);
@@ -554,9 +563,12 @@ function GatedPreview({ preview }: { preview: PermissionPreview }) {
           </div>
         ))}
       </dl>
-      {over ? (
+      {/* 잘린 미리보기는 스크롤해도 전체가 없다: 그때는 막힌 이유 문장만 말한다. */}
+      {over && !preview.truncated ? (
         <p className="text-timestamp text-ink-muted" data-testid="agent-permission-more">
-          미리보기 칸을 스크롤해서 끝까지 보세요
+          {over.length > 0
+            ? `${over.join("·")}까지 미리보기 칸을 스크롤해서 보세요`
+            : "미리보기 칸을 스크롤해서 끝까지 보세요"}
         </p>
       ) : null}
     </>

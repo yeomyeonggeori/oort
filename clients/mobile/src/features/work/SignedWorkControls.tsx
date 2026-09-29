@@ -37,7 +37,7 @@ import {
   type WorkSession,
 } from '@momo/core/lib/api';
 import {useQuery} from '@tanstack/react-query';
-import React, {useEffect, useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
   Platform,
@@ -95,6 +95,9 @@ export const SIGNING_REQUIRED_QUERY_KEY = (workspaceId: string) =>
 
 /** Why this phone cannot sign right now, or null when it can. */
 export type SignBlock = string | null;
+
+/** How long a just-opened allow ignores presses (see `readySince`). */
+export const ALLOW_SETTLE_MS = 700;
 
 export const PERMISSION_PREVIEW_QUERY_KEY = (
   workspaceId: string,
@@ -383,6 +386,19 @@ function PermissionCard({
   // #3118 H1: the question comes from the checked preview, never agent.status.
   const ask = permissionGateAsk(preview);
   const checked = preview.state === 'ready' ? preview : null;
+  // The preview landing reflows the card: a finger already on its way to
+  // 거부 can meet an allow button instead. Allow takes no press in the first
+  // moment after it opens (design-review R2 H-1; the same rule as the
+  // desktop dialog's MIN_VISIBLE and the web card's CONFIRM_GUARD).
+  // Only an allow that OPENS while the card is on screen settles; a card that
+  // mounts with its preview already checked did not move under anyone.
+  const readySince = useRef(0);
+  const wasReady = useRef(checked !== null);
+  useEffect(() => {
+    const ready = checked !== null;
+    if (ready && !wasReady.current) readySince.current = Date.now();
+    wasReady.current = ready;
+  }, [checked]);
   // No allow can come back for this request: 거부 is the one action (design-review M1).
   const allowGone = permissionAllowGone(preview);
   const blockLine =
@@ -414,6 +430,7 @@ function PermissionCard({
 
   const allow = async (scope: PermissionScope) => {
     if (!allowable || busy || !checked) return;
+    if (Date.now() - readySince.current < ALLOW_SETTLE_MS) return;
     setBusy(scope);
     setError(null);
     try {
@@ -492,10 +509,11 @@ function PermissionCard({
           // B1): the hash Face ID signs is over exactly these characters, so
           // nothing here is sanitised, clipped or reflowed. The page scrolls,
           // not the box.
-          <View style={styles.previewBox} testID="work-permission-preview">
-            <Text style={styles.previewKind}>
-              {PERMISSION_PREVIEW_KIND_LABEL[shown.kind]}
-            </Text>
+          // The kind is the question line's; the box holds only the fields.
+          <View
+            style={styles.previewBox}
+            testID="work-permission-preview"
+            accessibilityLabel={`요청 미리보기, ${PERMISSION_PREVIEW_KIND_LABEL[shown.kind]}`}>
             {permissionPreviewRows(shown).map(row => (
               // The gutter rule is on the text only: a label never has it, so
               // a line break inside a field cannot pass for a label (H2).
@@ -804,12 +822,6 @@ const buildStyles = (color: Palette) =>
       borderWidth: 1,
       borderColor: color.border,
       padding: space.sm,
-    },
-    previewKind: {
-      fontSize: font.meta,
-      lineHeight: line.meta,
-      color: color.text,
-      fontWeight: '600',
     },
     previewRow: {gap: space.xs},
     previewReserve: {minHeight: TOUCH_TARGET * 3},
