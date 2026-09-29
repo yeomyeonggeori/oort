@@ -505,19 +505,23 @@ fn tauri_grants_the_git_read_to_the_local_main_webview_only() {
     assert!(!mobile.iter().any(|c| c == command));
 }
 
-const WORK_HOST_COMMANDS: [&str; 5] = [
+const WORK_HOST_COMMANDS: [&str; 7] = [
     "work_host_status",
     "work_host_register",
     "work_host_start",
     "work_host_stop",
     "work_host_forget",
+    "work_host_set_remote_profile",
+    "work_host_prepare_remote_profile",
 ];
-const WORK_HOST_PERMISSIONS: [&str; 5] = [
+const WORK_HOST_PERMISSIONS: [&str; 7] = [
     "allow-work-host-status",
     "allow-work-host-register",
     "allow-work-host-start",
     "allow-work-host-stop",
     "allow-work-host-forget",
+    "allow-work-host-set-remote-profile",
+    "allow-work-host-prepare-remote-profile",
 ];
 
 /// Tauri's resolver: the work host commands (ADR-0188 D2, #2778) answer the
@@ -649,16 +653,18 @@ fn tauri_grants_the_device_key_commands_to_the_local_main_webview_only() {
     }
 }
 
-const HARNESS_PROFILE_COMMANDS: [&str; 4] = [
+const HARNESS_PROFILE_COMMANDS: [&str; 5] = [
     "harness_profile_list",
     "harness_profile_create",
     "harness_profile_status",
+    "harness_profile_remote_status",
     "harness_profile_remove",
 ];
-const HARNESS_PROFILE_PERMISSIONS: [&str; 4] = [
+const HARNESS_PROFILE_PERMISSIONS: [&str; 5] = [
     "allow-harness-profile-list",
     "allow-harness-profile-create",
     "allow-harness-profile-status",
+    "allow-harness-profile-remote-status",
     "allow-harness-profile-remove",
 ];
 
@@ -800,8 +806,8 @@ fn only_the_local_terminal_capability_grants_pty_and_none_is_remote() {
             assert_eq!(profile, HARNESS_PROFILE_PERMISSIONS);
             assert_eq!(
                 permission_ids(cap).len(),
-                4,
-                "harness-profile.json grants four commands"
+                5,
+                "harness-profile.json grants five commands"
             );
             assert_eq!(cap["webviews"], serde_json::json!(["main"]));
             assert!(
@@ -819,8 +825,8 @@ fn only_the_local_terminal_capability_grants_pty_and_none_is_remote() {
             assert_eq!(host, WORK_HOST_PERMISSIONS);
             assert_eq!(
                 permission_ids(cap).len(),
-                5,
-                "work-host.json grants five commands"
+                7,
+                "work-host.json grants seven commands"
             );
             assert_eq!(cap["webviews"], serde_json::json!(["main"]));
             assert_eq!(cap["platforms"], serde_json::json!(["macOS"]));

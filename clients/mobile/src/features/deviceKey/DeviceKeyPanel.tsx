@@ -82,6 +82,17 @@ export function deviceKeyActions(view: DeviceKeyView, state: DeviceKeyState): Ac
       return [{key: 'enroll', label: ACTION.enroll, onPress: state.enroll, enrolls: true}];
     case 'revoked':
       return [{key: 'reenroll', label: ACTION.reenroll, onPress: state.enroll, enrolls: true}];
+    case 'replaceBlocked':
+      return view.reason === 'oldKey'
+        ? [recheck]
+        : [
+            {
+              key: 'reenroll-refused',
+              label: ACTION.retry,
+              onPress: state.enroll,
+              enrolls: true,
+            },
+          ];
     case 'invalidated':
       return [{key: 'replace', label: ACTION.replace, onPress: state.replace, enrolls: true}];
     case 'biometryOff':
@@ -122,6 +133,7 @@ export function DeviceKeyPanel({
   const copy = deviceKeyCopy(view, busy);
   const fingerprint =
     'fingerprint' in view && view.fingerprint ? view.fingerprint : null;
+  const fingerprintLabel = copy.fingerprintLabel ?? FINGERPRINT_LABEL;
   const revokedFaceIdOff = view.kind === 'revoked' && view.biometryOff;
   const actions = deviceKeyActions(view, state);
   const [primary, ...rest] = actions;
@@ -137,6 +149,8 @@ export function DeviceKeyPanel({
         <View
           accessible
           accessibilityLabel={`${DEVICE_KEY_TITLE}: ${copy.badge}. ${copy.headline} ${copy.detail}${
+            copy.warning ? ` 주의. ${copy.warning}` : ''
+          }${
             copy.steps
               ? ` ${copy.steps.map((step, index) => `${index + 1}. ${step}`).join(' ')}`
               : ''
@@ -172,6 +186,11 @@ export function DeviceKeyPanel({
               {copy.detail}
             </Sentence>
           ) : null}
+          {copy.warning ? (
+            <View style={styles.warning} testID="device-key-warning">
+              <Sentence style={styles.warningText}>{copy.warning}</Sentence>
+            </View>
+          ) : null}
           {copy.steps ? (
             <View style={styles.steps} testID="device-key-steps">
               {copy.steps.map((step, index) => (
@@ -195,11 +214,11 @@ export function DeviceKeyPanel({
           <View
             style={styles.fingerprint}
             accessible
-            accessibilityLabel={`${FINGERPRINT_LABEL}, ${fingerprintAccessibilityLabel(fingerprint)}`}
+            accessibilityLabel={`${fingerprintLabel}, ${fingerprintAccessibilityLabel(fingerprint)}`}
             accessibilityHint={FINGERPRINT_HINT}
             testID="device-key-fingerprint"
           >
-            <Text style={styles.fingerprintLabel}>{FINGERPRINT_LABEL}</Text>
+            <Text style={styles.fingerprintLabel}>{fingerprintLabel}</Text>
             <View style={styles.fingerprintGroups}>
               {fingerprint.split(' ').map((group, index) => (
                 <Text
@@ -325,6 +344,19 @@ const buildStyles = (color: Palette) =>
     labelMuted: {color: color.textMuted},
     headline: {fontSize: font.body, fontWeight: '600', color: color.text},
     detail: {fontSize: font.label, color: color.textMuted, lineHeight: line.label},
+    // 보안 경고 (#3154 M3): 절차 글씨보다 앞서 읽히게 위험 바탕·굵은 글씨.
+    warning: {
+      backgroundColor: color.dangerSurface,
+      borderRadius: radius.sm,
+      paddingHorizontal: space.md,
+      paddingVertical: space.sm,
+    },
+    warningText: {
+      fontSize: font.label,
+      lineHeight: line.label,
+      fontWeight: '700',
+      color: color.dangerText,
+    },
     // 방법 (#3129): 번호는 본문 첫 줄에 맞춰 선다. 줄이 바뀌면 글만 들여 쓴다.
     steps: {gap: space.xs, paddingTop: space.xs},
     step: {flexDirection: 'row', alignItems: 'flex-start', gap: space.sm},

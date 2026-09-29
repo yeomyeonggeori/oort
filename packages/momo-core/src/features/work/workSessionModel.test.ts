@@ -264,6 +264,13 @@ describe("parseWorkSessionEvent", () => {
     expect(parsed?.seq).toBeGreaterThan(0);
   });
 
+  it("accepts approval.auto_allowed, and still drops an unknown type (#3152)", () => {
+    expect(parseWorkSessionEvent(reply("approval.auto_allowed", { scope: "session" }))?.type).toBe(
+      "approval.auto_allowed"
+    );
+    expect(parseWorkSessionEvent(reply("approval.mystery", {}))).toBeNull();
+  });
+
   it("ignores every other reply in the thread, excerpts included", () => {
     const excerpt: Message = {
       id: "msg-excerpt",
@@ -443,6 +450,28 @@ describe("foldSessionEvents", () => {
     expect(folded.rows.map((row) => [row.state, row.headline])).toEqual([
       ["running", "명령 실행 중"],
       ["done", "승인받음"],
+    ]);
+  });
+
+  it("shows an automatic allow as its own done line and leaves the open approval and call alone (#3152)", () => {
+    const folded = foldSessionEvents(
+      events(
+        reply("agent.status", { tool_call_name: "shell", detail: "정리" }),
+        reply("approval.requested", { action: "requested", status: "pending" }),
+        reply("approval.auto_allowed", {
+          action: "auto_allowed",
+          status: "approved",
+          scope: "session",
+          tool_kind: "read",
+          preview_sha256: "b".repeat(64),
+        })
+      ),
+      session()
+    );
+    expect(folded.rows.map((row) => [row.state, row.headline])).toEqual([
+      ["pending", "명령 실행 중"],
+      ["pending", "승인을 요청함"],
+      ["done", "세션 허락으로 자동 허락됨 · 파일 읽기"],
     ]);
   });
 

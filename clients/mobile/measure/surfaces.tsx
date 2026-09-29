@@ -3225,6 +3225,20 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           onOpenConversation={() => {}}
         />
       );
+    // #3152: 같은 화면을 진행 내역까지 끌어올려 찍는다(시뮬레이터는 스크롤할 수 없다).
+    case 'work-detail-events':
+      return (
+        <View style={{flex: 1, overflow: 'hidden'}}>
+          <View style={{flex: 1, marginTop: -880, height: 3000}}>
+            <WorkSessionDetailScreen
+              active
+              sessionId="measure-work-t1"
+              onBack={() => {}}
+              onOpenConversation={() => {}}
+            />
+          </View>
+        </View>
+      );
     // 이슈 #1146 N4 — 「메시지 검색」으로 가는 두 문을 한 장에.
     //
     // 이름은 이제 셋(도착한 화면의 제목과 이 두 문)이 코어의 표면 판정표 한 줄
@@ -3483,7 +3497,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
 //
 //   -momoMeasure DEVICE-KEY-PENDING · LIGHT-DEVICE-KEY-PENDING · …
 //   (pending approved revoked invalidated biometryoff unregistered unsupported
-//    servererror registering reconnect reconnecting live profile)
+//    servererror registering reconnect reconnecting live profile
+//    replace-blocked-old replace-blocked-refused; `<이름>@<y>` = y pt 스크롤)
 
 const DK_KEY = 'A2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW';
 const DK_FINGERPRINT = '5BAF F89D E7DE 5C1D 7B61';
@@ -3526,6 +3541,11 @@ function dkView(which: string): DeviceKeyView {
       return {kind: 'unlinked', reason: 'address', fingerprint: null};
     case 'unlinked-notmac':
       return {kind: 'unlinked', reason: 'notFromMac', fingerprint: DK_FINGERPRINT};
+    // #3145: the old key still holds the place / the server said 409.
+    case 'replace-blocked-old':
+      return {kind: 'replaceBlocked', reason: 'oldKey', fingerprint: DK_FINGERPRINT};
+    case 'replace-blocked-refused':
+      return {kind: 'replaceBlocked', reason: 'registerRefused', fingerprint: null};
     // #3103: live and approved, its sign-in ended — 「다시 연결 필요」.
     case 'reconnect':
     case 'reconnecting':
@@ -3685,8 +3705,12 @@ function SignedWorkSurface({which}: {which: string}): React.JSX.Element {
   );
 }
 
-function DeviceKeySurface({which}: {which: string}): React.JSX.Element {
+function DeviceKeySurface({which: rawWhich}: {which: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  // #3154 M1: `replace-blocked-old@900` 은 시트를 900pt 스크롤한 자리를 찍는다
+  // (AX-XXL 에서 지문이 접힌 아래에 있어 한 장으로는 끝까지 보이지 않는다).
+  const [which, scroll] = rawWhich.split('@');
+  const initialScrollY = scroll ? Number(scroll) : undefined;
   if (which === 'profile') {
     // 프로필 시트의 「연결 › 지시 기기」 줄. 줄은 씨앗을 뿌린 두 질의를 읽는다.
     harnessClient.setQueryData(DEVICE_KEY_LOCAL_QUERY_KEY, {status: 'ready', publicKey: DK_KEY});
@@ -3759,7 +3783,7 @@ function DeviceKeySurface({which}: {which: string}): React.JSX.Element {
             <LiveDeviceKeySheet />
           </QueryClientProvider>
         ) : (
-          <LinkSheetBody state={dkState(which)} onClose={() => {}} />
+          <LinkSheetBody state={dkState(which)} onClose={() => {}} initialScrollY={initialScrollY} />
         )}
       </PageSheet>
     </View>
@@ -4255,11 +4279,27 @@ function seedWorkConsole(): void {
           },
         },
         {
+          // #3152: 소유자의 「이 세션 동안」 허락이 덮은 읽기 — 묻지 않고 지나간 한 줄.
+          eventId: 'measure-event-auto-allowed',
+          type: 'approval.auto_allowed',
+          sessionId: 'measure-work-t1',
+          atMs: Date.now() - 300_000,
+          seq: 102,
+          payload: {
+            work_session_id: 'measure-work-t1',
+            action: 'auto_allowed',
+            status: 'approved',
+            scope: 'session',
+            tool_kind: 'read',
+            preview_sha256: 'c'.repeat(64),
+          },
+        },
+        {
           eventId: 'measure-event-tool',
           type: 'agent.status',
           sessionId: 'measure-work-t1',
           atMs: Date.now() - 120_000,
-          seq: 102,
+          seq: 103,
           payload: {
             work_session_id: 'measure-work-t1',
             tool_call_name: 'read_file',
@@ -4382,7 +4422,7 @@ if (
 if (
   LAUNCHED !== null &&
   LAUNCHED.kind === 'surface' &&
-  (LAUNCHED.name === 'work-console' || LAUNCHED.name === 'work-detail')
+  (LAUNCHED.name === 'work-console' || LAUNCHED.name === 'work-detail' || LAUNCHED.name === 'work-detail-events')
 ) {
   seedWorkConsole();
 }

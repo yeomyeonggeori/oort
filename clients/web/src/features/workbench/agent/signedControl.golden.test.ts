@@ -11,6 +11,7 @@ import {
   DEFAULT_FOLDER_ID,
   NOT_DELIVERED,
   rejectWithInstruction,
+  resetUnconfirmedInputsForTests,
   SCOPE_UNSUPPORTED_LINE,
   signedAllow,
   signedInstruction,
@@ -93,6 +94,7 @@ function refuse(status: number, code: string): Response {
 beforeEach(() => {
   calls = [];
   answers = [];
+  resetUnconfirmedInputsForTests();
   installCoreHost({
     apiBase: () => "https://oort.test",
     absoluteApiBase: () => "https://oort.test",
@@ -184,6 +186,105 @@ describe("signed instruction (golden work-instruction `queue`)", () => {
     expect(calls.map((c) => c.path)).toEqual([INSTRUCTION_PATH]);
   });
 
+  describe("a resend after a lost response is the same statement (#3096)", () => {
+    // The recording signer's envelope expires at 1_790_550_120_000.
+    const SIGNED_AT = 1_790_550_000_000;
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(SIGNED_AT);
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+    const lost = () => {
+      throw new TypeError("network lost after the server committed");
+    };
+    const send = (signer: HumanControlSigner, text = "테스트 돌려 줘", mode: "queue" | "interrupt" = "queue") =>
+      signedInstruction({ workspaceId: WS, session: SESSION, text, mode, signer });
+
+    it("resends with the same nonce and signature, and the person is not asked to sign twice", async () => {
+      const { signer, asked } = recordingSigner();
+      answers.push(lost);
+      const first = await send(signer);
+      expect(first).toMatchObject({ state: "not_delivered", stage: "server" });
+      answers.push(() => ok({ replayed: true }));
+      expect(await send(signer)).toEqual({ state: "sent" });
+      expect(asked).toHaveLength(1);
+      expect(calls).toHaveLength(2);
+      expect(calls[1]!.body.clientMsgId).toBe(calls[0]!.body.clientMsgId);
+      expect(calls[1]!.body.humanSignature).toEqual(calls[0]!.body.humanSignature);
+    });
+
+    it.each([500, 503])("a %s is kept the same way", async (status) => {
+      const { signer, asked } = recordingSigner();
+      answers.push(() => refuse(status, "internal"));
+      await send(signer);
+      await send(signer);
+      expect(asked).toHaveLength(1);
+      expect(calls[1]!.body.clientMsgId).toBe(calls[0]!.body.clientMsgId);
+    });
+
+    it.each([
+      [409, "instruction_nonce_reused"],
+      [400, "instruction_signature_mismatch"],
+      [403, "device_key_not_endorsed"],
+      [409, "work_host_offline"],
+    ])("a named refusal %s %s signs afresh next time (its sentence says so)", async (status, code) => {
+      const { signer, asked } = recordingSigner();
+      answers.push(() => refuse(status, code));
+      await send(signer);
+      await send(signer);
+      expect(asked).toHaveLength(2);
+      expect(calls[1]!.body.clientMsgId).not.toBe(calls[0]!.body.clientMsgId);
+    });
+
+    it("different text, mode or session is a new statement", async () => {
+      const { signer, asked } = recordingSigner();
+      answers.push(lost, lost);
+      await send(signer, "하나");
+      await send(signer, "둘");
+      await send(signer, "하나", "interrupt");
+      expect(asked).toHaveLength(3);
+      expect(new Set(calls.map((c) => c.body.clientMsgId)).size).toBe(3);
+    });
+
+    it("a sent instruction is forgotten: sending the same words again is a new instruction", async () => {
+      const { signer, asked } = recordingSigner();
+      answers.push(lost);
+      await send(signer);
+      await send(signer);
+      await send(signer);
+      expect(asked).toHaveLength(2);
+      expect(calls[2]!.body.clientMsgId).not.toBe(calls[1]!.body.clientMsgId);
+    });
+
+    it("a signature about to expire is not resent", async () => {
+      const { signer, asked } = recordingSigner();
+      answers.push(lost);
+      await send(signer);
+      vi.setSystemTime(SIGNED_AT + 120_000 - 10_000);
+      await send(signer);
+      expect(asked).toHaveLength(2);
+    });
+
+    it("「거부 + 지시」 keeps the instruction for a resend through the reply box", async () => {
+      const { signer, asked } = recordingSigner();
+      answers.push(() => ok({}), lost);
+      const out = await rejectWithInstruction({
+        workspaceId: WS,
+        session: SESSION,
+        requestEventId: "00000000-0000-7000-8000-0000000000e1",
+        optionId: "reject",
+        text: "다른 방법으로",
+        signer,
+      });
+      expect(out).toMatchObject({ state: "rejected", instruction: { state: "not_delivered" } });
+      await send(signer, "다른 방법으로");
+      expect(asked).toHaveLength(1);
+      expect(calls[2]!.body.clientMsgId).toBe(calls[1]!.body.clientMsgId);
+    });
+  });
+
   it("names the state 「전달 안 됨」", () => {
     expect(NOT_DELIVERED).toBe("전달 안 됨");
     expect(rejectWithInstructionLine(false, "x")).toContain(NOT_DELIVERED);
@@ -256,6 +357,9 @@ describe("signed allow (golden work-permission-decision `session_scope_signed`)"
     const golden = caseOf(DECISION, "session_scope_signed");
     const failure = permissionFailure(new ApiError(golden.status, "", golden.code));
     expect(failure).toEqual({ closed: false, text: SCOPE_UNSUPPORTED_LINE });
+    // #3149: the server takes 「이 세션 동안」 now; this answer means THIS HOST does not (not a member's machine).
+    expect(SCOPE_UNSUPPORTED_LINE).toContain("이 호스트는 세션 허락을 받지 않아요");
+    expect(SCOPE_UNSUPPORTED_LINE).not.toContain("이 서버");
   });
 
   it("the sent line says which scope went", () => {

@@ -69,6 +69,8 @@ const APP_COMMANDS: &[&str] = &[
     "harness_profile_list",
     "harness_profile_create",
     "harness_profile_status",
+    // The same probe against this Mac's 「원격 작업」 account folder (#3157).
+    "harness_profile_remote_status",
     "harness_profile_remove",
     // This Mac as a work host (ADR-0188 D2, #2778). Granted only by
     // capabilities/work-host.json.
@@ -77,6 +79,10 @@ const APP_COMMANDS: &[&str] = &[
     "work_host_start",
     "work_host_stop",
     "work_host_forget",
+    // This Mac's 「원격 작업」 account (#3033 workd op, #3157). Granted only by
+    // capabilities/work-host.json.
+    "work_host_set_remote_profile",
+    "work_host_prepare_remote_profile",
     // This Mac's human device key (ADR-0146 개정 R2-E5, #3025). Granted only
     // by capabilities/device-key.json.
     "device_key_status",
