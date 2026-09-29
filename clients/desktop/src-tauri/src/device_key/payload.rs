@@ -941,10 +941,11 @@ fn host_register_summary(request: &ControlRequest) -> Summary {
     Summary {
         title: "oort: 이 맥의 작업 호스트 등록에 서명합니다".into(),
         body: format!(
-            "호스트 키 지문: {}\n호스트 ID: {host_id}\n이름: 「{}」\n워크스페이스 {}\n방금 이 맥에서 시작한 등록일 때만 서명하세요. 서명하면 이 호스트가 내 이름으로 지시를 받을 수 있게 됩니다.",
+            "호스트 키 지문: {}\n호스트 ID: {host_id}\n이름: 「{}」\n워크스페이스: {}\n서버 인스턴스: {}\n방금 이 맥에서 시작한 등록일 때만 서명하세요. 서명하면 이 호스트가 내 이름으로 지시를 받을 수 있게 됩니다.",
             fingerprint(host_public_key_b64).unwrap_or_else(|| "(읽을 수 없음)".into()),
             nfc(label),
-            short_id(request.workspace_id),
+            request.workspace_id,
+            request.instance_id,
         ),
         confirm: "서명".into(),
         full_text: Some(format!("호스트 공개키 전체\n{host_public_key_b64}")),
@@ -952,9 +953,11 @@ fn host_register_summary(request: &ControlRequest) -> Summary {
 }
 
 /// Whether `summary` shows everything a `host_register` signature covers:
-/// the key's fingerprint, the whole key, the whole host id and the label.
+/// the key's fingerprint, the whole key, the whole host id, the label, and
+/// which workspace on which server instance it is for.
 /// `sign_statement` refuses to ask, let alone sign, when one is missing.
-pub fn host_register_dialog_complete(summary: &Summary, content: &ControlContent) -> bool {
+pub fn host_register_dialog_complete(summary: &Summary, request: &ControlRequest) -> bool {
+    let content = &request.content;
     let ControlContent::HostRegister {
         host_public_key_b64,
         host_id,
@@ -966,6 +969,8 @@ pub fn host_register_dialog_complete(summary: &Summary, content: &ControlContent
     let fingerprint_shown = fingerprint(host_public_key_b64)
         .is_some_and(|fingerprint| summary.body.contains(&fingerprint));
     fingerprint_shown
+        && summary.body.contains(&request.workspace_id.to_string())
+        && summary.body.contains(&request.instance_id)
         && summary.body.contains(&host_id.to_string())
         && summary.body.contains(&nfc(label))
         && summary

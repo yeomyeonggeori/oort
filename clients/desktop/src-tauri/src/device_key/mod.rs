@@ -113,7 +113,7 @@ pub fn sign_statement(
     // H5 (#3120): a `host_register` is never asked about in a dialog that
     // leaves out the host key, the host id or the label.
     if let Statement::Control { request, .. } = statement {
-        if !payload::host_register_dialog_complete(&summary, &request.content) {
+        if !payload::host_register_dialog_complete(&summary, request) {
             return Err("device_key_dialog_incomplete".into());
         }
     }
@@ -899,9 +899,10 @@ pub enum HostRegisterAnswer {
     Unsigned,
 }
 
-/// A statement lives this long; the server accepts up to 10 minutes and a
-/// clock ±5 minutes off (`signing-context`).
-const HOST_REGISTER_LIFETIME_MS: i64 = 5 * 60 * 1000;
+/// A statement lives this long: the dialog and Touch ID count against it, the
+/// server accepts up to 10 minutes and a clock ±5 minutes off
+/// (`signing-context`).
+const HOST_REGISTER_LIFETIME_MS: i64 = 9 * 60 * 1000;
 
 /// The `host_register` statement for `ask`, minus the signer: a fresh host id
 /// candidate and nonce, on the server's clock (D-9 시계 보정).
@@ -920,7 +921,7 @@ pub fn host_register_request(
         session_id: None,
         nonce,
         issued_at_ms,
-        expires_at_ms: issued_at_ms + HOST_REGISTER_LIFETIME_MS,
+        expires_at_ms: issued_at_ms.saturating_add(HOST_REGISTER_LIFETIME_MS),
         content: ControlContent::HostRegister {
             host_public_key_b64: ask.host_public_key.clone(),
             host_id,

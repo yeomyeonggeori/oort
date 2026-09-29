@@ -767,11 +767,11 @@ fn a_host_register_dialog_missing_a_field_is_refused() {
         unreachable!()
     };
     let full = statement.summary(None);
-    assert!(host_register_dialog_complete(&full, &request.content));
+    assert!(host_register_dialog_complete(&full, request));
     let key = host_key_b64();
     let fingerprint = fingerprint(&key).unwrap();
     let host_id = Uuid::from_u128(0xabcdef0123456789).to_string();
-    let cases: [(&str, Summary); 5] = [
+    let cases: [(&str, Summary); 7] = [
         (
             "fingerprint",
             Summary {
@@ -794,6 +794,20 @@ fn a_host_register_dialog_missing_a_field_is_refused() {
             },
         ),
         (
+            "whole workspace id",
+            Summary {
+                body: full.body.replace(&request.workspace_id.to_string(), "…"),
+                ..full.clone()
+            },
+        ),
+        (
+            "server instance",
+            Summary {
+                body: full.body.replace("inst_1", "…"),
+                ..full.clone()
+            },
+        ),
+        (
             "whole key",
             Summary {
                 full_text: Some(key[..12].to_string()),
@@ -810,18 +824,17 @@ fn a_host_register_dialog_missing_a_field_is_refused() {
     ];
     for (missing, summary) in cases {
         assert!(
-            !host_register_dialog_complete(&summary, &request.content),
+            !host_register_dialog_complete(&summary, request),
             "a dialog without the {missing} must not count"
         );
     }
     // Other kinds are not judged by this rule.
-    assert!(host_register_dialog_complete(
-        &full,
-        &ControlContent::Input {
-            mode: InputMode::Queue,
-            text: "x".into()
-        }
-    ));
+    let mut other = request.clone();
+    other.content = ControlContent::Input {
+        mode: InputMode::Queue,
+        text: "x".into(),
+    };
+    assert!(host_register_dialog_complete(&full, &other));
 }
 
 #[test]
@@ -834,7 +847,7 @@ fn the_ask_becomes_a_statement_on_the_servers_clock_for_five_minutes() {
         NOW + 999_999,
     );
     assert_eq!(request.issued_at_ms, NOW, "the server's clock, not ours");
-    assert_eq!(request.expires_at_ms, NOW + 5 * 60 * 1000);
+    assert_eq!(request.expires_at_ms, NOW + 9 * 60 * 1000);
     assert_eq!(request.host_id, Uuid::from_u128(9));
     assert!(matches!(
         &request.content,
