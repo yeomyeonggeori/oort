@@ -120,9 +120,21 @@ async function scenes(browser, origin) {
       check(`${scheme}/tab: 가로 넘침 0`, (await overflowX(page)) <= 0);
       const skipped = await page.textContent('[data-testid="agent-pane-skipped"]');
       check(`${scheme}/tab: 모르는 종류 한 줄 폴백`, skipped?.includes("1개") ?? false, { skipped });
+      const autoLine = await page.$$eval('.agent-row[data-kind="approval"]', (els) =>
+        els.map((e) => e.textContent ?? "").filter((t) => t.includes("세션 허락으로 자동 허락됨"))
+      );
+      check(`${scheme}/tab: 「세션 허락으로 자동 허락됨」 한 줄, 대기 카드는 그대로`, autoLine.length >= 1 && perm === 1, { autoLine });
       const waiting = await page.$$eval('[data-testid="workbench-pane"][data-waiting]', (els) => els.length);
       check(`${scheme}/tab: 기다림 칸 테두리·바닥 띠`, waiting === 1, { waiting });
       await shot(page, `agent-tab-1280-${scheme}`);
+      // #3152: 진행 목록을 자동 허락 줄까지 — 자동 허락 한 줄이 대기 카드와 나란히 보이는 장면.
+      await page.evaluate(() => {
+        const row = [...document.querySelectorAll('[data-pane-id="p2"] .agent-row[data-kind="approval"]')].find((e) =>
+          (e.textContent ?? "").includes("세션 허락으로 자동 허락됨")
+        );
+        row?.scrollIntoView({ block: "nearest" });
+      });
+      await shot(page, `agent-tab-1280-${scheme}-auto-allowed`);
 
       const fit = await permissionFit(page, "p2");
       check(`${scheme}/tab 1280: 카드 위 진행 줄 56px+, 질문 줄·버튼 보임, 버튼 높이 같음`, fitOk(fit), fit);
