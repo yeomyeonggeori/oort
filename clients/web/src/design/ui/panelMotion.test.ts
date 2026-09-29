@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compile } from "tailwindcss";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   DRAWER_SCRIM_MOTION,
   MODAL_CONTENT_MOTION,
@@ -121,9 +121,21 @@ async function loadStylesheet(id: string, base: string) {
 
 const DESIGN = dirname(fileURLToPath(new URL("../tokens.css", import.meta.url)));
 
-async function buildCss(candidates: string[]): Promise<string> {
-  const compiler = await compile(TOKENS_CSS, { base: DESIGN, loadStylesheet });
-  return compiler.build([...new Set(candidates)]);
+// #3100: compiled CSS is a pure function of the candidate set; the Tailwind
+// compile was a dominant per-test cost under CPU contention. Memoized per file.
+const cssCache = new Map<string, Promise<string>>();
+function buildCss(candidates: string[]): Promise<string> {
+  const unique = [...new Set(candidates)];
+  const key = unique.join("\u0000");
+  let hit = cssCache.get(key);
+  if (!hit) {
+    hit = (async () => {
+      const compiler = await compile(TOKENS_CSS, { base: DESIGN, loadStylesheet });
+      return compiler.build(unique);
+    })();
+    cssCache.set(key, hit);
+  }
+  return hit;
 }
 
 export function durationMs(value: string): number {
@@ -354,6 +366,27 @@ describe.skipIf(!chromiumAvailable)(
       summaryPrinted: false,
     };
 
+    // #3100: one Chromium for the whole lane, launched in a hook with its own
+    // budget instead of inside a test's timeout. Every probe still gets a fresh
+    // context+page (the `browser.close()` callers now close that context).
+    let sharedBrowser: Promise<import("playwright").Browser> | null = null;
+    const getBrowser = () => {
+      sharedBrowser ??= import("playwright").then(({ chromium }) =>
+        chromium.launch()
+      );
+      return sharedBrowser;
+    };
+    beforeAll(async () => {
+      await getBrowser();
+    }, 120_000);
+    afterAll(async () => {
+      if (!sharedBrowser) return;
+      const browser = await sharedBrowser;
+      sharedBrowser = null;
+      await browser.close();
+    }, 60_000);
+    const probeAssets = new Map<string, Promise<string>>();
+
     const printLaneSummary = () => {
       const {
         scrimInPageMs,
@@ -388,34 +421,42 @@ describe.skipIf(!chromiumAvailable)(
       reducedMotion: "reduce" | "no-preference" = "no-preference",
       colorScheme: "light" | "dark" = "light"
     ) {
-      const esbuild = await import("esbuild");
-      const bundled = await esbuild.build({
-        absWorkingDir: WEB_ROOT,
-        entryPoints: [HARNESS],
-        bundle: true,
-        write: false,
-        format: "iife",
-        platform: "browser",
-        jsx: "automatic",
-        // 사이드바 머리의 코메토 배지(DS2-6)가 래스터 자산이다. 하네스는 화면이
-        // 아니라 움직임을 재므로 data URL로 싣는다(Vite의 에셋 경로와 같은 역할).
-        loader: { ".png": "dataurl" },
-        alias: { "@": SRC, "@momo/core": CORE_SRC },
-        define: {
-          "import.meta.env": JSON.stringify({
-            DEV: false,
-            PROD: true,
-            MODE: "test",
-            SSR: false,
-          }),
-          "import.meta.url": JSON.stringify(
-            "https://example.test/panel-motion-harness.js"
-          ),
-        },
-        logLevel: "silent",
-      });
-      const js = bundled.outputFiles[0]?.text;
-      if (!js) throw new Error("esbuild produced no panelMotion harness");
+      const js = await (probeAssets.get("js") ??
+        (() => {
+          const built = (async () => {
+          const esbuild = await import("esbuild");
+          const bundled = await esbuild.build({
+            absWorkingDir: WEB_ROOT,
+            entryPoints: [HARNESS],
+            bundle: true,
+            write: false,
+            format: "iife",
+            platform: "browser",
+            jsx: "automatic",
+            // 사이드바 머리의 코메토 배지(DS2-6)가 래스터 자산이다. 하네스는 화면이
+            // 아니라 움직임을 재므로 data URL로 싣는다(Vite의 에셋 경로와 같은 역할).
+            loader: { ".png": "dataurl" },
+            alias: { "@": SRC, "@momo/core": CORE_SRC },
+            define: {
+              "import.meta.env": JSON.stringify({
+                DEV: false,
+                PROD: true,
+                MODE: "test",
+                SSR: false,
+              }),
+              "import.meta.url": JSON.stringify(
+                "https://example.test/panel-motion-harness.js"
+              ),
+            },
+            logLevel: "silent",
+          });
+          const js = bundled.outputFiles[0]?.text;
+          if (!js) throw new Error("esbuild produced no panelMotion harness");
+          return js;
+          })();
+          probeAssets.set("js", built);
+          return built;
+        })());
 
       const candidates = [
         ...classTokens(MODAL_OVERLAY_MOTION),
@@ -440,9 +481,11 @@ describe.skipIf(!chromiumAvailable)(
       ];
       const css = await buildCss(candidates);
 
-      const { chromium } = await import("playwright");
-      const browser = await chromium.launch();
-      const page = await browser.newPage();
+      const sharedHost = await getBrowser();
+      const context = await sharedHost.newContext();
+      // Callers keep the `{ browser, page }` shape and `browser.close()`.
+      const browser = { close: () => context.close() };
+      const page = await context.newPage();
       const pageErrors: string[] = [];
       page.on("pageerror", (err) => {
         pageErrors.push(err instanceof Error ? err.message : String(err));
@@ -632,15 +675,45 @@ describe.skipIf(!chromiumAvailable)(
         target.__exitTrace = new Promise((resolve) => {
           const started = performance.now();
           let frames = 0;
+          // #3100: a starved renderer can run the whole exit between two
+          // rAF ticks, so the frame counter reads 0 for an exit that did play.
+          // Also count the moment the node is *observed* closed and still
+          // animating (mutation callback, not frame-bound). An unmount with
+          // no exit animation never shows a closed node with a running
+          // animation, so it still reads 0.
+          let closedAnimating = false;
+          const watcher = new MutationObserver(() => {
+            const node = document.querySelector(sel);
+            if (
+              node &&
+              node.getAttribute("data-state") === "closed" &&
+              node.getAnimations({ subtree: true }).length > 0
+            ) {
+              closedAnimating = true;
+            }
+          });
+          watcher.observe(document.body, {
+            subtree: true,
+            childList: true,
+            attributes: true,
+            attributeFilter: ["data-state"],
+          });
+          const finish = () => {
+            watcher.disconnect();
+            resolve({
+              frames: frames === 0 && closedAnimating ? 1 : frames,
+              dwell: performance.now() - started,
+            });
+          };
           const tick = () => {
             const node = document.querySelector(sel);
             if (!node) {
-              resolve({ frames, dwell: performance.now() - started });
+              finish();
               return;
             }
             if (node.getAttribute("data-state") === "closed") frames += 1;
             if (performance.now() - started > 800) {
-              resolve({ frames, dwell: performance.now() - started });
+              finish();
               return;
             }
             requestAnimationFrame(tick);
@@ -747,8 +820,7 @@ describe.skipIf(!chromiumAvailable)(
       opacity: number;
       fillMode: string;
     }> {
-      const { chromium } = await import("playwright");
-      const browser = await chromium.launch();
+      const browser = await (await getBrowser()).newContext();
       try {
         const page = await browser.newPage();
         await page.setContent(
@@ -978,10 +1050,18 @@ describe.skipIf(!chromiumAvailable)(
     ) {
       const overlay = page.locator(overlaySelector).first();
       if ((await overlay.count()) === 0) return;
-      if ((await overlay.getAttribute("data-state")) === "open") {
+      // #3100: the overlay can finish its exit between `count()` and this
+      // read; `getAttribute` on a node that is already gone then waits out the
+      // whole 30s action timeout. Vanishing here means "gone", which is the
+      // goal of this helper. The 10s detach wait is cleanup, not a contract:
+      // the exit timing itself is measured in-page elsewhere.
+      const state = await overlay
+        .getAttribute("data-state", { timeout: 1_000 })
+        .catch(() => null);
+      if (state === "open") {
         await page.keyboard.press("Escape");
       }
-      await overlay.waitFor({ state: "detached", timeout: 2_000 });
+      await overlay.waitFor({ state: "detached", timeout: 10_000 });
     }
 
     /**
