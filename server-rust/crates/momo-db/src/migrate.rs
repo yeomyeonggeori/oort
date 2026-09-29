@@ -517,19 +517,25 @@ mod tests {
     /// 105 is #3169's item serving and 「기억해 둘게요」 proposals: `mem_proposal` (ENABLE + FORCE RLS),
     /// `mem_serve_items`, the stricter `mem_record_serving`, `mem_propose_item` (momo_memory only) and
     /// the API-side `mem_accept_proposal` / `mem_reject_proposal`.
+    /// 106 is #3208's memory-browser writes (ADR-0196 D9/D10): the API-callable definer functions
+    /// `mem_edit_item` (new curated item supersedes the old, evidence kept) and `mem_forget_item`
+    /// (permanent delete of the item, its older versions and dead twins), `mem_suppress` (hash-only
+    /// re-extraction suppression) with its insert trigger and the suppression checks in
+    /// `mem_accept_proposal`/`mem_propose_item`, plus the narrow `mem_definer` privilege widening
+    /// (UPDATE of `retired_at`/`retired_reason`, DELETE).
     #[test]
-    fn discovers_contiguous_migrations_001_to_105() {
+    fn discovers_contiguous_migrations_001_to_106() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            105,
-            "expected 105 migrations under {}",
+            106,
+            "expected 106 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 105);
+        assert_eq!(migrations.last().unwrap().version, 106);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

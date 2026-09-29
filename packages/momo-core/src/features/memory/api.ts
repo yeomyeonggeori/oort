@@ -12,6 +12,13 @@
 //   PATCH /v1/workspaces/{ws}/memory/settings/me         personal pause
 //   PATCH /v1/workspaces/{ws}/channels/{ch}/memory/settings   exclude / pause
 //
+//   GET    /v1/workspaces/{ws}/memory/items                    memory browser list / search   (#3208)
+//   GET    /v1/workspaces/{ws}/memory/items/{id}               one item + evidence back-links
+//   GET    /v1/workspaces/{ws}/memory/items/{id}/evidence      source messages
+//   GET    /v1/workspaces/{ws}/memory/items/{id}/events        lifecycle ledger
+//   PATCH  /v1/workspaces/{ws}/memory/items/{id}               edit (new item supersedes the old)
+//   DELETE /v1/workspaces/{ws}/memory/items/{id}               forget (permanent)
+//
 // Permission failures are 403, hidden rows are 404 or an empty list; callers
 // branch on `ApiError.status`, they do not filter results themselves.
 // =============================================================================
@@ -22,6 +29,12 @@ import { responseRecord } from "../../lib/wire";
 import { apiBase, coreSession } from "../../runtime/host";
 import {
   parseChannelMemorySettings,
+  parseEditedMemoryItem,
+  parseForgottenCount,
+  parseMemoryItemDetail,
+  parseMemoryItemEvents,
+  parseMemoryItemEvidence,
+  parseMemoryItemPage,
   parseMemberMemorySettings,
   parseMemoryDigestPage,
   parseMemoryDigestResponse,
@@ -31,7 +44,14 @@ import {
   parseMemorySettings,
   parseWorkspaceMemorySettings,
   type ChannelMemorySettings,
+  type EditedMemoryItem,
+  type EditMemoryItemInput,
   type ListMemoryDigestsOptions,
+  type ListMemoryItemsOptions,
+  type MemoryEvidenceLink,
+  type MemoryItemDetail,
+  type MemoryItemEvent,
+  type MemoryItemPage,
   type ListMemoryProposalsOptions,
   type MemberMemorySettings,
   type MemoryDigest,
@@ -186,4 +206,79 @@ export function patchMyMemorySettings(
     method: "PATCH",
     body: JSON.stringify({ paused }),
   }).then(parseMemberMemorySettings);
+}
+
+function itemPath(workspaceId: string, itemId: string): string {
+  return `${workspacePath(workspaceId)}/memory/items/${encodeURIComponent(itemId)}`;
+}
+
+/**
+ * Memory browser list (newest first, keyset `nextCursor`), or — with `q` — the ranked keyword
+ * search over current items. Empty when nothing is readable; never an error for a hidden channel.
+ */
+export function listMemoryItems(
+  workspaceId: string,
+  options: ListMemoryItemsOptions = {}
+): Promise<MemoryItemPage> {
+  const query = new URLSearchParams();
+  if (options.channelId !== undefined) query.set("channelId", options.channelId);
+  if (options.kind !== undefined) query.set("kind", options.kind);
+  if (options.status !== undefined) query.set("status", options.status);
+  if (options.q !== undefined && options.q.trim() !== "") query.set("q", options.q.trim());
+  if (options.cursor !== undefined) query.set("cursor", options.cursor);
+  if (options.limit !== undefined) query.set("limit", String(options.limit));
+  const suffix = query.toString();
+  return memoryRequest(
+    `${workspacePath(workspaceId)}/memory/items${suffix === "" ? "" : `?${suffix}`}`
+  ).then(parseMemoryItemPage);
+}
+
+/** One item with its evidence; a 404 `ApiError` when it is missing or hidden (indistinguishable). */
+export function getMemoryItem(workspaceId: string, itemId: string): Promise<MemoryItemDetail> {
+  return memoryRequest(itemPath(workspaceId, itemId)).then(parseMemoryItemDetail);
+}
+
+/** Source message ids (with channel and seq) to link back to; never message text. */
+export function getMemoryItemEvidence(
+  workspaceId: string,
+  itemId: string
+): Promise<MemoryEvidenceLink[]> {
+  return memoryRequest(`${itemPath(workspaceId, itemId)}/evidence`).then(parseMemoryItemEvidence);
+}
+
+/** The lifecycle ledger of an item, oldest first. */
+export function getMemoryItemEvents(
+  workspaceId: string,
+  itemId: string
+): Promise<MemoryItemEvent[]> {
+  return memoryRequest(`${itemPath(workspaceId, itemId)}/events`).then(parseMemoryItemEvents);
+}
+
+/**
+ * Edit an item: the server adds a new curated item (same evidence) that supersedes it and keeps the
+ * old one as history. Anyone who can read the item may edit it; a 404 `ApiError` otherwise (and for
+ * a missing id), 409 when the item is no longer current or an identical one exists, 422 for text
+ * the server refuses (empty, over 600 characters, unchanged, secret-shaped).
+ */
+export function editMemoryItem(
+  workspaceId: string,
+  itemId: string,
+  input: EditMemoryItemInput
+): Promise<EditedMemoryItem> {
+  const body: Record<string, unknown> = { body: input.body };
+  if (input.kind !== undefined) body.kind = input.kind;
+  return memoryRequest(itemPath(workspaceId, itemId), {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  }).then(parseEditedMemoryItem);
+}
+
+/**
+ * Forget an item for good (the item and its older versions are deleted; there is no undo).
+ * Resolves to how many versions were removed. 404 like edit; 409 when a newer version exists.
+ */
+export function forgetMemoryItem(workspaceId: string, itemId: string): Promise<number> {
+  return memoryRequest(itemPath(workspaceId, itemId), { method: "DELETE" }).then(
+    parseForgottenCount
+  );
 }

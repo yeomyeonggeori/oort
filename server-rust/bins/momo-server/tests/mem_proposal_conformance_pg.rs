@@ -1561,7 +1561,7 @@ async fn an_agent_cannot_propose_what_it_could_not_cite() {
         assert!(matches!(out, Ok(Some(_))), "{label}: sabotaged: {out:?}");
     }
     // The two walls for a channel the agent is not in are independent.
-    let tx = sabotage_tx(
+    let mut tx = sabotage_tx(
         &su,
         PROPOSE_FN,
         &[(
@@ -2859,4 +2859,148 @@ async fn futures_join(
         out.push(h.await.expect("join"));
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// #3208 M-5: a forgotten text is neither proposed again nor acceptable
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn a_forgotten_text_is_neither_proposed_again_nor_accepted() {
+    let (su, app, wk, w) = setup().await;
+    let text = "잊을 결정 lychee 문구예요";
+    // A pending proposal with this text exists before the item does.
+    let (pid, _) = pending(&su, &wk, &w, text).await;
+    // X: a live item with the same kind/text in the same channel, forged the way extraction stores it.
+    let (mx, _) = say(&su, w.ws, w.general, w.alice, "X 의 근거예요").await;
+    let x = Uuid::new_v4();
+    su_exec(
+        &su,
+        &format!(
+            "INSERT INTO mem_item (id, workspace_id, space_kind, channel_id, kind, origin, body, valid_from, \
+             content_hash, extractor_version, source_count) \
+             VALUES ('{x}', '{ws}', 'channel', '{ch}', 'decision', 'extracted', '{text}', now(), \
+                     encode(sha256(convert_to('decision:' || lower('{text}'), 'UTF8')), 'hex'), 'forged', 1)",
+            ws = w.ws,
+            ch = w.general
+        ),
+    )
+    .await;
+    su_exec(
+        &su,
+        &format!(
+            "INSERT INTO mem_evidence (workspace_id, item_id, message_id, channel_id) VALUES ('{}', '{x}', '{mx}', '{}')",
+            w.ws, w.general
+        ),
+    )
+    .await;
+    // alice forgets X (as the API role): the hash is remembered.
+    exec(
+        &app,
+        w.ws,
+        Some(w.alice),
+        &format!("SELECT mem_forget_item('{x}')"),
+    )
+    .await
+    .expect("forget X");
+    assert_eq!(
+        su_count(
+            &su,
+            &format!(
+                "SELECT count(*) FROM mem_suppress WHERE workspace_id = '{}'",
+                w.ws
+            )
+        )
+        .await,
+        1
+    );
+
+    // Accepting the still-pending proposal with X's text is refused cleanly (55000 -> the route's
+    // "can no longer be decided" 409), it stays pending, and no item appears.
+    assert_eq!(
+        accept(&app, w.ws, Some(w.bob), pid).await,
+        Err("55000".to_string())
+    );
+    assert_eq!(
+        su_count(
+            &su,
+            &format!("SELECT count(*) FROM mem_proposal WHERE id = '{pid}' AND status = 'pending'")
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        su_count(
+            &su,
+            &format!(
+                "SELECT count(*) FROM mem_item WHERE workspace_id = '{}' AND body = '{text}'",
+                w.ws
+            )
+        )
+        .await,
+        0
+    );
+
+    // A new proposal with X's text is not created; other text is.
+    let (m1, _) = say(&su, w.ws, w.general, w.alice, "새 근거 하나예요").await;
+    let (run, _) = mention_run(&su, &w, w.general, w.alice, "@agent 기억해 줘").await;
+    assert_eq!(
+        propose(&wk, w.ws, run, "decision", text, &[m1]).await,
+        Ok(None)
+    );
+    assert_eq!(
+        su_count(&su, &format!("SELECT count(*) FROM mem_proposal WHERE workspace_id = '{}' AND status = 'pending'", w.ws)).await,
+        1,
+        "only the pre-existing pending proposal"
+    );
+    assert!(matches!(
+        propose(
+            &wk,
+            w.ws,
+            run,
+            "decision",
+            "전혀 다른 새 결정 papayasalt 문구예요",
+            &[m1]
+        )
+        .await,
+        Ok(Some(_))
+    ));
+
+    // RED 1: without the accept check the insert trigger silently skips the row and the function
+    // fails somewhere else with a raw error (not the clean refusal).
+    const ACCEPT_CHECK: &str =
+        "RAISE EXCEPTION 'mem_accept_proposal: this memory was forgotten' USING ERRCODE = '55000';";
+    let tx = sabotage_tx(&su, ACCEPT_FN, &[(ACCEPT_CHECK, "NULL;")]).await;
+    let unchecked = decide_in(tx, w.ws, Some(w.bob), "mem_accept_proposal", pid, None).await;
+    eprintln!("RED [accept check removed]: shipped -> Err(55000); sabotaged -> {unchecked:?}");
+    assert_ne!(unchecked, Err("55000".to_string()));
+    // RED 2: without the check *and* the trigger a forgotten text is remembered again.
+    let mut tx = sabotage_tx(&su, ACCEPT_FN, &[(ACCEPT_CHECK, "NULL;")]).await;
+    sqlx::query("DROP TRIGGER mem_item_suppressed ON mem_item")
+        .execute(&mut *tx)
+        .await
+        .expect("drop trigger");
+    let resurrected = decide_in(tx, w.ws, Some(w.bob), "mem_accept_proposal", pid, None).await;
+    eprintln!("RED [accept check + trigger removed]: sabotaged -> {resurrected:?} (a forgotten text is an item again)");
+    assert!(resurrected.is_ok());
+    // RED 3: without the propose check a proposal with the forgotten text is created.
+    let mut tx = sabotage_tx(
+        &su,
+        PROPOSE_FN,
+        &[(
+            "AND s.channel_id = v_channel AND s.content_hash = v_hash",
+            "AND false",
+        )],
+    )
+    .await;
+    // (the still-pending twin would otherwise dedupe the proposal; drop it inside the rolled-back tx)
+    sqlx::query("DELETE FROM mem_proposal WHERE id = $1")
+        .bind(pid)
+        .execute(&mut *tx)
+        .await
+        .expect("drop the pending twin");
+    let proposed = propose_in(tx, w.ws, run, "decision", text, &[m1]).await;
+    eprintln!("RED [propose check removed]: shipped -> Ok(None); sabotaged -> {proposed:?}");
+    assert!(matches!(proposed, Ok(Some(_))));
 }
