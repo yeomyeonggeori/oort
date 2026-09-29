@@ -115,6 +115,11 @@ struct PendingControlsResponse {
     /// desktop app also hands them over locally.
     #[serde(default)]
     device_revocations: Vec<Value>,
+    /// `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED` on the server (#3117). Absent
+    /// (a server from before it, or the flag off) is `false`. The host only
+    /// ever *latches* on it ([`crate::signature_requirement`]).
+    #[serde(default)]
+    human_control_signature_required: bool,
 }
 
 /// `WorkSessionDto`, the fields the host uses.
@@ -247,6 +252,11 @@ pub trait HostApi: Send + Sync + 'static {
     fn take_device_revocations(&self) -> Vec<Value> {
         Vec::new()
     }
+    /// What the last `pending-controls` answer said about
+    /// `humanControlSignatureRequired` (#3117); `None` before any answer.
+    fn server_requires_human_signatures(&self) -> Option<bool> {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -260,6 +270,8 @@ pub struct HostClient {
     host_id: Uuid,
     key: Arc<HostKey>,
     revocations: std::sync::Mutex<Vec<Value>>,
+    /// 0 = no answer yet, 1 = false, 2 = true.
+    server_requires_signatures: std::sync::atomic::AtomicU8,
 }
 
 pub fn now_ms() -> i64 {
@@ -348,6 +360,7 @@ impl HostClient {
             host_id,
             key,
             revocations: std::sync::Mutex::new(Vec::new()),
+            server_requires_signatures: std::sync::atomic::AtomicU8::new(0),
         })
     }
 
@@ -431,6 +444,14 @@ impl HostApi for HostClient {
         let path = self.workspace_path(&format!("work-hosts/{}/pending-controls", self.host_id));
         let bytes = self.signed(Method::GET, &path, None).await?;
         let response = decode::<PendingControlsResponse>(&bytes)?;
+        self.server_requires_signatures.store(
+            if response.human_control_signature_required {
+                2
+            } else {
+                1
+            },
+            std::sync::atomic::Ordering::SeqCst,
+        );
         if !response.device_revocations.is_empty() {
             self.revocations
                 .lock()
@@ -438,6 +459,16 @@ impl HostApi for HostClient {
                 .extend(response.device_revocations);
         }
         Ok(response.work_controls)
+    }
+
+    fn server_requires_human_signatures(&self) -> Option<bool> {
+        match self
+            .server_requires_signatures
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            0 => None,
+            word => Some(word == 2),
+        }
     }
 
     fn take_device_revocations(&self) -> Vec<Value> {

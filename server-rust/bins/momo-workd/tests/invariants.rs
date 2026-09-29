@@ -25,6 +25,7 @@
 //! | `inv_18_a_token_split_by_a_tool_event_is_still_masked` | `EventRelay::status` flushing only complete lines (#2607 N-4) |
 //! | `inv_19_an_open_key_header_does_not_hold_the_rest_of_the_answer` | the open-key hold bound in `session::ready_len` (#2607 N-5) |
 //! | `inv_7_a_lost_spawn_ack_response_still_starts_the_session` | the settled-verdict sweep in `ControlLoop::poll_once` |
+//! | `inv_37_r2_an_allow_over_another_preview_is_refused_and_the_agent_waits` | #3118 (R2 H1): `SessionManager::permission_preview_sha256` looked up in `ControlLoop::check_signature` and `HumanTrust::check_control_with_preview` rebuilding the allow with the host's own hash; the preview relayed with the request is the tool call the agent asked about |
 //! | `inv_20_the_hosts_environment_never_reaches_an_agent_or_its_commands` | `policy::AGENT_ENV_ALLOWLIST` in `policy::launch_spec` (#2630 F1); `HOME` in Codex's isolation environment (#2630 F5) |
 
 use std::collections::{BTreeMap, VecDeque};
@@ -45,6 +46,7 @@ use momo_workd::session::{
     SessionManager, SessionSettings, MODE_ESCAPED_DETAIL, PERMISSION_DENIED_DETAIL,
     PERMISSION_EXPIRED_DETAIL,
 };
+use momo_workd::signature_requirement::{RequiredBy, SignatureRequirement};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -70,6 +72,8 @@ struct FakeServer {
     refuse_event_type: Mutex<Option<String>>,
     /// Revocations the next poll relays (ADR-0146 개정 D-7).
     revocations: Mutex<Vec<Value>>,
+    /// `humanControlSignatureRequired` on every poll answer (#3117).
+    requires_signatures: Mutex<Option<bool>>,
 }
 
 impl FakeServer {
@@ -81,6 +85,7 @@ impl FakeServer {
             lose_next_ack_response: Mutex::new(false),
             refuse_event_type: Mutex::new(None),
             revocations: Mutex::new(Vec::new()),
+            requires_signatures: Mutex::new(None),
         })
     }
 
@@ -207,6 +212,10 @@ impl HostApi for FakeServer {
     fn take_device_revocations(&self) -> Vec<Value> {
         std::mem::take(&mut *self.revocations.lock().unwrap())
     }
+
+    fn server_requires_human_signatures(&self) -> Option<bool> {
+        *self.requires_signatures.lock().unwrap()
+    }
 }
 
 struct Harness {
@@ -218,6 +227,9 @@ struct Harness {
     /// The host's R2 trust state (in `dir/state`), wired into `controls`
     /// only by [`harness_r2`].
     trust: Arc<Mutex<HumanTrust>>,
+    /// Whether R2 is required: forced by [`harness_r2`], the product latch by
+    /// [`harness_latching`] (#3117), off otherwise.
+    requirement: Arc<Mutex<SignatureRequirement>>,
     channel: Uuid,
     record: PathBuf,
     dir: PathBuf,
@@ -263,7 +275,25 @@ fn harness_with(tools: &[(&str, AdapterKind, &[&str])]) -> Harness {
 }
 
 fn harness_waiting(tools: &[(&str, AdapterKind, &[&str])], permission_wait: Duration) -> Harness {
-    harness_full(tools, permission_wait, false)
+    harness_full(tools, permission_wait, R2::Off)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum R2 {
+    Off,
+    /// `require_human_signatures: true` (ADR-0146 개정 D-10).
+    Forced,
+    /// As `momo-workd run` builds it (#3117): the latch in the state folder.
+    Latching,
+}
+
+/// The product wiring (#3117): R2 starts off and the server's word latches it.
+fn harness_latching(tools: &[(&str, &[&str])]) -> Harness {
+    let tools: Vec<(&str, AdapterKind, &[&str])> = tools
+        .iter()
+        .map(|(key, extra)| (*key, AdapterKind::Claude, *extra))
+        .collect();
+    harness_full(&tools, Duration::from_secs(60), R2::Latching)
 }
 
 /// R2 on (config `require_human_signatures`, ADR-0146 개정 D-10).
@@ -272,13 +302,13 @@ fn harness_r2(tools: &[(&str, &[&str])]) -> Harness {
         .iter()
         .map(|(key, extra)| (*key, AdapterKind::Claude, *extra))
         .collect();
-    harness_full(&tools, Duration::from_secs(60), true)
+    harness_full(&tools, Duration::from_secs(60), R2::Forced)
 }
 
 fn harness_full(
     tools: &[(&str, AdapterKind, &[&str])],
     permission_wait: Duration,
-    r2: bool,
+    r2: R2,
 ) -> Harness {
     let dir = std::env::temp_dir().join(format!("momo-workd-inv-{}", Uuid::new_v4().simple()));
     std::fs::create_dir_all(dir.join("repo")).unwrap();
@@ -340,8 +370,17 @@ fn harness_full(
         .unwrap(),
     ));
     let mut controls = ControlLoop::new(server.clone(), sessions, owner);
-    if r2 {
-        controls = controls.with_human_trust(trust.clone());
+    let requirement = Arc::new(Mutex::new(match r2 {
+        R2::Latching => SignatureRequirement::open(&state_dir, false),
+        R2::Forced => SignatureRequirement::forced(),
+        R2::Off => SignatureRequirement::off(),
+    }));
+    match r2 {
+        R2::Off => {}
+        R2::Forced => controls = controls.with_human_trust(trust.clone()),
+        R2::Latching => {
+            controls = controls.with_signature_requirement(trust.clone(), requirement.clone())
+        }
     }
     Harness {
         controls,
@@ -349,6 +388,7 @@ fn harness_full(
         owner,
         workspace,
         trust,
+        requirement,
         channel: Uuid::new_v4(),
         record,
         dir,
@@ -687,10 +727,25 @@ async fn inv_3_a_permission_request_waits_for_its_owner_and_gets_exactly_their_c
             "{key}"
         );
     }
-    let text = requested.payload.to_string();
+    // #3118: the tool call crosses only as the owner's preview (the server
+    // stores it for the owner and broadcasts the hash alone); nothing else in
+    // the event names it.
+    let mut outside_preview = requested.payload.clone();
+    let preview = outside_preview
+        .as_object_mut()
+        .unwrap()
+        .remove("preview")
+        .expect("the request carries its preview");
+    let text = outside_preview.to_string();
     assert!(
         !text.contains("allow-always") && !text.contains("id_ed25519"),
         "{text}"
+    );
+    assert_eq!(preview["kind"], "execute");
+    assert_eq!(preview["title"], "Run `cat ~/.ssh/id_ed25519`");
+    assert_eq!(
+        requested.payload["preview_sha256"],
+        json!(momo_wire::permission_preview::preview_sha256(&preview).unwrap())
     );
 
     // Nothing answers the agent until the owner decides.
@@ -2130,7 +2185,50 @@ fn signed_at(
         expires_at_ms,
         nonce,
         InputMode::Queue,
+        None,
     )
+}
+
+/// The owner's allow of a relayed request, signed over the preview hash the
+/// host relayed with it (#3118) — what the owner's app renders and hashes.
+fn signed_decision(h: &Harness, control: WorkControl, device: &Device) -> WorkControl {
+    let request = control.payload["request_event_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let hash = relayed_preview_sha256(h, &request);
+    signed_decision_over(control, device, &hash)
+}
+
+/// … over a given preview hash (a server that showed another preview).
+fn signed_decision_over(
+    control: WorkControl,
+    device: &Device,
+    preview_sha256: &str,
+) -> WorkControl {
+    let now = now_ms();
+    signed_full(
+        control,
+        device,
+        None,
+        now,
+        now + 5 * 60 * 1000,
+        Uuid::new_v4(),
+        InputMode::Queue,
+        Some(preview_sha256),
+    )
+}
+
+/// The `preview_sha256` the host put on its `approval.requested` for `request`.
+fn relayed_preview_sha256(h: &Harness, request: &str) -> String {
+    h.server
+        .events()
+        .into_iter()
+        .find(|event| {
+            event.event_type == "approval.requested" && event.event_id.to_string() == request
+        })
+        .and_then(|event| event.payload["preview_sha256"].as_str().map(str::to_string))
+        .expect("the host relayed the request with its preview hash")
 }
 
 /// An owner's input in `mode` (#3027), signed by `device`.
@@ -2144,9 +2242,11 @@ fn signed_input(control: WorkControl, device: &Device, mode: InputMode) -> WorkC
         now + 5 * 60 * 1000,
         Uuid::new_v4(),
         mode,
+        None,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn signed_full(
     mut control: WorkControl,
     device: &Device,
@@ -2155,6 +2255,7 @@ fn signed_full(
     expires_at_ms: i64,
     nonce: Uuid,
     mode: InputMode,
+    preview_sha256: Option<&str>,
 ) -> WorkControl {
     let payload = control.payload.clone();
     let text = |key: &str| payload[key].as_str().unwrap().to_string();
@@ -2183,6 +2284,8 @@ fn signed_full(
             option_id: option_id.as_deref().unwrap(),
             option_kind: option_kind.as_deref().unwrap(),
             scope: PermissionScope::Once,
+            // #3118: an allow names the preview the host relayed.
+            preview_sha256: Some(preview_sha256.expect("sign a decision with signed_decision")),
         },
         other => panic!("{other} is not signed"),
     };
@@ -2695,10 +2798,10 @@ async fn inv_25_r2_stopping_needs_no_signature_allowing_does() {
     assert!(poll_and_ack(&mut h, &next).await.ok);
     wait_for("the second request", || requested(&h, 1).is_some()).await;
     let second = requested(&h, 1).unwrap();
-    let allow = signed(
+    let allow = signed_decision(
+        &h,
         decision(&h, h.owner, session, &second, "allow-once", "allow_once"),
         &root,
-        None,
     );
     assert_eq!(
         poll_and_ack(&mut h, &allow).await,
@@ -3168,7 +3271,8 @@ async fn inv_32_r2_an_interrupt_withdraws_the_cancelled_turns_permission_request
         json!(requested.event_id)
     );
     // The owner's late allow for it finds nothing to answer.
-    let late = signed(
+    let late = signed_decision(
+        &h,
         decision(
             &h,
             h.owner,
@@ -3178,7 +3282,6 @@ async fn inv_32_r2_an_interrupt_withdraws_the_cancelled_turns_permission_request
             "allow_once",
         ),
         &root,
-        None,
     );
     assert_eq!(
         poll_and_ack(&mut h, &late).await,
@@ -3489,5 +3592,252 @@ async fn inv_34_r2_a_reset_then_new_id_pin_moves_the_binding_and_a_stuck_host_he
     assert_eq!(
         poll_and_ack(&mut h, &old).await,
         ControlAck::refused("device_signature_invalid")
+    );
+}
+
+/// #3117 (E10 검수 B1): the product wiring. R2 starts off; the server's
+/// `humanControlSignatureRequired` latches it only with a root pinned, before
+/// any control of that answer; the server's later `false` and a restart do not
+/// lower it; only the local reset does.
+#[tokio::test]
+async fn inv_35_r2_the_servers_word_latches_the_host_with_a_root_and_never_lowers_it() {
+    let mut h = harness_latching(&[("claude", &[])]);
+    let root = Device::new(1);
+    let request = spawn(&h, "claude", "start");
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+    wait_for("the first turn", || {
+        h.server
+            .statuses(session)
+            .contains(&SessionStatus::Idle { exit_code: 0 })
+    })
+    .await;
+    let unsigned = |h: &Harness, text: &str| {
+        control(h, "input", h.owner, Some(session), json!({ "text": text }))
+    };
+    let latch_file = h
+        .dir
+        .join("state")
+        .join(momo_workd::signature_requirement::REQUIRED_FILE);
+
+    // The server requires signatures, no root is pinned: the half state.
+    // Not latched (latched, every signed control would be refused too).
+    *h.server.requires_signatures.lock().unwrap() = Some(true);
+    let before_root = unsigned(&h, "before the root");
+    assert_eq!(
+        poll_and_ack(&mut h, &before_root).await,
+        ControlAck::ok(Some(session))
+    );
+    {
+        let requirement = h.requirement.lock().unwrap();
+        assert!(!requirement.required());
+        assert_eq!(requirement.server_required(), Some(true));
+    }
+    assert!(!latch_file.exists());
+
+    // The root is pinned: the next answer latches — before its own control.
+    pin(&h, &root);
+    let first_after = unsigned(&h, "in the latching answer");
+    assert_eq!(
+        poll_and_ack(&mut h, &first_after).await,
+        ControlAck::refused("device_signature_required")
+    );
+    assert_eq!(
+        h.requirement.lock().unwrap().required_by(),
+        Some(RequiredBy::Server)
+    );
+    assert!(latch_file.exists());
+    let fine = signed_input(unsigned(&h, "signed is fine"), &root, InputMode::Queue);
+    assert_eq!(
+        poll_and_ack(&mut h, &fine).await,
+        ControlAck::ok(Some(session))
+    );
+
+    // The server takes it back, and says so on every answer: still refused.
+    *h.server.requires_signatures.lock().unwrap() = Some(false);
+    let after_off = unsigned(&h, "after the server said false");
+    assert_eq!(
+        poll_and_ack(&mut h, &after_off).await,
+        ControlAck::refused("device_signature_required")
+    );
+    // A restart reads the latch back.
+    *h.requirement.lock().unwrap() = SignatureRequirement::open(&h.dir.join("state"), false);
+    let after_restart = unsigned(&h, "after a restart");
+    assert_eq!(
+        poll_and_ack(&mut h, &after_restart).await,
+        ControlAck::refused("device_signature_required")
+    );
+
+    // Only the local reset lowers it.
+    h.requirement.lock().unwrap().reset().unwrap();
+    let after_reset = unsigned(&h, "after the local reset");
+    assert_eq!(
+        poll_and_ack(&mut h, &after_reset).await,
+        ControlAck::ok(Some(session))
+    );
+    wait_for("the unsigned turn after the reset", || {
+        prompts(&h)
+            .iter()
+            .any(|prompt| prompt.contains("after the local reset"))
+    })
+    .await;
+    for refused in [
+        "in the latching answer",
+        "after the server said false",
+        "after a restart",
+    ] {
+        assert!(
+            !prompts(&h).iter().any(|prompt| prompt.contains(refused)),
+            "{refused} never reached the agent"
+        );
+    }
+}
+
+/// #3117 security review Low-1: with the product wiring the trust state is
+/// always there, so "R2 on" must be the requirement. A host that has not
+/// latched R2 takes an unverified envelope's `interrupt` as a queued turn.
+#[tokio::test]
+async fn inv_36_r2_not_latched_an_unverified_interrupt_is_a_queued_turn() {
+    let mut h = harness_latching(&[("claude", &["--hang-first"])]);
+    let request = spawn(&h, "claude", "first turn hangs");
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+    wait_for("the first prompt", || prompts(&h).len() == 1).await;
+    let mut input = control(
+        &h,
+        "input",
+        h.owner,
+        Some(session),
+        json!({ "text": "an envelope nobody verified" }),
+    );
+    input.human_signature = Some(json!({ "mode": "interrupt" }));
+    assert_eq!(
+        poll_and_ack(&mut h, &input).await,
+        ControlAck::ok(Some(session))
+    );
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(
+        !received_methods(&h).contains(&"session/cancel".to_string()),
+        "an unverified mode never cancels the running turn"
+    );
+    assert_eq!(prompts(&h).len(), 1, "it waits behind the turn");
+}
+
+/// #3118 (ADR-0146 증보, R2 H1): the host verifies an allow against the
+/// preview **it** relayed. A server that showed the owner another preview
+/// (「파일을 읽어도 될까요? README.md」 over `cat ~/.ssh/id_ed25519`) gets an
+/// allow signed over that preview's hash, and the host refuses it; so is a v2
+/// allow that names no preview. The agent keeps waiting, and the allow over
+/// what the host relayed is the one it gets.
+#[tokio::test]
+async fn inv_37_r2_an_allow_over_another_preview_is_refused_and_the_agent_waits() {
+    use momo_wire::permission_preview::{preview_sha256, PermissionPreview};
+    let mut h = harness_r2(&[("claude", &["--permission"])]);
+    let root = Device::new(1);
+    pin(&h, &root);
+    let request = signed(spawn(&h, "claude", "read the secret"), &root, None);
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+    wait_for("the request to reach the owner", || {
+        h.server
+            .events()
+            .iter()
+            .any(|event| event.event_type == "approval.requested")
+    })
+    .await;
+    let requested = h
+        .server
+        .events()
+        .into_iter()
+        .find(|event| event.event_type == "approval.requested")
+        .unwrap();
+    let event_id = requested.event_id.to_string();
+    let relayed = requested.payload["preview_sha256"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // What a server could show instead.
+    let shown = PermissionPreview {
+        kind: "read".into(),
+        title: "Read README.md".into(),
+        locations: String::new(),
+        input: String::new(),
+        truncated: false,
+    }
+    .to_value();
+    let shown_hash = preview_sha256(&shown).unwrap();
+    assert_ne!(shown_hash, relayed);
+    let over_shown = signed_decision_over(
+        decision(&h, h.owner, session, &event_id, "allow-once", "allow_once"),
+        &root,
+        &shown_hash,
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &over_shown).await,
+        ControlAck::refused("device_signature_invalid")
+    );
+    // A v2 allow, which names no preview, is not one either.
+    let mut v2 = decision(&h, h.owner, session, &event_id, "allow-once", "allow_once");
+    let now = now_ms();
+    let nonce = Uuid::new_v4();
+    let bytes = HumanControl {
+        instance_id: INSTANCE,
+        workspace_id: v2.workspace_id,
+        member_id: v2.requester_member_id,
+        device_key_id: root.id,
+        host_id: v2.target_host_id,
+        session_id: v2.session_id,
+        nonce,
+        issued_at_ms: now,
+        expires_at_ms: now + 60_000,
+        content: ControlContent::Permission {
+            request_event_id: Uuid::parse_str(&event_id).unwrap(),
+            option_id: "allow-once",
+            option_kind: "allow_once",
+            scope: PermissionScope::Once,
+            preview_sha256: None,
+        },
+    }
+    .signed_bytes_as(momo_wire::human_control::ControlSchema::V2)
+    .unwrap();
+    v2.human_signature = Some(json!({
+        "alg": "p256", "instanceId": INSTANCE,
+        "deviceKeyId": root.id, "devicePublicKey": root.public(),
+        "nonce": nonce, "issuedAtMs": now, "expiresAtMs": now + 60_000,
+        "scope": "once", "signature": root.sign(&bytes),
+    }));
+    assert_eq!(
+        poll_and_ack(&mut h, &v2).await,
+        ControlAck::refused("device_signature_invalid")
+    );
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        permission_outcomes(&h).is_empty(),
+        "no refused allow reaches the agent"
+    );
+
+    // The allow over the preview the host relayed is the one that works.
+    let genuine = signed_decision(
+        &h,
+        decision(&h, h.owner, session, &event_id, "allow-once", "allow_once"),
+        &root,
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &genuine).await,
+        ControlAck::ok(Some(session))
+    );
+    wait_for("the agent's answer", || permission_outcomes(&h).len() == 1).await;
+    assert_eq!(
+        permission_outcomes(&h)[0],
+        json!({"outcome": "selected", "optionId": "allow-once"})
+    );
+    // Answered: the host no longer holds a preview for it, so a second allow
+    // (fresh nonce) is a request it is not waiting on.
+    let again = signed_decision_over(
+        decision(&h, h.owner, session, &event_id, "allow-once", "allow_once"),
+        &root,
+        &relayed,
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &again).await,
+        ControlAck::refused("permission_request_unknown")
     );
 }

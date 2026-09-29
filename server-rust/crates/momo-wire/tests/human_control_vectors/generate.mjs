@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Regenerates a human-signing vectors file (#3021, ADR-0146 개정 2026-09-28 D-5;
-// v2 #3027). One command, run on a Mac from anywhere:
+// v2 #3027; v3 #3118). One command, run on a Mac from anywhere:
 //
 //   node server-rust/crates/momo-wire/tests/human_control_vectors/generate.mjs [file]
 //
@@ -9,6 +9,11 @@
 // The v2 cases live in docs/api/human-control-signing-v2.vectors.json:
 //
 //   node …/generate.mjs docs/api/human-control-signing-v2.vectors.json
+//
+// and the v3 cases (#3118: a permission binds its preview's hash) in
+// docs/api/human-control-signing-v3.vectors.json:
+//
+//   node …/generate.mjs docs/api/human-control-signing-v3.vectors.json
 //
 // What it does, per case (inputs = each case's `schema`/`fields`/`content`):
 //   1. builds content bytes + the signed payload in TypeScript-flavoured JS
@@ -62,12 +67,21 @@ function contentBytes(c, schema) {
     case "input":
       return utf8(nfc(c.text));
     case "spawn":
-      // v2 (#3027) binds the tool and the channel before the free-text prompt.
-      return schema === "momo.human.control.v2"
+      // v2 (#3027) binds the tool and the channel before the free-text prompt;
+      // v3 keeps v2's spawn body.
+      return schema === "momo.human.control.v2" || schema === "momo.human.control.v3"
         ? utf8(`${c.agent_member_id}\n${c.folder_id}\n${c.tool}\n${c.channel_id}\n${nfc(c.first_prompt)}`)
         : utf8(`${c.agent_member_id}\n${c.folder_id}\n${nfc(c.first_prompt)}`);
-    case "permission":
-      return utf8(`${c.request_event_id}\n${c.option_id}\n${c.option_kind}\n${c.scope}`);
+    case "permission": {
+      const base = `${c.request_event_id}\n${c.option_id}\n${c.option_kind}\n${c.scope}`;
+      // v3 (#3118): the preview's hash, as the host computed it, on a fifth line.
+      if (schema === "momo.human.control.v3") {
+        if (!/^[0-9a-f]{64}$/.test(c.preview_sha256 ?? "")) throw new Error("v3 permission needs preview_sha256");
+        return utf8(`${base}\n${c.preview_sha256}`);
+      }
+      if (c.preview_sha256 !== undefined) throw new Error("only a v3 permission binds a preview");
+      return utf8(base);
+    }
     case "bundle_manifest":
       return utf8(canonicalJson(c.manifest));
     case "host_register":
@@ -81,7 +95,8 @@ function payloadBytes(tc) {
   const f = tc.fields;
   switch (tc.schema) {
     case "momo.human.control.v1":
-    case "momo.human.control.v2": {
+    case "momo.human.control.v2":
+    case "momo.human.control.v3": {
       const c = tc.content;
       const mode = c.kind === "input" ? c.mode : ABSENT;
       return utf8(
@@ -190,8 +205,11 @@ for (const tc of doc.cases) {
   ];
 }
 
-const isV2 = doc.cases.every((tc) => tc.schema.endsWith(".v2"));
-const comment = isV2
+const isV3 = doc.cases.some((tc) => tc.schema === "momo.human.control.v3");
+const isV2 = !isV3 && doc.cases.every((tc) => tc.schema.endsWith(".v2"));
+const comment = isV3
+  ? "#3118 — momo.human.control.v3 공유 테스트 벡터(ADR-0146 증보 2026-09-29, R2 H1). v2와 같은 13줄 틀이고 첫 줄만 v3다. permission 본문에 다섯째 줄로 미리보기 해시(preview_sha256: host가 만든 닫힌 미리보기 객체의 canonical JSON SHA-256, 소문자 hex)가 붙어, 허락이 사람이 본 미리보기를 묶는다. 다른 kind의 본문은 v2와 같다. 입력과 파생값, WebCrypto(node)·CryptoKit(소프트웨어 키 + Secure Enclave 임시 키)의 실제 서명을 담고 Rust(momo-wire tests/human_control_vectors.rs)가 바이트를 다시 만들어 모든 서명을 검증한다. 재생성: node server-rust/crates/momo-wire/tests/human_control_vectors/generate.mjs docs/api/human-control-signing-v3.vectors.json. 비ASCII는 \\u 이스케이프, 키는 고정 라벨의 SHA-256에서 만든 시험 전용 키다."
+  : isV2
   ? "#3027·#3068 — momo.human.control.v2와 momo.human.device_revoke.v2(뿌리가 폐기 대상 공개키에도 서명한다) 공유 테스트 벡터(ADR-0146 개정 2026-09-28 D-5, R2-E7). v1과 같은 13줄 틀이고 첫 줄만 v2다. spawn 본문이 도구(tool)와 채널(channel_id)을 자유 문장(첫 프롬프트) 앞의 고정 필드로 결속하고, spawn 세션 줄은 재개(resume)의 후속 세션 id를 담을 수 있다(새 작업은 `-`). input·permission·bundle_manifest·host_register의 본문은 v1과 같다. 입력(schema·fields·content)과 파생값, WebCrypto(node)·CryptoKit(소프트웨어 키 + Secure Enclave 임시 키)의 실제 서명을 담고 Rust(momo-wire tests/human_control_vectors.rs)가 바이트를 다시 만들어 모든 서명을 검증한다. v1 파일(human-control-signing.vectors.json)은 폰이 바이트 동일 사본을 두므로 고치지 않는다. 재생성: node server-rust/crates/momo-wire/tests/human_control_vectors/generate.mjs docs/api/human-control-signing-v2.vectors.json. 비ASCII는 \\u 이스케이프, 키는 고정 라벨의 SHA-256에서 만든 시험 전용 키다."
   : doc._comment;
 const out = {

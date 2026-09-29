@@ -3573,6 +3573,7 @@ const SW_PERMISSION: PendingPermission = {
     masked: 0,
     neutralized: 0,
   },
+  previewSha256: null,
   allow: {kind: 'allow_once', optionId: 'once'},
   reject: {kind: 'reject_once', optionId: 'no'},
   hiddenOptions: 0,

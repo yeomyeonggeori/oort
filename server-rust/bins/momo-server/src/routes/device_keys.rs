@@ -47,17 +47,15 @@ use axum::{Extension, Json};
 use momo_auth::device_key::{
     endorse_device_key_in_tx, insert_device_key_in_tx, list_member_device_keys_in_tx,
     load_device_key_in_tx, rebind_device_key_in_tx, rebindable_key_id_in_tx,
-    revoke_device_key_signed_in_tx, validated_new_device_key, verify_own_password_in_tx,
-    DeviceKeyRecord, DeviceKeyRefusal, DEVICE_KEY_PLATFORM_MACOS,
-    REFUSAL_DEVICE_KEY_ALREADY_REGISTERED, REFUSAL_DEVICE_KEY_MEMBER_MISMATCH,
-    REFUSAL_DEVICE_KEY_REBIND_REQUIRED, REFUSAL_DEVICE_ROOT_LINKED_SESSION,
-    REFUSAL_DEVICE_ROOT_PASSWORD_REQUIRED, REFUSAL_SESSION_LINEAGE_ENDED,
+    revoke_device_key_signed_in_tx, session_is_device_linked_in_tx, validated_new_device_key,
+    verify_own_password_in_tx, DeviceKeyRecord, DeviceKeyRefusal, DEVICE_KEY_PLATFORM_IOS,
+    DEVICE_KEY_PLATFORM_MACOS, REFUSAL_DEVICE_KEY_ALREADY_REGISTERED,
+    REFUSAL_DEVICE_KEY_MEMBER_MISMATCH, REFUSAL_DEVICE_KEY_REBIND_REQUIRED,
+    REFUSAL_DEVICE_ROOT_LINKED_SESSION, REFUSAL_DEVICE_ROOT_PASSWORD_REQUIRED,
+    REFUSAL_SESSION_LINEAGE_ENDED,
 };
 use momo_auth::human_control::db_now_ms;
-use momo_auth::{
-    active_workspace_role, lock_live_session_lineage, session_device_label, session_id_of,
-    Principal,
-};
+use momo_auth::{active_workspace_role, lock_live_session_lineage, session_id_of, Principal};
 use momo_db::{with_tenant_tx, DbError};
 use uuid::Uuid;
 
@@ -96,6 +94,14 @@ pub(crate) fn refusal_error(refusal: DeviceKeyRefusal) -> ApiError {
             StatusCode::FORBIDDEN,
             "a root key is registered from a password sign-in on the host Mac",
         ),
+        DeviceKeyRefusal::RequiresLinkedSession => (
+            StatusCode::FORBIDDEN,
+            "a phone key is registered from a phone linked to your Mac by QR",
+        ),
+        DeviceKeyRefusal::LinkNotFromMac => (
+            StatusCode::FORBIDDEN,
+            "this phone was linked by a QR no Mac sign-in issued; link it again from your Mac",
+        ),
         DeviceKeyRefusal::Revoked => (StatusCode::FORBIDDEN, "the device key is revoked"),
         DeviceKeyRefusal::SignatureInvalid => (
             StatusCode::FORBIDDEN,
@@ -116,6 +122,8 @@ pub(crate) fn device_key_dto(
         member_id: record.member_id.to_string(),
         current: caller_session == Some(record.session_id),
         lineage_live: record.lineage_live,
+        linked_session: record.linked_session,
+        linked_from_mac: record.linked_from_mac,
         alg: record.alg,
         public_key: record.public_key,
         platform: record.platform,
@@ -196,7 +204,7 @@ pub async fn signing_context(
         max_clock_skew_ms: momo_wire::human_control::MAX_CLOCK_SKEW_MS,
         human_control_signature_required: state.device_keys.human_control_signature_required,
         host_register_signature_required: state.device_keys.host_register_signature_required,
-        human_control_schema: momo_wire::human_control::HUMAN_CONTROL_SCHEMA_V2,
+        human_control_schema: momo_wire::human_control::HUMAN_CONTROL_SCHEMA_V3,
         session_id: session_id.map(|id| id.to_string()),
     }))
 }
@@ -280,13 +288,19 @@ pub async fn register(
             else {
                 return Ok(Err(lineage_ended()));
             };
+            // Where this sign-in came from (#3119): one test for both
+            // directions. A QR-linked session is a phone (ADR-0180) — never a
+            // root, and the only place a phone key is registered
+            // (「QR 연결로만 등록」, ADR-0146 D-6 증보 2026-09-29). A stolen web or
+            // password-login refresh token therefore cannot plant a phone key.
+            let linked = session_is_device_linked_in_tx(conn, workspace_id, member_id, session_id)
+                .await
+                .map_err(DbError::from)?;
+            if new.platform == DEVICE_KEY_PLATFORM_IOS && !linked {
+                return Ok(Err(refusal_error(DeviceKeyRefusal::RequiresLinkedSession)));
+            }
             if let Some(password) = root_password.as_deref() {
-                // A QR-linked session is a phone (ADR-0180): never a root.
-                if session_device_label(conn, token_id)
-                    .await
-                    .map_err(DbError::from)?
-                    .is_some()
-                {
+                if linked {
                     return Ok(Err(ApiError::coded(
                         StatusCode::FORBIDDEN,
                         REFUSAL_DEVICE_ROOT_LINKED_SESSION,
@@ -395,10 +409,10 @@ async fn rebind_key(
             {
                 return Ok(Err(lineage_ended()));
             }
-            let caller_linked = session_device_label(conn, token_id)
-                .await
-                .map_err(DbError::from)?
-                .is_some();
+            let caller_linked =
+                session_is_device_linked_in_tx(conn, workspace_id, member_id, session_id)
+                    .await
+                    .map_err(DbError::from)?;
             let now_ms = db_now_ms(conn).await.map_err(DbError::from)?;
             let outcome = rebind_device_key_in_tx(
                 conn,
