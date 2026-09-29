@@ -37,6 +37,22 @@ ADR-0196(팀 기억 v2) M1의 요약 루프. `momo-agent-worker` 프로세스 �
 - 워크스페이스/채널: `mem_settings`의 `enabled`/`paused`/`excluded`(설정 API는 #3164).
 - 워커가 둘 이상이어도 된다 — `mem_cursor` 리스가 한 채널당 한 워커만 허용한다(다른 쪽은 55P03을 보고 건너뛴다).
 
+## 항목 추출 (#3168, M2)
+창 요약을 만드는 **같은 모델 호출**이 `{summary, items[]}` JSON을 돌려주고, 항목(결정·사실·약속)은 요약과 **같은 tx**에서
+`mem_add_item`(워커 전용 SQL 함수, migration 104)으로 **추가만** 된다. 끄려면 `MEMORY_EXTRACT_ENABLED=0`(M1처럼 요약만).
+- 후보는 워커가 먼저 엄격히 거른다: 근거 번호가 그 창의 메시지여야 하고, 근거 작성자가 사람이어야 하며(에이전트·봇 발언은 사실로
+  쓰지 않는다), 본문·근거에 시크릿 모양이 없어야 하고, 종류가 decision/fact/commitment, 한 문장(300자), 창당 6개. 어긋나면 그 후보만 버린다.
+  DB가 같은 것을 다시 확인한다(작성자 종류, 근거 ⊆ 요약 근거, 수정 후 읽기 40001, 스위치 55000, 토큰 모양 백스톱).
+- 응답이 JSON이 아니면 원문이 요약 본문이 되고 항목은 0개다(요약은 항상 만들어진다). 요약 본문에 자격증명 모양이 있으면 그 응답의 항목도 버린다.
+- DM(사람↔에이전트)에서 나온 항목은 개인 공간(`space_kind='personal'`, 소유자 = 그 사람)이다.
+- 읽기: 저장 채널·모든 근거 채널을 지금 읽을 수 있고 근거 메시지가 살아 있을 때만 보인다. 근거가 삭제·수정되면 즉시 가려진다 —
+  행은 지우지 않는다(`retired_reason=source_deleted/edited`로 내리는 정리 잡은 M3, #3172). 같은 내용이 다시 추출되면 죽은 옛 행은 `stale`로 표시되고 새 행이 들어간다.
+- 모델 호출 예산: 창 호출은 출력 허용량 +700토큰을 더 예약한다(`ITEMS_OUTPUT_ALLOWANCE`).
+- 상태 보기: `mem_item`(행), `mem_event`(생성 이벤트, 본문 없음). 프롬프트 버전은 `mem_digest.prompt_version`(digest-v2)과 `mem_item.extractor_version`(items-v1)에 남는다.
+- 검색: `mem_search_items(질의, 개수)`(열람 API, momo_app 세션만, 질의 200자 상한) / `mem_search_items_for(요청자, 질의, 개수, 답 채널)`(서빙, 워커 전용, **답 채널 필수**).
+  pg_trgm 낱말 유사도 + 조사 떼기, 뷰어의 멤버십 채널로 좁힌 뒤 RLS와 같은 읽기 규칙. GIN 인덱스는 RLS 아래에서 쓰이지 않아 만들지 않았다(ADR-0196 증보 2026-09-30).
+  워크스페이스 항목 수에 비례해 느려진다 — 측정은 PR #3200 본문. 시크릿 판정은 Rust `looks_like_secret`과 SQL `mem_looks_like_secret`이 같은 예/아니오 목록으로 시험된다.
+
 ## 알려진 한계 (M1)
 - 일일 상한은 넘으면 **멈춘다**(plan §6.6의 「트리거를 ≥120건으로 늘려 계속」은 미구현).
 - 스레드는 채널 롤업에 들어가지 않는다(창 요약만).
@@ -57,3 +73,10 @@ ADR-0196(팀 기억 v2) M1의 요약 루프. `momo-agent-worker` 프로세스 �
 - **후속(F8)**: API의 보류 개수 공개 조건(트리거 작성자 == 뷰어)과 서빙의 요청자 유도(사슬을 오름)가 a2a 사슬에서 다르다 — 사슬로 요청자가 정해진 run은 API에서 개수가 아무에게도 안 보인다. 별도 이슈.
 - **스캔 범위(F3)**: 답 채널 자신의 최근 요약 200개와, 요청자가 멤버인 다른 채널의 최근 요약 200개(보류 개수·DM 합집합 후보)를 따로 잡는다. 부분 인덱스 `mem_digest_home_idx`(채널, 최신순, `NOT stale`) 하나를 두 스캔이 쓴다.
 - **영수증 시간 제한(F5)**: `MEMORY_SERVE_TIMEOUT_MS`는 읽기+조립에만 건다. 영수증은 DB `lock_timeout` ≤1s · `statement_timeout`이 묶고, 커밋되면 블록을 돌려준다. 재시도가 23505를 만나면 기록된 요약 id와 새 블록이 같을 때만 싣는다.
+
+## 항목 서빙과 기억 제안 (#3169)
+- **항목 섹션**: 요약 블록 뒤에 `<기억 항목 참고자료>`가 붙는다(트리거 메시지 본문으로 `mem_serve_items`가 검색). 예산 `MEMORY_SERVE_ITEM_BUDGET_CHARS`(3000), 후보 `MEMORY_SERVE_MAX_ITEMS`(8). 영수증 `budget_chars`는 두 예산의 합(기본 6000). **항목 섹션만 끄기**: `MEMORY_SERVE_ITEMS_ENABLED=0`. 항목 읽기가 실패·시간 초과여도 요약은 그대로 실린다.
+- **에이전트 제안 도구 `memory_suggest`**: 에이전트 프로필의 `enabled_tools`에 넣어야 켜진다(기본 꺼짐 — `card_suggest`와 같은 이름 면제, 프로필이 안 켰으면 호출은 거부된다). 켜진 에이전트의 창에는 사람 메시지마다 `#<seq>`가 붙고(근거 번호), 규칙 블록이 함께 실린다. 도구는 `mem_proposal`에 **대기** 행만 만든다: 검색·서빙·기억 브라우저가 읽지 않는다. 채널 멤버가 `POST …/memory/proposals/{id}/accept`로 수락해야 `origin=confirmed` 항목이 된다.
+- **끄기·회수**: 프로필에서 도구를 빼면 새 제안이 멈춘다. 대기 제안은 14일 뒤 만료(목록에서 사라지고 수락 불가). 만료·근거 삭제된 제안의 본문 정리는 M3 정리 잡(#3172) 몫이다 — 그 전까지 행은 남지만 RLS가 가린다.
+- **한도**: run당 3건 · 채널 대기 20건 · 에이전트당 시간당 30건(도구가 「too many proposals」로 답한다).
+- **모니터링**: 로그 `memory serving recorded`의 `served_items`, `mem_event`의 `proposed`/`created`/`confirmed`/`rejected`, 감사 `memory.proposal.accepted|rejected`.

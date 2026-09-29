@@ -73,6 +73,17 @@ this table only records why they are there.
 | p256 (RustCrypto; brings ecdsa, elliptic-curve, primeorder, sec1 and their RustCrypto deps) | 0.14.0 | Apache-2.0 OR MIT | `server-rust/crates/momo-wire` (human device-key P-256 verification) | ADR-0146 개정 2026-09-28 D-1, #3021 |
 | unicode-normalization | 0.1.25 | MIT OR Apache-2.0 | `server-rust/crates/momo-wire` (NFC of signed human text; was already transitive via sqlx) | ADR-0146 개정 2026-09-28 D-5, #3021 |
 
+### Adapted designs and prompts (no code copied)
+
+Team memory v2 (ADR-0196 D2) adapts ideas and wording from Apache-2.0 projects. Nothing below is a
+dependency and no upstream source file is redistributed; the prompts are rewritten in Korean for
+oort. They are listed because ADR-0196 D2 requires attribution for translated or reworked prompts.
+
+| Upstream | License | What was adapted | Where in oort | Introduced by |
+|---|---|---|---|---|
+| company-brain (Supermemory Inc., https://github.com/supermemoryai/company-brain, commit ef8a45e) | Apache-2.0 | Collection policy: what to keep permanently vs let decay, never store the state of a system a connected tool owns, no chit-chat or secrets (`src/brain/memory/profile-config.ts`, `BRAIN_CAPTURE_POLICY`); curation prompt: agent and bot statements are not facts, keep the original wording and dates, at most six items per batch (`src/brain/slack/channel-observe.ts`, `DISTILL_SYSTEM`) | `server-rust/bins/momo-agent-worker/src/extract.rs` (`SYSTEM_WINDOW_ITEMS`) | ADR-0196 D2, #3168 |
+| mem0 (Mem0, Inc., https://github.com/mem0ai/mem0, v3) | Apache-2.0 | Add-only, single-pass extraction: one model call returns new memories and never edits existing ones (`mem0/configs/prompts.py`, `ADDITIVE_EXTRACTION_PROMPT`) | same prompt; the add-only write path `mem_add_item` (`server/Migrations/104_mem_item.sql`) | ADR-0196 D2/D4, #3168 |
+
 ### Phone client direct additions
 
 Direct phone dependencies or copied assets that an ADR or design issue introduced. The

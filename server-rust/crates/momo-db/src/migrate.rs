@@ -509,22 +509,33 @@ mod tests {
     /// `mem_usage` (ENABLE + FORCE RLS), worker-only read functions, the daily token budget
     /// functions, the message edit/delete trigger that marks dependent digests stale (security
     /// review L-2) and a `mem_apply_digest` that serialises with it. Re-runnable statements.
-    /// 103 is #3163's serving surface (ADR-0196 D6-4/D7/D9): the worker-only
-    /// `mem_serve_requester` / `mem_serve_candidates` functions (no table), the
-    /// re-runnable lockdown of those two and the extended definer allow-list check.
+    /// 103 is #3163's serving surface (`mem_serve_requester`, `mem_serve_candidates`).
+    /// 104 is #3168's items (ADR-0196 D3/D4/D5/D6): `mem_item` + `mem_event` (both ENABLE + FORCE
+    /// RLS; the event log is append-only), the FK on `mem_evidence.item_id`, the add-only write
+    /// function `mem_add_item` (momo_memory only), the read helpers and audience rule, and the
+    /// pg_trgm keyword search.
+    /// 105 is #3169's item serving and 「기억해 둘게요」 proposals: `mem_proposal` (ENABLE + FORCE RLS),
+    /// `mem_serve_items`, the stricter `mem_record_serving`, `mem_propose_item` (momo_memory only) and
+    /// the API-side `mem_accept_proposal` / `mem_reject_proposal`.
+    /// 106 is #3208's memory-browser writes (ADR-0196 D9/D10): the API-callable definer functions
+    /// `mem_edit_item` (new curated item supersedes the old, evidence kept) and `mem_forget_item`
+    /// (permanent delete of the item, its older versions and dead twins), `mem_suppress` (hash-only
+    /// re-extraction suppression) with its insert trigger and the suppression checks in
+    /// `mem_accept_proposal`/`mem_propose_item`, plus the narrow `mem_definer` privilege widening
+    /// (UPDATE of `retired_at`/`retired_reason`, DELETE).
     #[test]
-    fn discovers_contiguous_migrations_001_to_103() {
+    fn discovers_contiguous_migrations_001_to_106() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            103,
-            "expected 103 migrations under {}",
+            106,
+            "expected 106 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 103);
+        assert_eq!(migrations.last().unwrap().version, 106);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

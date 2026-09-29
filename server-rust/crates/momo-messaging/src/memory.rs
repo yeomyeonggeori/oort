@@ -445,9 +445,698 @@ pub async fn upsert_member_settings_in_tx(
     settings_from_row(&row).map_err(DbError::from)
 }
 
+// ---------------------------------------------------------------------------
+// items (#3168, ADR-0196 D3/D5/D6) — keyword search
+// ---------------------------------------------------------------------------
+
+/// Default / max hits of one item search.
+pub const MEM_ITEM_SEARCH_LIMIT_DEFAULT: i64 = 10;
+pub const MEM_ITEM_SEARCH_LIMIT_MAX: i64 = 50;
+
+/// One `mem_item` the caller can read, as `mem_search_items` returns it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemItemHit {
+    pub id: Uuid,
+    pub channel_id: Uuid,
+    /// `channel` | `personal`.
+    pub space_kind: String,
+    /// `decision` | `fact` | `commitment` | `preference` | `procedure`.
+    pub kind: String,
+    pub body: String,
+    pub valid_from: DateTime<Utc>,
+    /// `None` = still valid.
+    pub valid_to: Option<DateTime<Utc>>,
+    pub recorded_at: DateTime<Utc>,
+    pub score: f32,
+    /// The source messages (ids only; never their text).
+    pub evidence_message_ids: Vec<Uuid>,
+}
+
+/// Keyword search over the items the caller may read (`mem_search_items`, migration 104): the
+/// memory browser's search. **Browsing only**: it takes no audience narrowing. An agent answer that
+/// will be posted to a channel must be served through the worker-only `mem_search_items_for`
+/// (viewer = the requester, answer channel required), never through this function.
+///
+/// `mem_search_items` is a `SECURITY DEFINER` function that refuses any session which is not
+/// `momo_app` (or a superuser) and reads the viewer from `app.member_id` — [`bind_mem_reader_guc`]
+/// must have run first (without it the result is empty). It narrows candidates to the viewer's
+/// channels, scores them by trigram word similarity and then applies the *same* readability rule the
+/// RLS policy uses (`mem_item_readable_by`); this module adds no permission predicate of its own.
+/// The query is cut to 200 characters inside the function.
+pub async fn search_items_in_tx(
+    conn: &mut PgConnection,
+    query: &str,
+    limit: Option<i64>,
+) -> Result<Vec<MemItemHit>, DbError> {
+    let limit = match limit {
+        Some(value) if value > 0 => value.min(MEM_ITEM_SEARCH_LIMIT_MAX),
+        _ => MEM_ITEM_SEARCH_LIMIT_DEFAULT,
+    };
+    let rows = sqlx::query(
+        "SELECT id, channel_id, space_kind, kind, body, valid_from, valid_to, recorded_at, score, \
+                evidence_message_ids \
+           FROM mem_search_items($1, $2::integer)",
+    )
+    .bind(query)
+    .bind(limit as i32)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows
+        .iter()
+        .map(|row| MemItemHit {
+            id: row.get("id"),
+            channel_id: row.get("channel_id"),
+            space_kind: row.get("space_kind"),
+            kind: row.get("kind"),
+            body: row.get("body"),
+            valid_from: row.get("valid_from"),
+            valid_to: row.get("valid_to"),
+            recorded_at: row.get("recorded_at"),
+            score: row.get("score"),
+            evidence_message_ids: row
+                .get::<Option<Vec<Uuid>>, _>("evidence_message_ids")
+                .unwrap_or_default(),
+        })
+        .collect())
+}
+
+// ---------------------------------------------------------------------------
+// served items (a receipt's item list) and 「기억해 둘게요」 proposals (#3169)
+// ---------------------------------------------------------------------------
+
+/// One item a receipt names, as the caller may read it today. Items the caller cannot read (the
+/// evidence was deleted, they left the channel) are absent — the read policy hides them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemItemBrief {
+    pub id: Uuid,
+    pub channel_id: Uuid,
+    /// `decision` | `fact` | `commitment` | `preference` | `procedure`.
+    pub kind: String,
+    /// `extracted` | `confirmed` | `curated` | `synthesized`.
+    pub origin: String,
+    pub body: String,
+    pub valid_from: DateTime<Utc>,
+    pub source_count: i32,
+}
+
+/// Items by id (the ones a receipt names) in the order given. **No permission predicate here**:
+/// `mem_item`'s own read policy (`mem_item_evidence_ok`, viewer = `app.member_id`) hides what the
+/// caller may not read, exactly as [`digests_by_ids_in_tx`] relies on `mem_digest`'s.
+pub async fn items_by_ids_in_tx(
+    conn: &mut PgConnection,
+    item_ids: &[Uuid],
+) -> Result<Vec<MemItemBrief>, DbError> {
+    if item_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows = sqlx::query(
+        "SELECT i.id, i.channel_id, i.kind, i.origin, i.body, i.valid_from, i.source_count \
+           FROM mem_item i WHERE i.id = ANY($1) \
+          ORDER BY array_position($1, i.id)",
+    )
+    .bind(item_ids)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(MemItemBrief {
+                id: row.try_get("id")?,
+                channel_id: row.try_get("channel_id")?,
+                kind: row.try_get("kind")?,
+                origin: row.try_get("origin")?,
+                body: row.try_get("body")?,
+                valid_from: row.try_get("valid_from")?,
+                source_count: row.try_get("source_count")?,
+            })
+        })
+        .collect::<Result<_, sqlx::Error>>()
+        .map_err(DbError::from)
+}
+
+/// Default / max proposal page size.
+pub const MEM_PROPOSAL_LIMIT_DEFAULT: i64 = 20;
+pub const MEM_PROPOSAL_LIMIT_MAX: i64 = 50;
+
+pub fn clamp_mem_proposal_limit(requested: Option<i64>) -> i64 {
+    match requested {
+        Some(value) if value > 0 => value.min(MEM_PROPOSAL_LIMIT_MAX),
+        _ => MEM_PROPOSAL_LIMIT_DEFAULT,
+    }
+}
+
+/// One `mem_proposal` the caller can read. A **pending** proposal carries its text; a decided one
+/// is a shell (`body` and `evidence_message_ids` are gone — the accepted item holds the text).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemProposal {
+    pub id: Uuid,
+    pub channel_id: Uuid,
+    pub run_id: Option<Uuid>,
+    pub agent_member_id: Uuid,
+    pub requester_member_id: Uuid,
+    pub kind: String,
+    pub body: Option<String>,
+    pub subject_key: Option<String>,
+    pub evidence_message_ids: Vec<Uuid>,
+    /// `pending` | `accepted` | `rejected`.
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    pub decided_by: Option<Uuid>,
+    pub decided_at: Option<DateTime<Utc>>,
+    pub item_id: Option<Uuid>,
+    /// Is the caller the person the agent was answering? The card warns before a self-accept
+    /// (L-4). Computed in the same query from `app.member_id`; not a permission.
+    pub caller_is_requester: bool,
+    /// Author and channel sequence of each evidence message (pending proposals only), in the
+    /// order of `evidence_message_ids`. Ids and numbers only — the text comes from the normal
+    /// message read path, never from here.
+    pub evidence: Vec<ProposalEvidence>,
+}
+
+/// One evidence message of a pending proposal, without its text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProposalEvidence {
+    pub message_id: Uuid,
+    pub seq: i64,
+    pub author_member_id: Uuid,
+}
+
+const PROPOSAL_COLS: &str = "p.id, p.channel_id, p.run_id, p.agent_member_id, \
+     p.requester_member_id, p.kind, p.body, p.subject_key, p.evidence_message_ids, p.status, \
+     p.created_at, p.expires_at, p.decided_by, p.decided_at, p.item_id, \
+     (p.requester_member_id = \
+        nullif(pg_catalog.current_setting('app.member_id', true), '')::uuid) AS caller_is_requester";
+
+fn proposal_from_row(row: &sqlx::postgres::PgRow) -> Result<MemProposal, sqlx::Error> {
+    Ok(MemProposal {
+        id: row.try_get("id")?,
+        channel_id: row.try_get("channel_id")?,
+        run_id: row.try_get("run_id")?,
+        agent_member_id: row.try_get("agent_member_id")?,
+        requester_member_id: row.try_get("requester_member_id")?,
+        kind: row.try_get("kind")?,
+        body: row.try_get("body")?,
+        subject_key: row.try_get("subject_key")?,
+        evidence_message_ids: row.try_get("evidence_message_ids")?,
+        status: row.try_get("status")?,
+        created_at: row.try_get("created_at")?,
+        expires_at: row.try_get("expires_at")?,
+        decided_by: row.try_get("decided_by")?,
+        decided_at: row.try_get("decided_at")?,
+        item_id: row.try_get("item_id")?,
+        caller_is_requester: row
+            .try_get::<Option<bool>, _>("caller_is_requester")?
+            .unwrap_or(false),
+        evidence: Vec::new(),
+    })
+}
+
+/// Fill in `evidence` (author + seq) for the pending proposals in `rows`. A plain read of
+/// `message` for ids the proposal already names; a proposal is visible only to readers of its
+/// channel, and all its evidence lives in that channel.
+async fn attach_evidence(conn: &mut PgConnection, rows: &mut [MemProposal]) -> Result<(), DbError> {
+    let ids: Vec<Uuid> = rows
+        .iter()
+        .flat_map(|p| p.evidence_message_ids.iter().copied())
+        .collect();
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let found = sqlx::query(
+        "SELECT m.id, m.seq, m.author_member_id FROM message m \
+          WHERE m.id = ANY($1) AND m.deleted_at IS NULL",
+    )
+    .bind(&ids)
+    .fetch_all(&mut *conn)
+    .await?;
+    for proposal in rows.iter_mut() {
+        proposal.evidence = proposal
+            .evidence_message_ids
+            .iter()
+            .filter_map(|id| {
+                found
+                    .iter()
+                    .find(|row| row.get::<Uuid, _>("id") == *id)
+                    .map(|row| ProposalEvidence {
+                        message_id: *id,
+                        seq: row.get("seq"),
+                        author_member_id: row.get("author_member_id"),
+                    })
+            })
+            .collect();
+    }
+    Ok(())
+}
+
+/// Which proposals of a channel the caller asks for. These select *rows*, never permission: the
+/// read policy on `mem_proposal` (channel readable, a pending one unexpired and its evidence
+/// alive) has already decided what the caller may see.
+#[derive(Debug, Clone)]
+pub struct ProposalListFilter<'a> {
+    pub channel_id: Uuid,
+    /// `pending` | `accepted` | `rejected`.
+    pub status: &'a str,
+    /// Only the proposals one agent run made (the reply's card).
+    pub run_id: Option<Uuid>,
+    pub limit: i64,
+}
+
+pub async fn list_proposals_in_tx(
+    conn: &mut PgConnection,
+    filter: &ProposalListFilter<'_>,
+) -> Result<Vec<MemProposal>, DbError> {
+    let sql = format!(
+        "SELECT {PROPOSAL_COLS} FROM mem_proposal p \
+          WHERE p.channel_id = $1 AND p.status = $2 \
+            AND ($3::uuid IS NULL OR p.run_id = $3) \
+          ORDER BY p.created_at DESC, p.id DESC LIMIT $4"
+    );
+    let rows = sqlx::query(&sql)
+        .bind(filter.channel_id)
+        .bind(filter.status)
+        .bind(filter.run_id)
+        .bind(filter.limit)
+        .fetch_all(&mut *conn)
+        .await?;
+    let mut proposals: Vec<MemProposal> = rows
+        .iter()
+        .map(proposal_from_row)
+        .collect::<Result<_, _>>()
+        .map_err(DbError::from)?;
+    attach_evidence(conn, &mut proposals).await?;
+    Ok(proposals)
+}
+
+/// One proposal by id; `None` when it does not exist or the policy hides it.
+pub async fn get_proposal_in_tx(
+    conn: &mut PgConnection,
+    proposal_id: Uuid,
+) -> Result<Option<MemProposal>, DbError> {
+    let sql = format!("SELECT {PROPOSAL_COLS} FROM mem_proposal p WHERE p.id = $1");
+    let row = sqlx::query(&sql)
+        .bind(proposal_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    let mut found = row
+        .as_ref()
+        .map(proposal_from_row)
+        .transpose()
+        .map_err(DbError::from)?;
+    if let Some(proposal) = found.as_mut() {
+        attach_evidence(conn, std::slice::from_mut(proposal)).await?;
+    }
+    Ok(found)
+}
+
+/// Accept a proposal (`mem_accept_proposal`, migration 105): the new (or already remembered)
+/// item's id. The function is `SECURITY DEFINER`, refuses any session that is not `momo_app`, and
+/// takes the deciding member from `app.member_id` ([`bind_mem_reader_guc`] must have run) — there is
+/// no member argument to forge. SQLSTATEs: `42501` not allowed (also: unknown id), `55000` already
+/// decided / expired / memory off here, `23503` an evidence message is gone or unreadable to the
+/// accepter, `40001` evidence edited since the proposal, `23514` content refused.
+pub async fn accept_proposal_in_tx(
+    conn: &mut PgConnection,
+    proposal_id: Uuid,
+) -> Result<Uuid, DbError> {
+    Ok(sqlx::query_scalar("SELECT mem_accept_proposal($1)")
+        .bind(proposal_id)
+        .fetch_one(&mut *conn)
+        .await?)
+}
+
+/// Reject a proposal (`mem_reject_proposal`): same authority as accepting; logs a `mem_event`.
+pub async fn reject_proposal_in_tx(
+    conn: &mut PgConnection,
+    proposal_id: Uuid,
+) -> Result<(), DbError> {
+    sqlx::query_scalar::<_, bool>("SELECT mem_reject_proposal($1)")
+        .bind(proposal_id)
+        .fetch_one(&mut *conn)
+        .await?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// memory browser: items (#3208, ADR-0196 D9 / D12 V4)
+// ---------------------------------------------------------------------------
+//
+// Reads are RLS only (`mem_item` / `mem_evidence` / `mem_event` read policies; the viewer is
+// `app.member_id`, bound by [`bind_mem_reader_guc`]). No statement below re-derives "may this
+// member read it" — the `WHERE` clauses select *which* rows were asked for. The two writes are
+// the definer functions of migration 106; they derive the actor from `app.member_id` themselves.
+
+/// One `mem_item` the caller can read.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemItem {
+    pub id: Uuid,
+    pub channel_id: Uuid,
+    /// `channel` | `personal`.
+    pub space_kind: String,
+    pub kind: String,
+    /// `extracted` | `confirmed` | `curated` | `synthesized`.
+    pub origin: String,
+    pub body: String,
+    pub subject_key: Option<String>,
+    pub valid_from: DateTime<Utc>,
+    pub valid_to: Option<DateTime<Utc>>,
+    pub recorded_at: DateTime<Utc>,
+    pub retired_at: Option<DateTime<Utc>>,
+    pub retired_reason: Option<String>,
+    /// The version this one replaced (an edit).
+    pub supersedes_id: Option<Uuid>,
+    /// The version that replaced this one (set on a retired-by-edit item).
+    pub superseded_by_id: Option<Uuid>,
+    pub confidence: f32,
+    pub source_count: i32,
+    /// Curated items only: who wrote the current text (the `edited` event's actor) and when.
+    pub edited_by_member_id: Option<Uuid>,
+    pub edited_at: Option<DateTime<Utc>>,
+}
+
+const ITEM_COLS: &str = "i.id, i.channel_id, i.space_kind, i.kind, i.origin, i.body, \
+     i.subject_key, i.valid_from, i.valid_to, i.recorded_at, i.retired_at, i.retired_reason, \
+     i.supersedes_id, \
+     (SELECT s.id FROM mem_item s WHERE s.supersedes_id = i.id LIMIT 1) AS superseded_by_id, \
+     i.confidence, i.source_count, \
+     (SELECT e.actor_member_id FROM mem_event e WHERE e.target_kind = 'item' \
+        AND e.target_id = i.id AND e.action = 'edited' AND i.origin = 'curated' \
+        ORDER BY e.created_at, e.id LIMIT 1) AS edited_by_member_id, \
+     (SELECT e.created_at FROM mem_event e WHERE e.target_kind = 'item' \
+        AND e.target_id = i.id AND e.action = 'edited' AND i.origin = 'curated' \
+        ORDER BY e.created_at, e.id LIMIT 1) AS edited_at";
+
+fn item_from_row(row: &sqlx::postgres::PgRow) -> Result<MemItem, sqlx::Error> {
+    Ok(MemItem {
+        id: row.try_get("id")?,
+        channel_id: row.try_get("channel_id")?,
+        space_kind: row.try_get("space_kind")?,
+        kind: row.try_get("kind")?,
+        origin: row.try_get("origin")?,
+        body: row.try_get("body")?,
+        subject_key: row.try_get("subject_key")?,
+        valid_from: row.try_get("valid_from")?,
+        valid_to: row.try_get("valid_to")?,
+        recorded_at: row.try_get("recorded_at")?,
+        retired_at: row.try_get("retired_at")?,
+        retired_reason: row.try_get("retired_reason")?,
+        supersedes_id: row.try_get("supersedes_id")?,
+        superseded_by_id: row.try_get("superseded_by_id")?,
+        confidence: row.try_get("confidence")?,
+        source_count: row.try_get("source_count")?,
+        edited_by_member_id: row.try_get("edited_by_member_id")?,
+        edited_at: row.try_get("edited_at")?,
+    })
+}
+
+/// Which lifecycle the list shows. `forgotten` items are deleted, and `wrong` ones are hidden by
+/// the read rule, so neither is reachable through any status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemStatus {
+    /// Not retired (the default).
+    Active,
+    /// Retired but still readable (`edited`, and later `merged` / `decayed` / `source_*`).
+    History,
+    All,
+}
+
+impl ItemStatus {
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "active" => Some(Self::Active),
+            "history" => Some(Self::History),
+            "all" => Some(Self::All),
+            _ => None,
+        }
+    }
+}
+
+/// The item kinds (`mem_item_kind_ck`).
+pub const MEM_ITEM_KINDS: [&str; 5] = ["decision", "fact", "commitment", "preference", "procedure"];
+
+pub const MEM_ITEM_LIMIT_DEFAULT: i64 = 20;
+pub const MEM_ITEM_LIMIT_MAX: i64 = 100;
+
+pub fn clamp_mem_item_limit(requested: Option<i64>) -> i64 {
+    match requested {
+        Some(value) if value > 0 => value.min(MEM_ITEM_LIMIT_MAX),
+        _ => MEM_ITEM_LIMIT_DEFAULT,
+    }
+}
+
+/// Selector for the item list. Every field only chooses *which* rows; visibility is the policy's.
+#[derive(Debug, Clone, Copy)]
+pub struct ItemListFilter<'a> {
+    /// The reader (the credential's member). Used only to **narrow** the scan to the channels they
+    /// are an active member of (and their own personal space), the way `mem_search_items_core`
+    /// does — `channel_id = ANY(array)` is leakproof, so it runs before the read policy and stops
+    /// the policy function from being evaluated on every row of the workspace. It is not a
+    /// permission check: the read policy still decides what is visible.
+    pub viewer: Uuid,
+    pub channel_id: Option<Uuid>,
+    pub kind: Option<&'a str>,
+    pub status: ItemStatus,
+    /// Keyset: strictly older than `(recorded_at, id)` in `recorded_at DESC, id DESC` order.
+    pub before: Option<(DateTime<Utc>, Uuid)>,
+    pub limit: i64,
+}
+
+/// Items, newest first. Which of them the caller may see is entirely the read policy's decision.
+pub async fn list_items_in_tx(
+    conn: &mut PgConnection,
+    filter: &ItemListFilter<'_>,
+) -> Result<Vec<MemItem>, DbError> {
+    let member_channels: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT channel_id FROM membership WHERE member_id = $1 AND left_at IS NULL",
+    )
+    .bind(filter.viewer)
+    .fetch_all(&mut *conn)
+    .await?;
+    let sql = format!(
+        "SELECT {ITEM_COLS} FROM mem_item i \
+          WHERE ($1::uuid IS NULL OR i.channel_id = $1) \
+            AND ($2::text IS NULL OR i.kind = $2) \
+            AND ($3::text = 'all' \
+                 OR ($3 = 'active' AND i.retired_at IS NULL) \
+                 OR ($3 = 'history' AND i.retired_at IS NOT NULL)) \
+            AND ($4::timestamptz IS NULL OR (i.recorded_at, i.id) < ($4, $5)) \
+            AND (i.channel_id = ANY($7) OR (i.space_kind = 'personal' AND i.owner_member_id = $8)) \
+          ORDER BY i.recorded_at DESC, i.id DESC \
+          LIMIT $6"
+    );
+    let status = match filter.status {
+        ItemStatus::Active => "active",
+        ItemStatus::History => "history",
+        ItemStatus::All => "all",
+    };
+    let rows = sqlx::query(&sql)
+        .bind(filter.channel_id)
+        .bind(filter.kind)
+        .bind(status)
+        .bind(filter.before.map(|(at, _)| at))
+        .bind(filter.before.map(|(_, id)| id).unwrap_or_else(Uuid::nil))
+        .bind(filter.limit)
+        .bind(&member_channels)
+        .bind(filter.viewer)
+        .fetch_all(&mut *conn)
+        .await?;
+    rows.iter()
+        .map(item_from_row)
+        .collect::<Result<_, _>>()
+        .map_err(DbError::from)
+}
+
+/// The items a keyword search matched, with their full rows and the search order/score.
+/// `mem_search_items` (RLS-equivalent, see [`search_items_in_tx`]) picks and ranks; the rows are
+/// then read back **through the read policy again** so the response carries the same shape as the
+/// list, and `channel_id` / `kind` narrow the hits. Search covers live items only (the function
+/// skips retired ones), so it takes no status.
+pub async fn search_item_rows_in_tx(
+    conn: &mut PgConnection,
+    query: &str,
+    channel_id: Option<Uuid>,
+    kind: Option<&str>,
+    limit: Option<i64>,
+) -> Result<Vec<(MemItem, f32)>, DbError> {
+    let hits = search_items_in_tx(conn, query, limit).await?;
+    if hits.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<Uuid> = hits.iter().map(|hit| hit.id).collect();
+    let sql = format!(
+        "SELECT {ITEM_COLS} FROM mem_item i \
+          WHERE i.id = ANY($1) \
+            AND ($2::uuid IS NULL OR i.channel_id = $2) \
+            AND ($3::text IS NULL OR i.kind = $3)"
+    );
+    let rows = sqlx::query(&sql)
+        .bind(&ids)
+        .bind(channel_id)
+        .bind(kind)
+        .fetch_all(&mut *conn)
+        .await?;
+    let mut by_id = std::collections::HashMap::new();
+    for row in &rows {
+        let item = item_from_row(row)?;
+        by_id.insert(item.id, item);
+    }
+    Ok(hits
+        .iter()
+        .filter_map(|hit| by_id.remove(&hit.id).map(|item| (item, hit.score)))
+        .collect())
+}
+
+/// One item by id; `None` when it does not exist **or** the policy hides it (the caller cannot
+/// tell which — a 404 either way).
+pub async fn get_item_in_tx(
+    conn: &mut PgConnection,
+    item_id: Uuid,
+) -> Result<Option<MemItem>, DbError> {
+    let sql = format!("SELECT {ITEM_COLS} FROM mem_item i WHERE i.id = $1");
+    let row = sqlx::query(&sql)
+        .bind(item_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    row.as_ref()
+        .map(item_from_row)
+        .transpose()
+        .map_err(DbError::from)
+}
+
+/// One evidence link of an item: the source message to link back to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemItemEvidence {
+    pub item_id: Uuid,
+    pub message_id: Uuid,
+    pub channel_id: Uuid,
+    pub seq: i64,
+}
+
+/// Evidence links for items the caller has already read, in message order. `mem_evidence` has its
+/// own read policy (the caller must read the evidence channel).
+pub async fn evidence_for_items_in_tx(
+    conn: &mut PgConnection,
+    item_ids: &[Uuid],
+) -> Result<Vec<MemItemEvidence>, DbError> {
+    if item_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows = sqlx::query(
+        "SELECT e.item_id, e.message_id, e.channel_id, m.seq \
+           FROM mem_evidence e \
+           JOIN message m ON m.id = e.message_id AND m.workspace_id = e.workspace_id \
+          WHERE e.item_id = ANY($1) \
+          ORDER BY e.item_id, m.seq, e.message_id",
+    )
+    .bind(item_ids)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(MemItemEvidence {
+                item_id: row.try_get("item_id")?,
+                message_id: row.try_get("message_id")?,
+                channel_id: row.try_get("channel_id")?,
+                seq: row.try_get("seq")?,
+            })
+        })
+        .collect::<Result<_, sqlx::Error>>()
+        .map_err(DbError::from)
+}
+
+/// One `mem_event` row of an item (ids and counts only — the ledger never holds text).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemItemEvent {
+    pub id: Uuid,
+    /// `created` | `edited` | `superseded` | ...
+    pub action: String,
+    pub actor_member_id: Option<Uuid>,
+    pub detail: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+}
+
+/// The lifecycle of one item, oldest first. The `mem_event` read policy shows an item's events only
+/// to someone who can read the item.
+pub async fn list_item_events_in_tx(
+    conn: &mut PgConnection,
+    item_id: Uuid,
+) -> Result<Vec<MemItemEvent>, DbError> {
+    let rows = sqlx::query(
+        "SELECT id, action, actor_member_id, detail, created_at FROM mem_event \
+          WHERE target_kind = 'item' AND target_id = $1 \
+          ORDER BY created_at, id",
+    )
+    .bind(item_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(MemItemEvent {
+                id: row.try_get("id")?,
+                action: row.try_get("action")?,
+                actor_member_id: row.try_get("actor_member_id")?,
+                detail: row.try_get("detail")?,
+                created_at: row.try_get("created_at")?,
+            })
+        })
+        .collect::<Result<_, sqlx::Error>>()
+        .map_err(DbError::from)
+}
+
+/// Edit an item (ADR-0196 D4/D9): `mem_edit_item` adds a new `curated` item that supersedes the
+/// old one and retires the old one as `edited`; the new item's id is returned. The function derives
+/// the actor from `app.member_id`, refuses anyone who may not read the item with `P0002` (the same
+/// answer as a missing id), and re-checks everything itself — the caller passes no member.
+/// SQLSTATEs the caller maps: `42501` (not an active human / wrong session), `P0002` (not found
+/// or not readable), `55000` (already retired), `22023` (nothing changed, or an identical live item exists — one answer for both),
+/// `23514` (invalid body or kind). Only errors whose message starts with `mem_edit_item:` are the
+/// function's own; the caller must not map any other database error.
+pub async fn edit_item_in_tx(
+    conn: &mut PgConnection,
+    item_id: Uuid,
+    body: &str,
+    kind: Option<&str>,
+) -> Result<Uuid, DbError> {
+    let id: Uuid = sqlx::query_scalar("SELECT mem_edit_item($1, $2, $3)")
+        .bind(item_id)
+        .bind(body)
+        .bind(kind)
+        .fetch_one(&mut *conn)
+        .await?;
+    Ok(id)
+}
+
+/// Forget an item (ADR-0196 D9/D10): `mem_forget_item` permanently deletes it and its older
+/// versions and their evidence links, leaving only ids in `mem_event`. Returns how many item rows
+/// were removed. SQLSTATEs: `42501`, `P0002` (not found / not readable), `55000` (a newer version
+/// exists — forget that one).
+pub async fn forget_item_in_tx(conn: &mut PgConnection, item_id: Uuid) -> Result<i32, DbError> {
+    let removed: i32 = sqlx::query_scalar("SELECT mem_forget_item($1)")
+        .bind(item_id)
+        .fetch_one(&mut *conn)
+        .await?;
+    Ok(removed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn item_status_parses_the_three_values_only() {
+        assert_eq!(ItemStatus::parse("active"), Some(ItemStatus::Active));
+        assert_eq!(ItemStatus::parse("history"), Some(ItemStatus::History));
+        assert_eq!(ItemStatus::parse("all"), Some(ItemStatus::All));
+        assert_eq!(ItemStatus::parse("forgotten"), None);
+        assert_eq!(ItemStatus::parse(""), None);
+    }
+
+    #[test]
+    fn item_limit_clamps_to_default_and_max() {
+        assert_eq!(clamp_mem_item_limit(None), MEM_ITEM_LIMIT_DEFAULT);
+        assert_eq!(clamp_mem_item_limit(Some(-1)), MEM_ITEM_LIMIT_DEFAULT);
+        assert_eq!(clamp_mem_item_limit(Some(5)), 5);
+        assert_eq!(clamp_mem_item_limit(Some(9_999)), MEM_ITEM_LIMIT_MAX);
+    }
 
     #[test]
     fn digest_limit_clamps_to_default_and_max() {
