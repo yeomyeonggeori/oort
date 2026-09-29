@@ -557,6 +557,7 @@ fn main() {
             "INITIAL_AGENT_MODE": std::env::var("INITIAL_AGENT_MODE").ok(),
             "CODEX_CONFIG": std::env::var("CODEX_CONFIG").ok(),
             "CODEX_HOME": std::env::var("CODEX_HOME").ok(),
+            "CLAUDE_CONFIG_DIR": std::env::var("CLAUDE_CONFIG_DIR").ok(),
             "TMPDIR": std::env::var("TMPDIR").ok(),
             "HOME": std::env::var("HOME").ok(),
         },

@@ -433,6 +433,9 @@ pub struct SocketShared {
     /// Reported by `status`, and lowered by `reset_signature_requirement`
     /// (#3117): whether this host enforces device signatures, and why.
     pub requirement: Arc<Mutex<SignatureRequirement>>,
+    /// The host state folder: where `set_remote_profile` saves the choice
+    /// ([`crate::profile`], #3033).
+    pub state_folder: std::path::PathBuf,
 }
 
 /// The heartbeat's last outcome, which the desktop app reads through the

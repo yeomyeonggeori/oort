@@ -122,6 +122,16 @@ pub enum Refusal {
     ProjectConfigRefused,
     /// The allowed folder does not resolve to a directory.
     WorkdirUnavailable,
+    /// ADR-0191 D1 (#3033): this Mac's 「원격 작업」 account names a profile
+    /// folder that does not exist (removed, or never made). Never a silent
+    /// switch to the default account.
+    ProfileNotFound,
+    /// ADR-0191 D1 조건 1·8: the profile folder is unsafe (a symlink step, not
+    /// private, overlapping the allowed or state folder, carrying hooks or
+    /// other configuration), or the choice itself is unreadable.
+    ProfileRefused,
+    /// The profile is not signed in (the adapter asked for authentication).
+    ProfileLoginRequired,
     /// The adapter could not be started or did not complete the ACP handshake.
     AgentStartFailed,
     /// The server refused the session create.
@@ -201,6 +211,9 @@ impl Refusal {
             Self::CodexHomeRefused => "codex_home_refused",
             Self::ProjectConfigRefused => "project_config_refused",
             Self::WorkdirUnavailable => "workdir_unavailable",
+            Self::ProfileNotFound => "profile_not_found",
+            Self::ProfileRefused => "profile_refused",
+            Self::ProfileLoginRequired => "profile_login_required",
             Self::AgentStartFailed => "agent_start_failed",
             Self::SessionCreateFailed => "session_create_failed",
             Self::RequesterNotOwner => "requester_not_owner",
@@ -313,6 +326,20 @@ impl AdapterKind {
 
     /// `session/new` `_meta` for the same purpose, when the adapter reads one.
     pub fn session_new_meta(self) -> Option<Value> {
+        self.session_new_meta_protecting(&[])
+    }
+
+    /// [`Self::session_new_meta`], with folders the agent's own tools and
+    /// commands may not read either (#3033: the A lane profiles, where every
+    /// account's sign-in lives — the CLI reads its own folder; the agent does
+    /// not).
+    pub fn session_new_meta_protecting(self, protected: &[PathBuf]) -> Option<Value> {
+        let mut deny = claude_read_deny();
+        let mut credentials = claude_credential_files();
+        for folder in protected {
+            deny.push(format!("Read({}/**)", folder.display()));
+            credentials.push(json!({"path": folder.display().to_string(), "mode": "deny"}));
+        }
         match self {
             Self::Claude => Some(json!({
                 "claudeCode": {
@@ -324,7 +351,7 @@ impl AdapterKind {
                             "permissions": {
                                 "blockReadsOutsideWorkingDirectories": true,
                                 "disableBypassPermissionsMode": "disable",
-                                "deny": claude_read_deny(),
+                                "deny": deny,
                             },
                             // #2607 N-1: read-only commands that name no file
                             // (`grep -r pattern .`) run without a permission
@@ -339,7 +366,7 @@ impl AdapterKind {
                                 "autoAllowBashIfSandboxed": false,
                                 "allowUnsandboxedCommands": false,
                                 "filesystem": {"denyRead": CLAUDE_SANDBOX_DENY_READ},
-                                "credentials": {"files": claude_credential_files()},
+                                "credentials": {"files": credentials},
                             },
                         },
                     }
@@ -469,6 +496,7 @@ pub fn launch_spec(
     cwd: &Path,
     parent_env: impl IntoIterator<Item = (String, String)>,
     codex: &CodexHome,
+    claude_config_dir: Option<&Path>,
 ) -> LaunchSpec {
     let mut env: Vec<(String, String)> = parent_env
         .into_iter()
@@ -477,6 +505,13 @@ pub fn launch_spec(
     for (key, value) in entry.adapter.isolation_env(codex) {
         env.retain(|(existing, _)| existing != &key);
         env.push((key, value));
+    }
+    // ADR-0191 D1 조건 8 (#3033): `CLAUDE_CONFIG_DIR` is set by the host to the
+    // profile folder it checked — never passed through from the host's
+    // environment (it is not in [`AGENT_ENV_ALLOWLIST`], and an inherited
+    // value would have been filtered above).
+    if let (AdapterKind::Claude, Some(dir)) = (entry.adapter, claude_config_dir) {
+        env.push(("CLAUDE_CONFIG_DIR".to_string(), dir.display().to_string()));
     }
     LaunchSpec {
         program: entry.executable.clone(),
@@ -683,6 +718,15 @@ impl CodexHome {
     }
 
     /// The command that signs Codex in to this home.
+    /// The same host folders with `CODEX_HOME` moved to an account profile
+    /// folder (#3033, ADR-0191 D1 조건 1): `TMPDIR` and `HOME` stay the host's.
+    pub fn with_profile_home(&self, profile: PathBuf) -> Self {
+        Self {
+            home: profile,
+            ..self.clone()
+        }
+    }
+
     pub fn login_command(&self) -> String {
         format!("CODEX_HOME=\"{}\" codex login", self.home.display())
     }
@@ -690,7 +734,7 @@ impl CodexHome {
 
 /// Whether `folder` holds any of `names`; a directory counts once it has an
 /// entry (an unreadable one counts).
-fn holds_any(folder: &Path, names: &[&str]) -> bool {
+pub(crate) fn holds_any(folder: &Path, names: &[&str]) -> bool {
     names.iter().any(|name| {
         let path = folder.join(name);
         match std::fs::symlink_metadata(&path) {
@@ -793,11 +837,21 @@ pub fn prepare_codex_home(codex: &CodexHome, cwd: &Path) -> Result<(), Refusal> 
 /// `session/new` params: the resolved folder, **no** MCP servers, and the
 /// adapter's isolation `_meta` when it has one.
 pub fn session_new_params(adapter: AdapterKind, cwd: &Path) -> Value {
+    session_new_params_protecting(adapter, cwd, &[])
+}
+
+/// [`session_new_params`] with folders the agent may not read
+/// ([`AdapterKind::session_new_meta_protecting`]).
+pub fn session_new_params_protecting(
+    adapter: AdapterKind,
+    cwd: &Path,
+    protected: &[PathBuf],
+) -> Value {
     let mut params = json!({
         "cwd": cwd.display().to_string(),
         "mcpServers": [],
     });
-    if let Some(meta) = adapter.session_new_meta() {
+    if let Some(meta) = adapter.session_new_meta_protecting(protected) {
         params["_meta"] = meta;
     }
     params
@@ -1333,6 +1387,7 @@ mod tests {
             Path::new("/work/repo"),
             host_environment(),
             &codex_fixture(),
+            None,
         );
         assert_eq!(spec.program, PathBuf::from("/opt/agents/bin/adapter"));
         assert_eq!(spec.args.first().map(String::as_str), Some("--owner-flag"));
@@ -1354,6 +1409,130 @@ mod tests {
         let params = session_new_params(AdapterKind::Claude, Path::new("/work/repo"));
         assert_eq!(params["mcpServers"], json!([]));
         assert_eq!(params["cwd"], "/work/repo");
+    }
+
+    /// The account and credential-store redirects a host's environment may
+    /// carry (ADR-0191 D1 조건 8: the value is the host's choice, never inherited).
+    const HOST_ACCOUNT_REDIRECTS: &[&str] = &[
+        "CLAUDE_CONFIG_DIR",
+        "CLAUDE_SECURESTORAGE_CONFIG_DIR",
+        "ANTHROPIC_CONFIG_DIR",
+        "ANTHROPIC_PROFILE",
+    ];
+
+    fn with_account_redirects() -> Vec<(String, String)> {
+        let mut host = host_environment();
+        for key in HOST_ACCOUNT_REDIRECTS {
+            host.push((key.to_string(), "/zz/host-account".to_string()));
+        }
+        host
+    }
+
+    #[test]
+    fn claude_config_dir_is_the_hosts_checked_folder_or_absent_never_inherited() {
+        let claude = entry(AdapterKind::Claude);
+        let repo = Path::new("/work/repo");
+        // No profile: none of the host's redirects reaches the agent.
+        let spec = launch_spec(
+            &claude,
+            repo,
+            with_account_redirects(),
+            &codex_fixture(),
+            None,
+        );
+        for key in HOST_ACCOUNT_REDIRECTS {
+            assert!(
+                !spec.env.iter().any(|(name, _)| name == key),
+                "{key} was inherited"
+            );
+        }
+        // A profile: `CLAUDE_CONFIG_DIR` is exactly that folder, once, and the
+        // other redirects still stay out.
+        let profile = Path::new("/Users/me/Library/Application Support/oort/profiles/claude/Work");
+        let spec = launch_spec(
+            &claude,
+            repo,
+            with_account_redirects(),
+            &codex_fixture(),
+            Some(profile),
+        );
+        let dirs: Vec<&String> = spec
+            .env
+            .iter()
+            .filter(|(name, _)| name == "CLAUDE_CONFIG_DIR")
+            .map(|(_, value)| value)
+            .collect();
+        assert_eq!(dirs, [&profile.display().to_string()]);
+        for key in &HOST_ACCOUNT_REDIRECTS[1..] {
+            assert!(!spec.env.iter().any(|(name, _)| name == key), "{key}");
+        }
+        // Codex never gets Claude's variable, profile or not.
+        let spec = launch_spec(
+            &entry(AdapterKind::Codex),
+            repo,
+            with_account_redirects(),
+            &codex_fixture(),
+            Some(profile),
+        );
+        assert!(!spec.env.iter().any(|(name, _)| name == "CLAUDE_CONFIG_DIR"));
+    }
+
+    #[test]
+    fn no_account_redirect_is_on_the_env_allowlist() {
+        // The acceptance says the allowlist "gets" CLAUDE_CONFIG_DIR: it must
+        // not — the host sets it over the allowlist ([`launch_spec`]).
+        for key in HOST_ACCOUNT_REDIRECTS {
+            assert!(!is_passed_env(key), "{key} passes from the host env");
+        }
+    }
+
+    #[test]
+    fn the_profile_folders_are_out_of_reach_of_a_sessions_tools_and_commands() {
+        let profiles = PathBuf::from("/state/workd/profiles");
+        let params = session_new_params_protecting(
+            AdapterKind::Claude,
+            Path::new("/work/repo"),
+            std::slice::from_ref(&profiles),
+        );
+        let settings = &params["_meta"]["claudeCode"]["options"]["settings"];
+        let deny: Vec<&str> = settings["permissions"]["deny"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert!(deny.contains(&"Read(/state/workd/profiles/**)"), "{deny:?}");
+        assert!(settings["sandbox"]["credentials"]["files"]
+            .as_array()
+            .unwrap()
+            .contains(&json!({"path": "/state/workd/profiles", "mode": "deny"})));
+        // The unprotected form is unchanged.
+        let plain = session_new_params(AdapterKind::Claude, Path::new("/work/repo"));
+        assert!(!plain.to_string().contains("/state/workd/profiles"));
+    }
+
+    #[test]
+    fn a_codex_profile_moves_only_codex_home() {
+        let base = codex_fixture();
+        let moved = base.with_profile_home(PathBuf::from("/profiles/codex/Work"));
+        assert_eq!(moved.home, PathBuf::from("/profiles/codex/Work"));
+        assert_eq!(moved.tmp, base.tmp);
+        assert_eq!(moved.user_home, base.user_home);
+        assert_eq!(moved.owner_home, base.owner_home);
+        let spec = launch_spec(
+            &entry(AdapterKind::Codex),
+            Path::new("/work/repo"),
+            host_environment(),
+            &moved,
+            None,
+        );
+        let home: Vec<&String> = spec
+            .env
+            .iter()
+            .filter(|(name, _)| name == "CODEX_HOME")
+            .map(|(_, value)| value)
+            .collect();
+        assert_eq!(home, [&"/profiles/codex/Work".to_string()]);
     }
 
     #[test]
@@ -1487,6 +1666,7 @@ mod tests {
             Path::new("/work/repo"),
             host,
             &codex_fixture(),
+            None,
         );
         let value = |name: &str| {
             let matches: Vec<&String> = spec

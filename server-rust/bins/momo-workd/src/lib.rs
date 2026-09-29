@@ -18,6 +18,7 @@
 //! | [`acp`] | the JSON-RPC stdio transport |
 //! | [`projection`] | `session/update` → curated server events |
 //! | [`policy`] | the D6 invariants |
+//! | [`profile`] | which account a remote session runs as: this Mac's own choice, checked profile folder or refusal (#3033) |
 //! | [`control_socket`] | the app ↔ workd Unix socket: `status`, `shutdown`, `pin_root`, `revoke_device`, `reset_signature_requirement`, peer signature check |
 //! | [`cli`] | `register` / `run` |
 
@@ -32,6 +33,7 @@ pub mod human_trust;
 pub mod keystore;
 pub mod policy;
 pub mod proctree;
+pub mod profile;
 pub mod projection;
 pub mod redact;
 pub mod session;

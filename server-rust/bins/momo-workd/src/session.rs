@@ -15,7 +15,10 @@
 //!    ([`policy::check_project_config`]); for Codex, the host's own home is
 //!    ready and signed in, and Codex's own `HOME` holds no skill layer
 //!    ([`policy::prepare_codex_home`], ADR-0188 §8, #2630 F5); the agent gets
-//!    the allowlisted part of the host's environment only (#2630 F1);
+//!    the allowlisted part of the host's environment only (#2630 F1); if this
+//!    Mac chose an account for remote work, its profile folder is checked and
+//!    becomes `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, or the spawn is refused
+//!    ([`crate::profile`], ADR-0191 D1, #3033);
 //! 5. ACP `initialize` — the process must be the adapter its entry names
 //!    ([`policy::AdapterKind::agent_name`]) — then `session/new` with no MCP
 //!    servers and the adapter's isolation switches;
@@ -67,10 +70,13 @@ use crate::client::{
 };
 use crate::config::ToolEntry;
 use crate::policy::{self, AdapterKind, ModeAtOpen, Refusal};
+use crate::profile;
 use crate::projection::{self, chunk_field, Projection, MAX_FIELD_CHARS};
 
 /// ACP protocol version this client speaks.
 pub const ACP_PROTOCOL_VERSION: i64 = 1;
+/// ACP's `auth_required` JSON-RPC error code.
+const ACP_AUTH_REQUIRED: i64 = -32000;
 /// The server's `agent.partial` ceiling (`text_delta` ≤ 4096 bytes).
 pub const MAX_EVENT_TEXT_BYTES: usize = 4_096;
 /// Coalesced answer text is flushed at this size…
@@ -155,6 +161,9 @@ pub struct SessionSettings {
     pub max_sessions: usize,
     /// Codex's host-only home and temp folder (ADR-0188 §8).
     pub codex: policy::CodexHome,
+    /// The host state folder, where the desktop's 「원격 작업」 account choice
+    /// lives ([`crate::profile`], #3033). Read at every spawn.
+    pub state_folder: PathBuf,
     /// How long a bridged permission request waits for its owner
     /// ([`DEFAULT_PERMISSION_WAIT`]).
     pub permission_wait: Duration,
@@ -334,23 +343,39 @@ impl SessionManager {
             .ok_or(Refusal::WorkdirUnavailable)?;
         // Project agent configuration the adapter would apply regardless.
         policy::check_project_config(entry.adapter, &cwd)?;
-        // ADR-0188 §8: Codex runs only from the host's own home, signed in.
+        // #3033 (ADR-0191 D1): this Mac's 「원격 작업」 account, if it chose
+        // one — that profile or a refusal, never the default account.
+        let profile = profile::for_spawn(&self.settings.state_folder, entry.adapter, &cwd)?;
+        // ADR-0188 §8: Codex runs only from the host's own home (or the
+        // chosen profile, which has the same conditions), signed in.
+        let codex = match (&profile, entry.adapter) {
+            (Some(dir), AdapterKind::Codex) => self.settings.codex.with_profile_home(dir.clone()),
+            _ => self.settings.codex.clone(),
+        };
         if entry.adapter == AdapterKind::Codex {
-            if let Err(refusal) = policy::prepare_codex_home(&self.settings.codex, &cwd) {
+            if let Err(refusal) = policy::prepare_codex_home(&codex, &cwd) {
                 if refusal == Refusal::CodexLoginRequired {
                     tracing::warn!(
-                        login = %self.settings.codex.login_command(),
-                        "Codex is not signed in to the host's own home; sign in once with this command"
+                        login = %codex.login_command(),
+                        "Codex is not signed in to the folder remote work runs in; sign in once with this command"
                     );
+                    if profile.is_some() {
+                        return Err(Refusal::ProfileLoginRequired);
+                    }
                 }
                 return Err(refusal);
             }
         }
+        let claude_config_dir = match entry.adapter {
+            AdapterKind::Claude => profile.as_deref(),
+            AdapterKind::Codex => None,
+        };
         let spec = policy::launch_spec(
             &entry,
             &cwd,
             self.settings.parent_env.clone(),
-            &self.settings.codex,
+            &codex,
+            claude_config_dir,
         );
         let mut conn = AcpConnection::spawn(&spec).map_err(|error| {
             tracing::warn!(tool, error = %error, "agent launch failed");
@@ -363,6 +388,8 @@ impl SessionManager {
             entry.adapter,
             &cwd,
             self.settings.acp_start_timeout,
+            profile.is_some(),
+            &[profile::profile_root(&self.settings.state_folder)],
         )
         .await
         {
@@ -544,6 +571,8 @@ async fn handshake(
     adapter: AdapterKind,
     cwd: &std::path::Path,
     timeout: Duration,
+    profiled: bool,
+    protected: &[PathBuf],
 ) -> Result<String, Refusal> {
     let initialized = conn
         .request(
@@ -591,13 +620,20 @@ async fn handshake(
     let created = conn
         .request(
             "session/new",
-            policy::session_new_params(adapter, cwd),
+            policy::session_new_params_protecting(adapter, cwd, protected),
             timeout,
         )
         .await
         .map_err(|failure| {
             tracing::warn!(error = %failure, "ACP session/new failed");
-            Refusal::AgentStartFailed
+            // ACP `auth_required` (-32000): a chosen account that is not
+            // signed in says so, and is not "the agent failed to start".
+            match failure {
+                RpcFailure::Error { code, .. } if profiled && code == ACP_AUTH_REQUIRED => {
+                    Refusal::ProfileLoginRequired
+                }
+                _ => Refusal::AgentStartFailed,
+            }
         })?;
     let acp_session_id = created
         .get("sessionId")
