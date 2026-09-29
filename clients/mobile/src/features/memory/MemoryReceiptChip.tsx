@@ -83,6 +83,7 @@ const buildStyles = (color: Palette) =>
   StyleSheet.create({
     chip: {
       alignSelf: 'flex-start',
+      marginTop: space.xs,
       minHeight: CHIP_HEIGHT,
       paddingHorizontal: space.md,
       justifyContent: 'center',

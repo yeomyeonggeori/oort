@@ -198,10 +198,15 @@ const buildStyles = (color: Palette) =>
     },
     itemLine: {fontSize: font.label, lineHeight: line.label, color: color.text},
     itemMeta: {fontSize: font.meta, lineHeight: line.meta, color: color.textFaint},
-    note: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
+    note: {
+      fontSize: font.meta,
+      lineHeight: line.meta,
+      color: color.textMuted,
+      paddingBottom: space.md,
+    },
     withheld: {
       gap: space.xs,
-      paddingVertical: space.md,
+      paddingTop: space.md,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: color.border,
     },
