@@ -588,6 +588,7 @@ function PermissionCard({
   const [outcome, setOutcome] = useState<Outcome>(null);
   const [rejectNote, setRejectNote] = useState("");
   const unavailableId = useId();
+  const previewStateId = useId();
   const rejectNoteId = useId();
   const rejectHintId = useId();
   const allowRef = useRef<HTMLButtonElement>(null);
@@ -791,6 +792,12 @@ function PermissionCard({
           {reason}
         </p>
       ) : null}
+      {/* #3128: 허락이 닫힌 이유도 질문 바로 밑에 한 줄로(버튼 뒤에 두면 잘린다). */}
+      {gate && !inApp && !blocked && permission.allow !== null && gate.state !== "ready" ? (
+        <p id={previewStateId} className="break-keep text-meta text-ink-muted" data-testid="agent-permission-preview-state">
+          {gate.state === "loading" ? PERMISSION_PREVIEW_LOADING_LINE : gate.line}
+        </p>
+      ) : null}
       {inAppLine ? (
         <p id={unavailableId} className="break-keep text-meta text-ink-muted" data-testid="agent-permission-in-app">
           {ALLOW_IN_APP_LINE}
@@ -829,7 +836,7 @@ function PermissionCard({
             size="sm"
             className="tap-target"
             disabled={blocked || !allowable || busy}
-            aria-describedby={inAppLine ? unavailableId : describedBy}
+            aria-describedby={inAppLine ? unavailableId : gate && !checked && !blocked ? previewStateId : describedBy}
             onClick={() => arm("allow")}
             data-testid="agent-permission-allow"
           >
@@ -843,7 +850,7 @@ function PermissionCard({
               variant="secondary"
               className="tap-target"
               disabled={blocked || !allowable || busy}
-              aria-describedby={inAppLine ? unavailableId : describedBy}
+              aria-describedby={inAppLine ? unavailableId : gate && !checked && !blocked ? previewStateId : describedBy}
               onClick={() => arm("allow_session")}
               data-testid="agent-permission-allow-session"
             >
@@ -924,11 +931,6 @@ function PermissionCard({
           </div>
         </div>
       )}
-      {gate && !inApp && !blocked && permission.allow !== null && gate.state !== "ready" ? (
-        <p className="break-keep text-meta text-ink-muted" data-testid="agent-permission-preview-state">
-          {gate.state === "loading" ? PERMISSION_PREVIEW_LOADING_LINE : gate.line}
-        </p>
-      ) : null}
       {!gate && !inApp && !allowable && !blocked && permission.allow !== null ? (
         <p className="text-meta text-ink-muted" data-testid="agent-permission-truncated">
           미리보기가 길어 가운데가 잘렸어요. 전체를 보지 않고는 허락할 수 없어요. 거부하거나 호스트에서 결정하세요.
