@@ -80,6 +80,7 @@ export type SurfaceId =
   | "agentRunHistory"
   | "plugins"
   | "agentMemory"
+  | "teamMemory"
   | "messageSearch"
   | "hostedAgentPairing";
 
@@ -339,6 +340,25 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
     measured:
       "GET …/memories, …/memories/search, …/memories/{id}/grants, " +
       "POST …/memories/{id}/invalidate: 라우터에 없음(404).",
+  },
+  teamMemory: {
+    id: "teamMemory",
+    label: "팀 기억",
+    // #3165 (ADR-0196): 새 팀 기억 v2 표면이다. 위 `agentMemory` 줄과 **다른 표면**
+    // 이다. 그 줄은 삭제된 Swift 서버의 /memories 계열(에이전트 개인 기억)을 재던
+    // 칸이고 그 화면(AgentMemorySection)은 이 표에서 계속 접혀 있다. 되살리지
+    // 않는다: 새 기억 브라우저(#3170)가 들어올 때 함께 삭제된다(ADR-0196 D11).
+    provided: true,
+    // 승인 줄과 같은 이유로 문구를 남긴다: 이 칸은 이 코드베이스의 서버가 경로를
+    // 싣는가를 말하고, 아직 배포되지 않은 서버에 붙으면 404가 와서
+    // `serverSaysAbsent` 폴딩이 이 문구를 쓴다.
+    absentReason: "이 서버는 아직 팀 기억을 지원하지 않아요.",
+    fallback: "필요한 맥락은 채널에서 다시 알려 주면 에이전트가 그대로 써요.",
+    measured:
+      "2026-09-29 실측(#3165): server-rust/bins/momo-server/src/lib.rs에 여섯 경로가 등록됨. " +
+      "GET …/channels/{ch}/memory/digests, GET …/memory/digests/{id}, " +
+      "GET …/agent-runs/{run}/memory-receipt, GET/PATCH …/memory/settings, " +
+      "PATCH …/memory/settings/me, PATCH …/channels/{ch}/memory/settings.",
   },
   messageSearch: {
     id: "messageSearch",

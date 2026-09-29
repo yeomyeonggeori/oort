@@ -108,6 +108,12 @@ import { WelcomeKickoffStage } from "@/features/welcome/WelcomeKickoffStage";
 import { PhoneLinkChannelCard } from "@/features/welcome/PhoneLinkChannelCard";
 import type { AiConnectLine } from "@momo/core/features/commands/registry";
 import { AiConnectCard, AiConnectSuggestion } from "./AiConnectCard";
+import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
+import {
+  memoryEligibleRoom,
+  wantsMissedSummary,
+} from "@momo/core/features/memory/presentation";
+import { MissedSummary } from "@/features/memory/MissedSummary";
 import { CommandSuggestSlot } from "@/features/timeline/commandSuggestSlot";
 import { registerLocalCardHost } from "./localCards";
 import { shouldMountPhoneLinkCard } from "@/features/welcome/phoneLinkCard";
@@ -1287,6 +1293,38 @@ export function ChatShell() {
             onRetryMessages={timeline.reload}
           />
         )}
+
+        {/* 놓친 대화 요약 (ADR-0196 D12 V1, #3165). 목록 밖, 타임라인 위 띠다:
+            가상 리스트의 키·높이 계산에 끼지 않는다. 기준은 채널을 **열 때**
+            얼려 둔 커서와 머리(`openedWith`)다. 살아 있는 커서는 기록이 화면에
+            오르자마자 머리로 밀려서, 그것으로 물으면 늘 빈 페이지가 온다. */}
+        {stressCount === 0 &&
+          channelId !== null &&
+          openedWith !== null &&
+          wantsMissedSummary({
+            provided: isSurfaceProvided("teamMemory"),
+            channelId,
+            unreadCount: timelineUnread.unreadCount,
+            // 사람끼리의 DM은 서버가 기본으로 요약하지 않는다(ADR-0196 D9). 상대를
+            // 모르는 DM도 같은 쪽으로 접는다: 모르는 채로 카드를 세우면 「요약이 없다」를
+            // 잘못 말하게 된다. 에이전트와의 DM은 그대로 대상이다.
+            eligible: memoryEligibleRoom({ kind: channel?.kind, peerKind: peer?.kind }),
+          }) && (
+            <MissedSummary
+              key={`${channelId}:${openedWith.lastReadSeq ?? 0}`}
+              workspaceId={workspaceId}
+              channelId={channelId}
+              lastReadSeq={openedWith.lastReadSeq}
+              headSeq={openedWith.latestSeq}
+              onJump={onJumpToMessage}
+              // 카드를 닫으면 닫기 버튼(초점이 있던 곳)이 사라진다. 포인터가 세밀한
+              // 기기(키보드가 있는 쪽)에서만 컴포저로 초점을 돌려준다: 폰에서는
+              // 초점이 곧 화상 키보드라 닫기 한 번에 키보드가 올라오면 안 된다.
+              onDismissed={() => {
+                if (window.matchMedia("(pointer: fine)").matches) focusComposer();
+              }}
+            />
+          )}
 
         <div
           // `timeline-inset`(DS2-6): 넓은 창에서 좌우 8을 더해 메시지 행(px-4)이

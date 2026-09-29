@@ -1,3 +1,4 @@
+import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 import { Fragment, useId, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -277,6 +278,7 @@ export function useChannelActions({
         // 있고 손잡이가 없으면 눌러도 아무 일이 없는 라디오가 된다.
         sectionCount: onMoveToSection ? sections?.length ?? 0 : 0,
         canStar: Boolean(onToggleStar),
+        hasMemorySettings: isSurfaceProvided("teamMemory"),
       }),
     [
       channel,
@@ -346,6 +348,7 @@ export function useChannelActions({
         onToggleStar?.();
         return;
       case "topic":
+      case "memory":
       case "leave":
       case "move-to-section":
         // 다이얼로그로 넘어가는 항목과 무리 항목은 표면이 자기 복귀를 챙긴다.
