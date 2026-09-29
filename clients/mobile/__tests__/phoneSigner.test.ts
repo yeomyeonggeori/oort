@@ -7,7 +7,7 @@ jest.mock('expo-modules-core', () => ({
 
 import {SignerRefusal, type ControlToSign} from '@momo/core/features/auth/signedControl';
 
-import {humanControlPayload} from '../src/deviceKey/humanControl';
+import {humanControlPayload, type SignHumanControlInput} from '../src/deviceKey/humanControl';
 import {DeviceKeyError} from '../src/deviceKey/native';
 import {phoneSigner, phoneSignerRefusal, phoneSignInput} from '../src/deviceKey/signer';
 
@@ -32,9 +32,24 @@ interface Entry {
     nonce: string;
     issuedAtMs: number;
     expiresAtMs: number;
-    content: ControlToSign['content'];
+    content: ControlToSign['content'] & {preview?: unknown};
   };
   payload: string;
+}
+
+/** The page's shell request carries the preview beside the content; the
+ * core's `ControlToSign` carries it as `permissionPreview`. */
+function controlOf(e: Entry): ControlToSign {
+  const {preview, ...content} = e.request.content as ControlToSign['content'] & {
+    preview?: unknown;
+  };
+  return {
+    hostId: e.request.hostId,
+    sessionId: e.request.sessionId,
+    nonce: e.request.nonce,
+    content: content as ControlToSign['content'],
+    ...(preview ? {permissionPreview: preview as ControlToSign['permissionPreview']} : {}),
+  };
 }
 
 const entries = JSON.parse(
@@ -63,7 +78,7 @@ describe('phone ↔ desktop: one intent, one statement', () => {
       [
         'control_v2_input_interrupt',
         'control_v2_input_queue_nfc',
-        'control_v2_permission_session',
+        'control_v3_permission_once',
         'control_v2_spawn',
         'control_v2_spawn_resume',
       ].sort(),
@@ -73,19 +88,19 @@ describe('phone ↔ desktop: one intent, one statement', () => {
   it.each(entries.map(e => [e.name, e] as const))(
     '%s: the phone builds the bytes the desktop shell builds',
     (_name, e) => {
-      const control: ControlToSign = {
-        hostId: e.request.hostId,
-        sessionId: e.request.sessionId,
-        nonce: e.request.nonce,
-        content: e.request.content,
-      };
+      const control = controlOf(e);
       const input = phoneSignInput(
         {workspaceId: e.signer.workspaceId, memberId: e.signer.memberId, deviceKeyId: e.signer.keyId},
         control,
         context(e.request.instanceId, e.request.issuedAtMs),
         0,
       );
-      expect(input.schema).toBe('momo.human.control.v2');
+      // #3128: an allow is v3 (it binds the preview hash), the rest v2.
+      expect(input.schema).toBe(
+        control.content.kind === 'permission'
+          ? 'momo.human.control.v3'
+          : 'momo.human.control.v2',
+      );
       const bytes = humanControlPayload(
         input.schema,
         {
@@ -115,6 +130,34 @@ describe('phoneSigner', () => {
     content: e.request.content,
   };
   const identity = {workspaceId: 'w', memberId: 'm', deviceKeyId: 'k'};
+
+  it('an allow without the checked preview hash never reaches Face ID (#3128)', async () => {
+    const allow = controlOf(entries.find(x => x.name === 'control_v3_permission_once')!);
+    const bare = {
+      ...(allow.content as Extract<ControlToSign['content'], {kind: 'permission'}>),
+      previewSha256: undefined,
+    };
+    const native = jest.fn();
+    const signer = phoneSigner(identity, {
+      context: async () => context('i', 1_790_550_003_000),
+      // The real builder: it refuses before the enclave is asked.
+      sign: (async (input: SignHumanControlInput) => {
+        humanControlPayload(input.schema, {
+          instanceId: 'i', workspaceId: 'w', memberId: 'm', deviceKeyId: 'k', hostId: input.hostId,
+          sessionId: input.sessionId, nonce: input.nonce, issuedAtMs: 1, expiresAtMs: 2,
+        }, input.content);
+        native();
+        return {} as never;
+      }) as never,
+      now: () => 1_790_550_003_000,
+    });
+    const error = await signer
+      .sign({...allow, content: bare as ControlToSign['content']})
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(SignerRefusal);
+    expect((error as SignerRefusal).message).toContain('미리보기');
+    expect(native).not.toHaveBeenCalled();
+  });
 
   it('returns exactly the server’s envelope keys (no `schema`)', async () => {
     const sign = jest.fn(async (_input: unknown) => ({

@@ -16,7 +16,21 @@ export interface DeviceKeyCopy {
   tone: DeviceKeyTone;
   headline: string;
   detail: string;
+  /** 번호 붙은 방법 — 지금은 「QR 연결 필요」만 쓴다(#3129). */
+  steps?: readonly string[];
 }
+
+/**
+ * 맥에서 QR로 연결하는 방법(#3129, ADR-0146 D-6 증보 「QR 연결로만」). 맥 쪽
+ * 낱말과 맞춘다: 설정 › 기기 › 「폰 연결」 카드의 「QR 만들기」
+ * (`clients/web/.../DeviceLinkCard.tsx`), 폰 첫 화면의 「QR 찍기」
+ * (`WELCOME_QR_LABEL`). QR은 로그인 전 화면에서만 찍으므로 로그아웃이 가운데 선다.
+ */
+export const QR_LINK_STEPS: readonly string[] = [
+  '맥의 oort에서 설정 › 기기 › 폰 연결의 「QR 만들기」를 누릅니다.',
+  '이 폰의 프로필에서 로그아웃합니다.',
+  '첫 화면의 「QR 찍기」로 맥에 뜬 QR을 찍습니다.',
+];
 
 export const MAC_WHERE = '맥의 oort에서 설정 › 기기 › 지시 서명을 여세요.';
 
@@ -69,6 +83,24 @@ export function deviceKeyCopy(view: DeviceKeyView, busy = false): DeviceKeyCopy 
     };
   }
   switch (view.kind) {
+    case 'unlinked':
+      return view.reason === 'notFromMac'
+        ? {
+            badge: 'QR 연결 필요',
+            tone: 'warn',
+            headline: '맥에서 만든 QR로 다시 연결해야 지시할 수 있습니다.',
+            detail:
+              '이 폰은 맥이 아닌 곳에서 띄운 QR로 연결돼 맥에서 승인할 수 없습니다. 대화와 알림은 그대로 씁니다.',
+            steps: QR_LINK_STEPS,
+          }
+        : {
+            badge: 'QR 연결 필요',
+            tone: 'warn',
+            headline: '이 폰으로 지시하려면 맥에서 QR로 한 번 연결해야 합니다.',
+            detail:
+              'QR로 연결하지 않은 로그인은 지시 기기가 될 수 없습니다. 대화와 알림은 그대로 씁니다.',
+            steps: QR_LINK_STEPS,
+          };
     case 'loading':
       return {
         badge: '확인 중',

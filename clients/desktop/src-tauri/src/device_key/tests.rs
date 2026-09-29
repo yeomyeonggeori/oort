@@ -381,6 +381,7 @@ fn trust(root_key_id: Option<u128>, root_public_key: Option<&str>) -> crate::wor
         root_public_key: root_public_key.map(str::to_string),
         signatures_required: false,
         server_requires_signatures: None,
+        signatures_required_by: None,
     }
 }
 
@@ -614,4 +615,73 @@ fn a_rebind_may_not_name_another_row_than_this_workspaces_binding() {
     assert!(rebind_precheck(Some(&other_member), &request, "K").is_err());
     // A binding for a key the enclave no longer holds says nothing.
     assert_eq!(rebind_precheck(Some(&other_id), &request, "NEW"), Ok(()));
+}
+
+/// #3129: the webview reaches `reset_signature_requirement` only through the
+/// native dialog. A "no" (or a page script nobody clicked for) never touches
+/// the socket.
+#[test]
+fn the_latch_goes_down_only_after_the_native_dialog() {
+    let mut resets = 0;
+    let mut shown = None;
+    let declined = reset_after_confirm(
+        |summary| {
+            shown = Some(summary.clone());
+            false
+        },
+        || {
+            resets += 1;
+            Ok(false)
+        },
+    );
+    assert_eq!(declined, Err("device_key_declined".to_string()));
+    assert_eq!(resets, 0, "a declined dialog must not reach workd");
+    let shown = shown.expect("the dialog was asked");
+    assert_eq!(shown, reset_requirement_summary());
+    assert_eq!(shown.confirm, "검증 끄기");
+    assert!(shown.body.contains("다시 켜"), "{}", shown.body);
+    assert!(shown.full_text.is_none());
+
+    let mut resets = 0;
+    let done = reset_after_confirm(
+        |_| true,
+        || {
+            resets += 1;
+            Ok(true)
+        },
+    );
+    assert_eq!(resets, 1);
+    // The host's own config can keep it on: said as such, never 「꺼짐」.
+    assert_eq!(done, Ok(ResetRequirementOutcome { required: true }));
+
+    let refused = reset_after_confirm(
+        |_| true,
+        || Err("workd_refused: requirement_unavailable".into()),
+    );
+    assert_eq!(
+        refused,
+        Err("workd_refused: requirement_unavailable".to_string())
+    );
+}
+
+/// #3129: why the host enforces, as workd says it; anything else is dropped.
+#[test]
+fn workd_status_says_why_the_host_enforces() {
+    let by = |value: serde_json::Value| {
+        let status = serde_json::json!({
+            "hostId": "h", "workspaceId": "w", "ownerMemberId": "m",
+            "humanSignatures": {"required": true, "requiredBy": value},
+        });
+        crate::work_host::host_trust_of(&status)
+            .unwrap()
+            .signatures_required_by
+    };
+    assert_eq!(by(serde_json::json!("server")).as_deref(), Some("server"));
+    assert_eq!(by(serde_json::json!("config")).as_deref(), Some("config"));
+    assert_eq!(
+        by(serde_json::json!("unreadable")).as_deref(),
+        Some("unreadable")
+    );
+    assert_eq!(by(serde_json::json!("<script>")), None);
+    assert_eq!(by(serde_json::Value::Null), None);
 }
