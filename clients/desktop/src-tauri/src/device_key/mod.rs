@@ -951,6 +951,35 @@ pub fn sign_host_register(
         .map_err(|_| "device_key_failed: worker stopped".to_string())?
 }
 
+/// Refuse to sign a `host_register` when this Mac's clock is more than the
+/// server's window (`MAX_CLOCK_SKEW_MS`, 5 minutes) away from the server's
+/// own, before any dialog. `None` (a server that gave no clock) is not
+/// refused here: it gave no instance id either, so nothing is signed.
+/// The message is what the person reads at the end of the failed
+/// registration (workd relays it; it stays under the 120 characters the
+/// answer line keeps).
+pub(crate) fn check_host_register_clock(
+    server_time_ms: Option<i64>,
+    now_ms: i64,
+) -> Result<(), String> {
+    let Some(server) = server_time_ms else {
+        return Ok(());
+    };
+    let skew = now_ms.saturating_sub(server);
+    if skew.unsigned_abs() <= payload::MAX_CLOCK_SKEW_MS as u64 {
+        return Ok(());
+    }
+    let minutes = skew.unsigned_abs().div_ceil(60_000);
+    let side = if skew > 0 {
+        "빠릅니다"
+    } else {
+        "느립니다"
+    };
+    Err(format!(
+        "device_clock_skew: 이 Mac 시계가 서버보다 약 {minutes}분 {side}. 날짜·시간을 자동으로 맞춘 뒤 다시 등록하세요"
+    ))
+}
+
 fn sign_host_register_on(
     worker: &mut Worker,
     ask: &HostRegisterAsk,
@@ -963,6 +992,10 @@ fn sign_host_register_on(
         }
         Err(other) => return Err(other),
     };
+    // #3154: the statement is dated by this Mac's clock and the server holds
+    // it to ±5 minutes of its own. A Mac further off would sign, show a
+    // dialog, and be refused as `device_signature_expired` afterwards.
+    check_host_register_clock(ask.server_time_ms, now_ms())?;
     let request = host_register_request(ask, instance_id, Uuid::new_v4(), Uuid::new_v4(), now_ms());
     let (host_id, nonce, issued, expires) = (
         request.host_id,

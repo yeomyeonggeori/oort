@@ -32,7 +32,7 @@
 //!   candidate, or a logout / unlink / member-wide end of the key's session
 //!   lineage. Rows are never deleted.
 //! * **host_register** (D-8): [`verify_host_register_in_tx`] — the root
-//!   candidate's `momo.human.control.v1` statement over the host key, host id
+//!   candidate's `momo.human.control.v2` statement over the host key, host id
 //!   candidate and label.
 //!
 //! ## State

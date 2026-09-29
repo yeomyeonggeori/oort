@@ -954,6 +954,33 @@ async fn orphan_session(su: &PgPool, session: Uuid) {
     assert_eq!(moved, 1, "the source session was running");
 }
 
+/// The host reported `fixture.agent` on the session's thread: the record a
+/// signed resume's agent is checked against (#3154).
+async fn report_session_agent(su: &PgPool, fixture: &Fixture, session: Uuid) {
+    sqlx::query(
+        "WITH ws AS (SELECT channel_id, root_message_id FROM work_session WHERE id = $1), \
+              bumped AS ( \
+                UPDATE channel_seq SET last_seq = last_seq + 1 \
+                 WHERE workspace_id = $2 AND channel_id = (SELECT channel_id FROM ws) \
+                RETURNING last_seq AS seq) \
+         INSERT INTO message \
+           (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, \
+            props, root_id) \
+         SELECT $2, ws.channel_id, b.seq, 1, 0, $3, 'system', 'agent status', \
+                jsonb_build_object('kind', 'work_session_event', \
+                                   'event', jsonb_build_object('agent_member_id', $4::text)), \
+                ws.root_message_id \
+           FROM bumped b, ws",
+    )
+    .bind(session)
+    .bind(fixture.workspace)
+    .bind(fixture.owner)
+    .bind(fixture.agent.to_string())
+    .execute(su)
+    .await
+    .expect("report the session's agent");
+}
+
 /// The owner's own spawn onto `host` (see the module docs): a session the owner
 /// opens on an idle second laptop, orphaned the way the sweep would, then
 /// resumed onto `host` with the owner's human bearer. Returns the resume
@@ -2380,6 +2407,7 @@ async fn wdc_7_r2_signed_resume_then_queue_and_interrupt_end_to_end() {
         .unwrap();
     let source = Uuid::parse_str(created["workSession"]["id"].as_str().unwrap()).unwrap();
     orphan_session(&su, source).await;
+    report_session_agent(&su, &fixture, source).await;
     let successor = Uuid::new_v4();
     let issued = now_ms_3027();
     let nonce = Uuid::new_v4();
@@ -2763,6 +2791,7 @@ async fn wdc_8_r2_the_product_path_latches_the_host_and_the_server_cannot_undo_i
                 .unwrap();
             let source = Uuid::parse_str(created["workSession"]["id"].as_str().unwrap()).unwrap();
             orphan_session(&su, source).await;
+            report_session_agent(&su, fixture, source).await;
             let successor = Uuid::new_v4();
             let issued = now_ms_3027();
             let nonce = Uuid::new_v4();

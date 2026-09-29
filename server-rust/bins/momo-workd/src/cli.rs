@@ -275,6 +275,9 @@ pub enum SigningAnswer {
 pub struct SigningAsk {
     pub host_public_key: String,
     pub context: Option<client::SigningContext>,
+    /// Why there is, or is no, `context` (`available` · `unconfigured` ·
+    /// `not_offered`): the parent is told, not left to infer from a null.
+    pub context_state: &'static str,
 }
 
 /// Whoever holds the owner's root device key. The shipped implementation is
@@ -301,6 +304,11 @@ impl RegistrationSigner for StdioSigner {
             "hostPublicKey": ask.host_public_key,
             "instanceId": ask.context.as_ref().map(|c| c.instance_id.clone()),
             "serverTimeMs": ask.context.as_ref().map(|c| c.server_time_ms),
+            "signingContext": ask.context_state,
+            // What the owner can hold the dialog's fingerprint against: the
+            // same value is printed when the registration completes, and
+            // `momo-workd` never shows a key any other way.
+            "hostKeyFingerprint": host_key_fingerprint(&ask.host_public_key),
             "hostRegisterSignatureRequired":
                 ask.context.as_ref().is_some_and(|c| c.host_register_signature_required),
         });
@@ -386,25 +394,36 @@ pub async fn register_signed(
         blocking(move || store.store(&key, force)).await?;
     }
 
-    // From here a failure leaves no host row pointing at this key: do not
-    // keep it around.
+    // From here a failure must leave neither a host row pointing at this key
+    // nor this key without a row (#3155 review): `posted` remembers the row
+    // the server made, so every later refusal withdraws it as well as the key.
+    let posted: std::cell::Cell<Option<uuid::Uuid>> = std::cell::Cell::new(None);
     let attempt = async {
         let registration = match signer.as_mut() {
             None => None,
             Some(signer) => {
-                let context = client::fetch_signing_context(
+                let lookup = client::fetch_signing_context(
                     &config.server_base(),
                     config.workspace_id,
                     token.trim(),
                 )
                 .await
                 .map_err(CliError::Register)?;
-                let required = context
-                    .as_ref()
+                if lookup.context().is_none() {
+                    // The one silent fallback there was: say it.
+                    tracing::warn!(
+                        signing_context = lookup.state(),
+                        "this server offers no signing context; registering without the \
+                         owner's signature (the server decides whether that is enough)"
+                    );
+                }
+                let required = lookup
+                    .context()
                     .is_some_and(|c| c.host_register_signature_required);
                 let ask = SigningAsk {
                     host_public_key: public_key.clone(),
-                    context,
+                    context_state: lookup.state(),
+                    context: lookup.context().cloned(),
                 };
                 match signer.sign(&ask).await.map_err(CliError::Signing)? {
                     SigningAnswer::Signed(registration) => Some(registration),
@@ -437,46 +456,91 @@ pub async fn register_signed(
         )
         .await
         .map_err(CliError::Register)?;
+        posted.set(Some(registered.id));
         // The row must be the one the owner signed for, not merely a row.
         if signed_host_id.is_some_and(|id| id != registered.id) {
             return Err(CliError::Register(ClientError::Decode(
                 "the server registered another host id than the one signed".into(),
             )));
         }
-        Ok(registered)
+        if registered.public_key != public_key
+            || registered.workspace_id != config.workspace_id
+            || registered.scope != "member"
+            || registered.host_type != "workd"
+        {
+            return Err(CliError::Register(ClientError::Decode(
+                "the server registered a different host than the one requested".into(),
+            )));
+        }
+        let state = HostState {
+            server_url: config.server_base(),
+            workspace_id: registered.workspace_id,
+            host_id: registered.id,
+            owner_member_id: registered.owner_member_id,
+            public_key: public_key.clone(),
+            scope: registered.scope,
+        };
+        state.save(&config.state_path)?;
+        // A new registration is a new root (ADR-0146 개정 D-6): the old pin and
+        // its ledger do not carry over (#3024 review L1).
+        remove_trust_files(&config)?;
+        Ok(state)
     }
     .await;
-    let registered = match attempt {
-        Ok(registered) => registered,
+    let state = match attempt {
+        Ok(state) => state,
         Err(error) => {
+            if let Some(host_id) = posted.get() {
+                if let Err(revoke) = client::revoke_registered_host(
+                    &config.server_base(),
+                    config.workspace_id,
+                    token.trim(),
+                    host_id,
+                )
+                .await
+                {
+                    // Not silent: the owner can still revoke it by hand.
+                    tracing::warn!(
+                        %host_id,
+                        "could not withdraw the host row of a registration that failed: {revoke}"
+                    );
+                }
+                // The state file may be the half-written one of this attempt.
+                let _ = std::fs::remove_file(&config.state_path);
+            }
             let store = store.clone();
             let _ = blocking(move || store.delete()).await;
             return Err(error);
         }
     };
-    if registered.public_key != public_key
-        || registered.workspace_id != config.workspace_id
-        || registered.scope != "member"
-        || registered.host_type != "workd"
-    {
-        return Err(CliError::Register(ClientError::Decode(
-            "the server registered a different host than the one requested".into(),
-        )));
-    }
-    let state = HostState {
-        server_url: config.server_base(),
-        workspace_id: registered.workspace_id,
-        host_id: registered.id,
-        owner_member_id: registered.owner_member_id,
-        public_key,
-        scope: registered.scope,
-    };
-    state.save(&config.state_path)?;
-    // A new registration is a new root (ADR-0146 개정 D-6): the old pin and
-    // its ledger do not carry over (#3024 review L1).
-    remove_trust_files(&config)?;
-    tracing::info!(host_id = %state.host_id, key_store = %store.describe(), "work host registered");
+    tracing::info!(
+        host_id = %state.host_id,
+        key_store = %store.describe(),
+        fingerprint = %host_key_fingerprint(&state.public_key).unwrap_or_default(),
+        "work host registered"
+    );
     Ok(state)
+}
+
+/// The fingerprint a person compares: SHA-256 over the decoded public key, the
+/// first 10 bytes as upper-case hex in five groups of four — the string the
+/// desktop dialog and the web device list show for the same key
+/// (`5BAF F89D E7DE 5C1D 7B61` for the shared vector).
+pub fn host_key_fingerprint(public_key_b64: &str) -> Option<String> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(public_key_b64)
+        .ok()?;
+    let digest = momo_wire::sha256_hex(&bytes);
+    Some(
+        digest[..20]
+            .to_ascii_uppercase()
+            .as_bytes()
+            .chunks(4)
+            .map(|chunk| std::str::from_utf8(chunk).expect("ascii hex"))
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
 }
 
 /// Bind the control socket and serve it on a task (macOS; see
@@ -938,5 +1002,16 @@ mod tests {
         ] {
             assert!(parse_signing_answer(line).is_err(), "{line:?}");
         }
+    }
+
+    #[test]
+    fn the_host_key_fingerprint_is_the_shared_one() {
+        // clients/desktop device_key/payload/tests.rs FINGERPRINT_VECTOR and
+        // clients/web deviceKeysShared.test.ts pin the same string.
+        assert_eq!(
+            host_key_fingerprint("A2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW").as_deref(),
+            Some("5BAF F89D E7DE 5C1D 7B61")
+        );
+        assert_eq!(host_key_fingerprint("not base64!"), None);
     }
 }

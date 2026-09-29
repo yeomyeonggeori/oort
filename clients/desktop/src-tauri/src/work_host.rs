@@ -68,6 +68,8 @@ pub const DEFAULT_WORK_FOLDER: &str = "oort-work";
 /// Longest wait for `momo-workd register` (one HTTPS round trip plus a
 /// keychain write that may show a system prompt).
 const REGISTER_TIMEOUT: Duration = Duration::from_secs(90);
+/// `momo-workd forget` after a register that did not finish.
+const FORGET_TIMEOUT: Duration = Duration::from_secs(20);
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(2);
 const STOP_TIMEOUT: Duration = Duration::from_secs(8);
 
@@ -682,6 +684,17 @@ impl Service<'_> {
         request: RegisterRequest,
         sign: &mut dyn FnMut(&HostKeyAsk) -> Result<RegistrationAnswer, String>,
     ) -> Result<LocalStatus, String> {
+        let adapters = find_adapters(&crate::harness_path::current_search_path());
+        self.register_within(request, sign, &adapters, REGISTER_TIMEOUT)
+    }
+
+    fn register_within(
+        &self,
+        request: RegisterRequest,
+        sign: &mut dyn FnMut(&HostKeyAsk) -> Result<RegistrationAnswer, String>,
+        adapters: &[AdapterFound],
+        timeout: Duration,
+    ) -> Result<LocalStatus, String> {
         let sidecar = self.sidecar()?.to_path_buf();
         let _one_at_a_time = self
             .state
@@ -691,13 +704,12 @@ impl Service<'_> {
         if read_registered(&self.layout).is_some() {
             return Err("already_registered".to_string());
         }
-        let adapters = find_adapters(&crate::harness_path::current_search_path());
         let config = build_config(
             &self.layout,
             &request.server_url,
             &request.workspace_id,
             &request.display_name,
-            &adapters,
+            adapters,
         )?;
         if request.access_token.trim().is_empty() {
             return Err("not_signed_in".to_string());
@@ -732,9 +744,9 @@ impl Service<'_> {
         // The token crosses a pipe, not the child's environment: another
         // same-user process can read a running child's environment (#2778
         // security review M3), not its stdin.
-        let output = run_register(
+        let output = match run_register(
             command,
-            REGISTER_TIMEOUT,
+            timeout,
             request.access_token.trim(),
             &mut |child_ask| {
                 // The workspace and the label are this shell's own (what it
@@ -748,7 +760,17 @@ impl Service<'_> {
                     server_time_ms: child_ask.server_time_ms,
                 })
             },
-        )?;
+        ) {
+            Ok(output) => output,
+            Err(error) => {
+                // A child killed at the deadline never ran its own cleanup,
+                // and it made its key before it did anything else (#3155
+                // review): take the key and its state out now, and the config
+                // this call wrote, so the next attempt starts clean.
+                self.abandon_failed_register();
+                return Err(error);
+            }
+        };
         if !output.0 {
             // The last line of workd's stderr: it never carries the token
             // (workd_conformance_pg `register`), and it says why.
@@ -765,6 +787,29 @@ impl Service<'_> {
         }
         self.start()?;
         Ok(self.status())
+    }
+
+    /// `momo-workd forget` for a registration that did not finish, then the
+    /// config it read. Best effort: the failure being reported is the
+    /// register's, not this. (A row the killed child may already have made on
+    /// the server holds a key that no longer exists; the owner revokes it from
+    /// the host list.)
+    fn abandon_failed_register(&self) {
+        if let Ok(sidecar) = self.sidecar() {
+            let mut command = Command::new(sidecar);
+            command
+                .arg("forget")
+                .arg("--config")
+                .arg(&self.layout.config)
+                .args(key_args(&self.layout, self.development))
+                .env_clear()
+                .envs(child_env())
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            let _ = run_with_timeout(command, FORGET_TIMEOUT, None);
+        }
+        let _ = std::fs::remove_file(&self.layout.config);
     }
 
     pub fn start(&self) -> Result<(), String> {
@@ -1520,6 +1565,61 @@ echo '{"hostId":"h"}'"#;
         .unwrap_err();
         assert_eq!(error, "timeout");
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    /// A sidecar that hangs on `register` and records what else it is asked.
+    fn fake_sidecar(dir: &Path, marks: &Path) -> PathBuf {
+        let bin = dir.join("fake-workd");
+        std::fs::write(
+            &bin,
+            format!(
+                "#!/bin/sh\ncase \"$1\" in\n  register) read token; sleep 30 ;;\n  *) echo \"$@\" >> '{}' ;;\nesac\n",
+                marks.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        bin
+    }
+
+    #[test]
+    fn a_register_that_times_out_takes_its_key_and_config_with_it() {
+        let dir = std::env::temp_dir().join(format!("oort-reg-timeout-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let marks = dir.join("marks");
+        let layout = layout(&dir);
+        let state = WorkHostState::default();
+        let service = Service {
+            layout: layout.clone(),
+            sidecar: Some(fake_sidecar(&dir, &marks)),
+            development: true,
+            state: &state,
+        };
+        let error = service
+            .register_within(
+                RegisterRequest {
+                    server_url: "https://oort.example.com".into(),
+                    workspace_id: "00000000-0000-0000-0000-00000000000c".into(),
+                    display_name: "맥".into(),
+                    access_token: "tok".into(),
+                },
+                &mut |_| Ok(RegistrationAnswer::Unsigned),
+                &[found("claude")],
+                Duration::from_millis(400),
+            )
+            .unwrap_err();
+        assert_eq!(error, "timeout");
+        let asked = std::fs::read_to_string(&marks).unwrap_or_default();
+        assert!(
+            asked.starts_with("forget --config "),
+            "the killed child's key is forgotten: {asked:?}"
+        );
+        assert!(
+            !layout.config.exists(),
+            "the config this attempt wrote is gone"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

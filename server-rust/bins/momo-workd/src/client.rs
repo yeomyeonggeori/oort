@@ -44,7 +44,12 @@ pub enum ClientError {
     #[error("the server refused this host's credential (401)")]
     Unauthorized,
     #[error("server answered {status}: {message}")]
-    Status { status: u16, message: String },
+    Status {
+        status: u16,
+        message: String,
+        /// `error.code` (ADR-0188 R0), when the server named the refusal.
+        code: Option<String>,
+    },
     #[error("transport: {0}")]
     Transport(String),
     #[error("unexpected response: {0}")]
@@ -299,17 +304,17 @@ async fn read_response(response: reqwest::Response) -> Result<Vec<u8>, ClientErr
     }
     let bytes = read_capped(response, MAX_RESPONSE_BYTES).await?;
     if !status.is_success() {
-        let message = serde_json::from_slice::<Value>(&bytes)
-            .ok()
-            .and_then(|body| {
-                body.pointer("/error/message")
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            })
-            .unwrap_or_default();
+        let body = serde_json::from_slice::<Value>(&bytes).ok();
+        let field = |pointer: &str| {
+            body.as_ref()
+                .and_then(|body| body.pointer(pointer))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        };
         return Err(ClientError::Status {
             status: status.as_u16(),
-            message,
+            message: field("/error/message").unwrap_or_default(),
+            code: field("/error/code"),
         });
     }
     Ok(bytes.to_vec())
@@ -555,16 +560,48 @@ pub struct SigningContext {
     pub host_register_signature_required: bool,
 }
 
+/// Why a host has, or has no, signing context to show its parent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SigningContextLookup {
+    /// The instance served its context.
+    Available(SigningContext),
+    /// 503 `instance_id_unconfigured`: the operator set no `MOMO_INSTANCE_ID`,
+    /// so nothing signed could verify there.
+    Unconfigured,
+    /// 404: a server from before the route.
+    NotOffered,
+}
+
+impl SigningContextLookup {
+    pub fn context(&self) -> Option<&SigningContext> {
+        match self {
+            Self::Available(context) => Some(context),
+            _ => None,
+        }
+    }
+
+    /// The word the parent app is told (`signingContext` on the request line).
+    pub fn state(&self) -> &'static str {
+        match self {
+            Self::Available(_) => "available",
+            Self::Unconfigured => "unconfigured",
+            Self::NotOffered => "not_offered",
+        }
+    }
+}
+
 /// The owner's signing context, with the owner's token (the same one the
-/// registration itself uses). `Ok(None)` when the instance has none (503
-/// `instance_id_unconfigured`, or a build without the route): nothing signed
-/// could verify there, so the registration goes unsigned and the server
-/// decides.
+/// registration itself uses). Only two answers mean "this instance offers
+/// none" and let the registration go unsigned for the server to decide: 404
+/// (a build without the route) and the *named* 503 `instance_id_unconfigured`.
+/// Any other failure — an overloaded proxy's bare 503, a 500, a dropped
+/// connection — is an error, so a signed registration is never silently
+/// downgraded by a transient fault (#3155 review).
 pub async fn fetch_signing_context(
     base: &str,
     workspace_id: Uuid,
     bearer: &str,
-) -> Result<Option<SigningContext>, ClientError> {
+) -> Result<SigningContextLookup, ClientError> {
     let http = http_client()?;
     let response = http
         .get(format!(
@@ -575,12 +612,39 @@ pub async fn fetch_signing_context(
         .await
         .map_err(|error| ClientError::Transport(error.to_string()))?;
     match read_response(response).await {
-        Ok(bytes) => Ok(Some(decode::<SigningContext>(&bytes)?)),
+        Ok(bytes) => Ok(SigningContextLookup::Available(decode::<SigningContext>(
+            &bytes,
+        )?)),
+        Err(ClientError::Status { status: 404, .. }) => Ok(SigningContextLookup::NotOffered),
         Err(ClientError::Status {
-            status: 503 | 404, ..
-        }) => Ok(None),
+            status: 503,
+            code: Some(code),
+            ..
+        }) if code == "instance_id_unconfigured" => Ok(SigningContextLookup::Unconfigured),
         Err(error) => Err(error),
     }
+}
+
+/// Withdraw a host row this process registered and then could not stand
+/// behind (`DELETE …/work-hosts/{id}` with the owner's bearer, the same
+/// token the registration used). Best effort: the caller reports its own
+/// failure, not this one.
+pub async fn revoke_registered_host(
+    base: &str,
+    workspace_id: Uuid,
+    bearer: &str,
+    host_id: Uuid,
+) -> Result<(), ClientError> {
+    let http = http_client()?;
+    let response = http
+        .delete(format!(
+            "{base}/v1/workspaces/{workspace_id}/work-hosts/{host_id}"
+        ))
+        .bearer_auth(bearer)
+        .send()
+        .await
+        .map_err(|error| ClientError::Transport(error.to_string()))?;
+    read_response(response).await.map(|_| ())
 }
 
 #[cfg(test)]

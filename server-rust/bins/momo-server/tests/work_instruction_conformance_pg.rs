@@ -10,7 +10,7 @@
 //! | `a_retry_answers_the_same_and_a_reused_nonce_is_refused` | drop the pre-verify lookup (a retry becomes 409 `device_nonce_replayed`) or answer a different instruction as a retry |
 //! | `offline_and_closed_are_refused_before_the_nonce_is_spent` | check the host or the session after the signature (the nonce burns; the resend is 409) |
 //! | `only_the_owner_instructs` | drop the session-owner or host-owner check |
-//! | `every_misplaced_signature_is_refused_and_v1_input_still_verifies` | rebuild from the request instead of the session/host/text/mode, or refuse the v1 `input` the phone signs today |
+//! | `every_misplaced_signature_is_refused_and_v1_input_is_refused` | rebuild from the request instead of the session/host/text/mode, or accept a v1 `input` again (#3154: v1 is retired) |
 //! | `a_signed_resume_runs_under_the_session_the_owner_named` | allocate the successor id on the server, drop the tool/channel binding, or keep the E3 blanket 403 |
 //!
 //! `#[ignore]` — needs a real Postgres plus the runtime roles:
@@ -1023,7 +1023,7 @@ async fn only_the_owner_instructs() {
 
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
-async fn every_misplaced_signature_is_refused_and_v1_input_still_verifies() {
+async fn every_misplaced_signature_is_refused_and_v1_input_is_refused() {
     let _lock = test_lock().await;
     let s = stage(true).await;
     let session = s.session().await;
@@ -1108,8 +1108,11 @@ async fn every_misplaced_signature_is_refused_and_v1_input_still_verifies() {
     );
     assert_eq!(s.input_controls().await, 0);
 
-    // The phone's native signer allows v1 only today: an `input` in v1 bytes
-    // (same meaning) is accepted.
+    // #3154: control.v1 is gone. Both signers moved to v2 (input, spawn) and
+    // v3 (permission) in #3028/#3128/#3153, so an `input` in v1 bytes — which
+    // says the same thing as v2 — is refused like any other statement that does
+    // not verify, and spends nothing.
+    let before = s.input_controls().await;
     let nonce = Uuid::new_v4();
     let signature = instruction_signature(
         &s,
@@ -1128,18 +1131,12 @@ async fn every_misplaced_signature_is_refused_and_v1_input_still_verifies() {
             instruction_body("v1로 서명", InputMode::Queue, nonce, signature),
         )
         .await;
-    assert_eq!(status, 201, "a v1 input verifies: {body}");
-    let audit: Value = sqlx::query_scalar(
-        "SELECT detail FROM audit_log WHERE workspace_id = $1 AND action = 'work.instruction.sent'",
-    )
-    .bind(s.workspace)
-    .fetch_one(&s.su)
-    .await
-    .unwrap();
-    assert!(
-        audit.to_string().contains("momo.human.control.v1"),
-        "{audit}"
+    assert_eq!(
+        (status, code(&body)),
+        (403, Some("device_signature_invalid")),
+        "a v1 input no longer verifies: {body}"
     );
+    assert_eq!(s.input_controls().await, before);
 }
 
 // ---------------------------------------------------------------------------
@@ -1177,9 +1174,58 @@ async fn orphaned_source(s: &Stage) -> Uuid {
     source
 }
 
-fn resume_signature(s: &Stage, successor: Uuid, tool: &str, channel: Uuid, nonce: Uuid) -> Value {
+/// A live agent member of the workspace.
+async fn seed_agent(s: &Stage, handle: &str) -> Uuid {
+    let id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, 'agent', $3, $3)",
+    )
+    .bind(id)
+    .bind(s.workspace)
+    .bind(format!("{handle}-{}", &id.simple().to_string()[..6]))
+    .execute(&s.su)
+    .await
+    .expect("seed agent member");
+    id
+}
+
+/// One event in the session's thread that names `agent`, the way the host's
+/// relay does (the ACP event's `agent_member_id`).
+async fn report_agent(s: &Stage, session: Uuid, agent: Uuid) {
+    sqlx::query(
+        "WITH ws AS (SELECT channel_id, root_message_id FROM work_session WHERE id = $1), \
+              bumped AS ( \
+                UPDATE channel_seq SET last_seq = last_seq + 1 \
+                 WHERE workspace_id = $2 AND channel_id = (SELECT channel_id FROM ws) \
+                RETURNING last_seq AS seq) \
+         INSERT INTO message \
+           (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, \
+            props, root_id) \
+         SELECT $2, ws.channel_id, b.seq, 1, 0, $3, 'system', 'agent status', \
+                jsonb_build_object('kind', 'work_session_event', \
+                                   'event', jsonb_build_object('agent_member_id', $4::text)), \
+                ws.root_message_id \
+           FROM bumped b, ws",
+    )
+    .bind(session)
+    .bind(s.workspace)
+    .bind(s.person)
+    .bind(agent.to_string())
+    .execute(&s.su)
+    .await
+    .expect("report the session's agent");
+}
+
+fn resume_signature(
+    s: &Stage,
+    successor: Uuid,
+    tool: &str,
+    channel: Uuid,
+    nonce: Uuid,
+    agent: Uuid,
+) -> Value {
     let issued = now_ms();
-    let agent = Uuid::from_u128(0x3027_a9e7);
     let bytes = HumanControl {
         instance_id: INSTANCE_ID,
         workspace_id: s.workspace,
@@ -1213,6 +1259,8 @@ async fn a_signed_resume_runs_under_the_session_the_owner_named() {
     let _lock = test_lock().await;
     let s = stage(true).await;
     let source = orphaned_source(&s).await;
+    let agent = seed_agent(&s, "resume-agent").await;
+    report_agent(&s, source, agent).await;
     let path = format!(
         "/v1/workspaces/{}/work-sessions/{source}/resume",
         s.workspace
@@ -1240,7 +1288,7 @@ async fn a_signed_resume_runs_under_the_session_the_owner_named() {
                 &path,
                 &s.access,
                 json!({ "targetHostId": s.host, "sessionId": successor,
-                        "humanSignature": resume_signature(&s, successor, tool, channel, Uuid::new_v4()) }),
+                        "humanSignature": resume_signature(&s, successor, tool, channel, Uuid::new_v4(), agent) }),
             )
             .await;
         assert_eq!(
@@ -1257,7 +1305,7 @@ async fn a_signed_resume_runs_under_the_session_the_owner_named() {
             &path,
             &s.access,
             json!({ "targetHostId": s.host, "sessionId": successor,
-                    "humanSignature": resume_signature(&s, successor, "claude", s.channel, Uuid::new_v4()) }),
+                    "humanSignature": resume_signature(&s, successor, "claude", s.channel, Uuid::new_v4(), agent) }),
         )
         .await;
     assert_eq!(status, 201, "{body}");
@@ -1271,7 +1319,7 @@ async fn a_signed_resume_runs_under_the_session_the_owner_named() {
     .await
     .unwrap();
     assert!(human_nonce.is_some(), "the spawn carries the statement");
-    assert_eq!(spawn_agent, Some(Uuid::from_u128(0x3027_a9e7)));
+    assert_eq!(spawn_agent, Some(agent));
     let poll = s.poll().await;
     let spawn = poll["workControls"]
         .as_array()
@@ -1285,12 +1333,13 @@ async fn a_signed_resume_runs_under_the_session_the_owner_named() {
 
     // A second resume naming a taken successor id is refused by name.
     let source = orphaned_source(&s).await;
+    report_agent(&s, source, agent).await;
     let (status, body) = s
         .post(
             &format!("/v1/workspaces/{}/work-sessions/{source}/resume", s.workspace),
             &s.access,
             json!({ "targetHostId": s.host, "sessionId": successor,
-                    "humanSignature": resume_signature(&s, successor, "claude", s.channel, Uuid::new_v4()) }),
+                    "humanSignature": resume_signature(&s, successor, "claude", s.channel, Uuid::new_v4(), agent) }),
         )
         .await;
     assert_eq!(
@@ -1298,4 +1347,202 @@ async fn a_signed_resume_runs_under_the_session_the_owner_named() {
         (409, Some("resume_session_id_taken")),
         "{body}"
     );
+}
+
+/// Spawn controls and spent nonces: what a refused or replayed resume must
+/// not have added.
+async fn resume_footprint(s: &Stage) -> (i64, i64) {
+    let spawns: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM work_control WHERE workspace_id = $1 AND kind = 'spawn'",
+    )
+    .bind(s.workspace)
+    .fetch_one(&s.su)
+    .await
+    .unwrap();
+    let nonces: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM human_control_nonce WHERE workspace_id = $1")
+            .bind(s.workspace)
+            .fetch_one(&s.su)
+            .await
+            .unwrap();
+    (spawns, nonces)
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_signed_resume_must_name_the_agent_the_session_ran() {
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    let source = orphaned_source(&s).await;
+    let path = format!(
+        "/v1/workspaces/{}/work-sessions/{source}/resume",
+        s.workspace
+    );
+    let ran = seed_agent(&s, "ran").await;
+    let other = seed_agent(&s, "other").await;
+    let resume = |agent: Uuid| {
+        let successor = Uuid::new_v4();
+        json!({ "targetHostId": s.host, "sessionId": successor,
+                "humanSignature": resume_signature(&s, successor, "claude", s.channel, Uuid::new_v4(), agent) })
+    };
+    let refused = |status: u16, body: &Value, what: &str| {
+        assert_eq!(
+            (status, code(body)),
+            (403, Some("resume_agent_mismatch")),
+            "{what}: {body}"
+        );
+    };
+
+    // The session has reported no agent: nothing to vouch for the signed one.
+    let before = resume_footprint(&s).await;
+    let (status, body) = s.post(&path, &s.access, resume(ran)).await;
+    refused(status, &body, "a session that named no agent");
+
+    report_agent(&s, source, ran).await;
+    // Another live agent, a person, a made-up id: none is the session's.
+    for (agent, what) in [
+        (other, "another agent of the workspace"),
+        (s.person, "a human member"),
+        (Uuid::new_v4(), "an id that is nobody"),
+    ] {
+        let (status, body) = s.post(&path, &s.access, resume(agent)).await;
+        refused(status, &body, what);
+    }
+    assert_eq!(
+        resume_footprint(&s).await,
+        before,
+        "a refused agent spends no nonce and writes no spawn"
+    );
+
+    // A host that reports a person as the session's agent does not make the
+    // person an agent: the id must be a live agent member.
+    let liar = orphaned_source(&s).await;
+    report_agent(&s, liar, s.person).await;
+    let liar_path = format!("/v1/workspaces/{}/work-sessions/{liar}/resume", s.workspace);
+    let (status, body) = s.post(&liar_path, &s.access, resume(s.person)).await;
+    refused(status, &body, "a reported id that is not an agent member");
+
+    // The same lie about an agent that is gone, or that belongs to another
+    // workspace: a reported id is only good for a live agent of this one.
+    let gone = seed_agent(&s, "gone").await;
+    sqlx::query("UPDATE member SET deleted_at = now() WHERE id = $1")
+        .bind(gone)
+        .execute(&s.su)
+        .await
+        .unwrap();
+    let foreign_workspace = Uuid::new_v4();
+    sqlx::query("INSERT INTO workspace (id, slug, name) VALUES ($1, $2, $2)")
+        .bind(foreign_workspace)
+        .bind(format!("hc-{foreign_workspace}"))
+        .execute(&s.su)
+        .await
+        .unwrap();
+    let foreign = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, 'agent', 'foreign', 'foreign')",
+    )
+    .bind(foreign)
+    .bind(foreign_workspace)
+    .execute(&s.su)
+    .await
+    .unwrap();
+    for (agent, what) in [
+        (gone, "a deleted agent"),
+        (foreign, "another workspace's agent"),
+    ] {
+        let source = orphaned_source(&s).await;
+        report_agent(&s, source, agent).await;
+        let path = format!(
+            "/v1/workspaces/{}/work-sessions/{source}/resume",
+            s.workspace
+        );
+        let (status, body) = s.post(&path, &s.access, resume(agent)).await;
+        refused(status, &body, what);
+    }
+
+    // The host reports the session's agent: that agent resumes it.
+    let (status, body) = s.post(&path, &s.access, resume(ran)).await;
+    assert_eq!(status, 201, "{body}");
+    let successor = Uuid::parse_str(body["workSession"]["id"].as_str().unwrap()).unwrap();
+
+    // A resume of the resume is checked against the owner's own signed
+    // statement, not the host's word: the successor's events say `other`,
+    // the signed spawn says `ran`, and `ran` is who resumes it.
+    report_agent(&s, successor, other).await;
+    // Lost again, this time on the old laptop, so this Mac is a fresh target.
+    sqlx::query(
+        "UPDATE work_session SET status = 'orphaned', idle_at = NULL, host_lost_at = NULL, \
+                host_id = (SELECT host_id FROM work_session WHERE id = $2) \
+          WHERE id = $1",
+    )
+    .bind(successor)
+    .bind(source)
+    .execute(&s.su)
+    .await
+    .unwrap();
+    let path2 = format!(
+        "/v1/workspaces/{}/work-sessions/{successor}/resume",
+        s.workspace
+    );
+    let (status, body) = s.post(&path2, &s.access, resume(other)).await;
+    refused(
+        status,
+        &body,
+        "the host's later word over the owner's signed one",
+    );
+    let (status, body) = s.post(&path2, &s.access, resume(ran)).await;
+    assert_eq!(status, 201, "{body}");
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_retried_signed_resume_answers_with_the_successor_it_made() {
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    let source = orphaned_source(&s).await;
+    let agent = seed_agent(&s, "retry").await;
+    report_agent(&s, source, agent).await;
+    let path = format!(
+        "/v1/workspaces/{}/work-sessions/{source}/resume",
+        s.workspace
+    );
+    let successor = Uuid::new_v4();
+    let nonce = Uuid::new_v4();
+    let request = json!({ "targetHostId": s.host, "sessionId": successor,
+            "humanSignature": resume_signature(&s, successor, "claude", s.channel, nonce, agent) });
+
+    let (status, first) = s.post(&path, &s.access, request.clone()).await;
+    assert_eq!(status, 201, "{first}");
+    let made = resume_footprint(&s).await;
+
+    // The response was lost; the client sends the very same body again.
+    let (status, again) = s.post(&path, &s.access, request.clone()).await;
+    assert_eq!(status, 201, "the retry is answered, not refused: {again}");
+    assert_eq!(again["workSession"]["id"], first["workSession"]["id"]);
+    assert_eq!(
+        resume_footprint(&s).await,
+        made,
+        "a retry writes no second spawn and spends no second nonce"
+    );
+    let successors: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM work_session WHERE resumed_from_session_id = $1")
+            .bind(source)
+            .fetch_one(&s.su)
+            .await
+            .unwrap();
+    assert_eq!(successors, 1);
+
+    // Only that exact retry: another nonce for the same successor id is not
+    // the same statement, and another person is not the owner.
+    let fresh = json!({ "targetHostId": s.host, "sessionId": successor,
+            "humanSignature": resume_signature(&s, successor, "claude", s.channel, Uuid::new_v4(), agent) });
+    let (status, body) = s.post(&path, &s.access, fresh).await;
+    assert_eq!(status, 409, "another nonce is not a retry: {body}");
+    let (status, body) = s.post(&path, &s.other_access, request).await;
+    assert_ne!(
+        status, 201,
+        "a stranger cannot fish the session out: {body}"
+    );
+    assert_eq!(resume_footprint(&s).await, made);
 }

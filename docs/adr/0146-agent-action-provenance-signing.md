@@ -654,3 +654,35 @@ E10 검수(H2)는 D-6 ②의 전제가 서버에서 강제되지 않는다고 �
 - `momo-workd` `session_grant`(단위 10건): 종류별 범위 규칙, `..`·심볼릭 링크·상대 경로, 얕은 디렉터리, 파괴적 종류, 잘린 미리보기, 세대 무효화, 개수 한도.
 - `momo-workd` `invariants` inv_38(같은 명령 자동 허락·다른 명령 재질문·거부 후 유지·세대 올림 뒤 재질문·`approval.decided` 미사용), inv_39(once 서명·session 봉투 바꿔치기·거부, 모두 기억 없음), inv_40(R2 미고정 host의 미검증 봉투), inv_41(중계된 폐기서가 허락을 끊고 위조 폐기서는 끊지 않음), `control_socket` 단위 시험(`pin_root`·`reset_signature_requirement`가 세대를 올리고 거부된 op는 올리지 않음).
 - `momo-server` `human_control_conformance_pg::a_signed_session_allow_is_accepted_and_carries_its_scope`와 `every_misplaced_signed_allow_is_refused_by_name`의 범위 바꿔치기 두 건·거부에 붙은 session.
+
+## 증보 2026-09-29 — control.v1 폐기, 서명 재개의 agent 대조·재전송, 호스트 등록 후속 (#3154)
+
+#3153(폰·데스크탑이 v2 input·spawn과 v3 permission만 서명)과 #3155(호스트 등록 서명 흐름)의 검수가 남긴 엔진 쪽 후속이다. 새 공개 표면은 없다. 결정 한 가지(v1 폐기)와 이미 있는 라우트의 거절·멱등 규칙만 바뀐다. 위 「버전 정합」 표들과 「남은 것」의 해당 줄은 이 증보로 대체한다.
+
+### control.v1을 받지 않는다
+
+- **서버와 workd 모두 v1을 거절한다.** 두 곳이 같은 `HumanControl::verify_any`를 쓰므로 한 곳을 고쳤다. 이제 받는 것은 v3, 그리고 v2(미리보기 있는 permission 제외)다. 어느 종류든 v1이면 `device_signature_invalid`고 nonce는 쓰이지 않는다. `ControlSchema::V1`은 남긴다. 공유 벡터가 v1 바이트를 만들어 「거절됨」을 증명해야 하기 때문이다.
+- **근거(팀 기기 빌드).** v1은 R2 서명기가 처음 들어간 2026-09-28 하루 동안만 데스크탑(E5 #3025)과 폰 네이티브(#3066)에 있었고, 같은 날 두 서명기가 v2로 옮겼다(데스크탑 `99ca020c2`, 폰 `bbb0ea488`, #3028). permission은 2026-09-29 #3128에서 v3로 갔고, 폰 허용 목록과 `humanControl.ts`의 v1은 #3153에서 지웠다. 기록된 증거 빌드는 데스크탑 0.1.12(2026-09-27, 서명기 이전)와 iOS 3026이며 어느 쪽도 서명을 보내지 않는다. 서버 0.1.14는 서명 검증을 켜지 않은 채(`MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED` 꺼짐) 배포됐다.
+- **남는 위험.** 2026-09-28~29 사이 owner 기기에 직접 깐 개발 빌드가 v1로 input·permission을 서명하면, 보낸 서명은 플래그와 무관하게 검증되므로 그 요청이 403이 된다. 해당 기기는 v2/v3 서명기가 든 빌드로 다시 깔면 된다. 플래그로 v1을 남기는 안은 택하지 않았다: v1은 서명기가 없는 표면이라 「받을 이유」가 남아 있지 않고, 플래그는 결국 보안 규칙을 설정 뒤에 숨긴다.
+
+### 서명 재개(`POST …/work-sessions/{session}/resume`)
+
+- **agent 대조.** 서명된 spawn의 `agentMemberId`가 재개되는 세션의 agent와 같아야 한다. 아니면 403 `resume_agent_mismatch`이고 슬롯도 nonce도 쓰지 않는다. 세션 행에는 agent 열이 없어서 서버가 아는 기록을 신뢰 순서로 읽는다.
+  1. 그 세션의 이전 **서명된 spawn**(`work_control.human_spawn_agent_member_id`). 재개의 재개다. 소유자 자신의 서명이라 host의 말보다 앞선다.
+  2. 아니면 세션 스레드의 가장 최근 ACP 이벤트가 실은 `agent_member_id`(host가 보고한 값. 데스크탑이 서명할 agent를 읽는 곳과 같다).
+  - 어느 쪽이든 그 id는 이 워크스페이스의 살아 있는 `agent` 멤버여야 한다. 기록이 없는 세션은 거절한다(fail-closed). 서명 재개를 만드는 유일한 클라이언트가 이미 이벤트에서 agent를 읽지 못하면 서명을 거부(`RESUME_AGENT_UNKNOWN_LINE`)하므로 지금 동작하는 흐름은 깨지지 않는다. 서명 없는 재개(플래그 꺼짐)는 이 검사를 받지 않는다.
+- **후속 세션 id 재전송은 멱등이다.** 응답이 유실돼 클라이언트가 같은 `sessionId`·서명을 다시 보내면(#3153) 원본은 이미 `ended`라서 「only an orphaned work session can resume」 409가 났고, 성공한 재개가 실패로 보였다. 이제 다음을 모두 만족할 때만 이미 만든 후속 세션을 그대로 돌려준다(201, 쓰기 없음, nonce 재사용 없음): 후속 세션이 있고, 호출자의 것이고, 같은 대상 host이며, 이 원본에서 재개됐고(`resumed_from_session_id`), 호출자가 그 채널의 활성 멤버이며, 그 세션의 spawn 컨트롤이 이 요청과 **같은 nonce**를 실었다. 다른 nonce나 다른 사람의 같은 id는 종전대로 409/403이다.
+- **받아들인 위험(보안 검수 M1).** 서명된 spawn이 없는 원본은 host가 보고한 마지막 `agent_member_id`가 기준이다. 그 세션의 host(소유자 자신의 Mac, D-10의 신뢰 뿌리)가 거짓 id를 보고하면 데스크탑이 그 agent로 서명하고 서버도 통과시킨다. 보고를 위조할 수 있는 것은 그 host뿐이고(일반 멤버는 중첩 props를 보낼 수 없다), 그 host는 세션의 다른 모든 보고도 좌우한다. 이벤트 수신 시 agent id 검증이나 spawn 시 서버 기록은 후속이다. 기록이 아예 없는 세션(첫 이벤트 전에 끊긴 것)은 서명 재개가 거절되는 종단 상태다(서명 없는 재개는 플래그 꺼짐일 때 가능).
+- **남은 것.** 후속 세션 id가 다른 워크스페이스의 세션 id와 겹치면(전역 PK) 이름 없는 500이 나는 것은 그대로다(무작위 UUID, 권한 이득 없음).
+
+### 호스트 등록(`momo-workd register --sign-stdin`, #3155 검수 Low)
+
+- **503을 조용히 무서명으로 받지 않는다.** signing-context가 없는 것으로 보는 응답은 404(라우트 이전 서버)와 **이름 있는** 503 `instance_id_unconfigured`뿐이다. 그 밖의 503·5xx·연결 오류는 등록을 멈춘다. 이름 있는 503으로 무서명 등록을 진행할 때는 부모 앱에 `signingContext: "unconfigured"`를 알리고 workd 로그에 경고를 남긴다(서버가 서명을 요구하면 어차피 403이다).
+- **서버 행이 고아가 되지 않는다.** 등록 POST가 성공한 뒤의 어떤 실패도(서명한 host id와 다른 행, 다른 키·워크스페이스·scope의 행, 상태 파일 쓰기 실패) 같은 소유자 토큰으로 그 행을 `DELETE …/work-hosts/{id}`로 거두고, 키와 상태 파일도 지운다. 거두지 못하면 경고로 남는다(소유자가 목록에서 직접 끊는다).
+- **타임아웃 뒤에 host 키가 남지 않는다.** 데스크탑 셸이 등록 자식을 기한에 죽이면 자식의 정리가 돌지 못한다. 셸이 `momo-workd forget`으로 키·상태를, 그 호출이 쓴 설정을 지운다. 죽기 직전 서버에 행이 생겼다면 그 행은 키 없는 행으로 남으므로 소유자가 목록에서 끊는다(잔여 위험).
+- **지문을 비교할 곳이 생긴다.** 확인 창의 host 키 지문은 그 자리에서 대조할 대상이 없었다. workd가 같은 지문(SHA-256 앞 10바이트, 4글자 5묶음)을 등록 요청 줄(`hostKeyFingerprint`)과 등록 완료 줄에 싣고 로그에도 남긴다. 서버의 host 목록은 공개키 전체를 이미 주므로 웹은 같은 함수로 계산해 보일 수 있다(UXUI 후속). 창의 지문은 「그 순간 서명하는 키」의 고정이고, 실시간 대조는 등록 뒤 이 값들 사이에서 한다.
+- **시계 5분.** 서명 시각은 이 Mac의 시계인데 서버는 자기 시계 ±5분만 받는다. 셸이 signing-context의 `serverTimeMs`와 비교해 5분을 넘으면 창을 띄우기 전에 `device_clock_skew`로 거절하고 「날짜·시간을 자동으로 맞춘 뒤 다시 등록」을 안내한다(방향과 분 포함). 문구의 화면 노출 위계는 UXUI 몫이다.
+
+### 시험
+
+- `work_instruction_conformance_pg`: `a_signed_resume_must_name_the_agent_the_session_ran`, `a_retried_signed_resume_answers_with_the_successor_it_made`, v1 input 거절. `human_control_vectors`: `verify_any_refuses_every_v1_statement`. `momo-workd` `register_cleanup`(모의 서버, 실제 바이너리). 데스크탑 `a_register_that_times_out_takes_its_key_and_config_with_it`, `a_mac_more_than_five_minutes_off_the_server_is_told_before_the_dialog`.

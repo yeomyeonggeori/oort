@@ -1099,7 +1099,7 @@ impl MentionSettings {
 
 /// Human device-key settings (ADR-0146 개정 2026-09-28, #3022).
 ///
-/// * `MOMO_INSTANCE_ID` — the value every `momo.human.control.v1` statement
+/// * `MOMO_INSTANCE_ID` — the value every `momo.human.control.v2` statement
 ///   carries in its `instance_id` line, so a statement signed for one instance
 ///   does not verify on another (D-5). Opaque, operator-chosen, stable for the
 ///   life of the instance. Clients never build it from a URL: E3 (#3023)
@@ -1119,7 +1119,7 @@ impl MentionSettings {
 /// * `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED` — `true` makes a person's
 ///   instruction to a member-scoped host (a permission **allow** today; the
 ///   signed `input`/`spawn` route is E7 #3027) without a verified
-///   `momo.human.control.v1` signature a 403 `device_signature_required`, and
+///   `momo.human.control.v2` signature a 403 `device_signature_required`, and
 ///   refuses the owner's resume onto a member host (v1 cannot sign a spawn
 ///   into a session the server chose, #3024 M2). Default **off** (ADR-0146
 ///   D-11, Q11: closed until the R1 re-review and the R2 review PASS). A
