@@ -235,6 +235,7 @@ pub async fn create(
                         display_name,
                         handle,
                         model: momo_auth::HOSTED_AGENT_MODEL.to_string(),
+                        model_source: momo_agent::ModelSource::Agent,
                         base_url: momo_auth::HOSTED_AGENT_INERT_BASE_URL.to_string(),
                         system_prompt: None,
                         config: json!({"execution_mode":"hosted_dial_in"}),

@@ -243,10 +243,10 @@ pub use mention::{
 pub use provisioning::{
     agent_owner_in_tx, create_agent_identity_in_tx, default_enabled_tools,
     load_agent_model_policy_in_tx, load_agent_profile_in_tx, normalized_model,
-    normalized_system_prompt, reject_credential_shaped_fields, set_agent_paused_in_tx,
-    upsert_agent_profile_in_tx, validate_agent_profile, validated_config, AgentCreation,
-    AgentMember, AgentProfile, AgentProfileSpec, AgentSpecInvalid, NewAgentMember,
-    DEFAULT_ENABLED_TOOLS,
+    normalized_system_prompt, reject_credential_shaped_fields, set_agent_model_source_in_tx,
+    set_agent_paused_in_tx, upsert_agent_profile_in_tx, validate_agent_profile, validated_config,
+    AgentCreation, AgentMember, AgentProfile, AgentProfileSpec, AgentSpecInvalid, ModelSource,
+    NewAgentMember, DEFAULT_ENABLED_TOOLS,
 };
 pub use routing::{
     validate_request_routing, RequestedRouting, RoutingInvalid, MAX_ROUTING_MODEL_LENGTH,

@@ -66,6 +66,8 @@ use serde_json::{json, Map, Value};
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
+use crate::provisioning::ModelSource;
+
 use crate::tools::{ToolCall, ToolGrant};
 
 /// How long a pending approval may hold its agent's concurrency slot.
@@ -123,6 +125,8 @@ pub struct LockedApproval {
     pub status: String,
     pub expires_at: Option<DateTime<Utc>>,
     pub agent_model: String,
+    /// `agent.model_source` (#3147).
+    pub agent_model_source: ModelSource,
     pub run_input: Value,
     pub step_count: i32,
     pub max_steps: i32,
@@ -280,7 +284,7 @@ pub async fn lock_approval_in_tx(
     let row = sqlx::query(
         "SELECT a.id, a.workspace_id, a.run_id, a.channel_id, a.requested_by, \
                 a.request_message_id, a.action_type, a.payload, a.status::text AS status_label, \
-                a.expires_at, ag.model AS agent_model, r.input AS run_input, \
+                a.expires_at, ag.model AS agent_model, ag.model_source AS agent_model_source, r.input AS run_input, \
                 r.step_count, r.max_steps, r.depth \
            FROM approval a \
            JOIN agent_run r ON r.id = a.run_id \
@@ -306,6 +310,10 @@ pub async fn lock_approval_in_tx(
         status: row.try_get("status_label").map_err(DbError::from)?,
         expires_at: row.try_get("expires_at").map_err(DbError::from)?,
         agent_model: row.try_get("agent_model").map_err(DbError::from)?,
+        agent_model_source: ModelSource::from_column(
+            &row.try_get::<String, _>("agent_model_source")
+                .map_err(DbError::from)?,
+        ),
         run_input: row.try_get("run_input").map_err(DbError::from)?,
         step_count: row.try_get("step_count").map_err(DbError::from)?,
         max_steps: row.try_get("max_steps").map_err(DbError::from)?,
@@ -989,6 +997,7 @@ pub fn resume_job_payload(
         "channel_id": approval.channel_id.to_string(),
         "agent_member_id": approval.requested_by.to_string(),
         "model": approval.agent_model,
+        "model_source": approval.agent_model_source.as_str(),
         "prompt": approval
             .run_input
             .get("prompt")
@@ -1343,6 +1352,7 @@ mod tests {
             status: "pending".into(),
             expires_at: None,
             agent_model: "gpt-4".into(),
+            agent_model_source: ModelSource::Agent,
             run_input: json!({"prompt": "clean up"}),
             step_count: 1,
             max_steps: 12,
@@ -1372,6 +1382,7 @@ mod tests {
             "channel_id",
             "agent_member_id",
             "model",
+            "model_source",
             "prompt",
             "resume_from_approval_id",
             "approved_tool_call",
@@ -1398,6 +1409,7 @@ mod tests {
             status: "pending".into(),
             expires_at: None,
             agent_model: "gpt-4".into(),
+            agent_model_source: ModelSource::Agent,
             run_input: json!({"prompt": "clean up"}),
             step_count: 1,
             max_steps: 12,
@@ -1460,6 +1472,7 @@ mod tests {
             status: "pending".into(),
             expires_at: None,
             agent_model: "gpt-4".into(),
+            agent_model_source: ModelSource::Agent,
             run_input: json!({}),
             step_count: 7,
             max_steps: 12,
