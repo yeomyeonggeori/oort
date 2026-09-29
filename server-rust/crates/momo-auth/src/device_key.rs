@@ -82,6 +82,9 @@ pub const REFUSAL_DEVICE_KEY_REQUIRES_LINKED_SESSION: &str = "device_key_require
 /// (root) key is not approved: a web tab — or a stolen web token — can issue a
 /// QR, but only the Mac's sign-in holds a root (#3119).
 pub const REFUSAL_DEVICE_KEY_LINK_NOT_FROM_MAC: &str = "device_key_link_not_from_mac";
+/// A second live `ios` key on one sign-in lineage (#3127): register, rebind
+/// and endorse all refuse it.
+pub const REFUSAL_DEVICE_KEY_LINEAGE_HAS_PHONE_KEY: &str = "device_key_lineage_has_phone_key";
 
 /// Why a key ended (`member_device_key_revoked_ck`). The CHECK also allows
 /// `refresh_reuse`: rows a reuse revoked before #3097. Nothing writes it now —
@@ -281,6 +284,10 @@ pub enum DeviceKeyRefusal {
     RequiresLinkedSession,
     /// Endorsing a phone key whose QR link no Mac sign-in issued (#3119).
     LinkNotFromMac,
+    /// The sign-in lineage already holds another live `ios` key (#3127): one
+    /// phone key per lineage. The old key is revoked by the Mac (D-7), or the
+    /// phone links by QR again, before a new key can take its place.
+    LineageHasPhoneKey,
     /// The target key is already revoked and already carries a letter.
     Revoked,
     /// The signature does not verify, or the statement is stale or malformed.
@@ -298,6 +305,7 @@ impl DeviceKeyRefusal {
             DeviceKeyRefusal::RootLinkedSession => REFUSAL_DEVICE_ROOT_LINKED_SESSION,
             DeviceKeyRefusal::RequiresLinkedSession => REFUSAL_DEVICE_KEY_REQUIRES_LINKED_SESSION,
             DeviceKeyRefusal::LinkNotFromMac => REFUSAL_DEVICE_KEY_LINK_NOT_FROM_MAC,
+            DeviceKeyRefusal::LineageHasPhoneKey => REFUSAL_DEVICE_KEY_LINEAGE_HAS_PHONE_KEY,
             DeviceKeyRefusal::Revoked => REFUSAL_DEVICE_KEY_REVOKED,
             DeviceKeyRefusal::SignatureInvalid => REFUSAL_DEVICE_SIGNATURE_INVALID,
         }
@@ -445,6 +453,60 @@ pub async fn insert_device_key_in_tx(
     .bind(&new.label)
     .fetch_optional(&mut *conn)
     .await
+}
+
+/// Serialise everything that decides "this lineage holds one phone key"
+/// (#3127): a transaction-scoped advisory lock on the lineage id. Two
+/// registrations on a lineage with no phone key would otherwise both pass the
+/// check (the lineage share lock does not serialise them). Taken by register,
+/// rebind and endorse, always **after** the lineage's token rows and any key
+/// row lock, and never held across another wait, so it adds no lock cycle.
+async fn lock_phone_key_slot(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+        .bind(format!("phone-key-slot:{workspace_id}:{session_id}"))
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
+/// Another live `ios` key on the lineage `session_id`, other than `exclude`
+/// (#3127). Callers hold [`lock_phone_key_slot`] first.
+async fn other_live_phone_key_id(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    exclude: Option<Uuid>,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT id FROM member_device_key \
+          WHERE workspace_id = $1 AND session_id = $2 AND platform = 'ios' \
+            AND revoked_at IS NULL AND ($3::uuid IS NULL OR id <> $3) \
+          LIMIT 1",
+    )
+    .bind(workspace_id)
+    .bind(session_id)
+    .bind(exclude)
+    .fetch_optional(&mut *conn)
+    .await
+}
+
+/// Register-side gate (#3127): take the lineage's phone-key slot and report
+/// whether it is already held by a live `ios` key.
+pub async fn lineage_has_live_phone_key_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    lock_phone_key_slot(conn, workspace_id, session_id).await?;
+    Ok(
+        other_live_phone_key_id(conn, workspace_id, session_id, None)
+            .await?
+            .is_some(),
+    )
 }
 
 /// Whether the sign-in `session_id` of `member_id` was minted by redeeming a
@@ -613,6 +675,17 @@ pub async fn endorse_device_key_in_tx(
     }
     if !target.linked_from_mac {
         return Ok(Err(DeviceKeyRefusal::LinkNotFromMac));
+    }
+    // #3127: one candidate per lineage. A second live phone key on the target's
+    // sign-in — planted with a stolen refresh token, or left by a registration
+    // race or from before the rule — is never approved while the other lives.
+    // The Mac revokes one (D-7) and approves the one it means.
+    lock_phone_key_slot(conn, workspace_id, target.session_id).await?;
+    if other_live_phone_key_id(conn, workspace_id, target.session_id, Some(target.id))
+        .await?
+        .is_some()
+    {
+        return Ok(Err(DeviceKeyRefusal::LineageHasPhoneKey));
     }
 
     let letter = DeviceEndorse {
@@ -925,6 +998,16 @@ pub async fn rebind_device_key_in_tx(
     // ends with its lineage; its phone links by QR and registers anew.
     if key.platform == DEVICE_KEY_PLATFORM_IOS && (!caller_linked || !key.linked_session) {
         return Ok(Err(DeviceKeyRefusal::RequiresLinkedSession));
+    }
+    // #3127: the destination lineage keeps one phone key.
+    if key.platform == DEVICE_KEY_PLATFORM_IOS && key.session_id != caller_session {
+        lock_phone_key_slot(conn, workspace_id, caller_session).await?;
+        if other_live_phone_key_id(conn, workspace_id, caller_session, Some(key.id))
+            .await?
+            .is_some()
+        {
+            return Ok(Err(DeviceKeyRefusal::LineageHasPhoneKey));
+        }
     }
     if signed_at_ms <= 0 || signed_at_ms.abs_diff(now_ms) > MAX_CLOCK_SKEW_MS as u64 {
         return Ok(Err(DeviceKeyRefusal::SignatureInvalid));
