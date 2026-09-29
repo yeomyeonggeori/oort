@@ -123,9 +123,26 @@ let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
 let queryClient: QueryClient | null = null;
 
-beforeAll(() => {
+// #3100: `vi.waitFor` defaults to a 1000ms ceiling. These are "the UI reaches
+// state X" conditions, not "X within N ms" contracts, so under CPU contention
+// the ceiling measured the machine. The condition still fails loudly (with its
+// own assertion message) if X never happens.
+function waitForUi(assertion: () => void) {
+  return vi.waitFor(assertion, { timeout: 20_000, interval: 20 });
+}
+// Keep the per-test ceiling above the waitFor ceiling, otherwise the default
+// 5000ms test timeout silently becomes the wall-clock bound again. A test that
+// never reaches its state still fails: at waitFor's 20s, with its assertion.
+vi.setConfig({ testTimeout: 30_000 });
+
+beforeAll(async () => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
-});
+  // #3100: the lazy `@/app/App` import graph is the single biggest cost of the
+  // file. Charged to the first test it exhausted that test's 5000ms budget
+  // under load and cascaded. Pay it in the hook (own 120s budget) instead; the
+  // tests still assert the same behaviour with the default per-test timeout.
+  await import("@/app/App");
+}, 120_000);
 
 beforeEach(() => {
   sessionStorage.clear();
@@ -249,19 +266,19 @@ function click(testId: string) {
 }
 
 async function submitClaimFrom(host: HTMLElement) {
-  await vi.waitFor(() => {
+  await waitForUi(() => {
     expect(host.querySelector('[data-testid="claim-submit"]')).not.toBeNull();
   });
   fill("claim-password", PASSWORD);
   fill("claim-confirm", PASSWORD);
   click("claim-submit");
-  await vi.waitFor(() => {
+  await waitForUi(() => {
     expect(host.querySelector('[data-testid="onboarding-s1"]')).not.toBeNull();
   });
 }
 
 async function submitS1() {
-  await vi.waitFor(() => {
+  await waitForUi(() => {
     expect(
       document.querySelector('[data-testid="onboarding-s1-workspace-name"]')
     ).not.toBeNull();
@@ -272,7 +289,7 @@ async function submitS1() {
   await act(async () => {
     click("onboarding-s1-submit");
   });
-  await vi.waitFor(() => {
+  await waitForUi(() => {
     expect(document.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
   });
 }
@@ -290,7 +307,7 @@ function unmountApp() {
 describe("claim D1″ on the onboarding 2.0 frame (#2811)", () => {
   it("says the question through 코메토 and shows the first of four dots", async () => {
     const host = await mountApp();
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(host.querySelector('[data-testid="claim-submit"]')).not.toBeNull();
     });
     expect(host.querySelector('[data-testid="onboarding-frame"]')).not.toBeNull();
@@ -345,7 +362,7 @@ describe("claim → S1 submit → S2", () => {
   it("calls E1 and E2 once then renders S2 at dot 3 of 4", async () => {
     const host = await mountApp();
     await submitClaimFrom(host);
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(fetchWorkspace).toHaveBeenCalled();
     });
     await act(async () => {
@@ -390,14 +407,14 @@ describe("reload during S1 re-enters S1", () => {
     unmountApp();
 
     const reloaded = await mountApp();
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(reloaded.querySelector('[data-testid="session-restoring"]')).toBeNull();
     });
     expect(reloaded.querySelector('[data-testid="onboarding-s1"]')).not.toBeNull();
     expect(reloaded.querySelector('[data-testid="onboarding-s2"]')).toBeNull();
     expect(reloaded.querySelector('[data-testid="app-shell"]')).toBeNull();
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(fetchWorkspace).toHaveBeenCalled();
     });
     await act(async () => {
@@ -413,14 +430,14 @@ describe("reload during S1 re-enters S1", () => {
     unmountApp();
 
     const afterS1 = await mountApp();
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(afterS1.querySelector('[data-testid="session-restoring"]')).toBeNull();
     });
     expect(afterS1.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
     expect(afterS1.querySelector('[data-testid="onboarding-s1"]')).toBeNull();
 
     click("onboarding-s2-skip");
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(afterS1.querySelector('[data-testid="onboarding-s2"]')).toBeNull();
     });
     expect(ownerOnboardingIsPending()).toBe(false);
@@ -437,7 +454,7 @@ describe("S1 identity survives into the shell (H-2)", () => {
   it("updates the persisted member so a reload keeps the new name and handle", async () => {
     const host = await mountApp();
     await submitClaimFrom(host);
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(fetchWorkspace).toHaveBeenCalled();
     });
     await act(async () => {
@@ -448,7 +465,7 @@ describe("S1 identity survives into the shell (H-2)", () => {
     expect(getPersistedSession()?.member.displayName).toBe("성재");
     expect(getPersistedSession()?.member.handle).toBe("seongjae");
     click("onboarding-s2-skip");
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(host.querySelector('[data-testid="self-name"]')?.textContent).toBe(
         "성재"
       );
@@ -457,7 +474,7 @@ describe("S1 identity survives into the shell (H-2)", () => {
 
     unmountApp();
     const reloaded = await mountApp();
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(reloaded.querySelector('[data-testid="session-restoring"]')).toBeNull();
     });
     expect(reloaded.querySelector('[data-testid="self-name"]')?.textContent).toBe(
@@ -473,7 +490,7 @@ describe("S1 pending survives S2 skip (H-R2-1)", () => {
     renameWorkspace.mockRejectedValue(new ApiError(500, "engine boom"));
     const host = await mountApp();
     await submitClaimFrom(host);
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(fetchWorkspace).toHaveBeenCalled();
     });
     await act(async () => {
@@ -486,16 +503,16 @@ describe("S1 pending survives S2 skip (H-R2-1)", () => {
     await act(async () => {
       click("onboarding-s1-submit");
     });
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(host.querySelector('[data-testid="onboarding-s1-skip"]')).not.toBeNull();
     });
     click("onboarding-s1-skip");
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(host.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
     });
     expect(hasOwnerOnboardingFlag("workspace-profile")).toBe(true);
     click("onboarding-s2-skip");
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(host.querySelector('[data-testid="app-shell"]')).not.toBeNull();
     });
     expect(hasOwnerOnboardingFlag("workspace-profile")).toBe(true);
@@ -503,7 +520,7 @@ describe("S1 pending survives S2 skip (H-R2-1)", () => {
 
     unmountApp();
     const reloaded = await mountApp();
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(reloaded.querySelector('[data-testid="session-restoring"]')).toBeNull();
     });
     expect(reloaded.querySelector('[data-testid="onboarding-s1"]')).not.toBeNull();

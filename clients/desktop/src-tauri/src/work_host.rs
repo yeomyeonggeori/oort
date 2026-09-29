@@ -501,6 +501,76 @@ pub fn ask_workd_request(
     Ok(value)
 }
 
+/// The folder workd keeps a remote-work account in: `<state>/profiles/<harness>/<label>`
+/// (`state` = beside `host.json`, ADR-0191 D1 A lane). Pure; the disk is
+/// workd's to make and check.
+pub fn expected_remote_profile_dir(layout: &Layout, harness: &str, label: &str) -> PathBuf {
+    layout
+        .root
+        .join("state")
+        .join("profiles")
+        .join(harness)
+        .join(label)
+}
+
+fn set_remote_profile_request(harness: &str, label: Option<&str>) -> Value {
+    json!({ "op": "set_remote_profile", "harness": harness, "label": label })
+}
+
+/// `prepare_remote_profile`'s `path`, believed only when it is exactly the
+/// folder this app computes itself.
+fn accepted_remote_profile_dir(
+    layout: &Layout,
+    harness: &str,
+    label: &str,
+    answer: &Value,
+) -> Result<PathBuf, WorkdError> {
+    let expected = expected_remote_profile_dir(layout, harness, label);
+    match answer.get("path").and_then(Value::as_str) {
+        Some(path) if Path::new(path) == expected => Ok(expected),
+        _ => Err(WorkdError::Socket("profile_path_unexpected".into())),
+    }
+}
+
+/// What the webview may name: a harness that has profiles and a label the
+/// local profile rules accept. Refused here with workd's own words, so a bad
+/// value never reaches the socket.
+fn check_remote_profile_args(harness: &str, label: Option<&str>) -> Result<(), WorkdError> {
+    if crate::harness_profile::harness_env(harness).is_err() {
+        return Err(WorkdError::Refused("unknown_harness".into()));
+    }
+    if let Some(label) = label {
+        if crate::harness_profile::check_label(label).is_err() {
+            return Err(WorkdError::Refused("invalid_label".into()));
+        }
+    }
+    Ok(())
+}
+
+/// The A-lane folder and its variable for a sign-in PTY or a status probe:
+/// `prepare_remote_profile` through the code-signed socket, then only the
+/// path this app computed itself.
+pub fn remote_profile_for_pty(
+    app: &tauri::AppHandle,
+    harness: &str,
+    label: &str,
+) -> Result<(&'static str, PathBuf), String> {
+    let env = crate::harness_profile::harness_env(harness)?;
+    let state = app.state::<WorkHostState>();
+    let service = service(app, &state)?;
+    let dir = service
+        .prepare_remote_profile(harness, label)
+        .map_err(|error| error_code(&error))?;
+    Ok((env, dir))
+}
+
+/// What the webview branches on: workd's refusal label, or the socket code.
+fn error_code(error: &WorkdError) -> String {
+    match error {
+        WorkdError::Socket(code) | WorkdError::Refused(code) => code.clone(),
+    }
+}
+
 /// What the running workd says about R2 trust (`status.humanSignatures`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostTrust {
@@ -664,6 +734,51 @@ impl Service<'_> {
             &json!({ "op": "reset_signature_requirement" }),
         )?;
         Ok(answer.get("required") == Some(&Value::Bool(true)))
+    }
+
+    /// `set_remote_profile` (#3033/#3157): this Mac's 「원격 작업」 account for
+    /// one harness (`None` clears it). The choice lives in workd's state, never
+    /// in a spawn request. `Ok(true)`: the choice file was unreadable and the
+    /// clear reset every harness to no choice.
+    pub fn set_remote_profile(
+        &self,
+        harness: &str,
+        label: Option<&str>,
+    ) -> Result<bool, WorkdError> {
+        check_remote_profile_args(harness, label)?;
+        let pid = self
+            .state
+            .running_pid()
+            .ok_or_else(|| WorkdError::Socket("not_running".into()))?;
+        let answer = ask_workd_request(
+            &self.layout.socket,
+            pid,
+            &set_remote_profile_request(harness, label),
+        )?;
+        Ok(answer.get("reset") == Some(&Value::Bool(true)))
+    }
+
+    /// `prepare_remote_profile` (#3033/#3157): workd makes the account's
+    /// `0700` folder under its state and names it. The answer is believed only
+    /// when it is exactly the folder this app computes for that harness and
+    /// label under its own work-host state: a workd (or a squatter) cannot
+    /// point the sign-in anywhere else. The webview never sees or sends it.
+    pub fn prepare_remote_profile(
+        &self,
+        harness: &str,
+        label: &str,
+    ) -> Result<PathBuf, WorkdError> {
+        check_remote_profile_args(harness, Some(label))?;
+        let pid = self
+            .state
+            .running_pid()
+            .ok_or_else(|| WorkdError::Socket("not_running".into()))?;
+        let answer = ask_workd_request(
+            &self.layout.socket,
+            pid,
+            &json!({ "op": "prepare_remote_profile", "harness": harness, "label": label }),
+        )?;
+        accepted_remote_profile_dir(&self.layout, harness, label, &answer)
     }
 
     /// Where this Mac is registered, if it is.
@@ -1153,6 +1268,49 @@ pub async fn work_host_forget(app: tauri::AppHandle) -> Result<LocalStatus, Stri
     blocking(app, |service| service.forget()).await
 }
 
+/// `set_remote_profile`'s answer for the webview: only whether the choice file
+/// had to be reset.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteProfileSet {
+    pub reset: bool,
+}
+
+/// This Mac's 「원격 작업」 account for one harness (`label: null` clears it).
+/// Errors are workd's refusal labels (`profile_not_found`, `profile_refused`,
+/// …) or a socket code (`not_running`, `socket_unavailable`).
+#[tauri::command]
+pub async fn work_host_set_remote_profile(
+    app: tauri::AppHandle,
+    harness: String,
+    label: Option<String>,
+) -> Result<RemoteProfileSet, String> {
+    blocking(app, move |service| {
+        service
+            .set_remote_profile(&harness, label.as_deref())
+            .map(|reset| RemoteProfileSet { reset })
+            .map_err(|error| error_code(&error))
+    })
+    .await
+}
+
+/// Make the account's folder ready to sign in to. Answers nothing: the path is
+/// used by the shell's own sign-in terminal, never handed to the webview.
+#[tauri::command]
+pub async fn work_host_prepare_remote_profile(
+    app: tauri::AppHandle,
+    harness: String,
+    label: String,
+) -> Result<(), String> {
+    blocking(app, move |service| {
+        service
+            .prepare_remote_profile(&harness, &label)
+            .map(|_| ())
+            .map_err(|error| error_code(&error))
+    })
+    .await
+}
+
 /// At launch: a registered host starts with the app (ADR-0188 D2 첫 단계).
 pub fn start_if_registered(app: &tauri::AppHandle) {
     let app = app.clone();
@@ -1334,6 +1492,100 @@ mod tests {
         let answer = ask_workd(&socket, std::process::id(), "status").unwrap();
         assert!(!heartbeat_of(&answer).failing);
         drop(UnixStream::connect(&socket));
+        let _ = server.join();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #3157: the account ops take a harness and a label and nothing else;
+    /// `null` clears; workd's refusal comes back as its own label; and the
+    /// folder workd names is believed only if it is the one this app computes.
+    #[test]
+    fn the_remote_account_ops_carry_labels_and_believe_only_the_expected_folder() {
+        assert_eq!(
+            set_remote_profile_request("claude", Some("회사")),
+            json!({"op":"set_remote_profile","harness":"claude","label":"회사"})
+        );
+        assert_eq!(
+            set_remote_profile_request("codex", None),
+            json!({"op":"set_remote_profile","harness":"codex","label":null})
+        );
+        // Names the webview may not send never reach the socket.
+        for (harness, label, code) in [
+            ("grok", Some("a"), "unknown_harness"),
+            ("claude", Some("../x"), "invalid_label"),
+            ("claude", Some(".hidden"), "invalid_label"),
+            ("claude", Some("a\u{034F}b"), "invalid_label"),
+            ("claude", Some("a\u{2800}b"), "invalid_label"),
+            ("claude", Some("a\u{FE0F}"), "invalid_label"),
+            ("claude", Some("a\u{E0041}"), "invalid_label"),
+            ("claude", Some(""), "invalid_label"),
+        ] {
+            assert_eq!(
+                check_remote_profile_args(harness, label),
+                Err(WorkdError::Refused(code.into())),
+                "{harness} {label:?}"
+            );
+        }
+        assert_eq!(check_remote_profile_args("claude", None), Ok(()));
+        assert_eq!(check_remote_profile_args("codex", Some("회사")), Ok(()));
+
+        let dir = PathBuf::from("/tmp/wh-remote-profile");
+        let layout = Layout::new(&dir, &dir);
+        let good = expected_remote_profile_dir(&layout, "claude", "회사");
+        assert_eq!(good, dir.join("work-host/state/profiles/claude/회사"));
+        assert_eq!(
+            accepted_remote_profile_dir(
+                &layout,
+                "claude",
+                "회사",
+                &json!({"ok":true,"path": good.display().to_string()})
+            ),
+            Ok(good)
+        );
+        // A workd (or a squatter) that names another folder is not believed.
+        for path in [
+            json!("/Users/someone/.claude"),
+            json!("/tmp/wh-remote-profile/work-host/state/profiles/claude/other"),
+            json!("/tmp/wh-remote-profile/work-host/state/profiles/claude/회사/../.."),
+            json!(7),
+            Value::Null,
+        ] {
+            assert_eq!(
+                accepted_remote_profile_dir(
+                    &layout,
+                    "claude",
+                    "회사",
+                    &json!({"ok":true,"path": path})
+                ),
+                Err(WorkdError::Socket("profile_path_unexpected".into())),
+                "{path}"
+            );
+        }
+    }
+
+    /// workd's refusal reaches the webview as its bare label.
+    #[test]
+    fn a_workd_refusal_is_the_label_the_webview_branches_on() {
+        let dir = PathBuf::from(format!("/tmp/wh-refuse-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket = dir.join("workd.sock");
+        let _ = std::fs::remove_file(&socket);
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            let _ = std::io::BufRead::read_line(&mut std::io::BufReader::new(&stream), &mut line);
+            assert!(line.contains("set_remote_profile") && line.contains("\"label\":\"회사\""));
+            let _ = stream.write_all(b"{\"ok\":false,\"error\":\"profile_not_found\"}\n");
+        });
+        let error = ask_workd_request(
+            &socket,
+            std::process::id(),
+            &set_remote_profile_request("claude", Some("회사")),
+        )
+        .unwrap_err();
+        assert_eq!(error, WorkdError::Refused("profile_not_found".into()));
+        assert_eq!(error_code(&error), "profile_not_found");
         let _ = server.join();
         let _ = std::fs::remove_dir_all(&dir);
     }
