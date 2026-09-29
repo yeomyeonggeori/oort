@@ -37,7 +37,13 @@ import {
   type WorkSession,
 } from '@momo/core/lib/api';
 import {useQuery} from '@tanstack/react-query';
-import React, {useEffect, useMemo, useRef, useState} from 'react';
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   AccessibilityInfo,
   Platform,
@@ -394,7 +400,8 @@ function PermissionCard({
   // mounts with its preview already checked did not move under anyone.
   const readySince = useRef(0);
   const wasReady = useRef(checked !== null);
-  useEffect(() => {
+  // Layout effect: the start is set before the enabled button is painted.
+  useLayoutEffect(() => {
     const ready = checked !== null;
     if (ready && !wasReady.current) readySince.current = Date.now();
     wasReady.current = ready;
