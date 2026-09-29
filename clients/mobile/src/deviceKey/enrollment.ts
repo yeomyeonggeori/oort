@@ -67,7 +67,15 @@ export type DeviceKeyView =
   | {kind: 'reconnect'; fingerprint: string; row: DeviceKey; biometryOff: boolean}
   /** The key is here but the server list did not load. */
   | {kind: 'serverError'; fingerprint: string}
-  | {kind: 'localError'};
+  | {kind: 'localError'}
+  /** #3129 (ADR-0146 D-6 증보 「QR 연결로만」, #3119): this sign-in cannot
+   *  make the phone an instruction device. `address` — the sign-in did not
+   *  come from a QR link (address login, invite); `notFromMac` — the QR was
+   *  not issued from a Mac, so no root may approve it. Either way the one way
+   *  forward is a QR the Mac makes. */
+  | {kind: 'unlinked'; reason: UnlinkedReason; fingerprint: string | null};
+
+export type UnlinkedReason = 'address' | 'notFromMac';
 
 export interface LocalDeviceKey {
   status: DeviceKeyStatus;
@@ -99,6 +107,28 @@ export function rowForPublicKey(
 }
 
 export function deriveDeviceKeyView(input: {
+  local: LocalDeviceKey | undefined;
+  localError: unknown;
+  rows: readonly DeviceKey[] | undefined;
+  rowsError: unknown;
+  /**
+   * #3129: this sign-in is known not to be a QR link — the connect screen's
+   * route this run (`signIn`, `join`), or the server's
+   * `device_key_requires_linked_session` on the last try. Only a key with no
+   * live row reads it: registering would be refused. Unknown after an app
+   * restart, until the server says so.
+   */
+  signInUnlinked?: boolean;
+}): DeviceKeyView {
+  const view = deriveFromSources(input);
+  if (!input.signInUnlinked) return view;
+  if (view.kind === 'unregistered' || view.kind === 'revoked') {
+    return {kind: 'unlinked', reason: 'address', fingerprint: view.fingerprint};
+  }
+  return view;
+}
+
+function deriveFromSources(input: {
   local: LocalDeviceKey | undefined;
   localError: unknown;
   rows: readonly DeviceKey[] | undefined;
@@ -141,6 +171,12 @@ export function deriveDeviceKeyView(input: {
   if (keyNeedsRebind(row)) return {kind: 'reconnect', fingerprint, row, biometryOff};
   switch (row.state) {
     case 'unendorsed':
+      // #3119: a key the server will not let a root approve is not 「승인 전」 —
+      // waiting would never end. `undefined` is an older server: say nothing.
+      if (row.linkedSession === false) return {kind: 'unlinked', reason: 'address', fingerprint};
+      if (row.linkedFromMac === false) {
+        return {kind: 'unlinked', reason: 'notFromMac', fingerprint};
+      }
       return {kind: 'pending', fingerprint, row, biometryOff};
     case 'endorsed':
     case 'root':
@@ -160,9 +196,13 @@ export type EnrollOutcome =
 
 /** A failure with a sentence for the person. */
 export class EnrollError extends Error {
-  constructor(message: string) {
+  /** #3129: the server said this sign-in is not a QR link — the panel turns
+   *  to 「QR 연결 필요」 instead of offering the same refused button again. */
+  readonly unlinked: boolean;
+  constructor(message: string, options: {unlinked?: boolean} = {}) {
     super(message);
     this.name = 'EnrollError';
+    this.unlinked = options.unlinked ?? false;
   }
 }
 
@@ -218,6 +258,14 @@ function enrollFailure(error: unknown): EnrollError {
     if (error.code === DEVICE_KEY_REFUSAL.requiresLinkedSession) {
       return new EnrollError(
         '이 폰으로 지시하려면 맥에서 QR로 한 번 연결하세요. 대화와 알림은 그대로 씁니다.',
+        {unlinked: true},
+      );
+    }
+    // #3127: this sign-in already holds a phone key (the old one is not
+    // revoked yet). The Mac revokes it, or the phone links by QR again.
+    if (error.code === DEVICE_KEY_REFUSAL.lineageHasPhoneKey) {
+      return new EnrollError(
+        '이 연결에는 이미 폰 키가 있습니다. 맥에서 이전 키를 끊거나 QR로 다시 연결하세요.',
       );
     }
     if (error.code === DEVICE_KEY_REFUSAL.notFound) {

@@ -4,7 +4,10 @@ import instructionGolden from "../../../../../../docs/api/work-instruction.golde
 import { ApiError, type HumanSignatureRequest } from "@momo/core/lib/api";
 import { installCoreHost, resetCoreHost } from "@momo/core/runtime/host";
 import { permissionFailure, permissionSentLine, rejectWithInstructionLine } from "@momo/core/features/workbench/agentPane";
+import vectors from "../../../../../../docs/api/human-control-signing-v3.vectors.json";
+import type { PermissionPreview } from "@momo/core/features/workbench/permissionPreview";
 import {
+  ALLOW_NEEDS_PREVIEW_LINE,
   DEFAULT_FOLDER_ID,
   NOT_DELIVERED,
   rejectWithInstruction,
@@ -187,6 +190,13 @@ describe("signed instruction (golden work-instruction `queue`)", () => {
   });
 });
 
+// #3128: the v3 vector's host preview and its hash (what the card's gate hands over).
+const V3_ONCE = vectors.cases.find((c) => c.name === "control_v3_permission_once")!.content as unknown as {
+  preview: PermissionPreview;
+  preview_sha256: string;
+};
+const CHECKED = { preview: V3_ONCE.preview, sha256: V3_ONCE.preview_sha256 };
+
 describe("signed allow (golden work-permission-decision `session_scope_signed`)", () => {
   it.each(["once", "session"] as const)("scope %s: the golden keys, the stored option, the signed scope", async (scope) => {
     const { signer, asked } = recordingSigner();
@@ -197,6 +207,7 @@ describe("signed allow (golden work-permission-decision `session_scope_signed`)"
       requestEventId: "00000000-0000-4000-8000-00000000e001",
       optionId: "allow-once",
       scope,
+      preview: CHECKED,
       signer,
     });
     const [call] = calls;
@@ -212,14 +223,30 @@ describe("signed allow (golden work-permission-decision `session_scope_signed`)"
       optionId: "allow-once",
       optionKind: "allow_once",
       scope,
+      previewSha256: V3_ONCE.preview_sha256,
     });
+    // The signer gets the preview (the desktop shell re-hashes and shows it);
+    // the wire envelope does not (the server rebuilds from its stored hash).
+    expect(asked[0]!.permissionPreview).toEqual(V3_ONCE.preview);
+    expect(JSON.stringify(call!.body)).not.toContain(V3_ONCE.preview_sha256);
     expect(call!.body).not.toHaveProperty("instruction");
+  });
+
+  it("no checked preview: nothing is signed and nothing is sent (#3128)", async () => {
+    const { signer, asked } = recordingSigner();
+    for (const preview of [null, { preview: V3_ONCE.preview, sha256: "not-a-hash" }]) {
+      await expect(
+        signedAllow({ workspaceId: WS, session: SESSION, requestEventId: "e", optionId: "o", scope: "once", preview, signer })
+      ).rejects.toEqual(new SignerRefusal(ALLOW_NEEDS_PREVIEW_LINE));
+    }
+    expect(asked).toEqual([]);
+    expect(calls).toEqual([]);
   });
 
   it("a cancelled signature sends no decision", async () => {
     const { signer } = recordingSigner(new SignerRefusal("취소", true));
     await expect(
-      signedAllow({ workspaceId: WS, session: SESSION, requestEventId: "e", optionId: "o", scope: "once", signer })
+      signedAllow({ workspaceId: WS, session: SESSION, requestEventId: "e", optionId: "o", scope: "once", preview: CHECKED, signer })
     ).rejects.toBeInstanceOf(SignerRefusal);
     expect(calls).toEqual([]);
     expect(permissionFailure(new SignerRefusal("취소", true))).toEqual({ closed: false, text: "취소" });

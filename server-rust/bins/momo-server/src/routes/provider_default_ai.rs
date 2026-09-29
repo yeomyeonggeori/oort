@@ -26,10 +26,12 @@
 //!    operators editing different rows do not overwrite each other (the race
 //!    #3012 removes from notification rules is not reintroduced here).
 //!
-//! What this surface does **not** do yet: the agent-worker does not read these
-//! rows. The precedence it will apply is `agent.model` > `team_agent.modelId` >
-//! `AGENT_MODEL` (brief §4.2: the team row is a default, never an override of an
-//! agent's own model). That wiring is a follow-up (see the PR's 이탈표).
+//! The agent-worker reads these rows on every turn (#3041). The precedence it
+//! applies is the agent's own model > `team_agent.modelId` > `AGENT_MODEL`
+//! (brief §4.2: the team row is a default, never an override of an agent's own
+//! model); `summary` is the welcome opener's row. A row whose position no longer
+//! shows the label it was chosen on refuses the turn instead of answering on
+//! another provider — the same `linkResolved: false` this surface reports.
 
 use axum::extract::State;
 use axum::{Extension, Json};
