@@ -18,6 +18,11 @@ export interface DeviceKeyCopy {
   detail: string;
   /** 번호 붙은 방법 — 지금은 「QR 연결 필요」만 쓴다(#3129). */
   steps?: readonly string[];
+  /**
+   * 보안 경고 한 문장(#3154 M3). 절차 속에 묻히면 안 되는 「하지 말 것」이라 판이
+   * 따로 세운다(강조 블록). 없는 상태가 대부분이다.
+   */
+  warning?: string;
   /** 지문 줄의 이름. 없으면 「지문」. 이전 키의 지문을 보일 때 다르게 부른다. */
   fingerprintLabel?: string;
 }
@@ -45,9 +50,12 @@ export const REVOKE_OLD_KEY_STEPS: readonly string[] = [
 ];
 const AFTER_REVOKE_OLD = '여기로 돌아오면 「새 키로 다시 등록」이 열립니다.';
 const AFTER_REVOKE_REFUSED = '여기로 돌아와 「다시 시도」를 누릅니다.';
+/** 계보에 낯선 폰 키가 있을 수 있다 — 승인하면 그 키가 이 계정으로 지시한다. */
+export const REFUSED_WARNING =
+  '내가 등록한 것이 아니면 승인하지 말고 끊어야 합니다.';
 const OR_RELINK = '맥에서 QR을 새로 만들어 이 폰에 다시 연결해도 됩니다.';
 
-export const MAC_WHERE = '맥의 oort에서 설정 › 기기 › 지시 서명을 여세요.';
+export const MAC_WHERE = '맥의 oort에서 설정 › 기기 › 지시 서명을 엽니다.';
 
 /**
  * 맥 화면과 같은 낱말을 쓴다(`DeviceKeysBlock`: 「승인 전」, 「지시 권한 끊기」).
@@ -104,7 +112,7 @@ export function deviceKeyCopy(view: DeviceKeyView, busy = false): DeviceKeyCopy 
             badge: '맥 확인 필요',
             tone: 'warn',
             headline: '이전 지시 키가 맥에 남아 있어 새 키를 등록할 수 없습니다.',
-            detail: `Face ID가 바뀌어 이전 키는 쓸 수 없지만 맥에는 아직 승인된 채로 있습니다. 이전 키를 끊은 뒤 새 키를 등록하세요. ${OR_RELINK} 새 키도 맥에서 다시 승인해야 지시할 수 있습니다.`,
+            detail: `이 폰의 이전 키는 더 쓸 수 없는 것으로 보입니다(Face ID 등록이 바뀌면 이렇게 됩니다). 맥에는 아직 승인된 채로 남아 있을 수 있습니다. 이전 키를 끊은 뒤 새 키를 등록합니다. ${OR_RELINK} 새 키도 맥에서 다시 승인해야 지시할 수 있습니다.`,
             steps: [...REVOKE_OLD_KEY_STEPS, AFTER_REVOKE_OLD],
             fingerprintLabel: '이전 키 지문',
           }
@@ -112,7 +120,8 @@ export function deviceKeyCopy(view: DeviceKeyView, busy = false): DeviceKeyCopy 
             badge: '맥 확인 필요',
             tone: 'warn',
             headline: '이 연결에 이미 폰 키가 있어 새 키를 등록하지 못했습니다.',
-            detail: `이전 키를 끊으면 등록됩니다. ${OR_RELINK} 짚이는 이전 키가 없다면 맥의 지시 서명 목록에서 키의 이름과 등록 시각을 확인하세요. 내가 등록한 것이 아니면 승인하지 말고 끊으세요.`,
+            detail: `이전 키를 끊으면 등록됩니다. ${OR_RELINK} 짚이는 이전 키가 없다면 맥의 지시 서명 목록에서 키의 이름과 등록 시각을 확인합니다.`,
+            warning: REFUSED_WARNING,
             steps: [...REVOKE_OLD_KEY_STEPS, AFTER_REVOKE_REFUSED],
           };
     case 'unlinked':
