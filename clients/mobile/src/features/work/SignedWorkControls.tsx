@@ -359,8 +359,13 @@ function PermissionCard({
           {ask}
         </Sentence>
         {permission.preview ? (
-          // The whole preview, never clipped: an allow is signed over what the
-          // person saw (0188 D5; design-review B1). The page scrolls, not the box.
+          // The whole preview, never clipped (0188 D5; design-review B1). The
+          // page scrolls, not the box. NOT signed yet: this is inferred from the
+          // server-relayed `agent.status` before the request, and today's allow
+          // (control v2) binds only the request id and option (#3118 R2 H1).
+          // The v3 allow signs the host's preview hash — `checkPermissionPreview`
+          // in @momo/core; moving this card and the signer to it is the uxui
+          // follow-up.
           <Text style={styles.preview} testID="work-permission-preview">
             {permission.preview.text}
           </Text>
