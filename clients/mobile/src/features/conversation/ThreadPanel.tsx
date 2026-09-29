@@ -14,6 +14,8 @@ import {useOnline} from '../inbox/useOnline';
 import {Timeline} from './Timeline';
 import type {MessageRowActions} from './MessageRow';
 import type {UseTimelineResult} from './useTimeline';
+import type {MemoryEvidenceLink} from '@momo/core/features/memory/model';
+import {MissedDigestCard} from '../memory/MissedDigestCard';
 
 // =============================================================================
 // 스레드 — 한 메시지 아래에 달린 답글들.
@@ -45,6 +47,9 @@ import type {UseTimelineResult} from './useTimeline';
 // 뺌으로써 표현한다.
 // =============================================================================
 
+/** 근거 착지 토큰의 시작. 알림 착지 토큰(1부터 오른다)과 겹치지 않는 대역이다. */
+const EVIDENCE_TOKEN_BASE = 1_000_000;
+
 export function ThreadPanel({
   root,
   workspaceId,
@@ -59,6 +64,7 @@ export function ThreadPanel({
   onReplySent,
   onOpenProfile,
   onReaderTookList,
+  memory,
 }: {
   root: Message;
   /** Production supplies both; isolated legacy render fixtures may omit them. */
@@ -93,6 +99,17 @@ export function ThreadPanel({
    * 있으면 사람이 잡는 목록은 이쪽이다.
    */
   onReaderTookList?: () => void;
+  /**
+   * 팀 기억 요약(#3166). 스레드에는 자기 안읽음 경계가 없어서, 채널이 이 방문에서 얼린
+   * 경계(`sinceSeq`)보다 뒤에 온 답글이 있을 때만 「안 읽은 동안」을 세운다. 없으면
+   * 카드도, 「기억 n개 참고」 칩도 없다. `onOpenEvidenceOutside`는 근거가 이 스레드
+   * 밖(본류)에 있을 때 채널이 받아 간다.
+   */
+  memory?: {
+    sinceSeq: number;
+    headSeq: number;
+    onOpenEvidenceOutside: (link: MemoryEvidenceLink) => void;
+  };
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -148,10 +165,53 @@ export function ThreadPanel({
 
   const messages = useMemo(() => [liveRoot, ...replies], [liveRoot, replies]);
 
+  // 경계 뒤에 온 남의 답글 수. 내가 쓴 답글은 안 읽은 것이 아니다.
+  const sinceSeq = memory?.sinceSeq;
+  const unreadReplies = useMemo(
+    () =>
+      sinceSeq === undefined
+        ? 0
+        : replies.filter(
+            reply =>
+              reply.seq > sinceSeq &&
+              !uuidEq(reply.authorMemberId, myMemberId),
+          ).length,
+    [replies, sinceSeq, myMemberId],
+  );
+
   // 채널의 점프와 같은 기계다(`Timeline.jumpTarget`). 토큰이 바뀌는 순간 한 번
   // 돌므로, 답글이 도착해 `ready` 가 되는 그 렌더에서 처음 모습을 드러낸다.
-  const landingMessageId = landOn?.messageId;
-  const landingToken = landOn?.token;
+  //
+  // 요약 근거로 스레드 안 답글에 내려앉는 것도 같은 기계다(#3166). 근거는 사람이 방금
+  // 누른 것이라 알림 착지보다 나중이고, 그래서 한 번 눌린 뒤에는 근거가 이긴다.
+  // 토큰은 알림 착지의 토큰과 겹치지 않는 대역을 쓴다(같은 값이면 Timeline이 새 요청으로
+  // 보지 않는다).
+  const [evidenceLanding, setEvidenceLanding] = useState<{
+    messageId: string;
+    token: number;
+  } | null>(null);
+  const openEvidence = useCallback(
+    (link: MemoryEvidenceLink) => {
+      const here = timeline.state.messages.some(
+        m =>
+          uuidEq(m.id, link.messageId) &&
+          (uuidEq(m.id, root.id) ||
+            (m.rootId !== undefined && uuidEq(m.rootId, root.id))),
+      );
+      if (here) {
+        setEvidenceLanding(current => ({
+          messageId: link.messageId,
+          token: (current?.token ?? EVIDENCE_TOKEN_BASE) + 1,
+        }));
+      } else {
+        memory?.onOpenEvidenceOutside(link);
+      }
+    },
+    [timeline.state.messages, root.id, memory],
+  );
+  useEffect(() => setEvidenceLanding(null), [root.id]);
+  const landingMessageId = evidenceLanding?.messageId ?? landOn?.messageId;
+  const landingToken = evidenceLanding?.token ?? landOn?.token;
   const jumpTarget = useMemo(
     () =>
       landingMessageId !== undefined &&
@@ -182,6 +242,8 @@ export function ThreadPanel({
       // 아니라 그 결과가 모이는 곳이다.
       onTogglePin: togglePin,
       onOpenProfile,
+      workspaceId,
+      onOpenMemoryEvidence: openEvidence,
       // No `onOpenThread`: see the header. Every row here is already in one.
       //
       // No `onQuote` either, and that absence is a decision rather than an
@@ -194,7 +256,16 @@ export function ThreadPanel({
       // decision about where a quoted thread reply lands (본류 or the thread)
       // and belongs to whoever makes that one.
     }),
-    [myMemberId, toggleReaction, editBody, removeMessage, togglePin, onOpenProfile],
+    [
+      myMemberId,
+      toggleReaction,
+      editBody,
+      removeMessage,
+      togglePin,
+      onOpenProfile,
+      workspaceId,
+      openEvidence,
+    ],
   );
 
   const pending = timeline.repliesPending(root.id);
@@ -271,6 +342,21 @@ export function ThreadPanel({
                   headline={notice.text}
                   onDismiss={notice.onDismiss}
                   testID="notification-landing-notice"
+                />
+              ) : null}
+              {/* 안 읽은 동안 요약 (#3166): 채널이 얼린 경계 뒤에 온 남의 답글이 있을 때만. */}
+              {memory !== undefined &&
+              workspaceId !== undefined &&
+              channelId !== undefined &&
+              status === 'ready' ? (
+                <MissedDigestCard
+                  workspaceId={workspaceId}
+                  channelId={channelId}
+                  threadRootId={root.id}
+                  sinceSeq={memory.sinceSeq}
+                  unreadCount={unreadReplies}
+                  headSeq={memory.headSeq}
+                  onOpenEvidence={openEvidence}
                 />
               ) : null}
               <Timeline
