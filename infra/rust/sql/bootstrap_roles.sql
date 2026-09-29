@@ -51,6 +51,33 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO momo_app, momo_relay, momo_worker, momo_notifier;
 
+-- #3161 team memory (ADR-0196): the mem_* write tables are written only through
+-- the SECURITY DEFINER functions (mem_apply_digest / mem_advance_cursor /
+-- mem_record_serving). The ALL TABLES grant above must not restore direct DML;
+-- the RLS write policies are also restricted to mem_definer, this is the second wall.
+DO $$
+DECLARE r text; f text;
+BEGIN
+  IF to_regclass('public.mem_digest') IS NOT NULL THEN
+    FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier'] LOOP
+      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+        EXECUTE format('REVOKE INSERT, UPDATE, DELETE ON TABLE mem_digest, mem_evidence, mem_cursor, mem_serving FROM %I', r);
+      END IF;
+    END LOOP;
+    FOREACH f IN ARRAY ARRAY[
+      'mem_digest_live(uuid)', 'mem_digest_audience_ok(uuid, uuid, uuid)',
+      'mem_digest_rollup_inputs(uuid, uuid, text, bigint, bigint)',
+      'mem_channel_switch(uuid)',
+      'mem_apply_digest(uuid, uuid, text, bigint, bigint, text, uuid[], text, text, text, uuid[])',
+      'mem_advance_cursor(uuid, bigint, uuid, timestamptz)',
+      'mem_record_serving(uuid, uuid[], uuid[], integer, integer, integer)'
+    ] LOOP
+      EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO momo_app', f);
+    END LOOP;
+  END IF;
+END
+$$;
+
 -- Migration 009 can run before these runtime roles exist (the production
 -- internal-smoke order). Reassert the locked join boundary after role creation:
 -- only the NOBYPASSRLS API role may resolve one invite code to its workspace.
