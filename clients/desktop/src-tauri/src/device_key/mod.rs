@@ -64,8 +64,8 @@ use uuid::Uuid;
 
 use enclave::{AuthWindow, EnclaveError};
 use payload::{
-    ControlRequest, EndorseRequest, RebindRequest, RevokeRequest, Signer, Statement, Summary,
-    P256_PUBLIC_KEY_LEN,
+    ControlContent, ControlRequest, EndorseRequest, RebindRequest, RevokeRequest, Signer,
+    Statement, Summary, P256_PUBLIC_KEY_LEN,
 };
 
 /// Shown by Touch ID / the password sheet when a fresh authentication is due.
@@ -109,7 +109,15 @@ pub fn sign_statement(
     let bytes = statement
         .signed_bytes(now_ms)
         .map_err(|error| format!("device_key_payload_rejected: {}", error.code()))?;
-    if !platform.confirm(&statement.summary(local_host)) {
+    let summary = statement.summary(local_host);
+    // H5 (#3120): a `host_register` is never asked about in a dialog that
+    // leaves out the host key, the host id or the label.
+    if let Statement::Control { request, .. } = statement {
+        if !payload::host_register_dialog_complete(&summary, request) {
+            return Err("device_key_dialog_incomplete".into());
+        }
+    }
+    if !platform.confirm(&summary) {
         return Err("device_key_declined".into());
     }
     let (public_key, der) = platform.sign(&bytes).map_err(|error| error.code())?;
@@ -843,10 +851,13 @@ pub async fn device_key_sign_control(
     app: tauri::AppHandle,
     request: ControlRequest,
 ) -> Result<ControlSigned, String> {
-    // `host_register` and `bundle_manifest` are signable bytes (E1) but no
-    // surface asks for them yet, and their dialogs cannot yet show what matters
-    // (the host key, every bundle item): refused until they are wired
-    // (security review H5).
+    // `bundle_manifest` is signable bytes (E1) but no surface asks for it yet,
+    // and its dialog cannot yet show every bundle item: refused until it is
+    // wired (security review H5). `host_register` is refused HERE for good
+    // (#3120): the only host key worth vouching for is the one a
+    // `momo-workd register` child of this shell just made, so it is signed
+    // by `sign_host_register` from that child's own request, never from a
+    // page's (a script must not choose the key a root vouches for).
     let kind = request.content.kind();
     if !SIGNABLE_CONTROL_KINDS.contains(&kind) {
         return Err(format!("device_key_kind_not_enabled: {kind}"));
@@ -862,6 +873,112 @@ pub async fn device_key_sign_control(
         })
     })
     .await
+}
+
+/// What a `momo-workd register` child asked to have signed (#3120), plus the
+/// two facts only this shell knows: the workspace it is registering into and
+/// the label it configured. Never a page's data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostRegisterAsk {
+    pub workspace_id: Uuid,
+    pub label: String,
+    /// The child's own host public key (base64, 32 bytes).
+    pub host_public_key: String,
+    /// The server's `signing-context`; `None` when it has none.
+    pub instance_id: Option<String>,
+    pub server_time_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum HostRegisterAnswer {
+    /// The `registration` object of `POST …/work-hosts`.
+    Signed(Value),
+    /// No root key of this Mac is bound for the workspace (or the server
+    /// cannot verify a signature): register without one and let the server's
+    /// `MOMO_HOST_REGISTER_SIGNATURE_REQUIRED` decide.
+    Unsigned,
+}
+
+/// A statement lives this long: the dialog and Touch ID count against it, the
+/// server accepts up to 10 minutes and a clock ±5 minutes off
+/// (`signing-context`).
+const HOST_REGISTER_LIFETIME_MS: i64 = 9 * 60 * 1000;
+
+/// The `host_register` statement for `ask`, minus the signer: a fresh host id
+/// candidate and nonce, on the server's clock (D-9 시계 보정).
+pub fn host_register_request(
+    ask: &HostRegisterAsk,
+    instance_id: &str,
+    host_id: Uuid,
+    nonce: Uuid,
+    now_ms: i64,
+) -> ControlRequest {
+    let issued_at_ms = ask.server_time_ms.unwrap_or(now_ms);
+    ControlRequest {
+        workspace_id: ask.workspace_id,
+        instance_id: instance_id.to_string(),
+        host_id,
+        session_id: None,
+        nonce,
+        issued_at_ms,
+        expires_at_ms: issued_at_ms.saturating_add(HOST_REGISTER_LIFETIME_MS),
+        content: ControlContent::HostRegister {
+            host_public_key_b64: ask.host_public_key.clone(),
+            host_id,
+            label: ask.label.clone(),
+        },
+    }
+}
+
+/// Have the workspace's root key vouch for the host key a register child just
+/// made: native dialog with the whole statement, Touch ID, signature. Blocking
+/// (call it off the async runtime). Not a Tauri command: a page cannot reach it.
+pub fn sign_host_register(
+    app: &tauri::AppHandle,
+    ask: HostRegisterAsk,
+) -> Result<HostRegisterAnswer, String> {
+    let Some(instance_id) = ask.instance_id.clone() else {
+        return Ok(HostRegisterAnswer::Unsigned);
+    };
+    let (tx, rx) = mpsc::channel();
+    app.state::<DeviceKeyState>().submit(
+        app,
+        Box::new(move |worker| {
+            let _ = tx.send(sign_host_register_on(worker, &ask, &instance_id));
+        }),
+    )?;
+    rx.recv()
+        .map_err(|_| "device_key_failed: worker stopped".to_string())?
+}
+
+fn sign_host_register_on(
+    worker: &mut Worker,
+    ask: &HostRegisterAsk,
+    instance_id: &str,
+) -> Result<HostRegisterAnswer, String> {
+    let (signer, binding) = match worker.signer_for(ask.workspace_id) {
+        Ok(found) => found,
+        Err(reason) if reason == "device_key_not_root_here" => {
+            return Ok(HostRegisterAnswer::Unsigned)
+        }
+        Err(other) => return Err(other),
+    };
+    let request = host_register_request(ask, instance_id, Uuid::new_v4(), Uuid::new_v4(), now_ms());
+    let (host_id, nonce, issued, expires) = (
+        request.host_id,
+        request.nonce,
+        request.issued_at_ms,
+        request.expires_at_ms,
+    );
+    let signed = worker.sign(Statement::Control { signer, request }, &binding.public_key)?;
+    Ok(HostRegisterAnswer::Signed(json!({
+        "deviceKeyId": signer.key_id,
+        "hostId": host_id,
+        "nonce": nonce,
+        "issuedAtMs": issued,
+        "expiresAtMs": expires,
+        "signature": signed.signature,
+    })))
 }
 
 #[derive(Debug, Serialize)]
