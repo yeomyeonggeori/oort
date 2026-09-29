@@ -123,10 +123,14 @@
   - 클라이언트는 모델 id를 텍스트로만 그린다. `href`나 URL에 넣지 않는다(허용 문자에 `:`와 `/`가 있다).
   - 페이지가 나뉜 목록(`has_more`)이나 상한을 넘은 목록은 `modelIdsTruncated: true`다.
   - OpenRouter `/key` 확인은 키별 목록이 없어서 `modelIds`를 싣지 않는다. 공개 `/models`는 여전히 부르지 않는다.
+- **워커 연결(#3041, 2026-09-29).** agent-worker가 매 턴 이 행을 읽는다.
+  - 우선순위는 **에이전트 자신의 모델 > 팀 행 `modelId` > `AGENT_MODEL`**이다. `agent.model`은 `NOT NULL`이라 payload는 늘 모델을 싣는다. 그래서 「에이전트 자체 모델이 없다」는 payload 모델이 비었거나 인스턴스 기본(`AGENT_MODEL`)과 같은 경우다(씨앗 에이전트, 자리표시자로 만든 에이전트). 그 밖의 모델은 에이전트의 것이라 행을 읽지도 않는다. 인스턴스 기본과 같은 모델을 일부러 고른 에이전트는 구분할 수 없어 행을 따른다(이탈로 기록).
+  - 역할은 첫 인사(웰컴 opener) 잡이면 `summary`, 그 밖의 대답이면 `teamAgent`다. 채널 요약을 만드는 워커 경로는 아직 없다. 생기면 `summary` 행을 읽는다.
+  - 행의 링크 위치가 **지금도 저장 당시 label을 보일 때만** 쓴다. 위치 0은 이 턴이 푼 머리 링크, 1 이상은 `provider_link_chain` hop이다(hop은 그 hop의 URL·키로 부른다). `modelId`가 `null`이면 턴의 모델을 그대로 둔다.
+  - label이 다르거나 위치가 없거나 hop이 꺼졌거나 키가 열리지 않으면 **모델을 부르지 않는다.** 다른 링크·다른 모델로 넘어가지 않는다. 실행은 `failed`(`error.code: default_ai_unresolved`)로 닫고, 채널에는 #2871 시스템 줄(`props.reason: default_ai_unresolved`, 문 「AI 연결 열기」)을 남기고, 운영자용 audit `provider_default_ai.unresolved`에 역할·위치·저장 label·현재 label(모두 가린 값)만 싣는다.
+  - 행을 읽지 못하면(DB 오류) 추측하지 않고 재시도한다.
 - **범위 밖(후속).**
-  - agent-worker는 아직 이 행을 읽지 않는다. 읽을 때의 우선순위는 **에이전트 자신의 `model` > `teamAgent.modelId` > `AGENT_MODEL`**이다. 팀 행은 기본값이지 에이전트 모델을 덮어쓰지 않는다(§4.2 「에이전트별 모델(F10 유지)」).
-  - 요약·첫 인사 경로가 `summary` 행을 읽는 것도 후속이다.
-  - 웹 표 AA-8이 이 API로 저장하는 것은 uxui 후속이다.
+  - 웹 표 AA-8이 이 API로 저장하는 것과 「저장됐지만 아직 적용 전」 문구 제거는 uxui 후속이다.
 - **검증.**
   - 격리 PG 시험(`provider_probe_conformance_pg.rs`): 비운영자 403, 개인 source의 라우트 400과 CHECK 거부, 행 patch, 체인 이동 감지, audit에 키 없음, 테넌트 트랜잭션 0행·쓰기 거부, 키를 조각내 되돌리는 mock에서 `modelIds`에 조각 없음.
   - 사보타주로 가드마다 빨강을 확인했다. 실제 provider 왕복은 runtime-unverified다.

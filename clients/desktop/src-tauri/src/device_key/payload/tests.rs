@@ -12,6 +12,15 @@ const VECTORS: &str =
 const VECTORS_V2: &str =
     include_str!("../../../../../../docs/api/human-control-signing-v2.vectors.json");
 
+/// #3118 v3 vectors: a permission body binds the host's preview hash.
+const VECTORS_V3: &str =
+    include_str!("../../../../../../docs/api/human-control-signing-v3.vectors.json");
+
+fn cases_v3() -> Vec<Value> {
+    let root: Value = serde_json::from_str(VECTORS_V3).unwrap();
+    root["cases"].as_array().unwrap().clone()
+}
+
 fn cases() -> Vec<Value> {
     let root: Value = serde_json::from_str(VECTORS).unwrap();
     root["cases"].as_array().unwrap().clone()
@@ -47,6 +56,11 @@ fn control_request(fields: &Value, content: &Value) -> ControlRequest {
     // sends camelCase. Re-key it the way the bridge does.
     let mut camel = serde_json::Map::new();
     for (key, value) in content.as_object().unwrap() {
+        // The v3 vectors record the preview's canonical form beside it; the
+        // page does not send it (the shell derives it).
+        if key == "preview_canonical" {
+            continue;
+        }
         let key = if key == "kind" {
             key.clone()
         } else {
@@ -83,10 +97,12 @@ fn control_request(fields: &Value, content: &Value) -> ControlRequest {
 fn statement_of(case: &Value) -> Statement {
     let fields = &case["fields"];
     match case["schema"].as_str().unwrap() {
-        HUMAN_CONTROL_SCHEMA_V1 | HUMAN_CONTROL_SCHEMA_V2 => Statement::Control {
-            signer: signer_of(fields, "device_key_id"),
-            request: control_request(fields, &case["content"]),
-        },
+        HUMAN_CONTROL_SCHEMA_V1 | HUMAN_CONTROL_SCHEMA_V2 | HUMAN_CONTROL_SCHEMA_V3 => {
+            Statement::Control {
+                signer: signer_of(fields, "device_key_id"),
+                request: control_request(fields, &case["content"]),
+            }
+        }
         DEVICE_ENDORSE_SCHEMA_V1 => Statement::Endorse {
             signer: signer_of(fields, "root_key_id"),
             request: EndorseRequest {
@@ -203,7 +219,24 @@ fn every_v2_vector_rebuilds_byte_for_byte_and_every_signature_verifies() {
     for case in &cases {
         let name = case["name"].as_str().unwrap();
         let statement = statement_of(case);
-        let bytes = statement.signed_bytes(now_for(case)).unwrap();
+        // #3128: a permission is signed as v3 now. The v2 permission body (no
+        // preview line) is kept as a recipe only, and production refuses it.
+        let bytes = match &statement {
+            Statement::Control { signer, request }
+                if matches!(request.content, ControlContent::Permission { .. }) =>
+            {
+                assert_eq!(
+                    statement.signed_bytes(now_for(case)),
+                    Err(PayloadError::Field("preview", "missing")),
+                    "{name}: a permission without a preview is never signed"
+                );
+                control_bytes_for(ControlSchema::V2, signer, request).unwrap()
+            }
+            _ => {
+                schemas.insert(statement.schema());
+                statement.signed_bytes(now_for(case)).unwrap()
+            }
+        };
         assert_eq!(
             std::str::from_utf8(&bytes).unwrap(),
             case["payload"].as_str().unwrap(),
@@ -225,7 +258,6 @@ fn every_v2_vector_rebuilds_byte_for_byte_and_every_signature_verifies() {
             );
         }
         verify_all(name, case, &bytes);
-        schemas.insert(statement.schema());
     }
     assert_eq!(
         schemas,
@@ -421,11 +453,12 @@ fn the_rebind_letter_is_momo_wires_bytes_and_its_signature_verifies() {
 }
 
 #[test]
-fn only_the_four_schemas_with_their_exact_line_counts_are_signable() {
+fn only_the_five_schemas_with_their_exact_line_counts_are_signable() {
     let (_, rebind, _) = rebind_vector();
     let rebind_case = serde_json::json!({ "payload": rebind });
     for case in cases_v2()
         .into_iter()
+        .chain(cases_v3())
         .chain(
             cases()
                 .into_iter()
@@ -446,7 +479,8 @@ fn only_the_four_schemas_with_their_exact_line_counts_are_signable() {
     assert!(check_signing_payload(short.as_bytes()).is_err());
     for foreign in [
         "momo.human.control.v2\na",
-        "momo.human.control.v3\na\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl",
+        "momo.human.control.v3\na",
+        "momo.human.control.v4\na\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl",
         "momo.work.host.v1\na\nb",
         "hello",
         "",
@@ -737,10 +771,18 @@ fn no_dialog_text_carries_a_dash() {
     let summaries = cases()
         .into_iter()
         .chain(cases_v2())
+        .chain(cases_v3())
         .map(|case| (case["name"].to_string(), statement_of(&case).summary(None)))
         .chain([("rebind".to_string(), rebind_vector().0.summary(None))]);
     for (name, summary) in summaries {
-        for text in [&summary.title, &summary.body, &summary.confirm] {
+        // The `도구:` line quotes the host's preview title (data, not copy).
+        let body: String = summary
+            .body
+            .lines()
+            .filter(|line| !line.starts_with("도구: "))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for text in [&summary.title, &body, &summary.confirm] {
             assert!(
                 !text.contains('\u{2014}') && !text.contains('\u{2013}'),
                 "{name}: {text}"
@@ -757,9 +799,9 @@ const APP_REQUESTS: &str =
     include_str!("../../../../../web/src/features/work/__fixtures__/desktop-sign-requests.json");
 
 #[test]
-fn the_webviews_requests_build_the_v2_vector_bytes() {
+fn the_webviews_requests_build_the_v2_and_v3_vector_bytes() {
     let entries: Vec<Value> = serde_json::from_str(APP_REQUESTS).unwrap();
-    assert_eq!(entries.len(), 5, "input ×2, permission, spawn, resume");
+    assert_eq!(entries.len(), 5, "input ×2, permission (v3), spawn, resume");
     for entry in entries {
         let name = entry["name"].as_str().unwrap();
         let signer = Signer {
@@ -779,4 +821,363 @@ fn the_webviews_requests_build_the_v2_vector_bytes() {
             "{name}"
         );
     }
+}
+
+// ---- #3128: control v3 — a permission allow binds the host's preview ---------
+
+fn v3_case(name: &str) -> Value {
+    cases_v3()
+        .into_iter()
+        .find(|c| c["name"] == name)
+        .unwrap_or_else(|| panic!("no v3 vector {name}"))
+}
+
+/// The permission the v3 vector `control_v3_permission_once` signs, as the
+/// page sends it (preview + the page's hash).
+fn v3_permission() -> (Signer, ControlRequest, i64) {
+    let case = v3_case("control_v3_permission_once");
+    let Statement::Control { signer, request } = statement_of(&case) else {
+        unreachable!()
+    };
+    (signer, request, now_for(&case))
+}
+
+fn with_preview(
+    request: &ControlRequest,
+    preview: Option<Value>,
+    preview_sha256: Option<String>,
+) -> ControlRequest {
+    let mut request = request.clone();
+    if let ControlContent::Permission {
+        preview: p,
+        preview_sha256: h,
+        ..
+    } = &mut request.content
+    {
+        *p = preview;
+        *h = preview_sha256;
+    }
+    request
+}
+
+/// Every v3 case rebuilds byte for byte from its inputs, every recorded
+/// signature (WebCrypto, CryptoKit, Secure Enclave) verifies over those
+/// bytes, and the preview hash is the one this shell computes itself.
+#[test]
+fn every_v3_vector_rebuilds_byte_for_byte_and_every_signature_verifies() {
+    let cases = cases_v3();
+    assert_eq!(
+        cases.len(),
+        7,
+        "the #3118 vector set changed; review this port"
+    );
+    let mut permissions = 0;
+    for case in &cases {
+        let name = case["name"].as_str().unwrap();
+        let Statement::Control { signer, request } = statement_of(case) else {
+            panic!("{name}: v3 is control only")
+        };
+        let bytes = control_bytes_for(ControlSchema::V3, &signer, &request).unwrap();
+        assert_eq!(
+            std::str::from_utf8(&bytes).unwrap(),
+            case["payload"].as_str().unwrap(),
+            "{name}: payload bytes"
+        );
+        assert_eq!(
+            request
+                .content
+                .content_sha256_for(ControlSchema::V3)
+                .unwrap(),
+            case["content_sha256"].as_str().unwrap(),
+            "{name}: content sha256"
+        );
+        verify_all(name, case, &bytes);
+        if let ControlContent::Permission { preview, .. } = &request.content {
+            permissions += 1;
+            let preview = preview.as_ref().unwrap();
+            assert_eq!(
+                canonical_json(preview).unwrap(),
+                case["content"]["preview_canonical"].as_str().unwrap(),
+                "{name}: preview canonical bytes"
+            );
+            assert_eq!(
+                permission_preview_sha256(preview).unwrap(),
+                case["content"]["preview_sha256"].as_str().unwrap(),
+                "{name}: the shell's own preview hash"
+            );
+        }
+    }
+    assert_eq!(permissions, 2);
+}
+
+/// Production: a permission is signed as v3 (the vector's exact bytes), the
+/// other kinds stay v2, and a cut preview is never signed.
+#[test]
+fn a_permission_is_signed_as_v3_and_a_cut_preview_never_is() {
+    let (signer, request, now) = v3_permission();
+    let case = v3_case("control_v3_permission_once");
+    let statement = Statement::Control {
+        signer,
+        request: request.clone(),
+    };
+    assert_eq!(statement.schema(), HUMAN_CONTROL_SCHEMA_V3);
+    assert_eq!(
+        std::str::from_utf8(&statement.signed_bytes(now).unwrap()).unwrap(),
+        case["payload"].as_str().unwrap()
+    );
+    // `control_v3_permission_session` carries `truncated: true` (and a tab).
+    let cut = v3_case("control_v3_permission_session");
+    assert_eq!(
+        statement_of(&cut).signed_bytes(now_for(&cut)),
+        Err(PayloadError::Field("preview", "truncated"))
+    );
+    // input and spawn stay v2 (the server and workd accept v2 for them).
+    let input = v3_case("control_v3_input_queue_nfc");
+    let bytes = statement_of(&input).signed_bytes(now_for(&input)).unwrap();
+    assert!(bytes.starts_with(b"momo.human.control.v2\n"));
+}
+
+/// Sabotage the page: the server swapped the preview (a harmless read shown
+/// over the real command) and the page signs with the original request's hash,
+/// or a page hands its own hash for a preview it did not render. The shell's
+/// own hash differs and nothing reaches the dialog or the enclave.
+#[test]
+fn a_preview_that_is_not_the_hashed_one_is_never_signed() {
+    let (signer, request, now) = v3_permission();
+    let ControlContent::Permission {
+        preview: Some(real),
+        preview_sha256: Some(real_hash),
+        ..
+    } = request.content.clone()
+    else {
+        unreachable!()
+    };
+    let mut swapped = real.clone();
+    swapped["kind"] = Value::from("read");
+    swapped["title"] = Value::from("Read README.md");
+    swapped["input"] = Value::from(r#"{"path":"README.md"}"#);
+    let swapped_hash = permission_preview_sha256(&swapped).unwrap();
+    for (what, preview, hash, why) in [
+        (
+            "swapped preview, original hash",
+            Some(swapped.clone()),
+            Some(real_hash.clone()),
+            PayloadError::Field("preview_sha256", "mismatch"),
+        ),
+        (
+            "real preview, the swapped one's hash",
+            Some(real.clone()),
+            Some(swapped_hash.clone()),
+            PayloadError::Field("preview_sha256", "mismatch"),
+        ),
+        (
+            "no preview",
+            None,
+            Some(real_hash.clone()),
+            PayloadError::Field("preview", "missing"),
+        ),
+        (
+            "no hash",
+            Some(real.clone()),
+            None,
+            PayloadError::Field("preview_sha256", "missing"),
+        ),
+    ] {
+        let mut platform = CountingPlatform::default();
+        let statement = Statement::Control {
+            signer,
+            request: with_preview(&request, preview, hash),
+        };
+        assert_eq!(statement.signed_bytes(now), Err(why), "{what}");
+        assert!(
+            super::super::sign_statement(&mut platform, &statement, "unused", now, None).is_err(),
+            "{what}"
+        );
+        assert_eq!(
+            (platform.confirms, platform.signs),
+            (0, 0),
+            "{what}: no dialog, no enclave"
+        );
+    }
+    // A swapped preview WITH its own hash builds (the host refuses it, not
+    // this shell: its line is the host's hash, #3118) — and the bytes differ
+    // from the real allow's, so the recorded signatures do not carry over.
+    let resigned = Statement::Control {
+        signer,
+        request: with_preview(&request, Some(swapped), Some(swapped_hash)),
+    }
+    .signed_bytes(now)
+    .unwrap();
+    let case = v3_case("control_v3_permission_once");
+    assert_ne!(resigned, case["payload"].as_str().unwrap().as_bytes());
+    let signature = &case["signatures"][0];
+    assert!(!verify_raw(
+        &BASE64
+            .decode(signature["public_key"].as_str().unwrap())
+            .unwrap(),
+        &resigned,
+        &BASE64
+            .decode(signature["signature"].as_str().unwrap())
+            .unwrap(),
+    ));
+}
+
+#[derive(Default)]
+struct CountingPlatform {
+    confirms: usize,
+    signs: usize,
+}
+
+impl super::super::Platform for CountingPlatform {
+    fn confirm(&mut self, _summary: &Summary) -> bool {
+        self.confirms += 1;
+        true
+    }
+    fn sign(
+        &mut self,
+        _message: &[u8],
+    ) -> Result<([u8; P256_PUBLIC_KEY_LEN], Vec<u8>), super::super::enclave::EnclaveError> {
+        self.signs += 1;
+        Ok(([2u8; P256_PUBLIC_KEY_LEN], Vec::new()))
+    }
+}
+
+/// Only the closed v1 object with nothing the app would not show as is.
+#[test]
+fn only_a_closed_visible_preview_is_hashed() {
+    let (_, request, _) = v3_permission();
+    let ControlContent::Permission {
+        preview: Some(real),
+        ..
+    } = request.content
+    else {
+        unreachable!()
+    };
+    assert!(permission_preview_sha256(&real).is_ok());
+    let mut bad = Vec::new();
+    let mut extra = real.clone();
+    extra["note"] = Value::from("x");
+    bad.push(("extra key", extra));
+    let mut kind = real.clone();
+    kind["kind"] = Value::from("sudo");
+    bad.push(("kind", kind));
+    let mut schema = real.clone();
+    schema["schema"] = Value::from("momo.work_permission.preview.v2");
+    bad.push(("schema", schema));
+    let mut long = real.clone();
+    long["input"] = Value::from("x".repeat(PREVIEW_FIELD_MAX_CHARS + 1));
+    bad.push(("long", long));
+    let mut flag = real.clone();
+    flag["truncated"] = Value::from(0);
+    bad.push(("truncated not bool", flag));
+    // What the app's display neutralises (core `INVISIBLE`) and the host
+    // removes before hashing: the dialog could not show the hashed bytes.
+    for hidden in [
+        '\u{202E}', '\u{200B}', '\u{2028}', '\u{FEFF}', '\u{00AD}', '\r', '\u{1b}',
+    ] {
+        let mut v = real.clone();
+        v["title"] = Value::from(format!("Run{hidden} git push"));
+        bad.push(("hidden", v));
+    }
+    for (what, preview) in bad {
+        assert!(
+            permission_preview_sha256(&preview).is_err(),
+            "{what}: {preview}"
+        );
+    }
+    // What the host keeps and the app shows as is: tabs, line breaks in
+    // locations, a braille blank, a private-use glyph (a Nerd Font icon in a
+    // title). (ZWJ is in both the host's strip set and core `INVISIBLE`, so a
+    // preview never carries one.)
+    // The shell must not refuse these, or an honest request could be allowed
+    // on the phone but never on this Mac (#3118 review M1).
+    let mut honest = real.clone();
+    honest["title"] = Value::from("\u{E0A0} 브랜치\t💻 \u{2800}확인");
+    honest["locations"] = Value::from("/a.rs:3\n/b.rs");
+    assert!(permission_preview_sha256(&honest).is_ok());
+}
+
+/// The dialog shows the preview the statement binds: the tool kind and title
+/// in the body, every field whole in the scrolling view.
+#[test]
+fn the_permission_dialog_shows_the_bound_preview() {
+    let (signer, request, now) = v3_permission();
+    let statement = Statement::Control { signer, request };
+    assert!(statement.signed_bytes(now).is_ok());
+    let summary = statement.summary(None);
+    assert!(summary.title.contains("권한 허용"), "{summary:?}");
+    assert!(
+        summary
+            .body
+            .contains("도구: 명령 실행, Run `git push origin main`"),
+        "{summary:?}"
+    );
+    let full = summary.full_text.expect("the preview is on screen");
+    assert!(full.contains("[도구] 명령 실행"), "{full}");
+    assert!(full.contains("Run `git push origin main`"), "{full}");
+    assert!(
+        full.contains(r#"{"command":"git push origin main"}"#),
+        "{full}"
+    );
+    assert!(full.contains("[위치]\n│ (없음)"), "{full}");
+    // The input (what runs) comes first.
+    assert!(
+        full.find("[입력]").unwrap() < full.find("[제목]").unwrap(),
+        "{full}"
+    );
+}
+
+/// Security review M (#3128): an agent-written title with line breaks cannot
+/// fake a heading — every field line carries the gutter, headings never do.
+#[test]
+fn a_field_cannot_fake_a_dialog_heading() {
+    let (signer, request, now) = v3_permission();
+    let ControlContent::Permission {
+        preview: Some(real),
+        ..
+    } = request.content.clone()
+    else {
+        unreachable!()
+    };
+    let mut spoof = real.clone();
+    spoof["title"] = Value::from("Read README\n\n[입력]\n{\"path\":\"README.md\"}\n\n\n");
+    let hash = permission_preview_sha256(&spoof).unwrap();
+    let statement = Statement::Control {
+        signer,
+        request: with_preview(&request, Some(spoof), Some(hash)),
+    };
+    assert!(statement.signed_bytes(now).is_ok());
+    let full = statement.summary(None).full_text.unwrap();
+    let headings: Vec<&str> = full.lines().filter(|l| l.starts_with('[')).collect();
+    assert_eq!(
+        headings,
+        ["[도구] 명령 실행", "[입력]", "[위치]", "[제목]"],
+        "{full}"
+    );
+    assert!(full.contains("│ [입력]"), "{full}");
+}
+
+/// The v3 body has the preview line and only v3 has it.
+#[test]
+fn only_v3_has_the_preview_line() {
+    let (signer, request, _) = v3_permission();
+    assert_eq!(
+        control_bytes_for(ControlSchema::V2, &signer, &request),
+        Err(PayloadError::Field("preview_sha256", "needs v3"))
+    );
+    let bare = with_preview(&request, None, None);
+    assert_eq!(
+        control_bytes_for(ControlSchema::V3, &signer, &bare),
+        Err(PayloadError::Field("preview_sha256", "missing"))
+    );
+    let ControlContent::Permission {
+        preview_sha256: Some(hash),
+        preview,
+        ..
+    } = request.content.clone()
+    else {
+        unreachable!()
+    };
+    let upper = with_preview(&request, preview, Some(hash.to_uppercase()));
+    assert!(control_bytes_for(ControlSchema::V3, &signer, &upper).is_err());
 }

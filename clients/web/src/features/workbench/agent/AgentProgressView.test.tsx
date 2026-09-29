@@ -23,6 +23,13 @@ import {
   type AgentPaneActions,
 } from "./AgentProgressView";
 import { humanSignatureRefusal, type InstructFrom } from "@momo/core/features/auth/humanSignature";
+import vectorsV3 from "../../../../../../docs/api/human-control-signing-v3.vectors.json";
+import {
+  PERMISSION_PREVIEW_BLOCK_LINE,
+  permissionPreviewGate,
+  type PermissionPreviewGate,
+} from "@momo/core/features/workbench/permissionPreviewGate";
+import type { PermissionPreview } from "@momo/core/features/workbench/permissionPreview";
 
 // A 칸 진행 뷰(#2779). 사보타주 대상은 셋이다:
 //   - 권한 카드는 사람이 무장 → 확정을 누르기 전에는 결정을 만들지 않는다.
@@ -675,5 +682,85 @@ describe("signed surface (#3028)", () => {
     expect(hint.textContent).toBe("전달 안 됨 · 서명을 취소해서 보내지 않았어요.");
     expect(hint.getAttribute("data-failed")).toBe("");
     expect(box.value).toBe("이어서 해 줘");
+  });
+});
+
+// #3128: the signing surface shows the host's preview (owner read) and opens
+// the allow only through the shared gate. Sabotage: a server-swapped preview.
+
+describe("signed preview gate (#3128)", () => {
+  const HOST = vectorsV3.cases.find((c) => c.name === "control_v3_permission_once")!.content as unknown as {
+    preview: PermissionPreview;
+    preview_sha256: string;
+  };
+  const CUT = vectorsV3.cases.find((c) => c.name === "control_v3_permission_session")!.content as unknown as {
+    preview: PermissionPreview;
+    preview_sha256: string;
+  };
+  const read = (preview: unknown) => ({
+    status: "ok" as const,
+    data: { permissionRequest: { id: "r", sessionId: SID, requestEventId: "e", status: "pending" as const }, options: [], preview },
+  });
+  // agent.status says 「read README」; the host's preview says `git push`.
+  const events = () => [tool("read_file", "INFERRED README.md"), ask([ONCE, REJECT])];
+  const signed = (decide: AgentPaneActions["decide"]): AgentPaneActions => ({
+    decide,
+    reply: null,
+    sessionScope: true,
+    rejectWithInstruction: vi.fn(),
+  });
+  function renderGated(gate: PermissionPreviewGate, actions: AgentPaneActions) {
+    if (!host) {
+      host = document.createElement("div");
+      document.body.append(host);
+      root = createRoot(host);
+    }
+    act(() => {
+      root!.render(
+        createElement(AgentProgressView, { model: model(events()), ownerName: "곽성재", actions, previewGate: gate })
+      );
+    });
+  }
+  async function armAndCommit(testId: string) {
+    click(q(`[data-testid="${testId}"]`));
+    act(() => vi.advanceTimersByTime(CONFIRM_GUARD_MS));
+    await act(async () => {
+      q('[data-testid="agent-permission-commit"]')?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+  }
+
+  it("shows the host preview verbatim, asks from its kind, and the allow carries the recomputed hash", async () => {
+    const decide = vi.fn(async () => undefined);
+    renderGated(permissionPreviewGate(HOST.preview_sha256, read(HOST.preview)), signed(decide));
+    const card = q('[data-testid="agent-permission"]')!;
+    expect(card.textContent).toContain("명령을 실행해도 될까요?");
+    expect(card.textContent).not.toContain("INFERRED README.md");
+    expect(card.textContent).not.toContain("파일을 읽어도 될까요?");
+    expect(q('[data-testid="agent-permission-preview-input"]')!.textContent).toBe(HOST.preview.input);
+    await armAndCommit("agent-permission-allow");
+    expect(decide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "allow_once",
+        preview: { preview: HOST.preview, sha256: HOST.preview_sha256 },
+      })
+    );
+  });
+
+  it.each([
+    ["swapped by the server", () => permissionPreviewGate(HOST.preview_sha256, read({ ...HOST.preview, kind: "read", title: "Read README.md" })), PERMISSION_PREVIEW_BLOCK_LINE.mismatch],
+    ["cut", () => permissionPreviewGate(CUT.preview_sha256, read(CUT.preview)), PERMISSION_PREVIEW_BLOCK_LINE.truncated],
+    ["missing (old host)", () => permissionPreviewGate(null, read(null)), PERMISSION_PREVIEW_BLOCK_LINE.missing],
+    ["read failed", () => permissionPreviewGate(HOST.preview_sha256, { status: "error" }), PERMISSION_PREVIEW_BLOCK_LINE.unavailable],
+  ])("%s: both allows stay shut, one sentence says why, reject still works", async (_what, gate, line) => {
+    const decide = vi.fn(async () => undefined);
+    renderGated(gate(), signed(decide));
+    expect((q('[data-testid="agent-permission-allow"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((q('[data-testid="agent-permission-allow-session"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(q('[data-testid="agent-permission-preview-state"]')!.textContent).toBe(line);
+    expect(q('[data-testid="agent-permission"]')!.textContent).not.toContain("Read README.md");
+    await armAndCommit("agent-permission-allow");
+    expect(decide).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "allow_once" }));
+    await armAndCommit("agent-permission-reject");
+    expect(decide).toHaveBeenCalledWith(expect.objectContaining({ kind: "reject_once" }));
   });
 });

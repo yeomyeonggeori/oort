@@ -3,6 +3,11 @@ import { ApiError, type WorkSession } from "@momo/core/lib/api";
 import type { InstructFrom } from "@momo/core/features/auth/humanSignature";
 import type { WorkSessionEvent } from "@momo/core/features/work/workSessionModel";
 import { agentPaneModel, type AgentPaneModel } from "@momo/core/features/workbench/agentPane";
+import {
+  permissionPreviewGate,
+  type PermissionPreviewGate,
+} from "@momo/core/features/workbench/permissionPreviewGate";
+import { permissionPreviewSha256, type PermissionPreview } from "@momo/core/features/workbench/permissionPreview";
 import { AgentProgressView, type AgentPaneActions } from "./AgentProgressView";
 import { createAgentPaneStore } from "./agentPanes";
 import { summaryOf, type AgentPaneSource } from "./agentPaneSource";
@@ -159,7 +164,7 @@ function sceneActions(scene: AgentFixtureScene): AgentPaneActions {
     };
   }
   // #3028: 데스크탑 셸 + 서명을 요구하는 서버. 허락·지시가 서명 경로로 간다(흉내: 셸 없이 성공).
-  if (scene === "signed") {
+  if (scene === "signed" || scene.startsWith("signed-preview")) {
     return {
       decide: async () => undefined,
       reply: async () => ({ state: "sent" }),
@@ -214,7 +219,54 @@ export type AgentFixtureScene =
   /** 데스크탑 셸이 서명한다(#3028): 「이 세션 동안」·「거부 + 지시」·지시 칸. */
   | "signed"
   /** 같은 표면, 서명·전달 실패(#3028 「전달 안 됨」). */
-  | "signed-fail";
+  | "signed-fail"
+  /** #3128: 서명하는 표면 + 소유자 조회로 받은 host 미리보기(확인 통과). */
+  | "signed-preview"
+  /** #3128: 서버가 바꾼 미리보기 — 해시가 맞지 않아 허락이 닫힌다. */
+  | "signed-preview-mismatch"
+  /** #3128: 잘린 미리보기 — 보이지만 허락할 수 없다. */
+  | "signed-preview-cut"
+  /** #3128: 미리보기를 받는 중. */
+  | "signed-preview-loading"
+  /** #3128: 옛 host — 미리보기가 없다. */
+  | "signed-preview-missing";
+
+/** #3128: host가 만든 미리보기(흉내). 칸은 이것을 그대로 보이고 해시를 다시 계산한다. */
+const HOST_PREVIEW: PermissionPreview = {
+  schema: "momo.work_permission.preview.v1",
+  kind: "edit",
+  title: "Edit onboarding/copy.ts",
+  locations: "/Users/me/oort/clients/web/src/onboarding/copy.ts:42",
+  input: '{"new_string":"워크스페이스를 만들어요","old_string":"워크스페이스를 만듭니다","path":"onboarding/copy.ts"}',
+  truncated: false,
+};
+
+function sceneGate(scene: AgentFixtureScene): PermissionPreviewGate | null {
+  if (!scene.startsWith("signed-preview")) return null;
+  const read = (preview: unknown) => ({
+    status: "ok" as const,
+    data: {
+      permissionRequest: { id: "r", sessionId: SESSION_WAIT, requestEventId: "e", status: "pending" as const },
+      options: [],
+      preview,
+    },
+  });
+  const hash = permissionPreviewSha256(HOST_PREVIEW);
+  if (scene === "signed-preview-loading") return { state: "loading" };
+  if (scene === "signed-preview-missing") return permissionPreviewGate(null, read(null));
+  if (scene === "signed-preview-mismatch") {
+    return permissionPreviewGate(hash, read({ ...HOST_PREVIEW, kind: "read", title: "Read README.md", input: '{"path":"README.md"}' }));
+  }
+  if (scene === "signed-preview-cut") {
+    const cut: PermissionPreview = {
+      ...HOST_PREVIEW,
+      locations: Array.from({ length: 12 }, (_, i) => `/Users/me/oort/clients/web/src/onboarding/step${i + 1}.ts`).join("\n"),
+      truncated: true,
+    };
+    return permissionPreviewGate(permissionPreviewSha256(cut), read(cut));
+  }
+  return permissionPreviewGate(hash, read(HOST_PREVIEW));
+}
 
 /**
  * `signature` 장면: 제품처럼 403 `device_signature_required`를 받으면 플래그를 다시
@@ -306,6 +358,7 @@ export function fixtureAgentSource(scene: AgentFixtureScene): AgentPaneSource {
           actions={actions}
           offline={scene === "offline"}
           instructFrom={scene === "browser" ? "app" : "here"}
+          previewGate={id === SESSION_WAIT ? sceneGate(scene) : null}
         />
       ) : null;
     },

@@ -573,7 +573,7 @@ fn tauri_grants_the_work_host_commands_to_the_local_main_webview_only() {
     }
 }
 
-const DEVICE_KEY_COMMANDS: [&str; 8] = [
+const DEVICE_KEY_COMMANDS: [&str; 9] = [
     "device_key_status",
     "device_key_create",
     "device_key_bind_root",
@@ -582,8 +582,9 @@ const DEVICE_KEY_COMMANDS: [&str; 8] = [
     "device_key_sign_revoke",
     "device_key_deliver_revocation",
     "device_key_sign_rebind",
+    "device_key_reset_signature_requirement",
 ];
-const DEVICE_KEY_PERMISSIONS: [&str; 8] = [
+const DEVICE_KEY_PERMISSIONS: [&str; 9] = [
     "allow-device-key-status",
     "allow-device-key-create",
     "allow-device-key-bind-root",
@@ -592,6 +593,7 @@ const DEVICE_KEY_PERMISSIONS: [&str; 8] = [
     "allow-device-key-sign-revoke",
     "allow-device-key-deliver-revocation",
     "allow-device-key-sign-rebind",
+    "allow-device-key-reset-signature-requirement",
 ];
 
 /// Tauri's resolver: the device key (ADR-0146 개정 R2-E5, #3025) answers the

@@ -21,6 +21,14 @@ import {hex, sha256, utf8} from './sha256';
 // for the E1 vectors. A v1 spawn is refused here — the server and the host
 // refuse it too, so signing one would only ever fail after Face ID.
 //
+// #3128 (ADR-0146 증보 2026-09-29, R2 H1 · #3118) added `v3`: the same frame,
+// and a `permission` body gains a fifth line — the SHA-256 of the host's
+// preview the card checked (`checkPermissionPreview`) and showed. An allow is
+// signed as v3 (`phoneSigningSchema`); input and spawn stay v2, which the
+// server and workd still accept for them, so a phone update does not break
+// instructions on a host that has not updated yet. `docs/api/
+// human-control-signing-v3.vectors.json` pins the bytes.
+//
 // Only what a phone signs is here: `input`, `spawn`, `permission`.
 // `host_register` and `bundle_manifest` are the root Mac's (D-6 ①, ADR-0192 D3).
 // Nothing on this path sends anything; E8 carries the result to the route.
@@ -29,11 +37,19 @@ import {hex, sha256, utf8} from './sha256';
 export const HUMAN_CONTROL_SCHEMAS = [
   'momo.human.control.v1',
   'momo.human.control.v2',
+  'momo.human.control.v3',
 ] as const;
 export type HumanControlSchema = (typeof HUMAN_CONTROL_SCHEMAS)[number];
 
-/** What the phone signs (#3028). */
+/** What the phone signs input and spawn as (#3028). */
 export const PHONE_SIGNING_SCHEMA: HumanControlSchema = 'momo.human.control.v2';
+
+/** What the phone signs each kind as: an allow binds its preview (v3, #3128). */
+export function phoneSigningSchema(
+  kind: HumanControlContent['kind'],
+): HumanControlSchema {
+  return kind === 'permission' ? 'momo.human.control.v3' : PHONE_SIGNING_SCHEMA;
+}
 
 const ABSENT = '-';
 
@@ -56,6 +72,8 @@ export type HumanControlContent =
       optionKind: string;
       /** 「이번 한 번」 `once` · 「이 세션 동안」 `session` (D-8). */
       scope: 'once' | 'session';
+      /** v3 only (#3128): the hash of the preview the card checked and showed. */
+      previewSha256?: string;
     };
 
 export interface HumanControlFields {
@@ -128,15 +146,29 @@ export function humanControlContentBytes(
           content.firstPrompt.normalize('NFC'),
         ].join('\n'),
       );
-    case 'permission':
-      return utf8(
-        [
-          line('requestEventId', content.requestEventId),
-          line('optionId', content.optionId),
-          line('optionKind', content.optionKind),
-          line('scope', content.scope),
-        ].join('\n'),
-      );
+    case 'permission': {
+      const head = [
+        line('requestEventId', content.requestEventId),
+        line('optionId', content.optionId),
+        line('optionKind', content.optionKind),
+        line('scope', content.scope),
+      ];
+      // v3 has the preview line and only v3 has it (#3118): a v1/v2 allow
+      // cannot say which preview the person saw, and the host refuses it.
+      if (schema === 'momo.human.control.v3') {
+        const hash = content.previewSha256 ?? '';
+        if (!/^[0-9a-f]{64}$/.test(hash)) {
+          throw new HumanControlInputError(
+            'a v3 allow needs the checked preview hash',
+          );
+        }
+        return utf8([...head, hash].join('\n'));
+      }
+      if (content.previewSha256 !== undefined) {
+        throw new HumanControlInputError('a preview hash is signed only as v3');
+      }
+      return utf8(head.join('\n'));
+    }
   }
 }
 

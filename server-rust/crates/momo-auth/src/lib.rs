@@ -191,7 +191,8 @@ pub use refresh_proof::{
 };
 pub use token_store::{
     carries_privileged_scope, has_active_realtime_credential, lock_live_session_lineage,
-    lock_member_session_tokens_by_ids, lock_session_for_registration, lock_session_rows_in_tx,
+    lock_member_live_session_rows_in_tx, lock_member_session_tokens_by_ids,
+    lock_member_wide_sweep_in_tx, lock_session_for_registration, lock_session_rows_in_tx,
     new_session_id, record_session_token, record_session_token_with_device,
     revoke_member_session_tokens, revoke_member_session_tokens_by_ids,
     revoke_privileged_session_tokens, revoke_session_lineage_tokens, revoke_token,

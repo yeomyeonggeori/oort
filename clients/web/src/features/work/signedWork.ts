@@ -4,7 +4,8 @@
 //
 // The desktop shell holds the Secure Enclave key; this page names a
 // statement's fields and the shell builds, shows (native dialog) and signs it
-// (`device_key_sign_control`, control v2). Everything after the signature is
+// (`device_key_sign_control`: control v2, and v3 for an allow — #3128, the
+// shell re-hashes the preview the card showed and shows it in its dialog). Everything after the signature is
 // the shared core flow (`@momo/core/features/auth/signedControl`), which the
 // phone uses with its own signer.
 //
@@ -22,6 +23,7 @@ import {
 } from "@momo/core/features/auth/deviceKeys";
 import {
   agentMemberIdFromEvents,
+  ALLOW_NEEDS_PREVIEW_LINE,
   RESUME_AGENT_UNKNOWN_LINE,
   signedResume,
   SignerRefusal,
@@ -29,6 +31,12 @@ import {
   type HumanControlSigner,
 } from "@momo/core/features/auth/signedControl";
 import {
+  permissionPreviewGate,
+  type PermissionPreviewGate,
+} from "@momo/core/features/workbench/permissionPreviewGate";
+import type { PendingPermission } from "@momo/core/features/workbench/agentPane";
+import {
+  fetchWorkPermissionPreview,
   fetchWorkSessions,
   resumeWorkSession,
   uuidEq,
@@ -68,6 +76,33 @@ export function useHumanControlSigning(
   };
 }
 
+/**
+ * The owner's read of the open request's host preview, through the shared
+ * gate (#3128). `permission` null = nothing to read (not signing, not the
+ * owner, no request). Read once per request; a failed read says so, it never
+ * falls back to the inferred preview.
+ */
+export function usePermissionPreviewGate(
+  workspaceId: string,
+  sessionId: string,
+  permission: PendingPermission | null
+): PermissionPreviewGate {
+  const requestEventId = permission?.requestEventId ?? "";
+  const read = useQuery({
+    queryKey: ["work-permission-preview", workspaceId, sessionId, requestEventId] as const,
+    queryFn: () => fetchWorkPermissionPreview(workspaceId, sessionId, requestEventId),
+    enabled: permission !== null,
+    staleTime: Infinity,
+    retry: 1,
+    // A failed read tries again on its own (the card's sentence says so).
+    refetchInterval: (query) => (query.state.status === "error" ? 15_000 : false),
+  });
+  return permissionPreviewGate(
+    permission?.previewSha256 ?? null,
+    read.data ? { status: "ok", data: read.data } : read.isError ? { status: "error" } : { status: "loading" }
+  );
+}
+
 /** How long a signed statement lives: a Touch ID prompt and one request. The
  * server caps it at `maxLifetimeMs` (10 min). */
 export const STATEMENT_LIFETIME_MS = 2 * 60_000;
@@ -77,6 +112,7 @@ export const STATEMENT_LIFETIME_MS = 2 * 60_000;
  * sentences. `cancelled` = the person said no; nothing was sent.
  */
 export function desktopSignerRefusal(code: unknown): SignerRefusal {
+  if (code instanceof SignerRefusal) return code;
   const raw = typeof code === "string" ? code : "";
   const key = raw.split(":")[0]!.trim();
   switch (key) {
@@ -97,6 +133,22 @@ export function desktopSignerRefusal(code: unknown): SignerRefusal {
     case "unsupported_platform":
       return new SignerRefusal("이 빌드에서는 기기 서명을 할 수 없어요. 팀 배포 앱에서 보내 주세요.");
     case "device_key_payload_rejected":
+      // #3128: the shell's own check of the preview (hash, cut, shape).
+      if (/^device_key_payload_rejected:\s*preview_sha256: mismatch/.test(raw)) {
+        return new SignerRefusal(
+          "보여 준 미리보기가 요청과 맞지 않아 서명하지 않았어요. 거부하거나 호스트에서 결정해 주세요."
+        );
+      }
+      if (/^device_key_payload_rejected:\s*preview: truncated/.test(raw)) {
+        return new SignerRefusal(
+          "미리보기가 잘려 서명하지 않았어요. 전체를 보지 않고는 허락할 수 없어요. 거부하거나 호스트에서 결정해 주세요."
+        );
+      }
+      if (/^device_key_payload_rejected:\s*preview/.test(raw)) {
+        return new SignerRefusal(
+          "미리보기를 확인할 수 없어 서명하지 않았어요. 거부하거나 호스트에서 결정해 주세요."
+        );
+      }
       return new SignerRefusal(
         "보이지 않는 문자나 올바르지 않은 값이 있어 서명하지 않았어요. 내용을 고친 뒤 다시 보내 주세요."
       );
@@ -117,17 +169,24 @@ const DEFAULT_DEPS: DesktopSignerDeps = {
   now: () => Date.now(),
 };
 
-function shellContent(content: ControlToSign["content"]): DesktopControlRequest["content"] {
+function shellContent(control: ControlToSign): DesktopControlRequest["content"] {
+  const content = control.content;
   switch (content.kind) {
     case "input":
       return { kind: "input", mode: content.mode, text: content.text };
     case "permission":
+      // #3128: no preview, no allow (the shell refuses too; this is earlier).
+      if (!control.permissionPreview || !content.previewSha256) {
+        throw new SignerRefusal(ALLOW_NEEDS_PREVIEW_LINE);
+      }
       return {
         kind: "permission",
         requestEventId: content.requestEventId,
         optionId: content.optionId,
         optionKind: content.optionKind,
         scope: content.scope,
+        preview: control.permissionPreview,
+        previewSha256: content.previewSha256,
       };
     case "spawn":
       return {
@@ -168,7 +227,7 @@ export function shellControlRequest(
     nonce: control.nonce,
     issuedAtMs,
     expiresAtMs,
-    content: shellContent(control.content),
+    content: shellContent(control),
   };
 }
 
