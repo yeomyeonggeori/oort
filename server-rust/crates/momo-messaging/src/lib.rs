@@ -57,6 +57,8 @@ pub mod huddle_sweep;
 pub mod identity;
 pub mod interaction;
 pub mod member_rename;
+/// ADR-0196 / #3164 — team-memory digest + receipt reads and `mem_settings` writes (RLS only).
+pub mod memory;
 pub mod message;
 pub mod notification_rule;
 pub mod presence;
@@ -123,6 +125,13 @@ pub use interaction::{
 pub use member_rename::{
     build_member_renamed_payload, change_own_handle_in_tx, rename_own_display_name_in_tx,
     DisplayNameRename, HandleChangeRejected, HandleRename, MEMBER_RENAMED_BROADCAST_TYPE,
+};
+pub use memory::{
+    bind_mem_reader_guc, clamp_mem_digest_limit, digests_by_ids_in_tx, evidence_for_digests_in_tx,
+    get_digest_in_tx, get_serving_in_tx, last_read_seq_in_tx, list_digests_in_tx,
+    list_settings_in_tx, summarized_through_seq_in_tx, upsert_channel_settings_in_tx,
+    upsert_member_settings_in_tx, upsert_workspace_settings_in_tx, DigestListFilter, MemDigest,
+    MemEvidence, MemServing, MemSettingsRow, MEM_DIGEST_LIMIT_DEFAULT, MEM_DIGEST_LIMIT_MAX,
 };
 pub use message::{
     agent_auto_reply_streak_in_tx, agent_context_window_in_tx, build_broadcast_payload,
