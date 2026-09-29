@@ -214,6 +214,12 @@ function enrollFailure(error: unknown): EnrollError {
         '서버가 이 폰의 서명을 받지 않았습니다. 폰의 시계가 맞는지 확인하고 다시 시도하세요.',
       );
     }
+    // #3119 「QR 연결로만 등록」: a phone signed in by address.
+    if (error.code === DEVICE_KEY_REFUSAL.requiresLinkedSession) {
+      return new EnrollError(
+        '이 폰으로 지시하려면 맥에서 QR로 한 번 연결하세요. 대화와 알림은 그대로 씁니다.',
+      );
+    }
     if (error.code === DEVICE_KEY_REFUSAL.notFound) {
       return new EnrollError(
         '서버에 이 키가 더 이상 없습니다. 다시 시도하면 새로 등록합니다.',

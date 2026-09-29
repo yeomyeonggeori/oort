@@ -962,6 +962,11 @@ pub(crate) struct ValidatedAcpEvent {
     body: String,
     safe_payload: Value,
     props: Value,
+    /// #3118: an `approval.requested`'s host-built preview and its hash,
+    /// checked against each other. Stored on the request row for the session
+    /// owner; the broadcast `safe_payload` keeps only the hash (ADR-0188 D5:
+    /// 「채널로 방송하지 않는다」).
+    permission_preview: Option<(Value, String)>,
 }
 
 /// Swift `recordACPEvent` (`WorkSessionRoutes.swift:1400-1555`).
@@ -1093,6 +1098,7 @@ async fn record_acp_event_in_tx(
                     channel_id: existing.channel_id,
                     request_event_id: event.event_id,
                     options,
+                    preview: normalized.permission_preview.clone(),
                 },
             )
             .await?;
@@ -1201,6 +1207,7 @@ pub(crate) fn validated_acp_event(
     let mut allowed: HashSet<&str> = ["run_id", "work_session_id", "channel_id", "agent_member_id"]
         .into_iter()
         .collect();
+    let mut permission_preview = None;
     let body = match event.event_type.as_str() {
         "agent.partial" => {
             allowed.insert("text_delta");
@@ -1247,7 +1254,28 @@ pub(crate) fn validated_acp_event(
                 .to_string()
         }
         "approval.requested" => {
-            allowed.extend(["action", "action_type", "status", "options"]);
+            allowed.extend([
+                "action",
+                "action_type",
+                "status",
+                "options",
+                "preview",
+                "preview_sha256",
+            ]);
+            // #3118: the host's preview and its hash come together or not at
+            // all, and agree. (That proves an honest row is consistent; the
+            // host's own comparison is what stops a dishonest server.)
+            match (payload.get("preview"), payload.get("preview_sha256")) {
+                (None, None) => {}
+                (Some(preview), Some(Value::String(hash))) => {
+                    if momo_wire::permission_preview::check_relayed_preview(preview, hash).is_err()
+                    {
+                        return Err(ApiError::bad_request("invalid ACP permission preview"));
+                    }
+                    permission_preview = Some((preview.clone(), hash.clone()));
+                }
+                _ => return Err(ApiError::bad_request("invalid ACP permission preview")),
+            }
             let Some(options) = payload.get("options").and_then(Value::as_array) else {
                 return Err(ApiError::bad_request("invalid ACP approval request"));
             };
@@ -1309,7 +1337,11 @@ pub(crate) fn validated_acp_event(
         ));
     }
 
-    let safe_payload = Value::Object(payload.clone());
+    // The preview is the owner's (D5): it is stored on the request row, never
+    // broadcast or kept in the thread message. Its hash stays.
+    let mut broadcast = payload.clone();
+    broadcast.remove("preview");
+    let safe_payload = Value::Object(broadcast);
     let props = json!({
         "kind": "work_session_event",
         "schema": "momo.work_session.acp_event.v1",
@@ -1324,6 +1356,7 @@ pub(crate) fn validated_acp_event(
         body,
         safe_payload,
         props,
+        permission_preview,
     })
 }
 
@@ -2477,6 +2510,80 @@ mod tests {
                     .unwrap_err()
                     .message,
                 "display binding requires work host signature"
+            );
+        }
+    }
+
+    /// #3118: an `approval.requested` may carry the host's preview and its
+    /// hash — together and agreeing — and the broadcast payload keeps only
+    /// the hash (ADR-0188 D5: the preview is the owner's).
+    #[test]
+    fn a_permission_preview_is_checked_stored_aside_and_never_broadcast() {
+        use momo_wire::permission_preview::{preview_sha256, PermissionPreview};
+        let session_id = Uuid::from_u128(0x531);
+        let channel_id = Uuid::from_u128(0x202);
+        let preview = PermissionPreview {
+            kind: "execute".into(),
+            title: "Run `git push --force`".into(),
+            locations: String::new(),
+            input: r#"{"command":"git push --force"}"#.into(),
+            truncated: false,
+        }
+        .to_value();
+        let hash = preview_sha256(&preview).unwrap();
+        let event = |extra: Value| {
+            let mut payload = json!({
+                "run_id": session_id, "work_session_id": session_id, "channel_id": channel_id,
+                "action": "requested", "action_type": "tool_call", "status": "pending",
+                "options": [{"option_id": "allow-once", "kind": "allow_once", "name": "Allow once"}],
+            });
+            payload
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            WorkSessionAcpEvent {
+                event_id: Uuid::from_u128(0x546),
+                event_type: "approval.requested".into(),
+                v: 1,
+                ts: 1_784_678_400_000,
+                payload,
+            }
+        };
+        let validated = validated_acp_event(
+            &event(json!({"preview": preview, "preview_sha256": hash})),
+            session_id,
+        )
+        .expect("a consistent preview is accepted");
+        assert_eq!(
+            validated.permission_preview,
+            Some((preview.clone(), hash.clone()))
+        );
+        assert!(validated.safe_payload.get("preview").is_none());
+        assert_eq!(validated.safe_payload["preview_sha256"], json!(hash));
+        assert!(validated.props["event"].get("preview").is_none());
+        assert!(!validated.props.to_string().contains("git push --force"));
+
+        // Without a preview: as before.
+        let bare = validated_acp_event(&event(json!({})), session_id).unwrap();
+        assert_eq!(bare.permission_preview, None);
+
+        let mut swapped = preview.clone();
+        swapped["title"] = json!("Read README.md");
+        for (what, extra) in [
+            (
+                "a preview under another hash",
+                json!({"preview": swapped, "preview_sha256": hash}),
+            ),
+            ("a preview alone", json!({"preview": preview})),
+            ("a hash alone", json!({"preview_sha256": hash})),
+            (
+                "an open preview",
+                json!({"preview": {"kind": "execute"}, "preview_sha256": hash}),
+            ),
+        ] {
+            assert!(
+                validated_acp_event(&event(extra), session_id).is_err(),
+                "{what} must be refused"
             );
         }
     }

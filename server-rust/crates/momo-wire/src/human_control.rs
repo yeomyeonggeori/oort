@@ -9,7 +9,7 @@
 //! `\n`-joined fields, UTF-8, no trailing newline):
 //!
 //! ```text
-//! momo.human.control.v2          momo.human.device_endorse.v1   momo.human.device_revoke.v2
+//! momo.human.control.v3          momo.human.device_endorse.v1   momo.human.device_revoke.v2
 //! {instance_id}                  {workspace_id}                 {workspace_id}
 //! {workspace_id}                 {member_id}                    {member_id}
 //! {member_id}                    {root_key_id}                  {root_key_id}
@@ -54,7 +54,8 @@
 //! | `input`           | `NFC(text)`                                                   |
 //! | `spawn` (v2)      | `{agent_member_id}\n{folder_id}\n{tool}\n{channel_id}\n{NFC(first_prompt)}` |
 //! | `spawn` (v1)      | `{agent_member_id}\n{folder_id}\n{NFC(first_prompt)}` (retired) |
-//! | `permission`      | `{request_event_id}\n{option_id}\n{option_kind}\n{scope}`     |
+//! | `permission` (v3) | `{request_event_id}\n{option_id}\n{option_kind}\n{scope}\n{preview_sha256}` |
+//! | `permission` (v1·v2) | `{request_event_id}\n{option_id}\n{option_kind}\n{scope}` (only for a request with no preview) |
 //! | `bundle_manifest` | [`canonical_json`] of the manifest                            |
 //! | `host_register`   | `{host_public_key_b64}\n{host_id}\n{NFC(label)}`              |
 //!
@@ -92,6 +93,26 @@
 //! signature (E3's `action_signature` row) stores that return value, so both
 //! forms of one signature collapse to one row.
 //!
+//! ## v3 (#3118, R2 H1): an allow binds the preview the person saw
+//!
+//! `momo.human.control.v3` is v2's frame again with only the first line
+//! changed; one body differs. A `permission` body gains a fifth line, the
+//! lowercase hex SHA-256 of the request's **preview** — the tool kind, title,
+//! locations and input summary the host itself read from the agent's ACP
+//! request, in the closed canonical form of [`crate::permission_preview`].
+//! Under v2 the statement named only the request id, so a server that swapped
+//! the preview shown beside it (「파일을 읽어도 될까요? README.md」 over a
+//! sandbox-escaping command) still collected a valid allow (E10 review H1).
+//! The host compares the line with the hash it computed when it relayed the
+//! request, so no server can change what an allow means.
+//!
+//! [`ControlContent::Permission::preview_sha256`] decides which bodies exist:
+//! `Some` builds only under v3 (v1/v2 refuse to build), `None` — a request
+//! recorded before hosts sent previews — only under v1/v2. A verifier
+//! ([`HumanControl::verify_any`]) therefore never lets a v1/v2 signature
+//! stand for a request that has a preview. Every other kind is byte-identical
+//! to v2 under v3.
+//!
 //! Freshness is a pure function here ([`check_control_window`]); the nonce
 //! ledger lives in E3 (server) and E4 (workd).
 
@@ -106,8 +127,10 @@ use uuid::Uuid;
 /// Retired for `spawn`; still accepted for `input` / `permission` (see the
 /// module docs, v2).
 pub const HUMAN_CONTROL_SCHEMA_V1: &str = "momo.human.control.v1";
-/// The current control schema (R2-E7 #3027).
+/// R2-E7 #3027. Still accepted for every kind but a previewed `permission`.
 pub const HUMAN_CONTROL_SCHEMA_V2: &str = "momo.human.control.v2";
+/// The current control schema (#3118): a `permission` binds its preview.
+pub const HUMAN_CONTROL_SCHEMA_V3: &str = "momo.human.control.v3";
 pub const DEVICE_ENDORSE_SCHEMA_V1: &str = "momo.human.device_endorse.v1";
 pub const DEVICE_REVOKE_SCHEMA_V1: &str = "momo.human.device_revoke.v1";
 /// v2 (#3068): the root signs the revoked device's public key too.
@@ -173,6 +196,7 @@ pub enum FreshnessError {
 pub enum ControlSchema {
     V1,
     V2,
+    V3,
 }
 
 impl ControlSchema {
@@ -180,6 +204,7 @@ impl ControlSchema {
         match self {
             ControlSchema::V1 => HUMAN_CONTROL_SCHEMA_V1,
             ControlSchema::V2 => HUMAN_CONTROL_SCHEMA_V2,
+            ControlSchema::V3 => HUMAN_CONTROL_SCHEMA_V3,
         }
     }
 }
@@ -258,6 +283,11 @@ pub enum ControlContent<'a> {
         option_id: &'a str,
         option_kind: &'a str,
         scope: PermissionScope,
+        /// v3 (#3118): lowercase hex SHA-256 of the request's preview
+        /// ([`crate::permission_preview::preview_sha256`]), as the **host**
+        /// computed it. `None` only for a request recorded without one, which
+        /// v1/v2 statements answer; `Some` builds only under v3.
+        preview_sha256: Option<&'a str>,
     },
     BundleManifest {
         manifest: &'a serde_json::Value,
@@ -295,18 +325,21 @@ impl ControlContent<'_> {
             (ControlContent::Input { .. } | ControlContent::Permission { .. }, _) => {
                 SessionRule::Required
             }
-            (ControlContent::Spawn { .. }, ControlSchema::V2) => SessionRule::Optional,
+            (ControlContent::Spawn { .. }, ControlSchema::V2 | ControlSchema::V3) => {
+                SessionRule::Optional
+            }
             _ => SessionRule::Forbidden,
         }
     }
 
     /// The canonical content bytes (see the module table), in the current
-    /// schema (v2).
+    /// schema (v3).
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, HumanSigningError> {
-        self.canonical_bytes_as(ControlSchema::V2)
+        self.canonical_bytes_as(ControlSchema::V3)
     }
 
-    /// The canonical content bytes under `schema`. Only `spawn` differs.
+    /// The canonical content bytes under `schema`. `spawn` differs between
+    /// v1 and v2; `permission` between v2 and v3.
     pub fn canonical_bytes_as(&self, schema: ControlSchema) -> Result<Vec<u8>, HumanSigningError> {
         let text = match self {
             ControlContent::Input { text, .. } => nfc(text),
@@ -322,7 +355,7 @@ impl ControlContent<'_> {
                     ControlSchema::V1 => {
                         format!("{agent_member_id}\n{folder_id}\n{}", nfc(first_prompt))
                     }
-                    ControlSchema::V2 => {
+                    ControlSchema::V2 | ControlSchema::V3 => {
                         token("tool", tool)?;
                         format!(
                             "{agent_member_id}\n{folder_id}\n{tool}\n{channel_id}\n{}",
@@ -336,13 +369,35 @@ impl ControlContent<'_> {
                 option_id,
                 option_kind,
                 scope,
+                preview_sha256,
             } => {
                 token("option_id", option_id)?;
                 token("option_kind", option_kind)?;
-                format!(
+                let base = format!(
                     "{request_event_id}\n{option_id}\n{option_kind}\n{}",
                     scope.as_str()
-                )
+                );
+                match (schema, preview_sha256) {
+                    (ControlSchema::V3, Some(hash)) => {
+                        lower_hex_sha256("preview_sha256", hash)?;
+                        format!("{base}\n{hash}")
+                    }
+                    (ControlSchema::V3, None) => {
+                        return Err(HumanSigningError::InvalidField {
+                            field: "preview_sha256",
+                            reason: "a v3 permission binds its preview",
+                        })
+                    }
+                    (ControlSchema::V1 | ControlSchema::V2, None) => base,
+                    // A v1/v2 allow never names a preview: it must not stand
+                    // for a request that has one (#3118).
+                    (ControlSchema::V1 | ControlSchema::V2, Some(_)) => {
+                        return Err(HumanSigningError::InvalidField {
+                            field: "preview_sha256",
+                            reason: "only a v3 permission binds a preview",
+                        })
+                    }
+                }
             }
             ControlContent::BundleManifest { manifest } => canonical_json(manifest)?,
             ControlContent::HostRegister {
@@ -360,7 +415,7 @@ impl ControlContent<'_> {
 
     /// Lowercase hex SHA-256 of [`Self::canonical_bytes`].
     pub fn content_sha256(&self) -> Result<String, HumanSigningError> {
-        self.content_sha256_as(ControlSchema::V2)
+        self.content_sha256_as(ControlSchema::V3)
     }
 
     /// Lowercase hex SHA-256 of [`Self::canonical_bytes_as`].
@@ -378,7 +433,8 @@ enum SessionRule {
     Forbidden,
 }
 
-/// A `momo.human.control` statement (built as v2 unless a caller asks for v1).
+/// A `momo.human.control` statement (built as v3 unless a caller asks for an
+/// older schema).
 #[derive(Debug, Clone, PartialEq)]
 pub struct HumanControl<'a> {
     /// The server-issued instance id, echoed verbatim (never built from a URL).
@@ -399,10 +455,10 @@ pub struct HumanControl<'a> {
 }
 
 impl HumanControl<'_> {
-    /// The 13-line v2 bytes the device key signs. Structural rules only;
+    /// The 13-line v3 bytes the device key signs. Structural rules only;
     /// time is [`check_control_window`]'s job.
     pub fn signed_bytes(&self) -> Result<Vec<u8>, HumanSigningError> {
-        self.signed_bytes_as(ControlSchema::V2)
+        self.signed_bytes_as(ControlSchema::V3)
     }
 
     /// The 13-line bytes under `schema`.
@@ -439,7 +495,7 @@ impl HumanControl<'_> {
         .into_bytes())
     }
 
-    /// Rebuild the v2 bytes and verify `signature` (raw `r‖s`) under the
+    /// Rebuild the v3 bytes and verify `signature` (raw `r‖s`) under the
     /// device key. Returns the canonical low-s signature. Does not check time.
     pub fn verify(
         &self,
@@ -459,35 +515,60 @@ impl HumanControl<'_> {
         verify_p256(device_public_key, &self.signed_bytes_as(schema)?, signature)
     }
 
-    /// What a verifier accepts (module docs, v2): the v2 statement, or — for
-    /// every kind but `spawn`, whose v1 bytes say the same thing — the v1 one.
-    /// A v1 `spawn` is refused. Returns the schema that verified, its bytes
-    /// and the canonical low-s signature.
+    /// What a verifier accepts (module docs, v2 · v3): the v3 statement; the
+    /// v2 one for every kind but a permission that has a preview (a v2
+    /// permission body is built only when `preview_sha256` is `None`); and
+    /// the v1 one for the kinds whose v1 bytes say what v2's do — never a
+    /// `spawn`, whose v1 bytes bound neither tool nor channel. A statement
+    /// that cannot be built under a schema is not tried under it. Returns the
+    /// schema that verified, its bytes and the canonical low-s signature.
     pub fn verify_any(
         &self,
         device_public_key: &[u8],
         signature: &[u8],
     ) -> Result<VerifiedStatement, HumanSigningError> {
-        let v2 = self.signed_bytes_as(ControlSchema::V2)?;
-        match verify_p256(device_public_key, &v2, signature) {
-            Ok(canonical) => Ok(VerifiedStatement {
-                schema: ControlSchema::V2,
-                signed_bytes: v2,
-                signature: canonical,
-            }),
-            Err(v2_error) => {
-                if matches!(self.content, ControlContent::Spawn { .. }) {
-                    return Err(v2_error);
-                }
-                let v1 = self.signed_bytes_as(ControlSchema::V1)?;
-                let canonical = verify_p256(device_public_key, &v1, signature)?;
-                Ok(VerifiedStatement {
-                    schema: ControlSchema::V1,
-                    signed_bytes: v1,
-                    signature: canonical,
-                })
+        let previewed = matches!(
+            self.content,
+            ControlContent::Permission {
+                preview_sha256: Some(_),
+                ..
+            }
+        );
+        let spawn = matches!(self.content, ControlContent::Spawn { .. });
+        let mut schemas = Vec::with_capacity(3);
+        // A permission without a preview has no v3 body.
+        if !matches!(
+            self.content,
+            ControlContent::Permission {
+                preview_sha256: None,
+                ..
+            }
+        ) {
+            schemas.push(ControlSchema::V3);
+        }
+        if !previewed {
+            schemas.push(ControlSchema::V2);
+            if !spawn {
+                schemas.push(ControlSchema::V1);
             }
         }
+        let mut first_error = None;
+        for schema in schemas {
+            let bytes = self.signed_bytes_as(schema)?;
+            match verify_p256(device_public_key, &bytes, signature) {
+                Ok(canonical) => {
+                    return Ok(VerifiedStatement {
+                        schema,
+                        signed_bytes: bytes,
+                        signature: canonical,
+                    })
+                }
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        Err(first_error.unwrap_or(HumanSigningError::BadSignature))
     }
 }
 
@@ -934,6 +1015,21 @@ fn nfc(s: &str) -> String {
     s.nfc().collect()
 }
 
+/// 64 lowercase hex characters (a SHA-256 line).
+fn lower_hex_sha256(field: &'static str, value: &str) -> Result<(), HumanSigningError> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err(HumanSigningError::InvalidField {
+            field,
+            reason: "must be 64 lowercase hex characters",
+        });
+    }
+    Ok(())
+}
+
 fn token(field: &'static str, value: &str) -> Result<(), HumanSigningError> {
     if value.is_empty() {
         return Err(HumanSigningError::InvalidField {
@@ -1186,6 +1282,69 @@ mod tests {
         );
     }
 
+    /// #3118: a v3 permission's exact bytes; the preview line is load-bearing;
+    /// a v2 signature never stands for a previewed request, and a request
+    /// with no preview has no v3 body.
+    #[test]
+    fn a_v3_allow_binds_the_preview_and_a_v2_one_cannot_stand_for_it() {
+        use p256::ecdsa::signature::Signer as _;
+        let signing = p256::ecdsa::SigningKey::from_slice(&[5u8; 32]).unwrap();
+        let public = signing
+            .verifying_key()
+            .to_sec1_point(true)
+            .as_bytes()
+            .to_vec();
+        let seen = "a".repeat(64);
+        let swapped = "b".repeat(64);
+        let statement = |preview_sha256| HumanControl {
+            instance_id: "inst",
+            workspace_id: Uuid::from_u128(1),
+            member_id: Uuid::from_u128(2),
+            device_key_id: Uuid::from_u128(3),
+            host_id: Uuid::from_u128(4),
+            session_id: Some(Uuid::from_u128(5)),
+            nonce: Uuid::from_u128(6),
+            issued_at_ms: 1_790_000_000_000,
+            expires_at_ms: 1_790_000_060_000,
+            content: ControlContent::Permission {
+                request_event_id: Uuid::from_u128(7),
+                option_id: "allow-once",
+                option_kind: "allow_once",
+                scope: PermissionScope::Once,
+                preview_sha256,
+            },
+        };
+        let v3 = statement(Some(seen.as_str()));
+        assert_eq!(
+            String::from_utf8(v3.content.canonical_bytes().unwrap()).unwrap(),
+            format!("00000000-0000-0000-0000-000000000007\nallow-once\nallow_once\nonce\n{seen}")
+        );
+        assert!(String::from_utf8(v3.signed_bytes().unwrap())
+            .unwrap()
+            .starts_with("momo.human.control.v3\n"));
+        let signature: p256::ecdsa::Signature = signing.sign(&v3.signed_bytes().unwrap());
+        let verified = v3.verify_any(&public, &signature.to_bytes()).unwrap();
+        assert_eq!(verified.schema, ControlSchema::V3);
+        // The host rebuilds with the hash it computed; the server's swap shows.
+        assert_eq!(
+            statement(Some(swapped.as_str())).verify_any(&public, &signature.to_bytes()),
+            Err(HumanSigningError::BadSignature)
+        );
+        // A v2 allow (no preview line) is not accepted for a previewed request.
+        let legacy = statement(None);
+        let v2_sig: p256::ecdsa::Signature =
+            signing.sign(&legacy.signed_bytes_as(ControlSchema::V2).unwrap());
+        assert!(legacy.verify_any(&public, &v2_sig.to_bytes()).is_ok());
+        assert_eq!(
+            v3.verify_any(&public, &v2_sig.to_bytes()),
+            Err(HumanSigningError::BadSignature)
+        );
+        assert!(v3.signed_bytes_as(ControlSchema::V2).is_err());
+        assert!(legacy.signed_bytes_as(ControlSchema::V3).is_err());
+        let upper = seen.to_uppercase();
+        assert!(statement(Some(upper.as_str())).signed_bytes().is_err());
+    }
+
     #[test]
     fn newline_in_a_token_is_refused_so_no_boundary_can_move() {
         let content = ControlContent::Permission {
@@ -1193,6 +1352,7 @@ mod tests {
             option_id: "allow-once\nallow_once",
             option_kind: "x",
             scope: PermissionScope::Once,
+            preview_sha256: None,
         };
         assert!(matches!(
             content.canonical_bytes(),

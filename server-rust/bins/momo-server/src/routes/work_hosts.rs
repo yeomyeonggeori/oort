@@ -657,6 +657,8 @@ pub async fn pending_controls(
                 target_public_key: letter.target_public_key,
             })
             .collect(),
+        // #3117: the host latches R2 on this (with its root pinned).
+        human_control_signature_required: state.device_keys.human_control_signature_required,
     }))
 }
 

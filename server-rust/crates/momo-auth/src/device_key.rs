@@ -75,6 +75,13 @@ pub const REFUSAL_DEVICE_ROOT_LINKED_SESSION: &str = "device_root_linked_session
 /// The public key is live under the caller, on a sign-in that can no longer
 /// rotate: send a `device_rebind.v1` letter to move it onto this one (#3097).
 pub const REFUSAL_DEVICE_KEY_REBIND_REQUIRED: &str = "device_key_rebind_required";
+/// A phone (`ios`) key is registered, moved or approved only on a QR-linked
+/// session lineage (#3119, ADR-0146 D-6 증보 2026-09-29 「QR 연결로만 등록」).
+pub const REFUSAL_DEVICE_KEY_REQUIRES_LINKED_SESSION: &str = "device_key_requires_linked_session";
+/// A phone key whose QR link was issued from a sign-in that never held a Mac
+/// (root) key is not approved: a web tab — or a stolen web token — can issue a
+/// QR, but only the Mac's sign-in holds a root (#3119).
+pub const REFUSAL_DEVICE_KEY_LINK_NOT_FROM_MAC: &str = "device_key_link_not_from_mac";
 
 /// Why a key ended (`member_device_key_revoked_ck`). The CHECK also allows
 /// `refresh_reuse`: rows a reuse revoked before #3097. Nothing writes it now —
@@ -150,6 +157,14 @@ pub struct DeviceKeyRecord {
     /// The key's own sign-in can still rotate (#3097). A live key on an ended
     /// lineage signs nothing until [`rebind_device_key_in_tx`] moves it.
     pub lineage_live: bool,
+    /// The key's sign-in was minted by redeeming a QR device link
+    /// (`linked_lineage_sql!`, #3119). A phone key that is not is never a
+    /// candidate for approval; one approved before #3119 keeps its approval
+    /// and is shown as 「QR 아님」.
+    pub linked_session: bool,
+    /// That QR link was issued from a sign-in that holds (or held) a `macos`
+    /// key of the same member (`link_issuer_mac_sql!`, #3119).
+    pub linked_from_mac: bool,
     pub created_at_ms: i64,
     pub revoked_at_ms: Option<i64>,
     pub revoked_reason: Option<String>,
@@ -261,6 +276,11 @@ pub enum DeviceKeyRefusal {
     LineageLive,
     /// A rebind of a root (`macos`) key into a QR-linked (phone) session.
     RootLinkedSession,
+    /// A phone (`ios`) key on — or moved to or from — a sign-in that did not
+    /// come from a QR link (#3119).
+    RequiresLinkedSession,
+    /// Endorsing a phone key whose QR link no Mac sign-in issued (#3119).
+    LinkNotFromMac,
     /// The target key is already revoked and already carries a letter.
     Revoked,
     /// The signature does not verify, or the statement is stale or malformed.
@@ -276,6 +296,8 @@ impl DeviceKeyRefusal {
             DeviceKeyRefusal::NotEndorsable => REFUSAL_DEVICE_KEY_NOT_ENDORSABLE,
             DeviceKeyRefusal::LineageLive => REFUSAL_DEVICE_KEY_ALREADY_REGISTERED,
             DeviceKeyRefusal::RootLinkedSession => REFUSAL_DEVICE_ROOT_LINKED_SESSION,
+            DeviceKeyRefusal::RequiresLinkedSession => REFUSAL_DEVICE_KEY_REQUIRES_LINKED_SESSION,
+            DeviceKeyRefusal::LinkNotFromMac => REFUSAL_DEVICE_KEY_LINK_NOT_FROM_MAC,
             DeviceKeyRefusal::Revoked => REFUSAL_DEVICE_KEY_REVOKED,
             DeviceKeyRefusal::SignatureInvalid => REFUSAL_DEVICE_SIGNATURE_INVALID,
         }
@@ -315,11 +337,56 @@ macro_rules! own_lineage_live_sql {
     };
 }
 
+/// "The sign-in of key `k` was minted by redeeming a QR device link"
+/// (ADR-0180, #3119). The origin is the `device_link_token` row itself: its
+/// redeemed token halves (moved along on every rotation, and kept once
+/// consumed — only unconsumed rows are ever deleted) carry the lineage id
+/// `consume_device_link_in_tx` gave the phone. No other route mints such a row,
+/// and no request field can name one.
+macro_rules! linked_lineage_sql {
+    ($member:literal, $session:literal) => {
+        concat!(
+            "EXISTS ( \
+            SELECT 1 FROM device_link_token d \
+              JOIN token r ON r.workspace_id = d.workspace_id \
+                          AND r.id IN (d.redeemed_access_token_id, d.redeemed_refresh_token_id) \
+             WHERE d.workspace_id = k.workspace_id AND d.member_id = ",
+            $member,
+            " AND d.consumed_at IS NOT NULL AND r.session_id = ",
+            $session,
+            ")"
+        )
+    };
+}
+
+/// "The QR link that minted key `k`'s sign-in was issued from a sign-in that
+/// holds, or held, a `macos` key of the same member" (#3119). A root needs the
+/// password re-entered (review H1), so a stolen web token can issue a QR and
+/// redeem it itself, but its issuing sign-in never carries a Mac key. Revoked
+/// Mac keys count: a desktop that logged out and back in keeps its old row on
+/// the lineage that issued its phones' links.
+macro_rules! link_issuer_mac_sql {
+    () => {
+        "EXISTS ( \
+            SELECT 1 FROM device_link_token d \
+              JOIN token r ON r.workspace_id = d.workspace_id \
+                          AND r.id IN (d.redeemed_access_token_id, d.redeemed_refresh_token_id) \
+              JOIN token i ON i.workspace_id = d.workspace_id AND i.id = d.issued_session_token_id \
+              JOIN member_device_key m ON m.workspace_id = d.workspace_id \
+                                      AND m.member_id = d.member_id \
+                                      AND m.platform = 'macos' AND m.session_id = i.session_id \
+             WHERE d.workspace_id = k.workspace_id AND d.member_id = k.member_id \
+               AND d.consumed_at IS NOT NULL AND r.session_id = k.session_id)"
+    };
+}
+
 const KEY_COLUMNS: &str = concat!("k.id, k.workspace_id, k.member_id, k.session_id, k.alg, \
      k.public_key, k.platform, k.label, k.endorsed_by_key_id, k.endorsement_sig, \
      (extract(epoch FROM k.endorsed_at) * 1000)::bigint AS endorsed_at_ms, \
      ", endorser_live_sql!(), " AS endorser_live, \
      ", own_lineage_live_sql!(), " AS lineage_live, \
+     ", linked_lineage_sql!("k.member_id", "k.session_id"), " AS linked_session, \
+     ", link_issuer_mac_sql!(), " AS linked_from_mac, \
      (extract(epoch FROM k.created_at) * 1000)::bigint AS created_at_ms, \
      (extract(epoch FROM k.revoked_at) * 1000)::bigint AS revoked_at_ms, \
      k.revoked_reason, k.revoked_by_key_id, k.revocation_sig, k.revoked_at_ms AS revocation_signed_at_ms");
@@ -342,6 +409,8 @@ fn decode_key(row: &sqlx::postgres::PgRow) -> Result<DeviceKeyRecord, sqlx::Erro
         endorsed_at_ms: row.try_get("endorsed_at_ms")?,
         endorser_live: row.try_get("endorser_live")?,
         lineage_live: row.try_get("lineage_live")?,
+        linked_session: row.try_get("linked_session")?,
+        linked_from_mac: row.try_get("linked_from_mac")?,
         created_at_ms: row.try_get("created_at_ms")?,
         revoked_at_ms: row.try_get("revoked_at_ms")?,
         revoked_reason: row.try_get("revoked_reason")?,
@@ -376,6 +445,27 @@ pub async fn insert_device_key_in_tx(
     .bind(&new.label)
     .fetch_optional(&mut *conn)
     .await
+}
+
+/// Whether the sign-in `session_id` of `member_id` was minted by redeeming a
+/// QR device link (#3119) — the one origin test for both directions: a phone
+/// key must come from such a sign-in, a root key never may.
+pub async fn session_is_device_linked_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    session_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let sql = format!(
+        "SELECT {} FROM (SELECT $1::uuid AS workspace_id) k",
+        linked_lineage_sql!("$2", "$3")
+    );
+    sqlx::query_scalar(&sql)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(session_id)
+        .fetch_one(&mut *conn)
+        .await
 }
 
 /// Read one key (RLS confines it to the transaction's workspace).
@@ -514,6 +604,15 @@ pub async fn endorse_device_key_in_tx(
         || target.alg != DEVICE_KEY_ALG_P256
     {
         return Ok(Err(DeviceKeyRefusal::NotEndorsable));
+    }
+    // #3119 (「QR 연결로만 등록」): a phone key registered on any other sign-in
+    // — before the rule, or never — is not a candidate, and neither is one
+    // whose QR no Mac sign-in issued.
+    if !target.linked_session {
+        return Ok(Err(DeviceKeyRefusal::RequiresLinkedSession));
+    }
+    if !target.linked_from_mac {
+        return Ok(Err(DeviceKeyRefusal::LinkNotFromMac));
     }
 
     let letter = DeviceEndorse {
@@ -821,6 +920,12 @@ pub async fn rebind_device_key_in_tx(
     if key.platform == DEVICE_KEY_PLATFORM_MACOS && caller_linked {
         return Ok(Err(DeviceKeyRefusal::RootLinkedSession));
     }
+    // #3119: a phone key moves only from a QR-linked sign-in to a QR-linked
+    // sign-in. One registered elsewhere (before the rule) stays where it is and
+    // ends with its lineage; its phone links by QR and registers anew.
+    if key.platform == DEVICE_KEY_PLATFORM_IOS && (!caller_linked || !key.linked_session) {
+        return Ok(Err(DeviceKeyRefusal::RequiresLinkedSession));
+    }
     if signed_at_ms <= 0 || signed_at_ms.abs_diff(now_ms) > MAX_CLOCK_SKEW_MS as u64 {
         return Ok(Err(DeviceKeyRefusal::SignatureInvalid));
     }
@@ -1027,6 +1132,8 @@ mod tests {
             endorsed_at_ms: None,
             endorser_live: false,
             lineage_live: true,
+            linked_session: false,
+            linked_from_mac: false,
             created_at_ms: 0,
             revoked_at_ms: None,
             revoked_reason: None,
