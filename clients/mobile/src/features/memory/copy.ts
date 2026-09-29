@@ -106,9 +106,8 @@ export const MEMORY_PAUSE_CHECKING = '기억 설정을 확인하고 있어요.';
 // 굳히면 이 블록을 그쪽에 맞춘다. 화면·테스트는 이 상수만 읽는다.
 
 export const PROPOSAL_TITLE = '기억해 둘게요';
-export const PROPOSAL_LEAD = '이 답에서 팀이 기억하면 좋을 내용을 찾았어요.';
 export const PROPOSAL_ACCEPT = '기억하기';
-export const PROPOSAL_REJECT = '아니요';
+export const PROPOSAL_REJECT = '기억 안 하기';
 export const PROPOSAL_ACCEPT_A11Y = '이 내용을 팀 기억으로 남기기';
 export const PROPOSAL_REJECT_A11Y = '이 내용을 기억하지 않기';
 export const PROPOSAL_BUSY = '처리하고 있어요.';
@@ -122,7 +121,7 @@ export const PROPOSAL_ACCEPTED = '기억해 뒀어요.';
 export const PROPOSAL_REJECTED = '기억하지 않기로 했어요.';
 export const PROPOSAL_DESKTOP_HINT = '데스크탑에서 기억을 볼 수 있어요.';
 export const PROPOSAL_STALE =
-  '다른 곳에서 이미 정해졌거나, 근거 대화가 바뀌었거나, 기억이 꺼져 있어서 더 이상 정할 수 없어요.';
+  '이 제안은 이미 닫혀서 더 이상 정할 수 없어요.';
 export const PROPOSAL_EXPIRED = '기한이 지나서 더 이상 정할 수 없어요.';
 export const PROPOSAL_FAILED = '처리하지 못했어요. 연결을 확인하고 다시 눌러 주세요.';
 export const PROPOSAL_EVIDENCE_LABEL = '근거 대화';

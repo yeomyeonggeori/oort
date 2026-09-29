@@ -395,7 +395,6 @@ const buildStyles = (color: Palette) =>
       justifyContent: 'center',
       paddingVertical: space.xs,
       paddingHorizontal: space.md,
-      gap: 2,
       borderRadius: radius.sm,
       backgroundColor: color.bg,
     },
