@@ -326,6 +326,8 @@ struct Pass {
     ws: Uuid,
     ch: Uuid,
     cursor: i64,
+    /// #3212: the channel head at the last memory reset. Nothing at or below it is read, counted or sent.
+    reset_floor: i64,
     leased: bool,
 }
 
@@ -739,6 +741,7 @@ impl AgentWorker {
             ws,
             ch,
             cursor: cursor.last_seq,
+            reset_floor: cursor.reset_floor_seq,
             leased: false,
         };
         let mut recheck = Duration::from_secs(600);
@@ -845,7 +848,7 @@ impl AgentWorker {
             0
         };
         for _ in 0..cfg.windows_per_channel {
-            let after = pass.cursor.max(floor);
+            let after = pass.cursor.max(floor).max(pass.reset_floor);
             if after >= head {
                 break;
             }
@@ -914,7 +917,7 @@ impl AgentWorker {
     ) -> PassEnd {
         let cfg = &self.config.memory;
         let (ws, ch) = (pass.ws, pass.ch);
-        let floor = floor.max(0);
+        let floor = floor.max(0).max(pass.reset_floor);
         let index: Result<Vec<DigestIndexRow>, DbError> =
             mem::with_memory_tx(&self.pool, ws, move |conn| {
                 Box::pin(async move { mem::digest_index(conn, ch, "window", floor).await })
@@ -984,11 +987,14 @@ impl AgentWorker {
         let (ws, ch) = (pass.ws, pass.ch);
         let offset = self.config.utc_offset_minutes;
         let now = Utc::now();
+        let reset_floor = pass.reset_floor;
         let lookback_days = cfg.rollup_days.max(cfg.rollup_weeks * 7 + 7);
         let since = now - ChronoDuration::days(lookback_days);
         let days = match self
             .read_tx(ws, move |conn| {
-                Box::pin(async move { mem::day_bounds(conn, ws, ch, offset, since).await })
+                Box::pin(
+                    async move { mem::day_bounds(conn, ws, ch, offset, since, reset_floor).await },
+                )
             })
             .await
         {
@@ -1121,7 +1127,7 @@ impl AgentWorker {
                 stats.lease_held += 1;
                 return JobOutcome::LeaseHeld;
             }
-            let loaded = match self.load(ws, ch, &source).await {
+            let loaded = match self.load(ws, ch, &source, pass.reset_floor).await {
                 Ok(Some(loaded)) => loaded,
                 Ok(None) => return JobOutcome::Empty,
                 Err(error) => {
@@ -1316,6 +1322,12 @@ impl AgentWorker {
                             stats.lease_held += 1;
                             return JobOutcome::LeaseHeld;
                         }
+                        // #3212: the evidence predates a memory reset. Re-reading cannot help and the
+                        // read clamp should have kept it out; skip it, never retry, never back off.
+                        ApplyFailure::Reset => {
+                            tracing::warn!(channel_id = %ch, "memory: evidence predates a reset; skipped");
+                            return JobOutcome::Empty;
+                        }
                         _ => {
                             tracing::warn!(channel_id = %ch, ?failure, error = %error, "memory: apply failed");
                             stats.failures += 1;
@@ -1336,8 +1348,14 @@ impl AgentWorker {
     /// `mem_suppressed_messages` (a memory tx; the message read itself is a plain tenant tx). A range that
     /// is left with nothing becomes `None`, which the caller treats like any range without live sources
     /// (the stale digest is dropped).
-    async fn load(&self, ws: Uuid, ch: Uuid, source: &Source) -> Result<Option<Loaded>, DbError> {
-        let loaded = self.load_raw(ws, ch, source).await?;
+    async fn load(
+        &self,
+        ws: Uuid,
+        ch: Uuid,
+        source: &Source,
+        reset_floor: i64,
+    ) -> Result<Option<Loaded>, DbError> {
+        let loaded = self.load_raw(ws, ch, source, reset_floor).await?;
         let Some(mut loaded) = loaded else {
             return Ok(None);
         };
@@ -1382,11 +1400,13 @@ impl AgentWorker {
         ws: Uuid,
         ch: Uuid,
         source: &Source,
+        reset_floor: i64,
     ) -> Result<Option<Loaded>, DbError> {
         let cfg = self.config.memory.clone();
         let offset = self.config.utc_offset_minutes;
         match source.clone() {
             Source::ChannelWindow { after_seq, head } => {
+                let after_seq = after_seq.max(reset_floor);
                 self.read_tx(ws, move |conn| {
                     Box::pin(async move {
                         let Some(pending) =
@@ -1443,6 +1463,7 @@ impl AgentWorker {
                             after_seq,
                             head,
                             cfg.window_max_messages + 1,
+                            reset_floor,
                         )
                         .await?;
                         let read_at = mem::read_clock(conn).await?;
@@ -1481,6 +1502,7 @@ impl AgentWorker {
                             from_seq,
                             to_seq,
                             cfg.window_max_messages * 2,
+                            reset_floor,
                         )
                         .await?;
                         let read_at = mem::read_clock(conn).await?;
@@ -1516,8 +1538,15 @@ impl AgentWorker {
                 let (evidence, read_at) = self
                     .read_tx(ws, move |conn| {
                         Box::pin(async move {
-                            let evidence =
-                                mem::read_evidence_refs(conn, ws, ch, from_seq, to_seq).await?;
+                            let evidence = mem::read_evidence_refs(
+                                conn,
+                                ws,
+                                ch,
+                                from_seq,
+                                to_seq,
+                                reset_floor,
+                            )
+                            .await?;
                             let read_at = mem::read_clock(conn).await?;
                             Ok((evidence, read_at))
                         })
@@ -1541,8 +1570,17 @@ impl AgentWorker {
                     let rows = self
                         .read_tx(ws, move |conn| {
                             Box::pin(async move {
-                                mem::read_range(conn, ws, ch, None, from_seq, to_seq, limit + 1)
-                                    .await
+                                mem::read_range(
+                                    conn,
+                                    ws,
+                                    ch,
+                                    None,
+                                    from_seq,
+                                    to_seq,
+                                    limit + 1,
+                                    reset_floor,
+                                )
+                                .await
                             })
                         })
                         .await?;

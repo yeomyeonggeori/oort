@@ -212,6 +212,19 @@ END
 $$;
 -- END mem-lockdown
 
+-- #3212 (migration 110): the memory reset and the team-notice read are API entry points reserved for momo_app
+-- (not PUBLIC). Migration 110 can run before the runtime roles exist, so reassert the grant here.
+DO $$
+DECLARE f text;
+BEGIN
+  FOREACH f IN ARRAY ARRAY['mem_reset_workspace(bigint)', 'mem_summary_provider()'] LOOP
+    IF to_regprocedure('public.' || f) IS NOT NULL THEN
+      EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC', f);
+      EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO momo_app', f);
+    END IF;
+  END LOOP;
+END $$;
+
 -- The global catalog is migration-owned. API routes may read it but may mutate
 -- only tenant-scoped install/grant rows. Keep this revoke here as well as in 037:
 -- a later role-password rotation must not restore broad table writes.
