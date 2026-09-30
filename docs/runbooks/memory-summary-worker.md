@@ -70,6 +70,14 @@ ADR-0196(팀 기억 v2) M1의 요약 루프. `momo-agent-worker` 프로세스 �
 - **잊기 뒤 요약**: 항목을 잊으면 그 근거 메시지를 인용한 요약이 stale이 되고, 다시 만들 때 그 메시지는 입력에서 빠진다(`mem_suppress_msg`, id만).
 - 이식 귀속: Hindsight consolidation(MIT) · Graphiti 모순 구간 닫기(Apache-2.0) — `NOTICE`, `legal/THIRD_PARTY_NOTICES.md`.
 
+### 주제 (#3172 B, 마이그레이션 108)
+정리 잡의 판정 다음 단계(`topics.rs`, 끄기 `MEMORY_TOPICS_ENABLED=0`). 같은 채널 안에서만: 주제 없는 항목을 20개씩 기존 주제 번호/새 라벨로 배정 →
+리프가 `MEMORY_TOPIC_CAP`(125)에 닿으면 표본 `MEMORY_TOPIC_SPLIT_SAMPLE`(160)개를 2~4 하위 주제로 나눔 → 항목이 바뀐 리프의 요약을 다시 씀(`MEMORY_TOPIC_SUMMARIES_PER_RUN` 5, 항목 ≥ `MEMORY_TOPIC_SUMMARY_MIN_ITEMS` 3).
+- 라벨(2~30자)·요약(≤700자)은 모델이 쓴 글이라 Rust와 SQL이 시크릿 모양·괄호·제어문자를 두 번 검사한다. 통과 못 하면 버리고 `topic_rejected`로 센다.
+- 예산: 판정과 같은 일일 상한·80% 몫. 호출 수는 판정과 따로 `MEMORY_CONSOLIDATE_MAX_CALLS`까지. 루트 주제는 채널당 `MEMORY_TOPIC_MAX_ROOTS`(60).
+- 상태 보기: `mem_topic`(트리), `mem_topic_summary`(요약 + 근거 항목 id), `mem_item.topic_id`, `mem_event`(`assigned` from/to · `split` · `summarized` · `purged`).
+- 되돌리기: `mem_topic_revert(event_id)`(워커 전용) — 배정은 이전 주제로, 분할은 하위 주제를 접고 24시간 잠금.
+
 ## 알려진 한계 (M1)
 - 일일 상한은 넘으면 **멈춘다**(plan §6.6의 「트리거를 ≥120건으로 늘려 계속」은 미구현).
 - 스레드는 채널 롤업에 들어가지 않는다(창 요약만).

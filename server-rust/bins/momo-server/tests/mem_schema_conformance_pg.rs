@@ -2102,6 +2102,7 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
             || name == "mem_accept_proposal"
             || name == "mem_reject_proposal"
             || name == "mem_proposal_evidence_ok"
+            || name == "mem_topic_summary_ok"
         {
             // The RLS policies call the evidence helpers as the reading role; `mem_search_items`
             // is the API entry point (session_user guard inside; the worker-only twin is
@@ -2425,8 +2426,7 @@ fn migration_path() -> PathBuf {
 /// The allow-list self-check is restated by every migration that adds a definer function (101 and 102
 /// are merged and stay untouched, #3191 M-6); the newest one is the one that matches the real state.
 fn worker_migration_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../server/Migrations/107_mem_consolidate.sql")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../server/Migrations/108_mem_topics.sql")
 }
 
 /// M-1 / L-9: the lock block is one text in the two bootstrap files, compared byte for byte (stronger
@@ -2604,7 +2604,7 @@ async fn lock_block_also_locks_views_and_materialized_views() {
 
 /// L-1 / L-9: the SECURITY DEFINER functions owned by mem_definer are exactly this list, by **full signature**
 /// (`regprocedure` text): an overload that sneaks in under an allowed name is a stranger too (#3200 L-9).
-const DEFINER_ALLOW_LIST: [&str; 53] = [
+const DEFINER_ALLOW_LIST: [&str; 63] = [
     "mem_accept_proposal(uuid)",
     "mem_add_item(uuid,text,text,text,uuid[],real,boolean,text,text)",
     "mem_adjust_tokens(bigint)",
@@ -2658,6 +2658,16 @@ const DEFINER_ALLOW_LIST: [&str; 53] = [
     "mem_stale_digests(integer,integer)",
     "mem_suppressed_messages(uuid,uuid[])",
     "mem_token_budget(bigint)",
+    "mem_topic_assign(uuid,uuid,text,integer)",
+    "mem_topic_gc(uuid)",
+    "mem_topic_leaves(uuid)",
+    "mem_topic_revert(uuid)",
+    "mem_topic_set_summary(uuid,text,uuid[],text,text)",
+    "mem_topic_split_apply(uuid,text[],uuid[],integer[],integer)",
+    "mem_topic_split_candidates(uuid,integer,integer)",
+    "mem_topic_summary_ok(uuid)",
+    "mem_topic_summary_work(uuid,integer,integer,integer)",
+    "mem_topic_unassigned(uuid,integer)",
 ];
 
 /// The `DO` block that starts at `marker`, up to (not including) `until` or the end of the file.
@@ -2691,7 +2701,7 @@ async fn security_definer_functions_owned_by_mem_definer_are_allow_listed() {
     assert_eq!(
         owned, expected,
         "a SECURITY DEFINER function owned by mem_definer must be added to the allow-list \
-         here and in the newest migration's allow-list (107_mem_consolidate.sql) on purpose"
+         here and in the newest migration's allow-list (108_mem_topics.sql) on purpose"
     );
     // The migration's own self-check passes on the good state ...
     let check = tail_block(&worker_migration_path(), "-- ── L-9", None);

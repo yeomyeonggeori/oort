@@ -107,7 +107,16 @@ DECLARE
     'mem_serving_record_of(uuid)',
     'mem_stale_digests(integer, integer)',
     'mem_suppressed_messages(uuid, uuid[])',
-    'mem_token_budget(bigint)'
+    'mem_token_budget(bigint)',
+    'mem_topic_assign(uuid, uuid, text, integer)',
+    'mem_topic_gc(uuid)',
+    'mem_topic_leaves(uuid)',
+    'mem_topic_revert(uuid)',
+    'mem_topic_set_summary(uuid, text, uuid[], text, text)',
+    'mem_topic_split_apply(uuid, text[], uuid[], integer[], integer)',
+    'mem_topic_split_candidates(uuid, integer, integer)',
+    'mem_topic_summary_work(uuid, integer, integer, integer)',
+    'mem_topic_unassigned(uuid, integer)'
   ];
 BEGIN
   IF to_regclass('public.mem_digest') IS NULL THEN

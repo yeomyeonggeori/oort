@@ -528,19 +528,21 @@ mod tests {
     /// pending-proposal purge (all reversible through `mem_event`), `mem_cons_state`/`mem_cons_pair`/
     /// `mem_suppress_msg`, the `mem.op` marker policies, `mem_proposal.op`, the by-signature
     /// definer allow-list and the follow-ups of #3200/#3209 (event visibility, forget → digests stale).
+    /// 108 is #3172's topic layer (L3): `mem_topic`, `mem_topic_summary`, `mem_item.topic_id` and the worker-only
+    /// assign / split / summarise / gc / revert functions (same channel only, labels and summaries re-checked in SQL).
     #[test]
-    fn discovers_contiguous_migrations_001_to_107() {
+    fn discovers_contiguous_migrations_001_to_108() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            107,
-            "expected 107 migrations under {}",
+            108,
+            "expected 108 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 107);
+        assert_eq!(migrations.last().unwrap().version, 108);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

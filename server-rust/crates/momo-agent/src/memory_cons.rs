@@ -298,3 +298,219 @@ pub async fn consolidation_channels(
         .map(|row| (row.get("workspace_id"), row.get("channel_id")))
         .collect())
 }
+
+// ---------------------------------------------------------------------------
+// topics (L3, migration 108)
+// ---------------------------------------------------------------------------
+
+/// Bumped when a topic prompt or rule changes; stored on every topic summary.
+pub const TOPIC_PROMPT_VERSION: &str = "topic-v1";
+
+#[derive(Debug, Clone)]
+pub struct UnassignedItem {
+    pub item_id: Uuid,
+    pub kind: String,
+    pub body: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct TopicLeaf {
+    pub topic_id: Uuid,
+    pub label: String,
+    pub depth: i32,
+    pub live_count: i32,
+}
+
+/// One topic that reached the cap, with the sample the model is asked to classify.
+#[derive(Debug, Clone)]
+pub struct SplitCandidate {
+    pub topic_id: Uuid,
+    pub label: String,
+    pub live_count: i32,
+    pub sample: Vec<(Uuid, String)>,
+}
+
+/// One topic whose summary is missing or out of date, with the items it should rest on.
+#[derive(Debug, Clone)]
+pub struct SummaryWork {
+    pub topic_id: Uuid,
+    pub label: String,
+    pub items: Vec<(Uuid, String)>,
+}
+
+pub async fn topic_unassigned(
+    conn: &mut PgConnection,
+    channel_id: Uuid,
+    limit: i32,
+) -> Result<Vec<UnassignedItem>, DbError> {
+    let rows = sqlx::query("SELECT item_id, kind, body FROM mem_topic_unassigned($1, $2)")
+        .bind(channel_id)
+        .bind(limit)
+        .fetch_all(&mut *conn)
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|row| UnassignedItem {
+            item_id: row.get("item_id"),
+            kind: row.get("kind"),
+            body: row.get("body"),
+        })
+        .collect())
+}
+
+pub async fn topic_leaves(
+    conn: &mut PgConnection,
+    channel_id: Uuid,
+) -> Result<Vec<TopicLeaf>, DbError> {
+    let rows = sqlx::query("SELECT topic_id, label, depth, live_count FROM mem_topic_leaves($1)")
+        .bind(channel_id)
+        .fetch_all(&mut *conn)
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|row| TopicLeaf {
+            topic_id: row.get("topic_id"),
+            label: row.get("label"),
+            depth: row.get("depth"),
+            live_count: row.get("live_count"),
+        })
+        .collect())
+}
+
+/// Assign an item to an existing leaf (`topic`) or a new root (`new_label`); exactly one is given.
+/// SQLSTATE `23514` = not the item's channel/space, or the label is not acceptable.
+pub async fn topic_assign(
+    conn: &mut PgConnection,
+    item_id: Uuid,
+    topic: Option<Uuid>,
+    new_label: Option<&str>,
+    max_roots: i32,
+) -> Result<Option<Uuid>, DbError> {
+    Ok(
+        sqlx::query_scalar("SELECT mem_topic_assign($1, $2, $3, $4)")
+            .bind(item_id)
+            .bind(topic)
+            .bind(new_label)
+            .bind(max_roots)
+            .fetch_one(&mut *conn)
+            .await?,
+    )
+}
+
+pub async fn topic_split_candidates(
+    conn: &mut PgConnection,
+    channel_id: Uuid,
+    cap: i32,
+    sample: i32,
+) -> Result<Vec<SplitCandidate>, DbError> {
+    let rows = sqlx::query(
+        "SELECT topic_id, label, live_count, item_id, body FROM mem_topic_split_candidates($1, $2, $3)",
+    )
+    .bind(channel_id)
+    .bind(cap)
+    .bind(sample)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut out: Vec<SplitCandidate> = Vec::new();
+    for row in &rows {
+        let topic_id: Uuid = row.get("topic_id");
+        if out.last().map(|c| c.topic_id) != Some(topic_id) {
+            out.push(SplitCandidate {
+                topic_id,
+                label: row.get("label"),
+                live_count: row.get("live_count"),
+                sample: Vec::new(),
+            });
+        }
+        if let Some(last) = out.last_mut() {
+            last.sample.push((row.get("item_id"), row.get("body")));
+        }
+    }
+    Ok(out)
+}
+
+pub async fn topic_split_apply(
+    conn: &mut PgConnection,
+    topic_id: Uuid,
+    labels: &[String],
+    items: &[Uuid],
+    slots: &[i32],
+    cap: i32,
+) -> Result<i32, DbError> {
+    Ok(
+        sqlx::query_scalar("SELECT mem_topic_split_apply($1, $2, $3, $4, $5)")
+            .bind(topic_id)
+            .bind(labels)
+            .bind(items)
+            .bind(slots)
+            .bind(cap)
+            .fetch_one(&mut *conn)
+            .await?,
+    )
+}
+
+pub async fn topic_summary_work(
+    conn: &mut PgConnection,
+    channel_id: Uuid,
+    limit: i32,
+    min_items: i32,
+    per_topic: i32,
+) -> Result<Vec<SummaryWork>, DbError> {
+    let rows = sqlx::query(
+        "SELECT topic_id, label, item_id, body FROM mem_topic_summary_work($1, $2, $3, $4)",
+    )
+    .bind(channel_id)
+    .bind(limit)
+    .bind(min_items)
+    .bind(per_topic)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut out: Vec<SummaryWork> = Vec::new();
+    for row in &rows {
+        let topic_id: Uuid = row.get("topic_id");
+        if out.last().map(|c| c.topic_id) != Some(topic_id) {
+            out.push(SummaryWork {
+                topic_id,
+                label: row.get("label"),
+                items: Vec::new(),
+            });
+        }
+        if let Some(last) = out.last_mut() {
+            last.items.push((row.get("item_id"), row.get("body")));
+        }
+    }
+    Ok(out)
+}
+
+pub async fn topic_set_summary(
+    conn: &mut PgConnection,
+    topic_id: Uuid,
+    body: &str,
+    item_ids: &[Uuid],
+    model: &str,
+) -> Result<bool, DbError> {
+    Ok(
+        sqlx::query_scalar("SELECT mem_topic_set_summary($1, $2, $3, $4, $5)")
+            .bind(topic_id)
+            .bind(body)
+            .bind(item_ids)
+            .bind(model)
+            .bind(TOPIC_PROMPT_VERSION)
+            .fetch_one(&mut *conn)
+            .await?,
+    )
+}
+
+pub async fn topic_gc(conn: &mut PgConnection, channel_id: Uuid) -> Result<i32, DbError> {
+    Ok(sqlx::query_scalar("SELECT mem_topic_gc($1)")
+        .bind(channel_id)
+        .fetch_one(&mut *conn)
+        .await?)
+}
+
+pub async fn topic_revert(conn: &mut PgConnection, event_id: Uuid) -> Result<String, DbError> {
+    Ok(sqlx::query_scalar("SELECT mem_topic_revert($1)")
+        .bind(event_id)
+        .fetch_one(&mut *conn)
+        .await?)
+}

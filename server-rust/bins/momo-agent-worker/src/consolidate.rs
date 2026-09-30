@@ -127,6 +127,13 @@ pub struct ConsolidateStats {
     pub cap_reached: usize,
     pub switched: usize,
     pub failures: usize,
+    /// #3172 B: topic layer.
+    pub topic_assigned: usize,
+    pub topic_created: usize,
+    pub topic_splits: usize,
+    pub topic_summaries: usize,
+    pub topic_rejected: usize,
+    pub topics_gc: i64,
     /// Set when judging was skipped because no model is configured (housekeeping still ran).
     pub not_configured: Option<&'static str>,
 }
@@ -247,7 +254,7 @@ enum Judging {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum Reserved {
+pub(crate) enum Reserved {
     Yes,
     /// The channel was switched off / paused / excluded since the sweep looked.
     Switched,
@@ -255,7 +262,7 @@ enum Reserved {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum JudgeEnd {
+pub(crate) enum JudgeEnd {
     Finished,
     /// Stopped for the token cap (own share or the workspace's).
     CapReached,
@@ -459,7 +466,18 @@ impl AgentWorker {
         self.housekeeping(ws, ch, stats).await;
 
         let end = match judge {
-            Judging::Yes => self.judge_channel(ws, ch, stats).await,
+            Judging::Yes => {
+                let mut calls = 0usize;
+                let end = self.judge_channel(ws, ch, stats, &mut calls).await;
+                if end == JudgeEnd::Finished && cfg.topics_enabled {
+                    // The topic pass spends its own call budget (same limit, separate count): a channel full of
+                    // near-duplicates must not use up the calls that assignment and summaries need.
+                    let mut topic_calls = 0usize;
+                    self.topic_pass(ws, ch, stats, &mut topic_calls).await
+                } else {
+                    end
+                }
+            }
             Judging::NoModel => JudgeEnd::Finished,
             Judging::Capped => JudgeEnd::CapReached,
         };
@@ -518,6 +536,14 @@ impl AgentWorker {
             Err(error) => self.consolidate_failed(ch, "decay", &error, stats),
         }
         match mem::with_memory_tx(&self.pool, ws, move |conn| {
+            Box::pin(async move { cons::topic_gc(conn, ch).await })
+        })
+        .await
+        {
+            Ok(n) => stats.topics_gc += i64::from(n),
+            Err(error) => self.consolidate_failed(ch, "topic_gc", &error, stats),
+        }
+        match mem::with_memory_tx(&self.pool, ws, move |conn| {
             Box::pin(async move { cons::retention(conn, ch, retired_days, window_days, 500).await })
         })
         .await
@@ -544,7 +570,7 @@ impl AgentWorker {
     /// Reserve `estimate` tokens against the workspace's daily cap — the same counter the summaries use —
     /// after checking that consolidation's own share of it is not spent and that the channel is still
     /// allowed (a pause that lands mid-run stops the next call).
-    async fn reserve_for_judge(
+    pub(crate) async fn reserve_for_judge(
         &self,
         ws: Uuid,
         ch: Uuid,
@@ -572,10 +598,15 @@ impl AgentWorker {
         .await
     }
 
-    async fn judge_channel(&self, ws: Uuid, ch: Uuid, stats: &mut ConsolidateStats) -> JudgeEnd {
+    async fn judge_channel(
+        &self,
+        ws: Uuid,
+        ch: Uuid,
+        stats: &mut ConsolidateStats,
+        calls: &mut usize,
+    ) -> JudgeEnd {
         let cfg = &self.config.memory;
         let offset = self.config.utc_offset_minutes;
-        let mut calls = 0usize;
         let mut seen: HashSet<(Uuid, Uuid)> = HashSet::new();
         let mut consecutive_failures = 0u32;
         let (merge_sim, close_sim) = (
@@ -583,8 +614,9 @@ impl AgentWorker {
             cfg.consolidate_close_similarity,
         );
         loop {
-            if calls >= cfg.consolidate_max_calls {
-                return JudgeEnd::Stopped;
+            if *calls >= cfg.consolidate_max_calls {
+                // The judging budget is spent: not a fault, and the topic pass has its own.
+                return JudgeEnd::Finished;
             }
             // Pairs already seen in this run (unparsed answers, skipped) are not cached by the database, so the
             // list may hand them back first: ask for that many extra.
@@ -610,8 +642,9 @@ impl AgentWorker {
                 return JudgeEnd::Finished;
             }
             for pair in fresh {
-                if calls >= cfg.consolidate_max_calls {
-                    return JudgeEnd::Stopped;
+                if *calls >= cfg.consolidate_max_calls {
+                    // The judging budget is spent: not a fault, and the topic pass has its own.
+                    return JudgeEnd::Finished;
                 }
                 seen.insert((pair.a_id, pair.b_id));
                 let decision = pair.kind == "decision";
@@ -633,7 +666,7 @@ impl AgentWorker {
                         return JudgeEnd::Stopped;
                     }
                 }
-                calls += 1;
+                *calls += 1;
                 stats.llm_calls += 1;
                 let reply = match self.call_model(prompt, max_output).await {
                     Ok(reply) => reply,
@@ -690,7 +723,7 @@ impl AgentWorker {
         }
     }
 
-    async fn record_consolidate_cap_reached(&self, ws: Uuid) {
+    pub(crate) async fn record_consolidate_cap_reached(&self, ws: Uuid) {
         if !self.summary.should_audit(ws, AUDIT_CONSOLIDATE_TOKEN_CAP) {
             return;
         }

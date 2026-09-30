@@ -90,6 +90,7 @@ pub mod sse;
 pub mod stream;
 pub mod summary;
 pub mod tool_exec;
+pub mod topics;
 
 use std::future::Future;
 use std::sync::{Arc, Mutex};
