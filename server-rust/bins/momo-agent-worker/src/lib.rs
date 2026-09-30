@@ -76,8 +76,10 @@ pub mod a2a;
 pub mod anthropic;
 pub mod completion_report;
 pub mod config;
+pub mod consolidate;
 pub mod context;
 pub mod egress;
+pub mod embed;
 pub mod extract;
 pub mod oauth;
 pub mod partial;
@@ -89,6 +91,7 @@ pub mod sse;
 pub mod stream;
 pub mod summary;
 pub mod tool_exec;
+pub mod topics;
 
 use std::future::Future;
 use std::sync::{Arc, Mutex};
@@ -402,6 +405,13 @@ pub struct AgentWorker {
     /// #3162 — the memory summary loop's process-local state (lease token, per-channel
     /// memo, audit throttle). Nothing durable lives here.
     summary: summary::SummaryState,
+    /// #3172 — the consolidation loop's process-local memo (which channels are settled for today's slot).
+    consolidate: consolidate::ConsolidateState,
+    /// #3173 — the local embedder (query vectors at serving time, the backfill sweep). Off or
+    /// without a model it answers `None` everywhere and serving is keyword-only.
+    embed: embed::EmbedService,
+    /// Woken when this process stores a memory item, so the embedding loop does not wait a poll.
+    items_stored: tokio::sync::Notify,
 }
 
 impl AgentWorker {
@@ -448,6 +458,7 @@ impl AgentWorker {
         config: WorkerConfig,
     ) -> AgentWorker {
         let ttl = Duration::from_millis(2_000);
+        let config_memory = config.memory.clone();
         AgentWorker {
             pool,
             provider,
@@ -458,7 +469,17 @@ impl AgentWorker {
                 ttl,
             },
             summary: summary::SummaryState::new(),
+            consolidate: consolidate::ConsolidateState::new(),
+            embed: embed::EmbedService::from_config(&config_memory),
+            items_stored: tokio::sync::Notify::new(),
         }
+    }
+
+    /// Replace the embedder (conformance tests: a mock, a slow one, a failing one). The real model
+    /// is otherwise built from `MEMORY_EMBED_*` and loads lazily.
+    pub fn with_embed_service(mut self, service: embed::EmbedService) -> AgentWorker {
+        self.embed = service;
+        self
     }
 
     pub fn pool(&self) -> &PgPool {
@@ -469,6 +490,11 @@ impl AgentWorker {
     /// conformance suite can start a sweep "as after a restart" and tell two workers apart.
     pub fn summary_state(&self) -> &summary::SummaryState {
         &self.summary
+    }
+
+    /// The consolidation loop's process-local memo (tests start "a fresh process" with it).
+    pub fn consolidate_state(&self) -> &consolidate::ConsolidateState {
+        &self.consolidate
     }
 
     pub fn config(&self) -> &WorkerConfig {
@@ -750,6 +776,7 @@ impl AgentWorker {
         let memory_block = serving::serve(
             &self.pool,
             &self.config.memory,
+            &self.embed,
             self.config.utc_offset_minutes,
             job.workspace_id,
             run_id,
@@ -3359,7 +3386,13 @@ impl AgentWorker {
             self.run_jobs(shutdown).await;
             let _ = stop_tx.send(true);
         };
-        tokio::join!(jobs, self.run_summary_loop(stop_rx));
+        self.embed.warm();
+        tokio::join!(
+            jobs,
+            self.run_summary_loop(stop_rx.clone()),
+            self.run_consolidate_loop(stop_rx.clone()),
+            self.run_embed_loop(stop_rx)
+        );
     }
 
     async fn run_jobs(&self, shutdown: impl Future<Output = ()>) {

@@ -72,17 +72,68 @@ this table only records why they are there.
 |---|---|---|---|---|
 | p256 (RustCrypto; brings ecdsa, elliptic-curve, primeorder, sec1 and their RustCrypto deps) | 0.14.0 | Apache-2.0 OR MIT | `server-rust/crates/momo-wire` (human device-key P-256 verification) | ADR-0146 개정 2026-09-28 D-1, #3021 |
 | unicode-normalization | 0.1.25 | MIT OR Apache-2.0 | `server-rust/crates/momo-wire` (NFC of signed human text; was already transitive via sqlx) | ADR-0146 개정 2026-09-28 D-5, #3021 |
+| fastembed (fastembed-rs; `default-features = false`, no hf-hub / image models) | 7.1.0 | Apache-2.0 | `server-rust/crates/momo-embed` (loads the int8 ONNX sentence model and runs it) | ADR-0196 D8 증보 2026-09-30, #3173 |
+| ort / ort-sys (pykeio/ort, ONNX Runtime bindings; `load-dynamic`: no ONNX Runtime binary is downloaded or linked at cargo build time) | 2.0.0-rc.13 | MIT OR Apache-2.0 | via fastembed, `momo-embed` | same |
+| libloading (nagisa/rust_libloading; already in the graph via ort, now also a direct dependency that checks `ORT_DYLIB_PATH` before ort sees it) | 0.9.0 | ISC | `server-rust/crates/momo-embed` | same |
+| tokenizers (Hugging Face) | 0.23.2 | Apache-2.0 | via fastembed, `momo-embed` | same |
+
+### Embedded model and ONNX Runtime (worker image; not Cargo crates)
+
+The agent-worker embeds team-memory items locally (ADR-0196 D8 증보, #3173). Two artifacts ride in
+the app image that the generated Cargo bundle cannot list, because they are not crates. Neither is
+committed to git: the model is downloaded at image build from a pinned Hugging Face revision and
+verified by sha256 (`server-rust/model/e5-small-int8.sha256`, `server-rust/Dockerfile` stage
+`model-payload`); the ONNX Runtime shared library is Microsoft's own release
+(`onnxruntime-linux-<arch>-1.28.2.tgz` from github.com/microsoft/onnxruntime, sha256-pinned per
+architecture in the Dockerfile stage `ort-payload`) and is loaded at run time by `momo-agent-worker`
+through `ORT_DYLIB_PATH`.
+
+| Component | Version / revision | License | Where it lives | Attribution |
+|---|---|---|---|---|
+| `intfloat/multilingual-e5-small` model weights (int8 ONNX file `onnx/model_qint8_avx512_vnni.onnx` and tokenizer files) | Hugging Face revision `614241f622f53c4eeff9890bdc4f31cfecc418b3` | MIT (Hugging Face model-card metadata `license: mit`; the repository ships no separate LICENSE file) | `/opt/momo/models/e5-small-int8/` in the app image | Wang, Yang, Huang, Yang, Majumder, Wei: “Multilingual E5 Text Embeddings: A Technical Report” (arXiv:2402.05672, 2024); model card https://huggingface.co/intfloat/multilingual-e5-small. The training-data licences were not audited (only the model's declared licence was checked). |
+| ONNX Runtime (shared library `libonnxruntime.so`, unmodified Microsoft release) | 1.28.2 | MIT | `/opt/momo/lib/libonnxruntime.so` in the app image; its LICENSE and ThirdPartyNotices.txt (the notices of what ONNX Runtime itself bundles) are copied to `/usr/share/licenses/momo-rust/onnxruntime/` | Copyright (c) Microsoft Corporation, https://github.com/microsoft/onnxruntime (LICENSE text below) |
+
+ONNX Runtime licence text (MIT), reproduced because a binary redistribution must carry it:
+
+```
+MIT License
+
+Copyright (c) Microsoft Corporation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+The model weights are MIT as declared by their authors; the same permission notice applies to them.
+Weights are used unmodified apart from the int8 quantisation the upstream repository publishes.
 
 ### Adapted designs and prompts (no code copied)
 
-Team memory v2 (ADR-0196 D2) adapts ideas and wording from Apache-2.0 projects. Nothing below is a
+Team memory v2 (ADR-0196 D2) adapts ideas and wording from Apache-2.0 and MIT projects. Nothing below is a
 dependency and no upstream source file is redistributed; the prompts are rewritten in Korean for
 oort. They are listed because ADR-0196 D2 requires attribution for translated or reworked prompts.
 
 | Upstream | License | What was adapted | Where in oort | Introduced by |
 |---|---|---|---|---|
-| company-brain (Supermemory Inc., https://github.com/supermemoryai/company-brain, commit ef8a45e) | Apache-2.0 | Collection policy: what to keep permanently vs let decay, never store the state of a system a connected tool owns, no chit-chat or secrets (`src/brain/memory/profile-config.ts`, `BRAIN_CAPTURE_POLICY`); curation prompt: agent and bot statements are not facts, keep the original wording and dates, at most six items per batch (`src/brain/slack/channel-observe.ts`, `DISTILL_SYSTEM`) | `server-rust/bins/momo-agent-worker/src/extract.rs` (`SYSTEM_WINDOW_ITEMS`) | ADR-0196 D2, #3168 |
+| company-brain (Supermemory Inc., https://github.com/supermemoryai/company-brain, commit ef8a45e) | Apache-2.0 | Collection policy: what to keep permanently vs let decay, never store the state of a system a connected tool owns, no chit-chat or secrets (`src/brain/memory/profile-config.ts`, `BRAIN_CAPTURE_POLICY`); curation prompt: agent and bot statements are not facts, keep the original wording and dates, at most six items per batch (`src/brain/slack/channel-observe.ts`, `DISTILL_SYSTEM`) | `server-rust/bins/momo-agent-worker/src/extract.rs` (`SYSTEM_WINDOW_ITEMS`); topic split rule (`src/brain/memory/split.ts`: node ≥ 125 → 160 samples → 2–4 sub-topics, per-node lock): `server/Migrations/108_mem_topics.sql`, `server-rust/bins/momo-agent-worker/src/topics.rs` | ADR-0196 D2, #3168 |
 | mem0 (Mem0, Inc., https://github.com/mem0ai/mem0, v3) | Apache-2.0 | Add-only, single-pass extraction: one model call returns new memories and never edits existing ones (`mem0/configs/prompts.py`, `ADDITIVE_EXTRACTION_PROMPT`) | same prompt; the add-only write path `mem_add_item` (`server/Migrations/104_mem_item.sql`) | ADR-0196 D2/D4, #3168 |
+| Hindsight (Vectorize AI, Inc., https://github.com/vectorize-io/hindsight, commit eb021da, MIT, Copyright (c) 2025 Vectorize AI, Inc.) | MIT | Consolidation flow: candidate observations → judge whether they say the same thing → fold the losing one into the winner keeping time bounds and evidence, every step logged (`hindsight-api-slim/hindsight_api/engine/consolidation/consolidator.py`, `prompts.py`; the code lived under `hindsight_api/engine/consolidation/` when ADR-0196 was written). Re-implemented over PostgreSQL functions; the Korean judging prompt is written for oort and is not a translation | `server/Migrations/107_mem_consolidate.sql` (`mem_cons_pairs`, `mem_cons_apply`, `mem_cons_merge_items`), `server-rust/bins/momo-agent-worker/src/consolidate.rs`, `server-rust/crates/momo-agent/src/memory_cons.rs` | ADR-0196 D2/D4, #3172 |
+| Graphiti (Zep Software, Inc., https://github.com/getzep/graphiti, commit 852ca40, Apache-2.0; no NOTICE file upstream) | Apache-2.0 | Contradiction resolution over a bi-temporal fact: when a newer fact contradicts an older one whose validity is still open, the older one's validity ends where the newer begins (`invalid_at = new valid_at`) instead of being deleted (`graphiti_core/utils/maintenance/edge_operations.py`, `resolve_edge_contradictions`). Only the interval rule is adapted; the graph database is not used | `server/Migrations/107_mem_consolidate.sql` (`mem_cons_close_item`, `mem_item.valid_to` / `closed_by_id`), `server-rust/bins/momo-agent-worker/src/consolidate.rs` (`SYSTEM_JUDGE_DECISION`) | ADR-0196 D2/D3, #3172 |
 
 ### Phone client direct additions
 

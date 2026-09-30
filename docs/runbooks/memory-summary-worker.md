@@ -46,12 +46,39 @@ ADR-0196(팀 기억 v2) M1의 요약 루프. `momo-agent-worker` 프로세스 �
 - 응답이 JSON이 아니면 원문이 요약 본문이 되고 항목은 0개다(요약은 항상 만들어진다). 요약 본문에 자격증명 모양이 있으면 그 응답의 항목도 버린다.
 - DM(사람↔에이전트)에서 나온 항목은 개인 공간(`space_kind='personal'`, 소유자 = 그 사람)이다.
 - 읽기: 저장 채널·모든 근거 채널을 지금 읽을 수 있고 근거 메시지가 살아 있을 때만 보인다. 근거가 삭제·수정되면 즉시 가려진다 —
-  행은 지우지 않는다(`retired_reason=source_deleted/edited`로 내리는 정리 잡은 M3, #3172). 같은 내용이 다시 추출되면 죽은 옛 행은 `stale`로 표시되고 새 행이 들어간다.
+  행은 지우지 않는다(`retired_reason=source_deleted/edited`로 내리는 일은 정리 잡이 한다, 아래 「정리 잡」). 같은 내용이 다시 추출되면 죽은 옛 행은 `stale`로 표시되고 새 행이 들어간다.
 - 모델 호출 예산: 창 호출은 출력 허용량 +700토큰을 더 예약한다(`ITEMS_OUTPUT_ALLOWANCE`).
 - 상태 보기: `mem_item`(행), `mem_event`(생성 이벤트, 본문 없음). 프롬프트 버전은 `mem_digest.prompt_version`(digest-v2)과 `mem_item.extractor_version`(items-v1)에 남는다.
 - 검색: `mem_search_items(질의, 개수)`(열람 API, momo_app 세션만, 질의 200자 상한) / `mem_search_items_for(요청자, 질의, 개수, 답 채널)`(서빙, 워커 전용, **답 채널 필수**).
   pg_trgm 낱말 유사도 + 조사 떼기, 뷰어의 멤버십 채널로 좁힌 뒤 RLS와 같은 읽기 규칙. GIN 인덱스는 RLS 아래에서 쓰이지 않아 만들지 않았다(ADR-0196 증보 2026-09-30).
   워크스페이스 항목 수에 비례해 느려진다 — 측정은 PR #3200 본문. 시크릿 판정은 Rust `looks_like_secret`과 SQL `mem_looks_like_secret`이 같은 예/아니오 목록으로 시험된다.
+
+## 정리 잡 (#3172, M3)
+요약 루프 옆의 셋째 루프(`consolidate.rs`)가 채널마다 **하루 한 번** 돈다(워크스페이스 현지 `MEMORY_CONSOLIDATE_HOUR:MINUTE`, 기본 04:30 슬롯이
+열린 뒤 첫 훑기; 진행은 `mem_cons_state`). 끄기: `MEMORY_CONSOLIDATE_ENABLED=0`(데이터 그대로). 환경 변수는 `infra/.env.example`의 `MEMORY_CONSOLIDATE_*`·`MEMORY_*_RETENTION_DAYS`.
+- **토큰 없는 손질**(모델 미설정이어도 돈다): 근거가 죽은 항목 내리기(`source_deleted`/`source_edited`) · 잊은 항목의 근거를 인용한 요약 stale 표시 ·
+  만료/근거 삭제/잊은 해시의 대기 제안 삭제 · 감쇠(`forget_after` 경과, extracted/synthesized만) · 보존 삭제(retired 90일, 롤업이 덮은 창 요약 90일).
+  일시정지·제외된 채널은 데이터를 유지한다(감쇠·보존 삭제 없음).
+- **모델 판정**: 같은 채널·종류 후보 쌍마다 `duplicate | supersedes | distinct` 한 단어. duplicate → 병합(근거는 옮기지 않고 재관찰 횟수·기한만 잇는다, 진 쪽 `merged`), supersedes(결정) → 옛 결정의 `valid_to` 닫기.
+  사람이 확정한 항목이 지거나 옛 쪽이면 자동 변경 대신 `mem_proposal(op='merge'|'close')`. 판정한 쌍은 `mem_cons_pair`에 캐시된다(다시 묻지 않음).
+- **리스**: 정리는 요약과 따로 채널 리스(`MEMORY_CONSOLIDATE_LEASE_SECONDS` 900)를 쥐고 모델 호출마다 갱신한다. **원인이 사라지면 되돌림**: 닫은 항목·합친 이긴 쪽이 근거 소멸·감쇠·삭제로 내려가면 닫힌 결정을 다시 열고 진 쪽을 되살린다(`reverted` 이벤트). **사람의 되돌리기**: `POST …/memory/items/{id}/events/{event}/revert`. 롤업의 창 요약이 정리돼 없어도 stale 롤업은 원문에서 다시 만든다. 사람이 확정한 항목의 보존 삭제는 4배 기한.
+- **예산**: 요약과 **같은** 워크스페이스 일일 상한. 정리는 상한의 `MEMORY_CONSOLIDATE_TOKEN_SHARE_PERCENT`(80%)까지만 쓰고, 채널당 모델 호출은 `MEMORY_CONSOLIDATE_MAX_CALLS`(30)까지.
+  상한에 닿으면 그날 정리를 멈추고 `MEMORY_CONSOLIDATE_RETRY_SECONDS`(30분) 뒤 재시도, audit `mem.consolidate.token_cap_reached`(6시간에 한 번).
+- **상태 보기**: `mem_cons_state(channel_id, last_run_at, retry_after, lease_*)`, `mem_event`(정리마다 한 행: `merged` · `superseded`+`reason=contradiction` · `retired`+`reason=decayed|source_deleted|source_edited` · `reinforced` · `purged` · `expired` · `reverted`),
+  `mem_cons_pair`(판정 캐시), `mem_proposal.op <> 'add'`(정리 제안; 목록 API에는 아직 나오지 않는다).
+- **되돌리기**: 병합·기간 닫기·감쇠는 이벤트에 되돌릴 값이 있고 워커 전용 함수 `mem_cons_revert(event_id)`가 복원한다(psql은 `SET ROLE momo_memory` + `app.workspace_id`).
+  되돌린 쌍은 `distinct`로 캐시된다. 잊기·보존 삭제는 되돌릴 수 없다.
+- **잊기 뒤 요약**: 항목을 잊으면 그 근거 메시지를 인용한 요약이 stale이 되고, 다시 만들 때 그 메시지는 입력에서 빠진다(`mem_suppress_msg`, id만).
+- 이식 귀속: Hindsight consolidation(MIT) · Graphiti 모순 구간 닫기(Apache-2.0) — `NOTICE`, `legal/THIRD_PARTY_NOTICES.md`.
+
+### 주제 (#3172 B, 마이그레이션 109)
+정리 잡의 판정 다음 단계(`topics.rs`, 끄기 `MEMORY_TOPICS_ENABLED=0`). 같은 채널 안에서만: 주제 없는 항목을 20개씩 기존 주제 번호/새 라벨로 배정 →
+리프가 `MEMORY_TOPIC_CAP`(125)에 닿으면 표본 `MEMORY_TOPIC_SPLIT_SAMPLE`(160)개를 2~4 하위 주제로 나눔 → 항목이 바뀐 리프의 요약을 다시 씀(`MEMORY_TOPIC_SUMMARIES_PER_RUN` 5, 항목 ≥ `MEMORY_TOPIC_SUMMARY_MIN_ITEMS` 3).
+- 라벨(2~30자)·요약(≤700자)은 모델이 쓴 글이라 Rust와 SQL이 시크릿 모양·괄호·제어문자를 두 번 검사한다. 통과 못 하면 버리고 `topic_rejected`로 센다.
+- 예산: 판정과 같은 일일 상한·80% 몫. 호출 수는 판정과 따로 `MEMORY_CONSOLIDATE_MAX_CALLS`까지. 루트 주제는 채널당 `MEMORY_TOPIC_MAX_ROOTS`(60).
+- 상태 보기: `mem_topic`(트리), `mem_topic_summary`(요약 + 근거 항목 id), `mem_item.topic_id`, `mem_event`(`assigned` from/to · `split` · `summarized` · `purged`).
+- 정리(재검수): 루트 주제를 만든 항목이 잊히거나 근거가 죽으면 주제를 풀어 남은 항목을 다시 배정하고, 죽은·닫힌 항목이 든 요약과 나뉜 부모의 요약을 지운다(`purged`, `creator_gone`). 요약 입력에는 닫힌 결정이 들어가지 않는다. `momo_app`은 두 주제 테이블을 읽지 못한다(읽는 경로가 생길 때까지).
+- 되돌리기: `mem_topic_revert(event_id)`(워커 전용) — 배정은 이전 주제로, 분할은 하위 주제를 접고 24시간 잠금.
 
 ## 알려진 한계 (M1)
 - 일일 상한은 넘으면 **멈춘다**(plan §6.6의 「트리거를 ≥120건으로 늘려 계속」은 미구현).
@@ -80,3 +107,18 @@ ADR-0196(팀 기억 v2) M1의 요약 루프. `momo-agent-worker` 프로세스 �
 - **끄기·회수**: 프로필에서 도구를 빼면 새 제안이 멈춘다. 대기 제안은 14일 뒤 만료(목록에서 사라지고 수락 불가). 만료·근거 삭제된 제안의 본문 정리는 M3 정리 잡(#3172) 몫이다 — 그 전까지 행은 남지만 RLS가 가린다.
 - **한도**: run당 3건 · 채널 대기 20건 · 에이전트당 시간당 30건(도구가 「too many proposals」로 답한다).
 - **모니터링**: 로그 `memory serving recorded`의 `served_items`, `mem_event`의 `proposed`/`created`/`confirmed`/`rejected`, 감사 `memory.proposal.accepted|rejected`.
+
+## 임베딩과 벡터 검색 (#3173, M3)
+- **무엇**: 항목(`mem_item`)마다 로컬 모델(`intfloat/multilingual-e5-small`, MIT, int8 ONNX, 384차원)의 벡터를 `mem_item_embedding`(항목·모델 키)에 저장하고, 서빙 때 질문 벡터와 **가중 RRF**(키워드×2 : 벡터×1, k=60)로 융합한다. 브라우저(API) 검색은 M3에서도 키워드만이다(API 프로세스는 모델을 싣지 않는다). 요약(`mem_digest`)은 임베딩하지 않는다 — 요약 서빙은 질의가 아니라 청중 규칙이 고른다.
+- **어디서 도나**: 같은 워커 프로세스. 시작할 때 백그라운드에서 모델을 한 번 올리고(약 0.5초), 임베딩 루프가 `MEMORY_EMBED_POLL_SECONDS`마다(또는 이 프로세스가 항목을 저장한 직후) **벡터가 아직 없는 살아 있는 항목**을 `MEMORY_EMBED_BATCH`개씩 임베딩한다. 신규·편집(curated) 사본·수락된 제안·기존 이력(백필)이 모두 이 한 길이다. 워크스페이스당 스윕당 `MEMORY_EMBED_MAX_PER_SWEEP`(200)개가 상한이라 5,000건 이력도 약 13분에 걸쳐 조용히 채워진다.
+- **누가 정하나**: 권한은 여전히 SQL 하나다. 벡터는 순위 신호일 뿐이다. `mem_serve_items_fused`는 (1) 멤버십으로 좁힌 행만 거리 계산을 받고 (2) `mem_item_readable_by` + `mem_item_audience_ok`를 **통과한 것만** 후보로 세며(거른 뒤 자른다) (3) 키워드 후보(`mem_search_items_core`, 같은 규칙)와 융합한다. `mem_item_embedding`은 어떤 런타임 역할에도 테이블 권한이 없고(임베딩은 본문 복원 재료), 쓰기·읽기 함수는 `momo_memory`만 부른다.
+- **품질 손잡이**: `MEMORY_EMBED_MIN_SIMILARITY`(0.80)와 `MEMORY_EMBED_MARGIN`(0.04)이 「그나마 가까운」 무관 항목을 막고, 키워드 후보에 없는 벡터 전용 항목은 답당 3개까지만 싣는다(SQL 상수). 실제 질문 분포로 재기 전의 초기값이다.
+- **실패 격리**: 질문 임베딩은 `MEMORY_EMBED_QUERY_TIMEOUT_MS`(250) 예산 안에서만 기다린다. 모델이 아직 안 올라왔거나 바쁘거나 느리거나 실패하거나 융합 SQL이 오류를 내면 **M2와 같은 키워드 전용 읽기**로 돌아가고 답은 나간다. 모델 디렉터리가 없으면 경고를 한 번 남기고 임베딩 루프는 끝난다.
+- **메모리 요구(측정)**: 모델을 올린 워커 프로세스의 상주 메모리는 **약 0.9 GiB**(arm64 맥 release 실측: 로드 후 문장 64개 임베딩까지 RSS 901 MiB, 최대 940 MiB; ORT 스레드 2·4 동일). 모델 파일(118 MB)이 아니라 ONNX Runtime 작업 영역이 대부분이다. **워커 컨테이너는 최소 1.5 GiB(`MEMORY_EMBED_MIN_MEMORY_MB`)** 를 권한다 — cgroup 한도가 그보다 작다고 읽히면 임베딩은 경고 한 줄과 함께 스스로 꺼지고 키워드 전용으로 서빙한다(0으로 검사 끔). **x86 Linux/Railway 값은 재지 않았다(runtime-unverified).** 임베딩을 켜고 싶지 않은 작은 인스턴스는 `MEMORY_EMBED_ENABLED=0`.
+- **문제 항목 격리**: 임베딩이 계속 실패하는 항목(모델 오류·DB가 벡터를 거부)은 그 항목만 프로세스 안 백오프(1분부터 2배, 최대 6시간)로 빠지고 뒤의 항목은 계속 처리된다(배치가 통째로 실패하면 항목별로 재시도, DB 쓰기는 항목별 savepoint). 재시작하면 백오프는 초기화된다. 임베더 락이 패닉으로 오염돼도 다음 호출이 복구해 쓴다.
+- **폐기 항목**: 항목이 폐기(retired, 편집 포함)·stale 이 되면 그 항목의 벡터는 트리거가 즉시 지운다(테넌트 트랜잭션 안에서 표시할 때. 그렇지 않아 남은 벡터는 검색이 폐기·stale 항목을 거르므로 읽히지 않는다).
+- **모델 교체**: `momo_embed::MODEL_ID`가 바뀌면 다른 `model` 값의 새 행으로 병행 백필되고, 검색은 자기 모델의 행만 본다(옛 행 정리는 후속).
+- **끄기**: `MEMORY_EMBED_ENABLED=0` — 이후 서빙은 M2와 바이트 단위로 같다. 이미 쌓인 벡터는 남지만 읽히지 않는다.
+- **ONNX Runtime**: 정적 링크가 아니라 실행 시 `ORT_DYLIB_PATH`(이미지에서는 `/opt/momo/lib/libonnxruntime.so`, Microsoft 공식 1.28.2, sha256 고정)로 적재한다. 못 올리면 오류로 돌려받아 키워드 전용으로 서빙한다(패닉 없음). 로컬 개발에서 모델을 돌리려면 Microsoft 릴리스의 `libonnxruntime.dylib/.so`를 받아 `ORT_DYLIB_PATH`를 지정한다(`cargo build/test`는 필요 없다).
+- **이미지 검증**: `momo-agent-worker --embed-check`(모델 로드 + 문장 하나 임베딩 + 모양 검사)를 이미지 빌드가 돌린다. 실행 중 상태는 로그 `memory embedder loaded` / `memory embedding sweep`, 그리고 워크스페이스별 `mem_embedding_stats(model)`(살아 있는 항목 수 / 임베딩된 수)로 본다.
+- **알려진 한계(runtime-unverified)**: x86 Linux(Railway)에서의 지연·RSS는 재지 않았다(스파이크: ARM 맥에서 질의 3~5ms, 프로세스 최대 RSS ≈ 1 GB @ 배치 32 — 여기 기본 배치 16). int8 파일 이름의 `avx512_vnni`는 CPU 요구가 아니라 양자화 대상 이름이다(ARM 맥에서도 돈다). 색인(HNSW)은 만들지 않았다: 워크스페이스당 수만 행을 넘으면 `hnsw.iterative_scan`과 함께 도입한다.

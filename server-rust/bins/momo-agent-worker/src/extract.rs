@@ -233,6 +233,11 @@ fn normalise(text: &str) -> String {
 /// the model was shown. Nothing here trusts the model: numbers are re-mapped to ids through
 /// the window, authorship comes from the database rows, and the checks are all-or-nothing per
 /// candidate (a partly grounded claim is not a grounded claim).
+///
+/// Evidence is capped at [`MAX_EVIDENCE`]: only the **first** [`MAX_EVIDENCE`] distinct citations of a
+/// candidate are checked and stored. Citations beyond that (the tail) are ignored — neither validated
+/// nor kept — so an item never rests on a message this function did not vouch for, and a bad tail
+/// number cannot sink an item whose first five are sound (#3200 L-10).
 pub fn validate(raw: Vec<RawItem>, window: &[SourceMessage]) -> Validated {
     let mut out = Validated::default();
     let mut seen_text: HashSet<String> = HashSet::new();

@@ -1561,7 +1561,7 @@ async fn an_agent_cannot_propose_what_it_could_not_cite() {
         assert!(matches!(out, Ok(Some(_))), "{label}: sabotaged: {out:?}");
     }
     // The two walls for a channel the agent is not in are independent.
-    let mut tx = sabotage_tx(
+    let tx = sabotage_tx(
         &su,
         PROPOSE_FN,
         &[(
@@ -2241,7 +2241,10 @@ async fn serve_rows(wk: &PgPool, ws: Uuid, run: Uuid) -> Vec<(Uuid, Uuid, String
     rows
 }
 
-const SERVE_ITEMS_FN: &str = "public.mem_serve_items(uuid, integer, integer)";
+// #3173 (migration 107) moved `mem_serve_items`'s requester / switch / query derivation into
+// `mem_serve_gate`, which `mem_serve_items` and `mem_serve_items_fused` both call: the switch
+// clauses these sabotages remove now live there, and removing them still reaches `mem_serve_items`.
+const SERVE_ITEMS_FN: &str = "public.mem_serve_gate(uuid)";
 const RECORD_FN: &str =
     "public.mem_record_serving(uuid, uuid, uuid[], uuid[], integer, integer, integer)";
 
