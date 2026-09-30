@@ -28,6 +28,7 @@ import { ActivityRoute } from "@/features/activity/ActivityRoute";
 import { DirectoryRoute } from "@/features/directory/DirectoryRoute";
 import { SettingsRoute } from "@/features/settings/SettingsRoute";
 import { AgentHubRoute } from "@/features/agentHub/AgentHubRoute";
+import { MemoryBrowserRoute } from "@/features/memory/MemoryBrowserRoute";
 import { WorkstreamListRoute } from "@/features/workstreams/WorkstreamListRoute";
 import { WorkstreamDetailRoute } from "@/features/workstreams/WorkstreamDetailRoute";
 import { SearchRoute } from "@/features/search/SearchRoute";
@@ -325,6 +326,19 @@ export function App() {
           <Route path="activity" element={<ActivityRoute />} />
           <Route path="directory" element={<DirectoryRoute />} />
           <Route path="agents" element={<AgentHubRoute />} />
+          {/* 기억 브라우저(ADR-0196 D12 V4, #3170). 주소가 기억 하나를 가리켜야 해서
+              (제안 카드의 「기억 보기」) 설정의 한 절이 아니라 자기 라우트다. 서버가
+              팀 기억을 싣지 않아도 주소는 남겨 두고 이유를 말한다. */}
+          <Route
+            path="memory"
+            element={
+              isSurfaceProvided("teamMemory") ? (
+                <MemoryBrowserRoute />
+              ) : (
+                <SurfaceUnavailableRoute surface="teamMemory" />
+              )
+            }
+          />
           {/* 「내 작업」·「팀 작업」·작업 콘솔이 한 라우트를 나눠 쓴다(#2854). 콘솔은
               WorkRoute 안에서 여전히 SurfaceRoute(#2780) 뒤에 선다. */}
           <Route path="work" element={<WorkRoute />} />

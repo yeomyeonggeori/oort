@@ -178,3 +178,13 @@ describe("설정 › 기억: 상태", () => {
     expect(banner?.textContent).not.toContain("다시 시도");
   });
 });
+
+describe("설정 › 기억: 브라우저로 가는 길", () => {
+  it("기억 브라우저로 가는 링크를 준다 (권한과 무관하게)", async () => {
+    for (const role of ["member", "admin"] as const) {
+      unmount();
+      const { host } = await render(role);
+      expect(byTestId(host, "memory-open-browser")?.getAttribute("href")).toBe("/memory");
+    }
+  });
+});

@@ -79,7 +79,6 @@ export type SurfaceId =
   | "huddles"
   | "agentRunHistory"
   | "plugins"
-  | "agentMemory"
   | "teamMemory"
   | "messageSearch"
   | "hostedAgentPairing";
@@ -331,23 +330,12 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
     measured:
       "GET …/plugins 및 install/grants 6경로: 라우터에 없음(404).",
   },
-  agentMemory: {
-    id: "agentMemory",
-    label: "에이전트 기억",
-    provided: false,
-    absentReason: "이 서버는 아직 에이전트의 기억을 보관하지 않습니다.",
-    fallback: "필요한 맥락은 채널에서 다시 알려주면 에이전트가 그대로 씁니다.",
-    measured:
-      "GET …/memories, …/memories/search, …/memories/{id}/grants, " +
-      "POST …/memories/{id}/invalidate: 라우터에 없음(404).",
-  },
   teamMemory: {
     id: "teamMemory",
     label: "팀 기억",
-    // #3165 (ADR-0196): 새 팀 기억 v2 표면이다. 위 `agentMemory` 줄과 **다른 표면**
-    // 이다. 그 줄은 삭제된 Swift 서버의 /memories 계열(에이전트 개인 기억)을 재던
-    // 칸이고 그 화면(AgentMemorySection)은 이 표에서 계속 접혀 있다. 되살리지
-    // 않는다: 새 기억 브라우저(#3170)가 들어올 때 함께 삭제된다(ADR-0196 D11).
+    // #3165 (ADR-0196): 팀 기억 v2 표면이다. 예전 `agentMemory` 줄(삭제된 Swift
+    // 서버의 /memories 계열)과 그 화면(AgentMemorySection)은 기억 브라우저(#3170)가
+    // 들어오면서 함께 없어졌다(ADR-0196 D11).
     provided: true,
     // 승인 줄과 같은 이유로 문구를 남긴다: 이 칸은 이 코드베이스의 서버가 경로를
     // 싣는가를 말하고, 아직 배포되지 않은 서버에 붙으면 404가 와서
@@ -361,7 +349,10 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
       "PATCH …/memory/settings/me, PATCH …/channels/{ch}/memory/settings. " +
       "2026-09-30 실측(#3208): 기억 브라우저 여섯 경로가 더해짐. GET …/memory/items, " +
       "GET/PATCH/DELETE …/memory/items/{id}, GET …/memory/items/{id}/evidence, " +
-      "GET …/memory/items/{id}/events.",
+      "GET …/memory/items/{id}/events. " +
+      "2026-09-30 실측(#3210): 「기억해 둘게요」 제안 세 경로가 더해짐. " +
+      "GET …/channels/{ch}/memory/proposals, POST …/memory/proposals/{id}/accept, " +
+      "POST …/memory/proposals/{id}/reject.",
   },
   messageSearch: {
     id: "messageSearch",
@@ -419,7 +410,7 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
 const GATE_FIXTURE_SURFACES: Record<string, readonly SurfaceId[]> = {
   "workstream-gate": ["workstreams"],
   "work-console-gate": ["workConsole", "work"],
-  "agent-hub-gate": ["agentMemory", "agentRunHistory"],
+  "agent-hub-gate": ["agentRunHistory"],
   "ade-gate": ["ade"],
   // #2753: 채널 헤더 터미널 도크가 `work` 판정 뒤로 접혔다. 아래 두 픽스처는
   // work-sessions·work-hosts 를 실제로 답하고 도크를 연다
