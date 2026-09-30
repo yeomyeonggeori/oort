@@ -252,7 +252,7 @@ export const INSPECTOR_ITEMS_HEADING = "기억 항목";
 export const INSPECTOR_OPEN_ITEM = "기억에서 보기";
 export const INSPECTOR_NOTHING_READABLE = "이 답에 쓰인 기억 중 내가 열어 볼 수 있는 게 없어요.";
 export const INSPECTOR_NOTE =
-  "서버가 이 답을 만들 때 실제로 실은 기억만 보여 줘요. 지금 다시 찾은 결과가 아니에요.";
+  "이 답을 만들 때 실제로 쓴 기억만 보여 줘요. 지금 다시 찾은 결과가 아니에요.";
 
 export function inspectorBudgetLabel(usedChars: number, budgetChars: number): string {
   return `기억 칸 ${usedChars.toLocaleString("ko-KR")}자 / ${budgetChars.toLocaleString("ko-KR")}자 사용`;

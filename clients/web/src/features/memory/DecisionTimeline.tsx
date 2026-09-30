@@ -20,6 +20,7 @@ import {
   TIMELINE_EMPTY_HEADLINE,
   TIMELINE_LABEL,
   TIMELINE_LEAD,
+  TIMELINE_LINKS_CAPPED,
   TIMELINE_LINKS_ERROR,
   TIMELINE_LOAD_ERROR,
   TIMELINE_LOAD_MORE,
@@ -91,14 +92,15 @@ export function DecisionTimeline({
     () => list.data?.pages.flatMap((page) => page.items) ?? [],
     [list.data]
   );
-  const linkIds = useMemo(
-    () =>
-      items
-        .filter((item) => needsEventsForLinks(item))
-        .slice(0, LINK_READ_CAP)
-        .map((item) => item.id),
+  const linkCandidates = useMemo(
+    () => items.filter((item) => needsEventsForLinks(item)),
     [items]
   );
+  const linkIds = useMemo(
+    () => linkCandidates.slice(0, LINK_READ_CAP).map((item) => item.id),
+    [linkCandidates]
+  );
+  const linksCapped = linkCandidates.length > LINK_READ_CAP;
   const eventQueries = useTimelineEvents(workspaceId, linkIds);
   const eventsByItem = useMemo(() => {
     const map = new Map<string, readonly MemoryItemEvent[]>();
@@ -154,6 +156,11 @@ export function DecisionTimeline({
           {CLEANUP_NOTE}
         </p>
       </div>
+      {linksCapped && (
+        <p className="break-keep text-meta text-ink-muted" data-testid="memory-timeline-links-capped">
+          {TIMELINE_LINKS_CAPPED}
+        </p>
+      )}
       {linksFailed && (
         <p
           className="break-keep text-meta text-ink-muted"
@@ -273,7 +280,7 @@ function TimelineRow({
         type="button"
         className={cn(
           "flex min-w-0 flex-col gap-1 rounded-md border border-line px-3 py-2 text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring",
-          selected && "bg-surface-muted"
+          selected && "border-line-strong bg-surface-muted"
         )}
         aria-current={selected ? "true" : undefined}
         onClick={() => onOpenItem(item.id)}

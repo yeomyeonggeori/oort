@@ -39,11 +39,6 @@ const ME = "019f94e3-7a10-79cd-9dee-208f47edd9a8";
 const JIHOON = "019f94e3-7b0f-7a22-9c13-4d5e6f708192";
 const AGENT = "019f94e3-8b21-7ae0-b3c4-5f1a2d6e7c90";
 const RUN = "0199aa11-2222-7000-8000-0000000000c4";
-const PROPOSAL = "0199aa11-3333-7000-8000-000000000601";
-const ITEM_A = "0199aa11-4444-7000-8000-000000000701";
-const ITEM_B = "0199aa11-4444-7000-8000-000000000702";
-const ITEM_C = "0199aa11-4444-7000-8000-000000000703";
-const ITEM_OLD = "0199aa11-4444-7000-8000-000000000704";
 const NOW = Date.parse("2026-09-30T09:30:00+09:00");
 
 const SESSION = {
@@ -212,15 +207,6 @@ async function installMocks(context, v) {
     v.receipt !== undefined
       ? json(route, RECEIPT(v.receipt.withheld))
       : json(route, { error: { message: "no receipt" } }, 404));
-  // 「기억해 둘게요」
-  await context.route("**/v1/workspaces/*/channels/*/memory/proposals*", (route) =>
-    json(route, { proposals: v.proposals ?? [] }));
-  await context.route("**/v1/workspaces/*/memory/proposals/*/accept", (route) =>
-    v.acceptStatus
-      ? json(route, { error: { message: "x" } }, v.acceptStatus)
-      : json(route, { proposal: decided("accepted", { itemId: ITEM_A }) }));
-  await context.route("**/v1/workspaces/*/memory/proposals/*/reject", (route) =>
-    json(route, { proposal: decided("rejected") }));
   // 결정 타임라인·정리 이력
   await context.route(/\/v1\/workspaces\/[^/]+\/memory\/items(\?.*)?$/, (route) => {
     if (v.itemsStatus) return json(route, { error: { message: "boom" } }, v.itemsStatus);

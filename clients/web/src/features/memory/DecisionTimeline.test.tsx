@@ -6,6 +6,7 @@ import { ApiError } from "@momo/core/lib/api";
 import type { MemoryItemEvent } from "@momo/core/features/memory/model";
 import {
   CLEANUP_NOTE,
+  HISTORY_CLEANUP_NOTE,
   REVERT_CONFLICT_MESSAGE,
   REVERT_FAILED_MESSAGE,
   REVERT_FORBIDDEN_MESSAGE,
@@ -220,6 +221,26 @@ describe("결정 타임라인", () => {
     expect(byTestId(host, "memory-timeline-interval")?.textContent).toContain("근거");
   });
 
+  it("변경 기록을 읽는 상한을 넘으면 링크가 빠질 수 있다고 알린다", async () => {
+    const many = Array.from({ length: 61 }, (_, i) =>
+      item({
+        id: `00000000-0000-7000-8000-0000000${String(8000 + i)}`,
+        subjectKey: `주제 ${i}`,
+        validFromMs: T0 + i * DAY,
+        validToMs: T0 + (i + 1) * DAY,
+      })
+    );
+    listMemoryItems.mockResolvedValue({ items: many });
+    const { host } = await render();
+    expect(byTestId(host, "memory-timeline-links-capped")).not.toBeNull();
+    expect(getMemoryItemEvents).toHaveBeenCalledTimes(60);
+  });
+
+  it("상한 안에서는 알리지 않는다", async () => {
+    const { host } = await render();
+    expect(byTestId(host, "memory-timeline-links-capped")).toBeNull();
+  });
+
   it("밤사이 자동 정리와 되돌릴 수 있다는 안내를 준다", async () => {
     const { host } = await render();
     expect(byTestId(host, "memory-timeline-cleanup")?.textContent).toBe(CLEANUP_NOTE);
@@ -263,7 +284,7 @@ describe("정리 이력과 되돌리기", () => {
     expect(event.dataset.eventKind).toBe("closed");
     expect(event.textContent).toContain("새 결정이 나와서 유효 기간이 닫혔어요");
     expect(event.textContent).toContain("자동 정리");
-    expect(byTestId(host, "memory-history-cleanup-note")?.textContent).toBe(CLEANUP_NOTE);
+    expect(byTestId(host, "memory-history-cleanup-note")?.textContent).toBe(HISTORY_CLEANUP_NOTE);
     expect(byTestId(event, "memory-event-revert")).not.toBeNull();
   });
 

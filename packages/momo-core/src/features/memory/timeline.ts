@@ -31,16 +31,19 @@ export const TIMELINE_LABEL = "결정 타임라인";
 export const TIMELINE_LEAD =
   "채널의 결정이 시간에 따라 어떻게 바뀌었는지 보여 줘요. 카드를 누르면 근거와 이력이 열려요.";
 export const CLEANUP_NOTE =
-  "겹치거나 오래 쓰지 않은 기억은 하루에 한 번, 밤사이 자동으로 정리해요. 정리한 기록은 남고, 멤버는 언제든 되돌릴 수 있어요.";
+  "겹치거나 오래 쓰지 않은 기억은 밤사이 자동으로 정리해요. 정리한 기록은 남고, 멤버는 되돌릴 수 있어요. 이미 되돌렸거나 그 사이 상태가 바뀐 정리는 되돌릴 수 없어요.";
+/** 상세 이력 위의 짧은 안내. 같은 화면에 타임라인의 긴 안내가 이미 있어서 되풀이하지 않는다. */
+export const HISTORY_CLEANUP_NOTE = "정리한 기록은 남고, 멤버는 되돌릴 수 있어요.";
 export const TIMELINE_EMPTY_HEADLINE = "아직 결정 기억이 없어요.";
 export const TIMELINE_EMPTY_DETAIL =
   "채널에서 결정이 기억으로 남으면 바뀐 순서대로 여기에 쌓여요.";
 export const TIMELINE_LOAD_ERROR = "결정 타임라인을 불러오지 못했어요.";
+export const TIMELINE_LINKS_CAPPED =
+  "결정이 많아서 일부는 바뀐 결정 링크를 그리지 않았어요.";
 export const TIMELINE_LINKS_ERROR =
   "일부 결정의 변경 기록을 불러오지 못했어요.";
-export const TIMELINE_LOAD_MORE = "더 오래된 결정 보기";
-export const TIMELINE_LOAD_MORE_NOTE =
-  "지금 불러온 결정만 그려요. 더 불러오면 순서가 바뀔 수 있어요.";
+export const TIMELINE_LOAD_MORE = "결정 더 불러오기";
+export const TIMELINE_LOAD_MORE_NOTE = "지금까지 불러온 결정만 그렸어요.";
 export const TIMELINE_NO_SUBJECT = "주제 없음";
 export const TIMELINE_ORDER_NOTE = "오래된 결정이 위, 최근 결정이 아래예요.";
 

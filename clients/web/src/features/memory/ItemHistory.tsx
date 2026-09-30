@@ -19,7 +19,7 @@ import {
   memoryEventLabel,
 } from "@momo/core/features/memory/browser";
 import {
-  CLEANUP_NOTE,
+  HISTORY_CLEANUP_NOTE,
   REVERT_ALREADY,
   REVERT_AUTOMATIC,
   REVERT_BUSY,
@@ -129,7 +129,7 @@ export function ItemHistory({
           className="break-keep text-meta text-ink-muted"
           data-testid="memory-history-cleanup-note"
         >
-          {CLEANUP_NOTE}
+          {HISTORY_CLEANUP_NOTE}
         </p>
       )}
       {hasRevertable && !mayWrite && (
