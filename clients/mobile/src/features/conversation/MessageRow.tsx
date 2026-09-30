@@ -149,6 +149,7 @@ import {
 import {QuoteBlock, quoteAccessibilityPhrase} from './Quote';
 import {useLongPress} from './useLongPress';
 import {turnRecordRunId} from '@momo/core/features/timeline/cascadeModel';
+import {MemoryProposalCards} from '../memory/MemoryProposalCard';
 import {MemoryReceiptChip} from '../memory/MemoryReceiptChip';
 
 // =============================================================================
@@ -2842,6 +2843,19 @@ function MessageRowInner({
           <MemoryReceiptChip
             workspaceId={actions.workspaceId}
             runId={memoryRunId}
+            onOpenEvidence={actions.onOpenMemoryEvidence}
+          />
+        ) : null}
+
+        {/* 이 답이 낸 「기억해 둘게요」 제안 (#3171). 제안이 없거나 못 읽으면 카드 자신이
+            아무것도 그리지 않는다. 게스트 여부는 로스터의 워크스페이스 역할로 안다. */}
+        {!deleted && actions?.workspaceId && memoryRunId !== null ? (
+          <MemoryProposalCards
+            workspaceId={actions.workspaceId}
+            channelId={message.channelId}
+            runId={memoryRunId}
+            directory={directory}
+            role={memberFor(directory, actions.myMemberId)?.role}
             onOpenEvidence={actions.onOpenMemoryEvidence}
           />
         ) : null}
