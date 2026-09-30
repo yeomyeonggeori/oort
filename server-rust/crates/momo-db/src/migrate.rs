@@ -523,19 +523,23 @@ mod tests {
     /// re-extraction suppression) with its insert trigger and the suppression checks in
     /// `mem_accept_proposal`/`mem_propose_item`, plus the narrow `mem_definer` privilege widening
     /// (UPDATE of `retired_at`/`retired_reason`, DELETE).
+    /// 107 is #3173's local-embedding vector search (ADR-0196 D8 증보): `mem_item_embedding` (ENABLE +
+    /// FORCE RLS, no runtime-role privileges), the worker-only embedding writers and readers, the
+    /// query-text gate `mem_serve_query`, and the owner-only weighted-RRF fusion behind
+    /// `mem_serve_items_fused` (permission filtering stays in SQL, before the top-K cut).
     #[test]
-    fn discovers_contiguous_migrations_001_to_106() {
+    fn discovers_contiguous_migrations_001_to_107() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            106,
-            "expected 106 migrations under {}",
+            107,
+            "expected 107 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 106);
+        assert_eq!(migrations.last().unwrap().version, 107);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {
