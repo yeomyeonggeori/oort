@@ -6,6 +6,7 @@ import { ApiError, type Message } from "@momo/core/lib/api";
 import {
   PROPOSAL_ACCEPTED,
   PROPOSAL_CONFLICT_MESSAGE,
+  PROPOSAL_EXPIRED_MESSAGE,
   PROPOSAL_EVIDENCE_GONE,
   PROPOSAL_EVIDENCE_UNAVAILABLE,
   PROPOSAL_FAILED_MESSAGE,
@@ -163,8 +164,8 @@ describe("제안 카드: 자기 수락 경고", () => {
   });
 });
 
-describe("제안 카드: 손님", () => {
-  it("손님은 카드를 읽기만 하고 이유를 듣는다. 버튼도 요청도 없다", async () => {
+describe("제안 카드: 게스트", () => {
+  it("게스트은 카드를 읽기만 하고 이유를 듣는다. 버튼도 요청도 없다", async () => {
     const { host } = await render("guest");
     expect(card(host)?.getAttribute("data-state")).toBe("readOnly");
     expect(byTestId(host, "memory-proposal-text")).not.toBeNull();
@@ -235,6 +236,16 @@ describe("제안 카드: 실패", () => {
     expect(card(host)?.getAttribute("data-state")).toBe("conflict");
     expect(byTestId(host, "memory-proposal-conflict")?.textContent).toBe(PROPOSAL_CONFLICT_MESSAGE);
     expect(byTestId(host, "memory-proposal-accept")).toBeNull();
+  });
+
+  it("409인데 기한이 이미 지난 제안이면 기한이 지났다고 말한다", async () => {
+    listMemoryProposals.mockResolvedValue([proposal({ expiresAtMs: Date.now() - 1000 })]);
+    acceptMemoryProposal.mockRejectedValue(new ApiError(409, "expired"));
+    const { host } = await render();
+    click(byTestId(host, "memory-proposal-accept"));
+    await flush();
+    await flush();
+    expect(byTestId(host, "memory-proposal-conflict")?.textContent).toBe(PROPOSAL_EXPIRED_MESSAGE);
   });
 
   it("403: 결정할 수 없다고 말하고 카드를 읽기 전용으로 바꾼다", async () => {

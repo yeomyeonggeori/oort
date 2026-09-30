@@ -19,6 +19,7 @@ import {
   BROWSER_OPEN_NEWER,
   BROWSER_PERSONAL_SPACE,
   DETAIL_EVIDENCE_EMPTY,
+  DETAIL_LABEL,
   DETAIL_EVIDENCE_HEADING,
   DETAIL_EVIDENCE_NOTE,
   DETAIL_HISTORY_EMPTY,
@@ -65,8 +66,8 @@ import {
 // 기억 하나의 상세 (ADR-0196 D9 · D12 V4, #3170): 본문, 종류·출처, 근거 역링크, 이력,
 // 고치기, 잊기.
 //
-// 권한은 두 겹이다. 손님(워크스페이스 역할)과 지난 버전은 버튼을 아예 그리지 않고
-// 이유를 말한다. 그 밖의 어긋남(채널 역할이 손님, 그 사이 새 버전이 생김)은 서버의
+// 권한은 두 겹이다. 게스트(워크스페이스 역할)과 지난 버전은 버튼을 아예 그리지 않고
+// 이유를 말한다. 그 밖의 어긋남(채널 역할이 게스트, 그 사이 새 버전이 생김)은 서버의
 // 403·409가 두 번째 벽이고, 같은 화면에서 문장으로 돌려준다.
 //
 // 잊기는 되돌릴 수 없고, 이미 만들어진 요약에는 남아 있을 수 있다. 그래서 확인을 한 번
@@ -113,7 +114,7 @@ export function MemoryItemDetailPane({
   const [confirming, setConfirming] = useState(false);
   const [opener, setOpener] = useState<HTMLButtonElement | null>(null);
   const [writeError, setWriteError] = useState<string | null>(null);
-  const headingRef = useRef<HTMLHeadingElement>(null);
+  const headingRef = useRef<HTMLParagraphElement>(null);
   const headingId = useId();
   const fieldId = useId();
   const problemId = useId();
@@ -232,7 +233,7 @@ export function MemoryItemDetailPane({
 
   return (
     <article
-      aria-labelledby={headingId}
+      aria-label={DETAIL_LABEL}
       className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4"
       data-testid="memory-detail"
       data-item-id={item.id}
@@ -254,7 +255,7 @@ export function MemoryItemDetailPane({
             </span>
           )}
         </div>
-        <h2
+        <p
           id={headingId}
           ref={headingRef}
           tabIndex={-1}
@@ -262,7 +263,7 @@ export function MemoryItemDetailPane({
           data-testid="memory-detail-body"
         >
           {item.body}
-        </h2>
+        </p>
         <p className="text-meta text-ink-muted">
           {channelName !== "" && item.spaceKind !== "personal"
             ? `# ${channelName} · `
@@ -508,6 +509,7 @@ export function MemoryItemDetailPane({
                 type="button"
                 variant="outline"
                 size="sm"
+                className="tap-target"
                 disabled={forget.isPending}
                 onClick={() => setConfirming(false)}
                 data-testid="memory-forget-cancel"
@@ -518,6 +520,7 @@ export function MemoryItemDetailPane({
                 type="button"
                 variant="destructive"
                 size="sm"
+                className="tap-target"
                 aria-busy={forget.isPending || undefined}
                 onClick={confirmForget}
                 data-testid="memory-forget-confirm"

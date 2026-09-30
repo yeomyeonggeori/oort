@@ -171,6 +171,20 @@ describe("기억 브라우저: 목록", () => {
     expect(second.host.textContent).not.toContain("다시 시도");
   });
 
+  it("비어 있을 때는 고르라는 안내를 내지 않는다", async () => {
+    listMemoryItems.mockResolvedValue({ items: [] });
+    const { host } = await render();
+    expect(byTestId(host, "memory-browser-pick")).toBeNull();
+  });
+
+  it("폰에서 항목을 고르면 캐럿이 상세로 간다", async () => {
+    const { host } = await render({ mobile: true });
+    click(rows(host)[0] ?? null);
+    for (let i = 0; i < 4; i += 1) await flush();
+    expect(byTestId(host, "memory-detail")).not.toBeNull();
+    expect(document.activeElement).toBe(byTestId(host, "memory-detail-body"));
+  });
+
   it("내 일시정지가 켜져 있으면 알리고 설정으로 보낸다", async () => {
     getMemorySettings.mockResolvedValue(settings({ me: { paused: true } }));
     const { host } = await render();
@@ -224,8 +238,21 @@ describe("기억 브라우저: 상세", () => {
   });
 });
 
-describe("기억 브라우저: 손님·지난 버전", () => {
-  it("손님은 읽기만 한다. 고치기·잊기 버튼이 없고 이유를 듣는다", async () => {
+describe("기억 브라우저: 오프라인", () => {
+  it("연결이 끊기면 알리고, 상세의 고치기·잊기는 이유와 함께 잠근다", async () => {
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    const { host } = await render({ route: `/memory?item=${ITEM}` });
+    expect(byTestId(host, "memory-browser-offline")?.textContent).toContain("연결이 끊겨 있어요");
+    // 캐시된 목록은 계속 보인다.
+    expect(rows(host)).toHaveLength(1);
+    expect(byTestId(host, "memory-detail-edit")).toBeNull();
+    expect(byTestId(host, "memory-detail-reason")?.textContent).toContain("연결이 끊겨 있어서");
+    vi.restoreAllMocks();
+  });
+});
+
+describe("기억 브라우저: 게스트·지난 버전", () => {
+  it("게스트은 읽기만 한다. 고치기·잊기 버튼이 없고 이유를 듣는다", async () => {
     const { host } = await render({ role: "guest", route: `/memory?item=${ITEM}` });
     expect(byTestId(host, "memory-detail")).not.toBeNull();
     expect(byTestId(host, "memory-detail-edit")).toBeNull();
@@ -296,7 +323,7 @@ describe("기억 브라우저: 고치기", () => {
     );
   });
 
-  it("403(채널 손님)은 손님 문장, 409는 다시 읽었다는 문장이다", async () => {
+  it("403(채널 게스트)은 게스트 문장, 409는 다시 읽었다는 문장이다", async () => {
     editMemoryItem.mockRejectedValueOnce(new ApiError(403, "guest"));
     const { host } = await openEditor();
     typeInto(byTestId<HTMLTextAreaElement>(host, "memory-edit-field"), "다른 문장이에요.");
@@ -348,7 +375,7 @@ describe("기억 브라우저: 잊기", () => {
     expect(byTestId(host, "memory-browser-notice")?.textContent).toContain("잊었어요");
   });
 
-  it("지우기에 실패하면 창을 닫고 이유를 남긴다 (403은 손님 문장)", async () => {
+  it("지우기에 실패하면 창을 닫고 이유를 남긴다 (403은 게스트 문장)", async () => {
     forgetMemoryItem.mockRejectedValue(new ApiError(403, "guest"));
     const { host } = await openForget();
     click(document.body.querySelector('[data-testid="memory-forget-confirm"]'));

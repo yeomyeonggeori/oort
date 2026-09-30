@@ -9,6 +9,8 @@ import {
   ITEM_FORBIDDEN_MESSAGE,
   MEMORY_EVENT_FALLBACK,
   PROPOSAL_CONFLICT_MESSAGE,
+  PROPOSAL_EXPIRED_MESSAGE,
+  proposalConflictMessage,
   PROPOSAL_FAILED_MESSAGE,
   PROPOSAL_FORBIDDEN_MESSAGE,
   PROPOSAL_GUEST_READONLY,
@@ -27,7 +29,7 @@ import {
 describe("제안 카드 판정", () => {
   const pending = { status: "pending", callerIsRequester: false } as const;
 
-  it("멤버는 결정하고, 손님은 이유와 함께 읽기 전용이다", () => {
+  it("멤버는 결정하고, 게스트은 이유와 함께 읽기 전용이다", () => {
     expect(deriveProposalCard({ proposal: pending, role: "member" })).toEqual({
       canDecide: true,
       readOnlyReason: null,
@@ -78,7 +80,7 @@ describe("오류 문장 매핑", () => {
     expect(proposalDecisionError(new Error("offline")).kind).toBe("failed");
   });
 
-  it("편집·잊기: 403 손님, 404 없음=볼 수 없음, 409 다시 읽기, 422는 이유를 좁히지 않는다", () => {
+  it("편집·잊기: 403 게스트, 404 없음=볼 수 없음, 409 다시 읽기, 422는 이유를 좁히지 않는다", () => {
     expect(itemWriteError(new ApiError(403, "x"), "edit").message).toBe(ITEM_FORBIDDEN_MESSAGE);
     const gone = itemWriteError(new ApiError(404, "x"), "forget");
     expect(gone).toEqual({ message: BROWSER_OPEN_ITEM_GONE, refetch: true, gone: true });
@@ -101,6 +103,13 @@ describe("오류 문장 매핑", () => {
     expect(itemReadError(new ApiError(404, "x"), "list").kind).toBe("absent");
     expect(itemReadError(new ApiError(404, "x"), "detail").kind).toBe("gone");
     expect(itemReadError(new ApiError(500, "x"), "list").kind).toBe("failed");
+  });
+});
+
+describe("제안 문장은 폰과 같은 말을 쓴다", () => {
+  it("닫힘·기한 지남 문장을 기한으로 가른다", () => {
+    expect(proposalConflictMessage({ expiresAtMs: 100 }, 200)).toBe(PROPOSAL_EXPIRED_MESSAGE);
+    expect(proposalConflictMessage({ expiresAtMs: 300 }, 200)).toBe(PROPOSAL_CONFLICT_MESSAGE);
   });
 });
 

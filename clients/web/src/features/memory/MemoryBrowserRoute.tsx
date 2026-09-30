@@ -19,6 +19,7 @@ import {
   BROWSER_EMPTY_DETAIL,
   BROWSER_EMPTY_HEADLINE,
   BROWSER_LEAD,
+  BROWSER_OFFLINE,
   BROWSER_LOAD_MORE,
   BROWSER_NO_MATCH_DETAIL,
   BROWSER_NO_MATCH_HEADLINE,
@@ -54,7 +55,7 @@ import { useMemoryItemList, useMemorySettings } from "./useMemory";
 // =============================================================================
 
 const ROW_CLASS =
-  "flex w-full min-w-0 flex-col gap-1 border-b border-line px-4 py-3 text-left press hover:bg-surface-hover focus-visible:focus-ring";
+  "flex w-full min-w-0 flex-col gap-1 border-b border-line px-4 py-3 text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring";
 
 const DAY = new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric" });
 
@@ -163,7 +164,7 @@ export function MemoryBrowserRoute() {
           <p className="break-keep text-meta text-ink">{BROWSER_PAUSED_NOTICE}</p>
           <Link
             to="/settings?section=memory"
-            className="text-meta text-ink underline underline-offset-2 focus-visible:focus-ring"
+            className="text-meta text-ink underline underline-offset-2 press focus-visible:focus-ring"
           >
             {BROWSER_PAUSED_LINK}
           </Link>
@@ -177,6 +178,14 @@ export function MemoryBrowserRoute() {
           actionLabel="닫기"
           onAction={() => setNotice(null)}
           testId="memory-browser-notice"
+        />
+      )}
+
+      {offline && (
+        <InlineBanner
+          tone="neutral"
+          message={BROWSER_OFFLINE}
+          testId="memory-browser-offline"
         />
       )}
 
@@ -272,6 +281,7 @@ export function MemoryBrowserRoute() {
                       <Button
                         variant="outline"
                         size="sm"
+                        className="tap-target"
                         onClick={() => {
                           setSearchText("");
                           setParams(new URLSearchParams(), { replace: false });
@@ -302,7 +312,12 @@ export function MemoryBrowserRoute() {
                             aria-current={selected ? "true" : undefined}
                             data-testid="memory-browser-row"
                             data-item-id={item.id}
-                            onClick={() => setParam("item", item.id)}
+                            onClick={() => {
+                              // 폰에서는 목록이 사라지므로 캐럿을 상세로 옮긴다. 데스크탑은 목록에
+                              // 남아 화살표로 훑을 수 있게 둔다.
+                              setFocusDetail(isMobile);
+                              setParam("item", item.id);
+                            }}
                           >
                             <span className="flex flex-wrap items-center gap-2">
                               <span className="rounded-full bg-surface-muted px-2 py-1 text-meta text-ink-muted">
@@ -331,6 +346,7 @@ export function MemoryBrowserRoute() {
                       <Button
                         variant="outline"
                         size="sm"
+                        className="tap-target"
                         aria-busy={list.isFetchingNextPage || undefined}
                         onClick={() => {
                           if (!list.isFetchingNextPage) void list.fetchNextPage();
@@ -358,7 +374,7 @@ export function MemoryBrowserRoute() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="-ml-3"
+                  className="tap-target -ml-3"
                   onClick={() => setParam("item", null)}
                   data-testid="memory-browser-back"
                 >
@@ -368,9 +384,11 @@ export function MemoryBrowserRoute() {
               </div>
             )}
             {itemId === null ? (
-              <p className="break-keep px-4 py-6 text-body text-ink-muted" data-testid="memory-browser-pick">
-                {BROWSER_PICK_ONE}
-              </p>
+              items.length > 0 ? (
+                <p className="break-keep px-4 py-6 text-body text-ink-muted" data-testid="memory-browser-pick">
+                  {BROWSER_PICK_ONE}
+                </p>
+              ) : null
             ) : (
               <MemoryItemDetailPane
                 key={itemId}

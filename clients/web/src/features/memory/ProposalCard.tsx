@@ -10,6 +10,7 @@ import type { MemoryProposal } from "@momo/core/features/memory/model";
 import {
   PROPOSAL_ACCEPT_LABEL,
   PROPOSAL_ACCEPTED,
+  PROPOSAL_BUSY,
   PROPOSAL_EVIDENCE_GONE,
   PROPOSAL_EVIDENCE_HEADING,
   PROPOSAL_EVIDENCE_LOADING,
@@ -24,6 +25,7 @@ import {
   deriveProposalCard,
   memoryKindLabel,
   proposalByLine,
+  proposalConflictMessage,
   proposalDecisionError,
   type ProposalErrorView,
   PROPOSAL_FORBIDDEN_MESSAGE,
@@ -179,7 +181,13 @@ export function ProposalCard({
         },
         onError: (error) => {
           const view: ProposalErrorView = proposalDecisionError(error);
-          onOutcome({ kind: view.kind === "failed" ? "error" : view.kind, message: view.message });
+          onOutcome({
+            kind: view.kind === "failed" ? "error" : view.kind,
+            message:
+              view.kind === "conflict"
+                ? proposalConflictMessage(proposal, Date.now())
+                : view.message,
+          });
           if (view.refetch) {
             void client.invalidateQueries({
               queryKey: memoryKeys.proposals(workspaceId, channelId, runId),
@@ -274,10 +282,15 @@ export function ProposalCard({
               data-testid="memory-proposal-reject"
               onClick={() => decide("reject")}
             >
+              {decision.isPending && decision.variables?.decision === "reject" && (
+                <Loader2 aria-hidden="true" className="spinner-busy" />
+              )}
               {PROPOSAL_REJECT_LABEL}
             </Button>
           </div>
-          <p className="break-keep text-meta text-ink-muted">{PROPOSAL_NOT_SAVED_YET}</p>
+          <p className="break-keep text-meta text-ink-muted">
+            {decision.isPending ? PROPOSAL_BUSY : PROPOSAL_NOT_SAVED_YET}
+          </p>
         </>
       )}
 

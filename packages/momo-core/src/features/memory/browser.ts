@@ -16,8 +16,8 @@ import {
 //
 // 세 가지가 이 파일을 붙든다.
 //
-//   1. 클라이언트는 권한을 만들지 않는다. 손님(워크스페이스 역할)만 미리 읽기
-//      전용으로 그리고, 채널 역할이 손님인 경우·모르는 id는 서버의 403이 두 번째
+//   1. 클라이언트는 권한을 만들지 않는다. 게스트(워크스페이스 역할)만 미리 읽기
+//      전용으로 그리고, 채널 역할이 게스트인 경우·모르는 id는 서버의 403이 두 번째
 //      벽이다. 403과 404는 「권한 없음」과 「없음」을 구분해 말하지 않는다.
 //   2. 잊기 문구는 「다시는 나타나지 않는다」를 약속하지 않는다. 이미 만들어진
 //      요약에는 다시 만들어질 때까지 남아 있을 수 있다(D9 증보, 보안 검수 M-5).
@@ -92,7 +92,7 @@ export function isMemoryStatus(value: string | null | undefined): value is Memor
 // ---- 누가 무엇을 하나 --------------------------------------------------------
 
 /**
- * 워크스페이스 역할이 손님이면 결정·편집·잊기를 미리 접는다. 채널 역할이 손님인 사람은
+ * 워크스페이스 역할이 게스트이면 결정·편집·잊기를 미리 접는다. 채널 역할이 게스트인 사람은
  * 여기서 알 수 없어서 서버의 403이 막는다(그때 카드는 읽기 전용으로 바뀐다).
  */
 export function memberMayWriteMemory(role: MembershipRole | undefined): boolean {
@@ -112,16 +112,17 @@ export const PROPOSAL_HEADING = "기억해 둘게요";
 export const PROPOSAL_NOT_SAVED_YET =
   "기억하기를 누르기 전에는 아무것도 저장되지 않아요.";
 export const PROPOSAL_ACCEPT_LABEL = "기억하기";
-export const PROPOSAL_REJECT_LABEL = "아니요";
+export const PROPOSAL_REJECT_LABEL = "기억 안 하기";
+export const PROPOSAL_BUSY = "처리하고 있어요.";
 export const PROPOSAL_SELF_ACCEPT_WARNING =
-  "내가 부탁한 답에서 나온 제안이에요. 근거를 한 번 더 확인해 주세요.";
+  "내 질문에 대한 답에서 나온 제안이에요. 기억하면 다른 사람의 확인 없이 내가 정하는 셈이에요.";
 export const PROPOSAL_GUEST_READONLY =
-  "손님은 기억을 결정할 수 없어요. 제안 내용만 볼 수 있어요.";
-export const PROPOSAL_EVIDENCE_HEADING = "근거 메시지";
-export const PROPOSAL_EVIDENCE_LOADING = "원본을 불러오고 있어요.";
-export const PROPOSAL_EVIDENCE_UNAVAILABLE = "원본을 불러오지 못했어요.";
+  "게스트는 제안을 볼 수만 있고, 기억하거나 거절할 수는 없어요.";
+export const PROPOSAL_EVIDENCE_HEADING = "근거 대화";
+export const PROPOSAL_EVIDENCE_LOADING = "근거 대화를 불러오고 있어요.";
+export const PROPOSAL_EVIDENCE_UNAVAILABLE = "원문을 불러오지 못했어요.";
 export const PROPOSAL_EVIDENCE_GONE = "지워졌거나 볼 수 없는 메시지예요.";
-export const PROPOSAL_ACCEPTED = "기억했어요.";
+export const PROPOSAL_ACCEPTED = "기억해 뒀어요.";
 export const PROPOSAL_REJECTED = "기억하지 않기로 했어요.";
 export const PROPOSAL_OPEN_MEMORY = "기억 보기";
 export const PROPOSAL_UNKNOWN_MEMBER = "알 수 없는 멤버";
@@ -139,12 +140,19 @@ export interface ProposalErrorView {
   refetch: boolean;
 }
 
-export const PROPOSAL_FORBIDDEN_MESSAGE =
-  "이 제안은 내가 결정할 수 없어요. 손님이거나, 볼 수 없는 제안이에요.";
-export const PROPOSAL_CONFLICT_MESSAGE =
-  "이미 다른 분이 처리했거나 기간이 지났어요. 지운 내용이라 기억할 수 없는 경우도 있어요. 지금 상태를 다시 불러왔어요.";
-export const PROPOSAL_FAILED_MESSAGE =
-  "처리하지 못했어요. 연결을 확인하고 다시 시도해 주세요.";
+export const PROPOSAL_FORBIDDEN_MESSAGE = "이 제안은 내가 정할 수 없어요. 볼 수만 있어요.";
+/** 이미 결정됐거나(다른 사람이), 지운 내용이라 기억할 수 없거나, 근거가 바뀐 경우. */
+export const PROPOSAL_CONFLICT_MESSAGE = "이 제안은 이미 닫혀서 더 이상 정할 수 없어요.";
+export const PROPOSAL_EXPIRED_MESSAGE = "기한이 지나서 더 이상 정할 수 없어요.";
+export const PROPOSAL_FAILED_MESSAGE = "처리하지 못했어요. 연결을 확인하고 다시 눌러 주세요.";
+
+/** 409의 문장. 기한이 지난 제안이면 그 이유를, 아니면 「이미 닫힘」을 말한다. */
+export function proposalConflictMessage(
+  proposal: Pick<MemoryProposal, "expiresAtMs">,
+  nowMs: number
+): string {
+  return proposal.expiresAtMs <= nowMs ? PROPOSAL_EXPIRED_MESSAGE : PROPOSAL_CONFLICT_MESSAGE;
+}
 
 /**
  * accept/reject의 실패를 카드 상태로 옮긴다. 403은 「권한 없음」과 「모르는 id」가 같은
@@ -220,18 +228,21 @@ export const BROWSER_NO_MATCH_HEADLINE = "조건에 맞는 기억이 없어요."
 export const BROWSER_NO_MATCH_DETAIL = "필터를 바꾸거나 다른 말로 검색해 보세요.";
 export const BROWSER_LOAD_ERROR = "기억을 불러오지 못했어요.";
 export const BROWSER_LOAD_MORE = "더 보기";
+export const BROWSER_OFFLINE =
+  "연결이 끊겨 있어요. 마지막으로 받은 기억을 보여 주고, 고치기와 잊기는 연결이 돌아온 뒤에 할 수 있어요.";
 export const BROWSER_PICK_ONE = "왼쪽에서 기억을 고르면 자세히 볼 수 있어요.";
 export const BROWSER_BACK_TO_LIST = "목록으로";
 export const BROWSER_PAUSED_NOTICE =
   "내 기억 일시정지가 켜져 있어서 새 기억을 모으지 않아요. 이미 있는 기억은 그대로 보여요.";
 export const BROWSER_PAUSED_LINK = "설정에서 바꾸기";
 export const BROWSER_GUEST_READONLY =
-  "손님은 기억을 읽을 수만 있어요. 고치거나 잊는 건 멤버만 할 수 있어요.";
+  "게스트는 기억을 읽을 수만 있어요. 고치거나 잊는 건 멤버만 할 수 있어요.";
 export const BROWSER_NOT_CURRENT =
   "지난 버전이라 고치거나 잊을 수 없어요. 최신 버전에서 해 주세요.";
 export const BROWSER_OPEN_NEWER = "최신 버전 보기";
 export const BROWSER_OPEN_ITEM_GONE = "없는 기억이거나 볼 수 없는 기억이에요.";
 
+export const DETAIL_LABEL = "기억 상세";
 export const DETAIL_EVIDENCE_HEADING = "근거 메시지";
 export const DETAIL_EVIDENCE_EMPTY = "연결된 근거 메시지가 없어요.";
 export const DETAIL_HISTORY_HEADING = "이력";
@@ -274,10 +285,10 @@ export const FORGET_TITLE = "이 기억을 잊을까요?";
  */
 export const FORGET_DESCRIPTION =
   "이 기억을 지워요. 이미 만들어진 요약에는 다시 만들어질 때까지 남아 있을 수 있어요.";
-export const FORGET_IRREVERSIBLE = "지운 기억은 되돌릴 수 없어요.";
+export const FORGET_IRREVERSIBLE = "잊은 기억은 되돌릴 수 없어요.";
 export const FORGET_CONFIRM = "잊기";
 export const FORGET_CANCEL = "취소";
-export const FORGET_BUSY = "지우는 중";
+export const FORGET_BUSY = "잊는 중";
 
 export function forgottenNotice(count: number): string {
   return count > 1
@@ -295,7 +306,7 @@ export interface ItemWriteErrorView {
   gone: boolean;
 }
 
-export const ITEM_FORBIDDEN_MESSAGE = "손님은 기억을 고치거나 잊을 수 없어요.";
+export const ITEM_FORBIDDEN_MESSAGE = "게스트는 기억을 고치거나 잊을 수 없어요.";
 export const ITEM_CONFLICT_MESSAGE =
   "그 사이 새 버전이 생겼거나 내려간 기억이에요. 지금 상태를 다시 불러왔어요.";
 export const ITEM_EDIT_REFUSED_MESSAGE =
