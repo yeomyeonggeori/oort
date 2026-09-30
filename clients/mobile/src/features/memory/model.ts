@@ -1,9 +1,12 @@
 import {memoryIsCaughtUp} from '@momo/core/features/memory/model';
+import {ApiError} from '@momo/core/lib/api';
+import type {MembershipRole} from '@momo/core/lib/api';
 import type {
   MemoryDigest,
   MemoryDigestLevel,
   MemoryDigestPage,
   MemoryEvidenceLink,
+  MemoryProposal,
   MemoryReceipt,
   MemorySettings,
 } from '@momo/core/features/memory/model';
@@ -194,5 +197,57 @@ export function receiptSheetModel(receipt: MemoryReceipt): ReceiptSheetModel {
     ),
     withheld,
     listShorter: receipt.digests.length < receipt.servedCount,
+  };
+}
+
+// ---- 「기억해 둘게요」 제안 카드 (#3171) -------------------------------------------
+//
+// 카드는 이 판정이 낸 갈래를 그릴 뿐이다. 누가 결정할 수 있는가(ADR-0196 D4 증보)는
+// 서버가 정한다 — 여기서는 「이미 알고 있는 것」(워크스페이스 역할·기한·직전 응답)만으로
+// 눌러 보지도 못할 버튼을 세우지 않는다. 채널 멤버십 역할은 폰이 모르므로 그 게스트는
+// 첫 응답의 403으로 읽기 전용이 된다.
+
+/** 결정 요청이 낸 결과. `none`은 아직 누르지 않았거나 실패해서 처음 그대로다. */
+export type ProposalOutcome =
+  | 'none'
+  | 'accepted'
+  | 'rejected'
+  | 'closed'
+  | 'forbidden';
+
+export type ProposalView =
+  | {kind: 'pending'; selfWarning: boolean; failed: boolean}
+  | {kind: 'readOnly'; cause: 'guest' | 'forbidden'}
+  | {kind: 'accepted'}
+  | {kind: 'rejected'}
+  | {kind: 'stale'; cause: 'expired' | 'closed'};
+
+/** 결정 응답의 오류를 카드가 말할 세 갈래로 접는다. 409=이미 닫힘, 403=권한 없음. */
+export function proposalErrorOutcome(error: unknown): 'closed' | 'forbidden' | 'failed' {
+  if (error instanceof ApiError) {
+    if (error.status === 409) return 'closed';
+    if (error.status === 403) return 'forbidden';
+  }
+  return 'failed';
+}
+
+export function proposalView(input: {
+  proposal: Pick<MemoryProposal, 'status' | 'callerIsRequester' | 'expiresAtMs'>;
+  role: MembershipRole | undefined;
+  outcome: ProposalOutcome;
+  failed: boolean;
+  nowMs: number;
+}): ProposalView {
+  const {proposal, role, outcome} = input;
+  if (outcome === 'accepted' || proposal.status === 'accepted') return {kind: 'accepted'};
+  if (outcome === 'rejected' || proposal.status === 'rejected') return {kind: 'rejected'};
+  if (outcome === 'closed') return {kind: 'stale', cause: 'closed'};
+  if (role === 'guest') return {kind: 'readOnly', cause: 'guest'};
+  if (outcome === 'forbidden') return {kind: 'readOnly', cause: 'forbidden'};
+  if (proposal.expiresAtMs <= input.nowMs) return {kind: 'stale', cause: 'expired'};
+  return {
+    kind: 'pending',
+    selfWarning: proposal.callerIsRequester,
+    failed: input.failed,
   };
 }
