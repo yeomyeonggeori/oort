@@ -20,6 +20,7 @@ import { turnRecordRunId } from "@momo/core/features/timeline/cascadeModel";
 import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 import { MemoryReceiptChip } from "@/features/memory/MemoryReceiptChip";
 import { receiptRunIdFor } from "@/features/memory/receiptGate";
+import { RunProposalCards } from "@/features/memory/ProposalCard";
 import { rowPresentation } from "@momo/core/features/timeline/rowModel";
 import { streamStopMark } from "@momo/core/features/timeline/streamStop";
 // 구분선의 판정은 코어가 갖는다 — 폰이 같은 값을 소비한다 (U1 M-2).
@@ -1008,6 +1009,17 @@ export function MessageRow({
             workspaceId={workspaceId}
             runId={receiptRunId}
             channelId={message.channelId}
+            onJump={onJumpToMessage}
+          />
+        )}
+        {/* 「기억해 둘게요」 제안 카드(ADR-0196 D12 V3, #3170). 칩과 같은 좁힘(정착한
+            턴 기록 한 줄)에 단다: run 하나의 제안이 세 번 나오지 않게. 제안이 없으면
+            아무것도 그리지 않는다. */}
+        {receiptRunId !== null && (
+          <RunProposalCards
+            workspaceId={workspaceId}
+            channelId={message.channelId}
+            runId={receiptRunId}
             onJump={onJumpToMessage}
           />
         )}

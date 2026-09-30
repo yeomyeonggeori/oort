@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useSession } from "@/app/session";
 import { InlineBanner, Skeleton } from "@/features/common/States";
 import { SectionShell, SettingsToggleRow, Subsection } from "@/features/settings/SettingsFields";
@@ -33,6 +34,9 @@ import {
 // last word (a 403 maps to the same reason), so a stale role never lets a write
 // through.
 // =============================================================================
+
+const MEMORY_BROWSER_LEAD =
+  "팀이 기억해 두기로 한 것을 보고, 근거를 따라가고, 고치거나 잊을 수 있어요.";
 
 const ADMIN_REASON_ID = "memory-workspace-admin-reason";
 
@@ -107,6 +111,19 @@ export function MemorySettingsSection({
       {writeError !== null && (
         <InlineBanner message={writeError} testId="memory-write-error" />
       )}
+
+      <Subsection title="기억 살펴보기">
+        <p className="break-keep text-meta text-ink-muted">
+          {MEMORY_BROWSER_LEAD}
+        </p>
+        <Link
+          to="/memory"
+          className="tap-target inline-flex h-control-sm items-center self-start rounded-md bg-surface-muted px-3 text-meta text-ink press hover:bg-surface-hover focus-visible:focus-ring"
+          data-testid="memory-open-browser"
+        >
+          기억 열기
+        </Link>
+      </Subsection>
 
       <Subsection title="내 기억">
         <div
