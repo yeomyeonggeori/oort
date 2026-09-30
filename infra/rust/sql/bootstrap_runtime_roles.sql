@@ -136,6 +136,9 @@ BEGIN
       CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
       IF r = 'momo_app' AND t = 'mem_settings' THEN
         EXECUTE format('REVOKE TRUNCATE, REFERENCES, TRIGGER ON TABLE public.%I FROM %I', t, r);
+      ELSIF r = 'momo_app' AND t IN ('mem_topic', 'mem_topic_summary') THEN
+        -- #3172 B-4: no read route exists yet, so the API role has no SELECT on the topic tables either.
+        EXECUTE format('REVOKE ALL ON TABLE public.%I FROM %I', t, r);
       ELSIF r = 'momo_app' THEN
         EXECUTE format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.%I FROM %I', t, r);
       ELSE

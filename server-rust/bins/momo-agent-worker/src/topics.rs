@@ -50,6 +50,15 @@ const SYSTEM_SUMMARY: &str = "당신은 팀 기억 정리 담당입니다. 사�
 
 /// A label the model proposed, cleaned by the same rules as `mem_topic_label_clean` (SQL): whitespace folded,
 /// 2..=30 characters, none of ``[ ] < > { } ` \`` and no control character, not credential-shaped.
+/// B-6: bidirectional controls and zero-width characters can make a label or summary read differently from what it
+/// holds; both are refused (SQL does the same).
+fn has_invisible_format_char(text: &str) -> bool {
+    text.chars().any(|c| {
+        matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+    })
+}
+
 pub fn clean_label(raw: &str) -> Option<String> {
     let folded = raw.split_whitespace().collect::<Vec<_>>().join(" ");
     let chars = folded.chars().count();
@@ -57,6 +66,7 @@ pub fn clean_label(raw: &str) -> Option<String> {
         || folded
             .chars()
             .any(|c| c.is_control() || "[]<>{}`\\".contains(c))
+        || has_invisible_format_char(&folded)
         || looks_like_secret(&folded)
     {
         return None;
@@ -72,13 +82,23 @@ pub fn clean_summary(raw: &str) -> Option<String> {
         .map(|c| match c {
             '[' => '［',
             ']' => '］',
+            '<' => '＜',
+            '>' => '＞',
+            '{' => '｛',
+            '}' => '｝',
+            '`' => '｀',
+            '\\' => '＼',
             '\n' | '\r' | '\t' => ' ',
             other => other,
         })
         .collect();
     let folded = flat.split_whitespace().collect::<Vec<_>>().join(" ");
     let clipped = clip_chars(&folded, 699);
-    if clipped.is_empty() || clipped.chars().any(char::is_control) || looks_like_secret(&clipped) {
+    if clipped.is_empty()
+        || clipped.chars().any(char::is_control)
+        || has_invisible_format_char(&clipped)
+        || looks_like_secret(&clipped)
+    {
         return None;
     }
     Some(clipped)
@@ -279,9 +299,13 @@ impl AgentWorker {
         stats.llm_calls += 1;
         match self.call_model(prompt, max_output).await {
             Ok(reply) => {
-                self.renew_consolidate_lease(ws, ch).await;
+                let lease_held = self.renew_consolidate_lease(ws, ch).await;
                 let charged = reply.tokens.unwrap_or(estimate).max(estimate / 2);
                 self.settle_tokens(ws, charged - estimate).await;
+                if !lease_held {
+                    // A-13: another worker owns the channel now; what was paid for is not applied.
+                    return Ask::Stop;
+                }
                 Ask::Text(reply.text, reply.model)
             }
             Err(CallError::NotConfigured { reason, .. }) => {
@@ -600,6 +624,13 @@ mod tests {
         assert!(!s.contains('[') && !s.contains('\n'), "{s}");
         assert!(s.contains('［'));
         assert!(clean_summary("   ").is_none());
+        // B-6: the same characters as labels are neutralised, and invisible format characters are refused.
+        let t = clean_summary("a<b>{c}`d`\\e").unwrap();
+        assert_eq!(t, "a＜b＞｛c｝｀d｀＼e");
+        assert!(clean_summary("결정\u{202E}확정").is_none());
+        assert!(clean_summary("결\u{200B}정").is_none());
+        assert!(clean_label("운영\u{202E}규칙").is_none());
+        assert!(clean_label("운영\u{FEFF}규칙").is_none());
         let key = format!(
             "키는 {}{} 입니다",
             "ghp_", "Zx9Yw8Vu7Ts6Rq5Po4Nm3Lk2Ji1Hg0Fe9Dc"

@@ -463,20 +463,30 @@ async fn labels_and_summaries_are_checked_again_in_sql() {
     tx.rollback().await.unwrap();
 }
 
-async fn reader_sees(app: &PgPool, ws: Uuid, member: Uuid, sql: &str) -> Vec<String> {
-    let sql = sql.to_string();
+/// Would this reader be shown the topic's summary? (B-4: the API role has no table read on the topic tables yet, so
+/// the rule the policy will use is asked through its PUBLIC helper.)
+async fn reader_ok(app: &PgPool, ws: Uuid, member: Uuid, topic: Uuid) -> bool {
     with_tenant_tx(app, ws, move |conn| {
         Box::pin(async move {
             momo_messaging::memory::bind_mem_reader_guc(conn, member).await?;
-            let rows = sqlx::query(&sql).fetch_all(&mut *conn).await?;
-            Ok(rows
-                .iter()
-                .map(|r| r.try_get::<String, _>(0).unwrap_or_default())
-                .collect::<Vec<_>>())
+            Ok(
+                sqlx::query_scalar::<_, bool>("SELECT mem_topic_summary_ok($1)")
+                    .bind(topic)
+                    .fetch_one(&mut *conn)
+                    .await?,
+            )
         })
     })
     .await
     .expect("reader")
+}
+
+async fn summary_bodies(su: &PgPool, ch: Uuid) -> Vec<String> {
+    sqlx::query_scalar("SELECT body FROM mem_topic_summary WHERE channel_id = $1")
+        .bind(ch)
+        .fetch_all(su)
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -506,34 +516,23 @@ async fn a_forgotten_item_hides_the_summary_and_it_is_written_again_without_it()
         "{stats:?}"
     );
     let topic = topic_of(su, ids[0]).await.unwrap();
-    let sql = "SELECT body FROM mem_topic_summary";
-    let seen = reader_sees(&app, ws, w.fx.human_b, sql).await;
+    let seen = summary_bodies(su, ch).await;
     assert_eq!(seen.len(), 1);
     assert!(
         seen[0].contains("회식비"),
         "the summary carries the fact: {}",
         seen[0]
     );
+    assert!(reader_ok(&app, ws, w.fx.human_b, topic).await);
     assert!(
-        reader_sees(&app, ws, outsider, sql).await.is_empty(),
+        !reader_ok(&app, ws, outsider, topic).await,
         "not to someone outside the channel"
     );
-    assert!(
-        reader_sees(&app, ws, outsider, "SELECT label FROM mem_topic")
-            .await
-            .is_empty()
-    );
-    assert_eq!(
-        reader_sees(&app, ws, w.fx.human_b, "SELECT label FROM mem_topic")
-            .await
-            .len(),
-        1
-    );
 
-    // Forget the item the fact came from: the summary that rested on it disappears at once ...
+    // Forget the item the fact came from: the summary that rested on it is hidden at once ...
     assert_eq!(forget_as(&app, ws, w.fx.human_b, ids[2]).await, Ok(1));
     assert!(
-        reader_sees(&app, ws, w.fx.human_b, sql).await.is_empty(),
+        !reader_ok(&app, ws, w.fx.human_b, topic).await,
         "hidden the moment a source is gone"
     );
     // ... RED: without the readable-sources test the old text stays visible.
@@ -556,18 +555,18 @@ async fn a_forgotten_item_hides_the_summary_and_it_is_written_again_without_it()
         .execute(&mut *tx)
         .await
         .unwrap();
-    let leaked: Vec<String> = sqlx::query_scalar("SELECT body FROM mem_topic_summary")
-        .fetch_all(&mut *tx)
+    let leaked: bool = sqlx::query_scalar("SELECT mem_topic_summary_ok($1)")
+        .bind(topic)
+        .fetch_one(&mut *tx)
         .await
         .unwrap();
     tx.rollback().await.unwrap();
     eprintln!(
-        "RED source-readable test removed: the summary of a forgotten fact is still shown = {}",
-        leaked.iter().any(|b| b.contains("회식비"))
+        "RED source-readable test removed: the summary of a forgotten fact is still shown = {leaked}"
     );
-    assert!(leaked.iter().any(|b| b.contains("회식비")));
+    assert!(leaked);
 
-    // ... and the next pass writes it again from what is left.
+    // ... and the next pass deletes it (B-2) and writes it again from what is left.
     let before = w.provider.count();
     let stats = worker.consolidate_channel_now(ws, ch).await;
     assert_eq!(stats.topic_summaries, 1, "{stats:?}");
@@ -575,14 +574,13 @@ async fn a_forgotten_item_hides_the_summary_and_it_is_written_again_without_it()
         (before..w.provider.count()).all(|i| !w.provider.prompt(i).contains("회식비")),
         "the new prompt never saw the forgotten fact"
     );
-    let seen = reader_sees(&app, ws, w.fx.human_b, sql).await;
+    let seen = summary_bodies(su, ch).await;
     assert_eq!(seen.len(), 1);
     assert!(
         !seen[0].contains("회식비") && seen[0].contains("배포는 금요일"),
         "{}",
         seen[0]
     );
-    let _ = topic;
 }
 
 #[tokio::test]
@@ -652,4 +650,401 @@ async fn an_assignment_can_be_reverted_and_empty_topics_are_removed() {
         scalar_i64(su, "SELECT count(*) FROM mem_topic WHERE id = $1", topic).await,
         0
     );
+}
+
+async fn gc_in_tx(su: &PgPool, ws: Uuid, ch: Uuid, edits: &[(&str, &[(&str, &str)])]) -> i32 {
+    let mut tx = red_tx(su, ws, edits).await;
+    let n: i32 = sqlx::query_scalar("SELECT mem_topic_gc($1)")
+        .bind(ch)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    tx.rollback().await.unwrap();
+    n
+}
+
+const GC: &str = "public.mem_topic_gc(uuid)";
+const SUMMARY_WORK: &str = "public.mem_topic_summary_work(uuid, integer, integer, integer)";
+
+/// B-1 (#3172 re-review): the item that named a topic is forgotten -> the label is dissolved and the rest are relabelled.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn forgetting_the_item_that_named_a_topic_dissolves_the_label() {
+    let w = world().await;
+    let (su, ws, ch) = (&w.su, w.fx.ws, w.fx.channel);
+    let app = momo_app_pool().await;
+    *w.provider.reply_fn.lock().unwrap() = Some(topic_model());
+    let worker = worker_with(&w.provider, topic_config()).await;
+    let ids = many_items(&w, ch, 5, "라벨").await;
+    worker.consolidate_channel_now(ws, ch).await;
+    let topic = topic_of(su, ids[0]).await.expect("assigned");
+    let creator: Uuid =
+        sqlx::query_scalar("SELECT created_by_item_id FROM mem_topic WHERE id = $1")
+            .bind(topic)
+            .fetch_one(su)
+            .await
+            .unwrap();
+    assert!(ids.contains(&creator));
+    assert_eq!(forget_as(&app, ws, w.fx.human_b, creator).await, Ok(1));
+    // RED: without the dissolve step the label (born from the forgotten fact) stays.
+    let kept = gc_in_tx(
+        su,
+        ws,
+        ch,
+        &[(
+            GC,
+            &[(
+                "AND t.depth = 0 AND t.created_by_item_id IS NOT NULL",
+                "AND false AND t.created_by_item_id IS NOT NULL",
+            )],
+        )],
+    )
+    .await;
+    eprintln!("RED dissolve removed: gc removed {kept} topic(s), the forgotten fact's label stays");
+    assert_eq!(kept, 0);
+    assert!(gc_in_tx(su, ws, ch, &[]).await >= 1);
+    // The real pass: the topic is dissolved, its items come back unassigned and are named again from live items.
+    worker.consolidate_channel_now(ws, ch).await;
+    assert_eq!(
+        scalar_i64(su, "SELECT count(*) FROM mem_topic WHERE id = $1", topic).await,
+        0
+    );
+    let (again, live_creator): (i64, i64) = (
+        scalar_i64(su, "SELECT count(*) FROM mem_topic WHERE channel_id = $1", ch).await,
+        scalar_i64(
+            su,
+            "SELECT count(*) FROM mem_topic t JOIN mem_item i ON i.id = t.created_by_item_id WHERE t.channel_id = $1",
+            ch,
+        )
+        .await,
+    );
+    let _ = again;
+    assert!(
+        live_creator == 0 || live_creator == again,
+        "every topic left is named by an item that still exists"
+    );
+    for id in ids.iter().filter(|i| **i != creator) {
+        if let Some(t) = topic_of(su, *id).await {
+            assert_ne!(t, topic);
+        }
+    }
+}
+
+/// B-2: summaries that rest on a dead item, or that belong to a topic that has been split, are deleted by the job.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn summaries_of_dead_items_and_split_parents_are_deleted() {
+    let w = world().await;
+    let (su, ws, ch) = (&w.su, w.fx.ws, w.fx.channel);
+    *w.provider.reply_fn.lock().unwrap() = Some(topic_model());
+    let worker = worker_with(&w.provider, topic_config()).await;
+    let ids = many_items(&w, ch, 5, "요약정리").await;
+    worker.consolidate_channel_now(ws, ch).await;
+    assert_eq!(summary_bodies(su, ch).await.len(), 1);
+    let topic = topic_of(su, ids[0]).await.unwrap();
+
+    // (a) a member is retired -> the summary that rested on it goes.
+    sqlx::query("UPDATE mem_item SET retired_at = now(), retired_reason = 'decayed' WHERE id = $1")
+        .bind(ids[4])
+        .execute(su)
+        .await
+        .unwrap();
+    let sabotage: &[(&str, &[(&str, &str)])] = &[(
+        GC,
+        &[(
+            "WHERE s.workspace_id = v_ws AND s.channel_id = p_channel_id\n     AND (",
+            "WHERE false AND s.workspace_id = v_ws AND s.channel_id = p_channel_id\n     AND (",
+        )],
+    )];
+    let mut tx = red_tx(su, ws, sabotage).await;
+    sqlx::query_scalar::<_, i32>("SELECT mem_topic_gc($1)")
+        .bind(ch)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("RESET ROLE").execute(&mut *tx).await.unwrap();
+    let left: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM mem_topic_summary WHERE topic_id = $1")
+            .bind(topic)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    tx.rollback().await.unwrap();
+    eprintln!(
+        "RED summary cleanup removed: summaries left for a topic with a dead source = {left}"
+    );
+    assert_eq!(left, 1);
+    worker.consolidate_channel_now(ws, ch).await;
+    let bodies = summary_bodies(su, ch).await;
+    assert_eq!(
+        bodies.len(),
+        1,
+        "deleted, then written again from the live items"
+    );
+
+    // (b) the topic gets children (a split): the parent's summary goes even though its items are alive.
+    let child: Uuid = sqlx::query_scalar(
+        "INSERT INTO mem_topic (workspace_id, channel_id, parent_id, depth, label, label_key) VALUES ($1, $2, $3, 1, '하위 주제', '하위 주제') RETURNING id",
+    )
+    .bind(ws)
+    .bind(ch)
+    .bind(topic)
+    .fetch_one(su)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE mem_item SET topic_id = $1 WHERE topic_id = $2")
+        .bind(child)
+        .bind(topic)
+        .execute(su)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM mem_topic_summary WHERE topic_id = $1")
+        .bind(topic)
+        .execute(su)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO mem_topic_summary (topic_id, workspace_id, channel_id, body, item_ids, item_hash, prompt_version) \
+         SELECT $1, $2, $3, '옛 부모 요약', array_agg(id), 'x', 'topic-v1' FROM mem_item WHERE topic_id = $4 AND retired_at IS NULL",
+    )
+    .bind(topic)
+    .bind(ws)
+    .bind(ch)
+    .bind(child)
+    .execute(su)
+    .await
+    .unwrap();
+    let sabotage: &[(&str, &[(&str, &str)])] = &[(
+        GC,
+        &[(
+            "(EXISTS (SELECT 1 FROM public.mem_topic c WHERE c.parent_id = s.topic_id)",
+            "(false",
+        )],
+    )];
+    let mut tx = red_tx(su, ws, sabotage).await;
+    sqlx::query_scalar::<_, i32>("SELECT mem_topic_gc($1)")
+        .bind(ch)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("RESET ROLE").execute(&mut *tx).await.unwrap();
+    let left: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM mem_topic_summary WHERE topic_id = $1")
+            .bind(topic)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    tx.rollback().await.unwrap();
+    eprintln!(
+        "RED split-parent cleanup removed: the parent's summary is kept = {}",
+        left == 1
+    );
+    assert_eq!(left, 1);
+    gc_in_tx(su, ws, ch, &[]).await; // rolled back: only the count matters below
+    worker.consolidate_channel_now(ws, ch).await;
+    assert_eq!(
+        scalar_i64(
+            su,
+            "SELECT count(*) FROM mem_topic_summary WHERE topic_id = $1",
+            topic
+        )
+        .await,
+        0,
+        "the split parent has no summary"
+    );
+}
+
+/// B-3: a closed decision (an old value) and a retired item never feed a topic summary.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn closed_decisions_never_feed_a_topic_summary() {
+    let w = world().await;
+    let (su, ws, ch) = (&w.su, w.fx.ws, w.fx.channel);
+    *w.provider.reply_fn.lock().unwrap() = Some(topic_model());
+    let worker = worker_with(&w.provider, topic_config()).await;
+    let m = w.say("결정 근거").await;
+    let mut ids = Vec::new();
+    for (i, body) in [
+        "배포는 금요일",
+        "문서는 위키에",
+        "리뷰는 이틀 안에",
+        "회의는 월요일",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let mut sp = spec("decision", "extracted", body, ago(10 - i as i64), &[m]);
+        sp.subject = Some(["배포", "문서", "리뷰", "회의"][i]);
+        ids.push(put_item(su, ws, ch, sp).await);
+    }
+    worker.consolidate_channel_now(ws, ch).await;
+    let old = ids[0];
+    sqlx::query("UPDATE mem_item SET valid_to = now() - interval '1 day' WHERE id = $1")
+        .bind(old)
+        .execute(su)
+        .await
+        .unwrap();
+    // The old summary (which still says the old value) is gone, so the topic is due for a new one.
+    sqlx::query("DELETE FROM mem_topic_summary WHERE channel_id = $1")
+        .bind(ch)
+        .execute(su)
+        .await
+        .unwrap();
+    let ask = |edits: Vec<(&'static str, Vec<(&'static str, &'static str)>)>| async move {
+        let refs: Vec<(&str, &[(&str, &str)])> =
+            edits.iter().map(|(f, e)| (*f, e.as_slice())).collect();
+        let mut tx = red_tx(su, ws, &refs).await;
+        let got: Vec<Uuid> =
+            sqlx::query_scalar("SELECT item_id FROM mem_topic_summary_work($1, 5, 3, 30)")
+                .bind(ch)
+                .fetch_all(&mut *tx)
+                .await
+                .unwrap();
+        tx.rollback().await.unwrap();
+        got
+    };
+    let got = ask(vec![]).await;
+    assert_eq!(
+        got.len(),
+        3,
+        "three open decisions, the closed one is left out: {got:?}"
+    );
+    assert!(!got.contains(&old));
+    let got = ask(vec![(
+        SUMMARY_WORK,
+        vec![("AND i.valid_to IS NULL  -- B-3", "AND true  -- B-3")],
+    )])
+    .await;
+    eprintln!(
+        "RED valid_to filter removed: the closed decision feeds the summary = {}",
+        got.contains(&old)
+    );
+    assert!(got.contains(&old));
+    // The summary written by the next pass says nothing about the old value.
+    let before = w.provider.count();
+    worker.consolidate_channel_now(ws, ch).await;
+    assert!((before..w.provider.count()).all(|i| !w.provider.prompt(i).contains("배포는 금요일")));
+}
+
+/// B-4: no runtime role reads the topic tables until a read route exists.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn the_api_role_cannot_read_the_topic_tables() {
+    let w = world().await;
+    let (su, ws) = (&w.su, w.fx.ws);
+    let app = momo_app_pool().await;
+    for table in ["mem_topic", "mem_topic_summary"] {
+        let has: bool = sqlx::query_scalar("SELECT has_table_privilege('momo_app', $1, 'SELECT')")
+            .bind(format!("public.{table}"))
+            .fetch_one(su)
+            .await
+            .unwrap();
+        assert!(!has, "{table}");
+        let sql = format!("SELECT count(*) FROM {table}");
+        let refused = with_tenant_tx(&app, ws, move |conn| {
+            Box::pin(async move {
+                sqlx::query_scalar::<_, i64>(&sql)
+                    .fetch_one(&mut *conn)
+                    .await?;
+                Ok(())
+            })
+        })
+        .await;
+        assert_eq!(sqlstate_of(refused).await, "42501", "{table}");
+    }
+    // RED: the grant is what would open it.
+    let mut tx = su.begin().await.unwrap();
+    sqlx::query("GRANT SELECT ON mem_topic TO momo_app")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let has: bool =
+        sqlx::query_scalar("SELECT has_table_privilege('momo_app', 'public.mem_topic', 'SELECT')")
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    tx.rollback().await.unwrap();
+    eprintln!("RED SELECT granted: the API role can read topics = {has}");
+    assert!(has);
+}
+
+/// B-6: bidi / zero-width characters are refused in labels and summaries; summaries get the label neutralisation.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn invisible_format_characters_are_refused_and_summaries_are_neutralised() {
+    let w = world().await;
+    let (su, ws, ch) = (&w.su, w.fx.ws, w.fx.channel);
+    let ids = many_items(&w, ch, 3, "문자").await;
+    for label in ["운영\u{202E}규칙", "운영\u{200B}규칙", "\u{FEFF}운영규칙"] {
+        let sql = format!("SELECT mem_topic_assign('{}', NULL, '{label}', 60)", ids[0]);
+        let mut tx = red_tx(su, ws, &[]).await;
+        let refused = sqlx::query_scalar::<_, Option<Uuid>>(&sql)
+            .fetch_one(&mut *tx)
+            .await;
+        assert_eq!(
+            refused.map_err(|e| mem::sqlstate(&momo_db::DbError::from(e))),
+            Err(Some("23514".to_string())),
+            "{label:?}"
+        );
+        tx.rollback().await.unwrap();
+    }
+    let sql = format!(
+        "SELECT mem_topic_assign('{}', NULL, '운영\u{202E}규칙', 60)",
+        ids[0]
+    );
+    let mut tx = red_tx(
+        su,
+        ws,
+        &[(
+            LABEL_CLEAN,
+            &[(
+                "AND c !~ '[\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u2069\\uFEFF]'",
+                "",
+            )],
+        )],
+    )
+    .await;
+    let stored: Option<Uuid> = sqlx::query_scalar(&sql).fetch_one(&mut *tx).await.unwrap();
+    tx.rollback().await.unwrap();
+    eprintln!(
+        "RED invisible-character check removed: a label with a bidi override is stored = {}",
+        stored.is_some()
+    );
+    assert!(stored.is_some());
+
+    // Summaries: the same neutralisation as labels, and no invisible format characters.
+    *w.provider.reply_fn.lock().unwrap() = Some(topic_model());
+    let worker = worker_with(&w.provider, topic_config()).await;
+    worker.consolidate_channel_now(ws, ch).await;
+    let topic = topic_of(su, ids[0]).await.expect("assigned");
+    let items = format!("ARRAY['{}','{}','{}']::uuid[]", ids[0], ids[1], ids[2]);
+    let set = |body: &str| {
+        format!("SELECT mem_topic_set_summary('{topic}', '{body}', {items}, 'm', 'v')")
+    };
+    let mut tx = red_tx(su, ws, &[]).await;
+    sqlx::query_scalar::<_, bool>(&set("a<b>{c}`d`"))
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("RESET ROLE").execute(&mut *tx).await.unwrap();
+    let stored: String =
+        sqlx::query_scalar("SELECT body FROM mem_topic_summary WHERE topic_id = $1")
+            .bind(topic)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert_eq!(stored, "a＜b＞｛c｝｀d｀");
+    tx.rollback().await.unwrap();
+    for body in ["결정\u{202E}확정", "결\u{200B}정"] {
+        let mut tx = red_tx(su, ws, &[]).await;
+        let refused = sqlx::query_scalar::<_, bool>(&set(body))
+            .fetch_one(&mut *tx)
+            .await;
+        assert_eq!(
+            refused.map_err(|e| mem::sqlstate(&momo_db::DbError::from(e))),
+            Err(Some("23514".to_string())),
+            "{body:?}"
+        );
+        tx.rollback().await.unwrap();
+    }
 }

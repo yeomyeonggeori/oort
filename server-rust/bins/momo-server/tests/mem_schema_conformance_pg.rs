@@ -1776,6 +1776,8 @@ const DEFINER_ONLY_TABLES: [&str; 4] = [
     "mem_cons_state",
     "mem_cons_pair",
 ];
+/// #3172 B-4: tables no runtime role may read until a read route exists (asserted: momo_app has no SELECT either).
+const NO_READ_TABLES: [&str; 2] = ["mem_topic", "mem_topic_summary"];
 const RUNTIME_ROLES: [&str; 5] = [
     "momo_app",
     "momo_relay",
@@ -2012,7 +2014,7 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
                     continue;
                 }
                 let allowed = role == "momo_app"
-                    && (privilege == "SELECT"
+                    && ((privilege == "SELECT" && !NO_READ_TABLES.contains(&table.as_str()))
                         || (table == "mem_settings"
                             && matches!(privilege, "INSERT" | "UPDATE" | "DELETE")));
                 let has: bool = sqlx::query_scalar("SELECT has_table_privilege($1, $2, $3)")

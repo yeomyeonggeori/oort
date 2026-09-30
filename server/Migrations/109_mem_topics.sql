@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS mem_topic (
   owner_member_id uuid,
   label           text NOT NULL,
   label_key       text NOT NULL,
+  -- B-1: 루트 주제를 만든 항목. 그 항목이 잊히거나 근거가 죽으면 라벨이 그 사실에서 왔을 수 있어 주제를 풀고(mem_topic_gc) 다시 붙인다. FK 없음(잊기가 행을 지운다).
+  created_by_item_id uuid,
   split_lock_until timestamptz,
   created_at      timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT mem_topic_channel_fk FOREIGN KEY (channel_id, workspace_id)
@@ -83,12 +85,12 @@ CREATE POLICY mem_item_only_definer_upd ON mem_item AS RESTRICTIVE FOR UPDATE
          AND pg_catalog.current_setting('mem.op', true) IN
              ('add_item', 'edit_item', 'forget_item', 'accept_proposal',
               'cons_retire', 'cons_decay', 'cons_apply', 'cons_revert', 'cons_retention',
-              'topic_assign', 'topic_split', 'topic_revert'))
+              'topic_assign', 'topic_split', 'topic_revert', 'topic_gc'))
   WITH CHECK (current_user = 'mem_definer'
          AND pg_catalog.current_setting('mem.op', true) IN
              ('add_item', 'edit_item', 'forget_item', 'accept_proposal',
               'cons_retire', 'cons_decay', 'cons_apply', 'cons_revert', 'cons_retention',
-              'topic_assign', 'topic_split', 'topic_revert'));
+              'topic_assign', 'topic_split', 'topic_revert', 'topic_gc'));
 
 DO $$
 DECLARE t text;
@@ -185,9 +187,7 @@ BEGIN
     FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin'] LOOP
       IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
         EXECUTE format('REVOKE ALL ON TABLE public.%I FROM %I', t, r);
-        IF r = 'momo_app' THEN
-          EXECUTE format('GRANT SELECT ON TABLE public.%I TO %I', t, r);
-        END IF;
+        -- B-4: 읽는 API 경로가 생길 때까지 momo_app 도 이 테이블을 읽지 못한다(정책은 남겨 둔다 — 경로가 생기면 SELECT 만 준다).
       END IF;
     END LOOP;
   END LOOP;
@@ -204,6 +204,8 @@ AS $$
            WHEN pg_catalog.char_length(c) BETWEEN 2 AND 30
             AND pg_catalog.translate(c, '[]<>{}`\', '') = c
             AND c !~ '[[:cntrl:]]'
+            -- B-6: 양방향 제어·폭 없는 문자로 라벨을 다르게 보이게 할 수 없다.
+            AND c !~ '[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]'
             AND NOT public.mem_looks_like_secret(c)
            THEN c END
     FROM (SELECT pg_catalog.btrim(pg_catalog.regexp_replace(COALESCE(p_label, ''), '[[:space:]]+', ' ', 'g')) AS c) x
@@ -325,8 +327,8 @@ BEGIN
          >= GREATEST(COALESCE(p_max_roots, 60), 1) THEN
         RETURN NULL;
       END IF;
-      INSERT INTO public.mem_topic (workspace_id, channel_id, owner_member_id, label, label_key)
-      VALUES (v_ws, i.channel_id, i.owner_member_id, v_label, pg_catalog.lower(v_label))
+      INSERT INTO public.mem_topic (workspace_id, channel_id, owner_member_id, label, label_key, created_by_item_id)
+      VALUES (v_ws, i.channel_id, i.owner_member_id, v_label, pg_catalog.lower(v_label), i.id)
       ON CONFLICT DO NOTHING
       RETURNING id INTO v_topic;
       IF v_topic IS NULL THEN RETURN NULL; END IF;
@@ -478,6 +480,8 @@ BEGIN
             pg_catalog.jsonb_build_object('from', t.id, 'to', v_children[m.slot], 'via', 'split'));
     v_moved := v_moved + 1;
   END LOOP;
+  -- B-2: 나뉜 부모의 요약은 더는 리프 요약이 아니다 — 지운다(옛 항목들의 글이 남지 않게).
+  DELETE FROM public.mem_topic_summary WHERE topic_id = t.id AND workspace_id = v_ws;
   INSERT INTO public.mem_event (workspace_id, target_kind, target_id, action, channel_id, owner_member_id, detail)
   VALUES (v_ws, 'topic', t.id, 'split', t.channel_id, t.owner_member_id,
           pg_catalog.jsonb_build_object('children', v_n, 'moved', v_moved));
@@ -518,6 +522,7 @@ BEGIN
         SELECT i.id, i.body, pg_catalog.row_number() OVER (ORDER BY i.recorded_at DESC, i.id) AS rn
           FROM public.mem_item i
          WHERE i.topic_id = l.tid AND i.workspace_id = v_ws AND i.retired_at IS NULL AND NOT i.stale
+           AND i.valid_to IS NULL  -- B-3: 닫힌 결정(옛 값)은 주제 요약에 넣지 않는다
            AND public.mem_item_live(i.id)
          ORDER BY i.recorded_at DESC, i.id
          LIMIT v_per) m
@@ -557,9 +562,11 @@ BEGIN
   IF v_ws IS NULL THEN
     RAISE EXCEPTION 'mem_topic_set_summary: app.workspace_id is not set' USING ERRCODE = '42501';
   END IF;
-  v_body := pg_catalog.btrim(pg_catalog.translate(COALESCE(p_body, ''), E'[]\n\r\t', '［］   '));
+  -- B-6: 라벨과 같은 문자 중화 — [ ] < > { } ` \ 는 전각으로, 줄바꿈·탭은 공백으로. 양방향 제어·폭 없는 문자는 거부.
+  v_body := pg_catalog.btrim(pg_catalog.translate(COALESCE(p_body, ''), E'[]<>{}`\\\n\r\t', '［］＜＞｛｝｀＼   '));
   IF pg_catalog.char_length(v_body) NOT BETWEEN 1 AND 700 OR public.mem_looks_like_secret(v_body)
-     OR v_body ~ '[[:cntrl:]]' THEN
+     OR v_body ~ '[[:cntrl:]]'
+     OR v_body ~ '[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]' THEN
     RAISE EXCEPTION 'mem_topic_set_summary: the summary is not acceptable' USING ERRCODE = '23514';
   END IF;
   IF v_n NOT BETWEEN 1 AND 40
@@ -575,6 +582,7 @@ BEGIN
   IF (SELECT pg_catalog.count(*) FROM public.mem_item i
        WHERE i.id = ANY (p_item_ids) AND i.topic_id = t.id AND i.workspace_id = v_ws
          AND i.channel_id = t.channel_id AND i.retired_at IS NULL AND NOT i.stale
+         AND i.valid_to IS NULL
          AND public.mem_item_live(i.id)) <> v_n THEN
     RAISE EXCEPTION 'mem_topic_set_summary: every source must be a live item of this topic' USING ERRCODE = '23514';
   END IF;
@@ -612,6 +620,46 @@ BEGIN
   IF v_ws IS NULL THEN
     RAISE EXCEPTION 'mem_topic_gc: app.workspace_id is not set' USING ERRCODE = '42501';
   END IF;
+  -- B-1: 루트 주제를 만든 항목이 잊혔거나(행이 지워지고 'forgotten' 이벤트만 남음) 근거가 죽었으면, 라벨이 그 사실에서 온
+  -- 것일 수 있으니 주제를 푼다: 남은 항목은 미배정으로 돌아가 다음 배정에서 다시 붙고, 하위 주제·요약은 함께 지워진다.
+  FOR r IN
+    SELECT t.id, t.owner_member_id FROM public.mem_topic t
+     WHERE t.workspace_id = v_ws AND t.channel_id = p_channel_id AND t.depth = 0 AND t.created_by_item_id IS NOT NULL
+       AND (
+         (NOT EXISTS (SELECT 1 FROM public.mem_item c WHERE c.id = t.created_by_item_id AND c.workspace_id = v_ws)
+          AND EXISTS (SELECT 1 FROM public.mem_event e
+                       WHERE e.workspace_id = v_ws AND e.target_kind = 'item' AND e.target_id = t.created_by_item_id
+                         AND e.action = 'forgotten'))
+         OR EXISTS (SELECT 1 FROM public.mem_item c
+                     WHERE c.id = t.created_by_item_id AND c.workspace_id = v_ws
+                       AND ((c.retired_at IS NOT NULL
+                             AND c.retired_reason IN ('forgotten', 'wrong', 'source_deleted', 'source_edited'))
+                            OR (c.retired_at IS NULL AND NOT public.mem_item_live(c.id))))
+       )
+     ORDER BY t.id LIMIT 200 FOR UPDATE OF t SKIP LOCKED
+  LOOP
+    UPDATE public.mem_item SET topic_id = NULL
+     WHERE workspace_id = v_ws AND topic_id IN (
+       WITH RECURSIVE sub AS (
+         SELECT x.id FROM public.mem_topic x WHERE x.id = r.id
+         UNION ALL
+         SELECT c.id FROM public.mem_topic c JOIN sub ON c.parent_id = sub.id)
+       SELECT id FROM sub);
+    DELETE FROM public.mem_topic WHERE id = r.id AND workspace_id = v_ws;
+    INSERT INTO public.mem_event (workspace_id, target_kind, target_id, action, channel_id, owner_member_id, detail)
+    VALUES (v_ws, 'topic', r.id, 'purged', p_channel_id, r.owner_member_id,
+            pg_catalog.jsonb_build_object('reason', 'creator_gone'));
+    v_n := v_n + 1;
+  END LOOP;
+  -- B-2: 요약이 기댄 항목이 하나라도 죽었거나(잊음·근거 삭제·내려감·닫힘) 나뉘어 리프가 아닌 주제의 요약은 지운다.
+  -- 살아 있는 항목이 남은 리프의 요약은 다음 패스에서 다시 만든다.
+  DELETE FROM public.mem_topic_summary s
+   WHERE s.workspace_id = v_ws AND s.channel_id = p_channel_id
+     AND (EXISTS (SELECT 1 FROM public.mem_topic c WHERE c.parent_id = s.topic_id)
+          OR EXISTS (SELECT 1 FROM pg_catalog.unnest(s.item_ids) AS x(id)
+                      WHERE NOT EXISTS (SELECT 1 FROM public.mem_item i
+                                         WHERE i.id = x.id AND i.workspace_id = v_ws AND i.retired_at IS NULL
+                                           AND NOT i.stale AND i.valid_to IS NULL AND public.mem_item_live(i.id))));
   FOR v_round IN 1..4 LOOP
     FOR r IN
       SELECT t.id, t.owner_member_id FROM public.mem_topic t

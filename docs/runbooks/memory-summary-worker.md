@@ -77,6 +77,7 @@ ADR-0196(팀 기억 v2) M1의 요약 루프. `momo-agent-worker` 프로세스 �
 - 라벨(2~30자)·요약(≤700자)은 모델이 쓴 글이라 Rust와 SQL이 시크릿 모양·괄호·제어문자를 두 번 검사한다. 통과 못 하면 버리고 `topic_rejected`로 센다.
 - 예산: 판정과 같은 일일 상한·80% 몫. 호출 수는 판정과 따로 `MEMORY_CONSOLIDATE_MAX_CALLS`까지. 루트 주제는 채널당 `MEMORY_TOPIC_MAX_ROOTS`(60).
 - 상태 보기: `mem_topic`(트리), `mem_topic_summary`(요약 + 근거 항목 id), `mem_item.topic_id`, `mem_event`(`assigned` from/to · `split` · `summarized` · `purged`).
+- 정리(재검수): 루트 주제를 만든 항목이 잊히거나 근거가 죽으면 주제를 풀어 남은 항목을 다시 배정하고, 죽은·닫힌 항목이 든 요약과 나뉜 부모의 요약을 지운다(`purged`, `creator_gone`). 요약 입력에는 닫힌 결정이 들어가지 않는다. `momo_app`은 두 주제 테이블을 읽지 못한다(읽는 경로가 생길 때까지).
 - 되돌리기: `mem_topic_revert(event_id)`(워커 전용) — 배정은 이전 주제로, 분할은 하위 주제를 접고 24시간 잠금.
 
 ## 알려진 한계 (M1)
