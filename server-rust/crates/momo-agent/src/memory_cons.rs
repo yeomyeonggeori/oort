@@ -117,6 +117,31 @@ pub async fn begin(
         .await?)
 }
 
+/// Extend the lease (after every model call, so a long judging pass is not taken over by another worker).
+pub async fn renew(
+    conn: &mut PgConnection,
+    channel_id: Uuid,
+    lease_token: Uuid,
+    lease_seconds: f64,
+) -> Result<bool, DbError> {
+    Ok(sqlx::query_scalar("SELECT mem_cons_renew($1, $2, $3)")
+        .bind(channel_id)
+        .bind(lease_token)
+        .bind(lease_seconds)
+        .fetch_one(&mut *conn)
+        .await?)
+}
+
+/// Do not ask about this pair again for a day (the model did not answer with one of the three words).
+pub async fn defer_pair(conn: &mut PgConnection, a: Uuid, b: Uuid) -> Result<(), DbError> {
+    sqlx::query("SELECT mem_cons_defer_pair($1, $2)")
+        .bind(a)
+        .bind(b)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
 /// Release the lease. `done` = today's slot is complete; otherwise retry after `retry_seconds`.
 pub async fn finish(
     conn: &mut PgConnection,

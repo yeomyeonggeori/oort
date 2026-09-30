@@ -434,7 +434,7 @@ impl AgentWorker {
             return false;
         }
         let token = self.summary.lease_token();
-        let lease = cfg.lease_seconds;
+        let lease = cfg.consolidate_lease_seconds;
         let began = mem::with_memory_tx(&self.pool, ws, move |conn| {
             Box::pin(async move { cons::begin(conn, ch, token, lease, slot).await })
         })
@@ -465,10 +465,21 @@ impl AgentWorker {
         };
         let done = end != JudgeEnd::CapReached;
         let retry = cfg.consolidate_retry_seconds;
-        let _ = mem::with_memory_tx(&self.pool, ws, move |conn| {
+        match mem::with_memory_tx(&self.pool, ws, move |conn| {
             Box::pin(async move { cons::finish(conn, ch, token, done, retry).await })
         })
-        .await;
+        .await
+        {
+            Ok(true) => {}
+            // The lease is gone (expired and taken over) or the release failed: it runs out by itself; say so.
+            Ok(false) => {
+                tracing::warn!(channel_id = %ch, "memory consolidation: the lease was lost before it was released")
+            }
+            Err(error) => {
+                tracing::warn!(channel_id = %ch, error = %error, "memory consolidation: releasing the lease failed");
+                stats.failures += 1;
+            }
+        }
         if done {
             // Finished for today's slot: no need to ask the database again until the next one.
             self.consolidate
@@ -539,6 +550,19 @@ impl AgentWorker {
     ) {
         tracing::warn!(channel_id = %ch, step, error = %error, "memory consolidation: step failed");
         stats.failures += 1;
+    }
+
+    /// Extend the channel lease after a model call (M-6): a slow provider must not let another worker take the channel.
+    pub(crate) async fn renew_consolidate_lease(&self, ws: Uuid, ch: Uuid) {
+        let token = self.summary.lease_token();
+        let secs = self.config.memory.consolidate_lease_seconds;
+        if let Err(error) = mem::with_memory_tx(&self.pool, ws, move |conn| {
+            Box::pin(async move { cons::renew(conn, ch, token, secs).await })
+        })
+        .await
+        {
+            tracing::warn!(channel_id = %ch, error = %error, "memory consolidation: lease renewal failed");
+        }
     }
 
     /// Reserve `estimate` tokens against the workspace's daily cap — the same counter the summaries use —
@@ -654,12 +678,19 @@ impl AgentWorker {
                     }
                 };
                 consecutive_failures = 0;
+                self.renew_consolidate_lease(ws, ch).await;
                 // A provider that under-reports (or omits) usage cannot slip under the cap.
                 let charged = reply.tokens.unwrap_or(estimate).max(estimate / 2);
                 self.settle_tokens(ws, charged - estimate).await;
 
                 let Some(verdict) = parse_verdict(&reply.text, decision) else {
                     stats.unparsed += 1;
+                    // L-2: do not spend tokens on the same pair again tomorrow morning.
+                    let (a, b) = (pair.a_id, pair.b_id);
+                    let _ = mem::with_memory_tx(&self.pool, ws, move |conn| {
+                        Box::pin(async move { cons::defer_pair(conn, a, b).await })
+                    })
+                    .await;
                     continue;
                 };
                 stats.pairs_judged += 1;

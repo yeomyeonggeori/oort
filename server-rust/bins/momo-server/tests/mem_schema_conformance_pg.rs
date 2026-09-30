@@ -2102,6 +2102,7 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
             || name == "mem_accept_proposal"
             || name == "mem_reject_proposal"
             || name == "mem_proposal_evidence_ok"
+            || name == "mem_revert_consolidation"
         {
             // The RLS policies call the evidence helpers as the reading role; `mem_search_items`
             // is the API entry point (session_user guard inside; the worker-only twin is
@@ -2142,6 +2143,10 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
                         | "mem_cons_propose"
                         | "mem_cons_note_pair"
                         | "mem_cons_accept"
+                        | "mem_cons_defer"
+                        | "mem_cons_release"
+                        | "mem_item_guest_authored"
+                        | "mem_cons_revert_core"
                 );
             assert_eq!(has, expected, "{when}: {role} EXECUTE {signature}");
         }
@@ -2604,7 +2609,7 @@ async fn lock_block_also_locks_views_and_materialized_views() {
 
 /// L-1 / L-9: the SECURITY DEFINER functions owned by mem_definer are exactly this list, by **full signature**
 /// (`regprocedure` text): an overload that sneaks in under an allowed name is a stranger too (#3200 L-9).
-const DEFINER_ALLOW_LIST: [&str; 53] = [
+const DEFINER_ALLOW_LIST: [&str; 60] = [
     "mem_accept_proposal(uuid)",
     "mem_add_item(uuid,text,text,text,uuid[],real,boolean,text,text)",
     "mem_adjust_tokens(bigint)",
@@ -2617,6 +2622,8 @@ const DEFINER_ALLOW_LIST: [&str; 53] = [
     "mem_cons_begin(uuid,uuid,double precision,timestamp with time zone)",
     "mem_cons_close_item(uuid,uuid,uuid,uuid)",
     "mem_cons_decay(uuid,integer)",
+    "mem_cons_defer(uuid,uuid,text)",
+    "mem_cons_defer_pair(uuid,uuid)",
     "mem_cons_finish(uuid,uuid,boolean,integer)",
     "mem_cons_merge_items(uuid,uuid,uuid,uuid)",
     "mem_cons_note_pair(uuid,uuid,text)",
@@ -2624,9 +2631,12 @@ const DEFINER_ALLOW_LIST: [&str; 53] = [
     "mem_cons_propose(text,uuid,uuid)",
     "mem_cons_purge_proposals(uuid)",
     "mem_cons_reconcile(uuid)",
+    "mem_cons_release(uuid[],text)",
+    "mem_cons_renew(uuid,uuid,double precision)",
     "mem_cons_retention(uuid,integer,integer,integer)",
     "mem_cons_retire_dead(uuid,integer)",
     "mem_cons_revert(uuid)",
+    "mem_cons_revert_core(uuid,uuid)",
     "mem_cursor_state(uuid)",
     "mem_digest_audience_ok(uuid,uuid,uuid)",
     "mem_digest_evidence_ok(uuid)",
@@ -2638,6 +2648,7 @@ const DEFINER_ALLOW_LIST: [&str; 53] = [
     "mem_forget_item(uuid)",
     "mem_item_audience_ok(uuid,uuid,uuid)",
     "mem_item_evidence_ok(uuid)",
+    "mem_item_guest_authored(uuid)",
     "mem_item_live(uuid)",
     "mem_item_readable_by(uuid,uuid)",
     "mem_message_changed()",
@@ -2647,6 +2658,7 @@ const DEFINER_ALLOW_LIST: [&str; 53] = [
     "mem_record_serving(uuid,uuid,uuid[],uuid[],integer,integer,integer)",
     "mem_reject_proposal(uuid)",
     "mem_reserve_tokens(bigint,bigint)",
+    "mem_revert_consolidation(uuid)",
     "mem_search_items(text,integer,uuid,text)",
     "mem_search_items_core(uuid,text,integer,uuid,boolean,uuid,text)",
     "mem_search_items_for(uuid,text,integer,uuid)",

@@ -214,12 +214,14 @@ pub struct MemoryConfig {
     /// `MEMORY_CONSOLIDATE_TOKEN_SHARE_PERCENT` (80) — consolidation stops once the workspace's day usage
     /// reaches this share of the daily cap, so it can never starve the summaries (which stop only at 100 %).
     pub consolidate_token_share_percent: i64,
-    /// `MEMORY_CONSOLIDATE_MERGE_SIMILARITY` (0.55) / `MEMORY_CONSOLIDATE_CLOSE_SIMILARITY` (0.25) — trigram
+    /// `MEMORY_CONSOLIDATE_MERGE_SIMILARITY` (0.55) / `MEMORY_CONSOLIDATE_CLOSE_SIMILARITY` (0.5) — trigram
     /// similarity that makes a pair a merge / decision-closing candidate.
     pub consolidate_merge_similarity: f32,
     pub consolidate_close_similarity: f32,
     /// `MEMORY_CONSOLIDATE_MAX_OUTPUT_TOKENS` (40) — a verdict is one word.
     pub consolidate_max_output_tokens: i32,
+    /// `MEMORY_CONSOLIDATE_LEASE_SECONDS` (900) — the consolidation lease of a channel; renewed after every model call.
+    pub consolidate_lease_seconds: f64,
     /// `MEMORY_CONSOLIDATE_RETRY_SECONDS` (1800) — when a run stopped at the token cap, try again after this.
     pub consolidate_retry_seconds: i32,
     /// `MEMORY_RETIRED_RETENTION_DAYS` (90) / `MEMORY_WINDOW_RETENTION_DAYS` (90) — retention (plan §6.3, §6.5).
@@ -267,8 +269,9 @@ impl Default for MemoryConfig {
             consolidate_max_calls: 30,
             consolidate_token_share_percent: 80,
             consolidate_merge_similarity: 0.55,
-            consolidate_close_similarity: 0.25,
+            consolidate_close_similarity: 0.5,
             consolidate_max_output_tokens: 40,
+            consolidate_lease_seconds: 900.0,
             consolidate_retry_seconds: 1_800,
             retired_retention_days: 90,
             window_retention_days: 90,
@@ -379,6 +382,11 @@ impl MemoryConfig {
                 d.consolidate_close_similarity,
             )?
             .clamp(0.05, 1.0),
+            consolidate_lease_seconds: env_number(
+                "MEMORY_CONSOLIDATE_LEASE_SECONDS",
+                d.consolidate_lease_seconds,
+            )?
+            .clamp(30.0, 3600.0),
             consolidate_max_output_tokens: env_number(
                 "MEMORY_CONSOLIDATE_MAX_OUTPUT_TOKENS",
                 d.consolidate_max_output_tokens,
