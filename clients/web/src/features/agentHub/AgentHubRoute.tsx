@@ -11,7 +11,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Bot, Loader2, Search } from "lucide-react";
+import { Bot, Loader2 } from "lucide-react";
 import { useSession } from "@/app/session";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { cn } from "@/design/lib/cn";
@@ -22,7 +22,6 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/design/ui/dialog";
-import { Input } from "@/design/ui/input";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import {
@@ -63,26 +62,18 @@ import {
   fetchAgentProfile,
   fetchAgentRunDetail,
   fetchAgentRunSummaries,
-  invalidateMemory,
-  listAgentMemories,
-  listMemoryVisibilityGrants,
   putAgentPause,
-  searchAgentMemories,
   uuidEq,
   type AgentProfile,
   type AgentRun,
   type AgentRunSummary,
-  type MemoryItem,
   type RosterMember,
 } from "@momo/core/lib/api";
 import {
   agentMembers,
-  canInvalidateMemory,
   effectiveEffortLabel,
   effectiveModelLabel,
   lifecycleLabel,
-  memoryKindLabel,
-  memoryScopeLabel,
   mergeRunPages,
   normalizedId,
   runStatusLabel,
@@ -116,7 +107,8 @@ import {
  *
  * 프로필은 표면을 적지 않는다: 그 탭의 읽기/쓰기는 이 서버에 있고, 편집 가능
  * 여부는 이미 자기 프로브가 판정한다(features/routing/capability.ts ④).
- * 메모리와 이력은 이 서버에 경로가 없어서 열면 언제나 오류였다.
+ * 이력은 이 서버에 경로가 없으면 열자마자 오류라서 표면으로 접는다. (예전 메모리 탭은
+ * #3170에서 없어졌다: 팀 기억은 `/memory` 브라우저가 맡는다.)
  */
 const SECTIONS: {
   id: AgentHubSection;
@@ -126,7 +118,6 @@ const SECTIONS: {
   operatorOnly?: boolean;
 }[] = [
   { id: "profile", label: "프로필" },
-  { id: "memory", label: "메모리", surface: "agentMemory" },
   { id: "history", label: "이력", surface: "agentRunHistory" },
   // 연결 탭은 호스티드 연결의 **수명**이 사는 자리다: 해제와 정리 확인
   // (HAP-UX2 / #1362). 그 세 경로는 전부 human owner/admin 을 요구하므로 그 밖의
@@ -538,15 +529,6 @@ export function AgentHubRoute() {
                     offline={offline}
                     signals={signalsForAgent(allSignals, selected.id, nowMs)}
                     live={railLive}
-                  />
-                )}
-                {activeSection === "memory" && (
-                  <AgentMemorySection
-                    key={normalizedId(selected.id)}
-                    agent={selected}
-                    directory={directoryQuery.directory}
-                    offline={offline}
-                    onOpenProfile={() => setSection("profile")}
                   />
                 )}
                 {activeSection === "history" && (
@@ -1131,442 +1113,6 @@ function PermissionsSection({
         <Link to="/settings?section=plugins">설정의 앱에서 권한 보기</Link>
       </Button>
     </section>
-  );
-}
-
-function AgentMemorySection({
-  agent,
-  directory,
-  offline,
-  onOpenProfile,
-}: {
-  agent: RosterMember;
-  directory: Directory;
-  offline: boolean;
-  onOpenProfile: () => void;
-}) {
-  const { workspaceId, session } = useSession();
-  const client = useQueryClient();
-  const [queryText, setQueryText] = useState("");
-  const [submittedQuery, setSubmittedQuery] = useState("");
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const [openGrantsFor, setOpenGrantsFor] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState<MemoryItem | null>(null);
-  const [opener, setOpener] = useState<HTMLButtonElement | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [receipt, setReceipt] = useState<string | null>(null);
-  const isSearch = submittedQuery.length >= 2;
-  const query = useQuery({
-    queryKey: [
-      "agent-memories",
-      normalizedId(workspaceId),
-      normalizedId(agent.id),
-      submittedQuery,
-    ],
-    queryFn: async () =>
-      isSearch
-        ? (await searchAgentMemories(
-            workspaceId,
-            agent.id,
-            submittedQuery
-          )).map((hit) => hit.memory)
-        : listAgentMemories(workspaceId, agent.id),
-    retry: false,
-  });
-  const invalidateMutation = useMutation({
-    mutationFn: (memoryId: string) => invalidateMemory(workspaceId, memoryId),
-    onSuccess: async () => {
-      setConfirming(null);
-      setActionError(null);
-      setReceipt("메모리를 무효화했습니다. 출처와 변경 이력은 남아 있습니다.");
-      await client.invalidateQueries({
-        queryKey: [
-          "agent-memories",
-          normalizedId(workspaceId),
-          normalizedId(agent.id),
-        ],
-      });
-    },
-    onError: (error) => {
-      setConfirming(null);
-      setActionError(
-        error instanceof Error
-          ? error.message
-          : "메모리를 무효화하지 못했습니다."
-      );
-    },
-  });
-
-  function submitSearch(event: React.FormEvent) {
-    event.preventDefault();
-    const trimmed = queryText.trim();
-    if (trimmed.length === 1) {
-      setSearchError("검색어를 두 글자 이상 입력하세요.");
-      return;
-    }
-    setSearchError(null);
-    setSubmittedQuery(trimmed);
-  }
-
-  return (
-    <div className="flex flex-col">
-      <form
-        onSubmit={submitSearch}
-        className="flex items-start gap-2 border-b border-line p-4"
-        role="search"
-      >
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <label htmlFor="agent-memory-search" className="sr-only">
-            에이전트 메모리 검색
-          </label>
-          <Input
-            id="agent-memory-search"
-            type="search"
-            value={queryText}
-            onChange={(event) => {
-              setQueryText(event.target.value);
-              setSearchError(null);
-            }}
-            placeholder="기억 내용 검색"
-            aria-invalid={searchError ? true : undefined}
-            aria-describedby={searchError ? "agent-memory-search-error" : undefined}
-            data-testid="agent-memory-search"
-          />
-          {searchError && (
-            <p
-              id="agent-memory-search-error"
-              role="alert"
-              className="text-meta text-danger"
-            >
-              {searchError}
-            </p>
-          )}
-        </div>
-        <Button type="submit" variant="outline" size="sm">
-          <Search aria-hidden="true" />
-          검색
-        </Button>
-        {submittedQuery && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setQueryText("");
-              setSubmittedQuery("");
-              setSearchError(null);
-            }}
-          >
-            검색 지우기
-          </Button>
-        )}
-      </form>
-
-      {actionError && (
-        <InlineBanner
-          message={actionError}
-          actionLabel="닫기"
-          onAction={() => setActionError(null)}
-          testId="agent-memory-action-error"
-        />
-      )}
-      {receipt && (
-        <InlineBanner
-          tone="neutral"
-          message={receipt}
-          actionLabel="닫기"
-          onAction={() => setReceipt(null)}
-          testId="agent-memory-receipt"
-        />
-      )}
-
-      {query.isPending ? (
-        <AgentHubLoading
-          message={
-            isSearch
-              ? "메모리 검색 결과를 불러오는 중입니다."
-              : "메모리 목록을 불러오는 중입니다."
-          }
-          rows={5}
-          className="p-4"
-        />
-      ) : query.isError ? (
-        <InlineBanner
-          message={
-            isSearch
-              ? "메모리 검색 결과를 불러오지 못했습니다."
-              : "메모리 목록을 불러오지 못했습니다."
-          }
-          actionLabel="다시 시도"
-          onAction={() => void query.refetch()}
-          testId="agent-memory-error"
-        />
-      ) : query.data.length === 0 ? (
-        <EmptyInvite
-          headline={
-            isSearch
-              ? `"${submittedQuery}" 검색 결과가 없습니다.`
-              : "이 에이전트에 연결된 메모리가 없습니다."
-          }
-          detail={
-            isSearch
-              ? "다른 표현으로 검색하거나 전체 목록으로 돌아가세요."
-              : "대화에서 검증된 기억이 만들어지면 여기에 표시됩니다."
-          }
-          actions={
-            isSearch ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setQueryText("");
-                  setSubmittedQuery("");
-                }}
-              >
-                전체 목록 보기
-              </Button>
-            ) : (
-              <Button variant="outline" size="sm" onClick={onOpenProfile}>
-                프로필 보기
-              </Button>
-            )
-          }
-          testId={isSearch ? "agent-memory-zero" : "agent-memory-empty"}
-        />
-      ) : (
-        <ul data-testid="agent-memory-list">
-          {query.data.map((memory) => {
-            const mayInvalidate = canInvalidateMemory(
-              memberFor(directory, session.member.id)?.role,
-              session.member.id,
-              memory.createdByMemberId
-            );
-            return (
-              <li
-                key={memory.id}
-                className="flex flex-col gap-3 border-b border-line px-4 py-3"
-                data-testid="agent-memory-row"
-                data-memory-id={memory.id}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="mb-1 flex flex-wrap gap-1">
-                      <StatusChip>{memoryScopeLabel(memory.scope)}</StatusChip>
-                      <StatusChip>{memoryKindLabel(memory.kind)}</StatusChip>
-                      {memory.invalidAtMs !== undefined && (
-                        <StatusChip>무효화됨</StatusChip>
-                      )}
-                    </div>
-                    <p className="whitespace-pre-wrap break-words text-body text-ink">
-                      {memory.body}
-                    </p>
-                    <p className="mt-1 text-meta text-ink-muted">
-                      확인도{" "}
-                      <span data-numeric>
-                        {Math.round(memory.confidence * 100)}%
-                      </span>
-                      , {DATE_TIME.format(memory.updatedAtMs)}
-                    </p>
-                  </div>
-                  {mayInvalidate && memory.invalidAtMs === undefined && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="shrink-0"
-                      disabled={offline}
-                      onClick={(event) => {
-                        setOpener(event.currentTarget);
-                        setConfirming(memory);
-                        setReceipt(null);
-                        setActionError(null);
-                      }}
-                      data-testid="agent-memory-invalidate"
-                    >
-                      무효화
-                    </Button>
-                  )}
-                </div>
-                <div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() =>
-                      setOpenGrantsFor((current) =>
-                        uuidEq(current ?? undefined, memory.id)
-                          ? null
-                          : memory.id
-                      )
-                    }
-                    aria-expanded={uuidEq(openGrantsFor ?? undefined, memory.id)}
-                  >
-                    {uuidEq(openGrantsFor ?? undefined, memory.id)
-                      ? "공개 범위 접기"
-                      : "공개 범위 보기"}
-                  </Button>
-                  {uuidEq(openGrantsFor ?? undefined, memory.id) && (
-                    <MemoryGrantList
-                      workspaceId={workspaceId}
-                      memoryId={memory.id}
-                      directory={directory}
-                    />
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      {confirming && (
-        <MemoryInvalidationDialog
-          memory={confirming}
-          opener={opener}
-          pending={invalidateMutation.isPending}
-          onCancel={() => {
-            if (!invalidateMutation.isPending) setConfirming(null);
-          }}
-          onConfirm={() => {
-            if (!invalidateMutation.isPending) {
-              invalidateMutation.mutate(confirming.id);
-            }
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-function MemoryGrantList({
-  workspaceId,
-  memoryId,
-  directory,
-}: {
-  workspaceId: string;
-  memoryId: string;
-  directory: Directory;
-}) {
-  const query = useQuery({
-    queryKey: [
-      "memory-grants",
-      normalizedId(workspaceId),
-      normalizedId(memoryId),
-    ],
-    queryFn: () => listMemoryVisibilityGrants(workspaceId, memoryId),
-    retry: false,
-  });
-  if (query.isPending) {
-    return (
-      <AgentHubLoading
-        message="메모리 공개 범위를 불러오는 중입니다."
-        rows={2}
-        className="px-0 py-2"
-      />
-    );
-  }
-  if (query.isError) {
-    return (
-      <InlineBanner
-        separator={false}
-        message="이 메모리의 공개 범위를 읽을 수 없습니다."
-        actionLabel="다시 시도"
-        onAction={() => void query.refetch()}
-        testId="memory-grants-error"
-      />
-    );
-  }
-  if (query.data.length === 0) {
-    return (
-      <p className="px-3 py-2 text-meta text-ink-muted" data-testid="memory-grants-empty">
-        명시적으로 추가된 공개 범위가 없습니다.
-      </p>
-    );
-  }
-  return (
-    <ul className="flex flex-col gap-1 px-3 py-2" data-testid="memory-grants-list">
-      {query.data.map((grant) => {
-        const grantee = memberFor(directory, grant.granteeId);
-        return (
-          <li key={grant.id} className="flex items-center justify-between gap-2 text-meta">
-            <span className="text-ink">
-              {grantee
-                ? `${grantee.displayName} (@${grantee.handle})`
-                : grant.granteeKind === "agent"
-                  ? "명부에서 찾을 수 없는 에이전트"
-                  : "명부에서 찾을 수 없는 멤버"}
-            </span>
-            <span className="text-ink-muted">
-              {grant.revokedAtMs === undefined ? "공개 중" : "회수됨"}
-            </span>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-function MemoryInvalidationDialog({
-  memory,
-  opener,
-  pending,
-  onCancel,
-  onConfirm,
-}: {
-  memory: MemoryItem;
-  opener: HTMLButtonElement | null;
-  pending: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <Dialog open onOpenChange={(open) => {
-      if (!open && !pending) onCancel();
-    }}>
-      <DialogContent
-        opener={opener}
-        onEscapeKeyDown={(event) => {
-          event.stopPropagation();
-          if (pending) event.preventDefault();
-        }}
-        onInteractOutside={(event) => {
-          if (pending) event.preventDefault();
-        }}
-      >
-        <div className="flex flex-col gap-3 p-4">
-          <DialogTitle>이 메모리를 무효화할까요?</DialogTitle>
-          <DialogDescription>
-            이후 답변에서 사용하지 않게 표시합니다. 출처와 변경 이력은 삭제되지
-            않습니다.
-          </DialogDescription>
-          <p className="line-clamp-3 text-body text-ink">{memory.body}</p>
-          <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={pending}
-              onClick={onCancel}
-            >
-              취소
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              aria-busy={pending || undefined}
-              onClick={() => {
-                if (!pending) onConfirm();
-              }}
-              data-testid="agent-memory-invalidate-confirm"
-            >
-              {pending && <Loader2 aria-hidden="true" className="spinner-busy" />}
-              {pending ? "무효화 중" : "메모리 무효화"}
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
   );
 }
 

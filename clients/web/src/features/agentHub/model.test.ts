@@ -3,11 +3,9 @@ import type { AgentProfile, AgentRunSummary, RosterMember } from "@momo/core/lib
 import type { AgentWorkingSignal } from "@/features/agents/agentWorkingSignal";
 import {
   agentMembers,
-  canInvalidateMemory,
   effectiveEffortLabel,
   effectiveModelLabel,
   lifecycleLabel,
-  memoryKindLabel,
   mergeRunPages,
   signalsForAgent,
 } from "@momo/core/features/agents/hubModel";
@@ -132,14 +130,5 @@ describe("agent hub model", () => {
         { runs: [run("run-a"), run("RUN-0")] },
       ]).map((item) => item.id)
     ).toEqual(["run-b", "run-a", "run-0"]);
-  });
-
-  it("allows invalidation only for workspace managers or the creator", () => {
-    expect(canInvalidateMemory("admin", "ME", undefined)).toBe(true);
-    expect(canInvalidateMemory("member", "ME", "me")).toBe(true);
-    expect(canInvalidateMemory("member", "ME", "OTHER")).toBe(false);
-    expect(memoryKindLabel("preference")).toBe("선호");
-    expect(memoryKindLabel("fact")).toBe("사실");
-    expect(memoryKindLabel("project_note")).toBe("project_note");
   });
 });
