@@ -1191,3 +1191,67 @@ mod tests {
         assert_eq!(clamp_mem_digest_limit(Some(10_000)), MEM_DIGEST_LIMIT_MAX);
     }
 }
+
+// ---------------------------------------------------------------------------
+// reset + team notice (#3212, migration 110)
+// ---------------------------------------------------------------------------
+
+/// What `mem_reset_workspace` removed, per table. Counts only.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemResetCounts {
+    pub digests: i64,
+    pub items: i64,
+    pub evidence: i64,
+    pub topics: i64,
+    pub topic_summaries: i64,
+    pub embeddings: i64,
+    pub proposals: i64,
+    pub servings: i64,
+    pub consolidation_pairs: i64,
+    pub consolidation_state: i64,
+}
+
+/// The result of one reset: the new `reset_epoch` and what was deleted.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemResetOutcome {
+    pub epoch: i64,
+    pub deleted: MemResetCounts,
+}
+
+/// `mem_reset_workspace(expected_epoch)` — permanently delete every memory row of the workspace
+/// (migration 110). The actor is `app.member_id`; the function refuses a non-owner/admin, a
+/// non-human, a non-API session (`42501`), a missing epoch (`22023`) and an epoch that is no
+/// longer current (`55000`, "already reset"). Only errors whose message starts with
+/// `mem_reset_workspace:` are the function's own.
+pub async fn reset_workspace_in_tx(
+    conn: &mut PgConnection,
+    expected_epoch: i64,
+) -> Result<MemResetOutcome, DbError> {
+    let value: serde_json::Value = sqlx::query_scalar("SELECT mem_reset_workspace($1)")
+        .bind(expected_epoch)
+        .fetch_one(&mut *conn)
+        .await?;
+    serde_json::from_value(value)
+        .map_err(|error| DbError::from(sqlx::Error::Decode(Box::new(error))))
+}
+
+/// The 「기본 AI」 `summary` row as far as a workspace member may see it: the endpoint label as
+/// stored when the operator chose it (already redacted — no userinfo, query or fragment) and the
+/// model id. Nothing else of the row and nothing of the link (`mem_summary_provider`, migration
+/// 110). `None` = no `summary` row.
+pub async fn summary_provider_in_tx(
+    conn: &mut PgConnection,
+) -> Result<Option<(String, Option<String>)>, DbError> {
+    let row = sqlx::query("SELECT endpoint_label, model_id FROM mem_summary_provider()")
+        .fetch_optional(&mut *conn)
+        .await?;
+    row.map(|row| {
+        Ok((
+            row.try_get::<String, _>("endpoint_label")?,
+            row.try_get::<Option<String>, _>("model_id")?,
+        ))
+    })
+    .transpose()
+}

@@ -3552,6 +3552,117 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/memory/notice:
+    get:
+      tags: [memory]
+      operationId: getMemoryNotice
+      summary: What team memory sends, and to which provider (the team notice).
+      description: >
+        ADR-0196 D9 consent ② 「팀 고지」. Any active human member of the workspace
+        (guests included) may read it. It names the provider (a guest sees a custom gateway only as 사용자 지정, never its host) and the model id of
+        the operator's 「기본 AI」 `summary` row — the only place memory content is sent —
+        whether memory is on or paused, that embeddings are computed locally and never
+        sent, and machine codes for what is and is not read. The provider is the host of
+        the stored, already redacted endpoint label: never a key, a link, a path, a query
+        or any operator-only field. `sending` is `enabled && !paused && summary.configured`;
+        without a `summary` row the worker calls no model. Whether the link the row points
+        to has changed since is an operator concern and is not part of this read.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The notice.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryNotice"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/memory/reset:
+    post:
+      tags: [memory]
+      operationId: resetWorkspaceMemory
+      summary: Erase all team memory of the workspace for good (owner/admin).
+      description: >
+        ADR-0196 D9 「초기화 = 워크스페이스 관리자, 전량 영구 삭제(reset_epoch)」 and D10.
+        Permanently deletes every memory row of the workspace — summaries, items and their
+        older versions, evidence links, embeddings, topics and topic summaries, pending
+        proposals, serving receipts and consolidation state — and raises `resetEpoch` by one.
+        **Kept**: the switches (enabled/paused/channel exclusions/personal pauses/token cap),
+        the hashes and message ids of items people explicitly forgot (so a reset does not
+        undo a forget), the daily token usage counters, and the id-only event ledger (plus
+        one `reset` line). Every channel's summary cursor moves to the current head, so
+        memory is rebuilt from messages sent after the reset — the past is not re-summarised.
+        A summary or extraction that was still in flight cannot write after the reset.
+        Owner/admin only; guests, members and agents get 403. The body must say
+        `confirm: true` and carry the `resetEpoch` the client showed: a repeat with a stale
+        epoch (a double click, a retry after success, another admin who was faster) is a 409
+        and erases nothing. Audited (`memory.reset`, actor and epoch only). No undo.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetMemoryRequest"
+      responses:
+        "200":
+          description: The new epoch and how many rows each table lost.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResetMemoryResponse"
+        "400":
+          description: '`confirm` is not true, or `expectedEpoch` is negative.'
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not a workspace owner/admin, agent bearer, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: '`expectedEpoch` is not the current `resetEpoch` — memory was already reset.'
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Missing or unknown body field.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          description: >
+            `error.code` = `memory_reset_busy`. The reset kept losing to a worker or an editor (deadlock, lock
+            timeout, rows still appearing) after the server's own retries. Nothing was changed; retry in a few seconds.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /v1/workspaces/{workspaceId}/memory/settings/me:
     patch:
       tags: [memory]
@@ -12524,7 +12635,7 @@ components:
         enabled: {type: boolean}
         paused: {type: boolean}
         dailyTokenCap: {type: integer, format: int32}
-        resetEpoch: {type: integer, format: int64, description: Read only.}
+        resetEpoch: {type: integer, format: int64, description: Read only. Raised by POST /memory/reset.}
 
     ChannelMemorySettings:
       type: object
@@ -12550,6 +12661,71 @@ components:
           description: Channels with an explicit row that the caller can read.
           items: {$ref: "#/components/schemas/ChannelMemorySettings"}
         me: {$ref: "#/components/schemas/MemberMemorySettings"}
+
+    MemoryNotice:
+      type: object
+      required: [enabled, paused, sending, resetEpoch, summary, embeddings, sends, neverSends]
+      properties:
+        enabled: {type: boolean}
+        paused: {type: boolean}
+        sending: {type: boolean, description: "enabled && !paused && summary.configured — message text is (or will be) sent to the summary provider."}
+        resetEpoch: {type: integer, format: int64}
+        summary:
+          type: object
+          required: [configured]
+          properties:
+            configured: {type: boolean, description: "A 기본 AI summary row exists. Without one the worker calls no model."}
+            provider:
+              type: object
+              required: [name]
+              properties:
+                name: {type: string, description: "A known preset name (OpenAI, Anthropic, xAI, OpenRouter), else the host; a guest looking at a custom gateway gets 사용자 지정."}
+                host: {type: string, description: "Host of the redacted endpoint label — no scheme, port, path, query or userinfo. Absent for a guest looking at a custom (non-preset) gateway."}
+            modelId: {type: string, description: "Absent = the link's default model."}
+        embeddings:
+          type: object
+          required: [model, location, sentToProvider]
+          properties:
+            model: {type: string, example: multilingual-e5-small}
+            location: {type: string, enum: [local]}
+            sentToProvider: {type: boolean, description: Always false.}
+        sends:
+          type: array
+          description: Machine codes for what the summary worker reads and sends.
+          items: {type: string, enum: [channel_message_text, author_display_name, agent_dm_message_text, digest_text, memory_item_text, topic_summary_input]}
+        neverSends:
+          type: array
+          description: Machine codes for what it never reads.
+          items: {type: string, enum: [human_direct_messages, attachments, deleted_messages, excluded_channels, paused_members_dms]}
+
+    ResetMemoryRequest:
+      type: object
+      additionalProperties: false
+      required: [confirm, expectedEpoch]
+      properties:
+        confirm: {type: boolean, enum: [true]}
+        expectedEpoch: {type: integer, format: int64, minimum: 0, description: "The resetEpoch the client showed."}
+
+    ResetMemoryResponse:
+      type: object
+      required: [epoch, deleted]
+      properties:
+        epoch: {type: integer, format: int64, description: The new resetEpoch.}
+        deleted:
+          type: object
+          description: Rows removed per table (counts only).
+          required: [digests, items, evidence, topics, topicSummaries, embeddings, proposals, servings, consolidationPairs, consolidationState]
+          properties:
+            digests: {type: integer, format: int64}
+            items: {type: integer, format: int64}
+            evidence: {type: integer, format: int64}
+            topics: {type: integer, format: int64}
+            topicSummaries: {type: integer, format: int64}
+            embeddings: {type: integer, format: int64}
+            proposals: {type: integer, format: int64}
+            servings: {type: integer, format: int64}
+            consolidationPairs: {type: integer, format: int64}
+            consolidationState: {type: integer, format: int64}
 
     PatchWorkspaceMemorySettingsRequest:
       type: object
