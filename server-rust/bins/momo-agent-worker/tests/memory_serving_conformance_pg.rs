@@ -1788,7 +1788,17 @@ async fn serve_direct(
     turn: &Turn,
     payload_channel: Uuid,
 ) -> Option<String> {
-    momo_agent_worker::serving::serve(pool, cfg, 0, fx.ws, turn.run_id, payload_channel, None).await
+    momo_agent_worker::serving::serve(
+        pool,
+        cfg,
+        &momo_agent_worker::embed::EmbedService::disabled(),
+        0,
+        fx.ws,
+        turn.run_id,
+        payload_channel,
+        None,
+    )
+    .await
 }
 
 /// F9 + requester chain: the NEAREST human wins, not the first one found going up.

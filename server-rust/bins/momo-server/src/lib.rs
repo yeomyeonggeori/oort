@@ -888,6 +888,11 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/memory/items/{id}/events",
             get(routes::memory::get_item_events),
         )
+        // #3172 M-2: a person can undo a consolidation event (merge / decision closing / decay) of an item they can read.
+        .route(
+            "/v1/workspaces/{ws}/memory/items/{id}/events/{event}/revert",
+            post(routes::memory::revert_item_event),
+        )
         // ADR-0175 / #1888 — personal message reminders. Human-only, owner
         // scoped, no outbox fan-out (v1 is a client poll).
         .route(
