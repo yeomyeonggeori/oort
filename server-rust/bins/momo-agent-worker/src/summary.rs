@@ -1269,6 +1269,13 @@ impl AgentWorker {
             match applied {
                 Ok(tally) => {
                     stats.items_added += tally.added;
+                    if tally.added > 0 {
+                        // #3173: let the embedding loop pick the new items up now instead of
+                        // at its next tick. A wake-up only — embedding is a separate step, so a
+                        // failure there can never touch the item that was just stored.
+                        self.embed.forget_idle();
+                        self.items_stored.notify_one();
+                    }
                     stats.items_duplicate += tally.duplicate;
                     stats.items_refused += tally.refused;
                     if let Some(to) = cursor_to {

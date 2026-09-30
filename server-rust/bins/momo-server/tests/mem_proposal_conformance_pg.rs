@@ -2241,7 +2241,10 @@ async fn serve_rows(wk: &PgPool, ws: Uuid, run: Uuid) -> Vec<(Uuid, Uuid, String
     rows
 }
 
-const SERVE_ITEMS_FN: &str = "public.mem_serve_items(uuid, integer, integer)";
+// #3173 (migration 107) moved `mem_serve_items`'s requester / switch / query derivation into
+// `mem_serve_gate`, which `mem_serve_items` and `mem_serve_items_fused` both call: the switch
+// clauses these sabotages remove now live there, and removing them still reaches `mem_serve_items`.
+const SERVE_ITEMS_FN: &str = "public.mem_serve_gate(uuid)";
 const RECORD_FN: &str =
     "public.mem_record_serving(uuid, uuid, uuid[], uuid[], integer, integer, integer)";
 

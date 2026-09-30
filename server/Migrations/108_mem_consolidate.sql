@@ -1,5 +1,5 @@
 -- =============================================================================
--- 107_mem_consolidate.sql — #3172 / ADR-0196 (팀 기억 v2) M3: 정리 잡(중복 병합 · 결정 기간 닫기 · 감쇠 · 보존 삭제)
+-- 108_mem_consolidate.sql — #3172 / ADR-0196 (팀 기억 v2) M3: 정리 잡(중복 병합 · 결정 기간 닫기 · 감쇠 · 보존 삭제)
 --
 -- 백그라운드 정리(D4 「정리」 열)의 DB 쪽. agent-worker 의 정리 루프(consolidate.rs)가 momo_memory 로
 -- SET LOCAL ROLE 한 memory tx 안에서 이 함수들만 부른다. 테이블 권한도 BYPASSRLS 도 없다.
@@ -116,7 +116,7 @@ CREATE POLICY mem_evidence_sel ON mem_evidence FOR SELECT
 
 -- ── mem_event: 채널·소유자 열 + 어휘 + 읽기 정책 (L-8, #3209 L-2) ─────────────────────────────────────
 -- 이벤트는 id·종류·개수만 담는다(본문 없음). 그래서 항목이 지워진 뒤에도(잊기·보존 삭제) 그 흔적은 「그 채널을 읽을 수
--- 있는 사람」에게 보인다 — 개인 공간이면 소유자만. 107 이전에 쓰인 이벤트(channel_id 없음)는 옛 규칙(항목을 읽을 수
+-- 있는 사람」에게 보인다 — 개인 공간이면 소유자만. 108 이전에 쓰인 이벤트(channel_id 없음)는 옛 규칙(항목을 읽을 수
 -- 있을 때만)을 그대로 따른다.
 ALTER TABLE mem_event ADD COLUMN IF NOT EXISTS channel_id uuid;
 ALTER TABLE mem_event ADD COLUMN IF NOT EXISTS owner_member_id uuid;
@@ -2202,7 +2202,7 @@ DROP FUNCTION IF EXISTS mem_search_items_core(uuid, text, integer, uuid, boolean
 
 CREATE OR REPLACE FUNCTION mem_search_items_core(
   p_viewer uuid, p_query text, p_limit integer, p_answer_channel_id uuid, p_serve boolean,
-  p_channel_id uuid, p_kind text)
+  p_channel_id uuid DEFAULT NULL, p_kind text DEFAULT NULL)
 RETURNS TABLE (
   id uuid, channel_id uuid, space_kind text, kind text, body text,
   valid_from timestamptz, valid_to timestamptz, recorded_at timestamptz,
@@ -2356,6 +2356,125 @@ $$;
 
 
 
+-- ── 벡터 팔의 닫힌 결정 제외 (107 의 mem_search_items_fused 재정의; 소유자·권한은 그대로) ────────────────────────
+CREATE OR REPLACE FUNCTION mem_search_items_fused(
+  p_viewer uuid, p_query text, p_limit integer, p_answer_channel_id uuid,
+  p_query_vec text, p_model text, p_min_similarity real, p_margin real)
+RETURNS TABLE (
+  id uuid, channel_id uuid, space_kind text, kind text, body text,
+  valid_from timestamptz, valid_to timestamptz, recorded_at timestamptz,
+  score real, evidence_message_ids uuid[])
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+DECLARE
+  v_ws uuid := nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid;
+  v_limit integer := LEAST(GREATEST(COALESCE(p_limit, 10), 1), 50);
+  v_k integer := LEAST(GREATEST(COALESCE(p_limit, 10), 1) * 3, 50);
+  v_min real := LEAST(GREATEST(COALESCE(p_min_similarity, 0.8), 0), 1);
+  v_margin real := LEAST(GREATEST(COALESCE(p_margin, 1), 0), 1);
+  v_best real;
+  -- 키워드 후보에 없는 벡터 전용 항목은 이만큼만 실린다: 최근접 이웃은 항상 있어서(질문이 기억과 무관해도)
+  -- 상한이 없으면 매 답변 프롬프트에 「그나마 가까운」 항목이 한도까지 채워진다. 조정은 후속(게이팅 튜닝).
+  v_vector_only_cap CONSTANT integer := 3;
+  v_q public.vector;
+  v_vec_ids uuid[] := ARRAY[]::uuid[];
+  r record;
+BEGIN
+  IF p_answer_channel_id IS NULL THEN
+    RAISE EXCEPTION 'mem_search_items_fused: serving requires an answer channel' USING ERRCODE = '22023';
+  END IF;
+  IF v_ws IS NULL OR p_viewer IS NULL THEN
+    RETURN;
+  END IF;
+  IF p_query_vec IS NULL OR p_model IS NULL THEN
+    RETURN QUERY
+    SELECT * FROM public.mem_search_items_core(p_viewer, p_query, v_limit, p_answer_channel_id, true);
+    RETURN;
+  END IF;
+  -- 잘못된 벡터는 22P02(형식)·22000(차원) 로 멈춘다 — 워커는 키워드 전용으로 되돌아간다.
+  v_q := p_query_vec::public.vector;
+  IF public.vector_dims(v_q) <> 384 THEN
+    RAISE EXCEPTION 'mem_search_items_fused: expected a 384-dimension query vector' USING ERRCODE = '22023';
+  END IF;
+  IF public.vector_norm(v_q) = 0 THEN
+    RAISE EXCEPTION 'mem_search_items_fused: zero query vector' USING ERRCODE = '22023';
+  END IF;
+
+  FOR r IN
+    SELECT e.item_id AS eid, (1 - (e.embedding OPERATOR(public.<=>) v_q))::real AS sim
+      FROM public.mem_item_embedding e
+      JOIN public.mem_item i ON i.id = e.item_id AND i.workspace_id = e.workspace_id
+     WHERE e.workspace_id = v_ws
+       AND e.model = p_model
+       AND i.retired_at IS NULL
+       AND NOT i.stale
+       -- #3172: 서빙은 새 결정에 닫힌 옛 결정(valid_to)을 싣지 않는다 — 키워드 경로(mem_search_items_core)와 같다.
+       AND i.valid_to IS NULL
+       -- M-1(키워드 경로와 같은 좁히기): 뷰어의 활성 멤버십 채널(개인 공간이면 소유자 본인)에 있는 항목만
+       -- 거리 계산을 받는다 — 못 읽는 채널의 항목 수가 응답 시간에 드러나지 않는다(타이밍 오라클).
+       AND (i.channel_id IN (SELECT ms.channel_id FROM public.membership ms
+                              WHERE ms.workspace_id = v_ws AND ms.member_id = p_viewer
+                                AND ms.left_at IS NULL)
+            OR (i.space_kind = 'personal' AND i.owner_member_id = p_viewer))
+       AND (1 - (e.embedding OPERATOR(public.<=>) v_q)) >= v_min
+     ORDER BY e.embedding OPERATOR(public.<=>) v_q, i.id
+  LOOP
+    IF NOT public.mem_item_readable_by(r.eid, p_viewer) THEN
+      CONTINUE;
+    END IF;
+    IF NOT public.mem_item_audience_ok(r.eid, p_answer_channel_id, p_viewer) THEN
+      CONTINUE;
+    END IF;
+    -- 상대 문턱: 통과한 후보 중 가장 가까운 것에서 margin 이상 멀어지면 거기서 끊는다(거리순이라 뒤는 더 멀다).
+    -- 절대 문턱만으로는 e5 의 좁은 유사도 대역에서 「같은 분야의 그럭저럭 비슷한 항목」이 줄줄이 딸려 온다.
+    IF v_best IS NULL THEN
+      v_best := r.sim;
+    ELSIF r.sim < v_best - v_margin THEN
+      EXIT;
+    END IF;
+    v_vec_ids := v_vec_ids || r.eid;
+    EXIT WHEN pg_catalog.cardinality(v_vec_ids) >= v_k;
+  END LOOP;
+
+  RETURN QUERY
+  WITH kw AS (
+    SELECT c.id AS kid, c.ord AS krank
+      FROM public.mem_search_items_core(p_viewer, p_query, v_k, p_answer_channel_id, true)
+             WITH ORDINALITY AS c(id, channel_id, space_kind, kind, body, valid_from, valid_to,
+                                  recorded_at, score, evidence_message_ids, ord)
+  ),
+  vec AS (
+    SELECT x.vid, x.vrank
+      FROM pg_catalog.unnest(v_vec_ids) WITH ORDINALITY AS x(vid, vrank)
+  ),
+  fused AS (
+    SELECT COALESCE(kw.kid, vec.vid) AS fid,
+           (kw.kid IS NULL) AS vonly,
+           vec.vrank AS vrank,
+           (COALESCE(2.0 / (60 + kw.krank), 0) + COALESCE(1.0 / (60 + vec.vrank), 0)) AS rrf
+      FROM kw FULL OUTER JOIN vec ON vec.vid = kw.kid
+  ),
+  capped AS (
+    SELECT f.*, pg_catalog.row_number() OVER (PARTITION BY f.vonly ORDER BY f.vrank) AS vo_n
+      FROM fused f
+  )
+  SELECT i.id, i.channel_id, i.space_kind, i.kind, i.body, i.valid_from, i.valid_to, i.recorded_at,
+         f.rrf::real,
+         (SELECT pg_catalog.array_agg(ev.message_id ORDER BY ev.message_id)
+            FROM public.mem_evidence ev
+           WHERE ev.item_id = i.id AND ev.workspace_id = v_ws)
+    FROM capped f
+    JOIN public.mem_item i ON i.id = f.fid AND i.workspace_id = v_ws
+   WHERE NOT f.vonly OR f.vo_n <= v_vector_only_cap
+   ORDER BY f.rrf DESC, (i.valid_to IS NULL) DESC, i.recorded_at DESC, i.id
+   LIMIT v_limit;
+END
+$$;
+
+
 -- ── 소유자·권한 ────────────────────────────────────────────────────────────────
 GRANT CREATE ON SCHEMA public TO mem_definer;
 DO $$
@@ -2468,17 +2587,22 @@ DECLARE
     'mem_digest_audience_ok(uuid,uuid,uuid)', 'mem_digest_evidence_ok(uuid)',
     'mem_digest_index(uuid,text,bigint)', 'mem_digest_live(uuid)',
     'mem_digest_rollup_inputs(uuid,uuid,text,bigint,bigint)', 'mem_drop_digest(uuid)',
-    'mem_edit_item(uuid,text,text)', 'mem_forget_item(uuid)', 'mem_item_audience_ok(uuid,uuid,uuid)',
-    'mem_item_evidence_ok(uuid)', 'mem_item_guest_authored(uuid)', 'mem_item_live(uuid)',
-    'mem_item_readable_by(uuid,uuid)', 'mem_message_changed()', 'mem_proposal_decider(uuid)',
+    'mem_edit_item(uuid,text,text)', 'mem_embedding_stats(text)', 'mem_forget_item(uuid)',
+    'mem_item_audience_ok(uuid,uuid,uuid)', 'mem_item_embedding_cleanup()', 'mem_item_evidence_ok(uuid)',
+    'mem_item_guest_authored(uuid)', 'mem_item_live(uuid)', 'mem_item_readable_by(uuid,uuid)',
+    'mem_items_to_embed(text,integer)', 'mem_message_changed()', 'mem_proposal_decider(uuid)',
     'mem_proposal_evidence_ok(uuid)', 'mem_propose_item(uuid,text,text,text,uuid[])',
     'mem_record_serving(uuid,uuid,uuid[],uuid[],integer,integer,integer)', 'mem_reject_proposal(uuid)',
     'mem_reserve_tokens(bigint,bigint)', 'mem_revert_consolidation(uuid)',
     'mem_search_items(text,integer,uuid,text)',
     'mem_search_items_core(uuid,text,integer,uuid,boolean,uuid,text)',
-    'mem_search_items_for(uuid,text,integer,uuid)', 'mem_serve_candidates(uuid,bigint,integer,integer)',
-    'mem_serve_items(uuid,integer,integer)', 'mem_serve_requester(uuid)', 'mem_serving_of(uuid)',
-    'mem_serving_record_of(uuid)', 'mem_stale_digests(integer,integer)',
+    'mem_search_items_for(uuid,text,integer,uuid)',
+    'mem_search_items_fused(uuid,text,integer,uuid,text,text,real,real)',
+    'mem_serve_candidates(uuid,bigint,integer,integer)', 'mem_serve_gate(uuid)',
+    'mem_serve_items(uuid,integer,integer)',
+    'mem_serve_items_fused(uuid,integer,integer,text,text,real,real)', 'mem_serve_query(uuid)',
+    'mem_serve_requester(uuid)', 'mem_serving_of(uuid)', 'mem_serving_record_of(uuid)',
+    'mem_set_item_embedding(uuid,text,text)', 'mem_stale_digests(integer,integer)',
     'mem_suppressed_messages(uuid,uuid[])', 'mem_token_budget(bigint)'
   ];
 BEGIN

@@ -2147,6 +2147,11 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
                         | "mem_cons_release"
                         | "mem_item_guest_authored"
                         | "mem_cons_revert_core"
+                        // #3173: the fusion body, the serving gate and the trigger function that drops a
+                        // retired item's vectors are owner-only too.
+                        | "mem_search_items_fused"
+                        | "mem_serve_gate"
+                        | "mem_item_embedding_cleanup"
                 );
             assert_eq!(has, expected, "{when}: {role} EXECUTE {signature}");
         }
@@ -2431,7 +2436,7 @@ fn migration_path() -> PathBuf {
 /// are merged and stay untouched, #3191 M-6); the newest one is the one that matches the real state.
 fn worker_migration_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../server/Migrations/107_mem_consolidate.sql")
+        .join("../../../server/Migrations/108_mem_consolidate.sql")
 }
 
 /// M-1 / L-9: the lock block is one text in the two bootstrap files, compared byte for byte (stronger
@@ -2503,9 +2508,11 @@ async fn worker_only_list_matches_the_live_acls() {
             .map(|l| normalise(l.trim_end_matches(',').trim_matches('\'')))
             .collect();
         listed.sort();
-        assert_eq!(
-            listed, live,
-            "{file}: worker_only must list every worker-only function"
+        let only_live: Vec<&String> = live.iter().filter(|f| !listed.contains(f)).collect();
+        let only_listed: Vec<&String> = listed.iter().filter(|f| !live.contains(f)).collect();
+        assert!(
+            only_live.is_empty() && only_listed.is_empty(),
+            "{file}: worker_only must list every worker-only function — live but not listed: {only_live:?}; listed but not live: {only_listed:?}"
         );
     }
 }
@@ -2609,7 +2616,7 @@ async fn lock_block_also_locks_views_and_materialized_views() {
 
 /// L-1 / L-9: the SECURITY DEFINER functions owned by mem_definer are exactly this list, by **full signature**
 /// (`regprocedure` text): an overload that sneaks in under an allowed name is a stranger too (#3200 L-9).
-const DEFINER_ALLOW_LIST: [&str; 60] = [
+const DEFINER_ALLOW_LIST: [&str; 68] = [
     "mem_accept_proposal(uuid)",
     "mem_add_item(uuid,text,text,text,uuid[],real,boolean,text,text)",
     "mem_adjust_tokens(bigint)",
@@ -2645,12 +2652,15 @@ const DEFINER_ALLOW_LIST: [&str; 60] = [
     "mem_digest_rollup_inputs(uuid,uuid,text,bigint,bigint)",
     "mem_drop_digest(uuid)",
     "mem_edit_item(uuid,text,text)",
+    "mem_embedding_stats(text)",
     "mem_forget_item(uuid)",
     "mem_item_audience_ok(uuid,uuid,uuid)",
+    "mem_item_embedding_cleanup()",
     "mem_item_evidence_ok(uuid)",
     "mem_item_guest_authored(uuid)",
     "mem_item_live(uuid)",
     "mem_item_readable_by(uuid,uuid)",
+    "mem_items_to_embed(text,integer)",
     "mem_message_changed()",
     "mem_proposal_decider(uuid)",
     "mem_proposal_evidence_ok(uuid)",
@@ -2662,11 +2672,16 @@ const DEFINER_ALLOW_LIST: [&str; 60] = [
     "mem_search_items(text,integer,uuid,text)",
     "mem_search_items_core(uuid,text,integer,uuid,boolean,uuid,text)",
     "mem_search_items_for(uuid,text,integer,uuid)",
+    "mem_search_items_fused(uuid,text,integer,uuid,text,text,real,real)",
     "mem_serve_candidates(uuid,bigint,integer,integer)",
+    "mem_serve_gate(uuid)",
     "mem_serve_items(uuid,integer,integer)",
+    "mem_serve_items_fused(uuid,integer,integer,text,text,real,real)",
+    "mem_serve_query(uuid)",
     "mem_serve_requester(uuid)",
     "mem_serving_of(uuid)",
     "mem_serving_record_of(uuid)",
+    "mem_set_item_embedding(uuid,text,text)",
     "mem_stale_digests(integer,integer)",
     "mem_suppressed_messages(uuid,uuid[])",
     "mem_token_budget(bigint)",
@@ -2703,7 +2718,7 @@ async fn security_definer_functions_owned_by_mem_definer_are_allow_listed() {
     assert_eq!(
         owned, expected,
         "a SECURITY DEFINER function owned by mem_definer must be added to the allow-list \
-         here and in the newest migration's allow-list (107_mem_consolidate.sql) on purpose"
+         here and in the newest migration's allow-list (108_mem_consolidate.sql) on purpose"
     );
     // The migration's own self-check passes on the good state ...
     let check = tail_block(&worker_migration_path(), "-- ── L-9", None);
@@ -3038,7 +3053,7 @@ async fn definer_writes_to_items_need_the_mem_op_marker() {
         touch(&su, w.ws, item, Some("cons_retention"), None).await,
         (1, 1, 1)
     );
-    // RED: the pre-107 policies (definer only, no marker) let any definer statement through.
+    // RED: the pre-108 policies (definer only, no marker) let any definer statement through.
     let old = "DROP POLICY mem_item_only_definer_upd ON mem_item; \
                CREATE POLICY mem_item_only_definer_upd ON mem_item AS RESTRICTIVE FOR UPDATE \
                  USING (current_user = 'mem_definer') WITH CHECK (current_user = 'mem_definer'); \
@@ -3069,4 +3084,42 @@ async fn definer_writes_to_items_need_the_mem_op_marker() {
         .rows_affected();
     tx.rollback().await.unwrap();
     assert_eq!(n, 1, "digest evidence stays writable for mem_apply_digest");
+}
+
+// Definer functions that return a `body` without being told a viewer or a run (the run row derives
+// the requester): each one is a body reader with its own trust story. A new one must be added here
+// on purpose.
+//   mem_digest_rollup_inputs  worker-only, the summary worker's roll-up inputs (it reads every channel)
+//   mem_items_to_embed        worker-only, #3173: item bodies to embed locally with no viewer narrowing;
+//                             the same trust boundary as the summary worker (ADR-0196 D8 증보), and
+//                             nothing leaves the process
+//   mem_search_items          the API's search: viewer = the session GUC, `session_user` guarded
+const BODY_READERS_WITHOUT_VIEWER: [&str; 3] = [
+    "mem_digest_rollup_inputs",
+    "mem_items_to_embed",
+    "mem_search_items",
+];
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn body_readers_without_a_viewer_are_exactly_the_named_exceptions() {
+    let (su, _app, _w) = setup().await;
+    let found: Vec<String> = sqlx::query_scalar(
+        "SELECT p.proname::text FROM pg_proc p WHERE p.prosecdef \
+            AND pg_get_userbyid(p.proowner) = 'mem_definer' \
+            AND pg_get_function_result(p.oid) ~ '\\mbody\\M' \
+            AND pg_get_function_identity_arguments(p.oid) !~ '(viewer|run_id)' ORDER BY 1",
+    )
+    .fetch_all(&su)
+    .await
+    .expect("body readers");
+    assert_eq!(found, BODY_READERS_WITHOUT_VIEWER.to_vec());
+    // The one added for embedding is worker-only.
+    let app_can: bool = sqlx::query_scalar(
+        "SELECT has_function_privilege('momo_app', 'public.mem_items_to_embed(text, integer)'::regprocedure, 'EXECUTE')",
+    )
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(!app_can);
 }

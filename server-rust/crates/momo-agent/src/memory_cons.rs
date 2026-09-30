@@ -1,6 +1,6 @@
 //! Team memory v2 M3 — the SQL half of the consolidation job (#3172, ADR-0196 D4/D6/D10, plan §6).
 //!
-//! Every call here is one worker-only SQL function of migration 107, run inside a memory tx
+//! Every call here is one worker-only SQL function of migration 108, run inside a memory tx
 //! ([`crate::memory::with_memory_tx`]): `momo_worker` with `SET LOCAL ROLE momo_memory` and
 //! `SET LOCAL app.workspace_id`. Nothing in this module reads a `mem_*` table directly and none of
 //! it decides what may be changed — the database does: a curated/confirmed item is never merged,

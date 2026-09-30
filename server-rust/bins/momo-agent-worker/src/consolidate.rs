@@ -14,7 +14,7 @@
 //! ## What this file decides, and what it does not
 //!
 //! It decides *when* and *what to ask*. Everything that changes memory is a worker-only SQL function
-//! (migration 107) called in a memory tx (`SET LOCAL ROLE momo_memory`): the database refuses a
+//! (migration 108) called in a memory tx (`SET LOCAL ROLE momo_memory`): the database refuses a
 //! cross-channel pair, never merges/closes/decays a curated or confirmed item by itself (it makes a
 //! `mem_proposal`), and writes the `mem_event` that lets a person undo it. The model answers one of
 //! three words per pair; **no model-written text is stored by this job**, so there is nothing to

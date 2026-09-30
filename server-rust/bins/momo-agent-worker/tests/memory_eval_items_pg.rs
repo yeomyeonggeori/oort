@@ -54,6 +54,9 @@ struct Ctx {
     cons: Arc<Mutex<Vec<ConsolidateStats>>>,
     /// The workspace of the latest ingest (the digest check must not read other suites' leftovers in a shared DB).
     last_ws: Arc<Mutex<Option<Uuid>>>,
+    /// #3173: embed the ingested items (mock embedder) and serve through the fused path with the
+    /// widest possible vector candidate set (floor 0, no margin) — the leak gate must still hold.
+    vectors: bool,
 }
 
 struct State {
@@ -330,6 +333,23 @@ impl MemoryBackend for ItemsBackend {
             let cons = worker.consolidate_workspace_now(seeded.workspace_id).await;
             assert_eq!(cons.failures, 0, "{cons:?}");
             ctx.cons.lock().unwrap().push(cons);
+            if ctx.vectors {
+                let svc = momo_agent_worker::embed::EmbedService::with_embedder(
+                    Arc::new(momo_embed::testing::MockEmbedder::new(&[])),
+                    std::time::Duration::from_secs(2),
+                );
+                let vw = worker_with(&provider, memory_config())
+                    .await
+                    .with_embed_service(svc);
+                assert!(vw.embed_service().embedder().await.is_some());
+                for _ in 0..80 {
+                    let s = vw.embed_sweep().await;
+                    assert_eq!(s.failures, 0, "{s:?}");
+                    if s.embedded == 0 {
+                        break;
+                    }
+                }
+            }
             let by_message = seeded
                 .message
                 .iter()
@@ -399,6 +419,7 @@ impl MemoryBackend for ItemsBackend {
         );
         let tokens = state.tokens.clone();
         let su = self.ctx.su.clone();
+        let vectors = self.ctx.vectors;
         Ok(block(&self.ctx, async move {
             let wp = momo_worker_pool().await;
             let mut text = String::new();
@@ -439,9 +460,35 @@ impl MemoryBackend for ItemsBackend {
                 .execute(&su)
                 .await
                 .expect("agent_run");
+                let literal = vectors.then(|| {
+                    use momo_embed::TextEmbedder;
+                    momo_embed::vector_literal(
+                        &momo_embed::testing::MockEmbedder::new(&[])
+                            .embed_query(&group.join(" "))
+                            .unwrap(),
+                    )
+                    .unwrap()
+                });
                 let served = mem::with_memory_tx(&wp, ws, move |conn| {
                     Box::pin(async move {
-                        let items = mem::serve_items(conn, run, 20, 600).await?;
+                        let items = match &literal {
+                            Some(lit) => {
+                                mem::serve_items_fused(
+                                    conn,
+                                    run,
+                                    20,
+                                    600,
+                                    &mem::FusedQuery {
+                                        vector: lit,
+                                        model: "mock-concepts:v1",
+                                        min_similarity: 0.0,
+                                        margin: 1.0,
+                                    },
+                                )
+                                .await?
+                            }
+                            None => mem::serve_items(conn, run, 20, 600).await?,
+                        };
                         let digests = mem::serve_candidates(conn, run, None, 50, 3_000).await?;
                         Ok((items, digests))
                     })
@@ -571,6 +618,7 @@ async fn the_items_path_has_zero_leaks_and_stores_nothing_it_must_not() {
         stats: Arc::new(Mutex::new(Vec::new())),
         cons: Arc::new(Mutex::new(Vec::new())),
         last_ws: Arc::new(Mutex::new(None)),
+        vectors: false,
     };
     register(ctx.clone());
     let corpus = generate(SEED);
@@ -804,6 +852,89 @@ async fn the_items_path_has_zero_leaks_and_stores_nothing_it_must_not() {
             "{label}: the gate must fail with {expect}: {red:?}"
         );
     }
+    let after =
+        tokio::task::block_in_place(|| leak_violations(&factory, &corpus)).expect("leak cases run");
+    assert!(after.is_empty(), "everything restored: {after:?}");
+    eprintln!("restored: 0 violations again");
+    reset_instance(&su).await;
+}
+
+/// #3173 — the same leak gate with the vector path in play: every ingested item is embedded and
+/// the agent's context is what `mem_serve_items_fused` returns with the widest candidate set
+/// (similarity floor 0, no margin, so every permitted item is a vector candidate). 0 violations
+/// with the guards in place; the audience rule removed from the *vector loop* (the keyword side
+/// untouched) makes the gate FAIL — so the gate really sees the new path.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 superuser DB"]
+async fn the_vector_path_has_zero_leaks_too() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let ctx = Ctx {
+        su: su.clone(),
+        app: momo_app_pool().await,
+        handle: tokio::runtime::Handle::current(),
+        stats: Arc::new(Mutex::new(Vec::new())),
+        cons: Arc::new(Mutex::new(Vec::new())),
+        last_ws: Arc::new(Mutex::new(None)),
+        vectors: true,
+    };
+    // Not `register_product_backend` (first registration wins per process, and the sibling test
+    // registered a backend bound to its own runtime): this test builds its backend itself.
+    let corpus = generate(SEED);
+    let factory = {
+        let ctx = ctx.clone();
+        move || -> Box<dyn MemoryBackend> {
+            Box::new(ItemsBackend {
+                ctx: ctx.clone(),
+                state: None,
+            })
+        }
+    };
+
+    let started = std::time::Instant::now();
+    let violations =
+        tokio::task::block_in_place(|| leak_violations(&factory, &corpus)).expect("leak cases run");
+    eprintln!(
+        "\n=== MEM eval kit, VECTOR path (fused serving, floor 0, {} messages) ===\nleak cases: {} violation(s) in {:?}",
+        corpus.messages.len(),
+        violations.len(),
+        started.elapsed()
+    );
+    assert!(violations.is_empty(), "permission leaks: {violations:?}");
+    // The vector side really carried items: embeddings exist for the stored items.
+    let embedded: i64 = sqlx::query_scalar("SELECT count(*) FROM mem_item_embedding")
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert!(embedded > 0, "the vector path had something to rank");
+    for (id, what) in LEAK_CASES {
+        eprintln!("  PASS {id}: {what}");
+    }
+
+    // Sabotage the vector loop only.
+    let fused = "public.mem_search_items_fused(uuid, text, integer, uuid, text, text, real, real)";
+    let original = sabotage(
+        &su,
+        fused,
+        &[(
+            "IF NOT public.mem_item_audience_ok(r.eid, p_answer_channel_id, p_viewer) THEN\n      CONTINUE;\n    END IF;",
+            "",
+        )],
+    )
+    .await;
+    let red =
+        tokio::task::block_in_place(|| leak_violations(&factory, &corpus)).expect("leak cases run");
+    restore(&su, &original).await;
+    eprintln!(
+        "RED vector loop without the audience rule: {} violation(s), e.g. {:?}",
+        red.len(),
+        red.first()
+    );
+    assert!(
+        red.iter()
+            .any(|v| v.starts_with("general_call_excludes_hr")),
+        "the gate must fail through the vector path: {red:?}"
+    );
     let after =
         tokio::task::block_in_place(|| leak_violations(&factory, &corpus)).expect("leak cases run");
     assert!(after.is_empty(), "everything restored: {after:?}");
