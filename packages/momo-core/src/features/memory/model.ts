@@ -159,6 +159,57 @@ export interface MemorySettings {
   me: MemberMemorySettings;
 }
 
+/** What one `POST …/memory/reset` removed, per table (counts only). */
+export interface MemoryResetCounts {
+  digests: number;
+  items: number;
+  evidence: number;
+  topics: number;
+  topicSummaries: number;
+  embeddings: number;
+  proposals: number;
+  servings: number;
+  consolidationPairs: number;
+  consolidationState: number;
+}
+
+/** The result of a reset: the new `resetEpoch` and what was deleted. */
+export interface MemoryResetResult {
+  epoch: number;
+  deleted: MemoryResetCounts;
+}
+
+/** Machine codes for what the summary worker reads (the client owns the wording). */
+export type MemoryNoticeSends = "channel_message_text" | "author_display_name" | "agent_dm_message_text";
+export type MemoryNoticeNeverSends =
+  | "human_direct_messages"
+  | "attachments"
+  | "deleted_messages"
+  | "excluded_channels"
+  | "paused_members_dms";
+
+/**
+ * 「팀 고지」 (ADR-0196 D9 ②): what team memory sends to which provider. Provider and model only —
+ * never a key or a link. `sending` = `enabled && !paused && summary.configured`.
+ */
+export interface MemoryNotice {
+  enabled: boolean;
+  paused: boolean;
+  sending: boolean;
+  resetEpoch: number;
+  summary: {
+    /** false = no 기본 AI summary row: the worker calls no model, nothing is sent. */
+    configured: boolean;
+    /** Preset name (OpenAI, Anthropic, …) or the host; `host` is the bare host. */
+    provider?: { name: string; host: string };
+    /** Absent = the link's default model. */
+    modelId?: string;
+  };
+  embeddings: { model: string; location: "local"; sentToProvider: false };
+  sends: MemoryNoticeSends[];
+  neverSends: MemoryNoticeNeverSends[];
+}
+
 export interface ListMemoryDigestsOptions {
   level?: MemoryDigestLevel;
   threadRootId?: string;
@@ -722,6 +773,98 @@ export function parseRevertedConsolidation(value: unknown): RevertedConsolidatio
 }
 
 /** How many item rows a forget removed (the item plus its older versions). */
+const RESET_COUNT_KEYS = [
+  "digests",
+  "items",
+  "evidence",
+  "topics",
+  "topicSummaries",
+  "embeddings",
+  "proposals",
+  "servings",
+  "consolidationPairs",
+  "consolidationState",
+] as const;
+
+export function parseMemoryResetResult(value: unknown): MemoryResetResult {
+  const epoch = num(value, "epoch");
+  const deleted = record(record(value)?.deleted);
+  if (epoch === undefined || deleted === null) throw new WireShapeError();
+  const counts: Record<string, number> = {};
+  for (const key of RESET_COUNT_KEYS) {
+    const count = num(deleted, key);
+    if (count === undefined) throw new WireShapeError();
+    counts[key] = count;
+  }
+  return { epoch, deleted: counts as unknown as MemoryResetCounts };
+}
+
+const NOTICE_SENDS: readonly string[] = [
+  "channel_message_text",
+  "author_display_name",
+  "agent_dm_message_text",
+];
+const NOTICE_NEVER_SENDS: readonly string[] = [
+  "human_direct_messages",
+  "attachments",
+  "deleted_messages",
+  "excluded_channels",
+  "paused_members_dms",
+];
+
+/** Known codes only: a code this client does not know is dropped (a newer server), not shown raw. */
+function noticeCodes<T extends string>(source: unknown, key: string, known: readonly string[]): T[] {
+  const raw = stringArrayField(source, key);
+  if (raw === null) throw new WireShapeError();
+  return raw.filter((code): code is T => known.includes(code));
+}
+
+export function parseMemoryNotice(value: unknown): MemoryNotice {
+  const enabled = bool(value, "enabled");
+  const paused = bool(value, "paused");
+  const sending = bool(value, "sending");
+  const resetEpoch = num(value, "resetEpoch");
+  const summarySource = record(record(value)?.summary);
+  const embeddingsSource = record(record(value)?.embeddings);
+  if (
+    enabled === undefined ||
+    paused === undefined ||
+    sending === undefined ||
+    resetEpoch === undefined ||
+    summarySource === null ||
+    embeddingsSource === null
+  ) {
+    throw new WireShapeError();
+  }
+  const configured = bool(summarySource, "configured");
+  const model = str(embeddingsSource, "model");
+  if (configured === undefined || model === undefined) throw new WireShapeError();
+  // The embeddings are local by contract; a server that says otherwise is a wire error, never a quiet "OK".
+  if (str(embeddingsSource, "location") !== "local" || bool(embeddingsSource, "sentToProvider") !== false) {
+    throw new WireShapeError();
+  }
+  const summary: MemoryNotice["summary"] = { configured };
+  const providerSource = record(summarySource.provider);
+  if (providerSource !== null) {
+    const name = str(providerSource, "name");
+    const host = str(providerSource, "host");
+    if (name === undefined || host === undefined) throw new WireShapeError();
+    summary.provider = { name, host };
+  }
+  const modelId = str(summarySource, "modelId");
+  if (modelId !== undefined) summary.modelId = modelId;
+  return {
+    enabled,
+    paused,
+    sending,
+    resetEpoch,
+    summary,
+    embeddings: { model, location: "local", sentToProvider: false },
+    sends: noticeCodes<MemoryNoticeSends>(value, "sends", NOTICE_SENDS),
+    neverSends: noticeCodes<MemoryNoticeNeverSends>(value, "neverSends", NOTICE_NEVER_SENDS),
+  };
+}
+
 export function parseForgottenCount(value: unknown): number {
   const count = num(value, "forgottenCount");
   if (count === undefined) throw new WireShapeError();

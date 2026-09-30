@@ -11,6 +11,8 @@
 //   PATCH /v1/workspaces/{ws}/memory/settings            workspace switch (admin)
 //   PATCH /v1/workspaces/{ws}/memory/settings/me         personal pause
 //   PATCH /v1/workspaces/{ws}/channels/{ch}/memory/settings   exclude / pause
+//   GET   /v1/workspaces/{ws}/memory/notice              what memory sends to which provider (#3212)
+//   POST  /v1/workspaces/{ws}/memory/reset               erase all memory of the workspace (owner/admin, #3212)
 //
 //   GET    /v1/workspaces/{ws}/memory/items                    memory browser list / search   (#3208)
 //   GET    /v1/workspaces/{ws}/memory/items/{id}               one item + evidence back-links
@@ -42,7 +44,9 @@ import {
   parseMemoryDigestResponse,
   parseMemoryProposalDecision,
   parseMemoryProposalList,
+  parseMemoryNotice,
   parseMemoryReceiptResponse,
+  parseMemoryResetResult,
   parseMemorySettings,
   parseWorkspaceMemorySettings,
   type ChannelMemorySettings,
@@ -54,6 +58,8 @@ import {
   type MemoryItemDetail,
   type MemoryItemEvent,
   type MemoryItemPage,
+  type MemoryNotice,
+  type MemoryResetResult,
   type RevertedConsolidation,
   type ListMemoryProposalsOptions,
   type MemberMemorySettings,
@@ -299,4 +305,27 @@ export function revertMemoryConsolidation(
   return memoryRequest(`${itemPath(workspaceId, itemId)}/events/${encodeURIComponent(eventId)}/revert`, {
     method: "POST",
   }).then(parseRevertedConsolidation);
+}
+
+/**
+ * 「팀 고지」: what team memory sends to which provider (provider host + model id, local embeddings, the
+ * kinds of content read). Any active human member may read it; agents get 403.
+ */
+export function getMemoryNotice(workspaceId: string): Promise<MemoryNotice> {
+  return memoryRequest(`${workspacePath(workspaceId)}/memory/notice`).then(parseMemoryNotice);
+}
+
+/**
+ * Erase every memory row of the workspace for good (owner/admin only; 403 otherwise). The caller passes the
+ * `resetEpoch` it displayed: a stale value is a 409 and erases nothing (a double click, a retry after success).
+ * There is no undo. Resolves to the new epoch and per-table counts.
+ */
+export function resetWorkspaceMemory(
+  workspaceId: string,
+  expectedEpoch: number
+): Promise<MemoryResetResult> {
+  return memoryRequest(`${workspacePath(workspaceId)}/memory/reset`, {
+    method: "POST",
+    body: JSON.stringify({ confirm: true, expectedEpoch }),
+  }).then(parseMemoryResetResult);
 }

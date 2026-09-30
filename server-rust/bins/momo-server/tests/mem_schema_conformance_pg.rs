@@ -2066,7 +2066,12 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
         );
     }
     for (signature, name) in &functions {
-        if name == "mem_edit_item" || name == "mem_forget_item" {
+        if name == "mem_edit_item"
+            || name == "mem_forget_item"
+            // #3212: the reset and the team-notice read are API entry points of the same shape.
+            || name == "mem_reset_workspace"
+            || name == "mem_summary_provider"
+        {
             // #3208: the API's write entry points are PUBLIC EXECUTE on purpose (the same shape as
             // `mem_search_items`: no dependence on role-creation order); what protects them is the
             // in-function `session_user` guard and the actor derived from `app.member_id`, both
@@ -2438,7 +2443,7 @@ fn migration_path() -> PathBuf {
 /// The allow-list self-check is restated by every migration that adds a definer function (101 and 102
 /// are merged and stay untouched, #3191 M-6); the newest one is the one that matches the real state.
 fn worker_migration_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../server/Migrations/109_mem_topics.sql")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../server/Migrations/110_mem_reset.sql")
 }
 
 /// M-1 / L-9: the lock block is one text in the two bootstrap files, compared byte for byte (stronger
@@ -2618,7 +2623,7 @@ async fn lock_block_also_locks_views_and_materialized_views() {
 
 /// L-1 / L-9: the SECURITY DEFINER functions owned by mem_definer are exactly this list, by **full signature**
 /// (`regprocedure` text): an overload that sneaks in under an allowed name is a stranger too (#3200 L-9).
-const DEFINER_ALLOW_LIST: [&str; 78] = [
+const DEFINER_ALLOW_LIST: [&str; 80] = [
     "mem_accept_proposal(uuid)",
     "mem_add_item(uuid,text,text,text,uuid[],real,boolean,text,text)",
     "mem_adjust_tokens(bigint)",
@@ -2669,6 +2674,7 @@ const DEFINER_ALLOW_LIST: [&str; 78] = [
     "mem_propose_item(uuid,text,text,text,uuid[])",
     "mem_record_serving(uuid,uuid,uuid[],uuid[],integer,integer,integer)",
     "mem_reject_proposal(uuid)",
+    "mem_reset_workspace(bigint)",
     "mem_reserve_tokens(bigint,bigint)",
     "mem_revert_consolidation(uuid)",
     "mem_search_items(text,integer,uuid,text)",
@@ -2685,6 +2691,7 @@ const DEFINER_ALLOW_LIST: [&str; 78] = [
     "mem_serving_record_of(uuid)",
     "mem_set_item_embedding(uuid,text,text)",
     "mem_stale_digests(integer,integer)",
+    "mem_summary_provider()",
     "mem_suppressed_messages(uuid,uuid[])",
     "mem_token_budget(bigint)",
     "mem_topic_assign(uuid,uuid,text,integer)",
@@ -2730,7 +2737,7 @@ async fn security_definer_functions_owned_by_mem_definer_are_allow_listed() {
     assert_eq!(
         owned, expected,
         "a SECURITY DEFINER function owned by mem_definer must be added to the allow-list \
-         here and in the newest migration's allow-list (109_mem_topics.sql) on purpose"
+         here and in the newest migration's allow-list (110_mem_reset.sql) on purpose"
     );
     // The migration's own self-check passes on the good state ...
     let check = tail_block(&worker_migration_path(), "-- ── L-9", None);

@@ -11,6 +11,7 @@ import {
   getMemoryItem,
   getMemoryItemEvents,
   getMemoryItemEvidence,
+  getMemoryNotice,
   getMemorySettings,
   getRunMemoryReceipt,
   listMemoryDigests,
@@ -20,6 +21,7 @@ import {
   patchMyMemorySettings,
   patchWorkspaceMemorySettings,
   rejectMemoryProposal,
+  resetWorkspaceMemory,
 } from "./api";
 import { memoryIsCaughtUp } from "./model";
 
@@ -533,5 +535,108 @@ describe("memory browser items", () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, {})));
     await expect(forgetMemoryItem(WS, BITEM)).rejects.toBeInstanceOf(WireShapeError);
     await expect(editMemoryItem(WS, BITEM, { body: "x" })).rejects.toBeInstanceOf(WireShapeError);
+  });
+});
+
+function noticeWire(overrides: Record<string, unknown> = {}) {
+  return {
+    enabled: true,
+    paused: false,
+    sending: true,
+    resetEpoch: 2,
+    summary: { configured: true, provider: { name: "OpenAI", host: "api.openai.com" }, modelId: "gpt-5.4-mini" },
+    embeddings: { model: "multilingual-e5-small", location: "local", sentToProvider: false },
+    sends: ["channel_message_text", "author_display_name", "agent_dm_message_text"],
+    neverSends: ["human_direct_messages", "attachments", "deleted_messages", "excluded_channels", "paused_members_dms"],
+    ...overrides,
+  };
+}
+
+const COUNTS = {
+  digests: 4,
+  items: 3,
+  evidence: 9,
+  topics: 1,
+  topicSummaries: 1,
+  embeddings: 3,
+  proposals: 0,
+  servings: 2,
+  consolidationPairs: 1,
+  consolidationState: 1,
+};
+
+describe("memory notice and reset (#3212)", () => {
+  it("reads the team notice: provider and model, local embeddings, the codes", async () => {
+    installHost();
+    const fetchMock = vi.fn(async (input: RequestInit | URL | string) => {
+      expect(String(input)).toBe(`https://oort.test/v1/workspaces/${WS}/memory/notice`);
+      return jsonResponse(200, noticeWire());
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const notice = await getMemoryNotice(WS);
+    expect(notice.summary).toEqual({
+      configured: true,
+      provider: { name: "OpenAI", host: "api.openai.com" },
+      modelId: "gpt-5.4-mini",
+    });
+    expect(notice.embeddings).toEqual({ model: "multilingual-e5-small", location: "local", sentToProvider: false });
+    expect(notice.sending).toBe(true);
+    expect(notice.neverSends).toContain("human_direct_messages");
+  });
+
+  it("shows an unconfigured summary as such and drops codes it does not know", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(
+          200,
+          noticeWire({ sending: false, summary: { configured: false }, sends: ["channel_message_text", "from_the_future"] })
+        )
+      )
+    );
+    const notice = await getMemoryNotice(WS);
+    expect(notice.summary).toEqual({ configured: false });
+    expect(notice.sends).toEqual(["channel_message_text"]);
+  });
+
+  it("refuses a notice that claims embeddings leave the instance, or has no shape", async () => {
+    installHost();
+    for (const body of [
+      noticeWire({ embeddings: { model: "m", location: "local", sentToProvider: true } }),
+      noticeWire({ embeddings: { model: "m", location: "cloud", sentToProvider: false } }),
+      noticeWire({ summary: { configured: true, provider: { name: "OpenAI" } } }),
+      noticeWire({ sends: "channel_message_text" }),
+      {},
+    ]) {
+      vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, body)));
+      await expect(getMemoryNotice(WS)).rejects.toBeInstanceOf(WireShapeError);
+    }
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(403, { error: { message: "no" } })));
+    await expect(getMemoryNotice(WS)).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("posts the confirmation with the epoch it showed and returns the counts", async () => {
+    installHost();
+    const fetchMock = vi.fn(async (input: RequestInit | URL | string, init?: RequestInit) => {
+      expect(String(input)).toBe(`https://oort.test/v1/workspaces/${WS}/memory/reset`);
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({ confirm: true, expectedEpoch: 2 });
+      return jsonResponse(200, { epoch: 3, deleted: COUNTS });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await resetWorkspaceMemory(WS, 2)).toEqual({ epoch: 3, deleted: COUNTS });
+  });
+
+  it("surfaces 403 and 409 of a reset and rejects an incomplete answer", async () => {
+    installHost();
+    for (const status of [403, 409, 400]) {
+      vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(status, { error: { message: "no" } })));
+      await expect(resetWorkspaceMemory(WS, 2)).rejects.toMatchObject({ status });
+    }
+    for (const body of [{}, { epoch: 3 }, { epoch: 3, deleted: { ...COUNTS, items: undefined } }]) {
+      vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, body)));
+      await expect(resetWorkspaceMemory(WS, 2)).rejects.toBeInstanceOf(WireShapeError);
+    }
   });
 });

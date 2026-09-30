@@ -11,6 +11,8 @@
 //! PATCH /v1/workspaces/{ws}/memory/settings                workspace switch (admin)
 //! PATCH /v1/workspaces/{ws}/channels/{ch}/memory/settings  channel exclude / pause (admin)
 //! PATCH /v1/workspaces/{ws}/memory/settings/me             personal pause (self)
+//! GET   /v1/workspaces/{ws}/memory/notice                  what memory sends to which provider (any member, #3212)
+//! POST  /v1/workspaces/{ws}/memory/reset                   erase all memory of the workspace (owner/admin, #3212)
 //!
 //! GET    /v1/workspaces/{ws}/memory/items                  memory browser list / search   (#3208)
 //! GET    /v1/workspaces/{ws}/memory/items/{id}             one item (+ evidence back-links)
@@ -46,11 +48,12 @@ use momo_messaging::{
     evidence_for_digests_in_tx, evidence_for_items_in_tx, forget_item_in_tx, get_digest_in_tx,
     get_item_in_tx, get_proposal_in_tx, get_serving_in_tx, items_by_ids_in_tx, last_read_seq_in_tx,
     list_digests_in_tx, list_item_events_in_tx, list_items_in_tx, list_proposals_in_tx,
-    list_settings_in_tx, reject_proposal_in_tx, revert_consolidation_in_tx, search_item_rows_in_tx,
-    summarized_through_seq_in_tx, upsert_channel_settings_in_tx, upsert_member_settings_in_tx,
-    upsert_workspace_settings_in_tx, DigestListFilter, ItemListFilter, ItemStatus, MemDigest,
-    MemEvidence, MemItem, MemItemBrief, MemItemEvent, MemItemEvidence, MemProposal, MemServing,
-    MemSettingsRow, ProposalListFilter, MEM_ITEM_KINDS,
+    list_settings_in_tx, reject_proposal_in_tx, reset_workspace_in_tx, revert_consolidation_in_tx,
+    search_item_rows_in_tx, summarized_through_seq_in_tx, summary_provider_in_tx,
+    upsert_channel_settings_in_tx, upsert_member_settings_in_tx, upsert_workspace_settings_in_tx,
+    DigestListFilter, ItemListFilter, ItemStatus, MemDigest, MemEvidence, MemItem, MemItemBrief,
+    MemItemEvent, MemItemEvidence, MemProposal, MemResetCounts, MemServing, MemSettingsRow,
+    ProposalListFilter, MEM_ITEM_KINDS,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -1135,6 +1138,299 @@ pub async fn patch_member_settings(
 }
 
 // ---------------------------------------------------------------------------
+// reset + team notice (#3212, ADR-0196 D9 「초기화」 · 동의 ② 「팀 고지」, migration 110)
+// ---------------------------------------------------------------------------
+
+/// The `provider_default_ai` `summary` row is the only place memory content goes. A notice line
+/// names it by preset when the host is one of the known API roots, otherwise by host.
+const NOTICE_PRESETS: &[(&str, &str)] = &[
+    ("api.openai.com", "OpenAI"),
+    ("api.anthropic.com", "Anthropic"),
+    ("api.x.ai", "xAI"),
+    ("openrouter.ai", "OpenRouter"),
+];
+
+/// What the summary worker puts in the prompt (worker: `read_channel_window` / `LIVE` in
+/// `momo-agent/src/memory.rs`): text messages that are not deleted, with the author's display name
+/// and whether the author is an agent. Machine codes, not prose — the client owns the wording.
+const NOTICE_SENDS: &[&str] = &[
+    "channel_message_text",
+    "author_display_name",
+    "agent_dm_message_text",
+];
+/// What it never reads: human↔human DMs (D9 ③), files, deleted messages, channels and members
+/// that switched memory off.
+const NOTICE_NEVER_SENDS: &[&str] = &[
+    "human_direct_messages",
+    "attachments",
+    "deleted_messages",
+    "excluded_channels",
+    "paused_members_dms",
+];
+/// Local embeddings (ADR-0196 D8): the vector search runs in this instance's worker; no provider
+/// sees the text. Kept in step with `momo_embed::MODEL_ID` by a test.
+const NOTICE_EMBEDDING_MODEL: &str = "multilingual-e5-small";
+
+/// The host of a redacted endpoint label (`scheme://host[:port]/path`): no port, no path.
+fn notice_host(label: &str) -> Option<String> {
+    let rest = label.trim().split_once("://")?.1;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let host = authority.rsplit('@').next()?;
+    let host = if let Some(stripped) = host.strip_prefix('[') {
+        stripped.split(']').next()?
+    } else {
+        host.split(':').next()?
+    };
+    let host = host.trim().to_ascii_lowercase();
+    (!host.is_empty()).then_some(host)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoticeProviderDto {
+    /// A known preset name ("OpenAI"), else the host.
+    pub name: String,
+    pub host: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoticeSummaryDto {
+    /// A 「기본 AI」 `summary` row exists. Without one the worker calls no model (#3146).
+    pub configured: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<NoticeProviderDto>,
+    /// `None` = the link's default model.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoticeEmbeddingsDto {
+    pub model: &'static str,
+    /// `local` — computed inside this instance.
+    pub location: &'static str,
+    pub sent_to_provider: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryNoticeResponse {
+    pub enabled: bool,
+    pub paused: bool,
+    /// `enabled && !paused && summary.configured`: message text is (or will be) sent.
+    pub sending: bool,
+    pub reset_epoch: i64,
+    pub summary: NoticeSummaryDto,
+    pub embeddings: NoticeEmbeddingsDto,
+    pub sends: Vec<&'static str>,
+    pub never_sends: Vec<&'static str>,
+}
+
+fn notice_response(
+    settings: Option<&MemSettingsRow>,
+    summary: Option<(String, Option<String>)>,
+) -> MemoryNoticeResponse {
+    let workspace = workspace_settings_dto(settings);
+    let summary = match summary {
+        Some((label, model_id)) => {
+            let host = notice_host(&label);
+            let provider = host.map(|host| NoticeProviderDto {
+                name: NOTICE_PRESETS
+                    .iter()
+                    .find(|(known, _)| *known == host)
+                    .map_or_else(|| host.clone(), |(_, name)| (*name).to_string()),
+                host,
+            });
+            NoticeSummaryDto {
+                configured: provider.is_some(),
+                provider,
+                model_id,
+            }
+        }
+        None => NoticeSummaryDto {
+            configured: false,
+            provider: None,
+            model_id: None,
+        },
+    };
+    MemoryNoticeResponse {
+        enabled: workspace.enabled,
+        paused: workspace.paused,
+        sending: workspace.enabled && !workspace.paused && summary.configured,
+        reset_epoch: workspace.reset_epoch,
+        summary,
+        embeddings: NoticeEmbeddingsDto {
+            model: NOTICE_EMBEDDING_MODEL,
+            location: "local",
+            sent_to_provider: false,
+        },
+        sends: NOTICE_SENDS.to_vec(),
+        never_sends: NOTICE_NEVER_SENDS.to_vec(),
+    }
+}
+
+/// `GET /v1/workspaces/{ws}/memory/notice` — 「무엇이 어느 제공자로 가는지」. Any active human member
+/// (guests included: it is about their own messages). Exposes the provider host, its preset name and
+/// the model id, never a key, a link, a token or an operator-only field: the summary row is read
+/// through `mem_summary_provider` (three columns, one row), not through the operator transaction.
+pub async fn get_notice(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(workspace): Path<String>,
+) -> Result<Json<MemoryNoticeResponse>, ApiError> {
+    require_human(&principal, HUMAN_ONLY)?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let member_id = principal.member_id;
+
+    let outcome: DbRejectable<(Vec<MemSettingsRow>, Option<(String, Option<String>)>)> =
+        memory_tenant_tx(&state.pool, workspace_id, member_id, move |conn| {
+            Box::pin(async move {
+                if let Err(rejection) = require_live_human(conn, workspace_id, member_id).await? {
+                    return Ok(Err(rejection));
+                }
+                let settings = list_settings_in_tx(conn).await?;
+                let summary = summary_provider_in_tx(conn).await?;
+                Ok(Ok((settings, summary)))
+            })
+        })
+        .await;
+
+    let (settings, summary) = settle_mem_read("memory.get_notice", outcome)?;
+    Ok(Json(notice_response(
+        settings.iter().find(|row| row.scope == "workspace"),
+        summary,
+    )))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResetMemoryRequest {
+    /// Must be exactly `true`: the client shows a confirmation step first.
+    pub confirm: bool,
+    /// The `resetEpoch` the client showed. A second click (or a retry after success) carries an
+    /// old value and is refused with 409 instead of erasing again.
+    pub expected_epoch: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetMemoryResponse {
+    /// The new `resetEpoch`.
+    pub epoch: i64,
+    /// Rows removed per table (counts only).
+    pub deleted: MemResetCounts,
+}
+
+/// SQLSTATE → HTTP for errors raised by `mem_reset_workspace` itself (message prefix
+/// `mem_reset_workspace:`); anything else — a grant regression, an RLS denial — stays a 500.
+fn map_reset_error(error: &DbError) -> Option<ApiError> {
+    let DbError::Sqlx(momo_db::sqlx::Error::Database(db)) = error else {
+        return None;
+    };
+    if !db.message().starts_with("mem_reset_workspace:") {
+        return None;
+    }
+    Some(match db.code().as_deref()? {
+        "42501" => ApiError::forbidden("only a workspace owner or admin may reset team memory"),
+        "55000" => ApiError::new(
+            axum::http::StatusCode::CONFLICT,
+            "team memory was already reset; reload and check before resetting again",
+        ),
+        "22023" => ApiError::bad_request("expectedEpoch is required"),
+        _ => return None,
+    })
+}
+
+/// Deadlock (`40P01`), lock timeout (`55P03`) or a survivor check (`40001`): the reset waited for a
+/// worker or an editor and PG picked it as the victim, or a concurrent writer left a row behind. The transaction rolled back whole, so trying again is safe.
+fn reset_retryable(error: &DbError) -> bool {
+    matches!(
+        error,
+        DbError::Sqlx(momo_db::sqlx::Error::Database(db))
+            if matches!(db.code().as_deref(), Some("40P01" | "55P03" | "40001"))
+    )
+}
+
+/// `POST /v1/workspaces/{ws}/memory/reset` — erase every memory row of the workspace for good
+/// (ADR-0196 D9). Owner/admin only; the body must say `confirm: true` and the `expectedEpoch` the
+/// client showed. The switches, the token usage and the 「잊은」 hashes stay (migration 110 header).
+pub async fn reset_memory(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(workspace): Path<String>,
+    Json(request): Json<ResetMemoryRequest>,
+) -> Result<Json<ResetMemoryResponse>, ApiError> {
+    require_human(&principal, HUMAN_ONLY)?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    if !request.confirm {
+        return Err(ApiError::bad_request(
+            "confirm must be true to reset team memory",
+        ));
+    }
+    if request.expected_epoch < 0 {
+        return Err(ApiError::bad_request("expectedEpoch must not be negative"));
+    }
+    let member_id = principal.member_id;
+    let via_token = audit_via_token_id(&principal);
+    let expected_epoch = request.expected_epoch;
+
+    let mut attempt = 0;
+    let outcome = loop {
+        attempt += 1;
+        let result: Result<Result<_, ApiError>, DbError> =
+            memory_tenant_tx(&state.pool, workspace_id, member_id, move |conn| {
+                Box::pin(async move {
+                    // First wall: the caller is an active owner/admin. The definer function checks
+                    // again from `app.member_id` (the authority); a guest or member gets 403 here.
+                    match active_workspace_role(conn, workspace_id, member_id).await? {
+                        Some(WorkspaceRole::Owner | WorkspaceRole::Admin) => {}
+                        _ => {
+                            return Ok(Err(ApiError::forbidden(
+                                "only a workspace owner or admin may reset team memory",
+                            )))
+                        }
+                    }
+                    let done = match reset_workspace_in_tx(conn, expected_epoch).await {
+                        Ok(done) => done,
+                        Err(error) => {
+                            return match map_reset_error(&error) {
+                                Some(rejection) => Ok(Err(rejection)),
+                                None => Err(error),
+                            }
+                        }
+                    };
+                    write_audit(
+                        conn,
+                        &AuditEntry::new(workspace_id, "memory.reset")
+                            .by(member_id)
+                            .target("workspace", workspace_id)
+                            .via_token(via_token)
+                            .with_schema(
+                                "momo.memory.reset.v1",
+                                serde_json::json!({ "epoch": done.epoch }),
+                            ),
+                    )
+                    .await?;
+                    Ok(Ok(done))
+                })
+            })
+            .await;
+        match result {
+            Err(error) if attempt < 3 && reset_retryable(&error) => continue,
+            other => break other,
+        }
+    };
+
+    let done = settle_mem_read("memory.reset", outcome)?;
+    Ok(Json(ResetMemoryResponse {
+        epoch: done.epoch,
+        deleted: done.deleted,
+    }))
+}
+
+// ---------------------------------------------------------------------------
 // memory browser: items (#3208, ADR-0196 D9 / D12 V4)
 // ---------------------------------------------------------------------------
 //
@@ -1822,5 +2118,49 @@ mod tests {
     fn absent_workspace_row_means_defaults() {
         let dto = workspace_settings_dto(None);
         assert!(dto.enabled && !dto.paused && dto.reset_epoch == 0);
+    }
+
+    #[test]
+    fn the_notice_host_is_only_the_host() {
+        assert_eq!(notice_host("https://api.openai.com/v1").as_deref(), Some("api.openai.com"));
+        assert_eq!(
+            notice_host("https://ops:sk-abcdefghijklmnop@LLM.Corp.Example:8443/v1/PATH?api_key=sk-zz#f")
+                .as_deref(),
+            Some("llm.corp.example")
+        );
+        assert_eq!(notice_host("http://[::1]:8080/x").as_deref(), Some("::1"));
+        assert_eq!(notice_host("not a url"), None);
+        assert_eq!(notice_host("https:///v1"), None);
+        assert_eq!(notice_host(""), None);
+    }
+
+    #[test]
+    fn the_notice_says_nothing_is_sent_without_a_summary_row_or_when_paused() {
+        let none = notice_response(None, None);
+        assert!(!none.summary.configured && !none.sending && none.enabled);
+        assert_eq!(none.embeddings.location, "local");
+        assert!(!none.embeddings.sent_to_provider);
+        let row = Some(("https://api.anthropic.com/v1".to_string(), Some("claude-x".to_string())));
+        let on = notice_response(None, row.clone());
+        assert!(on.sending);
+        assert_eq!(on.summary.provider.as_ref().map(|p| p.name.as_str()), Some("Anthropic"));
+        let mut settings = MemSettingsRow {
+            scope: "workspace".into(),
+            channel_id: None,
+            member_id: None,
+            enabled: true,
+            paused: true,
+            excluded: false,
+            daily_token_cap: None,
+            reset_epoch: 4,
+            updated_at: chrono::Utc::now(),
+        };
+        let paused = notice_response(Some(&settings), row.clone());
+        assert!(!paused.sending && paused.paused && paused.reset_epoch == 4);
+        settings.paused = false;
+        settings.enabled = false;
+        assert!(!notice_response(Some(&settings), row).sending);
+        // an unparsable label configures nothing rather than naming a guess
+        assert!(!notice_response(None, Some(("garbage".to_string(), None))).summary.configured);
     }
 }
