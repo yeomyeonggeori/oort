@@ -8,18 +8,19 @@
 # legal sufficiency. Debian OS-layer licenses are inventoried separately
 # inside each image; GPL/LGPL there are copyleft, not permissive.
 #
-# cargo.lock.sha256: 86e07335da02429eb1c410187df2ec17345563ea533e275f862c527427cdda46
+# cargo.lock.sha256: b33dc7cec75ae6fc4701d5a4a6f85d501cb2f069c1c9016415fdd13c25617a97
 # web.package-lock.sha256: 3fe4cf55556ea18354f1024dfe564626553ceacb9310b290404e9e2af5ee736a
-# clarify.sha256: fcb9ac157804777c306cebdcc24f804992a74fcf87c27d42dbc5d9370a7ed8e6
-# cargo.packages: 321
+# clarify.sha256: 366b7c68569c49f9fab915342fc2c620d1ee6318ab3567d337fd4f7d1a0f79c3
+# cargo.packages: 383
 # npm.packages: 469
-# unique.license.blobs: 398
+# unique.license.blobs: 422
 #
 ## Package index
 # ecosystem <TAB> name <TAB> version <TAB> spdx <TAB> copyright <TAB> source <TAB> file_sha256[,file_sha256]
 cargo	aead	0.5.2	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	b1cf9a3333ca78152b859012cd4a804156e5243e9ca20ad1df7327ba5ea7405c,949ab7b3e7140fee216f06fe3a2bd67d68dd511f8ea73c1e01c98cb348e9c8ae
 cargo	aes	0.8.4	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,f7e8ab639afef15573680c97f796166835cbeb3865175882fea41c60d106b733
 cargo	aes-gcm	0.10.3	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,3c0dfa33fd2e6976038555b52095699452653b1fcabe113074f14e0848a6b11e
+cargo	ahash	0.8.12	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,0444c6991eead6822f7b9102e654448d51624431119546492e8b231db42c48bb
 cargo	aho-corasick	1.1.4	Unlicense OR MIT	Copyright (c) 2015 Andrew Gallant	package-tree	01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f,0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f,7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c
 cargo	allocator-api2	0.2.21	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	android_system_properties	0.1.5	MIT/Apache-2.0	Copyright 2016 Nicolas Silva; Copyright (c) 2013 Nicolas Silva; COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER	package-tree	216486f29671a4262efe32af6d84a75bef398127f8c5f369b5c8305983887a06,80f275e90d799911ed3830a7f242a2ef5a4ade2092fe0aa07bfb2d2cf2f2b95e
@@ -30,6 +31,7 @@ cargo	autocfg	1.5.1	Apache-2.0 OR MIT	copyright notice that is included in or at
 cargo	axum	0.8.9	MIT	Copyright (c) 2019 axum Contributors	package-tree	6a13bc24a100a6812f053879ec51b126b103af7cda6dbf48c4188722da44da9f
 cargo	axum-core	0.5.6	MIT	Copyright (c) 2019–2025 axum Contributors	package-tree	e5c343775a0e56c07182dd9b1667d31853cfcb6953f567ee1f5a7bf7978bf285
 cargo	base16ct	1.0.0	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,54fb6dfe99a6906f862aa40282f0e8e9d9d0f22d57d99ab8acbaf4c8ceaa70e0
+cargo	base64	0.13.1	MIT/Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,0dd882e53de11566d50f8e8e2d5a651bcf3fabee4987d70f306233cf39094ba7
 cargo	base64	0.22.1	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,0dd882e53de11566d50f8e8e2d5a651bcf3fabee4987d70f306233cf39094ba7
 cargo	base64ct	1.8.3	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,2d1c57bff28344b9e698f51063bc8509799cc4c99a4e0cf2aa3f7e7c3e1f9a9d
 cargo	bitflags	2.13.1	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb
@@ -38,6 +40,7 @@ cargo	block-buffer	0.12.1	MIT OR Apache-2.0	copyright notice that is included in
 cargo	bumpalo	3.20.3	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,65f94e99ddaf4f5d1782a6dae23f35d4293a9a01444a13135a6887017d353cee
 cargo	byteorder	1.5.0	Unlicense OR MIT	Copyright (c) 2015 Andrew Gallant	package-tree	01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f,0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f,7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c
 cargo	bytes	1.12.1	MIT	Copyright (c) 2018 Carl Lerche	package-tree	45f522cacecb1023856e46df79ca625dfc550c94910078bd8aec6e02880b3d42
+cargo	castaway	0.2.4	MIT	Copyright (c) 2021 Stephen M. Coakley	package-tree	f98e09091d5ae02b2f2ec1ead4f7f28c4c44d1cb98b078739ba67091637e170c
 cargo	cc	1.4.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397
 cargo	cfg-if	1.0.4	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397
 cargo	cfg_aliases	0.2.2	MIT	Copyright (c) 2020 Katharos Technology	package-tree	31b94860253d8ec7b4529f51901044d3b459d6292d996504a36b1bae3a36a812
@@ -45,6 +48,7 @@ cargo	chacha20	0.10.1	MIT OR Apache-2.0	copyright notice that is included in or 
 cargo	chrono	0.4.45	MIT OR Apache-2.0	Copyright (c) 2014, Kang Seonghoon.; copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	946c9835d8034d24404f8cfec5f4654cee5dad17e944afc3d06d742cf2882831
 cargo	cipher	0.4.4	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,5c7bd92d1f096f12203dc1b601e3cb17484fa1b023e30b6b8edcc80e416237ec
 cargo	cmov	0.5.4	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30,70c9d40f1f9545c3f133b8a67206e89da850f6468eed072281bb3701514114a9
+cargo	compact_str	0.9.1	MIT	Copyright (c) 2021 Parker Timmerman	package-tree	0d52feec79589df30138dad3800323fe5686b764b73347330a2dfef8ac83efe8
 cargo	const-oid	0.10.2	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,73b9dc2e79c7308998dd30296e073aefaefb944a68fb89aa412c23c0edcabcaa
 cargo	const-oid	0.9.6	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,bada9e7ed8dc00d63502053c455d7c8d7575dfb7e8277a2a832531844d900682
 cargo	core-foundation	0.10.1	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3
@@ -54,6 +58,8 @@ cargo	cpufeatures	0.2.17	MIT OR Apache-2.0	copyright notice that is included in 
 cargo	cpufeatures	0.3.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,ae9baa7beea910273c2f384c2a6b721fb7bd02bda3436074a1072e4ee689f985
 cargo	crc	3.4.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	470355a7eed93fcc4281ec2e0f82ca3b94e7af1e4d83629f91de8cfac34d750e,3488679340a49ecc34d342c4009d2dabf76f4a21f12aec2ca99b15805d656544
 cargo	crc-catalog	2.5.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2019 Akhil Velagapudi	package-tree	d3cdb764b98283ee7c3a3cea8d374e2a2957322374378d1f3263f4d512741fc3,5ef8fcfb6cccec8fcae043c834099a60c8b7406408db576e026d2b7e67dc5cf5
+cargo	crossbeam-deque	0.8.8	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab
+cargo	crossbeam-epoch	0.9.21	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab
 cargo	crossbeam-queue	0.3.13	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab
 cargo	crossbeam-utils	0.8.22	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab
 cargo	crypto-bigint	0.7.5	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,57a4d75c1d095bb94754a478f3cd15e60ac66a5c5627d844be01a918eea5fe88
@@ -63,9 +69,17 @@ cargo	ctr	0.9.2	MIT OR Apache-2.0	copyright notice that is included in or attach
 cargo	ctutils	0.4.2	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30,91585c36e4fb9ab4ca0d3dfac5d66d3c0c62cc51f640a0e1196542daf2267eae
 cargo	curve25519-dalek	4.1.3	BSD-3-Clause	Copyright (c) 2016-2021 isis agora lovecruft. All rights reserved.; Copyright (c) 2016-2021 Henry de Valence. All rights reserved.; Copyright (c) 2012 The Go Authors. All rights reserved.; copyright notice, this list of conditions and the following disclaimer	package-tree	cca0bd3c4fcdba74145ef9d49c62337e2c9fbf9368288f11d0547f1b0273219f
 cargo	curve25519-dalek-derive	0.1.1	MIT/Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
+cargo	daachorse	3.0.3	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
+cargo	darling	0.20.11	MIT	Copyright (c) 2017 Ted Driggs	package-tree	8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6
+cargo	darling_core	0.20.11	MIT	Copyright (c) 2017 Ted Driggs	package-tree	8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6
+cargo	darling_macro	0.20.11	MIT	Copyright (c) 2017 Ted Driggs	package-tree	8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6
+cargo	dary_heap	0.3.9	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	der	0.7.10	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,ad64fcb9589f162720f3cc5010ad76ca6ad3764e11861f9192c489df176bb71d
 cargo	der	0.8.2	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,73b9dc2e79c7308998dd30296e073aefaefb944a68fb89aa412c23c0edcabcaa
 cargo	deranged	0.5.8	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2024 Jacob Pratt et al.	package-tree	edd65bdd88957a205c47d53fa499eed8865a70320f0f03f6391668cb304ea376,231c837c45eb53f108fb48929e488965bc4fcc14e9ea21d35f50e6b99d98685b
+cargo	derive_builder	0.20.2	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright {yyyy} {name of copyright owner}	package-tree	c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08,8c9612877aacfa1b42f5e80b679e6c3c93a7ba2bb99dfaf6e87e200dca4b4e6c
+cargo	derive_builder_core	0.20.2	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright {yyyy} {name of copyright owner}	package-tree	c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08,8c9612877aacfa1b42f5e80b679e6c3c93a7ba2bb99dfaf6e87e200dca4b4e6c
+cargo	derive_builder_macro	0.20.2	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright {yyyy} {name of copyright owner}	package-tree	c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08,8c9612877aacfa1b42f5e80b679e6c3c93a7ba2bb99dfaf6e87e200dca4b4e6c
 cargo	digest	0.10.7	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,9e0dfd2dd4173a530e238cb6adb37aa78c34c6bc7444e0e10c1ab5d8881f63ba
 cargo	digest	0.11.3	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,af59cea35d7f5e2777a713b8d155d65efa2c339eb43f3c14e868c6ac8506edad
 cargo	displaydoc	0.2.7	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
@@ -77,14 +91,18 @@ cargo	either	1.17.0	MIT OR Apache-2.0	copyright notice that is included in or at
 cargo	elliptic-curve	0.14.1	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,d8c4ab431f20da8452c9a217084163822e5fd9d134e1343903c929f2859fc8fd
 cargo	equivalent	1.0.2	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,7365cc8878a1d7ce155a58c4ca09c3d7a6be413efa5334a80ea842912b669349
 cargo	errno	0.3.14	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,8764a597675778ddfd4e25f81b08a05dbcf089ac05662df7613fe67f150e3aa2
+cargo	esaxx-rs	0.1.10	Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
 cargo	etcetera	0.8.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	event-listener	5.4.2	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
+cargo	fastembed	7.1.0	Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2026 Anush008	package-tree	a05c7bf1bcb6c0e1160fafb8b172749a696da503a30e2ba70485c8c1c45a602c
+cargo	fastrand	2.5.0	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	ff	0.14.0	MIT/Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	3708458dee7f359ac6c9c5558023ed481be87e5372c43ebd7f2ca7ad23c12026,8d0c1d1d4b2bebf5b9211f0e883d5a482b7808f3ed31320da14ddee95811f4ef
 cargo	fiat-crypto	0.2.9	MIT OR Apache-2.0 OR BSD-1-Clause	Copyright 2015-2020 the fiat-crypto authors (see the AUTHORS file); Copyright (c) 2015-2020 the fiat-crypto authors (see the AUTHORS file); Copyright (c) 2015-2020 the fiat-crypto authors (see the AUTHORS file).	package-tree	6c935d087a2992d0f092665400a2fa99c98db58d96fbe29368f8f48182bed9aa,9eacbcb81be660840c714a560a9d65ba07913db98dd4baf969f78dd499fdd60f,0c1240e29b4a2c528bcc3ccc38a98b1dba5e3e6b465da910208935f082e2ced6,0034712d5e97a4f5b900a160a5c19d582b740d8e0638b4e44fd07e7b492dcd13
 cargo	find-msvc-tools	0.1.9	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397
 cargo	flume	0.11.1	Apache-2.0/MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	e48c2570866efc398ff8178f05c5d3a835c2f3c9c3770bf708d3f6cccb76601b,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	fnv	1.0.7	Apache-2.0 / MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,65fdb6c76cd61612070c066eec9ecdb30ee74fb27859d0d9af58b9f499fd0c3e
 cargo	foldhash	0.1.5	Zlib	Copyright (c) 2024 Orson Peters	package-tree	1d4c38d56650edc2c673cadbec74bec14db1fe8f2f10f4e3477dcbb49563be40
+cargo	foldhash	0.2.0	Zlib	Copyright (c) 2024 Orson Peters	package-tree	1d4c38d56650edc2c673cadbec74bec14db1fe8f2f10f4e3477dcbb49563be40
 cargo	form_urlencoded	1.2.2	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,20c7855c364d57ea4c97889a5e8d98470a9952dade37bd9248b9a54431670e5e
 cargo	futures	0.3.33	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright (c) 2016 Alex Crichton	package-tree	275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427,6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd
 cargo	futures-channel	0.3.33	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright (c) 2016 Alex Crichton	package-tree	275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427,6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd
@@ -98,11 +116,13 @@ cargo	futures-task	0.3.33	MIT OR Apache-2.0	copyright notice that is included in
 cargo	futures-util	0.3.33	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright (c) 2016 Alex Crichton	package-tree	275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427,6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd
 cargo	generic-array	0.14.7	MIT	Copyright (c) 2015 Bartłomiej Kamiński	package-tree	eb69613e00e596e13d2f58e820aee10e9d51754b91d7111bc997f1fc90791f66
 cargo	getrandom	0.2.17	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf,42fa16951ce7f24b5a467a40e5b449a1d41e662f97ca779864f053f39e097737
+cargo	getrandom	0.3.4	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf,29e9fe5074bd27e0e5d5d110394fbbcd841baee2651a3c4b4560a632702cede4
 cargo	getrandom	0.4.3	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf,523a42c25d245dde9c015f882cec7f4555aad883382a6cf19b4b7d9b2cd5419b
 cargo	ghash	0.5.1	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,c0fabcc308b450cb6fe62c9f56fae6abbeb9768eb80d992484c857d744846c2e
 cargo	group	0.14.0	MIT/Apache-2.0	copyright assignment is required to contribute to the "group" library.; copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	7429802d3e67e3308471b91fbea341e484c4e0a23d0fb230a8636c38184cec79,a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	h2	0.4.15	MIT	Copyright (c) 2017 h2 authors	package-tree	b21623012e6c453d944b0342c515b631cfcbf30704c2621b291526b69c10724d
 cargo	hashbrown	0.15.5	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2
+cargo	hashbrown	0.16.1	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2
 cargo	hashbrown	0.17.1	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2
 cargo	hashlink	0.10.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90,f1fa5f9e9d8f7827ae2235e742dd00bdf6106d4c5753df928e521d7541b7f9b6
 cargo	heck	0.5.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0
@@ -129,42 +149,61 @@ cargo	icu_normalizer_data	2.2.0	Unicode-3.0	COPYRIGHT AND PERMISSION NOTICE; Cop
 cargo	icu_properties	2.2.0	Unicode-3.0	COPYRIGHT AND PERMISSION NOTICE; Copyright © 2020-2024 Unicode, Inc.	package-tree	f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2
 cargo	icu_properties_data	2.2.0	Unicode-3.0	COPYRIGHT AND PERMISSION NOTICE; Copyright © 2020-2024 Unicode, Inc.	package-tree	f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2
 cargo	icu_provider	2.2.0	Unicode-3.0	COPYRIGHT AND PERMISSION NOTICE; Copyright © 2020-2024 Unicode, Inc.	package-tree	f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2
+cargo	ident_case	1.0.1	MIT/Apache-2.0	Authors: Ted Driggs <ted.driggs@outlook.com>	package-tree	508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1
 cargo	idna	1.1.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,b38f11f6096706e6de553dabe2a7ed142d59b6fa8c97e290c67496154745cdd5
 cargo	idna_adapter	1.2.2	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,8b43ce8accd61e9d370b5ca9e9c4f953279b5c239926c62315b40e24df51b726
 cargo	indexmap	2.14.0	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,ecc269ef87fd38a1d98e30bfac9ba964a9dbd9315c3770fed98d4d7cb5882055
 cargo	inout	0.1.4	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,304b898acad7f02e03d6d8832d682a3b43ee729ab5d3a069af5a36979083b6b4
 cargo	ipnet	2.12.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2017 Juniper Networks, Inc.	package-tree	87d9feb9238c6bd8e0024fc4733b06cff036f89f36d93b7df1c8a0549bbb7a5b,47dc9ff29128ddfb4d6a0435383c9f89120bc374dbcc1dd00b933a0b28aa7865
+cargo	itertools	0.14.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,7576269ea71f767b99297934c0b2367532690f8c4badc695edf8e04ab6a1e545
 cargo	itoa	1.0.18	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	js-sys	0.3.103	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397
 cargo	jsonwebtoken	9.3.1	MIT	Copyright (c) 2015 Vincent Prouillet	package-tree	a8012be84ea176195305bfb4e9109ed6f28860a8e697bc50302e75c2040813f3
 cargo	lazy_static	1.5.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720
 cargo	libc	0.2.189	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright (c) The Rust Project Developers	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,123a331b5dbf04c30097fa43b8f858bc85df671fe776de498d01f3d6b7c1f69e
+cargo	libloading	0.9.0	ISC	Copyright © 2015, Simonas Kazlauskas	package-tree	b29f8b01452350c20dd1af16ef83b598fea3053578ccc1c7a0ef40e57be2620f
 cargo	libm	0.2.16	MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright (c) 2018 Jorge Aparicio	package-tree	3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7
 cargo	libredox	0.1.18	MIT	Copyright (c) 2023 4lDO2	package-tree	8d073a6a80d1ef2d2fc2bc6c809aa221161bf1906c76d4aeef55fd2b999d9413
 cargo	libsqlite3-sys	0.30.1	MIT	Copyright (c) 2014-2021 The rusqlite developers	package-tree	f59ba65550f2a5adff98ec6478d783402c8e0a3eb515025c0b3438f3d30dc39e
+cargo	linux-raw-sys	0.12.1	Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	3290ae0fbc9ddb77d2239121d710f0bb9d31b3b4744e6d97fe01e652b4c1870b,a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	litemap	0.8.2	Unicode-3.0	COPYRIGHT AND PERMISSION NOTICE; Copyright © 2020-2024 Unicode, Inc.	package-tree	f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2
 cargo	lock_api	0.4.14	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,c9a75f18b9ab2927829a208fc6aa2cf4e63b8420887ba29cdb265d6619ae82d5
 cargo	log	0.4.33	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb
 cargo	lru-slab	0.1.2	MIT OR Apache-2.0 OR Zlib	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30,1466d9b4f3a59bb8997fc8d5fa977ce3f6a24bb2358793c09bfdf007039f6486,09785877275ffada6c371b652a30e95c26b435126fc0fc62f1bc2d72171f80a4
+cargo	macro_rules_attribute	0.2.3	Apache-2.0 OR MIT OR Zlib	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2019 Daniel Henry-Mantilla <daniel.henry.mantilla@gmail.com>	package-tree	388e98b08de12ba8a9d4575883c8b0386c747cea188ed459380fc58d60da15c9,603fb27ef3266ea516872eefd9ae587746b8c34614a35c0fb24e4e9e0c17e137,1c41c0e19caa2c20b0adfeb8219b606b21b7c63914aa3ae74ae3e091d7ce09ca
+cargo	macro_rules_attribute-proc_macro	0.2.3	Apache-2.0 OR MIT OR Zlib	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2019 Daniel Henry-Mantilla <daniel.henry.mantilla@gmail.com>	package-tree	388e98b08de12ba8a9d4575883c8b0386c747cea188ed459380fc58d60da15c9,603fb27ef3266ea516872eefd9ae587746b8c34614a35c0fb24e4e9e0c17e137,1c41c0e19caa2c20b0adfeb8219b606b21b7c63914aa3ae74ae3e091d7ce09ca
 cargo	matchers	0.2.0	MIT	Copyright (c) 2019 Eliza Weisman	package-tree	a47129d738752a6ae52247fea645b42cb320d19e9327f1eb2d1a7f99d9455ad3
 cargo	matchit	0.8.4	MIT AND BSD-3-Clause	Copyright (c) 2022 Ibraheem Ahmed; Copyright (c) 2013, Julien Schmidt	package-tree	de701d0618d694feb1af90f02181a1763d9b0bdeb70a3a592781e529077dba65,162ce11ad71338d0a0c6ebaf5c48af72c6ae237b468859d3656fe2d9ed3f3a85
+cargo	matrixmultiply	0.3.11	MIT/Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,792d075c7bad6dac258a44e799eb64cbf465e24d9932d27669be08c5ec957e27
 cargo	md-5	0.10.6	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,b4eb00df6e2a4d22518fcaa6a2b4646f249b3a3c9814509b22bd2091f1392ff1
 cargo	memchr	2.8.3	Unlicense OR MIT	Copyright (c) 2015 Andrew Gallant	package-tree	01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f,0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f,7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c
 cargo	mime	0.3.17	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,df9cfd06d8a44d9a671eadd39ffd97f166481da015a30f45dfd27886209c5922
+cargo	minimal-lexical	0.2.1	MIT/Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3,dbe1fff0fb1314b6af94f161511406275cf01c5a32441fbf24528a57a051d599
 cargo	mio	1.2.2	MIT	Copyright (c) 2014 Carl Lerche and other MIO contributors	package-tree	07919255c7e04793d8ea760d6c2ce32d19f9ff02bdbdde3ce90b1e1880929a9b
+cargo	monostate	0.1.18	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
+cargo	monostate-impl	0.1.18	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
+cargo	ndarray	0.17.2	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,1fd6747d2c8e80f9fa766f57c5888864774621deb85cc2838ccaed727db32d45
+cargo	nom	7.1.3	MIT	Copyright (c) 2014-2019 Geoffroy Couprie	package-tree	4dbda04344456f09a7a588140455413a9ac59b6b26a1ef7cdf9c800c012d87f0
 cargo	nu-ansi-term	0.50.3	MIT	Copyright (c) 2014 Benjamin Sago; Copyright (c) 2021-2022 The Nushell Project Developers	package-tree	cfdb7491dfa8800a1d561957d6a072ad63a6305ffa48386d04eae8eac8d65e8a
 cargo	num-bigint	0.4.8	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb
 cargo	num-bigint-dig	0.8.6	MIT/Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb
+cargo	num-complex	0.4.6	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb
 cargo	num-conv	0.2.2	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright (c) Jacob Pratt	package-tree	0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594,e2e245f2b566d0bfafb0f6a04c16b82d710c4e6e7d799e39bb4ef6e541b85b98
 cargo	num-integer	0.1.46	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb
 cargo	num-iter	0.1.46	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb
 cargo	num-traits	0.2.19	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb
 cargo	once_cell	1.21.4	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
+cargo	onig	6.5.3	MIT	Authors: Will Speak <will@willspeak.me>, Ivan Ivashchenko <defuz@me.com>	package-tree	e9c1238c5beb73c6cc130160418968058b21d486a7a445f0ceff27d51fbfdc44
+cargo	onig_sys	69.9.3	MIT	Authors: Will Speak <will@willspeak.me>, Ivan Ivashchenko <defuz@me.com>	package-tree	71f321038b088358004bee991635ac09e4c703bec467d3c30c06992c0595f189
 cargo	opaque-debug	0.3.1	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,f59f5a78193597e04fd932ee9af86254d14d08be5c9d0e003ab888feccce2161
+cargo	ort	2.0.0-rc.13	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30,6bba08de46289c40986a2e6b310e2da61fcea33b3c112c8320f6093f8f9cb71b
+cargo	ort-sys	2.0.0-rc.13	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30,6bba08de46289c40986a2e6b310e2da61fcea33b3c112c8320f6093f8f9cb71b
 cargo	p256	0.14.0	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,d8c4ab431f20da8452c9a217084163822e5fd9d134e1343903c929f2859fc8fd
 cargo	parking	2.2.1	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3,9a6d7a3c1b8edcc706c4b6c37f8dae9a77f02c7f9051df603f975db136b55419
 cargo	parking_lot	0.12.5	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,c9a75f18b9ab2927829a208fc6aa2cf4e63b8420887ba29cdb265d6619ae82d5
 cargo	parking_lot_core	0.9.12	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,c9a75f18b9ab2927829a208fc6aa2cf4e63b8420887ba29cdb265d6619ae82d5
+cargo	paste	1.0.15	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
+cargo	pastey	0.2.3	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	pem	3.0.6	MIT	Copyright (c) 2016 Jonathan Creekmore	package-tree	b7c76ff4466a3aeb6a7d903e81b651335e97d64ecb857e2ee9812a36c6fd1acf
 cargo	pem-rfc7468	0.7.0	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,90c503b61dee04e1449c323ec34c229dfb68d7adcb96c7e140ee55f70fce2d8e
 cargo	percent-encoding	2.3.2	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,b38f11f6096706e6de553dabe2a7ed142d59b6fa8c97e290c67496154745cdd5
@@ -174,6 +213,8 @@ cargo	pkcs8	0.10.2	Apache-2.0 OR MIT	copyright notice that is included in or att
 cargo	pkg-config	0.3.33	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397
 cargo	plain	0.2.3	MIT/Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,bc12b75fd81829814d843a03fa52aad0e53355b1f13665e309ff7fa33c66e5b5
 cargo	polyval	0.6.2	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,a291b6910744d262a9e953c3b5868d74510e20161359f649a11e1791fde84fcd
+cargo	portable-atomic	1.15.0	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
+cargo	portable-atomic-util	0.2.8	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	potential_utf	0.1.5	Unicode-3.0	COPYRIGHT AND PERMISSION NOTICE; Copyright © 2020-2024 Unicode, Inc.	package-tree	f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2
 cargo	powerfmt	0.2.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2023 Jacob Pratt et al.	package-tree	155420c6403d4e0fca34105e3c03fdd6939b64c393c7ec6f95f5b72c5474eab0,070dbc7dda03a29296f2d58bdb9b7331af90f2abc9f31df22875d1eabaf29852
 cargo	ppv-lite86	0.2.21	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2019 The CryptoCorrosion Contributors	package-tree	0218327e7a480793ffdd4eb792379a9709e5c135c7ba267f709d6f6d4d70af0a,4cada0bd02ea3692eee6f16400d86c6508bbd3bafb2b65fed0419f36d4f83e8f
@@ -184,15 +225,24 @@ cargo	quinn	0.11.11	MIT OR Apache-2.0	copyright notice that is included in or at
 cargo	quinn-proto	0.11.16	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4,4b2d0aca6789fa39e03d6738e869ea0988cceba210ca34ebb59c15c463e93a04
 cargo	quinn-udp	0.5.15	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4,4b2d0aca6789fa39e03d6738e869ea0988cceba210ca34ebb59c15c463e93a04
 cargo	quote	1.0.47	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
+cargo	r-efi	5.3.0	MIT OR Apache-2.0 OR LGPL-2.1-or-later	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright (C) 1991, 1999 Free Software Foundation, Inc.	clarify	f9c4c77baa3828004ee54b8a4f2db2e88ed44a6237a493965bf551fac0fcb62d,62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb
 cargo	r-efi	6.0.0	MIT OR Apache-2.0 OR LGPL-2.1-or-later	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright (C) 1991, 1999 Free Software Foundation, Inc.	clarify	f9c4c77baa3828004ee54b8a4f2db2e88ed44a6237a493965bf551fac0fcb62d,62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb
 cargo	rand	0.10.2	MIT OR Apache-2.0	copyright assignment is required to contribute to the Rand project.; copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5,35242e7a83f69875e6edeff02291e688c97caafe2f8902e4e19b49d3e78b4cab,209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b
 cargo	rand	0.8.7	MIT OR Apache-2.0	copyright assignment is required to contribute to the Rand project.; copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5,35242e7a83f69875e6edeff02291e688c97caafe2f8902e4e19b49d3e78b4cab,209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b
+cargo	rand	0.9.5	MIT OR Apache-2.0	copyright assignment is required to contribute to the Rand project.; copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5,35242e7a83f69875e6edeff02291e688c97caafe2f8902e4e19b49d3e78b4cab,209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b
 cargo	rand_chacha	0.3.1	MIT OR Apache-2.0	copyright assignment is required to contribute to the Rand project.; copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5,aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf,209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b
+cargo	rand_chacha	0.9.0	MIT OR Apache-2.0	copyright assignment is required to contribute to the Rand project.; copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5,35242e7a83f69875e6edeff02291e688c97caafe2f8902e4e19b49d3e78b4cab,209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b
 cargo	rand_core	0.10.1	MIT OR Apache-2.0	copyright assignment is required to contribute to the Rand project.; copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	92b81db30f7ab6d693e0af5661a40d273ca1947e891123ed823924192c10cbc7,6df43f6f4b5d4587f3d8d71e45532c688fd168afa5fe89d571cb32fa09c4ef51,8b6e9feec03e7c9a5facb26855cecd31662bf989b636bcfe79521bdf8ac863f0
 cargo	rand_core	0.6.4	MIT OR Apache-2.0	copyright assignment is required to contribute to the Rand project.; copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5,6df43f6f4b5d4587f3d8d71e45532c688fd168afa5fe89d571cb32fa09c4ef51,209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b
+cargo	rand_core	0.9.5	MIT OR Apache-2.0	copyright assignment is required to contribute to the Rand project.; copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5,6df43f6f4b5d4587f3d8d71e45532c688fd168afa5fe89d571cb32fa09c4ef51,209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b
 cargo	rand_pcg	0.10.2	MIT OR Apache-2.0	copyright assignment is required to contribute to the Rand project.; copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5,6df43f6f4b5d4587f3d8d71e45532c688fd168afa5fe89d571cb32fa09c4ef51,2234e3cefee876aeb686ad89e978bdb07bf118a1186ab1cf161bcdf69d4b4f57
+cargo	rawpointer	0.2.1	MIT/Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,7576269ea71f767b99297934c0b2367532690f8c4badc695edf8e04ab6a1e545
+cargo	rayon	1.12.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720
+cargo	rayon-cond	0.4.0	Apache-2.0/MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,27995d58ad5c1145c1a8cd86244ce844886958a35eb2b78c6b772748669999ac
+cargo	rayon-core	1.13.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720
 cargo	redox_syscall	0.5.18	MIT	Copyright (c) 2017 Redox OS Developers	package-tree	efcfee7981ff72431fffb06925cad00a23dce079ed4354f61030ad5abdb78829
 cargo	redox_syscall	0.9.1	MIT	Copyright (c) 2017 Redox OS Developers	package-tree	efcfee7981ff72431fffb06925cad00a23dce079ed4354f61030ad5abdb78829
+cargo	regex	1.13.1	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb
 cargo	regex-automata	0.4.16	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb
 cargo	regex-syntax	0.8.11	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb
 cargo	reqwest	0.12.28	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2016 Sean McArthur	package-tree	751963a8b88c0e3a9f27e98933079fbcf09b9998b2c13ac49c2e4d58444520d6,47d4e1803702728e03d30f8a848ae2249ba274bbd9f8443e803f7924d83cd371
@@ -201,11 +251,13 @@ cargo	ring	0.17.14	Apache-2.0 AND ISC	copyright notice that is included in or at
 cargo	rsa	0.9.10	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	rustc-hash	2.1.3	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	rustc_version	0.4.1	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,c9a75f18b9ab2927829a208fc6aa2cf4e63b8420887ba29cdb265d6619ae82d5
+cargo	rustix	1.1.5	Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	377c2e7c53250cc5905c0b0532d35973392af16ffb9596a41d99d202cf3617c9,a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	rustls	0.23.43	Apache-2.0 OR ISC OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,7cfafc877eccc46c0e346ccbaa5c51bb6b894d2b818e617d970211e232785ad4,709e3175b4212f7b13aa93971c9f62ff8c69ec45ad8c6532a7e0c41d7a7d6f8c
 cargo	rustls-pki-types	1.15.1	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2023 Dirkjan Ochtman	package-tree	45fd05c4865e7c350b98ad7ac50e1b15462d49af4a91e9b0c9dd933dc9a69742,9117d922e667125508dde62b02c1f57ed22f5ad21eb536aa2e2d99e1c796e639
 cargo	rustls-webpki	0.103.13	ISC	Copyright 2015 Brian Smith.; copyright notice and this permission notice appear in all copies.	package-tree	5b698ca13897be3afdb7174256fa1574f8c6892b8bea1a66dd6469d3fe27885a
 cargo	rustversion	1.0.23	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	ryu	1.0.23	Apache-2.0 OR BSL-1.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566
+cargo	safetensors	0.8.0	Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
 cargo	scopeguard	1.2.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,fb77f0a9c53e473abe5103c8632ef9f0f2874d4fb3f17cb2d8c661aab9cee9d7
 cargo	sec1	0.8.1	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,57a4d75c1d095bb94754a478f3cd15e60ac66a5c5627d844be01a918eea5fe88
 cargo	security-framework	3.7.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,91e934255ba3b2f21103d68c5581c23ef34aa95c4628e4405b8c901935e11c69
@@ -232,6 +284,7 @@ cargo	smallvec	1.15.2	MIT OR Apache-2.0	copyright notice that is included in or 
 cargo	socket2	0.6.5	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397
 cargo	spin	0.9.9	MIT	Copyright (c) 2014 Mathijs van de Nes	package-tree	58545fed1565e42d687aecec6897d35c6d37ccb71479a137c0deb2203e125c79
 cargo	spki	0.7.3	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,c995204cc6bad2ed67dd41f7d89bb9f1a9d48e0edd745732b30640d7912089a4
+cargo	spm_precompiled	0.1.4	Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
 cargo	sqlx	0.8.6	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2020 LaunchBadge, LLC	package-tree	b02a91171aa3ca67181a2b6e1c0f94be4d47d051e8dfc679bcc6a66fef74fd8e,44b1600a26039a75b28e1ce154a5dd163b16549f50e34fa577d9efe9c1bae179
 cargo	sqlx-core	0.8.6	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2020 LaunchBadge, LLC	package-tree	b02a91171aa3ca67181a2b6e1c0f94be4d47d051e8dfc679bcc6a66fef74fd8e,44b1600a26039a75b28e1ce154a5dd163b16549f50e34fa577d9efe9c1bae179
 cargo	sqlx-macros	0.8.6	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2020 LaunchBadge, LLC	package-tree	b02a91171aa3ca67181a2b6e1c0f94be4d47d051e8dfc679bcc6a66fef74fd8e,44b1600a26039a75b28e1ce154a5dd163b16549f50e34fa577d9efe9c1bae179
@@ -240,12 +293,15 @@ cargo	sqlx-mysql	0.8.6	MIT OR Apache-2.0	copyright notice that is included in or
 cargo	sqlx-postgres	0.8.6	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2020 LaunchBadge, LLC	package-tree	b02a91171aa3ca67181a2b6e1c0f94be4d47d051e8dfc679bcc6a66fef74fd8e,44b1600a26039a75b28e1ce154a5dd163b16549f50e34fa577d9efe9c1bae179
 cargo	sqlx-sqlite	0.8.6	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2020 LaunchBadge, LLC	package-tree	b02a91171aa3ca67181a2b6e1c0f94be4d47d051e8dfc679bcc6a66fef74fd8e,44b1600a26039a75b28e1ce154a5dd163b16549f50e34fa577d9efe9c1bae179
 cargo	stable_deref_trait	1.2.1	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,3c125f249fc6fb19f2415d027a0d9a170860583960ea53d08ea1d2b3f269d153
+cargo	static_assertions	1.1.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30,ea084a2373ebc1f0902c09266e7bf25a05ab3814c1805bb017ffa7308f90c061
 cargo	stringprep	0.1.5	MIT/Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright {yyyy} {name of copyright owner}	package-tree	c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08,a07450fd4496cb8b58466e6d529f1f502444eee4a235659337e9194d694739d6
+cargo	strsim	0.11.1	MIT	Copyright (c) 2015 Danny Guo; Copyright (c) 2016 Titus Wormer <tituswormer@gmail.com>; Copyright (c) 2018 Akash Kurdekar	package-tree	1e697ce8d21401fbf1bddd9b5c3fd4c4c79ae1e3bdf51f81761c85e11d5a89cd
 cargo	subtle	2.6.1	BSD-3-Clause	Copyright (c) 2016-2017 Isis Agora Lovecruft, Henry de Valence. All rights reserved.; Copyright (c) 2016-2024 Isis Agora Lovecruft. All rights reserved.	package-tree	d1fc1bc0d155df60b2e7705b6b2ae02a05c96f948e1cec6e2fb86360b09f346b
 cargo	syn	2.0.119	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	syn	3.0.3	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	sync_wrapper	1.0.2	Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594
 cargo	synstructure	0.13.2	MIT	Copyright 2016 Nika Layzell	package-tree	219920e865eee70b7dcfc948a86b099e7f4fe2de01bcca2ca9a20c0a033f2b59
+cargo	tempfile	3.27.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,8b427f5bc501764575e52ba4f9d95673cf8f6d80a86d0d06599852e1a9a20a36
 cargo	thiserror	1.0.69	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	thiserror	2.0.19	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	thiserror-impl	1.0.69	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
@@ -257,6 +313,7 @@ cargo	time-macros	0.2.32	MIT OR Apache-2.0	copyright notice that is included in 
 cargo	tinystr	0.8.3	Unicode-3.0	COPYRIGHT AND PERMISSION NOTICE; Copyright © 2020-2024 Unicode, Inc.	package-tree	f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2
 cargo	tinyvec	1.12.0	Zlib OR Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30,fd80a26fbb3f644af1fa994134446702932968519797227e07a1368dea80f0bc,84b34dd7608f7fb9b17bd588a6bf392bf7de504e2716f024a77d89f1b145a151
 cargo	tinyvec_macros	0.1.1	MIT OR Apache-2.0 OR Zlib	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2020 Tomasz "Soveu" Marx	package-tree	4f44572785f35152c1fd2eadf565b7e079c0f300b4324f0af653419f9d76b735,1dd8eca0f83669e75fa119e34fb9e1be9d16e3e9b6368962b8019db6e8ae5f7b,41ace205715d9f19a3214218cc1c01d57c533e02cd0fef7c8e51a49a7fce5ac5
+cargo	tokenizers	0.23.2	Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
 cargo	tokio	1.53.1	MIT	Copyright (c) Tokio Contributors	package-tree	253cd04c6714889df2d32f3f64d669179a1c95c76ac43c40882c52eb06bc3552
 cargo	tokio-macros	2.7.2	MIT	Copyright (c) 2019 Yoshua Wuyts; Copyright (c) Tokio Contributors	package-tree	0b83dc40cba89b9922bb84b0a9c7d2768ce37c1d7e138b7424fd4549915778c9
 cargo	tokio-rustls	0.26.4	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2017 quininer kel	package-tree	cc117d90b498b32b11a886f279b359da16a73c3b01efbb2f5cc004b20262334e,e20fa2b8e0a2565f24a792b94b4bf4b6c2b9d36f781d8a9516e218a036e6677a
@@ -276,7 +333,10 @@ cargo	typenum	1.20.1	MIT OR Apache-2.0	copyright notice that is included in or a
 cargo	unicode-bidi	0.3.18	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	edb20b474f6cbd4f4db066b54a9e0f687d0009d309412a63431189b59b8e2a07,a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0
 cargo	unicode-ident	1.0.24	(MIT OR Apache-2.0) AND Unicode-3.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; COPYRIGHT AND PERMISSION NOTICE	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3,f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1
 cargo	unicode-normalization	0.1.25	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	23860c2a7b5d96b21569afedf033469bab9fe14a1b24a35068b8641c578ce24d,a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0
+cargo	unicode-normalization-alignments	0.1.12	MIT/Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	23860c2a7b5d96b21569afedf033469bab9fe14a1b24a35068b8641c578ce24d,a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0
 cargo	unicode-properties	0.1.4	MIT/Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	23860c2a7b5d96b21569afedf033469bab9fe14a1b24a35068b8641c578ce24d,a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0
+cargo	unicode-segmentation	1.13.3	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	23860c2a7b5d96b21569afedf033469bab9fe14a1b24a35068b8641c578ce24d,a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0
+cargo	unicode_categories	0.1.1	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright {yyyy} {name of copyright owner}	package-tree	c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08,98a817e7b85e5fe4e79d165c656a4a139793b8b643d0f3d9cbcc3538ef82ec82
 cargo	universal-hash	0.5.1	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,6b50510a0400c72172355cc5d2ba0f2c5c2eb33149b8f96539dc345fdc484920
 cargo	untrusted	0.9.0	ISC	Authors: Brian Smith <brian@briansmith.org>	package-tree	7abd9b6960dcf7d4d0a48606a5b71bfe37d472db68d70637f3a58a56785f1621
 cargo	url	2.5.8	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,b38f11f6096706e6de553dabe2a7ed142d59b6fa8c97e290c67496154745cdd5
@@ -287,6 +347,7 @@ cargo	vcpkg	0.2.15	MIT/Apache-2.0	copyright notice that is included in or attach
 cargo	version_check	0.9.5	MIT/Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,b7e650f3fce5c53249d1cdc608b54df156a97edd636cf9d23498d0cfe7aec63e
 cargo	want	0.3.1	MIT	Copyright (c) 2018-2019 Sean McArthur	package-tree	a65f5d0a945d267751344c95665945b90c030ea107faf5c85d518929886187da
 cargo	wasi	0.11.1+wasi-snapshot-preview1	Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
+cargo	wasip2	1.0.4+wasi-0.2.12	Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	wasite	0.1.0	Apache-2.0 OR BSL-1.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	clarify	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566,f9c4c77baa3828004ee54b8a4f2db2e88ed44a6237a493965bf551fac0fcb62d
 cargo	wasm-bindgen	0.2.126	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397
 cargo	wasm-bindgen-futures	0.4.76	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397
@@ -325,6 +386,7 @@ cargo	windows_x86_64_gnullvm	0.48.5	MIT OR Apache-2.0	copyright notice that is i
 cargo	windows_x86_64_gnullvm	0.52.6	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright (c) Microsoft Corporation.	package-tree	c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b,c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383
 cargo	windows_x86_64_msvc	0.48.5	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright (c) Microsoft Corporation.	package-tree	c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b,c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383
 cargo	windows_x86_64_msvc	0.52.6	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright (c) Microsoft Corporation.	package-tree	c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b,c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383
+cargo	wit-bindgen	0.57.1	Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	wnaf	0.14.1	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,c1c9d5ca65122bab96e368709f8cfe9b92b443a3c21306c3260fc98eaac7e5fc
 cargo	writeable	0.6.3	Unicode-3.0	COPYRIGHT AND PERMISSION NOTICE; Copyright © 2020-2024 Unicode, Inc.	package-tree	f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2
 cargo	yoke	0.8.3	Unicode-3.0	COPYRIGHT AND PERMISSION NOTICE; Copyright © 2020-2024 Unicode, Inc.	package-tree	f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2
@@ -3800,6 +3862,36 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+-----
+
+### sha256:0444c6991eead6822f7b9102e654448d51624431119546492e8b231db42c48bb
+# as-filed: LICENSE-MIT
+-----
+Copyright (c) 2018 Tom Kaitchuck
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 -----
 
 ### sha256:04d9940b3b8b372bff74437c3b153eda8a89642669c4209a4f67135eb3132bc9
@@ -7863,6 +7955,32 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 -----
 
+### sha256:0d52feec79589df30138dad3800323fe5686b764b73347330a2dfef8ac83efe8
+# as-filed: LICENSE
+-----
+MIT License
+
+Copyright (c) 2021 Parker Timmerman
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-----
+
 ### sha256:0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594
 # as-filed: LICENSE-Apache
 -----
@@ -8720,6 +8838,30 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 -----
 
+### sha256:1c41c0e19caa2c20b0adfeb8219b606b21b7c63914aa3ae74ae3e091d7ce09ca
+# as-filed: LICENSE-ZLIB
+-----
+zlib License
+
+(C) 2019 Daniel Henry-Mantilla <daniel.henry.mantilla@gmail.com>
+
+This software is provided 'as-is', without any express or implied
+warranty.  In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.
+-----
+
 ### sha256:1cbe51b907662f6cb1492b16c359384a595180bf0e4d101603ed525e75c4e484
 # as-filed: LICENSE
 -----
@@ -8762,6 +8904,34 @@ the following restrictions:
 MIT License
 
 Copyright (c) 2020 Soveu
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-----
+
+### sha256:1e697ce8d21401fbf1bddd9b5c3fd4c4c79ae1e3bdf51f81761c85e11d5a89cd
+# as-filed: LICENSE
+-----
+The MIT License (MIT)
+
+Copyright (c) 2015 Danny Guo
+Copyright (c) 2016 Titus Wormer <tituswormer@gmail.com>
+Copyright (c) 2018 Akash Kurdekar
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -8828,6 +8998,38 @@ HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
 WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
+-----
+
+### sha256:1fd6747d2c8e80f9fa766f57c5888864774621deb85cc2838ccaed727db32d45
+# as-filed: LICENSE-MIT
+-----
+Copyright (c) 2015 - 2021 Ulrik Sverdrup "bluss",
+			  Jim Turner,
+			  and ndarray developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 -----
 
 ### sha256:209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b
@@ -9894,6 +10096,37 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+-----
+
+### sha256:29e9fe5074bd27e0e5d5d110394fbbcd841baee2651a3c4b4560a632702cede4
+# as-filed: LICENSE-MIT
+-----
+Copyright (c) 2018-2025 The rust-random Project Developers
+Copyright (c) 2014 The Rust Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 -----
 
 ### sha256:2a8a5d6197bb97a018b8a190dd3ed853d750ca87c8e80c17aad41d6c6ff448e1
@@ -11791,6 +12024,40 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 -----
 
+### sha256:3290ae0fbc9ddb77d2239121d710f0bb9d31b3b4744e6d97fe01e652b4c1870b
+# as-filed: COPYRIGHT
+-----
+Short version for non-lawyers:
+
+`linux-raw-sys` is triple-licensed under Apache 2.0 with the LLVM Exception,
+Apache 2.0, and MIT terms.
+
+
+Longer version:
+
+Copyrights in the `linux-raw-sys` project are retained by their contributors.
+No copyright assignment is required to contribute to the `linux-raw-sys`
+project.
+
+Some files include code derived from Rust's `libstd`; see the comments in
+the code for details.
+
+Except as otherwise noted (below and/or in individual files), `linux-raw-sys`
+is licensed under:
+
+ - the Apache License, Version 2.0, with the LLVM Exception
+   <LICENSE-Apache-2.0_WITH_LLVM-exception> or
+   <http://llvm.org/foundation/relicensing/LICENSE.txt>
+ - the Apache License, Version 2.0
+   <LICENSE-APACHE> or
+   <http://www.apache.org/licenses/LICENSE-2.0>,
+ - or the MIT license
+   <LICENSE-MIT> or
+   <http://opensource.org/licenses/MIT>,
+
+at your option.
+-----
+
 ### sha256:3488679340a49ecc34d342c4009d2dabf76f4a21f12aec2ca99b15805d656544
 # as-filed: LICENSE-MIT
 -----
@@ -12282,6 +12549,40 @@ limitations under the License.
 
 -----
 
+### sha256:377c2e7c53250cc5905c0b0532d35973392af16ffb9596a41d99d202cf3617c9
+# as-filed: COPYRIGHT
+-----
+Short version for non-lawyers:
+
+`rustix` is triple-licensed under Apache 2.0 with the LLVM Exception,
+Apache 2.0, and MIT terms.
+
+
+Longer version:
+
+Copyrights in the `rustix` project are retained by their contributors.
+No copyright assignment is required to contribute to the `rustix`
+project.
+
+Some files include code derived from Rust's `libstd`; see the comments in
+the code for details.
+
+Except as otherwise noted (below and/or in individual files), `rustix`
+is licensed under:
+
+ - the Apache License, Version 2.0, with the LLVM Exception
+   <LICENSE-Apache-2.0_WITH_LLVM-exception> or
+   <http://llvm.org/foundation/relicensing/LICENSE.txt>
+ - the Apache License, Version 2.0
+   <LICENSE-APACHE> or
+   <http://www.apache.org/licenses/LICENSE-2.0>,
+ - or the MIT license
+   <LICENSE-MIT> or
+   <http://opensource.org/licenses/MIT>,
+
+at your option.
+-----
+
 ### sha256:378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397
 # as-filed: LICENSE-MIT
 -----
@@ -12573,6 +12874,212 @@ have been licensed under extremely permissive terms.
 ------------------------------------------------------------------------------
 
 Copyright notices are retained in src/* files where relevant.
+-----
+
+### sha256:388e98b08de12ba8a9d4575883c8b0386c747cea188ed459380fc58d60da15c9
+# as-filed: LICENSE-APACHE
+-----
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright 2019 Daniel Henry-Mantilla <daniel.henry.mantilla@gmail.com>
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
 -----
 
 ### sha256:391a5396cec6230bfabd4ef4eb2350eb895bc5efce377a2218f5702ed020d3e3
@@ -14406,6 +14913,31 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -----
 
+### sha256:4dbda04344456f09a7a588140455413a9ac59b6b26a1ef7cdf9c800c012d87f0
+# as-filed: LICENSE
+-----
+Copyright (c) 2014-2019 Geoffroy Couprie
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+-----
+
 ### sha256:4eb7543b08d955a6d23fcc224601d43ff566e775be918805e26210d7f6eb4893
 # as-filed: LICENSE
 -----
@@ -14720,7 +15252,7 @@ DEALINGS IN THE SOFTWARE.
 -----
 
 ### sha256:508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1
-# as-filed: LICENSE_MIT
+# as-filed: LICENSE
 -----
 MIT License
 
@@ -15860,6 +16392,32 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 -----
 
+### sha256:603fb27ef3266ea516872eefd9ae587746b8c34614a35c0fb24e4e9e0c17e137
+# as-filed: LICENSE-MIT
+-----
+MIT License
+
+Copyright (c) 2019 Daniel Henry-Mantilla <daniel.henry.mantilla@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-----
+
 ### sha256:60e0b68c0f35c078eef3a5d29419d0b03ff84ec1df9c3f9d6e39a519a5ae7985
 # as-filed: LICENSE
 -----
@@ -16758,6 +17316,33 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 -----
 
+### sha256:6bba08de46289c40986a2e6b310e2da61fcea33b3c112c8320f6093f8f9cb71b
+# as-filed: LICENSE-MIT
+-----
+MIT License
+
+Copyright (c) 2023-2026 pyke.io
+Copyright (c) 2020 Nicolas Bigaouette
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-----
+
 ### sha256:6c935d087a2992d0f092665400a2fa99c98db58d96fbe29368f8f48182bed9aa
 # as-filed: COPYRIGHT
 -----
@@ -17143,6 +17728,41 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR
 ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+-----
+
+### sha256:71f321038b088358004bee991635ac09e4c703bec467d3c30c06992c0595f189
+# as-filed: LICENSE.md
+-----
+# Rust-Onig is Open Source!
+
+All source code in this repository is distributed under the terms of
+the *MIT License* unless otherwise stated. The Oniguruma source code
+remains the property of the original authors and is re-distributed
+under the original license, see [COPYING](oniguruma/COPYING) for more
+information.
+
+> The MIT License (MIT)
+> 
+> Copyright (c) 2015 Will Speak <will@willspeak.me>, Ivan Ivashchenko
+> <defuz@me.com>, and contributors.
+> 
+> Permission is hereby granted, free of charge, to any person obtaining a copy
+> of this software and associated documentation files (the "Software"), to deal
+> in the Software without restriction, including without limitation the rights
+> to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+> copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions:
+> 
+> The above copyright notice and this permission notice shall be included in all
+> copies or substantial portions of the Software.
+> 
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+> IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+> FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+> AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+> LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+> OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+> SOFTWARE.
 -----
 
 ### sha256:7365cc8878a1d7ce155a58c4ca09c3d7a6be413efa5334a80ea842912b669349
@@ -17818,6 +18438,38 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+-----
+
+### sha256:792d075c7bad6dac258a44e799eb64cbf465e24d9932d27669be08c5ec957e27
+# as-filed: LICENSE-MIT
+-----
+Copyright (c) 2016 - 2023 Ulrik Sverdrup "bluss"
+Copyirhgt (c) 2018 R. Janis Goldschmidt
+Copyright (c) 2021 DutchGhost [constparse.rs]
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 -----
 
 ### sha256:798e82590af6a84bfbde3d6bb0fb9162c519edf16122404fea00acefdc55cbd9
@@ -19513,6 +20165,36 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -----
 
+### sha256:8b427f5bc501764575e52ba4f9d95673cf8f6d80a86d0d06599852e1a9a20a36
+# as-filed: LICENSE-MIT
+-----
+Copyright (c) 2015 Steven Allen
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+-----
+
 ### sha256:8b43ce8accd61e9d370b5ca9e9c4f953279b5c239926c62315b40e24df51b726
 # as-filed: LICENSE-MIT
 -----
@@ -19833,6 +20515,32 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 -----
 
+### sha256:8c9612877aacfa1b42f5e80b679e6c3c93a7ba2bb99dfaf6e87e200dca4b4e6c
+# as-filed: LICENSE-MIT
+-----
+The MIT License (MIT)
+
+Copyright (c) 2016 rust-derive-builder contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-----
+
 ### sha256:8ce0830173fdac609dfb4ea603fdc002c2f4af0dc9b1a005653f5da9cf534b18
 # as-filed: LICENSE
 -----
@@ -19913,6 +20621,32 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+-----
+
+### sha256:8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6
+# as-filed: LICENSE
+-----
+MIT License
+
+Copyright (c) 2017 Ted Driggs
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 -----
 
 ### sha256:9060d3e477a57e94563100d089ee07a1bf3342f149fd7366913abf2b4b54f04b
@@ -20507,6 +21241,30 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 -----
 
+### sha256:98a817e7b85e5fe4e79d165c656a4a139793b8b643d0f3d9cbcc3538ef82ec82
+# as-filed: LICENSE-MIT
+-----
+Copyright (c) 2015 The unicode-categories Developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-----
+
 ### sha256:9a39f2aadab11a3697edd668ff2d8ad885b649737b7ab4d3bf12b34e5ada0c86
 # as-filed: LICENSE
 -----
@@ -20936,6 +21694,212 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+-----
+
+### sha256:a05c7bf1bcb6c0e1160fafb8b172749a696da503a30e2ba70485c8c1c45a602c
+# as-filed: LICENSE
+-----
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright 2026 Anush008
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
 -----
 
 ### sha256:a07450fd4496cb8b58466e6d529f1f502444eee4a235659337e9194d694739d6
@@ -22931,6 +23895,23 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 -----
 
+### sha256:b29f8b01452350c20dd1af16ef83b598fea3053578ccc1c7a0ef40e57be2620f
+# as-filed: LICENSE
+-----
+Copyright © 2015, Simonas Kazlauskas
+
+Permission to use, copy, modify, and/or distribute this software for any purpose with or without
+fee is hereby granted, provided that the above copyright notice and this permission notice appear
+in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS
+SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE
+AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT,
+NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
+-----
+
 ### sha256:b3470648aff02beb36d7a53240fc9260ed80ed93bd43bace6b67d7ef7336ee33
 # as-filed: LICENSE-MIT
 -----
@@ -24134,7 +25115,7 @@ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTH
 -----
 
 ### sha256:c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
-# as-filed: LICENSE-APACHE
+# as-filed: LICENSE
 -----
                                  Apache License
                            Version 2.0, January 2004
@@ -26116,6 +27097,48 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 -----
 
+### sha256:dbe1fff0fb1314b6af94f161511406275cf01c5a32441fbf24528a57a051d599
+# as-filed: LICENSE.md
+-----
+Minimal-lexical is dual licensed under the Apache 2.0 license as well as the MIT
+license. See the LICENCE-MIT and the LICENCE-APACHE files for the licenses.
+
+---
+
+`src/bellerophon.rs` is loosely based off the Golang implementation,
+found [here](https://github.com/golang/go/blob/b10849fbb97a2244c086991b4623ae9f32c212d0/src/strconv/extfloat.go).
+That code (used if the `compact` feature is enabled) is subject to a
+[3-clause BSD license](https://github.com/golang/go/blob/b10849fbb97a2244c086991b4623ae9f32c212d0/LICENSE):
+
+Copyright (c) 2009 The Go Authors. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+   * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+   * Neither the name of Google Inc. nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-----
+
 ### sha256:dc63692c70bf95b67d9059b0fa660a9189a0cfa054e9d5fda89ed35aca262901
 # as-filed: LICENSE
 -----
@@ -27016,6 +28039,66 @@ SOFTWARE.
 
 -----
 
+### sha256:e9c1238c5beb73c6cc130160418968058b21d486a7a445f0ceff27d51fbfdc44
+# as-filed: LICENSE.md
+-----
+# Rust-Onig is Open Source!
+
+All source code in this repository is distributed under the terms of
+the *MIT License* unless otherwise stated. The Oniguruma source code
+remains the property of the original authors and is re-distributed
+under the original license.
+
+> The MIT License (MIT)
+> 
+> Copyright (c) 2015 Will Speak <will@willspeak.me>, Ivan Ivashchenko
+> <defuz@me.com>, and contributors.
+> 
+> Permission is hereby granted, free of charge, to any person obtaining a copy
+> of this software and associated documentation files (the "Software"), to deal
+> in the Software without restriction, including without limitation the rights
+> to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+> copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions:
+> 
+> The above copyright notice and this permission notice shall be included in all
+> copies or substantial portions of the Software.
+> 
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+> IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+> FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+> AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+> LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+> OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+> SOFTWARE.
+-----
+
+### sha256:ea084a2373ebc1f0902c09266e7bf25a05ab3814c1805bb017ffa7308f90c061
+# as-filed: LICENSE-MIT
+-----
+MIT License
+
+Copyright (c) 2017 Nikolai Vazquez
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-----
+
 ### sha256:eafbfa606bc005ed7fd2f623d65af17ffe4ef7c017221ac14405bf4140771ea9
 # as-filed: LICENSE
 -----
@@ -27771,6 +28854,32 @@ DEALINGS IN THE SOFTWARE.
 MIT License
 
 Copyright (c) 2024 Tinylibs
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-----
+
+### sha256:f98e09091d5ae02b2f2ec1ead4f7f28c4c44d1cb98b078739ba67091637e170c
+# as-filed: LICENSE
+-----
+MIT License
+
+Copyright (c) 2021 Stephen M. Coakley
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

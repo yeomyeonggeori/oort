@@ -699,6 +699,28 @@ export function parseEditedMemoryItem(value: unknown): EditedMemoryItem {
   return { item: requireItem(source.item), evidence: requireEvidence(source), supersededId };
 }
 
+/** What a consolidation revert undid: a merge, a decision closing (`superseded`) or a decay. */
+export type ConsolidationRevertKind = "merged" | "superseded" | "decayed";
+
+export interface RevertedConsolidation {
+  reverted: ConsolidationRevertKind;
+  itemId: string;
+}
+
+export function parseRevertedConsolidation(value: unknown): RevertedConsolidation {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  const reverted = str(source, "reverted");
+  const itemId = str(source, "itemId");
+  if (
+    itemId === undefined ||
+    (reverted !== "merged" && reverted !== "superseded" && reverted !== "decayed")
+  ) {
+    throw new WireShapeError();
+  }
+  return { reverted, itemId };
+}
+
 /** How many item rows a forget removed (the item plus its older versions). */
 export function parseForgottenCount(value: unknown): number {
   const count = num(value, "forgottenCount");

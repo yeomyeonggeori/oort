@@ -18,6 +18,7 @@
 //   GET    /v1/workspaces/{ws}/memory/items/{id}/events        lifecycle ledger
 //   PATCH  /v1/workspaces/{ws}/memory/items/{id}               edit (new item supersedes the old)
 //   DELETE /v1/workspaces/{ws}/memory/items/{id}               forget (permanent)
+//   POST   /v1/workspaces/{ws}/memory/items/{id}/events/{event}/revert   undo a consolidation event (#3172)
 //
 // Permission failures are 403, hidden rows are 404 or an empty list; callers
 // branch on `ApiError.status`, they do not filter results themselves.
@@ -31,6 +32,7 @@ import {
   parseChannelMemorySettings,
   parseEditedMemoryItem,
   parseForgottenCount,
+  parseRevertedConsolidation,
   parseMemoryItemDetail,
   parseMemoryItemEvents,
   parseMemoryItemEvidence,
@@ -52,6 +54,7 @@ import {
   type MemoryItemDetail,
   type MemoryItemEvent,
   type MemoryItemPage,
+  type RevertedConsolidation,
   type ListMemoryProposalsOptions,
   type MemberMemorySettings,
   type MemoryDigest,
@@ -281,4 +284,19 @@ export function forgetMemoryItem(workspaceId: string, itemId: string): Promise<n
   return memoryRequest(itemPath(workspaceId, itemId), { method: "DELETE" }).then(
     parseForgottenCount
   );
+}
+
+/**
+ * Undo one consolidation event of an item — a merge, a decision closing or a decay (ADR-0196 D4/D9).
+ * Anyone who can read the item may (guests: 403); a 404 `ApiError` for a missing/unreadable item or event,
+ * 409 when the change no longer stands or would bring back forgotten content.
+ */
+export function revertMemoryConsolidation(
+  workspaceId: string,
+  itemId: string,
+  eventId: string
+): Promise<RevertedConsolidation> {
+  return memoryRequest(`${itemPath(workspaceId, itemId)}/events/${encodeURIComponent(eventId)}/revert`, {
+    method: "POST",
+  }).then(parseRevertedConsolidation);
 }

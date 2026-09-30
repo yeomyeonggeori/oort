@@ -64,13 +64,59 @@ DECLARE
   f text;
   runtime_roles text[] := ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin'];
   worker_only text[] := ARRAY[
-    'mem_apply_digest(uuid, uuid, text, bigint, bigint, text, uuid[], text, text, text, uuid[], timestamptz[], timestamptz)',
+    'mem_add_item(uuid, text, text, text, uuid[], real, boolean, text, text)',
+    'mem_adjust_tokens(bigint)',
     'mem_advance_cursor(uuid, bigint, uuid, timestamptz)',
-    'mem_record_serving(uuid, uuid, uuid[], uuid[], integer, integer, integer)',
-    'mem_digest_rollup_inputs(uuid, uuid, text, bigint, bigint)',
+    'mem_apply_digest(uuid, uuid, text, bigint, bigint, text, uuid[], text, text, text, uuid[], timestamptz[], timestamptz)',
+    'mem_channel_eligible(uuid)',
     'mem_channel_switch(uuid)',
+    'mem_cons_apply(uuid, uuid, text)',
+    'mem_cons_begin(uuid, uuid, double precision, timestamptz)',
+    'mem_cons_decay(uuid, integer)',
+    'mem_cons_defer_pair(uuid, uuid)',
+    'mem_cons_finish(uuid, uuid, boolean, integer)',
+    'mem_cons_pairs(uuid, real, real, integer)',
+    'mem_cons_purge_proposals(uuid)',
+    'mem_cons_reconcile(uuid)',
+    'mem_cons_renew(uuid, uuid, double precision)',
+    'mem_cons_retention(uuid, integer, integer, integer)',
+    'mem_cons_retire_dead(uuid, integer)',
+    'mem_cons_revert(uuid)',
+    'mem_cursor_state(uuid)',
+    'mem_digest_audience_ok(uuid, uuid, uuid)',
+    'mem_digest_index(uuid, text, bigint)',
     'mem_digest_live(uuid)',
-    'mem_digest_audience_ok(uuid, uuid, uuid)'
+    'mem_digest_rollup_inputs(uuid, uuid, text, bigint, bigint)',
+    'mem_drop_digest(uuid)',
+    'mem_embedding_stats(text)',
+    'mem_item_audience_ok(uuid, uuid, uuid)',
+    'mem_item_live(uuid)',
+    'mem_item_readable_by(uuid, uuid)',
+    'mem_items_to_embed(text, integer)',
+    'mem_propose_item(uuid, text, text, text, uuid[])',
+    'mem_record_serving(uuid, uuid, uuid[], uuid[], integer, integer, integer)',
+    'mem_reserve_tokens(bigint, bigint)',
+    'mem_search_items_for(uuid, text, integer, uuid)',
+    'mem_serve_candidates(uuid, bigint, integer, integer)',
+    'mem_serve_items_fused(uuid, integer, integer, text, text, real, real)',
+    'mem_serve_items(uuid, integer, integer)',
+    'mem_serve_query(uuid)',
+    'mem_serve_requester(uuid)',
+    'mem_serving_of(uuid)',
+    'mem_serving_record_of(uuid)',
+    'mem_set_item_embedding(uuid, text, text)',
+    'mem_stale_digests(integer, integer)',
+    'mem_suppressed_messages(uuid, uuid[])',
+    'mem_token_budget(bigint)',
+    'mem_topic_assign(uuid, uuid, text, integer)',
+    'mem_topic_gc(uuid)',
+    'mem_topic_leaves(uuid)',
+    'mem_topic_revert(uuid)',
+    'mem_topic_set_summary(uuid, text, uuid[], text, text)',
+    'mem_topic_split_apply(uuid, text[], uuid[], integer[], integer)',
+    'mem_topic_split_candidates(uuid, integer, integer)',
+    'mem_topic_summary_work(uuid, integer, integer, integer)',
+    'mem_topic_unassigned(uuid, integer)'
   ];
 BEGIN
   IF to_regclass('public.mem_digest') IS NULL THEN
@@ -83,6 +129,9 @@ BEGIN
       CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
       IF r = 'momo_app' AND t = 'mem_settings' THEN
         EXECUTE format('REVOKE TRUNCATE, REFERENCES, TRIGGER ON TABLE public.%I FROM %I', t, r);
+      ELSIF r = 'momo_app' AND t IN ('mem_topic', 'mem_topic_summary') THEN
+        -- #3172 B-4: no read route exists yet, so the API role has no SELECT on the topic tables either.
+        EXECUTE format('REVOKE ALL ON TABLE public.%I FROM %I', t, r);
       ELSIF r = 'momo_app' THEN
         EXECUTE format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.%I FROM %I', t, r);
       ELSE
@@ -91,6 +140,9 @@ BEGIN
     END LOOP;
   END LOOP;
   FOREACH f IN ARRAY worker_only LOOP
+    -- L-9 (#3200): the list names every worker-only function of every migration; an older database that
+    -- has not run a later migration yet simply does not have some of them.
+    CONTINUE WHEN to_regprocedure(format('public.%s', f)) IS NULL;
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC', f);
     FOREACH r IN ARRAY runtime_roles LOOP
       IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN

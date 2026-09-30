@@ -197,6 +197,90 @@ pub struct MemoryConfig {
     /// `MEMORY_SERVE_TIMEOUT_MS` (3000) — the whole serving step (read + receipt). Past it the
     /// reply goes out without memory; a slow database never delays an answer beyond this.
     pub serve_timeout: Duration,
+    /// `MEMORY_CONSOLIDATE_ENABLED` (**on**; `0|false|no|off` turns it off) — #3172: the daily
+    /// consolidation job (merge duplicates, close superseded decisions, decay, retention). Off
+    /// leaves the data as it is; it does not affect the summary loop or serving.
+    pub consolidate_enabled: bool,
+    /// `MEMORY_CONSOLIDATE_POLL_SECONDS` (300) — how often the loop looks for a channel that is due.
+    pub consolidate_poll_interval: Duration,
+    /// `MEMORY_CONSOLIDATE_HOUR` (4) / `MEMORY_CONSOLIDATE_MINUTE` (30) — the workspace-local time of
+    /// the daily slot (plan §6.1: 04:30). A channel runs once per slot, after the slot opens.
+    pub consolidate_hour: i64,
+    pub consolidate_minute: i64,
+    /// `MEMORY_CONSOLIDATE_MAX_CHANNELS` (2000) — channels one sweep looks at.
+    pub consolidate_max_channels: i64,
+    /// `MEMORY_CONSOLIDATE_MAX_CALLS` (30) — model calls one channel may spend per run.
+    pub consolidate_max_calls: usize,
+    /// `MEMORY_CONSOLIDATE_TOKEN_SHARE_PERCENT` (80) — consolidation stops once the workspace's day usage
+    /// reaches this share of the daily cap, so it can never starve the summaries (which stop only at 100 %).
+    pub consolidate_token_share_percent: i64,
+    /// `MEMORY_CONSOLIDATE_MERGE_SIMILARITY` (0.55) / `MEMORY_CONSOLIDATE_CLOSE_SIMILARITY` (0.5) — trigram
+    /// similarity that makes a pair a merge / decision-closing candidate.
+    pub consolidate_merge_similarity: f32,
+    pub consolidate_close_similarity: f32,
+    /// `MEMORY_CONSOLIDATE_MAX_OUTPUT_TOKENS` (40) — a verdict is one word.
+    pub consolidate_max_output_tokens: i32,
+    /// `MEMORY_CONSOLIDATE_LEASE_SECONDS` (900) — the consolidation lease of a channel; renewed after every model call.
+    pub consolidate_lease_seconds: f64,
+    /// `MEMORY_CONSOLIDATE_RETRY_SECONDS` (1800) — when a run stopped at the token cap, try again after this.
+    pub consolidate_retry_seconds: i32,
+    /// `MEMORY_RETIRED_RETENTION_DAYS` (90) / `MEMORY_WINDOW_RETENTION_DAYS` (90) — retention (plan §6.3, §6.5).
+    pub retired_retention_days: i32,
+    pub window_retention_days: i32,
+    /// `MEMORY_TOPICS_ENABLED` (**on**) — #3172 B: assign items to topics, split, summarise (needs the consolidation loop).
+    pub topics_enabled: bool,
+    /// `MEMORY_TOPIC_CAP` (125) — live items per topic node before it is split (plan §6.2).
+    pub topic_cap: i32,
+    /// `MEMORY_TOPIC_SPLIT_SAMPLE` (160) — items the model classifies when it splits one.
+    pub topic_split_sample: i32,
+    /// `MEMORY_TOPIC_MAX_ROOTS` (60) — root topics per channel (more labels are refused).
+    pub topic_max_roots: i32,
+    /// `MEMORY_TOPIC_BATCH` (20) — items per assignment call.
+    pub topic_batch: i32,
+    /// `MEMORY_TOPIC_SUMMARIES_PER_RUN` (5) / `MEMORY_TOPIC_SUMMARY_MIN_ITEMS` (3) — summaries rewritten per channel per run, and the fewest
+    /// live items a topic needs to have one.
+    pub topic_summaries_per_run: i32,
+    pub topic_summary_min_items: i32,
+    /// `MEMORY_TOPIC_MAX_OUTPUT_TOKENS` (400) — output allowance of an assignment / split / summary call.
+    pub topic_max_output_tokens: i32,
+    /// `MEMORY_EMBED_ENABLED` (**on**; `0|false|no|off` turns it off) — #3173: embed items locally
+    /// (multilingual-e5-small, int8) and fuse vector similarity into item serving. On means "when
+    /// the model directory loads": with no model the worker logs once and serves keyword-only, so
+    /// on-by-default costs a self-hoster without the model nothing. Off = M2 behaviour exactly.
+    pub embed_enabled: bool,
+    /// `MEMORY_EMBED_MODEL_DIR` (`/opt/momo/models/e5-small-int8`, where the image puts it) — the
+    /// directory holding `model_qint8.onnx` and the tokenizer files.
+    pub embed_model_dir: String,
+    /// `MEMORY_EMBED_THREADS` (2) — ONNX Runtime intra-op threads; small so embedding never
+    /// starves the reply path.
+    pub embed_threads: usize,
+    /// `MEMORY_EMBED_QUERY_TIMEOUT_MS` (250) — the query embedding's own budget inside
+    /// `serve_timeout`. Past it (or on any error) the reply is served keyword-only.
+    pub embed_query_timeout: Duration,
+    /// `MEMORY_EMBED_MIN_SIMILARITY` (0.80) — cosine floor for a vector neighbour to be a
+    /// candidate at all. e5 similarities are compressed (unrelated text still scores ~0.7), so
+    /// this, not the top-N cut, is what keeps unrelated items out.
+    pub embed_min_similarity: f32,
+    /// `MEMORY_EMBED_MARGIN` — a vector neighbour must also be within this cosine distance of the
+    /// nearest one the requester may see. The absolute floor cannot separate "about this" from
+    /// "same field" (e5 scores both 0.79-0.9); the margin keeps the tail of merely-similar items
+    /// out of the reply.
+    pub embed_margin: f32,
+    /// `MEMORY_EMBED_POLL_SECONDS` (30) — the embedding sweep's tick (it also wakes when this
+    /// process stores a new item).
+    pub embed_poll_interval: Duration,
+    /// `MEMORY_EMBED_BATCH` (16) — items embedded per model call (smaller = lower peak memory
+    /// and a shorter wait for a serving query queued behind it).
+    pub embed_batch: usize,
+    /// `MEMORY_EMBED_MAX_PER_SWEEP` (200) — items one workspace gets embedded per sweep: the
+    /// backfill's rate limit (a 5,000-item history drains over ~13 minutes at the default poll).
+    pub embed_max_per_sweep: usize,
+    /// `MEMORY_EMBED_MAX_WORKSPACES` (1000) — workspaces per page; a sweep pages through all of them.
+    pub embed_max_workspaces: i64,
+    /// `MEMORY_EMBED_MIN_MEMORY_MB` (1536) — when the container's cgroup memory limit is known and
+    /// smaller than this, embedding turns itself off with one warning (the loaded model measured
+    /// ~0.9 GiB resident on arm64; an OOM-killed worker would also stop answering). 0 disables the check.
+    pub embed_min_memory_mb: u64,
 }
 
 impl Default for MemoryConfig {
@@ -231,6 +315,39 @@ impl Default for MemoryConfig {
             serve_item_budget_chars: 3_000,
             serve_max_items: 8,
             serve_timeout: Duration::from_millis(3_000),
+            consolidate_enabled: true,
+            consolidate_poll_interval: Duration::from_secs(300),
+            consolidate_hour: 4,
+            consolidate_minute: 30,
+            consolidate_max_channels: 2_000,
+            consolidate_max_calls: 30,
+            consolidate_token_share_percent: 80,
+            consolidate_merge_similarity: 0.55,
+            consolidate_close_similarity: 0.6,
+            consolidate_max_output_tokens: 40,
+            consolidate_lease_seconds: 900.0,
+            consolidate_retry_seconds: 1_800,
+            retired_retention_days: 90,
+            window_retention_days: 90,
+            topics_enabled: true,
+            topic_cap: 125,
+            topic_split_sample: 160,
+            topic_max_roots: 60,
+            topic_batch: 20,
+            topic_summaries_per_run: 5,
+            topic_summary_min_items: 3,
+            topic_max_output_tokens: 400,
+            embed_enabled: true,
+            embed_model_dir: "/opt/momo/models/e5-small-int8".to_string(),
+            embed_threads: 2,
+            embed_query_timeout: Duration::from_millis(250),
+            embed_min_similarity: 0.80,
+            embed_margin: 0.04,
+            embed_poll_interval: Duration::from_secs(30),
+            embed_batch: 16,
+            embed_max_per_sweep: 200,
+            embed_max_workspaces: 1_000,
+            embed_min_memory_mb: 1_536,
         }
     }
 }
@@ -299,6 +416,131 @@ impl MemoryConfig {
                 )?
                 .clamp(200, 30_000),
             ),
+            consolidate_enabled: report_protocol_enabled(
+                env("MEMORY_CONSOLIDATE_ENABLED").as_deref(),
+            ),
+            consolidate_poll_interval: Duration::from_secs(
+                env_number(
+                    "MEMORY_CONSOLIDATE_POLL_SECONDS",
+                    d.consolidate_poll_interval.as_secs(),
+                )?
+                .max(1),
+            ),
+            consolidate_hour: env_number("MEMORY_CONSOLIDATE_HOUR", d.consolidate_hour)?
+                .clamp(0, 23),
+            consolidate_minute: env_number("MEMORY_CONSOLIDATE_MINUTE", d.consolidate_minute)?
+                .clamp(0, 59),
+            consolidate_max_channels: env_number(
+                "MEMORY_CONSOLIDATE_MAX_CHANNELS",
+                d.consolidate_max_channels,
+            )?
+            .max(1),
+            consolidate_max_calls: env_number(
+                "MEMORY_CONSOLIDATE_MAX_CALLS",
+                d.consolidate_max_calls,
+            )?
+            .clamp(1, 500),
+            consolidate_token_share_percent: env_number(
+                "MEMORY_CONSOLIDATE_TOKEN_SHARE_PERCENT",
+                d.consolidate_token_share_percent,
+            )?
+            .clamp(1, 100),
+            consolidate_merge_similarity: env_number(
+                "MEMORY_CONSOLIDATE_MERGE_SIMILARITY",
+                d.consolidate_merge_similarity,
+            )?
+            .clamp(0.1, 1.0),
+            consolidate_close_similarity: env_number(
+                "MEMORY_CONSOLIDATE_CLOSE_SIMILARITY",
+                d.consolidate_close_similarity,
+            )?
+            .clamp(0.05, 1.0),
+            consolidate_lease_seconds: env_number(
+                "MEMORY_CONSOLIDATE_LEASE_SECONDS",
+                d.consolidate_lease_seconds,
+            )?
+            .clamp(30.0, 3600.0),
+            consolidate_max_output_tokens: env_number(
+                "MEMORY_CONSOLIDATE_MAX_OUTPUT_TOKENS",
+                d.consolidate_max_output_tokens,
+            )?
+            .clamp(8, 400),
+            consolidate_retry_seconds: env_number(
+                "MEMORY_CONSOLIDATE_RETRY_SECONDS",
+                d.consolidate_retry_seconds,
+            )?
+            .clamp(60, 86_400),
+            retired_retention_days: env_number(
+                "MEMORY_RETIRED_RETENTION_DAYS",
+                d.retired_retention_days,
+            )?
+            .clamp(1, 3650),
+            window_retention_days: env_number(
+                "MEMORY_WINDOW_RETENTION_DAYS",
+                d.window_retention_days,
+            )?
+            .clamp(1, 3650),
+            topics_enabled: report_protocol_enabled(env("MEMORY_TOPICS_ENABLED").as_deref()),
+            topic_cap: env_number("MEMORY_TOPIC_CAP", d.topic_cap)?.clamp(4, 1000),
+            topic_split_sample: env_number("MEMORY_TOPIC_SPLIT_SAMPLE", d.topic_split_sample)?
+                .clamp(10, 400),
+            topic_max_roots: env_number("MEMORY_TOPIC_MAX_ROOTS", d.topic_max_roots)?.clamp(1, 500),
+            topic_batch: env_number("MEMORY_TOPIC_BATCH", d.topic_batch)?.clamp(1, 50),
+            topic_summaries_per_run: env_number(
+                "MEMORY_TOPIC_SUMMARIES_PER_RUN",
+                d.topic_summaries_per_run,
+            )?
+            .clamp(0, 20),
+            topic_summary_min_items: env_number(
+                "MEMORY_TOPIC_SUMMARY_MIN_ITEMS",
+                d.topic_summary_min_items,
+            )?
+            .clamp(1, 40),
+            topic_max_output_tokens: env_number(
+                "MEMORY_TOPIC_MAX_OUTPUT_TOKENS",
+                d.topic_max_output_tokens,
+            )?
+            .clamp(50, 2000),
+            embed_enabled: report_protocol_enabled(env("MEMORY_EMBED_ENABLED").as_deref()),
+            embed_model_dir: env("MEMORY_EMBED_MODEL_DIR")
+                .filter(|v| !v.trim().is_empty())
+                .unwrap_or(d.embed_model_dir),
+            embed_threads: env_number("MEMORY_EMBED_THREADS", d.embed_threads)?.clamp(1, 16),
+            embed_query_timeout: Duration::from_millis(
+                env_number(
+                    "MEMORY_EMBED_QUERY_TIMEOUT_MS",
+                    d.embed_query_timeout.as_millis() as u64,
+                )?
+                .clamp(20, 2_000),
+            ),
+            embed_min_similarity: {
+                let v: f32 = env_number("MEMORY_EMBED_MIN_SIMILARITY", d.embed_min_similarity)?;
+                if v.is_finite() {
+                    v.clamp(0.0, 1.0)
+                } else {
+                    d.embed_min_similarity
+                }
+            },
+            embed_margin: {
+                let v: f32 = env_number("MEMORY_EMBED_MARGIN", d.embed_margin)?;
+                if v.is_finite() {
+                    v.clamp(0.0, 1.0)
+                } else {
+                    d.embed_margin
+                }
+            },
+            embed_poll_interval: Duration::from_secs(
+                env_number("MEMORY_EMBED_POLL_SECONDS", d.embed_poll_interval.as_secs())?.max(1),
+            ),
+            embed_batch: env_number("MEMORY_EMBED_BATCH", d.embed_batch)?.clamp(1, 64),
+            embed_max_per_sweep: env_number("MEMORY_EMBED_MAX_PER_SWEEP", d.embed_max_per_sweep)?
+                .clamp(1, 5_000),
+            embed_max_workspaces: env_number(
+                "MEMORY_EMBED_MAX_WORKSPACES",
+                d.embed_max_workspaces,
+            )?
+            .clamp(1, 100_000),
+            embed_min_memory_mb: env_number("MEMORY_EMBED_MIN_MEMORY_MB", d.embed_min_memory_mb)?,
         })
     }
 }
@@ -548,6 +790,30 @@ mod tests {
         assert_eq!(policy.operator_hosts, vec!["mock-hermes".to_string()]);
     }
     use super::*;
+
+    /// #3173: embedding is on by default (with no model it degrades to keyword-only, so on is
+    /// safe), reads the image's model directory, and every number is inside the range the
+    /// operator can only make slower or smaller.
+    #[test]
+    fn embedding_defaults_are_on_and_point_at_the_images_model_directory() {
+        let d = MemoryConfig::default();
+        assert!(d.embed_enabled);
+        assert_eq!(d.embed_model_dir, "/opt/momo/models/e5-small-int8");
+        assert_eq!(d.embed_query_timeout, Duration::from_millis(250));
+        assert!(
+            d.embed_query_timeout < d.serve_timeout,
+            "the query budget sits inside the serving budget"
+        );
+        assert!((0.0..=1.0).contains(&d.embed_min_similarity));
+        assert!((0.0..=1.0).contains(&d.embed_margin));
+        assert!(d.embed_batch >= 1 && d.embed_max_per_sweep >= d.embed_batch);
+        // The same values a bare `from_env` (no MEMORY_EMBED_* set) produces.
+        let from_env = MemoryConfig::from_env().expect("defaults parse");
+        if std::env::vars().all(|(k, _)| !k.starts_with("MEMORY_EMBED_")) {
+            assert_eq!(from_env.embed_model_dir, d.embed_model_dir);
+            assert_eq!(from_env.embed_enabled, d.embed_enabled);
+        }
+    }
 
     #[test]
     fn log_filter_prefers_rust_log_then_the_compose_log_level() {
