@@ -2437,3 +2437,156 @@ async fn the_edit_trigger_does_not_leave_an_empty_tenant_guc_behind() {
     assert!(stale, "the digest was still staled with no GUC set");
     reset_instance(&su).await;
 }
+
+// --- #3212 H-1: a reset must not leave the worker re-sending erased text ---------------------------
+
+async fn reset_memory_as(app: &PgPool, ws: Uuid, admin: Uuid, epoch: i64) {
+    let mut tx = app.begin().await.expect("begin");
+    sqlx::query(
+        "SELECT set_config('app.workspace_id', $1, true), set_config('app.member_id', $2, true)",
+    )
+    .bind(ws.to_string())
+    .bind(admin.to_string())
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query_scalar::<_, String>(&format!("SELECT mem_reset_workspace({epoch})::text"))
+        .fetch_one(&mut *tx)
+        .await
+        .expect("reset");
+    tx.commit().await.expect("commit reset");
+}
+
+const ERASED: &str = "지워진옛내용";
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn after_a_reset_the_sweep_sends_nothing_that_was_erased() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let fx = seed(&su).await;
+    sqlx::query(
+        "UPDATE workspace_membership SET role = 'admin' WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(fx.ws)
+    .bind(fx.human)
+    .execute(&su)
+    .await
+    .unwrap();
+    configure_summary_row(&su, fx.human).await;
+    let wp = momo_worker_pool().await;
+    let app = momo_app_pool().await;
+
+    // Pre-reset history: old messages (→ two windows, a day and a week rollup), a summarised thread ...
+    for i in 0..6 {
+        post(&wp, &fx, fx.human, &format!("{ERASED} 옛 메시지 {i}")).await;
+    }
+    sqlx::query(
+        "UPDATE message SET created_at = date_trunc('day', now() - interval '21 days') + interval '10 hours' \
+                                         + make_interval(mins => seq::int) WHERE channel_id = $1",
+    )
+    .bind(fx.channel)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (root1, _) = post(&wp, &fx, fx.human, &format!("{ERASED} 스레드 뿌리 하나")).await;
+    for i in 0..4 {
+        post_reply(&wp, &fx, root1, fx.human_b, &format!("{ERASED} 답글 {i}")).await;
+    }
+    let mut config = memory_config();
+    config.memory.window_max_messages = 3;
+    config.memory.backfill_days = 60;
+    config.memory.rollup_days = 30;
+    let first = Recorder::new();
+    let stats = worker_with(&first, config.clone())
+        .await
+        .summary_sweep()
+        .await;
+    assert!(
+        stats.windows >= 2 && stats.threads >= 1 && stats.rollups >= 2,
+        "{stats:?}"
+    );
+    // ... and material no sweep has touched yet: a second thread and a few top-level messages.
+    let (root2, _) = post(&wp, &fx, fx.human, &format!("{ERASED} 아직 안 읽은 뿌리")).await;
+    for i in 0..4 {
+        post_reply(
+            &wp,
+            &fx,
+            root2,
+            fx.human_b,
+            &format!("{ERASED} 안 읽은 답글 {i}"),
+        )
+        .await;
+    }
+    for i in 0..3 {
+        post(&wp, &fx, fx.human, &format!("{ERASED} 안 읽은 메시지 {i}")).await;
+    }
+    let used_before = tokens_used_today(&su, fx.ws).await;
+    assert!(used_before > 0);
+
+    reset_memory_as(&app, fx.ws, fx.human, 0).await;
+    assert!(
+        digests(&su, fx.channel).await.is_empty(),
+        "the reset erased every digest"
+    );
+
+    // The sweep after the reset finds nothing it may read: no model call, no tokens, nothing written.
+    let second = Recorder::new();
+    let stats = worker_with(&second, config.clone())
+        .await
+        .summary_sweep()
+        .await;
+    assert_eq!(
+        second.count(),
+        0,
+        "no model call for erased content: {stats:?}"
+    );
+    assert_eq!(
+        tokens_used_today(&su, fx.ws).await,
+        used_before,
+        "no tokens reserved"
+    );
+    assert!(digests(&su, fx.channel).await.is_empty());
+    assert_eq!(stats.failures, 0, "{stats:?}");
+
+    // RED: if the worker does not learn the floor (the SQL function returns 0), the same sweep sends the
+    // erased text to the provider — the fence at apply time refuses every write, but the text has left.
+    let sig = "public.mem_cursor_state(uuid)";
+    let original: String = sqlx::query_scalar("SELECT pg_get_functiondef($1::regprocedure)")
+        .bind(sig)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert!(original.contains("COALESCE(c.reset_floor_seq, 0)"));
+    sqlx::raw_sql(&original.replace("COALESCE(c.reset_floor_seq, 0)", "0"))
+        .execute(&su)
+        .await
+        .unwrap();
+    let blind = Recorder::new();
+    let stats_blind = worker_with(&blind, config.clone())
+        .await
+        .summary_sweep()
+        .await;
+    sqlx::raw_sql(&original).execute(&su).await.unwrap();
+    let leaked = (0..blind.count())
+        .filter(|i| blind.prompt(*i).contains(ERASED))
+        .count();
+    println!(
+        "RED [worker floor clamp]: shipped -> {} model calls, 0 tokens; floor hidden from the worker -> {} calls, \
+         {leaked} carrying erased text, tokens {} -> {} ({stats_blind:?})",
+        second.count(),
+        blind.count(),
+        used_before,
+        tokens_used_today(&su, fx.ws).await
+    );
+    assert!(
+        blind.count() > 0 && leaked > 0,
+        "without the floor the erased text goes to the model"
+    );
+    assert!(
+        digests(&su, fx.channel).await.is_empty(),
+        "the apply fence still refuses every write"
+    );
+    reset_instance(&su).await;
+}

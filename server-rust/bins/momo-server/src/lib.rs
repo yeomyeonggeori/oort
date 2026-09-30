@@ -868,6 +868,15 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/memory/settings",
             patch(routes::memory::patch_channel_settings),
         )
+        // #3212 — 팀 고지(무엇이 어느 제공자로 가는지)와 기억 초기화(owner/admin, 전량 영구 삭제).
+        .route(
+            "/v1/workspaces/{ws}/memory/notice",
+            get(routes::memory::get_notice),
+        )
+        .route(
+            "/v1/workspaces/{ws}/memory/reset",
+            post(routes::memory::reset_memory),
+        )
         // ADR-0196 D9 / D12 V4 / #3208 — the memory browser: item list + search, detail, evidence,
         // event ledger, edit (supersede) and forget (permanent delete). Human only, RLS decides.
         .route(
