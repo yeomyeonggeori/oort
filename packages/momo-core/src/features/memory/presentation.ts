@@ -7,7 +7,11 @@ import {
   type MemoryDigest,
   type MemoryDigestPage,
   type MemoryReceipt,
+  type MemoryNotice,
+  type MemoryNoticeNeverSends,
+  type MemoryNoticeSends,
   type MemoryReceiptItem,
+  type MemoryResetResult,
   type MemorySettings,
 } from "./model";
 
@@ -316,7 +320,7 @@ export const CHANNEL_SWITCH_ADMIN_ONLY_REASON =
 
 /** Notice next to the workspace switch (ADR-0196 D9 team notice). */
 export const TEAM_MEMORY_NOTICE =
-  "팀 기억을 켜면 채널 대화가 요약을 만드는 AI에게 전달돼요. 요약에는 원본 메시지 링크가 함께 남아요. 사람끼리의 DM은 기본으로 빠져요.";
+  "요약 AI가 정해져 있고 팀 기억이 켜져 있으면, 채널 대화가 요약을 만드는 AI에게 전달돼요. 요약에는 원본 메시지 링크가 함께 남아요.";
 
 export function canChangeWorkspaceMemory(role: MembershipRole | undefined): boolean {
   return isWorkspaceOperator(role);
@@ -352,3 +356,204 @@ export function memoryWriteErrorMessage(
 
 export const MEMORY_SETTINGS_LOAD_ERROR =
   "기억 설정을 불러오지 못했어요. 잠시 뒤에 다시 시도해 주세요.";
+
+// ---- 팀 고지 (ADR-0196 D9 ②, #3212) -------------------------------------------
+//
+// The server sends machine codes and the client owns the wording. A code this
+// client does not know (a newer server) is NEVER shown raw and NEVER dropped: it
+// becomes one generic sentence, so the notice can only over-tell, not under-tell.
+
+export const MEMORY_NOTICE_TITLE = "무엇이 어디로 가는지";
+export const MEMORY_NOTICE_SENDS_TITLE = "요약 AI에게 보내는 것";
+export const MEMORY_NOTICE_NEVER_TITLE = "읽지 않는 것";
+export const MEMORY_NOTICE_LOAD_ERROR =
+  "팀 고지를 불러오지 못했어요. 잠시 뒤에 다시 시도해 주세요.";
+export const MEMORY_NOTICE_ENABLE_BLOCKED =
+  "고지를 불러오지 못해서 지금은 켤 수 없어요. 고지를 확인한 뒤에 켜 주세요.";
+export const MEMORY_NOTICE_ENABLE_LEAD =
+  "켜기 전에 확인해 주세요. 켜면 멘션 없이도 채널 대화가 아래 제공자로 전달돼요.";
+export const MEMORY_NOTICE_ENABLE_LEAD_UNCONFIGURED =
+  "켜기 전에 확인해 주세요. 요약 AI가 아직 정해지지 않아서, 켜도 지금은 아무것도 전달되지 않아요.";
+export const MEMORY_NOTICE_ENABLE_CONFIRM = "확인하고 켜기";
+
+export const MEMORY_NOTICE_SENDS_COPY: Record<MemoryNoticeSends, string> = {
+  channel_message_text: "채널 대화 본문을 보내요.",
+  author_display_name: "메시지를 쓴 사람의 표시 이름을 보내요.",
+  agent_dm_message_text: "에이전트와 나눈 1:1 대화 본문을 보내요.",
+  digest_text: "이미 만든 요약 본문을 일간·주간 요약의 재료로 보내요.",
+  memory_item_text: "저장된 기억 항목 본문을 중복이나 변경을 가릴 때 보내요.",
+  topic_summary_input: "주제 이름과 주제 요약을 주제를 정리할 때 보내요.",
+};
+export const MEMORY_NOTICE_SENDS_UNKNOWN =
+  "이 앱이 아직 모르는 종류의 내용도 보내요. 자세한 내용은 서버 운영자에게 물어봐 주세요.";
+
+export const MEMORY_NOTICE_NEVER_COPY: Record<MemoryNoticeNeverSends, string> = {
+  human_direct_messages: "사람끼리 나눈 DM은 읽지 않아요.",
+  attachments: "첨부 파일은 읽지 않아요.",
+  deleted_messages: "삭제된 메시지는 읽지 않아요.",
+  excluded_channels: "기억에서 제외한 채널은 읽지 않아요.",
+  paused_members_dms: "기억을 일시정지한 멤버의 DM은 읽지 않아요.",
+};
+export const MEMORY_NOTICE_NEVER_UNKNOWN =
+  "서버가 알려 준 읽지 않는 항목 중에 이 앱이 아직 모르는 것이 있어요.";
+
+const KNOWN_SENDS = MEMORY_NOTICE_SENDS_COPY as Record<string, string>;
+const KNOWN_NEVER = MEMORY_NOTICE_NEVER_COPY as Record<string, string>;
+
+/** One sentence per known code, in the server's order, plus at most one generic line for the unknown ones. */
+export function memoryNoticeLines(
+  codes: readonly string[],
+  known: Record<string, string>,
+  unknownLine: string
+): string[] {
+  const lines: string[] = [];
+  let unknown = false;
+  for (const code of codes) {
+    const line = Object.prototype.hasOwnProperty.call(known, code) ? known[code] : undefined;
+    if (line === undefined) unknown = true;
+    else if (!lines.includes(line)) lines.push(line);
+  }
+  if (unknown) lines.push(unknownLine);
+  return lines;
+}
+
+export interface MemoryNoticeView {
+  /** One sentence: is anything leaving right now, and if not, why. */
+  status: string;
+  /** Whether content is actually leaving now (drives the tone, never invented). */
+  sending: boolean;
+  provider: string;
+  model: string;
+  embeddings: string;
+  /** Empty when no summary AI is configured: nothing is sent, so nothing is listed. */
+  sends: string[];
+  neverSends: string[];
+}
+
+export function memoryNoticeView(notice: MemoryNotice): MemoryNoticeView {
+  const { summary } = notice;
+  let status: string;
+  if (!summary.configured) {
+    status = "요약 AI가 아직 정해지지 않아서 아무것도 보내지 않아요.";
+  } else if (!notice.enabled) {
+    status = "지금은 팀 기억이 꺼져 있어서 아무것도 보내지 않아요. 켜면 아래 내용이 전달돼요.";
+  } else if (notice.paused) {
+    status = "지금은 잠시 멈춰 있어서 아무것도 보내지 않아요. 다시 시작하면 아래 내용이 전달돼요.";
+  } else {
+    status = "지금 켜져 있어요. 아래 내용이 요약 AI 제공자에게 전달돼요.";
+  }
+  const providerName = summary.provider?.name;
+  const host = summary.provider?.host;
+  const provider = !summary.configured
+    ? "정해지지 않았어요"
+    : providerName === undefined
+      ? "확인할 수 없어요"
+      : host !== undefined && host !== providerName
+        ? `${providerName} (${host})`
+        : providerName;
+  return {
+    status,
+    sending: notice.sending,
+    provider,
+    model: !summary.configured ? "없음" : (summary.modelId ?? "제공자의 기본 모델"),
+    embeddings: `기억 검색용 임베딩(${notice.embeddings.model})은 이 서버 안에서 만들고 밖으로 보내지 않아요.`,
+    sends: summary.configured
+      ? memoryNoticeLines(notice.sends, KNOWN_SENDS, MEMORY_NOTICE_SENDS_UNKNOWN)
+      : [],
+    neverSends: memoryNoticeLines(notice.neverSends, KNOWN_NEVER, MEMORY_NOTICE_NEVER_UNKNOWN),
+  };
+}
+
+// ---- 기억 초기화 (ADR-0196 D9, #3212) ----------------------------------------
+//
+// What the sentences below promise is exactly what `mem_reset_workspace` does
+// (ADR-0196 증보 #3212). Nothing about backups, undo, or "everything".
+
+export const MEMORY_RESET_TITLE = "기억 초기화";
+export const MEMORY_RESET_LEAD =
+  "팀이 쌓아 온 기억을 모두 지우고 처음부터 다시 쌓아요. 되돌릴 수 없어요.";
+export const MEMORY_RESET_DELETES =
+  "요약, 기억 항목, 주제, 기억 제안, 답변에 실린 기억 영수증과 이들에 딸린 근거·검색 색인을 영구히 지워요.";
+export const MEMORY_RESET_KEEPS_SWITCHES =
+  "켜기와 일시정지 같은 스위치는 지금 상태 그대로 둬요.";
+export const MEMORY_RESET_KEEPS_FORGOTTEN =
+  "사람들이 잊기로 한 문장의 기록(같은 문장을 다시 기억하지 않게 막는 표시)은 지우지 않아요.";
+export const MEMORY_RESET_FROM_NOW =
+  "초기화한 뒤에 올라온 메시지부터 새로 요약해요. 원본 메시지는 그대로예요.";
+export const MEMORY_RESET_AUDIT = "누가 초기화했는지는 감사 기록에 남아요.";
+export const MEMORY_RESET_ADMIN_ONLY =
+  "기억 초기화는 워크스페이스 관리자만 할 수 있어요.";
+export const MEMORY_RESET_OFFLINE = "연결이 끊겨 있어서 지금은 초기화할 수 없어요.";
+export const MEMORY_RESET_TRIGGER = "기억 초기화…";
+export const MEMORY_RESET_CONFIRM_WORD = "초기화";
+export const MEMORY_RESET_CONFIRM_LABEL = `확인을 위해 「${MEMORY_RESET_CONFIRM_WORD}」라고 입력해 주세요`;
+export const MEMORY_RESET_CONFIRM_BUTTON = "모든 기억 영구 삭제";
+export const MEMORY_RESET_BUSY = "지우는 중";
+export const MEMORY_RESET_CANCEL = "취소";
+
+/** The typed confirmation: NFC-normalised and trimmed so a Korean IME's composed or decomposed jamo both count. */
+export function memoryResetConfirmed(typed: string): boolean {
+  return typed.normalize("NFC").trim() === MEMORY_RESET_CONFIRM_WORD;
+}
+
+export function memoryResetDoneMessage(epoch: number): string {
+  return `기억을 초기화했어요. 이 워크스페이스에서 ${epoch}번째 초기화예요. 팀 기억이 켜져 있으면 새 메시지부터 다시 쌓여요.`;
+}
+
+export function memoryResetDoneCounts(result: MemoryResetResult): string {
+  const d = result.deleted;
+  return `요약 ${d.digests}개, 기억 항목 ${d.items}개, 주제 ${d.topics}개, 기억 제안 ${d.proposals}개, 영수증 ${d.servings}개를 지웠어요.`;
+}
+
+export type MemoryResetFailureKind =
+  | "forbidden"
+  | "stale"
+  | "busy"
+  | "absent"
+  | "unauthorized"
+  | "error";
+
+export interface MemoryResetFailure {
+  kind: MemoryResetFailureKind;
+  message: string;
+}
+
+/**
+ * Status → sentence. 409 means the epoch the screen showed is stale (someone reset in between, or a double
+ * press): nothing was erased by THIS press, and the caller refetches. 503 is the server's own
+ * `memory_reset_busy`: nothing was erased, try again shortly.
+ */
+export function memoryResetFailure(error: unknown): MemoryResetFailure {
+  if (error instanceof ApiError) {
+    if (error.status === 403) {
+      return { kind: "forbidden", message: MEMORY_RESET_ADMIN_ONLY };
+    }
+    if (error.status === 409) {
+      return {
+        kind: "stale",
+        message:
+          "이미 초기화된 상태예요. 방금 다른 관리자가 초기화했거나 한 번 더 눌렀을 수 있어서 이번에는 아무것도 지우지 않았어요. 화면을 새로 고쳤어요.",
+      };
+    }
+    if (error.status === 503) {
+      return {
+        kind: "busy",
+        message:
+          "지금 다른 기억 작업이 진행 중이라 초기화하지 못했어요. 아무것도 지워지지 않았으니 잠시 뒤에 다시 시도해 주세요.",
+      };
+    }
+    if (error.status === 404 || error.status === 405 || error.status === 501) {
+      return { kind: "absent", message: "이 서버는 아직 기억 초기화를 지원하지 않아요." };
+    }
+    if (error.status === 401) {
+      return {
+        kind: "unauthorized",
+        message: "로그인이 만료됐어요. 다시 로그인한 뒤 시도해 주세요.",
+      };
+    }
+  }
+  return {
+    kind: "error",
+    message: "초기화하지 못했어요. 연결을 확인하고 다시 시도해 주세요. 결과가 확실하지 않으면 화면을 새로 열어 확인해 주세요.",
+  };
+}
