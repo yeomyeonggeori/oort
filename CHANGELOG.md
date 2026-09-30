@@ -11,6 +11,25 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-10-01
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.15>. Tag target: `main=a6e5cd1b`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Thirteen database migrations since 0.1.14 (098–110): the schema goes from 097 to 110 on the api pre-deploy. 098 adds `agent.model_source` (backfill: `hermes-agent` models read `instance_default`). **099 drops the legacy memory plane** (ADR-0129: the eight tables `memory_item`, `memory_source_ref`, `memory_visibility_grant`, `memory_lifecycle_event`, `memory_candidate`, `memory_extraction_cursor`, `workspace_memory_policy`, `context_packet`, their functions, and three `workspace.memory_external_provider_consent*` columns); it has no consumers and the data loss is intended (ADR-0196 D11); the `vector` extension stays. 100–110 add the team memory v2 `mem_*` tables, definer functions and the `mem_definer` and `momo_memory` roles; every new table has FORCE row-level security, writes go through definer functions only, and `message` gets one RESTRICTIVE lock-down policy. Rolling the app image back to 0.1.14 keeps schema 110: 0.1.14 does not read `mem_*`, but the tables 099 dropped do not come back (0.1.14 does not use them either).
+
+### Added
+- Server: team memory v2 (ADR-0196, supersedes ADR-0129). Channel and thread summaries with daily and weekly roll-ups are written through the team "Default AI" summary row; without a row the worker makes no model call and fails honestly (`not_configured`), with a daily per-workspace token cap. Decisions, facts and commitments are extracted in the same call and only appended; they are visible only to people who can read every source message (RLS), and person-to-person DMs are never summarized.
+- Server: agent replies carry summaries and items as reference material and leave a receipt, filtered by the reply channel (a 1:1 DM uses the union of the requester's permissions). "Remember this" proposals become memory only when a person accepts (not guests).
+- Server: a memory browser API (list, search, detail, sources, history, edit, forget). Forgetting is an immediate permanent delete and the same content is not extracted again. A nightly job merges duplicates, closes decision windows, decays, deletes by retention and groups topics; it never changes what a person confirmed, and its changes can be undone.
+- Server: local embeddings (multilingual-e5-small int8) so rephrased queries still find memory; memory text never leaves the instance. With less than 1.5 GiB of worker memory only embeddings switch off and search falls back to keywords. Workspace admins can reset memory, and a team notice says what goes to which provider.
+- Web and desktop: a "what you missed" summary card, a "N memories used" chip and inspector, proposal cards, the memory browser (`/memory`), a decision timeline with undo, and Settings › Memory (switch, team notice, reset).
+
+### Changed
+- Server: control v1 is retired and resume-agent checks compare hosts (#3183); the model-source contract (#3176); the session permission card shows auto-allow (#3181); remote work account wiring (#3180).
+
+### Not in this release
+- Phone screens (summary card, chip, proposal card) ship with the iOS build, not the image.
+- runtime-unverified: real summary model calls and nightly consolidation quality, embedding memory and latency on x86, on-device rendering.
+- Follow-ups: #3189, #3201, #3211, #3225, #3234, #3236, #3243.
+
 ## [0.1.14] - 2026-09-29
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.14>. Tag target: `main=41d91d68`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Six database migrations since 0.1.13 (092–097): the schema goes from 091 to 097 on the api pre-deploy. They add six tables (`work_permission_request`, `provider_default_ai`, `member_device_key`, `human_control_nonce`, `session_refresh_key`, `refresh_proof_nonce`), each with FORCE row-level security and one policy, nullable signature columns on `work_control`, and `action_signature.alg` (existing rows read `ed25519`); there is no data backfill. Rolling the app image back to 0.1.13 keeps schema 097: 0.1.13 does not read the new tables or columns, its writes satisfy the rewritten checks, and its migrate runner skips the six ledger rows it does not know.
