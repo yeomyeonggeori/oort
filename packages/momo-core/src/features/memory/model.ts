@@ -213,8 +213,13 @@ export interface MemoryNotice {
     modelId?: string;
   };
   embeddings: { model: string; location: "local"; sentToProvider: false };
-  sends: MemoryNoticeSends[];
-  neverSends: MemoryNoticeNeverSends[];
+  /**
+   * Machine codes. A known code is one of the unions above; a code this client does not know (a newer
+   * server) is KEPT, never dropped: a notice that silently loses a "we send this" line under-discloses,
+   * so the presentation renders a generic sentence for it instead of the raw code.
+   */
+  sends: string[];
+  neverSends: string[];
 }
 
 export interface ListMemoryDigestsOptions {
@@ -806,27 +811,11 @@ export function parseMemoryResetResult(value: unknown): MemoryResetResult {
   return { epoch, deleted: counts as unknown as MemoryResetCounts };
 }
 
-const NOTICE_SENDS: readonly string[] = [
-  "channel_message_text",
-  "author_display_name",
-  "agent_dm_message_text",
-  "digest_text",
-  "memory_item_text",
-  "topic_summary_input",
-];
-const NOTICE_NEVER_SENDS: readonly string[] = [
-  "human_direct_messages",
-  "attachments",
-  "deleted_messages",
-  "excluded_channels",
-  "paused_members_dms",
-];
-
-/** Known codes only: a code this client does not know is dropped (a newer server), not shown raw. */
-function noticeCodes<T extends string>(source: unknown, key: string, known: readonly string[]): T[] {
+/** Every code is kept, known or not (see `MemoryNotice.sends`); the client owns the wording. */
+function noticeCodes(source: unknown, key: string): string[] {
   const raw = stringArrayField(source, key);
   if (raw === null) throw new WireShapeError();
-  return raw.filter((code): code is T => known.includes(code));
+  return raw;
 }
 
 export function parseMemoryNotice(value: unknown): MemoryNotice {
@@ -870,8 +859,8 @@ export function parseMemoryNotice(value: unknown): MemoryNotice {
     resetEpoch,
     summary,
     embeddings: { model, location: "local", sentToProvider: false },
-    sends: noticeCodes<MemoryNoticeSends>(value, "sends", NOTICE_SENDS),
-    neverSends: noticeCodes<MemoryNoticeNeverSends>(value, "neverSends", NOTICE_NEVER_SENDS),
+    sends: noticeCodes(value, "sends"),
+    neverSends: noticeCodes(value, "neverSends"),
   };
 }
 
