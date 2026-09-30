@@ -596,7 +596,7 @@ describe("memory notice and reset (#3212)", () => {
     expect(notice.summary.provider).toEqual({ name: "사용자 지정" });
   });
 
-  it("shows an unconfigured summary as such and drops codes it does not know", async () => {
+  it("shows an unconfigured summary as such and keeps codes it does not know", async () => {
     installHost();
     vi.stubGlobal(
       "fetch",
@@ -609,7 +609,7 @@ describe("memory notice and reset (#3212)", () => {
     );
     const notice = await getMemoryNotice(WS);
     expect(notice.summary).toEqual({ configured: false });
-    expect(notice.sends).toEqual(["channel_message_text"]);
+    expect(notice.sends).toEqual(["channel_message_text", "from_the_future"]);
   });
 
   it("refuses a notice that claims embeddings leave the instance, or has no shape", async () => {
