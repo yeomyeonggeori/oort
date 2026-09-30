@@ -22,9 +22,6 @@ import {
   DETAIL_LABEL,
   DETAIL_EVIDENCE_HEADING,
   DETAIL_EVIDENCE_NOTE,
-  DETAIL_HISTORY_EMPTY,
-  DETAIL_HISTORY_ERROR,
-  DETAIL_HISTORY_HEADING,
   EDIT_CANCEL,
   EDIT_FIELD_LABEL,
   EDIT_LABEL,
@@ -48,12 +45,12 @@ import {
   itemReadError,
   itemWriteError,
   memberMayWriteMemory,
-  memoryEventLabel,
   memoryKindLabel,
   memoryOriginLabel,
   isMemoryKind,
 } from "@momo/core/features/memory/browser";
 import { EvidenceLinks } from "./EvidenceLinks";
+import { ItemHistory } from "./ItemHistory";
 import {
   memoryKeys,
   useEditMemoryItem,
@@ -449,36 +446,15 @@ export function MemoryItemDetailPane({
         </div>
       )}
 
-      <section aria-label={DETAIL_HISTORY_HEADING} className="flex flex-col gap-2">
-        <h3 className="text-meta font-medium text-ink-muted">{DETAIL_HISTORY_HEADING}</h3>
-        {events.isPending ? (
-          <p className="text-meta text-ink-muted">불러오고 있어요.</p>
-        ) : events.isError || !events.data ? (
-          <p className="text-meta text-ink-muted" data-testid="memory-detail-events-error">
-            {DETAIL_HISTORY_ERROR}
-          </p>
-        ) : events.data.length === 0 ? (
-          <p className="text-meta text-ink-muted">{DETAIL_HISTORY_EMPTY}</p>
-        ) : (
-          <ol className="flex flex-col gap-2" data-testid="memory-detail-events">
-            {events.data.map((event) => {
-              const actor =
-                event.actorMemberId !== undefined
-                  ? (memberFor(directory, event.actorMemberId)?.displayName ?? null)
-                  : null;
-              return (
-                <li key={event.id} className="flex flex-col text-meta" data-testid="memory-detail-event">
-                  <span className="text-ink">{memoryEventLabel(event.action)}</span>
-                  <span className="text-ink-muted">
-                    {actor !== null ? `${actor} · ` : ""}
-                    {DATE_TIME.format(event.createdAtMs)}
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
-        )}
-      </section>
+      <ItemHistory
+        workspaceId={workspaceId}
+        itemId={item.id}
+        events={events}
+        role={role}
+        offline={offline}
+        onReverted={(message) => onChanged({ nextItemId: item.id, message })}
+        onGone={(message) => onChanged({ nextItemId: null, message })}
+      />
 
       <Dialog
         open={confirming}

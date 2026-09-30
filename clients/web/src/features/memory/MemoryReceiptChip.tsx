@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { BookOpen } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { Popover, PopoverContent, PopoverTrigger } from "@/design/ui/popover";
+import { Button } from "@/design/ui/button";
 import {
+  INSPECTOR_OPEN,
   WITHHELD_EXPLAIN_COPY,
   deriveReceiptChip,
   digestSourceLabel,
@@ -12,7 +14,9 @@ import {
   withheldLabel,
   type ReceiptChipModel,
 } from "@momo/core/features/memory/presentation";
+import { memoryKindLabel } from "@momo/core/features/memory/browser";
 import { EvidenceLinks } from "./EvidenceLinks";
+import { MemoryReceiptInspector } from "./MemoryReceiptInspector";
 import { useMemoryReceipt } from "./useMemory";
 
 // =============================================================================
@@ -57,10 +61,14 @@ export function ReceiptChipView({
   onJump?: (messageId: string, seq: number) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [inspecting, setInspecting] = useState(false);
+  const chipRef = useRef<HTMLButtonElement>(null);
   return (
+    <>
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
+          ref={chipRef}
           type="button"
           data-testid="memory-receipt-chip"
           className={cn(
@@ -82,7 +90,7 @@ export function ReceiptChipView({
             {receiptSummaryLabel(model.servedCount)}
           </p>
         </div>
-        {model.digests.length > 0 ? (
+        {model.digests.length > 0 || model.items.length > 0 ? (
           <ul className="flex flex-col gap-3">
             {model.digests.map((digest) => (
               <li key={digest.id} data-testid="memory-receipt-digest">
@@ -103,6 +111,14 @@ export function ReceiptChipView({
                 />
               </li>
             ))}
+            {model.items.map((item) => (
+              <li key={item.id} data-testid="memory-receipt-item">
+                <p className="text-meta text-ink-muted">{memoryKindLabel(item.kind)}</p>
+                <p className="line-clamp-3 whitespace-pre-line break-keep text-body text-ink">
+                  {item.body}
+                </p>
+              </li>
+            ))}
           </ul>
         ) : (
           <p className="break-keep text-body text-ink-muted">
@@ -115,6 +131,21 @@ export function ReceiptChipView({
         >
           {RECEIPT_ONLY_READABLE}
         </p>
+        <div>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="tap-target"
+            onClick={() => {
+              setOpen(false);
+              setInspecting(true);
+            }}
+            data-testid="memory-receipt-inspect"
+          >
+            {INSPECTOR_OPEN}
+          </Button>
+        </div>
         {model.withheldCount !== null && (
           <div
             className="flex flex-col gap-1 border-t border-line pt-3"
@@ -130,5 +161,14 @@ export function ReceiptChipView({
         )}
       </PopoverContent>
     </Popover>
+    <MemoryReceiptInspector
+      open={inspecting}
+      onOpenChange={setInspecting}
+      model={model}
+      channelId={channelId}
+      opener={chipRef.current}
+      onJump={onJump}
+    />
+    </>
   );
 }
