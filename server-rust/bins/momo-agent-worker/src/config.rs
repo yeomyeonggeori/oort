@@ -227,6 +227,22 @@ pub struct MemoryConfig {
     /// `MEMORY_RETIRED_RETENTION_DAYS` (90) / `MEMORY_WINDOW_RETENTION_DAYS` (90) — retention (plan §6.3, §6.5).
     pub retired_retention_days: i32,
     pub window_retention_days: i32,
+    /// `MEMORY_TOPICS_ENABLED` (**on**) — #3172 B: assign items to topics, split, summarise (needs the consolidation loop).
+    pub topics_enabled: bool,
+    /// `MEMORY_TOPIC_CAP` (125) — live items per topic node before it is split (plan §6.2).
+    pub topic_cap: i32,
+    /// `MEMORY_TOPIC_SPLIT_SAMPLE` (160) — items the model classifies when it splits one.
+    pub topic_split_sample: i32,
+    /// `MEMORY_TOPIC_MAX_ROOTS` (60) — root topics per channel (more labels are refused).
+    pub topic_max_roots: i32,
+    /// `MEMORY_TOPIC_BATCH` (20) — items per assignment call.
+    pub topic_batch: i32,
+    /// `MEMORY_TOPIC_SUMMARIES_PER_RUN` (5) / `MEMORY_TOPIC_SUMMARY_MIN_ITEMS` (3) — summaries rewritten per channel per run, and the fewest
+    /// live items a topic needs to have one.
+    pub topic_summaries_per_run: i32,
+    pub topic_summary_min_items: i32,
+    /// `MEMORY_TOPIC_MAX_OUTPUT_TOKENS` (400) — output allowance of an assignment / split / summary call.
+    pub topic_max_output_tokens: i32,
     /// `MEMORY_EMBED_ENABLED` (**on**; `0|false|no|off` turns it off) — #3173: embed items locally
     /// (multilingual-e5-small, int8) and fuse vector similarity into item serving. On means "when
     /// the model directory loads": with no model the worker logs once and serves keyword-only, so
@@ -313,6 +329,14 @@ impl Default for MemoryConfig {
             consolidate_retry_seconds: 1_800,
             retired_retention_days: 90,
             window_retention_days: 90,
+            topics_enabled: true,
+            topic_cap: 125,
+            topic_split_sample: 160,
+            topic_max_roots: 60,
+            topic_batch: 20,
+            topic_summaries_per_run: 5,
+            topic_summary_min_items: 3,
+            topic_max_output_tokens: 400,
             embed_enabled: true,
             embed_model_dir: "/opt/momo/models/e5-small-int8".to_string(),
             embed_threads: 2,
@@ -456,6 +480,27 @@ impl MemoryConfig {
                 d.window_retention_days,
             )?
             .clamp(1, 3650),
+            topics_enabled: report_protocol_enabled(env("MEMORY_TOPICS_ENABLED").as_deref()),
+            topic_cap: env_number("MEMORY_TOPIC_CAP", d.topic_cap)?.clamp(4, 1000),
+            topic_split_sample: env_number("MEMORY_TOPIC_SPLIT_SAMPLE", d.topic_split_sample)?
+                .clamp(10, 400),
+            topic_max_roots: env_number("MEMORY_TOPIC_MAX_ROOTS", d.topic_max_roots)?.clamp(1, 500),
+            topic_batch: env_number("MEMORY_TOPIC_BATCH", d.topic_batch)?.clamp(1, 50),
+            topic_summaries_per_run: env_number(
+                "MEMORY_TOPIC_SUMMARIES_PER_RUN",
+                d.topic_summaries_per_run,
+            )?
+            .clamp(0, 20),
+            topic_summary_min_items: env_number(
+                "MEMORY_TOPIC_SUMMARY_MIN_ITEMS",
+                d.topic_summary_min_items,
+            )?
+            .clamp(1, 40),
+            topic_max_output_tokens: env_number(
+                "MEMORY_TOPIC_MAX_OUTPUT_TOKENS",
+                d.topic_max_output_tokens,
+            )?
+            .clamp(50, 2000),
             embed_enabled: report_protocol_enabled(env("MEMORY_EMBED_ENABLED").as_deref()),
             embed_model_dir: env("MEMORY_EMBED_MODEL_DIR")
                 .filter(|v| !v.trim().is_empty())

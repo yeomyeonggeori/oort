@@ -1776,6 +1776,8 @@ const DEFINER_ONLY_TABLES: [&str; 4] = [
     "mem_cons_state",
     "mem_cons_pair",
 ];
+/// #3172 B-4: tables no runtime role may read until a read route exists (asserted: momo_app has no SELECT either).
+const NO_READ_TABLES: [&str; 2] = ["mem_topic", "mem_topic_summary"];
 const RUNTIME_ROLES: [&str; 5] = [
     "momo_app",
     "momo_relay",
@@ -2012,7 +2014,7 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
                     continue;
                 }
                 let allowed = role == "momo_app"
-                    && (privilege == "SELECT"
+                    && ((privilege == "SELECT" && !NO_READ_TABLES.contains(&table.as_str()))
                         || (table == "mem_settings"
                             && matches!(privilege, "INSERT" | "UPDATE" | "DELETE")));
                 let has: bool = sqlx::query_scalar("SELECT has_table_privilege($1, $2, $3)")
@@ -2033,7 +2035,7 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
                     continue;
                 }
                 let allowed = role == "momo_app"
-                    && (privilege == "SELECT"
+                    && ((privilege == "SELECT" && !NO_READ_TABLES.contains(&table.as_str()))
                         || (table == "mem_settings" && matches!(privilege, "INSERT" | "UPDATE")));
                 let has: bool = sqlx::query_scalar("SELECT has_any_column_privilege($1, $2, $3)")
                     .bind(role)
@@ -2102,6 +2104,7 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
             || name == "mem_accept_proposal"
             || name == "mem_reject_proposal"
             || name == "mem_proposal_evidence_ok"
+            || name == "mem_topic_summary_ok"
             || name == "mem_revert_consolidation"
         {
             // The RLS policies call the evidence helpers as the reading role; `mem_search_items`
@@ -2435,8 +2438,7 @@ fn migration_path() -> PathBuf {
 /// The allow-list self-check is restated by every migration that adds a definer function (101 and 102
 /// are merged and stay untouched, #3191 M-6); the newest one is the one that matches the real state.
 fn worker_migration_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../server/Migrations/108_mem_consolidate.sql")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../server/Migrations/109_mem_topics.sql")
 }
 
 /// M-1 / L-9: the lock block is one text in the two bootstrap files, compared byte for byte (stronger
@@ -2616,7 +2618,7 @@ async fn lock_block_also_locks_views_and_materialized_views() {
 
 /// L-1 / L-9: the SECURITY DEFINER functions owned by mem_definer are exactly this list, by **full signature**
 /// (`regprocedure` text): an overload that sneaks in under an allowed name is a stranger too (#3200 L-9).
-const DEFINER_ALLOW_LIST: [&str; 68] = [
+const DEFINER_ALLOW_LIST: [&str; 78] = [
     "mem_accept_proposal(uuid)",
     "mem_add_item(uuid,text,text,text,uuid[],real,boolean,text,text)",
     "mem_adjust_tokens(bigint)",
@@ -2685,6 +2687,16 @@ const DEFINER_ALLOW_LIST: [&str; 68] = [
     "mem_stale_digests(integer,integer)",
     "mem_suppressed_messages(uuid,uuid[])",
     "mem_token_budget(bigint)",
+    "mem_topic_assign(uuid,uuid,text,integer)",
+    "mem_topic_gc(uuid)",
+    "mem_topic_leaves(uuid)",
+    "mem_topic_revert(uuid)",
+    "mem_topic_set_summary(uuid,text,uuid[],text,text)",
+    "mem_topic_split_apply(uuid,text[],uuid[],integer[],integer)",
+    "mem_topic_split_candidates(uuid,integer,integer)",
+    "mem_topic_summary_ok(uuid)",
+    "mem_topic_summary_work(uuid,integer,integer,integer)",
+    "mem_topic_unassigned(uuid,integer)",
 ];
 
 /// The `DO` block that starts at `marker`, up to (not including) `until` or the end of the file.
@@ -2718,7 +2730,7 @@ async fn security_definer_functions_owned_by_mem_definer_are_allow_listed() {
     assert_eq!(
         owned, expected,
         "a SECURITY DEFINER function owned by mem_definer must be added to the allow-list \
-         here and in the newest migration's allow-list (108_mem_consolidate.sql) on purpose"
+         here and in the newest migration's allow-list (109_mem_topics.sql) on purpose"
     );
     // The migration's own self-check passes on the good state ...
     let check = tail_block(&worker_migration_path(), "-- ── L-9", None);
@@ -3094,10 +3106,16 @@ async fn definer_writes_to_items_need_the_mem_op_marker() {
 //                             the same trust boundary as the summary worker (ADR-0196 D8 증보), and
 //                             nothing leaves the process
 //   mem_search_items          the API's search: viewer = the session GUC, `session_user` guarded
-const BODY_READERS_WITHOUT_VIEWER: [&str; 3] = [
+//   mem_topic_*               worker-only (#3172 B): the consolidation job's topic assignment / split / summary
+//                             inputs, one channel at a time, the same trust boundary as the summary worker;
+//                             the model never writes stored text (labels and summaries are checked in SQL)
+const BODY_READERS_WITHOUT_VIEWER: [&str; 6] = [
     "mem_digest_rollup_inputs",
     "mem_items_to_embed",
     "mem_search_items",
+    "mem_topic_split_candidates",
+    "mem_topic_summary_work",
+    "mem_topic_unassigned",
 ];
 
 #[tokio::test]

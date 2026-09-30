@@ -114,7 +114,16 @@ DECLARE
     'mem_set_item_embedding(uuid, text, text)',
     'mem_stale_digests(integer, integer)',
     'mem_suppressed_messages(uuid, uuid[])',
-    'mem_token_budget(bigint)'
+    'mem_token_budget(bigint)',
+    'mem_topic_assign(uuid, uuid, text, integer)',
+    'mem_topic_gc(uuid)',
+    'mem_topic_leaves(uuid)',
+    'mem_topic_revert(uuid)',
+    'mem_topic_set_summary(uuid, text, uuid[], text, text)',
+    'mem_topic_split_apply(uuid, text[], uuid[], integer[], integer)',
+    'mem_topic_split_candidates(uuid, integer, integer)',
+    'mem_topic_summary_work(uuid, integer, integer, integer)',
+    'mem_topic_unassigned(uuid, integer)'
   ];
 BEGIN
   IF to_regclass('public.mem_digest') IS NULL THEN
@@ -127,6 +136,9 @@ BEGIN
       CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
       IF r = 'momo_app' AND t = 'mem_settings' THEN
         EXECUTE format('REVOKE TRUNCATE, REFERENCES, TRIGGER ON TABLE public.%I FROM %I', t, r);
+      ELSIF r = 'momo_app' AND t IN ('mem_topic', 'mem_topic_summary') THEN
+        -- #3172 B-4: no read route exists yet, so the API role has no SELECT on the topic tables either.
+        EXECUTE format('REVOKE ALL ON TABLE public.%I FROM %I', t, r);
       ELSIF r = 'momo_app' THEN
         EXECUTE format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.%I FROM %I', t, r);
       ELSE
