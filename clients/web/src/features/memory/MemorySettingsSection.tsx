@@ -1,4 +1,7 @@
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { Button } from "@/design/ui/button";
+import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { useSession } from "@/app/session";
 import { InlineBanner, Skeleton } from "@/features/common/States";
 import { SectionShell, SettingsToggleRow, Subsection } from "@/features/settings/SettingsFields";
@@ -8,6 +11,13 @@ import {
   MEMORY_PAUSE_DETAIL_ON,
   MEMORY_PAUSE_LABEL,
   MEMORY_PAUSE_WORKSPACE_OFF,
+  MEMORY_NOTICE_ENABLE_BLOCKED,
+  MEMORY_NOTICE_ENABLE_CONFIRM,
+  MEMORY_NOTICE_ENABLE_LEAD,
+  MEMORY_NOTICE_ENABLE_LEAD_UNCONFIGURED,
+  MEMORY_NOTICE_TITLE,
+  MEMORY_RESET_CANCEL,
+  MEMORY_RESET_TITLE,
   MEMORY_SETTINGS_LOAD_ERROR,
   TEAM_MEMORY_NOTICE,
   WORKSPACE_SWITCH_ADMIN_ONLY_REASON,
@@ -18,7 +28,10 @@ import {
   serverSaysAbsent,
   serverSurface,
 } from "@momo/core/features/capabilities/serverSurfaces";
+import { MemoryNoticeBody, MemoryNoticeQueryBody } from "./MemoryNoticePanel";
+import { MemoryResetPanel } from "./MemoryResetPanel";
 import {
+  useMemoryNotice,
   useMemorySettings,
   useMyMemoryMutation,
   useWorkspaceMemoryMutation,
@@ -54,6 +67,25 @@ export function MemorySettingsSection({
   const settings = useMemorySettings(workspaceId);
   const workspaceWrite = useWorkspaceMemoryMutation(workspaceId);
   const myWrite = useMyMemoryMutation(workspaceId);
+  // Every member reads the notice (guests included); it also backs the confirm step of the switch.
+  const notice = useMemoryNotice(workspaceId);
+  // D9 ②: turning memory ON asks first, with the notice in front of the admin. Off is one click.
+  const [askingEnable, setAskingEnable] = useState(false);
+  useEscapeLayer(askingEnable, () => setAskingEnable(false));
+  // Focus goes into the question when it opens and back to the switch when it closes.
+  const enableConfirmRef = useRef<HTMLButtonElement | null>(null);
+  const enableWasAsking = useRef(false);
+  useEffect(() => {
+    if (askingEnable) {
+      enableWasAsking.current = true;
+      enableConfirmRef.current?.focus({ preventScroll: true });
+    } else if (enableWasAsking.current) {
+      enableWasAsking.current = false;
+      document
+        .querySelector<HTMLElement>('[data-testid="memory-workspace-enabled"]')
+        ?.focus({ preventScroll: true });
+    }
+  }, [askingEnable]);
 
   const lines = [
     "채널 대화를 요약해 두고, 에이전트가 답할 때 참고하게 해요.",
@@ -175,7 +207,13 @@ export function MemorySettingsSection({
             }
             onToggle={(next) => {
               myWrite.reset();
-              workspaceWrite.mutate({ enabled: next });
+              if (next) {
+                workspaceWrite.reset();
+                setAskingEnable(true);
+                return;
+              }
+              setAskingEnable(false);
+              workspaceWrite.mutate({ enabled: false });
             }}
           />
           <SettingsToggleRow
@@ -193,6 +231,76 @@ export function MemorySettingsSection({
             }}
           />
         </div>
+        {askingEnable && !workspace.enabled && (
+          <div
+            role="group"
+            aria-label="팀 기억 켜기 확인"
+            className="flex min-w-0 flex-col gap-3 rounded-md border border-line-strong p-3"
+            data-testid="memory-enable-ask"
+          >
+            <p className="break-keep text-body font-semibold text-ink">
+              {notice.data && !notice.data.summary.configured
+                ? MEMORY_NOTICE_ENABLE_LEAD_UNCONFIGURED
+                : MEMORY_NOTICE_ENABLE_LEAD}
+            </p>
+            {notice.data ? (
+              <MemoryNoticeBody notice={notice.data} />
+            ) : (
+              <MemoryNoticeQueryBody query={notice} />
+            )}
+            {!notice.data && !notice.isPending && (
+              <p className="break-keep text-meta text-ink-muted" data-testid="memory-enable-blocked">
+                {MEMORY_NOTICE_ENABLE_BLOCKED}
+              </p>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                ref={enableConfirmRef}
+                type="button"
+                size="sm"
+                aria-disabled={!notice.data || workspaceLocked || undefined}
+                className={!notice.data || workspaceLocked ? "opacity-50" : undefined}
+                onClick={() => {
+                  if (!notice.data || workspaceLocked) return;
+                  setAskingEnable(false);
+                  workspaceWrite.mutate({ enabled: true });
+                }}
+                data-testid="memory-enable-confirm"
+              >
+                {MEMORY_NOTICE_ENABLE_CONFIRM}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setAskingEnable(false)}
+                data-testid="memory-enable-cancel"
+              >
+                {MEMORY_RESET_CANCEL}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Subsection>
+
+      {!(askingEnable && !workspace.enabled) && (
+        <Subsection title={MEMORY_NOTICE_TITLE}>
+          <div
+            className="flex min-w-0 flex-col rounded-md border border-line p-3"
+            data-testid="memory-notice"
+          >
+            <MemoryNoticeQueryBody query={notice} />
+          </div>
+        </Subsection>
+      )}
+
+      <Subsection title={MEMORY_RESET_TITLE}>
+        <MemoryResetPanel
+          workspaceId={workspaceId}
+          canReset={canChangeWorkspace}
+          offline={offline}
+          epoch={workspace.resetEpoch}
+        />
       </Subsection>
 
       <p className="break-keep text-meta text-ink-muted" data-testid="memory-channel-hint">

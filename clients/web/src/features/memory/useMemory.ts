@@ -11,7 +11,9 @@ import {
   forgetMemoryItem,
   getMemoryItem,
   getMemoryItemEvents,
+  getMemoryNotice,
   getMemorySettings,
+  resetWorkspaceMemory,
   listMemoryItems,
   listMemoryProposals,
   rejectMemoryProposal,
@@ -30,6 +32,7 @@ import type {
   MemoryItemDetail,
   MemoryItemEvent,
   MemoryItemPage,
+  MemoryNotice,
   MemoryProposal,
   MemoryProposalEvidence,
   MemoryDigestPage,
@@ -53,6 +56,7 @@ function retryUnlessAbsent(count: number, error: unknown): boolean {
 
 export const memoryKeys = {
   settings: (workspaceId: string) => ["memory", "settings", workspaceId] as const,
+  notice: (workspaceId: string) => ["memory", "notice", workspaceId] as const,
   digests: (workspaceId: string, channelId: string, sinceSeq: number) =>
     ["memory", "digests", workspaceId, channelId, sinceSeq] as const,
   receipt: (workspaceId: string, runId: string) =>
@@ -76,6 +80,29 @@ export function useMemorySettings(workspaceId: string, enabled = true) {
     queryFn: () => getMemorySettings(workspaceId),
     enabled,
     retry: retryUnlessAbsent,
+  });
+}
+
+/** 「팀 고지」: any active human member may read it, guests included (#3212). */
+export function useMemoryNotice(workspaceId: string, enabled = true) {
+  return useQuery<MemoryNotice>({
+    queryKey: memoryKeys.notice(workspaceId),
+    queryFn: () => getMemoryNotice(workspaceId),
+    enabled,
+    retry: retryUnlessAbsent,
+  });
+}
+
+/**
+ * 기억 초기화 (owner/admin). The caller passes the epoch the screen showed; a stale one is a 409 and erases
+ * nothing. Whatever the outcome, the settings are read again: success moves the epoch, and a 409 or 503
+ * means the number on screen may no longer be the server's.
+ */
+export function useResetWorkspaceMemory(workspaceId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (expectedEpoch: number) => resetWorkspaceMemory(workspaceId, expectedEpoch),
+    onSettled: () => client.invalidateQueries({ queryKey: ["memory"] }),
   });
 }
 
