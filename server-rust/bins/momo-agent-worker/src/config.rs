@@ -229,8 +229,12 @@ pub struct MemoryConfig {
     /// `MEMORY_EMBED_MAX_PER_SWEEP` (200) — items one workspace gets embedded per sweep: the
     /// backfill's rate limit (a 5,000-item history drains over ~13 minutes at the default poll).
     pub embed_max_per_sweep: usize,
-    /// `MEMORY_EMBED_MAX_WORKSPACES` (1000) — workspaces one sweep looks at.
+    /// `MEMORY_EMBED_MAX_WORKSPACES` (1000) — workspaces per page; a sweep pages through all of them.
     pub embed_max_workspaces: i64,
+    /// `MEMORY_EMBED_MIN_MEMORY_MB` (1536) — when the container's cgroup memory limit is known and
+    /// smaller than this, embedding turns itself off with one warning (the loaded model measured
+    /// ~0.9 GiB resident on arm64; an OOM-killed worker would also stop answering). 0 disables the check.
+    pub embed_min_memory_mb: u64,
 }
 
 impl Default for MemoryConfig {
@@ -275,6 +279,7 @@ impl Default for MemoryConfig {
             embed_batch: 16,
             embed_max_per_sweep: 200,
             embed_max_workspaces: 1_000,
+            embed_min_memory_mb: 1_536,
         }
     }
 }
@@ -382,6 +387,7 @@ impl MemoryConfig {
                 d.embed_max_workspaces,
             )?
             .clamp(1, 100_000),
+            embed_min_memory_mb: env_number("MEMORY_EMBED_MIN_MEMORY_MB", d.embed_min_memory_mb)?,
         })
     }
 }

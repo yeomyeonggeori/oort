@@ -111,6 +111,54 @@ fn clip(text: &str) -> String {
     text.chars().take(MAX_TEXT_CHARS).collect()
 }
 
+/// Lock a mutex, taking the guard back from a poisoned one. A panic inside one `embed` call must
+/// not leave the embedder permanently unusable (every later call failing => keyword-only forever):
+/// ORT's session is not left half-written by a Rust panic in the caller's post-processing, and if
+/// the session really is broken the next call returns an ordinary error.
+pub(crate) fn lock_recover<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Validate `ORT_DYLIB_PATH` ourselves before ort sees it. With `ort-load-dynamic`, a library that
+/// cannot be loaded makes ort *panic while holding its global environment lock*; catching that
+/// panic leaves the lock poisoned and the process aborts at exit (`release_env_on_exit`). So ort
+/// only ever gets a path we have already loaded and found `OrtGetApiBase` in.
+///
+/// The path must be absolute (a bare name would be resolved through the loader's search path, which
+/// is exactly what pinning the library in the image is meant to avoid) and set explicitly.
+fn check_ort_library() -> Result<(), EmbedError> {
+    let lib = std::env::var_os("ORT_DYLIB_PATH").ok_or_else(|| {
+        EmbedError::Load("ORT_DYLIB_PATH is not set (the image sets it)".to_string())
+    })?;
+    let path = Path::new(&lib);
+    if !path.is_absolute() {
+        return Err(EmbedError::Load(format!(
+            "ORT_DYLIB_PATH must be an absolute path, got {}",
+            path.display()
+        )));
+    }
+    if !path.is_file() {
+        return Err(EmbedError::Load(format!(
+            "ORT_DYLIB_PATH does not point at a file: {}",
+            path.display()
+        )));
+    }
+    // SAFETY: loading a shared library runs its initialisers. The path is operator-controlled
+    // configuration (the image's pinned, sha256-verified libonnxruntime) and ort would load the same
+    // file next anyway; we only add a check that happens *before* ort's lock is taken.
+    let library = unsafe { libloading::Library::new(path) }
+        .map_err(|e| EmbedError::Load(format!("cannot load {}: {e}", path.display())))?;
+    // SAFETY: only the presence of the symbol is checked; it is not called.
+    let has_api = unsafe { library.get::<unsafe extern "C" fn()>(b"OrtGetApiBase\0") }.is_ok();
+    if !has_api {
+        return Err(EmbedError::Load(format!(
+            "{} is a shared library but not ONNX Runtime (no OrtGetApiBase)",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
 /// `multilingual-e5-small` int8 on ONNX Runtime (CPU).
 pub struct OnnxEmbedder {
     model: Mutex<TextEmbedding>,
@@ -121,16 +169,7 @@ impl OnnxEmbedder {
     /// `intra_threads` caps ONNX Runtime's CPU threads (`None` = all cores); the worker uses a
     /// small number so embedding never starves the reply path.
     pub fn load(dir: &Path, intra_threads: Option<usize>) -> Result<OnnxEmbedder, EmbedError> {
-        // `ort-load-dynamic` resolves the library on first use and panics if it cannot; say what is
-        // wrong up front where we can, and turn any remaining panic into an error below.
-        if let Some(lib) = std::env::var_os("ORT_DYLIB_PATH") {
-            if !Path::new(&lib).is_file() {
-                return Err(EmbedError::Load(format!(
-                    "ORT_DYLIB_PATH does not point at a file: {}",
-                    Path::new(&lib).display()
-                )));
-            }
-        }
+        check_ort_library()?;
         let read = |name: &str| {
             std::fs::read(dir.join(name))
                 .map_err(|e| EmbedError::Load(format!("{}: {e}", dir.join(name).display())))
@@ -145,18 +184,10 @@ impl OnnxEmbedder {
         let model = UserDefinedEmbeddingModel::new(onnx, files).with_pooling(Pooling::Mean);
         let mut options = InitOptionsUserDefined::default();
         options.intra_threads = intra_threads;
-        let model = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            TextEmbedding::try_new_from_user_defined(model, options)
-        }))
-        .map_err(|panic| {
-            let why = panic
-                .downcast_ref::<String>()
-                .cloned()
-                .or_else(|| panic.downcast_ref::<&str>().map(|s| (*s).to_string()))
-                .unwrap_or_else(|| "unknown panic".to_string());
-            EmbedError::Load(format!("ONNX Runtime could not be loaded: {why}"))
-        })?
-        .map_err(|e| EmbedError::Load(e.to_string()))?;
+        // `model` (holding the 118 MB `onnx` buffer) is moved into fastembed, which parses it into the
+        // ORT session and drops it before returning: nothing here keeps the buffer alive.
+        let model = TextEmbedding::try_new_from_user_defined(model, options)
+            .map_err(|e| EmbedError::Load(e.to_string()))?;
         Ok(OnnxEmbedder {
             model: Mutex::new(model),
         })
@@ -164,10 +195,7 @@ impl OnnxEmbedder {
 
     fn run(&self, prefixed: Vec<String>) -> Result<Vec<Vec<f32>>, EmbedError> {
         let want = prefixed.len();
-        let mut model = self
-            .model
-            .lock()
-            .map_err(|_| EmbedError::Infer("embedder lock poisoned".to_string()))?;
+        let mut model = lock_recover(&self.model);
         let mut out = model
             .embed(prefixed, Some(16))
             .map_err(|e| EmbedError::Infer(e.to_string()))?;
@@ -229,6 +257,42 @@ mod tests {
         ));
         v[3] = f32::NAN;
         assert!(vector_literal(&v).is_err());
+    }
+
+    #[test]
+    fn a_poisoned_lock_is_recovered_not_fatal() {
+        let m = std::sync::Arc::new(Mutex::new(41));
+        let m2 = m.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = m2.lock().unwrap();
+            panic!("a panic while the embedder lock is held");
+        })
+        .join();
+        assert!(m.is_poisoned());
+        *lock_recover(&m) += 1;
+        assert_eq!(*lock_recover(&m), 42, "later calls still work");
+    }
+
+    #[test]
+    fn model_id_names_the_revision_the_dockerfile_downloads() {
+        let dockerfile =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Dockerfile"))
+                .expect("read server-rust/Dockerfile");
+        let line = dockerfile
+            .lines()
+            .find(|l| l.starts_with("ARG E5_SMALL_REVISION="))
+            .expect("the Dockerfile pins E5_SMALL_REVISION");
+        let revision = line.trim_start_matches("ARG E5_SMALL_REVISION=").trim();
+        assert_eq!(revision.len(), 40, "a full commit SHA: {revision}");
+        let short = MODEL_ID
+            .split('@')
+            .nth(1)
+            .and_then(|r| r.split(':').next())
+            .expect("MODEL_ID carries @<revision>");
+        assert!(
+            revision.starts_with(short) && short.len() >= 8,
+            "MODEL_ID revision {short} != Dockerfile E5_SMALL_REVISION {revision}: bump both together"
+        );
     }
 
     #[test]

@@ -1794,6 +1794,207 @@ async fn each_new_sql_guard_is_load_bearing() {
     restore_fused(&su).await;
 }
 
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn one_poison_item_does_not_block_the_queue() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    restore_fused(&su).await;
+    let fx = seed(&su).await;
+    let wp = momo_worker_pool().await;
+    let digest = write_digest(
+        &wp,
+        fx.ws,
+        fx.general,
+        fx.bob,
+        "window",
+        "구간 요약이에요",
+        3,
+        None,
+        &[],
+    )
+    .await;
+    let mut good = Vec::new();
+    for n in 0..4 {
+        good.push(add_item_to(&wp, &fx, &digest, &format!("릴리스 연기 결정 정상 {n}")).await);
+    }
+    // Newest first is the sweep's order: the two poison items sit at the head of the queue.
+    // POISONA makes the model call for a whole batch fail; ZEROB embeds to the zero vector, which
+    // the database refuses for that one row.
+    let a = add_item_to(&wp, &fx, &digest, "릴리스 POISONA").await;
+    let b = add_item_to(&wp, &fx, &digest, "릴리스 ZEROB").await;
+
+    let provider = Arc::new(MockChatProvider::echo());
+    let mut cfg = vec_config();
+    cfg.memory.embed_batch = 2; // a poison item at the head would starve a batch-of-2 forever
+    let svc = service(
+        mock_embedder().failing_on("POISONA").zero_on("ZEROB"),
+        2_000,
+    );
+    let w = worker_vec(&provider, cfg, svc).await;
+    assert!(w.embed_service().embedder().await.is_some());
+
+    let stats = w.embed_sweep().await;
+    assert!(stats.failures >= 2, "{stats:?}");
+    let have: Vec<Uuid> =
+        sqlx::query_scalar("SELECT item_id FROM mem_item_embedding WHERE workspace_id = $1")
+            .bind(fx.ws)
+            .fetch_all(&su)
+            .await
+            .unwrap();
+    for g in &good {
+        assert!(
+            have.contains(g),
+            "a healthy item behind the poison ones is embedded: {g}"
+        );
+    }
+    assert!(
+        !have.contains(&a) && !have.contains(&b),
+        "the poison items are not"
+    );
+    let backed_off = w.embed_service().backed_off();
+    assert!(
+        backed_off.contains(&a) && backed_off.contains(&b),
+        "{backed_off:?}"
+    );
+
+    // The next sweeps leave them alone (backoff) and still serve new work.
+    let fresh = add_item_to(&wp, &fx, &digest, "예산 비용 새 항목").await;
+    w.embed_service().forget_idle();
+    let stats = w.embed_sweep().await;
+    assert_eq!(
+        stats.failures, 0,
+        "no retry inside the backoff window: {stats:?}"
+    );
+    let fresh_rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM mem_item_embedding WHERE item_id = $1")
+            .bind(fresh)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(fresh_rows, 1);
+
+    // After the wait they are tried again (and back off again).
+    w.embed_service().forget_backoff();
+    w.embed_service().forget_idle();
+    let stats = w.embed_sweep().await;
+    assert!(
+        stats.failures >= 2,
+        "retried once the backoff is over: {stats:?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn a_retired_or_stale_item_loses_its_vectors() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    restore_fused(&su).await;
+    let fx = seed(&su).await;
+    let wp = momo_worker_pool().await;
+    let old = write_item(&wp, &fx, fx.general, fx.bob, "릴리스 연기 결정 원본").await;
+    let stale = write_item(&wp, &fx, fx.general, fx.bob, "예산 비용 결정 원본").await;
+    let provider = Arc::new(MockChatProvider::echo());
+    let w = worker_vec(&provider, vec_config(), service(mock_embedder(), 2_000)).await;
+    embed_everything(&w).await;
+    let count = |id: Uuid| {
+        let su = su.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM mem_item_embedding WHERE item_id = $1",
+            )
+            .bind(id)
+            .fetch_one(&su)
+            .await
+            .unwrap()
+        }
+    };
+    assert_eq!((count(old).await, count(stale).await), (1, 1));
+
+    // Edit through the API function: the old version retires, a new curated version appears.
+    let app = momo_app_pool().await;
+    let mut tx = app.begin().await.unwrap();
+    sqlx::query(
+        "SELECT set_config('app.workspace_id', $1, true), set_config('app.member_id', $2, true)",
+    )
+    .bind(fx.ws.to_string())
+    .bind(fx.bob.to_string())
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    let new: Uuid = sqlx::query_scalar("SELECT mem_edit_item($1, $2, NULL)")
+        .bind(old)
+        .bind("릴리스 연기 결정 수정본")
+        .fetch_one(&mut *tx)
+        .await
+        .expect("edit");
+    tx.commit().await.unwrap();
+    assert_eq!(
+        count(old).await,
+        0,
+        "the retired version's vectors are gone at once"
+    );
+    assert_eq!(count(new).await, 0, "the new version is not embedded yet");
+    w.embed_service().forget_idle();
+    embed_everything(&w).await;
+    assert_eq!(count(new).await, 1, "the sweep embeds the new version");
+
+    // A stale mark (a dead source) drops them too. As in production it happens inside a tenant
+    // transaction (the definer's delete policy is scoped to `app.workspace_id`).
+    let mut tx = su.begin().await.unwrap();
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(fx.ws.to_string())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE mem_item SET stale = true WHERE id = $1")
+        .bind(stale)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(count(stale).await, 0);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn the_sweep_pages_through_every_workspace() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    restore_fused(&su).await;
+    let wp = momo_worker_pool().await;
+    let mut worlds = Vec::new();
+    for n in 0..3 {
+        let fx = seed(&su).await;
+        write_item(
+            &wp,
+            &fx,
+            fx.general,
+            fx.bob,
+            &format!("릴리스 연기 결정 워크스페이스 {n}"),
+        )
+        .await;
+        worlds.push(fx);
+    }
+    let provider = Arc::new(MockChatProvider::echo());
+    let mut cfg = vec_config();
+    cfg.memory.embed_max_workspaces = 1; // a page of one workspace: the walk must continue past it
+    let w = worker_vec(&provider, cfg, service(mock_embedder(), 2_000)).await;
+    assert!(w.embed_service().embedder().await.is_some());
+    w.embed_sweep().await;
+    for fx in &worlds {
+        assert_eq!(
+            embedded_of(&su, fx.ws, MOCK_MODEL).await,
+            1,
+            "workspace {} was visited",
+            fx.ws
+        );
+    }
+}
+
 // =============================================================================
 // The real model (ignored unless the model directory is present)
 // =============================================================================

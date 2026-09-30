@@ -87,6 +87,9 @@ ADR-0196(팀 기억 v2) M1의 요약 루프. `momo-agent-worker` 프로세스 �
 - **누가 정하나**: 권한은 여전히 SQL 하나다. 벡터는 순위 신호일 뿐이다. `mem_serve_items_fused`는 (1) 멤버십으로 좁힌 행만 거리 계산을 받고 (2) `mem_item_readable_by` + `mem_item_audience_ok`를 **통과한 것만** 후보로 세며(거른 뒤 자른다) (3) 키워드 후보(`mem_search_items_core`, 같은 규칙)와 융합한다. `mem_item_embedding`은 어떤 런타임 역할에도 테이블 권한이 없고(임베딩은 본문 복원 재료), 쓰기·읽기 함수는 `momo_memory`만 부른다.
 - **품질 손잡이**: `MEMORY_EMBED_MIN_SIMILARITY`(0.80)와 `MEMORY_EMBED_MARGIN`(0.04)이 「그나마 가까운」 무관 항목을 막고, 키워드 후보에 없는 벡터 전용 항목은 답당 3개까지만 싣는다(SQL 상수). 실제 질문 분포로 재기 전의 초기값이다.
 - **실패 격리**: 질문 임베딩은 `MEMORY_EMBED_QUERY_TIMEOUT_MS`(250) 예산 안에서만 기다린다. 모델이 아직 안 올라왔거나 바쁘거나 느리거나 실패하거나 융합 SQL이 오류를 내면 **M2와 같은 키워드 전용 읽기**로 돌아가고 답은 나간다. 모델 디렉터리가 없으면 경고를 한 번 남기고 임베딩 루프는 끝난다.
+- **메모리 요구(측정)**: 모델을 올린 워커 프로세스의 상주 메모리는 **약 0.9 GiB**(arm64 맥 release 실측: 로드 후 문장 64개 임베딩까지 RSS 901 MiB, 최대 940 MiB; ORT 스레드 2·4 동일). 모델 파일(118 MB)이 아니라 ONNX Runtime 작업 영역이 대부분이다. **워커 컨테이너는 최소 1.5 GiB(`MEMORY_EMBED_MIN_MEMORY_MB`)** 를 권한다 — cgroup 한도가 그보다 작다고 읽히면 임베딩은 경고 한 줄과 함께 스스로 꺼지고 키워드 전용으로 서빙한다(0으로 검사 끔). **x86 Linux/Railway 값은 재지 않았다(runtime-unverified).** 임베딩을 켜고 싶지 않은 작은 인스턴스는 `MEMORY_EMBED_ENABLED=0`.
+- **문제 항목 격리**: 임베딩이 계속 실패하는 항목(모델 오류·DB가 벡터를 거부)은 그 항목만 프로세스 안 백오프(1분부터 2배, 최대 6시간)로 빠지고 뒤의 항목은 계속 처리된다(배치가 통째로 실패하면 항목별로 재시도, DB 쓰기는 항목별 savepoint). 재시작하면 백오프는 초기화된다. 임베더 락이 패닉으로 오염돼도 다음 호출이 복구해 쓴다.
+- **폐기 항목**: 항목이 폐기(retired, 편집 포함)·stale 이 되면 그 항목의 벡터는 트리거가 즉시 지운다(테넌트 트랜잭션 안에서 표시할 때. 그렇지 않아 남은 벡터는 검색이 폐기·stale 항목을 거르므로 읽히지 않는다).
 - **모델 교체**: `momo_embed::MODEL_ID`가 바뀌면 다른 `model` 값의 새 행으로 병행 백필되고, 검색은 자기 모델의 행만 본다(옛 행 정리는 후속).
 - **끄기**: `MEMORY_EMBED_ENABLED=0` — 이후 서빙은 M2와 바이트 단위로 같다. 이미 쌓인 벡터는 남지만 읽히지 않는다.
 - **ONNX Runtime**: 정적 링크가 아니라 실행 시 `ORT_DYLIB_PATH`(이미지에서는 `/opt/momo/lib/libonnxruntime.so`, Microsoft 공식 1.28.2, sha256 고정)로 적재한다. 못 올리면 오류로 돌려받아 키워드 전용으로 서빙한다(패닉 없음). 로컬 개발에서 모델을 돌리려면 Microsoft 릴리스의 `libonnxruntime.dylib/.so`를 받아 `ORT_DYLIB_PATH`를 지정한다(`cargo build/test`는 필요 없다).

@@ -29,6 +29,8 @@ rust-version.workspace = true
 # ignored real-model tests) needs `ORT_DYLIB_PATH` pointing at libonnxruntime.
 [dependencies]
 fastembed = { version = "=7.1.0", default-features = false, features = ["ort-load-dynamic"] }
+# Already in the graph (ort load-dynamic); used to validate ORT_DYLIB_PATH before ort sees it.
+libloading = "0.9"
 thiserror.workspace = true
 tracing.workspace = true
 

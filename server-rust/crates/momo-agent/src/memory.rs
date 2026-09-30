@@ -607,13 +607,20 @@ pub async fn embedding_stats(conn: &mut PgConnection, model: &str) -> Result<(i6
     Ok((row.get("live_items"), row.get("embedded_items")))
 }
 
-/// Workspaces the embedding sweep looks at (ids only; `workspace` is not a `mem_*` table, so the
-/// worker's own role reads it).
-pub async fn workspace_ids(pool: &PgPool, limit: i64) -> Result<Vec<Uuid>, DbError> {
-    let rows = sqlx::query("SELECT id FROM workspace ORDER BY id LIMIT $1")
-        .bind(limit)
-        .fetch_all(pool)
-        .await?;
+/// One page of workspace ids after `after` (keyset paging by id; `workspace` is not a `mem_*`
+/// table, so the worker's own role reads it). An empty page ends the walk.
+pub async fn workspace_ids(
+    pool: &PgPool,
+    after: Option<Uuid>,
+    limit: i64,
+) -> Result<Vec<Uuid>, DbError> {
+    let rows = sqlx::query(
+        "SELECT id FROM workspace WHERE ($1::uuid IS NULL OR id > $1) ORDER BY id LIMIT $2",
+    )
+    .bind(after)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
     Ok(rows.iter().map(|row| row.get("id")).collect())
 }
 

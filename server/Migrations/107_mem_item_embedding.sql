@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS mem_item_embedding (
 CREATE INDEX IF NOT EXISTS mem_item_embedding_ws_idx
   ON mem_item_embedding (workspace_id, model);
 
-GRANT SELECT, INSERT ON mem_item_embedding TO mem_definer;
+GRANT SELECT, INSERT, DELETE ON mem_item_embedding TO mem_definer;
 
 -- ── 서빙 게이트 (mem_serve_items 의 앞부분을 한 곳으로) ───────────────────────────────
 -- 105 의 mem_serve_items 가 하던 것 그대로: 요청자(run 행에서 유도)·답 채널·스위치(워크스페이스·채널·요청자 개인
@@ -420,6 +420,22 @@ BEGIN
 END
 $$;
 
+-- ── 폐기·stale 항목의 벡터는 지운다 ───────────────────────────────────────────────
+-- 편집(mem_edit_item)은 옛 행을 retired 로 내리고 새 curated 행을 넣는다. 옛 버전은 이력으로 남아도 검색·서빙은
+-- 읽지 않으므로 벡터(본문 복원 재료)를 들고 있을 이유가 없다 — 폐기되는 그 순간 함께 지운다.
+CREATE OR REPLACE FUNCTION mem_item_embedding_cleanup()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+BEGIN
+  DELETE FROM public.mem_item_embedding e
+   WHERE e.item_id = NEW.id AND e.workspace_id = NEW.workspace_id;
+  RETURN NULL;
+END
+$$;
+
 -- ── 소유자·권한 ────────────────────────────────────────────────────────────────
 GRANT CREATE ON SCHEMA public TO mem_definer;
 DO $$
@@ -430,7 +446,7 @@ BEGIN
     'mem_search_items_fused(uuid, text, integer, uuid, text, text, real, real)',
     'mem_serve_items_fused(uuid, integer, integer, text, text, real, real)',
     'mem_set_item_embedding(uuid, text, text)', 'mem_items_to_embed(text, integer)',
-    'mem_embedding_stats(text)'
+    'mem_embedding_stats(text)', 'mem_item_embedding_cleanup()'
   ] LOOP
     EXECUTE format('ALTER FUNCTION %s OWNER TO mem_definer', f);
   END LOOP;
@@ -438,6 +454,13 @@ END $$;
 REVOKE CREATE ON SCHEMA public FROM mem_definer;
 
 -- ── RLS ────────────────────────────────────────────────────────────────────────
+DROP TRIGGER IF EXISTS mem_item_embedding_cleanup_trg ON mem_item;
+CREATE TRIGGER mem_item_embedding_cleanup_trg
+  AFTER UPDATE OF retired_at, stale ON mem_item
+  FOR EACH ROW
+  WHEN ((NEW.retired_at IS NOT NULL AND OLD.retired_at IS NULL) OR (NEW.stale AND NOT OLD.stale))
+  EXECUTE FUNCTION mem_item_embedding_cleanup();
+
 ALTER TABLE mem_item_embedding ENABLE ROW LEVEL SECURITY;
 ALTER TABLE mem_item_embedding FORCE ROW LEVEL SECURITY;
 
@@ -448,7 +471,8 @@ CREATE POLICY mem_item_embedding_ins ON mem_item_embedding FOR INSERT TO mem_def
 DROP POLICY IF EXISTS mem_item_embedding_sel_definer ON mem_item_embedding;
 CREATE POLICY mem_item_embedding_sel_definer ON mem_item_embedding FOR SELECT TO mem_definer
   USING (workspace_id = nullif(current_setting('app.workspace_id', true), '')::uuid);
--- 추가만: 수정·삭제 정책이 없고, 나중에 누가 허용 정책을 더해도 RESTRICTIVE 는 AND 라 못 뚫는다.
+-- 수정은 없다(RESTRICTIVE false). 삭제는 정의자만, 자기 워크스페이스에서만: 항목이 폐기(retired)·stale 이 되면
+-- 아래 트리거가 그 항목의 벡터를 지운다. 나중에 누가 허용 정책을 더해도 RESTRICTIVE 는 AND 라 못 뚫는다.
 -- (mem_item 삭제의 FK CASCADE 는 참조 무결성 동작이라 행 보안을 거치지 않는다.)
 DROP POLICY IF EXISTS mem_item_embedding_only_definer_ins ON mem_item_embedding;
 CREATE POLICY mem_item_embedding_only_definer_ins ON mem_item_embedding AS RESTRICTIVE FOR INSERT
@@ -456,9 +480,13 @@ CREATE POLICY mem_item_embedding_only_definer_ins ON mem_item_embedding AS RESTR
 DROP POLICY IF EXISTS mem_item_embedding_no_update ON mem_item_embedding;
 CREATE POLICY mem_item_embedding_no_update ON mem_item_embedding AS RESTRICTIVE FOR UPDATE
   USING (false) WITH CHECK (false);
+DROP POLICY IF EXISTS mem_item_embedding_del ON mem_item_embedding;
+CREATE POLICY mem_item_embedding_del ON mem_item_embedding FOR DELETE TO mem_definer
+  USING (workspace_id = nullif(current_setting('app.workspace_id', true), '')::uuid);
 DROP POLICY IF EXISTS mem_item_embedding_no_delete ON mem_item_embedding;
-CREATE POLICY mem_item_embedding_no_delete ON mem_item_embedding AS RESTRICTIVE FOR DELETE
-  USING (false);
+DROP POLICY IF EXISTS mem_item_embedding_only_definer_del ON mem_item_embedding;
+CREATE POLICY mem_item_embedding_only_definer_del ON mem_item_embedding AS RESTRICTIVE FOR DELETE
+  USING (current_user = 'mem_definer');
 
 -- ── 런타임 역할 권한 (이 마이그레이션이 만든 객체만) ─────────────────────────────────
 -- 101 의 공용 잠금 블록은 건드리지 않는다(mem_* 테이블을 동적으로 순회하므로 부트스트랩이 다시 돌면 이 테이블도
@@ -479,7 +507,8 @@ DECLARE
   ];
   owner_only text[] := ARRAY[
     'mem_serve_gate(uuid)',
-    'mem_search_items_fused(uuid, text, integer, uuid, text, text, real, real)'
+    'mem_search_items_fused(uuid, text, integer, uuid, text, text, real, real)',
+    'mem_item_embedding_cleanup()'
   ];
 BEGIN
   EXECUTE 'REVOKE ALL ON TABLE public.mem_item_embedding FROM PUBLIC';
@@ -553,7 +582,8 @@ DECLARE
     'mem_serve_items', 'mem_serving_record_of',
     'mem_edit_item', 'mem_forget_item',
     'mem_serve_gate', 'mem_serve_query', 'mem_search_items_fused', 'mem_serve_items_fused',
-    'mem_set_item_embedding', 'mem_items_to_embed', 'mem_embedding_stats'
+    'mem_set_item_embedding', 'mem_items_to_embed', 'mem_embedding_stats',
+    'mem_item_embedding_cleanup'
   ];
 BEGIN
   FOR f IN SELECT p.oid::regprocedure::text FROM pg_proc p

@@ -26,6 +26,8 @@ pub struct MockEmbedder {
     mode: Mode,
     calls: AtomicUsize,
     id: String,
+    fail_on: Option<String>,
+    zero_on: Option<String>,
 }
 
 impl MockEmbedder {
@@ -44,11 +46,25 @@ impl MockEmbedder {
             mode: Mode::Works,
             calls: AtomicUsize::new(0),
             id: "mock-concepts:v1".to_string(),
+            fail_on: None,
+            zero_on: None,
         }
     }
 
     pub fn with_mode(mut self, mode: Mode) -> MockEmbedder {
         self.mode = mode;
+        self
+    }
+
+    /// Any passage batch containing this text fails as a whole (a poison item in a batch).
+    pub fn failing_on(mut self, needle: &str) -> MockEmbedder {
+        self.fail_on = Some(needle.to_string());
+        self
+    }
+
+    /// A passage containing this text embeds to the zero vector (the database refuses that one row).
+    pub fn zero_on(mut self, needle: &str) -> MockEmbedder {
+        self.zero_on = Some(needle.to_string());
         self
     }
 
@@ -114,7 +130,18 @@ impl TextEmbedder for MockEmbedder {
 
     fn embed_passages(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbedError> {
         self.gate()?;
-        Ok(texts.iter().map(|t| self.one(t)).collect())
+        if let Some(needle) = &self.fail_on {
+            if texts.iter().any(|t| t.contains(needle.as_str())) {
+                return Err(EmbedError::Infer("poison passage".to_string()));
+            }
+        }
+        Ok(texts
+            .iter()
+            .map(|t| match &self.zero_on {
+                Some(n) if t.contains(n.as_str()) => vec![0.0; DIMS],
+                _ => self.one(t),
+            })
+            .collect())
     }
 }
 

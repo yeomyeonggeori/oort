@@ -101,10 +101,10 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends ca-certificates curl; \
     rm -rf /var/lib/apt/lists/*; \
     base="https://huggingface.co/intfloat/multilingual-e5-small/resolve/${E5_SMALL_REVISION}"; \
-    curl --fail --silent --show-error --location --retry 3 --retry-delay 2 \
+    curl --fail --silent --show-error --proto '=https' --proto-redir '=https' --location --retry 3 --retry-delay 2 \
       -o model_qint8.onnx "${base}/onnx/model_qint8_avx512_vnni.onnx"; \
     for f in tokenizer.json config.json special_tokens_map.json tokenizer_config.json; do \
-      curl --fail --silent --show-error --location --retry 3 --retry-delay 2 -o "$f" "${base}/$f"; \
+      curl --fail --silent --show-error --proto '=https' --proto-redir '=https' --location --retry 3 --retry-delay 2 -o "$f" "${base}/$f"; \
     done; \
     sha256sum -c /models/e5-small-int8.sha256; \
     ls -l
@@ -131,7 +131,7 @@ RUN set -eux; \
       aarch64) arch=aarch64; sha="${ORT_SHA256_AARCH64}" ;; \
       *) echo "no pinned ONNX Runtime for $(uname -m)" >&2; exit 1 ;; \
     esac; \
-    curl --fail --silent --show-error --location --retry 3 --retry-delay 2 -o ort.tgz \
+    curl --fail --silent --show-error --proto '=https' --proto-redir '=https' --location --retry 3 --retry-delay 2 -o ort.tgz \
       "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-${arch}-${ORT_VERSION}.tgz"; \
     echo "${sha}  ort.tgz" | sha256sum -c; \
     tar -xzf ort.tgz --strip-components=1; \

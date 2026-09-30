@@ -74,6 +74,7 @@ this table only records why they are there.
 | unicode-normalization | 0.1.25 | MIT OR Apache-2.0 | `server-rust/crates/momo-wire` (NFC of signed human text; was already transitive via sqlx) | ADR-0146 개정 2026-09-28 D-5, #3021 |
 | fastembed (fastembed-rs; `default-features = false`, no hf-hub / image models) | 7.1.0 | Apache-2.0 | `server-rust/crates/momo-embed` (loads the int8 ONNX sentence model and runs it) | ADR-0196 D8 증보 2026-09-30, #3173 |
 | ort / ort-sys (pykeio/ort, ONNX Runtime bindings; `load-dynamic`: no ONNX Runtime binary is downloaded or linked at cargo build time) | 2.0.0-rc.13 | MIT OR Apache-2.0 | via fastembed, `momo-embed` | same |
+| libloading (nagisa/rust_libloading; already in the graph via ort, now also a direct dependency that checks `ORT_DYLIB_PATH` before ort sees it) | 0.9.0 | ISC | `server-rust/crates/momo-embed` | same |
 | tokenizers (Hugging Face) | 0.23.2 | Apache-2.0 | via fastembed, `momo-embed` | same |
 
 ### Embedded model and ONNX Runtime (worker image; not Cargo crates)

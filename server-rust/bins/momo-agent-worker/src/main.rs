@@ -16,6 +16,20 @@ use momo_agent_worker::{AgentWorker, WorkerConfig};
 /// check the shape. The image build runs it, so a model file that is missing, corrupt or not
 /// loadable by the bundled ONNX Runtime fails the build instead of degrading a running worker
 /// to keyword-only search without anyone noticing. Prints no text, only the verdict.
+fn current_rss_kb() -> Option<u64> {
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        return status
+            .lines()
+            .find_map(|l| l.strip_prefix("VmRSS:"))
+            .and_then(|v| v.split_whitespace().next()?.parse().ok());
+    }
+    let out = std::process::Command::new("ps")
+        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}
+
 fn embed_check() -> Result<(), Box<dyn std::error::Error>> {
     use momo_embed::TextEmbedder;
     let cfg = momo_agent_worker::config::MemoryConfig::from_env()?;
@@ -44,10 +58,20 @@ fn embed_check() -> Result<(), Box<dyn std::error::Error>> {
         )
         .into());
     }
+    // Steady-state footprint after load + a few batches (Linux: /proc; elsewhere: ps). Measurement
+    // aid for the runbook's memory floor; the number is informational.
+    let passages: Vec<String> = (0..64)
+        .map(|n| format!("4월 릴리스는 QA 일정 때문에 다음 달로 연기하기로 결정했어요 {n}"))
+        .collect();
+    for chunk in passages.chunks(16) {
+        model.embed_passages(chunk)?;
+    }
+    let rss_mb = current_rss_kb().map(|kb| kb / 1024);
     println!(
-        "embed-check ok model={} dims={} load_ms={loaded_ms} related={near:.3} unrelated={far:.3}",
+        "embed-check ok model={} dims={} load_ms={loaded_ms} rss_mb={} related={near:.3} unrelated={far:.3}",
         model.model_id(),
-        query.len()
+        query.len(),
+        rss_mb.map_or("?".to_string(), |v| v.to_string())
     );
     Ok(())
 }

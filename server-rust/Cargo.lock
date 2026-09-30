@@ -1692,6 +1692,7 @@ name = "momo-embed"
 version = "0.0.0"
 dependencies = [
  "fastembed",
+ "libloading",
  "tempfile",
  "thiserror 1.0.69",
  "tracing",

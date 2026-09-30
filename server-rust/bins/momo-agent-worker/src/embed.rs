@@ -43,8 +43,35 @@ const MAX_QUERY_INFLIGHT: usize = 2;
 /// A workspace with nothing to embed is not asked again for this long (unless this process
 /// stored a new item, which wakes it).
 const IDLE_RECHECK: Duration = Duration::from_secs(300);
+/// First retry of a failing item waits this long; each further failure doubles it (capped below).
+const POISON_BACKOFF_BASE: Duration = Duration::from_secs(60);
+const POISON_BACKOFF_MAX: Duration = Duration::from_secs(6 * 3600);
+/// Failing items remembered at most (an unbounded map would be its own leak).
+const POISON_MAX_TRACKED: usize = 10_000;
 /// Wall-clock cap on one batch of stored items (a saturated machine must not hang a sweep).
 const BATCH_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The container's memory limit in bytes (cgroup v2, then v1), `None` when unlimited or unknown.
+pub fn cgroup_memory_limit_bytes() -> Option<u64> {
+    for path in [
+        "/sys/fs/cgroup/memory.max",
+        "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+    ] {
+        if let Ok(text) = std::fs::read_to_string(path) {
+            // "max" (v2 unlimited) does not parse; v1 "unlimited" is a huge number.
+            if let Ok(bytes) = text.trim().parse::<u64>() {
+                return (bytes < (1u64 << 60)).then_some(bytes);
+            }
+            return None;
+        }
+    }
+    None
+}
+
+/// Is a `limit_bytes` container big enough for the model (`min_mb`; 0 = no check)?
+pub fn memory_allows(limit_bytes: u64, min_mb: u64) -> bool {
+    min_mb == 0 || limit_bytes / (1024 * 1024) >= min_mb
+}
 
 /// A query embedding ready for SQL: pgvector text plus the model it belongs to.
 #[derive(Debug, Clone, PartialEq)]
@@ -60,6 +87,8 @@ struct Inner {
     slot: OnceCell<Option<Arc<dyn TextEmbedder>>>,
     inflight: Arc<Semaphore>,
     idle: Mutex<HashMap<Uuid, Instant>>,
+    /// Items that failed to embed: id -> (failures so far, do not retry before). In-process only.
+    poison: Mutex<HashMap<Uuid, (u32, Instant)>>,
     load_failed_logged: AtomicBool,
 }
 
@@ -83,6 +112,17 @@ impl EmbedService {
     pub fn from_config(cfg: &MemoryConfig) -> EmbedService {
         if !cfg.embed_enabled {
             return EmbedService::disabled();
+        }
+        if let Some(limit) = cgroup_memory_limit_bytes() {
+            if !memory_allows(limit, cfg.embed_min_memory_mb) {
+                tracing::warn!(
+                    limit_mb = limit / (1024 * 1024),
+                    needed_mb = cfg.embed_min_memory_mb,
+                    "memory embedding disabled: the container memory limit is below \
+                     MEMORY_EMBED_MIN_MEMORY_MB (the model needs ~0.9 GiB resident); serving stays keyword-only"
+                );
+                return EmbedService::disabled();
+            }
         }
         let dir = PathBuf::from(&cfg.embed_model_dir);
         let threads = cfg.embed_threads;
@@ -110,6 +150,7 @@ impl EmbedService {
                 slot: OnceCell::new(),
                 inflight: Arc::new(Semaphore::new(MAX_QUERY_INFLIGHT)),
                 idle: Mutex::new(HashMap::new()),
+                poison: Mutex::new(HashMap::new()),
                 load_failed_logged: AtomicBool::new(false),
             }),
         }
@@ -226,6 +267,47 @@ impl EmbedService {
         map.insert(ws, Instant::now());
     }
 
+    /// Items still in their retry backoff: the sweep neither embeds nor waits on them, so one bad
+    /// item cannot block the queue behind it.
+    pub fn backed_off(&self) -> Vec<Uuid> {
+        let now = Instant::now();
+        let map = self.inner.poison.lock().unwrap_or_else(|p| p.into_inner());
+        map.iter()
+            .filter(|(_, (_, next))| *next > now)
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
+    fn record_failure(&self, id: Uuid) {
+        let mut map = self.inner.poison.lock().unwrap_or_else(|p| p.into_inner());
+        if map.len() >= POISON_MAX_TRACKED && !map.contains_key(&id) {
+            return;
+        }
+        let entry = map.entry(id).or_insert((0, Instant::now()));
+        entry.0 += 1;
+        let wait = POISON_BACKOFF_BASE
+            .saturating_mul(1u32 << (entry.0 - 1).min(12))
+            .min(POISON_BACKOFF_MAX);
+        entry.1 = Instant::now() + wait;
+    }
+
+    fn clear_failure(&self, id: Uuid) {
+        self.inner
+            .poison
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&id);
+    }
+
+    /// Forget every backoff (tests: "a later sweep, after the wait").
+    pub fn forget_backoff(&self) {
+        self.inner
+            .poison
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clear();
+    }
+
     /// Something new was stored: look at every workspace again on the next sweep.
     pub fn forget_idle(&self) {
         self.inner
@@ -308,40 +390,57 @@ impl AgentWorker {
             return stats;
         };
         let model = embedder.model_id().to_string();
-        let workspaces = match mem::workspace_ids(&self.pool, cfg.embed_max_workspaces).await {
-            Ok(ids) => ids,
-            Err(error) => {
-                tracing::warn!(error = %error, "memory embed sweep: workspace list failed");
-                stats.failures += 1;
-                return stats;
-            }
-        };
-        for ws in workspaces {
-            if self.embed.idle_skip(ws) {
-                continue;
-            }
-            stats.workspaces += 1;
-            let mut budget = cfg.embed_max_per_sweep;
-            let mut drained = false;
-            while budget > 0 {
-                let want = cfg.embed_batch.min(budget);
-                match self
-                    .embed_batch(ws, &embedder, &model, want, &mut stats)
-                    .await
-                {
-                    BatchOutcome::Done(0) => {
-                        drained = true;
-                        break;
-                    }
-                    BatchOutcome::Done(n) => budget = budget.saturating_sub(n),
-                    BatchOutcome::Failed => break,
+        // Page through every workspace by id (keyset), `embed_max_workspaces` per page.
+        let mut after: Option<Uuid> = None;
+        loop {
+            let page = match mem::workspace_ids(&self.pool, after, cfg.embed_max_workspaces).await {
+                Ok(ids) => ids,
+                Err(error) => {
+                    tracing::warn!(error = %error, "memory embed sweep: workspace list failed");
+                    stats.failures += 1;
+                    return stats;
                 }
-            }
-            if drained {
-                self.embed.mark_idle(ws);
+            };
+            let Some(last) = page.last().copied() else {
+                break;
+            };
+            after = Some(last);
+            for ws in page {
+                self.embed_workspace(ws, &embedder, &model, &mut stats)
+                    .await;
             }
         }
         stats
+    }
+
+    async fn embed_workspace(
+        &self,
+        ws: Uuid,
+        embedder: &Arc<dyn TextEmbedder>,
+        model: &str,
+        stats: &mut EmbedSweepStats,
+    ) {
+        let cfg = &self.config.memory;
+        if self.embed.idle_skip(ws) {
+            return;
+        }
+        stats.workspaces += 1;
+        let mut budget = cfg.embed_max_per_sweep;
+        let mut drained = false;
+        while budget > 0 {
+            let want = cfg.embed_batch.min(budget);
+            match self.embed_batch(ws, embedder, model, want, stats).await {
+                BatchOutcome::Done(0) => {
+                    drained = true;
+                    break;
+                }
+                BatchOutcome::Done(n) => budget = budget.saturating_sub(n),
+                BatchOutcome::Failed => break,
+            }
+        }
+        if drained {
+            self.embed.mark_idle(ws);
+        }
     }
 
     async fn embed_batch(
@@ -353,7 +452,10 @@ impl AgentWorker {
         stats: &mut EmbedSweepStats,
     ) -> BatchOutcome {
         let model_owned = model.to_string();
-        let limit = i32::try_from(want).unwrap_or(16);
+        // Items in their retry backoff are skipped in Rust, so ask for enough extra rows that
+        // `want` eligible ones still come back (a poison item at the head must not starve the rest).
+        let backed_off = self.embed.backed_off();
+        let limit = i32::try_from((want + backed_off.len()).min(500)).unwrap_or(16);
         let rows = match mem::with_memory_tx(&self.pool, ws, move |conn| {
             Box::pin(async move { mem::items_to_embed(conn, &model_owned, limit).await })
         })
@@ -366,52 +468,108 @@ impl AgentWorker {
                 return BatchOutcome::Failed;
             }
         };
+        let rows: Vec<(Uuid, String)> = rows
+            .into_iter()
+            .filter(|(id, _)| !backed_off.contains(id))
+            .take(want)
+            .collect();
         if rows.is_empty() {
             return BatchOutcome::Done(0);
         }
-        let texts: Vec<String> = rows.iter().map(|(_, body)| body.clone()).collect();
-        let worker_embedder = embedder.clone();
-        let task = tokio::task::spawn_blocking(move || worker_embedder.embed_passages(&texts));
-        let vectors = match tokio::time::timeout(BATCH_TIMEOUT, task).await {
-            Ok(Ok(Ok(vectors))) if vectors.len() == rows.len() => vectors,
-            Ok(Ok(Ok(_))) | Ok(Ok(Err(_))) | Ok(Err(_)) | Err(_) => {
-                tracing::warn!(workspace_id = %ws, "memory embed sweep: model call failed; retrying next sweep");
-                stats.failures += 1;
-                return BatchOutcome::Failed;
+
+        // Embed the batch; if the model call fails as a whole, retry item by item so that one
+        // poison text costs only itself.
+        let mut ready: Vec<(Uuid, Vec<f32>)> = Vec::with_capacity(rows.len());
+        match run_embed(embedder, rows.iter().map(|r| r.1.clone()).collect()).await {
+            Some(vectors) if vectors.len() == rows.len() => {
+                ready.extend(rows.iter().map(|r| r.0).zip(vectors));
             }
-        };
-        let mut pairs: Vec<(Uuid, String)> = Vec::with_capacity(rows.len());
-        for ((id, _), vector) in rows.iter().zip(&vectors) {
+            _ => {
+                for (id, body) in &rows {
+                    match run_embed(embedder, vec![body.clone()]).await {
+                        Some(mut v) if v.len() == 1 => ready.push((*id, v.remove(0))),
+                        _ => {
+                            self.embed.record_failure(*id);
+                            stats.failures += 1;
+                        }
+                    }
+                }
+                tracing::warn!(
+                    workspace_id = %ws,
+                    failed = rows.len() - ready.len(),
+                    "memory embed sweep: batch model call failed; items retried one by one"
+                );
+            }
+        }
+
+        let mut pairs: Vec<(Uuid, String)> = Vec::with_capacity(ready.len());
+        for (id, vector) in &ready {
             match vector_literal(vector) {
                 Ok(literal) => pairs.push((*id, literal)),
                 Err(error) => {
                     tracing::warn!(workspace_id = %ws, error = %error, "memory embed sweep: bad vector");
+                    self.embed.record_failure(*id);
                     stats.failures += 1;
                 }
             }
         }
+        // One savepoint per item: the database refusing one row (zero vector, a lock timeout on
+        // that row, …) rolls back that row only.
         let model_owned = model.to_string();
         let written = mem::with_memory_tx(&self.pool, ws, move |conn| {
             Box::pin(async move {
-                let mut ok = 0usize;
+                let mut ok = Vec::new();
                 let mut skipped = 0usize;
+                let mut failed = Vec::new();
                 for (id, literal) in &pairs {
-                    if mem::set_item_embedding(conn, *id, &model_owned, literal).await? {
-                        ok += 1;
-                    } else {
-                        skipped += 1;
+                    momo_db::sqlx::query("SAVEPOINT embed_item")
+                        .execute(&mut *conn)
+                        .await?;
+                    match mem::set_item_embedding(conn, *id, &model_owned, literal).await {
+                        Ok(true) => {
+                            ok.push(*id);
+                            momo_db::sqlx::query("RELEASE SAVEPOINT embed_item")
+                                .execute(&mut *conn)
+                                .await?;
+                        }
+                        Ok(false) => {
+                            skipped += 1;
+                            momo_db::sqlx::query("RELEASE SAVEPOINT embed_item")
+                                .execute(&mut *conn)
+                                .await?;
+                        }
+                        Err(_) => {
+                            momo_db::sqlx::query("ROLLBACK TO SAVEPOINT embed_item")
+                                .execute(&mut *conn)
+                                .await?;
+                            failed.push(*id);
+                        }
                     }
                 }
-                Ok((ok, skipped))
+                Ok((ok, skipped, failed))
             })
         })
         .await;
         match written {
-            Ok((ok, skipped)) => {
-                stats.embedded += ok;
+            Ok((ok, skipped, failed)) => {
+                for id in &ok {
+                    self.embed.clear_failure(*id);
+                }
+                for id in &failed {
+                    self.embed.record_failure(*id);
+                }
+                if !failed.is_empty() {
+                    tracing::warn!(
+                        workspace_id = %ws,
+                        failed = failed.len(),
+                        "memory embed sweep: the database refused some vectors; they back off"
+                    );
+                }
+                stats.embedded += ok.len();
                 stats.skipped += skipped;
-                // A batch that stored nothing (everything skipped) must not spin: report progress
-                // only for rows actually handled so the budget still drains.
+                stats.failures += failed.len();
+                // Progress counts rows handled (failed ones back off, so they do not come back
+                // in this sweep): the budget still drains.
                 BatchOutcome::Done(rows.len())
             }
             Err(error) => {
@@ -420,6 +578,16 @@ impl AgentWorker {
                 BatchOutcome::Failed
             }
         }
+    }
+}
+
+/// One model call on the blocking pool under the batch deadline. `None` = failed or timed out.
+async fn run_embed(embedder: &Arc<dyn TextEmbedder>, texts: Vec<String>) -> Option<Vec<Vec<f32>>> {
+    let embedder = embedder.clone();
+    let task = tokio::task::spawn_blocking(move || embedder.embed_passages(&texts));
+    match tokio::time::timeout(BATCH_TIMEOUT, task).await {
+        Ok(Ok(Ok(vectors))) => Some(vectors),
+        _ => None,
     }
 }
 
@@ -452,6 +620,14 @@ mod tests {
         let v = s.embed_query("배포").await.expect("loaded now");
         assert_eq!(v.model, "mock-concepts:v1");
         assert!(v.literal.starts_with('[') && v.literal.ends_with(']'));
+    }
+
+    #[test]
+    fn a_small_container_is_refused_and_zero_disables_the_check() {
+        let mb = 1024 * 1024;
+        assert!(!memory_allows(512 * mb, 1536));
+        assert!(memory_allows(2048 * mb, 1536));
+        assert!(memory_allows(512 * mb, 0));
     }
 
     #[tokio::test]

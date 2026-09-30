@@ -2122,7 +2122,9 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
                 // #3173: the fusion body and the serving gate are owner-only too (the worker
                 // reaches them through `mem_serve_items_fused` / `mem_serve_query`).
                 && name != "mem_search_items_fused"
-                && name != "mem_serve_gate";
+                && name != "mem_serve_gate"
+                // ... and the trigger function that drops a retired item's vectors.
+                && name != "mem_item_embedding_cleanup";
             assert_eq!(has, expected, "{when}: {role} EXECUTE {signature}");
         }
     }
@@ -2531,7 +2533,7 @@ async fn lock_block_also_locks_views_and_materialized_views() {
 }
 
 /// L-1: the SECURITY DEFINER functions owned by mem_definer are exactly this list.
-const DEFINER_ALLOW_LIST: [&str; 44] = [
+const DEFINER_ALLOW_LIST: [&str; 45] = [
     "mem_accept_proposal",
     "mem_add_item",
     "mem_adjust_tokens",
@@ -2550,6 +2552,7 @@ const DEFINER_ALLOW_LIST: [&str; 44] = [
     "mem_embedding_stats",
     "mem_forget_item",
     "mem_item_audience_ok",
+    "mem_item_embedding_cleanup",
     "mem_item_evidence_ok",
     "mem_item_live",
     "mem_item_readable_by",
@@ -2790,4 +2793,42 @@ async fn recursion_guard_in_the_digest_policy_is_load_bearing() {
     .await
     .expect("arm");
     assert_eq!(arm_after, 1, "definer arm restored");
+}
+
+// Definer functions that return a `body` without being told a viewer or a run (the run row derives
+// the requester): each one is a body reader with its own trust story. A new one must be added here
+// on purpose.
+//   mem_digest_rollup_inputs  worker-only, the summary worker's roll-up inputs (it reads every channel)
+//   mem_items_to_embed        worker-only, #3173: item bodies to embed locally with no viewer narrowing;
+//                             the same trust boundary as the summary worker (ADR-0196 D8 증보), and
+//                             nothing leaves the process
+//   mem_search_items          the API's search: viewer = the session GUC, `session_user` guarded
+const BODY_READERS_WITHOUT_VIEWER: [&str; 3] = [
+    "mem_digest_rollup_inputs",
+    "mem_items_to_embed",
+    "mem_search_items",
+];
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn body_readers_without_a_viewer_are_exactly_the_named_exceptions() {
+    let (su, _app, _w) = setup().await;
+    let found: Vec<String> = sqlx::query_scalar(
+        "SELECT p.proname::text FROM pg_proc p WHERE p.prosecdef \
+            AND pg_get_userbyid(p.proowner) = 'mem_definer' \
+            AND pg_get_function_result(p.oid) ~ '\\mbody\\M' \
+            AND pg_get_function_identity_arguments(p.oid) !~ '(viewer|run_id)' ORDER BY 1",
+    )
+    .fetch_all(&su)
+    .await
+    .expect("body readers");
+    assert_eq!(found, BODY_READERS_WITHOUT_VIEWER.to_vec());
+    // The one added for embedding is worker-only.
+    let app_can: bool = sqlx::query_scalar(
+        "SELECT has_function_privilege('momo_app', 'public.mem_items_to_embed(text, integer)'::regprocedure, 'EXECUTE')",
+    )
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(!app_can);
 }
