@@ -38,6 +38,11 @@ import {
   itemReadError,
   memoryKindLabel,
 } from "@momo/core/features/memory/browser";
+import {
+  TIMELINE_VIEW_LIST,
+  TIMELINE_VIEW_TIMELINE,
+} from "@momo/core/features/memory/timeline";
+import { DecisionTimeline } from "./DecisionTimeline";
 import { MemoryItemDetailPane } from "./MemoryItemDetailPane";
 import { useMemoryItemList, useMemorySettings } from "./useMemory";
 
@@ -71,6 +76,8 @@ export function MemoryBrowserRoute() {
   const status = isMemoryStatus(statusParam) ? statusParam : "active";
   const q = params.get("q") ?? "";
   const itemId = params.get("item");
+  // 결정 타임라인(V5)은 같은 라우트의 다른 보기다: 채널 필터만 함께 쓰고 종류·상태·검색은 접는다.
+  const timelineView = params.get("view") === "timeline";
 
   const [searchText, setSearchText] = useState(q);
   const [notice, setNotice] = useState<string | null>(null);
@@ -200,7 +207,37 @@ export function MemoryBrowserRoute() {
             data-testid="memory-browser-list-pane"
           >
             <div className="flex flex-col gap-2 border-b border-line px-4 py-3">
+              <div
+                role="group"
+                aria-label="보기 방식"
+                className="flex gap-2"
+                data-testid="memory-browser-views"
+              >
+                {(
+                  [
+                    { value: null, label: TIMELINE_VIEW_LIST },
+                    { value: "timeline", label: TIMELINE_VIEW_TIMELINE },
+                  ] as const
+                ).map((view) => {
+                  const active = (view.value === "timeline") === timelineView;
+                  return (
+                    <Button
+                      key={view.label}
+                      type="button"
+                      size="sm"
+                      variant={active ? "secondary" : "ghost"}
+                      className="tap-target"
+                      aria-pressed={active}
+                      onClick={() => setParam("view", view.value)}
+                      data-testid={`memory-browser-view-${view.value ?? "list"}`}
+                    >
+                      {view.label}
+                    </Button>
+                  );
+                })}
+              </div>
               <p className="break-keep text-meta text-ink-muted">{BROWSER_LEAD}</p>
+              {!timelineView && (
               <Input
                 type="search"
                 value={searchText}
@@ -209,6 +246,7 @@ export function MemoryBrowserRoute() {
                 placeholder={BROWSER_SEARCH_PLACEHOLDER}
                 data-testid="memory-browser-search"
               />
+              )}
               <div className="grid grid-cols-2 gap-2">
                 <Select
                   aria-label="채널"
@@ -224,6 +262,7 @@ export function MemoryBrowserRoute() {
                     </option>
                   ))}
                 </Select>
+                {!timelineView && (
                 <Select
                   aria-label="종류"
                   value={kind ?? ""}
@@ -237,6 +276,8 @@ export function MemoryBrowserRoute() {
                     </option>
                   ))}
                 </Select>
+                )}
+                {!timelineView && (
                 <Select
                   aria-label="상태"
                   value={status}
@@ -252,8 +293,9 @@ export function MemoryBrowserRoute() {
                     </option>
                   ))}
                 </Select>
+                )}
               </div>
-              {searching && (
+              {searching && !timelineView && (
                 <p className="break-keep text-meta text-ink-muted" data-testid="memory-browser-search-note">
                   {BROWSER_SEARCH_NOTE}
                 </p>
@@ -261,7 +303,18 @@ export function MemoryBrowserRoute() {
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto" data-testid="memory-browser-list">
-              {list.isPending ? (
+              {timelineView ? (
+                <DecisionTimeline
+                  workspaceId={workspaceId}
+                  channelId={channelId}
+                  selectedItemId={itemId}
+                  channelNames={channelNames}
+                  onOpenItem={(id) => {
+                    setFocusDetail(isMobile);
+                    setParam("item", id);
+                  }}
+                />
+              ) : list.isPending ? (
                 <Skeleton ready={false} rows={6} />
               ) : readError !== null ? (
                 <InlineBanner

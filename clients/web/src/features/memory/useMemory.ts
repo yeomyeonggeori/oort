@@ -1,6 +1,7 @@
 import {
   useInfiniteQuery,
   useMutation,
+  useQueries,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
@@ -14,6 +15,7 @@ import {
   listMemoryItems,
   listMemoryProposals,
   rejectMemoryProposal,
+  revertMemoryConsolidation,
   getRunMemoryReceipt,
   listMemoryDigests,
   patchChannelMemorySettings,
@@ -302,5 +304,59 @@ export function useForgetMemoryItem(workspaceId: string) {
   return useMutation({
     mutationFn: (itemId: string) => forgetMemoryItem(workspaceId, itemId),
     onSuccess: () => client.invalidateQueries({ queryKey: memoryKeys.items(workspaceId) }),
+  });
+}
+
+/** Undo one consolidation event (#3172/#3174). Refetches every item read: a revert reshapes lists and timelines. */
+export function useRevertConsolidation(workspaceId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ itemId, eventId }: { itemId: string; eventId: string }) =>
+      revertMemoryConsolidation(workspaceId, itemId, eventId),
+    onSuccess: () => client.invalidateQueries({ queryKey: memoryKeys.items(workspaceId) }),
+    // A 409 means the server's state moved on; read it again either way.
+    onError: () => client.invalidateQueries({ queryKey: memoryKeys.items(workspaceId) }),
+  });
+}
+
+/**
+ * Decisions over time (V5). `status: all` because a merged or decayed decision is history
+ * and a closed one is still live; the server pages 100 at a time.
+ */
+export function useDecisionTimelineItems(workspaceId: string, channelId: string, enabled: boolean) {
+  return useInfiniteQuery<MemoryItemPage>({
+    queryKey: memoryKeys.itemList(workspaceId, {
+      kind: "decision",
+      status: "all",
+      ...(channelId !== "" ? { channelId } : {}),
+      limit: 100,
+    }),
+    queryFn: ({ pageParam }) =>
+      listMemoryItems(workspaceId, {
+        kind: "decision",
+        status: "all",
+        ...(channelId !== "" ? { channelId } : {}),
+        ...(typeof pageParam === "string" ? { cursor: pageParam } : {}),
+        limit: 100,
+      }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor,
+    enabled,
+    retry: retryUnlessAbsent,
+  });
+}
+
+/**
+ * The ledger of the items whose "replaced by" / "merged into" link only the ledger holds
+ * (`ItemDto` carries no closer). One read per closed or merged decision; a failed read
+ * leaves that entry without a link rather than failing the timeline.
+ */
+export function useTimelineEvents(workspaceId: string, itemIds: readonly string[]) {
+  return useQueries({
+    queries: itemIds.map((itemId) => ({
+      queryKey: memoryKeys.itemEvents(workspaceId, itemId),
+      queryFn: () => getMemoryItemEvents(workspaceId, itemId),
+      retry: false,
+    })),
   });
 }
