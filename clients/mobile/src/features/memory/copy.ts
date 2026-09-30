@@ -98,3 +98,48 @@ export const MEMORY_ADMIN_ROW = '팀·채널 기억 설정';
 export const MEMORY_ADMIN_DETAIL =
   '팀 전체 스위치와 채널별 제외는 데스크탑에서 바꿀 수 있어요.';
 export const MEMORY_PAUSE_CHECKING = '기억 설정을 확인하고 있어요.';
+
+// ---- 「기억해 둘게요」 제안 카드 (#3171, plan.md §5 V3 / ADR-0196 D4·D9) ------------
+//
+// 웹 #3170과 같은 문장을 쓰려 했으나 이 브랜치를 자르는 시점에 웹의 제안 카드 문장이
+// 아직 없었다(코어에도 공용 자리가 없다). 그래서 해요체로 새로 적었고, 웹이 먼저
+// 굳히면 이 블록을 그쪽에 맞춘다. 화면·테스트는 이 상수만 읽는다.
+
+export const PROPOSAL_TITLE = '기억해 둘게요';
+export const PROPOSAL_ACCEPT = '기억하기';
+export const PROPOSAL_REJECT = '기억 안 하기';
+export const PROPOSAL_ACCEPT_A11Y = '이 내용을 팀 기억으로 남기기';
+export const PROPOSAL_REJECT_A11Y = '이 내용을 기억하지 않기';
+export const PROPOSAL_BUSY = '처리하고 있어요.';
+export const PROPOSAL_SELF_WARNING =
+  '내 질문에 대한 답에서 나온 제안이에요. 기억하면 다른 사람의 확인 없이 내가 정하는 셈이에요.';
+export const PROPOSAL_GUEST =
+  '게스트는 제안을 볼 수만 있고, 기억하거나 거절할 수는 없어요.';
+export const PROPOSAL_FORBIDDEN =
+  '이 제안은 내가 정할 수 없어요. 볼 수만 있어요.';
+export const PROPOSAL_ACCEPTED = '기억해 뒀어요.';
+export const PROPOSAL_REJECTED = '기억하지 않기로 했어요.';
+export const PROPOSAL_DESKTOP_HINT = '데스크탑에서 기억을 볼 수 있어요.';
+export const PROPOSAL_STALE =
+  '이 제안은 이미 닫혀서 더 이상 정할 수 없어요.';
+export const PROPOSAL_EXPIRED = '기한이 지나서 더 이상 정할 수 없어요.';
+export const PROPOSAL_FAILED = '처리하지 못했어요. 연결을 확인하고 다시 눌러 주세요.';
+export const PROPOSAL_EVIDENCE_LABEL = '근거 대화';
+export const PROPOSAL_EVIDENCE_LOADING = '근거 대화를 불러오고 있어요.';
+export const PROPOSAL_EVIDENCE_UNREADABLE = '원문을 불러오지 못했어요.';
+
+export const PROPOSAL_KIND_LABEL = {
+  decision: '결정',
+  fact: '사실',
+  commitment: '약속',
+  preference: '선호',
+  procedure: '절차',
+} as const;
+
+export function proposalEvidenceLine(author: string, seq: number): string {
+  return `${author} · #${seq}`;
+}
+
+export function proposalEvidenceA11y(author: string, seq: number): string {
+  return `${author}의 ${seq}번 메시지로 이동`;
+}

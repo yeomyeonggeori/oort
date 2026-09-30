@@ -35,6 +35,14 @@ jest.mock('@momo/core/features/memory/api', () => ({
     throw new Error('not used');
   },
   patchMyMemorySettings: async () => ({paused: false}),
+  // 답 밑의 제안 카드(#3171)가 부르는 자리. 이 파일은 제안을 시험하지 않으므로 빈 목록.
+  listMemoryProposals: async () => [],
+  acceptMemoryProposal: async () => {
+    throw new Error('not used');
+  },
+  rejectMemoryProposal: async () => {
+    throw new Error('not used');
+  },
 }));
 
 const SELF = '11111111-1111-4111-8111-111111111111';
