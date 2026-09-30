@@ -979,32 +979,24 @@ async fn red_a_confirmed_item_is_changed_without_the_two_walls() {
     tx.rollback().await.unwrap();
 
     // The same for closing a confirmed decision.
-    let d1 = put_item(
-        su,
-        ws,
-        ch,
-        spec(
-            "decision",
-            "confirmed",
-            "DB는 Postgres를 쓴다",
-            ago(6),
-            &[m1],
-        ),
-    )
-    .await;
-    let d2 = put_item(
-        su,
-        ws,
-        ch,
-        spec(
-            "decision",
-            "extracted",
-            "DB는 MySQL로 바꾼다",
-            ago(1),
-            &[m2],
-        ),
-    )
-    .await;
+    let mut sp1 = spec(
+        "decision",
+        "confirmed",
+        "DB는 Postgres를 쓴다",
+        ago(6),
+        &[m1],
+    );
+    sp1.subject = Some("DB 종류");
+    let d1 = put_item(su, ws, ch, sp1).await;
+    let mut sp2 = spec(
+        "decision",
+        "extracted",
+        "DB는 MySQL로 바꾼다",
+        ago(1),
+        &[m2],
+    );
+    sp2.subject = Some("DB 종류");
+    let d2 = put_item(su, ws, ch, sp2).await;
     let sql = format!("SELECT mem_cons_apply('{d1}', '{d2}', 'supersedes')");
     let route = (
         "IF older.origin IN ('curated', 'confirmed') OR v_guest THEN",
@@ -1587,7 +1579,7 @@ async fn red_retention_without_its_guards() {
         "shipped: a 10-day-old retired item and an uncovered window stay"
     );
     let age = count(vec![(
-        "AND i.retired_at < pg_catalog.now() - pg_catalog.make_interval(\n             days => p_retired_days * CASE WHEN i.origin IN ('curated', 'confirmed') THEN 4 ELSE 1 END)",
+        "AND i.retired_at < pg_catalog.now() - pg_catalog.make_interval(\n             days => p_retired_days * CASE WHEN i.origin IN ('curated', 'confirmed')\n                                            AND i.retired_reason IN ('merged', 'decayed', 'edited') THEN 4 ELSE 1 END)",
         "",
     )])
     .await;
