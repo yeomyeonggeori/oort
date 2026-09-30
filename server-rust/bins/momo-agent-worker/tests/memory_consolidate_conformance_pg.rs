@@ -269,7 +269,10 @@ async fn sabotage_committed(su: &PgPool, function: &str, edits: &[(&str, &str)])
     PENDING_RESTORE.lock().unwrap().push(original.clone());
     let mut def = original.clone();
     for (from, to) in edits {
-        assert!(def.contains(from), "sabotage fragment not found in {function}: {from}");
+        assert!(
+            def.contains(from),
+            "sabotage fragment not found in {function}: {from}"
+        );
         def = def.replacen(from, to, 1);
     }
     sqlx::query(&def).execute(su).await.expect("sabotage");
@@ -286,7 +289,10 @@ async fn world() -> World {
     let su = superuser_pool().await;
     let leftovers: Vec<String> = std::mem::take(&mut *PENDING_RESTORE.lock().unwrap());
     for def in leftovers {
-        sqlx::query(&def).execute(&su).await.expect("restore a dead sabotage");
+        sqlx::query(&def)
+            .execute(&su)
+            .await
+            .expect("restore a dead sabotage");
     }
     reset_instance(&su).await;
     let fx = seed(&su).await;
@@ -309,7 +315,9 @@ impl World {
     }
 
     async fn say_in(&self, channel: Uuid, body: &str) -> Uuid {
-        post_in(&self.wp, self.fx.ws, channel, self.fx.human, body).await.0
+        post_in(&self.wp, self.fx.ws, channel, self.fx.human, body)
+            .await
+            .0
     }
 
     async fn consolidate(&self) -> ConsolidateStatsAlias {
@@ -322,7 +330,8 @@ impl World {
         &self,
         f: impl for<'c> FnOnce(
                 &'c mut momo_db::PgConnection,
-            ) -> Pin<Box<dyn Future<Output = Result<T, momo_db::DbError>> + Send + 'c>>
+            )
+                -> Pin<Box<dyn Future<Output = Result<T, momo_db::DbError>> + Send + 'c>>
             + Send,
     ) -> Result<T, momo_db::DbError> {
         mem::with_memory_tx(&self.wp, self.fx.ws, f).await
@@ -341,14 +350,48 @@ async fn duplicate_merge_unions_evidence_and_is_reversible() {
     let m1 = w.say("배포는 금요일 오후로 하죠").await;
     let m2 = w.say("네 금요일 오후 좋아요").await;
     let m3 = w.say("확정: 금요일 오후 배포").await;
-    let a = put_item(su, ws, ch, spec("fact", "extracted", "배포는 금요일 오후에 한다", ago(3), &[m1, m2])).await;
-    let b = put_item(su, ws, ch, spec("fact", "extracted", "배포는 금요일 오후에 진행한다", ago(2), &[m2, m3])).await;
-    *w.provider.reply_fn.lock().unwrap() =
-        Some(judge(vec![("금요일 오후에 한다", "금요일 오후에 진행한다", "duplicate")]));
+    let a = put_item(
+        su,
+        ws,
+        ch,
+        spec(
+            "fact",
+            "extracted",
+            "배포는 금요일 오후에 한다",
+            ago(3),
+            &[m1, m2],
+        ),
+    )
+    .await;
+    let b = put_item(
+        su,
+        ws,
+        ch,
+        spec(
+            "fact",
+            "extracted",
+            "배포는 금요일 오후에 진행한다",
+            ago(2),
+            &[m2, m3],
+        ),
+    )
+    .await;
+    *w.provider.reply_fn.lock().unwrap() = Some(judge(vec![(
+        "금요일 오후에 한다",
+        "금요일 오후에 진행한다",
+        "duplicate",
+    )]));
 
     let stats = w.consolidate().await;
-    assert_eq!((stats.llm_calls, stats.pairs_judged, stats.merged), (1, 1, 1), "{stats:?}");
-    assert!(tokens_used_today(su, ws).await > 0, "judging is charged to the daily cap");
+    assert_eq!(
+        (stats.llm_calls, stats.pairs_judged, stats.merged),
+        (1, 1, 1),
+        "{stats:?}"
+    );
+    assert!(
+        tokens_used_today(su, ws).await > 0,
+        "judging is charged to the daily cap"
+    );
 
     // Equal rank and evidence: the earlier record wins. The loser is folded, not deleted.
     let (win, lose) = (item(su, a).await.unwrap(), item(su, b).await.unwrap());
@@ -356,8 +399,16 @@ async fn duplicate_merge_unions_evidence_and_is_reversible() {
     assert_eq!(lose.retired_reason.as_deref(), Some("merged"));
     assert!(!win.retired);
     assert_eq!(win.source_count, 3);
-    assert_eq!(evidence_ids(su, a).await, sorted(vec![m1, m2, m3]), "union of the evidence");
-    assert_eq!(evidence_ids(su, b).await, sorted(vec![m2, m3]), "the loser keeps its own");
+    assert_eq!(
+        evidence_ids(su, a).await,
+        sorted(vec![m1, m2, m3]),
+        "union of the evidence"
+    );
+    assert_eq!(
+        evidence_ids(su, b).await,
+        sorted(vec![m2, m3]),
+        "the loser keeps its own"
+    );
     let merged = events(su, b, "merged").await;
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].1["into"], json!(a.to_string()));
@@ -385,7 +436,11 @@ async fn duplicate_merge_unions_evidence_and_is_reversible() {
     // A person's undo outranks the machine: the pair is remembered as distinct and never asked again.
     let calls = w.provider.count();
     let stats = w.consolidate().await;
-    assert_eq!((stats.llm_calls, w.provider.count()), (0, calls), "{stats:?}");
+    assert_eq!(
+        (stats.llm_calls, w.provider.count()),
+        (0, calls),
+        "{stats:?}"
+    );
 }
 
 #[tokio::test]
@@ -396,22 +451,38 @@ async fn a_newer_contradicting_decision_closes_the_old_one() {
     let app = momo_app_pool().await;
     let m1 = w.say("API 서버는 Rust로 가자").await;
     let m2 = w.say("다시 생각해보니 Go로 바꾸자").await;
-    let mut s1 = spec("decision", "extracted", "API 서버는 Rust로 간다", ago(5), &[m1]);
+    let mut s1 = spec(
+        "decision",
+        "extracted",
+        "API 서버는 Rust로 간다",
+        ago(5),
+        &[m1],
+    );
     s1.subject = Some("API 서버 언어");
-    let mut s2 = spec("decision", "extracted", "API 서버는 Go로 바꾼다", ago(1), &[m2]);
+    let mut s2 = spec(
+        "decision",
+        "extracted",
+        "API 서버는 Go로 바꾼다",
+        ago(1),
+        &[m2],
+    );
     s2.subject = Some("API 서버 언어");
-    let (old, new) = (put_item(su, ws, ch, s1).await, put_item(su, ws, ch, s2).await);
+    let (old, new) = (
+        put_item(su, ws, ch, s1).await,
+        put_item(su, ws, ch, s2).await,
+    );
     *w.provider.reply_fn.lock().unwrap() = Some(judge(vec![("Rust로", "Go로", "supersedes")]));
 
     let stats = w.consolidate().await;
     assert_eq!((stats.closed, stats.pairs_judged), (1, 1), "{stats:?}");
     let (o, n) = (item(su, old).await.unwrap(), item(su, new).await.unwrap());
     // Graphiti: the old decision's validity ends where the new one begins; nothing is deleted or retired.
-    let new_from: DateTime<Utc> = sqlx::query_scalar("SELECT valid_from FROM mem_item WHERE id = $1")
-        .bind(new)
-        .fetch_one(su)
-        .await
-        .unwrap();
+    let new_from: DateTime<Utc> =
+        sqlx::query_scalar("SELECT valid_from FROM mem_item WHERE id = $1")
+            .bind(new)
+            .fetch_one(su)
+            .await
+            .unwrap();
     assert_eq!(o.valid_to, Some(new_from));
     assert_eq!(o.closed_by, Some(new));
     assert!(!o.retired && o.retired_reason.is_none());
@@ -432,26 +503,60 @@ async fn a_newer_contradicting_decision_closes_the_old_one() {
     // ... and a closed decision can be forgotten on its own (it has no `supersedes` successor).
     let e1 = w.say("배포 도구는 A").await;
     let e2 = w.say("배포 도구는 B로 교체").await;
-    let mut t1 = spec("decision", "extracted", "배포 도구는 A를 쓴다", ago(4), &[e1]);
+    let mut t1 = spec(
+        "decision",
+        "extracted",
+        "배포 도구는 A를 쓴다",
+        ago(4),
+        &[e1],
+    );
     t1.subject = Some("배포 도구");
-    let mut t2 = spec("decision", "extracted", "배포 도구는 B로 교체한다", ago(1), &[e2]);
+    let mut t2 = spec(
+        "decision",
+        "extracted",
+        "배포 도구는 B로 교체한다",
+        ago(1),
+        &[e2],
+    );
     t2.subject = Some("배포 도구");
-    let (old2, new2) = (put_item(su, ws, ch, t1).await, put_item(su, ws, ch, t2).await);
+    let (old2, new2) = (
+        put_item(su, ws, ch, t1).await,
+        put_item(su, ws, ch, t2).await,
+    );
     *w.provider.reply_fn.lock().unwrap() = Some(judge(vec![("A를", "B로", "supersedes")]));
     assert_eq!(w.consolidate().await.closed, 1);
     let closing = events(su, old2, "superseded").await;
-    assert_eq!(forget_as(&app, ws, w.fx.human_b, old2).await, Ok(1), "the closed decision is forgettable");
+    assert_eq!(
+        forget_as(&app, ws, w.fx.human_b, old2).await,
+        Ok(1),
+        "the closed decision is forgettable"
+    );
     assert!(item(su, old2).await.is_none() && item(su, new2).await.is_some());
 
     // Revert of a closing: re-open through the event.
     let (old3, _new3) = {
         let r1 = w.say("문서 도구는 X").await;
         let r2 = w.say("문서 도구는 Y로").await;
-        let mut u1 = spec("decision", "extracted", "문서 도구는 X를 쓴다", ago(4), &[r1]);
+        let mut u1 = spec(
+            "decision",
+            "extracted",
+            "문서 도구는 X를 쓴다",
+            ago(4),
+            &[r1],
+        );
         u1.subject = Some("문서 도구");
-        let mut u2 = spec("decision", "extracted", "문서 도구는 Y로 바꾼다", ago(1), &[r2]);
+        let mut u2 = spec(
+            "decision",
+            "extracted",
+            "문서 도구는 Y로 바꾼다",
+            ago(1),
+            &[r2],
+        );
         u2.subject = Some("문서 도구");
-        (put_item(su, ws, ch, u1).await, put_item(su, ws, ch, u2).await)
+        (
+            put_item(su, ws, ch, u1).await,
+            put_item(su, ws, ch, u2).await,
+        )
     };
     *w.provider.reply_fn.lock().unwrap() = Some(judge(vec![("X를", "Y로", "supersedes")]));
     assert_eq!(w.consolidate().await.closed, 1);
@@ -546,7 +651,11 @@ async fn edit_msg(app: &PgPool, ws: Uuid, author: Uuid, message: Uuid, body: &st
 }
 
 async fn scalar_i64(su: &PgPool, sql: &str, id: Uuid) -> i64 {
-    sqlx::query_scalar(sql).bind(id).fetch_one(su).await.expect("scalar")
+    sqlx::query_scalar(sql)
+        .bind(id)
+        .fetch_one(su)
+        .await
+        .expect("scalar")
 }
 
 // --- the human-made side ---------------------------------------------------------------
@@ -559,23 +668,87 @@ async fn human_made_items_only_get_proposals() {
     let app = momo_app_pool().await;
     let m: Vec<Uuid> = {
         let mut v = Vec::new();
-        for body in ["금요일 배포로 확정", "네 동의합니다", "다시 정리: 금요일", "DB는 Postgres", "DB를 MySQL로 바꿉니다", "장애 대응은 김철수"] {
+        for body in [
+            "금요일 배포로 확정",
+            "네 동의합니다",
+            "다시 정리: 금요일",
+            "DB는 Postgres",
+            "DB를 MySQL로 바꿉니다",
+            "장애 대응은 김철수",
+        ] {
             v.push(w.say(body).await);
         }
         v
     };
     // Two human-made duplicates: the curated one wins, the confirmed one becomes a *proposal*.
-    let confirmed = put_item(su, ws, ch, spec("fact", "confirmed", "배포는 금요일에 한다", ago(4), &[m[0]])).await;
-    let curated = put_item(su, ws, ch, spec("fact", "curated", "배포는 금요일에 진행한다", ago(3), &[m[1]])).await;
+    let confirmed = put_item(
+        su,
+        ws,
+        ch,
+        spec("fact", "confirmed", "배포는 금요일에 한다", ago(4), &[m[0]]),
+    )
+    .await;
+    let curated = put_item(
+        su,
+        ws,
+        ch,
+        spec(
+            "fact",
+            "curated",
+            "배포는 금요일에 진행한다",
+            ago(3),
+            &[m[1]],
+        ),
+    )
+    .await;
     // A confirmed decision and a newer machine-made contradiction: a *proposal* to close, nothing closed.
-    let mut d1 = spec("decision", "confirmed", "DB는 Postgres를 쓴다", ago(6), &[m[3]]);
+    let mut d1 = spec(
+        "decision",
+        "confirmed",
+        "DB는 Postgres를 쓴다",
+        ago(6),
+        &[m[3]],
+    );
     d1.subject = Some("DB 종류");
-    let mut d2 = spec("decision", "extracted", "DB는 MySQL로 바꾼다", ago(1), &[m[4]]);
+    let mut d2 = spec(
+        "decision",
+        "extracted",
+        "DB는 MySQL로 바꾼다",
+        ago(1),
+        &[m[4]],
+    );
     d2.subject = Some("DB 종류");
-    let (old_decision, new_decision) = (put_item(su, ws, ch, d1).await, put_item(su, ws, ch, d2).await);
+    let (old_decision, new_decision) = (
+        put_item(su, ws, ch, d1).await,
+        put_item(su, ws, ch, d2).await,
+    );
     // A machine-made duplicate of a confirmed item is folded into it, and the confirmed one is not touched.
-    let dup = put_item(su, ws, ch, spec("fact", "extracted", "장애 대응은 김철수가 맡는다", ago(2), &[m[5]])).await;
-    let owner = put_item(su, ws, ch, spec("fact", "confirmed", "장애 대응은 김철수가 한다", ago(5), &[m[2]])).await;
+    let dup = put_item(
+        su,
+        ws,
+        ch,
+        spec(
+            "fact",
+            "extracted",
+            "장애 대응은 김철수가 맡는다",
+            ago(2),
+            &[m[5]],
+        ),
+    )
+    .await;
+    let owner = put_item(
+        su,
+        ws,
+        ch,
+        spec(
+            "fact",
+            "confirmed",
+            "장애 대응은 김철수가 한다",
+            ago(5),
+            &[m[2]],
+        ),
+    )
+    .await;
     *w.provider.reply_fn.lock().unwrap() = Some(judge(vec![
         ("금요일에 한다", "금요일에 진행한다", "duplicate"),
         ("Postgres", "MySQL", "supersedes"),
@@ -583,15 +756,25 @@ async fn human_made_items_only_get_proposals() {
     ]));
 
     let stats = w.consolidate().await;
-    assert_eq!((stats.proposed, stats.merged, stats.closed), (2, 1, 0), "{stats:?}");
+    assert_eq!(
+        (stats.proposed, stats.merged, stats.closed),
+        (2, 1, 0),
+        "{stats:?}"
+    );
     // Nothing a person made was changed.
     for id in [confirmed, curated, old_decision, owner] {
         let row = item(su, id).await.unwrap();
-        assert!(!row.retired && row.valid_to.is_none() && row.merged_into.is_none(), "{id}");
+        assert!(
+            !row.retired && row.valid_to.is_none() && row.merged_into.is_none(),
+            "{id}"
+        );
     }
     // The machine-made duplicate went into the confirmed item, whose evidence stayed as it was.
     let folded = item(su, dup).await.unwrap();
-    assert_eq!((folded.merged_into, folded.retired_reason.as_deref()), (Some(owner), Some("merged")));
+    assert_eq!(
+        (folded.merged_into, folded.retired_reason.as_deref()),
+        (Some(owner), Some("merged"))
+    );
     assert_eq!(item(su, owner).await.unwrap().source_count, 1);
     assert_eq!(evidence_ids(su, owner).await, vec![m[2]]);
 
@@ -603,31 +786,54 @@ async fn human_made_items_only_get_proposals() {
     .await
     .unwrap();
     assert_eq!(proposals.len(), 2);
-    let close = proposals.iter().find(|p| p.1 == "close").expect("close proposal");
-    let merge = proposals.iter().find(|p| p.1 == "merge").expect("merge proposal");
+    let close = proposals
+        .iter()
+        .find(|p| p.1 == "close")
+        .expect("close proposal");
+    let merge = proposals
+        .iter()
+        .find(|p| p.1 == "merge")
+        .expect("merge proposal");
     assert_eq!((close.2, close.3), (old_decision, new_decision));
-    assert_eq!((merge.2, merge.3), (confirmed, curated), "target = the one that would go, other = the one that stays");
+    assert_eq!(
+        (merge.2, merge.3),
+        (confirmed, curated),
+        "target = the one that would go, other = the one that stays"
+    );
     assert!(proposals.iter().all(|p| p.4 == "pending"));
 
     // A second pass does not pile up more of them.
     assert_eq!(w.consolidate().await.proposed, 0);
 
     // Accepting is a person's act: the merge is applied, the proposal keeps no text.
-    assert_eq!(accept_as(&app, ws, w.fx.human_b, merge.0).await, Ok(curated));
+    assert_eq!(
+        accept_as(&app, ws, w.fx.human_b, merge.0).await,
+        Ok(curated)
+    );
     let gone = item(su, confirmed).await.unwrap();
-    assert_eq!((gone.merged_into, gone.retired_reason.as_deref()), (Some(curated), Some("merged")));
-    let body_left: Option<String> = sqlx::query_scalar("SELECT body FROM mem_proposal WHERE id = $1")
-        .bind(merge.0)
-        .fetch_one(su)
-        .await
-        .unwrap();
+    assert_eq!(
+        (gone.merged_into, gone.retired_reason.as_deref()),
+        (Some(curated), Some("merged"))
+    );
+    let body_left: Option<String> =
+        sqlx::query_scalar("SELECT body FROM mem_proposal WHERE id = $1")
+            .bind(merge.0)
+            .fetch_one(su)
+            .await
+            .unwrap();
     assert!(body_left.is_none(), "decided proposals keep no text");
-    assert_eq!(accept_as(&app, ws, w.fx.human_b, close.0).await, Ok(new_decision));
+    assert_eq!(
+        accept_as(&app, ws, w.fx.human_b, close.0).await,
+        Ok(new_decision)
+    );
     let closed = item(su, old_decision).await.unwrap();
     assert_eq!(closed.closed_by, Some(new_decision));
     assert!(closed.valid_to.is_some());
     // Deciding twice is refused.
-    assert_eq!(accept_as(&app, ws, w.fx.human_b, close.0).await, Err("55000".to_string()));
+    assert_eq!(
+        accept_as(&app, ws, w.fx.human_b, close.0).await,
+        Err("55000".to_string())
+    );
 }
 
 #[tokio::test]
@@ -637,8 +843,20 @@ async fn red_a_confirmed_item_is_changed_without_the_two_walls() {
     let (su, ws, ch) = (&w.su, w.fx.ws, w.fx.channel);
     let m1 = w.say("금요일 배포로 확정").await;
     let m2 = w.say("동의합니다").await;
-    let a = put_item(su, ws, ch, spec("fact", "confirmed", "배포는 금요일에 한다", ago(4), &[m1])).await;
-    let b = put_item(su, ws, ch, spec("fact", "curated", "배포는 금요일에 진행한다", ago(3), &[m2])).await;
+    let a = put_item(
+        su,
+        ws,
+        ch,
+        spec("fact", "confirmed", "배포는 금요일에 한다", ago(4), &[m1]),
+    )
+    .await;
+    let b = put_item(
+        su,
+        ws,
+        ch,
+        spec("fact", "curated", "배포는 금요일에 진행한다", ago(3), &[m2]),
+    )
+    .await;
     let sql = format!("SELECT mem_cons_apply('{a}', '{b}', 'duplicate')");
 
     // Shipped: a proposal, and the confirmed item is untouched.
@@ -648,9 +866,14 @@ async fn red_a_confirmed_item_is_changed_without_the_two_walls() {
     tx.rollback().await.unwrap();
 
     // Wall 1 (`mem_cons_apply` routes a protected loser to a proposal) removed: wall 2 in `mem_cons_merge_items` holds alone.
-    let route = ("IF l.origin IN ('curated', 'confirmed') THEN", "IF false THEN");
+    let route = (
+        "IF l.origin IN ('curated', 'confirmed') THEN",
+        "IF false THEN",
+    );
     let mut tx = red_tx(su, ws, &[(APPLY, &[route])]).await;
-    let held = sqlx::query_scalar::<_, String>(&sql).fetch_one(&mut *tx).await;
+    let held = sqlx::query_scalar::<_, String>(&sql)
+        .fetch_one(&mut *tx)
+        .await;
     let held = held.map_err(|e| mem::sqlstate(&momo_db::DbError::from(e)));
     assert_eq!(held, Err(Some("23514".to_string())), "wall 2 alone refuses");
     tx.rollback().await.unwrap();
@@ -663,36 +886,70 @@ async fn red_a_confirmed_item_is_changed_without_the_two_walls() {
     let mut tx = red_tx(su, ws, &[(APPLY, &[route]), (MERGE, &[inner])]).await;
     let outcome: String = sqlx::query_scalar(&sql).fetch_one(&mut *tx).await.unwrap();
     sqlx::query("RESET ROLE").execute(&mut *tx).await.unwrap();
-    let retired: bool = sqlx::query_scalar("SELECT retired_at IS NOT NULL FROM mem_item WHERE id = $1")
-        .bind(a)
-        .fetch_one(&mut *tx)
-        .await
-        .unwrap();
+    let retired: bool =
+        sqlx::query_scalar("SELECT retired_at IS NOT NULL FROM mem_item WHERE id = $1")
+            .bind(a)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
     eprintln!("RED both walls removed: outcome={outcome} confirmed item retired={retired}");
     assert_eq!((outcome.as_str(), retired), ("merged", true));
     tx.rollback().await.unwrap();
 
     // The same for closing a confirmed decision.
-    let d1 = put_item(su, ws, ch, spec("decision", "confirmed", "DB는 Postgres를 쓴다", ago(6), &[m1])).await;
-    let d2 = put_item(su, ws, ch, spec("decision", "extracted", "DB는 MySQL로 바꾼다", ago(1), &[m2])).await;
+    let d1 = put_item(
+        su,
+        ws,
+        ch,
+        spec(
+            "decision",
+            "confirmed",
+            "DB는 Postgres를 쓴다",
+            ago(6),
+            &[m1],
+        ),
+    )
+    .await;
+    let d2 = put_item(
+        su,
+        ws,
+        ch,
+        spec(
+            "decision",
+            "extracted",
+            "DB는 MySQL로 바꾼다",
+            ago(1),
+            &[m2],
+        ),
+    )
+    .await;
     let sql = format!("SELECT mem_cons_apply('{d1}', '{d2}', 'supersedes')");
-    let route = ("IF older.origin IN ('curated', 'confirmed') THEN", "IF false THEN");
+    let route = (
+        "IF older.origin IN ('curated', 'confirmed') THEN",
+        "IF false THEN",
+    );
     let inner = (
         "IF o.origin IN ('curated', 'confirmed') AND p_proposal_id IS NULL THEN",
         "IF false THEN",
     );
     let mut tx = red_tx(su, ws, &[(APPLY, &[route])]).await;
-    let held = sqlx::query_scalar::<_, String>(&sql).fetch_one(&mut *tx).await;
-    assert_eq!(held.map_err(|e| mem::sqlstate(&momo_db::DbError::from(e))), Err(Some("23514".to_string())));
+    let held = sqlx::query_scalar::<_, String>(&sql)
+        .fetch_one(&mut *tx)
+        .await;
+    assert_eq!(
+        held.map_err(|e| mem::sqlstate(&momo_db::DbError::from(e))),
+        Err(Some("23514".to_string()))
+    );
     tx.rollback().await.unwrap();
     let mut tx = red_tx(su, ws, &[(APPLY, &[route]), (CLOSE, &[inner])]).await;
     let outcome: String = sqlx::query_scalar(&sql).fetch_one(&mut *tx).await.unwrap();
     sqlx::query("RESET ROLE").execute(&mut *tx).await.unwrap();
-    let closed: bool = sqlx::query_scalar("SELECT valid_to IS NOT NULL FROM mem_item WHERE id = $1")
-        .bind(d1)
-        .fetch_one(&mut *tx)
-        .await
-        .unwrap();
+    let closed: bool =
+        sqlx::query_scalar("SELECT valid_to IS NOT NULL FROM mem_item WHERE id = $1")
+            .bind(d1)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
     eprintln!("RED both walls removed: outcome={outcome} confirmed decision closed={closed}");
     assert_eq!((outcome.as_str(), closed), ("closed", true));
     tx.rollback().await.unwrap();
@@ -710,9 +967,21 @@ async fn decay_skips_what_a_person_made_and_re_observation_extends_it() {
     let w = world().await;
     let (su, ws, ch) = (&w.su, w.fx.ws, w.fx.channel);
     let m = w.say("오늘은 임시 서버로 배포").await;
-    let mut due = spec("fact", "extracted", "오늘은 임시 서버로 배포한다", ago(20), &[m]);
+    let mut due = spec(
+        "fact",
+        "extracted",
+        "오늘은 임시 서버로 배포한다",
+        ago(20),
+        &[m],
+    );
     due.forget_after = Some(ago(1));
-    let mut synth = spec("fact", "synthesized", "이번 주는 야간 배포 금지", ago(20), &[m]);
+    let mut synth = spec(
+        "fact",
+        "synthesized",
+        "이번 주는 야간 배포 금지",
+        ago(20),
+        &[m],
+    );
     synth.forget_after = Some(ago(2));
     let mut later = spec("fact", "extracted", "이번 주 회의는 화요일", ago(2), &[m]);
     later.forget_after = Some(in_days(5));
@@ -738,13 +1007,22 @@ async fn decay_skips_what_a_person_made_and_re_observation_extends_it() {
     };
     assert_eq!(
         reasons,
-        vec![Some("decayed".into()), Some("decayed".into()), None, None, None],
+        vec![
+            Some("decayed".into()),
+            Some("decayed".into()),
+            None,
+            None,
+            None
+        ],
         "only the machine-made, elapsed ones decay; a person's are never touched"
     );
     let ev = events(su, ids[0], "retired").await;
     assert_eq!(ev.len(), 1);
     assert_eq!(ev[0].1["reason"], json!("decayed"));
-    assert!(ev[0].1.get("body").is_none(), "the ledger holds ids and reasons, never text");
+    assert!(
+        ev[0].1.get("body").is_none(),
+        "the ledger holds ids and reasons, never text"
+    );
 
     // Decay is reversible through its event; a revived item gets a fresh 14 days.
     let event = ev[0].0;
@@ -763,10 +1041,15 @@ async fn re_observation_extends_forget_after_and_a_regeneration_does_not() {
     let text = "이번 주 배포는 임시 서버로 한다";
     // The mock answers every window with the same ephemeral item, citing the first human message it was shown.
     *w.provider.reply_fn.lock().unwrap() = Some(Arc::new(move |_n, prompt| {
-        let first_seq: i64 = between(prompt, "<대화>\n[", "]").trim().parse().unwrap_or(0);
+        let first_seq: i64 = between(prompt, "<대화>\n[", "]")
+            .trim()
+            .parse()
+            .unwrap_or(0);
         extraction_answer(
             "- 임시 서버 배포",
-            vec![json!({"kind": "fact", "text": text, "evidence": [first_seq], "ephemeral": true, "confidence": 0.9})],
+            vec![
+                json!({"kind": "fact", "text": text, "evidence": [first_seq], "ephemeral": true, "confidence": 0.9}),
+            ],
         )
     }));
     for body in ["임시 서버로 배포해요", "확인했습니다", "롤백 계획은 별도"] {
@@ -800,14 +1083,26 @@ async fn re_observation_extends_forget_after_and_a_regeneration_does_not() {
     assert!(same.forget_after.unwrap() < in_days(1));
 
     // New messages say it again: reinforce_count + 1 and 14 more days.
-    for body in ["오늘도 임시 서버를 쓴다", "네 그대로 갑니다", "내일까지 유지"] {
+    for body in [
+        "오늘도 임시 서버를 쓴다",
+        "네 그대로 갑니다",
+        "내일까지 유지",
+    ] {
         w.say(body).await;
     }
     w.worker.summary_state().forget_channels();
     w.worker.summary_sweep().await;
     let again = item(su, id).await.unwrap();
-    assert_eq!(again.reinforce_count, 1, "{again_count}", again_count = again.reinforce_count);
-    assert!(again.forget_after.unwrap() > in_days(13), "extended to 14 days");
+    assert_eq!(
+        again.reinforce_count,
+        1,
+        "{again_count}",
+        again_count = again.reinforce_count
+    );
+    assert!(
+        again.forget_after.unwrap() > in_days(13),
+        "extended to 14 days"
+    );
     assert_eq!(events(su, id, "reinforced").await.len(), 1);
     let stats = w.consolidate().await;
     assert_eq!(stats.decayed, 0, "a re-observed item does not decay");
@@ -825,7 +1120,11 @@ async fn red_decay_touches_a_confirmed_item_without_the_origin_guard() {
     let run = |edits: Vec<(&'static str, &'static str)>| {
         let su = su.clone();
         async move {
-            let e: Vec<(&str, &[(&str, &str)])> = if edits.is_empty() { vec![] } else { vec![(DECAY, &edits[..])] };
+            let e: Vec<(&str, &[(&str, &str)])> = if edits.is_empty() {
+                vec![]
+            } else {
+                vec![(DECAY, &edits[..])]
+            };
             let mut tx = red_tx(&su, ws, &e).await;
             let n: i32 = sqlx::query_scalar("SELECT mem_cons_decay($1, 10)")
                 .bind(ch)
@@ -837,7 +1136,11 @@ async fn red_decay_touches_a_confirmed_item_without_the_origin_guard() {
         }
     };
     assert_eq!(run(vec![]).await, 0, "shipped: nothing decays");
-    let n = run(vec![("AND i.origin IN ('extracted', 'synthesized')", "AND true")]).await;
+    let n = run(vec![(
+        "AND i.origin IN ('extracted', 'synthesized')",
+        "AND true",
+    )])
+    .await;
     eprintln!("RED origin guard removed: {n} item(s) decayed (a confirmed one)");
     assert_eq!(n, 1);
     let _ = id;
@@ -860,13 +1163,65 @@ async fn dead_evidence_retires_items() {
         w.say("멀쩡한 근거").await,
         w.say("확정 항목의 근거").await,
     );
-    let all_dead = put_item(su, ws, ch, spec("fact", "extracted", "근거가 모두 지워진 사실", ago(3), &[p1, p2])).await;
-    let edited = put_item(su, ws, ch, spec("fact", "extracted", "근거가 고쳐진 사실", ago(3), &[q1])).await;
-    let partial = put_item(su, ws, ch, spec("fact", "extracted", "근거가 반만 남은 사실", ago(3), &[r1, r2])).await;
-    let healthy = put_item(su, ws, ch, spec("fact", "extracted", "멀쩡한 사실", ago(3), &[s1])).await;
-    let confirmed = put_item(su, ws, ch, spec("decision", "confirmed", "확정한 결정", ago(3), &[c1])).await;
-    let stale = put_item(su, ws, ch, spec("fact", "extracted", "다시 추출되며 죽은 행", ago(3), &[s1])).await;
-    sqlx::query("UPDATE mem_item SET stale = true WHERE id = $1").bind(stale).execute(su).await.unwrap();
+    let all_dead = put_item(
+        su,
+        ws,
+        ch,
+        spec(
+            "fact",
+            "extracted",
+            "근거가 모두 지워진 사실",
+            ago(3),
+            &[p1, p2],
+        ),
+    )
+    .await;
+    let edited = put_item(
+        su,
+        ws,
+        ch,
+        spec("fact", "extracted", "근거가 고쳐진 사실", ago(3), &[q1]),
+    )
+    .await;
+    let partial = put_item(
+        su,
+        ws,
+        ch,
+        spec(
+            "fact",
+            "extracted",
+            "근거가 반만 남은 사실",
+            ago(3),
+            &[r1, r2],
+        ),
+    )
+    .await;
+    let healthy = put_item(
+        su,
+        ws,
+        ch,
+        spec("fact", "extracted", "멀쩡한 사실", ago(3), &[s1]),
+    )
+    .await;
+    let confirmed = put_item(
+        su,
+        ws,
+        ch,
+        spec("decision", "confirmed", "확정한 결정", ago(3), &[c1]),
+    )
+    .await;
+    let stale = put_item(
+        su,
+        ws,
+        ch,
+        spec("fact", "extracted", "다시 추출되며 죽은 행", ago(3), &[s1]),
+    )
+    .await;
+    sqlx::query("UPDATE mem_item SET stale = true WHERE id = $1")
+        .bind(stale)
+        .execute(su)
+        .await
+        .unwrap();
     for gone in [p1, p2, r1, c1] {
         delete_msg(&app, ws, w.fx.human, gone).await;
     }
@@ -880,8 +1235,16 @@ async fn dead_evidence_retires_items() {
     };
     assert_eq!(reason(all_dead).await.as_deref(), Some("source_deleted"));
     assert_eq!(reason(edited).await.as_deref(), Some("source_edited"));
-    assert_eq!(reason(partial).await.as_deref(), Some("source_deleted"), "a claim that lost one of its sources is dead too");
-    assert_eq!(reason(confirmed).await.as_deref(), Some("source_deleted"), "hygiene applies to a person's items as well");
+    assert_eq!(
+        reason(partial).await.as_deref(),
+        Some("source_deleted"),
+        "a claim that lost one of its sources is dead too"
+    );
+    assert_eq!(
+        reason(confirmed).await.as_deref(),
+        Some("source_deleted"),
+        "hygiene applies to a person's items as well"
+    );
     assert_eq!(reason(stale).await.as_deref(), Some("source_deleted"));
     assert_eq!(reason(healthy).await, None);
     let ev = events(su, all_dead, "retired").await;
@@ -889,15 +1252,40 @@ async fn dead_evidence_retires_items() {
 
     // RED: without the liveness test nothing retires.
     let m = w.say("또 다른 근거").await;
-    let dead2 = put_item(su, ws, ch, spec("fact", "extracted", "또 죽을 사실", ago(3), &[m])).await;
+    let dead2 = put_item(
+        su,
+        ws,
+        ch,
+        spec("fact", "extracted", "또 죽을 사실", ago(3), &[m]),
+    )
+    .await;
     delete_msg(&app, ws, w.fx.human, m).await;
-    let mut tx = red_tx(su, ws, &[(RETIRE, &[("AND (i.stale OR NOT public.mem_item_live(i.id))", "AND i.stale")])]).await;
-    let n: i32 = sqlx::query_scalar("SELECT mem_cons_retire_dead($1, 10)").bind(ch).fetch_one(&mut *tx).await.unwrap();
+    let mut tx = red_tx(
+        su,
+        ws,
+        &[(
+            RETIRE,
+            &[(
+                "AND (i.stale OR NOT public.mem_item_live(i.id))",
+                "AND i.stale",
+            )],
+        )],
+    )
+    .await;
+    let n: i32 = sqlx::query_scalar("SELECT mem_cons_retire_dead($1, 10)")
+        .bind(ch)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
     eprintln!("RED liveness test removed: {n} dead item(s) retired");
     assert_eq!(n, 0);
     tx.rollback().await.unwrap();
     let mut tx = red_tx(su, ws, &[]).await;
-    let n: i32 = sqlx::query_scalar("SELECT mem_cons_retire_dead($1, 10)").bind(ch).fetch_one(&mut *tx).await.unwrap();
+    let n: i32 = sqlx::query_scalar("SELECT mem_cons_retire_dead($1, 10)")
+        .bind(ch)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
     assert_eq!(n, 1);
     tx.rollback().await.unwrap();
     let _ = dead2;
@@ -905,6 +1293,7 @@ async fn dead_evidence_retires_items() {
 
 // --- retention -----------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 async fn put_digest(
     su: &PgPool,
     ws: Uuid,
@@ -935,11 +1324,13 @@ async fn put_digest(
 }
 
 async fn exists(su: &PgPool, table: &str, id: Uuid) -> bool {
-    sqlx::query_scalar::<_, bool>(&format!("SELECT EXISTS (SELECT 1 FROM {table} WHERE id = $1)"))
-        .bind(id)
-        .fetch_one(su)
-        .await
-        .expect("exists")
+    sqlx::query_scalar::<_, bool>(&format!(
+        "SELECT EXISTS (SELECT 1 FROM {table} WHERE id = $1)"
+    ))
+    .bind(id)
+    .fetch_one(su)
+    .await
+    .expect("exists")
 }
 
 #[tokio::test]
@@ -948,9 +1339,27 @@ async fn retention_deletes_old_retired_items_and_covered_windows() {
     let w = world().await;
     let (su, ws, ch) = (&w.su, w.fx.ws, w.fx.channel);
     let m = w.say("보존 시험용 근거").await;
-    let old = put_item(su, ws, ch, spec("fact", "extracted", "오래전에 내려간 사실", ago(200), &[m])).await;
-    let recent = put_item(su, ws, ch, spec("fact", "extracted", "최근에 내려간 사실", ago(20), &[m])).await;
-    let live = put_item(su, ws, ch, spec("fact", "extracted", "살아 있는 사실", ago(20), &[m])).await;
+    let old = put_item(
+        su,
+        ws,
+        ch,
+        spec("fact", "extracted", "오래전에 내려간 사실", ago(200), &[m]),
+    )
+    .await;
+    let recent = put_item(
+        su,
+        ws,
+        ch,
+        spec("fact", "extracted", "최근에 내려간 사실", ago(20), &[m]),
+    )
+    .await;
+    let live = put_item(
+        su,
+        ws,
+        ch,
+        spec("fact", "extracted", "살아 있는 사실", ago(20), &[m]),
+    )
+    .await;
     sqlx::query("UPDATE mem_item SET retired_at = now() - interval '91 days', retired_reason = 'decayed' WHERE id = $1")
         .bind(old)
         .execute(su)
@@ -974,11 +1383,30 @@ async fn retention_deletes_old_retired_items_and_covered_windows() {
     let _thread_day = put_digest(su, ws, ch, "day", 61, 80, None, false, 1).await;
 
     let stats = w.consolidate().await;
-    assert_eq!((stats.items_purged, stats.windows_pruned), (1, 1), "{stats:?}");
-    assert!(!exists(su, "mem_item", old).await, "retired for 91 days: permanently deleted");
-    assert_eq!(scalar_i64(su, "SELECT count(*) FROM mem_evidence WHERE item_id = $1", old).await, 0, "with its evidence links");
+    assert_eq!(
+        (stats.items_purged, stats.windows_pruned),
+        (1, 1),
+        "{stats:?}"
+    );
+    assert!(
+        !exists(su, "mem_item", old).await,
+        "retired for 91 days: permanently deleted"
+    );
+    assert_eq!(
+        scalar_i64(
+            su,
+            "SELECT count(*) FROM mem_evidence WHERE item_id = $1",
+            old
+        )
+        .await,
+        0,
+        "with its evidence links"
+    );
     assert!(exists(su, "mem_item", recent).await && exists(su, "mem_item", live).await);
-    assert!(!exists(su, "mem_digest", covered).await, "an old window that a rollup covers is pruned");
+    assert!(
+        !exists(su, "mem_digest", covered).await,
+        "an old window that a rollup covers is pruned"
+    );
     for kept in [uncovered, recent_w, stale_cover, day, thread] {
         assert!(exists(su, "mem_digest", kept).await, "{kept} stays");
     }
@@ -986,7 +1414,10 @@ async fn retention_deletes_old_retired_items_and_covered_windows() {
     let purged = events(su, old, "purged").await;
     assert_eq!(purged.len(), 1);
     assert_eq!(purged[0].1["reason"], json!("retention"));
-    assert!(purged[0].1.to_string().find("사실").is_none(), "no text in the ledger");
+    assert!(
+        purged[0].1.to_string().find("사실").is_none(),
+        "no text in the ledger"
+    );
     assert_eq!(events(su, covered, "purged").await.len(), 1);
 
     // A retention of less than a day is a mistake, not a setting.
@@ -996,12 +1427,26 @@ async fn retention_deletes_old_retired_items_and_covered_windows() {
     assert_eq!(sqlstate_of(bad).await, "22023");
 
     // A paused workspace keeps its data (no decay, no retention) but still drops what lost its source.
-    sqlx::query("INSERT INTO mem_settings (workspace_id, scope, paused) VALUES ($1, 'workspace', true)")
-        .bind(ws)
-        .execute(su)
-        .await
-        .unwrap();
-    let old2 = put_item(su, ws, ch, spec("fact", "extracted", "일시정지 중에도 남는 사실", ago(300), &[m])).await;
+    sqlx::query(
+        "INSERT INTO mem_settings (workspace_id, scope, paused) VALUES ($1, 'workspace', true)",
+    )
+    .bind(ws)
+    .execute(su)
+    .await
+    .unwrap();
+    let old2 = put_item(
+        su,
+        ws,
+        ch,
+        spec(
+            "fact",
+            "extracted",
+            "일시정지 중에도 남는 사실",
+            ago(300),
+            &[m],
+        ),
+    )
+    .await;
     sqlx::query("UPDATE mem_item SET retired_at = now() - interval '200 days', retired_reason = 'decayed' WHERE id = $1")
         .bind(old2)
         .execute(su)
@@ -1018,7 +1463,13 @@ async fn red_retention_without_its_guards() {
     let w = world().await;
     let (su, ws, ch) = (&w.su, w.fx.ws, w.fx.channel);
     let m = w.say("보존 시험용 근거").await;
-    let recent = put_item(su, ws, ch, spec("fact", "extracted", "최근에 내려간 사실", ago(20), &[m])).await;
+    let recent = put_item(
+        su,
+        ws,
+        ch,
+        spec("fact", "extracted", "최근에 내려간 사실", ago(20), &[m]),
+    )
+    .await;
     sqlx::query("UPDATE mem_item SET retired_at = now() - interval '10 days', retired_reason = 'decayed' WHERE id = $1")
         .bind(recent)
         .execute(su)
@@ -1028,22 +1479,43 @@ async fn red_retention_without_its_guards() {
     let count = |edits: Vec<(&'static str, &'static str)>| {
         let su = su.clone();
         async move {
-            let e: Vec<(&str, &[(&str, &str)])> = if edits.is_empty() { vec![] } else { vec![(RETENTION, &edits[..])] };
+            let e: Vec<(&str, &[(&str, &str)])> = if edits.is_empty() {
+                vec![]
+            } else {
+                vec![(RETENTION, &edits[..])]
+            };
             let mut tx = red_tx(&su, ws, &e).await;
-            let row = sqlx::query("SELECT items_deleted, windows_pruned FROM mem_cons_retention($1, 90, 90, 100)")
-                .bind(ch)
-                .fetch_one(&mut *tx)
-                .await
-                .unwrap();
+            let row = sqlx::query(
+                "SELECT items_deleted, windows_pruned FROM mem_cons_retention($1, 90, 90, 100)",
+            )
+            .bind(ch)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
             tx.rollback().await.unwrap();
-            (row.get::<i32, _>("items_deleted"), row.get::<i32, _>("windows_pruned"))
+            (
+                row.get::<i32, _>("items_deleted"),
+                row.get::<i32, _>("windows_pruned"),
+            )
         }
     };
-    assert_eq!(count(vec![]).await, (0, 0), "shipped: a 10-day-old retired item and an uncovered window stay");
-    let age = count(vec![("AND i.retired_at < pg_catalog.now() - pg_catalog.make_interval(days => p_retired_days)", "")]).await;
+    assert_eq!(
+        count(vec![]).await,
+        (0, 0),
+        "shipped: a 10-day-old retired item and an uncovered window stay"
+    );
+    let age = count(vec![(
+        "AND i.retired_at < pg_catalog.now() - pg_catalog.make_interval(days => p_retired_days)",
+        "",
+    )])
+    .await;
     eprintln!("RED retirement age removed: {age:?} (items, windows) — a 10-day-old retired item is deleted");
     assert_eq!(age.0, 1);
-    let cover = count(vec![("AND EXISTS (SELECT 1 FROM public.mem_digest u", "AND NOT EXISTS (SELECT 1 FROM public.mem_digest u")]).await;
+    let cover = count(vec![(
+        "AND EXISTS (SELECT 1 FROM public.mem_digest u",
+        "AND NOT EXISTS (SELECT 1 FROM public.mem_digest u",
+    )])
+    .await;
     eprintln!("RED rollup cover inverted: {cover:?} — an uncovered window is deleted");
     assert_eq!(cover.1, 1);
 }
@@ -1082,9 +1554,11 @@ const FACT_MARKER: &str = "회식비는 오만원";
 async fn forget_flow(w: &World) -> ForgetFlow {
     let (su, ws) = (&w.su, w.fx.ws);
     let app = momo_app_pool().await;
-    *w.provider.reply_fn.lock().unwrap() = Some(echo_reply(FACT_MARKER, "회식비는 오만원으로 정했다"));
+    *w.provider.reply_fn.lock().unwrap() =
+        Some(echo_reply(FACT_MARKER, "회식비는 오만원으로 정했다"));
     w.say("이번 배포는 금요일 오후입니다").await;
-    w.say(&format!("{FACT_MARKER}으로 정했습니다 참고하세요")).await;
+    w.say(&format!("{FACT_MARKER}으로 정했습니다 참고하세요"))
+        .await;
     w.say("그럼 그렇게 진행하겠습니다").await;
     w.worker.summary_sweep().await;
     let item_id: Uuid = sqlx::query_scalar("SELECT id FROM mem_item WHERE workspace_id = $1")
@@ -1092,46 +1566,58 @@ async fn forget_flow(w: &World) -> ForgetFlow {
         .fetch_one(su)
         .await
         .expect("the fact was extracted");
-    let digest_body: String = sqlx::query_scalar("SELECT body FROM mem_digest WHERE workspace_id = $1 AND level = 'window'")
-        .bind(ws)
-        .fetch_one(su)
-        .await
-        .expect("digest");
-    assert!(digest_body.contains(FACT_MARKER), "the first digest carries the fact");
+    let digest_body: String = sqlx::query_scalar(
+        "SELECT body FROM mem_digest WHERE workspace_id = $1 AND level = 'window'",
+    )
+    .bind(ws)
+    .fetch_one(su)
+    .await
+    .expect("digest");
+    assert!(
+        digest_body.contains(FACT_MARKER),
+        "the first digest carries the fact"
+    );
 
-    let forgotten = forget_as(&app, ws, w.fx.human_b, item_id).await.expect("forget") as usize;
+    let forgotten = forget_as(&app, ws, w.fx.human_b, item_id)
+        .await
+        .expect("forget") as usize;
     let stale_after_forget: bool =
         sqlx::query_scalar("SELECT bool_and(stale) FROM mem_digest WHERE workspace_id = $1")
             .bind(ws)
             .fetch_one(su)
             .await
             .unwrap();
-    let suppressed_messages: i64 = sqlx::query_scalar("SELECT count(*) FROM mem_suppress_msg WHERE workspace_id = $1")
-        .bind(ws)
-        .fetch_one(su)
-        .await
-        .unwrap();
-
-    let before = w.provider.count();
-    w.worker.summary_state().forget_channels();
-    w.worker.summary_sweep().await;
-    let regen_prompt_has_fact = (before..w.provider.count()).any(|i| w.provider.prompt(i).contains(FACT_MARKER));
-    let bodies: Vec<String> = sqlx::query_scalar("SELECT body FROM mem_digest WHERE workspace_id = $1")
-        .bind(ws)
-        .fetch_all(su)
-        .await
-        .unwrap();
-    let still_stale_after_regen: bool =
-        sqlx::query_scalar("SELECT COALESCE(bool_or(stale), false) FROM mem_digest WHERE workspace_id = $1")
+    let suppressed_messages: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM mem_suppress_msg WHERE workspace_id = $1")
             .bind(ws)
             .fetch_one(su)
             .await
             .unwrap();
-    let items_after: i64 = sqlx::query_scalar("SELECT count(*) FROM mem_item WHERE workspace_id = $1")
-        .bind(ws)
-        .fetch_one(su)
-        .await
-        .unwrap();
+
+    let before = w.provider.count();
+    w.worker.summary_state().forget_channels();
+    w.worker.summary_sweep().await;
+    let regen_prompt_has_fact =
+        (before..w.provider.count()).any(|i| w.provider.prompt(i).contains(FACT_MARKER));
+    let bodies: Vec<String> =
+        sqlx::query_scalar("SELECT body FROM mem_digest WHERE workspace_id = $1")
+            .bind(ws)
+            .fetch_all(su)
+            .await
+            .unwrap();
+    let still_stale_after_regen: bool = sqlx::query_scalar(
+        "SELECT COALESCE(bool_or(stale), false) FROM mem_digest WHERE workspace_id = $1",
+    )
+    .bind(ws)
+    .fetch_one(su)
+    .await
+    .unwrap();
+    let items_after: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM mem_item WHERE workspace_id = $1")
+            .bind(ws)
+            .fetch_one(su)
+            .await
+            .unwrap();
     ForgetFlow {
         forgotten,
         stale_after_forget,
@@ -1150,10 +1636,22 @@ async fn forgetting_makes_digests_stale_and_they_regenerate_without_the_fact() {
     let w = world().await;
     let flow = forget_flow(&w).await;
     assert_eq!(flow.forgotten, 1);
-    assert!(flow.stale_after_forget, "the digests that cite the forgotten item's evidence are stale at once");
-    assert_eq!(flow.suppressed_messages, 1, "its evidence message is remembered (id only)");
-    assert!(!flow.regen_prompt_has_fact, "the regeneration is not shown the forgotten message");
-    assert!(!flow.regen_body_has_fact, "the regenerated digest no longer carries the fact");
+    assert!(
+        flow.stale_after_forget,
+        "the digests that cite the forgotten item's evidence are stale at once"
+    );
+    assert_eq!(
+        flow.suppressed_messages, 1,
+        "its evidence message is remembered (id only)"
+    );
+    assert!(
+        !flow.regen_prompt_has_fact,
+        "the regeneration is not shown the forgotten message"
+    );
+    assert!(
+        !flow.regen_body_has_fact,
+        "the regenerated digest no longer carries the fact"
+    );
     assert!(!flow.still_stale_after_regen);
     assert_eq!(flow.items_after, 0, "and the fact is not extracted again");
 }
@@ -1163,7 +1661,12 @@ async fn forgetting_makes_digests_stale_and_they_regenerate_without_the_fact() {
 async fn red_forgetting_without_the_suppression_or_the_stale_mark() {
     // 1. Without the input exclusion the regeneration echoes the fact straight back: the guard is load-bearing.
     let w = world().await;
-    let original = sabotage_committed(&w.su, SUPPRESSED, &[("AND s.message_id = ANY (p_ids)", "AND false")]).await;
+    let original = sabotage_committed(
+        &w.su,
+        SUPPRESSED,
+        &[("AND s.message_id = ANY (p_ids)", "AND false")],
+    )
+    .await;
     let flow = forget_flow(&w).await;
     restore(&w.su, original).await;
     eprintln!(
@@ -1178,11 +1681,15 @@ async fn red_forgetting_without_the_suppression_or_the_stale_mark() {
     let original = sabotage_committed(
         &w.su,
         FORGET,
-        &[("UPDATE public.mem_digest d SET stale = true", "UPDATE public.mem_digest d SET stale = d.stale")],
+        &[(
+            "UPDATE public.mem_digest d SET stale = true",
+            "UPDATE public.mem_digest d SET stale = d.stale",
+        )],
     )
     .await;
     let app = momo_app_pool().await;
-    *w.provider.reply_fn.lock().unwrap() = Some(echo_reply(FACT_MARKER, "회식비는 오만원으로 정했다"));
+    *w.provider.reply_fn.lock().unwrap() =
+        Some(echo_reply(FACT_MARKER, "회식비는 오만원으로 정했다"));
     w.say("이번 배포는 금요일 오후입니다").await;
     w.say(&format!("{FACT_MARKER}으로 정했습니다")).await;
     w.say("그럼 그렇게 진행하겠습니다").await;
@@ -1192,22 +1699,29 @@ async fn red_forgetting_without_the_suppression_or_the_stale_mark() {
         .fetch_one(&w.su)
         .await
         .unwrap();
-    forget_as(&app, w.fx.ws, w.fx.human_b, item_id).await.expect("forget");
-    let stale_now: bool = sqlx::query_scalar("SELECT bool_and(stale) FROM mem_digest WHERE workspace_id = $1")
-        .bind(w.fx.ws)
-        .fetch_one(&w.su)
+    forget_as(&app, w.fx.ws, w.fx.human_b, item_id)
         .await
-        .unwrap();
+        .expect("forget");
+    let stale_now: bool =
+        sqlx::query_scalar("SELECT bool_and(stale) FROM mem_digest WHERE workspace_id = $1")
+            .bind(w.fx.ws)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
     restore(&w.su, original).await;
     eprintln!("RED stale mark removed from mem_forget_item: digests stale right after the forget = {stale_now}");
     assert!(!stale_now);
     let stats = w.consolidate().await;
-    assert_eq!(stats.digests_marked_stale, 1, "the job's reconcile catches it: {stats:?}");
-    let stale_later: bool = sqlx::query_scalar("SELECT bool_and(stale) FROM mem_digest WHERE workspace_id = $1")
-        .bind(w.fx.ws)
-        .fetch_one(&w.su)
-        .await
-        .unwrap();
+    assert_eq!(
+        stats.digests_marked_stale, 1,
+        "the job's reconcile catches it: {stats:?}"
+    );
+    let stale_later: bool =
+        sqlx::query_scalar("SELECT bool_and(stale) FROM mem_digest WHERE workspace_id = $1")
+            .bind(w.fx.ws)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
     assert!(stale_later);
 }
 
@@ -1256,17 +1770,51 @@ async fn seed_proposals(w: &World) -> Proposals {
         w.say("멀쩡한 제안의 근거").await,
     );
     let forgotten_hash = "aa".repeat(32);
-    sqlx::query("INSERT INTO mem_suppress (workspace_id, channel_id, content_hash) VALUES ($1, $2, $3)")
-        .bind(fx.ws)
-        .bind(fx.channel)
-        .bind(&forgotten_hash)
-        .execute(su)
-        .await
-        .unwrap();
-    let expired = put_proposal(su, fx, "만료된 제안의 본문", &[m1], &"01".repeat(32), ago(1)).await;
-    let evidence_gone = put_proposal(su, fx, "근거가 지워진 제안의 본문", &[m2], &"02".repeat(32), in_days(10)).await;
-    let suppressed = put_proposal(su, fx, "잊은 내용의 제안 본문", &[m3], &forgotten_hash, in_days(10)).await;
-    let healthy = put_proposal(su, fx, "멀쩡한 제안의 본문", &[m4], &"04".repeat(32), in_days(10)).await;
+    sqlx::query(
+        "INSERT INTO mem_suppress (workspace_id, channel_id, content_hash) VALUES ($1, $2, $3)",
+    )
+    .bind(fx.ws)
+    .bind(fx.channel)
+    .bind(&forgotten_hash)
+    .execute(su)
+    .await
+    .unwrap();
+    let expired = put_proposal(
+        su,
+        fx,
+        "만료된 제안의 본문",
+        &[m1],
+        &"01".repeat(32),
+        ago(1),
+    )
+    .await;
+    let evidence_gone = put_proposal(
+        su,
+        fx,
+        "근거가 지워진 제안의 본문",
+        &[m2],
+        &"02".repeat(32),
+        in_days(10),
+    )
+    .await;
+    let suppressed = put_proposal(
+        su,
+        fx,
+        "잊은 내용의 제안 본문",
+        &[m3],
+        &forgotten_hash,
+        in_days(10),
+    )
+    .await;
+    let healthy = put_proposal(
+        su,
+        fx,
+        "멀쩡한 제안의 본문",
+        &[m4],
+        &"04".repeat(32),
+        in_days(10),
+    )
+    .await;
     delete_msg(&app, fx.ws, fx.human, m2).await;
     Proposals {
         expired,
@@ -1284,7 +1832,10 @@ async fn dead_expired_and_forgotten_pending_proposals_are_purged() {
     let stats = w.consolidate().await;
     assert_eq!(stats.proposals_purged, 3, "{stats:?}");
     for gone in [p.expired, p.evidence_gone, p.suppressed] {
-        assert!(!exists(&w.su, "mem_proposal", gone).await, "{gone}: the row and its body are deleted");
+        assert!(
+            !exists(&w.su, "mem_proposal", gone).await,
+            "{gone}: the row and its body are deleted"
+        );
     }
     assert!(exists(&w.su, "mem_proposal", p.healthy).await);
     let reason = |id| {
@@ -1301,15 +1852,25 @@ async fn dead_expired_and_forgotten_pending_proposals_are_purged() {
         }
     };
     let e = reason(p.expired).await;
-    assert_eq!((e.0.as_str(), e.1["reason"].as_str()), ("expired", Some("expired")));
+    assert_eq!(
+        (e.0.as_str(), e.1["reason"].as_str()),
+        ("expired", Some("expired"))
+    );
     let e = reason(p.suppressed).await;
-    assert_eq!((e.0.as_str(), e.1["reason"].as_str()), ("purged", Some("suppressed")));
+    assert_eq!(
+        (e.0.as_str(), e.1["reason"].as_str()),
+        ("purged", Some("suppressed"))
+    );
     let e = reason(p.evidence_gone).await;
-    assert_eq!((e.0.as_str(), e.1["reason"].as_str()), ("purged", Some("evidence_gone")));
-    let text_left: i64 = sqlx::query_scalar("SELECT count(*) FROM mem_event WHERE detail::text LIKE '%본문%'")
-        .fetch_one(&w.su)
-        .await
-        .unwrap();
+    assert_eq!(
+        (e.0.as_str(), e.1["reason"].as_str()),
+        ("purged", Some("evidence_gone"))
+    );
+    let text_left: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM mem_event WHERE detail::text LIKE '%본문%'")
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
     assert_eq!(text_left, 0, "the ledger never holds the proposal text");
 }
 
@@ -1322,31 +1883,53 @@ async fn red_each_purge_condition_is_load_bearing() {
     let remaining = |edits: Vec<(&'static str, &'static str)>| {
         let su = su.clone();
         async move {
-            let e: Vec<(&str, &[(&str, &str)])> = if edits.is_empty() { vec![] } else { vec![(PURGE, &edits[..])] };
+            let e: Vec<(&str, &[(&str, &str)])> = if edits.is_empty() {
+                vec![]
+            } else {
+                vec![(PURGE, &edits[..])]
+            };
             let mut tx = red_tx(&su, ws, &e).await;
-            sqlx::query("SELECT mem_cons_purge_proposals($1)").bind(ch).execute(&mut *tx).await.unwrap();
-            sqlx::query("RESET ROLE").execute(&mut *tx).await.unwrap();
-            let ids: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM mem_proposal WHERE channel_id = $1")
+            sqlx::query("SELECT mem_cons_purge_proposals($1)")
                 .bind(ch)
-                .fetch_all(&mut *tx)
+                .execute(&mut *tx)
                 .await
                 .unwrap();
+            sqlx::query("RESET ROLE").execute(&mut *tx).await.unwrap();
+            let ids: Vec<Uuid> =
+                sqlx::query_scalar("SELECT id FROM mem_proposal WHERE channel_id = $1")
+                    .bind(ch)
+                    .fetch_all(&mut *tx)
+                    .await
+                    .unwrap();
             tx.rollback().await.unwrap();
             ids
         }
     };
     assert_eq!(remaining(vec![]).await, vec![p.healthy]);
     let no_expiry = remaining(vec![("WHERE p.workspace_id = v_ws AND p.channel_id = p_channel_id AND p.status = 'pending'\n       AND (p.expires_at <= pg_catalog.now()\n            OR EXISTS", "WHERE p.workspace_id = v_ws AND p.channel_id = p_channel_id AND p.status = 'pending'\n       AND (false\n            OR EXISTS")]).await;
-    eprintln!("RED expiry condition removed: the expired proposal survives = {}", no_expiry.contains(&p.expired));
+    eprintln!(
+        "RED expiry condition removed: the expired proposal survives = {}",
+        no_expiry.contains(&p.expired)
+    );
     assert!(no_expiry.contains(&p.expired));
-    let no_evidence = remaining(vec![("OR NOT public.mem_proposal_evidence_ok(p.id))", "OR false)")]).await;
-    eprintln!("RED evidence condition removed: the proposal whose message was deleted survives = {}", no_evidence.contains(&p.evidence_gone));
+    let no_evidence = remaining(vec![(
+        "OR NOT public.mem_proposal_evidence_ok(p.id))",
+        "OR false)",
+    )])
+    .await;
+    eprintln!(
+        "RED evidence condition removed: the proposal whose message was deleted survives = {}",
+        no_evidence.contains(&p.evidence_gone)
+    );
     assert!(no_evidence.contains(&p.evidence_gone));
     let no_suppress = remaining(vec![(
         "            OR EXISTS (SELECT 1 FROM public.mem_suppress s\n                        WHERE s.workspace_id = p.workspace_id AND s.channel_id = p.channel_id\n                          AND s.content_hash = p.content_hash)\n            OR NOT",
         "            OR NOT",
     )]).await;
-    eprintln!("RED forgotten-hash condition removed: the proposal of a forgotten fact survives = {}", no_suppress.contains(&p.suppressed));
+    eprintln!(
+        "RED forgotten-hash condition removed: the proposal of a forgotten fact survives = {}",
+        no_suppress.contains(&p.suppressed)
+    );
     assert!(no_suppress.contains(&p.suppressed));
 }
 
@@ -1356,8 +1939,20 @@ async fn pair_of_duplicates(w: &World, tag: &str, bodies: (&str, &str)) {
     let (su, ws, ch) = (&w.su, w.fx.ws, w.fx.channel);
     let m1 = w.say(&format!("{tag} 근거 하나")).await;
     let m2 = w.say(&format!("{tag} 근거 둘")).await;
-    put_item(su, ws, ch, spec("fact", "extracted", bodies.0, ago(3), &[m1])).await;
-    put_item(su, ws, ch, spec("fact", "extracted", bodies.1, ago(2), &[m2])).await;
+    put_item(
+        su,
+        ws,
+        ch,
+        spec("fact", "extracted", bodies.0, ago(3), &[m1]),
+    )
+    .await;
+    put_item(
+        su,
+        ws,
+        ch,
+        spec("fact", "extracted", bodies.1, ago(2), &[m2]),
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -1366,7 +1961,15 @@ async fn the_token_cap_stops_judging_but_not_the_housekeeping() {
     let w = world().await;
     let (su, ws, ch) = (&w.su, w.fx.ws, w.fx.channel);
     *w.provider.reply_fn.lock().unwrap() = Some(judge(vec![("", "", "duplicate")]));
-    pair_of_duplicates(&w, "하나", ("빌드 서버는 리눅스 러너를 쓴다", "빌드 서버는 리눅스 러너를 사용한다")).await;
+    pair_of_duplicates(
+        &w,
+        "하나",
+        (
+            "빌드 서버는 리눅스 러너를 쓴다",
+            "빌드 서버는 리눅스 러너를 사용한다",
+        ),
+    )
+    .await;
     // Housekeeping work that needs no tokens: a decayed item.
     let m = w.say("감쇠될 근거").await;
     let mut due = spec("fact", "extracted", "감쇠될 사실", ago(20), &[m]);
@@ -1380,11 +1983,21 @@ async fn the_token_cap_stops_judging_but_not_the_housekeeping() {
         .await
         .unwrap();
     let stats = w.consolidate().await;
-    assert_eq!((stats.llm_calls, stats.cap_reached, w.provider.count()), (0, 1, 0), "{stats:?}");
+    assert_eq!(
+        (stats.llm_calls, stats.cap_reached, w.provider.count()),
+        (0, 1, 0),
+        "{stats:?}"
+    );
     assert_eq!(stats.decayed, 1, "the housekeeping ran anyway");
-    assert_eq!(item(su, due_id).await.unwrap().retired_reason.as_deref(), Some("decayed"));
+    assert_eq!(
+        item(su, due_id).await.unwrap().retired_reason.as_deref(),
+        Some("decayed")
+    );
     assert_eq!(tokens_used_today(su, ws).await, 0, "nothing was reserved");
-    assert_eq!(audit_count(su, ws, "mem.consolidate.token_cap_reached").await, 1);
+    assert_eq!(
+        audit_count(su, ws, "mem.consolidate.token_cap_reached").await,
+        1
+    );
     // The run is not "done": it retries after the back-off, not at the next slot.
     let (last_run, retry): (Option<DateTime<Utc>>, Option<DateTime<Utc>>) =
         sqlx::query_as("SELECT last_run_at, retry_after FROM mem_cons_state WHERE channel_id = $1")
@@ -1393,11 +2006,23 @@ async fn the_token_cap_stops_judging_but_not_the_housekeeping() {
             .await
             .unwrap();
     assert!(last_run.is_none() && retry.unwrap() > Utc::now());
-    assert_eq!(w.consolidate().await.not_due, 1, "inside the back-off the channel is not due");
+    assert_eq!(
+        w.consolidate().await.not_due,
+        1,
+        "inside the back-off the channel is not due"
+    );
 
     // A cap of 100k with 85k already used: consolidation's 80 % share is spent, the summaries' 100 % is not.
-    sqlx::query("DELETE FROM mem_settings WHERE workspace_id = $1").bind(ws).execute(su).await.unwrap();
-    sqlx::query("UPDATE mem_cons_state SET retry_after = NULL WHERE channel_id = $1").bind(ch).execute(su).await.unwrap();
+    sqlx::query("DELETE FROM mem_settings WHERE workspace_id = $1")
+        .bind(ws)
+        .execute(su)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE mem_cons_state SET retry_after = NULL WHERE channel_id = $1")
+        .bind(ch)
+        .execute(su)
+        .await
+        .unwrap();
     sqlx::query("INSERT INTO mem_settings (workspace_id, scope, daily_token_cap) VALUES ($1, 'workspace', 100000)")
         .bind(ws)
         .execute(su)
@@ -1412,14 +2037,25 @@ async fn the_token_cap_stops_judging_but_not_the_housekeeping() {
     .await
     .unwrap();
     let stats = w.consolidate().await;
-    assert_eq!((stats.llm_calls, stats.cap_reached), (0, 1), "share spent: {stats:?}");
+    assert_eq!(
+        (stats.llm_calls, stats.cap_reached),
+        (0, 1),
+        "share spent: {stats:?}"
+    );
     // The summaries' own reservation still succeeds at 85 %.
     let reserved = w
         .mem_call(|conn| Box::pin(async move { mem::reserve_tokens(conn, 1_000, 300_000).await }))
         .await
         .unwrap();
-    assert!(reserved, "the summaries keep their headroom above consolidation's share");
-    sqlx::query("UPDATE mem_cons_state SET retry_after = NULL WHERE channel_id = $1").bind(ch).execute(su).await.unwrap();
+    assert!(
+        reserved,
+        "the summaries keep their headroom above consolidation's share"
+    );
+    sqlx::query("UPDATE mem_cons_state SET retry_after = NULL WHERE channel_id = $1")
+        .bind(ch)
+        .execute(su)
+        .await
+        .unwrap();
 
     // Control: with the share at 100 % the same numbers let the call through (the share check is what stopped it),
     // and the call is charged to the same counter.
@@ -1429,7 +2065,10 @@ async fn the_token_cap_stops_judging_but_not_the_housekeeping() {
     let before = tokens_used_today(su, ws).await;
     let stats = free.consolidate_channel_now(ws, ch).await;
     assert_eq!((stats.llm_calls, stats.merged), (1, 1), "{stats:?}");
-    assert!(tokens_used_today(su, ws).await > before, "judging is charged to the summaries' counter");
+    assert!(
+        tokens_used_today(su, ws).await > before,
+        "judging is charged to the summaries' counter"
+    );
 }
 
 #[tokio::test]
@@ -1441,7 +2080,10 @@ async fn a_channel_spends_at_most_its_call_budget() {
         ("배포 창구는 슬랙이다", "배포 창구는 슬랙 채널이다"),
         ("회의록은 노션에 쓴다", "회의록은 노션에 적는다"),
         ("코드 리뷰는 두 명이 한다", "코드 리뷰는 두 사람이 한다"),
-        ("장애 공지는 상태 페이지에", "장애 공지는 상태 페이지에 올린다"),
+        (
+            "장애 공지는 상태 페이지에",
+            "장애 공지는 상태 페이지에 올린다",
+        ),
     ]
     .iter()
     .enumerate()
@@ -1466,30 +2108,74 @@ async fn nothing_is_consolidated_across_channels() {
     let other = new_channel(su, ws, "public", &[w.fx.human, w.fx.human_b, w.fx.agent]).await;
     let m1 = w.say("배포는 금요일 오후").await;
     let m2 = w.say_in(other, "배포는 금요일 오후").await;
-    let a = put_item(su, ws, w.fx.channel, spec("fact", "extracted", "배포는 금요일 오후에 한다", ago(3), &[m1])).await;
-    let b = put_item(su, ws, other, spec("fact", "extracted", "배포는 금요일 오후에 한다", ago(2), &[m2])).await;
+    let a = put_item(
+        su,
+        ws,
+        w.fx.channel,
+        spec(
+            "fact",
+            "extracted",
+            "배포는 금요일 오후에 한다",
+            ago(3),
+            &[m1],
+        ),
+    )
+    .await;
+    let b = put_item(
+        su,
+        ws,
+        other,
+        spec(
+            "fact",
+            "extracted",
+            "배포는 금요일 오후에 한다",
+            ago(2),
+            &[m2],
+        ),
+    )
+    .await;
     *w.provider.reply_fn.lock().unwrap() = Some(judge(vec![("", "", "duplicate")]));
 
     let one = w.worker.consolidate_channel_now(ws, w.fx.channel).await;
     let two = w.worker.consolidate_channel_now(ws, other).await;
-    assert_eq!((one.llm_calls, two.llm_calls, w.provider.count()), (0, 0, 0), "no pair exists inside a channel");
+    assert_eq!(
+        (one.llm_calls, two.llm_calls, w.provider.count()),
+        (0, 0, 0),
+        "no pair exists inside a channel"
+    );
     for id in [a, b] {
         assert!(!item(su, id).await.unwrap().retired);
     }
     // Asked directly, the database refuses the pair (and only the shipped guards do).
     let sql = format!("SELECT mem_cons_apply('{a}', '{b}', 'duplicate')");
     let mut tx = red_tx(su, ws, &[]).await;
-    let refused = sqlx::query_scalar::<_, String>(&sql).fetch_one(&mut *tx).await;
-    assert_eq!(refused.map_err(|e| mem::sqlstate(&momo_db::DbError::from(e))), Err(Some("23514".to_string())));
+    let refused = sqlx::query_scalar::<_, String>(&sql)
+        .fetch_one(&mut *tx)
+        .await;
+    assert_eq!(
+        refused.map_err(|e| mem::sqlstate(&momo_db::DbError::from(e))),
+        Err(Some("23514".to_string()))
+    );
     tx.rollback().await.unwrap();
     // Wall 1 (in `mem_cons_apply`) removed: wall 2 (`mem_cons_merge_items`) refuses alone.
-    let wall1 = ("IF x.channel_id <> y.channel_id OR", "IF false AND x.channel_id <> y.channel_id OR");
+    let wall1 = (
+        "IF x.channel_id <> y.channel_id OR",
+        "IF false AND x.channel_id <> y.channel_id OR",
+    );
     let mut tx = red_tx(su, ws, &[(APPLY, &[wall1])]).await;
-    let refused = sqlx::query_scalar::<_, String>(&sql).fetch_one(&mut *tx).await;
-    assert_eq!(refused.map_err(|e| mem::sqlstate(&momo_db::DbError::from(e))), Err(Some("23514".to_string())));
+    let refused = sqlx::query_scalar::<_, String>(&sql)
+        .fetch_one(&mut *tx)
+        .await;
+    assert_eq!(
+        refused.map_err(|e| mem::sqlstate(&momo_db::DbError::from(e))),
+        Err(Some("23514".to_string()))
+    );
     tx.rollback().await.unwrap();
     // Both removed: the two channels' items are merged into one. This is what the walls prevent.
-    let wall2 = ("IF l.id = w.id OR l.channel_id <> w.channel_id OR", "IF l.id = w.id OR");
+    let wall2 = (
+        "IF l.id = w.id OR l.channel_id <> w.channel_id OR",
+        "IF l.id = w.id OR",
+    );
     let mut tx = red_tx(su, ws, &[(APPLY, &[wall1]), (MERGE, &[wall2])]).await;
     let outcome: String = sqlx::query_scalar(&sql).fetch_one(&mut *tx).await.unwrap();
     sqlx::query("RESET ROLE").execute(&mut *tx).await.unwrap();
@@ -1514,12 +2200,30 @@ async fn the_job_runs_as_momo_memory_and_is_closed_to_everyone_else() {
     let app = momo_app_pool().await;
     let m1 = w.say("역할 시험 근거 하나").await;
     let m2 = w.say("역할 시험 근거 둘").await;
-    let a = put_item(su, ws, ch, spec("fact", "extracted", "역할 시험 사실 하나", ago(3), &[m1])).await;
-    let b = put_item(su, ws, ch, spec("fact", "extracted", "역할 시험 사실 둘", ago(2), &[m2])).await;
+    let a = put_item(
+        su,
+        ws,
+        ch,
+        spec("fact", "extracted", "역할 시험 사실 하나", ago(3), &[m1]),
+    )
+    .await;
+    let b = put_item(
+        su,
+        ws,
+        ch,
+        spec("fact", "extracted", "역할 시험 사실 둘", ago(2), &[m2]),
+    )
+    .await;
 
     let worker_only = vec![
-        format!("SELECT mem_cons_begin('{ch}', '{}', 60, now())", Uuid::new_v4()),
-        format!("SELECT mem_cons_finish('{ch}', '{}', true, 60)", Uuid::new_v4()),
+        format!(
+            "SELECT mem_cons_begin('{ch}', '{}', 60, now())",
+            Uuid::new_v4()
+        ),
+        format!(
+            "SELECT mem_cons_finish('{ch}', '{}', true, 60)",
+            Uuid::new_v4()
+        ),
         format!("SELECT mem_cons_retire_dead('{ch}', 10)"),
         format!("SELECT mem_cons_decay('{ch}', 10)"),
         format!("SELECT mem_cons_reconcile('{ch}')"),
@@ -1535,7 +2239,11 @@ async fn the_job_runs_as_momo_memory_and_is_closed_to_everyone_else() {
         format!("SELECT mem_cons_close_item('{a}', '{b}', NULL, NULL)"),
         format!("SELECT mem_cons_propose('merge', '{a}', '{b}')"),
         format!("SELECT mem_cons_note_pair('{a}', '{b}', 'distinct')"),
-        format!("SELECT mem_cons_accept('{}', '{}')", Uuid::new_v4(), w.fx.human),
+        format!(
+            "SELECT mem_cons_accept('{}', '{}')",
+            Uuid::new_v4(),
+            w.fx.human
+        ),
     ];
     let run = |pool: PgPool, sql: String| async move {
         with_tenant_tx(&pool, ws, move |conn| {
@@ -1545,35 +2253,72 @@ async fn the_job_runs_as_momo_memory_and_is_closed_to_everyone_else() {
     };
     for sql in worker_only.iter().chain(internal.iter()) {
         // The API role and the plain worker connection (BYPASSRLS, but not momo_memory) cannot run any of them.
-        assert_eq!(sqlstate_of(run(app.clone(), sql.clone()).await).await, "42501", "momo_app: {sql}");
-        assert_eq!(sqlstate_of(run(w.wp.clone(), sql.clone()).await).await, "42501", "momo_worker: {sql}");
+        assert_eq!(
+            sqlstate_of(run(app.clone(), sql.clone()).await).await,
+            "42501",
+            "momo_app: {sql}"
+        );
+        assert_eq!(
+            sqlstate_of(run(w.wp.clone(), sql.clone()).await).await,
+            "42501",
+            "momo_worker: {sql}"
+        );
     }
     // momo_memory (the worker after SET LOCAL ROLE) runs the worker-only ones and not the internal ones.
     for sql in &worker_only {
         let outcome = w
             .mem_call({
                 let sql = sql.clone();
-                move |conn| Box::pin(async move { Ok(sqlx::query(&sql).fetch_all(&mut *conn).await.map(|_| ())?) })
+                move |conn| {
+                    Box::pin(async move {
+                        Ok(sqlx::query(&sql).fetch_all(&mut *conn).await.map(|_| ())?)
+                    })
+                }
             })
             .await;
-        assert_ne!(sqlstate_of(outcome).await, "42501", "momo_memory must run {sql}");
+        assert_ne!(
+            sqlstate_of(outcome).await,
+            "42501",
+            "momo_memory must run {sql}"
+        );
     }
     for sql in &internal {
         let outcome = w
             .mem_call({
                 let sql = sql.clone();
-                move |conn| Box::pin(async move { Ok(sqlx::query(&sql).fetch_all(&mut *conn).await.map(|_| ())?) })
+                move |conn| {
+                    Box::pin(async move {
+                        Ok(sqlx::query(&sql).fetch_all(&mut *conn).await.map(|_| ())?)
+                    })
+                }
             })
             .await;
-        assert_eq!(sqlstate_of(outcome).await, "42501", "even momo_memory cannot run the internal {sql}");
+        assert_eq!(
+            sqlstate_of(outcome).await,
+            "42501",
+            "even momo_memory cannot run the internal {sql}"
+        );
     }
 
     // Witness: the sweep's writes happen in a session of `momo_worker` that has done `SET ROLE momo_memory`.
     // (The probes above took a lease under a random token; start from a clean state row.)
-    sqlx::query("DELETE FROM mem_cons_state WHERE channel_id = $1").bind(ch).execute(su).await.unwrap();
-    sqlx::query("DROP TABLE IF EXISTS cons_witness").execute(su).await.unwrap();
-    sqlx::query("CREATE TABLE cons_witness (session_name text, role_setting text)").execute(su).await.unwrap();
-    sqlx::query("GRANT INSERT ON cons_witness TO PUBLIC").execute(su).await.unwrap();
+    sqlx::query("DELETE FROM mem_cons_state WHERE channel_id = $1")
+        .bind(ch)
+        .execute(su)
+        .await
+        .unwrap();
+    sqlx::query("DROP TABLE IF EXISTS cons_witness")
+        .execute(su)
+        .await
+        .unwrap();
+    sqlx::query("CREATE TABLE cons_witness (session_name text, role_setting text)")
+        .execute(su)
+        .await
+        .unwrap();
+    sqlx::query("GRANT INSERT ON cons_witness TO PUBLIC")
+        .execute(su)
+        .await
+        .unwrap();
     sqlx::query(
         "CREATE OR REPLACE FUNCTION cons_witness_fn() RETURNS trigger LANGUAGE plpgsql AS \
          $f$ BEGIN INSERT INTO cons_witness VALUES (session_user::text, current_setting('role')); RETURN NEW; END $f$",
@@ -1581,21 +2326,37 @@ async fn the_job_runs_as_momo_memory_and_is_closed_to_everyone_else() {
     .execute(su)
     .await
     .unwrap();
-    sqlx::query("DROP TRIGGER IF EXISTS cons_witness_trg ON mem_cons_state").execute(su).await.unwrap();
+    sqlx::query("DROP TRIGGER IF EXISTS cons_witness_trg ON mem_cons_state")
+        .execute(su)
+        .await
+        .unwrap();
     sqlx::query("CREATE TRIGGER cons_witness_trg AFTER INSERT OR UPDATE ON mem_cons_state FOR EACH ROW EXECUTE FUNCTION cons_witness_fn()")
         .execute(su)
         .await
         .unwrap();
     let stats = w.consolidate().await;
-    let seen: Vec<(String, String)> = sqlx::query_as("SELECT DISTINCT session_name, role_setting FROM cons_witness")
-        .fetch_all(su)
+    let seen: Vec<(String, String)> =
+        sqlx::query_as("SELECT DISTINCT session_name, role_setting FROM cons_witness")
+            .fetch_all(su)
+            .await
+            .unwrap();
+    sqlx::query("DROP TRIGGER cons_witness_trg ON mem_cons_state")
+        .execute(su)
         .await
         .unwrap();
-    sqlx::query("DROP TRIGGER cons_witness_trg ON mem_cons_state").execute(su).await.unwrap();
-    sqlx::query("DROP TABLE cons_witness").execute(su).await.unwrap();
-    sqlx::query("DROP FUNCTION cons_witness_fn()").execute(su).await.unwrap();
+    sqlx::query("DROP TABLE cons_witness")
+        .execute(su)
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION cons_witness_fn()")
+        .execute(su)
+        .await
+        .unwrap();
     assert_eq!(stats.channels, 1, "{stats:?}");
-    assert_eq!(seen, vec![("momo_worker".to_string(), "momo_memory".to_string())]);
+    assert_eq!(
+        seen,
+        vec![("momo_worker".to_string(), "momo_memory".to_string())]
+    );
 }
 
 // --- cadence -------------------------------------------------------------------------
@@ -1613,25 +2374,39 @@ async fn a_channel_runs_once_per_slot_and_a_second_worker_yields() {
     };
     let first = put_item(su, ws, ch, decayable("첫째 감쇠 대상")).await;
     w.worker.consolidate_sweep().await;
-    assert!(item(su, first).await.unwrap().retired, "the first sweep of the slot runs the channel");
+    assert!(
+        item(su, first).await.unwrap().retired,
+        "the first sweep of the slot runs the channel"
+    );
 
     // Same slot: nothing more happens, from memory or (after a restart) from the database.
     let second = put_item(su, ws, ch, decayable("둘째 감쇠 대상")).await;
     w.worker.consolidate_sweep().await;
-    assert!(!item(su, second).await.unwrap().retired, "not again in the same slot");
+    assert!(
+        !item(su, second).await.unwrap().retired,
+        "not again in the same slot"
+    );
     w.worker.consolidate_state().forget_channels();
     w.worker.consolidate_sweep().await;
-    assert!(!item(su, second).await.unwrap().retired, "a restarted worker asks the database, which says done");
+    assert!(
+        !item(su, second).await.unwrap().retired,
+        "a restarted worker asks the database, which says done"
+    );
 
     // The next slot.
-    sqlx::query("UPDATE mem_cons_state SET last_run_at = now() - interval '2 days' WHERE channel_id = $1")
-        .bind(ch)
-        .execute(su)
-        .await
-        .unwrap();
+    sqlx::query(
+        "UPDATE mem_cons_state SET last_run_at = now() - interval '2 days' WHERE channel_id = $1",
+    )
+    .bind(ch)
+    .execute(su)
+    .await
+    .unwrap();
     w.worker.consolidate_state().forget_channels();
     w.worker.consolidate_sweep().await;
-    assert!(item(su, second).await.unwrap().retired, "a new day, a new run");
+    assert!(
+        item(su, second).await.unwrap().retired,
+        "a new day, a new run"
+    );
 
     // Another worker holds the lease: this one does not touch the channel.
     let third = put_item(su, ws, ch, decayable("셋째 감쇠 대상")).await;
@@ -1673,7 +2448,10 @@ async fn as_reader(app: &PgPool, ws: Uuid, member: Uuid, sql: &str) -> Vec<Strin
         Box::pin(async move {
             momo_messaging::memory::bind_mem_reader_guc(conn, member).await?;
             let rows = sqlx::query(&sql).fetch_all(&mut *conn).await?;
-            Ok(rows.iter().map(|r| r.try_get::<String, _>(0).unwrap_or_default()).collect::<Vec<_>>())
+            Ok(rows
+                .iter()
+                .map(|r| r.try_get::<String, _>(0).unwrap_or_default())
+                .collect::<Vec<_>>())
         })
     })
     .await
@@ -1700,15 +2478,26 @@ async fn as_reader_with(
     if let Some(ddl) = ddl {
         sqlx::raw_sql(ddl).execute(&mut *tx).await.expect("ddl");
     }
-    sqlx::query("SELECT set_config('app.workspace_id', $1, true), set_config('app.member_id', $2, true)")
-        .bind(ws.to_string())
-        .bind(member.to_string())
+    sqlx::query(
+        "SELECT set_config('app.workspace_id', $1, true), set_config('app.member_id', $2, true)",
+    )
+    .bind(ws.to_string())
+    .bind(member.to_string())
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query("SET LOCAL ROLE momo_app")
         .execute(&mut *tx)
         .await
         .unwrap();
-    sqlx::query("SET LOCAL ROLE momo_app").execute(&mut *tx).await.unwrap();
-    let rows = sqlx::query(sql).fetch_all(&mut *tx).await.expect("reader query");
-    let out = rows.iter().map(|r| r.try_get::<String, _>(0).unwrap_or_default()).collect();
+    let rows = sqlx::query(sql)
+        .fetch_all(&mut *tx)
+        .await
+        .expect("reader query");
+    let out = rows
+        .iter()
+        .map(|r| r.try_get::<String, _>(0).unwrap_or_default())
+        .collect();
     tx.rollback().await.unwrap();
     out
 }
@@ -1719,9 +2508,24 @@ async fn item_evidence_rows_follow_the_items_readability() {
     let w = world().await;
     let (su, ws, ch) = (&w.su, w.fx.ws, w.fx.channel);
     let app = momo_app_pool().await;
-    let (m1, m2) = (w.say("보이는 항목의 근거").await, w.say("가려질 항목의 근거").await);
-    let shown = put_item(su, ws, ch, spec("fact", "extracted", "보이는 사실", ago(3), &[m1])).await;
-    let hidden = put_item(su, ws, ch, spec("fact", "extracted", "가려질 사실", ago(3), &[m2])).await;
+    let (m1, m2) = (
+        w.say("보이는 항목의 근거").await,
+        w.say("가려질 항목의 근거").await,
+    );
+    let shown = put_item(
+        su,
+        ws,
+        ch,
+        spec("fact", "extracted", "보이는 사실", ago(3), &[m1]),
+    )
+    .await;
+    let hidden = put_item(
+        su,
+        ws,
+        ch,
+        spec("fact", "extracted", "가려질 사실", ago(3), &[m2]),
+    )
+    .await;
     delete_msg(&app, ws, w.fx.human, m2).await;
     let sql = format!("SELECT item_id::text FROM mem_evidence WHERE item_id IN ('{shown}', '{hidden}') ORDER BY 1");
     // A channel member reads the evidence link of the item they can read, and not that of the item hidden
@@ -1730,7 +2534,10 @@ async fn item_evidence_rows_follow_the_items_readability() {
     assert_eq!(seen, vec![shown.to_string()]);
     // RED: the old policy showed every evidence row of a channel the reader belongs to.
     let old = as_reader_with(su, ws, w.fx.human_b, Some(OLD_EVIDENCE_POLICY), &sql).await;
-    eprintln!("RED old evidence policy: a reader sees {} evidence link(s), including the hidden item's", old.len());
+    eprintln!(
+        "RED old evidence policy: a reader sees {} evidence link(s), including the hidden item's",
+        old.len()
+    );
     assert_eq!(old.len(), 2);
     // A non-member sees neither (unchanged).
     let outsider = new_member(su, ws, "human", "외부인").await;
@@ -1745,26 +2552,60 @@ async fn forgotten_items_leave_an_id_only_trace_channel_readers_can_see() {
     let app = momo_app_pool().await;
     let outsider = new_member(su, ws, "human", "외부인").await;
     let m = w.say("잊을 사실의 근거").await;
-    let item_id = put_item(su, ws, ch, spec("fact", "extracted", "잊을 사실은 비밀 문구를 담고 있다", ago(3), &[m])).await;
+    let item_id = put_item(
+        su,
+        ws,
+        ch,
+        spec(
+            "fact",
+            "extracted",
+            "잊을 사실은 비밀 문구를 담고 있다",
+            ago(3),
+            &[m],
+        ),
+    )
+    .await;
     assert_eq!(forget_as(&app, ws, w.fx.human_b, item_id).await, Ok(1));
     assert!(item(su, item_id).await.is_none());
 
-    let sql = format!("SELECT detail::text FROM mem_event WHERE target_id = '{item_id}' AND action = 'forgotten'");
+    let sql = format!(
+        "SELECT detail::text FROM mem_event WHERE target_id = '{item_id}' AND action = 'forgotten'"
+    );
     let seen = as_reader(&app, ws, w.fx.human, &sql).await;
-    assert_eq!(seen.len(), 1, "a channel reader still sees that something was forgotten");
+    assert_eq!(
+        seen.len(),
+        1,
+        "a channel reader still sees that something was forgotten"
+    );
     let detail: serde_json::Value = serde_json::from_str(&seen[0]).unwrap();
-    assert_eq!(detail["channel_id"], json!(ch.to_string()), "#3209 L-2: the channel id is in the detail");
+    assert_eq!(
+        detail["channel_id"],
+        json!(ch.to_string()),
+        "#3209 L-2: the channel id is in the detail"
+    );
     assert!(!seen[0].contains("비밀 문구"), "ids only, never text");
-    assert!(as_reader(&app, ws, outsider, &sql).await.is_empty(), "not to someone outside the channel");
+    assert!(
+        as_reader(&app, ws, outsider, &sql).await.is_empty(),
+        "not to someone outside the channel"
+    );
     // RED: the old rule needed the (now deleted) item to be readable.
     let old = as_reader_with(su, ws, w.fx.human, Some(OLD_EVENT_POLICY), &sql).await;
-    eprintln!("RED old event policy: the forgotten item's trace is visible to a channel member = {}", !old.is_empty());
+    eprintln!(
+        "RED old event policy: the forgotten item's trace is visible to a channel member = {}",
+        !old.is_empty()
+    );
     assert!(old.is_empty());
 
     // A personal space's trace belongs to its owner alone.
     let dm = new_channel(su, ws, "dm", &[w.fx.human, w.fx.agent]).await;
     let dm_msg = w.say_in(dm, "개인 공간 사실의 근거").await;
-    let personal = put_item(su, ws, dm, spec("fact", "extracted", "개인 공간의 사실", ago(3), &[dm_msg])).await;
+    let personal = put_item(
+        su,
+        ws,
+        dm,
+        spec("fact", "extracted", "개인 공간의 사실", ago(3), &[dm_msg]),
+    )
+    .await;
     sqlx::query("UPDATE mem_item SET space_kind = 'personal', owner_member_id = $2 WHERE id = $1")
         .bind(personal)
         .bind(w.fx.human)
@@ -1772,9 +2613,17 @@ async fn forgotten_items_leave_an_id_only_trace_channel_readers_can_see() {
         .await
         .unwrap();
     assert_eq!(forget_as(&app, ws, w.fx.human, personal).await, Ok(1));
-    let sql = format!("SELECT action FROM mem_event WHERE target_id = '{personal}' AND action = 'forgotten'");
-    assert_eq!(as_reader(&app, ws, w.fx.human, &sql).await, vec!["forgotten".to_string()]);
-    assert!(as_reader(&app, ws, w.fx.agent, &sql).await.is_empty(), "the DM's other member is not the owner");
+    let sql = format!(
+        "SELECT action FROM mem_event WHERE target_id = '{personal}' AND action = 'forgotten'"
+    );
+    assert_eq!(
+        as_reader(&app, ws, w.fx.human, &sql).await,
+        vec!["forgotten".to_string()]
+    );
+    assert!(
+        as_reader(&app, ws, w.fx.agent, &sql).await.is_empty(),
+        "the DM's other member is not the owner"
+    );
 }
 
 #[tokio::test]
@@ -1787,11 +2636,35 @@ async fn a_search_filter_narrows_before_the_top_n_cut() {
     // Twelve items in #general match the query well; two in the other channel match a little less.
     for i in 0..12 {
         let m = w.say(&format!("배포창구 근거 {i}")).await;
-        put_item(su, ws, w.fx.channel, spec("fact", "extracted", &format!("배포창구는 슬랙 채널이다 {i}"), ago(3), &[m])).await;
+        put_item(
+            su,
+            ws,
+            w.fx.channel,
+            spec(
+                "fact",
+                "extracted",
+                &format!("배포창구는 슬랙 채널이다 {i}"),
+                ago(3),
+                &[m],
+            ),
+        )
+        .await;
     }
     for i in 0..2 {
         let m = w.say_in(other, &format!("배포창구 다른 근거 {i}")).await;
-        put_item(su, ws, other, spec("decision", "extracted", &format!("다른 곳의 배포창구 정리 {i}"), ago(3), &[m])).await;
+        put_item(
+            su,
+            ws,
+            other,
+            spec(
+                "decision",
+                "extracted",
+                &format!("다른 곳의 배포창구 정리 {i}"),
+                ago(3),
+                &[m],
+            ),
+        )
+        .await;
     }
     let human = w.fx.human;
     let search = |channel: Option<Uuid>, kind: Option<&'static str>| {
@@ -1800,7 +2673,14 @@ async fn a_search_filter_narrows_before_the_top_n_cut() {
             with_tenant_tx(&app, ws, move |conn| {
                 Box::pin(async move {
                     momo_messaging::memory::bind_mem_reader_guc(conn, human).await?;
-                    Ok(momo_messaging::memory::search_item_rows_in_tx(conn, "배포창구", channel, kind, Some(5)).await?)
+                    momo_messaging::memory::search_item_rows_in_tx(
+                        conn,
+                        "배포창구",
+                        channel,
+                        kind,
+                        Some(5),
+                    )
+                    .await
                 })
             })
             .await
@@ -1809,7 +2689,11 @@ async fn a_search_filter_narrows_before_the_top_n_cut() {
     };
     assert_eq!(search(None, None).await.len(), 5);
     let narrowed = search(Some(other), None).await;
-    assert_eq!(narrowed.len(), 2, "both hits of the other channel, not the empty remainder of a general top-5");
+    assert_eq!(
+        narrowed.len(),
+        2,
+        "both hits of the other channel, not the empty remainder of a general top-5"
+    );
     assert!(narrowed.iter().all(|(item, _)| item.channel_id == other));
     let by_kind = search(None, Some("decision")).await;
     assert_eq!(by_kind.len(), 2);
@@ -1820,21 +2704,30 @@ async fn a_search_filter_narrows_before_the_top_n_cut() {
     redefine(
         &mut tx,
         "public.mem_search_items_core(uuid, text, integer, uuid, boolean, uuid, text)",
-        &[("AND (p_channel_id IS NULL OR i.channel_id = p_channel_id)", "AND true")],
+        &[(
+            "AND (p_channel_id IS NULL OR i.channel_id = p_channel_id)",
+            "AND true",
+        )],
     )
     .await;
-    sqlx::query("SELECT set_config('app.workspace_id', $1, true), set_config('app.member_id', $2, true)")
-        .bind(ws.to_string())
-        .bind(w.fx.human.to_string())
+    sqlx::query(
+        "SELECT set_config('app.workspace_id', $1, true), set_config('app.member_id', $2, true)",
+    )
+    .bind(ws.to_string())
+    .bind(w.fx.human.to_string())
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query("SET LOCAL ROLE momo_app")
         .execute(&mut *tx)
         .await
         .unwrap();
-    sqlx::query("SET LOCAL ROLE momo_app").execute(&mut *tx).await.unwrap();
-    let wrong: Vec<Uuid> = sqlx::query_scalar("SELECT channel_id FROM mem_search_items('배포창구', 5, $1, NULL)")
-        .bind(other)
-        .fetch_all(&mut *tx)
-        .await
-        .unwrap();
+    let wrong: Vec<Uuid> =
+        sqlx::query_scalar("SELECT channel_id FROM mem_search_items('배포창구', 5, $1, NULL)")
+            .bind(other)
+            .fetch_all(&mut *tx)
+            .await
+            .unwrap();
     tx.rollback().await.unwrap();
     eprintln!("RED in-scan channel predicate removed: a search for the other channel returns {} hit(s) of #general", wrong.iter().filter(|c| **c != other).count());
     assert!(wrong.iter().any(|c| *c != other));

@@ -340,7 +340,9 @@ impl MemoryConfig {
                 )?
                 .clamp(200, 30_000),
             ),
-            consolidate_enabled: report_protocol_enabled(env("MEMORY_CONSOLIDATE_ENABLED").as_deref()),
+            consolidate_enabled: report_protocol_enabled(
+                env("MEMORY_CONSOLIDATE_ENABLED").as_deref(),
+            ),
             consolidate_poll_interval: Duration::from_secs(
                 env_number(
                     "MEMORY_CONSOLIDATE_POLL_SECONDS",
@@ -348,7 +350,8 @@ impl MemoryConfig {
                 )?
                 .max(1),
             ),
-            consolidate_hour: env_number("MEMORY_CONSOLIDATE_HOUR", d.consolidate_hour)?.clamp(0, 23),
+            consolidate_hour: env_number("MEMORY_CONSOLIDATE_HOUR", d.consolidate_hour)?
+                .clamp(0, 23),
             consolidate_minute: env_number("MEMORY_CONSOLIDATE_MINUTE", d.consolidate_minute)?
                 .clamp(0, 59),
             consolidate_max_channels: env_number(
@@ -356,8 +359,11 @@ impl MemoryConfig {
                 d.consolidate_max_channels,
             )?
             .max(1),
-            consolidate_max_calls: env_number("MEMORY_CONSOLIDATE_MAX_CALLS", d.consolidate_max_calls)?
-                .clamp(1, 500),
+            consolidate_max_calls: env_number(
+                "MEMORY_CONSOLIDATE_MAX_CALLS",
+                d.consolidate_max_calls,
+            )?
+            .clamp(1, 500),
             consolidate_token_share_percent: env_number(
                 "MEMORY_CONSOLIDATE_TOKEN_SHARE_PERCENT",
                 d.consolidate_token_share_percent,
@@ -383,10 +389,16 @@ impl MemoryConfig {
                 d.consolidate_retry_seconds,
             )?
             .clamp(60, 86_400),
-            retired_retention_days: env_number("MEMORY_RETIRED_RETENTION_DAYS", d.retired_retention_days)?
-                .clamp(1, 3650),
-            window_retention_days: env_number("MEMORY_WINDOW_RETENTION_DAYS", d.window_retention_days)?
-                .clamp(1, 3650),
+            retired_retention_days: env_number(
+                "MEMORY_RETIRED_RETENTION_DAYS",
+                d.retired_retention_days,
+            )?
+            .clamp(1, 3650),
+            window_retention_days: env_number(
+                "MEMORY_WINDOW_RETENTION_DAYS",
+                d.window_retention_days,
+            )?
+            .clamp(1, 3650),
         })
     }
 }

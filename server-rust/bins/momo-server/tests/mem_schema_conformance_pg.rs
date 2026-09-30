@@ -1770,7 +1770,12 @@ const WORKER_ONLY: [&str; 7] = [
 ];
 /// Tables whose policies name `mem_definer` only: a table SELECT that a bootstrap re-grant leaves on
 /// `momo_app` shows it zero rows, so its presence is not asserted either way.
-const DEFINER_ONLY_TABLES: [&str; 4] = ["mem_suppress", "mem_suppress_msg", "mem_cons_state", "mem_cons_pair"];
+const DEFINER_ONLY_TABLES: [&str; 4] = [
+    "mem_suppress",
+    "mem_suppress_msg",
+    "mem_cons_state",
+    "mem_cons_pair",
+];
 const RUNTIME_ROLES: [&str; 5] = [
     "momo_app",
     "momo_relay",
@@ -2000,7 +2005,10 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
                 // settings. TRUNCATE / REFERENCES / TRIGGER nowhere (#3186 M-1).
                 // `mem_suppress` (#3208 M-5): its policies name mem_definer only, so momo_app reads
                 // zero rows whether or not a bootstrap re-grant left it a table SELECT — not asserted.
-                if role == "momo_app" && DEFINER_ONLY_TABLES.contains(&table.as_str()) && privilege == "SELECT" {
+                if role == "momo_app"
+                    && DEFINER_ONLY_TABLES.contains(&table.as_str())
+                    && privilege == "SELECT"
+                {
                     continue;
                 }
                 let allowed = role == "momo_app"
@@ -2018,7 +2026,10 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
             }
             // Column-level grants are a side door around the table-level revokes (#3186 M-3).
             for privilege in ["SELECT", "INSERT", "UPDATE", "REFERENCES"] {
-                if role == "momo_app" && DEFINER_ONLY_TABLES.contains(&table.as_str()) && privilege == "SELECT" {
+                if role == "momo_app"
+                    && DEFINER_ONLY_TABLES.contains(&table.as_str())
+                    && privilege == "SELECT"
+                {
                     continue;
                 }
                 let allowed = role == "momo_app"
@@ -2439,7 +2450,11 @@ fn lock_block_is_identical_in_both_bootstraps_and_extends_101() {
             .map_or_else(|| "length".to_string(), |i| format!("line {}", i + 1));
         panic!("bootstrap_roles.sql and bootstrap_runtime_roles.sql differ at {line} of the lock block");
     }
-    for line in migration.lines().map(str::trim).filter(|l| l.starts_with("'mem_") && l.contains('(')) {
+    for line in migration
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("'mem_") && l.contains('('))
+    {
         assert!(
             roles.contains(line.trim_end_matches(',')),
             "the bootstrap lock block dropped a function 101 locked: {line}"
@@ -2468,8 +2483,13 @@ async fn worker_only_list_matches_the_live_acls() {
     assert!(live.len() >= 30, "worker-only functions: {live:?}");
     for file in ["bootstrap_roles.sql", "bootstrap_runtime_roles.sql"] {
         let block = lock_region(&sql_dir().join(file));
-        let normalise = |sig: &str| sig.replace(", ", ",").replace("timestamptz", "timestamp with time zone");
-        let start = block.find("worker_only text[] := ARRAY[").expect("worker_only");
+        let normalise = |sig: &str| {
+            sig.replace(", ", ",")
+                .replace("timestamptz", "timestamp with time zone")
+        };
+        let start = block
+            .find("worker_only text[] := ARRAY[")
+            .expect("worker_only");
         let end = block[start..].find("];").expect("end") + start;
         let mut listed: Vec<String> = block[start..end]
             .lines()
@@ -2478,7 +2498,10 @@ async fn worker_only_list_matches_the_live_acls() {
             .map(|l| normalise(l.trim_end_matches(',').trim_matches('\'')))
             .collect();
         listed.sort();
-        assert_eq!(listed, live, "{file}: worker_only must list every worker-only function");
+        assert_eq!(
+            listed, live,
+            "{file}: worker_only must list every worker-only function"
+        );
     }
 }
 
@@ -2666,8 +2689,7 @@ async fn security_definer_functions_owned_by_mem_definer_are_allow_listed() {
     let mut expected: Vec<String> = DEFINER_ALLOW_LIST.iter().map(|s| s.to_string()).collect();
     expected.sort();
     assert_eq!(
-        owned,
-        expected,
+        owned, expected,
         "a SECURITY DEFINER function owned by mem_definer must be added to the allow-list \
          here and in the newest migration's allow-list (107_mem_consolidate.sql) on purpose"
     );
@@ -2897,12 +2919,17 @@ async fn a_definer_overload_under_an_allowed_name_is_refused() {
         passed.contains("by-name check passed") && !passed.contains("not in the allow-list"),
         "RED: the by-name check lets the overload through: {passed}"
     );
-    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM pg_proc WHERE proname = 'mem_add_item' AND pronargs = 1")
-        .fetch_one(&_su)
-        .await
-        .expect("count");
+    let left: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_proc WHERE proname = 'mem_add_item' AND pronargs = 1",
+    )
+    .fetch_one(&_su)
+    .await
+    .expect("count");
     assert_eq!(left, 0, "the sabotage rolled back");
-    eprintln!("RED by-name allow-list: the rogue overload mem_add_item(uuid) passes; by-signature: {}", err.lines().next().unwrap_or(""));
+    eprintln!(
+        "RED by-name allow-list: the rogue overload mem_add_item(uuid) passes; by-signature: {}",
+        err.lines().next().unwrap_or("")
+    );
 }
 
 /// L-6 (#3209): a definer UPDATE/DELETE of `mem_item` / item evidence needs the function to have said what it is
@@ -2931,7 +2958,13 @@ async fn definer_writes_to_items_need_the_mem_op_marker() {
         .expect("evidence");
 
     // `ddl` runs before the role switch (sabotage); each statement reports how many rows it touched.
-    async fn touch(su: &PgPool, ws: Uuid, item: Uuid, marker: Option<&str>, ddl: Option<&str>) -> (u64, u64, u64) {
+    async fn touch(
+        su: &PgPool,
+        ws: Uuid,
+        item: Uuid,
+        marker: Option<&str>,
+        ddl: Option<&str>,
+    ) -> (u64, u64, u64) {
         let mut tx = su.begin().await.expect("begin");
         if let Some(ddl) = ddl {
             sqlx::raw_sql(ddl).execute(&mut *tx).await.expect("ddl");
@@ -2941,9 +2974,16 @@ async fn definer_writes_to_items_need_the_mem_op_marker() {
             .execute(&mut *tx)
             .await
             .unwrap();
-        sqlx::query("SET LOCAL ROLE mem_definer").execute(&mut *tx).await.unwrap();
+        sqlx::query("SET LOCAL ROLE mem_definer")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
         if let Some(marker) = marker {
-            sqlx::query("SELECT mem_op($1)").bind(marker).execute(&mut *tx).await.unwrap();
+            sqlx::query("SELECT mem_op($1)")
+                .bind(marker)
+                .execute(&mut *tx)
+                .await
+                .unwrap();
         }
         let updated = sqlx::query("UPDATE mem_item SET stale = true WHERE id = $1")
             .bind(item)
@@ -2968,10 +3008,24 @@ async fn definer_writes_to_items_need_the_mem_op_marker() {
     }
     // No marker: the statements find no rows. A marker for another kind of operation does not open the others.
     assert_eq!(touch(&su, w.ws, item, None, None).await, (0, 0, 0));
-    assert_eq!(touch(&su, w.ws, item, Some("add_item"), None).await, (1, 0, 0), "an updater may not delete");
-    assert_eq!(touch(&su, w.ws, item, Some("cons_decay"), None).await, (1, 0, 0));
-    assert_eq!(touch(&su, w.ws, item, Some("forget_item"), None).await, (1, 1, 1), "forget may update, delete evidence and items");
-    assert_eq!(touch(&su, w.ws, item, Some("cons_retention"), None).await, (1, 1, 1));
+    assert_eq!(
+        touch(&su, w.ws, item, Some("add_item"), None).await,
+        (1, 0, 0),
+        "an updater may not delete"
+    );
+    assert_eq!(
+        touch(&su, w.ws, item, Some("cons_decay"), None).await,
+        (1, 0, 0)
+    );
+    assert_eq!(
+        touch(&su, w.ws, item, Some("forget_item"), None).await,
+        (1, 1, 1),
+        "forget may update, delete evidence and items"
+    );
+    assert_eq!(
+        touch(&su, w.ws, item, Some("cons_retention"), None).await,
+        (1, 1, 1)
+    );
     // RED: the pre-107 policies (definer only, no marker) let any definer statement through.
     let old = "DROP POLICY mem_item_only_definer_upd ON mem_item; \
                CREATE POLICY mem_item_only_definer_upd ON mem_item AS RESTRICTIVE FOR UPDATE \
@@ -2986,9 +3040,21 @@ async fn definer_writes_to_items_need_the_mem_op_marker() {
     // The digest's own evidence rows are not gated (mem_apply_digest rewrites them without a marker).
     let digest = seed_digest(&su, w.ws, w.s1, w.m_s1.1, &[(w.m_s1.0, w.s1)]).await;
     let mut tx = su.begin().await.unwrap();
-    sqlx::query("SELECT set_config('app.workspace_id', $1, true)").bind(w.ws.to_string()).execute(&mut *tx).await.unwrap();
-    sqlx::query("SET LOCAL ROLE mem_definer").execute(&mut *tx).await.unwrap();
-    let n = sqlx::query("DELETE FROM mem_evidence WHERE digest_id = $1").bind(digest).execute(&mut *tx).await.unwrap().rows_affected();
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(w.ws.to_string())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("SET LOCAL ROLE mem_definer")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let n = sqlx::query("DELETE FROM mem_evidence WHERE digest_id = $1")
+        .bind(digest)
+        .execute(&mut *tx)
+        .await
+        .unwrap()
+        .rows_affected();
     tx.rollback().await.unwrap();
     assert_eq!(n, 1, "digest evidence stays writable for mem_apply_digest");
 }

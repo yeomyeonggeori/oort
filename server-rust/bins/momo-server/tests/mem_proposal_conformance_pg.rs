@@ -1561,7 +1561,7 @@ async fn an_agent_cannot_propose_what_it_could_not_cite() {
         assert!(matches!(out, Ok(Some(_))), "{label}: sabotaged: {out:?}");
     }
     // The two walls for a channel the agent is not in are independent.
-    let mut tx = sabotage_tx(
+    let tx = sabotage_tx(
         &su,
         PROPOSE_FN,
         &[(

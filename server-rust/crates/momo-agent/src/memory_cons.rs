@@ -108,15 +108,13 @@ pub async fn begin(
     lease_seconds: f64,
     slot_start: DateTime<Utc>,
 ) -> Result<bool, DbError> {
-    Ok(
-        sqlx::query_scalar("SELECT mem_cons_begin($1, $2, $3, $4)")
-            .bind(channel_id)
-            .bind(lease_token)
-            .bind(lease_seconds)
-            .bind(slot_start)
-            .fetch_one(&mut *conn)
-            .await?,
-    )
+    Ok(sqlx::query_scalar("SELECT mem_cons_begin($1, $2, $3, $4)")
+        .bind(channel_id)
+        .bind(lease_token)
+        .bind(lease_seconds)
+        .bind(slot_start)
+        .fetch_one(&mut *conn)
+        .await?)
 }
 
 /// Release the lease. `done` = today's slot is complete; otherwise retry after `retry_seconds`.
@@ -127,15 +125,13 @@ pub async fn finish(
     done: bool,
     retry_seconds: i32,
 ) -> Result<bool, DbError> {
-    Ok(
-        sqlx::query_scalar("SELECT mem_cons_finish($1, $2, $3, $4)")
-            .bind(channel_id)
-            .bind(lease_token)
-            .bind(done)
-            .bind(retry_seconds)
-            .fetch_one(&mut *conn)
-            .await?,
-    )
+    Ok(sqlx::query_scalar("SELECT mem_cons_finish($1, $2, $3, $4)")
+        .bind(channel_id)
+        .bind(lease_token)
+        .bind(done)
+        .bind(retry_seconds)
+        .fetch_one(&mut *conn)
+        .await?)
 }
 
 /// Retire items whose evidence died (`source_deleted` / `source_edited`, D6-5). Returns the count.
@@ -235,15 +231,14 @@ pub async fn retention(
     window_days: i32,
     limit: i32,
 ) -> Result<(i32, i32), DbError> {
-    let row = sqlx::query(
-        "SELECT items_deleted, windows_pruned FROM mem_cons_retention($1, $2, $3, $4)",
-    )
-    .bind(channel_id)
-    .bind(retired_days)
-    .bind(window_days)
-    .bind(limit)
-    .fetch_one(&mut *conn)
-    .await?;
+    let row =
+        sqlx::query("SELECT items_deleted, windows_pruned FROM mem_cons_retention($1, $2, $3, $4)")
+            .bind(channel_id)
+            .bind(retired_days)
+            .bind(window_days)
+            .bind(limit)
+            .fetch_one(&mut *conn)
+            .await?;
     Ok((row.get("items_deleted"), row.get("windows_pruned")))
 }
 
@@ -273,13 +268,11 @@ pub async fn suppressed_messages(
     if ids.is_empty() {
         return Ok(Vec::new());
     }
-    Ok(
-        sqlx::query_scalar("SELECT mem_suppressed_messages($1, $2)")
-            .bind(channel_id)
-            .bind(ids)
-            .fetch_all(&mut *conn)
-            .await?,
-    )
+    Ok(sqlx::query_scalar("SELECT mem_suppressed_messages($1, $2)")
+        .bind(channel_id)
+        .bind(ids)
+        .fetch_all(&mut *conn)
+        .await?)
 }
 
 /// The channels one consolidation sweep looks at: `(workspace_id, channel_id)` across every tenant

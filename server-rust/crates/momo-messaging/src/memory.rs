@@ -752,7 +752,8 @@ pub async fn get_proposal_in_tx(
     // `op = 'add'` only: the consolidation job's merge / close proposals (#3172) have no agent, requester
     // or run, and their card is a later surface — until then they are not listed (accepting one still
     // works through `mem_accept_proposal`, which dispatches on `op`).
-    let sql = format!("SELECT {PROPOSAL_COLS} FROM mem_proposal p WHERE p.id = $1 AND p.op = 'add'");
+    let sql =
+        format!("SELECT {PROPOSAL_COLS} FROM mem_proposal p WHERE p.id = $1 AND p.op = 'add'");
     let row = sqlx::query(&sql)
         .bind(proposal_id)
         .fetch_optional(&mut *conn)

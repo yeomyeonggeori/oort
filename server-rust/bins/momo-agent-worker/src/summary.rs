@@ -1329,7 +1329,9 @@ impl AgentWorker {
         };
         let ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
         let suppressed: HashSet<Uuid> = mem::with_memory_tx(&self.pool, ws, move |conn| {
-            Box::pin(async move { momo_agent::memory_cons::suppressed_messages(conn, ch, &ids).await })
+            Box::pin(
+                async move { momo_agent::memory_cons::suppressed_messages(conn, ch, &ids).await },
+            )
         })
         .await?
         .into_iter()
@@ -1696,7 +1698,12 @@ impl AgentWorker {
             .await;
     }
 
-    pub(crate) async fn write_throttled_audit(&self, ws: Uuid, action: &'static str, detail: Value) {
+    pub(crate) async fn write_throttled_audit(
+        &self,
+        ws: Uuid,
+        action: &'static str,
+        detail: Value,
+    ) {
         let written = with_tenant_tx(&self.pool, ws, move |conn| {
             Box::pin(async move {
                 if mem::audit_recent(conn, ws, action, AUDIT_THROTTLE_HOURS).await? {

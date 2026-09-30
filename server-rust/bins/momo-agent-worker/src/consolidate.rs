@@ -51,7 +51,9 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::provider::ChatMessage;
-use crate::summary::{clip_chars, defang, estimate_tokens, neutralise_markers, CallError, SummaryModel};
+use crate::summary::{
+    clip_chars, defang, estimate_tokens, neutralise_markers, CallError, SummaryModel,
+};
 use crate::AgentWorker;
 
 /// Pairs asked for per database round trip.
@@ -134,7 +136,12 @@ pub struct ConsolidateStats {
 // ---------------------------------------------------------------------------
 
 /// The start of the most recent daily slot (`hour:minute` workspace-local) that has opened by `now`.
-pub fn slot_start(now: DateTime<Utc>, utc_offset_minutes: i32, hour: i64, minute: i64) -> DateTime<Utc> {
+pub fn slot_start(
+    now: DateTime<Utc>,
+    utc_offset_minutes: i32,
+    hour: i64,
+    minute: i64,
+) -> DateTime<Utc> {
     let offset = ChronoDuration::minutes(i64::from(utc_offset_minutes));
     let local = now + offset;
     let time = NaiveTime::from_hms_opt(hour.clamp(0, 23) as u32, minute.clamp(0, 59) as u32, 0)
@@ -301,7 +308,7 @@ impl AgentWorker {
             cfg.consolidate_hour,
             cfg.consolidate_minute,
         );
-        self.consolidate_all(slot, &mut stats).await;
+        self.consolidate_all(slot, None, &mut stats).await;
         stats
     }
 
@@ -311,8 +318,23 @@ impl AgentWorker {
         if !self.config.memory.enabled || !self.config.memory.consolidate_enabled {
             return stats;
         }
-        self.consolidate_all(Utc::now() + ChronoDuration::minutes(1), &mut stats)
+        self.consolidate_all(Utc::now() + ChronoDuration::minutes(1), None, &mut stats)
             .await;
+        stats
+    }
+
+    /// A test entry: every channel of one workspace, treated as due right now.
+    pub async fn consolidate_workspace_now(&self, ws: Uuid) -> ConsolidateStats {
+        let mut stats = ConsolidateStats::default();
+        if !self.config.memory.enabled || !self.config.memory.consolidate_enabled {
+            return stats;
+        }
+        self.consolidate_all(
+            Utc::now() + ChronoDuration::minutes(1),
+            Some(ws),
+            &mut stats,
+        )
+        .await;
         stats
     }
 
@@ -330,14 +352,30 @@ impl AgentWorker {
             }
             SummaryModel::Transient(_) => Judging::NoModel,
         };
-        self.consolidate_channel(ws, ch, Utc::now() + ChronoDuration::minutes(1), judge, &mut stats)
-            .await;
+        self.consolidate_channel(
+            ws,
+            ch,
+            Utc::now() + ChronoDuration::minutes(1),
+            judge,
+            &mut stats,
+        )
+        .await;
         stats
     }
 
-    async fn consolidate_all(&self, slot: DateTime<Utc>, stats: &mut ConsolidateStats) {
+    async fn consolidate_all(
+        &self,
+        slot: DateTime<Utc>,
+        only_workspace: Option<Uuid>,
+        stats: &mut ConsolidateStats,
+    ) {
         let cfg = &self.config.memory;
-        let mut channels = match cons::consolidation_channels(&self.pool, cfg.consolidate_max_channels).await {
+        let mut channels = match cons::consolidation_channels(
+            &self.pool,
+            cfg.consolidate_max_channels,
+        )
+        .await
+        {
             Ok(channels) => channels,
             Err(error) => {
                 tracing::warn!(error = %error, "memory consolidation: channel discovery failed");
@@ -347,6 +385,9 @@ impl AgentWorker {
         };
         if channels.is_empty() {
             return;
+        }
+        if let Some(only) = only_workspace {
+            channels.retain(|(ws, _)| *ws == only);
         }
         channels.sort();
         let model_ready = match self.resolve_summary_model().await {
@@ -430,7 +471,8 @@ impl AgentWorker {
         .await;
         if done {
             // Finished for today's slot: no need to ask the database again until the next one.
-            self.consolidate.settle(ch, slot, Duration::from_secs(26 * 3600));
+            self.consolidate
+                .settle(ch, slot, Duration::from_secs(26 * 3600));
         } else {
             stats.cap_reached += 1;
         }
@@ -488,7 +530,13 @@ impl AgentWorker {
         }
     }
 
-    fn consolidate_failed(&self, ch: Uuid, step: &str, error: &DbError, stats: &mut ConsolidateStats) {
+    fn consolidate_failed(
+        &self,
+        ch: Uuid,
+        step: &str,
+        error: &DbError,
+        stats: &mut ConsolidateStats,
+    ) {
         tracing::warn!(channel_id = %ch, step, error = %error, "memory consolidation: step failed");
         stats.failures += 1;
     }
@@ -496,7 +544,12 @@ impl AgentWorker {
     /// Reserve `estimate` tokens against the workspace's daily cap — the same counter the summaries use —
     /// after checking that consolidation's own share of it is not spent and that the channel is still
     /// allowed (a pause that lands mid-run stops the next call).
-    async fn reserve_for_judge(&self, ws: Uuid, ch: Uuid, estimate: i64) -> Result<Reserved, DbError> {
+    async fn reserve_for_judge(
+        &self,
+        ws: Uuid,
+        ch: Uuid,
+        estimate: i64,
+    ) -> Result<Reserved, DbError> {
         let cap_default = self.config.memory.daily_token_cap;
         let share = self.config.memory.consolidate_token_share_percent;
         mem::with_memory_tx(&self.pool, ws, move |conn| {
@@ -525,7 +578,10 @@ impl AgentWorker {
         let mut calls = 0usize;
         let mut seen: HashSet<(Uuid, Uuid)> = HashSet::new();
         let mut consecutive_failures = 0u32;
-        let (merge_sim, close_sim) = (cfg.consolidate_merge_similarity, cfg.consolidate_close_similarity);
+        let (merge_sim, close_sim) = (
+            cfg.consolidate_merge_similarity,
+            cfg.consolidate_close_similarity,
+        );
         loop {
             if calls >= cfg.consolidate_max_calls {
                 return JudgeEnd::Stopped;
@@ -534,7 +590,9 @@ impl AgentWorker {
             // list may hand them back first: ask for that many extra.
             let want = (PAIR_BATCH as usize + seen.len()).min(100) as i32;
             let pairs = match mem::with_memory_tx(&self.pool, ws, move |conn| {
-                Box::pin(async move { cons::candidate_pairs(conn, ch, merge_sim, close_sim, want).await })
+                Box::pin(async move {
+                    cons::candidate_pairs(conn, ch, merge_sim, close_sim, want).await
+                })
             })
             .await
             {
@@ -613,7 +671,9 @@ impl AgentWorker {
                 match applied {
                     Ok(ApplyOutcome::Merged) => stats.merged += 1,
                     Ok(ApplyOutcome::Closed) => stats.closed += 1,
-                    Ok(ApplyOutcome::ProposedMerge | ApplyOutcome::ProposedClose) => stats.proposed += 1,
+                    Ok(ApplyOutcome::ProposedMerge | ApplyOutcome::ProposedClose) => {
+                        stats.proposed += 1
+                    }
                     Ok(ApplyOutcome::Distinct) => stats.distinct += 1,
                     Ok(ApplyOutcome::Skipped) => stats.skipped += 1,
                     Ok(ApplyOutcome::Deferred) => stats.deferred += 1,
@@ -704,8 +764,14 @@ mod tests {
     #[test]
     fn the_verdict_is_one_word_and_supersedes_needs_a_decision() {
         assert_eq!(parse_verdict("duplicate", false), Some(Verdict::Duplicate));
-        assert_eq!(parse_verdict("  Distinct.\n", true), Some(Verdict::Distinct));
-        assert_eq!(parse_verdict("```\nsupersedes\n```", true), Some(Verdict::Supersedes));
+        assert_eq!(
+            parse_verdict("  Distinct.\n", true),
+            Some(Verdict::Distinct)
+        );
+        assert_eq!(
+            parse_verdict("```\nsupersedes\n```", true),
+            Some(Verdict::Supersedes)
+        );
         assert_eq!(
             parse_verdict("{\"verdict\": \"supersedes\"}", true),
             Some(Verdict::Supersedes)
@@ -717,7 +783,10 @@ mod tests {
         assert_eq!(parse_verdict("모르겠습니다", true), None);
         assert_eq!(parse_verdict("", true), None);
         // The same word twice is still one verdict.
-        assert_eq!(parse_verdict("distinct, distinct", true), Some(Verdict::Distinct));
+        assert_eq!(
+            parse_verdict("distinct, distinct", true),
+            Some(Verdict::Distinct)
+        );
     }
 
     #[test]
@@ -729,7 +798,10 @@ mod tests {
         // exactly one real closing tag per block
         assert_eq!(user.matches("</기억 A>").count(), 1, "{user}");
         assert_eq!(user.matches("<기억 B>").count(), 1, "{user}");
-        assert!(!user.contains('['), "square brackets are neutralised: {user}");
+        assert!(
+            !user.contains('['),
+            "square brackets are neutralised: {user}"
+        );
         assert!(messages[0].content.contains("supersedes"));
         let plain = build_judge_prompt(&pair("fact"), 0);
         assert!(!plain[0].content.contains("supersedes"));

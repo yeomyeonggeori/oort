@@ -1943,13 +1943,14 @@ async fn guard_cases(su: PgPool, worker: PgPool, app: PgPool, w: World) {
     println!("RED [edit: session_user guard]: sabotaged momo_worker edit -> {acted:?}");
     assert!(acted.is_ok());
 
-    // evidence copy: without it the new item has no evidence and the read rule hides it.
+    // evidence copy: without it the new item has no evidence and the read rule hides it. (#3172 L-6: a definer
+    // DELETE of item evidence needs the `mem.op` marker, so the sabotage declares itself as a forget.)
     let original = sabotage(
         &su,
         edit_sig,
         &[(
             "GET DIAGNOSTICS v_ins = ROW_COUNT;",
-            "v_ins := v_n; DELETE FROM public.mem_evidence WHERE item_id = v_id;",
+            "v_ins := v_n; PERFORM public.mem_op('forget_item'); DELETE FROM public.mem_evidence WHERE item_id = v_id;",
         )],
     )
     .await;

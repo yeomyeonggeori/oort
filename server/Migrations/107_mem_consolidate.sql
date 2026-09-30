@@ -513,7 +513,8 @@ BEGIN
                       WHERE cp.workspace_id = v_ws
                         AND cp.low_id = LEAST(sc.aid, sc.bid) AND cp.high_id = GREATEST(sc.aid, sc.bid))
      AND (sc.s >= p_merge_sim OR (sc.closable AND (sc.subj OR sc.s >= p_close_sim)))
-   ORDER BY sc.s DESC, sc.aid, sc.bid
+   -- 같은 subject_key 를 가진 결정 쌍이 먼저(가장 강한 신호), 그다음 유사도 순.
+   ORDER BY sc.subj DESC, sc.s DESC, sc.aid, sc.bid
    LIMIT LEAST(GREATEST(COALESCE(p_limit, 20), 1), 100);
 END
 $$;

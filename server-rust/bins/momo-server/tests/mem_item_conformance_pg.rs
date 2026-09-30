@@ -2795,6 +2795,13 @@ async fn the_definer_may_only_mark_stale_retire_and_delete_and_the_deny_policies
         async move {
             let mut tx = su.begin().await.expect("begin");
             become_role(&mut tx, "mem_definer", ws, None).await;
+            // #3172 L-6: a definer statement that changes or deletes items must have said what it is doing
+            // (`mem.op`; pinned on its own in mem_schema_conformance_pg). This test is about the *column* and
+            // *policy* limits, so it plays a function that declared itself.
+            sqlx::query("SELECT mem_op('forget_item')")
+                .execute(&mut *tx)
+                .await
+                .expect("marker");
             let r = sqlx::query(&sql)
                 .execute(&mut *tx)
                 .await
