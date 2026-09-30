@@ -1228,9 +1228,13 @@ pub struct MemoryNoticeResponse {
     pub never_sends: Vec<&'static str>,
 }
 
+/// (endpoint label, model id) of the `summary` row.
+type SummaryRow = (String, Option<String>);
+type NoticeRows = (Vec<MemSettingsRow>, Option<SummaryRow>);
+
 fn notice_response(
     settings: Option<&MemSettingsRow>,
-    summary: Option<(String, Option<String>)>,
+    summary: Option<SummaryRow>,
 ) -> MemoryNoticeResponse {
     let workspace = workspace_settings_dto(settings);
     let summary = match summary {
@@ -1284,7 +1288,7 @@ pub async fn get_notice(
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let member_id = principal.member_id;
 
-    let outcome: DbRejectable<(Vec<MemSettingsRow>, Option<(String, Option<String>)>)> =
+    let outcome: DbRejectable<NoticeRows> =
         memory_tenant_tx(&state.pool, workspace_id, member_id, move |conn| {
             Box::pin(async move {
                 if let Err(rejection) = require_live_human(conn, workspace_id, member_id).await? {
@@ -2122,10 +2126,15 @@ mod tests {
 
     #[test]
     fn the_notice_host_is_only_the_host() {
-        assert_eq!(notice_host("https://api.openai.com/v1").as_deref(), Some("api.openai.com"));
         assert_eq!(
-            notice_host("https://ops:sk-abcdefghijklmnop@LLM.Corp.Example:8443/v1/PATH?api_key=sk-zz#f")
-                .as_deref(),
+            notice_host("https://api.openai.com/v1").as_deref(),
+            Some("api.openai.com")
+        );
+        assert_eq!(
+            notice_host(
+                "https://ops:sk-abcdefghijklmnop@LLM.Corp.Example:8443/v1/PATH?api_key=sk-zz#f"
+            )
+            .as_deref(),
             Some("llm.corp.example")
         );
         assert_eq!(notice_host("http://[::1]:8080/x").as_deref(), Some("::1"));
@@ -2140,10 +2149,16 @@ mod tests {
         assert!(!none.summary.configured && !none.sending && none.enabled);
         assert_eq!(none.embeddings.location, "local");
         assert!(!none.embeddings.sent_to_provider);
-        let row = Some(("https://api.anthropic.com/v1".to_string(), Some("claude-x".to_string())));
+        let row = Some((
+            "https://api.anthropic.com/v1".to_string(),
+            Some("claude-x".to_string()),
+        ));
         let on = notice_response(None, row.clone());
         assert!(on.sending);
-        assert_eq!(on.summary.provider.as_ref().map(|p| p.name.as_str()), Some("Anthropic"));
+        assert_eq!(
+            on.summary.provider.as_ref().map(|p| p.name.as_str()),
+            Some("Anthropic")
+        );
         let mut settings = MemSettingsRow {
             scope: "workspace".into(),
             channel_id: None,
@@ -2161,6 +2176,10 @@ mod tests {
         settings.enabled = false;
         assert!(!notice_response(Some(&settings), row).sending);
         // an unparsable label configures nothing rather than naming a guess
-        assert!(!notice_response(None, Some(("garbage".to_string(), None))).summary.configured);
+        assert!(
+            !notice_response(None, Some(("garbage".to_string(), None)))
+                .summary
+                .configured
+        );
     }
 }

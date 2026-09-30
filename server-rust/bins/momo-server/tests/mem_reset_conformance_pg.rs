@@ -1313,7 +1313,7 @@ async fn a_worker_that_read_before_the_reset_cannot_write_after_it() {
             let ok = worker_thread_digest(&worker, m.ws, m.p1, root, sr, sq, &[root, post_reply]).await;
             assert!(ok.is_ok(), "root + a reply after the reset: {ok:?}");
             let bad =
-                worker_thread_digest(&worker, m.ws, m.p1, root, sr, sq + 0, &[root, pre_reply, post_reply]).await;
+                worker_thread_digest(&worker, m.ws, m.p1, root, sr, sq, &[root, pre_reply, post_reply]).await;
             assert_eq!(bad, Err("40001".to_string()));
             // (5) Writes that hang on ids the reset erased fail by themselves.
             let mut tx = worker_tx(&worker, m.ws).await;
