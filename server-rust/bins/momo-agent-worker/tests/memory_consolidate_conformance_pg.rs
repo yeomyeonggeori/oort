@@ -18,7 +18,7 @@
 //!
 //! | test | what it pins |
 //! |---|---|
-//! | `duplicate_merge_unions_evidence_and_is_reversible` | merge, evidence union, `mem_event`, revert, no re-judging |
+//! | `duplicate_merge_unions_evidence_and_is_reversible` | merge (evidence stays with each item, A-1), `mem_event`, revert, no re-judging |
 //! | `a_newer_contradicting_decision_closes_the_old_one` | `valid_to` closing, no `supersedes_id`, forget reopens |
 //! | `human_made_items_only_get_proposals` | curated/confirmed are never auto-changed; accept applies |
 //! | `decay_skips_what_a_person_made_and_re_observation_extends_it` | decay, `forget_after` extension |
@@ -100,11 +100,12 @@ async fn duplicate_merge_unions_evidence_and_is_reversible() {
     assert_eq!(lose.merged_into, Some(a));
     assert_eq!(lose.retired_reason.as_deref(), Some("merged"));
     assert!(!win.retired);
-    assert_eq!(win.source_count, 3);
+    // A-1: the loser's evidence is NOT moved onto the winner (its author could then kill the winner).
+    assert_eq!(win.source_count, 2);
     assert_eq!(
         evidence_ids(su, a).await,
-        sorted(vec![m1, m2, m3]),
-        "union of the evidence"
+        sorted(vec![m1, m2]),
+        "the winner keeps only its own evidence"
     );
     assert_eq!(
         evidence_ids(su, b).await,
@@ -114,7 +115,7 @@ async fn duplicate_merge_unions_evidence_and_is_reversible() {
     let merged = events(su, b, "merged").await;
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].1["into"], json!(a.to_string()));
-    assert_eq!(merged[0].1["added"], json!([m3.to_string()]));
+    assert_eq!(merged[0].1["added"], json!([]));
     assert_eq!(events(su, a, "merged").await.len(), 1);
 
     // Reversible: the event carries what is needed.
@@ -593,32 +594,24 @@ async fn red_a_confirmed_item_is_changed_without_the_two_walls() {
     tx.rollback().await.unwrap();
 
     // The same for closing a confirmed decision.
-    let d1 = put_item(
-        su,
-        ws,
-        ch,
-        spec(
-            "decision",
-            "confirmed",
-            "DB는 Postgres를 쓴다",
-            ago(6),
-            &[m1],
-        ),
-    )
-    .await;
-    let d2 = put_item(
-        su,
-        ws,
-        ch,
-        spec(
-            "decision",
-            "extracted",
-            "DB는 MySQL로 바꾼다",
-            ago(1),
-            &[m2],
-        ),
-    )
-    .await;
+    let mut sp1 = spec(
+        "decision",
+        "confirmed",
+        "DB는 Postgres를 쓴다",
+        ago(6),
+        &[m1],
+    );
+    sp1.subject = Some("DB 종류");
+    let d1 = put_item(su, ws, ch, sp1).await;
+    let mut sp2 = spec(
+        "decision",
+        "extracted",
+        "DB는 MySQL로 바꾼다",
+        ago(1),
+        &[m2],
+    );
+    sp2.subject = Some("DB 종류");
+    let d2 = put_item(su, ws, ch, sp2).await;
     let sql = format!("SELECT mem_cons_apply('{d1}', '{d2}', 'supersedes')");
     let route = (
         "IF older.origin IN ('curated', 'confirmed') OR v_guest THEN",
@@ -1187,7 +1180,7 @@ async fn red_retention_without_its_guards() {
         "shipped: a 10-day-old retired item and an uncovered window stay"
     );
     let age = count(vec![(
-        "AND i.retired_at < pg_catalog.now() - pg_catalog.make_interval(\n             days => p_retired_days * CASE WHEN i.origin IN ('curated', 'confirmed') THEN 4 ELSE 1 END)",
+        "AND i.retired_at < pg_catalog.now() - pg_catalog.make_interval(\n             days => p_retired_days * CASE WHEN i.origin IN ('curated', 'confirmed')\n                                            AND i.retired_reason IN ('merged', 'decayed', 'edited') THEN 4 ELSE 1 END)",
         "",
     )])
     .await;
@@ -3183,16 +3176,40 @@ async fn retired_human_made_items_outlive_the_machine_retention() {
         spec("fact", "curated", "아주 오래된 고친 사실", ago(900), &[m]),
     )
     .await;
-    for (id, days) in [(machine, 100), (human, 100), (old_human, 400)] {
-        sqlx::query("UPDATE mem_item SET retired_at = now() - make_interval(days => $2), retired_reason = 'edited' WHERE id = $1")
+    // A-5: the 4x grace is for merged / decayed / edited items only; a source-dead item uses the base retention.
+    let source_gone = put_item(
+        su,
+        ws,
+        ch,
+        spec(
+            "fact",
+            "confirmed",
+            "근거가 지워진 확정 사실",
+            ago(400),
+            &[m],
+        ),
+    )
+    .await;
+    for (id, days, reason) in [
+        (machine, 100, "edited"),
+        (human, 100, "edited"),
+        (old_human, 400, "edited"),
+        (source_gone, 100, "source_deleted"),
+    ] {
+        sqlx::query("UPDATE mem_item SET retired_at = now() - make_interval(days => $2), retired_reason = $3 WHERE id = $1")
             .bind(id)
             .bind(days)
+            .bind(reason)
             .execute(su)
             .await
             .unwrap();
     }
     let stats = w.consolidate().await;
-    assert_eq!(stats.items_purged, 2, "{stats:?}");
+    assert_eq!(stats.items_purged, 3, "{stats:?}");
+    assert!(
+        item(su, source_gone).await.is_none(),
+        "confirmed but source_deleted, 100 days: base retention"
+    );
     assert!(
         item(su, machine).await.is_none(),
         "machine-retired, 100 days: gone"
@@ -3302,4 +3319,356 @@ async fn an_unanswerable_pair_is_not_asked_again_tomorrow() {
         .unwrap();
     let third = worker.consolidate_channel_now(ws, ch).await;
     assert_eq!(third.llm_calls, 1, "{third:?}");
+}
+
+/// A-2 (#3172 re-review): a stale rollup that is too big to rebuild from messages stays hidden and the pass goes on
+/// to the next stale digest — it must not end the channel's whole summary pass.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn one_rollup_too_big_to_rebuild_does_not_stop_the_channels_pass() {
+    let w = world().await;
+    let (su, ws, ch) = (&w.su, w.fx.ws, w.fx.channel);
+    let mut cfg = cons_config();
+    cfg.memory.window_max_messages = 1; // a rollup rebuild reads at most 2 messages
+    let worker = worker_with(&w.provider, cfg).await;
+    let mut seqs = Vec::new();
+    for body in ["큰 범위 하나", "큰 범위 둘", "큰 범위 셋", "작은 범위 하나"] {
+        let (_id, seq) = post(&w.wp, &w.fx, w.fx.human, body).await;
+        seqs.push(seq);
+    }
+    // The big one comes first in the stale order (to_seq), the small one after it.
+    let big = put_digest(su, ws, ch, "day", seqs[0], seqs[2], None, true, 1).await;
+    let small = put_digest(su, ws, ch, "day", seqs[3], seqs[3], None, true, 1).await;
+    sqlx::query("INSERT INTO mem_cursor (channel_id, workspace_id, last_seq) VALUES ($1, $2, $3)")
+        .bind(ch)
+        .bind(ws)
+        .bind(seqs[3])
+        .execute(su)
+        .await
+        .unwrap();
+    *w.provider.reply_fn.lock().unwrap() = Some(echo_reply("__none__", "x"));
+    let sweep = worker.summary_sweep().await;
+    assert_eq!(
+        sweep.regenerated, 1,
+        "the small rollup is rebuilt: {sweep:?}"
+    );
+    assert!(
+        exists(su, "mem_digest", big).await,
+        "the big one is kept, not dropped"
+    );
+    let big_stale: bool = sqlx::query_scalar("SELECT stale FROM mem_digest WHERE id = $1")
+        .bind(big)
+        .fetch_one(su)
+        .await
+        .unwrap();
+    assert!(big_stale, "and stays hidden");
+    let small_stale: bool = sqlx::query_scalar("SELECT stale FROM mem_digest WHERE id = $1")
+        .bind(small)
+        .fetch_one(su)
+        .await
+        .unwrap();
+    assert!(!small_stale, "the pass went on to the next stale digest");
+}
+
+/// A-1 (#3172 re-review): a merge must not let the loser's author kill the winner by deleting their own message.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn a_merge_does_not_let_the_losers_author_kill_the_winner() {
+    let w = world().await;
+    let (su, ws, ch) = (&w.su, w.fx.ws, w.fx.channel);
+    let app = momo_app_pool().await;
+    let m1 = w.say("배포는 금요일 오후로 하죠").await;
+    let m3 = post(&w.wp, &w.fx, w.fx.human_b, "저도 금요일 오후 배포에 한 표")
+        .await
+        .0;
+    let a = put_item(
+        su,
+        ws,
+        ch,
+        spec(
+            "fact",
+            "extracted",
+            "배포는 금요일 오후에 한다",
+            ago(3),
+            &[m1],
+        ),
+    )
+    .await;
+    let b = put_item(
+        su,
+        ws,
+        ch,
+        spec(
+            "fact",
+            "extracted",
+            "배포는 금요일 오후에 진행한다",
+            ago(2),
+            &[m3],
+        ),
+    )
+    .await;
+    *w.provider.reply_fn.lock().unwrap() = Some(judge(vec![(
+        "금요일 오후에 한다",
+        "금요일 오후에 진행한다",
+        "duplicate",
+    )]));
+    let stats = w.consolidate().await;
+    assert_eq!(stats.merged, 1, "{stats:?}");
+    assert_eq!(item(su, b).await.unwrap().merged_into, Some(a));
+    assert_eq!(
+        evidence_ids(su, a).await,
+        vec![m1],
+        "nothing of the loser's moved over"
+    );
+    // The loser's author deletes their message.
+    delete_msg(&app, ws, w.fx.human_b, m3).await;
+    let stats = w.consolidate().await;
+    let win = item(su, a).await.unwrap();
+    assert!(
+        !win.retired,
+        "the winner outlives the loser's author's delete: {stats:?}"
+    );
+
+    // RED: with the union put back the same delete retires the winner.
+    let w = world().await;
+    let (su, ws, ch) = (&w.su, w.fx.ws, w.fx.channel);
+    let app = momo_app_pool().await;
+    let m1 = w.say("배포는 금요일 오후로 하죠").await;
+    let m3 = post(&w.wp, &w.fx, w.fx.human_b, "저도 금요일 오후 배포에 한 표")
+        .await
+        .0;
+    let a = put_item(
+        su,
+        ws,
+        ch,
+        spec(
+            "fact",
+            "extracted",
+            "배포는 금요일 오후에 한다",
+            ago(3),
+            &[m1],
+        ),
+    )
+    .await;
+    put_item(
+        su,
+        ws,
+        ch,
+        spec(
+            "fact",
+            "extracted",
+            "배포는 금요일 오후에 진행한다",
+            ago(2),
+            &[m3],
+        ),
+    )
+    .await;
+    *w.provider.reply_fn.lock().unwrap() = Some(judge(vec![(
+        "금요일 오후에 한다",
+        "금요일 오후에 진행한다",
+        "duplicate",
+    )]));
+    let original = sabotage_committed(
+        su,
+        "mem_cons_merge_items(uuid,uuid,uuid,uuid)",
+        &[("    v_reinforce := l.reinforce_count + 1;", "    INSERT INTO public.mem_evidence (workspace_id, item_id, message_id, channel_id, created_at) SELECT v_ws, w.id, le.message_id, le.channel_id, le.created_at FROM public.mem_evidence le WHERE le.item_id = l.id AND le.workspace_id = v_ws; v_reinforce := l.reinforce_count + 1;")],
+    )
+    .await;
+    w.consolidate().await;
+    delete_msg(&app, ws, w.fx.human_b, m3).await;
+    w.consolidate().await;
+    let killed = item(su, a).await.unwrap().retired;
+    restore(su, original).await;
+    eprintln!(
+        "RED evidence union put back: the loser's author's delete retired the winner = {killed}"
+    );
+    assert!(killed, "without the fix the attack works");
+}
+
+/// A-3 (#3172 re-review): `mem_apply_digest` refuses evidence of a forgotten fact, and the stale-rollup exception
+/// holds only when the input windows really do not exist.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn a_digest_cannot_rest_on_a_forgotten_message_or_skip_windows_that_exist() {
+    let w = world().await;
+    let (su, ws, ch) = (&w.su, w.fx.ws, w.fx.channel);
+    let (m1, s1) = post(&w.wp, &w.fx, w.fx.human, "지운 사실의 메시지").await;
+    let (m2, s2) = post(&w.wp, &w.fx, w.fx.human, "평범한 메시지").await;
+    sqlx::query(
+        "INSERT INTO mem_suppress_msg (workspace_id, channel_id, message_id) VALUES ($1, $2, $3)",
+    )
+    .bind(ws)
+    .bind(ch)
+    .bind(m1)
+    .execute(su)
+    .await
+    .unwrap();
+    let apply = |level: &'static str, ids: Vec<Uuid>, from: i64, to: i64| {
+        let w = &w;
+        async move {
+            let n = ids.len();
+            let stamps: Vec<Option<DateTime<Utc>>> = vec![None; n];
+            w.mem_call(move |conn| {
+                Box::pin(async move {
+                    sqlx::query_scalar::<_, Uuid>(
+                        "SELECT mem_apply_digest($1, NULL, $2, $3, $4, '본문', '{}', 'm', 'test', 'v', $5, $6, now())",
+                    )
+                    .bind(ch)
+                    .bind(level)
+                    .bind(from)
+                    .bind(to)
+                    .bind(ids)
+                    .bind(stamps)
+                    .fetch_one(&mut *conn)
+                    .await
+                    .map_err(momo_db::DbError::from)
+                })
+            })
+            .await
+        }
+    };
+    assert_eq!(
+        sqlstate_of(apply("window", vec![m1, m2], s1, s2).await).await,
+        "23514",
+        "a forgotten fact's message is no digest evidence"
+    );
+    assert_eq!(
+        sqlstate_of(apply("window", vec![m2], s2, s2).await).await,
+        "ok"
+    );
+
+    // A stale day rollup whose windows still exist must be rolled up from them, not rebuilt from messages.
+    let day = put_digest(su, ws, ch, "day", s1, s2 + 10, None, true, 1).await;
+    let _ = day;
+    assert_eq!(
+        sqlstate_of(apply("day", vec![m2], s1, s2 + 10).await).await,
+        "23514",
+        "the input windows exist: the message shortcut is closed"
+    );
+    // RED: with the existence check removed the shortcut opens.
+    let original = sabotage_committed(
+        su,
+        "mem_apply_digest(uuid,uuid,text,bigint,bigint,text,uuid[],text,text,text,uuid[],timestamp with time zone[],timestamp with time zone)",
+        &[("OR (pg_catalog.cardinality(v_src) = 0 AND EXISTS (", "OR (false AND EXISTS (")],
+    )
+    .await;
+    let opened = sqlstate_of(apply("day", vec![m2], s1, s2 + 10).await).await;
+    restore(su, original).await;
+    eprintln!("RED window-existence check removed: apply of a windowless rollup = {opened}");
+    assert_eq!(
+        opened, "ok",
+        "without the check the windowless rebuild goes through"
+    );
+}
+
+/// A-4 (#3172 re-review): `mem_cons_apply` re-checks the closing candidate conditions, whatever the caller passes.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn a_supersedes_verdict_needs_a_shared_subject_or_real_similarity() {
+    let w = world().await;
+    let (su, ws, ch) = (&w.su, w.fx.ws, w.fx.channel);
+    let m1 = w.say("점심은 김밥이 좋아요").await;
+    let m2 = w.say("배포 주기를 격주로 바꾸자").await;
+    let old = put_item(
+        su,
+        ws,
+        ch,
+        spec(
+            "decision",
+            "extracted",
+            "점심은 김밥으로 정했다",
+            ago(5),
+            &[m1],
+        ),
+    )
+    .await;
+    let new = put_item(
+        su,
+        ws,
+        ch,
+        spec(
+            "decision",
+            "extracted",
+            "배포 주기는 격주로 바꾼다",
+            ago(1),
+            &[m2],
+        ),
+    )
+    .await;
+    let out = w
+        .mem_call(move |conn| {
+            Box::pin(
+                async move { cons::apply_verdict(conn, old, new, cons::Verdict::Supersedes).await },
+            )
+        })
+        .await
+        .expect("apply");
+    assert_eq!(
+        out,
+        cons::ApplyOutcome::Distinct,
+        "unrelated decisions with no shared subject are not closed"
+    );
+    assert!(item(su, old).await.unwrap().valid_to.is_none());
+    // RED: without the re-check the same call closes the older decision.
+    sqlx::query("DELETE FROM mem_cons_pair WHERE workspace_id = $1")
+        .bind(ws)
+        .execute(su)
+        .await
+        .unwrap();
+    let original = sabotage_committed(
+        su,
+        "mem_cons_apply(uuid,uuid,text)",
+        &[("OR public.similarity(x.body, y.body) >= 0.6", "OR true")],
+    )
+    .await;
+    let out = w
+        .mem_call(move |conn| {
+            Box::pin(
+                async move { cons::apply_verdict(conn, old, new, cons::Verdict::Supersedes).await },
+            )
+        })
+        .await
+        .expect("apply");
+    restore(su, original).await;
+    eprintln!("RED candidate re-check removed: unrelated decision closed = {out:?}");
+    assert_eq!(out, cons::ApplyOutcome::Closed);
+}
+
+/// A-13 (#3172 re-review): a lease that is no longer ours stops the run; a verdict paid for is not applied.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to an isolated pgvector/pg18 DB"]
+async fn a_lost_lease_stops_the_run_and_applies_nothing() {
+    let w = world().await;
+    let (su, ws, ch) = (&w.su, w.fx.ws, w.fx.channel);
+    pair_of_duplicates(
+        &w,
+        "임대상실",
+        (
+            "임대 상실 사실 하나 입니다",
+            "임대 상실 사실 하나 입니다 확정",
+        ),
+    )
+    .await;
+    let hook_su = su.clone();
+    *w.provider.hook.lock().unwrap() = Some(Arc::new(move |_n| {
+        let su = hook_su.clone();
+        Box::pin(async move {
+            // Another worker takes the channel while the model call is in flight.
+            sqlx::query("UPDATE mem_cons_state SET lease_token = gen_random_uuid() WHERE leased_until IS NOT NULL")
+                .execute(&su)
+                .await
+                .unwrap();
+        })
+    }));
+    *w.provider.reply_fn.lock().unwrap() = Some(judge(vec![("", "", "duplicate")]));
+    let mut config = cons_config();
+    config.memory.consolidate_merge_similarity = 0.3;
+    let worker = worker_with(&w.provider, config).await;
+    let stats = worker.consolidate_channel_now(ws, ch).await;
+    assert_eq!(stats.llm_calls, 1, "{stats:?}");
+    assert_eq!(
+        (stats.pairs_judged, stats.merged),
+        (0, 0),
+        "nothing is applied after the lease is lost: {stats:?}"
+    );
 }

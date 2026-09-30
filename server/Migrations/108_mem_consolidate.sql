@@ -730,26 +730,14 @@ BEGIN
   END IF;
 
   IF w.origin NOT IN ('curated', 'confirmed') THEN
-    -- 근거 합치기: 이긴 쪽에 없는 진 쪽 근거 메시지를 (최대 16개까지) 이긴 쪽 근거로 더한다.
-    v_room := GREATEST(16 - (SELECT pg_catalog.count(*)::integer FROM public.mem_evidence we
-                              WHERE we.item_id = w.id AND we.workspace_id = v_ws), 0);
-    SELECT COALESCE(pg_catalog.array_agg(x.message_id ORDER BY x.message_id), '{}'::uuid[]) INTO v_added
-      FROM (SELECT le.message_id FROM public.mem_evidence le
-             WHERE le.item_id = l.id AND le.workspace_id = v_ws
-               AND NOT EXISTS (SELECT 1 FROM public.mem_evidence we
-                                WHERE we.item_id = w.id AND we.message_id = le.message_id)
-             ORDER BY le.message_id
-             LIMIT v_room) x;
-    INSERT INTO public.mem_evidence (workspace_id, item_id, message_id, channel_id, created_at)
-    SELECT v_ws, w.id, le.message_id, le.channel_id, le.created_at
-      FROM public.mem_evidence le
-     WHERE le.item_id = l.id AND le.workspace_id = v_ws AND le.message_id = ANY (v_added);
+    -- A-1: 진 쪽의 근거는 이긴 쪽으로 옮기지 않는다. 옮기면 진 쪽 작성자가 자기 메시지를 지우는 것만으로
+    -- mem_item_live 가 이긴 쪽을 죽이고(mem_cons_release 도 이긴 쪽은 못 살린다) 남의 항목이 사라진다.
+    -- 진 쪽은 병합된 채 근거를 그대로 들고 있고(되돌리면 그대로 살아난다), 이긴 쪽은 재관찰 횟수와 기한만 잇는다.
     v_reinforce := l.reinforce_count + 1;
     v_forget := CASE WHEN w.forget_after IS NULL OR l.forget_after IS NULL THEN NULL
                      ELSE GREATEST(w.forget_after, l.forget_after) END;
     UPDATE public.mem_item
-       SET source_count = source_count + pg_catalog.cardinality(v_added),
-           reinforce_count = reinforce_count + v_reinforce,
+       SET reinforce_count = reinforce_count + v_reinforce,
            last_seen_at = GREATEST(last_seen_at, l.last_seen_at),
            forget_after = v_forget
      WHERE id = w.id;
@@ -1043,6 +1031,12 @@ BEGIN
   IF x.kind <> 'decision' OR older.valid_to IS NOT NULL OR NOT (older.valid_from < newer.valid_from) THEN
     RETURN 'skipped';
   END IF;
+  -- A-4: 후보 조건(M-1)을 적용 시점에 다시 본다 — 워커가 내민 쌍이라도 같은 subject_key 이거나 유사도가 0.6 이상이어야 닫는다.
+  IF NOT ((x.subject_key IS NOT NULL AND x.subject_key = y.subject_key)
+          OR public.similarity(x.body, y.body) >= 0.6) THEN
+    PERFORM public.mem_cons_note_pair(x.id, y.id, 'distinct');
+    RETURN 'distinct';
+  END IF;
   IF older.origin IN ('curated', 'confirmed') OR v_guest THEN
     v_prop := public.mem_cons_propose('close', older.id, newer.id);
     IF v_prop IS NULL THEN
@@ -1160,8 +1154,10 @@ BEGIN
       FROM public.mem_item i
      WHERE i.workspace_id = v_ws AND i.channel_id = p_channel_id AND i.retired_at IS NOT NULL
        -- M-4: 사람이 확정·고친 항목(curated/confirmed)은 4배 오래 둔다(사람의 결정이 기계 기한으로 사라지지 않게).
+       -- A-5: 4배는 병합·감쇠·편집으로 내려간 것만. 근거가 죽은 것(source_*)은 사람이 만든 것이어도 기본 기한이다.
        AND i.retired_at < pg_catalog.now() - pg_catalog.make_interval(
-             days => p_retired_days * CASE WHEN i.origin IN ('curated', 'confirmed') THEN 4 ELSE 1 END)
+             days => p_retired_days * CASE WHEN i.origin IN ('curated', 'confirmed')
+                                            AND i.retired_reason IN ('merged', 'decayed', 'edited') THEN 4 ELSE 1 END)
      ORDER BY i.retired_at, i.id
      LIMIT v_lim
        FOR UPDATE OF i SKIP LOCKED
@@ -1484,6 +1480,13 @@ BEGIN
   IF (SELECT pg_catalog.count(DISTINCT e) FROM pg_catalog.unnest(p_evidence_message_ids) AS e) <> v_n THEN
     RAISE EXCEPTION 'mem_apply_digest: duplicate or NULL evidence message' USING ERRCODE = '23514';
   END IF;
+  -- A-3: 잊은 사실의 메시지(mem_suppress_msg)는 어떤 요약의 근거도 될 수 없다 — 워커가 빼는 것에 기대지 않고 DB 가 거부한다.
+  IF EXISTS (SELECT 1 FROM public.mem_suppress_msg sm
+              WHERE sm.workspace_id = v_ws AND sm.channel_id = p_channel_id
+                AND sm.message_id = ANY (p_evidence_message_ids)) THEN
+    RAISE EXCEPTION 'mem_apply_digest: a message of a forgotten fact cannot be digest evidence'
+      USING ERRCODE = '23514';
+  END IF;
   IF p_read_at IS NULL OR p_read_at > pg_catalog.now()
      OR p_evidence_edited_at IS NULL
      OR pg_catalog.cardinality(p_evidence_edited_at) <> v_n
@@ -1523,7 +1526,14 @@ BEGIN
     IF pg_catalog.cardinality(v_src) = 0 AND NOT EXISTS (
          SELECT 1 FROM public.mem_digest d
           WHERE d.workspace_id = v_ws AND d.channel_id = p_channel_id AND d.level = p_level
-            AND d.to_seq = p_to_seq AND d.thread_root_id IS NOT DISTINCT FROM p_thread_root_id AND d.stale) THEN
+            AND d.to_seq = p_to_seq AND d.thread_root_id IS NOT DISTINCT FROM p_thread_root_id AND d.stale)
+       -- A-3: 「입력 창이 정말 없을 때」만: 범위 안에 한 단계 아래 요약이 하나라도 있으면 그것으로 굴려야 한다.
+       OR (pg_catalog.cardinality(v_src) = 0 AND EXISTS (
+         SELECT 1 FROM public.mem_digest s
+          WHERE s.workspace_id = v_ws AND s.channel_id = p_channel_id
+            AND s.thread_root_id IS NOT DISTINCT FROM p_thread_root_id
+            AND s.level = CASE p_level WHEN 'day' THEN 'window' ELSE 'day' END
+            AND s.from_seq >= p_from_seq AND s.to_seq <= p_to_seq)) THEN
       RAISE EXCEPTION 'mem_apply_digest: a rollup needs source digests' USING ERRCODE = '23514';
     END IF;
     IF pg_catalog.cardinality(v_src) > 0 AND (SELECT pg_catalog.count(*) FROM public.mem_digest s

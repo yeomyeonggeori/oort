@@ -59,7 +59,7 @@ ADR-0196(팀 기억 v2) M1의 요약 루프. `momo-agent-worker` 프로세스 �
 - **토큰 없는 손질**(모델 미설정이어도 돈다): 근거가 죽은 항목 내리기(`source_deleted`/`source_edited`) · 잊은 항목의 근거를 인용한 요약 stale 표시 ·
   만료/근거 삭제/잊은 해시의 대기 제안 삭제 · 감쇠(`forget_after` 경과, extracted/synthesized만) · 보존 삭제(retired 90일, 롤업이 덮은 창 요약 90일).
   일시정지·제외된 채널은 데이터를 유지한다(감쇠·보존 삭제 없음).
-- **모델 판정**: 같은 채널·종류 후보 쌍마다 `duplicate | supersedes | distinct` 한 단어. duplicate → 병합(근거 합침, 진 쪽 `merged`), supersedes(결정) → 옛 결정의 `valid_to` 닫기.
+- **모델 판정**: 같은 채널·종류 후보 쌍마다 `duplicate | supersedes | distinct` 한 단어. duplicate → 병합(근거는 옮기지 않고 재관찰 횟수·기한만 잇는다, 진 쪽 `merged`), supersedes(결정) → 옛 결정의 `valid_to` 닫기.
   사람이 확정한 항목이 지거나 옛 쪽이면 자동 변경 대신 `mem_proposal(op='merge'|'close')`. 판정한 쌍은 `mem_cons_pair`에 캐시된다(다시 묻지 않음).
 - **리스**: 정리는 요약과 따로 채널 리스(`MEMORY_CONSOLIDATE_LEASE_SECONDS` 900)를 쥐고 모델 호출마다 갱신한다. **원인이 사라지면 되돌림**: 닫은 항목·합친 이긴 쪽이 근거 소멸·감쇠·삭제로 내려가면 닫힌 결정을 다시 열고 진 쪽을 되살린다(`reverted` 이벤트). **사람의 되돌리기**: `POST …/memory/items/{id}/events/{event}/revert`. 롤업의 창 요약이 정리돼 없어도 stale 롤업은 원문에서 다시 만든다. 사람이 확정한 항목의 보존 삭제는 4배 기한.
 - **예산**: 요약과 **같은** 워크스페이스 일일 상한. 정리는 상한의 `MEMORY_CONSOLIDATE_TOKEN_SHARE_PERCENT`(80%)까지만 쓰고, 채널당 모델 호출은 `MEMORY_CONSOLIDATE_MAX_CALLS`(30)까지.
