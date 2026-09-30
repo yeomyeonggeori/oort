@@ -63,7 +63,40 @@ const EVENT_LABEL: Readonly<Record<string, string>> = {
 
 export const MEMORY_EVENT_FALLBACK = "기록이 남았어요";
 
-export function memoryEventLabel(action: string): string {
+function detailText(detail: Record<string, unknown> | undefined, key: string): string | undefined {
+  const value = detail?.[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * 원장 사건의 이름. 같은 `action`도 `detail`에 따라 뜻이 다르다(`superseded`는 고쳐 써서 바뀐 것과
+ * 모순으로 기간이 닫힌 것, `retired`는 감쇠와 근거 소실). 모르는 조합은 일반 문장으로 접는다.
+ */
+export function memoryEventLabel(action: string, detail?: Record<string, unknown>): string {
+  if (action === "merged") {
+    return detailText(detail, "absorbed") !== undefined
+      ? "비슷한 기억을 합쳐 받았어요"
+      : (EVENT_LABEL.merged ?? MEMORY_EVENT_FALLBACK);
+  }
+  if (action === "superseded") {
+    return detailText(detail, "reason") === "contradiction"
+      ? "새 결정이 나와서 유효 기간이 닫혔어요"
+      : (EVENT_LABEL.superseded ?? MEMORY_EVENT_FALLBACK);
+  }
+  if (action === "retired") {
+    const reason = detailText(detail, "reason");
+    if (reason === "decayed") return "오래 쓰지 않아서 정리됐어요";
+    if (reason === "source_deleted") return "근거 메시지가 지워져서 내렸어요";
+    if (reason === "source_edited") return "근거 메시지가 고쳐져서 내렸어요";
+    return EVENT_LABEL.retired ?? MEMORY_EVENT_FALLBACK;
+  }
+  if (action === "reverted") {
+    const what = detailText(detail, "what");
+    if (what === "merged") return "합치기를 되돌렸어요";
+    if (what === "superseded") return "유효 기간 닫기를 되돌렸어요";
+    if (what === "decayed") return "정리를 되돌려 다시 살렸어요";
+    return "정리를 되돌렸어요";
+  }
   return EVENT_LABEL[action] ?? MEMORY_EVENT_FALLBACK;
 }
 
