@@ -584,6 +584,18 @@ describe("memory notice and reset (#3212)", () => {
     expect(notice.neverSends).toContain("human_direct_messages");
   });
 
+  it("accepts a provider without a host (a guest sees 사용자 지정 only)", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(200, noticeWire({ summary: { configured: true, provider: { name: "사용자 지정" } } }))
+      )
+    );
+    const notice = await getMemoryNotice(WS);
+    expect(notice.summary.provider).toEqual({ name: "사용자 지정" });
+  });
+
   it("shows an unconfigured summary as such and drops codes it does not know", async () => {
     installHost();
     vi.stubGlobal(
@@ -605,7 +617,7 @@ describe("memory notice and reset (#3212)", () => {
     for (const body of [
       noticeWire({ embeddings: { model: "m", location: "local", sentToProvider: true } }),
       noticeWire({ embeddings: { model: "m", location: "cloud", sentToProvider: false } }),
-      noticeWire({ summary: { configured: true, provider: { name: "OpenAI" } } }),
+      noticeWire({ summary: { configured: true, provider: { host: "api.openai.com" } } }),
       noticeWire({ sends: "channel_message_text" }),
       {},
     ]) {

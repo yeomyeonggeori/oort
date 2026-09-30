@@ -10,6 +10,10 @@
 //! | `app_member_id_is_not_left_on_the_pooled_connection` | LOCAL GUC 가 커넥션에 남지 않는다 |
 //! | `the_notice_names_the_provider_and_model_and_no_secret` | 요약 제공자·모델·로컬 임베딩·데이터 범주, 어떤 멤버에게나, 비밀 없음(키 모양 검사 + 응답 키 화이트리스트) |
 //! | `the_notice_reads_one_row_through_two_independent_walls` | provider_default_ai 의 summary 한 행만(함수 WHERE·정책이 서로 독립인 벽), session_user 가드 |
+//! | `pre_floor_evidence_never_becomes_an_item_or_a_proposal` | M-1/L-3: 뿌리 예외 없음, add_item·propose_item 울타리(RED), propose 락 경합(RED) |
+//! | `a_suspended_or_deleted_admin_cannot_reset` | 정지·삭제된 관리자(HTTP·DB, RED) |
+//! | `a_reset_never_deadlocks_with_a_message_edit_holding_the_channel_lock` | 편집(메시지 행+채널 락)·요약·초기화 동시 실행에 교착 없음 |
+//! | `the_epoch_never_goes_back_and_a_busy_reset_answers_503` | L-5 세대 삭제·감소 금지(RED), 5회 상한 raise, API 503 |
 //! | `the_embedding_label_matches_the_embed_crate` | 고지의 임베딩 모델명이 momo-embed 의 MODEL_ID 와 맞는다 |
 //!
 //! `#[ignore]` — needs a real Postgres (pgvector/pgvector:pg18):
@@ -1071,6 +1075,19 @@ async fn only_an_owner_or_admin_may_reset_and_a_repeat_is_refused() {
 }
 
 /// The reset HTTP call and the moment it finishes, for the race tests.
+async fn seed_run(su: &PgPool, ws: Uuid, channel: Uuid, agent: Uuid, trigger: Uuid) -> Uuid {
+    let id = Uuid::new_v4();
+    exec(
+        su,
+        &format!(
+            "INSERT INTO agent_run (id, workspace_id, agent_member_id, channel_id, trigger_message_id, status) \
+             VALUES ('{id}', '{ws}', '{agent}', '{channel}', '{trigger}', 'running')"
+        ),
+    )
+    .await;
+    id
+}
+
 fn spawn_reset(base: String, ws: Uuid, token: String) -> tokio::task::JoinHandle<(u16, Value)> {
     tokio::spawn(async move {
         let http = reqwest::Client::new();
@@ -1102,6 +1119,13 @@ async fn race_with_open_write(
 ) -> (bool, i64) {
     let m = seed_min(su).await;
     let (msg, seq) = seed_message(su, m.ws, m.p1, m.owner.id).await;
+    let run = if write == "proposal" {
+        join(su, m.ws, m.p1, m.agent, "member").await;
+        let (trigger, _) = seed_message(su, m.ws, m.p1, m.owner.id).await;
+        Some(seed_run(su, m.ws, m.p1, m.agent, trigger).await)
+    } else {
+        None
+    };
     let digest = if write == "item" {
         Some(
             worker_digest(worker, m.ws, m.p1, seq, seq, &[msg])
@@ -1116,6 +1140,16 @@ async fn race_with_open_write(
 
     let mut tx = worker_tx(worker, m.ws).await;
     match (write, digest) {
+        ("proposal", _) => {
+            let _: Option<Uuid> = sqlx::query_scalar(
+                "SELECT mem_propose_item($1, 'fact', '경합 중인 제안 dragonberry', NULL, $2)",
+            )
+            .bind(run.expect("run"))
+            .bind(vec![msg])
+            .fetch_one(&mut *tx)
+            .await
+            .expect("propose (uncommitted)");
+        }
         ("item", Some(digest)) => {
             let _: Option<Uuid> = sqlx::query_scalar(
                 "SELECT mem_add_item($1, 'fact', '경합 중인 항목 dragonberry', NULL, $2, 0.8::real, false, 'v', 'm')",
@@ -1148,6 +1182,8 @@ async fn race_with_open_write(
     assert_eq!(status, 200, "{body}");
     let left: i64 = if write == "item" {
         sqlx::query_scalar("SELECT count(*) FROM mem_item WHERE workspace_id = $1")
+    } else if write == "proposal" {
+        sqlx::query_scalar("SELECT count(*) FROM mem_proposal WHERE workspace_id = $1")
     } else {
         sqlx::query_scalar("SELECT count(*) FROM mem_digest WHERE workspace_id = $1 AND created_at > now() - interval '1 hour'")
     }
@@ -1179,6 +1215,11 @@ async fn a_summary_in_flight_cannot_survive_a_reset() {
                     "mem_add_item",
                     "public.mem_add_item(uuid, text, text, text, uuid[], real, boolean, text, text)",
                     "item",
+                ),
+                (
+                    "mem_propose_item",
+                    "public.mem_propose_item(uuid, text, text, text, uuid[])",
+                    "proposal",
                 ),
             ] {
                 let shipped = race_with_open_write(&su, &worker, &base, write).await;
@@ -1298,23 +1339,28 @@ async fn a_worker_that_read_before_the_reset_cannot_write_after_it() {
             .unwrap();
             assert_eq!(floor, head, "the fence is the channel head at the reset");
 
-            // (1) A digest over messages read before the reset is refused (40001 = read again).
+            // (1) A digest over messages read before the reset is refused with its own SQLSTATE (55R01: re-reading cannot help).
             let stale = worker_digest(&worker, m.ws, m.p1, s1, s2, &[m1, m2]).await;
-            assert_eq!(stale, Err("40001".to_string()));
+            assert_eq!(stale, Err("55R01".to_string()));
             // (2) A digest that straddles the reset is refused too.
             let (m3, s3) = seed_message(&su, m.ws, m.p1, m.owner.id).await;
             let straddle = worker_digest(&worker, m.ws, m.p1, s2, s3, &[m2, m3]).await;
-            assert_eq!(straddle, Err("40001".to_string()));
+            assert_eq!(straddle, Err("55R01".to_string()));
             // (3) New messages after the reset are summarised normally.
             let fresh = worker_digest(&worker, m.ws, m.p1, s3, s3, &[m3]).await;
             assert!(fresh.is_ok(), "post-reset messages are memory again: {fresh:?}");
-            // (4) A thread digest may cite its root, never a reply from before the reset.
+            // (4) M-1: no thread-root exemption. A thread digest rests on replies after the reset; the erased root
+            // (or an erased reply) is refused, and a digest of the root alone is refused too.
             let (post_reply, sq) = seed_reply(&su, m.ws, m.p1, m.bob.id, root).await;
-            let ok = worker_thread_digest(&worker, m.ws, m.p1, root, sr, sq, &[root, post_reply]).await;
-            assert!(ok.is_ok(), "root + a reply after the reset: {ok:?}");
+            let ok = worker_thread_digest(&worker, m.ws, m.p1, root, sq, sq, &[post_reply]).await;
+            assert!(ok.is_ok(), "a reply after the reset: {ok:?}");
+            let with_root = worker_thread_digest(&worker, m.ws, m.p1, root, sr, sq + 1, &[root, post_reply]).await;
+            assert_eq!(with_root, Err("55R01".to_string()), "the erased root is not evidence");
+            let root_only = worker_thread_digest(&worker, m.ws, m.p1, root, sr, sr, &[root]).await;
+            assert_eq!(root_only, Err("55R01".to_string()), "a root-only digest is refused");
             let bad =
-                worker_thread_digest(&worker, m.ws, m.p1, root, sr, sq, &[root, pre_reply, post_reply]).await;
-            assert_eq!(bad, Err("40001".to_string()));
+                worker_thread_digest(&worker, m.ws, m.p1, root, sp, sq + 1, &[pre_reply, post_reply]).await;
+            assert_eq!(bad, Err("55R01".to_string()));
             // (5) Writes that hang on ids the reset erased fail by themselves.
             let mut tx = worker_tx(&worker, m.ws).await;
             let add = sqlx::query_scalar::<_, Option<Uuid>>(
@@ -1366,7 +1412,7 @@ async fn a_worker_that_read_before_the_reset_cannot_write_after_it() {
             .await;
             let resurrected = worker_digest(&worker, m.ws, m.p1, s1, s2, &[m1, m2]).await;
             restore(&su, &original).await;
-            println!("RED [reset fence]: shipped -> 40001; fence removed -> {resurrected:?} (the pre-reset summary is back)");
+            println!("RED [reset fence]: shipped -> 55R01; fence removed -> {resurrected:?} (the pre-reset summary is back)");
             assert!(resurrected.is_ok(), "{resurrected:?}");
             let back: i64 = sqlx::query_scalar("SELECT count(*) FROM mem_digest WHERE id = $1")
                 .bind(resurrected.unwrap())
@@ -1406,8 +1452,28 @@ async fn each_guard_of_the_reset_is_load_bearing() {
     .await;
 }
 
+/// The EXECUTE grant (momo_app only) is the first wall; the in-function `session_user` guard is the second. To
+/// prove the second stands on its own, open the first for the duration of the test and put it back afterwards.
+async fn open_execute_wall(su: &PgPool, signature: &str) {
+    exec(
+        su,
+        &format!("GRANT EXECUTE ON FUNCTION {signature} TO PUBLIC"),
+    )
+    .await;
+    register_restore(format!(
+        "REVOKE ALL ON FUNCTION {signature} FROM PUBLIC; GRANT EXECUTE ON FUNCTION {signature} TO momo_app"
+    ));
+}
+
 async fn guard_cases(su: PgPool, worker: PgPool, app: PgPool, a: Full) {
     let ws = a.m.ws;
+    // The worker login has no EXECUTE at all (privilege wall) ...
+    assert_eq!(
+        as_of(&worker, ws, a.m.owner.id, &reset_sql(0)).await,
+        Err("42501".to_string()),
+        "momo_worker cannot even call the function"
+    );
+    open_execute_wall(&su, RESET_SIG).await;
     // An agent that is (wrongly) an admin: only the human check can stop it.
     let rogue_agent = seed_agent(&su, ws, a.m.owner.id).await;
     sqlx::query(
@@ -1824,6 +1890,15 @@ async fn the_notice_names_the_provider_and_model_and_no_secret() {
         assert!(!text.contains(forbidden), "{forbidden} leaked: {text}");
     }
     println!("notice (dirty label) -> {text}");
+    // L-1: a guest never sees a custom gateway's host — only 「사용자 지정」.
+    let (status, as_guest) = get(&http, &notice_url(&base, m.ws), &gina).await;
+    assert_eq!(status, 200);
+    assert_eq!(as_guest["summary"]["provider"]["name"], "사용자 지정");
+    assert!(
+        as_guest["summary"]["provider"].get("host").is_none(),
+        "{as_guest}"
+    );
+    assert!(!as_guest.to_string().contains("llm.corp.example"));
     // Generic key-shape scan over every string of a clean response.
     exec(
         &su,
@@ -1889,6 +1964,7 @@ async fn the_notice_reads_one_row_through_two_independent_walls() {
     )
     .await;
     let m = seed_min(&su).await;
+    open_execute_wall(&su, "public.mem_summary_provider()").await;
     let sql = "SELECT string_agg(endpoint_label || '|' || COALESCE(model_id, '-'), ',' ORDER BY endpoint_label) FROM mem_summary_provider()";
     let sig = "public.mem_summary_provider()";
     guarded(&su.clone(), {
@@ -1989,4 +2065,329 @@ fn the_embedding_label_matches_the_embed_crate() {
         id_line.contains("multilingual-e5-small"),
         "the notice says multilingual-e5-small; momo-embed says: {id_line}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// security review follow-ups (#3229): M-1, L-3, L-5, L-7, suspended/deleted, lock order
+// ---------------------------------------------------------------------------
+
+async fn worker_propose(
+    worker: &PgPool,
+    ws: Uuid,
+    run: Uuid,
+    body: &str,
+    evidence: &[Uuid],
+) -> Result<Option<Uuid>, String> {
+    let mut tx = worker_tx(worker, ws).await;
+    let out =
+        sqlx::query_scalar::<_, Option<Uuid>>("SELECT mem_propose_item($1, 'fact', $2, NULL, $3)")
+            .bind(run)
+            .bind(body)
+            .bind(evidence)
+            .fetch_one(&mut *tx)
+            .await;
+    match out {
+        Ok(id) => {
+            tx.commit().await.ok();
+            Ok(id)
+        }
+        Err(sqlx::Error::Database(db)) => Err(db.code().map(|c| c.to_string()).unwrap_or_default()),
+        Err(other) => Err(format!("non-db: {other}")),
+    }
+}
+
+async fn worker_add_item(
+    worker: &PgPool,
+    ws: Uuid,
+    digest: Uuid,
+    body: &str,
+    evidence: &[Uuid],
+) -> Result<Option<Uuid>, String> {
+    let mut tx = worker_tx(worker, ws).await;
+    let out = sqlx::query_scalar::<_, Option<Uuid>>(
+        "SELECT mem_add_item($1, 'fact', $2, NULL, $3, 0.8::real, false, 'v', 'm')",
+    )
+    .bind(digest)
+    .bind(body)
+    .bind(evidence)
+    .fetch_one(&mut *tx)
+    .await;
+    match out {
+        Ok(id) => {
+            tx.commit().await.ok();
+            Ok(id)
+        }
+        Err(sqlx::Error::Database(db)) => Err(db.code().map(|c| c.to_string()).unwrap_or_default()),
+        Err(other) => Err(format!("non-db: {other}")),
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn pre_floor_evidence_never_becomes_an_item_or_a_proposal() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let worker = worker_pool().await;
+    let base = start_server(momo_app_pool(4).await).await;
+    let http = reqwest::Client::new();
+    guarded(&su.clone(), {
+        let (su, worker, base, http) = (su.clone(), worker.clone(), base.clone(), http.clone());
+        async move {
+            let m = seed_min(&su).await;
+            join(&su, m.ws, m.p1, m.agent, "member").await;
+            let owner = login(&http, &base, m.ws, &m.owner.email).await;
+            let (old, _) = seed_message(&su, m.ws, m.p1, m.owner.id).await;
+            let (status, body) = post_reset(&http, &base, m.ws, &owner, 0).await;
+            assert_eq!(status, 200, "{body}");
+
+            // A post-reset digest and an item on it are fine; the same item over a message the floor now covers is not.
+            let (m3, s3) = seed_message(&su, m.ws, m.p1, m.owner.id).await;
+            let digest = worker_digest(&worker, m.ws, m.p1, s3, s3, &[m3]).await.expect("post-reset digest");
+            let ok = worker_add_item(&worker, m.ws, digest, "초기화 뒤의 사실 quincejelly", &[m3]).await;
+            assert!(matches!(ok, Ok(Some(_))), "{ok:?}");
+            exec(
+                &su,
+                &format!(
+                    "UPDATE mem_cursor SET last_seq = {s3}, reset_floor_seq = {s3} WHERE channel_id = '{}'",
+                    m.p1
+                ),
+            )
+            .await;
+            let blocked = worker_add_item(&worker, m.ws, digest, "바닥 아래 근거의 사실 pineapplerock", &[m3]).await;
+            assert_eq!(blocked, Err("55R01".to_string()), "pre-floor evidence cannot become an item");
+            let add_sig = "public.mem_add_item(uuid, text, text, text, uuid[], real, boolean, text, text)";
+            let original = sabotage(&su, add_sig, &[("AND m.seq <= c.reset_floor_seq", "AND false")]).await;
+            let leaked = worker_add_item(&worker, m.ws, digest, "바닥 아래 근거의 사실 pineapplerock", &[m3]).await;
+            restore(&su, &original).await;
+            println!("RED [add_item fence]: shipped -> 55R01; fence removed -> {leaked:?}");
+            assert!(matches!(leaked, Ok(Some(_))), "{leaked:?}");
+
+            // L-3: the same for a proposal — evidence from before the reset is refused, one after it is fine.
+            let (trigger, _) = seed_message(&su, m.ws, m.p1, m.owner.id).await;
+            let run = seed_run(&su, m.ws, m.p1, m.agent, trigger).await;
+            exec(
+                &su,
+                &format!(
+                    "UPDATE mem_cursor SET last_seq = (SELECT last_seq FROM channel_seq WHERE channel_id = '{ch}'), \
+                        reset_floor_seq = {s3} - 1 WHERE channel_id = '{ch}'",
+                    ch = m.p1
+                ),
+            )
+            .await;
+            // (floor just below m3, above the erased `old`)
+            let below = worker_propose(&worker, m.ws, run, "바닥 아래 근거의 제안 blueberryjam", &[old]).await;
+            assert_eq!(below, Err("55R01".to_string()), "a proposal cannot cite an erased message");
+            let fine = worker_propose(&worker, m.ws, run, "초기화 뒤 근거의 제안 blueberryjam", &[m3]).await;
+            assert!(matches!(fine, Ok(Some(_))), "{fine:?}");
+            let propose_sig = "public.mem_propose_item(uuid, text, text, text, uuid[])";
+            let original = sabotage(&su, propose_sig, &[("AND m.seq <= c.reset_floor_seq", "AND false")]).await;
+            let leaked = worker_propose(&worker, m.ws, run, "바닥 아래 근거의 제안 blueberryjam 둘", &[old]).await;
+            restore(&su, &original).await;
+            println!("RED [propose fence]: shipped -> 55R01; fence removed -> {leaked:?}");
+            assert!(matches!(leaked, Ok(Some(_))), "{leaked:?}");
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_suspended_or_deleted_admin_cannot_reset() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let worker = worker_pool().await;
+    let app = momo_app_pool(2).await;
+    let a = seed_full(&su, &worker, false).await;
+    let ws = a.m.ws;
+    let base = start_server(app.clone()).await;
+    let http = reqwest::Client::new();
+    // HTTP: a token issued while active stops working once the member is suspended / deleted.
+    for (label, update) in [
+        (
+            "suspended",
+            "UPDATE member SET status = 'suspended' WHERE id = $1",
+        ),
+        (
+            "deleted",
+            "UPDATE member SET deleted_at = now() WHERE id = $1",
+        ),
+    ] {
+        let admin = seed_human(&su, ws, "admin").await;
+        let token = login(&http, &base, ws, &admin.email).await;
+        sqlx::query(update)
+            .bind(admin.id)
+            .execute(&su)
+            .await
+            .unwrap();
+        let (status, body) = post_reset(&http, &base, ws, &token, 0).await;
+        assert!(status == 401 || status == 403, "{label}: {status} {body}");
+        assert_eq!(epoch_of(&su, ws).await, 0, "{label}: nothing changed");
+    }
+    // DB: the function refuses them on its own, from app.member_id (a second and third wall behind the route).
+    let susp = seed_human(&su, ws, "admin").await;
+    let gone = seed_human(&su, ws, "admin").await;
+    exec(
+        &su,
+        &format!(
+            "UPDATE member SET status = 'suspended' WHERE id = '{}'",
+            susp.id
+        ),
+    )
+    .await;
+    exec(
+        &su,
+        &format!(
+            "UPDATE member SET deleted_at = now() WHERE id = '{}'",
+            gone.id
+        ),
+    )
+    .await;
+    guarded(&su.clone(), {
+        let (su, app) = (su.clone(), app.clone());
+        async move {
+            for (label, member) in [("suspended", susp.id), ("deleted", gone.id)] {
+                let sql = reset_sql(0);
+                assert_eq!(
+                    as_of(&app, ws, member, &sql).await,
+                    Err("42501".to_string()),
+                    "{label}"
+                );
+                let original = sabotage(
+                    &su,
+                    RESET_SIG,
+                    &[
+                        (
+                            "AND m.status = 'active' AND m.deleted_at IS NULL) THEN",
+                            ") THEN",
+                        ),
+                        ("NOT public.mem_is_workspace_admin()", "false"),
+                    ],
+                )
+                .await;
+                let leaked = as_of(&app, ws, member, &sql).await;
+                restore(&su, &original).await;
+                println!(
+                    "RED [{label} admin]: shipped -> 42501; both walls removed -> ok={}",
+                    leaked.is_ok()
+                );
+                assert!(leaked.is_ok(), "{label}: {leaked:?}");
+            }
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_reset_never_deadlocks_with_a_message_edit_holding_the_channel_lock() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let worker = worker_pool().await;
+    let base = start_server(momo_app_pool(4).await).await;
+    let http = reqwest::Client::new();
+    let a = seed_full(&su, &worker, false).await;
+    let m = &a.m;
+    let owner = login(&http, &base, m.ws, &m.owner.email).await;
+    let (evidence, seq) = seed_message(&su, m.ws, m.p1, m.owner.id).await;
+
+    // E: an edit — message row lock + the channel advisory lock (exclusive), held open.
+    let mut edit = su.begin().await.unwrap();
+    sqlx::query("UPDATE message SET body = '편집 중', edited_at = now() WHERE id = $1")
+        .bind(evidence)
+        .execute(&mut *edit)
+        .await
+        .expect("edit (uncommitted)");
+    // W: a summary of that message (message FOR KEY SHARE → waits at the channel advisory lock behind E).
+    let wtask = {
+        let (worker, ws, ch) = (worker.clone(), m.ws, m.p1);
+        tokio::spawn(async move { worker_digest(&worker, ws, ch, seq, seq, &[evidence]).await })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    // R: the reset. It takes only the workspace lock, then deletes rows E's trigger may hold.
+    let reset = spawn_reset(base.clone(), m.ws, owner);
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    edit.commit().await.expect("the edit commits");
+    let finished = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        (
+            wtask.await.expect("worker task"),
+            reset.await.expect("reset task"),
+        )
+    })
+    .await
+    .expect("no deadlock: both finished within 20 s");
+    let (applied, (status, body)) = finished;
+    assert_eq!(status, 200, "{body}");
+    assert_ne!(
+        applied.as_ref().err().map(String::as_str),
+        Some("40P01"),
+        "no deadlock victim: {applied:?}"
+    );
+    // W ran after the reset committed (the workspace lock), so its evidence is at/below the floor.
+    assert_eq!(applied, Err("55R01".to_string()), "{applied:?}");
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM mem_digest WHERE workspace_id = $1")
+        .bind(m.ws)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_epoch_never_goes_back_and_a_busy_reset_answers_503() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let worker = worker_pool().await;
+    let app = momo_app_pool(2).await;
+    let base = start_server(app.clone()).await;
+    let http = reqwest::Client::new();
+    guarded(&su.clone(), {
+        let (su, worker, app, base, http) =
+            (su.clone(), worker.clone(), app.clone(), base.clone(), http.clone());
+        async move {
+            // L-5: after a reset the workspace row cannot be deleted (which would let a stale epoch work again).
+            let a = seed_full(&su, &worker, false).await;
+            let ws = a.m.ws;
+            let owner = login(&http, &base, ws, &a.m.owner.email).await;
+            let (status, _) = post_reset(&http, &base, ws, &owner, 0).await;
+            assert_eq!(status, 200);
+            let del = "DELETE FROM mem_settings WHERE scope = 'workspace' RETURNING reset_epoch::text";
+            assert_eq!(as_of(&app, ws, a.m.owner.id, del).await, Err("42501".to_string()));
+            let down = "UPDATE mem_settings SET reset_epoch = 0 WHERE scope = 'workspace' RETURNING reset_epoch::text";
+            assert_eq!(as_of(&app, ws, a.m.owner.id, down).await, Err("42501".to_string()));
+            exec(&su, "ALTER TABLE mem_settings DISABLE TRIGGER mem_settings_epoch_no_delete_trg").await;
+            register_restore("ALTER TABLE mem_settings ENABLE TRIGGER mem_settings_epoch_no_delete_trg".to_string());
+            let gone = as_of(&app, ws, a.m.owner.id, del).await;
+            exec(&su, "ALTER TABLE mem_settings ENABLE TRIGGER mem_settings_epoch_no_delete_trg").await;
+            println!("RED [epoch delete guard]: shipped -> 42501; trigger disabled -> {gone:?}");
+            assert!(gone.is_ok());
+            // The workspace itself can still be deleted (the FK cascade removes the settings row).
+            let doomed = seed_full(&su, &worker, false).await;
+            let doomed_owner = login(&http, &base, doomed.m.ws, &doomed.m.owner.email).await;
+            assert_eq!(post_reset(&http, &base, doomed.m.ws, &doomed_owner, 0).await.0, 200);
+            exec(&su, &format!("DELETE FROM workspace WHERE id = '{}'", doomed.m.ws)).await;
+            assert_eq!(epoch_of(&su, doomed.m.ws).await, 0, "the workspace and its settings are gone");
+
+            // L-4/L-7: a reset that keeps finding new rows raises instead of leaving quietly, and the API
+            // answers a retryable 503 (after its own bounded retries) with nothing changed.
+            let b = seed_full(&su, &worker, false).await;
+            let b_owner = login(&http, &base, b.m.ws, &b.m.owner.email).await;
+            let before = counts(&su, b.m.ws).await;
+            let original = sabotage(&su, RESET_SIG, &[("IF v_pass = 5 THEN", "IF v_pass >= 1 THEN")]).await;
+            let (status, body) = post_reset(&http, &base, b.m.ws, &b_owner, 0).await;
+            restore(&su, &original).await;
+            println!("busy reset -> {status} {body}");
+            assert_eq!(status, 503, "{body}");
+            assert_eq!(body["error"]["code"], "memory_reset_busy");
+            assert_eq!(counts(&su, b.m.ws).await, before, "a busy reset changed nothing");
+            assert_eq!(epoch_of(&su, b.m.ws).await, 0);
+            let (status, body) = post_reset(&http, &base, b.m.ws, &b_owner, 0).await;
+            assert_eq!(status, 200, "{body}");
+        }
+    })
+    .await;
 }

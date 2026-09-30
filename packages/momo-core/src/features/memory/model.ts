@@ -180,7 +180,13 @@ export interface MemoryResetResult {
 }
 
 /** Machine codes for what the summary worker reads (the client owns the wording). */
-export type MemoryNoticeSends = "channel_message_text" | "author_display_name" | "agent_dm_message_text";
+export type MemoryNoticeSends =
+  | "channel_message_text"
+  | "author_display_name"
+  | "agent_dm_message_text"
+  | "digest_text"
+  | "memory_item_text"
+  | "topic_summary_input";
 export type MemoryNoticeNeverSends =
   | "human_direct_messages"
   | "attachments"
@@ -200,8 +206,9 @@ export interface MemoryNotice {
   summary: {
     /** false = no 기본 AI summary row: the worker calls no model, nothing is sent. */
     configured: boolean;
-    /** Preset name (OpenAI, Anthropic, …) or the host; `host` is the bare host. */
-    provider?: { name: string; host: string };
+    /** Preset name (OpenAI, Anthropic, …), the host of a custom gateway, or 「사용자 지정」 for a guest;
+    `host` is the bare host and is absent for a guest looking at a custom gateway. */
+    provider?: { name: string; host?: string };
     /** Absent = the link's default model. */
     modelId?: string;
   };
@@ -803,6 +810,9 @@ const NOTICE_SENDS: readonly string[] = [
   "channel_message_text",
   "author_display_name",
   "agent_dm_message_text",
+  "digest_text",
+  "memory_item_text",
+  "topic_summary_input",
 ];
 const NOTICE_NEVER_SENDS: readonly string[] = [
   "human_direct_messages",
@@ -848,8 +858,8 @@ export function parseMemoryNotice(value: unknown): MemoryNotice {
   if (providerSource !== null) {
     const name = str(providerSource, "name");
     const host = str(providerSource, "host");
-    if (name === undefined || host === undefined) throw new WireShapeError();
-    summary.provider = { name, host };
+    if (name === undefined) throw new WireShapeError();
+    summary.provider = host === undefined ? { name } : { name, host };
   }
   const modelId = str(summarySource, "modelId");
   if (modelId !== undefined) summary.modelId = modelId;

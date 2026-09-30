@@ -3559,7 +3559,7 @@ paths:
       summary: What team memory sends, and to which provider (the team notice).
       description: >
         ADR-0196 D9 consent ② 「팀 고지」. Any active human member of the workspace
-        (guests included) may read it. It names the provider host and the model id of
+        (guests included) may read it. It names the provider (a guest sees a custom gateway only as 사용자 지정, never its host) and the model id of
         the operator's 「기본 AI」 `summary` row — the only place memory content is sent —
         whether memory is on or paused, that embeddings are computed locally and never
         sent, and machine codes for what is and is not read. The provider is the host of
@@ -3654,6 +3654,14 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          description: >
+            `error.code` = `memory_reset_busy`. The reset kept losing to a worker or an editor (deadlock, lock
+            timeout, rows still appearing) after the server's own retries. Nothing was changed; retry in a few seconds.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /v1/workspaces/{workspaceId}/memory/settings/me:
     patch:
@@ -12669,10 +12677,10 @@ components:
             configured: {type: boolean, description: "A 기본 AI summary row exists. Without one the worker calls no model."}
             provider:
               type: object
-              required: [name, host]
+              required: [name]
               properties:
-                name: {type: string, description: "A known preset name (OpenAI, Anthropic, xAI, OpenRouter), else the host."}
-                host: {type: string, description: "Host of the redacted endpoint label — no scheme, port, path, query or userinfo."}
+                name: {type: string, description: "A known preset name (OpenAI, Anthropic, xAI, OpenRouter), else the host; a guest looking at a custom gateway gets 사용자 지정."}
+                host: {type: string, description: "Host of the redacted endpoint label — no scheme, port, path, query or userinfo. Absent for a guest looking at a custom (non-preset) gateway."}
             modelId: {type: string, description: "Absent = the link's default model."}
         embeddings:
           type: object
@@ -12684,7 +12692,7 @@ components:
         sends:
           type: array
           description: Machine codes for what the summary worker reads and sends.
-          items: {type: string, enum: [channel_message_text, author_display_name, agent_dm_message_text]}
+          items: {type: string, enum: [channel_message_text, author_display_name, agent_dm_message_text, digest_text, memory_item_text, topic_summary_input]}
         neverSends:
           type: array
           description: Machine codes for what it never reads.

@@ -137,6 +137,60 @@ CREATE TRIGGER mem_settings_epoch_guard_trg
   BEFORE INSERT OR UPDATE OF reset_epoch ON mem_settings
   FOR EACH ROW EXECUTE FUNCTION mem_settings_epoch_guard();
 
+-- ── 워커가 울타리를 안다: mem_cursor_state 에 reset_floor_seq (보안 검수 H-1) ───────────────────────────
+-- 워커는 mem_* 를 읽지 못하므로 커서 상태 함수로만 안다. 반환 열이 바뀌어 DROP 후 다시 만든다(워커 전용 ACL 복원).
+DROP FUNCTION IF EXISTS mem_cursor_state(uuid);
+CREATE FUNCTION mem_cursor_state(p_channel_id uuid)
+RETURNS TABLE (last_seq bigint, lease_token uuid, leased_until timestamptz, head_seq bigint, reset_floor_seq bigint)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+  SELECT COALESCE(c.last_seq, 0), c.lease_token, c.leased_until, cs.last_seq, COALESCE(c.reset_floor_seq, 0)
+    FROM public.channel_seq cs
+    LEFT JOIN public.mem_cursor c
+      ON c.channel_id = cs.channel_id AND c.workspace_id = cs.workspace_id
+   WHERE cs.channel_id = p_channel_id
+     AND cs.workspace_id = nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid
+$$;
+GRANT CREATE ON SCHEMA public TO mem_definer;
+ALTER FUNCTION mem_cursor_state(uuid) OWNER TO mem_definer;
+REVOKE CREATE ON SCHEMA public FROM mem_definer;
+DO $$
+DECLARE r text;
+BEGIN
+  EXECUTE 'REVOKE ALL ON FUNCTION public.mem_cursor_state(uuid) FROM PUBLIC';
+  FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+      EXECUTE format('REVOKE ALL ON FUNCTION public.mem_cursor_state(uuid) FROM %I', r);
+    END IF;
+  END LOOP;
+  EXECUTE 'GRANT EXECUTE ON FUNCTION public.mem_cursor_state(uuid) TO momo_memory';
+END $$;
+
+-- ── reset_epoch 는 줄지 않는다 (보안 검수 L-5) ───────────────────────────────────────────────────────
+-- 워크스페이스 행을 지웠다 다시 넣으면 세대가 0 으로 돌아가 낡은 expectedEpoch 가 다시 통한다. 세대가 오른 워크스페이스 행의 삭제는
+-- 워크스페이스 자체가 사라질 때(FK 연쇄)만 허용한다.
+CREATE OR REPLACE FUNCTION mem_settings_epoch_no_delete()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+BEGIN
+  IF OLD.scope = 'workspace' AND OLD.reset_epoch > 0
+     AND EXISTS (SELECT 1 FROM public.workspace w WHERE w.id = OLD.workspace_id) THEN
+    RAISE EXCEPTION 'mem_settings: the workspace settings row (reset_epoch %) cannot be deleted', OLD.reset_epoch
+      USING ERRCODE = '42501';
+  END IF;
+  RETURN OLD;
+END
+$$;
+DROP TRIGGER IF EXISTS mem_settings_epoch_no_delete_trg ON mem_settings;
+CREATE TRIGGER mem_settings_epoch_no_delete_trg
+  BEFORE DELETE ON mem_settings
+  FOR EACH ROW EXECUTE FUNCTION mem_settings_epoch_no_delete();
+
 -- ── 팀 고지: 요약 제공자 읽기 (열 세 개, 한 행) ──────────────────────────────────────
 GRANT SELECT (role, link_endpoint_label, model_id) ON provider_default_ai TO mem_definer;
 DROP POLICY IF EXISTS provider_default_ai_summary_mem ON provider_default_ai;
@@ -277,6 +331,11 @@ BEGIN
     DELETE FROM public.mem_cons_state WHERE workspace_id = v_ws;
     GET DIAGNOSTICS v_n = ROW_COUNT; v_cons := v_cons + v_n; v_round := v_round + v_n;
     EXIT WHEN v_round = 0;
+    IF v_pass = 5 THEN
+      -- 5회를 돌고도 계속 새 행이 나온다: 조용히 나가지 않고 통째로 되돌린다(API 가 다시 시도한다).
+      RAISE EXCEPTION 'mem_reset_workspace: rows kept appearing during the reset; nothing was changed'
+        USING ERRCODE = '40001';
+    END IF;
   END LOOP;
 
   -- 사후 검사: RLS 는 삭제할 수 없는 행을 오류 없이 건너뛴다(예: 표지 정책이 어긋났을 때). 그러면 「세대만 오른 채 데이터가 남는」
@@ -285,7 +344,8 @@ BEGIN
   IF EXISTS (SELECT 1 FROM public.mem_item i WHERE i.workspace_id = v_ws AND i.recorded_at <= v_started)
      OR EXISTS (SELECT 1 FROM public.mem_digest d WHERE d.workspace_id = v_ws AND d.created_at <= v_started)
      OR EXISTS (SELECT 1 FROM public.mem_topic t WHERE t.workspace_id = v_ws AND t.created_at <= v_started)
-     OR EXISTS (SELECT 1 FROM public.mem_proposal p WHERE p.workspace_id = v_ws AND p.created_at <= v_started) THEN
+     OR EXISTS (SELECT 1 FROM public.mem_proposal p WHERE p.workspace_id = v_ws AND p.created_at <= v_started)
+     OR EXISTS (SELECT 1 FROM public.mem_topic_summary ts WHERE ts.workspace_id = v_ws AND ts.created_at <= v_started) THEN
     RAISE EXCEPTION 'mem_reset_workspace: rows survived the reset; nothing was changed' USING ERRCODE = '40001';
   END IF;
 
@@ -360,18 +420,18 @@ BEGIN
     RAISE EXCEPTION 'mem_apply_digest: memory is disabled, paused, excluded or not allowed for this channel'
       USING ERRCODE = '55000';
   END IF;
-  -- #3212: 초기화 울타리. 초기화는 채널마다 reset_floor_seq(그때의 채널 헤드)를 남긴다. 그 이하의 메시지를 근거로 하는
-  -- 요약은 초기화 전에 읽은 것이므로 거부한다(40001 — 워커는 다시 읽는다; 커서가 헤드로 옮겨졌으니 새 메시지만 읽는다).
-  -- 스레드 요약의 뿌리 메시지만 예외다(스레드 맥락; 답글은 여전히 커서 뒤여야 한다).
+  -- #3212: 초기화 울타리. 초기화는 채널마다 reset_floor_seq(그때의 채널 헤드)를 남긴다. 그 이하의 메시지는 초기화로 지워진
+  -- 내용이므로 어떤 요약의 근거도 될 수 없다 — 스레드 뿌리도 예외가 아니다(보안 검수 M-1). 워커는 이 값을 mem_cursor_state 로
+  -- 알고 읽기 단계에서 미리 걸러 모델을 부르지 않는다; 이 검사는 경합 뒤의 마지막 벽이다. 다시 읽어도 소용없으므로(40001 이 아니라)
+  -- 전용 SQLSTATE 55R01 을 쓴다 — 워커는 재시도하지 않고 건너뛴다.
   IF EXISTS (SELECT 1
                FROM public.mem_cursor c
                JOIN public.message m
                  ON m.workspace_id = c.workspace_id AND m.channel_id = c.channel_id
               WHERE c.workspace_id = v_ws AND c.channel_id = p_channel_id AND c.reset_floor_seq > 0
                 AND m.id = ANY (p_evidence_message_ids)
-                AND m.seq <= c.reset_floor_seq
-                AND m.id IS DISTINCT FROM p_thread_root_id) THEN
-    RAISE EXCEPTION 'mem_apply_digest: evidence predates a memory reset' USING ERRCODE = '40001';
+                AND m.seq <= c.reset_floor_seq) THEN
+    RAISE EXCEPTION 'mem_apply_digest: evidence predates a memory reset' USING ERRCODE = '55R01';
   END IF;
   IF p_thread_root_id IS NOT NULL AND NOT EXISTS (
        SELECT 1 FROM public.message r
@@ -564,6 +624,16 @@ BEGIN
     RAISE EXCEPTION 'mem_add_item: memory is disabled, paused, excluded or not allowed for this channel'
       USING ERRCODE = '55000';
   END IF;
+  -- #3212: 초기화 울타리(보안 검수 M-1/L-3) — 초기화 이전 메시지는 근거가 될 수 없다(55R01).
+  IF EXISTS (SELECT 1
+               FROM public.mem_cursor c
+               JOIN public.message m
+                 ON m.workspace_id = c.workspace_id AND m.channel_id = c.channel_id
+              WHERE c.workspace_id = v_ws AND c.channel_id = v_channel AND c.reset_floor_seq > 0
+                AND m.id = ANY (p_evidence_message_ids)
+                AND m.seq <= c.reset_floor_seq) THEN
+    RAISE EXCEPTION 'mem_add_item: evidence predates a memory reset' USING ERRCODE = '55R01';
+  END IF;
 
   -- 근거 ⊆ 요약의 근거.
   IF (SELECT pg_catalog.count(*) FROM public.mem_evidence de
@@ -679,6 +749,222 @@ BEGIN
 END
 $$;
 
+
+-- mem_propose_item (106 정의 + 초기화 락·울타리; 본문은 그대로, 바뀐 곳에 「#3212」)
+CREATE OR REPLACE FUNCTION mem_propose_item(
+  p_run_id uuid, p_kind text, p_body text, p_subject_key text, p_evidence_message_ids uuid[])
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+DECLARE
+  v_ws uuid := nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid;
+  v_n integer := COALESCE(pg_catalog.cardinality(p_evidence_message_ids), 0);
+  v_body text := pg_catalog.btrim(COALESCE(p_body, ''));
+  v_subject text := nullif(pg_catalog.btrim(COALESCE(p_subject_key, '')), '');
+  v_channel uuid;
+  v_agent uuid;
+  v_trigger uuid;
+  v_status public.run_status;
+  v_run_created timestamptz;
+  v_trigger_seq bigint;
+  v_req uuid;
+  v_norm text;
+  v_hash text;
+  v_id uuid;
+BEGIN
+  IF v_ws IS NULL THEN
+    RAISE EXCEPTION 'mem_propose_item: app.workspace_id is not set' USING ERRCODE = '42501';
+  END IF;
+  IF p_kind IS NULL OR p_kind NOT IN ('decision', 'fact', 'commitment', 'preference', 'procedure') THEN
+    RAISE EXCEPTION 'mem_propose_item: unknown kind' USING ERRCODE = '23514';
+  END IF;
+  IF pg_catalog.char_length(v_body) NOT BETWEEN 1 AND 600 THEN
+    RAISE EXCEPTION 'mem_propose_item: body must be 1..600 characters' USING ERRCODE = '23514';
+  END IF;
+  IF v_subject IS NOT NULL AND pg_catalog.char_length(v_subject) > 80 THEN
+    RAISE EXCEPTION 'mem_propose_item: subject_key is at most 80 characters' USING ERRCODE = '23514';
+  END IF;
+  IF public.mem_looks_like_secret(v_body) OR public.mem_looks_like_secret(COALESCE(v_subject, '')) THEN
+    RAISE EXCEPTION 'mem_propose_item: body looks like a credential' USING ERRCODE = '23514';
+  END IF;
+  IF v_n = 0 OR v_n > 8 THEN
+    RAISE EXCEPTION 'mem_propose_item: 1..8 evidence messages are required' USING ERRCODE = '23514';
+  END IF;
+  IF (SELECT pg_catalog.count(DISTINCT e) FROM pg_catalog.unnest(p_evidence_message_ids) AS e) <> v_n THEN
+    RAISE EXCEPTION 'mem_propose_item: duplicate or NULL evidence message' USING ERRCODE = '23514';
+  END IF;
+
+  -- 에이전트·채널은 run 행에서. 호출자가 정하지 않는다.
+  SELECT r.channel_id, r.agent_member_id, r.trigger_message_id, r.status, r.created_at
+    INTO v_channel, v_agent, v_trigger, v_status, v_run_created
+    FROM public.agent_run r WHERE r.id = p_run_id AND r.workspace_id = v_ws;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'mem_propose_item: run not in workspace' USING ERRCODE = '23503';
+  END IF;
+  IF v_status IN ('succeeded', 'failed', 'cancelled', 'timed_out') THEN
+    RAISE EXCEPTION 'mem_propose_item: the run has ended' USING ERRCODE = '55000';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.member a
+                  WHERE a.id = v_agent AND a.workspace_id = v_ws AND a.kind = 'agent'
+                    AND a.status = 'active' AND a.deleted_at IS NULL) THEN
+    RAISE EXCEPTION 'mem_propose_item: only an active agent proposes' USING ERRCODE = '55000';
+  END IF;
+  v_req := public.mem_serve_requester(p_run_id);
+  IF v_req IS NULL THEN
+    RAISE EXCEPTION 'mem_propose_item: this run has no human requester' USING ERRCODE = '55000';
+  END IF;
+  -- 스위치: 워크스페이스·채널·DM 규칙(mem_channel_eligible) + 요청자의 개인 일시정지.
+  IF NOT public.mem_channel_eligible(v_channel) THEN
+    RAISE EXCEPTION 'mem_propose_item: memory is disabled, paused, excluded or not allowed for this channel'
+      USING ERRCODE = '55000';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.mem_settings s
+              WHERE s.workspace_id = v_ws AND s.scope = 'member'
+                AND s.member_id = v_req AND s.paused) THEN
+    RAISE EXCEPTION 'mem_propose_item: the requester paused memory' USING ERRCODE = '55000';
+  END IF;
+  -- 에이전트도 요청자도 이 채널을 읽을 수 있어야 한다(에이전트가 못 읽는 곳의 메시지를 인용할 수 없다).
+  IF NOT public.mem_member_can_read(v_channel, v_agent)
+     OR NOT public.mem_member_can_read(v_channel, v_req) THEN
+    RAISE EXCEPTION 'mem_propose_item: the agent and the requester must both read the channel'
+      USING ERRCODE = '55000';
+  END IF;
+
+  IF v_trigger IS NOT NULL THEN
+    SELECT tm.seq INTO v_trigger_seq FROM public.message tm
+     WHERE tm.id = v_trigger AND tm.workspace_id = v_ws AND tm.channel_id = v_channel;
+  END IF;
+  -- M-1 (보안 검수): 「지금 대화」의 기준 seq 는 절대 비지 않는다. 트리거가 없는 run(parent_run_id 로 이어진 자식 run)
+  -- 이나 트리거 행을 못 찾는 run 은 「run 이 시작될 때의 채널 머리 seq」를 기준으로 삼는다 — 에이전트가 그 시점에 볼 수
+  -- 있던 최신 메시지다. 창(200개)을 건너뛰는 fail-open 을 두지 않는다. 거부(55000) 대신 폴백을 고른 이유: A2A 위임 자식
+  -- run 도 요청자(사슬)가 있어 정당하게 제안할 수 있고, 머리 seq 는 그 run 이 볼 수 있던 범위의 상한이라 트리거 기준과
+  -- 같은 성질(뒤의 메시지·오래된 메시지 거부)을 유지한다. 빈 채널이면 0 이라 어떤 근거도 통과하지 못한다.
+  IF v_trigger_seq IS NULL THEN
+    SELECT COALESCE(pg_catalog.max(hm.seq), 0) INTO v_trigger_seq FROM public.message hm
+     WHERE hm.workspace_id = v_ws AND hm.channel_id = v_channel AND hm.created_at <= v_run_created;
+  END IF;
+
+  -- 락 순서는 어디서나 「메시지 행 → 채널 advisory」(102 H-1).
+  PERFORM 1 FROM public.message m
+   WHERE m.id = ANY (p_evidence_message_ids) AND m.workspace_id = v_ws AND m.channel_id = v_channel
+   ORDER BY m.id
+   FOR KEY SHARE;
+  PERFORM pg_catalog.pg_advisory_xact_lock_shared(
+    pg_catalog.hashtextextended('mem_digest:' || v_channel::text, 0));
+  -- #3212 L-3: 초기화와 직렬화한다(락 순서: 메시지 행 → 채널 → 워크스페이스 reset → 행).
+  PERFORM pg_catalog.pg_advisory_xact_lock_shared(
+    pg_catalog.hashtextextended('mem_reset:' || v_ws::text, 0));
+  -- #3212: 초기화 울타리(보안 검수 M-1/L-3) — 초기화 이전 메시지는 근거가 될 수 없다(55R01).
+  IF EXISTS (SELECT 1
+               FROM public.mem_cursor c
+               JOIN public.message m
+                 ON m.workspace_id = c.workspace_id AND m.channel_id = c.channel_id
+              WHERE c.workspace_id = v_ws AND c.channel_id = v_channel AND c.reset_floor_seq > 0
+                AND m.id = ANY (p_evidence_message_ids)
+                AND m.seq <= c.reset_floor_seq) THEN
+    RAISE EXCEPTION 'mem_propose_item: evidence predates a memory reset' USING ERRCODE = '55R01';
+  END IF;
+
+  -- 근거: 이 run 의 채널의 살아 있는 메시지, 트리거 근방(뒤의 것·200개 앞보다 오래된 것은 대화 밖), DM 은 합류 이후만.
+  IF (SELECT pg_catalog.count(*) FROM public.message m
+       WHERE m.id = ANY (p_evidence_message_ids)
+         AND m.channel_id = v_channel AND m.workspace_id = v_ws
+         AND m.deleted_at IS NULL AND m.state <> 'deleted'
+         -- 에이전트도 요청자도 그 메시지의 채널을 읽을 수 있어야 한다(위의 「같은 채널」과 독립된 벽).
+         AND public.mem_member_can_read(m.channel_id, v_agent)
+         AND public.mem_member_can_read(m.channel_id, v_req)
+         AND (m.seq <= v_trigger_seq AND m.seq > v_trigger_seq - 200)
+         AND (NOT EXISTS (SELECT 1 FROM public.channel dc WHERE dc.id = m.channel_id AND dc.kind = 'dm')
+              OR m.created_at >= (
+                   SELECT pg_catalog.max(x.joined_at) FROM public.membership x
+                    WHERE x.channel_id = m.channel_id AND x.workspace_id = m.workspace_id
+                      AND x.left_at IS NULL))
+     ) <> v_n THEN
+    RAISE EXCEPTION 'mem_propose_item: evidence must be live messages of this run''s conversation'
+      USING ERRCODE = '23503';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.message m
+              WHERE m.id = ANY (p_evidence_message_ids)
+                AND m.edited_at IS NOT NULL AND m.edited_at > v_run_created) THEN
+    RAISE EXCEPTION 'mem_propose_item: evidence was edited after the run began' USING ERRCODE = '40001';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.message m
+               JOIN public.member au ON au.id = m.author_member_id AND au.workspace_id = m.workspace_id
+              WHERE m.id = ANY (p_evidence_message_ids) AND au.kind <> 'human') THEN
+    RAISE EXCEPTION 'mem_propose_item: evidence written by an agent or bot cannot support a memory'
+      USING ERRCODE = '23514';
+  END IF;
+
+  -- L-2: 같은 채널의 제안은 중복 검사 **전에** 직렬화한다(동시에 같은 내용이 들어와 둘 다 검사를 통과한 뒤 23505 로
+  -- 터지는 길을 막는다). 요율 제한의 카운트도 이 락 아래에서 센다. 아래 INSERT 의 ON CONFLICT 는 두 번째 벽이다.
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('mem_proposal:' || v_channel::text, 0));
+
+  -- 같은 채널·같은 내용: 이미 기억하고 있거나 이미 제안 중이면 새로 만들지 않는다.
+  v_norm := pg_catalog.lower(pg_catalog.regexp_replace(v_body, '[[:space:]]+', ' ', 'g'));
+  v_hash := pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(p_kind || ':' || v_norm, 'UTF8')), 'hex');
+  -- #3208 M-5: 사람이 잊은 (채널, 해시)는 다시 제안하지 않는다(제안 없음 = NULL, 중복과 같은 답).
+  IF EXISTS (SELECT 1 FROM public.mem_suppress s
+              WHERE s.workspace_id = v_ws AND s.channel_id = v_channel AND s.content_hash = v_hash) THEN
+    RETURN NULL;
+  END IF;
+  -- 만료된 대기 제안이 같은 내용을 막지 않게 정리한다(본문·근거 id 를 지우고 거절 껍데기로 닫는다).
+  -- L-7: `decided_by` 는 NOT NULL·shape CHECK 가 결정자를 요구해서 **제안한 에이전트**로 채운다 — 사람의 결정이 아니다.
+  -- 그래서 사건을 `rejected` 가 아니라 `expired`(행위자 = 에이전트, detail.by='expiry')로 남긴다. UI 는 `expired` 이벤트가
+  -- 있는 껍데기를 「사람이 거절함」으로 읽지 말 것(만료 카드는 목록에도 나오지 않는다).
+  WITH closed AS (
+    UPDATE public.mem_proposal
+       SET status = 'rejected', body = NULL, subject_key = NULL, evidence_message_ids = '{}',
+           decided_by = v_agent, decided_at = pg_catalog.now()
+     WHERE workspace_id = v_ws AND channel_id = v_channel AND content_hash = v_hash
+       AND status = 'pending' AND expires_at <= pg_catalog.now()
+    RETURNING id
+  )
+  INSERT INTO public.mem_event (workspace_id, target_kind, target_id, action, actor_member_id, detail)
+  SELECT v_ws, 'proposal', c.id, 'expired', v_agent, pg_catalog.jsonb_build_object('by', 'expiry')
+    FROM closed c;
+  IF EXISTS (SELECT 1 FROM public.mem_item i
+              WHERE i.workspace_id = v_ws AND i.channel_id = v_channel AND i.content_hash = v_hash
+                AND i.retired_at IS NULL AND NOT i.stale AND public.mem_item_live(i.id))
+     OR EXISTS (SELECT 1 FROM public.mem_proposal p
+                 WHERE p.workspace_id = v_ws AND p.channel_id = v_channel
+                   AND p.content_hash = v_hash AND p.status = 'pending') THEN
+    RETURN NULL;
+  END IF;
+
+  -- 요율 제한(위의 채널 락 아래에서 센다: 동시에 여러 개가 한도를 함께 넘지 못한다).
+  IF (SELECT pg_catalog.count(*) FROM public.mem_proposal p
+       WHERE p.workspace_id = v_ws AND p.run_id = p_run_id) >= 3
+     OR (SELECT pg_catalog.count(*) FROM public.mem_proposal p
+          WHERE p.workspace_id = v_ws AND p.channel_id = v_channel
+            AND p.status = 'pending' AND p.expires_at > pg_catalog.now()) >= 20
+     OR (SELECT pg_catalog.count(*) FROM public.mem_proposal p
+          WHERE p.workspace_id = v_ws AND p.agent_member_id = v_agent
+            AND p.created_at > pg_catalog.now() - interval '1 hour') >= 30 THEN
+    RAISE EXCEPTION 'mem_propose_item: too many proposals' USING ERRCODE = '54000';
+  END IF;
+
+  INSERT INTO public.mem_proposal
+    (workspace_id, channel_id, run_id, agent_member_id, requester_member_id, kind, body,
+     subject_key, evidence_message_ids, content_hash)
+  VALUES
+    (v_ws, v_channel, p_run_id, v_agent, v_req, p_kind, v_body, v_subject,
+     (SELECT pg_catalog.array_agg(e ORDER BY e) FROM pg_catalog.unnest(p_evidence_message_ids) AS e),
+     v_hash)
+  ON CONFLICT (workspace_id, channel_id, content_hash) WHERE status = 'pending' DO NOTHING
+  RETURNING id INTO v_id;
+  IF v_id IS NULL THEN
+    RETURN NULL;
+  END IF;
+  INSERT INTO public.mem_event (workspace_id, target_kind, target_id, action, actor_member_id, detail)
+  VALUES (v_ws, 'proposal', v_id, 'proposed', v_agent,
+          pg_catalog.jsonb_build_object('run_id', p_run_id, 'kind', p_kind, 'evidence_count', v_n));
+  RETURN v_id;
+END
+$$;
+
 -- ── 소유자·권한 ─────────────────────────────────────────────────────────────────────
 -- 두 함수는 API 가 부른다(PUBLIC EXECUTE 는 106 의 mem_edit_item 과 같은 이유: 역할 생성 순서에 기대지 않고, 함수 안의 session_user
 -- 가드와 GUC 행위자가 벽이다). 시험이 상태를 고정한다.
@@ -686,6 +972,18 @@ GRANT CREATE ON SCHEMA public TO mem_definer;
 ALTER FUNCTION mem_reset_workspace(bigint) OWNER TO mem_definer;
 ALTER FUNCTION mem_summary_provider() OWNER TO mem_definer;
 REVOKE CREATE ON SCHEMA public FROM mem_definer;
+
+-- 보안 검수 L-6: 새 API 함수는 PUBLIC 이 아니라 momo_app 에만 EXECUTE 를 준다(session_user 가드는 그대로 둔다 — 벽이 둘이다).
+-- 역할이 이 마이그레이션보다 늦게 생기면 부트스트랩(bootstrap_roles.sql · bootstrap_runtime_roles.sql)이 같은 GRANT 를 다시 준다.
+REVOKE ALL ON FUNCTION mem_reset_workspace(bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION mem_summary_provider() FROM PUBLIC;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_app') THEN
+    GRANT EXECUTE ON FUNCTION mem_reset_workspace(bigint) TO momo_app;
+    GRANT EXECUTE ON FUNCTION mem_summary_provider() TO momo_app;
+  END IF;
+END $$;
 
 -- ── L-9: mem_definer 소유 SECURITY DEFINER 함수 허용 목록 (전체 시그니처; 109 것 + 이 파일의 2개: mem_reset_workspace, mem_summary_provider) ──────────────
 DO $$

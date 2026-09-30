@@ -2066,12 +2066,35 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
         );
     }
     for (signature, name) in &functions {
-        if name == "mem_edit_item"
-            || name == "mem_forget_item"
-            // #3212: the reset and the team-notice read are API entry points of the same shape.
-            || name == "mem_reset_workspace"
-            || name == "mem_summary_provider"
-        {
+        if name == "mem_reset_workspace" || name == "mem_summary_provider" {
+            // #3212 L-6: API entry points reserved for momo_app — not PUBLIC. The in-function session_user guard
+            // stays as the second wall (exercised and sabotaged in mem_reset_conformance_pg).
+            let public_exec: bool = sqlx::query_scalar(
+                "SELECT has_function_privilege('public', $1::regprocedure, 'EXECUTE')",
+            )
+            .bind(signature)
+            .fetch_one(su)
+            .await
+            .expect("public execute");
+            assert!(!public_exec, "{when}: PUBLIC must not EXECUTE {signature}");
+            for role in &roles {
+                let has: bool = sqlx::query_scalar(
+                    "SELECT has_function_privilege($1, $2::regprocedure, 'EXECUTE')",
+                )
+                .bind(role)
+                .bind(signature)
+                .fetch_one(su)
+                .await
+                .expect("has_function_privilege");
+                assert_eq!(
+                    has,
+                    role == "momo_app",
+                    "{when}: {role} EXECUTE {signature} (only momo_app)"
+                );
+            }
+            continue;
+        }
+        if name == "mem_edit_item" || name == "mem_forget_item" {
             // #3208: the API's write entry points are PUBLIC EXECUTE on purpose (the same shape as
             // `mem_search_items`: no dependence on role-creation order); what protects them is the
             // in-function `session_user` guard and the actor derived from `app.member_id`, both

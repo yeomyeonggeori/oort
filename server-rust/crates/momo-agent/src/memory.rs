@@ -116,6 +116,8 @@ pub enum ApplyFailure {
     Switched,
     /// 55P03 — another worker holds this channel's lease.
     LeaseHeld,
+    /// 55R01 — the evidence predates a memory reset (#3212). Re-reading cannot help: skip, never retry.
+    Reset,
     Other,
 }
 
@@ -126,6 +128,7 @@ impl ApplyFailure {
             Some("23503") => ApplyFailure::EvidenceGone,
             Some("55000") => ApplyFailure::Switched,
             Some("55P03") => ApplyFailure::LeaseHeld,
+            Some("55R01") => ApplyFailure::Reset,
             _ => ApplyFailure::Other,
         }
     }
@@ -156,6 +159,9 @@ pub struct CursorState {
     pub lease_token: Option<Uuid>,
     pub leased_until: Option<DateTime<Utc>>,
     pub head_seq: i64,
+    /// #3212: the channel head at the last memory reset (0 = never). Nothing at or below it may be read into a
+    /// summary — the reset erased it.
+    pub reset_floor_seq: i64,
 }
 
 /// `None` when the channel has no `channel_seq` row in this workspace.
@@ -164,7 +170,7 @@ pub async fn cursor_state(
     channel_id: Uuid,
 ) -> Result<Option<CursorState>, DbError> {
     let row = sqlx::query(
-        "SELECT last_seq, lease_token, leased_until, head_seq FROM mem_cursor_state($1)",
+        "SELECT last_seq, lease_token, leased_until, head_seq, reset_floor_seq FROM mem_cursor_state($1)",
     )
     .bind(channel_id)
     .fetch_optional(&mut *conn)
@@ -174,6 +180,7 @@ pub async fn cursor_state(
         lease_token: row.get("lease_token"),
         leased_until: row.get("leased_until"),
         head_seq: row.get("head_seq"),
+        reset_floor_seq: row.get("reset_floor_seq"),
     }))
 }
 
@@ -912,11 +919,12 @@ pub async fn read_range(
     from_seq: i64,
     to_seq: i64,
     limit: i64,
+    reset_floor_seq: i64,
 ) -> Result<Vec<SourceMessage>, DbError> {
     let sql = format!(
         "SELECT {SOURCE_COLS} FROM message m JOIN member a ON a.id = m.author_member_id AND a.workspace_id = m.workspace_id \
           WHERE m.workspace_id = $1 AND m.channel_id = $2 \
-            AND m.seq >= $3 AND m.seq <= $4 AND {LIVE} \
+            AND m.seq >= $3 AND m.seq <= $4 AND m.seq > $7 AND {LIVE} \
             AND (($5::uuid IS NULL AND m.root_id IS NULL) \
                  OR ($5::uuid IS NOT NULL AND (m.id = $5 OR m.root_id = $5))) \
           ORDER BY m.seq LIMIT $6"
@@ -928,6 +936,7 @@ pub async fn read_range(
         .bind(to_seq)
         .bind(thread_root_id)
         .bind(limit)
+        .bind(reset_floor_seq)
         .fetch_all(&mut *conn)
         .await?;
     Ok(rows.iter().map(source_message).collect())
@@ -942,11 +951,12 @@ pub async fn read_evidence_refs(
     channel_id: Uuid,
     from_seq: i64,
     to_seq: i64,
+    reset_floor_seq: i64,
 ) -> Result<Vec<EvidenceRef>, DbError> {
     let sql = format!(
         "SELECT m.id, m.seq, m.edited_at FROM message m \
           WHERE m.workspace_id = $1 AND m.channel_id = $2 AND m.root_id IS NULL \
-            AND m.seq >= $3 AND m.seq <= $4 AND {LIVE} \
+            AND m.seq >= $3 AND m.seq <= $4 AND m.seq > $5 AND {LIVE} \
           ORDER BY m.seq"
     );
     let rows = sqlx::query(&sql)
@@ -954,6 +964,7 @@ pub async fn read_evidence_refs(
         .bind(channel_id)
         .bind(from_seq)
         .bind(to_seq)
+        .bind(reset_floor_seq)
         .fetch_all(&mut *conn)
         .await?;
     Ok(rows
@@ -1026,11 +1037,14 @@ pub async fn read_thread_window(
     after_seq: i64,
     upto_seq: i64,
     limit: i64,
+    reset_floor_seq: i64,
 ) -> Result<Vec<SourceMessage>, DbError> {
+    // #3212: a root at or below the reset floor is erased text too — it does not ride along.
     let sql = format!(
         "SELECT {SOURCE_COLS} FROM message m JOIN member a ON a.id = m.author_member_id AND a.workspace_id = m.workspace_id \
           WHERE m.workspace_id = $1 AND m.channel_id = $2 AND {LIVE} \
-            AND (m.id = $3 OR (m.root_id = $3 AND m.seq > $4 AND m.seq <= $5)) \
+            AND ((m.id = $3 AND m.seq > $7) \
+                 OR (m.root_id = $3 AND m.seq > GREATEST($4, $7) AND m.seq <= $5)) \
           ORDER BY m.seq LIMIT $6"
     );
     let rows = sqlx::query(&sql)
@@ -1040,6 +1054,7 @@ pub async fn read_thread_window(
         .bind(after_seq)
         .bind(upto_seq)
         .bind(limit)
+        .bind(reset_floor_seq)
         .fetch_all(&mut *conn)
         .await?;
     Ok(rows.iter().map(source_message).collect())
@@ -1060,13 +1075,14 @@ pub async fn day_bounds(
     channel_id: Uuid,
     utc_offset_minutes: i32,
     since: DateTime<Utc>,
+    reset_floor_seq: i64,
 ) -> Result<Vec<DayBounds>, DbError> {
     let sql = format!(
         "SELECT ((m.created_at AT TIME ZONE 'UTC') + make_interval(mins => $3))::date AS day, \
                 min(m.seq) AS min_seq, max(m.seq) AS max_seq \
            FROM message m \
           WHERE m.workspace_id = $1 AND m.channel_id = $2 AND m.root_id IS NULL \
-            AND m.created_at >= $4 AND {LIVE} \
+            AND m.created_at >= $4 AND m.seq > $5 AND {LIVE} \
           GROUP BY 1 ORDER BY 1"
     );
     let rows = sqlx::query(&sql)
@@ -1074,6 +1090,7 @@ pub async fn day_bounds(
         .bind(channel_id)
         .bind(utc_offset_minutes)
         .bind(since)
+        .bind(reset_floor_seq)
         .fetch_all(&mut *conn)
         .await?;
     Ok(rows

@@ -1157,6 +1157,12 @@ const NOTICE_SENDS: &[&str] = &[
     "channel_message_text",
     "author_display_name",
     "agent_dm_message_text",
+    // The rollup (day/week) prompts carry the window digests' text.
+    "digest_text",
+    // The consolidation judge (duplicate / supersedes) compares two stored items' bodies.
+    "memory_item_text",
+    // The topic labeller and summariser send item bodies of one channel.
+    "topic_summary_input",
 ];
 /// What it never reads: human↔human DMs (D9 ③), files, deleted messages, channels and members
 /// that switched memory off.
@@ -1190,7 +1196,10 @@ fn notice_host(label: &str) -> Option<String> {
 pub struct NoticeProviderDto {
     /// A known preset name ("OpenAI"), else the host.
     pub name: String,
-    pub host: String,
+    /// Absent for a guest looking at a custom (non-preset) provider: the host of an operator's own gateway is
+    /// not the guest's to see (L-1); the name is then 「사용자 지정」.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1232,21 +1241,35 @@ pub struct MemoryNoticeResponse {
 type SummaryRow = (String, Option<String>);
 type NoticeRows = (Vec<MemSettingsRow>, Option<SummaryRow>);
 
+/// What a guest sees instead of a custom provider's host.
+const NOTICE_CUSTOM_PROVIDER: &str = "사용자 지정";
+
 fn notice_response(
     settings: Option<&MemSettingsRow>,
     summary: Option<SummaryRow>,
+    show_custom_host: bool,
 ) -> MemoryNoticeResponse {
     let workspace = workspace_settings_dto(settings);
     let summary = match summary {
         Some((label, model_id)) => {
             let host = notice_host(&label);
-            let provider = host.map(|host| NoticeProviderDto {
-                name: NOTICE_PRESETS
-                    .iter()
-                    .find(|(known, _)| *known == host)
-                    .map_or_else(|| host.clone(), |(_, name)| (*name).to_string()),
-                host,
-            });
+            let provider =
+                host.map(
+                    |host| match NOTICE_PRESETS.iter().find(|(known, _)| *known == host) {
+                        Some((_, name)) => NoticeProviderDto {
+                            name: (*name).to_string(),
+                            host: Some(host),
+                        },
+                        None if show_custom_host => NoticeProviderDto {
+                            name: host.clone(),
+                            host: Some(host),
+                        },
+                        None => NoticeProviderDto {
+                            name: NOTICE_CUSTOM_PROVIDER.to_string(),
+                            host: None,
+                        },
+                    },
+                );
             NoticeSummaryDto {
                 configured: provider.is_some(),
                 provider,
@@ -1288,23 +1311,27 @@ pub async fn get_notice(
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let member_id = principal.member_id;
 
-    let outcome: DbRejectable<NoticeRows> =
+    let outcome: DbRejectable<(NoticeRows, bool)> =
         memory_tenant_tx(&state.pool, workspace_id, member_id, move |conn| {
             Box::pin(async move {
-                if let Err(rejection) = require_live_human(conn, workspace_id, member_id).await? {
-                    return Ok(Err(rejection));
-                }
+                let Some(role) = active_workspace_role(conn, workspace_id, member_id).await? else {
+                    return Ok(Err(ApiError::forbidden("active human membership required")));
+                };
                 let settings = list_settings_in_tx(conn).await?;
                 let summary = summary_provider_in_tx(conn).await?;
-                Ok(Ok((settings, summary)))
+                Ok(Ok((
+                    (settings, summary),
+                    !matches!(role, WorkspaceRole::Guest),
+                )))
             })
         })
         .await;
 
-    let (settings, summary) = settle_mem_read("memory.get_notice", outcome)?;
+    let ((settings, summary), show_custom_host) = settle_mem_read("memory.get_notice", outcome)?;
     Ok(Json(notice_response(
         settings.iter().find(|row| row.scope == "workspace"),
         summary,
+        show_custom_host,
     )))
 }
 
@@ -1427,6 +1454,15 @@ pub async fn reset_memory(
         }
     };
 
+    // L-7: the reset kept losing to a worker or an editor (deadlock / lock timeout / a survivor check):
+    // nothing was changed; tell the client to try again rather than answering a bare 500.
+    if matches!(&outcome, Err(error) if reset_retryable(error)) {
+        return Err(ApiError::coded(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "memory_reset_busy",
+            "team memory is busy; nothing was changed. Try again in a few seconds",
+        ));
+    }
     let done = settle_mem_read("memory.reset", outcome)?;
     Ok(Json(ResetMemoryResponse {
         epoch: done.epoch,
@@ -2145,7 +2181,7 @@ mod tests {
 
     #[test]
     fn the_notice_says_nothing_is_sent_without_a_summary_row_or_when_paused() {
-        let none = notice_response(None, None);
+        let none = notice_response(None, None, true);
         assert!(!none.summary.configured && !none.sending && none.enabled);
         assert_eq!(none.embeddings.location, "local");
         assert!(!none.embeddings.sent_to_provider);
@@ -2153,7 +2189,7 @@ mod tests {
             "https://api.anthropic.com/v1".to_string(),
             Some("claude-x".to_string()),
         ));
-        let on = notice_response(None, row.clone());
+        let on = notice_response(None, row.clone(), true);
         assert!(on.sending);
         assert_eq!(
             on.summary.provider.as_ref().map(|p| p.name.as_str()),
@@ -2170,16 +2206,98 @@ mod tests {
             reset_epoch: 4,
             updated_at: chrono::Utc::now(),
         };
-        let paused = notice_response(Some(&settings), row.clone());
+        let paused = notice_response(Some(&settings), row.clone(), true);
         assert!(!paused.sending && paused.paused && paused.reset_epoch == 4);
         settings.paused = false;
         settings.enabled = false;
-        assert!(!notice_response(Some(&settings), row).sending);
+        assert!(!notice_response(Some(&settings), row, true).sending);
         // an unparsable label configures nothing rather than naming a guess
         assert!(
-            !notice_response(None, Some(("garbage".to_string(), None)))
+            !notice_response(None, Some(("garbage".to_string(), None)), true)
                 .summary
                 .configured
+        );
+    }
+
+    /// The notice must name everything the worker sends. Every file that calls the summary model
+    /// (`self.call_model(`) is listed here with the codes it needs; a new call site fails this test until
+    /// it is reviewed against the notice (M-2).
+    #[test]
+    fn the_notice_codes_follow_the_worker_call_sites() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../momo-agent-worker/src");
+        let expected: &[(&str, &[&str])] = &[
+            (
+                "summary.rs",
+                &[
+                    "channel_message_text",
+                    "author_display_name",
+                    "agent_dm_message_text",
+                    "digest_text",
+                ],
+            ),
+            ("consolidate.rs", &["memory_item_text"]),
+            ("topics.rs", &["topic_summary_input"]),
+        ];
+        let mut callers: Vec<String> = std::fs::read_dir(&dir)
+            .expect("worker src")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().extension().is_some_and(|e| e == "rs"))
+            .filter(|entry| {
+                std::fs::read_to_string(entry.path())
+                    .is_ok_and(|text| text.contains("self.call_model("))
+            })
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        callers.sort();
+        let mut listed: Vec<String> = expected.iter().map(|(f, _)| (*f).to_string()).collect();
+        listed.sort();
+        assert_eq!(
+            callers, listed,
+            "a memory model call site was added or removed: update the notice codes (NOTICE_SENDS) and this list"
+        );
+        for (file, codes) in expected {
+            for code in *codes {
+                assert!(
+                    NOTICE_SENDS.contains(code),
+                    "{file} sends {code}: missing from NOTICE_SENDS"
+                );
+            }
+        }
+        // and nothing in the notice that no call site accounts for
+        let accounted: Vec<&str> = expected
+            .iter()
+            .flat_map(|(_, c)| c.iter().copied())
+            .collect();
+        for code in NOTICE_SENDS {
+            assert!(
+                accounted.contains(code),
+                "{code} is in the notice but no call site is mapped to it"
+            );
+        }
+    }
+
+    #[test]
+    fn a_guest_sees_the_preset_name_or_custom_but_never_a_custom_host() {
+        let custom = Some(("https://llm.corp.example/v1".to_string(), None));
+        let guest = notice_response(None, custom.clone(), false);
+        let provider = guest.summary.provider.expect("provider");
+        assert_eq!(
+            (provider.name.as_str(), provider.host),
+            ("사용자 지정", None)
+        );
+        let member = notice_response(None, custom, true)
+            .summary
+            .provider
+            .expect("provider");
+        assert_eq!(member.host.as_deref(), Some("llm.corp.example"));
+        let preset = Some(("https://api.openai.com/v1".to_string(), None));
+        let guest = notice_response(None, preset, false)
+            .summary
+            .provider
+            .expect("provider");
+        assert_eq!(
+            (guest.name.as_str(), guest.host.as_deref()),
+            ("OpenAI", Some("api.openai.com"))
         );
     }
 }
