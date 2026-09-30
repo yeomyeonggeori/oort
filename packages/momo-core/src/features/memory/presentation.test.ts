@@ -240,6 +240,28 @@ describe("deriveReceiptChip", () => {
     expect(deriveReceiptChip(receipt({ withheldCount: 3 }))?.withheldCount).toBe(3);
   });
 
+  it("counts served items as listed, so only the unreadable remainder is unlisted", () => {
+    const model = deriveReceiptChip(
+      receipt({
+        servedCount: 4,
+        items: [
+          {
+            id: "i1",
+            channelId: "c",
+            kind: "decision",
+            origin: "confirmed",
+            body: "큐를 늘려요.",
+            validFromMs: 1,
+            sourceCount: 2,
+          },
+        ],
+      })
+    );
+    expect(model?.items).toHaveLength(1);
+    expect(model?.unlistedCount).toBe(1);
+    expect(model?.usedChars).toBe(receipt().usedChars);
+  });
+
   it("accounts for served items the reader cannot open", () => {
     expect(
       deriveReceiptChip(receipt({ servedCount: 5 }))?.unlistedCount
