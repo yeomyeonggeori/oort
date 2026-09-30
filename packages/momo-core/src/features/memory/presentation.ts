@@ -320,7 +320,7 @@ export const CHANNEL_SWITCH_ADMIN_ONLY_REASON =
 
 /** Notice next to the workspace switch (ADR-0196 D9 team notice). */
 export const TEAM_MEMORY_NOTICE =
-  "팀 기억을 켜면 채널 대화가 요약을 만드는 AI에게 전달돼요. 요약에는 원본 메시지 링크가 함께 남아요.";
+  "요약 AI가 정해져 있고 팀 기억이 켜져 있으면, 채널 대화가 요약을 만드는 AI에게 전달돼요. 요약에는 원본 메시지 링크가 함께 남아요.";
 
 export function canChangeWorkspaceMemory(role: MembershipRole | undefined): boolean {
   return isWorkspaceOperator(role);
@@ -473,7 +473,7 @@ export const MEMORY_RESET_TITLE = "기억 초기화";
 export const MEMORY_RESET_LEAD =
   "팀이 쌓아 온 기억을 모두 지우고 처음부터 다시 쌓아요. 되돌릴 수 없어요.";
 export const MEMORY_RESET_DELETES =
-  "요약, 기억 항목, 주제, 기억 제안, 답변에 실린 기억 영수증을 영구히 지워요.";
+  "요약, 기억 항목, 주제, 기억 제안, 답변에 실린 기억 영수증과 이들에 딸린 근거·검색 색인을 영구히 지워요.";
 export const MEMORY_RESET_KEEPS_SWITCHES =
   "켜기와 일시정지 같은 스위치는 지금 상태 그대로 둬요.";
 export const MEMORY_RESET_KEEPS_FORGOTTEN =
@@ -497,7 +497,7 @@ export function memoryResetConfirmed(typed: string): boolean {
 }
 
 export function memoryResetDoneMessage(epoch: number): string {
-  return `기억을 초기화했어요. 초기화 기록은 ${epoch}회가 됐어요. 팀 기억이 켜져 있으면 새 메시지부터 다시 쌓여요.`;
+  return `기억을 초기화했어요. 이 워크스페이스에서 ${epoch}번째 초기화예요. 팀 기억이 켜져 있으면 새 메시지부터 다시 쌓여요.`;
 }
 
 export function memoryResetDoneCounts(result: MemoryResetResult): string {

@@ -276,7 +276,7 @@ describe("기억 초기화", () => {
     await typeWord(host);
     await submit(host);
     const done = text(host, "memory-reset-done");
-    expect(done).toContain("초기화 기록은 3회");
+    expect(done).toContain("3번째 초기화예요");
     expect(done).toContain("요약 12개");
     expect(done).toContain("영수증 5개");
     expect(byTestId(host, "memory-reset-confirm")).toBeNull();

@@ -118,6 +118,8 @@ const SHOTS = [
   { name: "idle", v: {}, wait: "memory-reset-open" },
   { name: "ask-enable", v: { settings: settings({ enabled: false }), notice: { ...NOTICE, enabled: false, sending: false } }, wait: "memory-workspace-enabled",
     drive: async (page) => { await page.getByTestId("memory-workspace-enabled").click(); await page.getByTestId("memory-enable-ask").waitFor({ state: "visible" }); } },
+  { name: "ask-enable-unconfigured", v: { settings: settings({ enabled: false }), notice: { ...NOTICE, enabled: false, sending: false, summary: { configured: false } } }, wait: "memory-workspace-enabled",
+    drive: async (page) => { await page.getByTestId("memory-workspace-enabled").click(); await page.getByTestId("memory-enable-ask").waitFor({ state: "visible" }); } },
   { name: "confirming", v: {}, wait: "memory-reset-open", drive: async (page) => { await confirmReset(page, "초기"); } },
   { name: "confirming-armed", v: {}, wait: "memory-reset-open", drive: async (page) => { await confirmReset(page); } },
   { name: "running", v: { resetHang: true }, wait: "memory-reset-open",
