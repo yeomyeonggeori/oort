@@ -46,12 +46,30 @@ ADR-0196(팀 기억 v2) M1의 요약 루프. `momo-agent-worker` 프로세스 �
 - 응답이 JSON이 아니면 원문이 요약 본문이 되고 항목은 0개다(요약은 항상 만들어진다). 요약 본문에 자격증명 모양이 있으면 그 응답의 항목도 버린다.
 - DM(사람↔에이전트)에서 나온 항목은 개인 공간(`space_kind='personal'`, 소유자 = 그 사람)이다.
 - 읽기: 저장 채널·모든 근거 채널을 지금 읽을 수 있고 근거 메시지가 살아 있을 때만 보인다. 근거가 삭제·수정되면 즉시 가려진다 —
-  행은 지우지 않는다(`retired_reason=source_deleted/edited`로 내리는 정리 잡은 M3, #3172). 같은 내용이 다시 추출되면 죽은 옛 행은 `stale`로 표시되고 새 행이 들어간다.
+  행은 지우지 않는다(`retired_reason=source_deleted/edited`로 내리는 일은 정리 잡이 한다, 아래 「정리 잡」). 같은 내용이 다시 추출되면 죽은 옛 행은 `stale`로 표시되고 새 행이 들어간다.
 - 모델 호출 예산: 창 호출은 출력 허용량 +700토큰을 더 예약한다(`ITEMS_OUTPUT_ALLOWANCE`).
 - 상태 보기: `mem_item`(행), `mem_event`(생성 이벤트, 본문 없음). 프롬프트 버전은 `mem_digest.prompt_version`(digest-v2)과 `mem_item.extractor_version`(items-v1)에 남는다.
 - 검색: `mem_search_items(질의, 개수)`(열람 API, momo_app 세션만, 질의 200자 상한) / `mem_search_items_for(요청자, 질의, 개수, 답 채널)`(서빙, 워커 전용, **답 채널 필수**).
   pg_trgm 낱말 유사도 + 조사 떼기, 뷰어의 멤버십 채널로 좁힌 뒤 RLS와 같은 읽기 규칙. GIN 인덱스는 RLS 아래에서 쓰이지 않아 만들지 않았다(ADR-0196 증보 2026-09-30).
   워크스페이스 항목 수에 비례해 느려진다 — 측정은 PR #3200 본문. 시크릿 판정은 Rust `looks_like_secret`과 SQL `mem_looks_like_secret`이 같은 예/아니오 목록으로 시험된다.
+
+## 정리 잡 (#3172, M3)
+요약 루프 옆의 셋째 루프(`consolidate.rs`)가 채널마다 **하루 한 번** 돈다(워크스페이스 현지 `MEMORY_CONSOLIDATE_HOUR:MINUTE`, 기본 04:30 슬롯이
+열린 뒤 첫 훑기; 진행은 `mem_cons_state`). 끄기: `MEMORY_CONSOLIDATE_ENABLED=0`(데이터 그대로). 환경 변수는 `infra/.env.example`의 `MEMORY_CONSOLIDATE_*`·`MEMORY_*_RETENTION_DAYS`.
+- **토큰 없는 손질**(모델 미설정이어도 돈다): 근거가 죽은 항목 내리기(`source_deleted`/`source_edited`) · 잊은 항목의 근거를 인용한 요약 stale 표시 ·
+  만료/근거 삭제/잊은 해시의 대기 제안 삭제 · 감쇠(`forget_after` 경과, extracted/synthesized만) · 보존 삭제(retired 90일, 롤업이 덮은 창 요약 90일).
+  일시정지·제외된 채널은 데이터를 유지한다(감쇠·보존 삭제 없음).
+- **모델 판정**: 같은 채널·종류 후보 쌍마다 `duplicate | supersedes | distinct` 한 단어. duplicate → 병합(근거는 옮기지 않고 재관찰 횟수·기한만 잇는다, 진 쪽 `merged`), supersedes(결정) → 옛 결정의 `valid_to` 닫기.
+  사람이 확정한 항목이 지거나 옛 쪽이면 자동 변경 대신 `mem_proposal(op='merge'|'close')`. 판정한 쌍은 `mem_cons_pair`에 캐시된다(다시 묻지 않음).
+- **리스**: 정리는 요약과 따로 채널 리스(`MEMORY_CONSOLIDATE_LEASE_SECONDS` 900)를 쥐고 모델 호출마다 갱신한다. **원인이 사라지면 되돌림**: 닫은 항목·합친 이긴 쪽이 근거 소멸·감쇠·삭제로 내려가면 닫힌 결정을 다시 열고 진 쪽을 되살린다(`reverted` 이벤트). **사람의 되돌리기**: `POST …/memory/items/{id}/events/{event}/revert`. 롤업의 창 요약이 정리돼 없어도 stale 롤업은 원문에서 다시 만든다. 사람이 확정한 항목의 보존 삭제는 4배 기한.
+- **예산**: 요약과 **같은** 워크스페이스 일일 상한. 정리는 상한의 `MEMORY_CONSOLIDATE_TOKEN_SHARE_PERCENT`(80%)까지만 쓰고, 채널당 모델 호출은 `MEMORY_CONSOLIDATE_MAX_CALLS`(30)까지.
+  상한에 닿으면 그날 정리를 멈추고 `MEMORY_CONSOLIDATE_RETRY_SECONDS`(30분) 뒤 재시도, audit `mem.consolidate.token_cap_reached`(6시간에 한 번).
+- **상태 보기**: `mem_cons_state(channel_id, last_run_at, retry_after, lease_*)`, `mem_event`(정리마다 한 행: `merged` · `superseded`+`reason=contradiction` · `retired`+`reason=decayed|source_deleted|source_edited` · `reinforced` · `purged` · `expired` · `reverted`),
+  `mem_cons_pair`(판정 캐시), `mem_proposal.op <> 'add'`(정리 제안; 목록 API에는 아직 나오지 않는다).
+- **되돌리기**: 병합·기간 닫기·감쇠는 이벤트에 되돌릴 값이 있고 워커 전용 함수 `mem_cons_revert(event_id)`가 복원한다(psql은 `SET ROLE momo_memory` + `app.workspace_id`).
+  되돌린 쌍은 `distinct`로 캐시된다. 잊기·보존 삭제는 되돌릴 수 없다.
+- **잊기 뒤 요약**: 항목을 잊으면 그 근거 메시지를 인용한 요약이 stale이 되고, 다시 만들 때 그 메시지는 입력에서 빠진다(`mem_suppress_msg`, id만).
+- 이식 귀속: Hindsight consolidation(MIT) · Graphiti 모순 구간 닫기(Apache-2.0) — `NOTICE`, `legal/THIRD_PARTY_NOTICES.md`.
 
 ## 알려진 한계 (M1)
 - 일일 상한은 넘으면 **멈춘다**(plan §6.6의 「트리거를 ≥120건으로 늘려 계속」은 미구현).

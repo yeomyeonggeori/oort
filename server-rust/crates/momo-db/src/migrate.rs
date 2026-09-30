@@ -527,19 +527,24 @@ mod tests {
     /// FORCE RLS, no runtime-role privileges), the worker-only embedding writers and readers, the
     /// query-text gate `mem_serve_query`, and the owner-only weighted-RRF fusion behind
     /// `mem_serve_items_fused` (permission filtering stays in SQL, before the top-K cut).
+    /// 108 is #3172's consolidation job (ADR-0196 D4/D10): worker-only definer functions for
+    /// duplicate merge, decision-interval closing, decay, source-death retirement, retention and
+    /// pending-proposal purge (all reversible through `mem_event`), `mem_cons_state`/`mem_cons_pair`/
+    /// `mem_suppress_msg`, the `mem.op` marker policies, `mem_proposal.op`, the by-signature
+    /// definer allow-list and the follow-ups of #3200/#3209 (event visibility, forget → digests stale).
     #[test]
-    fn discovers_contiguous_migrations_001_to_107() {
+    fn discovers_contiguous_migrations_001_to_108() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            107,
-            "expected 107 migrations under {}",
+            108,
+            "expected 108 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 107);
+        assert_eq!(migrations.last().unwrap().version, 108);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

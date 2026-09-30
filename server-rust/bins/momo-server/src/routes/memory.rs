@@ -42,11 +42,11 @@ use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{DbError, PgConnection, PgPool};
 use momo_messaging::{
     accept_proposal_in_tx, bind_mem_reader_guc, clamp_mem_digest_limit, clamp_mem_item_limit,
-    clamp_mem_proposal_limit, digests_by_ids_in_tx, edit_item_in_tx, evidence_for_digests_in_tx,
-    evidence_for_items_in_tx, forget_item_in_tx, get_digest_in_tx, get_item_in_tx,
-    get_proposal_in_tx, get_serving_in_tx, items_by_ids_in_tx, last_read_seq_in_tx,
+    clamp_mem_proposal_limit, digests_by_ids_in_tx, edit_item_in_tx, event_target_in_tx,
+    evidence_for_digests_in_tx, evidence_for_items_in_tx, forget_item_in_tx, get_digest_in_tx,
+    get_item_in_tx, get_proposal_in_tx, get_serving_in_tx, items_by_ids_in_tx, last_read_seq_in_tx,
     list_digests_in_tx, list_item_events_in_tx, list_items_in_tx, list_proposals_in_tx,
-    list_settings_in_tx, reject_proposal_in_tx, search_item_rows_in_tx,
+    list_settings_in_tx, reject_proposal_in_tx, revert_consolidation_in_tx, search_item_rows_in_tx,
     summarized_through_seq_in_tx, upsert_channel_settings_in_tx, upsert_member_settings_in_tx,
     upsert_workspace_settings_in_tx, DigestListFilter, ItemListFilter, ItemStatus, MemDigest,
     MemEvidence, MemItem, MemItemBrief, MemItemEvent, MemItemEvidence, MemProposal, MemServing,
@@ -584,7 +584,9 @@ pub async fn get_receipt(
         receipt: ReceiptDto {
             run_id: serving.run_id.to_string(),
             channel_id: serving.channel_id.to_string(),
-            served_count: (serving.digest_ids.len() + serving.item_ids.len()) as i32,
+            // What the caller can read, not what was stored: a digest or item that has since been hidden for this
+            // caller must not leave a count that hints at it (#3222 H-3 follow-up).
+            served_count: (digests.len() + items.len()) as i32,
             digest_ids: digests.iter().map(|digest| digest.id.to_string()).collect(),
             digests: digests
                 .iter()
@@ -1164,7 +1166,11 @@ fn map_item_write_error(error: &DbError) -> Option<ApiError> {
         return None;
     };
     let message = db.message();
-    if !(message.starts_with("mem_edit_item:") || message.starts_with("mem_forget_item:")) {
+    if !(message.starts_with("mem_edit_item:")
+        || message.starts_with("mem_forget_item:")
+        || message.starts_with("mem_revert_consolidation:")
+        || message.starts_with("mem_cons_revert:"))
+    {
         return None;
     }
     Some(match db.code().as_deref()? {
@@ -1351,6 +1357,14 @@ pub struct EditItemResponse {
     pub evidence: Vec<ItemEvidenceDto>,
     /// The item it replaced (now retired as `edited`, kept as history).
     pub superseded_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevertEventResponse {
+    /// What was undone: `merged` | `superseded` (a decision closing) | `decayed`.
+    pub reverted: String,
+    pub item_id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -1708,6 +1722,66 @@ pub async fn forget_item(
 
     Ok(Json(ForgetItemResponse {
         forgotten_count: settle_mem_read("memory.forget_item", outcome)?,
+    }))
+}
+
+/// `POST /v1/workspaces/{ws}/memory/items/{id}/events/{event}/revert` — undo one consolidation event of an item
+/// (ADR-0196 D4 「되돌릴 수 있어야 한다」, D9): a merge, a decision closing or a decay. Same permission and the
+/// same 404 as [`edit_item`] (anyone who can read the item — and, for a merge, the item it was merged into; guests
+/// get 403). Refused (409) when the change no longer stands, the channel is switched off, or it would bring back
+/// forgotten or unsupported content. The event must belong to the item in the path (404 otherwise).
+pub async fn revert_item_event(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, item, event)): Path<(String, String, String)>,
+) -> Result<Json<RevertEventResponse>, ApiError> {
+    require_human(&principal, HUMAN_ONLY)?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let item_id = path_uuid(&item, "invalid item id")?;
+    let event_id = path_uuid(&event, "invalid event id")?;
+    let member_id = principal.member_id;
+    let via_token = audit_via_token_id(&principal);
+
+    let outcome: DbRejectable<String> =
+        memory_tenant_tx(&state.pool, workspace_id, member_id, move |conn| {
+            Box::pin(async move {
+                if let Err(rejection) = require_live_human(conn, workspace_id, member_id).await? {
+                    return Ok(Err(rejection));
+                }
+                // The event must be the item's own — checked through the read policy first, so a foreign or hidden
+                // event id is the same 404 as a missing one.
+                if event_target_in_tx(conn, event_id).await? != Some(item_id) {
+                    return Ok(Err(ApiError::not_found(ITEM_NOT_FOUND)));
+                }
+                let reverted = match revert_consolidation_in_tx(conn, event_id).await {
+                    Ok(kind) => kind,
+                    Err(error) => {
+                        return match map_item_write_error(&error) {
+                            Some(rejection) => Ok(Err(rejection)),
+                            None => Err(error),
+                        }
+                    }
+                };
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, "memory.item.consolidation_reverted")
+                        .by(member_id)
+                        .target("memory_item", item_id)
+                        .via_token(via_token)
+                        .with_schema(
+                            "momo.memory.item.consolidation_reverted.v1",
+                            serde_json::json!({ "event": event_id, "what": reverted }),
+                        ),
+                )
+                .await?;
+                Ok(Ok(reverted))
+            })
+        })
+        .await;
+
+    Ok(Json(RevertEventResponse {
+        reverted: settle_mem_read("memory.revert_item_event", outcome)?,
+        item_id: item_id.to_string(),
     }))
 }
 

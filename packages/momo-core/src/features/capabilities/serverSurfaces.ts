@@ -361,7 +361,8 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
       "PATCH …/memory/settings/me, PATCH …/channels/{ch}/memory/settings. " +
       "2026-09-30 실측(#3208): 기억 브라우저 여섯 경로가 더해짐. GET …/memory/items, " +
       "GET/PATCH/DELETE …/memory/items/{id}, GET …/memory/items/{id}/evidence, " +
-      "GET …/memory/items/{id}/events.",
+      "GET …/memory/items/{id}/events. " +
+      "2026-09-30 실측(#3172): POST …/memory/items/{id}/events/{event}/revert가 더해짐(정리 되돌리기).",
   },
   messageSearch: {
     id: "messageSearch",

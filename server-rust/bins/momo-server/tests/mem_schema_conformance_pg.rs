@@ -1768,6 +1768,14 @@ const WORKER_ONLY: [&str; 7] = [
     "mem_digest_live",
     "mem_digest_audience_ok",
 ];
+/// Tables whose policies name `mem_definer` only: a table SELECT that a bootstrap re-grant leaves on
+/// `momo_app` shows it zero rows, so its presence is not asserted either way.
+const DEFINER_ONLY_TABLES: [&str; 4] = [
+    "mem_suppress",
+    "mem_suppress_msg",
+    "mem_cons_state",
+    "mem_cons_pair",
+];
 const RUNTIME_ROLES: [&str; 5] = [
     "momo_app",
     "momo_relay",
@@ -1997,7 +2005,10 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
                 // settings. TRUNCATE / REFERENCES / TRIGGER nowhere (#3186 M-1).
                 // `mem_suppress` (#3208 M-5): its policies name mem_definer only, so momo_app reads
                 // zero rows whether or not a bootstrap re-grant left it a table SELECT — not asserted.
-                if role == "momo_app" && table == "mem_suppress" && privilege == "SELECT" {
+                if role == "momo_app"
+                    && DEFINER_ONLY_TABLES.contains(&table.as_str())
+                    && privilege == "SELECT"
+                {
                     continue;
                 }
                 let allowed = role == "momo_app"
@@ -2015,7 +2026,10 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
             }
             // Column-level grants are a side door around the table-level revokes (#3186 M-3).
             for privilege in ["SELECT", "INSERT", "UPDATE", "REFERENCES"] {
-                if role == "momo_app" && table == "mem_suppress" && privilege == "SELECT" {
+                if role == "momo_app"
+                    && DEFINER_ONLY_TABLES.contains(&table.as_str())
+                    && privilege == "SELECT"
+                {
                     continue;
                 }
                 let allowed = role == "momo_app"
@@ -2088,6 +2102,7 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
             || name == "mem_accept_proposal"
             || name == "mem_reject_proposal"
             || name == "mem_proposal_evidence_ok"
+            || name == "mem_revert_consolidation"
         {
             // The RLS policies call the evidence helpers as the reading role; `mem_search_items`
             // is the API entry point (session_user guard inside; the worker-only twin is
@@ -2116,15 +2131,28 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
             // worker role may run it, because it takes the serve/browse flag from its caller.
             // `mem_proposal_decider` (#3169) is an internal helper of the accept / reject
             // functions and is callable by its owner alone, like `mem_search_items_core`.
+            // #3172: the consolidation internals (merge / close / propose / note_pair / cons_accept) are
+            // callable by their owner alone, like the two above.
             let expected = role == "momo_memory"
-                && name != "mem_search_items_core"
-                && name != "mem_proposal_decider"
-                // #3173: the fusion body and the serving gate are owner-only too (the worker
-                // reaches them through `mem_serve_items_fused` / `mem_serve_query`).
-                && name != "mem_search_items_fused"
-                && name != "mem_serve_gate"
-                // ... and the trigger function that drops a retired item's vectors.
-                && name != "mem_item_embedding_cleanup";
+                && !matches!(
+                    name.as_str(),
+                    "mem_search_items_core"
+                        | "mem_proposal_decider"
+                        | "mem_cons_merge_items"
+                        | "mem_cons_close_item"
+                        | "mem_cons_propose"
+                        | "mem_cons_note_pair"
+                        | "mem_cons_accept"
+                        | "mem_cons_defer"
+                        | "mem_cons_release"
+                        | "mem_item_guest_authored"
+                        | "mem_cons_revert_core"
+                        // #3173: the fusion body, the serving gate and the trigger function that drops a
+                        // retired item's vectors are owner-only too.
+                        | "mem_search_items_fused"
+                        | "mem_serve_gate"
+                        | "mem_item_embedding_cleanup"
+                );
             assert_eq!(has, expected, "{when}: {role} EXECUTE {signature}");
         }
     }
@@ -2408,30 +2436,84 @@ fn migration_path() -> PathBuf {
 /// are merged and stay untouched, #3191 M-6); the newest one is the one that matches the real state.
 fn worker_migration_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../server/Migrations/107_mem_item_embedding.sql")
+        .join("../../../server/Migrations/108_mem_consolidate.sql")
 }
 
-/// M-1: the lock block is one text in three files. Compared byte for byte (stronger than a
-/// hash); the digest is printed so the PR can quote it.
+/// M-1 / L-9: the lock block is one text in the two bootstrap files, compared byte for byte (stronger
+/// than a hash). Migration 101 carries the block as it was when it shipped (a merged migration is
+/// never edited): its worker-only list is the 100-era subset. The bootstrap blocks name **every**
+/// worker-only function of every migration (#3200 L-9), so 101's list must be contained in theirs, and
+/// the bootstrap list must equal the functions the database actually grants to `momo_memory` alone
+/// (checked against the live ACLs in `worker_only_list_matches_the_live_acls`).
 #[test]
-fn lock_block_is_identical_in_migration_and_both_bootstraps() {
+fn lock_block_is_identical_in_both_bootstraps_and_extends_101() {
     let migration = lock_region(&migration_path());
     let roles = lock_region(&sql_dir().join("bootstrap_roles.sql"));
     let runtime = lock_region(&sql_dir().join("bootstrap_runtime_roles.sql"));
     assert!(migration.len() > 2000, "the extracted block is not empty");
     assert!(migration.contains("relkind IN ('r', 'p', 'v', 'm')"));
-    for (name, other) in [
-        ("bootstrap_roles.sql", &roles),
-        ("bootstrap_runtime_roles.sql", &runtime),
-    ] {
-        if &migration != other {
-            let line = migration
-                .lines()
-                .zip(other.lines())
-                .position(|(a, b)| a != b)
-                .map_or_else(|| "length".to_string(), |i| format!("line {}", i + 1));
-            panic!("migration 101 and {name} differ at {line} of the lock block");
-        }
+    if roles != runtime {
+        let line = roles
+            .lines()
+            .zip(runtime.lines())
+            .position(|(a, b)| a != b)
+            .map_or_else(|| "length".to_string(), |i| format!("line {}", i + 1));
+        panic!("bootstrap_roles.sql and bootstrap_runtime_roles.sql differ at {line} of the lock block");
+    }
+    for line in migration
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("'mem_") && l.contains('('))
+    {
+        assert!(
+            roles.contains(line.trim_end_matches(',')),
+            "the bootstrap lock block dropped a function 101 locked: {line}"
+        );
+    }
+}
+
+/// L-9 (#3200): the bootstrap `worker_only` list is exactly the set of definer functions that hold
+/// EXECUTE for `momo_memory` (minus the trigger function): a worker-only function added by a later
+/// migration but missing from the list is not re-locked by a bootstrap re-run.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn worker_only_list_matches_the_live_acls() {
+    let (su, _app, _w) = setup().await;
+    let live: Vec<String> = sqlx::query_scalar(
+        "SELECT p.oid::regprocedure::text FROM pg_proc p \
+          WHERE pg_get_userbyid(p.proowner) = 'mem_definer' AND p.prosecdef \
+            AND p.proname <> 'mem_message_changed' \
+            AND has_function_privilege('momo_memory', p.oid, 'EXECUTE') \
+            AND NOT has_function_privilege('momo_app', p.oid, 'EXECUTE') \
+          ORDER BY 1",
+    )
+    .fetch_all(&su)
+    .await
+    .expect("live worker-only functions");
+    assert!(live.len() >= 30, "worker-only functions: {live:?}");
+    for file in ["bootstrap_roles.sql", "bootstrap_runtime_roles.sql"] {
+        let block = lock_region(&sql_dir().join(file));
+        let normalise = |sig: &str| {
+            sig.replace(", ", ",")
+                .replace("timestamptz", "timestamp with time zone")
+        };
+        let start = block
+            .find("worker_only text[] := ARRAY[")
+            .expect("worker_only");
+        let end = block[start..].find("];").expect("end") + start;
+        let mut listed: Vec<String> = block[start..end]
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("'mem_"))
+            .map(|l| normalise(l.trim_end_matches(',').trim_matches('\'')))
+            .collect();
+        listed.sort();
+        let only_live: Vec<&String> = live.iter().filter(|f| !listed.contains(f)).collect();
+        let only_listed: Vec<&String> = listed.iter().filter(|f| !live.contains(f)).collect();
+        assert!(
+            only_live.is_empty() && only_listed.is_empty(),
+            "{file}: worker_only must list every worker-only function — live but not listed: {only_live:?}; listed but not live: {only_listed:?}"
+        );
     }
 }
 
@@ -2532,53 +2614,77 @@ async fn lock_block_also_locks_views_and_materialized_views() {
     su_exec(&su, "DROP MATERIALIZED VIEW mem_probe_mv").await;
 }
 
-/// L-1: the SECURITY DEFINER functions owned by mem_definer are exactly this list.
-const DEFINER_ALLOW_LIST: [&str; 45] = [
-    "mem_accept_proposal",
-    "mem_add_item",
-    "mem_adjust_tokens",
-    "mem_advance_cursor",
-    "mem_apply_digest",
-    "mem_channel_eligible",
-    "mem_channel_switch",
-    "mem_cursor_state",
-    "mem_digest_audience_ok",
-    "mem_digest_evidence_ok",
-    "mem_digest_index",
-    "mem_digest_live",
-    "mem_digest_rollup_inputs",
-    "mem_drop_digest",
-    "mem_edit_item",
-    "mem_embedding_stats",
-    "mem_forget_item",
-    "mem_item_audience_ok",
-    "mem_item_embedding_cleanup",
-    "mem_item_evidence_ok",
-    "mem_item_live",
-    "mem_item_readable_by",
-    "mem_items_to_embed",
-    "mem_message_changed",
-    "mem_proposal_decider",
-    "mem_proposal_evidence_ok",
-    "mem_propose_item",
-    "mem_record_serving",
-    "mem_reject_proposal",
-    "mem_reserve_tokens",
-    "mem_search_items",
-    "mem_search_items_core",
-    "mem_search_items_for",
-    "mem_search_items_fused",
-    "mem_serve_candidates",
-    "mem_serve_gate",
-    "mem_serve_items",
-    "mem_serve_items_fused",
-    "mem_serve_query",
-    "mem_serve_requester",
-    "mem_serving_of",
-    "mem_serving_record_of",
-    "mem_set_item_embedding",
-    "mem_stale_digests",
-    "mem_token_budget",
+/// L-1 / L-9: the SECURITY DEFINER functions owned by mem_definer are exactly this list, by **full signature**
+/// (`regprocedure` text): an overload that sneaks in under an allowed name is a stranger too (#3200 L-9).
+const DEFINER_ALLOW_LIST: [&str; 68] = [
+    "mem_accept_proposal(uuid)",
+    "mem_add_item(uuid,text,text,text,uuid[],real,boolean,text,text)",
+    "mem_adjust_tokens(bigint)",
+    "mem_advance_cursor(uuid,bigint,uuid,timestamp with time zone)",
+    "mem_apply_digest(uuid,uuid,text,bigint,bigint,text,uuid[],text,text,text,uuid[],timestamp with time zone[],timestamp with time zone)",
+    "mem_channel_eligible(uuid)",
+    "mem_channel_switch(uuid)",
+    "mem_cons_accept(uuid,uuid)",
+    "mem_cons_apply(uuid,uuid,text)",
+    "mem_cons_begin(uuid,uuid,double precision,timestamp with time zone)",
+    "mem_cons_close_item(uuid,uuid,uuid,uuid)",
+    "mem_cons_decay(uuid,integer)",
+    "mem_cons_defer(uuid,uuid,text)",
+    "mem_cons_defer_pair(uuid,uuid)",
+    "mem_cons_finish(uuid,uuid,boolean,integer)",
+    "mem_cons_merge_items(uuid,uuid,uuid,uuid)",
+    "mem_cons_note_pair(uuid,uuid,text)",
+    "mem_cons_pairs(uuid,real,real,integer)",
+    "mem_cons_propose(text,uuid,uuid)",
+    "mem_cons_purge_proposals(uuid)",
+    "mem_cons_reconcile(uuid)",
+    "mem_cons_release(uuid[],text)",
+    "mem_cons_renew(uuid,uuid,double precision)",
+    "mem_cons_retention(uuid,integer,integer,integer)",
+    "mem_cons_retire_dead(uuid,integer)",
+    "mem_cons_revert(uuid)",
+    "mem_cons_revert_core(uuid,uuid)",
+    "mem_cursor_state(uuid)",
+    "mem_digest_audience_ok(uuid,uuid,uuid)",
+    "mem_digest_evidence_ok(uuid)",
+    "mem_digest_index(uuid,text,bigint)",
+    "mem_digest_live(uuid)",
+    "mem_digest_rollup_inputs(uuid,uuid,text,bigint,bigint)",
+    "mem_drop_digest(uuid)",
+    "mem_edit_item(uuid,text,text)",
+    "mem_embedding_stats(text)",
+    "mem_forget_item(uuid)",
+    "mem_item_audience_ok(uuid,uuid,uuid)",
+    "mem_item_embedding_cleanup()",
+    "mem_item_evidence_ok(uuid)",
+    "mem_item_guest_authored(uuid)",
+    "mem_item_live(uuid)",
+    "mem_item_readable_by(uuid,uuid)",
+    "mem_items_to_embed(text,integer)",
+    "mem_message_changed()",
+    "mem_proposal_decider(uuid)",
+    "mem_proposal_evidence_ok(uuid)",
+    "mem_propose_item(uuid,text,text,text,uuid[])",
+    "mem_record_serving(uuid,uuid,uuid[],uuid[],integer,integer,integer)",
+    "mem_reject_proposal(uuid)",
+    "mem_reserve_tokens(bigint,bigint)",
+    "mem_revert_consolidation(uuid)",
+    "mem_search_items(text,integer,uuid,text)",
+    "mem_search_items_core(uuid,text,integer,uuid,boolean,uuid,text)",
+    "mem_search_items_for(uuid,text,integer,uuid)",
+    "mem_search_items_fused(uuid,text,integer,uuid,text,text,real,real)",
+    "mem_serve_candidates(uuid,bigint,integer,integer)",
+    "mem_serve_gate(uuid)",
+    "mem_serve_items(uuid,integer,integer)",
+    "mem_serve_items_fused(uuid,integer,integer,text,text,real,real)",
+    "mem_serve_query(uuid)",
+    "mem_serve_requester(uuid)",
+    "mem_serving_of(uuid)",
+    "mem_serving_record_of(uuid)",
+    "mem_set_item_embedding(uuid,text,text)",
+    "mem_stale_digests(integer,integer)",
+    "mem_suppressed_messages(uuid,uuid[])",
+    "mem_token_budget(bigint)",
 ];
 
 /// The `DO` block that starts at `marker`, up to (not including) `until` or the end of the file.
@@ -2599,20 +2705,23 @@ fn tail_block(path: &std::path::Path, marker: &str, until: Option<&str>) -> Stri
 async fn security_definer_functions_owned_by_mem_definer_are_allow_listed() {
     let (su, _app, _w) = setup().await;
     let owned: Vec<String> = sqlx::query_scalar(
-        "SELECT p.proname::text FROM pg_proc p WHERE p.prosecdef \
+        "SELECT p.oid::regprocedure::text FROM pg_proc p WHERE p.prosecdef \
             AND pg_get_userbyid(p.proowner) = 'mem_definer' ORDER BY 1",
     )
     .fetch_all(&su)
     .await
     .expect("definer functions");
+    let mut owned = owned;
+    owned.sort();
+    let mut expected: Vec<String> = DEFINER_ALLOW_LIST.iter().map(|s| s.to_string()).collect();
+    expected.sort();
     assert_eq!(
-        owned,
-        DEFINER_ALLOW_LIST.to_vec(),
+        owned, expected,
         "a SECURITY DEFINER function owned by mem_definer must be added to the allow-list \
-         here and in the newest migration's allow-list (107_mem_item_embedding.sql) on purpose"
+         here and in the newest migration's allow-list (108_mem_consolidate.sql) on purpose"
     );
     // The migration's own self-check passes on the good state ...
-    let check = tail_block(&worker_migration_path(), "-- ── L-1", None);
+    let check = tail_block(&worker_migration_path(), "-- ── L-9", None);
     run_sql_text(&check).expect("allow-list check passes on the real state");
     // ... and fails, loudly, when a stranger function is owned by mem_definer (sabotage; the
     // single transaction rolls the rogue function back).
@@ -2793,6 +2902,188 @@ async fn recursion_guard_in_the_digest_policy_is_load_bearing() {
     .await
     .expect("arm");
     assert_eq!(arm_after, 1, "definer arm restored");
+}
+
+// ---------------------------------------------------------------------------
+// #3172: L-9 (allow-list by signature) and L-6 (`mem.op` marker)
+// ---------------------------------------------------------------------------
+
+/// L-9 (#3200): an overload under an allowed *name* is a stranger. The by-name check that 101–106 shipped lets
+/// `mem_add_item(uuid)` (owned by `mem_definer`, `SECURITY DEFINER`) through; the by-signature check does not.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn a_definer_overload_under_an_allowed_name_is_refused() {
+    let (_su, _app, _w) = setup().await;
+    let check = tail_block(&worker_migration_path(), "-- ── L-9", None);
+    let rogue = "CREATE FUNCTION public.mem_add_item(p_rogue uuid) RETURNS int LANGUAGE sql SECURITY DEFINER \
+                 SET search_path = pg_catalog AS $f$ SELECT 1 $f$; \
+                 ALTER FUNCTION public.mem_add_item(uuid) OWNER TO mem_definer;";
+    let err = run_sql_text(&format!("{rogue} {check}")).expect_err("the overload must be refused");
+    assert!(
+        err.contains("mem_add_item(uuid)") && err.contains("allow-list"),
+        "RED output: {err}"
+    );
+    // The old, by-name check (what the earlier migrations restated) waves the same state through.
+    let names: Vec<String> = DEFINER_ALLOW_LIST
+        .iter()
+        .map(|s| format!("'{}'", s.split('(').next().unwrap()))
+        .collect();
+    let by_name = format!(
+        "DO $$ DECLARE f text; BEGIN \
+           FOR f IN SELECT p.oid::regprocedure::text FROM pg_proc p \
+                     WHERE p.prosecdef AND pg_get_userbyid(p.proowner) = 'mem_definer' \
+                       AND p.proname <> ALL (ARRAY[{}]) LOOP \
+             RAISE EXCEPTION 'not in the allow-list: %', f; END LOOP; END $$;",
+        names.join(", ")
+    );
+    // (The trailing RAISE rolls the single transaction back so the rogue function does not stay behind: the by-name
+    // check itself passes, and the only error is our own marker.)
+    let passed = run_sql_text(&format!(
+        "{rogue} {by_name} DO $$ BEGIN RAISE EXCEPTION 'by-name check passed'; END $$;"
+    ))
+    .expect_err("rolled back on purpose");
+    assert!(
+        passed.contains("by-name check passed") && !passed.contains("not in the allow-list"),
+        "RED: the by-name check lets the overload through: {passed}"
+    );
+    let left: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_proc WHERE proname = 'mem_add_item' AND pronargs = 1",
+    )
+    .fetch_one(&_su)
+    .await
+    .expect("count");
+    assert_eq!(left, 0, "the sabotage rolled back");
+    eprintln!(
+        "RED by-name allow-list: the rogue overload mem_add_item(uuid) passes; by-signature: {}",
+        err.lines().next().unwrap_or("")
+    );
+}
+
+/// L-6 (#3209): a definer UPDATE/DELETE of `mem_item` / item evidence needs the function to have said what it is
+/// doing (`mem.op`). Without the marker the RESTRICTIVE policy hides the rows from the statement.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn definer_writes_to_items_need_the_mem_op_marker() {
+    let (su, _app, w) = setup().await;
+    let item: Uuid = sqlx::query_scalar(
+        "INSERT INTO mem_item (workspace_id, space_kind, channel_id, kind, origin, body, valid_from, content_hash, \
+                               extractor_version, source_count) \
+         VALUES ($1, 'channel', $2, 'fact', 'extracted', '표지 시험', now(), md5(random()::text), 'test', 1) RETURNING id",
+    )
+    .bind(w.ws)
+    .bind(w.s1)
+    .fetch_one(&su)
+    .await
+    .expect("item");
+    sqlx::query("INSERT INTO mem_evidence (workspace_id, item_id, message_id, channel_id) VALUES ($1, $2, $3, $4)")
+        .bind(w.ws)
+        .bind(item)
+        .bind(w.m_s1.0)
+        .bind(w.s1)
+        .execute(&su)
+        .await
+        .expect("evidence");
+
+    // `ddl` runs before the role switch (sabotage); each statement reports how many rows it touched.
+    async fn touch(
+        su: &PgPool,
+        ws: Uuid,
+        item: Uuid,
+        marker: Option<&str>,
+        ddl: Option<&str>,
+    ) -> (u64, u64, u64) {
+        let mut tx = su.begin().await.expect("begin");
+        if let Some(ddl) = ddl {
+            sqlx::raw_sql(ddl).execute(&mut *tx).await.expect("ddl");
+        }
+        sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+            .bind(ws.to_string())
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("SET LOCAL ROLE mem_definer")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        if let Some(marker) = marker {
+            sqlx::query("SELECT mem_op($1)")
+                .bind(marker)
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+        }
+        let updated = sqlx::query("UPDATE mem_item SET stale = true WHERE id = $1")
+            .bind(item)
+            .execute(&mut *tx)
+            .await
+            .unwrap()
+            .rows_affected();
+        let evidence = sqlx::query("DELETE FROM mem_evidence WHERE item_id = $1")
+            .bind(item)
+            .execute(&mut *tx)
+            .await
+            .unwrap()
+            .rows_affected();
+        let deleted = sqlx::query("DELETE FROM mem_item WHERE id = $1")
+            .bind(item)
+            .execute(&mut *tx)
+            .await
+            .unwrap()
+            .rows_affected();
+        tx.rollback().await.unwrap();
+        (updated, evidence, deleted)
+    }
+    // No marker: the statements find no rows. A marker for another kind of operation does not open the others.
+    assert_eq!(touch(&su, w.ws, item, None, None).await, (0, 0, 0));
+    assert_eq!(
+        touch(&su, w.ws, item, Some("add_item"), None).await,
+        (1, 0, 0),
+        "an updater may not delete"
+    );
+    assert_eq!(
+        touch(&su, w.ws, item, Some("cons_decay"), None).await,
+        (1, 0, 0)
+    );
+    assert_eq!(
+        touch(&su, w.ws, item, Some("forget_item"), None).await,
+        (1, 1, 1),
+        "forget may update, delete evidence and items"
+    );
+    assert_eq!(
+        touch(&su, w.ws, item, Some("cons_retention"), None).await,
+        (1, 1, 1)
+    );
+    // RED: the pre-108 policies (definer only, no marker) let any definer statement through.
+    let old = "DROP POLICY mem_item_only_definer_upd ON mem_item; \
+               CREATE POLICY mem_item_only_definer_upd ON mem_item AS RESTRICTIVE FOR UPDATE \
+                 USING (current_user = 'mem_definer') WITH CHECK (current_user = 'mem_definer'); \
+               DROP POLICY mem_item_only_definer_del ON mem_item; \
+               CREATE POLICY mem_item_only_definer_del ON mem_item AS RESTRICTIVE FOR DELETE \
+                 USING (current_user = 'mem_definer'); \
+               DROP POLICY mem_evidence_marked_del ON mem_evidence;";
+    let without = touch(&su, w.ws, item, None, Some(old)).await;
+    eprintln!("RED marker policies removed: a definer statement without a marker touches (update, evidence delete, item delete) = {without:?}");
+    assert_eq!(without, (1, 1, 1));
+    // The digest's own evidence rows are not gated (mem_apply_digest rewrites them without a marker).
+    let digest = seed_digest(&su, w.ws, w.s1, w.m_s1.1, &[(w.m_s1.0, w.s1)]).await;
+    let mut tx = su.begin().await.unwrap();
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(w.ws.to_string())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("SET LOCAL ROLE mem_definer")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let n = sqlx::query("DELETE FROM mem_evidence WHERE digest_id = $1")
+        .bind(digest)
+        .execute(&mut *tx)
+        .await
+        .unwrap()
+        .rows_affected();
+    tx.rollback().await.unwrap();
+    assert_eq!(n, 1, "digest evidence stays writable for mem_apply_digest");
 }
 
 // Definer functions that return a `body` without being told a viewer or a run (the run row derives

@@ -76,6 +76,7 @@ pub mod a2a;
 pub mod anthropic;
 pub mod completion_report;
 pub mod config;
+pub mod consolidate;
 pub mod context;
 pub mod egress;
 pub mod embed;
@@ -403,6 +404,8 @@ pub struct AgentWorker {
     /// #3162 — the memory summary loop's process-local state (lease token, per-channel
     /// memo, audit throttle). Nothing durable lives here.
     summary: summary::SummaryState,
+    /// #3172 — the consolidation loop's process-local memo (which channels are settled for today's slot).
+    consolidate: consolidate::ConsolidateState,
     /// #3173 — the local embedder (query vectors at serving time, the backfill sweep). Off or
     /// without a model it answers `None` everywhere and serving is keyword-only.
     embed: embed::EmbedService,
@@ -465,6 +468,7 @@ impl AgentWorker {
                 ttl,
             },
             summary: summary::SummaryState::new(),
+            consolidate: consolidate::ConsolidateState::new(),
             embed: embed::EmbedService::from_config(&config_memory),
             items_stored: tokio::sync::Notify::new(),
         }
@@ -485,6 +489,11 @@ impl AgentWorker {
     /// conformance suite can start a sweep "as after a restart" and tell two workers apart.
     pub fn summary_state(&self) -> &summary::SummaryState {
         &self.summary
+    }
+
+    /// The consolidation loop's process-local memo (tests start "a fresh process" with it).
+    pub fn consolidate_state(&self) -> &consolidate::ConsolidateState {
+        &self.consolidate
     }
 
     pub fn config(&self) -> &WorkerConfig {
@@ -3380,6 +3389,7 @@ impl AgentWorker {
         tokio::join!(
             jobs,
             self.run_summary_loop(stop_rx.clone()),
+            self.run_consolidate_loop(stop_rx.clone()),
             self.run_embed_loop(stop_rx)
         );
     }

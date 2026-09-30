@@ -5,6 +5,7 @@ import { WireShapeError } from "../../lib/wire";
 import {
   editMemoryItem,
   forgetMemoryItem,
+  revertMemoryConsolidation,
   acceptMemoryProposal,
   getMemoryDigest,
   getMemoryItem,
@@ -500,6 +501,26 @@ describe("memory browser items", () => {
     expect(edited.supersededId).toBe(BITEM);
     expect(edited.evidence).toHaveLength(1);
     expect(await forgetMemoryItem(WS, BITEM)).toBe(3);
+  });
+
+  it("reverts a consolidation event through the item's own path and rejects a bad answer", async () => {
+    installHost();
+    const fetchMock = vi.fn(async (input: RequestInit | URL | string, init?: RequestInit) => {
+      expect(String(input)).toContain(`/memory/items/${BITEM}/events/e-1/revert`);
+      expect(init?.method).toBe("POST");
+      return jsonResponse(200, { reverted: "merged", itemId: BITEM });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await revertMemoryConsolidation(WS, BITEM, "e-1")).toEqual({
+      reverted: "merged",
+      itemId: BITEM,
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, { reverted: "forgotten", itemId: BITEM })));
+    await expect(revertMemoryConsolidation(WS, BITEM, "e-1")).rejects.toBeInstanceOf(WireShapeError);
+    for (const status of [403, 404, 409]) {
+      vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(status, { error: { message: "no" } })));
+      await expect(revertMemoryConsolidation(WS, BITEM, "e-1")).rejects.toMatchObject({ status });
+    }
   });
 
   it("surfaces 404, 409 and 422 of a write as ApiErrors, and rejects a bad forget body", async () => {

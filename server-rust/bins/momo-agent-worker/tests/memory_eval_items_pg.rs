@@ -38,6 +38,7 @@ use eval_kit::corpus::*;
 use eval_kit::harness::*;
 use eval_kit::pg as evalpg;
 use eval_kit::reference::{product_backend, register_product_backend};
+use momo_agent_worker::consolidate::ConsolidateStats;
 use momo_agent_worker::summary::SweepStats;
 use serde_json::{json, Value};
 
@@ -49,6 +50,10 @@ struct Ctx {
     app: PgPool,
     handle: tokio::runtime::Handle,
     stats: Arc<Mutex<Vec<SweepStats>>>,
+    /// What the consolidation job did after each ingest (#3172).
+    cons: Arc<Mutex<Vec<ConsolidateStats>>>,
+    /// The workspace of the latest ingest (the digest check must not read other suites' leftovers in a shared DB).
+    last_ws: Arc<Mutex<Option<Uuid>>>,
     /// #3173: embed the ingested items (mock embedder) and serve through the fused path with the
     /// widest possible vector candidate set (floor 0, no margin) — the leak gate must still hold.
     vectors: bool,
@@ -56,6 +61,7 @@ struct Ctx {
 
 struct State {
     seeded: evalpg::Seeded,
+    corpus: Corpus,
     by_message: HashMap<Uuid, String>,
     /// Every canary / control token: the queries the serving path is asked with.
     tokens: Vec<String>,
@@ -83,6 +89,9 @@ fn oracle(corpus: &Corpus) -> Oracle {
     }
     let secrets: Vec<String> = corpus.secrets.iter().map(|(_, s)| s.clone()).collect();
     Arc::new(move |_n, prompt| {
+        if prompt.contains("<기억 A>") {
+            return judge_answer(prompt);
+        }
         let mut good_first: Vec<Value> = Vec::new();
         let mut good_rest: Vec<Value> = Vec::new();
         let mut bad: Vec<Value> = Vec::new();
@@ -112,9 +121,18 @@ fn oracle(corpus: &Corpus) -> Oracle {
                 continue;
             };
             let candidate = |kind: &str| json!({"kind": kind, "text": body, "evidence": [seq], "confidence": 0.9});
+            // A decision cites its topic as the subject (what a real extraction prompt asks for): the same subject is
+            // what makes two decisions candidates for interval closing.
+            let decision = |kind: &str| {
+                let mut c = candidate(kind);
+                if let Some((topic, _)) = body.split_once("는 ") {
+                    c["subject"] = json!(topic);
+                }
+                c
+            };
             match class {
                 Class::LeakCanary | Class::Control => good_first.push(candidate("fact")),
-                Class::Decision | Class::DecisionChange => good_rest.push(candidate("decision")),
+                Class::Decision | Class::DecisionChange => good_rest.push(decision("decision")),
                 Class::Commitment => good_rest.push(candidate("commitment")),
                 // Statements of an agent or a bot are not facts: a careless model cites them anyway.
                 Class::Bot | Class::AgentReply => bad.push(candidate("fact")),
@@ -130,7 +148,110 @@ fn oracle(corpus: &Corpus) -> Oracle {
     })
 }
 
+/// The consolidation judge of the mock model: two decisions of one topic where the later one says "바꿔요"
+/// (the corpus phrases a change that way) — the later supersedes the earlier. Anything else is distinct.
+fn judge_answer(prompt: &str) -> String {
+    let block = |open: &str, close: &str| {
+        let start = prompt.find(open).map_or(0, |i| i + open.len());
+        let end = prompt[start..]
+            .find(close)
+            .map_or(prompt.len(), |i| i + start);
+        prompt[start..end]
+            .trim()
+            .lines()
+            .last()
+            .unwrap_or("")
+            .to_string()
+    };
+    let (a, b) = (
+        block("<기억 A>", "</기억 A>"),
+        block("<기억 B>", "</기억 B>"),
+    );
+    let topic = |body: &str| body.split_once("는 ").map(|(t, _)| t.to_string());
+    if topic(&a).is_some() && topic(&a) == topic(&b) && a.contains("가요") && b.contains("바꿔요")
+    {
+        "supersedes".to_string()
+    } else {
+        "distinct".to_string()
+    }
+}
+
+/// `"{topic}는 {value}로 가요."` / `"...로 바꿔요."` → `value` (adapter-side: the items have no structured value column).
+fn decision_value(topic: &str, body: &str) -> String {
+    body.strip_prefix(&format!("{topic}는 "))
+        .and_then(|rest| {
+            rest.strip_suffix("로 가요.")
+                .or_else(|| rest.strip_suffix("로 바꿔요."))
+        })
+        .unwrap_or(body)
+        .to_string()
+}
+
+struct TopicItem {
+    id: Uuid,
+    value: String,
+    open: bool,
+    closed_by: Option<Uuid>,
+    evidence: Vec<String>,
+    minute: u32,
+}
+
 impl ItemsBackend {
+    /// The decision items of `topic` that `viewer` can read (RLS), oldest first, live ones only.
+    fn topic_items(&self, viewer: Who, topic: &str) -> R<Vec<TopicItem>> {
+        let state = self.ids()?;
+        let (ws, who) = (state.seeded.workspace_id, state.seeded.member[&viewer]);
+        let app = self.ctx.app.clone();
+        let topic_owned = topic.to_string();
+        #[allow(clippy::type_complexity)]
+        let rows: Vec<(Uuid, String, bool, Option<Uuid>, Vec<Uuid>)> = block(
+            &self.ctx,
+            async move {
+                let mut tx = app.begin().await.expect("begin");
+                sqlx::query("SELECT set_config('app.workspace_id', $1, true), set_config('app.member_id', $2, true)")
+                .bind(ws.to_string())
+                .bind(who.to_string())
+                .execute(&mut *tx)
+                .await
+                .expect("gucs");
+                let rows = sqlx::query_as(
+                    "SELECT i.id, i.body, i.valid_to IS NULL, i.closed_by_id, \
+                        ARRAY(SELECT e.message_id FROM mem_evidence e WHERE e.item_id = i.id) \
+                   FROM mem_item i \
+                  WHERE i.kind = 'decision' AND i.subject_key = $1 AND i.retired_at IS NULL \
+                  ORDER BY i.valid_from, i.id",
+                )
+                .bind(topic_owned)
+                .fetch_all(&mut *tx)
+                .await
+                .expect("topic items");
+                tx.rollback().await.expect("rollback");
+                rows
+            },
+        );
+        Ok(rows
+            .into_iter()
+            .map(|(id, body, open, closed_by, evidence)| {
+                let keys: Vec<String> = evidence
+                    .iter()
+                    .filter_map(|e| state.by_message.get(e).cloned())
+                    .collect();
+                let minute = keys
+                    .first()
+                    .and_then(|k| state.corpus.msg(k))
+                    .map_or(0, |m| m.minute);
+                TopicItem {
+                    id,
+                    value: decision_value(topic, &body),
+                    open,
+                    closed_by,
+                    evidence: keys,
+                    minute,
+                }
+            })
+            .collect())
+    }
+
     fn ids(&self) -> R<&State> {
         self.state
             .as_ref()
@@ -193,6 +314,10 @@ impl MemoryBackend for ItemsBackend {
             config.memory.thread_idle_min_replies = 1;
             config.memory.windows_per_channel = 8;
             config.memory.daily_token_cap = 100_000_000;
+            // #3172: the consolidation job runs after the collection path, as it does every night.
+            config.memory.consolidate_hour = 0;
+            config.memory.consolidate_minute = 0;
+            config.memory.consolidate_max_calls = 500;
             let worker = worker_with(&provider, config).await;
             for _ in 0..60 {
                 worker.summary_state().forget_channels();
@@ -204,6 +329,10 @@ impl MemoryBackend for ItemsBackend {
                     break;
                 }
             }
+            *ctx.last_ws.lock().unwrap() = Some(seeded.workspace_id);
+            let cons = worker.consolidate_workspace_now(seeded.workspace_id).await;
+            assert_eq!(cons.failures, 0, "{cons:?}");
+            ctx.cons.lock().unwrap().push(cons);
             if ctx.vectors {
                 let svc = momo_agent_worker::embed::EmbedService::with_embedder(
                     Arc::new(momo_embed::testing::MockEmbedder::new(&[])),
@@ -234,6 +363,7 @@ impl MemoryBackend for ItemsBackend {
                 .collect();
             State {
                 seeded,
+                corpus: corpus.clone(),
                 by_message,
                 tokens,
             }
@@ -408,15 +538,37 @@ impl MemoryBackend for ItemsBackend {
             .collect())
     }
 
-    fn current_value(&self, _: Who, _: &str) -> R<Option<Answer>> {
-        Err(EvalError::NotImplemented(
-            "MEM-M3 decision timeline (#3172/#3174)",
-        ))
+    /// The current decision is the one item whose validity is still open. Two open decisions of one topic are a
+    /// contradiction nobody resolved (no closing happened): there is no answer, so the query counts as missed.
+    fn current_value(&self, viewer: Who, topic: &str) -> R<Option<Answer>> {
+        let items = self.topic_items(viewer, topic)?;
+        let mut open = items.into_iter().filter(|i| i.open);
+        Ok(match (open.next(), open.next()) {
+            (Some(one), None) => Some(Answer {
+                value: one.value,
+                evidence: one.evidence,
+            }),
+            _ => None,
+        })
     }
-    fn timeline(&self, _: Who, _: &str) -> R<Vec<Period>> {
-        Err(EvalError::NotImplemented(
-            "MEM-M3 decision timeline (#3172/#3174)",
-        ))
+
+    /// Old values stay, each closed at the minute its successor began — read from `closed_by_id`, not guessed.
+    fn timeline(&self, viewer: Who, topic: &str) -> R<Vec<Period>> {
+        let items = self.topic_items(viewer, topic)?;
+        let minute_of: HashMap<Uuid, u32> = items.iter().map(|i| (i.id, i.minute)).collect();
+        Ok(items
+            .iter()
+            .map(|i| Period {
+                value: i.value.clone(),
+                valid_from_minute: i.minute,
+                valid_to_minute: if i.open {
+                    None
+                } else {
+                    i.closed_by.and_then(|c| minute_of.get(&c).copied())
+                },
+                evidence: i.evidence.clone(),
+            })
+            .collect())
     }
     fn commitments(&self, _: Who) -> R<Vec<Commitment>> {
         Err(EvalError::NotImplemented(
@@ -464,6 +616,8 @@ async fn the_items_path_has_zero_leaks_and_stores_nothing_it_must_not() {
         app: momo_app_pool().await,
         handle: tokio::runtime::Handle::current(),
         stats: Arc::new(Mutex::new(Vec::new())),
+        cons: Arc::new(Mutex::new(Vec::new())),
+        last_ws: Arc::new(Mutex::new(None)),
         vectors: false,
     };
     register(ctx.clone());
@@ -538,12 +692,24 @@ async fn the_items_path_has_zero_leaks_and_stores_nothing_it_must_not() {
     eprintln!("policy + provenance violations: {violations:?}");
     assert!(violations.is_empty(), "{violations:?}");
     // Digest bodies (built from the transcript the model saw) carry no secret-shaped string either.
-    let digests: Vec<String> = sqlx::query_scalar("SELECT body FROM mem_digest")
-        .fetch_all(&su)
-        .await
-        .expect("digests");
+    let ingest_ws = ctx.last_ws.lock().unwrap().expect("an ingest ran");
+    let digests: Vec<String> =
+        sqlx::query_scalar("SELECT body FROM mem_digest WHERE workspace_id = $1")
+            .bind(ingest_ws)
+            .fetch_all(&su)
+            .await
+            .expect("digests");
     for (_, secret) in &corpus.secrets {
-        assert!(digests.iter().all(|d| !d.contains(secret.as_str())));
+        assert!(
+            digests.iter().all(|d| !d.contains(secret.as_str())),
+            "a digest carries a secret-shaped string ({} chars, starts {:?}): {:?}",
+            secret.len(),
+            secret.chars().take(4).collect::<String>(),
+            digests
+                .iter()
+                .find(|d| d.contains(secret.as_str()))
+                .map(|d| d.chars().take(300).collect::<String>())
+        );
         assert!(stored.iter().all(|s| !s.text.contains(secret.as_str())));
     }
     drop(b);
@@ -561,6 +727,62 @@ async fn the_items_path_has_zero_leaks_and_stores_nothing_it_must_not() {
     for (id, what) in LEAK_CASES {
         eprintln!("  PASS {id}: {what}");
     }
+
+    // ---- 1b. decision tracking (plan §8.2 / D13): the leak gate above ran on the *consolidated* state; now
+    //          the consolidated state is scored for what consolidation is for.
+    let consolidated = ctx
+        .cons
+        .lock()
+        .unwrap()
+        .last()
+        .cloned()
+        .expect("a consolidation ran");
+    eprintln!("consolidation totals: {consolidated:?}");
+    let mut backend = product_backend();
+    backend.ingest(&corpus).expect("ingest");
+    let score = decision_score(&*backend, &corpus).expect("decision score");
+    eprintln!(
+        "decision tracking: current value {}/{} correct ({:.1} %), changed decisions keeping the old value with a closed valid_to {}/{}",
+        score.current_correct,
+        score.current_total,
+        100.0 * score.current_correct as f64 / score.current_total as f64,
+        score.closed_ok,
+        score.closed_total
+    );
+    assert!(
+        score.current_correct * 10 >= score.current_total * 9,
+        "current-value accuracy >= 90 %: {score:?}"
+    );
+    assert_eq!(
+        score.closed_ok, score.closed_total,
+        "100 % of changed decisions: {score:?}"
+    );
+    drop(backend);
+    // RED: without the interval closing the open contradictions leave no single current value and no closed
+    // periods — the score drops (the guard is what the metric measures).
+    let close_fn = "public.mem_cons_close_item(uuid, uuid, uuid, uuid)";
+    let original = sabotage(
+        &su,
+        close_fn,
+        &[(
+            "  UPDATE public.mem_item\n     SET valid_to = n.valid_from, closed_by_id = n.id, closed_at = pg_catalog.now()\n   WHERE id = o.id;",
+            "",
+        )],
+    )
+    .await;
+    let mut broken = product_backend();
+    broken.ingest(&corpus).expect("ingest");
+    let red = decision_score(&*broken, &corpus).expect("decision score");
+    drop(broken);
+    restore(&su, &original).await;
+    eprintln!(
+        "RED interval closing removed: current value {}/{}, closed periods {}/{}",
+        red.current_correct, red.current_total, red.closed_ok, red.closed_total
+    );
+    assert!(
+        red.current_correct < score.current_correct && red.closed_ok == 0,
+        "{red:?}"
+    );
 
     // ---- 2. sabotage: each guard removed makes the gate FAIL, and putting it back makes it pass
     let read_fn = "public.mem_item_readable_by(uuid, uuid)";
@@ -652,6 +874,8 @@ async fn the_vector_path_has_zero_leaks_too() {
         app: momo_app_pool().await,
         handle: tokio::runtime::Handle::current(),
         stats: Arc::new(Mutex::new(Vec::new())),
+        cons: Arc::new(Mutex::new(Vec::new())),
+        last_ws: Arc::new(Mutex::new(None)),
         vectors: true,
     };
     // Not `register_product_backend` (first registration wins per process, and the sibling test

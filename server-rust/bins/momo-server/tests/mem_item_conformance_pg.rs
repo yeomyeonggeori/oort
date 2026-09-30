@@ -1894,7 +1894,7 @@ async fn search_respects_rls_and_narrows_the_audience() {
         .all(|i| *i != it.hr_item));
 
     // RED: the audience predicate and the read check are load-bearing in the search core ...
-    let core = "public.mem_search_items_core(uuid, text, integer, uuid, boolean)";
+    let core = "public.mem_search_items_core(uuid, text, integer, uuid, boolean, uuid, text)";
     let leaked = search_with_core(
         &su,
         core,
@@ -1978,7 +1978,7 @@ async fn search_respects_rls_and_narrows_the_audience() {
             let mut tx = if strip_guard {
                 sabotage_tx(
                     &su,
-                    "public.mem_search_items(text, integer)",
+                    "public.mem_search_items(text, integer, uuid, text)",
                     &[(
                         "IF session_user::text <> 'momo_app'",
                         "IF false AND session_user::text <> 'momo_app'",
@@ -2499,7 +2499,7 @@ async fn worker_only_item_functions_are_closed_to_the_api() {
 // review hardening (M-1, M-4, M-6, L-2, L-5, L-6)
 // ---------------------------------------------------------------------------
 
-const CORE: &str = "public.mem_search_items_core(uuid, text, integer, uuid, boolean)";
+const CORE: &str = "public.mem_search_items_core(uuid, text, integer, uuid, boolean, uuid, text)";
 const FOR_FN: &str = "public.mem_search_items_for(uuid, text, integer, uuid)";
 
 #[tokio::test]
@@ -2523,14 +2523,14 @@ async fn serving_never_runs_without_an_audience_and_queries_are_capped() {
         (
             "serve without a channel",
             format!(
-                "SELECT count(*) FROM mem_search_items_core('{}', '{word}', 10, NULL, true)",
+                "SELECT count(*) FROM mem_search_items_core('{}', '{word}', 10, NULL, true, NULL, NULL)",
                 w.alice
             ),
         ),
         (
             "browse with a channel",
             format!(
-                "SELECT count(*) FROM mem_search_items_core('{}', '{word}', 10, '{}', false)",
+                "SELECT count(*) FROM mem_search_items_core('{}', '{word}', 10, '{}', false, NULL, NULL)",
                 w.alice, w.general
             ),
         ),
@@ -2543,7 +2543,7 @@ async fn serving_never_runs_without_an_audience_and_queries_are_capped() {
     }
     // ... and nobody but the owner can call the core: not the worker role, not the API role.
     let core_call = format!(
-        "SELECT count(*) FROM mem_search_items_core('{}', '{word}', 10, '{}', true)",
+        "SELECT count(*) FROM mem_search_items_core('{}', '{word}', 10, '{}', true, NULL, NULL)",
         w.alice, w.general
     );
     assert_eq!(exec(&wk, w.ws, None, &core_call).await, Err("42501".into()));
@@ -2553,8 +2553,8 @@ async fn serving_never_runs_without_an_audience_and_queries_are_capped() {
     );
     // RED: serving regresses to "browse" (the wrapper passes false) — the core guard still stops it ...
     let serve_as_browse = (
-        "mem_search_items_core(p_viewer, p_query, p_limit, p_answer_channel_id, true)",
-        "mem_search_items_core(p_viewer, p_query, p_limit, p_answer_channel_id, false)",
+        "mem_search_items_core(p_viewer, p_query, p_limit, p_answer_channel_id, true, NULL, NULL)",
+        "mem_search_items_core(p_viewer, p_query, p_limit, p_answer_channel_id, false, NULL, NULL)",
     );
     let serve = format!(
         "SELECT id FROM mem_search_items_for('{}', '{word}', 20, '{}')",
@@ -2795,6 +2795,13 @@ async fn the_definer_may_only_mark_stale_retire_and_delete_and_the_deny_policies
         async move {
             let mut tx = su.begin().await.expect("begin");
             become_role(&mut tx, "mem_definer", ws, None).await;
+            // #3172 L-6: a definer statement that changes or deletes items must have said what it is doing
+            // (`mem.op`; pinned on its own in mem_schema_conformance_pg). This test is about the *column* and
+            // *policy* limits, so it plays a function that declared itself.
+            sqlx::query("SELECT mem_op('forget_item')")
+                .execute(&mut *tx)
+                .await
+                .expect("marker");
             let r = sqlx::query(&sql)
                 .execute(&mut *tx)
                 .await
