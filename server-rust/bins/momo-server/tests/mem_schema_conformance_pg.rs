@@ -2035,7 +2035,7 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
                     continue;
                 }
                 let allowed = role == "momo_app"
-                    && (privilege == "SELECT"
+                    && ((privilege == "SELECT" && !NO_READ_TABLES.contains(&table.as_str()))
                         || (table == "mem_settings" && matches!(privilege, "INSERT" | "UPDATE")));
                 let has: bool = sqlx::query_scalar("SELECT has_any_column_privilege($1, $2, $3)")
                     .bind(role)
