@@ -7,6 +7,7 @@ import {
   type MemoryDigest,
   type MemoryDigestPage,
   type MemoryReceipt,
+  type MemoryReceiptItem,
   type MemorySettings,
 } from "./model";
 
@@ -213,12 +214,16 @@ export interface ReceiptChipModel {
   label: string;
   servedCount: number;
   digests: MemoryDigest[];
+  /** Served items this reader can open today (#3174; empty for a server that predates the field). */
+  items: MemoryReceiptItem[];
   /**
-   * Digests counted in `servedCount` that this reader cannot open (or that are
-   * not digests). Shown as a plain fact so the number on the chip and the list
-   * under it never silently disagree.
+   * Served digests and items this reader cannot open. Shown as a plain fact so
+   * the number on the chip and the lists under it never silently disagree.
    */
   unlistedCount: number;
+  /** Characters of the memory block the run was given, out of its budget. */
+  usedChars: number;
+  budgetChars: number;
   /** Present only when the server returned it and it is above zero. */
   withheldCount: number | null;
 }
@@ -236,6 +241,34 @@ export const WITHHELD_EXPLAIN_COPY =
 
 export const RECEIPT_TITLE = "이 답에 참고한 기억";
 export const RECEIPT_ONLY_READABLE = "이 목록에는 내가 볼 수 있는 기억만 나와요.";
+
+// ---- serving inspector (#3174, ADR-0196 D7 / D12 V6) ------------------------
+
+export const INSPECTOR_TITLE = "이 답에 쓰인 기억";
+export const INSPECTOR_OPEN = "쓰인 기억 자세히 보기";
+export const INSPECTOR_CLOSE = "닫기";
+export const INSPECTOR_DIGESTS_HEADING = "요약";
+export const INSPECTOR_ITEMS_HEADING = "기억 항목";
+export const INSPECTOR_OPEN_ITEM = "기억에서 보기";
+export const INSPECTOR_NOTHING_READABLE = "이 답에 쓰인 기억 중 내가 열어 볼 수 있는 게 없어요.";
+export const INSPECTOR_NOTE =
+  "서버가 이 답을 만들 때 실제로 실은 기억만 보여 줘요. 지금 다시 찾은 결과가 아니에요.";
+
+export function inspectorBudgetLabel(usedChars: number, budgetChars: number): string {
+  return `기억 칸 ${usedChars.toLocaleString("ko-KR")}자 / ${budgetChars.toLocaleString("ko-KR")}자 사용`;
+}
+
+export function inspectorUnlistedLabel(count: number): string {
+  return `열어 볼 수 없는 기억 ${count}개`;
+}
+
+export function inspectorModelLabel(model: string): string {
+  return `요약한 모델 ${model}`;
+}
+
+export function inspectorItemMeta(validFromLabel: string, sourceCount: number): string {
+  return `${validFromLabel}의 기억 · 근거 ${sourceCount}개`;
+}
 
 export function receiptSummaryLabel(count: number): string {
   return `기억 ${count}개를 참고해서 답했어요.`;
@@ -255,7 +288,13 @@ export function deriveReceiptChip(
     label: receiptChipLabel(receipt.servedCount),
     servedCount: receipt.servedCount,
     digests: receipt.digests,
-    unlistedCount: Math.max(0, receipt.servedCount - receipt.digests.length),
+    items: receipt.items ?? [],
+    unlistedCount: Math.max(
+      0,
+      receipt.servedCount - receipt.digests.length - (receipt.items?.length ?? 0)
+    ),
+    usedChars: receipt.usedChars,
+    budgetChars: receipt.budgetChars,
     withheldCount: withheld !== undefined && withheld > 0 ? withheld : null,
   };
 }
