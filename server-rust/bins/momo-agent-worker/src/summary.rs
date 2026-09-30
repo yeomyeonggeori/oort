@@ -311,8 +311,15 @@ enum JobOutcome {
     LeaseHeld,
     Switched,
     NotConfigured,
+    /// A stale rollup that cannot be rebuilt from messages (too many): it stays hidden and the pass moves on.
+    Unrebuildable,
     Failed,
 }
+
+/// Marker text of the error `load` returns for a rollup whose window digests are gone and whose messages do not
+/// fit one call (A-2): `run_job` turns it into `JobOutcome::Unrebuildable` instead of a failed pass.
+const ROLLUP_TOO_LARGE: &str =
+    "a rollup without window digests is too large to rebuild from messages";
 
 /// The channel's working state during one pass.
 struct Pass {
@@ -809,6 +816,8 @@ impl AgentWorker {
                         }
                     }
                 }
+                // A-2: one stale rollup that cannot be rebuilt must not end the channel's whole pass.
+                JobOutcome::Unrebuildable => continue,
                 JobOutcome::Failed => return PassEnd::Done,
                 _ => return PassEnd::Stop,
             }
@@ -1116,6 +1125,10 @@ impl AgentWorker {
                 Ok(Some(loaded)) => loaded,
                 Ok(None) => return JobOutcome::Empty,
                 Err(error) => {
+                    if error.to_string().contains(ROLLUP_TOO_LARGE) {
+                        tracing::warn!(channel_id = %ch, "memory: a stale rollup is too large to rebuild from messages; kept hidden");
+                        return JobOutcome::Unrebuildable;
+                    }
                     tracing::warn!(channel_id = %ch, error = %error, "memory: read failed");
                     stats.failures += 1;
                     return JobOutcome::Failed;
@@ -1540,8 +1553,7 @@ impl AgentWorker {
                         // Too many messages for one call: keep the (hidden, stale) rollup for a later, roomier
                         // attempt rather than dropping it.
                         return Err(DbError::from(momo_db::sqlx::Error::Protocol(
-                            "a rollup without window digests is too large to rebuild from messages"
-                                .into(),
+                            ROLLUP_TOO_LARGE.into(),
                         )));
                     }
                     let (picked, _) = pick_within_budget(&cfg, rows);

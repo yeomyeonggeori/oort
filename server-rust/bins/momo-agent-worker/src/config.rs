@@ -307,7 +307,7 @@ impl Default for MemoryConfig {
             consolidate_max_calls: 30,
             consolidate_token_share_percent: 80,
             consolidate_merge_similarity: 0.55,
-            consolidate_close_similarity: 0.5,
+            consolidate_close_similarity: 0.6,
             consolidate_max_output_tokens: 40,
             consolidate_lease_seconds: 900.0,
             consolidate_retry_seconds: 1_800,

@@ -6,7 +6,7 @@
 //!   ─▶ housekeeping (no model):  retire items whose evidence died · re-mark digests that cite a forgotten
 //!        item's evidence · purge dead pending proposals · decay · retention
 //!   ─▶ judging (model, capped): candidate pairs ─▶ one word each: duplicate | supersedes | distinct
-//!        duplicate ─▶ fold the loser into the winner (union of evidence)      ─ or a proposal, if a human made the loser
+//!        duplicate ─▶ fold the loser into the winner (evidence stays put, A-1) ─ or a proposal, if a human made the loser
 //!        supersedes ─▶ close the older decision's valid_to (Graphiti-style)    ─ or a proposal, if a human made it
 //!   ─▶ release the lease (done, or "retry after" when the token cap stopped it)
 //! ```
@@ -553,15 +553,21 @@ impl AgentWorker {
     }
 
     /// Extend the channel lease after a model call (M-6): a slow provider must not let another worker take the channel.
-    pub(crate) async fn renew_consolidate_lease(&self, ws: Uuid, ch: Uuid) {
+    /// Returns `false` when the lease is no longer ours (`Ok(false)`: another worker took the channel, A-13): the caller
+    /// must stop its run. A failed renewal (an error) is logged and treated as "still ours" so a blip does not abort.
+    pub(crate) async fn renew_consolidate_lease(&self, ws: Uuid, ch: Uuid) -> bool {
         let token = self.summary.lease_token();
         let secs = self.config.memory.consolidate_lease_seconds;
-        if let Err(error) = mem::with_memory_tx(&self.pool, ws, move |conn| {
+        match mem::with_memory_tx(&self.pool, ws, move |conn| {
             Box::pin(async move { cons::renew(conn, ch, token, secs).await })
         })
         .await
         {
-            tracing::warn!(channel_id = %ch, error = %error, "memory consolidation: lease renewal failed");
+            Ok(held) => held,
+            Err(error) => {
+                tracing::warn!(channel_id = %ch, error = %error, "memory consolidation: lease renewal failed");
+                true
+            }
         }
     }
 
@@ -678,10 +684,15 @@ impl AgentWorker {
                     }
                 };
                 consecutive_failures = 0;
-                self.renew_consolidate_lease(ws, ch).await;
+                let lease_held = self.renew_consolidate_lease(ws, ch).await;
                 // A provider that under-reports (or omits) usage cannot slip under the cap.
                 let charged = reply.tokens.unwrap_or(estimate).max(estimate / 2);
                 self.settle_tokens(ws, charged - estimate).await;
+                if !lease_held {
+                    // A-13: another worker owns the channel now; what we just paid for is not applied.
+                    tracing::warn!(channel_id = %ch, "memory consolidation: lease lost, stopping the run");
+                    return JudgeEnd::Stopped;
+                }
 
                 let Some(verdict) = parse_verdict(&reply.text, decision) else {
                     stats.unparsed += 1;
