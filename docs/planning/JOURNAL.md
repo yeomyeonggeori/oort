@@ -3,6 +3,14 @@
 > 세션 종료 시 공용 계약에 따라 짧은 항목을 맨 위에 추가한다.
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 갱신할 때 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-10-01 · Sonnet 5.5 planner-docs · ★팀 기억 v2 M0~M3 main 통합(`58cfd534`) · oort-team v0.1.15 · 증거 빌드 0.1.15/3030
+
+- **랜딩:** [ADR-0196](../adr/0196-team-memory-v2.md)(0129 대체) M0~M3 — migration 098~110, #3158~#3174·#3208·#3212 닫힘. 요약·롤업, 항목(결정·사실·약속, add-only 추출), 에이전트 문맥 공급(영수증), 「기억해 둘게요」 제안, 기억 브라우저·편집·잊기(하드 삭제+재추출 억제), 야간 정리(병합·기간 종료·감쇠·보존·주제·사람 되돌림), 로컬 e5-small int8 벡터 검색+가중 RRF(owner 09-30), 워크스페이스 초기화·팀 공지, 웹·폰 화면.
+- **릴리스:** v0.1.15(`main=a6e5cd1b`, schema 110, digest `sha256:1759d196…`)를 `oort-team`에 배포(#3250·#3251, [릴리스](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.15)). 워커 메모리 32GB라 임베딩 켬. 증거 빌드: 데스크탑 0.1.15 공증 DMG·iOS 3030(#2568·#1607).
+- **보안 검수 약 15라운드의 공통 교훈:** permissive-OR 함정, `momo_memory`+`SET LOCAL ROLE`로 워커만 EXECUTE, 오라클 금지, 잠금 순서 행→advisory.
+- **이전(09-29·30):** R2 서명 후속(#3183 v1 제거)·모델 출처(#3176)·자동 허락 표시(#3181)·원격 계정 배선(#3180). 패스키 #3045~#3052는 R2 뒤.
+- **열린 것:** 팀 「기본 AI」 채널 요약 행 미설정 → 요약·정리 유휴(owner). 기억 후속 #3189·#3201·#3211·#3225·#3234·#3236·#3243. 0.1.14·0.1.15 owner 스모크 대기.
+
 ## 2026-09-27 · Opus 5.5(+워커·리뷰어 C·보안 검수·design-review) · ★oort-team v0.1.11→v0.1.12 · 증거 빌드 0.1.12/3026 · 에이전트 작업 공간·AI 계정 결재
 
 - **결재(성재):** 작업 탭 Q1~Q6·AI 계정 Q1~Q7 「전부 권장대로」, 로그인 모달(공식 CLI 숨은 PTY), Jev=BYOK(앱 설정), 방해 금지 「묶어」, DM 「권장대로」, 운영 변수 `MOMO_HOSTED_DELIVERY_ENABLED` 승인, 빌드·서버 v0.1.11·v0.1.12 승인.
@@ -228,11 +236,3 @@
 - go → `launch-ls-beta.sh`: LS-1 #2165(`wls1`)·LS-2 #2166(`wls2`) 발사. LS-1은 PushRelay 결재 반영을 위해 1회 중단·정정 재개(`mission-ls1-b.md`: Swift relay 소스만 삭제, push 컴포즈·env·런북·검증기 보존).
 - 성재: 「셀프호스팅 레벨에서 모바일 알림 포함, iOS만 앱스토어 출시, Rust 기반이면 좋다」 → ADR-0183 결재 기록 2(결정 ① 정정) · #1255 = SH-10 재정의 · `first-goal-two-cases.md` §4 G1'-2 승격 + §7. 「계정 살아 있음, 로컬 테스트는 CDP 정책 위반 아님」 → CDP 로컬 허용, E2E-A 자동화. 메모리 갱신.
 - 열린 것(성재): G2에 iOS 앱스토어 v0 포함 개정(§7) 확인.
-
-## 2026-09-07 (저녁) · Fable · ★LS-α 완결 — LS-4(#2143)·LS-0(#2142) main 정본화, LS-β(LS-1 #2165·LS-2 #2166) 패킷 발급
-
-- **LS-4 랜딩**(PR #2152 R1 커밋 10 → planner 검토: 정본·코드 인용 16본 삭제 miss → R2 복원+규칙 확장(살아 있는 정본·코드 참조면 보존, 경로 인식) → miss 0) → 승격 ad #2153 → main `e1975ce9`. 결과: handoffs 302→76 · planning 루트 70→51 · planning/research 112→78 · `research/` 112→36 · claudedocs 39→0(+gitignore) · docs/archive 해체 · STATUS 2026-08 761줄 로테이션 · D6 규칙 README §2.
-- **LS-0 랜딩**(PR #2154 R1 8 + R2 3: 정지 3건 판정 — 문서 명령 게이트=브리프 범위 결함(AGENTS 2행·aws 런북 삭제·worktree_janitor 복원·ncp 런북은 계약 게이트 의존으로 유지) · web 82 빨강=로그인 셸 PATH(node 26) → `run_cmd` 호출자 PATH 재적용 · pgbackrest 선재 #2157) → 정책 감사(track PR·승격 #2158·**sync #2159까지 셋 다** 필요 — 정책 파일 변경 시 sync도 감사, promote-lib 반영) → main `6ed61cfb`. 결과: scripts 265→168 · `add_swift_commands` 0 · CI 레인 5→4 · web 프로파일=clients/web(2807/2807) · SQL 4본 `infra/rust/sql/` · SH 시험 4본 docs 프로파일 편입.
-- 발급: **LS-1 #2165**(`handoffs/2026-09-07-ls1-swift-retire-brief.md`, engine, 감사) · **LS-2 #2166**(`handoffs/2026-09-07-ls2-client-dual-canon-brief.md`, uxui, work 표면 숨김 포함). 워크트리 `wls1`·`wls2`. 발사는 go.
-- 추적 파일 3,416 → 2,927(−489). 다음: go → LS-1 ∥ LS-2 → LS-3 → 스냅샷 92·출시 계획 개정 → G1'.
-
