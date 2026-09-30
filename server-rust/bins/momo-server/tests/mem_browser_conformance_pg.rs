@@ -2651,3 +2651,78 @@ async fn only_the_functions_own_errors_are_mapped_and_nul_is_refused() {
     .await;
     assert_eq!(s, 200);
 }
+
+/// #3172 M-2: a member of the channel undoes a consolidation event through the API; everyone else gets the
+/// 404 of a missing id, a stale or foreign event id is a 404, and doing it twice is a 409.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn a_member_reverts_a_consolidation_event_through_the_api() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let worker = worker_pool().await;
+    let w = build_world(&su, &worker).await;
+    let base = start_server(momo_app_pool(4).await).await;
+    let http = reqwest::Client::new();
+    let bob = login(&http, &base, w.ws, &w.bob.email).await;
+    let carol = login(&http, &base, w.ws, &w.carol.email).await;
+    let agent = agent_bearer(&su, w.ws, w.agent).await;
+    // a1 was decayed by the job (the ledger says so).
+    sqlx::query("UPDATE mem_item SET retired_at = now(), retired_reason = 'decayed', forget_after = now() - interval '1 day' WHERE id = $1")
+        .bind(w.a1)
+        .execute(&su)
+        .await
+        .unwrap();
+    let event: Uuid = sqlx::query_scalar(
+        "INSERT INTO mem_event (workspace_id, target_kind, target_id, action, channel_id, detail) \
+         VALUES ($1, 'item', $2, 'retired', $3, '{\"reason\": \"decayed\"}'::jsonb) RETURNING id",
+    )
+    .bind(w.ws)
+    .bind(w.a1)
+    .bind(w.p1)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let url = |item: Uuid, ev: Uuid| format!("{}/events/{ev}/revert", item_url(&base, w.ws, item));
+    let post = |token: String, item: Uuid, ev: Uuid| {
+        let (http, url) = (http.clone(), url(item, ev));
+        async move { send(&http, reqwest::Method::POST, &url, &token, None).await }
+    };
+    // Not readable / not an item of that event / an agent: never a hint.
+    let (s_missing, b_missing) = post(carol.clone(), w.a1, Uuid::new_v4()).await;
+    assert_eq!(s_missing, 404);
+    assert_eq!(
+        post(carol.clone(), w.a1, event).await,
+        (s_missing, b_missing.clone())
+    );
+    assert_eq!(post(bob.clone(), w.a2, event).await, (s_missing, b_missing));
+    assert_eq!(post(agent, w.a1, event).await.0, 403);
+    assert!(!sqlx::query_scalar::<_, bool>(
+        "SELECT retired_at IS NULL FROM mem_item WHERE id = $1"
+    )
+    .bind(w.a1)
+    .fetch_one(&su)
+    .await
+    .unwrap());
+    // A member of the channel undoes it.
+    let (status, body) = post(bob.clone(), w.a1, event).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["reverted"], "decayed");
+    assert_eq!(body["itemId"], w.a1.to_string());
+    assert!(
+        sqlx::query_scalar::<_, bool>("SELECT retired_at IS NULL FROM mem_item WHERE id = $1")
+            .bind(w.a1)
+            .fetch_one(&su)
+            .await
+            .unwrap()
+    );
+    let actor: Option<Uuid> = sqlx::query_scalar(
+        "SELECT actor_member_id FROM mem_event WHERE target_id = $1 AND action = 'reverted'",
+    )
+    .bind(w.a1)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(actor, Some(w.bob.id));
+    assert_eq!(post(bob, w.a1, event).await.0, 409, "only once");
+}

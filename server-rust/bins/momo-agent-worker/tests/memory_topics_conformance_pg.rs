@@ -96,6 +96,7 @@ async fn topic_of(su: &PgPool, item: Uuid) -> Option<Uuid> {
 
 fn topic_config() -> WorkerConfig {
     let mut c = cons_config();
+    c.memory.topics_enabled = true;
     c.memory.consolidate_max_calls = 100;
     c
 }

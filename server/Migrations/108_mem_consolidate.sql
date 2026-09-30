@@ -1,5 +1,5 @@
 -- =============================================================================
--- 107_mem_consolidate.sql — #3172 / ADR-0196 (팀 기억 v2) M3: 정리 잡(중복 병합 · 결정 기간 닫기 · 감쇠 · 보존 삭제)
+-- 108_mem_consolidate.sql — #3172 / ADR-0196 (팀 기억 v2) M3: 정리 잡(중복 병합 · 결정 기간 닫기 · 감쇠 · 보존 삭제)
 --
 -- 백그라운드 정리(D4 「정리」 열)의 DB 쪽. agent-worker 의 정리 루프(consolidate.rs)가 momo_memory 로
 -- SET LOCAL ROLE 한 memory tx 안에서 이 함수들만 부른다. 테이블 권한도 BYPASSRLS 도 없다.
@@ -116,7 +116,7 @@ CREATE POLICY mem_evidence_sel ON mem_evidence FOR SELECT
 
 -- ── mem_event: 채널·소유자 열 + 어휘 + 읽기 정책 (L-8, #3209 L-2) ─────────────────────────────────────
 -- 이벤트는 id·종류·개수만 담는다(본문 없음). 그래서 항목이 지워진 뒤에도(잊기·보존 삭제) 그 흔적은 「그 채널을 읽을 수
--- 있는 사람」에게 보인다 — 개인 공간이면 소유자만. 107 이전에 쓰인 이벤트(channel_id 없음)는 옛 규칙(항목을 읽을 수
+-- 있는 사람」에게 보인다 — 개인 공간이면 소유자만. 108 이전에 쓰인 이벤트(channel_id 없음)는 옛 규칙(항목을 읽을 수
 -- 있을 때만)을 그대로 따른다.
 ALTER TABLE mem_event ADD COLUMN IF NOT EXISTS channel_id uuid;
 ALTER TABLE mem_event ADD COLUMN IF NOT EXISTS owner_member_id uuid;
@@ -199,9 +199,12 @@ CREATE TABLE IF NOT EXISTS mem_cons_pair (
   high_id       uuid NOT NULL REFERENCES mem_item(id) ON DELETE CASCADE,
   verdict       text NOT NULL,
   judged_at     timestamptz NOT NULL DEFAULT now(),
+  -- 'deferred'(제안 한도) · 'unparsed'(모델이 세 단어로 답하지 않음)는 이 시각까지만 다시 묻지 않는다(L-2). 확정 판정은 NULL.
+  retry_after   timestamptz,
   PRIMARY KEY (low_id, high_id),
   CONSTRAINT mem_cons_pair_order_ck CHECK (low_id < high_id),
-  CONSTRAINT mem_cons_pair_verdict_ck CHECK (verdict IN ('duplicate', 'supersedes', 'distinct'))
+  CONSTRAINT mem_cons_pair_verdict_ck CHECK (verdict IN ('duplicate', 'supersedes', 'distinct', 'deferred', 'unparsed')),
+  CONSTRAINT mem_cons_pair_retry_ck CHECK ((verdict IN ('deferred', 'unparsed')) = (retry_after IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS mem_cons_pair_high_idx ON mem_cons_pair (high_id);
 
@@ -321,6 +324,122 @@ BEGIN
 END
 $$;
 
+-- M-6: 모델 호출이 끝날 때마다 리스를 늘린다(긴 판정 뒤에도 다른 워커가 채널을 가로채지 않게).
+CREATE OR REPLACE FUNCTION mem_cons_renew(p_channel_id uuid, p_lease_token uuid, p_lease_seconds double precision)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+DECLARE
+  v_ws uuid := nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid;
+BEGIN
+  IF v_ws IS NULL THEN
+    RAISE EXCEPTION 'mem_cons_renew: app.workspace_id is not set' USING ERRCODE = '42501';
+  END IF;
+  UPDATE public.mem_cons_state s
+     SET leased_until = pg_catalog.now() + pg_catalog.make_interval(
+           secs => LEAST(GREATEST(COALESCE(p_lease_seconds, 300), 1), 3600))
+   WHERE s.channel_id = p_channel_id AND s.workspace_id = v_ws AND s.lease_token = p_lease_token;
+  RETURN FOUND;
+END
+$$;
+
+-- L-2: 모델이 세 단어로 답하지 않은 쌍은 하루 동안 다시 묻지 않는다(매일 같은 쌍에 토큰을 태우지 않는다).
+CREATE OR REPLACE FUNCTION mem_cons_defer_pair(p_a uuid, p_b uuid)
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+  INSERT INTO public.mem_cons_pair (workspace_id, low_id, high_id, verdict, retry_after)
+  SELECT nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid,
+         LEAST(p_a, p_b), GREATEST(p_a, p_b), 'unparsed', pg_catalog.now() + interval '1 day'
+   WHERE EXISTS (SELECT 1 FROM public.mem_item i WHERE i.id = p_a
+                    AND i.workspace_id = nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid)
+     AND EXISTS (SELECT 1 FROM public.mem_item i WHERE i.id = p_b
+                    AND i.workspace_id = nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid)
+  ON CONFLICT (low_id, high_id) DO UPDATE
+    SET verdict = 'unparsed', retry_after = pg_catalog.now() + interval '1 day', judged_at = pg_catalog.now()
+    WHERE public.mem_cons_pair.verdict IN ('deferred', 'unparsed')
+$$;
+
+
+-- ── 원인이 사라지면 결과도 되돌린다 (H-2) ─────────────────────────────────────────────────────────────
+-- 항목이 내려가거나(근거 소멸·감쇠) 보존 삭제로 지워지기 **직전에** 부른다(지운 뒤에는 FK SET NULL 이 closed_by_id 를 지워 버린다).
+--   * 그 항목이 닫았던 결정: 후속 버전(편집)이나 합쳐 들어간 이긴 쪽이 살아 있으면 거기로 옮기고, 없으면 다시 연다.
+--   * 그 항목에 합쳐졌던 진 쪽: 후속 버전이 있으면 거기로 옮기고, 없으면 진 쪽 자신의 근거가 살아 있을 때 되살린다.
+-- 이벤트 'reverted'(이유·id 만). 호출자가 mem.op 표지를 이미 세웠다.
+CREATE OR REPLACE FUNCTION mem_cons_release(p_dying uuid[], p_reason text)
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+DECLARE
+  v_ws uuid := nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid;
+  r record;
+  v_succ uuid;
+  v_n integer := 0;
+BEGIN
+  IF v_ws IS NULL THEN
+    RAISE EXCEPTION 'mem_cons_release: app.workspace_id is not set' USING ERRCODE = '42501';
+  END IF;
+  IF COALESCE(pg_catalog.cardinality(p_dying), 0) = 0 THEN
+    RETURN 0;
+  END IF;
+  FOR r IN
+    SELECT i.id, i.closed_by_id, i.channel_id, i.owner_member_id FROM public.mem_item i
+     WHERE i.workspace_id = v_ws AND i.closed_by_id = ANY (p_dying) AND i.valid_to IS NOT NULL
+       AND i.retired_at IS NULL
+     ORDER BY i.id FOR UPDATE OF i
+  LOOP
+    SELECT s.id INTO v_succ FROM public.mem_item s
+     WHERE s.workspace_id = v_ws AND s.retired_at IS NULL AND NOT s.stale AND s.id <> ALL (p_dying)
+       AND (s.supersedes_id = r.closed_by_id
+            OR s.id = (SELECT c.merged_into_id FROM public.mem_item c
+                        WHERE c.id = r.closed_by_id AND c.retired_reason = 'merged'))
+     ORDER BY s.recorded_at LIMIT 1;
+    IF v_succ IS NOT NULL THEN
+      UPDATE public.mem_item SET closed_by_id = v_succ WHERE id = r.id;
+    ELSE
+      UPDATE public.mem_item SET valid_to = NULL, closed_by_id = NULL, closed_at = NULL WHERE id = r.id;
+      INSERT INTO public.mem_event (workspace_id, target_kind, target_id, action, channel_id, owner_member_id, detail)
+      VALUES (v_ws, 'item', r.id, 'reverted', r.channel_id, r.owner_member_id,
+              pg_catalog.jsonb_build_object('what', 'superseded', 'reason', p_reason,
+                                            'closer', r.closed_by_id, 'channel_id', r.channel_id));
+      v_n := v_n + 1;
+    END IF;
+  END LOOP;
+  FOR r IN
+    SELECT i.id, i.merged_into_id, i.channel_id, i.owner_member_id FROM public.mem_item i
+     WHERE i.workspace_id = v_ws AND i.merged_into_id = ANY (p_dying) AND i.retired_reason = 'merged'
+     ORDER BY i.id FOR UPDATE OF i
+  LOOP
+    SELECT s.id INTO v_succ FROM public.mem_item s
+     WHERE s.workspace_id = v_ws AND s.retired_at IS NULL AND NOT s.stale AND s.id <> ALL (p_dying)
+       AND s.supersedes_id = r.merged_into_id
+     ORDER BY s.recorded_at LIMIT 1;
+    IF v_succ IS NOT NULL THEN
+      UPDATE public.mem_item SET merged_into_id = v_succ WHERE id = r.id;
+    ELSIF public.mem_item_live(r.id) THEN
+      BEGIN
+        UPDATE public.mem_item SET merged_into_id = NULL, retired_at = NULL, retired_reason = NULL WHERE id = r.id;
+        INSERT INTO public.mem_event (workspace_id, target_kind, target_id, action, channel_id, owner_member_id, detail)
+        VALUES (v_ws, 'item', r.id, 'reverted', r.channel_id, r.owner_member_id,
+                pg_catalog.jsonb_build_object('what', 'merged', 'reason', p_reason,
+                                              'winner', r.merged_into_id, 'channel_id', r.channel_id));
+        v_n := v_n + 1;
+      EXCEPTION WHEN unique_violation THEN
+        -- 같은 내용의 살아 있는 항목이 이미 있다 — 되살릴 이유가 없다.
+        NULL;
+      END;
+    END IF;
+  END LOOP;
+  RETURN v_n;
+END
+$$;
+
 -- ── 근거가 죽은 항목 내리기 (D6-5) ──────────────────────────────────────────────────────────────────
 -- 항목의 근거 메시지가 삭제·수정돼 더는 항목을 받쳐 주지 못하면(mem_item_live=false) retired_reason 을 source_deleted
 -- (근거가 지워졌거나 하드 삭제로 줄었을 때) 또는 source_edited(살아 있지만 근거를 읽은 뒤 수정됐을 때)로 내린다.
@@ -338,6 +457,7 @@ DECLARE
   v_n integer := 0;
   v_reason text;
   v_gone boolean;
+  v_ids uuid[] := '{}';
 BEGIN
   IF v_ws IS NULL THEN
     RAISE EXCEPTION 'mem_cons_retire_dead: app.workspace_id is not set' USING ERRCODE = '42501';
@@ -369,7 +489,9 @@ BEGIN
     VALUES (v_ws, 'item', r.id, 'retired', p_channel_id, r.owner_member_id,
             pg_catalog.jsonb_build_object('reason', v_reason));
     v_n := v_n + 1;
+    v_ids := v_ids || r.id;
   END LOOP;
+  PERFORM public.mem_cons_release(v_ids, 'closer_source_gone');
   RETURN v_n;
 END
 $$;
@@ -388,6 +510,7 @@ DECLARE
   v_ws uuid := nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid;
   r record;
   v_n integer := 0;
+  v_ids uuid[] := '{}';
 BEGIN
   IF v_ws IS NULL THEN
     RAISE EXCEPTION 'mem_cons_decay: app.workspace_id is not set' USING ERRCODE = '42501';
@@ -413,7 +536,9 @@ BEGIN
             pg_catalog.jsonb_build_object(
               'reason', 'decayed', 'forget_after', r.forget_after, 'reinforce_count', r.reinforce_count));
     v_n := v_n + 1;
+    v_ids := v_ids || r.id;
   END LOOP;
+  PERFORM public.mem_cons_release(v_ids, 'closer_decayed');
   RETURN v_n;
 END
 $$;
@@ -500,7 +625,8 @@ BEGIN
            a.valid_from AS afrom, b.valid_from AS bfrom, a.origin AS aorigin, b.origin AS borigin,
            public.similarity(a.body, b.body) AS s,
            (a.subject_key IS NOT NULL AND a.subject_key = b.subject_key) AS subj,
-           (a.kind = 'decision' AND a.valid_to IS NULL AND b.valid_to IS NULL) AS closable
+           (a.kind = 'decision' AND a.valid_to IS NULL AND b.valid_to IS NULL) AS closable,
+           (a.valid_to IS NOT DISTINCT FROM b.valid_to) AS same_validity
       FROM live a
       JOIN live b
         ON (a.valid_from, a.id) < (b.valid_from, b.id)
@@ -511,8 +637,11 @@ BEGIN
     FROM scored sc
    WHERE NOT EXISTS (SELECT 1 FROM public.mem_cons_pair cp
                       WHERE cp.workspace_id = v_ws
-                        AND cp.low_id = LEAST(sc.aid, sc.bid) AND cp.high_id = GREATEST(sc.aid, sc.bid))
-     AND (sc.s >= p_merge_sim OR (sc.closable AND (sc.subj OR sc.s >= p_close_sim)))
+                        AND cp.low_id = LEAST(sc.aid, sc.bid) AND cp.high_id = GREATEST(sc.aid, sc.bid)
+                        AND (cp.retry_after IS NULL OR cp.retry_after > pg_catalog.now()))
+     -- H-1: 같은 내용이라도 유효 기간이 다른 두 항목(닫힌 것과 열린 것)은 중복 후보가 아니다.
+     AND ((sc.s >= p_merge_sim AND sc.same_validity)
+          OR (sc.closable AND (sc.subj OR sc.s >= p_close_sim)))
    -- 같은 subject_key 를 가진 결정 쌍이 먼저(가장 강한 신호), 그다음 유사도 순.
    ORDER BY sc.subj DESC, sc.s DESC, sc.aid, sc.bid
    LIMIT LEAST(GREATEST(COALESCE(p_limit, 20), 1), 100);
@@ -527,6 +656,27 @@ IMMUTABLE
 SET search_path = pg_catalog, public, pg_temp
 AS $$
   SELECT CASE p_origin WHEN 'curated' THEN 3 WHEN 'confirmed' THEN 2 WHEN 'synthesized' THEN 1 ELSE 0 END
+$$;
+
+
+-- 게스트가 쓴 메시지를 근거로 든 항목은 자동으로 병합·닫기하지 않는다(제안만): 게스트의 발언으로 팀의 결정을 닫는 길을 막는다(M-1).
+CREATE OR REPLACE FUNCTION mem_item_guest_authored(p_item_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.mem_evidence e
+      JOIN public.message m ON m.id = e.message_id AND m.workspace_id = e.workspace_id
+     WHERE e.item_id = p_item_id
+       AND e.workspace_id = nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid
+       AND (EXISTS (SELECT 1 FROM public.workspace_membership wm
+                     WHERE wm.workspace_id = m.workspace_id AND wm.member_id = m.author_member_id AND wm.role = 'guest')
+            OR EXISTS (SELECT 1 FROM public.membership ms
+                        WHERE ms.workspace_id = m.workspace_id AND ms.channel_id = m.channel_id
+                          AND ms.member_id = m.author_member_id AND ms.role = 'guest')))
 $$;
 
 -- ── 병합·닫기의 알맹이 (내부 함수; 호출자가 잠금과 게이트를 이미 잡았다) ───────────────────────────────
@@ -567,6 +717,14 @@ BEGIN
     RAISE EXCEPTION 'mem_cons_merge_items: a curated or confirmed item is never merged automatically'
       USING ERRCODE = '23514';
   END IF;
+  IF p_proposal_id IS NULL AND (public.mem_item_guest_authored(l.id) OR public.mem_item_guest_authored(w.id)) THEN
+    RAISE EXCEPTION 'mem_cons_merge_items: an item resting on a guest''s message is never merged automatically'
+      USING ERRCODE = '23514';
+  END IF;
+  -- H-1: 열린 결정과 닫힌 결정(또는 기간이 다른 둘)은 같은 내용이어도 하나가 아니다 — 합치면 현재 결정이 사라진다.
+  IF l.valid_to IS DISTINCT FROM w.valid_to THEN
+    RAISE EXCEPTION 'mem_cons_merge_items: items with different validity are never merged' USING ERRCODE = '23514';
+  END IF;
   IF l.retired_at IS NOT NULL OR w.retired_at IS NOT NULL OR l.stale OR w.stale THEN
     RETURN false;
   END IF;
@@ -600,6 +758,8 @@ BEGIN
   UPDATE public.mem_item
      SET merged_into_id = w.id, retired_at = pg_catalog.now(), retired_reason = 'merged'
    WHERE id = l.id;
+  -- 진 쪽이 닫았던 결정의 닫은 자리는 이긴 쪽이 이어받는다(같은 내용이다).
+  UPDATE public.mem_item SET closed_by_id = w.id WHERE closed_by_id = l.id AND workspace_id = v_ws;
 
   INSERT INTO public.mem_event (workspace_id, target_kind, target_id, action, actor_member_id,
                                 channel_id, owner_member_id, detail)
@@ -648,6 +808,10 @@ BEGIN
   END IF;
   IF o.origin IN ('curated', 'confirmed') AND p_proposal_id IS NULL THEN
     RAISE EXCEPTION 'mem_cons_close_item: a curated or confirmed decision is never closed automatically'
+      USING ERRCODE = '23514';
+  END IF;
+  IF p_proposal_id IS NULL AND (public.mem_item_guest_authored(o.id) OR public.mem_item_guest_authored(n.id)) THEN
+    RAISE EXCEPTION 'mem_cons_close_item: a decision resting on a guest''s message is never closed automatically'
       USING ERRCODE = '23514';
   END IF;
   IF o.retired_at IS NOT NULL OR n.retired_at IS NOT NULL OR o.stale OR n.stale
@@ -748,7 +912,22 @@ AS $$
   INSERT INTO public.mem_cons_pair (workspace_id, low_id, high_id, verdict)
   VALUES (nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid,
           LEAST(p_a, p_b), GREATEST(p_a, p_b), p_verdict)
-  ON CONFLICT (low_id, high_id) DO UPDATE SET verdict = EXCLUDED.verdict, judged_at = pg_catalog.now()
+  ON CONFLICT (low_id, high_id) DO UPDATE
+    SET verdict = EXCLUDED.verdict, judged_at = pg_catalog.now(), retry_after = NULL
+$$;
+
+CREATE OR REPLACE FUNCTION mem_cons_defer(p_a uuid, p_b uuid, p_verdict text)
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+  INSERT INTO public.mem_cons_pair (workspace_id, low_id, high_id, verdict, retry_after)
+  VALUES (nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid,
+          LEAST(p_a, p_b), GREATEST(p_a, p_b), p_verdict, pg_catalog.now() + interval '1 day')
+  ON CONFLICT (low_id, high_id) DO UPDATE
+    SET verdict = EXCLUDED.verdict, retry_after = EXCLUDED.retry_after, judged_at = pg_catalog.now()
+    WHERE public.mem_cons_pair.verdict IN ('deferred', 'unparsed')
 $$;
 
 -- ── 판정 하나의 적용 (워커 → DB) ────────────────────────────────────────────────────────────────────
@@ -774,6 +953,7 @@ DECLARE
   l public.mem_item%ROWTYPE;
   v_msgs uuid[];
   v_prop uuid;
+  v_guest boolean;
 BEGIN
   PERFORM public.mem_op('cons_apply');
   IF v_ws IS NULL THEN
@@ -812,9 +992,11 @@ BEGIN
     RETURN 'skipped';
   END IF;
   IF EXISTS (SELECT 1 FROM public.mem_cons_pair cp
-              WHERE cp.workspace_id = v_ws AND cp.low_id = LEAST(x.id, y.id) AND cp.high_id = GREATEST(x.id, y.id)) THEN
+              WHERE cp.workspace_id = v_ws AND cp.low_id = LEAST(x.id, y.id) AND cp.high_id = GREATEST(x.id, y.id)
+                AND (cp.retry_after IS NULL OR cp.retry_after > pg_catalog.now())) THEN
     RETURN 'skipped';
   END IF;
+  v_guest := public.mem_item_guest_authored(x.id) OR public.mem_item_guest_authored(y.id);
 
   IF p_verdict = 'distinct' THEN
     PERFORM public.mem_cons_note_pair(x.id, y.id, 'distinct');
@@ -828,6 +1010,11 @@ BEGIN
   END IF;
 
   IF p_verdict = 'duplicate' THEN
+    -- H-1: an open decision and a closed one (or two different validity periods) are not duplicates, whatever the model says.
+    IF x.valid_to IS DISTINCT FROM y.valid_to THEN
+      PERFORM public.mem_cons_note_pair(x.id, y.id, 'distinct');
+      RETURN 'distinct';
+    END IF;
     IF public.mem_origin_rank(x.origin) > public.mem_origin_rank(y.origin)
        OR (public.mem_origin_rank(x.origin) = public.mem_origin_rank(y.origin)
            AND (x.source_count > y.source_count
@@ -836,9 +1023,10 @@ BEGIN
     ELSE
       w := y; l := x;
     END IF;
-    IF l.origin IN ('curated', 'confirmed') THEN
+    IF l.origin IN ('curated', 'confirmed') OR v_guest THEN
       v_prop := public.mem_cons_propose('merge', l.id, w.id);
       IF v_prop IS NULL THEN
+        PERFORM public.mem_cons_defer(x.id, y.id, 'deferred');
         RETURN 'deferred';
       END IF;
       PERFORM public.mem_cons_note_pair(x.id, y.id, 'duplicate');
@@ -855,9 +1043,10 @@ BEGIN
   IF x.kind <> 'decision' OR older.valid_to IS NOT NULL OR NOT (older.valid_from < newer.valid_from) THEN
     RETURN 'skipped';
   END IF;
-  IF older.origin IN ('curated', 'confirmed') THEN
+  IF older.origin IN ('curated', 'confirmed') OR v_guest THEN
     v_prop := public.mem_cons_propose('close', older.id, newer.id);
     IF v_prop IS NULL THEN
+      PERFORM public.mem_cons_defer(x.id, y.id, 'deferred');
       RETURN 'deferred';
     END IF;
     PERFORM public.mem_cons_note_pair(x.id, y.id, 'supersedes');
@@ -887,8 +1076,28 @@ BEGIN
   IF NOT FOUND OR p.op = 'add' THEN
     RAISE EXCEPTION 'mem_accept_proposal: not allowed' USING ERRCODE = '42501';
   END IF;
+  -- 락 순서는 mem_cons_apply 와 같다: 항목 행(id 순) → 근거 메시지 행(FOR KEY SHARE, id 순) → 채널 advisory 공유.
   PERFORM 1 FROM public.mem_item i WHERE i.id IN (p.target_item_id, p.other_item_id) AND i.workspace_id = v_ws
    ORDER BY i.id FOR UPDATE;
+  PERFORM 1 FROM public.message m
+   WHERE m.workspace_id = v_ws
+     AND m.id IN (SELECT ev.message_id FROM public.mem_evidence ev
+                   WHERE ev.item_id IN (p.target_item_id, p.other_item_id) AND ev.workspace_id = v_ws)
+   ORDER BY m.id FOR KEY SHARE;
+  PERFORM pg_catalog.pg_advisory_xact_lock_shared(
+    pg_catalog.hashtextextended('mem_digest:' || p.channel_id::text, 0));
+  -- 수락은 활성 사람(게스트 아님)이 읽을 수 있는 채널에서만(mem_accept_proposal 이 열릴 때 라우트의 검사와 겹치는 두 번째 벽).
+  IF NOT EXISTS (SELECT 1 FROM public.member h
+                  WHERE h.id = p_viewer AND h.workspace_id = v_ws AND h.kind = 'human'
+                    AND h.status = 'active' AND h.deleted_at IS NULL)
+     OR NOT public.mem_member_can_read(p.channel_id, p_viewer)
+     OR EXISTS (SELECT 1 FROM public.workspace_membership wm
+                 WHERE wm.workspace_id = v_ws AND wm.member_id = p_viewer AND wm.role = 'guest')
+     OR EXISTS (SELECT 1 FROM public.membership gm
+                 WHERE gm.workspace_id = v_ws AND gm.channel_id = p.channel_id AND gm.member_id = p_viewer
+                   AND gm.left_at IS NULL AND gm.role = 'guest') THEN
+    RAISE EXCEPTION 'mem_accept_proposal: not allowed' USING ERRCODE = '42501';
+  END IF;
   IF NOT public.mem_channel_eligible(p.channel_id) THEN
     RAISE EXCEPTION 'mem_accept_proposal: memory is disabled, paused, excluded or not allowed for this channel'
       USING ERRCODE = '55000';
@@ -950,11 +1159,15 @@ BEGIN
     SELECT i.id, i.owner_member_id, i.retired_reason
       FROM public.mem_item i
      WHERE i.workspace_id = v_ws AND i.channel_id = p_channel_id AND i.retired_at IS NOT NULL
-       AND i.retired_at < pg_catalog.now() - pg_catalog.make_interval(days => p_retired_days)
+       -- M-4: 사람이 확정·고친 항목(curated/confirmed)은 4배 오래 둔다(사람의 결정이 기계 기한으로 사라지지 않게).
+       AND i.retired_at < pg_catalog.now() - pg_catalog.make_interval(
+             days => p_retired_days * CASE WHEN i.origin IN ('curated', 'confirmed') THEN 4 ELSE 1 END)
      ORDER BY i.retired_at, i.id
      LIMIT v_lim
        FOR UPDATE OF i SKIP LOCKED
   LOOP
+    -- H-2: 이 항목이 닫았거나 합쳐 들인 것들을 지우기 전에 놓아 준다(지운 뒤에는 closed_by_id 가 조용히 NULL 이 된다).
+    PERFORM public.mem_cons_release(ARRAY[r.id], 'closer_purged');
     DELETE FROM public.mem_evidence ev WHERE ev.item_id = r.id AND ev.workspace_id = v_ws;
     DELETE FROM public.mem_item i WHERE i.id = r.id AND i.workspace_id = v_ws;
     INSERT INTO public.mem_event (workspace_id, target_kind, target_id, action, channel_id, owner_member_id, detail)
@@ -1035,8 +1248,9 @@ $$;
 -- 정리 이벤트 한 건을 되돌린다: 병합('merged' 진 쪽 이벤트), 기간 닫기('superseded' + reason=contradiction),
 -- 감쇠('retired' + reason=decayed). 이벤트에 남은 값으로 상태를 복원하고 'reverted' 를 남긴다. 되돌린 쌍은 distinct 로
 -- 캐시해 정리 잡이 다시 적용하지 않는다(사람의 결정을 이긴다). 잊기·보존 삭제는 되돌릴 수 없다(id 만 남는다).
--- 워커 전용: 사람 쪽 표면(API)은 이후 이슈가 이 함수에 붙는다.
-CREATE OR REPLACE FUNCTION mem_cons_revert(p_event_id uuid)
+-- 알맹이는 mem_cons_revert_core(내부). 호출자가 둘이다: 워커 전용 mem_cons_revert(행위자 없음)와 API 가 부르는
+-- mem_revert_consolidation(사람이 읽을 수 있는 항목의 되돌리기; 권한·스위치·잊은 내용 검사는 그쪽이 한다).
+CREATE OR REPLACE FUNCTION mem_cons_revert_core(p_event_id uuid, p_actor uuid)
 RETURNS text
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -1124,10 +1338,234 @@ BEGIN
     RAISE EXCEPTION 'mem_cons_revert: this event cannot be reverted' USING ERRCODE = '22023';
   END IF;
 
-  INSERT INTO public.mem_event (workspace_id, target_kind, target_id, action, channel_id, owner_member_id, detail)
-  VALUES (v_ws, 'item', l.id, 'reverted', l.channel_id, l.owner_member_id,
-          pg_catalog.jsonb_build_object('of', p_event_id, 'what', v_kind));
+  INSERT INTO public.mem_event (workspace_id, target_kind, target_id, action, actor_member_id,
+                                channel_id, owner_member_id, detail)
+  VALUES (v_ws, 'item', l.id, 'reverted', p_actor, l.channel_id, l.owner_member_id,
+          pg_catalog.jsonb_build_object('of', p_event_id, 'what', v_kind, 'channel_id', l.channel_id));
   RETURN v_kind;
+END
+$$;
+
+CREATE OR REPLACE FUNCTION mem_cons_revert(p_event_id uuid)
+RETURNS text
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+  SELECT public.mem_cons_revert_core(p_event_id, NULL)
+$$;
+
+-- M-2: 사람의 되돌리기(API). mem_edit_item / mem_forget_item 과 같은 신뢰 경계: PUBLIC EXECUTE + 함수 안의 session_user 가드,
+-- 행위자는 app.member_id 에서만(활성 사람, 게스트 아님), 읽을 수 없는 이벤트는 없는 것과 같은 P0002(→ 404).
+--   * 되돌릴 수 있는 것: 병합('merged' 진 쪽 이벤트), 기간 닫기('superseded'+contradiction), 감쇠('retired'+decayed).
+--   * 항목(병합이면 진 쪽과 이긴 쪽 둘 다)을 행위자가 읽을 수 있어야 하고, 채널이 지금 요약·정리 대상이어야 한다(55000).
+--   * 잊은 내용을 되살리지 않는다: 항목의 (채널, 해시)가 mem_suppress 에 있거나 근거가 죽었으면(mem_item_live=false) 55000.
+CREATE OR REPLACE FUNCTION mem_revert_consolidation(p_event_id uuid)
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+DECLARE
+  v_ws uuid := nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid;
+  v_actor uuid := nullif(pg_catalog.current_setting('app.member_id', true), '')::uuid;
+  e public.mem_event%ROWTYPE;
+  i public.mem_item%ROWTYPE;
+  v_other uuid;
+BEGIN
+  PERFORM public.mem_op('cons_revert');
+  IF session_user::text <> 'momo_app'
+     AND NOT COALESCE((SELECT r.rolsuper FROM pg_catalog.pg_roles r WHERE r.rolname = session_user::text), false) THEN
+    RAISE EXCEPTION 'mem_revert_consolidation: only the API role may revert' USING ERRCODE = '42501';
+  END IF;
+  IF v_ws IS NULL OR v_actor IS NULL THEN
+    RAISE EXCEPTION 'mem_revert_consolidation: no acting member' USING ERRCODE = '42501';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.member m
+                  WHERE m.id = v_actor AND m.workspace_id = v_ws AND m.kind = 'human'
+                    AND m.status = 'active' AND m.deleted_at IS NULL) THEN
+    RAISE EXCEPTION 'mem_revert_consolidation: the acting member must be an active human' USING ERRCODE = '42501';
+  END IF;
+  SELECT * INTO e FROM public.mem_event x WHERE x.id = p_event_id AND x.workspace_id = v_ws;
+  IF NOT FOUND OR e.target_kind <> 'item' THEN
+    RAISE EXCEPTION 'mem_revert_consolidation: event not found' USING ERRCODE = 'P0002';
+  END IF;
+  SELECT * INTO i FROM public.mem_item x WHERE x.id = e.target_id AND x.workspace_id = v_ws;
+  IF NOT FOUND OR NOT public.mem_item_readable_by(i.id, v_actor)
+     OR NOT (e.action = 'merged' OR e.action = 'superseded' OR e.action = 'retired') THEN
+    RAISE EXCEPTION 'mem_revert_consolidation: event not found' USING ERRCODE = 'P0002';
+  END IF;
+  -- 병합이면 이긴 쪽도 읽을 수 있어야 한다.
+  IF e.action = 'merged' THEN
+    v_other := (e.detail ->> 'into')::uuid;
+    IF v_other IS NULL OR NOT public.mem_item_readable_by(v_other, v_actor) THEN
+      RAISE EXCEPTION 'mem_revert_consolidation: event not found' USING ERRCODE = 'P0002';
+    END IF;
+  END IF;
+  -- 게스트는 읽을 수는 있어도 되돌리지 못한다(편집·잊기와 같은 결정, D9).
+  IF EXISTS (SELECT 1 FROM public.membership ms
+              WHERE ms.workspace_id = v_ws AND ms.member_id = v_actor AND ms.left_at IS NULL AND ms.role = 'guest'
+                AND (ms.channel_id = i.channel_id
+                     OR ms.channel_id IN (SELECT ev.channel_id FROM public.mem_evidence ev
+                                           WHERE ev.item_id = i.id AND ev.workspace_id = v_ws)))
+     OR EXISTS (SELECT 1 FROM public.workspace_membership wm
+                 WHERE wm.workspace_id = v_ws AND wm.member_id = v_actor AND wm.role = 'guest') THEN
+    RAISE EXCEPTION 'mem_revert_consolidation: guests may not change memory items' USING ERRCODE = '42501';
+  END IF;
+  IF NOT public.mem_channel_eligible(i.channel_id) THEN
+    RAISE EXCEPTION 'mem_revert_consolidation: memory is disabled, paused, excluded or not allowed for this channel'
+      USING ERRCODE = '55000';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.mem_suppress s
+              WHERE s.workspace_id = v_ws AND s.channel_id = i.channel_id AND s.content_hash = i.content_hash)
+     OR NOT public.mem_item_live(i.id) THEN
+    RAISE EXCEPTION 'mem_revert_consolidation: forgotten or unsupported content is not brought back' USING ERRCODE = '55000';
+  END IF;
+  RETURN public.mem_cons_revert_core(p_event_id, v_actor);
+END
+$$;
+
+
+-- ── mem_apply_digest (102 의 재정의): 창이 정리된 stale 롤업은 메시지에서 다시 만든다 (H-3) ─────────────────
+CREATE OR REPLACE FUNCTION mem_apply_digest(
+  p_channel_id uuid, p_thread_root_id uuid, p_level text,
+  p_from_seq bigint, p_to_seq bigint, p_body text,
+  p_source_digest_ids uuid[], p_model text, p_model_source text, p_prompt_version text,
+  p_evidence_message_ids uuid[], p_evidence_edited_at timestamptz[], p_read_at timestamptz)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+DECLARE
+  v_ws uuid := nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid;
+  v_n integer := COALESCE(pg_catalog.cardinality(p_evidence_message_ids), 0);
+  v_src uuid[] := COALESCE(p_source_digest_ids, '{}');
+  v_id uuid;
+BEGIN
+  IF v_ws IS NULL THEN
+    RAISE EXCEPTION 'mem_apply_digest: app.workspace_id is not set' USING ERRCODE = '42501';
+  END IF;
+  IF p_level IS NULL OR p_level NOT IN ('window', 'day', 'week') THEN
+    RAISE EXCEPTION 'mem_apply_digest: bad level' USING ERRCODE = '23514';
+  END IF;
+  IF p_from_seq IS NULL OR p_to_seq IS NULL OR p_from_seq < 0 OR p_to_seq < p_from_seq THEN
+    RAISE EXCEPTION 'mem_apply_digest: bad seq range' USING ERRCODE = '23514';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.channel c WHERE c.id = p_channel_id AND c.workspace_id = v_ws) THEN
+    RAISE EXCEPTION 'mem_apply_digest: channel not in workspace' USING ERRCODE = '23503';
+  END IF;
+  -- H-1: 락 순서는 어디서나 「메시지 행 → 채널 advisory」. 편집 tx 는 메시지 행을 FOR UPDATE 로
+  -- 쥔 채 트리거에서 advisory(exclusive)를 기다린다. 여기서 advisory(shared)를 먼저 쥐고 나중에
+  -- mem_evidence FK 가 같은 행에 FOR KEY SHARE 를 요청하면 교착(40P01)이다. 그래서 근거 행을
+  -- id 순으로 먼저 잠근다(편집이 먼저면 여기서 기다리고, 우리가 먼저면 편집이 커밋까지 기다린다).
+  PERFORM 1 FROM public.message m
+   WHERE m.id = ANY (p_evidence_message_ids) AND m.workspace_id = v_ws AND m.channel_id = p_channel_id
+   ORDER BY m.id
+   FOR KEY SHARE;
+  -- L-2: 이 채널의 수정·삭제 트리거(exclusive)와 직렬화한다. 이후 문장은 락을 얻은 뒤의
+  -- 새 스냅샷으로 돈다(READ COMMITTED) — 먼저 커밋된 편집은 아래 40001 검사가 잡는다.
+  PERFORM pg_catalog.pg_advisory_xact_lock_shared(
+    pg_catalog.hashtextextended('mem_digest:' || p_channel_id::text, 0));
+  -- 스위치(D9)·DM 규칙: 꺼졌거나 정지·제외·보관됐거나 사람끼리 DM 이면 기록하지 않는다.
+  IF NOT public.mem_channel_eligible(p_channel_id) THEN
+    RAISE EXCEPTION 'mem_apply_digest: memory is disabled, paused, excluded or not allowed for this channel'
+      USING ERRCODE = '55000';
+  END IF;
+  IF p_thread_root_id IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM public.message r
+        WHERE r.id = p_thread_root_id AND r.channel_id = p_channel_id
+          AND r.workspace_id = v_ws AND r.root_id IS NULL) THEN
+    RAISE EXCEPTION 'mem_apply_digest: thread root not in channel' USING ERRCODE = '23503';
+  END IF;
+  IF v_n = 0 THEN
+    RAISE EXCEPTION 'mem_apply_digest: at least one evidence message is required' USING ERRCODE = '23514';
+  END IF;
+  IF (SELECT pg_catalog.count(DISTINCT e) FROM pg_catalog.unnest(p_evidence_message_ids) AS e) <> v_n THEN
+    RAISE EXCEPTION 'mem_apply_digest: duplicate or NULL evidence message' USING ERRCODE = '23514';
+  END IF;
+  IF p_read_at IS NULL OR p_read_at > pg_catalog.now()
+     OR p_evidence_edited_at IS NULL
+     OR pg_catalog.cardinality(p_evidence_edited_at) <> v_n
+     OR EXISTS (SELECT 1 FROM pg_catalog.unnest(p_evidence_edited_at) AS t(x) WHERE t.x > p_read_at) THEN
+    RAISE EXCEPTION 'mem_apply_digest: bad read snapshot (read_at / per-evidence edited_at)'
+      USING ERRCODE = '23514';
+  END IF;
+  IF (SELECT pg_catalog.count(*) FROM public.message m
+       WHERE m.id = ANY (p_evidence_message_ids)
+         AND m.channel_id = p_channel_id AND m.workspace_id = v_ws
+         AND m.seq BETWEEN p_from_seq AND p_to_seq
+         AND m.deleted_at IS NULL AND m.state <> 'deleted'
+         AND (p_thread_root_id IS NULL OR m.id = p_thread_root_id OR m.root_id = p_thread_root_id)
+         -- M-3: DM 은 현재 활성 멤버 모두가 합류한 뒤(가장 늦은 합류 이후)의 메시지만 근거가 될 수 있다(소급 요약 금지).
+         AND (NOT EXISTS (SELECT 1 FROM public.channel dc WHERE dc.id = m.channel_id AND dc.kind = 'dm')
+              OR m.created_at >= (
+                   SELECT pg_catalog.max(x.joined_at) FROM public.membership x
+                    WHERE x.channel_id = m.channel_id AND x.workspace_id = m.workspace_id
+                      AND x.left_at IS NULL))
+     ) <> v_n THEN
+    RAISE EXCEPTION 'mem_apply_digest: evidence message is not a live message of this channel/range/thread'
+      USING ERRCODE = '23503';
+  END IF;
+  IF EXISTS (SELECT 1
+               FROM ROWS FROM (pg_catalog.unnest(p_evidence_message_ids), pg_catalog.unnest(p_evidence_edited_at)) AS s(mid, snap)
+               JOIN public.message m ON m.id = s.mid
+              WHERE m.edited_at IS DISTINCT FROM s.snap) THEN
+    RAISE EXCEPTION 'mem_apply_digest: evidence was edited after it was read' USING ERRCODE = '40001';
+  END IF;
+  IF p_level = 'window' THEN
+    IF pg_catalog.cardinality(v_src) <> 0 THEN
+      RAISE EXCEPTION 'mem_apply_digest: a window digest has no source digests' USING ERRCODE = '23514';
+    END IF;
+  ELSE
+    -- #3172 H-3: a rollup normally rolls up window digests. The one exception: an existing STALE rollup whose windows
+    -- retention has removed (D10) is rebuilt from the live messages of its range (the evidence checks above still hold).
+    IF pg_catalog.cardinality(v_src) = 0 AND NOT EXISTS (
+         SELECT 1 FROM public.mem_digest d
+          WHERE d.workspace_id = v_ws AND d.channel_id = p_channel_id AND d.level = p_level
+            AND d.to_seq = p_to_seq AND d.thread_root_id IS NOT DISTINCT FROM p_thread_root_id AND d.stale) THEN
+      RAISE EXCEPTION 'mem_apply_digest: a rollup needs source digests' USING ERRCODE = '23514';
+    END IF;
+    IF pg_catalog.cardinality(v_src) > 0 AND (SELECT pg_catalog.count(*) FROM public.mem_digest s
+         WHERE s.id = ANY (v_src) AND s.workspace_id = v_ws AND s.channel_id = p_channel_id
+           AND s.thread_root_id IS NOT DISTINCT FROM p_thread_root_id
+           AND s.level = CASE p_level WHEN 'day' THEN 'window' ELSE 'day' END
+           AND s.from_seq >= p_from_seq AND s.to_seq <= p_to_seq
+       ) <> (SELECT pg_catalog.count(DISTINCT x) FROM pg_catalog.unnest(v_src) AS x) THEN
+      RAISE EXCEPTION 'mem_apply_digest: source digests must be one level below, same channel/thread, inside the range'
+        USING ERRCODE = '23503';
+    END IF;
+    IF pg_catalog.cardinality(v_src) > 0 AND EXISTS (SELECT 1 FROM public.mem_evidence se
+                WHERE se.digest_id = ANY (v_src) AND se.workspace_id = v_ws
+                  AND se.message_id <> ALL (p_evidence_message_ids)) THEN
+      RAISE EXCEPTION 'mem_apply_digest: rollup evidence must cover every source digest evidence'
+        USING ERRCODE = '23514';
+    END IF;
+  END IF;
+
+  SELECT d.id INTO v_id FROM public.mem_digest d
+   WHERE d.workspace_id = v_ws AND d.channel_id = p_channel_id AND d.level = p_level
+     AND d.to_seq = p_to_seq AND d.thread_root_id IS NOT DISTINCT FROM p_thread_root_id
+   FOR UPDATE;
+  IF FOUND THEN
+    UPDATE public.mem_digest
+       SET from_seq = p_from_seq, body = p_body, source_count = v_n,
+           source_digest_ids = v_src, model = p_model, model_source = p_model_source,
+           prompt_version = p_prompt_version, stale = false, created_at = pg_catalog.now()
+     WHERE id = v_id;
+    DELETE FROM public.mem_evidence WHERE digest_id = v_id;
+  ELSE
+    INSERT INTO public.mem_digest
+      (workspace_id, channel_id, thread_root_id, level, from_seq, to_seq, body,
+       source_count, source_digest_ids, model, model_source, prompt_version)
+    VALUES
+      (v_ws, p_channel_id, p_thread_root_id, p_level, p_from_seq, p_to_seq, p_body,
+       v_n, v_src, p_model, p_model_source, p_prompt_version)
+    RETURNING id INTO v_id;
+  END IF;
+  INSERT INTO public.mem_evidence (workspace_id, digest_id, message_id, channel_id, created_at)
+  SELECT v_ws, v_id, e, p_channel_id, p_read_at FROM pg_catalog.unnest(p_evidence_message_ids) AS e;
+  RETURN v_id;
 END
 $$;
 
@@ -1453,6 +1891,9 @@ BEGIN
   IF v_ins <> v_n THEN
     RAISE EXCEPTION 'mem_edit_item: copied % evidence rows, expected %', v_ins, v_n USING ERRCODE = '23503';
   END IF;
+  -- H-2: 옛 버전이 닫았거나 합쳐 들인 것들은 새 버전이 이어받는다(편집은 같은 결정의 고침이다).
+  UPDATE public.mem_item SET merged_into_id = v_id WHERE merged_into_id = o.id AND workspace_id = v_ws;
+  UPDATE public.mem_item SET closed_by_id = v_id WHERE closed_by_id = o.id AND workspace_id = v_ws;
   INSERT INTO public.mem_event (workspace_id, target_kind, target_id, action, actor_member_id,
                                 channel_id, owner_member_id, detail)
   VALUES
@@ -1630,8 +2071,10 @@ BEGIN
     RAISE EXCEPTION 'mem_accept_proposal: the proposal expired' USING ERRCODE = '55000';
   END IF;
   -- #3172: 정리 잡이 만든 병합·기간 닫기 제안은 새 항목을 만들지 않고 두 항목에 적용한다.
+  -- M-7: 정리 제안(merge/close)은 카드(UI, #3174)가 붙기 전까지 API 로는 결정할 수 없다. 적용 알맹이(mem_cons_accept)는 있고
+  -- 자기 검사(활성 사람·게스트 아님·읽을 수 있는 채널·정리 대상 채널·락 순서)를 갖췄지만 아직 여기서 열지 않는다.
   IF v_p.op <> 'add' THEN
-    RETURN public.mem_cons_accept(v_p.id, v_viewer);
+    RAISE EXCEPTION 'mem_accept_proposal: this proposal cannot be decided yet' USING ERRCODE = '55000';
   END IF;
   v_n := pg_catalog.cardinality(v_p.evidence_message_ids);
 
@@ -1759,7 +2202,7 @@ DROP FUNCTION IF EXISTS mem_search_items_core(uuid, text, integer, uuid, boolean
 
 CREATE OR REPLACE FUNCTION mem_search_items_core(
   p_viewer uuid, p_query text, p_limit integer, p_answer_channel_id uuid, p_serve boolean,
-  p_channel_id uuid, p_kind text)
+  p_channel_id uuid DEFAULT NULL, p_kind text DEFAULT NULL)
 RETURNS TABLE (
   id uuid, channel_id uuid, space_kind text, kind text, body text,
   valid_from timestamptz, valid_to timestamptz, recorded_at timestamptz,
@@ -1913,6 +2356,125 @@ $$;
 
 
 
+-- ── 벡터 팔의 닫힌 결정 제외 (107 의 mem_search_items_fused 재정의; 소유자·권한은 그대로) ────────────────────────
+CREATE OR REPLACE FUNCTION mem_search_items_fused(
+  p_viewer uuid, p_query text, p_limit integer, p_answer_channel_id uuid,
+  p_query_vec text, p_model text, p_min_similarity real, p_margin real)
+RETURNS TABLE (
+  id uuid, channel_id uuid, space_kind text, kind text, body text,
+  valid_from timestamptz, valid_to timestamptz, recorded_at timestamptz,
+  score real, evidence_message_ids uuid[])
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+DECLARE
+  v_ws uuid := nullif(pg_catalog.current_setting('app.workspace_id', true), '')::uuid;
+  v_limit integer := LEAST(GREATEST(COALESCE(p_limit, 10), 1), 50);
+  v_k integer := LEAST(GREATEST(COALESCE(p_limit, 10), 1) * 3, 50);
+  v_min real := LEAST(GREATEST(COALESCE(p_min_similarity, 0.8), 0), 1);
+  v_margin real := LEAST(GREATEST(COALESCE(p_margin, 1), 0), 1);
+  v_best real;
+  -- 키워드 후보에 없는 벡터 전용 항목은 이만큼만 실린다: 최근접 이웃은 항상 있어서(질문이 기억과 무관해도)
+  -- 상한이 없으면 매 답변 프롬프트에 「그나마 가까운」 항목이 한도까지 채워진다. 조정은 후속(게이팅 튜닝).
+  v_vector_only_cap CONSTANT integer := 3;
+  v_q public.vector;
+  v_vec_ids uuid[] := ARRAY[]::uuid[];
+  r record;
+BEGIN
+  IF p_answer_channel_id IS NULL THEN
+    RAISE EXCEPTION 'mem_search_items_fused: serving requires an answer channel' USING ERRCODE = '22023';
+  END IF;
+  IF v_ws IS NULL OR p_viewer IS NULL THEN
+    RETURN;
+  END IF;
+  IF p_query_vec IS NULL OR p_model IS NULL THEN
+    RETURN QUERY
+    SELECT * FROM public.mem_search_items_core(p_viewer, p_query, v_limit, p_answer_channel_id, true);
+    RETURN;
+  END IF;
+  -- 잘못된 벡터는 22P02(형식)·22000(차원) 로 멈춘다 — 워커는 키워드 전용으로 되돌아간다.
+  v_q := p_query_vec::public.vector;
+  IF public.vector_dims(v_q) <> 384 THEN
+    RAISE EXCEPTION 'mem_search_items_fused: expected a 384-dimension query vector' USING ERRCODE = '22023';
+  END IF;
+  IF public.vector_norm(v_q) = 0 THEN
+    RAISE EXCEPTION 'mem_search_items_fused: zero query vector' USING ERRCODE = '22023';
+  END IF;
+
+  FOR r IN
+    SELECT e.item_id AS eid, (1 - (e.embedding OPERATOR(public.<=>) v_q))::real AS sim
+      FROM public.mem_item_embedding e
+      JOIN public.mem_item i ON i.id = e.item_id AND i.workspace_id = e.workspace_id
+     WHERE e.workspace_id = v_ws
+       AND e.model = p_model
+       AND i.retired_at IS NULL
+       AND NOT i.stale
+       -- #3172: 서빙은 새 결정에 닫힌 옛 결정(valid_to)을 싣지 않는다 — 키워드 경로(mem_search_items_core)와 같다.
+       AND i.valid_to IS NULL
+       -- M-1(키워드 경로와 같은 좁히기): 뷰어의 활성 멤버십 채널(개인 공간이면 소유자 본인)에 있는 항목만
+       -- 거리 계산을 받는다 — 못 읽는 채널의 항목 수가 응답 시간에 드러나지 않는다(타이밍 오라클).
+       AND (i.channel_id IN (SELECT ms.channel_id FROM public.membership ms
+                              WHERE ms.workspace_id = v_ws AND ms.member_id = p_viewer
+                                AND ms.left_at IS NULL)
+            OR (i.space_kind = 'personal' AND i.owner_member_id = p_viewer))
+       AND (1 - (e.embedding OPERATOR(public.<=>) v_q)) >= v_min
+     ORDER BY e.embedding OPERATOR(public.<=>) v_q, i.id
+  LOOP
+    IF NOT public.mem_item_readable_by(r.eid, p_viewer) THEN
+      CONTINUE;
+    END IF;
+    IF NOT public.mem_item_audience_ok(r.eid, p_answer_channel_id, p_viewer) THEN
+      CONTINUE;
+    END IF;
+    -- 상대 문턱: 통과한 후보 중 가장 가까운 것에서 margin 이상 멀어지면 거기서 끊는다(거리순이라 뒤는 더 멀다).
+    -- 절대 문턱만으로는 e5 의 좁은 유사도 대역에서 「같은 분야의 그럭저럭 비슷한 항목」이 줄줄이 딸려 온다.
+    IF v_best IS NULL THEN
+      v_best := r.sim;
+    ELSIF r.sim < v_best - v_margin THEN
+      EXIT;
+    END IF;
+    v_vec_ids := v_vec_ids || r.eid;
+    EXIT WHEN pg_catalog.cardinality(v_vec_ids) >= v_k;
+  END LOOP;
+
+  RETURN QUERY
+  WITH kw AS (
+    SELECT c.id AS kid, c.ord AS krank
+      FROM public.mem_search_items_core(p_viewer, p_query, v_k, p_answer_channel_id, true)
+             WITH ORDINALITY AS c(id, channel_id, space_kind, kind, body, valid_from, valid_to,
+                                  recorded_at, score, evidence_message_ids, ord)
+  ),
+  vec AS (
+    SELECT x.vid, x.vrank
+      FROM pg_catalog.unnest(v_vec_ids) WITH ORDINALITY AS x(vid, vrank)
+  ),
+  fused AS (
+    SELECT COALESCE(kw.kid, vec.vid) AS fid,
+           (kw.kid IS NULL) AS vonly,
+           vec.vrank AS vrank,
+           (COALESCE(2.0 / (60 + kw.krank), 0) + COALESCE(1.0 / (60 + vec.vrank), 0)) AS rrf
+      FROM kw FULL OUTER JOIN vec ON vec.vid = kw.kid
+  ),
+  capped AS (
+    SELECT f.*, pg_catalog.row_number() OVER (PARTITION BY f.vonly ORDER BY f.vrank) AS vo_n
+      FROM fused f
+  )
+  SELECT i.id, i.channel_id, i.space_kind, i.kind, i.body, i.valid_from, i.valid_to, i.recorded_at,
+         f.rrf::real,
+         (SELECT pg_catalog.array_agg(ev.message_id ORDER BY ev.message_id)
+            FROM public.mem_evidence ev
+           WHERE ev.item_id = i.id AND ev.workspace_id = v_ws)
+    FROM capped f
+    JOIN public.mem_item i ON i.id = f.fid AND i.workspace_id = v_ws
+   WHERE NOT f.vonly OR f.vo_n <= v_vector_only_cap
+   ORDER BY f.rrf DESC, (i.valid_to IS NULL) DESC, i.recorded_at DESC, i.id
+   LIMIT v_limit;
+END
+$$;
+
+
 -- ── 소유자·권한 ────────────────────────────────────────────────────────────────
 GRANT CREATE ON SCHEMA public TO mem_definer;
 DO $$
@@ -1926,7 +2488,9 @@ BEGIN
     'mem_cons_propose(text, uuid, uuid)', 'mem_cons_note_pair(uuid, uuid, text)',
     'mem_cons_apply(uuid, uuid, text)', 'mem_cons_accept(uuid, uuid)',
     'mem_cons_retention(uuid, integer, integer, integer)', 'mem_cons_purge_proposals(uuid)',
-    'mem_cons_revert(uuid)',
+    'mem_cons_revert(uuid)', 'mem_cons_renew(uuid, uuid, double precision)', 'mem_cons_defer_pair(uuid, uuid)',
+    'mem_cons_defer(uuid, uuid, text)', 'mem_cons_release(uuid[], text)', 'mem_item_guest_authored(uuid)',
+    'mem_cons_revert_core(uuid, uuid)', 'mem_revert_consolidation(uuid)',
     'mem_search_items_core(uuid, text, integer, uuid, boolean, uuid, text)',
     'mem_search_items_for(uuid, text, integer, uuid)', 'mem_search_items(text, integer, uuid, text)'
   ] LOOP
@@ -1949,12 +2513,15 @@ DECLARE
     'mem_cons_retire_dead(uuid, integer)', 'mem_cons_decay(uuid, integer)', 'mem_cons_reconcile(uuid)',
     'mem_suppressed_messages(uuid, uuid[])', 'mem_cons_pairs(uuid, real, real, integer)',
     'mem_cons_apply(uuid, uuid, text)', 'mem_cons_retention(uuid, integer, integer, integer)',
-    'mem_cons_purge_proposals(uuid)', 'mem_cons_revert(uuid)',
+    'mem_cons_purge_proposals(uuid)', 'mem_cons_revert(uuid)', 'mem_cons_renew(uuid, uuid, double precision)',
+    'mem_cons_defer_pair(uuid, uuid)',
     'mem_search_items_for(uuid, text, integer, uuid)'
   ];
   internal_only text[] := ARRAY[
     'mem_cons_merge_items(uuid, uuid, uuid, uuid)', 'mem_cons_close_item(uuid, uuid, uuid, uuid)',
     'mem_cons_propose(text, uuid, uuid)', 'mem_cons_note_pair(uuid, uuid, text)', 'mem_cons_accept(uuid, uuid)',
+    'mem_cons_defer(uuid, uuid, text)', 'mem_cons_release(uuid[], text)', 'mem_item_guest_authored(uuid)',
+    'mem_cons_revert_core(uuid, uuid)',
     'mem_search_items_core(uuid, text, integer, uuid, boolean, uuid, text)'
   ];
 BEGIN
@@ -2010,23 +2577,32 @@ DECLARE
     'mem_channel_eligible(uuid)', 'mem_channel_switch(uuid)', 'mem_cons_accept(uuid,uuid)',
     'mem_cons_apply(uuid,uuid,text)', 'mem_cons_begin(uuid,uuid,double precision,timestamp with time zone)',
     'mem_cons_close_item(uuid,uuid,uuid,uuid)', 'mem_cons_decay(uuid,integer)',
+    'mem_cons_defer(uuid,uuid,text)', 'mem_cons_defer_pair(uuid,uuid)',
     'mem_cons_finish(uuid,uuid,boolean,integer)', 'mem_cons_merge_items(uuid,uuid,uuid,uuid)',
     'mem_cons_note_pair(uuid,uuid,text)', 'mem_cons_pairs(uuid,real,real,integer)',
     'mem_cons_propose(text,uuid,uuid)', 'mem_cons_purge_proposals(uuid)', 'mem_cons_reconcile(uuid)',
+    'mem_cons_release(uuid[],text)', 'mem_cons_renew(uuid,uuid,double precision)',
     'mem_cons_retention(uuid,integer,integer,integer)', 'mem_cons_retire_dead(uuid,integer)',
-    'mem_cons_revert(uuid)', 'mem_cursor_state(uuid)', 'mem_digest_audience_ok(uuid,uuid,uuid)',
-    'mem_digest_evidence_ok(uuid)', 'mem_digest_index(uuid,text,bigint)', 'mem_digest_live(uuid)',
+    'mem_cons_revert(uuid)', 'mem_cons_revert_core(uuid,uuid)', 'mem_cursor_state(uuid)',
+    'mem_digest_audience_ok(uuid,uuid,uuid)', 'mem_digest_evidence_ok(uuid)',
+    'mem_digest_index(uuid,text,bigint)', 'mem_digest_live(uuid)',
     'mem_digest_rollup_inputs(uuid,uuid,text,bigint,bigint)', 'mem_drop_digest(uuid)',
-    'mem_edit_item(uuid,text,text)', 'mem_forget_item(uuid)', 'mem_item_audience_ok(uuid,uuid,uuid)',
-    'mem_item_evidence_ok(uuid)', 'mem_item_live(uuid)', 'mem_item_readable_by(uuid,uuid)',
-    'mem_message_changed()', 'mem_proposal_decider(uuid)', 'mem_proposal_evidence_ok(uuid)',
-    'mem_propose_item(uuid,text,text,text,uuid[])',
+    'mem_edit_item(uuid,text,text)', 'mem_embedding_stats(text)', 'mem_forget_item(uuid)',
+    'mem_item_audience_ok(uuid,uuid,uuid)', 'mem_item_embedding_cleanup()', 'mem_item_evidence_ok(uuid)',
+    'mem_item_guest_authored(uuid)', 'mem_item_live(uuid)', 'mem_item_readable_by(uuid,uuid)',
+    'mem_items_to_embed(text,integer)', 'mem_message_changed()', 'mem_proposal_decider(uuid)',
+    'mem_proposal_evidence_ok(uuid)', 'mem_propose_item(uuid,text,text,text,uuid[])',
     'mem_record_serving(uuid,uuid,uuid[],uuid[],integer,integer,integer)', 'mem_reject_proposal(uuid)',
-    'mem_reserve_tokens(bigint,bigint)', 'mem_search_items(text,integer,uuid,text)',
+    'mem_reserve_tokens(bigint,bigint)', 'mem_revert_consolidation(uuid)',
+    'mem_search_items(text,integer,uuid,text)',
     'mem_search_items_core(uuid,text,integer,uuid,boolean,uuid,text)',
-    'mem_search_items_for(uuid,text,integer,uuid)', 'mem_serve_candidates(uuid,bigint,integer,integer)',
-    'mem_serve_items(uuid,integer,integer)', 'mem_serve_requester(uuid)', 'mem_serving_of(uuid)',
-    'mem_serving_record_of(uuid)', 'mem_stale_digests(integer,integer)',
+    'mem_search_items_for(uuid,text,integer,uuid)',
+    'mem_search_items_fused(uuid,text,integer,uuid,text,text,real,real)',
+    'mem_serve_candidates(uuid,bigint,integer,integer)', 'mem_serve_gate(uuid)',
+    'mem_serve_items(uuid,integer,integer)',
+    'mem_serve_items_fused(uuid,integer,integer,text,text,real,real)', 'mem_serve_query(uuid)',
+    'mem_serve_requester(uuid)', 'mem_serving_of(uuid)', 'mem_serving_record_of(uuid)',
+    'mem_set_item_embedding(uuid,text,text)', 'mem_stale_digests(integer,integer)',
     'mem_suppressed_messages(uuid,uuid[])', 'mem_token_budget(bigint)'
   ];
 BEGIN

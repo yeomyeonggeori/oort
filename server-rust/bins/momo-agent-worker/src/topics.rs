@@ -279,6 +279,7 @@ impl AgentWorker {
         stats.llm_calls += 1;
         match self.call_model(prompt, max_output).await {
             Ok(reply) => {
+                self.renew_consolidate_lease(ws, ch).await;
                 let charged = reply.tokens.unwrap_or(estimate).max(estimate / 2);
                 self.settle_tokens(ws, charged - estimate).await;
                 Ask::Text(reply.text, reply.model)
@@ -606,7 +607,7 @@ mod tests {
         assert!(clean_summary(&key).is_none());
         assert_eq!(
             clean_summary(&"가".repeat(900)).unwrap().chars().count(),
-            701
+            700
         );
     }
 

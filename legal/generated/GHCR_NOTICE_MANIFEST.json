@@ -1,21 +1,21 @@
 {
   "counts": {
-    "cargo": 321,
+    "cargo": 383,
     "npm": 469,
-    "unique_blobs": 398
+    "unique_blobs": 422
   },
   "format": "ghcr-notice-bundle/v1",
   "generator": "scripts/generate_ghcr_notice_bundle.py",
   "image_files": {
-    "GHCR_THIRD_PARTY_NOTICES.txt": "31e032bf4f31c2af2aa22fa5c4692110879b2e962a9724fcfb634a77353247b0",
+    "GHCR_THIRD_PARTY_NOTICES.txt": "c41078a02a4635f1fd5fa14895a280d3cb4cc8e4979f06fd13ab82808bd92e3b",
     "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
-    "NOTICE": "731eca38bb8b24fdb16cd794b844f7e41267005bf1065466349b928816e7095c",
-    "THIRD_PARTY_NOTICES.md": "5c7b6d204475b82e3f6c51738ee058fdfce050b602c9423b2d5615a59193fd71"
+    "NOTICE": "a6d4fe7ecfc042cda323035dfa7b014504c63ef74f5ba2dc811c5101044735e4",
+    "THIRD_PARTY_NOTICES.md": "8163afc010574bf57d0a5f957c8dfc953ec3032d8c06e3c55eb17e4a94186d40"
   },
   "inputs": {
-    "clarify_sha256": "fcb9ac157804777c306cebdcc24f804992a74fcf87c27d42dbc5d9370a7ed8e6",
+    "clarify_sha256": "366b7c68569c49f9fab915342fc2c620d1ee6318ab3567d337fd4f7d1a0f79c3",
     "clients_web_package_lock_sha256": "3fe4cf55556ea18354f1024dfe564626553ceacb9310b290404e9e2af5ee736a",
-    "server_rust_cargo_lock_sha256": "86e07335da02429eb1c410187df2ec17345563ea533e275f862c527427cdda46",
+    "server_rust_cargo_lock_sha256": "b33dc7cec75ae6fc4701d5a4a6f85d501cb2f069c1c9016415fdd13c25617a97",
     "spdx_texts_sha256": {
       "0BSD.txt": "3662a9adfe6feddb077f96dfad3cb30408540a2a3eae5a656b7ff4375e622be0",
       "Apache-2.0.txt": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
@@ -29,8 +29,8 @@
     }
   },
   "outputs": {
-    "bundle_sha256": "31e032bf4f31c2af2aa22fa5c4692110879b2e962a9724fcfb634a77353247b0",
-    "sha256_manifest_sha256": "cd100b37753d93bc9558e616c9d497f130e3e4261f7f3bbf46b1c44117672be6"
+    "bundle_sha256": "c41078a02a4635f1fd5fa14895a280d3cb4cc8e4979f06fd13ab82808bd92e3b",
+    "sha256_manifest_sha256": "b6c9aabb9f0562dee1f5750824ac59d5bfed3f3c25440e643ef3ffd2e1634dc6"
   },
   "packages": [
     {
@@ -95,6 +95,27 @@
       "source": "package-tree",
       "spdx": "Apache-2.0 OR MIT",
       "version": "0.10.3"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "0444c6991eead6822f7b9102e654448d51624431119546492e8b231db42c48bb",
+          "source": "package-tree"
+        }
+      ],
+      "name": "ahash",
+      "repository": "https://github.com/tkaitchuck/ahash",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.8.12"
     },
     {
       "copyright": "Copyright (c) 2015 Andrew Gallant",
@@ -319,6 +340,27 @@
       "name": "base64",
       "repository": "https://github.com/marshallpierce/rust-base64",
       "source": "package-tree",
+      "spdx": "MIT/Apache-2.0",
+      "version": "0.13.1"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "0dd882e53de11566d50f8e8e2d5a651bcf3fabee4987d70f306233cf39094ba7",
+          "source": "package-tree"
+        }
+      ],
+      "name": "base64",
+      "repository": "https://github.com/marshallpierce/rust-base64",
+      "source": "package-tree",
       "spdx": "MIT OR Apache-2.0",
       "version": "0.22.1"
     },
@@ -470,6 +512,22 @@
       "version": "1.12.1"
     },
     {
+      "copyright": "Copyright (c) 2021 Stephen M. Coakley",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "f98e09091d5ae02b2f2ec1ead4f7f28c4c44d1cb98b078739ba67091637e170c",
+          "source": "package-tree"
+        }
+      ],
+      "name": "castaway",
+      "repository": "https://github.com/sagebind/castaway",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "0.2.4"
+    },
+    {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
       "ecosystem": "cargo",
       "files": [
@@ -605,6 +663,22 @@
       "source": "package-tree",
       "spdx": "Apache-2.0 OR MIT",
       "version": "0.5.4"
+    },
+    {
+      "copyright": "Copyright (c) 2021 Parker Timmerman",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "0d52feec79589df30138dad3800323fe5686b764b73347330a2dfef8ac83efe8",
+          "source": "package-tree"
+        }
+      ],
+      "name": "compact_str",
+      "repository": "https://github.com/ParkMyCar/compact_str",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "0.9.1"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
@@ -810,6 +884,48 @@
           "source": "package-tree"
         }
       ],
+      "name": "crossbeam-deque",
+      "repository": "https://github.com/crossbeam-rs/crossbeam",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.8.8"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab",
+          "source": "package-tree"
+        }
+      ],
+      "name": "crossbeam-epoch",
+      "repository": "https://github.com/crossbeam-rs/crossbeam",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.9.21"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab",
+          "source": "package-tree"
+        }
+      ],
       "name": "crossbeam-queue",
       "repository": "https://github.com/crossbeam-rs/crossbeam",
       "source": "package-tree",
@@ -980,6 +1096,96 @@
       "version": "0.1.1"
     },
     {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "source": "package-tree"
+        }
+      ],
+      "name": "daachorse",
+      "repository": "https://github.com/daac-tools/daachorse",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "3.0.3"
+    },
+    {
+      "copyright": "Copyright (c) 2017 Ted Driggs",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6",
+          "source": "package-tree"
+        }
+      ],
+      "name": "darling",
+      "repository": "https://github.com/TedDriggs/darling",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "0.20.11"
+    },
+    {
+      "copyright": "Copyright (c) 2017 Ted Driggs",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6",
+          "source": "package-tree"
+        }
+      ],
+      "name": "darling_core",
+      "repository": "https://github.com/TedDriggs/darling",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "0.20.11"
+    },
+    {
+      "copyright": "Copyright (c) 2017 Ted Driggs",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6",
+          "source": "package-tree"
+        }
+      ],
+      "name": "darling_macro",
+      "repository": "https://github.com/TedDriggs/darling",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "0.20.11"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "source": "package-tree"
+        }
+      ],
+      "name": "dary_heap",
+      "repository": "https://github.com/hanmertens/dary_heap",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.3.9"
+    },
+    {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
       "ecosystem": "cargo",
       "files": [
@@ -1041,6 +1247,69 @@
       "source": "package-tree",
       "spdx": "MIT OR Apache-2.0",
       "version": "0.5.8"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright {yyyy} {name of copyright owner}",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "8c9612877aacfa1b42f5e80b679e6c3c93a7ba2bb99dfaf6e87e200dca4b4e6c",
+          "source": "package-tree"
+        }
+      ],
+      "name": "derive_builder",
+      "repository": "https://github.com/colin-kiegel/rust-derive-builder",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.20.2"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright {yyyy} {name of copyright owner}",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "8c9612877aacfa1b42f5e80b679e6c3c93a7ba2bb99dfaf6e87e200dca4b4e6c",
+          "source": "package-tree"
+        }
+      ],
+      "name": "derive_builder_core",
+      "repository": "https://github.com/colin-kiegel/rust-derive-builder",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.20.2"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright {yyyy} {name of copyright owner}",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "8c9612877aacfa1b42f5e80b679e6c3c93a7ba2bb99dfaf6e87e200dca4b4e6c",
+          "source": "package-tree"
+        }
+      ],
+      "name": "derive_builder_macro",
+      "repository": "https://github.com/colin-kiegel/rust-derive-builder",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.20.2"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
@@ -1264,6 +1533,22 @@
       "version": "0.3.14"
     },
     {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "source": "package-tree"
+        }
+      ],
+      "name": "esaxx-rs",
+      "repository": "https://github.com/Narsil/esaxx-rs",
+      "source": "package-tree",
+      "spdx": "Apache-2.0",
+      "version": "0.1.10"
+    },
+    {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
       "ecosystem": "cargo",
       "files": [
@@ -1304,6 +1589,43 @@
       "source": "package-tree",
       "spdx": "Apache-2.0 OR MIT",
       "version": "5.4.2"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2026 Anush008",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "a05c7bf1bcb6c0e1160fafb8b172749a696da503a30e2ba70485c8c1c45a602c",
+          "source": "package-tree"
+        }
+      ],
+      "name": "fastembed",
+      "repository": "https://github.com/Anush008/fastembed-rs",
+      "source": "package-tree",
+      "spdx": "Apache-2.0",
+      "version": "7.1.0"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "source": "package-tree"
+        }
+      ],
+      "name": "fastrand",
+      "repository": "https://github.com/smol-rs/fastrand",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT",
+      "version": "2.5.0"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
@@ -1435,6 +1757,22 @@
       "source": "package-tree",
       "spdx": "Zlib",
       "version": "0.1.5"
+    },
+    {
+      "copyright": "Copyright (c) 2024 Orson Peters",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "1d4c38d56650edc2c673cadbec74bec14db1fe8f2f10f4e3477dcbb49563be40",
+          "source": "package-tree"
+        }
+      ],
+      "name": "foldhash",
+      "repository": "https://github.com/orlp/foldhash",
+      "source": "package-tree",
+      "spdx": "Zlib",
+      "version": "0.2.0"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
@@ -1715,6 +2053,27 @@
         },
         {
           "name": "LICENSE-MIT",
+          "sha256": "29e9fe5074bd27e0e5d5d110394fbbcd841baee2651a3c4b4560a632702cede4",
+          "source": "package-tree"
+        }
+      ],
+      "name": "getrandom",
+      "repository": "https://github.com/rust-random/getrandom",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.3.4"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
           "sha256": "523a42c25d245dde9c015f882cec7f4555aad883382a6cf19b4b7d9b2cd5419b",
           "source": "package-tree"
         }
@@ -1808,6 +2167,27 @@
       "source": "package-tree",
       "spdx": "MIT OR Apache-2.0",
       "version": "0.15.5"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2",
+          "source": "package-tree"
+        }
+      ],
+      "name": "hashbrown",
+      "repository": "https://github.com/rust-lang/hashbrown",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.16.1"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
@@ -2306,6 +2686,22 @@
       "version": "2.2.0"
     },
     {
+      "copyright": "Authors: Ted Driggs <ted.driggs@outlook.com>",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1",
+          "source": "package-tree"
+        }
+      ],
+      "name": "ident_case",
+      "repository": "https://github.com/TedDriggs/ident_case",
+      "source": "package-tree",
+      "spdx": "MIT/Apache-2.0",
+      "version": "1.0.1"
+    },
+    {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
       "ecosystem": "cargo",
       "files": [
@@ -2411,6 +2807,27 @@
       "version": "2.12.0"
     },
     {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "7576269ea71f767b99297934c0b2367532690f8c4badc695edf8e04ab6a1e545",
+          "source": "package-tree"
+        }
+      ],
+      "name": "itertools",
+      "repository": "https://github.com/rust-itertools/itertools",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.14.0"
+    },
+    {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
       "ecosystem": "cargo",
       "files": [
@@ -2511,6 +2928,22 @@
       "version": "0.2.189"
     },
     {
+      "copyright": "Copyright © 2015, Simonas Kazlauskas",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "b29f8b01452350c20dd1af16ef83b598fea3053578ccc1c7a0ef40e57be2620f",
+          "source": "package-tree"
+        }
+      ],
+      "name": "libloading",
+      "repository": "https://github.com/nagisa/rust_libloading/",
+      "source": "package-tree",
+      "spdx": "ISC",
+      "version": "0.9.0"
+    },
+    {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright (c) 2018 Jorge Aparicio",
       "ecosystem": "cargo",
       "files": [
@@ -2557,6 +2990,37 @@
       "source": "package-tree",
       "spdx": "MIT",
       "version": "0.30.1"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "COPYRIGHT",
+          "sha256": "3290ae0fbc9ddb77d2239121d710f0bb9d31b3b4744e6d97fe01e652b4c1870b",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-Apache-2.0_WITH_LLVM-exception",
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "source": "package-tree"
+        }
+      ],
+      "name": "linux-raw-sys",
+      "repository": "https://github.com/sunfishcode/linux-raw-sys",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "version": "0.12.1"
     },
     {
       "copyright": "COPYRIGHT AND PERMISSION NOTICE; Copyright © 2020-2024 Unicode, Inc.",
@@ -2643,6 +3107,58 @@
       "version": "0.1.2"
     },
     {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2019 Daniel Henry-Mantilla <daniel.henry.mantilla@gmail.com>",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "388e98b08de12ba8a9d4575883c8b0386c747cea188ed459380fc58d60da15c9",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "603fb27ef3266ea516872eefd9ae587746b8c34614a35c0fb24e4e9e0c17e137",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-ZLIB",
+          "sha256": "1c41c0e19caa2c20b0adfeb8219b606b21b7c63914aa3ae74ae3e091d7ce09ca",
+          "source": "package-tree"
+        }
+      ],
+      "name": "macro_rules_attribute",
+      "repository": "https://github.com/danielhenrymantilla/macro_rules_attribute-rs",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT OR Zlib",
+      "version": "0.2.3"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2019 Daniel Henry-Mantilla <daniel.henry.mantilla@gmail.com>",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "388e98b08de12ba8a9d4575883c8b0386c747cea188ed459380fc58d60da15c9",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "603fb27ef3266ea516872eefd9ae587746b8c34614a35c0fb24e4e9e0c17e137",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-ZLIB",
+          "sha256": "1c41c0e19caa2c20b0adfeb8219b606b21b7c63914aa3ae74ae3e091d7ce09ca",
+          "source": "package-tree"
+        }
+      ],
+      "name": "macro_rules_attribute-proc_macro",
+      "repository": "https://github.com/danielhenrymantilla/macro_rules_attribute-rs",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT OR Zlib",
+      "version": "0.2.3"
+    },
+    {
       "copyright": "Copyright (c) 2019 Eliza Weisman",
       "ecosystem": "cargo",
       "files": [
@@ -2678,6 +3194,27 @@
       "source": "package-tree",
       "spdx": "MIT AND BSD-3-Clause",
       "version": "0.8.4"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "792d075c7bad6dac258a44e799eb64cbf465e24d9932d27669be08c5ec957e27",
+          "source": "package-tree"
+        }
+      ],
+      "name": "matrixmultiply",
+      "repository": "https://github.com/bluss/matrixmultiply/",
+      "source": "package-tree",
+      "spdx": "MIT/Apache-2.0",
+      "version": "0.3.11"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
@@ -2748,6 +3285,32 @@
       "version": "0.3.17"
     },
     {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE.md",
+          "sha256": "dbe1fff0fb1314b6af94f161511406275cf01c5a32441fbf24528a57a051d599",
+          "source": "package-tree"
+        }
+      ],
+      "name": "minimal-lexical",
+      "repository": "https://github.com/Alexhuszagh/minimal-lexical",
+      "source": "package-tree",
+      "spdx": "MIT/Apache-2.0",
+      "version": "0.2.1"
+    },
+    {
       "copyright": "Copyright (c) 2014 Carl Lerche and other MIO contributors",
       "ecosystem": "cargo",
       "files": [
@@ -2762,6 +3325,85 @@
       "source": "package-tree",
       "spdx": "MIT",
       "version": "1.2.2"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "source": "package-tree"
+        }
+      ],
+      "name": "monostate",
+      "repository": "https://github.com/dtolnay/monostate",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.1.18"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "source": "package-tree"
+        }
+      ],
+      "name": "monostate-impl",
+      "repository": "https://github.com/dtolnay/monostate",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.1.18"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "1fd6747d2c8e80f9fa766f57c5888864774621deb85cc2838ccaed727db32d45",
+          "source": "package-tree"
+        }
+      ],
+      "name": "ndarray",
+      "repository": "https://github.com/rust-ndarray/ndarray",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.17.2"
+    },
+    {
+      "copyright": "Copyright (c) 2014-2019 Geoffroy Couprie",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "4dbda04344456f09a7a588140455413a9ac59b6b26a1ef7cdf9c800c012d87f0",
+          "source": "package-tree"
+        }
+      ],
+      "name": "nom",
+      "repository": "https://github.com/Geal/nom",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "7.1.3"
     },
     {
       "copyright": "Copyright (c) 2014 Benjamin Sago; Copyright (c) 2021-2022 The Nushell Project Developers",
@@ -2820,6 +3462,27 @@
       "source": "package-tree",
       "spdx": "MIT/Apache-2.0",
       "version": "0.8.6"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb",
+          "source": "package-tree"
+        }
+      ],
+      "name": "num-complex",
+      "repository": "https://github.com/rust-num/num-complex",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.4.6"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright (c) Jacob Pratt",
@@ -2927,6 +3590,38 @@
       "version": "1.21.4"
     },
     {
+      "copyright": "Authors: Will Speak <will@willspeak.me>, Ivan Ivashchenko <defuz@me.com>",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE.md",
+          "sha256": "e9c1238c5beb73c6cc130160418968058b21d486a7a445f0ceff27d51fbfdc44",
+          "source": "package-tree"
+        }
+      ],
+      "name": "onig",
+      "repository": "https://github.com/iwillspeak/rust-onig",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "6.5.3"
+    },
+    {
+      "copyright": "Authors: Will Speak <will@willspeak.me>, Ivan Ivashchenko <defuz@me.com>",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE.md",
+          "sha256": "71f321038b088358004bee991635ac09e4c703bec467d3c30c06992c0595f189",
+          "source": "package-tree"
+        }
+      ],
+      "name": "onig_sys",
+      "repository": "https://github.com/rust-onig/rust-onig",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "69.9.3"
+    },
+    {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
       "ecosystem": "cargo",
       "files": [
@@ -2946,6 +3641,48 @@
       "source": "package-tree",
       "spdx": "MIT OR Apache-2.0",
       "version": "0.3.1"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "6bba08de46289c40986a2e6b310e2da61fcea33b3c112c8320f6093f8f9cb71b",
+          "source": "package-tree"
+        }
+      ],
+      "name": "ort",
+      "repository": "https://github.com/pykeio/ort",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "2.0.0-rc.13"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "6bba08de46289c40986a2e6b310e2da61fcea33b3c112c8320f6093f8f9cb71b",
+          "source": "package-tree"
+        }
+      ],
+      "name": "ort-sys",
+      "repository": "https://github.com/pykeio/ort",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "2.0.0-rc.13"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
@@ -3035,6 +3772,48 @@
       "source": "package-tree",
       "spdx": "MIT OR Apache-2.0",
       "version": "0.9.12"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "source": "package-tree"
+        }
+      ],
+      "name": "paste",
+      "repository": "https://github.com/dtolnay/paste",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "1.0.15"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "source": "package-tree"
+        }
+      ],
+      "name": "pastey",
+      "repository": "https://github.com/as1100k/pastey",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.2.3"
     },
     {
       "copyright": "Copyright (c) 2016 Jonathan Creekmore",
@@ -3219,6 +3998,48 @@
       "source": "package-tree",
       "spdx": "Apache-2.0 OR MIT",
       "version": "0.6.2"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "source": "package-tree"
+        }
+      ],
+      "name": "portable-atomic",
+      "repository": "https://github.com/taiki-e/portable-atomic",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT",
+      "version": "1.15.0"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "source": "package-tree"
+        }
+      ],
+      "name": "portable-atomic-util",
+      "repository": "https://github.com/taiki-e/portable-atomic-util",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT",
+      "version": "0.2.8"
     },
     {
       "copyright": "COPYRIGHT AND PERMISSION NOTICE; Copyright © 2020-2024 Unicode, Inc.",
@@ -3449,6 +4270,32 @@
       "repository": "https://github.com/r-efi/r-efi",
       "source": "clarify",
       "spdx": "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
+      "version": "5.3.0"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright (C) 1991, 1999 Free Software Foundation, Inc.",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "SPDX-MIT.txt",
+          "sha256": "f9c4c77baa3828004ee54b8a4f2db2e88ed44a6237a493965bf551fac0fcb62d",
+          "source": "clarify"
+        },
+        {
+          "name": "SPDX-Apache-2.0.txt",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "source": "clarify"
+        },
+        {
+          "name": "SPDX-LGPL-2.1-or-later.txt",
+          "sha256": "fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb",
+          "source": "clarify"
+        }
+      ],
+      "name": "r-efi",
+      "repository": "https://github.com/r-efi/r-efi",
+      "source": "clarify",
+      "spdx": "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
       "version": "6.0.0"
     },
     {
@@ -3514,6 +4361,32 @@
         },
         {
           "name": "LICENSE-APACHE",
+          "sha256": "35242e7a83f69875e6edeff02291e688c97caafe2f8902e4e19b49d3e78b4cab",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b",
+          "source": "package-tree"
+        }
+      ],
+      "name": "rand",
+      "repository": "https://github.com/rust-random/rand",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.9.5"
+    },
+    {
+      "copyright": "copyright assignment is required to contribute to the Rand project.; copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "COPYRIGHT",
+          "sha256": "90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-APACHE",
           "sha256": "aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf",
           "source": "package-tree"
         },
@@ -3528,6 +4401,32 @@
       "source": "package-tree",
       "spdx": "MIT OR Apache-2.0",
       "version": "0.3.1"
+    },
+    {
+      "copyright": "copyright assignment is required to contribute to the Rand project.; copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "COPYRIGHT",
+          "sha256": "90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "35242e7a83f69875e6edeff02291e688c97caafe2f8902e4e19b49d3e78b4cab",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b",
+          "source": "package-tree"
+        }
+      ],
+      "name": "rand_chacha",
+      "repository": "https://github.com/rust-random/rand",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.9.0"
     },
     {
       "copyright": "copyright assignment is required to contribute to the Rand project.; copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
@@ -3597,6 +4496,32 @@
         },
         {
           "name": "LICENSE-MIT",
+          "sha256": "209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b",
+          "source": "package-tree"
+        }
+      ],
+      "name": "rand_core",
+      "repository": "https://github.com/rust-random/rand",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.9.5"
+    },
+    {
+      "copyright": "copyright assignment is required to contribute to the Rand project.; copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "COPYRIGHT",
+          "sha256": "90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "6df43f6f4b5d4587f3d8d71e45532c688fd168afa5fe89d571cb32fa09c4ef51",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
           "sha256": "2234e3cefee876aeb686ad89e978bdb07bf118a1186ab1cf161bcdf69d4b4f57",
           "source": "package-tree"
         }
@@ -3606,6 +4531,90 @@
       "source": "package-tree",
       "spdx": "MIT OR Apache-2.0",
       "version": "0.10.2"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "7576269ea71f767b99297934c0b2367532690f8c4badc695edf8e04ab6a1e545",
+          "source": "package-tree"
+        }
+      ],
+      "name": "rawpointer",
+      "repository": "https://github.com/bluss/rawpointer/",
+      "source": "package-tree",
+      "spdx": "MIT/Apache-2.0",
+      "version": "0.2.1"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720",
+          "source": "package-tree"
+        }
+      ],
+      "name": "rayon",
+      "repository": "https://github.com/rayon-rs/rayon",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "1.12.0"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "27995d58ad5c1145c1a8cd86244ce844886958a35eb2b78c6b772748669999ac",
+          "source": "package-tree"
+        }
+      ],
+      "name": "rayon-cond",
+      "repository": "https://github.com/cuviper/rayon-cond",
+      "source": "package-tree",
+      "spdx": "Apache-2.0/MIT",
+      "version": "0.4.0"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720",
+          "source": "package-tree"
+        }
+      ],
+      "name": "rayon-core",
+      "repository": "https://github.com/rayon-rs/rayon",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "1.13.0"
     },
     {
       "copyright": "Copyright (c) 2017 Redox OS Developers",
@@ -3638,6 +4647,27 @@
       "source": "package-tree",
       "spdx": "MIT",
       "version": "0.9.1"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb",
+          "source": "package-tree"
+        }
+      ],
+      "name": "regex",
+      "repository": "https://github.com/rust-lang/regex",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "1.13.1"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
@@ -3817,6 +4847,37 @@
       "ecosystem": "cargo",
       "files": [
         {
+          "name": "COPYRIGHT",
+          "sha256": "377c2e7c53250cc5905c0b0532d35973392af16ffb9596a41d99d202cf3617c9",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-Apache-2.0_WITH_LLVM-exception",
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "source": "package-tree"
+        }
+      ],
+      "name": "rustix",
+      "repository": "https://github.com/bytecodealliance/rustix",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "version": "1.1.5"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
           "name": "LICENSE-APACHE",
           "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
           "source": "package-tree"
@@ -3916,6 +4977,22 @@
       "source": "package-tree",
       "spdx": "Apache-2.0 OR BSL-1.0",
       "version": "1.0.23"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "source": "package-tree"
+        }
+      ],
+      "name": "safetensors",
+      "repository": "https://github.com/huggingface/safetensors",
+      "source": "package-tree",
+      "spdx": "Apache-2.0",
+      "version": "0.8.0"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
@@ -4439,6 +5516,22 @@
       "version": "0.7.3"
     },
     {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "source": "package-tree"
+        }
+      ],
+      "name": "spm_precompiled",
+      "repository": "https://github.com/huggingface/spm_precompiled",
+      "source": "package-tree",
+      "spdx": "Apache-2.0",
+      "version": "0.1.4"
+    },
+    {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2020 LaunchBadge, LLC",
       "ecosystem": "cargo",
       "files": [
@@ -4607,6 +5700,27 @@
       "version": "1.2.1"
     },
     {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "ea084a2373ebc1f0902c09266e7bf25a05ab3814c1805bb017ffa7308f90c061",
+          "source": "package-tree"
+        }
+      ],
+      "name": "static_assertions",
+      "repository": "https://github.com/nvzqz/static-assertions-rs",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "1.1.0"
+    },
+    {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright {yyyy} {name of copyright owner}",
       "ecosystem": "cargo",
       "files": [
@@ -4626,6 +5740,22 @@
       "source": "package-tree",
       "spdx": "MIT/Apache-2.0",
       "version": "0.1.5"
+    },
+    {
+      "copyright": "Copyright (c) 2015 Danny Guo; Copyright (c) 2016 Titus Wormer <tituswormer@gmail.com>; Copyright (c) 2018 Akash Kurdekar",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "1e697ce8d21401fbf1bddd9b5c3fd4c4c79ae1e3bdf51f81761c85e11d5a89cd",
+          "source": "package-tree"
+        }
+      ],
+      "name": "strsim",
+      "repository": "https://github.com/rapidfuzz/strsim-rs",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "0.11.1"
     },
     {
       "copyright": "Copyright (c) 2016-2017 Isis Agora Lovecruft, Henry de Valence. All rights reserved.; Copyright (c) 2016-2024 Isis Agora Lovecruft. All rights reserved.",
@@ -4716,6 +5846,27 @@
       "source": "package-tree",
       "spdx": "MIT",
       "version": "0.13.2"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "8b427f5bc501764575e52ba4f9d95673cf8f6d80a86d0d06599852e1a9a20a36",
+          "source": "package-tree"
+        }
+      ],
+      "name": "tempfile",
+      "repository": "https://github.com/Stebalien/tempfile",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "3.27.0"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
@@ -4952,6 +6103,22 @@
       "source": "package-tree",
       "spdx": "MIT OR Apache-2.0 OR Zlib",
       "version": "0.1.1"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "source": "package-tree"
+        }
+      ],
+      "name": "tokenizers",
+      "repository": "https://github.com/huggingface/tokenizers",
+      "source": "package-tree",
+      "spdx": "Apache-2.0",
+      "version": "0.23.2"
     },
     {
       "copyright": "Copyright (c) Tokio Contributors",
@@ -5322,11 +6489,84 @@
           "source": "package-tree"
         }
       ],
+      "name": "unicode-normalization-alignments",
+      "repository": "https://github.com/n1t0/unicode-normalization",
+      "source": "package-tree",
+      "spdx": "MIT/Apache-2.0",
+      "version": "0.1.12"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "COPYRIGHT",
+          "sha256": "23860c2a7b5d96b21569afedf033469bab9fe14a1b24a35068b8641c578ce24d",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0",
+          "source": "package-tree"
+        }
+      ],
       "name": "unicode-properties",
       "repository": "https://github.com/unicode-rs/unicode-properties",
       "source": "package-tree",
       "spdx": "MIT/Apache-2.0",
       "version": "0.1.4"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "COPYRIGHT",
+          "sha256": "23860c2a7b5d96b21569afedf033469bab9fe14a1b24a35068b8641c578ce24d",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0",
+          "source": "package-tree"
+        }
+      ],
+      "name": "unicode-segmentation",
+      "repository": "https://github.com/unicode-rs/unicode-segmentation",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "1.13.3"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright {yyyy} {name of copyright owner}",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "98a817e7b85e5fe4e79d165c656a4a139793b8b643d0f3d9cbcc3538ef82ec82",
+          "source": "package-tree"
+        }
+      ],
+      "name": "unicode_categories",
+      "repository": "https://github.com/swgillespie/unicode-categories",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.1.1"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
@@ -5532,6 +6772,32 @@
       "source": "package-tree",
       "spdx": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
       "version": "0.11.1+wasi-snapshot-preview1"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-Apache-2.0_WITH_LLVM-exception",
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "source": "package-tree"
+        }
+      ],
+      "name": "wasip2",
+      "repository": "https://github.com/bytecodealliance/wasi-rs",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "version": "1.0.4+wasi-0.2.12"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
@@ -6330,6 +7596,32 @@
       "source": "package-tree",
       "spdx": "MIT OR Apache-2.0",
       "version": "0.52.6"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-Apache-2.0_WITH_LLVM-exception",
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "source": "package-tree"
+        }
+      ],
+      "name": "wit-bindgen",
+      "repository": "https://github.com/bytecodealliance/wit-bindgen",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "version": "0.57.1"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",

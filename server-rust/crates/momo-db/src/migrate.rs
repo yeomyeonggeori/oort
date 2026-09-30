@@ -523,7 +523,11 @@ mod tests {
     /// re-extraction suppression) with its insert trigger and the suppression checks in
     /// `mem_accept_proposal`/`mem_propose_item`, plus the narrow `mem_definer` privilege widening
     /// (UPDATE of `retired_at`/`retired_reason`, DELETE).
-    /// 107 is #3172's consolidation job (ADR-0196 D4/D10): worker-only definer functions for
+    /// 107 is #3173's local-embedding vector search (ADR-0196 D8 증보): `mem_item_embedding` (ENABLE +
+    /// FORCE RLS, no runtime-role privileges), the worker-only embedding writers and readers, the
+    /// query-text gate `mem_serve_query`, and the owner-only weighted-RRF fusion behind
+    /// `mem_serve_items_fused` (permission filtering stays in SQL, before the top-K cut).
+    /// 108 is #3172's consolidation job (ADR-0196 D4/D10): worker-only definer functions for
     /// duplicate merge, decision-interval closing, decay, source-death retirement, retention and
     /// pending-proposal purge (all reversible through `mem_event`), `mem_cons_state`/`mem_cons_pair`/
     /// `mem_suppress_msg`, the `mem.op` marker policies, `mem_proposal.op`, the by-signature
@@ -531,18 +535,18 @@ mod tests {
     /// 108 is #3172's topic layer (L3): `mem_topic`, `mem_topic_summary`, `mem_item.topic_id` and the worker-only
     /// assign / split / summarise / gc / revert functions (same channel only, labels and summaries re-checked in SQL).
     #[test]
-    fn discovers_contiguous_migrations_001_to_108() {
+    fn discovers_contiguous_migrations_001_to_109() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            108,
-            "expected 108 migrations under {}",
+            109,
+            "expected 109 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 108);
+        assert_eq!(migrations.last().unwrap().version, 109);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

@@ -1269,6 +1269,13 @@ impl AgentWorker {
             match applied {
                 Ok(tally) => {
                     stats.items_added += tally.added;
+                    if tally.added > 0 {
+                        // #3173: let the embedding loop pick the new items up now instead of
+                        // at its next tick. A wake-up only — embedding is a separate step, so a
+                        // failure there can never touch the item that was just stored.
+                        self.embed.forget_idle();
+                        self.items_stored.notify_one();
+                    }
                     stats.items_duplicate += tally.duplicate;
                     stats.items_refused += tally.refused;
                     if let Some(to) = cursor_to {
@@ -1321,7 +1328,10 @@ impl AgentWorker {
         let Some(mut loaded) = loaded else {
             return Ok(None);
         };
-        if !matches!(source, Source::Range { .. } | Source::ThreadWindow { .. }) {
+        if !matches!(
+            source,
+            Source::Range { .. } | Source::ThreadWindow { .. } | Source::Rollup { .. }
+        ) {
             return Ok(Some(loaded));
         }
         let Material::Messages(messages) = &loaded.material else {
@@ -1510,7 +1520,45 @@ impl AgentWorker {
                 })
                 .await?;
                 if inputs.is_empty() {
-                    return Ok(None);
+                    // H-3 (#3172): the window digests under this rollup are gone — retention prunes them 90 days
+                    // after a rollup covers them (D10 / plan §6.3), and an edit or delete can then make the rollup
+                    // stale. The originals are still in `message`, so rebuild the rollup from them instead of
+                    // letting "no inputs" delete the only summary of that stretch.
+                    let limit = cfg.window_max_messages * 2;
+                    let rows = self
+                        .read_tx(ws, move |conn| {
+                            Box::pin(async move {
+                                mem::read_range(conn, ws, ch, None, from_seq, to_seq, limit + 1)
+                                    .await
+                            })
+                        })
+                        .await?;
+                    if rows.is_empty() {
+                        return Ok(None);
+                    }
+                    if rows.len() as i64 > limit {
+                        // Too many messages for one call: keep the (hidden, stale) rollup for a later, roomier
+                        // attempt rather than dropping it.
+                        return Err(DbError::from(momo_db::sqlx::Error::Protocol(
+                            "a rollup without window digests is too large to rebuild from messages"
+                                .into(),
+                        )));
+                    }
+                    let (picked, _) = pick_within_budget(&cfg, rows);
+                    if picked.is_empty() {
+                        return Ok(None);
+                    }
+                    return Ok(Some(Loaded {
+                        level,
+                        thread_root: None,
+                        from_seq,
+                        to_seq,
+                        evidence: picked.iter().map(SourceMessage::evidence).collect(),
+                        source_digests: Vec::new(),
+                        cursor_to: None,
+                        material: Material::Messages(picked),
+                        read_at,
+                    }));
                 }
                 Ok(Some(Loaded {
                     level,

@@ -72,6 +72,55 @@ this table only records why they are there.
 |---|---|---|---|---|
 | p256 (RustCrypto; brings ecdsa, elliptic-curve, primeorder, sec1 and their RustCrypto deps) | 0.14.0 | Apache-2.0 OR MIT | `server-rust/crates/momo-wire` (human device-key P-256 verification) | ADR-0146 개정 2026-09-28 D-1, #3021 |
 | unicode-normalization | 0.1.25 | MIT OR Apache-2.0 | `server-rust/crates/momo-wire` (NFC of signed human text; was already transitive via sqlx) | ADR-0146 개정 2026-09-28 D-5, #3021 |
+| fastembed (fastembed-rs; `default-features = false`, no hf-hub / image models) | 7.1.0 | Apache-2.0 | `server-rust/crates/momo-embed` (loads the int8 ONNX sentence model and runs it) | ADR-0196 D8 증보 2026-09-30, #3173 |
+| ort / ort-sys (pykeio/ort, ONNX Runtime bindings; `load-dynamic`: no ONNX Runtime binary is downloaded or linked at cargo build time) | 2.0.0-rc.13 | MIT OR Apache-2.0 | via fastembed, `momo-embed` | same |
+| libloading (nagisa/rust_libloading; already in the graph via ort, now also a direct dependency that checks `ORT_DYLIB_PATH` before ort sees it) | 0.9.0 | ISC | `server-rust/crates/momo-embed` | same |
+| tokenizers (Hugging Face) | 0.23.2 | Apache-2.0 | via fastembed, `momo-embed` | same |
+
+### Embedded model and ONNX Runtime (worker image; not Cargo crates)
+
+The agent-worker embeds team-memory items locally (ADR-0196 D8 증보, #3173). Two artifacts ride in
+the app image that the generated Cargo bundle cannot list, because they are not crates. Neither is
+committed to git: the model is downloaded at image build from a pinned Hugging Face revision and
+verified by sha256 (`server-rust/model/e5-small-int8.sha256`, `server-rust/Dockerfile` stage
+`model-payload`); the ONNX Runtime shared library is Microsoft's own release
+(`onnxruntime-linux-<arch>-1.28.2.tgz` from github.com/microsoft/onnxruntime, sha256-pinned per
+architecture in the Dockerfile stage `ort-payload`) and is loaded at run time by `momo-agent-worker`
+through `ORT_DYLIB_PATH`.
+
+| Component | Version / revision | License | Where it lives | Attribution |
+|---|---|---|---|---|
+| `intfloat/multilingual-e5-small` model weights (int8 ONNX file `onnx/model_qint8_avx512_vnni.onnx` and tokenizer files) | Hugging Face revision `614241f622f53c4eeff9890bdc4f31cfecc418b3` | MIT (Hugging Face model-card metadata `license: mit`; the repository ships no separate LICENSE file) | `/opt/momo/models/e5-small-int8/` in the app image | Wang, Yang, Huang, Yang, Majumder, Wei: “Multilingual E5 Text Embeddings: A Technical Report” (arXiv:2402.05672, 2024); model card https://huggingface.co/intfloat/multilingual-e5-small. The training-data licences were not audited (only the model's declared licence was checked). |
+| ONNX Runtime (shared library `libonnxruntime.so`, unmodified Microsoft release) | 1.28.2 | MIT | `/opt/momo/lib/libonnxruntime.so` in the app image; its LICENSE and ThirdPartyNotices.txt (the notices of what ONNX Runtime itself bundles) are copied to `/usr/share/licenses/momo-rust/onnxruntime/` | Copyright (c) Microsoft Corporation, https://github.com/microsoft/onnxruntime (LICENSE text below) |
+
+ONNX Runtime licence text (MIT), reproduced because a binary redistribution must carry it:
+
+```
+MIT License
+
+Copyright (c) Microsoft Corporation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+The model weights are MIT as declared by their authors; the same permission notice applies to them.
+Weights are used unmodified apart from the int8 quantisation the upstream repository publishes.
 
 ### Adapted designs and prompts (no code copied)
 

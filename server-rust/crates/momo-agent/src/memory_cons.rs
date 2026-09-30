@@ -1,6 +1,6 @@
 //! Team memory v2 M3 — the SQL half of the consolidation job (#3172, ADR-0196 D4/D6/D10, plan §6).
 //!
-//! Every call here is one worker-only SQL function of migration 107, run inside a memory tx
+//! Every call here is one worker-only SQL function of migration 108, run inside a memory tx
 //! ([`crate::memory::with_memory_tx`]): `momo_worker` with `SET LOCAL ROLE momo_memory` and
 //! `SET LOCAL app.workspace_id`. Nothing in this module reads a `mem_*` table directly and none of
 //! it decides what may be changed — the database does: a curated/confirmed item is never merged,
@@ -115,6 +115,31 @@ pub async fn begin(
         .bind(slot_start)
         .fetch_one(&mut *conn)
         .await?)
+}
+
+/// Extend the lease (after every model call, so a long judging pass is not taken over by another worker).
+pub async fn renew(
+    conn: &mut PgConnection,
+    channel_id: Uuid,
+    lease_token: Uuid,
+    lease_seconds: f64,
+) -> Result<bool, DbError> {
+    Ok(sqlx::query_scalar("SELECT mem_cons_renew($1, $2, $3)")
+        .bind(channel_id)
+        .bind(lease_token)
+        .bind(lease_seconds)
+        .fetch_one(&mut *conn)
+        .await?)
+}
+
+/// Do not ask about this pair again for a day (the model did not answer with one of the three words).
+pub async fn defer_pair(conn: &mut PgConnection, a: Uuid, b: Uuid) -> Result<(), DbError> {
+    sqlx::query("SELECT mem_cons_defer_pair($1, $2)")
+        .bind(a)
+        .bind(b)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
 }
 
 /// Release the lease. `done` = today's slot is complete; otherwise retry after `retry_seconds`.
@@ -300,7 +325,7 @@ pub async fn consolidation_channels(
 }
 
 // ---------------------------------------------------------------------------
-// topics (L3, migration 108)
+// topics (L3, migration 109)
 // ---------------------------------------------------------------------------
 
 /// Bumped when a topic prompt or rule changes; stored on every topic summary.

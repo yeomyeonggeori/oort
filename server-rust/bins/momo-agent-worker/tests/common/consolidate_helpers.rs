@@ -15,6 +15,8 @@ fn cons_config() -> WorkerConfig {
     // "The slot opened at midnight": every channel is due whenever the test asks for it.
     config.memory.consolidate_hour = 0;
     config.memory.consolidate_minute = 0;
+    // Topics have their own suite; the A-stage tests count model calls and rows exactly.
+    config.memory.topics_enabled = false;
     config
 }
 

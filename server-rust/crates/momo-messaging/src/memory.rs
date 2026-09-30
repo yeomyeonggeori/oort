@@ -750,8 +750,9 @@ pub async fn get_proposal_in_tx(
     proposal_id: Uuid,
 ) -> Result<Option<MemProposal>, DbError> {
     // `op = 'add'` only: the consolidation job's merge / close proposals (#3172) have no agent, requester
-    // or run, and their card is a later surface — until then they are not listed (accepting one still
-    // works through `mem_accept_proposal`, which dispatches on `op`).
+    // or run. They are neither listed nor decidable through the API until their card exists (#3174):
+    // `mem_accept_proposal` refuses them (55000) and its inner apply function carries its own guest /
+    // eligibility / lock checks for the day it is wired.
     let sql =
         format!("SELECT {PROPOSAL_COLS} FROM mem_proposal p WHERE p.id = $1 AND p.op = 'add'");
     let row = sqlx::query(&sql)
@@ -1127,6 +1128,37 @@ pub async fn forget_item_in_tx(conn: &mut PgConnection, item_id: Uuid) -> Result
         .fetch_one(&mut *conn)
         .await?;
     Ok(removed)
+}
+
+/// Undo one consolidation event on an item (`mem_revert_consolidation`, migration 107): a merge, a decision
+/// closing or a decay. The actor is `app.member_id`; the function answers `P0002` for an event on an item the
+/// caller cannot read (the same as a missing id), `42501` for a guest / non-human / wrong session, `55000` when
+/// the change no longer stands or would bring back forgotten or unsupported content, `22023` for an event that
+/// is not revertible. Only errors whose message starts with `mem_revert_consolidation:` or `mem_cons_revert:` are
+/// the function's own.
+pub async fn revert_consolidation_in_tx(
+    conn: &mut PgConnection,
+    event_id: Uuid,
+) -> Result<String, DbError> {
+    Ok(sqlx::query_scalar("SELECT mem_revert_consolidation($1)")
+        .bind(event_id)
+        .fetch_one(&mut *conn)
+        .await?)
+}
+
+/// The item an event belongs to, as the reader may see it (`None` = missing or hidden by the policy).
+pub async fn event_target_in_tx(
+    conn: &mut PgConnection,
+    event_id: Uuid,
+) -> Result<Option<Uuid>, DbError> {
+    Ok(
+        sqlx::query_scalar(
+            "SELECT target_id FROM mem_event WHERE id = $1 AND target_kind = 'item'",
+        )
+        .bind(event_id)
+        .fetch_optional(&mut *conn)
+        .await?,
+    )
 }
 
 #[cfg(test)]

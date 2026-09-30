@@ -1,5 +1,5 @@
 -- =============================================================================
--- 108_mem_topics.sql — #3172 / ADR-0196 (팀 기억 v2) M3 B단계: 주제(L3) 배정·분할·요약
+-- 109_mem_topics.sql — #3172 / ADR-0196 (팀 기억 v2) M3 B단계: 주제(L3) 배정·분할·요약
 --
 -- 정리 잡(107)의 둘째 반쪽. 항목(L2)을 **같은 채널 안에서만** 주제 트리 노드에 배정하고, 노드가 cap(125)에 닿으면
 -- 2~4개 하위 주제로 나누고(company-brain split.ts 식: 160개 표본을 모델이 분류, 나머지는 유사도로 배정), 주제마다
@@ -76,7 +76,7 @@ GRANT UPDATE (topic_id) ON mem_item TO mem_definer;
 GRANT SELECT, INSERT, UPDATE, DELETE ON mem_topic TO mem_definer;
 GRANT SELECT, INSERT, UPDATE, DELETE ON mem_topic_summary TO mem_definer;
 
--- mem.op 표지(107): 항목 UPDATE 목록에 주제 배정·분할·되돌리기를 더한다.
+-- mem.op 표지(108): 항목 UPDATE 목록에 주제 배정·분할·되돌리기를 더한다.
 DROP POLICY IF EXISTS mem_item_only_definer_upd ON mem_item;
 CREATE POLICY mem_item_only_definer_upd ON mem_item AS RESTRICTIVE FOR UPDATE
   USING (current_user = 'mem_definer'
@@ -767,7 +767,7 @@ BEGIN
   END LOOP;
 END $$;
 
--- ── L-9: mem_definer 소유 SECURITY DEFINER 함수 허용 목록 (전체 시그니처; 107 것 + 이 파일의 10개) ──────────────
+-- ── L-9: mem_definer 소유 SECURITY DEFINER 함수 허용 목록 (전체 시그니처; 108 것 + 이 파일의 10개) ──────────────
 DO $$
 DECLARE
   f text;
@@ -778,23 +778,32 @@ DECLARE
     'mem_channel_eligible(uuid)', 'mem_channel_switch(uuid)', 'mem_cons_accept(uuid,uuid)',
     'mem_cons_apply(uuid,uuid,text)', 'mem_cons_begin(uuid,uuid,double precision,timestamp with time zone)',
     'mem_cons_close_item(uuid,uuid,uuid,uuid)', 'mem_cons_decay(uuid,integer)',
+    'mem_cons_defer(uuid,uuid,text)', 'mem_cons_defer_pair(uuid,uuid)',
     'mem_cons_finish(uuid,uuid,boolean,integer)', 'mem_cons_merge_items(uuid,uuid,uuid,uuid)',
     'mem_cons_note_pair(uuid,uuid,text)', 'mem_cons_pairs(uuid,real,real,integer)',
     'mem_cons_propose(text,uuid,uuid)', 'mem_cons_purge_proposals(uuid)', 'mem_cons_reconcile(uuid)',
+    'mem_cons_release(uuid[],text)', 'mem_cons_renew(uuid,uuid,double precision)',
     'mem_cons_retention(uuid,integer,integer,integer)', 'mem_cons_retire_dead(uuid,integer)',
-    'mem_cons_revert(uuid)', 'mem_cursor_state(uuid)', 'mem_digest_audience_ok(uuid,uuid,uuid)',
-    'mem_digest_evidence_ok(uuid)', 'mem_digest_index(uuid,text,bigint)', 'mem_digest_live(uuid)',
+    'mem_cons_revert(uuid)', 'mem_cons_revert_core(uuid,uuid)', 'mem_cursor_state(uuid)',
+    'mem_digest_audience_ok(uuid,uuid,uuid)', 'mem_digest_evidence_ok(uuid)',
+    'mem_digest_index(uuid,text,bigint)', 'mem_digest_live(uuid)',
     'mem_digest_rollup_inputs(uuid,uuid,text,bigint,bigint)', 'mem_drop_digest(uuid)',
-    'mem_edit_item(uuid,text,text)', 'mem_forget_item(uuid)', 'mem_item_audience_ok(uuid,uuid,uuid)',
-    'mem_item_evidence_ok(uuid)', 'mem_item_live(uuid)', 'mem_item_readable_by(uuid,uuid)',
-    'mem_message_changed()', 'mem_proposal_decider(uuid)', 'mem_proposal_evidence_ok(uuid)',
-    'mem_propose_item(uuid,text,text,text,uuid[])',
+    'mem_edit_item(uuid,text,text)', 'mem_embedding_stats(text)', 'mem_forget_item(uuid)',
+    'mem_item_audience_ok(uuid,uuid,uuid)', 'mem_item_embedding_cleanup()', 'mem_item_evidence_ok(uuid)',
+    'mem_item_guest_authored(uuid)', 'mem_item_live(uuid)', 'mem_item_readable_by(uuid,uuid)',
+    'mem_items_to_embed(text,integer)', 'mem_message_changed()', 'mem_proposal_decider(uuid)',
+    'mem_proposal_evidence_ok(uuid)', 'mem_propose_item(uuid,text,text,text,uuid[])',
     'mem_record_serving(uuid,uuid,uuid[],uuid[],integer,integer,integer)', 'mem_reject_proposal(uuid)',
-    'mem_reserve_tokens(bigint,bigint)', 'mem_search_items(text,integer,uuid,text)',
+    'mem_reserve_tokens(bigint,bigint)', 'mem_revert_consolidation(uuid)',
+    'mem_search_items(text,integer,uuid,text)',
     'mem_search_items_core(uuid,text,integer,uuid,boolean,uuid,text)',
-    'mem_search_items_for(uuid,text,integer,uuid)', 'mem_serve_candidates(uuid,bigint,integer,integer)',
-    'mem_serve_items(uuid,integer,integer)', 'mem_serve_requester(uuid)', 'mem_serving_of(uuid)',
-    'mem_serving_record_of(uuid)', 'mem_stale_digests(integer,integer)',
+    'mem_search_items_for(uuid,text,integer,uuid)',
+    'mem_search_items_fused(uuid,text,integer,uuid,text,text,real,real)',
+    'mem_serve_candidates(uuid,bigint,integer,integer)', 'mem_serve_gate(uuid)',
+    'mem_serve_items(uuid,integer,integer)',
+    'mem_serve_items_fused(uuid,integer,integer,text,text,real,real)', 'mem_serve_query(uuid)',
+    'mem_serve_requester(uuid)', 'mem_serving_of(uuid)', 'mem_serving_record_of(uuid)',
+    'mem_set_item_embedding(uuid,text,text)', 'mem_stale_digests(integer,integer)',
     'mem_suppressed_messages(uuid,uuid[])', 'mem_token_budget(bigint)',
     'mem_topic_assign(uuid,uuid,text,integer)', 'mem_topic_gc(uuid)', 'mem_topic_leaves(uuid)',
     'mem_topic_revert(uuid)', 'mem_topic_set_summary(uuid,text,uuid[],text,text)',

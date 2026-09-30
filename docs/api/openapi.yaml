@@ -3975,6 +3975,65 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/memory/items/{itemId}/events/{eventId}/revert:
+    post:
+      tags: [memory]
+      operationId: revertMemoryItemEvent
+      summary: Undo one consolidation event of an item.
+      description: >
+        ADR-0196 D4 (every consolidation is reversible) and D9. Reverts a **merge** (the merged-away item comes back and
+        the evidence the winner took from it is given back), a **decision closing** (the older decision's `valid_to` is
+        reopened) or a **decay** (the item is live again with a fresh 14 days), and remembers the pair as distinct so
+        the nightly job does not redo it. **Who may:** anyone who can read the item (and, for a merge, the item it was
+        merged into) — the same rule as edit; `guest` members get 403. The event must belong to the item in the path.
+        A nonexistent or unreadable item/event is an identical 404. 409 when the change no longer stands, the channel's
+        memory is switched off or paused, or reverting would bring back forgotten content or an item whose source
+        messages are gone. Forget and retention deletes cannot be reverted.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/MemoryItemId"
+        - name: eventId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: What was undone.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevertMemoryEventResponse"
+        "400":
+          description: Invalid item or event id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, guest, inactive membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Item or event not found or not readable by the caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The change no longer stands, memory is off for the channel, or the content must not come back.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /v1/workspaces/{workspaceId}/channels/{channelId}/huddles:
     post:
       tags: [huddles]
@@ -12384,6 +12443,16 @@ components:
           type: array
           items: {$ref: "#/components/schemas/MemoryEvidenceLink"}
         supersededId: {type: string, format: uuid}
+
+    RevertMemoryEventResponse:
+      type: object
+      required: [reverted, itemId]
+      properties:
+        reverted:
+          type: string
+          enum: [merged, superseded, decayed]
+          description: What was undone — a merge, a decision closing (`superseded`) or a decay.
+        itemId: {type: string, format: uuid}
 
     ForgetMemoryItemResponse:
       type: object

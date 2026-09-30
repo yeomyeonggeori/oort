@@ -32,6 +32,16 @@
 # license gate would make a security failure read as a license failure.
 # =============================================================================
 
+# Advisories are NOT part of the CI gate (`check licenses` only, #1225); this section only records
+# reviewed exceptions for anyone who runs `cargo deny check advisories` by hand.
+[advisories]
+ignore = [
+    # paste 1.0.15 (RUSTSEC-2024-0436, "no longer maintained"; a proc-macro, no known vulnerability).
+    # Reaches us only through tokenizers 0.23 <- fastembed 7.1 <- momo-embed (#3173). Review by
+    # 2026-12-31 or when tokenizers moves to pastey, whichever is first.
+    { id = "RUSTSEC-2024-0436", reason = "unmaintained proc-macro via tokenizers (#3173); revisit 2026-12-31" },
+]
+
 [licenses]
 # Every SPDX expression in the graph must be satisfiable by this list. cargo-deny
 # evaluates the expression properly: `A OR B` passes when either side is allowed,

@@ -49,6 +49,14 @@ legal/THIRD_PARTY_NOTICES.md ("Server direct additions"), currently p256
 (Apache-2.0 OR MIT) and unicode-normalization (MIT OR Apache-2.0),
 ADR-0146 amendment 2026-09-28; both are also in the generated bundle.
 
+The agent-worker image also carries a local sentence-embedding model and ONNX Runtime for team-memory
+search (ADR-0196 D8 증보, #3173): intfloat/multilingual-e5-small weights (MIT, unmodified int8 ONNX
+published by the model authors) and ONNX Runtime (MIT, Copyright (c) Microsoft Corporation; the
+unmodified shared library, loaded through the ort and fastembed crates, with Microsoft's own
+ThirdPartyNotices.txt under /usr/share/licenses/momo-rust/onnxruntime/). They are not Cargo crates,
+so the generated bundle cannot list them; legal/THIRD_PARTY_NOTICES.md ("Embedded model and ONNX
+Runtime") carries their notices.
+
 Team memory v2 (ADR-0196 D2) adapts prompt wording and design ideas from company-brain
 (Supermemory Inc., Apache-2.0), mem0 (Mem0, Inc., Apache-2.0), Hindsight (Vectorize AI, Inc.,
 MIT: Copyright (c) 2025 Vectorize AI, Inc.) and Graphiti (Zep Software, Inc., Apache-2.0); no
