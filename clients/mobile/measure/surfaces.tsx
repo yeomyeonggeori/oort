@@ -47,6 +47,8 @@ import {
 import {MissedDigestCardView} from '../src/features/memory/MissedDigestCard';
 import {MemoryDigestSheet} from '../src/features/memory/MemoryDigestSheet';
 import {MemoryPauseSection} from '../src/features/memory/MemoryPauseSection';
+import {MemoryProposalCardView} from '../src/features/memory/MemoryProposalCard';
+import type {ProposalView} from '../src/features/memory/model';
 import {memoryKeys} from '../src/features/memory/queries';
 import {
   receiptSheetModel,
@@ -58,6 +60,7 @@ import {
 } from '../src/features/memory/copy';
 import type {
   MemoryDigest,
+  MemoryProposal,
   MemoryReceipt,
   MemorySettings,
 } from '@momo/core/features/memory/model';
@@ -1143,6 +1146,41 @@ const MEMORY_SETTINGS: MemorySettings = {
   channels: [],
   me: {paused: false},
 };
+const MEMORY_PROPOSAL_MSG_A = '00000000-0000-7000-8000-0000000000f1';
+const MEMORY_PROPOSAL_MSG_B = '00000000-0000-7000-8000-0000000000f2';
+const MEMORY_PROPOSAL: MemoryProposal = {
+  id: '00000000-0000-7000-8000-000000000601',
+  channelId: MEMORY_CH,
+  runId: MEMORY_RUN,
+  agentMemberId: AGENT,
+  requesterMemberId: OTHER,
+  kind: 'decision',
+  status: 'pending',
+  text: '배포는 매주 금요일 오후에 하고, 롤백은 지난주 문서 절차를 따라요.',
+  evidenceMessageIds: [MEMORY_PROPOSAL_MSG_A, MEMORY_PROPOSAL_MSG_B],
+  evidence: [
+    {messageId: MEMORY_PROPOSAL_MSG_A, seq: 28, authorMemberId: OTHER},
+    {messageId: MEMORY_PROPOSAL_MSG_B, seq: 29, authorMemberId: SELF},
+  ],
+  callerIsRequester: false,
+  createdAtMs: NOW,
+  // 카드는 실제 시계로 기한을 잰다(harness NOW는 과거다).
+  expiresAtMs: Date.now() + 86_400_000,
+};
+function seedMemoryProposal(proposal: MemoryProposal): void {
+  harnessClient.setQueryData(
+    memoryKeys.proposals(MEMORY_WS, MEMORY_CH, MEMORY_RUN),
+    [proposal],
+  );
+  harnessClient.setQueryData(
+    memoryKeys.evidenceText(MEMORY_WS, MEMORY_CH, MEMORY_PROPOSAL_MSG_A),
+    '이번 주부터 배포는 금요일 오후로 가요. 월요일 배포는 이제 안 해요.',
+  );
+  harnessClient.setQueryData(
+    memoryKeys.evidenceText(MEMORY_WS, MEMORY_CH, MEMORY_PROPOSAL_MSG_B),
+    '좋아요. 롤백은 지난주에 정리한 문서 그대로 갈게요.',
+  );
+}
 const MEMORY_TURN: Message = {
   id: '00000000-0000-7000-8000-0000000000e1',
   channelId: MEMORY_CH,
@@ -3125,6 +3163,77 @@ export function Surface({name}: {name: string}): React.JSX.Element {
               onOpenMemoryEvidence: () => {},
             }}
           />
+        </Frame>
+      );
+    }
+    case 'memory-proposal':
+    case 'memory-proposal-self': {
+      seedMemoryProposal(
+        name === 'memory-proposal-self'
+          ? {...MEMORY_PROPOSAL, requesterMemberId: SELF, callerIsRequester: true}
+          : MEMORY_PROPOSAL,
+      );
+      return (
+        <Frame
+          label={
+            name === 'memory-proposal-self'
+              ? '기억해 둘게요 — 내 질문에서 나온 제안 (#3171)'
+              : '기억해 둘게요 — 에이전트 답 아래 (#3171)'
+          }>
+          <MessageRow
+            message={MEMORY_TURN}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            actions={{
+              myMemberId: SELF,
+              onToggleReaction: async () => {},
+              onEdit: async () => {},
+              onDelete: async () => {},
+              workspaceId: MEMORY_WS,
+              onOpenMemoryEvidence: () => {},
+            }}
+          />
+        </Frame>
+      );
+    }
+    case 'memory-proposal-states':
+    case 'memory-proposal-decided': {
+      seedMemoryProposal(MEMORY_PROPOSAL);
+      const decided: MemoryProposal = {...MEMORY_PROPOSAL, evidence: [], evidenceMessageIds: []};
+      const frames: [string, ProposalView, boolean][] =
+        name === 'memory-proposal-states'
+          ? [
+              ['게스트 — 읽기 전용', {kind: 'readOnly', cause: 'guest'}, false],
+              ['처리 중', {kind: 'pending', selfWarning: false, failed: false}, true],
+              ['처리 실패', {kind: 'pending', selfWarning: false, failed: true}, false],
+            ]
+          : [
+              ['기억함', {kind: 'accepted'}, false],
+              ['기억하지 않음', {kind: 'rejected'}, false],
+              ['다른 곳에서 정해짐(409)', {kind: 'stale', cause: 'closed'}, false],
+              ['기한 지남', {kind: 'stale', cause: 'expired'}, false],
+            ];
+      return (
+        <Frame label={name === 'memory-proposal-states' ? '기억해 둘게요 — 읽기 전용·처리 중·실패 (#3171)' : '기억해 둘게요 — 결정된 넷 (#3171)'}>
+          <ScrollView>
+            {frames.map(([label, view, busy]) => (
+              <View key={label}>
+                <Text style={styles.label}>{label}</Text>
+                <MemoryProposalCardView
+                  proposal={view.kind === 'pending' || view.kind === 'readOnly' ? MEMORY_PROPOSAL : decided}
+                  workspaceId={MEMORY_WS}
+                  directory={DIRECTORY}
+                  view={view}
+                  busy={busy}
+                  onAccept={() => {}}
+                  onReject={() => {}}
+                  onOpenEvidence={() => {}}
+                />
+              </View>
+            ))}
+          </ScrollView>
         </Frame>
       );
     }

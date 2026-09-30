@@ -73,7 +73,6 @@ describe("표면 판정표", () => {
       "ade",
       "huddles",
       "plugins",
-      "agentMemory",
     ] as const) {
       expect(isSurfaceProvided(id)).toBe(false);
     }

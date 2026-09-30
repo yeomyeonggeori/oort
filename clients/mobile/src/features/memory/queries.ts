@@ -1,13 +1,17 @@
-import {ApiError} from '@momo/core/lib/api';
+import {ApiError, fetchMessages} from '@momo/core/lib/api';
 import {
+  acceptMemoryProposal,
   getMemorySettings,
   getRunMemoryReceipt,
   listMemoryDigests,
+  listMemoryProposals,
   patchMyMemorySettings,
+  rejectMemoryProposal,
 } from '@momo/core/features/memory/api';
 import {memoryIsCaughtUp} from '@momo/core/features/memory/model';
 import type {
   MemoryDigestPage,
+  MemoryProposal,
   MemoryReceipt,
   MemorySettings,
 } from '@momo/core/features/memory/model';
@@ -39,6 +43,22 @@ export const memoryKeys = {
       channelId.toLowerCase(),
       threadRootId?.toLowerCase() ?? '-',
       sinceSeq,
+    ] as const,
+  proposals: (workspaceId: string, channelId: string, runId: string) =>
+    [
+      'memory',
+      'proposals',
+      workspaceId.toLowerCase(),
+      channelId.toLowerCase(),
+      runId.toLowerCase(),
+    ] as const,
+  evidenceText: (workspaceId: string, channelId: string, messageId: string) =>
+    [
+      'memory',
+      'evidence-text',
+      workspaceId.toLowerCase(),
+      channelId.toLowerCase(),
+      messageId.toLowerCase(),
     ] as const,
   receipt: (workspaceId: string, runId: string) =>
     ['memory', 'receipt', workspaceId.toLowerCase(), runId.toLowerCase()] as const,
@@ -173,4 +193,67 @@ export function useMyMemoryPause(workspaceId: string) {
       mutation.mutate(paused);
     },
   };
+}
+
+/**
+ * 한 run이 낸 「기억해 둘게요」 제안(아직 정하지 않은 것). 실시간 신호가 없으므로
+ * 다시 묻지 않는다: 답이 그려질 때 한 번 묻고, 결정은 카드가 응답으로 직접 안다.
+ * 읽지 못하는 채널은 서버가 빈 목록을 주므로 「제안 없음」과 구분되지 않는다 — 그래서
+ * 오류도 조용히 카드가 없다(답을 가리지 않는다).
+ */
+export function useRunMemoryProposals(
+  workspaceId: string,
+  channelId: string,
+  runId: string | null,
+) {
+  return useQuery<MemoryProposal[]>({
+    queryKey: memoryKeys.proposals(workspaceId, channelId, runId ?? ''),
+    queryFn: () =>
+      listMemoryProposals(workspaceId, channelId, {
+        runId: runId as string,
+        status: 'pending',
+        limit: 5,
+      }),
+    enabled: runId !== null,
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
+/**
+ * 제안 근거 한 줄의 원문. 코어는 메시지 하나를 id로 읽는 길이 없어서 채널 읽기
+ * (`after=seq-1`, 1건)로 그 seq의 메시지를 가져온다. 다른 메시지가 오거나 지워졌으면
+ * `null` — 카드는 원문 없이 「누가 · #seq」 줄만 세운다.
+ */
+export function useProposalEvidenceText(
+  workspaceId: string,
+  channelId: string,
+  evidence: {messageId: string; seq: number},
+) {
+  return useQuery<string | null>({
+    queryKey: memoryKeys.evidenceText(workspaceId, channelId, evidence.messageId),
+    queryFn: async () => {
+      const page = await fetchMessages(workspaceId, channelId, {
+        after: Math.max(0, evidence.seq - 1),
+        limit: 1,
+      });
+      const row = page.messages.find(
+        message => message.id.toLowerCase() === evidence.messageId.toLowerCase(),
+      );
+      if (row === undefined || row.state === 'deleted') return null;
+      return row.body ?? null;
+    },
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
+/** 수락·거절. 성공하면 응답(본문이 지워진 껍데기)을 돌려준다. */
+export function useDecideProposal(workspaceId: string) {
+  return useMutation({
+    mutationFn: (input: {id: string; decision: 'accept' | 'reject'}) =>
+      input.decision === 'accept'
+        ? acceptMemoryProposal(workspaceId, input.id)
+        : rejectMemoryProposal(workspaceId, input.id),
+  });
 }
