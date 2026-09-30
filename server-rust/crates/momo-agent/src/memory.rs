@@ -911,6 +911,7 @@ pub async fn read_channel_window(
 
 /// The messages of one digest range: for the channel (`thread_root_id = None`) the top-level
 /// ones, for a thread the root plus its replies. `seq` in `[from_seq, to_seq]`.
+#[allow(clippy::too_many_arguments)]
 pub async fn read_range(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -1029,6 +1030,7 @@ pub async fn thread_candidates(
 
 /// A thread's root plus its replies in `(after_seq, upto_seq]`, oldest first. The root rides
 /// along (when alive) so the digest keeps its context and the root is part of the evidence.
+#[allow(clippy::too_many_arguments)]
 pub async fn read_thread_window(
     conn: &mut PgConnection,
     workspace_id: Uuid,
