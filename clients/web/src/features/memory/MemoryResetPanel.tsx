@@ -118,11 +118,6 @@ export function MemoryResetPanel({
           {memoryResetDoneMessage(doneEpoch)} {memoryResetDoneCounts(reset.data)}
         </p>
       )}
-      {failure !== null && (
-        <div data-kind={failure.kind} data-testid="memory-reset-error-kind">
-          <InlineBanner message={failure.message} testId="memory-reset-error" />
-        </div>
-      )}
 
       {!canReset ? (
         <p className="break-keep text-meta text-ink-muted" data-testid="memory-reset-admin-only">
@@ -191,6 +186,8 @@ export function MemoryResetPanel({
               type="button"
               variant="ghost"
               size="sm"
+              aria-disabled={running || undefined}
+              className={running ? "opacity-50" : undefined}
               onClick={() => {
                 if (!running) close();
               }}
@@ -200,6 +197,12 @@ export function MemoryResetPanel({
             </Button>
           </div>
         </form>
+      )}
+      {/* Under the controls it belongs to, so a retry never has to look upward for the reason. */}
+      {failure !== null && (
+        <div data-kind={failure.kind} data-testid="memory-reset-error-kind">
+          <InlineBanner message={failure.message} testId="memory-reset-error" />
+        </div>
       )}
     </div>
   );

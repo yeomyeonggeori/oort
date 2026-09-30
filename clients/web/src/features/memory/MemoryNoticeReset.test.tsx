@@ -193,6 +193,15 @@ describe("팀 고지: 켤 때 확인", () => {
     expect(patchWorkspaceMemorySettings).not.toHaveBeenCalled();
   });
 
+  it("요약 AI가 없으면 켜도 아무것도 전달되지 않는다고 머리 문장이 말한다", async () => {
+    getMemoryNotice.mockResolvedValue(notice({ sending: false, summary: { configured: false } }));
+    const { host } = await render("admin");
+    click(byTestId(host, "memory-workspace-enabled"));
+    await flush();
+    expect(text(host, "memory-enable-ask")).toContain("켜도 지금은 아무것도 전달되지 않아요");
+    expect(text(host, "memory-enable-ask")).not.toContain("채널 대화가 아래 제공자로 전달돼요");
+  });
+
   it("끄는 것은 확인 없이 바로 나간다", async () => {
     getMemorySettings.mockResolvedValue(
       settings({ workspace: { enabled: true, paused: false, resetEpoch: 0 } })
@@ -229,7 +238,7 @@ describe("기억 초기화", () => {
     const body = text(host, "memory-reset");
     expect(body).toContain("영구히 지워요");
     expect(body).toContain("스위치는 지금 상태 그대로");
-    expect(body).toContain("잊기로 한 것은 계속 잊은 채로");
+    expect(body).toContain("같은 문장을 다시 기억하지 않게 막는 표시");
     expect(body).toContain("초기화한 뒤에 올라온 메시지부터");
   });
 
@@ -267,7 +276,7 @@ describe("기억 초기화", () => {
     await typeWord(host);
     await submit(host);
     const done = text(host, "memory-reset-done");
-    expect(done).toContain("3번째 초기화");
+    expect(done).toContain("초기화 기록은 3회");
     expect(done).toContain("요약 12개");
     expect(done).toContain("영수증 5개");
     expect(byTestId(host, "memory-reset-confirm")).toBeNull();

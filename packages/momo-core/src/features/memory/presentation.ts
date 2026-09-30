@@ -320,7 +320,7 @@ export const CHANNEL_SWITCH_ADMIN_ONLY_REASON =
 
 /** Notice next to the workspace switch (ADR-0196 D9 team notice). */
 export const TEAM_MEMORY_NOTICE =
-  "팀 기억을 켜면 채널 대화가 요약을 만드는 AI에게 전달돼요. 요약에는 원본 메시지 링크가 함께 남아요. 사람끼리의 DM은 기본으로 빠져요.";
+  "팀 기억을 켜면 채널 대화가 요약을 만드는 AI에게 전달돼요. 요약에는 원본 메시지 링크가 함께 남아요.";
 
 export function canChangeWorkspaceMemory(role: MembershipRole | undefined): boolean {
   return isWorkspaceOperator(role);
@@ -372,6 +372,8 @@ export const MEMORY_NOTICE_ENABLE_BLOCKED =
   "고지를 불러오지 못해서 지금은 켤 수 없어요. 고지를 확인한 뒤에 켜 주세요.";
 export const MEMORY_NOTICE_ENABLE_LEAD =
   "켜기 전에 확인해 주세요. 켜면 멘션 없이도 채널 대화가 아래 제공자로 전달돼요.";
+export const MEMORY_NOTICE_ENABLE_LEAD_UNCONFIGURED =
+  "켜기 전에 확인해 주세요. 요약 AI가 아직 정해지지 않아서, 켜도 지금은 아무것도 전달되지 않아요.";
 export const MEMORY_NOTICE_ENABLE_CONFIRM = "확인하고 켜기";
 
 export const MEMORY_NOTICE_SENDS_COPY: Record<MemoryNoticeSends, string> = {
@@ -475,14 +477,14 @@ export const MEMORY_RESET_DELETES =
 export const MEMORY_RESET_KEEPS_SWITCHES =
   "켜기와 일시정지 같은 스위치는 지금 상태 그대로 둬요.";
 export const MEMORY_RESET_KEEPS_FORGOTTEN =
-  "사람들이 잊기로 한 것은 계속 잊은 채로 남아요.";
+  "사람들이 잊기로 한 문장의 기록(같은 문장을 다시 기억하지 않게 막는 표시)은 지우지 않아요.";
 export const MEMORY_RESET_FROM_NOW =
   "초기화한 뒤에 올라온 메시지부터 새로 요약해요. 원본 메시지는 그대로예요.";
 export const MEMORY_RESET_AUDIT = "누가 초기화했는지는 감사 기록에 남아요.";
 export const MEMORY_RESET_ADMIN_ONLY =
   "기억 초기화는 워크스페이스 관리자만 할 수 있어요.";
 export const MEMORY_RESET_OFFLINE = "연결이 끊겨 있어서 지금은 초기화할 수 없어요.";
-export const MEMORY_RESET_TRIGGER = "기억 초기화...";
+export const MEMORY_RESET_TRIGGER = "기억 초기화…";
 export const MEMORY_RESET_CONFIRM_WORD = "초기화";
 export const MEMORY_RESET_CONFIRM_LABEL = `확인을 위해 「${MEMORY_RESET_CONFIRM_WORD}」라고 입력해 주세요`;
 export const MEMORY_RESET_CONFIRM_BUTTON = "모든 기억 영구 삭제";
@@ -495,7 +497,7 @@ export function memoryResetConfirmed(typed: string): boolean {
 }
 
 export function memoryResetDoneMessage(epoch: number): string {
-  return `기억을 초기화했어요. 지금까지 ${epoch}번째 초기화예요. 이제부터 새로 쌓여요.`;
+  return `기억을 초기화했어요. 초기화 기록은 ${epoch}회가 됐어요. 팀 기억이 켜져 있으면 새 메시지부터 다시 쌓여요.`;
 }
 
 export function memoryResetDoneCounts(result: MemoryResetResult): string {

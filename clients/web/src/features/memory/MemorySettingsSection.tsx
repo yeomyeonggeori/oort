@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/design/ui/button";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
@@ -14,6 +14,7 @@ import {
   MEMORY_NOTICE_ENABLE_BLOCKED,
   MEMORY_NOTICE_ENABLE_CONFIRM,
   MEMORY_NOTICE_ENABLE_LEAD,
+  MEMORY_NOTICE_ENABLE_LEAD_UNCONFIGURED,
   MEMORY_NOTICE_TITLE,
   MEMORY_RESET_CANCEL,
   MEMORY_RESET_TITLE,
@@ -71,6 +72,20 @@ export function MemorySettingsSection({
   // D9 ②: turning memory ON asks first, with the notice in front of the admin. Off is one click.
   const [askingEnable, setAskingEnable] = useState(false);
   useEscapeLayer(askingEnable, () => setAskingEnable(false));
+  // Focus goes into the question when it opens and back to the switch when it closes.
+  const enableConfirmRef = useRef<HTMLButtonElement | null>(null);
+  const enableWasAsking = useRef(false);
+  useEffect(() => {
+    if (askingEnable) {
+      enableWasAsking.current = true;
+      enableConfirmRef.current?.focus({ preventScroll: true });
+    } else if (enableWasAsking.current) {
+      enableWasAsking.current = false;
+      document
+        .querySelector<HTMLElement>('[data-testid="memory-workspace-enabled"]')
+        ?.focus({ preventScroll: true });
+    }
+  }, [askingEnable]);
 
   const lines = [
     "채널 대화를 요약해 두고, 에이전트가 답할 때 참고하게 해요.",
@@ -224,7 +239,9 @@ export function MemorySettingsSection({
             data-testid="memory-enable-ask"
           >
             <p className="break-keep text-body font-semibold text-ink">
-              {MEMORY_NOTICE_ENABLE_LEAD}
+              {notice.data && !notice.data.summary.configured
+                ? MEMORY_NOTICE_ENABLE_LEAD_UNCONFIGURED
+                : MEMORY_NOTICE_ENABLE_LEAD}
             </p>
             {notice.data ? (
               <MemoryNoticeBody notice={notice.data} />
@@ -238,6 +255,7 @@ export function MemorySettingsSection({
             )}
             <div className="flex flex-wrap items-center gap-2">
               <Button
+                ref={enableConfirmRef}
                 type="button"
                 size="sm"
                 aria-disabled={!notice.data || workspaceLocked || undefined}
