@@ -28,6 +28,7 @@ import {
   byTestId,
   click,
   flush,
+  waitUntil,
   item,
   mount,
   settings,
@@ -104,6 +105,9 @@ async function render(
   return view;
 }
 
+const has = (host: HTMLElement, id: string) => () => byTestId(host, id) !== null;
+const rowsCount = (host: HTMLElement, n: number) => () =>
+  host.querySelectorAll('[data-testid="memory-browser-row"]').length === n;
 const rows = (host: HTMLElement) =>
   host.querySelectorAll('[data-testid="memory-browser-row"]');
 
@@ -127,11 +131,17 @@ describe("기억 브라우저: 목록", () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 350));
     });
-    for (let i = 0; i < 4; i += 1) await flush();
+    await waitUntil(
+      () =>
+        listMemoryItems.mock.lastCall?.[1] !== undefined &&
+        (listMemoryItems.mock.lastCall[1] as { q?: string }).q === "재시도 큐",
+      "search query sent to the server"
+    );
     expect(listMemoryItems).toHaveBeenLastCalledWith(
       WS,
       expect.objectContaining({ q: "재시도 큐" })
     );
+    await waitUntil(() => byTestId<HTMLSelectElement>(host, "memory-browser-filter-status")?.disabled === true, "status filter locked");
     expect(byTestId<HTMLSelectElement>(host, "memory-browser-filter-status")?.disabled).toBe(true);
     expect(byTestId(host, "memory-browser-search-note")).not.toBeNull();
   });
@@ -142,8 +152,7 @@ describe("기억 브라우저: 목록", () => {
       .mockResolvedValueOnce({ items: [item({ id: OLDER, body: "배포는 목요일 오전이에요." })] });
     const { host } = await render();
     click(byTestId(host, "memory-browser-more"));
-    await flush();
-    await flush();
+    await waitUntil(rowsCount(host, 2), "second page rendered");
     expect(listMemoryItems).toHaveBeenLastCalledWith(WS, expect.objectContaining({ cursor: "c1" }));
     expect(rows(host)).toHaveLength(2);
     expect(byTestId(host, "memory-browser-more")).toBeNull();
@@ -152,9 +161,11 @@ describe("기억 브라우저: 목록", () => {
   it("비어 있으면 안내하고, 필터 때문에 비면 필터를 지우게 한다", async () => {
     listMemoryItems.mockResolvedValue({ items: [] });
     const first = await render();
+    await waitUntil(has(first.host, "memory-browser-empty"), "empty state");
     expect(byTestId(first.host, "memory-browser-empty")?.textContent).toContain(BROWSER_EMPTY_HEADLINE);
     unmount();
     const second = await render({ route: "/memory?kind=fact" });
+    await waitUntil(has(second.host, "memory-browser-no-match"), "no-match state");
     expect(byTestId(second.host, "memory-browser-no-match")).not.toBeNull();
     expect(byTestId(second.host, "memory-browser-empty")).toBeNull();
   });
@@ -162,11 +173,16 @@ describe("기억 브라우저: 목록", () => {
   it("읽기에 실패하면 이유와 다시 시도를 준다. 서버에 경로가 없으면(404) 시도 버튼이 없다", async () => {
     listMemoryItems.mockRejectedValue(new ApiError(500, "x"));
     const first = await render();
+    await waitUntil(has(first.host, "memory-browser-error"), "load error");
     expect(byTestId(first.host, "memory-browser-error")?.textContent).toContain(BROWSER_LOAD_ERROR);
     expect(first.host.textContent).toContain("다시 시도");
     unmount();
     listMemoryItems.mockRejectedValue(new ApiError(404, "x"));
     const second = await render();
+    await waitUntil(
+      () => second.host.textContent?.includes("이 서버는 아직 팀 기억을 지원하지 않아요.") === true,
+      "unsupported-server message"
+    );
     expect(second.host.textContent).toContain("이 서버는 아직 팀 기억을 지원하지 않아요.");
     expect(second.host.textContent).not.toContain("다시 시도");
   });
@@ -174,13 +190,19 @@ describe("기억 브라우저: 목록", () => {
   it("비어 있을 때는 고르라는 안내를 내지 않는다", async () => {
     listMemoryItems.mockResolvedValue({ items: [] });
     const { host } = await render();
+    await waitUntil(has(host, "memory-browser-empty"), "empty state");
     expect(byTestId(host, "memory-browser-pick")).toBeNull();
   });
 
   it("폰에서 항목을 고르면 캐럿이 상세로 간다", async () => {
     const { host } = await render({ mobile: true });
+    await waitUntil(rowsCount(host, 1), "list rows rendered");
     click(rows(host)[0] ?? null);
-    for (let i = 0; i < 4; i += 1) await flush();
+    await waitUntil(has(host, "memory-detail"), "detail opened");
+    await waitUntil(
+      () => document.activeElement === byTestId(host, "memory-detail-body"),
+      "focus moved to detail body"
+    );
     expect(byTestId(host, "memory-detail")).not.toBeNull();
     expect(document.activeElement).toBe(byTestId(host, "memory-detail-body"));
   });
@@ -188,6 +210,7 @@ describe("기억 브라우저: 목록", () => {
   it("내 일시정지가 켜져 있으면 알리고 설정으로 보낸다", async () => {
     getMemorySettings.mockResolvedValue(settings({ me: { paused: true } }));
     const { host } = await render();
+    await waitUntil(has(host, "memory-browser-paused"), "paused notice");
     expect(byTestId(host, "memory-browser-paused")?.textContent).toContain(BROWSER_PAUSED_NOTICE);
     expect(
       byTestId(host, "memory-browser-paused")?.querySelector("a")?.getAttribute("href")
@@ -198,6 +221,10 @@ describe("기억 브라우저: 목록", () => {
 describe("기억 브라우저: 상세", () => {
   it("근거 역링크·출처·이력(모르는 사건은 일반 문장)을 보인다", async () => {
     const { host } = await render({ route: `/memory?item=${ITEM}` });
+    await waitUntil(
+      () => host.querySelectorAll('[data-testid="memory-detail-event"]').length === 2 && has(host, "memory-detail-evidence-link")(),
+      "detail, evidence and history loaded"
+    );
     expect(byTestId(host, "memory-detail-body")?.textContent).toContain("두 배로");
     expect(byTestId(host, "memory-detail-origin")?.textContent).toBe("사람이 확인했어요");
     const link = byTestId(host, "memory-detail-evidence-link");
@@ -216,6 +243,7 @@ describe("기억 브라우저: 상세", () => {
       evidence: EVIDENCE,
     });
     const { host } = await render({ route: `/memory?item=${ITEM}` });
+    await waitUntil(has(host, "memory-detail-open-older"), "edited detail loaded");
     expect(byTestId(host, "memory-detail-edited-by")?.textContent).toContain("고친 사람 박지훈");
     expect(byTestId(host, "memory-detail-open-older")).not.toBeNull();
   });
@@ -223,16 +251,17 @@ describe("기억 브라우저: 상세", () => {
   it("없는 기억(404)은 없거나 볼 수 없다고만 말한다", async () => {
     getMemoryItem.mockRejectedValue(new ApiError(404, "x"));
     const { host } = await render({ route: `/memory?item=${ITEM}` });
+    await waitUntil(has(host, "memory-detail-gone"), "gone notice");
     expect(byTestId(host, "memory-detail-gone")?.textContent).toContain(BROWSER_OPEN_ITEM_GONE);
     expect(byTestId(host, "memory-detail-gone")?.textContent).not.toMatch(/권한/);
   });
 
   it("폰 폭에서는 상세만 보이고 목록으로 돌아갈 수 있다", async () => {
     const { host } = await render({ route: `/memory?item=${ITEM}`, mobile: true });
+    await waitUntil(has(host, "memory-detail"), "detail loaded");
     expect(byTestId(host, "memory-browser-list-pane")).toBeNull();
-    expect(byTestId(host, "memory-detail")).not.toBeNull();
     click(byTestId(host, "memory-browser-back"));
-    await flush();
+    await waitUntil(has(host, "memory-browser-list-pane"), "list pane back");
     expect(byTestId(host, "memory-browser-list-pane")).not.toBeNull();
     expect(byTestId(host, "memory-detail")).toBeNull();
   });
@@ -242,6 +271,10 @@ describe("기억 브라우저: 오프라인", () => {
   it("연결이 끊기면 알리고, 상세의 고치기·잊기는 이유와 함께 잠근다", async () => {
     vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
     const { host } = await render({ route: `/memory?item=${ITEM}` });
+    await waitUntil(
+      () => has(host, "memory-browser-offline")() && has(host, "memory-detail-reason")() && rowsCount(host, 1)(),
+      "offline view loaded"
+    );
     expect(byTestId(host, "memory-browser-offline")?.textContent).toContain("연결이 끊겨 있어요");
     // 캐시된 목록은 계속 보인다.
     expect(rows(host)).toHaveLength(1);
@@ -254,6 +287,7 @@ describe("기억 브라우저: 오프라인", () => {
 describe("기억 브라우저: 게스트·지난 버전", () => {
   it("게스트은 읽기만 한다. 고치기·잊기 버튼이 없고 이유를 듣는다", async () => {
     const { host } = await render({ role: "guest", route: `/memory?item=${ITEM}` });
+    await waitUntil(has(host, "memory-detail-reason"), "guest detail loaded");
     expect(byTestId(host, "memory-detail")).not.toBeNull();
     expect(byTestId(host, "memory-detail-edit")).toBeNull();
     expect(byTestId(host, "memory-detail-forget")).toBeNull();
@@ -266,6 +300,7 @@ describe("기억 브라우저: 게스트·지난 버전", () => {
       evidence: EVIDENCE,
     });
     const { host } = await render({ route: `/memory?item=${ITEM}` });
+    await waitUntil(has(host, "memory-detail-open-newer"), "old version loaded");
     expect(byTestId(host, "memory-detail-edit")).toBeNull();
     expect(byTestId(host, "memory-detail-forget")).toBeNull();
     expect(byTestId(host, "memory-detail-reason")?.textContent).toBe(BROWSER_NOT_CURRENT);
@@ -276,8 +311,9 @@ describe("기억 브라우저: 게스트·지난 버전", () => {
 describe("기억 브라우저: 고치기", () => {
   async function openEditor() {
     const view = await render({ route: `/memory?item=${ITEM}` });
+    await waitUntil(has(view.host, "memory-detail-edit"), "detail loaded");
     click(byTestId(view.host, "memory-detail-edit"));
-    await flush();
+    await waitUntil(has(view.host, "memory-edit-form"), "editor opened");
     return view;
   }
 
@@ -291,11 +327,14 @@ describe("기억 브라우저: 고치기", () => {
   it("바뀐 게 없거나 비어 있으면 서버에 보내지 않고 이유를 말한다", async () => {
     const { host } = await openEditor();
     click(byTestId(host, "memory-edit-save"));
-    await flush();
+    await waitUntil(has(host, "memory-edit-problem"), "unchanged problem shown");
     expect(byTestId(host, "memory-edit-problem")?.textContent).toBe("바뀐 내용이 없어요.");
     typeInto(byTestId<HTMLTextAreaElement>(host, "memory-edit-field"), "   ");
     click(byTestId(host, "memory-edit-save"));
-    await flush();
+    await waitUntil(
+      () => byTestId(host, "memory-edit-problem")?.textContent === "내용을 적어 주세요.",
+      "empty problem shown"
+    );
     expect(byTestId(host, "memory-edit-problem")?.textContent).toBe("내용을 적어 주세요.");
     expect(editMemoryItem).not.toHaveBeenCalled();
   });
@@ -304,8 +343,10 @@ describe("기억 브라우저: 고치기", () => {
     const { host } = await openEditor();
     typeInto(byTestId<HTMLTextAreaElement>(host, "memory-edit-field"), "큐 크기를 두 배로 늘려요.");
     click(byTestId(host, "memory-edit-save"));
-    await flush();
-    await flush();
+    await waitUntil(
+      () => byTestId(host, "memory-browser-notice")?.textContent?.includes("이력에 남았") === true && byTestId(host, "memory-edit-form") === null,
+      "save notice shown and editor closed"
+    );
     expect(editMemoryItem).toHaveBeenCalledWith(WS, ITEM, { body: "큐 크기를 두 배로 늘려요." });
     expect(byTestId(host, "memory-browser-notice")?.textContent).toContain("이력에 남았");
     expect(byTestId(host, "memory-edit-form")).toBeNull();
@@ -316,8 +357,7 @@ describe("기억 브라우저: 고치기", () => {
     const { host } = await openEditor();
     typeInto(byTestId<HTMLTextAreaElement>(host, "memory-edit-field"), "다른 문장이에요.");
     click(byTestId(host, "memory-edit-save"));
-    await flush();
-    await flush();
+    await waitUntil(has(host, "memory-detail-write-error"), "write error shown");
     expect(byTestId(host, "memory-detail-write-error")?.textContent).toContain(
       ITEM_EDIT_REFUSED_MESSAGE
     );
@@ -328,13 +368,17 @@ describe("기억 브라우저: 고치기", () => {
     const { host } = await openEditor();
     typeInto(byTestId<HTMLTextAreaElement>(host, "memory-edit-field"), "다른 문장이에요.");
     click(byTestId(host, "memory-edit-save"));
-    await flush();
-    await flush();
+    await waitUntil(
+      () => byTestId(host, "memory-detail-write-error")?.textContent?.includes(ITEM_FORBIDDEN_MESSAGE) === true,
+      "forbidden message shown"
+    );
     expect(byTestId(host, "memory-detail-write-error")?.textContent).toContain(ITEM_FORBIDDEN_MESSAGE);
     editMemoryItem.mockRejectedValueOnce(new ApiError(409, "stale"));
     click(byTestId(host, "memory-edit-save"));
-    await flush();
-    await flush();
+    await waitUntil(
+      () => byTestId(host, "memory-detail-write-error")?.textContent?.includes(ITEM_CONFLICT_MESSAGE) === true,
+      "conflict message shown"
+    );
     expect(byTestId(host, "memory-detail-write-error")?.textContent).toContain(ITEM_CONFLICT_MESSAGE);
   });
 });
@@ -342,8 +386,9 @@ describe("기억 브라우저: 고치기", () => {
 describe("기억 브라우저: 잊기", () => {
   async function openForget() {
     const view = await render({ route: `/memory?item=${ITEM}` });
+    await waitUntil(has(view.host, "memory-detail-forget"), "detail loaded");
     click(byTestId(view.host, "memory-detail-forget"));
-    await flush();
+    await waitUntil(() => dialog() !== null, "forget dialog opened");
     return view;
   }
   const dialog = () => document.body.querySelector('[data-testid="memory-forget-dialog"]');
@@ -360,7 +405,7 @@ describe("기억 브라우저: 잊기", () => {
   it("취소하면 아무것도 지우지 않는다", async () => {
     await openForget();
     click(document.body.querySelector('[data-testid="memory-forget-cancel"]'));
-    await flush();
+    await waitUntil(() => dialog() === null, "forget dialog closed");
     expect(forgetMemoryItem).not.toHaveBeenCalled();
     expect(dialog()).toBeNull();
   });
@@ -368,8 +413,10 @@ describe("기억 브라우저: 잊기", () => {
   it("확인하면 지우고 목록으로 돌아가 알린다", async () => {
     const { host } = await openForget();
     click(document.body.querySelector('[data-testid="memory-forget-confirm"]'));
-    await flush();
-    await flush();
+    await waitUntil(
+      () => byTestId(host, "memory-browser-notice")?.textContent?.includes("잊었어요") === true && byTestId(host, "memory-detail") === null,
+      "forgotten notice shown and detail closed"
+    );
     expect(forgetMemoryItem).toHaveBeenCalledWith(WS, ITEM);
     expect(byTestId(host, "memory-detail")).toBeNull();
     expect(byTestId(host, "memory-browser-notice")?.textContent).toContain("잊었어요");
@@ -379,8 +426,10 @@ describe("기억 브라우저: 잊기", () => {
     forgetMemoryItem.mockRejectedValue(new ApiError(403, "guest"));
     const { host } = await openForget();
     click(document.body.querySelector('[data-testid="memory-forget-confirm"]'));
-    await flush();
-    await flush();
+    await waitUntil(
+      () => dialog() === null && has(host, "memory-detail-write-error")(),
+      "dialog closed and error shown"
+    );
     expect(dialog()).toBeNull();
     expect(byTestId(host, "memory-detail-write-error")?.textContent).toContain(ITEM_FORBIDDEN_MESSAGE);
     expect(byTestId(host, "memory-detail")).not.toBeNull();
@@ -389,6 +438,7 @@ describe("기억 브라우저: 잊기", () => {
   it("에이전트나 목록에 없는 id로 열어도 화면이 죽지 않는다", async () => {
     getMemoryItem.mockRejectedValue(new ApiError(404, "x"));
     const { host } = await render({ route: `/memory?item=${AGENT}` });
+    await waitUntil(has(host, "memory-detail-gone"), "gone notice");
     expect(byTestId(host, "memory-detail-gone")).not.toBeNull();
   });
 });
