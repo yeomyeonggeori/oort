@@ -11,6 +11,7 @@ import {Image, StyleSheet, Text, View} from 'react-native';
 import {font, radius, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {apiBase} from '../../storage/serverBase';
+import {useMemberAvatarUri} from './memberAvatarImage';
 
 // =============================================================================
 // 폰의 아바타 (감사 H-11 · goal U4-6M)
@@ -110,7 +111,10 @@ export function Avatar({
     () => avatarIdentity(memberFor(directory, memberId), base),
     [directory, memberId, base],
   );
-  const source = avatarImageSource(identity, base);
+  // 업로드된 사진(인가 content 경로)은 베어러로 받아 온다. 받는 중·실패에는
+  // `null` 이라 이니셜이 같은 크기로 서 있다. 옛 `avatarUrl` 은 기존 길 그대로.
+  const uploaded = useMemberAvatarUri(identity.contentPath);
+  const source = uploaded ?? avatarImageSource(identity, base);
   const carriesColor = avatarCarriesIdentityColor(identity.kind);
   const round = AVATAR_SHAPE[identity.kind] === 'round';
   const sized =
