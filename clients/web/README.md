@@ -135,7 +135,7 @@ Native does not implement CORS at all.
 
 - **The server had no CORS.** `OPTIONS /v1/auth/login` answered 405 and no
   response carried an `Access-Control-*` header, so the webview blocked the login
-  POST before it was sent and the connect screen said "서버에 닿지 못했습니다".
+  POST before it was sent and the connect screen said "서버에 닿지 못했어요".
   Fixed server-side (MOMO-605, `server-rust/bins/momo-server/src/cors.rs`): set
   `MOMO_CORS_ALLOWED_ORIGINS=tauri://localhost` on the api service. Unset is
   still the default and still mounts nothing.

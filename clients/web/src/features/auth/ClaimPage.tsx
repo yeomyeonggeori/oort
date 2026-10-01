@@ -75,6 +75,8 @@ export function ClaimPage({
   const token = readClaimToken(window.location.pathname);
   const [claimed, setClaimed] = useState<LoginResponse | null>(null);
   const claimedRef = useRef<LoginResponse | null>(null);
+  // 같은 틱에 겹친 두 제출을 막는 동기 자물쇠(#3267). `busy` state는 다음 렌더에 선다.
+  const attemptLockRef = useRef(false);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
@@ -100,7 +102,7 @@ export function ClaimPage({
   }, [failure, missingToken]);
 
   async function attempt() {
-    if (token === null) return;
+    if (token === null || attemptLockRef.current) return;
     if (password !== confirm) {
       setMismatch(true);
       setFailure(null);
@@ -108,6 +110,7 @@ export function ClaimPage({
     }
     setMismatch(false);
     setFailure(null);
+    attemptLockRef.current = true;
     setBusy(true);
     try {
       // applyLogin fires inside claimOwnerPassword. Hold restore BEFORE the
@@ -123,6 +126,7 @@ export function ClaimPage({
       releaseSessionRestore();
       setFailure(claimFailureCopy(err));
     } finally {
+      attemptLockRef.current = false;
       setBusy(false);
     }
   }
