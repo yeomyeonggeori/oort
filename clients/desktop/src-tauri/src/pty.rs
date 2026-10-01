@@ -31,7 +31,8 @@
 //    `login` is one row of `LOGIN_COMMANDS` (ADR-0190 D3-f, #2816): the
 //    official CLI's own sign-in command with its arguments fixed here. The
 //    page names a harness and a method, never an argument.
-// 3. **Where.** `cwd` must canonicalize to a directory inside the user's home.
+// 3. **Where.** `cwd` must be absolute, free of `..`, and canonicalize to a
+//    readable directory inside the user's home (`start_folder::check_folder`).
 //    Validation happens before the command builder sees the path: portable-pty
 //    silently falls back to $HOME for a cwd that is not a directory.
 // 4. **With which environment.** The app's environment minus the account
@@ -364,20 +365,8 @@ pub fn check_cwd(cwd: Option<&str>, home: &Path) -> Result<PathBuf, String> {
     let Some(raw) = cwd else {
         return Ok(home.to_path_buf());
     };
-    let path = Path::new(raw);
-    if !path.is_absolute() {
-        return Err("refused: folder must be an absolute path".into());
-    }
-    let canonical = path
-        .canonicalize()
-        .map_err(|_| "refused: folder does not exist".to_string())?;
-    if !canonical.is_dir() {
-        return Err("refused: folder is not a directory".into());
-    }
-    if !canonical.starts_with(home) {
-        return Err("refused: folder is outside the home directory".into());
-    }
-    Ok(canonical)
+    // The one folder rule, shared with the new-session picker (#2775).
+    crate::start_folder::check_folder(raw, home)
 }
 
 pub fn check_shell(host: &HostFacts) -> Result<PathBuf, String> {

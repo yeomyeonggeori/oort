@@ -57,7 +57,7 @@ import "./sessionList.css";
 // - ⌘J(작업 탭)는 이 목록의 지금 칸 행으로 캐럿을 보낸다. ↑↓로 옮기고 Enter.
 // - ⌃1–9는 목록 안에서도 칸 번호로 간다(격자 밖이라 격자 키가 받지 못한다).
 //   ⌘⇧↵는 포커스 칸 최대화.
-// - 필터 칩(전부·나를 기다림·공유)과 묶기(저장소·상태)는 이 기기에 기억한다.
+// - 필터 칩(전부·응답 필요·공유)과 묶기(저장소·상태)는 이 기기에 기억한다.
 
 const PREFS_KEY = "momo.web.workbench.sessionList.v1";
 
@@ -321,7 +321,7 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
   const filters: SessionFilter[] = ["all", "waiting", "shared"];
 
   return (
-    <aside className="sl" aria-labelledby="session-list-title" data-testid="session-list">
+    <aside className="sl sidebar-list shell-swap-in" aria-labelledby="session-list-title" data-testid="session-list">
       <div className="sl-hd">
         <h2 id="session-list-title">세션</h2>
         {/* 시안의 「⌘J 이동」은 저장소 머리에 있었다. 머리를 숨기는 저장소 하나일 때도 보이게 제목 옆에 둔다. */}

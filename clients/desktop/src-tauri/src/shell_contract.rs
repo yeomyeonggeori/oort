@@ -505,6 +505,134 @@ fn tauri_grants_the_git_read_to_the_local_main_webview_only() {
     assert!(!mobile.iter().any(|c| c == command));
 }
 
+const WORKBENCH_START_COMMANDS: [&str; 3] = [
+    "workbench_folder_pick",
+    "workbench_folder_inspect",
+    "workbench_worktree_create",
+];
+const WORKBENCH_START_PERMISSIONS: [&str; 3] = [
+    "allow-workbench-folder-pick",
+    "allow-workbench-folder-inspect",
+    "allow-workbench-worktree-create",
+];
+
+/// Tauri's resolver: the start-location commands (#2775) — the folder picker
+/// and the one git write — answer the main webview's bundled origin only.
+#[test]
+fn tauri_grants_the_start_location_commands_to_the_local_main_webview_only() {
+    let mut context = crate::context();
+    let authority = context.runtime_authority_mut();
+    let local = tauri::ipc::Origin::Local;
+    let blocks = handler_blocks(LIB_RS);
+    let desktop = blocks
+        .iter()
+        .find(|b| b.contains(&"updater_check".to_string()))
+        .unwrap();
+    let mobile = blocks
+        .iter()
+        .find(|b| !b.contains(&"updater_check".to_string()))
+        .unwrap();
+    // The dialog plugin's own commands are not granted to anyone.
+    for command in [
+        "plugin:dialog|open",
+        "plugin:dialog|save",
+        "plugin:dialog|message",
+    ] {
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &local)
+                .is_none(),
+            "{command} is granted"
+        );
+    }
+    for command in WORKBENCH_START_COMMANDS {
+        assert!(authority
+            .resolve_access(command, "main", "main", &local)
+            .is_some());
+        for url in ["https://evil.example/", "http://127.0.0.1:8080/"] {
+            let remote = tauri::ipc::Origin::Remote {
+                url: url.parse().unwrap(),
+            };
+            assert!(
+                authority
+                    .resolve_access(command, "main", "main", &remote)
+                    .is_none(),
+                "{command} from {url}"
+            );
+        }
+        assert!(authority
+            .resolve_access(command, "other", "other", &local)
+            .is_none());
+        assert!(authority
+            .resolve_access(command, "main", "embedded", &local)
+            .is_none());
+        assert!(desktop.iter().any(|c| c == command));
+        assert!(!mobile.iter().any(|c| c == command));
+    }
+}
+
+/// ADR-0190 D3-c 증보 2026-10-01: the one git write lives in `start_folder.rs`
+/// alone. No other source names `worktree`, and in that file the only git
+/// subcommands are the reads and `worktree add` — not one of the others.
+#[test]
+fn the_only_git_write_is_worktree_add_in_start_folder() {
+    for (name, src) in crate_sources() {
+        if name == "start_folder.rs" || name == "shell_contract.rs" || name == "git_read.rs" {
+            continue;
+        }
+        let production = src.split("#[cfg(test)]\nmod tests").next().unwrap_or("");
+        let hit = production
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .any(|l| l.contains("\"worktree\"") && l.contains("\"add\""));
+        assert!(!hit, "{name} names a worktree write");
+    }
+    let src = crate_sources()
+        .into_iter()
+        .find(|(n, _)| n == "start_folder.rs")
+        .unwrap()
+        .1;
+    let production = src.split("#[cfg(test)]\nmod tests").next().unwrap();
+    for banned in [
+        "\"fetch\"",
+        "\"checkout\"",
+        "\"commit\"",
+        "\"reset\"",
+        "\"gc\"",
+        "\"push\"",
+        "\"pull\"",
+        "\"clone\"",
+        "\"branch\"",
+        "\"remove\"",
+        "\"prune\"",
+        "\"clean\"",
+        "\"stash\"",
+        "\"rebase\"",
+        "\"merge\"",
+        "\"restore\"",
+        "\"switch\"",
+    ] {
+        assert!(
+            !production.contains(banned),
+            "start_folder.rs mentions {banned}"
+        );
+    }
+    // Never a shell string.
+    // The one program started is the absolute git path (`-c` here is git's own
+    // config flag in `GIT_PREFIX`, not a shell's).
+    let spawns: Vec<&str> = production.matches("Command::new(").collect();
+    assert_eq!(spawns.len(), 1, "start_folder.rs starts one program");
+    assert!(production.contains("Command::new(git)"));
+    for banned in ["\"sh\"", "\"bash\"", "\"zsh\""] {
+        let hits = production
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .filter(|l| l.contains(banned))
+            .count();
+        assert_eq!(hits, 0, "start_folder.rs runs a shell: {banned}");
+    }
+}
+
 const WORK_HOST_COMMANDS: [&str; 7] = [
     "work_host_status",
     "work_host_register",
@@ -768,7 +896,8 @@ fn only_the_local_terminal_capability_grants_pty_and_none_is_remote() {
             "git-read.json",
             "harness-profile.json",
             "pty.json",
-            "work-host.json"
+            "work-host.json",
+            "workbench-start.json"
         ],
         "new capability file: review it here"
     );
@@ -856,6 +985,32 @@ fn only_the_local_terminal_capability_grants_pty_and_none_is_remote() {
             );
         } else {
             assert!(device_key.is_empty(), "{name} grants {device_key:?}");
+        }
+        // The new-session start location (#2775): three commands, the main
+        // webview only, and no `dialog:*` anywhere — the webview cannot open
+        // the dialog plugin, only ask `workbench_folder_pick` to.
+        assert!(
+            !permission_ids(cap).iter().any(|p| p.starts_with("dialog:")),
+            "{name} grants a dialog permission"
+        );
+        let start: Vec<&str> = permission_ids(cap)
+            .into_iter()
+            .filter(|p| WORKBENCH_START_PERMISSIONS.contains(p))
+            .collect();
+        if name == "workbench-start.json" {
+            assert_eq!(start, WORKBENCH_START_PERMISSIONS);
+            assert_eq!(
+                permission_ids(cap).len(),
+                WORKBENCH_START_PERMISSIONS.len(),
+                "workbench-start.json grants only the three start commands"
+            );
+            assert_eq!(cap["webviews"], serde_json::json!(["main"]));
+            assert!(
+                cap.get("windows").is_none(),
+                "a window grant covers child webviews"
+            );
+        } else {
+            assert!(start.is_empty(), "{name} grants {start:?}");
         }
         if name == "pty.json" {
             assert_eq!(

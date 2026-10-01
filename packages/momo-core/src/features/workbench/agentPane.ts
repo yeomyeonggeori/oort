@@ -445,7 +445,7 @@ export interface AgentPaneInput {
 
 /**
  * 세션 상태를 목록·칸 머리의 상태 어휘로. 결정되지 않은 권한 요청은 소유자에게
- * 「나를 기다림」이다. 다른 사람에게는 그 요청이 보이지 않으므로(D5) 실행 중이다.
+ * 「응답 필요」다. 다른 사람에게는 그 요청이 보이지 않으므로(D5) 실행 중이다.
  */
 export function agentSessionStatus(
   session: Pick<WorkSession, "status">,
@@ -470,7 +470,7 @@ export function agentSessionStatus(
 }
 
 const AGENT_STATUS_LABEL: Readonly<Record<SessionStatus, string>> = {
-  waiting: "나를 기다림",
+  waiting: "응답 필요",
   running: "실행 중",
   review: "검토 대기",
   idle: "대기",
@@ -517,7 +517,7 @@ export function agentPaneModel(input: AgentPaneInput): AgentPaneModel {
       ? { ...pending, preview: null, allow: null, reject: null, hiddenOptions: 0 }
       : pending;
   const status = agentSessionStatus(session, permission !== null, viewerIsOwner);
-  // 소유자가 아닌 사람에게 권한 요청은 「나를 기다림」이 아니지만, 「실행 중」이라고만
+  // 소유자가 아닌 사람에게 권한 요청은 「응답 필요」가 아니지만, 「실행 중」이라고만
   // 말하면 본문(「누구의 확인을 기다려요」)과 어긋난다. 글만 바꾼다.
   const statusLabel =
     permission !== null && !viewerIsOwner && status === "running"
@@ -635,7 +635,7 @@ export function pruneAgentPanes(
 /**
  * 칸에 열 수 있는 A 세션: 내가 소유한, 아직 끝나지 않은 세션. 이미 칸에 열린
  * 세션은 빼지 않는다(같은 세션을 두 칸에 여는 것은 거부하지 않고 표시만 한다).
- * 정렬은 목록과 같다: 나를 기다림은 권한 요청을 읽어야 알 수 있으므로 여기서는
+ * 정렬은 목록과 같다: 응답 필요은 권한 요청을 읽어야 알 수 있으므로 여기서는
  * 실행 중 → 대기 → 최근.
  */
 export function openableAgentSessions(
