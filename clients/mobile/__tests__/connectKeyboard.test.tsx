@@ -92,7 +92,7 @@ const ROW_GAP = 16;
 
 /** 코어의 로그인 실패 문장(`signInFailureCopy`) — 401 과, 아무것도 답하지 않은 요청. */
 const UNAUTHORIZED = '이메일 또는 비밀번호가 맞지 않습니다.';
-const UNREACHABLE = '서버에 닿지 못했습니다. 주소와 네트워크를 확인하고 다시 시도하세요.';
+const UNREACHABLE = '서버에 닿지 못했어요. 주소와 네트워크를 확인하고 다시 시도해 주세요.';
 
 interface Span {
   top: number;

@@ -179,6 +179,24 @@ export async function flush(): Promise<void> {
   });
 }
 
+// Condition-based wait (#3236): a fixed number of flushes assumes how many macrotasks the
+// fetch -> query -> render chain needs, which does not hold on a loaded CI runner. Poll the
+// actual DOM/mock condition instead. Bounded below vitest's 5s test timeout so a real
+// regression fails here with its label instead of timing out the test and leaving this loop
+// running into the next one; it also stops once the view is unmounted.
+export async function waitUntil(
+  predicate: () => boolean,
+  label: string,
+  timeoutMs = 4000
+): Promise<void> {
+  const started = Date.now();
+  while (!predicate()) {
+    if (Date.now() - started > timeoutMs) throw new Error(`waitUntil timed out: ${label}`);
+    if (root === null) throw new Error(`waitUntil aborted, view unmounted: ${label}`);
+    await flush();
+  }
+}
+
 export function byTestId<T extends HTMLElement = HTMLElement>(
   scope: ParentNode,
   id: string
