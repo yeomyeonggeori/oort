@@ -72,6 +72,9 @@ this table only records why they are there.
 |---|---|---|---|---|
 | p256 (RustCrypto; brings ecdsa, elliptic-curve, primeorder, sec1 and their RustCrypto deps) | 0.14.0 | Apache-2.0 OR MIT | `server-rust/crates/momo-wire` (human device-key P-256 verification) | ADR-0146 개정 2026-09-28 D-1, #3021 |
 | unicode-normalization | 0.1.25 | MIT OR Apache-2.0 | `server-rust/crates/momo-wire` (NFC of signed human text; was already transitive via sqlx) | ADR-0146 개정 2026-09-28 D-5, #3021 |
+| tauri-plugin-dialog | 2.7.3 | Apache-2.0 OR MIT | `clients/desktop/src-tauri` (native folder picker for the new-session menu, opened from Rust only; no `dialog:*` permission is granted to the webview) | ADR-0190 증보 2026-10-01, #2775 |
+| tauri-plugin-fs | 2.5.2 | Apache-2.0 OR MIT | `clients/desktop/src-tauri` (transitive of tauri-plugin-dialog; not registered as a plugin, no command exposed) | ADR-0190 증보 2026-10-01, #2775 |
+| rfd | 0.16.0 | MIT | `clients/desktop/src-tauri` (transitive of tauri-plugin-dialog: the OS file dialog) | ADR-0190 증보 2026-10-01, #2775 |
 | fastembed (fastembed-rs; `default-features = false`, no hf-hub / image models) | 7.1.0 | Apache-2.0 | `server-rust/crates/momo-embed` (loads the int8 ONNX sentence model and runs it) | ADR-0196 D8 증보 2026-09-30, #3173 |
 | ort / ort-sys (pykeio/ort, ONNX Runtime bindings; `load-dynamic`: no ONNX Runtime binary is downloaded or linked at cargo build time) | 2.0.0-rc.13 | MIT OR Apache-2.0 | via fastembed, `momo-embed` | same |
 | libloading (nagisa/rust_libloading; already in the graph via ort, now also a direct dependency that checks `ORT_DYLIB_PATH` before ort sees it) | 0.9.0 | ISC | `server-rust/crates/momo-embed` | same |

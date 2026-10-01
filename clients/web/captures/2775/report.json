@@ -1,0 +1,362 @@
+{
+  "scenes": [
+    "start-repo-menu-light",
+    "start-repo-worktree-on-light",
+    "start-repo-picked-light",
+    "start-home-menu-light",
+    "start-plain-menu-light",
+    "start-empty-menu-light",
+    "start-fail-pane-light",
+    "start-repo-menu-dark",
+    "start-repo-worktree-on-dark",
+    "start-repo-picked-dark",
+    "start-home-menu-dark",
+    "start-plain-menu-dark",
+    "start-empty-menu-dark",
+    "start-fail-pane-dark"
+  ],
+  "checks": [
+    {
+      "name": "light/start-repo: 메뉴가 뷰포트 안",
+      "ok": true,
+      "detail": {
+        "left": 12,
+        "top": 262,
+        "right": 283.171875,
+        "bottom": 709,
+        "vw": 1280,
+        "vh": 800
+      }
+    },
+    {
+      "name": "light/start-repo: 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "light/start-repo: 홈에서 시작·폴더 고르기·격리 줄",
+      "ok": true
+    },
+    {
+      "name": "light/start-repo: 클라우드 안내 한 줄",
+      "ok": true
+    },
+    {
+      "name": "light/start-repo: 격리는 기본 꺼짐",
+      "ok": true
+    },
+    {
+      "name": "light/start-repo: 최근 프로젝트 네 줄",
+      "ok": true
+    },
+    {
+      "name": "light/start-repo: git 저장소라 켤 수 있다",
+      "ok": true,
+      "detail": {
+        "note": "원래 폴더는 그대로 두고, 새 브랜치로 따로 작업해요"
+      }
+    },
+    {
+      "name": "light/start-repo: 격리를 켜면 체크",
+      "ok": true
+    },
+    {
+      "name": "light/start-repo: 고른 폴더가 시작 위치로 보임",
+      "ok": true
+    },
+    {
+      "name": "light/start-repo: 폴더를 고른 뒤에도 메뉴가 열려 있음",
+      "ok": true
+    },
+    {
+      "name": "light/start-home: 메뉴가 뷰포트 안",
+      "ok": true,
+      "detail": {
+        "left": 12,
+        "top": 420,
+        "right": 228.15625,
+        "bottom": 709,
+        "vw": 1280,
+        "vh": 800
+      }
+    },
+    {
+      "name": "light/start-home: 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "light/start-home: 홈에서 시작·폴더 고르기·격리 줄",
+      "ok": true
+    },
+    {
+      "name": "light/start-home: 클라우드 안내 한 줄",
+      "ok": true
+    },
+    {
+      "name": "light/start-home: 격리는 기본 꺼짐",
+      "ok": true
+    },
+    {
+      "name": "light/start-home: 최근 없음",
+      "ok": true
+    },
+    {
+      "name": "light/start-home: 홈에서는 이유와 함께 꺼짐",
+      "ok": true,
+      "detail": {
+        "note": "홈에서는 쓸 수 없어요"
+      }
+    },
+    {
+      "name": "light/start-plain: 메뉴가 뷰포트 안",
+      "ok": true,
+      "detail": {
+        "left": 12,
+        "top": 262,
+        "right": 228.15625,
+        "bottom": 709,
+        "vw": 1280,
+        "vh": 800
+      }
+    },
+    {
+      "name": "light/start-plain: 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "light/start-plain: 홈에서 시작·폴더 고르기·격리 줄",
+      "ok": true
+    },
+    {
+      "name": "light/start-plain: 클라우드 안내 한 줄",
+      "ok": true
+    },
+    {
+      "name": "light/start-plain: 격리는 기본 꺼짐",
+      "ok": true
+    },
+    {
+      "name": "light/start-plain: git이 아니면 이유와 함께 꺼짐",
+      "ok": true,
+      "detail": {
+        "note": "git 저장소를 고르면 켤 수 있어요"
+      }
+    },
+    {
+      "name": "light/start-empty: 메뉴가 뷰포트 안",
+      "ok": true,
+      "detail": {
+        "left": 12,
+        "top": 262,
+        "right": 228.15625,
+        "bottom": 709,
+        "vw": 1280,
+        "vh": 800
+      }
+    },
+    {
+      "name": "light/start-empty: 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "light/start-empty: 홈에서 시작·폴더 고르기·격리 줄",
+      "ok": true
+    },
+    {
+      "name": "light/start-empty: 클라우드 안내 한 줄",
+      "ok": true
+    },
+    {
+      "name": "light/start-empty: 격리는 기본 꺼짐",
+      "ok": true
+    },
+    {
+      "name": "light/start-empty: 커밋 없으면 이유와 함께 꺼짐",
+      "ok": true,
+      "detail": {
+        "note": "아직 커밋이 없어서 쓸 수 없어요"
+      }
+    },
+    {
+      "name": "light/start-fail: 칸이 한국어로 이유를 말하고 다시 열기를 준다",
+      "ok": true,
+      "detail": {
+        "status": "터미널을 열지 못했습니다.\n\n다시 열기"
+      }
+    },
+    {
+      "name": "light/start-fail: 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "dark/start-repo: 메뉴가 뷰포트 안",
+      "ok": true,
+      "detail": {
+        "left": 12,
+        "top": 262,
+        "right": 283.171875,
+        "bottom": 709,
+        "vw": 1280,
+        "vh": 800
+      }
+    },
+    {
+      "name": "dark/start-repo: 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "dark/start-repo: 홈에서 시작·폴더 고르기·격리 줄",
+      "ok": true
+    },
+    {
+      "name": "dark/start-repo: 클라우드 안내 한 줄",
+      "ok": true
+    },
+    {
+      "name": "dark/start-repo: 격리는 기본 꺼짐",
+      "ok": true
+    },
+    {
+      "name": "dark/start-repo: 최근 프로젝트 네 줄",
+      "ok": true
+    },
+    {
+      "name": "dark/start-repo: git 저장소라 켤 수 있다",
+      "ok": true,
+      "detail": {
+        "note": "원래 폴더는 그대로 두고, 새 브랜치로 따로 작업해요"
+      }
+    },
+    {
+      "name": "dark/start-repo: 격리를 켜면 체크",
+      "ok": true
+    },
+    {
+      "name": "dark/start-repo: 고른 폴더가 시작 위치로 보임",
+      "ok": true
+    },
+    {
+      "name": "dark/start-repo: 폴더를 고른 뒤에도 메뉴가 열려 있음",
+      "ok": true
+    },
+    {
+      "name": "dark/start-home: 메뉴가 뷰포트 안",
+      "ok": true,
+      "detail": {
+        "left": 12,
+        "top": 420,
+        "right": 228.15625,
+        "bottom": 709,
+        "vw": 1280,
+        "vh": 800
+      }
+    },
+    {
+      "name": "dark/start-home: 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "dark/start-home: 홈에서 시작·폴더 고르기·격리 줄",
+      "ok": true
+    },
+    {
+      "name": "dark/start-home: 클라우드 안내 한 줄",
+      "ok": true
+    },
+    {
+      "name": "dark/start-home: 격리는 기본 꺼짐",
+      "ok": true
+    },
+    {
+      "name": "dark/start-home: 최근 없음",
+      "ok": true
+    },
+    {
+      "name": "dark/start-home: 홈에서는 이유와 함께 꺼짐",
+      "ok": true,
+      "detail": {
+        "note": "홈에서는 쓸 수 없어요"
+      }
+    },
+    {
+      "name": "dark/start-plain: 메뉴가 뷰포트 안",
+      "ok": true,
+      "detail": {
+        "left": 12,
+        "top": 262,
+        "right": 228.15625,
+        "bottom": 709,
+        "vw": 1280,
+        "vh": 800
+      }
+    },
+    {
+      "name": "dark/start-plain: 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "dark/start-plain: 홈에서 시작·폴더 고르기·격리 줄",
+      "ok": true
+    },
+    {
+      "name": "dark/start-plain: 클라우드 안내 한 줄",
+      "ok": true
+    },
+    {
+      "name": "dark/start-plain: 격리는 기본 꺼짐",
+      "ok": true
+    },
+    {
+      "name": "dark/start-plain: git이 아니면 이유와 함께 꺼짐",
+      "ok": true,
+      "detail": {
+        "note": "git 저장소를 고르면 켤 수 있어요"
+      }
+    },
+    {
+      "name": "dark/start-empty: 메뉴가 뷰포트 안",
+      "ok": true,
+      "detail": {
+        "left": 12,
+        "top": 262,
+        "right": 228.15625,
+        "bottom": 709,
+        "vw": 1280,
+        "vh": 800
+      }
+    },
+    {
+      "name": "dark/start-empty: 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "dark/start-empty: 홈에서 시작·폴더 고르기·격리 줄",
+      "ok": true
+    },
+    {
+      "name": "dark/start-empty: 클라우드 안내 한 줄",
+      "ok": true
+    },
+    {
+      "name": "dark/start-empty: 격리는 기본 꺼짐",
+      "ok": true
+    },
+    {
+      "name": "dark/start-empty: 커밋 없으면 이유와 함께 꺼짐",
+      "ok": true,
+      "detail": {
+        "note": "아직 커밋이 없어서 쓸 수 없어요"
+      }
+    },
+    {
+      "name": "dark/start-fail: 칸이 한국어로 이유를 말하고 다시 열기를 준다",
+      "ok": true,
+      "detail": {
+        "status": "터미널을 열지 못했습니다.\n\n다시 열기"
+      }
+    },
+    {
+      "name": "dark/start-fail: 가로 넘침 0",
+      "ok": true
+    }
+  ]
+}

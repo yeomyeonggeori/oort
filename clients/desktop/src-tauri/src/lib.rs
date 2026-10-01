@@ -77,6 +77,12 @@ mod pdf_viewer;
 // which only `capabilities/pty.json` grants.
 #[cfg(desktop)]
 mod pty;
+// Where a new session starts (ADR-0190 D3-c 증보 2026-10-01, #2775): the
+// folder rule, the native folder picker and the one git write (a new
+// worktree). Reachable only through three `workbench_*` commands, which only
+// `capabilities/workbench-start.json` grants.
+#[cfg(desktop)]
+mod start_folder;
 // What the capability and window config owe the web bundle's drag regions and
 // file drops (#2671). Tests only.
 #[cfg(test)]
@@ -141,6 +147,9 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // Opened only by `start_folder` on the Rust side; no capability grants
+        // a `dialog:*` permission to the webview.
+        .plugin(tauri_plugin_dialog::init())
         .manage(updater::UpdaterState::default())
         .manage(pty::PtyState::default())
         .manage(work_host::WorkHostState::default())
@@ -184,6 +193,9 @@ pub fn run() {
             pty::pty_kill,
             pty::pty_ack,
             git_read::workbench_git_read,
+            start_folder::workbench_folder_pick,
+            start_folder::workbench_folder_inspect,
+            start_folder::workbench_worktree_create,
             harness_profile::harness_profile_list,
             harness_profile::harness_profile_create,
             harness_profile::harness_profile_status,

@@ -12,7 +12,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { ChevronDown, ListTree, Maximize, Minimize, PanelLeftOpen, Plus, SquareTerminal, X } from "lucide-react";
+import { Check, ChevronDown, ListTree, Maximize, Minimize, PanelLeftOpen, Plus, SquareTerminal, X } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import {
@@ -23,8 +23,11 @@ import {
 } from "@/design/ui/dialog";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
 import {
@@ -52,7 +55,7 @@ import {
   toggleDockRatio,
 } from "@momo/core/features/workbench/dockStore";
 import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
-import { detectLocalHarnesses, type PtyProgram } from "@/lib/tauri";
+import { desktopStart, detectLocalHarnesses, type PtyProgram } from "@/lib/tauri";
 import { readAiDefaults, useAiDefaults } from "@/features/settings/aiDefaultsStore";
 import {
   checkingAccountLine,
@@ -79,7 +82,22 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/design/ui/dropdown-menu";
-import type { LocalSessionView } from "./localSessions";
+import type { LocalSessionView, PaneStart } from "./localSessions";
+import {
+  choiceLabel,
+  cwdOf,
+  forgetFolder,
+  parentName,
+  readStartState,
+  rememberFolder,
+  START_COPY,
+  startErrorMessage,
+  worktreeAvailability,
+  writeStartState,
+  type StartFolder,
+  type StartState,
+  type StartStorage,
+} from "./startLocation";
 import { usePaneGit } from "./usePaneGit";
 import { useSessionListOpen } from "./sessionListOpen";
 import { WorkbenchGrid, type WorkbenchPaneInfo } from "../WorkbenchGrid";
@@ -141,6 +159,7 @@ export function LocalTerminalDock({
   presentation = "dock",
   agent,
   launchSource,
+  startSource,
 }: {
   sessions?: LocalSessions;
   platform?: KeyPlatform;
@@ -164,6 +183,15 @@ export function LocalTerminalDock({
     detect: () => Promise<LocalHarnessProbe[]>;
     deps: LocalTerminalLaunchDeps;
   };
+  /**
+   * 새 세션의 시작 위치(#2775): 폴더 고르기·폴더 확인과 이 기기의 기억. 없으면 셸의
+   * 명령과 localStorage를 쓴다. 브라우저 하네스(캡처)·시험만 넘긴다.
+   */
+  startSource?: {
+    pick: () => Promise<StartFolder | null>;
+    inspect: (path: string) => Promise<StartFolder>;
+    storage?: StartStorage | null;
+  };
 }) {
   const platform = platformProp ?? detectPlatform();
   const dock = useDockState();
@@ -183,6 +211,25 @@ export function LocalTerminalDock({
   const aiPrefs = useAiDefaults();
   const launchSourceRef = useRef(launchSource);
   launchSourceRef.current = launchSource;
+  const startSourceRef = useRef(startSource);
+  startSourceRef.current = startSource;
+  const startStorage = (): StartStorage | undefined | null => startSourceRef.current?.storage;
+  /** 새 세션의 시작 위치(마지막에 쓴 곳이 기본)와 최근 프로젝트. 이 기기에만 저장한다. */
+  const [start, setStart] = useState<StartState>(() =>
+    startSource?.storage === undefined ? readStartState() : readStartState(startSource.storage)
+  );
+  const startRef = useRef(start);
+  /** worktree 격리: 세션을 열 때마다 새로 고른다(기본 끔, 한 번 쓰면 다시 끈다). */
+  const [worktreeOn, setWorktreeOn] = useState(false);
+  const worktreeOnRef = useRef(worktreeOn);
+  worktreeOnRef.current = worktreeOn;
+  const commitStart = useCallback((next: StartState) => {
+    startRef.current = next;
+    setStart(next);
+    const storage = startStorage();
+    if (storage === undefined) writeStartState(next);
+    else writeStartState(next, storage);
+  }, []);
   const [confirm, setConfirm] = useState<{ paneId: PaneId; close: () => void } | null>(null);
   const sessionMap = useSyncSessions(sessions);
   const sessionMapRef = useRef(sessionMap);
@@ -237,6 +284,39 @@ export function LocalTerminalDock({
     };
   }, [active]);
 
+  // 고른 폴더가 아직 있는지, git 저장소인지(worktree를 켤 수 있는지) 다시 확인한다.
+  // 없어졌으면 홈으로 돌아가고 한 줄로 말한다. 조용히 다른 곳에서 시작하지 않는다.
+  const chosenPath = start.choice.kind === "folder" ? start.choice.folder.path : null;
+  useEffect(() => {
+    if (!active || chosenPath === null) return;
+    let alive = true;
+    const inspect = startSourceRef.current?.inspect ?? desktopStart.inspect;
+    void inspect(chosenPath).then(
+      (facts) => {
+        if (!alive) return;
+        const current = startRef.current;
+        if (current.choice.kind !== "folder" || current.choice.folder.path !== chosenPath) return;
+        const same =
+          current.choice.folder.repo === facts.repo && current.choice.folder.name === facts.name;
+        if (same) return;
+        commitStart({
+          choice: { kind: "folder", folder: facts },
+          recent: current.recent.map((r) => (r.path === facts.path ? facts : r)),
+        });
+      },
+      () => {
+        if (!alive) return;
+        const current = startRef.current;
+        commitStart({ choice: { kind: "home" }, recent: forgetFolder(current.recent, chosenPath) });
+        setWorktreeOn(false);
+        setNotice(START_COPY.folderGone);
+      }
+    );
+    return () => {
+      alive = false;
+    };
+  }, [active, chosenPath, commitStart]);
+
   const bodySize = () => {
     const rect = bodyRef.current?.getBoundingClientRect();
     return { width: rect?.width ?? 0, height: rect?.height ?? 0 };
@@ -250,27 +330,46 @@ export function LocalTerminalDock({
     (program: PtyProgram): boolean => {
       const current = layoutRef.current;
       const ids = paneIds(current.root);
+      // 시작 위치: 마지막에 쓴 폴더(없으면 홈). worktree는 켜 두었고 쓸 수 있을 때만.
+      const choice = startRef.current.choice;
+      const paneStart: PaneStart = {
+        cwd: cwdOf(choice),
+        worktree: worktreeOnRef.current && worktreeAvailability(choice).enabled,
+      };
+      /** 칸을 열었다: 이 폴더를 최근 맨 앞에 두고, worktree 선택은 다시 끈다. */
+      const launched = () => {
+        if (choice.kind === "folder") {
+          commitStart({
+            choice,
+            recent: rememberFolder(startRef.current.recent, choice.folder),
+          });
+        }
+        setWorktreeOn(false);
+      };
       if (ids.length === 1 && !sessions.has(ids[0]!)) {
-        sessions.setPendingProgram(ids[0]!, program);
+        sessions.setPendingProgram(ids[0]!, program, paneStart);
         if (!tab) openDock();
+        launched();
         return true;
       }
       if (!tab && !dock.open) openDock();
       const size = bodySize();
       const axis = size.width / 2 >= WORKBENCH_MIN_PANE.width || size.width === 0 ? "row" : "column";
       const newId = paneIdFor(current.seq);
-      sessions.setPendingProgram(newId, program);
+      sessions.setPendingProgram(newId, program, paneStart);
       const result = splitPane(current, current.focused, axis, size.width > 0 ? size : { width: 4000, height: 4000 });
       if (!result.ok) {
+        sessions.close(newId);
         setNotice(SPLIT_REFUSED);
         return false;
       }
       setNotice(null);
       layoutRef.current = result.layout;
       setLayout(result.layout);
+      launched();
       return true;
     },
-    [dock.open, sessions, setLayout, tab]
+    [commitStart, dock.open, sessions, setLayout, tab]
   );
 
   /**
@@ -606,6 +705,112 @@ export function LocalTerminalDock({
     </Dialog>
   );
 
+  // ---- 시작 위치(#2775): 홈 · 최근 프로젝트 · 폴더 고르기 · worktree 격리 ------------
+  const choice = start.choice;
+  const choiceValue = choice.kind === "folder" ? choice.folder.path : "home";
+  const shownRecent =
+    choice.kind === "folder" && !start.recent.some((r) => r.path === choice.folder.path)
+      ? [choice.folder, ...start.recent]
+      : start.recent;
+  const availability = worktreeAvailability(choice);
+  const keepOpen = (event: Event) => event.preventDefault();
+  const selectStart = (value: string) => {
+    if (value === "home") {
+      commitStart({ choice: { kind: "home" }, recent: startRef.current.recent });
+    } else {
+      const folder = shownRecent.find((r) => r.path === value);
+      if (!folder) return;
+      commitStart({ choice: { kind: "folder", folder }, recent: startRef.current.recent });
+    }
+    // 격리는 폴더마다 새로 고른다: 다른 폴더로 옮기면 다시 끈다.
+    setWorktreeOn(false);
+    setNotice(null);
+  };
+  /** 네이티브 폴더 대화상자. 취소는 아무 일도 아니다. 거부는 이유를 한 줄로 말한다. */
+  const pickFolder = async () => {
+    const pick = startSourceRef.current?.pick ?? desktopStart.pick;
+    try {
+      const facts = await pick();
+      if (facts === null) return;
+      commitStart({
+        choice: { kind: "folder", folder: facts },
+        recent: rememberFolder(startRef.current.recent, facts),
+      });
+      setWorktreeOn(false);
+      setNotice(null);
+    } catch (error) {
+      setNotice(startErrorMessage(error));
+    }
+  };
+  const startItems = (
+    <>
+      <DropdownMenuLabel id="local-terminal-start-label" data-testid="local-terminal-start-label">
+        {`${START_COPY.heading} · ${choiceLabel(choice)}`}
+      </DropdownMenuLabel>
+      <DropdownMenuRadioGroup
+        aria-labelledby="local-terminal-start-label"
+        value={choiceValue}
+        onValueChange={selectStart}
+      >
+        <DropdownMenuRadioItem value="home" onSelect={keepOpen} data-testid="local-terminal-start-home">
+          {START_COPY.home}
+          {choiceValue === "home" ? <Check aria-hidden className="ml-auto size-4 shrink-0" /> : null}
+        </DropdownMenuRadioItem>
+        {shownRecent.length > 0 ? (
+          <DropdownMenuLabel className="pt-2">{START_COPY.recent}</DropdownMenuLabel>
+        ) : null}
+        {shownRecent.map((folder) => (
+          <DropdownMenuRadioItem
+            key={folder.path}
+            value={folder.path}
+            onSelect={keepOpen}
+            title={folder.path}
+            data-testid="local-terminal-start-recent"
+          >
+            <span className="min-w-0 truncate">{folder.name}</span>
+            <span className="ml-auto flex shrink-0 items-center gap-2 pl-4 text-meta text-ink-muted">
+              <span className="max-w-24 truncate">{parentName(folder.path)}</span>
+              {choiceValue === folder.path ? <Check aria-hidden className="size-4 text-ink" /> : null}
+            </span>
+          </DropdownMenuRadioItem>
+        ))}
+      </DropdownMenuRadioGroup>
+      <DropdownMenuItem
+        onSelect={(event) => {
+          event.preventDefault();
+          void pickFolder();
+        }}
+        data-testid="local-terminal-start-pick"
+      >
+        {START_COPY.pick}
+      </DropdownMenuItem>
+      <DropdownMenuCheckboxItem
+        layout="stack"
+        checked={worktreeOn && availability.enabled}
+        disabled={!availability.enabled}
+        onCheckedChange={setWorktreeOn}
+        onSelect={keepOpen}
+        // 꺼진 줄은 이름만 흐리게 하고 이유 줄은 또렷하게 둔다(이유가 읽혀야 한다).
+        className="data-[disabled]:opacity-100"
+        aria-describedby="local-terminal-start-worktree-note"
+        data-testid="local-terminal-start-worktree"
+      >
+        <span className={cn("flex w-full items-center gap-2", !availability.enabled && "opacity-50")}>
+          {START_COPY.worktree}
+          {worktreeOn && availability.enabled ? <Check aria-hidden className="ml-auto size-4" /> : null}
+        </span>
+        <span
+          id="local-terminal-start-worktree-note"
+          className="text-meta text-ink-muted"
+          data-testid="local-terminal-start-worktree-note"
+        >
+          {availability.enabled ? START_COPY.worktreeHint : availability.reason}
+        </span>
+      </DropdownMenuCheckboxItem>
+      <DropdownMenuSeparator />
+    </>
+  );
+
   const agentItems =
     agent && agent.candidates.length > 0 ? (
       <>
@@ -630,10 +835,20 @@ export function LocalTerminalDock({
           </DropdownMenuItem>
         ))}
       </>
-    ) : null;
+    ) : (
+      // 연결된 호스트가 없으면 섹션이 통째로 사라져 「없음」이라는 말이 어디에도 없었다
+      // (#3278). 가짜 클라우드 항목은 만들지 않고 한 줄로만 말한다.
+      <>
+        <DropdownMenuSeparator />
+        <p className="select-none px-2 py-1 text-meta text-ink-muted" data-testid="local-terminal-cloud-hint">
+          {START_COPY.cloud}
+        </p>
+      </>
+    );
 
   const newSessionItems = (
     <>
+      {startItems}
           <DropdownMenuItem
             onSelect={() => {
               pickedRef.current = true;

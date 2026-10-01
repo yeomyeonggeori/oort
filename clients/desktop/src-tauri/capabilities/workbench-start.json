@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "workbench-start",
+  "description": "Where a new session starts (ADR-0190 D3-c 증보 2026-10-01, #2775): pick a folder with the native dialog, re-check a remembered folder, and create one git worktree under ~/.oort/worktrees. For the main window's own webview (label `main`) on the bundled (local) origin only, scoped by webview like git-read.json so a child webview does not inherit it. No `remote` entry, and no `dialog:*` permission: the webview cannot open the dialog plugin itself.",
+  "webviews": [
+    "main"
+  ],
+  "platforms": [
+    "macOS",
+    "windows",
+    "linux"
+  ],
+  "permissions": [
+    "allow-workbench-folder-pick",
+    "allow-workbench-folder-inspect",
+    "allow-workbench-worktree-create"
+  ]
+}
