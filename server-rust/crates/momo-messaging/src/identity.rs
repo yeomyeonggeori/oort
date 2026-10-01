@@ -461,6 +461,10 @@ pub struct RosterMember {
     pub display_name: String,
     pub handle: String,
     pub avatar_url: Option<String>,
+    /// The uploaded avatar (ADR-0161 증보, #3277), humans only in practice.
+    /// When set it wins over the legacy bare `avatar_url`; the route turns it
+    /// into the versioned content path (`…/members/{id}/avatar/content?v={media}`).
+    pub avatar_media_id: Option<Uuid>,
     /// Workspace role (`workspace_membership.role`), not a channel role.
     pub role: Option<WorkspaceRole>,
     /// How many channels this member is currently in — **as the viewer may see
@@ -531,6 +535,7 @@ fn decode_roster_member(row: &sqlx::postgres::PgRow) -> Result<RosterMember, sql
         display_name: row.try_get("display_name")?,
         handle: row.try_get("handle")?,
         avatar_url: row.try_get("avatar_url")?,
+        avatar_media_id: row.try_get("avatar_media_id")?,
         role: role_label.as_deref().and_then(WorkspaceRole::from_db_label),
         channel_count: row.try_get("channel_count")?,
         channel_ids: row.try_get("channel_ids")?,
@@ -598,6 +603,7 @@ pub async fn list_workspace_roster(
                 m.display_name, \
                 m.handle, \
                 m.avatar_url, \
+                m.avatar_media_id, \
                 wm.role::text AS role, \
                 COALESCE(cc.channel_count, 0) AS channel_count, \
                 COALESCE(ch.channel_ids, '{}'::uuid[]) AS channel_ids, \
