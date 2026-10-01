@@ -17,7 +17,9 @@ async function waitForServer() {
   for (let i = 0; i < 60; i += 1) {
     try {
       if ((await fetch(origin)).ok) return;
-    } catch {}
+    } catch {
+      // not up yet
+    }
     await new Promise((r) => setTimeout(r, 500));
   }
   throw new Error("preview server did not start");
