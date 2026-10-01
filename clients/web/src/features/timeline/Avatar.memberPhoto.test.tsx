@@ -103,7 +103,7 @@ describe("Avatar — 업로드된 멤버 사진", () => {
   });
 
   it("다른 오리진 옛 주소는 CSP 가 막으므로 이니셜", async () => {
-    const h = await mount(member("https://cdn.example/a.png"));
+    const h = await mount(member("https://other-origin.test/a.png"));
     expect(h.querySelector("img")).toBeNull();
   });
 
