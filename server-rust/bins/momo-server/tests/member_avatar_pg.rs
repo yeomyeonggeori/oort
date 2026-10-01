@@ -206,8 +206,63 @@ async fn login(http: &reqwest::Client, base: &str, workspace: Uuid, person: &Per
         .to_string()
 }
 
-const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR-fixture-bytes";
-const PNG2: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR-second-picture";
+/// A PNG header with real dimensions (the server reads them), padded so two
+/// fixtures differ byte-for-byte.
+fn png_bytes(w: u32, h: u32, tag: &[u8]) -> Vec<u8> {
+    let mut v = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    v.extend_from_slice(&w.to_be_bytes());
+    v.extend_from_slice(&h.to_be_bytes());
+    v.extend_from_slice(&[8, 6, 0, 0, 0]);
+    v.extend_from_slice(tag);
+    v
+}
+
+fn png() -> Vec<u8> {
+    png_bytes(16, 16, b"first")
+}
+
+fn png2() -> Vec<u8> {
+    png_bytes(16, 16, b"second-picture")
+}
+
+fn gif_bytes(w: u16, h: u16) -> Vec<u8> {
+    let mut v = b"GIF89a".to_vec();
+    v.extend_from_slice(&w.to_le_bytes());
+    v.extend_from_slice(&h.to_le_bytes());
+    v.extend_from_slice(&[0, 0, 0]);
+    v
+}
+
+fn webp_vp8x(w: u32, h: u32) -> Vec<u8> {
+    let mut v = b"RIFF\x1a\0\0\0WEBPVP8X\x0a\0\0\0\0\0\0\0".to_vec();
+    v.extend_from_slice(&(w - 1).to_le_bytes()[..3]);
+    v.extend_from_slice(&(h - 1).to_le_bytes()[..3]);
+    v
+}
+
+fn webp_vp8l(w: u32, h: u32) -> Vec<u8> {
+    let mut v = b"RIFF\x1a\0\0\0WEBPVP8L\x05\0\0\0\x2f".to_vec();
+    v.extend_from_slice(&((w - 1) | ((h - 1) << 14)).to_le_bytes());
+    v.push(0);
+    v
+}
+
+fn webp_vp8(w: u16, h: u16) -> Vec<u8> {
+    let mut v = b"RIFF\x1a\0\0\0WEBPVP8 \x0a\0\0\0\x10\x02\0\x9d\x01\x2a".to_vec();
+    v.extend_from_slice(&w.to_le_bytes());
+    v.extend_from_slice(&h.to_le_bytes());
+    v
+}
+
+fn jpeg_bytes(w: u16, h: u16, sof: u8) -> Vec<u8> {
+    let mut v = vec![0xFF, 0xD8, 0xFF, sof, 0, 17, 8];
+    v.extend_from_slice(&h.to_be_bytes());
+    v.extend_from_slice(&w.to_be_bytes());
+    v.extend_from_slice(&[3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]);
+    v
+}
+
+const CACHE_IMMUTABLE: &str = "private, max-age=31536000, immutable";
 const SVG: &[u8] = b"<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>";
 
 fn base_path(workspace: Uuid) -> String {
@@ -315,8 +370,20 @@ async fn get_content(
     workspace: Uuid,
     member: Uuid,
 ) -> reqwest::Response {
+    get_content_v(http, base, token, workspace, member, None).await
+}
+
+async fn get_content_v(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    workspace: Uuid,
+    member: Uuid,
+    v: Option<&str>,
+) -> reqwest::Response {
+    let query = v.map(|v| format!("?v={v}")).unwrap_or_default();
     http.get(format!(
-        "{base}/v1/workspaces/{workspace}/members/{member}/avatar/content"
+        "{base}/v1/workspaces/{workspace}/members/{member}/avatar/content{query}"
     ))
     .bearer_auth(token)
     .send()
@@ -379,7 +446,7 @@ async fn a_member_sets_their_own_avatar_and_everyone_in_the_workspace_reads_it()
         "no avatar yet"
     );
 
-    let done = upload_avatar(&w.http, &w.base, &w.alice_token, w.ws, "image/png", PNG).await;
+    let done = upload_avatar(&w.http, &w.base, &w.alice_token, w.ws, "image/png", &png()).await;
     assert_eq!(done["status"], json!("complete"));
     assert_eq!(done["memberId"], json!(w.alice.member.to_string()));
     let media = done["id"].as_str().expect("id").to_string();
@@ -397,26 +464,82 @@ async fn a_member_sets_their_own_avatar_and_everyone_in_the_workspace_reads_it()
         Some(expected)
     );
 
-    // Another active member of the same workspace may read it.
-    let read = get_content(&w.http, &w.base, &w.bob_token, w.ws, w.alice.member).await;
+    // Another active member of the same workspace may read it — through the
+    // versioned URL the roster handed out.
+    let read = get_content_v(
+        &w.http,
+        &w.base,
+        &w.bob_token,
+        w.ws,
+        w.alice.member,
+        Some(&media),
+    )
+    .await;
     assert_eq!(read.status(), 200);
     let headers = read.headers().clone();
     assert_eq!(headers[reqwest::header::CONTENT_TYPE], "image/png");
     assert_eq!(headers[reqwest::header::X_CONTENT_TYPE_OPTIONS], "nosniff");
-    let cache = headers[reqwest::header::CACHE_CONTROL].to_str().unwrap();
-    assert!(cache.contains("immutable"), "cache-control was {cache:?}");
-    assert_eq!(read.bytes().await.expect("bytes").as_ref(), PNG);
+    assert_eq!(
+        headers[reqwest::header::CONTENT_SECURITY_POLICY],
+        "default-src 'none'; sandbox"
+    );
+    assert_eq!(headers[reqwest::header::CACHE_CONTROL], CACHE_IMMUTABLE);
+    assert_eq!(
+        read.bytes().await.expect("bytes").as_ref(),
+        png().as_slice()
+    );
 
     // A member with no avatar is a 404, not an empty 200.
     let none = get_content(&w.http, &w.base, &w.alice_token, w.ws, w.bob.member).await;
     assert_eq!(none.status(), 404);
 
     // Replacement: a new media id, a new `?v=`, the old bytes are gone.
-    let second = upload_avatar(&w.http, &w.base, &w.alice_token, w.ws, "image/png", PNG2).await;
+    let second = upload_avatar(&w.http, &w.base, &w.alice_token, w.ws, "image/png", &png2()).await;
     assert_ne!(second["id"], json!(media));
     assert_ne!(second["avatarUrl"], done["avatarUrl"], "?v= must change");
-    let read = get_content(&w.http, &w.base, &w.bob_token, w.ws, w.alice.member).await;
-    assert_eq!(read.bytes().await.expect("bytes").as_ref(), PNG2);
+    let second_media = second["id"].as_str().unwrap().to_string();
+    let read = get_content_v(
+        &w.http,
+        &w.base,
+        &w.bob_token,
+        w.ws,
+        w.alice.member,
+        Some(&second_media),
+    )
+    .await;
+    assert_eq!(
+        read.bytes().await.expect("bytes").as_ref(),
+        png2().as_slice()
+    );
+    // L-1: the replaced version's URL no longer serves anything — a stale `?v=`
+    // must never get today's bytes under yesterday's year-long cache key.
+    let stale = get_content_v(
+        &w.http,
+        &w.base,
+        &w.bob_token,
+        w.ws,
+        w.alice.member,
+        Some(&media),
+    )
+    .await;
+    assert_eq!(stale.status(), 404, "the replaced media's v is stale");
+    let forged = get_content_v(
+        &w.http,
+        &w.base,
+        &w.bob_token,
+        w.ws,
+        w.alice.member,
+        Some("garbage"),
+    )
+    .await;
+    assert_eq!(forged.status(), 404, "a v that names no media is stale");
+    // A bare fetch (no v) is served but is not cacheable-immutable.
+    let bare = get_content(&w.http, &w.base, &w.bob_token, w.ws, w.alice.member).await;
+    assert_eq!(bare.status(), 200);
+    assert_eq!(
+        bare.headers()[reqwest::header::CACHE_CONTROL],
+        "private, no-cache"
+    );
 
     // Idempotent complete: a second call answers the same row.
     let again = complete(
@@ -428,6 +551,33 @@ async fn a_member_sets_their_own_avatar_and_everyone_in_the_workspace_reads_it()
     )
     .await;
     assert_eq!(again.status(), 200);
+
+    // L-4: a *completed* upload that is no longer current is not re-pointed at.
+    // The replaced media answers 409 and Alice keeps her current avatar.
+    let before = pointer(&w.su, w.alice.member).await;
+    let replaced = complete(&w.http, &w.base, &w.alice_token, w.ws, &media).await;
+    assert_eq!(
+        replaced.status(),
+        409,
+        "a replaced upload cannot be re-completed"
+    );
+    assert_eq!(pointer(&w.su, w.alice.member).await, before);
+    // Same after a removal: the once-current media is not resurrected.
+    let removed = w
+        .http
+        .delete(format!("{}{}", w.base, base_path(w.ws)))
+        .bearer_auth(&w.alice_token)
+        .send()
+        .await
+        .expect("remove");
+    assert_eq!(removed.status(), 204);
+    let resurrect = complete(&w.http, &w.base, &w.alice_token, w.ws, &second_media).await;
+    assert_eq!(
+        resurrect.status(),
+        409,
+        "a removed avatar is not resurrected by complete"
+    );
+    assert_eq!(pointer(&w.su, w.alice.member).await, None);
 }
 
 /// SELF-ONLY. The red proof of this file.
@@ -437,7 +587,8 @@ async fn a_member_cannot_touch_another_members_avatar() {
     let w = world().await;
 
     // Alice opens an upload; Bob learns the media id and tries to finish it.
-    let alice_media = start_and_put(&w.http, &w.base, &w.alice_token, w.ws, "image/png", PNG).await;
+    let alice_media =
+        start_and_put(&w.http, &w.base, &w.alice_token, w.ws, "image/png", &png()).await;
     let hijack = complete(&w.http, &w.base, &w.bob_token, w.ws, &alice_media).await;
     assert_eq!(
         hijack.status(),
@@ -481,10 +632,10 @@ async fn a_member_cannot_touch_another_members_avatar() {
             .send()
             .await
             .expect("cross-member write");
-        assert!(
-            matches!(response.status().as_u16(), 404 | 405),
-            "{method} {path} answered {}",
-            response.status()
+        assert_eq!(
+            response.status(),
+            404,
+            "{method} {path}: no such route, so nothing to write to"
         );
     }
 
@@ -589,18 +740,222 @@ async fn the_server_refuses_bad_mimes_oversize_files_and_bytes_that_are_not_the_
         .expect("row");
     assert_eq!(status, "failed");
 
-    // Spam brake: more than ten unfinished sessions in ten minutes is a 429.
-    let mut last = 201;
-    for _ in 0..12 {
-        last = create_upload(&w.http, &w.base, &w.bob_token, w.ws, "image/png", 4)
+    // Size boundary: exactly 5 MiB is accepted, one byte more is not.
+    let exact = create_upload(
+        &w.http,
+        &w.base,
+        &w.alice_token,
+        w.ws,
+        "image/png",
+        5 * 1024 * 1024,
+    )
+    .await;
+    assert_eq!(exact.status(), 201, "exactly 5 MiB is within the ceiling");
+    let over = create_upload(
+        &w.http,
+        &w.base,
+        &w.alice_token,
+        w.ws,
+        "image/png",
+        5 * 1024 * 1024 + 1,
+    )
+    .await;
+    assert_eq!(over.status(), 413);
+}
+
+/// Complete a session for `bytes` declared as `mime` and return the response.
+async fn put_and_complete(w: &World, mime: &str, bytes: &[u8]) -> (reqwest::Response, String) {
+    let media = start_and_put(&w.http, &w.base, &w.alice_token, w.ws, mime, bytes).await;
+    (
+        complete(&w.http, &w.base, &w.alice_token, w.ws, &media).await,
+        media,
+    )
+}
+
+/// M-1 — the decode bomb. A small file whose header declares a huge canvas must
+/// not become anybody's avatar: every format's oversize case, the 4096 boundary,
+/// and headers whose dimensions cannot be read.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_header_declaring_more_than_4096_by_4096_never_becomes_an_avatar() {
+    let w = world().await;
+    let oversize: Vec<(&str, &str, Vec<u8>)> = vec![
+        ("png wide", "image/png", png_bytes(4097, 16, b"x")),
+        ("png tall", "image/png", png_bytes(16, 4097, b"x")),
+        ("png huge", "image/png", png_bytes(u32::MAX, u32::MAX, b"x")),
+        ("gif", "image/gif", gif_bytes(4097, 16)),
+        ("gif max", "image/gif", gif_bytes(u16::MAX, u16::MAX)),
+        ("webp vp8x", "image/webp", webp_vp8x(4097, 16)),
+        (
+            "webp vp8x huge",
+            "image/webp",
+            webp_vp8x(16_777_216, 16_777_216),
+        ),
+        ("webp vp8l", "image/webp", webp_vp8l(4097, 16)),
+        ("webp vp8", "image/webp", webp_vp8(16_383, 16)),
+        ("jpeg sof0", "image/jpeg", jpeg_bytes(4097, 16, 0xC0)),
+        ("jpeg sof2", "image/jpeg", jpeg_bytes(16, 4097, 0xC2)),
+        (
+            "jpeg max",
+            "image/jpeg",
+            jpeg_bytes(u16::MAX, u16::MAX, 0xC0),
+        ),
+    ];
+    for (label, mime, bytes) in oversize {
+        let (response, media) = put_and_complete(&w, mime, &bytes).await;
+        assert_eq!(
+            response.status(),
+            422,
+            "{label}: oversize header must be refused"
+        );
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM member_avatar_media WHERE id = $1")
+                .bind(Uuid::parse_str(&media).unwrap())
+                .fetch_one(&w.su)
+                .await
+                .expect("row");
+        assert_eq!(status, "failed", "{label}: the upload is marked failed");
+        assert_eq!(
+            pointer(&w.su, w.alice.member).await,
+            None,
+            "{label}: no avatar set"
+        );
+    }
+
+    // Unreadable dimensions are a refusal, not a pass: right magic number, no
+    // IHDR / no SOF / truncated.
+    let mut no_ihdr = png_bytes(16, 16, b"x");
+    no_ihdr[12..16].copy_from_slice(b"IDAT");
+    let unreadable: Vec<(&str, &str, Vec<u8>)> = vec![
+        ("png without IHDR", "image/png", no_ihdr),
+        (
+            "png truncated",
+            "image/png",
+            b"\x89PNG\r\n\x1a\n\0\0".to_vec(),
+        ),
+        (
+            "jpeg without SOF",
+            "image/jpeg",
+            vec![0xFF, 0xD8, 0xFF, 0xDA, 0, 4, 0, 0],
+        ),
+        ("png zero width", "image/png", png_bytes(0, 16, b"x")),
+    ];
+    for (label, mime, bytes) in unreadable {
+        let (response, _) = put_and_complete(&w, mime, &bytes).await;
+        assert_eq!(
+            response.status(),
+            422,
+            "{label}: unreadable dimensions are refused"
+        );
+    }
+    assert_eq!(pointer(&w.su, w.alice.member).await, None);
+
+    // The boundary itself, and a normal one per format, still succeed.
+    for (label, mime, bytes) in [
+        ("png 4096", "image/png", png_bytes(4096, 4096, b"edge")),
+        ("gif", "image/gif", gif_bytes(64, 64)),
+        ("webp vp8x", "image/webp", webp_vp8x(512, 512)),
+        ("jpeg sof2", "image/jpeg", jpeg_bytes(640, 480, 0xC2)),
+    ] {
+        let (response, _) = put_and_complete(&w, mime, &bytes).await;
+        assert_eq!(
+            response.status(),
+            200,
+            "{label} within the ceiling completes"
+        );
+    }
+}
+
+/// M-2 — the hourly session limit counts every status and cannot be beaten by a
+/// burst. 20 are allowed; the rest are 429, whether they arrive one by one or all
+/// at once.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn the_hourly_upload_limit_counts_every_status_and_holds_under_a_burst() {
+    let w = world().await;
+
+    // Serial: 1 complete + 1 failed (svg bytes under a png label) + 18 pending
+    // = 20 sessions of three different statuses; the 21st is refused.
+    let (done, _) = put_and_complete(&w, "image/png", &png()).await;
+    assert_eq!(done.status(), 200);
+    let (bad, _) = put_and_complete(&w, "image/png", SVG).await;
+    assert_eq!(bad.status(), 409);
+    for i in 0..18 {
+        let r = create_upload(&w.http, &w.base, &w.alice_token, w.ws, "image/png", 4).await;
+        assert_eq!(r.status(), 201, "session {i} is within the limit");
+    }
+    let refused = create_upload(&w.http, &w.base, &w.alice_token, w.ws, "image/png", 4).await;
+    assert_eq!(refused.status(), 429, "complete and failed rows count too");
+    let rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM member_avatar_media WHERE member_id = $1")
+            .bind(w.alice.member)
+            .fetch_one(&w.su)
             .await
-            .status()
-            .as_u16();
-        if last == 429 {
-            break;
+            .expect("count");
+    assert_eq!(rows, 20, "the refused request reserved nothing");
+
+    // Burst: 40 simultaneous requests from a fresh member — exactly 20 get in.
+    let mut tasks = Vec::new();
+    for _ in 0..40 {
+        let (http, base, token, ws) = (w.http.clone(), w.base.clone(), w.bob_token.clone(), w.ws);
+        tasks.push(tokio::spawn(async move {
+            create_upload(&http, &base, &token, ws, "image/png", 4)
+                .await
+                .status()
+                .as_u16()
+        }));
+    }
+    let mut created = 0;
+    let mut limited = 0;
+    for task in tasks {
+        match task.await.expect("join") {
+            201 => created += 1,
+            429 => limited += 1,
+            other => panic!("unexpected status {other}"),
         }
     }
-    assert_eq!(last, 429, "unfinished upload sessions are rate limited");
+    assert_eq!(
+        (created, limited),
+        (20, 20),
+        "a burst cannot overshoot the hourly limit"
+    );
+    let rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM member_avatar_media WHERE member_id = $1")
+            .bind(w.bob.member)
+            .fetch_one(&w.su)
+            .await
+            .expect("count");
+    assert_eq!(rows, 20);
+}
+
+/// L-3 — guests may set their own picture ("everyone can set their own"); they
+/// still cannot reach anyone else's.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_guest_may_set_and_remove_their_own_avatar_only() {
+    let w = world().await;
+    let guest = seed_person(&w.su, w.ws, "guest").await;
+    let guest_token = login(&w.http, &w.base, w.ws, &guest).await;
+
+    let done = upload_avatar(&w.http, &w.base, &guest_token, w.ws, "image/png", &png()).await;
+    assert_eq!(done["memberId"], json!(guest.member.to_string()));
+    assert!(pointer(&w.su, guest.member).await.is_some());
+
+    // …but a guest cannot finish a member's upload.
+    let alice_media =
+        start_and_put(&w.http, &w.base, &w.alice_token, w.ws, "image/png", &png2()).await;
+    let hijack = complete(&w.http, &w.base, &guest_token, w.ws, &alice_media).await;
+    assert_eq!(hijack.status(), 404);
+
+    let removed = w
+        .http
+        .delete(format!("{}{}", w.base, base_path(w.ws)))
+        .bearer_auth(&guest_token)
+        .send()
+        .await
+        .expect("guest removes");
+    assert_eq!(removed.status(), 204);
+    assert_eq!(pointer(&w.su, guest.member).await, None);
 }
 
 /// Remove, and the legacy `avatar_url` decision (D-M4).
@@ -619,7 +974,7 @@ async fn remove_clears_the_avatar_and_the_legacy_url_is_the_fallback() {
         "no upload: the legacy column is shown unchanged"
     );
 
-    let done = upload_avatar(&w.http, &w.base, &w.alice_token, w.ws, "image/png", PNG).await;
+    let done = upload_avatar(&w.http, &w.base, &w.alice_token, w.ws, "image/png", &png()).await;
     assert_eq!(
         roster_avatar(&w.http, &w.base, &w.bob_token, w.ws, w.alice.member).await,
         done["avatarUrl"].as_str().map(str::to_string),
@@ -667,7 +1022,7 @@ async fn remove_clears_the_avatar_and_the_legacy_url_is_the_fallback() {
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
 async fn another_workspace_cannot_read_or_see_the_avatar() {
     let w = world().await;
-    upload_avatar(&w.http, &w.base, &w.alice_token, w.ws, "image/png", PNG).await;
+    upload_avatar(&w.http, &w.base, &w.alice_token, w.ws, "image/png", &png()).await;
 
     let other_ws = seed_workspace(&w.su).await;
     let outsider = seed_person(&w.su, other_ws, "owner").await;

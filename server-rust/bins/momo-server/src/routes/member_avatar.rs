@@ -30,18 +30,17 @@
 //!   `?v={media}`, so the proxy answers `private, max-age=…, immutable`.
 
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use momo_auth::Principal;
-use momo_drive::MAX_ATTACHMENT_BYTES;
 use momo_messaging::{
-    active_workspace_role, clear_own_member_avatar_in_tx,
-    count_recent_pending_member_avatar_uploads_in_tx, create_pending_member_avatar_upload_in_tx,
-    load_own_member_avatar_media_in_tx, read_current_member_avatar_media_in_tx,
-    settle_member_avatar_upload_in_tx, sniff_image_mime, validate_avatar_name,
-    validate_member_avatar_mime, MemberAvatarMedia, IMAGE_SNIFF_PREFIX_BYTES,
+    activate_member_avatar_upload_in_tx, active_workspace_role, clear_own_member_avatar_in_tx,
+    image_dimensions, load_own_member_avatar_media_in_tx, read_current_member_avatar_media_in_tx,
+    reserve_member_avatar_upload_in_tx, settle_member_avatar_upload_in_tx, sniff_image_mime,
+    validate_avatar_name, validate_member_avatar_mime, MemberAvatarMedia,
+    IMAGE_HEADER_PREFIX_BYTES, MAX_MEMBER_AVATAR_DIMENSION, MAX_MEMBER_AVATAR_UPLOADS_PER_HOUR,
     MAX_WORKSPACE_AVATAR_BYTES,
 };
 use uuid::Uuid;
@@ -56,9 +55,6 @@ use crate::routes::shared::{
 use crate::AppState;
 
 const HUMANS_ONLY: &str = "only a human member can change their profile picture";
-
-/// At most this many unfinished upload sessions per member per ten minutes.
-const MAX_RECENT_PENDING_UPLOADS: i64 = 10;
 
 /// The versioned content path of a member's avatar. `?v={media}` changes on every
 /// replacement, so an `immutable` cache entry is never stale.
@@ -147,8 +143,12 @@ pub async fn create_upload(
     let member_id = principal.member_id;
     let via_token_id = audit_via_token_id(&principal);
 
-    // Membership + the spam brake in one short read, before the Drive round trip.
-    let gate: DbRejectable<()> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+    // Membership, the rate limit and the reservation row in ONE transaction,
+    // serialized behind a lock on the caller's member row — so a burst of
+    // concurrent requests cannot overshoot the hourly limit. The Drive round trip
+    // happens after this commits (a network call must not hold a connection).
+    let (reserve_name, reserve_mime, reserve_size) = (name.clone(), mime.clone(), request.size);
+    let reserved: DbRejectable<Uuid> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
             if active_workspace_role(conn, workspace_id, member_id)
                 .await?
@@ -156,23 +156,34 @@ pub async fn create_upload(
             {
                 return Ok(Err(ApiError::forbidden("not a workspace member")));
             }
-            let pending =
-                count_recent_pending_member_avatar_uploads_in_tx(conn, workspace_id, member_id)
-                    .await?;
-            if pending >= MAX_RECENT_PENDING_UPLOADS {
-                return Ok(Err(ApiError::new(
+            match reserve_member_avatar_upload_in_tx(
+                conn,
+                workspace_id,
+                member_id,
+                &reserve_name,
+                &reserve_mime,
+                reserve_size,
+            )
+            .await?
+            {
+                Some(id) => Ok(Ok(id)),
+                None => Ok(Err(ApiError::new(
                     StatusCode::TOO_MANY_REQUESTS,
-                    "too many unfinished avatar uploads; try again in a few minutes",
-                )));
+                    format!(
+                        "at most {MAX_MEMBER_AVATAR_UPLOADS_PER_HOUR} avatar uploads per hour; \
+                         try again later"
+                    ),
+                ))),
             }
-            Ok(Ok(()))
         })
     })
     .await;
-    settle_db("member_avatar.create_upload.gate", gate)?;
+    let media_id = settle_db("member_avatar.create_upload.reserve", reserved)?;
 
-    // The Drive session is created OUTSIDE any transaction. The workspace id is
-    // the Drive folder scope, as for the workspace avatar.
+    // The Drive session is created OUTSIDE any transaction. If it fails, the
+    // reservation stays `failed` (it still counts against the limit) and there
+    // is no Drive object to reap. The workspace id is the Drive folder scope, as
+    // for the workspace avatar.
     let session = state
         .drive
         .create_resumable_upload(workspace_id, &name, &mime, request.size)
@@ -181,24 +192,29 @@ pub async fn create_upload(
     let upload_url =
         state.advertised_local_upload_url(&headers, uri.scheme_str(), session.upload_url)?;
 
-    let created: DbRejectable<Uuid> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+    let activated: DbRejectable<bool> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
-            let id = create_pending_member_avatar_upload_in_tx(
+            Ok(Ok(activate_member_avatar_upload_in_tx(
                 conn,
                 workspace_id,
                 member_id,
+                media_id,
                 via_token_id,
                 &session.drive_file_id,
                 &name,
                 &mime,
                 request.size,
             )
-            .await?;
-            Ok(Ok(id))
+            .await?))
         })
     })
     .await;
-    let media_id = settle_db("member_avatar.create_upload", created)?;
+    if !settle_db("member_avatar.create_upload.activate", activated)? {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "avatar upload reservation was not found",
+        ));
+    }
 
     Ok((
         StatusCode::CREATED,
@@ -228,11 +244,11 @@ pub async fn complete(
     let via_token_id = audit_via_token_id(&principal);
     require_active_member(&state, workspace_id, member_id).await?;
 
-    let pending: DbRejectable<MemberAvatarMedia> =
+    let loaded: DbRejectable<(MemberAvatarMedia, bool)> =
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
                 // Owner-scoped: an upload someone else started is invisible (404).
-                match load_own_member_avatar_media_in_tx(
+                let Some(media) = load_own_member_avatar_media_in_tx(
                     conn,
                     media_id,
                     workspace_id,
@@ -240,17 +256,29 @@ pub async fn complete(
                     false,
                 )
                 .await?
-                {
-                    None => Ok(Err(ApiError::not_found("avatar upload not found"))),
-                    Some(media) => Ok(Ok(media)),
-                }
+                else {
+                    return Ok(Err(ApiError::not_found("avatar upload not found")));
+                };
+                let current = read_current_member_avatar_media_in_tx(conn, workspace_id, member_id)
+                    .await?
+                    .is_some_and(|current| current.id == media.id);
+                Ok(Ok((media, current)))
             })
         })
         .await;
-    let pending = settle_db("member_avatar.complete.load", pending)?;
+    let (pending, is_current) = settle_db("member_avatar.complete.load", loaded)?;
 
     if pending.status == "complete" {
-        return Ok(Json(response(&pending, "complete")));
+        // Idempotent only for the avatar that is *still* current. A completed
+        // upload that has since been replaced or removed answers 409 and does
+        // NOT silently re-point the member at an old picture (L-4): upload again.
+        if is_current {
+            return Ok(Json(response(&pending, "complete")));
+        }
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "avatar upload is no longer your current avatar; upload it again",
+        ));
     }
     let Some(drive_file_id) = pending
         .drive_file_id
@@ -273,19 +301,36 @@ pub async fn complete(
         && metadata.mime == pending.mime
         && metadata.drive_file_id == drive_file_id;
     let mut actual_mime = metadata.mime.clone();
-    // … and so must the bytes themselves. Only worth a Drive read if the cheap
-    // checks passed.
+    let mut refusal: Option<(StatusCode, &'static str)> = None;
+    // … and so must the bytes themselves — the magic number AND the pixel
+    // dimensions from the header (a 5 MiB file may still decode to gigabytes).
+    // Only worth a Drive read if the cheap checks passed. Unknown or unparsable
+    // dimensions are a refusal, not a pass.
     if matched {
         let prefix = state
             .drive
-            .file_content(&drive_file_id, MAX_ATTACHMENT_BYTES)
+            .file_content(&drive_file_id, MAX_WORKSPACE_AVATAR_BYTES)
             .await
             .map_err(drive_error)?
-            .read_prefix(IMAGE_SNIFF_PREFIX_BYTES)
+            .read_prefix(IMAGE_HEADER_PREFIX_BYTES)
             .await
             .map_err(drive_error)?;
         match sniff_image_mime(&prefix) {
-            Some(sniffed) if sniffed == pending.mime => {}
+            Some(sniffed) if sniffed == pending.mime => match image_dimensions(sniffed, &prefix) {
+                Some((w, h))
+                    if w <= MAX_MEMBER_AVATAR_DIMENSION && h <= MAX_MEMBER_AVATAR_DIMENSION => {}
+                other => {
+                    matched = false;
+                    actual_mime = match other {
+                        Some((w, h)) => format!("{sniffed};dimensions={w}x{h}"),
+                        None => format!("{sniffed};dimensions=unreadable"),
+                    };
+                    refusal = Some((
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "avatar dimensions must be readable and at most 4096x4096",
+                    ));
+                }
+            },
             other => {
                 matched = false;
                 actual_mime = other.unwrap_or("unrecognized").to_string();
@@ -341,10 +386,11 @@ pub async fn complete(
     let settled = settle_db("member_avatar.complete", settled)?;
 
     if !matched {
-        return Err(ApiError::new(
+        let (status, message) = refusal.unwrap_or((
             StatusCode::CONFLICT,
             "uploaded file size, mime or content does not match",
         ));
+        return Err(ApiError::new(status, message));
     }
     Ok(Json(response(&settled, "complete")))
 }
@@ -379,6 +425,12 @@ pub async fn remove(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// The `?v={media}` cache key (see [`member_avatar_url`]).
+#[derive(Debug, serde::Deserialize)]
+pub struct ContentQuery {
+    v: Option<String>,
+}
+
 /// `GET /v1/workspaces/{ws}/members/{member}/avatar/content`
 ///
 /// The authorization proxy. **Any active workspace member** may read any member's
@@ -389,6 +441,7 @@ pub async fn content(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path((workspace, member)): Path<(String, String)>,
+    Query(query): Query<ContentQuery>,
 ) -> Result<Response, ApiError> {
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let target_member = path_uuid(&member, "invalid member id")?;
@@ -414,6 +467,17 @@ pub async fn content(
         .await;
     let media = settle_db("member_avatar.content", found)?;
 
+    // L-1: the `immutable` year-long cache is only safe when the URL names the
+    // bytes. A `v` that is not the *current* media id (stale, forged or garbage)
+    // is a 404 — it must never get today's bytes cached under yesterday's key.
+    // No `v` at all is a legitimate bare fetch: served, but revalidated, not
+    // cached for a year.
+    let cache_control = match query.v.as_deref() {
+        Some(v) if v == media.id.to_string() => "private, max-age=31536000, immutable",
+        Some(_) => return Err(ApiError::not_found("avatar version is not current")),
+        None => "private, no-cache",
+    };
+
     let Some(drive_file_id) = media.drive_file_id.filter(|_| media.status == "complete") else {
         return Err(ApiError::not_found("member has no avatar"));
     };
@@ -436,10 +500,7 @@ pub async fn content(
             header::CONTENT_SECURITY_POLICY,
             "default-src 'none'; sandbox",
         )
-        .header(
-            header::CACHE_CONTROL,
-            "private, max-age=31536000, immutable",
-        )
+        .header(header::CACHE_CONTROL, cache_control)
         .body(Body::from_stream(archived.body))
         .map_err(|error| ApiError::internal("member_avatar.content.response", error))
 }

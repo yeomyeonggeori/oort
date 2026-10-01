@@ -1463,8 +1463,9 @@ paths:
         another member. Bytes bypass this server (ADR-0151): the client PUTs them to
         the returned capability URL, then calls `complete`. `mime` must be
         `image/png`, `image/jpeg`, `image/webp` or `image/gif` (SVG is refused);
-        `size` is 1 byte to 5 MiB. At most 10 unfinished sessions per member per ten
-        minutes (429). Agent bearers are 403 (not on the agent-route allow-list).
+        `size` is 1 byte to 5 MiB. At most 20 sessions per member per hour, counting
+        every status (429); the check and the reservation are serialized per member,
+        so a burst cannot exceed it. Guests may set their own avatar. Agent bearers are 403 (not on the agent-route allow-list).
       security: [{bearerAuth: []}]
       parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
       requestBody:
@@ -1507,7 +1508,11 @@ paths:
         file's own magic number against the declared mime, then points the caller's
         member row at the new media. A mismatch commits the row as `failed` and
         answers 409. Only the member who opened the session can complete it: another
-        member's media id answers 404. Idempotent.
+        member's media id answers 404. Idempotent for the avatar that is still
+        current; a completed upload that has since been replaced or removed answers
+        409 and is not re-pointed at. The pixel dimensions are read from the header
+        and must be readable and at most 4096x4096, else 422 (the row is marked
+        `failed`).
       security: [{bearerAuth: []}]
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
@@ -1522,7 +1527,10 @@ paths:
           description: No such upload for this caller (including another member's upload).
           content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
         "409":
-          description: Size, mime or content does not match, or the upload is in a state that cannot complete.
+          description: Size, mime or content does not match; the upload is in a state that cannot complete; or it completed earlier but is no longer the current avatar.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+        "422":
+          description: Image dimensions are unreadable or exceed 4096x4096.
           content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
 
   /v1/workspaces/{workspaceId}/members/me/avatar:
@@ -1552,8 +1560,9 @@ paths:
         the timeline and roster). Served with the stored image mime,
         `nosniff`, `Content-Security-Policy: default-src 'none'; sandbox` and
         `Cache-Control: private, max-age=31536000, immutable`; the roster URL's
-        `?v={media}` changes on replacement so a cached copy is never stale. The `v`
-        query parameter is a cache key and is not interpreted.
+        `?v={media}` changes on replacement so a cached copy is never stale. A `v`
+        that is not the member's current media id answers 404; with no `v` the
+        bytes are served with `Cache-Control: private, no-cache`.
       security: [{bearerAuth: []}]
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
@@ -10993,7 +11002,8 @@ components:
             Resolved avatar: the versioned content path of the member's uploaded
             picture when set (ADR-0161 amendment, #3277), otherwise the legacy
             `member.avatar_url` value, otherwise absent. Fetch the content path with
-            the bearer; it is not loadable by a bare `<img src>`.
+            the bearer; it is not loadable by a bare `<img src>`. A legacy value is an
+            arbitrary string: render it with `referrerpolicy="no-referrer"`.
         role:
           $ref: "#/components/schemas/MembershipRole"
         channelCount:
