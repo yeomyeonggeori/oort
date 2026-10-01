@@ -63,7 +63,7 @@ describe("derivePaneStatus (#2776, 제안서 §3.4)", () => {
 describe("attentionTransitions: 알림은 상태가 새로 될 때 한 번", () => {
   const m = (entries: [string, SessionStatus][]) => new Map(entries);
 
-  it("나를 기다림·끝남으로 바뀐 칸만", () => {
+  it("응답 필요·끝남으로 바뀐 칸만", () => {
     const prev = m([
       ["a", "running"],
       ["b", "running"],
@@ -102,7 +102,7 @@ describe("attentionTransitions: 알림은 상태가 새로 될 때 한 번", () 
 
   it("알림 문구는 칸 번호·이름과 이유만", () => {
     expect(attentionCopy("waiting", { index: 3, name: "claude" }, "waiting-permission")).toEqual({
-      title: "나를 기다림",
+      title: "응답 필요",
       body: "3번 칸 · claude: 실행 허락을 기다려요",
     });
     expect(attentionCopy("done", { index: 1, name: "codex" }, "turn-done")).toEqual({

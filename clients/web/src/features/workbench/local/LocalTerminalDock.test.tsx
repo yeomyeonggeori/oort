@@ -233,7 +233,7 @@ describe("터미널 입력이 먼저", () => {
     const { input } = await openWithPane();
     key(input, { code: "KeyJ", key: "J", ctrlKey: true, shiftKey: true });
     await vi.waitFor(() =>
-      expect(q("workbench-notice")?.textContent).toBe("나를 기다리는 칸이 없습니다.")
+      expect(q("workbench-notice")?.textContent).toBe("응답이 필요한 칸이 없습니다.")
     );
   });
 });
@@ -377,10 +377,10 @@ describe("세션 목록 (#2856)", () => {
     );
   });
 
-  it("필터 「나를 기다림」은 한 줄 + 「전부 보기」, 묶기 선택은 기억한다", async () => {
+  it("필터 「응답 필요」는 한 줄 + 「전부 보기」, 묶기 선택은 기억한다", async () => {
     await mountTwo();
     act(() => q("session-list-filter-waiting")!.click());
-    expect(q("session-list-empty")?.textContent).toContain("나를 기다리는 세션이 없습니다.");
+    expect(q("session-list-empty")?.textContent).toContain("응답이 필요한 세션이 없습니다.");
     expect(q("session-list-filter-waiting")?.getAttribute("aria-pressed")).toBe("true");
     act(() => q("session-list-show-all")!.click());
     expect(rows()).toHaveLength(2);
@@ -413,7 +413,7 @@ describe("세션 목록 (#2856)", () => {
     expect(pane("p2").hasAttribute("data-waiting")).toBe(false);
     signal(2, "waiting-permission");
     await vi.waitFor(() => expect(pane("p2").hasAttribute("data-waiting")).toBe(true));
-    expect(pane("p2").getAttribute("aria-label")).toContain("나를 기다림");
+    expect(pane("p2").getAttribute("aria-label")).toContain("응답 필요");
     expect(pane("p2").querySelector("[data-testid='workbench-pane-waiting']")?.textContent).toContain(
       "실행 허락을 기다려요"
     );
@@ -432,7 +432,7 @@ describe("세션 목록 (#2856)", () => {
     expect(pane("p2").querySelector("[data-testid='status-mark']")?.getAttribute("data-status")).toBe("done");
     // 이제 기다리는 칸이 없다.
     key(document.body, { code: "KeyJ", key: "J", ctrlKey: true, shiftKey: true });
-    await vi.waitFor(() => expect(q("workbench-notice")?.textContent).toBe("나를 기다리는 칸이 없습니다."));
+    await vi.waitFor(() => expect(q("workbench-notice")?.textContent).toBe("응답이 필요한 칸이 없습니다."));
   });
 
 });

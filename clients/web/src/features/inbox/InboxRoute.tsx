@@ -109,7 +109,7 @@ const EMPTY_COPY: Record<InboxFilter, { headline: string; detail: string }> = {
 
 /**
  * 결정 대기가 비었는데 이 기기의 칸이 회원님을 기다릴 때(#2776, design-review H1).
- * 「결정할 일이 없습니다」는 위의 「나를 기다림」 줄과 모순이다. 비어 있는 것은
+ * 「결정할 일이 없습니다」는 위의 「응답 필요」 줄과 모순이다. 비어 있는 것은
  * 서버 원장의 승인뿐이라고 좁혀 말한다.
  */
 const EMPTY_WITH_LOCAL_WAITING = {
@@ -184,7 +184,7 @@ function FeedPanel({
 }: {
   filter: InboxFilter;
   feed: Feed;
-  /** 이 기기에서 「나를 기다림」인 칸 수(#2776). 결정 대기의 빈 문구를 좁힌다. */
+  /** 이 기기에서 「응답 필요」인 칸 수(#2776). 결정 대기의 빈 문구를 좁힌다. */
   localWaiting?: number;
   onMarkRead?: (item: FeedItem) => void;
   renderActions?: (item: FeedItem) => ReactNode;
@@ -424,7 +424,7 @@ export function InboxRoute() {
         )}
       </header>
 
-      {/* 이 기기의 칸(#2776): 로컬 칸의 「나를 기다림」·「끝남」. 데스크탑에만 있다. */}
+      {/* 이 기기의 칸(#2776): 로컬 칸의 「응답 필요」·「끝남」. 데스크탑에만 있다. */}
       {isDesktop() ? <LocalPaneInbox /> : null}
 
       {/* tone이 판정에서 온다. `InlineBanner`는 error면 role="alert"+--danger,

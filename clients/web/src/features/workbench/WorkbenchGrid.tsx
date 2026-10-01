@@ -64,10 +64,10 @@ export interface WorkbenchPaneInfo {
 export interface PaneStatusView {
   /** 머리에 그릴 표지. */
   mark: ReactNode;
-  /** 표지의 글자(「나를 기다림」 등). 칸의 접근 이름에 붙는다. */
+  /** 표지의 글자(「응답 필요」 등). 칸의 접근 이름에 붙는다. */
   label: string;
   /**
-   * 「나를 기다림」: 칸에 신호색 테두리를 두르고 바닥 띠를 그린다(시안 ① `.pane.wait`
+   * 「응답 필요」: 칸에 신호색 테두리를 두르고 바닥 띠를 그린다(시안 ① `.pane.wait`
    * · `.pwait`). null이면 기다리지 않는다.
    */
   waiting: {
@@ -121,7 +121,7 @@ export interface WorkbenchGridProps {
    */
   onRequestClose?: (paneId: PaneId, close: () => void) => void;
   /**
-   * 호스트의 알림 한 줄(#2774 도크: 새 세션 거부, 「나를 기다림」 없음). 격자의
+   * 호스트의 알림 한 줄(#2774 도크: 새 세션 거부, 「응답 필요」 없음). 격자의
    * 상태 줄 자리에 뜬다. 상태 줄은 늘 있으므로 알림이 떠도 칸 높이가 바뀌지
    * 않는다(PTY 크기 변경 없음). 격자 자신의 거부 문구가 먼저다.
    */
@@ -555,7 +555,7 @@ function Splitter({
       onDoubleClick={() => ctx.onToggleRatio(split.id)}
       onKeyDown={onKeyDown}
       className={cn(
-        "group flex shrink-0 touch-none select-none items-center justify-center rounded-full focus-visible:focus-ring",
+        "group flex shrink-0 touch-none select-none items-center justify-center focus-visible:focus-ring",
         row ? "w-2 cursor-col-resize" : "h-2 cursor-row-resize",
         hidden && "invisible"
       )}
@@ -563,9 +563,9 @@ function Splitter({
       <span
         aria-hidden
         className={cn(
-          "rounded-full bg-line transition-colors group-hover:bg-line-strong",
-          row ? "h-8 w-px" : "h-px w-8",
-          dragging && "bg-line-strong"
+          "bg-line-strong transition-colors group-hover:bg-ink-muted",
+          row ? "h-full w-px" : "h-px w-full",
+          dragging && "bg-ink-muted"
         )}
       />
     </div>
@@ -613,21 +613,16 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
         if (!focused) ctx.onFocusPane(id);
       }}
       className={cn(
-        "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-surface",
-        // 신호색 링은 「키가 여기로 간다」는 뜻이다. 격자가 실제로 포커스를 가질
-        // 때만 그린다. 아니면 활성 칸은 진한 테두리와 머리 채움으로만 조용히 표시한다.
-        focused ? "border-line-strong group-focus-within/wb:focus-ring" : "border-line",
+        // #3279: 카드 테두리·둥근 모서리 없음. 칸 사이는 얇은 구분선(Splitter)이
+        // 가른다. 신호색은 「응답 필요」 칸만 쓴다(workbench.css `.wb-waiting`).
+        // 활성 칸은 머리 글자만 진해지고, 격자가 포커스를 가질 때 안쪽 가는 선이 붙는다.
+        "group/pane flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface",
         maximized && "wb-maximized",
         waiting && "wb-waiting",
         covered && "invisible"
       )}
     >
-      <header
-        className={cn(
-          "@container flex h-control shrink-0 items-center gap-2 border-b border-line pl-3 pr-1",
-          focused ? "bg-surface" : "bg-surface-muted"
-        )}
-      >
+      <header className="@container flex h-control-sm shrink-0 items-center gap-2 pl-3 pr-1">
         <span
           data-numeric
           className={cn(
@@ -636,15 +631,6 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
           )}
         >
           {index}
-        </span>
-        <span
-          title={title}
-          className={cn(
-            "min-w-0 flex-1 truncate text-meta",
-            focused ? "font-medium text-ink" : "text-ink-muted"
-          )}
-        >
-          {title}
         </span>
         {lane ? (
           <span
@@ -661,52 +647,70 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
             <span className="hidden @sm:inline">{lane.label}</span>
           </span>
         ) : null}
+        <span
+          title={title}
+          className={cn(
+            "min-w-0 flex-1 truncate text-meta",
+            focused ? "font-medium text-ink" : "text-ink-muted"
+          )}
+        >
+          {title}
+        </span>
         {/* 상태 글자는 칸의 접근 이름에 이미 있다. 표지는 모양만(design-review N3). */}
         {status ? (
           <span aria-hidden className="flex shrink-0 items-center">
             {status.mark}
           </span>
         ) : null}
-        <PaneButton
-          label="오른쪽으로 분할"
-          platform={platform}
-          keycap="⌘D"
-          narrowHidden
-          disabled={!canRight}
-          onClick={() => ctx.onSplit(id, "row")}
+        {/* #3279: 단추는 호버·포커스·최대화 때만 보인다. DOM에는 항상 있어 Tab으로
+            닿고(단추에 키보드 포커스가 오면 has-[:focus-visible]로 드러난다. 터미널이 쥔 포커스는
+            이 묶음 밖이라 활성 칸이라고 늘 보이지는 않는다), 숨은 동안은 포인터를
+            받지 않는다. 터치(hover: none)에는 호버가 없으니 늘 보인다. 단축키는 그대로다. */}
+        <span
+          data-testid="workbench-pane-actions"
+          className="flex shrink-0 items-center opacity-0 pointer-events-none transition-opacity group-hover/pane:pointer-events-auto group-hover/pane:opacity-100 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100 group-data-[maximized]/pane:pointer-events-auto group-data-[maximized]/pane:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100 motion-reduce:transition-none"
         >
-          <Columns2 />
-        </PaneButton>
-        <PaneButton
-          label="아래로 분할"
-          platform={platform}
-          keycap="⌘⇧D"
-          narrowHidden
-          disabled={!canDown}
-          onClick={() => ctx.onSplit(id, "column")}
-        >
-          <Rows2 />
-        </PaneButton>
-        <PaneButton
-          label={userMaximized ? "최대화 끄기" : "칸 최대화"}
-          platform={platform}
-          keycap="⌘⇧↵"
-          disabled={ctx.single || (ctx.cramped && !userMaximized)}
-          disabledReason={ctx.cramped && !userMaximized ? "자리가 좁아 지금은 한 칸만 보입니다" : undefined}
-          pressed={userMaximized}
-          onClick={() => ctx.onMaximize(id)}
-        >
-          {userMaximized ? <Minimize2 /> : <Maximize2 />}
-        </PaneButton>
-        <PaneButton
-          label="칸 닫기"
-          platform={platform}
-          keycap="⌘W"
-          disabled={ctx.single}
-          onClick={() => ctx.onClose(id)}
-        >
-          <X />
-        </PaneButton>
+          <PaneButton
+            label="오른쪽으로 분할"
+            platform={platform}
+            keycap="⌘D"
+            narrowHidden
+            disabled={!canRight}
+            onClick={() => ctx.onSplit(id, "row")}
+          >
+            <Columns2 />
+          </PaneButton>
+          <PaneButton
+            label="아래로 분할"
+            platform={platform}
+            keycap="⌘⇧D"
+            narrowHidden
+            disabled={!canDown}
+            onClick={() => ctx.onSplit(id, "column")}
+          >
+            <Rows2 />
+          </PaneButton>
+          <PaneButton
+            label={userMaximized ? "최대화 끄기" : "칸 최대화"}
+            platform={platform}
+            keycap="⌘⇧↵"
+            disabled={ctx.single || (ctx.cramped && !userMaximized)}
+            disabledReason={ctx.cramped && !userMaximized ? "자리가 좁아 지금은 한 칸만 보입니다" : undefined}
+            pressed={userMaximized}
+            onClick={() => ctx.onMaximize(id)}
+          >
+            {userMaximized ? <Minimize2 /> : <Maximize2 />}
+          </PaneButton>
+          <PaneButton
+            label="칸 닫기"
+            platform={platform}
+            keycap="⌘W"
+            disabled={ctx.single}
+            onClick={() => ctx.onClose(id)}
+          >
+            <X />
+          </PaneButton>
+        </span>
       </header>
       <div className="flex min-h-0 flex-1 flex-col">
         {ctx.renderPane ? ctx.renderPane(info) : <EmptyPane />}

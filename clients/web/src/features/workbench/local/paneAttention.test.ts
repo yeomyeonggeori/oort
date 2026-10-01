@@ -5,7 +5,7 @@ import { defaultWorkbenchLayout, focusPane, splitPane } from "@momo/core/feature
 import { memoryLayoutStorage, readWorkbenchLayout, writeWorkbenchLayout } from "../useWorkbenchLayout";
 import { createPaneAttention, focusStoredPane, type PaneObservation } from "./paneAttention";
 
-// #2776: 「나를 기다림」·「끝남」이 인박스 줄과 OS 알림으로 합류한다. 알림은 상태가
+// #2776: 「응답 필요」·「끝남」이 인박스 줄과 OS 알림으로 합류한다. 알림은 상태가
 // 새로 될 때 한 번이고, 사람이 보고 있는 칸은 알리지 않는다.
 
 function setup(focused = false) {
@@ -31,7 +31,7 @@ describe("paneAttention", () => {
     store.observe([pane("p1", "waiting", 3)], null);
     store.observe([pane("p1", "waiting", 3), pane("p2", "running", 4)], null);
     expect(notify).toHaveBeenCalledTimes(1);
-    expect(notify).toHaveBeenCalledWith("나를 기다림", "3번 칸 · claude: 실행 허락을 기다려요");
+    expect(notify).toHaveBeenCalledWith("응답 필요", "3번 칸 · claude: 실행 허락을 기다려요");
     expect(store.entries().map((e) => [e.paneId, e.status])).toEqual([["p1", "waiting"]]);
   });
 
@@ -59,7 +59,7 @@ describe("paneAttention", () => {
     expect(notify).toHaveBeenCalledTimes(1);
   });
 
-  it("본 「끝남」, 상태가 바뀐 칸, 닫은 칸은 내리고, 본 「나를 기다림」은 답할 때까지 남긴다", () => {
+  it("본 「끝남」, 상태가 바뀐 칸, 닫은 칸은 내리고, 본 「응답 필요」는 답할 때까지 남긴다", () => {
     const { store, pane } = setup();
     store.observe([pane("p1", "running"), pane("p2", "running"), pane("p3", "running")], null);
     store.observe([pane("p1", "waiting"), pane("p2", "done"), pane("p3", "waiting")], null);
