@@ -1,0 +1,870 @@
+{
+  "1280-light": {
+    "baseline": {
+      "trigger.x": 70,
+      "trigger.y": 748,
+      "trigger.w": 206,
+      "trigger.h": 40,
+      "trigger.lw": 206,
+      "trigger.lh": 40,
+      "avatar.x": 74,
+      "avatar.y": 756,
+      "avatar.w": 24,
+      "avatar.h": 24,
+      "avatar.lw": 24,
+      "avatar.lh": 24,
+      "name.x": 106,
+      "name.y": 748,
+      "name.w": 166,
+      "name.h": 22,
+      "name.lw": 166,
+      "name.lh": 22,
+      "emoji.x": 106,
+      "emoji.y": 770,
+      "emoji.w": 15,
+      "emoji.h": 18,
+      "emoji.lw": 15,
+      "emoji.lh": 18,
+      "dot.x": 90,
+      "dot.y": 772,
+      "dot.w": 8,
+      "dot.h": 8,
+      "dot.lw": 8,
+      "dot.lh": 8
+    },
+    "steps": {
+      "max": 4.12,
+      "at": "pressed-settled:trigger.w",
+      "perKey": {
+        "trigger.x": {
+          "d": 2.06,
+          "step": "pressed-settled"
+        },
+        "trigger.y": {
+          "d": 0.4,
+          "step": "pressed-settled"
+        },
+        "trigger.w": {
+          "d": 4.12,
+          "step": "pressed-settled"
+        },
+        "trigger.h": {
+          "d": 0.8,
+          "step": "pressed-settled"
+        },
+        "avatar.x": {
+          "d": 1.98,
+          "step": "pressed-settled"
+        },
+        "avatar.y": {
+          "d": 0.24,
+          "step": "pressed-settled"
+        },
+        "avatar.w": {
+          "d": 0.48,
+          "step": "pressed-settled"
+        },
+        "avatar.h": {
+          "d": 0.48,
+          "step": "pressed-settled"
+        },
+        "name.x": {
+          "d": 1.34,
+          "step": "pressed-settled"
+        },
+        "name.y": {
+          "d": 0.4,
+          "step": "pressed-settled"
+        },
+        "name.w": {
+          "d": 3.32,
+          "step": "pressed-settled"
+        },
+        "name.h": {
+          "d": 0.44,
+          "step": "pressed-settled"
+        },
+        "emoji.x": {
+          "d": 1.34,
+          "step": "pressed-settled"
+        },
+        "emoji.y": {
+          "d": 0.04,
+          "step": "pressed-settled"
+        },
+        "emoji.w": {
+          "d": 0.3,
+          "step": "pressed-settled"
+        },
+        "emoji.h": {
+          "d": 0.36,
+          "step": "pressed-settled"
+        },
+        "dot.x": {
+          "d": 1.66,
+          "step": "pressed-settled"
+        },
+        "dot.y": {
+          "d": 0.08,
+          "step": "pressed-settled"
+        },
+        "dot.w": {
+          "d": 0.16,
+          "step": "pressed-settled"
+        },
+        "dot.h": {
+          "d": 0.16,
+          "step": "pressed-settled"
+        }
+      }
+    },
+    "frames": {
+      "max": 4.12,
+      "at": "rAF#50@1933:trigger.w",
+      "perKey": {
+        "trigger.x": {
+          "d": 2.06,
+          "step": "rAF#49@1925"
+        },
+        "trigger.y": {
+          "d": 0.4,
+          "step": "rAF#72@2116"
+        },
+        "trigger.w": {
+          "d": 4.12,
+          "step": "rAF#49@1925"
+        },
+        "trigger.h": {
+          "d": 0.8,
+          "step": "rAF#72@2116"
+        },
+        "avatar.x": {
+          "d": 1.98,
+          "step": "rAF#49@1925"
+        },
+        "avatar.y": {
+          "d": 0.24,
+          "step": "rAF#47@1908"
+        },
+        "avatar.w": {
+          "d": 0.48,
+          "step": "rAF#48@1916"
+        },
+        "avatar.h": {
+          "d": 0.48,
+          "step": "rAF#48@1916"
+        },
+        "name.x": {
+          "d": 1.34,
+          "step": "rAF#48@1916"
+        },
+        "name.y": {
+          "d": 0.4,
+          "step": "rAF#72@2116"
+        },
+        "name.w": {
+          "d": 3.32,
+          "step": "rAF#49@1925"
+        },
+        "name.h": {
+          "d": 0.44,
+          "step": "rAF#72@2116"
+        },
+        "emoji.x": {
+          "d": 1.34,
+          "step": "rAF#48@1916"
+        },
+        "emoji.y": {
+          "d": 0.04,
+          "step": "rAF#45@1891"
+        },
+        "emoji.w": {
+          "d": 0.3,
+          "step": "rAF#72@2116"
+        },
+        "emoji.h": {
+          "d": 0.36,
+          "step": "rAF#72@2116"
+        },
+        "dot.x": {
+          "d": 1.66,
+          "step": "rAF#49@1925"
+        },
+        "dot.y": {
+          "d": 0.08,
+          "step": "rAF#72@2116"
+        },
+        "dot.w": {
+          "d": 0.16,
+          "step": "rAF#49@1925"
+        },
+        "dot.h": {
+          "d": 0.16,
+          "step": "rAF#47@1908"
+        }
+      }
+    },
+    "streamFrameCount": 270,
+    "transforms": [
+      "none",
+      "matrix(1, 0, 0, 1, 0, 0)",
+      "matrix(0.994936, 0, 0, 0.994936, 0, 0)",
+      "matrix(0.9909, 0, 0, 0.9909, 0, 0)"
+    ],
+    "outlines": [
+      "none 3px"
+    ],
+    "ok": false
+  },
+  "390-light": {
+    "baseline": {
+      "trigger.x": 70,
+      "trigger.y": 724,
+      "trigger.w": 146,
+      "trigger.h": 44,
+      "trigger.lw": 146,
+      "trigger.lh": 44,
+      "avatar.x": 74,
+      "avatar.y": 734,
+      "avatar.w": 24,
+      "avatar.h": 24,
+      "avatar.lw": 24,
+      "avatar.lh": 24,
+      "name.x": 106,
+      "name.y": 726,
+      "name.w": 106,
+      "name.h": 22,
+      "name.lw": 106,
+      "name.lh": 22,
+      "emoji.x": 106,
+      "emoji.y": 748,
+      "emoji.w": 15,
+      "emoji.h": 18,
+      "emoji.lw": 15,
+      "emoji.lh": 18,
+      "dot.x": 90,
+      "dot.y": 750,
+      "dot.w": 8,
+      "dot.h": 8,
+      "dot.lw": 8,
+      "dot.lh": 8
+    },
+    "steps": {
+      "max": 2.92,
+      "at": "pressed-settled:trigger.w",
+      "perKey": {
+        "trigger.x": {
+          "d": 1.46,
+          "step": "pressed-settled"
+        },
+        "trigger.y": {
+          "d": 0.44,
+          "step": "pressed-settled"
+        },
+        "trigger.w": {
+          "d": 2.92,
+          "step": "pressed-settled"
+        },
+        "trigger.h": {
+          "d": 0.88,
+          "step": "pressed-settled"
+        },
+        "avatar.x": {
+          "d": 1.38,
+          "step": "pressed-settled"
+        },
+        "avatar.y": {
+          "d": 0.24,
+          "step": "pressed-settled"
+        },
+        "avatar.w": {
+          "d": 0.48,
+          "step": "pressed-settled"
+        },
+        "avatar.h": {
+          "d": 0.48,
+          "step": "pressed-settled"
+        },
+        "name.x": {
+          "d": 0.74,
+          "step": "pressed-settled"
+        },
+        "name.y": {
+          "d": 0.4,
+          "step": "pressed-settled"
+        },
+        "name.w": {
+          "d": 2.12,
+          "step": "pressed-settled"
+        },
+        "name.h": {
+          "d": 0.44,
+          "step": "pressed-settled"
+        },
+        "emoji.x": {
+          "d": 0.74,
+          "step": "pressed-settled"
+        },
+        "emoji.y": {
+          "d": 0.04,
+          "step": "pressed-settled"
+        },
+        "emoji.w": {
+          "d": 0.3,
+          "step": "pressed-settled"
+        },
+        "emoji.h": {
+          "d": 0.36,
+          "step": "pressed-settled"
+        },
+        "dot.x": {
+          "d": 1.06,
+          "step": "pressed-settled"
+        },
+        "dot.y": {
+          "d": 0.08,
+          "step": "pressed-settled"
+        },
+        "dot.w": {
+          "d": 0.16,
+          "step": "pressed-settled"
+        },
+        "dot.h": {
+          "d": 0.16,
+          "step": "pressed-settled"
+        }
+      }
+    },
+    "frames": {
+      "max": 2.92,
+      "at": "rAF#47@2409:trigger.w",
+      "perKey": {
+        "trigger.x": {
+          "d": 1.46,
+          "step": "rAF#46@2401"
+        },
+        "trigger.y": {
+          "d": 0.44,
+          "step": "rAF#68@2584"
+        },
+        "trigger.w": {
+          "d": 2.92,
+          "step": "rAF#47@2409"
+        },
+        "trigger.h": {
+          "d": 0.88,
+          "step": "rAF#68@2584"
+        },
+        "avatar.x": {
+          "d": 1.38,
+          "step": "rAF#46@2401"
+        },
+        "avatar.y": {
+          "d": 0.24,
+          "step": "rAF#45@2393"
+        },
+        "avatar.w": {
+          "d": 0.48,
+          "step": "rAF#46@2401"
+        },
+        "avatar.h": {
+          "d": 0.48,
+          "step": "rAF#46@2401"
+        },
+        "name.x": {
+          "d": 0.74,
+          "step": "rAF#46@2401"
+        },
+        "name.y": {
+          "d": 0.4,
+          "step": "rAF#68@2584"
+        },
+        "name.w": {
+          "d": 2.12,
+          "step": "rAF#68@2584"
+        },
+        "name.h": {
+          "d": 0.44,
+          "step": "rAF#68@2584"
+        },
+        "emoji.x": {
+          "d": 0.74,
+          "step": "rAF#46@2401"
+        },
+        "emoji.y": {
+          "d": 0.04,
+          "step": "rAF#44@2384"
+        },
+        "emoji.w": {
+          "d": 0.3,
+          "step": "rAF#45@2393"
+        },
+        "emoji.h": {
+          "d": 0.36,
+          "step": "rAF#68@2584"
+        },
+        "dot.x": {
+          "d": 1.06,
+          "step": "rAF#46@2401"
+        },
+        "dot.y": {
+          "d": 0.08,
+          "step": "rAF#68@2584"
+        },
+        "dot.w": {
+          "d": 0.16,
+          "step": "rAF#47@2409"
+        },
+        "dot.h": {
+          "d": 0.16,
+          "step": "rAF#45@2393"
+        }
+      }
+    },
+    "streamFrameCount": 260,
+    "transforms": [
+      "none",
+      "matrix(1, 0, 0, 1, 0, 0)",
+      "matrix(0.994898, 0, 0, 0.994898, 0, 0)",
+      "matrix(0.990827, 0, 0, 0.990827, 0, 0)"
+    ],
+    "outlines": [
+      "none 3px"
+    ],
+    "ok": false
+  },
+  "1280-dark": {
+    "baseline": {
+      "trigger.x": 70,
+      "trigger.y": 748,
+      "trigger.w": 206,
+      "trigger.h": 40,
+      "trigger.lw": 206,
+      "trigger.lh": 40,
+      "avatar.x": 74,
+      "avatar.y": 756,
+      "avatar.w": 24,
+      "avatar.h": 24,
+      "avatar.lw": 24,
+      "avatar.lh": 24,
+      "name.x": 106,
+      "name.y": 748,
+      "name.w": 166,
+      "name.h": 22,
+      "name.lw": 166,
+      "name.lh": 22,
+      "emoji.x": 106,
+      "emoji.y": 770,
+      "emoji.w": 15,
+      "emoji.h": 18,
+      "emoji.lw": 15,
+      "emoji.lh": 18,
+      "dot.x": 90,
+      "dot.y": 772,
+      "dot.w": 8,
+      "dot.h": 8,
+      "dot.lw": 8,
+      "dot.lh": 8
+    },
+    "steps": {
+      "max": 4.12,
+      "at": "pressed-settled:trigger.w",
+      "perKey": {
+        "trigger.x": {
+          "d": 2.06,
+          "step": "pressed-settled"
+        },
+        "trigger.y": {
+          "d": 0.4,
+          "step": "pressed-settled"
+        },
+        "trigger.w": {
+          "d": 4.12,
+          "step": "pressed-settled"
+        },
+        "trigger.h": {
+          "d": 0.8,
+          "step": "pressed-settled"
+        },
+        "avatar.x": {
+          "d": 1.98,
+          "step": "pressed-settled"
+        },
+        "avatar.y": {
+          "d": 0.24,
+          "step": "pressed-settled"
+        },
+        "avatar.w": {
+          "d": 0.48,
+          "step": "pressed-settled"
+        },
+        "avatar.h": {
+          "d": 0.48,
+          "step": "pressed-settled"
+        },
+        "name.x": {
+          "d": 1.34,
+          "step": "pressed-settled"
+        },
+        "name.y": {
+          "d": 0.4,
+          "step": "pressed-settled"
+        },
+        "name.w": {
+          "d": 3.32,
+          "step": "pressed-settled"
+        },
+        "name.h": {
+          "d": 0.44,
+          "step": "pressed-settled"
+        },
+        "emoji.x": {
+          "d": 1.34,
+          "step": "pressed-settled"
+        },
+        "emoji.y": {
+          "d": 0.04,
+          "step": "pressed-settled"
+        },
+        "emoji.w": {
+          "d": 0.3,
+          "step": "pressed-settled"
+        },
+        "emoji.h": {
+          "d": 0.36,
+          "step": "pressed-settled"
+        },
+        "dot.x": {
+          "d": 1.66,
+          "step": "pressed-settled"
+        },
+        "dot.y": {
+          "d": 0.08,
+          "step": "pressed-settled"
+        },
+        "dot.w": {
+          "d": 0.16,
+          "step": "pressed-settled"
+        },
+        "dot.h": {
+          "d": 0.16,
+          "step": "pressed-settled"
+        }
+      }
+    },
+    "frames": {
+      "max": 4.12,
+      "at": "rAF#48@1893:trigger.w",
+      "perKey": {
+        "trigger.x": {
+          "d": 2.06,
+          "step": "rAF#48@1893"
+        },
+        "trigger.y": {
+          "d": 0.4,
+          "step": "rAF#69@2068"
+        },
+        "trigger.w": {
+          "d": 4.12,
+          "step": "rAF#48@1893"
+        },
+        "trigger.h": {
+          "d": 0.8,
+          "step": "rAF#69@2068"
+        },
+        "avatar.x": {
+          "d": 1.98,
+          "step": "rAF#48@1893"
+        },
+        "avatar.y": {
+          "d": 0.24,
+          "step": "rAF#46@1877"
+        },
+        "avatar.w": {
+          "d": 0.48,
+          "step": "rAF#47@1885"
+        },
+        "avatar.h": {
+          "d": 0.48,
+          "step": "rAF#47@1885"
+        },
+        "name.x": {
+          "d": 1.34,
+          "step": "rAF#47@1885"
+        },
+        "name.y": {
+          "d": 0.4,
+          "step": "rAF#69@2068"
+        },
+        "name.w": {
+          "d": 3.32,
+          "step": "rAF#48@1893"
+        },
+        "name.h": {
+          "d": 0.44,
+          "step": "rAF#69@2068"
+        },
+        "emoji.x": {
+          "d": 1.34,
+          "step": "rAF#47@1885"
+        },
+        "emoji.y": {
+          "d": 0.04,
+          "step": "rAF#44@1860"
+        },
+        "emoji.w": {
+          "d": 0.3,
+          "step": "rAF#69@2068"
+        },
+        "emoji.h": {
+          "d": 0.36,
+          "step": "rAF#69@2068"
+        },
+        "dot.x": {
+          "d": 1.66,
+          "step": "rAF#47@1885"
+        },
+        "dot.y": {
+          "d": 0.08,
+          "step": "rAF#69@2068"
+        },
+        "dot.w": {
+          "d": 0.16,
+          "step": "rAF#46@1877"
+        },
+        "dot.h": {
+          "d": 0.16,
+          "step": "rAF#46@1877"
+        }
+      }
+    },
+    "streamFrameCount": 264,
+    "transforms": [
+      "none",
+      "matrix(1, 0, 0, 1, 0, 0)",
+      "matrix(0.995155, 0, 0, 0.995155, 0, 0)",
+      "matrix(0.990771, 0, 0, 0.990771, 0, 0)"
+    ],
+    "outlines": [
+      "none 3px"
+    ],
+    "ok": false
+  },
+  "390-dark": {
+    "baseline": {
+      "trigger.x": 70,
+      "trigger.y": 724,
+      "trigger.w": 146,
+      "trigger.h": 44,
+      "trigger.lw": 146,
+      "trigger.lh": 44,
+      "avatar.x": 74,
+      "avatar.y": 734,
+      "avatar.w": 24,
+      "avatar.h": 24,
+      "avatar.lw": 24,
+      "avatar.lh": 24,
+      "name.x": 106,
+      "name.y": 726,
+      "name.w": 106,
+      "name.h": 22,
+      "name.lw": 106,
+      "name.lh": 22,
+      "emoji.x": 106,
+      "emoji.y": 748,
+      "emoji.w": 15,
+      "emoji.h": 18,
+      "emoji.lw": 15,
+      "emoji.lh": 18,
+      "dot.x": 90,
+      "dot.y": 750,
+      "dot.w": 8,
+      "dot.h": 8,
+      "dot.lw": 8,
+      "dot.lh": 8
+    },
+    "steps": {
+      "max": 2.92,
+      "at": "pressed-settled:trigger.w",
+      "perKey": {
+        "trigger.x": {
+          "d": 1.46,
+          "step": "pressed-settled"
+        },
+        "trigger.y": {
+          "d": 0.44,
+          "step": "pressed-settled"
+        },
+        "trigger.w": {
+          "d": 2.92,
+          "step": "pressed-settled"
+        },
+        "trigger.h": {
+          "d": 0.88,
+          "step": "pressed-settled"
+        },
+        "avatar.x": {
+          "d": 1.38,
+          "step": "pressed-settled"
+        },
+        "avatar.y": {
+          "d": 0.24,
+          "step": "pressed-settled"
+        },
+        "avatar.w": {
+          "d": 0.48,
+          "step": "pressed-settled"
+        },
+        "avatar.h": {
+          "d": 0.48,
+          "step": "pressed-settled"
+        },
+        "name.x": {
+          "d": 0.74,
+          "step": "pressed-settled"
+        },
+        "name.y": {
+          "d": 0.4,
+          "step": "pressed-settled"
+        },
+        "name.w": {
+          "d": 2.12,
+          "step": "pressed-settled"
+        },
+        "name.h": {
+          "d": 0.44,
+          "step": "pressed-settled"
+        },
+        "emoji.x": {
+          "d": 0.74,
+          "step": "pressed-settled"
+        },
+        "emoji.y": {
+          "d": 0.04,
+          "step": "pressed-settled"
+        },
+        "emoji.w": {
+          "d": 0.3,
+          "step": "pressed-settled"
+        },
+        "emoji.h": {
+          "d": 0.36,
+          "step": "pressed-settled"
+        },
+        "dot.x": {
+          "d": 1.06,
+          "step": "pressed-settled"
+        },
+        "dot.y": {
+          "d": 0.08,
+          "step": "pressed-settled"
+        },
+        "dot.w": {
+          "d": 0.16,
+          "step": "pressed-settled"
+        },
+        "dot.h": {
+          "d": 0.16,
+          "step": "pressed-settled"
+        }
+      }
+    },
+    "frames": {
+      "max": 2.92,
+      "at": "rAF#48@2422:trigger.w",
+      "perKey": {
+        "trigger.x": {
+          "d": 1.46,
+          "step": "rAF#47@2414"
+        },
+        "trigger.y": {
+          "d": 0.44,
+          "step": "rAF#69@2597"
+        },
+        "trigger.w": {
+          "d": 2.92,
+          "step": "rAF#48@2422"
+        },
+        "trigger.h": {
+          "d": 0.88,
+          "step": "rAF#69@2597"
+        },
+        "avatar.x": {
+          "d": 1.38,
+          "step": "rAF#47@2414"
+        },
+        "avatar.y": {
+          "d": 0.24,
+          "step": "rAF#46@2405"
+        },
+        "avatar.w": {
+          "d": 0.48,
+          "step": "rAF#47@2414"
+        },
+        "avatar.h": {
+          "d": 0.48,
+          "step": "rAF#47@2414"
+        },
+        "name.x": {
+          "d": 0.74,
+          "step": "rAF#47@2414"
+        },
+        "name.y": {
+          "d": 0.4,
+          "step": "rAF#69@2597"
+        },
+        "name.w": {
+          "d": 2.12,
+          "step": "rAF#69@2597"
+        },
+        "name.h": {
+          "d": 0.44,
+          "step": "rAF#69@2597"
+        },
+        "emoji.x": {
+          "d": 0.74,
+          "step": "rAF#47@2414"
+        },
+        "emoji.y": {
+          "d": 0.04,
+          "step": "rAF#44@2389"
+        },
+        "emoji.w": {
+          "d": 0.3,
+          "step": "rAF#47@2414"
+        },
+        "emoji.h": {
+          "d": 0.36,
+          "step": "rAF#69@2597"
+        },
+        "dot.x": {
+          "d": 1.06,
+          "step": "rAF#47@2414"
+        },
+        "dot.y": {
+          "d": 0.08,
+          "step": "rAF#69@2597"
+        },
+        "dot.w": {
+          "d": 0.16,
+          "step": "rAF#48@2422"
+        },
+        "dot.h": {
+          "d": 0.16,
+          "step": "rAF#46@2405"
+        }
+      }
+    },
+    "streamFrameCount": 260,
+    "transforms": [
+      "none",
+      "matrix(1, 0, 0, 1, 0, 0)",
+      "matrix(0.994939, 0, 0, 0.994939, 0, 0)",
+      "matrix(0.990902, 0, 0, 0.990902, 0, 0)"
+    ],
+    "outlines": [
+      "none 3px"
+    ],
+    "ok": false
+  }
+}

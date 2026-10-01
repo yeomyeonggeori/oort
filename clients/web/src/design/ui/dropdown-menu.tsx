@@ -181,6 +181,24 @@ export const DropdownMenuRadioItem = React.forwardRef<
 DropdownMenuRadioItem.displayName = MenuPrimitive.RadioItem.displayName;
 
 /**
+ * An on/off row (`menuitemcheckbox`, `aria-checked`), for a choice that rides along
+ * with the action rows rather than being one of them (new-session 「worktree 격리」,
+ * #2775). Same row measure and focus ring as `RadioItem`; the caller draws the check.
+ * `layout="stack"` lets a disabled row carry its reason on a second line.
+ */
+export const DropdownMenuCheckboxItem = React.forwardRef<
+  React.ElementRef<typeof MenuPrimitive.CheckboxItem>,
+  React.ComponentPropsWithoutRef<typeof MenuPrimitive.CheckboxItem> & { layout?: "row" | "stack" }
+>(({ className, layout = "row", ...props }, ref) => (
+  <MenuPrimitive.CheckboxItem
+    ref={ref}
+    className={menuRowClass({ layout, className })}
+    {...props}
+  />
+));
+DropdownMenuCheckboxItem.displayName = MenuPrimitive.CheckboxItem.displayName;
+
+/**
  * A group's **title**: the line that names what the rows beneath it are, rather
  * than being one of them.
  *

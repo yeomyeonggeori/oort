@@ -43,6 +43,9 @@ portable-pty = "0.9.0"
 # plugin itself is rather than pulled into a mobile build that cannot use it.
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2"
+# Native folder picker for the new-session menu (#2775). Opened from Rust only
+# (`start_folder.rs`); no capability exposes it to the webview. MIT OR Apache-2.0.
+tauri-plugin-dialog = "2"
 # The shell's own refresh rotation (#3106, ADR-0146 D-7 증보 #3079): the shell
 # POSTs `/v1/auth/refresh` with the keychain's token and its refresh-key proof,
 # so the webview never reads the token back. reqwest 0.13 was already in this

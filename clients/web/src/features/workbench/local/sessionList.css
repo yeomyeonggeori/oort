@@ -5,42 +5,41 @@
  * 시안 값과 다른 줄은 PR 「시안과의 차이」에 있다.
  * ========================================================================== */
 
+/* #3275: 앱 셸 사이드바와 같은 말을 쓴다. 자기 면·테두리·유리가 없다: 사이드바는
+ * 창 바닥(그라데이션) 위에 녹아 있고, 이 목록도 같다. 안쪽 여백은 `sidebar-list`
+ * 유틸(위 4 · 왼쪽 14 · 오른쪽 12 · 아래 12)이 클래스로 진다(SessionList.tsx). 그래서
+ * 아래 자식들은 좌우 바깥 여백을 따로 갖지 않는다. 폭은 레일 64와 합쳐 사이드바
+ * 전체 폭(324)이 되는 값이라(260) 탭을 오가도 본문 가장자리가 같다. 오른쪽 경계선은
+ * 없다: 사이드바도 본문과 경계선이 아니라 바닥 색 차이로 갈린다. */
 .sl {
-  /* 시안 `.slist`: 268 폭(코어 WORK_TAB_SESSION_LIST_PX), 유리 면, 오른쪽 경계. */
   inline-size: var(--session-list-width);
   flex: none;
   display: flex;
   flex-direction: column;
   min-block-size: 0;
-  background-color: var(--glass);
-  border-inline-end: 1px solid var(--line);
-  -webkit-backdrop-filter: blur(22px);
-  backdrop-filter: blur(22px);
   color: var(--ink);
 }
-@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-  .sl {
-    background-color: var(--surface);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-  }
-}
 
+/* 머리: 사이드바 워크스페이스 머리(`sidebar-ws`)와 같은 높이 48(위 4 + 34 + 아래 10)과
+ * 같은 가로 6. 제목 줄이 탭을 옮겨도 같은 자리에 선다. */
 .sl-hd {
   display: flex;
   align-items: center;
   gap: var(--spacing-2);
-  padding: var(--session-head-pad) var(--session-head-pad) var(--session-head-pad-bottom);
+  box-sizing: border-box;
+  min-block-size: 48px;
+  padding: var(--spacing-1) 6px 10px;
 }
 .sl-hd kbd {
   font: 500 var(--text-timestamp) var(--font-mono);
   color: var(--ink-muted);
 }
+/* 제목은 사이드바 워크스페이스 이름(`sidebar-ws-name`)과 같은 글자다. */
 .sl-hd h2 {
-  font-size: var(--session-text-title);
-  line-height: var(--text-title--line-height);
+  font-size: 1.125rem;
+  line-height: 1.5rem;
   font-weight: 800;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
 }
 .sl-hd .sl-r {
   margin-inline-start: auto;
@@ -48,7 +47,7 @@
   gap: var(--session-gap-icon);
 }
 
-/* 시안 `.ibtn` 30×30 r8. */
+/* 머리 아이콘 단추: `channelHeaderControlClass`와 같은 34 · 반경 10(시안 `.a-ibtn`). */
 .sl-ibtn {
   inline-size: var(--session-icon-button);
   block-size: var(--session-icon-button);
@@ -70,15 +69,15 @@
 
 /* 시안 `.proj`: 저장소 선택기. */
 .sl-proj {
-  margin: 0 var(--session-inset) var(--spacing-2);
+  margin: 0 0 var(--spacing-2);
   display: flex;
   align-items: center;
   gap: var(--spacing-2);
   block-size: var(--session-vessel-height);
   padding: 0 var(--session-vessel-pad);
-  border: 1px solid var(--line);
   border-radius: var(--session-radius-vessel);
   background-color: var(--surface);
+  box-shadow: var(--elevation-rest);
   font-size: var(--session-text-row);
   font-weight: 600;
   min-inline-size: 0;
@@ -91,12 +90,19 @@
   color: var(--icon);
 }
 .sl-proj .sl-name {
+  flex: 0 1 auto;
   min-inline-size: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 폭이 사이드바와 같아진 뒤(260) 저장소 이름이 먼저 잘리지 않게, 부제(worktree·세션 수)가
+ * 먼저 줄어든다(#3275). */
 .sl-proj .sl-sub {
+  flex: 0 100 auto;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-weight: 400;
   color: var(--ink-muted);
   font-family: var(--font-mono);
@@ -104,6 +110,7 @@
   white-space: nowrap;
 }
 .sl-proj .sl-last {
+  flex: none;
   margin-inline-start: auto;
   inline-size: var(--session-icon-small);
   block-size: var(--session-icon-small);
@@ -114,12 +121,14 @@
 
 /* 검색 칸: `.proj`와 같은 그릇. */
 .sl-search {
-  margin: 0 var(--session-inset) var(--spacing-2);
+  margin: 0 0 var(--spacing-2);
   display: flex;
   align-items: center;
   gap: var(--spacing-2);
   block-size: var(--session-vessel-height);
   padding: 0 var(--session-vessel-pad);
+  /* 입력 그릇은 3:1 선을 갖는다(SKILL §2). 저장소 선택기는 입력이 아니라 사이드바
+   * 검색 입구처럼 면 + rest 그림자다. */
   border: 1px solid var(--line-strong);
   border-radius: var(--session-radius-vessel);
   background-color: var(--surface);
@@ -147,7 +156,7 @@
 .sl-chips {
   display: flex;
   gap: var(--session-gap-line);
-  padding: 0 var(--session-inset) var(--session-head-pad-bottom);
+  padding: 0 0 var(--session-head-pad-bottom);
   flex-wrap: wrap;
 }
 .sl-chip {
@@ -177,7 +186,7 @@
   flex: 1;
   min-block-size: 0;
   overflow-y: auto;
-  padding: 0 var(--spacing-2) var(--spacing-1);
+  padding: 0 0 var(--spacing-1);
   font-size: var(--session-text-row);
 }
 
@@ -220,13 +229,17 @@
 .sl-row:hover {
   background-color: var(--surface-hover);
 }
+/* 선택 줄은 사이드바 선택 행(`sidebar-row-selected`)과 같은 문법: 흰 면 + rest 그림자. */
 .sl-row[aria-current="true"] {
   background-color: var(--surface);
-  /* 다크에서는 면(--surface)이 유리 위에서 거의 같은 밝기라(1.0:1, design-review H1)
-   * 1px 테 하나를 더한다. 라이트는 시안 그대로다. */
-  box-shadow:
-    var(--shadow-sm),
-    inset 0 0 0 1px light-dark(transparent, var(--line-strong));
+  box-shadow: var(--elevation-rest);
+}
+@media (prefers-contrast: more) {
+  .sl-row[aria-current="true"] {
+    box-shadow:
+      var(--elevation-rest),
+      inset 0 0 0 1px var(--line-strong);
+  }
 }
 
 /* 시안 `.wt`. */
@@ -440,9 +453,10 @@
   align-items: center;
   justify-content: center;
   gap: var(--session-gap-line);
-  margin: var(--spacing-1) var(--session-inset) var(--session-head-pad-bottom);
+  margin: var(--spacing-1) 0 var(--session-head-pad-bottom);
   block-size: var(--session-vessel-height);
-  border-radius: var(--session-radius-vessel);
+  /* 버튼은 채운 알약이다(ADR-0189 D6). */
+  border-radius: 9999px;
   background-color: var(--primary);
   color: var(--on-primary);
   font-size: var(--session-text-row);
@@ -458,9 +472,9 @@
 }
 
 /* 시안 `.ft`. */
+/* 하단 줄: 사이드바 하단(프로필 줄)처럼 선 없이 같은 가로 여백(6)으로 선다. */
 .sl-ft {
-  border-block-start: 1px solid var(--line);
-  padding: var(--session-head-pad-bottom) var(--session-head-pad);
+  padding: var(--session-head-pad-bottom) 6px 0;
   font-size: var(--text-meta);
   color: var(--ink-muted);
   display: flex;

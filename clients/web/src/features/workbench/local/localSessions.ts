@@ -35,7 +35,8 @@ import {
   staleScrollbackEntries,
 } from "@momo/core/features/workbench/scrollbackStore";
 import { parsePaneSignal, type PaneSignal } from "@momo/core/features/workbench/paneStatus";
-import { desktopPty, type PtyExit, type PtyProgram } from "@/lib/tauri";
+import { desktopPty, desktopStart, type PtyExit, type PtyProgram } from "@/lib/tauri";
+import { START_COPY, startErrorMessage } from "./startLocation";
 
 /** 보이는 xterm이든 미러든, 이 모듈이 쓰는 xterm 표면. */
 export interface TerminalLike {
@@ -142,6 +143,10 @@ function clampRows(rows: number): number {
 
 interface Session {
   view: LocalSessionView;
+  /** 시작 위치. 다시 시작(`restart`)도 같은 곳에서 한다. */
+  start: PaneStart;
+  /** 만들어 둔 worktree(다시 시작에서 또 만들지 않는다). */
+  madeWorktree: string | null;
   mirror: MirrorTerminal;
   serialize: (lines: number) => string;
   ptyId: number | null;
@@ -157,8 +162,18 @@ interface Session {
   titleSub: { dispose(): void } | null;
 }
 
+/** 칸이 시작할 곳(#2775). `cwd` 없음 = 홈. `worktree`가 참이면 먼저 새 worktree를 만든다. */
+export interface PaneStart {
+  cwd: string | null;
+  worktree: boolean;
+}
+
+export const HOME_START: PaneStart = { cwd: null, worktree: false };
+
 export interface LocalSessionsDeps {
   pty: PtyPort;
+  /** `git worktree add`(셸의 유일한 git 쓰기). 없으면 worktree 시작은 실패한다. */
+  worktree?: (repo: string) => Promise<{ path: string }>;
   loadMirror: () => Promise<MirrorFactory>;
   storage: () => ScrollbackStorage | null;
   sessionKey?: string;
@@ -219,6 +234,7 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
   let mirrorFactory: Promise<MirrorFactory> | null = null;
   /** 칸이 처음 시작할 때 띄울 프로그램. 새 세션 메뉴가 분할 전에 적는다. */
   const pendingPrograms = new Map<string, PtyProgram>();
+  const pendingStarts = new Map<string, PaneStart>();
   const starting = new Map<string, Promise<void>>();
   /**
    * 시작 중(미러 청크를 읽는 중)에 닫힌 칸. `ensure`가 청크를 받은 뒤 이 표시를
@@ -338,9 +354,21 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
     if (generation > 1) writeBoth(s, SHOW_CURSOR);
     update(s, { phase: "starting", exit: null, error: null, inputNotice: null, signal: null });
     try {
+      let cwd = s.start.cwd;
+      if (s.start.worktree) {
+        // 격리를 고른 칸은 worktree가 서야 뜬다. 못 만들면 원래 폴더로 몰래 가지 않는다.
+        if (s.madeWorktree === null) {
+          if (cwd === null || !deps.worktree) throw new Error("worktree_failed: not a repository");
+          writeBoth(s, `${START_COPY.makingWorktree}…\r\n`);
+          s.madeWorktree = (await deps.worktree(cwd)).path;
+          if (s.disposed || s.generation !== generation) return;
+        }
+        cwd = s.madeWorktree;
+      }
       const id = await deps.pty.spawn(
         {
           program: s.view.program,
+          ...(cwd !== null ? { cwd } : {}),
           cols: clampCols(s.mirror.cols),
           rows: clampRows(s.mirror.rows),
         },
@@ -367,11 +395,12 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
       update(s, { phase: "running" });
     } catch (error) {
       if (s.disposed || s.generation !== generation) return;
+      // 시작 위치 때문에 못 뜬 것은 칸 안에 한국어로 말한다(영어 원문은 풀이에 남긴다).
+      const raw = error instanceof Error ? error.message : String(error);
+      const line = s.start.cwd !== null ? startErrorMessage(error) : raw;
+      if (line !== raw) writeBoth(s, `${line}\r\n`);
       writeBoth(s, HIDE_CURSOR);
-      update(s, {
-        phase: "failed",
-        error: error instanceof Error ? error.message : String(error),
-      });
+      update(s, { phase: "failed", error: raw });
     }
   };
 
@@ -390,8 +419,9 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
     },
 
     /** 새 세션 메뉴가 분할 직전에 부른다. 칸이 처음 시작할 때 이 프로그램을 띄운다. */
-    setPendingProgram(paneId: string, program: PtyProgram): void {
+    setPendingProgram(paneId: string, program: PtyProgram, start: PaneStart = HOME_START): void {
       pendingPrograms.set(paneId, program);
+      pendingStarts.set(paneId, start);
     },
 
     /**
@@ -404,11 +434,15 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
       if (inFlight) return inFlight;
       const run = (async () => {
         const program = pendingPrograms.get(paneId) ?? { kind: "shell" as const };
+        const start = pendingStarts.get(paneId) ?? HOME_START;
         pendingPrograms.delete(paneId);
+        pendingStarts.delete(paneId);
         const made = await factory();
         if (closedWhileStarting.delete(paneId)) return;
         const { mirror, serialize } = made.create(clampCols(cols), clampRows(rows));
         const s: Session = {
+          start,
+          madeWorktree: null,
           view: {
             paneId,
             program,
@@ -490,7 +524,7 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
       const s = sessions.get(paneId);
       if (!s || s.ptyId === null) return;
       const id = s.ptyId;
-      // 「나를 기다림」에 사람이 답했다(#2776). Claude Code는 거부·중단에 hook을 내지
+      // 「응답 필요」에 사람이 답했다(#2776). Claude Code는 거부·중단에 hook을 내지
       // 않으므로(스파이크 실측) 기다림은 이 사람의 입력으로 푼다. 허락이면 곧
       // PostToolUse가, 새 요청이면 UserPromptSubmit이 뒤따른다. 출력은 보지 않는다.
       if (s.view.signal === "waiting-permission" || s.view.signal === "waiting-input") {
@@ -527,6 +561,7 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
     /** 칸을 닫는다: 프로세스를 끝내고 이 기기의 스크롤백도 지운다. */
     close(paneId: string): void {
       pendingPrograms.delete(paneId);
+      pendingStarts.delete(paneId);
       const s = sessions.get(paneId);
       if (!s) {
         if (starting.has(paneId)) closedWhileStarting.add(paneId);
@@ -582,6 +617,7 @@ export function localSessions(): LocalSessions {
   if (shared === null) {
     shared = createLocalSessions({
       pty: desktopPty,
+      worktree: (repo) => desktopStart.createWorktree(repo),
       loadMirror: loadBrowserMirror,
       storage: browserStorage,
     });

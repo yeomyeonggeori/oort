@@ -136,7 +136,7 @@ describe("buildSessionList", () => {
     expect(m.repos).toEqual([{ id: "momo\u0001momo", name: "momo", worktrees: 4, sessions: 8 }]);
   });
 
-  it("세션 안의 순서: 나를 기다림 → 실행 중 → 검토 대기 → 나머지, 같으면 번호", () => {
+  it("세션 안의 순서: 응답 필요 → 실행 중 → 검토 대기 → 나머지, 같으면 번호", () => {
     const m = buildSessionList(
       [
         pane(1, git("r", "r", "main"), { status: "done" }),
@@ -179,7 +179,7 @@ describe("buildSessionList", () => {
     expect(m.repos.find((r) => r.id === null)).toEqual({ id: null, name: "폴더", worktrees: 0, sessions: 1 });
   });
 
-  it("필터: 나를 기다림·공유. 숫자는 필터 전이다", () => {
+  it("필터: 응답 필요·공유. 숫자는 필터 전이다", () => {
     const waiting = buildSessionList(MOCK, { filter: "waiting", grouping: "repo" });
     expect(sessionRowsOf(waiting).map((r) => r.index)).toEqual([3, 5]);
     // 걸러진 뒤 worktree마다 하나씩 남으면 평탄화된다.
@@ -193,7 +193,7 @@ describe("buildSessionList", () => {
   it("상태로 묶으면 행마다 브랜치를 싣고, 저장소가 하나면 저장소 이름은 반복하지 않는다(planner 결정)", () => {
     const m = buildSessionList(MOCK, { filter: "all", grouping: "status" });
     expect(shape(m.rows)).toEqual([
-      "# 나를 기다림",
+      "# 응답 필요",
       "3 @feat/2774-xterm",
       "5 @fix/push-dup",
       "# 실행 중",
