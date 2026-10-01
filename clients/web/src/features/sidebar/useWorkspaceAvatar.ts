@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
 import { fetchWorkspaceAvatar } from "@momo/core/lib/api";
+import { createAvatarImageHook } from "./avatarImageStore";
 
 // =============================================================================
 // 워크스페이스 아바타 바이트를 레일 타일로 (ADR-0161 D5).
@@ -15,33 +15,7 @@ import { fetchWorkspaceAvatar } from "@momo/core/lib/api";
 // 브라우저 HTTP 캐시도 같은 판정을 돕는다.
 // =============================================================================
 
-const previews = new Map<string, string>();
-const inflight = new Map<string, Promise<string>>();
-
-/** 세션 하나가 무한정 쌓지 않게. 레일은 워크스페이스 수만큼만 쓰지만 상한을 둔다. */
-const PREVIEW_LIMIT = 32;
-
-function remember(key: string, dataUrl: string): void {
-  previews.set(key, dataUrl);
-  while (previews.size > PREVIEW_LIMIT) {
-    const oldest = previews.keys().next();
-    if (oldest.done) break;
-    previews.delete(oldest.value);
-  }
-}
-
-function readAsDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result;
-      if (typeof result === "string") resolve(result);
-      else reject(new Error("avatar preview"));
-    };
-    reader.onerror = () => reject(new Error("avatar preview"));
-    reader.readAsDataURL(blob);
-  });
-}
+const workspaceAvatar = createAvatarImageHook(fetchWorkspaceAvatar);
 
 /**
  * The avatar `data:` URL for `avatarUrl`, or `null` while it loads or on failure.
@@ -51,51 +25,7 @@ function readAsDataUrl(blob: Blob): Promise<string> {
  * "없으면 텍스트 이니셜"). `avatarUrl === undefined` means the workspace has no
  * avatar at all, and nothing is fetched.
  */
-export function useWorkspaceAvatar(avatarUrl: string | undefined): string | null {
-  const cached = avatarUrl ? previews.get(avatarUrl) ?? null : null;
-  const [dataUrl, setDataUrl] = useState<string | null>(cached);
-
-  useEffect(() => {
-    if (!avatarUrl) {
-      setDataUrl(null);
-      return;
-    }
-    const hit = previews.get(avatarUrl);
-    if (hit !== undefined) {
-      setDataUrl(hit);
-      return;
-    }
-    let live = true;
-    setDataUrl(null);
-    let request = inflight.get(avatarUrl);
-    if (request === undefined) {
-      request = fetchWorkspaceAvatar(avatarUrl)
-        .then(readAsDataUrl)
-        .then((url) => {
-          remember(avatarUrl, url);
-          return url;
-        })
-        .finally(() => inflight.delete(avatarUrl));
-      inflight.set(avatarUrl, request);
-    }
-    request
-      .then((url) => {
-        if (live) setDataUrl(url);
-      })
-      .catch(() => {
-        // The initial is the honest fallback; a broken image would be worse.
-        if (live) setDataUrl(null);
-      });
-    return () => {
-      live = false;
-    };
-  }, [avatarUrl]);
-
-  return dataUrl;
-}
+export const useWorkspaceAvatar = workspaceAvatar.useAvatar;
 
 /** 테스트 전용. 모듈 전역 캐시가 테스트 사이를 넘어가지 않게 한다. */
-export function resetWorkspaceAvatarsForTest(): void {
-  previews.clear();
-  inflight.clear();
-}
+export const resetWorkspaceAvatarsForTest = workspaceAvatar.reset;

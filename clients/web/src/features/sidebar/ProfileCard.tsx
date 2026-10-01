@@ -114,7 +114,11 @@ export function ProfileCard({
                 : "tap-target flex min-w-0 flex-1 items-center gap-2 rounded-sm px-1 text-left press-instant-fill hover:bg-surface-hover data-[state=open]:bg-surface-hover focus-visible:focus-ring"
             }
           >
-            <PresenceBadge selfName={selfName} effective={effective} />
+            <PresenceBadge
+              selfName={selfName}
+              effective={effective}
+              avatarUrl={selfMember?.avatarUrl}
+            />
             <span className={compact ? "hidden" : "flex min-w-0 flex-1 flex-col"}>
               <span className="truncate text-body" data-testid="self-name">
                 {selfName}
