@@ -65,7 +65,7 @@ export function WorkRail({ footer }: { footer?: ReactNode }) {
   return (
     <div
       data-testid="work-rail"
-      className="flex h-full w-work-rail shrink-0 flex-col items-center gap-2 pb-3"
+      className="shell-swap-in flex h-full w-work-rail shrink-0 flex-col items-center gap-2 pb-3"
     >
       <nav aria-label="앱 탐색" className="flex flex-col items-center">
         <ul className="flex flex-col items-center gap-2">
