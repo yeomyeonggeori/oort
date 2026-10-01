@@ -46,7 +46,7 @@ describe("request deadline", () => {
       .catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(NetworkError);
     expect((failure as NetworkError).failure).toBe("timeout");
-    expect((failure as NetworkError).message).toContain("응답하지 않았습니다");
+    expect((failure as NetworkError).message).toContain("응답하지 않았어요");
   });
 
   it("counts the deadline against the body too, not just the headers", async () => {
@@ -86,7 +86,7 @@ describe("request deadline", () => {
       .then(() => null)
       .catch((error: unknown) => error);
     expect((failure as NetworkError).failure).toBe("unreachable");
-    expect((failure as NetworkError).message).toContain("서버에 닿지 못했습니다");
+    expect((failure as NetworkError).message).toContain("서버에 닿지 못했어요");
   });
 
   it("keeps the caller's own cancellation a cancellation", async () => {

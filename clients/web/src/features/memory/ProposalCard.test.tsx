@@ -30,6 +30,7 @@ import {
   click,
   flush,
   mount,
+  waitUntil,
   proposal,
   unmount,
 } from "./memoryTestKit";
@@ -90,15 +91,30 @@ async function render(role: "member" | "guest" = "member") {
     createElement(RunProposalCards, { workspaceId: WS, channelId: CH, runId: RUN }),
     { role }
   );
-  for (let i = 0; i < 5; i += 1) await flush();
+  // Settle on state (#3236): the list was asked, and the card is drawn unless the server
+  // answered with nothing to draw.
+  await waitUntil(() => listMemoryProposals.mock.calls.length > 0, "proposals requested");
+  const answer = (await (listMemoryProposals.mock.results.at(-1)?.value as Promise<unknown[]>)) ?? [];
+  if (answer.length > 0) {
+    await waitUntil(() => byTestId(view.host, "memory-proposal") !== null, "proposal card drawn");
+  } else {
+    await flush();
+  }
   return view;
 }
 
 const card = (host: HTMLElement) => byTestId(host, "memory-proposal");
+const state = (host: HTMLElement, want: string) => () => card(host)?.getAttribute("data-state") === want;
+const evidenceRows = (host: HTMLElement) =>
+  host.querySelectorAll('[data-testid="memory-proposal-evidence-row"]');
 
 describe("제안 카드: 대기", () => {
   it("제안 문장·종류·근거(작성자와 본문)를 그리고 두 버튼을 준다", async () => {
     const { host } = await render();
+    await waitUntil(
+      () => evidenceRows(host).length === 2 && (evidenceRows(host)[1]?.textContent ?? "").includes(TEXT_B),
+      "evidence bodies loaded"
+    );
     expect(listMemoryProposals).toHaveBeenCalledWith(WS, CH, {
       runId: RUN,
       status: "pending",
@@ -132,6 +148,10 @@ describe("제안 카드: 대기", () => {
   it("근거를 읽지 못하면 그 줄에 이유를 말하고 행은 남긴다", async () => {
     fetchMessages.mockRejectedValue(new ApiError(500, "x"));
     const { host } = await render();
+    await waitUntil(
+      () => (evidenceRows(host)[0]?.textContent ?? "").includes(PROPOSAL_EVIDENCE_UNAVAILABLE),
+      "evidence error shown"
+    );
     const rows = host.querySelectorAll('[data-testid="memory-proposal-evidence-row"]');
     expect(rows).toHaveLength(2);
     expect(rows[0]?.textContent).toContain(PROPOSAL_EVIDENCE_UNAVAILABLE);
@@ -142,6 +162,10 @@ describe("제안 카드: 대기", () => {
   it("지워졌거나 볼 수 없는 근거는 그렇게 말한다", async () => {
     fetchMessages.mockResolvedValue({ messages: [message(MSG_A, 41, JIHOON, TEXT_A)] });
     const { host } = await render();
+    await waitUntil(
+      () => (evidenceRows(host)[1]?.textContent ?? "").includes(PROPOSAL_EVIDENCE_GONE),
+      "gone evidence shown"
+    );
     const rows = host.querySelectorAll('[data-testid="memory-proposal-evidence-row"]');
     expect(rows[0]?.textContent).toContain(TEXT_A);
     expect(rows[1]?.textContent).toContain(PROPOSAL_EVIDENCE_GONE);
@@ -180,8 +204,10 @@ describe("제안 카드: 결정", () => {
   it("기억하기: 서버에 수락을 보내고, 기억했어요와 기억 보기 링크로 바뀐다", async () => {
     const { host } = await render();
     click(byTestId(host, "memory-proposal-accept"));
-    await flush();
-    await flush();
+    await waitUntil(
+      () => state(host, "accepted")() && byTestId(host, "memory-proposal-open") !== null,
+      "accepted card with open link"
+    );
     expect(acceptMemoryProposal).toHaveBeenCalledWith(WS, PROPOSAL);
     expect(rejectMemoryProposal).not.toHaveBeenCalled();
     expect(card(host)?.getAttribute("data-state")).toBe("accepted");
@@ -197,8 +223,7 @@ describe("제안 카드: 결정", () => {
   it("아니요: 거절을 보내고 기억하지 않기로 했다고 말한다", async () => {
     const { host } = await render();
     click(byTestId(host, "memory-proposal-reject"));
-    await flush();
-    await flush();
+    await waitUntil(state(host, "rejected"), "rejected card");
     expect(rejectMemoryProposal).toHaveBeenCalledWith(WS, PROPOSAL);
     expect(acceptMemoryProposal).not.toHaveBeenCalled();
     expect(card(host)?.getAttribute("data-state")).toBe("rejected");
@@ -212,13 +237,13 @@ describe("제안 카드: 결정", () => {
     click(byTestId(host, "memory-proposal-accept"));
     click(byTestId(host, "memory-proposal-accept"));
     click(byTestId(host, "memory-proposal-reject"));
-    await flush();
+    await waitUntil(state(host, "deciding"), "deciding state");
     expect(card(host)?.getAttribute("data-state")).toBe("deciding");
     expect(byTestId(host, "memory-proposal-accept")?.getAttribute("aria-busy")).toBe("true");
     expect(acceptMemoryProposal).toHaveBeenCalledTimes(1);
     expect(rejectMemoryProposal).not.toHaveBeenCalled();
     release(proposal({ status: "accepted", text: undefined, evidence: [] }));
-    await flush();
+    await waitUntil(state(host, "accepted"), "accepted after release");
   });
 });
 
@@ -229,10 +254,12 @@ describe("제안 카드: 실패", () => {
     // 다시 읽으면 서버는 더 이상 대기 제안으로 주지 않는다.
     listMemoryProposals.mockResolvedValue([]);
     click(byTestId(host, "memory-proposal-accept"));
-    await flush();
-    await flush();
+    await waitUntil(state(host, "conflict"), "conflict card");
     await client.invalidateQueries({ queryKey: ["memory", "proposals"] });
-    await flush();
+    await waitUntil(
+      () => listMemoryProposals.mock.calls.length >= 2 && state(host, "conflict")(),
+      "proposals re-read, card still carries the conflict"
+    );
     expect(card(host)?.getAttribute("data-state")).toBe("conflict");
     expect(byTestId(host, "memory-proposal-conflict")?.textContent).toBe(PROPOSAL_CONFLICT_MESSAGE);
     expect(byTestId(host, "memory-proposal-accept")).toBeNull();
@@ -243,8 +270,7 @@ describe("제안 카드: 실패", () => {
     acceptMemoryProposal.mockRejectedValue(new ApiError(409, "expired"));
     const { host } = await render();
     click(byTestId(host, "memory-proposal-accept"));
-    await flush();
-    await flush();
+    await waitUntil(() => byTestId(host, "memory-proposal-conflict") !== null, "conflict message shown");
     expect(byTestId(host, "memory-proposal-conflict")?.textContent).toBe(PROPOSAL_EXPIRED_MESSAGE);
   });
 
@@ -252,8 +278,7 @@ describe("제안 카드: 실패", () => {
     acceptMemoryProposal.mockRejectedValue(new ApiError(403, "forbidden"));
     const { host } = await render();
     click(byTestId(host, "memory-proposal-accept"));
-    await flush();
-    await flush();
+    await waitUntil(state(host, "readOnly"), "read-only card");
     expect(card(host)?.getAttribute("data-state")).toBe("readOnly");
     expect(byTestId(host, "memory-proposal-readonly")?.textContent).toBe(PROPOSAL_FORBIDDEN_MESSAGE);
     expect(byTestId(host, "memory-proposal-accept")).toBeNull();
@@ -263,13 +288,11 @@ describe("제안 카드: 실패", () => {
     acceptMemoryProposal.mockRejectedValueOnce(new ApiError(500, "boom"));
     const { host } = await render();
     click(byTestId(host, "memory-proposal-accept"));
-    await flush();
-    await flush();
+    await waitUntil(state(host, "error"), "error card");
     expect(card(host)?.getAttribute("data-state")).toBe("error");
     expect(byTestId(host, "memory-proposal-error")?.textContent).toBe(PROPOSAL_FAILED_MESSAGE);
     click(byTestId(host, "memory-proposal-accept"));
-    await flush();
-    await flush();
+    await waitUntil(state(host, "accepted"), "accepted on retry");
     expect(acceptMemoryProposal).toHaveBeenCalledTimes(2);
     expect(card(host)?.getAttribute("data-state")).toBe("accepted");
     // 성공하면 이전 오류 문장은 치워진다.

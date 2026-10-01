@@ -54,10 +54,10 @@ function seconds(ms: number): number {
 }
 
 function networkFailureCopy(failure: NetworkFailure, timeoutMs: number): string {
-  const next = "주소와 네트워크를 확인하고 다시 시도하세요.";
+  const next = "주소와 네트워크를 확인하고 다시 시도해 주세요.";
   return failure === "timeout"
-    ? `서버가 ${seconds(timeoutMs)}초 안에 응답하지 않았습니다. ${next}`
-    : `서버에 닿지 못했습니다. ${next}`;
+    ? `서버가 ${seconds(timeoutMs)}초 안에 응답하지 않았어요. ${next}`
+    : `서버에 닿지 못했어요. ${next}`;
 }
 
 /**
