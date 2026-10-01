@@ -563,9 +563,9 @@ function Splitter({
       <span
         aria-hidden
         className={cn(
-          "bg-line transition-colors group-hover:bg-line-strong",
+          "bg-line-strong transition-colors group-hover:bg-ink-muted",
           row ? "h-full w-px" : "h-px w-full",
-          dragging && "bg-line-strong"
+          dragging && "bg-ink-muted"
         )}
       />
     </div>

@@ -1,30 +1,18 @@
 #!/usr/bin/env node
 // =============================================================================
-// 「내 작업」·「팀 작업」 진입점 캡처와 실측 (#2854, 시안 ①·④).
+// #3279 칸 크롬 전/후 캡처. 3칸 분할(1 | 2 / 3) + 「응답 필요」 칸(p2) 하나.
 //
-//   npm run build && node scripts/capture-work-tab.mjs
-//   → artifacts/work-tab/*.png + report.json
+//   npm run build && OUT_DIR=captures/3279/after node scripts/capture-pane-chrome.mjs
+//   → 1280·390 × light·dark, 호버(-hover)·키보드 포커스(-focus) 장면.
 //
-// 진짜 앱 셸(사이드바·레일·라우트)을 Chromium으로 연다. 백엔드는 없다: `/v1/**`는
-// 이 파일의 고정 응답이고, 실시간 소켓은 곧바로 연결되는 흉내다(gate-work-console과
-// 같은 모양). 데스크탑은 `window.__TAURI_INTERNALS__`를 흉내 내어 켠다. PTY는 흉내
-// 셸 출력을 내는 가짜다. 신호등(macOS 창 단추)은 브라우저에 없다.
-//
-// 재는 것:
-//   - 1440×900 「내 작업」 4×2: 칸 여덟의 폭이 모두 `WORKBENCH_MIN_PANE`(240) 이상,
-//     앱 사이드바 열(레일) 폭 64, 가로 넘침 0.
-//   - 1280×800 「내 작업」 4×2: 같은 것(세션 목록 T4가 서기 전 기준).
-//   - 1100×760(데스크탑 기본 창)·900×700: 4×2가 240을 못 지키면 격자가 접힌 모양을 찍는다.
-//   - 「팀 작업」 빈 상태: 데스크탑 1440·1280, 웹 390(서랍 닫힘·열림).
-//   - 세션 목록(#2856, 시안 ① `.slist`): 1440에서 저절로 펴지고 폭 268, 칸 폭 ≥ 240.
-//     1280에서는 4×2가 목록을 편 채로 240을 못 지켜 저절로 접힌다. 펴기를 누른
-//     모양도 찍는다. git 읽기(`workbench_git_read`)는 시안 ①과 같은 고정 답이다.
-//   - 시안 나란히: 시안 ① `.slist`와 구현 목록(`compare-session-list-*`).
+// 백엔드는 없다: `/v1/**`는 고정 응답, 실시간 소켓은 곧바로 연결되는 흉내, 데스크탑은
+// `window.__TAURI_INTERNALS__` 흉내(capture-work-tab.mjs와 같은 모양, 세션은 셸이 쥔
+// 핸들만 답하는 #3106 모양)다. 기준선(전)은 같은 스크립트를 base 워크트리에서 돌린다.
 // =============================================================================
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "../gates/preview-guard.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
@@ -32,11 +20,6 @@ import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/work-tab");
 const PORT = Number(process.env.CAPTURE_PORT || 5197);
-const MIN_PANE = 240;
-const SESSION_LIST_PX = 268;
-const MOCKUP =
-  process.env.WORK_TAB_MOCKUP ??
-  resolve(WEB_ROOT, "../../../momo/claudedocs/agent-workspace-2.0/workspace-mockups.html");
 
 const workspaceId = "00000000-0000-7000-8000-000000000001";
 const memberId = "00000000-0000-7000-8000-000000000101";
@@ -60,24 +43,6 @@ const roster = [
   },
 ];
 
-// 균등 4×2. 위 줄이 1~4, 아래 줄이 5~8(시안 ①의 번호).
-function row4(ids, base) {
-  const pane = (id) => ({ kind: "pane", id });
-  return {
-    kind: "split", id: `s${base}`, axis: "row", ratio: 0.5,
-    first: { kind: "split", id: `s${base + 1}`, axis: "row", ratio: 0.5, first: pane(ids[0]), second: pane(ids[1]) },
-    second: { kind: "split", id: `s${base + 2}`, axis: "row", ratio: 0.5, first: pane(ids[2]), second: pane(ids[3]) },
-  };
-}
-const LAYOUT_4X2_UNUSED = {
-  v: 1,
-  root: { kind: "split", id: "s20", axis: "column", ratio: 0.5, first: row4(["p1", "p2", "p3", "p4"], 21), second: row4(["p5", "p6", "p7", "p8"], 24) },
-  focused: "p3",
-  maximized: null,
-  seq: 30,
-};
-
-
 // #3279 칸 크롬 캡처(전/후 비교용). 3칸 분할 + 「응답 필요」 칸 하나.
 // 3칸: 왼쪽 p1, 오른쪽 위 p2, 오른쪽 아래 p3.
 const LAYOUT_3 = {
@@ -92,14 +57,7 @@ const LAYOUT_3 = {
   seq: 30,
 };
 
-const failures = [];
-const report = { scenes: [], checks: [] };
-function check(name, ok, detail) {
-  report.checks.push({ name, ok, detail });
-  console.log(`${ok ? "ok  " : "FAIL"} ${name}${detail ? `  ${JSON.stringify(detail)}` : ""}`);
-  if (!ok) failures.push(name);
-}
-
+const report = { scenes: [] };
 function json(route, body, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
@@ -281,7 +239,6 @@ async function open(browser, origin, { viewport, scheme, desktop, signals = null
   return { context, page };
 }
 
-async function overflowX(page) { return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth); }
 async function scene(browser, origin, scheme, viewport) {
   const tag = `${viewport.width}-${scheme}`;
   const { context, page } = await open(browser, origin, { viewport, scheme, desktop: true, signals: MOCK_SIGNALS });
