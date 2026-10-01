@@ -723,6 +723,25 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/members/me/sidebar-prefs",
             get(routes::sidebar_prefs::get).put(routes::sidebar_prefs::put),
         )
+        // ADR-0161 증보 (#3277) — member avatar. Write paths are `/members/me/…`
+        // only (no `{member}` to name someone else); the read path serves any
+        // member's avatar to any active workspace member.
+        .route(
+            "/v1/workspaces/{ws}/members/me/avatar/uploads",
+            post(routes::member_avatar::create_upload),
+        )
+        .route(
+            "/v1/workspaces/{ws}/members/me/avatar/{id}/complete",
+            post(routes::member_avatar::complete),
+        )
+        .route(
+            "/v1/workspaces/{ws}/members/me/avatar",
+            delete(routes::member_avatar::remove),
+        )
+        .route(
+            "/v1/workspaces/{ws}/members/{member}/avatar/content",
+            get(routes::member_avatar::content),
+        )
         // #1767 — self password change. Separate path from leave so a PATCH
         // cannot be read as a lifecycle mutation.
         .route(

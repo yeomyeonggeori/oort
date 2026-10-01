@@ -86,3 +86,43 @@ Slack의 워크스페이스 스위처도 초기엔 **계정별 독립 세션**(�
 | 4b-4(예약) | `GET /v1/me/workspaces` 서버 목록 + 전역 토큰 즉시 전환 | — | D5-B(공개) | **별도 ADR**(D5-B 승격) |
 
 > 번호 조율: 병렬 배치 W-QA4(사용자 presence)가 **ADR-0160**을 claim(예약), 본 워크스페이스 레일이 **0161**. 두 워커가 origin/track/engine에서 병렬 진행하므로 충돌 회피를 위해 미리 분리했다.
+
+## 증보 1 (2026-10-01) — 멤버 아바타(내 프로필 사진) 업로드
+
+- Status: **Accepted** (성재 요청 2026-10-01, 데스크탑 0.1.15 스크린샷 피드백)
+- 결재 인용: 「프로필 사진 변경도 가능해야하는데, 그 부분도 가능하게 하고」 (이슈 #3277)
+- 발단: 위 Context 1·2가 못 박은 대로 `member.avatar_url`은 바 컬럼이고 업로드 경로가 0이었다. D5는 **워크스페이스** 아바타만 열었고(`workspace.avatar_media_id`, 067), 사람의 아바타는 의도적으로 열지 않았다. 이 증보가 D5의 경로를 **멤버**로 확장한다. D5의 결정(0151 비대칭·Drive 단일 백엔드·immutable 캐시)은 재개봉하지 않는다.
+
+### D-M1. 저장 → 새 테이블 + 새 포인터, `avatar_url`은 재사용하지 않는다
+- 마이그레이션 **111** `member_avatar_media`(067의 모양: `pending → complete | failed`, `drive_file_id`, RLS **FORCE** + `ws_isolation`) + `member.avatar_media_id uuid`.
+- 포인터는 **복합 FK** `(avatar_media_id, id) → member_avatar_media (id, member_id)`(`ON DELETE SET NULL (avatar_media_id)`)다. 즉 **다른 멤버가 올린 미디어를 가리키는 포인터는 스키마상 표현 불가**다 — self-only가 라우트 가드 한 줄에만 걸리지 않는다(방어 2중).
+- `member.avatar_url`(001)은 **그대로 둔다**(삭제·재정의 없음).
+
+### D-M2. 쓰기 = 본인만, 사람만
+- 쓰기 경로는 전부 `/members/me/…`다. `{member}`가 경로에 없으므로 남의 사진을 바꾸는 요청은 만들 수조차 없다(`sidebar_prefs`·`password`와 같은 규율). `complete`는 `(media id, 호출자)`로 행을 찾으므로 남이 연 업로드는 **404**로 보인다.
+- **에이전트는 인간 아바타를 바꿀 수 없고, 자기 것도 이 버전에서는 못 바꾼다**: 핸들러 `require_human` + 에이전트 bearer 허용 목록에 이 경로가 없다(DB 조회 전 403). 활성 워크스페이스 멤버여야 한다.
+- 워크스페이스 아바타(owner/admin 게이트)와 달리 **역할 게이트는 없다** — 프로필 사진은 설정 write가 아니라 자기 프로필이다.
+
+### D-M3. 업로드 계약 = 0151 비대칭 + D5 패턴 그대로, 검증은 더 엄격
+- `POST …/members/me/avatar/uploads`(Drive resumable 세션; 세션 → 행 순서) → 클라가 Drive capability URL로 PUT → `POST …/members/me/avatar/{id}/complete` → `DELETE …/members/me/avatar`(제거).
+- **크기**: 1 B ~ **5 MiB**(D5·067과 동일, 0151의 100 MB는 첨부용). 초과·0은 413.
+- **mime = 허용 목록 `image/png`·`image/jpeg`·`image/webp`·`image/gif`** (D5의 `image/*`보다 좁다). **SVG 거절**: 스크립트를 품을 수 있는 문서를 이 오리진에서 인라인 서빙하지 않는다. DB CHECK가 같은 목록을 든다.
+- **서버 측 MIME 스니핑**: `complete`가 Drive 메타(크기·mime·file id)에 더해 **파일 첫 12바이트의 매직 넘버**를 읽어 선언 mime과 대조한다(선언·Drive 보고 mime은 둘 다 클라가 정한 값). 어긋나면 행을 `failed`로 커밋하고 409 — 아바타는 되지 않는다.
+- 남용 브레이크: 인증된 경로 앞에는 per-member 한도기가 없으므로(per-IP 한도기는 join/claim·업로드 capability용) **미완료 세션 10개/10분**을 넘으면 429. 전용 한도기가 서면 그쪽으로 옮긴다.
+
+### D-M4. 레거시 `avatar_url` → **남기고, 업로드가 있으면 업로드가 이긴다**
+- 모든 멤버 DTO가 노출하는 해석된 `avatarUrl` = `avatar_media_id`가 있으면 버전 붙은 content 경로, 없으면 `member.avatar_url`(있다면 그대로), 없으면 생략(이니셜).
+- 제거(`DELETE`)는 포인터만 지운다 → 레거시 값이 있으면 그리로 되돌아간다. 레거시 컬럼에 쓰는 경로는 계속 없다. 현재 이 DTO는 `RosterMemberDto`(`GET …/roster`) 하나다.
+
+### D-M5. 읽기 = 같은 워크스페이스의 활성 멤버 누구나
+- `GET …/members/{member}/avatar/content` — 아바타는 타임라인·로스터·멘션·스레드 어디서나 그려지므로 채널이 아니라 **워크스페이스** 스코프(D5와 같은 결정). 다른 워크스페이스는 403(스코프 불일치), 아바타가 없거나 탈퇴한 멤버는 404.
+- 응답: 저장된(허용 목록의) mime, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`, `Cache-Control: private, max-age=31536000, immutable`.
+- **immutable 버전 토큰**: D5의 「content-hash URL」은 구현상 **미디어 id(UUIDv7) 토큰** `?v={media}`다 — 교체마다 새 행이므로 URL이 바뀌고 캐시는 낡지 않는다(내용 해시가 아니다; 같은 사진을 다시 올리면 URL이 바뀌어도 무해). 이 서버는 `<img src>`로 베어러를 못 싣는 점이 워크스페이스 아바타와 같아, 클라는 `fetch`+Blob(`fetchMemberAvatar`)으로 받는다.
+
+### D-M6. 교체·제거·회수
+- 교체 = 새 완료 행으로 포인터 이동, 제거 = 포인터 NULL(멱등 204, 두 번째 호출은 감사 행 없음). 이전 미디어의 Drive 회수는 D5와 같은 **후속 잡**(범위 밖).
+- 감사: `member.avatar_upload_started` · `member.avatar_updated` · `member.avatar_upload_failed` · `member.avatar_removed`.
+- 실시간 브로드캐스트(outbox)는 이 증보에 없다: 다른 클라는 다음 roster 읽기에서 새 `?v=`를 받는다. 즉시 반영이 필요하면 `member.renamed`와 같은 모양의 별도 증보.
+
+### 범위 밖
+에이전트 아바타 업로드, 이전 미디어 Drive 회수 잡, 크롭·리사이즈(클라가 5 MiB 안으로 만든다), 실시간 전파, 레거시 `avatar_url` 정리·이전.

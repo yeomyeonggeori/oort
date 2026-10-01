@@ -1452,6 +1452,129 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {description: Caller is the last active owner, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
 
+  /v1/workspaces/{workspaceId}/members/me/avatar/uploads:
+    post:
+      tags: [membership]
+      operationId: createMyAvatarUpload
+      summary: Open a Drive resumable upload session for the caller's own profile picture.
+      description: >
+        ADR-0161 amendment (2026-10-01, #3277). Human active members only, and only
+        for themself: there is no member id in this path, so no request can name
+        another member. Bytes bypass this server (ADR-0151): the client PUTs them to
+        the returned capability URL, then calls `complete`. `mime` must be
+        `image/png`, `image/jpeg`, `image/webp` or `image/gif` (SVG is refused);
+        `size` is 1 byte to 5 MiB. At most 10 unfinished sessions per member per ten
+        minutes (429). Agent bearers are 403 (not on the agent-route allow-list).
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMemberAvatarUploadRequest"
+      responses:
+        "201":
+          description: Pending avatar row and resumable capability URL created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttachmentUploadResponse"
+        "400":
+          description: Invalid name or a mime outside the allow-list.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Not a human live member of this workspace, workspace scope mismatch, or an agent bearer.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+        "413":
+          description: Declared size is 0 or above 5 MiB.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+        "429":
+          description: Too many unfinished upload sessions.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+        "503":
+          description: Drive archive is not configured.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+
+  /v1/workspaces/{workspaceId}/members/me/avatar/{mediaId}/complete:
+    post:
+      tags: [membership]
+      operationId: completeMyAvatarUpload
+      summary: Verify the uploaded bytes and make them the caller's avatar.
+      description: >
+        Verifies Drive's size, mime and file id against the declaration **and** the
+        file's own magic number against the declared mime, then points the caller's
+        member row at the new media. A mismatch commits the row as `failed` and
+        answers 409. Only the member who opened the session can complete it: another
+        member's media id answers 404. Idempotent.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: mediaId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Avatar set. `avatarUrl` is the versioned content path the roster will carry.
+          content: {application/json: {schema: {$ref: "#/components/schemas/MemberAvatarResponse"}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: No such upload for this caller (including another member's upload).
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+        "409":
+          description: Size, mime or content does not match, or the upload is in a state that cannot complete.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+
+  /v1/workspaces/{workspaceId}/members/me/avatar:
+    delete:
+      tags: [membership]
+      operationId: removeMyAvatar
+      summary: Remove the caller's own uploaded avatar.
+      description: >
+        Clears the caller's avatar pointer; the roster falls back to the legacy
+        `avatar_url` value if the member has one, otherwise to initials. Idempotent
+        (204 whether or not there was an avatar). The Drive bytes are reclaimed by a
+        later job.
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
+      responses:
+        "204": {description: Avatar cleared (or there was none).}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /v1/workspaces/{workspaceId}/members/{memberId}/avatar/content:
+    get:
+      tags: [membership]
+      operationId: getMemberAvatarContent
+      summary: Stream a member's current avatar after workspace-membership validation.
+      description: >
+        Any active member of the workspace may read any member's avatar (it renders in
+        the timeline and roster). Served with the stored image mime,
+        `nosniff`, `Content-Security-Policy: default-src 'none'; sandbox` and
+        `Cache-Control: private, max-age=31536000, immutable`; the roster URL's
+        `?v={media}` changes on replacement so a cached copy is never stale. The `v`
+        query parameter is a cache key and is not interpreted.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: memberId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: v, in: query, required: false, schema: {type: string}}
+      responses:
+        "200":
+          description: Avatar bytes (image/png, image/jpeg, image/webp or image/gif).
+          content:
+            image/png: {schema: {type: string, format: binary}}
+            image/jpeg: {schema: {type: string, format: binary}}
+            image/webp: {schema: {type: string, format: binary}}
+            image/gif: {schema: {type: string, format: binary}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Caller is not an active member of this workspace, or the path workspace is not the caller's.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+        "404":
+          description: That member has no avatar (or is not in this workspace).
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+
   /v1/workspaces/{workspaceId}/members/me/password:
     patch:
       tags: [auth]
@@ -10866,6 +10989,11 @@ components:
           type: string
         avatarUrl:
           type: string
+          description: >
+            Resolved avatar: the versioned content path of the member's uploaded
+            picture when set (ADR-0161 amendment, #3277), otherwise the legacy
+            `member.avatar_url` value, otherwise absent. Fetch the content path with
+            the bearer; it is not loadable by a bare `<img src>`.
         role:
           $ref: "#/components/schemas/MembershipRole"
         channelCount:
@@ -15531,6 +15659,39 @@ components:
           type: string
           format: uri
           description: Opaque Google resumable upload capability URL.
+
+    CreateMemberAvatarUploadRequest:
+      type: object
+      additionalProperties: false
+      required: [name, mime, size]
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        mime:
+          type: string
+          enum: [image/png, image/jpeg, image/webp, image/gif]
+        size:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 5242880
+
+    MemberAvatarResponse:
+      type: object
+      required: [id, workspaceId, memberId, name, mime, size, status, avatarUrl, createdAtMs]
+      properties:
+        id: {type: string, format: uuid}
+        workspaceId: {type: string, format: uuid}
+        memberId: {type: string, format: uuid}
+        name: {type: string}
+        mime: {type: string}
+        size: {type: integer, format: int64}
+        status: {type: string, enum: [complete]}
+        avatarUrl:
+          type: string
+          description: Versioned content path (`/v1/workspaces/{ws}/members/{member}/avatar/content?v={media}`).
+        createdAtMs: {type: integer, format: int64}
 
     Attachment:
       type: object

@@ -2771,8 +2771,20 @@ export async function completeWorkspaceAvatarUpload(
  * 않게 한다.
  */
 export async function fetchWorkspaceAvatar(avatarUrl: string): Promise<Blob> {
-  if (!/^\/v1\/workspaces\/[^/]+\/avatar\/content(\?|$)/.test(avatarUrl)) {
-    throw new ApiError(400, "not a workspace avatar content path");
+  return fetchAvatarBlob(
+    avatarUrl,
+    /^\/v1\/workspaces\/[^/]+\/avatar\/content(\?|$)/,
+    "not a workspace avatar content path"
+  );
+}
+
+async function fetchAvatarBlob(
+  avatarUrl: string,
+  shape: RegExp,
+  refusal: string
+): Promise<Blob> {
+  if (!shape.test(avatarUrl)) {
+    throw new ApiError(400, refusal);
   }
   const send = (token: string | null): Promise<Response> => {
     const headers = new Headers();
@@ -2786,6 +2798,99 @@ export async function fetchWorkspaceAvatar(avatarUrl: string): Promise<Blob> {
   if (res.status === 401) coreSession().markAuthExpired();
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
   return res.blob();
+}
+
+// ---- 멤버 아바타 (ADR-0161 증보 2026-10-01, #3277) ---------------------------
+//
+// 워크스페이스 아바타(위)를 사람에게 다시 쓴 것. 쓰기는 `members/me` 뿐이다 — 경로에
+// 멤버 id 가 없으므로 남의 사진을 바꾸는 요청은 만들 수조차 없다(self-only). 읽기는
+// 같은 워크스페이스의 활성 멤버 누구나. 에이전트는 못 바꾼다(사람 전용).
+// mime 은 png/jpeg/webp/gif 만(SVG 거절), 크기는 1B~5MiB, 서버가 파일 첫 바이트의
+// 매직 넘버까지 대조해 어긋나면 complete 가 409 다.
+
+/** 서버가 받는 멤버 아바타 mime. 클라가 파일 선택 단계에서 미리 거르는 데 쓴다. */
+export const MEMBER_AVATAR_MIMES = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+] as const;
+
+/** 서버 상한(5 MiB). */
+export const MEMBER_AVATAR_MAX_BYTES = 5 * 1024 * 1024;
+
+/** `MemberAvatarResponse` — complete 가 돌려주는 완료된 미디어 행. */
+export interface MemberAvatarMedia {
+  id: string;
+  memberId: string;
+  status: string;
+  /** 이 멤버의 roster `avatarUrl` 이 이제 가질 버전 붙은 content 경로. */
+  avatarUrl: string;
+}
+
+function myAvatarPath(workspaceId: string): string {
+  return `/v1/workspaces/${encodeURIComponent(workspaceId)}/members/me/avatar`;
+}
+
+/** 내 아바타 업로드 세션을 연다. `uploadUrl` 은 불투명한 Drive capability 다(로그 금지). */
+export async function createMyAvatarUpload(
+  workspaceId: string,
+  file: { name: string; mime: string; size: number }
+): Promise<WorkspaceAvatarUpload> {
+  const source = responseRecord(
+    await request<unknown>(`${myAvatarPath(workspaceId)}/uploads`, {
+      method: "POST",
+      body: JSON.stringify(file),
+    })
+  );
+  const id = str(source, "id");
+  const uploadUrl = str(source, "uploadUrl");
+  if (id === undefined || uploadUrl === undefined) throw new WireShapeError();
+  return { id, status: "pending", uploadUrl };
+}
+
+/** Drive 가 든 바이트를 서버가 대조(크기·mime·매직 넘버)하게 하고, 맞으면 내 아바타로 삼는다. */
+export async function completeMyAvatarUpload(
+  workspaceId: string,
+  mediaId: string
+): Promise<MemberAvatarMedia> {
+  const source = responseRecord(
+    await request<unknown>(
+      `${myAvatarPath(workspaceId)}/${encodeURIComponent(mediaId)}/complete`,
+      { method: "POST" }
+    )
+  );
+  const id = str(source, "id");
+  const memberId = str(source, "memberId");
+  const status = str(source, "status");
+  const avatarUrl = str(source, "avatarUrl");
+  if (
+    id === undefined ||
+    memberId === undefined ||
+    status === undefined ||
+    avatarUrl === undefined
+  ) {
+    throw new WireShapeError();
+  }
+  return { id, memberId, status, avatarUrl };
+}
+
+/** 내 아바타를 지운다(이니셜로 돌아간다). 멱등 — 없어도 성공한다. 204 라 본문이 없다. */
+export async function removeMyAvatar(workspaceId: string): Promise<void> {
+  await authedRequest(myAvatarPath(workspaceId), { method: "DELETE" });
+}
+
+/**
+ * 멤버 아바타 바이트를 인가 프록시로 받는다. `avatarUrl` 은 roster 가 준
+ * same-origin content 경로(`…/members/{id}/avatar/content?v={media}`)이고, 그 형태가
+ * 아니면 베어러를 싣지 않고 거절한다(임의 주소로 토큰이 새지 않게).
+ */
+export async function fetchMemberAvatar(avatarUrl: string): Promise<Blob> {
+  return fetchAvatarBlob(
+    avatarUrl,
+    /^\/v1\/workspaces\/[^/]+\/members\/[^/]+\/avatar\/content(\?|$)/,
+    "not a member avatar content path"
+  );
 }
 
 // ---- 자기 표시 이름 (#1873 / BZ-4e) ----------------------------------------

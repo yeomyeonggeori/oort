@@ -56,6 +56,7 @@ pub mod huddle;
 pub mod huddle_sweep;
 pub mod identity;
 pub mod interaction;
+pub mod member_avatar;
 pub mod member_rename;
 /// ADR-0196 / #3164 — team-memory digest + receipt reads and `mem_settings` writes (RLS only).
 pub mod memory;
@@ -121,6 +122,12 @@ pub use interaction::{
     PinnedMessage, ReactionAction, ReactionDelta, ReactionEmojiInvalid, ReactionSnapshot,
     StreamCloseOutcome, StreamEdit, StreamOutcome, CHANNEL_PIN_LIMIT, MESSAGE_REACTION_LIMIT,
     OPENING_STREAM_REV, REACTION_EMOJI_MAX_CHARS, STREAM_PROPS_KEY,
+};
+pub use member_avatar::{
+    clear_own_member_avatar_in_tx, count_recent_pending_member_avatar_uploads_in_tx,
+    create_pending_member_avatar_upload_in_tx, load_own_member_avatar_media_in_tx,
+    read_current_member_avatar_media_in_tx, settle_member_avatar_upload_in_tx, sniff_image_mime,
+    validate_member_avatar_mime, MemberAvatarMedia, IMAGE_SNIFF_PREFIX_BYTES, MEMBER_AVATAR_MIMES,
 };
 pub use member_rename::{
     build_member_renamed_payload, change_own_handle_in_tx, rename_own_display_name_in_tx,
