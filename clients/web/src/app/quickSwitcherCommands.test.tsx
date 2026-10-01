@@ -24,7 +24,11 @@ import {
   COMMAND_USAGE_STORAGE_KEY,
   parseCommandUsage,
 } from "@momo/core/features/commands/usage";
-import { OPEN_INBOX_SHORTCUT } from "@/app/keyboardShortcuts";
+import {
+  OPEN_INBOX_SHORTCUT,
+  TOGGLE_SIDEBAR_SHORTCUT,
+} from "@/app/keyboardShortcuts";
+import { resetShortcutBindingsForTest, setBinding } from "@/app/shortcutBindings";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { registerLocalCardHost } from "@/features/chat/localCards";
 import {
@@ -66,6 +70,8 @@ const world = {
   role: "owner" as RosterMember["role"],
   surfacesProvided: true,
   agents: [] as RosterMember[],
+  // 접을 탐색 패널이 있는 셸(웹·데스크탑)인가(#3299). 거짓이면 폰처럼 능력이 없다.
+  sidebar: null as { collapsed: boolean; onToggle: () => boolean } | null,
 };
 
 function agent(): RosterMember {
@@ -222,6 +228,7 @@ function Host({ actionsResponse }: { actionsResponse?: unknown }) {
       setOpen(next);
     },
     actionsResponse,
+    sidebarList: world.sidebar ?? undefined,
   });
 }
 
@@ -293,6 +300,8 @@ function expectedCommands() {
       handle: member.handle,
     })),
     canOpenLocalCard: () => false,
+    sidebarList:
+      world.sidebar === null ? undefined : { collapsed: world.sidebar.collapsed },
   });
 }
 
@@ -322,12 +331,14 @@ beforeEach(() => {
   world.role = "owner";
   world.surfacesProvided = true;
   world.agents = [];
+  world.sidebar = null;
   openChangeCalls = [];
   setPaletteOpen = null;
   currentPath = "";
   openCreateChannel.mockReset();
   openAgentProfile.mockReset();
   localStorage.clear();
+  resetShortcutBindingsForTest();
 });
 
 afterEach(() => {
@@ -403,6 +414,67 @@ describe("「명령」 그룹은 레지스트리를 그린다", () => {
     );
     expect(routing).toHaveLength(1);
     expect(routing[0]?.dataset.memberId).toBe(AGENT_ID);
+  });
+});
+
+describe("탐색 패널 접기/열기 명령 (#3299)", () => {
+  const sidebarRow = () =>
+    commandRows().find((row) => row.dataset.commandId === "view.sidebar");
+
+  it("접을 패널이 없는 환경(폰처럼 능력이 없는 쪽)에는 줄이 없다", async () => {
+    world.sidebar = null;
+    await mount();
+    expect(sidebarRow()).toBeUndefined();
+  });
+
+  it("펼침이면 「접기」, 접힘이면 「열기」로 이름이 따라간다", async () => {
+    world.sidebar = { collapsed: false, onToggle: () => true };
+    await mount();
+    expect(sidebarRow()?.textContent).toContain("탐색 패널 접기");
+    act(() => mountedRoot?.unmount());
+    mountedHost?.remove();
+    world.sidebar = { collapsed: true, onToggle: () => false };
+    await mount();
+    expect(sidebarRow()?.textContent).toContain("탐색 패널 열기");
+  });
+
+  it("키캡은 지금 유효한 조합이다 — 재지정하면 따라간다", async () => {
+    world.sidebar = { collapsed: false, onToggle: () => true };
+    await mount();
+    const caps = () =>
+      [...(sidebarRow()?.querySelectorAll("kbd") ?? [])].map((k) => k.textContent);
+    expect(caps()).toEqual(["⌘B"]);
+    await act(async () => {
+      setBinding("toggle-sidebar", { code: "KeyY", shift: true, alt: false });
+    });
+    expect(caps()).toEqual(["⌘⇧Y"]);
+    expect(caps()).toEqual([...TOGGLE_SIDEBAR_SHORTCUT.keycaps]);
+  });
+
+  it("누르면 셸의 접기를 한 프레임 뒤에 부르고 팔레트를 닫는다", async () => {
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi
+      .spyOn(globalThis, "requestAnimationFrame")
+      .mockImplementation((callback: FrameRequestCallback) => {
+        frames.push(callback);
+        return frames.length;
+      });
+    const onToggle = vi.fn(() => true);
+    try {
+      world.sidebar = { collapsed: false, onToggle };
+      await mount();
+      await act(async () => {
+        sidebarRow()!.click();
+      });
+      expect(openChangeCalls).toContain(false);
+      expect(onToggle).not.toHaveBeenCalled();
+      await act(async () => {
+        for (const frame of frames) frame(0);
+      });
+      expect(onToggle).toHaveBeenCalledTimes(1);
+    } finally {
+      raf.mockRestore();
+    }
   });
 });
 
