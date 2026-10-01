@@ -26,6 +26,7 @@ import { AgentCredentialsSection } from "./AgentCredentialsSection";
 import { AiLinkSection } from "./AiLinkSection";
 import { AppearanceSection } from "./AppearanceSection";
 import { TerminalSection } from "./TerminalSection";
+import { ShortcutsSection } from "./ShortcutsSection";
 import { LinkPreviewSection } from "./LinkPreviewSection";
 import { EventSubscriptionSection } from "./EventSubscriptionSection";
 import { InviteSection } from "./InviteSection";
@@ -291,6 +292,7 @@ export function SettingsRoute() {
           )}
           {section === "appearance" && <AppearanceSection />}
           {section === "terminal" && <TerminalSection />}
+          {section === "shortcuts" && <ShortcutsSection />}
           {section === "link-previews" && <LinkPreviewSection />}
           {section === "notifications" && (
             <NotificationRulesSection offline={offline} />

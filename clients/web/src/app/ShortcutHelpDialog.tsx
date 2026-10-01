@@ -12,6 +12,7 @@ import {
   SHORTCUT_HELP_GROUPS,
   shouldOpenShortcutHelp,
 } from "@/app/keyboardShortcuts";
+import { useShortcutBindingsVersion } from "@/app/shortcutBindings";
 
 /**
  * 키캡 상자. 글꼴·모서리·그릇·색이 한 벌로 여기 한 번만 적힌다.
@@ -41,15 +42,18 @@ const KEYCAP_PAD = { block: "py-1", inline: "py-px" } as const;
 export function Keycaps({
   keycaps,
   variant = "block",
+  format,
 }: {
   keycaps: readonly string[];
   variant?: keyof typeof KEYCAP_PAD;
+  /** 키캡 글자를 바꿔 적는다(설정이 macOS 밖에서 ⌘를 Ctrl로 적을 때). 키 문자열 자체는 그대로다. */
+  format?: (keycap: string) => string;
 }) {
   return (
     <>
       {keycaps.map((keycap) => (
         <kbd key={keycap} className={`${KEYCAP_BOX} ${KEYCAP_PAD[variant]}`}>
-          {keycap}
+          {format ? format(keycap) : keycap}
         </kbd>
       ))}
     </>
@@ -73,6 +77,8 @@ export function ShortcutHelpDialog() {
   const openerRef = useRef<HTMLElement | null>(null);
   const openRef = useRef(false);
   const [open, setOpen] = useState(false);
+  // 설정에서 키를 바꾸면 도움말의 키캡도 같은 정본에서 다시 읽는다 (#3281).
+  useShortcutBindingsVersion();
 
   const setDialogOpen = useCallback((next: boolean) => {
     openRef.current = next;

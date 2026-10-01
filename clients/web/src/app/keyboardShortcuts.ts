@@ -6,6 +6,14 @@
 // keycaps와 description을 그린다. 키가 바뀌면 동작과 설명이 한 diff에서 움직인다.
 // =============================================================================
 
+import {
+  DEFAULT_COMBOS,
+  comboKeycap,
+  effectiveCombo,
+  getOverride,
+  matchesCombo,
+} from "@/app/shortcutBindings";
+
 export interface ShortcutEvent {
   key: string;
   code?: string;
@@ -35,6 +43,11 @@ export interface KeyboardShortcut {
    * 한다. 그래서 비워 둔다.
    */
   paletteCommandId?: string;
+  /**
+   * 사용자가 설정 › 단축키에서 키를 바꿀 수 있는가 (#3281). 참인 줄의 `keycaps`·`matches`는
+   * 재지정을 읽는다(`shortcutBindings.ts`). 거짓인 줄은 고정이고, 설정에는 읽기 전용으로 선다.
+   */
+  rebindable?: boolean;
 }
 
 export interface ShortcutHelpGroup {
@@ -51,42 +64,64 @@ function lowerKey(event: ShortcutEvent): string {
   return event.key.toLowerCase();
 }
 
-export const OPEN_QUICK_SWITCHER_SHORTCUT: KeyboardShortcut = {
+/**
+ * 재지정 가능한 줄을 만든다 (#3281). `matches`는 재지정이 없으면 **원래의 판정**
+ * (`defaultMatches`)을 그대로 돌고, 있으면 그 조합을 물리 키로 맞춘다. `keycaps`는 읽을 때마다
+ * 지금 유효한 조합에서 그린다(도움말·팔레트가 재그림을 구독한다).
+ */
+function rebindableShortcut(
+  def: Omit<KeyboardShortcut, "keycaps" | "matches" | "rebindable"> & {
+    defaultMatches: (event: ShortcutEvent) => boolean;
+  }
+): KeyboardShortcut {
+  const { defaultMatches, ...rest } = def;
+  return {
+    ...rest,
+    rebindable: true,
+    get keycaps(): readonly string[] {
+      return [comboKeycap(effectiveCombo(def.id) ?? DEFAULT_COMBOS[def.id])];
+    },
+    matches(event) {
+      const override = getOverride(def.id);
+      return override !== undefined
+        ? matchesCombo(event, override)
+        : defaultMatches(event);
+    },
+  };
+}
+
+export const OPEN_QUICK_SWITCHER_SHORTCUT: KeyboardShortcut = rebindableShortcut({
   id: "open-quick-switcher",
   description: "검색과 이동 열기",
-  keycaps: ["⌘K"],
-  matches: (event) =>
+  defaultMatches: (event) =>
     commandOrControl(event) && !event.shiftKey && lowerKey(event) === "k",
-};
+});
 
-export const OPEN_NEW_DM_SHORTCUT: KeyboardShortcut = {
+export const OPEN_NEW_DM_SHORTCUT: KeyboardShortcut = rebindableShortcut({
   id: "open-new-dm",
   description: "새 다이렉트 메시지 시작",
-  keycaps: ["⌘⇧K"],
-  matches: (event) =>
+  defaultMatches: (event) =>
     commandOrControl(event) && event.shiftKey === true && lowerKey(event) === "k",
-};
+});
 
-export const OPEN_SETTINGS_SHORTCUT: KeyboardShortcut = {
+export const OPEN_SETTINGS_SHORTCUT: KeyboardShortcut = rebindableShortcut({
   id: "open-settings",
   description: "설정 열기",
-  keycaps: ["⌘,"],
   paletteCommandId: "nav.settings",
-  matches: (event) => commandOrControl(event) && event.key === ",",
-};
+  defaultMatches: (event) => commandOrControl(event) && event.key === ",",
+});
 
-export const OPEN_INBOX_SHORTCUT: KeyboardShortcut = {
+export const OPEN_INBOX_SHORTCUT: KeyboardShortcut = rebindableShortcut({
   id: "open-inbox",
   description: "인박스 열기",
-  keycaps: ["⌘⇧A"],
   paletteCommandId: "nav.inbox",
-  matches: (event) =>
+  defaultMatches: (event) =>
     event.metaKey === true &&
     event.shiftKey === true &&
     !event.ctrlKey &&
     !event.altKey &&
     lowerKey(event) === "a",
-};
+});
 
 /**
  * 탐색 패널(목록 열) 접고 펴기 (#3280). 정본은 이 한 줄이다: 도움말·타이틀바 툴팁·
@@ -96,20 +131,24 @@ export const OPEN_INBOX_SHORTCUT: KeyboardShortcut = {
  * 「ㅠ」). **누가 언제 가져가는가**는 `shouldToggleSidebar`가 정한다 — 컴포저의 굵게
  * (⌘B)가 우선이고, 터미널은 macOS에서만 넘긴다.
  *
- * 팔레트 명령(`paletteCommandId`)은 아직 없다: 팔레트의 `client` 명령은 코어 레지스트리·
- * 폰과 함께 움직이는 표라 이 PR의 범위가 아니다(#3281에서 함께 정한다).
+ * 팔레트 명령(`paletteCommandId`)은 없다: 팔레트의 `client` 명령은 코어 레지스트리·
+ * 폰과 함께 움직이는 표라(`CommandContext`에 접기 훅이 없다) 이 줄의 범위 밖이다(#3281).
  */
-export const TOGGLE_SIDEBAR_SHORTCUT: KeyboardShortcut = {
-  id: "toggle-sidebar",
-  description: "탐색 패널 접고 펴기",
-  keycaps: ["⌘B"],
-  matches: (event) =>
+function matchesDefaultSidebarKey(event: ShortcutEvent): boolean {
+  return (
     commandOrControl(event) &&
     !(event.metaKey === true && event.ctrlKey === true) &&
     !event.shiftKey &&
     !event.altKey &&
-    (event.code === "KeyB" || (event.code === undefined && lowerKey(event) === "b")),
-};
+    (event.code === "KeyB" || (event.code === undefined && lowerKey(event) === "b"))
+  );
+}
+
+export const TOGGLE_SIDEBAR_SHORTCUT: KeyboardShortcut = rebindableShortcut({
+  id: "toggle-sidebar",
+  description: "탐색 패널 접고 펴기",
+  defaultMatches: matchesDefaultSidebarKey,
+});
 
 export const MOVE_UNREAD_CHANNEL_SHORTCUT: KeyboardShortcut = {
   id: "move-unread-channel",
@@ -223,6 +262,7 @@ export type ShortcutPlatform = "mac" | "other";
  * 3. 모달·다이얼로그가 열려 있으면 아니다(`overlayOpen`).
  * 4. **터미널**(`.xterm`): macOS ⌘B만 앱이 가져간다(PTY로 갈 바이트가 없는 키, ADR-0190 D5
  *    증보 `TERMINAL_APP_BINDINGS`). 그 밖의 플랫폼 Ctrl+B는 tmux prefix라 터미널 몫이다.
+ *    이 칸에서는 재지정을 보지 않는다: 키는 항상 기본 ⌘B다(#3281).
  * 5. **입력 칸**(컴포저 textarea·`contenteditable`·input): 건드리지 않는다. 컴포저의 ⌘B는
  *    「굵게」다(`useComposerFormat`).
  */
@@ -235,7 +275,17 @@ export function shouldToggleSidebar(
   platform: ShortcutPlatform,
   context: { overlayOpen?: boolean } = {}
 ): boolean {
-  if (!TOGGLE_SIDEBAR_SHORTCUT.matches(event)) return false;
+  const target = event.target as TextEntryTarget | null;
+  const inTerminal =
+    target !== null &&
+    typeof target.closest === "function" &&
+    target.closest(".xterm") !== null;
+  // 터미널 안에서는 키가 **고정**이다(ADR-0190 D5 증보): 재지정은 터미널이 앱으로 넘기는
+  // 키를 넓히지 않으므로, 이 자리는 항상 기본 ⌘B만 본다. 재지정한 조합은 터미널을 통과하지 않는다.
+  const shapeMatches = inTerminal
+    ? matchesDefaultSidebarKey(event)
+    : TOGGLE_SIDEBAR_SHORTCUT.matches(event);
+  if (!shapeMatches) return false;
   const exactModifier =
     platform === "mac"
       ? event.metaKey === true && event.ctrlKey !== true
@@ -243,11 +293,6 @@ export function shouldToggleSidebar(
   if (!exactModifier) return false;
   if (event.isComposing === true || event.repeat === true) return false;
   if (context.overlayOpen === true) return false;
-  const target = event.target as TextEntryTarget | null;
-  const inTerminal =
-    target !== null &&
-    typeof target.closest === "function" &&
-    target.closest(".xterm") !== null;
   if (inTerminal) return platform === "mac";
   return !isTextEntryTarget(event.target);
 }
