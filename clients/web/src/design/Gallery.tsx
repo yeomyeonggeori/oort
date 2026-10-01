@@ -44,6 +44,7 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
+  DropdownMenuCheckboxItem,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -469,6 +470,12 @@ function OverlayExamples() {
                         안 읽은 것만
                       </DropdownMenuRadioItem>
                     </DropdownMenuRadioGroup>
+                    <DropdownMenuCheckboxItem
+                      data-gallery-export="DropdownMenuCheckboxItem"
+                      checked={false}
+                    >
+                      켜고 끄기
+                    </DropdownMenuCheckboxItem>
                   </DropdownMenuContent>
                 )}
               </OverlayCell>

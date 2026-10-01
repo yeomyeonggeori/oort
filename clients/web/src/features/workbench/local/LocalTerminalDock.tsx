@@ -723,6 +723,8 @@ export function LocalTerminalDock({
       if (!folder) return;
       commitStart({ choice: { kind: "folder", folder }, recent: startRef.current.recent });
     }
+    // 격리는 폴더마다 새로 고른다: 다른 폴더로 옮기면 다시 끈다.
+    setWorktreeOn(false);
     setNotice(null);
   };
   /** 네이티브 폴더 대화상자. 취소는 아무 일도 아니다. 거부는 이유를 한 줄로 말한다. */
@@ -735,6 +737,7 @@ export function LocalTerminalDock({
         choice: { kind: "folder", folder: facts },
         recent: rememberFolder(startRef.current.recent, facts),
       });
+      setWorktreeOn(false);
       setNotice(null);
     } catch (error) {
       setNotice(startErrorMessage(error));
@@ -767,7 +770,7 @@ export function LocalTerminalDock({
           >
             <span className="min-w-0 truncate">{folder.name}</span>
             <span className="ml-auto flex shrink-0 items-center gap-2 pl-4 text-meta text-ink-muted">
-              {parentName(folder.path)}
+              <span className="max-w-24 truncate">{parentName(folder.path)}</span>
               {choiceValue === folder.path ? <Check aria-hidden className="size-4 text-ink" /> : null}
             </span>
           </DropdownMenuRadioItem>
@@ -788,13 +791,20 @@ export function LocalTerminalDock({
         disabled={!availability.enabled}
         onCheckedChange={setWorktreeOn}
         onSelect={keepOpen}
+        // 꺼진 줄은 이름만 흐리게 하고 이유 줄은 또렷하게 둔다(이유가 읽혀야 한다).
+        className="data-[disabled]:opacity-100"
+        aria-describedby="local-terminal-start-worktree-note"
         data-testid="local-terminal-start-worktree"
       >
-        <span className="flex w-full items-center gap-2">
+        <span className={cn("flex w-full items-center gap-2", !availability.enabled && "opacity-50")}>
           {START_COPY.worktree}
           {worktreeOn && availability.enabled ? <Check aria-hidden className="ml-auto size-4" /> : null}
         </span>
-        <span className="text-meta text-ink-muted" data-testid="local-terminal-start-worktree-note">
+        <span
+          id="local-terminal-start-worktree-note"
+          className="text-meta text-ink-muted"
+          data-testid="local-terminal-start-worktree-note"
+        >
           {availability.enabled ? START_COPY.worktreeHint : availability.reason}
         </span>
       </DropdownMenuCheckboxItem>

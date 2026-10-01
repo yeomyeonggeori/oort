@@ -352,6 +352,31 @@ describe("worktree 격리 (#2775)", () => {
     expect(checkbox()?.getAttribute("aria-checked")).toBe("false");
   });
 
+  it("격리를 켜 둔 채 다른 폴더로 옮기면 다시 꺼진다", async () => {
+    const { sessions } = fakeSessions();
+    const other: StartFolder = { path: "/Users/t/projects/web", name: "web", repo: "ready" };
+    const storage = memoryStorage({ choice: { kind: "folder", folder: REPO }, recent: [REPO, other] });
+    await mount(sessions, { pick: async () => null, inspect: async (p) => (p === other.path ? other : REPO), storage });
+    await openMenu();
+    await act(async () => checkbox()!.click());
+    expect(checkbox()?.getAttribute("aria-checked")).toBe("true");
+    await act(async () => all("local-terminal-start-recent")[1]!.click());
+    expect(checkbox()?.getAttribute("aria-checked")).toBe("false");
+    // 홈을 거쳐 돌아와도 켜져 있지 않다.
+    await act(async () => q("local-terminal-start-home")!.click());
+    await act(async () => all("local-terminal-start-recent")[0]!.click());
+    expect(checkbox()?.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("꺼진 줄의 이유는 입력 보조 기술에 연결되어 있다", async () => {
+    const { sessions } = fakeSessions();
+    await mount(sessions, { pick: async () => null, inspect: never, storage: memoryStorage() });
+    await openMenu();
+    const id = checkbox()?.getAttribute("aria-describedby");
+    expect(id).toBeTruthy();
+    expect(document.getElementById(id!)?.textContent).toBe("홈에서는 쓸 수 없어요");
+  });
+
   it("worktree를 못 만들면 원래 폴더로 몰래 가지 않고, 칸이 이유를 말한다", async () => {
     const { sessions, spawns, failWorktreeWith } = fakeSessions();
     failWorktreeWith("worktree_failed: no commit yet");
