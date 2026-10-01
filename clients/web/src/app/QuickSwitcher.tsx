@@ -21,6 +21,7 @@ import {
   Lock,
   MessageSquare,
   Milestone,
+  PanelLeft,
   Plug,
   Plus,
   Search,
@@ -173,6 +174,7 @@ const COMMAND_ICONS: Record<CommandIcon, LucideIcon> = {
   agent: Bot,
   // 시안 ①의 `i-plug`. AI 연결 카드와 컴포저 `/연결` 줄이 같은 글리프를 든다.
   "ai-connect": Plug,
+  sidebar: PanelLeft,
 };
 
 /** 명령 id → 그 명령과 같은 일을 하는 단축키. 없으면 키캡을 그리지 않는다. */
@@ -437,6 +439,7 @@ export function QuickSwitcher({
   open,
   onOpenChange,
   actionsResponse,
+  sidebarList,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -452,8 +455,15 @@ export function QuickSwitcher({
    * 통째로 없다. 확신 없는 행동 줄은 세우지 않는다(fail-closed).
    */
   actionsResponse?: unknown;
+  /**
+   * 접을 탐색 패널(목록 열)이 있는 셸이 넣는 능력(#3299). 넣으면 「탐색 패널 접기/열기」
+   * 명령이 서고, 안 넣으면(접을 열이 없는 설정 전면·폰 서랍 폭) 줄 자체가 없다.
+   * `onToggle`은 **바뀐 뒤의 접힘**을 돌려준다.
+   */
+  sidebarList?: { collapsed: boolean; onToggle: () => boolean };
 }) {
   const { session, workspaceId } = useSession();
+  const sidebarCollapsed = sidebarList?.collapsed;
   const navigate = useNavigate();
   const location = useLocation();
   const { showNav: showDrafts } = useDraftsPanel();
@@ -661,10 +671,20 @@ export function QuickSwitcher({
           agents: commandAgents,
           // 카드 자리는 지금 서 있는 채널의 것이다(#2943). 채널 밖이면 없다.
           canOpenLocalCard: () => hasLocalCardHost(currentChannelId),
+          sidebarList:
+            sidebarCollapsed === undefined ? undefined : { collapsed: sidebarCollapsed },
         }),
         usage
       ),
-    [showDrafts, canCreate, commandAgents, usage, surfaceProvided, currentChannelId]
+    [
+      showDrafts,
+      canCreate,
+      commandAgents,
+      usage,
+      surfaceProvided,
+      currentChannelId,
+      sidebarCollapsed,
+    ]
   );
 
   const commandContext: CommandContext = {
@@ -684,6 +704,16 @@ export function QuickSwitcher({
     workspaceId,
     // #2854: 데스크탑의 작업 콘솔은 `/work?view=console`이다.
     desktop: isDesktop(),
+    // 접기는 한 프레임 뒤에 한다(위 폼들과 같은 이유): 팔레트가 캐럿을 먼저 돌려놓아야
+    // 셸이 「목록 열 안의 캐럿」을 단추로 옮겨 <body>로 떨어지지 않는다.
+    toggleSidebarList:
+      sidebarList === undefined
+        ? undefined
+        : () => {
+            const next = !sidebarList.collapsed;
+            requestAnimationFrame(() => sidebarList.onToggle());
+            return next;
+          },
   };
 
   // 「명령」 그룹. 자리는 친 말이 정한다(아래 `commandsFirst`).
