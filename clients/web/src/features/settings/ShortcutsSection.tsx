@@ -136,7 +136,7 @@ export function ShortcutsSection({
           : event.ctrlKey && !event.metaKey;
       const modName = platform === "mac" ? "⌘" : "Ctrl";
       if (!modOk) {
-        const message = `${modName}와 함께 누르세요. 글자만 누르면 입력과 구분되지 않습니다.`;
+        const message = `${modName} 키와 함께 누르세요. 글자만 누르면 입력과 구분되지 않습니다.`;
         setNotice({ rowId, message });
         setLive(message);
         return;
@@ -309,7 +309,7 @@ export function ShortcutsSection({
                           <span className="text-body text-ink">{row.name}</span>
                           <span className="text-meta text-ink-muted">
                             {capturing
-                              ? `${modifierName}를 누른 채 키를 누르세요. Esc로 취소합니다.`
+                              ? `${modifierName} 키를 누른 채 키를 누르세요. Esc로 취소합니다.`
                               : [
                                   row.desktopOnly ? "데스크탑 전용" : null,
                                   row.rebindable ? null : "고정",
@@ -325,8 +325,14 @@ export function ShortcutsSection({
                               ref={captureRef}
                               type="button"
                               className="w-action rounded-sm border border-line-strong bg-surface px-2 py-1 text-meta text-ink press focus-visible:focus-ring"
-                              aria-label={`「${row.name}」에 지정할 키를 누르세요. Esc로 취소합니다.`}
-                              onBlur={() => setCapturingId((current) => (current === row.id ? null : current))}
+                              aria-label={`키를 누르세요. 「${row.name}」에 지정합니다. Esc로 취소합니다.`}
+                              onBlur={() => {
+                                // 포커스가 입력 칸을 벗어나면 입력이 끝난다. 끝났다고 알리고 남은 경고를 걷는다.
+                                if (capturingId !== row.id) return;
+                                setCapturingId(null);
+                                setNotice((current) => (current?.swap === undefined ? null : current));
+                                setLive("포커스를 옮겨 키 지정을 끝냈습니다. 키는 그대로입니다.");
+                              }}
                               data-testid="shortcut-capture"
                             >
                               키를 누르세요
@@ -352,8 +358,8 @@ export function ShortcutsSection({
                                 onClick={() => (capturing ? cancelCapture(true, row.id) : startCapture(row))}
                                 aria-label={
                                   capturing
-                                    ? `「${row.name}」 키 지정 취소`
-                                    : `「${row.name}」 키 바꾸기`
+                                    ? `취소, 「${row.name}」 키 지정`
+                                    : `변경, 「${row.name}」 단축키`
                                 }
                                 data-testid={`shortcut-change-${row.id}`}
                               >
@@ -369,7 +375,7 @@ export function ShortcutsSection({
                                     setNotice(null);
                                     setLive(`「${row.name}」 키를 기본 키로 되돌렸습니다.`);
                                   }}
-                                  aria-label={`「${row.name}」 키를 기본 키로 되돌리기`}
+                                  aria-label={`초기화, 「${row.name}」 단축키를 기본 키로`}
                                   data-testid={`shortcut-reset-${row.id}`}
                                 >
                                   초기화

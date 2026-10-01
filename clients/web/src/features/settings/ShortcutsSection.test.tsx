@@ -193,7 +193,7 @@ describe("설정 › 단축키 (#3281)", () => {
     expect(host.querySelector('[data-testid="shortcut-notice"]')?.textContent).toContain("앱 종료");
     expect(host.querySelector('[data-testid="shortcut-capture"]')).not.toBeNull();
     press({ key: "x", code: "KeyX" });
-    expect(host.querySelector('[data-testid="shortcut-notice"]')?.textContent).toContain("⌘와 함께");
+    expect(host.querySelector('[data-testid="shortcut-notice"]')?.textContent).toContain("⌘ 키와 함께");
   });
 
   it("데스크탑에서 터미널 키(⌘J)는 막고 이유를 말한다", () => {
@@ -212,6 +212,31 @@ describe("설정 › 단축키 (#3281)", () => {
     expect(host.querySelector('[data-testid="shortcut-capture"]')).toBeNull();
     expect(live(host)).toContain("취소");
     expect(OPEN_INBOX_SHORTCUT.keycaps).toEqual(["⌘⇧A"]);
+  });
+
+  it("포커스가 입력 칸을 벗어나면 입력이 끝나고 낭독하며 남은 경고를 걷는다", () => {
+    const host = render(false);
+    click(host.querySelector('[data-testid="shortcut-change-open-inbox"]'));
+    press({ key: "q", code: "KeyQ", metaKey: true });
+    expect(host.querySelector('[data-testid="shortcut-notice"]')).not.toBeNull();
+    const capture = host.querySelector('[data-testid="shortcut-capture"]') as HTMLElement;
+    expect(document.activeElement).toBe(capture);
+    act(() => capture.blur());
+    expect(host.querySelector('[data-testid="shortcut-capture"]')).toBeNull();
+    expect(host.querySelector('[data-testid="shortcut-notice"]')).toBeNull();
+    expect(live(host)).toContain("포커스를 옮겨");
+    expect(OPEN_INBOX_SHORTCUT.keycaps).toEqual(["⌘⇧A"]);
+  });
+
+  it("버튼의 접근 이름은 화면에 보이는 글자로 시작한다", () => {
+    const host = render(false);
+    click(host.querySelector('[data-testid="shortcut-change-open-inbox"]'));
+    press({ key: "g", code: "KeyG", metaKey: true, shiftKey: true });
+    const change = host.querySelector('[data-testid="shortcut-change-open-inbox"]') as HTMLElement;
+    expect(change.textContent).toBe("변경");
+    expect(change.getAttribute("aria-label")?.startsWith("변경")).toBe(true);
+    const reset = host.querySelector('[data-testid="shortcut-reset-open-inbox"]') as HTMLElement;
+    expect(reset.getAttribute("aria-label")?.startsWith(reset.textContent ?? "?")).toBe(true);
   });
 
   it("모두 초기화는 바꾼 키가 없으면 꺼져 있고, 있으면 전부 되돌린다", () => {

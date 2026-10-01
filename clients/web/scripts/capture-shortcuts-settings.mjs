@@ -136,9 +136,9 @@ const rowBox = (page, id) =>
     return { y: Math.round(r.y * 10) / 10, h: Math.round(r.height * 10) / 10, w: Math.round(r.width * 10) / 10 };
   }, id);
 
-async function scene(browser, origin, scheme, desktop, report) {
-  const tag = `${desktop ? "desktop" : "web"}-${scheme}`;
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, colorScheme: scheme, serviceWorkers: "block" });
+async function scene(browser, origin, scheme, desktop, report, width = 1280) {
+  const tag = `${desktop ? "desktop" : "web"}-${scheme}${width === 1280 ? "" : `-${width}`}`;
+  const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: scheme, serviceWorkers: "block" });
   await installRoutes(context);
   const page = await context.newPage();
   await installRealtime(page);
@@ -237,6 +237,9 @@ async function main() {
     }
     await scene(browser, preview.origin, "light", true, report);
     await scene(browser, preview.origin, "dark", true, report);
+    // 좁은 창(900): 설정 목차와 이름 열이 좁아져도 줄이 무너지지 않는다.
+    await scene(browser, preview.origin, "light", true, report, 900);
+    await scene(browser, preview.origin, "dark", false, report, 900);
   } finally {
     await browser.close();
     await preview.stop?.();
