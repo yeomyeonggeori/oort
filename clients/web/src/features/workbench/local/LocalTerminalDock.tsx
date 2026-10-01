@@ -12,7 +12,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { Check, ChevronDown, ListTree, Maximize, Minimize, PanelLeftOpen, Plus, SquareTerminal, X } from "lucide-react";
+import { Check, ChevronDown, ListTree, Maximize, Minimize, Plus, SquareTerminal, X } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import {
@@ -1018,7 +1018,7 @@ export function LocalTerminalDock({
         },
       ];
     });
-    // 「내 작업」(#2854·#2856, 시안 ①): 세션 목록 260 | 머리 줄 48 · 격자 좌우 여백 12.
+    // 「내 작업」(#2854·#2856, 시안 ①): 세션 목록 268 | 머리 줄 48 · 격자 좌우 여백 12.
     // 배치 프리셋(T5)·worktree 보기(T6)·로그 패널(T7)은 각 이슈가 머리 줄에 붙인다.
     return (
       <div
@@ -1036,24 +1036,13 @@ export function LocalTerminalDock({
             onActivate={(paneId) => applyFromList(focusPane(layoutRef.current, paneId))}
             onMaximize={(paneId) => applyFromList(toggleMaximize(layoutRef.current, paneId))}
             onFocusIndex={(index) => applyFromList(focusIndex(layoutRef.current, index))}
-            onCollapse={() => setListOpen(false)}
             newSessionItems={newSessionItems}
             onNewSessionMenuCloseAutoFocus={onMenuCloseAutoFocus}
           />
         ) : null}
         <section aria-labelledby="my-work-title" className="flex min-h-0 min-w-0 flex-1 flex-col">
           <header className="flex h-work-tab-bar shrink-0 items-center gap-2 pl-4 pr-3">
-            {list.open ? null : (
-              <DockIconButton
-                label="세션 목록 펴기"
-                keycap="⌘J"
-                aria="Meta+J"
-                testId="session-list-expand"
-                onClick={() => openListAndFocus()}
-              >
-                <PanelLeftOpen />
-              </DockIconButton>
-            )}
+            {/* 접힌 목록을 펴는 단추는 이 머리에 없다(#3280): 제목줄의 접기 단추와 ⌘B가 한다. */}
             <h1 id="my-work-title" className="shrink-0 text-title font-bold text-ink">
               {WORK_NAV.mine}
             </h1>

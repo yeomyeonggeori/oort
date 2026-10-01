@@ -211,7 +211,7 @@ async function signIn(page, origin) {
   await page.getByTestId("login-email").fill("capture@example.test");
   await page.getByTestId("login-password").fill("not-a-secret");
   await page.getByTestId("login-submit").click();
-  await page.getByTestId("nav-team-work").waitFor({ timeout: 20_000 });
+  await page.getByTestId("rail-team").waitFor({ timeout: 20_000 });
 }
 
 // 시안 ①의 상태(#2776): 칸 3·5 응답 필요, 나머지 실행 중(hook 「작업 중」), PTY 6 끝남(종료 0).
@@ -243,7 +243,7 @@ async function scene(browser, origin, scheme, viewport) {
   const tag = `${viewport.width}-${scheme}`;
   const { context, page } = await open(browser, origin, { viewport, scheme, desktop: true, signals: MOCK_SIGNALS });
   if (viewport.width < 600) await page.goto(`${origin}/#/work`);
-  else await page.getByTestId("nav-my-work").click();
+  else await page.getByTestId("rail-mine").click();
   await page.getByTestId("my-work-tab").waitFor();
   await page.waitForFunction(() => document.querySelectorAll("[data-testid='my-work-tab'] [data-pane-id] .xterm-rows").length >= 1, null, { timeout: 15_000 });
   await page.waitForFunction(() => document.querySelectorAll("[data-testid='my-work-tab'] [data-pane-id]").length >= 1, null, { timeout: 15_000 });

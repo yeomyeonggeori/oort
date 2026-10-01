@@ -3,8 +3,7 @@ import {
   Cloud,
   CircleHelp,
   Laptop,
-  PanelLeftClose,
-  PanelLeftOpen,
+  PanelLeft,
   Server,
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -514,13 +513,12 @@ export function WorkConsoleRoute() {
                   aria-controls="work-console-session-list"
                   title={detailWide ? "세션 목록 보이기" : "상세 넓게 보기"}
                   data-testid="work-console-detail-wide"
-                  className="pane-wide-toggle flex size-6 shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+                  className="pane-wide-toggle flex size-control-sm shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
                 >
-                  {detailWide ? (
-                    <PanelLeftOpen className="size-4" />
-                  ) : (
-                    <PanelLeftClose className="size-4" />
-                  )}
+                  {/* 아이콘은 하나다(#3280): 상태는 aria-pressed와 툴팁이 말한다. 좌측 사이드바
+                      접기 단추(제목줄)와 같은 28px 계열이고, 의미가 「접기」가 아니라 「확대」라
+                      모양만 좌측 패널 아이콘 한 개로 고정한다. */}
+                  <PanelLeft className="size-4" />
                 </button>
               </div>
               <WorkSessionDetail

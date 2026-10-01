@@ -8,6 +8,7 @@ import {
   OPEN_QUICK_SWITCHER_SHORTCUT,
   OPEN_SETTINGS_SHORTCUT,
   PRIMARY_ACTION_SHORTCUT,
+  TOGGLE_SIDEBAR_SHORTCUT,
   REGISTERED_SHORTCUTS,
   ROW_ACTIONS_SHORTCUT,
   SHORTCUT_HELP_GROUPS,
@@ -30,6 +31,26 @@ function key(
   };
 }
 
+describe("탐색 패널 접기 ⌘B (#3280)", () => {
+  it("도움말 「탐색」 그룹에 한 번 등록되고 팔레트 명령은 아직 없다(#3281이 함께 정한다)", () => {
+    const navigation = SHORTCUT_HELP_GROUPS.find((group) => group.id === "navigation");
+    expect(navigation?.shortcuts).toContain(TOGGLE_SIDEBAR_SHORTCUT);
+    expect(TOGGLE_SIDEBAR_SHORTCUT.keycaps).toEqual(["⌘B"]);
+    expect(TOGGLE_SIDEBAR_SHORTCUT.paletteCommandId).toBeUndefined();
+  });
+
+  it("키 모양: ⌘B·Ctrl+B만, ⇧·⌥·수식 없음은 아니다. 한글 2벌식은 code로 잡는다", () => {
+    const b = (o: Partial<ShortcutEvent>) => TOGGLE_SIDEBAR_SHORTCUT.matches(key("b", { code: "KeyB", ...o }));
+    expect(b({ metaKey: true })).toBe(true);
+    expect(b({ ctrlKey: true })).toBe(true);
+    expect(b({ metaKey: true, key: "ㅠ" })).toBe(true);
+    expect(b({})).toBe(false);
+    expect(b({ metaKey: true, shiftKey: true })).toBe(false);
+    expect(b({ metaKey: true, altKey: true })).toBe(false);
+    expect(b({ metaKey: true, code: "KeyN", key: "n" })).toBe(false);
+  });
+});
+
 describe("shortcut registry", () => {
   it("renders every registered shortcut exactly once", () => {
     const grouped = SHORTCUT_HELP_GROUPS.flatMap((group) => group.shortcuts);
@@ -37,7 +58,7 @@ describe("shortcut registry", () => {
     expect(new Set(grouped.map((shortcut) => shortcut.id)).size).toBe(
       grouped.length
     );
-    expect(grouped).toHaveLength(8);
+    expect(grouped).toHaveLength(9);
   });
 
   it("matches the global navigation registrations", () => {

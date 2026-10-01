@@ -79,7 +79,20 @@ describe("터미널 포커스 중 가로채는 키 = D5 표 전부, 그 밖은 �
       "close",
       "jump-palette",
       "next-waiting",
+      "toggle-sidebar",
     ]);
+  });
+
+  // #3280, ADR-0190 D5 증보: ⌘B(탐색 패널 접기)는 macOS에서만 앱이 가져간다.
+  it("⌘B는 macOS에서 앱 키이고, 비 mac Ctrl+B(tmux prefix)·수식 키가 다른 B는 터미널 입력이다", () => {
+    expect(isTerminalAppKey({ code: "KeyB", key: "b", metaKey: true }, "mac")).toBe(true);
+    // 한글 2벌식: key가 「ㅠ」여도 물리 키로 판정한다.
+    expect(isTerminalAppKey({ code: "KeyB", key: "ㅠ", metaKey: true }, "mac")).toBe(true);
+    expect(isTerminalAppKey({ code: "KeyB", key: "b", ctrlKey: true }, "other")).toBe(false);
+    expect(isTerminalAppKey({ code: "KeyB", key: "b", ctrlKey: true }, "mac")).toBe(false); // ⌃B = tmux prefix
+    expect(isTerminalAppKey({ code: "KeyB", key: "B", metaKey: true, shiftKey: true }, "mac")).toBe(false);
+    expect(isTerminalAppKey({ code: "KeyB", key: "b", metaKey: true, altKey: true }, "mac")).toBe(false);
+    expect(isTerminalAppKey({ code: "KeyB", key: "b" }, "mac")).toBe(false);
   });
 
   it.each<[string, WorkbenchKeyEvent]>([
