@@ -53,10 +53,10 @@ describe("창 바닥과 떠 있는 판 (시안 `.a-win` · `.a-main`)", () => {
     );
   });
 
-  it("띠가 있는 테마는 사이드바 열 폭만큼 띠가 바닥 위에 깔리고, 접히면 0이다", () => {
+  it("띠가 있는 테마는 사이드바 열 폭만큼 띠가 바닥 위에 깔리고, 접히면 레일 폭만 남는다 (#3280)", () => {
     expect(shell).toMatch(/linear-gradient\(var\(--band, transparent\), var\(--band, transparent\)\)/);
     expect(shell).toMatch(/background-size:\s*var\(--w-sidebar\) 100%,/);
-    expect(shell).toMatch(/\[data-sidebar-collapsed\][\s\S]*?background-size:\s*0px 100%,/);
+    expect(shell).toMatch(/\[data-sidebar-collapsed\][\s\S]*?background-size:\s*var\(--spacing-rail\) 100%,/);
   });
 
   it("본문은 첫 행부터 인셋 8(위·오른쪽·아래)로 떠 있고, 접히면 상단 줄 아래로 내려간다", () => {
@@ -114,7 +114,9 @@ describe("사이드바 (시안 `.a-side`)", () => {
   it("선택 행은 흰 면 + rest로 뜨고 호박색을 쓰지 않는다 (owner 결정 2026-09-26)", () => {
     const selected = utility("sidebar-row-selected");
     expect(selected).toMatch(/background-color: var\(--surface\);/);
-    expect(selected).toMatch(/box-shadow: var\(--elevation-rest\);/);
+    // 다크 대비 고리(#3280): 라이트는 투명이라 그대로이고 다크에서만 --line-strong 1px가 선다.
+    expect(selected).toMatch(/box-shadow:\s*var\(--elevation-rest\),\s*inset 0 0 0 1px var\(--selected-edge\);/);
+    expect(TOKENS).toMatch(/--selected-edge: light-dark\(transparent, var\(--line-strong\)\);/);
     expect(selected).not.toMatch(/--signal|--accent/);
     const active = /const activeClass =\s*"([^"]+)"/.exec(SIDEBAR_ROW)?.[1] ?? "";
     expect(active.split(/\s+/)).toEqual(
@@ -134,7 +136,7 @@ describe("사이드바 (시안 `.a-side`)", () => {
 });
 
 describe("띠 위 규칙 (노을띠 `band`, themes-2.0 §3)", () => {
-  const scope = rule(".sidebar-drawer,\n.app-shell:not([data-sidebar-collapsed]) > .app-titlebar {");
+  const scope = rule(".sidebar-drawer,\n.app-shell:not([data-sidebar-collapsed], [data-work-rail]) > .app-titlebar {");
   const allowed = new Set<string>(BAND_ALLOWED_FOREGROUNDS.map(([role]) => role));
 
   it("사이드바 범위의 글자 역할은 전부 띠 위에 설 수 있는 역할로 다시 묶인다", () => {

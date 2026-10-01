@@ -88,6 +88,29 @@ export const OPEN_INBOX_SHORTCUT: KeyboardShortcut = {
     lowerKey(event) === "a",
 };
 
+/**
+ * 탐색 패널(목록 열) 접고 펴기 (#3280). 정본은 이 한 줄이다: 도움말·타이틀바 툴팁·
+ * 셸 핸들러가 모두 여기서 읽는다(#3281이 재바인딩을 얹을 자리).
+ *
+ * `matches`는 키 모양만 본다(⌘ 또는 Ctrl + B, 물리 키 `code`: 한글 2벌식에서 `key`는
+ * 「ㅠ」). **누가 언제 가져가는가**는 `shouldToggleSidebar`가 정한다 — 컴포저의 굵게
+ * (⌘B)가 우선이고, 터미널은 macOS에서만 넘긴다.
+ *
+ * 팔레트 명령(`paletteCommandId`)은 아직 없다: 팔레트의 `client` 명령은 코어 레지스트리·
+ * 폰과 함께 움직이는 표라 이 PR의 범위가 아니다(#3281에서 함께 정한다).
+ */
+export const TOGGLE_SIDEBAR_SHORTCUT: KeyboardShortcut = {
+  id: "toggle-sidebar",
+  description: "탐색 패널 접고 펴기",
+  keycaps: ["⌘B"],
+  matches: (event) =>
+    commandOrControl(event) &&
+    !(event.metaKey === true && event.ctrlKey === true) &&
+    !event.shiftKey &&
+    !event.altKey &&
+    (event.code === "KeyB" || (event.code === undefined && lowerKey(event) === "b")),
+};
+
 export const MOVE_UNREAD_CHANNEL_SHORTCUT: KeyboardShortcut = {
   id: "move-unread-channel",
   description: "이전 또는 다음 안 읽은 채널로 이동",
@@ -135,6 +158,7 @@ export const SHORTCUT_HELP_GROUPS: readonly ShortcutHelpGroup[] = [
       OPEN_NEW_DM_SHORTCUT,
       OPEN_SETTINGS_SHORTCUT,
       OPEN_INBOX_SHORTCUT,
+      TOGGLE_SIDEBAR_SHORTCUT,
       MOVE_UNREAD_CHANNEL_SHORTCUT,
       OPEN_SHORTCUT_HELP_SHORTCUT,
     ],
@@ -185,4 +209,45 @@ export function shouldOpenShortcutHelp(
     !isTextEntryTarget(event.target) &&
     OPEN_SHORTCUT_HELP_SHORTCUT.matches(event)
   );
+}
+
+/** 이 창의 수식 키 규약: macOS는 ⌘, 그 밖은 Ctrl. */
+export type ShortcutPlatform = "mac" | "other";
+
+/**
+ * 전역 ⌘B(Ctrl+B)가 탐색 패널을 접고 펼 것인가 (#3280).
+ *
+ * 순서가 계약이다.
+ * 1. 키 모양: macOS는 ⌘B만(⌃B는 아니다), 그 밖은 Ctrl+B만. Shift·Alt가 붙으면 아니다.
+ * 2. IME 조합 중이거나 키를 누르고 있는 반복이면 아니다.
+ * 3. 모달·다이얼로그가 열려 있으면 아니다(`overlayOpen`).
+ * 4. **터미널**(`.xterm`): macOS ⌘B만 앱이 가져간다(PTY로 갈 바이트가 없는 키, ADR-0190 D5
+ *    증보 `TERMINAL_APP_BINDINGS`). 그 밖의 플랫폼 Ctrl+B는 tmux prefix라 터미널 몫이다.
+ * 5. **입력 칸**(컴포저 textarea·`contenteditable`·input): 건드리지 않는다. 컴포저의 ⌘B는
+ *    「굵게」다(`useComposerFormat`).
+ */
+export function shouldToggleSidebar(
+  event: ShortcutEvent & {
+    target: EventTarget | null;
+    isComposing?: boolean;
+    repeat?: boolean;
+  },
+  platform: ShortcutPlatform,
+  context: { overlayOpen?: boolean } = {}
+): boolean {
+  if (!TOGGLE_SIDEBAR_SHORTCUT.matches(event)) return false;
+  const exactModifier =
+    platform === "mac"
+      ? event.metaKey === true && event.ctrlKey !== true
+      : event.ctrlKey === true && event.metaKey !== true;
+  if (!exactModifier) return false;
+  if (event.isComposing === true || event.repeat === true) return false;
+  if (context.overlayOpen === true) return false;
+  const target = event.target as TextEntryTarget | null;
+  const inTerminal =
+    target !== null &&
+    typeof target.closest === "function" &&
+    target.closest(".xterm") !== null;
+  if (inTerminal) return platform === "mac";
+  return !isTextEntryTarget(event.target);
 }

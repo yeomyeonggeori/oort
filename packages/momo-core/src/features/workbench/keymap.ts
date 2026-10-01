@@ -209,8 +209,21 @@ export function resolveDockKey(
 export function isTerminalAppKey(event: WorkbenchKeyEvent, platform: KeyPlatform): boolean {
   return (
     resolveWorkbenchKey(event, platform) !== null ||
-    resolveDockKey(event, platform, { dockFocused: true }) !== null
+    resolveDockKey(event, platform, { dockFocused: true }) !== null ||
+    isSidebarToggleKey(event, platform)
   );
+}
+
+/**
+ * 탐색 패널(목록 열) 접기 ⌘B (#3280, ADR-0190 D5 증보). **macOS에서만** 터미널 포커스에서도
+ * 앱이 가져간다: ⌘B는 PTY로 보낼 바이트가 없는 키다. 그 밖의 플랫폼에서 Ctrl+B는
+ * tmux prefix·readline의 뒤로 한 글자라 터미널 몫이다(이 함수가 거짓이므로 xterm이 받는다).
+ * 앱 전역 핸들러(웹 `AppShell`)가 실제로 접는다 — 이 함수는 xterm이 이 키를 앱에 넘기게
+ * 하는 판정만 맡는다. `code`로 판정한다(한글 2벌식에서 `key`는 「ㅠ」).
+ */
+export function isSidebarToggleKey(event: WorkbenchKeyEvent, platform: KeyPlatform): boolean {
+  if (platform !== "mac" || event.code !== "KeyB") return false;
+  return exactly(readModifiers(event, platform), { mod: true }, platform);
 }
 
 export interface TerminalAppBinding {
@@ -234,6 +247,12 @@ export const TERMINAL_APP_BINDINGS: readonly TerminalAppBinding[] = [
   ...WORKBENCH_BINDINGS.map((b) => ({ id: b.id, description: b.description, keycaps: b.keycaps })),
   { id: "jump-palette", description: "칸 목록 열기", keycaps: ["⌘J"] },
   { id: "next-waiting", description: "다음 「응답 필요」로", keycaps: ["⌃⇧J"] },
+  {
+    id: "toggle-sidebar",
+    description: "탐색 패널(목록 열) 접고 펴기",
+    keycaps: ["⌘B"],
+    note: "macOS에서만 터미널 안에서도 됩니다. 다른 플랫폼의 Ctrl+B는 터미널(tmux prefix)이 가집니다.",
+  },
 ];
 
 const KEYCAP_CODES: Record<string, string> = {

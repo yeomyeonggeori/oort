@@ -191,7 +191,7 @@ async function signIn(page, origin) {
   await page.getByTestId("login-email").fill("capture@example.test");
   await page.getByTestId("login-password").fill("not-a-secret");
   await page.getByTestId("login-submit").click();
-  await page.getByTestId("nav-team-work").waitFor({ timeout: 20_000 });
+  await page.getByTestId("rail-team").waitFor({ timeout: 20_000 });
 }
 
 async function overflowX(page) {

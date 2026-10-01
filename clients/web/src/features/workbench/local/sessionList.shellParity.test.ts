@@ -25,12 +25,15 @@ function block(css: string, selector: string): string {
 const px = (decl: string): number => Number(/(\d+(?:\.\d+)?)px/.exec(decl)?.[1]);
 
 describe("작업 탭 좌측 패널은 사이드바와 같은 말을 쓴다 (#3275)", () => {
-  it("레일 + 목록 = 사이드바 전체 폭이라 본문 왼쪽 가장자리가 같다", () => {
+  it("레일 + 목록 = 사이드바 전체 폭이라 본문 왼쪽 가장자리가 같다 (#3280: 260 타협 해소)", () => {
     const sidebarList = px(/--w-sidebar-list:\s*[^;]+;/.exec(TOKENS)![0]);
-    const workspaceRail = 56; // --spacing-rail
-    expect(WORK_TAB_RAIL_PX + WORK_TAB_SESSION_LIST_PX).toBe(workspaceRail + sidebarList);
-    // CSS 폭은 숫자를 적지 않고 같은 식으로 코어 상수와 묶인다.
-    expect(TOKENS).toMatch(/--session-list-width:\s*calc\(var\(--w-sidebar\) - var\(--w-work-rail\)\);/);
+    const rail = px(/--spacing-rail:\s*[^;]+;/.exec(TOKENS)![0]);
+    expect(rail).toBe(56);
+    expect(sidebarList).toBe(268);
+    // 코어 상수는 CSS와 같은 값이다: 레일은 모든 탭에서 한 벌(56), 목록은 사이드바 목록 열(268).
+    expect(WORK_TAB_RAIL_PX).toBe(rail);
+    expect(WORK_TAB_SESSION_LIST_PX).toBe(sidebarList);
+    expect(TOKENS).toMatch(/--session-list-width:\s*var\(--w-sidebar-list\);/);
   });
 
   it("목록 자신은 면·유리·테두리를 갖지 않는다(사이드바는 창 바닥 위에 녹아 있다)", () => {
@@ -61,11 +64,17 @@ describe("작업 탭 좌측 패널은 사이드바와 같은 말을 쓴다 (#327
     expect(TOKENS).toMatch(/--session-radius-row:\s*var\(--radius-md\);/);
     const selected = block(LIST_CSS, '.sl-row[aria-current="true"]');
     expect(selected).toMatch(/background-color:\s*var\(--surface\)/);
-    expect(selected).toMatch(/box-shadow:\s*var\(--elevation-rest\)/);
+    // 다크 선택 줄 대비(#3282 Medium): 사이드바 선택 행과 같은 안쪽 고리 토큰을 읽는다.
+    expect(selected).toMatch(/var\(--elevation-rest\),\s*inset 0 0 0 1px var\(--selected-edge\)/);
   });
 
-  it("떠날 때도 열 폭은 곧바로 바뀐다(미끄러지며 사이드바 트리가 다시 짜이지 않는다)", () => {
-    expect(APP_SHELL).toMatch(/data-work-rail-exit=/);
-    expect(TOKENS).toMatch(/&\[data-work-rail-exit\]\s*\{\s*transition:\s*none;/);
+  it("레일은 탭마다 바뀌지 않는다: 작업 레일 토큰·이탈 전이가 없고, 「내 작업」 열 폭은 접힌 모양과 같다 (#3280)", () => {
+    expect(APP_SHELL).not.toMatch(/data-work-rail-exit/);
+    expect(TOKENS).not.toMatch(/--w-work-rail|--spacing-work-rail|data-work-rail-exit/);
+    const shell = TOKENS.slice(TOKENS.indexOf("@utility app-shell"));
+    const collapsed = block(shell, "&[data-sidebar-collapsed]");
+    const workTab = block(shell, "&[data-work-rail]");
+    expect(collapsed).toMatch(/grid-template-columns:\s*var\(--spacing-rail\) 1fr;/);
+    expect(workTab).toMatch(/grid-template-columns:\s*var\(--spacing-rail\) 1fr;/);
   });
 });
