@@ -27,6 +27,7 @@ const EVERYTHING = {
   isSurfaceProvided: () => true,
   agents: [{ id: "agent-1", displayName: "김인턴", handle: "intern" }],
   canOpenLocalCard: () => false,
+  sidebarList: { collapsed: false },
 };
 
 const switcherSource = readFileSync("src/app/QuickSwitcher.tsx", "utf8");
@@ -70,7 +71,7 @@ describe("명령 레지스트리 ↔ 단축키 정본", () => {
       REGISTERED_SHORTCUTS.filter((s) => s.paletteCommandId !== undefined).map(
         (s) => s.id
       )
-    ).toEqual(["open-settings", "open-inbox"]);
+    ).toEqual(["open-settings", "open-inbox", "toggle-sidebar"]);
   });
 });
 

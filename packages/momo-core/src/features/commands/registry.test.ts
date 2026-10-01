@@ -5,6 +5,7 @@ import {
   AGENT_SUGGESTABLE_COMMANDS,
   AI_CONNECT_SETTINGS_PATH,
   KNOWN_COMMAND_IDS,
+  TOGGLE_SIDEBAR_COMMAND_ID,
   agentRoutingCommandId,
   slashCommands,
   commandSearchValue,
@@ -53,17 +54,21 @@ function context(opened = false): CommandContext & {
 
 describe("명령 레지스트리", () => {
   it("id가 겹치지 않고 KNOWN_COMMAND_IDS가 고정 명령 전부를 덮는다", () => {
-    const ids = visibleCommands(env()).map((command) => command.id);
+    const ids = visibleCommands(env({ sidebarList: { collapsed: false } })).map(
+      (command) => command.id
+    );
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of KNOWN_COMMAND_IDS) {
       expect(ids).toContain(id);
     }
   });
 
-  it("client 명령은 ai.connect 하나다 — 나머지는 전부 navigate(#2943)", () => {
+  it("client 명령은 ai.connect·view.sidebar 둘이다 — 나머지는 전부 navigate(#2943·#3299)", () => {
     const agents = [{ id: "a-1", displayName: "김인턴", handle: "intern" }];
-    for (const command of visibleCommands(env({ agents }))) {
-      if (command.id === "ai.connect") continue;
+    for (const command of visibleCommands(
+      env({ agents, sidebarList: { collapsed: false } })
+    )) {
+      if (command.id === "ai.connect" || command.id === TOGGLE_SIDEBAR_COMMAND_ID) continue;
       expect(command.kind).toBe("navigate");
     }
   });
@@ -227,6 +232,54 @@ describe("명령 레지스트리", () => {
 // 이 패키지는 `import.meta`와 `node:fs` 타입이 없어 그 파일을 읽을 수 없다.
 // 여기서는 코어만으로 잴 수 있는 규칙을 잰다.
 // =============================================================================
+
+describe("탐색 패널 접기/열기 (#3299)", () => {
+  const find = (overrides: Partial<CommandEnv> = {}) =>
+    visibleCommands(env(overrides)).find(
+      (command) => command.id === TOGGLE_SIDEBAR_COMMAND_ID
+    );
+
+  it("접을 목록 열이 없는 클라이언트(폰)에는 줄이 서지 않는다", () => {
+    expect(find()).toBeUndefined();
+    expect(find({ sidebarList: undefined })).toBeUndefined();
+  });
+
+  it("이름이 지금 상태를 따른다: 펼침이면 접기, 접힘이면 열기", () => {
+    expect(find({ sidebarList: { collapsed: false } })?.title).toBe("탐색 패널 접기");
+    expect(find({ sidebarList: { collapsed: true } })?.title).toBe("탐색 패널 열기");
+  });
+
+  it("client 명령이고 단축키 정본 toggle-sidebar를 가리키며 에이전트 제안 대상이 아니다", () => {
+    const command = find({ sidebarList: { collapsed: false } })!;
+    expect(command.kind).toBe("client");
+    expect(command.shortcutId).toBe("toggle-sidebar");
+    expect(command.agentSuggestable).toBeUndefined();
+    expect(AGENT_SUGGESTABLE_COMMANDS.map((c) => c.id)).not.toContain(
+      TOGGLE_SIDEBAR_COMMAND_ID
+    );
+  });
+
+  it("run은 훅을 한 번 부르고 바뀐 상태를 말한다 — 이동·폼은 건드리지 않는다", () => {
+    const ctx = { ...context(), toggleSidebarList: vi.fn(() => true) };
+    const result = find({ sidebarList: { collapsed: false } })!.run(ctx);
+    expect(ctx.toggleSidebarList).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ status: "탐색 패널 접기", closesSurface: true });
+    expect(ctx.navigate).not.toHaveBeenCalled();
+    const open = { ...context(), toggleSidebarList: vi.fn(() => false) };
+    expect(find({ sidebarList: { collapsed: true } })!.run(open).status).toBe(
+      "탐색 패널 열기"
+    );
+  });
+
+  it("훅이 없으면 아무 일도 하지 않고 표면을 닫지도 않는다(방어)", () => {
+    const result = find({ sidebarList: { collapsed: false } })!.run(context());
+    expect(result).toEqual({ status: null, closesSurface: false });
+  });
+
+  it("슬래시 목록에는 서지 않는다", () => {
+    expect(slashCommands().map((c) => c.id)).not.toContain(TOGGLE_SIDEBAR_COMMAND_ID);
+  });
+});
 
 describe("agentSuggestable", () => {
   it("client 명령에만 붙는다 — 서버 상태를 바꾸지 않는 명령만 제안 카드가 된다", () => {

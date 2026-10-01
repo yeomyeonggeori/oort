@@ -36,7 +36,7 @@ describe("탐색 패널 접기 ⌘B (#3280)", () => {
     const navigation = SHORTCUT_HELP_GROUPS.find((group) => group.id === "navigation");
     expect(navigation?.shortcuts).toContain(TOGGLE_SIDEBAR_SHORTCUT);
     expect(TOGGLE_SIDEBAR_SHORTCUT.keycaps).toEqual(["⌘B"]);
-    expect(TOGGLE_SIDEBAR_SHORTCUT.paletteCommandId).toBeUndefined();
+    expect(TOGGLE_SIDEBAR_SHORTCUT.paletteCommandId).toBe("view.sidebar");
   });
 
   it("키 모양: ⌘B·Ctrl+B만, ⇧·⌥·수식 없음은 아니다. 한글 2벌식은 code로 잡는다", () => {
