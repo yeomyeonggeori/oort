@@ -578,7 +578,8 @@ describe("D1 로그인 한 화면 (#2809 OB2-3)", () => {
       expect(q("login-email-error")).toBeNull();
       expect(q("login-password")?.getAttribute("aria-invalid")).toBeNull();
       expect(q("login-email")?.getAttribute("aria-invalid")).toBeNull();
-      fill("login-password", "again");
+      expect(focused()).toBe("login-submit");
+      expect((q("login-password") as HTMLInputElement).value).toBe("correct-horse");
       submitEvent();
       expect(login).toHaveBeenCalledTimes(2);
       await act(async () => undefined);
@@ -643,7 +644,7 @@ describe("D1 로그인 한 화면 (#2809 OB2-3)", () => {
     expect(login).not.toHaveBeenCalled();
   });
 
-  it("on a server that does not answer: 당황 and the password gone too", async () => {
+  it("on a server that does not answer: 당황, the password kept, and the cursor on 들어가기 (#3267)", async () => {
     setServerBase("https://team.example.com");
     login.mockRejectedValue(new NetworkError("unreachable", 15_000));
     mount();
@@ -652,7 +653,9 @@ describe("D1 로그인 한 화면 (#2809 OB2-3)", () => {
     await submitForm();
     await vi.waitFor(() => expect(q("login-error")).not.toBeNull());
     expect(guideExpression()).toBe("flustered");
-    expect((q("login-password") as HTMLInputElement).value).toBe("");
+    expect((q("login-password") as HTMLInputElement).value).toBe("correct-horse");
+    expect(q("login-password-error")).toBeNull();
+    expect(focused()).toBe("login-submit");
   });
 
   it("offline: 당황 with its own sentence, the banner, and a held submit", () => {

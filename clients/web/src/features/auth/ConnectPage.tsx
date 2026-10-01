@@ -381,9 +381,16 @@ export function ConnectPage({
       } else {
         setFailure(copy);
       }
-      // 비밀번호는 실패 뒤에 남기지 않는다(#2809). 다시 넣고 들어간다.
-      setPassword("");
-      focusLater("password");
+      if (err instanceof ApiError && err.status === 401) {
+        // 비밀번호는 거절된 뒤에 남기지 않는다(#2809). 다시 넣고 들어간다.
+        setPassword("");
+        focusLater("password");
+      } else {
+        // 서버가 비밀번호를 판정한 게 아니다(응답 없음·연결 실패·서버 오류). 입력은
+        // 그대로 두고 커서를 「들어가기」에 둔다. 비밀번호 칸에 포커스 링을 세우면
+        // 틀렸다는 말로 읽힌다(#3267).
+        focusLater("submit");
+      }
     } finally {
       submitLockRef.current = false;
       if (mountedRef.current) setBusy(false);
