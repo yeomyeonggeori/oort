@@ -372,7 +372,7 @@ describe('the four states of the 대화 list', () => {
     renderShell();
     await waitFor(() => expect(screen.getByTestId('channels-error')).toBeTruthy());
     expect(screen.getByTestId('channels-error')).toHaveTextContent(
-      /주소와 네트워크를 확인하고 다시 시도하세요\./,
+      /주소와 네트워크를 확인하고 다시 시도해 주세요\./,
     );
   });
 });

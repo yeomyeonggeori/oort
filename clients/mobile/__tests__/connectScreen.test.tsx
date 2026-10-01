@@ -204,7 +204,7 @@ describe('the login round trip, mocked', () => {
     );
     // …and specifically not the server's English, and not a network story.
     expect(screen.getByTestId('failure')).not.toHaveTextContent(/invalid credentials/);
-    expect(screen.getByTestId('failure')).not.toHaveTextContent(/서버에 닿지 못했습니다/);
+    expect(screen.getByTestId('failure')).not.toHaveTextContent(/서버에 닿지 못했어요/);
   });
 
   it('offers no retry for a wrong password, because pressing again cannot help', async () => {
@@ -226,7 +226,7 @@ describe('the login round trip, mocked', () => {
     await waitFor(() => expect(screen.getByTestId('failure')).toBeTruthy());
     // The core wrote this copy, deadline included; the screen shows it verbatim.
     expect(screen.getByTestId('failure')).toHaveTextContent(
-      /주소와 네트워크를 확인하고 다시 시도하세요\./,
+      /주소와 네트워크를 확인하고 다시 시도해 주세요\./,
     );
     expect(screen.getByTestId('failure-retry')).toBeTruthy();
   });

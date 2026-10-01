@@ -318,9 +318,9 @@ describe("failure copy", () => {
 
   it("never shows a raw transport failure as an invite verdict", () => {
     const unreachable = new NetworkError("unreachable", 15_000);
-    expect(joinFailureCopy(unreachable).message).toContain("서버에 닿지 못했습니다");
+    expect(joinFailureCopy(unreachable).message).toContain("서버에 닿지 못했어요");
     expect(signInFailureCopy(unreachable).message).toContain(
-      "서버에 닿지 못했습니다"
+      "서버에 닿지 못했어요"
     );
     // A body that is not JSON is a client-side fault, not a verdict either.
     expect(signInFailureCopy(new SyntaxError("bad json")).message).toContain(

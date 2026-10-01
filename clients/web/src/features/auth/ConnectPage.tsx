@@ -173,11 +173,17 @@ export function ConnectPage({
   const profileNameRef = useRef<HTMLInputElement>(null);
   const submitRef = useRef<HTMLButtonElement>(null);
   const profileBusyRef = useRef(false);
+  // 요청이 나간 동안의 동기 자물쇠. `busy` state는 다음 렌더에야 서므로, 같은
+  // 틱에 겹친 두 제출(더블클릭·Enter 반복)은 state만으로는 못 막는다.
+  const submitLockRef = useRef(false);
+  const mountedRef = useRef(true);
   const stepRef = useRef(step);
   stepRef.current = step;
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       releaseSessionRestore();
     };
   }, []);
@@ -342,6 +348,7 @@ export function ConnectPage({
   }
 
   async function signIn() {
+    if (submitLockRef.current) return;
     setFailure(null);
     setFieldError(null);
     // 빈 칸은 서버에 묻기 전에 그 칸에서 말한다.
@@ -355,11 +362,15 @@ export function ConnectPage({
       focusLater("password");
       return;
     }
+    submitLockRef.current = true;
     setBusy(true);
     try {
       const session = await login(email, password, workspace);
+      // 화면이 이미 내려갔다면(뒤로·다른 링크) 늦은 응답은 상태를 건드리지 않는다.
+      if (!mountedRef.current) return;
       onLoggedIn(session);
     } catch (err) {
+      if (!mountedRef.current) return;
       const copy = signInFailureCopy(err);
       if (err instanceof ApiError && err.status === 401) {
         // 이메일·비밀번호 판정은 문제 자리(비밀번호 칸)에서 다음 행동과 함께 말한다.
@@ -374,7 +385,8 @@ export function ConnectPage({
       setPassword("");
       focusLater("password");
     } finally {
-      setBusy(false);
+      submitLockRef.current = false;
+      if (mountedRef.current) setBusy(false);
     }
   }
 
@@ -410,6 +422,8 @@ export function ConnectPage({
   }
 
   async function join() {
+    if (submitLockRef.current) return;
+    submitLockRef.current = true;
     setFailure(null);
     setBusy(true);
     holdSessionRestore();
@@ -417,7 +431,9 @@ export function ConnectPage({
     try {
       session = await joinWithInvite(inviteCode, email, password);
     } catch (err) {
+      submitLockRef.current = false;
       releaseSessionRestore();
+      if (!mountedRef.current) return;
       const next = joinFailureCopy(err);
       setFailure(next);
       setBusy(false);
@@ -436,6 +452,8 @@ export function ConnectPage({
     }
     // 활성 에이전트가 있으면 AI 연결을 건너뛴다(#2810, ADR-0185 c1).
     await settleAfterJoin(session.member.workspaceId);
+    submitLockRef.current = false;
+    if (!mountedRef.current) return;
     setBusy(false);
     if (session.createdMember && wantsNamePatch(session)) {
       setJoined(session);
@@ -447,13 +465,13 @@ export function ConnectPage({
 
   function onSignInSubmit(e: FormEvent) {
     e.preventDefault();
-    if (busy) return;
+    if (busy || submitLockRef.current) return;
     void signIn();
   }
 
   function onJoinSubmit(e: FormEvent) {
     e.preventDefault();
-    if (busy || profileBusy) return;
+    if (busy || profileBusy || submitLockRef.current) return;
     if (joined) {
       if (profileFailed || !wantsNamePatch(joined)) {
         finishJoin(joined, joined.member);
@@ -632,9 +650,10 @@ export function ConnectPage({
           <Button
             ref={submitRef}
             type="submit"
-            className={ONBOARDING_ACTION_CLASS}
+            className={`${ONBOARDING_ACTION_CLASS} aria-busy:pointer-events-none`}
             disabled={!online}
             aria-busy={busy || undefined}
+            aria-disabled={busy || undefined}
             title={online ? undefined : "오프라인 상태에서는 연결할 수 없습니다."}
             data-testid="login-submit"
           >
@@ -756,7 +775,7 @@ export function ConnectPage({
           <Button
             ref={submitRef}
             type="submit"
-            className={ONBOARDING_ACTION_CLASS}
+            className={`${ONBOARDING_ACTION_CLASS} aria-busy:pointer-events-none`}
             // 진행 중은 aria-busy + 「…중」 문장이다. 흐리게 막지 않는다(States.tsx).
             disabled={
               joined && profileFailed
@@ -764,6 +783,7 @@ export function ConnectPage({
                 : !online || profileFieldError !== null
             }
             aria-busy={busy || profileBusy || undefined}
+            aria-disabled={busy || profileBusy || undefined}
             title={online ? undefined : "오프라인 상태에서는 연결할 수 없습니다."}
             data-testid="login-submit"
           >
@@ -839,6 +859,7 @@ export function ConnectPage({
               type="button"
               variant="ghost"
               data-testid="onboarding-back"
+              disabled={busy || profileBusy}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={() => backToWelcome({ keepInvite: true })}
             >

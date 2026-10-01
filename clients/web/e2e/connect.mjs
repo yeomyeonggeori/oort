@@ -198,7 +198,7 @@ try {
   const deadBaseError = await page.textContent('[data-testid="login-error"]');
   record(
     "requests-follow-the-chosen-base",
-    (deadBaseError ?? "").includes("서버에 닿지 못했습니다"),
+    (deadBaseError ?? "").includes("서버에 닿지 못했어요"),
     `error=${deadBaseError}`
   );
   // MOMO-609 / G-1: a base that cannot answer must END. #2809: the password
