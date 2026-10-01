@@ -122,7 +122,7 @@ describe("ProfileAvatarField", () => {
   });
 
   it.each([
-    [413, /너무 큽니다/],
+    [413, /5MB까지/],
     [422, /4096px/],
     [409, /다시 골라/],
     [429, /너무 자주/],
@@ -204,5 +204,38 @@ describe("ProfileAvatarField", () => {
     const status = h.querySelector('[data-testid="profile-avatar-status"]')!;
     expect(status.getAttribute("aria-live")).toBe("polite");
     expect(status.textContent).toBe("프로필 사진을 바꿨습니다.");
+  });
+
+  it("처음 올리면 「올렸습니다」, 지우기 단추가 없으니 진행 문장에 지우기 꼬리가 없다", async () => {
+    let finish: () => void = () => undefined;
+    upload.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = () =>
+            resolve({ id: "m", memberId: "u", status: "ready", avatarUrl: "/v1/workspaces/w/members/u/avatar/content?v=m" });
+        })
+    );
+    const h = await mount(me());
+    await pick(h, png());
+    const status = () => h.querySelector('[data-testid="profile-avatar-status"]')!.textContent;
+    expect(status()).toMatch(/^올리는 중 \d+%\.$/);
+    await act(async () => {
+      finish();
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(status()).toBe("프로필 사진을 올렸습니다.");
+  });
+
+  it("지우기 확인 질문이 열리면 앞의 완료 문장을 지운다", async () => {
+    const h = await mount(me("/v1/workspaces/w/members/u/avatar/content?v=m"));
+    await pick(h, png());
+    const status = () => h.querySelector('[data-testid="profile-avatar-status"]')!.textContent;
+    expect(status()).toBe("프로필 사진을 바꿨습니다.");
+    await act(async () => {
+      h.querySelector<HTMLButtonElement>('[data-testid="profile-avatar-remove"]')!.click();
+    });
+    expect(status()).toBe("");
   });
 });

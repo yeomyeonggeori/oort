@@ -30,7 +30,7 @@ describe("memberAvatarUploadError", () => {
       memberAvatarUploadError(new ApiError(status, "x"))
     );
     expect(new Set(messages).size).toBe(5);
-    expect(messages[0]).toMatch(/너무 큽니다/);
+    expect(messages[0]).toMatch(/5MB까지/);
     expect(messages[1]).toMatch(/4096px/);
     expect(messages[2]).toMatch(/다시 골라/);
     expect(messages[3]).toMatch(/너무 자주/);

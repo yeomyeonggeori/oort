@@ -47,6 +47,7 @@ export function ProfileAvatarField({
   const refreshRoster = () =>
     client.invalidateQueries({ queryKey: ["roster", workspaceId] });
 
+  const hadAvatarRef = useRef(false);
   const upload = useMutation({
     mutationFn: async (file: File) => {
       setProgress(0);
@@ -55,7 +56,7 @@ export function ProfileAvatarField({
     },
     onSuccess: async () => {
       await refreshRoster();
-      setDone("프로필 사진을 바꿨습니다.");
+      setDone(hadAvatarRef.current ? "프로필 사진을 바꿨습니다." : "프로필 사진을 올렸습니다.");
     },
     onError: (failure) => setError(memberAvatarUploadError(failure)),
   });
@@ -94,13 +95,14 @@ export function ProfileAvatarField({
       setError(problem);
       return;
     }
+    hadAvatarRef.current = hasAvatar;
     upload.mutate(file);
   }
 
   // 한 칸에 하나만 선다: 오류 > 진행 > 형제 잠금 사유 > 완료. 칸의 높이는 늘 예약해
   // 두므로(min-h-6) 문장이 나타나도 아래 폼이 밀리지 않는다.
   const status = uploading
-    ? `올리는 중 ${Math.round(progress * 100)}%. 끝나면 지울 수 있습니다.`
+    ? `올리는 중 ${Math.round(progress * 100)}%.${hasAvatar ? " 끝나면 지울 수 있습니다." : ""}`
     : removing
       ? "지우는 중입니다. 끝나면 다시 바꿀 수 있습니다."
       : done;
@@ -150,6 +152,9 @@ export function ProfileAvatarField({
                 .filter(Boolean)
                 .join(" ") || undefined
             }
+            onAskingChange={(asking) => {
+              if (asking) setDone(null);
+            }}
             busy={removing}
             busyLabel="지우는 중"
             onConfirm={() => {

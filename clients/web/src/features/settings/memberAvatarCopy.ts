@@ -29,7 +29,7 @@ export function memberAvatarUploadError(error: unknown): string {
   if (!(error instanceof ApiError)) return GENERIC;
   switch (error.status) {
     case 413:
-      return "이미지가 너무 큽니다. 5MB 이하로 줄여서 올려 주세요.";
+      return "프로필 사진은 5MB까지 올릴 수 있습니다.";
     case 422:
       return "이 이미지는 사용할 수 없습니다. 열 수 있는 이미지이고 가로세로 4096px 이하인지 확인해 주세요.";
     case 409:

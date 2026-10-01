@@ -108,9 +108,9 @@ export function PresenceBadge({
       // 테마에서 바닥과 같은 색이 됐다. 흰 면 + rest로 어느 바닥 위에서도 선다.
       // 띠(노을띠) 위에서도 흰 면이라 원래 글자 역할을 쓴다.
       className={cn(
-        "band-surface relative flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface text-meta font-semibold text-ink shadow-sm",
-        // 사람의 사진은 원이다(AVATAR_SHAPE.human). 이니셜 타일은 기존 모양 그대로.
-        imageSrc !== null && "rounded-full"
+        "band-surface relative flex size-6 shrink-0 items-center justify-center rounded-full bg-surface text-meta font-semibold text-ink shadow-sm",
+        // 이 배지는 늘 나(사람)다: 원(AVATAR_SHAPE.human). 사진을 지워 이니셜로
+        // 돌아가도 모양이 바뀌지 않는다.
       )}
       aria-hidden="true"
     >
