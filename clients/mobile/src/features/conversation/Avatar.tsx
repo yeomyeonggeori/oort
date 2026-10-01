@@ -154,6 +154,7 @@ export function Avatar({
           source={{uri: source}}
           style={[
             styles.image,
+            identity.kind === 'human' && styles.imageHuman,
             round ? styles.round : styles.roundedSquare,
             sized,
           ]}
@@ -217,11 +218,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   unknown: {borderWidth: 1, borderColor: color.border},
   // 투명 PNG 가 바닥(surface)에 녹지 않게 한 단 아래 채움을 깐다. 웹은 hover 계열
   // 토큰을 쓰는 자리이고, 폰에는 그 토큰이 없어 같은 역할의 `surfaceMuted` 다.
-  image: {
-    width: AVATAR_SIZE,
-    height: AVATAR_SIZE,
-    backgroundColor: color.surfaceMuted,
-  },
+  image: {width: AVATAR_SIZE, height: AVATAR_SIZE},
+  /** 사람 사진에만 — 에이전트는 상자의 `agentSurface` 가 비친다(웹 MessageRow 와 같다). */
+  imageHuman: {backgroundColor: color.surfaceMuted},
   initial: {
     fontSize: font.label,
     fontWeight: '600',

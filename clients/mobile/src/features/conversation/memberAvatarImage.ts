@@ -43,7 +43,7 @@ interface Indexed {
   size: number;
 }
 
-/** 삽입 순서 = 쓴 순서(LRU). 키는 파일 URI 가 아니라 `cacheKey`. */
+/** 삽입 순서 = 쓴 순서(LRU). 키는 파일명(`hashName(cacheKey)`) — 순수 계산이라 렌더 중에도 싸다. */
 const index = new Map<string, Indexed>();
 const inflight = new Map<string, Promise<string | null>>();
 const failedUntil = new Map<string, number>();
@@ -51,10 +51,16 @@ let adopted = false;
 /** 비우기 세대 — 비우는 사이 끝난 다운로드는 파일을 버리고 결과를 내지 않는다. */
 let generation = 0;
 
+let cachedDirectory: Directory | null = null;
+
+/** 디렉터리는 한 번만 만들고 기억한다(렌더 경로에서 네이티브 호출을 반복하지 않는다). */
 function directory(): Directory {
-  const dir = new Directory(Paths.cache, DIRECTORY_NAME);
-  if (!dir.exists) dir.create({intermediates: true, idempotent: true});
-  return dir;
+  if (cachedDirectory === null) {
+    const dir = new Directory(Paths.cache, DIRECTORY_NAME);
+    if (!dir.exists) dir.create({intermediates: true, idempotent: true});
+    cachedDirectory = dir;
+  }
+  return cachedDirectory;
 }
 
 /* eslint-disable no-bitwise -- 파일명 해시는 비트 연산이 본업이다 */
@@ -104,8 +110,10 @@ function adoptExisting(): void {
   try {
     for (const item of directory().list()) {
       if (!(item instanceof File)) continue;
-      // 어느 키의 파일인지는 파일명 해시로만 안다 — 키 대신 파일명을 색인 키로 둔다.
-      index.set(`file:${item.uri}`, {file: item, size: item.size ?? 0});
+      index.set(item.uri.slice(item.uri.lastIndexOf('/') + 1), {
+        file: item,
+        size: item.size ?? 0,
+      });
     }
     evict();
   } catch {
@@ -113,29 +121,21 @@ function adoptExisting(): void {
   }
 }
 
-function fileFor(key: string): File {
-  return new File(directory(), hashName(key));
+function fileFor(name: string): File {
+  return new File(directory(), name);
 }
 
-function lookup(key: string): Indexed | undefined {
-  adoptExisting();
-  const target = fileFor(key).uri;
-  const direct = index.get(key);
-  if (direct !== undefined) return direct;
-  const adoptedEntry = index.get(`file:${target}`);
-  if (adoptedEntry !== undefined) {
-    index.delete(`file:${target}`);
-    index.set(key, adoptedEntry);
-  }
-  return adoptedEntry;
-}
-
-/** 이미 받아 둔 `file://` 주소(없으면 `null`). 렌더 첫 프레임에 깜빡임 없이 쓴다. */
+/**
+ * 이미 받아 둔 `file://` 주소(없으면 `null`). **메모리 색인만 본다** — 렌더 중에
+ * 불리므로 디렉터리·파일 경로를 만들지 않는다(받아 둔 파일의 색인 거두기는 첫
+ * `loadMemberAvatar` 에서 한 번 한다). 렌더 첫 프레임에 깜빡임 없이 쓴다.
+ */
 export function peekMemberAvatar(key: string): string | null {
-  const hit = lookup(key);
+  const name = hashName(key);
+  const hit = index.get(name);
   if (hit === undefined) return null;
-  index.delete(key);
-  index.set(key, hit);
+  index.delete(name);
+  index.set(name, hit);
   return hit.file.uri;
 }
 
@@ -169,6 +169,7 @@ async function download(path: string, destination: File): Promise<File> {
 export function loadMemberAvatar(path: string): Promise<string | null> {
   if (memberAvatarContentPath(path) === null) return Promise.resolve(null);
   const key = memberAvatarCacheKey(path);
+  adoptExisting(); // 렌더 밖(첫 사용)에서 한 번
   const known = peekMemberAvatar(key);
   if (known !== null) return Promise.resolve(known);
   const active = inflight.get(key);
@@ -177,7 +178,8 @@ export function loadMemberAvatar(path: string): Promise<string | null> {
   if (until !== undefined && until > Date.now()) return Promise.resolve(null);
 
   const started = generation;
-  const destination = fileFor(key);
+  const name = hashName(key);
+  const destination = fileFor(name);
   const request = download(path, destination)
     .then((file): string | null => {
       if (started !== generation) {
@@ -185,8 +187,8 @@ export function loadMemberAvatar(path: string): Promise<string | null> {
         return null;
       }
       failedUntil.delete(key);
-      index.delete(key);
-      index.set(key, {file, size: file.size ?? 0});
+      index.delete(name);
+      index.set(name, {file, size: file.size ?? 0});
       evict();
       return file.uri;
     })
@@ -236,19 +238,24 @@ export function __resetMemberAvatarCache(): void {
   inflight.clear();
   failedUntil.clear();
   adopted = false;
+  cachedDirectory = null;
 }
 
 /**
  * `path` 가 있으면 그 멤버 아바타의 `file://` 주소, 받는 중·실패면 `null`.
  * 호출한 쪽은 `null` 동안 같은 크기의 이니셜을 세운다(크기 변화 없음).
  *
- * 상태는 어느 키의 결과인지 함께 든다 — 경로가 바뀐 첫 렌더에 앞 사람의 사진을
- * 새 멤버 얼굴로 그리지 않게(DM A→B 전환). 이미 받은 것은 렌더 중에 캐시를 먼저
- * 본다(이니셜→이미지 깜박임 없음).
+ * 반환은 **현재 key 의 캐시 색인**뿐이다 — 경로가 바뀐 첫 렌더에 앞 사람의 사진을
+ * 새 멤버 얼굴로 그리지 않고(DM A→B 전환), 이미 받은 것은 첫 프레임부터 이미지다
+ * (이니셜→이미지 깜박임 없음). `loaded` 상태는 받기가 끝났을 때 다시 그리게 하는
+ * 신호다.
  */
 export function useMemberAvatarUri(path: string | null): string | null {
   const key = path === null ? null : memberAvatarCacheKey(path);
   const [loaded, setLoaded] = useState<{key: string; uri: string} | null>(null);
+  const hit = key === null ? null : peekMemberAvatar(key);
+  // 받았던 것이 캐시에서 밀려났다(축출·비우기): 낡은 `loaded` 는 쓰지 않고 다시 받는다.
+  const stale = key !== null && hit === null && loaded?.key === key;
   useEffect(() => {
     if (path === null || key === null) return undefined;
     if (peekMemberAvatar(key) !== null) return undefined;
@@ -259,7 +266,6 @@ export function useMemberAvatarUri(path: string | null): string | null {
     return () => {
       alive = false;
     };
-  }, [path, key]);
-  if (key === null) return null;
-  return peekMemberAvatar(key) ?? (loaded?.key === key ? loaded.uri : null);
+  }, [path, key, stale]);
+  return hit;
 }

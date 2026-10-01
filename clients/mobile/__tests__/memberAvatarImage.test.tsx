@@ -176,6 +176,15 @@ describe('멤버 아바타 받기 — 디스크 파일 캐시', () => {
     expect(downloads()).toHaveLength(5);
   });
 
+  it('받는 도중 비우면 끝난 뒤 파일이 없고 결과는 null 이다', async () => {
+    const pending = loadMemberAvatar(PATH_A);
+    clearMemberAvatarCache();
+    await expect(pending).resolves.toBeNull();
+    expect([...fsMock.__files].filter(u => u.includes('oort-member-avatars'))).toHaveLength(0);
+    // 비운 뒤의 새 요청은 정상으로 받는다.
+    expect(isFile(await loadMemberAvatar(PATH_A))).toBe(true);
+  });
+
   it('비우기는 메모리 색인과 디스크 파일을 모두 지운다', async () => {
     const uri = await loadMemberAvatar(PATH_A);
     clearMemberAvatarCache();
@@ -238,6 +247,49 @@ describe('Avatar 가 그린다', () => {
     expect(view.getByTestId('avatar-initial', HIDDEN)).toBeTruthy();
     await waitFor(() => expect(view.getByTestId('avatar-image', HIDDEN)).toBeTruthy());
     expect(view.getByTestId('avatar-image', HIDDEN).props.source.uri).not.toBe(selfUri);
+  });
+
+  it('캐시가 찬 뒤 새로 마운트하면 첫 프레임부터 file:// 이미지이고 다시 받지 않는다', async () => {
+    const first = render(<Avatar directory={dir(PATH_A)} memberId={SELF} />);
+    await waitFor(() => expect(first.getByTestId('avatar-image', HIDDEN)).toBeTruthy());
+    first.unmount();
+    expect(downloads()).toHaveLength(1);
+    const second = render(<Avatar directory={dir(PATH_A)} memberId={SELF} />);
+    // 대기 없이 곧바로: effect·프라미스를 기다리지 않은 첫 프레임이다.
+    expect(isFile(second.getByTestId('avatar-image', HIDDEN).props.source.uri)).toBe(true);
+    expect(second.queryByTestId('avatar-initial', HIDDEN)).toBeNull();
+    expect(downloads()).toHaveLength(1);
+  });
+
+  it('캐시에서 밀려난 뒤 다시 그려지면 낡은 주소를 버리고 다시 받는다', async () => {
+    const view = render(<Avatar directory={dir(PATH_A)} memberId={SELF} />);
+    await waitFor(() => expect(view.getByTestId('avatar-image', HIDDEN)).toBeTruthy());
+    clearMemberAvatarCache(); // 축출과 같은 효과: 색인과 파일이 사라진다
+    view.rerender(<Avatar directory={dir(PATH_A)} memberId={SELF} size={40} />);
+    expect(view.queryByTestId('avatar-image', HIDDEN)).toBeNull();
+    await waitFor(() => expect(downloads()).toHaveLength(2));
+    await waitFor(() => expect(view.getByTestId('avatar-image', HIDDEN)).toBeTruthy());
+  });
+
+  it('사람 사진에만 배경이 깔리고 에이전트는 상자 색이 비친다', async () => {
+    const agentPath = `/v1/workspaces/${WS}/members/${AGENT}/avatar/content?v=m`;
+    const d = makeDirectory([
+      member({id: SELF, avatarUrl: PATH_A}),
+      member({id: AGENT, kind: 'agent', displayName: '김인턴', avatarUrl: agentPath}),
+    ]);
+    const view = render(
+      <>
+        <Avatar directory={d} memberId={SELF} />
+        <Avatar directory={d} memberId={AGENT} />
+      </>,
+    );
+    await waitFor(() => expect(view.getAllByTestId('avatar-image', HIDDEN)).toHaveLength(2));
+    const [human, agent] = view.getAllByTestId('avatar-image', HIDDEN);
+    const bg = (n: {props: {style: unknown}}) =>
+      ([] as Record<string, unknown>[]).concat(n.props.style as never).flat(5)
+        .map(x => x?.backgroundColor).find(Boolean);
+    expect(bg(human)).toBeTruthy();
+    expect(bg(agent)).toBeUndefined();
   });
 
   it('옛 절대 avatarUrl 은 기존대로 uri 로 실리고 요청은 없다', () => {
