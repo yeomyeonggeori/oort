@@ -67,7 +67,13 @@ fn roster_dto(member: &RosterMember) -> RosterMemberDto {
         status: member.status.clone(),
         display_name: member.display_name.clone(),
         handle: member.handle.clone(),
-        avatar_url: member.avatar_url.clone(),
+        // ADR-0161 증보: an uploaded avatar wins over the legacy bare column.
+        avatar_url: crate::routes::member_avatar::resolved_member_avatar_url(
+            member.workspace_id,
+            member.id,
+            member.avatar_media_id,
+            member.avatar_url.as_deref(),
+        ),
         role: member.role.map(|role| role.as_db_label().to_string()),
         channel_count: member.channel_count,
         channel_ids: member
@@ -194,6 +200,7 @@ mod tests {
             display_name: "김인턴".into(),
             handle: "intern".into(),
             avatar_url: None,
+            avatar_media_id: None,
             role: Some(WorkspaceRole::Member),
             channel_count: 2,
             channel_ids: vec![Uuid::from_u128(3), Uuid::from_u128(4)],

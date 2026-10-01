@@ -2624,6 +2624,24 @@ pub struct AvatarResponse {
     pub created_at_ms: i64,
 }
 
+/// The completed member-avatar media row (`POST …/members/me/avatar/{id}/complete`),
+/// ADR-0161 증보 (#3277). `avatarUrl` is the versioned content path the member's
+/// roster row will carry from now on, so the caller can show the new picture
+/// without waiting for a roster refetch.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberAvatarResponse {
+    pub id: String,
+    pub workspace_id: String,
+    pub member_id: String,
+    pub name: String,
+    pub mime: String,
+    pub size: i64,
+    pub status: String,
+    pub avatar_url: String,
+    pub created_at_ms: i64,
+}
+
 // ---------------------------------------------------------------------------
 // realtime (B4 — Swift `AuthRoutes.realtimeToken` + `CentrifugoRoutes.swift`)
 // ---------------------------------------------------------------------------

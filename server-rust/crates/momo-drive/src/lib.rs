@@ -266,6 +266,30 @@ pub struct DriveContent {
     pub body: BoxStream<'static, Result<Bytes, DriveError>>,
 }
 
+impl DriveContent {
+    /// Read up to `limit` leading bytes and drop the rest of the stream.
+    ///
+    /// For magic-number checks (`complete` of a member avatar): the stream is
+    /// never buffered whole, and an archive that errors before `limit` bytes
+    /// surfaces that error rather than a silently short prefix. A file shorter
+    /// than `limit` returns what it has.
+    pub async fn read_prefix(mut self, limit: usize) -> Result<Vec<u8>, DriveError> {
+        use futures::StreamExt;
+        let mut prefix = Vec::with_capacity(limit);
+        while prefix.len() < limit {
+            match self.body.next().await {
+                Some(Ok(chunk)) => {
+                    let take = (limit - prefix.len()).min(chunk.len());
+                    prefix.extend_from_slice(&chunk[..take]);
+                }
+                Some(Err(error)) => return Err(error),
+                None => break,
+            }
+        }
+        Ok(prefix)
+    }
+}
+
 impl std::fmt::Debug for DriveContent {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter

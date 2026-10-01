@@ -39,6 +39,9 @@ pub mod hosted_dm_approvals;
 pub mod huddles;
 pub mod invites;
 pub mod join;
+/// ADR-0161 증보 (#3277) — the member avatar media surface (self-only write,
+/// workspace-wide read).
+pub mod member_avatar;
 /// #1768 — ADR-0128 D2/D3 member lifecycle (role/suspend/remove/bans/channel leave).
 pub mod member_lifecycle;
 /// ADR-0196 / #3164 — team-memory digest + receipt reads and settings (RLS-filtered).
