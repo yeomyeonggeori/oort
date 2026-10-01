@@ -986,7 +986,7 @@ export function WorkPanel({
             onClick={closePanel}
             aria-label="작업 세션 닫기"
             data-testid="work-panel-close"
-            className="flex size-6 shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+            className="flex size-control-sm shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
           >
             <X className="size-4" />
           </button>

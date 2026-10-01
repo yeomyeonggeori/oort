@@ -96,7 +96,7 @@ export function WorkspaceRail({
         // 현재 타일은 흰 면 + rest 그림자로 뜬다(DS2-6, 사이드바 선택 행과 같은
         // 문법 — owner 결정 2026-09-26: 선택을 호박색으로 칠하지 않는다). 띠
         // 위에서도 흰 면이라 원래 글자 역할을 쓴다.
-        className="band-surface relative isolate flex size-rail-tile items-center justify-center rounded-md bg-surface text-title font-semibold text-ink shadow-sm"
+        className="band-surface relative isolate flex size-rail-tile items-center justify-center rounded-md bg-surface text-title font-semibold text-ink rail-tile-current"
         title={tile.label}
         aria-label={tile.label}
         data-testid="workspace-current"

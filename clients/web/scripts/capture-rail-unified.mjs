@@ -293,6 +293,18 @@ async function scene(browser, origin, scheme, viewport, report, preCollapsed = f
   await page.waitForTimeout(900);
   out.mine = await probe();
   await shot("mywork");
+  // 단추의 aria-expanded는 화면과 같아야 한다: 좁은 창(1280·900)은 폭 규칙으로 세션 목록이 닫혀 있고,
+  // 그때도 첫 번째 ⌘B가 목록을 연다(저장된 상태만 읽으면 두 번 눌러야 열린다).
+  const listVisible = out.mine.sessionList !== null;
+  check(`${tag} 내 작업: 단추 aria-expanded가 화면(세션 목록 유무)과 같다`, (out.mine.toggleAria.expanded === "true") === listVisible, JSON.stringify([out.mine.toggleAria, listVisible]));
+  if (!listVisible) {
+    await page.getByTestId("rail-mine").focus();
+    await page.keyboard.press("Meta+KeyB");
+    await page.waitForTimeout(500);
+    out.mineAfterOneCmdB = await probe();
+    check(`${tag} 내 작업(목록 자동 접힘): ⌘B 한 번에 세션 목록(268)이 열린다`, out.mineAfterOneCmdB.sessionList !== null && out.mineAfterOneCmdB.sessionList.w === 268 && out.mineAfterOneCmdB.toggleAria.expanded === "true", JSON.stringify(out.mineAfterOneCmdB.sessionList));
+    await shot("mywork-opened-by-cmdb");
+  }
 
   await page.getByTestId("rail-team").click();
   await page.waitForTimeout(500);
@@ -310,7 +322,7 @@ async function scene(browser, origin, scheme, viewport, report, preCollapsed = f
     check(`${tag} ${key}: 레일 상자(x·y·w·h)가 대화 탭과 같고 폭이 56이다`, same(o.rail, out.chat.rail) && o.rail.w === 56, JSON.stringify([o.rail, out.chat.rail]));
     check(`${tag} ${key}: 워크스페이스 타일·「+」·프로필 자리가 같다`, same(o.tile, out.chat.tile) && same(o.plus, out.chat.plus) && same(o.profile, out.chat.profile));
     check(`${tag} ${key}: 목적지 단추 자리가 같다`, same(o.railItems, out.chat.railItems), JSON.stringify([o.railItems, out.chat.railItems]));
-    check(`${tag} ${key}: 접기 단추 자리·aria가 같다`, same(o.toggle, out.chat.toggle) && o.toggleAria.expanded === "true", JSON.stringify([o.toggle, out.chat.toggle]));
+    check(`${tag} ${key}: 접기 단추 자리·aria가 같다`, same(o.toggle, out.chat.toggle) && o.toggleAria.expanded === (key === "mine" ? String(o.sessionList !== null) : "true"), JSON.stringify([o.toggle, out.chat.toggle]));
     check(`${tag} ${key}: 64px 작업 레일이 없다`, o.legacyWorkRail === 0);
     check(`${tag} ${key}: 가로 넘침 0`, o.scrollW === 0, String(o.scrollW));
   }
@@ -323,9 +335,12 @@ async function scene(browser, origin, scheme, viewport, report, preCollapsed = f
   check(`${tag} 내 작업 열 = 56(목록은 라우트 안)`, out.mine.cols.startsWith("56px"), out.mine.cols);
 
   // ⌘B: 일반 포커스에서 목록 열만 접고 레일은 남는다.
-  await page.getByTestId("rail-chat").focus();
+  // 캐럿이 목록 열 안(채널 행)에 있을 때 접어도 캐럿이 <body>로 떨어지지 않는다(접기 단추로 간다).
+  await page.locator("[data-testid='channel-item']").first().focus();
   await page.keyboard.press("Meta+KeyB");
   await page.waitForTimeout(500);
+  const focusAfter = await page.evaluate(() => document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName);
+  check(`${tag} 목록 열 안에서 ⌘B로 접어도 캐럿이 접기 단추로 간다(<body> 아님)`, focusAfter === "sidebar-toggle", String(focusAfter));
   out.collapsed = await probe();
   await shot("collapsed");
   check(`${tag} ⌘B: 접힘 = 열 56·목록 열 숨김·단추 aria-expanded=false`, out.collapsed.cols.startsWith("56px") && out.collapsed.listPaneHidden === true && out.collapsed.toggleAria.expanded === "false", JSON.stringify([out.collapsed.cols, out.collapsed.listPaneHidden, out.collapsed.toggleAria]));
@@ -360,6 +375,7 @@ async function scene(browser, origin, scheme, viewport, report, preCollapsed = f
     const value = await composer.inputValue().catch(() => null);
     check(`${tag} 컴포저에서 ⌘B: 접힘 불변(펼침 유지)`, after.toggleAria.expanded === "true" && after.cols.startsWith("324px"), JSON.stringify([after.toggleAria, after.cols]));
     out.composerValue = value;
+    check(`${tag} 컴포저에서 ⌘B는 굵게로 동작한다(마크다운 **)`, typeof value === "string" && value.includes("**"), String(value));
   } else {
     console.log(`skip ${tag} 컴포저 시험: 컴포저 없음`);
   }

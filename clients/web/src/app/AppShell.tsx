@@ -27,7 +27,9 @@ import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { AppTitlebar } from "@/app/AppTitlebar";
 import { useSidebarCollapsePaint } from "@/app/useSidebarCollapsePaint";
 import {
+  applySidebarListChange,
   setSidebarCollapsed,
+  useDisplayedSidebarCollapsed,
   useSidebarCollapsed,
 } from "@/app/sidebarCollapseStore";
 import { useSidebarShortcut } from "@/app/useSidebarShortcut";
@@ -256,11 +258,32 @@ export function AppShell({
     sidebarToggleRef.current?.focus();
   }, [isMobile]);
 
+  // 제목줄 단추와 ⌘B가 읽는 「접힘」은 화면에 보이는 상태다: 「내 작업」이 좁은 창에서
+  // 폭 규칙으로 세션 목록을 접어 둔 것(`autoClosed`)도 접힘이다. 저장된 상태만 읽으면 그
+  // 창에서 첫 번째 누름이 아무 일도 하지 않고 aria-expanded가 화면과 어긋난다.
+  const displayedCollapsed = useDisplayedSidebarCollapsed(myWorkTab);
+  const requestListChange = useCallback(
+    (next: boolean) => {
+      if (next) {
+        // 목록 열 안에 있던 캐럿은 접히면서 사라진다. 닫기 전에 단추로 옮겨 <body>로 떨어지지 않게 한다.
+        const active = document.activeElement;
+        if (
+          active instanceof HTMLElement &&
+          active.closest('#sidebar-channel-pane, [data-testid="session-list"]') !== null
+        ) {
+          sidebarToggleRef.current?.focus();
+        }
+      }
+      applySidebarListChange(next, sidebarPaint.requestCollapsedChange);
+    },
+    [sidebarPaint]
+  );
+
   // ⌘B / Ctrl+B: 목록 열 접고 펴기 (#3280). 규칙은 `useSidebarShortcut`·`shouldToggleSidebar`.
   useSidebarShortcut({
     enabled: !isMobile && !isSettingsSurface,
-    collapsed: sidebarPaneCollapsed,
-    onToggle: sidebarPaint.requestCollapsedChange,
+    collapsed: displayedCollapsed,
+    onToggle: requestListChange,
   });
 
   useEffect(() => {
@@ -346,8 +369,9 @@ export function AppShell({
           >
             {!isSettingsSurface && (
               <AppTitlebar
-                collapsed={sidebarPaneCollapsed}
-                onCollapsedChange={sidebarPaint.requestCollapsedChange}
+                collapsed={displayedCollapsed}
+                controls={myWorkTab ? "session-list-column" : "sidebar-channel-pane"}
+                onCollapsedChange={requestListChange}
                 toggleRef={sidebarToggleRef}
                 onToggleFocus={() => {
                   desktopToggleFocusedRef.current = true;

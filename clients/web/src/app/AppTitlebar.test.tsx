@@ -85,7 +85,7 @@ describe("AppTitlebar", () => {
     expect(titlebar?.contains(toggle)).toBe(true);
     expect(toggle?.getAttribute("aria-expanded")).toBe("true");
     expect(toggle?.getAttribute("aria-label")).toBe("탐색 패널 접기");
-    expect(toggle?.getAttribute("aria-controls")).toBe("sidebar-drawer");
+    expect(toggle?.getAttribute("aria-controls")).toBe("sidebar-channel-pane");
     // #3280: 툴팁에 키 힌트(⌘B, 비 mac은 Ctrl+B)가 서고, 접근성 이름은 상태 문구만 말한다.
     expect(toggle?.getAttribute("title")).toMatch(/^탐색 패널 접기 \((⌘B|Ctrl\+B)\)$/);
     expect(toggle?.getAttribute("aria-keyshortcuts")).toMatch(/^(Meta|Control)\+B$/);

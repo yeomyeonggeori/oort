@@ -15,12 +15,18 @@ import { keyPlatformOf } from "@momo/core/features/workbench/keymap";
  */
 export function AppTitlebar({
   collapsed,
+  controls = "sidebar-channel-pane",
   onCollapsedChange,
   toggleRef,
   onToggleFocus,
   onToggleBlur,
 }: {
   collapsed: boolean;
+  /**
+   * 이 단추가 여닫는 목록 열의 id(#3280). 레일은 접혀도 남으므로 서랍 전체가 아니라 목록 열이다.
+   * 「내 작업」에서는 라우트 안의 세션 목록(`session-list-column`)이고, 접히면 언마운트된다.
+   */
+  controls?: string;
   onCollapsedChange: (collapsed: boolean) => void;
   toggleRef?: Ref<HTMLButtonElement>;
   onToggleFocus?: () => void;
@@ -52,7 +58,7 @@ export function AppTitlebar({
         onPointerDown={(event) => event.stopPropagation()}
         aria-label={copy.label}
         aria-expanded={copy.expanded}
-        aria-controls="sidebar-drawer"
+        aria-controls={controls}
         title={`${copy.label} (${keyHint})`}
         aria-keyshortcuts={platformIsMac ? "Meta+B" : "Control+B"}
         data-testid="sidebar-toggle"

@@ -1786,6 +1786,12 @@
     flex: none;
   }
 }
+/* 현재 워크스페이스 타일 (#3280): 선택 행과 같은 문법(rest 그림자 + 다크 안쪽 고리). */
+@utility rail-tile-current {
+  box-shadow:
+    var(--elevation-rest),
+    inset 0 0 0 1px var(--selected-edge);
+}
 @utility rail-item-selected {
   background-color: var(--surface);
   box-shadow:
