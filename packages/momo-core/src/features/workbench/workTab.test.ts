@@ -10,13 +10,13 @@ import {
   workViewOf,
 } from "./workTab";
 
-/** 레일을 접지 않은 앱 사이드바(워크스페이스 레일 56 + 목록 268). */
+/** 목록 열까지 편 앱 사이드바(레일 56 + 목록 268). */
 const FULL_SIDEBAR_PX = 56 + 268;
 
 describe("작업 탭 폭 (#2854, 제안서 §3.3)", () => {
-  it("1440 창, 레일 64 + 세션 목록 260에서 4×2 칸이 최소 폭 240을 넘는다", () => {
+  it("1440 창, 레일 56 + 세션 목록 268에서 4×2 칸이 최소 폭 240을 넘는다", () => {
     const input = { windowWidth: 1440, sidebarPx: WORK_TAB_RAIL_PX, sessionListPx: WORK_TAB_SESSION_LIST_PX, cols: 4 };
-    expect(workTabPaneWidth(input)).toBe(267); // 시안 ①은 목록 268 → 265, 레일+목록=324 정렬(#3275)로 목록 260 → 267
+    expect(workTabPaneWidth(input)).toBe(267); // 레일 56 + 목록 268 = 324(#3280: 레일 64·목록 260 타협 해소). 값은 이전과 같은 267
     expect(WORK_TAB_RAIL_PX + WORK_TAB_SESSION_LIST_PX).toBe(FULL_SIDEBAR_PX); // 탭을 오가도 왼쪽 가장자리가 같다
     expect(workTabPaneWidth(input)).toBeGreaterThanOrEqual(WORKBENCH_MIN_PANE.width);
     expect(workTabFits(input)).toBe(true);
@@ -60,14 +60,14 @@ describe("/work 보기 판정 (ADR-0194 D1·D2)", () => {
 describe("sessionListFits (#2856)", () => {
   // 4×2의 최소 폭: 240 × 4 + 경계 8 × 3 = 984.
   const min4x2 = 4 * 240 + 3 * 8;
-  it("1440 창은 목록(260)을 편 채로 4×2가 선다", () => {
+  it("1440 창은 목록(268)을 편 채로 4×2가 선다", () => {
     expect(sessionListFits(1440, min4x2)).toBe(true);
   });
   it("1280 창은 목록을 펴면 4×2가 240을 못 지켜 접는다", () => {
     expect(sessionListFits(1280, min4x2)).toBe(false);
   });
   it("경계: 목록을 편 격자 폭이 최소 폭과 같으면 선다", () => {
-    expect(sessionListFits(64 + WORK_TAB_SESSION_LIST_PX + 24 + min4x2, min4x2)).toBe(true);
-    expect(sessionListFits(64 + WORK_TAB_SESSION_LIST_PX + 24 + min4x2 - 1, min4x2)).toBe(false);
+    expect(sessionListFits(WORK_TAB_RAIL_PX + WORK_TAB_SESSION_LIST_PX + 24 + min4x2, min4x2)).toBe(true);
+    expect(sessionListFits(WORK_TAB_RAIL_PX + WORK_TAB_SESSION_LIST_PX + 24 + min4x2 - 1, min4x2)).toBe(false);
   });
 });

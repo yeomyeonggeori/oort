@@ -1273,3 +1273,32 @@ describe("local terminal palette (#2849)", () => {
     });
   }
 });
+
+// =============================================================================
+// 선택 행의 다크 대비 (#3280, #3282 Medium 「다크 선택 줄 대비」).
+//
+// 선택 행의 면(--surface)이 창 바닥 위에 서는데, 다크에서는 면 차이가 거의 없어(약 1.1:1)
+// 선택이 그림자 하나에만 기댔다. 해결은 다크에서만 --line-strong 안쪽 고리(--selected-edge)다.
+// 고리가 3:1 인 이유는 --line-strong 의 정의(모든 면 위 3:1)이고, 여기서 창 바닥의 세 정지점과
+// 선택 행의 면 양쪽에 대해 잰다. 이전 값(면 대 바닥)을 함께 적어 개선이 숫자로 남는다.
+// =============================================================================
+describe("selected row edge (#3280)", () => {
+  const FLOORS = ["canvas-top", "canvas-mid", "canvas-bottom"] as const;
+
+  it("다크: 면 대 바닥은 1.3:1 안쪽(고리가 필요한 이유)이다", () => {
+    for (const floor of FLOORS) {
+      expect(contrast(pick("surface", 1), pick(floor, 1)), floor).toBeLessThan(1.3);
+    }
+  });
+
+  it("다크: 고리(--line-strong)는 창 바닥 세 정지점과 선택 행 면 모두에서 3:1 이상이다", () => {
+    for (const floor of FLOORS) {
+      expect(contrast(pick("line-strong", 1), pick(floor, 1)), floor).toBeGreaterThanOrEqual(3);
+    }
+    expect(contrast(pick("line-strong", 1), pick("surface", 1))).toBeGreaterThanOrEqual(3);
+  });
+
+  it("라이트는 고리가 투명이라 선택 행 모양이 그대로다", () => {
+    expect(css).toMatch(/--selected-edge:\s*light-dark\(transparent, var\(--line-strong\)\);/);
+  });
+});

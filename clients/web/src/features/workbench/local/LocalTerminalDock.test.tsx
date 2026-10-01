@@ -6,6 +6,11 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import type { WorkbenchPaneInfo } from "../WorkbenchGrid";
 import { createLocalSessions, type LocalSessions, type MirrorTerminal } from "./localSessions";
 import { dockSnapshot, resetDockStateForTest } from "./dockState";
+import {
+  SIDEBAR_COLLAPSED_KEY,
+  resetSidebarCollapsedForTest,
+  setSidebarCollapsed,
+} from "@/app/sidebarCollapseStore";
 
 // 도크의 키 경계를 실제 DOM 사건으로 잰다. 칸 안의 xterm은 같은 모양의
 // 가짜(`.xterm` 안의 textarea)로 바꾼다: 여기서 재는 것은 xterm이 아니라
@@ -145,6 +150,7 @@ beforeEach(() => {
   } catch {
     /* jsdom storage */
   }
+  resetSidebarCollapsedForTest();
 });
 
 afterEach(() => {
@@ -389,23 +395,25 @@ describe("세션 목록 (#2856)", () => {
     });
   });
 
-  it("목록을 접으면 머리 줄에 펴기와 「새 세션」, ⌘J는 다시 펴고 행으로 간다", async () => {
+  it("접힌 목록(제목줄 단추·⌘B의 공유 상태)은 머리 줄에 「새 세션」만 남기고, ⌘J는 다시 펴고 행으로 간다 (#3280)", async () => {
     await mountTwo();
-    act(() => q("session-list-collapse")!.click());
+    // 목록 안에는 접기 단추도, 머리 줄에는 펴기 단추도 없다(제목줄 단추 하나가 한다).
+    expect(q("session-list-collapse")).toBeNull();
+    expect(q("session-list-expand")).toBeNull();
+    act(() => setSidebarCollapsed(true));
     expect(q("session-list")).toBeNull();
-    expect(q("session-list-expand")).not.toBeNull();
+    expect(q("session-list-expand")).toBeNull();
     expect(q("local-terminal-new")).not.toBeNull();
     // 「내 작업」에서 ⌘J는 목록으로 간다. ⌘J를 내건 칸 목록 단추는 도크에만 있다(design-review H2).
     expect(q("local-terminal-jump")).toBeNull();
-    expect(document.querySelectorAll("[aria-keyshortcuts='Meta+J']")).toHaveLength(1);
-    // 접기는 기억하고, 펴기는 이번 실행에만 기억한다(M3).
-    expect(window.localStorage.getItem("momo.web.workbench.sessionList.open.v1")).toBe("closed");
+    expect(document.querySelectorAll("[aria-keyshortcuts='Meta+J']")).toHaveLength(0);
+    // 접힘은 기기별로 기억한다(#3280이 #1864의 비저장을 이 패널에서 대체한다).
+    expect(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY)).toBe("1");
     key(document.body, { code: "KeyJ", key: "j", metaKey: true });
     await vi.waitFor(() => expect(q("session-list")).not.toBeNull());
     await vi.waitFor(() => expect(document.activeElement?.getAttribute("data-session-row")).toBe(""));
-    expect(window.localStorage.getItem("momo.web.workbench.sessionList.open.v1")).toBeNull();
+    expect(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY)).toBeNull();
   });
-
 
   it("hook 신호가 칸 머리·테두리·바닥 띠·목록을 바꾸고, ⌃⇧J가 기다리는 칸으로 간다 (#2776)", async () => {
     const { signal } = await mountTwo();

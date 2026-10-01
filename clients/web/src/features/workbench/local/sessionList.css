@@ -8,8 +8,8 @@
 /* #3275: 앱 셸 사이드바와 같은 말을 쓴다. 자기 면·테두리·유리가 없다: 사이드바는
  * 창 바닥(그라데이션) 위에 녹아 있고, 이 목록도 같다. 안쪽 여백은 `sidebar-list`
  * 유틸(위 4 · 왼쪽 14 · 오른쪽 12 · 아래 12)이 클래스로 진다(SessionList.tsx). 그래서
- * 아래 자식들은 좌우 바깥 여백을 따로 갖지 않는다. 폭은 레일 64와 합쳐 사이드바
- * 전체 폭(324)이 되는 값이라(260) 탭을 오가도 본문 가장자리가 같다. 오른쪽 경계선은
+ * 아래 자식들은 좌우 바깥 여백을 따로 갖지 않는다. 폭은 레일 56과 합쳐 사이드바
+ * 전체 폭(324)이 되는 값이라(268) 탭을 오가도 본문 가장자리가 같다. 오른쪽 경계선은
  * 없다: 사이드바도 본문과 경계선이 아니라 바닥 색 차이로 갈린다. */
 .sl {
   inline-size: var(--session-list-width);
@@ -232,7 +232,9 @@
 /* 선택 줄은 사이드바 선택 행(`sidebar-row-selected`)과 같은 문법: 흰 면 + rest 그림자. */
 .sl-row[aria-current="true"] {
   background-color: var(--surface);
-  box-shadow: var(--elevation-rest);
+  box-shadow:
+    var(--elevation-rest),
+    inset 0 0 0 1px var(--selected-edge);
 }
 @media (prefers-contrast: more) {
   .sl-row[aria-current="true"] {

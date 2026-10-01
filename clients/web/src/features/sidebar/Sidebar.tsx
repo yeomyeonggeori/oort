@@ -5,7 +5,6 @@ import {
   Activity,
   Bot,
   Hash,
-  Inbox,
   Lock,
   MessageSquare,
   FolderPlus,
@@ -13,10 +12,8 @@ import {
   Plus,
   Search,
   ServerCog,
-  SquareTerminal,
   SquarePen,
   Users,
-  SquareKanban,
   X,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -24,7 +21,7 @@ import { uuidEq, type Channel } from "@momo/core/lib/api";
 import { fetchWorkspace } from "@momo/core/features/settings/api";
 import { useSession } from "@/app/session";
 import { isSidebarTreeInert } from "@/app/sidebarPane";
-import { ROUTE_REGION_DOM_ID, useInertWhile, useShellNav } from "@/app/shellNav";
+import { useInertWhile, useShellNav } from "@/app/shellNav";
 import {
   agentTurnsInChannel,
   useAgentWorkingSignals,
@@ -64,19 +61,16 @@ import { AGENTS_NAV } from "./workspaceNav";
 import { SidebarRowContextMenu } from "./SidebarRowContextMenu";
 import { openChannelId } from "./openChannel";
 import { roveSidebarRows } from "./sidebarRoving";
-import { WorkspaceRail } from "./WorkspaceRail";
+import { WorkspaceRail, type RailDestination } from "./WorkspaceRail";
 import { SidebarNowCard } from "./SidebarNowCard";
 import { workspaceRailTile } from "./workspaceRailModel";
 import { KomettoMark } from "@/design/brand/KomettoMark";
 import { ProfileCard } from "./ProfileCard";
-import { WorkRail } from "./WorkRail";
-import { takeRailReturn } from "./workRailReturn";
+import { useMentionCount } from "@/features/inbox/useInbox";
 import { isDesktop } from "@/lib/tauri";
 import {
   MY_WORK_PATH,
-  TEAM_WORK_PATH,
   WORK_CONSOLE_VIEW_PATH,
-  WORK_NAV,
   isWorkPath,
   workViewOf,
   type WorkView,
@@ -177,17 +171,17 @@ export function Sidebar({
   onOpenQuickSwitcher,
   channelPaneCollapsed,
   treeHidden,
-  workRail = false,
+  listInRoute = false,
 }: {
   onOpenQuickSwitcher: () => void;
   channelPaneCollapsed: boolean;
   treeHidden: boolean;
   /**
-   * 데스크탑 「내 작업」 격자(#2854, 시안 ①): 앱 사이드바가 64px 레일로 접힌다.
-   * 워크스페이스 레일과 채널 목록은 언마운트하지 않고 숨긴다(스크롤·펼친 섹션이
-   * 남는다). 이 동안에는 제목줄의 접기 상태를 따르지 않는다: 레일이 곧 접힌 모양이다.
+   * 데스크탑 「내 작업」 격자(#2854, 시안 ①): 목록 열(268)을 이 사이드바의 채널 트리가 아니라
+   * 라우트의 세션 목록이 쓴다. 채널 목록은 언마운트하지 않고 숨긴다(스크롤·펼친 섹션이
+   * 남는다). **레일(56)은 숨기지도 바꾸지도 않는다**(#3280): 모든 탭에서 같은 노드다.
    */
-  workRail?: boolean;
+  listInRoute?: boolean;
 }) {
   const { session, workspaceId, connStatus } = useSession();
   const navigate = useNavigate();
@@ -201,33 +195,19 @@ export function Sidebar({
   const workLocation = useLocation();
   const currentWorkView: WorkView | null =
     isWorkPath(workLocation.pathname) ? workViewOf(workLocation.search) : null;
-  // 레일 단추로 떠나 레일이 내려가면 캐럿이 <body>에 떨어진다(design-review H1).
-  // 되살아난 채널 목록의 같은 줄로, 없으면(대화) 라우트 상자로 놓는다.
-  const wasWorkRail = useRef(workRail);
-  useEffect(() => {
-    const was = wasWorkRail.current;
-    wasWorkRail.current = workRail;
-    if (!was || workRail) return;
-    const target = takeRailReturn();
-    const active = document.activeElement;
-    if (active && active !== document.body && active.isConnected) return;
-    // 레일 단추가 아닌 길(⌘K·뒤로 가기·전역 단축키·프로필 메뉴)로 떠나도 레일과
-    // 터미널이 함께 내려가 캐럿이 떨어진다(검수 #2927 M1). 그때는 라우트 상자다.
-    if (target === undefined) {
-      document.getElementById(ROUTE_REGION_DOM_ID)?.focus({ preventScroll: true });
-      return;
-    }
-    // 접어 둔 사이드바로 돌아가면 그 줄은 숨어 있거나 inert라 캐럿을 받지 못한다
-    // (design-review R2 H1). 그때와, 옮겨지지 않았을 때는 라우트 상자로 간다.
-    const row =
-      target && !channelPaneCollapsed
-        ? document.querySelector<HTMLElement>(`[data-testid="${target}"]`)
-        : null;
-    row?.focus({ preventScroll: true });
-    if (!row || document.activeElement !== row) {
-      document.getElementById(ROUTE_REGION_DOM_ID)?.focus({ preventScroll: true });
-    }
-  }, [workRail, channelPaneCollapsed]);
+  // 레일 목적지(#3280): 레일은 어느 탭에서도 내려가지 않으므로, 단추로 탭을 옮겨도 캐럿을 쥔
+  // 단추가 사라지지 않는다(#2854 design-review H1의 캐럿 복귀 장치가 필요 없다).
+  const { pathname } = workLocation;
+  const railActive: RailDestination | null = pathname.startsWith("/inbox")
+    ? "inbox"
+    : currentWorkView === "mine" && desktopWork
+      ? "mine"
+      : currentWorkView === "team"
+        ? "team"
+        : pathname === "/" || pathname.startsWith("/c/")
+          ? "chat"
+          : null;
+  const inboxUnread = useMentionCount();
 
   // 폰에서 이 사이드바는 서랍이다 (goal B6). 닫혀 있는 동안에는 화면 밖으로
   // 밀려 있을 뿐 DOM에는 남아 있으므로(스크롤 위치와 마운트를 지킨다), 탭 순서와
@@ -237,12 +217,13 @@ export function Sidebar({
   // 남기지 않는다. 펼침은 hidden을 먼저 걷고 다음 프레임에 폭을 연다.
   const { isMobile, drawerOpen, closeDrawer } = useShellNav();
   const asDrawer = isMobile;
+  // 닫힌 폰 서랍은 통째로 빠진다. 데스크탑 접힘은 목록 열만 빠진다(#3280): 레일은 접힌
+  // 동안에도 탭 순서에 남는 입구다.
   const drawerRef = useInertWhile<HTMLDivElement>(
-    isSidebarTreeInert({
-      asDrawer,
-      drawerOpen,
-      collapsed: channelPaneCollapsed && !workRail,
-    })
+    isSidebarTreeInert({ asDrawer, drawerOpen, collapsed: false })
+  );
+  const listPaneRef = useInertWhile<HTMLDivElement>(
+    !asDrawer && channelPaneCollapsed
   );
   const closeRef = useRef<HTMLButtonElement>(null);
   const collapsedSections = useSidebarSectionsCollapsed();
@@ -608,20 +589,7 @@ export function Sidebar({
         data-testid="sidebar"
         data-overlay-layer={asDrawer ? "surface" : undefined}
       >
-        {workRail && (
-          <WorkRail
-            footer={
-              <ProfileCard
-                compact
-                workspaceId={workspaceId}
-                selfMemberId={session.member.id}
-                selfMember={selfMember}
-                selfName={selfName}
-                connected={connStatus === "connected"}
-              />
-            }
-          />
-        )}
+        {/* 하나의 레일 (#3280): 모든 탭·접힘에서 같은 노드다. 프로필은 아래에 선다. */}
         <WorkspaceRail
           workspace={{
             name: workspaceQuery.data?.name,
@@ -630,12 +598,44 @@ export function Sidebar({
           }}
           workspaceId={workspaceId}
           avatarUrl={workspaceQuery.data?.avatarUrl}
-          hidden={treeHidden || workRail}
+          active={railActive}
+          showMyWork={desktopWork}
+          inboxUnread={inboxUnread}
+          footer={
+            <div className="safe-area-bottom flex flex-col items-center gap-2">
+              {/* Bound to real connStatus, never decorative (SKILL §8): the colour and
+                  the accessible name both derive from the status, and while connected
+                  the element is not rendered at all. 12x4 bar = the workspace rail's
+                  marker grammar, deliberately not the avatar badge's circle. */}
+              {showsConnectionBar(connStatus) && (
+                <span
+                  data-testid="conn-status"
+                  data-status={connStatus}
+                  role="img"
+                  aria-label={connectionCopy(connStatus)}
+                  title={connectionCopy(connStatus)}
+                  className={cn(
+                    "h-1 w-3 shrink-0 rounded-full",
+                    connectionBarClass(connStatus)
+                  )}
+                />
+              )}
+              <ProfileCard
+                compact
+                workspaceId={workspaceId}
+                selfMemberId={session.member.id}
+                selfMember={selfMember}
+                selfName={selfName}
+                connected={connStatus === "connected"}
+              />
+            </div>
+          }
         />
 
         <div
+          ref={listPaneRef}
           id="sidebar-channel-pane"
-          hidden={treeHidden || workRail}
+          hidden={treeHidden || listInRoute}
           data-sidebar-channel-pane
           data-testid="sidebar-channel-pane"
           className="sidebar-list flex h-full w-full min-w-0 flex-col"
@@ -724,24 +724,8 @@ export function Sidebar({
           >
             <nav aria-label="워크스페이스 탐색">
               <ul className="sidebar-stack">
-                <SidebarRow to="/inbox" icon={<Inbox className="size-4" />} label="인박스" testId="nav-inbox" />
-                {/* 「작업」 두 줄 (#2854, 시안 ④ 사이드바의 자리: 인박스 바로 아래). */}
-                {desktopWork && (
-                  <SidebarRow
-                    to={MY_WORK_PATH}
-                    icon={<SquareTerminal className="size-4" />}
-                    label={WORK_NAV.mine}
-                    testId="nav-my-work"
-                    isActive={currentWorkView === "mine"}
-                  />
-                )}
-                <SidebarRow
-                  to={TEAM_WORK_PATH}
-                  icon={<SquareKanban className="size-4" />}
-                  label={WORK_NAV.team}
-                  testId="nav-team-work"
-                  isActive={currentWorkView === "team"}
-                />
+                {/* 인박스·내 작업·팀 작업은 레일의 목적지다(#3280). 목록 줄은 중복이라 뺐고,
+                    인박스 안 읽음 배지는 레일 타일로 갔다. */}
                 <DraftsNavItem />
                 <SidebarRow to="/activity" icon={<Activity className="size-4" />} label="활동" testId="nav-activity" />
                 <SidebarRow to="/directory" icon={<Users className="size-4" />} label="멤버" testId="nav-directory" />
@@ -1204,7 +1188,9 @@ export function Sidebar({
               Renders nothing at all unless there is something to act on. */}
           <UpdateBadge />
 
-          {/* The identity row is "who I am". Two DIFFERENT facts can appear here and
+          {/* #3280: the identity row ("who I am") and the connection bar moved to the
+              rail footer, so this row now holds only the shortcut help. What follows is
+              the rationale they were built under. The identity row is "who I am". Two DIFFERENT facts can appear here and
               ADR-0160 keeps them apart (guard 6) — 6b design-review H1 is what made
               the separation real rather than asserted:
               • the presence badge (③) is on the avatar: the declared status
@@ -1215,32 +1201,7 @@ export function Sidebar({
               UX-D4 (#1756) made the whole row the profile-card trigger: status
               radios, the rail's 워크스페이스 추가, and settings live in that
               card. The collapse control lives on the titlebar (#1864). */}
-          <div className="safe-area-bottom flex items-center gap-2 pt-2">
-            <ProfileCard
-              workspaceId={workspaceId}
-              selfMemberId={session.member.id}
-              selfMember={selfMember}
-              selfName={selfName}
-              connected={connStatus === "connected"}
-            />
-            {/* Bound to real connStatus, never decorative (SKILL §8): the colour and
-                the accessible name both derive from the status, and while connected
-                the element is not rendered at all. 12x4 bar = the workspace rail's
-                marker grammar, deliberately not the avatar badge's circle.
-                shrink-0 keeps it in place while a long name truncates. */}
-            {showsConnectionBar(connStatus) && (
-              <span
-                data-testid="conn-status"
-                data-status={connStatus}
-                role="img"
-                aria-label={connectionCopy(connStatus)}
-                title={connectionCopy(connStatus)}
-                className={cn(
-                  "h-1 w-3 shrink-0 rounded-full",
-                  connectionBarClass(connStatus)
-                )}
-              />
-            )}
+          <div className="safe-area-bottom flex items-center justify-end gap-2 pt-2">
             <ShortcutHelpDialog />
           </div>
         </div>
