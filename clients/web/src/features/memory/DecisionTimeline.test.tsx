@@ -18,7 +18,7 @@ import {
   TIMELINE_LOAD_ERROR,
 } from "@momo/core/features/memory/timeline";
 import { MemoryBrowserRoute } from "./MemoryBrowserRoute";
-import { CH, ME, WS, byTestId, click, flush, item, mount, settings, unmount } from "./memoryTestKit";
+import { CH, ME, WS, byTestId, click, item, mount, settings, unmount, waitUntil } from "./memoryTestKit";
 
 const listMemoryItems = vi.hoisted(() => vi.fn());
 const getMemoryItem = vi.hoisted(() => vi.fn());
@@ -151,7 +151,16 @@ async function render(
     route: options.route ?? "/memory?view=timeline",
     mobile: options.mobile === true,
   });
-  for (let i = 0; i < 8; i += 1) await flush();
+  // Settle on a state, not a flush count (#3236): the list query has resolved into a
+  // terminal view. Tests that assert on later async state (event links, detail pane) wait
+  // for that exact DOM condition themselves.
+  await waitUntil(
+    () =>
+      view.host.querySelector(
+        '[data-testid="memory-timeline-entry"], [data-testid="memory-timeline-empty"], [data-testid="memory-timeline-error"]'
+      ) !== null,
+    "timeline settled"
+  );
   return view;
 }
 
@@ -161,6 +170,10 @@ const dialog = () =>
   document.body.querySelector<HTMLElement>('[data-testid="memory-revert-dialog"]');
 const dialogButton = (id: string) =>
   document.body.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+const dialogOpen = () => dialog()?.getAttribute("data-state") === "open";
+// The detail pane and its event history load after the list: wait for the revert control
+// (or the given history marker) instead of assuming how many ticks that takes.
+const historyReady = (host: HTMLElement, id = "memory-detail-event") => () => byTestId(host, id) !== null;
 
 describe("결정 타임라인", () => {
   it("결정만 시간순으로 묶어 그리고 종류·상태로 좁힌 질의를 보낸다", async () => {
@@ -193,6 +206,12 @@ describe("결정 타임라인", () => {
   it("무엇이 무엇을 바꿨는지는 옛 결정의 원장 사건에서 읽고 링크로 이어 준다", async () => {
     const { host } = await render();
     const old = entries(host).find((row) => row.dataset.itemId === OLD);
+    await waitUntil(
+      () =>
+        byTestId(old as HTMLElement, "memory-timeline-open-replacement") !== null &&
+        byTestId(entries(host).find((row) => row.dataset.itemId === NEW) as HTMLElement, "memory-timeline-replaces") !== null,
+      "event links drawn"
+    );
     expect(byTestId(old as HTMLElement, "memory-timeline-replaced")?.textContent).toContain(
       "다른 결정으로 바뀌었어요 (9월 9일)"
     );
@@ -201,13 +220,17 @@ describe("결정 타임라인", () => {
       "이전 결정 1개를 바꿨어요"
     );
     click(byTestId(old as HTMLElement, "memory-timeline-open-replacement"));
-    await flush();
+    await waitUntil(
+      () => byTestId(host, "memory-detail")?.getAttribute("data-item-id") === NEW,
+      "detail opened on the replacing decision"
+    );
     expect(byTestId(host, "memory-detail")?.getAttribute("data-item-id")).toBe(NEW);
   });
 
   it("합쳐진 결정은 합쳐진 곳을 가리킨다", async () => {
     const { host } = await render();
     const merged = entries(host).find((row) => row.dataset.itemId === MERGED) as HTMLElement;
+    await waitUntil(() => byTestId(merged, "memory-timeline-open-winner") !== null, "merge link drawn");
     expect(byTestId(merged, "memory-timeline-merged")?.textContent).toContain("합쳐졌어요");
     expect(byTestId(merged, "memory-timeline-open-winner")).not.toBeNull();
   });
@@ -215,6 +238,7 @@ describe("결정 타임라인", () => {
   it("변경 기록을 못 읽어도 구간과 상태는 그리고 링크만 뺀다", async () => {
     getMemoryItemEvents.mockRejectedValue(new ApiError(500, "x"));
     const { host } = await render();
+    await waitUntil(() => byTestId(host, "memory-timeline-links-error") !== null, "links error shown");
     expect(entries(host)).toHaveLength(4);
     expect(byTestId(host, "memory-timeline-links-error")?.textContent).toBe(TIMELINE_LINKS_ERROR);
     expect(byTestId(host, "memory-timeline-replaced")).toBeNull();
@@ -232,12 +256,15 @@ describe("결정 타임라인", () => {
     );
     listMemoryItems.mockResolvedValue({ items: many });
     const { host } = await render();
+    await waitUntil(() => getMemoryItemEvents.mock.calls.length >= 60, "60 event reads issued");
+    await waitUntil(() => byTestId(host, "memory-timeline-links-capped") !== null, "cap notice shown");
     expect(byTestId(host, "memory-timeline-links-capped")).not.toBeNull();
     expect(getMemoryItemEvents).toHaveBeenCalledTimes(60);
   });
 
   it("상한 안에서는 알리지 않는다", async () => {
     const { host } = await render();
+    await waitUntil(() => byTestId(host, "memory-timeline-replaced") !== null, "event links drawn");
     expect(byTestId(host, "memory-timeline-links-capped")).toBeNull();
   });
 
@@ -262,7 +289,7 @@ describe("결정 타임라인", () => {
     expect(byTestId(host, "memory-browser-filter-kind")).toBeNull();
     expect(byTestId(host, "memory-browser-filter-channel")).not.toBeNull();
     click(byTestId(host, "memory-browser-view-list"));
-    await flush();
+    await waitUntil(() => byTestId(host, "memory-browser-search") !== null, "list view shown");
     expect(byTestId(host, "memory-timeline")).toBeNull();
     expect(byTestId(host, "memory-browser-search")).not.toBeNull();
   });
@@ -270,7 +297,7 @@ describe("결정 타임라인", () => {
   it("폰 폭에서도 카드를 누르면 상세가 열린다", async () => {
     const { host } = await render({ mobile: true });
     click(byTestId(entries(host)[0] as HTMLElement, "memory-timeline-open"));
-    await flush();
+    await waitUntil(() => byTestId(host, "memory-detail") !== null, "detail opened on phone width");
     expect(byTestId(host, "memory-detail")).not.toBeNull();
   });
 });
@@ -280,6 +307,7 @@ describe("정리 이력과 되돌리기", () => {
 
   it("기간이 닫힌 결정의 이력에 이름표와 되돌리기가 붙고, 자동 정리라고 말한다", async () => {
     const { host } = await render({ route: open(OLD) });
+    await waitUntil(historyReady(host, "memory-event-revert"), "history with revert shown");
     const event = byTestId(host, "memory-detail-event") as HTMLElement;
     expect(event.dataset.eventKind).toBe("closed");
     expect(event.textContent).toContain("새 결정이 나와서 유효 기간이 닫혔어요");
@@ -290,43 +318,49 @@ describe("정리 이력과 되돌리기", () => {
 
   it("누르면 확인을 거치고, 확인해야 요청을 보낸다", async () => {
     const { host } = await render({ route: open(OLD) });
+    await waitUntil(historyReady(host, "memory-event-revert"), "history with revert shown");
     click(byTestId(host, "memory-event-revert"));
-    await flush();
+    await waitUntil(dialogOpen, "revert dialog opened");
     expect(dialog()).not.toBeNull();
     expect(revertMemoryConsolidation).not.toHaveBeenCalled();
     expect(dialogButton("memory-revert-description")?.textContent).toContain("닫힌 결정을 다시");
     click(dialogButton("memory-revert-cancel"));
-    await flush();
+    await waitUntil(() => !dialogOpen(), "revert dialog closed after cancel");
     expect(revertMemoryConsolidation).not.toHaveBeenCalled();
     click(byTestId(host, "memory-event-revert"));
-    await flush();
+    await waitUntil(dialogOpen, "revert dialog reopened");
     click(dialogButton("memory-revert-confirm"));
-    await flush();
-    await flush();
+    await waitUntil(
+      () => byTestId(host, "memory-browser-notice")?.textContent?.includes("닫힌 기간을 되돌렸어요") === true,
+      "revert notice shown"
+    );
     expect(revertMemoryConsolidation).toHaveBeenCalledWith(WS, OLD, CLOSE_EVENT);
     expect(byTestId(host, "memory-browser-notice")?.textContent).toContain("닫힌 기간을 되돌렸어요");
   });
 
   it("되돌린 뒤에는 목록과 이력을 다시 읽는다", async () => {
     const { host } = await render({ route: open(OLD) });
+    await waitUntil(historyReady(host, "memory-event-revert"), "history with revert shown");
     const before = listMemoryItems.mock.calls.length;
     click(byTestId(host, "memory-event-revert"));
-    await flush();
+    await waitUntil(dialogOpen, "revert dialog opened");
     click(dialogButton("memory-revert-confirm"));
-    for (let i = 0; i < 4; i += 1) await flush();
+    await waitUntil(() => listMemoryItems.mock.calls.length > before, "list re-read after revert");
     expect(listMemoryItems.mock.calls.length).toBeGreaterThan(before);
   });
 
   it("합침과 감쇠는 그 종류에 맞는 결과를 설명한다", async () => {
     const merged = await render({ route: open(MERGED) });
+    await waitUntil(historyReady(merged.host, "memory-event-revert"), "merged history shown");
     click(byTestId(merged.host, "memory-event-revert"));
-    await flush();
+    await waitUntil(dialogOpen, "revert dialog opened (merged)");
     expect(dialogButton("memory-revert-description")?.textContent).toContain("다시 합치지 않아요");
     unmount();
     document.body.innerHTML = "";
     const decayed = await render({ route: open(DECAYED) });
+    await waitUntil(historyReady(decayed.host, "memory-event-revert"), "decayed history shown");
     click(byTestId(decayed.host, "memory-event-revert"));
-    await flush();
+    await waitUntil(dialogOpen, "revert dialog opened (decayed)");
     expect(dialogButton("memory-revert-description")?.textContent).toContain("14일");
   });
 
@@ -337,6 +371,7 @@ describe("정리 이력과 되돌리기", () => {
     ];
     try {
       const { host } = await render({ route: open(OLD) });
+      await waitUntil(historyReady(host, "memory-event-reverted"), "reverted marker shown");
       const rows = host.querySelectorAll('[data-testid="memory-detail-event"]');
       expect(rows).toHaveLength(2);
       expect(byTestId(host, "memory-event-reverted")?.textContent).toBe("되돌렸어요");
@@ -355,6 +390,10 @@ describe("정리 이력과 되돌리기", () => {
     ];
     try {
       const { host } = await render({ route: open(OLD) });
+      await waitUntil(
+        () => host.querySelectorAll('[data-testid="memory-detail-event"]').length === 3,
+        "three events shown"
+      );
       expect(host.querySelectorAll('[data-testid="memory-detail-event"]')).toHaveLength(3);
       expect(byTestId(host, "memory-event-revert")).toBeNull();
     } finally {
@@ -364,6 +403,7 @@ describe("정리 이력과 되돌리기", () => {
 
   it("게스트는 이력을 읽기만 하고 이유를 듣는다", async () => {
     const { host } = await render({ role: "guest", route: open(OLD) });
+    await waitUntil(historyReady(host), "history shown");
     expect(byTestId(host, "memory-detail-event")?.textContent).toContain("유효 기간이 닫혔어요");
     expect(byTestId(host, "memory-event-revert")).toBeNull();
     expect(byTestId(host, "memory-history-guest")?.textContent).toBe(REVERT_GUEST_READONLY);
@@ -377,11 +417,14 @@ describe("정리 이력과 되돌리기", () => {
   ])("실패 %i는 정해진 한 문장으로 돌려준다", async (status, message) => {
     revertMemoryConsolidation.mockRejectedValue(new ApiError(status, "x"));
     const { host } = await render({ route: open(OLD) });
+    await waitUntil(historyReady(host, "memory-event-revert"), "history with revert shown");
     click(byTestId(host, "memory-event-revert"));
-    await flush();
+    await waitUntil(dialogOpen, "revert dialog opened");
     click(dialogButton("memory-revert-confirm"));
-    await flush();
-    await flush();
+    await waitUntil(
+      () => byTestId(host, "memory-history-error") !== null && !dialogOpen(),
+      "revert error shown and dialog closed"
+    );
     expect(byTestId(host, "memory-history-error")?.textContent).toContain(message);
     expect(dialog()?.getAttribute("data-state")).not.toBe("open");
   });
@@ -389,10 +432,16 @@ describe("정리 이력과 되돌리기", () => {
   it("404는 없거나 볼 수 없다고만 말하고 상세를 닫는다", async () => {
     revertMemoryConsolidation.mockRejectedValue(new ApiError(404, "x"));
     const { host } = await render({ route: open(OLD) });
+    await waitUntil(historyReady(host, "memory-event-revert"), "history with revert shown");
     click(byTestId(host, "memory-event-revert"));
-    await flush();
+    await waitUntil(dialogOpen, "revert dialog opened");
     click(dialogButton("memory-revert-confirm"));
-    for (let i = 0; i < 4; i += 1) await flush();
+    await waitUntil(
+      () =>
+        byTestId(host, "memory-browser-notice")?.textContent?.includes(REVERT_GONE_MESSAGE) === true &&
+        byTestId(host, "memory-detail") === null,
+      "gone notice shown and detail closed"
+    );
     expect(byTestId(host, "memory-browser-notice")?.textContent).toContain(REVERT_GONE_MESSAGE);
     expect(byTestId(host, "memory-detail")).toBeNull();
   });
@@ -400,6 +449,7 @@ describe("정리 이력과 되돌리기", () => {
   it("연결이 끊기면 되돌리기를 잠그고 이유를 말한다", async () => {
     vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
     const { host } = await render({ route: open(OLD) });
+    await waitUntil(historyReady(host, "memory-history-offline"), "offline note shown");
     expect(byTestId(host, "memory-history-offline")?.textContent).toContain("연결이 끊겨");
     expect(byTestId(host, "memory-event-revert")?.hasAttribute("disabled")).toBe(true);
     vi.restoreAllMocks();

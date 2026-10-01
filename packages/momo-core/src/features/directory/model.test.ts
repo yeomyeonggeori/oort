@@ -577,7 +577,7 @@ describe("openDmErrorMessage", () => {
     );
     expect(message).toContain("Hermes님과의 대화를 열지 못했습니다");
     // The transport's own measured copy, deadline included, not a second one.
-    expect(message).toContain("15초 안에 응답하지 않았습니다");
+    expect(message).toContain("15초 안에 응답하지 않았어요");
   });
 
   it("still says what failed and what to do for an unknown error", () => {

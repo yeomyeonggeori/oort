@@ -483,6 +483,129 @@ describe("D1 로그인 한 화면 (#2809 OB2-3)", () => {
     await act(async () => resolve(session));
   });
 
+  describe("한 번만 보낸다 (#3267)", () => {
+    function pendingLogin(): { resolve: (v: LoginResponse) => void; reject: (e: unknown) => void } {
+      let resolve: (v: LoginResponse) => void = () => undefined;
+      let reject: (e: unknown) => void = () => undefined;
+      login.mockImplementation(
+        () =>
+          new Promise<LoginResponse>((res, rej) => {
+            resolve = res;
+            reject = rej;
+          })
+      );
+      return { resolve: (v) => resolve(v), reject: (e) => reject(e) };
+    }
+
+    function submitEvent() {
+      const form = q("login-submit")!.closest("form")!;
+      act(() => {
+        form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      });
+    }
+
+    function readyForm() {
+      setServerBase("https://team.example.com");
+      mount();
+      fill("login-email", "seongjae@dawn.example");
+      fill("login-password", "correct-horse");
+    }
+
+    it("sends one request for a double click in the same tick and shows the pending label", async () => {
+      const pending = pendingLogin();
+      readyForm();
+      act(() => {
+        (q("login-submit") as HTMLElement).click();
+        (q("login-submit") as HTMLElement).click();
+      });
+      expect(login).toHaveBeenCalledTimes(1);
+      const button = q("login-submit") as HTMLButtonElement;
+      expect(button.textContent).toBe("들어가는 중…");
+      expect(button.getAttribute("aria-busy")).toBe("true");
+      expect(button.getAttribute("aria-disabled")).toBe("true");
+      click("login-submit");
+      expect(login).toHaveBeenCalledTimes(1);
+      await act(async () => pending.resolve(session));
+    });
+
+    it("ignores Enter (a second form submit) while the request is in flight", async () => {
+      const pending = pendingLogin();
+      readyForm();
+      submitEvent();
+      expect(login).toHaveBeenCalledTimes(1);
+      submitEvent();
+      submitEvent();
+      expect(login).toHaveBeenCalledTimes(1);
+      await act(async () => pending.resolve(session));
+    });
+
+    it("keeps the inputs readable and the way back closed while it waits", async () => {
+      const pending = pendingLogin();
+      readyForm();
+      submitEvent();
+      expect((q("login-email") as HTMLInputElement).value).toBe("seongjae@dawn.example");
+      expect((q("login-email") as HTMLInputElement).disabled).toBe(false);
+      expect((q("login-password") as HTMLInputElement).disabled).toBe(false);
+      expect((q("onboarding-back") as HTMLButtonElement).disabled).toBe(true);
+      expect((q("connect-server-change") as HTMLButtonElement).disabled).toBe(true);
+      await act(async () => pending.resolve(session));
+    });
+
+    it("works again after a failure", async () => {
+      const pending = pendingLogin();
+      readyForm();
+      submitEvent();
+      await act(async () => pending.reject(new ApiError(500, "boom")));
+      const button = q("login-submit") as HTMLButtonElement;
+      expect(button.textContent).toBe("들어가기");
+      expect(button.getAttribute("aria-busy")).toBeNull();
+      expect(button.getAttribute("aria-disabled")).toBeNull();
+      fill("login-password", "again");
+      submitEvent();
+      expect(login).toHaveBeenCalledTimes(2);
+      await act(async () => undefined);
+    });
+
+    it("on a timeout: 해요체 message, no credential error, and it can be pressed again", async () => {
+      const pending = pendingLogin();
+      readyForm();
+      submitEvent();
+      await act(async () => pending.reject(new NetworkError("timeout", 15_000)));
+      expect(q("login-error")?.textContent).toContain(
+        "서버가 15초 안에 응답하지 않았어요. 주소와 네트워크를 확인하고 다시 시도해 주세요."
+      );
+      expect(q("login-password-error")).toBeNull();
+      expect(q("login-email-error")).toBeNull();
+      expect(q("login-password")?.getAttribute("aria-invalid")).toBeNull();
+      expect(q("login-email")?.getAttribute("aria-invalid")).toBeNull();
+      expect(focused()).toBe("login-submit");
+      expect((q("login-password") as HTMLInputElement).value).toBe("correct-horse");
+      submitEvent();
+      expect(login).toHaveBeenCalledTimes(2);
+      await act(async () => undefined);
+    });
+
+    it("does not touch state or sign in when the response lands after unmount", async () => {
+      const pending = pendingLogin();
+      const onLoggedIn = vi.fn();
+      setServerBase("https://team.example.com");
+      mount(onLoggedIn);
+      fill("login-email", "seongjae@dawn.example");
+      fill("login-password", "correct-horse");
+      submitEvent();
+      const errors: unknown[][] = [];
+      const spy = vi.spyOn(console, "error").mockImplementation((...a) => {
+        errors.push(a);
+      });
+      act(() => mountedRoot?.unmount());
+      mountedRoot = null;
+      await act(async () => pending.resolve(session));
+      spy.mockRestore();
+      expect(onLoggedIn).not.toHaveBeenCalled();
+      expect(errors).toEqual([]);
+    });
+  });
+
   it("on a rejected sign-in: 당황, the error at the password field with the next step, and the password gone", async () => {
     setServerBase("https://team.example.com");
     login.mockRejectedValue(new ApiError(401, "invalid credentials"));
@@ -521,7 +644,7 @@ describe("D1 로그인 한 화면 (#2809 OB2-3)", () => {
     expect(login).not.toHaveBeenCalled();
   });
 
-  it("on a server that does not answer: 당황 and the password gone too", async () => {
+  it("on a server that does not answer: 당황, the password kept, and the cursor on 들어가기 (#3267)", async () => {
     setServerBase("https://team.example.com");
     login.mockRejectedValue(new NetworkError("unreachable", 15_000));
     mount();
@@ -530,7 +653,9 @@ describe("D1 로그인 한 화면 (#2809 OB2-3)", () => {
     await submitForm();
     await vi.waitFor(() => expect(q("login-error")).not.toBeNull());
     expect(guideExpression()).toBe("flustered");
-    expect((q("login-password") as HTMLInputElement).value).toBe("");
+    expect((q("login-password") as HTMLInputElement).value).toBe("correct-horse");
+    expect(q("login-password-error")).toBeNull();
+    expect(focused()).toBe("login-submit");
   });
 
   it("offline: 당황 with its own sentence, the banner, and a held submit", () => {

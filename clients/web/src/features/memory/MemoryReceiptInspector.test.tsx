@@ -9,7 +9,7 @@ import {
   WITHHELD_EXPLAIN_COPY,
 } from "@momo/core/features/memory/presentation";
 import { MemoryReceiptChip } from "./MemoryReceiptChip";
-import { CH, ITEM, RUN, WS, byTestId, click, digest, flush, mount, unmount } from "./memoryTestKit";
+import { CH, ITEM, RUN, WS, byTestId, click, digest, mount, unmount, waitUntil } from "./memoryTestKit";
 
 const getRunMemoryReceipt = vi.hoisted(() => vi.fn());
 
@@ -69,12 +69,16 @@ async function openInspector(data: MemoryReceipt, onJump = vi.fn()) {
   const view = mount(
     createElement(MemoryReceiptChip, { workspaceId: WS, runId: RUN, channelId: CH, onJump })
   );
-  await flush();
-  await flush();
+  // Wait for each step's DOM, not a tick count (#3236): chip after the receipt loads,
+  // the inspect action after the popover opens, then the dialog itself.
+  await waitUntil(() => byTestId(view.host, "memory-receipt-chip") !== null, "receipt chip drawn");
   click(byTestId(view.host, "memory-receipt-chip"));
-  await flush();
+  await waitUntil(
+    () => document.body.querySelector('[data-testid="memory-receipt-inspect"]') !== null,
+    "popover opened"
+  );
   click(document.body.querySelector('[data-testid="memory-receipt-inspect"]'));
-  await flush();
+  await waitUntil(() => inspector() !== null, "inspector opened");
   return { ...view, onJump };
 }
 
@@ -104,7 +108,10 @@ describe("서빙 인스펙터: 이 답에 쓰인 기억", () => {
   it("요약의 근거 링크는 같은 채널이면 그 자리로 점프하고 인스펙터를 닫는다", async () => {
     const { onJump } = await openInspector(receipt());
     click(within("memory-inspector-evidence-link"));
-    await flush();
+    await waitUntil(
+      () => onJump.mock.calls.length > 0 && inspector()?.getAttribute("data-state") !== "open",
+      "jumped and inspector closed"
+    );
     expect(onJump).toHaveBeenCalledWith(digest().evidence[0]?.messageId, digest().evidence[0]?.seq);
     expect(inspector()?.getAttribute("data-state")).not.toBe("open");
   });
@@ -154,10 +161,12 @@ describe("서빙 인스펙터: 이 답에 쓰인 기억", () => {
   it("팝오버 목록에도 실린 항목이 나온다", async () => {
     getRunMemoryReceipt.mockResolvedValue(receipt());
     const view = mount(createElement(MemoryReceiptChip, { workspaceId: WS, runId: RUN, channelId: CH }));
-    await flush();
-    await flush();
+    await waitUntil(() => byTestId(view.host, "memory-receipt-chip") !== null, "receipt chip drawn");
     click(byTestId(view.host, "memory-receipt-chip"));
-    await flush();
+    await waitUntil(
+      () => document.body.querySelector('[data-testid="memory-receipt-item"]') !== null,
+      "popover items drawn"
+    );
     const popover = document.body.querySelector('[data-testid="memory-receipt-popover"]');
     expect(popover?.querySelectorAll('[data-testid="memory-receipt-item"]')).toHaveLength(1);
   });
@@ -165,7 +174,7 @@ describe("서빙 인스펙터: 이 답에 쓰인 기억", () => {
   it("닫기로 닫는다", async () => {
     await openInspector(receipt());
     click(within("memory-inspector-close"));
-    await flush();
+    await waitUntil(() => inspector()?.getAttribute("data-state") !== "open", "inspector closed");
     expect(inspector()?.getAttribute("data-state")).not.toBe("open");
   });
 });

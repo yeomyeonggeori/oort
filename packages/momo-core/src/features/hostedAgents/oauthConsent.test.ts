@@ -303,7 +303,7 @@ describe("RED PROOF ④ 없는 것과 거절된 것은 한 문장이고 fallback
       "preview",
       new NetworkError("timeout", 15_000)
     );
-    expect(message).toContain("응답하지 않았습니다");
+    expect(message).toContain("응답하지 않았어요");
   });
 });
 
