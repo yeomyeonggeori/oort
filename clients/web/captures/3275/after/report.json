@@ -1,0 +1,1258 @@
+{
+  "1440-light": {
+    "tag": "1440-light",
+    "inbox": {
+      "rail": null,
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 324,
+        "h": 860
+      },
+      "panel": {
+        "x": 56,
+        "y": 40,
+        "w": 268,
+        "h": 860
+      },
+      "panelKind": "sidebar-channel-pane",
+      "panelStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(231, 228, 223)",
+        "pad": "4px 12px",
+        "backdrop": "none"
+      },
+      "head": {
+        "x": 70,
+        "y": 44,
+        "w": 242,
+        "h": 48
+      },
+      "main": {
+        "x": 324,
+        "y": 8,
+        "w": 1108,
+        "h": 884
+      },
+      "mainStyle": {
+        "bg": "rgb(255, 254, 252)",
+        "radius": "18px",
+        "borderR": "0px rgb(231, 228, 223)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 324,
+        "y": 8,
+        "w": 1108,
+        "h": 884
+      },
+      "cols": "324px 1116px",
+      "scrollW": 0
+    },
+    "work": {
+      "rail": {
+        "x": 0,
+        "y": 40,
+        "w": 64,
+        "h": 860
+      },
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 64,
+        "h": 860
+      },
+      "panel": {
+        "x": 64,
+        "y": 40,
+        "w": 260,
+        "h": 860
+      },
+      "panelKind": "session-list",
+      "panelStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(231, 228, 223)",
+        "pad": "4px 12px",
+        "backdrop": "none"
+      },
+      "head": {
+        "x": 78,
+        "y": 44,
+        "w": 234,
+        "h": 48
+      },
+      "main": {
+        "x": 64,
+        "y": 40,
+        "w": 1376,
+        "h": 860
+      },
+      "mainStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(231, 228, 223)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 324,
+        "y": 40,
+        "w": 1116,
+        "h": 860
+      },
+      "cols": "64px 1376px",
+      "scrollW": 0
+    },
+    "toWork": {
+      "frames": 108,
+      "jump": {
+        "px": 24,
+        "at": "content.h@40ms"
+      },
+      "cols": [
+        "324px 1116px",
+        "64px 1376px"
+      ]
+    },
+    "fromWork": {
+      "frames": 113,
+      "jump": {
+        "px": 24,
+        "at": "content.h@32ms"
+      },
+      "cols": [
+        "64px 1376px",
+        "324px 1116px"
+      ]
+    },
+    "back": {
+      "rail": null,
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 324,
+        "h": 860
+      },
+      "panel": {
+        "x": 56,
+        "y": 40,
+        "w": 268,
+        "h": 860
+      },
+      "panelKind": "sidebar-channel-pane",
+      "panelStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(231, 228, 223)",
+        "pad": "4px 12px",
+        "backdrop": "none"
+      },
+      "head": {
+        "x": 70,
+        "y": 44,
+        "w": 242,
+        "h": 48
+      },
+      "main": {
+        "x": 324,
+        "y": 8,
+        "w": 1108,
+        "h": 884
+      },
+      "mainStyle": {
+        "bg": "rgb(255, 254, 252)",
+        "radius": "18px",
+        "borderR": "0px rgb(231, 228, 223)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 324,
+        "y": 8,
+        "w": 1108,
+        "h": 884
+      },
+      "cols": "324px 1116px",
+      "scrollW": 0
+    }
+  },
+  "1280-light": {
+    "tag": "1280-light",
+    "inbox": {
+      "rail": null,
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 324,
+        "h": 760
+      },
+      "panel": {
+        "x": 56,
+        "y": 40,
+        "w": 268,
+        "h": 760
+      },
+      "panelKind": "sidebar-channel-pane",
+      "panelStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(231, 228, 223)",
+        "pad": "4px 12px",
+        "backdrop": "none"
+      },
+      "head": {
+        "x": 70,
+        "y": 44,
+        "w": 242,
+        "h": 48
+      },
+      "main": {
+        "x": 324,
+        "y": 8,
+        "w": 948,
+        "h": 784
+      },
+      "mainStyle": {
+        "bg": "rgb(255, 254, 252)",
+        "radius": "18px",
+        "borderR": "0px rgb(231, 228, 223)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 324,
+        "y": 8,
+        "w": 948,
+        "h": 784
+      },
+      "cols": "324px 956px",
+      "scrollW": 0
+    },
+    "work": {
+      "rail": {
+        "x": 0,
+        "y": 40,
+        "w": 64,
+        "h": 760
+      },
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 64,
+        "h": 760
+      },
+      "panel": null,
+      "panelKind": null,
+      "panelStyle": null,
+      "head": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      },
+      "main": {
+        "x": 64,
+        "y": 40,
+        "w": 1216,
+        "h": 760
+      },
+      "mainStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(231, 228, 223)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 64,
+        "y": 40,
+        "w": 1216,
+        "h": 760
+      },
+      "cols": "64px 1216px",
+      "scrollW": 0
+    },
+    "toWork": {
+      "frames": 110,
+      "jump": {
+        "px": 268,
+        "at": "content.w@32ms"
+      },
+      "cols": [
+        "324px 956px",
+        "64px 1216px"
+      ]
+    },
+    "workListOpen": {
+      "rail": {
+        "x": 0,
+        "y": 40,
+        "w": 64,
+        "h": 760
+      },
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 64,
+        "h": 760
+      },
+      "panel": {
+        "x": 64,
+        "y": 40,
+        "w": 260,
+        "h": 760
+      },
+      "panelKind": "session-list",
+      "panelStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(231, 228, 223)",
+        "pad": "4px 12px",
+        "backdrop": "none"
+      },
+      "head": {
+        "x": 78,
+        "y": 44,
+        "w": 234,
+        "h": 48
+      },
+      "main": {
+        "x": 64,
+        "y": 40,
+        "w": 1216,
+        "h": 760
+      },
+      "mainStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(231, 228, 223)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 324,
+        "y": 40,
+        "w": 956,
+        "h": 760
+      },
+      "cols": "64px 1216px",
+      "scrollW": 0
+    },
+    "fromWork": {
+      "frames": 113,
+      "jump": {
+        "px": 24,
+        "at": "content.h@28ms"
+      },
+      "cols": [
+        "64px 1216px",
+        "324px 956px"
+      ]
+    },
+    "back": {
+      "rail": null,
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 324,
+        "h": 760
+      },
+      "panel": {
+        "x": 56,
+        "y": 40,
+        "w": 268,
+        "h": 760
+      },
+      "panelKind": "sidebar-channel-pane",
+      "panelStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(231, 228, 223)",
+        "pad": "4px 12px",
+        "backdrop": "none"
+      },
+      "head": {
+        "x": 70,
+        "y": 44,
+        "w": 242,
+        "h": 48
+      },
+      "main": {
+        "x": 324,
+        "y": 8,
+        "w": 948,
+        "h": 784
+      },
+      "mainStyle": {
+        "bg": "rgb(255, 254, 252)",
+        "radius": "18px",
+        "borderR": "0px rgb(231, 228, 223)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 324,
+        "y": 8,
+        "w": 948,
+        "h": 784
+      },
+      "cols": "324px 956px",
+      "scrollW": 0
+    }
+  },
+  "900-light": {
+    "tag": "900-light",
+    "inbox": {
+      "rail": null,
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 324,
+        "h": 660
+      },
+      "panel": {
+        "x": 56,
+        "y": 40,
+        "w": 268,
+        "h": 660
+      },
+      "panelKind": "sidebar-channel-pane",
+      "panelStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(231, 228, 223)",
+        "pad": "4px 12px",
+        "backdrop": "none"
+      },
+      "head": {
+        "x": 70,
+        "y": 44,
+        "w": 242,
+        "h": 48
+      },
+      "main": {
+        "x": 324,
+        "y": 8,
+        "w": 568,
+        "h": 684
+      },
+      "mainStyle": {
+        "bg": "rgb(255, 254, 252)",
+        "radius": "18px",
+        "borderR": "0px rgb(231, 228, 223)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 324,
+        "y": 8,
+        "w": 568,
+        "h": 684
+      },
+      "cols": "324px 576px",
+      "scrollW": 0
+    },
+    "work": {
+      "rail": {
+        "x": 0,
+        "y": 40,
+        "w": 64,
+        "h": 660
+      },
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 64,
+        "h": 660
+      },
+      "panel": null,
+      "panelKind": null,
+      "panelStyle": null,
+      "head": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      },
+      "main": {
+        "x": 64,
+        "y": 40,
+        "w": 836,
+        "h": 660
+      },
+      "mainStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(231, 228, 223)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 64,
+        "y": 40,
+        "w": 836,
+        "h": 660
+      },
+      "cols": "64px 836px",
+      "scrollW": 0
+    },
+    "toWork": {
+      "frames": 110,
+      "jump": {
+        "px": 268,
+        "at": "content.w@35ms"
+      },
+      "cols": [
+        "324px 576px",
+        "64px 836px"
+      ]
+    },
+    "workListOpen": {
+      "rail": {
+        "x": 0,
+        "y": 40,
+        "w": 64,
+        "h": 660
+      },
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 64,
+        "h": 660
+      },
+      "panel": {
+        "x": 64,
+        "y": 40,
+        "w": 260,
+        "h": 660
+      },
+      "panelKind": "session-list",
+      "panelStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(231, 228, 223)",
+        "pad": "4px 12px",
+        "backdrop": "none"
+      },
+      "head": {
+        "x": 78,
+        "y": 44,
+        "w": 234,
+        "h": 48
+      },
+      "main": {
+        "x": 64,
+        "y": 40,
+        "w": 836,
+        "h": 660
+      },
+      "mainStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(231, 228, 223)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 324,
+        "y": 40,
+        "w": 576,
+        "h": 660
+      },
+      "cols": "64px 836px",
+      "scrollW": 0
+    },
+    "fromWork": {
+      "frames": 111,
+      "jump": {
+        "px": 24,
+        "at": "content.h@24ms"
+      },
+      "cols": [
+        "64px 836px",
+        "324px 576px"
+      ]
+    },
+    "back": {
+      "rail": null,
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 324,
+        "h": 660
+      },
+      "panel": {
+        "x": 56,
+        "y": 40,
+        "w": 268,
+        "h": 660
+      },
+      "panelKind": "sidebar-channel-pane",
+      "panelStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(231, 228, 223)",
+        "pad": "4px 12px",
+        "backdrop": "none"
+      },
+      "head": {
+        "x": 70,
+        "y": 44,
+        "w": 242,
+        "h": 48
+      },
+      "main": {
+        "x": 324,
+        "y": 8,
+        "w": 568,
+        "h": 684
+      },
+      "mainStyle": {
+        "bg": "rgb(255, 254, 252)",
+        "radius": "18px",
+        "borderR": "0px rgb(231, 228, 223)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 324,
+        "y": 8,
+        "w": 568,
+        "h": 684
+      },
+      "cols": "324px 576px",
+      "scrollW": 0
+    }
+  },
+  "1440-dark": {
+    "tag": "1440-dark",
+    "inbox": {
+      "rail": null,
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 324,
+        "h": 860
+      },
+      "panel": {
+        "x": 56,
+        "y": 40,
+        "w": 268,
+        "h": 860
+      },
+      "panelKind": "sidebar-channel-pane",
+      "panelStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(44, 48, 57)",
+        "pad": "4px 12px",
+        "backdrop": "none"
+      },
+      "head": {
+        "x": 70,
+        "y": 44,
+        "w": 242,
+        "h": 48
+      },
+      "main": {
+        "x": 324,
+        "y": 8,
+        "w": 1108,
+        "h": 884
+      },
+      "mainStyle": {
+        "bg": "rgb(23, 26, 32)",
+        "radius": "18px",
+        "borderR": "0px rgb(44, 48, 57)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 324,
+        "y": 8,
+        "w": 1108,
+        "h": 884
+      },
+      "cols": "324px 1116px",
+      "scrollW": 0
+    },
+    "work": {
+      "rail": {
+        "x": 0,
+        "y": 40,
+        "w": 64,
+        "h": 860
+      },
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 64,
+        "h": 860
+      },
+      "panel": {
+        "x": 64,
+        "y": 40,
+        "w": 260,
+        "h": 860
+      },
+      "panelKind": "session-list",
+      "panelStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(44, 48, 57)",
+        "pad": "4px 12px",
+        "backdrop": "none"
+      },
+      "head": {
+        "x": 78,
+        "y": 44,
+        "w": 234,
+        "h": 48
+      },
+      "main": {
+        "x": 64,
+        "y": 40,
+        "w": 1376,
+        "h": 860
+      },
+      "mainStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(44, 48, 57)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 324,
+        "y": 40,
+        "w": 1116,
+        "h": 860
+      },
+      "cols": "64px 1376px",
+      "scrollW": 0
+    },
+    "toWork": {
+      "frames": 108,
+      "jump": {
+        "px": 24,
+        "at": "content.h@32ms"
+      },
+      "cols": [
+        "324px 1116px",
+        "64px 1376px"
+      ]
+    },
+    "fromWork": {
+      "frames": 113,
+      "jump": {
+        "px": 24,
+        "at": "content.h@30ms"
+      },
+      "cols": [
+        "64px 1376px",
+        "324px 1116px"
+      ]
+    },
+    "back": {
+      "rail": null,
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 324,
+        "h": 860
+      },
+      "panel": {
+        "x": 56,
+        "y": 40,
+        "w": 268,
+        "h": 860
+      },
+      "panelKind": "sidebar-channel-pane",
+      "panelStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(44, 48, 57)",
+        "pad": "4px 12px",
+        "backdrop": "none"
+      },
+      "head": {
+        "x": 70,
+        "y": 44,
+        "w": 242,
+        "h": 48
+      },
+      "main": {
+        "x": 324,
+        "y": 8,
+        "w": 1108,
+        "h": 884
+      },
+      "mainStyle": {
+        "bg": "rgb(23, 26, 32)",
+        "radius": "18px",
+        "borderR": "0px rgb(44, 48, 57)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 324,
+        "y": 8,
+        "w": 1108,
+        "h": 884
+      },
+      "cols": "324px 1116px",
+      "scrollW": 0
+    }
+  },
+  "1280-dark": {
+    "tag": "1280-dark",
+    "inbox": {
+      "rail": null,
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 324,
+        "h": 760
+      },
+      "panel": {
+        "x": 56,
+        "y": 40,
+        "w": 268,
+        "h": 760
+      },
+      "panelKind": "sidebar-channel-pane",
+      "panelStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(44, 48, 57)",
+        "pad": "4px 12px",
+        "backdrop": "none"
+      },
+      "head": {
+        "x": 70,
+        "y": 44,
+        "w": 242,
+        "h": 48
+      },
+      "main": {
+        "x": 324,
+        "y": 8,
+        "w": 948,
+        "h": 784
+      },
+      "mainStyle": {
+        "bg": "rgb(23, 26, 32)",
+        "radius": "18px",
+        "borderR": "0px rgb(44, 48, 57)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 324,
+        "y": 8,
+        "w": 948,
+        "h": 784
+      },
+      "cols": "324px 956px",
+      "scrollW": 0
+    },
+    "work": {
+      "rail": {
+        "x": 0,
+        "y": 40,
+        "w": 64,
+        "h": 760
+      },
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 64,
+        "h": 760
+      },
+      "panel": null,
+      "panelKind": null,
+      "panelStyle": null,
+      "head": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      },
+      "main": {
+        "x": 64,
+        "y": 40,
+        "w": 1216,
+        "h": 760
+      },
+      "mainStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(44, 48, 57)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 64,
+        "y": 40,
+        "w": 1216,
+        "h": 760
+      },
+      "cols": "64px 1216px",
+      "scrollW": 0
+    },
+    "toWork": {
+      "frames": 110,
+      "jump": {
+        "px": 268,
+        "at": "content.w@34ms"
+      },
+      "cols": [
+        "324px 956px",
+        "64px 1216px"
+      ]
+    },
+    "workListOpen": {
+      "rail": {
+        "x": 0,
+        "y": 40,
+        "w": 64,
+        "h": 760
+      },
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 64,
+        "h": 760
+      },
+      "panel": {
+        "x": 64,
+        "y": 40,
+        "w": 260,
+        "h": 760
+      },
+      "panelKind": "session-list",
+      "panelStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(44, 48, 57)",
+        "pad": "4px 12px",
+        "backdrop": "none"
+      },
+      "head": {
+        "x": 78,
+        "y": 44,
+        "w": 234,
+        "h": 48
+      },
+      "main": {
+        "x": 64,
+        "y": 40,
+        "w": 1216,
+        "h": 760
+      },
+      "mainStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(44, 48, 57)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 324,
+        "y": 40,
+        "w": 956,
+        "h": 760
+      },
+      "cols": "64px 1216px",
+      "scrollW": 0
+    },
+    "fromWork": {
+      "frames": 112,
+      "jump": {
+        "px": 24,
+        "at": "content.h@30ms"
+      },
+      "cols": [
+        "64px 1216px",
+        "324px 956px"
+      ]
+    },
+    "back": {
+      "rail": null,
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 324,
+        "h": 760
+      },
+      "panel": {
+        "x": 56,
+        "y": 40,
+        "w": 268,
+        "h": 760
+      },
+      "panelKind": "sidebar-channel-pane",
+      "panelStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(44, 48, 57)",
+        "pad": "4px 12px",
+        "backdrop": "none"
+      },
+      "head": {
+        "x": 70,
+        "y": 44,
+        "w": 242,
+        "h": 48
+      },
+      "main": {
+        "x": 324,
+        "y": 8,
+        "w": 948,
+        "h": 784
+      },
+      "mainStyle": {
+        "bg": "rgb(23, 26, 32)",
+        "radius": "18px",
+        "borderR": "0px rgb(44, 48, 57)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 324,
+        "y": 8,
+        "w": 948,
+        "h": 784
+      },
+      "cols": "324px 956px",
+      "scrollW": 0
+    }
+  },
+  "900-dark": {
+    "tag": "900-dark",
+    "inbox": {
+      "rail": null,
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 324,
+        "h": 660
+      },
+      "panel": {
+        "x": 56,
+        "y": 40,
+        "w": 268,
+        "h": 660
+      },
+      "panelKind": "sidebar-channel-pane",
+      "panelStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(44, 48, 57)",
+        "pad": "4px 12px",
+        "backdrop": "none"
+      },
+      "head": {
+        "x": 70,
+        "y": 44,
+        "w": 242,
+        "h": 48
+      },
+      "main": {
+        "x": 324,
+        "y": 8,
+        "w": 568,
+        "h": 684
+      },
+      "mainStyle": {
+        "bg": "rgb(23, 26, 32)",
+        "radius": "18px",
+        "borderR": "0px rgb(44, 48, 57)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 324,
+        "y": 8,
+        "w": 568,
+        "h": 684
+      },
+      "cols": "324px 576px",
+      "scrollW": 0
+    },
+    "work": {
+      "rail": {
+        "x": 0,
+        "y": 40,
+        "w": 64,
+        "h": 660
+      },
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 64,
+        "h": 660
+      },
+      "panel": null,
+      "panelKind": null,
+      "panelStyle": null,
+      "head": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      },
+      "main": {
+        "x": 64,
+        "y": 40,
+        "w": 836,
+        "h": 660
+      },
+      "mainStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(44, 48, 57)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 64,
+        "y": 40,
+        "w": 836,
+        "h": 660
+      },
+      "cols": "64px 836px",
+      "scrollW": 0
+    },
+    "toWork": {
+      "frames": 110,
+      "jump": {
+        "px": 268,
+        "at": "content.w@38ms"
+      },
+      "cols": [
+        "324px 576px",
+        "64px 836px"
+      ]
+    },
+    "workListOpen": {
+      "rail": {
+        "x": 0,
+        "y": 40,
+        "w": 64,
+        "h": 660
+      },
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 64,
+        "h": 660
+      },
+      "panel": {
+        "x": 64,
+        "y": 40,
+        "w": 260,
+        "h": 660
+      },
+      "panelKind": "session-list",
+      "panelStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(44, 48, 57)",
+        "pad": "4px 12px",
+        "backdrop": "none"
+      },
+      "head": {
+        "x": 78,
+        "y": 44,
+        "w": 234,
+        "h": 48
+      },
+      "main": {
+        "x": 64,
+        "y": 40,
+        "w": 836,
+        "h": 660
+      },
+      "mainStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(44, 48, 57)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 324,
+        "y": 40,
+        "w": 576,
+        "h": 660
+      },
+      "cols": "64px 836px",
+      "scrollW": 0
+    },
+    "fromWork": {
+      "frames": 111,
+      "jump": {
+        "px": 24,
+        "at": "content.h@28ms"
+      },
+      "cols": [
+        "64px 836px",
+        "324px 576px"
+      ]
+    },
+    "back": {
+      "rail": null,
+      "drawer": {
+        "x": 0,
+        "y": 40,
+        "w": 324,
+        "h": 660
+      },
+      "panel": {
+        "x": 56,
+        "y": 40,
+        "w": 268,
+        "h": 660
+      },
+      "panelKind": "sidebar-channel-pane",
+      "panelStyle": {
+        "bg": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "borderR": "0px rgb(44, 48, 57)",
+        "pad": "4px 12px",
+        "backdrop": "none"
+      },
+      "head": {
+        "x": 70,
+        "y": 44,
+        "w": 242,
+        "h": 48
+      },
+      "main": {
+        "x": 324,
+        "y": 8,
+        "w": 568,
+        "h": 684
+      },
+      "mainStyle": {
+        "bg": "rgb(23, 26, 32)",
+        "radius": "18px",
+        "borderR": "0px rgb(44, 48, 57)",
+        "pad": "0px 0px",
+        "backdrop": "none"
+      },
+      "content": {
+        "x": 324,
+        "y": 8,
+        "w": 568,
+        "h": 684
+      },
+      "cols": "324px 576px",
+      "scrollW": 0
+    }
+  }
+}
