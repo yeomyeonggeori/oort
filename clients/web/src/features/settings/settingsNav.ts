@@ -17,6 +17,7 @@ export type SettingsSectionId =
   | "link-previews"
   | "notifications"
   | "terminal"
+  | "shortcuts"
   | "updates"
   | "ai"
   | "agents"
@@ -59,6 +60,9 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   // 로컬 터미널의 단축키 표(#2774, ADR-0190 D5 「이 목록은 설정에서 볼 수
   // 있다」). 브라우저에도 선다: 그 탭에는 로컬 터미널이 없다고 말하는 자리다.
   { id: "terminal", label: "터미널", group: "개인" },
+  // 단축키 목록·검색·재지정(#3281). 웹과 데스크탑 모두에 선다: 브라우저에서는 데스크탑
+  // 전용 키를 표시만 하고, 바꾼 키는 이 기기(브라우저)에만 저장된다.
+  { id: "shortcuts", label: "단축키", group: "개인" },
   { id: "updates", label: "업데이트", group: "개인", desktopOnly: true },
   // AI 연결은 개인 묶음 맨 아래다(#2877, 제안서 Q3). 이름과 id 는 그대로다:
   // 「설정 › AI 연결」 문구가 서버의 에이전트 안내 문장·온보딩에 박혀 있다. 첫 절이
