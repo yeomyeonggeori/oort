@@ -140,7 +140,8 @@ describe("A panes in the grid (#2779)", () => {
     expect(pane("p2").querySelector('[data-testid="workbench-pane-lane"]')?.getAttribute("data-lane")).toBe("agent");
     expect(pane("p1").querySelector('[data-testid="workbench-pane-lane"]')?.getAttribute("data-lane")).toBe("local");
     expect(sessions.has("p2")).toBe(false);
-    expect(document.querySelector('[data-testid="my-work-note"]')?.textContent).toContain("에이전트 칸은 oort에 기록");
+    // #3279: 머리 안내 문구는 없다(목록 바닥과 레인 표지가 말한다).
+    expect(document.querySelector('[data-testid="my-work-note"]')).toBeNull();
   });
 
   it("closing an A pane closes the window only: no confirm, no kill, binding removed", async () => {
@@ -162,7 +163,7 @@ describe("A panes in the grid (#2779)", () => {
     const { source } = fakeSource({ title: "문구", harness: "claude", status: "waiting", waitingLine: "파일을 고쳐도 될까요?" });
     await mount(sessions, source);
     expect(pane("p2").hasAttribute("data-waiting")).toBe(true);
-    expect(pane("p2").getAttribute("aria-label")).toContain("나를 기다림");
+    expect(pane("p2").getAttribute("aria-label")).toContain("응답 필요");
     // 칸 안 권한 카드가 같은 질문을 하므로 바닥 띠는 그리지 않는다(design-review R1 M1).
     expect(pane("p2").querySelector("[data-testid='workbench-pane-waiting']")).toBeNull();
     act(() => {

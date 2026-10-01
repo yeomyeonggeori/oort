@@ -117,7 +117,7 @@ function detectPlatform(): KeyPlatform {
 }
 
 
-const NO_WAITING = "나를 기다리는 칸이 없습니다.";
+const NO_WAITING = "응답이 필요한 칸이 없습니다.";
 
 /** 알림·인박스에 쓰는 칸 이름: 작업 이름(OSC 제목), 없으면 프로그램 이름. */
 function paneName(view: LocalSessionView): string {
@@ -377,7 +377,7 @@ export function LocalTerminalDock({
           setJumpOpen(true);
           return;
         case "next-waiting": {
-          // 격자 순서로 지금 칸 다음의 「나를 기다림」 칸(#2776). 도크가 닫혀 있으면 연다.
+          // 격자 순서로 지금 칸 다음의 「응답 필요」 칸(#2776). 도크가 닫혀 있으면 연다.
           const current = layoutRef.current;
           const target = nextWaitingPane(
             paneIds(current.root),
@@ -503,7 +503,7 @@ export function LocalTerminalDock({
     });
   };
 
-  // 「나를 기다림」·「끝남」을 인박스와 OS 알림으로(#2776). 도크가 닫혀 있어도
+  // 「응답 필요」·「끝남」을 인박스와 OS 알림으로(#2776). 도크가 닫혀 있어도
   // 판정은 돈다(칸의 프로세스는 계속 돈다). 사람이 보는 칸은 격자가 보일 때의 활성 칸이다.
   useEffect(() => {
     const order = paneIds(layout.root);
@@ -570,7 +570,6 @@ export function LocalTerminalDock({
       ? { kind: "agent", label: AGENT_LANE_LABEL, icon: <AgentLaneIcon /> }
       : { kind: "local", label: LOCAL_LANE_LABEL, icon: <SquareTerminal aria-hidden /> };
   };
-  const hasAgentPane = ids.some((id) => agentOf(id) !== null);
   const confirmView = confirm ? sessionMap.get(confirm.paneId) ?? null : null;
   const confirmIndex = confirm ? ids.indexOf(confirm.paneId) + 1 : 0;
 
@@ -843,11 +842,6 @@ export function LocalTerminalDock({
             <h1 id="my-work-title" className="shrink-0 text-title font-bold text-ink">
               {WORK_NAV.mine}
             </h1>
-            <p className="min-w-0 truncate text-meta text-ink-muted" data-testid="my-work-note">
-              {hasAgentPane
-                ? "로컬 칸은 이 기기에서만 돌고, 에이전트 칸은 oort에 기록됩니다."
-                : "이 기기의 세션입니다. 서버에 기록하지 않습니다."}
-            </p>
             <span className="flex-1" />
             {list.open ? null : sessionMenus}
           </header>
@@ -875,10 +869,6 @@ export function LocalTerminalDock({
       <header className="@container flex h-control shrink-0 items-center gap-1 px-2">
         <SquareTerminal aria-hidden className="size-4 shrink-0 text-icon" />
         <h2 className="min-w-0 truncate pl-1 text-meta font-medium text-ink">로컬 터미널</h2>
-        {/* 설명은 도크 폭(창 폭이 아니다)이 넉넉할 때만. */}
-        <p className="hidden min-w-0 truncate text-meta text-ink-muted @2xl:block">
-          이 기기에서만 돌고 서버에 기록하지 않습니다.
-        </p>
         <span className="flex-1" />
         {sessionMenus}
         <DockIconButton

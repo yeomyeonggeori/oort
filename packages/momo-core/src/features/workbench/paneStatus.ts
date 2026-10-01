@@ -79,7 +79,7 @@ export function derivePaneStatus(input: PaneStatusInput): SessionStatus {
   }
 }
 
-/** 칸 머리 바닥 띠의 한 줄(시안 ① `.pwait`). 「나를 기다림」일 때만 있다. */
+/** 칸 머리 바닥 띠의 한 줄(시안 ① `.pwait`). 「응답 필요」일 때만 있다. */
 export function waitingLine(signal: PaneSignal | null): string | null {
   if (signal === "waiting-permission") return "실행 허락을 기다려요";
   if (signal === "waiting-input") return "답을 기다려요";
@@ -88,7 +88,7 @@ export function waitingLine(signal: PaneSignal | null): string | null {
 
 // ---- 알림 --------------------------------------------------------------------
 
-/** 인박스·OS 알림으로 가는 상태(제안서 §3.4: 「나를 기다림」과 「끝남」만). */
+/** 인박스·OS 알림으로 가는 상태(제안서 §3.4: 「응답 필요」과 「끝남」만). */
 export type AttentionStatus = Extract<SessionStatus, "waiting" | "done">;
 
 export function isAttention(status: SessionStatus): status is AttentionStatus {
@@ -101,7 +101,7 @@ export interface PaneAttention {
 }
 
 /**
- * 이전 판정과 지금 판정을 비교해 **새로** 「나를 기다림」이나 「끝남」이 된 칸만
+ * 이전 판정과 지금 판정을 비교해 **새로** 「응답 필요」나 「끝남」이 된 칸만
  * 돌려준다. 같은 상태가 다시 계산돼도(다시 그리기, 다른 칸의 변화) 알림은 한 번이다.
  * 이전 판정에 없던 칸(방금 연 칸)은 「실행 중」에서 온 것으로 본다.
  */
@@ -149,7 +149,7 @@ export function attentionCopy(
 ): AttentionCopy {
   const where = `${pane.index}번 칸 · ${pane.name}`;
   if (attention === "waiting") {
-    return { title: "나를 기다림", body: `${where}: ${waitingLine(signal) ?? "입력을 기다려요"}` };
+    return { title: "응답 필요", body: `${where}: ${waitingLine(signal) ?? "입력을 기다려요"}` };
   }
   return { title: "끝남", body: `${where}: 작업이 끝났어요` };
 }
@@ -157,7 +157,7 @@ export function attentionCopy(
 // ---- ⌃⇧J ---------------------------------------------------------------------
 
 /**
- * 다음 「나를 기다림」 칸. 격자 순서(`ids`)로 지금 칸 다음부터 한 바퀴 돈다.
+ * 다음 「응답 필요」 칸. 격자 순서(`ids`)로 지금 칸 다음부터 한 바퀴 돈다.
  * 지금 칸만 기다리면 그 칸이다. 없으면 null.
  */
 export function nextWaitingPane(

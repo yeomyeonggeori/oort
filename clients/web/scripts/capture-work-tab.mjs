@@ -234,7 +234,7 @@ async function signIn(page, origin) {
   await page.getByTestId("nav-team-work").waitFor({ timeout: 20_000 });
 }
 
-// 시안 ①의 상태(#2776): 칸 3·5 나를 기다림, 나머지 실행 중(hook 「작업 중」), PTY 6 끝남(종료 0).
+// 시안 ①의 상태(#2776): 칸 3·5 응답 필요, 나머지 실행 중(hook 「작업 중」), PTY 6 끝남(종료 0).
 // 키는 칸 id다. `exit-0`은 신호가 아니라 그 칸의 프로세스를 코드 0으로 끝낸다.
 // p8은 시안(실행 중)과 달리 코드 1로 끝내 「멈춤(×)」 표지를 증거로 남긴다(design-review M2).
 const MOCK_SIGNALS = { p3: "waiting-permission", p5: "waiting-permission", p6: "exit-0", p8: "exit-1", "*": "working" };
@@ -307,7 +307,7 @@ async function myWork(browser, origin, scheme, viewport) {
     const listWidth = await page.evaluate(() => document.querySelector("[data-testid='session-list']")?.getBoundingClientRect().width ?? null);
     check(`${tag} 세션 목록 폭 ${SESSION_LIST_PX}`, listWidth === SESSION_LIST_PX, { listWidth });
     // 말줄임(`text-overflow: ellipsis`)이 아닌데 제 상자를 넘는 요소. 상태 표지 상자는
-    // 뺀다: 「나를 기다림」 마름모는 9px 네모를 45° 돌린 것이라(시안 `.st.wait i`) 대각선이
+    // 뺀다: 「응답 필요」 마름모는 9px 네모를 45° 돌린 것이라(시안 `.st.wait i`) 대각선이
     // 상자를 조금 넘는 것이 모양 그 자체다.
     const rowOverflow = await page.evaluate(() =>
       [...document.querySelectorAll("[data-testid='session-list'] *")]
@@ -375,7 +375,7 @@ async function teamWork(browser, origin, scheme, viewport, desktop) {
 }
 
 /**
- * 세션 목록의 상태와 흐름(design-review M8): 키보드 포커스 줄(⌘J), 「나를 기다림」
+ * 세션 목록의 상태와 흐름(design-review M8): 키보드 포커스 줄(⌘J), 「응답 필요」
  * 빈 상태, 상태로 묶기, 찾기(남은 세션 하나 → 평탄화된 두 줄 행). 끝나면 원래대로.
  */
 async function sessionListStates(page, tag) {
@@ -408,7 +408,7 @@ async function sessionListStates(page, tag) {
 }
 
 /**
- * 칸 상태(#2776, 시안 ①): 칸 머리 표지, 「나를 기다림」 테두리·바닥 띠, ⌃⇧J, 인박스 합류.
+ * 칸 상태(#2776, 시안 ①): 칸 머리 표지, 「응답 필요」 테두리·바닥 띠, ⌃⇧J, 인박스 합류.
  * 시안 ① 격자와 구현 격자를 나란히 찍는다.
  */
 async function paneStatus(browser, origin, scheme, viewport) {

@@ -40,7 +40,7 @@ describe("도크 키(ADR-0190 D5, #2774)", () => {
     expect(mac({ code: "KeyT", metaKey: true }, true)).toEqual({ type: "new-session" });
   });
 
-  it("⌘J는 점프 목록, ⌃⇧J는 다음 「나를 기다림」", () => {
+  it("⌘J는 점프 목록, ⌃⇧J는 다음 「응답 필요」", () => {
     expect(mac({ code: "KeyJ", metaKey: true })).toEqual({ type: "jump-palette" });
     expect(mac({ code: "KeyJ", ctrlKey: true, shiftKey: true })).toEqual({ type: "next-waiting" });
     expect(mac({ code: "KeyJ", ctrlKey: true })).toBeNull();
