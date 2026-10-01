@@ -6,6 +6,7 @@
 // keycaps와 description을 그린다. 키가 바뀌면 동작과 설명이 한 diff에서 움직인다.
 // =============================================================================
 
+import { TOGGLE_SIDEBAR_COMMAND_ID } from "@momo/core/features/commands/registry";
 import {
   DEFAULT_COMBOS,
   comboKeycap,
@@ -131,8 +132,8 @@ export const OPEN_INBOX_SHORTCUT: KeyboardShortcut = rebindableShortcut({
  * 「ㅠ」). **누가 언제 가져가는가**는 `shouldToggleSidebar`가 정한다 — 컴포저의 굵게
  * (⌘B)가 우선이고, 터미널은 macOS에서만 넘긴다.
  *
- * 팔레트 명령(`paletteCommandId`)은 없다: 팔레트의 `client` 명령은 코어 레지스트리·
- * 폰과 함께 움직이는 표라(`CommandContext`에 접기 훅이 없다) 이 줄의 범위 밖이다(#3281).
+ * 팔레트 명령(`paletteCommandId`)은 「탐색 패널 접기/열기」다(#3299). 줄의 키캡은 이 줄의
+ * `keycaps`를 읽으므로 재지정이 팔레트에도 그대로 간다.
  */
 function matchesDefaultSidebarKey(event: ShortcutEvent): boolean {
   return (
@@ -147,6 +148,7 @@ function matchesDefaultSidebarKey(event: ShortcutEvent): boolean {
 export const TOGGLE_SIDEBAR_SHORTCUT: KeyboardShortcut = rebindableShortcut({
   id: "toggle-sidebar",
   description: "탐색 패널 접고 펴기",
+  paletteCommandId: TOGGLE_SIDEBAR_COMMAND_ID,
   defaultMatches: matchesDefaultSidebarKey,
 });
 
