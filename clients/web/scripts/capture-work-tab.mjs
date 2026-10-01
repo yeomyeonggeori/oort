@@ -33,7 +33,7 @@ const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/work-tab");
 const PORT = Number(process.env.CAPTURE_PORT || 5197);
 const MIN_PANE = 240;
-const SESSION_LIST_PX = 268;
+const SESSION_LIST_PX = 260; // 레일 64 + 260 = 사이드바 324 (#3275)
 const MOCKUP =
   process.env.WORK_TAB_MOCKUP ??
   resolve(WEB_ROOT, "../../../momo/claudedocs/agent-workspace-2.0/workspace-mockups.html");
@@ -211,7 +211,11 @@ async function installDesktop(page, layout, signals = null) {
           }
           if (cmd === "detect_local_harnesses") return { harnesses: [] };
           if (cmd === "detect_hosted_agents") return [];
-          if (cmd === "keychain_available") return false;
+          // #3106: 셸이 새로고침 토큰을 보관하고 웹뷰는 핸들만 본다. 저장되면 핸들이 선다.
+          if (cmd === "keychain_available") return true;
+          if (cmd === "keychain_store_refresh_token") { window.__kc = true; return null; }
+          if (cmd === "keychain_refresh_token_handle") return window.__kc ? "shell:00000000000000000000000000000001" : null;
+          if (cmd === "keychain_clear_refresh_token") { window.__kc = false; return null; }
           if (cmd === "deep_link_take_pending") return [];
           if (cmd === "app_version") return "0.1.11";
           if (cmd === "notification_permission") return "denied";
