@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
@@ -453,5 +455,60 @@ describe("ProfileCard 커스텀 상태 (#1889)", () => {
     await vi.waitFor(() => {
       expect(document.querySelector('[data-testid="set-status-dialog"]')).not.toBeNull();
     });
+  });
+});
+
+// #3276: 프로필 행이 눌릴 때 아바타·이름이 흔들렸다. 원인은 `.press:active`의
+// `transform: scale(0.98)`이었다(실측: 눌린 채 트리거 폭이 4.12px 줄고, 놓으며 메뉴가
+// 열릴 때 되돌아온다. 호버·포커스 링·메뉴 열림/닫힘·상태 점은 모두 0px).
+// 실제 상자는 scripts/capture-profile-jitter.mjs(Chromium)가 프레임마다 재고, 여기서는
+// 그 원인이 되돌아오지 못하게 클래스와 유틸 정의를 고정한다. jsdom은 CSS를 계산하지
+// 않으므로 계산값이 아니라 문자열 계약이다.
+describe("ProfileCard 트리거는 눌러도 움직이지 않는다 (#3276)", () => {
+  const tokens = readFileSync(resolve(__dirname, "../../design/tokens.css"), "utf8");
+
+  function triggerClasses(): string[] {
+    mountCard();
+    const trigger = document.querySelector('[data-testid="profile-card"]');
+    expect(trigger).not.toBeNull();
+    return (trigger!.getAttribute("class") ?? "").split(/\s+/).filter(Boolean);
+  }
+
+  it("눌림은 채움(press-instant-fill)이고 `press`(scale)가 아니다", () => {
+    const classes = triggerClasses();
+    expect(classes).toContain("press-instant-fill");
+    expect(classes).not.toContain("press");
+  });
+
+  it("크기·위치를 바꾸는 활성/열림 변형이 없다", () => {
+    const classes = triggerClasses();
+    const geometry = /^(?:[a-z-]+:|data-\[[^\]]+\]:)*(?:scale|translate|rotate|font|border|ring|outline-offset|p[xytblr]?|m[xytblr]?|w|h|size|gap|leading|text-(?:body|meta|title))-/;
+    const stateful = classes.filter((c) => /^(?:active|data-\[state=open\]|aria-expanded|focus-visible|focus):/.test(c));
+    for (const c of stateful) {
+      const bare = c.replace(/^(?:active|data-\[state=open\]|aria-expanded|focus-visible|focus):/, "");
+      // focus-visible:focus-ring은 inset 아웃라인(오프셋 -2px)이라 상자를 늘리지 않는다.
+      if (bare === "focus-ring") continue;
+      expect(`${c}`, `${c}는 상태에 따라 상자를 바꿀 수 있다`).not.toMatch(geometry);
+      expect(bare.startsWith("bg-"), `${c}: 상태 변형은 채움만 바꾼다`).toBe(true);
+    }
+  });
+
+  it("press-instant-fill 정의는 눌린 상태에서 transform을 없앤다", () => {
+    const block = tokens.match(/@utility press-instant-fill \{([\s\S]*?)\n\}/);
+    expect(block, "tokens.css의 press-instant-fill 유틸").not.toBeNull();
+    const body = block![1];
+    expect(body).toMatch(/&:active[^{]*\{[^}]*transform:\s*none/);
+    expect(body).not.toMatch(/scale\(/);
+    // 전이 목록에 transform이 들어 있으면 놓을 때 되돌아오는 움직임이 생긴다.
+    const transition = body.match(/transition-property:([^;]*);/);
+    expect(transition?.[1] ?? "").not.toMatch(/\btransform\b/);
+  });
+
+  it("메뉴를 열고 닫아도 트리거 클래스가 같다(크기 변형 없음)", async () => {
+    const before = triggerClasses();
+    await openMenu();
+    const trigger = document.querySelector('[data-testid="profile-card"]')!;
+    expect(trigger.getAttribute("data-state")).toBe("open");
+    expect((trigger.getAttribute("class") ?? "").split(/\s+/).filter(Boolean)).toEqual(before);
   });
 });

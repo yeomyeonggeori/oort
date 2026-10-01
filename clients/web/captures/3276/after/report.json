@@ -1,0 +1,210 @@
+{
+  "1280-light": {
+    "baseline": {
+      "trigger.x": 70,
+      "trigger.y": 748,
+      "trigger.w": 206,
+      "trigger.h": 40,
+      "trigger.lw": 206,
+      "trigger.lh": 40,
+      "avatar.x": 74,
+      "avatar.y": 756,
+      "avatar.w": 24,
+      "avatar.h": 24,
+      "avatar.lw": 24,
+      "avatar.lh": 24,
+      "name.x": 106,
+      "name.y": 748,
+      "name.w": 166,
+      "name.h": 22,
+      "name.lw": 166,
+      "name.lh": 22,
+      "emoji.x": 106,
+      "emoji.y": 770,
+      "emoji.w": 15,
+      "emoji.h": 18,
+      "emoji.lw": 15,
+      "emoji.lh": 18,
+      "dot.x": 90,
+      "dot.y": 772,
+      "dot.w": 8,
+      "dot.h": 8,
+      "dot.lw": 8,
+      "dot.lh": 8
+    },
+    "steps": {
+      "max": 0,
+      "at": null,
+      "perKey": {}
+    },
+    "frames": {
+      "max": 0,
+      "at": null,
+      "perKey": {}
+    },
+    "streamFrameCount": 269,
+    "transforms": [
+      "none"
+    ],
+    "outlines": [
+      "none 3px"
+    ],
+    "ok": true
+  },
+  "390-light": {
+    "baseline": {
+      "trigger.x": 70,
+      "trigger.y": 724,
+      "trigger.w": 146,
+      "trigger.h": 44,
+      "trigger.lw": 146,
+      "trigger.lh": 44,
+      "avatar.x": 74,
+      "avatar.y": 734,
+      "avatar.w": 24,
+      "avatar.h": 24,
+      "avatar.lw": 24,
+      "avatar.lh": 24,
+      "name.x": 106,
+      "name.y": 726,
+      "name.w": 106,
+      "name.h": 22,
+      "name.lw": 106,
+      "name.lh": 22,
+      "emoji.x": 106,
+      "emoji.y": 748,
+      "emoji.w": 15,
+      "emoji.h": 18,
+      "emoji.lw": 15,
+      "emoji.lh": 18,
+      "dot.x": 90,
+      "dot.y": 750,
+      "dot.w": 8,
+      "dot.h": 8,
+      "dot.lw": 8,
+      "dot.lh": 8
+    },
+    "steps": {
+      "max": 0,
+      "at": null,
+      "perKey": {}
+    },
+    "frames": {
+      "max": 0,
+      "at": null,
+      "perKey": {}
+    },
+    "streamFrameCount": 261,
+    "transforms": [
+      "none"
+    ],
+    "outlines": [
+      "none 3px"
+    ],
+    "ok": true
+  },
+  "1280-dark": {
+    "baseline": {
+      "trigger.x": 70,
+      "trigger.y": 748,
+      "trigger.w": 206,
+      "trigger.h": 40,
+      "trigger.lw": 206,
+      "trigger.lh": 40,
+      "avatar.x": 74,
+      "avatar.y": 756,
+      "avatar.w": 24,
+      "avatar.h": 24,
+      "avatar.lw": 24,
+      "avatar.lh": 24,
+      "name.x": 106,
+      "name.y": 748,
+      "name.w": 166,
+      "name.h": 22,
+      "name.lw": 166,
+      "name.lh": 22,
+      "emoji.x": 106,
+      "emoji.y": 770,
+      "emoji.w": 15,
+      "emoji.h": 18,
+      "emoji.lw": 15,
+      "emoji.lh": 18,
+      "dot.x": 90,
+      "dot.y": 772,
+      "dot.w": 8,
+      "dot.h": 8,
+      "dot.lw": 8,
+      "dot.lh": 8
+    },
+    "steps": {
+      "max": 0,
+      "at": null,
+      "perKey": {}
+    },
+    "frames": {
+      "max": 0,
+      "at": null,
+      "perKey": {}
+    },
+    "streamFrameCount": 265,
+    "transforms": [
+      "none"
+    ],
+    "outlines": [
+      "none 3px"
+    ],
+    "ok": true
+  },
+  "390-dark": {
+    "baseline": {
+      "trigger.x": 70,
+      "trigger.y": 724,
+      "trigger.w": 146,
+      "trigger.h": 44,
+      "trigger.lw": 146,
+      "trigger.lh": 44,
+      "avatar.x": 74,
+      "avatar.y": 734,
+      "avatar.w": 24,
+      "avatar.h": 24,
+      "avatar.lw": 24,
+      "avatar.lh": 24,
+      "name.x": 106,
+      "name.y": 726,
+      "name.w": 106,
+      "name.h": 22,
+      "name.lw": 106,
+      "name.lh": 22,
+      "emoji.x": 106,
+      "emoji.y": 748,
+      "emoji.w": 15,
+      "emoji.h": 18,
+      "emoji.lw": 15,
+      "emoji.lh": 18,
+      "dot.x": 90,
+      "dot.y": 750,
+      "dot.w": 8,
+      "dot.h": 8,
+      "dot.lw": 8,
+      "dot.lh": 8
+    },
+    "steps": {
+      "max": 0,
+      "at": null,
+      "perKey": {}
+    },
+    "frames": {
+      "max": 0,
+      "at": null,
+      "perKey": {}
+    },
+    "streamFrameCount": 261,
+    "transforms": [
+      "none"
+    ],
+    "outlines": [
+      "none 3px"
+    ],
+    "ok": true
+  }
+}
