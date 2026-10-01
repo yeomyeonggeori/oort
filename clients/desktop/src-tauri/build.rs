@@ -64,6 +64,11 @@ const APP_COMMANDS: &[&str] = &[
     // Local git reads (ADR-0190 D3-c, #2855). Granted only by
     // capabilities/git-read.json.
     "workbench_git_read",
+    // Where a new session starts (ADR-0190 D3-c 증보 2026-10-01, #2775).
+    // Granted only by capabilities/workbench-start.json.
+    "workbench_folder_pick",
+    "workbench_folder_inspect",
+    "workbench_worktree_create",
     // Account profile folders (ADR-0191 D1, ADR-0190 D3-f, #2878). Granted
     // only by capabilities/harness-profile.json.
     "harness_profile_list",

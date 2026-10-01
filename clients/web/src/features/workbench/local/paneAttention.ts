@@ -19,9 +19,9 @@ import {
 import { DOCK_SESSION_KEY, type LocalSessionView } from "./localSessions";
 
 // =============================================================================
-// 「나를 기다림」·「끝남」의 합류점 (#2776, 제안서 §3.4).
+// 「응답 필요」·「끝남」의 합류점 (#2776, 제안서 §3.4).
 //
-// 칸 상태가 **새로** 「나를 기다림」이나 「끝남」이 되면:
+// 칸 상태가 **새로** 「응답 필요」나 「끝남」이 되면:
 //   - 인박스의 「이 기기의 칸」 줄에 오른다(`useLocalPaneAttention`). 그 칸을 보면
 //     (격자의 활성 칸이 되면) 내려간다.
 //   - 사람이 그 칸을 보고 있지 않으면 OS 알림을 한 번 띄운다. 권한이 없으면
@@ -92,7 +92,7 @@ export function createPaneAttention(deps: PaneAttentionDeps) {
       let changed = false;
       let kept = entries.filter((e) => {
         const p = byId.get(e.paneId);
-        // 「끝남」은 한 번 보면 내린다(알림이 할 일을 다 했다). 「나를 기다림」은 이어지는
+        // 「끝남」은 한 번 보면 내린다(알림이 할 일을 다 했다). 「응답 필요」는 이어지는
         // 상태라 답해서 상태가 바뀔 때까지 남긴다(design-review M3).
         const keep =
           p !== undefined && p.status === e.status && !(e.status === "done" && e.paneId === viewing);

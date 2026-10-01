@@ -166,7 +166,7 @@ export type DockCommand =
  * | 전체 화면 켜고 끄기 | ⌃⇧` | Backquote |
  * | 새 세션 | ⌃⇧N (도크 포커스 중이면 ⌘T도) | KeyN, KeyT |
  * | 칸 목록 열기 | ⌘J | KeyJ |
- * | 다음 「나를 기다림」 | ⌃⇧J | KeyJ |
+ * | 다음 「응답 필요」 | ⌃⇧J | KeyJ |
  *
  * ⌃`는 `key`가 아니라 `code`로 판정한다. 한글 2벌식에서 같은 자판은 「₩」를
  * 내고, ⌃⇧`의 `key`는 「~」다. `code`는 둘 다 `Backquote`다.
@@ -233,7 +233,7 @@ export const TERMINAL_APP_BINDINGS: readonly TerminalAppBinding[] = [
   { id: "new-session", description: "새 세션", keycaps: ["⌃⇧N", "⌘T"], note: "⌘T는 도크에 포커스가 있을 때만 됩니다." },
   ...WORKBENCH_BINDINGS.map((b) => ({ id: b.id, description: b.description, keycaps: b.keycaps })),
   { id: "jump-palette", description: "칸 목록 열기", keycaps: ["⌘J"] },
-  { id: "next-waiting", description: "다음 「나를 기다림」으로", keycaps: ["⌃⇧J"] },
+  { id: "next-waiting", description: "다음 「응답 필요」로", keycaps: ["⌃⇧J"] },
 ];
 
 const KEYCAP_CODES: Record<string, string> = {

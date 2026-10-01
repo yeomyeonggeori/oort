@@ -105,7 +105,7 @@ pub struct HookLine {
 ///   webview keeps one signal, so the second changes nothing.
 /// - `Notification` + `idle_prompt` is Claude re-announcing a finished turn
 ///   after ~60 s; the pane is already 「끝남」, so it does not become
-///   「나를 기다림」 and does not notify twice.
+///   「응답 필요」 and does not notify twice.
 /// - `PreToolUse` fires before the permission prompt, so it cannot clear a
 ///   wait; `PostToolUse` (the tool ran = the person allowed it) does.
 /// - A denial or an interrupt fires no hook at all (measured: ESC, "3. No",
@@ -114,7 +114,7 @@ pub struct HookLine {
 /// - `elicitation_dialog` was not observed in the spike; it is kept because
 ///   Claude documents it as the other way a turn waits for an answer.
 /// - Codex 0.156 `notify` only ever carries `agent-turn-complete`; there is
-///   no approval type, so a Codex pane never shows 「나를 기다림」.
+///   no approval type, so a Codex pane never shows 「응답 필요」.
 pub fn signal_for(source: Source, event: &str, detail: Option<&str>) -> Option<PaneSignal> {
     match (source, event, detail) {
         (Source::Claude, "SessionStart", _) => Some(PaneSignal::Ready),

@@ -95,6 +95,21 @@ export function AppShell({
   // 「내 작업」 격자(#2854, 시안 ①). 도크와 같은 세션·배치를 라우트가 그리므로 이
   // 동안 도크는 마운트하지 않는다(한 칸에 xterm 둘). 앱 사이드바는 64px 레일로 접힌다.
   const myWorkTab = isMyWorkTab(routePath, shellLocation.search, localTerminal);
+  // #3275: 「내 작업」을 떠나는 순간만 사이드바 열 폭을 미끄러뜨리지 않는다. 레일 64 + 목록
+  // 260 = 사이드바 324라 본문의 왼쪽 가장자리는 이미 같고, 64에서 324로 열이 자라는 동안
+  // 목록이 한 프레임마다 다시 짜이며 번쩍였다(실측 242px 뜀). 속성은 레일 속성이 빠지는 같은
+  // 커밋에 서서 그 전이를 없애고, 바뀐 내용(사이드바 트리)은 짧게 떠오른다.
+  const [wasMyWorkTab, setWasMyWorkTab] = useState(myWorkTab);
+  const [leavingMyWork, setLeavingMyWork] = useState(false);
+  if (wasMyWorkTab !== myWorkTab) {
+    setWasMyWorkTab(myWorkTab);
+    setLeavingMyWork(wasMyWorkTab && !myWorkTab);
+  }
+  useEffect(() => {
+    if (!leavingMyWork) return;
+    const id = window.setTimeout(() => setLeavingMyWork(false), 400);
+    return () => window.clearTimeout(id);
+  }, [leavingMyWork]);
   const localDockFullscreen =
     localTerminal && !myWorkTab && localDock.open && localDock.fullscreen;
   // The design capture seam (?agentwork=live|offline) seeds fixed agent turns
@@ -328,6 +343,7 @@ export function AppShell({
                   : undefined
             }
             data-work-rail={myWorkTab && !isSettingsSurface ? "" : undefined}
+            data-work-rail-exit={leavingMyWork && !myWorkTab ? "" : undefined}
             data-settings-surface={isSettingsSurface ? "" : undefined}
           >
             {!isSettingsSurface && (
