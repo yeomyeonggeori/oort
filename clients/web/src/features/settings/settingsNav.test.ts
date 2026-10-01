@@ -26,6 +26,7 @@ describe("settingsNav", () => {
       "link-previews",
       "notifications",
       "terminal",
+      "shortcuts",
       "updates",
       "ai",
     ]);
@@ -60,6 +61,7 @@ describe("settingsNav", () => {
       "link-previews",
       "notifications",
       "terminal",
+      "shortcuts",
       "updates",
       "ai",
     ]);
