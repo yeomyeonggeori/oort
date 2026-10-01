@@ -55,7 +55,25 @@ export interface AvatarIdentity {
   kind: AvatarKind;
   /** 실을 수 있는 이미지 주소. 없거나 실을 수 없으면 `null`. */
   imageUrl: string | null;
+  /**
+   * 업로드된 멤버 아바타(ADR-0161 증보)의 인가 content 경로. 베어러가 있어야
+   * 읽히므로 `<img src>` 에 그대로 실을 수 없다 — 호스트가 `fetchMemberAvatar` 로
+   * 받아 실을 수 있는 스킴으로 바꾼다. 아니면 `null`. `imageUrl` 과 동시에 값을
+   * 갖지 않는다.
+   */
+  contentPath: string | null;
   fallback: AvatarFallback;
+}
+
+/** `…/members/{id}/avatar/content?v=…` — `fetchMemberAvatar` 가 받는 바로 그 형태. */
+const MEMBER_AVATAR_CONTENT = /^\/v1\/workspaces\/[^/]+\/members\/[^/]+\/avatar\/content(\?|$)/;
+
+/** 업로드된 멤버 아바타의 인가 content 경로이면 그 경로, 아니면 `null`. */
+export function memberAvatarContentPath(
+  avatarUrl: string | null | undefined
+): string | null {
+  const raw = avatarUrl?.trim();
+  return raw && MEMBER_AVATAR_CONTENT.test(raw) ? raw : null;
 }
 
 /**
@@ -82,6 +100,8 @@ export function renderableAvatarUrl(
 ): string | null {
   const raw = avatarUrl?.trim();
   if (!raw) return null;
+  // 인가 content 경로는 같은 오리진 경로처럼 보여도 직접 실으면 401 깨진 상자다.
+  if (memberAvatarContentPath(raw) !== null) return null;
   if (raw.startsWith("//")) return null;
   if (raw.startsWith("/")) return raw;
   const lower = raw.toLowerCase();
@@ -126,12 +146,18 @@ export function avatarIdentity(
   origin?: string | null
 ): AvatarIdentity {
   if (!member) {
-    return { kind: "unknown", imageUrl: null, fallback: { kind: "unknown" } };
+    return {
+      kind: "unknown",
+      imageUrl: null,
+      contentPath: null,
+      fallback: { kind: "unknown" },
+    };
   }
   const initial = avatarInitial(member.displayName);
   return {
     kind: member.kind === "agent" ? "agent" : "human",
     imageUrl: renderableAvatarUrl(member.avatarUrl, origin),
+    contentPath: memberAvatarContentPath(member.avatarUrl),
     fallback:
       initial === null
         ? { kind: "unknown" }

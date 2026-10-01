@@ -45,6 +45,7 @@ import { deletedFoldSegments } from "@momo/core/features/timeline/deletedFold";
 // 아바타의 계약도 코어가 갖는다 (진단 H-11): 어떤 주소를 이미지로 믿는가,
 // 무엇을 이니셜로 삼는가, 사람과 에이전트를 무엇으로 가르는가.
 import { avatarIdentity } from "@momo/core/features/workspace/avatar";
+import { useMemberAvatar } from "@/features/sidebar/useMemberAvatar";
 // 코어의 간격 숫자를 클래스로 옮긴 다리. CSP가 인라인 스타일을 막아서 생긴 두 벌이고,
 // 갈라지지 않게 `spacing.test.ts`가 둘을 묶는다.
 import {
@@ -215,6 +216,10 @@ export function Avatar({ member }: { member: RosterMember | null }) {
     member,
     typeof location === "undefined" ? null : location.origin
   );
+  // 업로드된 사진은 베어러가 있어야 읽힌다. 받는 동안과 실패 때는 이니셜이 서 있고,
+  // 상자(size-8)가 고정이라 이미지가 들어와도 자리는 움직이지 않는다.
+  const uploaded = useMemberAvatar(identity.contentPath ?? undefined);
+  const imageSrc = identity.imageUrl ?? uploaded;
   return (
     <span
       aria-hidden="true"
@@ -230,10 +235,12 @@ export function Avatar({ member }: { member: RosterMember | null }) {
         identity.kind === "unknown" && "bg-surface-hover text-ink-muted"
       )}
     >
-      {identity.imageUrl !== null ? (
+      {imageSrc !== null ? (
         <img
-          src={identity.imageUrl}
+          src={imageSrc}
           alt=""
+          // 옛 `avatarUrl`(외부 주소일 수 있다)이 우리 주소를 Referer 로 새기지 않게.
+          referrerPolicy="no-referrer"
           // 상자를 채우되 비율은 지킨다. 정사각이 아닌 사진이 늘어나면 그 얼굴은
           // 그 사람이 아니다.
           className="size-full object-cover"

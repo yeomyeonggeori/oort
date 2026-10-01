@@ -19,13 +19,15 @@ import {
 import { recordOwnerOnboardingSettingsSave } from "@/features/profile/shared/onboardingSettingsSave";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
+import { ProfileAvatarField } from "./ProfileAvatarField";
 import { Field, SaveButton, SectionShell } from "./SettingsFields";
 
 // Design Read: settings / Profile for internal team users on web+Tauri,
 // density 7/10, motion 2/10.
 //
 // 표시 이름과 핸들(E2)을 S1과 같이 한 폼·한 PATCH로 저장한다. 아바타는
-// 현행 표시, 업로드는 서버 표면이 없어 넣지 않는다. 검증은 제출/blur.
+// 사진은 별도 저장 단추 없이 고르는 즉시 올리고(ProfileAvatarField, #3277),
+// 이름·핸들 폼과 독립이다. 검증은 제출/blur.
 // 성공 시에만 roster와 세션을 갱신한다 (낙관 갱신 없음).
 
 export function ProfileSection({ offline }: { offline: boolean }) {
@@ -157,6 +159,7 @@ export function ProfileSection({ offline }: { offline: boolean }) {
           {shownName}
         </p>
       </div>
+      <ProfileAvatarField workspaceId={workspaceId} me={me ?? null} offline={offline} />
       {offline ? (
         <InlineBanner
           tone="neutral"
