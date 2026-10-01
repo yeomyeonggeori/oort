@@ -529,8 +529,8 @@ async function openInbox(page) {
   await page.getByTestId("login-email").fill("approvals@example.test");
   await page.getByTestId("login-password").fill("gate-only");
   await page.getByTestId("login-submit").click();
-  await page.getByTestId("nav-inbox").waitFor();
-  await page.getByTestId("nav-inbox").click();
+  await page.getByTestId("rail-inbox").waitFor();
+  await page.getByTestId("rail-inbox").click();
   await page.getByTestId("inbox-route").waitFor();
 }
 

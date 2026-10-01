@@ -5,6 +5,7 @@ import {
   avatarCarriesIdentityColor,
   avatarIdentity,
   avatarInitial,
+  memberAvatarContentPath,
   renderableAvatarUrl,
   AVATAR_SHAPE,
   AVATAR_SIZE,
@@ -150,5 +151,34 @@ describe("모양과 크기", () => {
     expect(avatarCarriesIdentityColor("human")).toBe(true);
     expect(avatarCarriesIdentityColor("agent")).toBe(true);
     expect(avatarCarriesIdentityColor("unknown")).toBe(false);
+  });
+});
+
+describe("업로드된 멤버 아바타 content 경로 (#3277)", () => {
+  const PATH = "/v1/workspaces/w1/members/m1/avatar/content?v=media1";
+
+  it("같은 오리진 경로처럼 보여도 직접 <img> 에 실을 수 없다 — imageUrl 이 아니라 contentPath", () => {
+    expect(renderableAvatarUrl(PATH, ORIGIN)).toBeNull();
+    const identity = avatarIdentity(member({ avatarUrl: PATH }), ORIGIN);
+    expect(identity.imageUrl).toBeNull();
+    expect(identity.contentPath).toBe(PATH);
+  });
+
+  it("다른 경로·절대 주소·워크스페이스 아바타 경로는 contentPath 가 아니다", () => {
+    for (const other of [
+      "/media/a.png",
+      "https://evil.example/v1/workspaces/w/members/m/avatar/content",
+      "/v1/workspaces/w/avatar/content?v=1",
+    ]) {
+      const result = memberAvatarContentPath(other);
+      expect(result).toBeNull();
+    }
+    expect(memberAvatarContentPath(undefined)).toBeNull();
+  });
+
+  it("옛 같은 오리진 경로는 계속 imageUrl", () => {
+    const identity = avatarIdentity(member({ avatarUrl: "/media/a.png" }), ORIGIN);
+    expect(identity.imageUrl).toBe("/media/a.png");
+    expect(identity.contentPath).toBeNull();
   });
 });

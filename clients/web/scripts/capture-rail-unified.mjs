@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 // =============================================================================
-// 탭 전환 측정 (#3275): 대화/인박스 <-> 「내 작업」을 오갈 때 좌측 패널이 튀지 않는지.
+// 레일 일관화 측정 (#3280): 하나의 레일(56px)이 모든 탭에서 같은 자리·같은 모양인지,
+// 접기 단추가 같은 자리인지, ⌘B가 목록 열만 접고(레일 유지) 컴포저 굵게를 건드리지
+// 않는지, 접힘이 기기별로 기억되는지를 실제 셸(Chromium)에서 재고 단언한다.
 //
-//   npm run build && node scripts/capture-shell-switch.mjs
-//   → OUT_DIR(기본 artifacts/shell-switch)/*.png + report.json
+//   npm run build && node scripts/capture-rail-unified.mjs
+//   → OUT_DIR(기본 artifacts/rail-unified)/*.png + report.json
 //
-// capture-work-tab.mjs와 같은 흉내(Tauri·PTY·/v1)로 진짜 셸을 연다. 전환 중
-// 매 프레임 `#sidebar-drawer`(레일)와 좌측 패널(`[data-testid=session-list]`,
-// 없으면 `sidebar-channel-pane`)과 본문의 상자를 재고, 전환 전·후의 면(배경색)·
-// 모서리·머리 높이·안쪽 여백 값을 한 표로 적는다. 모션 줄임 없음(실제 전이를 잰다).
+// capture-work-tab.mjs와 같은 흉내(Tauri·PTY·/v1)로 진짜 셸을 연다. 단언이 하나라도
+// 틀리면 종료 코드 1이다.
 // =============================================================================
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -18,7 +18,7 @@ import { startGuardedPreview } from "../gates/preview-guard.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/shell-switch");
+const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/rail-unified");
 const PORT = Number(process.env.CAPTURE_PORT || 5199);
 
 const workspaceId = "00000000-0000-7000-8000-000000000001";
@@ -215,106 +215,172 @@ async function signIn(page, origin) {
 }
 
 
-// 프레임마다 재는 상자와 면. 전환이 튀는지는 이 값들이 프레임 사이에서 얼마나 뛰는지로 읽는다.
+
 const PROBE = `
 (() => {
   const q = (s) => document.querySelector(s);
-  const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; };
-  const style = (el) => { if (!el) return null; const c = getComputedStyle(el); return { bg: c.backgroundColor, radius: c.borderTopRightRadius, borderR: c.borderRightWidth + " " + c.borderRightColor, pad: c.paddingTop + " " + c.paddingRight, backdrop: c.backdropFilter }; };
-  const shell = q(".app-shell");
-  const panel = q("[data-testid='session-list']") || q("[data-testid='sidebar-channel-pane']:not([hidden])");
-  const head = q("[data-testid='session-list'] .sl-hd") || q("[data-testid='sidebar-workspace-header']");
+  const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.x * 10) / 10, y: Math.round(r.y * 10) / 10, w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10 }; };
   const main = q(".app-shell > main");
+  const toggle = q("[data-testid='sidebar-toggle']");
+  const pane = q("[data-testid='sidebar-channel-pane']");
   return {
     rail: box(q("[data-testid='workspace-rail']")),
-    drawer: box(q("#sidebar-drawer")),
-    panel: box(panel), panelKind: panel ? panel.getAttribute("data-testid") : null, panelStyle: style(panel),
-    head: box(head),
-    main: box(main), mainStyle: style(main),
-    // 눈에 보이는 본문의 왼쪽 가장자리: 작업 탭은 격자 구역, 나머지는 떠 있는 판.
+    tile: box(q("[data-testid='workspace-current']")),
+    plus: box(q("[data-testid='add-workspace']")),
+    railItems: ["rail-chat", "rail-inbox", "rail-mine", "rail-team"].map((id) => box(q("[data-testid='" + id + "']"))),
+    profile: box(q("[data-testid='profile-card']")),
+    toggle: box(toggle),
+    toggleAria: toggle ? { expanded: toggle.getAttribute("aria-expanded"), label: toggle.getAttribute("aria-label"), title: toggle.getAttribute("title") } : null,
+    current: [...document.querySelectorAll("[data-testid='workspace-rail'] [aria-current='page']")].map((e) => e.textContent),
+    listPaneHidden: pane ? pane.hidden : null,
+    sessionList: box(q("[data-testid='session-list']")),
     content: box(q("[data-testid='my-work-tab'] > section") || main),
-    cols: shell ? getComputedStyle(shell).gridTemplateColumns : null,
+    main: box(main),
+    cols: getComputedStyle(q(".app-shell")).gridTemplateColumns,
+    legacyWorkRail: document.querySelectorAll("[data-testid='work-rail']").length,
     scrollW: document.documentElement.scrollWidth - document.documentElement.clientWidth,
   };
 })()`;
 
-async function startStream(page) {
-  await page.evaluate((src) => {
-    window.__sw = [];
-    window.__swStop = false;
-    const t0 = performance.now();
-    const tick = () => { window.__sw.push({ t: Math.round(performance.now() - t0), s: (0, eval)(src) }); if (!window.__swStop) requestAnimationFrame(tick); };
-    requestAnimationFrame(tick);
-  }, PROBE);
+const failures = [];
+function check(name, ok, detail = "") {
+  console.log(`${ok ? "ok  " : "FAIL"} ${name}${ok ? "" : ` ${detail}`}`);
+  if (!ok) failures.push(`${name} ${detail}`);
 }
-async function endStream(page) {
-  return page.evaluate(() => { window.__swStop = true; return window.__sw; });
-}
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-/** 연속 프레임에서 가장 큰 한 프레임 간 뜀(px)과, 그 뜀이 어느 상자의 어느 값인지. */
-function biggestJump(stream, keys) {
-  let best = { px: 0, at: null };
-  for (let i = 1; i < stream.length; i++) {
-    for (const k of keys) {
-      const a = stream[i - 1].s[k], b = stream[i].s[k];
-      if (!a || !b) continue;
-      for (const f of ["x", "w", "h"]) {
-        const d = Math.abs(b[f] - a[f]);
-        if (d > best.px) best = { px: Math.round(d * 10) / 10, at: `${k}.${f}@${stream[i].t}ms` };
-      }
-    }
-  }
-  return best;
-}
-
-async function switchScene(browser, origin, scheme, viewport, report) {
-  const tag = `${viewport.width}-${scheme}`;
-  const context = await browser.newContext({ viewport, colorScheme: scheme, serviceWorkers: "block" }); // 모션 줄임 없음
+async function scene(browser, origin, scheme, viewport, report, preCollapsed = false) {
+  const tag = `${viewport.width}-${scheme}${preCollapsed ? "-remembered" : ""}`;
+  const context = await browser.newContext({ viewport, colorScheme: scheme, serviceWorkers: "block" });
   await installRoutes(context);
   const page = await context.newPage();
   await installRealtime(page);
   await installDesktop(page, LAYOUT_4X2, null);
   await page.addInitScript((server) => { try { localStorage.setItem("momo.web.server.v1", server); } catch { /* 저장소 없는 캡처 */ } }, origin);
+  // 이전 실행에서 접어 둔 기기: 저장된 접힘으로 시작한다.
+  if (preCollapsed) await page.addInitScript(() => { try { localStorage.setItem("momo.web.shell.listColumn.collapsed.v1", "1"); } catch { /* 저장소 없는 캡처 */ } });
   await signIn(page, origin);
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(600);
   const probe = () => page.evaluate(PROBE);
-  const out = { tag };
+  const shot = (name) => page.screenshot({ path: resolve(OUT_DIR, `${name}-${tag}.png`) });
+  const out = {};
+  if (preCollapsed) {
+    out.remembered = await probe();
+    await shot("collapsed-remembered");
+    check(`${tag} 저장된 접힘으로 시작한다(열 56·목록 열 숨김·aria-expanded=false)`, out.remembered.cols.startsWith("56px") && out.remembered.listPaneHidden === true && out.remembered.toggleAria.expanded === "false", JSON.stringify([out.remembered.cols, out.remembered.listPaneHidden, out.remembered.toggleAria]));
+    await page.getByTestId("rail-mine").click();
+    await page.getByTestId("my-work-tab").waitFor();
+    await page.waitForTimeout(600);
+    out.mineRemembered = await probe();
+    check(`${tag} 저장된 접힘은 내 작업의 세션 목록에도 적용된다`, out.mineRemembered.sessionList === null);
+    report[tag] = out;
+    await context.close();
+    return;
+  }
+
+  out.chat = await probe();
+  await shot("chat");
+  // 레일 노드 정체성: 탭을 옮겨도 같은 DOM 노드여야 한다.
+  await page.evaluate(() => { document.querySelector("[data-testid='workspace-rail']").setAttribute("data-cap-identity", "rail-1"); });
 
   await page.getByTestId("rail-inbox").click();
   await page.waitForTimeout(500);
   out.inbox = await probe();
-  await page.screenshot({ path: resolve(OUT_DIR, `inbox-${tag}.png`) });
+  await shot("inbox");
 
-  await startStream(page);
   await page.getByTestId("rail-mine").click();
   await page.getByTestId("my-work-tab").waitFor();
   await page.waitForTimeout(900);
-  let stream = await endStream(page);
-  out.work = await probe();
-  out.toWork = { frames: stream.length, jump: biggestJump(stream, ["content", "head"]), cols: [...new Set(stream.map((f) => f.s.cols))] };
-  await page.screenshot({ path: resolve(OUT_DIR, `work-${tag}.png`) });
-
-  if (out.work.panelKind !== "session-list") {
-    // 좁은 창은 목록이 접혀 있다: 펴서 같은 칸을 비교한다.
-    await page.getByTestId("sidebar-toggle").click();
-    await page.getByTestId("session-list").waitFor();
+  out.mine = await probe();
+  await shot("mywork");
+  // 단추의 aria-expanded는 화면과 같아야 한다: 좁은 창(1280·900)은 폭 규칙으로 세션 목록이 닫혀 있고,
+  // 그때도 첫 번째 ⌘B가 목록을 연다(저장된 상태만 읽으면 두 번 눌러야 열린다).
+  const listVisible = out.mine.sessionList !== null;
+  check(`${tag} 내 작업: 단추 aria-expanded가 화면(세션 목록 유무)과 같다`, (out.mine.toggleAria.expanded === "true") === listVisible, JSON.stringify([out.mine.toggleAria, listVisible]));
+  if (!listVisible) {
+    await page.getByTestId("rail-mine").focus();
+    await page.keyboard.press("Meta+KeyB");
     await page.waitForTimeout(500);
-    out.workListOpen = await probe();
-    await page.screenshot({ path: resolve(OUT_DIR, `work-list-open-${tag}.png`) });
+    out.mineAfterOneCmdB = await probe();
+    check(`${tag} 내 작업(목록 자동 접힘): ⌘B 한 번에 세션 목록(268)이 열린다`, out.mineAfterOneCmdB.sessionList !== null && out.mineAfterOneCmdB.sessionList.w === 268 && out.mineAfterOneCmdB.toggleAria.expanded === "true", JSON.stringify(out.mineAfterOneCmdB.sessionList));
+    await shot("mywork-opened-by-cmdb");
   }
 
-  await startStream(page);
-  await page.getByTestId("rail-chat").click().catch(async () => { await page.getByTestId("rail-inbox").click(); });
-  await page.waitForTimeout(900);
-  stream = await endStream(page);
-  out.fromWork = { frames: stream.length, jump: biggestJump(stream, ["content", "head"]), cols: [...new Set(stream.map((f) => f.s.cols))] };
-  out.back = await probe();
-  await page.screenshot({ path: resolve(OUT_DIR, `back-${tag}.png`) });
+  await page.getByTestId("rail-team").click();
+  await page.waitForTimeout(500);
+  out.team = await probe();
+  await shot("team");
+
+  await page.getByTestId("rail-chat").click();
+  await page.waitForTimeout(500);
+  out.chatAgain = await probe();
+
+  const identity = await page.evaluate(() => document.querySelector("[data-testid='workspace-rail']")?.getAttribute("data-cap-identity"));
+  check(`${tag} 레일은 탭을 오가도 같은 DOM 노드다`, identity === "rail-1", String(identity));
+  for (const key of ["inbox", "mine", "team", "chatAgain"]) {
+    const o = out[key];
+    check(`${tag} ${key}: 레일 상자(x·y·w·h)가 대화 탭과 같고 폭이 56이다`, same(o.rail, out.chat.rail) && o.rail.w === 56, JSON.stringify([o.rail, out.chat.rail]));
+    check(`${tag} ${key}: 워크스페이스 타일·「+」·프로필 자리가 같다`, same(o.tile, out.chat.tile) && same(o.plus, out.chat.plus) && same(o.profile, out.chat.profile));
+    check(`${tag} ${key}: 목적지 단추 자리가 같다`, same(o.railItems, out.chat.railItems), JSON.stringify([o.railItems, out.chat.railItems]));
+    check(`${tag} ${key}: 접기 단추 자리·aria가 같다`, same(o.toggle, out.chat.toggle) && o.toggleAria.expanded === (key === "mine" ? String(o.sessionList !== null) : "true"), JSON.stringify([o.toggle, out.chat.toggle]));
+    check(`${tag} ${key}: 64px 작업 레일이 없다`, o.legacyWorkRail === 0);
+    check(`${tag} ${key}: 가로 넘침 0`, o.scrollW === 0, String(o.scrollW));
+  }
+  check(`${tag} 레일 aria-current: 대화·인박스·내 작업·팀 작업 각 하나`,
+    same([out.chat.current, out.inbox.current, out.mine.current, out.team.current], [["대화"], ["인박스"], ["내 작업"], ["팀 작업"]]),
+    JSON.stringify([out.chat.current, out.inbox.current, out.mine.current, out.team.current]));
+  // 본문 왼쪽 가장자리: 대화·인박스(떠 있는 판 = 324 + 8)와 내 작업(세션 목록 끝 = 56 + 268 = 324)이 같은 목록 열 폭을 쓴다.
+  check(`${tag} 목록 열 폭: 내 작업 세션 목록 268(펼침일 때)`, out.mine.sessionList === null || out.mine.sessionList.w === 268, JSON.stringify(out.mine.sessionList));
+  check(`${tag} 대화 탭 열 = 56 + 268`, out.chat.cols.startsWith("324px"), out.chat.cols);
+  check(`${tag} 내 작업 열 = 56(목록은 라우트 안)`, out.mine.cols.startsWith("56px"), out.mine.cols);
+
+  // ⌘B: 일반 포커스에서 목록 열만 접고 레일은 남는다.
+  // 캐럿이 목록 열 안(채널 행)에 있을 때 접어도 캐럿이 <body>로 떨어지지 않는다(접기 단추로 간다).
+  await page.locator("[data-testid='channel-item']").first().focus();
+  await page.keyboard.press("Meta+KeyB");
+  await page.waitForTimeout(500);
+  const focusAfter = await page.evaluate(() => document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName);
+  check(`${tag} 목록 열 안에서 ⌘B로 접어도 캐럿이 접기 단추로 간다(<body> 아님)`, focusAfter === "sidebar-toggle", String(focusAfter));
+  out.collapsed = await probe();
+  await shot("collapsed");
+  check(`${tag} ⌘B: 접힘 = 열 56·목록 열 숨김·단추 aria-expanded=false`, out.collapsed.cols.startsWith("56px") && out.collapsed.listPaneHidden === true && out.collapsed.toggleAria.expanded === "false", JSON.stringify([out.collapsed.cols, out.collapsed.listPaneHidden, out.collapsed.toggleAria]));
+  check(`${tag} ⌘B: 접혀도 레일·접기 단추 자리가 같다`, same(out.collapsed.rail, out.chat.rail) && same(out.collapsed.toggle, out.chat.toggle) && same(out.collapsed.railItems, out.chat.railItems));
+  const stored = await page.evaluate(() => localStorage.getItem("momo.web.shell.listColumn.collapsed.v1"));
+  check(`${tag} 접힘을 기기별로 기억한다`, stored === "1", String(stored));
+
+  // 접힌 채로 「내 작업」으로: 세션 목록도 접혀 있다(상태 한 벌), 레일은 그대로.
+  await page.getByTestId("rail-mine").click();
+  await page.getByTestId("my-work-tab").waitFor();
+  await page.waitForTimeout(700);
+  out.minedCollapsed = await probe();
+  await shot("mywork-collapsed");
+  check(`${tag} 접힌 채 내 작업: 세션 목록 없음·레일 같음·단추 같은 자리`, out.minedCollapsed.sessionList === null && same(out.minedCollapsed.rail, out.chat.rail) && same(out.minedCollapsed.toggle, out.chat.toggle) && out.minedCollapsed.toggleAria.expanded === "false");
+  // 제목줄 단추로 편다(내 작업에서도 같은 단추).
+  await page.getByTestId("sidebar-toggle").click();
+  await page.waitForTimeout(600);
+  out.minedOpened = await probe();
+  check(`${tag} 내 작업에서 단추로 펴면 세션 목록(268)이 선다`, out.minedOpened.sessionList !== null && out.minedOpened.sessionList.w === 268 && out.minedOpened.toggleAria.expanded === "true", JSON.stringify(out.minedOpened.sessionList));
+
+  // 컴포저 포커스에서는 ⌘B가 굵게이고 접힘이 바뀌지 않는다.
+  await page.getByTestId("rail-chat").click();
+  await page.waitForTimeout(500);
+  const composer = page.locator("[data-testid='composer-input'], textarea").first();
+  if (await composer.count()) {
+    await composer.focus();
+    await composer.fill("굵게");
+    await page.keyboard.press("Meta+KeyA");
+    await page.keyboard.press("Meta+KeyB");
+    await page.waitForTimeout(400);
+    const after = await probe();
+    const value = await composer.inputValue().catch(() => null);
+    check(`${tag} 컴포저에서 ⌘B: 접힘 불변(펼침 유지)`, after.toggleAria.expanded === "true" && after.cols.startsWith("324px"), JSON.stringify([after.toggleAria, after.cols]));
+    out.composerValue = value;
+    check(`${tag} 컴포저에서 ⌘B는 굵게로 동작한다(마크다운 **)`, typeof value === "string" && value.includes("**"), String(value));
+  } else {
+    console.log(`skip ${tag} 컴포저 시험: 컴포저 없음`);
+  }
+
   report[tag] = out;
-  console.log(`${tag}: ->work 본문·머리 최대 뜀 ${out.toWork.jump.px}px (${out.toWork.jump.at}) cols ${JSON.stringify(out.toWork.cols)} | ->chat 본문·머리 최대 뜀 ${out.fromWork.jump.px}px (${out.fromWork.jump.at}) cols ${JSON.stringify(out.fromWork.cols)}`);
-  console.log(`   본문 왼쪽 가장자리 x: 인박스 ${out.inbox.content.x} · 내 작업 ${out.work.content.x} · 돌아온 뒤 ${out.back.content.x}`);
-  console.log(`   inbox panel ${JSON.stringify(out.inbox.panelStyle)} head ${JSON.stringify(out.inbox.head)}`);
-  console.log(`   work  panel ${JSON.stringify((out.workListOpen ?? out.work).panelStyle)} head ${JSON.stringify((out.workListOpen ?? out.work).head)}`);
   await context.close();
 }
 
@@ -324,9 +390,12 @@ async function main() {
   const browser = await chromium.launch();
   const report = {};
   try {
+    const only = process.env.ONLY ? process.env.ONLY.split(",") : null;
     for (const scheme of ["light", "dark"]) {
       for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 900, height: 700 }]) {
-        await switchScene(browser, preview.origin, scheme, viewport, report);
+        if (only && !only.includes(`${viewport.width}-${scheme}`)) continue;
+        await scene(browser, preview.origin, scheme, viewport, report);
+        if (viewport.width === 1440) await scene(browser, preview.origin, scheme, viewport, report, true);
       }
     }
   } finally {
@@ -334,5 +403,9 @@ async function main() {
     await preview.stop?.();
   }
   writeFileSync(resolve(OUT_DIR, "report.json"), JSON.stringify(report, null, 2));
+  if (failures.length > 0) {
+    console.error(`\n${failures.length}개 단언 실패`);
+    process.exit(1);
+  }
 }
 main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });

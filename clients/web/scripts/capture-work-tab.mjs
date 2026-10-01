@@ -235,7 +235,7 @@ async function signIn(page, origin) {
   await page.getByTestId("login-email").fill("capture@example.test");
   await page.getByTestId("login-password").fill("not-a-secret");
   await page.getByTestId("login-submit").click();
-  await page.getByTestId("nav-team-work").waitFor({ timeout: 20_000 });
+  await page.getByTestId("rail-team").waitFor({ timeout: 20_000 });
 }
 
 // 시안 ①의 상태(#2776): 칸 3·5 응답 필요, 나머지 실행 중(hook 「작업 중」), PTY 6 끝남(종료 0).
@@ -275,9 +275,9 @@ async function shot(page, name) {
 async function myWork(browser, origin, scheme, viewport) {
   const tag = `${viewport.width}-${scheme}`;
   const { context, page } = await open(browser, origin, { viewport, scheme, desktop: true });
-  await page.getByTestId("nav-my-work").click();
+  await page.getByTestId("rail-mine").click();
   await page.getByTestId("my-work-tab").waitFor();
-  await page.getByTestId("work-rail").waitFor();
+  await page.getByTestId("workspace-rail").waitFor();
   const wide = viewport.width >= 1280;
   // 좁은 창(1100 기본·900)에서는 4×2가 240을 못 지켜 격자가 한 칸 최대화로 접힌다
   // (#2774 fitLayout). 그 모양을 그대로 찍고 기록한다(프리셋 안내는 T5).
@@ -337,7 +337,7 @@ async function myWork(browser, origin, scheme, viewport) {
   await shot(page, `my-work-${tag}`);
   report[`my-work-${tag}`] = { panes, railWidth };
   if (viewport.width === 1280) {
-    await page.getByTestId("session-list-expand").click();
+    await page.getByTestId("sidebar-toggle").click();
     await page.getByTestId("session-list").waitFor();
     await page.waitForFunction(() => document.querySelector("[data-testid='session-list']")?.textContent?.includes("feat/2774-xterm"), null, { timeout: 10_000 });
     await page.waitForTimeout(300);
@@ -361,17 +361,17 @@ async function teamWork(browser, origin, scheme, viewport, desktop) {
   if (viewport.width < 600) {
     await page.goto(`${origin}/#/work?view=team`);
   } else {
-    await page.getByTestId("nav-team-work").click();
+    await page.getByTestId("rail-team").click();
   }
   await page.getByTestId("team-work-empty").waitFor();
   check(`${tag} 팀 작업 빈 상태`, true);
   check(`${tag} 가로 넘침 0`, (await overflowX(page)) === 0);
-  check(`${tag} 팀 작업에서는 레일로 접지 않는다`, (await page.locator("[data-testid='work-rail']").count()) === 0);
+  check(`${tag} 팀 작업에서는 레일로 접지 않는다`, (await page.locator("[data-testid='workspace-rail']").count()) === 0);
   await shot(page, `team-work-${tag}`);
   if (viewport.width < 600) {
     await page.getByTestId("open-sidebar-drawer").first().click();
-    await page.getByTestId("nav-team-work").waitFor({ state: "visible" });
-    check(`${tag} 서랍에 「내 작업」 없음(웹)`, (await page.locator("[data-testid='nav-my-work']").count()) === 0);
+    await page.getByTestId("rail-team").waitFor({ state: "visible" });
+    check(`${tag} 서랍에 「내 작업」 없음(웹)`, (await page.locator("[data-testid='rail-mine']").count()) === 0);
     await page.waitForTimeout(300);
     await shot(page, `team-work-${tag}-drawer`);
   }
@@ -418,7 +418,7 @@ async function sessionListStates(page, tag) {
 async function paneStatus(browser, origin, scheme, viewport) {
   const tag = `${viewport.width}-${scheme}`;
   const { context, page } = await open(browser, origin, { viewport, scheme, desktop: true, signals: MOCK_SIGNALS });
-  await page.getByTestId("nav-my-work").click();
+  await page.getByTestId("rail-mine").click();
   await page.getByTestId("my-work-tab").waitFor();
   await page.waitForFunction(() => document.querySelectorAll("[data-testid='my-work-tab'] [data-pane-id] .xterm-rows").length >= 8, null, { timeout: 15_000 });
   // 칸 제목(OSC)이 선 뒤에 칸을 찾는다. 제목 없는 칸은 하나다.
@@ -474,7 +474,7 @@ async function paneStatus(browser, origin, scheme, viewport) {
   await page.waitForTimeout(200);
   await page.locator("[data-pane-id='p5']").screenshot({ path: resolve(OUT_DIR, `pane-status-${tag}-pane5-focused.png`) });
   // 인박스: 칸 5는 봤으니 내려간다. 끝난 칸은 남는다.
-  await page.getByTestId("work-rail-inbox").click();
+  await page.getByTestId("rail-inbox").click();
   await page.getByTestId("inbox-route").waitFor();
   await page.getByTestId("inbox-local-panes").waitFor({ timeout: 5_000 });
   const inboxRows = await page.locator("[data-testid='inbox-local-pane']").evaluateAll((els) => els.map((e) => e.getAttribute("data-status") + ":" + e.textContent));

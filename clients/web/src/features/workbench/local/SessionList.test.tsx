@@ -65,7 +65,6 @@ function mount(sessions: SessionListInput[], focusedPaneId: string) {
         onActivate: () => undefined,
         onMaximize: () => undefined,
         onFocusIndex: () => undefined,
-        onCollapse: () => undefined,
         newSessionItems: null,
       })
     );
