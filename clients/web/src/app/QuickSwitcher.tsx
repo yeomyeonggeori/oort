@@ -71,6 +71,7 @@ import {
   type KeyboardShortcut,
 } from "@/app/keyboardShortcuts";
 import { Keycaps } from "@/app/ShortcutHelpDialog";
+import { useShortcutBindingsVersion } from "@/app/shortcutBindings";
 import {
   commandSearchValue,
   visibleCommands,
@@ -302,6 +303,8 @@ function CommandRow({
   onRun: (command: PaletteCommand) => void;
 }) {
   const Icon = COMMAND_ICONS[command.icon];
+  // 재지정된 키를 힌트가 다시 읽게 한다 (#3281).
+  useShortcutBindingsVersion();
   const shortcut = SHORTCUT_BY_COMMAND_ID.get(command.id);
   return (
     <Command.Item
