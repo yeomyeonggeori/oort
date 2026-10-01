@@ -537,19 +537,22 @@ mod tests {
     /// 110 is #3212's memory reset (ADR-0196 D9/D10): `mem_reset_workspace` (owner/admin, permanent delete, `reset_epoch`
     /// only raised by it), the per-channel `reset_floor_seq` fence + the reset advisory lock in `mem_apply_digest` /
     /// `mem_add_item`, and `mem_summary_provider` (the team notice's provider/model, three columns of one row).
+    ///
+    /// 111 is #3277's member avatar (ADR-0161 증보): `member_avatar_media` (the 067 lifecycle re-aimed at a member, image
+    /// mime allow-list without SVG) and `member.avatar_media_id` with a composite self-only FK.
     #[test]
-    fn discovers_contiguous_migrations_001_to_110() {
+    fn discovers_contiguous_migrations_001_to_111() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            110,
-            "expected 110 migrations under {}",
+            111,
+            "expected 111 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 110);
+        assert_eq!(migrations.last().unwrap().version, 111);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {
