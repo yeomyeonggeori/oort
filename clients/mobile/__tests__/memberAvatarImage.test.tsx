@@ -10,9 +10,9 @@ import '../src/boot/coreHost';
 import {Avatar} from '../src/features/conversation/Avatar';
 import {
   FAILURE_TTL_MS,
-  MAX_ENTRIES,
-  MAX_ENTRY_BYTES,
+  MAX_DISK_BYTES,
   __resetMemberAvatarCache,
+  clearMemberAvatarCache,
   loadMemberAvatar,
 } from '../src/features/conversation/memberAvatarImage';
 import {__resetSessionStore} from '../src/storage/secureSession';
@@ -62,46 +62,27 @@ const LOGIN_BODY = {
   member: {id: SELF, workspaceId: WS, kind: 'human', displayName: 'x', handle: 'x'},
 };
 
-const DATA_URI = 'data:image/png;base64,AAAA';
+const fsMock = jest.requireMock('expo-file-system') as {
+  __files: Set<string>;
+  __state: {
+    downloads: {url: string; destination: {uri: string}; options: {headers?: Record<string, string>}}[];
+    downloadBytes: number;
+    failures: Error[];
+    failure: Error | null;
+  };
+  __reset: () => void;
+};
 let fetchMock: jest.Mock<Promise<Response>, [string, RequestInit?]>;
-let readerResult: string | Error;
 
-function installFileReader(): void {
-  class FakeReader {
-    result: string | null = null;
-    error: Error | null = null;
-    onloadend: (() => void) | null = null;
-    readAsDataURL(): void {
-      if (readerResult instanceof Error) this.error = readerResult;
-      else this.result = readerResult;
-      setTimeout(() => this.onloadend?.(), 0);
-    }
-  }
-  (globalThis as unknown as {FileReader: unknown}).FileReader = FakeReader;
-}
-
-function avatarResponse(status: number): Response {
-  return {
-    status,
-    ok: status >= 200 && status < 300,
-    blob: async () => ({size: 4}) as unknown as Blob,
-    text: async () => '',
-  } as unknown as Response;
-}
-
-const authHeader = (init?: RequestInit): string | null =>
-  (init?.headers as Headers | undefined)?.get('Authorization') ?? null;
-
-const avatarCalls = () =>
-  fetchMock.mock.calls.filter(([url]) => url.includes('/avatar/content'));
+const downloads = () => fsMock.__state.downloads;
+const isFile = (uri: unknown) => typeof uri === 'string' && uri.startsWith('file://');
 
 beforeEach(async () => {
   __resetMemberAvatarCache();
   __resetSessionStore();
   __resetServerBaseCache();
   setServerBase(BASE);
-  readerResult = DATA_URI;
-  installFileReader();
+  fsMock.__reset();
   fetchMock = jest.fn();
   globalThis.fetch = fetchMock as unknown as typeof fetch;
   fetchMock.mockResolvedValueOnce({
@@ -116,110 +97,108 @@ beforeEach(async () => {
 afterEach(() => {
   cleanup();
   jest.useRealTimers();
+  fsMock.__reset();
   __resetSessionStore();
   __resetServerBaseCache();
 });
 
-describe('멤버 아바타 받기', () => {
-  it('서버 주소 + 경로로, 베어러를 싣고 받는다', async () => {
-    fetchMock.mockResolvedValue(avatarResponse(200));
-    await expect(loadMemberAvatar(PATH_A)).resolves.toBe(DATA_URI);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(`${BASE}${PATH_A}`);
-    expect(authHeader(init)).toBe('Bearer access-token-1');
+const pathN = (i: number) => `/v1/workspaces/${WS}/members/m${i}/avatar/content?v=1`;
+const unauthorized = () => new Error('HTTP 401');
+
+describe('멤버 아바타 받기 — 디스크 파일 캐시', () => {
+  it('서버 주소 + 경로를 베어러와 함께 받아 file:// 주소를 준다', async () => {
+    const uri = await loadMemberAvatar(PATH_A);
+    expect(isFile(uri)).toBe(true);
+    expect(downloads()).toHaveLength(1);
+    expect(downloads()[0].url).toBe(`${BASE}${PATH_A}`);
+    expect(downloads()[0].options.headers).toEqual({Authorization: 'Bearer access-token-1'});
+    expect(fsMock.__files.has(uri as string)).toBe(true);
   });
 
-  it('같은 ?v= 는 동시에 불러도·나중에 불러도 한 번만 받는다', async () => {
-    fetchMock.mockResolvedValue(avatarResponse(200));
-    await Promise.all([loadMemberAvatar(PATH_A), loadMemberAvatar(PATH_A)]);
+  it('같은 ?v= 는 동시에도 나중에도 한 번만 받는다', async () => {
+    const [a, b] = await Promise.all([loadMemberAvatar(PATH_A), loadMemberAvatar(PATH_A)]);
     await loadMemberAvatar(PATH_A);
-    expect(avatarCalls()).toHaveLength(1);
+    expect(a).toBe(b);
+    expect(downloads()).toHaveLength(1);
   });
 
-  it('?v= 가 바뀌면(사진을 바꿈) 새로 받는다', async () => {
-    fetchMock.mockResolvedValue(avatarResponse(200));
-    await loadMemberAvatar(PATH_A);
-    await loadMemberAvatar(PATH_B);
-    expect(avatarCalls()).toHaveLength(2);
+  it('?v= 가 바뀌면 다른 파일로 새로 받는다', async () => {
+    const a = await loadMemberAvatar(PATH_A);
+    const b = await loadMemberAvatar(PATH_B);
+    expect(a).not.toBe(b);
+    expect(downloads()).toHaveLength(2);
+  });
+
+  it('앱을 다시 켠 뒤에도 디스크에 남은 파일을 다시 받지 않는다', async () => {
+    const first = await loadMemberAvatar(PATH_A);
+    __resetMemberAvatarCache(); // 프로세스 재시작: 메모리만 사라진다
+    await expect(loadMemberAvatar(PATH_A)).resolves.toBe(first);
+    expect(downloads()).toHaveLength(1);
+  });
+
+  it('401 이면 갱신 후 한 번 다시 받는다', async () => {
+    fsMock.__state.failures = [unauthorized()];
+    fetchMock.mockResolvedValueOnce({
+      status: 200,
+      ok: true,
+      text: async () =>
+        JSON.stringify({...LOGIN_BODY, accessToken: 'access-token-2', refreshToken: 'refresh-token-2'}),
+    } as unknown as Response);
+    const uri = await loadMemberAvatar(PATH_A);
+    expect(isFile(uri)).toBe(true);
+    expect(downloads()).toHaveLength(2);
+    expect(downloads()[1].options.headers).toEqual({Authorization: 'Bearer access-token-2'});
   });
 
   it('실패는 null 이고 잠깐은 다시 묻지 않으며, 지나면 다시 시도한다', async () => {
     jest.useFakeTimers({now: 1_000_000, doNotFake: ['setTimeout']});
-    fetchMock.mockResolvedValue(avatarResponse(404));
+    fsMock.__state.failures = [new Error('HTTP 404')];
     await expect(loadMemberAvatar(PATH_A)).resolves.toBeNull();
     await expect(loadMemberAvatar(PATH_A)).resolves.toBeNull();
-    expect(avatarCalls()).toHaveLength(1);
+    expect(downloads()).toHaveLength(1);
     jest.setSystemTime(1_000_000 + FAILURE_TTL_MS + 1);
-    fetchMock.mockResolvedValue(avatarResponse(200));
-    await expect(loadMemberAvatar(PATH_A)).resolves.toBe(DATA_URI);
-    expect(avatarCalls()).toHaveLength(2);
+    expect(isFile(await loadMemberAvatar(PATH_A))).toBe(true);
+    expect(downloads()).toHaveLength(2);
   });
 
-  it('읽기 오류도 null 이다', async () => {
-    readerResult = new Error('boom');
-    fetchMock.mockResolvedValue(avatarResponse(200));
-    await expect(loadMemberAvatar(PATH_A)).resolves.toBeNull();
-  });
-
-  it('임의 주소에는 베어러를 싣지 않는다(코어가 거절)', async () => {
+  it('임의 주소에는 베어러를 싣지 않는다', async () => {
     await expect(loadMemberAvatar('https://evil.example/x.png')).resolves.toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(downloads()).toHaveLength(0);
   });
 
-  it('캐시는 상한을 넘으면 가장 오래 안 쓴 것부터 버린다', async () => {
-    fetchMock.mockResolvedValue(avatarResponse(200));
-    const p = (i: number) => `/v1/workspaces/${WS}/members/m${i}/avatar/content?v=1`;
-    for (let i = 0; i <= MAX_ENTRIES; i += 1) await loadMemberAvatar(p(i));
-    fetchMock.mockClear();
-    await loadMemberAvatar(p(MAX_ENTRIES)); // 최근 것은 남아 있다
-    expect(fetchMock).not.toHaveBeenCalled();
-    await loadMemberAvatar(p(0)); // 가장 오래된 것은 밀려났다
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+  it('디스크 총량 상한을 넘으면 가장 오래 안 쓴 파일부터 지운다', async () => {
+    fsMock.__state.downloadBytes = MAX_DISK_BYTES / 4 + 1; // 4장이면 상한 초과
+    const uris: (string | null)[] = [];
+    for (let i = 0; i < 4; i += 1) uris.push(await loadMemberAvatar(pathN(i)));
+    expect(fsMock.__files.has(uris[0] as string)).toBe(false); // 가장 오래된 것
+    for (const kept of uris.slice(1)) expect(fsMock.__files.has(kept as string)).toBe(true);
+    await loadMemberAvatar(pathN(0)); // 지워졌으니 다시 받는다
+    expect(downloads()).toHaveLength(5);
   });
 
-  const big = (n: number) => `data:image/png;base64,${'A'.repeat(n)}`;
-  const q = (i: number) => `/v1/workspaces/${WS}/members/b${i}/avatar/content?v=1`;
-
-  it('총 바이트 상한을 넘으면 개수와 무관하게 오래된 것부터 버린다', async () => {
-    fetchMock.mockResolvedValue(avatarResponse(200));
-    readerResult = big(MAX_ENTRY_BYTES - 100); // 단건 상한 직전, 3장이면 16M 초과
-    await loadMemberAvatar(q(0));
-    await loadMemberAvatar(q(1));
-    await loadMemberAvatar(q(2));
-    fetchMock.mockClear();
-    await loadMemberAvatar(q(2)); // 최근 것은 남는다
-    await loadMemberAvatar(q(1));
-    expect(fetchMock).not.toHaveBeenCalled();
-    await loadMemberAvatar(q(0)); // 가장 오래된 것은 총량 때문에 밀려났다
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('단건이 상한의 절반을 넘으면 캐시하지 않고 값만 넘긴다', async () => {
-    fetchMock.mockResolvedValue(avatarResponse(200));
-    readerResult = big(MAX_ENTRY_BYTES + 1);
-    await expect(loadMemberAvatar(q(0))).resolves.toBe(readerResult);
-    await loadMemberAvatar(q(0));
-    expect(avatarCalls()).toHaveLength(2);
+  it('비우기는 메모리 색인과 디스크 파일을 모두 지운다', async () => {
+    const uri = await loadMemberAvatar(PATH_A);
+    clearMemberAvatarCache();
+    expect(fsMock.__files.has(uri as string)).toBe(false);
+    await loadMemberAvatar(PATH_A);
+    expect(downloads()).toHaveLength(2);
   });
 });
 
 describe('Avatar 가 그린다', () => {
   const HIDDEN = {includeHiddenElements: true} as const;
 
-  it('받는 동안·실패하면 이니셜, 도착하면 이미지 — 크기는 그대로', async () => {
-    fetchMock.mockResolvedValue(avatarResponse(200));
+  it('받는 동안 이니셜, 도착하면 file:// 이미지 — 상자 크기는 그대로', async () => {
     const view = render(<Avatar directory={dir(PATH_A)} memberId={SELF} />);
     expect(view.getByTestId('avatar-initial', HIDDEN)).toBeTruthy();
-    const box = view.getByTestId('avatar-human', HIDDEN);
-    const before = JSON.stringify(box.props.style);
+    const before = JSON.stringify(view.getByTestId('avatar-human', HIDDEN).props.style);
     await waitFor(() => expect(view.getByTestId('avatar-image', HIDDEN)).toBeTruthy());
-    expect(view.getByTestId('avatar-image', HIDDEN).props.source).toEqual({uri: DATA_URI});
+    expect(isFile(view.getByTestId('avatar-image', HIDDEN).props.source.uri)).toBe(true);
     expect(JSON.stringify(view.getByTestId('avatar-human', HIDDEN).props.style)).toBe(before);
   });
 
   it('받기에 실패하면 이니셜이 남는다', async () => {
-    fetchMock.mockResolvedValue(avatarResponse(404));
+    fsMock.__state.failures = [new Error('HTTP 404')];
     const view = render(<Avatar directory={dir(PATH_A)} memberId={SELF} />);
     await act(async () => {
       await loadMemberAvatar(PATH_A);
@@ -229,7 +208,6 @@ describe('Avatar 가 그린다', () => {
   });
 
   it('같은 사진의 아바타 여럿이 한 번만 받는다', async () => {
-    fetchMock.mockResolvedValue(avatarResponse(200));
     const d = dir(PATH_A);
     const view = render(
       <>
@@ -238,22 +216,40 @@ describe('Avatar 가 그린다', () => {
       </>,
     );
     await waitFor(() => expect(view.getAllByTestId('avatar-image', HIDDEN)).toHaveLength(2));
-    expect(avatarCalls()).toHaveLength(1);
+    expect(downloads()).toHaveLength(1);
+  });
+
+  it('같은 컴포넌트에서 memberId 만 바꾸면 앞 사람의 사진이 한 프레임도 안 나온다', async () => {
+    const OTHER = '33333333-3333-4333-8333-333333333333';
+    const otherPath = `/v1/workspaces/${WS}/members/${OTHER}/avatar/content?v=9`;
+    const d = makeDirectory([
+      member({id: SELF, avatarUrl: PATH_A}),
+      member({id: OTHER, displayName: '박지민', avatarUrl: otherPath}),
+    ]);
+    const view = render(<Avatar directory={d} memberId={SELF} />);
+    await waitFor(() => expect(view.getByTestId('avatar-image', HIDDEN)).toBeTruthy());
+    const selfUri = view.getByTestId('avatar-image', HIDDEN).props.source.uri;
+
+    // 같은 Avatar 원소에서 memberId 만 바꾼다(DM A→B). act 가 effect 까지 돌린 뒤라도
+    // 새 사람의 파일이 오기 전에는 앞 사람 사진이 아니라 이니셜이어야 한다.
+    fsMock.__state.failures = [];
+    view.rerender(<Avatar directory={d} memberId={OTHER} />);
+    expect(view.queryByTestId('avatar-image', HIDDEN)?.props.source.uri).not.toBe(selfUri);
+    expect(view.getByTestId('avatar-initial', HIDDEN)).toBeTruthy();
+    await waitFor(() => expect(view.getByTestId('avatar-image', HIDDEN)).toBeTruthy());
+    expect(view.getByTestId('avatar-image', HIDDEN).props.source.uri).not.toBe(selfUri);
   });
 
   it('옛 절대 avatarUrl 은 기존대로 uri 로 실리고 요청은 없다', () => {
-    const view = render(
-      <Avatar directory={dir(`${BASE}/legacy/me.png`)} memberId={SELF} />,
-    );
+    const view = render(<Avatar directory={dir(`${BASE}/legacy/me.png`)} memberId={SELF} />);
     expect(view.getByTestId('avatar-image', HIDDEN).props.source).toEqual({
       uri: `${BASE}/legacy/me.png`,
     });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(downloads()).toHaveLength(0);
   });
 
   it('에이전트는 사진이 있어도 둥근 사각이다', async () => {
     const agentPath = `/v1/workspaces/${WS}/members/${AGENT}/avatar/content?v=m`;
-    fetchMock.mockResolvedValue(avatarResponse(200));
     const view = render(<Avatar directory={dir(agentPath)} memberId={AGENT} />);
     await waitFor(() => expect(view.getByTestId('avatar-image', HIDDEN)).toBeTruthy());
     expect(view.getByTestId('avatar-agent', HIDDEN)).toBeTruthy();

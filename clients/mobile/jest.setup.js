@@ -158,6 +158,10 @@ jest.mock('expo-file-system', () => {
     progress: [{bytesWritten: 1, totalBytes: 2}, {bytesWritten: 2, totalBytes: 2}],
     uploadProgress: [{bytesSent: 1, totalBytes: 2}, {bytesSent: 2, totalBytes: 2}],
     sizes: new Map(),
+    // 다운로드가 디스크에 쓰는 바이트 수(아바타 캐시 총량 시험용). 기본 0.
+    downloadBytes: 0,
+    // 호출 순서대로 하나씩 꺼내 던지는 실패(없으면 `failure` 규칙).
+    failures: [],
   };
   const uriOf = value =>
     typeof value === 'string' ? value : value && typeof value.uri === 'string' ? value.uri : '';
@@ -178,6 +182,11 @@ jest.mock('expo-file-system', () => {
     create() {
       directories.add(this.uri);
     }
+    list() {
+      return [...files]
+        .filter(uri => uri.startsWith(`${this.uri}/`))
+        .map(uri => new File(uri));
+    }
   }
 
   class File {
@@ -196,8 +205,10 @@ jest.mock('expo-file-system', () => {
     static async downloadFileAsync(url, destination, options = {}) {
       state.downloads.push({url, destination, options});
       for (const progress of state.progress) options.onProgress?.(progress);
+      if (state.failures.length > 0) throw state.failures.shift();
       if (state.failure) throw state.failure;
       files.add(destination.uri);
+      state.sizes.set(destination.uri, state.downloadBytes);
       return destination;
     }
     createUploadTask(url, options = {}) {
@@ -246,6 +257,8 @@ jest.mock('expo-file-system', () => {
         {bytesSent: 2, totalBytes: 2},
       ];
       state.sizes.clear();
+      state.downloadBytes = 0;
+      state.failures = [];
     },
   };
 });

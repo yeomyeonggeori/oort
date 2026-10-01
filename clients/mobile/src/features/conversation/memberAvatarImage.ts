@@ -1,143 +1,265 @@
-import {fetchMemberAvatar} from '@momo/core/lib/api';
+import {memberAvatarContentPath} from '@momo/core/features/workspace/avatar';
+import {refreshSession} from '@momo/core/lib/api';
+import {apiBase, coreSession} from '@momo/core/runtime/host';
+import {Directory, File, Paths} from 'expo-file-system';
 import {useEffect, useState} from 'react';
 
 // =============================================================================
-// 업로드된 멤버 아바타(ADR-0161 증보, #3277)를 폰에서 싣는 길
+// 업로드된 멤버 아바타(ADR-0161 증보, #3277)를 폰에서 싣는 길 — 디스크 파일 캐시
 //
 // roster 의 `avatarUrl` 이 `…/members/{id}/avatar/content?v={media}` 이면 그것은
 // **베어러가 있어야 읽히는** 인가 경로다. RN `Image` 는 헤더를 못 싣는 `uri` 로
-// 그것을 읽으면 401 회색 상자가 남는다. 그래서 코어 `fetchMemberAvatar`(베어러·
-// 401 갱신·경로 모양 검사까지 코어가 한다)로 받아 `data:` 주소로 바꿔 싣는다.
+// 그것을 읽으면 401 회색 상자가 남는다. 그래서 첨부와 같은 길로 받는다
+// (`attachments/content.ts`): 네이티브 다운로더가 베어러를 실어 앱 캐시 디렉터리에
+// **파일로** 쓰고, `Image` 에는 `file://` 주소를 준다. 5 MiB 짜리 사진이 JS 힙에
+// 문자열로 남는 일이 없다.
+//
+// 경로 모양 검사는 코어 `memberAvatarContentPath` 가 한다 — 그 형태가 아니면 베어러를
+// 싣지 않고 거절한다(임의 주소로 토큰이 새지 않게).
 //
 // ## 캐시
 //
-// 키는 content 경로 그대로다 — 멤버 id 와 `?v=` 가 모두 들어 있어, 사진을 바꾸면
-// 키가 바뀌고 같은 사진은 한 번만 받는다. 한 화면에 같은 사람의 행이 수십 개여도
-// 요청은 하나다(진행 중인 약속을 공유한다). 항목은 최대 `MAX_ENTRIES` 개(가장 오래
-// 안 쓴 것부터 버린다 — 5 MiB 상한 이미지의 data 주소가 메모리를 먹는다).
-// 실패는 `FAILURE_TTL_MS` 동안만 기억한다: 그 사이 같은 행이 다시 그려져도 요청
-// 폭풍이 없고, 일시 오류는 곧 다시 시도된다.
+// 키는 서버 주소 + content 경로(멤버 id 와 `?v=` 포함)이고 파일명은 그 해시다.
+// 사진을 바꾸면 `?v=` 가 달라져 새 파일이 된다. 같은 사진은 한 번만 받고 진행 중인
+// 요청도 공유한다. 디스크 총량이 `MAX_DISK_BYTES` 를 넘으면 가장 오래 안 쓴 파일부터
+// 지운다. 실패는 `FAILURE_TTL_MS` 동안만 기억한다(요청 폭풍 방지, 일시 오류는 곧
+// 재시도). 앱을 다시 켜면 디렉터리에 남은 파일을 색인으로 거둔다.
+//
+// 로그아웃·세션 경계에서는 `clearMemberAvatarCache()` 가 메모리와 디스크를 비운다
+// (앞 사람의 얼굴이 다음 사람 기기에 남지 않게).
 //
 // ## 레퍼러
 //
-// 이 길은 서버 주소로 `fetch` 하는 것이 전부라 웹의 `<img>` 처럼 레퍼러가 실리지
-// 않는다. 옛 `avatarUrl`(절대 http 주소)은 RN `Image` 가 읽는데, RN `Image` 에는
-// 레퍼러 정책을 정하는 속성이 없다 — 코어가 이 서버 오리진의 주소만 통과시키므로
-// 새는 곳은 이 서버뿐이다(후속 아님, 기록만).
+// 받는 길은 네이티브 다운로더이고 레퍼러를 싣지 않는다.
 // =============================================================================
 
-export const MAX_ENTRIES = 64;
-/** 캐시된 data 주소 길이의 합 상한(문자 수 ≈ 바이트). 서버 상한 5 MiB 의 base64 는 ~6.7 M 이라 최악 개수 상한만으로는 수백 MB 다. */
-export const MAX_TOTAL_BYTES = 16 * 1024 * 1024;
-/** 단건이 이 값을 넘으면 캐시하지 않는다 — 그 화면에서만 쓰고 버린다. */
-export const MAX_ENTRY_BYTES = MAX_TOTAL_BYTES / 2;
+export const MAX_DISK_BYTES = 64 * 1024 * 1024;
 export const FAILURE_TTL_MS = 30_000;
 
-type Entry =
-  | {state: 'pending'; promise: Promise<string | null>}
-  | {state: 'ready'; uri: string}
-  | {state: 'failed'; until: number};
+const DIRECTORY_NAME = 'oort-member-avatars';
 
-const cache = new Map<string, Entry>();
-
-/** 시험·로그아웃·워크스페이스 전환 때 비운다. */
-export function __resetMemberAvatarCache(): void {
-  cache.clear();
+interface Indexed {
+  file: File;
+  size: number;
 }
 
-function blobToDataUri(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const result = reader.result;
-      if (typeof result === 'string' && result.startsWith('data:')) resolve(result);
-      else reject(new Error('avatar blob did not decode'));
-    };
-    reader.onerror = () => reject(reader.error ?? new Error('avatar read failed'));
-    reader.readAsDataURL(blob);
-  });
+/** 삽입 순서 = 쓴 순서(LRU). 키는 파일 URI 가 아니라 `cacheKey`. */
+const index = new Map<string, Indexed>();
+const inflight = new Map<string, Promise<string | null>>();
+const failedUntil = new Map<string, number>();
+let adopted = false;
+/** 비우기 세대 — 비우는 사이 끝난 다운로드는 파일을 버리고 결과를 내지 않는다. */
+let generation = 0;
+
+function directory(): Directory {
+  const dir = new Directory(Paths.cache, DIRECTORY_NAME);
+  if (!dir.exists) dir.create({intermediates: true, idempotent: true});
+  return dir;
 }
 
-function entryBytes(entry: Entry): number {
-  return entry.state === 'ready' ? entry.uri.length : 0;
+/* eslint-disable no-bitwise -- 파일명 해시는 비트 연산이 본업이다 */
+/** 두 개의 32비트 FNV-1a 를 이어 붙인 16자 16진 — 파일명용(보안 용도가 아니다). */
+function hashName(key: string): string {
+  let a = 0x811c9dc5;
+  let b = 0x01000193 ^ key.length;
+  for (let i = 0; i < key.length; i += 1) {
+    const c = key.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193) >>> 0;
+    b = Math.imul(b + c + i, 0x85ebca6b) >>> 0;
+    b ^= b >>> 13;
+  }
+  return `${a.toString(16).padStart(8, '0')}${b.toString(16).padStart(8, '0')}.img`;
+}
+
+/* eslint-enable no-bitwise */
+
+export function memberAvatarCacheKey(path: string): string {
+  return `${apiBase()}${path}`;
 }
 
 function totalBytes(): number {
   let sum = 0;
-  for (const entry of cache.values()) sum += entryBytes(entry);
+  for (const entry of index.values()) sum += entry.size;
   return sum;
 }
 
-function remember(path: string, entry: Entry): void {
-  // Map 은 삽입 순서를 지킨다 — 지우고 다시 넣어 가장 최근으로 올린다.
-  cache.delete(path);
-  cache.set(path, entry);
-  while (cache.size > MAX_ENTRIES || totalBytes() > MAX_TOTAL_BYTES) {
-    const oldest = cache.keys().next().value;
-    if (oldest === undefined) break;
-    cache.delete(oldest);
+function evict(): void {
+  while (totalBytes() > MAX_DISK_BYTES && index.size > 1) {
+    const oldest = index.keys().next();
+    if (oldest.done) break;
+    const entry = index.get(oldest.value);
+    index.delete(oldest.value);
+    try {
+      if (entry?.file.exists) entry.file.delete();
+    } catch {
+      // 지우지 못한 파일은 다음 실행의 색인 거두기가 다시 센다.
+    }
   }
 }
 
-/** 이미 받아 둔 주소(없으면 `null`). 렌더 첫 프레임에 깜빡임 없이 쓴다. */
-export function peekMemberAvatar(path: string): string | null {
-  const hit = cache.get(path);
-  if (hit?.state === 'ready') {
-    remember(path, hit);
-    return hit.uri;
+/** 앱을 다시 켠 뒤 디렉터리에 남은 파일을 색인으로 거둔다(한 번). */
+function adoptExisting(): void {
+  if (adopted) return;
+  adopted = true;
+  try {
+    for (const item of directory().list()) {
+      if (!(item instanceof File)) continue;
+      // 어느 키의 파일인지는 파일명 해시로만 안다 — 키 대신 파일명을 색인 키로 둔다.
+      index.set(`file:${item.uri}`, {file: item, size: item.size ?? 0});
+    }
+    evict();
+  } catch {
+    // 색인을 못 거두면 빈 캐시로 시작한다 — 받으면 그만이다.
   }
-  return null;
+}
+
+function fileFor(key: string): File {
+  return new File(directory(), hashName(key));
+}
+
+function lookup(key: string): Indexed | undefined {
+  adoptExisting();
+  const target = fileFor(key).uri;
+  const direct = index.get(key);
+  if (direct !== undefined) return direct;
+  const adoptedEntry = index.get(`file:${target}`);
+  if (adoptedEntry !== undefined) {
+    index.delete(`file:${target}`);
+    index.set(key, adoptedEntry);
+  }
+  return adoptedEntry;
+}
+
+/** 이미 받아 둔 `file://` 주소(없으면 `null`). 렌더 첫 프레임에 깜빡임 없이 쓴다. */
+export function peekMemberAvatar(key: string): string | null {
+  const hit = lookup(key);
+  if (hit === undefined) return null;
+  index.delete(key);
+  index.set(key, hit);
+  return hit.file.uri;
+}
+
+function isUnauthorized(error: unknown): boolean {
+  return /(?:status(?: code)?\s*[:=]?\s*401|http\s*401|unauthori[sz]ed)/i.test(
+    error instanceof Error ? error.message : String(error),
+  );
+}
+
+async function download(path: string, destination: File): Promise<File> {
+  const send = (): Promise<File> => {
+    const token = coreSession().getAccessToken();
+    return File.downloadFileAsync(`${apiBase()}${path}`, destination, {
+      headers: token === null ? {} : {Authorization: `Bearer ${token}`},
+      idempotent: true,
+    });
+  };
+  try {
+    return await send();
+  } catch (error: unknown) {
+    if (!isUnauthorized(error)) throw error;
+    if (coreSession().getRefreshToken() !== null && (await refreshSession())) {
+      return send();
+    }
+    coreSession().markAuthExpired();
+    throw error;
+  }
 }
 
 /** 같은 경로는 한 번만 받는다. 실패하면 `null`(이니셜이 선다). */
 export function loadMemberAvatar(path: string): Promise<string | null> {
-  const hit = cache.get(path);
-  if (hit?.state === 'ready') return Promise.resolve(hit.uri);
-  if (hit?.state === 'pending') return hit.promise;
-  if (hit?.state === 'failed' && hit.until > Date.now()) return Promise.resolve(null);
+  if (memberAvatarContentPath(path) === null) return Promise.resolve(null);
+  const key = memberAvatarCacheKey(path);
+  const known = peekMemberAvatar(key);
+  if (known !== null) return Promise.resolve(known);
+  const active = inflight.get(key);
+  if (active !== undefined) return active;
+  const until = failedUntil.get(key);
+  if (until !== undefined && until > Date.now()) return Promise.resolve(null);
 
-  const promise = fetchMemberAvatar(path)
-    .then(blobToDataUri)
-    .then(
-      (uri): string | null => {
-        // 너무 큰 한 장은 캐시에 앉히지 않는다(진행 중 표시도 걷는다). 이 호출을
-        // 기다린 화면만 값을 들고 있다가 내려가면 버려진다.
-        if (uri.length > MAX_ENTRY_BYTES) cache.delete(path);
-        else remember(path, {state: 'ready', uri});
-        return uri;
-      },
-      (): string | null => {
-        remember(path, {state: 'failed', until: Date.now() + FAILURE_TTL_MS});
+  const started = generation;
+  const destination = fileFor(key);
+  const request = download(path, destination)
+    .then((file): string | null => {
+      if (started !== generation) {
+        if (file.exists) file.delete();
         return null;
-      },
-    );
-  remember(path, {state: 'pending', promise});
-  return promise;
+      }
+      failedUntil.delete(key);
+      index.delete(key);
+      index.set(key, {file, size: file.size ?? 0});
+      evict();
+      return file.uri;
+    })
+    .catch((): string | null => {
+      try {
+        if (destination.exists) destination.delete();
+      } catch {
+        // 반쯤 쓰인 파일이 남아도 다음 성공이 덮는다(idempotent).
+      }
+      if (started === generation) failedUntil.set(key, Date.now() + FAILURE_TTL_MS);
+      return null;
+    })
+    .finally(() => {
+      if (inflight.get(key) === request) inflight.delete(key);
+    });
+  inflight.set(key, request);
+  return request;
+}
+
+/** 로그아웃·세션 경계: 메모리 색인과 디스크 파일을 모두 비운다. */
+export function clearMemberAvatarCache(): void {
+  generation += 1;
+  inflight.clear();
+  failedUntil.clear();
+  const files = [...index.values()].map(entry => entry.file);
+  index.clear();
+  try {
+    const dir = new Directory(Paths.cache, DIRECTORY_NAME);
+    if (dir.exists) for (const item of dir.list()) if (item instanceof File) files.push(item);
+  } catch {
+    // 디렉터리를 못 읽어도 색인에 있던 파일은 지운다.
+  }
+  for (const file of files) {
+    try {
+      if (file.exists) file.delete();
+    } catch {
+      // 못 지운 파일은 다음 비우기가 다시 시도한다.
+    }
+  }
+  adopted = true; // 방금 비웠으니 거둘 것이 없다.
+}
+
+/** 시험용: 모듈 상태 전체를 처음으로(디스크는 시험 mock 이 따로 비운다). */
+export function __resetMemberAvatarCache(): void {
+  generation += 1;
+  index.clear();
+  inflight.clear();
+  failedUntil.clear();
+  adopted = false;
 }
 
 /**
- * `path` 가 있으면 그 멤버 아바타의 `data:` 주소, 받는 중·실패면 `null`.
+ * `path` 가 있으면 그 멤버 아바타의 `file://` 주소, 받는 중·실패면 `null`.
  * 호출한 쪽은 `null` 동안 같은 크기의 이니셜을 세운다(크기 변화 없음).
+ *
+ * 상태는 어느 키의 결과인지 함께 든다 — 경로가 바뀐 첫 렌더에 앞 사람의 사진을
+ * 새 멤버 얼굴로 그리지 않게(DM A→B 전환). 이미 받은 것은 렌더 중에 캐시를 먼저
+ * 본다(이니셜→이미지 깜박임 없음).
  */
 export function useMemberAvatarUri(path: string | null): string | null {
-  const [uri, setUri] = useState<string | null>(() =>
-    path === null ? null : peekMemberAvatar(path),
-  );
+  const key = path === null ? null : memberAvatarCacheKey(path);
+  const [loaded, setLoaded] = useState<{key: string; uri: string} | null>(null);
   useEffect(() => {
-    if (path === null) {
-      setUri(null);
-      return undefined;
-    }
-    const known = peekMemberAvatar(path);
-    setUri(known);
-    if (known !== null) return undefined;
+    if (path === null || key === null) return undefined;
+    if (peekMemberAvatar(key) !== null) return undefined;
     let alive = true;
-    void loadMemberAvatar(path).then(next => {
-      if (alive) setUri(next);
+    void loadMemberAvatar(path).then(uri => {
+      if (alive && uri !== null) setLoaded({key, uri});
     });
     return () => {
       alive = false;
     };
-  }, [path]);
-  return uri;
+  }, [path, key]);
+  if (key === null) return null;
+  return peekMemberAvatar(key) ?? (loaded?.key === key ? loaded.uri : null);
 }
