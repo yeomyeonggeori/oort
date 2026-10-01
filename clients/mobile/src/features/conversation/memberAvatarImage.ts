@@ -27,6 +27,10 @@ import {useEffect, useState} from 'react';
 // =============================================================================
 
 export const MAX_ENTRIES = 64;
+/** 캐시된 data 주소 길이의 합 상한(문자 수 ≈ 바이트). 서버 상한 5 MiB 의 base64 는 ~6.7 M 이라 최악 개수 상한만으로는 수백 MB 다. */
+export const MAX_TOTAL_BYTES = 16 * 1024 * 1024;
+/** 단건이 이 값을 넘으면 캐시하지 않는다 — 그 화면에서만 쓰고 버린다. */
+export const MAX_ENTRY_BYTES = MAX_TOTAL_BYTES / 2;
 export const FAILURE_TTL_MS = 30_000;
 
 type Entry =
@@ -54,11 +58,21 @@ function blobToDataUri(blob: Blob): Promise<string> {
   });
 }
 
+function entryBytes(entry: Entry): number {
+  return entry.state === 'ready' ? entry.uri.length : 0;
+}
+
+function totalBytes(): number {
+  let sum = 0;
+  for (const entry of cache.values()) sum += entryBytes(entry);
+  return sum;
+}
+
 function remember(path: string, entry: Entry): void {
   // Map 은 삽입 순서를 지킨다 — 지우고 다시 넣어 가장 최근으로 올린다.
   cache.delete(path);
   cache.set(path, entry);
-  while (cache.size > MAX_ENTRIES) {
+  while (cache.size > MAX_ENTRIES || totalBytes() > MAX_TOTAL_BYTES) {
     const oldest = cache.keys().next().value;
     if (oldest === undefined) break;
     cache.delete(oldest);
@@ -86,7 +100,10 @@ export function loadMemberAvatar(path: string): Promise<string | null> {
     .then(blobToDataUri)
     .then(
       (uri): string | null => {
-        remember(path, {state: 'ready', uri});
+        // 너무 큰 한 장은 캐시에 앉히지 않는다(진행 중 표시도 걷는다). 이 호출을
+        // 기다린 화면만 값을 들고 있다가 내려가면 버려진다.
+        if (uri.length > MAX_ENTRY_BYTES) cache.delete(path);
+        else remember(path, {state: 'ready', uri});
         return uri;
       },
       (): string | null => {

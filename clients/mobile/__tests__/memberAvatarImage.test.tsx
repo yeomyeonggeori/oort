@@ -11,6 +11,7 @@ import {Avatar} from '../src/features/conversation/Avatar';
 import {
   FAILURE_TTL_MS,
   MAX_ENTRIES,
+  MAX_ENTRY_BYTES,
   __resetMemberAvatarCache,
   loadMemberAvatar,
 } from '../src/features/conversation/memberAvatarImage';
@@ -175,6 +176,31 @@ describe('멤버 아바타 받기', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     await loadMemberAvatar(p(0)); // 가장 오래된 것은 밀려났다
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  const big = (n: number) => `data:image/png;base64,${'A'.repeat(n)}`;
+  const q = (i: number) => `/v1/workspaces/${WS}/members/b${i}/avatar/content?v=1`;
+
+  it('총 바이트 상한을 넘으면 개수와 무관하게 오래된 것부터 버린다', async () => {
+    fetchMock.mockResolvedValue(avatarResponse(200));
+    readerResult = big(MAX_ENTRY_BYTES - 100); // 단건 상한 직전, 3장이면 16M 초과
+    await loadMemberAvatar(q(0));
+    await loadMemberAvatar(q(1));
+    await loadMemberAvatar(q(2));
+    fetchMock.mockClear();
+    await loadMemberAvatar(q(2)); // 최근 것은 남는다
+    await loadMemberAvatar(q(1));
+    expect(fetchMock).not.toHaveBeenCalled();
+    await loadMemberAvatar(q(0)); // 가장 오래된 것은 총량 때문에 밀려났다
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('단건이 상한의 절반을 넘으면 캐시하지 않고 값만 넘긴다', async () => {
+    fetchMock.mockResolvedValue(avatarResponse(200));
+    readerResult = big(MAX_ENTRY_BYTES + 1);
+    await expect(loadMemberAvatar(q(0))).resolves.toBe(readerResult);
+    await loadMemberAvatar(q(0));
+    expect(avatarCalls()).toHaveLength(2);
   });
 });
 
