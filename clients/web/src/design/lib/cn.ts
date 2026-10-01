@@ -52,6 +52,7 @@ export const NAMED_MEASURES = [
   "control",
   "control-lg",
   "action-sm",
+  "avatar-action",
   "action",
   "action-band",
   "chat-min",

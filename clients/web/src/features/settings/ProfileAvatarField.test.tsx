@@ -84,6 +84,20 @@ async function pick(h: HTMLElement, file: File) {
   });
 }
 
+async function confirmRemove(h: HTMLElement) {
+  await act(async () => {
+    h.querySelector<HTMLButtonElement>('[data-testid="profile-avatar-remove"]')!.click();
+  });
+  const confirm = [...h.querySelectorAll("button")].find((b) => b.textContent === "지우기");
+  expect(confirm, "제자리 확인의 「지우기」 단추").toBeTruthy();
+  await act(async () => {
+    confirm!.click();
+  });
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 10));
+  });
+}
+
 const png = () => new File([new Uint8Array(8)], "a.png", { type: "image/png" });
 const err = (h: HTMLElement) => h.querySelector('[data-testid="profile-avatar-error"]')?.textContent;
 
@@ -103,12 +117,12 @@ describe("ProfileAvatarField", () => {
     expect(err(h)).toMatch(/PNG, JPG, GIF, WebP/);
     const big = new File([new Uint8Array(5 * 1024 * 1024 + 1)], "b.png", { type: "image/png" });
     await pick(h, big);
-    expect(err(h)).toBe("사진은 5MB까지 올릴 수 있어요.");
+    expect(err(h)).toBe("프로필 사진은 5MB까지 올릴 수 있습니다.");
     expect(upload).not.toHaveBeenCalled();
   });
 
   it.each([
-    [413, /너무 커요/],
+    [413, /너무 큽니다/],
     [422, /4096px/],
     [409, /다시 골라/],
     [429, /너무 자주/],
@@ -128,10 +142,7 @@ describe("ProfileAvatarField", () => {
 
     const h = await mount(me("/v1/workspaces/w/members/u/avatar/content?v=m"));
     const spy = vi.spyOn(client, "invalidateQueries");
-    const button = h.querySelector<HTMLButtonElement>('[data-testid="profile-avatar-remove"]')!;
-    await act(async () => {
-      button.click();
-    });
+    await confirmRemove(h);
     expect(removeMyAvatar).toHaveBeenCalledWith("w");
     expect(spy).toHaveBeenCalledWith({ queryKey: ["roster", "w"] });
   });
@@ -139,10 +150,8 @@ describe("ProfileAvatarField", () => {
   it("지우기 실패는 오류를 보인다", async () => {
     removeMyAvatar.mockRejectedValue(new ApiError(500, "x"));
     const h = await mount(me("/v1/workspaces/w/members/u/avatar/content?v=m"));
-    await act(async () => {
-      h.querySelector<HTMLButtonElement>('[data-testid="profile-avatar-remove"]')!.click();
-    });
-    expect(err(h)).toMatch(/지우지 못했어요/);
+    await confirmRemove(h);
+    expect(err(h)).toMatch(/지우지 못했습니다/);
   });
 
   it("오프라인이면 파일 창도 지우기도 열지 않는다", async () => {
@@ -153,5 +162,47 @@ describe("ProfileAvatarField", () => {
     expect(removeMyAvatar).not.toHaveBeenCalled();
     await pick(h, png());
     expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("지우기를 한 번 누른 것만으로는 지우지 않는다(제자리 확인)", async () => {
+    const h = await mount(me("/v1/workspaces/w/members/u/avatar/content?v=m"));
+    await act(async () => {
+      h.querySelector<HTMLButtonElement>('[data-testid="profile-avatar-remove"]')!.click();
+    });
+    expect(removeMyAvatar).not.toHaveBeenCalled();
+  });
+
+  it("지우기가 성공하면 초점이 <body> 가 아니라 남는 「사진 올리기」 로 간다", async () => {
+    const h = await mount(me("/v1/workspaces/w/members/u/avatar/content?v=m"));
+    await confirmRemove(h);
+    expect(document.activeElement).toBe(
+      h.querySelector('[data-testid="profile-avatar-change"]')
+    );
+  });
+
+  it("올리는 동안 지우기는 잠기고 이유 문장에 연결된다, 완료는 polite 상태 줄이 말한다", async () => {
+    let finish: () => void = () => undefined;
+    upload.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = () =>
+            resolve({ id: "m", memberId: "u", status: "ready", avatarUrl: "/v1/workspaces/w/members/u/avatar/content?v=m" });
+        })
+    );
+    const h = await mount(me("/v1/workspaces/w/members/u/avatar/content?v=old"));
+    await pick(h, png());
+    const remove = h.querySelector<HTMLButtonElement>('[data-testid="profile-avatar-remove"]')!;
+    expect(remove.getAttribute("aria-disabled")).toBe("true");
+    const reason = remove.getAttribute("aria-describedby")!;
+    expect(h.querySelector(`[id="${reason}"]`)?.textContent).toMatch(/올리는 중/);
+    await act(async () => {
+      finish();
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    const status = h.querySelector('[data-testid="profile-avatar-status"]')!;
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(status.textContent).toBe("프로필 사진을 바꿨습니다.");
   });
 });

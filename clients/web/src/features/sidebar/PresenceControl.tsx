@@ -107,7 +107,11 @@ export function PresenceBadge({
       // DS2-6: 사이드바가 바닥(그라데이션) 위에 녹은 뒤로 옅은 채움은 밝은 두
       // 테마에서 바닥과 같은 색이 됐다. 흰 면 + rest로 어느 바닥 위에서도 선다.
       // 띠(노을띠) 위에서도 흰 면이라 원래 글자 역할을 쓴다.
-      className="band-surface relative flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface text-meta font-semibold text-ink shadow-sm"
+      className={cn(
+        "band-surface relative flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface text-meta font-semibold text-ink shadow-sm",
+        // 사람의 사진은 원이다(AVATAR_SHAPE.human). 이니셜 타일은 기존 모양 그대로.
+        imageSrc !== null && "rounded-full"
+      )}
       aria-hidden="true"
     >
       {imageSrc !== null ? (
@@ -117,7 +121,7 @@ export function PresenceBadge({
           src={imageSrc}
           alt=""
           referrerPolicy="no-referrer"
-          className="size-full rounded-sm object-cover"
+          className="size-full rounded-full object-cover"
           data-testid="presence-avatar-image"
         />
       ) : (
