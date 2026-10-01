@@ -1353,6 +1353,14 @@
       }
     }
 
+    /* 「내 작업」을 떠날 때도 열 폭은 곧바로 바뀐다(#3275). 레일 64 + 목록 260이 사이드바
+     * 324와 같아 본문 가장자리가 이미 제자리이고, 열이 미끄러지는 동안 사이드바 트리가
+     * 프레임마다 다시 짜이던 번쩍임(실측 242px 뜀)만 남아 있었다. 접힘 토글(#1864)의
+     * 전이는 이 속성이 없을 때 그대로다. */
+    &[data-work-rail-exit] {
+      transition: none;
+    }
+
     @media (prefers-contrast: more) {
       background-image: linear-gradient(
         var(--band, transparent),
@@ -1407,6 +1415,25 @@
      * 인셋을 더하면 어느 표면 하나는 반드시 빠뜨린다. `box-sizing: border-box`라
      * 패딩은 100% 높이 **안**에서 자리를 얻으므로 셸은 여전히 창만 하다. */
     padding-block-start: env(safe-area-inset-top, 0px);
+  }
+}
+
+/* 탭을 바꾸며 갈린 왼쪽 패널(레일·세션 목록·떠난 뒤의 사이드바 트리)은 면이 새로 나타나
+ * 지 않고 짧게 떠오른다(#3275). 이동이 아니라 불투명도 하나라 상자는 움직이지 않는다.
+ * 지속 시간은 모션 사다리(instant)이고 reduced-motion에서는 사다리가 0이다. */
+@keyframes shell-swap-in {
+  from {
+    opacity: 0;
+  }
+}
+.shell-swap-in,
+.app-shell[data-work-rail-exit] .sidebar-list {
+  animation: shell-swap-in var(--motion-instant) var(--motion-ease-standard) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .shell-swap-in,
+  .app-shell[data-work-rail-exit] .sidebar-list {
+    animation: none;
   }
 }
 
@@ -4958,15 +4985,16 @@ progress[data-upload-progress]:indeterminate::-webkit-progress-bar {
  * 12px·11px 글자는 기존 역할(`--text-meta`·`--text-timestamp`)을 쓴다.
  * ========================================================================== */
 :root {
-  /* 폭: 코어 WORK_TAB_SESSION_LIST_PX와 같은 값. */
-  --session-list-width: 268px;
+  /* 폭: 코어 WORK_TAB_SESSION_LIST_PX(260)와 같은 값이다. 레일 64와 합쳐 앱 사이드바
+   * 전체 폭(324)이 되어, 탭을 오가도 본문의 왼쪽 가장자리가 움직이지 않는다(#3275). */
+  --session-list-width: calc(var(--w-sidebar) - var(--w-work-rail));
   /* 줄 높이: 세션 줄 30 · worktree 줄 28 · 그릇(저장소 선택기·찾기·새 세션) 34 ·
    * 거르기 칩 26 · 머리 아이콘 단추 30 · 「기본」 표 18. */
   --session-row-height: 30px;
   --session-worktree-height: 28px;
   --session-vessel-height: 34px;
   --session-chip-height: 26px;
-  --session-icon-button: 30px;
+  --session-icon-button: 34px;
   --session-badge-height: 18px;
   /* 안쪽 여백과 들여쓰기. */
   --session-head-pad: 14px;
@@ -4984,7 +5012,7 @@ progress[data-upload-progress]:indeterminate::-webkit-progress-bar {
   --session-gap-tight: 4px;
   --session-gap-icon: 2px;
   /* 반경: 줄·아이콘 단추 8 · 그릇 10 · 칩 13(높이의 절반) · 「기본」 9. */
-  --session-radius-row: 8px;
+  --session-radius-row: var(--radius-md);
   --session-radius-vessel: 10px;
   --session-radius-chip: 13px;
   --session-radius-badge: 9px;

@@ -93,7 +93,13 @@ export function ProfileCard({
     <>
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
-          {/* `tap-target` (44px under 600px) is the whole row now: the old
+          {/* #3276: no `press` here. `.press:active` is `scale(0.98)`, and on a
+              row that holds an avatar, a name and a status emoji it shrank the
+              whole identity cluster by up to 4px on every click (measured with
+              scripts/capture-profile-jitter.mjs: hover, focus ring, menu open
+              and close are all 0px; the press is the only mover). The pressed
+              state is a fill (`press-instant-fill`), never geometry.
+              `tap-target` (44px under 600px) is the whole row now: the old
               24×24 avatar-only hit sat next to a 44px gear (6b H2). The avatar
               itself stays 24px; the badge stays on that span. */}
           <button
@@ -104,8 +110,8 @@ export function ProfileCard({
             title={triggerName}
             className={
               compact
-                ? "flex size-rail-tile shrink-0 items-center justify-center rounded-md press hover:bg-surface-hover focus-visible:focus-ring"
-                : "tap-target flex min-w-0 flex-1 items-center gap-2 rounded-sm px-1 text-left press hover:bg-surface-hover focus-visible:focus-ring"
+                ? "flex size-rail-tile shrink-0 items-center justify-center rounded-md press-instant-fill hover:bg-surface-hover focus-visible:focus-ring"
+                : "tap-target flex min-w-0 flex-1 items-center gap-2 rounded-sm px-1 text-left press-instant-fill hover:bg-surface-hover data-[state=open]:bg-surface-hover focus-visible:focus-ring"
             }
           >
             <PresenceBadge selfName={selfName} effective={effective} />

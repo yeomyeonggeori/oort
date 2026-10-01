@@ -14,13 +14,18 @@ import { WORKBENCH_GUTTER, WORKBENCH_MIN_PANE } from "./layoutTree";
 //   콘솔로 간다(인박스 앵커·관제 카드가 이미 이 주소를 쓴다).
 //
 // 폭(§3.3): 작업 탭에서 앱 사이드바는 64px 레일로 접힌다. 사이드바(324)와 세션
-// 목록(268)을 다 펴면 1440 창의 4열 칸이 칸 최소 폭(240)에 못 미친다.
+// 목록(260)을 다 펴면 1440 창의 4열 칸이 칸 최소 폭(240)에 못 미친다.
+// 레일 64 + 목록 260 = 324: 다른 탭의 사이드바 전체 폭과 같다. 탭을 오갈 때 본문의
+// 왼쪽 가장자리가 움직이지 않는다(#3275).
 // =============================================================================
 
 /** 작업 탭에서 앱 사이드바가 접힌 레일의 폭(시안 ① `.rail`). */
 export const WORK_TAB_RAIL_PX = 64;
-/** 세션 목록 패널의 폭(시안 ① `.slist`, T4 #2856이 세운다). */
-export const WORK_TAB_SESSION_LIST_PX = 268;
+/**
+ * 세션 목록 패널의 폭(시안 ① `.slist`, T4 #2856이 세운다). 시안은 268이었으나 레일 64와
+ * 합쳐 앱 사이드바 전체 폭(56 + 268 = 324)과 같도록 260으로 둔다(#3275).
+ */
+export const WORK_TAB_SESSION_LIST_PX = 260;
 /** 격자의 좌우 여백(시안 ① `.grid` padding 0 12). */
 export const WORK_TAB_GRID_PAD_PX = 12;
 
@@ -87,10 +92,10 @@ export function workTabFits(input: WorkTabWidthInput): boolean {
 }
 
 /**
- * 세션 목록(268)을 편 채로 이 배치가 칸 최소 폭을 지키는가(#2856). `minGridWidth`는
+ * 세션 목록(260)을 편 채로 이 배치가 칸 최소 폭을 지키는가(#2856). `minGridWidth`는
  * 배치의 최소 폭(`minimumSize(layout.root).width`)이다. 못 지키면 목록을 스스로
  * 접는다(사람이 직접 편 목록은 접지 않는다). 1440 창 4×2(984)는 지키고, 1280 창
- * 4×2는 못 지킨다(924).
+ * 4×2는 못 지킨다(932).
  */
 export function sessionListFits(windowWidth: number, minGridWidth: number): boolean {
   const grid = windowWidth - WORK_TAB_RAIL_PX - WORK_TAB_SESSION_LIST_PX - 2 * WORK_TAB_GRID_PAD_PX;
