@@ -164,13 +164,14 @@ describe("최대화: 다른 칸은 트리에 남는다", () => {
   });
 });
 
-describe("신호색 링은 격자가 실제로 포커스를 가질 때만", () => {
-  it("활성 칸의 링은 group-focus-within에 묶여 있다(항상 켜진 focus-ring이 아니다)", () => {
+describe("칸 크롬(#3279): 카드 테두리 없음, 신호색은 「응답 필요」 칸만", () => {
+  it("활성 칸에 항상 켜진 focus-ring도, 카드 테두리·둥근 모서리도 없다", () => {
     render(<Controlled initial={four()} />);
     const active = panes().find((p) => p.hasAttribute("data-focused"))!;
     const classes = active.className.split(/\s+/);
-    expect(classes).toContain("group-focus-within/wb:focus-ring");
     expect(classes).not.toContain("focus-ring");
+    expect(classes).not.toContain("border");
+    expect(classes).not.toContain("rounded-xl");
     expect(grid().className.split(/\s+/)).toContain("group/wb");
   });
 

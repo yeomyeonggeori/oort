@@ -47,7 +47,7 @@ export interface AgentPaneSummary {
   title: string;
   harness: string;
   status: SessionStatus;
-  /** 「나를 기다림」일 때 칸 바닥 띠 한 줄. */
+  /** 「응답 필요」일 때 칸 바닥 띠 한 줄. */
   waitingLine: string | null;
 }
 
@@ -82,7 +82,7 @@ export function summaryOf(model: AgentPaneModel): AgentPaneSummary {
   return {
     title: model.goal,
     harness: model.harness,
-    // 관전자에게 권한 요청은 「나를 기다림」이 아니고 도는 것도 아니다: 빈 원(대기).
+    // 관전자에게 권한 요청은 「응답 필요」가 아니고 도는 것도 아니다: 빈 원(대기).
     status: pending && !model.viewerIsOwner ? "idle" : model.status,
     waitingLine:
       model.status === "waiting" && pending
@@ -128,7 +128,7 @@ export function agentRoutes(
         // 서버가 서명을 요구한다고 답했다: 플래그를 다시 읽어 칸을 안내로 바꾼다(D-4).
         if (err instanceof ApiError && err.code === HUMAN_SIGNATURE_REFUSAL.required) onSignatureRequired();
         // 서버가 결론을 낸 거절(409·403·404)도 스레드를 다시 읽는다: 다른 기기의 결정이나
-        // host 철회가 남긴 `approval.decided`가 칸 머리의 「나를 기다림」을 거둔다.
+        // host 철회가 남긴 `approval.decided`가 칸 머리의 「응답 필요」를 거둔다.
         if (err instanceof ApiError && err.status >= 400 && err.status < 500) afterDecide();
         throw err;
       }

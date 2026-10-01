@@ -17,13 +17,13 @@ import type { GitDiffTotals, GitReadResult, GitWorktree } from "./gitRead";
 //   바뀌지 않는다.
 //
 // 상태 어휘는 제안서 §3.4의 모양 + 글자다. 이 목록은 상태를 **판정하지 않는다**.
-// 「나를 기다림」「검토 대기」「대기」의 출처(OSC·hook)는 #2776이 세운다. 그 전에는
+// 「응답 필요」「검토 대기」「대기」의 출처(OSC·hook)는 #2776이 세운다. 그 전에는
 // 칸의 프로세스 단계(`running`·`exited`·`failed`)가 주는 것만 보인다.
 // =============================================================================
 
 export type SessionStatus = "waiting" | "running" | "review" | "idle" | "done" | "stopped";
 
-/** 정렬 순서: 나를 기다림 → 실행 중 → 검토 대기 → 나머지(§3.2, ADR-0188 D4). */
+/** 정렬 순서: 응답 필요 → 실행 중 → 검토 대기 → 나머지(§3.2, ADR-0188 D4). */
 export const SESSION_STATUS_ORDER: readonly SessionStatus[] = [
   "waiting",
   "running",
@@ -34,7 +34,7 @@ export const SESSION_STATUS_ORDER: readonly SessionStatus[] = [
 ];
 
 export const SESSION_STATUS_LABEL: Readonly<Record<SessionStatus, string>> = {
-  waiting: "나를 기다림",
+  waiting: "응답 필요",
   running: "실행 중",
   review: "검토 대기",
   idle: "대기",
@@ -431,14 +431,14 @@ export function sessionRowsOf(model: SessionListModel): SessionRow[] {
 
 /** 필터가 비었을 때 한 줄(§5 states: 한 문장 + 한 행동). */
 export const SESSION_LIST_EMPTY: Readonly<Record<SessionFilter, string>> = {
-  all: "이 기기에서 연 세션이 없습니다.",
-  waiting: "나를 기다리는 세션이 없습니다.",
+  all: "이 기기에서 연 세션이 없습니다. 세션은 이 기기에서만 돌고 서버에 기록하지 않습니다.",
+  waiting: "응답이 필요한 세션이 없습니다.",
   shared: "팀에 공유한 세션이 없습니다.",
 };
 
 export const SESSION_FILTER_LABEL: Readonly<Record<SessionFilter, string>> = {
   all: "전부",
-  waiting: "나를 기다림",
+  waiting: "응답 필요",
   shared: "공유",
 };
 

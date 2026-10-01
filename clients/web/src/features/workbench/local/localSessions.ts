@@ -490,7 +490,7 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
       const s = sessions.get(paneId);
       if (!s || s.ptyId === null) return;
       const id = s.ptyId;
-      // 「나를 기다림」에 사람이 답했다(#2776). Claude Code는 거부·중단에 hook을 내지
+      // 「응답 필요」에 사람이 답했다(#2776). Claude Code는 거부·중단에 hook을 내지
       // 않으므로(스파이크 실측) 기다림은 이 사람의 입력으로 푼다. 허락이면 곧
       // PostToolUse가, 새 요청이면 UserPromptSubmit이 뒤따른다. 출력은 보지 않는다.
       if (s.view.signal === "waiting-permission" || s.view.signal === "waiting-input") {
