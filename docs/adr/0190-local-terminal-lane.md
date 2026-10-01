@@ -382,6 +382,8 @@ D4의 「이름 · 폴더 표시 이름 · 상태」를 아래 **S1**로 넓힌�
    - **셸 없이, 배열로.** `<git>`은 PATH에서 찾은 절대 경로이고 인자는 배열이다(`sh -c` 없음). 상속된 `GIT_*`를 전부 지우고 `GIT_TERMINAL_PROMPT=0`·`GIT_PAGER=cat`·`GIT_NO_LAZY_FETCH=1`을 둔다. stdin·stderr는 null, 자체 프로세스 그룹, 60초 제한.
    - **훅을 켜지 않는다.** `core.hooksPath=/dev/null`로 `post-checkout` 등 저장소 훅을 막는다. 버튼 하나로 저장소가 가진 임의 코드를 돌리지 않는다. 훅이 필요한 의존 설치는 사용자나 에이전트가 새 칸에서 한다.
    - **filter를 거부한다.** 체크아웃은 smudge·clean·process filter를 실행한다. D3-c 증보(2026-09-27)와 같은 규칙으로 `config --get-regexp ^filter\..*\.(clean|smudge|process)$`를 먼저 읽고, git-lfs 표준값 밖의 filter가 하나라도 있으면 만들지 않고 이유를 말한다.
+   - **네트워크는 0이다.** `GIT_LFS_SKIP_SMUDGE=1`을 환경에 고정한다. 신뢰할 수 없는 저장소의 `.lfsconfig`가 LFS 서버를 가리켜도 체크아웃이 접속하지 않고, LFS 파일은 포인터로 남는다(사용자가 직접 `git lfs pull`). `GIT_CEILING_DIRECTORIES`는 홈의 부모로 두고, 저장소 최상위가 홈 자체(dotfiles 저장소)이거나 홈 밖(위)이면 「저장소 아님」으로 거부한다. 폴더 고르기 대화상자는 한 번에 하나만 열린다(열려 있는 동안 또 부르면 `refused: picker busy`).
+   - **실패 뒤 정리.** `worktree add`가 실패하거나 시간 초과가 나면 셸이 만든 `wt-<8 hex>` 폴더가 남아 있으면 지운다. git이 이미 쓴 브랜치(`oort/wt-…`)와 `.git/worktrees/<leaf>` 메타데이터는 남을 수 있다. `worktree prune`·`branch -D`는 이 증보가 허용하는 쓰기가 아니므로 하지 않고, 사용자가 필요하면 직접 정리한다(잔여는 다음 `git worktree prune`이 치운다).
    - **조건.** 홈이 아닌 폴더가 커밋이 있는 git 저장소일 때만 켤 수 있다. 아니면 메뉴가 이유를 보이며 끈다(「git 저장소를 고르면 켤 수 있어요」, 「아직 커밋이 없어서 쓸 수 없어요」, 「홈에서는 쓸 수 없어요」). 켜 둔 값은 세션을 한 번 열면 다시 꺼진다(기본 끔 유지).
    - **실패는 칸이 말한다.** 못 만들면 원래 저장소 폴더로 몰래 열지 않는다. 칸이 실패 상태가 되어 한국어로 이유를 쓰고, 「다시 열기」는 같은 곳에서 다시 시도한다.
 5. **세션 목록 묶음은 그대로다.** 칸의 폴더가 저장소나 worktree이면 D3-c의 읽기(G1·G3)가 그 칸을 저장소 → worktree 묶음에 넣는다. 「폴더 0 worktree」는 홈에서만 시작해서 생긴 것이었다.

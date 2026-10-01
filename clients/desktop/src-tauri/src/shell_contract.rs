@@ -532,6 +532,19 @@ fn tauri_grants_the_start_location_commands_to_the_local_main_webview_only() {
         .iter()
         .find(|b| !b.contains(&"updater_check".to_string()))
         .unwrap();
+    // The dialog plugin's own commands are not granted to anyone.
+    for command in [
+        "plugin:dialog|open",
+        "plugin:dialog|save",
+        "plugin:dialog|message",
+    ] {
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &local)
+                .is_none(),
+            "{command} is granted"
+        );
+    }
     for command in WORKBENCH_START_COMMANDS {
         assert!(authority
             .resolve_access(command, "main", "main", &local)

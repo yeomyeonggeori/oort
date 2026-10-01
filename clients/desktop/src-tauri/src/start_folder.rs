@@ -28,7 +28,10 @@
 //    The program is the absolute `git` found on the app's search PATH, run
 //    with an argv array (never `sh -c`), every inherited `GIT_*` removed,
 //    hooks off (`core.hooksPath=/dev/null`), fsmonitor off, no prompt, its own
-//    process group and a time limit. A repository whose configured clean /
+//    process group and a time limit. `GIT_LFS_SKIP_SMUDGE=1` keeps an LFS
+//    server named by an untrusted `.lfsconfig` from being contacted, and
+//    `GIT_CEILING_DIRECTORIES` (home's parent) plus a top-level check refuse a
+//    repository that is home itself or above it. A repository whose configured clean /
 //    smudge / process filter is not git-lfs's is refused: a checkout would
 //    run that program (same rule as the reads, `FILTER_ALLOWED`).
 // 4. **Fields only.** The reads here (`rev-parse`) return a state and a name,
@@ -40,6 +43,7 @@ use std::ffi::OsString;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -76,6 +80,10 @@ pub const GIT_ENV: &[(&str, &str)] = &[
     ("GIT_TERMINAL_PROMPT", "0"),
     ("GIT_PAGER", "cat"),
     ("GIT_NO_LAZY_FETCH", "1"),
+    // An untrusted repository's `.lfsconfig` can name an LFS server; without
+    // this the smudge filter of a checkout would contact it. LFS files are
+    // left as pointers (the user's own `git lfs pull` fetches them).
+    ("GIT_LFS_SKIP_SMUDGE", "1"),
 ];
 
 /// Same list and same verbatim values as the reads' `FILTER_ALLOWED`.
@@ -222,7 +230,13 @@ pub fn worktree_add_args(branch: &str, dir: &Path) -> Vec<OsString> {
     ]
 }
 
-fn run_start_git(git: &Path, folder: &Path, args: &[OsString], timeout: Duration) -> Option<Ran> {
+fn run_start_git(
+    git: &Path,
+    folder: &Path,
+    home: &Path,
+    args: &[OsString],
+    timeout: Duration,
+) -> Option<Ran> {
     if !git.is_absolute() || !folder.is_dir() {
         return None;
     }
@@ -243,6 +257,11 @@ fn run_start_git(git: &Path, folder: &Path, args: &[OsString], timeout: Duration
     }
     for (key, value) in GIT_ENV {
         cmd.env(key, value);
+    }
+    // Repository discovery stops below home's parent: a repository above home
+    // (or at `/Users`) is never found from a folder inside home.
+    if let Some(parent) = home.parent() {
+        cmd.env("GIT_CEILING_DIRECTORIES", parent);
     }
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
@@ -305,11 +324,14 @@ fn args(list: &[&str]) -> Vec<OsString> {
     list.iter().map(OsString::from).collect()
 }
 
-/// The repository's top-level folder, or `None` outside one.
-fn toplevel(git: &Path, folder: &Path) -> Option<PathBuf> {
+/// The repository's top-level folder, or `None` outside one. A repository
+/// whose top is home itself (a dotfiles repo) or above it is not one this
+/// feature works on: `None`, same as "not a repository".
+fn toplevel(git: &Path, folder: &Path, home: &Path) -> Option<PathBuf> {
     let ran = run_start_git(
         git,
         folder,
+        home,
         &args(&["rev-parse", "--show-toplevel"]),
         READ_TIMEOUT,
     )?;
@@ -321,16 +343,18 @@ fn toplevel(git: &Path, folder: &Path) -> Option<PathBuf> {
     if line.is_empty() {
         return None;
     }
-    PathBuf::from(line).canonicalize().ok()
+    let top = PathBuf::from(line).canonicalize().ok()?;
+    (top != home && top.starts_with(home)).then_some(top)
 }
 
-fn repo_state(git: &Path, folder: &Path) -> RepoState {
-    if toplevel(git, folder).is_none() {
+fn repo_state(git: &Path, folder: &Path, home: &Path) -> RepoState {
+    if toplevel(git, folder, home).is_none() {
         return RepoState::None;
     }
     let has_commit = run_start_git(
         git,
         folder,
+        home,
         &args(&["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]),
         READ_TIMEOUT,
     )
@@ -342,8 +366,8 @@ fn repo_state(git: &Path, folder: &Path) -> RepoState {
     }
 }
 
-fn filters_allowed(git: &Path, folder: &Path) -> bool {
-    let Some(ran) = run_start_git(git, folder, &args(FILTER_CHECK_ARGS), READ_TIMEOUT) else {
+fn filters_allowed(git: &Path, folder: &Path, home: &Path) -> bool {
+    let Some(ran) = run_start_git(git, folder, home, &args(FILTER_CHECK_ARGS), READ_TIMEOUT) else {
         return false;
     };
     match ran.code {
@@ -372,7 +396,7 @@ pub fn configured_filters_allowed(out: &[u8]) -> bool {
 pub fn inspect_in(git: Option<&Path>, raw: &str, home: &Path) -> Result<FolderFacts, String> {
     let path = check_folder(raw, home)?;
     let repo = match git {
-        Some(git) if path != home => repo_state(git, &path),
+        Some(git) if path != home => repo_state(git, &path, home),
         _ => RepoState::None,
     };
     Ok(FolderFacts {
@@ -399,12 +423,12 @@ pub fn create_worktree_in(
     if folder == home {
         return Err("worktree_failed: not a repository".into());
     }
-    let top =
-        toplevel(git, &folder).ok_or_else(|| "worktree_failed: not a repository".to_string())?;
-    if repo_state(git, &folder) != RepoState::Ready {
+    let top = toplevel(git, &folder, home)
+        .ok_or_else(|| "worktree_failed: not a repository".to_string())?;
+    if repo_state(git, &folder, home) != RepoState::Ready {
         return Err("worktree_failed: no commit yet".into());
     }
-    if !filters_allowed(git, &top) {
+    if !filters_allowed(git, &top, home) {
         return Err("worktree_failed: unsupported filter".into());
     }
     let repo_name = safe_segment(&display_name(&top));
@@ -425,10 +449,25 @@ pub fn create_worktree_in(
         return Err("worktree_failed: folder exists".into());
     }
     let branch = format!("{BRANCH_PREFIX}{leaf}");
-    let ran = run_start_git(git, &top, &worktree_add_args(&branch, &dir), WRITE_TIMEOUT)
-        .ok_or_else(|| "worktree_failed: timed out".to_string())?;
-    if ran.code != Some(0) {
-        return Err("worktree_failed: git refused".into());
+    let ran = run_start_git(
+        git,
+        &top,
+        home,
+        &worktree_add_args(&branch, &dir),
+        WRITE_TIMEOUT,
+    );
+    let ok = ran.as_ref().is_some_and(|r| r.code == Some(0));
+    if !ok {
+        // A half-made folder is removed (it is ours: generated leaf under the
+        // managed parent). Branch and `.git/worktrees/<leaf>` metadata git may
+        // have written stay; ADR-0190 증보 2026-10-01 notes them.
+        if dir.starts_with(&parent) && dir != parent && dir.exists() {
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+        return Err(match ran {
+            None => "worktree_failed: timed out".into(),
+            Some(_) => "worktree_failed: git refused".into(),
+        });
     }
     let made = check_folder(&dir.to_string_lossy(), home)
         .map_err(|_| "worktree_failed: folder missing after add".to_string())?;
@@ -442,12 +481,33 @@ pub fn create_worktree_in(
 // Commands
 // ---------------------------------------------------------------------------
 
+static PICKING: AtomicBool = AtomicBool::new(false);
+
+/// Holds the single-flight flag while a dialog is open.
+struct PickGuard;
+impl PickGuard {
+    fn try_acquire() -> Option<PickGuard> {
+        PICKING
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| PickGuard)
+    }
+}
+impl Drop for PickGuard {
+    fn drop(&mut self) {
+        PICKING.store(false, Ordering::Release);
+    }
+}
+
 /// Folder-only native picker starting in home. `None` = the user cancelled.
+/// One dialog at a time: a second call while one is open is refused.
 #[tauri::command]
 pub async fn workbench_folder_pick(app: tauri::AppHandle) -> Result<Option<FolderFacts>, String> {
     use tauri_plugin_dialog::DialogExt;
+    let guard = PickGuard::try_acquire().ok_or_else(|| "refused: picker busy".to_string())?;
     let home = current_home()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
         let picked = app
             .dialog()
             .file()
@@ -775,7 +835,9 @@ mod tests {
         let err =
             create_worktree_in(Some(&git()), repo.to_str().unwrap(), &home, "wt-f").unwrap_err();
         assert_eq!(err, "worktree_failed: unsupported filter");
-        assert!(!home.join(".oort").exists() || !home.join(".oort/worktrees/proj/wt-f").exists());
+        // Nothing was made for the refused repository.
+        assert!(!home.join(".oort/worktrees/proj/wt-f").exists());
+        assert!(!home.join(".oort/worktrees/proj").exists());
         fs::remove_dir_all(&home).unwrap();
     }
 
@@ -793,5 +855,165 @@ mod tests {
         create_worktree_in(Some(&git()), repo.to_str().unwrap(), &home, "wt-hook").unwrap();
         assert!(!marker.exists(), "post-checkout hook ran");
         fs::remove_dir_all(&home).unwrap();
+    }
+
+    /// M2: a repository that is home itself (dotfiles) or above it is never
+    /// offered a worktree, and `inspect` does not call it a repository.
+    #[test]
+    fn a_repository_at_or_above_home_is_refused() {
+        let g = git();
+        // Home itself is a repository; the folder is inside it.
+        let home = temp_home("home-repo");
+        init_repo(&home);
+        let sub = home.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        let err = create_worktree_in(Some(&g), sub.to_str().unwrap(), &home, "wt-m2a").unwrap_err();
+        assert_eq!(err, "worktree_failed: not a repository");
+        assert_eq!(
+            inspect_in(Some(&g), sub.to_str().unwrap(), &home)
+                .unwrap()
+                .repo,
+            RepoState::None
+        );
+        assert!(!home.join(".oort").exists());
+        fs::remove_dir_all(&home).unwrap();
+
+        // A repository above home: home is a folder inside the repository.
+        let above = temp_home("above");
+        init_repo(&above);
+        let home = above.join("home");
+        let proj = home.join("proj");
+        fs::create_dir_all(&proj).unwrap();
+        let err =
+            create_worktree_in(Some(&g), proj.to_str().unwrap(), &home, "wt-m2b").unwrap_err();
+        assert_eq!(err, "worktree_failed: not a repository");
+        assert_eq!(
+            inspect_in(Some(&g), proj.to_str().unwrap(), &home)
+                .unwrap()
+                .repo,
+            RepoState::None
+        );
+        assert!(!home.join(".oort").exists());
+        // Control: the same folder is a repository once it has its own.
+        init_repo(&proj);
+        assert_eq!(
+            inspect_in(Some(&g), proj.to_str().unwrap(), &home)
+                .unwrap()
+                .repo,
+            RepoState::Ready
+        );
+        fs::remove_dir_all(&above).unwrap();
+    }
+
+    /// M1 and the inherited-environment rule: `GIT_*` from the app's own
+    /// environment never reaches git, and LFS never contacts a server.
+    #[test]
+    fn inherited_git_variables_are_ignored_and_lfs_smudge_is_off() {
+        assert!(GIT_ENV.contains(&("GIT_LFS_SKIP_SMUDGE", "1")));
+        let home = temp_home("env");
+        let repo = home.join("proj");
+        init_repo(&repo);
+        std::env::set_var("GIT_CONFIG_COUNT", "1");
+        std::env::set_var("GIT_CONFIG_KEY_0", "oort.evil");
+        std::env::set_var("GIT_CONFIG_VALUE_0", "yes");
+        std::env::set_var("GIT_LFS_SKIP_SMUDGE", "0");
+        // Control: git itself sees the variable.
+        let seen = Command::new(git())
+            .args(["config", "--get", "oort.evil"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        let ran = run_start_git(
+            &git(),
+            &repo,
+            &home,
+            &args(&["config", "--get", "oort.evil"]),
+            READ_TIMEOUT,
+        );
+        std::env::remove_var("GIT_CONFIG_COUNT");
+        std::env::remove_var("GIT_CONFIG_KEY_0");
+        std::env::remove_var("GIT_CONFIG_VALUE_0");
+        std::env::remove_var("GIT_LFS_SKIP_SMUDGE");
+        assert_eq!(
+            seen.status.code(),
+            Some(0),
+            "control: git reads GIT_CONFIG_*"
+        );
+        assert_eq!(ran.unwrap().code, Some(1), "GIT_CONFIG_* reached the child");
+        fs::remove_dir_all(&home).unwrap();
+    }
+
+    /// A planted `core.fsmonitor` program does not run (behavioural), while a
+    /// git without the prefix does run it (control).
+    #[test]
+    fn a_planted_fsmonitor_does_not_run() {
+        let home = temp_home("fsmon");
+        let repo = home.join("proj");
+        init_repo(&repo);
+        let marker = home.join("fsmonitor-ran");
+        let hook = home.join("fsmon.sh");
+        fs::write(
+            &hook,
+            format!("#!/bin/sh\ntouch '{}'\nexit 1\n", marker.display()),
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let set = Command::new(git())
+            .args(["config", "core.fsmonitor", hook.to_str().unwrap()])
+            .current_dir(&repo)
+            .status()
+            .unwrap();
+        assert!(set.success());
+        let g = git();
+        // Control: an unprotected `git status` fires it.
+        let _ = Command::new(&g)
+            .args(["status", "--porcelain"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(
+            marker.exists(),
+            "control: fsmonitor should fire without the prefix"
+        );
+        fs::remove_file(&marker).unwrap();
+        create_worktree_in(Some(&g), repo.to_str().unwrap(), &home, "wt-fsm").unwrap();
+        assert!(!marker.exists(), "core.fsmonitor ran");
+        fs::remove_dir_all(&home).unwrap();
+    }
+
+    /// L2: a refused add leaves no folder behind.
+    #[test]
+    fn a_refused_add_leaves_no_folder() {
+        let home = temp_home("cleanup");
+        let repo = home.join("proj");
+        init_repo(&repo);
+        let g = git();
+        // The branch name is taken, so git refuses.
+        let taken = Command::new(&g)
+            .args(["branch", "oort/wt-clash"])
+            .current_dir(&repo)
+            .status()
+            .unwrap();
+        assert!(taken.success());
+        let err =
+            create_worktree_in(Some(&g), repo.to_str().unwrap(), &home, "wt-clash").unwrap_err();
+        assert_eq!(err, "worktree_failed: git refused");
+        assert!(!home.join(".oort/worktrees/proj/wt-clash").exists());
+        fs::remove_dir_all(&home).unwrap();
+    }
+
+    /// Only one dialog at a time.
+    #[test]
+    fn only_one_picker_at_a_time() {
+        let first = PickGuard::try_acquire().expect("free");
+        assert!(
+            PickGuard::try_acquire().is_none(),
+            "second pick must be refused"
+        );
+        drop(first);
+        assert!(PickGuard::try_acquire().is_some(), "released after drop");
     }
 }
