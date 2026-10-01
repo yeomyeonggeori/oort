@@ -86,6 +86,11 @@ describe("AppTitlebar", () => {
     expect(toggle?.getAttribute("aria-expanded")).toBe("true");
     expect(toggle?.getAttribute("aria-label")).toBe("탐색 패널 접기");
     expect(toggle?.getAttribute("aria-controls")).toBe("sidebar-drawer");
+    // #3280: 툴팁에 키 힌트(⌘B, 비 mac은 Ctrl+B)가 서고, 접근성 이름은 상태 문구만 말한다.
+    expect(toggle?.getAttribute("title")).toMatch(/^탐색 패널 접기 \((⌘B|Ctrl\+B)\)$/);
+    expect(toggle?.getAttribute("aria-keyshortcuts")).toMatch(/^(Meta|Control)\+B$/);
+    // 28px 계열(size-control-sm) · 아이콘 하나(PanelLeft) · 상태는 aria-expanded.
+    expect(toggle?.className).toContain("size-control-sm");
     expect(toggle?.hasAttribute("data-tauri-drag-region")).toBe(false);
     expect(titlebar?.hasAttribute("data-tauri-drag-region")).toBe(false);
 

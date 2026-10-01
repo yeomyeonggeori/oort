@@ -105,7 +105,7 @@ export function ProfileCard({
           <button
             ref={triggerRef}
             type="button"
-            data-testid={compact ? "profile-card-rail" : "profile-card"}
+            data-testid="profile-card"
             aria-label={triggerName}
             title={triggerName}
             className={

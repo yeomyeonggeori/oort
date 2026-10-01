@@ -13,7 +13,7 @@
 import { useHumanControlSigning, useResumeWorkSession } from "./signedWork";
 import { resumeFailureLine } from "@momo/core/features/auth/signedControl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PanelRightClose, PanelRightOpen, X } from "lucide-react";
+import { PanelRight, X } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import {
@@ -972,15 +972,14 @@ export function WorkPanel({
             type="button"
             onClick={() => setWide((current) => !current)}
             aria-pressed={wide}
-            aria-label={wide ? "패널 좁게 보기" : "패널 넓게 보기"}
+            aria-label="패널 넓게 보기"
+            title={wide ? "패널 좁게 보기" : "패널 넓게 보기"}
             data-testid="work-panel-wide"
-            className="pane-wide-toggle flex size-6 shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+            // 좌측 사이드바 접기 단추(제목줄)와 같은 28px 계열이다(#3280). 아이콘은 하나이고
+            // 상태는 aria-pressed·툴팁이 말한다(이름이 상태마다 바뀌면 pressed와 겹쳐 두 번 말한다).
+            className="pane-wide-toggle flex size-control-sm shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
           >
-            {wide ? (
-              <PanelRightClose className="size-4" />
-            ) : (
-              <PanelRightOpen className="size-4" />
-            )}
+            <PanelRight className="size-4" />
           </button>
           <button
             type="button"

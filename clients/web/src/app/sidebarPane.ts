@@ -1,7 +1,9 @@
 // =============================================================================
-// Desktop sidebar fold (#1864).
+// Desktop sidebar fold (#1864, #3280).
 //
-// The pane fold is shell-lifetime state owned by AppShell (`sidebarPaneCollapsed`).
+// The fold is the list column only (the 56px rail stays). It is one state shared by
+// every tab (`sidebarCollapseStore`, remembered per device since #3280; #1864 kept it
+// shell-lifetime only).
 // This file holds the copy and a11y predicates the titlebar toggle and the
 // sidebar tree share, so a label and an inert rule cannot drift apart.
 // =============================================================================
@@ -13,6 +15,11 @@ export function sidebarPaneToggleCopy(collapsed: boolean): {
   return collapsed
     ? { label: "탐색 패널 열기", expanded: false }
     : { label: "탐색 패널 접기", expanded: true };
+}
+
+/** 접기 단추의 키 힌트(#3280). macOS는 ⌘B, 그 밖은 Ctrl+B. */
+export function sidebarToggleKeyHint(isMac: boolean): string {
+  return isMac ? "⌘B" : "Ctrl+B";
 }
 
 /** Closed mobile drawer, or a desktop fold: the tree is off the tab/AX path. */

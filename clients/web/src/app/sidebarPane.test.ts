@@ -148,9 +148,12 @@ describe("접힘 계약 (#1864)", () => {
     expect(sidebarSource).toContain('data-testid="open-quick-switcher"');
     expect(sidebarSource).toContain('testId="channel-item"');
     expect(sidebarSource).toContain("ProfileCard");
-    // #2854: 「내 작업」 레일 동안에도 트리는 숨는다(언마운트하지 않는다).
-    expect(sidebarSource).toContain("hidden={treeHidden || workRail}");
-    expect(railSource).toContain("hidden={hidden}");
+    // #2854: 「내 작업」 동안에도 목록 트리는 숨는다(언마운트하지 않는다). #3280: 레일은
+    // 숨기지 않는다 — 접힘·「내 작업」 어디서도 `hidden`을 받지 않는 같은 노드다.
+    expect(sidebarSource).toContain("hidden={treeHidden || listInRoute}");
+    expect(railSource).not.toContain("hidden={hidden}");
+    expect(sidebarSource).not.toContain("workRail");
+    expect(titlebarSource).not.toContain("hideToggle");
     expect(paintSource).toContain("transitionend");
     expect(paintSource).toContain("prefersReducedMotion");
     expect(paintSource).toContain("requestAnimationFrame");
@@ -158,7 +161,7 @@ describe("접힘 계약 (#1864)", () => {
     expect(railSource).not.toContain("PanelLeftOpen");
   });
 
-  it("접힘 폭은 0이고 reduced-motion은 즉시 전환한다", () => {
+  it("접힘 폭은 레일(56)만 남기고 reduced-motion은 즉시 전환한다 (#3280)", () => {
     const shellBlock = tokensCss.slice(tokensCss.indexOf("@utility app-shell"));
     expect(tokensCss).toContain(
       "--duration-sidebar: var(--motion-standard);"
@@ -167,7 +170,8 @@ describe("접힘 계약 (#1864)", () => {
       "transition: grid-template-columns var(--duration-sidebar)"
     );
     expect(shellBlock).toContain("var(--motion-ease-standard)");
-    expect(shellBlock).toContain("grid-template-columns: 0px 1fr;");
+    expect(shellBlock).toContain("grid-template-columns: var(--spacing-rail) 1fr;");
+    expect(shellBlock).not.toContain("grid-template-columns: 0px 1fr;");
     expect(shellBlock).toContain(
       "@media (prefers-reduced-motion: reduce)"
     );

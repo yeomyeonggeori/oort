@@ -26,6 +26,11 @@ import { ConnectionBanner } from "@/features/common/ConnectionBanner";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { AppTitlebar } from "@/app/AppTitlebar";
 import { useSidebarCollapsePaint } from "@/app/useSidebarCollapsePaint";
+import {
+  setSidebarCollapsed,
+  useSidebarCollapsed,
+} from "@/app/sidebarCollapseStore";
+import { useSidebarShortcut } from "@/app/useSidebarShortcut";
 import { Sidebar } from "@/features/sidebar/Sidebar";
 import { CreateChannelProvider } from "@/features/channels/CreateChannelDialog";
 import { AddWorkspaceProvider } from "@/features/workspace/AddWorkspaceDialog";
@@ -73,10 +78,11 @@ export function AppShell({
   const [realtime, setRealtime] = useState<RealtimeHandle | null>(null);
   const [connStatus, setConnStatus] = useState<RealtimeStatus>("connecting");
   const [switcherOpen, setSwitcherOpen] = useState(false);
-  // 데스크톱 사이드바 접힘 (#1864). 저장소나 URL에 쓰지 않는 셸 수명 상태다:
-  // 라우트를 오가는 동안은 선택을 지키되 새 창·새 로그인까지 과거의 접힌
-  // 상태를 가져가지 않는다.
-  const [sidebarPaneCollapsed, setSidebarPaneCollapsed] = useState(false);
+  // 목록 열 접힘 (#1864 → #3280). 모든 탭이 공유하는 한 벌이고(「내 작업」의 세션 목록
+  // 포함) 기기별로 기억한다: #1864는 저장하지 않는 셸 수명 상태로 뒀으나 성재가 이 범위에서
+  // 「기기별로 기억」을 결재했다(2026-10-01). 저장소 접근은 store가 try/catch로 감싼다.
+  const sidebarPaneCollapsed = useSidebarCollapsed();
+  const setSidebarPaneCollapsed = setSidebarCollapsed;
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const desktopToggleFocusedRef = useRef(false);
   // The route boundary resets when the user navigates: a failed channel must
@@ -93,23 +99,9 @@ export function AppShell({
   const localTerminal = isDesktop() && !stress;
   const localDock = useDockState();
   // 「내 작업」 격자(#2854, 시안 ①). 도크와 같은 세션·배치를 라우트가 그리므로 이
-  // 동안 도크는 마운트하지 않는다(한 칸에 xterm 둘). 앱 사이드바는 64px 레일로 접힌다.
+  // 동안 도크는 마운트하지 않는다(한 칸에 xterm 둘). 레일(56)은 다른 탭과 같은 노드·같은
+  // 자리이고, 채널 목록 자리(목록 열 268)를 라우트의 세션 목록이 쓴다(#3280).
   const myWorkTab = isMyWorkTab(routePath, shellLocation.search, localTerminal);
-  // #3275: 「내 작업」을 떠나는 순간만 사이드바 열 폭을 미끄러뜨리지 않는다. 레일 64 + 목록
-  // 260 = 사이드바 324라 본문의 왼쪽 가장자리는 이미 같고, 64에서 324로 열이 자라는 동안
-  // 목록이 한 프레임마다 다시 짜이며 번쩍였다(실측 242px 뜀). 속성은 레일 속성이 빠지는 같은
-  // 커밋에 서서 그 전이를 없애고, 바뀐 내용(사이드바 트리)은 짧게 떠오른다.
-  const [wasMyWorkTab, setWasMyWorkTab] = useState(myWorkTab);
-  const [leavingMyWork, setLeavingMyWork] = useState(false);
-  if (wasMyWorkTab !== myWorkTab) {
-    setWasMyWorkTab(myWorkTab);
-    setLeavingMyWork(wasMyWorkTab && !myWorkTab);
-  }
-  useEffect(() => {
-    if (!leavingMyWork) return;
-    const id = window.setTimeout(() => setLeavingMyWork(false), 400);
-    return () => window.clearTimeout(id);
-  }, [leavingMyWork]);
   const localDockFullscreen =
     localTerminal && !myWorkTab && localDock.open && localDock.fullscreen;
   // The design capture seam (?agentwork=live|offline) seeds fixed agent turns
@@ -264,6 +256,13 @@ export function AppShell({
     sidebarToggleRef.current?.focus();
   }, [isMobile]);
 
+  // ⌘B / Ctrl+B: 목록 열 접고 펴기 (#3280). 규칙은 `useSidebarShortcut`·`shouldToggleSidebar`.
+  useSidebarShortcut({
+    enabled: !isMobile && !isSettingsSurface,
+    collapsed: sidebarPaneCollapsed,
+    onToggle: sidebarPaint.requestCollapsedChange,
+  });
+
   useEffect(() => {
     if (stress) return;
     const handle = createRealtime(
@@ -343,12 +342,10 @@ export function AppShell({
                   : undefined
             }
             data-work-rail={myWorkTab && !isSettingsSurface ? "" : undefined}
-            data-work-rail-exit={leavingMyWork && !myWorkTab ? "" : undefined}
             data-settings-surface={isSettingsSurface ? "" : undefined}
           >
             {!isSettingsSurface && (
               <AppTitlebar
-                hideToggle={myWorkTab}
                 collapsed={sidebarPaneCollapsed}
                 onCollapsedChange={sidebarPaint.requestCollapsedChange}
                 toggleRef={sidebarToggleRef}
@@ -363,7 +360,7 @@ export function AppShell({
                 onOpenQuickSwitcher={() => setSwitcherOpen(true)}
                 channelPaneCollapsed={sidebarPaneCollapsed}
                 treeHidden={sidebarPaint.treeHidden}
-                workRail={myWorkTab}
+                listInRoute={myWorkTab}
               />
             )}
             {/* 스크림은 사이드바 **다음**에 있어야 한다: 서랍이 열린 동안 탭이 갈
