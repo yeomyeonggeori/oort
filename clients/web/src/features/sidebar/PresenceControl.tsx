@@ -20,6 +20,11 @@ import {
 } from "@/design/ui/dropdown-menu";
 import { InlineBanner } from "@/features/common/States";
 import { cn } from "@/design/lib/cn";
+import {
+  memberAvatarContentPath,
+  renderableAvatarUrl,
+} from "@momo/core/features/workspace/avatar";
+import { useMemberAvatar } from "./useMemberAvatar";
 
 // =============================================================================
 // Self presence (ADR-0160 ③, 프레즌스 6b). UX-D4 (#1756) moved the trigger: the
@@ -82,10 +87,19 @@ function optionDotClass(status: PresenceStatus): string {
 export function PresenceBadge({
   selfName,
   effective,
+  avatarUrl,
 }: {
   selfName: string;
   effective: EffectivePresence;
+  /** roster 가 준 내 `avatarUrl`. 없거나 못 받으면 이니셜이다. */
+  avatarUrl?: string;
 }) {
+  const direct = renderableAvatarUrl(
+    avatarUrl,
+    typeof location === "undefined" ? null : location.origin
+  );
+  const uploaded = useMemberAvatar(memberAvatarContentPath(avatarUrl) ?? undefined);
+  const imageSrc = direct ?? uploaded;
   return (
     <span
       data-testid="presence-control"
@@ -93,10 +107,26 @@ export function PresenceBadge({
       // DS2-6: 사이드바가 바닥(그라데이션) 위에 녹은 뒤로 옅은 채움은 밝은 두
       // 테마에서 바닥과 같은 색이 됐다. 흰 면 + rest로 어느 바닥 위에서도 선다.
       // 띠(노을띠) 위에서도 흰 면이라 원래 글자 역할을 쓴다.
-      className="band-surface relative flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface text-meta font-semibold text-ink shadow-sm"
+      className={cn(
+        "band-surface relative flex size-6 shrink-0 items-center justify-center rounded-full bg-surface text-meta font-semibold text-ink shadow-sm",
+        // 이 배지는 늘 나(사람)다: 원(AVATAR_SHAPE.human). 사진을 지워 이니셜로
+        // 돌아가도 모양이 바뀌지 않는다.
+      )}
       aria-hidden="true"
     >
-      {selfName.slice(0, 1)}
+      {imageSrc !== null ? (
+        // 배지 점은 이 span 에 붙어 있으므로(위 주석) 이미지는 그 안쪽 자리만 채운다.
+        // 상자는 size-6 으로 고정이라 사진이 들어와도 레이아웃은 움직이지 않는다.
+        <img
+          src={imageSrc}
+          alt=""
+          referrerPolicy="no-referrer"
+          className="size-full rounded-full object-cover"
+          data-testid="presence-avatar-image"
+        />
+      ) : (
+        selfName.slice(0, 1)
+      )}
       {/* The presence badge. Bound to `effective`, ringed in the sidebar
           surface so it reads as a badge sitting on the avatar rather than a
           hole punched through it. Anchored to THIS span, not to the profile
