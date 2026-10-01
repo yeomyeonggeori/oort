@@ -95,7 +95,8 @@ export type CommandIcon =
   | "workstreams"
   | "create-channel"
   | "agent"
-  | "ai-connect";
+  | "ai-connect"
+  | "sidebar";
 
 /** 명령이 알아야 하는 나 자신. 지금은 멤버 id 하나면 충분하다. */
 export interface CommandSession {
@@ -127,6 +128,14 @@ export interface CommandContext {
    * `/work?view=console`에 산다. 없으면 웹으로 읽는다.
    */
   readonly desktop?: boolean;
+  /**
+   * 탐색 패널(목록 열)을 접고 펴고, **바뀐 뒤의 접힘**(접혔으면 true)을 돌려준다(#3299).
+   *
+   * **선택 능력이다.** 접을 목록 열이 있는 클라이언트(웹·데스크탑 셸)만 넣는다. 폰은
+   * 넣지 않는다 — 접을 열이 없다. 없으면 `view.sidebar`는 `CommandEnv.sidebarList`도
+   * 없어 **표 자체에서 빠지므로** 폰에서 깨진 줄이 아니라 줄이 없는 것이다.
+   */
+  readonly toggleSidebarList?: () => boolean;
 }
 
 /**
@@ -230,6 +239,12 @@ export interface CommandEnv {
    * 무엇이 일어나는지를 줄이 거짓 없이 말하게 한다.
    */
   readonly canOpenLocalCard: (card: LocalCardId) => boolean;
+  /**
+   * 접을 탐색 패널이 있는가, 있다면 지금 접혀 있는가(#3299). **없으면(undefined)
+   * 그 명령이 서지 않는다** — `CommandContext.toggleSidebarList`와 짝이다. 줄의 이름이
+   * 지금 상태를 따른다(접혀 있으면 「열기」).
+   */
+  readonly sidebarList?: { readonly collapsed: boolean };
 }
 
 interface StaticCommand extends Command {
@@ -237,6 +252,15 @@ interface StaticCommand extends Command {
   readonly available: (env: CommandEnv) => boolean;
   /** 환경에 따라 바뀌는 작은 글씨. 있으면 `meta`보다 앞선다. */
   readonly metaFor?: (env: CommandEnv) => string;
+  /** 환경에 따라 바뀌는 이름. 있으면 `title`보다 앞선다(#3299 「접기/열기」). */
+  readonly titleFor?: (env: CommandEnv) => string;
+}
+
+/** 탐색 패널 접기 명령의 id. 단축키 정본(`toggle-sidebar`)의 `paletteCommandId`가 가리킨다. */
+export const TOGGLE_SIDEBAR_COMMAND_ID = "view.sidebar";
+
+function sidebarTitle(collapsed: boolean): string {
+  return collapsed ? "탐색 패널 열기" : "탐색 패널 접기";
 }
 
 /** 설정 › AI 연결의 주소. 카드와 폴백과 이동 명령이 같은 자리를 가리킨다. */
@@ -458,6 +482,29 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
     run: navigateTo("/workstreams", serverSurface("workstreams").label),
   },
   {
+    // 목록 열 접기(#3299, #3280의 ⌘B). 접을 열이 있는 클라이언트만 `env.sidebarList`를
+    // 넣는다 — 폰은 넣지 않아 줄이 없다. 이 기기의 외양을 바꾸는 `client` 명령이지만
+    // `agentSuggestable`이 아니다: 에이전트가 사람의 패널을 접자고 카드로 조르는 것은
+    // 가치가 없고, 제안 가능으로 올리면 서버 허용목록·OpenAPI enum까지 함께 움직여야 한다.
+    id: TOGGLE_SIDEBAR_COMMAND_ID,
+    title: sidebarTitle(false),
+    group: "navigate",
+    kind: "client",
+    shortcutId: "toggle-sidebar",
+    keywords: ["사이드바", "목록", "패널", "접기", "열기", "sidebar", "panel", "collapse", "toggle"],
+    icon: "sidebar",
+    testId: "switcher-toggle-sidebar",
+    available: (env) => env.sidebarList !== undefined,
+    titleFor: (env) => sidebarTitle(env.sidebarList?.collapsed === true),
+    run: (ctx) => {
+      if (ctx.toggleSidebarList === undefined) {
+        return { status: null, closesSurface: false };
+      }
+      const collapsed = ctx.toggleSidebarList();
+      return { status: sidebarTitle(!collapsed), closesSurface: true };
+    },
+  },
+  {
     // 채널 만들기 has a seat because ⌘K is the house grammar for "every action
     // has a keyboard path" (SKILL §6). 서버에 묻지 않고 같은 함수로 판정하므로
     // 팔레트는 서버가 403으로 답할 것을 내놓지 않는다.
@@ -540,8 +587,11 @@ export function agentRoutingCommands(
 /** 지금 이 환경에서 팔레트가 그릴 수 있는 명령 전부, 바닥 순서로. */
 export function visibleCommands(env: CommandEnv): readonly Command[] {
   const fixed = STATIC_COMMANDS.filter((command) => command.available(env)).map(
-    ({ available: _available, metaFor, ...command }) =>
-      metaFor === undefined ? command : { ...command, meta: metaFor(env) }
+    ({ available: _available, metaFor, titleFor, ...command }) => ({
+      ...command,
+      ...(titleFor === undefined ? {} : { title: titleFor(env) }),
+      ...(metaFor === undefined ? {} : { meta: metaFor(env) }),
+    })
   );
   return [...fixed, ...agentRoutingCommands(env.agents)];
 }
@@ -556,7 +606,10 @@ export function visibleCommands(env: CommandEnv): readonly Command[] {
 export function slashCommands(): readonly Command[] {
   return STATIC_COMMANDS.filter(
     (command) => command.kind === "client" && command.slash !== undefined
-  ).map(({ available: _available, metaFor: _metaFor, ...command }) => command);
+  ).map(
+    ({ available: _available, metaFor: _metaFor, titleFor: _titleFor, ...command }) =>
+      command
+  );
 }
 
 /**

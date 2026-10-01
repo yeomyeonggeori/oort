@@ -11,6 +11,7 @@ import {Image, StyleSheet, Text, View} from 'react-native';
 import {font, radius, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {apiBase} from '../../storage/serverBase';
+import {useMemberAvatarUri} from './memberAvatarImage';
 
 // =============================================================================
 // 폰의 아바타 (감사 H-11 · goal U4-6M)
@@ -110,7 +111,10 @@ export function Avatar({
     () => avatarIdentity(memberFor(directory, memberId), base),
     [directory, memberId, base],
   );
-  const source = avatarImageSource(identity, base);
+  // 업로드된 사진(인가 content 경로)은 베어러로 받아 온다. 받는 중·실패에는
+  // `null` 이라 이니셜이 같은 크기로 서 있다. 옛 `avatarUrl` 은 기존 길 그대로.
+  const uploaded = useMemberAvatarUri(identity.contentPath);
+  const source = uploaded ?? avatarImageSource(identity, base);
   const carriesColor = avatarCarriesIdentityColor(identity.kind);
   const round = AVATAR_SHAPE[identity.kind] === 'round';
   const sized =
@@ -150,6 +154,7 @@ export function Avatar({
           source={{uri: source}}
           style={[
             styles.image,
+            identity.kind === 'human' && styles.imageHuman,
             round ? styles.round : styles.roundedSquare,
             sized,
           ]}
@@ -211,7 +216,11 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 채움 대신 테두리 하나: 자리는 지키되 아무것도 주장하지 않는다.
    */
   unknown: {borderWidth: 1, borderColor: color.border},
+  // 투명 PNG 가 바닥(surface)에 녹지 않게 한 단 아래 채움을 깐다. 웹은 hover 계열
+  // 토큰을 쓰는 자리이고, 폰에는 그 토큰이 없어 같은 역할의 `surfaceMuted` 다.
   image: {width: AVATAR_SIZE, height: AVATAR_SIZE},
+  /** 사람 사진에만 — 에이전트는 상자의 `agentSurface` 가 비친다(웹 MessageRow 와 같다). */
+  imageHuman: {backgroundColor: color.surfaceMuted},
   initial: {
     fontSize: font.label,
     fontWeight: '600',

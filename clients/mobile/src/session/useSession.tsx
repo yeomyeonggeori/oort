@@ -21,6 +21,7 @@ import {authGate, type AuthGate} from './authGate';
 import {forgetDeviceKeyOnSignOut} from '../deviceKey/enrollment';
 import {clearAllDrafts} from '../features/conversation/drafts';
 import {clearAllAttachmentDrafts} from '../features/attachments/draftStore';
+import {clearMemberAvatarCache} from '../features/conversation/memberAvatarImage';
 import {revokeDevice} from '../push/devices';
 import {registeredPushDeviceId} from '../push/registration';
 
@@ -218,7 +219,11 @@ export function SessionProvider({
     // explicit signOut만 경계가 아니다. 토큰 만료는 이 provider를 바로 내리고,
     // 같은 프로세스에서 다른 계정이 들어오면 member identity가 바뀐다. 두 경우 모두
     // 이전 세대의 draft/native PUT/create 응답을 다음 계정보다 먼저 끊는다 (#1703).
-    return () => clearAllAttachmentDrafts();
+    return () => {
+      clearAllAttachmentDrafts();
+      // 토큰 만료·계정 교체도 이 경계다 — 앞 사람의 얼굴 파일을 디스크에 남기지 않는다.
+      clearMemberAvatarCache();
+    };
   }, [attachmentSessionKey]);
 
   const workspaceId = member.workspaceId;
@@ -263,6 +268,8 @@ export function SessionProvider({
     // native PUT이 살아 있을 수 있다. 화면만 비우지 않고 진행 중 PUT도 취소하며,
     // 늦게 도착한 create/complete 응답도 세션 세대 경계에서 버린다 (#1703).
     clearAllAttachmentDrafts();
+    // 멤버 아바타 파일 캐시도 지운다(메모리 색인 + 디스크).
+    clearMemberAvatarCache();
   }, [queryClient, workspaceId]);
 
   const value = useMemo<SignedInSession>(

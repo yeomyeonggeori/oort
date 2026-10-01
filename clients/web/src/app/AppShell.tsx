@@ -484,7 +484,22 @@ export function AppShell({
            * (MOMO-613). Exactly one writer to the turn store is ever mounted. */}
           {!stress && turnFixture === null && <AgentWorkingRail />}
           {turnFixture !== null && <AgentTurnFixture mode={turnFixture} />}
-          <QuickSwitcher open={switcherOpen} onOpenChange={setSwitcherOpen} />
+          <QuickSwitcher
+            open={switcherOpen}
+            onOpenChange={setSwitcherOpen}
+            // ⌘B와 같은 능력(#3299): 접을 목록 열이 있는 화면에서만 명령이 선다.
+            sidebarList={
+              !isMobile && !isSettingsSurface
+                ? {
+                    collapsed: displayedCollapsed,
+                    onToggle: () => {
+                      requestListChange(!displayedCollapsed);
+                      return !displayedCollapsed;
+                    },
+                  }
+                : undefined
+            }
+          />
         </MemberProfileProvider>
         </AgentProfileProvider>
         </AddChannelMemberProvider>
