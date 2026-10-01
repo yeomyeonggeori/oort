@@ -15,6 +15,7 @@ import { isTerminalThemeChoice } from "@momo/core/features/workbench/terminalThe
 import { setTerminalTheme } from "./terminalTheme";
 import { writeAiDefaults } from "@/features/settings/aiDefaultsStore";
 import { LocalTerminalDock } from "./LocalTerminalDock";
+import { START_STORAGE_KEY } from "./startLocation";
 import { createLocalSessions, DOCK_SESSION_KEY, loadBrowserMirror, type PtyPort } from "./localSessions";
 import { openDock, resetDockStateForTest, toggleDockFullscreen, useDockState } from "./dockState";
 import { fixtureAgentSource, type AgentFixtureScene } from "../agent/agentPaneFixtures";
@@ -157,6 +158,41 @@ function fourLayout(): WorkbenchLayout {
  * `ai-account`·`ai-missing`·`ai-login` 장면(#3010): 기본 AI 표에서 로컬 터미널 새 세션을
  * 「Claude · 개인」으로 골라 둔 상태. 이 맥의 감지와 프로필 목록은 고정 값이다.
  */
+/**
+ * `start-*`(#2775): 새 세션 메뉴의 시작 위치. 폴더 검사·고르기는 흉내다(브라우저에는
+ * 셸이 없다). `start-repo` git 저장소를 고른 상태, `start-plain` git이 아닌 폴더,
+ * `start-home` 처음 쓰는 기기(홈, 최근 없음), `start-empty` 커밋 없는 저장소,
+ * `start-fail` 이미 worktree를 켜 두면 만들기가 실패한다.
+ */
+const START_FOLDERS = {
+  repo: { path: "/Users/demo/projects/oort", name: "oort", repo: "ready" as const },
+  other: { path: "/Users/demo/projects/momo-landing", name: "momo-landing", repo: "ready" as const },
+  plain: { path: "/Users/demo/notes", name: "notes", repo: "none" as const },
+  empty: { path: "/Users/demo/projects/fresh", name: "fresh", repo: "empty" as const },
+};
+
+function startSource(scene: string) {
+  if (!scene.startsWith("start-")) return undefined;
+  const kind = scene.slice("start-".length);
+  const chosen =
+    kind === "plain" ? START_FOLDERS.plain : kind === "empty" ? START_FOLDERS.empty : kind === "home" ? null : START_FOLDERS.repo;
+  const recent =
+    kind === "home" ? [] : [START_FOLDERS.repo, START_FOLDERS.other, START_FOLDERS.plain, START_FOLDERS.empty];
+  const map = new Map<string, string>();
+  map.set(
+    START_STORAGE_KEY,
+    JSON.stringify({ choice: chosen ? { kind: "folder", folder: chosen } : { kind: "home" }, recent })
+  );
+  return {
+    pick: async () => START_FOLDERS.other,
+    inspect: async (path: string) => Object.values(START_FOLDERS).find((f) => f.path === path) ?? START_FOLDERS.repo,
+    storage: {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => void map.set(k, v),
+    },
+  };
+}
+
 function aiLaunchSource(scene: string) {
   if (!scene.startsWith("ai-")) return undefined;
   return {
@@ -181,12 +217,29 @@ function aiLaunchSource(scene: string) {
   };
 }
 
+const startLaunchSource = {
+  detect: async () => [
+    { id: "claude" as const, installed: true, auth: "logged_in" as const },
+    { id: "codex" as const, installed: true, auth: "logged_in" as const },
+  ],
+  deps: {
+    prefs: () => ({}),
+    profiles: async () => [],
+    hiddenDefaults: () => [],
+    profileStatus: async () => ({ id: "claude" as const, installed: true, auth: "logged_in" as const }),
+  },
+};
+
 export function LocalTerminalHarness() {
   const [params] = useSearchParams();
   const scene = params.get("scene") ?? "one";
   const sessions = useMemo(
     () =>
       createLocalSessions({
+        worktree: async () => {
+          if (scene === "start-fail") throw new Error("worktree_failed: git refused");
+          return { path: "/Users/demo/.oort/worktrees/oort/wt-3f9a1c27" };
+        },
         pty: demoPty(
           scene.startsWith("exited") || scene.endsWith("-exited")
             ? "exited"
@@ -202,7 +255,11 @@ export function LocalTerminalHarness() {
     [scene]
   );
   const dock = useDockState();
-  const launchSource = useMemo(() => aiLaunchSource(scene), [scene]);
+  const launchSource = useMemo(
+    () => aiLaunchSource(scene) ?? (scene.startsWith("start-") ? startLaunchSource : undefined),
+    [scene]
+  );
+  const startFolders = useMemo(() => startSource(scene), [scene]);
   useMemo(() => {
     // 메뉴의 계정 표시는 저장된 선택을 읽는다(판정 재료는 `launchSource`).
     if (scene.startsWith("ai-")) writeAiDefaults(launchSource!.deps.prefs());
@@ -245,6 +302,20 @@ export function LocalTerminalHarness() {
     if (scene !== "full") openDock();
     if (scene === "full") toggleDockFullscreen();
   }, [scene]);
+
+  if (scene.startsWith("start-")) {
+    return (
+      <main className="flex h-full min-h-0 flex-col bg-pane text-ink" data-testid="local-terminal-harness">
+        <LocalTerminalDock
+          sessions={sessions}
+          platform="mac"
+          presentation="tab"
+          launchSource={launchSource}
+          startSource={startFolders}
+        />
+      </main>
+    );
+  }
 
   if (agent) {
     return (

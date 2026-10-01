@@ -373,6 +373,11 @@ export interface PtyExit {
 
 export interface PtySpawnRequest {
   program: PtyProgram;
+  /**
+   * 시작 폴더(#2775). 이 맥의 홈 안의 절대 경로여야 하고, 셸이 다시 검사한다
+   * (없음·파일·`..`·읽을 수 없음·홈 밖은 거부). 없으면 홈.
+   */
+  cwd?: string;
   cols: number;
   rows: number;
 }
@@ -460,6 +465,60 @@ export async function readWorkbenchGit(
     return GIT_READ_UNKNOWN;
   }
 }
+
+// ---- where a new session starts (#2775, ADR-0190 D3-c 증보 2026-10-01) -------
+
+/** git 저장소인가: 아님 · 저장소지만 커밋 없음 · 커밋 있음(worktree를 만들 수 있다). */
+export type FolderRepoState = "none" | "empty" | "ready";
+
+/** 셸이 검사해 돌려준 폴더. `path`는 정규화된 절대 경로다. */
+export interface FolderFacts {
+  path: string;
+  name: string;
+  repo: FolderRepoState;
+}
+
+export interface WorktreeMade {
+  path: string;
+  branch: string;
+}
+
+function folderFacts(raw: unknown): FolderFacts {
+  const row = (raw ?? {}) as Record<string, unknown>;
+  if (typeof row.path !== "string" || typeof row.name !== "string") throw new Error("refused: bad folder");
+  const repo: FolderRepoState = row.repo === "ready" || row.repo === "empty" ? row.repo : "none";
+  return { path: row.path, name: row.name, repo };
+}
+
+/**
+ * 새 세션의 시작 위치를 위한 세 명령. 폴더 고르기는 셸이 네이티브 대화상자를 연다
+ * (웹뷰에는 `dialog` 권한이 없다). 거부는 `refused: …`, worktree 실패는
+ * `worktree_failed: …`로 reject한다. 브라우저 탭에는 로컬 터미널이 없어 전부 reject.
+ */
+export const desktopStart = {
+  /** null = 취소. */
+  async pick(): Promise<FolderFacts | null> {
+    if (!IS_TAURI) throw new Error("local terminal unavailable");
+    const raw = await invoke<unknown>("workbench_folder_pick");
+    return raw === null ? null : folderFacts(raw);
+  },
+  async inspect(path: string): Promise<FolderFacts> {
+    if (!IS_TAURI) throw new Error("local terminal unavailable");
+    return folderFacts(await invoke<unknown>("workbench_folder_inspect", { request: { path } }));
+  },
+  /** 유일한 git 쓰기: `git worktree add`(ADR-0190 D3-c 증보 2026-10-01). */
+  async createWorktree(path: string): Promise<WorktreeMade> {
+    if (!IS_TAURI) throw new Error("local terminal unavailable");
+    const raw = (await invoke<unknown>("workbench_worktree_create", { request: { path } })) as Record<
+      string,
+      unknown
+    >;
+    if (typeof raw?.path !== "string" || typeof raw.branch !== "string") {
+      throw new Error("worktree_failed: bad answer");
+    }
+    return { path: raw.path, branch: raw.branch };
+  },
+};
 
 // ---- this Mac as a work host (#2778, ADR-0188 D2) -----------------------------
 
