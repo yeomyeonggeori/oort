@@ -8,6 +8,7 @@ import { SessionProvider, type SessionContextValue } from "@/app/session";
 import type { MessageNewEvent } from "@momo/core/lib/realtimeEvents";
 import type { RealtimeHandle } from "@/lib/realtime";
 import { DesktopNotifications } from "./DesktopNotifications";
+import { osNotifier } from "./osNotifier";
 import {
   reloadDesktopNotificationKindsForTest,
   setDesktopNotificationKind,
@@ -18,7 +19,7 @@ const IDS = vi.hoisted(() => ({
   self: "00000000-0000-7000-8000-000000000101",
   other: "00000000-0000-7000-8000-0000000005d1",
   agent: "00000000-0000-7000-8000-000000000103",
-  channel: "00000000-0000-7000-8000-000000000201",
+  channel: "00000000-0000-7000-8000-00000000020a",
 }));
 
 const showNotification = vi.hoisted(() => vi.fn());
@@ -174,14 +175,14 @@ function sessionValue(): SessionContextValue {
   };
 }
 
-function mountRail(): HTMLElement {
+function mountRail(path = "/"): HTMLElement {
   const host = document.createElement("div");
   document.body.append(host);
   mountedHost = host;
   mountedRoot = createRoot(host);
   const tree: ReactElement = createElement(
     MemoryRouter,
-    null,
+    { initialEntries: [path] },
     createElement(
       SessionProvider,
       { value: sessionValue() },
@@ -198,6 +199,7 @@ describe("DesktopNotifications", () => {
     expect(onMessage).not.toBeNull();
     await act(async () => {
       onMessage?.(mentionEvent());
+      osNotifier().flush();
       await Promise.resolve();
     });
     expect(showNotification).toHaveBeenCalledTimes(1);
@@ -209,12 +211,62 @@ describe("DesktopNotifications", () => {
     setDesktopNotificationKind("mention", false, localStorage);
     await act(async () => {
       onMessage?.(mentionEvent());
+      osNotifier().flush();
       await Promise.resolve();
     });
     expect(showNotification).not.toHaveBeenCalled();
 
     await act(async () => {
       onMessage?.(approvalEvent());
+      osNotifier().flush();
+      await Promise.resolve();
+    });
+    expect(showNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it("승인 둘이 연달아 오면 「승인 필요 2건」 한 묶음으로 나간다 (#3339)", async () => {
+    mountRail();
+    const other = { ...approvalEvent() };
+    await act(async () => {
+      onMessage?.(approvalEvent());
+      onMessage?.({
+        ...other,
+        payload: { ...other.payload, id: "019F96A4-E717-7F82-9750-58B2D7D28299" },
+      } as MessageNewEvent);
+      osNotifier().flush();
+      await Promise.resolve();
+    });
+    expect(showNotification).toHaveBeenCalledTimes(1);
+    expect(showNotification.mock.calls[0]?.[0]).toBe("승인 필요 2건");
+  });
+
+  it("경로 id의 대소문자가 이벤트와 달라도 같은 채널로 본다 (#3339)", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    mountRail("/c/" + IDS.channel.toUpperCase());
+    await act(async () => {
+      onMessage?.(mentionEvent());
+      osNotifier().flush();
+      await Promise.resolve();
+    });
+    expect(showNotification).not.toHaveBeenCalled();
+  });
+
+  it("창이 앞이고 그 채널이 열려 있으면 알리지 않고, 다른 화면이면 알린다 (#3339)", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    mountRail("/c/" + IDS.channel);
+    await act(async () => {
+      onMessage?.(mentionEvent());
+      osNotifier().flush();
+      await Promise.resolve();
+    });
+    expect(showNotification).not.toHaveBeenCalled();
+    act(() => mountedRoot?.unmount());
+    mountedRoot = null;
+    mountedHost?.remove();
+    mountRail("/inbox");
+    await act(async () => {
+      onMessage?.(mentionEvent());
+      osNotifier().flush();
       await Promise.resolve();
     });
     expect(showNotification).toHaveBeenCalledTimes(1);

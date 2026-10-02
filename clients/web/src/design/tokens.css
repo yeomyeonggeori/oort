@@ -1342,19 +1342,13 @@
       }
     }
 
-    /* 「내 작업」 (#2854, 시안 ①). 레일(56)은 다른 탭과 같은 노드·같은 자리다(#3280):
-     * 열 폭도 접힌 모양과 같은 `레일 + 1fr`이고, 목록 열(268)은 앱 사이드바 트리가 아니라
-     * 라우트 안의 세션 목록이 쓴다(본문 가장자리 = 56 + 268 = 324, 다른 탭과 같다).
+    /* 「내 작업」 (#2854, 시안 ①; #3334로 열 모양 변경). 사이드바(레일 56 + 목록 열 268 = 324)는
+     * 다른 탭과 같은 노드·같은 폭이다: 열 폭도 배경 띠도 다른 탭과 같고, 목록 열의 머리(검색·
+     * 목적지)는 그대로 서며 본문 자리만 라우트의 세션 목록이 포털로 채운다(`Sidebar`의
+     * `sidebar-body-slot`). 접힘도 같은 규칙(`data-sidebar-collapsed`)이다. 그래서 이 블록에는
+     * 열 규칙이 없다 — 이 탭이 바꾸는 것은 본문 판의 모양뿐이다.
      * 판은 상단 줄 아래(둘째 행)에서 시작한다: 신호등과 접기 단추(인셋 80)가 판 위로 걸친다. */
     &[data-work-rail] {
-      /* 들어올 때는 폭을 곧바로 바꾼다: 324에서 56으로 미끄러지는 동안 4열 칸이 240
-       * 아래로 내려가 격자가 한 칸 최대화로 번쩍인다(design-review M3). */
-      transition: none;
-      grid-template-columns: var(--spacing-rail) 1fr;
-      background-size:
-        var(--spacing-rail) 100%,
-        100% 100%;
-
       /* 시안 ①에는 떠 있는 판이 없다: 머리 줄·격자·상태 줄이 창 바닥(그라데이션)
        * 위에 곧바로 서고, 칸 하나하나가 판이다. 그래서 판의 면·그림자·반경을 걷는다. */
       > main {
@@ -1590,7 +1584,7 @@
 }
 
 .sidebar-drawer,
-.app-shell:not([data-sidebar-collapsed], [data-work-rail]) > .app-titlebar {
+.app-shell:not([data-sidebar-collapsed]) > .app-titlebar {
   --ink: var(--on-band, var(--ink-base));
   --ink-muted: var(--on-band-muted, var(--ink-muted-base));
   --icon: var(--on-band-muted, var(--icon-base));
@@ -1655,6 +1649,39 @@
 @utility sidebar-list {
   padding-block: var(--spacing-1) var(--spacing-3);
   padding-inline: 14px var(--spacing-3);
+}
+
+/* 목록 열의 몸통(#3334): 고정 머리(검색과 이동 아래 구획 A·B) + 본문 자리. 보통은 머리가 자기 높이를
+ * 갖고(창 높이에서 본문 자리 16rem을 남기는 만큼까지, 넘으면 머리가 스스로 스크롤) 본문이 나머지를
+ * 쓴다. **낮은 창(높이 780 이하)** 에서는 한 열로 같이 스크롤한다: 머리가 위로 지나가고 본문 자리가
+ * 최소 24rem을 지킨다. 본문의 세션 목록은 자기 머리(제목·프로젝트·칩)와 새 세션 단추만으로 180쯤을
+ * 쓰므로, 머리를 고정해 두면 700 높이에서 줄이 한 줄도 안 남았다(design-review High). */
+@utility sidebar-list-root {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-block-size: 0;
+
+  @media (height <= 780px) {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+@utility sidebar-list-head {
+  flex: none;
+  max-block-size: calc(100% - 16rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+
+  @media (height <= 780px) {
+    max-block-size: none;
+    overflow-y: visible;
+  }
+}
+@utility sidebar-list-body {
+  @media (height <= 780px) {
+    min-block-size: 24rem;
+  }
 }
 
 /* 행 사이 간격 2 (시안 `.a-side { gap: 2px }`). 리듬 스케일(4부터) 밖의 값이라

@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 // =============================================================================
-// ⌘K 「탐색 패널 접기/열기」 명령 측정 (#3299): 명령 줄이 서고, 이름이 상태를 따르고
-// (접기/열기), 키캡이 지금 유효한 조합(재지정 포함)이며, 누르면 목록 열이 접히고 펴지는지
-// 실제 셸(Chromium)에서 재고 단언한다. capture-rail-unified.mjs와 같은 흉내(/v1·실시간).
+// 설정 › 알림 규칙 › 종류별 표 캡처 (#3339): 종류 × (OS 알림 / 독 배지 / 폰 푸시) 표를
+// 라이트/다크 × 1280·900으로 찍고, 기본값(DM 꺼짐)·가로 스크롤 없음·독 배지 invoke가
+// 인박스 수와 같은지(데스크탑 셸 흉내가 받은 `dock_badge_set`)를 단언한다.
 //
-//   npm run build && node scripts/capture-palette-sidebar.mjs
-//   → OUT_DIR(기본 artifacts/palette-sidebar)/*.png
-// 단언이 하나라도 틀리면 종료 코드 1이다.
+//   npm run build && node scripts/capture-notify-settings.mjs
+//   → OUT_DIR(기본 artifacts/notify-settings)/*.png + report.json
+//
+// 단언이 하나라도 틀리면 종료 코드 1이다. /v1 은 흉내 서버고 시크릿은 없다.
 // =============================================================================
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -16,27 +17,25 @@ import { startGuardedPreview } from "../gates/preview-guard.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/palette-sidebar");
-const PORT = Number(process.env.CAPTURE_PORT || 5198);
+const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/notify-settings");
+const PORT = Number(process.env.CAPTURE_PORT || 5199);
 
 const workspaceId = "00000000-0000-7000-8000-000000000001";
 const memberId = "00000000-0000-7000-8000-000000000101";
 const channels = [
   { id: "00000000-0000-7000-8000-000000000201", workspaceId, kind: "public", name: "workbench", muted: false },
-  { id: "00000000-0000-7000-8000-000000000202", workspaceId, kind: "public", name: "agent-lab", muted: false },
   { id: "00000000-0000-7000-8000-000000000203", workspaceId, kind: "public", name: "general", muted: false },
-  { id: "00000000-0000-7000-8000-000000000204", workspaceId, kind: "private", name: "design-2.0", muted: false },
 ];
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
   member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
-  realtimeWebSocketUrl: "ws://work-tab-capture.invalid/connection/websocket",
+  realtimeWebSocketUrl: "ws://shortcuts-capture.invalid/connection/websocket",
 };
 const roster = [
   {
     id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "곽성재",
-    handle: "seongjae", channelCount: 4, channelIds: channels.map((c) => c.id), capabilities: [],
+    handle: "seongjae", channelCount: 2, channelIds: channels.map((c) => c.id), capabilities: [],
     createdAtMs: 0, updatedAtMs: 0,
   },
 ];
@@ -77,7 +76,7 @@ async function installRealtime(page) {
       send(data) {
         const replies = String(data).trim().split("\n").map((line) => {
           const c = JSON.parse(line);
-          if (c.connect) return { id: c.id, connect: { client: "work-tab-capture", version: "6" } };
+          if (c.connect) return { id: c.id, connect: { client: "shortcuts-capture", version: "6" } };
           if (c.subscribe) return { id: c.id, subscribe: { recoverable: true, positioned: true, recovered: false, epoch: "cap", offset: 0 } };
           return { id: c.id };
         });
@@ -89,16 +88,40 @@ async function installRealtime(page) {
   });
 }
 
+/** 데스크탑 셸 흉내(설정 화면만 열면 되므로 명령은 빈 답이다). */
+async function installDesktop(page) {
+  await page.addInitScript(() => {
+    const callbacks = new Map();
+    let next = 1;
+    window.__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main", windowLabel: "main" } },
+      transformCallback(cb) { const id = next++; callbacks.set(id, cb); return id; },
+      unregisterCallback(id) { callbacks.delete(id); },
+      convertFileSrc: (p) => p,
+      async invoke(cmd, args) {
+        if (cmd === "keychain_available") return true;
+        if (cmd === "keychain_store_refresh_token") { window.__kc = true; return null; }
+        if (cmd === "keychain_refresh_token_handle") return window.__kc ? "shell:00000000000000000000000000000001" : null;
+        if (cmd === "keychain_clear_refresh_token") { window.__kc = false; return null; }
+        if (cmd === "app_version") return "0.1.15";
+        if (cmd === "notification_permission") return "granted";
+        if (cmd === "dock_badge_set") { (window.__dock ??= []).push(args.count); return null; }
+        if (cmd === "deep_link_take_pending") return [];
+        if (cmd.startsWith("plugin:event|")) return 1;
+        return null;
+      },
+    };
+  });
+}
+
 async function signIn(page, origin) {
   await page.goto(origin, { waitUntil: "domcontentloaded" });
   await advanceToAccount(page);
   await page.getByTestId("login-email").fill("capture@example.test");
   await page.getByTestId("login-password").fill("not-a-secret");
   await page.getByTestId("login-submit").click();
-  await page.getByTestId("nav-team").waitFor({ timeout: 20_000 });
+  await page.getByTestId("rail-team").waitFor({ timeout: 20_000 });
 }
-
-
 
 
 const failures = [];
@@ -107,53 +130,36 @@ function check(name, ok, detail = "") {
   if (!ok) failures.push(`${name} ${detail}`);
 }
 
-const cols = (page) => page.evaluate(() => getComputedStyle(document.querySelector(".app-shell")).gridTemplateColumns);
-const paletteRow = (page) => page.locator("[data-command-id='view.sidebar']");
-async function openPalette(page) {
-  await page.keyboard.press("Meta+KeyK");
-  await page.getByTestId("quick-switcher").waitFor();
-  await page.keyboard.type("탐색 패널");
-  await page.waitForTimeout(250);
-}
-
-async function scene(browser, origin, scheme) {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: scheme, serviceWorkers: "block" });
+async function scene(browser, origin, scheme, width, report) {
+  const tag = `${scheme}-${width}`;
+  const context = await browser.newContext({ viewport: { width, height: 1000 }, colorScheme: scheme, serviceWorkers: "block" });
   await installRoutes(context);
   const page = await context.newPage();
   await installRealtime(page);
+  await installDesktop(page);
   await page.addInitScript((server) => { try { localStorage.setItem("momo.web.server.v1", server); } catch { /* 저장소 없는 캡처 */ } }, origin);
   await signIn(page, origin);
-  await page.waitForTimeout(500);
-  const tag = scheme;
-  const shot = (name) => page.screenshot({ path: resolve(OUT_DIR, `${name}-${tag}.png`) });
-
-  check(`${tag} 시작은 펼침(열 324)`, (await cols(page)).startsWith("324px"), await cols(page));
-  await openPalette(page);
-  const row = paletteRow(page);
-  check(`${tag} 팔레트에 「탐색 패널 접기」 줄이 선다`, (await row.count()) === 1 && (await row.innerText()).includes("탐색 패널 접기"), await row.allInnerTexts());
-  check(`${tag} 키캡이 ⌘B다`, JSON.stringify(await row.locator("kbd").allInnerTexts()) === JSON.stringify(["⌘", "B"]) || (await row.locator("kbd").allInnerTexts()).join("") === "⌘B", JSON.stringify(await row.locator("kbd").allInnerTexts()));
-  await shot("palette-collapse");
-  await row.click();
-  await page.waitForTimeout(600);
-  check(`${tag} 누르면 팔레트가 닫히고 목록 열이 접힌다(열 56)`, (await page.getByTestId("quick-switcher").count()) === 0 && (await cols(page)).startsWith("56px"), await cols(page));
-
-  await openPalette(page);
-  check(`${tag} 접힌 뒤에는 이름이 「탐색 패널 열기」다`, (await paletteRow(page).innerText()).includes("탐색 패널 열기"));
-  await shot("palette-open");
-  await paletteRow(page).click();
-  await page.waitForTimeout(600);
-  check(`${tag} 다시 누르면 펴진다(열 324)`, (await cols(page)).startsWith("324px"), await cols(page));
-
-  // 재지정: 키캡이 따라간다.
-  await page.evaluate(() => localStorage.setItem("oort.shortcuts.v1", JSON.stringify({ version: 1, bindings: { "toggle-sidebar": { code: "KeyY", shift: true, alt: false } } })));
-  await page.reload();
-  await page.getByTestId("nav-team").waitFor({ timeout: 20_000 });
-  await page.waitForTimeout(500);
-  await openPalette(page);
-  const caps = (await paletteRow(page).locator("kbd").allInnerTexts()).join("");
-  check(`${tag} 재지정하면 키캡이 ⌘⇧Y로 바뀐다`, caps === "⌘⇧Y", caps);
-  await shot("palette-rebound");
-  await page.keyboard.press("Escape");
+  await page.evaluate(() => { window.location.hash = "#/settings?section=notifications"; });
+  await page.getByTestId("desktop-notification-kinds").waitFor({ timeout: 8000 }).catch(async (error) => {
+    await page.screenshot({ path: resolve(OUT_DIR, `debug-${tag}.png`) });
+    throw error;
+  });
+  await page.waitForTimeout(400);
+  const out = {};
+  out.scrollX = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  check(`${tag} 가로 스크롤 없음`, out.scrollX <= 0, String(out.scrollX));
+  const state = (id) => page.getByTestId(id).isChecked();
+  check(`${tag} 승인·응답 필요·멘션·내 작업 끝남은 기본 켬`, (await Promise.all(["approval", "pane-waiting", "mention", "work-mine-done"].map((k) => state(`desktop-notification-kind-${k}`)))).every(Boolean));
+  check(`${tag} 새 DM은 기본 끔(OS 알림·독 배지 합산)`, !(await state("desktop-notification-kind-dm")) && !(await state("desktop-notification-dock-dm")));
+  // 독 배지는 인박스 수(승인·응답 필요·멘션) 하나에서 온다: 이 장면의 서버는 비어 있어 0.
+  const dock = await page.evaluate(() => window.__dock ?? []);
+  check(`${tag} 독 배지 invoke는 needs-me 수(0)와 같다`, dock.length > 0 && dock.every((n) => n === 0), JSON.stringify(dock));
+  await page.screenshot({ path: resolve(OUT_DIR, `table-${tag}.png`), fullPage: true });
+  await page.getByTestId("desktop-notification-kind-dm").click();
+  await page.waitForTimeout(150);
+  await page.screenshot({ path: resolve(OUT_DIR, `table-dm-on-${tag}.png`), fullPage: true });
+  check(`${tag} DM을 켜면 이 기기에 저장된다`, (await page.evaluate(() => localStorage.getItem("momo.web.notifications.v1"))).includes('"dm":true'));
+  report[tag] = out;
   await context.close();
 }
 
@@ -161,16 +167,22 @@ async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
   const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT" });
   const browser = await chromium.launch();
+  const report = {};
   try {
-    for (const scheme of ["light", "dark"]) await scene(browser, preview.origin, scheme);
+    for (const scheme of ["light", "dark"]) {
+      await scene(browser, preview.origin, scheme, 1280, report);
+      await scene(browser, preview.origin, scheme, 900, report);
+    }
   } finally {
     await browser.close();
     await preview.stop?.();
   }
+  writeFileSync(resolve(OUT_DIR, "report.json"), JSON.stringify(report, null, 2));
   if (failures.length > 0) {
     console.error(`\n${failures.length}개 단언 실패`);
     process.exit(1);
   }
+  console.log("\n모든 단언 통과");
 }
 
 main().catch((error) => {

@@ -33,7 +33,8 @@ const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/work-tab");
 const PORT = Number(process.env.CAPTURE_PORT || 5197);
 const MIN_PANE = 240;
-const SESSION_LIST_PX = 260; // 레일 64 + 260 = 사이드바 324 (#3275)
+// 세션 목록은 목록 열(268)의 본문 자리 안에 서고 열의 안쪽 여백(왼 14 + 오른 12)을 뺀 242다 (#3334).
+const SESSION_LIST_PX = 242;
 const MOCKUP =
   process.env.WORK_TAB_MOCKUP ??
   resolve(WEB_ROOT, "../../../momo/claudedocs/agent-workspace-2.0/workspace-mockups.html");
@@ -236,7 +237,7 @@ async function signIn(page, origin) {
   await page.getByTestId("login-email").fill("capture@example.test");
   await page.getByTestId("login-password").fill("not-a-secret");
   await page.getByTestId("login-submit").click();
-  await page.getByTestId("rail-team").waitFor({ timeout: 20_000 });
+  await page.getByTestId("nav-team").waitFor({ timeout: 20_000 });
 }
 
 // 시안 ①의 상태(#2776): 칸 3·5 응답 필요, 나머지 실행 중(hook 「작업 중」), PTY 6 끝남(종료 0).
@@ -276,7 +277,7 @@ async function shot(page, name) {
 async function myWork(browser, origin, scheme, viewport) {
   const tag = `${viewport.width}-${scheme}`;
   const { context, page } = await open(browser, origin, { viewport, scheme, desktop: true });
-  await page.getByTestId("rail-mine").click();
+  await page.getByTestId("nav-mine").click();
   await page.getByTestId("my-work-tab").waitFor();
   await page.getByTestId("workspace-rail").waitFor();
   const wide = viewport.width >= 1280;
@@ -300,9 +301,10 @@ async function myWork(browser, origin, scheme, viewport) {
     console.log(`info ${tag} 좁은 창: 칸 ${panes.length}, 상태 줄 ${JSON.stringify(status)}`);
     report[`my-work-${tag}-narrow`] = { panes, status };
   }
-  check(`${tag} 앱 사이드바 레일 64`, railWidth === 64, { railWidth });
   // 세션 목록(#2856): 1440은 저절로 펴지고, 1280(4×2가 268 옆에서 240을 못 지킨다)은 접힌다.
   const listState = await page.getByTestId("my-work-tab").getAttribute("data-session-list");
+  // 앱 사이드바: 목록 열이 펴지면 56 + 268 = 324, 접히면 레일 56 한 벌이다(#3280, #3334).
+  check(`${tag} 앱 사이드바 폭 ${listState === "open" ? 324 : 56}`, railWidth === (listState === "open" ? 324 : 56), { railWidth, listState });
   if (viewport.width >= 1440) {
     check(`${tag} 세션 목록 펼침`, listState === "open", { listState });
     await page.waitForFunction(() => document.querySelectorAll("[data-testid='session-list-row']").length >= 1);
@@ -362,17 +364,17 @@ async function teamWork(browser, origin, scheme, viewport, desktop) {
   if (viewport.width < 600) {
     await page.goto(`${origin}/#/work?view=team`);
   } else {
-    await page.getByTestId("rail-team").click();
+    await page.getByTestId("nav-team").click();
   }
   await page.getByTestId("team-board-empty").waitFor();
   check(`${tag} 팀 작업 빈 상태`, true);
   check(`${tag} 가로 넘침 0`, (await overflowX(page)) === 0);
-  check(`${tag} 팀 작업에서는 레일로 접지 않는다`, (await page.locator("[data-testid='workspace-rail']").count()) === 0);
+  check(`${tag} 팀 작업에서도 레일이 한 벌 선다(#3280)`, (await page.locator("[data-testid='workspace-rail']").count()) === 1);
   await shot(page, `team-work-${tag}`);
   if (viewport.width < 600) {
     await page.getByTestId("open-sidebar-drawer").first().click();
-    await page.getByTestId("rail-team").waitFor({ state: "visible" });
-    check(`${tag} 서랍에 「내 작업」 없음(웹)`, (await page.locator("[data-testid='rail-mine']").count()) === 0);
+    await page.getByTestId("nav-team").waitFor({ state: "visible" });
+    check(`${tag} 서랍에도 「내 작업」 줄이 있다(웹, #3334: 눌러서 이유를 본다)`, (await page.locator("[data-testid='nav-mine']").count()) === 1);
     await page.waitForTimeout(300);
     await shot(page, `team-work-${tag}-drawer`);
   }
@@ -419,7 +421,7 @@ async function sessionListStates(page, tag) {
 async function paneStatus(browser, origin, scheme, viewport) {
   const tag = `${viewport.width}-${scheme}`;
   const { context, page } = await open(browser, origin, { viewport, scheme, desktop: true, signals: MOCK_SIGNALS });
-  await page.getByTestId("rail-mine").click();
+  await page.getByTestId("nav-mine").click();
   await page.getByTestId("my-work-tab").waitFor();
   await page.waitForFunction(() => document.querySelectorAll("[data-testid='my-work-tab'] [data-pane-id] .xterm-rows").length >= 8, null, { timeout: 15_000 });
   // 칸 제목(OSC)이 선 뒤에 칸을 찾는다. 제목 없는 칸은 하나다.
@@ -475,7 +477,7 @@ async function paneStatus(browser, origin, scheme, viewport) {
   await page.waitForTimeout(200);
   await page.locator("[data-pane-id='p5']").screenshot({ path: resolve(OUT_DIR, `pane-status-${tag}-pane5-focused.png`) });
   // 인박스: 칸 5는 봤으니 내려간다. 끝난 칸은 남는다.
-  await page.getByTestId("rail-inbox").click();
+  await page.getByTestId("nav-inbox").click();
   await page.getByTestId("inbox-route").waitFor();
   await page.getByTestId("inbox-local-panes").waitFor({ timeout: 5_000 });
   const inboxRows = await page.locator("[data-testid='inbox-local-pane']").evaluateAll((els) => els.map((e) => e.getAttribute("data-status") + ":" + e.textContent));
