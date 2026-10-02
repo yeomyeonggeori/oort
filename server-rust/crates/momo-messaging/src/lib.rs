@@ -48,6 +48,7 @@
 //! remains outside this crate.
 
 pub mod attachment;
+pub mod avatar_reclaim;
 pub mod channel;
 pub mod dm;
 pub mod error;

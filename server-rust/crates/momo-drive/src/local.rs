@@ -459,6 +459,25 @@ impl DriveArchive for LocalDriveArchive {
         })
     }
 
+    async fn delete_file(&self, file_id: &str) -> Result<(), DriveError> {
+        let _guard = self.lock.lock().await;
+        // `object_path` rejects anything outside the id alphabet, so a stored id
+        // can never name a path outside `objects/`.
+        let object = object_path(&self.root, file_id)?;
+        let meta = meta_path(&self.root, file_id)?;
+        refuse_symlink(&object)?;
+        refuse_symlink(&meta)?;
+        for path in [&object, &meta] {
+            match fs::remove_file(path) {
+                Ok(()) => {}
+                // Already gone is success.
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => return Err(DriveError::UpstreamFailure),
+            }
+        }
+        Ok(())
+    }
+
     async fn file_content(
         &self,
         file_id: &str,
@@ -683,6 +702,45 @@ mod tests {
             resolve_local_id(&objects, "escaped").expect_err("symlink"),
             DriveError::AccessDenied
         );
+    }
+
+    #[tokio::test]
+    async fn delete_file_removes_object_and_meta_is_idempotent_and_refuses_odd_ids() {
+        let (dir, _guard) = temp_root();
+        let archive = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9").expect("open");
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "a.png", "image/png", 5)
+            .await
+            .expect("session");
+        archive
+            .accept_stub_upload(
+                &token_from(&session),
+                Some("image/png"),
+                None,
+                body(b"hello"),
+            )
+            .await
+            .expect("upload");
+        archive
+            .file_metadata(&session.drive_file_id)
+            .await
+            .expect("landed");
+        archive
+            .delete_file(&session.drive_file_id)
+            .await
+            .expect("delete");
+        assert_eq!(
+            archive
+                .file_metadata(&session.drive_file_id)
+                .await
+                .expect_err("gone"),
+            DriveError::FileNotFound
+        );
+        archive
+            .delete_file(&session.drive_file_id)
+            .await
+            .expect("again");
+        assert!(archive.delete_file("../../etc/passwd").await.is_err());
     }
 
     #[tokio::test]
