@@ -549,19 +549,22 @@ mod tests {
     ///
     /// 114 is #2862's shared-session S1 payload (ADR-0190 D4-b, ADR-0194 D9): the RLS-FORCE table `work_session_share`
     /// and the widened `work_session.tool` CHECK.
+    ///
+    /// 115 is #3341's 「작업 끝남」 push inputs (ADR-0120 부록 A): `work_session.turn_started_at` and
+    /// `notification_rule.work_complete_push`.
     #[test]
-    fn discovers_contiguous_migrations_001_to_114() {
+    fn discovers_contiguous_migrations_001_to_115() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            114,
-            "expected 114 migrations under {}",
+            115,
+            "expected 115 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 114);
+        assert_eq!(migrations.last().unwrap().version, 115);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

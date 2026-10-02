@@ -33,13 +33,14 @@ use chrono::{DateTime, Utc};
 use momo_auth::{active_workspace_role, Principal};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_messaging::{
-    get_notification_rule_in_tx, patch_notification_rule_in_tx, set_notification_rule_in_tx,
-    NotificationRule, NotificationRulePatch, NotificationRuleUpdate, StatusPatch,
+    get_notification_rule_in_tx, get_push_kinds_in_tx, patch_notification_rule_in_tx,
+    patch_push_kinds_in_tx, set_notification_rule_in_tx, NotificationRule, NotificationRulePatch,
+    NotificationRuleUpdate, PushKinds, PushKindsPatch, StatusPatch,
 };
 
 use crate::dto::{
-    NotificationRulesResponse, OptionalPatch, PatchNotificationRulesRequest,
-    UpdateNotificationRulesRequest,
+    NotificationRulesResponse, OptionalPatch, PatchNotificationRulesRequest, PatchPushKindsRequest,
+    PushKindsResponse, UpdateNotificationRulesRequest,
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
@@ -254,6 +255,96 @@ pub async fn patch(
     Ok(Json(rules_response(rule)))
 }
 
+// ---------------------------------------------------------------------------
+// push kinds (ADR-0120 부록 A, #3341)
+// ---------------------------------------------------------------------------
+
+fn push_kinds_response(kinds: PushKinds) -> PushKindsResponse {
+    PushKindsResponse {
+        work_complete: kinds.work_complete,
+    }
+}
+
+/// `GET /v1/workspaces/{ws}/notification-rules/push-kinds` — which kinds of push
+/// the caller wants. No stored row answers every kind on.
+pub async fn get_push_kinds(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(workspace): Path<String>,
+) -> Result<Json<PushKindsResponse>, ApiError> {
+    require_human(&principal, "notification rules require a human bearer")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let member_id = principal.member_id;
+
+    let outcome: DbRejectable<PushKinds> =
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                if active_workspace_role(conn, workspace_id, member_id)
+                    .await?
+                    .is_none()
+                {
+                    return Ok(Err(ApiError::forbidden("active human membership required")));
+                }
+                Ok(Ok(
+                    get_push_kinds_in_tx(conn, workspace_id, member_id).await?
+                ))
+            })
+        })
+        .await;
+    let kinds = settle_db("notification_rules.push_kinds.get", outcome)?;
+    Ok(Json(push_kinds_response(kinds)))
+}
+
+/// `PATCH /v1/workspaces/{ws}/notification-rules/push-kinds` — change only the
+/// named switches. Self-scoped like the rest of this module: the member is the
+/// credential's, so there is no spelling that edits someone else's switches.
+pub async fn patch_push_kinds(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(workspace): Path<String>,
+    Json(request): Json<PatchPushKindsRequest>,
+) -> Result<Json<PushKindsResponse>, ApiError> {
+    require_human(&principal, "notification rules require a human bearer")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let member_id = principal.member_id;
+    let via_token = audit_via_token_id(&principal);
+    let patch = PushKindsPatch {
+        work_complete: request.work_complete,
+    };
+    if patch.is_empty() {
+        return Err(ApiError::bad_request("name at least one of workComplete"));
+    }
+
+    let outcome: DbRejectable<PushKinds> =
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                if active_workspace_role(conn, workspace_id, member_id)
+                    .await?
+                    .is_none()
+                {
+                    return Ok(Err(ApiError::forbidden("active human membership required")));
+                }
+                let saved = patch_push_kinds_in_tx(conn, workspace_id, member_id, patch).await?;
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, "notification_rule.push_kinds.updated")
+                        .by(member_id)
+                        .about(member_id)
+                        .via_token(via_token)
+                        .with_schema(
+                            "momo.notification_rule.push_kinds.updated.v1",
+                            serde_json::json!({ "work_complete": saved.work_complete }),
+                        ),
+                )
+                .await?;
+                Ok(Ok(saved))
+            })
+        })
+        .await;
+    let kinds = settle_db("notification_rules.push_kinds.patch", outcome)?;
+    Ok(Json(push_kinds_response(kinds)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,6 +397,22 @@ mod tests {
             assert_eq!(error.message, "dndUntilMs must be in the future");
         }
         assert!(parse_until_patch("dndUntilMs", &OptionalPatch::Set(Some(i64::MAX)), now).is_err());
+    }
+
+    #[test]
+    fn push_kinds_answer_camel_case_and_default_on() {
+        let json = serde_json::to_value(push_kinds_response(PushKinds::default())).expect("json");
+        assert_eq!(json, serde_json::json!({"workComplete": true}));
+        assert!(serde_json::from_value::<PatchPushKindsRequest>(
+            serde_json::json!({"workComplete": false, "keyword": "x"})
+        )
+        .is_err());
+        let empty: PatchPushKindsRequest =
+            serde_json::from_value(serde_json::json!({})).expect("ok");
+        assert!(PushKindsPatch {
+            work_complete: empty.work_complete
+        }
+        .is_empty());
     }
 
     #[test]

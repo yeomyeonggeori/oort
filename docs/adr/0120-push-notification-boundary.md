@@ -1,6 +1,6 @@
 # ADR-0120: 푸시 알림 경계 — Dawn 운영 push relay + 서버 notifier
 
-- Status: **Accepted** (2026-07-15, 성재 — 권고안 D1-A~D5-A 전체 승인. Dawn 운영 항목(Apple Developer 계정·relay 배포)은 별도 실행 결정, 서버측 P-1/P-2는 웹 배치 후 발급)
+- Status: **Accepted** (2026-07-15, 성재 — 권고안 D1-A~D5-A 전체 승인. Dawn 운영 항목(Apple Developer 계정·relay 배포)은 별도 실행 결정, 서버측 P-1/P-2는 웹 배치 후 발급). **부록 A(`work_session_idle` 5번째 reason): Accepted 2026-10-02, 성재 — 범위 한정(내가 시작한 세션·1분 이상·앱 비활성). A-8 참조.**
 - 관련: `research/15-platform-expansion/01`(Slack 판정 교훈)·`02` §2-1(4사 relay 구조), ADR-0109(unread — 판정의 데이터 기반), ADR-0004(자격증명 비유입 — 같은 결의 content 비유입), ux-bible P8(알림 예산)·P9(판정 로직은 서버 한 곳)·P10(관측 내장), 로드맵 M5·EP-IOS(MOMO-040~043 승계)
 - 발단: 성재 인프라 발제(2026-07-15) 중 푸시. iOS(M5)의 전제조건이며 Dawn 운영 인프라가 필요해 **리드타임이 가장 긴 항목** — 웹 우선 결정과 무관하게 draft를 선행한다.
 
@@ -58,12 +58,16 @@ D1-A + D2-A + D3-A + D4 + D5-A. macOS 알림(APNs macOS topic)도 같은 파이�
 
 ---
 
-# 부록 A — `work_session_idle` 푸시가 조용히 폐기된다 (**미결 · Accept 대기**)
+# 부록 A — `work_session_idle` 푸시 「작업 끝남」 (**Accepted 2026-10-02, 성재 — 범위 한정**)
 
-> **상태: 제안(미결). 성재 승인 전까지 코드 변경 없음.** goal HYG-1(2026-08-03)에서 실측·기안.
-> 위 본문의 Accepted 결정을 바꾸지 않는다 — 이 절은 그 결정이 만든 어휘 경계에서
-> 발견된 결함과 선택지를 기록할 뿐이다.
-> 발단: ADR-0139 D1이 약속한 "완료 감지 푸시"(`0139:20`)가 실제로는 배달되지 않는다.
+> **상태: Accepted (2026-10-02).** 성재 결재(AskUserQuestion, 2026-10-02, 사이드바·알림 시안 결재 ④):
+> **「폰 『작업 끝남』 푸시 = 내가 시작한 세션 · 1분 이상 · 앱 비활성일 때만」**. 이 범위로
+> `work_session_idle`을 5번째 reason으로 받는다(선택지 1 — 어휘 확장, A-6 권고 그대로). 결정 본문은
+> **A-8**이다. A-1~A-7은 2026-08-03 실측·기안 기록이며 그 시점 트리(Swift `relay/PushRelay`·
+> `clients/iOS`·`scripts/verify_push_notifier.sh`·목 relay)를 인용한다 — 그 파일들은 이후 Rust
+> `momo-push-relay`·`clients/mobile`·`momo-notifier` 시험으로 대체되어 사라졌고, 현행 위치는 A-8 표가 정본이다.
+> 위 본문의 Accepted 결정(D1~D5)은 바뀌지 않는다 — 이 절은 어휘 하나를 늘리는 와이어 계약 증보다.
+> 발단: ADR-0139 D1이 약속한 "완료 감지 푸시"(`0139:20`)가 배달되지 않던 결함(HYG-1, 2026-08-03).
 
 ## A-1. 증상 — 판정은 5개를 내고, 배달 경로는 4개만 안다
 
@@ -198,3 +202,59 @@ work-host 서명 미포팅으로 400 거부라(`server-rust/bins/momo-server/src
 - `scripts/tests/test_push_relay_vocabulary_contract.py` — **신규**. 다섯 표면의 어휘를 정적으로
   대조하고, **목 relay 가 `work_session_idle` 을 200 으로 받는 것을 루프백 소켓으로 실증**한다
   (docker·DB·외부망 없음). `local_gate.sh` "python syntax" 단계에 등록.
+
+## A-8. 결정 — 「작업 끝남」 푸시의 범위와 판정 (Accepted 2026-10-02)
+
+**결재 인용(성재, 2026-10-02, AskUserQuestion 결재 ④):** 폰 「작업 끝남」 푸시는 **내가 시작한 세션, 1분
+이상, 앱이 비활성일 때만** 연다. 그 밖의 `work_session_idle`은 보내지 않는다.
+
+### 어휘 (와이어 계약 증보)
+- `reason` 은 **5종**: `dm` · `mention` · `approval_request` · `resume_offer` · `work_session_idle`.
+  `category` 는 4종 그대로이고 `work_session_idle` 은 `momo.work` 다(탭하면 작업 세션으로 간다).
+- 페이로드는 **그대로 id-only**(D2-A)다. 새 필드 없음 — 새 라벨 하나뿐이다. 세션 라벨·터미널 텍스트·
+  카드 본문은 relay를 지나지 않는다(NSE가 자기 서버에서 fetch하는 카드 본문은 고정 문구
+  「작업 완료 — idle 대기」이며 터미널 출력이 아니다).
+- 구버전 앱은 새 reason을 모른다. NSE가 파싱 실패 시 relay의 정적 자리표시자를 그대로 보여 주고
+  (fail-open, A-5) 알림 자체는 도착한다 → **relay 먼저, 클라가 뒤따르는 순차 배포**가 가능하다.
+
+### 판정 (서버, `momo-push` judgment — P9 그대로 한 곳)
+`work_session_idle` 은 아래를 **모두** 만족할 때만 세션을 시작한 멤버에게 정확히 한 번 선택된다.
+하나라도 어긋나면 reason 이 **없다**(`dm` 으로 흘러내리지 않는다 — 카드 문구가 DM 상대에게 가면 안 된다).
+1. **내가 시작한 세션**: 카드의 `owner_member_id` = 수신자 = 카드 작성자 = `work_session.member_id`
+   (카드의 `session_id`·`root_id` 가 그 세션의 것). 위조 카드(타인 명의·타인 작성·없는 세션)는 아무도 못 받는다.
+2. **1분 이상**: 끝난 **턴**의 길이 `props.ran_ms ≥ 60 000`. 세션 생성이 아니라 턴 기준이다 —
+   `work_session.turn_started_at`(migration 115)을 running 진입 두 경로가 갱신하고, idle 전이가 같은
+   트랜잭션에서 DB 시계로 `ran_ms`·`turn_started_ms` 를 카드에 박는다. 판정은 나중에 도는 notifier라
+   그 사이 세션이 다시 running 이 되어도 값이 변하지 않는다. (세션 기준으로 재면 3초짜리 후속 턴마다 푸시가 쏟아진다.)
+3. **턴당 1회(dedupe)**: 같은 `session_id`·같은 `turn_started_ms` 의 이전 idle 카드가 있으면 보내지 않는다
+   (전이 자체도 같은 상태 재보고에 두 번째 카드를 만들지 않는다 — 2중 방어). 다음 턴은 다시 보낸다.
+4. **멤버의 종류별 설정**: `notification_rule.work_complete_push`(기본 true, migration 115)가 꺼져 있으면
+   보내지 않는다. API: `GET|PATCH /v1/workspaces/{ws}/notification-rules/push-kinds`
+   (`{workComplete: bool}`, 본인 한정·사람 한정, openapi 반영) — 폰 설정 토글(#3342)이 쓴다.
+   기존 DND(`notification_rule.dnd`)·채널 mute(`notification_pref`)는 그대로 위에서 억제한다.
+5. **앱 비활성일 때만 — 전경 휴리스틱**: 서버에는 전경/활성 신호가 **없다**(`device.last_seen_at` 은 등록 때만
+   움직이고, 가용성 하트비트는 DB를 거치지 않는 ephemeral 이다). 그래서 (a) **서버**: 수신자의 `read_state`
+   커서가 그 채널에서 카드 시각 30초 전 이후에 전진했거나 이미 카드를 덮으면 「지금 보고 있다」고 보고
+   보내지 않는다(웹·데스크탑·폰 어디서든 — 시안 §1.2 「대상이 보이면 억제」와 같은 결). (b) **기기**:
+   앱이 전경이면 OS가 푸시 배너를 띄우지 않는다(앱은 전경 표시 핸들러를 설정하지 않는다 —
+   `clients/mobile/src/push/notifications.ts`·`AppDelegate.swift`). 두 겹 모두 근사이며, 정확한 활성 신호
+   (기기 앱 상태 보고)가 필요해지면 별도 결정으로 다룬다(보류).
+
+### 남용·경계
+- relay는 레이블만 검증한다(닫힌 어휘, 닫힌 필드 집합). 누가 받을지는 서버 판정이 정한다.
+- 상한: 턴 ≥ 60초 + 턴당 1회이므로 세션당 분당 1회 이하. relay의 서버 단위 rate limit(D5-A)은 그대로다.
+- 크로스 테넌트: 판정 SQL 모든 조인에 `workspace_id` 술어, notifier 풀링 예외는 기존 그대로.
+
+### 현행 구현 위치 (2026-10-02)
+| 지점 | 파일 |
+|---|---|
+| 판정 | `server-rust/crates/momo-push/src/judgment.rs` (`WORK_COMPLETE_MIN_RAN_MS`, `WORK_COMPLETE_FOREGROUND_WINDOW_SECS`) |
+| idle 카드 스탬프 | `server-rust/bins/momo-server/src/routes/work_sessions.rs` + `momo-t3` `turn_timing_in_tx` |
+| 설정 API | `server-rust/bins/momo-server/src/routes/notification_rules.rs` (`push-kinds`), `docs/api/openapi.yaml` |
+| relay 검증기 | `server-rust/bins/momo-push-relay/src/dispatch.rs` `ALLOWED_REASONS` (5종) |
+| iOS NSE·RN | `clients/mobile/ios/MomoPushKit/PushNotification.swift`, `clients/mobile/src/push/contract.ts` (`PUSH_REASONS`) |
+| 시험 | `momo-notifier/tests/push_conformance_pg.rs`, `momo-server/tests/host_signed_session_conformance_pg.rs`, `notification_rules_patch_conformance_pg.rs`, `momo-push-relay` 단위, `scripts/verify_push_relay.sh`(5종), 폰 `pushContract.test.ts`·`pushActions.test.ts` |
+
+### 후속(범위 밖)
+폰 설정 토글·수신 UI는 #3342, 데스크탑 OS 알림 확장은 #3335 하위 이슈. 기기 앱 상태 보고(정확한 전경 신호)와
+팀 작업 끝남·DM의 푸시는 이 결정에 포함되지 않는다.

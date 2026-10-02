@@ -166,8 +166,9 @@ pub use message::{
     HISTORY_LIMIT_MAX, REPLIES_LIMIT_DEFAULT, REPLIES_LIMIT_MAX,
 };
 pub use notification_rule::{
-    get_notification_rule_in_tx, patch_notification_rule_in_tx, pause_in_force,
-    set_notification_rule_in_tx, NotificationRule, NotificationRulePatch, NotificationRuleUpdate,
+    get_notification_rule_in_tx, get_push_kinds_in_tx, patch_notification_rule_in_tx,
+    patch_push_kinds_in_tx, pause_in_force, set_notification_rule_in_tx, NotificationRule,
+    NotificationRulePatch, NotificationRuleUpdate, PushKinds, PushKindsPatch,
 };
 pub use presence::{
     build_presence_payload, declared_presence_for, decode_optional_presence, effective_presence,

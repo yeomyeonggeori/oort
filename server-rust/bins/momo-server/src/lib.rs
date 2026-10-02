@@ -847,6 +847,13 @@ pub fn build_app(state: AppState) -> Router {
                 .put(routes::notification_rules::put)
                 .patch(routes::notification_rules::patch),
         )
+        // ADR-0120 부록 A (#3341) — which kinds of push the caller wants
+        // (「작업 끝남」 on/off). Self-scoped exactly like the rules above.
+        .route(
+            "/v1/workspaces/{ws}/notification-rules/push-kinds",
+            get(routes::notification_rules::get_push_kinds)
+                .patch(routes::notification_rules::patch_push_kinds),
+        )
         // ADR-0196 / #3164 — team memory v2: digest + receipt reads and the
         // settings switches. Human-only; visibility and write authority are the
         // `mem_*` RLS policies (the transaction binds app.member_id).

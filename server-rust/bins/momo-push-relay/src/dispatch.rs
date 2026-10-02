@@ -30,7 +30,17 @@ const REQUIRED_KEYS: &[&str] = &[
     "message_id",
 ];
 
-const ALLOWED_REASONS: &[&str] = &["dm", "mention", "approval_request", "resume_offer"];
+/// The closed reason vocabulary (ADR-0120 부록 A, Accepted 2026-10-02: five).
+/// `work_session_idle` is the 「작업 끝남」 push; the server decides who gets it
+/// (the starter only, turns of 60 s or more, not while looking) — the relay only
+/// checks the label is one it knows.
+const ALLOWED_REASONS: &[&str] = &[
+    "dm",
+    "mention",
+    "approval_request",
+    "resume_offer",
+    "work_session_idle",
+];
 const ALLOWED_CATEGORIES: &[&str] = &["momo.message", "momo.mention", "momo.approval", "momo.work"];
 
 /// APNs `aps.sound` per category (#2669).
@@ -40,7 +50,7 @@ const ALLOWED_CATEGORIES: &[&str] = &["momo.message", "momo.mention", "momo.appr
 /// | `momo.message` | `default` | A DM: a person wrote to you. |
 /// | `momo.mention` | `default` | Someone named you. |
 /// | `momo.approval` | `default` | An agent is waiting on your decision. |
-/// | `momo.work` | `default` | It reaches one person through the same judgment as the rows above: a work-session card in your DM or naming you, or the owner-only `resume_offer`, which is itself an `approval_request` message. The category follows the message's shape, not its urgency, so a silent row would make a DM quieter just because it carries a card. |
+/// | `momo.work` | `default` | It reaches one person through the same judgment as the rows above: a work-session card in your DM or naming you, the owner-only `resume_offer` (itself an `approval_request` message), or the owner-only `work_session_idle` 「작업 끝남」. The category follows the message's shape, not its urgency, so a silent row would make a DM quieter just because it carries a card. |
 ///
 /// `"default"` is the system sound. The person's own settings (sound off for
 /// oort, Focus, the silent switch) are applied by the OS on the device, so the
@@ -50,9 +60,9 @@ const ALLOWED_CATEGORIES: &[&str] = &["momo.message", "momo.mention", "momo.appr
 /// shows nothing, such as a quiet refresh (`content-available` only,
 /// `apns-push-type: background`). The relay has no such kind: every dispatch it
 /// accepts goes out as `apns-push-type: alert` with the placeholder alert
-/// (`sender.rs`), so every one of them sounds. `work_session_idle` would fall
-/// under `momo.work`, but the relay refuses that reason (ADR-0120 부록 A,
-/// undecided). Revisit the `momo.work` row when that appendix is decided.
+/// (`sender.rs`), so every one of them sounds. `work_session_idle` falls under
+/// `momo.work` and sounds like the rest: the server only sends it when the person
+/// asked to hear about it (ADR-0120 부록 A), so there is no reason to mute it here.
 ///
 /// Every category in [`ALLOWED_CATEGORIES`] has exactly one row here.
 const CATEGORY_SOUNDS: &[(&str, Option<&str>)] = &[
@@ -381,6 +391,7 @@ mod tests {
             ("momo.mention", "mention", Some("default")),
             ("momo.approval", "approval_request", Some("default")),
             ("momo.work", "resume_offer", Some("default")),
+            ("momo.work", "work_session_idle", Some("default")),
         ];
         let rows: BTreeSet<&str> = table.iter().map(|(category, _, _)| *category).collect();
         let allowed: BTreeSet<&str> = ALLOWED_CATEGORIES.iter().copied().collect();
@@ -478,16 +489,64 @@ mod tests {
         assert!(PushDispatch::decode_closed(json.as_bytes()).is_ok());
     }
 
-    /// Pins ADR-0120 부록 A (미결): judgment can emit `work_session_idle`,
-    /// the relay still takes only the other four reasons.
+    /// ADR-0120 부록 A (Accepted 2026-10-02): the 「작업 끝남」 push is the fifth
+    /// reason, under the existing `momo.work` category. The reason set is written
+    /// out here, not read from `ALLOWED_REASONS`, so widening or narrowing the
+    /// constant turns this red.
     #[test]
-    fn work_session_idle_is_rejected_even_though_its_category_is_allowed() {
+    fn work_session_idle_is_an_allowed_work_dispatch() {
         let json = DISPATCH_JSON
             .replace("\"reason\":\"mention\"", "\"reason\":\"work_session_idle\"")
             .replace(
                 "\"category\":\"momo.mention\"",
                 "\"category\":\"momo.work\"",
             );
+        let dispatch = PushDispatch::decode_closed(json.as_bytes()).unwrap();
+        assert_eq!(dispatch.reason, "work_session_idle");
+        let encoded = serde_json::to_vec(&ApnsPayload::from_dispatch(&dispatch)).unwrap();
+        let object: Value = serde_json::from_slice(&encoded).unwrap();
+        // Id-only: the fifth reason adds a label, not a field.
+        let keys: BTreeSet<&str> = object["momo"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let expected: BTreeSet<&str> = [
+            "schema",
+            "server_id",
+            "workspace_id",
+            "channel_id",
+            "message_id",
+            "collapse_id",
+            "reason",
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(keys, expected);
+        assert_eq!(object["momo"]["reason"], "work_session_idle");
+        assert_eq!(object["aps"]["category"], "momo.work");
+    }
+
+    #[test]
+    fn the_reason_vocabulary_is_exactly_five() {
+        let expected: BTreeSet<&str> = [
+            "dm",
+            "mention",
+            "approval_request",
+            "resume_offer",
+            "work_session_idle",
+        ]
+        .into_iter()
+        .collect();
+        let allowed: BTreeSet<&str> = ALLOWED_REASONS.iter().copied().collect();
+        assert_eq!(allowed, expected);
+    }
+
+    #[test]
+    fn an_unknown_reason_is_still_refused() {
+        let json =
+            DISPATCH_JSON.replace("\"reason\":\"mention\"", "\"reason\":\"work_session_done\"");
         assert_eq!(
             PushDispatch::decode_closed(json.as_bytes()).unwrap_err(),
             DispatchError::Reason
