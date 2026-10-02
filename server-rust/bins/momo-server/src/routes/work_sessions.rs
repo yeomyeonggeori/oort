@@ -397,6 +397,12 @@ pub async fn create(
 
 /// The code for a share that is not on the person's own registered desktop.
 const CODE_LOCAL_SHARE_REQUIRES_HOST: &str = "local_share_requires_registered_host";
+/// The code for a member already sharing [`MAX_ACTIVE_LOCAL_SESSIONS`] panes.
+const CODE_LOCAL_SHARE_LIMIT: &str = "local_share_limit";
+/// A shared pane takes no pool slot, so something else bounds how many a member
+/// can open (each one posts a card into a shared channel). Generous for a
+/// terminal dock's worth of panes, small enough to stop a loop.
+const MAX_ACTIVE_LOCAL_SESSIONS: i64 = 32;
 
 /// ADR-0190 D4 (#2793): record a shared local pane.
 ///
@@ -432,6 +438,23 @@ async fn create_local_in_tx(
     if !is_active_channel_member_in_tx(conn, workspace_id, channel_id, member_id).await? {
         return Ok(Err(ApiError::forbidden(
             "active channel membership required",
+        )));
+    }
+    let active: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM work_session \
+          WHERE workspace_id = $1 AND member_id = $2 AND origin = 'local_pty' \
+            AND status IN ('running', 'idle', 'orphaned')",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(T3Error::from)?;
+    if active >= MAX_ACTIVE_LOCAL_SESSIONS {
+        return Ok(Err(ApiError::coded(
+            StatusCode::CONFLICT,
+            CODE_LOCAL_SHARE_LIMIT,
+            "too many shared local sessions are active; end one first",
         )));
     }
 

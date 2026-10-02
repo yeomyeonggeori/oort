@@ -22,6 +22,7 @@
 //! | `d4_4_sharing_is_off_until_the_persons_own_desktop_is_registered` | 공유는 기본 꺼짐 · host 등록 뒤에만 | `work_sessions::create_local_in_tx` host check |
 //! | `d4_5_nothing_but_names_reaches_the_row` | 경로·raw 바이트·바인딩 비저장 | 112's CHECKs, `validated_local_text`, the `origin = 'host'` writers |
 //! | `d4_6_a_host_cannot_relay_into_a_shared_local_session` | ACP 중계(권한 요청)·PTY 바인딩 거부 | the `local_pty` branches in `record_acp_event_in_tx` and `bind_remote_pty_in_tx` |
+//! | `d4_7_a_member_cannot_share_without_bound` | 풀 슬롯을 안 쓰므로 멤버당 활성 공유 수를 제한 | `MAX_ACTIVE_LOCAL_SESSIONS` in `work_sessions::create_local_in_tx` |
 //!
 //! Every refusal test also takes the legitimate path beside it (a host-origin
 //! session answering differently, the owner ending their own shared pane), so
@@ -1336,4 +1337,56 @@ async fn d4_6_a_host_cannot_relay_into_a_shared_local_session() {
         "display binding on a shared local pane: {message}"
     );
     assert_eq!(code, json!(LOCAL_REFUSAL));
+}
+
+// ---------------------------------------------------------------------------
+// 7 — a shared pane takes no pool slot, so a member's count is bounded instead
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn d4_7_a_member_cannot_share_without_bound() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let (desktop, _) = own_desktop(&su, &tenant).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let owner_token = login(&http, &base, tenant.workspace, &tenant.owner_email).await;
+
+    let mut first = None;
+    for _ in 0..32 {
+        let id = share(&http, &base, &owner_token, &tenant, desktop).await;
+        first.get_or_insert(id);
+    }
+    let (status, code, message) = error_of(
+        register_local(
+            &http,
+            &base,
+            &owner_token,
+            &tenant,
+            json!({"hostId": desktop}),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, 409, "{message}");
+    assert_eq!(code, json!("local_share_limit"));
+    assert_eq!(session_count(&su, tenant.workspace).await, 32);
+
+    // Ending one makes room again.
+    let ended = http
+        .patch(format!(
+            "{}/{}",
+            sessions_url(&base, &tenant),
+            first.expect("one")
+        ))
+        .bearer_auth(&owner_token)
+        .json(&json!({"status": "ended"}))
+        .send()
+        .await
+        .expect("end");
+    assert_eq!(ended.status(), 200);
+    share(&http, &base, &owner_token, &tenant, desktop).await;
 }

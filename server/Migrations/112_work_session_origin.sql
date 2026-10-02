@@ -52,7 +52,7 @@ COMMENT ON COLUMN work_session.folder_label IS
 -- origin은 한번 정해지면 바뀌지 않는다: local_pty → host 로 되돌려 컨트롤 거부를
 -- 우회하는 길을 닫는다.
 CREATE FUNCTION work_session_origin_immutable() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
 BEGIN
   IF NEW.origin IS DISTINCT FROM OLD.origin THEN
     RAISE EXCEPTION 'work_session origin is immutable (ADR-0190 D4)'
@@ -69,10 +69,10 @@ CREATE TRIGGER work_session_origin_immutable
 -- 바인딩하는 UPDATE(session_id) 모두 막는다. 세션 조회는 호출자와 같은
 -- app.workspace_id RLS 아래에서, 같은 workspace_id로만 한다.
 CREATE FUNCTION work_control_refuse_local_session() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
 BEGIN
   IF NEW.session_id IS NOT NULL AND EXISTS (
-    SELECT 1 FROM work_session ws
+    SELECT 1 FROM public.work_session ws
      WHERE ws.id = NEW.session_id
        AND ws.workspace_id = NEW.workspace_id
        AND ws.origin = 'local_pty'
