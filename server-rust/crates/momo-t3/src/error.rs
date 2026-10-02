@@ -98,7 +98,7 @@ pub enum T3Error {
     /// ADR-0190 D4 (#2793): the session is a shared local pane
     /// (`work_session.origin = 'local_pty'`). Server-side it accepts **no**
     /// `work_control` of any kind; the `work_control_refuse_local_session`
-    /// trigger (112) says so for every caller and this is its domain name.
+    /// trigger (113) says so for every caller and this is its domain name.
     #[error("a shared local session accepts no work control")]
     LocalSessionControlForbidden,
 

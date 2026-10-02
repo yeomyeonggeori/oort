@@ -148,7 +148,7 @@ fn validated_label(raw: &str) -> Result<String, ApiError> {
 /// ADR-0190 D4 (#2793): the names a shared local pane may carry. The server
 /// holds a display name and the folder's **last path element** — never a path —
 /// so a separator or a control character is refused here (friendly 400) and by
-/// 112's CHECKs (the row cannot say it either).
+/// 113's CHECKs (the row cannot say it either).
 fn validated_local_text(raw: &str, what: &str, max: usize) -> Result<String, ApiError> {
     let value = raw.trim().to_string();
     let length = value.chars().count();
@@ -1747,7 +1747,7 @@ async fn bind_remote_pty_in_tx(
             "work host cannot bind another host session",
         )));
     }
-    // ADR-0190 D4: a shared local pane carries no PTY binding (112's CHECK and
+    // ADR-0190 D4: a shared local pane carries no PTY binding (113's CHECK and
     // `write_remote_pty_binding_in_tx` say the same).
     if existing.origin == "local_pty" {
         return Ok(Err(local_session_control_refusal()));

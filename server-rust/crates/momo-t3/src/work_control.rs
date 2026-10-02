@@ -1085,7 +1085,7 @@ pub const REFUSAL_REMOTE_HOST_KILL_ONLY: &str = "remote_host_kill_only";
 
 /// ADR-0190 D4 (#2793): the machine code for a control aimed at a shared local
 /// session (`work_session.origin = 'local_pty'`). 403 on every route; the
-/// `work_control_refuse_local_session` trigger (112) is the same refusal for
+/// `work_control_refuse_local_session` trigger (113) is the same refusal for
 /// callers that never reach a route.
 pub const REFUSAL_LOCAL_SESSION_NO_CONTROL: &str = "local_session_no_control";
 

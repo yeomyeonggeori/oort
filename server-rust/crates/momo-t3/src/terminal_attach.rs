@@ -904,7 +904,7 @@ impl DisplayBindingTarget {
 /// the same lock: this statement is the only writer of these columns, and a
 /// guard that lives only in the caller is a guard the next caller does not have.
 /// `origin = 'host'` is ADR-0190 D4: a shared local pane never carries a binding
-/// (raw spectating is D6, after goal A), and 112's CHECK says the same.
+/// (raw spectating is D6, after goal A), and 113's CHECK says the same.
 /// `Ok(false)` means the row moved out of `running|idle` and the caller answers
 /// Swift's 409 rather than reporting a write that did not happen.
 pub async fn write_display_binding_in_tx(

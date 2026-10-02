@@ -270,7 +270,7 @@ async fn create_in_tx(conn: &mut PgConnection, input: CreateInput) -> Rejectable
     // ADR-0190 D4 (#2793): a shared local pane (`origin = 'local_pty'`) takes
     // no control of any kind from anyone — refused here, before the host-scope
     // and lineage questions (which answer a different 403) and before any write. The
-    // `work_control_refuse_local_session` trigger (112) is the same refusal for
+    // `work_control_refuse_local_session` trigger (113) is the same refusal for
     // every other caller.
     if let Some(session_id) = input.session_id {
         if session_is_local_pty_in_tx(conn, input.workspace_id, session_id).await? {

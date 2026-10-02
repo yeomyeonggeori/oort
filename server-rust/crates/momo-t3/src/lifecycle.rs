@@ -420,7 +420,7 @@ pub async fn create_work_session_with_id_in_tx(
 
 /// Record a shared local pane (ADR-0190 D4, #2793): `origin = 'local_pty'`,
 /// name + folder label only. The caller has proven the host is the person's own
-/// registered desktop; the CHECKs in 112 keep paths, PTY and display bindings
+/// registered desktop; the CHECKs in 113 keep paths, PTY and display bindings
 /// out of the row, and the `work_control` trigger keeps controls off it.
 pub async fn create_local_pty_work_session_with_id_in_tx(
     conn: &mut PgConnection,

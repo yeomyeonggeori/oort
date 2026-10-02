@@ -18,9 +18,9 @@
 //! |---|---|---|
 //! | `d4_1_a_shared_local_session_refuses_every_agent_control` (**red proof**) | 공유 L 세션에 input·read·kill 컨트롤 생성 → 거부 | the `session_is_local_pty_in_tx` branch in `work_controls::create_in_tx` |
 //! | `d4_2_the_owners_own_routes_refuse_a_shared_local_session` | 사람 경로(지시·권한 결정·재개)도 같은 거부 | the `origin == "local_pty"` branches in `work_instructions`, `work_permissions`, `work_sessions::resume_in_tx` |
-//! | `d4_3_the_database_refuses_a_control_whatever_the_caller` | 배치·워커·미래의 라우트도 막는다 | the `work_control_refuse_local_session` trigger (112) |
+//! | `d4_3_the_database_refuses_a_control_whatever_the_caller` | 배치·워커·미래의 라우트도 막는다 | the `work_control_refuse_local_session` trigger (113) |
 //! | `d4_4_sharing_is_off_until_the_persons_own_desktop_is_registered` | 공유는 기본 꺼짐 · host 등록 뒤에만 | `work_sessions::create_local_in_tx` host check |
-//! | `d4_5_nothing_but_names_reaches_the_row` | 경로·raw 바이트·바인딩 비저장 | 112's CHECKs, `validated_local_text`, the `origin = 'host'` writers |
+//! | `d4_5_nothing_but_names_reaches_the_row` | 경로·raw 바이트·바인딩 비저장 | 113's CHECKs, `validated_local_text`, the `origin = 'host'` writers |
 //! | `d4_6_a_host_cannot_relay_into_a_shared_local_session` | ACP 중계(권한 요청)·PTY 바인딩 거부 | the `local_pty` branches in `record_acp_event_in_tx` and `bind_remote_pty_in_tx` |
 //! | `d4_7_a_member_cannot_share_without_bound` | 풀 슬롯을 안 쓰므로 멤버당 활성 공유 수를 제한 | `MAX_ACTIVE_LOCAL_SESSIONS` in `work_sessions::create_local_in_tx` |
 //!

@@ -870,7 +870,7 @@ async fn publish_binding_in_tx(
         )));
     }
     // ADR-0190 D4: a shared local pane carries no screen binding (raw spectating
-    // is D6, after goal A); 112's CHECK and `write_display_binding_in_tx` agree.
+    // is D6, after goal A); 113's CHECK and `write_display_binding_in_tx` agree.
     if momo_t3::work_control::session_is_local_pty_in_tx(conn, workspace_id, session_id).await? {
         return Ok(Err(crate::routes::shared::local_session_control_refusal()));
     }
