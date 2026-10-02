@@ -144,6 +144,8 @@ fn session_dto(detail: momo_t3::WorkSessionDetail) -> WorkSessionDto {
         exit_code: detail.exit_code,
         end_reason: detail.end_reason,
         resumed_from_session_id: detail.resumed_from_session_id.map(|id| id.to_string()),
+        origin: detail.origin,
+        folder_label: detail.folder_label,
     }
 }
 

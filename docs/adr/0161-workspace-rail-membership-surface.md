@@ -126,7 +126,7 @@ Slack의 워크스페이스 스위처도 초기엔 **계정별 독립 세션**(�
 
 ### D-M6. 교체·제거·회수
 - **이미 완료된 미디어의 재 `complete`(L-4)**: 그 미디어가 **여전히 현재 아바타면 200(멱등)**, 그 뒤 교체·제거되어 현재가 아니면 **409** — 오래된 사진으로 조용히 되돌리지 않는다(되돌리려면 다시 업로드). 재포인트 방식은 택하지 않는다.
-- 교체 = 새 완료 행으로 포인터 이동, 제거 = 포인터 NULL(멱등 204, 두 번째 호출은 감사 행 없음). 이전 미디어의 Drive 회수는 D5와 같은 **후속 잡**(범위 밖).
+- 교체 = 새 완료 행으로 포인터 이동, 제거 = 포인터 NULL(멱등 204, 두 번째 호출은 감사 행 없음). 이전 미디어의 Drive 회수는 D5와 같은 **후속 잡**(→ 증보 2).
 - 감사: `member.avatar_upload_started` · `member.avatar_updated` · `member.avatar_upload_failed` · `member.avatar_removed`.
 - 실시간 브로드캐스트(outbox)는 이 증보에 없다: 다른 클라는 다음 roster 읽기에서 새 `?v=`를 받는다. 즉시 반영이 필요하면 `member.renamed`와 같은 모양의 별도 증보.
 
@@ -134,4 +134,16 @@ Slack의 워크스페이스 스위처도 초기엔 **계정별 독립 세션**(�
 - 레거시 `member.avatar_url`(D-M4)은 **임의 문자열**이 될 수 있다(과거 시드·외부 값). 클라이언트는 이를 `<img>`로 그릴 때 **`referrerpolicy="no-referrer"`** 를 붙여 Referer로 워크스페이스 URL이 새지 않게 한다(웹 PR의 몫). 업로드 아바타(same-origin 경로)는 베어러 `fetch`+Blob 경로를 쓴다.
 
 ### 범위 밖
-에이전트 아바타 업로드, 이전 미디어 Drive 회수 잡, 크롭·리사이즈(클라가 5 MiB 안으로 만든다), 실시간 전파, 레거시 `avatar_url` 정리·이전, **GIF 프레임 수 상한**, **교체·제거·실패한 Drive 객체 회수 잡(후속 이슈)**.
+에이전트 아바타 업로드, 이전 미디어 Drive 회수 잡, 크롭·리사이즈(클라가 5 MiB 안으로 만든다), 실시간 전파, 레거시 `avatar_url` 정리·이전, **GIF 프레임 수 상한**, **교체·제거·실패한 Drive 객체 회수 잡(→ 증보 2, #3284)**.
+
+## 증보 2 (2026-10-02) — 아바타 Drive 객체 회수 잡 (#3284)
+
+D5·증보 1이 「후속 잡」으로 미룬 회수를 구현한다. 경계가 바뀌는 곳만 적는다.
+
+- **`DriveArchive::delete_file` 추가.** `momo-drive`의 「No delete」를 뒤집는다. 호출자는 이 잡 하나뿐이다(라우트 핸들러는 부르지 않는다). **멱등**: 이미 없는 객체(Drive 404/410)는 성공. Google 구현은 삭제 전에 파일이 **이 아카이브의 공유 드라이브 소속**인지 확인하고, 아니면 `AccessDenied`로 지우지 않는다(저장된 id는 문자열일 뿐이다).
+- **자리**: `momo-notifier`의 sweep(huddle sweep과 같은 두 풀 모양). 후보 읽기는 기존 BYPASSRLS notifier 풀(읽기 전용, id만), **모든 쓰기는 RLS-bound `momo_app` 풀**의 행당 테넌트 트랜잭션(`SET LOCAL app.workspace_id`)이다 — 새 BYPASSRLS 쓰기 경로 없음, 풀이 BYPASSRLS면 거절. 이로써 notifier가 Drive 서비스계정 **키 경로**를 갖게 된다(Google 백엔드일 때만; ADR-0004 — 키는 경로이지 값이 아니고 로그에 나오지 않는다).
+- **후보**: `drive_file_id`가 있고 아직 해소되지 않은 행 중 ① 어떤 멤버/워크스페이스도 가리키지 않는 `complete`(교체·제거), ② `failed`, ③ `pending`이면서 `PENDING_TTL`(24 h, 업로드 캐퍼빌리티 1 h보다 길다) 경과. Drive 파일 없는 `failed` 예약 행은 대상이 아니다.
+- **현재 아바타는 지우지 않는다**: 행 `FOR UPDATE` → (새 문장으로) 포인터 확인 → Drive 삭제 → 표식, 한 트랜잭션. 동시 `complete`/교체는 행 잠금(FK key-share 포함)에서 기다리고, 이긴 쪽이 다른 쪽에 보인다. `pending`이 회수되면 `failed`로 바꿔 늦은 `complete`가 죽은 파일을 가리키지 못하게 한다.
+- **행은 지우지 않고 표식(`drive_reclaimed_at`, migration 112)**: `member.avatar_media_id`가 `ON DELETE SET NULL`이라 행 삭제가 경합 시 현재 아바타를 조용히 비울 수 있고, 업로드 상한(시간당 N회)이 최근 행을 센다. 표식은 「해소」(삭제·이미 없음·**영구 거절**)다. 영구 거절(공유 드라이브 밖/잘못된 id)도 표식을 써 재시도 굶김을 막고, 감사 행의 `refused`로 드러난다.
+- **감사·로그**: 워크스페이스당 틱 요약 1행 `avatar.drive_reclaimed`(행위자 NULL, 개수만 — 파일명·Drive id·멤버 id 없음). 한 틱은 테이블당 `batch`(기본 50)행, Drive 호출당 30 s 상한, 기본 주기 10분.
+- **범위(미해결)**: Google Drive 백엔드만. `local`(self-host·현 oort-team)·`stub`은 api 프로세스/볼륨 안에 있어 notifier가 안전하게 열 수 없다(`LocalDriveArchive::open`은 열 때 대기 세션을 지운다) — api 프로세스 안의 잡 또는 definer 읽기 함수가 필요한 **후속 결정**. 멤버·워크스페이스 행의 CASCADE 삭제로 사라진 행의 Drive 객체도 이 잡 대상이 아니다.

@@ -548,6 +548,14 @@ async fn end_session_in_tx(
     else {
         return Ok(ToolResult::error(call_id, "Work session not found."));
     };
+    // ADR-0190 D4 (#2793): ending is a control. A shared local pane accepts
+    // none from an agent — the person closes their own pane.
+    if existing.origin == "local_pty" {
+        return Ok(ToolResult::error(
+            call_id,
+            "A shared local session accepts no work control.",
+        ));
+    }
     if existing.member_id != actor_member_id {
         return Ok(ToolResult::error(
             call_id,

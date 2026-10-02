@@ -21,10 +21,11 @@
 //!   (`momo_messaging::attachment`). The split is asserted mechanically by
 //!   [`tests::the_archive_has_no_database_dependency`].
 //! * **No `axum`.** [`DriveContent`] hands back a byte stream, not a response.
-//! * **No delete.** Swift's `deleteFile` has no caller among the three v0 routes
-//!   (`AttachmentRoutes.swift` never calls it), and a capability nothing invokes
-//!   is one more thing that can be invoked by mistake. Attachment reaping is the
-//!   janitor's, and it is not part of v0.
+//! * **No delete on the request path.** No route handler calls
+//!   [`DriveArchive::delete_file`]. Its one caller is the avatar reclaim sweep in
+//!   `momo-notifier` (#3284, ADR-0161 D5 + 증보 2), which only ever passes ids it
+//!   read from a tenant transaction after re-checking they are not a current
+//!   avatar. Attachment reaping is still not part of v0.
 //! * **No S3.** ADR-0151 rejected option 2 for v0, so `S3ArchiveClient.swift`
 //!   is deliberately not ported — and with it the `redirectURL` branch of
 //!   Swift's content route, which only that client ever set. The Drive backend
@@ -331,7 +332,7 @@ impl DriveError {
 
 /// The workspace's byte archive.
 ///
-/// Five methods, and that is the whole outbound surface a route can reach. The
+/// Six methods; a route reaches five (delete is the reclaim sweep's). The
 /// trait is what makes the stub and Google backends substitutable **without a
 /// test-only branch in a handler**: the attachment routes are written once and
 /// the operator's environment decides which archive they run against.
@@ -356,6 +357,17 @@ pub trait DriveArchive: Send + Sync + std::fmt::Debug {
 
     async fn file_content(&self, file_id: &str, max_bytes: i64)
         -> Result<DriveContent, DriveError>;
+
+    /// Permanently delete one object (#3284, ADR-0161 D5 reclaim).
+    ///
+    /// **Idempotent: an object that is already gone is success** (`Ok(())`), so a
+    /// re-run after a crash between "Drive deleted" and "row marked" converges.
+    /// A file that is not on this archive's own drive is never deleted
+    /// ([`DriveError::AccessDenied`]). The default refuses
+    /// ([`DriveError::Unavailable`]): a backend must opt in.
+    async fn delete_file(&self, _file_id: &str) -> Result<(), DriveError> {
+        Err(DriveError::Unavailable)
+    }
 
     /// Accept bytes for a stub session. Non-stub backends refuse: an upload that
     /// reached the server at all means the client used the wrong URL.

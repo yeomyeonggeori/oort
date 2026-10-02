@@ -132,7 +132,8 @@ pub async fn reserve_provisioning_slot_in_tx(
                JOIN work_host h ON h.id = ws.host_id \
               WHERE ws.workspace_id = $1 \
                 AND ws.status IN ('running', 'idle') \
-                AND h.type <> 'cloud' ) \
+                AND h.type <> 'cloud' \
+                AND ws.origin <> 'local_pty' ) \
          + ( SELECT count(*)::int \
                FROM work_cloud_host ch \
               WHERE ch.workspace_id = $1 \
@@ -223,7 +224,8 @@ pub async fn acquire_slot_in_tx(
                JOIN work_host h ON h.id = ws.host_id \
               WHERE ws.workspace_id = $1 \
                 AND ws.status IN ('running', 'idle') \
-                AND h.type <> 'cloud' ) \
+                AND h.type <> 'cloud' \
+                AND ws.origin <> 'local_pty' ) \
          + ( SELECT count(*)::int \
                FROM work_cloud_host ch \
               WHERE ch.workspace_id = $1 \
@@ -234,7 +236,8 @@ pub async fn acquire_slot_in_tx(
               WHERE ws.workspace_id = $1 \
                 AND ws.member_id = $2 \
                 AND ws.status IN ('running', 'idle') \
-                AND h.type <> 'cloud' ) \
+                AND h.type <> 'cloud' \
+                AND ws.origin <> 'local_pty' ) \
          + ( SELECT count(*)::int \
                FROM work_cloud_host ch \
               WHERE ch.workspace_id = $1 \
