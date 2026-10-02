@@ -79,6 +79,7 @@ pub mod webhook_ingress;
 /// Public ingress: [`webhook_ingress`].
 pub mod webhooks;
 pub mod welcome;
+pub mod work_board;
 /// #1114 — the host-control ledger (ADR-0114 D4/D5) and its spawn approval.
 pub mod work_controls;
 pub mod work_hosts;
