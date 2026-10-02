@@ -78,6 +78,9 @@ pub mod work_control;
 /// ADR-0188 D5 (#3000) — the permission bridge's ledger: an ACP permission
 /// request relayed by a member host, decided once by the session owner.
 pub mod work_permission;
+/// #2862 / ADR-0190 D4-b + ADR-0194 D4·D7·D8·D9 — the shared local session's S1
+/// payload (`work_session_share`): validation, storage, retention, the one event.
+pub mod work_share;
 
 pub use billing::{
     acquire_slot_in_tx, pause_usage_in_tx, reserve_provisioning_slot_in_tx, resume_usage_in_tx,

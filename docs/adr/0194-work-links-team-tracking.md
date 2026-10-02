@@ -6,6 +6,7 @@
 - 결재 인용: 작업 탭·팀 추적 제안서 §9의 질문 Q1~Q6에 권장안을 붙여 올렸고, 성재가 「전부 권장대로」라고 답했다. 시안은 https://claude.ai/artifact/Wi3dNY64UbyoQCU9q1qLuM 이다. 이 ADR은 Q1·Q4·Q5·Q6의 서버·링크 쪽을 적는다. Q2·Q3과 Q4·Q5의 로컬 쪽은 ADR-0190 증보 D3-c·D4-b에 있다.
 - 기안: Opus 5.5 worker(#2853)
 - 근거 자료: 제안서 `claudedocs/agent-workspace-2.0/workspace-tab.md`(§4 팀 추적, §5 대화 안의 링크와 카드, §6 Claude Tag식 흐름 매핑, §7.4 경계와 시험, §8.3 API 초안). gitignore 대상이라 로컬에만 있다. 이 ADR이 결정에 필요한 내용을 옮겨 적었다.
+- 증보: 2026-10-02 공유 PATCH 구현 확정(#2862) — 와이어·상한·PR URL 문법·거부 코드·이벤트·보존. 파일 끝 「증보 2026-10-02」 절. 결정은 바뀌지 않는다
 - 증보 대상: ADR-0190 D3-c·D4-b(선행. 이 ADR의 공유 필드와 출처 규칙은 거기서 온다)
 - 관계: ADR-0100(공개 API·DB 계약 변경은 Accepted ADR이 머지 조건), ADR-0125·0188(host 서명, 결정자 = 소유자), ADR-0132 D1(run 취소), ADR-0154(요약 줄·서랍·진행 뷰), ADR-0174(이 기기 저장), ADR-0180·`docs/onboarding-deeplink.md`(`oort://` 스킴 체계), ADR-0182(토스트 금지), ADR-0191(한도 카드), ADR-0192 D7(서버 GitHub 토큰 없음)
 
@@ -146,3 +147,15 @@
   - Q5 「링크 복사」는 공유 확인이 먼저, 「채널에 공유」는 켜기와 카드 게시를 한 번에 한다. 주인만 여는 링크는 없다.
   - Q6 PR은 1단계에 주인 기기의 PR URL·diff 숫자만, 체크·리뷰는 #2783 웹훅 레시피 뒤. 서버는 GitHub 토큰을 쥐지 않는다.
 - worker가 확정한 것(제안서 §8.3 초안의 경로를 실제 라우트 체계에 맞춤): 초안의 `PATCH /work-sessions/:id/share`는 `PATCH /v1/workspaces/{ws}/work-sessions/{session}/share`, `GET /work?scope=team`은 기존 목록 라우트에 `scope=team`을 더한 `GET /v1/workspaces/{ws}/work-sessions?scope=team`, `GET /work-sessions/:id/card`는 `GET /v1/workspaces/{ws}/work-sessions/{session}/card`로 적었다. `/work`는 클라 라우트로 남는다.
+
+## 증보 2026-10-02 — 공유 PATCH 구현 확정 (#2862, D4·D7·D8·D9)
+
+- Status: **Accepted** (결재 인용: 성재 「전부 권장대로」, 2026-09-27 — 이 ADR의 D4·D7·D8·D9가 이미 정한 범위를 구현하면서 와이어·상한 값만 못 박는다. 결정은 바뀌지 않는다)
+- 와이어(camelCase, 알려진 필드 외 거부): `{shared:false}` 또는 `{shared:true, harness, state, repo?, branch?, stages?, diff?{added,deleted,files,ahead,behind,uncommitted}, prUrl?, lastActivityAt?}`. 데스크탑 수집기의 `ShareSummaryS1`(`packages/momo-core`, #2861)과 필드 이름이 같고, 알 수 없는 값은 생략 또는 `null`이다. `shared:true`는 **전체 교체**다(생략한 선택 필드는 지워진다). `state`는 코어 `SessionStatus`의 여섯 값 `waiting`(나를 기다림)·`running`·`review`(검토 대기)·`idle`·`done`(끝남)·`stopped`(멈춤)이다. ADR-0190 D4-b 표의 「조용함」은 현재 칸 상태 판정에 없어 넣지 않았다(판정이 생기면 enum과 코어를 같이 넓히는 증보를 낸다). `harness`는 `claude`·`codex`·`grok`·`opencode`·`shell`·`other`.
+- 상한: 본문 8 KiB(넘으면 413), `repo` 100자, `branch` 200자, 단계 표지 12개·각 80자(제어 문자·ANSI·양방향 서식 문자 거부), diff 숫자는 0 이상 32비트 정수(큰 diff 하나가 갱신 전체를 거부하지 않게 더 좁히지 않는다), 마지막 활동 시각 `lastActivityAt`은 epoch **초**이고 2020-01-01 ~ 지금+5분 안.
+- PR URL(D7): 소문자 `https://`, 호스트 정확 일치(`github.com` + 환경변수 `MOMO_GITHUB_ENTERPRISE_HOSTS`의 DNS 이름), 경로 정확히 `/<owner>/<repo>/pull/<번호>`. 쿼리·조각은 버리고 정규형으로 저장한다. 사용자 정보·포트·IP·퍼센트 인코딩·`/files` 같은 꼬리 경로는 거부한다. 서버는 이 URL을 열지도 해석하지도 않는다.
+- 거부 코드: 사람·에이전트 토큰 403, 다른 host·다른 멤버의 세션 403, `origin≠local_pty` 403 `share_local_session_only`, 종료된 세션에 켜기·갱신 409 `share_session_ended`(해제는 허용).
+- 이벤트(D8): `work.session.share_changed`, 본문은 `session_id`·`channel_id`·`kind`(`enabled`·`state_changed`·`disabled`)뿐이다. 켜기·끄기·파생 상태 변화에서만 같은 tx의 outbox로 나간다.
+- 보존(D9): 알림 서비스의 sweep이 종료 30일 지난 `work_session_share` 행을 지우고 `disabled` 이벤트를 같은 tx에서 낸다.
+- 저장(D9): migration 114 — `work_session_share`(RLS FORCE, 복합 FK로 `workspace_id` 일치 강제, `local_pty` 세션 전용 트리거, 값 CHECK)와 `work_session.tool` CHECK에 `grok`·`other` 추가. 금지 필드(커밋 제목·파일 이름·경로·원격 URL)는 컬럼이 없다.
+
