@@ -207,6 +207,13 @@ export function boardSummary(items: readonly SharedWorkSession[]): {
   return { sentence, current: current.length, waiting };
 }
 
+/** 「오늘 끝난 것」 보기의 요약. 「지금」 문장을 그대로 두면 보이는 목록과 어긋난다. */
+export function doneSummary(count: number): string {
+  return count === 0
+    ? "오늘 끝난 공유 세션이 없어요."
+    : `오늘 ${count}개가 끝났어요.`;
+}
+
 export interface DiffFacts {
   commits: number | null;
   added: number | null;

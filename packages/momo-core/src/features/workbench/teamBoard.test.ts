@@ -5,6 +5,7 @@ import {
   TEAM_BOARD_COPY,
   boardSummary,
   diffFacts,
+  doneSummary,
   groupByOwner,
   itemsForView,
   laneLabel,
@@ -88,6 +89,11 @@ describe("팀 보드 말 (#2863)", () => {
     const items = [row({ state: "running" }), row({ state: "waiting" }), row({ state: "done" })];
     expect(boardSummary(items).sentence).toBe("지금 팀에서 2개가 돌고 있어요. 1개는 담당자 확인을 기다려요.");
     expect(boardSummary([row({ state: "done" })]).sentence).toBe("지금 도는 공유 세션이 없어요.");
+  });
+
+  it("오늘 끝난 것 요약은 그 보기의 숫자를 말한다", () => {
+    expect(doneSummary(0)).toBe("오늘 끝난 공유 세션이 없어요.");
+    expect(doneSummary(3)).toBe("오늘 3개가 끝났어요.");
   });
 
   it("diff: 에이전트 레인(모두 null)은 숫자를 말하지 않는다", () => {

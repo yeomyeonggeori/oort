@@ -13,6 +13,7 @@ import { uuidEq } from "@momo/core/lib/api";
 import {
   TEAM_BOARD_COPY,
   boardSummary,
+  doneSummary,
   channelLabel,
   groupByOwner,
   itemsForView,
@@ -245,14 +246,12 @@ export function TeamBoardRoute() {
         )}
       </header>
 
-      {offline && (
+      {/* 읽은 목록이 있으면 앱 셸의 끊김 배너가 이미 말한다(같은 사실을 두 번 말하지 않는다).
+          목록이 아직 없을 때만 여기서 말한다. */}
+      {offline && list.data === undefined && (
         <InlineBanner
           tone="neutral"
-          message={
-            list.data !== undefined
-              ? TEAM_BOARD_COPY.offlineBanner
-              : TEAM_BOARD_COPY.offlineEmpty
-          }
+          message={TEAM_BOARD_COPY.offlineEmpty}
           testId="team-board-offline"
         />
       )}
@@ -284,6 +283,7 @@ export function TeamBoardRoute() {
           data-team-board-list=""
           className="flex min-h-0 min-w-0 flex-col overflow-y-auto focus-visible:focus-ring"
           aria-label="공유된 팀 작업 목록"
+          aria-busy={firstLoad}
           role="region"
         >
           {firstLoad ? (
@@ -307,12 +307,14 @@ export function TeamBoardRoute() {
             />
           ) : (
             <>
-              <p
-                className="border-b border-line px-4 py-3 text-body text-ink"
-                data-testid="team-board-summary"
-              >
-                {summary.sentence}
-              </p>
+              {visible.length > 0 && (
+                <p
+                  className="border-b border-line px-4 py-3 text-body text-ink"
+                  data-testid="team-board-summary"
+                >
+                  {view === "now" ? summary.sentence : doneSummary(visible.length)}
+                </p>
+              )}
               {visible.length === 0 ? (
                 <EmptyInvite
                   headline={
@@ -514,12 +516,12 @@ function BoardRow({
           </span>
         </span>
         <span className="flex min-w-0 flex-col" data-col="where">
-          <span className="truncate font-mono text-meta text-ink">
+          <span className="truncate font-mono text-meta text-ink" title={where.primary ?? undefined}>
             {where.primary ?? ""}
           </span>
           <span className="flex min-w-0 items-center gap-2 text-timestamp text-ink-muted">
             {where.secondary !== null && (
-              <span className="min-w-0 truncate font-mono">{where.secondary}</span>
+              <span className="min-w-0 truncate font-mono" title={where.secondary}>{where.secondary}</span>
             )}
             <DiffNumbers item={item} />
           </span>

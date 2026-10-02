@@ -275,8 +275,8 @@ async function scene(browser, origin, scheme, viewport, kind) {
   if (kind === "offline") {
     await page.getByTestId("team-board-row").first().waitFor();
     await context.setOffline(true);
-    await page.getByTestId("team-board-offline").waitFor();
-    check(`${tag} 오프라인: 배너가 서고 마지막 목록이 남는다`, (await page.getByTestId("team-board-row").count()) === 5);
+    await page.getByText("네트워크가 끊겼습니다").waitFor();
+    check(`${tag} 오프라인: 앱 셸 배너 하나만 서고(보드 배너 없음) 마지막 목록이 남는다`, (await page.getByTestId("team-board-offline").count()) === 0 && (await page.getByTestId("team-board-row").count()) === 5);
     await shot(page, `offline-${tag}`);
   }
   await context.close();

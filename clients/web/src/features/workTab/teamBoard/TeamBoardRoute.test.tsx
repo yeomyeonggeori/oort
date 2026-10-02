@@ -196,13 +196,17 @@ describe("팀 보드: 네 상태", () => {
     await screen.findByTestId("team-board-row");
   });
 
-  it("오프라인: 배너 한 줄이 서고 불러온 목록은 계속 그려진다", async () => {
+  it("오프라인: 읽은 목록은 계속 그려지고(앱 셸 배너가 끊김을 말한다), 목록이 없으면 보드가 말한다", async () => {
     offline.value = true;
     board([sharedRow()]);
     render(mount().ui);
     await screen.findByTestId("team-board-row");
-    expect(screen.getByTestId("team-board-offline").textContent).toContain("마지막으로 본 목록");
     expect(screen.getAllByTestId("team-board-row")).toHaveLength(1);
+    expect(screen.queryByTestId("team-board-offline")).toBeNull();
+    cleanup();
+    api.fetchSharedWorkSessions.mockReturnValue(new Promise(() => undefined));
+    render(mount().ui);
+    expect((await screen.findByTestId("team-board-offline")).textContent).toContain("오프라인");
   });
 });
 
