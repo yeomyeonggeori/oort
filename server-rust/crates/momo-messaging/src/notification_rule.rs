@@ -321,6 +321,98 @@ pub async fn patch_notification_rule_in_tx(
     set_notification_rule_in_tx(conn, workspace_id, member_id, update).await
 }
 
+/// Which kinds of push this member wants (ADR-0120 부록 A, #3341).
+///
+/// Deliberately NOT a field of [`NotificationRule`]: that struct is the DND /
+/// mention-exception pair every presence and PUT path builds literally, and its
+/// writers (`store_rule`) replace a row wholesale. The kind switches live in
+/// their own columns with their own read/patch functions, so a DND write cannot
+/// reset them and a kind write cannot disturb a DND bundle. The notifier judgment
+/// reads the same row (`notification_rule.work_complete_push`).
+///
+/// Absence of a row is `Self::default()`: every kind on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PushKinds {
+    /// 「작업 끝남」 — `reason = work_session_idle`, only for sessions the member
+    /// started (the judgment decides that; this is the member's own off switch).
+    pub work_complete: bool,
+}
+
+impl Default for PushKinds {
+    fn default() -> Self {
+        Self {
+            work_complete: true,
+        }
+    }
+}
+
+/// A field-level push-kinds write. An absent field keeps what is stored when the
+/// write lands (read under the row lock).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PushKindsPatch {
+    pub work_complete: Option<bool>,
+}
+
+impl PushKindsPatch {
+    pub fn is_empty(&self) -> bool {
+        self.work_complete.is_none()
+    }
+}
+
+/// Read the calling member's push-kind switches, defaulting when no row exists.
+pub async fn get_push_kinds_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<PushKinds, DbError> {
+    let stored: Option<bool> = sqlx::query_scalar(
+        "SELECT work_complete_push FROM notification_rule \
+          WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(PushKinds {
+        work_complete: stored.unwrap_or(true),
+    })
+}
+
+/// Apply a [`PushKindsPatch`] and return the stored value. The default row is
+/// materialized first (so two first writers serialize on its lock, as in
+/// [`load_rule`]); only the named columns are written — the DND columns and any
+/// presence bundle are untouched.
+pub async fn patch_push_kinds_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    patch: PushKindsPatch,
+) -> Result<PushKinds, DbError> {
+    sqlx::query(
+        "INSERT INTO notification_rule (workspace_id, member_id) VALUES ($1, $2) \
+         ON CONFLICT (workspace_id, member_id) DO NOTHING",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .execute(&mut *conn)
+    .await?;
+    let stored: bool = sqlx::query_scalar(
+        "UPDATE notification_rule \
+            SET work_complete_push = COALESCE($3, work_complete_push), \
+                updated_at = CASE WHEN $3 IS NOT NULL THEN now() ELSE updated_at END \
+          WHERE workspace_id = $1 AND member_id = $2 \
+      RETURNING work_complete_push",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .bind(patch.work_complete)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(PushKinds {
+        work_complete: stored,
+    })
+}
+
 /// The pause a DND bundle sets: on, until the later of the pre-bundle pause
 /// and the DND expiry. A pre-bundle pause with no expiry keeps the result
 /// indefinite ("원래 켜져 있었으면 유지"); a pre-bundle pause that was off

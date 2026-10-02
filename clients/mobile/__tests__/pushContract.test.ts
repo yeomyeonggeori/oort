@@ -73,6 +73,13 @@ describe('the JS push contract matches the Swift the extension runs', () => {
     for (const reason of PUSH_REASONS) {
       expect(SWIFT).toContain(`"${reason}"`);
     }
+    // Containment is not equality: a sixth reason in Swift only (or a stale one
+    // left behind) would pass the loop above. Compare the whole list.
+    const gate = SWIFT.match(/\[((?:"[a-z_]+",?\s*)+)\]\.contains\(payload\.reason\)/);
+    if (!gate) throw new Error('no reason gate in the Swift source');
+    const swiftReasons = [...gate[1].matchAll(/"([a-z_]+)"/g)].map(m => m[1]);
+    expect(swiftReasons).toEqual([...PUSH_REASONS]);
+    expect(PUSH_REASONS).toContain('work_session_idle');
   });
 
   it('registers under the app bundle id, never the extension bundle id', () => {

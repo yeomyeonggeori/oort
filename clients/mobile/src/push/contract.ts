@@ -59,12 +59,19 @@ export type PushAction = (typeof PUSH_ACTION)[keyof typeof PUSH_ACTION];
  *  envelope whose schema string is not exactly this, so JS must not be laxer. */
 export const PUSH_ENVELOPE_SCHEMA = 'momo.push.notification.v2';
 
-/** Accepted `reason` values — PushNotification.swift:188. */
+/** Accepted `reason` values — PushNotification.swift:218 (the `contains` gate).
+ *
+ *  Five since ADR-0120 부록 A (Accepted 2026-10-02, #3341): `work_session_idle`
+ *  is the 「작업 끝남」 push. The server only sends it to the member who started
+ *  the session, for turns of 60 s or more, when they were not just looking at it
+ *  — the app only validates the label and never branches on it (the screen it
+ *  opens follows `category`, which stays `momo.work`). */
 export const PUSH_REASONS = [
   'dm',
   'mention',
   'approval_request',
   'resume_offer',
+  'work_session_idle',
 ] as const;
 
 export type PushReason = (typeof PUSH_REASONS)[number];

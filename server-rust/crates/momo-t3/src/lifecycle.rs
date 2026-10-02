@@ -805,6 +805,7 @@ pub async fn transition_tool_lifecycle_in_tx(
             "UPDATE work_session \
                 SET status = 'running', \
                     idle_at = NULL, \
+                    turn_started_at = clock_timestamp(), \
                     ended_at = NULL, \
                     end_reason = NULL \
               WHERE workspace_id = $1 \
@@ -820,6 +821,32 @@ pub async fn transition_tool_lifecycle_in_tx(
         .fetch_optional(&mut *conn)
         .await?;
     row.as_ref().map(decode_detail).transpose()
+}
+
+/// How long the turn that is ending has run, and when it began (#3341).
+///
+/// `ran_ms` is measured on the database clock against `turn_started_at`, which
+/// the two paths into `running` refresh (migration 115). The idle card stamps
+/// both numbers into its props at the moment of the transition: the push
+/// judgment runs later in the notifier, by which time the session may already be
+/// `running` again and its own `turn_started_at` would describe the next turn.
+/// `turn_started_ms` doubles as the turn's identity for per-turn dedupe.
+pub async fn turn_timing_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+) -> Result<(i64, i64), T3Error> {
+    let row = sqlx::query(
+        "SELECT floor(extract(epoch from turn_started_at) * 1000)::bigint AS started_ms, \
+                floor(extract(epoch from (clock_timestamp() - turn_started_at)) * 1000)::bigint AS ran_ms \
+           FROM work_session \
+          WHERE workspace_id = $1 AND id = $2",
+    )
+    .bind(workspace_id)
+    .bind(session_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok((row.try_get("started_ms")?, row.try_get("ran_ms")?))
 }
 
 /// The channel-scoped session list (`WorkSessionRoutes.list` :2038-2087).
