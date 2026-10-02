@@ -84,6 +84,7 @@ pub mod work_controls;
 pub mod work_hosts;
 pub mod work_instructions;
 pub mod work_permissions;
+pub mod work_session_share;
 pub mod work_sessions;
 pub mod work_tier_policy;
 pub mod work_tool_profiles;
