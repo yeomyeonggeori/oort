@@ -45,7 +45,7 @@ export const BROWSER_NOTIFICATION_DEFAULT_DETAIL =
 export const BROWSER_NOTIFICATION_DENIED_MESSAGE =
   "이 브라우저에서 oort의 알림이 막혀 있습니다. 주소창 왼쪽의 사이트 설정(자물쇠)에서 알림을 허용한 뒤 이 페이지를 새로 고치세요.";
 export const BROWSER_NOTIFICATION_UNSUPPORTED_MESSAGE =
-  "이 브라우저는 알림을 지원하지 않습니다. 데스크톱 앱이나 최신 브라우저를 쓰세요.";
+  "이 브라우저는 알림을 지원하지 않습니다. 데스크탑 앱이나 최신 브라우저를 쓰세요.";
 
 /** 로컬 칸·기한 확인은 데스크탑 앱만 신호를 갖는다. 브라우저 탭에서는 스위치가 아니라 안내다. */
 const DESKTOP_ONLY_KINDS: ReadonlySet<string> = new Set(["pane-waiting", "work-mine-done", "reminder"]);
