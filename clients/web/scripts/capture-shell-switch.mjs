@@ -211,7 +211,7 @@ async function signIn(page, origin) {
   await page.getByTestId("login-email").fill("capture@example.test");
   await page.getByTestId("login-password").fill("not-a-secret");
   await page.getByTestId("login-submit").click();
-  await page.getByTestId("rail-team").waitFor({ timeout: 20_000 });
+  await page.getByTestId("nav-team").waitFor({ timeout: 20_000 });
 }
 
 
@@ -280,13 +280,13 @@ async function switchScene(browser, origin, scheme, viewport, report) {
   const probe = () => page.evaluate(PROBE);
   const out = { tag };
 
-  await page.getByTestId("rail-inbox").click();
+  await page.getByTestId("nav-inbox").click();
   await page.waitForTimeout(500);
   out.inbox = await probe();
   await page.screenshot({ path: resolve(OUT_DIR, `inbox-${tag}.png`) });
 
   await startStream(page);
-  await page.getByTestId("rail-mine").click();
+  await page.getByTestId("nav-mine").click();
   await page.getByTestId("my-work-tab").waitFor();
   await page.waitForTimeout(900);
   let stream = await endStream(page);
@@ -304,7 +304,7 @@ async function switchScene(browser, origin, scheme, viewport, report) {
   }
 
   await startStream(page);
-  await page.getByTestId("rail-chat").click().catch(async () => { await page.getByTestId("rail-inbox").click(); });
+  await page.getByTestId("nav-chat").click().catch(async () => { await page.getByTestId("nav-inbox").click(); });
   await page.waitForTimeout(900);
   stream = await endStream(page);
   out.fromWork = { frames: stream.length, jump: biggestJump(stream, ["content", "head"]), cols: [...new Set(stream.map((f) => f.s.cols))] };

@@ -2,6 +2,7 @@
 
 import { act, createElement, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { mountSidebarBodySlotForTest } from "@/features/sidebar/sidebarBodySlot";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
 import type { PtySpawnRequest } from "@/lib/tauri";
@@ -102,6 +103,7 @@ function memoryStorage(initial?: StartState): StartStorage & { value: () => Star
 
 const reactAct = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 let root: Root | null = null;
+let unmountSlot: (() => void) | null = null;
 let host: HTMLElement | null = null;
 
 function q(id: string) {
@@ -114,6 +116,7 @@ function all(id: string) {
 type StartSource = NonNullable<Parameters<typeof LocalTerminalDock>[0]["startSource"]>;
 
 async function mount(sessions: LocalSessions, startSource: StartSource) {
+  unmountSlot = mountSidebarBodySlotForTest();
   host = document.createElement("main");
   document.body.append(host);
   root = createRoot(host);
@@ -186,6 +189,8 @@ beforeEach(() => {
 afterEach(() => {
   if (root) act(() => root?.unmount());
   root = null;
+  unmountSlot?.();
+  unmountSlot = null;
   host?.remove();
 });
 

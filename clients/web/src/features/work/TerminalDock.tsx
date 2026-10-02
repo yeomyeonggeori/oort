@@ -15,6 +15,7 @@ import { useWorkHosts, useWorkSessions } from "./useWorkSessions";
 import { ObserverTerminal, TerminalShortNotice } from "./ObserverTerminal";
 import { useSession } from "@/app/session";
 import { useSurfaceProvided } from "@/features/capabilities/useSurfaceProvided";
+import { WORK_CONSOLE_VIEW_PATH } from "@momo/core/features/workbench/workTab";
 
 function readPx(name: string): number {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name);
@@ -369,7 +370,7 @@ export function TerminalDock({
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => navigate("/work")}
+                  onClick={() => navigate(WORK_CONSOLE_VIEW_PATH)}
                   data-testid="terminal-dock-console"
                 >
                   작업 콘솔 보기

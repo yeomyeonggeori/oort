@@ -1,10 +1,15 @@
-import {uuidEq, type Channel, type Message} from '@momo/core/lib/api';
+import {
+  uuidEq,
+  type Channel,
+  type Message,
+  type WorkSession,
+} from '@momo/core/lib/api';
 import {
   DEFAULT_ACTION_IDENTIFIER,
   type NotificationResponse,
 } from 'expo-notifications';
 
-import type {PushCategory} from './contract';
+import type {PushCategory, PushReason} from './contract';
 import {parsePushEnvelope, threadRootId} from './envelope';
 
 // =============================================================================
@@ -43,6 +48,12 @@ export interface NotificationTarget {
   /** 승인 알림일 때만. 카드가 `messageId` 자리에 있다. */
   approvalId: string | null;
   category: PushCategory;
+  /**
+   * 왜 이 알림이 왔는가. 화면을 **고르는** 값은 아니고(`category` 가 같은 `momo.work`
+   * 아래 `resume_offer` 도 담는다), 「작업 끝남」(`work_session_idle`)만이 대화 대신
+   * 그 세션 화면으로 간다(`workSessionForTap`).
+   */
+  reason: PushReason;
 }
 
 export type TapArrival =
@@ -87,6 +98,7 @@ export function tapArrival(
       threadRootId: threadRootId(envelope),
       approvalId: envelope.approvalId,
       category: envelope.category,
+      reason: envelope.reason,
     },
   };
 }
@@ -262,4 +274,35 @@ export function planNotificationLanding(
     jumpInChannel: true,
     notice: deleted ? NOTIFICATION_TAP_COPY.messageDeleted : null,
   };
+}
+
+// ---- 「작업 끝남」 탭 (#3342, ADR-0120 부록 A) ----------------------------------
+//
+// 이 알림은 식별자만 나른다. 카드 메시지의 `thread-id` 가 **세션의 루트 메시지**이고
+// (`momo-push` judgment: `COALESCE(root_id, channel_id)`), 세션 원장은 그 루트를
+// `rootMessageId` 로 안다. 그래서 목적지는 세션 목록 한 번의 읽기로 정해진다 — 카드
+// 본문이나 `props.session_id` 를 다시 읽어 오지 않는다(알림이 들고 오지 않은 것을
+// 알림 대신 지어내지 않는다).
+
+/**
+ * 「작업 끝남」 알림이 열어야 할 세션, 없으면 null.
+ *
+ * null 은 「대화로 간다」다: 다른 이유의 알림이거나, 세션이 이 목록에 없을 때다(원장이
+ * 지워졌거나, 이 사람이 볼 수 없다). 그때 알림은 거짓말을 한 것이 아니므로 기존 착지
+ * (채널의 그 카드)가 그대로 답이 된다.
+ */
+export function workSessionForTap(
+  target: Pick<NotificationTarget, 'reason' | 'channelId' | 'threadRootId'>,
+  sessions: readonly WorkSession[] | undefined,
+): WorkSession | null {
+  if (target.reason !== 'work_session_idle') return null;
+  const rootId = target.threadRootId;
+  if (rootId === null) return null;
+  return (
+    sessions?.find(
+      session =>
+        uuidEq(session.rootMessageId, rootId) &&
+        uuidEq(session.channelId, target.channelId),
+    ) ?? null
+  );
 }

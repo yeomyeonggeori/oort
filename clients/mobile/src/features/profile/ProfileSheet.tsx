@@ -11,6 +11,8 @@ import {
   NOTIFICATION_PAUSE_LABEL,
   NOTIFICATION_PAUSE_LOAD_FAILED,
   NOTIFICATION_PAUSE_SAVE_FAILED,
+  PUSH_WORK_COMPLETE_DESCRIPTION,
+  PUSH_WORK_COMPLETE_LABEL,
 } from '@momo/core/features/settings/notificationRules';
 import {
   CUSTOM_STATUS_DIALOG_TITLE,
@@ -74,7 +76,11 @@ import {Avatar} from '../conversation/Avatar';
 import {formatRealtimeDiagnostics} from '../../realtime/diagnostics';
 import {COPY_RECEIPT_MS, copyText} from '../conversation/copy';
 import {currentAppVersionLabel} from './appVersion';
-import {usePauseNotifications, useSetPresence} from './selfStatus';
+import {
+  usePauseNotifications,
+  usePushKinds,
+  useSetPresence,
+} from './selfStatus';
 import {StatusPage} from './StatusPage';
 import {DEVICE_KEY_TITLE, deviceKeyCopy} from '../deviceKey/copy';
 import {DeviceKeyPanel} from '../deviceKey/DeviceKeyPanel';
@@ -333,7 +339,8 @@ function DeviceKeyPage({workspaceId}: {workspaceId: string}): React.JSX.Element 
   return <DeviceKeyPanel state={state} />;
 }
 
-function ProfilePage({
+/** 캡처 하네스가 알림 묶음까지 끌어올려 찍는다(시뮬레이터는 스크롤할 수 없다). 앱은 시트 안에서만 쓴다. */
+export function ProfilePage({
   workspaceId,
   member,
   directory,
@@ -361,6 +368,7 @@ function ProfilePage({
   const push = usePushPermission();
   const setPresence = useSetPresence(workspaceId, member.id);
   const pause = usePauseNotifications(workspaceId);
+  const kinds = usePushKinds(workspaceId);
   const prompt = usePushPrompt();
   const now = useNow();
   const [confirming, setConfirming] = useState(false);
@@ -642,6 +650,77 @@ function ProfilePage({
             {NOTIFICATION_PAUSE_SAVE_FAILED}
           </Sentence>
         ) : null}
+        {/* 종류별 스위치 (#3342, ADR-0120 부록 A). 서버가 이 경로를 모르면(아직 배포
+            전) 줄 자체를 세우지 않는다 — 켜도 아무 일 없는 스위치는 약속이다. */}
+        {kinds.absent ? null : (
+          <GroupRow
+            title={PUSH_WORK_COMPLETE_LABEL}
+            detail={
+              kinds.loadFailed
+                ? NOTIFICATION_PAUSE_LOAD_FAILED
+                : kinds.ready
+                  ? PUSH_WORK_COMPLETE_DESCRIPTION
+                  : '알림 설정을 확인하는 중입니다.'
+            }
+            separated
+            onPress={() => kinds.setWorkComplete(!kinds.workComplete)}
+            accessibilityRole="switch"
+            accessibilityState={{
+              checked: kinds.workComplete,
+              disabled: !kinds.ready || kinds.pending,
+            }}
+            accessibilityLabel={PUSH_WORK_COMPLETE_LABEL}
+            accessibilityHint={PUSH_WORK_COMPLETE_DESCRIPTION}
+            trailing={
+              kinds.ready ? (
+                <Switch
+                  value={kinds.workComplete}
+                  onValueChange={next => kinds.setWorkComplete(next)}
+                  disabled={kinds.pending}
+                  trackColor={{false: palette.border, true: palette.ok}}
+                  ios_backgroundColor={palette.border}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                  testID="profile-work-complete-switch"
+                />
+              ) : kinds.loadFailed ? null : (
+                <ActivityIndicator
+                  color={palette.textMuted}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                  testID="profile-work-complete-loading"
+                />
+              )
+            }
+            testID="profile-work-complete-row"
+          />
+        )}
+        {kinds.loadFailed ? (
+          <GroupRow
+            title="다시 불러오기"
+            tone="accent"
+            separated
+            onPress={kinds.retryLoad}
+            testID="profile-work-complete-retry"
+          />
+        ) : null}
+        {kinds.failed ? (
+          <Sentence
+            style={styles.rowFailure}
+            accessibilityLiveRegion="polite"
+            testID="work-complete-failure"
+          >
+            {NOTIFICATION_PAUSE_SAVE_FAILED}
+          </Sentence>
+        ) : null}
+        {kinds.absent ? null : (
+          <GroupRow
+            title="항상 오는 알림"
+            detail="승인 요청, 나를 부른 멘션, 다이렉트 메시지는 종류별로 끌 수 없습니다. 한꺼번에 멈추려면 알림 일시 중지를 쓰세요."
+            separated
+            testID="profile-always-row"
+          />
+        )}
       </GroupSection>
 
       <MemoryPauseSection workspaceId={workspaceId} />

@@ -170,6 +170,7 @@ pub fn run() {
             notification::notification_permission,
             notification::notification_request_permission,
             notification::notification_show,
+            notification::dock_badge_set,
             keychain::keychain_available,
             keychain::keychain_refresh_token_handle,
             keychain::keychain_store_refresh_token,

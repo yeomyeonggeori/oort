@@ -263,7 +263,7 @@ async function signIn(page, origin) {
   await page.getByTestId("login-email").fill("capture@example.test");
   await page.getByTestId("login-password").fill("not-a-secret");
   await page.getByTestId("login-submit").click();
-  await page.getByTestId("rail-team").waitFor({ timeout: 20_000 });
+  await page.getByTestId("nav-team").waitFor({ timeout: 20_000 });
 }
 
 // 시안 ①의 상태(#2776): 칸 3·5 응답 필요, 나머지 실행 중(hook 「작업 중」), PTY 6 끝남(종료 0).
@@ -288,10 +288,10 @@ async function scene(browser, origin, scheme) {
   await page.addInitScript((server) => { try { localStorage.setItem("momo.web.server.v1", server); } catch { /* 저장소 없는 캡처 */ } }, origin);
   await signIn(page, origin);
   const shot = (name) => page.screenshot({ path: resolve(OUT_DIR, `${name}-${tag}.png`) });
-  const badge = () => page.locator("[data-testid='rail-inbox-badge']").first().textContent().catch(() => null);
+  const badge = () => page.locator("[data-testid='nav-inbox'] [data-testid='mention-badge']").first().textContent().catch(() => null);
 
   // 칸이 「응답 필요」가 되도록 내 작업을 한 번 연다(상태는 이 기기 스토어가 쥔다).
-  await page.getByTestId("rail-mine").click();
+  await page.getByTestId("nav-mine").click();
   await page.getByTestId("my-work-tab").waitFor();
   await page.waitForFunction(() => document.querySelectorAll("[data-testid='my-work-tab'] [data-pane-id] .xterm-rows").length >= 1, null, { timeout: 15_000 });
   await page.waitForTimeout(1500);
@@ -306,14 +306,14 @@ async function scene(browser, origin, scheme) {
   await page.waitForTimeout(800);
 
   // 인박스: 에이전트 탭 없음, 활동 링크, 머리 수.
-  await page.getByTestId("rail-inbox").click();
+  await page.getByTestId("nav-inbox").click();
   await page.getByTestId("inbox-route").waitFor();
   await page.waitForTimeout(900);
   const tabs = await page.$$eval("[role='tab']", (els) => els.map((e) => e.textContent));
   report.badge[tag] = { rail: await badge(), header: await page.getByTestId("inbox-needs-me-count").textContent().catch(() => null), tabs };
   check(`${tag} 인박스에 「에이전트」 탭이 없다`, !tabs.some((t) => t?.includes("에이전트")), JSON.stringify(tabs));
-  check(`${tag} 레일 배지 = 5 (승인 2 + 응답 필요 칸 1 + 멘션 2)`, report.badge[tag].rail === "5", JSON.stringify(report.badge[tag]));
-  check(`${tag} 인박스 머리 수가 레일 배지와 같다`, report.badge[tag].header === report.badge[tag].rail, JSON.stringify(report.badge[tag]));
+  check(`${tag} 인박스 줄 알약 = 5 (승인 2 + 응답 필요 칸 1 + 멘션 2)`, report.badge[tag].rail === "5", JSON.stringify(report.badge[tag]));
+  check(`${tag} 인박스 머리 수가 줄 알약과 같다`, report.badge[tag].header === report.badge[tag].rail, JSON.stringify(report.badge[tag]));
   await shot("inbox-needs-action");
   await page.getByTestId("inbox-tab-mentions").click();
   await page.waitForTimeout(800);

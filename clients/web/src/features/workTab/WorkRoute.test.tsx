@@ -87,11 +87,23 @@ describe("/work 보기 (#2854)", () => {
     expect(isMyWorkTab(entry, "", true)).toBe(true);
   });
 
-  it("웹 /work는 호스트 판정 뒤의 작업 콘솔 그대로다(로컬 격자가 없다)", async () => {
+  it("웹 /work는 「내 작업」 설명 상태다: 이유 + 팀 작업 링크, 콘솔도 격자도 아니다 (#3334)", async () => {
     const el = await mount("/work");
     expect(el.querySelector('[data-testid="dock-stub"]')).toBeNull();
+    expect(el.querySelector('[data-testid="work-console-stub"]')).toBeNull();
+    const notice = el.querySelector('[data-testid="my-work-web-notice"]');
+    expect(notice?.textContent).toContain("이 기기에는 터미널 레인이 없어요");
+    expect(el.querySelector("h1")?.textContent).toBe("내 작업");
+    expect(
+      el.querySelector('[data-testid="my-work-web-notice-team-link"]')?.getAttribute("href")
+    ).toBe("/work?view=team");
+  });
+
+  it("웹 ?view=console은 호스트 판정 뒤의 작업 콘솔이다 (#3334: 콘솔의 새 주소)", async () => {
+    const el = await mount("/work?view=console");
     expect(el.querySelector('[data-testid="surface-route-stub"]')?.getAttribute("data-surface")).toBe("workConsole");
     expect(el.querySelector('[data-testid="work-console-stub"]')).not.toBeNull();
+    expect(el.querySelector('[data-testid="my-work-web-notice"]')).toBeNull();
   });
 
   it.each([false, true])("?view=team은 어디서나 「팀 작업」 보드다 (desktop=%s)", async (desktop) => {
@@ -110,8 +122,10 @@ describe("/work 보기 (#2854)", () => {
     expect(new URLSearchParams(seen.search).get("session")).toBe("abc");
   });
 
-  it("웹 세션 링크는 주소를 건드리지 않는다", async () => {
-    await mount("/work?session=abc");
-    expect(seen.search).toBe("?session=abc");
+  it("웹 세션 링크도 콘솔로 가고 view=console을 붙인다(목록으로 돌아가도 설명 상태로 새지 않는다)", async () => {
+    const el = await mount("/work?session=abc");
+    expect(el.querySelector('[data-testid="work-console-stub"]')).not.toBeNull();
+    expect(new URLSearchParams(seen.search).get("view")).toBe("console");
+    expect(new URLSearchParams(seen.search).get("session")).toBe("abc");
   });
 });

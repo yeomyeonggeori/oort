@@ -20,13 +20,18 @@ class MemoryStorage {
 afterEach(() => reloadDesktopNotificationKindsForTest(null));
 
 describe("desktop notification kinds preference", () => {
-  it("defaults both real fire-path kinds on", () => {
+  it("defaults: 승인·응답 필요·멘션·내 작업 끝남 켬, 새 DM과 DM 독 배지 끔 (#3339 결재)", () => {
     expect(desktopNotificationKinds()).toEqual(DEFAULT_DESKTOP_NOTIFICATION_KINDS);
-    expect(Object.keys(desktopNotificationKinds()).sort()).toEqual([
-      "approval",
-      "mention",
-      "reminder",
-    ]);
+    expect(desktopNotificationKinds()).toEqual({
+      mention: true,
+      approval: true,
+      reminder: true,
+      "pane-waiting": true,
+      "work-mine-done": true,
+      dm: false,
+      dockBadge: true,
+      dockDm: false,
+    });
   });
 
   it("persists a kind off and restores it on the next load", () => {
@@ -34,16 +39,14 @@ describe("desktop notification kinds preference", () => {
     reloadDesktopNotificationKindsForTest(storage);
     setDesktopNotificationKind("mention", false, storage);
     expect(JSON.parse(storage.getItem(DESKTOP_NOTIFICATION_STORAGE_KEY) ?? "")).toEqual({
+      ...DEFAULT_DESKTOP_NOTIFICATION_KINDS,
       mention: false,
-      approval: true,
-      reminder: true,
     });
 
     reloadDesktopNotificationKindsForTest(storage);
     expect(desktopNotificationKinds()).toEqual({
+      ...DEFAULT_DESKTOP_NOTIFICATION_KINDS,
       mention: false,
-      approval: true,
-      reminder: true,
     });
   });
 
@@ -56,9 +59,8 @@ describe("desktop notification kinds preference", () => {
     storage.setItem(DESKTOP_NOTIFICATION_STORAGE_KEY, JSON.stringify({ mention: false }));
     reloadDesktopNotificationKindsForTest(storage);
     expect(desktopNotificationKinds()).toEqual({
+      ...DEFAULT_DESKTOP_NOTIFICATION_KINDS,
       mention: false,
-      approval: true,
-      reminder: true,
     });
   });
 });

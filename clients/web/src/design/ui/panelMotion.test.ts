@@ -471,6 +471,13 @@ describe.skipIf(!chromiumAvailable)(
         ...quotedClassTokens(FILES.sidebar),
         ...quotedClassTokens(FILES.harness),
         "sidebar-drawer",
+        // 목록 열의 몸통(#3334). 따옴표 짝으로 소스를 훑는 위 방식은 JSX 글 속 따옴표·아포스트로피
+        // 하나에 짝이 밀려 진짜 className을 놓친다(`sidebar-list`가 이미 그 이유로 여기 없다). 이
+        // 이름들이 빠지면 열이 flex가 아니게 되어 하네스의 기하(뒤쪽 클릭 좌표)가 달라진다.
+        "h-[726px]", // 하네스 셸의 고정 높이(measure/panelMotion.harness.tsx)
+        "sidebar-list-root",
+        "sidebar-list-head",
+        "sidebar-list-body",
         "sidebar-scrim",
         "scrim-blur",
         "scrim-press",

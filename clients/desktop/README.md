@@ -110,6 +110,7 @@ interface HostedAgentProbe {
 | `notification_permission` | — | `"granted" \| "denied" \| "default"` | No prompt. Desktop: always `"granted"` — the plugin does not read the OS setting (#2676). |
 | `notification_request_permission` | — | same | Desktop: always `"granted"`, no prompt. macOS asks on the first `notification_show` instead (#2676). |
 | `notification_show` | `{ title: string, body?: string }` | `boolean` | `false` = not shown because permission is not granted. Desktop never returns `false`: a banner macOS drops is still `true` (#2676). |
+| `dock_badge_set` | `{ count: number }` | `void` \| error | Dock badge = the web bundle's 「나에게 필요한 일」 count (`useNeedsMeCount`); `0` clears it, capped at 999. Granted to the `main` window only (#3339). |
 | `keychain_available` | — | `boolean` | Probes the credential store. |
 | `keychain_refresh_token_handle` | — | `string \| null` | `shell:` + 32 hex of the stored token's SHA-256, or `null` (#3106). The token itself never comes back to the webview (`keychain_load_refresh_token` was removed). |
 | `keychain_store_refresh_token` | `{ token: string, origin: string }` | `void` \| error | Rejects an empty token, a `shell:` handle, or a missing/non-http(s) origin. `origin` pins the token to its server: the shell presents it nowhere else (#3106). |

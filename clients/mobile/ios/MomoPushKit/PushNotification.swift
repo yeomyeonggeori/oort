@@ -283,19 +283,70 @@ public struct PushNotificationResolver: Sendable {
     }
 }
 
+/// 「작업 끝남」 알림의 문구 (ADR-0120 부록 A, #3342). 순수 함수라 네트워크 없이 시험된다.
+///
+/// 제목은 「작업이 끝났어요」이고, 세션 이름을 알면 ` · 이름`을 붙인다. 본문은 끝난 턴의 길이다
+/// (`ran_ms` — 서버가 60초 이상일 때만 이 알림을 보낸다). 이름이나 길이를 모르면 **있는 만큼만**
+/// 말한다: 모르는 것을 지어내는 것보다 짧은 문장이 낫다.
+public enum PushWorkCompleteCopy {
+    public static let title = "작업이 끝났어요"
+    public static let fallbackBody = "작업이 끝나 대기 중이에요"
+
+    public static func display(label: String?, ranMs: Int64?) -> PushDisplayContent {
+        let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let title = trimmed.isEmpty ? Self.title : "\(Self.title) · \(trimmed)"
+        guard let ranMs, ranMs >= 60_000 else {
+            return PushDisplayContent(title: title, body: fallbackBody)
+        }
+        let minutes = Int(ranMs / 60_000)
+        let span: String
+        if minutes >= 60 {
+            let hours = minutes / 60
+            let rest = minutes % 60
+            span = rest == 0 ? "\(hours)시간" : "\(hours)시간 \(rest)분"
+        } else {
+            span = "\(minutes)분"
+        }
+        return PushDisplayContent(title: title, body: "\(span) 만에 끝났어요")
+    }
+}
+
 public actor MomoPushRESTFetcher: PushMessageFetching {
     private struct MessagePage: Decodable {
         let messages: [Message]
+    }
+
+    /// 카드 `props` 에서 이 파일이 읽는 세 키. 하나라도 모양이 달라도(문자열이 아니거나 없거나)
+    /// 메시지 전체를 버리지 않는다 — 각 키를 따로, 실패하면 nil 로 읽는다.
+    private struct Props: Decodable {
+        let kind: String?
+        let ranMs: Int64?
+        let label: String?
+
+        enum CodingKeys: String, CodingKey {
+            case kind, label
+            case ranMs = "ran_ms"
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            kind = try? container.decode(String.self, forKey: .kind)
+            ranMs = try? container.decode(Int64.self, forKey: .ranMs)
+            label = try? container.decode(String.self, forKey: .label)
+        }
     }
 
     private struct Message: Decodable {
         let id: String
         let authorMemberID: String
         let body: String?
+        let rootID: String?
+        let props: Props?
 
         enum CodingKeys: String, CodingKey {
-            case id, body
+            case id, body, props
             case authorMemberID = "authorMemberId"
+            case rootID = "rootId"
         }
     }
 
@@ -321,9 +372,22 @@ public actor MomoPushRESTFetcher: PushMessageFetching {
             root + "/channels/\(envelope.channelID)/messages?limit=200",
             fetchSession: fetchSession
         )
-        async let rosterData = get(root + "/roster", fetchSession: fetchSession)
         let page = try decoder.decode(MessagePage.self, from: try await messageData)
-        let roster = try decoder.decode(Roster.self, from: try await rosterData)
+        // 「작업 끝남」 카드의 작성자는 **받는 사람 본인**(세션을 시작한 사람)이라, 아래의
+        // 「작성자 이름 + 본문」 규칙을 타면 「내 이름 / 작업 완료 — idle 대기」가 된다.
+        // 카드가 말하는 것은 사람이 아니라 세션이므로 문구를 따로 짓는다. 이름 목록은
+        // 이 갈래에서 읽지 않는다.
+        if envelope.reason == "work_session_idle",
+           let card = page.messages.first(where: { $0.id.lowercased() == envelope.messageID.lowercased() }),
+           card.props?.kind == "work_session_idle" {
+            // 세션 이름은 카드가 아니라 **루트 카드**의 `props.label` 에 있다. 같은 쪽(최근
+            // 200개)에 있을 때만 쓴다 — 없으면 이름 없이 말한다.
+            let rootLabel = page.messages
+                .first(where: { $0.id.lowercased() == (card.rootID ?? "").lowercased() })?
+                .props?.label
+            return PushWorkCompleteCopy.display(label: rootLabel, ranMs: card.props?.ranMs)
+        }
+        let roster = try decoder.decode(Roster.self, from: try await get(root + "/roster", fetchSession: fetchSession))
         guard let message = page.messages.first(where: { $0.id.lowercased() == envelope.messageID.lowercased() }),
               let body = message.body?.trimmingCharacters(in: .whitespacesAndNewlines),
               !body.isEmpty,

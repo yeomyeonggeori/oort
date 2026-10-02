@@ -69,6 +69,8 @@ import {
   type SessionListInput,
 } from "@momo/core/features/workbench/sessionList";
 import { nextWaitingPane, waitingLine } from "@momo/core/features/workbench/paneStatus";
+import { createPortal } from "react-dom";
+import { useSidebarBodySlot } from "@/features/sidebar/sidebarBodySlot";
 import { SessionList, StatusMark, type SessionListHandle } from "./SessionList";
 import { paneAttention, paneStatusOf } from "./paneAttention";
 import type { PaneLaneView, PaneStatusView } from "../WorkbenchGrid";
@@ -250,6 +252,8 @@ export function LocalTerminalDock({
   const attention = paneAttention();
   const listRef = useRef<SessionListHandle>(null);
   const list = useSessionListOpen(minimumSize(layout.root).width);
+  // 「내 작업」의 세션 목록은 앱 사이드바의 목록 열 본문 자리에 선다(#3334).
+  const bodySlot = useSidebarBodySlot();
   const listOpenRef = useRef(list.open);
   listOpenRef.current = list.open;
   const setListOpen = list.setOpen;
@@ -1027,19 +1031,22 @@ export function LocalTerminalDock({
         data-session-list={list.open ? "open" : "closed"}
         className="flex min-h-0 min-w-0 flex-1"
       >
-        {list.open ? (
-          <SessionList
-            ref={listRef}
-            sessions={listInputs}
-            focusedPaneId={layout.focused}
-            platform={platform}
-            onActivate={(paneId) => applyFromList(focusPane(layoutRef.current, paneId))}
-            onMaximize={(paneId) => applyFromList(toggleMaximize(layoutRef.current, paneId))}
-            onFocusIndex={(index) => applyFromList(focusIndex(layoutRef.current, index))}
-            newSessionItems={newSessionItems}
-            onNewSessionMenuCloseAutoFocus={onMenuCloseAutoFocus}
-          />
-        ) : null}
+        {list.open && bodySlot
+          ? createPortal(
+              <SessionList
+                ref={listRef}
+                sessions={listInputs}
+                focusedPaneId={layout.focused}
+                platform={platform}
+                onActivate={(paneId) => applyFromList(focusPane(layoutRef.current, paneId))}
+                onMaximize={(paneId) => applyFromList(toggleMaximize(layoutRef.current, paneId))}
+                onFocusIndex={(index) => applyFromList(focusIndex(layoutRef.current, index))}
+                newSessionItems={newSessionItems}
+                onNewSessionMenuCloseAutoFocus={onMenuCloseAutoFocus}
+              />,
+              bodySlot
+            )
+          : null}
         <section aria-labelledby="my-work-title" className="flex min-h-0 min-w-0 flex-1 flex-col">
           <header className="flex h-work-tab-bar shrink-0 items-center gap-2 pl-4 pr-3">
             {/* 접힌 목록을 펴는 단추는 이 머리에 없다(#3280): 제목줄의 접기 단추와 ⌘B가 한다. */}

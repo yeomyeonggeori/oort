@@ -2,6 +2,7 @@
 
 import { act, createElement, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { mountSidebarBodySlotForTest } from "@/features/sidebar/sidebarBodySlot";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
 import { resolveRow, type AiDefaultsAccount } from "@momo/core/features/settings/aiDefaults";
@@ -78,6 +79,7 @@ function fakeSessions() {
 
 const reactAct = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 let root: Root | null = null;
+let unmountSlot: (() => void) | null = null;
 let host: HTMLElement | null = null;
 
 function q(id: string) {
@@ -85,6 +87,7 @@ function q(id: string) {
 }
 
 async function mount(sessions: LocalSessions) {
+  unmountSlot = mountSidebarBodySlotForTest();
   host = document.createElement("main");
   document.body.append(host);
   root = createRoot(host);
@@ -166,6 +169,8 @@ beforeEach(() => {
 afterEach(() => {
   if (root) act(() => root?.unmount());
   root = null;
+  unmountSlot?.();
+  unmountSlot = null;
   host?.remove();
 });
 

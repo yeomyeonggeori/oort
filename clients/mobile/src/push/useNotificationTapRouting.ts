@@ -1,4 +1,5 @@
 import {channelLabel} from '@momo/core/features/workspace/directory';
+import {fetchWorkSessions} from '@momo/core/lib/api';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {AccessibilityInfo} from 'react-native';
 
@@ -12,6 +13,7 @@ import {
   NOTIFICATION_TAP_COPY,
   openableChannel,
   unavailableCopy,
+  workSessionForTap,
   type NotificationTarget,
 } from './tapArrival';
 
@@ -81,6 +83,11 @@ interface PendingTap {
   nav: NotificationTapNav;
   /** 목록 실패를 이 탭에 대해 이미 알렸는가. 한 탭에 한 번만 말한다. */
   failureSaid: boolean;
+  /**
+   * 「작업 끝남」 탭의 세션 조회 상태. 효과가 다시 돌아도 두 번 묻지 않는다.
+   * `missed` 는 물었는데 맞는 세션이 없었다 — 그때 이 탭은 평범한 알림처럼 대화로 간다.
+   */
+  session: 'unasked' | 'asking' | 'missed';
 }
 
 export function useNotificationTapRouting(
@@ -93,6 +100,8 @@ export function useNotificationTapRouting(
   const roster = useDirectory(workspaceId);
   const invalidateApprovals = useInvalidateApprovals();
   const [notice, setNotice] = useState<string | null>(null);
+  // 세션 조회가 끝났음을 효과에 알리는 박동. 값은 읽지 않고, 바뀐다는 사실이 전부다.
+  const [resolveTick, setResolveTick] = useState(0);
 
   // 판정이 끝나는 순간의 명부로 제목을 짓는다. 탭이 닿을 때의 것을 붙들면, 기다리는
   // 사이에 도착한 명부가 헤더에 반영되지 않는다.
@@ -142,6 +151,7 @@ export function useNotificationTapRouting(
         arrivedAtMs: Date.now(),
         nav: {tab: navTab, conversation: navConversation},
         failureSaid: false,
+        session: 'unasked',
       };
     }
 
@@ -163,6 +173,39 @@ export function useNotificationTapRouting(
     const {target} = pending;
     const channel = openableChannel(channelList, target.channelId);
     if (channel !== null) {
+      // 「작업 끝남」은 대화가 아니라 **그 세션**으로 간다 (#3342). 세션 원장을 한 번
+      // 읽어 이 알림의 루트와 맞는 것을 찾고, 없으면 아래의 대화 착지로 떨어진다.
+      // 읽는 동안 탭은 대기로 남는다 — 사람이 다른 곳을 고르면 위에서 접힌다.
+      //
+      // 「작업 콘솔을 싣는가」(`isSurfaceProvided('workConsole')`)는 묻지 않는다. 그 판정은
+      // 호스트 목록을 읽은 **뒤에야** 서는데, 콜드 런치의 탭은 그보다 먼저 온다 — 묻는
+      // 순간 이 길이 닫혀 있는 것이 정상이 된다. 세션 원장이 이 서버에 없으면 읽기가
+      // 실패하고, 실패는 아래에서 대화로 떨어진다.
+      if (target.reason === 'work_session_idle' && pending.session !== 'missed') {
+        if (pending.session === 'asking') return;
+        pending.session = 'asking';
+        void fetchWorkSessions(workspaceId)
+          .then(sessions => workSessionForTap(target, sessions))
+          .catch(() => null)
+          .then(session => {
+            // 그 사이 사람이 옮겼거나 새 탭이 왔다면 이 답은 낡았다.
+            if (pendingRef.current !== pending) return;
+            if (session !== null) {
+              pendingRef.current = null;
+              setNotice(null);
+              dispatch({
+                type: 'openWorkSessionFromNotification',
+                workSession: {sessionId: session.id},
+              });
+              return;
+            }
+            // 세션을 못 찾았다: 평범한 알림처럼 대화로 연다. 효과를 다시 돌려 그
+            // 길을 타게 한다.
+            pending.session = 'missed';
+            setResolveTick(tick => tick + 1);
+          });
+        return;
+      }
       pendingRef.current = null;
       // 승인 카드의 컨트롤은 대기 원장에서 온다(`usePendingApprovals`). 그 캐시는
       // 이 알림보다 먼저 읽혔을 수 있고, 그러면 방금 도착한 승인이 카드에서 「인박스나
@@ -227,6 +270,8 @@ export function useNotificationTapRouting(
     invalidateApprovals,
     dispatch,
     member.id,
+    workspaceId,
+    resolveTick,
   ]);
 
   const dismissNotice = useCallback(() => setNotice(null), []);

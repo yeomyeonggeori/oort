@@ -229,6 +229,7 @@ export type NavAction =
   | {type: 'selectTab'; tab: Tab}
   | {type: 'openConversation'; conversation: OpenConversation}
   | {type: 'openFromNotification'; conversation: OpenConversation}
+  | {type: 'openWorkSessionFromNotification'; workSession: OpenWorkSession}
   | {type: 'openSearch'; initialQuery?: string}
   | {type: 'openAgentList'}
   | {type: 'openAgent'; agent: OpenAgent}
@@ -275,6 +276,18 @@ export function navReducer(state: NavState, action: NavAction): NavState {
         tab: 'home',
         ...NO_LAYERS,
         conversation: action.conversation,
+      };
+    case 'openWorkSessionFromNotification':
+      // 「작업 끝남」 알림도 **새 입구**다 — 위 `openFromNotification` 과 같은 이유로 열려
+      // 있던 층은 모두 걷는다. 세션 화면 **아래**에는 작업 목록(팀 보드)을 깐다: 그
+      // 화면의 뒤로가기는 「작업 목록으로」라고 말하고(`WorkSessionDetailScreen`), 목록에서
+      // 세션을 눌러 들어온 것과 같은 모양이어야 그 말이 참이다. 뒤로 두 번이면 홈이다.
+      return {
+        ...state,
+        tab: 'home',
+        ...NO_LAYERS,
+        workList: true,
+        workSession: action.workSession,
       };
     case 'openSearch':
       // 검색은 탭이다(ADR-0189 D1). 넘길 말이 있으면 씨앗을 새로 세운다 — 없으면
