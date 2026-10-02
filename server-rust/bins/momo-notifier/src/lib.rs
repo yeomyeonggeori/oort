@@ -65,6 +65,7 @@ pub mod huddle_sweep;
 pub mod provider;
 pub mod push;
 pub mod push_relay;
+pub mod share_retention_sweep;
 
 use std::future::Future;
 use std::sync::Arc;
@@ -723,6 +724,27 @@ impl Notifier {
             }
         });
 
+        // ---- loop 2c': shared-session payload retention (#2862) ----------------
+        //
+        // ADR-0190 D4-b: the S1 extension is deleted 30 days after the session
+        // ended. Cross-tenant read, per-tenant delete under the GUC.
+        let shares = self.clone();
+        let share_retention_task = tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(shares.config.sweep_interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                if let Err(error) = share_retention_sweep::sweep_expired_shares(
+                    &shares.pool,
+                    shares.config.claim_batch_size,
+                )
+                .await
+                {
+                    tracing::error!(error = %error, "share retention sweep iteration failed");
+                }
+            }
+        });
+
         // ---- loop 2d: the huddle ghost sweep (#2758, ADR-0122 증보 D-H4) ------
         //
         // Its own task: each tick makes one LiveKit call per active huddle, and
@@ -895,6 +917,7 @@ impl Notifier {
         lease_task.abort();
         approval_sweep_task.abort();
         control_window_sweep_task.abort();
+        share_retention_task.abort();
         if let Some(task) = huddle_sweep_task {
             task.abort();
         }

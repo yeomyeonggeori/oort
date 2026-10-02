@@ -6494,6 +6494,97 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/share:
+    patch:
+      tags: [work-sessions, work-hosts]
+      operationId: shareWorkSession
+      summary: Publish or withdraw a shared local session's S1 payload as its own host.
+      description: >
+        #2862, ADR-0190 D4-b and ADR-0194 D4. MomoHost-signed only: a human or
+        agent bearer is 403, an unsigned or replayed request is 401. The
+        signing host must be the session's own host, the session must be the
+        host owner's own, and its origin must be local_pty (an agent-lane
+        session is 403 share_local_session_only). shared:true replaces the
+        whole S1 payload (omitted optional fields are cleared); shared:false
+        deletes it and takes no other field. Unknown fields are refused by
+        name, so there is no field for a commit title, a file name, a path, a
+        remote URL or terminal output. Limits: body 8 KiB (413), repo 100
+        chars without a path separator, branch 200 chars and not a path, at
+        most 12 stage markers of at most 80 chars each without control
+        characters, closed harness and state lists, diff numbers as
+        non-negative 32-bit integers, last activity in epoch seconds. prUrl must be https on
+        github.com or an operator-configured GitHub Enterprise host
+        (MOMO_GITHUB_ENTERPRISE_HOSTS) with the exact path
+        /owner/repo/pull/number; query and fragment are dropped and the
+        canonical form stored. The server never fetches that URL and holds no
+        GitHub token (ADR-0192 D7). Starting or updating sharing on an ended
+        session is 409 share_session_ended; unsharing is always allowed. In the
+        same transaction a work.session.share_changed outbox row is written
+        when sharing turns on or off or the derived state changes (payload:
+        session_id, channel_id, kind enabled|state_changed|disabled, nothing
+        else); a diff-only or marker-only update emits nothing. The payload is
+        deleted 30 days after the session ends.
+      security:
+        - workHostAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkSessionId"
+        - $ref: "#/components/parameters/WorkHostSentAt"
+        - $ref: "#/components/parameters/WorkHostSignature"
+        - $ref: "#/components/parameters/WorkHostRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShareWorkSessionRequest"
+      responses:
+        "200":
+          description: Payload stored (or replaced), or withdrawn. Unsharing something not shared is also 200.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkSessionShareResponse"
+        "400":
+          description: Unknown field, missing required field, or a value outside its limit, list or grammar.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid or replayed host signature, or a query string on the request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: >
+            Human or agent bearer, another host's or another member's session,
+            or a session whose origin is not local_pty (code
+            share_local_session_only).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Session does not exist in this workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The session has ended (code share_session_ended).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Body larger than 8 KiB.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/display-control:
     delete:
       tags: [work-sessions]
@@ -13727,6 +13818,101 @@ components:
         - $ref: "#/components/schemas/UpdateWorkSessionObservationRequest"
         - $ref: "#/components/schemas/RelayWorkSessionACPEventRequest"
         - $ref: "#/components/schemas/BindWorkSessionRemotePTYRequest"
+
+    ShareWorkSessionRequest:
+      oneOf:
+        - $ref: "#/components/schemas/UnshareWorkSessionRequest"
+        - $ref: "#/components/schemas/ShareWorkSessionPayloadRequest"
+
+    UnshareWorkSessionRequest:
+      type: object
+      required: [shared]
+      additionalProperties: false
+      properties:
+        shared:
+          type: boolean
+          enum: [false]
+
+    ShareWorkSessionPayloadRequest:
+      type: object
+      required: [shared, harness, state]
+      additionalProperties: false
+      description: >
+        ADR-0190 D4-b S1, spelled as the desktop collector's ShareSummaryS1
+        (momo-core, #2861). Every optional field may be absent or null, which
+        means unknown and is cleared. Nothing else is accepted: no commit
+        titles, file names, paths, remote URLs or terminal output.
+      properties:
+        shared:
+          type: boolean
+          enum: [true]
+        repo:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 100
+          description: Repository display name (the top-level folder's last element); no path separator.
+        branch:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 200
+          description: >
+            Git branch name (no whitespace and none of ~ ^ : ? * [); omitted
+            for a detached HEAD. Not a path.
+        harness:
+          type: string
+          enum: [claude, codex, grok, opencode, shell, other]
+        state:
+          type: string
+          description: >
+            momo-core SessionStatus: waiting (나를 기다림), running (실행 중),
+            review (검토 대기), idle (대기), done (끝남), stopped (멈춤).
+          enum: [waiting, running, review, idle, done, stopped]
+        stages:
+          type: array
+          nullable: true
+          maxItems: 12
+          items:
+            type: string
+            minLength: 1
+            maxLength: 80
+        diff:
+          type: object
+          nullable: true
+          additionalProperties: false
+          description: Numbers only (null = unknown); there is no file-name field.
+          properties:
+            added: { type: integer, nullable: true, minimum: 0, maximum: 2147483647 }
+            deleted: { type: integer, nullable: true, minimum: 0, maximum: 2147483647 }
+            files: { type: integer, nullable: true, minimum: 0, maximum: 2147483647 }
+            ahead: { type: integer, nullable: true, minimum: 0, maximum: 2147483647 }
+            behind: { type: integer, nullable: true, minimum: 0, maximum: 2147483647 }
+            uncommitted: { type: integer, nullable: true, minimum: 0, maximum: 2147483647 }
+        prUrl:
+          type: string
+          nullable: true
+          maxLength: 300
+          description: >
+            https URL of the form https://{host}/{owner}/{repo}/pull/{number}
+            on github.com or an operator-configured GitHub Enterprise host.
+            Query and fragment are dropped.
+        lastActivityAt:
+          type: integer
+          format: int64
+          nullable: true
+          description: Epoch seconds. Between 2020-01-01 and now plus five minutes.
+
+    WorkSessionShareResponse:
+      type: object
+      required: [sessionId, shared]
+      additionalProperties: false
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+        shared:
+          type: boolean
 
     BindWorkSessionRemotePTYRequest:
       type: object

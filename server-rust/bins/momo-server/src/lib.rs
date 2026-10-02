@@ -1113,6 +1113,13 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/work-sessions/{session}/resume",
             post(routes::work_sessions::resume),
         )
+        // #2862 (ADR-0194 D4): a shared local session's S1 payload. Host-signed
+        // only — a human bearer is refused in the handler, and the path is on the
+        // signed allow-list (`work_host_auth::is_allowed_signed_path`).
+        .route(
+            "/v1/workspaces/{ws}/work-sessions/{session}/share",
+            patch(routes::work_session_share::share),
+        )
         // ADR-0188 D5 (#3000): the session owner's permission decision.
         // Human bearer only — never on the signed host allow-list, and absent
         // from `momo_auth::required_agent_scope`.
