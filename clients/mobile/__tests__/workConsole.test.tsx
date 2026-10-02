@@ -1,7 +1,6 @@
-import type {Member, WorkSession} from '@momo/core/lib/api';
+import type {Member, SharedWorkSession, WorkSession} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
-  act,
   cleanup,
   fireEvent,
   render,
@@ -16,16 +15,7 @@ import {AccessibilityInfo, StyleSheet} from 'react-native';
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
-import {
-  darkPalette,
-  lightPalette,
-  TOUCH_TARGET,
-} from '../src/design/tokens';
-import {
-  WORK_CONSOLE_LIMIT,
-  workConsoleSessions,
-  workSessionRecentTimeLabel,
-} from '../src/features/work/model';
+import {TOUCH_TARGET} from '../src/design/tokens';
 import AppShell from '../src/shell/AppShell';
 import {
   __resetSessionStore,
@@ -250,6 +240,38 @@ const SESSION_EVENTS = [
   }),
 ];
 
+// 「작업」은 팀 보드다(#2864). 에이전트 세션 화면(허락 서명 컨트롤이 있는 곳)은 내가 시킨
+// 에이전트 세션을 보드의 시트에서 눌러야 열린다. 원장 한 줄마다 그 길의 줄을 하나 만든다.
+function sharedRowFor(session: WorkSession): SharedWorkSession {
+  return {
+    sessionId: session.id,
+    origin: 'host',
+    label: session.label,
+    folderLabel: null,
+    status: session.status,
+    owner: {memberId: SELF_ID, displayName: '곽성재'},
+    homeChannel: {id: session.channelId, name: 'general'},
+    startedAtMs: session.startedAtMs,
+    endedAtMs: session.endedAtMs ?? null,
+    sharedAtMs: null,
+    repo: null,
+    branch: null,
+    harness: session.tool,
+    state: session.status === 'ended' ? 'done' : 'running',
+    stages: [],
+    diff: {
+      added: null,
+      deleted: null,
+      files: null,
+      ahead: null,
+      behind: null,
+      uncommitted: null,
+    },
+    prUrl: null,
+    lastActivityAt: Math.floor(Date.now() / 1000),
+  };
+}
+
 function jsonResponse(status: number, body: unknown): Response {
   return {
     status,
@@ -267,6 +289,12 @@ interface RouteOverrides {
 function installFetch(overrides: RouteOverrides = {}): jest.Mock {
   const mock = jest.fn(async (input: string | URL | Request) => {
     const url = String(input);
+    if (url.includes('/work-sessions/shared')) {
+      return jsonResponse(200, {
+        sessions: WORK_SESSIONS.map(sharedRowFor),
+        nextCursor: null,
+      });
+    }
     if (url.includes('/work-sessions')) {
       return overrides.workSessions
         ? overrides.workSessions()
@@ -333,157 +361,26 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
-async function openWorkTab(): Promise<void> {
+async function openBoard(): Promise<void> {
   renderShell();
   await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
   // 탭이던 것이 + 메뉴의 행이 되었다 (ADR-0189 D1, #2714 → #2750).
   fireEvent.press(screen.getByTestId('shell-plus'));
   fireEvent.press(screen.getByTestId('plus-menu-work'));
-  await waitFor(() => expect(screen.getByTestId('work-list')).toBeTruthy());
+  await waitFor(() =>
+    expect(screen.getByTestId('team-board-list')).toBeTruthy(),
+  );
 }
 
-describe('workspace-wide 작업 tab', () => {
-  it('mounts lazily, then shows running-first rows with exact shared location labels', async () => {
-    const fetchMock = installFetch();
-    renderShell();
-    await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
-    expect(screen.getByTestId('shell-plus')).toBeTruthy();
-    expect(
-      fetchMock.mock.calls.some(([url]) => String(url).includes('/work-sessions')),
-    ).toBe(false);
-
-    // 탭이던 것이 + 메뉴의 행이 되었다 (ADR-0189 D1, #2714 → #2750).
-
-    fireEvent.press(screen.getByTestId('shell-plus'));
-
-    fireEvent.press(screen.getByTestId('plus-menu-work'));
-    expect(screen.getByTestId('work-loading')).toBeTruthy();
-    await waitFor(() => expect(screen.getByTestId('work-list')).toBeTruthy());
-    expect(screen.getByTestId('work-title')).toHaveTextContent('작업 콘솔');
-
-    expect(
-      screen.getAllByTestId(/^work-row-/).map(node => node.props.testID),
-    ).toEqual([
-      'work-row-SESSION-APP',
-      'work-row-SESSION-WORKD',
-      'work-row-SESSION-UNKNOWN',
-      'work-row-SESSION-CLOUD',
-    ]);
-    expect(screen.getByTestId('work-location-SESSION-APP')).toHaveTextContent(
-      /T1 · 데스크톱 앱/,
-    );
-    expect(screen.getByTestId('work-location-SESSION-WORKD')).toHaveTextContent(
-      /T2 · 셀프호스트/,
-    );
-    expect(screen.getByTestId('work-location-SESSION-CLOUD')).toHaveTextContent(
-      /T3 · 클라우드/,
-    );
-    expect(screen.getByTestId('work-location-SESSION-UNKNOWN')).toHaveTextContent(
-      /실행 위치 확인 필요/,
-    );
-    expect(screen.getByTestId('work-row-SESSION-APP')).toHaveTextContent(
-      /general · 담당 김인턴 @kim-intern/,
-    );
-    expect(screen.getByTestId('work-row-SESSION-APP')).toHaveTextContent(
-      /도구 codex · 시작 \d{2}:\d{2}/,
-    );
-    expect(screen.getByTestId('work-row-SESSION-WORKD')).toHaveTextContent(
-      /도구 prime · 시작 \d{2}:\d{2}/,
-    );
-    expect(screen.getByTestId('work-row-SESSION-UNKNOWN')).toHaveTextContent(
-      /도구 hermes · 시작 \d{2}:\d{2}/,
-    );
-    expect(screen.getByTestId('work-row-SESSION-CLOUD')).toHaveTextContent(
-      /도구 claude · 종료 \d{2}:\d{2}/,
-    );
-    expect(screen.getByTestId('work-location-SESSION-UNKNOWN')).toHaveProp(
-      'accessibilityLabel',
-      '실행 위치를 확인해야 합니다',
-    );
-
-    fireEvent.press(screen.getByTestId('work-filter-active'));
-    expect(screen.getAllByTestId(/^work-row-/).map(node => node.props.testID)).toEqual([
-      'work-row-SESSION-APP',
-      'work-row-SESSION-WORKD',
-    ]);
-  });
-
-  it('keeps the visited tab mounted without polling its ledger while hidden', async () => {
-    const fetchMock = installFetch();
-    await openWorkTab();
-    const reads = () =>
-      fetchMock.mock.calls.filter(([url]) => String(url).includes('/work-sessions'))
-        .length;
-    const before = reads();
-    // 층을 닫는다 — 탭바는 층 뒤에 있어 누를 수 없다(ADR-0189 D1, #2714).
-    fireEvent.press(screen.getByLabelText('작업 콘솔 닫기'));
-    jest.useFakeTimers();
-    act(() => jest.advanceTimersByTime(120_000));
-    expect(reads()).toBe(before);
-  });
-
-  it('renders an empty ledger as empty', async () => {
-    installFetch({workSessions: () => jsonResponse(200, {workSessions: []})});
-    renderShell();
-    await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
-    // 탭이던 것이 + 메뉴의 행이 되었다 (ADR-0189 D1, #2714 → #2750).
-    fireEvent.press(screen.getByTestId('shell-plus'));
-    fireEvent.press(screen.getByTestId('plus-menu-work'));
-    await waitFor(() => expect(screen.getByTestId('work-empty')).toBeTruthy());
-  });
-
-  it('renders a failed first read as an error and retries it', async () => {
-    let attempts = 0;
-    installFetch({
-      workSessions: () => {
-        attempts += 1;
-        return attempts === 1
-          ? jsonResponse(500, {error: {message: 'DO_NOT_RENDER_SERVER_BODY'}})
-          : jsonResponse(200, {workSessions: WORK_SESSIONS});
-      },
-    });
-    renderShell();
-    await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
-    // 탭이던 것이 + 메뉴의 행이 되었다 (ADR-0189 D1, #2714 → #2750).
-    fireEvent.press(screen.getByTestId('shell-plus'));
-    fireEvent.press(screen.getByTestId('plus-menu-work'));
-    await waitFor(() => expect(screen.getByTestId('work-error')).toBeTruthy());
-    expect(screen.queryByText(/DO_NOT_RENDER_SERVER_BODY/)).toBeNull();
-    fireEvent.press(screen.getByTestId('work-error-retry'));
-    await waitFor(() => expect(screen.getByTestId('work-list')).toBeTruthy());
-  });
-
-  it('retains cached rows on refetch failure and when NetInfo goes offline', async () => {
-    let fail = false;
-    installFetch({
-      workSessions: () =>
-        fail
-          ? jsonResponse(500, {error: {message: 'nope'}})
-          : jsonResponse(200, {workSessions: WORK_SESSIONS}),
-    });
-    await openWorkTab();
-    fail = true;
-    await act(async () => {
-      await queryClient?.invalidateQueries({queryKey: ['work-sessions', WS]});
-    });
-    await waitFor(() => expect(screen.getByTestId('work-stale-cached')).toBeTruthy());
-    expect(screen.getByTestId('work-row-SESSION-APP')).toBeTruthy();
-
-    const netInfo = jest.requireMock('@react-native-community/netinfo').default as {
-      __emit: (state: {
-        isConnected: boolean | null;
-        isInternetReachable: boolean | null;
-      }) => void;
-    };
-    act(() => {
-      netInfo.__emit({isConnected: false, isInternetReachable: false});
-    });
-    await waitFor(() =>
-      expect(screen.getByTestId('work-offline-cached')).toBeTruthy(),
-    );
-    expect(screen.getByTestId('work-row-SESSION-APP')).toBeTruthy();
-  });
-});
+/** 보드 → 줄 → 읽기 전용 시트 → 「내 에이전트 세션 화면」 → 에이전트 세션 화면. */
+async function openWorkDetail(sessionId: string): Promise<void> {
+  await openBoard();
+  fireEvent.press(screen.getByTestId(`team-board-row-${sessionId}`));
+  await waitFor(() =>
+    expect(screen.getByTestId('team-detail-open-agent-session')).toBeTruthy(),
+  );
+  fireEvent.press(screen.getByTestId('team-detail-open-agent-session'));
+}
 
 describe('read-only phone-native work detail', () => {
   it('shows typed plan/lifecycle/tool summaries, never raw payload/body, and returns from origin conversation', async () => {
@@ -491,8 +388,7 @@ describe('read-only phone-native work detail', () => {
       .spyOn(AccessibilityInfo, 'setAccessibilityFocus')
       .mockImplementation(() => {});
     installFetch();
-    await openWorkTab();
-    fireEvent.press(screen.getByTestId('work-row-SESSION-APP'));
+    await openWorkDetail('SESSION-APP');
 
     expect(screen.getByTestId('work-detail-pane')).toHaveProp(
       'accessibilityViewIsModal',
@@ -550,7 +446,9 @@ describe('read-only phone-native work detail', () => {
 
     const detailBacks = screen.getAllByTestId('header-back');
     fireEvent.press(detailBacks[detailBacks.length - 1]);
-    await waitFor(() => expect(screen.getByTestId('work-list')).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByTestId('team-board-list')).toBeTruthy(),
+    );
     await waitFor(() =>
       expect(focusSpy.mock.calls.length).toBeGreaterThan(detailReturnFocusCalls),
     );
@@ -573,8 +471,7 @@ describe('read-only phone-native work detail', () => {
     'does not call an empty %s relay a complete empty ledger',
     async (sessionId, copy) => {
       installFetch();
-      await openWorkTab();
-      fireEvent.press(screen.getByTestId(`work-row-${sessionId}`));
+      await openWorkDetail(sessionId);
       await waitFor(() =>
         expect(screen.getByTestId('work-detail-host-unverified')).toHaveTextContent(
           copy,
@@ -587,29 +484,12 @@ describe('read-only phone-native work detail', () => {
     },
   );
 
-  it('keeps essential text scalable and every new direct control at least 44pt', async () => {
+  it('keeps every direct control at least 44pt and the headings headings', async () => {
     installFetch();
-    await openWorkTab();
-    const filterStyle = StyleSheet.flatten(
-      screen.getByTestId('work-filter-active').props.style,
+    await openWorkDetail('SESSION-APP');
+    await waitFor(() =>
+      expect(screen.getByTestId('work-detail-origin')).toBeTruthy(),
     );
-    expect(filterStyle.minHeight).toBeGreaterThanOrEqual(TOUCH_TARGET);
-    expect([darkPalette.textFaint, lightPalette.textFaint]).toContain(
-      filterStyle.borderColor,
-    );
-    // 탭바 글자가 큰 글씨에서 자라는지를 여기서 쟀었다. DS2-2(#2714)의 탭바는 시안
-    // A 대로 아이콘만 들고(이름은 VoiceOver 라벨), 그 기하·라벨은
-    // `shellChrome.test.tsx` 가 잰다. 이 층의 나가는 길은 머리의 뒤로가기다.
-    expect(screen.getByLabelText('작업 콘솔 닫기')).toBeTruthy();
-    expect(screen.getByTestId('work-title')).toHaveProp(
-      'accessibilityRole',
-      'header',
-    );
-    const title = screen.getByText('릴레이 재시작 절차');
-    expect(title.props.numberOfLines).toBeUndefined();
-    expect(title.props.allowFontScaling).not.toBe(false);
-
-    fireEvent.press(screen.getByTestId('work-row-SESSION-APP'));
     const originStyle = StyleSheet.flatten(
       screen.getByTestId('work-detail-origin').props.style,
     );
@@ -621,30 +501,6 @@ describe('read-only phone-native work detail', () => {
 });
 
 describe('bounded model and privacy boundary', () => {
-  it('uses status as the timestamp fact and fails closed on a missing end time', () => {
-    expect(
-      workSessionRecentTimeLabel(
-        workSession({id: 'ENDED-WITHOUT-TIME', status: 'ended'}),
-      ),
-    ).toBe('종료 시각 확인 필요');
-    expect(
-      workSessionRecentTimeLabel(
-        workSession({
-          id: 'RUNNING-WITH-STALE-END',
-          status: 'running',
-          endedAtMs: NOW + 60_000,
-        }),
-      ),
-    ).toMatch(/^시작 \d{2}:\d{2}$/);
-  });
-
-  it('caps defensive rendering at the same 200 rows as the membership-scoped endpoint', () => {
-    const many = Array.from({length: WORK_CONSOLE_LIMIT + 5}, (_, index) =>
-      workSession({id: `SESSION-${index}`, startedAtMs: index}),
-    );
-    expect(workConsoleSessions(many, 'all')).toHaveLength(WORK_CONSOLE_LIMIT);
-  });
-
   // LIVE-2 added `issueDisplayAttach` and its grant to the shared core, which
   // is exactly the shape this guard already exists to keep off the phone: the
   // screen half carries the same 60 second bearer and the same host address as
@@ -654,7 +510,6 @@ describe('bounded model and privacy boundary', () => {
   it('contains no terminal or display attach, WebView, secret, or durable-storage path', () => {
     const files = [
       '../src/features/work/queries.ts',
-      '../src/screens/WorkConsoleScreen.tsx',
       '../src/screens/WorkSessionDetailScreen.tsx',
     ];
     const source = files
