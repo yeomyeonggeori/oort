@@ -4,34 +4,12 @@ import {
   type WorkHost,
   type WorkSession,
 } from '@momo/core/lib/api';
-import {sortSessions} from '@momo/core/features/work/workSessionModel';
-import {clockLabel} from '@momo/core/features/work/workSessionFormat';
 import {workExecutionLocation} from '@momo/core/features/work/workLocation';
 import {
   channelLabel,
   memberNameParts,
   type Directory,
 } from '@momo/core/features/workspace/directory';
-
-/** The server applies the same ceiling. Keeping it here makes the UI contract explicit. */
-export const WORK_CONSOLE_LIMIT = 200;
-
-export type WorkConsoleFilter = 'all' | 'active';
-
-/** `active=1` on the server means exactly these two ledger states. */
-export function isActiveWorkSession(session: WorkSession): boolean {
-  return session.status === 'running' || session.status === 'idle';
-}
-
-/** Running-first core order, then the optional server-compatible active filter. */
-export function workConsoleSessions(
-  sessions: readonly WorkSession[],
-  filter: WorkConsoleFilter,
-): WorkSession[] {
-  const visible =
-    filter === 'active' ? sessions.filter(isActiveWorkSession) : sessions;
-  return sortSessions(visible).slice(0, WORK_CONSOLE_LIMIT);
-}
 
 const EXPLICIT_TIME = new Intl.DateTimeFormat('ko-KR', {
   year: 'numeric',
@@ -44,16 +22,6 @@ const EXPLICIT_TIME = new Intl.DateTimeFormat('ko-KR', {
 /** A wall-clock fact, never an elapsed value that keeps a hidden list ticking. */
 export function explicitTimeLabel(atMs: number): string {
   return EXPLICIT_TIME.format(new Date(atMs));
-}
-
-/** Match the shared work-console contract: ended rows show their end fact. */
-export function workSessionRecentTimeLabel(session: WorkSession): string {
-  if (session.status !== 'ended') {
-    return `시작 ${clockLabel(session.startedAtMs)}`;
-  }
-  return session.endedAtMs === undefined
-    ? '종료 시각 확인 필요'
-    : `종료 ${clockLabel(session.endedAtMs)}`;
 }
 
 export interface WorkSessionPresentation {
