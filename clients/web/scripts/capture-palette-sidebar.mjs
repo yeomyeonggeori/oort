@@ -95,7 +95,7 @@ async function signIn(page, origin) {
   await page.getByTestId("login-email").fill("capture@example.test");
   await page.getByTestId("login-password").fill("not-a-secret");
   await page.getByTestId("login-submit").click();
-  await page.getByTestId("rail-team").waitFor({ timeout: 20_000 });
+  await page.getByTestId("nav-team").waitFor({ timeout: 20_000 });
 }
 
 
@@ -147,7 +147,7 @@ async function scene(browser, origin, scheme) {
   // 재지정: 키캡이 따라간다.
   await page.evaluate(() => localStorage.setItem("oort.shortcuts.v1", JSON.stringify({ version: 1, bindings: { "toggle-sidebar": { code: "KeyY", shift: true, alt: false } } })));
   await page.reload();
-  await page.getByTestId("rail-team").waitFor({ timeout: 20_000 });
+  await page.getByTestId("nav-team").waitFor({ timeout: 20_000 });
   await page.waitForTimeout(500);
   await openPalette(page);
   const caps = (await paletteRow(page).locator("kbd").allInnerTexts()).join("");

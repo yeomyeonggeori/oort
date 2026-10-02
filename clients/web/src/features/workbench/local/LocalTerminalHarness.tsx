@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { cn } from "@/design/lib/cn";
 import {
@@ -15,6 +15,7 @@ import { isTerminalThemeChoice } from "@momo/core/features/workbench/terminalThe
 import { setTerminalTheme } from "./terminalTheme";
 import { writeAiDefaults } from "@/features/settings/aiDefaultsStore";
 import { LocalTerminalDock } from "./LocalTerminalDock";
+import { setSidebarBodySlot } from "@/features/sidebar/sidebarBodySlot";
 import { START_STORAGE_KEY } from "./startLocation";
 import { createLocalSessions, DOCK_SESSION_KEY, loadBrowserMirror, type PtyPort } from "./localSessions";
 import { openDock, resetDockStateForTest, toggleDockFullscreen, useDockState } from "./dockState";
@@ -305,7 +306,7 @@ export function LocalTerminalHarness() {
 
   if (scene.startsWith("start-")) {
     return (
-      <main className="flex h-full min-h-0 flex-col bg-pane text-ink" data-testid="local-terminal-harness">
+      <TabHarnessFrame>
         <LocalTerminalDock
           sessions={sessions}
           platform="mac"
@@ -313,15 +314,15 @@ export function LocalTerminalHarness() {
           launchSource={launchSource}
           startSource={startFolders}
         />
-      </main>
+      </TabHarnessFrame>
     );
   }
 
   if (agent) {
     return (
-      <main className="flex h-full min-h-0 flex-col bg-pane text-ink" data-testid="local-terminal-harness">
+      <TabHarnessFrame>
         <LocalTerminalDock sessions={sessions} platform="mac" presentation="tab" agent={agent} />
-      </main>
+      </TabHarnessFrame>
     );
   }
 
@@ -351,3 +352,17 @@ export function LocalTerminalHarness() {
   );
 }
 
+/**
+ * 「내 작업」 탭 하네스의 틀(#3334): 앱 셸에서는 세션 목록이 사이드바 목록 열의 본문 자리에
+ * 포털로 선다(`sidebarBodySlot`). 셸이 없는 이 진단 표면은 같은 폭(268)의 자리를 직접 내놓는다.
+ */
+function TabHarnessFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex h-full min-h-0 bg-pane text-ink" data-testid="local-terminal-harness">
+      <aside className="sidebar-list sl-harness-column flex h-full flex-col">
+        <div ref={setSidebarBodySlot} data-testid="sidebar-body-slot" className="flex min-h-0 flex-1 flex-col" />
+      </aside>
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
+    </div>
+  );
+}

@@ -30,6 +30,7 @@ import {
   applySidebarListChange,
   setSidebarCollapsed,
   useDisplayedSidebarCollapsed,
+  useSidebarAutoClosed,
   useSidebarCollapsed,
 } from "@/app/sidebarCollapseStore";
 import { useSidebarShortcut } from "@/app/useSidebarShortcut";
@@ -124,8 +125,12 @@ export function AppShell({
   // `sidebar-drawer`). 상태는 여기 한 벌만 있고, 여는 컨트롤은 각 표면의 헤더가
   // `SidebarDrawerToggle`로 그린다.
   const isMobile = useIsMobileShell();
+  // 「내 작업」이 폭 규칙으로 목록 열을 접어 둔 것(`autoClosed`)도 접힘이다(#3334): 세션 목록이
+  // 목록 열 안에 서므로 열이 접혀야 한다. 저장된 접힘과 같은 길(`data-sidebar-collapsed`)로 칠한다.
+  const sidebarAutoClosed = useSidebarAutoClosed();
+  const listColumnCollapsed = sidebarPaneCollapsed || (myWorkTab && sidebarAutoClosed);
   const sidebarPaint = useSidebarCollapsePaint({
-    collapsed: sidebarPaneCollapsed,
+    collapsed: listColumnCollapsed,
     asDrawer: isMobile,
     setCollapsed: setSidebarPaneCollapsed,
   });
@@ -359,7 +364,7 @@ export function AppShell({
             ref={sidebarPaint.shellRef}
             className="app-shell"
             data-sidebar-collapsed={
-              isSettingsSurface || myWorkTab
+              isSettingsSurface
                 ? undefined
                 : sidebarPaint.trackCollapsed
                   ? ""
@@ -371,7 +376,7 @@ export function AppShell({
             {!isSettingsSurface && (
               <AppTitlebar
                 collapsed={displayedCollapsed}
-                controls={myWorkTab ? "session-list-column" : "sidebar-channel-pane"}
+                controls="sidebar-channel-pane"
                 onCollapsedChange={requestListChange}
                 toggleRef={sidebarToggleRef}
                 onToggleFocus={() => {
@@ -383,7 +388,7 @@ export function AppShell({
             {!isSettingsSurface && (
               <Sidebar
                 onOpenQuickSwitcher={() => setSwitcherOpen(true)}
-                channelPaneCollapsed={sidebarPaneCollapsed}
+                channelPaneCollapsed={listColumnCollapsed}
                 treeHidden={sidebarPaint.treeHidden}
                 listInRoute={myWorkTab}
               />

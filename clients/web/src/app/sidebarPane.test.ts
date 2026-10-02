@@ -148,9 +148,11 @@ describe("접힘 계약 (#1864)", () => {
     expect(sidebarSource).toContain('data-testid="open-quick-switcher"');
     expect(sidebarSource).toContain('testId="channel-item"');
     expect(sidebarSource).toContain("ProfileCard");
-    // #2854: 「내 작업」 동안에도 목록 트리는 숨는다(언마운트하지 않는다). #3280: 레일은
-    // 숨기지 않는다 — 접힘·「내 작업」 어디서도 `hidden`을 받지 않는 같은 노드다.
-    expect(sidebarSource).toContain("hidden={treeHidden || listInRoute}");
+    // #3334: 목록 열(머리 포함)은 「내 작업」에서도 숨지 않는다 — 접힘만 숨긴다. 탭에 따라
+    // 숨는 것은 본문 자리뿐이다(채널 목록은 언마운트하지 않고 `hidden`). #3280: 레일은 숨기지
+    // 않는다 — 접힘·「내 작업」 어디서도 `hidden`을 받지 않는 같은 노드다.
+    expect(sidebarSource).toContain("hidden={treeHidden}");
+    expect(sidebarSource).not.toContain("hidden={treeHidden || listInRoute}");
     expect(railSource).not.toContain("hidden={hidden}");
     expect(sidebarSource).not.toContain("workRail");
     expect(titlebarSource).not.toContain("hideToggle");

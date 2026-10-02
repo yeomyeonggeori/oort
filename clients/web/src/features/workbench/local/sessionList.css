@@ -11,9 +11,18 @@
  * 아래 자식들은 좌우 바깥 여백을 따로 갖지 않는다. 폭은 레일 56과 합쳐 사이드바
  * 전체 폭(324)이 되는 값이라(268) 탭을 오가도 본문 가장자리가 같다. 오른쪽 경계선은
  * 없다: 사이드바도 본문과 경계선이 아니라 바닥 색 차이로 갈린다. */
-.sl {
-  inline-size: var(--session-list-width);
+/* 진단 하네스(셸 없음)가 내놓는 목록 열: 앱 사이드바 목록 열과 같은 폭이다(#3334). */
+.sl-harness-column {
+  inline-size: var(--w-sidebar-list);
   flex: none;
+}
+
+.sl {
+  /* #3334: 이 목록은 목록 열의 본문 자리(`sidebar-body-slot`)에 포털로 선다. 폭은 열이
+   * (268, `--w-sidebar-list`) 정하므로 자기 폭을 갖지 않고 자리를 채운다. 안쪽 여백도 열이
+   * 이미 진다(`sidebar-list`는 열 쪽에만 붙는다). */
+  inline-size: 100%;
+  flex: 1 1 0;
   display: flex;
   flex-direction: column;
   min-block-size: 0;

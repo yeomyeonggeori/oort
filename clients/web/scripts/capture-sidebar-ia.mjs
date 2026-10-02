@@ -1,17 +1,18 @@
 #!/usr/bin/env node
 // =============================================================================
-// #3337 인박스/활동 역할 분리 + 「나에게 필요한 일」 수 캡처.
+// #3334 사이드바 정보 구조 캡처: 레일은 워크스페이스 전용, 목적지는 목록 열의 「검색과 이동」
+// 아래 구획 A·B, 메시지 검색 줄 없음, 접힘(⌘B)에서 레일이 목적지 아이콘 다섯.
 //
-//   npm run build && OUT_DIR=~/.cache/momo-scratch/3337/captures node scripts/capture-needs-me.mjs
-//   → 1280 × light·dark: 인박스(결정 대기·멘션·리마인더 탭, 에이전트 탭 없음, 활동 링크),
-//     활동(필터 칩 네 개 + 각 칩), 레일 인박스 배지(승인 2 + 응답 필요 칸 1 + 멘션 2 = 5).
+//   npm run build && OUT_DIR=~/.cache/momo-scratch/3334/captures node scripts/capture-sidebar-ia.mjs
+//   → 라이트·다크 × 1440×900·900×700: 대화(chat) · 내 작업(데스크탑, mine) · 팀 작업(team) ·
+//     접힘(collapsed) · 웹 「내 작업」 설명 상태(mine-web)
 //
-// 백엔드는 없다: `/v1/**`는 고정 응답, 실시간 소켓은 곧바로 연결되는 흉내, 데스크탑은
-// `window.__TAURI_INTERNALS__` 흉내(capture-work-tab.mjs와 같은 모양, 세션은 셸이 쥔
-// 핸들만 답하는 #3106 모양)다. 기준선(전)은 같은 스크립트를 base 워크트리에서 돌린다.
+// 백엔드는 없다: `/v1/**`는 고정 응답(승인 2 + 멘션 2 + 응답 필요 칸 1 = 나에게 필요한 일 5,
+// 안 읽은 채널, 공유 세션 6), 실시간 소켓은 곧바로 연결되는 흉내, 데스크탑은
+// `window.__TAURI_INTERNALS__` 흉내다(capture-needs-me.mjs와 같은 모양).
 // =============================================================================
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -19,8 +20,8 @@ import { startGuardedPreview } from "../gates/preview-guard.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/needs-me");
-const PORT = Number(process.env.CAPTURE_PORT || 5203);
+const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/sidebar-ia");
+const PORT = Number(process.env.CAPTURE_PORT || 5207);
 
 const workspaceId = "00000000-0000-7000-8000-000000000001";
 const memberId = "00000000-0000-7000-8000-000000000101";
@@ -95,6 +96,28 @@ const LAYOUT_3 = {
   seq: 30,
 };
 
+
+const seId = otherId;
+const MIN = 60;
+function sharedRows(now) {
+  const sec = Math.floor(now / 1000);
+  const none = { added: null, deleted: null, files: null, ahead: null, behind: null, uncommitted: null };
+  const diff = (added, deleted, files, ahead) => ({ added, deleted, files, ahead, behind: 0, uncommitted: 0 });
+  const base = { folderLabel: null, endedAtMs: null, startedAtMs: now - 3_600_000, sharedAtMs: now - 3_000_000, prUrl: null };
+  const row = (n, label, who, whoId, state, repo, branch, minAgo, d = none) => ({
+    ...base, sessionId: `00000000-0000-7000-8000-0000000000${n}`, origin: "local_pty", label, status: "running",
+    owner: { memberId: whoId, displayName: who }, homeChannel: { id: channels[0].id, name: "workbench" },
+    repo, branch, harness: "claude", state, stages: ["세션 시작", "작업 중"], diff: d, lastActivityAt: sec - minAgo * MIN,
+  });
+  return [
+    row("a1", "주간 리포트", "김인턴", agentId, "running", null, null, 1),
+    row("a2", "결제 모듈 리팩터", "서연", seId, "waiting", "momo", "refactor/pay", 3, diff(88, 21, 5, 2)),
+    row("a3", "한글 입력 이중 전송 수리", "곽성재", memberId, "waiting", "momo", "feat/2774-xterm", 4, diff(128, 40, 9, 2)),
+    row("a4", "온보딩 카피", "서연", seId, "review", "momo", "docs/onboarding", 24, diff(12, 3, 1, 1)),
+    row("a5", "relay 중복 발행 수리", "곽성재", memberId, "running", "momo", "fix/push-dup", 6, diff(42, 18, 4, 1)),
+  ];
+}
+
 function json(route, body, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
@@ -110,7 +133,12 @@ async function installRoutes(context) {
     if (path.endsWith("/channels")) return json(route, { channels });
     if (path.endsWith("/roster")) return json(route, { members: roster });
     if (path.endsWith("/read-state")) {
-      return json(route, { read_states: [{ channel_id: channels[0].id, last_read_seq: 4, latest_seq: 9, unread_count: 5, mention_count: 2 }] });
+      // 열려 있는 채널(workbench)은 멘션 2(나에게 필요한 일). agent-lab·general은 일반 안 읽음(호박 알약, 이번 범위 밖의 현행 문법이 그대로인지 보인다).
+      return json(route, { read_states: [
+        { channel_id: channels[0].id, last_read_seq: 4, latest_seq: 9, unread_count: 5, mention_count: 2 },
+        { channel_id: channels[1].id, last_read_seq: 1, latest_seq: 4, unread_count: 3, mention_count: 0 },
+        { channel_id: channels[2].id, last_read_seq: 7, latest_seq: 8, unread_count: 1, mention_count: 0 },
+      ] });
     }
     if (path.endsWith("/approvals")) {
       const status = new URL(route.request().url()).searchParams.get("status") ?? "pending";
@@ -119,6 +147,7 @@ async function installRoutes(context) {
     if (path.endsWith("/agent-runs")) return json(route, { runs: path.includes(channels[0].id) ? runs : [] });
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     if (path.endsWith("/work-hosts")) return json(route, { workHosts: [] });
+    if (path.endsWith("/work-sessions/shared")) return json(route, { sessions: sharedRows(Date.now()), nextCursor: null });
     if (path.endsWith("/work-sessions")) return json(route, { workSessions: [] });
     if (path.endsWith(`/workspaces/${workspaceId}`)) return json(route, { workspace: { id: workspaceId, name: "여명거리" } });
     if (path.includes("/messages")) {
@@ -266,33 +295,40 @@ async function signIn(page, origin) {
   await page.getByTestId("nav-team").waitFor({ timeout: 20_000 });
 }
 
-// 시안 ①의 상태(#2776): 칸 3·5 응답 필요, 나머지 실행 중(hook 「작업 중」), PTY 6 끝남(종료 0).
-// 키는 칸 id다. `exit-0`은 신호가 아니라 그 칸의 프로세스를 코드 0으로 끝낸다.
-// p8은 시안(실행 중)과 달리 코드 1로 끝내 「멈춤(×)」 표지를 증거로 남긴다(design-review M2).
-
+// 칸 하나가 「응답 필요」가 되도록 시안 ①의 hook 신호를 쓴다(#2776).
 const SIGNALS = { p2: "waiting-permission", "*": "working" };
-const report = { scenes: [], badge: {} };
 const failures = [];
 function check(name, ok, detail = "") {
   console.log(`${ok ? "ok  " : "FAIL"} ${name}${ok ? "" : ` ${detail}`}`);
   if (!ok) failures.push(name);
 }
+const overflowX = (page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
-async function scene(browser, origin, scheme) {
-  const tag = `1280-${scheme}`;
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: scheme, reducedMotion: "reduce", serviceWorkers: "block" });
+async function open(browser, origin, scheme, viewport, desktop) {
+  const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce", serviceWorkers: "block" });
   await installRoutes(context);
   const page = await context.newPage();
   await installRealtime(page);
-  await installDesktop(page, LAYOUT_3, SIGNALS);
+  if (desktop) await installDesktop(page, LAYOUT_3, SIGNALS);
   await page.addInitScript((server) => { try { localStorage.setItem("momo.web.server.v1", server); } catch { /* 저장소 없는 캡처 */ } }, origin);
   await signIn(page, origin);
+  await page.waitForTimeout(500);
+  return { context, page };
+}
+
+async function desktopScenes(browser, origin, scheme, viewport) {
+  const tag = `${viewport.width}-${scheme}`;
+  const { context, page } = await open(browser, origin, scheme, viewport, true);
   const shot = (name) => page.screenshot({ path: resolve(OUT_DIR, `${name}-${tag}.png`) });
-  const badge = () => page.locator("[data-testid='nav-inbox'] [data-testid='mention-badge']").first().textContent().catch(() => null);
 
   // 칸이 「응답 필요」가 되도록 내 작업을 한 번 연다(상태는 이 기기 스토어가 쥔다).
   await page.getByTestId("nav-mine").click();
   await page.getByTestId("my-work-tab").waitFor();
+  // 좁은 창은 폭 규칙으로 목록 열이 접혀 있다: 사람이 펴는 길(제목줄 단추)로 편다.
+  if ((await page.getByTestId("sidebar-toggle").getAttribute("aria-expanded")) === "false") {
+    await page.getByTestId("sidebar-toggle").click();
+    await page.waitForTimeout(500);
+  }
   await page.waitForFunction(() => document.querySelectorAll("[data-testid='my-work-tab'] [data-pane-id] .xterm-rows").length >= 1, null, { timeout: 15_000 });
   await page.waitForTimeout(1500);
   await page.evaluate((signals) => {
@@ -303,51 +339,74 @@ async function scene(browser, origin, scheme) {
       window.__captureSignal[key]?.(signals[id] ?? signals["*"]);
     }
   }, SIGNALS);
-  await page.waitForTimeout(800);
-
-  // 인박스: 에이전트 탭 없음, 활동 링크, 머리 수.
-  await page.getByTestId("nav-inbox").click();
-  await page.getByTestId("inbox-route").waitFor();
   await page.waitForTimeout(900);
-  const tabs = await page.$$eval("[role='tab']", (els) => els.map((e) => e.textContent));
-  report.badge[tag] = { rail: await badge(), header: await page.getByTestId("inbox-needs-me-count").textContent().catch(() => null), tabs };
-  check(`${tag} 인박스에 「에이전트」 탭이 없다`, !tabs.some((t) => t?.includes("에이전트")), JSON.stringify(tabs));
-  check(`${tag} 인박스 줄 알약 = 5 (승인 2 + 응답 필요 칸 1 + 멘션 2)`, report.badge[tag].rail === "5", JSON.stringify(report.badge[tag]));
-  check(`${tag} 인박스 머리 수가 줄 알약과 같다`, report.badge[tag].header === report.badge[tag].rail, JSON.stringify(report.badge[tag]));
-  await shot("inbox-needs-action");
-  await page.getByTestId("inbox-tab-mentions").click();
-  await page.waitForTimeout(800);
-  const mentionRows = await page.$$eval("[data-testid='inbox-list'] > li", (e) => e.length).catch(() => 0);
-  check(`${tag} 멘션 탭: 수(2)와 목록(2건)이 같다`, mentionRows === 2, String(mentionRows));
-  await shot("inbox-mentions");
-  await page.getByTestId("inbox-tab-needs-action").click();
+  await shot("mine");
+  check(`${tag} 내 작업: 세션 목록이 목록 열 본문 자리 안이다`, (await page.locator("[data-testid='sidebar-body-slot'] [data-testid='session-list']").count()) === 1);
+  check(`${tag} 내 작업: 가로 넘침 0`, (await overflowX(page)) === 0);
 
-  // 옛 딥링크는 활동으로 건너간다.
-  await page.goto(`${origin}/#/inbox?filter=agents`);
-  await page.getByTestId("activity-route").waitFor();
-  check(`${tag} ?filter=agents 딥링크는 활동으로 간다`, page.url().includes("/activity"), page.url());
+  await page.getByTestId("nav-team").click();
+  await page.getByTestId("sidebar-team-session").first().waitFor({ timeout: 10_000 });
+  await page.waitForTimeout(500);
+  await shot("team");
+  check(`${tag} 팀 작업: 사이드바 팀 세션 5줄`, (await page.getByTestId("sidebar-team-session").count()) === 5);
+  check(`${tag} 팀 작업: 가로 넘침 0`, (await overflowX(page)) === 0);
 
-  // 활동: 칩 네 개와 각 칩.
-  await page.waitForTimeout(800);
-  const chips = await page.$$eval("[role='tab']", (els) => els.map((e) => e.textContent));
-  check(`${tag} 활동 칩 네 개`, JSON.stringify(chips) === JSON.stringify(["전체", "내 에이전트", "승인", "작업 끝남"]), JSON.stringify(chips));
-  await shot("activity-all");
-  const rowsOf = () => page.$$eval("[data-testid='activity-list'] > li", (e) => e.map((x) => x.textContent ?? ""));
-  const allRows = await rowsOf();
-  for (const f of ["mine", "approvals", "done"]) {
-    await page.getByTestId(`activity-tab-${f}`).click();
+  await page.getByTestId("nav-chat").click();
+  await page.waitForTimeout(500);
+  await shot("chat");
+  check(`${tag} 대화: 메시지 검색 줄 없음`, (await page.getByTestId("nav-search").count()) === 0);
+  check(`${tag} 대화: 레일에 목적지 없음`, (await page.getByTestId("rail-destinations").count()) === 0);
+  check(`${tag} 대화: 인박스 알약 = 5`, (await page.locator("[data-testid='nav-inbox'] [data-testid='mention-badge']").textContent()) === "5");
+  check(`${tag} 대화: 가로 넘침 0`, (await overflowX(page)) === 0);
+
+  // ⌘B: 목록 열이 접히고 레일이 목적지 아이콘 다섯을 이어 붙인다.
+  await page.locator("[data-testid='channel-item']").first().focus();
+  await page.keyboard.press("Meta+KeyB");
+  await page.waitForTimeout(600);
+  await shot("collapsed");
+  const icons = await page.locator("[data-testid='workspace-rail'] nav[aria-label='앱 탐색'] a").evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")));
+  check(`${tag} 접힘: 레일 목적지 아이콘 다섯`, JSON.stringify(icons) === JSON.stringify(["rail-chat", "rail-inbox", "rail-agents", "rail-mine", "rail-team"]), JSON.stringify(icons));
+  check(`${tag} 접힘: 인박스 아이콘 배지 = 5`, (await page.locator("[data-testid='rail-inbox-badge']").textContent()) === "5");
+  check(`${tag} 접힘: 가로 넘침 0`, (await overflowX(page)) === 0);
+  await context.close();
+}
+
+// 창 최소 높이(480)에 가까운 낮은 창(#3334 design-review High): 열 전체가 한 번에 스크롤하고 본문 자리가
+// 24rem을 지킨다. 대화와 내 작업을 찍고, 스크롤한 모습(본문이 보이는 위치)도 찍는다.
+async function shortScenes(browser, origin, scheme) {
+  const viewport = { width: 900, height: 480 };
+  const tag = `900x480-${scheme}`;
+  const { context, page } = await open(browser, origin, scheme, viewport, true);
+  await page.screenshot({ path: resolve(OUT_DIR, `chat-short-${tag}.png`) });
+  await page.getByTestId("nav-mine").click();
+  await page.getByTestId("my-work-tab").waitFor();
+  if ((await page.getByTestId("sidebar-toggle").getAttribute("aria-expanded")) === "false") {
+    await page.getByTestId("sidebar-toggle").click();
     await page.waitForTimeout(500);
-    await shot(`activity-${f}`);
-    const rows = await rowsOf();
-    if (f === "mine") check(`${tag} 내 에이전트 칩은 서연의 새벽봇 행을 뺀다`, rows.length > 0 && rows.length < allRows.length && !rows.some((t) => t.includes("dawn-bot")), `${rows.length}/${allRows.length}`);
-    if (f === "approvals") check(`${tag} 승인 칩은 승인 행만 (실행 행 제외)`, rows.length === 4 && !rows.some((t) => t.includes("작업을 실행")), String(rows.length));
-    if (f === "done") check(`${tag} 작업 끝남 칩은 끝난 실행 2건만 보인다`, rows.length === 2 && rows.every((t) => t.includes("작업을 실행")), String(rows.length));
   }
-  await page.getByTestId("activity-tab-all").click();
-  check(`${tag} 대기 승인 행에 인박스 링크`, (await page.getByTestId("activity-pending-link").count()) === 2);
-  check(`${tag} 가로 넘침 0`, (await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) === 0);
-  await shot("rail-badge-mixed");
-  report.scenes.push(tag);
+  await page.waitForTimeout(1200);
+  await page.screenshot({ path: resolve(OUT_DIR, `mine-short-${tag}.png`) });
+  const slot = await page.getByTestId("sidebar-body-slot").boundingBox();
+  check(`${tag} 낮은 창 내 작업: 본문 자리 높이 ≥ 384(24rem)`, !!slot && slot.height >= 383, JSON.stringify(slot));
+  await page.getByTestId("sidebar-list-root").evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: resolve(OUT_DIR, `mine-short-scrolled-${tag}.png`) });
+  const rows = await page.locator("[data-testid='session-list-row']:visible").count();
+  check(`${tag} 낮은 창 내 작업: 스크롤하면 세션 줄이 보인다(${rows}줄)`, rows >= 1);
+  check(`${tag} 낮은 창: 가로 넘침 0`, (await overflowX(page)) === 0);
+  await context.close();
+}
+
+async function webScenes(browser, origin, scheme, viewport) {
+  const tag = `${viewport.width}-${scheme}`;
+  const { context, page } = await open(browser, origin, scheme, viewport, false);
+  await page.getByTestId("nav-mine").click();
+  await page.getByTestId("my-work-web-notice").waitFor();
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: resolve(OUT_DIR, `mine-web-${tag}.png`) });
+  const text = await page.getByTestId("my-work-web-notice").innerText();
+  check(`${tag} 웹 내 작업: 이유 문장과 팀 작업 링크`, text.includes("이 기기에는 터미널 레인이 없어요") && (await page.getByTestId("my-work-web-notice-team-link").getAttribute("href"))?.endsWith("/work?view=team"));
+  check(`${tag} 웹 내 작업: 가로 넘침 0`, (await overflowX(page)) === 0);
   await context.close();
 }
 
@@ -357,16 +416,20 @@ async function main() {
   const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT" });
   const browser = await chromium.launch();
   try {
-    for (const scheme of ["light", "dark"]) await scene(browser, preview.origin, scheme);
+    for (const scheme of ["light", "dark"]) {
+      for (const viewport of [{ width: 1440, height: 900 }, { width: 900, height: 700 }]) {
+        await desktopScenes(browser, preview.origin, scheme, viewport);
+        await webScenes(browser, preview.origin, scheme, viewport);
+      }
+      await shortScenes(browser, preview.origin, scheme);
+    }
   } finally {
     await browser.close();
-    await preview.stop();
+    await preview.stop?.();
   }
-  writeFileSync(resolve(OUT_DIR, "report.json"), JSON.stringify(report, null, 2));
   if (failures.length > 0) {
     console.error(`\n${failures.length}개 단언 실패`);
     process.exit(1);
   }
 }
-
-await main();
+main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });

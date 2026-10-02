@@ -44,8 +44,15 @@ async function open(browser, origin, scheme, scene) {
   const context = await browser.newContext({ viewport: VIEWPORT, colorScheme: scheme, reducedMotion: "reduce" });
   const page = await context.newPage();
   await page.goto(`${origin}/#/design/local-terminal?scene=${scene}`);
-  await page.getByTestId("session-list-new").waitFor();
+  await newSessionButton(page).waitFor();
   return { context, page };
+}
+
+// 「새 세션」 단추는 세션 목록이 펴져 있으면 목록 바닥(`session-list-new`)에, 폭 규칙(#2856)으로
+// 접혀 있으면 머리 줄(`local-terminal-new`)에 선다. 1280 창의 4×2 배치는 목록을 접으므로(#3294 이후)
+// 캡처는 어느 쪽이든 지금 보이는 단추를 쓴다(#3332: 목록 바닥 단추만 기다리다 타임아웃).
+function newSessionButton(page) {
+  return page.locator('[data-testid="session-list-new"], [data-testid="local-terminal-new"]').first();
 }
 
 async function shot(page, name) {
@@ -54,7 +61,7 @@ async function shot(page, name) {
 }
 
 async function openMenu(page) {
-  await page.getByTestId("session-list-new").click();
+  await newSessionButton(page).click();
   await page.getByTestId("local-terminal-start-home").waitFor();
   // 폴더 검사(흉내)가 끝나 격리 줄의 상태가 정해질 때까지.
   await page.waitForTimeout(200);
