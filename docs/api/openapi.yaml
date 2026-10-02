@@ -6596,8 +6596,9 @@ paths:
         ShareSummaryS1 (repo, branch, harness, state, stages, diff, prUrl,
         lastActivityAt in epoch seconds) plus the owner member, the home channel
         and the lane (origin). Included: shared local sessions (origin local_pty
-        that still have their S1 payload) and agent-lane sessions (origin host,
-        running or ended within 30 days); an agent-lane row has null repo,
+        that still have their S1 payload) and agent-lane sessions (origin host);
+        either kind leaves the board 30 days after it ended, enforced by the
+        read itself (not by the retention sweep); an agent-lane row has null repo,
         branch, prUrl, folderLabel, sharedAtMs and diff numbers and an empty
         stages list, its state derived from the ledger (running, idle, done,
         stopped) and its lastActivityAt from the newest thread message. Only
@@ -6671,7 +6672,7 @@ paths:
         rule (the caller is an active member of the home channel, in SQL). A
         session the caller may not see is 404 with one fixed body for every
         reason: not a member of the home channel, never shared, unshared,
-        agent-lane session ended more than 30 days ago, archived channel, no
+        a session that ended more than 30 days ago, archived channel, no
         such session, or another workspace's id. There is deliberately no 403
         that would say the session exists. A malformed id is 400.
       security:

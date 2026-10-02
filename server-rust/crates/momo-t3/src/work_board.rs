@@ -7,8 +7,11 @@
 //! * a **shared local** session (`origin = 'local_pty'`) that still has its
 //!   `work_session_share` row — unsharing deletes that row, so the session
 //!   disappears from the very next read; or
-//! * an **agent-lane** session (`origin = 'host'`, #2779) that is running or
-//!   ended within [`SHARE_RETENTION_DAYS`].
+//! * an **agent-lane** session (`origin = 'host'`, #2779).
+//!
+//! Either kind drops off the board [`SHARE_RETENTION_DAYS`] after it ended. The
+//! read enforces that itself rather than waiting for the notifier's sweep to
+//! delete the share row, so a late sweep cannot extend what is visible.
 //!
 //! There is no workspace-wide view (Q4): a member of a different channel gets
 //! nothing, not a 403. The list and the single read share this one query, so
@@ -116,14 +119,16 @@ WITH board AS ( \
     LEFT JOIN work_session_share s \
       ON s.workspace_id = ws.workspace_id AND s.session_id = ws.id \
     LEFT JOIN LATERAL ( \
-         SELECT max(m.created_at) AS last_at FROM message m \
-          WHERE ws.origin = 'host' AND m.root_id = ws.root_message_id \
+         SELECT m.created_at AS last_at FROM message m \
+          WHERE ws.origin = 'host' AND m.workspace_id = ws.workspace_id \
+            AND m.root_id = ws.root_message_id AND m.deleted_at IS NULL \
+          ORDER BY m.seq DESC LIMIT 1 \
         ) t ON true \
    WHERE ws.workspace_id = $1 \
      AND ($3::uuid IS NULL OR ws.id = $3) \
-     AND ( (ws.origin = 'local_pty' AND s.session_id IS NOT NULL) \
-        OR (ws.origin = 'host' AND (ws.ended_at IS NULL \
-              OR ws.ended_at > clock_timestamp() - make_interval(days => $4))) ) \
+     AND (ws.ended_at IS NULL \
+          OR ws.ended_at > clock_timestamp() - make_interval(days => $4)) \
+     AND ((ws.origin = 'local_pty' AND s.session_id IS NOT NULL) OR ws.origin = 'host') \
 ) \
 SELECT * FROM board \
  WHERE ($5::bigint IS NULL OR (activity_us, id) < ($5, $6::uuid)) \
@@ -283,7 +288,9 @@ mod tests {
             "display_id",
             "display_endpoint",
             "host_id",
-            "commit",
+            "commit_title",
+            "commit_message",
+            "subject",
             "body",
             "props",
             "cwd",

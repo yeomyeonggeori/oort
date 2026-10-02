@@ -20,7 +20,7 @@
 //! | `b5_paging_is_stable_complete_and_strict` | 커서 완전·무중복·동률 안정·잘못된 커서 400 | the `(activity_us, id) <` keyset |
 //! | `b6_host_and_agent_credentials_cannot_read_the_board` | 호스트 서명·에이전트 토큰 거부 | `require_human` |
 //! | `b7_no_terminal_control_or_commit_field_on_the_wire` | 응답 키 전수 · 금지 키 없음 | `SharedWorkSessionDto` field list |
-//! | `b8_agent_session_retention_and_archived_channel` | 종료 30일 뒤·보관 채널 사라짐 | the retention / `archived_at` predicates |
+//! | `b8_agent_session_retention_and_archived_channel` | 종료 30일 뒤(A·L 모두, 공유 행이 남아 있어도)·보관 채널 사라짐 | the retention / `archived_at` predicates |
 //!
 //! Every refusal test also takes the legitimate path beside it, so none of them
 //! can pass by a route that refuses everything, and each asserts the status and
@@ -836,6 +836,11 @@ impl Board {
         response.json().await.expect("list body")
     }
 
+    async fn one_in(&self, token: &str, tenant: &Tenant, session: Uuid) -> reqwest::Response {
+        self.get(token, board_one_url(&self.base, tenant.workspace, session))
+            .await
+    }
+
     async fn one(&self, token: &str, session: Uuid) -> reqwest::Response {
         self.get(
             token,
@@ -843,6 +848,10 @@ impl Board {
         )
         .await
     }
+}
+
+async fn token_for(b: &Board, tenant: &Tenant) -> String {
+    login(&b.http, &b.base, tenant.workspace, &tenant.owner_email).await
 }
 
 fn ids(list: &Value) -> Vec<String> {
@@ -1002,14 +1011,42 @@ async fn b2_a_non_member_gets_the_same_404_for_every_reason() {
 
     // Every other reason produces the very same status, code and message:
     // never shared, nonexistent, and another tenant's id.
-    let other = {
-        let app = role_pool("momo_app", &momo_app_password()).await;
-        seed_tenant(&b.su, &app).await
+    // A real, shared local session of *another tenant*, read with this tenant's
+    // credential on this tenant's path.
+    let (other_session, other_tenant) = {
+        let other = seed_tenant(&b.su, &b.app).await;
+        let (host, seed) = own_desktop(&b.su, &other).await;
+        let token = login(&b.http, &b.base, other.workspace, &other.owner_email).await;
+        let registered =
+            register_local(&b.http, &b.base, &token, &other, json!({"hostId": host})).await;
+        assert_eq!(registered.status(), 201);
+        let registered: Value = registered.json().await.unwrap();
+        let session = Uuid::parse_str(registered["workSession"]["id"].as_str().unwrap()).unwrap();
+        let shared = patch_share(
+            &b.http,
+            &b.base,
+            &other,
+            session,
+            host,
+            &seed,
+            &s1_payload(),
+        )
+        .await;
+        assert_eq!(shared.status(), 200, "the other tenant shares its own pane");
+        (session, other)
     };
+    let other_token = token_for(&b, &other_tenant).await;
+    assert_eq!(
+        b.one_in(&other_token, &other_tenant, other_session)
+            .await
+            .status(),
+        200,
+        "the other tenant can read it itself"
+    );
     for (what, session) in [
         ("never shared", unshared),
         ("nonexistent", Uuid::new_v4()),
-        ("another tenant's id", other.channel),
+        ("another tenant's real shared session", other_session),
     ] {
         let seen = error_of(b.one(&b.alice_token, session).await).await;
         assert_eq!(
@@ -1442,8 +1479,44 @@ async fn b8_agent_session_retention_and_archived_channel() {
     assert_eq!(gone, (404, Value::Null, NOT_FOUND.to_string()));
     assert!(ids(&b.list(&b.alice_token, "").await).is_empty());
 
-    // An archived home channel takes its sessions off the board.
+    // A shared local session that ended 31 days ago is off the board even though
+    // its share row is still there (the notifier's sweep has not run): the read
+    // enforces retention itself.
     let now = now_ms() / 1000;
+    let stale = b
+        .local(b.tenant.channel, "오래됨", Some(payload_with(now, "done")))
+        .await;
+    assert_eq!(b.one(&b.alice_token, stale).await.status(), 200);
+    sqlx::query(
+        "UPDATE work_session SET status = 'ended', started_at = now() - interval '40 days', \
+                ended_at = now() - interval '29 days', exit_code = 0 WHERE id = $1",
+    )
+    .bind(stale)
+    .execute(&b.su)
+    .await
+    .unwrap();
+    assert_eq!(
+        b.one(&b.alice_token, stale).await.status(),
+        200,
+        "29 days after the end: still inside retention"
+    );
+    sqlx::query("UPDATE work_session SET ended_at = now() - interval '31 days' WHERE id = $1")
+        .bind(stale)
+        .execute(&b.su)
+        .await
+        .unwrap();
+    let share_row: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM work_session_share WHERE session_id = $1")
+            .bind(stale)
+            .fetch_one(&b.su)
+            .await
+            .unwrap();
+    assert_eq!(share_row, 1, "the share row is still stored");
+    let gone = error_of(b.one(&b.alice_token, stale).await).await;
+    assert_eq!(gone, (404, Value::Null, NOT_FOUND.to_string()));
+    assert!(ids(&b.list(&b.alice_token, "").await).is_empty());
+
+    // An archived home channel takes its sessions off the board.
     let local = b
         .local(b.tenant.channel, "공유", Some(payload_with(now, "running")))
         .await;
