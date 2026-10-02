@@ -1109,6 +1109,17 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/work-sessions/{session}",
             patch(routes::work_sessions::end),
         )
+        // #3322 (#2863 server half): the team board's reads. Human bearer only,
+        // filtered to the viewer's home channels in SQL; a literal segment beats
+        // `{session}` in the router, so `shared` is never parsed as an id.
+        .route(
+            "/v1/workspaces/{ws}/work-sessions/shared",
+            get(routes::work_board::list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/work-sessions/{session}/shared",
+            get(routes::work_board::get_one),
+        )
         .route(
             "/v1/workspaces/{ws}/work-sessions/{session}/resume",
             post(routes::work_sessions::resume),
