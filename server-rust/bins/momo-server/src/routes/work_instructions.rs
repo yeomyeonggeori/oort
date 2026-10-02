@@ -69,7 +69,8 @@ use crate::human_control::{
     authorize_human_control_in_tx, record_control_provenance_in_tx, signature_columns,
 };
 use crate::routes::shared::{
-    audit_via_token_id, path_uuid, settle, tenant_tx, workspace_scope, Rejectable,
+    audit_via_token_id, local_session_control_refusal, path_uuid, settle, tenant_tx,
+    workspace_scope, Rejectable,
 };
 use crate::routes::work_controls::{control_dto, dispatch_control_in_tx};
 use crate::AppState;
@@ -353,6 +354,11 @@ async fn send_in_tx(
     else {
         return Ok(Err(ApiError::not_found("work session not found")));
     };
+    // ADR-0190 D4: a shared local pane takes no input — refused before the
+    // signature is looked at, and before any write.
+    if session.origin == "local_pty" {
+        return Ok(Err(local_session_control_refusal()));
+    }
     // ADR-0188 D3: 지시자 = 세션 소유자 = host 소유자.
     if session.member_id != member_id {
         return Ok(Err(ApiError::coded(

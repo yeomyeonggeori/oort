@@ -62,8 +62,8 @@ use momo_messaging::{cent_channel, send_message_in_tx, MessageType, NewMessage};
 use momo_outbox::{emit_outbox, OutboxKind};
 use momo_t3::work_control::{
     control_event_payload, dispatched_spawn_owner_in_tx, insert_work_control_in_tx,
-    record_host_last_used_in_tx, resume_target_rejection_in_tx, NewWorkControl,
-    ResumeTargetRejection, KIND_SPAWN, STATUS_DISPATCHED,
+    record_host_last_used_in_tx, resume_target_rejection_in_tx, target_work_host_in_tx,
+    NewWorkControl, ResumeTargetRejection, KIND_SPAWN, STATUS_DISPATCHED,
 };
 use momo_t3::work_permission::{
     bridgeable_options, cancel_pending_for_session_in_tx, insert_permission_request_in_tx,
@@ -72,15 +72,15 @@ use momo_t3::work_permission::{
 use momo_t3::{
     acquire_slot_in_tx, allocate_uuid_v7, card_props, close_control_window_in_tx,
     cloud_host_id_for_host, cloud_host_id_for_host_in_tx, cloud_host_id_for_session_in_tx,
-    create_resumed_work_session_in_tx, create_work_session_with_id_in_tx, end_work_session_in_tx,
-    is_active_channel_member_in_tx, lifecycle_payload, list_work_session_details_in_tx,
-    lock_work_session_detail_in_tx, mark_work_session_resumed_in_tx, parse_remote_pty_binding,
-    pause_usage_in_tx, remote_pty_host_status_in_tx, resolve_cloud_host_id,
-    set_work_session_observation_in_tx, start_usage_in_tx, terminate_in_tx, tool_lifecycle_payload,
-    transition_tool_lifecycle_in_tx, update_session_card_props_in_tx, work_session_scope_in_tx,
-    work_tool_is_enabled_in_tx, write_remote_pty_binding_in_tx, ControlWindowEndReason,
-    NewWorkSession, RemotePtyBinding, RemotePtyHostStatus, T3Error, T3LockLadder,
-    TerminationReason, WorkSessionDetail,
+    create_local_pty_work_session_with_id_in_tx, create_resumed_work_session_in_tx,
+    create_work_session_with_id_in_tx, end_work_session_in_tx, is_active_channel_member_in_tx,
+    lifecycle_payload, list_work_session_details_in_tx, lock_work_session_detail_in_tx,
+    mark_work_session_resumed_in_tx, parse_remote_pty_binding, pause_usage_in_tx,
+    remote_pty_host_status_in_tx, resolve_cloud_host_id, set_work_session_observation_in_tx,
+    start_usage_in_tx, terminate_in_tx, tool_lifecycle_payload, transition_tool_lifecycle_in_tx,
+    update_session_card_props_in_tx, work_session_scope_in_tx, work_tool_is_enabled_in_tx,
+    write_remote_pty_binding_in_tx, ControlWindowEndReason, NewWorkSession, RemotePtyBinding,
+    RemotePtyHostStatus, T3Error, T3LockLadder, TerminationReason, WorkSessionDetail,
 };
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
@@ -92,8 +92,8 @@ use crate::dto::{
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
-    audit_via_token_id, lifecycle_body, path_uuid, require_human, require_human_or_work_host,
-    settle, t3_error, tenant_tx, workspace_scope, Rejectable,
+    audit_via_token_id, lifecycle_body, local_session_control_refusal, path_uuid, require_human,
+    require_human_or_work_host, settle, t3_error, tenant_tx, workspace_scope, Rejectable,
 };
 use crate::work_host_auth::signed_request_unauthorized;
 use crate::AppState;
@@ -145,6 +145,45 @@ fn validated_label(raw: &str) -> Result<String, ApiError> {
     }
 }
 
+/// ADR-0190 D4 (#2793): the names a shared local pane may carry. The server
+/// holds a display name and the folder's **last path element** — never a path —
+/// so a separator or a control character is refused here (friendly 400) and by
+/// 112's CHECKs (the row cannot say it either).
+fn validated_local_text(raw: &str, what: &str, max: usize) -> Result<String, ApiError> {
+    let value = raw.trim().to_string();
+    let length = value.chars().count();
+    if !(1..=max).contains(&length) {
+        return Err(ApiError::bad_request(format!(
+            "{what} must contain 1...{max} characters"
+        )));
+    }
+    if value
+        .chars()
+        .any(|c| c == '/' || c == '\\' || c.is_control())
+    {
+        return Err(ApiError::bad_request(format!(
+            "{what} must not contain a path separator or control character"
+        )));
+    }
+    Ok(value)
+}
+
+/// The `origin` a create request names: `host` (default) or `local_pty`.
+fn requested_origin_is_local(request: &CreateWorkSessionRequest) -> Result<bool, ApiError> {
+    match request.origin.as_deref() {
+        None | Some("host") => {
+            if request.folder_label.is_some() {
+                return Err(ApiError::bad_request(
+                    "folderLabel requires origin local_pty",
+                ));
+            }
+            Ok(false)
+        }
+        Some("local_pty") => Ok(true),
+        Some(_) => Err(ApiError::bad_request("origin must be host or local_pty")),
+    }
+}
+
 /// `activeFilter` (:2107-2113): absent/`"0"`/`"1"`, anything else is a 400.
 fn active_filter(raw: Option<&str>) -> Result<bool, ApiError> {
     match raw {
@@ -175,6 +214,8 @@ fn session_dto(detail: WorkSessionDetail) -> WorkSessionDto {
         exit_code: detail.exit_code,
         end_reason: detail.end_reason,
         resumed_from_session_id: detail.resumed_from_session_id.map(|id| id.to_string()),
+        origin: detail.origin,
+        folder_label: detail.folder_label,
     }
 }
 
@@ -225,6 +266,56 @@ pub async fn create(
     require_human_or_work_host(&principal, "work sessions require a human or work host")?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let host_signed = principal.kind == PrincipalKind::WorkHost;
+    let local_pty = requested_origin_is_local(&request)?;
+    if local_pty {
+        // ADR-0190 D4: the person shares their own pane. A host never
+        // registers one on their behalf, and nothing a host binds (control,
+        // PTY, display) rides on it.
+        if host_signed {
+            return Err(ApiError::forbidden(
+                "a shared local session is registered by the person, not a work host",
+            ));
+        }
+        reject_unsupported_create(&request)?;
+        let tool = validated_tool(&request.tool)?;
+        let label = validated_local_text(&request.label, "label", 120)?;
+        let folder_label = request
+            .folder_label
+            .as_deref()
+            .map(|raw| validated_local_text(raw, "folderLabel", 80))
+            .transpose()?;
+        let (channel_id, host_id, member_id) =
+            (request.channel_id, request.host_id, principal.member_id);
+        let detail = settle(
+            "work_sessions.create_local",
+            tenant_tx(
+                &state.pool,
+                workspace_id,
+                lifecycle_body(move |conn: &mut momo_db::PgConnection| {
+                    Box::pin(async move {
+                        create_local_in_tx(
+                            conn,
+                            workspace_id,
+                            member_id,
+                            channel_id,
+                            host_id,
+                            &tool,
+                            &label,
+                            folder_label.as_deref(),
+                        )
+                        .await
+                    }) as _
+                }),
+            )
+            .await,
+        )?;
+        return Ok((
+            StatusCode::CREATED,
+            Json(WorkSessionResponse {
+                work_session: session_dto(detail),
+            }),
+        ));
+    }
     if host_signed {
         let Some(signing_host) = principal.token_id else {
             return Err(signed_request_unauthorized());
@@ -302,6 +393,104 @@ pub async fn create(
             work_session: session_dto(detail),
         }),
     ))
+}
+
+/// The code for a share that is not on the person's own registered desktop.
+const CODE_LOCAL_SHARE_REQUIRES_HOST: &str = "local_share_requires_registered_host";
+
+/// ADR-0190 D4 (#2793): record a shared local pane.
+///
+/// Sharing is off by default: no row exists until the person asks, and it is
+/// allowed only once their desktop is a registered, unrevoked `app` host that
+/// they own (ADR-0188 R1 등록 GUI, #2778). Missing, revoked, someone else's and
+/// non-desktop hosts collapse to one non-disclosing refusal. No slot is taken
+/// (the machine is the person's own, not the pool's) and no usage ledger opens.
+#[allow(clippy::too_many_arguments)]
+async fn create_local_in_tx(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    channel_id: Uuid,
+    host_id: Uuid,
+    tool: &str,
+    label: &str,
+    folder_label: Option<&str>,
+) -> Rejectable<WorkSessionDetail> {
+    // ---- rejections first (nothing is written above this line) -------------
+    let own_desktop = target_work_host_in_tx(conn, workspace_id, host_id)
+        .await?
+        .is_some_and(|host| {
+            host.host_type == "app" && host.scope == "member" && host.owner_member_id == member_id
+        });
+    if !own_desktop {
+        return Ok(Err(ApiError::coded(
+            StatusCode::FORBIDDEN,
+            CODE_LOCAL_SHARE_REQUIRES_HOST,
+            "sharing a local pane requires your own registered desktop",
+        )));
+    }
+    if !is_active_channel_member_in_tx(conn, workspace_id, channel_id, member_id).await? {
+        return Ok(Err(ApiError::forbidden(
+            "active channel membership required",
+        )));
+    }
+
+    // ---- writes ------------------------------------------------------------
+    let session_id = allocate_uuid_v7(conn).await?;
+    let props = card_props(session_id, tool, label, "running", None, None, None, None);
+    let card = send_message_in_tx(
+        conn,
+        workspace_id,
+        NewMessage {
+            channel_id,
+            author_member_id: member_id,
+            message_type: MessageType::System,
+            body: None,
+            props,
+            root_id: None,
+            reply_to_id: None,
+            client_msg_id: Some(session_id),
+            run_id: None,
+            hlc_ts: None,
+            hlc_count: None,
+        },
+    )
+    .await
+    .map_err(T3Error::from)?;
+    let session = create_local_pty_work_session_with_id_in_tx(
+        conn,
+        workspace_id,
+        session_id,
+        NewWorkSession {
+            channel_id,
+            member_id,
+            host_id,
+            root_message_id: card.message.id,
+            tool: tool.to_string(),
+            label: label.to_string(),
+        },
+        folder_label,
+    )
+    .await?;
+    let detail = lock_work_session_detail_in_tx(conn, workspace_id, session.id)
+        .await?
+        .ok_or(T3Error::SessionNotFound)?;
+    emit_outbox(
+        &mut *conn,
+        workspace_id,
+        OutboxKind::Broadcast,
+        "publish",
+        &lifecycle_payload(
+            &cent_channel(workspace_id, channel_id),
+            "work.session.started",
+            &detail.0,
+            card.message.seq,
+        ),
+        Some(channel_id),
+    )
+    .await
+    .map_err(|error| T3Error::from(momo_db::DbError::from(error)))?;
+    Ok(Ok(detail.0))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1057,6 +1246,12 @@ async fn record_acp_event_in_tx(
             "work host cannot relay another host session",
         )));
     }
+    // ADR-0190 D4: a shared local pane carries a name, a folder label and a
+    // status. An ACP stream is transcript content and a permission request is
+    // a control surface; neither belongs on it.
+    if existing.origin == "local_pty" {
+        return Ok(Err(local_session_control_refusal()));
+    }
     if existing.status != "running" {
         return Ok(Err(ApiError::new(
             StatusCode::CONFLICT,
@@ -1528,6 +1723,11 @@ async fn bind_remote_pty_in_tx(
         return Ok(Err(ApiError::forbidden(
             "work host cannot bind another host session",
         )));
+    }
+    // ADR-0190 D4: a shared local pane carries no PTY binding (112's CHECK and
+    // `write_remote_pty_binding_in_tx` say the same).
+    if existing.origin == "local_pty" {
+        return Ok(Err(local_session_control_refusal()));
     }
     if existing.status != "running" && existing.status != "idle" {
         return Ok(Err(ApiError::new(
@@ -2113,6 +2313,11 @@ async fn resume_in_tx(
     else {
         return Ok(Err(ApiError::not_found("work session not found")));
     };
+    // ADR-0190 D4: resume is a spawn control carrying the session; a shared
+    // local pane takes none, so there is nothing to hand over.
+    if source.origin == "local_pty" {
+        return Ok(Err(local_session_control_refusal()));
+    }
     // #3154: a retry of a signed resume that already went through. The
     // client keeps the same successor id and signature after a lost response
     // (#3153); by then the source is `ended`, so without this the retry meets
@@ -2514,6 +2719,8 @@ mod tests {
             exit_code: None,
             end_reason: None,
             resumed_from_session_id: None,
+            origin: "host".into(),
+            folder_label: None,
         }
     }
 
@@ -2699,6 +2906,8 @@ mod tests {
             attach_endpoint: None,
             display_id: None,
             display_endpoint: None,
+            origin: None,
+            folder_label: None,
         };
         assert!(reject_unsupported_create(&base()).is_ok());
         let mut with_control = base();

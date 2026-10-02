@@ -903,6 +903,8 @@ impl DisplayBindingTarget {
 /// The `status` clause is repeated here even though the caller checked it under
 /// the same lock: this statement is the only writer of these columns, and a
 /// guard that lives only in the caller is a guard the next caller does not have.
+/// `origin = 'host'` is ADR-0190 D4: a shared local pane never carries a binding
+/// (raw spectating is D6, after goal A), and 112's CHECK says the same.
 /// `Ok(false)` means the row moved out of `running|idle` and the caller answers
 /// Swift's 409 rather than reporting a write that did not happen.
 pub async fn write_display_binding_in_tx(
@@ -916,6 +918,7 @@ pub async fn write_display_binding_in_tx(
             SET display_id = $3, display_endpoint = $4 \
           WHERE workspace_id = $1 \
             AND id = $2 \
+            AND origin = 'host' \
             AND status IN ('running', 'idle')",
     )
     .bind(workspace_id)
@@ -942,6 +945,7 @@ pub async fn write_remote_pty_binding_in_tx(
             SET pty_id = $3, attach_endpoint = $4 \
           WHERE workspace_id = $1 \
             AND id = $2 \
+            AND origin = 'host' \
             AND status IN ('running', 'idle')",
     )
     .bind(workspace_id)
