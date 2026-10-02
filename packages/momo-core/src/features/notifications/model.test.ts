@@ -480,6 +480,12 @@ describe("notifyDecision: DM kind and target visibility (#3339)", () => {
     if (decision.show) expect(decision.notification.kind).toBe("dm");
   });
 
+  it("a system row in a DM is not a dm notification", () => {
+    expect(
+      notifyDecision(event({ props: {}, type: "system", body: "참여했어요" }), dm())
+    ).toEqual({ show: false, skip: "not-notifiable" });
+  });
+
   it("without isDirect an ordinary message is still silent", () => {
     expect(notifyDecision(event({ props: {} }), context())).toEqual({
       show: false,

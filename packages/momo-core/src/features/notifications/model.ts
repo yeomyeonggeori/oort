@@ -145,7 +145,8 @@ export function notifiableKind(
   }
   if (mentionsMember(message, selfMemberId)) return "mention";
   // A DM that mentions you is a mention (the louder, default-on kind).
-  if (isDirect && message.type !== "approval_request") return "dm";
+  // Only a person-readable text row: a join/system line or a tool call is not a DM.
+  if (isDirect && message.type === "text") return "dm";
   return null;
 }
 

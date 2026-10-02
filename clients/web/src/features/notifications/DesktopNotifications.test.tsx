@@ -19,7 +19,7 @@ const IDS = vi.hoisted(() => ({
   self: "00000000-0000-7000-8000-000000000101",
   other: "00000000-0000-7000-8000-0000000005d1",
   agent: "00000000-0000-7000-8000-000000000103",
-  channel: "00000000-0000-7000-8000-000000000201",
+  channel: "00000000-0000-7000-8000-00000000020a",
 }));
 
 const showNotification = vi.hoisted(() => vi.fn());
@@ -238,6 +238,17 @@ describe("DesktopNotifications", () => {
     });
     expect(showNotification).toHaveBeenCalledTimes(1);
     expect(showNotification.mock.calls[0]?.[0]).toBe("승인 필요 2건");
+  });
+
+  it("경로 id의 대소문자가 이벤트와 달라도 같은 채널로 본다 (#3339)", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    mountRail("/c/" + IDS.channel.toUpperCase());
+    await act(async () => {
+      onMessage?.(mentionEvent());
+      osNotifier().flush();
+      await Promise.resolve();
+    });
+    expect(showNotification).not.toHaveBeenCalled();
   });
 
   it("창이 앞이고 그 채널이 열려 있으면 알리지 않고, 다른 화면이면 알린다 (#3339)", async () => {

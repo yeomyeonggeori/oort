@@ -92,9 +92,11 @@ export function DesktopNotifications() {
       isDesktop: isDesktop(),
       windowFocused: focusedRef.current,
       // 창이 앞이어도 대상 채널이 화면에 없으면 알린다(#3339).
-      isTargetVisible: (channelId) =>
-        pathnameRef.current === `/c/${channelId}` ||
-        pathnameRef.current.startsWith(`/c/${channelId}/`),
+      isTargetVisible: (channelId) => {
+        // 경로의 id와 이벤트의 id는 대소문자가 다를 수 있다: uuidEq로 비교한다.
+        const routeId = /^\/c\/([^/]+)/.exec(pathnameRef.current)?.[1];
+        return routeId !== undefined && uuidEq(routeId, channelId);
+      },
       isDirect: (channelId) =>
         current.channels.some(
           (channel) => uuidEq(channel.id, channelId) && channel.kind === "dm"

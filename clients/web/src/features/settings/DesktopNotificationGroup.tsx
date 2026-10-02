@@ -62,7 +62,7 @@ export const DESKTOP_NOTIFICATION_KIND_ROWS: ReadonlyArray<DesktopNotificationKi
 ];
 
 const PHONE_CELL_TEXT: Record<PhoneCell, string> = {
-  phone: "폰 앱에서 정해요",
+  phone: "곧 열려요",
   "desktop-only": "데스크탑 전용",
   soon: "곧 열려요",
 };
@@ -198,6 +198,7 @@ export function DesktopNotificationGroup() {
   const requestingRef = useRef(false);
   const kinds = useDesktopNotificationKinds();
   const unsupportedReasonId = useId();
+  const dockOffReasonId = useId();
   const kindsLocked = permission === "unsupported";
 
   useEffect(() => {
@@ -262,8 +263,11 @@ export function DesktopNotificationGroup() {
         ]}
       >
         <div
-          className="min-w-0 overflow-x-auto rounded-md border border-line"
+          className="min-w-0 overflow-x-auto rounded-md border border-line focus-visible:focus-ring"
           data-testid="desktop-notification-kinds"
+          role="region"
+          aria-label="알림 종류별 설정 표"
+          tabIndex={0}
         >
           <table className="w-full border-collapse text-left">
             <caption className="sr-only">알림 종류별 OS 알림, 독 배지, 폰 푸시</caption>
@@ -288,7 +292,7 @@ export function DesktopNotificationGroup() {
                     </th>
                     <td className="whitespace-nowrap p-3 text-center align-top">
                       {row.id === null ? (
-                        <span className="text-meta text-ink-muted">곧 열려요</span>
+                        <span className="text-meta text-ink-muted">연결 전</span>
                       ) : (
                         <input
                           type="checkbox"
@@ -304,22 +308,26 @@ export function DesktopNotificationGroup() {
                         />
                       )}
                     </td>
-                    <td className="whitespace-nowrap p-3 text-center align-top">
+                    <td className="whitespace-nowrap p-3 text-center align-top text-meta text-ink-muted">
                       {row.dock === "dm" ? (
                         <input
                           type="checkbox"
                           aria-label={`${row.name} 독 배지`}
                           checked={kinds.dockDm}
                           disabled={kindsLocked || !kinds.dockBadge}
-                          aria-describedby={kindsLocked ? unsupportedReasonId : undefined}
+                          aria-describedby={
+                            kindsLocked ? unsupportedReasonId : !kinds.dockBadge ? dockOffReasonId : undefined
+                          }
                           onChange={(event) => setDesktopNotificationKind("dockDm", event.target.checked)}
                           className="mt-1 accent-accent press focus-visible:focus-ring"
                           data-testid="desktop-notification-dock-dm"
                         />
+                      ) : !kinds.dockBadge ? (
+                        "꺼짐"
+                      ) : row.dock === "counted" ? (
+                        "수에 포함"
                       ) : (
-                        <span className="text-meta text-ink-muted">
-                          {row.dock === "counted" ? "수에 포함" : "세지 않아요"}
-                        </span>
+                        "세지 않아요"
                       )}
                     </td>
                     <td className="whitespace-nowrap p-3 text-center align-top text-meta text-ink-muted">
@@ -341,6 +349,11 @@ export function DesktopNotificationGroup() {
             describedBy={kindsLocked ? unsupportedReasonId : undefined}
             onToggle={(enabled) => setDesktopNotificationKind("dockBadge", enabled)}
           />
+          {!kinds.dockBadge && (
+            <p id={dockOffReasonId} className="border-t border-line p-3 text-meta text-ink-muted">
+              독 배지가 꺼져 있어서 표의 독 배지 열은 모두 쉬어요.
+            </p>
+          )}
         </div>
       </Subsection>
     </>
