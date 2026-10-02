@@ -44,12 +44,14 @@ use momo_db::{with_tenant_tx, DbError, PgPool};
 use momo_drive::{DriveArchive, DriveError, GoogleDriveArchive};
 use momo_messaging::avatar_reclaim::{
     avatar_reclaim_candidates, ensure_write_pool_rls_bound, reclaim_avatar_media_in_tx,
-    write_reclaim_audit, DriveDelete, ReclaimCounts,
+    write_reclaim_audit, DriveDelete, ReclaimCounts, ReclaimOutcome,
 };
 use uuid::Uuid;
 
 /// One Drive delete (probe + DELETE) may not hold the tick longer than this.
 pub const DELETE_TIMEOUT: Duration = Duration::from_secs(30);
+/// Consecutive transient Drive failures after which a tick stops early.
+pub const MAX_CONSECUTIVE_DRIVE_FAILURES: u32 = 3;
 
 /// Settings for the avatar reclaim. Holds a key **path**, never key material.
 #[derive(Clone)]
@@ -144,8 +146,14 @@ impl AvatarReclaimer {
         let mut per_workspace: HashMap<Uuid, ReclaimCounts> = HashMap::new();
         let mut stats = AvatarReclaimStats::default();
         let drive_unavailable = Arc::new(AtomicBool::new(false));
+        // A Drive that keeps failing (timeouts, 5xx) must not hold the tick for
+        // batch x DELETE_TIMEOUT: stop after a few consecutive failures.
+        let mut consecutive_drive_failures = 0u32;
 
         for candidate in candidates {
+            if consecutive_drive_failures >= MAX_CONSECUTIVE_DRIVE_FAILURES {
+                break;
+            }
             if drive_unavailable.load(Ordering::Relaxed) {
                 // No Drive configured at all: every further row would fail the
                 // same way. Stop; nothing was written.
@@ -171,14 +179,22 @@ impl AvatarReclaimer {
 
             let counts = per_workspace.entry(candidate.workspace_id).or_default();
             match result {
-                Ok(outcome) => counts.record(outcome),
+                Ok(outcome) => {
+                    counts.record(outcome);
+                    if outcome == ReclaimOutcome::DriveFailed {
+                        consecutive_drive_failures += 1;
+                    } else {
+                        consecutive_drive_failures = 0;
+                    }
+                }
                 Err(error) => {
                     stats.db_errors += 1;
-                    // The error text is a database error; it names no file.
+                    // Fixed text: a database error may echo relation/constraint
+                    // names, and nothing here needs them.
+                    let _ = &error;
                     tracing::warn!(
                         workspace_id = %candidate.workspace_id,
-                        error = %error,
-                        "avatar reclaim failed for a media row"
+                        "avatar reclaim failed for a media row (database error)"
                     );
                 }
             }
