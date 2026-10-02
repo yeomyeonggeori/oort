@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useSession } from "@/app/session";
-import { isDesktop, showNotification } from "@/lib/tauri";
+import { isDesktop } from "@/lib/tauri";
 import type { MessageNewEvent } from "@/lib/realtime";
 import { uuidEq } from "@momo/core/lib/api";
 import {
@@ -17,6 +17,7 @@ import {
   type ArmedOpen,
 } from "@momo/core/features/notifications/model";
 import { notifyThisDevice } from "./deviceNotify";
+import { osNotifier, type OsNotifyKind } from "./osNotifier";
 
 // =============================================================================
 // Desktop notification rail (MOMO-607, ADR-0133 P2) — the trigger MOMO-603 left
@@ -79,6 +80,8 @@ export function DesktopNotifications() {
   // Everything the decision needs that changes on render, read through a ref so
   // the message handler below can stay stable — rebuilding it would tear down
   // and re-establish every subscription on each roster refetch.
+  const pathnameRef = useRef(location.pathname);
+  pathnameRef.current = location.pathname;
   const contextRef = useRef({ channels, directory, selfId });
   contextRef.current = { channels, directory, selfId };
 
@@ -88,6 +91,14 @@ export function DesktopNotifications() {
     const decision = notifyThisDevice(event, {
       isDesktop: isDesktop(),
       windowFocused: focusedRef.current,
+      // 창이 앞이어도 대상 채널이 화면에 없으면 알린다(#3339).
+      isTargetVisible: (channelId) =>
+        pathnameRef.current === `/c/${channelId}` ||
+        pathnameRef.current.startsWith(`/c/${channelId}/`),
+      isDirect: (channelId) =>
+        current.channels.some(
+          (channel) => uuidEq(channel.id, channelId) && channel.kind === "dm"
+        ),
       selfMemberId: current.selfId,
       isMuted: (channelId) =>
         current.channels.some(
@@ -109,9 +120,19 @@ export function DesktopNotifications() {
     const { messageId, channelId, title, body } = decision.notification;
     announcedRef.current = rememberAnnounced(announcedRef.current, messageId);
     armedRef.current = armOpen(armedRef.current, channelId, nowMs);
-    // Fire and forget: `showNotification` resolves false for a browser or a
-    // refused permission, which are both normal states, not failures.
-    void showNotification(title, body);
+    // 같은 종류는 한 묶음으로 쌓아 보낸다(osNotifier). 보내기는 fire and forget:
+    // 브라우저나 거절된 권한은 false로 끝나는 정상 상태다.
+    const kindMap: Record<typeof decision.notification.kind, OsNotifyKind> = {
+      approval: "approval",
+      mention: "mention",
+      dm: "dm",
+    };
+    osNotifier().offer({
+      kind: kindMap[decision.notification.kind],
+      title,
+      ...(body === undefined ? {} : { body }),
+      label: title.replace(/^승인 필요 · /, ""),
+    });
   }, []);
 
   // ---- the rail -----------------------------------------------------------

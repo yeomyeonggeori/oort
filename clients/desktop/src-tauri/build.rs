@@ -33,6 +33,9 @@ const APP_COMMANDS: &[&str] = &[
     "notification_permission",
     "notification_request_permission",
     "notification_show",
+    // Dock badge = the web side's needs-me count (#3339). Desktop only;
+    // granted to the main window in capabilities/default.json.
+    "dock_badge_set",
     "keychain_available",
     // Desktop: the webview's handle for the stored token (#3106).
     "keychain_refresh_token_handle",
