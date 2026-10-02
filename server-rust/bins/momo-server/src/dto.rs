@@ -1321,6 +1321,84 @@ pub struct WorkSessionShareResponse {
     pub shared: bool,
 }
 
+/// Query string of `GET …/work-sessions/shared` (#3322).
+#[derive(Debug, Default, Deserialize)]
+pub struct SharedWorkSessionListQuery {
+    #[serde(default)]
+    pub limit: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+/// The S1 diff numbers as the board returns them. `null` = unknown.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedDiffDto {
+    pub added: Option<i32>,
+    pub deleted: Option<i32>,
+    pub files: Option<i32>,
+    pub ahead: Option<i32>,
+    pub behind: Option<i32>,
+    pub uncommitted: Option<i32>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedSessionOwnerDto {
+    pub member_id: String,
+    pub display_name: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedSessionChannelDto {
+    pub id: String,
+    pub name: Option<String>,
+}
+
+/// One team-board row: `momo-core`'s `ShareSummaryS1` (repo, branch, harness,
+/// state, stages, diff, prUrl, lastActivityAt) plus who, where and which lane.
+/// Nothing in it can carry terminal text, input, control or a commit title.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedWorkSessionDto {
+    pub session_id: String,
+    /// `local_pty` (shared L pane) or `host` (agent lane, #2779).
+    pub origin: String,
+    pub label: String,
+    pub folder_label: Option<String>,
+    /// Ledger status: running | idle | orphaned | ended.
+    pub status: String,
+    pub owner: SharedSessionOwnerDto,
+    pub home_channel: SharedSessionChannelDto,
+    pub started_at_ms: i64,
+    pub ended_at_ms: Option<i64>,
+    pub shared_at_ms: Option<i64>,
+    pub repo: Option<String>,
+    pub branch: Option<String>,
+    pub harness: String,
+    pub state: String,
+    pub stages: Vec<String>,
+    pub diff: SharedDiffDto,
+    pub pr_url: Option<String>,
+    /// Epoch seconds.
+    pub last_activity_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedWorkSessionListResponse {
+    pub sessions: Vec<SharedWorkSessionDto>,
+    /// Present only when more rows follow; opaque.
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedWorkSessionResponse {
+    pub session: SharedWorkSessionDto,
+}
+
 /// Swift `WorkSessionACPEvent` (`WorkSessionRoutes.swift:40-51`). Wire keys
 /// stay snake_case (`event_id`, `v`, `ts`) because that is what the daemon
 /// already signs and sends.
