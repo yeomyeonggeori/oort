@@ -53,7 +53,7 @@ export function WorkspaceRail({
   active: RailDestination | null;
   /** 「내 작업」은 이 기기의 격자라 데스크탑에만 선다(웹에는 로컬 터미널 레인이 없다, ADR-0190 D1). */
   showMyWork: boolean;
-  /** 안 읽은 멘션 수. 인박스 타일의 배지로 선다(목록 줄에서 이사 온 자리). */
+  /** 「나에게 필요한 일」 수(useNeedsMeCount). 인박스 타일의 배지로 선다(목록 줄에서 이사 온 자리). */
   inboxUnread?: number;
   /** 아래 프로필(연결 상태 막대 포함). */
   footer?: ReactNode;
@@ -213,7 +213,7 @@ function RailLink({
         to={to}
         data-testid={testId}
         aria-current={current ? "page" : undefined}
-        aria-label={badge > 0 ? `${label}, 안 읽은 멘션 ${badge}개` : undefined}
+        aria-label={badge > 0 ? `${label}, 나에게 필요한 일 ${badge}개` : undefined}
         className={cn(
           "rail-item relative focus-visible:focus-ring active:bg-surface-pressed",
           current
