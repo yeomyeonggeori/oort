@@ -763,6 +763,43 @@ export function asWorkSessionControlFrame(
   return frame as WorkSessionControlFrame;
 }
 
+/**
+ * 공유 세션의 켜짐·꺼짐·파생 상태 변화(ADR-0194 D8, `work_share::share_changed_payload`).
+ *
+ * 본문은 세션 id·집 채널 id·전환 종류뿐이다. 이름·브랜치·숫자·URL은 싣지 않는다.
+ * 그래서 이 프레임은 **신호**일 뿐이다: 받은 클라이언트는 GET으로 다시 읽고, 그 답을
+ * 진실로 쓴다(보이지 않게 된 줄은 단건 404가 지운다). 봉투에 `seq`가 없다.
+ */
+export interface WorkSessionShareChangedFrame {
+  type: "work.session.share_changed";
+  v: number;
+  ts: number;
+  payload: {
+    session_id: string;
+    channel_id: string;
+    kind: "enabled" | "state_changed" | "disabled";
+  };
+}
+
+export function asWorkSessionShareChangedFrame(
+  data: unknown
+): WorkSessionShareChangedFrame | null {
+  if (typeof data !== "object" || data === null) return null;
+  const frame = data as Partial<WorkSessionShareChangedFrame>;
+  if (frame.type !== "work.session.share_changed") return null;
+  const payload = frame.payload as Record<string, unknown> | undefined;
+  if (!payload || typeof payload.session_id !== "string") return null;
+  if (typeof payload.channel_id !== "string") return null;
+  if (
+    payload.kind !== "enabled" &&
+    payload.kind !== "state_changed" &&
+    payload.kind !== "disabled"
+  ) {
+    return null;
+  }
+  return frame as WorkSessionShareChangedFrame;
+}
+
 const WORK_ACP_TYPES: ReadonlySet<string> = new Set<WorkSessionACPType>([
   "agent.status",
   "agent.partial",
@@ -1030,6 +1067,13 @@ export interface RealtimeHandle {
        * with the same silence the frame just broke.
        */
       onControl?: (frame: WorkSessionControlFrame) => void;
+      /**
+       * A shared session turned on, off or changed derived state (ADR-0194 D8,
+       * 팀 보드 #2863). A signal only: the frame carries no name or number, so
+       * the caller re-reads the board endpoint and treats that answer as true.
+       * Optional for the same reason as `onControl`.
+       */
+      onShareChanged?: (frame: WorkSessionShareChangedFrame) => void;
       /** A replayed or non-recovered (re)subscribe: heal from REST instead. */
       onResync: () => void;
     }

@@ -61,6 +61,7 @@ export const NAMED_MEASURES = [
   "rail-marker",
   "work-tab-bar",
   "work-board-bar",
+  "work-board-drawer",
   "pane-sm",
   "pane",
   "pane-md",

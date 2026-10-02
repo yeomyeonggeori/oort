@@ -67,11 +67,13 @@ const emptyFeed: Feed = {
   refetch: () => undefined,
 };
 
+const mentionCount = { value: 0 };
+
 vi.mock("./useInbox", () => ({
   useNeedsAction: () => listFeed,
   useMentions: () => emptyFeed,
   useAgentFeed: () => emptyFeed,
-  useMentionCount: () => 0,
+  useMentionCount: () => mentionCount.value,
   useUnreadMentionChannels: () => [],
   useMarkRead: () => () => undefined,
   useInvalidateApprovals: () => () => undefined,
@@ -133,6 +135,7 @@ beforeAll(() => {
 beforeEach(() => {
   listFeed.items = [ITEM];
   listFeed.isLoading = false;
+  mentionCount.value = 0;
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: false,
     media: query,
@@ -177,5 +180,30 @@ describe("InboxRoute skeleton host", () => {
     );
     expect(skel).not.toBeNull();
     expect(skel?.getAttribute("data-ready")).toBe("false");
+  });
+
+  it("「에이전트」 탭이 없고 활동으로 이어진다 (#3337)", async () => {
+    const host = await mount();
+    expect(host.querySelector('[data-testid="inbox-tab-agents"]')).toBeNull();
+    expect(host.querySelector('[data-testid="inbox-tab-needs-action"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="inbox-tab-mentions"]')).not.toBeNull();
+    const link = host.querySelector('[data-testid="inbox-activity-link"]');
+    expect(link?.getAttribute("href")).toBe("/activity");
+  });
+
+  it("머리 수 = 승인 + 멘션 (레일 배지와 같은 단일 출처)", async () => {
+    mentionCount.value = 2;
+    listFeed.items = [{ ...ITEM, approvalId: "ap-1" }];
+    const host = await mount();
+    // 승인 1(결정 가능) + 멘션 2
+    expect(host.querySelector('[data-testid="inbox-needs-me-count"]')?.textContent).toBe("3");
+    expect(host.querySelector('[data-testid="inbox-tab-needs-action"]')?.textContent).toContain("1");
+    expect(host.querySelector('[data-testid="inbox-tab-mentions"]')?.textContent).toContain("2");
+  });
+
+  it("필요한 일이 없으면 머리 수를 그리지 않는다", async () => {
+    listFeed.items = [];
+    const host = await mount();
+    expect(host.querySelector('[data-testid="inbox-needs-me-count"]')).toBeNull();
   });
 });
