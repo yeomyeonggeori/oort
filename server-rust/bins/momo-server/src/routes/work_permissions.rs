@@ -94,7 +94,8 @@ use crate::human_control::{
     authorize_human_control_in_tx, record_control_provenance_in_tx, signature_columns,
 };
 use crate::routes::shared::{
-    audit_via_token_id, path_uuid, settle, tenant_tx, workspace_scope, Rejectable,
+    audit_via_token_id, local_session_control_refusal, path_uuid, settle, tenant_tx,
+    workspace_scope, Rejectable,
 };
 use crate::routes::work_controls::dispatch_control_in_tx;
 use crate::routes::work_sessions::{publish_session_event_in_tx, validated_acp_event};
@@ -350,6 +351,10 @@ async fn decide_in_tx(
     else {
         return Ok(Err(ApiError::not_found("work session not found")));
     };
+    // ADR-0190 D4: a shared local pane has no permission surface to decide.
+    if session.origin == "local_pty" {
+        return Ok(Err(local_session_control_refusal()));
+    }
     // D3: 결정자 = 세션 소유자 = host 소유자. Both, so neither a session
     // handed to someone else nor a host registered by someone else can move
     // the decision off the machine's owner.

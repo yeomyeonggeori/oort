@@ -540,19 +540,25 @@ mod tests {
     ///
     /// 111 is #3277's member avatar (ADR-0161 증보): `member_avatar_media` (the 067 lifecycle re-aimed at a member, image
     /// mime allow-list without SVG) and `member.avatar_media_id` with a composite self-only FK.
+    ///
+    /// 112 is #3284's avatar Drive reclaim: `drive_reclaimed_at` on both avatar media tables (rows are marked, never deleted)
+    /// and the partial scan indexes the reclaim sweep reads.
+    ///
+    /// 113 is #2793's shared local session (ADR-0190 D4): `work_session.origin` / `folder_label` and the
+    /// `work_control_refuse_local_session` trigger that keeps every control off a `local_pty` session.
     #[test]
-    fn discovers_contiguous_migrations_001_to_111() {
+    fn discovers_contiguous_migrations_001_to_113() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            111,
-            "expected 111 migrations under {}",
+            113,
+            "expected 113 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 111);
+        assert_eq!(migrations.last().unwrap().version, 113);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

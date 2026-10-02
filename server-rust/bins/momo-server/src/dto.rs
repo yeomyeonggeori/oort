@@ -1225,6 +1225,14 @@ pub struct CreateWorkSessionRequest {
     pub display_id: Option<String>,
     #[serde(default)]
     pub display_endpoint: Option<String>,
+    /// ADR-0190 D4 (#2793): `host` (default) or `local_pty` — a shared local
+    /// pane. A `local_pty` session carries a name, a folder label and a status
+    /// and nothing else; the server refuses every control aimed at it.
+    #[serde(default)]
+    pub origin: Option<String>,
+    /// `local_pty` only: the folder's last path element, never a full path.
+    #[serde(default)]
+    pub folder_label: Option<String>,
 }
 
 /// `PATCH …/work-sessions/{session}` request (Swift `UpdateWorkSessionRequest`,
@@ -1360,6 +1368,11 @@ pub struct WorkSessionDto {
     pub end_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resumed_from_session_id: Option<String>,
+    /// ADR-0190 D4: `host` or `local_pty`.
+    pub origin: String,
+    /// `local_pty` only; the folder's last path element.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub folder_label: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -5121,6 +5134,8 @@ mod tests {
             exit_code: None,
             end_reason: None,
             resumed_from_session_id: None,
+            origin: "host".into(),
+            folder_label: None,
         };
         let json = serde_json::to_value(&dto).expect("serialize");
         assert_eq!(json["rootMessageId"], "r");
