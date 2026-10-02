@@ -186,11 +186,11 @@ export function ActivityRoute() {
 function renderPendingLink(item: FeedItem) {
   if (item.kind !== "approval" || !item.pending) return null;
   return (
-    <p className="px-4 pb-2 text-meta">
+    <p className="px-4 text-meta">
       <Link
         to="/inbox"
         data-testid="activity-pending-link"
-        className="press rounded-sm text-ink-muted underline underline-offset-2 hover:text-ink focus-visible:focus-ring"
+        className="press inline-flex min-h-control items-center rounded-sm text-ink-muted underline underline-offset-2 hover:text-ink focus-visible:focus-ring"
       >
         인박스에서 처리
       </Link>

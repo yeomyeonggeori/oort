@@ -38,11 +38,17 @@ const auth = {
 };
 const agentId = "00000000-0000-7000-8000-000000000301";
 const otherId = "00000000-0000-7000-8000-000000000102";
+const otherAgentId = "00000000-0000-7000-8000-000000000302";
 const NOW = Date.now();
 const roster = [
   {
     id: agentId, workspaceId, kind: "agent", status: "active", displayName: "김인턴", handle: "kim-intern",
     channelCount: 4, channelIds: channels.map((c) => c.id), capabilities: [], ownerHumanId: memberId,
+    createdAtMs: 0, updatedAtMs: 0,
+  },
+  {
+    id: otherAgentId, workspaceId, kind: "agent", status: "active", displayName: "새벽봇", handle: "dawn-bot",
+    channelCount: 4, channelIds: channels.map((c) => c.id), capabilities: [], ownerHumanId: otherId,
     createdAtMs: 0, updatedAtMs: 0,
   },
   {
@@ -63,10 +69,15 @@ const approval = (id, status, minutesAgo, tool) => ({
 });
 const approvals = {
   pending: [approval("ap-1", "pending", 5, "work.session.end"), approval("ap-2", "pending", 12, "shell.exec")],
-  approved: [{ ...approval("ap-3", "approved", 60, "file.write"), decided_at_ms: NOW - 3_000_000, decided_by: memberId }],
+  approved: [
+    { ...approval("ap-3", "approved", 60, "file.write"), decided_at_ms: NOW - 3_000_000, decided_by: memberId },
+    // 담당이 다른 에이전트(서연의 새벽봇): 「내 에이전트」 칩에서는 빠져야 한다.
+    { ...approval("ap-4", "approved", 90, "file.write"), requested_by: otherAgentId, decided_at_ms: NOW - 5_000_000, decided_by: otherId },
+  ],
 };
 const runs = [
   { id: "r-1", workspaceId, agentMemberId: agentId, channelId: channels[0].id, status: "succeeded", stepCount: 6, maxSteps: 20, input: { type: "work", title: "주간 리포트 초안" }, startedAtMs: NOW - 900_000, finishedAtMs: NOW - 600_000, createdAtMs: NOW - 900_000, updatedAtMs: NOW - 600_000 },
+  { id: "r-3", workspaceId, agentMemberId: otherAgentId, channelId: channels[0].id, status: "succeeded", stepCount: 4, maxSteps: 20, input: { type: "work", title: "온보딩 카피 정리" }, startedAtMs: NOW - 2_000_000, finishedAtMs: NOW - 1_800_000, createdAtMs: NOW - 2_000_000, updatedAtMs: NOW - 1_800_000 },
   { id: "r-2", workspaceId, agentMemberId: agentId, channelId: channels[0].id, status: "running", stepCount: 2, maxSteps: 20, input: { type: "work", title: "배포 스크립트 점검" }, startedAtMs: NOW - 120_000, createdAtMs: NOW - 120_000, updatedAtMs: NOW - 60_000 },
 ];
 
@@ -110,7 +121,15 @@ async function installRoutes(context) {
     if (path.endsWith("/work-hosts")) return json(route, { workHosts: [] });
     if (path.endsWith("/work-sessions")) return json(route, { workSessions: [] });
     if (path.endsWith(`/workspaces/${workspaceId}`)) return json(route, { workspace: { id: workspaceId, name: "여명거리" } });
-    if (path.includes("/messages")) return json(route, { messages: [] });
+    if (path.includes("/messages")) {
+      // 멘션 탭의 수(read-state 2)와 목록이 같아야 한다: 안 읽은 구간(seq 5~9)의 멘션 두 건.
+      if (!path.includes(channels[0].id)) return json(route, { messages: [] });
+      const mention = (id, seq, text) => ({
+        id, channelId: channels[0].id, seq, hlcTs: NOW - 60_000 * seq, hlcCount: 0, authorMemberId: otherId, type: "text",
+        body: text, text, createdAtMs: NOW - 60_000 * (10 - seq), props: { mention_member_ids: [memberId] },
+      });
+      return json(route, { messages: [mention("m-1", 8, "@seongjae 배포 전에 한번 봐 주세요"), mention("m-2", 9, "@seongjae 리뷰 코멘트 반영했어요")] });
+    }
     return json(route, {});
   });
 }
@@ -297,7 +316,9 @@ async function scene(browser, origin, scheme) {
   check(`${tag} 인박스 머리 수가 레일 배지와 같다`, report.badge[tag].header === report.badge[tag].rail, JSON.stringify(report.badge[tag]));
   await shot("inbox-needs-action");
   await page.getByTestId("inbox-tab-mentions").click();
-  await page.waitForTimeout(600);
+  await page.waitForTimeout(800);
+  const mentionRows = await page.$$eval("[data-testid='inbox-list'] > li", (e) => e.length).catch(() => 0);
+  check(`${tag} 멘션 탭: 수(2)와 목록(2건)이 같다`, mentionRows === 2, String(mentionRows));
   await shot("inbox-mentions");
   await page.getByTestId("inbox-tab-needs-action").click();
 
@@ -311,13 +332,17 @@ async function scene(browser, origin, scheme) {
   const chips = await page.$$eval("[role='tab']", (els) => els.map((e) => e.textContent));
   check(`${tag} 활동 칩 네 개`, JSON.stringify(chips) === JSON.stringify(["전체", "내 에이전트", "승인", "작업 끝남"]), JSON.stringify(chips));
   await shot("activity-all");
+  const rowsOf = () => page.$$eval("[data-testid='activity-list'] > li", (e) => e.map((x) => x.textContent ?? ""));
+  const allRows = await rowsOf();
   for (const f of ["mine", "approvals", "done"]) {
     await page.getByTestId(`activity-tab-${f}`).click();
     await page.waitForTimeout(500);
     await shot(`activity-${f}`);
+    const rows = await rowsOf();
+    if (f === "mine") check(`${tag} 내 에이전트 칩은 서연의 새벽봇 행을 뺀다`, rows.length > 0 && rows.length < allRows.length && !rows.some((t) => t.includes("dawn-bot")), `${rows.length}/${allRows.length}`);
+    if (f === "approvals") check(`${tag} 승인 칩은 승인 행만 (실행 행 제외)`, rows.length === 4 && !rows.some((t) => t.includes("작업을 실행")), String(rows.length));
+    if (f === "done") check(`${tag} 작업 끝남 칩은 끝난 실행 2건만 보인다`, rows.length === 2 && rows.every((t) => t.includes("작업을 실행")), String(rows.length));
   }
-  const doneRows = await page.$$eval("[data-testid='activity-list'] > li", (e) => e.length);
-  check(`${tag} 작업 끝남 칩은 끝난 실행 1건만 보인다`, doneRows === 1, String(doneRows));
   await page.getByTestId("activity-tab-all").click();
   check(`${tag} 대기 승인 행에 인박스 링크`, (await page.getByTestId("activity-pending-link").count()) === 2);
   check(`${tag} 가로 넘침 0`, (await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) === 0);
