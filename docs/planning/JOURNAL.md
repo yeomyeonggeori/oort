@@ -3,6 +3,16 @@
 > 세션 종료 시 공용 계약에 따라 짧은 항목을 맨 위에 추가한다.
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 갱신할 때 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-10-02 · Opus 5.5 planner · ★데스크탑 피드백 묶음·팀 작업 사슬·사이드바/알림 재편
+
+- **10-01 피드백 전량 main:** 좌측 패널·프로필 흔들림(#3282), 「응답 필요」(#3285), 새 세션 시작 위치(#3286), 레일·⌘B(#3294), 단축키 설정(#3298), ⌘K 접기(#3306), 프로필 사진 엔진·웹·폰(#3283·#3293·#3305).
+- **팀 작업 W-Share:** #3313(mig 113)→#3318·#3319(mig 114)→#3326→#3333·#3344. 남은 연결: #2867 공유 켜기·수집기 sender.
+- **사이드바·알림(성재 10-02 결재 4건):** 인박스/활동 분리 #3343, 작업 끝남 푸시 #3346(ADR-0120 부록 A Accepted), 독 배지·OS 알림 #3349, IA 재편 #3358. 진행: #3338·#3342.
+- **증거 빌드:** 0.1.15 evidence-1002 DMG·iOS 3031(#2568·#1607). 첫 공증 403(Apple 계약) → 동의 후 통과.
+- **QA:** 에이전트 태그 설정 요청 — 초대만 지원(테마·알림 미지원) → #3353~#3356.
+- **환경:** 타 프로젝트 산출물 133GB 정리, `dev-artifact-sweep` launchd. Colima VM 디스크 거의 가득.
+- **교훈:** 승격 체인 중 land 금지(정책 바인딩 실패). `promote_both`가 셸에 set -e를 남김. 워커 캡처는 스크래치 회수 전에 claudedocs로 복사.
+
 ## 2026-10-01 · Sonnet 5.5 planner-docs · ★팀 기억 v2 M0~M3 main 통합(`58cfd534`) · oort-team v0.1.15 · 증거 빌드 0.1.15/3030
 
 - **랜딩:** [ADR-0196](../adr/0196-team-memory-v2.md)(0129 대체) M0~M3 — migration 098~110, #3158~#3174·#3208·#3212 닫힘. 요약·롤업, 항목(결정·사실·약속, add-only 추출), 에이전트 문맥 공급(영수증), 「기억해 둘게요」 제안, 기억 브라우저·편집·잊기(하드 삭제+재추출 억제), 야간 정리(병합·기간 종료·감쇠·보존·주제·사람 되돌림), 로컬 e5-small int8 벡터 검색+가중 RRF(owner 09-30), 워크스페이스 초기화·팀 공지, 웹·폰 화면.
@@ -230,9 +240,3 @@
 - **LS-2 랜딩**(PR #2175 R1 6 + R2 2 + planner 위생 1: NOTICE·THIRD_PARTY는 GHCR 고지 매니페스트 해시 고정이라 base 바이트 유지) → 감사(AGENTS 1행·test_license_gate Case 6) → track/uxui → #2166·dependabot #1355~1357 close → 승격 ah #2176 → main → sync engine #2178(자동 감사)·uxui #2179. 결과: clients 1250→1136, work 표면 4 id 셀프호스트 기본 숨김(진입점 0/5).
 - **LS-1 R1 완주**(PR #2177, 커밋 8, 정정 1회: PushRelay 소스만 삭제·계약 보존): 삭제 313, `.swift` 224→8(RN 셸), 추적 2,929→2,616, 부록 A 실측(Swift 169 vs Rust 183, Swift-only 패밀리 전부 폐기), LinkShort 대체 없이 삭제. planner 검토 수용 + **R2 2건 대기**(engine 합류·AGENTS/INDEX 충돌 해소 / `gate-csp-deploy.mjs`의 삭제된 `infra/prod/Caddyfile` 대상 → `infra/rust/Caddyfile.local`). 랜딩은 감사 체인(`audit-ls1.md` 초안).
 - 재개 절차: `claudedocs/resume-2026-09-07/RESUME.md` 「★ 재개 첫 행동」. 열린 결재: G2에 iOS 앱스토어 v0 포함(§7).
-
-## 2026-09-07 (밤) · Fable · ★결재 3건 — 푸시 relay Rust 승격(SH-10) · CDP 로컬 허용 · iOS 앱스토어 의도 + LS-β 발사
-
-- go → `launch-ls-beta.sh`: LS-1 #2165(`wls1`)·LS-2 #2166(`wls2`) 발사. LS-1은 PushRelay 결재 반영을 위해 1회 중단·정정 재개(`mission-ls1-b.md`: Swift relay 소스만 삭제, push 컴포즈·env·런북·검증기 보존).
-- 성재: 「셀프호스팅 레벨에서 모바일 알림 포함, iOS만 앱스토어 출시, Rust 기반이면 좋다」 → ADR-0183 결재 기록 2(결정 ① 정정) · #1255 = SH-10 재정의 · `first-goal-two-cases.md` §4 G1'-2 승격 + §7. 「계정 살아 있음, 로컬 테스트는 CDP 정책 위반 아님」 → CDP 로컬 허용, E2E-A 자동화. 메모리 갱신.
-- 열린 것(성재): G2에 iOS 앱스토어 v0 포함 개정(§7) 확인.
