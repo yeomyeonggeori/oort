@@ -28,6 +28,7 @@ import {
   NOTIFICATION_TAP_COPY,
   planNotificationLanding,
   tapArrival,
+  workSessionForTap,
 } from '../src/push/tapArrival';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
@@ -303,6 +304,9 @@ type FetchInit = {method?: string; body?: unknown};
  */
 const serverLater = new Map<string, unknown[]>();
 
+/** `GET …/work-sessions` 의 답 — 「작업 끝남」 탭이 루트 메시지로 세션을 찾는다(#3342). */
+let workSessionRows: unknown[] = [];
+
 function commitLater(channelId: string, row: unknown): void {
   serverLater.set(channelId, [...(serverLater.get(channelId) ?? []), row]);
 }
@@ -393,8 +397,11 @@ function installFetch(options: FetchOptions = {}): jest.Mock {
       }
       return jsonResponse(200, {approvals: [PENDING_APPROVAL]});
     }
+    if (url.includes('/work-sessions/shared')) {
+      return jsonResponse(200, {sessions: [], nextCursor: null});
+    }
     if (url.includes('/work-sessions')) {
-      return jsonResponse(200, {workSessions: []});
+      return jsonResponse(200, {workSessions: workSessionRows});
     }
     if (url.includes('/work-hosts')) return jsonResponse(200, {workHosts: []});
     throw new Error(`unrouted request: ${url}`);
@@ -646,6 +653,7 @@ async function expectSentence(testID: string, sentence: string): Promise<void> {
 beforeEach(() => {
   mmkvStore.clear();
   serverLater.clear();
+  workSessionRows = [];
   __resetSessionStore();
   __resetServerBaseCache();
   setServerBase(BASE);
@@ -677,6 +685,7 @@ describe('탭이 가리키는 곳 — 식별자만으로 짓는다 (순수)', ()
         threadRootId: null,
         approvalId: null,
         category: 'momo.mention',
+        reason: 'mention',
       },
     });
   });
@@ -2225,5 +2234,131 @@ describe('「있다」는 언제든, 「없다」는 탭 뒤 읽기로만 (#2632
     await sleep(200);
     expect(screen.getByTestId('conversation-title')).toHaveTextContent('random');
     expect(rowsHeld()).not.toContain(NEW_ID);
+  });
+});
+
+// =============================================================================
+// 「작업 끝남」 탭 — 대화가 아니라 그 세션으로 (#3342, ADR-0120 부록 A)
+//
+// 알림은 식별자만 나른다: 카드 메시지의 `thread-id` 가 세션의 **루트 메시지**다. 앱은
+// 세션 원장을 한 번 읽어 `rootMessageId` 가 맞는 세션을 찾고, 그 세션 화면을 홈 탭 위의
+// 층으로 연다(그 아래는 작업 목록). 못 찾으면 평범한 알림처럼 대화로 간다.
+// =============================================================================
+const SESSION_ID = 'ssssssss-0000-4000-8000-000000000001';
+const SESSION_LABEL = 'docs 정리';
+
+function sessionRow(over: Record<string, unknown> = {}) {
+  return {
+    id: SESSION_ID,
+    workspaceId: WS,
+    channelId: GENERAL,
+    memberId: SELF_ID,
+    hostId: 'host-1',
+    rootMessageId: ROOT,
+    tool: 'codex',
+    label: SESSION_LABEL,
+    status: 'idle',
+    observation: 'open',
+    observerGrantCount: 0,
+    remoteAttachAvailable: false,
+    remoteDisplayAvailable: false,
+    startedAtMs: T0,
+    ...over,
+  };
+}
+
+/** relay 가 보내는 「작업 끝남」: 카드는 세션 루트(ROOT)의 답글이고 category 는 momo.work. */
+const IDLE_AIM: Aim = {
+  messageId: REPLY,
+  threadId: ROOT,
+  category: 'momo.work',
+  reason: 'work_session_idle',
+};
+
+describe('「작업 끝남」 탭 (#3342)', () => {
+  it('세션 판정은 루트 메시지와 채널이 모두 맞을 때만 세션을 준다 (순수)', () => {
+    const rows = [
+      sessionRow(),
+      sessionRow({id: 'other', rootMessageId: RANDOM_ROOT_A, channelId: RANDOM}),
+    ] as never[];
+    const target = {reason: 'work_session_idle' as const, channelId: GENERAL, threadRootId: ROOT};
+    expect(workSessionForTap(target, rows)?.id).toBe(SESSION_ID);
+    // 다른 이유의 알림은 세션으로 가지 않는다 — 같은 스레드여도.
+    expect(workSessionForTap({...target, reason: 'mention'}, rows)).toBeNull();
+    expect(workSessionForTap({...target, reason: 'resume_offer'}, rows)).toBeNull();
+    // 루트가 없거나, 채널이 다르거나, 원장에 없으면 null — 대화로 간다.
+    expect(workSessionForTap({...target, threadRootId: null}, rows)).toBeNull();
+    expect(workSessionForTap({...target, channelId: RANDOM}, rows)).toBeNull();
+    expect(workSessionForTap({...target, threadRootId: OLD_ROOT}, rows)).toBeNull();
+    expect(workSessionForTap(target, undefined)).toBeNull();
+  });
+
+  it('탭 분류는 reason 을 들고 간다', () => {
+    const arrival = tapArrival(tapResponse(apnsPayload(IDLE_AIM)), WS);
+    expect(arrival?.kind === 'target' && arrival.target).toMatchObject({
+      reason: 'work_session_idle',
+      category: 'momo.work',
+      threadRootId: ROOT,
+    });
+  });
+
+  it('종료 — 탭이 앱을 띄우면 대화가 아니라 그 세션 화면이 서고, 뒤로는 작업 목록이다', async () => {
+    installFetch();
+    workSessionRows = [sessionRow()];
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(apnsPayload(IDLE_AIM)),
+    );
+    renderShell();
+
+    await waitFor(() => expect(screen.getByTestId('work-detail-pane')).toBeTruthy(), SETTLE);
+    await waitFor(
+      () => expect(screen.getByTestId('work-detail-title')).toHaveTextContent(SESSION_LABEL),
+      SETTLE,
+    );
+    // 대화는 열리지 않았다.
+    expect(screen.queryByTestId('conversation-title')).toBeNull();
+    // 뒤로는 그 화면이 말한 대로 「작업 목록」이다.
+    fireEvent.press(screen.getByLabelText('작업 목록으로'));
+    await waitFor(() => expect(screen.queryByTestId('work-detail-pane')).toBeNull());
+    expect(screen.queryByTestId('conversation-title')).toBeNull();
+  });
+
+  it('실행 중 — 다른 대화가 열려 있어도 세션 화면이 그 위를 대체한다', async () => {
+    installFetch();
+    workSessionRows = [sessionRow()];
+    renderShell();
+    await waitForSidebar();
+    fireEvent.press(screen.getByTestId(`sidebar-row-channel:${RANDOM}`));
+    await waitFor(
+      () => expect(screen.getByTestId('conversation-title')).toHaveTextContent('random'),
+      SETTLE,
+    );
+    await tapWhileRunning(apnsPayload(IDLE_AIM));
+    await waitFor(() => expect(screen.getByTestId('work-detail-pane')).toBeTruthy(), SETTLE);
+    expect(screen.queryByTestId('conversation-title')).toBeNull();
+  });
+
+  it('원장에 그 세션이 없으면 평범한 알림처럼 그 카드가 있는 대화로 간다', async () => {
+    installFetch();
+    workSessionRows = [];
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(apnsPayload(IDLE_AIM)),
+    );
+    renderShell();
+    await expectLanded('general', REPLY, true);
+    expect(screen.queryByTestId('work-detail-pane')).toBeNull();
+  });
+
+  it('같은 스레드의 멘션 알림은 세션이 아니라 대화로 간다', async () => {
+    installFetch();
+    workSessionRows = [sessionRow()];
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(
+        apnsPayload({...IDLE_AIM, category: 'momo.mention', reason: 'mention'}),
+      ),
+    );
+    renderShell();
+    await expectLanded('general', REPLY, true);
+    expect(screen.queryByTestId('work-detail-pane')).toBeNull();
   });
 });

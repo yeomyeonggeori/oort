@@ -3,15 +3,16 @@ import { describe, expect, it, vi } from "vitest";
 import type { SessionStatus } from "@momo/core/features/workbench/sessionList";
 import { defaultWorkbenchLayout, focusPane, splitPane } from "@momo/core/features/workbench/layoutTree";
 import { memoryLayoutStorage, readWorkbenchLayout, writeWorkbenchLayout } from "../useWorkbenchLayout";
+import type { DesktopNotifyKind } from "@/features/notifications/preference";
 import { createPaneAttention, focusStoredPane, type PaneObservation } from "./paneAttention";
 
 // #2776: 「응답 필요」·「끝남」이 인박스 줄과 OS 알림으로 합류한다. 알림은 상태가
 // 새로 될 때 한 번이고, 사람이 보고 있는 칸은 알리지 않는다.
 
-function setup(focused = false) {
-  const notify = vi.fn(async () => true);
+function setup(focused = false, kindEnabled?: (kind: DesktopNotifyKind) => boolean) {
+  const notify = vi.fn();
   let t = 1_000;
-  const store = createPaneAttention({ notify, windowFocused: () => focused, now: () => t++ });
+  const store = createPaneAttention({ notify, windowFocused: () => focused, now: () => t++, ...(kindEnabled ? { kindEnabled } : {}) });
   const pane = (paneId: string, status: SessionStatus, index = 1): PaneObservation => ({
     paneId,
     index,
@@ -31,7 +32,12 @@ describe("paneAttention", () => {
     store.observe([pane("p1", "waiting", 3)], null);
     store.observe([pane("p1", "waiting", 3), pane("p2", "running", 4)], null);
     expect(notify).toHaveBeenCalledTimes(1);
-    expect(notify).toHaveBeenCalledWith("응답 필요", "3번 칸 · claude: 실행 허락을 기다려요");
+    expect(notify).toHaveBeenCalledWith({
+      kind: "waiting",
+      title: "응답 필요",
+      body: "3번 칸 · claude: 실행 허락을 기다려요",
+      label: "3번 칸 · claude",
+    });
     expect(store.entries().map((e) => [e.paneId, e.status])).toEqual([["p1", "waiting"]]);
   });
 
@@ -40,7 +46,12 @@ describe("paneAttention", () => {
     store.observe([pane("p1", "running"), pane("p2", "running")], null);
     store.observe([pane("p1", "done"), pane("p2", "stopped")], null);
     expect(notify).toHaveBeenCalledTimes(1);
-    expect(notify).toHaveBeenCalledWith("끝남", "1번 칸 · claude: 작업이 끝났어요");
+    expect(notify).toHaveBeenCalledWith({
+      kind: "done",
+      title: "끝남",
+      body: "1번 칸 · claude: 작업이 끝났어요",
+      label: "1번 칸 · claude",
+    });
     expect(store.entries().map((e) => e.paneId)).toEqual(["p1"]);
   });
 
@@ -50,6 +61,15 @@ describe("paneAttention", () => {
     store.observe([pane("p1", "waiting")], "p1");
     expect(notify).not.toHaveBeenCalled();
     expect(store.entries()).toEqual([]);
+  });
+
+  it("종류를 끈 기기는 OS 알림만 건너뛰고 인박스 줄은 그대로 오른다 (#3339)", () => {
+    const { store, notify, pane } = setup(false, (kind) => kind !== "work-mine-done");
+    store.observe([pane("p1", "running"), pane("p2", "running")], null);
+    store.observe([pane("p1", "done"), pane("p2", "waiting")], null);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0]?.[0]).toMatchObject({ kind: "waiting" });
+    expect(store.entries().map((e) => e.status).sort()).toEqual(["done", "waiting"]);
   });
 
   it("창이 뒤에 있으면 활성 칸도 알린다", () => {

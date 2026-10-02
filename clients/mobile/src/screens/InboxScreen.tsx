@@ -32,13 +32,14 @@ import {
   ScreenHeader,
 } from '../design/atoms';
 import {useRefreshControl} from '../design/refresh';
-import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
+import {ds2Radius, ds2Type, font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
 import {
   ApprovalDecision,
   decisionReceiptCopy,
 } from '../features/inbox/ApprovalDecision';
 import {APPROVAL_OFFLINE_COPY, useOnline} from '../features/inbox/useOnline';
+import {usePhoneNeedsMe} from '../features/inbox/useNeedsMe';
 import {
   useAgentFeed,
   useInvalidateApprovals,
@@ -177,6 +178,12 @@ export default function InboxScreen({
   // 배선은 `useOnline` 이 든다 — 승인 컨트롤이 서는 화면이 둘이 됐고, 같은
   // 컨트롤이 화면마다 다른 오프라인 결을 가지면 그것은 어휘 분열이다.
   const online = useOnline();
+
+  // 필터 칩의 수는 탭 알약과 **같은 합**의 두 몫이다(#3342): 결정 대기 + 멘션 = 알약.
+  // 칩이 자기 수를 따로 세면 알약은 3, 칩 둘은 2와 2를 말하게 된다.
+  const needsMe = usePhoneNeedsMe();
+  const chipCount = (value: InboxFilter): number =>
+    value === 'needs-action' ? needsMe.approvals : value === 'mentions' ? needsMe.mentions : 0;
 
   // All three are mounted; `enabled` decides which ones actually fetch. Same
   // shape as the web route, so a tab switch is instant on a warm cache instead
@@ -347,6 +354,11 @@ export default function InboxScreen({
               key={value}
               accessibilityRole="tab"
               accessibilityState={{selected: value === filter}}
+              accessibilityLabel={
+                chipCount(value) > 0
+                  ? `${filterLabel(value)}, ${chipCount(value)}개`
+                  : filterLabel(value)
+              }
               onPress={() => setFilter(value)}
               style={({pressed}) => [
                 styles.tab,
@@ -354,10 +366,22 @@ export default function InboxScreen({
                 pressed && styles.pressed,
               ]}
               testID={`inbox-tab-${value}`}>
-              <Text
-                style={[styles.tabLabel, value === filter && styles.tabLabelActive]}>
-                {filterLabel(value)}
-              </Text>
+              <View style={styles.tabInner}>
+                <Text
+                  style={[styles.tabLabel, value === filter && styles.tabLabelActive]}>
+                  {filterLabel(value)}
+                </Text>
+                {chipCount(value) > 0 ? (
+                  <View style={styles.tabCount} testID={`inbox-tab-count-${value}`}>
+                    <Text
+                      style={styles.tabCountLabel}
+                      importantForAccessibility="no"
+                      accessibilityElementsHidden>
+                      {chipCount(value) > 99 ? '99+' : String(chipCount(value))}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
             </Pressable>
           ))}
         </View>
@@ -579,6 +603,18 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     borderColor: color.border,
   },
   tabActive: {backgroundColor: color.surface, borderColor: color.accent},
+  tabInner: {flexDirection: 'row', alignItems: 'center', gap: space.xs},
+  // 탭바 알약과 같은 잉크 알약 — 같은 수를 같은 모양으로 말한다.
+  tabCount: {
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: space.xs,
+    borderRadius: ds2Radius.badge,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: color.primary,
+  },
+  tabCountLabel: {fontSize: ds2Type.badge, fontWeight: '800', color: color.onPrimary},
   tabLabel: {fontSize: font.label, color: color.textMuted},
   tabLabelActive: {color: color.text, fontWeight: '600'},
   listContent: {paddingBottom: space.lg},

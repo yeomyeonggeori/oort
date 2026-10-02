@@ -308,7 +308,7 @@ async function login(page) {
   await page.getByTestId("login-email").fill("capture@example.test");
   await page.getByTestId("login-password").fill("capture-only");
   await page.getByTestId("login-submit").click();
-  await page.getByTestId("rail-inbox").waitFor({ timeout: 15_000 });
+  await page.getByTestId("nav-inbox").waitFor({ timeout: 15_000 });
 }
 
 const shots = [];
@@ -355,8 +355,10 @@ async function captureScheme(browser, scheme, viewport, suffix) {
   // 1) 작업 흐름: 사이드바에서 줄이 사라졌고, 주소는 그대로 열리며 이유를 말한다.
   const wsRow = await page.getByTestId("nav-workstreams").count();
   if (wsRow !== 0) throw new Error("작업 흐름 진입점이 아직 서 있다");
+  // #3334: 사이드바의 「메시지 검색」 줄은 없어졌다(⌘K 「검색과 이동」이 대신한다). 줄이 돌아오면 붉다.
   const searchRow = await page.getByTestId("nav-search").count();
-  if (searchRow !== 1) throw new Error("검색 진입점이 없다");
+  if (searchRow !== 0) throw new Error("메시지 검색 줄이 사이드바에 돌아왔다");
+  if ((await page.getByTestId("open-quick-switcher").count()) !== 1) throw new Error("검색과 이동 입구가 없다");
   await page.goto(`${origin}/#/workstreams`);
   await page.getByTestId("surface-unavailable-route").waitFor();
   await shoot(page, `unavailable-workstreams-${suffix}`);
@@ -410,21 +412,12 @@ async function captureScheme(browser, scheme, viewport, suffix) {
   await page.goto(`${origin}/#/search`);
   await page.getByTestId("search-idle").waitFor();
 
-  // 한 목적지, 한 이름 (이슈 #1146 N4).
-  //
-  // 이 하네스가 「없는 것을 있다고 말하지 않는가」를 재는 자리인 것과 같은 이유로
-  // 여기서 잰다: **가는 길과 도착한 곳이 서로 다른 이름을 말하면** 사람은 하나의
-  // 기능을 둘로 세고, 사이드바에서 「검색」을 눌러 「메시지 검색」에 도착한 사람은
-  // 자기가 어디에 왔는지 다시 확인해야 한다. 1차가 정확히 그랬다.
-  //
-  // 이 두 값은 이제 코어의 표면 판정표 한 줄에서 함께 오므로 이 단언은 배선이
-  // 끊겼을 때만 붉어진다 — 어느 한쪽에 낱말을 손으로 적어 넣으면 그렇게 된다.
-  const navName = (await page.getByTestId("nav-search").innerText()).trim();
+  // 한 목적지, 한 이름 (이슈 #1146 N4, #3334 이후). 사이드바 줄은 없어졌으므로 이름은 라우트 제목과
+  // 팔레트 항목 둘이 코어의 표면 판정표 한 줄에서 받아 간다(웹 시험 surfaceName.test.ts가 배선을
+  // 잠근다). 여기서는 도착한 표면이 그 이름을 말하는지만 잰다.
   const routeName = (await page.getByTestId("search-title").innerText()).trim();
-  if (navName !== routeName) {
-    throw new Error(
-      `한 목적지가 이름을 둘 갖고 있다: 사이드바는 "${navName}", 도착한 표면은 "${routeName}"`
-    );
+  if (routeName !== "메시지 검색") {
+    throw new Error(`메시지 검색 표면의 이름이 달라졌다: "${routeName}"`);
   }
 
   await shoot(page, `search-idle-${suffix}`);

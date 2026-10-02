@@ -290,4 +290,28 @@ describe("DesktopNotificationGroup", () => {
     ).not.toBeNull();
     expect(host.textContent).not.toContain("준비");
   });
+
+  it("종류 × 채널 표: 기본값, DM은 꺼짐, 폰 열은 정보뿐 (#3339)", async () => {
+    const host = mount(createElement(DesktopNotificationGroup));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const box = (id: string) =>
+      host.querySelector(`[data-testid="${id}"]`) as HTMLInputElement;
+    for (const id of ["approval", "pane-waiting", "mention", "work-mine-done"]) {
+      expect(box(`desktop-notification-kind-${id}`).checked).toBe(true);
+    }
+    expect(box("desktop-notification-kind-dm").checked).toBe(false);
+    expect(box("desktop-notification-dock-dm").checked).toBe(false);
+    expect(box("desktop-notification-dock-badge").checked).toBe(true);
+    // 폰 푸시 열에는 입력이 없다(폰 설정은 폰 앱에서).
+    const rows = host.querySelectorAll("tbody tr");
+    expect(rows).toHaveLength(7);
+    for (const row of rows) {
+      expect(row.querySelectorAll("td:last-child input")).toHaveLength(0);
+    }
+    expect(host.textContent).toContain("팀 작업 끝남");
+    act(() => box("desktop-notification-kind-dm").click());
+    expect(box("desktop-notification-kind-dm").checked).toBe(true);
+  });
 });

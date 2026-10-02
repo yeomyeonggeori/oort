@@ -28,7 +28,12 @@ import { agentCardModel } from "../timeline/agentCardModel";
 // and is visible to anyone glancing at the screen.
 // =============================================================================
 
-export type NotifyKind = "mention" | "approval";
+/**
+ * `dm` (#3339): a message in a one-to-one conversation that does not mention
+ * you. Off by default on this device (`preference.ts`): a DM is the noisiest
+ * thing a person can do to a teammate, so the person opts in.
+ */
+export type NotifyKind = "mention" | "approval" | "dm";
 
 /** Why nothing was shown. Every value is a rule someone can argue with. */
 export type NotifySkip =
@@ -130,7 +135,8 @@ export function notificationBody(raw: string | undefined): string | undefined {
  */
 export function notifiableKind(
   message: Message,
-  selfMemberId: string
+  selfMemberId: string,
+  isDirect = false
 ): NotifyKind | null {
   if (message.state === "deleted") return null;
   if (message.type === "approval_request") {
@@ -138,6 +144,9 @@ export function notifiableKind(
     if (card?.kind === "approval" && card.status === "pending") return "approval";
   }
   if (mentionsMember(message, selfMemberId)) return "mention";
+  // A DM that mentions you is a mention (the louder, default-on kind).
+  // Only a person-readable text row: a join/system line or a tool call is not a DM.
+  if (isDirect && message.type === "text") return "dm";
   return null;
 }
 
@@ -161,6 +170,16 @@ export interface NotifyContext {
   isDesktop: boolean;
   /** The momo window has focus right now. */
   windowFocused: boolean;
+  /**
+   * Is this channel what the window is showing right now? A banner is
+   * suppressed only when the window is focused AND the target is on screen
+   * (#3339): a focused window looking at another channel still gets one.
+   * Absent means "assume visible", the stricter pre-#3339 rule (any focus
+   * suppresses).
+   */
+  isTargetVisible?: (channelId: string) => boolean;
+  /** Is this channel a one-to-one DM? Absent means no channel is. */
+  isDirect?: (channelId: string) => boolean;
   selfMemberId: string;
   /** Server per-member mute for a channel (Channel.muted). */
   isMuted: (channelId: string) => boolean;
@@ -189,7 +208,11 @@ export function notifyDecision(
   if (event.type !== "message.new") return { show: false, skip: "edited" };
 
   const message = payloadToMessage(event.payload);
-  const kind = notifiableKind(message, context.selfMemberId);
+  const kind = notifiableKind(
+    message,
+    context.selfMemberId,
+    context.isDirect?.(message.channelId) ?? false
+  );
   if (kind === null) return { show: false, skip: "not-notifiable" };
   if (uuidEq(message.authorMemberId, context.selfMemberId)) {
     return { show: false, skip: "self" };
@@ -206,7 +229,12 @@ export function notifyDecision(
     return { show: false, skip: "stale" };
   }
   if (context.isAnnounced(message.id)) return { show: false, skip: "duplicate" };
-  if (context.windowFocused) return { show: false, skip: "focused" };
+  if (
+    context.windowFocused &&
+    (context.isTargetVisible?.(message.channelId) ?? true)
+  ) {
+    return { show: false, skip: "focused" };
+  }
 
   const notification: DesktopNotification = {
     kind,
@@ -214,6 +242,8 @@ export function notifyDecision(
     channelId: message.channelId,
     title: context.actorFor(message.authorMemberId),
   };
+  // 「무엇이 일어났나 + 어디서」 순서(#3339 시안): 승인은 종류 이름이 먼저다.
+  if (kind === "approval") notification.title = `승인 필요 · ${notification.title}`;
   const body = notificationBody(approvalTitle(message, kind) ?? message.body);
   if (body !== undefined) notification.body = body;
   return { show: true, notification };

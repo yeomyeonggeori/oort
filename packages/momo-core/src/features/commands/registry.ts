@@ -35,7 +35,7 @@
 
 import { serverSurface, type SurfaceId } from "../capabilities/serverSurfaces";
 import { attachDirection } from "../../lib/koreanParticle";
-import { MY_WORK_PATH, WORK_CONSOLE_VIEW_PATH } from "../workbench/workTab";
+import { WORK_CONSOLE_VIEW_PATH } from "../workbench/workTab";
 
 /**
  * 팔레트가 명령을 묶는 갈래.
@@ -463,12 +463,10 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
     icon: "work-console",
     testId: "switcher-work-console",
     available: (env) => env.isSurfaceProvided("workConsole"),
-    // #2854: 데스크탑 `/work`는 「내 작업」 격자다. 사이드바 줄과 같은 판정으로 간다.
+    // #2854·#3334: `/work`는 데스크탑에서 「내 작업」 격자, 웹에서 「내 작업」 설명 상태다.
+    // 작업 콘솔은 어느 쪽이든 `?view=console`이다(사이드바 줄과 같은 주소).
     run: (ctx) =>
-      navigateTo(
-        ctx.desktop ? WORK_CONSOLE_VIEW_PATH : MY_WORK_PATH,
-        serverSurface("workConsole").label
-      )(ctx),
+      navigateTo(WORK_CONSOLE_VIEW_PATH, serverSurface("workConsole").label)(ctx),
   },
   {
     id: "nav.workstreams",

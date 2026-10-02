@@ -73,6 +73,12 @@ interface Server {
    * 직전에 한 번 반영한다.
    */
   afterRead?: Partial<{dnd: boolean; mentionOverridesMute: boolean}>;
+  /** 푸시 종류 스위치(#3342). 서버 기본은 켬이다. */
+  kinds: {workComplete: boolean};
+  /** 종류 GET 의 답: 'ok' | 'fail' | 'absent'(404 — 아직 이 기능이 없는 서버) | 'hang'. */
+  kindsRead: 'ok' | 'fail' | 'absent' | 'hang';
+  /** 종류 PATCH 를 실패시킨다. */
+  kindsWriteFails: boolean;
   presenceFails: boolean;
   /** 명부 GET 을 실패시킨다 — 되돌림이 재조회 없이도 서는지 재려고. */
   rosterFails: boolean;
@@ -109,6 +115,19 @@ function jsonResponse(status: number, body: unknown): Response {
 function installFetch(): void {
   globalThis.fetch = jest.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
+    if (url.includes('/notification-rules/push-kinds')) {
+      if (method === 'PATCH') {
+        const body = JSON.parse(String(init?.body));
+        server.puts.push({path: 'push-kinds', method, body});
+        if (server.kindsWriteFails) return jsonResponse(500, {error: {message: 'x'}});
+        server.kinds = {...server.kinds, ...body};
+        return jsonResponse(200, server.kinds);
+      }
+      if (server.kindsRead === 'fail') return jsonResponse(500, {error: {message: 'boom'}});
+      if (server.kindsRead === 'absent') return jsonResponse(404, {error: {message: 'no route'}});
+      if (server.kindsRead === 'hang') return new Promise<Response>(() => {});
+      return jsonResponse(200, {...server.kinds});
+    }
     if (url.includes('/notification-rules')) {
       // #3012 서버: PUT 은 통째 치환, PATCH 는 적힌 필드만 **도착한 때의** 값 위에 합친다.
       if (method === 'PUT' || method === 'PATCH') {
@@ -201,6 +220,9 @@ beforeEach(() => {
     self: baseSelf(),
     rules: {dnd: false, mentionOverridesMute: true},
     rulesRead: 'ok',
+    kinds: {workComplete: true},
+    kindsRead: 'ok',
+    kindsWriteFails: false,
     presenceFails: false,
     rosterFails: false,
     puts: [],
@@ -228,6 +250,7 @@ async function openSheet() {
 
 const presencePuts = () => server.puts.filter(p => p.path === 'presence');
 const rulesPuts = () => server.puts.filter(p => p.path === 'notification-rules');
+const kindsPuts = () => server.puts.filter(p => p.path === 'push-kinds');
 
 describe('상태를 시트에서 바로 바꾼다 (#2848)', () => {
   it('세 줄이 코어 순서·낱말로 서고, 지금 선언이 선택돼 있다', async () => {
@@ -557,5 +580,98 @@ describe('상태 글 (#2848, ADR-0176)', () => {
     fireEvent.press(within(sheet).getByTestId('profile-back'));
     expect(within(sheet).getByTestId('presence-option-auto')).toBeTruthy();
     expect(presencePuts()).toHaveLength(0);
+  });
+});
+
+// =============================================================================
+// 푸시 종류 — 「작업 끝남」 (#3342, ADR-0120 부록 A)
+//
+// 서버 계약은 `GET|PATCH …/notification-rules/push-kinds {workComplete}` 하나다. 이 폰은
+// 새 길을 내지 않는다. 시험이 지키는 것:
+//   1. 스위치를 누르면 **PATCH 가 `{workComplete}` 하나만** 싣는다(PUT 도, 다른 키도 아님).
+//   2. 서버 값을 읽기 전에는 스위치를 세우지 않고 눌러도 보내지 않는다 — 기본이 「켬」이라
+//      모르는 채 「꺼짐」을 그리면 거짓이다.
+//   3. 이 경로를 모르는 서버(404)에서는 죽은 스위치를 세우지 않는다.
+//   4. 이 스위치의 쓰기는 일시 중지 규칙(`notification-rules`)을 건드리지 않는다.
+// =============================================================================
+describe('푸시 종류 — 작업 끝남 (#3342)', () => {
+  it('스위치가 켬으로 서고, 끄면 PATCH {workComplete:false} 하나만 간다', async () => {
+    const sheet = await openSheet();
+    const row = within(sheet).getByTestId('profile-work-complete-row');
+    await waitFor(() =>
+      expect(row.props.accessibilityState).toMatchObject({disabled: false}),
+    );
+    expect(row.props.accessibilityRole).toBe('switch');
+    expect(row.props.accessibilityState).toMatchObject({checked: true});
+    expect(row).toHaveTextContent(/^작업 끝남/);
+
+    fireEvent.press(row);
+    await waitFor(() => expect(kindsPuts()).toHaveLength(1));
+    expect(JSON.stringify(kindsPuts()[0].body)).toBe('{"workComplete":false}');
+    expect(kindsPuts()[0].method).toBe('PATCH');
+    await waitFor(() =>
+      expect(
+        within(sheet).getByTestId('profile-work-complete-row').props.accessibilityState,
+      ).toMatchObject({checked: false}),
+    );
+    // 일시 중지 규칙은 한 번도 쓰지 않았다.
+    expect(rulesPuts()).toHaveLength(0);
+  });
+
+  it('스위치 컨트롤을 직접 돌려도 같은 PATCH 다', async () => {
+    server.kinds = {workComplete: false};
+    const sheet = await openSheet();
+    await waitFor(() =>
+      expect(
+        within(sheet).getByTestId('profile-work-complete-switch', {includeHiddenElements: true}),
+      ).toBeTruthy(),
+    );
+    fireEvent(
+      within(sheet).getByTestId('profile-work-complete-switch', {includeHiddenElements: true}),
+      'valueChange',
+      true,
+    );
+    await waitFor(() => expect(kindsPuts()).toHaveLength(1));
+    expect(JSON.stringify(kindsPuts()[0].body)).toBe('{"workComplete":true}');
+  });
+
+  it('서버 값을 아직 못 읽었으면 잠겨 있고, 눌러도 아무것도 보내지 않는다', async () => {
+    server.kindsRead = 'hang';
+    const sheet = await openSheet();
+    const row = within(sheet).getByTestId('profile-work-complete-row');
+    expect(row.props.accessibilityState).toMatchObject({disabled: true});
+    expect(
+      within(sheet).queryByTestId('profile-work-complete-switch', {includeHiddenElements: true}),
+    ).toBeNull();
+    fireEvent.press(row);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(kindsPuts()).toHaveLength(0);
+  });
+
+  it('쓰기가 실패하면 스위치를 되돌리고 그렇게 말한다', async () => {
+    server.kindsWriteFails = true;
+    const sheet = await openSheet();
+    const row = within(sheet).getByTestId('profile-work-complete-row');
+    await waitFor(() =>
+      expect(row.props.accessibilityState).toMatchObject({disabled: false}),
+    );
+    fireEvent.press(row);
+    await waitFor(() =>
+      expect(within(sheet).getByTestId('work-complete-failure')).toBeTruthy(),
+    );
+    expect(
+      within(sheet).getByTestId('profile-work-complete-row').props.accessibilityState,
+    ).toMatchObject({checked: true});
+  });
+
+  it('이 경로를 모르는 서버(404)에서는 줄을 세우지 않는다', async () => {
+    server.kindsRead = 'absent';
+    const sheet = await openSheet();
+    await waitFor(() =>
+      expect(within(sheet).getByTestId('profile-pause-row')).toBeTruthy(),
+    );
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect(within(sheet).queryByTestId('profile-work-complete-row')).toBeNull();
+    expect(within(sheet).queryByTestId('profile-always-row')).toBeNull();
   });
 });

@@ -190,13 +190,13 @@ describe("명령 레지스트리", () => {
     expect(status("nav.settings.agents")).toBe("에이전트 자격으로 이동");
   });
 
-  it("작업 콘솔은 웹이면 /work, 데스크탑이면 /work?view=console로 간다 (#2854 — 데스크탑 /work는 「내 작업」 격자)", () => {
+  it("작업 콘솔은 웹·데스크탑 모두 /work?view=console로 간다 (#2854·#3334 — /work는 데스크탑에서 「내 작업」 격자, 웹에서 설명 상태)", () => {
     const command = visibleCommands(env()).find((c) => c.id === "nav.workConsole")!;
     const web = context();
     command.run(web);
     const desktop = { ...context(), desktop: true };
     const result = command.run(desktop);
-    expect(web.navigate.mock.calls).toEqual([["/work"]]);
+    expect(web.navigate.mock.calls).toEqual([["/work?view=console"]]);
     expect(desktop.navigate.mock.calls).toEqual([["/work?view=console"]]);
     expect(result.status).toBe("작업 콘솔로 이동");
   });

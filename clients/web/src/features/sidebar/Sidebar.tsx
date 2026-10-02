@@ -2,18 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, usePresence, useReducedMotion } from "motion/react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
-  Activity,
-  Bot,
   Hash,
   Lock,
   MessageSquare,
   FolderPlus,
-  Milestone,
   Plus,
   Search,
-  ServerCog,
   SquarePen,
-  Users,
   X,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -50,27 +45,25 @@ import {
   useCreateChannelOpen,
   useOpenCreateChannel,
 } from "@/features/channels/useCreateChannel";
-import {
-  isSurfaceProvided,
-  serverSurface,
-} from "@momo/core/features/capabilities/serverSurfaces";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { UpdateBadge } from "@/features/updates/UpdateBadge";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
-import { AGENTS_NAV } from "./workspaceNav";
 import { SidebarRowContextMenu } from "./SidebarRowContextMenu";
 import { openChannelId } from "./openChannel";
 import { roveSidebarRows } from "./sidebarRoving";
 import { WorkspaceRail, type RailDestination } from "./WorkspaceRail";
 import { SidebarNowCard } from "./SidebarNowCard";
+import { SidebarDestinations } from "./SidebarDestinations";
+import { destinationMarks } from "./sidebarBadge";
+import { useLocalPaneAttention } from "@/features/workbench/local/paneAttention";
+import { destinationActive } from "./sidebarDestinationsModel";
+import { SidebarTeamSessions } from "./SidebarTeamSessions";
+import { setSidebarBodySlot } from "./sidebarBodySlot";
 import { workspaceRailTile } from "./workspaceRailModel";
 import { KomettoMark } from "@/design/brand/KomettoMark";
 import { ProfileCard } from "./ProfileCard";
-import { useNeedsMeCount } from "@/features/inbox/useNeedsMe";
-import { isDesktop } from "@/lib/tauri";
+import { useNeedsMe } from "@/features/inbox/useNeedsMe";
 import {
-  MY_WORK_PATH,
-  WORK_CONSOLE_VIEW_PATH,
   isWorkPath,
   workViewOf,
   type WorkView,
@@ -113,7 +106,6 @@ import { cn } from "@/design/lib/cn";
 import { DRAWER_SCRIM_MOTION } from "@/design/motion";
 import { MOVE_UNREAD_CHANNEL_SHORTCUT } from "@/app/keyboardShortcuts";
 import { ShortcutHelpDialog } from "@/app/ShortcutHelpDialog";
-import { DraftsNavItem } from "@/features/drafts/DraftsNavItem";
 import { useSurfaceProvided } from "@/features/capabilities/useSurfaceProvided";
 
 // =============================================================================
@@ -187,28 +179,30 @@ export function Sidebar({
   const navigate = useNavigate();
   const navRef = useRef<HTMLDivElement>(null);
   const workConsoleProvided = useSurfaceProvided("workConsole");
-  // 「작업」 묶음 (#2854, ADR-0194 D1). 「내 작업」은 이 기기의 격자라 데스크탑에만
-  // 선다(웹에는 로컬 터미널 레인이 없다, ADR-0190 D1). 웹의 `/work`는 작업 콘솔
-  // 그대로다. 「팀 작업」은 어디서나 선다. 두 줄의 경로가 같아(`/work`) 선택은
-  // 쿼리까지 보고 가른다.
-  const desktopWork = isDesktop();
+  // 「작업」 묶음 (#2854, ADR-0194 D1). 「내 작업」은 웹에서도 줄이 선다(#3334): 데스크탑에서는
+  // 이 기기의 격자, 웹에서는 「이 기기에는 터미널 레인이 없어요」 설명 상태가 열린다. 두 줄의
+  // 경로가 같아(`/work`) 선택은 쿼리까지 보고 가른다.
   const workLocation = useLocation();
   const currentWorkView: WorkView | null =
     isWorkPath(workLocation.pathname) ? workViewOf(workLocation.search) : null;
-  // 레일 목적지(#3280): 레일은 어느 탭에서도 내려가지 않으므로, 단추로 탭을 옮겨도 캐럿을 쥔
-  // 단추가 사라지지 않는다(#2854 design-review H1의 캐럿 복귀 장치가 필요 없다).
+  // 팀 작업 탭의 본문은 채널이 아니라 팀 세션 목록이다(#3334).
+  const teamBody = currentWorkView === "team";
+  // 목적지 선택(#3334): 펼침의 목록 열 구획 A·B와 접힘의 레일 아이콘이 같은 판정을 읽는다.
   const { pathname } = workLocation;
-  const railActive: RailDestination | null = pathname.startsWith("/inbox")
+  const destActive = destinationActive(pathname, currentWorkView);
+  const railActive: RailDestination | null = destActive.inbox
     ? "inbox"
-    : currentWorkView === "mine" && desktopWork
+    : destActive.mine
       ? "mine"
-      : currentWorkView === "team"
+      : destActive.team
         ? "team"
-        : pathname === "/" || pathname.startsWith("/c/")
-          ? "chat"
-          : null;
+        : destActive.agents
+          ? "agents"
+          : destActive.chat
+            ? "chat"
+            : null;
   // 「나에게 필요한 일」 단일 출처(#3337): 승인+응답 필요 칸+안 읽은 멘션.
-  const inboxUnread = useNeedsMeCount();
+  const needsMeState = useNeedsMe();
 
   // 폰에서 이 사이드바는 서랍이다 (goal B6). 닫혀 있는 동안에는 화면 밖으로
   // 밀려 있을 뿐 DOM에는 남아 있으므로(스크롤 위치와 마운트를 지킨다), 탭 순서와
@@ -424,6 +418,18 @@ export function Sidebar({
       ),
     [ordered, openId, readStates.byChannel]
   );
+  // 목적지 표지(#3338): 접힌 레일 아이콘과 펼친 구획 A·B 줄이 **같은 함수**로 푼다. 아직 안
+  // 본 「끝남」은 칸을 보면 내려가는 `paneAttention`의 done 줄이다.
+  const paneAttention = useLocalPaneAttention();
+  const railMarks = useMemo(
+    () =>
+      destinationMarks({
+        needsMe: needsMeState,
+        unreadChannels: unreadChannels.length,
+        doneUnseen: paneAttention.some((e) => e.status === "done"),
+      }),
+    [needsMeState, unreadChannels.length, paneAttention]
+  );
   // ⌥↓ walks this list even when a section is folded. The collapsed header
   // therefore carries the same aggregate the keyboard already visits (M-2).
   //
@@ -600,8 +606,8 @@ export function Sidebar({
           workspaceId={workspaceId}
           avatarUrl={workspaceQuery.data?.avatarUrl}
           active={railActive}
-          showMyWork={desktopWork}
-          inboxUnread={inboxUnread}
+          collapsed={channelPaneCollapsed && !asDrawer}
+          marks={railMarks}
           footer={
             <div className="safe-area-bottom flex flex-col items-center gap-2">
               {/* Bound to real connStatus, never decorative (SKILL §8): the colour and
@@ -636,7 +642,7 @@ export function Sidebar({
         <div
           ref={listPaneRef}
           id="sidebar-channel-pane"
-          hidden={treeHidden || listInRoute}
+          hidden={treeHidden}
           data-sidebar-channel-pane
           data-testid="sidebar-channel-pane"
           className="sidebar-list flex h-full w-full min-w-0 flex-col"
@@ -717,95 +723,56 @@ export function Sidebar({
               if (!asDrawer || !drawerOpen) return;
               if ((event.target as Element).closest("a")) closeDrawer();
             }}
-            // `overscroll-contain` (goal B9): 채널 목록 끝에서 계속 미는 손가락이
-            // 서랍 바깥으로 넘어가지 않는다 — 덮인 표면이 함께 움직이면 서랍이 종이
-            // 한 장이 아니라 창처럼 느껴진다. 타임라인이 같은 이유로 같은 것을 쓴다.
-            className="overscroll-contain min-h-0 flex-1 overflow-y-auto"
-            data-testid="channel-list"
+            className="sidebar-list-root sidebar-list-cue"
+            data-testid="sidebar-list-root"
           >
-            <nav aria-label="워크스페이스 탐색">
-              <ul className="sidebar-stack">
-                {/* 인박스·내 작업·팀 작업은 레일의 목적지다(#3280). 목록 줄은 중복이라 뺐고,
-                    인박스 안 읽음 배지는 레일 타일로 갔다. */}
-                <DraftsNavItem />
-                <SidebarRow to="/activity" icon={<Activity className="size-4" />} label="활동" testId="nav-activity" />
-                <SidebarRow to="/directory" icon={<Users className="size-4" />} label="멤버" testId="nav-directory" />
-                <SidebarRow to={AGENTS_NAV.to} icon={<Bot className="size-4" />} label={AGENTS_NAV.label} testId="nav-agents" />
-                {/* TC-1 (#1758): 전역 작업 세션 목록. 채널 헤더 터미널은
-                    도크이고, 우측 WorkPanel 은 이 경로의 `open-work-panel` 이
-                    연다. 표면 삭제 금지 — 셀프호스트 기본은 진입점만 접는다
-                    (#2166). #2780: 정적 표가 아니라 온라인 호스트 유무로
-                    펼친다(useSurfaceProvided). #2854: 데스크탑에서는 `/work`가
-                    「내 작업」 격자라 콘솔은 `?view=console`에 선다. */}
-                {workConsoleProvided && (
-                  <SidebarRow
-                    to={desktopWork ? WORK_CONSOLE_VIEW_PATH : MY_WORK_PATH}
-                    icon={<ServerCog className="size-4" />}
-                    label={serverSurface("workConsole").label}
-                    testId="nav-work-console"
-                    isActive={
-                      currentWorkView === null
-                        ? false
-                        : desktopWork
-                          ? currentWorkView === "console"
-                          : currentWorkView !== "team"
-                    }
+            {/* 고정 머리(#3334): 구획 A·B는 **모든 탭에서 같은 노드·같은 자리**다. 본문만 바뀐다
+                (아래). 머리 높이가 창을 넘으면 머리가 스스로 스크롤하고, 낮은 창(높이 780 이하)에서는
+                열 전체가 한 번에 스크롤한다(`sidebar-list-root`·`-head`·`-body`). */}
+            <div
+              className="sidebar-list-head"
+              data-testid="sidebar-list-head"
+            >
+              <SidebarDestinations
+                active={destActive}
+                needsMe={needsMeState}
+                unreadChannels={unreadChannels.length}
+                workConsoleProvided={workConsoleProvided}
+                nowCard={
+                  /* 작업 중 카드 (DS2-6, 시안 A `.a-side .a-now`). 열린 턴이 없으면 아무것도
+                     그리지 않는다 — 빈 카드는 「조용하다」를 말하는 대신 자리만 차지한다. 채널
+                     행의 알약과 같은 가게(`turnSignals`)를 읽으므로 둘이 다르게 말할 수 없다. */
+                  <SidebarNowCard
+                    signals={turnSignals}
+                    nowMs={nowMs}
+                    live={railLive}
+                    directory={directoryQuery.directory}
+                    channels={[...channels, ...dms]}
+                    selfMemberId={session.member.id}
                   />
-                )}
-                {/* 메시지 검색 (goal B12 H5). 전역 목적지인 이유는 인박스와 같다:
-                    가는 곳이지 구독하는 것이 아니다.
-
-                    **이름을 짓지 않고 받아 온다** (이슈 #1146 N4). 1차의 이 줄은
-                    「검색」이라고 적었는데, 도착하는 라우트의 제목도 팔레트의 항목도
-                    폰의 화면도 전부 「메시지 검색」이었다 — 한 목적지에 이름이 둘이면
-                    사람은 그것을 두 기능으로 센다. 바로 위 줄의 「검색과 이동」과
-                    나란히 서면 더 나빠서, 「검색」은 그 팔레트의 짧은 이름처럼 읽혔다.
-                    게다가 팔레트의 빈 상태는 이 줄을 **이름으로 가리킨다**(「메시지
-                    본문은 아래 메시지 검색에서 찾을 수 있습니다」) — 가리키는 이름이
-                    화면에 없으면 그 안내는 없는 곳을 가리킨 것이다.
-
-                    판정은 팔레트가 「멤버 ↔ 디렉터리」에서 이미 내렸다: 사람이
-                    **도착하는 표면이 쓰는 말**이 그 목적지의 이름이다. 그 말은 코어의
-                    표면 판정표에 이미 한 줄로 있으므로(`serverSurface`), 여기서 다시
-                    적지 않고 그것을 든다. */}
-                {isSurfaceProvided("messageSearch") && (
-                  <SidebarRow
-                    to="/search"
-                    icon={<Search className="size-4" />}
-                    label={serverSurface("messageSearch").label}
-                    testId="nav-search"
-                  />
-                )}
-                {/* 작업 흐름 sits with the global destinations for the reason
-                    에이전트 does (MOMO-652): it is a place you GO, not a thing you
-                    are subscribed to. It is also the one work surface that cannot
-                    live in the channel drawer beside it — 작업 세션 is scoped to
-                    the channel you are already in and, in its most used range, to
-                    your own sessions, while someone looking for work to pick up is
-                    by definition looking for work that is not theirs (ADR-0143).
-
-                    이 서버가 작업 흐름을 싣지 않으면 줄 자체를 세우지 않는다
-                    (goal B12). 비활성으로 남겨 두는 선택지도 있었지만, 흐릿한 줄은
-                    "권한이 없다"로 읽히고 그것은 사실이 아니다: 없는 것은 권한이
-                    아니라 기능이다. 주소를 직접 열면 라우트가 이유를 말한다. */}
-                {isSurfaceProvided("workstreams") && (
-                  <SidebarRow to="/workstreams" icon={<Milestone className="size-4" />} label={serverSurface("workstreams").label} testId="nav-workstreams" />
-                )}
-              </ul>
-
-              {/* 작업 중 카드 (DS2-6, 시안 A `.a-side .a-now`). 열린 턴이 없으면
-                  아무것도 그리지 않는다 — 빈 카드는 「조용하다」를 말하는 대신
-                  자리만 차지한다. 채널 행의 알약과 같은 가게(`turnSignals`)를
-                  읽으므로 둘이 다르게 말할 수 없다. */}
-              <SidebarNowCard
-                signals={turnSignals}
-                nowMs={nowMs}
-                live={railLive}
-                directory={directoryQuery.directory}
-                channels={[...channels, ...dms]}
-                selfMemberId={session.member.id}
+                }
               />
+            </div>
 
+            {/* 본문 자리 셋(#3334): 탭에 따라 하나만 보인다. 채널 목록은 언마운트하지 않고 숨긴다
+                (스크롤·펼친 섹션이 남는다). 「내 작업」의 세션 목록은 라우트가 이 자리에 포털로
+                그린다(`sidebarBodySlot`). */}
+            <div
+              ref={setSidebarBodySlot}
+              hidden={!listInRoute}
+              className="sidebar-list-body flex min-h-0 flex-1 flex-col"
+              data-testid="sidebar-body-slot"
+            />
+            {teamBody && !listInRoute && <SidebarTeamSessions />}
+            <div
+              hidden={listInRoute || teamBody}
+              // `overscroll-contain` (goal B9): 채널 목록 끝에서 계속 미는 손가락이
+              // 서랍 바깥으로 넘어가지 않는다 — 덮인 표면이 함께 움직이면 서랍이 종이
+              // 한 장이 아니라 창처럼 느껴진다. 타임라인이 같은 이유로 같은 것을 쓴다.
+              className="sidebar-list-body overscroll-contain min-h-0 flex-1 overflow-y-auto"
+              data-testid="channel-list"
+            >
+            <nav aria-label="채널과 메시지">
               {/* 배치에 대해 사이드바가 하는 말은 **한 번에 하나**다.
  
                   · 읽기 실패(design-review #1932 B-1): 배치를 한 번도 못 읽었다.
@@ -1182,6 +1149,7 @@ export function Sidebar({
                 </p>
               )}
             </nav>
+            </div>
           </div>
 
           {/* Above the identity row, not below it: a new build is news, and news

@@ -2,6 +2,7 @@
 
 import { act, createElement, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { mountSidebarBodySlotForTest } from "@/features/sidebar/sidebarBodySlot";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkbenchPaneInfo } from "../WorkbenchGrid";
 import { createLocalSessions, type LocalSessions, type MirrorTerminal } from "./localSessions";
@@ -99,12 +100,14 @@ function fakeSessions() {
 
 const reactAct = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 let root: Root | null = null;
+let unmountSlot: (() => void) | null = null;
 let host: HTMLElement | null = null;
 let composer: HTMLTextAreaElement | null = null;
 let windowKeys: string[] = [];
 const onWindowKey = (event: KeyboardEvent) => windowKeys.push(`${event.metaKey ? "⌘" : ""}${event.key}`);
 
 async function mount(sessions: LocalSessions, presentation?: "dock" | "tab") {
+  unmountSlot = mountSidebarBodySlotForTest();
   host = document.createElement("main");
   document.body.append(host);
   composer = document.createElement("textarea");
@@ -157,6 +160,8 @@ afterEach(() => {
   window.removeEventListener("keydown", onWindowKey);
   if (root) act(() => root?.unmount());
   root = null;
+  unmountSlot?.();
+  unmountSlot = null;
   host?.remove();
   composer?.remove();
 });

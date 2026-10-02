@@ -36,28 +36,36 @@ export const DESKTOP_NOTIFICATION_DENIED_MESSAGE =
 export const DESKTOP_NOTIFICATION_UNSUPPORTED_MESSAGE =
   "이 화면에서는 데스크톱 알림을 쓸 수 없습니다. 데스크톱 앱을 쓰면 알림이 옵니다.";
 
-export const DESKTOP_NOTIFICATION_KIND_ROWS: ReadonlyArray<{
-  id: DesktopNotifyKind;
+/** 독 배지 열의 모습: 수에 들어가는 종류, 세지 않는 종류, 사람이 켜는 종류(DM). */
+type DockCell = "counted" | "never" | "dm";
+/** 폰 푸시 열은 정보뿐이다(폰 설정은 #3342). */
+type PhoneCell = "phone" | "desktop-only" | "soon";
+
+export interface DesktopNotificationKindRow {
+  /** 이 기기에 저장되는 스위치. 없으면 OS 알림 열도 「곧 열려요」. */
+  id: DesktopNotifyKind | null;
   name: string;
   description: string;
-}> = [
-  {
-    id: "mention",
-    name: "멘션",
-    description: "나를 멘션한 메시지.",
-  },
-  {
-    id: "approval",
-    name: "승인 요청",
-    description: "내 결정이 필요한 승인 요청.",
-  },
-  {
-    id: "reminder",
-    name: "나중에 알림",
-    description:
-      "직접 잡아 둔 메시지 기한이 된 때. 창이 가려져 있어도 이 기기가 확인합니다.",
-  },
+  dock: DockCell;
+  phone: PhoneCell;
+}
+
+// 종류 × 채널 표(#3339 시안 8번). 기본값은 preference.ts가 갖는다.
+export const DESKTOP_NOTIFICATION_KIND_ROWS: ReadonlyArray<DesktopNotificationKindRow> = [
+  { id: "approval", name: "승인 필요", description: "에이전트가 허용을 기다려요.", dock: "counted", phone: "phone" },
+  { id: "pane-waiting", name: "응답 필요 (이 기기 세션)", description: "로컬 칸이 입력을 기다려요.", dock: "counted", phone: "desktop-only" },
+  { id: "mention", name: "멘션", description: "나를 멘션한 메시지예요.", dock: "counted", phone: "phone" },
+  { id: "work-mine-done", name: "내 작업 끝남", description: "이 기기에서 돌린 세션이 끝났어요.", dock: "never", phone: "phone" },
+  { id: null, name: "팀 작업 끝남", description: "다른 사람의 세션이 끝났어요.", dock: "never", phone: "soon" },
+  { id: "dm", name: "새 DM", description: "1:1 대화의 새 글이에요.", dock: "dm", phone: "phone" },
+  { id: "reminder", name: "나중에 알림", description: "잡아 둔 메시지 기한이 됐어요. 창이 가려져 있어도 이 기기가 확인해요.", dock: "never", phone: "soon" },
 ];
+
+const PHONE_CELL_TEXT: Record<PhoneCell, string> = {
+  phone: "곧 열려요",
+  "desktop-only": "데스크탑 전용",
+  soon: "곧 열려요",
+};
 
 export function DesktopNotificationPermissionPanel({
   permission,
@@ -190,6 +198,7 @@ export function DesktopNotificationGroup() {
   const requestingRef = useRef(false);
   const kinds = useDesktopNotificationKinds();
   const unsupportedReasonId = useId();
+  const dockOffReasonId = useId();
   const kindsLocked = permission === "unsupported";
 
   useEffect(() => {
@@ -234,7 +243,7 @@ export function DesktopNotificationGroup() {
       <Subsection
         title="이 기기 알림"
         lines={[
-          "데스크톱 알림은 이 앱이 앞에 없을 때 멘션과 승인 요청을 알려 줍니다. 나중에 알림은 만기가 되면 앱이 앞에 있어도 알려 줍니다.",
+          "창이 앞에 있고 그 대상이 화면에 보이면 알리지 않아요. 같은 종류가 연달아 오면 한 묶음으로 보내요. 나중에 알림은 기한이 되면 앱이 앞에 있어도 알려요.",
         ]}
       >
         <div data-testid="desktop-notifications-permission-host">
@@ -247,23 +256,104 @@ export function DesktopNotificationGroup() {
         </div>
       </Subsection>
 
-      <Subsection title="종류별">
+      <Subsection
+        title="종류별"
+        lines={[
+          "앱 안의 배지와 줄 표시는 항상 켜 있어요. 아래는 OS 알림과 독 배지만 정해요.",
+        ]}
+      >
         <div
-          className="flex min-w-0 flex-col overflow-hidden rounded-md border border-line"
+          className="min-w-0 overflow-x-auto rounded-md border border-line focus-visible:focus-ring"
           data-testid="desktop-notification-kinds"
+          role="region"
+          aria-label="알림 종류별 설정 표"
+          tabIndex={0}
         >
-          {DESKTOP_NOTIFICATION_KIND_ROWS.map((row) => (
-            <SettingsToggleRow
-              key={row.id}
-              testId={`desktop-notification-kind-${row.id}`}
-              name={row.name}
-              description={row.description}
-              checked={kinds[row.id]}
-              disabled={kindsLocked}
-              describedBy={kindsLocked ? unsupportedReasonId : undefined}
-              onToggle={(enabled) => setDesktopNotificationKind(row.id, enabled)}
-            />
-          ))}
+          <table className="w-full border-collapse text-left">
+            <caption className="sr-only">알림 종류별 OS 알림, 독 배지, 폰 푸시</caption>
+            <thead>
+              <tr className="border-b border-line bg-surface-sunken text-meta text-ink-muted">
+                <th scope="col" className="p-3 font-normal">종류</th>
+                <th scope="col" className="whitespace-nowrap p-3 text-center font-normal">OS 알림</th>
+                <th scope="col" className="whitespace-nowrap p-3 text-center font-normal">독 배지</th>
+                <th scope="col" className="whitespace-nowrap p-3 text-center font-normal">폰 푸시</th>
+              </tr>
+            </thead>
+            <tbody>
+              {DESKTOP_NOTIFICATION_KIND_ROWS.map((row) => {
+                const rowKey = row.id ?? "team-work-done";
+                return (
+                  <tr key={rowKey} className="border-b border-line last:border-b-0">
+                    <th scope="row" className="min-w-0 p-3 align-top font-normal">
+                      <span className="block text-body text-ink">{row.name}</span>
+                      <span className="block break-keep text-meta text-ink-muted">
+                        {row.description}
+                      </span>
+                    </th>
+                    <td className="whitespace-nowrap p-3 text-center align-top">
+                      {row.id === null ? (
+                        <span className="text-meta text-ink-muted">연결 전</span>
+                      ) : (
+                        <input
+                          type="checkbox"
+                          aria-label={`${row.name} OS 알림`}
+                          checked={kinds[row.id]}
+                          disabled={kindsLocked}
+                          aria-describedby={kindsLocked ? unsupportedReasonId : undefined}
+                          onChange={(event) =>
+                            setDesktopNotificationKind(row.id as DesktopNotifyKind, event.target.checked)
+                          }
+                          className="mt-1 accent-accent press focus-visible:focus-ring"
+                          data-testid={`desktop-notification-kind-${row.id}`}
+                        />
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap p-3 text-center align-top text-meta text-ink-muted">
+                      {row.dock === "dm" ? (
+                        <input
+                          type="checkbox"
+                          aria-label={`${row.name} 독 배지`}
+                          checked={kinds.dockDm}
+                          disabled={kindsLocked || !kinds.dockBadge}
+                          aria-describedby={
+                            kindsLocked ? unsupportedReasonId : !kinds.dockBadge ? dockOffReasonId : undefined
+                          }
+                          onChange={(event) => setDesktopNotificationKind("dockDm", event.target.checked)}
+                          className="mt-1 accent-accent press focus-visible:focus-ring"
+                          data-testid="desktop-notification-dock-dm"
+                        />
+                      ) : !kinds.dockBadge ? (
+                        "꺼짐"
+                      ) : row.dock === "counted" ? (
+                        "수에 포함"
+                      ) : (
+                        "세지 않아요"
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap p-3 text-center align-top text-meta text-ink-muted">
+                      {PHONE_CELL_TEXT[row.phone]}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex min-w-0 flex-col overflow-hidden rounded-md border border-line">
+          <SettingsToggleRow
+            testId="desktop-notification-dock-badge"
+            name="독 배지"
+            description="나에게 필요한 일(승인, 응답 필요, 안 읽은 멘션)의 수를 독 아이콘에 그려요."
+            checked={kinds.dockBadge}
+            disabled={kindsLocked}
+            describedBy={kindsLocked ? unsupportedReasonId : undefined}
+            onToggle={(enabled) => setDesktopNotificationKind("dockBadge", enabled)}
+          />
+          {!kinds.dockBadge && (
+            <p id={dockOffReasonId} className="border-t border-line p-3 text-meta text-ink-muted">
+              독 배지가 꺼져 있어서 표의 독 배지 열은 모두 쉬어요.
+            </p>
+          )}
         </div>
       </Subsection>
     </>

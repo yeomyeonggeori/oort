@@ -181,7 +181,7 @@ async function signIn(page, origin) {
   await page.getByTestId("login-email").fill("capture@example.test");
   await page.getByTestId("login-password").fill("not-a-secret");
   await page.getByTestId("login-submit").click();
-  await page.getByTestId("rail-team").waitFor({ timeout: 20_000 });
+  await page.getByTestId("nav-team").waitFor({ timeout: 20_000 });
 }
 
 const overflowX = (page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -199,7 +199,7 @@ async function scene(browser, origin, scheme, viewport, kind) {
   const page = await context.newPage();
   await installRealtime(page);
   await signIn(page, origin);
-  await page.getByTestId("rail-team").click();
+  await page.getByTestId("nav-team").click();
   await page.getByTestId("team-work-route").waitFor();
 
   if (kind === "board" || kind === "drawer") {

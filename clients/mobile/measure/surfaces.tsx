@@ -101,8 +101,8 @@ import {ThemeControl} from '../src/design/ThemeControl';
 import {parseExecutionPlan} from '@momo/core/lib/executionPlan';
 import {measureMode} from './root';
 import {Shell} from '../src/shell/AppShell';
-import {INITIAL_NAV} from '../src/nav/state';
-import {ProfileSheet} from '../src/features/profile/ProfileSheet';
+import {INITIAL_NAV, navReducer} from '../src/nav/state';
+import {ProfilePage, ProfileSheet} from '../src/features/profile/ProfileSheet';
 import {PageSheet} from '../src/design/PageSheet';
 import {LinkSheetBody} from '../src/features/deviceKey/DeviceKeyLinkSheet';
 import {
@@ -3723,6 +3723,28 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // 레일이 끊긴 홈: 카드가 색을 벗고 이유를 말한다.
     case 'shell-home-offline':
       return <Shell />;
+    // #3342: 탭 배지 — 홈 점(안 읽음) + 인박스 알약(결정 대기 승인 2 + 안 읽은 멘션 2 = 4).
+    case 'shell-badges':
+      return (
+        <RealtimeContext.Provider value={CONNECTED_RAIL}>
+          <Shell />
+        </RealtimeContext.Provider>
+      );
+    // 같은 수가 인박스 필터 칩에서 두 몫(결정 대기 2 · 멘션 2)으로 보인다.
+    case 'shell-inbox-badges':
+      return <Shell initialNav={{...INITIAL_NAV, tab: 'inbox'}} />;
+    // 「작업 끝남」 푸시를 눌렀을 때 도착하는 곳: 실제 항법 reducer 가 지은 상태 그대로다
+    // (홈 탭 위에 작업 목록, 그 위에 세션). 푸시 자체는 시뮬레이터에 보낼 수 없어 도착
+    // 화면만 찍는다.
+    case 'shell-work-from-push':
+      return (
+        <Shell
+          initialNav={navReducer(INITIAL_NAV, {
+            type: 'openWorkSessionFromNotification',
+            workSession: {sessionId: 'measure-work-t1'},
+          })}
+        />
+      );
     case 'shell-inbox':
       return <Shell initialNav={{...INITIAL_NAV, tab: 'inbox'}} />;
     case 'shell-search':
@@ -3758,6 +3780,27 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             onClose={() => {}}
           />
         </View>
+      );
+    // #3342: 프로필의 「알림」 묶음 — 푸시 종류 스위치. 시트를 알림 묶음이 보이도록 끌어올려 찍는다.
+    case 'shell-profile-notify':
+      return (
+        <Screen>
+          <View style={{flex: 1, overflow: 'hidden'}}>
+            <View style={{marginTop: -560, height: 3000}}>
+              <ProfilePage
+                workspaceId={HARNESS_MEMBER.workspaceId}
+                member={HARNESS_MEMBER}
+                directory={makeDirectory(SHELL_ROSTER)}
+                connected
+                onOpenTheme={() => {}}
+                onOpenStatus={() => {}}
+                onOpenDeviceKey={() => {}}
+                onSignOut={() => {}}
+                onRevealEnd={() => {}}
+              />
+            </View>
+          </View>
+        </Screen>
       );
     case 'mark-unread-sidebar':
       // 캡션은 **아래**에 단다. 이 화면은 자기 `Screen` 이 안전 영역 위쪽을
@@ -4562,6 +4605,27 @@ function seedShell(surface: string): void {
     read('ch-oncall', 0, 0),
     read('dm-agent', 1, 0),
   ]);
+
+  // #3342: 프로필 시트의 푸시 종류 스위치(서버 기본은 켬). 씨앗이 없으면 줄이 잠긴다.
+  harnessClient.setQueryData(['settings', 'push-kinds', ADE_WS], {workComplete: true});
+  if (surface === 'shell-badges' || surface === 'shell-inbox-badges') {
+    // 결정 대기 승인 둘. 읽음 씨앗(멘션 2)과 합쳐 알약이 4가 된다.
+    const pending = (id: string) => ({
+      id,
+      workspaceId: ADE_WS,
+      runId: `run-${id}`,
+      channelId: 'ch-agent-lab',
+      requestedBy: AGENT,
+      actionType: 'tool_call',
+      status: 'pending',
+      expiresAtMs: Date.now() + 600_000,
+    });
+    harnessClient.setQueryData(['approvals', ADE_WS, 'pending'], [
+      pending('measure-approval-1'),
+      pending('measure-approval-2'),
+    ]);
+  }
+  if (surface === 'shell-work-from-push') seedWorkConsole();
 
   if (surface === 'shell-home-idle') return;
   // 시안의 카드: 김인턴이 #agent-lab 에서 PR 초안을 쓰는 중.

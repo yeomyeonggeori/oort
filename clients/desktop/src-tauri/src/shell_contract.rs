@@ -214,6 +214,13 @@ fn app_commands_are_gated_by_the_capability() {
     assert!(authority
         .resolve_access("notification_show", "main", "main", &local)
         .is_some());
+    // The Dock badge (#3339) is the main window's alone.
+    assert!(authority
+        .resolve_access("dock_badge_set", "main", "main", &local)
+        .is_some());
+    assert!(authority
+        .resolve_access("dock_badge_set", "other", "other", &local)
+        .is_none());
     // Control: a command no capability grants is refused, which is only true
     // once the app manifest exists.
     assert!(authority

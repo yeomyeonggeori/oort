@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // =============================================================================
-// 레일 일관화 측정 (#3280): 하나의 레일(56px)이 모든 탭에서 같은 자리·같은 모양인지,
-// 접기 단추가 같은 자리인지, ⌘B가 목록 열만 접고(레일 유지) 컴포저 굵게를 건드리지
-// 않는지, 접힘이 기기별로 기억되는지를 실제 셸(Chromium)에서 재고 단언한다.
+// 레일·목록 열 일관화 측정 (#3280, #3334): 하나의 레일(56px)과 목록 열의 고정 머리(검색과
+// 이동 + 구획 A·B)가 모든 탭에서 같은 자리·같은 DOM 노드인지, 접기 단추가 같은 자리인지,
+// ⌘B가 목록 열만 접고(레일 유지) 접힌 레일이 목적지 아이콘 다섯을 이어 붙이는지, 컴포저
+// 굵게를 건드리지 않는지, 접힘이 기기별로 기억되는지를 실제 셸(Chromium)에서 재고 단언한다.
 //
 //   npm run build && node scripts/capture-rail-unified.mjs
 //   → OUT_DIR(기본 artifacts/rail-unified)/*.png + report.json
@@ -205,17 +206,6 @@ async function installDesktop(page, layout, signals = null) {
   );
 }
 
-async function signIn(page, origin) {
-  await page.goto(origin, { waitUntil: "domcontentloaded" });
-  await advanceToAccount(page);
-  await page.getByTestId("login-email").fill("capture@example.test");
-  await page.getByTestId("login-password").fill("not-a-secret");
-  await page.getByTestId("login-submit").click();
-  await page.getByTestId("rail-team").waitFor({ timeout: 20_000 });
-}
-
-
-
 const PROBE = `
 (() => {
   const q = (s) => document.querySelector(s);
@@ -227,11 +217,20 @@ const PROBE = `
     rail: box(q("[data-testid='workspace-rail']")),
     tile: box(q("[data-testid='workspace-current']")),
     plus: box(q("[data-testid='add-workspace']")),
-    railItems: ["rail-chat", "rail-inbox", "rail-mine", "rail-team"].map((id) => box(q("[data-testid='" + id + "']"))),
+    // 펼침: 레일에는 목적지가 없고(0), 목록 열 머리의 줄이 선다. 접힘: 반대다.
+    railDestinations: ["rail-chat", "rail-inbox", "rail-agents", "rail-mine", "rail-team"].map((id) => box(q("[data-testid='" + id + "']"))),
+    railDivider: !!q("[data-testid='rail-divider']"),
+    headBox: box(q("[data-testid='sidebar-list-head']")),
+    headRows: ["nav-chat", "nav-inbox", "nav-directory", "nav-agents", "nav-mine", "nav-team", "nav-activity"].map((id) => box(q("[data-testid='" + id + "']"))),
+    searchBox: box(q("[data-testid='open-quick-switcher']")),
+    headCurrent: [...document.querySelectorAll("[data-testid='sidebar-list-head'] [aria-current='page']")].map((e) => e.getAttribute("data-testid")),
+    searchRow: document.querySelectorAll("[data-testid='nav-search']").length,
+    bodySlot: box(q("[data-testid='sidebar-body-slot']")),
+    bodySlotHidden: q("[data-testid='sidebar-body-slot']") ? q("[data-testid='sidebar-body-slot']").hidden : null,
     profile: box(q("[data-testid='profile-card']")),
     toggle: box(toggle),
     toggleAria: toggle ? { expanded: toggle.getAttribute("aria-expanded"), label: toggle.getAttribute("aria-label"), title: toggle.getAttribute("title") } : null,
-    current: [...document.querySelectorAll("[data-testid='workspace-rail'] [aria-current='page']")].map((e) => e.textContent),
+    railCurrent: [...document.querySelectorAll("[data-testid='workspace-rail'] [aria-current='page']")].map((e) => e.getAttribute("data-testid")),
     listPaneHidden: pane ? pane.hidden : null,
     sessionList: box(q("[data-testid='session-list']")),
     content: box(q("[data-testid='my-work-tab'] > section") || main),
@@ -259,7 +258,14 @@ async function scene(browser, origin, scheme, viewport, report, preCollapsed = f
   await page.addInitScript((server) => { try { localStorage.setItem("momo.web.server.v1", server); } catch { /* 저장소 없는 캡처 */ } }, origin);
   // 이전 실행에서 접어 둔 기기: 저장된 접힘으로 시작한다.
   if (preCollapsed) await page.addInitScript(() => { try { localStorage.setItem("momo.web.shell.listColumn.collapsed.v1", "1"); } catch { /* 저장소 없는 캡처 */ } });
-  await signIn(page, origin);
+  // 접힘으로 시작하면 목록 열 머리가 inert라 nav-* 가 없다: 레일 아이콘으로 기다린다.
+  const ready = preCollapsed ? "rail-team" : "nav-team";
+  await page.goto(origin, { waitUntil: "domcontentloaded" });
+  await advanceToAccount(page);
+  await page.getByTestId("login-email").fill("capture@example.test");
+  await page.getByTestId("login-password").fill("not-a-secret");
+  await page.getByTestId("login-submit").click();
+  await page.getByTestId(ready).waitFor({ timeout: 20_000 });
   await page.waitForTimeout(600);
   const probe = () => page.evaluate(PROBE);
   const shot = (name) => page.screenshot({ path: resolve(OUT_DIR, `${name}-${tag}.png`) });
@@ -268,6 +274,7 @@ async function scene(browser, origin, scheme, viewport, report, preCollapsed = f
     out.remembered = await probe();
     await shot("collapsed-remembered");
     check(`${tag} 저장된 접힘으로 시작한다(열 56·목록 열 숨김·aria-expanded=false)`, out.remembered.cols.startsWith("56px") && out.remembered.listPaneHidden === true && out.remembered.toggleAria.expanded === "false", JSON.stringify([out.remembered.cols, out.remembered.listPaneHidden, out.remembered.toggleAria]));
+    check(`${tag} 접힌 레일에 목적지 다섯이 모두 있다`, out.remembered.railDestinations.every((b) => b !== null) && out.remembered.railDivider === true, JSON.stringify(out.remembered.railDestinations));
     await page.getByTestId("rail-mine").click();
     await page.getByTestId("my-work-tab").waitFor();
     await page.waitForTimeout(600);
@@ -280,21 +287,25 @@ async function scene(browser, origin, scheme, viewport, report, preCollapsed = f
 
   out.chat = await probe();
   await shot("chat");
-  // 레일 노드 정체성: 탭을 옮겨도 같은 DOM 노드여야 한다.
-  await page.evaluate(() => { document.querySelector("[data-testid='workspace-rail']").setAttribute("data-cap-identity", "rail-1"); });
+  // 노드 정체성: 탭을 옮겨도 레일·목록 열 머리·줄이 같은 DOM 노드여야 한다.
+  await page.evaluate(() => {
+    document.querySelector("[data-testid='workspace-rail']").setAttribute("data-cap-identity", "rail-1");
+    document.querySelector("[data-testid='sidebar-list-head']").setAttribute("data-cap-identity", "head-1");
+    document.querySelector("[data-testid='nav-team']").setAttribute("data-cap-identity", "team-row-1");
+  });
 
-  await page.getByTestId("rail-inbox").click();
+  await page.getByTestId("nav-inbox").click();
   await page.waitForTimeout(500);
   out.inbox = await probe();
   await shot("inbox");
 
-  await page.getByTestId("rail-mine").click();
+  await page.getByTestId("nav-mine").click();
   await page.getByTestId("my-work-tab").waitFor();
   await page.waitForTimeout(900);
   out.mine = await probe();
   await shot("mywork");
-  // 단추의 aria-expanded는 화면과 같아야 한다: 좁은 창(1280·900)은 폭 규칙으로 세션 목록이 닫혀 있고,
-  // 그때도 첫 번째 ⌘B가 목록을 연다(저장된 상태만 읽으면 두 번 눌러야 열린다).
+  // 단추의 aria-expanded는 화면과 같아야 한다: 좁은 창(1280·900)은 폭 규칙으로 목록 열이 닫혀 있고,
+  // 그때도 첫 번째 ⌘B가 목록 열을 연다(저장된 상태만 읽으면 두 번 눌러야 열린다).
   const listVisible = out.mine.sessionList !== null;
   check(`${tag} 내 작업: 단추 aria-expanded가 화면(세션 목록 유무)과 같다`, (out.mine.toggleAria.expanded === "true") === listVisible, JSON.stringify([out.mine.toggleAria, listVisible]));
   if (!listVisible) {
@@ -302,37 +313,48 @@ async function scene(browser, origin, scheme, viewport, report, preCollapsed = f
     await page.keyboard.press("Meta+KeyB");
     await page.waitForTimeout(500);
     out.mineAfterOneCmdB = await probe();
-    check(`${tag} 내 작업(목록 자동 접힘): ⌘B 한 번에 세션 목록(268)이 열린다`, out.mineAfterOneCmdB.sessionList !== null && out.mineAfterOneCmdB.sessionList.w === 268 && out.mineAfterOneCmdB.toggleAria.expanded === "true", JSON.stringify(out.mineAfterOneCmdB.sessionList));
+    check(`${tag} 내 작업(목록 자동 접힘): ⌘B 한 번에 목록 열과 세션 목록이 열린다`, out.mineAfterOneCmdB.sessionList !== null && out.mineAfterOneCmdB.cols.startsWith("324px") && out.mineAfterOneCmdB.toggleAria.expanded === "true", JSON.stringify([out.mineAfterOneCmdB.sessionList, out.mineAfterOneCmdB.cols]));
     await shot("mywork-opened-by-cmdb");
+    out.mineAfterOneCmdB.headSame = await page.evaluate(() => document.querySelector("[data-testid='sidebar-list-head']")?.getAttribute("data-cap-identity"));
   }
 
-  await page.getByTestId("rail-team").click();
+  await page.getByTestId("nav-team").click();
   await page.waitForTimeout(500);
   out.team = await probe();
   await shot("team");
 
-  await page.getByTestId("rail-chat").click();
+  await page.getByTestId("nav-chat").click();
   await page.waitForTimeout(500);
   out.chatAgain = await probe();
 
-  const identity = await page.evaluate(() => document.querySelector("[data-testid='workspace-rail']")?.getAttribute("data-cap-identity"));
-  check(`${tag} 레일은 탭을 오가도 같은 DOM 노드다`, identity === "rail-1", String(identity));
+  const identity = await page.evaluate(() => ({
+    rail: document.querySelector("[data-testid='workspace-rail']")?.getAttribute("data-cap-identity"),
+    head: document.querySelector("[data-testid='sidebar-list-head']")?.getAttribute("data-cap-identity"),
+    team: document.querySelector("[data-testid='nav-team']")?.getAttribute("data-cap-identity"),
+  }));
+  check(`${tag} 레일·목록 열 머리·줄은 탭을 오가도 같은 DOM 노드다`, identity.rail === "rail-1" && identity.head === "head-1" && identity.team === "team-row-1", JSON.stringify(identity));
+  // 좁은 창(1280·900)의 「내 작업」은 폭 규칙으로 목록 열이 자동으로 접혀 있다: 그 화면은 접힘이라
+  // 레일에 목적지 다섯이 서고 머리는 숨는다(아래 ⌘B 시험이 열림을 잰다). 펼침 시험에서 뺀다.
+  const mineAutoCollapsed = out.mine.sessionList === null;
+  check(`${tag} 펼침 레일에는 목적지·구분선이 없고 메시지 검색 줄도 없다`, [out.chat, out.inbox, ...(mineAutoCollapsed ? [] : [out.mine]), out.team].every((o) => o.railDestinations.every((b) => b === null) && o.railDivider === false && o.searchRow === 0), JSON.stringify(out.chat.railDestinations));
   for (const key of ["inbox", "mine", "team", "chatAgain"]) {
     const o = out[key];
     check(`${tag} ${key}: 레일 상자(x·y·w·h)가 대화 탭과 같고 폭이 56이다`, same(o.rail, out.chat.rail) && o.rail.w === 56, JSON.stringify([o.rail, out.chat.rail]));
     check(`${tag} ${key}: 워크스페이스 타일·「+」·프로필 자리가 같다`, same(o.tile, out.chat.tile) && same(o.plus, out.chat.plus) && same(o.profile, out.chat.profile));
-    check(`${tag} ${key}: 목적지 단추 자리가 같다`, same(o.railItems, out.chat.railItems), JSON.stringify([o.railItems, out.chat.railItems]));
+    if (key === "mine" && mineAutoCollapsed) {
+      check(`${tag} mine(목록 열 자동 접힘): 레일에 목적지 다섯이 선다`, o.railDivider === true && o.railDestinations.every((b) => b !== null), JSON.stringify(o.railDestinations));
+    } else check(`${tag} ${key}: 검색과 이동·목적지 줄·머리 상자 자리가 같다`, same(o.searchBox, out.chat.searchBox) && same(o.headRows, out.chat.headRows) && same(o.headBox, out.chat.headBox), JSON.stringify([o.headRows, out.chat.headRows]));
     check(`${tag} ${key}: 접기 단추 자리·aria가 같다`, same(o.toggle, out.chat.toggle) && o.toggleAria.expanded === (key === "mine" ? String(o.sessionList !== null) : "true"), JSON.stringify([o.toggle, out.chat.toggle]));
     check(`${tag} ${key}: 64px 작업 레일이 없다`, o.legacyWorkRail === 0);
+    check(`${tag} ${key}: 열 폭이 324(56 + 268)로 같다`, o.cols.startsWith("324px") || (key === "mine" && o.cols.startsWith("56px")), o.cols);
     check(`${tag} ${key}: 가로 넘침 0`, o.scrollW === 0, String(o.scrollW));
   }
-  check(`${tag} 레일 aria-current: 대화·인박스·내 작업·팀 작업 각 하나`,
-    same([out.chat.current, out.inbox.current, out.mine.current, out.team.current], [["대화"], ["인박스"], ["내 작업"], ["팀 작업"]]),
-    JSON.stringify([out.chat.current, out.inbox.current, out.mine.current, out.team.current]));
-  // 본문 왼쪽 가장자리: 대화·인박스(떠 있는 판 = 324 + 8)와 내 작업(세션 목록 끝 = 56 + 268 = 324)이 같은 목록 열 폭을 쓴다.
-  check(`${tag} 목록 열 폭: 내 작업 세션 목록 268(펼침일 때)`, out.mine.sessionList === null || out.mine.sessionList.w === 268, JSON.stringify(out.mine.sessionList));
+  check(`${tag} 목록 열 머리 aria-current: 대화·인박스·내 작업·팀 작업 각 하나`,
+    same([out.chat.headCurrent, out.inbox.headCurrent, out.mine.headCurrent, out.team.headCurrent], [["nav-chat"], ["nav-inbox"], ["nav-mine"], ["nav-team"]]),
+    JSON.stringify([out.chat.headCurrent, out.inbox.headCurrent, out.mine.headCurrent, out.team.headCurrent]));
+  // 내 작업의 세션 목록은 목록 열의 본문 자리 안에 선다(머리 아래, 열 안쪽).
+  check(`${tag} 내 작업 세션 목록은 머리 아래 본문 자리 안이다(펼침일 때)`, out.mine.sessionList === null || (out.mine.bodySlotHidden === false && out.mine.sessionList.y >= out.mine.headBox.y + out.mine.headBox.h - 1 && out.mine.sessionList.x + out.mine.sessionList.w <= 56 + 268), JSON.stringify([out.mine.sessionList, out.mine.headBox]));
   check(`${tag} 대화 탭 열 = 56 + 268`, out.chat.cols.startsWith("324px"), out.chat.cols);
-  check(`${tag} 내 작업 열 = 56(목록은 라우트 안)`, out.mine.cols.startsWith("56px"), out.mine.cols);
 
   // ⌘B: 일반 포커스에서 목록 열만 접고 레일은 남는다.
   // 캐럿이 목록 열 안(채널 행)에 있을 때 접어도 캐럿이 <body>로 떨어지지 않는다(접기 단추로 간다).
@@ -344,25 +366,29 @@ async function scene(browser, origin, scheme, viewport, report, preCollapsed = f
   out.collapsed = await probe();
   await shot("collapsed");
   check(`${tag} ⌘B: 접힘 = 열 56·목록 열 숨김·단추 aria-expanded=false`, out.collapsed.cols.startsWith("56px") && out.collapsed.listPaneHidden === true && out.collapsed.toggleAria.expanded === "false", JSON.stringify([out.collapsed.cols, out.collapsed.listPaneHidden, out.collapsed.toggleAria]));
-  check(`${tag} ⌘B: 접혀도 레일·접기 단추 자리가 같다`, same(out.collapsed.rail, out.chat.rail) && same(out.collapsed.toggle, out.chat.toggle) && same(out.collapsed.railItems, out.chat.railItems));
+  check(`${tag} ⌘B: 접혀도 레일·접기 단추 자리가 같다`, same(out.collapsed.rail, out.chat.rail) && same(out.collapsed.toggle, out.chat.toggle));
+  check(`${tag} ⌘B: 접힌 레일에 구분선 아래 목적지 다섯(대화·인박스·에이전트·내 작업·팀 작업)이 모두 선다`, out.collapsed.railDivider === true && out.collapsed.railDestinations.every((b) => b !== null), JSON.stringify(out.collapsed.railDestinations));
+  check(`${tag} ⌘B: 접힌 레일 아이콘이 레일 안(x 0~56)에 있다`, out.collapsed.railDestinations.every((b) => b && b.x >= 0 && b.x + b.w <= 56), JSON.stringify(out.collapsed.railDestinations));
+  check(`${tag} ⌘B: 접힌 레일 aria-current = 대화`, same(out.collapsed.railCurrent, ["rail-chat"]), JSON.stringify(out.collapsed.railCurrent));
   const stored = await page.evaluate(() => localStorage.getItem("momo.web.shell.listColumn.collapsed.v1"));
   check(`${tag} 접힘을 기기별로 기억한다`, stored === "1", String(stored));
 
-  // 접힌 채로 「내 작업」으로: 세션 목록도 접혀 있다(상태 한 벌), 레일은 그대로.
+  // 접힌 채로 「내 작업」으로(레일 아이콘): 세션 목록도 접혀 있다(상태 한 벌), 레일은 그대로.
   await page.getByTestId("rail-mine").click();
   await page.getByTestId("my-work-tab").waitFor();
   await page.waitForTimeout(700);
   out.minedCollapsed = await probe();
   await shot("mywork-collapsed");
   check(`${tag} 접힌 채 내 작업: 세션 목록 없음·레일 같음·단추 같은 자리`, out.minedCollapsed.sessionList === null && same(out.minedCollapsed.rail, out.chat.rail) && same(out.minedCollapsed.toggle, out.chat.toggle) && out.minedCollapsed.toggleAria.expanded === "false");
+  check(`${tag} 접힌 채 내 작업: 레일 aria-current = 내 작업`, same(out.minedCollapsed.railCurrent, ["rail-mine"]), JSON.stringify(out.minedCollapsed.railCurrent));
   // 제목줄 단추로 편다(내 작업에서도 같은 단추).
   await page.getByTestId("sidebar-toggle").click();
   await page.waitForTimeout(600);
   out.minedOpened = await probe();
-  check(`${tag} 내 작업에서 단추로 펴면 세션 목록(268)이 선다`, out.minedOpened.sessionList !== null && out.minedOpened.sessionList.w === 268 && out.minedOpened.toggleAria.expanded === "true", JSON.stringify(out.minedOpened.sessionList));
+  check(`${tag} 내 작업에서 단추로 펴면 목록 열(324)과 세션 목록이 선다`, out.minedOpened.sessionList !== null && out.minedOpened.cols.startsWith("324px") && out.minedOpened.toggleAria.expanded === "true", JSON.stringify([out.minedOpened.sessionList, out.minedOpened.cols]));
 
   // 컴포저 포커스에서는 ⌘B가 굵게이고 접힘이 바뀌지 않는다.
-  await page.getByTestId("rail-chat").click();
+  await page.getByTestId("nav-chat").click();
   await page.waitForTimeout(500);
   const composer = page.locator("[data-testid='composer-input'], textarea").first();
   if (await composer.count()) {

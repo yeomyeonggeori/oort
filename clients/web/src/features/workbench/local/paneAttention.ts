@@ -9,7 +9,9 @@ import {
 } from "@momo/core/features/workbench/paneStatus";
 import type { SessionStatus } from "@momo/core/features/workbench/sessionList";
 import { focusPane } from "@momo/core/features/workbench/layoutTree";
-import { isDesktop, showNotification } from "@/lib/tauri";
+import { isDesktop } from "@/lib/tauri";
+import { desktopNotificationKinds, type DesktopNotifyKind } from "@/features/notifications/preference";
+import { osNotifier, type OsNotifyKind } from "@/features/notifications/osNotifier";
 import {
   browserLayoutStorage,
   readWorkbenchLayout,
@@ -60,7 +62,10 @@ export interface PaneObservation {
 }
 
 export interface PaneAttentionDeps {
-  notify: (title: string, body: string) => Promise<boolean>;
+  /** OS 알림 한 건. 같은 종류를 묶는 일은 호출 쪽(osNotifier)이 한다. */
+  notify: (item: { kind: OsNotifyKind; title: string; body: string; label: string }) => void;
+  /** 이 기기에서 이 종류의 OS 알림이 켜져 있는가. 없으면 전부 켜짐. 인박스 줄과는 무관하다. */
+  kindEnabled?: (kind: DesktopNotifyKind) => boolean;
   windowFocused: () => boolean;
   now: () => number;
 }
@@ -110,9 +115,18 @@ export function createPaneAttention(deps: PaneAttentionDeps) {
           ];
           changed = true;
         }
-        if (shouldNotifyAttention({ windowFocused: focused, paneInView: inView })) {
+        const prefKind: DesktopNotifyKind = t.status === "waiting" ? "pane-waiting" : "work-mine-done";
+        if (
+          shouldNotifyAttention({ windowFocused: focused, paneInView: inView }) &&
+          (deps.kindEnabled?.(prefKind) ?? true)
+        ) {
           const copy = attentionCopy(t.status, { index: p.index, name: p.name }, p.signal);
-          void deps.notify(copy.title, copy.body).catch(() => false);
+          deps.notify({
+            kind: t.status === "waiting" ? "waiting" : "done",
+            title: copy.title,
+            body: copy.body,
+            label: `${p.index}번 칸 · ${p.name}`,
+          });
         }
       }
       // 번호·이름은 배치가 바뀌면 따라간다.
@@ -138,7 +152,10 @@ let shared: PaneAttention | null = null;
 
 export function paneAttention(): PaneAttention {
   shared ??= createPaneAttention({
-    notify: (title, body) => (isDesktop() ? showNotification(title, body) : Promise.resolve(false)),
+    notify: (item) => {
+      if (isDesktop()) osNotifier().offer(item);
+    },
+    kindEnabled: (kind) => desktopNotificationKinds()[kind],
     windowFocused: () => typeof document !== "undefined" && document.hasFocus() && document.visibilityState === "visible",
     now: () => Date.now(),
   });
