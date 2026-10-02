@@ -43,12 +43,14 @@
   font: 500 var(--text-timestamp) var(--font-mono);
   color: var(--ink-muted);
 }
-/* 제목은 사이드바 워크스페이스 이름(`sidebar-ws-name`)과 같은 글자다. */
+/* 제목은 구획 머리(`sidebar-section-label`: 12.5/700 ink-muted)와 같은 글자다. 앞 판은 워크스페이스
+ * 이름(18/800)을 따라 구획 B의 「에이전트·작업」보다 크게 서서 위계가 거꾸로였다(#3358 검수 M). 이 줄은
+ * 본문 목록의 이름표이지 화면 제목이 아니다 — 화면 제목은 본문의 「내 작업」(`h1`)이 진다. */
 .sl-hd h2 {
-  font-size: 1.125rem;
-  line-height: 1.5rem;
-  font-weight: 800;
-  letter-spacing: -0.03em;
+  font-size: 0.78125rem;
+  line-height: 1rem;
+  font-weight: 700;
+  color: var(--ink-muted);
 }
 .sl-hd .sl-r {
   margin-inline-start: auto;

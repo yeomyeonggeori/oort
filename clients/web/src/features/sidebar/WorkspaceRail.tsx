@@ -8,6 +8,8 @@ import {
   WORK_NAV,
 } from "@momo/core/features/workbench/workTab";
 import { AGENTS_NAV } from "./workspaceNav";
+import { AttentionDot, AttentionPill } from "./AttentionBadge";
+import type { DestinationMark, DestinationMarks } from "./sidebarBadge";
 import { useOpenAddWorkspace } from "@/features/workspace/useAddWorkspace";
 import { useWorkspaceAvatar } from "./useWorkspaceAvatar";
 import {
@@ -37,7 +39,7 @@ export function WorkspaceRail({
   avatarUrl,
   active,
   collapsed = false,
-  inboxUnread = 0,
+  marks,
   footer,
 }: {
   // The tile draws the WORKSPACE (검수 피드백 #4a-1). It is a name-query object,
@@ -57,8 +59,11 @@ export function WorkspaceRail({
   active: RailDestination | null;
   /** 목록 열이 접혀 있다(⌘B). 접힌 동안에만 목적지 아이콘 다섯이 레일에 선다. */
   collapsed?: boolean;
-  /** 「나에게 필요한 일」 수(useNeedsMeCount). 접힌 레일의 인박스 아이콘 배지다. */
-  inboxUnread?: number;
+  /**
+   * 목적지별 표지(`destinationMarks`): 펼친 목록 열의 줄과 **같은 함수의 결과**다. 접힌 레일의
+   * 아이콘 모서리에 알약(잉크=나에게 필요, 호박=안 읽음) 또는 수를 못 그리는 점이 선다.
+   */
+  marks?: DestinationMarks;
   /** 아래 프로필(연결 상태 막대 포함). */
   footer?: ReactNode;
 }) {
@@ -173,17 +178,27 @@ export function WorkspaceRail({
           <span aria-hidden="true" className="h-px w-6 shrink-0 bg-line" data-testid="rail-divider" />
           <nav aria-label="앱 탐색" className="flex flex-col items-center" data-testid="rail-destinations">
             <ul className="flex flex-col items-center gap-2">
-              <RailLink to="/" icon={<MessageSquare />} label="대화" testId="rail-chat" current={active === "chat"} />
+              <RailLink to="/" icon={<MessageSquare />} label="대화" testId="rail-chat" current={active === "chat"} mark={marks?.chat} dotLabel="안 읽은 채널이 있어요" />
               <RailLink
                 to="/inbox"
                 icon={<Inbox />}
                 label="인박스"
                 testId="rail-inbox"
                 current={active === "inbox"}
-                badge={inboxUnread}
+                mark={marks?.inbox}
+                pillLabel="나에게 필요한 일"
               />
               <RailLink to={AGENTS_NAV.to} icon={<Bot />} label={AGENTS_NAV.label} testId="rail-agents" current={active === "agents"} />
-              <RailLink to={MY_WORK_PATH} icon={<SquareTerminal />} label={WORK_NAV.mine} testId="rail-mine" current={active === "mine"} />
+              <RailLink
+                to={MY_WORK_PATH}
+                icon={<SquareTerminal />}
+                label={WORK_NAV.mine}
+                testId="rail-mine"
+                current={active === "mine"}
+                mark={marks?.mine}
+                pillLabel="응답이 필요한 세션"
+                dotLabel="아직 안 본 끝난 세션이 있어요"
+              />
               <RailLink to={TEAM_WORK_PATH} icon={<SquareKanban />} label={WORK_NAV.team} testId="rail-team" current={active === "team"} />
             </ul>
           </nav>
@@ -203,15 +218,31 @@ function RailLink({
   label,
   testId,
   current,
-  badge = 0,
+  mark,
+  pillLabel,
+  dotLabel,
 }: {
   to: string;
   icon: ReactNode;
   label: string;
   testId: string;
   current: boolean;
-  badge?: number;
+  mark?: DestinationMark;
+  /** 알약이 말하는 것(「<이름>, <뜻> N개」). */
+  pillLabel?: string;
+  /** 점이 말하는 것. */
+  dotLabel?: string;
 }) {
+  const pill = mark?.pill ?? null;
+  const dot = mark?.dot ?? null;
+  // 접근 가능한 이름은 펼친 줄의 `badgeLabel`과 같은 문장이다. 호박 알약은 이 레일에 서지
+  // 않는다(안 읽음은 점으로만): 일반 안 읽음 수는 채널·DM 줄에서만 센다.
+  const accessible =
+    pill && pillLabel
+      ? `${label}, ${pillLabel} ${pill.count}개`
+      : dot && dotLabel
+        ? `${label}, ${dotLabel}`
+        : undefined;
   return (
     <li>
       {/* NavLink가 아니라 Link다: NavLink는 경로만 봐서 「팀 작업」(`/work?view=team`)도
@@ -220,7 +251,7 @@ function RailLink({
         to={to}
         data-testid={testId}
         aria-current={current ? "page" : undefined}
-        aria-label={badge > 0 ? `${label}, 나에게 필요한 일 ${badge}개` : undefined}
+        aria-label={accessible}
         className={cn(
           "rail-item relative focus-visible:focus-ring active:bg-surface-pressed",
           current
@@ -230,15 +261,17 @@ function RailLink({
       >
         <span aria-hidden="true">{icon}</span>
         <span>{label}</span>
-        {badge > 0 && (
-          <span
-            aria-hidden="true"
-            data-testid="rail-inbox-badge"
-            className="sidebar-badge absolute -right-1 -top-1 bg-primary text-on-primary"
-          >
-            {badge > 99 ? "99+" : badge}
+        {pill ? (
+          <span aria-hidden="true" className="absolute -right-1 -top-1">
+            <AttentionPill spec={pill} testId={`${testId}-badge`} max={99} />
           </span>
-        )}
+        ) : dot ? (
+          <AttentionDot
+            tone={dot}
+            testId={`${testId}-dot`}
+            className="absolute right-0.5 top-0.5 ring-2 ring-surface"
+          />
+        ) : null}
       </Link>
     </li>
   );

@@ -54,6 +54,8 @@ import { roveSidebarRows } from "./sidebarRoving";
 import { WorkspaceRail, type RailDestination } from "./WorkspaceRail";
 import { SidebarNowCard } from "./SidebarNowCard";
 import { SidebarDestinations } from "./SidebarDestinations";
+import { destinationMarks } from "./sidebarBadge";
+import { useLocalPaneAttention } from "@/features/workbench/local/paneAttention";
 import { destinationActive } from "./sidebarDestinationsModel";
 import { SidebarTeamSessions } from "./SidebarTeamSessions";
 import { setSidebarBodySlot } from "./sidebarBodySlot";
@@ -416,6 +418,18 @@ export function Sidebar({
       ),
     [ordered, openId, readStates.byChannel]
   );
+  // 목적지 표지(#3338): 접힌 레일 아이콘과 펼친 구획 A·B 줄이 **같은 함수**로 푼다. 아직 안
+  // 본 「끝남」은 칸을 보면 내려가는 `paneAttention`의 done 줄이다.
+  const paneAttention = useLocalPaneAttention();
+  const railMarks = useMemo(
+    () =>
+      destinationMarks({
+        needsMe: needsMeState,
+        unreadChannels: unreadChannels.length,
+        doneUnseen: paneAttention.some((e) => e.status === "done"),
+      }),
+    [needsMeState, unreadChannels.length, paneAttention]
+  );
   // ⌥↓ walks this list even when a section is folded. The collapsed header
   // therefore carries the same aggregate the keyboard already visits (M-2).
   //
@@ -593,7 +607,7 @@ export function Sidebar({
           avatarUrl={workspaceQuery.data?.avatarUrl}
           active={railActive}
           collapsed={channelPaneCollapsed && !asDrawer}
-          inboxUnread={needsMeState.total}
+          marks={railMarks}
           footer={
             <div className="safe-area-bottom flex flex-col items-center gap-2">
               {/* Bound to real connStatus, never decorative (SKILL §8): the colour and
@@ -722,6 +736,7 @@ export function Sidebar({
               <SidebarDestinations
                 active={destActive}
                 needsMe={needsMeState}
+                unreadChannels={unreadChannels.length}
                 workConsoleProvided={workConsoleProvided}
                 nowCard={
                   /* 작업 중 카드 (DS2-6, 시안 A `.a-side .a-now`). 열린 턴이 없으면 아무것도

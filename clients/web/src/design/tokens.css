@@ -1665,6 +1665,11 @@
   @media (height <= 780px) {
     overflow-y: auto;
     overscroll-behavior: contain;
+    /* 스크롤 단서(#3358 검수 M): 열 전체가 스크롤하는 낮은 창에서 아래 가장자리가 20px 옅어져
+     * 「더 있다」를 말한다. 색을 칠하지 않고 마스크로 깎으므로 그라데이션 바탕에서도 이음매가 없다.
+     * 끝까지 스크롤했을 때 마지막 줄이 옅어지지 않도록 같은 20px을 아래 여백으로 채운다. */
+    mask-image: linear-gradient(to bottom, black calc(100% - 20px), transparent);
+    padding-block-end: 20px;
   }
 }
 @utility sidebar-list-head {
@@ -1856,6 +1861,16 @@
   font-size: var(--text-timestamp);
   line-height: 1;
   font-weight: 700;
+}
+
+/* 수 없는 점 (표시 문법, 시안 `?panel=grammar`): 접혀서 수를 못 그릴 때만. 8px 원이고, 면에
+ * 놓이면 바탕과 같은 링으로 떨어져 보인다(레일 아이콘 모서리). */
+@utility sidebar-dot {
+  display: inline-block;
+  flex: none;
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 9999px;
 }
 
 /* 섹션 머리 (시안 `.a-slabel`): 12.5/700 ink-muted, 셰브론 14, 위 여백 14. */

@@ -3,6 +3,10 @@
 // #3334 사이드바 정보 구조 캡처: 레일은 워크스페이스 전용, 목적지는 목록 열의 「검색과 이동」
 // 아래 구획 A·B, 메시지 검색 줄 없음, 접힘(⌘B)에서 레일이 목적지 아이콘 다섯.
 //
+// #3338(표시 문법)이 같은 장면에 얹혔다: 잉크(필요)·호박(안 읽음) 알약이 섞인 대화, 구획 B의 세션 줄
+// 칩(응답 필요·끝남), 접힌 레일의 알약·점, 내 작업·팀 작업 목록의 글자 칩, 낮은 창(900×480)의 스크롤
+// 단서. `OUT_DIR=~/.cache/momo-scratch/3338/captures`.
+//
 //   npm run build && OUT_DIR=~/.cache/momo-scratch/3334/captures node scripts/capture-sidebar-ia.mjs
 //   → 라이트·다크 × 1440×900·900×700: 대화(chat) · 내 작업(데스크탑, mine) · 팀 작업(team) ·
 //     접힘(collapsed) · 웹 「내 작업」 설명 상태(mine-web)
@@ -97,6 +101,8 @@ const LAYOUT_3 = {
 };
 
 
+// 낮은 창 팀 작업 장면이 줄을 더 늘려 「열이 넘칠 때 끝 줄이 닿는가」를 잰다(#3358 검수 M).
+let EXTRA_TEAM = 0;
 const seId = otherId;
 const MIN = 60;
 function sharedRows(now) {
@@ -109,7 +115,9 @@ function sharedRows(now) {
     owner: { memberId: whoId, displayName: who }, homeChannel: { id: channels[0].id, name: "workbench" },
     repo, branch, harness: "claude", state, stages: ["세션 시작", "작업 중"], diff: d, lastActivityAt: sec - minAgo * MIN,
   });
+  const extra = Array.from({ length: EXTRA_TEAM }, (_, i) => row(`b${String(i).padStart(2, "0")}`, `추가 세션 ${i + 1}`, "곽성재", memberId, i % 3 === 0 ? "waiting" : i % 3 === 1 ? "idle" : "done", "momo", `chore/extra-${i + 1}`, 30 + i));
   return [
+    ...extra,
     row("a1", "주간 리포트", "김인턴", agentId, "running", null, null, 1),
     row("a2", "결제 모듈 리팩터", "서연", seId, "waiting", "momo", "refactor/pay", 3, diff(88, 21, 5, 2)),
     row("a3", "한글 입력 이중 전송 수리", "곽성재", memberId, "waiting", "momo", "feat/2774-xterm", 4, diff(128, 40, 9, 2)),
@@ -138,6 +146,8 @@ async function installRoutes(context) {
         { channel_id: channels[0].id, last_read_seq: 4, latest_seq: 9, unread_count: 5, mention_count: 2 },
         { channel_id: channels[1].id, last_read_seq: 1, latest_seq: 4, unread_count: 3, mention_count: 0 },
         { channel_id: channels[2].id, last_read_seq: 7, latest_seq: 8, unread_count: 1, mention_count: 0 },
+        // #3338: 열려 있지 않은 채널의 멘션 1 = 잉크 알약(나에게 필요). 위 둘은 호박(일반 안 읽음).
+        { channel_id: channels[3].id, last_read_seq: 2, latest_seq: 5, unread_count: 3, mention_count: 1 },
       ] });
     }
     if (path.endsWith("/approvals")) {
@@ -339,8 +349,33 @@ async function desktopScenes(browser, origin, scheme, viewport) {
       window.__captureSignal[key]?.(signals[id] ?? signals["*"]);
     }
   }, SIGNALS);
+  // #3338: p3 칸이 코드 0으로 끝난다 = 아직 안 본 「끝남」(칸을 보면 내려간다). p2가 응답 필요다.
+  await page.waitForTimeout(1500);
+  // 칸 번호 ↔ PTY 제목 열쇠는 띄우는 순서에 따라 달라서 칸 머리 글자로 찾는다(제목이 없는 칸 = 빈 열쇠).
+  await page.evaluate(() => {
+    window.__captureKeyOf = (paneId) => {
+      const head = (document.querySelector(`[data-testid='my-work-tab'] [data-pane-id='${paneId}']`)?.textContent ?? "").slice(0, 40);
+      return Object.keys(window.__captureExit ?? {}).filter((t) => t && head.includes(t)).sort((a, b) => b.length - a.length)[0] ?? "";
+    };
+  });
+  // #3338: p3 칸이 코드 0으로 끝난다 = 아직 안 본 「끝남」(칸을 보면 내려간다). p2가 응답 필요다.
+  await page.evaluate(() => {
+    window.__p2key = window.__captureKeyOf("p2"); // 내 작업을 떠난 뒤(대화·접힘)에도 쓰려고 미리 쥔다.
+    window.__captureExit[window.__captureKeyOf("p3")](0);
+  });
   await page.waitForTimeout(900);
   await shot("mine");
+  const chipStates = await page.locator("[data-testid='session-row-chip']").evaluateAll((els) => els.map((e) => e.getAttribute("data-status")));
+  check(`${tag} 내 작업: 목록 줄이 글자 칩이다(응답 필요 포함, 박동 점 없음)`, chipStates.includes("waiting") && chipStates.length >= 3 && (await page.locator("[data-testid='session-list-row'] [data-testid='status-mark']").count()) === 0, JSON.stringify(chipStates));
+  check(`${tag} 내 작업: 목록 제목이 구획 라벨보다 크지 않다`, await page.evaluate(() => {
+    const h = parseFloat(getComputedStyle(document.getElementById("session-list-title")).fontSize);
+    const l = parseFloat(getComputedStyle(document.querySelector("[data-testid='section-collapse-agent-work']")).fontSize);
+    return h <= l + 0.5;
+  }));
+  check(`${tag} 내 작업: 응답 필요 칸이 있으면 줄 알약 = 잉크`, (await page.locator("[data-testid='nav-mine'] [data-testid='mention-badge']").getAttribute("data-tone")) === "ink");
+  const live = await page.locator("[data-testid='sidebar-live-pane-chip']").evaluateAll((els) => els.map((e) => e.getAttribute("data-status")));
+  check(`${tag} 구획 B 세션 줄: 응답 필요 → 끝남 칩`, JSON.stringify(live) === JSON.stringify(["waiting", "done"]), JSON.stringify(live));
+  await page.getByTestId("sidebar-list-head").screenshot({ path: resolve(OUT_DIR, `section-b-${tag}.png`) });
   check(`${tag} 내 작업: 세션 목록이 목록 열 본문 자리 안이다`, (await page.locator("[data-testid='sidebar-body-slot'] [data-testid='session-list']").count()) === 1);
   check(`${tag} 내 작업: 가로 넘침 0`, (await overflowX(page)) === 0);
 
@@ -348,6 +383,8 @@ async function desktopScenes(browser, origin, scheme, viewport) {
   await page.getByTestId("sidebar-team-session").first().waitFor({ timeout: 10_000 });
   await page.waitForTimeout(500);
   await shot("team");
+  const teamChips = await page.locator("[data-testid='sidebar-team-session-chip']").evaluateAll((els) => els.map((e) => e.getAttribute("data-status")));
+  check(`${tag} 팀 작업: 줄마다 글자 칩(응답 필요·실행 중 포함)`, teamChips.length === 5 && teamChips.includes("waiting") && teamChips.includes("running"), JSON.stringify(teamChips));
   check(`${tag} 팀 작업: 사이드바 팀 세션 5줄`, (await page.getByTestId("sidebar-team-session").count()) === 5);
   check(`${tag} 팀 작업: 가로 넘침 0`, (await overflowX(page)) === 0);
 
@@ -356,7 +393,10 @@ async function desktopScenes(browser, origin, scheme, viewport) {
   await shot("chat");
   check(`${tag} 대화: 메시지 검색 줄 없음`, (await page.getByTestId("nav-search").count()) === 0);
   check(`${tag} 대화: 레일에 목적지 없음`, (await page.getByTestId("rail-destinations").count()) === 0);
-  check(`${tag} 대화: 인박스 알약 = 5`, (await page.locator("[data-testid='nav-inbox'] [data-testid='mention-badge']").textContent()) === "5");
+  const tone = (id, badge) => page.locator(`[data-testid='channel-item']:has-text('${id}') [data-testid='${badge}']`).first().getAttribute("data-tone");
+  check(`${tag} 대화: 멘션 채널(design-2.0) = 잉크, 일반 안 읽음(agent-lab) = 호박`, (await tone("design-2.0", "mention-badge")) === "ink" && (await tone("agent-lab", "unread-count")) === "amber");
+  await page.screenshot({ path: resolve(OUT_DIR, `chat-pills-${tag}.png`) });
+  check(`${tag} 대화: 인박스 알약 = 6`, (await page.locator("[data-testid='nav-inbox'] [data-testid='mention-badge']").textContent()) === "6");
   check(`${tag} 대화: 가로 넘침 0`, (await overflowX(page)) === 0);
 
   // ⌘B: 목록 열이 접히고 레일이 목적지 아이콘 다섯을 이어 붙인다.
@@ -366,8 +406,20 @@ async function desktopScenes(browser, origin, scheme, viewport) {
   await shot("collapsed");
   const icons = await page.locator("[data-testid='workspace-rail'] nav[aria-label='앱 탐색'] a").evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")));
   check(`${tag} 접힘: 레일 목적지 아이콘 다섯`, JSON.stringify(icons) === JSON.stringify(["rail-chat", "rail-inbox", "rail-agents", "rail-mine", "rail-team"]), JSON.stringify(icons));
-  check(`${tag} 접힘: 인박스 아이콘 배지 = 5`, (await page.locator("[data-testid='rail-inbox-badge']").textContent()) === "5");
+  check(`${tag} 접힘: 인박스 아이콘 배지 = 6`, (await page.locator("[data-testid='rail-inbox-badge']").textContent()) === "6");
+  const railMine = await page.locator("[data-testid='rail-mine-badge']").getAttribute("data-tone");
+  const railChat = await page.locator("[data-testid='rail-chat-dot']").getAttribute("data-tone");
+  check(`${tag} 접힘: 내 작업 = 잉크 알약, 대화 = 호박 점`, railMine === "ink" && railChat === "amber", `${railMine} ${railChat}`);
+  await page.locator("[data-testid='workspace-rail']").screenshot({ path: resolve(OUT_DIR, `rail-${tag}.png`) });
   check(`${tag} 접힘: 가로 넘침 0`, (await overflowX(page)) === 0);
+  // 응답 필요 칸이 풀리면(= 작업 중) 내 작업 알약이 내려가고 안 본 끝남이 초록 점으로 남는다.
+  await page.evaluate(() => {
+    // 응답 필요 칸(p2)이 멈춘다: 「응답 필요」가 아니게 된다.
+    window.__captureExit?.[window.__p2key]?.(1);
+  });
+  await page.waitForTimeout(700);
+  await shot("collapsed-dot");
+  check(`${tag} 접힘: 응답 필요가 풀리면 내 작업 = 초록 점`, (await page.locator("[data-testid='rail-mine-dot']").getAttribute("data-tone")) === "ok" && (await page.locator("[data-testid='rail-mine-badge']").count()) === 0);
   await context.close();
 }
 
@@ -376,7 +428,7 @@ async function desktopScenes(browser, origin, scheme, viewport) {
 async function shortScenes(browser, origin, scheme) {
   const viewport = { width: 900, height: 480 };
   const tag = `900x480-${scheme}`;
-  const { context, page } = await open(browser, origin, scheme, viewport, true);
+  let { context, page } = await open(browser, origin, scheme, viewport, true);
   await page.screenshot({ path: resolve(OUT_DIR, `chat-short-${tag}.png`) });
   await page.getByTestId("nav-mine").click();
   await page.getByTestId("my-work-tab").waitFor();
@@ -394,6 +446,37 @@ async function shortScenes(browser, origin, scheme) {
   const rows = await page.locator("[data-testid='session-list-row']:visible").count();
   check(`${tag} 낮은 창 내 작업: 스크롤하면 세션 줄이 보인다(${rows}줄)`, rows >= 1);
   check(`${tag} 낮은 창: 가로 넘침 0`, (await overflowX(page)) === 0);
+  // #3358 검수 M(c): 팀 작업 탭 본문이 낮은 창에서 아래가 잘렸다. 끝까지 스크롤하면 마지막 줄이 열 안에 온전히 선다.
+  await context.close();
+  EXTRA_TEAM = 9;
+  ({ context, page } = await open(browser, origin, scheme, viewport, true));
+  await page.getByTestId("nav-team").click();
+  await page.getByTestId("sidebar-team-session").first().waitFor({ timeout: 10_000 });
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: resolve(OUT_DIR, `team-short-${tag}.png`) });
+  await page.getByTestId("sidebar-list-root").evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: resolve(OUT_DIR, `team-short-scrolled-${tag}.png`) });
+  const lastRowFits = await page.evaluate(() => {
+    const root = document.querySelector("[data-testid='sidebar-list-root']").getBoundingClientRect();
+    const rows = [...document.querySelectorAll("[data-testid='sidebar-team-session']")];
+    const last = rows[rows.length - 1].getBoundingClientRect();
+    return { rowBottom: Math.round(last.bottom), rootBottom: Math.round(root.bottom), vh: innerHeight };
+  });
+  // 줄이 열보다 많을 때: 열 스크롤(root)과 목록 안 스크롤(ul)이 겹쳐 있어도 끝 줄에 닿을 수 있어야 한다.
+  await page.getByTestId("sidebar-team-session").last().scrollIntoViewIfNeeded();
+  await page.waitForTimeout(200);
+  await page.screenshot({ path: resolve(OUT_DIR, `team-short-many-end-${tag}.png`) });
+  const endReach = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll("[data-testid='sidebar-team-session']")];
+    const last = rows[rows.length - 1].getBoundingClientRect();
+    const help = document.querySelector("[data-testid='sidebar'] [aria-label*='도움']")?.getBoundingClientRect();
+    return { n: rows.length, rowBottom: Math.round(last.bottom), vh: innerHeight, helpTop: help ? Math.round(help.top) : null };
+  });
+  check(`${tag} 낮은 창 팀 작업(${endReach.n}줄): 끝 줄에 닿으면 창 안에 온전히 선다`, endReach.rowBottom <= endReach.vh, JSON.stringify(endReach));
+  check(`${tag} 낮은 창 팀 작업: 끝까지 스크롤하면 마지막 줄이 열 안에 온전히 선다`, lastRowFits.rowBottom <= lastRowFits.rootBottom + 1 && lastRowFits.rowBottom <= lastRowFits.vh, JSON.stringify(lastRowFits));
+  check(`${tag} 낮은 창: 스크롤 단서(아래 가장자리 페이드)가 있다`, await page.getByTestId("sidebar-list-root").evaluate((el) => { const m = getComputedStyle(el).maskImage; return !!m && m !== "none"; }));
+  EXTRA_TEAM = 0;
   await context.close();
 }
 
@@ -417,7 +500,7 @@ async function main() {
   const browser = await chromium.launch();
   try {
     for (const scheme of ["light", "dark"]) {
-      for (const viewport of [{ width: 1440, height: 900 }, { width: 900, height: 700 }]) {
+      for (const viewport of process.env.ONLY_SHORT ? [] : [{ width: 1440, height: 900 }, { width: 900, height: 700 }]) {
         await desktopScenes(browser, preview.origin, scheme, viewport);
         await webScenes(browser, preview.origin, scheme, viewport);
       }
