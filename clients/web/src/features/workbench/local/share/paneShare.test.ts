@@ -20,13 +20,18 @@ const SESSION = "00000000-0000-7000-8000-0000000000b1";
 class FakeMirror implements MirrorTerminal {
   cols = 80;
   rows = 24;
+  private title: ((t: string) => void) | null = null;
+  setTitle(t: string) {
+    this.title?.(t);
+  }
   write(_d: string | Uint8Array, cb?: () => void) {
     if (cb) queueMicrotask(cb);
   }
   resize() {}
   dispose() {}
-  onTitleChange() {
-    return { dispose: () => undefined };
+  onTitleChange(listener: (t: string) => void) {
+    this.title = listener;
+    return { dispose: () => (this.title = null) };
   }
 }
 
@@ -49,6 +54,7 @@ function rig(over: Partial<PaneShareDeps> & { repo?: string | null; host?: Local
   let output: (b: ArrayBuffer) => void = () => undefined;
   let exit: (e: PtyExit) => void = () => undefined;
   let nextPty = 1;
+  const mirrors: FakeMirror[] = [];
   const pty: PtyPort = {
     spawn: vi.fn(async (_r, o, e) => {
       output = o;
@@ -60,7 +66,13 @@ function rig(over: Partial<PaneShareDeps> & { repo?: string | null; host?: Local
     kill: vi.fn(async () => undefined),
     ack: vi.fn(async () => undefined),
   };
-  const factory: MirrorFactory = { create: () => ({ mirror: new FakeMirror(), serialize: () => "" }) };
+  const factory: MirrorFactory = {
+    create: () => {
+      const mirror = new FakeMirror();
+      mirrors.push(mirror);
+      return { mirror, serialize: () => "" };
+    },
+  };
   let t = 5_000_000;
   const sessions = createLocalSessions({ pty, loadMirror: async () => factory, storage: () => null, now: () => t });
   const storage = memoryStorage();
@@ -101,6 +113,7 @@ function rig(over: Partial<PaneShareDeps> & { repo?: string | null; host?: Local
     sent,
     created,
     ended,
+    mirrors,
     advance: (ms: number) => {
       t += ms;
       vi.advanceTimersByTime(ms);
@@ -426,5 +439,75 @@ describe("hostReadiness", () => {
     expect(hostReadiness(REGISTERED, WS, "https://other.example")).toBe("elsewhere");
     expect(hostReadiness({ ...REGISTERED, running: false }, WS, "https://team.example")).toBe("not_running");
     expect(hostReadiness(REGISTERED, WS.toUpperCase(), "https://team.example")).toBe("ready");
+  });
+});
+
+describe("세션 이름은 주인이 정한다 (ADR-0190 D4-b)", () => {
+  const SECRET = "/Users/me/secret-repo fix: acme-corp 고객 환불 sk-ant-api03-CANARY";
+
+  it("하네스 제목의 경로·토큰 모양은 기본 이름에서 경로 구분자가 지워지고, 주인이 고친 이름만 서버로 간다", async () => {
+    const h = rig();
+    await started(h);
+    h.mirrors[0]!.setTitle(`◐ ${SECRET}`);
+    await settle();
+    const prep = await h.share.prepare("p1");
+    expect(prep.name).not.toMatch(/[\\/]/);
+    expect(prep.name.length).toBeLessThanOrEqual(80);
+    await h.share.share("p1", CH_A, "릴리스 노트 초안");
+    await settle();
+    expect(h.created).toMatchObject([{ label: "릴리스 노트 초안" }]);
+    expect(JSON.stringify(h.created)).not.toContain("sk-ant-api03-CANARY");
+    expect(JSON.stringify(h.created)).not.toContain("/Users/");
+  });
+
+  it("이름을 못 받아도(기본값) 서버로 가는 이름에는 경로 구분자가 없고 80자를 넘지 않는다", async () => {
+    const h = rig();
+    await started(h);
+    h.mirrors[0]!.setTitle(`◐ ${SECRET} ${"가".repeat(200)}`);
+    await settle();
+    await h.share.share("p1", CH_A);
+    const label = (h.created[0] as { label: string }).label;
+    expect(label).not.toMatch(/[\\/]/);
+    expect(label.length).toBeLessThanOrEqual(80);
+    expect(label.length).toBeGreaterThan(0);
+  });
+
+  it("빈 이름은 프로그램 이름으로 돌아간다", async () => {
+    const h = rig();
+    await started(h);
+    await h.share.share("p1", CH_A, "   ");
+    expect(h.created).toMatchObject([{ label: "claude" }]);
+  });
+});
+
+describe("경합", () => {
+  it("서버가 세션을 만드는 사이 칸이 닫히면 그 세션을 바로 끝내고 켜지 않는다", async () => {
+    let release: (v: { id: string; channelId: string }) => void = () => undefined;
+    const h = rig({
+      createSession: vi.fn(
+        () =>
+          new Promise<{ id: string; channelId: string }>((resolve) => {
+            release = resolve;
+          })
+      ),
+    });
+    await started(h);
+    const pending = h.share.share("p1", CH_A);
+    await settle();
+    h.sessions.close("p1");
+    release({ id: SESSION, channelId: CH_A });
+    expect(await pending).toEqual({ ok: false, reason: "no_pane" });
+    await settle();
+    expect(h.ended).toEqual([SESSION]);
+    expect(h.deps.sendShare).not.toHaveBeenCalled();
+    expect(h.share.getState("p1").kind).toBe("off");
+  });
+
+  it("같은 칸에 공유가 동시에 두 번 들어와도 세션은 하나만 만든다", async () => {
+    const h = rig();
+    await started(h);
+    await Promise.all([h.share.share("p1", CH_A), h.share.share("p1", CH_A)]);
+    await settle();
+    expect(h.deps.createSession).toHaveBeenCalledTimes(1);
   });
 });

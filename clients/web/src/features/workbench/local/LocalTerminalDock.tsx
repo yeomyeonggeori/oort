@@ -273,7 +273,7 @@ export function LocalTerminalDock({
     const link = shareSource?.share.linkFor(paneId) ?? null;
     if (!link || !shareSource) return;
     const ok = await shareSource.copyText(link);
-    setNotice(ok ? `${SHARE_COPY.linkCopied}. ${SHARE_COPY.linkNote}` : SHARE_COPY.copyFailed);
+    setNotice(ok ? SHARE_COPY.linkCopied : SHARE_COPY.copyFailed);
   };
   const runShareAction = async (paneId: string, action: ShareAction) => {
     if (!shareSource) return;
@@ -307,6 +307,7 @@ export function LocalTerminalDock({
     const on = state.kind === "on" || state.kind === "stopping";
     return {
       chip: on ? (state.syncFailed ? SHARE_COPY.chipSyncFailed : SHARE_COPY.chipOn(channelNameOf(state.channelId))) : null,
+      chipWarn: on && state.syncFailed,
       menuLabel: SHARE_COPY.menuLabel,
       menu: entries.map((entry) => (
         <DropdownMenuItem

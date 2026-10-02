@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { Button } from "@/design/ui/button";
+import { Input } from "@/design/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/design/ui/dialog";
 import { ChoiceRadios, type RadioChoice } from "@/features/settings/SettingsFields";
-import type { HostReadiness, PaneShare, SharePrepared, ShareRefusal } from "./paneShare";
+import { SHARE_NAME_MAX, type HostReadiness, type PaneShare, type SharePrepared, type ShareRefusal } from "./paneShare";
 import { refusalLine, SHARE_COPY } from "./shareCopy";
 
 // Reading this as: 「채널에 공유」 창 for internal team users on Tauri desktop,
@@ -51,23 +52,32 @@ export function ShareDialog({
   const [pick, setPick] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<ShareRefusal | null>(null);
+  /** 칸을 확인하지 못했다(셸이 답하지 않음). 「다시 확인」으로 한 번 더 읽는다. */
+  const [prepError, setPrepError] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  /** 팀에 보일 세션 이름. 주인이 정한다(ADR-0190 D4-b): 이 칸의 기본 이름을 채워 두고 고칠 수 있다. */
+  const [name, setName] = useState("");
+  const nameId = useId();
 
   useEffect(() => {
     let alive = true;
+    setPrep(null);
+    setPrepError(false);
     void share.prepare(paneId).then(
       (next) => {
         if (!alive) return;
         setPrep(next);
+        setName(next.name);
         setPick(next.lockedChannelId ?? next.defaultChannelId);
       },
       () => {
-        if (alive) setPrep({ host: "no_shell", repo: null, defaultChannelId: null, lockedChannelId: null });
+        if (alive) setPrepError(true);
       }
     );
     return () => {
       alive = false;
     };
-  }, [share, paneId]);
+  }, [share, paneId, attempt]);
 
   const choices = useMemo<RadioChoice[]>(
     () =>
@@ -97,14 +107,14 @@ export function ShareDialog({
         : prep?.host === "no_shell"
           ? SHARE_COPY.hostNoShell
           : SHARE_COPY.hostNotRegistered;
-  const canSubmit = prep !== null && !hostBlocked && (locked !== null || pick !== null) && !busy;
+  const canSubmit = prep !== null && !hostBlocked && (locked !== null || (pick !== null && name.trim() !== "")) && !busy;
 
   const submit = async () => {
     const channelId = locked ?? pick;
     if (!channelId) return;
     setBusy(true);
     setRefusal(null);
-    const result = await share.share(paneId, channelId);
+    const result = await share.share(paneId, channelId, locked === null ? name : undefined);
     setBusy(false);
     if (result.ok) {
       onShared(intent, nameOf(channelId));
@@ -124,7 +134,11 @@ export function ShareDialog({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{lead}</DialogDescription>
         </div>
-        {prep === null ? (
+        {prepError ? (
+          <p role="alert" className="text-body text-ink" data-testid="share-dialog-prepare-error">
+            {SHARE_COPY.prepareFailed}
+          </p>
+        ) : prep === null ? (
           <p role="status" className="text-body text-ink-muted" data-testid="share-dialog-preparing">
             {SHARE_COPY.preparing}
           </p>
@@ -153,6 +167,22 @@ export function ShareDialog({
             />
           </div>
         )}
+        {prep !== null && !hostBlocked && locked === null && !prepError ? (
+          <div className="flex flex-col gap-1">
+            <label htmlFor={nameId} className="text-meta text-ink-muted">
+              {SHARE_COPY.nameLabel}
+            </label>
+            <Input
+              id={nameId}
+              value={name}
+              maxLength={SHARE_NAME_MAX}
+              disabled={busy}
+              onChange={(event) => setName(event.target.value)}
+              data-testid="share-dialog-name"
+            />
+            <p className="text-meta text-ink-muted">{SHARE_COPY.nameHint}</p>
+          </div>
+        ) : null}
         <p className="text-meta text-ink-muted">{SHARE_COPY.never}</p>
         {refusal && !hostBlocked ? (
           <p role="alert" className="text-body text-danger" data-testid="share-dialog-error">
@@ -163,7 +193,11 @@ export function ShareDialog({
           <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onClose}>
             {SHARE_COPY.cancel}
           </Button>
-          {hostBlocked && prep?.host !== "no_shell" ? (
+          {prepError ? (
+            <Button type="button" size="sm" data-testid="share-dialog-retry" onClick={() => setAttempt((n) => n + 1)}>
+              {SHARE_COPY.prepareRetry}
+            </Button>
+          ) : hostBlocked && prep?.host !== "no_shell" ? (
             <Button type="button" size="sm" data-testid="share-dialog-host-go" onClick={onOpenHostSettings}>
               {SHARE_COPY.hostGo}
             </Button>

@@ -1,6 +1,6 @@
 import { ApiError } from "@momo/core/lib/api";
 import type { LocalWorkHostStatus } from "@momo/core/features/settings/thisMacHost";
-import type { ShareSender, ShareSummaryS1 } from "@momo/core/features/workbench/shareSummary";
+import { cleanLabel, type ShareSender, type ShareSummaryS1 } from "@momo/core/features/workbench/shareSummary";
 import { createShareCollectors, harnessOf, type ShareCollectors, type ShareGitReader, type ShareSessionsPort } from "../shareCollectors";
 import type { LocalSessionView } from "../localSessions";
 import { lastChannelFor, rememberChannelFor, type RepoChannelStorage } from "./repoChannelStore";
@@ -55,7 +55,22 @@ export interface PaneShareView {
 
 const OFF: PaneShareView = Object.freeze({ kind: "off", channelId: null, sessionId: null, syncFailed: false });
 
+/** 세션 이름 상한(ADR-0190 D4-b: 80자). 서버 상한(120자)보다 좁다. */
+export const SHARE_NAME_MAX = 80;
+
+/**
+ * 팀에 보이는 세션 이름. 이름은 **주인이 정한다**(D4-b): 창이 이 값을 채워 보여 주고 주인이 고친
+ * 값만 서버로 간다. 하네스·셸이 OSC 제목에 무엇을 실었는지(작업 문장, 경로, user@host)는 주인이
+ * 보기 전에는 기기를 떠나지 않으므로, 기본값에서 경로 구분자와 제어·서식 문자를 지운다.
+ */
+export function cleanShareName(raw: string | null | undefined, fallback: string): string {
+  const stripped = (raw ?? "").replace(/[\\/]+/g, " ").replace(/\s+/g, " ");
+  return cleanLabel(stripped, SHARE_NAME_MAX) ?? cleanLabel(fallback, SHARE_NAME_MAX) ?? "셸";
+}
+
 export interface SharePrepared {
+  /** 이 칸의 기본 세션 이름(주인이 고칠 수 있다). */
+  name: string;
   host: HostReadiness;
   /** 저장소 표시 이름(G1). 못 읽으면 null. */
   repo: string | null;
@@ -93,7 +108,8 @@ export interface PaneShare {
   subscribe(listener: () => void): () => void;
   getState(paneId: string): PaneShareView;
   prepare(paneId: string): Promise<SharePrepared>;
-  share(paneId: string, channelId: string): Promise<ShareResult>;
+  /** `name`은 주인이 확인한 세션 이름. 없으면 기본 이름(정제됨)을 쓴다. */
+  share(paneId: string, channelId: string, name?: string): Promise<ShareResult>;
   unshare(paneId: string): Promise<ShareResult>;
   /** 공유된 칸의 팀 보드 주소. 공유 중이 아니면 null(링크는 공유된 세션에만 있다). */
   linkFor(paneId: string): string | null;
@@ -119,9 +135,12 @@ const HOST_REFUSAL: Record<Exclude<HostReadiness, "ready">, ShareRefusal> = {
   no_shell: "no_shell",
 };
 
-function defaultLabel(view: LocalSessionView): string {
-  if (view.title) return view.title;
+function programName(view: LocalSessionView): string {
   return view.program.kind === "harness" ? view.program.id : "셸";
+}
+
+function defaultLabel(view: LocalSessionView): string {
+  return cleanShareName(view.title, programName(view));
 }
 
 function refusalOf(error: unknown): ShareRefusal {
@@ -242,20 +261,30 @@ export function createPaneShare(deps: PaneShareDeps): PaneShare {
     async prepare(paneId) {
       const [{ readiness }, repo] = await Promise.all([hostReady(), readRepo(paneId).catch(() => null)]);
       const locked = entries.get(paneId)?.home?.channelId ?? null;
+      const view = deps.sessions.getSnapshot().get(paneId);
       const last = lastChannelFor(deps.workspaceId, repo, deps.storage);
       const selectable = last !== null && (deps.channelSelectable?.(last) ?? true);
-      return { host: readiness, repo, defaultChannelId: selectable ? last : null, lockedChannelId: locked };
+      return {
+        name: view ? cleanShareName(labelOf(view), programName(view)) : "셸",
+        host: readiness,
+        repo,
+        defaultChannelId: selectable ? last : null,
+        lockedChannelId: locked,
+      };
     },
-    async share(paneId, channelId) {
+    async share(paneId, channelId, name) {
       const view = deps.sessions.getSnapshot().get(paneId);
       if (!view) return { ok: false, reason: "no_pane" };
       const e = entryOf(paneId);
       if (e.view.kind === "starting" || e.view.kind === "stopping" || e.view.kind === "on") return { ok: true };
+      // 호스트 확인을 기다리는 동안 두 번째 호출이 같은 칸으로 세션을 또 만들지 못하게 먼저 잡는다.
+      set(e, { kind: "starting", channelId: e.home?.channelId ?? channelId, sessionId: e.home?.sessionId ?? null, syncFailed: false });
+      const back = (): PaneShareView => ({ kind: "off", channelId: e.home?.channelId ?? null, sessionId: e.home?.sessionId ?? null, syncFailed: false });
       const { readiness, hostId } = await hostReady();
       if (readiness !== "ready" || !hostId) {
+        set(e, back());
         return { ok: false, reason: readiness === "ready" ? "failed" : HOST_REFUSAL[readiness] };
       }
-      set(e, { kind: "starting", channelId: e.home?.channelId ?? channelId, sessionId: e.home?.sessionId ?? null, syncFailed: false });
       try {
         let home = e.home;
         if (!home) {
@@ -264,10 +293,17 @@ export function createPaneShare(deps: PaneShareDeps): PaneShare {
             channelId,
             hostId,
             tool: harnessOf(view.program),
-            label: labelOf(view),
+            label: cleanShareName(name ?? labelOf(view), programName(view)),
             folderLabel: repo,
           });
           home = { sessionId: created.id, channelId: created.channelId };
+          // 서버가 세션을 만드는 사이 칸이 닫혔다: 이 세션의 주인 칸이 없으니 바로 끝낸다.
+          if (!deps.sessions.getSnapshot().has(paneId)) {
+            entries.delete(paneId);
+            emit();
+            void Promise.resolve(deps.endSession(created.id)).catch(() => undefined);
+            return { ok: false, reason: "no_pane" };
+          }
           e.home = home;
           rememberChannelFor(deps.workspaceId, repo, home.channelId, deps.storage);
         }
@@ -276,7 +312,7 @@ export function createPaneShare(deps: PaneShareDeps): PaneShare {
         collectors.setSharing(paneId, true);
         return { ok: true };
       } catch (error) {
-        set(e, { kind: "off", channelId: e.home?.channelId ?? null, sessionId: e.home?.sessionId ?? null, syncFailed: false });
+        set(e, back());
         return { ok: false, reason: refusalOf(error) };
       }
     },

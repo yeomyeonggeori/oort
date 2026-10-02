@@ -182,7 +182,7 @@ const HOST_STATUS_REGISTERED = (origin) => ({
 /** 데스크탑 셸 흉내. p1=PTY1(oort 저장소), p2=PTY2(momo 저장소, 공유한 적 없는 저장소). */
 async function installDesktop(page, { registered, origin, remember }) {
   await page.addInitScript(
-    ({ layout, registered, origin, remember, status }) => {
+    ({ layout, registered, remember, status }) => {
       try {
         localStorage.setItem("momo.web.workbench.layout.v1:dock", JSON.stringify(layout));
         if (remember) localStorage.setItem(`momo.work.shareChannel.v1:${remember.ws}`, JSON.stringify(remember.map));
@@ -329,7 +329,16 @@ async function scene(browser, origin, scheme) {
     await openPaneMenu(page, 1);
     check(`${tag} 꺼짐 메뉴: 채널에 공유 · 링크 복사만`, (await page.getByTestId("pane-share-menu-share").innerText()) === "채널에 공유" && (await page.getByTestId("pane-share-menu-copy").innerText()) === "링크 복사" && (await page.getByTestId("pane-share-menu-unshare").count()) === 0);
     await shot(page, `share-menu-off-${tag}`);
+    await page.keyboard.press("Escape");
 
+    // 세션 목록 행 우클릭 메뉴: 같은 항목이다.
+    await page.getByTestId("session-list-row").first().click({ button: "right" });
+    await page.getByTestId("session-list-row-menu").waitFor();
+    check(`${tag} 목록 행 메뉴: 채널에 공유 · 링크 복사`, (await page.getByTestId("session-row-menu-share").innerText()) === "채널에 공유" && (await page.getByTestId("session-row-menu-copy").innerText()) === "링크 복사");
+    await shot(page, `share-row-menu-${tag}`);
+    await page.keyboard.press("Escape");
+
+    await openPaneMenu(page, 1);
     await page.getByTestId("pane-share-menu-share").click();
     await page.getByTestId("share-dialog-channels").waitFor();
     await page.waitForTimeout(250);
@@ -338,12 +347,17 @@ async function scene(browser, origin, scheme) {
     check(`${tag} 채널 고르기: 워크스페이스 전체 공개 선택지가 없다`, (await page.locator("input[name='share-channel']").count()) === channels.length);
     await shot(page, `share-dialog-${tag}`);
 
+    const nameValue = await page.getByTestId("share-dialog-name").inputValue();
+    check(`${tag} 이름: 주인이 보는 칸에 기본 이름이 채워져 있고 경로 구분자가 없다`, nameValue.length > 0 && !/[\\/]/.test(nameValue), nameValue);
+    await page.getByTestId("share-dialog-name").fill("한글 입력 이중 전송 수리");
+
     // 다른 채널로 바꿔 공유한다: 고른 것이 집이다.
     await page.locator(`input[name='share-channel'][value='${chByName.workbench.id}']`).check();
     await page.getByTestId("share-dialog-submit").click();
     await page.getByTestId("workbench-pane-share-chip").first().waitFor();
     await page.waitForTimeout(500);
     check(`${tag} 공유: POST가 고른 채널·내 호스트·origin=local_pty로 갔다`, world.posts.length === 1 && world.posts[0].origin === "local_pty" && world.posts[0].channelId === chByName.workbench.id && world.posts[0].hostId === hostId && world.posts[0].folderLabel === "oort", world.posts);
+    check(`${tag} 공유: 주인이 확인한 이름이 서버로 갔다`, world.posts[0].label === "한글 입력 이중 전송 수리", world.posts[0].label);
     check(`${tag} 공유: 폴더 전체 경로가 서버로 가지 않는다`, !JSON.stringify(world.posts).includes("/Users/"));
     check(`${tag} 공유: 요약 PATCH가 host 서명 경로(work_host_share)로 갔다`, world.patches.length >= 1 && world.patches[0].body.shared === true && world.patches[0].body.harness === "shell", world.patches.map((p) => p.body.shared));
     const chipText = await page.getByTestId("workbench-pane-share-chip").first().innerText();
@@ -351,6 +365,15 @@ async function scene(browser, origin, scheme) {
     await paneOf(page, 1).hover({ position: { x: 120, y: 12 } });
     await page.waitForTimeout(250);
     await shot(page, `share-pane-chrome-${tag}`);
+
+    // 좁은 창(900): 표지는 아이콘만 남고 메뉴 단추는 접힌다. 가로 넘침 0.
+    await page.setViewportSize({ width: 900, height: 700 });
+    await page.waitForTimeout(400);
+    check(`${tag} 900: 가로 넘침 0`, (await overflowX(page)) === 0, await overflowX(page));
+    await paneOf(page, 1).hover({ position: { x: 100, y: 12 } });
+    await shot(page, `share-pane-chrome-900-${tag}`);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.waitForTimeout(400);
 
     // 몇 초 뒤 git 숫자가 담긴 갱신이 간다(간격 제한 5초).
     await page.waitForTimeout(6200);

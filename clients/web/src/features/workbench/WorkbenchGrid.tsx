@@ -9,7 +9,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { Columns2, Info, Maximize2, Minimize2, Radio, Rows2, Share2, X } from "lucide-react";
+import { Columns2, Info, Maximize2, Minimize2, Radio, Rows2, Share2, TriangleAlert, X } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/design/ui/dropdown-menu";
 import {
@@ -691,7 +691,7 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
               "flex min-w-0 max-w-[40%] shrink items-center gap-1 text-timestamp font-semibold text-ink [&_svg]:size-3 [&_svg]:shrink-0"
             )}
           >
-            <Radio aria-hidden />
+            {share.chipWarn ? <TriangleAlert aria-hidden /> : <Radio aria-hidden />}
             <span className="hidden truncate @sm:inline">{share.chip}</span>
             <span className="sr-only @sm:hidden">{share.chip}</span>
           </span>
@@ -718,7 +718,8 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
                   aria-label={share.menuLabel}
                   title={share.menuLabel}
                   data-testid="workbench-pane-share-menu"
-                  className={PANE_BUTTON_CLASS}
+                  // 공유 중인 칸은 좁아도 끄는 길을 접지 않는다(공유가 켜진 칸을 끌 방법이 머리에서 사라지면 안 된다).
+                  className={cn(PANE_BUTTON_CLASS, !share.chip && "hidden @xs:inline-flex")}
                 >
                   <Share2 />
                 </button>

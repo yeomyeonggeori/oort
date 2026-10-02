@@ -214,7 +214,7 @@ describe("「채널에 공유」 (#2867)", () => {
     const radio = document.querySelector<HTMLInputElement>('input[name="share-channel"]:checked');
     expect(radio?.value).toBe(CH_LAB);
     expect(text()).toContain("이 저장소로 마지막에 공유한 채널");
-    expect(text()).toContain("팀은 이름·상태·worktree만 봅니다");
+    expect(text()).toContain("팀은 이름·상태·worktree만 봐요");
     // 고른 채널로 한 번에: 서버가 카드를 올리고, 표지가 선다.
     await act(async () => q("share-dialog-submit")!.click());
     await settle();
@@ -225,6 +225,43 @@ describe("「채널에 공유」 (#2867)", () => {
     expect(q("pane-share-menu-share")).toBeNull();
     expect(q("pane-share-menu-copy")).not.toBeNull();
     expect(q("pane-share-menu-unshare")?.textContent).toBe("공유 끄기");
+  });
+
+  it("세션 이름은 주인이 정한다: 기본 이름이 채워져 있고, 고친 이름만 서버로 간다", async () => {
+    const r = rig({ remember: CH_WORKBENCH });
+    await mount(r);
+    await openPaneMenu();
+    await pick("pane-share-menu-share");
+    await vi.waitFor(() => expect(q("share-dialog-name")).not.toBeNull());
+    const input = q("share-dialog-name") as HTMLInputElement;
+    expect(input.value).toBe("셸");
+    expect(text()).toContain("하네스가 정한 작업 제목은 기본값일 뿐");
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      setter.call(input, "한글 입력 수리");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => q("share-dialog-submit")!.click());
+    await settle();
+    expect(r.created).toMatchObject([{ label: "한글 입력 수리" }]);
+  });
+
+  it("칸을 확인하지 못하면(prepare 실패) 플랫폼 탓을 하지 않고 다시 확인할 수 있다", async () => {
+    const r = rig({ remember: CH_WORKBENCH });
+    const real = r.source.share.prepare.bind(r.source.share);
+    let calls = 0;
+    r.source.share.prepare = vi.fn(async (paneId: string) => {
+      if (calls++ === 0) throw new Error("shell busy");
+      return real(paneId);
+    });
+    await mount(r);
+    await openPaneMenu();
+    await pick("pane-share-menu-share");
+    await vi.waitFor(() => expect(q("share-dialog-prepare-error")).not.toBeNull());
+    expect(text()).not.toContain("데스크탑 앱에서만");
+    await act(async () => q("share-dialog-retry")!.click());
+    await vi.waitFor(() => expect(q("share-dialog-channels")).not.toBeNull());
+    expect(q("share-dialog-prepare-error")).toBeNull();
   });
 
   it("처음이면 채널이 골라져 있지 않고, 고르기 전에는 공유할 수 없다. 워크스페이스 전체 공개 칸이 없다", async () => {
@@ -247,7 +284,7 @@ describe("「채널에 공유」 (#2867)", () => {
     await vi.waitFor(() => expect(q("share-dialog")).not.toBeNull());
     expect(q("share-dialog")?.getAttribute("data-intent")).toBe("copy");
     expect(text()).toContain("이 세션을 공유할까요?");
-    expect(text()).toContain("팀은 이름·상태·worktree만 봅니다");
+    expect(text()).toContain("팀은 이름·상태·worktree만 봐요");
     const cancel = [...document.querySelectorAll("button")].find((b) => b.textContent === "취소")!;
     await act(async () => cancel.click());
     await settle();
@@ -266,8 +303,8 @@ describe("「채널에 공유」 (#2867)", () => {
     await act(async () => q("share-dialog-submit")!.click());
     await settle();
     expect(r.copied).toEqual([`https://team.example/work?view=team&card=${SESSION}`]);
-    expect(text()).toContain("링크를 복사했어요");
-    expect(text()).toContain("oort:// 링크는 곧 붙어요");
+    expect(text()).toContain("팀 작업 보드 링크를 복사했어요");
+    expect(text()).not.toContain("oort://");
   });
 
   it("공유 중에는 링크 복사가 곧장 복사한다(다시 묻지 않는다)", async () => {
