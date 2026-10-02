@@ -1672,6 +1672,8 @@
 }
 @utility sidebar-list-cue {
   @media (height <= 780px) {
+    /* 끝까지 스크롤하면 마지막 줄이 그늘 아래 여백에 놓이도록 같은 28px을 채운다. */
+    padding-block-end: 28px;
     &::after {
       content: "";
       position: sticky;
