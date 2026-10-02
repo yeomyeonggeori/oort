@@ -5,6 +5,9 @@ import {
   asPinFrame,
   asReactionFrame,
   asTypingFrame,
+  asWorkSessionLifecycleFrame,
+  asWorkSessionShareChangedFrame,
+  asWorkSessionToolTransitionFrame,
   centrifugoAgentChannelName,
   centrifugoChannelName,
   centrifugoTypingChannelName,
@@ -97,7 +100,19 @@ export type TypingHandlers = Parameters<
 export type ChannelRail = Pick<
   RealtimeHandle,
   'subscribeChannel' | 'subscribeAgent' | 'subscribeTyping'
->;
+> & {
+  /**
+   * 팀 작업 보드의 **신호**(#2864, ADR-0194 D8). 한 채널의 공유 변화·세션 수명주기·도구
+   * 전환 프레임을 듣고, 프레임 안의 값은 하나도 넘기지 않는다: 받은 쪽은 REST 로 다시
+   * 읽고 그 답이 진실이다. 재구독(되쏘기 포함)도 같은 신호다. 메시지 레일과 같은 구독을
+   * 같은 refcount 로 쓴다.
+   */
+  subscribeWorkBoard: (
+    workspaceId: string,
+    channelId: string,
+    handlers: {onSignal: () => void},
+  ) => () => void;
+};
 
 /**
  * Wire the message rail onto an already-built Centrifuge client.
@@ -190,6 +205,39 @@ export function createChannelRail(getClient: () => Centrifuge): ChannelRail {
             // about which message a frame is about.
             const pin: PinEvent | null = asPinFrame(ctx.data);
             if (pin) handlers.onPin?.(pin);
+          };
+          sub.on('subscribed', onSubscribed);
+          sub.on('publication', onPublication);
+          return () => {
+            sub.off('subscribed', onSubscribed);
+            sub.off('publication', onPublication);
+          };
+        },
+      );
+    },
+
+    subscribeWorkBoard(workspaceId, channelId, handlers) {
+      // 메시지 레일과 같은 옵션이어야 한다: `attach` 는 먼저 온 호출이 만든 구독을
+      // 나눠 쓰므로, 여기서 다른 플래그를 주면 아무도 읽지 않는 플래그다.
+      return attach(
+        centrifugoChannelName(workspaceId, channelId),
+        {recoverable: true, positioned: true},
+        sub => {
+          const gate = createReplayGate();
+          const onSubscribed = (ctx: SubscribedRecoveryContext) => {
+            gate.onSubscribed(ctx);
+            // 놓친 것은 읽기로 고친다.
+            handlers.onSignal();
+          };
+          const onPublication = (ctx: {data?: unknown}) => {
+            if (gate.isReplaying()) return;
+            if (
+              asWorkSessionShareChangedFrame(ctx.data) ||
+              asWorkSessionLifecycleFrame(ctx.data) ||
+              asWorkSessionToolTransitionFrame(ctx.data)
+            ) {
+              handlers.onSignal();
+            }
           };
           sub.on('subscribed', onSubscribed);
           sub.on('publication', onPublication);

@@ -12,7 +12,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Channel, RosterMember, WorkHost } from "@momo/core/lib/api";
+import type { Approval, Channel, RosterMember, WorkHost } from "@momo/core/lib/api";
 import { emptySidebarPrefs } from "@momo/core/features/sidebar/sidebarSections";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { WORK_SURFACE_IDS } from "@momo/core/features/capabilities/serverSurfaces";
@@ -23,6 +23,7 @@ import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { SettingsRoute } from "@/features/settings/SettingsRoute";
 import { ChatShell } from "@/features/chat/ChatShell";
 import { WORK_HOST_OFFLINE_GRACE_MS } from "./useSurfaceProvided";
+import { paneAttention } from "@/features/workbench/local/paneAttention";
 import {
   dockSnapshot,
   resetDockStateForTest,
@@ -153,6 +154,8 @@ const workFlag = { provided: false };
 // #2780: 정적 표 절반은 위 `workFlag`가, 런타임 절반은 이 호스트 목록이 정한다.
 // 목록은 진짜 `useWorkHosts` 경로로 흐른다: 화면이 부르는 GET만 이 자리에서 바꾼다.
 const hostList: { hosts: WorkHost[] } = { hosts: [] };
+// #3337: 「나에게 필요한 일」 시험이 쓰는 대기 승인. 진짜 `useNeedsAction` 경로로 흐른다.
+const pendingApprovals: { rows: Approval[] } = { rows: [] };
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
@@ -160,6 +163,8 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
     ...actual,
     fetchWorkHosts: async () => hostList.hosts,
     fetchWorkSessions: async () => [],
+    fetchApprovals: async (_ws: string, status: string) =>
+      status === "pending" ? pendingApprovals.rows : [],
   };
 });
 
@@ -567,6 +572,7 @@ beforeAll(() => {
 beforeEach(() => {
   workFlag.provided = false;
   hostList.hosts = [];
+  pendingApprovals.rows = [];
   shell.desktop = false;
   resetDockStateForTest();
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -886,11 +892,76 @@ describe("하나의 레일: 대화·인박스·내 작업·팀 작업 (#3280, #2
     await vi.waitFor(() =>
       expect(tile.querySelector('[data-testid="rail-inbox-badge"]')?.textContent).toBe("3")
     );
-    expect(tile.getAttribute("aria-label")).toBe("인박스, 안 읽은 멘션 3개");
+    expect(tile.getAttribute("aria-label")).toBe("인박스, 나에게 필요한 일 3개");
     // 0이면 배지도, 이름 덮어쓰기도 없다.
     const quiet = await mount({ switcherOpen: false });
     expect(quiet.querySelector('[data-testid="rail-inbox-badge"]')).toBeNull();
     expect(quiet.querySelector('[data-testid="rail-inbox"]')?.hasAttribute("aria-label")).toBe(false);
+  });
+});
+
+describe("레일 인박스 배지 = 「나에게 필요한 일」 단일 출처 (#3337)", () => {
+  const approval = (id: string): Approval => ({
+    id,
+    workspaceId: WS,
+    runId: "run-1",
+    channelId: CH,
+    requestedBy: self.id,
+    actionType: "tool_call",
+    status: "pending",
+  });
+
+  const badge = (host: HTMLElement) =>
+    host.querySelector('[data-testid="rail-inbox"] [data-testid="rail-inbox-badge"]')?.textContent;
+
+  it("멘션 2 + 대기 승인 2 + 응답 필요 칸 1 = 5 (한 출처가 세 원천을 모두 합한다)", async () => {
+    shell.desktop = true;
+    pendingApprovals.rows = [approval("ap-1"), approval("ap-2")];
+    const store = paneAttention();
+    act(() => {
+      store.observe(
+        [{ paneId: "pane-wait", index: 1, name: "claude", status: "waiting", signal: null }],
+        null
+      );
+    });
+    try {
+      const host = await mount({ mentions: 2, switcherOpen: false });
+      await vi.waitFor(() => expect(badge(host)).toBe("5"));
+    } finally {
+      act(() => store.observe([], null));
+    }
+  });
+
+  it("승인만 있어도 배지가 선다 (멘션만 세던 옛 배지는 0이었다)", async () => {
+    pendingApprovals.rows = [approval("ap-1")];
+    const host = await mount({ switcherOpen: false });
+    await vi.waitFor(() => expect(badge(host)).toBe("1"));
+  });
+
+  it("같은 승인이 원장에서 두 번 와도 한 번만 센다", async () => {
+    pendingApprovals.rows = [approval("ap-1"), approval("ap-1")];
+    const host = await mount({ switcherOpen: false });
+    await vi.waitFor(() => expect(badge(host)).toBe("1"));
+  });
+
+  it("웹(데스크탑 아님)에서는 응답 필요 칸이 있어도 세지 않는다", async () => {
+    shell.desktop = false;
+    const store = paneAttention();
+    act(() => {
+      store.observe(
+        [{ paneId: "pane-wait", index: 1, name: "claude", status: "waiting", signal: null }],
+        null
+      );
+    });
+    try {
+      const host = await mount({ switcherOpen: false });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(badge(host)).toBeUndefined();
+    } finally {
+      act(() => store.observe([], null));
+    }
   });
 });
 

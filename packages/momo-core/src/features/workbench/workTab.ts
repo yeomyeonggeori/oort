@@ -8,7 +8,7 @@ import { WORKBENCH_GUTTER, WORKBENCH_MIN_PANE } from "./layoutTree";
 // - 「내 작업」 `/work`: 이 기기의 세션 격자(데스크탑). 웹에는 로컬 터미널
 //   레인이 없다(ADR-0190 D1). 웹의 `/work`는 지금까지처럼 작업 콘솔이다.
 // - 「팀 작업」 `/work?view=team`: 팀 보드(ADR-0194 D1·D2의 보드 링크와 같은
-//   쿼리). 보드 자체는 T11(#2863)이 채운다. 그 전에는 빈 상태 안내다.
+//   쿼리). 보드는 `teamBoard.ts`와 웹 `workTab/teamBoard/`(T11 #2863)가 채운다.
 // - 작업 콘솔: 에이전트(A 레인) 세션 목록. 웹은 `/work`, 데스크탑은 `/work`가
 //   격자라 `?view=console`에 둔다. 세션 링크 `/work?session=<id>`는 두 곳 모두
 //   콘솔로 간다(인박스 앵커·관제 카드가 이미 이 주소를 쓴다).
@@ -107,11 +107,4 @@ export function sessionListFits(windowWidth: number, minGridWidth: number): bool
 export const WORK_NAV = {
   mine: "내 작업",
   team: "팀 작업",
-} as const;
-
-/** 「팀 작업」 보드가 서기 전(T11 #2863)의 빈 상태. 한 문장 + 한 행동. */
-export const TEAM_WORK_EMPTY = {
-  title: "팀 작업 보드가 아직 없습니다",
-  body: "팀원이 공유한 세션과 에이전트 세션이 이곳에 모일 예정입니다. 그전에는 채널에서 진행을 확인하세요.",
-  action: "채널로 가기",
 } as const;
