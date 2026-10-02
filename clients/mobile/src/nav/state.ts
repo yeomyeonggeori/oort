@@ -58,7 +58,7 @@ import type {NotificationLanding} from '../push/tapArrival';
  *   에이전트  FAB 시트의 「에이전트 부르기」가 여는 층(`agentList`). ADR-0189 D1은
  *             이것을 홈 맨 위 「작업 중」 카드와 DM 섹션으로 흡수하라고 했고, 그
  *             홈은 DS2-3(#2715)이 그린다. 그때까지 문은 FAB에 있다.
- *   작업      FAB 시트의 「작업 콘솔」이 여는 층(`workList`). 서버가 그 표면을
+ *   작업      FAB 시트의 「작업」이 여는 층(`workList`) — 팀 보드 한 열 판(#2864). 서버가 그 표면을
  *             내줄 때만 문이 선다 — 탭일 때와 같은 조건이다.
  *
  * 검색은 층에서 **탭**이 되었다. 층이던 때의 이유(「검색은 머무는 곳이 아니라
@@ -195,7 +195,7 @@ export interface NavState {
    * steps out.
    */
   agent: OpenAgent | null;
-  /** 작업 콘솔 — FAB 시트가 여는 층(탭이던 것, ADR-0189 D1). */
+  /** 작업(팀 보드 한 열 판) — FAB 시트가 여는 층(탭이던 것, ADR-0189 D1). */
   workList: boolean;
   /** 작업 콘솔 위, 그리고 그 상세가 여는 대화 아래. */
   workSession: OpenWorkSession | null;

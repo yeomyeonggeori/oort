@@ -6,8 +6,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { useSession } from "@/app/session";
+import { ChevronRight } from "lucide-react";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import {
   EmptyInvite,
@@ -29,7 +30,6 @@ import {
 } from "@/features/reminders/inboxTab";
 import { FeedList } from "./FeedRow";
 import { LocalPaneInbox } from "./LocalPaneInbox";
-import { useLocalPaneAttention } from "@/features/workbench/local/paneAttention";
 import { isDesktop } from "@/lib/tauri";
 import {
   ApprovalActions,
@@ -39,15 +39,12 @@ import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecis
 import type { SpawnExecutionPlan } from "@momo/core/lib/executionPlan";
 import {
   isSurfaceProvided,
-  serverSurface,
   type SurfaceId,
 } from "@momo/core/features/capabilities/serverSurfaces";
 import { SurfaceUnavailableSection } from "@/features/capabilities/SurfaceUnavailable";
 import {
-  agentsFeedPartial,
   approvalRowControl,
   approvalsPanelState,
-  decidableCount,
   decisionNote,
   type DecisionNote,
 } from "./approvalsPanel";
@@ -58,7 +55,6 @@ import {
   type InboxFilter,
 } from "@momo/core/features/inbox/model";
 import {
-  useAgentFeed,
   useInvalidateApprovals,
   useMarkRead,
   useMentionCount,
@@ -67,6 +63,7 @@ import {
   useUnreadMentionChannels,
   type Feed,
 } from "./useInbox";
+import { useNeedsMe } from "./useNeedsMe";
 
 // =============================================================================
 // 인박스 (R-1 §2). Zero is the default: notifications are not something you
@@ -242,12 +239,19 @@ function FeedPanel({
 
 export function InboxRoute() {
   const { session } = useSession();
-  const localWaiting = useLocalPaneAttention().filter((e) => e.status === "waiting").length;
+  // 「나에게 필요한 일」 수의 단일 출처(#3337): 레일 배지와 같은 값을 읽는다.
+  const needs = useNeedsMe();
+  const localWaiting = needs.panes;
   const [params, setParams] = useSearchParams();
   // 이 서버가 답할 수 있는 탭만 (goal B12). 승인 원장이 없는 서버에서는 결정
-  // 대기와 에이전트가 사라지고 멘션 하나만 남는다.
+  // 대기가 사라지고 멘션 하나만 남는다. 「에이전트」 탭은 웹에서 없앴다(#3337): 활동의
+  // 부분집합이었다. 인박스 = 나에게 필요한 것, 활동 = 일어난 일 기록. core의
+  // `InboxFilter`는 폰이 아직 쓰므로 그대로 두고 웹이 걸러 낸다.
   const availableFilters = useMemo(
-    () => availableInboxFilters((surface) => isSurfaceProvided(surface)),
+    () =>
+      availableInboxFilters((surface) => isSurfaceProvided(surface)).filter(
+        (f) => f !== "agents"
+      ),
     []
   );
   const webFilters = useMemo(
@@ -256,12 +260,6 @@ export function InboxRoute() {
   );
   const filter = parseWebInboxFilter(params.get("filter"), availableFilters);
   const approvalsProvided = isSurfaceProvided("approvals");
-  // 2R H1: 「에이전트」 탭의 나머지 절반. 정적 판정으로 묻는다 — 요청을 보내
-  // 405를 받아 보고 알아낼 필요가 없는 사실이다.
-  const runHistoryMissing = agentsFeedPartial((surface) =>
-    isSurfaceProvided(surface)
-  );
-  const runHistorySurface = serverSurface("agentRunHistory");
 
   // 결정 대기 stays loaded on every tab: it is the count that decides whether a
   // person needs to come here at all. The mention count is free (read-state is
@@ -273,9 +271,6 @@ export function InboxRoute() {
   // 올라간다 (goal B12).
   const needsAction = useNeedsAction(approvalsProvided);
   const mentions = useMentions(filter === "mentions");
-  const agents = useAgentFeed(filter === "agents", {
-    ownedBy: session.member.id,
-  });
   const mentionCount = useMentionCount();
   const reminders = useReminders(session.member.workspaceId);
   const reminderDueCount = (reminders.data?.reminders ?? []).filter((row) =>
@@ -310,9 +305,7 @@ export function InboxRoute() {
       ? null
       : filter === "needs-action"
         ? needsAction
-        : filter === "mentions"
-          ? mentions
-          : agents;
+        : mentions;
 
   // 2R L1: 결정 영수증은 **그 목록에 대한 답**이다. 탭을 옮기면 그 답이 가리키던
   // 행은 화면에 없는데 줄만 남아, 멘션 목록 위에 "승인을 기록했습니다"가 떠 있는
@@ -391,12 +384,27 @@ export function InboxRoute() {
     }
   }, [unreadChannels, markRead]);
 
+  // 옛 「에이전트」 탭 딥링크는 활동으로 보낸다(#3337).
+  if (params.get("filter") === "agents") {
+    return <Navigate to="/activity" replace />;
+  }
+
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="inbox-route">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <SidebarDrawerToggle />
           <h1 className="text-body font-semibold">인박스</h1>
+          {/* 헤더 수 = 「나에게 필요한 일」(레일 배지와 같은 훅). 0이면 그리지 않는다. */}
+          {needs.total > 0 && (
+            <span
+              data-testid="inbox-needs-me-count"
+              aria-label={`나에게 필요한 일 ${needs.total}개`}
+              className="sidebar-badge bg-signal text-on-signal"
+            >
+              {needs.total > 99 ? "99+" : needs.total}
+            </span>
+          )}
         </div>
         {/* 탭이 하나뿐이면 탭 줄을 세우지 않는다 (goal B12). 고를 것이 없는
             고르개는 컨트롤이 아니라 장식이고, 남은 하나에 이미 있는 이름을
@@ -416,7 +424,7 @@ export function InboxRoute() {
             counts={{
               // 이 기기의 칸이 회원님을 기다리는 수도 센다(#2776): 배지는 「지금 해야
               // 할 일의 수」다.
-              "needs-action": decidableCount(needsAction.items) + localWaiting,
+              "needs-action": needs.approvals + needs.panes,
               mentions: mentionCount,
               reminders: reminderDueCount,
             }}
@@ -463,20 +471,6 @@ export function InboxRoute() {
       {/* 탭 줄이 없으면 이 상자는 tabpanel이 아니다. 역할만 남겨 두면
           `aria-labelledby`가 존재하지 않는 탭을 가리키고, 보조기술은 이름 없는
           패널을 읽는다. 탭이 하나뿐일 때 이 표면은 그냥 목록이다. */}
-      {/* 2R H1: 「에이전트」 탭은 승인 원장과 작업 실행 기록 두 원장 위에 서 있는데,
-          이 서버는 뒤의 것을 읽는 경로를 싣지 않았다(POST 전용 경로라 GET은 405).
-          그 사실을 삼키면 화면은 승인 기록만 담긴 목록을 그려 놓고 "조용한 게
-          정상입니다"라고 말하고, 사용자는 에이전트가 아무 작업도 하지 않았다고
-          읽는다 — 우리가 모르는 사실이다. 목록은 그대로 남긴다: 있는 절반을 감추는
-          것은 반대 방향의 같은 거짓말이다. */}
-      {filter === "agents" && runHistoryMissing && (
-        <InlineBanner
-          tone="neutral"
-          message={`${runHistorySurface.absentReason} 아래 목록은 승인 기록만 담고 있습니다.`}
-          testId="inbox-agents-partial"
-        />
-      )}
-
       <div
         {...(webFilters.length > 1
           ? {
@@ -504,6 +498,19 @@ export function InboxRoute() {
           <RemindersPanel />
         )}
       </div>
+
+      {/* 에이전트가 한 일 전체는 활동에서 본다(#3337). 인박스는 나에게 필요한 것만 담는다. */}
+      <Link
+        to="/activity"
+        data-testid="inbox-activity-link"
+        className="press mx-4 mb-2 flex h-control items-center justify-between rounded-lg bg-surface-hover px-3 text-body text-ink-muted hover:bg-surface-pressed hover:text-ink focus-visible:focus-ring"
+      >
+        <span>에이전트가 한 일 전체는 활동에서 봐요</span>
+        <span className="flex items-center gap-1 text-ink">
+          활동 열기
+          <ChevronRight className="size-4" aria-hidden="true" />
+        </span>
+      </Link>
 
       {/* 컴포저와 같은 이유의 안전 영역 (goal B6): 이것도 셸의 마지막 줄이고,
           폰에서는 그 아래가 홈 인디케이터다. */}

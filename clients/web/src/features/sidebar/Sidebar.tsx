@@ -66,7 +66,7 @@ import { SidebarNowCard } from "./SidebarNowCard";
 import { workspaceRailTile } from "./workspaceRailModel";
 import { KomettoMark } from "@/design/brand/KomettoMark";
 import { ProfileCard } from "./ProfileCard";
-import { useMentionCount } from "@/features/inbox/useInbox";
+import { useNeedsMeCount } from "@/features/inbox/useNeedsMe";
 import { isDesktop } from "@/lib/tauri";
 import {
   MY_WORK_PATH,
@@ -207,7 +207,8 @@ export function Sidebar({
         : pathname === "/" || pathname.startsWith("/c/")
           ? "chat"
           : null;
-  const inboxUnread = useMentionCount();
+  // 「나에게 필요한 일」 단일 출처(#3337): 승인+응답 필요 칸+안 읽은 멘션.
+  const inboxUnread = useNeedsMeCount();
 
   // 폰에서 이 사이드바는 서랍이다 (goal B6). 닫혀 있는 동안에는 화면 밖으로
   // 밀려 있을 뿐 DOM에는 남아 있으므로(스크롤 위치와 마운트를 지킨다), 탭 순서와

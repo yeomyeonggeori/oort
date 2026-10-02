@@ -22,5 +22,5 @@
       "@momo/core/*": ["../../packages/momo-core/src/*"]
     }
   },
-  "include": ["measure", "src/vite-env.d.ts"]
+  "include": ["measure", "src/vite-env.d.ts", "src/features/workbench/local/xtermHeadless.d.ts"]
 }
