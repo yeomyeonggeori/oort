@@ -92,3 +92,55 @@ pub fn notification_show<R: Runtime>(
     builder.show().map_err(|error| error.to_string())?;
     Ok(true)
 }
+
+/// Largest number the Dock tile shows. Past this the web side's own count is
+/// still exact in the app; the tile just stops growing (macOS draws any digits,
+/// but a four-digit badge is unreadable and means "a lot" either way).
+#[cfg(desktop)]
+const DOCK_BADGE_MAX: u32 = 999;
+
+/// Sets the Dock/taskbar badge to the web side's 「나에게 필요한 일」 count
+/// (#3339). `0` removes the badge. The count is computed once in the web
+/// bundle (`useNeedsMeCount`); this command only draws it.
+///
+/// Acts on the calling window, so a capability that grants it to `main` only is
+/// enough: no other window can set it, and no window label crosses the IPC
+/// boundary. No notification permission is involved; macOS draws the badge on
+/// the app icon without one.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn dock_badge_set<R: Runtime>(
+    window: tauri::WebviewWindow<R>,
+    count: u32,
+) -> Result<(), String> {
+    window
+        .set_badge_count(badge_value(count))
+        .map_err(|error| error.to_string())
+}
+
+/// `None` clears the badge; anything else is clamped to [`DOCK_BADGE_MAX`].
+#[cfg(desktop)]
+fn badge_value(count: u32) -> Option<i64> {
+    if count == 0 {
+        None
+    } else {
+        Some(i64::from(count.min(DOCK_BADGE_MAX)))
+    }
+}
+
+#[cfg(all(test, desktop))]
+mod badge_tests {
+    use super::badge_value;
+
+    #[test]
+    fn zero_clears_the_badge() {
+        assert_eq!(badge_value(0), None);
+    }
+
+    #[test]
+    fn counts_pass_through_and_cap() {
+        assert_eq!(badge_value(4), Some(4));
+        assert_eq!(badge_value(999), Some(999));
+        assert_eq!(badge_value(5000), Some(999));
+    }
+}

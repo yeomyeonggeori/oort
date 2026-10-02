@@ -106,4 +106,53 @@ describe("notifyThisDevice", () => {
     expect(approval.show).toBe(true);
     if (approval.show) expect(approval.notification.kind).toBe("approval");
   });
+
+  // ---- #3339 ---------------------------------------------------------------
+  function dmEvent(): MessageNewEvent {
+    const e = mentionEvent();
+    return {
+      ...e,
+      payload: { ...e.payload, props: {}, body: "점심 먹었어요?" },
+    } as MessageNewEvent;
+  }
+  const dmContext = (over: Partial<Omit<NotifyContext, "kindEnabled">> = {}) => ({
+    ...context(),
+    isDirect: () => true,
+    ...over,
+  });
+
+  it("새 DM은 기본으로 OS 알림이 가지 않는다(기본 끔)", () => {
+    reloadDesktopNotificationKindsForTest(new MemoryStorage());
+    expect(notifyThisDevice(dmEvent(), dmContext())).toEqual({
+      show: false,
+      skip: "kind-disabled",
+    });
+  });
+
+  it("설정에서 켠 사람에게는 새 DM이 간다", () => {
+    const storage = new MemoryStorage();
+    reloadDesktopNotificationKindsForTest(storage);
+    setDesktopNotificationKind("dm", true, storage);
+    const decision = notifyThisDevice(dmEvent(), dmContext());
+    expect(decision.show).toBe(true);
+    if (decision.show) expect(decision.notification.kind).toBe("dm");
+  });
+
+  it("창이 앞이고 그 DM이 화면에 보이면 켜도 알리지 않는다(포커스 억제)", () => {
+    const storage = new MemoryStorage();
+    reloadDesktopNotificationKindsForTest(storage);
+    setDesktopNotificationKind("dm", true, storage);
+    expect(
+      notifyThisDevice(dmEvent(), dmContext({ windowFocused: true, isTargetVisible: () => true }))
+    ).toEqual({ show: false, skip: "focused" });
+  });
+
+  it("창이 앞이어도 그 DM이 화면에 없으면 알린다", () => {
+    const storage = new MemoryStorage();
+    reloadDesktopNotificationKindsForTest(storage);
+    setDesktopNotificationKind("dm", true, storage);
+    expect(
+      notifyThisDevice(dmEvent(), dmContext({ windowFocused: true, isTargetVisible: () => false })).show
+    ).toBe(true);
+  });
 });
