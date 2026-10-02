@@ -334,3 +334,39 @@ describe('a notification is a new way in (#2569)', () => {
     expect(navReducer(opened, {type: 'back'})).toEqual(INITIAL_NAV);
   });
 });
+
+describe('「작업 끝남」 알림 입구 (#3342)', () => {
+  it('열려 있던 층을 모두 걷고, 홈 탭 위에 작업 목록과 그 위의 세션을 깐다', () => {
+    const stacked = nav({
+      tab: 'inbox',
+      conversation: OPEN,
+      agentList: true,
+      workList: true,
+      searchSeed: {initialQuery: 'x', seq: 1},
+    });
+    const next = navReducer(stacked, {
+      type: 'openWorkSessionFromNotification',
+      workSession: {sessionId: 'S-1'},
+    });
+    expect(next).toMatchObject({
+      tab: 'home',
+      conversation: null,
+      agentList: false,
+      agent: null,
+      workList: true,
+      workSession: {sessionId: 'S-1'},
+      hosted: null,
+    });
+  });
+
+  it('뒤로는 한 겹씩이다 — 세션 → 작업 목록 → 홈', () => {
+    const opened = navReducer(nav({tab: 'search'}), {
+      type: 'openWorkSessionFromNotification',
+      workSession: {sessionId: 'S-1'},
+    });
+    const toList = navReducer(opened, {type: 'back'});
+    expect(toList).toMatchObject({tab: 'home', workSession: null, workList: true});
+    const toHome = navReducer(toList, {type: 'back'});
+    expect(toHome).toMatchObject({tab: 'home', workSession: null, workList: false});
+  });
+});

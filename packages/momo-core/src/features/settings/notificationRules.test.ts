@@ -3,8 +3,12 @@ import { ApiError } from "../../lib/api";
 import { installCoreHost, resetCoreHost, type SessionPort } from "../../runtime/host";
 import {
   DEFAULT_NOTIFICATION_RULES,
+  DEFAULT_PUSH_KINDS,
+  fetchPushKinds,
   notificationRulesFromWire,
   patchNotificationRules,
+  patchPushKinds,
+  pushKindsFromWire,
 } from "./notificationRules";
 
 describe("notificationRulesFromWire", () => {
@@ -137,5 +141,83 @@ describe("patchNotificationRules (#3042)", () => {
     const error = await patchNotificationRules(WS, { dnd: true }).catch((e) => e);
     expect(error).toBeInstanceOf(ApiError);
     expect(error).toMatchObject({ status: 409, message: "nope", code: "some_code" });
+  });
+});
+
+// ---- ADR-0120 부록 A (#3342): 푸시 종류 ---------------------------------------
+
+describe("push kinds (#3342)", () => {
+  const WS = "00000000-0000-7000-8000-000000000001";
+
+  function installHost(): void {
+    installCoreHost({
+      apiBase: () => "https://oort.test",
+      absoluteApiBase: () => "https://oort.test",
+      buildMode: () => "test",
+      session: {
+        getAccessToken: () => "access-token",
+        getRefreshToken: () => null,
+        getPersistedSession: () => null,
+        applyLogin: () => {},
+        applyRotation: () => {},
+        markAuthExpired: () => {},
+        clearSession: () => {},
+      },
+    });
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    resetCoreHost();
+  });
+
+  it("reads an absent or malformed body as ON — the server's no-row answer", () => {
+    expect(pushKindsFromWire({})).toEqual(DEFAULT_PUSH_KINDS);
+    expect(pushKindsFromWire(null)).toEqual(DEFAULT_PUSH_KINDS);
+    expect(pushKindsFromWire({ workComplete: "no" })).toEqual(DEFAULT_PUSH_KINDS);
+    expect(pushKindsFromWire({ workComplete: false })).toEqual({ workComplete: false });
+  });
+
+  it("PATCHes exactly {workComplete} to the push-kinds path", async () => {
+    installHost();
+    const calls: { url: string; method: string; body: unknown }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        calls.push({
+          url: String(input),
+          method: String(init?.method),
+          body: JSON.parse(String(init?.body)),
+        });
+        return new Response(JSON.stringify({ workComplete: false }), { status: 200 });
+      })
+    );
+    await expect(patchPushKinds(WS, { workComplete: false })).resolves.toEqual({
+      workComplete: false,
+    });
+    expect(calls).toEqual([
+      {
+        url: `https://oort.test/v1/workspaces/${WS}/notification-rules/push-kinds`,
+        method: "PATCH",
+        body: { workComplete: false },
+      },
+    ]);
+  });
+
+  it("GETs the same path and refuses an empty patch without a round trip", async () => {
+    installHost();
+    const requested: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      requested.push(String(input));
+      return new Response(JSON.stringify({ workComplete: true }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchPushKinds(WS)).resolves.toEqual({ workComplete: true });
+    expect(requested[0]).toBe(
+      `https://oort.test/v1/workspaces/${WS}/notification-rules/push-kinds`
+    );
+    fetchMock.mockClear();
+    await expect(patchPushKinds(WS, {})).rejects.toThrow(/empty/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
