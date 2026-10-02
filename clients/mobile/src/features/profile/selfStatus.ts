@@ -4,10 +4,14 @@ import {
   type PresenceWrite,
   type RosterMember,
 } from '@momo/core/lib/api';
+import {serverSaysAbsent} from '@momo/core/features/capabilities/serverSurfaces';
 import {
   fetchNotificationRules,
+  fetchPushKinds,
   patchNotificationRules,
+  patchPushKinds,
   type NotificationRules,
+  type PushKinds,
 } from '@momo/core/features/settings/notificationRules';
 import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 
@@ -152,6 +156,61 @@ export function usePauseNotifications(workspaceId: string) {
       // 쓰기는 이 스위치 하나라 읽은 값의 나머지는 서버로 가지 않는다.
       if (rules === undefined || mutation.isPending) return;
       mutation.mutate(paused);
+    },
+  };
+}
+
+export const pushKindsKey = (workspaceId: string) =>
+  ['settings', 'push-kinds', workspaceId] as const;
+
+/**
+ * 푸시 **종류** 스위치 — 지금은 「작업 끝남」 하나 (ADR-0120 부록 A, #3342).
+ *
+ * `usePauseNotifications` 와 같은 모양이고 같은 이유로 그렇다: 서버 값을 한 번 읽기
+ * 전에는 스위치를 세우지 않고(모르는 상태를 「꺼짐」으로 그리면 켜 둔 사람에게 거짓이다
+ * — 서버 기본은 **켬**이다), 쓰기는 이 스위치 하나만 PATCH 로 싣는다.
+ *
+ * `absent` 는 서버가 이 경로를 모른다고 직접 답했다는 뜻이다(404/405/501) — 아직
+ * 이 기능을 배포하지 않은 서버. 그때 죽은 스위치를 세우는 것은 켜도 아무 일도 없는
+ * 약속이므로 줄 자체를 세우지 않는다.
+ */
+export function usePushKinds(workspaceId: string) {
+  const client = useQueryClient();
+  const key = pushKindsKey(workspaceId);
+  const query = useQuery({
+    queryKey: key,
+    queryFn: () => fetchPushKinds(workspaceId),
+    retry: (count, error) => !serverSaysAbsent(error) && count < 1,
+  });
+  const mutation = useMutation({
+    mutationFn: (workComplete: boolean) =>
+      patchPushKinds(workspaceId, {workComplete}),
+    onMutate: async (workComplete: boolean) => {
+      await client.cancelQueries({queryKey: key});
+      const previous = client.getQueryData<PushKinds>(key);
+      client.setQueryData<PushKinds>(key, {workComplete});
+      return {previous};
+    },
+    onError: (_error, _next, context) => {
+      if (context?.previous) client.setQueryData(key, context.previous);
+    },
+    onSuccess: saved => {
+      client.setQueryData(key, saved);
+    },
+  });
+  const kinds = query.data;
+  return {
+    absent: query.isError && serverSaysAbsent(query.error),
+    ready: kinds !== undefined,
+    workComplete: kinds?.workComplete ?? true,
+    loadFailed:
+      query.isError && kinds === undefined && !serverSaysAbsent(query.error),
+    retryLoad: () => void query.refetch(),
+    pending: mutation.isPending,
+    failed: mutation.isError,
+    setWorkComplete: (next: boolean) => {
+      if (kinds === undefined || mutation.isPending) return;
+      mutation.mutate(next);
     },
   };
 }

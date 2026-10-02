@@ -36,8 +36,17 @@ import {tabLabel, visibleTabs, type Tab} from '../nav/state';
 //
 //   .a-tab  glass + blur(22) · 1px glassLine · sh2 (z 20 은 옮기지 않는다 — bar 주석)
 //   .a-tab button   ink2 / on: ink 8% 채움 + ink
-//   .a-tab .dot     17×17 · accent / onAccent · 10.5/800 · 가로 4 · 2px surface 고리
+//   .a-tab .dot     17×17 · 10.5/800 · 가로 4 · 2px surface 고리
 //                   (자리는 탭이 줄어든 비율로 옮긴다: top 8 · right 16)
+//
+// ## 배지 문법 (#3342, 사이드바·알림 시안 §1.2 · 7)
+//
+//   인박스  잉크 알약 + 수 = 「나에게 필요한 일」(결정할 수 있는 승인 + 안 읽은 멘션).
+//           수는 `useNeedsMe` 한 곳에서 오고(core `needsMe`), 이 파일은 받아서 그릴 뿐이다.
+//   홈      호박 점(수 없음) = 안 읽은 글이 어딘가에 있다. 수를 안 그리는 이유는 홈이
+//           말하는 것이 「읽을 것이 있다」 하나라서다 — 「해야 할 일」은 인박스의 말이다.
+//
+// 앱 아이콘 배지는 이 둘이 아니라 서버가 푸시에 싣는 안 읽음 합이다(`push/appBadge.ts`).
 //   .a-fab  primary / onPrimary · sh2 — 지름만 64 → 54(탭바 높이와 같다)
 //   .a-fade left 0 · right 0 · bottom 0 · height 150 ·
 //           linear-gradient(180deg, transparent, bgBot 62%)
@@ -68,6 +77,8 @@ export const SHELL = {
   minInset: 16,
   fadeHeight: 150,
   dot: 17,
+  /** 홈의 안 읽음 점 — 수를 못 그리는 자리라 알약보다 작다. 고리는 같은 2. */
+  unreadDot: 10,
   /** 시안 `.a-scroll{padding-bottom:140px}` — 목록 끝이 탭바 밑에 숨지 않게. */
   clearance: 140,
 } as const;
@@ -162,14 +173,17 @@ function coveredProps(covered: boolean) {
 export function ShellBottomBar({
   current,
   inboxCount,
+  homeUnread = false,
   onSelect,
   onPlus,
   plusOpen = false,
   covered = false,
 }: {
   current: Tab;
-  /** 인박스 점의 수. 0이면 점이 없다. */
+  /** 인박스 알약의 수 — 「나에게 필요한 일」. 0이면 알약이 없다. */
   inboxCount: number;
+  /** 홈 탭의 안 읽음 점. 수가 아니라 있다/없다다. */
+  homeUnread?: boolean;
   onSelect: (tab: Tab) => void;
   onPlus: () => void;
   /** + 메뉴가 열려 있는가(보조기술의 「펼쳐짐」). */
@@ -194,6 +208,7 @@ export function ShellBottomBar({
                 width={tabWidth}
                 selected={tab === current}
                 badge={tab === 'inbox' ? inboxCount : 0}
+                unread={tab === 'home' && homeUnread}
                 onPress={() => onSelect(tab)}
               />
             ))}
@@ -205,17 +220,33 @@ export function ShellBottomBar({
   );
 }
 
+/**
+ * 탭의 VoiceOver 이름. 배지가 말하는 것을 **그대로** 이름에 싣는다 — 눈에 보이는
+ * 수가 「멘션」이 아니라 「나에게 필요한 일」이므로 라벨도 그 낱말이다.
+ */
+export function tabAccessibilityLabel(
+  tab: Tab,
+  badge: number,
+  unread: boolean,
+): string {
+  if (badge > 0) return `${tabLabel(tab)}, 나에게 필요한 일 ${badge}개`;
+  if (unread) return `${tabLabel(tab)}, 안 읽은 글 있음`;
+  return tabLabel(tab);
+}
+
 function TabButton({
   tab,
   width,
   selected,
   badge,
+  unread,
   onPress,
 }: {
   tab: Tab;
   width: number;
   selected: boolean;
   badge: number;
+  unread: boolean;
   onPress: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -225,9 +256,7 @@ function TabButton({
     <Pressable
       accessibilityRole="tab"
       accessibilityState={{selected}}
-      accessibilityLabel={
-        badge > 0 ? `${tabLabel(tab)}, 멘션 ${badge}개` : tabLabel(tab)
-      }
+      accessibilityLabel={tabAccessibilityLabel(tab, badge, unread)}
       onPress={onPress}
       style={({pressed}) => [
         styles.tab,
@@ -245,6 +274,14 @@ function TabButton({
         }}
         testID={`tab-icon-${tab}`}
       />
+      {unread ? (
+        <View
+          style={styles.unreadDot}
+          testID={`tab-unread-${tab}`}
+          importantForAccessibility="no"
+          accessibilityElementsHidden
+        />
+      ) : null}
       {badge > 0 ? (
         <View style={styles.dot} testID={`tab-dot-${tab}`}>
           <Text
@@ -378,13 +415,24 @@ const buildStyles = (color: Palette) =>
       paddingHorizontal: 4,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: color.accent,
+      // 잉크 알약 — 「나에게 필요한 일」은 신호색이 아니라 주 행동과 같은 잉크다.
+      backgroundColor: color.primary,
       boxShadow: `0 0 0 2px ${color.surface}`,
     },
     dotLabel: {
       fontSize: ds2Type.badge,
       fontWeight: '800',
-      color: color.onAccent,
+      color: color.onPrimary,
+    },
+    unreadDot: {
+      position: 'absolute',
+      top: 9,
+      right: 20,
+      width: SHELL.unreadDot,
+      height: SHELL.unreadDot,
+      borderRadius: SHELL.unreadDot / 2,
+      backgroundColor: color.accent,
+      boxShadow: `0 0 0 2px ${color.surface}`,
     },
     plus: {
       width: SHELL.plus,

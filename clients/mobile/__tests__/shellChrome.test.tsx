@@ -258,7 +258,10 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     for (const tab of TABS) {
       const node = screen.getByTestId(`tab-${tab}`);
       expect(node).toHaveProp('accessibilityRole', 'tab');
-      expect(node).toHaveProp('accessibilityLabel', tabLabel(tab));
+      // 배지가 있으면 라벨이 그 뜻을 덧붙인다(#3342) — 이름이 앞에 서는 것이 이 시험의 몫이다.
+      expect(String(node.props.accessibilityLabel)).toMatch(
+        new RegExp(`^${tabLabel(tab)}`),
+      );
     }
     expect(screen.queryByTestId('tab-agents')).toBeNull();
     expect(screen.queryByTestId('tab-work')).toBeNull();
@@ -285,14 +288,14 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(insideTablist(plus as unknown as Node)).toBe(false);
   });
 
-  it('인박스 점이 멘션 수를 들고, 라벨이 그 수를 말한다', async () => {
+  it('인박스 알약이 「나에게 필요한 일」 수를 들고, 라벨이 그 수를 말한다 (#3342)', async () => {
     installFetch(2);
     await renderReady();
     await waitFor(() => expect(screen.getByTestId('tab-dot-inbox')).toBeTruthy());
     expect(screen.getByTestId('tab-dot-inbox')).toHaveTextContent('2');
     expect(screen.getByTestId('tab-inbox')).toHaveProp(
       'accessibilityLabel',
-      '인박스, 멘션 2개',
+      '인박스, 나에게 필요한 일 2개',
     );
   });
 
