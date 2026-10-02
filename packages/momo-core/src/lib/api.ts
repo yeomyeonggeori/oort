@@ -3344,6 +3344,88 @@ export async function fetchWorkSessions(
   return res.workSessions;
 }
 
+// ---- 팀 보드 (#2863, ADR-0194 증보 읽기 경로, #3322) ----------------------------
+//
+// 공유된 세션의 큐레이션 요약. 서버가 **보는 사람이 집 채널의 멤버인 것만** 돌려준다.
+// 이 모양에는 터미널 글, 입력, 컨트롤, PTY, 호스트, 커밋 제목 필드가 없다. 클라이언트는
+// 받은 줄을 그대로 그린다: 멤버십 거르기를 다시 하지 않는다(서버가 정본이다).
+
+export type SharedSessionOrigin = "local_pty" | "host";
+export type SharedSessionState =
+  | "waiting"
+  | "running"
+  | "review"
+  | "idle"
+  | "done"
+  | "stopped";
+
+/** 숫자만. null = 모름(에이전트 레인은 항상 null). 파일 이름은 없다. */
+export interface SharedWorkSessionDiff {
+  added: number | null;
+  deleted: number | null;
+  files: number | null;
+  ahead: number | null;
+  behind: number | null;
+  uncommitted: number | null;
+}
+
+export interface SharedWorkSession {
+  sessionId: string;
+  origin: SharedSessionOrigin;
+  label: string;
+  folderLabel: string | null;
+  /** 원장 상태. 칩은 `state`를 쓴다. */
+  status: WorkSessionStatusWire;
+  owner: { memberId: string; displayName: string };
+  homeChannel: { id: string; name: string | null };
+  startedAtMs: number;
+  endedAtMs: number | null;
+  sharedAtMs: number | null;
+  repo: string | null;
+  branch: string | null;
+  /** 로컬은 닫힌 하네스 목록, 에이전트 레인은 도구 키. */
+  harness: string;
+  state: SharedSessionState;
+  stages: string[];
+  diff: SharedWorkSessionDiff;
+  prUrl: string | null;
+  /** 에포크 **초**. 목록 순서의 기준이다. */
+  lastActivityAt: number;
+}
+
+export interface SharedWorkSessionPage {
+  sessions: SharedWorkSession[];
+  nextCursor: string | null;
+}
+
+export async function fetchSharedWorkSessions(
+  workspaceId: string,
+  opts: { cursor?: string | null; limit?: number } = {}
+): Promise<SharedWorkSessionPage> {
+  const query = new URLSearchParams();
+  if (opts.limit !== undefined) query.set("limit", String(opts.limit));
+  if (opts.cursor) query.set("cursor", opts.cursor);
+  const text = query.toString();
+  const suffix = text === "" ? "" : `?${text}`;
+  const res = await request<SharedWorkSessionPage>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/work-sessions/shared${suffix}`
+  );
+  return { sessions: res.sessions, nextCursor: res.nextCursor ?? null };
+}
+
+/** 단건. 보이지 않는 이유가 무엇이든 404 하나다(보드에서 지우라는 뜻). */
+export async function fetchSharedWorkSession(
+  workspaceId: string,
+  sessionId: string
+): Promise<SharedWorkSession> {
+  const res = await request<{ session: SharedWorkSession }>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/work-sessions/${encodeURIComponent(sessionId)}/shared`
+  );
+  return res.session;
+}
+
 /**
  * End a session. This is the PROCESS side of the ledger (the host stops holding
  * it), not "stop the current turn": the server has no turn-scoped stop for a

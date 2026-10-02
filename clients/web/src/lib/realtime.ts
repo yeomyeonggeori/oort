@@ -13,6 +13,7 @@ import {
   asWorkSessionControlFrame,
   asWorkSessionObserverFrame,
   asWorkSessionToolTransitionFrame,
+  asWorkSessionShareChangedFrame,
   centrifugoAgentChannelName,
   centrifugoChannelName,
   centrifugoTypingChannelName,
@@ -34,6 +35,7 @@ import {
   type WorkSessionControlFrame,
   type WorkSessionObserverFrame,
   type WorkSessionToolTransitionFrame,
+  type WorkSessionShareChangedFrame,
 } from "@momo/core/lib/realtimeEvents";
 import { isTerminalProgressFrame } from "@momo/core/features/agents/agentRail";
 import { workHostNoticeChannelName } from "@momo/core/features/settings/thisMacHost";
@@ -366,6 +368,8 @@ export function createRealtime(
       onAcpEvent: (frame: WorkSessionACPFrame) => void;
       onObserver: (frame: WorkSessionObserverFrame) => void;
       onControl?: (frame: WorkSessionControlFrame) => void;
+      /** 팀 보드(#2863): 공유 켜짐·꺼짐·상태 변화. 신호일 뿐이니 받으면 GET으로 다시 읽는다. */
+      onShareChanged?: (frame: WorkSessionShareChangedFrame) => void;
       onResync: () => void;
     }
   ): () => void {
@@ -414,6 +418,12 @@ export function createRealtime(
           const control = asWorkSessionControlFrame(ctx.data);
           if (control) {
             handlers.onControl?.(control);
+            return;
+          }
+          // 공유 변화도 경계 사실이다: ACP 파서는 이 봉투를 어차피 거절한다.
+          const shareChanged = asWorkSessionShareChangedFrame(ctx.data);
+          if (shareChanged) {
+            handlers.onShareChanged?.(shareChanged);
             return;
           }
           const acp = asWorkSessionACPFrame(ctx.data);

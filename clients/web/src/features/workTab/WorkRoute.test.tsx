@@ -25,6 +25,10 @@ vi.mock("@/features/workConsole/WorkConsoleRoute", () => ({
   WorkConsoleRoute: () => createElement("div", { "data-testid": "work-console-stub" }),
 }));
 vi.mock("@/app/SidebarDrawerToggle", () => ({ SidebarDrawerToggle: () => null }));
+// 보드의 몸(읽기·드로어·키보드)은 teamBoard/ 시험이 잰다. 여기서는 주소가 보드로 가는지만 잰다.
+vi.mock("@/features/workTab/teamBoard/TeamBoardRoute", () => ({
+  TeamBoardRoute: () => createElement("div", { "data-testid": "team-board-stub" }),
+}));
 
 const { WorkRoute } = await import("./WorkRoute");
 
@@ -90,17 +94,12 @@ describe("/work 보기 (#2854)", () => {
     expect(el.querySelector('[data-testid="work-console-stub"]')).not.toBeNull();
   });
 
-  it.each([false, true])("?view=team은 어디서나 「팀 작업」 빈 상태다 (desktop=%s)", async (desktop) => {
+  it.each([false, true])("?view=team은 어디서나 「팀 작업」 보드다 (desktop=%s)", async (desktop) => {
     shell.desktop = desktop;
     const el = await mount("/work?view=team");
-    expect(el.querySelector("h1")?.textContent).toBe("팀 작업");
-    expect(el.querySelector('[data-testid="team-work-empty"]')).not.toBeNull();
+    expect(el.querySelector('[data-testid="team-board-stub"]')).not.toBeNull();
     expect(el.querySelector('[data-testid="dock-stub"]')).toBeNull();
-    // 한 문장 + 한 행동: 채널로 간다.
-    await act(async () => {
-      el.querySelector<HTMLButtonElement>('[data-testid="team-work-empty-action"]')!.click();
-    });
-    expect(el.querySelector('[data-testid="home"]')).not.toBeNull();
+    expect(el.querySelector('[data-testid="work-console-stub"]')).toBeNull();
   });
 
   it("데스크탑 세션 링크는 콘솔로 가고 주소에 view=console을 붙인다(목록으로 돌아가도 격자로 새지 않는다)", async () => {
