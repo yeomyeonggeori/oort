@@ -16,7 +16,14 @@
 //!   it never even reads it.
 //! * **Approval request** — an `approval_request` message notifies the humans
 //!   who can decide it, excluding the requesting agent.
-//! * **Resume offer / idle** — the owning member of the orphaned session.
+//! * **Resume offer** — the owning member of the orphaned session.
+//! * **Work complete (`work_session_idle`, ADR-0120 부록 A, #3341)** — only the
+//!   member who started the session, only when the turn ran at least
+//!   [`WORK_COMPLETE_MIN_RAN_MS`], only once per turn, only when they have not
+//!   just been reading that channel ([`WORK_COMPLETE_FOREGROUND_WINDOW_SECS`]),
+//!   and only while `notification_rule.work_complete_push` is on. An idle card
+//!   that fails any of these selects NO reason — it must never fall through to
+//!   `dm`, which would push the card's own text to a DM peer.
 //! * **Mute (ADR-0124)** — the per-channel `notification_pref` row suppresses
 //!   every reason, mentions and approvals included. Read at judgment time; no
 //!   cache.
@@ -49,6 +56,17 @@ use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
 use crate::dispatch::{category_for, PushCategory, PushReason};
+
+/// A work turn must have run at least this long (ms) to earn a 「작업 끝남」 push
+/// (성재 2026-10-02: 「1분 이상」; ADR-0120 부록 A). Measured per turn at the
+/// idle transition and stamped on the card as `props.ran_ms`.
+pub const WORK_COMPLETE_MIN_RAN_MS: i64 = 60_000;
+
+/// The "app is not in the foreground" heuristic (ADR-0120 부록 A-8). The server
+/// has no foreground signal, so a person is treated as looking at the session
+/// when their read cursor in its channel advanced within this many seconds
+/// before the idle card, or already covers the card.
+pub const WORK_COMPLETE_FOREGROUND_WINDOW_SECS: f64 = 30.0;
 
 /// One (member, active token) pair to notify, with the reason that selected it.
 #[derive(Debug, Clone)]
@@ -84,6 +102,12 @@ pub async fn judge_targets(
                   COALESCE(m.props->'mention_member_ids', '[]'::jsonb) AS mention_ids, \
                   m.props->>'kind' AS props_kind, \
                   m.props->>'owner_member_id' AS owner_member_id, \
+                  m.props->>'session_id' AS session_id, \
+                  m.props->'turn_started_ms' AS turn_started_ms, \
+                  CASE WHEN jsonb_typeof(m.props->'ran_ms') = 'number' \
+                       THEN (m.props->>'ran_ms')::numeric END AS ran_ms, \
+                  m.seq, \
+                  m.created_at, \
                   m.root_id, \
                   c.kind::text AS channel_kind \
              FROM message m \
@@ -97,9 +121,38 @@ pub async fn judge_targets(
                     WHEN (SELECT props_kind FROM msg) = 'resume_offer' \
                          AND lower(mem.id::text) = lower((SELECT owner_member_id FROM msg)) \
                       THEN 'resume_offer' \
-                    WHEN (SELECT props_kind FROM msg) = 'work_session_idle' \
-                         AND lower(mem.id::text) = lower((SELECT owner_member_id FROM msg)) \
-                      THEN 'work_session_idle' \
+                    WHEN (SELECT props_kind FROM msg) = 'work_session_idle' THEN \
+                      CASE WHEN lower(mem.id::text) = lower((SELECT owner_member_id FROM msg)) \
+                            AND mem.id = (SELECT author_member_id FROM msg) \
+                            AND (SELECT message_type FROM msg) = 'system' \
+                            AND COALESCE((SELECT ran_ms FROM msg), 0) >= $3::bigint \
+                            AND EXISTS ( \
+                              SELECT 1 FROM work_session ws \
+                               WHERE ws.workspace_id = $1 \
+                                 AND lower(ws.id::text) = lower((SELECT session_id FROM msg)) \
+                                 AND ws.member_id = mem.id \
+                                 AND ws.root_message_id = (SELECT root_id FROM msg) \
+                            ) \
+                            AND NOT EXISTS ( \
+                              SELECT 1 FROM message prior \
+                               WHERE prior.workspace_id = $1 \
+                                 AND prior.channel_id = (SELECT channel_id FROM msg) \
+                                 AND prior.seq < (SELECT seq FROM msg) \
+                                 AND prior.props->>'kind' = 'work_session_idle' \
+                                 AND prior.props->>'session_id' = (SELECT session_id FROM msg) \
+                                 AND prior.props->'turn_started_ms' = (SELECT turn_started_ms FROM msg) \
+                            ) \
+                            AND NOT EXISTS ( \
+                              SELECT 1 FROM read_state seen \
+                               WHERE seen.workspace_id = $1 \
+                                 AND seen.channel_id = (SELECT channel_id FROM msg) \
+                                 AND seen.member_id = mem.id \
+                                 AND seen.last_read_seq > 0 \
+                                 AND ( seen.last_read_seq >= (SELECT seq FROM msg) \
+                                       OR seen.last_read_at >= (SELECT created_at FROM msg) \
+                                            - make_interval(secs => $4::double precision) ) \
+                            ) \
+                        THEN 'work_session_idle' END \
                     WHEN (SELECT message_type FROM msg) = 'approval_request' \
                          AND mem.kind = 'human' THEN 'approval_request' \
                     WHEN EXISTS ( \
@@ -159,6 +212,7 @@ pub async fn judge_targets(
               COALESCE(nr.dnd, false) \
               AND (nr.dnd_until IS NULL OR nr.dnd_until > now()) \
             ) \
+            AND NOT (r.reason = 'work_session_idle' AND NOT COALESCE(nr.work_complete_push, true)) \
             AND ( \
               np.member_id IS NULL \
               OR (np.muted_until IS NOT NULL AND np.muted_until <= now()) \
@@ -168,6 +222,8 @@ pub async fn judge_targets(
     )
     .bind(workspace_id)
     .bind(message_id)
+    .bind(WORK_COMPLETE_MIN_RAN_MS)
+    .bind(WORK_COMPLETE_FOREGROUND_WINDOW_SECS)
     .fetch_all(&mut *conn)
     .await?;
 

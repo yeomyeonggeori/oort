@@ -617,7 +617,8 @@ async fn mark_session_running_in_tx(
 ) -> Result<(), T3Error> {
     sqlx::query(
         "UPDATE work_session \
-            SET status = 'running', idle_at = NULL \
+            SET status = 'running', idle_at = NULL, \
+                turn_started_at = clock_timestamp() \
           WHERE workspace_id = $1 AND id = $2",
     )
     .bind(workspace_id)

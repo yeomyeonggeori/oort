@@ -32,6 +32,12 @@
 //! | `a_timed_pause_suppresses_until_it_expires_then_delivers` (증보 2) | drop the `dnd_until > now()` arm from the `dnd` predicate |
 //! | `declared_dnd_pauses_pushes_and_both_lapse_together` (증보 2 「묶어」) | skip the bundle in `set_declared_presence_in_tx`, or engage it without the DND expiry |
 //! | `a_transient_relay_failure_requeues_instead_of_dropping` | settle on transient failure |
+//! | `work_complete_pushes_the_session_starter_for_a_long_turn` (ADR-0120 부록 A, #3341) | drop the `work_session_idle` arm, or let the arm yield no reason for the starter |
+//! | `work_complete_skips_a_turn_shorter_than_a_minute` | drop the `ran_ms >= $3` predicate |
+//! | `work_complete_is_for_the_starter_only_never_a_peer_or_a_forged_card` | drop the owner/author/work_session ownership predicates, or let an ineligible idle card fall through to `dm` |
+//! | `work_complete_skips_when_the_owner_was_just_reading_the_channel` | drop the `read_state` recency predicate |
+//! | `work_complete_is_pushed_once_per_turn` | drop the per-turn `prior` dedupe predicate |
+//! | `work_complete_respects_the_members_own_switch` | drop the `work_complete_push` filter |
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -1057,5 +1063,429 @@ async fn a_transient_relay_failure_requeues_instead_of_dropping() {
     assert_eq!(
         unsettled, 1,
         "the in-flight claim stays unsettled so the retry re-sends rather than skipping"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0120 부록 A (#3341) — 「작업 끝남」 push: work_session_idle
+// ---------------------------------------------------------------------------
+
+/// The session owner is `fixture.recipient_id` (the member with a device); the
+/// DM peer is `fixture.author_id`.
+struct WorkFixture {
+    session_id: Uuid,
+    root_id: Uuid,
+}
+
+async fn give_device(su: &PgPool, fixture: &Fixture, member_id: Uuid) {
+    let device_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO device (id, workspace_id, member_id, platform) \
+         VALUES ($1, $2, $3, 'ios'::device_platform)",
+    )
+    .bind(device_id)
+    .bind(fixture.workspace_id)
+    .bind(member_id)
+    .execute(su)
+    .await
+    .expect("seed peer device");
+    sqlx::query(
+        "INSERT INTO push_token (workspace_id, device_id, member_id, apns_token, env, topic) \
+         VALUES ($1, $2, $3, $4, 'sandbox'::push_env, 'kim.dawn.momo.e2e')",
+    )
+    .bind(fixture.workspace_id)
+    .bind(device_id)
+    .bind(member_id)
+    .bind(Uuid::new_v4().simple().to_string().repeat(2))
+    .execute(su)
+    .await
+    .expect("seed peer push token");
+}
+
+/// A running work session owned by `fixture.recipient_id`, with its root card.
+async fn seed_work_session(su: &PgPool, fixture: &Fixture) -> WorkFixture {
+    let host_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO work_host (id, workspace_id, scope, owner_member_id, type, display_name, \
+                                public_key, capabilities, last_seen_at) \
+         VALUES ($1, $2, 'member', $3, 'app', 'mac', $4, '{}'::jsonb, clock_timestamp())",
+    )
+    .bind(host_id)
+    .bind(fixture.workspace_id)
+    .bind(fixture.recipient_id)
+    .bind("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+    .execute(su)
+    .await
+    .expect("seed work host");
+    let root_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO message \
+           (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, props) \
+         VALUES ($1, $2, 1, 1, 0, $3, 'system', '{\"kind\":\"work.session\"}'::jsonb) RETURNING id",
+    )
+    .bind(fixture.workspace_id)
+    .bind(fixture.channel_id)
+    .bind(fixture.recipient_id)
+    .fetch_one(su)
+    .await
+    .expect("seed session root card");
+    let session_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO work_session \
+           (workspace_id, channel_id, member_id, host_id, root_message_id, tool, label) \
+         VALUES ($1, $2, $3, $4, $5, 'claude', 'build the thing') RETURNING id",
+    )
+    .bind(fixture.workspace_id)
+    .bind(fixture.channel_id)
+    .bind(fixture.recipient_id)
+    .bind(host_id)
+    .bind(root_id)
+    .fetch_one(su)
+    .await
+    .expect("seed work session");
+    WorkFixture {
+        session_id,
+        root_id,
+    }
+}
+
+/// Insert an idle card exactly as `transition_lifecycle_in_tx` shapes it. The
+/// author / owner / numbers are parameters so a test can forge each fact.
+#[allow(clippy::too_many_arguments)]
+async fn idle_card(
+    su: &PgPool,
+    fixture: &Fixture,
+    work: &WorkFixture,
+    seq: i64,
+    author: Uuid,
+    owner_prop: Uuid,
+    ran_ms: i64,
+    turn_started_ms: i64,
+) -> Uuid {
+    sqlx::query_scalar(
+        "INSERT INTO message \
+           (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, \
+            root_id, props) \
+         VALUES ($1, $2, $3, $3, 0, $4, 'system', '작업 완료 — idle 대기', $5, \
+                 jsonb_build_object('kind', 'work_session_idle', \
+                                    'session_id', $6::text, \
+                                    'owner_member_id', $7::text, \
+                                    'turn_started_ms', $8::bigint, \
+                                    'ran_ms', $9::bigint)) \
+         RETURNING id",
+    )
+    .bind(fixture.workspace_id)
+    .bind(fixture.channel_id)
+    .bind(seq)
+    .bind(author)
+    .bind(work.root_id)
+    .bind(work.session_id.to_string())
+    .bind(owner_prop.to_string())
+    .bind(turn_started_ms)
+    .bind(ran_ms)
+    .fetch_one(su)
+    .await
+    .expect("insert idle card (fires push_candidate_enqueue_trg)")
+}
+
+/// Drain the fixture's candidates and return what was dispatched for `message`.
+async fn dispatched_for(su: &PgPool, fixture: &Fixture, message: Uuid) -> Vec<PushDispatch> {
+    focus_candidates(su, &[fixture.workspace_id]).await;
+    let relay = RecordingDispatcher::accepting();
+    let pool = momo_notifier_pool().await;
+    drain(&pool, relay.clone())
+        .drain_once(64)
+        .await
+        .expect("drain");
+    relay
+        .sent()
+        .into_iter()
+        .filter(|dispatch| dispatch.message_id == message.to_string())
+        .collect()
+}
+
+const LONG_TURN_MS: i64 = 90_000;
+const TURN_A: i64 = 1_800_000_000_000;
+
+async fn work_fixture(su: &PgPool) -> (Fixture, WorkFixture) {
+    let secrets = Secrets::mint();
+    let fixture = seed_dm_fixture(su, &secrets).await;
+    // The DM peer has a device too: every "nobody else is notified" claim below
+    // is only meaningful if the peer COULD be.
+    give_device(su, &fixture, fixture.author_id).await;
+    let work = seed_work_session(su, &fixture).await;
+    (fixture, work)
+}
+
+/// The happy path: the member who started the session hears that a 90 s turn
+/// finished — on the fifth reason, the `momo.work` category, ids only — and the
+/// DM peer, who is in the channel and has a device, hears nothing.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn work_complete_pushes_the_session_starter_for_a_long_turn() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let (fixture, work) = work_fixture(&su).await;
+    let owner = fixture.recipient_id;
+    let card = idle_card(&su, &fixture, &work, 2, owner, owner, LONG_TURN_MS, TURN_A).await;
+
+    let sent = dispatched_for(&su, &fixture, card).await;
+    assert_eq!(sent.len(), 1, "exactly the starter's one device: {sent:?}");
+    assert_eq!(sent[0].reason, "work_session_idle");
+    assert_eq!(sent[0].category, "momo.work");
+    assert_eq!(sent[0].approval_id, None);
+    let rendered = serde_json::to_string(&sent[0]).expect("render");
+    assert!(
+        !rendered.contains("build the thing") && !rendered.contains("작업 완료"),
+        "label and card body stay off the wire: {rendered}"
+    );
+}
+
+/// 「1분 이상」: a 59.999 s turn is silent, and silent means NO reason — it must
+/// not fall through to the DM arm and push the card's text to the peer.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn work_complete_skips_a_turn_shorter_than_a_minute() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let (fixture, work) = work_fixture(&su).await;
+    let owner = fixture.recipient_id;
+    let short = idle_card(&su, &fixture, &work, 2, owner, owner, 59_999, TURN_A).await;
+    let boundary = idle_card(&su, &fixture, &work, 3, owner, owner, 60_000, TURN_A + 1).await;
+
+    let skipped = dispatched_for(&su, &fixture, short).await;
+    assert!(
+        skipped.is_empty(),
+        "59.999 s is under a minute: {skipped:?}"
+    );
+    // The boundary is inclusive ("1분 이상"); the same drain handled both cards.
+    let relay_again = dispatched_for(&su, &fixture, boundary).await;
+    assert!(
+        relay_again.is_empty(),
+        "the first drain already settled the boundary card; re-drain sends nothing new"
+    );
+    let delivered: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM push_dispatch_log WHERE workspace_id = $1 AND message_id = $2",
+    )
+    .bind(fixture.workspace_id)
+    .bind(boundary)
+    .fetch_one(&su)
+    .await
+    .expect("count");
+    assert_eq!(delivered, 1, "exactly 60 s is long enough");
+}
+
+/// Only the starter. A card naming the DM peer as owner, a card authored by the
+/// peer, and a card for a session id that belongs to someone else all select no
+/// recipient — the peer cannot be spammed by forging a card, and the real owner
+/// is not pushed for a card they did not author.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn work_complete_is_for_the_starter_only_never_a_peer_or_a_forged_card() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let (fixture, work) = work_fixture(&su).await;
+    let owner = fixture.recipient_id;
+    let peer = fixture.author_id;
+
+    // owner prop names the peer, authored by the peer: the peer is not the
+    // session's member, so there is no session of theirs to be told about.
+    let peer_owned = idle_card(&su, &fixture, &work, 2, peer, peer, LONG_TURN_MS, TURN_A).await;
+    // authored by the peer, owner prop names the real owner (a forged card).
+    let forged = idle_card(
+        &su,
+        &fixture,
+        &work,
+        3,
+        peer,
+        owner,
+        LONG_TURN_MS,
+        TURN_A + 1,
+    )
+    .await;
+    // a session id that does not exist.
+    let ghost = WorkFixture {
+        session_id: Uuid::new_v4(),
+        root_id: work.root_id,
+    };
+    let no_session = idle_card(
+        &su,
+        &fixture,
+        &ghost,
+        4,
+        owner,
+        owner,
+        LONG_TURN_MS,
+        TURN_A + 2,
+    )
+    .await;
+
+    focus_candidates(&su, &[fixture.workspace_id]).await;
+    let relay = RecordingDispatcher::accepting();
+    let pool = momo_notifier_pool().await;
+    drain(&pool, relay.clone())
+        .drain_once(64)
+        .await
+        .expect("drain");
+    for (name, card) in [
+        ("peer-owned", peer_owned),
+        ("forged by the peer", forged),
+        ("unknown session", no_session),
+    ] {
+        let hits: Vec<_> = relay
+            .sent()
+            .into_iter()
+            .filter(|d| d.message_id == card.to_string())
+            .collect();
+        assert!(hits.is_empty(), "{name} idle card pushed: {hits:?}");
+    }
+}
+
+/// 「앱 비활성일 때만」, approximated server-side (ADR-0120 부록 A-8): a person
+/// whose read cursor moved in the channel within 30 s before the card is looking
+/// at it; one who last read minutes ago is not.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn work_complete_skips_when_the_owner_was_just_reading_the_channel() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+
+    // Reading right now -> silent.
+    let (fixture, work) = work_fixture(&su).await;
+    let owner = fixture.recipient_id;
+    sqlx::query(
+        "INSERT INTO read_state (workspace_id, channel_id, member_id, last_read_seq, last_read_at) \
+         VALUES ($1, $2, $3, 1, now())",
+    )
+    .bind(fixture.workspace_id)
+    .bind(fixture.channel_id)
+    .bind(owner)
+    .execute(&su)
+    .await
+    .expect("owner just read the channel");
+    let watched = idle_card(&su, &fixture, &work, 2, owner, owner, LONG_TURN_MS, TURN_A).await;
+    let sent = dispatched_for(&su, &fixture, watched).await;
+    assert!(
+        sent.is_empty(),
+        "the owner is looking at the channel: {sent:?}"
+    );
+
+    // Last read five minutes ago, and behind the card -> pushed.
+    let (fixture, work) = work_fixture(&su).await;
+    let owner = fixture.recipient_id;
+    sqlx::query(
+        "INSERT INTO read_state (workspace_id, channel_id, member_id, last_read_seq, last_read_at) \
+         VALUES ($1, $2, $3, 1, now() - interval '5 minutes')",
+    )
+    .bind(fixture.workspace_id)
+    .bind(fixture.channel_id)
+    .bind(owner)
+    .execute(&su)
+    .await
+    .expect("owner read the channel long ago");
+    let away = idle_card(&su, &fixture, &work, 2, owner, owner, LONG_TURN_MS, TURN_A).await;
+    let sent = dispatched_for(&su, &fixture, away).await;
+    assert_eq!(sent.len(), 1, "the owner is away: {sent:?}");
+    assert_eq!(sent[0].reason, "work_session_idle");
+}
+
+/// One push per turn. A second idle card for the same turn (a retried
+/// transition, a duplicate relay of the host's report) is silent; the next turn
+/// is a different `turn_started_ms` and is pushed again.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn work_complete_is_pushed_once_per_turn() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let (fixture, work) = work_fixture(&su).await;
+    let owner = fixture.recipient_id;
+    let first = idle_card(&su, &fixture, &work, 2, owner, owner, LONG_TURN_MS, TURN_A).await;
+    let duplicate = idle_card(
+        &su,
+        &fixture,
+        &work,
+        3,
+        owner,
+        owner,
+        LONG_TURN_MS + 5,
+        TURN_A,
+    )
+    .await;
+    let next_turn = idle_card(
+        &su,
+        &fixture,
+        &work,
+        4,
+        owner,
+        owner,
+        LONG_TURN_MS,
+        TURN_A + 200_000,
+    )
+    .await;
+
+    focus_candidates(&su, &[fixture.workspace_id]).await;
+    let relay = RecordingDispatcher::accepting();
+    let pool = momo_notifier_pool().await;
+    drain(&pool, relay.clone())
+        .drain_once(64)
+        .await
+        .expect("drain");
+    let count = |card: Uuid| {
+        relay
+            .sent()
+            .iter()
+            .filter(|d| d.message_id == card.to_string() && d.reason == "work_session_idle")
+            .count()
+    };
+    assert_eq!(count(first), 1, "the turn's first card is pushed");
+    assert_eq!(
+        count(duplicate),
+        0,
+        "a second card for the same turn is not"
+    );
+    assert_eq!(count(next_turn), 1, "the next turn is pushed again");
+}
+
+/// The member's own switch (`PATCH …/notification-rules/push-kinds`). It turns
+/// off this kind only: a plain DM still reaches them.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn work_complete_respects_the_members_own_switch() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let (fixture, work) = work_fixture(&su).await;
+    let owner = fixture.recipient_id;
+    sqlx::query(
+        "INSERT INTO notification_rule (workspace_id, member_id, work_complete_push) \
+         VALUES ($1, $2, false)",
+    )
+    .bind(fixture.workspace_id)
+    .bind(owner)
+    .execute(&su)
+    .await
+    .expect("owner switches 작업 끝남 off");
+    let card = idle_card(&su, &fixture, &work, 2, owner, owner, LONG_TURN_MS, TURN_A).await;
+    let dm = send_message(&su, &fixture, "hello", 3).await;
+
+    focus_candidates(&su, &[fixture.workspace_id]).await;
+    let relay = RecordingDispatcher::accepting();
+    let pool = momo_notifier_pool().await;
+    drain(&pool, relay.clone())
+        .drain_once(64)
+        .await
+        .expect("drain");
+    let sent = relay.sent();
+    assert!(
+        sent.iter().all(|d| d.message_id != card.to_string()),
+        "the switch is off: {sent:?}"
+    );
+    assert!(
+        sent.iter()
+            .any(|d| d.message_id == dm.to_string() && d.reason == "dm"),
+        "the switch is per kind — a DM still notifies: {sent:?}"
     );
 }
