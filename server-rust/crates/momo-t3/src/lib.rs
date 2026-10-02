@@ -119,9 +119,9 @@ pub use lifecycle::{
     load_listed_work_session_detail_in_tx, load_work_session_in_tx, lock_work_session_detail_in_tx,
     mark_work_session_resumed_in_tx, resolve_cloud_host_id, set_work_session_observation_in_tx,
     terminate, terminate_in_tx, tool_lifecycle_payload, transition_cloud_host_in_tx,
-    transition_tool_lifecycle_in_tx, update_session_card_props_in_tx, with_t3_lifecycle_tx,
-    work_session_scope_in_tx, work_tool_is_enabled_in_tx, CloudHostState, NewWorkSession,
-    T3LockLadder, TerminationReason, WorkSession, WorkSessionDetail,
+    transition_tool_lifecycle_in_tx, turn_timing_in_tx, update_session_card_props_in_tx,
+    with_t3_lifecycle_tx, work_session_scope_in_tx, work_tool_is_enabled_in_tx, CloudHostState,
+    NewWorkSession, T3LockLadder, TerminationReason, WorkSession, WorkSessionDetail,
 };
 /// The B0 provider vocabulary, re-exported because this crate's public API
 /// speaks it (`CloudProvisioner::capabilities`, `provision_instance`). A caller

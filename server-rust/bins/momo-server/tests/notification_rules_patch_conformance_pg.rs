@@ -546,3 +546,122 @@ async fn the_patch_route_changes_only_named_fields_and_put_still_works() {
         ]
     );
 }
+
+/// ADR-0120 부록 A (#3341): `GET|PATCH …/notification-rules/push-kinds` — the
+/// 「작업 끝남」 switch the phone reads and writes. Default on; a patch changes
+/// only what it names; it is independent of the DND rule row it shares (a DND
+/// write must not reset it, and it must not disturb a pause); 400 on an empty
+/// body (an unknown field is refused by the JSON extractor).
+///
+/// Sabotage: make `patch_push_kinds_in_tx` write `work_complete_push = $3` (a
+/// NULL for an absent field would then break the NOT NULL), or let
+/// `store_rule` set the column — the "independent of DND" step goes red.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a real Postgres"]
+async fn the_push_kinds_route_defaults_on_patches_by_field_and_is_independent_of_dnd() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(momo_app_pool().await).await;
+    let http = reqwest::Client::new();
+    let login: Value = http
+        .post(format!("{base}/v1/auth/login"))
+        .json(&json!({
+            "email": fixture.email,
+            "password": TEST_PASSWORD,
+            "workspace": fixture.workspace.to_string(),
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let token = login["accessToken"].as_str().expect("token").to_string();
+    let kinds = format!(
+        "{base}/v1/workspaces/{}/notification-rules/push-kinds",
+        fixture.workspace
+    );
+    let rules = format!(
+        "{base}/v1/workspaces/{}/notification-rules",
+        fixture.workspace
+    );
+    let send = |request: reqwest::RequestBuilder| {
+        let request = request.bearer_auth(&token);
+        async move {
+            let response = request.send().await.unwrap();
+            let status = response.status().as_u16();
+            (
+                status,
+                response.json::<Value>().await.unwrap_or(Value::Null),
+            )
+        }
+    };
+
+    // No row: every kind on.
+    let (status, body) = send(http.get(&kinds)).await;
+    assert_eq!((status, &body), (200, &json!({"workComplete": true})));
+
+    // Switch it off; it is stored and read back.
+    let (status, body) = send(http.patch(&kinds).json(&json!({"workComplete": false}))).await;
+    assert_eq!((status, &body), (200, &json!({"workComplete": false})));
+    let (_, body) = send(http.get(&kinds)).await;
+    assert_eq!(body, json!({"workComplete": false}));
+    let stored: bool = sqlx::query_scalar(
+        "SELECT work_complete_push FROM notification_rule WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.member)
+    .fetch_one(&su)
+    .await
+    .expect("stored switch");
+    assert!(!stored);
+
+    // Independent of DND, both ways: a DND write (PATCH and a whole-snapshot PUT)
+    // leaves the switch off, and the switch write leaves the pause alone.
+    let (status, rule) = send(http.patch(&rules).json(&json!({"dnd": true}))).await;
+    assert_eq!(status, 200);
+    assert_eq!(rule["dnd"], true);
+    let (status, _) = send(
+        http.put(&rules)
+            .json(&json!({"dnd": true, "mentionOverridesMute": true})),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let (_, body) = send(http.get(&kinds)).await;
+    assert_eq!(
+        body,
+        json!({"workComplete": false}),
+        "a DND write must not reset the switch"
+    );
+    let (status, _) = send(http.patch(&kinds).json(&json!({"workComplete": true}))).await;
+    assert_eq!(status, 200);
+    let (_, rule) = send(http.get(&rules)).await;
+    assert_eq!(
+        rule["dnd"], true,
+        "the switch write must not touch the pause"
+    );
+    assert_eq!(rule["mentionOverridesMute"], true);
+
+    // Empty or null-only body: 400. An unknown field never reaches the handler —
+    // the JSON extractor refuses it (422), as on the sibling rules routes.
+    for (bad, expected) in [
+        (json!({}), 400),
+        (json!({"workComplete": null}), 400),
+        (json!({"workComplete": true, "dm": false}), 422),
+    ] {
+        let (status, _) = send(http.patch(&kinds).json(&bad)).await;
+        assert_eq!(status, expected, "{bad}");
+    }
+
+    // Self-scoped: no spelling edits another member (the path carries no member).
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id = $1 \
+            AND action = 'notification_rule.push_kinds.updated'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .expect("audit count");
+    assert_eq!(audited, 2, "each accepted patch is audited");
+}

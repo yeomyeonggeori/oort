@@ -867,6 +867,24 @@ export async function showNotification(title: string, body?: string): Promise<bo
   }
 }
 
+/**
+ * Draw the Dock badge (#3339). The count is the web bundle's 「나에게 필요한 일」
+ * total (`useNeedsMeCount`); 0 removes the badge. Fire-and-forget: a browser, or
+ * a shell without the command, simply has no badge, which is not an error.
+ */
+export async function setDockBadge(count: number): Promise<boolean> {
+  if (!IS_TAURI) return false;
+  try {
+    await invoke<void>("dock_badge_set", {
+      count: Math.max(0, Math.min(Math.trunc(count), 0xffffffff)),
+    });
+    return true;
+  } catch (error) {
+    console.warn("[momo] dock badge failed", error);
+    return false;
+  }
+}
+
 // ---- OS credential store ----------------------------------------------------
 
 /**

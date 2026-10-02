@@ -2949,6 +2949,82 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/notification-rules/push-kinds:
+    get:
+      tags: [channels]
+      operationId: getPushKinds
+      summary: Read which kinds of push the caller wants.
+      description: >
+        ADR-0120 부록 A (#3341). The signed-in member's own per-kind push switches
+        (never a memberId from the request). No stored row answers every kind on.
+        `workComplete` gates the 「작업 끝남」 push (`reason=work_session_idle`),
+        which the server only ever sends to the member who started the session,
+        for a turn that ran 60 s or more, when the member has not just been
+        reading that channel.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The caller's push-kind switches.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushKindsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active human membership required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    patch:
+      tags: [channels]
+      operationId: patchPushKinds
+      summary: Change only the named push-kind switches.
+      description: >
+        ADR-0120 부록 A (#3341). Every field optional; an omitted one keeps what is
+        stored when the write lands (merged under the row lock). An empty body is a
+        400; an unknown field is refused by the JSON extractor (422). Independent of DND: a pause still suppresses
+        every push, and these switches are untouched by it.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchPushKindsRequest"
+      responses:
+        "200":
+          description: The stored switches after the patch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushKindsResponse"
+        "400":
+          description: Empty body (or only null fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active human membership required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /v1/workspaces/{workspaceId}/members/me/sidebar-prefs:
     get:
       tags: [sidebar]
@@ -12590,6 +12666,25 @@ components:
           description: ADR-0124 증보 2. Epoch ms while a timed pause is running, else null.
         mentionOverridesMute:
           type: boolean
+
+    PatchPushKindsRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: "ADR-0120 부록 A (#3341). Every field optional; omitted = keep what is stored."
+      properties:
+        workComplete:
+          type: boolean
+          nullable: true
+          description: 「작업 끝남」 push for sessions this member started.
+
+    PushKindsResponse:
+      type: object
+      required: [workComplete]
+      properties:
+        workComplete:
+          type: boolean
+          description: Default true.
 
     SidebarSection:
       type: object

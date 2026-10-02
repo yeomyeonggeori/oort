@@ -1,8 +1,30 @@
 import { useSyncExternalStore } from "react";
 import type { NotifyKind } from "@momo/core/features/notifications/model";
 
-/** A4 kinds plus the reminder poll (A-41). Mentions/approvals ride message.new. */
-export type DesktopNotifyKind = NotifyKind | "reminder";
+/**
+ * A4 kinds plus the reminder poll (A-41). Mentions/approvals/DMs ride
+ * message.new; the two local-pane kinds come from `paneAttention` (#3339).
+ *
+ *   pane-waiting    — a local pane is waiting for input (응답 필요)
+ *   work-mine-done  — a local pane finished (내 작업 끝남)
+ *
+ * 팀 작업 끝남 has no client-side signal yet (the server judges it, #3341), so
+ * it has no switch here: a toggle that does nothing is worse than a row that
+ * says 준비 중.
+ */
+export type DesktopNotifyKind =
+  | NotifyKind
+  | "reminder"
+  | "pane-waiting"
+  | "work-mine-done";
+
+/**
+ * Dock badge switches (#3339). The badge is the needs-me count and nothing
+ * else (`useNeedsMeCount`, one source); these only decide whether it is drawn
+ * and whether unread DMs are added on top (default off, owner decision).
+ */
+export type DockPrefKey = "dockBadge" | "dockDm";
+export type DesktopPrefKey = DesktopNotifyKind | DockPrefKey;
 
 // =============================================================================
 // This-device desktop notification kinds (BF-A4 / #1887).
@@ -20,13 +42,23 @@ export type DesktopNotifyKind = NotifyKind | "reminder";
 
 export const DESKTOP_NOTIFICATION_STORAGE_KEY = "momo.web.notifications.v1";
 
-export type DesktopNotificationKinds = Record<DesktopNotifyKind, boolean>;
+export type DesktopNotificationKinds = Record<DesktopPrefKey, boolean>;
 
 export const DEFAULT_DESKTOP_NOTIFICATION_KINDS: DesktopNotificationKinds = {
   mention: true,
   approval: true,
   reminder: true,
+  // 기본 켬: 승인·응답 필요·멘션·내 작업 끝남. 기본 끔: 새 DM(성재 결정 2026-10-02).
+  "pane-waiting": true,
+  "work-mine-done": true,
+  dm: false,
+  dockBadge: true,
+  dockDm: false,
 };
+
+const PREFERENCE_KEYS = Object.keys(
+  DEFAULT_DESKTOP_NOTIFICATION_KINDS
+) as DesktopPrefKey[];
 
 interface PreferenceStorage {
   getItem(key: string): string | null;
@@ -51,20 +83,11 @@ function parseKinds(raw: string | null): DesktopNotificationKinds {
       return { ...DEFAULT_DESKTOP_NOTIFICATION_KINDS };
     }
     const record = value as Record<string, unknown>;
-    return {
-      mention:
-        typeof record.mention === "boolean"
-          ? record.mention
-          : DEFAULT_DESKTOP_NOTIFICATION_KINDS.mention,
-      approval:
-        typeof record.approval === "boolean"
-          ? record.approval
-          : DEFAULT_DESKTOP_NOTIFICATION_KINDS.approval,
-      reminder:
-        typeof record.reminder === "boolean"
-          ? record.reminder
-          : DEFAULT_DESKTOP_NOTIFICATION_KINDS.reminder,
-    };
+    const next = { ...DEFAULT_DESKTOP_NOTIFICATION_KINDS };
+    for (const key of PREFERENCE_KEYS) {
+      if (typeof record[key] === "boolean") next[key] = record[key];
+    }
+    return next;
   } catch {
     return { ...DEFAULT_DESKTOP_NOTIFICATION_KINDS };
   }
@@ -111,7 +134,7 @@ function write(
 }
 
 export function setDesktopNotificationKind(
-  kind: DesktopNotifyKind,
+  kind: DesktopPrefKey,
   enabled: boolean,
   storage: PreferenceStorage | null = browserStorage()
 ): void {
