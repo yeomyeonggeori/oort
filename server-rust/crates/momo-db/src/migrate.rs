@@ -546,19 +546,22 @@ mod tests {
     ///
     /// 113 is #2793's shared local session (ADR-0190 D4): `work_session.origin` / `folder_label` and the
     /// `work_control_refuse_local_session` trigger that keeps every control off a `local_pty` session.
+    ///
+    /// 114 is #2862's shared-session S1 payload (ADR-0190 D4-b, ADR-0194 D9): the RLS-FORCE table `work_session_share`
+    /// and the widened `work_session.tool` CHECK.
     #[test]
-    fn discovers_contiguous_migrations_001_to_113() {
+    fn discovers_contiguous_migrations_001_to_114() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            113,
-            "expected 113 migrations under {}",
+            114,
+            "expected 114 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 113);
+        assert_eq!(migrations.last().unwrap().version, 114);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

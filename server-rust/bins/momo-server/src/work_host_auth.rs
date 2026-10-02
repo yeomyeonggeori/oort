@@ -266,6 +266,17 @@ pub(crate) fn is_allowed_signed_path(method: &Method, path: &str) -> bool {
     if method == Method::PATCH && segments.len() == 5 && segments[3] == "work-sessions" {
         return true;
     }
+    // `PATCH …/work-sessions/{session}/share` (#2862, ADR-0194 D4) — a shared
+    // local session's S1 payload / unshare. Path names a session, so the pin
+    // (signer == the session's own host, owner == the session's member) lives in
+    // the handler; a human bearer never reaches it (the handler refuses).
+    if method == Method::PATCH
+        && segments.len() == 6
+        && segments[3] == "work-sessions"
+        && segments[5] == "share"
+    {
+        return true;
+    }
     // `GET …/work-tool-profiles` (#1777) — the daemon's boot catalog. The path
     // names no host; the handler serves the enabled projection to any signed
     // host in the workspace (Swift `WorkToolProfileRoutes.list`).
