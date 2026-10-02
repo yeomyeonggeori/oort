@@ -1261,6 +1261,66 @@ pub struct UpdateWorkSessionRequest {
     pub display_endpoint: Option<String>,
 }
 
+/// `PATCH …/work-sessions/{session}/share` request (#2862 — ADR-0190 증보 D4-b S1,
+/// ADR-0194 D4). Host-signed only. `shared: false` unshares and takes no other
+/// field; `shared: true` replaces the whole S1 payload (`harness` and `state`
+/// required, the rest optional — absent or `null` is "unknown" and is cleared).
+/// The field names are the desktop collector's `ShareSummaryS1`
+/// (`packages/momo-core`, #2861): `repo`, `branch`, `harness`, `state`,
+/// `stages`, `diff{added,deleted,files,ahead,behind,uncommitted}`, `prUrl`,
+/// `lastActivityAt` (epoch **seconds**).
+///
+/// `deny_unknown_fields` is the first of three layers that keep a commit title,
+/// a file name or terminal output off the server: there is no such field here,
+/// so a request that names one is a 400 before it is validated.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShareWorkSessionRequest {
+    pub shared: bool,
+    #[serde(default)]
+    pub repo: Option<String>,
+    #[serde(default)]
+    pub branch: Option<String>,
+    #[serde(default)]
+    pub harness: Option<String>,
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub stages: Option<Vec<String>>,
+    #[serde(default)]
+    pub diff: Option<ShareDiffRequest>,
+    #[serde(default)]
+    pub pr_url: Option<String>,
+    #[serde(default)]
+    pub last_activity_at: Option<i64>,
+}
+
+/// The S1 diff numbers — integers only; there is no file-name field.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShareDiffRequest {
+    #[serde(default)]
+    pub added: Option<i64>,
+    #[serde(default)]
+    pub deleted: Option<i64>,
+    #[serde(default)]
+    pub files: Option<i64>,
+    #[serde(default)]
+    pub ahead: Option<i64>,
+    #[serde(default)]
+    pub behind: Option<i64>,
+    #[serde(default)]
+    pub uncommitted: Option<i64>,
+}
+
+/// `PATCH …/work-sessions/{session}/share` response: the fact, not the payload.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkSessionShareResponse {
+    pub session_id: String,
+    pub shared: bool,
+}
+
 /// Swift `WorkSessionACPEvent` (`WorkSessionRoutes.swift:40-51`). Wire keys
 /// stay snake_case (`event_id`, `v`, `ts`) because that is what the daemon
 /// already signs and sends.
