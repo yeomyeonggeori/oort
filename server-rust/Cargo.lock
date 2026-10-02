@@ -1775,6 +1775,7 @@ dependencies = [
  "jsonwebtoken",
  "momo-agent",
  "momo-db",
+ "momo-drive",
  "momo-messaging",
  "momo-outbox",
  "momo-provider",

@@ -1082,6 +1082,30 @@ pub const SHELL_LAUNCH_COMMANDS: &[&str] = &[
 ///
 /// An agent bearer addressed `input`/`read`/`spawn` to a remote host.
 pub const REFUSAL_REMOTE_HOST_KILL_ONLY: &str = "remote_host_kill_only";
+
+/// ADR-0190 D4 (#2793): the machine code for a control aimed at a shared local
+/// session (`work_session.origin = 'local_pty'`). 403 on every route; the
+/// `work_control_refuse_local_session` trigger (113) is the same refusal for
+/// callers that never reach a route.
+pub const REFUSAL_LOCAL_SESSION_NO_CONTROL: &str = "local_session_no_control";
+
+/// Is this session a shared local pane? `false` for a missing session (the
+/// caller's own not-found answer stays what it was).
+pub async fn session_is_local_pty_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+) -> Result<bool, T3Error> {
+    let found: Option<i32> = sqlx::query_scalar(
+        "SELECT 1 FROM work_session \
+          WHERE id = $2 AND workspace_id = $1 AND origin = 'local_pty'",
+    )
+    .bind(workspace_id)
+    .bind(session_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(found.is_some())
+}
 /// A shell was asked of a remote host.
 pub const REFUSAL_REMOTE_HOST_SHELL: &str = "remote_host_shell_refused";
 /// Somebody other than the remote host's owner tried to decide work headed to

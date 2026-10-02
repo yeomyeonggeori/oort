@@ -96,7 +96,7 @@ use momo_t3::work_control::{
     disable_auto_approve_in_tx, enable_auto_approve_in_tx, fail_approved_control_in_tx,
     insert_work_control_in_tx, last_used_spawn_host_in_tx, list_auto_approvals_in_tx,
     lock_work_control_in_tx, mark_control_dispatched_in_tx, record_host_last_used_in_tx,
-    session_control_lineage_status_in_tx, settle_control_ack_in_tx,
+    session_control_lineage_status_in_tx, session_is_local_pty_in_tx, settle_control_ack_in_tx,
     spawn_ack_session_matches_in_tx, spawn_execution_object, spawn_host_candidates_in_tx,
     spawn_is_auto_approved_in_tx, target_host_scope_allows, target_work_host_in_tx,
     validated_error_label, validated_payload, validated_session_shape, validated_tool_key,
@@ -117,7 +117,8 @@ use crate::dto::{
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
-    audit_via_token_id, path_uuid, require_human, settle, tenant_tx, workspace_scope, Rejectable,
+    audit_via_token_id, local_session_control_refusal, path_uuid, require_human, settle, tenant_tx,
+    workspace_scope, Rejectable,
 };
 use crate::AppState;
 
@@ -265,6 +266,17 @@ async fn create_in_tx(conn: &mut PgConnection, input: CreateInput) -> Rejectable
             "agent run is not eligible for work control",
         )));
     };
+
+    // ADR-0190 D4 (#2793): a shared local pane (`origin = 'local_pty'`) takes
+    // no control of any kind from anyone — refused here, before the host-scope
+    // and lineage questions (which answer a different 403) and before any write. The
+    // `work_control_refuse_local_session` trigger (113) is the same refusal for
+    // every other caller.
+    if let Some(session_id) = input.session_id {
+        if session_is_local_pty_in_tx(conn, input.workspace_id, session_id).await? {
+            return Ok(Err(local_session_control_refusal()));
+        }
+    }
 
     let Some(host) = target_work_host_in_tx(conn, input.workspace_id, input.target_host_id).await?
     else {

@@ -6668,7 +6668,9 @@ paths:
           description: >
             Human bearer, wrong agent/run lineage, member-host owner mismatch,
             or (ADR-0188 R0, `error.code: remote_host_kill_only`) an
-            input/read/spawn addressed to a member-scoped host.
+            input/read/spawn addressed to a member-scoped host, or (ADR-0190 D4,
+            `error.code: local_session_no_control`) any control naming a shared
+            local session (`origin=local_pty`), judged before the host-scope rule.
           content:
             application/json:
               schema:
@@ -13694,6 +13696,28 @@ components:
           description: >
             Credential-free HTTPS or WSS direct PTY endpoint. Userinfo, query,
             and fragment are forbidden. MomoServer never proxies this stream.
+        origin:
+          type: string
+          enum: [host, local_pty]
+          default: host
+          description: >
+            ADR-0190 D4 (#2793). `local_pty` records a shared local terminal
+            pane: a name (`label`), a folder display name (`folderLabel`) and a
+            status, nothing else. Human bearer only, and only on the caller's own
+            registered, unrevoked `app` host (403 `local_share_requires_registered_host`
+            otherwise); sharing is off until the person asks. controlId, ptyId,
+            attachEndpoint, displayId and displayEndpoint are refused with it, a
+            slot is not taken, and the server refuses every work control aimed at
+            the session (see WorkSession.origin).
+        folderLabel:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: >
+            `origin=local_pty` only (400 otherwise). The folder's last path
+            element. Path separators (`/`, `\`) and control characters are
+            refused; label obeys the same rule for `local_pty`. A full path is
+            never stored.
 
     UpdateWorkSessionRequest:
       oneOf:
@@ -13885,7 +13909,7 @@ components:
       type: object
       required:
         [id, workspaceId, channelId, memberId, hostId, rootMessageId,
-         tool, label, status, observation, observerGrantCount,
+         tool, label, origin, status, observation, observerGrantCount,
          remoteAttachAvailable, remoteDisplayAvailable, startedAtMs]
       properties:
         id:
@@ -13913,6 +13937,19 @@ components:
           type: string
           minLength: 1
           maxLength: 120
+        origin:
+          type: string
+          enum: [host, local_pty]
+          description: >
+            ADR-0190 D4 (#2793). `local_pty` is a shared local terminal pane
+            (name, folder label, status only). The server refuses EVERY work
+            control aimed at it, with 403 `local_session_no_control`: input,
+            read, kill, permission, spawn-resume, ACP relay, PTY/display binding.
+            Enforced in the routes and again by a database trigger; a host
+            receiving and ignoring a control is not the design. Immutable.
+        folderLabel:
+          type: string
+          description: '`local_pty` only. The folder''s last path element, never a full path.'
         status:
           type: string
           enum: [running, idle, orphaned, ended]
