@@ -269,7 +269,7 @@ function RailLink({
           <AttentionDot
             tone={dot}
             testId={`${testId}-dot`}
-            className="absolute right-0.5 top-0.5 ring-2 ring-surface"
+            className="absolute right-2 top-1 ring-2 ring-surface"
           />
         ) : null}
       </Link>

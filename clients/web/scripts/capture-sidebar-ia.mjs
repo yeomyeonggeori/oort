@@ -475,7 +475,7 @@ async function shortScenes(browser, origin, scheme) {
   });
   check(`${tag} 낮은 창 팀 작업(${endReach.n}줄): 끝 줄에 닿으면 창 안에 온전히 선다`, endReach.rowBottom <= endReach.vh, JSON.stringify(endReach));
   check(`${tag} 낮은 창 팀 작업: 끝까지 스크롤하면 마지막 줄이 열 안에 온전히 선다`, lastRowFits.rowBottom <= lastRowFits.rootBottom + 1 && lastRowFits.rowBottom <= lastRowFits.vh, JSON.stringify(lastRowFits));
-  check(`${tag} 낮은 창: 스크롤 단서(아래 가장자리 페이드)가 있다`, await page.getByTestId("sidebar-list-root").evaluate((el) => { const m = getComputedStyle(el).maskImage; return !!m && m !== "none"; }));
+  check(`${tag} 낮은 창: 스크롤 단서(아래 가장자리 그늘)가 있다`, await page.getByTestId("sidebar-list-root").evaluate((el) => { const c = getComputedStyle(el, "::after"); return c.content !== "none" && c.position === "sticky" && c.backgroundImage.includes("gradient"); }));
   EXTRA_TEAM = 0;
   await context.close();
 }

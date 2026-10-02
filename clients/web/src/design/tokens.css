@@ -1665,11 +1665,24 @@
   @media (height <= 780px) {
     overflow-y: auto;
     overscroll-behavior: contain;
-    /* 스크롤 단서(#3358 검수 M): 열 전체가 스크롤하는 낮은 창에서 아래 가장자리가 20px 옅어져
-     * 「더 있다」를 말한다. 색을 칠하지 않고 마스크로 깎으므로 그라데이션 바탕에서도 이음매가 없다.
-     * 끝까지 스크롤했을 때 마지막 줄이 옅어지지 않도록 같은 20px을 아래 여백으로 채운다. */
-    mask-image: linear-gradient(to bottom, black calc(100% - 20px), transparent);
-    padding-block-end: 20px;
+    /* 스크롤 단서(#3358 검수 M): 열 전체가 스크롤하는 낮은 창에서 아래 가장자리에 옅은 그늘이 붙어
+     * 「더 있다」를 말한다(아래 ::after). 색을 칠하지 않고 잉크를 옅게 섞은 그라데이션이라 바탕이
+     * 그라데이션이어도 이음매가 없다. 행이 가장자리를 가로지르지 않아도 보인다. */
+  }
+}
+@utility sidebar-list-cue {
+  @media (height <= 780px) {
+    &::after {
+      content: "";
+      position: sticky;
+      inset-block-end: 0;
+      flex: none;
+      display: block;
+      block-size: 28px;
+      margin-block-start: -28px;
+      pointer-events: none;
+      background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--ink) 9%, transparent));
+    }
   }
 }
 @utility sidebar-list-head {

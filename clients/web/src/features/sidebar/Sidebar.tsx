@@ -723,7 +723,7 @@ export function Sidebar({
               if (!asDrawer || !drawerOpen) return;
               if ((event.target as Element).closest("a")) closeDrawer();
             }}
-            className="sidebar-list-root"
+            className="sidebar-list-root sidebar-list-cue"
             data-testid="sidebar-list-root"
           >
             {/* 고정 머리(#3334): 구획 A·B는 **모든 탭에서 같은 노드·같은 자리**다. 본문만 바뀐다
