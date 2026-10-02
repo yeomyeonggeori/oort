@@ -12,12 +12,12 @@ import {
   WORK_CONSOLE_VIEW_PATH,
   WORK_NAV,
 } from "@momo/core/features/workbench/workTab";
-import { cn } from "@/design/lib/cn";
-import { CHIP_CLASS } from "@/features/common/chip";
 import { DraftsNavItem } from "@/features/drafts/DraftsNavItem";
 import { useLocalPaneAttention } from "@/features/workbench/local/paneAttention";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
 import { AGENTS_NAV } from "./workspaceNav";
+import { SessionStateChip } from "./SessionStateChip";
+import { destinationMarks } from "./sidebarBadge";
 import { AGENT_WORK_SECTION_ID, type SidebarDestinationActive } from "./sidebarDestinationsModel";
 import {
   setSidebarSectionCollapsed,
@@ -48,9 +48,15 @@ export function SidebarDestinations({
   needsMe,
   workConsoleProvided,
   nowCard,
+  unreadChannels = 0,
 }: {
   active: SidebarDestinationActive;
   needsMe: NeedsMe;
+  /**
+   * 안 읽은 채널 수. 펼친 줄에는 안 그린다(아래 채널·DM 줄이 수를 말한다). 접힌 레일의 대화 점과
+   * 같은 입력이라 여기서도 같은 `destinationMarks`로 한 번에 푼다.
+   */
+  unreadChannels?: number;
   workConsoleProvided: boolean;
   /** 지금 도는 에이전트 턴 카드(`SidebarNowCard`). 열린 턴이 없으면 아무것도 그리지 않는다. */
   nowCard?: ReactNode;
@@ -60,6 +66,15 @@ export function SidebarDestinations({
   // 웹에는 로컬 터미널 레인이 없어(ADR-0190 D1) 칸이 있어도 세지 않는다. needsMe가 이미
   // 데스크탑 판정을 거친 수(`panes`)를 준다.
   const waitingPanes = paneEntries.filter((e) => e.status === "waiting" && needsMe.panes > 0);
+  // 아직 안 본 끝남(「끝남」은 칸을 보면 내려간다, `paneAttention`). 웹에는 칸이 없어 비어 있다.
+  const donePanes = paneEntries.filter((e) => e.status === "done");
+  const marks = destinationMarks({
+    needsMe,
+    unreadChannels,
+    doneUnseen: donePanes.length > 0,
+  });
+  // 구획 B의 지금 도는 세션 줄: 응답 필요가 먼저, 안 본 끝남이 뒤. 최대 셋.
+  const liveRows = [...waitingPanes, ...donePanes].slice(0, 3);
   return (
     <div data-testid="sidebar-destinations" className="flex min-w-0 flex-col">
       <nav aria-label="워크스페이스 탐색">
@@ -71,7 +86,7 @@ export function SidebarDestinations({
             label="인박스"
             testId="nav-inbox"
             isActive={active.inbox}
-            mentionCount={needsMe.total}
+            mentionCount={marks.inbox.pill?.count ?? 0}
             badgeLabel={needsMe.total > 0 ? `나에게 필요한 일 ${needsMe.total}개` : undefined}
           />
           <SidebarRow to="/directory" icon={<Users className="size-4" />} label="멤버" testId="nav-directory" isActive={active.directory} />
@@ -83,7 +98,8 @@ export function SidebarDestinations({
         sectionId={AGENT_WORK_SECTION_ID}
         collapsed={collapsedSections[AGENT_WORK_SECTION_ID] === true}
         onCollapsedChange={(next) => setSidebarSectionCollapsed(AGENT_WORK_SECTION_ID, next)}
-        mentionCount={needsMe.panes}
+        mentionCount={marks.mine.pill?.count ?? 0}
+        dot={marks.mine.dot}
       >
         <SidebarRow to={AGENTS_NAV.to} icon={<Bot className="size-4" />} label={AGENTS_NAV.label} testId="nav-agents" isActive={active.agents} />
         <SidebarRow
@@ -92,8 +108,15 @@ export function SidebarDestinations({
           label={WORK_NAV.mine}
           testId="nav-mine"
           isActive={active.mine}
-          mentionCount={needsMe.panes}
-          badgeLabel={needsMe.panes > 0 ? `응답이 필요한 세션 ${needsMe.panes}개` : undefined}
+          mentionCount={marks.mine.pill?.count ?? 0}
+          dot={marks.mine.dot}
+          badgeLabel={
+            needsMe.panes > 0
+              ? `응답이 필요한 세션 ${needsMe.panes}개`
+              : marks.mine.dot === "ok"
+                ? "아직 안 본 끝난 세션이 있어요"
+                : undefined
+          }
         />
         <SidebarRow to={TEAM_WORK_PATH} icon={<SquareKanban className="size-4" />} label={WORK_NAV.team} testId="nav-team" isActive={active.team} />
         <SidebarRow to="/activity" icon={<Activity className="size-4" />} label="활동" testId="nav-activity" isActive={active.activity} />
@@ -114,7 +137,7 @@ export function SidebarDestinations({
         {isSurfaceProvided("workstreams") && (
           <SidebarRow to="/workstreams" icon={<Milestone className="size-4" />} label={serverSurface("workstreams").label} testId="nav-workstreams" isActive={active.workstreams} />
         )}
-        {waitingPanes.slice(0, 3).map((entry) => (
+        {liveRows.map((entry) => (
           <li key={entry.paneId}>
             <Link
               to={MY_WORK_PATH}
@@ -122,8 +145,16 @@ export function SidebarDestinations({
               data-status={entry.status}
               className="sidebar-row flex w-full items-center gap-2 text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
             >
-              <span className={cn(CHIP_CLASS, "bg-warn-soft text-warn")}>응답 필요</span>
-              <span className="min-w-0 truncate text-meta text-ink">{entry.name} · 이 기기</span>
+              <SessionStateChip status={entry.status} testId="sidebar-live-pane-chip" />
+              <span
+                className={
+                  entry.status === "waiting"
+                    ? "min-w-0 truncate text-meta font-semibold text-ink"
+                    : "min-w-0 truncate text-meta text-ink"
+                }
+              >
+                {entry.name} · 이 기기
+              </span>
             </Link>
           </li>
         ))}

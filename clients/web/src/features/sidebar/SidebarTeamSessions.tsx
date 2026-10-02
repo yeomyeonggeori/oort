@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { uuidEq } from "@momo/core/lib/api";
-import { sessionTitle, whereLabel } from "@momo/core/features/workbench/teamBoard";
+import { sessionTitle, stateChipLabel, whereLabel } from "@momo/core/features/workbench/teamBoard";
 import { filterTeamSessions, TEAM_FILTER_LABEL, type TeamFilter } from "./teamSessionsModel";
 import { TEAM_WORK_PATH } from "@momo/core/features/workbench/workTab";
 import { useSession } from "@/app/session";
 import { cn } from "@/design/lib/cn";
-import { StateChip } from "@/features/workTab/teamBoard/TeamBoardParts";
+import { SessionStateChip } from "./SessionStateChip";
 import { useTeamBoardList } from "@/features/workTab/teamBoard/useTeamBoard";
 
 // =============================================================================
@@ -41,7 +41,7 @@ export function SidebarTeamSessions() {
   const firstLoad = list.isPending && list.data === undefined;
 
   return (
-    <div className="sidebar-list-body flex min-h-0 flex-1 flex-col gap-2 border-t border-line pt-3" data-testid="sidebar-team-sessions">
+    <div className="sidebar-list-body flex min-h-0 flex-1 flex-col [@media(height<=780px)]:flex-none gap-2 border-t border-line pt-3" data-testid="sidebar-team-sessions">
       <div role="group" aria-label="팀 세션 거르기" className="flex flex-wrap gap-1 px-1">
         {(Object.keys(FILTER_LABEL) as TeamFilter[]).map((key) => (
           <button
@@ -61,7 +61,7 @@ export function SidebarTeamSessions() {
           </button>
         ))}
       </div>
-      <ul className="sidebar-stack min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <ul className="sidebar-stack min-h-0 flex-1 overflow-y-auto overscroll-contain [@media(height<=780px)]:flex-none [@media(height<=780px)]:overflow-y-visible">
         {firstLoad ? (
           <li className="px-3 py-2 text-meta text-ink-muted">불러오는 중이에요</li>
         ) : rows.length === 0 ? (
@@ -86,10 +86,15 @@ export function SidebarTeamSessions() {
                   )}
                 >
                   <span className="flex min-w-0 items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate text-body font-medium text-ink">
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate text-body text-ink",
+                        item.state === "waiting" ? "font-bold" : "font-medium"
+                      )}
+                    >
                       {sessionTitle(item)}
                     </span>
-                    <StateChip item={item} />
+                    <SessionStateChip status={item.state} label={stateChipLabel(item)} testId="sidebar-team-session-chip" />
                   </span>
                   <span className="min-w-0 truncate text-meta text-ink-muted">
                     {[item.owner.displayName, where.primary].filter(Boolean).join(" · ")}

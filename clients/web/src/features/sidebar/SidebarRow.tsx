@@ -9,6 +9,8 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { Link, NavLink } from "react-router-dom";
 import { cn } from "@/design/lib/cn";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
+import { AttentionDot, AttentionPill } from "./AttentionBadge";
+import { badgeFor, type DotTone } from "./sidebarBadge";
 import {
   shouldShowSectionActions,
   sidebarSectionListId,
@@ -84,6 +86,11 @@ export interface SidebarRowProps {
    * 말하지 않는다. 없으면 예전 그대로다.
    */
   badgeLabel?: string;
+  /**
+   * 알약이 없는 줄에 서는 점(수를 못 그릴 때). 알약이 있으면 그려지지 않는다: 같은 자리에
+   * 둘이 서면 알약이 이긴다(`sidebarBadge`).
+   */
+  dot?: DotTone | null;
 }
 
 export function SidebarRow({
@@ -101,9 +108,11 @@ export function SidebarRow({
   dragProps,
   isActive: activeOverride,
   badgeLabel,
+  dot = null,
 }: SidebarRowProps) {
+  // 알약은 한 줄에 하나다(필요 > 일반). 규칙은 `badgeFor`가 진다.
+  const pill = badgeFor({ needsMe: mentionCount, unread: unreadCount });
   const hasUnread = unreadCount > 0;
-  const hasMention = mentionCount > 0;
   const linkProps = {
     to,
     "data-sidebar-row": "",
@@ -137,22 +146,13 @@ export function SidebarRow({
         )}
       </span>
       {trailing}
-      {hasMention ? (
-        <span
-          className="sidebar-badge bg-primary text-on-primary"
-          data-numeric
-          data-testid="mention-badge"
-        >
-          {mentionCount}
-        </span>
-      ) : hasUnread ? (
-        <span
-          className="sidebar-badge bg-signal text-on-signal"
-          data-numeric
-          data-testid="unread-count"
-        >
-          {unreadCount}
-        </span>
+      {pill ? (
+        <AttentionPill
+          spec={pill}
+          testId={pill.tone === "ink" ? "mention-badge" : "unread-count"}
+        />
+      ) : dot ? (
+        <AttentionDot tone={dot} testId="row-dot" />
       ) : null}
     </>
   );
@@ -199,6 +199,7 @@ export function SidebarSection({
   overlayOpen = false,
   unreadCount = 0,
   mentionCount = 0,
+  dot = null,
   dropProps,
   headerDragProps,
   wrapList = true,
@@ -227,6 +228,8 @@ export function SidebarSection({
   /** Collapsed-header aggregate. Hidden while expanded: the rows speak then. */
   unreadCount?: number;
   mentionCount?: number;
+  /** 접혀 있고 알약이 없을 때만 서는 점(예: 아직 안 본 끝남). */
+  dot?: DotTone | null;
   /**
    * When false, children already include the `<ul>` (a Skeleton wrapping the
    * list). Default true: this section is the list. SKILL §6 `ul > li`.
@@ -265,8 +268,8 @@ export function SidebarSection({
   });
   const Chevron = collapsed ? ChevronRight : ChevronDown;
   const listId = sidebarSectionListId(sectionId);
-  const hasUnread = unreadCount > 0;
-  const hasMention = mentionCount > 0;
+  // 접힌 머리의 합산도 줄과 같은 문법이다: 잉크(필요) > 호박(일반 안 읽음) > 점.
+  const sectionPill = badgeFor({ needsMe: mentionCount, unread: unreadCount });
 
   const onHeaderFocus = (event: FocusEvent<HTMLDivElement>) => {
     // Pointer click focuses the collapse button but must not paint a ring or
@@ -335,22 +338,10 @@ export function SidebarSection({
             <span className="min-w-0 truncate">{title}</span>
           </button>
         </h2>
-        {collapsed && hasMention ? (
-          <span
-            className="sidebar-badge bg-primary text-on-primary"
-            data-numeric
-            data-testid={`section-unread-${sectionId}`}
-          >
-            {mentionCount}
-          </span>
-        ) : collapsed && hasUnread ? (
-          <span
-            className="shrink-0 text-timestamp text-ink-muted"
-            data-numeric
-            data-testid={`section-unread-${sectionId}`}
-          >
-            {unreadCount}
-          </span>
+        {collapsed && sectionPill ? (
+          <AttentionPill spec={sectionPill} testId={`section-unread-${sectionId}`} />
+        ) : collapsed && dot ? (
+          <AttentionDot tone={dot} testId={`section-dot-${sectionId}`} />
         ) : null}
         {showActions ? action : null}
       </div>
