@@ -544,6 +544,10 @@
   --spacing-work-tab-bar: 48px;
   /* 「팀 작업」 머리 줄 높이 (#2854, 시안 ④ `.mhd` 54). */
   --spacing-work-board-bar: 54px;
+  /* 「팀 작업」 세션 상세 드로어 폭 (#2863, 시안 ④ `.drawer` 408). 1440 창에서 앱 사이드바(324)를
+   * 빼고 남는 본문 1108 중 408을 쓰면 표가 700을 지킨다. 그보다 좁은 창은 드로어가 표를
+   * 대신한다(`team-board-layout`). */
+  --spacing-work-board-drawer: 408px;
 
   /* Diff body measure (MOMO-620 / ADR-0126 D2). A diff scrolls INSIDE its card
    * at this height, the same 400px cap the mac card uses, so a 500 line change
@@ -2748,6 +2752,65 @@
  * 서고, 900px 아래에서는 선택 전 목록 / 선택 후 상세 중 하나만 선다. 기존
  * work-pane과 같은 문턱을 쓰는 이유는 상세가 같은 80열 터미널을 품기 때문이다.
  * 임의 grid-template 값을 컴포넌트에 흩뿌리지 않고 이름 붙은 기하 한 줄로 둔다. */
+/* 「팀 작업」 보드 몸(#2863, 시안 ④). 표 열 | 드로어 열. 드로어가 선 채 창이 1400보다
+ * 좁으면 표가 408을 내줄 수 없어서 드로어가 표 자리를 통째로 쓴다(닫으면 표로 돌아온다).
+ * 작업 콘솔의 `work-console-layout`과 같은 방식이고, 임의 grid 값을 컴포넌트에 두지 않는다. */
+@utility team-board-layout {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+
+  > [data-team-board-list] {
+    min-width: 0;
+    flex: 1;
+  }
+
+  > [data-team-board-drawer] {
+    width: var(--spacing-work-board-drawer);
+    flex: none;
+  }
+
+  @media (width < 1400px) {
+    &[data-drawer] > [data-team-board-list] {
+      display: none;
+    }
+
+    &[data-drawer] > [data-team-board-drawer] {
+      width: auto;
+      flex: 1;
+    }
+  }
+}
+
+/* 보드 표의 한 줄. 머리 줄과 데이터 줄이 같은 열을 쓴다. 상태 열 120, 활동 열 80, 채널 열 96.
+ * 1100보다 좁으면 「작업 위치」와 「채널」 열을 접는다(상세 드로어가 둘 다 말한다). */
+@utility team-board-row {
+  display: grid;
+  align-items: center;
+  column-gap: 12px;
+  grid-template-columns: minmax(0, 2.3fr) minmax(0, 1.6fr) 120px 80px 96px;
+
+  /* 접힌 두 열의 내용은 첫 열의 둘째 줄(`data-narrow`)로 옮겨 가 보인다: 좁아도 카드가 말하는 것은
+   * 같다. 넓을 때는 이 줄을 숨긴다. */
+  [data-narrow] {
+    display: none;
+  }
+
+  @media (width < 1100px) {
+    grid-template-columns: minmax(0, 1fr) 120px 80px;
+
+    > [data-col="where"],
+    > [data-col="channel"] {
+      display: none;
+    }
+
+    [data-narrow] {
+      display: flex;
+    }
+  }
+}
+
 @utility work-console-layout {
   display: grid;
   grid-template-columns: var(--spacing-pane) minmax(0, 1fr);

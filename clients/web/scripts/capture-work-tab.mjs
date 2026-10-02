@@ -103,6 +103,7 @@ async function installRoutes(context) {
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     if (path.endsWith("/work-hosts")) return json(route, { workHosts: [] });
     if (path.endsWith("/work-sessions")) return json(route, { workSessions: [] });
+    if (path.endsWith("/work-sessions/shared")) return json(route, { sessions: [], nextCursor: null });
     if (path.endsWith(`/workspaces/${workspaceId}`)) return json(route, { workspace: { id: workspaceId, name: "여명거리" } });
     if (path.includes("/messages")) return json(route, { messages: [] });
     return json(route, {});
@@ -363,7 +364,7 @@ async function teamWork(browser, origin, scheme, viewport, desktop) {
   } else {
     await page.getByTestId("rail-team").click();
   }
-  await page.getByTestId("team-work-empty").waitFor();
+  await page.getByTestId("team-board-empty").waitFor();
   check(`${tag} 팀 작업 빈 상태`, true);
   check(`${tag} 가로 넘침 0`, (await overflowX(page)) === 0);
   check(`${tag} 팀 작업에서는 레일로 접지 않는다`, (await page.locator("[data-testid='workspace-rail']").count()) === 0);
