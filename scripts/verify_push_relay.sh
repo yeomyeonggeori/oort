@@ -69,7 +69,7 @@ MOMO_APNS_ALLOW_STUB=1 \
 MOMO_APNS_STUB_STATUS=410 \
 MOMO_APNS_STUB_REASON=Unregistered \
 MOMO_APNS_STUB_CAPTURE_PATH="$CAPTURE" \
-MOMO_PUSH_RELAY_RATE_LIMIT_PER_MINUTE=2 \
+MOMO_PUSH_RELAY_RATE_LIMIT_PER_MINUTE=7 \
 MOMO_PUSH_RELAY_HOST=127.0.0.1 \
 MOMO_PUSH_RELAY_PORT="$PORT" \
 "$BIN" >"$TMP_ROOT/relay.log" 2>&1 &
@@ -153,8 +153,43 @@ STATUS="$(curl -sS -o /dev/null -w '%{http_code}' \
 echo "[sabotage] extra envelope field body -> HTTP $STATUS (expect 400)"
 test "$STATUS" = 400
 
+# ADR-0120 부록 A (Accepted 2026-10-02, #3341): the reason vocabulary is five.
+# Every reason is accepted on the category the judgment pairs it with, and one
+# outside the set is a 400 (the closed validator, not a pass-through). The five
+# accepted bodies use five of the window's seven slots (the first body above
+# used one), so the rate-limit step below still sees exactly two left.
+reason_n=0
+for pair in "dm momo.message" "mention momo.mention" "approval_request momo.approval" \
+            "resume_offer momo.work" "work_session_idle momo.work"; do
+  reason="${pair% *}"; category="${pair#* }"
+  reason_n=$((reason_n + 1))
+  msg_id="55555555-5555-5555-5555-55555555555${reason_n}"
+  RBODY="$TMP_ROOT/reason-$reason.json"
+  jq -c --arg r "$reason" --arg c "$category" --arg id "$msg_id" \
+    '.reason=$r | .category=$c | .message_id=$id | .collapse_id=("m-"+$id)
+     | if $c == "momo.approval" then .approval_id="66666666-6666-6666-6666-666666666666" else . end' \
+    "$BODY" >"$RBODY"
+  STATUS="$(curl -sS -o /dev/null -w '%{http_code}' \
+    -H 'Content-Type: application/json' \
+    -H 'X-Momo-Server-Id: verify-server' \
+    -H "X-Momo-Push-Signature: $(sign_body "$RBODY")" \
+    --data-binary "@$RBODY" "http://127.0.0.1:$PORT/v1/push")"
+  echo "[reasons] $reason on $category -> HTTP $STATUS (expect 200)"
+  test "$STATUS" = 200
+done
+UNKNOWN="$TMP_ROOT/reason-unknown.json"
+jq -c '.reason="work_session_done" | .category="momo.work" | .message_id="77777777-7777-7777-7777-777777777777"' \
+  "$BODY" >"$UNKNOWN"
+STATUS="$(curl -sS -o /dev/null -w '%{http_code}' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Momo-Server-Id: verify-server' \
+  -H "X-Momo-Push-Signature: $(sign_body "$UNKNOWN")" \
+  --data-binary "@$UNKNOWN" "http://127.0.0.1:$PORT/v1/push")"
+echo "[sabotage] reason outside the five -> HTTP $STATUS (expect 400)"
+test "$STATUS" = 400
+
 # Rate limit counts distinct accepted dispatches. Replay of the first body
-# did not consume a second slot, so the next unique body fills the window of 2
+# did not consume a second slot, so the next unique body fills the window
 # and the one after that is 429.
 unique_body 0 >"$TMP_ROOT/u0.json"
 unique_body 1 >"$TMP_ROOT/u1.json"

@@ -78,9 +78,10 @@ use momo_t3::{
     mark_work_session_resumed_in_tx, parse_remote_pty_binding, pause_usage_in_tx,
     remote_pty_host_status_in_tx, resolve_cloud_host_id, set_work_session_observation_in_tx,
     start_usage_in_tx, terminate_in_tx, tool_lifecycle_payload, transition_tool_lifecycle_in_tx,
-    update_session_card_props_in_tx, work_session_scope_in_tx, work_tool_is_enabled_in_tx,
-    write_remote_pty_binding_in_tx, ControlWindowEndReason, NewWorkSession, RemotePtyBinding,
-    RemotePtyHostStatus, T3Error, T3LockLadder, TerminationReason, WorkSessionDetail,
+    turn_timing_in_tx, update_session_card_props_in_tx, work_session_scope_in_tx,
+    work_tool_is_enabled_in_tx, write_remote_pty_binding_in_tx, ControlWindowEndReason,
+    NewWorkSession, RemotePtyBinding, RemotePtyHostStatus, T3Error, T3LockLadder,
+    TerminationReason, WorkSessionDetail,
 };
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
@@ -1970,6 +1971,10 @@ async fn transition_lifecycle_in_tx(
 
     let channel = cent_channel(workspace_id, updated.channel_id);
     let (event_type, event_seq, discriminator, _idle_message) = if target_status == "idle" {
+        // #3341 / ADR-0120 부록 A: the card carries the length of the turn that
+        // just ended, measured here. Judgment reads these two numbers and nothing
+        // else about timing — it never looks at the session row again.
+        let (turn_started_ms, ran_ms) = turn_timing_in_tx(conn, workspace_id, session_id).await?;
         let idle_card = send_message_in_tx(
             conn,
             workspace_id,
@@ -1982,6 +1987,8 @@ async fn transition_lifecycle_in_tx(
                     "kind": "work_session_idle",
                     "session_id": updated.id.to_string(),
                     "owner_member_id": updated.member_id.to_string(),
+                    "turn_started_ms": turn_started_ms,
+                    "ran_ms": ran_ms,
                 }),
                 root_id: Some(updated.root_message_id),
                 reply_to_id: None,
