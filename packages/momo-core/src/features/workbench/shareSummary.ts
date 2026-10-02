@@ -81,15 +81,15 @@ export const noopShareSender: ShareSender = { send: () => undefined };
 
 // ---- 정제 ------------------------------------------------------------------
 
-// 제어 문자·ESC·양방향 서식·보이지 않는 서식 문자. 코드 포인트로 판정한다.
+// 제어 문자·ESC·줄/문단 구분·서식 문자(양방향·태그·보이지 않는 구분)·채움 문자·이형 선택자.
+const HIDDEN_CATEGORY = /^[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]$/u;
+const HIDDEN_POINTS = new Set([0x034f, 0x115f, 0x1160, 0x3164]);
 function isHiddenFormat(cp: number): boolean {
   return (
-    cp <= 0x1f ||
-    (cp >= 0x7f && cp <= 0x9f) ||
-    (cp >= 0x200b && cp <= 0x200f) ||
-    (cp >= 0x202a && cp <= 0x202e) ||
-    (cp >= 0x2060 && cp <= 0x206f) ||
-    cp === 0xfeff
+    HIDDEN_POINTS.has(cp) ||
+    (cp >= 0xfe00 && cp <= 0xfe0f) ||
+    (cp >= 0xe0100 && cp <= 0xe01ef) ||
+    HIDDEN_CATEGORY.test(String.fromCodePoint(cp))
   );
 }
 
@@ -114,9 +114,12 @@ const PR_PATH = /^\/[^/\s]+\/[^/\s]+\/pull\/\d{1,9}$/;
 
 /**
  * PR URL: 한 줄, `https`, `/<소유자>/<저장소>/pull/<번호>`로 끝남. 자격 증명·질의·
- * 조각이 붙은 값은 거부한다(토큰이 섞일 수 있다). 형식의 정본은 ADR-0194.
+ * 조각·포트가 붙은 값과 허용 호스트(기본 github.com, GHE는 호출자가 넘긴다) 밖의 값은
+ * 거부한다(토큰이 섞일 수 있고, 임의 호스트로 가는 링크가 된다). 형식의 정본은 ADR-0194.
  */
-export function parsePrUrl(value: unknown): string | null {
+export const PR_HOSTS_DEFAULT: readonly string[] = ["github.com"];
+
+export function parsePrUrl(value: unknown, hosts: readonly string[] = PR_HOSTS_DEFAULT): string | null {
   if (typeof value !== "string" || value.length > MAX_PR_URL_CHARS) return null;
   const text = value.trim();
   if (/\s/.test(text) || [...text].some((ch) => isHiddenFormat(ch.codePointAt(0)!))) return null;
@@ -127,7 +130,8 @@ export function parsePrUrl(value: unknown): string | null {
     return null;
   }
   if (url.protocol !== "https:" || url.username !== "" || url.password !== "") return null;
-  if (url.search !== "" || url.hash !== "") return null;
+  if (url.search !== "" || url.hash !== "" || url.port !== "") return null;
+  if (!hosts.includes(url.hostname)) return null;
   if (!PR_PATH.test(url.pathname)) return null;
   return `https://${url.host}${url.pathname}`;
 }
@@ -195,6 +199,11 @@ export interface ShareCollector {
   onGit(results: GitInputs): void;
   onLifecycle(phase: SessionPhaseInput, exitCode?: number | null, exitSignal?: string | number | null): void;
   onPrUrl(url: string | null): void;
+  /**
+   * 칸이 마지막으로 내보낸 **시각**(ms). ADR-0190 D4-b 출처 3: 출력 내용이 아니라 시각만
+   * 받는다. 숫자 하나가 입구라서 글이 들어올 길이 없다.
+   */
+  onActivity(atMs: number): void;
   /** 공유를 켜면 현재 요약을 바로 보내고, 끄면 보류 중인 갱신을 버린다. 기본은 꺼짐(D4). */
   setSharing(on: boolean): void;
   /** 지금까지 모인 요약. 공유 여부와 무관하게 읽을 수 있다(로컬 표시용). */
@@ -258,17 +267,47 @@ export function createShareCollector(options: ShareCollectorOptions): ShareColle
     };
   }
 
+  /** 보내는 중에 새 요약이 필요해졌다: 끝난 뒤 최신 모양으로 한 번 더 보낸다. */
+  let inFlight = false;
+  let resend = false;
+
+  function sendFailed(): void {
+    // 못 보낸 모양을 보낸 것으로 두지 않는다: 다음 변화가 간격 제한 안에서 다시 시도한다.
+    lastSentShape = null;
+  }
+
+  function sendDone(): void {
+    inFlight = false;
+    if (resend) {
+      resend = false;
+      flush();
+    }
+  }
+
   function flush(): void {
     cancelPending?.();
     cancelPending = null;
     if (!sharing) return;
+    if (inFlight) {
+      resend = true;
+      return;
+    }
     const summary = snapshot();
     lastSentShape = shape(summary);
     lastSentAt = now();
+    let result: void | Promise<void>;
     try {
-      void Promise.resolve(sender.send(summary)).catch(() => undefined);
+      result = sender.send(summary);
     } catch {
-      // 보내기 실패는 수집을 멈추지 않는다. 다음 변화가 다시 시도한다.
+      sendFailed();
+      return;
+    }
+    if (result !== undefined && typeof (result as Promise<void>).then === "function") {
+      inFlight = true;
+      (result as Promise<void>).then(sendDone, () => {
+        sendFailed();
+        sendDone();
+      });
     }
   }
 
@@ -352,6 +391,12 @@ export function createShareCollector(options: ShareCollectorOptions): ShareColle
       if (nextPhase === "failed") pushStage(STAGE_LABEL.failed);
       if (nextPhase === "starting" || nextPhase === "exited" || nextPhase === "failed") signal = null;
       touch();
+      changed();
+    },
+    onActivity(atMs) {
+      if (!Number.isFinite(atMs) || atMs < 0) return;
+      if (lastActivityMs !== null && atMs <= lastActivityMs) return;
+      lastActivityMs = Math.min(atMs, now());
       changed();
     },
     onPrUrl(url) {

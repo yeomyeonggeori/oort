@@ -131,7 +131,7 @@ describe("red proof: 출력 파싱 경로가 없다 (ADR-0190 D4-b, Q3)", () => 
   it("수집기의 입구는 타입 있는 신호뿐이고 출력을 받는 메서드가 없다", () => {
     const { c } = rig();
     expect(Object.keys(c).sort()).toEqual(
-      ["dispose", "onGit", "onLifecycle", "onPrUrl", "onSignal", "onTitle", "setSharing", "snapshot"].sort()
+      ["dispose", "onActivity", "onGit", "onLifecycle", "onPrUrl", "onSignal", "onTitle", "setSharing", "snapshot"].sort()
     );
   });
 
@@ -196,6 +196,21 @@ describe("정제", () => {
     expect(c.snapshot().repo).toBeNull();
     c.onGit({ g1: ok({ kind: "repo", name: "oort" }) });
     expect(c.snapshot().repo).toBe("oort");
+  });
+
+  it("줄·문단 구분, 태그 문자, 이형 선택자도 지운다", () => {
+    expect(cleanLabel("a\u2028b\u2029c", 10)).toBe("abc");
+    expect(cleanLabel("x\u{E0041}\u{E0042}y", 10)).toBe("xy");
+    expect(cleanLabel("a\uFE0Fb\u3164c", 10)).toBe("abc");
+    expect(parsePrUrl("https://github.com/a/b\u2028/pull/1")).toBeNull();
+  });
+
+  it("PR URL은 허용 호스트의 기본 포트만 받는다", () => {
+    expect(parsePrUrl("https://evil.example/a/b/pull/1")).toBeNull();
+    expect(parsePrUrl("https://github.com:8443/a/b/pull/1")).toBeNull();
+    expect(parsePrUrl("https://ghe.corp.example/a/b/pull/1", ["ghe.corp.example"])).toBe(
+      "https://ghe.corp.example/a/b/pull/1"
+    );
   });
 
   it("PR URL은 https + /pull/<번호>만, 자격 증명·질의·조각은 거부", () => {
@@ -270,20 +285,62 @@ describe("공유 꺼짐 기본값과 합치기·간격 제한", () => {
     expect(sent.length).toBe(n + 1);
   });
 
-  it("보내기가 던져도 수집은 계속된다", () => {
-    let t = 0;
+  it("보내기가 던져도 수집은 계속되고, 못 보낸 모양은 다음 변화에서 다시 보낸다", () => {
+    let t = 1_000_000;
+    let fail = true;
+    const sent: ShareSummaryS1[] = [];
     const c = createShareCollector({
       harness: "codex",
       now: () => (t += 10_000),
       sender: {
-        send: () => {
-          throw new Error("boom");
+        send: (summary) => {
+          if (fail) throw new Error("boom");
+          sent.push(summary);
         },
       },
     });
+    c.onLifecycle("running");
+    c.setSharing(true); // 실패
+    expect(sent).toEqual([]);
+    fail = false;
+    expect(() => c.onSignal("waiting-permission")).not.toThrow();
+    expect(sent.at(-1)?.state).toBe("waiting");
+  });
+
+  it("보내는 중에는 겹쳐 보내지 않고, 끝난 뒤 최신 모양을 한 번 더 보낸다", async () => {
+    let t = 1_000_000;
+    const releases: (() => void)[] = [];
+    const sent: ShareSummaryS1[] = [];
+    const c = createShareCollector({
+      harness: "claude",
+      now: () => (t += 10_000),
+      sender: {
+        send: (summary) => {
+          sent.push(summary);
+          return new Promise<void>((r) => releases.push(r));
+        },
+      },
+    });
+    c.onLifecycle("running");
     c.setSharing(true);
-    expect(() => c.onSignal("working")).not.toThrow();
-    expect(c.snapshot().state).toBe("idle");
+    c.onSignal("working");
+    c.onSignal("waiting-permission");
+    expect(sent.length).toBe(1); // 첫 요청이 끝나기 전에는 하나뿐
+    releases[0]!();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(sent.length).toBe(2);
+    expect(sent[1]!.state).toBe("waiting");
+  });
+
+  it("활동 시각은 숫자 하나로만 받고 되돌아가지 않는다", () => {
+    const { c } = rig();
+    c.onActivity(1_000_500);
+    expect(c.snapshot().lastActivityAt).toBe(1000);
+    c.onActivity(900_000);
+    expect(c.snapshot().lastActivityAt).toBe(1000);
+    c.onActivity(Number.NaN);
+    expect(c.snapshot().lastActivityAt).toBe(1000);
   });
 
   it("기본 보내기는 아무 일도 하지 않는다", () => {
