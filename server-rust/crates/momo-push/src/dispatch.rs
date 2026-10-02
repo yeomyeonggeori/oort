@@ -67,25 +67,6 @@ impl PushReason {
             _ => None,
         }
     }
-
-    /// Whether the **relay** will accept this reason.
-    ///
-    /// Known divergence, ported deliberately rather than silently repaired:
-    /// judgment can produce [`PushReason::WorkSessionIdle`]
-    /// (`NotifierService.swift:367-369`), but the relay's closed validator
-    /// (`relay/PushRelay/.../PushDispatch.swift:71-73`) and the iOS NSE
-    /// (`clients/iOS/.../PushNotification.swift:188`) both accept only the other
-    /// four. Such a dispatch is answered 400 → settled as a permanent failure →
-    /// never delivered and never retried.
-    ///
-    /// The e2e gate does not catch this because it asserts against
-    /// `scripts/mock_push_relay.py`, which performs no vocabulary validation.
-    /// Widening the relay's vocabulary is an ADR-0120 wire change, so this port
-    /// preserves the behaviour and pins it with
-    /// [`tests::work_session_idle_is_not_deliverable_through_the_relay`].
-    pub fn accepted_by_relay(self) -> bool {
-        !matches!(self, PushReason::WorkSessionIdle)
-    }
 }
 
 /// APNs `category` — drives the client's notification actions and grouping.
@@ -479,28 +460,24 @@ mod tests {
         assert!(first.len() <= 64, "apns-collapse-id is capped at 64 bytes");
     }
 
-    /// Pins the divergence documented on [`PushReason::accepted_by_relay`]:
-    /// judgment can emit `work_session_idle`, but the relay and the iOS NSE
-    /// accept only four reasons, so those pushes are silently undeliverable
-    /// today. If the relay's vocabulary is ever widened (an ADR-0120 change),
-    /// this test goes red and must be updated deliberately.
+    /// The wire vocabulary is exactly these five strings (ADR-0120 부록 A,
+    /// Accepted 2026-10-02). The relay validator
+    /// (`momo-push-relay/src/dispatch.rs` `ALLOWED_REASONS`) and the phone's
+    /// `clients/mobile/src/push/contract.ts` + `PushNotification.swift` spell the
+    /// same five; each pins its own copy, so adding a reason here without
+    /// widening them turns one of those red instead of silently 400-ing in prod.
     #[test]
-    fn work_session_idle_is_not_deliverable_through_the_relay() {
-        for reason in [
-            PushReason::Dm,
-            PushReason::Mention,
-            PushReason::ApprovalRequest,
-            PushReason::ResumeOffer,
-        ] {
-            assert!(
-                reason.accepted_by_relay(),
-                "{} is in the relay vocabulary",
-                reason.as_str()
-            );
+    fn the_judgment_vocabulary_is_the_five_wire_reasons() {
+        let all = [
+            (PushReason::Dm, "dm"),
+            (PushReason::Mention, "mention"),
+            (PushReason::ApprovalRequest, "approval_request"),
+            (PushReason::ResumeOffer, "resume_offer"),
+            (PushReason::WorkSessionIdle, "work_session_idle"),
+        ];
+        for (reason, label) in all {
+            assert_eq!(reason.as_str(), label);
+            assert_eq!(PushReason::from_db(label), Some(reason));
         }
-        assert!(
-            !PushReason::WorkSessionIdle.accepted_by_relay(),
-            "relay/PushRelay/.../PushDispatch.swift:71-73 rejects work_session_idle"
-        );
     }
 }
