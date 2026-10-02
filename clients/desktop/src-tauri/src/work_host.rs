@@ -781,6 +781,27 @@ impl Service<'_> {
         accepted_remote_profile_dir(&self.layout, harness, label, &answer)
     }
 
+    /// `share_session` (#2867): workd signs and sends `PATCH …/work-sessions/{id}/share`
+    /// as this host. The webview names a session and an S1 body; the key, the
+    /// path and the signature stay in workd. Refused here, before the socket,
+    /// when the id is not a uuid or the body is not a JSON object.
+    pub fn share_session(&self, session_id: &str, body: &Value) -> Result<(), WorkdError> {
+        let session_id = share_session_id(session_id)?;
+        if !body.is_object() {
+            return Err(WorkdError::Refused("invalid_request".into()));
+        }
+        let pid = self
+            .state
+            .running_pid()
+            .ok_or_else(|| WorkdError::Socket("not_running".into()))?;
+        ask_workd_request(
+            &self.layout.socket,
+            pid,
+            &json!({ "op": "share_session", "sessionId": session_id, "body": body }),
+        )
+        .map(|_| ())
+    }
+
     /// Where this Mac is registered, if it is.
     pub fn registered(&self) -> Option<Registered> {
         read_registered(&self.layout)
@@ -1311,6 +1332,31 @@ pub async fn work_host_prepare_remote_profile(
     .await
 }
 
+/// A session id as workd's path wants it: a canonical lowercase uuid, never a
+/// string a webview could stretch into another path.
+fn share_session_id(raw: &str) -> Result<String, WorkdError> {
+    uuid::Uuid::parse_str(raw)
+        .map(|id| id.to_string())
+        .map_err(|_| WorkdError::Refused("invalid_request".into()))
+}
+
+/// 「채널에 공유」·「공유 끄기」(#2867): hand workd a shared pane's S1 body to sign
+/// and send as this host. Errors are workd's closed `share_*` labels or a socket
+/// code; the server's message never reaches the webview.
+#[tauri::command]
+pub async fn work_host_share(
+    app: tauri::AppHandle,
+    session_id: String,
+    body: Value,
+) -> Result<(), String> {
+    blocking(app, move |service| {
+        service
+            .share_session(&session_id, &body)
+            .map_err(|error| error_code(&error))
+    })
+    .await
+}
+
 /// At launch: a registered host starts with the app (ADR-0188 D2 첫 단계).
 pub fn start_if_registered(app: &tauri::AppHandle) {
     let app = app.clone();
@@ -1588,6 +1634,26 @@ mod tests {
         assert_eq!(error_code(&error), "profile_not_found");
         let _ = server.join();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_share_session_id_is_a_uuid_or_nothing_reaches_the_socket() {
+        assert_eq!(
+            share_session_id("0194E0B2-8F5A-7C3D-9A11-2B3C4D5E6F70").unwrap(),
+            "0194e0b2-8f5a-7c3d-9a11-2b3c4d5e6f70"
+        );
+        for bad in [
+            "",
+            "../../work-hosts",
+            "0194e0b2-8f5a-7c3d-9a11-2b3c4d5e6f70/x",
+            "x",
+        ] {
+            assert_eq!(
+                share_session_id(bad).unwrap_err(),
+                WorkdError::Refused("invalid_request".into()),
+                "{bad:?}"
+            );
+        }
     }
 
     #[test]

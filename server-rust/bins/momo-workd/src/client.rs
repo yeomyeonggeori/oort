@@ -511,6 +511,25 @@ impl HostApi for HostClient {
     }
 }
 
+/// Relay of a shared local pane's S1 payload (#2867, ADR-0194 D4). The desktop
+/// app hands workd the body over the code-signed control socket; workd signs
+/// `PATCH …/work-sessions/{session}/share` as this host and sends it. The host
+/// key never leaves workd, and the path is built here from a parsed uuid.
+#[async_trait]
+pub trait ShareRelay: Send + Sync + 'static {
+    async fn relay_share(&self, session_id: Uuid, body: &Value) -> Result<(), ClientError>;
+}
+
+#[async_trait]
+impl ShareRelay for HostClient {
+    async fn relay_share(&self, session_id: Uuid, body: &Value) -> Result<(), ClientError> {
+        let path = self.workspace_path(&format!("work-sessions/{session_id}/share"));
+        self.signed(Method::PATCH, &path, Some(body))
+            .await
+            .map(|_| ())
+    }
+}
+
 /// `POST /v1/workspaces/{ws}/work-hosts` with the **owner's** bearer — the one
 /// call a host makes as a person rather than as itself (ADR-0188 D2/D3: the
 /// person who registers is the owner). The token is used for this request and

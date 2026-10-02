@@ -82,6 +82,7 @@ fn serve(path: &Path, policy: PeerPolicy) -> (tokio::task::JoinHandle<()>, Arc<N
         )),
         state_folder: path.parent().expect("socket folder").to_path_buf(),
         grants: momo_workd::session_grant::GrantEpoch::default(),
+        share: None,
     };
     let task = tokio::spawn(socket.serve(identity, shared));
     (task, stop)
