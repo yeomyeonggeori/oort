@@ -8,6 +8,7 @@ import {
   channelLabel,
   ownedBy,
   sessionTitle,
+  stateChipLabel,
   whereLabel,
   type BoardSection,
 } from '@momo/core/features/workbench/teamBoard';
@@ -414,7 +415,7 @@ function BoardRow({
       onPress={onPress}
       accessibilityLabel={[
         sessionTitle(item),
-        item.state === 'waiting' ? '응답 필요' : '',
+        stateChipLabel(item),
         `${item.owner.displayName}`,
         whereText,
         channel,
@@ -438,7 +439,7 @@ function BoardRow({
         ) : null}
         <View style={styles.metaLine}>
           <Text style={styles.rowMeta} numberOfLines={1}>
-            {channel} · {activity}
+            {item.owner.displayName} · {channel} · {activity}
           </Text>
           <DiffNumbers item={item} />
         </View>
