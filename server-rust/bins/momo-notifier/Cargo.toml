@@ -26,6 +26,10 @@ momo-db = { path = "../../crates/momo-db" }
 # whether or not a human ever looks.
 momo-agent = { path = "../../crates/momo-agent" }
 momo-messaging = { path = "../../crates/momo-messaging" }
+# #3284 (ADR-0161 D5 + 증보 1): the avatar reclaim sweep deletes Drive objects.
+# Only `DriveArchive::delete_file` is called, and only with ids read inside a
+# tenant transaction after the current-avatar check.
+momo-drive = { path = "../../crates/momo-drive" }
 chrono.workspace = true
 momo-provider = { path = "../../crates/momo-provider" }
 momo-t3 = { path = "../../crates/momo-t3" }

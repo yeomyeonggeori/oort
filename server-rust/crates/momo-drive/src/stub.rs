@@ -153,6 +153,12 @@ impl DriveArchive for StubDriveArchive {
         })
     }
 
+    async fn delete_file(&self, file_id: &str) -> Result<(), DriveError> {
+        // Idempotent: removing an object that is not there is success.
+        self.state.lock().await.objects.remove(file_id);
+        Ok(())
+    }
+
     async fn file_content(
         &self,
         file_id: &str,
@@ -256,6 +262,48 @@ mod tests {
             out.extend_from_slice(&chunk.expect("chunk"));
         }
         out
+    }
+
+    #[tokio::test]
+    async fn delete_removes_the_object_and_a_second_delete_is_still_success() {
+        let archive = StubDriveArchive::new("http://127.0.0.1:9");
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "a.png", "image/png", 5)
+            .await
+            .expect("session");
+        let token = session
+            .upload_url
+            .rsplit('/')
+            .next()
+            .expect("token")
+            .to_string();
+        archive
+            .accept_stub_upload(&token, Some("image/png"), None, body(b"hello"))
+            .await
+            .expect("upload");
+        archive
+            .file_metadata(&session.drive_file_id)
+            .await
+            .expect("landed");
+        archive
+            .delete_file(&session.drive_file_id)
+            .await
+            .expect("delete");
+        assert_eq!(
+            archive
+                .file_metadata(&session.drive_file_id)
+                .await
+                .expect_err("gone"),
+            DriveError::FileNotFound
+        );
+        archive
+            .delete_file(&session.drive_file_id)
+            .await
+            .expect("again");
+        archive
+            .delete_file("never-existed")
+            .await
+            .expect("unknown id");
     }
 
     #[tokio::test]
