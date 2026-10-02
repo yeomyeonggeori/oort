@@ -6585,6 +6585,129 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /v1/workspaces/{workspaceId}/work-sessions/shared:
+    get:
+      tags: [work-sessions]
+      operationId: listSharedWorkSessions
+      summary: Team board — the shared sessions of the channels the caller belongs to.
+      description: >
+        #3322 (serves #2863), ADR-0190 D4 and ADR-0194. Human bearer only (a
+        host signature or agent token is refused). Each row is momo-core's
+        ShareSummaryS1 (repo, branch, harness, state, stages, diff, prUrl,
+        lastActivityAt in epoch seconds) plus the owner member, the home channel
+        and the lane (origin). Included: shared local sessions (origin local_pty
+        that still have their S1 payload) and agent-lane sessions (origin host);
+        either kind leaves the board 30 days after it ended, enforced by the
+        read itself (not by the retention sweep); an agent-lane row has null repo,
+        branch, prUrl, folderLabel, sharedAtMs and diff numbers and an empty
+        stages list, its state derived from the ledger (running, idle, done,
+        stopped) and its lastActivityAt from the newest thread message. Only
+        sessions whose home channel the caller is an active member of are
+        listed — the filter is in SQL under RLS FORCE and there is no
+        workspace-wide view. The response has no terminal text, input, control,
+        PTY or host fields and no commit titles. Order is last activity, newest
+        first, ties by session id. Paging is by an opaque cursor; the page
+        carries nextCursor only when more visible rows follow and never a total.
+
+        Realtime contract: the server broadcasts work.session.share_changed
+        (session_id, channel_id, kind enabled|state_changed|disabled and
+        nothing else) on the home channel when sharing turns on or off or the
+        derived state changes. A client that receives it re-reads this list (or
+        the single read below for that session_id) and treats the answer as the
+        truth; a 404 on the single read means the session left the board
+        (unshared, or no longer visible to the viewer) and its row is removed.
+        Agent-lane progress arrives on the existing work.session.* and
+        message events of the channel; clients re-read the same way. Diff-only
+        updates emit no event, so a board that wants fresh numbers refetches on
+        focus or on a slow timer.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: limit
+          in: query
+          required: false
+          description: Page size, 1..100 (default 50). Out-of-range values are clamped; a non-number means the default.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          description: The nextCursor of the previous page, passed back unchanged. Anything else is 400.
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        "200":
+          description: One page of the board.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SharedWorkSessionListResponse"
+        "400":
+          description: Malformed cursor (message "invalid cursor").
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The path workspace is not the credential's workspace, or the credential is not a signed-in person.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/shared:
+    get:
+      tags: [work-sessions]
+      operationId: getSharedWorkSession
+      summary: One team-board row, if the caller may see it.
+      description: >
+        #3322. The same row shape as listSharedWorkSessions, same visibility
+        rule (the caller is an active member of the home channel, in SQL). A
+        session the caller may not see is 404 with one fixed body for every
+        reason: not a member of the home channel, never shared, unshared,
+        a session that ended more than 30 days ago, archived channel, no
+        such session, or another workspace's id. There is deliberately no 403
+        that would say the session exists. A malformed id is 400.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkSessionId"
+      responses:
+        "200":
+          description: The row.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SharedWorkSessionResponse"
+        "400":
+          description: Malformed session id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The path workspace is not the credential's workspace, or the credential is not a signed-in person.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not visible to the caller (message "shared work session not found").
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/display-control:
     delete:
       tags: [work-sessions]
@@ -13913,6 +14036,116 @@ components:
           format: uuid
         shared:
           type: boolean
+
+    SharedWorkSessionDiff:
+      type: object
+      required: [added, deleted, files, ahead, behind, uncommitted]
+      additionalProperties: false
+      description: Numbers only; null = unknown (and always null for an agent-lane session). No file names.
+      properties:
+        added: {type: integer, nullable: true, minimum: 0}
+        deleted: {type: integer, nullable: true, minimum: 0}
+        files: {type: integer, nullable: true, minimum: 0}
+        ahead: {type: integer, nullable: true, minimum: 0}
+        behind: {type: integer, nullable: true, minimum: 0}
+        uncommitted: {type: integer, nullable: true, minimum: 0}
+
+    SharedWorkSession:
+      type: object
+      required:
+        - sessionId
+        - origin
+        - label
+        - folderLabel
+        - status
+        - owner
+        - homeChannel
+        - startedAtMs
+        - endedAtMs
+        - sharedAtMs
+        - repo
+        - branch
+        - harness
+        - state
+        - stages
+        - diff
+        - prUrl
+        - lastActivityAt
+      additionalProperties: false
+      description: >
+        ShareSummaryS1 (repo, branch, harness, state, stages, diff, prUrl,
+        lastActivityAt) plus owner, home channel and lane. No terminal text,
+        input, control, PTY, host or commit-title field exists.
+      properties:
+        sessionId: {type: string, format: uuid}
+        origin:
+          type: string
+          enum: [local_pty, host]
+          description: local_pty = shared local pane; host = agent-lane session.
+        label: {type: string}
+        folderLabel: {type: string, nullable: true, description: "Last path element only (local_pty)."}
+        status:
+          type: string
+          enum: [running, idle, orphaned, ended]
+          description: Ledger status.
+        owner:
+          type: object
+          required: [memberId, displayName]
+          additionalProperties: false
+          properties:
+            memberId: {type: string, format: uuid}
+            displayName: {type: string}
+        homeChannel:
+          type: object
+          required: [id, name]
+          additionalProperties: false
+          properties:
+            id: {type: string, format: uuid}
+            name: {type: string, nullable: true}
+        startedAtMs: {type: integer, format: int64}
+        endedAtMs: {type: integer, format: int64, nullable: true}
+        sharedAtMs: {type: integer, format: int64, nullable: true}
+        repo: {type: string, nullable: true}
+        branch: {type: string, nullable: true}
+        harness:
+          type: string
+          description: Closed harness list for local_pty; the tool key for an agent-lane session.
+        state:
+          type: string
+          enum: [waiting, running, review, idle, done, stopped]
+        stages:
+          type: array
+          maxItems: 12
+          items: {type: string, maxLength: 80}
+        diff:
+          $ref: "#/components/schemas/SharedWorkSessionDiff"
+        prUrl: {type: string, nullable: true}
+        lastActivityAt:
+          type: integer
+          format: int64
+          description: Epoch seconds. Orders the list.
+
+    SharedWorkSessionListResponse:
+      type: object
+      required: [sessions, nextCursor]
+      additionalProperties: false
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/SharedWorkSession"
+        nextCursor:
+          type: string
+          nullable: true
+          description: Opaque; present only when more visible rows follow. There is no total.
+
+    SharedWorkSessionResponse:
+      type: object
+      required: [session]
+      additionalProperties: false
+      properties:
+        session:
+          $ref: "#/components/schemas/SharedWorkSession"
 
     BindWorkSessionRemotePTYRequest:
       type: object

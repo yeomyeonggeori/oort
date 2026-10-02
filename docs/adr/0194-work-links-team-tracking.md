@@ -6,7 +6,7 @@
 - 결재 인용: 작업 탭·팀 추적 제안서 §9의 질문 Q1~Q6에 권장안을 붙여 올렸고, 성재가 「전부 권장대로」라고 답했다. 시안은 https://claude.ai/artifact/Wi3dNY64UbyoQCU9q1qLuM 이다. 이 ADR은 Q1·Q4·Q5·Q6의 서버·링크 쪽을 적는다. Q2·Q3과 Q4·Q5의 로컬 쪽은 ADR-0190 증보 D3-c·D4-b에 있다.
 - 기안: Opus 5.5 worker(#2853)
 - 근거 자료: 제안서 `claudedocs/agent-workspace-2.0/workspace-tab.md`(§4 팀 추적, §5 대화 안의 링크와 카드, §6 Claude Tag식 흐름 매핑, §7.4 경계와 시험, §8.3 API 초안). gitignore 대상이라 로컬에만 있다. 이 ADR이 결정에 필요한 내용을 옮겨 적었다.
-- 증보: 2026-10-02 공유 PATCH 구현 확정(#2862) — 와이어·상한·PR URL 문법·거부 코드·이벤트·보존. 파일 끝 「증보 2026-10-02」 절. 결정은 바뀌지 않는다
+- 증보: 2026-10-02 팀 보드 읽기 경로 확정(#3322, 아래 「증보 2026-10-02 (읽기)」). 같은 날 공유 PATCH 구현 확정(#2862) — 와이어·상한·PR URL 문법·거부 코드·이벤트·보존. 파일 끝 「증보 2026-10-02」 절. 결정은 바뀌지 않는다
 - 증보 대상: ADR-0190 D3-c·D4-b(선행. 이 ADR의 공유 필드와 출처 규칙은 거기서 온다)
 - 관계: ADR-0100(공개 API·DB 계약 변경은 Accepted ADR이 머지 조건), ADR-0125·0188(host 서명, 결정자 = 소유자), ADR-0132 D1(run 취소), ADR-0154(요약 줄·서랍·진행 뷰), ADR-0174(이 기기 저장), ADR-0180·`docs/onboarding-deeplink.md`(`oort://` 스킴 체계), ADR-0182(토스트 금지), ADR-0191(한도 카드), ADR-0192 D7(서버 GitHub 토큰 없음)
 
@@ -159,3 +159,11 @@
 - 보존(D9): 알림 서비스의 sweep이 종료 30일 지난 `work_session_share` 행을 지우고 `disabled` 이벤트를 같은 tx에서 낸다.
 - 저장(D9): migration 114 — `work_session_share`(RLS FORCE, 복합 FK로 `workspace_id` 일치 강제, `local_pty` 세션 전용 트리거, 값 CHECK)와 `work_session.tool` CHECK에 `grok`·`other` 추가. 금지 필드(커밋 제목·파일 이름·경로·원격 URL)는 컬럼이 없다.
 
+## 증보 2026-10-02 (읽기) — 팀 보드 읽기 API 경로 확정 (#3322, D4·Q4)
+
+- Status: **Accepted** (결재 인용: 성재 「전부 권장대로」, 2026-09-27 — Q1~Q6. 결정은 바뀌지 않고, 제안서 §8.3 초안의 읽기 경로 이름만 이슈 #3322 본문(정본)으로 바뀐다)
+- 경로 변경: 위 「worker가 확정한 것」의 `GET …/work-sessions?scope=team`·`GET …/work-sessions/{session}/card`를 **쓰지 않는다**. 기존 목록 라우트(내 채널 세션 원장, 컨트롤·PTY 필드 포함)에 팀 범위를 섞으면 그 응답이 공유 범위(S1)보다 넓은 필드를 실을 길이 열린다. 그래서 읽기는 별도 두 라우트다: `GET /v1/workspaces/{ws}/work-sessions/shared`(커서 페이지, 마지막 활동 최신순)와 `GET /v1/workspaces/{ws}/work-sessions/{session}/shared`(단건). `/card`(채널 카드)는 #2863 이후 별도 이슈.
+- 보이는 범위(Q4): 보는 사람이 **집 채널의 활성 멤버**인 세션만이다(SQL 한 문장, RLS FORCE 아래). 워크스페이스 전체 공개는 없다. 단건에서 비멤버·미공유·해제·존재하지 않음·타 테넌트는 **같은 404, 같은 본문**이다(존재를 알려 주는 403 없음). 목록은 총계를 주지 않고, 다음 페이지가 있을 때만 불투명 `nextCursor`를 준다.
+- 모양: `ShareSummaryS1`(`repo`·`branch`·`harness`·`state`·`stages`·`diff`·`prUrl`·`lastActivityAt` 초)에 소유자 멤버·집 채널·`origin`·`status`·시각을 더한 것. A 레인 세션(`origin=host`, #2779)은 같은 모양에 값 없는 필드를 `null`(`stages`는 빈 배열)로 싣고, `harness`=도구 키, `state`는 원장에서 파생(running·idle·done·stopped), `lastActivityAt`은 스레드의 마지막 메시지 시각이다. 터미널 원문·입력·컨트롤·PTY·host 필드와 커밋 제목은 응답에 없다.
+- 보존: 종료 30일이 지난 세션은 L·A 모두 읽기에서 안 보인다(알림 sweep의 지연과 무관하게 읽기가 직접 판정).
+- 실시간(D8): 새 이벤트는 없다. `work.session.share_changed`(켜기·끄기·상태 변화)를 받은 클라이언트가 이 GET으로 다시 읽는다. 단건 404는 보드에서 지우라는 뜻이다. diff 숫자만 바뀐 갱신은 이벤트가 없어 포커스·느린 타이머로 재조회한다.

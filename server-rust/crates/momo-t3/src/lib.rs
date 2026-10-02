@@ -72,6 +72,8 @@ pub mod terminal_attach;
 /// oort-operated TURN, replacing the one static password the install runbook
 /// shipped as explicitly temporary.
 pub mod turn;
+/// #3322 — the team board's read model: the viewer's home-channel filter in SQL.
+pub mod work_board;
 /// ADR-0114 D4/D5 + ADR-0125 D6-A — the host-control ledger and the spawn
 /// approval card's host candidates.
 pub mod work_control;
