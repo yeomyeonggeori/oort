@@ -3,6 +3,7 @@ import type {
   SharedWorkSessionDiff,
   SharedSessionState,
 } from "../../lib/api";
+import { uuidEq } from "../../lib/api";
 import { attachParticle } from "../../lib/koreanParticle";
 import { SESSION_STATUS_LABEL } from "./sessionList";
 
@@ -50,6 +51,11 @@ export const TEAM_BOARD_COPY = {
     "터미널 원문은 주인의 기기에만 있어요. 여기서는 이름, 상태, 작업 위치와 하네스가 알린 단계만 보여요.",
   goneTitle: "이 세션은 더 이상 보이지 않아요",
   goneBody: "공유가 꺼졌거나 이 채널의 멤버가 아니에요.",
+  // 폰 한 열 판(#2864). 보기 전환은 「전체 | 내 것」, 한 줄 목록은 상태 구간으로 끊는다.
+  filterAll: "전체",
+  filterMine: "내 것",
+  emptyMineTitle: "내가 시킨 세션이 없어요",
+  emptyMineBody: "내 이름으로 돌고 있거나 오늘 끝난 공유 세션이 여기에 모여요.",
 } as const;
 
 /** 목록 한 줄의 상태 칩 말(시안 ④). 색만으로 말하지 않고 글자가 붙는다. */
@@ -290,4 +296,61 @@ export function homeChannelIds(items: readonly SharedWorkSession[]): string[] {
     out.push(item.homeChannel.id);
   }
   return out;
+}
+
+// -----------------------------------------------------------------------------
+// 폰 한 열 판 (#2864, 제안서 T12). 같은 줄을 **상태 순서**로 한 열에 세운다:
+// 응답 필요 → 실행 중 → 검토 대기, 그 뒤 대기, 맨 끝에 오늘 끝난 것. 구간 안은 서버
+// 순서(마지막 활동 최신순)를 지킨다. 여기서도 **거르지 않는다**: 순서와 구간만 정하고,
+// 「내 것」은 보는 사람이 고른 보기이지 가시성 거르기가 아니다(서버가 이미 끝낸 일).
+// -----------------------------------------------------------------------------
+
+/** 한 열 판의 구간. 끝난 줄은 「오늘 끝난 것」 하나로 모은다. */
+export type BoardSectionKey = "waiting" | "running" | "review" | "idle" | "finished";
+
+/** 위에서 아래로. 이 순서가 이슈 #2864의 수용 기준이다. */
+export const BOARD_SECTION_ORDER: readonly BoardSectionKey[] = [
+  "waiting",
+  "running",
+  "review",
+  "idle",
+  "finished",
+];
+
+export interface BoardSection {
+  key: BoardSectionKey;
+  label: string;
+  items: SharedWorkSession[];
+}
+
+/**
+ * 구간으로 나눈다. 빈 구간은 만들지 않는다. 끝난 줄은 오늘 0시 이후에 끝난 것만 서고
+ * (`itemsForView`의 「오늘 끝난 것」과 같은 기준), 그보다 오래된 끝난 줄은 이 한 열
+ * 판에 서지 않는다(웹 보드에서도 어느 보기에도 서지 않는 줄이다).
+ */
+export function boardSections(
+  items: readonly SharedWorkSession[],
+  nowMs: number
+): BoardSection[] {
+  const finished = itemsForView(items, "done", nowMs);
+  const sections: BoardSection[] = [];
+  for (const key of BOARD_SECTION_ORDER) {
+    const inSection =
+      key === "finished" ? finished : items.filter((i) => i.state === key);
+    if (inSection.length === 0) continue;
+    sections.push({
+      key,
+      label: key === "finished" ? TEAM_BOARD_COPY.viewDone : SESSION_STATUS_LABEL[key],
+      items: inSection,
+    });
+  }
+  return sections;
+}
+
+/** 「내 것」: 주인이 나인 줄. 에이전트 레인은 주인이 시킨 사람이다(레인 말과 같은 뜻). */
+export function ownedBy(
+  items: readonly SharedWorkSession[],
+  memberId: string
+): SharedWorkSession[] {
+  return items.filter((i) => uuidEq(i.owner.memberId, memberId));
 }

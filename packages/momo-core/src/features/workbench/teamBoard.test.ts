@@ -3,12 +3,15 @@ import type { SharedWorkSession } from "../../lib/api";
 import { asWorkSessionShareChangedFrame } from "../../lib/realtimeEvents";
 import {
   TEAM_BOARD_COPY,
+  BOARD_SECTION_ORDER,
+  boardSections,
   boardSummary,
   diffFacts,
   doneSummary,
   groupByOwner,
   itemsForView,
   laneLabel,
+  ownedBy,
   prFacts,
   stageMarkers,
   stateChipLabel,
@@ -137,5 +140,66 @@ describe("work.session.share_changed 프레임", () => {
     expect(asWorkSessionShareChangedFrame(frame({ session_id: "s", kind: "enabled" }))).toBeNull();
     expect(asWorkSessionShareChangedFrame({ type: "work.session.ended", payload: {} })).toBeNull();
     expect(asWorkSessionShareChangedFrame(null)).toBeNull();
+  });
+});
+
+describe("폰 한 열 판: 상태 순서와 내 것 (#2864)", () => {
+  const ME = "00000000-0000-7000-8000-000000000101";
+  const OTHER = "00000000-0000-7000-8000-000000000102";
+  const at = (id: string, state: SharedWorkSession["state"], extra: Partial<SharedWorkSession> = {}) =>
+    row({
+      sessionId: `00000000-0000-7000-8000-0000000000${id}`,
+      label: `세션 ${id}`,
+      state,
+      lastActivityAt: SEC(NOW - 60_000),
+      ...extra,
+    });
+
+  it("순서는 응답 필요 → 실행 중 → 검토 대기 → 대기 → 오늘 끝난 것이다", () => {
+    expect(BOARD_SECTION_ORDER).toEqual(["waiting", "running", "review", "idle", "finished"]);
+    // 서버 순서(최신순)가 일부러 순서와 어긋나게 넣는다.
+    const items = [
+      at("c1", "review"),
+      at("c2", "running"),
+      at("c3", "done", { endedAtMs: NOW - 1000, lastActivityAt: SEC(NOW - 1000) }),
+      at("c4", "waiting"),
+      at("c5", "idle"),
+    ];
+    const sections = boardSections(items, NOW);
+    expect(sections.map((s) => s.key)).toEqual(["waiting", "running", "review", "idle", "finished"]);
+    expect(sections.map((s) => s.label)).toEqual([
+      SESSION_STATUS_LABEL.waiting,
+      SESSION_STATUS_LABEL.running,
+      SESSION_STATUS_LABEL.review,
+      SESSION_STATUS_LABEL.idle,
+      TEAM_BOARD_COPY.viewDone,
+    ]);
+    expect(SESSION_STATUS_LABEL.waiting).toBe("응답 필요");
+  });
+
+  it("구간 안은 서버 순서를 지키고, 빈 구간은 없고, 오래전에 끝난 줄은 서지 않는다", () => {
+    const a = at("d1", "running");
+    const b = at("d2", "running");
+    const old = at("d3", "done", { lastActivityAt: SEC(NOW - 3 * 86_400_000) });
+    const sections = boardSections([a, old, b], NOW);
+    expect(sections.map((s) => s.key)).toEqual(["running"]);
+    expect(sections[0]?.items.map((i) => i.sessionId)).toEqual([a.sessionId, b.sessionId]);
+  });
+
+  it("내 것: 주인이 나인 줄만, 대소문자 무관. 에이전트 레인도 시킨 사람이 나면 내 것이다", () => {
+    const mine = at("e1", "waiting");
+    const agentMine = at("e2", "running", { origin: "host" });
+    const theirs = at("e3", "running", { owner: { memberId: OTHER, displayName: "김인턴" } });
+    const upper = at("e4", "review", { owner: { memberId: ME.toUpperCase(), displayName: "곽성재" } });
+    expect(ownedBy([mine, theirs, agentMine, upper], ME).map((i) => i.sessionId)).toEqual([
+      mine.sessionId,
+      agentMine.sessionId,
+      upper.sessionId,
+    ]);
+  });
+
+  it("「확인 기다림」은 어디에도 없다(성재 결정 2026-10-01)", () => {
+    expect(JSON.stringify(TEAM_BOARD_COPY)).not.toContain("확인 기다림");
+    expect(JSON.stringify(SESSION_STATUS_LABEL)).not.toContain("확인 기다림");
   });
 });
