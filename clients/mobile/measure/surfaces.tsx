@@ -3513,6 +3513,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'team-board-mine':
     case 'team-board-empty':
     case 'team-board-empty-mine':
+    case 'team-board-error':
       return (
         <TeamBoardScreen
           active
@@ -4671,6 +4672,8 @@ const TEAM_BOARD_AGENT_ROW = TEAM_BOARD_ROWS[2];
 function seedTeamBoard(surface: string): void {
   harnessClient.setQueryData(['roster', ADE_WS], ADE_ROSTER);
   harnessClient.setQueryData(['channels', ADE_WS], ADE_CHANNELS);
+  // 오류 판은 씨앗이 없다: 닿지 않는 서버를 읽다 실패한 첫 읽기 그대로다.
+  if (surface === 'team-board-error') return;
   const empty = surface === 'team-board-empty' || surface === 'team-board-empty-mine';
   harnessClient.setQueryData(['team-board', ADE_WS, 'list'], {
     pages: [{sessions: empty ? [] : TEAM_BOARD_ROWS, nextCursor: null}],
