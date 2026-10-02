@@ -13857,7 +13857,9 @@ components:
           nullable: true
           minLength: 1
           maxLength: 200
-          description: Branch name; omitted for a detached HEAD. Not a path.
+          description: >
+            Git branch name (no whitespace and none of ~ ^ : ? * [); omitted
+            for a detached HEAD. Not a path.
         harness:
           type: string
           enum: [claude, codex, grok, opencode, shell, other]

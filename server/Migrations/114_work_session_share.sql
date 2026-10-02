@@ -34,7 +34,7 @@ LANGUAGE sql IMMUTABLE PARALLEL SAFE SET search_path = pg_catalog AS $$
        SELECT 1 FROM jsonb_array_elements(markers) AS e(v)
         WHERE jsonb_typeof(e.v) <> 'string'
            OR char_length(e.v #>> '{}') NOT BETWEEN 1 AND 80
-           OR (e.v #>> '{}') ~ '[[:cntrl:]]'
+           OR (e.v #>> '{}') ~ '[[:cntrl:]\u00ad\u061c\u2028-\u202e\u2060-\u206f/\\]'
      )
 $$;
 
@@ -68,13 +68,13 @@ CREATE TABLE work_session_share (
   CONSTRAINT work_session_share_repo_label_ck CHECK (
     repo_label IS NULL OR (
       length(btrim(repo_label)) BETWEEN 1 AND 100
-      AND repo_label !~ '[/\\[:cntrl:]]'
+      AND repo_label !~ '[/\\[:cntrl:]\u00ad\u061c\u2028-\u202e\u2060-\u206f]'
     )
   ),
   CONSTRAINT work_session_share_branch_ck CHECK (
     branch IS NULL OR (
       length(btrim(branch)) BETWEEN 1 AND 200
-      AND branch !~ '[\\[:cntrl:]]'
+      AND branch !~ '[\\[:cntrl:][:space:]~^:?*\[\u00ad\u061c\u2028-\u202e\u2060-\u206f]'
       AND branch !~ '^[/~]'
       AND branch !~ '^[A-Za-z]:'
     )

@@ -955,6 +955,14 @@ async fn s1_3_limits_lists_paths_and_pr_urls_are_enforced() {
         ("branch", json!("~/work")),
         ("branch", json!("C:\\work")),
         ("branch", json!("x".repeat(201))),
+        (
+            "branch",
+            json!("fix: rotate the prod database password for acme"),
+        ),
+        ("branch", json!("feat\u{2028}x")),
+        ("repo", json!("oort\u{2028}[승인됨]")),
+        ("repo", json!("oort\u{2060}x")),
+        ("stages", json!(["/Users/me/secret-proj/src/auth.rs"])),
         ("harness", json!("cursor")),
         ("harness", json!("")),
         ("state", json!("나를 기다림")),
@@ -1179,6 +1187,46 @@ async fn s1_4_only_the_owners_own_signed_host_can_share() {
     assert_eq!(
         status, 403,
         "a teammate's host cannot share the owner's session"
+    );
+
+    // The session's own host, but its registered owner is no longer the session's
+    // member (the host row was re-owned): the host pin passes, the owner pin must
+    // not — this is the guard `existing.member_id != owner_member_id` alone.
+    let (re_owned, re_owned_seed) = own_desktop(&rig.su, &rig.tenant).await;
+    let owner_session = share(
+        &rig.http,
+        &rig.base,
+        &rig.owner_token,
+        &rig.tenant,
+        re_owned,
+    )
+    .await;
+    sqlx::query("UPDATE work_host SET owner_member_id = $2 WHERE id = $1")
+        .bind(re_owned)
+        .bind(teammate)
+        .execute(&rig.su)
+        .await
+        .expect("re-own host");
+    let (status, _, message) = error_of(
+        patch_share(
+            &rig.http,
+            &rig.base,
+            &rig.tenant,
+            owner_session,
+            re_owned,
+            &re_owned_seed,
+            &body,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(
+        status, 403,
+        "a host cannot share a session of a member who is not its owner: {message}"
+    );
+    assert!(
+        message.contains("another member"),
+        "refused by the owner pin: {message}"
     );
 
     // A session that does not exist.
@@ -1561,6 +1609,10 @@ async fn s1_7_rls_cross_tenant_and_the_schema_has_no_forbidden_column() {
         "the trigger refuses a share row on a host-origin session"
     );
     for (column, value) in [
+        ("branch", "'fix: rotate the key'"),
+        ("branch", "E'feat\\u2028x'"),
+        ("repo_label", "E'oort\\u2028x'"),
+        ("stage_markers", "'[\"/etc/passwd\"]'::jsonb"),
         ("branch", "'/etc/passwd'"),
         ("branch", "'C:\\x'"),
         ("pr_url", "'http://github.com/a/b/pull/1'"),

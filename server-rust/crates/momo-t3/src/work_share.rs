@@ -93,12 +93,27 @@ impl ShareRejection {
 }
 
 fn is_unsafe_char(c: char) -> bool {
-    // Control characters include ESC (ANSI) and NUL; the bidi/zero-width block is
-    // the "Trojan source" class that makes one string read as another.
+    // Control characters include ESC (ANSI) and NUL; the rest is the invisible /
+    // direction-changing class (Unicode Cf, Zl, Zp and the default-ignorable
+    // fillers) that makes one string read as another or breaks a line in a card.
     c.is_control()
         || matches!(
             c,
-            '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}'
+            '\u{00AD}'
+                | '\u{034F}'
+                | '\u{061C}'
+                | '\u{115F}'..='\u{1160}'
+                | '\u{17B4}'..='\u{17B5}'
+                | '\u{180B}'..='\u{180F}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{2028}'..='\u{202E}'
+                | '\u{2060}'..='\u{206F}'
+                | '\u{3164}'
+                | '\u{FE00}'..='\u{FE0F}'
+                | '\u{FEFF}'
+                | '\u{FFA0}'
+                | '\u{FFF0}'..='\u{FFFB}'
+                | '\u{E0000}'..='\u{E0FFF}'
         )
 }
 
@@ -135,6 +150,16 @@ pub fn validated_repo_label(raw: &str) -> Result<String, ShareRejection> {
 /// the branch slot.
 pub fn validated_branch(raw: &str) -> Result<String, ShareRejection> {
     let value = bounded_text(raw, "branch", MAX_BRANCH_CHARS)?;
+    // A git ref has no whitespace and none of `~ ^ : ? * [` — so a commit title
+    // ("fix: rotate the key") cannot be sent in the branch slot.
+    if value
+        .chars()
+        .any(|c| c.is_whitespace() || matches!(c, '~' | '^' | ':' | '?' | '*' | '['))
+    {
+        return Err(ShareRejection::new(
+            "branch must be a git branch name (no whitespace or ~ ^ : ? * [)",
+        ));
+    }
     let starts_like_path = value.starts_with('/') || value.starts_with('~');
     let mut chars = value.chars();
     let drive_letter = matches!(
@@ -178,7 +203,16 @@ pub fn validated_stage_markers(raw: &[String]) -> Result<Vec<String>, ShareRejec
         )));
     }
     raw.iter()
-        .map(|marker| bounded_text(marker, "stage marker", MAX_STAGE_MARKER_CHARS))
+        .map(|marker| {
+            let text = bounded_text(marker, "stage marker", MAX_STAGE_MARKER_CHARS)?;
+            // Stage labels are short words; a path separator means a path.
+            if text.contains('/') || text.contains('\\') {
+                return Err(ShareRejection::new(
+                    "stage marker must not contain a path separator",
+                ));
+            }
+            Ok(text)
+        })
         .collect()
 }
 
@@ -565,12 +599,33 @@ mod tests {
         assert!(validated_branch("~/work").is_err());
         assert!(validated_branch("C:\\work").is_err());
         assert!(validated_branch("c:/work").is_err());
+        assert!(
+            validated_branch("fix: rotate prod key").is_err(),
+            "a commit title is not a branch"
+        );
+        assert!(validated_branch("fix rotate").is_err());
+        assert!(validated_branch("feat/한글-브랜치").is_ok());
         assert!(validated_branch(&"x".repeat(201)).is_err());
         assert!(validated_stage_markers(&["원인 찾음".into(), "수정 커밋".into()]).is_ok());
         assert!(validated_stage_markers(&vec!["a".to_string(); 13]).is_err());
         assert!(validated_stage_markers(&["x".repeat(81)]).is_err());
         assert!(validated_stage_markers(&["bad\u{7}".into()]).is_err());
         assert!(validated_stage_markers(&["\u{202E}rtl".into()]).is_err());
+        assert!(validated_stage_markers(&["/Users/me/secret/auth.rs".into()]).is_err());
+        for hidden in [
+            "\u{2028}",
+            "\u{2029}",
+            "\u{061C}",
+            "\u{2060}",
+            "\u{00AD}",
+            "\u{3164}",
+            "\u{E0041}",
+        ] {
+            assert!(
+                validated_repo_label(&format!("oort{hidden}x")).is_err(),
+                "{hidden:?}"
+            );
+        }
     }
 
     #[test]
