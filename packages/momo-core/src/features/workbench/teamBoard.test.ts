@@ -14,6 +14,7 @@ import {
   stateChipLabel,
   stateSentence,
 } from "./teamBoard";
+import { SESSION_STATUS_LABEL } from "./sessionList";
 
 const NOW = Date.parse("2026-10-02T12:00:00+09:00");
 const SEC = (ms: number) => Math.floor(ms / 1000);
@@ -43,8 +44,9 @@ function row(overrides: Partial<SharedWorkSession> = {}): SharedWorkSession {
 }
 
 describe("팀 보드 말 (#2863)", () => {
-  it("비개발자용 상태 말: 「나를 기다림」은 남에게 「확인 기다림」이다", () => {
-    expect(stateChipLabel(row({ state: "waiting" }))).toBe("확인 기다림");
+  it("비개발자용 상태 말: 대기 상태는 내 작업과 같은 정본 「응답 필요」다", () => {
+    expect(stateChipLabel(row({ state: "waiting" }))).toBe("응답 필요");
+    expect(stateChipLabel(row({ state: "waiting" }))).toBe(SESSION_STATUS_LABEL.waiting);
     expect(stateChipLabel(row({ state: "done", prUrl: "https://github.com/a/b/pull/1" }))).toBe("끝남 · PR");
     expect(stateChipLabel(row({ state: "done" }))).toBe("끝남");
   });
@@ -59,7 +61,7 @@ describe("팀 보드 말 (#2863)", () => {
 
   it("상태 문장: 기다림은 주인 이름과 분 단위 경과를 말한다", () => {
     const waiting = row({ state: "waiting", lastActivityAt: SEC(NOW - 3 * 60_000) });
-    expect(stateSentence(waiting, NOW)).toBe("곽성재의 확인을 기다려요 · 3분째");
+    expect(stateSentence(waiting, NOW)).toBe("곽성재의 응답이 필요해요 · 3분째");
   });
 
   it("묶기: 서버 순서를 지키고 사람마다 한 묶음이다", () => {
@@ -85,9 +87,9 @@ describe("팀 보드 말 (#2863)", () => {
     expect(itemsForView(items, "done", NOW).map((i) => i.sessionId)).toEqual(["done-today"]);
   });
 
-  it("요약 문장은 도는 수와 확인 기다림 수를 센다", () => {
+  it("요약 문장은 도는 수와 응답 필요 수를 센다", () => {
     const items = [row({ state: "running" }), row({ state: "waiting" }), row({ state: "done" })];
-    expect(boardSummary(items).sentence).toBe("지금 팀에서 2개가 돌고 있어요. 1개는 담당자 확인을 기다려요.");
+    expect(boardSummary(items).sentence).toBe("지금 팀에서 2개가 돌고 있어요. 1개는 응답이 필요해요.");
     expect(boardSummary([row({ state: "done" })]).sentence).toBe("지금 도는 공유 세션이 없어요.");
   });
 

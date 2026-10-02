@@ -142,7 +142,7 @@ describe("팀 보드: 보는 사람 채널 멤버십 (#2863 Acceptance)", () => 
     render(mount().ui);
     const row = await screen.findByTestId("team-board-row");
     const text = row.textContent ?? "";
-    for (const part of ["한글 입력 이중 전송 수리", "momo", "feat/2774-xterm", "claude", "확인 기다림", "+128", "−40", "3분 전", "#workbench"]) {
+    for (const part of ["한글 입력 이중 전송 수리", "momo", "feat/2774-xterm", "claude", "응답 필요", "+128", "−40", "3분 전", "#workbench"]) {
       expect(text).toContain(part);
     }
     expect(screen.getByRole("heading", { name: /곽성재/ })).toBeTruthy();

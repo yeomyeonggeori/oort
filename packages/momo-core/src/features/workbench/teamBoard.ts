@@ -4,6 +4,7 @@ import type {
   SharedSessionState,
 } from "../../lib/api";
 import { attachParticle } from "../../lib/koreanParticle";
+import { SESSION_STATUS_LABEL } from "./sessionList";
 
 // =============================================================================
 // 「팀 작업」 보드의 말과 묶음 (#2863, 제안서 §4, ADR-0194, 시안 ④).
@@ -13,8 +14,8 @@ import { attachParticle } from "../../lib/koreanParticle";
 // 않는다: 클라이언트가 한 번 더 거르면 서버의 거르기가 새는 것을 가리거나, 보여야 할
 // 줄을 숨긴다. 시험이 그 두 방향을 모두 잠근다.
 //
-// 비개발자가 읽는 화면이라 상태 말이 내 작업(「응답 필요」)과 다르다. 「나를
-// 기다림」은 남에게는 주인 이름이 붙은 「확인 기다림」이다(제안서 §4.2).
+// 대기 상태의 말은 「내 작업」과 같은 정본 상수(`SESSION_STATUS_LABEL`, 「응답 필요」)다
+// (성재 결정 2026-10-01, #3279·#3285). 보드가 따로 말을 만들지 않는다.
 // =============================================================================
 
 export const TEAM_BOARD_COPY = {
@@ -55,7 +56,7 @@ export const TEAM_BOARD_COPY = {
 export function stateChipLabel(item: SharedWorkSession): string {
   switch (item.state) {
     case "waiting":
-      return "확인 기다림";
+      return SESSION_STATUS_LABEL.waiting;
     case "running":
       return "실행 중";
     case "review":
@@ -96,7 +97,7 @@ export function whereLabel(item: SharedWorkSession): {
 }
 
 /**
- * 상세 머리의 상태 문장(시안 ④ 「곽성재의 확인을 기다려요 · 3분째」).
+ * 상세 머리의 상태 문장(시안 ④ 「곽성재의 응답이 필요해요 · 3분째」).
  * `nowMs`는 호출자가 준다(시계 없는 순수 함수).
  */
 export function stateSentence(item: SharedWorkSession, nowMs: number): string {
@@ -108,7 +109,7 @@ export function stateSentence(item: SharedWorkSession, nowMs: number): string {
         Math.floor((nowMs - item.lastActivityAt * 1000) / 60_000)
       );
       const since = minutes < 1 ? "방금부터" : `${minutes}분째`;
-      return `${owner}의 확인을 기다려요 · ${since}`;
+      return `${owner}의 응답이 필요해요 · ${since}`;
     }
     case "running":
       return "지금 작업하고 있어요";
@@ -203,7 +204,7 @@ export function boardSummary(items: readonly SharedWorkSession[]): {
   }
   const first = `지금 팀에서 ${current.length}개가 돌고 있어요.`;
   const sentence =
-    waiting > 0 ? `${first} ${waiting}개는 담당자 확인을 기다려요.` : first;
+    waiting > 0 ? `${first} ${waiting}개는 응답이 필요해요.` : first;
   return { sentence, current: current.length, waiting };
 }
 
