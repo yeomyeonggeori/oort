@@ -43,7 +43,7 @@ import { SectionShell, SettingsToggleRow, Subsection } from "./SettingsFields";
 
 const LINES = [
   NOTIFICATION_RULES_SERVER_NOTE,
-  "데스크톱 알림을 종류별로 끄는 선택은 이 기기에만 저장됩니다.",
+  "OS 알림을 종류별로 끄는 선택은 이 기기에만 저장됩니다.",
 ];
 
 const CHANNEL_NOTE =
