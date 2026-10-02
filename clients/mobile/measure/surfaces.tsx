@@ -142,7 +142,8 @@ import {
   composerPlaceholderClauses,
 } from '@momo/core/features/chat/composerCopy';
 import {FixedScheme, useStyles, type ColorScheme} from '../src/design/theme';
-import WorkConsoleScreen from '../src/screens/WorkConsoleScreen';
+import TeamBoardScreen from '../src/screens/TeamBoardScreen';
+import {TeamBoardDetailSheet} from '../src/features/work/teamBoard/TeamBoardDetailSheet';
 import WorkSessionDetailScreen from '../src/screens/WorkSessionDetailScreen';
 import {SessionRow} from '../src/screens/AgentDetailScreen';
 import {WorkStatusBadge} from '../src/features/work/WorkSessionParts';
@@ -151,7 +152,11 @@ import {
   workSessionStatus,
   type WorkSessionStatus,
 } from '@momo/core/features/work/workSessionModel';
-import type {WorkHost, WorkSession} from '@momo/core/lib/api';
+import type {
+  SharedWorkSession,
+  WorkHost,
+  WorkSession,
+} from '@momo/core/lib/api';
 
 // =============================================================================
 // goal RN-C5 의 표면들을 사진 찍을 수 있게 세워 두는 하네스. **앱 코드가 아니다.**
@@ -3501,11 +3506,53 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </RealtimeContext.Provider>
       );
     }
-    // ---- #1292: workspace-wide RN Work Console + read-only detail ---------
-    case 'work-console':
+    // ---- #2864: 「작업」 = 팀 보드 한 열 판 + 읽기 전용 시트 ------------------
+    //   team-board · team-board-mine · team-board-detail · team-board-detail-agent
+    //   team-board-detail-nopr · team-board-empty · team-board-empty-mine
+    case 'team-board':
+    case 'team-board-mine':
+    case 'team-board-empty':
+    case 'team-board-empty-mine':
       return (
-        <WorkConsoleScreen active onOpenSession={() => {}} />
+        <TeamBoardScreen
+          active
+          initialFilter={
+            name === 'team-board-mine' || name === 'team-board-empty-mine'
+              ? 'mine'
+              : 'all'
+          }
+          onOpenConversation={() => {}}
+          onBack={() => {}}
+        />
       );
+    case 'team-board-detail':
+    case 'team-board-detail-agent':
+    case 'team-board-detail-nopr': {
+      const item =
+        name === 'team-board-detail-agent'
+          ? TEAM_BOARD_AGENT_ROW
+          : name === 'team-board-detail-nopr'
+            ? TEAM_BOARD_ROWS[3]
+            : TEAM_BOARD_ROWS[0];
+      return (
+        <>
+          <TeamBoardScreen
+            active
+            onOpenConversation={() => {}}
+            onBack={() => {}}
+          />
+          <TeamBoardDetailSheet
+            item={item}
+            nowMs={Date.now()}
+            onClose={() => {}}
+            onOpenChannel={() => {}}
+            onOpenAgentSession={
+              name === 'team-board-detail-agent' ? () => {} : undefined
+            }
+          />
+        </>
+      );
+    }
     case 'work-detail':
       return (
         <WorkSessionDetailScreen
@@ -3769,7 +3816,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             approval-card · approval-notes · avatar · composer-offline ·
             composer-placeholder · composer-growth ·
             group · dividers · ade-summary · ade-summary-empty · ade-panel ·
-            work-console · work-detail · agent-sessions ·
+            team-board · work-detail · agent-sessions ·
             destructive-confirm · search-entry · search-idle ·
             search-searching · search-empty · search-error · search-results ·
             mark-unread-sidebar · mark-unread-divider
@@ -4530,6 +4577,107 @@ function seedShell(surface: string): void {
   });
 }
 
+// ---- #2864: 「작업」 팀 보드 한 열 판 --------------------------------------------
+//
+// 서버가 보는 사람(SELF = 곽성재)의 채널 멤버십으로 이미 걸러 준 공유 세션이다. 로컬 공유
+// 세션과 에이전트 레인(origin=host) 세션이 섞여 있고, 두 줄이 내 것이다(하나는 A 레인).
+// 시각은 찍는 순간 기준으로 잡는다(「3분 전」이 사진마다 어긋나지 않게).
+const TB_OTHER = '00000000-0000-7000-8000-00000000b002';
+const TB_OTHER2 = '00000000-0000-7000-8000-00000000b003';
+function tbRow(over: Partial<SharedWorkSession> & {sessionId: string}): SharedWorkSession {
+  const now = Date.now();
+  return {
+    origin: 'local_pty',
+    label: '작업',
+    folderLabel: 'oort',
+    status: 'running',
+    owner: {memberId: SELF, displayName: '곽성재'},
+    homeChannel: {id: 'ch-deploy', name: 'workbench'},
+    startedAtMs: now - 3_600_000,
+    endedAtMs: null,
+    sharedAtMs: now - 3_000_000,
+    repo: 'oort',
+    branch: 'feat/2774-xterm',
+    harness: 'claude',
+    state: 'running',
+    stages: [],
+    diff: {added: null, deleted: null, files: null, ahead: null, behind: null, uncommitted: null},
+    prUrl: null,
+    lastActivityAt: Math.floor((now - 60_000) / 1000),
+    ...over,
+  };
+}
+const TB_MIN = (n: number) => Math.floor((Date.now() - n * 60_000) / 1000);
+const TEAM_BOARD_ROWS: SharedWorkSession[] = [
+  tbRow({
+    sessionId: '00000000-0000-7000-8000-0000000000a1',
+    label: '한글 입력 이중 전송 수리',
+    state: 'waiting',
+    stages: ['세션 시작', '작업 중', '실행 허락 기다림'],
+    diff: {added: 128, deleted: 40, files: 9, ahead: 2, behind: 0, uncommitted: 1},
+    lastActivityAt: TB_MIN(3),
+  }),
+  tbRow({
+    sessionId: '00000000-0000-7000-8000-0000000000a2',
+    label: '푸시 중복 수정',
+    owner: {memberId: TB_OTHER, displayName: '김인턴'},
+    homeChannel: {id: 'ch-build', name: 'agent-lab'},
+    branch: 'fix/push-dup',
+    harness: 'codex',
+    state: 'running',
+    stages: ['세션 시작', '작업 중'],
+    diff: {added: 42, deleted: 7, files: 3, ahead: 1, behind: 0, uncommitted: 0},
+    lastActivityAt: TB_MIN(1),
+  }),
+  tbRow({
+    sessionId: '00000000-0000-7000-8000-0000000000a3',
+    label: '온보딩 문구 다듬기',
+    origin: 'host',
+    folderLabel: null,
+    repo: null,
+    branch: null,
+    owner: {memberId: SELF, displayName: '곽성재'},
+    homeChannel: {id: 'ch-build', name: 'agent-lab'},
+    state: 'running',
+    lastActivityAt: TB_MIN(2),
+  }),
+  tbRow({
+    sessionId: '00000000-0000-7000-8000-0000000000a4',
+    label: '설정 화면 접근성 점검',
+    owner: {memberId: TB_OTHER2, displayName: '박디자인'},
+    homeChannel: {id: 'ch-deploy', name: 'workbench'},
+    repo: 'oort',
+    branch: 'chore/a11y-settings',
+    state: 'review',
+    stages: ['세션 시작', '작업 중', '검토 요청'],
+    diff: {added: 96, deleted: 31, files: 6, ahead: 3, behind: 0, uncommitted: 0},
+    prUrl: null,
+    lastActivityAt: TB_MIN(14),
+  }),
+  tbRow({
+    sessionId: '00000000-0000-7000-8000-0000000000a5',
+    label: '릴리스 노트 초안',
+    state: 'done',
+    status: 'ended',
+    endedAtMs: Date.now() - 1_800_000,
+    stages: ['세션 시작', '작업 중', '끝남'],
+    diff: {added: 54, deleted: 12, files: 2, ahead: 1, behind: 0, uncommitted: 0},
+    prUrl: 'https://github.com/yeomyeonggeori/oort/pull/3290',
+    lastActivityAt: TB_MIN(30),
+  }),
+];
+const TEAM_BOARD_AGENT_ROW = TEAM_BOARD_ROWS[2];
+
+function seedTeamBoard(surface: string): void {
+  harnessClient.setQueryData(['roster', ADE_WS], ADE_ROSTER);
+  harnessClient.setQueryData(['channels', ADE_WS], ADE_CHANNELS);
+  const empty = surface === 'team-board-empty' || surface === 'team-board-empty-mine';
+  harnessClient.setQueryData(['team-board', ADE_WS, 'list'], {
+    pages: [{sessions: empty ? [] : TEAM_BOARD_ROWS, nextCursor: null}],
+    pageParams: [null],
+  });
+}
+
 function seedWorkConsole(): void {
   const shift = Date.now() - NOW;
   harnessClient.setQueryData(['roster', ADE_WS], ADE_ROSTER);
@@ -4712,9 +4860,16 @@ if (
 if (
   LAUNCHED !== null &&
   LAUNCHED.kind === 'surface' &&
-  (LAUNCHED.name === 'work-console' || LAUNCHED.name === 'work-detail' || LAUNCHED.name === 'work-detail-events')
+  (LAUNCHED.name === 'work-detail' || LAUNCHED.name === 'work-detail-events')
 ) {
   seedWorkConsole();
+}
+if (
+  LAUNCHED !== null &&
+  LAUNCHED.kind === 'surface' &&
+  LAUNCHED.name.startsWith('team-board')
+) {
+  seedTeamBoard(LAUNCHED.name);
 }
 if (
   LAUNCHED !== null &&
