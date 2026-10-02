@@ -159,6 +159,8 @@ interface Session {
   persistTimer: ReturnType<typeof setTimeout> | null;
   persistFirstAt: number | null;
   disposed: boolean;
+  /** 마지막 출력이 온 **시각**(ms). 내용은 아니다. 바뀌어도 다시 그리지 않는다(공유 요약용, #2861). */
+  lastOutputAt: number | null;
   titleSub: { dispose(): void } | null;
 }
 
@@ -314,6 +316,7 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
 
   const onOutput = (s: Session, generation: number, buffer: ArrayBuffer) => {
     if (s.disposed || s.generation !== generation) return;
+    s.lastOutputAt = now();
     const bytes = new Uint8Array(buffer);
     const batcher = s.batcher;
     s.mirror.write(bytes, () => batcher?.add(bytes.byteLength));
@@ -465,6 +468,7 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
           persistTimer: null,
           persistFirstAt: null,
           disposed: false,
+          lastOutputAt: null,
           titleSub: null,
         };
         s.titleSub = mirror.onTitleChange((title) => {
@@ -598,6 +602,11 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
     /** 모든 칸을 지금 저장한다(pagehide 등). */
     persistAll(): void {
       for (const id of sessions.keys()) persistNow(id);
+    },
+
+    /** 칸이 마지막으로 출력을 낸 시각(ms). 내용이 아니다(ADR-0190 D4-b 출처 3). 없으면 null. */
+    lastOutputAtOf(paneId: string): number | null {
+      return sessions.get(paneId)?.lastOutputAt ?? null;
     },
 
     /** 시험용: 칸의 PTY id. */
