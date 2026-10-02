@@ -465,11 +465,11 @@ describe('opening a conversation', () => {
 });
 
 describe('the 인박스 tab', () => {
-  it('is reachable and carries the server’s mention count', async () => {
+  it('is reachable and carries 「나에게 필요한 일」 (the server’s mention count here)', async () => {
     installFetch();
     renderShell();
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
-    expect(screen.getByLabelText('인박스, 멘션 1개')).toBeTruthy();
+    expect(screen.getByLabelText('인박스, 나에게 필요한 일 1개')).toBeTruthy();
   });
 
   // goal W-AP1: 이 블록은 **플립 전 세계**를 단정하고 있었다.
