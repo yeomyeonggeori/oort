@@ -2381,6 +2381,24 @@ pub struct NotificationRulesResponse {
     pub mention_overrides_mute: bool,
 }
 
+/// `PATCH …/notification-rules/push-kinds` request (ADR-0120 부록 A, #3341).
+/// Every field optional; at least one is required; unknown fields are refused.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PatchPushKindsRequest {
+    /// 「작업 끝남」 push (`work_session_idle`) for sessions this member started.
+    #[serde(default)]
+    pub work_complete: Option<bool>,
+}
+
+/// `GET/PATCH …/notification-rules/push-kinds` response — the stored switches.
+/// No row answers as every kind on.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushKindsResponse {
+    pub work_complete: bool,
+}
+
 // ---------------------------------------------------------------------------
 // sidebar prefs (ADR-0177 / #1932)
 // ---------------------------------------------------------------------------

@@ -92,6 +92,20 @@ describe('envelope guards mirror the extension', () => {
     expect(parsePushEnvelope(payload({momo: {channel_id: 'not-a-uuid'}}))).toBeNull();
   });
 
+  it('accepts the 「작업 끝남」 reason on the work category (ADR-0120 부록 A)', () => {
+    // The fifth reason. Without it the JS guard drops a push the relay and the
+    // extension both accept, and a tap does nothing.
+    const envelope = parsePushEnvelope(
+      payload({
+        aps: {category: 'momo.work'},
+        momo: {reason: 'work_session_idle', approval_id: undefined},
+      }),
+    );
+    expect(envelope?.reason).toBe('work_session_idle');
+    expect(envelope?.category).toBe('momo.work');
+    expect(envelope?.approvalId).toBeNull();
+  });
+
   it('rejects an unknown reason', () => {
     expect(parsePushEnvelope(payload({momo: {reason: 'because'}}))).toBeNull();
   });

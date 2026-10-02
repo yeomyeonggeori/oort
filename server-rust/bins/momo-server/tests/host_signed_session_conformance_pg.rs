@@ -31,6 +31,7 @@ use base64::Engine as _;
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use momo_db::sqlx::Row;
 use momo_db::PgPool;
 use momo_messaging::{create_channel, ChannelKind, NewChannel};
 use momo_server::{build_app, AppState};
@@ -870,6 +871,152 @@ async fn hss_2_only_the_signing_host_may_move_running_and_idle() {
     assert_eq!(running.status(), 200);
     let running_body: Value = running.json().await.expect("running body");
     assert_eq!(running_body["workSession"]["status"], "running");
+}
+
+/// ADR-0120 부록 A (#3341): the idle card carries the length of the turn that
+/// just ended (`ran_ms`) and the turn's identity (`turn_started_ms`), measured at
+/// the transition; a repeated idle report adds no second card; going back to
+/// `running` starts a new turn whose clock the next idle card reports.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn hss_idle_card_stamps_the_turn_and_a_repeat_adds_no_card() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed_fixture(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let workspace = fixture.workspace;
+
+    let owner_token = login(&http, &base, workspace, &fixture.owner_email).await;
+    let agent_token = agent_bearer(&su, &fixture).await;
+    let (host_id, host_seed) = register_host(&http, &base, &owner_token, workspace, true).await;
+    let control = dispatch_spawn(
+        &http,
+        &base,
+        &owner_token,
+        &agent_token,
+        &fixture,
+        &host_id,
+        LABEL,
+    )
+    .await;
+    let created = signed_host(
+        &http,
+        &base,
+        &host_seed,
+        workspace,
+        &host_id,
+        "POST",
+        &create_path(workspace),
+        &create_body(fixture.channel, &host_id, control),
+    )
+    .await;
+    assert_eq!(created.status(), 201);
+    let created_body: Value = created.json().await.expect("created");
+    let session = created_body["workSession"]["id"]
+        .as_str()
+        .expect("id")
+        .to_string();
+    let session_uuid = Uuid::parse_str(&session).expect("session uuid");
+
+    let patch = |status: Value| {
+        let (http, base, host_seed, host_id, session) = (
+            http.clone(),
+            base.clone(),
+            host_seed,
+            host_id.clone(),
+            session.clone(),
+        );
+        async move {
+            signed_host(
+                &http,
+                &base,
+                &host_seed,
+                workspace,
+                &host_id,
+                "PATCH",
+                &session_path(workspace, &session),
+                &status,
+            )
+            .await
+        }
+    };
+    let cards = || async {
+        sqlx::query(
+            "SELECT props->>'ran_ms' AS ran_ms, props->>'turn_started_ms' AS started_ms \
+               FROM message \
+              WHERE workspace_id = $1 AND props->>'kind' = 'work_session_idle' \
+                AND props->>'session_id' = $2 \
+              ORDER BY seq",
+        )
+        .bind(workspace)
+        .bind(&session)
+        .fetch_all(&su)
+        .await
+        .expect("idle cards")
+        .into_iter()
+        .map(|row| {
+            (
+                row.get::<String, _>("ran_ms")
+                    .parse::<i64>()
+                    .expect("ran_ms"),
+                row.get::<String, _>("started_ms")
+                    .parse::<i64>()
+                    .expect("turn_started_ms"),
+            )
+        })
+        .collect::<Vec<_>>()
+    };
+
+    // A 90-second-old turn.
+    sqlx::query(
+        "UPDATE work_session SET turn_started_at = clock_timestamp() - interval '90 seconds' \
+          WHERE id = $1",
+    )
+    .bind(session_uuid)
+    .execute(&su)
+    .await
+    .expect("backdate the turn");
+    let first_started: i64 = sqlx::query_scalar(
+        "SELECT floor(extract(epoch from turn_started_at) * 1000)::bigint \
+           FROM work_session WHERE id = $1",
+    )
+    .bind(session_uuid)
+    .fetch_one(&su)
+    .await
+    .expect("turn start");
+
+    let idle = patch(json!({"status": "idle", "exitCode": 0})).await;
+    assert_eq!(idle.status(), 200);
+    let after_first = cards().await;
+    assert_eq!(after_first.len(), 1, "one idle card: {after_first:?}");
+    assert!(
+        (90_000..120_000).contains(&after_first[0].0),
+        "ran_ms is the turn's length on the database clock: {after_first:?}"
+    );
+    assert_eq!(after_first[0].1, first_started, "the card names its turn");
+
+    // The host repeats the report: no second card (and so no second push).
+    let again = patch(json!({"status": "idle", "exitCode": 0})).await;
+    assert_eq!(again.status(), 200);
+    assert_eq!(cards().await.len(), 1, "a repeated idle adds no card");
+
+    // Next turn: running resets the clock; an immediate idle is a short turn.
+    let running = patch(json!({"status": "running"})).await;
+    assert_eq!(running.status(), 200);
+    let second = patch(json!({"status": "idle", "exitCode": 0})).await;
+    assert_eq!(second.status(), 200);
+    let after_second = cards().await;
+    assert_eq!(after_second.len(), 2, "{after_second:?}");
+    assert!(
+        after_second[1].0 < 60_000,
+        "the new turn is short, not measured from the session's start: {after_second:?}"
+    );
+    assert!(
+        after_second[1].1 > first_started,
+        "a new turn has a new identity: {after_second:?}"
+    );
 }
 
 #[tokio::test]
