@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useReducer,
   useRef,
   useState,
   useSyncExternalStore,
@@ -71,9 +72,13 @@ import {
 import { nextWaitingPane, waitingLine } from "@momo/core/features/workbench/paneStatus";
 import { createPortal } from "react-dom";
 import { useSidebarBodySlot } from "@/features/sidebar/sidebarBodySlot";
-import { SessionList, StatusMark, type SessionListHandle } from "./SessionList";
+import { SessionList, StatusMark, type SessionListHandle, type SessionRowMenuEntry } from "./SessionList";
 import { paneAttention, paneStatusOf } from "./paneAttention";
-import type { PaneLaneView, PaneStatusView } from "../WorkbenchGrid";
+import type { PaneLaneView, PaneShareChrome, PaneStatusView } from "../WorkbenchGrid";
+import { ShareDialog, type ShareIntent } from "./share/ShareDialog";
+import type { PaneShareSource } from "./share/paneShareSource";
+import { shareMenuEntries, type ShareAction } from "./share/shareMenu";
+import { SHARE_COPY } from "./share/shareCopy";
 import {
   AGENT_LANE_LABEL,
   AgentLaneIcon,
@@ -162,6 +167,7 @@ export function LocalTerminalDock({
   agent,
   launchSource,
   startSource,
+  share,
 }: {
   sessions?: LocalSessions;
   platform?: KeyPlatform;
@@ -194,6 +200,12 @@ export function LocalTerminalDock({
     inspect: (path: string) => Promise<StartFolder>;
     storage?: StartStorage | null;
   };
+  /**
+   * 「채널에 공유」(#2867): 로컬 칸을 팀에 보이게 하는 원천. 없으면 공유 메뉴가 없다(브라우저
+   * 하네스·시험). 제품은 `useLocalShareSource()`를 넘긴다. 공유는 기본 꺼짐이고, 사람이 메뉴에서
+   * 골라야 켜진다.
+   */
+  share?: PaneShareSource;
 }) {
   const platform = platformProp ?? detectPlatform();
   const dock = useDockState();
@@ -250,6 +262,82 @@ export function LocalTerminalDock({
     return paneStatusOf(sessionMapRef.current.get(id));
   };
   const attention = paneAttention();
+  // ---- 「채널에 공유」(#2867) ---------------------------------------------------
+  const [, bumpShare] = useReducer((n: number) => n + 1, 0);
+  const shareSource = share;
+  useEffect(() => shareSource?.share.subscribe(bumpShare), [shareSource]);
+  const [shareDialog, setShareDialog] = useState<{ paneId: string; intent: ShareIntent } | null>(null);
+  const channelNameOf = (id: string | null) =>
+    shareSource?.channels.find((c) => c.id.toLowerCase() === id?.toLowerCase())?.name ?? null;
+  const copyShareLink = async (paneId: string) => {
+    const link = shareSource?.share.linkFor(paneId) ?? null;
+    if (!link || !shareSource) return;
+    const ok = await shareSource.copyText(link);
+    setNotice(ok ? `${SHARE_COPY.linkCopied}. ${SHARE_COPY.linkNote}` : SHARE_COPY.copyFailed);
+  };
+  const runShareAction = async (paneId: string, action: ShareAction) => {
+    if (!shareSource) return;
+    const state = shareSource.share.getState(paneId);
+    if (action === "share") {
+      setShareDialog({ paneId, intent: "share" });
+    } else if (action === "copy") {
+      // Q5: 공유가 꺼져 있으면 링크를 만들기 전에 공유 확인을 먼저 묻는다. 거절하면 링크가 없다.
+      if (state.kind === "on") void copyShareLink(paneId);
+      else setShareDialog({ paneId, intent: "copy" });
+    } else {
+      const result = await shareSource.share.unshare(paneId);
+      setNotice(result.ok ? SHARE_COPY.unshared : SHARE_COPY.unshareFailed);
+    }
+  };
+  const shareEntriesOf = (paneId: string): SessionRowMenuEntry[] | null => {
+    if (!shareSource || agentOfRef.current(paneId) !== null) return null;
+    return shareMenuEntries(shareSource.share.getState(paneId).kind).map((entry) => ({
+      id: entry.id,
+      label: entry.label,
+      disabled: entry.disabled,
+      onSelect: () => {
+        if (entry.id !== "busy") void runShareAction(paneId, entry.id);
+      },
+    }));
+  };
+  const shareChromeOf = (pane: WorkbenchPaneInfo): PaneShareChrome | null => {
+    const entries = shareEntriesOf(pane.id);
+    if (!entries || !shareSource) return null;
+    const state = shareSource.share.getState(pane.id);
+    const on = state.kind === "on" || state.kind === "stopping";
+    return {
+      chip: on ? (state.syncFailed ? SHARE_COPY.chipSyncFailed : SHARE_COPY.chipOn(channelNameOf(state.channelId))) : null,
+      menuLabel: SHARE_COPY.menuLabel,
+      menu: entries.map((entry) => (
+        <DropdownMenuItem
+          key={entry.id}
+          disabled={entry.disabled}
+          onSelect={entry.onSelect}
+          data-testid={`pane-share-menu-${entry.id}`}
+        >
+          {entry.label}
+        </DropdownMenuItem>
+      )),
+    };
+  };
+  const shareDialogNode =
+    shareDialog && shareSource ? (
+      <ShareDialog
+        share={shareSource.share}
+        paneId={shareDialog.paneId}
+        intent={shareDialog.intent}
+        channels={shareSource.channels}
+        onClose={() => setShareDialog(null)}
+        onShared={(intent, channelName) => {
+          if (intent === "copy") void copyShareLink(shareDialog.paneId);
+          else setNotice(SHARE_COPY.shared(channelName));
+        }}
+        onOpenHostSettings={() => {
+          setShareDialog(null);
+          shareSource.openHostSettings();
+        }}
+      />
+    ) : null;
   const listRef = useRef<SessionListHandle>(null);
   const list = useSessionListOpen(minimumSize(layout.root).width);
   // 「내 작업」의 세션 목록은 앱 사이드바의 목록 열 본문 자리에 선다(#3334).
@@ -968,6 +1056,7 @@ export function LocalTerminalDock({
       paneTitle={titleOf}
       paneStatus={statusView}
       paneLane={laneOf}
+      paneShare={shareSource ? shareChromeOf : undefined}
       renderPane={(pane) => {
         const bound = agentOf(pane.id);
         if (bound && agent) return agent.render(bound, pane.id);
@@ -1012,8 +1101,8 @@ export function LocalTerminalDock({
           title: view.title ?? programName,
           harness,
           status: paneStatusOf(view) ?? "idle",
-          // L 세션 공유(ADR-0190 D4-b)는 이 기기에 아직 상태가 없다.
-          shared: false,
+          // L 세션 공유(ADR-0190 D4-b): 기본 꺼짐. 사람이 「채널에 공유」를 골라야 켜진다(#2867).
+          shared: shareSource?.share.getState(id).kind === "on",
           // 읽기 전이면 「확인 중」(null). 시작 중이거나 PTY가 있는 칸은 곧 읽는다. PTY 없이
           // 끝난 칸(읽기 전에 끝남)은 셸이 git 읽기를 거절하므로 「폴더」다.
           git:
@@ -1043,6 +1132,7 @@ export function LocalTerminalDock({
                 onFocusIndex={(index) => applyFromList(focusIndex(layoutRef.current, index))}
                 newSessionItems={newSessionItems}
                 onNewSessionMenuCloseAutoFocus={onMenuCloseAutoFocus}
+                rowMenu={shareSource ? shareEntriesOf : undefined}
               />,
               bodySlot
             )
@@ -1061,6 +1151,7 @@ export function LocalTerminalDock({
           </div>
         </section>
         {closeConfirm}
+        {shareDialogNode}
       </div>
     );
   }
@@ -1106,6 +1197,7 @@ export function LocalTerminalDock({
         {grid}
       </div>
       {closeConfirm}
+      {shareDialogNode}
     </section>
   );
 }

@@ -21,6 +21,12 @@ import {
 } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/design/ui/context-menu";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -88,6 +94,14 @@ function savePrefs(prefs: Prefs) {
   }
 }
 
+/** 행 우클릭 메뉴의 한 항목(#2867 「채널에 공유」·「링크 복사」·「공유 끄기」). */
+export interface SessionRowMenuEntry {
+  id: string;
+  label: string;
+  disabled?: boolean;
+  onSelect: () => void;
+}
+
 export interface SessionListHandle {
   /** ⌘J: 지금 칸의 행(없으면 첫 행)으로 캐럿을 보낸다. */
   focus(): void;
@@ -103,6 +117,11 @@ export interface SessionListProps {
   /** 「새 세션」 메뉴의 항목들(도크와 같은 메뉴). 트리거는 목록이 그린다. */
   newSessionItems: ReactNode;
   onNewSessionMenuCloseAutoFocus?: (event: Event) => void;
+  /**
+   * 행 우클릭(키보드는 메뉴 키·Shift+F10) 메뉴(#2867). 없거나 빈 목록이면 그 행은 메뉴가
+   * 없다(A 세션 행). 항목은 호스트가 정하고, 목록은 그리기만 한다.
+   */
+  rowMenu?: (paneId: string) => readonly SessionRowMenuEntry[] | null;
 }
 
 export const SessionList = forwardRef<SessionListHandle, SessionListProps>(function SessionList(
@@ -115,6 +134,7 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
     onFocusIndex,
     newSessionItems,
     onNewSessionMenuCloseAutoFocus,
+    rowMenu,
   },
   ref
 ) {
@@ -284,6 +304,7 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
         tabStop={row.paneId === tabStop}
         onActivate={onActivate}
         onMaximize={onMaximize}
+        menu={rowMenu?.(row.paneId) ?? null}
       />
     );
   }
@@ -315,6 +336,7 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
       tabStop={p.paneId === tabStop}
       onActivate={onActivate}
       onMaximize={onMaximize}
+      menu={rowMenu?.(p.paneId) ?? null}
     />
   ));
 
@@ -612,6 +634,7 @@ function SessionRowButton({
   tabStop,
   onActivate,
   onMaximize,
+  menu = null,
 }: {
   row: SessionRow;
   level: number;
@@ -622,6 +645,7 @@ function SessionRowButton({
   tabStop: boolean;
   onActivate: (paneId: string) => void;
   onMaximize: (paneId: string) => void;
+  menu?: readonly SessionRowMenuEntry[] | null;
 }) {
   const label = SESSION_STATUS_LABEL[row.status];
   // 평탄화된 줄(worktree에 세션 하나, 또는 상태로 묶기)은 worktree 줄을 함께 싣는다.
@@ -634,7 +658,7 @@ function SessionRowButton({
   ]
     .filter(Boolean)
     .join(", ");
-  return (
+  const button = (
     <button
       type="button"
       role="treeitem"
@@ -684,5 +708,18 @@ function SessionRowButton({
         <SessionStateChip status={row.status} testId="session-row-chip" />
       </span>
     </button>
+  );
+  if (!menu || menu.length === 0) return button;
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{button}</ContextMenuTrigger>
+      <ContextMenuContent data-testid="session-list-row-menu">
+        {menu.map((entry) => (
+          <ContextMenuItem key={entry.id} disabled={entry.disabled} onSelect={entry.onSelect} data-testid={`session-row-menu-${entry.id}`}>
+            {entry.label}
+          </ContextMenuItem>
+        ))}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }

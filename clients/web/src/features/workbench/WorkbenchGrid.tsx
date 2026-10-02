@@ -9,8 +9,9 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { Columns2, Info, Maximize2, Minimize2, Rows2, X } from "lucide-react";
+import { Columns2, Info, Maximize2, Minimize2, Radio, Rows2, Share2, X } from "lucide-react";
 import { cn } from "@/design/lib/cn";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/design/ui/dropdown-menu";
 import {
   WORKBENCH_GUTTER,
   WORKBENCH_NUDGE_STEP,
@@ -93,6 +94,21 @@ export interface PaneLaneView {
   icon: ReactNode;
 }
 
+/**
+ * 칸 머리의 공유 표지와 메뉴(#2867, 「채널에 공유」). 공유 중이면 표지가 머리에 늘 보이고
+ * (호버 단추 묶음 밖이다: 누가 보고 있는지는 숨기지 않는다), 메뉴 단추는 다른 칸 단추와 같이
+ * 호버·포커스 때 드러난다. 메뉴 항목은 호스트가 채운다.
+ */
+export interface PaneShareChrome {
+  /** 「공유 중 · #채널」. 꺼져 있으면 null. */
+  chip: string | null;
+  /** 요약을 못 보냈다: 표지가 주의 색이다(글도 다르다). */
+  chipWarn?: boolean;
+  /** 메뉴 단추의 이름(「공유」). */
+  menuLabel: string;
+  menu: ReactNode;
+}
+
 export interface WorkbenchGridProps {
   layout: WorkbenchLayout;
   onLayoutChange: (next: WorkbenchLayout) => void;
@@ -107,6 +123,8 @@ export interface WorkbenchGridProps {
   paneStatus?: (pane: WorkbenchPaneInfo) => PaneStatusView | null;
   /** 칸 머리의 레인 표지(#2779). 없으면 그리지 않는다. */
   paneLane?: (pane: WorkbenchPaneInfo) => PaneLaneView | null;
+  /** 칸 머리의 공유 표지와 메뉴(#2867). 없으면 그리지 않는다(A 칸·브라우저). */
+  paneShare?: (pane: WorkbenchPaneInfo) => PaneShareChrome | null;
   storage?: LayoutStorageStatus;
   /** 기본은 `navigator.platform`으로 판정한다. */
   platform?: KeyPlatform;
@@ -220,6 +238,7 @@ export function WorkbenchGrid({
   paneTitle,
   paneStatus,
   paneLane,
+  paneShare,
   storage = "ok",
   platform: platformProp,
   size: sizeOverride,
@@ -362,6 +381,7 @@ export function WorkbenchGrid({
     paneTitle,
     paneStatus,
     paneLane,
+    paneShare,
     onFocusPane: (id) => apply(focusPane(layoutRef.current, id), false),
     onSplit: (id, axis) => apply(splitPane(layoutRef.current, id, axis, sizeRef.current)),
     onClose: requestClose,
@@ -431,6 +451,7 @@ interface RenderContext {
   paneTitle?: (pane: WorkbenchPaneInfo) => string;
   paneStatus?: (pane: WorkbenchPaneInfo) => PaneStatusView | null;
   paneLane?: (pane: WorkbenchPaneInfo) => PaneLaneView | null;
+  paneShare?: (pane: WorkbenchPaneInfo) => PaneShareChrome | null;
   onFocusPane: (id: PaneId) => void;
   onSplit: (id: PaneId, axis: SplitAxis) => void;
   onClose: (id: PaneId) => void;
@@ -583,6 +604,7 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
   const title = ctx.paneTitle?.(info) ?? `칸 ${index}`;
   const status = ctx.paneStatus?.(info) ?? null;
   const lane = ctx.paneLane?.(info) ?? null;
+  const share = ctx.paneShare?.(info) ?? null;
   const waiting = status?.waiting ?? null;
   const ref = useRef<HTMLElement>(null);
 
@@ -656,6 +678,24 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
         >
           {title}
         </span>
+        {/* 공유 표지(#2867): 공유 중인 칸은 팀이 보고 있다는 사실을 머리에 늘 둔다. 호버 단추
+            묶음 밖이라 숨지 않는다. 좁은 칸(머리 폭 20rem 미만)에서는 아이콘만 남고 글은
+            칸의 접근 이름 대신 title이 말한다. */}
+        {share?.chip ? (
+          <span
+            data-testid="workbench-pane-share-chip"
+            data-warn={share.chipWarn ? "" : undefined}
+            title={share.chip}
+            className={cn(
+              // 신호색은 「응답 필요」 칸만 쓴다(workbench.css): 공유 표지는 잉크색과 글로 말한다.
+              "flex min-w-0 max-w-[40%] shrink items-center gap-1 text-timestamp font-semibold text-ink [&_svg]:size-3 [&_svg]:shrink-0"
+            )}
+          >
+            <Radio aria-hidden />
+            <span className="hidden truncate @sm:inline">{share.chip}</span>
+            <span className="sr-only @sm:hidden">{share.chip}</span>
+          </span>
+        ) : null}
         {/* 상태 글자는 칸의 접근 이름에 이미 있다. 표지는 모양만(design-review N3). */}
         {status ? (
           <span aria-hidden className="flex shrink-0 items-center">
@@ -668,8 +708,26 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
             받지 않는다. 터치(hover: none)에는 호버가 없으니 늘 보인다. 단축키는 그대로다. */}
         <span
           data-testid="workbench-pane-actions"
-          className="flex shrink-0 items-center opacity-0 pointer-events-none transition-opacity group-hover/pane:pointer-events-auto group-hover/pane:opacity-100 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100 group-data-[maximized]/pane:pointer-events-auto group-data-[maximized]/pane:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100 motion-reduce:transition-none"
+          className="flex shrink-0 items-center opacity-0 pointer-events-none transition-opacity group-hover/pane:pointer-events-auto group-hover/pane:opacity-100 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100 has-[[data-state=open]]:pointer-events-auto has-[[data-state=open]]:opacity-100 group-data-[maximized]/pane:pointer-events-auto group-data-[maximized]/pane:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100 motion-reduce:transition-none"
         >
+          {share ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={share.menuLabel}
+                  title={share.menuLabel}
+                  data-testid="workbench-pane-share-menu"
+                  className={PANE_BUTTON_CLASS}
+                >
+                  <Share2 />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" data-testid="workbench-pane-share-items">
+                {share.menu}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
           <PaneButton
             label="오른쪽으로 분할"
             platform={platform}
@@ -734,6 +792,9 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
   );
 }
 
+const PANE_BUTTON_CLASS =
+  "inline-flex size-control-sm shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-ink-muted [&_svg]:size-4";
+
 function PaneButton({
   label,
   platform,
@@ -777,10 +838,7 @@ function PaneButton({
         (disabledReason ? `: ${disabledReason}` : "")
       }
       onClick={onClick}
-      className={cn(
-        "inline-flex size-control-sm shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-ink-muted [&_svg]:size-4",
-        narrowHidden && "hidden @xs:inline-flex"
-      )}
+      className={cn(PANE_BUTTON_CLASS, narrowHidden && "hidden @xs:inline-flex")}
     >
       {children}
     </button>
