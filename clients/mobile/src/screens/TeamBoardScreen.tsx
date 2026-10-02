@@ -203,6 +203,7 @@ export default function TeamBoardScreen({
           filter={filter}
           total={shownAll.length}
           mine={mineCount}
+          partial={list.hasNextPage}
           onChange={setFilter}
         />
       ) : null}
@@ -274,6 +275,7 @@ export default function TeamBoardScreen({
             filter === 'all' ? (
               <Text style={styles.summary} testID="team-board-summary">
                 {summary.sentence}
+                {list.hasNextPage ? ' 더 있어요.' : ''}
               </Text>
             ) : null
           }
@@ -347,11 +349,14 @@ function BoardFilterBar({
   filter,
   total,
   mine,
+  partial,
   onChange,
 }: {
   filter: BoardFilter;
   total: number;
   mine: number;
+  /** 아직 다음 쪽이 있다: 센 수는 불러온 만큼이라 합계가 아니다. */
+  partial: boolean;
   onChange: (filter: BoardFilter) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -359,8 +364,8 @@ function BoardFilterBar({
     <View accessibilityRole="tablist" style={styles.filters}>
       {(
         [
-          ['all', `${TEAM_BOARD_COPY.filterAll} ${total}`],
-          ['mine', `${TEAM_BOARD_COPY.filterMine} ${mine}`],
+          ['all', `${TEAM_BOARD_COPY.filterAll} ${total}${partial ? '+' : ''}`],
+          ['mine', `${TEAM_BOARD_COPY.filterMine} ${mine}${partial ? '+' : ''}`],
         ] as const
       ).map(([value, label]) => {
         const selected = value === filter;
