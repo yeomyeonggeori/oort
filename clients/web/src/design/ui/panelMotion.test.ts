@@ -435,7 +435,9 @@ describe.skipIf(!chromiumAvailable)(
             jsx: "automatic",
             // 사이드바 머리의 코메토 배지(DS2-6)가 래스터 자산이다. 하네스는 화면이
             // 아니라 움직임을 재므로 data URL로 싣는다(Vite의 에셋 경로와 같은 역할).
-            loader: { ".png": "dataurl" },
+            // 사이드바가 「나에게 필요한 일」 수(#3337)로 로컬 칸 모듈을 끌어오고, 그 모듈의
+            // 동적 import가 xterm.css를 가리킨다. 하네스는 터미널을 그리지 않으므로 비운다.
+            loader: { ".png": "dataurl", ".css": "empty" },
             alias: { "@": SRC, "@momo/core": CORE_SRC },
             define: {
               "import.meta.env": JSON.stringify({
