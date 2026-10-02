@@ -107,7 +107,8 @@ pub use display_control::{
 pub use error::T3Error;
 pub use lease::{renewable_lease_candidates, LeaseRenewalCandidate};
 pub use lifecycle::{
-    bind_cloud_host_in_tx, card_props, cloud_host_state_in_tx, create_resumed_work_session_in_tx,
+    bind_cloud_host_in_tx, card_props, cloud_host_state_in_tx,
+    create_local_pty_work_session_with_id_in_tx, create_resumed_work_session_in_tx,
     create_work_session_in_tx, create_work_session_with_id_in_tx, end_work_session_in_tx,
     is_active_channel_member_in_tx, lifecycle_payload, list_work_session_details_in_tx,
     load_listed_work_session_detail_in_tx, load_work_session_in_tx, lock_work_session_detail_in_tx,
