@@ -133,7 +133,12 @@ async function installRoutes(context) {
     if (path.endsWith("/channels")) return json(route, { channels });
     if (path.endsWith("/roster")) return json(route, { members: roster });
     if (path.endsWith("/read-state")) {
-      return json(route, { read_states: [{ channel_id: channels[0].id, last_read_seq: 4, latest_seq: 9, unread_count: 5, mention_count: 2 }] });
+      // 열려 있는 채널(workbench)은 멘션 2(나에게 필요한 일). agent-lab·general은 일반 안 읽음(호박 알약, 이번 범위 밖의 현행 문법이 그대로인지 보인다).
+      return json(route, { read_states: [
+        { channel_id: channels[0].id, last_read_seq: 4, latest_seq: 9, unread_count: 5, mention_count: 2 },
+        { channel_id: channels[1].id, last_read_seq: 1, latest_seq: 4, unread_count: 3, mention_count: 0 },
+        { channel_id: channels[2].id, last_read_seq: 7, latest_seq: 8, unread_count: 1, mention_count: 0 },
+      ] });
     }
     if (path.endsWith("/approvals")) {
       const status = new URL(route.request().url()).searchParams.get("status") ?? "pending";
@@ -366,6 +371,32 @@ async function desktopScenes(browser, origin, scheme, viewport) {
   await context.close();
 }
 
+// 창 최소 높이(480)에 가까운 낮은 창(#3334 design-review High): 열 전체가 한 번에 스크롤하고 본문 자리가
+// 24rem을 지킨다. 대화와 내 작업을 찍고, 스크롤한 모습(본문이 보이는 위치)도 찍는다.
+async function shortScenes(browser, origin, scheme) {
+  const viewport = { width: 900, height: 480 };
+  const tag = `900x480-${scheme}`;
+  const { context, page } = await open(browser, origin, scheme, viewport, true);
+  await page.screenshot({ path: resolve(OUT_DIR, `chat-short-${tag}.png`) });
+  await page.getByTestId("nav-mine").click();
+  await page.getByTestId("my-work-tab").waitFor();
+  if ((await page.getByTestId("sidebar-toggle").getAttribute("aria-expanded")) === "false") {
+    await page.getByTestId("sidebar-toggle").click();
+    await page.waitForTimeout(500);
+  }
+  await page.waitForTimeout(1200);
+  await page.screenshot({ path: resolve(OUT_DIR, `mine-short-${tag}.png`) });
+  const slot = await page.getByTestId("sidebar-body-slot").boundingBox();
+  check(`${tag} 낮은 창 내 작업: 본문 자리 높이 ≥ 384(24rem)`, !!slot && slot.height >= 383, JSON.stringify(slot));
+  await page.getByTestId("sidebar-list-root").evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: resolve(OUT_DIR, `mine-short-scrolled-${tag}.png`) });
+  const rows = await page.locator("[data-testid='session-list-row']:visible").count();
+  check(`${tag} 낮은 창 내 작업: 스크롤하면 세션 줄이 보인다(${rows}줄)`, rows >= 1);
+  check(`${tag} 낮은 창: 가로 넘침 0`, (await overflowX(page)) === 0);
+  await context.close();
+}
+
 async function webScenes(browser, origin, scheme, viewport) {
   const tag = `${viewport.width}-${scheme}`;
   const { context, page } = await open(browser, origin, scheme, viewport, false);
@@ -390,6 +421,7 @@ async function main() {
         await desktopScenes(browser, preview.origin, scheme, viewport);
         await webScenes(browser, preview.origin, scheme, viewport);
       }
+      await shortScenes(browser, preview.origin, scheme);
     }
   } finally {
     await browser.close();

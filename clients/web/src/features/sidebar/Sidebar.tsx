@@ -709,14 +709,14 @@ export function Sidebar({
               if (!asDrawer || !drawerOpen) return;
               if ((event.target as Element).closest("a")) closeDrawer();
             }}
-            className="flex min-h-0 flex-1 flex-col"
+            className="sidebar-list-root"
             data-testid="sidebar-list-root"
           >
             {/* 고정 머리(#3334): 구획 A·B는 **모든 탭에서 같은 노드·같은 자리**다. 본문만 바뀐다
-                (아래). 머리 높이가 창을 넘으면 머리가 스스로 스크롤한다: 본문 자리에 최소 16rem(256)을
-                남긴다(낮은 창에서 세션·팀 목록이 한 줄도 안 보이는 일을 막는다). */}
+                (아래). 머리 높이가 창을 넘으면 머리가 스스로 스크롤하고, 낮은 창(높이 780 이하)에서는
+                열 전체가 한 번에 스크롤한다(`sidebar-list-root`·`-head`·`-body`). */}
             <div
-              className="overscroll-contain max-h-[calc(100%-16rem)] shrink-0 overflow-y-auto"
+              className="sidebar-list-head"
               data-testid="sidebar-list-head"
             >
               <SidebarDestinations
@@ -745,7 +745,7 @@ export function Sidebar({
             <div
               ref={setSidebarBodySlot}
               hidden={!listInRoute}
-              className="flex min-h-0 flex-1 flex-col"
+              className="sidebar-list-body flex min-h-0 flex-1 flex-col"
               data-testid="sidebar-body-slot"
             />
             {teamBody && !listInRoute && <SidebarTeamSessions />}
@@ -754,7 +754,7 @@ export function Sidebar({
               // `overscroll-contain` (goal B9): 채널 목록 끝에서 계속 미는 손가락이
               // 서랍 바깥으로 넘어가지 않는다 — 덮인 표면이 함께 움직이면 서랍이 종이
               // 한 장이 아니라 창처럼 느껴진다. 타임라인이 같은 이유로 같은 것을 쓴다.
-              className="overscroll-contain min-h-0 flex-1 overflow-y-auto"
+              className="sidebar-list-body overscroll-contain min-h-0 flex-1 overflow-y-auto"
               data-testid="channel-list"
             >
             <nav aria-label="채널과 메시지">

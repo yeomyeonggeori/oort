@@ -41,7 +41,7 @@ export function SidebarTeamSessions() {
   const firstLoad = list.isPending && list.data === undefined;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2 border-t border-line pt-3" data-testid="sidebar-team-sessions">
+    <div className="sidebar-list-body flex min-h-0 flex-1 flex-col gap-2 border-t border-line pt-3" data-testid="sidebar-team-sessions">
       <div role="group" aria-label="팀 세션 거르기" className="flex flex-wrap gap-1 px-1">
         {(Object.keys(FILTER_LABEL) as TeamFilter[]).map((key) => (
           <button

@@ -43,13 +43,6 @@ import {
 // 이어 붙인다(`WorkspaceRail`).
 // =============================================================================
 
-/**
- * 낮은 창(높이 780 이하)에서는 「지금 도는 세션」 줄을 접는다. 머리는 스크롤하지 않는 고정 영역이라
- * (본문 자리를 지킨다) 줄이 머리 바닥에서 반쯤 잘려 보이는 것보다 줄 없이 목적지 줄의 알약(내 작업 1)
- * 이 같은 사실을 말하는 편이 낫다. 높이가 충분하면 줄이 선다.
- */
-const SHORT_WINDOW_HIDDEN = "[@media(max-height:780px)]:hidden";
-
 export function SidebarDestinations({
   active,
   needsMe,
@@ -122,7 +115,7 @@ export function SidebarDestinations({
           <SidebarRow to="/workstreams" icon={<Milestone className="size-4" />} label={serverSurface("workstreams").label} testId="nav-workstreams" isActive={active.workstreams} />
         )}
         {waitingPanes.slice(0, 3).map((entry) => (
-          <li key={entry.paneId} className={SHORT_WINDOW_HIDDEN}>
+          <li key={entry.paneId}>
             <Link
               to={MY_WORK_PATH}
               data-testid="sidebar-live-pane"
@@ -135,7 +128,7 @@ export function SidebarDestinations({
           </li>
         ))}
       </SidebarSection>
-      {nowCard ? <div className={SHORT_WINDOW_HIDDEN}>{nowCard}</div> : null}
+      {nowCard ? <div>{nowCard}</div> : null}
     </div>
   );
 }

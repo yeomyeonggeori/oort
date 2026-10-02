@@ -1651,6 +1651,39 @@
   padding-inline: 14px var(--spacing-3);
 }
 
+/* 목록 열의 몸통(#3334): 고정 머리(검색과 이동 아래 구획 A·B) + 본문 자리. 보통은 머리가 자기 높이를
+ * 갖고(창 높이에서 본문 자리 16rem을 남기는 만큼까지, 넘으면 머리가 스스로 스크롤) 본문이 나머지를
+ * 쓴다. **낮은 창(높이 780 이하)** 에서는 한 열로 같이 스크롤한다: 머리가 위로 지나가고 본문 자리가
+ * 최소 24rem을 지킨다. 본문의 세션 목록은 자기 머리(제목·프로젝트·칩)와 새 세션 단추만으로 180쯤을
+ * 쓰므로, 머리를 고정해 두면 700 높이에서 줄이 한 줄도 안 남았다(design-review High). */
+@utility sidebar-list-root {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-block-size: 0;
+
+  @media (height <= 780px) {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+@utility sidebar-list-head {
+  flex: none;
+  max-block-size: calc(100% - 16rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+
+  @media (height <= 780px) {
+    max-block-size: none;
+    overflow-y: visible;
+  }
+}
+@utility sidebar-list-body {
+  @media (height <= 780px) {
+    min-block-size: 24rem;
+  }
+}
+
 /* 행 사이 간격 2 (시안 `.a-side { gap: 2px }`). 리듬 스케일(4부터) 밖의 값이라
  * 이 목록 자리에만 둔다. 선택 행의 rest 그림자가 옆 행과 붙지 않는 틈이다. */
 @utility sidebar-stack {

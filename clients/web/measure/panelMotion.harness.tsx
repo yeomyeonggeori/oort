@@ -144,8 +144,12 @@ function DrawerProbe({
           사이드바 접기
         </button>
         <div
-          className="app-shell"
+          className="app-shell h-[726px]"
           data-testid="drawer-shell"
+          // 높이를 고정한다(#3334): 이 하네스에는 높이 있는 부모가 없어 셸의 높이는 사이드바 내용이
+          // 정한다. 사이드바 몸통이 재배치되며(고정 머리 + 본문 자리) 셸이 484로 줄었고, 테스트가
+          // 「본문 뒤 클릭」 좌표를 잡는 본문 상자(`click-behind`)도 함께 줄어 좌표가 상자 밖으로
+          // 나갔다. 값은 재배치 전 측정(본문 710 + 위아래 8)이다.
           data-sidebar-collapsed={folded ? "" : undefined}
         >
           <Sidebar
