@@ -13,7 +13,7 @@ import {StyleSheet, View} from 'react-native';
 import type {Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
 import {AgentWorkingRail} from '../features/agents/AgentWorkingRail';
-import {useMentionCount} from '../features/inbox/useInbox';
+import {usePhoneNeedsMe} from '../features/inbox/useNeedsMe';
 import {useDirectory} from '../features/workspace/queries';
 import {EdgeSwipeBack} from '../nav/EdgeSwipeBack';
 import {
@@ -77,9 +77,11 @@ import {
 // tracked and each is rendered from its first visit onward: mounting is
 // deferred, never undone.
 //
-// The 인박스 badge reads `useMentionCount()`, which is the read-state projection
-// the sidebar is already holding — so it is free, and it cannot disagree with
-// the per-channel counts one screen over.
+// The 인박스 badge is 「나에게 필요한 일」 (#3342): core `needsMe` over the
+// approvals this person can decide plus the read-state projection's unread
+// mentions (`useNeedsMe`). The 홈 dot is the same projection's 「anything unread」.
+// Both sources are caches the screens already hold, so neither costs a request
+// the sidebar and inbox would not have made, and neither can disagree with them.
 // =============================================================================
 
 export default function AppShell({member}: {member: Member}): React.JSX.Element {
@@ -143,7 +145,8 @@ export function Shell({
     !directoryQuery.isPending,
     memberFor(directoryQuery.directory, member.id)?.role,
   );
-  const mentionCount = useMentionCount();
+  // 탭 배지의 출처는 이 한 줄이다(#3342): 인박스 알약 = core `needsMe` 합, 홈 점 = 안 읽음.
+  const needsMe = usePhoneNeedsMe();
   // 알림 본문 탭 → 대화 하나 (#2569). 못 가면 그 이유 한 문장을 대화 목록에 둔다.
   // 지금의 자리를 함께 건넨다: 답을 기다리는 탭은 사람이 다른 곳을 고르면 접힌다.
   const tapRouting = useNotificationTapRouting(dispatch, {
@@ -311,7 +314,8 @@ export function Shell({
       <ScrollFade />
       <ShellBottomBar
         current={nav.tab}
-        inboxCount={mentionCount}
+        inboxCount={needsMe.total}
+        homeUnread={needsMe.homeUnread}
         onSelect={tab => {
           setCreate(null);
           dispatch({type: 'selectTab', tab});

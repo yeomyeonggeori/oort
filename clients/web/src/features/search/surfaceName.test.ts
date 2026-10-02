@@ -33,12 +33,22 @@ import { serverSurface } from "@momo/core/features/capabilities/serverSurfaces";
 const SURFACE_ID = "messageSearch";
 const NAME = serverSurface(SURFACE_ID).label;
 
-/** 이 목적지의 이름을 사람에게 내놓는 세 자리. */
+/**
+ * 이 목적지의 이름을 사람에게 내놓는 두 자리. 사이드바 줄은 #3334에서 없어졌다(⌘K가 메시지
+ * 본문까지 덮는다, 성재 2026-10-02): 사이드바는 더 이상 이 이름을 내놓는 자리가 아니다
+ * (아래 「사이드바에는 메시지 검색 줄이 없다」).
+ */
 const SURFACES = {
-  sidebar: "../sidebar/Sidebar.tsx",
   route: "./SearchRoute.tsx",
   palette: "../../app/QuickSwitcher.tsx",
 } as const;
+
+/** 목록 열의 목적지 줄을 그리는 소스들. 어느 하나라도 이 줄을 다시 세우면 아래 시험이 붉다. */
+const SIDEBAR_SOURCES = [
+  "../sidebar/Sidebar.tsx",
+  "../sidebar/SidebarDestinations.tsx",
+  "../sidebar/WorkspaceRail.tsx",
+] as const;
 
 function read(relativePath: string): string {
   return readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), "utf8");
@@ -64,7 +74,7 @@ function handWrites(source: string, name: string): boolean {
 }
 
 describe("메시지 검색이라는 목적지는 이름이 하나다 (이슈 #1170 M1)", () => {
-  it("세 표면 전부 표면 판정표에서 이름을 받아 온다", () => {
+  it("두 표면 전부 표면 판정표에서 이름을 받아 온다", () => {
     const missing = Object.entries(SURFACES)
       .filter(([, path]) => !stripProse(read(path)).includes(`serverSurface("${SURFACE_ID}")`))
       .map(([surface]) => surface);
@@ -78,15 +88,16 @@ describe("메시지 검색이라는 목적지는 이름이 하나다 (이슈 #11
     expect(offenders).toEqual([]);
   });
 
-  it("사이드바 줄의 label 이 코어의 그 한 줄이다", () => {
-    // 파일 어딘가에서 `serverSurface` 를 읽는 것만으로는 모자란다: 사이드바는 다른
-    // 표면도 판정표에 묻는다(작업 흐름·승인). 이름이 실제로 흘러 들어가는 자리는
-    // **그 줄의 label prop** 이고, 여기서 재는 것은 그 한 곳이다.
-    const row = read(SURFACES.sidebar)
-      .split("<SidebarRow")
-      .find((chunk) => chunk.includes('testId="nav-search"'));
-    expect(row).toBeDefined();
-    expect(row).toContain(`label={serverSurface("${SURFACE_ID}").label}`);
+  it("사이드바에는 메시지 검색 줄이 없다 (#3334: ⌘K가 대신한다)", () => {
+    // 줄이 돌아오는 길은 둘이다: 목적지 줄(`to="/search"`·`nav-search`)을 다시 세우거나, 표면 판정표의
+    // 그 이름을 사이드바가 들고 나오는 것. 둘 다 산문을 걷어낸 소스에서 잡는다.
+    for (const path of SIDEBAR_SOURCES) {
+      const code = stripProse(read(path));
+      expect(code, `${path} nav-search`).not.toContain("nav-search");
+      expect(code, `${path} /search 줄`).not.toMatch(/to=["{`]*\/search/);
+      expect(code, `${path} 판정표 이름`).not.toContain(`serverSurface("${SURFACE_ID}")`);
+      expect(code, `${path} isSurfaceProvided`).not.toContain(`isSurfaceProvided("${SURFACE_ID}")`);
+    }
   });
 
   it("라우트 제목이 코어의 그 한 줄이다", () => {
@@ -97,12 +108,11 @@ describe("메시지 검색이라는 목적지는 이름이 하나다 (이슈 #11
     expect(route).toMatch(/data-testid="search-title"\s*>\s*\{SEARCH_SURFACE_NAME\}/);
   });
 
-  it("수동 캡처가 붙잡는 두 로케이터가 그대로 있다", () => {
-    // capture-honesty.mjs 는 `nav-search` 와 `search-title` 의 innerText 를 비교한다.
-    // 둘 중 하나가 사라지면 그 하네스는 이름-분열이 아니라 **로케이터 타임아웃**으로
-    // 붉어서, 무엇이 깨졌는지 말해 주지 않는다(#1169 리뷰 N4). 그 실패를 여기서
-    // 먼저, 이름으로 잡는다.
-    expect(read(SURFACES.sidebar)).toContain('testId="nav-search"');
+  it("수동 캡처가 붙잡는 로케이터가 그대로 있다", () => {
+    // capture-honesty.mjs 는 라우트의 `search-title` innerText 를 팔레트 항목과 비교한다
+    // (#3334 이후 사이드바 줄 `nav-search`는 없다). 로케이터가 사라지면 그 하네스는
+    // 이름-분열이 아니라 **로케이터 타임아웃**으로 붉어서, 무엇이 깨졌는지 말해 주지
+    // 않는다(#1169 리뷰 N4). 그 실패를 여기서 먼저, 이름으로 잡는다.
     expect(read(SURFACES.route)).toContain('data-testid="search-title"');
   });
 

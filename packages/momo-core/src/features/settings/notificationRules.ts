@@ -135,6 +135,62 @@ export function patchNotificationRules(
   }).then(notificationRulesFromWire);
 }
 
+// ---- 푸시 종류 (ADR-0120 부록 A, #3341·#3342) ---------------------------------
+//
+// `GET|PATCH /v1/workspaces/{ws}/notification-rules/push-kinds` — 어떤 **종류**의
+// 푸시를 받을지. 위 두 스위치(`dnd`·`mentionOverridesMute`)와 다른 행이 아니라 같은
+// 규칙의 다른 열이고, 서버는 「저장된 행이 없으면 전부 켬」으로 답한다. 그래서 읽기에서
+// 빠진 스위치는 `true`다(위 규칙의 `false`와 방향이 반대다 — 기본이 켬이다).
+//
+// 쓰기는 **PATCH만** 있다: 이름 붙인 스위치만 싣고, 서버가 행 잠금 아래에서 합친다.
+
+export interface PushKinds {
+  /** 「작업 끝남」(`reason=work_session_idle`) — 내가 시작한 세션이 한 턴을 끝냈을 때. */
+  workComplete: boolean;
+}
+
+export const DEFAULT_PUSH_KINDS: PushKinds = { workComplete: true };
+
+export function pushKindsFromWire(value: unknown): PushKinds {
+  const body = record(value) ?? {};
+  return { workComplete: bool(body, "workComplete") ?? true };
+}
+
+function pushKindsPath(workspaceId: string): string {
+  return `${rulesPath(workspaceId)}/push-kinds`;
+}
+
+export function fetchPushKinds(workspaceId: string): Promise<PushKinds> {
+  return settingsRequest<unknown>(pushKindsPath(workspaceId)).then(
+    pushKindsFromWire
+  );
+}
+
+/** The switches a {@link patchPushKinds} call changes; an omitted one is kept. */
+export interface PushKindsPatch {
+  workComplete?: boolean;
+}
+
+export function patchPushKinds(
+  workspaceId: string,
+  patch: PushKindsPatch
+): Promise<PushKinds> {
+  const body: Record<string, unknown> = {};
+  if (patch.workComplete !== undefined) body.workComplete = patch.workComplete;
+  if (Object.keys(body).length === 0) {
+    return Promise.reject(new Error("empty push-kinds patch"));
+  }
+  return settingsRequest<unknown>(pushKindsPath(workspaceId), {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  }).then(pushKindsFromWire);
+}
+
+export const PUSH_WORK_COMPLETE_LABEL = "작업 끝남";
+
+export const PUSH_WORK_COMPLETE_DESCRIPTION =
+  "내가 시작한 작업이 1분 넘게 돌다가 끝나면 알립니다. 그 작업을 보고 있을 때는 오지 않습니다.";
+
 // ---- 낱말 (#2848) -------------------------------------------------------------
 //
 // 이 규칙의 `dnd` 는 **알림 일시 중지**라고 부른다. 「방해 금지」는 선언 상태

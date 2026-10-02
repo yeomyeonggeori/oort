@@ -6,9 +6,11 @@ import {
   type ReactNode,
 } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { NavLink } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { cn } from "@/design/lib/cn";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
+import { AttentionDot, AttentionPill } from "./AttentionBadge";
+import { badgeFor, type DotTone } from "./sidebarBadge";
 import {
   shouldShowSectionActions,
   sidebarSectionListId,
@@ -78,6 +80,17 @@ export interface SidebarRowProps {
    * `/work?view=team`은 경로가 같다)은 셸이 판정을 넘긴다. 없으면 NavLink가 정한다.
    */
   isActive?: boolean;
+  /**
+   * 배지(알약)가 말하는 뜻. 있으면 링크의 접근 가능한 이름이 「이름, 뜻」이 된다(예: 「인박스,
+   * 나에게 필요한 일 4개」). 알약의 숫자는 `aria-hidden`이 아니지만 단독으로는 무엇의 수인지
+   * 말하지 않는다. 없으면 예전 그대로다.
+   */
+  badgeLabel?: string;
+  /**
+   * 알약이 없는 줄에 서는 점(수를 못 그릴 때). 알약이 있으면 그려지지 않는다: 같은 자리에
+   * 둘이 서면 알약이 이긴다(`sidebarBadge`).
+   */
+  dot?: DotTone | null;
 }
 
 export function SidebarRow({
@@ -94,22 +107,23 @@ export function SidebarRow({
   wrapLink,
   dragProps,
   isActive: activeOverride,
+  badgeLabel,
+  dot = null,
 }: SidebarRowProps) {
+  // 알약은 한 줄에 하나다(필요 > 일반). 규칙은 `badgeFor`가 진다.
+  const pill = badgeFor({ needsMe: mentionCount, unread: unreadCount });
   const hasUnread = unreadCount > 0;
-  const hasMention = mentionCount > 0;
-  const link = (
-    <NavLink
-      to={to}
-      data-sidebar-row=""
-      data-testid={testId}
-      {...dataAttrs}
-      {...dragProps}
-      data-unread={hasUnread ? "" : undefined}
-      aria-current={activeOverride === undefined ? undefined : activeOverride ? "page" : false}
-      className={({ isActive }) =>
-        cn(rowClass, (activeOverride ?? isActive) ? activeClass : inactiveClass)
-      }
-    >
+  const linkProps = {
+    to,
+    "data-sidebar-row": "",
+    "data-testid": testId,
+    ...dataAttrs,
+    ...dragProps,
+    "data-unread": hasUnread ? "" : undefined,
+    "aria-label": badgeLabel ? `${label}, ${badgeLabel}` : undefined,
+  };
+  const content = (
+    <>
       <span data-row-icon="" aria-hidden="true">
         {icon}
       </span>
@@ -132,25 +146,37 @@ export function SidebarRow({
         )}
       </span>
       {trailing}
-      {hasMention ? (
-        <span
-          className="sidebar-badge bg-primary text-on-primary"
-          data-numeric
-          data-testid="mention-badge"
-        >
-          {mentionCount}
-        </span>
-      ) : hasUnread ? (
-        <span
-          className="sidebar-badge bg-signal text-on-signal"
-          data-numeric
-          data-testid="unread-count"
-        >
-          {unreadCount}
-        </span>
+      {pill ? (
+        <AttentionPill
+          spec={pill}
+          testId={pill.tone === "ink" ? "mention-badge" : "unread-count"}
+        />
+      ) : dot ? (
+        <AttentionDot tone={dot} testId="row-dot" />
       ) : null}
-    </NavLink>
+    </>
   );
+  // 선택을 셸이 정하는 줄(`isActive` 지정)은 `Link`로 그린다. `NavLink`는 `aria-current`를 자기
+  // 경로 판정으로만 내므로(쿼리가 다른 `/work` 두 줄, 접두어로 켜지는 `/c/…`) 선택 클래스와
+  // 스크린리더에 읽히는 선택이 갈라진다. 지정이 없으면 예전 그대로 NavLink가 정한다.
+  const link =
+    activeOverride === undefined ? (
+      <NavLink
+        {...linkProps}
+        className={({ isActive }) => cn(rowClass, isActive ? activeClass : inactiveClass)}
+      >
+        {content}
+      </NavLink>
+    ) : (
+      <Link
+        {...linkProps}
+        aria-current={activeOverride ? "page" : undefined}
+        className={cn(rowClass, activeOverride ? activeClass : inactiveClass)}
+      >
+        {content}
+      </Link>
+    );
+
   return <li>{wrapLink ? wrapLink(link) : link}</li>;
 }
 
@@ -173,6 +199,7 @@ export function SidebarSection({
   overlayOpen = false,
   unreadCount = 0,
   mentionCount = 0,
+  dot = null,
   dropProps,
   headerDragProps,
   wrapList = true,
@@ -201,6 +228,8 @@ export function SidebarSection({
   /** Collapsed-header aggregate. Hidden while expanded: the rows speak then. */
   unreadCount?: number;
   mentionCount?: number;
+  /** 접혀 있고 알약이 없을 때만 서는 점(예: 아직 안 본 끝남). */
+  dot?: DotTone | null;
   /**
    * When false, children already include the `<ul>` (a Skeleton wrapping the
    * list). Default true: this section is the list. SKILL §6 `ul > li`.
@@ -239,8 +268,8 @@ export function SidebarSection({
   });
   const Chevron = collapsed ? ChevronRight : ChevronDown;
   const listId = sidebarSectionListId(sectionId);
-  const hasUnread = unreadCount > 0;
-  const hasMention = mentionCount > 0;
+  // 접힌 머리의 합산도 줄과 같은 문법이다: 잉크(필요) > 호박(일반 안 읽음) > 점.
+  const sectionPill = badgeFor({ needsMe: mentionCount, unread: unreadCount });
 
   const onHeaderFocus = (event: FocusEvent<HTMLDivElement>) => {
     // Pointer click focuses the collapse button but must not paint a ring or
@@ -309,22 +338,10 @@ export function SidebarSection({
             <span className="min-w-0 truncate">{title}</span>
           </button>
         </h2>
-        {collapsed && hasMention ? (
-          <span
-            className="sidebar-badge bg-primary text-on-primary"
-            data-numeric
-            data-testid={`section-unread-${sectionId}`}
-          >
-            {mentionCount}
-          </span>
-        ) : collapsed && hasUnread ? (
-          <span
-            className="shrink-0 text-timestamp text-ink-muted"
-            data-numeric
-            data-testid={`section-unread-${sectionId}`}
-          >
-            {unreadCount}
-          </span>
+        {collapsed && sectionPill ? (
+          <AttentionPill spec={sectionPill} testId={`section-unread-${sectionId}`} />
+        ) : collapsed && dot ? (
+          <AttentionDot tone={dot} testId={`section-dot-${sectionId}`} />
         ) : null}
         {showActions ? action : null}
       </div>

@@ -320,7 +320,7 @@ describe("notifyDecision: approval copy", () => {
         kind: "approval",
         messageId: "019F96A4-E717-7F82-9750-58B2D7D28225",
         channelId: CHANNEL,
-        title: "@hermes",
+        title: "승인 필요 · @hermes",
         body: "스테이징에 배포",
       },
     });
@@ -464,5 +464,49 @@ describe("click landing", () => {
     const armed = armOpen(null, CHANNEL, NOW);
     expect(openTarget(armed, NOW + OPEN_ARM_TTL_MS + 1)).toBeNull();
     expect(openTarget(null, NOW)).toBeNull();
+  });
+});
+
+describe("notifyDecision: DM kind and target visibility (#3339)", () => {
+  const dm = (over: Partial<NotifyContext> = {}) =>
+    context({ isDirect: () => true, ...over });
+
+  it("a DM without a mention is the dm kind, and nothing else is", () => {
+    const decision = notifyDecision(
+      event({ props: {}, body: "점심 먹었어요?" }),
+      dm()
+    );
+    expect(decision.show).toBe(true);
+    if (decision.show) expect(decision.notification.kind).toBe("dm");
+  });
+
+  it("a system row in a DM is not a dm notification", () => {
+    expect(
+      notifyDecision(event({ props: {}, type: "system", body: "참여했어요" }), dm())
+    ).toEqual({ show: false, skip: "not-notifiable" });
+  });
+
+  it("without isDirect an ordinary message is still silent", () => {
+    expect(notifyDecision(event({ props: {} }), context())).toEqual({
+      show: false,
+      skip: "not-notifiable",
+    });
+  });
+
+  it("a focused window that is looking at another channel still gets the banner", () => {
+    const decision = notifyDecision(
+      event(),
+      context({ windowFocused: true, isTargetVisible: () => false })
+    );
+    expect(decision.show).toBe(true);
+  });
+
+  it("a focused window looking at the channel gets none", () => {
+    expect(
+      notifyDecision(
+        event(),
+        context({ windowFocused: true, isTargetVisible: () => true })
+      )
+    ).toEqual({ show: false, skip: "focused" });
   });
 });

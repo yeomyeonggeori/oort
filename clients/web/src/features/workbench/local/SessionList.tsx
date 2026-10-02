@@ -44,6 +44,7 @@ import {
   type WorktreeRow,
 } from "@momo/core/features/workbench/sessionList";
 import { resolveWorkbenchKey, type KeyPlatform } from "@momo/core/features/workbench/keymap";
+import { SessionStateChip } from "@/features/sidebar/SessionStateChip";
 import "./sessionList.css";
 
 // Reading this as: 작업 탭 세션 목록(시안 ① `.slist`) for internal team users on
@@ -320,9 +321,9 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
   const filters: SessionFilter[] = ["all", "waiting", "shared"];
 
   return (
-    <aside id="session-list-column" className="sl sidebar-list shell-swap-in" aria-labelledby="session-list-title" data-testid="session-list">
+    <aside id="session-list-column" className="sl shell-swap-in" aria-labelledby="session-list-title" data-testid="session-list">
       <div className="sl-hd">
-        <h2 id="session-list-title">세션</h2>
+        <h2 id="session-list-title">이 기기의 세션</h2>
         {/* 시안의 「⌘J 이동」은 저장소 머리에 있었다. 머리를 숨기는 저장소 하나일 때도 보이게 제목 옆에 둔다. */}
         <kbd aria-hidden title="세션 목록으로 이동">⌘J</kbd>
         <div className="sl-r">
@@ -674,12 +675,13 @@ function SessionRowButton({
         <span className="sl-num" data-numeric>
           {row.index}
         </span>
-        <StatusMark status={row.status} />
         <span className="sl-t" title={row.title}>
           {row.title}
         </span>
         {row.shared ? <Radio className="sl-shr" /> : null}
         <span className="sl-h">{row.harness}</span>
+        {/* 상태는 글자 칩이 말한다(#3338, 표시 문법): 팀 작업 목록·구획 B와 같은 컴포넌트다. */}
+        <SessionStateChip status={row.status} testId="session-row-chip" />
       </span>
     </button>
   );

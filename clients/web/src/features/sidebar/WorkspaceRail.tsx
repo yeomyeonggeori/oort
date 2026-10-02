@@ -1,12 +1,15 @@
 import { useRef, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Inbox, MessageSquare, Plus, SquareKanban, SquareTerminal } from "lucide-react";
+import { Bot, Inbox, MessageSquare, Plus, SquareKanban, SquareTerminal } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import {
   MY_WORK_PATH,
   TEAM_WORK_PATH,
   WORK_NAV,
 } from "@momo/core/features/workbench/workTab";
+import { AGENTS_NAV } from "./workspaceNav";
+import { AttentionDot, AttentionPill } from "./AttentionBadge";
+import type { DestinationMark, DestinationMarks } from "./sidebarBadge";
 import { useOpenAddWorkspace } from "@/features/workspace/useAddWorkspace";
 import { useWorkspaceAvatar } from "./useWorkspaceAvatar";
 import {
@@ -14,11 +17,14 @@ import {
   type WorkspaceNameState,
 } from "./workspaceRailModel";
 
-// 앱 레일 (#3280). 이 파일의 컴포넌트가 하나의 레일(56px)이다: 워크스페이스 타일과
-// 「+」, 구분선, 목적지 넷(대화·인박스·내 작업·팀 작업), 아래 프로필. 모든 탭·라우트에서
-// 같은 노드·같은 자리·같은 폭이고, 탭이 바뀌어도 언마운트하거나 숨기지 않는다(「내 작업」이
-// 64px 작업 레일로 바꿔 끼우던 #2854 구조의 폐기). 탭마다 바뀌는 것은 오른쪽 목록 열의
-// 내용뿐이다. 접힘도 목록 열만 접고 레일은 남는다(Cursor의 Activity Bar 방식).
+// 앱 레일 (#3280 → #3334). 이 파일의 컴포넌트가 하나의 레일(56px)이다: 워크스페이스 타일과
+// 「+」, 아래 프로필. 펼친 동안 레일은 **워크스페이스 전용**이다(성재 2026-10-02): 목적지
+// (대화·인박스·멤버·에이전트·내 작업·팀 작업·활동)는 목록 열의 「검색과 이동」 바로 아래
+// 구획 A·B로 돌아갔다(`SidebarDestinations`). ⌘B로 목록 열이 접힌 동안에만 레일이 구분선
+// 아래에 목적지 아이콘 다섯(대화·인박스·에이전트·내 작업·팀 작업)을 이어 붙인다 — 접힘은
+// 사람이 누른 동작이라 「탭을 옮겨도 왼쪽 크롬이 바뀌지 않는다」(#3275/#3280)를 깨지 않는다.
+// 모든 탭·라우트에서 같은 노드·같은 자리·같은 폭이고, 탭이 바뀌어도 언마운트하거나 숨기지
+// 않는다. 접힘도 목록 열만 접고 레일은 남는다(Cursor의 Activity Bar 방식).
 //
 // 워크스페이스 레일 (검수 #4b / ADR-0161). 32px 레일을 디스코드형 스위처가 설 만큼
 // 넓혔다: 폭·타일·현재 마커가 전부 이름 토큰(--spacing-rail{,-tile,-marker})이라,
@@ -32,8 +38,8 @@ export function WorkspaceRail({
   workspaceId,
   avatarUrl,
   active,
-  showMyWork,
-  inboxUnread = 0,
+  collapsed = false,
+  marks,
   footer,
 }: {
   // The tile draws the WORKSPACE (검수 피드백 #4a-1). It is a name-query object,
@@ -49,12 +55,15 @@ export function WorkspaceRail({
    * `data:` URL — an `<img src>` to the proxy cannot authenticate.
    */
   avatarUrl?: string;
-  /** 지금 있는 목적지(`aria-current`). 넷 밖의 화면(활동·멤버·설정 등)이면 null. */
+  /** 지금 있는 목적지(`aria-current`). 다섯 밖의 화면(활동·멤버·설정 등)이면 null. */
   active: RailDestination | null;
-  /** 「내 작업」은 이 기기의 격자라 데스크탑에만 선다(웹에는 로컬 터미널 레인이 없다, ADR-0190 D1). */
-  showMyWork: boolean;
-  /** 「나에게 필요한 일」 수(useNeedsMeCount). 인박스 타일의 배지로 선다(목록 줄에서 이사 온 자리). */
-  inboxUnread?: number;
+  /** 목록 열이 접혀 있다(⌘B). 접힌 동안에만 목적지 아이콘 다섯이 레일에 선다. */
+  collapsed?: boolean;
+  /**
+   * 목적지별 표지(`destinationMarks`): 펼친 목록 열의 줄과 **같은 함수의 결과**다. 접힌 레일의
+   * 아이콘 모서리에 알약(잉크=나에게 필요, 호박=안 읽음) 또는 수를 못 그리는 점이 선다.
+   */
+  marks?: DestinationMarks;
   /** 아래 프로필(연결 상태 막대 포함). */
   footer?: ReactNode;
 }) {
@@ -160,35 +169,48 @@ export function WorkspaceRail({
           이 점은 사용자 프레즌스(가용성/away/dnd, ADR-0160 6b)가 아니다. */}
     </nav>
 
-      {/* 구분선: 위는 「어느 워크스페이스」, 아래는 「어디로」. */}
-      <span aria-hidden="true" className="h-px w-6 shrink-0 bg-line" data-testid="rail-divider" />
-
-      {/* 목적지 넷 (#3280). 항목은 44px 아이콘+11px 글자(`rail-item`), 선택은 사이드바
+      {/* 접힘(⌘B)에서만: 위는 「어느 워크스페이스」, 아래는 「어디로」. 펼친 동안 목적지는
+          목록 열에 있어 레일에는 구분선도 목적지도 없다(같은 줄을 두 곳에 두면 한 목적지가 두
+          기능처럼 읽힌다, #1146 N4). 항목은 44px 아이콘+11px 글자(`rail-item`), 선택은 사이드바
           선택 행과 같은 문법(흰 면 + rest 그림자)이다. */}
-      <nav aria-label="앱 탐색" className="flex flex-col items-center">
-        <ul className="flex flex-col items-center gap-2">
-          <RailLink to="/" icon={<MessageSquare />} label="대화" testId="rail-chat" current={active === "chat"} />
-          <RailLink
-            to="/inbox"
-            icon={<Inbox />}
-            label="인박스"
-            testId="rail-inbox"
-            current={active === "inbox"}
-            badge={inboxUnread}
-          />
-          {showMyWork && (
-            <RailLink to={MY_WORK_PATH} icon={<SquareTerminal />} label={WORK_NAV.mine} testId="rail-mine" current={active === "mine"} />
-          )}
-          <RailLink to={TEAM_WORK_PATH} icon={<SquareKanban />} label={WORK_NAV.team} testId="rail-team" current={active === "team"} />
-        </ul>
-      </nav>
+      {collapsed && (
+        <>
+          <span aria-hidden="true" className="h-px w-6 shrink-0 bg-line" data-testid="rail-divider" />
+          <nav aria-label="앱 탐색" className="flex flex-col items-center" data-testid="rail-destinations">
+            <ul className="flex flex-col items-center gap-2">
+              <RailLink to="/" icon={<MessageSquare />} label="대화" testId="rail-chat" current={active === "chat"} mark={marks?.chat} dotLabel="안 읽은 채널이 있어요" />
+              <RailLink
+                to="/inbox"
+                icon={<Inbox />}
+                label="인박스"
+                testId="rail-inbox"
+                current={active === "inbox"}
+                mark={marks?.inbox}
+                pillLabel="나에게 필요한 일"
+              />
+              <RailLink to={AGENTS_NAV.to} icon={<Bot />} label={AGENTS_NAV.label} testId="rail-agents" current={active === "agents"} />
+              <RailLink
+                to={MY_WORK_PATH}
+                icon={<SquareTerminal />}
+                label={WORK_NAV.mine}
+                testId="rail-mine"
+                current={active === "mine"}
+                mark={marks?.mine}
+                pillLabel="응답이 필요한 세션"
+                dotLabel="아직 안 본 끝난 세션이 있어요"
+              />
+              <RailLink to={TEAM_WORK_PATH} icon={<SquareKanban />} label={WORK_NAV.team} testId="rail-team" current={active === "team"} />
+            </ul>
+          </nav>
+        </>
+      )}
       <span className="min-h-0 flex-1" />
       {footer}
     </div>
   );
 }
 
-export type RailDestination = "chat" | "inbox" | "mine" | "team";
+export type RailDestination = "chat" | "inbox" | "agents" | "mine" | "team";
 
 function RailLink({
   to,
@@ -196,15 +218,31 @@ function RailLink({
   label,
   testId,
   current,
-  badge = 0,
+  mark,
+  pillLabel,
+  dotLabel,
 }: {
   to: string;
   icon: ReactNode;
   label: string;
   testId: string;
   current: boolean;
-  badge?: number;
+  mark?: DestinationMark;
+  /** 알약이 말하는 것(「<이름>, <뜻> N개」). */
+  pillLabel?: string;
+  /** 점이 말하는 것. */
+  dotLabel?: string;
 }) {
+  const pill = mark?.pill ?? null;
+  const dot = mark?.dot ?? null;
+  // 접근 가능한 이름은 펼친 줄의 `badgeLabel`과 같은 문장이다. 호박 알약은 이 레일에 서지
+  // 않는다(안 읽음은 점으로만): 일반 안 읽음 수는 채널·DM 줄에서만 센다.
+  const accessible =
+    pill && pillLabel
+      ? `${label}, ${pillLabel} ${pill.count}개`
+      : dot && dotLabel
+        ? `${label}, ${dotLabel}`
+        : undefined;
   return (
     <li>
       {/* NavLink가 아니라 Link다: NavLink는 경로만 봐서 「팀 작업」(`/work?view=team`)도
@@ -213,7 +251,7 @@ function RailLink({
         to={to}
         data-testid={testId}
         aria-current={current ? "page" : undefined}
-        aria-label={badge > 0 ? `${label}, 나에게 필요한 일 ${badge}개` : undefined}
+        aria-label={accessible}
         className={cn(
           "rail-item relative focus-visible:focus-ring active:bg-surface-pressed",
           current
@@ -223,15 +261,17 @@ function RailLink({
       >
         <span aria-hidden="true">{icon}</span>
         <span>{label}</span>
-        {badge > 0 && (
-          <span
-            aria-hidden="true"
-            data-testid="rail-inbox-badge"
-            className="sidebar-badge absolute -right-1 -top-1 bg-signal text-on-signal"
-          >
-            {badge > 99 ? "99+" : badge}
+        {pill ? (
+          <span aria-hidden="true" className="absolute -right-1 -top-1">
+            <AttentionPill spec={pill} testId={`${testId}-badge`} max={99} />
           </span>
-        )}
+        ) : dot ? (
+          <AttentionDot
+            tone={dot}
+            testId={`${testId}-dot`}
+            className="absolute right-2 top-1 ring-2 ring-surface"
+          />
+        ) : null}
       </Link>
     </li>
   );

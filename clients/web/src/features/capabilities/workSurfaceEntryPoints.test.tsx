@@ -470,7 +470,7 @@ async function mount(
             createElement(Sidebar, {
               onOpenQuickSwitcher: () => undefined,
               channelPaneCollapsed: collapsed,
-              treeHidden: collapsed && !listInRoute,
+              treeHidden: collapsed,
               listInRoute,
             }),
             createElement(QuickSwitcher, {
@@ -811,52 +811,70 @@ describe("남의 개인 호스트도 관전·관제 진입점을 연다 (#2854 p
   });
 });
 
-describe("하나의 레일: 대화·인박스·내 작업·팀 작업 (#3280, #2854, ADR-0194 D1)", () => {
+describe("펼침: 레일은 워크스페이스 전용, 목적지는 목록 열의 「검색과 이동」 아래 (#3334)", () => {
   function rowCount(host: HTMLElement, id: string): number {
     return host.querySelectorAll(`[data-testid="${id}"]`).length;
   }
-  const railLabels = (host: HTMLElement) =>
-    [...host.querySelectorAll('[data-testid="workspace-rail"] nav[aria-label="앱 탐색"] a')].map(
-      (a) => a.textContent
-    );
+  const labelsIn = (host: HTMLElement, selector: string) =>
+    [...host.querySelectorAll(`${selector} a`)].map((a) => a.textContent?.replace(/\d+$/, "").trim());
+  const RAIL_DEST_IDS = ["rail-chat", "rail-inbox", "rail-agents", "rail-mine", "rail-team"];
 
-  it("데스크탑은 호스트가 없어도 「내 작업」이 레일에 서고 「팀 작업」과 나란하다", async () => {
+  it("레일에는 워크스페이스 타일·「+」·프로필만 있고 목적지·구분선은 없다", async () => {
     shell.desktop = true;
-    workFlag.provided = false;
-    hostList.hosts = [];
-    const host = await mount();
-    await hostsSettled();
-    expect(railLabels(host)).toEqual(["대화", "인박스", "내 작업", "팀 작업"]);
-    expect(host.querySelector('[data-testid="rail-team"]')?.getAttribute("href")).toBe(
-      "/work?view=team"
-    );
-    // 워크스페이스 타일·「+」·구분선·프로필이 같은 레일 안에 있다.
+    const host = await mount({ switcherOpen: false });
     const rail = host.querySelector('[data-testid="workspace-rail"]')!;
-    for (const id of ["workspace-current", "add-workspace", "rail-divider", "profile-card"]) {
+    for (const id of ["workspace-current", "add-workspace", "profile-card"]) {
       expect(rail.querySelector(`[data-testid="${id}"]`), id).not.toBeNull();
     }
-  });
-
-  it("목록 열에는 레일과 겹치는 줄(인박스·내 작업·팀 작업)이 없다", async () => {
-    shell.desktop = true;
-    const host = await mount();
-    await hostsSettled();
-    for (const id of ["nav-inbox", "nav-my-work", "nav-team-work"]) {
-      expect(rowCount(host, id), id).toBe(0);
+    for (const id of [...RAIL_DEST_IDS, "rail-divider", "rail-destinations"]) {
+      expect(rail.querySelector(`[data-testid="${id}"]`), id).toBeNull();
     }
-    // 레일이 안 가진 전역 줄은 목록에 남는다.
-    expect(rowCount(host, "nav-activity")).toBe(1);
-    expect(rowCount(host, "nav-directory")).toBe(1);
   });
 
-  it("웹에는 로컬 격자가 없어 레일에 「내 작업」이 없고 「팀 작업」만 선다", async () => {
-    shell.desktop = false;
+  it("목록 열 머리 구획 A·B가 「검색과 이동」 바로 아래, 채널 목록 위에 선다", async () => {
+    shell.desktop = true;
     workFlag.provided = false;
     hostList.hosts = [];
-    const host = await mount();
+    const host = await mount({ switcherOpen: false });
     await hostsSettled();
-    expect(railLabels(host)).toEqual(["대화", "인박스", "팀 작업"]);
-    expect(rowCount(host, "rail-mine")).toBe(0);
+    const head = host.querySelector('[data-testid="sidebar-list-head"]')!;
+    const search = host.querySelector('[data-testid="open-quick-switcher"]')!;
+    const channels = host.querySelector('[data-testid="channel-list"]')!;
+    // 문서 순서: 검색 → 머리 → 채널 목록.
+    expect(search.compareDocumentPosition(head) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(head.compareDocumentPosition(channels) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(labelsIn(head as HTMLElement, '[data-testid="sidebar-destinations"] nav')).toEqual([
+      "대화",
+      "인박스",
+      "멤버",
+    ]);
+    expect(
+      [...head.querySelectorAll('[data-testid="sidebar-section-agent-work"] a')].map((a) =>
+        a.textContent?.replace(/\d+$/, "").trim()
+      )
+    ).toEqual(["에이전트", "내 작업", "팀 작업", "활동"]);
+    expect(head.querySelector('[data-testid="nav-team"]')?.getAttribute("href")).toBe("/work?view=team");
+    expect(
+      head.querySelector('[data-testid="sidebar-section-agent-work-header"]')?.textContent
+    ).toContain("에이전트·작업");
+  });
+
+  it("웹에서도 「내 작업」 줄이 선다(누르면 설명 상태가 열린다)", async () => {
+    shell.desktop = false;
+    const host = await mount({ switcherOpen: false });
+    expect(rowCount(host, "nav-mine")).toBe(1);
+    expect(host.querySelector('[data-testid="nav-mine"]')?.getAttribute("href")).toBe("/work");
+  });
+
+  it("「메시지 검색」 줄이 없다: 서버가 검색을 싣고 있어도 ⌘K가 대신한다", async () => {
+    // 서버가 메시지 검색 표면을 싣는 경우에도(옛 줄의 조건) 줄은 서지 않는다. 줄이 다시
+    // 세워지면(`nav-search`) 이 시험이 붉다.
+    const host = await mount({ switcherOpen: false });
+    expect(rowCount(host, "nav-search")).toBe(0);
+    expect(host.querySelector('[data-testid="sidebar"] a[href="/search"]')).toBeNull();
+    expect(host.querySelector('[data-testid="sidebar"]')?.textContent).not.toContain("메시지 검색");
+    // 검색과 이동 입구는 그대로다.
+    expect(rowCount(host, "open-quick-switcher")).toBe(1);
   });
 
   it("데스크탑에서 호스트가 있으면 작업 콘솔은 `?view=console`로 간다(`/work`는 격자다)", async () => {
@@ -871,36 +889,94 @@ describe("하나의 레일: 대화·인박스·내 작업·팀 작업 (#3280, #2
     );
   });
 
-  it.each([
-    ["/", "대화"],
-    ["/c/" + CH, "대화"],
-    ["/inbox", "인박스"],
-    ["/work", "내 작업"],
-    ["/work?view=team", "팀 작업"],
-  ])("%s 에서는 레일의 「%s」 하나만 aria-current다", async (entry, label) => {
-    shell.desktop = true;
-    const host = await mount({ entry, switcherOpen: false });
-    const current = [...host.querySelectorAll('[data-testid="workspace-rail"] [aria-current="page"]')].map(
-      (a) => a.textContent
+  it("웹에서도 작업 콘솔은 `?view=console`이다(`/work`는 「내 작업」 설명 상태다)", async () => {
+    shell.desktop = false;
+    workFlag.provided = false;
+    hostList.hosts = [onlineHost()];
+    const host = await mount();
+    await hostsSettled();
+    await vi.waitFor(() => expect(rowCount(host, "nav-work-console")).toBe(1));
+    expect(host.querySelector('[data-testid="nav-work-console"]')?.getAttribute("href")).toBe(
+      "/work?view=console"
     );
-    expect(current).toEqual([label]);
   });
 
-  it("안 읽은 멘션 수는 인박스 레일 타일의 배지로 선다(목록 줄에서 이사)", async () => {
+  it.each([
+    ["/", "nav-chat"],
+    ["/c/" + CH, "nav-chat"],
+    ["/inbox", "nav-inbox"],
+    ["/agents", "nav-agents"],
+    ["/directory", "nav-directory"],
+    ["/activity", "nav-activity"],
+    ["/work", "nav-mine"],
+    ["/work?view=team", "nav-team"],
+  ])("%s 에서는 머리의 %s 하나만 aria-current다", async (entry, testId) => {
+    shell.desktop = true;
+    const host = await mount({ entry, switcherOpen: false });
+    const current = [
+      ...host.querySelectorAll('[data-testid="sidebar-list-head"] [aria-current="page"]'),
+    ].map((a) => a.getAttribute("data-testid"));
+    expect(current).toEqual([testId]);
+  });
+
+  it("안 읽은 멘션 수는 인박스 줄의 잉크 알약으로 서고 이름에 뜻이 붙는다", async () => {
     const host = await mount({ mentions: 3, switcherOpen: false });
+    const row = host.querySelector('[data-testid="nav-inbox"]')!;
+    await vi.waitFor(() =>
+      expect(row.querySelector('[data-testid="mention-badge"]')?.textContent).toBe("3")
+    );
+    expect(row.getAttribute("aria-label")).toBe("인박스, 나에게 필요한 일 3개");
+    // 0이면 알약도, 이름 덮어쓰기도 없다.
+    const quiet = await mount({ switcherOpen: false });
+    expect(quiet.querySelector('[data-testid="nav-inbox"] [data-testid="mention-badge"]')).toBeNull();
+    expect(quiet.querySelector('[data-testid="nav-inbox"]')?.hasAttribute("aria-label")).toBe(false);
+  });
+});
+
+describe("접힘(⌘B): 레일이 목적지 아이콘 다섯을 이어 붙인다 (#3334)", () => {
+  const RAIL_DEST_IDS = ["rail-chat", "rail-inbox", "rail-agents", "rail-mine", "rail-team"];
+  const railIcons = (host: HTMLElement) =>
+    [...host.querySelectorAll('[data-testid="workspace-rail"] nav[aria-label="앱 탐색"] a')].map((a) =>
+      a.getAttribute("data-testid")
+    );
+
+  it.each([true, false])("접히면 구분선 아래 다섯 목적지가 모두 선다 (desktop=%s)", async (desktop) => {
+    // 「내 작업」은 웹에서도 선다: 하나라도 빠지면 접힌 동안 그 목적지로 갈 길이 사라진다.
+    shell.desktop = desktop;
+    const host = await mount({ collapsed: true, switcherOpen: false });
+    expect(railIcons(host)).toEqual(RAIL_DEST_IDS);
+    const rail = host.querySelector('[data-testid="workspace-rail"]')!;
+    expect(rail.querySelector('[data-testid="rail-divider"]')).not.toBeNull();
+    // 워크스페이스 타일·「+」·프로필은 접힘에서도 그대로다.
+    for (const id of ["workspace-current", "add-workspace", "profile-card"]) {
+      expect(rail.querySelector(`[data-testid="${id}"]`), id).not.toBeNull();
+    }
+    // 아이콘마다 이름(글자)이 있다: 이름 없는 아이콘이 「내 작업」이 어디 갔는지 모르게 했다.
+    expect(
+      [...rail.querySelectorAll('nav[aria-label="앱 탐색"] a')].map((a) => a.textContent)
+    ).toEqual(["대화", "인박스", "에이전트", "내 작업", "팀 작업"]);
+  });
+
+  it("접힌 인박스 아이콘의 배지가 나에게 필요한 일 수다", async () => {
+    const host = await mount({ collapsed: true, mentions: 3, switcherOpen: false });
     const tile = host.querySelector('[data-testid="rail-inbox"]')!;
     await vi.waitFor(() =>
       expect(tile.querySelector('[data-testid="rail-inbox-badge"]')?.textContent).toBe("3")
     );
     expect(tile.getAttribute("aria-label")).toBe("인박스, 나에게 필요한 일 3개");
-    // 0이면 배지도, 이름 덮어쓰기도 없다.
-    const quiet = await mount({ switcherOpen: false });
-    expect(quiet.querySelector('[data-testid="rail-inbox-badge"]')).toBeNull();
-    expect(quiet.querySelector('[data-testid="rail-inbox"]')?.hasAttribute("aria-label")).toBe(false);
+  });
+
+  it("접힘에서 지금 있는 목적지 하나만 aria-current다", async () => {
+    shell.desktop = true;
+    const host = await mount({ collapsed: true, entry: "/work?view=team", switcherOpen: false });
+    const current = [
+      ...host.querySelectorAll('[data-testid="workspace-rail"] [aria-current="page"]'),
+    ].map((a) => a.getAttribute("data-testid"));
+    expect(current).toEqual(["rail-team"]);
   });
 });
 
-describe("레일 인박스 배지 = 「나에게 필요한 일」 단일 출처 (#3337)", () => {
+describe("나에게 필요한 일 = 인박스 알약 단일 출처 (#3337, #3334)", () => {
   const approval = (id: string): Approval => ({
     id,
     workspaceId: WS,
@@ -912,9 +988,11 @@ describe("레일 인박스 배지 = 「나에게 필요한 일」 단일 출처 
   });
 
   const badge = (host: HTMLElement) =>
+    host.querySelector('[data-testid="nav-inbox"] [data-testid="mention-badge"]')?.textContent;
+  const railBadge = (host: HTMLElement) =>
     host.querySelector('[data-testid="rail-inbox"] [data-testid="rail-inbox-badge"]')?.textContent;
 
-  it("멘션 2 + 대기 승인 2 + 응답 필요 칸 1 = 5 (한 출처가 세 원천을 모두 합한다)", async () => {
+  it("멘션 2 + 대기 승인 2 + 응답 필요 칸 1 = 5, 펼침의 줄과 접힘의 아이콘이 같은 수다", async () => {
     shell.desktop = true;
     pendingApprovals.rows = [approval("ap-1"), approval("ap-2")];
     const store = paneAttention();
@@ -927,12 +1005,14 @@ describe("레일 인박스 배지 = 「나에게 필요한 일」 단일 출처 
     try {
       const host = await mount({ mentions: 2, switcherOpen: false });
       await vi.waitFor(() => expect(badge(host)).toBe("5"));
+      const folded = await mount({ mentions: 2, collapsed: true, switcherOpen: false });
+      await vi.waitFor(() => expect(railBadge(folded)).toBe("5"));
     } finally {
       act(() => store.observe([], null));
     }
   });
 
-  it("승인만 있어도 배지가 선다 (멘션만 세던 옛 배지는 0이었다)", async () => {
+  it("승인만 있어도 알약이 선다 (멘션만 세던 옛 배지는 0이었다)", async () => {
     pendingApprovals.rows = [approval("ap-1")];
     const host = await mount({ switcherOpen: false });
     await vi.waitFor(() => expect(badge(host)).toBe("1"));
@@ -965,8 +1045,50 @@ describe("레일 인박스 배지 = 「나에게 필요한 일」 단일 출처 
   });
 });
 
-describe("레일은 탭마다 바뀌지 않는다 (#3280)", () => {
-  it("「내 작업」으로 들어가도 레일은 같은 노드·숨김 없음이고 목록 열만 숨는다", async () => {
+describe("레일과 목록 열 머리는 탭마다 바뀌지 않는다 (#3280, #3334)", () => {
+  const click = (host: HTMLElement, testId: string) =>
+    act(() => host.querySelector<HTMLElement>(`[data-testid="${testId}"]`)!.click());
+
+  it("대화 → 인박스 → 팀 작업 → 내 작업 → 대화: 머리와 그 안의 모든 줄이 같은 DOM 노드다", async () => {
+    shell.desktop = true;
+    const host = await mount({ switcherOpen: false });
+    const q = (id: string) => host.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+    const ROWS = ["nav-chat", "nav-inbox", "nav-directory", "nav-agents", "nav-mine", "nav-team", "nav-activity"];
+    const head = q("sidebar-list-head")!;
+    const destinations = q("sidebar-destinations")!;
+    const rows = ROWS.map((id) => q(id)!);
+    const rail = q("workspace-rail")!;
+    const search = q("open-quick-switcher")!;
+    const bodySlot = q("sidebar-body-slot")!;
+    const expectSame = (step: string) => {
+      expect(q("sidebar-list-head"), `${step}: 머리`).toBe(head);
+      expect(q("sidebar-destinations"), `${step}: 구획 A·B`).toBe(destinations);
+      ROWS.forEach((id, i) => expect(q(id), `${step}: ${id}`).toBe(rows[i]));
+      expect(q("workspace-rail"), `${step}: 레일`).toBe(rail);
+      expect(q("open-quick-switcher"), `${step}: 검색`).toBe(search);
+      expect(q("sidebar-body-slot"), `${step}: 본문 자리(언마운트 없이 숨김만)`).toBe(bodySlot);
+      expect(q("sidebar-channel-pane")?.hidden, `${step}: 목록 열은 숨지 않는다`).toBe(false);
+      expect(q("workspace-rail")?.querySelector('[data-testid="rail-destinations"]'), `${step}: 펼침 레일에 목적지 없음`).toBeNull();
+    };
+    click(host, "nav-inbox");
+    expectSame("인박스");
+    click(host, "nav-team");
+    expectSame("팀 작업");
+    // 팀 작업의 본문은 채널 목록이 아니라 팀 세션 목록이다(머리는 그대로).
+    expect(q("sidebar-team-sessions")).not.toBeNull();
+    expect(q("channel-list")?.hidden).toBe(true);
+    act(() => rerenderRail(true)); // 데스크탑 「내 작업」: 셸이 listInRoute를 켠다
+    expectSame("내 작업");
+    expect(q("sidebar-body-slot")?.hidden).toBe(false);
+    expect(q("channel-list")?.hidden).toBe(true);
+    act(() => rerenderRail(false));
+    click(host, "nav-chat");
+    expectSame("대화");
+    expect(q("channel-list")?.hidden).toBe(false);
+    expect(q("sidebar-team-sessions")).toBeNull();
+  });
+
+  it("「내 작업」으로 들어가도 레일은 같은 노드·숨김 없음이고 본문 자리만 바뀐다", async () => {
     shell.desktop = true;
     const host = await mount({ entry: "/work", listInRoute: false, switcherOpen: false });
     const railBefore = host.querySelector<HTMLElement>('[data-testid="workspace-rail"]')!;
@@ -982,8 +1104,9 @@ describe("레일은 탭마다 바뀌지 않는다 (#3280)", () => {
     expect(railAfter.closest("[inert]")).toBeNull();
     expect(host.querySelector('[data-testid="work-rail"]')).toBeNull(); // 64px 작업 레일은 없다
     expect(railAfter.querySelector('[data-testid="add-workspace"]')).not.toBeNull();
-    // 바뀌는 것은 목록 열의 내용(채널 트리 → 라우트의 세션 목록)뿐이다.
-    expect(host.querySelector<HTMLElement>('[data-testid="sidebar-channel-pane"]')?.hidden).toBe(true);
+    // 목록 열은 숨지 않는다(#3334): 바뀌는 것은 본문 자리뿐이다(채널 트리 → 라우트의 세션 목록).
+    expect(host.querySelector<HTMLElement>('[data-testid="sidebar-channel-pane"]')?.hidden).toBe(false);
+    expect(host.querySelector<HTMLElement>('[data-testid="channel-list"]')?.hidden).toBe(true);
     expect(host.querySelector('[data-testid="channel-list"]')).not.toBeNull(); // 언마운트하지 않는다
   });
 
