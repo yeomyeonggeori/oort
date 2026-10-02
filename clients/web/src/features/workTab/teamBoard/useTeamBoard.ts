@@ -54,7 +54,7 @@ export function useTeamBoardList(workspaceId: string) {
     enabled: workspaceId !== "",
   });
   const items = useMemo<SharedWorkSession[]>(
-    () => query.data?.pages.flatMap((page) => page.sessions) ?? [],
+    () => query.data?.pages.flatMap((page) => page.sessions ?? []) ?? [],
     [query.data]
   );
   return { ...query, items };

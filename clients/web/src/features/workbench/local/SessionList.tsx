@@ -320,7 +320,7 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
   const filters: SessionFilter[] = ["all", "waiting", "shared"];
 
   return (
-    <aside id="session-list-column" className="sl sidebar-list shell-swap-in" aria-labelledby="session-list-title" data-testid="session-list">
+    <aside id="session-list-column" className="sl shell-swap-in" aria-labelledby="session-list-title" data-testid="session-list">
       <div className="sl-hd">
         <h2 id="session-list-title">세션</h2>
         {/* 시안의 「⌘J 이동」은 저장소 머리에 있었다. 머리를 숨기는 저장소 하나일 때도 보이게 제목 옆에 둔다. */}

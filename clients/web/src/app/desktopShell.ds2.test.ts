@@ -136,7 +136,7 @@ describe("사이드바 (시안 `.a-side`)", () => {
 });
 
 describe("띠 위 규칙 (노을띠 `band`, themes-2.0 §3)", () => {
-  const scope = rule(".sidebar-drawer,\n.app-shell:not([data-sidebar-collapsed], [data-work-rail]) > .app-titlebar {");
+  const scope = rule(".sidebar-drawer,\n.app-shell:not([data-sidebar-collapsed]) > .app-titlebar {");
   const allowed = new Set<string>(BAND_ALLOWED_FOREGROUNDS.map(([role]) => role));
 
   it("사이드바 범위의 글자 역할은 전부 띠 위에 설 수 있는 역할로 다시 묶인다", () => {

@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { NavLink } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { cn } from "@/design/lib/cn";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
 import {
@@ -78,6 +78,12 @@ export interface SidebarRowProps {
    * `/work?view=team`은 경로가 같다)은 셸이 판정을 넘긴다. 없으면 NavLink가 정한다.
    */
   isActive?: boolean;
+  /**
+   * 배지(알약)가 말하는 뜻. 있으면 링크의 접근 가능한 이름이 「이름, 뜻」이 된다(예: 「인박스,
+   * 나에게 필요한 일 4개」). 알약의 숫자는 `aria-hidden`이 아니지만 단독으로는 무엇의 수인지
+   * 말하지 않는다. 없으면 예전 그대로다.
+   */
+  badgeLabel?: string;
 }
 
 export function SidebarRow({
@@ -94,22 +100,21 @@ export function SidebarRow({
   wrapLink,
   dragProps,
   isActive: activeOverride,
+  badgeLabel,
 }: SidebarRowProps) {
   const hasUnread = unreadCount > 0;
   const hasMention = mentionCount > 0;
-  const link = (
-    <NavLink
-      to={to}
-      data-sidebar-row=""
-      data-testid={testId}
-      {...dataAttrs}
-      {...dragProps}
-      data-unread={hasUnread ? "" : undefined}
-      aria-current={activeOverride === undefined ? undefined : activeOverride ? "page" : false}
-      className={({ isActive }) =>
-        cn(rowClass, (activeOverride ?? isActive) ? activeClass : inactiveClass)
-      }
-    >
+  const linkProps = {
+    to,
+    "data-sidebar-row": "",
+    "data-testid": testId,
+    ...dataAttrs,
+    ...dragProps,
+    "data-unread": hasUnread ? "" : undefined,
+    "aria-label": badgeLabel ? `${label}, ${badgeLabel}` : undefined,
+  };
+  const content = (
+    <>
       <span data-row-icon="" aria-hidden="true">
         {icon}
       </span>
@@ -149,8 +154,29 @@ export function SidebarRow({
           {unreadCount}
         </span>
       ) : null}
-    </NavLink>
+    </>
   );
+  // 선택을 셸이 정하는 줄(`isActive` 지정)은 `Link`로 그린다. `NavLink`는 `aria-current`를 자기
+  // 경로 판정으로만 내므로(쿼리가 다른 `/work` 두 줄, 접두어로 켜지는 `/c/…`) 선택 클래스와
+  // 스크린리더에 읽히는 선택이 갈라진다. 지정이 없으면 예전 그대로 NavLink가 정한다.
+  const link =
+    activeOverride === undefined ? (
+      <NavLink
+        {...linkProps}
+        className={({ isActive }) => cn(rowClass, isActive ? activeClass : inactiveClass)}
+      >
+        {content}
+      </NavLink>
+    ) : (
+      <Link
+        {...linkProps}
+        aria-current={activeOverride ? "page" : undefined}
+        className={cn(rowClass, activeOverride ? activeClass : inactiveClass)}
+      >
+        {content}
+      </Link>
+    );
+
   return <li>{wrapLink ? wrapLink(link) : link}</li>;
 }
 

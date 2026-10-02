@@ -44,8 +44,11 @@ describe("작업 탭 좌측 패널은 사이드바와 같은 말을 쓴다 (#327
     expect(LIST_CSS).not.toMatch(/prefers-reduced-transparency/);
   });
 
-  it("안쪽 여백은 사이드바 열의 `sidebar-list` 유틸이 진다", () => {
-    expect(SESSION_LIST_TSX).toMatch(/className="sl sidebar-list /);
+  it("안쪽 여백은 사이드바 열의 `sidebar-list` 유틸이 지고, 목록은 그 열의 본문 자리를 채운다 (#3334)", () => {
+    // 목록은 열 안(`sidebar-body-slot`)에 포털로 서므로 여백을 또 두면 두 번 들여쓴다.
+    expect(SESSION_LIST_TSX).not.toMatch(/className="sl sidebar-list /);
+    expect(SESSION_LIST_TSX).toMatch(/className="sl shell-swap-in"/);
+    expect(block(LIST_CSS, ".sl")).toMatch(/inline-size:\s*100%;/);
     // 자식은 좌우 바깥 여백을 또 두지 않는다(두 번 들여쓰면 사이드바와 가장자리가 어긋난다).
     expect(LIST_CSS).not.toMatch(/margin:\s*[^;]*var\(--session-inset\)/);
     expect(LIST_CSS).not.toMatch(/padding:\s*0 var\(--session-inset\)/);
@@ -68,13 +71,15 @@ describe("작업 탭 좌측 패널은 사이드바와 같은 말을 쓴다 (#327
     expect(selected).toMatch(/var\(--elevation-rest\),\s*inset 0 0 0 1px var\(--selected-edge\)/);
   });
 
-  it("레일은 탭마다 바뀌지 않는다: 작업 레일 토큰·이탈 전이가 없고, 「내 작업」 열 폭은 접힌 모양과 같다 (#3280)", () => {
+  it("레일·목록 열은 탭마다 바뀌지 않는다: 작업 레일 토큰·이탈 전이가 없고, 「내 작업」은 열 폭을 건드리지 않는다 (#3280, #3334)", () => {
     expect(APP_SHELL).not.toMatch(/data-work-rail-exit/);
     expect(TOKENS).not.toMatch(/--w-work-rail|--spacing-work-rail|data-work-rail-exit/);
     const shell = TOKENS.slice(TOKENS.indexOf("@utility app-shell"));
     const collapsed = block(shell, "&[data-sidebar-collapsed]");
     const workTab = block(shell, "&[data-work-rail]");
     expect(collapsed).toMatch(/grid-template-columns:\s*var\(--spacing-rail\) 1fr;/);
-    expect(workTab).toMatch(/grid-template-columns:\s*var\(--spacing-rail\) 1fr;/);
+    // #3334: 세션 목록이 목록 열로 돌아와 「내 작업」은 열 규칙이 없다(다른 탭과 같은 324).
+    expect(workTab).not.toMatch(/grid-template-columns/);
+    expect(workTab).not.toMatch(/background-size/);
   });
 });
