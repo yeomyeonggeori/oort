@@ -30,11 +30,20 @@
 //!   not run either. `MOMO_HUDDLE_SWEEP_LIVEKIT_URL` optionally overrides the
 //!   URL the sweep itself uses to reach LiveKit (default `MOMO_LIVEKIT_URL`).
 //!
+//! * `MOMO_DRIVE_SA_KEY_PATH` / `MOMO_DRIVE_SHARED_DRIVE_ID` (and the backend
+//!   `MOMO_DRIVE_ARCHIVE_BACKEND`, unset or `google`) — the API's own Drive
+//!   variables (#3284). Both present: the avatar Drive reclaim runs, every
+//!   `MOMO_AVATAR_RECLAIM_INTERVAL_MS` (600000, floored at 10000), at most
+//!   `MOMO_AVATAR_RECLAIM_BATCH` (50, 1..=500) rows per table per tick, writing
+//!   through `MOMO_AVATAR_RECLAIM_DATABASE_URL` (default
+//!   `MOMO_HUDDLE_SWEEP_DATABASE_URL`: the RLS-bound `momo_app` connection).
+//!
 //! No `.env` reading and no baked-in credential: a missing DB URL is a boot
 //! error, not a silent dev default.
 
 use std::time::Duration;
 
+use crate::avatar_reclaim::AvatarReclaimConfig;
 use crate::huddle_sweep::HuddleSweepConfig;
 
 #[derive(Debug, thiserror::Error)]
@@ -131,6 +140,15 @@ pub struct NotifierConfig {
     /// it the sweep does not run even when LiveKit is configured: the notifier's
     /// own BYPASSRLS pool is never used for huddle writes.
     pub huddle_sweep_database_url: Option<String>,
+    /// #3284 avatar Drive reclaim. `None` unless a **Google** Drive is configured
+    /// (`MOMO_DRIVE_SA_KEY_PATH` + `MOMO_DRIVE_SHARED_DRIVE_ID`, backend unset or
+    /// `google`): the local/stub archives live inside `momo-server`'s process or
+    /// volume and are not safe to open from here.
+    pub avatar_reclaim: Option<AvatarReclaimConfig>,
+    /// `MOMO_AVATAR_RECLAIM_DATABASE_URL`, falling back to
+    /// `MOMO_HUDDLE_SWEEP_DATABASE_URL` (the same RLS-bound `momo_app`
+    /// connection). Every reclaim write goes through it; never logged.
+    pub avatar_reclaim_database_url: Option<String>,
 }
 
 fn env(key: &str) -> Option<String> {
@@ -188,6 +206,19 @@ impl NotifierConfig {
                 Duration::from_millis(huddle_sweep_ms.max(1_000)),
             ),
             huddle_sweep_database_url: env("MOMO_HUDDLE_SWEEP_DATABASE_URL"),
+            avatar_reclaim: AvatarReclaimConfig::parse(
+                env("MOMO_DRIVE_ARCHIVE_BACKEND")
+                    .or_else(|| env("MOMO_DRIVE_BACKEND"))
+                    .as_deref(),
+                env("MOMO_DRIVE_SA_KEY_PATH").as_deref(),
+                env("MOMO_DRIVE_SHARED_DRIVE_ID").as_deref(),
+                Duration::from_millis(
+                    env_number("MOMO_AVATAR_RECLAIM_INTERVAL_MS", 600_000u64)?.max(10_000),
+                ),
+                env_number("MOMO_AVATAR_RECLAIM_BATCH", 50i64)?.clamp(1, 500),
+            ),
+            avatar_reclaim_database_url: env("MOMO_AVATAR_RECLAIM_DATABASE_URL")
+                .or_else(|| env("MOMO_HUDDLE_SWEEP_DATABASE_URL")),
         })
     }
 
@@ -206,6 +237,8 @@ impl NotifierConfig {
             push: PushConfig::for_target(),
             huddle_sweep: None,
             huddle_sweep_database_url: None,
+            avatar_reclaim: None,
+            avatar_reclaim_database_url: None,
         }
     }
 }

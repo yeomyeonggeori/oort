@@ -26,6 +26,10 @@
 //!    and the huddle ends the way a last leave ends it. Runs only when LiveKit
 //!    is configured; its writes go through a separate RLS-bound pool, never
 //!    this process's BYPASSRLS one. One iteration is [`huddle_sweep::HuddleSweeper::sweep_once`].
+//! 6. **avatar Drive reclaim** (#3284, ADR-0161 D5 + 증보 2) — deletes the Drive
+//!    object of a replaced, removed, `failed` or abandoned-`pending` member or
+//!    workspace avatar, never a current one. Google Drive only, and only with the
+//!    RLS-bound connection. One iteration is [`avatar_reclaim::AvatarReclaimer::sweep_once`].
 //!
 //! The drain holds **no APNs key and contains no APNs code**: a self-hosted
 //! server cannot have one, so it hands an id-only dispatch to the relay that
@@ -54,6 +58,7 @@
 //! `settled_at`, so even a duplicated convergence bills once.
 
 pub mod approval_sweep;
+pub mod avatar_reclaim;
 pub mod config;
 pub mod control_window_sweep;
 pub mod huddle_sweep;
@@ -777,6 +782,74 @@ impl Notifier {
             }
         };
 
+        // ---- loop 2e: the avatar Drive reclaim (#3284, ADR-0161 D5) ----------
+        //
+        // Its own task: each row is a Drive call. Without a Google Drive
+        // configuration (and the RLS-bound connection) it is not spawned at all.
+        let avatar_reclaim_task = match (
+            self.config.avatar_reclaim.clone(),
+            self.config.avatar_reclaim_database_url.as_deref(),
+        ) {
+            (None, _) => {
+                tracing::info!(
+                    "avatar reclaim disabled (no Google Drive configured for the notifier; \
+                     local/stub archives are not reachable from this process)"
+                );
+                None
+            }
+            (Some(_), None) => {
+                tracing::warn!(
+                    "avatar reclaim disabled: MOMO_AVATAR_RECLAIM_DATABASE_URL (or \
+                     MOMO_HUDDLE_SWEEP_DATABASE_URL), the RLS-bound momo_app connection, is \
+                     not set; replaced and abandoned avatar files will not be reclaimed"
+                );
+                None
+            }
+            (Some(config), Some(url)) => {
+                match momo_db::sqlx::postgres::PgPoolOptions::new()
+                    .max_connections(2)
+                    .connect_lazy(url)
+                {
+                    Err(error) => {
+                        tracing::error!(
+                            error = %error,
+                            "avatar reclaim disabled: the RLS-bound database URL does not parse"
+                        );
+                        None
+                    }
+                    Ok(write_pool) => match avatar_reclaim::AvatarReclaimer::from_config(&config) {
+                        None => {
+                            tracing::error!(
+                                "avatar reclaim disabled: the Drive service account is unusable"
+                            );
+                            None
+                        }
+                        Some(reclaimer) => {
+                            let read_pool = self.pool.clone();
+                            let interval = config.interval;
+                            Some(tokio::spawn(async move {
+                                let mut ticker = tokio::time::interval(interval);
+                                ticker.set_missed_tick_behavior(
+                                    tokio::time::MissedTickBehavior::Delay,
+                                );
+                                loop {
+                                    ticker.tick().await;
+                                    if let Err(error) =
+                                        reclaimer.sweep_once(&read_pool, &write_pool).await
+                                    {
+                                        tracing::error!(
+                                            error = %error,
+                                            "avatar reclaim iteration failed"
+                                        );
+                                    }
+                                }
+                            }))
+                        }
+                    },
+                }
+            }
+        };
+
         // ---- loop 4: ADR-0120 push-candidate drain -------------------------
         let (push_task, push_listener) = match self.push.clone() {
             None => {
@@ -823,6 +896,9 @@ impl Notifier {
         approval_sweep_task.abort();
         control_window_sweep_task.abort();
         if let Some(task) = huddle_sweep_task {
+            task.abort();
+        }
+        if let Some(task) = avatar_reclaim_task {
             task.abort();
         }
         if let Some(task) = push_task {

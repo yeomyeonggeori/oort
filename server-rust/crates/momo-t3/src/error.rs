@@ -95,6 +95,13 @@ pub enum T3Error {
     #[error("work session not found")]
     SessionNotFound,
 
+    /// ADR-0190 D4 (#2793): the session is a shared local pane
+    /// (`work_session.origin = 'local_pty'`). Server-side it accepts **no**
+    /// `work_control` of any kind; the `work_control_refuse_local_session`
+    /// trigger (113) says so for every caller and this is its domain name.
+    #[error("a shared local session accepts no work control")]
+    LocalSessionControlForbidden,
+
     /// B2.3 sweep: `t3_terminate` settled the ledger, and the session row was
     /// then moved by someone else before the transition could apply. Returned so
     /// the transaction rolls back — an invoice must not stand for a session this
@@ -137,6 +144,8 @@ pub(crate) fn classify_pg(sqlstate: &str, message: &str) -> Option<T3Error> {
                 Some(T3Error::CloudHostMissing)
             } else if message.starts_with("t3 workspace credit ledger missing") {
                 Some(T3Error::CreditLedgerMissing)
+            } else if message.starts_with("local_pty session accepts no work control") {
+                Some(T3Error::LocalSessionControlForbidden)
             } else {
                 None
             }
@@ -216,6 +225,17 @@ mod tests {
                 "t3 workspace credit ledger missing for workspace 0189d3f0-0000-7000-8000-000000000000"
             ),
             Some(T3Error::CreditLedgerMissing)
+        ));
+    }
+
+    #[test]
+    fn local_session_control_refusal_is_named() {
+        assert!(matches!(
+            classify_pg(
+                "23514",
+                "local_pty session accepts no work control (ADR-0190 D4)"
+            ),
+            Some(T3Error::LocalSessionControlForbidden)
         ));
     }
 

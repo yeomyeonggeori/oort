@@ -431,6 +431,44 @@ impl DriveArchive for GoogleDriveArchive {
         }
     }
 
+    async fn delete_file(&self, file_id: &str) -> Result<(), DriveError> {
+        if !valid_drive_id(file_id) {
+            return Err(DriveError::InvalidArguments(
+                "Drive file id is invalid".into(),
+            ));
+        }
+        // Never delete what is not on this archive's shared drive: the service
+        // account may see other files, and a stored id is only a string.
+        let probe = build_url(
+            DRIVE_API_BASE,
+            &format!("/files/{file_id}"),
+            &[("supportsAllDrives", "true"), ("fields", "id,driveId")],
+        )?;
+        match self.get_json(probe).await {
+            Ok(object) => {
+                if object.get("driveId").and_then(Value::as_str) != Some(&self.shared_drive_id) {
+                    return Err(DriveError::AccessDenied);
+                }
+            }
+            Err(error) => return delete_outcome_of_probe_error(error),
+        }
+        let url = build_url(
+            DRIVE_API_BASE,
+            &format!("/files/{file_id}"),
+            &[("supportsAllDrives", "true")],
+        )?;
+        let token = self.access_token().await?;
+        let response = self
+            .http
+            .delete(url)
+            .bearer_auth(token)
+            .timeout(API_TIMEOUT)
+            .send()
+            .await
+            .map_err(|_| DriveError::UpstreamFailure)?;
+        delete_status_outcome(response.status().as_u16())
+    }
+
     async fn file_content(
         &self,
         file_id: &str,
@@ -486,6 +524,24 @@ impl DriveArchive for GoogleDriveArchive {
 }
 
 /// Google's status codes → the archive's vocabulary (Swift `mappedError`).
+/// The outcome of a Drive `DELETE`: gone (200/204) and already-gone (404/410)
+/// are both success — that is what makes a re-run safe.
+fn delete_status_outcome(status: u16) -> Result<(), DriveError> {
+    match status {
+        200..=299 | 404 | 410 => Ok(()),
+        other => Err(mapped_error(other)),
+    }
+}
+
+/// A failed pre-delete probe: not found is "already gone" (success); every
+/// other failure stands, so an unreachable Drive is never read as a deletion.
+fn delete_outcome_of_probe_error(error: DriveError) -> Result<(), DriveError> {
+    match error {
+        DriveError::FileNotFound => Ok(()),
+        other => Err(other),
+    }
+}
+
 fn mapped_error(status: u16) -> DriveError {
     match status {
         403 => DriveError::AccessDenied,
@@ -561,6 +617,33 @@ mod tests {
             DriveError::Unavailable
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn delete_treats_gone_and_already_gone_as_success_and_nothing_else() {
+        for ok in [200u16, 204, 404, 410] {
+            assert_eq!(delete_status_outcome(ok), Ok(()), "{ok}");
+        }
+        assert_eq!(delete_status_outcome(403), Err(DriveError::AccessDenied));
+        for bad in [400u16, 401, 429, 500, 503] {
+            assert_eq!(
+                delete_status_outcome(bad),
+                Err(DriveError::UpstreamFailure),
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            delete_outcome_of_probe_error(DriveError::FileNotFound),
+            Ok(())
+        );
+        assert_eq!(
+            delete_outcome_of_probe_error(DriveError::UpstreamFailure),
+            Err(DriveError::UpstreamFailure)
+        );
+        assert_eq!(
+            delete_outcome_of_probe_error(DriveError::AccessDenied),
+            Err(DriveError::AccessDenied)
+        );
     }
 
     #[test]

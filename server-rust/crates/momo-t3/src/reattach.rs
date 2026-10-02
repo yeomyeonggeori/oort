@@ -178,6 +178,7 @@ fn reattach_columns() -> String {
      CASE WHEN ws.ended_at IS NULL THEN NULL \
           ELSE floor(extract(epoch from ws.ended_at) * 1000)::bigint END AS ended_at_ms, \
      ws.exit_code, ws.end_reason, ws.resumed_from_session_id, \
+     ws.origin, ws.folder_label, \
      ws.pty_id, ws.attach_endpoint, ws.display_id, ws.display_endpoint, \
      root.seq AS root_message_seq, \
      (h.revoked_at IS NOT NULL) AS host_revoked, \
@@ -245,6 +246,8 @@ pub async fn load_session_reattach_state_in_tx(
         exit_code: row.try_get("exit_code")?,
         end_reason: row.try_get("end_reason")?,
         resumed_from_session_id: row.try_get("resumed_from_session_id")?,
+        origin: row.try_get("origin")?,
+        folder_label: row.try_get("folder_label")?,
     };
     Ok(Some(SessionReattachState {
         session,
@@ -367,6 +370,8 @@ mod tests {
                 exit_code: None,
                 end_reason: None,
                 resumed_from_session_id: None,
+                origin: "host".into(),
+                folder_label: None,
             },
             root_message_seq: 4,
             last_event_seq: Some(9),

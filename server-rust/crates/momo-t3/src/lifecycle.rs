@@ -418,6 +418,41 @@ pub async fn create_work_session_with_id_in_tx(
     decode_work_session(&row)
 }
 
+/// Record a shared local pane (ADR-0190 D4, #2793): `origin = 'local_pty'`,
+/// name + folder label only. The caller has proven the host is the person's own
+/// registered desktop; the CHECKs in 113 keep paths, PTY and display bindings
+/// out of the row, and the `work_control` trigger keeps controls off it.
+pub async fn create_local_pty_work_session_with_id_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    new: NewWorkSession,
+    folder_label: Option<&str>,
+) -> Result<WorkSession, T3Error> {
+    let sql = format!(
+        "INSERT INTO work_session \
+           (id, workspace_id, channel_id, member_id, host_id, root_message_id, tool, label, \
+            started_at, origin, folder_label) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, \
+                 COALESCE((SELECT created_at FROM message WHERE id = $6), clock_timestamp()), \
+                 'local_pty', $9) \
+         RETURNING {WORK_SESSION_COLUMNS}"
+    );
+    let row = sqlx::query(&sql)
+        .bind(session_id)
+        .bind(workspace_id)
+        .bind(new.channel_id)
+        .bind(new.member_id)
+        .bind(new.host_id)
+        .bind(new.root_message_id)
+        .bind(&new.tool)
+        .bind(&new.label)
+        .bind(folder_label)
+        .fetch_one(&mut *conn)
+        .await?;
+    decode_work_session(&row)
+}
+
 /// Read one session inside the current transaction.
 pub async fn load_work_session_in_tx(
     conn: &mut PgConnection,
@@ -513,6 +548,11 @@ pub struct WorkSessionDetail {
     pub exit_code: Option<i32>,
     pub end_reason: Option<String>,
     pub resumed_from_session_id: Option<Uuid>,
+    /// ADR-0190 D4 (#2793): `host` (a work_host runs it) or `local_pty` (a
+    /// shared local pane — name, folder label and status only, no controls).
+    pub origin: String,
+    /// `local_pty` only: the folder's last path element, never a full path.
+    pub folder_label: Option<String>,
 }
 
 /// The two availability predicates, aliased `ws`, written **once**.
@@ -585,7 +625,8 @@ fn detail_columns() -> String {
          floor(extract(epoch from ws.started_at) * 1000)::bigint AS started_at_ms, \
          CASE WHEN ws.ended_at IS NULL THEN NULL \
               ELSE floor(extract(epoch from ws.ended_at) * 1000)::bigint END AS ended_at_ms, \
-         ws.exit_code, ws.end_reason, ws.resumed_from_session_id"
+         ws.exit_code, ws.end_reason, ws.resumed_from_session_id, \
+         ws.origin, ws.folder_label"
     )
 }
 
@@ -600,7 +641,7 @@ fn detail_returning() -> String {
          floor(extract(epoch from started_at) * 1000)::bigint AS started_at_ms, \
          CASE WHEN ended_at IS NULL THEN NULL \
               ELSE floor(extract(epoch from ended_at) * 1000)::bigint END AS ended_at_ms, \
-         exit_code, end_reason, resumed_from_session_id"
+         exit_code, end_reason, resumed_from_session_id, origin, folder_label"
     )
 }
 
@@ -638,6 +679,8 @@ fn decode_detail(row: &sqlx::postgres::PgRow) -> Result<WorkSessionDetail, T3Err
         exit_code: row.try_get("exit_code")?,
         end_reason: row.try_get("end_reason")?,
         resumed_from_session_id: row.try_get("resumed_from_session_id")?,
+        origin: row.try_get("origin")?,
+        folder_label: row.try_get("folder_label")?,
     })
 }
 
@@ -824,7 +867,8 @@ pub(crate) fn list_columns() -> String {
                       CASE WHEN ws.ended_at IS NULL THEN NULL \
                            ELSE floor(extract(epoch from ws.ended_at) * 1000)::bigint END \
                         AS ended_at_ms, \
-                      ws.exit_code, ws.end_reason, ws.resumed_from_session_id"
+                      ws.exit_code, ws.end_reason, ws.resumed_from_session_id, \
+                      ws.origin, ws.folder_label"
     )
 }
 
@@ -1345,6 +1389,14 @@ pub fn lifecycle_payload(
     );
     payload.insert("tool".into(), serde_json::json!(session.tool));
     payload.insert("label".into(), serde_json::json!(session.label));
+    // ADR-0190 D4: a shared local pane says so on the stream too, so a surface
+    // never has to guess from REST which rows take no controls.
+    if session.origin != "host" {
+        payload.insert("origin".into(), serde_json::json!(session.origin));
+        if let Some(folder_label) = &session.folder_label {
+            payload.insert("folder_label".into(), serde_json::json!(folder_label));
+        }
+    }
     if is_ended {
         if let Some(ended_at_ms) = session.ended_at_ms {
             payload.insert("ended_at".into(), serde_json::json!(ended_at_ms));

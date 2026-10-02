@@ -125,6 +125,9 @@ pub(crate) fn t3_error(context: &str, error: T3Error) -> ApiError {
     match error {
         T3Error::Db(inner) => db_error_status(context, inner),
         T3Error::SessionNotFound => ApiError::not_found("work session not found"),
+        // ADR-0190 D4: the database trigger's refusal, in the same coded shape
+        // the routes answer before they write.
+        T3Error::LocalSessionControlForbidden => local_session_control_refusal(),
         T3Error::CloudHostNotFound => ApiError::not_found("oort Cloud host not found"),
         // ADR-0140 enforcement points: all conflicts, all retryable-or-not by a
         // client that can read the message.
@@ -153,6 +156,16 @@ pub(crate) fn t3_error(context: &str, error: T3Error) -> ApiError {
         | T3Error::InvalidTerminationReason
         | T3Error::StaleAfterSettlement(_)) => ApiError::internal(context, other),
     }
+}
+
+/// ADR-0190 D4 (#2793): the one answer for any control aimed at a shared local
+/// session — 403 with a code, never a silent host-side ignore.
+pub(crate) fn local_session_control_refusal() -> ApiError {
+    ApiError::coded(
+        StatusCode::FORBIDDEN,
+        momo_t3::work_control::REFUSAL_LOCAL_SESSION_NO_CONTROL,
+        "a shared local session accepts no work control",
+    )
 }
 
 fn db_error_status(context: &str, error: DbError) -> ApiError {
