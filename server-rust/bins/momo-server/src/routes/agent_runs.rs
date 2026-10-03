@@ -176,7 +176,16 @@ pub async fn create(
                             "this subscription agent takes requests from its owner only",
                         )));
                     }
-                    if !subscription_agents_enabled {
+                    // #3396 — the kill switch governs subscription CLIs; an agent
+                    // whose brain is its owner's personal key is not one.
+                    let uses_owner_key = momo_agent::agent_owner_only_brain_in_tx(
+                        conn,
+                        workspace_id,
+                        agent_member_id,
+                    )
+                    .await?
+                        == momo_agent::OwnerOnlyBrain::OwnerKey;
+                    if !subscription_agents_enabled && !uses_owner_key {
                         return Ok(Err(ApiError::new(
                             StatusCode::CONFLICT,
                             "subscription agents are disabled on this server",

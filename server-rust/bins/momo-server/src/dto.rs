@@ -4121,6 +4121,65 @@ pub struct AgentMemberDto {
     pub display_name: String,
 }
 
+/// `POST /v1/workspaces/{ws}/personal-keys` (#3396, ADR-0147 증보 2026-10-03).
+/// `apiKey` is write-only: no response, audit row or log ever carries it.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct IssuePersonalKeyRequest {
+    pub owner_member_id: Uuid,
+    pub api_key: String,
+    #[serde(default)]
+    pub format: Option<String>,
+    pub base_url: String,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+// The key must not survive a `{:?}` in a log line.
+impl std::fmt::Debug for IssuePersonalKeyRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IssuePersonalKeyRequest")
+            .field("owner_member_id", &self.owner_member_id)
+            .field("api_key", &"<redacted>")
+            .finish_non_exhaustive()
+    }
+}
+
+/// `POST /v1/workspaces/{ws}/personal-keys/{key}/agent`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreatePersonalKeyAgentRequest {
+    pub display_name: String,
+    pub handle: String,
+    pub model: String,
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+}
+
+/// One issued key. Nothing here can reproduce or identify the key itself.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonalKeyDto {
+    pub id: String,
+    pub owner_member_id: String,
+    pub format: String,
+    pub endpoint_label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// `active` | `revoked`.
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issued_by: Option<String>,
+    pub issued_at_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PersonalKeyListResponse {
+    pub keys: Vec<PersonalKeyDto>,
+}
+
 /// Swift `CreateAgentResponse` (:345-347).
 #[derive(Debug, Serialize)]
 pub struct CreateAgentResponse {

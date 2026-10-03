@@ -65,6 +65,7 @@ pub mod join;
 pub mod link;
 pub mod membership_lifecycle;
 pub mod oauth;
+pub mod personal_link;
 pub mod presets;
 pub mod provider;
 pub mod quota;
@@ -119,10 +120,18 @@ pub use oauth::{
     ATTRIBUTION_PERSONAL, DEFAULT_OPENAI_TOKEN_ENDPOINT, OAUTH_OPENAI_KIND,
     USAGE_SCOPE_INTERNAL_ONLY,
 };
+pub use personal_link::{
+    decrypt_personal_link, find_personal_link_in_tx, holder_has_personal_agent_in_tx,
+    issue_personal_link_in_tx, key_fingerprint, last_revoked_base_url_in_tx,
+    list_personal_links_in_tx, read_owner_key_for_agent, revoke_personal_link_in_tx,
+    DecryptedOwnerKey, IssueOutcome, NewPersonalLink, PersonalKeyUnusable, PersonalLinkInfo,
+    RevokeOutcome, StoredOwnerKey, PERSONAL_LINK_AUDIT_SCHEMA, PERSONAL_LINK_ISSUED_ACTION,
+    PERSONAL_LINK_REVOKED_ACTION,
+};
 pub use presets::{ProviderFormat, ProviderPreset, PROVIDER_PRESETS};
 pub use provider::{
     is_unsafe_secret, redacted_endpoint_label, requires_strict_external_provider, same_origin,
-    url_origin, validated_base_url, BaseUrlInvalid, ProviderConfig, ProviderMode,
+    url_host, url_origin, validated_base_url, BaseUrlInvalid, ProviderConfig, ProviderMode,
 };
 pub use quota::{list_quota_snapshots, QuotaSnapshot};
 pub use tier::{

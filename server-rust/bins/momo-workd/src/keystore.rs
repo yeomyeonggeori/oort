@@ -28,6 +28,8 @@
 //! The seed never reaches a log line: [`HostKey`]'s `Debug` prints the public key
 //! only, and the seed is overwritten when the value drops.
 
+pub mod box_store;
+
 use std::fmt;
 use std::io::{Read as _, Write as _};
 use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _};
@@ -60,6 +62,17 @@ pub enum KeyStoreError {
         #[source]
         source: std::io::Error,
     },
+    /// The persistence gate (ADR-0197 D8) refused: the key would sit where a
+    /// backup or a snapshot could copy it in the clear.
+    #[error("host key refused by the persistence gate: {0}")]
+    Refused(String),
+    /// The per-box seal key is gone (crypto-shred, ADR-0197 D10) or unusable.
+    #[error("the box seal key is unavailable: {0}")]
+    SealKeyGone(String),
+    /// The sealed envelope did not open: wrong seal key, another box's file or
+    /// a tampered one. Never distinguishes which.
+    #[error("the sealed host key in {0} does not open")]
+    Unseal(String),
     #[error("keychain: {0}")]
     Keychain(String),
     #[error("this platform has no keychain backend; use --dev-key-file for development only")]
@@ -127,6 +140,9 @@ impl Drop for HostKey {
 /// [`KeyStore::describe`] — never the key itself.
 pub enum KeyStore {
     File(FileKeyStore),
+    /// A Linux box's volume (ADR-0197 D8, spike S4). Never the default: the
+    /// box image sets `OORT_BOX_KEY_DIR` and friends (see `cli::key_store`).
+    Box(box_store::BoxKeyStore),
     #[cfg(target_os = "macos")]
     Keychain(KeychainKeyStore),
 }
@@ -161,6 +177,7 @@ impl KeyStore {
     pub fn describe(&self) -> String {
         match self {
             Self::File(store) => format!("dev key file {}", store.path.display()),
+            Self::Box(store) => store.describe(),
             #[cfg(target_os = "macos")]
             Self::Keychain(store) => format!(
                 "keychain {}/{} (data-protection, ThisDeviceOnly)",
@@ -176,6 +193,7 @@ impl KeyStore {
     pub fn load(&self) -> Result<Option<HostKey>, KeyStoreError> {
         match self {
             Self::File(store) => store.load(),
+            Self::Box(store) => store.load(),
             #[cfg(target_os = "macos")]
             Self::Keychain(store) => store.load(),
         }
@@ -186,6 +204,7 @@ impl KeyStore {
     pub fn store(&self, key: &HostKey, replace: bool) -> Result<(), KeyStoreError> {
         match self {
             Self::File(store) => store.store(key, replace),
+            Self::Box(store) => store.store(key, replace),
             #[cfg(target_os = "macos")]
             Self::Keychain(store) => store.store(key, replace),
         }
@@ -194,6 +213,7 @@ impl KeyStore {
     pub fn delete(&self) -> Result<(), KeyStoreError> {
         match self {
             Self::File(store) => store.delete(),
+            Self::Box(store) => store.delete(),
             #[cfg(target_os = "macos")]
             Self::Keychain(store) => store.delete(),
         }
@@ -315,7 +335,10 @@ impl FileKeyStore {
 
 /// The key's folder: a directory owned by this user that no one else may write
 /// into or list (`0700` or stricter).
-fn check_private_dir(path: &Path, metadata: &std::fs::Metadata) -> Result<(), KeyStoreError> {
+pub(crate) fn check_private_dir(
+    path: &Path,
+    metadata: &std::fs::Metadata,
+) -> Result<(), KeyStoreError> {
     let unsafe_dir = |detail: String| KeyStoreError::UnsafeFile {
         path: path.display().to_string(),
         detail,
@@ -340,7 +363,10 @@ fn check_private_dir(path: &Path, metadata: &std::fs::Metadata) -> Result<(), Ke
 
 /// A key file must be a regular file, owned by this user, with no group or
 /// other permission bits (`0600` or stricter).
-fn check_private_file(path: &Path, metadata: &std::fs::Metadata) -> Result<(), KeyStoreError> {
+pub(crate) fn check_private_file(
+    path: &Path,
+    metadata: &std::fs::Metadata,
+) -> Result<(), KeyStoreError> {
     let unsafe_file = |detail: String| KeyStoreError::UnsafeFile {
         path: path.display().to_string(),
         detail,
