@@ -36,12 +36,12 @@ describe("osNotifier 묶음 (#3339)", () => {
       expect(send).not.toHaveBeenCalled();
       vi.advanceTimersByTime(COALESCE_MS);
       expect(send).toHaveBeenCalledTimes(2);
-      expect(send).toHaveBeenCalledWith("승인 필요 2건", "a, b");
-      expect(send).toHaveBeenCalledWith("dm:c", "c 본문");
+      expect(send).toHaveBeenCalledWith("승인 필요 2건", "a, b", { kind: "approval" });
+      expect(send).toHaveBeenCalledWith("dm:c", "c 본문", { kind: "dm" });
       // 창이 닫힌 뒤의 새 건은 새 묶음이다.
       n.offer(item("approval", "d"));
       vi.advanceTimersByTime(COALESCE_MS);
-      expect(send).toHaveBeenLastCalledWith("approval:d", "d 본문");
+      expect(send).toHaveBeenLastCalledWith("approval:d", "d 본문", { kind: "approval" });
     } finally {
       vi.useRealTimers();
     }
