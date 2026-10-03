@@ -1580,7 +1580,8 @@ export function Composer({
                     style={[
                       styles.mentionColumn,
                       annotationLine === null && styles.mentionColumnCenter,
-                    ]}>
+                    ]}
+                    testID="mention-column">
                     {/* 이름과 핸들은 **한 묶음**이다 — 그 묶음이 자라고, 그 안에서 둘이
                         함께 줄어든다. 형제 셋(`AgentsScreen`·`SidebarScreen`·
                         `HostedConnectionsScreen`)의 `rowText` + `rowTitleLine` 과 같은
@@ -2102,11 +2103,12 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   /**
    * 이름 + 핸들의 묶음 — 형제 셋의 `rowText`/`rowTitleLine` 과 같은 것.
    *
-   * `flex: 1` 이라 표지가 자기 폭을 다 받고 이 묶음이 나머지를 받는다. 안에서
+   * 묶음은 이제 왼쪽 칸(`mentionColumn`, `flex: 1`) 안의 첫 줄이라 폭은 칸이 받는다 —
+   * 묶음 자신이 `flex: 1` 이면 세로로도 자라 보조 줄과 벌어진다(AIH-9b 캡처에서 잡았다).
+   * 칩이 자기 폭을 먼저 받고 칸이 나머지를 받는 것은 그대로다. 안에서
    * 두 조각이 폭에 비례해 함께 줄어드는 것이 위 절의 요점이다.
    */
   mentionIdentity: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
