@@ -34,7 +34,7 @@ printf '%s\n' "$granted" | grep -Fxq work_control || fail "GRANT list missing wo
 printf '%s\n' "$granted" | grep -Fxq work_cloud_host_transition || \
   fail "GRANT list missing work_cloud_host_transition"
 printf '%s\n' "$granted" | grep -Fxq workspace && \
-  fail "GRANT list still has workspace (trimmed in #2448; topup_credit is REST-only)"
+  fail "GRANT list has a table-level workspace grant (trimmed in #2448; the avatar reclaim read needs only the column, #3377)"
 printf '%s\n' "$granted" | grep -Fxq work_pool && \
   fail "GRANT list still has work_pool (trimmed in #2448; lock_work_pool=false on notifier)"
 pass "parsed GRANT ON TABLE allowlist ($(printf '%s\n' "$granted" | grep -c .))"
@@ -198,6 +198,42 @@ SCAN_SCOPE = [
         "mode": "symbols",
         "symbols": ["reread_interaction_in_tx", "emit_message_edited_in_tx"],
         "why": "control_window_sweep.rs:70 emit_message_edited_in_tx after stamp",
+    },
+    {
+        "path": "server-rust/crates/momo-t3/src/work_share.rs",
+        "mode": "symbols",
+        "symbols": ["workspaces_with_expired_shares"],
+        "why": (
+            "share_retention_sweep.rs: the cross-tenant candidate READ on the "
+            "notifier pool (#3377; v0.1.16 incident). Only this symbol: "
+            "delete_expired_shares_for_workspace_in_tx is the momo_app write "
+            "pool's DELETE and must stay out of scope."
+        ),
+    },
+    {
+        "path": "server-rust/crates/momo-messaging/src/avatar_reclaim.rs",
+        "mode": "symbols",
+        "symbols": ["candidate_sql", "avatar_reclaim_candidates"],
+        "literal_tables": ["member_avatar_media", "workspace_avatar_media", "member"],
+        "column_reads": {"workspace": ["avatar_media_id"]},
+        "why": (
+            "notifier avatar_reclaim.rs: avatar_reclaim_candidates on the "
+            "notifier pool. candidate_sql builds `FROM {table} a … FROM {owner} o` "
+            "from AvatarKind (Member → member_avatar_media / member, Workspace → "
+            "workspace_avatar_media / workspace), which a literal scan cannot see, "
+            "so the four relations are named here. `workspace` is read for one "
+            "column only (o.avatar_media_id), hence a column grant. "
+            "reclaim_avatar_media_in_tx is the momo_app write half and is not scanned."
+        ),
+    },
+    {
+        "path": "server-rust/crates/momo-messaging/src/huddle_sweep.rs",
+        "mode": "symbols",
+        "symbols": ["active_huddles_for_sweep"],
+        "why": (
+            "notifier huddle_sweep.rs: active_huddles_for_sweep, the cross-tenant "
+            "READ on the notifier pool (#2758). Settlements are the momo_app pool."
+        ),
     },
     {
         "path": "server/Migrations/058_t3_interval_micro_precision.sql",
@@ -399,6 +435,8 @@ def corpus_for(entry, extra_text=""):
             pieces.append(load_sql_functions(text, entry["symbols"]))
         else:
             fail(f"unknown scan mode {mode}")
+    for table in entry.get("literal_tables", []):
+        pieces.append(f"SELECT 1 FROM {table}")
     if extra_text:
         pieces.append(extra_text)
     return "\n".join(pieces)
@@ -439,6 +477,32 @@ def parse_verbs(sql):
             continue
         add(m.group(1), "SELECT")
     return used, deletes
+
+
+COLUMN_GRANT_RE = re.compile(
+    r'GRANT\s+SELECT\s*\(([^)]*)\)\s+ON\s+([a-z][a-z0-9_]*)\s+TO\s+momo_notifier',
+    re.I,
+)
+
+
+def parse_column_grants(text):
+    """`GRANT SELECT (a, b) ON <table> TO momo_notifier` → {table: {a, b}}.
+
+    Deliberately a different shape from the table grants (no `ON TABLE`), so the
+    doctor / table-grant parsers never read a column grant as a table grant."""
+    grants = {}
+    for m in COLUMN_GRANT_RE.finditer(text):
+        cols = {c.strip().lower() for c in m.group(1).split(",") if c.strip()}
+        grants.setdefault(m.group(2).lower(), set()).update(cols)
+    return grants
+
+
+def collect_column_reads():
+    reads = {}
+    for entry in SCAN_SCOPE:
+        for table, cols in entry.get("column_reads", {}).items():
+            reads.setdefault(table, set()).update(cols)
+    return reads
 
 
 def parse_grants(text):
@@ -581,8 +645,25 @@ def collect_used(extra_by_path=None):
     return used, deletes
 
 
-def compare(used, grants, real):
+def compare(used, grants, real, col_grants=None, col_reads=None):
     problems = []
+    col_grants = col_grants if col_grants is not None else COLUMN_GRANTS
+    col_reads = col_reads if col_reads is not None else COLUMN_READS
+    for table, cols in sorted(col_reads.items()):
+        have = col_grants.get(table, set())
+        if "SELECT" in grants.get(table, set()):
+            problems.append(
+                f"table-level SELECT {table} where only columns {sorted(cols)} are read"
+            )
+        for col in sorted(cols - have):
+            problems.append(
+                f"column read {table}.{col} not in GRANT SELECT (…) ON {table}"
+            )
+    for table, cols in sorted(col_grants.items()):
+        for col in sorted(cols - col_reads.get(table, set())):
+            problems.append(
+                f"over-grant column {table}.{col} (no scanned statement reads it)"
+            )
     for table, verbs in sorted(used.items()):
         if table not in real:
             continue
@@ -632,6 +713,8 @@ for line in NOT_SCANNED:
 
 real = public_tables()
 grants = parse_grants(bootstrap.read_text(encoding="utf-8"))
+COLUMN_GRANTS = parse_column_grants(bootstrap.read_text(encoding="utf-8"))
+COLUMN_READS = collect_column_reads()
 used, deletes = collect_used()
 used_real = {t: v for t, v in used.items() if t in real}
 
@@ -703,6 +786,39 @@ if not any("GRANT DELETE ON TABLE outbox" in p for p in probs_c):
 print(
     "[test-notifier-role-grants] ok: sabotage GRANT DELETE ON outbox → RED "
     f"({[p for p in probs_c if 'DELETE' in p][0]})"
+)
+
+# (d) #3377: the grant the v0.1.16 share retention sweep lacked. Drop it → RED.
+grants_d = {t: set(vs) for t, vs in grants.items()}
+grants_d.pop("work_session_share", None)
+probs_d = compare(used_real, grants_d, real)
+if not any("SELECT work_session_share" in p for p in probs_d):
+    fail(f"sabotage drop work_session_share GRANT stayed GREEN (problems={probs_d})")
+print(
+    "[test-notifier-role-grants] ok: sabotage drop work_session_share GRANT → RED "
+    f"({[p for p in probs_d if 'work_session_share' in p][0]})"
+)
+
+# (e) #3377: drop the one-column workspace grant the avatar reclaim read needs → RED.
+probs_e = compare(used_real, grants, real, col_grants={})
+if not any("column read workspace.avatar_media_id" in p for p in probs_e):
+    fail(f"sabotage drop workspace column GRANT stayed GREEN (problems={probs_e})")
+print(
+    "[test-notifier-role-grants] ok: sabotage drop workspace.avatar_media_id column GRANT → RED "
+    f"({[p for p in probs_e if 'avatar_media_id' in p][0]})"
+)
+
+# (f) #3377: a share-retention DELETE in the scanned notifier source → RED.
+used_f, dels_f = collect_used(
+    extra_by_path={
+        "server-rust/bins/momo-notifier/src/*.rs": "DELETE FROM work_session_share"
+    }
+)
+if "work_session_share" not in dels_f:
+    fail("sabotage DELETE FROM work_session_share in notifier source stayed GREEN")
+print(
+    "[test-notifier-role-grants] ok: sabotage DELETE FROM work_session_share "
+    "in scanned source → RED (statement DELETE is always forbidden)"
 )
 
 # (d) grant a table no statement uses (workspace after trim) → RED

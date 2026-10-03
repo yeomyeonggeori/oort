@@ -2,7 +2,10 @@
 //! (#2862 — ADR-0190 증보 D4-b: 「세션이 끝나고 30일이 지나면 S1 확장 필드를 지운다」).
 //!
 //! The candidate read runs as `momo_notifier` (BYPASSRLS, the sweep's existing
-//! exception) and every delete as a per-tenant transaction under the tenant GUC.
+//! exception) and every delete as a per-tenant transaction under the tenant GUC on
+//! the RLS-bound `momo_app` pool (#3377). This suite uses the development role
+//! file, so it proves behaviour, not grants: `prod_role_conformance_pg` is the
+//! one that provisions roles the production way.
 //!
 //! ```text
 //! DATABASE_URL=postgres://momo:momo@localhost:15432/momo \
@@ -261,7 +264,9 @@ async fn a_payload_is_deleted_thirty_days_after_the_end_and_not_before() {
     let running_a = seed_shared(&su, &app, &a, member_a, None).await;
     let old_b = seed_shared(&su, &app, &b, member_b, Some(45)).await;
 
-    let stats = sweep_expired_shares(&notifier, 100).await.expect("sweep");
+    let stats = sweep_expired_shares(&notifier, &app, 100)
+        .await
+        .expect("sweep");
     // `>=`: a crashed earlier run may have left expired rows for the sweep to take too.
     assert!(
         stats.deleted >= 2,
@@ -287,7 +292,9 @@ async fn a_payload_is_deleted_thirty_days_after_the_end_and_not_before() {
     assert!(session_exists(&su, old_a).await && session_exists(&su, old_b).await);
 
     // A second tick has nothing to do.
-    let again = sweep_expired_shares(&notifier, 100).await.expect("sweep");
+    let again = sweep_expired_shares(&notifier, &app, 100)
+        .await
+        .expect("sweep");
     assert_eq!(again.deleted, 0);
 }
 
@@ -302,7 +309,9 @@ async fn the_sweep_announces_the_deletion_through_the_outbox_without_names() {
     let (a, member) = seed_workspace(&su, &app).await;
     let session = seed_shared(&su, &app, &a, member, Some(40)).await;
 
-    sweep_expired_shares(&notifier, 100).await.expect("sweep");
+    sweep_expired_shares(&notifier, &app, 100)
+        .await
+        .expect("sweep");
     let events: Vec<Value> = sqlx::query_scalar(
         "SELECT payload FROM outbox WHERE workspace_id = $1 \
            AND payload->'data'->>'type' = 'work.session.share_changed'",

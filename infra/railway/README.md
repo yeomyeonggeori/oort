@@ -390,6 +390,7 @@ base64 < ~/.momo-secrets/railway-relay-key/server-ed25519-private.pem | tr -d '\
 | notifier | `MOMO_LIVEKIT_API_SECRET` | sealed: the api's value (#2759) |
 | notifier | `MOMO_LIVEKIT_URL` | the api's value (#2759). The sweep calls LiveKit RoomService there (server → LiveKit HTTPS only) |
 | notifier | `MOMO_AVATAR_RECLAIM_DATABASE_URL` | (선택) 아바타 Drive 회수 잡(#3284, ADR-0161 증보 2)의 쓰기 연결 — 기본은 위 `MOMO_HUDDLE_SWEEP_DATABASE_URL`(같은 RLS-bound `momo_app`). BYPASSRLS URL 은 거절한다 |
+| notifier | `MOMO_SHARE_RETENTION_DATABASE_URL` | (선택) 공유 세션 보존 잡(#2862, #3377)의 삭제 연결 — 기본은 위 `MOMO_HUDDLE_SWEEP_DATABASE_URL`(같은 RLS-bound `momo_app`). notifier 역할(`NOTIFIER_DATABASE_URL`)에는 DELETE 가 없어 후보 읽기만 하고, 둘 다 없으면 잡을 켜지 않는다. BYPASSRLS URL 은 거절한다. `MOMO_SHARE_RETENTION_INTERVAL_MS`(기본 600000) 로 주기를 바꾼다 |
 | notifier | `MOMO_DRIVE_SA_KEY_PATH` / `MOMO_DRIVE_SHARED_DRIVE_ID` | (선택) **Google Drive 백엔드에서만** 회수 잡이 돈다(api 와 같은 값). 기본 `local` 백엔드(위 Drive 절)는 api 볼륨을 notifier 가 마운트할 수 없어 **회수하지 않는다** — 후속 이슈. 주기 `MOMO_AVATAR_RECLAIM_INTERVAL_MS`(기본 600000), 틱당 `MOMO_AVATAR_RECLAIM_BATCH`(기본 50) |
 
 Check in the Apple Developer portal that the APNs key's environment scope

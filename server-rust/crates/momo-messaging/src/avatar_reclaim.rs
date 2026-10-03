@@ -269,7 +269,7 @@ pub async fn ensure_write_pool_rls_bound(pool: &PgPool) -> Result<(), DbError> {
     .await?;
     if row.try_get::<bool, _>("bypasses")? {
         return Err(DbError::from(sqlx::Error::Protocol(
-            "avatar reclaim write pool connects as a role that bypasses RLS".into(),
+            "sweep write pool connects as a role that bypasses RLS (avatar reclaim, share retention)".into(),
         )));
     }
     Ok(())

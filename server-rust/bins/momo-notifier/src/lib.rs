@@ -59,6 +59,7 @@
 
 pub mod approval_sweep;
 pub mod avatar_reclaim;
+pub mod backoff;
 pub mod config;
 pub mod control_window_sweep;
 pub mod huddle_sweep;
@@ -626,26 +627,20 @@ impl Notifier {
                 tracing::info!("t3 disabled; cloud lifecycle reconciler idle");
                 return;
             }
-            let mut ticker = tokio::time::interval(reconciler.config.reconcile_interval);
-            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            loop {
-                ticker.tick().await;
-                if let Err(error) = reconciler.reconcile_once().await {
-                    tracing::error!(error = %error, "cloud lifecycle reconciliation iteration failed");
-                }
-            }
+            backoff::supervise(
+                "cloud lifecycle reconciliation",
+                reconciler.config.reconcile_interval,
+                || reconciler.reconcile_once(),
+            )
+            .await;
         });
 
         let sweeper = self.clone();
         let sweep_task = tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(sweeper.config.sweep_interval);
-            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            loop {
-                ticker.tick().await;
-                if let Err(error) = sweeper.sweep_once().await {
-                    tracing::error!(error = %error, "tier fallback sweep iteration failed");
-                }
-            }
+            backoff::supervise("tier fallback sweep", sweeper.config.sweep_interval, || {
+                sweeper.sweep_once()
+            })
+            .await;
         });
 
         // ---- loop 3: #1197 H1 instance lease renewal -----------------------
@@ -661,14 +656,12 @@ impl Notifier {
                 tracing::info!("t3 disabled; instance lease renewal idle");
                 return;
             }
-            let mut ticker = tokio::time::interval(renewer.config.lease_renewal_interval);
-            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            loop {
-                ticker.tick().await;
-                if let Err(error) = renewer.renew_leases_once().await {
-                    tracing::error!(error = %error, "instance lease renewal iteration failed");
-                }
-            }
+            backoff::supervise(
+                "instance lease renewal",
+                renewer.config.lease_renewal_interval,
+                || renewer.renew_leases_once(),
+            )
+            .await;
         });
 
         // ---- loop 2b: the approval expiry sweep (goal SRV-T1) --------------
@@ -679,19 +672,17 @@ impl Notifier {
         // It runs regardless of `t3_enabled` — approvals are not a T3 feature.
         let approvals = self.clone();
         let approval_sweep_task = tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(approvals.config.sweep_interval);
-            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            loop {
-                ticker.tick().await;
-                if let Err(error) = approval_sweep::sweep_expired_approvals(
-                    &approvals.pool,
-                    approvals.config.claim_batch_size,
-                )
-                .await
-                {
-                    tracing::error!(error = %error, "approval expiry sweep iteration failed");
-                }
-            }
+            backoff::supervise(
+                "approval expiry sweep",
+                approvals.config.sweep_interval,
+                || {
+                    approval_sweep::sweep_expired_approvals(
+                        &approvals.pool,
+                        approvals.config.claim_batch_size,
+                    )
+                },
+            )
+            .await;
         });
 
         // ---- loop 2c: the control-window lease sweep (#1425) ---------------
@@ -709,41 +700,67 @@ impl Notifier {
         // loop costs one indexed poll.
         let windows = self.clone();
         let control_window_sweep_task = tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(windows.config.sweep_interval);
-            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            loop {
-                ticker.tick().await;
-                if let Err(error) = control_window_sweep::sweep_lapsed_control_windows(
-                    &windows.pool,
-                    windows.config.claim_batch_size,
-                )
-                .await
-                {
-                    tracing::error!(error = %error, "control window sweep iteration failed");
-                }
-            }
+            backoff::supervise(
+                "control window sweep",
+                windows.config.sweep_interval,
+                || {
+                    control_window_sweep::sweep_lapsed_control_windows(
+                        &windows.pool,
+                        windows.config.claim_batch_size,
+                    )
+                },
+            )
+            .await;
         });
 
-        // ---- loop 2c': shared-session payload retention (#2862) ----------------
+        // ---- loop 2c': shared-session payload retention (#2862, #3377) ---------
         //
         // ADR-0190 D4-b: the S1 extension is deleted 30 days after the session
-        // ended. Cross-tenant read, per-tenant delete under the GUC.
-        let shares = self.clone();
-        let share_retention_task = tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(shares.config.sweep_interval);
-            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            loop {
-                ticker.tick().await;
-                if let Err(error) = share_retention_sweep::sweep_expired_shares(
-                    &shares.pool,
-                    shares.config.claim_batch_size,
-                )
-                .await
+        // ended. Two pools, like the huddle sweep: the cross-tenant candidate read
+        // runs on the notifier pool (SELECT only — the notifier role has no
+        // DELETE), every delete on an RLS-bound `momo_app` pool. Without that URL
+        // the loop is not spawned: it would fail on every tick (v0.1.16 incident).
+        let share_retention_task = match self.config.share_retention_database_url.as_deref() {
+            None => {
+                tracing::warn!(
+                    "share retention disabled: MOMO_SHARE_RETENTION_DATABASE_URL (or \
+                     MOMO_HUDDLE_SWEEP_DATABASE_URL), the RLS-bound momo_app connection, is \
+                     not set; expired shared-session payloads will not be deleted"
+                );
+                None
+            }
+            Some(url) => {
+                match momo_db::sqlx::postgres::PgPoolOptions::new()
+                    .max_connections(2)
+                    .connect_lazy(url)
                 {
-                    tracing::error!(error = %error, "share retention sweep iteration failed");
+                    Err(error) => {
+                        tracing::error!(
+                            error = %error,
+                            "share retention disabled: the RLS-bound database URL does not parse"
+                        );
+                        None
+                    }
+                    Ok(write_pool) => {
+                        let shares = self.clone();
+                        Some(tokio::spawn(async move {
+                            backoff::supervise(
+                                "share retention sweep",
+                                shares.config.share_retention_interval,
+                                || {
+                                    share_retention_sweep::sweep_expired_shares(
+                                        &shares.pool,
+                                        &write_pool,
+                                        shares.config.claim_batch_size,
+                                    )
+                                },
+                            )
+                            .await;
+                        }))
+                    }
                 }
             }
-        });
+        };
 
         // ---- loop 2d: the huddle ghost sweep (#2758, ADR-0122 증보 D-H4) ------
         //
@@ -784,20 +801,17 @@ impl Notifier {
                     Ok(write_pool) => {
                         let read_pool = self.pool.clone();
                         Some(tokio::spawn(async move {
-                            let mut ticker = tokio::time::interval(config.interval);
-                            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                            let mut sweeper = huddle_sweep::HuddleSweeper::new(config);
-                            loop {
-                                ticker.tick().await;
-                                if let Err(error) =
-                                    sweeper.sweep_once(&read_pool, &write_pool).await
-                                {
-                                    tracing::error!(
-                                        error = %error,
-                                        "huddle sweep iteration failed"
-                                    );
-                                }
-                            }
+                            let interval = config.interval;
+                            let sweeper =
+                                tokio::sync::Mutex::new(huddle_sweep::HuddleSweeper::new(config));
+                            backoff::supervise("huddle sweep", interval, || async {
+                                sweeper
+                                    .lock()
+                                    .await
+                                    .sweep_once(&read_pool, &write_pool)
+                                    .await
+                            })
+                            .await;
                         }))
                     }
                 }
@@ -850,21 +864,10 @@ impl Notifier {
                             let read_pool = self.pool.clone();
                             let interval = config.interval;
                             Some(tokio::spawn(async move {
-                                let mut ticker = tokio::time::interval(interval);
-                                ticker.set_missed_tick_behavior(
-                                    tokio::time::MissedTickBehavior::Delay,
-                                );
-                                loop {
-                                    ticker.tick().await;
-                                    if let Err(error) =
-                                        reclaimer.sweep_once(&read_pool, &write_pool).await
-                                    {
-                                        tracing::error!(
-                                            error = %error,
-                                            "avatar reclaim iteration failed"
-                                        );
-                                    }
-                                }
+                                backoff::supervise("avatar reclaim", interval, || {
+                                    reclaimer.sweep_once(&read_pool, &write_pool)
+                                })
+                                .await;
                             }))
                         }
                     },
@@ -893,6 +896,7 @@ impl Notifier {
                     drain.reclaim_stuck().await;
                     let mut ticker = tokio::time::interval(interval);
                     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                    let mut backoff = backoff::Backoff::new(interval, backoff::MAX_BACKOFF);
                     loop {
                         tokio::select! {
                             _ = ticker.tick() => {}
@@ -904,7 +908,23 @@ impl Notifier {
                                 }
                             }
                         }
-                        drain.drain_to_empty(batch).await;
+                        // #3377: a drain that fails (revoked grant, database down)
+                        // must not be retried every `interval` forever.
+                        let (_, error) = drain.drain_until_error(batch).await;
+                        match error {
+                            None => backoff.succeeded(),
+                            Some(error) => {
+                                let delay = backoff.failed();
+                                tracing::error!(
+                                    error = %error,
+                                    consecutive_failures = backoff.consecutive_failures(),
+                                    next_attempt_in_ms = delay.as_millis() as u64,
+                                    "push drain iteration failed"
+                                );
+                                tokio::time::sleep(delay.saturating_sub(interval)).await;
+                                ticker.reset();
+                            }
+                        }
                     }
                 });
                 (Some(task), Some(listener))
@@ -917,7 +937,9 @@ impl Notifier {
         lease_task.abort();
         approval_sweep_task.abort();
         control_window_sweep_task.abort();
-        share_retention_task.abort();
+        if let Some(task) = share_retention_task {
+            task.abort();
+        }
         if let Some(task) = huddle_sweep_task {
             task.abort();
         }
