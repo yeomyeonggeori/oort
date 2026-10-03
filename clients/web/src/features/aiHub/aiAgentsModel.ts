@@ -41,7 +41,7 @@ export interface AgentTableRow {
   status: AgentStatusView | null;
 }
 
-function agentStatus(agent: RosterMember, labels: AiAgentLabels, c: AiAgentClassification): AgentStatusView | null {
+export function agentStatus(agent: RosterMember, labels: AiAgentLabels, c: AiAgentClassification): AgentStatusView | null {
   if (agent.status !== "active") return { label: COPY.inactive, tone: "mute", detail: null };
   // core 의 서버 사유 상태는 회색(muted) 한 가지 톤이다.
   if (labels.status) return { label: labels.status.label, tone: "mute", detail: labels.status.detail };
@@ -170,4 +170,14 @@ export function createKindOptions(input: CreateKindInput): CreateKindOption[] {
     { id: "mySubscription", ...kinds.mySubscription, ...subscription },
     { id: "external", ...kinds.external, ...external },
   ];
+}
+
+/**
+ * 명부 행 하나의 상태 한 단어(연결 목록 없이, 서버 명부 필드만으로). `/agents` 목록 칩이 표와 같은
+ * 우선순위를 쓰게 하려는 것이다. 서버가 상태 필드를 안 주는 구서버는 null 이 아니라 「활성」/null 이 나오고,
+ * 호출부는 「활성」이면 자기 프로필 기반 판정으로 돌아간다.
+ */
+export function rosterStatusView(agent: RosterMember, viewerHumanId: string): AgentStatusView | null {
+  const classification = classifyAiAgent(factsFor(agent, undefined, false), { humanId: viewerHumanId });
+  return agentStatus(agent, aiAgentLabels(classification), classification);
 }

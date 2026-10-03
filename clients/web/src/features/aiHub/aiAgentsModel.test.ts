@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RosterMember } from "@momo/core/lib/api";
-import { agentTableRows, createKindOptions } from "./aiAgentsModel";
+import { agentTableRows, createKindOptions, rosterStatusView } from "./aiAgentsModel";
 
 const WS = "w1";
 const ME = "00000000-0000-7000-8000-000000000101";
@@ -117,6 +117,13 @@ describe("만들기 3종 권한", () => {
     expect(sub?.reason).toContain("데스크탑 앱에서");
   });
 
+  it("대상 칩은 실제 관문과 같은 말이다: 팀·외부는 소유자·관리자, 거절 문장도 같은 낱말", () => {
+    const opts = createKindOptions({ mayCreate: false, subscription: "denied", externalProvided: true });
+    expect(opts[0]?.audience).toBe("소유자·관리자");
+    expect(opts[2]?.audience).toBe("소유자·관리자");
+    expect(opts[0]?.reason).toContain("소유자·관리자");
+  });
+
   it("권한이 없으면 셋 다 사유와 함께 잠긴다", () => {
     const opts = createKindOptions({ mayCreate: false, subscription: "denied", externalProvided: true });
     expect(opts.every((o) => o.state === "locked" && o.reason !== null)).toBe(true);
@@ -127,5 +134,16 @@ describe("만들기 3종 권한", () => {
     expect(off[1]?.reason).toContain("꺼져 있어요");
     expect(off[2]).toMatchObject({ state: "locked" });
     expect(off[0]?.state).toBe("available");
+  });
+});
+
+describe("/agents 목록 칩과 같은 상태 우선순위", () => {
+  it("문의 중·맥 꺼짐은 활성보다 앞서고, 서버 사유가 없으면 활성이라 호출부가 프로필 판정으로 돌아간다", () => {
+    const get = (h: string) => rosterStatusView(MEMBERS.find((m) => m.handle === h) as RosterMember, ME);
+    expect(get("성재-claude")).toMatchObject({ label: "문의 중", tone: "mute" });
+    expect(get("서연-codex")).toMatchObject({ label: "맥 꺼짐", tone: "warn" });
+    expect(get("성재-codex")?.label).toBe("내 맥 켜짐");
+    expect(get("김인턴")?.label).toBe("활성");
+    expect(rosterStatusView(agent("x", "구서버", { paused: undefined }), ME)).toBeNull();
   });
 });

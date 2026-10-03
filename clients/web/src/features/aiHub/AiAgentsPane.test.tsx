@@ -179,7 +179,41 @@ describe("표", () => {
     await until("ai-agents-table");
     expect(document.querySelectorAll("tbody th[scope='row']")).toHaveLength(6);
     expect(document.querySelector("caption")?.textContent).toContain("쓰는 AI");
-    expect(document.querySelector("[role='region']")?.getAttribute("tabindex")).toBe("0");
+    // 밀 것이 없으면 키보드 정차점이 아니다.
+    expect(document.querySelector("[role='region']")?.hasAttribute("tabindex")).toBe(false);
+  });
+});
+
+describe("표 다듬기 (디자인 검수)", () => {
+  it("호박색은 내가 부를 수 없을 때만: 내 「나만」은 회색, 남의 「서연 님만」은 호박색", async () => {
+    mount();
+    await until("ai-agents-table");
+    const tone = (handle: string) => q(`ai-agent-callable-${handle}`)?.querySelector("[data-tone]")?.getAttribute("data-tone");
+    expect(tone("성재-codex")).toBe("mute");
+    expect(tone("성재-키")).toBe("mute");
+    expect(tone("서연-codex")).toBe("warn");
+    expect(tone("김인턴")).toBe("mute");
+    // 맥 꺼짐은 호박색 그대로.
+    expect(q("ai-agent-status-서연-codex")?.querySelector("[data-tone]")?.getAttribute("data-tone")).toBe("warn");
+  });
+
+  it("이름이 /agents?agent=<id> 링크라 눌러 그 에이전트를 연다", async () => {
+    mount();
+    await until("ai-agents-table");
+    expect(q("ai-agent-link-성재-codex")?.getAttribute("href")).toBe("/agents?agent=a2");
+  });
+
+  it("가로로 넘칠 때만 스크롤 영역이 키보드 정차점이다", async () => {
+    const sw = vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockReturnValue(900);
+    const cw = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(400);
+    try {
+      mount();
+      await until("ai-agents-table");
+      expect(document.querySelector("[role='region']")?.getAttribute("tabindex")).toBe("0");
+    } finally {
+      sw.mockRestore();
+      cw.mockRestore();
+    }
   });
 });
 
@@ -233,7 +267,7 @@ describe("에이전트 만들기 3종", () => {
       "available", "locked", "available",
     ]);
     expect(q("create-kind-team")?.textContent).toContain("팀 AI 키로 답해요");
-    expect(q("create-kind-team-audience")?.textContent).toBe("운영자");
+    expect(q("create-kind-team-audience")?.textContent).toBe("소유자·관리자");
     expect(q("create-kind-external-audience")?.textContent).toBe("소유자·관리자");
     expect(q("create-kind-mySubscription-audience")?.textContent).toBe("데스크탑에서 해요");
     const sub = q("create-kind-mySubscription") as HTMLElement;

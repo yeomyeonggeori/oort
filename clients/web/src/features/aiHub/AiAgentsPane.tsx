@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Lock } from "lucide-react";
+import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import {
   AI_AGENTS_PANE_COPY as COPY,
@@ -21,12 +22,12 @@ import { agentTableRows, type AgentStatusView, type AgentTableRow } from "./aiAg
 import { CreateAgentFlow } from "./CreateAgentFlow";
 
 const TH = "whitespace-nowrap px-3 py-2 text-left text-meta font-normal text-ink-muted";
-const TD = "px-3 py-3 align-top text-body text-ink max-md:px-0 max-md:py-1";
+const TD = "px-3 py-3 align-top text-body text-ink max-lg:px-0 max-lg:py-1";
 
 /** 좁은 폭에서 표가 카드로 접힐 때만 보이는 칸 이름. 넓은 폭에서는 표 머리가 말한다. */
 function CellLabel({ children }: { children: string }) {
   return (
-    <span aria-hidden="true" data-cell-label className="block text-timestamp text-ink-muted md:hidden">
+    <span aria-hidden="true" data-cell-label className="block text-timestamp text-ink-muted lg:hidden">
       {children}
     </span>
   );
@@ -37,7 +38,7 @@ function StatusCell({ status }: { status: AgentStatusView | null }) {
   return (
     <div className="flex min-w-0 flex-col items-start gap-1">
       <AiPill tone={status.tone}>{status.label}</AiPill>
-      {status.detail && <span className="break-keep text-meta text-ink-muted">{status.detail}</span>}
+      {status.detail && <span className="max-w-pane-md break-keep text-meta text-ink-muted">{status.detail}</span>}
     </div>
   );
 }
@@ -46,7 +47,7 @@ function CallableCell({ row }: { row: AgentTableRow }) {
   const { callable, lockedForViewer } = row.labels;
   if (callable === null) return <span className="text-meta text-ink-muted">{COPY.unknownBrain}</span>;
   return (
-    <AiPill tone={row.classification.callableBy === "owner" ? "warn" : "mute"}>
+    <AiPill tone={lockedForViewer ? "warn" : "mute"}>
       {lockedForViewer && <Lock aria-hidden="true" className="size-3 shrink-0" />}
       {callable}
       {lockedForViewer && <span className="sr-only"> · {COPY.locked}</span>}
@@ -54,25 +55,33 @@ function CallableCell({ row }: { row: AgentTableRow }) {
   );
 }
 
-function AgentRow({ row }: { row: AgentTableRow }) {
+function AgentRow({ row, highlighted }: { row: AgentTableRow; highlighted: boolean }) {
   const { labels } = row;
   return (
     <tr
       role="row"
-      className="border-b border-line max-md:grid max-md:grid-cols-2 max-md:gap-x-4 max-md:py-3"
+      className={cn("border-b border-line max-lg:grid max-lg:grid-cols-2 max-lg:gap-x-4 max-lg:py-3", highlighted && "bg-accent-soft")}
       data-testid={`ai-agent-row-${row.handle}`}
+      data-just-created={highlighted || undefined}
       data-locked={labels.lockedForViewer || undefined}
     >
-      <th scope="row" role="rowheader" className={`${TD} text-left font-normal max-md:col-span-2 max-md:pb-2`}>
+      <th scope="row" role="rowheader" className={`${TD} text-left font-normal max-lg:col-span-2 max-lg:pb-2 lg:whitespace-nowrap`}>
         <div className="flex min-w-0 items-center gap-3">
           <AiLogo mark={row.mark} />
           <div className="flex min-w-0 flex-col">
-            <span className="break-keep text-body font-semibold text-ink [overflow-wrap:anywhere]">{row.name}</span>
+            <Link
+              to={`/agents?agent=${encodeURIComponent(row.id)}`}
+              data-agent-link={row.id}
+              data-testid={`ai-agent-link-${row.handle}`}
+              className="break-keep text-body font-semibold text-ink underline-offset-4 press hover:underline focus-visible:focus-ring lg:whitespace-nowrap"
+            >
+              {row.name}
+            </Link>
             <span className="text-meta text-ink-muted [overflow-wrap:anywhere]">@{row.handle}</span>
           </div>
         </div>
       </th>
-      <td role="cell" className={`${TD} md:whitespace-nowrap`} data-testid={`ai-agent-brain-${row.handle}`}>
+      <td role="cell" className={`${TD} lg:whitespace-nowrap`} data-testid={`ai-agent-brain-${row.handle}`}>
         <CellLabel>{COPY.columns.brain}</CellLabel>
         {labels.brain ?? <span className="text-meta text-ink-muted">{COPY.unknownBrain}</span>}
       </td>
@@ -80,11 +89,11 @@ function AgentRow({ row }: { row: AgentTableRow }) {
         <CellLabel>{COPY.columns.callable}</CellLabel>
         <CallableCell row={row} />
       </td>
-      <td role="cell" className={`${TD} md:whitespace-nowrap`} data-testid={`ai-agent-cost-${row.handle}`}>
+      <td role="cell" className={`${TD} lg:whitespace-nowrap`} data-testid={`ai-agent-cost-${row.handle}`}>
         <CellLabel>{COPY.columns.cost}</CellLabel>
         {labels.cost ?? <span className="text-meta text-ink-muted">{COPY.unknownBrain}</span>}
       </td>
-      <td role="cell" className={`${TD} max-md:col-span-2`} data-testid={`ai-agent-status-${row.handle}`}>
+      <td role="cell" className={`${TD} max-lg:col-span-2 lg:w-full`} data-testid={`ai-agent-status-${row.handle}`}>
         <CellLabel>{COPY.columns.status}</CellLabel>
         <StatusCell status={row.status} />
       </td>
@@ -96,6 +105,24 @@ function AgentRow({ row }: { row: AgentTableRow }) {
  * 「에이전트」 구획 (AIH-7, #3428). 에이전트마다 쓰는 AI · 부를 수 있는 사람 · 비용 · 상태를 한 표로 본다.
  * 칸의 문장은 전부 core `aiAgentLabels` 가 만든다(서버 값 → 라벨). 만들기는 종류를 고르는 창(`CreateAgentFlow`).
  */
+/** 표가 폭보다 넓어 실제로 가로로 밀릴 때만 true. 그때만 스크롤 영역이 키보드 정차점이 된다. */
+function useOverflowX() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setOverflowing(el.scrollWidth > el.clientWidth + 1);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    if (el.firstElementChild) observer.observe(el.firstElementChild);
+    return () => observer.disconnect();
+  });
+  return { ref, overflowing };
+}
+
 export function AiAgentsPane() {
   const { workspaceId, session } = useSession();
   const offline = useOffline();
@@ -110,6 +137,9 @@ export function AiAgentsPane() {
     setChoosing(true);
   };
   const entry = glossaryEntry(aiHubSection("agents").glossaryId);
+  const scroll = useOverflowX();
+  // 방금 만든 에이전트 줄: 명부가 새로 오면 그 줄의 이름으로 포커스를 옮기고 잠깐 칠한다.
+  const [createdId, setCreatedId] = useState<string | null>(null);
 
   const mayCreate = canCreateAgentNow(
     !directory.isPending,
@@ -121,6 +151,20 @@ export function AiAgentsPane() {
     directory.isPending || directory.isError
       ? []
       : agentTableRows(directory.directory.members, hosted.isPending ? null : (hosted.data ?? null), session.member.id);
+
+  const createdRowReady = createdId !== null && rows.some((r) => r.id.toLowerCase() === createdId);
+  useEffect(() => {
+    if (!createdRowReady) return;
+    // 만들기 창이 닫히며 여는 단추로 포커스를 돌려주고 난 뒤에 옮긴다.
+    const focus = window.setTimeout(() => {
+      document.querySelector<HTMLElement>(`[data-agent-link="${createdId}"]`)?.focus();
+    }, 400);
+    const clear = window.setTimeout(() => setCreatedId(null), 3000);
+    return () => {
+      window.clearTimeout(focus);
+      window.clearTimeout(clear);
+    };
+  }, [createdRowReady, createdId]);
 
   return (
     <div className="flex min-w-0 flex-col gap-4" data-testid="ai-hub-pane-agents">
@@ -163,7 +207,7 @@ export function AiAgentsPane() {
           detail={mayCreate ? COPY.emptyCanCreate : COPY.emptyCannotCreate}
           actions={
             mayCreate ? (
-              <Button size="sm" onClick={(event) => openChooser(event.currentTarget)} disabled={offline}>
+              <Button type="button" size="sm" className="tap-target" onClick={(event) => openChooser(event.currentTarget)} disabled={offline}>
                 {COPY.create.button}
               </Button>
             ) : undefined
@@ -174,15 +218,17 @@ export function AiAgentsPane() {
       ) : (
         // 표가 폭보다 넓으면 이 상자 안에서만 가로로 민다(문서는 넘치지 않는다). 키보드로도 닿는다.
         <div
+          ref={scroll.ref}
           className="min-w-0 overflow-x-auto focus-visible:focus-ring"
           role="region"
           aria-label={COPY.tableLabel}
-          // 가로로 미는 영역은 키보드로 닿아야 한다.
-          tabIndex={0}
+          // 가로로 미는 영역은 키보드로 닿아야 한다. 밀 것이 없으면 정차점도 아니다.
+          tabIndex={scroll.overflowing ? 0 : undefined}
+          data-overflowing={scroll.overflowing || undefined}
         >
-          <table role="table" className="block w-full border-collapse md:table" data-testid="ai-agents-table">
+          <table role="table" className="block w-full border-collapse lg:table" data-testid="ai-agents-table">
             <caption className="sr-only">{COPY.tableLabel}</caption>
-            <thead role="rowgroup" className="max-md:sr-only">
+            <thead role="rowgroup" className="max-lg:sr-only">
               <tr role="row" className="border-b border-line">
                 <th scope="col" role="columnheader" className={TH}>{COPY.columns.agent}</th>
                 <th scope="col" role="columnheader" className={TH}>{COPY.columns.brain}</th>
@@ -191,9 +237,9 @@ export function AiAgentsPane() {
                 <th scope="col" role="columnheader" className={TH}>{COPY.columns.status}</th>
               </tr>
             </thead>
-            <tbody role="rowgroup" className="block md:table-row-group">
+            <tbody role="rowgroup" className="block lg:table-row-group">
               {rows.map((row) => (
-                <AgentRow key={row.id} row={row} />
+                <AgentRow key={row.id} row={row} highlighted={createdId !== null && row.id.toLowerCase() === createdId} />
               ))}
             </tbody>
           </table>
@@ -211,7 +257,10 @@ export function AiAgentsPane() {
         </Link>
       </p>
 
-      <CreateAgentFlow open={choosing} onOpenChange={setChoosing} mayCreate={mayCreate} opener={opener} />
+      <CreateAgentFlow open={choosing} onOpenChange={setChoosing} mayCreate={mayCreate}
+        opener={opener}
+        onCreated={(created) => setCreatedId(created.id.toLowerCase())}
+      />
     </div>
   );
 }

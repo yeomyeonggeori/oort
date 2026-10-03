@@ -10,7 +10,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { AI_HUB_NAV_COPY } from "@momo/core/features/ai/aiHubModel";
 import { Bot, Loader2 } from "lucide-react";
 import { useSession } from "@/app/session";
@@ -87,6 +87,7 @@ import { StatusChip } from "./StatusChip";
 import { useAgentToolCatalog } from "./useAgentToolCatalog";
 import { toolsProfilePut } from "./enabledToolsModel";
 import { canCreateAgentNow } from "./createModel";
+import { rosterStatusView } from "@/features/aiHub/aiAgentsModel";
 import { CreateAgentFlow } from "@/features/aiHub/CreateAgentFlow";
 import { GrokBotInvite } from "@/features/hostedAgents/GrokBotInvite";
 import { HostedAgentWizard } from "@/features/hostedAgents/HostedAgentWizard";
@@ -184,6 +185,7 @@ function AgentListRow({
   signals,
   live,
   onSelect,
+  viewerId,
 }: {
   agent: RosterMember;
   profile: AgentProfile | null;
@@ -193,9 +195,15 @@ function AgentListRow({
   signals: ReturnType<typeof signalsForAgent>;
   live: boolean;
   onSelect: () => void;
+  viewerId: string;
 }) {
   const current = signals[0];
-  const lifecycle = lifecycleLabel(agent, profile, profilePending, profileFailed);
+  // 「AI」 표와 같은 우선순위: 문의 중·맥 꺼짐 같은 서버 사유가 있으면 「활성」보다 앞선다.
+  const server = rosterStatusView(agent, viewerId);
+  const serverSpecific = server !== null && server.label !== "활성";
+  const lifecycle = serverSpecific
+    ? server.label
+    : lifecycleLabel(agent, profile, profilePending, profileFailed);
   return (
     <li className="border-b border-line">
       <button
@@ -222,7 +230,7 @@ function AgentListRow({
             <span className="min-w-0 flex-1 truncate text-body font-medium text-ink">
               {agent.displayName}
             </span>
-            <StatusChip>{lifecycle}</StatusChip>
+            <StatusChip tone={serverSpecific && server.tone === "warn" ? "warn" : "neutral"}>{lifecycle}</StatusChip>
           </span>
           <span className="truncate text-meta text-ink-muted">@{agent.handle}</span>
           {current && (
@@ -284,7 +292,9 @@ export function AgentHubRoute() {
       ),
     [agents, profiles]
   );
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // `/agents?agent=<id>` 로 오면 그 에이전트를 먼저 연다(「AI」 표의 이름 링크).
+  const [searchParams] = useSearchParams();
+  const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get("agent")?.toLowerCase() ?? null);
   const [section, setSection] = useState<AgentHubSection>("profile");
   const [creating, setCreating] = useState(false);
   const [createOpener, setCreateOpener] = useState<HTMLElement | null>(null);
@@ -484,6 +494,7 @@ export function AgentHubRoute() {
                     signals={signalsForAgent(allSignals, agent.id, nowMs)}
                     live={railLive}
                     onSelect={() => setSelectedId(normalizedId(agent.id))}
+                    viewerId={session.member.id}
                   />
                 );
               })}

@@ -41,6 +41,7 @@ function KindRow({
       <button
         type="button"
         // 잠긴 버튼도 포커스를 받아야 사유를 들을 수 있다: disabled 대신 aria-disabled.
+        // 눌림 효과는 누를 수 있는 줄에만 있다. 사유는 버튼 안에 있어 포커스 링이 한 덩어리로 감싼다.
         aria-disabled={locked || undefined}
         aria-describedby={option.reason ? reasonId : undefined}
         onClick={() => {
@@ -49,8 +50,8 @@ function KindRow({
         data-testid={`create-kind-${option.id}`}
         data-state={option.state}
         className={cn(
-          "tap-target flex w-full min-w-0 flex-col gap-1 px-1 py-3 text-left active:bg-surface-pressed focus-visible:focus-ring",
-          locked ? "cursor-not-allowed" : "hover:bg-surface-hover"
+          "tap-target flex w-full min-w-0 flex-col gap-1 px-1 py-3 text-left focus-visible:focus-ring",
+          locked ? "cursor-not-allowed" : "hover:bg-surface-hover active:bg-surface-pressed"
         )}
       >
         <span className="flex min-w-0 flex-wrap items-center gap-2">
@@ -65,17 +66,19 @@ function KindRow({
             {option.desktopHint ? COPY.create.desktopHint : option.audience}
           </span>
         </span>
-        <span className="break-keep text-meta text-ink-muted">{option.description}</span>
+        <span className={cn("break-keep text-meta", locked ? "text-ink-faint" : "text-ink-muted")}>
+          {option.description}
+        </span>
+        {option.reason && (
+          <span
+            id={reasonId}
+            className="break-keep text-meta text-ink-muted"
+            data-testid={`create-kind-${option.id}-reason`}
+          >
+            {option.reason}
+          </span>
+        )}
       </button>
-      {option.reason && (
-        <p
-          id={reasonId}
-          className="break-keep px-1 pb-3 text-meta text-ink-muted"
-          data-testid={`create-kind-${option.id}-reason`}
-        >
-          {option.reason}
-        </p>
-      )}
     </li>
   );
 }

@@ -153,7 +153,7 @@ export const AI_HUB_COPY = {
     team: {
       title: "팀 에이전트",
       description: "팀 AI 키로 답해요. 누구나 부르고, 비용은 팀 몫이에요.",
-      audience: "운영자",
+      audience: "소유자·관리자",
     },
     mySubscription: {
       title: "내 Claude Code·Codex",
@@ -206,7 +206,7 @@ export const AI_AGENTS_PANE_COPY = {
     pending: "확인하는 중이에요.",
     serverOff: "이 서버에서는 꺼져 있어요. 운영자에게 요청하세요.",
     unavailable: "이 빌드에서는 쓸 수 없어요.",
-    denied: "소유자나 관리자만 만들 수 있어요.",
+    denied: "소유자·관리자만 만들 수 있어요.",
     externalOff: "이 빌드에서는 외부 에이전트를 초대할 수 없어요.",
   },
 } as const;
