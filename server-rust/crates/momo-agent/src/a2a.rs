@@ -263,45 +263,45 @@ impl A2aBlock {
         // server line (#2889 Medium-3 동형).
         let inert = crate::inert_display_name(target_display_name);
         let target_display_name = inert.as_str();
-        let head = format!("{target_display_name}에게 위임하지 못했습니다");
+        let head = format!("{target_display_name}에게 위임하지 못했어요");
         match self {
             A2aBlock::Depth {
                 source_depth,
                 max_depth,
             } => format!(
-                "{head}. 위임 깊이 한도에 도달했습니다(현재 {source_depth}단계, 최대 {max_depth}단계)."
+                "{head}. 위임 깊이 한도에 도달했어요(현재 {source_depth}단계, 최대 {max_depth}단계)."
             ),
             // goal SRV-B5b — the subject particle, decided when the name is
             // Hangul. `head` needs none: 「…에게」 is invariant.
             A2aBlock::Concurrency { active, max } => format!(
-                "{head}. {} 동시 실행 한도에 도달했습니다(실행 중 {active}건, 최대 {max}건).",
+                "{head}. {} 동시 실행 한도에 도달했어요(실행 중 {active}건, 최대 {max}건).",
                 crate::korean::attach_particle(
                     target_display_name,
                     crate::korean::ParticlePair::Subject
                 )
             ),
             A2aBlock::ConsecutiveAuto { streak, max } => format!(
-                "{head}. 사람의 마지막 메시지 이후 연속 자동 응답 한도에 도달했습니다({streak}회, 최대 {max}회)."
+                "{head}. 사람의 마지막 메시지 이후 연속 자동 응답 한도에 도달했어요({streak}회, 최대 {max}회)."
             ),
             A2aBlock::StepCap { step_count, max } => format!(
-                "{head}. 이 실행의 단계 한도에 도달했습니다({step_count}단계, 최대 {max}단계)."
+                "{head}. 이 실행의 단계 한도에 도달했어요({step_count}단계, 최대 {max}단계)."
             ),
             A2aBlock::ChainBudget {
                 tokens: true,
                 spent,
                 max,
                 ..
-            } => format!("{head}. 이 위임 체인의 토큰 한도에 도달했습니다({spent}/{max})."),
+            } => format!("{head}. 이 위임 체인의 토큰 한도에 도달했어요({spent}/{max})."),
             A2aBlock::ChainBudget {
                 tokens: false,
                 spent,
                 max,
                 ..
             } => format!(
-                "{head}. 이 위임 체인의 비용 한도에 도달했습니다({spent}/{max} micro-USD)."
+                "{head}. 이 위임 체인의 비용 한도에 도달했어요({spent}/{max} micro-USD)."
             ),
-            A2aBlock::SelfMention => format!("{head}. 자기 자신은 위임 대상이 아닙니다."),
-            A2aBlock::OwnerOnlyTarget => format!("{head}. 개인 에이전트는 위임 대상이 아닙니다."),
+            A2aBlock::SelfMention => format!("{head}. 자기 자신은 위임 대상이 아니에요."),
+            A2aBlock::OwnerOnlyTarget => format!("{head}. 개인 에이전트는 위임 대상이 아니에요."),
         }
     }
 

@@ -1491,7 +1491,7 @@ async fn an_inactive_hosted_agent_fails_closed_and_never_falls_back_to_managed()
         fixture.human,
         "hosted_connection_unavailable",
         "의 연결이 끊겨 있어서 답하지 못했어요. \
-         워크스페이스 관리자가 설정 › 연결 › 에이전트 자격에서 다시 연결할 수 있어요.",
+         워크스페이스 관리자가 AI › 외부 연결에서 다시 연결할 수 있어요.",
     );
     assert_eq!(
         notices[0]["props"]["notice_action"]["href"],
@@ -2139,7 +2139,7 @@ async fn an_unapproved_channel_never_reaches_the_hosted_job_path() {
         fixture.human,
         "hosted_channel_unapproved",
         "에게 승인되지 않아서 전달하지 못했어요. \
-         워크스페이스 관리자가 설정 › 연결 › 에이전트 자격에서 이 채널을 승인할 수 있어요.",
+         워크스페이스 관리자가 AI › 외부 연결에서 이 채널을 승인할 수 있어요.",
     );
     assert_eq!(
         notices[0]["props"]["notice_action"],
@@ -3761,7 +3761,7 @@ async fn an_approved_workspace_action_mints_the_invite_and_shows_the_link_once()
         result_body
             .as_deref()
             .expect("a body a client that knows no card kind can still read")
-            .starts_with("초대 링크를 만들었습니다"),
+            .starts_with("초대 링크를 만들었어요"),
         "{result_body:?}"
     );
 

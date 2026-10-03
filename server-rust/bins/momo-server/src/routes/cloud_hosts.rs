@@ -123,7 +123,7 @@ pub async fn enroll(
     if let Some(scope) = request.scope.as_deref() {
         if scope != "workspace" {
             return Err(ApiError::bad_request(
-                "BYOC 등록은 워크스페이스 공용만 지원합니다. 개인 호스트는 아직 열려 있지 않습니다.",
+                "BYOC 등록은 워크스페이스 공용만 지원해요. 개인 호스트는 아직 열려 있지 않아요.",
             ));
         }
     }
@@ -153,7 +153,7 @@ pub async fn enroll(
                 };
                 if !role.is_admin() {
                     return Ok(Err(ApiError::forbidden(
-                        "BYOC 호스트 등록은 워크스페이스 관리자만 할 수 있습니다.",
+                        "BYOC 호스트 등록은 워크스페이스 관리자만 할 수 있어요.",
                     )));
                 }
                 // Same serialization the managed create uses: a row lock cannot
@@ -201,7 +201,7 @@ pub async fn enroll(
     if enrollment.replayed {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
-            "이 idempotencyRef의 등록 토큰은 이미 발급됐습니다. 새 ref로 다시 요청하세요.",
+            "이 idempotencyRef의 등록 토큰은 이미 발급됐어요. 새 ref로 다시 요청해 주세요.",
         ));
     }
 
@@ -231,7 +231,7 @@ fn validated_shared_scope(scope: Option<&str>) -> Result<(), ApiError> {
     match scope {
         None | Some("workspace") => Ok(()),
         Some(_) => Err(ApiError::bad_request(
-            "oort Cloud 호스트는 워크스페이스 공용만 지원합니다. 개인 호스트는 아직 열려 있지 않습니다.",
+            "oort Cloud 호스트는 워크스페이스 공용만 지원해요. 개인 호스트는 아직 열려 있지 않아요.",
         )),
     }
 }
@@ -247,8 +247,8 @@ fn validated_shared_scope(scope: Option<&str>) -> Result<(), ApiError> {
 fn provisioner_unavailable() -> ApiError {
     ApiError::new(
         StatusCode::SERVICE_UNAVAILABLE,
-        "이 인스턴스에는 oort Cloud 호스트를 생성할 수 있는 provider가 설정돼 있지 않습니다. \
-         인스턴스 운영자에게 문의하세요.",
+        "이 인스턴스에는 oort Cloud 호스트를 생성할 수 있는 provider가 설정돼 있지 않아요. \
+         인스턴스 운영자에게 문의해 주세요.",
     )
 }
 
@@ -296,11 +296,11 @@ fn tier_rejection(rejection: CloudAcquisitionRejected) -> ApiError {
     match rejection {
         CloudAcquisitionRejected::TierPolicyExcludesCloud => ApiError::new(
             StatusCode::CONFLICT,
-            "현재 작업 티어 정책이 oort Cloud 호스트를 허용하지 않습니다. 정책을 먼저 바꾸세요.",
+            "현재 작업 티어 정책이 oort Cloud 호스트를 허용하지 않아요. 정책을 먼저 바꿔 주세요.",
         ),
         CloudAcquisitionRejected::PolicyPinsAnotherHost => ApiError::new(
             StatusCode::CONFLICT,
-            "작업 티어 정책이 특정 호스트를 지정하고 있습니다. 새 클라우드 호스트를 만들 수 없습니다.",
+            "작업 티어 정책이 특정 호스트를 지정하고 있어요. 새 클라우드 호스트를 만들 수 없어요.",
         ),
     }
 }
@@ -321,7 +321,7 @@ fn provider_call_failed(context: &str, error: CloudProviderError) -> ApiError {
     );
     ApiError::new(
         StatusCode::SERVICE_UNAVAILABLE,
-        "oort Cloud 호스트를 준비하지 못했습니다. 잠시 후 같은 idempotencyRef로 다시 시도하세요.",
+        "oort Cloud 호스트를 준비하지 못했어요. 잠시 후 같은 idempotencyRef로 다시 시도해 주세요.",
     )
 }
 

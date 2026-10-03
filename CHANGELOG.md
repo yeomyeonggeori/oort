@@ -20,7 +20,11 @@ Two database migrations since 0.1.17 (116-117): 116 adds the subscription-agent 
 - Server: personal API keys. Only an operator issues them, only an owner-only agent resolves them, and there is no fallback to the team key (#3415).
 - Research spikes for the personal cloud workspace (ADR-0197): Linux host key custody (#3417) and a blind PTY relay that only forwards ciphertext (#3418). Neither is turned on in a running service.
 
+- Web and desktop: the AI hub agent table (`/ai/agents`): which AI each agent uses, who can call it, who pays, and its status, computed from the server fields in one place. Personal-key agents read "personal key, only me"; paused Claude subscription agents show a grey "inquiry pending" status. "Create agent" now offers three kinds (team, my subscription, external); my subscription is desktop-only (#3426, #3430).
+
 ### Changed
+- Server: Claude subscription agents are no longer driven on someone's behalf while `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED` is off (the default), including agents registered before the flag existed. Mentions, 1:1 DMs, thread mentions, inbox fan-out, the welcome speaker and Agent Port tools skip them, work requests return 409 `claude_subscription_agent_paused`, and the agent posts a one-line notice at most every 10 minutes. Codex and personal-key agents, direct terminal use, Remote Control, and a member's own remote work session on their own Mac are unaffected (ADR-0193 D18, #3429).
+- Web and desktop: the agents page status chips use the same status order and colors as the AI hub table (#3430).
 - Phone: consecutive messages from the same person group tighter (6 pt) without a per-row time; the time is in the long-press sheet (#3387).
 
 ## [0.1.17] - 2026-10-03
