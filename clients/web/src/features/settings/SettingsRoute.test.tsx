@@ -277,6 +277,30 @@ describe("SettingsRoute 전면 레이아웃", () => {
     expect(members.querySelector('[data-testid="section-members"]')).not.toBeNull();
   });
 
+  it("허브로 옮긴 다섯 구획 위에는 「AI 허브로 옮겼어요」 링크가 서고, 그 밖의 구획에는 없다 (AIH-3)", () => {
+    const host = mountRoute("/settings?section=profile");
+    expect(host.querySelector('[data-testid="ai-hub-moved-link"]')).toBeNull();
+    const expected: Array<[string, string]> = [
+      ["settings-nav-ai", "/ai/accounts"],
+      ["settings-nav-agents", "/ai/external"],
+      ["settings-nav-plugins", "/ai/external"],
+      ["settings-nav-webhooks", "/ai/external"],
+      ["settings-nav-events", "/ai/external"],
+    ];
+    for (const [navId, href] of expected) {
+      act(() => {
+        (host.querySelector(`[data-testid="${navId}"]`) as HTMLButtonElement).click();
+      });
+      const line = host.querySelector('[data-testid="ai-hub-moved-link"]');
+      expect(line?.textContent, navId).toContain("AI 허브로 옮겼어요");
+      expect(line?.querySelector("a")?.getAttribute("href"), navId).toBe(href);
+    }
+    act(() => {
+      (host.querySelector('[data-testid="settings-nav-account"]') as HTMLButtonElement).click();
+    });
+    expect(host.querySelector('[data-testid="ai-hub-moved-link"]')).toBeNull();
+  });
+
   it("사이드바에서 기존 섹션에 모두 도달한다", () => {
     const host = mountRoute("/settings?section=profile");
     const clicks: Array<[string, string]> = [

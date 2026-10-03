@@ -7,6 +7,7 @@ export interface SidebarDestinationActive {
   chat: boolean;
   inbox: boolean;
   directory: boolean;
+  ai: boolean;
   agents: boolean;
   mine: boolean;
   team: boolean;
@@ -29,6 +30,7 @@ export function destinationActive(
     chat: pathname === "/" || startsWith("/c"),
     inbox: startsWith("/inbox"),
     directory: startsWith("/directory"),
+    ai: startsWith("/ai"),
     agents: startsWith("/agents"),
     mine: workView === "mine",
     team: workView === "team",

@@ -2,6 +2,12 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
+
+const navigateSpy = vi.hoisted(() => vi.fn());
+vi.mock("react-router-dom", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router-dom")>()),
+  useNavigate: () => navigateSpy,
+}));
 import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -325,6 +331,16 @@ describe("카드의 겉 (#2944 시안 ①)", () => {
     expect(q(host, "ai-connect-card-claude")).toBeNull();
     expect(q(host, "ai-connect-card-grok")).toBeNull();
     expect(q(host, "ai-connect-card-team-section")).toBeNull();
+  });
+
+  it("「AI에서 열기」는 설정이 아니라 AI 허브 내 AI 계정으로 간다 (AIH-3)", async () => {
+    navigateSpy.mockClear();
+    const host = mountCard();
+    await until(host, "ai-connect-card-team");
+    const open = q(host, "ai-connect-card-settings") as HTMLElement;
+    expect(open.getAttribute("aria-label")).toBe("AI에서 열기");
+    act(() => open.click());
+    expect(navigateSpy.mock.calls).toEqual([["/ai/accounts"]]);
   });
 
   it("× 와 Esc 가 닫는다", async () => {
