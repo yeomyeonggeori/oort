@@ -8,8 +8,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
 
-import {color, font, line, SAFE_GUTTER, space} from '../src/design/tokens';
+import {color, font, SAFE_GUTTER, space} from '../src/design/tokens';
 import {CONV} from '../src/features/conversation/convDesign';
+import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
 import {MessageBody} from '../src/features/conversation/MessageBody';
 import {
   DayDivider,
@@ -738,11 +739,10 @@ describe('#1112 — 고정 표면이 하네스에 선다', () => {
 // 선택지는 「항상」 아니면 「전혀」뿐이고, 「전혀」가 고장난 쪽이었다.
 // =============================================================================
 
-describe('#1083 H-3 → DS2-4 — 모든 행이 자기 시각을 말한다', () => {
-  // DS2-4(#2716)에서 자리가 바뀌었다: owner 피드백 표 「이름 굵게 + 시간 회색 한 줄」.
-  // 묶음 머리는 이름 뒤 같은 줄, 연속 행은 비어 있는 아바타 칸. 오른쪽 34pt 예약은
-  // 사라졌다(`MessageRow` 의 `TIME_GUTTER` 머리말). H-3 의 요구 — 모든 행이 눈으로
-  // 자기 시각을 말한다 — 는 그대로 지킨다.
+describe('#3386 — 연속 행에는 시각이 없다 (Buzz, owner 2026-10-03 가 H-3 을 대체)', () => {
+  // 성재: 「시간 부분이랑 그룹화가 buzz처럼 되어야하는데, 시간이 좌측에 위치하는
+  // 이슈랑 개별로 표시되는 이슈가 있어.」 묶음 머리는 이름 뒤 한 줄에 시각 하나,
+  // 연속 행은 시각 칸이 없다. 개별 시각은 길게 누르기 시트 머리와 접근성 라벨에 있다.
   /** 시각은 접근성에서 숨겨져 있으므로 기본 쿼리가 건너뛴다 — 그것이 설계다. */
   const HIDDEN = {includeHiddenElements: true} as const;
 
@@ -758,39 +758,32 @@ describe('#1083 H-3 → DS2-4 — 모든 행이 자기 시각을 말한다', () 
     );
   }
 
-  it('연속 행에도 시각이 있다 — 예전에는 그룹 머리에만 있었다', () => {
-    expect(rowAt(false).getByTestId('row-time', HIDDEN)).toBeTruthy();
+  it('연속 행은 보이는 시각을 그리지 않는다 — 숨겨진 것까지 포함해 0 개', () => {
+    const view = rowAt(false);
+    expect(view.queryAllByTestId('row-time', HIDDEN)).toHaveLength(0);
+    // 시각 문자열 자체도 어디에도 없다(다른 testID 로 되살려도 잡힌다).
+    expect(view.queryAllByText(/^\d\d:\d\d$/, HIDDEN)).toHaveLength(0);
   });
 
-  it('묶음 머리의 시각은 이름과 **한 줄**이다 — 같은 선언된 줄 상자를 든다', () => {
+  it('묶음 머리의 시각은 이름과 **한 줄**이고 하나뿐이다', () => {
     const view = rowAt(true);
     const time = view.getByTestId('row-time', HIDDEN);
-    // 작성자 줄 안이다(절대 배치가 아니라 흐름). 머리 행에는 시각이 **하나**다.
     expect(view.getAllByTestId('row-time', HIDDEN)).toHaveLength(1);
     const timeStyle = flatten(time.props.style);
     expect(timeStyle.position).toBeUndefined();
     const author = flatten(view.getByText('김인턴').props.style);
     expect(author.lineHeight).toBe(CONV.whoLine);
     expect(timeStyle.lineHeight).toBe(author.lineHeight);
-    // 시안 `.a-m .who` 15/700 · `time` 12/500.
     expect(author.fontSize).toBe(CONV.whoSize);
     expect(author.fontWeight).toBe('700');
     expect(timeStyle.fontSize).toBe(font.meta);
   });
 
-  it('연속 행의 시각은 비어 있는 아바타 칸 안이다 — 세로도 가로도 새로 쓰지 않는다', () => {
-    const view = rowAt(false);
-    const inner = flatten(view.getByTestId('message-press').props.style);
-    const time = flatten(view.getByTestId('row-time', HIDDEN).props.style);
-    expect(time.position).toBe('absolute');
-    expect(time.left).toBe(SAFE_GUTTER);
-    // 칸의 오른쪽 끝이 본문 시작보다 안쪽이다 — 겹치지 않는다.
-    expect(Number(time.left) + Number(time.width)).toBeLessThanOrEqual(
-      Number(inner.paddingLeft),
-    );
-    // y 는 그릇의 위쪽 패딩과 같은 곳에서 온다(u44 M-2), 줄 상자는 본문 줄.
-    expect(Number(time.top)).toBe(Number(inner.paddingVertical));
-    expect(time.lineHeight).toBe(line.body);
+  it('연속 행 본문은 이름 칸과 같은 x 에서 시작한다 — 아바타 칸은 비워 둔다', () => {
+    const head = flatten(rowAt(true).getByTestId('message-press').props.style);
+    const cont = flatten(rowAt(false).getByTestId('message-press').props.style);
+    expect(cont.paddingLeft).toBe(head.paddingLeft);
+    expect(cont.paddingLeft).toBe(SAFE_GUTTER + CONV.avatar + CONV.avatarGap);
   });
 
   it('오른쪽 시각 예약이 없다 — 본문이 오른쪽 여백까지 간다 (Buzz)', () => {
@@ -799,37 +792,29 @@ describe('#1083 H-3 → DS2-4 — 모든 행이 자기 시각을 말한다', () 
       expect(inner.paddingRight ?? inner.paddingHorizontal).toBe(SAFE_GUTTER);
     }
     expect(codeOnly(SRC('MessageRow.tsx'))).not.toContain('rowTimeReserve');
+    expect(codeOnly(SRC('MessageRow.tsx'))).not.toContain('rowTime:');
   });
 
-  it('보조기술이 같은 시각을 두 번 읽지 않는다', () => {
+  it('접근성 라벨은 두 자리 모두 시각을 말한다 — 눈에서 접어도 로터는 안다', () => {
     for (const head of [true, false]) {
       const view = rowAt(head);
-      const time = view.getByTestId('row-time', HIDDEN);
-      expect(view.queryByTestId('row-time')).toBeNull();
-      expect(time.props.accessibilityElementsHidden).toBe(true);
-      expect(time.props.importantForAccessibility).toBe('no-hide-descendants');
       expect(
         String(view.getByTestId('message-row').props.accessibilityLabel),
       ).toMatch(/\d\d:\d\d/);
       view.unmount();
     }
+    const headTime = rowAt(true).getByTestId('row-time', HIDDEN);
+    expect(headTime.props.accessibilityElementsHidden).toBe(true);
+    expect(headTime.props.importantForAccessibility).toBe('no-hide-descendants');
   });
 
-  it('시각이 본문 AA 를 지난다 — 뜻을 나르는 글자다 (두 자리 모두)', () => {
-    for (const head of [true, false]) {
-      const style = flatten(rowAt(head).getByTestId('row-time', HIDDEN).props.style);
-      expect(style.color).toBe(color.textMuted);
-      expect(contrast(String(style.color), color.bg)).toBeGreaterThanOrEqual(4.5);
-    }
+  it('머리 시각이 본문 AA 를 지난다 — 뜻을 나르는 글자다', () => {
+    const style = flatten(rowAt(true).getByTestId('row-time', HIDDEN).props.style);
+    expect(style.color).toBe(color.textMuted);
+    expect(contrast(String(style.color), color.bg)).toBeGreaterThanOrEqual(4.5);
   });
 
-  it('칸보다 넓은 큰 글씨에서 접히지 않고 줄어든다 (#2617 를 되풀이하지 않는다)', () => {
-    const time = rowAt(false).getByTestId('row-time', HIDDEN);
-    expect(time.props.numberOfLines).toBe(1);
-    expect(time.props.adjustsFontSizeToFit).toBe(true);
-  });
-
-  it('카드가 연속 행 시각을 덮지 않는다 — 시각이 흐름 자식보다 **뒤에** 칠해진다', () => {
+  it('카드(승인 요청) 연속 행에도 시각이 없다', () => {
     const view = render(
       <MessageRow
         message={message({
@@ -847,15 +832,32 @@ describe('#1083 H-3 → DS2-4 — 모든 행이 자기 시각을 말한다', () 
         nowMs={BASE_MS}
       />,
     );
-    const kids = view
-      .getByTestId('message-press')
-      .children.filter((kid: unknown) => {
-        if (typeof kid === 'string') return true;
-        const type = (kid as {type?: {name?: string}}).type;
-        return type?.name !== 'PressabilityDebugView';
-      });
-    const last = kids[kids.length - 1];
-    expect(typeof last === 'string' ? last : last.props.testID).toBe('row-time');
+    expect(view.queryAllByTestId('row-time', HIDDEN)).toHaveLength(0);
+  });
+
+  it('개별 시각은 길게 누르기 시트 머리에서 본다', () => {
+    const at = new Date(BASE_MS);
+    const hhmm = `${String(at.getHours()).padStart(2, '0')}:${String(
+      at.getMinutes(),
+    ).padStart(2, '0')}`;
+    const view = render(
+      <MessageActionSheet
+        message={message({body: '재시작하면 seq 는 이어집니다'})}
+        chips={[]}
+        availability={
+          {reply: true, quote: true, pin: true} as unknown as React.ComponentProps<
+            typeof MessageActionSheet
+          >['availability']
+        }
+        authorLabel="김인턴"
+        onClose={() => undefined}
+        onToggleReaction={() => undefined}
+        onReply={() => undefined}
+        onEdit={() => undefined}
+        onDelete={() => undefined}
+      />,
+    );
+    expect(view.getByTestId('sheet-time').props.children).toBe(hhmm);
   });
 });
 
@@ -903,8 +905,8 @@ describe('#1083 — 아직 서버 시계가 없는 행은 시각을 지어내지
   });
 });
 
-describe('#1083 H-7(폰) — 그룹 안에서 메시지 경계가 보인다', () => {
-  it('연속 행 세로 여백이 3pt 보다 크다', () => {
+describe('#1083 H-7 → #3386(폰) — 그룹 안 간격은 문단 수준이다', () => {
+  it('연속 행 세로 여백이 0 보다 크고 8pt 이하다', () => {
     // 한 사람이 연달아 쓴 다섯 줄이 한 덩이 문단으로 읽혔다. 시각이 오른쪽에
     // 표식을 만들고, 세로 여백이 그 둘을 함께 경계로 만든다.
     //
@@ -921,10 +923,12 @@ describe('#1083 H-7(폰) — 그룹 안에서 메시지 경계가 보인다', ()
       />,
     );
     const inner = flatten(view.getByTestId('message-press').props.style);
-    expect(Number(inner.paddingVertical)).toBeGreaterThan(3);
-    // 값은 **코어가 정한다**. 두 행 사이에 실제로 남는 거리가 `withinGroup`
-    // 이 되도록 절반씩 나눠 문다 — 웹은 같은 값을 위아래 패딩의 합으로 만든다.
-    expect(Number(inner.paddingVertical) * 2).toBe(ROW_SPACE.withinGroup);
+    // #3386: Buzz 처럼 문단 간격으로 줄였다. 두 행 사이 실제 거리 = 위아래 패딩의 합.
+    // 하한(0 초과)과 **상한(8)** 이 둘 다 있다 — 다시 12 로 벌어지면 빨개진다.
+    const gap = Number(inner.paddingVertical) * 2;
+    expect(gap).toBeGreaterThan(0);
+    expect(gap).toBeLessThanOrEqual(8);
+    expect(gap).toBeLessThan(ROW_SPACE.withinGroup);
   });
 
   it('그룹 사이 여백이 그룹 안 여백보다 크다 — 아니면 경계가 뒤집힌다', () => {
@@ -940,8 +944,11 @@ describe('#1083 H-7(폰) — 그룹 안에서 메시지 경계가 보인다', ()
       />,
     );
     const outer = flatten(head.getByTestId('message-row').props.style);
-    // 안쪽이 절반씩 물고 있으므로 차이만 더한다: 6+6=12(안), 6+6+4=16(사이).
-    expect(Number(outer.marginTop) + ROW_SPACE.withinGroup).toBe(CONV.groupGap);
+    // 안쪽이 절반씩 물고 있으므로 차이만 더한다: 3+3=6(안), 3+3+10=16(사이).
+    const inner = flatten(head.getByTestId('message-press').props.style);
+    expect(
+      Number(outer.marginTop) + Number(inner.paddingVertical) * 2,
+    ).toBe(CONV.groupGap);
   });
 });
 

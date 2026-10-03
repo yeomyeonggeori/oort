@@ -21,6 +21,14 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 
+/** hh:mm, 24-hour, local. The row's own clock is never used for ordering. */
+export function timeLabel(atMs: number): string {
+  const d = new Date(atMs);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
 // =============================================================================
 // 메시지 액션 시트 — 폰에서 hover 를 대신하는 것.
 //
@@ -192,9 +200,16 @@ export function MessageActionSheet({
 
           <View style={styles.preview}>
             <Text style={styles.previewTitle}>메시지 액션</Text>
-            <Text style={styles.previewAuthor} numberOfLines={1}>
-              {authorLabel}
-            </Text>
+            {/* 이 메시지의 시각 (#3386). 연속 행은 왼쪽 시각 칸을 접었다 — 5분 묶음 안
+                개별 발화의 시각은 길게 눌러 여는 이 머리에서 본다. */}
+            <View style={styles.previewWho}>
+              <Text style={styles.previewAuthor} numberOfLines={1}>
+                {authorLabel}
+              </Text>
+              <Text style={styles.previewTime} testID="sheet-time">
+                {timeLabel(message.createdAtMs)}
+              </Text>
+            </View>
             <Text style={styles.previewBody} numberOfLines={2}>
               {preview === '' ? '내용 없는 메시지' : preview}
             </Text>
@@ -390,7 +405,15 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     borderBottomColor: color.border,
   },
   previewTitle: {fontSize: font.label, color: color.text, fontWeight: '700'},
-  previewAuthor: {fontSize: font.meta, color: color.textFaint, fontWeight: '600'},
+  previewWho: {flexDirection: 'row', alignItems: 'baseline', columnGap: space.sm},
+  previewAuthor: {
+    flexShrink: 1,
+    fontSize: font.meta,
+    color: color.textFaint,
+    fontWeight: '600',
+  },
+  // AA: `textFaint` 는 본문 대비 4.5 를 못 지난다 — 시각은 뜻을 나르는 글자다.
+  previewTime: {fontSize: font.meta, color: color.textMuted},
   previewBody: {fontSize: font.label, color: color.textMuted, lineHeight: 19},
   reactions: {
     paddingVertical: space.sm,

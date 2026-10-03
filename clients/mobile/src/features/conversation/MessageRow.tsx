@@ -7,7 +7,6 @@ import {
   unreadDividerSegments,
   DIVIDER_SPACE,
   DIVIDER_TONE,
-  ROW_SPACE,
   type DividerSegment,
   type DividerTone,
   type RecoverySource,
@@ -96,7 +95,7 @@ import {usePalette, useStyles} from '../../design/theme';
 import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
 import {COPY_RECEIPT_MS, copyText} from './copy';
 import {MessageBody, bodyAffordances, openLink} from './MessageBody';
-import {MessageActionSheet} from './MessageActionSheet';
+import {MessageActionSheet, timeLabel} from './MessageActionSheet';
 import {MessageEditorSheet} from './MessageEditorSheet';
 import {appNote} from './appVoice';
 import {Avatar} from './Avatar';
@@ -198,22 +197,25 @@ import {MemoryReceiptChip} from '../memory/MemoryReceiptChip';
 const UNKNOWN_MEMBER = '알 수 없는 멤버';
 
 /**
- * 시각이 서는 두 자리 (감사 H-3 → DS2-4 #2716).
+ * 시각이 서는 자리는 **묶음 머리 한 곳**이다 (#3386 — owner 2026-10-03, Buzz 기준).
  *
- * H-3 은 모든 행의 시각을 **오른쪽 한 칸**에 세웠다(34pt 예약). DS2-4 에서 owner
- * 피드백 표가 그것을 바꿨다: 「아바타 40, 이름 굵게 + 시간 회색 **한 줄**」(Buzz).
- * 그래서 이제
+ * 이력: 감사 H-3 은 시각을 오른쪽 한 칸에, DS2-4(#2716)는 연속 행의 시각을 비어 있는
+ * 아바타 칸에 세웠다. owner 가 그것을 대체했다 — 「시간 부분이랑 그룹화가 buzz처럼
+ * 되어야하는데, 시간이 좌측에 위치하는 이슈랑 개별로 표시되는 이슈가 있어.」
  *
- *   * **묶음 머리**: 이름 바로 뒤, 같은 줄(`Author` 의 `time`). 시안 `.a-m .who time`.
- *   * **연속 행**: 왼쪽 아바타 칸 안(`rowTime`). 그 칸은 머리 행에만 얼굴이 서고
- *     연속 행에서는 비어 있다 — 비어 있는 칸에 시각을 세우면 세로도 가로도 새로
- *     쓰지 않는다.
+ *   * **묶음 머리**: 이름 바로 뒤, 같은 줄(`Author` 의 `time`).
+ *   * **연속 행**: 시각 없음. 본문이 이름 칸과 같은 x 에서 문단처럼 이어진다.
+ *   * 개별 시각은 길게 누르기 시트 머리(`sheet-time`)와 접근성 라벨에 있다.
  *
- * 오른쪽 예약(42pt)이 사라져 본문이 Buzz 처럼 오른쪽 여백까지 간다. H-3 의 요구
- * 「모든 행이 자기 시각을 말한다」는 그대로다 — 자리가 둘이 됐을 뿐, 연속 행의 시각이
- * 늘 같은 x(아바타 칸)에 선다는 성질도 그대로다.
+ * 간격은 `CONTINUATION_GAP` 이 진다(아래).
  */
-const TIME_GUTTER = CONV.avatar;
+
+/**
+ * 같은 작성자 묶음 안 두 행 사이의 실제 거리(pt). 코어 `ROW_SPACE.withinGroup`(12)은
+ * 웹과 공유하는 값이라 건드리지 않고, 폰만 Buzz 처럼 문단 간격으로 줄인다. 위·아래
+ * 패딩이 절반씩 문다. 시험이 상한(8)을 지킨다 — 다시 벌어지면 빨개진다.
+ */
+const CONTINUATION_GAP = 6;
 
 /**
  * 반응 칩의 레이아웃 변. 두 축 모두 이 값이고, 두 축 모두 슬롭이 44 로 채운다.
@@ -283,14 +285,6 @@ const AVATAR_HIT_SLOP = {
   left: AVATAR_SLOP,
   right: AVATAR_SLOP,
 } as const;
-
-/** hh:mm, 24-hour, local. The row's own clock is never used for ordering. */
-function timeLabel(atMs: number): string {
-  const d = new Date(atMs);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${hh}:${mm}`;
-}
 
 function relativeLabel(atMs: number, nowMs: number): string {
   const diff = Math.max(0, nowMs - atMs);
@@ -588,7 +582,7 @@ function Author({
         </Text>
       ) : null}
       {/* 시각이 여기로 돌아왔다 (DS2-4, owner 표). H-3 은 오른쪽 한 칸이었다 —
-          위 `TIME_GUTTER` 머리말. 보조기술에는 숨긴다: 행 라벨이 이미 말한다. */}
+          위 시각 머리말. 보조기술에는 숨긴다: 행 라벨이 이미 말한다. */}
       {time !== undefined ? (
         <Text
           accessibilityElementsHidden
@@ -2563,7 +2557,7 @@ function MessageRowInner({
           styles.rowInner,
           // 칸의 예약은 **여기 한 곳**이다 (design-review M-1) — 아래
           // `rowAvatarReserve` 주석이 왜 자식이 아니라 그릇인지 든다. DS2-4 에서
-          // 오른쪽 시각 칸이 사라지고 아바타 칸 하나가 남았다(`TIME_GUTTER`).
+          // 오른쪽 시각 칸이 사라지고 아바타 칸 하나가 남았다(연속 행 시각은 #3386 에서 접었다).
           styles.rowAvatarReserve,
           pressed && actions !== undefined && styles.rowPressed,
         ]}
@@ -2886,52 +2880,27 @@ function MessageRowInner({
 
         {
           // ===================================================================
-          // 행의 시각 (감사 H-3)
+          // 연속 행에는 시각이 없다 (#3386 — 성재 2026-10-03, Buzz 기준)
           //
-          // 그룹 창은 **5분**이다(`AUTHOR_GROUP_WINDOW_MS`). 즉 한 그룹이 최대
-          // 5분을 덮는데 그 안 개별 발화의 시각이 화면 어디에도 없었다 —
-          // 「이 말 언제 한 거지?」에 답이 없다.
+          // 성재 원문: 「시간 부분이랑 그룹화가 buzz처럼 되어야하는데, 시간이
+          // 좌측에 위치하는 이슈랑 개별로 표시되는 이슈가 있어.」
           //
-          // 그런데 **접근성 라벨에는 모든 행의 시각이 들어 있다**
-          // (`rowAccessibilityLabel`). 로터는 아는 것을 눈은 몰랐다. 즉 이
-          // 정보가 값어치 있다는 판단은 이미 내려져 있었고, 빠진 것은 눈으로
-          // 가는 길뿐이었다.
+          // 이 자리는 감사 H-3 → DS2-4(#2716)에서 「모든 행이 눈으로 자기 시각을
+          // 말한다」는 이유로 **비어 있는 아바타 칸에 연속 행의 시각을 세웠다**.
+          // 그 판단(5분 창 안 개별 발화의 시각이 화면 어디에도 없다)은 접근성
+          // 라벨엔 시각이 있다는 점과 함께 당시엔 합리적이었으나, owner 결정이
+          // 그것을 **대체한다**: 같은 작성자 5분 창(`AUTHOR_GROUP_WINDOW_MS`)의
+          // 연속 발화는 머리(아바타·이름·시각) 한 번 + 본문만 문단처럼 이어진다.
+          // 왼쪽 칸의 시각은 묶음을 개별 메시지 더미로 쪼개 보이게 했다.
           //
-          // 웹은 hover 로 준다. **폰에는 hover 가 없다** — 그래서 이 화면의
-          // 선택지는 「항상」 아니면 「전혀」 둘뿐이고, 「전혀」가 지금 고장난
-          // 쪽이다.
+          // 개별 시각은 사라지지 않는다:
+          //   * 길게 눌러 여는 액션 시트 머리(`MessageActionSheet` 의 `sheet-time`)
+          //   * 접근성 라벨(`rowAccessibilityLabel`) — 로터는 늘 알고 있었다
+          // 웹은 hover 로 주므로 그대로다. 그룹 창(5분)도 그대로다.
           //
-          // ## 세로를 한 픽셀도 안 쓴다
-          //
-          // 줄을 하나 더 세우면 5연발에 80pt 가 사라진다. 묶음 머리에서는 이름
-          // 뒤 같은 줄에(`Author` 의 `time`), 연속 행에서는 **비어 있는 아바타
-          // 칸**에 절대 위치로 앉힌다(DS2-4, `TIME_GUTTER` 머리말). 그 칸은
-          // 그릇이 이미 비워 둔 자리라 겹치지 않고, 세로 비용이 0 이다.
-          //
-          // ## 흐름 자식 **뒤**에 그린다 (design-review M-1)
-          //
-          // RN 에는 z-index 기본값이 없다 — 형제는 **쓰인 순서대로** 칠해진다.
-          // 이 `Text` 가 카드보다 앞에 있었을 때, 불투명한 `styles.card` 배경이
-          // 그 위에 칠해져 시각이 조용히 사라질 수 있었다. 자리는 이제 여백이
-          // 지키고 순서는 칠을 지킨다 — 둘 중 하나가 깨져도 나머지가 남는다.
-          //
-          // ## 보조기술에는 안 보인다
-          //
-          // 행 라벨이 이미 이 시각을 말한다. 여기서 또 하나의 원소를 세우면
-          // 로터가 같은 사실을 두 번 읽는다 — 「행 하나 = 원소 하나」를 다른
-          // 방식으로 깨는 것이다.
+          // 되돌리지 말 것: 연속 행에 시각 `Text` 를 다시 세우면 `row-time` 시험이
+          // 빨개진다(묶음 머리 한 곳에만 있어야 한다).
           // ===================================================================
-          startsGroup ? null : (
-            <Text
-              accessibilityElementsHidden
-              importantForAccessibility="no-hide-descendants"
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              style={styles.rowTime}
-              testID="row-time">
-              {timeLabel(message.createdAtMs)}
-            </Text>
-          )
         }
       </Pressable>
 
@@ -3483,12 +3452,12 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     paddingHorizontal: SAFE_GUTTER,
     // 3pt 였다 — 한 사람이 연달아 쓴 다섯 줄이 한 덩이 문단으로 읽혔다(감사
     // H-7). 값은 **코어가 정한다**: 두 행 사이에 실제로 남는 거리가
-    // `ROW_SPACE.withinGroup` 이 되도록 절반씩 나눠 문다. 웹은 같은 값을
+    // `CONTINUATION_GAP` 이 되도록 절반씩 나눠 문다. 웹은 같은 값을
     // 위아래 패딩의 합으로 만든다.
     //
     // 첫 판은 `space.xs`(4 → 사이 8pt)로 잡았는데 코어 랜딩이 그것을 12 로
     // 정정했다. 「둘의 비를 지키면서 안쪽을 넓힌다」가 그 판정이다.
-    paddingVertical: ROW_SPACE.withinGroup / 2,
+    paddingVertical: CONTINUATION_GAP / 2,
     gap: 2,
   },
   /**
@@ -3520,39 +3489,13 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    */
   rowAvatarReserve: {paddingLeft: SAFE_GUTTER + CONV.avatar + CONV.avatarGap},
   /**
-   * 아바타가 앉는 자리. 규칙은 `rowTime` 과 하나도 다르지 않다 — **이 메시지의
+   * 아바타가 앉는 자리. 규칙: **이 메시지의
    * 맨 위 왼쪽**이고, 그 y 는 그릇의 위쪽 패딩과 **같은 곳**에서 온다.
    */
   rowAvatar: {
     position: 'absolute',
     left: SAFE_GUTTER,
-    top: ROW_SPACE.withinGroup / 2,
-  },
-  /**
-   * 연속 행의 시각 (H-3 → DS2-4). **비어 있는 아바타 칸** 안, 행의 첫 줄 옆.
-   *
-   * `position: 'absolute'` 인 이유는 세로 비용을 0 으로 두기 위해서다. 겹침을 막는
-   * 것은 `rowAvatarReserve`(그 칸은 원래 비워 둔 자리)이고, 가림을 막는 것은 렌더
-   * 순서다(위 JSX 주석).
-   *
-   * y 는 그릇의 위쪽 패딩과 **같은 곳**에서 온다(u44 리뷰 M-2: 두 숫자가 따로
-   * 적혀 있으면 그 차이가 어긋남이 된다). 연속 행의 첫 줄은 본문이므로 줄 상자도
-   * 본문(`line.body`)이다. 묶음 머리의 시각은 여기가 아니라 이름 줄(`authorTime`).
-   *
-   * 칸 폭(40)을 넘는 큰 글씨에서는 줄바꿈 대신 줄어든다(`adjustsFontSizeToFit`) —
-   * 「04:5 / 9」로 접히던 #2617 의 결함을 이 칸에서 되풀이하지 않는다.
-   */
-  rowTime: {
-    position: 'absolute',
-    left: SAFE_GUTTER,
-    top: ROW_SPACE.withinGroup / 2,
-    width: TIME_GUTTER,
-    textAlign: 'center',
-    fontSize: font.meta,
-    // 시각은 뜻을 나르는 글자다 — `textFaint` 는 배경 대비 3.562:1 로 본문
-    // AA(4.5)를 못 지난다(U4-2 M-6 실측).
-    color: color.textMuted,
-    lineHeight: line.body,
+    top: CONTINUATION_GAP / 2,
   },
   // Feedback that the row is interactive at all. On a phone this is one of the
   // few honest signals that a gesture exists, and it costs no vertical space.
@@ -3620,14 +3563,13 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 표시를 세운 것이 사람의 동작이었으므로, 거두는 것도 사람의 동작이다.
    */
   rowLanded: {backgroundColor: color.warnSurface},
-  // 그룹 사이는 `ROW_SPACE.betweenGroups`. 안쪽이 이미 절반씩 물고 있으므로
-  // 차이만 더한다 — 6+6=12(안), 6+6+6=18(사이).
+  // 그룹 사이는 `CONV.groupGap`. 안쪽이 이미 절반씩 물고 있으므로 차이만 더한다.
   /**
    * 작성자가 바뀌는 자리의 틈. 시안 `.a-m{margin-bottom:16px}` — 두 행의 안쪽 패딩
-   * 합(`withinGroup` 12)에 이만큼을 더해 16 이 된다. 코어 `betweenGroups`(18)보다
+   * 합(`CONTINUATION_GAP`)에 이만큼을 더해 16 이 된다. 코어 `betweenGroups`(18)보다
    * 2 좁다: 아바타가 40 으로 커져 묶음 경계가 얼굴로 먼저 읽힌다.
    */
-  rowStartsGroup: {marginTop: CONV.groupGap - ROW_SPACE.withinGroup},
+  rowStartsGroup: {marginTop: CONV.groupGap - CONTINUATION_GAP},
   // 시각 칸의 여백은 여기 없다 — 그릇(`rowTimeReserve`)이 진다. 이 줄에만
   // 걸어 두었던 것이 M-1 이 말한 구멍의 절반이었다: 예약이 자식에 붙어 있으면
   // **그 자식이 없는 행**은 예약도 없다.

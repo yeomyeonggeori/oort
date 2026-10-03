@@ -288,6 +288,9 @@ services:
       # `true` = on (the default); any other value = off. `:-` so existing
       # stacks keep the default without a new required key.
       MOMO_SUBSCRIPTION_AGENTS_ENABLED: ${MOMO_SUBSCRIPTION_AGENTS_ENABLED:-}
+      # #3397 (ADR-0193 증보 2026-10-03): Claude subscription agents are OFF by default;
+      # only an exact `true` opens registration. Codex is unaffected.
+      MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED: ${MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED:-}
       # ADR-0110: the ONLY authority for the realtime address handed to clients.
       # No default — a wrong guess silently points every client at nothing.
       MOMO_CENTRIFUGO_WS_URL: ${MOMO_CENTRIFUGO_WS_URL:?set MOMO_CENTRIFUGO_WS_URL}
