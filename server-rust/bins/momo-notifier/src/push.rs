@@ -96,6 +96,16 @@ impl PushDrain {
 
     /// Drain until a claim comes back short, matching the relay/agent-worker loop.
     pub async fn drain_to_empty(&self, batch_size: i64) -> DrainStats {
+        let (total, error) = self.drain_until_error(batch_size).await;
+        if let Some(error) = error {
+            tracing::error!(error = %error, "push drain iteration failed");
+        }
+        total
+    }
+
+    /// [`PushDrain::drain_to_empty`] that hands the failure back instead of
+    /// logging it, so the run loop can back off (#3377).
+    pub async fn drain_until_error(&self, batch_size: i64) -> (DrainStats, Option<sqlx::Error>) {
         let mut total = DrainStats::default();
         loop {
             match self.drain_once(batch_size).await {
@@ -107,13 +117,10 @@ impl PushDrain {
                     total.requeued += stats.requeued;
                     total.failed += stats.failed;
                     if claimed < batch_size as usize {
-                        return total;
+                        return (total, None);
                     }
                 }
-                Err(error) => {
-                    tracing::error!(error = %error, "push drain iteration failed");
-                    return total;
-                }
+                Err(error) => return (total, Some(error)),
             }
         }
     }
