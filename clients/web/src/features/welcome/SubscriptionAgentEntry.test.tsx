@@ -157,14 +157,17 @@ afterEach(() => {
 });
 
 describe("설정 › AI 연결 입구 (#2870)", () => {
-  it("owner + 데스크탑 + 서버 켬: 버튼이 재진입 주소를 연다", async () => {
+  it("owner + 데스크탑 + 서버 켬: 버튼이 온보딩 화면이 아니라 구독 에이전트 창을 연다 (#3389)", async () => {
     mount(createElement(AiMyAccountsSection));
     await rtlWaitFor(() => {
       if (!q("subscription-entry-open")) throw new Error("entry");
     });
     expect(q("subscription-entry")?.getAttribute("data-surface")).toBe("rows");
     act(() => q("subscription-entry-open")?.click());
-    expect(window.location.hash).toBe("#/ai-connect?from=settings");
+    expect(window.location.hash).not.toBe("#/ai-connect?from=settings");
+    await rtlWaitFor(() => {
+      if (!document.querySelector('[data-testid="subscription-start-dialog"]')) throw new Error("start");
+    });
   });
 
   it("AI 연결 화면이 「준비됨」으로 읽는 CLI를 내 계정 절도 같은 판정으로 싣는다 (#2938 ①)", async () => {
@@ -290,13 +293,16 @@ describe("설정 › AI 연결 입구 (#2870)", () => {
 });
 
 describe("에이전트 화면 입구 (#2870)", () => {
-  it("구독 줄이 설 때만 머리 버튼이 서고, 누르면 출발지를 싣는다", async () => {
+  it("구독 줄이 설 때만 머리 버튼이 서고, 누르면 온보딩이 아니라 구독 에이전트 창이 선다 (#3389)", async () => {
     mount(createElement(SubscriptionAgentEntryButton, { from: "agents" }));
     await rtlWaitFor(() => {
       if (!q("agent-hub-subscription-entry")) throw new Error("entry");
     });
     act(() => q("agent-hub-subscription-entry")?.click());
-    expect(window.location.hash).toBe("#/ai-connect?from=agents");
+    expect(window.location.hash).not.toContain("ai-connect");
+    await rtlWaitFor(() => {
+      if (!document.querySelector('[data-testid="subscription-start-dialog"]')) throw new Error("start");
+    });
   });
 
   it("서버 킬 스위치가 꺼지면 머리 버튼은 없다", async () => {

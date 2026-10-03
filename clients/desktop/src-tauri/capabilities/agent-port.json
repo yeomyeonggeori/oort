@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "agent-port",
+  "description": "Sign-in to agent registration (ADR-0190 D3-h, #3389): this install's id, and the app's hand-off of the one-time connection value to the official Claude Code CLI (two fixed commands, the value kept in the app's own store, never in argv or a log). For the main window's own webview (label `main`) on the bundled (local) origin only, scoped by webview like pty.json. No `remote` entry: a page from the network must never reach it.",
+  "webviews": [
+    "main"
+  ],
+  "platforms": [
+    "macOS",
+    "windows",
+    "linux"
+  ],
+  "permissions": [
+    "allow-agent-port-device",
+    "allow-agent-port-connect",
+    "allow-agent-port-replace-credential",
+    "allow-agent-port-disconnect"
+  ]
+}
