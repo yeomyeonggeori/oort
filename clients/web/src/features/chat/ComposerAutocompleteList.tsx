@@ -160,7 +160,8 @@ export function ComposerAutocompleteList({
                   ? "bg-accent-soft active:bg-surface-pressed"
                   : "hover:bg-surface-hover active:bg-surface-pressed",
                 // 못 부르는 에이전트는 흐리게: 고를 수는 있다(보내기 전 composer 위 한 줄이 말한다).
-                locked ? "text-ink-muted" : "text-ink"
+                // 강조된 줄은 흐리지 않는다(accent-soft 위 muted 의 대비). 자물쇠가 잠금을 말한다.
+                locked && index !== highlight ? "text-ink-muted" : "text-ink"
               )}
             >
               {candidate.mark === "private-channel" && (
@@ -171,7 +172,13 @@ export function ComposerAutocompleteList({
               <span className="line-clamp-2 break-words">{candidate.lead}</span>
               {locked && <Lock className="size-3 shrink-0" aria-hidden="true" data-testid="mention-locked-mark" />}
               {candidate.hint !== "" && (
-                <span className="min-w-0 flex-1 truncate text-meta text-ink-muted">
+                <span
+                  className={cn(
+                    "text-meta text-ink-muted",
+                    // 주석이 있는 줄(에이전트)은 이름을 자르지 않고 감싼다: 표시 이름이 사람이 고르는 기준이다.
+                    agent ? "min-w-0 max-w-full break-words" : "min-w-0 flex-1 truncate"
+                  )}
+                >
                   {candidate.hint}
                 </span>
               )}
