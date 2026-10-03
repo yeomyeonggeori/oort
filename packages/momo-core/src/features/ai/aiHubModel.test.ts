@@ -4,6 +4,8 @@ import {
   mySubscriptionAgents,
   subscriptionAgentStatus,
   subscriptionAgentText,
+  AI_AGENT_PAUSED_STATUS,
+  CLAUDE_SUBSCRIPTION_AGENT_PAUSED,
   AI_GLOSSARY,
   AI_HUB_COPY,
   AI_HUB_FROM_SETTINGS,
@@ -613,5 +615,80 @@ describe("내가 만든 구독 에이전트 (AIH-4)", () => {
   it("나를 모르면 아무것도 올리지 않는다", () => {
     expect(mySubscriptionAgents(roster, connections, null)).toEqual([]);
     expect(mySubscriptionAgents(roster, connections, " ")).toEqual([]);
+  });
+});
+
+describe("개인 키 brain 과 서버 사유 (#3416)", () => {
+  it("brain=personal_key 는 구독이 아니라 개인 키로 읽고, 호출자는 소유자뿐이다", () => {
+    const c = classifyAiAgent({ brain: "personal_key", callableBy: "everyone", invocationScope: "owner_only" }, ME);
+    expect(c).toMatchObject({ brain: "personal_key", brainSource: "server", callableBy: "owner", cost: "owner" });
+    const l = aiAgentLabels(classifyAiAgent({ brain: "personal_key", ownerHumanId: "h-me" }, ME));
+    expect(l.brain).toBe("개인 키");
+    expect(l.brain).not.toContain("구독");
+    expect(l.cost).toBe("개인 키");
+    expect(l.callable).toBe("나만");
+    expect(l.mentionLine).toBe("개인 키 · 나만");
+    expect(l.mentionBadge).toBe("개인 키");
+    expect(l.host).toBeNull();
+  });
+
+  it("개인 키는 owner_only 범위여도 구독 하니스가 붙어도 구독으로 추론되지 않는다", () => {
+    const l = labelsFor({ brain: "personal_key", invocationScope: "owner_only", subscriptionHarness: "claude_code", hostOnline: false });
+    expect(l.brain).toBe("개인 키");
+    expect(l.host).toBeNull();
+    expect(l.mentionLine).not.toContain("맥");
+  });
+
+  it("남의 개인 키 에이전트는 이름으로 말하고 잠근다", () => {
+    const l = labelsFor({ brain: "personal_key", ownerHumanId: "h-me", ownerDisplayName: "성재" }, OTHER);
+    expect(l.callable).toBe("성재 님만");
+    expect(l.mentionLine).toBe("개인 키 · 성재 님만");
+    expect(l.lockedForViewer).toBe(true);
+    const c = classifyAiAgent({ brain: "personal_key", ownerHumanId: "h-me", ownerDisplayName: "성재" }, OTHER);
+    expect(nonOwnerNotice(c, "성재의 봇")).toBe("성재의 봇은 성재 님 개인 키라서 성재 님만 부를 수 있어요.");
+    expect(nonOwnerComposerNotice(c, "성재의 봇")).toContain("성재 님만 부를 수 있어요");
+    expect(hostOfflineNotice(classifyAiAgent({ brain: "personal_key", hostOnline: false }, ME))).toBeNull();
+  });
+
+  it("모르는 brain 문자열은 개인 키로 읽지 않는다", () => {
+    expect(classifyAiAgent({ brain: "personal_keys" }).brain).toBe("unknown");
+    expect(labelsFor({ brain: "personal_keys" }).brain).toBeNull();
+  });
+
+  it("서버 사유 claude_subscription_agent_paused 는 「문의 중」 회색 상태로, 설명을 붙인다", () => {
+    const l = labelsFor({
+      brain: "subscription",
+      subscriptionHarness: "claude_code",
+      hostOnline: true,
+      brainUnavailableReason: CLAUDE_SUBSCRIPTION_AGENT_PAUSED,
+      ownerHumanId: "h-me",
+    });
+    expect(l.status).toBe(AI_AGENT_PAUSED_STATUS);
+    expect(l.status?.label).toBe("문의 중");
+    expect(l.status?.tone).toBe("muted");
+    expect(l.status?.detail).toContain("Anthropic 약관 확인 전까지 꺼져 있어요");
+    expect(l.status?.detail).toContain("Remote Control");
+    expect(findLegacyTerms(l.status?.detail ?? "")).toEqual([]);
+    // 맥이 켜져 있어도 꺼져 있어도 「맥 켜짐/꺼짐」「켜지면 답해요」를 말하지 않는다.
+    expect(l.host).toBeNull();
+    expect(l.mentionLine).toBe("내 구독 · 나만 부를 수 있어요 · 문의 중");
+    const off = labelsFor({ brain: "subscription", hostOnline: false, brainUnavailableReason: CLAUDE_SUBSCRIPTION_AGENT_PAUSED });
+    expect(off.host).toBeNull();
+    expect(off.mentionLine).toContain("문의 중");
+    expect(off.mentionLine).not.toContain("맥 꺼짐");
+    const c = classifyAiAgent({ brain: "subscription", hostOnline: false, brainUnavailableReason: CLAUDE_SUBSCRIPTION_AGENT_PAUSED });
+    expect(hostOfflineNotice(c)).toBeNull();
+  });
+
+  it("사유가 없거나 모르는 사유면 상태를 만들지 않고 맥 상태를 그대로 쓴다", () => {
+    for (const reason of [undefined, null, "", "something_new"]) {
+      const l = labelsFor({ brain: "subscription", hostOnline: false, brainUnavailableReason: reason });
+      expect(l.status, String(reason)).toBeNull();
+      expect(l.host?.label, String(reason)).toBe("맥 꺼짐");
+    }
+  });
+
+  it("서버 사유 문자열이 서버 상수와 같다", () => {
+    expect(CLAUDE_SUBSCRIPTION_AGENT_PAUSED).toBe("claude_subscription_agent_paused");
   });
 });
