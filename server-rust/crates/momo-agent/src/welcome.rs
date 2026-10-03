@@ -217,6 +217,7 @@ pub async fn resolve_welcome_target_in_tx(
     prefer_agent_member_id: Option<Uuid>,
     welcomed_member_id: Uuid,
     subscription_agents_enabled: bool,
+    claude_subscription_agents_enabled: bool,
 ) -> Result<Option<WelcomeTarget>, DbError> {
     let settings: Value = sqlx::query_scalar("SELECT settings FROM workspace WHERE id = $1")
         .bind(workspace_id)
@@ -247,6 +248,7 @@ pub async fn resolve_welcome_target_in_tx(
         hosted_delivery_enabled,
         welcomed_member_id,
         subscription_agents_enabled,
+        claude_subscription_agents_enabled,
     )
     .await?;
     let Some(agent) = agent else {
@@ -292,6 +294,8 @@ fn hosted_agent_is_deliverable(agent: &WelcomeAgent, hosted_delivery_enabled: bo
         && agent.hosted_channel_approved
 }
 
+// Each argument is one independent gate fact; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 async fn load_welcome_agent_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -300,6 +304,7 @@ async fn load_welcome_agent_in_tx(
     hosted_delivery_enabled: bool,
     welcomed_member_id: Uuid,
     subscription_agents_enabled: bool,
+    claude_subscription_agents_enabled: bool,
 ) -> Result<Option<WelcomeAgent>, DbError> {
     let rows = sqlx::query(
         "SELECT m.id, a.model, a.model_source, a.system_prompt, a.max_run_steps, a.tool_schema, a.config, \
@@ -355,7 +360,9 @@ async fn load_welcome_agent_in_tx(
                 ) \
             AND ($3::uuid IS NULL OR m.id = $3) \
             AND (a.invocation_scope <> 'owner_only' \
-                 OR ($5 AND a.owner_human_id = $4)) \
+                 OR ($5 AND a.owner_human_id = $4 \
+                     AND ($6 OR a.uses_owner_key \
+                          OR COALESCE(a.subscription_harness, 'claude_code') <> 'claude_code'))) \
           ORDER BY m.created_at ASC, m.id ASC",
     )
     .bind(workspace_id)
@@ -363,6 +370,7 @@ async fn load_welcome_agent_in_tx(
     .bind(specified)
     .bind(welcomed_member_id)
     .bind(subscription_agents_enabled)
+    .bind(claude_subscription_agents_enabled)
     .fetch_all(&mut *conn)
     .await?;
     for row in rows {

@@ -465,6 +465,11 @@ pub struct SendExtras<'a> {
     /// mean the shipped default (the path on), so every existing caller that
     /// builds `SendExtras::default()` keeps its hosted fan-out unchanged.
     pub subscription_agents_disabled: bool,
+    /// #3397 (결재 2026-10-03) — the Claude subscription opt-in is **off**
+    /// (the shipped default). Named for the non-default state like the field
+    /// above, but `SendExtras::default()` therefore means the opt-in is *on*;
+    /// every real send path sets it from `AgentPortConfig`.
+    pub claude_subscription_agents_disabled: bool,
 }
 
 /// Why a REST send was refused before it could commit.
@@ -828,6 +833,7 @@ pub async fn send_message_with_mentions_in_tx(
         via_token_id,
         opens_stream,
         subscription_agents_disabled,
+        claude_subscription_agents_disabled,
     } = extras;
     if let Some(signature) = signature {
         if input.client_msg_id.is_none() {
@@ -925,6 +931,7 @@ pub async fn send_message_with_mentions_in_tx(
         sent.message.id,
         sent.message.author_member_id,
         !subscription_agents_disabled,
+        !claude_subscription_agents_disabled,
     )
     .await?;
     Ok(Ok(sent))

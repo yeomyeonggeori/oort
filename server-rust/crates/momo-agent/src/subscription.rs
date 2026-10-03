@@ -136,6 +136,9 @@ pub enum SubscriptionNoticeKind {
     OfflineNotQueued,
     /// D6 — the operator turned the subscription path off.
     Disabled,
+    /// D14·D17 증보 2026-10-03 (#3397) — the agent is a Claude subscription agent
+    /// and this instance has not opted in (「회색·문의 중」).
+    ClaudePaused,
 }
 
 impl SubscriptionNoticeKind {
@@ -146,6 +149,7 @@ impl SubscriptionNoticeKind {
             // per window that the CLI is away, whichever sentence was true.
             Self::OfflineQueued | Self::OfflineNotQueued => "offline",
             Self::Disabled => "disabled",
+            Self::ClaudePaused => "claude_paused",
         }
     }
 }
@@ -172,6 +176,10 @@ pub fn subscription_notice_body(kind: SubscriptionNoticeKind, scope: &OwnerOnlyS
             "지금은 이 서버에서 구독 에이전트를 쓸 수 없어요. 설정 › AI 연결에서 API 키로 연결할 수 있어요."
                 .to_string()
         }
+        SubscriptionNoticeKind::ClaudePaused => {
+            "Claude 구독으로 대신 답하는 기능은 Anthropic 확인이 끝날 때까지 쉬고 있어요. 내 작업에서 직접 쓰거나, 설정 › AI 연결에서 API 키로 연결할 수 있어요."
+                .to_string()
+        }
     }
 }
 
@@ -188,6 +196,7 @@ pub fn owner_only_gate(
     scope: Option<&OwnerOnlyScope>,
     author_member_id: Uuid,
     subscription_agents_enabled: bool,
+    claude_subscription_agents_enabled: bool,
 ) -> Option<SubscriptionNoticeKind> {
     let scope = scope?;
     if author_member_id != scope.owner_member_id {
@@ -196,7 +205,67 @@ pub fn owner_only_gate(
     if !subscription_agents_enabled && !scope.uses_owner_key {
         return Some(SubscriptionNoticeKind::Disabled);
     }
+    if claude_subscription_blocked(
+        Some(scope.harness),
+        scope.uses_owner_key,
+        claude_subscription_agents_enabled,
+    ) {
+        return Some(SubscriptionNoticeKind::ClaudePaused);
+    }
     None
+}
+
+/// #3397 (결재 2026-10-03) — the runtime block. `true` = this agent's brain is a
+/// Claude subscription and the instance has not opted in, so oort must not
+/// drive it on anyone's behalf (ACP / `claude -p` / the hosted runtime that
+/// dials in). A personal-key agent is not a subscription (`uses_owner_key`),
+/// and Codex is not affected. Decided from the agent row on every call, so an
+/// agent registered before the flag existed is blocked the same as a new one.
+pub fn claude_subscription_blocked(
+    harness: Option<SubscriptionHarness>,
+    uses_owner_key: bool,
+    claude_subscription_agents_enabled: bool,
+) -> bool {
+    !claude_subscription_agents_enabled
+        && !uses_owner_key
+        && harness == Some(SubscriptionHarness::ClaudeCode)
+}
+
+/// Is `agent_member_id` a Claude subscription agent that the instance's
+/// conservative mode blocks? Used by surfaces that hold only an agent id (the
+/// Agent Port tool view, the work-request route).
+pub async fn agent_claude_subscription_blocked_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    claude_subscription_agents_enabled: bool,
+) -> Result<bool, DbError> {
+    if claude_subscription_agents_enabled {
+        return Ok(false);
+    }
+    let row: Option<(String, Option<String>, bool)> = sqlx::query_as(
+        "SELECT invocation_scope, subscription_harness, uses_owner_key FROM agent \
+          WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(row.is_some_and(|(scope, harness, uses_owner_key)| {
+        scope == INVOCATION_SCOPE_OWNER_ONLY
+            && claude_subscription_blocked(
+                // Same default the mention path uses for an `owner_only` row
+                // with no recorded harness.
+                Some(
+                    harness
+                        .as_deref()
+                        .and_then(SubscriptionHarness::parse)
+                        .unwrap_or(SubscriptionHarness::ClaudeCode),
+                ),
+                uses_owner_key,
+                false,
+            )
+    }))
 }
 
 /// Where a notice about `trigger` belongs: the thread it was said in, or a new
@@ -838,22 +907,78 @@ mod tests {
         let owner = Uuid::from_u128(1);
         let other = Uuid::from_u128(2);
         let s = scope(owner);
-        assert_eq!(owner_only_gate(None, other, true), None, "workspace agents");
-        assert_eq!(owner_only_gate(None, other, false), None);
         assert_eq!(
-            owner_only_gate(Some(&s), other, true),
+            owner_only_gate(None, other, true, true),
+            None,
+            "workspace agents"
+        );
+        assert_eq!(owner_only_gate(None, other, false, false), None);
+        assert_eq!(
+            owner_only_gate(Some(&s), other, true, true),
             Some(SubscriptionNoticeKind::NonOwner)
         );
         assert_eq!(
-            owner_only_gate(Some(&s), other, false),
+            owner_only_gate(Some(&s), other, false, false),
             Some(SubscriptionNoticeKind::NonOwner),
             "a non-owner hears whose agent this is, never the operator's switch"
         );
-        assert_eq!(owner_only_gate(Some(&s), owner, true), None);
+        assert_eq!(owner_only_gate(Some(&s), owner, true, true), None);
         assert_eq!(
-            owner_only_gate(Some(&s), owner, false),
+            owner_only_gate(Some(&s), owner, false, true),
             Some(SubscriptionNoticeKind::Disabled)
         );
+    }
+
+    /// #3397 (결재 2026-10-03): an existing Claude subscription agent is refused
+    /// with the flag off, even for its owner; Codex and a personal-key agent are
+    /// not; flag on allows. Fails if the gate ignores the Claude flag.
+    #[test]
+    fn the_gate_pauses_claude_subscription_agents_until_the_instance_opts_in() {
+        let owner = Uuid::from_u128(1);
+        let claude = scope(owner);
+        assert_eq!(
+            owner_only_gate(Some(&claude), owner, true, false),
+            Some(SubscriptionNoticeKind::ClaudePaused),
+            "flag off: refused, with a reason, not dropped"
+        );
+        assert_eq!(owner_only_gate(Some(&claude), owner, true, true), None);
+        let codex = OwnerOnlyScope {
+            harness: SubscriptionHarness::Codex,
+            ..scope(owner)
+        };
+        assert_eq!(
+            owner_only_gate(Some(&codex), owner, true, false),
+            None,
+            "Codex is not affected"
+        );
+        let personal_key = OwnerOnlyScope {
+            uses_owner_key: true,
+            ..scope(owner)
+        };
+        assert_eq!(
+            owner_only_gate(Some(&personal_key), owner, true, false),
+            None,
+            "a personal API key is not a subscription"
+        );
+        assert_eq!(
+            SubscriptionNoticeKind::ClaudePaused.as_str(),
+            "claude_paused"
+        );
+        assert!(claude_subscription_blocked(
+            Some(SubscriptionHarness::ClaudeCode),
+            false,
+            false
+        ));
+        assert!(!claude_subscription_blocked(
+            Some(SubscriptionHarness::Codex),
+            false,
+            false
+        ));
+        assert!(!claude_subscription_blocked(
+            Some(SubscriptionHarness::ClaudeCode),
+            false,
+            true
+        ));
     }
 
     #[test]

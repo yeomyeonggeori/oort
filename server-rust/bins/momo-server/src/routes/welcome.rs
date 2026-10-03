@@ -22,6 +22,8 @@ use uuid::Uuid;
 /// Insert the welcome job for a newly created human, or no-op when the
 /// workspace has no one who can speak (or the only speaker is an undeliverable
 /// hosted agent).
+// Each argument is one independent gate fact; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn enqueue_welcome_kickoff_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -29,6 +31,7 @@ pub(crate) async fn enqueue_welcome_kickoff_in_tx(
     gateway_enabled: bool,
     hosted_delivery_enabled: bool,
     subscription_agents_enabled: bool,
+    claude_subscription_agents_enabled: bool,
     prefer_agent_member_id: Option<Uuid>,
 ) -> Result<(), DbError> {
     lock_welcome_opener_in_tx(&mut *conn, workspace_id, member_id).await?;
@@ -42,6 +45,7 @@ pub(crate) async fn enqueue_welcome_kickoff_in_tx(
         prefer_agent_member_id,
         member_id,
         subscription_agents_enabled,
+        claude_subscription_agents_enabled,
     )
     .await?
     else {
@@ -75,6 +79,7 @@ pub(crate) async fn enqueue_owner_welcome_kickoff_in_tx(
     gateway_enabled: bool,
     hosted_delivery_enabled: bool,
     subscription_agents_enabled: bool,
+    claude_subscription_agents_enabled: bool,
 ) -> Result<i32, DbError> {
     let Some(owner_id) = resolve_welcome_owner_in_tx(&mut *conn, workspace_id).await? else {
         return Ok(0);
@@ -96,6 +101,7 @@ pub(crate) async fn enqueue_owner_welcome_kickoff_in_tx(
         gateway_enabled,
         hosted_delivery_enabled,
         subscription_agents_enabled,
+        claude_subscription_agents_enabled,
         speaker_agent_member_id,
     )
     .await?;
