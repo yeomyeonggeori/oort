@@ -72,7 +72,7 @@ export function AiHubOverview({ mayCreateAgent }: { mayCreateAgent: boolean }) {
         <p className="max-w-2xl break-keep text-body text-ink-muted">{AI_HUB_COPY.subtitle}</p>
         {mayCreateAgent ? (
           <Button asChild size="sm" data-testid="ai-hub-create-agent">
-            <Link to="/agents">{AI_HUB_OVERVIEW_COPY.createAgent}</Link>
+            <Link to={`${aiHubSection("agents").path}?create=1`}>{AI_HUB_OVERVIEW_COPY.createAgent}</Link>
           </Button>
         ) : null}
       </div>

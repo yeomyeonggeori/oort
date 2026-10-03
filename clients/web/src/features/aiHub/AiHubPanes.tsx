@@ -1,9 +1,6 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
-import { Button } from "@/design/ui/button";
 import {
   AI_EXTERNAL_SUBSECTIONS,
-  AI_HUB_OVERVIEW_COPY,
   aiHubSection,
   glossaryEntry,
   type AiHubSectionId,
@@ -33,25 +30,13 @@ function PaneHead({ id, children }: { id: AiHubSectionId; children?: ReactNode }
 }
 
 export { AiAccountsPane } from "./AiAccountsPane";
+export { AiAgentsPane } from "./AiAgentsPane";
 
 export function AiTeamKeysPane({ offline, workspaceId }: PaneProps) {
   return (
     <div className="flex min-w-0 flex-col">
       <PaneHead id="teamKeys" />
       <AiLinkSection offline={offline} workspaceId={workspaceId} heading={false} />
-    </div>
-  );
-}
-
-export function AiAgentsPane() {
-  return (
-    <div className="flex min-w-0 flex-col">
-      <PaneHead id="agents" />
-      <div className="flex flex-wrap gap-2">
-        <Button asChild size="sm" data-testid="ai-hub-open-agent-list">
-          <Link to="/agents">{AI_HUB_OVERVIEW_COPY.openLink.agents}</Link>
-        </Button>
-      </div>
     </div>
   );
 }
