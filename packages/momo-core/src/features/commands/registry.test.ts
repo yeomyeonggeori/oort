@@ -359,7 +359,7 @@ describe("ai.connect (#2943 GC-2)", () => {
 
   it("줄의 작은 글씨가 누른 결과를 거짓 없이 말한다", () => {
     expect(aiConnect({ canOpenLocalCard: () => true }).meta).toBe("이 채널 · 나에게만");
-    expect(aiConnect({ canOpenLocalCard: () => false }).meta).toBe("AI에서 열려요");
+    expect(aiConnect({ canOpenLocalCard: () => false }).meta).toBe("AI 화면에서 열려요");
   });
 
   it("옛 「AI」 이동 줄은 허브 줄로 흡수됐다", () => {

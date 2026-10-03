@@ -255,7 +255,7 @@ describe("webhookFailureMessage", () => {
   it("carries the network copy this package wrote, which holds no wire text", () => {
     const offline = new NetworkError("unreachable", 15_000);
     const message = webhookFailureMessage("list", offline);
-    expect(message).toContain("웹훅 목록을 불러오지 못했어요");
+    expect(message).toContain("들어오는 주소 목록을 불러오지 못했어요");
     expect(message).toContain(offline.message);
   });
 
@@ -264,7 +264,7 @@ describe("webhookFailureMessage", () => {
       "비밀값을 회전하지 못했어요"
     );
     expect(webhookFailureMessage("revoke", new Error("boom"))).toContain(
-      "웹훅을 폐기하지 못했어요"
+      "주소를 폐기하지 못했어요"
     );
     expect(webhookFailureMessage("revoke", new Error("boom"))).not.toContain(
       "boom"

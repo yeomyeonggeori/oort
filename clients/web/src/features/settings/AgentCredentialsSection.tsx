@@ -50,7 +50,7 @@ import { formatMoment } from "./oauthGrant";
 
 const CREDENTIALS_OFFLINE_NOTE_ID = "agent-credentials-offline-note";
 const CREDENTIALS_OFFLINE_REASON =
-  "연결이 끊겨 지금은 자격을 발급하거나 바꿀 수 없어요.";
+  "연결이 끊겨 지금은 연결 값을 발급하거나 바꿀 수 없어요.";
 
 export type CredentialsRowAction = "disconnect" | "doorbell" | "record";
 
@@ -253,7 +253,7 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
       }}
       data-testid={testId}
     >
-      새 자격 발급
+      새 연결 값 발급
     </Button>
   );
 
@@ -304,7 +304,7 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
           <div className="flex min-w-0 flex-col gap-2">
             <EmptyInvite
               headline="아직 연결된 에이전트가 없어요."
-              detail="자격을 발급하면 연결 값이 한 번 열려요. 그 값으로 에이전트가 연결돼요."
+              detail="연결 값을 발급하면 한 번 열려요. 그 값으로 에이전트가 연결돼요."
               className="px-0"
               actions={issueButton("agent-credentials-issue")}
               testId="agent-credentials-empty"

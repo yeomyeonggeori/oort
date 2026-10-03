@@ -405,7 +405,7 @@ export function WebhookSection({
 
         {rows.length === 0 ? (
           <EmptyInvite
-            headline="아직 만든 웹훅이 없어요."
+            headline="아직 만든 주소가 없어요."
             detail="아래에서 받을 채널과 수신 방식을 정하면 수신 주소가 발급돼요."
             className="px-0"
             testId="webhook-empty"
@@ -485,7 +485,7 @@ export function WebhookSection({
           data-testid="webhook-create-form"
         >
           <Subsection
-            title="웹훅 만들기"
+            title="주소 만들기"
             lines={["발급된 비밀값은 이 화면을 벗어나면 다시 볼 수 없어요."]}
           >
             <div className="flex min-w-0 flex-col gap-3">
@@ -510,7 +510,7 @@ export function WebhookSection({
               <Field
                 label="이름"
                 htmlFor="webhook-label"
-                hint={`목록에서 이 웹훅을 구별하는 값이에요. ${WEBHOOK_LABEL_MAX}자까지.`}
+                hint={`목록에서 이 주소를 구별하는 값이에요. ${WEBHOOK_LABEL_MAX}자까지.`}
                 error={labelError}
               >
                 <Input
@@ -556,7 +556,7 @@ export function WebhookSection({
                   className={cn(createLocked && "opacity-50")}
                   data-testid="webhook-create"
                 >
-                  {creating ? "만드는 중" : "웹훅 만들기"}
+                  {creating ? "만드는 중" : "주소 만들기"}
                 </Button>
                 {/* 한 번에 하나만 그려진다. 서는 조건은 `createLockReason` 이 그
                     id 를 고르는 조건과 같은 것이어야 하고, 그래야 가리키는 곳에
@@ -630,7 +630,7 @@ const BUSY_ROW_REASON =
  * (`InviteSection.OFFLINE_CREATE_REASON` 이 같은 판정을 적는다).
  */
 const OFFLINE_CREATE_REASON =
-  "연결이 끊겨 지금은 웹훅을 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요.";
+  "연결이 끊겨 지금은 주소를 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요.";
 
 /**
  * 받을 채널이 없다는 사실은 위 `SelectField` 의 유일한 선택지가 이미 말하지만,

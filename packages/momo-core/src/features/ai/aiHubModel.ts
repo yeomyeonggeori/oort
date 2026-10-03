@@ -990,7 +990,7 @@ export const AI_HUB_FROM_SETTINGS: Readonly<Record<string, AiHubSectionId>> = {
 export const AI_HUB_NAV_COPY = {
   movedToHub: "AI 화면으로 옮겼어요",
   movedToHubAction: "AI에서 열기",
-  agentsPageLine: "설정·권한·비용은 AI에서",
+  agentsPageLine: "설정·권한·비용은 AI 화면에서",
   openAiAction: "AI에서 열기",
   tabsLabel: "AI 구획",
   overviewTab: "개요",

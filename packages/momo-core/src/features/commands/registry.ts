@@ -435,7 +435,7 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
     agentSuggestable: true,
     available: always,
     metaFor: (env) =>
-      env.canOpenLocalCard("ai.connect") ? "이 채널 · 나에게만" : "AI에서 열려요",
+      env.canOpenLocalCard("ai.connect") ? "이 채널 · 나에게만" : "AI 화면에서 열려요",
     slash: {
       name: "연결",
       aliases: ["connect", "ai"],

@@ -472,7 +472,7 @@ describe("목록 네 상태", () => {
     expect(host.textContent).toContain("아직 연결된 에이전트가 없어요");
     expect(
       host.querySelector('[data-testid="agent-credentials-issue"]')?.textContent
-    ).toBe("새 자격 발급");
+    ).toBe("새 연결 값 발급");
   });
 
   it("오류는 자리의 배너다", async () => {

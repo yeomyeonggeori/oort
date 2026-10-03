@@ -236,7 +236,7 @@ export function webhookLabelIssue(raw: string): WebhookLabelIssue | null {
 export function webhookLabelIssueMessage(issue: WebhookLabelIssue): string {
   switch (issue) {
     case "empty":
-      return "이름을 입력하세요. 목록에서 이 웹훅을 구별하는 유일한 값이에요.";
+      return "이름을 입력하세요. 목록에서 이 주소를 구별하는 유일한 값이에요.";
     case "tooLong":
       return `이름은 ${WEBHOOK_LABEL_MAX}자까지 쓸 수 있어요.`;
     case "controlCharacter":
@@ -368,13 +368,13 @@ export type WebhookAction = "list" | "create" | "rotate" | "revoke";
 function actionPrefix(action: WebhookAction): string {
   switch (action) {
     case "list":
-      return "웹훅 목록을 불러오지 못했어요.";
+      return "들어오는 주소 목록을 불러오지 못했어요.";
     case "create":
-      return "웹훅을 만들지 못했어요.";
+      return "주소를 만들지 못했어요.";
     case "rotate":
       return "비밀값을 회전하지 못했어요.";
     case "revoke":
-      return "웹훅을 폐기하지 못했어요.";
+      return "주소를 폐기하지 못했어요.";
   }
 }
 
@@ -387,13 +387,13 @@ function statusAdvice(action: WebhookAction, status: number): string {
     case 401:
       return "로그인 세션이 만료되었어요. 다시 로그인한 뒤 시도하세요.";
     case 403:
-      return "이 워크스페이스의 웹훅은 소유자나 관리자만 관리할 수 있어요. 관리자에게 요청하세요.";
+      return "이 워크스페이스의 들어오는 주소는 소유자나 관리자만 관리할 수 있어요. 관리자에게 요청하세요.";
     case 404:
       return action === "create"
         ? "고른 채널을 서버에서 찾지 못했어요. 목록을 다시 불러온 뒤 다른 채널을 고르세요."
-        : "이 웹훅이 서버에 없어요. 목록을 다시 불러오세요.";
+        : "이 주소가 서버에 없어요. 목록을 다시 불러오세요.";
     case 409:
-      return "이미 폐기된 웹훅이에요. 목록을 다시 불러오세요.";
+      return "이미 폐기된 주소예요. 목록을 다시 불러오세요.";
     case 429:
       return "요청이 너무 잦아요. 잠시 뒤에 다시 시도하세요.";
     default:
@@ -509,7 +509,7 @@ export function revokeConfirmQuestion(label: string): string {
  * 없다"는 뜻이다. 무슨 일이 있었는지에서 멈추면 할 일이 없는 사람을 남긴다.
  */
 export const UNRESOLVABLE_RECEIVE_URL_NOTICE =
-  "서버가 이 서버 주소로 해석되는 수신 URL을 주지 않았어요. 이 웹훅을 폐기하고 다시 만드세요.";
+  "서버가 이 서버 주소로 해석되는 수신 URL을 주지 않았어요. 이 주소를 폐기하고 다시 만드세요.";
 
 /** Shown on a Slack-compatible row, where the list can never show the URL again. */
 export const SLACK_URL_RECOVERY_HINT =
@@ -548,7 +548,7 @@ export const WEBHOOK_DELIVERY_RECORD_NOTE =
  * 사람이 실제로 들고 오는 질문은 "웹훅이 조용한데 뭐가 문제인가"이고, 이름표는
  * 그 질문의 답이 여기 있다고 말해야 한다.
  */
-export const WEBHOOK_INGRESS_NOTES_LABEL = "웹훅이 조용할 때: 보낸 쪽이 받은 거절 코드";
+export const WEBHOOK_INGRESS_NOTES_LABEL = "들어오는 주소가 조용할 때: 보낸 쪽이 받은 거절 코드";
 
 export function webhookIngressNotes(mode: WebhookMode): readonly string[] {
   if (mode === "native") {

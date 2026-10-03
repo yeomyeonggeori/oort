@@ -201,7 +201,7 @@ export function isApprovableChannel(channel: ApprovalChannelInput): boolean {
 
 function channelDetail(channel: ApprovalChannelInput): string {
   if (channel.kind === "dm") {
-    return "1:1 대화는 여기서 고르지 않아요. 연결한 뒤 에이전트 자격의 1:1 대화 목록에서 소유자가 열어요.";
+    return "1:1 대화는 여기서 고르지 않아요. 연결한 뒤 외부 에이전트 연결의 1:1 대화 목록에서 소유자가 열어요.";
   }
   if (channel.archivedAtMs !== undefined) {
     return "보관된 채널이에요. 다시 열면 승인할 수 있어요.";
