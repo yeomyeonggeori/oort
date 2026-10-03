@@ -41,13 +41,15 @@ use momo_agent::{
 };
 use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
-use momo_messaging::active_workspace_role;
+use momo_messaging::{active_workspace_role, WorkspaceRole};
 use momo_settings::{
-    find_personal_link_in_tx, is_handle_banned_in_tx, issue_personal_link_in_tx, key_fingerprint,
+    find_personal_link_in_tx, holder_has_personal_agent_in_tx, is_handle_banned_in_tx,
+    issue_personal_link_in_tx, key_fingerprint, last_revoked_base_url_in_tx,
     list_personal_links_in_tx, normalized_join_display_name, normalized_requested_handle,
-    redacted_endpoint_label, revoke_personal_link_in_tx, seal_bearer, validated_base_url,
-    IssueOutcome, LinkCredential, NewPersonalLink, PersonalLinkInfo, ProviderFormat, RevokeOutcome,
-    PERSONAL_LINK_AUDIT_SCHEMA, PERSONAL_LINK_ISSUED_ACTION, PERSONAL_LINK_REVOKED_ACTION,
+    redacted_endpoint_label, revoke_personal_link_in_tx, seal_bearer, url_host, validated_base_url,
+    EgressPolicy, IssueOutcome, LinkCredential, NewPersonalLink, PersonalLinkInfo, ProviderFormat,
+    RevokeOutcome, PERSONAL_LINK_AUDIT_SCHEMA, PERSONAL_LINK_ISSUED_ACTION,
+    PERSONAL_LINK_REVOKED_ACTION,
 };
 use serde_json::json;
 
@@ -114,9 +116,11 @@ fn requested_key(raw: &str, format: ProviderFormat) -> Result<LinkCredential, Ap
     if key.chars().count() < MIN_API_KEY_CHARS || key.chars().count() > MAX_API_KEY_CHARS {
         return Err(ApiError::bad_request("apiKey must be 8...512 characters"));
     }
-    if key.chars().any(|c| c.is_whitespace() || c.is_control()) {
+    // Printable ASCII only: a zero-width or look-alike character would make
+    // two spellings of one key fingerprint differently (one key, one member).
+    if !key.chars().all(|c| c.is_ascii_graphic()) {
         return Err(ApiError::bad_request(
-            "apiKey must not contain whitespace or control characters",
+            "apiKey must be printable ASCII without whitespace",
         ));
     }
     // A key that is itself a sealed-envelope document would be re-read as
@@ -164,6 +168,17 @@ pub async fn issue(
         state.settings.env_provider.allow_local_loopback,
     )
     .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?;
+    // The operator's own provider host and the local-host opt-ins are exempt from
+    // the connect-time address check (the operator wrote them). A workspace
+    // admin must not be able to aim a person's key at them (SSRF into the
+    // operator's network): those hosts are not available to personal keys.
+    let reserved = EgressPolicy::from_env(state.settings.env_provider.allow_local_loopback)
+        .with_operator_base_url(&state.settings.env_provider.base_url);
+    if url_host(&base_url).is_none_or(|host| reserved.host_exempt(&host)) {
+        return Err(ApiError::bad_request(
+            "baseUrl points at a host reserved for the server operator; a personal key needs a public provider host",
+        ));
+    }
     let label = requested_label(request.label.as_deref())?;
     let fingerprint = key_fingerprint(credential.presentable_bearer(), &master);
     let ciphertext = seal_bearer(&credential.to_sealed_plaintext(), &master)
@@ -181,6 +196,8 @@ pub async fn issue(
                 if !role.is_some_and(|role| role.is_admin()) {
                     return Ok(Err(ApiError::forbidden("workspace admin required")));
                 }
+                let previous_base_url =
+                    last_revoked_base_url_in_tx(conn, workspace_id, owner).await?;
                 let outcome = issue_personal_link_in_tx(
                     conn,
                     workspace_id,
@@ -215,6 +232,14 @@ pub async fn issue(
                         "this key is already attached to a member; one key belongs to one member",
                     ))),
                 };
+                let mut detail = audit_detail(&info);
+                // The holder's agent carries over to this key: if it now points
+                // at a different origin, the trail says from where to where.
+                if let Some(previous) = previous_base_url
+                    .filter(|previous| !momo_settings::same_origin(previous, &info.base_url))
+                {
+                    detail["origin_changed_from"] = json!(redacted_endpoint_label(&previous));
+                }
                 write_audit(
                     conn,
                     &AuditEntry::new(workspace_id, PERSONAL_LINK_ISSUED_ACTION)
@@ -222,7 +247,7 @@ pub async fn issue(
                         .about(owner)
                         .target("personal_provider_link", info.id)
                         .via_token(via_token)
-                        .with_schema(PERSONAL_LINK_AUDIT_SCHEMA, audit_detail(&info)),
+                        .with_schema(PERSONAL_LINK_AUDIT_SCHEMA, detail),
                 )
                 .await?;
                 Ok(Ok(info))
@@ -396,6 +421,22 @@ pub async fn create_agent(
                         StatusCode::CONFLICT,
                         "personal_key_revoked",
                         "this personal key is revoked",
+                    )));
+                }
+                // A guest cannot mint a workspace member, with or without a key.
+                let holder_role = active_workspace_role(conn, workspace_id, link.owner_member_id).await?;
+                if holder_role.is_none_or(|role| role == WorkspaceRole::Guest) {
+                    return Ok(Err(ApiError::forbidden(
+                        "the key's holder must be a non-guest member of this workspace",
+                    )));
+                }
+                if holder_has_personal_agent_in_tx(conn, workspace_id, link.id, link.owner_member_id)
+                    .await?
+                {
+                    return Ok(Err(ApiError::coded(
+                        StatusCode::CONFLICT,
+                        "personal_agent_exists",
+                        "this member already has a personal agent; it keeps working across key re-issues",
                     )));
                 }
                 if is_handle_banned_in_tx(conn, &handle).await? {

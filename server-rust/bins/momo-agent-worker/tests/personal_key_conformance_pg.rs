@@ -24,6 +24,7 @@
 //! | `another_members_agent_never_reaches_a_key_it_does_not_own` | drop `l.owner_member_id = a.owner_human_id` from `read_owner_key_for_agent` |
 //! | `revoke_stops_use_on_the_next_turn_and_borrows_nothing` | drop `l.revoked_at IS NULL`; cache the key; fall back to env on `None` |
 //! | `an_unreadable_or_non_api_key_credential_refuses` | accept an OAuth envelope in `decrypt_personal_link`; fall back to env on a decrypt error |
+//! | `a_key_on_an_operator_exempt_host_or_asked_by_a_non_holder_is_refused` | drop the `host_exempt` refusal in `resolve_owner_key_transport`; drop the caller == holder check in `process` |
 //! | `an_owner_key_agent_neither_delegates_nor_welcomes` | drop the `owner_key_agent` guard before `route_a2a_mentions_in_tx`; drop the welcome skip |
 //! | `no_row_carries_the_key` | write the provider error unredacted; put the key into an audit detail |
 
@@ -902,4 +903,62 @@ async fn no_row_carries_the_key() {
             );
         }
     }
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a_key_on_an_operator_exempt_host_or_asked_by_a_non_holder_is_refused() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su).await;
+
+    // (1) A key whose endpoint is the operator's own provider host: that host is
+    // exempt from the connect-time address check, so a key somebody else issued
+    // must not ride it. Refused before any call.
+    issue_key(
+        &su,
+        &t,
+        t.m,
+        KEY_M,
+        "https://operator-gw.example:8443/prefix/v1",
+    )
+    .await;
+    let provider = Arc::new(MockChatProvider::echo());
+    let mut config = worker_config(Some(TEAM_ENV_BEARER));
+    config.egress = momo_settings::EgressPolicy::default()
+        .with_operator_base_url("https://operator-gw.example/v1");
+    let worker = AgentWorker::new(
+        momo_worker_pool().await,
+        provider.clone() as Arc<dyn ChatProvider>,
+        config,
+    );
+    let run = job(&su, &t, t.pm, t.m, "운영자 호스트", false).await;
+    drain(&worker).await;
+    assert!(
+        provider.calls().is_empty(),
+        "a key aimed at the operator's host was called"
+    );
+    assert_eq!(run_status(&su, run).await, "failed");
+
+    // (2) The same worker, a key on a public host, but the caller is not the
+    // holder (a door that forgot the owner gate): the key is not spent.
+    sqlx::query("UPDATE personal_provider_link SET revoked_at = now() WHERE workspace_id = $1")
+        .bind(t.workspace_id)
+        .execute(&su)
+        .await
+        .unwrap();
+    issue_key(&su, &t, t.m, KEY_M2, BASE_M).await;
+    let stranger = job(&su, &t, t.pm, t.n, "엔이 엠의 에이전트를", false).await;
+    drain(&worker).await;
+    assert!(
+        provider.calls().is_empty(),
+        "a non-holder's job spent the holder's key"
+    );
+    assert_eq!(run_status(&su, stranger).await, "failed");
+    // Positive control: the holder's own job on the same key is answered.
+    job(&su, &t, t.pm, t.m, "엠이 직접", false).await;
+    assert_eq!(drain(&worker).await.answered, 1);
+    assert_eq!(provider.calls().len(), 1);
+    assert_eq!(provider.calls()[0].bearer, KEY_M2);
 }

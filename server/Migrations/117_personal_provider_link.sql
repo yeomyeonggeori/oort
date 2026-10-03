@@ -13,9 +13,10 @@
 -- 불변식(ADR-0004 증보 1 / ADR-0147 / ADR-0193 D4 를 그대로 잇는다)
 --   * 키는 AES-GCM 봉투(PROVIDER_LINK_MASTER_KEY)로만 저장한다. 평문 컬럼 없음.
 --   * key_fingerprint 는 「키 1개 = 한 사람」을 DB가 지키는 열쇠다. 봉투는 매번 nonce 가 달라 서로
---     비교할 수 없으므로, 마스터 키로 도메인 분리한 SHA-256 지문을 따로 둔다. 지문은 활성 행끼리
+--     비교할 수 없으므로, 마스터 키로 만든 HMAC-SHA256 지문을 따로 둔다. 지문은 활성 행끼리
 --     UNIQUE 이고, 지문만으로는 키를 되돌릴 수 없다(마스터 키 없이는 대조도 못 한다).
 --   * 한 소유자에 활성 키는 하나(부분 UNIQUE). 교체는 회수 후 재발급이다. 회수한 행은 남아 감사에 쓰인다.
+--     한 소유자의 개인 키 에이전트도 하나다(agent_owner_key_holder_uk).
 --   * base_url 은 발급 시 한 번만 정해진다. 수정 경로가 없다 = 키가 다른 origin 으로 따라가지 않는다
 --     (ADR-0147 증보 2026-09-28 「키는 origin에 묶인다」와 같은 이유).
 --   * RLS FORCE + ws_isolation. app.provider_link_admin GUC 를 일반 멤버 tx 에 켜지 않는다
@@ -36,7 +37,7 @@ CREATE TABLE personal_provider_link (
   base_url          text NOT NULL,
   -- AES-GCM sealed box (version||nonce||ct||tag). 봉투 안의 kind 가 wire 를 정한다.
   bearer_ciphertext bytea NOT NULL,
-  -- hex(SHA-256("momo.personal_link.fp.v1\n" || masterKey || "\n" || key)).
+  -- hex(HMAC-SHA256(masterKey, "momo.personal_link.fp.v1\n" || key)).
   key_fingerprint   text NOT NULL,
   -- 사람이 알아보는 이름(선택). 키 값이 아니다.
   label             text,
@@ -59,7 +60,7 @@ COMMENT ON TABLE personal_provider_link IS
 COMMENT ON COLUMN personal_provider_link.bearer_ciphertext IS
   'AES-GCM sealed box. 평문은 저장·로그·감사·응답 어디에도 없다.';
 COMMENT ON COLUMN personal_provider_link.key_fingerprint IS
-  '키 1개 = 한 사람. 활성 행끼리 UNIQUE. 마스터 키로 도메인 분리한 SHA-256 — 되돌릴 수 없다.';
+  '키 1개 = 한 사람. 활성 행끼리 UNIQUE. 마스터 키로 만든 HMAC-SHA256 — 되돌릴 수 없다. 마스터 키를 회전하면 활성 행을 새 키로 다시 지문 찍어야 한다.';
 
 -- 활성 키끼리만 유일: 같은 키를 두 사람(두 행)에게 줄 수 없다. 회수된 행의 지문은 재발급을 막지 않는다.
 CREATE UNIQUE INDEX personal_provider_link_fp_active_uk
@@ -108,8 +109,11 @@ BEGIN
     RAISE EXCEPTION 'personal_provider_link key, owner and origin cannot change; revoke and issue a new key (ADR-0147 증보 2026-10-03)'
       USING ERRCODE = 'check_violation';
   END IF;
+  -- `revoked_by` may go to NULL (its FK is ON DELETE SET NULL: the revoking member left);
+  -- it may not change to anyone else, and the revocation itself cannot be undone.
   IF OLD.revoked_at IS NOT NULL
-     AND (NEW.revoked_at IS DISTINCT FROM OLD.revoked_at OR NEW.revoked_by IS DISTINCT FROM OLD.revoked_by) THEN
+     AND (NEW.revoked_at IS DISTINCT FROM OLD.revoked_at
+          OR (NEW.revoked_by IS DISTINCT FROM OLD.revoked_by AND NEW.revoked_by IS NOT NULL)) THEN
     RAISE EXCEPTION 'personal_provider_link revocation cannot be undone (ADR-0147 증보 2026-10-03)'
       USING ERRCODE = 'check_violation';
   END IF;
@@ -139,6 +143,11 @@ ALTER TABLE agent
     AND NOT (subscription_harness IS NOT NULL AND uses_owner_key)
     AND (invocation_scope <> 'owner_only' OR owner_human_id IS NOT NULL)
   );
+
+-- 한 사람에 개인 키 에이전트 하나. 키를 회수·재발급해도 같은 에이전트가 이어 쓴다(정체성은 유지,
+-- 새 키의 origin 은 발급 감사에 「이전 endpoint → 새 endpoint」로 남는다).
+CREATE UNIQUE INDEX agent_owner_key_holder_uk
+  ON agent (workspace_id, owner_human_id) WHERE uses_owner_key;
 
 COMMENT ON COLUMN agent.uses_owner_key IS
   '#3396 ADR-0147 증보 2026-10-03: owner_only 에이전트의 두뇌가 소유자(owner_human_id)의 개인 API 키(personal_provider_link)다. subscription_harness 와 배타. owner_only 행에서 한 방향(agent_owner_only_final_guard).';

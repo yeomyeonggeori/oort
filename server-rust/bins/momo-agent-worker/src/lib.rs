@@ -653,19 +653,35 @@ impl AgentWorker {
                 .resolve_owner_key_transport(job.workspace_id, payload.agent_member_id)
                 .await
             {
-                personal::OwnerKeyTransport::Ready(transport) => *transport,
+                personal::OwnerKeyTransport::Ready(transport, holder) => {
+                    // Defence in depth behind the delivery gates: the turn's
+                    // caller (the author, or the approver of a resumed tool)
+                    // must be the holder. Every door already refuses anyone
+                    // else; this keeps a future door from spending the key.
+                    let caller = payload.approved_by.or(payload.author_member_id);
+                    if caller != Some(holder) {
+                        return self
+                            .settle_personal_key_unavailable(
+                                &job,
+                                &payload,
+                                run_id,
+                                "caller is not the holder",
+                            )
+                            .await;
+                    }
+                    *transport
+                }
                 personal::OwnerKeyTransport::Unavailable(reason) => {
                     return self
                         .settle_personal_key_unavailable(&job, &payload, run_id, reason)
                         .await;
                 }
                 personal::OwnerKeyTransport::ReadFailed(reason) => {
-                    let endpoint = self.resolve_transport().await.endpoint;
                     return self
                         .settle_retryable(
                             &job,
                             &format!("personal key read failed: {reason}"),
-                            &endpoint,
+                            &personal::neutral_endpoint(),
                         )
                         .await;
                 }
@@ -2826,12 +2842,11 @@ impl AgentWorker {
         })
         .await;
         if let Err(error) = audit {
-            let endpoint = self.resolve_transport().await.endpoint;
             return self
                 .settle_retryable(
                     job,
                     &format!("personal key audit failed: {error}"),
-                    &endpoint,
+                    &personal::neutral_endpoint(),
                 )
                 .await;
         }

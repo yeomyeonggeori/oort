@@ -16,7 +16,7 @@
 //!   the caller does not even compute those for this turn (ADR-0135 D1, #2897);
 //! * nothing is cached. A revoke is the next turn's refusal, not "after the TTL".
 
-use momo_settings::{decrypt_personal_link, read_owner_key_for_agent, LinkCredential};
+use momo_settings::{decrypt_personal_link, read_owner_key_for_agent, url_host, LinkCredential};
 use uuid::Uuid;
 
 use crate::provider::{ProviderEndpoint, ProviderWire};
@@ -28,7 +28,8 @@ pub const PERSONAL_KEY_SOURCE: &str = "personal_key";
 
 /// The outcome of resolving an owner-key agent's credential.
 pub enum OwnerKeyTransport {
-    Ready(Box<ResolvedTransport>),
+    /// The transport and the holder (`agent.owner_human_id`) it belongs to.
+    Ready(Box<ResolvedTransport>, Uuid),
     /// No usable personal key for this agent: refuse the turn, say so, and do
     /// not borrow another credential.
     Unavailable(&'static str),
@@ -68,6 +69,17 @@ impl AgentWorker {
                 return OwnerKeyTransport::Unavailable("personal key unusable");
             }
         };
+        // The operator's own provider host and the local-host opt-ins are exempt
+        // from the connect-time address check because the operator wrote them.
+        // A key somebody else issued must not ride that exemption (SSRF into the
+        // operator's network): such a key is not usable here, whatever the row says.
+        if url_host(&opened.base_url).is_none_or(|host| self.config.egress.host_exempt(&host)) {
+            tracing::warn!(
+                agent_member_id = %agent_member_id,
+                "personal key points at a host reserved for the operator; refusing the turn"
+            );
+            return OwnerKeyTransport::Unavailable("personal key endpoint reserved");
+        }
         let endpoint = ProviderEndpoint {
             base_url: opened.base_url,
             bearer: opened.credential.presentable_bearer().to_string(),
@@ -79,10 +91,26 @@ impl AgentWorker {
         // refresh / re-seal machinery has nothing to do with it: `Bearer` or
         // `AnthropicKey` only, and no `provider_link` timestamp to write back to.
         debug_assert!(!matches!(opened.credential, LinkCredential::OpenAiOAuth(_)));
-        OwnerKeyTransport::Ready(Box::new(ResolvedTransport {
-            endpoint,
-            credential: opened.credential,
-            link_updated_at_ms: None,
-        }))
+        OwnerKeyTransport::Ready(
+            Box::new(ResolvedTransport {
+                endpoint,
+                credential: opened.credential,
+                link_updated_at_ms: None,
+            }),
+            stored.owner_member_id,
+        )
+    }
+}
+
+/// The endpoint a refusal path hands to `settle_retryable` for its log label:
+/// nothing of the team's, nothing of anyone's key. (Computing the team transport
+/// there would read and decrypt the team link on a personal turn for no reason.)
+pub(crate) fn neutral_endpoint() -> ProviderEndpoint {
+    ProviderEndpoint {
+        base_url: "personal-key".to_string(),
+        bearer: String::new(),
+        source: PERSONAL_KEY_SOURCE,
+        wire: ProviderWire::ChatCompletions,
+        account_id: None,
     }
 }

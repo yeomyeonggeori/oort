@@ -12,9 +12,9 @@
 //!
 //! * the **fingerprint** that makes "one key, one member" a database fact:
 //!   sealed boxes carry a fresh nonce, so two ciphertexts of the same key never
-//!   compare equal. The fingerprint is a domain-separated SHA-256 over the
-//!   master key and the key; it is unique among *active* rows and is not a
-//!   usable derivative of the key without the master key;
+//!   compare equal. The fingerprint is an HMAC-SHA256 under the master key; it
+//!   is unique among *active* rows and, without the master key, cannot be used
+//!   to test guesses of the key;
 //! * issue / revoke / list statements. Every read that serves an API response
 //!   selects columns **by name** and never the sealed box; the one statement
 //!   that does select it ([`read_owner_key_for_agent`]) is the worker's;
@@ -37,23 +37,44 @@ pub const PERSONAL_LINK_ISSUED_ACTION: &str = "provider.personal_link.issued";
 pub const PERSONAL_LINK_REVOKED_ACTION: &str = "provider.personal_link.revoked";
 pub const PERSONAL_LINK_AUDIT_SCHEMA: &str = "momo.provider_personal_link.audit.v1";
 
-/// `hex(SHA-256("momo.personal_link.fp.v1\n" || masterKey || "\n" || key))`.
+/// `hex(HMAC-SHA256(masterKey, "momo.personal_link.fp.v1\n" || key))`.
 ///
 /// The key is trimmed first (the same normalisation `seal_bearer` applies), so
 /// a key pasted with a trailing newline fingerprints like the key that was
-/// meant.
+/// meant. A keyed MAC, not a bare hash: without the master key a leaked
+/// fingerprint cannot be used to test guesses of the key offline. Rotating the
+/// master key changes every fingerprint, so a rotation re-fingerprints the
+/// active rows (they are re-sealed then anyway).
 pub fn key_fingerprint(secret: &str, master_key: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(b"momo.personal_link.fp.v1\n");
-    hasher.update(master_key.as_bytes());
-    hasher.update(b"\n");
-    hasher.update(secret.trim().as_bytes());
-    let digest = hasher.finalize();
+    let mut message = Vec::with_capacity(32 + secret.len());
+    message.extend_from_slice(b"momo.personal_link.fp.v1\n");
+    message.extend_from_slice(secret.trim().as_bytes());
+    let mac = hmac_sha256(master_key.as_bytes(), &message);
     let mut out = String::with_capacity(64);
-    for byte in digest {
+    for byte in mac {
         out.push_str(&format!("{byte:02x}"));
     }
     out
+}
+
+/// RFC 2104 HMAC over SHA-256 (block size 64). Written out because `sha2` is
+/// already a dependency of this crate and a MAC crate would be a new one.
+fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
+    const BLOCK: usize = 64;
+    let mut block = [0u8; BLOCK];
+    if key.len() > BLOCK {
+        block[..32].copy_from_slice(&Sha256::digest(key));
+    } else {
+        block[..key.len()].copy_from_slice(key);
+    }
+    let mut inner = Sha256::new();
+    inner.update(block.map(|b| b ^ 0x36));
+    inner.update(message);
+    let inner = inner.finalize();
+    let mut outer = Sha256::new();
+    outer.update(block.map(|b| b ^ 0x5c));
+    outer.update(inner);
+    outer.finalize().into()
 }
 
 /// One issued key as every response and audit row may describe it: no sealed
@@ -218,6 +239,53 @@ pub async fn find_personal_link_in_tx(
     Ok(row.map(info))
 }
 
+/// The endpoint of the holder's most recently revoked key, if any. An issue
+/// compares it with the new one so a changed origin shows in the audit row:
+/// the holder's agent carries over to the new key (one personal agent per
+/// holder), and whoever reads the trail should see where it now points.
+pub async fn last_revoked_base_url_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    owner_member_id: Uuid,
+) -> Result<Option<String>, DbError> {
+    let url: Option<String> = sqlx::query_scalar(
+        "SELECT base_url FROM personal_provider_link \
+          WHERE workspace_id = $1 AND owner_member_id = $2 AND revoked_at IS NOT NULL \
+          ORDER BY revoked_at DESC, id DESC LIMIT 1",
+    )
+    .bind(workspace_id)
+    .bind(owner_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(url)
+}
+
+/// Lock the key row, then say whether the holder already has a personal agent.
+/// The lock serialises two creates (and a create against a revoke) on the same
+/// key; `agent_owner_key_holder_uk` is the backstop.
+pub async fn holder_has_personal_agent_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    link_id: Uuid,
+    owner_member_id: Uuid,
+) -> Result<bool, DbError> {
+    sqlx::query(
+        "SELECT 1 FROM personal_provider_link WHERE workspace_id = $1 AND id = $2 FOR UPDATE",
+    )
+    .bind(workspace_id)
+    .bind(link_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let exists: Option<i32> = sqlx::query_scalar(
+        "SELECT 1 FROM agent WHERE workspace_id = $1 AND owner_human_id = $2 AND uses_owner_key",
+    )
+    .bind(workspace_id)
+    .bind(owner_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(exists.is_some())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RevokeOutcome {
     Revoked(PersonalLinkInfo),
@@ -362,6 +430,23 @@ mod tests {
         assert_ne!(a, key_fingerprint("sk-live-abc", "master-two"));
         assert_eq!(a.len(), 64);
         assert!(!a.contains("sk-live"));
+    }
+
+    #[test]
+    fn hmac_sha256_matches_the_rfc_4231_vectors() {
+        let hex = |bytes: [u8; 32]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        // RFC 4231 test case 1 and test case 6 (a key longer than the block).
+        assert_eq!(
+            hex(hmac_sha256(&[0x0b; 20], b"Hi There")),
+            "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"
+        );
+        assert_eq!(
+            hex(hmac_sha256(
+                &[0xaa; 131],
+                b"Test Using Larger Than Block-Size Key - Hash Key First"
+            )),
+            "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54"
+        );
     }
 
     fn stored(format: &str, plaintext: &str) -> StoredOwnerKey {

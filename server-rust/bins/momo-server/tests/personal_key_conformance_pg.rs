@@ -7,6 +7,8 @@
 //! |---|---|---|
 //! | `issue_list_revoke_keep_the_key_write_only_and_one_to_one` | admin-only issue; own-only `mine`; revoke by admin or holder; 409 on a second key for a member and on the same key twice (same member, other member, other workspace); no response or audit row carries the key; RLS hides the table across workspaces | the unique indexes of migration 117; the role checks; selecting `bearer_ciphertext` in a list statement |
 //! | `a_bad_endpoint_or_key_is_refused_before_anything_is_stored` | SSRF/plaintext/credential-shaped input → 400, 0 rows | `validated_base_url`, `requested_key` |
+//! | `a_guest_holder_makes_no_agent_and_a_changed_origin_is_in_the_audit` | a guest holder cannot mint a member; a re-issue at another origin is in the audit | the guest check in `create_agent`; `origin_changed_from` |
+//! | `deleting_the_member_who_revoked_a_key_does_not_trip_the_one_way_trigger` | `revoked_by` ON DELETE SET NULL vs the immutability trigger | the NULL allowance in `personal_provider_link_immutable` |
 //! | `the_personal_agent_is_the_holders_and_is_delivered_to_the_holder_only` | the created agent is `owner_only` + `uses_owner_key`; holder's mention → a worker job even with the subscription kill switch off; a non-holder's mention → 0 jobs and the owner_only skip | `owner_only_gate`, the `uses_owner_key` narrowing in `mention.rs` |
 
 use std::net::SocketAddr;
@@ -30,6 +32,8 @@ const MASTER_KEY: &str = "personal-key-conformance-master-3396";
 const KEY_ONE: &str = "sk-live-personal-3396-aaaa1111bbbb2222";
 const KEY_TWO: &str = "sk-live-personal-3396-cccc3333dddd4444";
 const BASE: &str = "https://api.provider-one.example/v1";
+/// The operator's own provider host (`HERMES_BASE_URL`): exempt from the egress address check.
+const OPERATOR_BASE: &str = "https://operator-gateway.example/v1";
 
 fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("set DATABASE_URL to an isolated PostgreSQL 18 URL")
@@ -121,7 +125,10 @@ async fn start_server(pool: PgPool) -> String {
     )
     .with_settings(SettingsConfig {
         provider_link_master_key: Some(MASTER_KEY.to_string()),
-        env_provider: momo_settings::ProviderConfig::default(),
+        env_provider: momo_settings::ProviderConfig {
+            base_url: OPERATOR_BASE.to_string(),
+            ..momo_settings::ProviderConfig::default()
+        },
         platform_admin_emails: vec![],
         environment: "local".to_string(),
     })
@@ -804,6 +811,21 @@ async fn the_personal_agent_is_the_holders_and_is_delivered_to_the_holder_only()
         "the job carries the key"
     );
 
+    // One personal agent per holder; the second create is a 409, not a second member.
+    let (status, second_agent) = call(
+        &client,
+        "POST",
+        agent_url.clone(),
+        &w.m_jwt,
+        Some(json!({"displayName": "둘째", "handle": format!("second-{}", &Uuid::new_v4().simple().to_string()[..8]), "model": "m"})),
+    )
+    .await;
+    assert_eq!(
+        (status, second_agent["error"]["code"].clone()),
+        (409, json!("personal_agent_exists")),
+        "{second_agent}"
+    );
+
     // A revoked key makes no agent: 409, nothing created.
     let (status, _) = call(
         &client,
@@ -821,4 +843,128 @@ async fn the_personal_agent_is_the_holders_and_is_delivered_to_the_holder_only()
         (409, json!("personal_key_revoked")),
         "{refused}"
     );
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3396-*)"]
+async fn a_guest_holder_makes_no_agent_and_a_changed_origin_is_in_the_audit() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_keys(&su).await;
+    let w = seed_world(&su).await;
+    let (guest, guest_jwt) = insert_human(&su, w.workspace, "게스트", "guest").await;
+    let base = start_server(momo_app_pool().await).await;
+    let client = reqwest::Client::new();
+
+    // A guest holder: the key can be issued, but they cannot mint a member.
+    let (status, issued) = call(
+        &client,
+        "POST",
+        keys_url(&base, &w, ""),
+        &w.admin_jwt,
+        Some(issue_body(guest, KEY_ONE)),
+    )
+    .await;
+    assert_eq!(status, 201, "{issued}");
+    let key_id = issued["id"].as_str().unwrap().to_string();
+    let (status, refused) = call(
+        &client,
+        "POST",
+        keys_url(&base, &w, &format!("/{key_id}/agent")),
+        &guest_jwt,
+        Some(json!({"displayName": "게스트 두뇌", "handle": format!("guest-{}", &Uuid::new_v4().simple().to_string()[..8]), "model": "m"})),
+    )
+    .await;
+    assert_eq!(
+        status, 403,
+        "a guest holder created a workspace member: {refused}"
+    );
+    let agents: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM agent WHERE workspace_id=$1 AND uses_owner_key")
+            .bind(w.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(agents, 0);
+
+    // Revoke and re-issue to the same holder at another origin: the audit row
+    // says from where to where (the holder's agent carries over to the new key).
+    let (status, _) = call(
+        &client,
+        "POST",
+        keys_url(&base, &w, &format!("/{key_id}/revoke")),
+        &w.admin_jwt,
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    let (status, moved) = call(
+        &client,
+        "POST",
+        keys_url(&base, &w, ""),
+        &w.admin_jwt,
+        Some(json!({"ownerMemberId": guest, "apiKey": KEY_TWO, "baseUrl": "https://api.provider-two.example/v1"})),
+    )
+    .await;
+    assert_eq!(status, 201, "{moved}");
+    let detail: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='provider.personal_link.issued' \
+          ORDER BY created_at DESC, id DESC LIMIT 1",
+    ).bind(w.workspace).fetch_one(&su).await.unwrap();
+    assert_eq!(detail["origin_changed_from"], BASE, "{detail}");
+    assert!(!detail.to_string().contains(KEY_TWO));
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3396-*)"]
+async fn deleting_the_member_who_revoked_a_key_does_not_trip_the_one_way_trigger() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_keys(&su).await;
+    let w = seed_world(&su).await;
+    let base = start_server(momo_app_pool().await).await;
+    let client = reqwest::Client::new();
+    let (revoker, _) = insert_human(&su, w.workspace, "회수자", "admin").await;
+    let (_, issued) = call(
+        &client,
+        "POST",
+        keys_url(&base, &w, ""),
+        &w.admin_jwt,
+        Some(issue_body(w.m, KEY_ONE)),
+    )
+    .await;
+    let key_id = issued["id"].as_str().unwrap().to_string();
+    // Revoked directly (the route leaves an audit row, and a member with audit
+    // history cannot be hard-deleted at all): the row names the revoker.
+    sqlx::query(
+        "UPDATE personal_provider_link SET revoked_at = now(), revoked_by = $2 WHERE id = $1::uuid",
+    )
+    .bind(&key_id)
+    .bind(revoker)
+    .execute(&su)
+    .await
+    .expect("revoke");
+    // `revoked_by` is ON DELETE SET NULL: removing the revoker rewrites the row,
+    // and the revocation trigger must let that one change through.
+    sqlx::query("DELETE FROM member WHERE id = $1")
+        .bind(revoker)
+        .execute(&su)
+        .await
+        .expect("a revoker's deletion must not be blocked by personal_provider_link_immutable");
+    let (revoked_at, revoked_by): (Option<chrono::DateTime<chrono::Utc>>, Option<Uuid>) =
+        sqlx::query_as(
+            "SELECT revoked_at, revoked_by FROM personal_provider_link WHERE id = $1::uuid",
+        )
+        .bind(&key_id)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert!(revoked_at.is_some() && revoked_by.is_none());
+    // And the revocation still cannot be undone.
+    let undone =
+        sqlx::query("UPDATE personal_provider_link SET revoked_at = NULL WHERE id = $1::uuid")
+            .bind(&key_id)
+            .execute(&su)
+            .await;
+    assert!(undone.is_err(), "a revoked key was un-revoked");
 }
