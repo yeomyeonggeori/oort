@@ -995,7 +995,7 @@ async fn b54_3_a_refused_grant_fails_the_run_with_a_relogin_message() {
         body.contains("다시 로그인"),
         "the message names the repair: {body}"
     );
-    assert!(body.contains("AI에서"), "…and where to do it: {body}");
+    assert!(body.contains("AI 화면에서"), "…and where to do it: {body}");
     // goal B8 H2 moved the provider's own words off the timeline. A refused
     // grant answers with a body that can quote the token it refused, so this
     // assertion is inverted on purpose: the channel must NOT carry it.

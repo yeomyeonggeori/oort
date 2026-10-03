@@ -254,7 +254,7 @@ fn enum_arg(
 ///   both given and mismatched → refused.
 /// * `{scope:"mine"}` alone has **two** candidate harnesses (claude, codex), so
 ///   there is no unique pair to fill: it is kept as `{scope:"mine"}` and opens
-///   the 「내 계정」 절 with no harness pre-selected. Its label is 「AI 연결」,
+///   the 「내 계정」 절 with no harness pre-selected. Its label is 「내 AI 계정 연결」,
 ///   the no-harness row of the table. (Decision recorded in the PR; G2 does not
 ///   name this case.)
 /// * `{}` stays `{}` and opens the whole card.
@@ -287,8 +287,8 @@ fn ai_connect_label(args: &Value) -> &'static str {
     match args.get("harness").and_then(Value::as_str) {
         Some("claude") => "Claude 구독 연결",
         Some("codex") => "Codex 구독 연결",
-        Some("team_key") => "팀 API 키 연결",
-        _ => "AI 연결",
+        Some("team_key") => "팀 AI 키 연결",
+        _ => "내 AI 계정 연결",
     }
 }
 
@@ -643,10 +643,10 @@ mod tests {
         for (args, label) in [
             (json!({"harness": "claude"}), "Claude 구독 연결"),
             (json!({"harness": "codex"}), "Codex 구독 연결"),
-            (json!({"harness": "team_key"}), "팀 API 키 연결"),
-            (json!({"scope": "team"}), "팀 API 키 연결"),
-            (json!({"scope": "mine"}), "AI 연결"),
-            (json!({}), "AI 연결"),
+            (json!({"harness": "team_key"}), "팀 AI 키 연결"),
+            (json!({"scope": "team"}), "팀 AI 키 연결"),
+            (json!({"scope": "mine"}), "내 AI 계정 연결"),
+            (json!({}), "내 AI 계정 연결"),
         ] {
             let suggestion = suggest(json!({
                 "commandId": "ai.connect",
@@ -725,8 +725,8 @@ mod tests {
         assert!(!output.contains('`'), "{output}");
         assert!(output.contains("「Claude 구독 연결」"));
         assert_eq!(
-            suggestion_tool_output("곽성재", "AI 연결"),
-            "곽성재님에게 「AI 연결」 카드를 보냈어요. 연결은 그 사람이 카드에서 직접 해요."
+            suggestion_tool_output("곽성재", "내 AI 계정 연결"),
+            "곽성재님에게 「내 AI 계정 연결」 카드를 보냈어요. 연결은 그 사람이 카드에서 직접 해요."
         );
     }
 
