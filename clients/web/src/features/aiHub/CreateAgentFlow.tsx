@@ -49,7 +49,7 @@ function KindRow({
         data-testid={`create-kind-${option.id}`}
         data-state={option.state}
         className={cn(
-          "tap-target press flex w-full min-w-0 flex-col gap-1 px-1 py-3 text-left focus-visible:focus-ring",
+          "tap-target flex w-full min-w-0 flex-col gap-1 px-1 py-3 text-left active:bg-surface-pressed focus-visible:focus-ring",
           locked ? "cursor-not-allowed" : "hover:bg-surface-hover"
         )}
       >

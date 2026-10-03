@@ -58,11 +58,12 @@ function AgentRow({ row }: { row: AgentTableRow }) {
   const { labels } = row;
   return (
     <tr
+      role="row"
       className="border-b border-line max-md:grid max-md:grid-cols-2 max-md:gap-x-4 max-md:py-3"
       data-testid={`ai-agent-row-${row.handle}`}
       data-locked={labels.lockedForViewer || undefined}
     >
-      <th scope="row" className={`${TD} text-left font-normal max-md:col-span-2 max-md:pb-2`}>
+      <th scope="row" role="rowheader" className={`${TD} text-left font-normal max-md:col-span-2 max-md:pb-2`}>
         <div className="flex min-w-0 items-center gap-3">
           <AiLogo mark={row.mark} />
           <div className="flex min-w-0 flex-col">
@@ -71,19 +72,19 @@ function AgentRow({ row }: { row: AgentTableRow }) {
           </div>
         </div>
       </th>
-      <td className={`${TD} md:whitespace-nowrap`} data-testid={`ai-agent-brain-${row.handle}`}>
+      <td role="cell" className={`${TD} md:whitespace-nowrap`} data-testid={`ai-agent-brain-${row.handle}`}>
         <CellLabel>{COPY.columns.brain}</CellLabel>
         {labels.brain ?? <span className="text-meta text-ink-muted">{COPY.unknownBrain}</span>}
       </td>
-      <td className={TD} data-testid={`ai-agent-callable-${row.handle}`}>
+      <td role="cell" className={TD} data-testid={`ai-agent-callable-${row.handle}`}>
         <CellLabel>{COPY.columns.callable}</CellLabel>
         <CallableCell row={row} />
       </td>
-      <td className={`${TD} md:whitespace-nowrap`} data-testid={`ai-agent-cost-${row.handle}`}>
+      <td role="cell" className={`${TD} md:whitespace-nowrap`} data-testid={`ai-agent-cost-${row.handle}`}>
         <CellLabel>{COPY.columns.cost}</CellLabel>
         {labels.cost ?? <span className="text-meta text-ink-muted">{COPY.unknownBrain}</span>}
       </td>
-      <td className={`${TD} max-md:col-span-2`} data-testid={`ai-agent-status-${row.handle}`}>
+      <td role="cell" className={`${TD} max-md:col-span-2`} data-testid={`ai-agent-status-${row.handle}`}>
         <CellLabel>{COPY.columns.status}</CellLabel>
         <StatusCell status={row.status} />
       </td>
@@ -173,24 +174,24 @@ export function AiAgentsPane() {
       ) : (
         // 표가 폭보다 넓으면 이 상자 안에서만 가로로 민다(문서는 넘치지 않는다). 키보드로도 닿는다.
         <div
-          className="min-w-0 overflow-x-auto"
+          className="min-w-0 overflow-x-auto focus-visible:focus-ring"
           role="region"
           aria-label={COPY.tableLabel}
           // 가로로 미는 영역은 키보드로 닿아야 한다.
           tabIndex={0}
         >
-          <table className="block w-full border-collapse md:table" data-testid="ai-agents-table">
+          <table role="table" className="block w-full border-collapse md:table" data-testid="ai-agents-table">
             <caption className="sr-only">{COPY.tableLabel}</caption>
-            <thead className="max-md:sr-only">
-              <tr className="border-b border-line">
-                <th scope="col" className={TH}>{COPY.columns.agent}</th>
-                <th scope="col" className={TH}>{COPY.columns.brain}</th>
-                <th scope="col" className={TH}>{COPY.columns.callable}</th>
-                <th scope="col" className={TH}>{COPY.columns.cost}</th>
-                <th scope="col" className={TH}>{COPY.columns.status}</th>
+            <thead role="rowgroup" className="max-md:sr-only">
+              <tr role="row" className="border-b border-line">
+                <th scope="col" role="columnheader" className={TH}>{COPY.columns.agent}</th>
+                <th scope="col" role="columnheader" className={TH}>{COPY.columns.brain}</th>
+                <th scope="col" role="columnheader" className={TH}>{COPY.columns.callable}</th>
+                <th scope="col" role="columnheader" className={TH}>{COPY.columns.cost}</th>
+                <th scope="col" role="columnheader" className={TH}>{COPY.columns.status}</th>
               </tr>
             </thead>
-            <tbody className="block md:table-row-group">
+            <tbody role="rowgroup" className="block md:table-row-group">
               {rows.map((row) => (
                 <AgentRow key={row.id} row={row} />
               ))}
