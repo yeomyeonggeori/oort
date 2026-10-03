@@ -645,7 +645,7 @@ export const AI_HUB_OVERVIEW_COPY = {
 
 export const AI_HUB_ACCOUNTS_COPY = {
   /** 데스크탑 머리 아래 한 줄(시안 2-a). */
-  desktopSubtitle: "이 맥에 로그인한 구독과 내 API 키예요. 나만 쓰고, 로그인은 각 회사의 공식 CLI가 해요.",
+  desktopSubtitle: "이 맥에 로그인한 구독이에요. 나만 쓰고, 로그인은 각 회사의 공식 CLI가 해요.",
   /** 웹 머리 아래 한 줄(시안 2-b). */
   webSubtitle: "웹에서는 보기만 해요.",
   subscriptionHead: "구독",

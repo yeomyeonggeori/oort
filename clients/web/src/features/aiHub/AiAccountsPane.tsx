@@ -68,6 +68,9 @@ function DesktopAccounts() {
   return (
     <div className="flex min-w-0 flex-col gap-6" data-testid="ai-accounts-desktop">
       <PaneHead subtitle={COPY.desktopSubtitle} />
+      <p className="-mt-3 max-w-2xl break-keep text-meta text-ink-muted" data-testid="ai-accounts-login-not-stored">
+        {AI_HUB_COPY.loginNotStored}
+      </p>
       <AiMyAccountsSection
         title={COPY.subscriptionHead}
         scope={COPY.subscriptionScope}

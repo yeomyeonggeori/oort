@@ -3189,7 +3189,9 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           label={
             name === 'ai-connect-card'
               ? '폰 로컬 카드 — 운영자 (#2945)'
-              : '폰 로컬 카드 — 비운영자 (#2945)'
+              : name === 'ai-connect-card-mine'
+                ? '폰 로컬 카드 — 내 에이전트 (#3399)'
+                : '폰 로컬 카드 — 비운영자 (#2945)'
           }>
           {/* 앱과 같은 `ConversationLayout` — 자판이 오르면 카드와 입력창이 함께
               들린다(자판 위 접힘 캡처, maestro 92). */}
