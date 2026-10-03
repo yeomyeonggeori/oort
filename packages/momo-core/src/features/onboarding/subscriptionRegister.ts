@@ -282,13 +282,13 @@ export const CALM_BADGE: Record<"paused" | "disabled", string> = {
 export function calmLine(refusal: RegisterRefusal, harness: LocalHarnessId): string {
   switch (refusal) {
     case "paused":
-      return `이 서버에서는 ${HARNESS_LABEL[harness]} 구독 에이전트가 잠시 멈춰 있어요.`;
+      return `이 서버에서는 ${HARNESS_LABEL[harness]} 구독으로 쓰는 에이전트가 잠시 멈춰 있어요.`;
     case "disabled":
-      return "이 서버에서는 구독 에이전트가 꺼져 있어요.";
+      return "이 서버에서는 구독으로 쓰는 에이전트가 꺼져 있어요.";
     case "forbidden":
       return "에이전트로 만드는 건 워크스페이스 관리자가 해요.";
     case "limit":
-      return `${HARNESS_LABEL[harness]} 구독 에이전트가 이미 다섯 개예요.`;
+      return `${HARNESS_LABEL[harness]} 구독으로 쓰는 에이전트가 이미 다섯 개예요.`;
     default:
       return "이 에이전트는 연결을 마저 끊은 뒤에 다시 만들 수 있어요.";
   }
@@ -348,9 +348,9 @@ export function registerLiveMessage(step: RegisterStep, harness: LocalHarnessId,
   }
 }
 
-// ---- 첫 창 (에이전트 화면·설정의 「내 구독 에이전트 붙이기」) ---------------------
+// ---- 첫 창 (에이전트 화면·설정의 「내 구독으로 에이전트 만들기」) ---------------------
 
-export const START_TITLE = "내 구독 에이전트 붙이기";
+export const START_TITLE = "내 구독으로 에이전트 만들기";
 export const START_DETAIL =
   "이 맥에서 로그인한 Claude Code나 Codex를 채널에서 @로 부를 수 있게 해요. 나만 부를 수 있어요.";
 export const START_CREATE_LABEL = "에이전트로 만들기";

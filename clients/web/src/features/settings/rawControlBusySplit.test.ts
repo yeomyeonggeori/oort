@@ -313,9 +313,9 @@ describe("RED PROOF ④ 형제 쓰기로 잠긴 줄이 사유를 든다 (#1542)"
 
   it("두 번째 사유 문장이 있고, 코드가 아니라 문장이다", () => {
     expect(file).toContain("const BUSY_ROW_REASON =");
-    expect(file).toContain("앞서 누른 것이 아직 끝나지 않았습니다.");
+    expect(file).toContain("앞서 누른 것이 아직 끝나지 않았어요.");
     // 뒷문장은 오프라인 문장의 동사를 그대로 받는다 — 같은 목록의 같은 두 행동.
-    expect(file).toContain("이어서 멈추거나 지울 수 있습니다.");
+    expect(file).toContain("이어서 멈추거나 지울 수 있어요.");
   });
 
   it("한 번에 하나만 선다", () => {
@@ -637,7 +637,7 @@ describe("#1559 RED PROOF ④ 잠긴 컨트롤이 사유를 든다", () => {
     // 큐에 쌓이지 않는 발급이므로 「그대로 보내집니다」라고 약속하지 않는다.
     // 그 금지는 이제 이 파일만의 것이 아니다 — 아래 「회전 1」의 전 파일 스캔.
     expect(file).toContain(
-      "연결이 끊겨 지금은 초대 링크를 만들 수 없습니다. 다시 연결되면 이어서 만들 수 있습니다."
+      "연결이 끊겨 지금은 초대 링크를 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요."
     );
   });
 
@@ -898,7 +898,7 @@ describe("#1559 회전 1 · 거짓 약속 (#1595 H4)", () => {
   it("어느 표면도 오프라인 큐를 약속하지 않는다", () => {
     // 이 클라이언트에 오프라인 큐는 없다. 아래 단정이 그 사실 자체를 잰다.
     for (const [name, file] of Object.entries(FILES)) {
-      expect(copyOnly(file), name).not.toContain("그대로 보내집니다");
+      expect(copyOnly(file), name).not.toContain("그대로 보내져요");
     }
   });
 
@@ -914,10 +914,10 @@ describe("#1559 회전 1 · 거짓 약속 (#1595 H4)", () => {
 
   it("두 표면이 같은 잠금에 같은 사실을 말한다", () => {
     expect(FILES["EventSubscriptionSection.tsx"]).toContain(
-      "서버와 연결이 끊겨 지금은 만들 수 없습니다. 다시 연결되면 이어서 만들 수 있습니다."
+      "서버와 연결이 끊겨 지금은 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요."
     );
-    expect(FILES["InviteSection.tsx"]).toContain("다시 연결되면 이어서 만들 수 있습니다.");
-    expect(FILES["WebhookSection.tsx"]).toContain("다시 연결되면 이어서 만들 수 있습니다.");
+    expect(FILES["InviteSection.tsx"]).toContain("다시 연결되면 이어서 만들 수 있어요.");
+    expect(FILES["WebhookSection.tsx"]).toContain("다시 연결되면 이어서 만들 수 있어요.");
   });
 });
 
@@ -988,8 +988,8 @@ describe("#1559 회전 1 · 되돌리기가 사유 없이 침묵하지 않는다
     );
     expect(file).toContain('const engineRadiosName = "work-host-engine";');
     expect(file).toContain("const modeRadiosName = `work-tier-mode-${scope}`;");
-    expect(file).toContain("엔진을 저장하는 중입니다.");
-    expect(file).toContain("정책을 저장하는 중입니다.");
+    expect(file).toContain("엔진을 저장하는 중이에요.");
+    expect(file).toContain("정책을 저장하는 중이에요.");
   });
 });
 

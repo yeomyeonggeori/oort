@@ -15,7 +15,7 @@ import { validateBaseUrl } from "./oauthGrant";
 // =============================================================================
 // 팀 키 폼 하나 (#2944 GC-3에서 옮김, #2880 AA-7).
 //
-// 채팅의 로컬 연결 카드와 설정 › AI 연결 곁판이 **이 컴포넌트 하나**를 쓴다. 프리셋
+// 채팅의 로컬 연결 카드와 AI 곁판이 **이 컴포넌트 하나**를 쓴다. 프리셋
 // 칩·password 칸·오프라인 잠금·대체 전 한 번 묻기·저장하면 칸 비우기가 두 표면에서
 // 다르게 동작하면 안 되기 때문이다(교차 시험: `AiConnectCard.test.tsx`의
 // 「같은 폼 · 같은 결과 문장: 설정 × 카드」).
@@ -221,7 +221,7 @@ export function TeamKeyForm({
       autoComplete="off"
       data-form-type="other"
       data-testid={tid("key-form")}
-      aria-label="팀 API 키 넣기"
+      aria-label="팀 AI 키 넣기"
     >
       {showChips ? (
         <fieldset className="flex min-w-0 flex-wrap gap-2">
@@ -358,7 +358,7 @@ export function TeamKeyForm({
       )}
       {confirmReplace && (
         <p className="break-keep text-meta text-warn" role="alert" data-testid={tid("key-replace")}>
-          지금 팀 기본 키({maskedBearer(link.bearerLast4)})를 이 키로 바꿔요.
+          지금 팀 AI 키({maskedBearer(link.bearerLast4)})를 이 키로 바꿔요.
           {movesAddress && movesLabel ? ` 주소도 ${movesLabel} 주소로 바뀌어요.` : ""} 팀 에이전트는 바로 새 키로 대답해요.
           {currentFailed
             ? " 지금 키는 방금 확인에 실패했어요. 새 키도 저장한 뒤에 확인해요."

@@ -264,8 +264,8 @@ export function PluginSection({ offline }: { offline: boolean }) {
   }, [catalogQuery.data, detailsQuery.data, mutation.isPending, scopeFocusAfterChange]);
 
   const lines = [
-    "워크스페이스에 설치할 앱과 내 사용 권한을 관리합니다.",
-    "앱이 연결할 외부 도메인과 현재 내게 허용된 도구 정책을 함께 확인할 수 있습니다.",
+    "워크스페이스에 설치할 앱과 내 사용 권한을 관리해요.",
+    "앱이 연결할 외부 도메인과 현재 내게 허용된 도구 정책을 함께 확인할 수 있어요.",
   ];
 
   // 미제공일 때의 머리말. 위 두 줄을 그대로 쓰면 구획이 스스로를 반박한다:
@@ -276,7 +276,7 @@ export function PluginSection({ offline }: { offline: boolean }) {
   // 다른 세 표면(작업 흐름·활동·에이전트 허브)에는 이 문제가 없다. 그쪽 머리말은
   // 라벨 한 단어뿐이라 부정할 본문을 갖고 있지 않다.
   const unavailableLines = [
-    "이 서버에서는 앱을 설치하거나 권한을 관리할 수 없습니다.",
+    "이 서버에서는 앱을 설치하거나 권한을 관리할 수 없어요.",
   ];
 
   // 이 서버가 앱 표면을 싣지 않았다 (goal B12). 판정은 정적 표가 아니라 **서버가
@@ -332,7 +332,7 @@ export function PluginSection({ offline }: { offline: boolean }) {
       {catalogQuery.isPending && <PluginMarketplaceSkeleton />}
       {catalogQuery.isError && (
         <InlineBanner
-          message="앱 목록을 읽지 못했습니다. 서버 연결을 확인한 뒤 다시 시도하세요."
+          message="앱 목록을 읽지 못했어요. 서버 연결을 확인한 뒤 다시 시도하세요."
           actionLabel="다시 시도"
           onAction={() => void catalogQuery.refetch()}
           testId="plugins-error"
@@ -340,9 +340,9 @@ export function PluginSection({ offline }: { offline: boolean }) {
       )}
       {catalogQuery.data && visible.length === 0 && (
         <EmptyInvite
-          headline="설치할 수 있는 앱이 없습니다."
+          headline="설치할 수 있는 앱이 없어요."
           detail={catalogQuery.data.plugins.length === 0
-            ? "서버에 등록된 앱이 아직 없습니다."
+            ? "서버에 등록된 앱이 아직 없어요."
             : "검색어나 보기를 바꿔 다른 앱을 확인하세요."}
           actions={catalogQuery.data.plugins.length > 0 ? (
             <Button variant="outline" size="sm" onClick={() => { setQuery(""); setFilter("all"); }}>
@@ -536,7 +536,7 @@ function PluginDetailPanel({
   if (isError || !detail) {
     return (
       <InlineBanner
-        message={isError ? pluginDetailErrorMessage(error) : "앱 상세 정보를 읽지 못했습니다."}
+        message={isError ? pluginDetailErrorMessage(error) : "앱 상세 정보를 읽지 못했어요."}
         actionLabel="다시 시도"
         onAction={onRetry}
         testId="plugin-detail-error"
@@ -597,7 +597,7 @@ function PluginDetailPanel({
       </div>
 
       <dl className="flex flex-col gap-2">
-        {detail.publisherName && <DetailRow label="배포자" value={detail.publisherVerified ? `${detail.publisherName}, oort 레지스트리가 확인함` : detail.publisherName} />}
+        {detail.publisherName && <DetailRow label="배포자" value={detail.publisherVerified ? `${detail.publisherName}, oort 레지스트리가 확인했어요` : detail.publisherName} />}
         {detail.license && <DetailRow label="라이선스" value={detail.license} />}
         {detail.provenanceURL && <DetailLink label="출처" href={detail.provenanceURL} />}
         {detail.termsURL && <DetailLink label="이용약관" href={detail.termsURL} />}
@@ -608,7 +608,7 @@ function PluginDetailPanel({
       <div className="flex flex-col gap-2">
         <h4 className="text-body font-semibold text-ink">도구와 권한</h4>
         {detail.tools.length === 0 ? (
-          <p className="text-body text-ink-muted">서버가 표시할 도구 정보를 보내지 않았습니다.</p>
+          <p className="text-body text-ink-muted">서버가 표시할 도구 정보를 보내지 않았어요.</p>
         ) : (
           <ul className="flex flex-col overflow-hidden rounded-md border border-line">
             {detail.tools.map((tool) => <ToolRow key={tool.name} tool={tool} />)}
@@ -685,7 +685,7 @@ function PluginActions({
   if (!available) {
     return (
       <div className="flex flex-col gap-2" aria-busy={busy || undefined}>
-        {roleState === "checking" && <p className="text-meta text-ink-muted" role="status">관리자 권한을 확인하는 중입니다.</p>}
+        {roleState === "checking" && <p className="text-meta text-ink-muted" role="status">관리자 권한을 확인하는 중이에요.</p>}
         {roleUnknownNotice}
         {roleState === "known" && !canManage && (
           <p className="max-w-pane text-meta text-ink-muted">{nonAdminInstallGuidance(managerNames)}</p>
@@ -710,7 +710,7 @@ function PluginActions({
   return (
     <div className="flex flex-col gap-2" aria-busy={busy || undefined}>
       {roleUnknownNotice}
-      {scopes.length === 0 && <p className="max-w-pane text-meta text-ink-muted">허용할 권한이 없습니다.</p>}
+      {scopes.length === 0 && <p className="max-w-pane text-meta text-ink-muted">허용할 권한이 없어요.</p>}
       {activeScopes.length > 0 && (
         <p className="max-w-pane text-meta text-ink-muted">
           현재 허용: {activeScopes.map(identifiableScopeSentence).join(", ")}
@@ -820,7 +820,7 @@ function PluginScopeConsentButton({
 function PluginRoleUnknownNotice({ onRetry }: { onRetry: () => void }) {
   return (
     <InlineBanner
-      message="내 역할을 확인하지 못했습니다. 설치 권한을 판단할 수 없습니다."
+      message="내 역할을 확인하지 못했어요. 설치 권한을 판단할 수 없어요."
       actionLabel="역할 다시 확인"
       onAction={onRetry}
       testId="plugin-role-error"
@@ -1020,7 +1020,7 @@ function PluginScopeConsentDialog({
             <p className="text-meta text-ink-muted">
               {isGrant
                 ? "권한마다 연결된 도구와 데이터 범위를 확인한 뒤 계속하세요."
-                : "회수하면 선택한 권한에 연결된 아래 도구를 더 이상 사용할 수 없습니다."}
+                : "회수하면 선택한 권한에 연결된 아래 도구를 더 이상 사용할 수 없어요."}
             </p>
             {/* The ONE live region for selection state. Unchecking the last box
                 used to say the same thing three times in one keystroke: this
@@ -1139,12 +1139,12 @@ function PluginScopeConsentDialog({
                   <span className="flex size-control shrink-0 items-center justify-center rounded-sm border border-line bg-surface-hover text-body font-semibold text-ink">{appIcon}</span>
                 </span>
                 <DialogDescription className="min-w-0 flex-1">
-                  선택한 권한의 도구가 내 사용자 정책에 추가됩니다.
+                  선택한 권한의 도구가 내 사용자 정책에 추가돼요.
                 </DialogDescription>
               </div>
             ) : (
               <DialogDescription>
-                선택한 권한으로 사용할 수 있던 도구가 내 사용자 정책에서 제거됩니다.
+                선택한 권한으로 사용할 수 있던 도구가 내 사용자 정책에서 제거돼요.
               </DialogDescription>
             )}
             {isGrant && consent.plugin.installed && consent.plugin.enabled && managerNames.length > 0 && (
@@ -1187,7 +1187,7 @@ function PluginScopeConsentDialog({
               없다. */}
           {isGrant && (
             <dl className="flex flex-col gap-2 border-t border-line pt-3">
-              {consent.plugin.publisherName && <DetailRow label="배포자" value={consent.plugin.publisherVerified ? `${consent.plugin.publisherName}, oort 레지스트리가 확인함` : consent.plugin.publisherName} />}
+              {consent.plugin.publisherName && <DetailRow label="배포자" value={consent.plugin.publisherVerified ? `${consent.plugin.publisherName}, oort 레지스트리가 확인했어요` : consent.plugin.publisherName} />}
               {consent.plugin.license && <DetailRow label="라이선스" value={consent.plugin.license} />}
               {consent.plugin.provenanceURL && <DetailLink label="출처" href={consent.plugin.provenanceURL} />}
               {consent.plugin.egressDomains.length > 0 && <DetailRow label="외부 연결" value={consent.plugin.egressDomains.join(", ")} />}

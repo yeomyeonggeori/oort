@@ -58,8 +58,6 @@ export interface AiGlossaryEntry {
   term: string;
   /** 화면에 쓰는 한 줄. */
   meaning: string;
-  /** 이 말이 흡수하는 지금의 말(시안 용어집 오른쪽 열). */
-  absorbs: readonly string[];
 }
 
 export const AI_GLOSSARY: readonly AiGlossaryEntry[] = [
@@ -67,53 +65,60 @@ export const AI_GLOSSARY: readonly AiGlossaryEntry[] = [
     id: "myAiAccount",
     term: "내 AI 계정",
     meaning: "내가 로그인한 Claude Code·Codex 구독과 내 API 키. 나만 써요.",
-    absorbs: ["내 계정", "이 맥", "구독", "구독 추가", "로그인(단독)", "개인 구독", "내 설정", "로컬 터미널 기본 로그인"],
   },
   {
     id: "teamAiKey",
     term: "팀 AI 키",
     meaning: "운영자가 넣은 API 키. 팀이 같이 쓰고 비용은 팀 몫이에요.",
-    absorbs: ["팀 연결", "팀 API 키", "팀 키", "팀 기본", "운영자 설정"],
   },
   {
     id: "defaultAi",
     term: "기본 AI",
     meaning: "기능마다 먼저 쓸 AI. 표에서 기능별로 골라요.",
-    absorbs: ["기본 AI(유지)", "앱 명령", "원격 작업 기본 계정", "팀 에이전트 대답", "로컬 터미널 새 세션"],
   },
   {
     id: "agent",
     term: "에이전트",
     meaning: "@로 부르는 AI 멤버. 쓰는 AI는 내 구독, 팀 키, 외부 중 하나예요.",
-    absorbs: ["호스티드 에이전트", "구독 에이전트", "합류/합류시키기", "봇(AI 봇)", "에이전트 초대(초대하기만 유지)"],
   },
   {
     id: "callableBy",
     term: "부를 수 있는 사람",
     meaning: "누구나 또는 한 사람만. 에이전트마다 하나예요.",
-    absorbs: ["owner_only", "오너 전용", "소유자 전용", "본인 1인"],
   },
   {
     id: "cost",
     term: "비용",
     meaning: "답할 때 나가는 돈이 누구 몫인지: 내 구독, 팀, 외부 운영자.",
-    absorbs: ["과금", "사용량 소스", "팀 키만"],
   },
   {
     id: "externalConnection",
     term: "외부 연결",
     meaning: "oort 밖과 주고받는 통로. 앱 · 채널로 들어오는 주소 · 밖으로 보내는 알림 · 외부 에이전트 연결.",
-    absorbs: ["웹훅", "이벤트 구독", "에이전트 자격", "MCP", "Agent Port", "1회용 연결 값(발급 화면에서만 사용)", "앱"],
   },
   {
     id: "myWork",
     term: "내 작업",
     meaning: "내 맥 터미널에서 내 계정으로 직접 하는 일.",
-    absorbs: ["내 작업(유지)", "로컬 터미널", "코드 실행 호스트(설정에 유지)"],
   },
 ];
 
-/** 시안 용어집 아래 「금지」 줄. */
+/**
+ * 각 용어가 흡수하는 지금의 말(시안 용어집 오른쪽 열). 화면에 그려지지 않는 데이터라 옛 말 글자가 그대로 있다.
+ * design-preflight-allow: 옛 말을 정의하는 표(#3445). 제목·설명을 든 `AI_GLOSSARY`는 마커 없이 게이트를 받는다.
+ */
+export const AI_GLOSSARY_ABSORBS: Readonly<Record<AiGlossaryId, readonly string[]>> = {
+  myAiAccount: ["내 계정", "이 맥", "구독", "구독 추가", "로그인(단독)", "개인 구독", "내 설정", "로컬 터미널 기본 로그인"],
+  teamAiKey: ["팀 연결", "팀 API 키", "팀 키", "팀 기본", "운영자 설정"],
+  defaultAi: ["기본 AI(유지)", "앱 명령", "원격 작업 기본 계정", "팀 에이전트 대답", "로컬 터미널 새 세션"],
+  agent: ["호스티드 에이전트", "구독 에이전트", "합류/합류시키기", "봇(AI 봇)", "에이전트 초대(초대하기만 유지)"],
+  callableBy: ["owner_only", "오너 전용", "소유자 전용", "본인 1인"],
+  cost: ["과금", "사용량 소스", "팀 키만"],
+  externalConnection: ["웹훅", "이벤트 구독", "에이전트 자격", "MCP", "Agent Port", "1회용 연결 값(발급 화면에서만 사용)", "앱"],
+  myWork: ["내 작업(유지)", "로컬 터미널", "코드 실행 호스트(설정에 유지)"],
+};
+
+/** 시안 용어집 아래 「금지」 줄. **화면에 렌더하면 안 된다**(옛 말을 인용하는 문장이다). design-preflight-allow: 금지어를 말하는 문장이라 옛 말을 인용한다(화면에는 그려지지 않는다, #3445). */
 export const AI_GLOSSARY_BANS =
   "「AI 연결」은 허브 이름 「AI」로 흡수해요. 「합류」는 화면에서 안 써요(만들기·초대). 영어 약자 MCP·Agent Port는 외부 에이전트 연결 상세 화면의 괄호 안에서만 써요.";
 
@@ -211,7 +216,7 @@ export const AI_EXTERNAL_ROWS: readonly AiExternalRow[] = [
     summary: "다른 곳에서 도는 에이전트를 멤버로 들여요. 연결 값은 발급할 때 한 번만 보여요.",
     detail: [
       "다른 인프라에서 도는 에이전트를 이 워크스페이스의 멤버로 들이는 연결이에요.",
-      "연결 값은 발급 직후 한 번만 보여요. 끊기는 서버가 끊겼다고 답한 뒤에야 끝나요.",
+      "연결 값은 발급 직후 한 번만 보여요. 해제는 서버가 끊겼다고 답한 뒤에야 끝나요.",
     ],
     countNoun: "연결",
     path: `${AI_EXTERNAL_BASE_PATH}/agents`,
@@ -221,8 +226,8 @@ export const AI_EXTERNAL_ROWS: readonly AiExternalRow[] = [
   {
     id: "hostedBotInvite",
     title: AI_EXTERNAL_SUBSECTIONS.hostedBotInvite,
-    legacy: "호스티드 에이전트 연결",
-    detailLegacy: "호스티드 에이전트 연결",
+    legacy: null,
+    detailLegacy: null,
     summary: "서버가 대신 돌려 주는 봇을 초대해요. 에이전트 만들기 목록에서도 열려요.",
     detail: [],
     countNoun: "봇",
@@ -423,7 +428,7 @@ export type AiTeamFeatureId = "appCommand" | "teamAgent" | "greeting" | "channel
 
 const TEAM_FEATURE_NAME: Readonly<Record<AiTeamFeatureId, string>> = {
   appCommand: "말로 앱 설정 바꾸기",
-  teamAgent: "팀 에이전트 대답",
+  teamAgent: "팀 에이전트의 답",
   greeting: "첫 인사",
   channelSummary: "채널 요약",
 };
@@ -892,6 +897,7 @@ export interface LegacyTermEntry {
   note?: string;
 }
 
+// design-preflight-allow: 옛 말을 정의하는 표. 게이트(design_preflight_ast.mjs loadLegacyTerms)의 정본이라 옛 말 글자가 여기 있어야 한다(#3445)
 export const LEGACY_TERM_MAP: readonly LegacyTermEntry[] = [
   { old: "AI 연결", next: "AI", grepGate: true, note: "허브 이름으로 흡수" },
   { old: "합류", next: "만들기 · 초대", grepGate: true, note: "합류시키기 포함. 화면에서 쓰지 않아요" },
@@ -914,6 +920,9 @@ export const LEGACY_TERM_MAP: readonly LegacyTermEntry[] = [
   { old: "로컬 터미널 기본 로그인", next: "내 AI 계정", grepGate: true },
   { old: "구독 추가", next: "내 AI 계정", grepGate: true },
   { old: "1회용 연결 값", next: "외부 에이전트 연결", grepGate: true, note: "발급 화면에서만 사용" },
+  { old: "오너", next: "소유자", grepGate: true, note: "워크스페이스 역할 이름은 화면에서 「소유자」로 써요" },
+  { old: "구독 붙이기", next: "에이전트 만들기", grepGate: true },
+  { old: "owner·admin", next: "소유자·관리자", grepGate: true, note: "한글 문장 안의 영문 역할 이름" },
   { old: "내 계정", next: "내 AI 계정", grepGate: false, note: "프로필 화면의 「내 계정」과 겹쳐요" },
   { old: "이 맥", next: "내 AI 계정", grepGate: false, note: "「이 맥의 Claude Code」 같은 정상 문장이 있어요" },
   { old: "구독", next: "내 AI 계정 · 내 구독", grepGate: false, note: "새 문구도 「내 구독」을 써요" },
@@ -979,9 +988,9 @@ export const AI_HUB_FROM_SETTINGS: Readonly<Record<string, AiHubSectionId>> = {
 
 /** 허브 화면과 옛 입구의 안내 문구 (플랜 §7). */
 export const AI_HUB_NAV_COPY = {
-  movedToHub: "AI 허브로 옮겼어요",
+  movedToHub: "AI 화면으로 옮겼어요",
   movedToHubAction: "AI에서 열기",
-  agentsPageLine: "설정·권한·비용은 AI에서",
+  agentsPageLine: "설정·권한·비용은 AI 화면에서",
   openAiAction: "AI에서 열기",
   tabsLabel: "AI 구획",
   overviewTab: "개요",

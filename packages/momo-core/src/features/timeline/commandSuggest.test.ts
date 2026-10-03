@@ -76,7 +76,7 @@ describe("command_suggest(ai.connect) 파서 (ADR-0186 G3·G4, #2948)", () => {
       agentName: "hermes",
     });
     expect(commandSuggestHead(card!)).toBe("hermes가 제안했어요");
-    expect(commandSuggestOneLine(card!)).toBe("곽성재에게 AI 연결을 제안했어요");
+    expect(commandSuggestOneLine(card!)).toBe("곽성재에게 AI 계정 연결을 제안했어요");
   });
 
   it("평범한 에이전트 문장처럼 턴 카드를 만들지 않는다(본문은 그대로 남는다)", () => {

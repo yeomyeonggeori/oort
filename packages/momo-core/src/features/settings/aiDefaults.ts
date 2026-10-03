@@ -6,7 +6,7 @@ import { HARNESS_LABEL } from "../onboarding/aiConnect";
 import { ACCOUNT_LABEL } from "./harnessProfiles";
 
 // =============================================================================
-// 설정 › AI 연결 › 기본 AI 표 (#2881 AA-8, 시안 §5, brief §4.1·§4.2·§4.5).
+// AI › 기본 AI 표 (#2881 AA-8, 시안 §5, brief §4.1·§4.2·§4.5).
 //
 // 규칙은 하나다: **결과를 나만 보면 내 구독도 되고, 팀이 보면 팀 키만.** 이 파일은
 // 표의 행과 그 행이 고를 수 있는 자격, 저장된 선택이 지금 쓸 수 없을 때 무엇으로
@@ -43,7 +43,7 @@ export type AiDefaultRowId = (typeof AI_DEFAULT_ROW_IDS)[number];
 export const PERSONAL_ROW_IDS = ["appCommand", "localTerminal", "remoteWork"] as const;
 export type PersonalRowId = (typeof PERSONAL_ROW_IDS)[number];
 
-/** 자격의 종류. `profile` = 이 맥의 공식 CLI 구독, `teamKey` = 서버의 팀 API 키. */
+/** 자격의 종류. `profile` = 이 맥의 공식 CLI 구독, `teamKey` = 서버의 팀 AI 키. */
 export type AiCredentialSource = "profile" | "teamKey";
 
 export interface AiDefaultRow {
@@ -59,7 +59,7 @@ export interface AiDefaultRow {
 export const AI_DEFAULT_ROWS: readonly AiDefaultRow[] = [
   {
     id: "appCommand",
-    title: "앱 명령",
+    title: "말로 앱 설정 바꾸기",
     hint: "「테마 바꿔 줘」「알림 꺼 줘」 · 결과는 이 기기에만",
     audience: "me",
     // 목표는 내 구독(로컬 실행기, Q4 B)인데 ADR 증보 전이라 아직 팀 키만 연다.
@@ -67,29 +67,29 @@ export const AI_DEFAULT_ROWS: readonly AiDefaultRow[] = [
   },
   {
     id: "localTerminal",
-    title: "로컬 터미널 새 세션",
+    title: "내 터미널의 새 세션",
     hint: "새 세션을 열 때 먼저 고를 계정",
     audience: "me",
     sources: ["profile"],
   },
   {
     id: "remoteWork",
-    title: "원격 작업 기본 계정",
-    hint: "폰에서 시작하는 작업",
+    title: "폰에서 시작하는 작업",
+    hint: "먼저 쓸 계정",
     audience: "me",
     sources: ["profile"],
   },
   {
     id: "teamAgent",
-    title: "팀 에이전트 대답",
-    hint: "멘션·DM, 팀이 봄",
+    title: "팀 에이전트의 답",
+    hint: "멘션·DM, 팀이 같이 봐요",
     audience: "team",
     sources: ["teamKey"],
   },
   {
     id: "summary",
     title: "채널 요약 · 첫 인사",
-    hint: "서버에서 돌고 팀이 봄",
+    hint: "서버에서 돌고 팀이 같이 봐요",
     audience: "team",
     sources: ["teamKey"],
   },
@@ -128,7 +128,7 @@ export interface AiDefaultsAccount {
  * 팀 키에 대해 이 화면이 아는 것.
  * - `present`: 서버에 팀 키가 있다(운영자라 읽었다).
  * - `absent`: 운영자가 읽었고 없다.
- * - `mock`: 저장된 키가 없고 서버가 모의 응답으로만 대답한다(팀 연결 절과 같은 말).
+ * - `mock`: 저장된 키가 없고 서버가 모의 응답으로만 대답한다(팀 AI 키 절과 같은 말).
  * - `hidden`: 운영자가 아니라 읽을 수 없다(서버 403). 있다고도 없다고도 하지 않는다.
  * - `loading`: 아직 모른다.
  * - `error`: 403이 아닌 오류로 읽지 못했다.
@@ -177,19 +177,19 @@ export function credentialKey(ref: AiCredentialRef): string {
 
 /**
  * 자격 이름: 「Claude · 개인」, 기본 로그인은 「Claude · 이 맥 기본 로그인」, 팀 키는
- * 「팀 API 키 · api.openai.com」(호스트만, 선택 칸 폭 안에 들게).
+ * 「팀 AI 키 · api.openai.com」(호스트만, 선택 칸 폭 안에 들게).
  */
 export function credentialName(ref: AiCredentialRef, teamKey: AiDefaultsTeamKey): string {
   if (ref.kind === "teamKey") {
-    return teamKey.status === "present" ? `팀 API 키 · ${teamKeyHost(teamKey.name)}` : "팀 API 키";
+    return teamKey.status === "present" ? `팀 AI 키 · ${teamKeyHost(teamKey.name)}` : "팀 AI 키";
   }
   const account = ACCOUNT_LABEL[ref.harness];
   return ref.label === null ? `${account} · 이 맥 기본 로그인` : `${account} · ${ref.label}`;
 }
 
 /**
- * 출처 글자(시안 `.sel-box small`). 팀 키는 이름이 이미 「팀 API 키」라 붙이지 않는다
- * (「팀 API 키 · API 키」 반복을 피함).
+ * 출처 글자(시안 `.sel-box small`). 팀 키는 이름이 이미 「팀 AI 키」라 붙이지 않는다
+ * (「팀 AI 키 · API 키」 반복을 피함).
  */
 export function credentialSource(ref: AiCredentialRef): string | null {
   return ref.kind === "teamKey" ? null : "구독";
@@ -263,9 +263,9 @@ export function optionsFor(rowId: AiDefaultRowId, input: AiDefaultsInput): AiDef
 export function modelLine(ref: AiCredentialRef, teamKey: AiDefaultsTeamKey): string {
   if (ref.kind === "profile") return "모델은 CLI 기본값";
   if (teamKey.status === "present" && teamKey.modelCount !== null) {
-    return `모델은 서버가 정함 · 이 키로 쓸 수 있는 모델 ${teamKey.modelCount}개`;
+    return `모델은 서버가 정해요 · 이 키로 쓸 수 있는 모델 ${teamKey.modelCount}개`;
   }
-  return "모델은 서버가 정함";
+  return "모델은 서버가 정해요";
 }
 
 // ---- 저장(이 기기) ----------------------------------------------------------------
@@ -350,7 +350,7 @@ export const AI_DEFAULT_FALLBACK: Record<AiDefaultRowId, string> = {
 
 /** 개인 행의 「고르지 않음」 선택지 글자. */
 export const AI_DEFAULT_UNSET_LABEL: Record<PersonalRowId, string> = {
-  appCommand: "팀 API 키",
+  appCommand: "팀 AI 키",
   // 고르지 않으면 새 세션은 CLI가 제 기본 위치(이 맥의 기본 로그인)로 뜬다(#3010).
   // 「마지막에 쓴 계정」을 기억하는 곳은 없다.
   localTerminal: "이 맥 기본 로그인",
@@ -370,11 +370,11 @@ function teamKeyUnknown(teamKey: AiDefaultsTeamKey): string | null {
   switch (teamKey.status) {
     case "hidden":
       // 멤버가 모르는 것은 키의 정체다. 앱 명령을 쓸 수 없다는 말이 아니다(2차 M1').
-      return "팀 API 키 · 운영자 설정";
+      return "팀 AI 키 · 운영자만 바꿔요";
     case "loading":
-      return "팀 연결을 확인하고 있어요";
+      return "팀 AI 키를 확인하고 있어요";
     case "error":
-      return "팀 연결을 불러오지 못했어요";
+      return "팀 AI 키를 불러오지 못했어요";
     default:
       return null;
   }
@@ -405,14 +405,14 @@ export function resolveRow(
         return {
           state: "blocked",
           using: AI_DEFAULT_FALLBACK.appCommand,
-          sentence: "팀 API 키가 없어 앱 명령을 쓸 수 없어요. AI 계정을 연결하면 쓸 수 있어요.",
+          sentence: "팀 AI 키가 없어 말로 앱 설정 바꾸기를 쓸 수 없어요. 운영자가 팀 AI 키를 넣으면 쓸 수 있어요.",
         };
       }
       if (teamKey.status === "present" && teamKey.failed) {
         return {
           state: "blocked",
           using: teamName,
-          sentence: "팀 API 키 확인이 실패했어요. 키가 다시 확인될 때까지 앱 명령은 대답하지 못해요.",
+          sentence: "팀 AI 키 확인이 실패했어요. 키가 다시 확인될 때까지 말로 앱 설정 바꾸기는 쓸 수 없어요.",
         };
       }
       return { state: "ok", using: teamName, note: "내 구독으로 부르기는 준비 중이에요" };
@@ -465,14 +465,14 @@ export function resolveRow(
         return {
           state: "fallback",
           using: "모의 응답",
-          sentence: "저장된 팀 API 키가 없어 팀 에이전트는 모의 응답으로만 대답해요. 내 구독으로 넘어가지 않아요.",
+          sentence: "저장된 팀 AI 키가 없어 팀 에이전트는 모의 응답으로만 대답해요. 내 구독으로 넘어가지 않아요.",
         };
       }
       if (teamKey.status === "absent") {
         return {
           state: "blocked",
           using: AI_DEFAULT_FALLBACK.teamAgent,
-          sentence: "팀 API 키가 없어 팀 에이전트는 대답할 수 없어요. 내 구독으로 넘어가지 않아요.",
+          sentence: "팀 AI 키가 없어 팀 에이전트는 대답할 수 없어요. 내 구독으로 넘어가지 않아요.",
         };
       }
       return { state: "ok", using: "에이전트마다 정함 · 팀 키만", note: null };
@@ -484,7 +484,7 @@ export function resolveRow(
         return {
           state: "fallback",
           using: AI_DEFAULT_FALLBACK.summary,
-          sentence: "팀 API 키가 없어 요약은 쉬고, 첫 인사는 정해진 문구로 해요.",
+          sentence: "팀 AI 키가 없어 요약은 쉬고, 첫 인사는 정해진 문구로 해요.",
         };
       }
       return { state: "ok", using: teamName, note: null };

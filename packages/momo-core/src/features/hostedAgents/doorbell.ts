@@ -35,29 +35,29 @@ export interface HostedDoorbellRegistration {
 
 export const DOORBELL_HEADLINE = "도어벨 설정";
 export const DOORBELL_LEAD =
-  "그록봇 webhook 루틴을 부름이 쌓일 때 깨웁니다. 도어벨이 실패해도 부름 자체는 그대로 남습니다.";
-export const DOORBELL_EMPTY_HEADLINE = "도어벨이 아직 없습니다.";
+  "그록봇 webhook 루틴을 부름이 쌓일 때 깨워요. 도어벨이 실패해도 부름 자체는 그대로 남아요.";
+export const DOORBELL_EMPTY_HEADLINE = "도어벨이 아직 없어요.";
 export const DOORBELL_EMPTY_DETAIL =
-  "그록봇에 webhook 루틴을 만든 뒤, 받은 https 주소와 sender key를 넣으세요. 루틴 문안은 셀프호스트 에이전트 플레이북의 도어벨 절에 있습니다.";
-export const DOORBELL_GATE_OFF_HEADLINE = "이 서버는 도어벨이 꺼져 있습니다.";
+  "그록봇에 webhook 루틴을 만든 뒤, 받은 https 주소와 sender key를 넣으세요. 루틴 문안은 셀프호스트 에이전트 플레이북의 도어벨 절에 있어요.";
+export const DOORBELL_GATE_OFF_HEADLINE = "이 서버는 도어벨이 꺼져 있어요.";
 export const DOORBELL_GATE_OFF_DETAIL =
-  "운영자가 MOMO_DOORBELL_ENABLED를 열기 전에는 등록할 수 없습니다. 꺼진 것은 고장이 아닙니다.";
+  "운영자가 MOMO_DOORBELL_ENABLED를 열기 전에는 등록할 수 없어요. 꺼진 것은 고장이 아니에요.";
 export const DOORBELL_URL_HINT =
-  "https 주소만 등록됩니다. 사설망과 로컬 주소는 거절됩니다.";
+  "https 주소만 등록돼요. 사설망과 로컬 주소는 거절돼요.";
 export const DOORBELL_SECRET_HINT =
-  "저장 후에는 끝자리만 보입니다. 다시 넣으면 교체되고 다시 봉인되며, 마지막 발화 시각은 초기화됩니다.";
+  "저장 후에는 끝자리만 보여요. 다시 넣으면 교체되고 서버에 다시 저장되며, 마지막 발화 시각은 초기화돼요.";
 export const DOORBELL_NEVER_FIRED = "아직 울린 적 없음";
 export const DOORBELL_STATUS_NONE = "없음";
 export const DOORBELL_NOT_ACTIVE =
-  "활성 연결에서만 도어벨을 등록할 수 있습니다.";
+  "활성 연결에서만 도어벨을 등록할 수 있어요.";
 export const DOORBELL_REGISTER_LABEL = "도어벨 등록";
 export const DOORBELL_REPLACE_LABEL = "도어벨 교체";
 export const DOORBELL_UNREGISTER_LABEL = "도어벨 해제";
 export const DOORBELL_UNREGISTER_QUESTION =
-  "해제하면 이 연결의 webhook 깨우기가 즉시 멈춥니다. 부름 전달은 그대로입니다.";
+  "해제하면 이 연결의 webhook 깨우기가 즉시 멈춰요. 부름 전달은 그대로예요.";
 export const DOORBELL_UNREGISTER_CONFIRM = "해제";
-export const DOORBELL_REGISTERED_LIVE = "도어벨을 등록했습니다.";
-export const DOORBELL_UNREGISTERED_LIVE = "도어벨을 해제했습니다.";
+export const DOORBELL_REGISTERED_LIVE = "도어벨을 등록했어요.";
+export const DOORBELL_UNREGISTERED_LIVE = "도어벨을 해제했어요.";
 export const DOORBELL_URL_LABEL = "webhook 주소";
 export const DOORBELL_URL_REPLACE_LABEL = "새 webhook 주소";
 export const DOORBELL_SECRET_LABEL = "sender key";
@@ -66,10 +66,10 @@ export const DOORBELL_MASK_LABEL = "sender key";
 export const DOORBELL_FIRED_LABEL = "마지막 발화";
 export const DOORBELL_STATUS_LABEL = "마지막 상태";
 export const DOORBELL_OFFLINE_NOTE =
-  "연결이 끊겨 있어 지금은 도어벨을 바꾸거나 해제할 수 없습니다.";
+  "연결이 끊겨 있어 지금은 도어벨을 바꾸거나 해제할 수 없어요.";
 export const DOORBELL_BUSY_NOTE =
-  "앞서 누른 것이 아직 끝나지 않았습니다. 이어서 등록하거나 해제할 수 있습니다.";
-export const DOORBELL_LOADING_LABEL = "도어벨을 불러오는 중입니다.";
+  "앞서 누른 것이 아직 끝나지 않았어요. 이어서 등록하거나 해제할 수 있어요.";
+export const DOORBELL_LOADING_LABEL = "도어벨을 불러오는 중이에요.";
 export const DOORBELL_RETRY_GATE = "다시 입력";
 
 /**
@@ -155,14 +155,14 @@ export function applyDoorbellRegistration(
 export function doorbellUrlIssue(raw: string): string | null {
   const trimmed = raw.trim();
   if (!trimmed) return "https 주소를 입력하세요.";
-  if (trimmed.length > DOORBELL_URL_MAX) return "주소가 너무 깁니다.";
+  if (trimmed.length > DOORBELL_URL_MAX) return "주소가 너무 길어요.";
   let parsed: URL;
   try {
     parsed = new URL(trimmed);
   } catch {
     return "https 주소를 입력하세요.";
   }
-  if (parsed.protocol !== "https:") return "https 주소만 등록됩니다.";
+  if (parsed.protocol !== "https:") return "https 주소만 등록돼요.";
   return null;
 }
 
@@ -170,7 +170,7 @@ export function doorbellSecretIssue(raw: string): string | null {
   const trimmed = raw.trim();
   if (!trimmed) return "sender key를 입력하세요.";
   if (trimmed.length > DOORBELL_SECRET_MAX) {
-    return "sender key가 너무 깁니다.";
+    return "sender key가 너무 길어요.";
   }
   return null;
 }
@@ -196,35 +196,35 @@ export type DoorbellAction = "register" | "unregister";
 const WIRE_CONTRACT_MESSAGES: ReadonlyArray<readonly [string, string]> = [
   [
     "webhook URL must be an absolute HTTP(S) URL",
-    "webhook 주소가 완전한 주소가 아닙니다. https:// 로 시작하는 전체 주소를 넣으세요.",
+    "webhook 주소가 완전한 주소가 아니에요. https:// 로 시작하는 전체 주소를 넣으세요.",
   ],
   [
     "webhook URL must use HTTPS",
-    "webhook 주소는 https만 받습니다. https:// 주소로 바꾸세요.",
+    "webhook 주소는 https만 받아요. https:// 주소로 바꾸세요.",
   ],
   [
     "webhook URL resolves to a private or reserved address",
-    "webhook 주소가 사설망·예약 대역이라 거부되었습니다. 공인 https 주소를 넣으세요.",
+    "webhook 주소가 사설망·예약 대역이라 거부되었어요. 공인 https 주소를 넣으세요.",
   ],
   [
     "webhook URL host could not be resolved",
-    "webhook 주소의 호스트를 찾지 못했습니다. 주소 철자를 확인하세요.",
+    "webhook 주소의 호스트를 찾지 못했어요. 주소 철자를 확인하세요.",
   ],
   [
     "doorbell secret must not be empty",
-    "sender key가 비어 있습니다. 값을 넣고 다시 시도하세요.",
+    "sender key가 비어 있어요. 값을 넣고 다시 시도하세요.",
   ],
   [
     "doorbell secret exceeds",
-    "sender key가 너무 깁니다. 발급받은 키 그대로인지 확인하세요.",
+    "sender key가 너무 길어요. 발급받은 키 그대로인지 확인하세요.",
   ],
   [
     "doorbell requires an active hosted connection",
-    "활성 연결에서만 도어벨을 다룰 수 있습니다. 연결을 먼저 활성 상태로 만드세요.",
+    "활성 연결에서만 도어벨을 다룰 수 있어요. 연결을 먼저 활성 상태로 만드세요.",
   ],
   [
     "doorbell is not registered",
-    "이 연결에는 등록된 도어벨이 없습니다. 화면을 새로 고치세요.",
+    "이 연결에는 등록된 도어벨이 없어요. 화면을 새로 고치세요.",
   ],
 ];
 
@@ -240,31 +240,31 @@ export function doorbellFailureMessage(
 ): string {
   const prefix =
     action === "register"
-      ? "도어벨을 등록하지 못했습니다."
-      : "도어벨을 해제하지 못했습니다.";
+      ? "도어벨을 등록하지 못했어요."
+      : "도어벨을 해제하지 못했어요.";
   if (error instanceof NetworkError) return `${prefix} ${error.message}`;
   if (error instanceof WireShapeError) {
-    return `${prefix} 서버 응답을 확인하지 못했습니다. 다시 시도하세요.`;
+    return `${prefix} 서버 응답을 확인하지 못했어요. 다시 시도하세요.`;
   }
   if (error instanceof ApiError) {
     if (error.status === 400 || error.status === 409) {
       const mapped = wireContractMessage(error.message.trim());
       if (mapped) return `${prefix} ${mapped}`;
-      return `${prefix} 입력값이 서버 계약과 맞지 않습니다. 주소와 sender key를 확인한 뒤 다시 시도하세요.`;
+      return `${prefix} 입력값이 서버 계약과 맞지 않아요. 주소와 sender key를 확인한 뒤 다시 시도하세요.`;
     }
     if (error.status === 401) {
-      return `${prefix} 로그인 세션이 만료되었습니다. 다시 로그인한 뒤 시도하세요.`;
+      return `${prefix} 로그인 세션이 만료되었어요. 다시 로그인한 뒤 시도하세요.`;
     }
     if (error.status === 403) {
-      return `${prefix} 호스티드 에이전트 연결은 워크스페이스 오너나 관리자만 다룰 수 있습니다.`;
+      return `${prefix} 호스티드 봇 초대는 워크스페이스 소유자나 관리자만 다룰 수 있어요.`;
     }
     if (error.status === 404) {
       const mapped = wireContractMessage(error.message.trim());
       if (mapped) return `${prefix} ${mapped}`;
-      return `${prefix} 이 연결이 서버에 없습니다. 다시 불러오세요.`;
+      return `${prefix} 이 연결이 서버에 없어요. 다시 불러오세요.`;
     }
     if (error.status === 429) {
-      return `${prefix} 요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.`;
+      return `${prefix} 요청이 너무 잦아요. 잠시 뒤에 다시 시도하세요.`;
     }
     return `${prefix} 잠시 뒤에 다시 시도하세요.`;
   }

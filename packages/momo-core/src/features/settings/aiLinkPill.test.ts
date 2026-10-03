@@ -27,7 +27,7 @@ const probe = (ok: boolean): ProviderLinkTest => ({
 
 const legacy = { ...LINK, credentialKind: "oauth-openai" } as ProviderLink;
 
-describe("linkPill (#2941): 팀 연결 줄의 판정표", () => {
+describe("linkPill (#2941): 팀 AI 키 줄의 판정표", () => {
   const rows: Array<[string, Parameters<typeof linkPill>[0], string, string]> = [
     ["오프라인이 모든 것을 이긴다", { link: LINK, offline: true, probe: probe(false), checking: true }, "mute", "확인할 수 없음"],
     ["내부용 연결은 읽기 전용", { link: legacy, offline: false, probe: probe(true) }, "mute", "읽기 전용"],

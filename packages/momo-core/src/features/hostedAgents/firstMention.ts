@@ -273,33 +273,33 @@ function copyFor(view: {
   if (view.phase === "empty") {
     return {
       headline: "첫 멘션을 보내보세요.",
-      detail: `${attachParticle(`@${handle}`, "object")} 부르면 ${attachParticle(name, "subject")} 같은 채널에 답합니다.`,
+      detail: `${attachParticle(`@${handle}`, "object")} 부르면 ${attachParticle(name, "subject")} 같은 채널에 답해요.`,
       actionLabel: "첫 멘션 쓰기",
     };
   }
   if (view.phase === "loading") {
     return {
-      headline: `${name}의 답을 기다리는 중입니다.`,
-      detail: "에이전트가 같은 채널에 메시지를 쓰면 이 온보딩은 끝납니다.",
+      headline: `${name}의 답을 기다리는 중이에요.`,
+      detail: "에이전트가 같은 채널에 메시지를 쓰면 이 온보딩은 끝나요.",
       actionLabel: null,
     };
   }
   if (view.errorKind === "timeout") {
     return {
-      headline: `${name}의 답이 오지 않았습니다.`,
-      detail: "다시 멘션해 보세요. 답이 없으면 이 온보딩은 끝나지 않습니다.",
+      headline: `${name}의 답이 오지 않았어요.`,
+      detail: "다시 멘션해 보세요. 답이 없으면 이 온보딩은 끝나지 않아요.",
       actionLabel: "다시 멘션하기",
     };
   }
   if (view.errorKind === "connections") {
     return {
-      headline: `${name} 연결 상태를 확인하지 못했습니다.`,
+      headline: `${name} 연결 상태를 확인하지 못했어요.`,
       detail: "다시 시도하세요.",
       actionLabel: "다시 시도",
     };
   }
   return {
-    headline: "채널 메시지를 확인하지 못했습니다.",
+    headline: "채널 메시지를 확인하지 못했어요.",
     detail: "연결을 확인하고 다시 시도하세요.",
     actionLabel: "다시 시도",
   };
@@ -335,13 +335,13 @@ function connectionCopy(
   const who = agent?.displayName ?? "에이전트";
   if (loading) {
     return {
-      headline: `${who} 연결 상태를 확인하는 중입니다.`,
+      headline: `${who} 연결 상태를 확인하는 중이에요.`,
       detail: "",
       actionLabel: null,
     };
   }
   return {
-    headline: `${who} 연결 상태를 확인하지 못했습니다.`,
+    headline: `${who} 연결 상태를 확인하지 못했어요.`,
     detail: "다시 시도하세요.",
     actionLabel: "다시 시도",
   };

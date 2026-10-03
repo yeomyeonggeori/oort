@@ -1,7 +1,7 @@
 import type {ImageSourcePropType} from 'react-native';
 
 // =============================================================================
-// AI 연결 카드의 글리프 넷 (#2945 GC-4).
+// AI 계정 카드의 글리프 넷 (#2945 GC-4).
 //
 // 경로는 시안 `claudedocs/chat-genui-connect/mockups.html`의 `#i-plug`·`#i-eye`·
 // `#i-laptop`·`#i-refresh`이고, 출처는 셸 아이콘과 같은 Lucide(ISC) 계열이다. 폰에는

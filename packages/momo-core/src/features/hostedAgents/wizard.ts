@@ -58,7 +58,7 @@ export const HOSTED_WIZARD_STEPS: readonly HostedWizardStepSpec[] = [
     number: 1,
     title: "전용 에이전트 이름 정하기",
     purpose:
-      "이 연결만 쓰는 에이전트 멤버를 새로 만듭니다. 기존 에이전트에 덧붙이지 않습니다.",
+      "이 연결만 쓰는 에이전트 멤버를 새로 만들어요. 기존 에이전트에 덧붙이지 않아요.",
   },
   {
     id: "pairing",
@@ -66,28 +66,28 @@ export const HOSTED_WIZARD_STEPS: readonly HostedWizardStepSpec[] = [
     title: "연결 값 발급",
     // 일반 프리셋 문면. Grok 은 presets.ts `GROK_PAIRING_PURPOSE` 가 같은 자리를 덮는다.
     purpose:
-      "연결 값은 지금 한 번만 보입니다. provider 설정에 붙여 넣고 이 화면에서 저장을 마치세요.",
+      "연결 값은 지금 한 번만 보여요. provider 설정에 붙여 넣고 이 화면에서 저장을 마치세요.",
   },
   {
     id: "detecting",
     number: 3,
     title: "다이얼인 기다리기",
     purpose:
-      "이 에이전트가 연결 값으로 접속하면 감지됩니다. 감지만으로는 아무 권한도 열리지 않습니다.",
+      "이 에이전트가 연결 값으로 접속하면 감지돼요. 감지만으로는 아무 권한도 열리지 않아요.",
   },
   {
     id: "approval",
     number: 4,
     title: "사람이 채널과 권한 확인",
     purpose:
-      "이 에이전트가 닿을 채널과 권한을 직접 고릅니다. 고르지 않은 채널은 열리지 않습니다.",
+      "이 에이전트가 닿을 채널과 권한을 직접 골라요. 고르지 않은 채널은 열리지 않아요.",
   },
   {
     id: "activation",
     number: 5,
     title: "자격증명 교체와 활성 확인",
     purpose:
-      "승인하면 새 자격증명이 한 번만 보입니다. provider 설정의 연결 값을 그 값으로 바꿔야 활성이 됩니다.",
+      "승인하면 새 자격증명이 한 번만 보여요. provider 설정의 연결 값을 그 값으로 바꿔야 활성이 돼요.",
   },
 ];
 
@@ -101,7 +101,7 @@ export function hostedStepSpec(step: HostedWizardStep): HostedWizardStepSpec {
 
 /** 5단계가 이미 끝난 자리의 같은 한 문장. 교체는 과거형이고, 남은 것은 확인이다. */
 export const HOSTED_ACTIVATION_DONE_PURPOSE =
-  "자격증명 교체가 끝났고 첫 증명도 성공했습니다. 승인한 채널에서 한 번 불러 확인하세요.";
+  "자격증명 교체가 끝났고 첫 증명도 성공했어요. 승인한 채널에서 한 번 불러 확인하세요.";
 
 /**
  * 제목 아래에 서는 한 문장. 5단계에서만 서버 상태를 함께 본다.
@@ -201,7 +201,7 @@ export interface HostedGate {
  */
 export function regenerateGate(connection: HostedAgentConnection | null): HostedGate {
   if (connection === null) {
-    return { allowed: false, blockedCopy: "아직 연결을 만들지 않았습니다." };
+    return { allowed: false, blockedCopy: "아직 연결을 만들지 않았어요." };
   }
   switch (connection.status) {
     case "pairing_pending":
@@ -212,13 +212,13 @@ export function regenerateGate(connection: HostedAgentConnection | null): Hosted
       return {
         allowed: false,
         blockedCopy:
-          "이미 활성인 연결입니다. 값을 다시 발급하려면 먼저 이 연결을 해제해야 합니다.",
+          "이미 활성인 연결이에요. 값을 다시 발급하려면 먼저 이 연결을 해제해야 해요.",
       };
     case "cleanup_pending":
     case "disconnected":
       return {
         allowed: false,
-        blockedCopy: "해제된 연결입니다. 다시 쓰려면 새 연결을 만드세요.",
+        blockedCopy: "해제된 연결이에요. 다시 쓰려면 새 연결을 만드세요.",
       };
   }
 }
@@ -231,32 +231,32 @@ export function regenerateGate(connection: HostedAgentConnection | null): Hosted
  */
 export function confirmStateGate(connection: HostedAgentConnection | null): HostedGate {
   if (connection === null) {
-    return { allowed: false, blockedCopy: "아직 연결을 만들지 않았습니다." };
+    return { allowed: false, blockedCopy: "아직 연결을 만들지 않았어요." };
   }
   if (connection.status === "pairing_pending") {
     return {
       allowed: false,
       blockedCopy:
-        "아직 이 에이전트가 다이얼인하지 않았습니다. 감지된 뒤에 승인할 수 있습니다.",
+        "아직 이 에이전트가 다이얼인하지 않았어요. 감지된 뒤에 승인할 수 있어요.",
     };
   }
   if (connection.status === "expired") {
     return {
       allowed: false,
-      blockedCopy: "연결 값이 만료됐습니다. 새 값을 발급한 뒤 다시 승인하세요.",
+      blockedCopy: "연결 값이 만료됐어요. 새 값을 발급한 뒤 다시 승인하세요.",
     };
   }
   if (connection.status !== "detected") {
     return {
       allowed: false,
-      blockedCopy: "이 연결은 지금 승인할 수 있는 상태가 아닙니다.",
+      blockedCopy: "이 연결은 지금 승인할 수 있는 상태가 아니에요.",
     };
   }
   if (connection.activeCredentialId !== undefined) {
     return {
       allowed: false,
       blockedCopy:
-        "이미 승인해 자격증명을 발급했습니다. 승인을 바꾸려면 연결 값을 다시 발급해 처음부터 진행하세요.",
+        "이미 승인해 자격증명을 발급했어요. 승인을 바꾸려면 연결 값을 다시 발급해 처음부터 진행하세요.",
     };
   }
   return { allowed: true };
@@ -274,14 +274,14 @@ export function testMentionGate(connection: HostedAgentConnection | null): Hoste
     return {
       allowed: false,
       blockedCopy:
-        "자격증명 증명이 아직 성공하지 않았습니다. 활성이 된 뒤에 테스트 멘션을 보낼 수 있습니다.",
+        "자격증명 증명이 아직 성공하지 않았어요. 활성이 된 뒤에 테스트 멘션을 보낼 수 있어요.",
     };
   }
   if (connection.approvedChannelIds.length === 0) {
     return {
       allowed: false,
       blockedCopy:
-        "승인한 채널이 없습니다. 이 에이전트가 닿을 채널이 없으므로 멘션할 자리도 없습니다.",
+        "승인한 채널이 없어요. 이 에이전트가 닿을 채널이 없으므로 멘션할 자리도 없어요.",
     };
   }
   return { allowed: true };
@@ -329,19 +329,19 @@ export function hostedLiveMessage(
     case "identity":
       return "1단계. 전용 에이전트의 이름과 핸들을 정하세요.";
     case "pairing":
-      return "2단계. 연결 값이 발급됐습니다. 화면에서 복사해 provider 설정에 넣으세요.";
+      return "2단계. 연결 값이 발급됐어요. 화면에서 복사해 provider 설정에 넣으세요.";
     case "detecting":
-      return "3단계. 이 에이전트의 다이얼인을 기다리는 중입니다.";
+      return "3단계. 이 에이전트의 다이얼인을 기다리는 중이에요.";
     case "approval":
-      return "4단계. 다이얼인을 감지했습니다. 닿을 채널과 권한을 확인하세요.";
+      return "4단계. 다이얼인을 감지했어요. 닿을 채널과 권한을 확인하세요.";
     case "activation":
       return awaitingProof(connection)
-        ? "5단계. 새 자격증명을 발급했습니다. provider 설정의 값을 바꾸면 증명이 진행됩니다."
-        : "5단계. 연결이 활성입니다. 승인한 채널에서 이 에이전트를 부를 수 있습니다.";
+        ? "5단계. 새 자격증명을 발급했어요. provider 설정의 값을 바꾸면 증명이 진행돼요."
+        : "5단계. 연결이 활성이에요. 승인한 채널에서 이 에이전트를 부를 수 있어요.";
     case "expired":
-      return "연결 값이 만료됐습니다. 새 값을 발급해야 이어서 진행할 수 있습니다.";
+      return "연결 값이 만료됐어요. 새 값을 발급해야 이어서 진행할 수 있어요.";
     case "closed":
-      return "이 연결은 해제 절차에 들어갔습니다. 이 화면에서는 더 진행하지 않습니다.";
+      return "이 연결은 해제 절차에 들어갔어요. 이 화면에서는 더 진행하지 않아요.";
   }
 }
 
@@ -357,14 +357,14 @@ export function testMentionSentence(
   handle: string
 ): string {
   const called = attachParticle(`@${handle}`, "object");
-  return `${channelLabel}에서 ${called} 부르면 이 에이전트가 같은 자리에 답합니다. 답은 다른 팀메이트의 메시지와 같은 경로로 옵니다.`;
+  return `${channelLabel}에서 ${called} 부르면 이 에이전트가 같은 자리에 답해요. 답은 다른 팀메이트의 메시지와 같은 경로로 와요.`;
 }
 
 /** 마법사 전체가 무엇을 하는 물건인지. 진입점과 머리글이 같은 말을 쓴다. */
-export const HOSTED_WIZARD_TITLE = "호스티드 에이전트 연결";
+export const HOSTED_WIZARD_TITLE = "호스티드 봇 초대";
 
 export const HOSTED_WIZARD_LEAD =
-  "이미 다른 곳에서 돌리고 있는 에이전트를 이 워크스페이스의 팀메이트로 들입니다. oort가 그 에이전트를 부르는 것이 아니라, 그 에이전트가 oort로 접속합니다.";
+  "이미 다른 곳에서 돌리고 있는 에이전트를 이 워크스페이스의 팀메이트로 들여요. oort가 그 에이전트를 부르는 것이 아니라, 그 에이전트가 oort로 접속해요.";
 
 /**
  * 해제 흐름이 이 화면의 것이 아니라는 사실. 감추지 않고 적는다.
@@ -374,4 +374,4 @@ export const HOSTED_WIZARD_LEAD =
  * 못한다.
  */
 export const HOSTED_CLOSED_NOTICE =
-  "이 연결은 해제 절차에 들어갔습니다. 남은 정리는 에이전트 화면의 연결 탭에서 이어서 합니다.";
+  "이 연결은 해제 절차에 들어갔어요. 남은 정리는 에이전트 화면의 연결 탭에서 이어서 해요.";

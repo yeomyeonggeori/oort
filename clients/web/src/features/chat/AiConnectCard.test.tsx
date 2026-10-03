@@ -31,7 +31,7 @@ import { AiConnectCard } from "./AiConnectCard";
 // =============================================================================
 // 로컬 연결 카드 (#2944 GC-3). brief §3.3~3.5, §5.
 //
-// - 교차: 같은 입력(모의 link·probe·CLI 감지)에 설정 › AI 연결과 카드가 **같은
+// - 교차: 같은 입력(모의 link·probe·CLI 감지)에 AI과 카드가 **같은
 //   알약**을 말한다(#2941 판정 한 곳).
 // - 흐름 넷: 구독 로그인(#2816 모달) · 팀 키(운영자) · 연결 확인 · 실패 제자리.
 // - 비밀값: 키가 React 상태·뮤테이션 캐시·브라우저 저장소·로그에 남지 않는다.
@@ -296,7 +296,7 @@ describe("카드의 겉 (#2944 시안 ①)", () => {
     expect(q(host, "ai-connect-card-only-me")?.textContent).toContain("나에게만 보여요");
     const card = q(host, "ai-connect-card") as HTMLElement;
     expect(card.textContent).toContain("내 계정 · 이 맥");
-    expect(card.textContent).toContain("팀 연결 · 이 서버");
+    expect(card.textContent).toContain("팀 AI 키 · 이 서버");
     expect(card.textContent).not.toMatch(/hermes|에이전트가 제안/);
     expect(pillOf(q(host, "ai-connect-card-grok")).text).toBe("준비 중");
     // 알약 하나에 버튼 하나.
@@ -307,7 +307,7 @@ describe("카드의 겉 (#2944 시안 ①)", () => {
   it("열리면 제목에 초점, 다시 마운트돼 claimFocus가 거짓이면 초점을 빼앗지 않는다", async () => {
     const host = mountCard();
     await until(host, "ai-connect-card-team");
-    expect(document.activeElement?.textContent).toBe("AI 연결");
+    expect(document.activeElement?.textContent).toBe("AI 계정");
     const other = document.createElement("textarea");
     document.body.append(other);
     other.focus();
@@ -948,7 +948,7 @@ describe("네 상태 · 권한", () => {
     vi.mocked(fetchProviderLink).mockRejectedValue(new ApiError(500, "서버 오류"));
     const host = mountCard({ line: "team" });
     const error = await until(host, "ai-connect-card-team-error");
-    expect(error.textContent).toContain("팀 연결을 불러오지 못했어요");
+    expect(error.textContent).toContain("팀 AI 키를 불러오지 못했어요");
     vi.mocked(fetchProviderLink).mockResolvedValue(KEY_LINK);
     act(() => error.querySelector("button")?.click());
     await until(host, "ai-connect-card-team");
@@ -968,7 +968,7 @@ describe("네 상태 · 권한", () => {
     vi.mocked(fetchProviderLink).mockImplementation(() => new Promise(() => undefined));
     vi.mocked(detectLocalHarnesses).mockImplementation(() => new Promise(() => undefined));
     const host = mountCard();
-    // 두 절이 각자 막대를 세운다(내 계정은 명부·CLI, 팀 연결은 provider_link).
+    // 두 절이 각자 막대를 세운다(내 계정은 명부·CLI, 팀 AI 키는 provider_link).
     await waitFor(() =>
       expect(host.querySelectorAll("[data-testid='skeleton'][aria-busy='true']").length).toBe(2)
     );

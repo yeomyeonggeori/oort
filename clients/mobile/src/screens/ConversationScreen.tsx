@@ -792,7 +792,7 @@ export default function ConversationScreen({
   const [pinsOpen, setPinsOpen] = useState(false);
   useEffect(() => setPinsOpen(false), [channelId]);
 
-  // AI 연결 카드 (#2945 GC-4, brief §3.2·Q1). **메시지가 아니다**: 이 기기·이 채널
+  // AI 계정 카드 (#2945 GC-4, brief §3.2·Q1). **메시지가 아니다**: 이 기기·이 채널
   // 화면에만 있고 서버에 아무것도 보내지 않는다. 채널당 한 장이고 닫기·채널 이동·
   // 앱 재시작에 사라진다. 방 id를 함께 들고 지금 방과 같을 때만 그리므로, 방을
   // 옮긴 첫 프레임에도 앞 방의 카드가 보이지 않는다(효과로 지우면 한 프레임 늦다).

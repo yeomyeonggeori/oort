@@ -82,7 +82,9 @@ import {
   EMDASH_CATEGORY,
   LATIN_PARTICLE_CATEGORY,
   PROGRESS_WORD_CATEGORY,
+  loadLegacyTerms,
   loadTypeScript,
+  makeLegacyTermCategory,
   runCases,
   scanSource,
   shipsStrings,
@@ -122,6 +124,8 @@ const CATEGORIES = [
   EMDASH_CATEGORY,
   PROGRESS_WORD_CATEGORY,
   LATIN_PARTICLE_CATEGORY,
+  // 옛 용어(#3445): 코어 문장은 두 클라가 그대로 렌더한다. 목록은 LEGACY_TERM_MAP 에서 읽는다.
+  makeLegacyTermCategory(loadLegacyTerms(ts, REPO_ROOT)),
   {
     key: "raw_color",
     rule: "raw color literal handed to a client (색은 클라의 토큰이 정한다 — 코어는 역할만 말한다)",
@@ -178,6 +182,18 @@ function scanCore() {
 // 코어 소스 한 조각과 그것이 받아야 하는 판정이다. `(A) 줄 기반`이 틀렸을 자리
 // 에는 그렇게 적어 두었다 — 이 표가 곧 (C)를 고른 근거다.
 const SELFTEST_CASES = [
+  {
+    want: ["legacy_term"],
+    file: "features/onboarding/aiConnect.ts",
+    why: "코어 문장의 「설정 › AI 연결」 — 두 클라가 그대로 렌더한다(#3445)",
+    src: 'export const LATER = "설정 › AI 연결에서 언제든 이어서 할 수 있어요.";',
+  },
+  {
+    want: [],
+    file: "features/onboarding/aiConnect.ts",
+    why: "치환된 「AI」 문장은 통과한다",
+    src: 'export const LATER = "AI에서 언제든 이어서 할 수 있어요.";',
+  },
   {
     want: ["emdash"],
     file: "features/x/copy.ts",

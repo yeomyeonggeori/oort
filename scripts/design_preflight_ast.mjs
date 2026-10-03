@@ -8,10 +8,13 @@
 //
 //   · scripts/design_preflight_core.mjs          packages/momo-core/src
 //         emdash · raw_color · hype · progress_word · latin_particle   (#1511)
+//         legacy_term                                                  (#3445)
 //   · scripts/design_preflight_web_strings.mjs   clients/web/src
 //         emdash · progress_word · latin_particle                      (#1511)
+//         legacy_term                                                  (#3445)
 //   · scripts/design_preflight_phone_strings.mjs clients/mobile/src
 //         progress_word · latin_particle                               (#1511 회전 1)
+//         legacy_term                                                  (#3445)
 //         em-dash 는 여기서 걸지 않는다 — 폰은 conversationHygiene.test.tsx 의
 //         `src/` 전수 스윕이 이미 잡는다. 같은 위반을 두 곳에서 세면 어느 쪽이
 //         정본인지 모르게 된다.
@@ -53,7 +56,7 @@
 // 규칙을 늘릴 자리다 — 지금 늘리면 영원히 0 인 줄이 하나 더 늘 뿐이다.
 // =============================================================================
 
-import { readdirSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 
@@ -62,7 +65,7 @@ import { createRequire } from "node:module";
  * 두 게이트를 함께 통과하려는 사람이 어느 쪽 마커인지부터 배워야 한다.
  *
  * 다는 자리는 둘이다: 문자열이 시작하는 줄의 뒤꼬리 주석, 또는 그 문자열을 담은
- * **선언의 머리 주석**. 뒤꼬리만 허용하면 사유가 100자짜리 문자열 뒤에 매달려
+ * **선언의 머리 주석**(`legacy_term` 만 바깥 선언들의 머리 주석도 본다, #3445). 뒤꼬리만 허용하면 사유가 100자짜리 문자열 뒤에 매달려
  * 아무도 읽지 않는데, 검토된 예외에서 정작 읽혀야 하는 것이 그 사유다.
  */
 export const ALLOW_MARKER = "design-preflight-allow";
@@ -128,6 +131,66 @@ export const LATIN_PARTICLE_CATEGORY = {
   hit: (text) =>
     /[A-Za-z] (은|는|이|가|을|를|과|와|의|로|으로|에|에서|도|만)(?=$|[^가-힣])/.test(text),
 };
+
+/**
+ * 옛 용어 분류 (AIH-10, #3445). 용어집(플랜 §2)이 흡수한 옛 말이 화면 문자열에 남으면
+ * 위반이다. 목록의 정본은 코어의 `LEGACY_TERM_MAP`(grepGate: true 항목)이고 여기서
+ * 베끼지 않는다 — `loadLegacyTerms` 가 그 파일을 파싱해 읽는다. 코어의 시험도 같은
+ * 표로 `findLegacyTerms` 를 고정하므로 두 갈래 정의가 생기지 않는다.
+ *
+ * 영문 식별자 꼴 항목(`owner_only`)은 **한글이 함께 든 문자열**에서만 위반이다. 맨
+ * 기계 값(`"owner_only"`)은 와이어 코드라 바꾸지 않는다(이슈 계약).
+ *
+ * 허용 예외는 한 가지 길뿐이다: `design-preflight-allow` 마커(문자열 줄의 뒤꼬리 또는
+ * 선언의 머리 주석, 바깥 선언 포함). 옛 말을 정의하는 표와 용어집이 그 자리다.
+ */
+export function makeLegacyTermCategory(terms) {
+  const isIdentifier = (term) => /^[\x21-\x7e]+$/.test(term);
+  return {
+    key: "legacy_term",
+    rule:
+      "옛 용어 (AI 허브 용어집 §2, #3445): 「AI 연결」→「AI」, 「오너」→「소유자」, 「합류」·「구독 붙이기」·「호스티드 에이전트」 등은 " +
+      "화면에서 쓰지 않는다. 목록 정본 = core LEGACY_TERM_MAP(grepGate). 예외는 design-preflight-allow 마커 + PR 근거",
+    hit: (text) =>
+      terms.some((term) => text.includes(term) && (!isIdentifier(term) || /[가-힣]/.test(text))),
+  };
+}
+
+/** core 의 LEGACY_TERM_MAP 에서 grepGate 항목의 `old` 를 읽는다. 못 읽으면 던진다(조용한 초록 금지). */
+export function loadLegacyTerms(ts, repoRoot) {
+  const file = join(repoRoot, "packages/momo-core/src/features/ai/aiHubModel.ts");
+  const sf = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.ES2022, true);
+  const terms = [];
+  let found = false;
+  const visit = (node) => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      node.name.getText(sf) === "LEGACY_TERM_MAP" &&
+      node.initializer &&
+      ts.isArrayLiteralExpression(node.initializer)
+    ) {
+      found = true;
+      for (const el of node.initializer.elements) {
+        if (!ts.isObjectLiteralExpression(el)) continue;
+        let old = null;
+        let gate = false;
+        for (const prop of el.properties) {
+          if (!ts.isPropertyAssignment(prop)) continue;
+          const name = prop.name.getText(sf);
+          if (name === "old" && ts.isStringLiteralLike(prop.initializer)) old = prop.initializer.text;
+          if (name === "grepGate" && prop.initializer.kind === ts.SyntaxKind.TrueKeyword) gate = true;
+        }
+        if (old && gate) terms.push(old);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  if (!found || terms.length === 0) {
+    throw new Error(`LEGACY_TERM_MAP(grepGate)를 ${file} 에서 읽지 못했다`);
+  }
+  return terms;
+}
 
 /**
  * `typescript` 를 찾는다. 워크스페이스 루트로 호이스트되기도 하고 패키지 안에 남기도
@@ -238,23 +301,30 @@ export function scanSource(ts, fileName, text, categories) {
     return null;
   };
 
-  const allowed = (node, line) => {
+  // outer=false: 가장 가까운 칸만(모든 기존 분류의 의미). outer=true: 바깥 선언들의 머리
+  // 주석도 본다 — `legacy_term` 만 쓴다(#3445). 옛 말을 **정의**하는 표(LEGACY_TERM_MAP)는
+  // 항목마다 마커를 달 수 없어서 표 선언 하나의 머리 주석이 그 안 전부를 덮어야 한다.
+  // 다른 분류에 이 상승을 주면 컴포넌트 머리의 마커 하나가 본문 전체의 em-dash 를 지운다.
+  const allowed = (node, line, outer) => {
     // ① 문자열이 시작하는 줄의 뒤꼬리 주석. 여러 줄 템플릿이면 그 시작 줄이다.
     if ((lines[line] ?? "").includes(ALLOW_MARKER)) return true;
     // ② 그 칸의 머리 주석(`//` 든 `/** */` 든). 파서가 붙여 주므로 「주석을 어떻게
     //    알아보나」를 여기서도 다시 풀지 않는다.
-    const declaration = enclosingDeclaration(node);
-    if (!declaration) return false;
-    const ranges = ts.getLeadingCommentRanges(text, declaration.getFullStart()) ?? [];
-    return ranges.some((r) => text.slice(r.pos, r.end).includes(ALLOW_MARKER));
+    for (let declaration = enclosingDeclaration(node); declaration; ) {
+      const ranges = ts.getLeadingCommentRanges(text, declaration.getFullStart()) ?? [];
+      if (ranges.some((r) => text.slice(r.pos, r.end).includes(ALLOW_MARKER))) return true;
+      if (!outer) return false;
+      declaration = enclosingDeclaration(declaration);
+    }
+    return false;
   };
 
   const record = (node, literalText) => {
     // JsxText 의 getStart 는 앞 공백을 건너뛰므로 보고되는 줄이 글자가 실제로
     // 시작하는 줄이다(TS 의 getTokenPosOfNode 가 JsxText 를 특례로 다룬다).
     const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line;
-    if (allowed(node, line)) return;
     for (const category of categories) {
+      if (allowed(node, line, category.key === "legacy_term")) continue;
       if (category.hit(literalText)) {
         hits.push({
           key: category.key,

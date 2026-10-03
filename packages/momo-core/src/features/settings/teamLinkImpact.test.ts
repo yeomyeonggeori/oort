@@ -51,7 +51,7 @@ describe("teamLinkAffectedAgents (#2880)", () => {
   });
 
   it("본문은 읽은 수만 말한다", () => {
-    expect(teamUnlinkTitle("OpenAI · 팀 기본")).toBe("OpenAI · 팀 기본 연결을 끊을까요?");
+    expect(teamUnlinkTitle("OpenAI · 팀 AI 키")).toBe("OpenAI · 팀 AI 키 연결을 끊을까요?");
     expect(teamUnlinkBody([{ id: "a", name: "a", where: null, paused: false }])).toMatch(/^이 키를 쓰는 팀 에이전트 1개가/);
     expect(teamUnlinkBody([])).toMatch(/^지금 이 키를 쓰는 팀 에이전트는 없어요/);
     expect(teamUnlinkBody(null)).not.toMatch(/\d/);

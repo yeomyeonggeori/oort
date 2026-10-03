@@ -41,7 +41,7 @@ import { formatMoment } from "./oauthGrant";
 // 설정 › 연결 › 에이전트 자격 (#2204).
 //
 // 목록은 이 화면의 것이고, 발급·재발급·해제·도어벨은 이미 있는 표면을 연다.
-// 위저드·1회용 카드·해제 장부를 여기 복제하지 않는다. 1회용 연결 값은 목록에
+// 위저드·1회용 카드·해제 장부를 여기 복제하지 않는다. 연결 값은 목록에
 // 없고, 위저드 안의 OneTimeSecretCard 에만 선다.
 //
 // 목록 키는 연결 `id` 다. 부분 unique index 때문에 한 에이전트 멤버가 만료 행과
@@ -50,7 +50,7 @@ import { formatMoment } from "./oauthGrant";
 
 const CREDENTIALS_OFFLINE_NOTE_ID = "agent-credentials-offline-note";
 const CREDENTIALS_OFFLINE_REASON =
-  "연결이 끊겨 지금은 자격을 발급하거나 바꿀 수 없습니다.";
+  "연결이 끊겨 지금은 연결 값을 발급하거나 바꿀 수 없어요.";
 
 export type CredentialsRowAction = "disconnect" | "doorbell" | "record";
 
@@ -253,7 +253,7 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
       }}
       data-testid={testId}
     >
-      새 자격 발급
+      새 연결 값 발급
     </Button>
   );
 
@@ -272,20 +272,20 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
       <SectionShell
         title="에이전트 자격"
         lines={[
-          "다른 인프라에서 도는 에이전트를 이 워크스페이스에 들이는 연결입니다.",
-          "1회용 연결 값은 발급 직후 한 번만 보입니다. 해제는 서버가 끊겼다고 답한 뒤에야 끝납니다.",
+          "다른 인프라에서 도는 에이전트를 이 워크스페이스에 들이는 연결이에요.",
+          "연결 값은 발급 직후 한 번만 보여요. 해제는 서버가 끊겼다고 답한 뒤에야 끝나요.",
         ]}
       >
         {list.isPending && (
           <div role="status" data-testid="agent-credentials-loading">
-            <span className="sr-only">연결 목록을 불러오는 중입니다.</span>
+            <span className="sr-only">연결 목록을 불러오는 중이에요.</span>
             <Skeleton ready={false} rows={3} className="p-0" />
           </div>
         )}
 
         {list.isError && isHostedOperatorDenied(list.error) && (
           <OperatorNotice
-            who="외부 에이전트 연결은 소유자·관리자만 볼 수 있습니다."
+            who="외부 에이전트 연결은 소유자·관리자만 볼 수 있어요."
             contact="봐야 한다면 소유자·관리자에게 문의하세요."
           />
         )}
@@ -303,8 +303,8 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
         {list.isSuccess && rows.length === 0 && (
           <div className="flex min-w-0 flex-col gap-2">
             <EmptyInvite
-              headline="아직 연결된 에이전트가 없습니다."
-              detail="자격을 발급하면 1회용 연결 값이 한 번 열립니다. 그 값으로 에이전트가 합류합니다."
+              headline="아직 연결된 에이전트가 없어요."
+              detail="연결 값을 발급하면 한 번 열려요. 그 값으로 에이전트가 연결돼요."
               className="px-0"
               actions={issueButton("agent-credentials-issue")}
               testId="agent-credentials-empty"

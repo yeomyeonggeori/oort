@@ -37,13 +37,13 @@ export interface EnabledToolsSectionProps {
   save: (enabledTools: string[]) => Promise<ToolsSaveResult>;
 }
 
-const OFFLINE_REASON = "연결이 끊긴 동안에는 바꿀 수 없습니다.";
+const OFFLINE_REASON = "연결이 끊긴 동안에는 바꿀 수 없어요.";
 const SAVE_ERROR =
-  "도구 허용을 저장하지 못했습니다. 연결을 확인하고 다시 시도하세요.";
-const SAVE_IDLE_REASON = "바꿀 내용이 없습니다.";
+  "도구 허용을 저장하지 못했어요. 연결을 확인하고 다시 시도하세요.";
+const SAVE_IDLE_REASON = "바꿀 내용이 없어요.";
 const TOOLS_EDITOR_LEAD =
-  "이 에이전트가 부를 수 있는 도구입니다. 바꾼 뒤에는 저장해야 반영됩니다.";
-const TOOLS_DISPLAY_LEAD = "이 에이전트에 허용된 도구입니다.";
+  "이 에이전트가 부를 수 있는 도구예요. 바꾼 뒤에는 저장해야 반영돼요.";
+const TOOLS_DISPLAY_LEAD = "이 에이전트에 허용된 도구예요.";
 
 /**
  * Reading this as: Agent Hub profile tools section for internal team users on
@@ -245,7 +245,7 @@ export function EnabledToolsSection({
             <InlineBanner
               message={
                 catalogMessage ??
-                "도구 목록을 불러오지 못했습니다. 연결을 확인하고 다시 시도하세요."
+                "도구 목록을 불러오지 못했어요. 연결을 확인하고 다시 시도하세요."
               }
               actionLabel={onRetryCatalog ? "다시 시도" : undefined}
               onAction={onRetryCatalog}
@@ -258,7 +258,7 @@ export function EnabledToolsSection({
               separator={false}
               message={
                 catalogMessage ??
-                "이 계정으로는 이 에이전트의 도구 허용을 바꿀 수 없습니다."
+                "이 계정으로는 이 에이전트의 도구 허용을 바꿀 수 없어요."
               }
               testId="agent-hub-enabled-tools-forbidden"
             />

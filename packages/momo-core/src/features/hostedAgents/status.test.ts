@@ -131,7 +131,7 @@ describe("① status decoding", () => {
     const off = artifact({ kind: "routine", currentStatus: "inactive", resolved: false });
     expect(cleanupRowState(off)).toBe("observed");
     expect(cleanupRowTone(cleanupRowState(off))).toBe("warn");
-    expect(cleanupRowDetail(off)).toContain("아직 확인으로 넘어가지 않았습니다");
+    expect(cleanupRowDetail(off)).toContain("아직 확인으로 넘어가지 않았어요");
   });
 });
 
@@ -208,10 +208,10 @@ describe("③ secret redaction", () => {
       resolved: true,
       disposition: "removed",
       source: "manual",
-      evidence: "커넥터 목록에서 제거를 눌렀고 목록에서 사라졌습니다",
+      evidence: "커넥터 목록에서 제거를 눌렀고 목록에서 사라졌어요",
     });
     expect(cleanupEvidenceText(row)).toBe(
-      "커넥터 목록에서 제거를 눌렀고 목록에서 사라졌습니다"
+      "커넥터 목록에서 제거를 눌렀고 목록에서 사라졌어요"
     );
   });
 });
@@ -265,7 +265,7 @@ describe("progress and the assembled views", () => {
     expect(progress.resolved).toBe(1);
     expect(progress.remainingRequired).toBe(2);
     expect(progress.nextTitle).toBe("커넥터 설치");
-    expect(cleanupProgressSentence(progress)).toContain("2개 남았습니다");
+    expect(cleanupProgressSentence(progress)).toContain("2개 남았어요");
     expect(cleanupProgressSentence(progress)).toContain("커넥터 설치");
   });
 
@@ -274,7 +274,7 @@ describe("progress and the assembled views", () => {
       artifact({ resolved: true, source: "manual", disposition: "removed" }),
     ]);
     expect(progress.remainingRequired).toBe(0);
-    expect(cleanupProgressSentence(progress)).toContain("모두 확인했습니다");
+    expect(cleanupProgressSentence(progress)).toContain("모두 확인했어요");
   });
 
   it("builds a list row from status vocabulary, without inventing a cleanup count", () => {
@@ -288,7 +288,7 @@ describe("progress and the assembled views", () => {
     expect(row.statusLabel).toBe("감지됨");
     expect(row.statusTone).toBe("warn");
     // detected-without-credential and detected-with-credential are different sentences.
-    expect(row.statusDetail).toContain("아직 아무 권한도 열리지 않았습니다");
+    expect(row.statusDetail).toContain("아직 아무 권한도 열리지 않았어요");
   });
 
   it("assembles a detail view: facts, status, times, and read-only cleanup rows", () => {
