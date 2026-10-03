@@ -121,6 +121,41 @@ describe("ComposerAutocompleteList with agent annotations", () => {
     expect(legacy?.querySelector("[data-testid='mention-agent-line']")).toBeNull();
   });
 
+  it("keeps the chip in its own column so a long wrapped name cannot push it to another line", () => {
+    const long = agent({
+      handle: "long",
+      displayName: "성재의 아주 긴 이름을 가진 Claude Code 에이전트 (개발팀 공용 아님)",
+      brain: "subscription",
+      callableBy: "owner_only",
+      ownerHumanId: OWNER,
+      owner: { id: OWNER, displayName: "성재" },
+    });
+    mount(
+      createElement(ComposerAutocompleteList, {
+        id: "l",
+        kind: "mention",
+        candidates: memberCandidates([long], "", undefined, VIEWER),
+        highlight: 0,
+        onChoose: () => undefined,
+        testId: "l",
+        optionTestId: "o",
+      })
+    );
+    const option = document.querySelector<HTMLElement>("[data-testid='o']") as HTMLElement;
+    const chip = option.querySelector<HTMLElement>("[data-testid='mention-badge']") as HTMLElement;
+    const main = option.querySelector<HTMLElement>("[data-testid='mention-agent-main']") as HTMLElement;
+    // 칩은 이름을 담은 칸의 자식이 아니라 버튼의 직접 자식(오른쪽 고정 칸)이고 첫 줄에 붙는다.
+    expect(chip.parentElement).toBe(option);
+    expect(main.parentElement).toBe(option);
+    expect(chip.className).toContain("self-start");
+    expect(chip.className).toContain("shrink-0");
+    expect(main.className).toContain("flex-1");
+    expect(main.className).toContain("min-w-0");
+    // 이름은 자르지 않는다.
+    expect(main.querySelector(".truncate")).toBeNull();
+    expect(option.className).not.toContain("flex-wrap");
+  });
+
   it("stays selectable: a locked row still inserts the handle", () => {
     const chosen: string[] = [];
     mount(

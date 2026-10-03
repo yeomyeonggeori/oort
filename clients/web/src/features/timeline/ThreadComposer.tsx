@@ -260,7 +260,7 @@ export function ThreadComposer({
           />
         )}
         {agentNotice !== null && (
-          <p role="status" className="pb-2 text-meta text-warn" data-testid="thread-composer-agent-notice">
+          <p role="status" className="px-3 pb-2 text-meta text-warn" data-testid="thread-composer-agent-notice">
             {agentNotice}
           </p>
         )}

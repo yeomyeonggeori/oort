@@ -155,7 +155,8 @@ export function ComposerAutocompleteList({
                 onChoose(candidate);
               }}
               className={cn(
-                "flex w-full flex-wrap items-center gap-x-2 rounded-sm px-2 py-1 text-left text-body",
+                "flex w-full gap-x-2 rounded-sm px-2 py-1 text-left text-body",
+                agent ? "items-start" : "flex-wrap items-center",
                 index === highlight
                   ? "bg-accent-soft active:bg-surface-pressed"
                   : "hover:bg-surface-hover active:bg-surface-pressed",
@@ -164,39 +165,57 @@ export function ComposerAutocompleteList({
                 locked && index !== highlight ? "text-ink-muted" : "text-ink"
               )}
             >
-              {candidate.mark === "private-channel" && (
-                // 사이드바·⌘K 와 같은 글리프이고 같은 자리다(이름 앞, `#` 대신).
-                // 행의 접근 이름은 방 이름이 진다 — 그 두 표면도 같은 규율이다.
-                <Lock className="size-4 shrink-0" aria-hidden="true" />
-              )}
-              <span className="line-clamp-2 break-words">{candidate.lead}</span>
-              {locked && <Lock className="size-3 shrink-0" aria-hidden="true" data-testid="mention-locked-mark" />}
-              {candidate.hint !== "" && (
-                <span
-                  className={cn(
-                    "text-meta text-ink-muted",
-                    // 주석이 있는 줄(에이전트)은 이름을 자르지 않고 감싼다: 표시 이름이 사람이 고르는 기준이다.
-                    agent ? "min-w-0 max-w-full break-words" : "min-w-0 flex-1 truncate"
+              {agent ? (
+                // 에이전트 줄은 두 칸이다: 왼쪽(이름 줄 + 보조 줄, 이름은 이 칸 안에서 감싼다)과
+                // 오른쪽 칩(첫 줄에 붙은 고정 칸). 한 줄 flex-wrap 으로 두면 긴 표시 이름이 칩을
+                // 다음 줄로 밀어낸다(design-review H).
+                <>
+                  <span className="min-w-0 flex-1" data-testid="mention-agent-main">
+                    <span className="flex flex-wrap items-baseline gap-x-2">
+                      <span className="break-words">{candidate.lead}</span>
+                      {locked && (
+                        <Lock
+                          className="size-3 shrink-0 self-center"
+                          aria-hidden="true"
+                          data-testid="mention-locked-mark"
+                        />
+                      )}
+                      {candidate.hint !== "" && (
+                        <span className="min-w-0 break-words text-meta text-ink-muted">
+                          {candidate.hint}
+                        </span>
+                      )}
+                    </span>
+                    <span
+                      className="block break-words text-meta text-ink-muted"
+                      data-testid="mention-agent-line"
+                    >
+                      {agent.line}
+                    </span>
+                  </span>
+                  {agent.badge && (
+                    <span
+                      className="shrink-0 self-start rounded-full bg-surface-muted px-2 text-timestamp text-ink-muted"
+                      data-testid="mention-badge"
+                    >
+                      {agent.badge}
+                    </span>
                   )}
-                >
-                  {candidate.hint}
-                </span>
-              )}
-              {agent?.badge && (
-                <span
-                  className="ml-auto shrink-0 rounded-full bg-surface-muted px-2 text-timestamp text-ink-muted"
-                  data-testid="mention-badge"
-                >
-                  {agent.badge}
-                </span>
-              )}
-              {agent && (
-                <span
-                  className="basis-full break-words text-meta text-ink-muted"
-                  data-testid="mention-agent-line"
-                >
-                  {agent.line}
-                </span>
+                </>
+              ) : (
+                <>
+                  {candidate.mark === "private-channel" && (
+                    // 사이드바·⌘K 와 같은 글리프이고 같은 자리다(이름 앞, `#` 대신).
+                    // 행의 접근 이름은 방 이름이 진다 — 그 두 표면도 같은 규율이다.
+                    <Lock className="size-4 shrink-0" aria-hidden="true" />
+                  )}
+                  <span className="line-clamp-2 break-words">{candidate.lead}</span>
+                  {candidate.hint !== "" && (
+                    <span className="min-w-0 flex-1 truncate text-meta text-ink-muted">
+                      {candidate.hint}
+                    </span>
+                  )}
+                </>
               )}
             </button>
           </li>

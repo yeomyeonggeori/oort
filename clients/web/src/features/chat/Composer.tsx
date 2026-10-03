@@ -57,7 +57,7 @@ import { useMentionRouting } from "@/features/routing/useMentionRouting";
 import { mentionRoutingTarget } from "@momo/core/features/routing/mentionTargets";
 import { routingPayload } from "@momo/core/features/routing/routingModel";
 import { calledAgents } from "@momo/core/features/routing/mentionTargets";
-import { composerAgentNotice } from "@momo/core/features/ai/aiMention";
+import { agentWillNotAnswer, composerAgentNotice } from "@momo/core/features/ai/aiMention";
 import type { QuoteDraft } from "@momo/core/features/timeline/quote";
 import { QuoteChip } from "@/features/timeline/QuoteBlock";
 import { TypingLine } from "@/features/chat/TypingLine";
@@ -603,10 +603,11 @@ export function Composer({
   );
   const routing = useMentionRouting(routingTarget);
   // 못 부르는(남의 구독·개인 키) 또는 쉬는(Claude 문의 중) 에이전트를 부르는 글이면 한 줄 (AIH-9).
-  const agentNotice = useMemo(
-    () => composerAgentNotice(calledAgents(routingTarget), session.member.id),
-    [routingTarget, session.member.id]
-  );
+  const calledNow = calledAgents(routingTarget);
+  const agentNotice = composerAgentNotice(calledNow, session.member.id);
+  // 부른 에이전트가 전부 답하지 않으면 「이번만 바꾸기」 줄은 거짓 약속이다: 한 줄이 그 자리를 대신한다.
+  const noneAnswer =
+    calledNow.length > 0 && calledNow.every((agent) => agentWillNotAnswer(agent, session.member.id));
 
   // 줄이 한 번 생기면 이 글을 다 쓸 때까지 자리를 비워 둔다.
   //
@@ -905,7 +906,7 @@ export function Composer({
           보여야 한다. Cursor가 모델 피커를 입력창 하단 바에 둔 이유와 같고
           (레퍼런스 §2), 상속 상태에서도 사라지지 않는 이유는 "바꾸지 않으면
           무엇이 되는가"가 이 줄의 본래 내용이기 때문이다. */}
-      {hasTarget ? (
+      {hasTarget && !noneAnswer ? (
         <MentionRoutingBar
           channelId={channelId}
           target={routingTarget}
@@ -924,9 +925,14 @@ export function Composer({
 
       {agentNotice !== null && (
         // 보내기 전에 말한다: 선택은 막지 않지만 보내도 답이 오지 않는다. 문장은 코어가 만든다.
+        // 자리와 안쪽 여백은 라우팅 줄(`MENTION_ROUTING_ROW_CLASS`, px-4)과 같다. 전부 답하지 않는
+        // 글에서는 이 줄이 라우팅 줄을 대신한다.
         <p
           role="status"
-          className="px-6 pb-2 text-meta text-warn"
+          className={cn(
+            "flex min-h-8 items-center px-4 py-1 text-meta text-warn",
+            noneAnswer && "border-t border-line"
+          )}
           data-testid="composer-agent-notice"
         >
           {agentNotice}

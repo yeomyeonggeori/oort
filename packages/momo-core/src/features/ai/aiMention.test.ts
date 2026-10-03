@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RosterMember } from "../../lib/api";
 import { CLAUDE_SUBSCRIPTION_AGENT_PAUSED } from "./aiHubModel";
-import { composerAgentNotice, mentionAnnotation } from "./aiMention";
+import { agentWillNotAnswer, composerAgentNotice, mentionAnnotation } from "./aiMention";
 
 const VIEWER = "00000000-0000-7000-8000-00000000000a";
 const OWNER = "00000000-0000-7000-8000-00000000000b";
@@ -112,5 +112,16 @@ describe("composerAgentNotice", () => {
     expect(composerAgentNotice([teamKey, otherSub, otherKey], VIEWER)).toBe(
       "성재의 Claude Code는 성재 님만 부를 수 있어요. 보내도 답하지 않아요. 외 1명도 답하지 않아요."
     );
+  });
+});
+
+describe("agentWillNotAnswer", () => {
+  it("is true only for agents that cannot be called or are paused", () => {
+    expect(agentWillNotAnswer(otherSub, VIEWER)).toBe(true);
+    expect(agentWillNotAnswer(otherKey, VIEWER)).toBe(true);
+    expect(agentWillNotAnswer(pausedMine, VIEWER)).toBe(true);
+    expect(agentWillNotAnswer(teamKey, VIEWER)).toBe(false);
+    expect(agentWillNotAnswer(mineSub, VIEWER)).toBe(false);
+    expect(agentWillNotAnswer(otherSub, null)).toBe(false);
   });
 });

@@ -12,13 +12,17 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "../gates/preview-guard.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/ai-mention");
-const PORT = Number(process.env.CAPTURE_PORT || 5237);
+const PORT = Number(process.env.CAPTURE_PORT || 5347);
+
+// 라우팅 줄이 읽는 세 물음(프로필 · 허용 모델 · effort 표)을 서버 형상 그대로 답한다.
+const ROUTING = JSON.parse(readFileSync(resolve(WEB_ROOT, "src/features/routing/routingFixtures.json"), "utf8"));
 
 const workspaceId = "00000000-0000-7000-8000-000000000001";
 const memberId = "00000000-0000-7000-8000-000000000101";
@@ -86,6 +90,10 @@ async function installRoutes(context) {
     if (path.endsWith("/work-hosts")) return json(route, { workHosts: [] });
     if (path.endsWith("/work-sessions/shared")) return json(route, { sessions: [], nextCursor: null });
     if (path.endsWith("/work-sessions")) return json(route, { workSessions: [] });
+    if (path.endsWith("/effort-table")) return json(route, ROUTING.effortTable);
+    if (path.endsWith("/allowed-models")) return json(route, {});
+    if (path.endsWith("/profile")) return json(route, { profile: ROUTING.inherit.profile });
+    if (path.endsWith("/replies")) return json(route, { messages: [] });
     if (path.includes("/messages")) return json(route, { messages: [message] });
     return json(route, {});
   });
@@ -166,6 +174,13 @@ async function scenes(browser, origin, scheme, viewport) {
     for (const h of ["kim-intern", "haneul-codex", "hermes"]) {
       check(`${tag} ${h} 잠금 아님`, (await lineOf(page, h).getAttribute("data-locked")) === null);
     }
+    // 긴 표시 이름(「성재의 Claude Code」)이 감겨도 칩은 이름 줄(첫 줄)에 붙어 있다.
+    for (const h of ["seongjae-claude", "seongjae-codex", "kim-intern"]) {
+      const opt = lineOf(page, h);
+      const first = await opt.locator("span").first().boundingBox();
+      const chip = await opt.getByTestId("mention-badge").boundingBox();
+      check(`${tag} ${h} 칩이 첫 줄에 붙음 (칩 top ${Math.round(chip.y)} / 줄 top ${Math.round(first.y)})`, Math.abs(chip.y - first.y) <= 6);
+    }
     check(`${tag} 가로 넘침 0`, (await overflowX(page)) === 0);
     const box = await page.getByTestId("composer-mention-list").boundingBox();
     check(`${tag} 목록이 화면 안`, box.x >= 0 && box.x + box.width <= viewport.width, JSON.stringify(box));
@@ -177,6 +192,7 @@ async function scenes(browser, origin, scheme, viewport) {
     await notice.waitFor();
     await page.waitForTimeout(300);
     await page.screenshot({ path: resolve(OUT_DIR, `composer-locked-notice-${tag}.png`) });
+    check(`${tag} 못 부르는 글: 라우팅 줄(이번만 바꾸기)이 없고 한 줄이 대신한다`, (await page.getByText("이번만 바꾸기").count()) === 0 && (await page.getByText("확인하지 못했습니다").count()) === 0);
     check(`${tag} 한 줄: 못 부름`, ((await notice.textContent()) ?? "").endsWith("성재 님만 부를 수 있어요. 보내도 답하지 않아요."), String(await notice.textContent()));
 
     // Claude 문의 중 (내 에이전트)
@@ -187,9 +203,39 @@ async function scenes(browser, origin, scheme, viewport) {
     check(`${tag} 한 줄: 문의 중`, ((await notice.textContent()) ?? "").includes("약관 확인 전까지 쉬고 있어요"));
     check(`${tag} 한 줄 가로 넘침 0`, (await overflowX(page)) === 0);
 
-    // 부를 수 있는 에이전트는 한 줄이 없다
+    // 부를 수 있는 에이전트는 한 줄이 없고 라우팅 줄이 선다
     await input.fill("@kim-intern 요약 부탁해요");
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(600);
+    await page.screenshot({ path: resolve(OUT_DIR, `composer-callable-routing-${tag}.png`) });
+    check(`${tag} 부를 수 있으면 라우팅 줄이 선다`, (await page.getByText("이번만 바꾸기").count()) > 0);
+    check(`${tag} 라우팅 줄에 오류 문구 없음`, (await page.getByText("확인하지 못했습니다").count()) === 0 && (await page.getByText("불러오지 못해").count()) === 0);
+    // 왼쪽 안쪽 여백: 한 줄과 라우팅 줄이 같은 x 에서 시작한다
+    await input.fill("@seongjae-codex 요약 부탁해요");
+    await notice.waitFor();
+    const noticePad = await notice.evaluate((el) => { const r = el.getBoundingClientRect(); return r.x + parseFloat(getComputedStyle(el).paddingLeft); });
+    await input.fill("@kim-intern @seongjae-codex 요약 부탁해요");
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: resolve(OUT_DIR, `composer-mixed-${tag}.png`) });
+    const routingX = await page.getByText("이번만 바꾸기").first().evaluate((el) => { const d = el.closest("div.px-4") ?? el.closest("div"); const r = d.getBoundingClientRect(); return r.x + parseFloat(getComputedStyle(d).paddingLeft); });
+    check(`${tag} 한 줄 왼쪽 여백 = 라우팅 줄 왼쪽 여백 (${Math.round(noticePad)} / ${Math.round(routingX)})`, Math.abs(noticePad - routingX) <= 1);
+
+    // 스레드 패널의 작성창
+    await input.fill("");
+    const msg = page.getByTestId("timeline-message").first();
+    await msg.hover();
+    await page.getByRole("button", { name: /답글/ }).first().click();
+    const tinput = page.getByTestId("thread-panel").locator("textarea");
+    await tinput.waitFor({ timeout: 8000 });
+    await tinput.click();
+    await page.keyboard.type("@seongjae-codex 부탁해요");
+    const tnotice = page.getByTestId("thread-composer-agent-notice");
+    await tnotice.waitFor();
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: resolve(OUT_DIR, `thread-locked-notice-${tag}.png`) });
+    const tn = await tnotice.evaluate((el) => { const r = el.getBoundingClientRect(); return { x: r.x + parseFloat(getComputedStyle(el).paddingLeft) }; });
+    const ti = await tinput.boundingBox();
+    check(`${tag} 스레드 한 줄 왼쪽 = 입력 글자 왼쪽 (${Math.round(tn.x)} / ${Math.round(ti.x + 12)})`, Math.abs(tn.x - (ti.x + 12)) <= 4);
+    check(`${tag} 스레드 가로 넘침 0`, (await overflowX(page)) === 0);
     check(`${tag} 팀 키 에이전트는 한 줄 없음`, (await page.getByTestId("composer-agent-notice").count()) === 0);
   } finally {
     await context.close();

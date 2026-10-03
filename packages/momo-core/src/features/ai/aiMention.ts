@@ -69,3 +69,11 @@ export function composerAgentNotice(agents: readonly RosterMember[], viewerHuman
   if (notices.length === 1) return notices[0];
   return `${notices[0]} 외 ${notices.length - 1}명도 답하지 않아요.`;
 }
+
+/** 이 에이전트는 보는 사람이 불러도 답하지 않는다(못 부름 또는 Claude 문의 중). */
+export function agentWillNotAnswer(agent: RosterMember, viewerHumanId: string | null | undefined): boolean {
+  if (agent.kind !== "agent") return false;
+  const c = classifyRosterAgent(agent, viewerHumanId);
+  const name = agent.displayName;
+  return (nonOwnerComposerNotice(c, name) ?? pausedComposerNotice(c, name)) !== null;
+}
