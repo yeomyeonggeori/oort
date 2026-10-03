@@ -17,12 +17,12 @@ export function AiHubMovedLink({ section }: { section: string }) {
   const row = aiExternalRowFromSettings(section);
   const to = row?.path ?? aiHubSection(target).path;
   return (
-    <p className="mb-4 flex flex-wrap items-center gap-2 text-meta text-ink-muted" data-testid="ai-hub-moved-link">
+    <p className="mb-4 break-keep text-meta text-ink-muted" data-testid="ai-hub-moved-link">
       <span>{row?.settingsLine ?? AI_HUB_NAV_COPY.movedToHub}</span>
-      <span aria-hidden="true">·</span>
+      <span aria-hidden="true" className="mx-2">·</span>
       <Link
         to={to}
-        className="font-semibold text-ink underline underline-offset-4 press focus-visible:focus-ring"
+        className="whitespace-nowrap font-semibold text-ink underline underline-offset-4 press focus-visible:focus-ring"
       >
         {AI_HUB_NAV_COPY.movedToHubAction}
       </Link>

@@ -171,7 +171,7 @@ export const AI_EXTERNAL_ROWS: readonly AiExternalRow[] = [
     countNoun: "설치",
     path: `${AI_EXTERNAL_BASE_PATH}/apps`,
     fromSettings: "plugins",
-    settingsLine: "앱은 AI 허브 › 외부 연결의 「앱」으로 옮겼어요.",
+    settingsLine: "앱은 AI › 외부 연결의 「앱」으로 옮겼어요.",
   },
   {
     id: "incoming",
@@ -186,7 +186,7 @@ export const AI_EXTERNAL_ROWS: readonly AiExternalRow[] = [
     countNoun: "주소",
     path: `${AI_EXTERNAL_BASE_PATH}/incoming`,
     fromSettings: "webhooks",
-    settingsLine: "웹훅은 AI 허브 › 외부 연결의 「채널로 들어오는 주소」로 옮겼어요.",
+    settingsLine: "웹훅은 AI › 외부 연결의 「채널로 들어오는 주소」로 옮겼어요.",
   },
   {
     id: "outgoing",
@@ -201,7 +201,7 @@ export const AI_EXTERNAL_ROWS: readonly AiExternalRow[] = [
     countNoun: "구독",
     path: `${AI_EXTERNAL_BASE_PATH}/outgoing`,
     fromSettings: "events",
-    settingsLine: "이벤트 구독은 AI 허브 › 외부 연결의 「밖으로 보내는 알림」으로 옮겼어요.",
+    settingsLine: "이벤트 구독은 AI › 외부 연결의 「밖으로 보내는 알림」으로 옮겼어요.",
   },
   {
     id: "externalAgents",
@@ -216,7 +216,7 @@ export const AI_EXTERNAL_ROWS: readonly AiExternalRow[] = [
     countNoun: "연결",
     path: `${AI_EXTERNAL_BASE_PATH}/agents`,
     fromSettings: "agents",
-    settingsLine: "에이전트 자격은 AI 허브 › 외부 연결의 「외부 에이전트 연결」로 옮겼어요.",
+    settingsLine: "에이전트 자격은 AI › 외부 연결의 「외부 에이전트 연결」로 옮겼어요.",
   },
   {
     id: "hostedBotInvite",
@@ -239,7 +239,7 @@ export const AI_EXTERNAL_COPY = {
   back: "외부 연결",
   inviteHref: "/ai/agents?create=1",
   codeHost: {
-    text: "코드 실행 호스트(내 작업이 도는 맥·서버)는 「내 작업」 관련이라 설정에 남겨 두고, 이 화면에서 링크만 걸어요.",
+    text: "코드 실행 호스트(내 작업이 도는 맥·서버)는 「내 작업」 관련이라 설정에 있어요.",
     action: "설정에서 열기",
     href: "/settings?section=code",
   },
