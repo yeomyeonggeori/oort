@@ -554,6 +554,13 @@ resumes delivery without an announcement. Subscription agents are hosted
 agents, so they also need `MOMO_HOSTED_DELIVERY_ENABLED=true` to receive
 anything.
 
+**Claude subscription agents are off by default** (`MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`,
+owner decision 2026-10-03 while Anthropic's reply is pending, [ADR-0193](adr/0193-onboarding-2-subscription-agent-boundary.md)
+D17). Only an exact `true` lets the register-after-login endpoint accept a
+Claude Code agent; otherwise it answers `409 claude_subscription_agent_paused`
+and Claude subscription agents report `brainUnavailableReason`. Codex agents are
+not affected. Restart **api** after changing it.
+
 ---
 
 ## What just came up
