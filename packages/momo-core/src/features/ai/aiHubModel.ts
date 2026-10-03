@@ -1,4 +1,6 @@
 import { particleFor } from "../../lib/koreanParticle";
+import type { AiDefaultRowId, AiDefaultsTeamKey } from "../settings/aiDefaults";
+import { teamKeyHost } from "../settings/aiDefaults";
 
 // =============================================================================
 // 「AI」 허브 용어·라벨 모델 (AIH-1, #3391, claudedocs/ai-hub-2026-10/plan.md).
@@ -171,6 +173,179 @@ export function teamKeyOperatorOnlyNotice(operatorName?: string | null): string 
   const name = cleanName(operatorName);
   const who = name ? `${name} 님` : "운영자";
   return `팀 키는 운영자만 보고 바꿀 수 있어요. 필요하면 ${who}에게 요청하세요.`;
+}
+
+// ---------------------------------------------------------------------------
+// 「팀 AI 키」 구획과 「기본 AI」 표 (AIH-6, #3400, 플랜 §5·§8-6)
+//
+// 화면 문장은 여기서 나온다. 「고르지 않으면」 문장은 서버가 실제로 하는 일을
+// 옮긴 것이다(2026-10-03 코드 확인):
+//   · 팀 에이전트 줄이 비어 있으면 `resolve_default_ai_role` 이 NotApplicable 을 돌려주고
+//     턴은 그대로 간다: 연결 순서 맨 위 키(위치 0)와 서버 기본 모델. 팀 키가 없으면
+//     `provider_required` 로 대답하지 못한다(내 구독으로 넘어가지 않는다).
+//   · 첫 인사도 같은 길이다(`is_welcome` 은 summary 줄을 읽고, 줄이 없으면 맨 위 키).
+//   · 채널 요약은 다르다: `summary.rs resolve_summary_model` 은 줄이 없으면
+//     `no_summary_row` 로 모델을 부르지 않는다(「대신 다른 걸로 간다」가 없다).
+//     그래서 플랜의 한 문장 「고르지 않으면 팀 AI 키로 답해요」는 채널 요약에는 거짓이다.
+//   · 개인 줄 셋은 이 기기 저장이고 서버가 모른다(`aiDefaults.ts`).
+// 표의 「고르지 않으면」 칸은 이 파일의 구조(kind)에서 문장을 만들고, 시험이 코어
+// 판정(`resolveRow`)과 어긋나지 않는지 본다.
+// ---------------------------------------------------------------------------
+
+/** 팀 AI 키 구획의 화면 문구. */
+export const AI_TEAM_KEYS_COPY = {
+  keysHeading: "넣어 둔 키",
+  keysSubtitle: "운영자만 보고 바꿔요",
+  addKey: "API 키 추가",
+  columns: {
+    company: "AI 회사",
+    key: "키",
+    usedBy: "쓰는 곳",
+    status: "상태",
+  },
+  keyNone: "아직 넣은 키가 없어요",
+  emptyLine: "아직 팀 AI 키가 없어요. 팀 에이전트가 대답하려면 API 키가 하나 필요해요.",
+  mockLine: "지금 팀 에이전트는 모의 응답으로만 대답해요.",
+  noAnswerLine: "지금 팀 에이전트는 대답하지 못해요.",
+  fallbackBadge: "예비",
+  firstKeyBadge: "맨 위 키",
+  firstKeyNote: "고르지 않은 기능은 맨 위 키를 써요.",
+  lastCheckUnknown: "이 화면에서는 아직 확인하지 않았어요",
+  usedByNobody: "쓰는 곳이 아직 없어요",
+  usedByUnknown: "쓰는 곳을 불러오지 못했어요",
+  usedByAgents: (names: readonly string[]) => {
+    if (names.length === 0) return "";
+    const head = names.slice(0, 2).map((n) => `@${n}`).join(", ");
+    return names.length > 2 ? `${head} 외 ${names.length - 2}명` : head;
+  },
+  agentsUnknown: "쓰는 에이전트를 불러오지 못했어요",
+  chainToggle: "예비 키와 시도 순서",
+  requestHeading: "운영자에게 요청",
+  requestDm: (name: string) => `${name} 님에게 메시지`,
+  requestNoOperator: "이 워크스페이스의 운영자를 찾지 못했어요. 이 서버를 운영하는 사람에게 요청하세요.",
+  requestHint: "키를 넣거나 바꾸는 일은 운영자가 해요.",
+  readOnlyDefaults: "기본 AI는 볼 수만 있어요. 팀 줄은 운영자가 바꿔요.",
+  checkFirst: "연결 확인을 하면 줄마다 고를 수 있는 모델이 보여요.",
+  personalKeys: {
+    heading: "개인 API 키",
+    badge: "준비 중",
+    body: "운영자가 사람마다 발급하는 API 키를 준비하고 있어요. 발급받은 키는 그 사람의 본인 전용 에이전트에서만 쓰이고, 다른 사람이 부르거나 같이 쓸 수 없어요.",
+    nowLine: "지금은 팀이 같이 쓸 키는 운영자가 「팀 AI 키」에 넣고, 내 구독은 「내 AI 계정」에서 로그인해요.",
+  },
+  defaultsHeading: "기본 AI",
+  defaultsSubtitle: "기능마다 먼저 쓸 AI",
+  defaultsColumns: {
+    feature: "이 기능은",
+    serves: "누구를 위해",
+    uses: "이 AI로",
+    unset: "고르지 않으면",
+  },
+  defaultsFootTeam: "팀 줄은 운영자가 바꿔요. 모델을 직접 고른 에이전트는 자기 모델을 써요.",
+  defaultsFootPersonal: "내 줄은 내 구독을 고를 수 있어요. 팀 에이전트는 내 구독으로 넘어가지 않아요.",
+} as const;
+
+/** 서버가 알려준 주소로 AI 회사 이름을 붙인다. 모르는 주소는 주소 이름 그대로. */
+export function teamKeyCompany(baseUrl: string): { name: string; models: string | null } {
+  const host = teamKeyHost(baseUrl);
+  if (host === "api.anthropic.com") return { name: AI_HUB_OVERVIEW_COPY.providerLabel.anthropic, models: "Claude 모델" };
+  if (host === "api.openai.com") return { name: AI_HUB_OVERVIEW_COPY.providerLabel.openai, models: "GPT 모델" };
+  return { name: host === "" ? "알 수 없는 주소" : host, models: null };
+}
+
+export type AiTeamFeatureId = "appCommand" | "teamAgent" | "greeting" | "channelSummary";
+
+const TEAM_FEATURE_NAME: Readonly<Record<AiTeamFeatureId, string>> = {
+  appCommand: "말로 앱 설정 바꾸기",
+  teamAgent: "팀 에이전트 대답",
+  greeting: "첫 인사",
+  channelSummary: "채널 요약",
+};
+
+/**
+ * 연결 순서의 한 자리(위치)가 쓰이는 기능. `defaultAi` 는 서버에 저장된 팀 줄이 가리키는 위치
+ * (없으면 null = 고르지 않음). 위치 0 은 맨 위 키라서 고르지 않은 기능이 모두 거기로 간다.
+ * 채널 요약은 줄을 고른 위치에서만 돈다(고르지 않으면 어디서도 돌지 않는다).
+ */
+export function teamKeyFeatureUses(
+  position: number,
+  defaultAi: { teamAgent: number | null; summary: number | null } | null
+): string[] {
+  const out: AiTeamFeatureId[] = [];
+  const teamAgent = defaultAi?.teamAgent ?? null;
+  const summary = defaultAi?.summary ?? null;
+  if (position === 0) out.push("appCommand");
+  if (teamAgent === null ? position === 0 : teamAgent === position) out.push("teamAgent");
+  if (summary === null ? position === 0 : summary === position) out.push("greeting");
+  if (summary !== null && summary === position) out.push("channelSummary");
+  return out.map((id) => TEAM_FEATURE_NAME[id]);
+}
+
+/** 「고르지 않으면」 일이 어떻게 되는지의 구조. 문장은 여기서 만든다. */
+export type AiDefaultUnsetKind =
+  | "teamKeyFirst" // 팀 AI 키 맨 위 키로 답한다. 키가 없으면 못 한다.
+  | "greetingFirstSummaryOff" // 첫 인사는 맨 위 키, 채널 요약은 돌지 않는다.
+  | "macDefaultLogin" // 이 맥 기본 로그인
+  | "askEachTime" // 매번 묻는다
+  | "off"; // 꺼져 있다
+
+export interface AiDefaultFeatureRow {
+  readonly rowId: AiDefaultRowId;
+  /** 기능 이름(평문). */
+  readonly feature: string;
+  /** 어디서 쓰는지 한 줄. */
+  readonly hint: string;
+  /** 누구를 위한 줄인가: 나만(이 기기) / 팀 모두. */
+  readonly serves: "me" | "team";
+  readonly servesText: string;
+  readonly whenUnset: AiDefaultUnsetKind;
+}
+
+export const AI_HUB_DEFAULT_ROWS: readonly AiDefaultFeatureRow[] = [
+  { rowId: "teamAgent", feature: "팀 에이전트가 대답할 때", hint: "멘션, DM, 팀이 보는 곳", serves: "team", servesText: "팀 모두", whenUnset: "teamKeyFirst" },
+  { rowId: "summary", feature: "첫 인사 · 채널 요약", hint: "서버가 만들고 팀이 봐요", serves: "team", servesText: "팀 모두", whenUnset: "greetingFirstSummaryOff" },
+  { rowId: "appCommand", feature: "말로 앱 설정 바꾸기", hint: "⌘K에서 「테마 바꿔 줘」 · 이 기기에만", serves: "me", servesText: "나만", whenUnset: "teamKeyFirst" },
+  { rowId: "localTerminal", feature: "내 맥 터미널을 열 때", hint: "새 세션을 열 때 먼저 쓸 계정 · 이 기기에만", serves: "me", servesText: "나만", whenUnset: "macDefaultLogin" },
+  { rowId: "remoteWork", feature: "폰에서 시작한 작업", hint: "내 맥에서 도는 원격 작업 · 이 기기에만", serves: "me", servesText: "나만", whenUnset: "askEachTime" },
+  { rowId: "guardrail", feature: "승인이 필요한지 판정할 때", hint: "가드레일", serves: "team", servesText: "팀 모두", whenUnset: "off" },
+];
+
+export function aiDefaultFeatureRow(rowId: AiDefaultRowId): AiDefaultFeatureRow {
+  const found = AI_HUB_DEFAULT_ROWS.find((row) => row.rowId === rowId);
+  if (!found) throw new Error(`unknown default ai row: ${rowId}`);
+  return found;
+}
+
+/**
+ * 「고르지 않으면」 문장. 팀 키 상태(`absent`/`mock`)에 따라 달라지는 것만 갈라진다.
+ * 상태를 모를 때(`hidden`·`loading`·`error`)는 키가 있다고도 없다고도 하지 않는다.
+ */
+export function defaultAiUnsetSentence(
+  rowId: AiDefaultRowId,
+  teamKey: AiDefaultsTeamKey["status"]
+): string {
+  const kind = aiDefaultFeatureRow(rowId).whenUnset;
+  const noKey = teamKey === "absent" || teamKey === "mock";
+  switch (kind) {
+    case "teamKeyFirst":
+      if (rowId === "appCommand") {
+        return noKey
+          ? "팀 AI 키가 없어 쓸 수 없어요."
+          : "팀 AI 키 맨 위 키로 답해요.";
+      }
+      if (teamKey === "mock") return "저장된 키가 없어 모의 응답으로만 대답해요. 내 구독으로 넘어가지 않아요.";
+      if (teamKey === "absent") return "팀 AI 키가 없어 대답하지 못해요. 내 구독으로 넘어가지 않아요.";
+      return "팀 AI 키 맨 위 키와 서버 기본 모델로 답해요. 내 구독으로 넘어가지 않아요.";
+    case "greetingFirstSummaryOff":
+      return noKey
+        ? "팀 AI 키가 없어 요약은 쉬고, 첫 인사는 정해진 문구로 나가요."
+        : "첫 인사는 팀 AI 키 맨 위 키로 나가요. 채널 요약은 여기서 고를 때까지 만들지 않아요.";
+    case "macDefaultLogin":
+      return "이 맥 기본 로그인으로 열려요.";
+    case "askEachTime":
+      return "매번 묻기로 해요. 어떤 계정으로 할지 그때 골라요.";
+    case "off":
+      return "지금은 꺼져 있어요. 기존 승인 규칙을 그대로 써요.";
+  }
 }
 
 // ---------------------------------------------------------------------------
