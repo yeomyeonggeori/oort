@@ -154,7 +154,7 @@ describe("문장", () => {
     const all = [
       ...confirmBullets("claude"),
       ...confirmBullets("codex"),
-      doneDetail("claude"),
+      doneDetail("claude", "kim-claude"),
       manualDetail("codex", "codex"),
       manualDetail("claude", "cli-failed"),
       manualDetail("claude", "cli-missing"),

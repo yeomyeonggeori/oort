@@ -195,49 +195,7 @@ async function login(page) {
   await page.getByTestId("channel-item").first().waitFor();
 }
 
-const PRESETS = [
-  { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", format: "openai" },
-  { id: "anthropic", label: "Anthropic (Claude)", baseUrl: "https://api.anthropic.com/v1", format: "anthropic" },
-  { id: "xai", label: "xAI (Grok)", baseUrl: "https://api.x.ai/v1", format: "openai" },
-  { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", format: "openai" },
-];
-const KEY_LINK = {
-  schema: "momo.provider_link.v0", configured: true, source: "database", mode: "external-hermes",
-  baseUrl: "https://api.anthropic.com/v1", endpointLabel: "Anthropic", bearerConfigured: true,
-  bearerLast4: "7c1e", availability: "live", keyConfigured: true, updatedAtMs: Date.now() - 3 * 86_400_000,
-  diagnostics: [], credentialKind: "anthropic-key", presets: PRESETS,
-};
-const EMPTY_LINK = {
-  schema: "momo.provider_link.v0", configured: false, source: "environment", mode: "local-mock",
-  baseUrl: "http://mock", endpointLabel: "mock", bearerConfigured: false, availability: "mock",
-  keyConfigured: false, diagnostics: [], presets: PRESETS,
-};
-/** 프리셋에 없는 지금 주소(사내 게이트웨이, review #2961 M4). */
-const PROXY_LINK = {
-  ...KEY_LINK,
-  baseUrl: "https://llm-gateway.yeomyeong-internal.example/v1",
-  endpointLabel: "llm-gateway.yeomyeong-internal.example",
-  credentialKind: "bearer",
-  format: "openai",
-};
 const FAKE_KEY = "capture-only-not-a-key-000000000000";
-const probe = (ok, reason) => ({
-  schema: "momo.provider_link.test.v0", ok, reason, source: "database", mode: "external-hermes",
-  endpointLabel: "Anthropic", checkedAtMs: Date.now(),
-});
-
-/** 팀 연결 대역. `testHold`가 있으면 확인 응답을 그 약속이 풀릴 때까지 붙든다. */
-function teamRoute({ link = KEY_LINK, test = probe(true), testHold = null, denied = false } = {}) {
-  return async (route, request, path) => {
-    if (denied) return json(route, { error: { code: "forbidden", message: "operator required" } }, 403);
-    if (path.endsWith("/test")) {
-      if (testHold) await testHold;
-      return json(route, test);
-    }
-    if (path.endsWith("/chain")) return json(route, { error: { code: "not_found", message: "none" } }, 404);
-    return json(route, link);
-  };
-}
 
 const outDir = resolve(process.env.OUT || resolve(webRoot, "captures/3389"));
 
@@ -306,14 +264,6 @@ async function assertNoKeyInAxTree(context, page, name) {
     throw new Error(`[${name}] 접근성 트리에 키가 평문으로 있다: ${JSON.stringify(leaks.map((n) => n.role?.value))}`);
   }
 }
-
-/** 실패한 지금 키 → 「키 바꾸기」로 폼을 연다. */
-async function openReplaceForm(page) {
-  await page.getByTestId("ai-connect-card-team-check").click();
-  await page.getByTestId("ai-connect-card-team-key").click();
-  await page.getByTestId("ai-connect-card-key-form").waitFor();
-}
-
 
 const SCENES = [
   ["1-login-waiting", "aiCard=login-modal"],

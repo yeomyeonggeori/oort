@@ -252,6 +252,33 @@ describe("로그인 → 확인 → 만드는 중 → 끝", () => {
   });
 });
 
+describe("닫기 보호", () => {
+  it("만드는 중에는 Esc로 닫히지 않고(값·작업을 잃지 않게), 끝난 뒤 확인 단계의 Esc는 닫는다", async () => {
+    let release: (value: unknown) => void = () => undefined;
+    registerImpl = () => new Promise((resolve) => (release = resolve));
+    const onClose = vi.fn();
+    mount("claude", { startAt: "register", onClose });
+    await flush();
+    const esc = () =>
+      act(() => {
+        document.activeElement?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+        );
+      });
+    esc();
+    expect(onClose).toHaveBeenCalled(); // 확인 단계: 닫힌다
+    const closedAt = onClose.mock.calls.length;
+    click(dq("register-create"));
+    await flush();
+    expect(dq("register-registering")).not.toBeNull();
+    esc();
+    expect(onClose).toHaveBeenCalledTimes(closedAt); // 만드는 중: 닫히지 않는다
+    release(wire());
+    await flush();
+    expect(dq("register-done")).not.toBeNull();
+  });
+});
+
 describe("Claude 멈춤은 오류 모양이 아니다", () => {
   it("회색 · 문의 중, 사람이 직접 쓰는 길만, 경고 표지 없음", async () => {
     registerImpl = async () => {

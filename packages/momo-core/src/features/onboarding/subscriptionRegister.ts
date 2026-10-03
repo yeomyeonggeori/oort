@@ -227,8 +227,8 @@ export function doneLine(handle: string): string {
   return `@${handle}${hasFinalConsonant(handle) ? "을" : "를"} 만들었어요.`;
 }
 
-export function doneDetail(harness: LocalHarnessId): string {
-  return `${attachParticle(HARNESS_LABEL[harness], "object")} 한 번 열면 연결돼요. 15분 안에 열어 주세요. 지나면 여기서 다시 눌러 주세요.`;
+export function doneDetail(harness: LocalHarnessId, handle: string): string {
+  return `${attachParticle(HARNESS_LABEL[harness], "object")} 15분 안에 한 번 열면 연결돼요. 그 뒤 채널에서 @${attachInstrument(handle)} 불러 보세요. 15분이 지나면 여기서 다시 눌러 주세요.`;
 }
 
 export const DONE_AGENTS_LABEL = "에이전트 보기";

@@ -42,6 +42,7 @@ import {
   registeringCliStage,
   registeringLine,
 } from "@momo/core/features/onboarding/subscriptionRegister";
+import { Check } from "lucide-react";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { KomettoGuide } from "@/features/onboarding/guide/KomettoGuide";
@@ -82,7 +83,10 @@ export function RegisterStepBody({
   onClose,
   fixture,
   showLoggedIn = true,
+  onGuard,
 }: {
+  /** 지금 Esc·바깥 누름으로 닫으면 한 번만 보이는 값이나 진행 중 작업을 잃는가. */
+  onGuard?: (guarded: boolean) => void;
   harness: LocalHarnessId;
   context: RegisterContext;
   onClose: () => void;
@@ -118,6 +122,11 @@ export function RegisterStepBody({
 
   const handle = normalizeAgentHandle(state.handle);
   const step = state.step;
+  const guarded = step.step === "registering" || (step.step === "manual" && state.plan !== null);
+  useEffect(() => {
+    onGuard?.(guarded);
+    return () => onGuard?.(false);
+  }, [guarded, onGuard]);
 
   if (step.step === "confirm") {
     return (
@@ -218,10 +227,15 @@ export function RegisterStepBody({
             <li
               key={label}
               aria-current={index === at ? "step" : undefined}
-              className={index === at ? "text-ink" : undefined}
+              className={index === at ? "font-semibold text-ink" : undefined}
               data-state={index < at ? "done" : index === at ? "current" : "todo"}
             >
-              {index + 1}. {label}
+              {index < at ? (
+                <Check aria-hidden="true" className="mr-1 inline size-3" />
+              ) : (
+                `${index + 1}. `
+              )}
+              {label}
             </li>
           ))}
         </ol>
@@ -236,7 +250,7 @@ export function RegisterStepBody({
         <KomettoGuide
           expression={expressionForState("success")}
           line={doneLine(step.handle)}
-          detail={doneDetail(harness)}
+          detail={doneDetail(harness, step.handle)}
           lineId={lineId}
           lineTestId="register-line"
         />

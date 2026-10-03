@@ -365,6 +365,21 @@ impl Store {
         serde_json::from_slice(&text).ok()
     }
 
+    fn owner_path(&self) -> PathBuf {
+        self.dir.join("oort-owner")
+    }
+
+    fn write_owner(&self, agent_id: &str) -> std::io::Result<()> {
+        self.ensure_dir()?;
+        std::fs::write(self.owner_path(), agent_id)
+    }
+
+    fn owner(&self) -> Option<String> {
+        std::fs::read_to_string(self.owner_path())
+            .ok()
+            .map(|text| text.trim().to_string())
+    }
+
     fn remove_entry(&self, agent_id: &str) -> bool {
         std::fs::remove_file(self.entry_path(agent_id)).is_ok()
     }
@@ -490,6 +505,13 @@ pub fn connect(request: &ConnectRequest, machine: &Machine<'_>) -> Result<Connec
     // value): the CLI's setting names the helper, not the value, so swapping
     // the stored value is the whole step. No second `add-json`.
     if let Some(entry) = previous.as_ref().filter(|entry| entry.added) {
+        // The CLI setting names the endpoint it was added with; a different
+        // address needs the person's hands, not a silent swap.
+        if entry.endpoint != endpoint {
+            return Ok(ConnectOutcome::Manual {
+                reason: ManualReason::CliFailed,
+            });
+        }
         let renewed = Entry {
             endpoint: entry.endpoint.clone(),
             credential: request.credential.clone(),
@@ -525,6 +547,9 @@ pub fn connect(request: &ConnectRequest, machine: &Machine<'_>) -> Result<Connec
             ..pending
         };
         if store.write_entry(&request.agent_id, &added).is_ok() {
+            // The CLI has one `oort` slot: remember whose it is, so a later
+            // disconnect of another agent never removes it.
+            let _ = store.write_owner(&request.agent_id);
             return Ok(ConnectOutcome::Connected);
         }
     }
@@ -566,13 +591,17 @@ pub fn disconnect(agent_id: &str, machine: &Machine<'_>) -> Result<bool, String>
         return Ok(false);
     };
     let mut removed = false;
-    if entry.added {
+    // Only the agent that owns the CLI's single `oort` slot may remove it.
+    if entry.added && store.owner().as_deref() == Some(agent_id) {
         if let Some(program) = harness_path::find_on_path("claude", machine.search_path) {
             removed = run_exit_only(&program, command_row("remove"), None, machine)
                 .is_some_and(|status| status.success());
         }
     }
     store.remove_entry(agent_id);
+    if store.owner().as_deref() == Some(agent_id) {
+        let _ = std::fs::remove_file(store.owner_path());
+    }
     Ok(removed || !entry.added)
 }
 
@@ -1138,6 +1167,53 @@ mod tests {
                 ["mcp", "remove", "--scope", "user", "oort"]
             );
             assert!(sandbox.store().read_entry(AGENT).is_none());
+        }
+
+        #[test]
+        fn a_repeat_with_another_endpoint_is_left_to_the_person() {
+            let sandbox = Sandbox::new("endpoint", 0, true);
+            connect(&sandbox.request(), &sandbox.machine()).unwrap();
+            std::fs::remove_file(&sandbox.argv).unwrap();
+            let mut moved = sandbox.request();
+            moved.endpoint = "https://other.example.test/v1/mcp/agent-port".into();
+            assert_eq!(
+                connect(&moved, &sandbox.machine()).unwrap(),
+                ConnectOutcome::Manual {
+                    reason: ManualReason::CliFailed
+                }
+            );
+            assert!(!sandbox.argv.exists());
+            assert_eq!(
+                sandbox.store().read_entry(AGENT).unwrap().credential,
+                VALUE,
+                "the stored value was swapped for another address"
+            );
+        }
+
+        #[test]
+        fn only_the_agent_that_owns_the_oort_slot_may_remove_it() {
+            let sandbox = Sandbox::new("slot", 0, true);
+            connect(&sandbox.request(), &sandbox.machine()).unwrap();
+            // A second agent's entry that claims `added` without owning the slot.
+            sandbox
+                .store()
+                .write_entry(
+                    OTHER_AGENT,
+                    &Entry {
+                        endpoint: ENDPOINT.into(),
+                        credential: VALUE.into(),
+                        added: true,
+                    },
+                )
+                .unwrap();
+            std::fs::remove_file(&sandbox.argv).unwrap();
+            disconnect(OTHER_AGENT, &sandbox.machine()).unwrap();
+            assert!(!sandbox.argv.exists(), "mcp remove ran for a non-owner");
+            disconnect(AGENT, &sandbox.machine()).unwrap();
+            assert_eq!(
+                sandbox.recorded_argv(),
+                ["mcp", "remove", "--scope", "user", "oort"]
+            );
         }
 
         #[test]

@@ -138,11 +138,14 @@ export function HarnessLoginDialog({
   onFallbackStarted: (harness: LocalHarnessId) => void;
   fixture?: HarnessLoginFixture | null;
 }) {
+  const guardRef = useRef(false);
   return (
     <Dialog
       open={harness !== null}
       onOpenChange={(open) => {
-        if (!open) onClose();
+        // 만드는 중이거나 한 번만 보이는 값이 떠 있을 때는 Esc·바깥 누름으로 닫지 않는다.
+        // 단추(「완료」)로는 닫힌다.
+        if (!open && !guardRef.current) onClose();
       }}
     >
       {harness !== null && (
@@ -158,6 +161,7 @@ export function HarnessLoginDialog({
           onConnected={onConnected}
           onFallbackStarted={onFallbackStarted}
           fixture={fixture ?? null}
+          guardRef={guardRef}
           register={profile === null && !remote ? register : null}
           startAt={profile === null && !remote && register ? startAt : "login"}
         />
@@ -232,9 +236,11 @@ function LoginDialogBody({
   fixture,
   register,
   startAt,
+  guardRef,
 }: {
   register: RegisterContext | null;
   startAt: "login" | "register";
+  guardRef: { current: boolean };
   harness: LocalHarnessId;
   profile: string | null;
   remote: boolean;
@@ -317,11 +323,20 @@ function LoginDialogBody({
         className="harness-login gap-4 p-6"
         data-testid="harness-login-dialog"
         data-phase="register"
-        onEscapeKeyDown={() => onClose()}
+        onEscapeKeyDown={(event) => {
+          if (guardRef.current) event.preventDefault();
+          else onClose();
+        }}
+        onInteractOutside={(event) => {
+          if (guardRef.current) event.preventDefault();
+        }}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
         <DialogTitle className="sr-only">{loginDialogTitle(harness)}</DialogTitle>
         <RegisterStepBody
+          onGuard={(guarded) => {
+            guardRef.current = guarded;
+          }}
           harness={harness}
           context={register}
           onClose={onClose}
