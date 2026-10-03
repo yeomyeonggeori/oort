@@ -11,7 +11,7 @@ import { InlineBanner } from "@/features/common/States";
 import type { ChipTone, HubCardView } from "./aiHubOverviewModel";
 import { useAiHubOverview } from "./useAiHubOverview";
 
-const HUB_CHIP_TONE: Record<ChipTone, string> = {
+export const HUB_CHIP_TONE: Record<ChipTone, string> = {
   ok: "bg-ok-soft text-ok",
   warn: "bg-warn-soft text-warn",
   signal: "bg-muted-soft text-ink",
