@@ -457,6 +457,9 @@ pub struct SocketShared {
     /// #3095: `pin_root`, `revoke_device` and `reset_signature_requirement`
     /// retire every 「이 세션 동안」 grant through it.
     pub grants: crate::session_grant::GrantEpoch,
+    /// `share_session` (#2867): signs and sends the S1 share PATCH as this
+    /// host. `None` in tests that never share.
+    pub share: Option<Arc<dyn crate::client::ShareRelay>>,
 }
 
 /// The heartbeat's last outcome, which the desktop app reads through the

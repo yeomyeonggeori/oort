@@ -71,6 +71,10 @@ const REGISTER_TIMEOUT: Duration = Duration::from_secs(90);
 /// `momo-workd forget` after a register that did not finish.
 const FORGET_TIMEOUT: Duration = Duration::from_secs(20);
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(2);
+/// `share_session` waits for workd's own HTTP call to the server (workd times that out at
+/// 30 s). A shorter wait here would reject while the request is still in flight, and a later
+/// `{shared:false}` could be overtaken by that late summary (#2867 security review).
+const SHARE_SOCKET_TIMEOUT: Duration = Duration::from_secs(35);
 const STOP_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Where everything lives, under the app's data folder.
@@ -467,13 +471,23 @@ pub fn ask_workd_request(
     expected_pid: u32,
     request: &Value,
 ) -> Result<Value, WorkdError> {
+    ask_workd_request_within(socket, expected_pid, request, SOCKET_TIMEOUT)
+}
+
+/// [`ask_workd_request`] with an explicit wait, for the one op that outlasts a local read.
+pub fn ask_workd_request_within(
+    socket: &Path,
+    expected_pid: u32,
+    request: &Value,
+    timeout: Duration,
+) -> Result<Value, WorkdError> {
     let socket_error = |code: &str| WorkdError::Socket(code.to_string());
     let mut stream = UnixStream::connect(socket).map_err(|_| socket_error("socket_unavailable"))?;
     if peer_pid(&stream) != Some(expected_pid) {
         return Err(socket_error("socket_peer_not_our_child"));
     }
-    stream.set_read_timeout(Some(SOCKET_TIMEOUT)).ok();
-    stream.set_write_timeout(Some(SOCKET_TIMEOUT)).ok();
+    stream.set_read_timeout(Some(timeout)).ok();
+    stream.set_write_timeout(Some(timeout)).ok();
     let mut line = serde_json::to_vec(request).map_err(|_| socket_error("socket_write_failed"))?;
     line.push(b'\n');
     stream
@@ -779,6 +793,28 @@ impl Service<'_> {
             &json!({ "op": "prepare_remote_profile", "harness": harness, "label": label }),
         )?;
         accepted_remote_profile_dir(&self.layout, harness, label, &answer)
+    }
+
+    /// `share_session` (#2867): workd signs and sends `PATCH …/work-sessions/{id}/share`
+    /// as this host. The webview names a session and an S1 body; the key, the
+    /// path and the signature stay in workd. Refused here, before the socket,
+    /// when the id is not a uuid or the body is not a JSON object.
+    pub fn share_session(&self, session_id: &str, body: &Value) -> Result<(), WorkdError> {
+        let session_id = share_session_id(session_id)?;
+        if !body.is_object() {
+            return Err(WorkdError::Refused("invalid_request".into()));
+        }
+        let pid = self
+            .state
+            .running_pid()
+            .ok_or_else(|| WorkdError::Socket("not_running".into()))?;
+        ask_workd_request_within(
+            &self.layout.socket,
+            pid,
+            &json!({ "op": "share_session", "sessionId": session_id, "body": body }),
+            SHARE_SOCKET_TIMEOUT,
+        )
+        .map(|_| ())
     }
 
     /// Where this Mac is registered, if it is.
@@ -1311,6 +1347,31 @@ pub async fn work_host_prepare_remote_profile(
     .await
 }
 
+/// A session id as workd's path wants it: a canonical lowercase uuid, never a
+/// string a webview could stretch into another path.
+fn share_session_id(raw: &str) -> Result<String, WorkdError> {
+    uuid::Uuid::parse_str(raw)
+        .map(|id| id.to_string())
+        .map_err(|_| WorkdError::Refused("invalid_request".into()))
+}
+
+/// 「채널에 공유」·「공유 끄기」(#2867): hand workd a shared pane's S1 body to sign
+/// and send as this host. Errors are workd's closed `share_*` labels or a socket
+/// code; the server's message never reaches the webview.
+#[tauri::command]
+pub async fn work_host_share(
+    app: tauri::AppHandle,
+    session_id: String,
+    body: Value,
+) -> Result<(), String> {
+    blocking(app, move |service| {
+        service
+            .share_session(&session_id, &body)
+            .map_err(|error| error_code(&error))
+    })
+    .await
+}
+
 /// At launch: a registered host starts with the app (ADR-0188 D2 첫 단계).
 pub fn start_if_registered(app: &tauri::AppHandle) {
     let app = app.clone();
@@ -1588,6 +1649,65 @@ mod tests {
         assert_eq!(error_code(&error), "profile_not_found");
         let _ = server.join();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_share_relay_waits_longer_than_workds_own_http_timeout() {
+        // workd's `REQUEST_TIMEOUT` is 30 s. An app-side wait that ends first would reject while the
+        // summary is still in flight, and a later `{shared:false}` could be overtaken by it.
+        assert!(SHARE_SOCKET_TIMEOUT > Duration::from_secs(30));
+        assert!(SHARE_SOCKET_TIMEOUT > SOCKET_TIMEOUT);
+    }
+
+    #[test]
+    fn a_slow_answer_fails_the_default_wait_and_succeeds_within_a_longer_one() {
+        let dir = std::env::temp_dir().join(format!("wh-slow-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket = dir.join("workd.sock");
+        let _ = std::fs::remove_file(&socket);
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let server = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut line = String::new();
+                let _ =
+                    std::io::BufRead::read_line(&mut std::io::BufReader::new(&stream), &mut line);
+                std::thread::sleep(Duration::from_millis(2_600));
+                let _ = stream.write_all(b"{\"ok\":true}\n");
+            }
+        });
+        let request = json!({"op": "share_session"});
+        let default = ask_workd_request(&socket, std::process::id(), &request).unwrap_err();
+        assert_eq!(default, WorkdError::Socket("socket_read_failed".into()));
+        assert!(ask_workd_request_within(
+            &socket,
+            std::process::id(),
+            &request,
+            Duration::from_secs(6)
+        )
+        .is_ok());
+        let _ = server.join();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_share_session_id_is_a_uuid_or_nothing_reaches_the_socket() {
+        assert_eq!(
+            share_session_id("0194E0B2-8F5A-7C3D-9A11-2B3C4D5E6F70").unwrap(),
+            "0194e0b2-8f5a-7c3d-9a11-2b3c4d5e6f70"
+        );
+        for bad in [
+            "",
+            "../../work-hosts",
+            "0194e0b2-8f5a-7c3d-9a11-2b3c4d5e6f70/x",
+            "x",
+        ] {
+            assert_eq!(
+                share_session_id(bad).unwrap_err(),
+                WorkdError::Refused("invalid_request".into()),
+                "{bad:?}"
+            );
+        }
     }
 
     #[test]

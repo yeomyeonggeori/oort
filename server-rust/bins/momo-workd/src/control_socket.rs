@@ -81,6 +81,14 @@
 //!                    reset every harness to no choice)
 //! ← {"ok":false,"error":"invalid_request"|"unknown_harness"|"invalid_label"|
 //!                       "profile_not_found"|"profile_refused"|"profiles_unavailable"}
+//! → {"op":"share_session","sessionId":"<uuid>","body":{"shared":false}|{"shared":true,…S1}}
+//! ← {"ok":true}   (#2867: workd signs `PATCH …/work-sessions/{id}/share` as this
+//!                  host. The host key never crosses the socket; the server validates
+//!                  the body against the S1 schema and pins signer = session's host.)
+//! ← {"ok":false,"error":"invalid_request"|"share_unavailable"|"share_invalid"|
+//!                       "share_unauthorized"|"share_forbidden"|"share_not_found"|
+//!                       "share_session_ended"|"share_too_large"|"share_unreachable"|
+//!                       "share_failed"}
 //! ```
 
 use std::io;
@@ -102,7 +110,10 @@ pub use crate::controls::{HostHealth, SocketShared};
 pub const APP_SIGNING_IDENTIFIER: &str = "app.momo.desktop";
 
 /// Longest request line accepted.
-pub const MAX_REQUEST_BYTES: usize = 4 * 1024;
+///
+/// 16 KiB: a full S1 share body is up to 8 KiB (ADR-0194 증보) and the line
+/// carries it inside an envelope.
+pub const MAX_REQUEST_BYTES: usize = 16 * 1024;
 
 /// How long a connected peer has to send its one line.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -368,7 +379,7 @@ async fn answer(stream: UnixStream, identity: &HostIdentity, shared: &SocketShar
     let mut line = String::new();
     let read = tokio::time::timeout(REQUEST_TIMEOUT, reader.read_line(&mut line)).await;
     let response = match read {
-        Ok(Ok(_)) if line.ends_with('\n') => respond(line.trim_end(), identity, shared),
+        Ok(Ok(_)) if line.ends_with('\n') => respond_async(line.trim_end(), identity, shared).await,
         Ok(Ok(_)) => json!({"ok": false, "error": "request_too_long_or_unterminated"}),
         Ok(Err(_)) => return,
         Err(_) => json!({"ok": false, "error": "timeout"}),
@@ -387,6 +398,93 @@ trait TakeLimited: Sized {
 impl TakeLimited for tokio::net::unix::OwnedReadHalf {
     fn take_limited(self) -> tokio::io::Take<Self> {
         tokio::io::AsyncReadExt::take(self, MAX_REQUEST_BYTES as u64)
+    }
+}
+
+/// The one op that talks to the server (`share_session`, #2867) is async; every
+/// other op is answered by the synchronous [`respond`].
+pub async fn respond_async(line: &str, identity: &HostIdentity, shared: &SocketShared) -> Value {
+    match serde_json::from_str::<Value>(line) {
+        Ok(request) if request.get("op").and_then(Value::as_str) == Some("share_session") => {
+            share_session(&request, shared).await
+        }
+        _ => respond(line, identity, shared),
+    }
+}
+
+/// The S1 fields a share body may carry (ADR-0190 D4-b). Anything else is
+/// refused here as well as by the server: a webview that was handed a stray key
+/// does not get it signed.
+const SHARE_BODY_KEYS: [&str; 9] = [
+    "shared",
+    "harness",
+    "state",
+    "repo",
+    "branch",
+    "stages",
+    "diff",
+    "prUrl",
+    "lastActivityAt",
+];
+/// The server's own ceiling for a share body (`MAX_SHARE_BODY_BYTES`).
+const SHARE_BODY_MAX_BYTES: usize = 8 * 1024;
+
+fn share_body_is_well_formed(body: &Value) -> bool {
+    let Some(object) = body.as_object() else {
+        return false;
+    };
+    let Some(shared) = object.get("shared").and_then(Value::as_bool) else {
+        return false;
+    };
+    if object
+        .keys()
+        .any(|key| !SHARE_BODY_KEYS.contains(&key.as_str()))
+    {
+        return false;
+    }
+    if !shared && object.len() != 1 {
+        return false;
+    }
+    serde_json::to_vec(body).is_ok_and(|raw| raw.len() <= SHARE_BODY_MAX_BYTES)
+}
+
+async fn share_session(request: &Value, shared: &SocketShared) -> Value {
+    let (Some(session_id), Some(body)) = (
+        request
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .and_then(|raw| Uuid::parse_str(raw).ok()),
+        request.get("body"),
+    ) else {
+        return json!({"ok": false, "error": "invalid_request"});
+    };
+    if !share_body_is_well_formed(body) {
+        return json!({"ok": false, "error": "invalid_request"});
+    }
+    let Some(relay) = &shared.share else {
+        return json!({"ok": false, "error": "share_unavailable"});
+    };
+    match relay.relay_share(session_id, body).await {
+        Ok(()) => json!({"ok": true}),
+        Err(error) => json!({"ok": false, "error": share_error_label(&error)}),
+    }
+}
+
+/// A closed label for the app; the server's message is never forwarded.
+fn share_error_label(error: &crate::client::ClientError) -> &'static str {
+    use crate::client::ClientError;
+    match error {
+        ClientError::Unauthorized => "share_unauthorized",
+        ClientError::Status { status, code, .. } => match (*status, code.as_deref()) {
+            (409, Some("share_session_ended")) => "share_session_ended",
+            (400, _) => "share_invalid",
+            (403, _) => "share_forbidden",
+            (404, _) => "share_not_found",
+            (413, _) => "share_too_large",
+            _ => "share_failed",
+        },
+        ClientError::Transport(_) => "share_unreachable",
+        _ => "share_failed",
     }
 }
 
@@ -693,6 +791,7 @@ mod tests {
             )),
             state_folder: dir.to_path_buf(),
             grants: crate::session_grant::GrantEpoch::default(),
+            share: None,
         }
     }
 
@@ -968,6 +1067,119 @@ mod tests {
             &reopened,
         );
         assert_eq!(again["error"], "root_already_pinned");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    /// Records what workd was asked to sign; answers with the scripted result.
+    struct FakeRelay {
+        sent: std::sync::Mutex<Vec<(Uuid, Value)>>,
+        answer: Result<(), crate::client::ClientError>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::client::ShareRelay for FakeRelay {
+        async fn relay_share(
+            &self,
+            session_id: Uuid,
+            body: &Value,
+        ) -> Result<(), crate::client::ClientError> {
+            self.sent.lock().unwrap().push((session_id, body.clone()));
+            match &self.answer {
+                Ok(()) => Ok(()),
+                Err(crate::client::ClientError::Status { status, code, .. }) => {
+                    Err(crate::client::ClientError::Status {
+                        status: *status,
+                        message: String::new(),
+                        code: code.clone(),
+                    })
+                }
+                Err(_) => Err(crate::client::ClientError::Unauthorized),
+            }
+        }
+    }
+
+    fn share_request(session: &str, body: Value) -> String {
+        json!({"op":"share_session","sessionId":session,"body":body}).to_string()
+    }
+
+    #[tokio::test]
+    async fn share_session_signs_only_a_well_formed_s1_body_for_a_real_uuid() {
+        let dir = scratch();
+        let mut shared = self::shared(&dir);
+        let relay = Arc::new(FakeRelay {
+            sent: Default::default(),
+            answer: Ok(()),
+        });
+        shared.share = Some(relay.clone());
+        let session = Uuid::from_u128(7).to_string();
+        let ask = |line: String| {
+            let shared = shared.clone();
+            async move { respond_async(&line, &identity(), &shared).await }
+        };
+
+        let on =
+            json!({"shared":true,"harness":"claude","state":"running","repo":"momo","prUrl":null});
+        assert_eq!(
+            ask(share_request(&session, on.clone())).await,
+            json!({"ok": true})
+        );
+        assert_eq!(
+            ask(share_request(&session, json!({"shared":false}))).await,
+            json!({"ok": true})
+        );
+        assert_eq!(relay.sent.lock().unwrap().len(), 2);
+        assert_eq!(relay.sent.lock().unwrap()[0], (Uuid::from_u128(7), on));
+
+        // Refused before anything is signed.
+        let before = relay.sent.lock().unwrap().len();
+        for bad in [
+            share_request("../../x", json!({"shared":false})),
+            share_request(&session, json!({"harness":"claude"})),
+            share_request(&session, json!({"shared":true,"commitTitle":"secret"})),
+            share_request(&session, json!({"shared":false,"repo":"momo"})),
+            share_request(&session, json!({"shared":true,"repo":"x".repeat(9000)})),
+            share_request(&session, json!("shared")),
+            json!({"op":"share_session","sessionId":session}).to_string(),
+        ] {
+            assert_eq!(ask(bad).await["error"], "invalid_request");
+        }
+        assert_eq!(
+            relay.sent.lock().unwrap().len(),
+            before,
+            "nothing was signed"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn share_session_names_the_refusal_with_a_closed_label_and_never_the_server_message() {
+        let dir = scratch();
+        let session = Uuid::from_u128(7).to_string();
+        let off = share_request(&session, json!({"shared":false}));
+        let mut shared = self::shared(&dir);
+        // No relay (a host that never started its client).
+        assert_eq!(
+            respond_async(&off, &identity(), &shared).await["error"],
+            "share_unavailable"
+        );
+        for (status, code, label) in [
+            (403, None, "share_forbidden"),
+            (409, Some("share_session_ended"), "share_session_ended"),
+            (400, None, "share_invalid"),
+            (404, None, "share_not_found"),
+            (500, None, "share_failed"),
+        ] {
+            shared.share = Some(Arc::new(FakeRelay {
+                sent: Default::default(),
+                answer: Err(crate::client::ClientError::Status {
+                    status,
+                    message: "secret detail".into(),
+                    code: code.map(str::to_string),
+                }),
+            }));
+            let answer = respond_async(&off, &identity(), &shared).await;
+            assert_eq!(answer["error"], label);
+            assert!(!answer.to_string().contains("secret detail"));
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 }
