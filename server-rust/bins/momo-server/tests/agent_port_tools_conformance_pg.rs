@@ -181,7 +181,8 @@ async fn start_server_with_gateway(
         // thing allowed to open it before HAP-E6 (#1367).
         hosted_delivery_enabled,
         subscription_agents_enabled: true,
-        claude_subscription_agents_enabled: false,
+        // #3397: these suites drive Claude subscription agents; the opt-in is on.
+        claude_subscription_agents_enabled: true,
         oauth: Default::default(),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
