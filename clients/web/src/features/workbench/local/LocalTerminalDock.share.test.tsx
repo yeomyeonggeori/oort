@@ -235,7 +235,7 @@ describe("「채널에 공유」 (#2867)", () => {
     await vi.waitFor(() => expect(q("share-dialog-name")).not.toBeNull());
     const input = q("share-dialog-name") as HTMLInputElement;
     expect(input.value).toBe("셸");
-    expect(text()).toContain("하네스가 정한 작업 제목은 기본값일 뿐");
+    expect(text()).toContain("기본 이름은 작업 제목에서 가져왔으니");
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
       setter.call(input, "한글 입력 수리");
@@ -244,6 +244,23 @@ describe("「채널에 공유」 (#2867)", () => {
     await act(async () => q("share-dialog-submit")!.click());
     await settle();
     expect(r.created).toMatchObject([{ label: "한글 입력 수리" }]);
+  });
+
+  it("이름을 비우면 이유를 말하고 공유할 수 없다", async () => {
+    const r = rig({ remember: CH_WORKBENCH });
+    await mount(r);
+    await openPaneMenu();
+    await pick("pane-share-menu-share");
+    await vi.waitFor(() => expect(q("share-dialog-name")).not.toBeNull());
+    const input = q("share-dialog-name") as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      setter.call(input, "  ");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(q("share-dialog-name-empty")?.textContent).toBe("이름을 입력해 주세요.");
+    expect((q("share-dialog-submit") as HTMLButtonElement).disabled).toBe(true);
+    expect(r.deps.createSession).not.toHaveBeenCalled();
   });
 
   it("칸을 확인하지 못하면(prepare 실패) 플랫폼 탓을 하지 않고 다시 확인할 수 있다", async () => {
@@ -346,6 +363,9 @@ describe("「채널에 공유」 (#2867)", () => {
     await pick("pane-share-menu-share");
     await vi.waitFor(() => expect(q("share-dialog-host")).not.toBeNull());
     expect(q("share-dialog-host")?.textContent).toContain("이 맥을 작업 호스트로 먼저 등록");
+    // 호스트가 막혔으면 공유를 권하는 문장(작업 카드로 올려요 · 올라가지 않아요)은 거짓이라 보이지 않는다.
+    expect(text()).not.toContain("작업 카드로 올려요");
+    expect(text()).not.toContain("올라가지 않아요");
     expect(q("share-dialog-channels")).toBeNull();
     expect(q("share-dialog-submit")).toBeNull();
     await act(async () => q("share-dialog-host-go")!.click());

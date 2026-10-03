@@ -71,6 +71,10 @@ const REGISTER_TIMEOUT: Duration = Duration::from_secs(90);
 /// `momo-workd forget` after a register that did not finish.
 const FORGET_TIMEOUT: Duration = Duration::from_secs(20);
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(2);
+/// `share_session` waits for workd's own HTTP call to the server (workd times that out at
+/// 30 s). A shorter wait here would reject while the request is still in flight, and a later
+/// `{shared:false}` could be overtaken by that late summary (#2867 security review).
+const SHARE_SOCKET_TIMEOUT: Duration = Duration::from_secs(35);
 const STOP_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Where everything lives, under the app's data folder.
@@ -467,13 +471,23 @@ pub fn ask_workd_request(
     expected_pid: u32,
     request: &Value,
 ) -> Result<Value, WorkdError> {
+    ask_workd_request_within(socket, expected_pid, request, SOCKET_TIMEOUT)
+}
+
+/// [`ask_workd_request`] with an explicit wait, for the one op that outlasts a local read.
+pub fn ask_workd_request_within(
+    socket: &Path,
+    expected_pid: u32,
+    request: &Value,
+    timeout: Duration,
+) -> Result<Value, WorkdError> {
     let socket_error = |code: &str| WorkdError::Socket(code.to_string());
     let mut stream = UnixStream::connect(socket).map_err(|_| socket_error("socket_unavailable"))?;
     if peer_pid(&stream) != Some(expected_pid) {
         return Err(socket_error("socket_peer_not_our_child"));
     }
-    stream.set_read_timeout(Some(SOCKET_TIMEOUT)).ok();
-    stream.set_write_timeout(Some(SOCKET_TIMEOUT)).ok();
+    stream.set_read_timeout(Some(timeout)).ok();
+    stream.set_write_timeout(Some(timeout)).ok();
     let mut line = serde_json::to_vec(request).map_err(|_| socket_error("socket_write_failed"))?;
     line.push(b'\n');
     stream
@@ -794,10 +808,11 @@ impl Service<'_> {
             .state
             .running_pid()
             .ok_or_else(|| WorkdError::Socket("not_running".into()))?;
-        ask_workd_request(
+        ask_workd_request_within(
             &self.layout.socket,
             pid,
             &json!({ "op": "share_session", "sessionId": session_id, "body": body }),
+            SHARE_SOCKET_TIMEOUT,
         )
         .map(|_| ())
     }
@@ -1632,6 +1647,45 @@ mod tests {
         .unwrap_err();
         assert_eq!(error, WorkdError::Refused("profile_not_found".into()));
         assert_eq!(error_code(&error), "profile_not_found");
+        let _ = server.join();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_share_relay_waits_longer_than_workds_own_http_timeout() {
+        // workd's `REQUEST_TIMEOUT` is 30 s. An app-side wait that ends first would reject while the
+        // summary is still in flight, and a later `{shared:false}` could be overtaken by it.
+        assert!(SHARE_SOCKET_TIMEOUT > Duration::from_secs(30));
+        assert!(SHARE_SOCKET_TIMEOUT > SOCKET_TIMEOUT);
+    }
+
+    #[test]
+    fn a_slow_answer_fails_the_default_wait_and_succeeds_within_a_longer_one() {
+        let dir = std::env::temp_dir().join(format!("wh-slow-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket = dir.join("workd.sock");
+        let _ = std::fs::remove_file(&socket);
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let server = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut line = String::new();
+                let _ =
+                    std::io::BufRead::read_line(&mut std::io::BufReader::new(&stream), &mut line);
+                std::thread::sleep(Duration::from_millis(2_600));
+                let _ = stream.write_all(b"{\"ok\":true}\n");
+            }
+        });
+        let request = json!({"op": "share_session"});
+        let default = ask_workd_request(&socket, std::process::id(), &request).unwrap_err();
+        assert_eq!(default, WorkdError::Socket("socket_read_failed".into()));
+        assert!(ask_workd_request_within(
+            &socket,
+            std::process::id(),
+            &request,
+            Duration::from_secs(6)
+        )
+        .is_ok());
         let _ = server.join();
         let _ = std::fs::remove_dir_all(&dir);
     }

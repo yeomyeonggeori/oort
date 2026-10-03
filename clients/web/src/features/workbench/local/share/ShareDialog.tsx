@@ -132,7 +132,8 @@ export function ShareDialog({
       <DialogContent className="gap-4 p-4" data-testid="share-dialog" data-intent={intent}>
         <div className="flex flex-col gap-1">
           <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{lead}</DialogDescription>
+          {/* 호스트가 막혔으면 공유를 권하는 문장은 거짓이 된다: 등록 안내 한 줄만 남긴다. */}
+          {hostBlocked ? null : <DialogDescription className="break-keep">{lead}</DialogDescription>}
         </div>
         {prepError ? (
           <p role="alert" className="text-body text-ink" data-testid="share-dialog-prepare-error">
@@ -143,11 +144,11 @@ export function ShareDialog({
             {SHARE_COPY.preparing}
           </p>
         ) : hostBlocked ? (
-          <p role="status" className="text-body text-ink" data-testid="share-dialog-host">
+          <p role="status" className="break-keep text-body text-ink" data-testid="share-dialog-host">
             {hostLine}
           </p>
         ) : locked !== null ? (
-          <p className="text-body text-ink" data-testid="share-dialog-locked">
+          <p className="break-keep text-body text-ink" data-testid="share-dialog-locked">
             {SHARE_COPY.lockedHome(nameOf(locked) ?? "채널")}
           </p>
         ) : choices.length === 0 ? (
@@ -180,10 +181,15 @@ export function ShareDialog({
               onChange={(event) => setName(event.target.value)}
               data-testid="share-dialog-name"
             />
-            <p className="text-meta text-ink-muted">{SHARE_COPY.nameHint}</p>
+            {name.trim() === "" ? (
+              <p role="status" className="text-meta text-ink" data-testid="share-dialog-name-empty">
+                {SHARE_COPY.nameEmpty}
+              </p>
+            ) : null}
+            <p className="break-keep text-meta text-ink-muted">{SHARE_COPY.nameHint}</p>
           </div>
         ) : null}
-        <p className="text-meta text-ink-muted">{SHARE_COPY.never}</p>
+        {hostBlocked ? null : <p className="break-keep text-meta text-ink-muted">{SHARE_COPY.never}</p>}
         {refusal && !hostBlocked ? (
           <p role="alert" className="text-body text-danger" data-testid="share-dialog-error">
             {refusalLine(refusal)}

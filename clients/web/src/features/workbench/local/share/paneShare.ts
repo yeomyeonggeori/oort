@@ -285,6 +285,12 @@ export function createPaneShare(deps: PaneShareDeps): PaneShare {
         set(e, back());
         return { ok: false, reason: readiness === "ready" ? "failed" : HOST_REFUSAL[readiness] };
       }
+      // 호스트를 확인하는 사이 칸이 닫혔다(이미 세션이 있던 칸이면 닫힘 처리기가 끝냈다): 켜지 않는다.
+      if (!deps.sessions.getSnapshot().has(paneId)) {
+        entries.delete(paneId);
+        emit();
+        return { ok: false, reason: "no_pane" };
+      }
       try {
         let home = e.home;
         if (!home) {

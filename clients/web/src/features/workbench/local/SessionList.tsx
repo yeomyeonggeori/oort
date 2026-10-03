@@ -546,11 +546,11 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
         <Radio aria-hidden />
         {sharedCount > 0 ? (
           <span>
-            <b>{`${sharedCount}개 공유 중`}</b> · 팀은 이름·상태만 봅니다
+            <b>{`${sharedCount}개 공유 중`}</b> · 팀은 이름·상태·worktree만 봐요
           </span>
         ) : (
           <span>
-            <b>공유 없음</b> · 이 기기에서만 보입니다
+            <b>공유 없음</b> · 이 기기에서만 보여요
           </span>
         )}
       </p>
