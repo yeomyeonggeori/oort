@@ -474,7 +474,9 @@ export function classifyAiAgent(facts: AiAgentFacts, viewer: AiViewer = {}): AiA
     ownership,
     ownerName: cleanName(facts.ownerDisplayName),
     hostOnline: typeof facts.hostOnline === "boolean" ? facts.hostOnline : null,
-    unavailableReason: facts.brainUnavailableReason === CLAUDE_SUBSCRIPTION_AGENT_PAUSED ? facts.brainUnavailableReason : null,
+    // 이 사유는 Claude 구독 대행에만 붙는다. 다른 brain 에 잘못 내려와도 「문의 중」을 만들지 않는다.
+    unavailableReason:
+      brain === "subscription" && facts.brainUnavailableReason === CLAUDE_SUBSCRIPTION_AGENT_PAUSED ? facts.brainUnavailableReason : null,
     providerLabel: cleanName(facts.providerLabel),
   };
 }

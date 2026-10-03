@@ -655,6 +655,13 @@ describe("개인 키 brain 과 서버 사유 (#3416)", () => {
     expect(labelsFor({ brain: "personal_keys" }).brain).toBeNull();
   });
 
+  it("구독이 아닌 brain 에 사유가 잘못 와도 「문의 중」을 만들지 않는다", () => {
+    for (const brain of ["personal_key", "team_key"] as const) {
+      const l = labelsFor({ brain, brainUnavailableReason: CLAUDE_SUBSCRIPTION_AGENT_PAUSED });
+      expect(l.status).toBeNull();
+    }
+  });
+
   it("서버 사유 claude_subscription_agent_paused 는 「문의 중」 회색 상태로, 설명을 붙인다", () => {
     const l = labelsFor({
       brain: "subscription",
