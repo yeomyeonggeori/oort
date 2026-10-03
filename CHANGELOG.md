@@ -11,6 +11,18 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+Two database migrations since 0.1.17 (116-117): 116 adds the subscription-agent fields and device registration (ADR-0193 D14-D17); 117 adds `personal_provider_link` for personal API keys (FORCE row-level security). No data is dropped.
+
+### Added
+- Web, desktop and phone: an "AI" entry at the top of the sidebar with a hub overview, one shared vocabulary for agents, subscriptions and keys, and the old entry points linked to it (#3394, #3398).
+- Server: agents now report their brain (team key, personal subscription, personal key), who can call them, their owner and whether their host is online; a subscription-agent registration endpoint. Claude subscription agents are off by default (`MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`) until Anthropic confirms the terms (#3401).
+- Web and desktop: team AI keys in the AI hub (#3403), "My AI accounts" (#3404), and a single "sign in, then register" step for Claude Code on desktop that passes the value through `headersHelper` instead of the command line (#3419).
+- Server: personal API keys. Only an operator issues them, only an owner-only agent resolves them, and there is no fallback to the team key (#3415).
+- Research spikes for the personal cloud workspace (ADR-0197): Linux host key custody (#3417) and a blind PTY relay that only forwards ciphertext (#3418). Neither is turned on in a running service.
+
+### Changed
+- Phone: consecutive messages from the same person group tighter (6 pt) without a per-row time; the time is in the long-press sheet (#3387).
+
 ## [0.1.17] - 2026-10-03
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.17>. Tag target: `main=4d623fe1`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. **v0.1.16 was published but never deployed**: its `momo-notifier` ran the share retention sweep with a role that had no privilege on `work_session_share` and looped on `permission denied` (#3377); 0.1.17 contains everything in 0.1.16 plus the fix (#3378). Five database migrations since 0.1.15 (111-115): the schema goes from 110 to 115 on the api pre-deploy. 111 adds `member_avatar_media` (member profile photos: own-write only, composite FK, FORCE row-level security). 112 adds the `drive_reclaimed_at` marker for avatar Drive reclaim (rows are kept). 113 adds `work_session.origin` (`host` or `local_pty`) and `folder_label`, plus a trigger that refuses work-control creation on a shared local session. 114 adds `work_session_share` (shared summary S1, FORCE row-level security) and widens the `tool` CHECK. 115 adds `work_session.turn_started_at` and `notification_rule.work_complete_push` (default true). No data is dropped. There is no new migration for the fix: the api pre-deploy re-applies `bootstrap_runtime_roles.sql`. Rolling the app image back to 0.1.15 keeps schema 115: 0.1.15 does not read the new columns or tables, so only the new features turn off.
