@@ -1,0 +1,545 @@
+import { particleFor } from "../../lib/koreanParticle";
+
+// =============================================================================
+// 「AI」 허브 용어·라벨 모델 (AIH-1, #3391, claudedocs/ai-hub-2026-10/plan.md).
+//
+// 화면이 「누가 어떤 AI를 쓰고, 누가 부를 수 있고, 비용이 누구 몫인가」를 말하는
+// 모든 문장을 한 곳에 둔다. 에이전트 표, 멘션 자동완성, 비소유자 안내가 같은
+// 사실을 서로 다른 말로 하는 일(팀 키로 대신 답한다는 거짓 약속 포함)을 구조로
+// 막는 것이 목적이다. UI 없음, 플랫폼 API 없음, 순수 함수.
+//
+// ## 입력: 오늘의 서버 필드와 AIH-2의 미래 필드
+//
+// 서버가 `brain`·`callable_by`·`owner`·`host_online`을 내려주는 것은 AIH-2(공개 API
+// 변경, ADR 증보)다. 그 전에도, 그 뒤에도 같은 함수가 돈다.
+//
+//   · 미래 필드(brain, callableBy, ownerDisplayName, hostOnline)가 있으면 그 값이 먼저다.
+//   · 없으면 오늘 있는 값으로 추론한다: `invocationScope === "owner_only"` 또는
+//     `subscriptionHarness` 가 있으면 내 구독, `hostedConnection === true` 면 외부,
+//     `hostedConnection === false` 면 팀 키.
+//   · 둘 다 없으면 `unknown`. unknown 은 「모른다」이지 기본값이 아니다. 라벨 함수는
+//     unknown 에 대해 아무 문장도 만들지 않는다(null). 플랜 §9: 구버전 서버에서는
+//     보조 줄을 그리지 않는다. 모르는 것을 팀 키 · 누구나 로 읽으면 구독 에이전트를
+//     누구나 부를 수 있다고 약속하게 된다.
+//
+// ## 약관 선을 모델이 지킨다 (플랜 §4-3, §4-5)
+//
+// 내 구독 에이전트는 서버가 뭐라고 내려주든 「만든 사람만」이다. brain 이 구독인데
+// callable_by 가 everyone 이면 서버 값을 믿지 않고 owner 로 읽는다. 그리고 구독
+// 에이전트의 맥이 꺼져 있을 때 어떤 문장도 「팀 키로 대신 답한다」고 하지 않는다.
+//
+// ## 소유자를 모를 때
+//
+// 보는 사람이 소유자인지 알 수 없으면(ownerHumanId 또는 viewerHumanId 부재) 「내 구독」
+// 도 「성재 님만」도 말하지 않고 「개인 구독 · 만든 사람만」이라 한다. 소유자 본인에게
+// 자물쇠와 「보내도 답하지 않아요」를 보이는 쪽이 훨씬 나쁜 오류라서 비소유자 안내는
+// ownership === "other" 일 때만 만든다.
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// 용어집 (8개)
+// ---------------------------------------------------------------------------
+
+export type AiGlossaryId =
+  | "myAiAccount"
+  | "teamAiKey"
+  | "defaultAi"
+  | "agent"
+  | "callableBy"
+  | "cost"
+  | "externalConnection"
+  | "myWork";
+
+export interface AiGlossaryEntry {
+  id: AiGlossaryId;
+  /** 화면에 쓰는 말. */
+  term: string;
+  /** 화면에 쓰는 한 줄. */
+  meaning: string;
+  /** 이 말이 흡수하는 지금의 말(시안 용어집 오른쪽 열). */
+  absorbs: readonly string[];
+}
+
+export const AI_GLOSSARY: readonly AiGlossaryEntry[] = [
+  {
+    id: "myAiAccount",
+    term: "내 AI 계정",
+    meaning: "내가 로그인한 Claude Code·Codex 구독과 내 API 키. 나만 써요.",
+    absorbs: ["내 계정", "이 맥", "구독", "구독 추가", "로그인(단독)", "개인 구독", "내 설정", "로컬 터미널 기본 로그인"],
+  },
+  {
+    id: "teamAiKey",
+    term: "팀 AI 키",
+    meaning: "운영자가 넣은 API 키. 팀이 같이 쓰고 비용은 팀 몫이에요.",
+    absorbs: ["팀 연결", "팀 API 키", "팀 키", "팀 기본", "운영자 설정"],
+  },
+  {
+    id: "defaultAi",
+    term: "기본 AI",
+    meaning: "기능마다 먼저 쓸 AI. 표에서 기능별로 골라요.",
+    absorbs: ["기본 AI(유지)", "앱 명령", "원격 작업 기본 계정", "팀 에이전트 대답", "로컬 터미널 새 세션"],
+  },
+  {
+    id: "agent",
+    term: "에이전트",
+    meaning: "@로 부르는 AI 멤버. 쓰는 AI는 내 구독, 팀 키, 외부 중 하나예요.",
+    absorbs: ["호스티드 에이전트", "구독 에이전트", "합류/합류시키기", "봇(AI 봇)", "에이전트 초대(초대하기만 유지)"],
+  },
+  {
+    id: "callableBy",
+    term: "부를 수 있는 사람",
+    meaning: "누구나 또는 한 사람만. 에이전트마다 하나예요.",
+    absorbs: ["owner_only", "오너 전용", "소유자 전용", "본인 1인"],
+  },
+  {
+    id: "cost",
+    term: "비용",
+    meaning: "답할 때 나가는 돈이 누구 몫인지: 내 구독, 팀, 외부 운영자.",
+    absorbs: ["과금", "사용량 소스", "팀 키만"],
+  },
+  {
+    id: "externalConnection",
+    term: "외부 연결",
+    meaning: "oort 밖과 주고받는 통로. 앱 · 채널로 들어오는 주소 · 밖으로 보내는 알림 · 외부 에이전트 연결.",
+    absorbs: ["웹훅", "이벤트 구독", "에이전트 자격", "MCP", "Agent Port", "1회용 연결 값(발급 화면에서만 사용)", "앱"],
+  },
+  {
+    id: "myWork",
+    term: "내 작업",
+    meaning: "내 맥 터미널에서 내 계정으로 직접 하는 일.",
+    absorbs: ["내 작업(유지)", "로컬 터미널", "코드 실행 호스트(설정에 유지)"],
+  },
+];
+
+/** 시안 용어집 아래 「금지」 줄. */
+export const AI_GLOSSARY_BANS =
+  "「AI 연결」은 허브 이름 「AI」로 흡수해요. 「합류」는 화면에서 안 써요(만들기·초대). 영어 약자 MCP·Agent Port는 외부 에이전트 연결 상세 화면의 괄호 안에서만 써요.";
+
+export function glossaryEntry(id: AiGlossaryId): AiGlossaryEntry {
+  const found = AI_GLOSSARY.find((entry) => entry.id === id);
+  // 위 표가 AiGlossaryId 를 전부 덮는다는 것은 시험이 고정한다.
+  if (!found) throw new Error(`unknown glossary id: ${id}`);
+  return found;
+}
+
+/** 외부 연결 하위 이름 (플랜 §2). */
+export const AI_EXTERNAL_SUBSECTIONS = {
+  apps: "앱",
+  incoming: "채널로 들어오는 주소",
+  outgoing: "밖으로 보내는 알림",
+  externalAgents: "외부 에이전트 연결",
+  hostedBotInvite: "호스티드 봇 초대",
+} as const;
+
+// ---------------------------------------------------------------------------
+// 화면 문구 상수 (플랜 §5)
+// ---------------------------------------------------------------------------
+
+export const AI_HUB_COPY = {
+  name: "AI",
+  subtitle: "누가 어떤 AI를 쓰는지, 누가 부를 수 있는지, 비용이 누구 몫인지 한 곳에서 봐요.",
+  webAccountsNotice:
+    "Claude Code·Codex 로그인은 데스크탑 앱에서 해요. 로그인 정보가 브라우저로 오지 않도록, 내 맥에 설치한 공식 CLI로만 로그인해요.",
+  phoneAccountsNotice: "로그인은 맥에서 해요.",
+  loginNotStored: "로그인 정보는 oort에 저장하지 않아요.",
+  defaultAiDescription:
+    "기능마다 먼저 쓸 AI를 골라요. 고르지 않으면 팀 AI 키로 답해요. 내 구독은 내 줄에서만 고를 수 있고, 팀 에이전트는 내 구독을 쓰지 않아요.",
+  agentsPageTagline: "@로 부르는 AI 멤버예요.",
+  subscriptionHostOfflineDetail: "켜지면 답해요. 팀 키로 대신하지 않아요.",
+  /** 에이전트 만들기 3종 (시안 5번 패널). */
+  createKinds: {
+    team: {
+      title: "팀 에이전트",
+      description: "팀 AI 키로 답해요. 누구나 부르고, 비용은 팀 몫이에요.",
+      audience: "운영자",
+    },
+    mySubscription: {
+      title: "내 Claude Code·Codex",
+      description: "내 구독으로 답해요. 나만 부르고, 비용은 내 구독이에요.",
+      audience: "데스크탑",
+    },
+    external: {
+      title: "다른 곳에서 도는 에이전트",
+      description: "직접 운영하는 에이전트를 초대해요. 비용은 운영하는 쪽이 내요.",
+      audience: "소유자·관리자",
+    },
+  },
+} as const;
+
+/** 팀 키 비운영자 안내. 운영자 이름을 모르면 「운영자」로 말한다. */
+export function teamKeyOperatorOnlyNotice(operatorName?: string | null): string {
+  const name = cleanName(operatorName);
+  const who = name ? `${name} 님` : "운영자";
+  return `팀 키는 운영자만 보고 바꿀 수 있어요. 필요하면 ${who}에게 요청하세요.`;
+}
+
+// ---------------------------------------------------------------------------
+// 입력 사실과 분류
+// ---------------------------------------------------------------------------
+
+export type AiBrain = "subscription" | "team_key" | "external";
+export type AiCallableBy = "owner" | "everyone";
+export type AiCostOwner = "owner" | "team" | "external";
+export type AiHarness = "claude_code" | "codex";
+export type AiOwnership = "mine" | "other" | "unknown";
+
+/**
+ * 에이전트 한 명에 대해 클라이언트가 가진 사실. 모든 필드가 선택이다.
+ *
+ * 앞 묶음은 AIH-2 의 미래 필드이고 서버 값(문자열)을 그대로 받는다. 모르는 값은
+ * 부재와 같다. 뒤 묶음은 오늘 서버가 이미 내려주는 값이다.
+ */
+export interface AiAgentFacts {
+  // --- AIH-2 (아직 서버에 없음) ---
+  brain?: string | null;
+  callableBy?: string | null;
+  /** 소유자 표시 이름(멤버 표시 이름). */
+  ownerDisplayName?: string | null;
+  hostOnline?: boolean | null;
+  // --- 오늘 있는 값 ---
+  /** `RosterMember.ownerHumanId`. */
+  ownerHumanId?: string | null;
+  /** `HostedAgentConnection.invocationScope`. */
+  invocationScope?: string | null;
+  /** `HostedAgentConnection.subscriptionHarness`. */
+  subscriptionHarness?: string | null;
+  /**
+   * 호스티드 연결(외부 에이전트)이 있는가. true=있음, false=연결 목록을 읽었고 없음,
+   * undefined=읽지 못함. false 와 undefined 는 다른 사실이다.
+   */
+  hostedConnection?: boolean | null;
+  /** 팀 키 줄의 괄호 안(예: Anthropic). 있을 때만 쓴다. */
+  providerLabel?: string | null;
+}
+
+export interface AiViewer {
+  /** 보는 사람의 사람 멤버 id. 없으면 소유 여부를 모른다. */
+  humanId?: string | null;
+}
+
+export interface AiAgentClassification {
+  brain: AiBrain | "unknown";
+  /** brain 을 서버가 말했는지, 오늘 값에서 추론했는지, 모르는지. */
+  brainSource: "server" | "inferred" | "unknown";
+  harness: AiHarness | null;
+  callableBy: AiCallableBy | "unknown";
+  cost: AiCostOwner | "unknown";
+  ownership: AiOwnership;
+  ownerName: string | null;
+  hostOnline: boolean | null;
+  providerLabel: string | null;
+}
+
+const BRAINS: readonly AiBrain[] = ["subscription", "team_key", "external"];
+
+function cleanName(raw: string | null | undefined): string | null {
+  const trimmed = raw?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function toBrain(raw: string | null | undefined): AiBrain | null {
+  return BRAINS.find((brain) => brain === raw) ?? null;
+}
+
+function toHarness(raw: string | null | undefined): AiHarness | null {
+  return raw === "claude_code" || raw === "codex" ? raw : null;
+}
+
+function sameId(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+export function classifyAiAgent(facts: AiAgentFacts, viewer: AiViewer = {}): AiAgentClassification {
+  const harness = toHarness(facts.subscriptionHarness);
+
+  let brain: AiBrain | null = toBrain(facts.brain);
+  let brainSource: AiAgentClassification["brainSource"] = brain ? "server" : "unknown";
+  if (!brain) {
+    if (facts.invocationScope === "owner_only" || harness) brain = "subscription";
+    else if (facts.hostedConnection === true) brain = "external";
+    else if (facts.hostedConnection === false) brain = "team_key";
+    if (brain) brainSource = "inferred";
+  }
+
+  // 구독은 서버 값과 무관하게 소유자만. 그 밖에는 서버 값 > 오늘 값 > brain 에서 유도.
+  let callableBy: AiCallableBy | "unknown";
+  if (brain === "subscription") callableBy = "owner";
+  else if (facts.callableBy === "owner" || facts.callableBy === "everyone") callableBy = facts.callableBy;
+  else if (facts.invocationScope === "owner_only") callableBy = "owner";
+  else if (facts.invocationScope === "workspace") callableBy = "everyone";
+  else if (brain === "team_key" || brain === "external") callableBy = "everyone";
+  else callableBy = "unknown";
+
+  const cost: AiAgentClassification["cost"] =
+    brain === "subscription" ? "owner" : brain === "team_key" ? "team" : brain === "external" ? "external" : "unknown";
+
+  let ownership: AiOwnership = "unknown";
+  const ownerId = cleanName(facts.ownerHumanId);
+  const viewerId = cleanName(viewer.humanId);
+  if (ownerId && viewerId) ownership = sameId(ownerId, viewerId) ? "mine" : "other";
+
+  return {
+    brain: brain ?? "unknown",
+    brainSource,
+    harness,
+    callableBy,
+    cost,
+    ownership,
+    ownerName: cleanName(facts.ownerDisplayName),
+    hostOnline: typeof facts.hostOnline === "boolean" ? facts.hostOnline : null,
+    providerLabel: cleanName(facts.providerLabel),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 라벨
+// ---------------------------------------------------------------------------
+
+export const HARNESS_LABEL: Readonly<Record<AiHarness, string>> = {
+  claude_code: "Claude Code",
+  codex: "Codex",
+};
+
+/** 소유자를 문장 안에서 부르는 말. 이름을 모르면 「만든 사람」. */
+function ownerRef(c: AiAgentClassification): string {
+  return c.ownerName ? `${c.ownerName} 님` : "만든 사람";
+}
+
+export interface AiAgentLabels {
+  /** 표 「쓰는 AI」 열. */
+  brain: string | null;
+  /** 표 「부를 수 있는 사람」 열(칩). */
+  callable: string | null;
+  /** 표 「비용」 열. */
+  cost: string | null;
+  /** 표 「상태」 열의 맥 켜짐/꺼짐. 구독 에이전트가 아니거나 모르면 null. */
+  host: { label: string; detail: string | null } | null;
+  /** 멘션 후보의 보조 줄(`쓰는 AI · 부를 수 있는 사람`). null 이면 줄을 그리지 않는다. */
+  mentionLine: string | null;
+  /** 멘션 후보 오른쪽 칩. */
+  mentionBadge: string | null;
+  /** 멘션 후보에 자물쇠를 붙이고 흐리게: 보는 사람이 못 부르는 에이전트. */
+  lockedForViewer: boolean;
+}
+
+export function aiAgentLabels(c: AiAgentClassification): AiAgentLabels {
+  const mine = c.ownership === "mine";
+  const other = c.ownership === "other";
+  // 소유자 이름을 알거나 남의 것이면 이름(또는 「만든 사람」)으로 말한다. 둘 다 아니면 중립.
+  const named = c.ownerName !== null || other;
+  const harness = c.harness ? ` (${HARNESS_LABEL[c.harness]})` : "";
+
+  let brain: string | null = null;
+  let callable: string | null = null;
+  let cost: string | null = null;
+  let mentionBrain: string | null = null;
+  let mentionCallable: string | null = null;
+  let mentionBadge: string | null = null;
+
+  switch (c.brain) {
+    case "subscription":
+      brain = `${mine ? "내 구독" : "개인 구독"}${harness}`;
+      callable = mine ? "나만" : `${c.ownerName ? `${c.ownerName} 님` : "만든 사람"}만`;
+      cost = mine ? "내 구독" : `${c.ownerName ? `${c.ownerName} 님` : "만든 사람"} 구독`;
+      mentionBrain = mine ? "내 구독" : named ? `${ownerRef(c)} 개인 구독` : "개인 구독";
+      mentionCallable = mine ? "나만 부를 수 있어요" : `${ownerRef(c)}만 부를 수 있어요`;
+      mentionBadge = mine ? "내 구독" : named ? `${ownerRef(c)}만` : "개인 구독";
+      break;
+    case "team_key":
+      brain = `팀 AI 키${c.providerLabel ? ` (${c.providerLabel})` : ""}`;
+      callable = "누구나";
+      cost = "팀";
+      mentionBrain = "팀 키";
+      mentionCallable = "누구나";
+      mentionBadge = "팀 키";
+      break;
+    case "external":
+      brain = "외부 (직접 운영)";
+      callable = "누구나";
+      cost = "외부 운영자";
+      mentionBrain = "외부";
+      mentionCallable = "누구나";
+      mentionBadge = "외부";
+      break;
+    default:
+      break;
+  }
+
+  // brain 을 모르는 채 callable 만 아는 경우(서버가 callable_by 만 내려준 경우)에도
+  // 표의 칩은 그린다. 보조 줄은 두 값을 다 알 때만.
+  if (callable === null && c.callableBy === "everyone") callable = "누구나";
+  if (callable === null && c.callableBy === "owner") callable = `${c.ownerName ? `${c.ownerName} 님` : "만든 사람"}만`;
+
+  let host: AiAgentLabels["host"] = null;
+  if (c.brain === "subscription" && c.hostOnline === true) {
+    host = { label: mine ? "내 맥 켜짐" : "맥 켜짐", detail: null };
+  } else if (c.brain === "subscription" && c.hostOnline === false) {
+    host = { label: "맥 꺼짐", detail: AI_HUB_COPY.subscriptionHostOfflineDetail };
+  }
+
+  const offlineSuffix = host?.label === "맥 꺼짐" ? " · 맥 꺼짐" : "";
+  const mentionLine =
+    mentionBrain !== null && mentionCallable !== null ? `${mentionBrain} · ${mentionCallable}${offlineSuffix}` : null;
+
+  return {
+    brain,
+    callable,
+    cost,
+    host,
+    mentionLine,
+    mentionBadge,
+    lockedForViewer: c.brain === "subscription" && other,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 안내 문구 (보낸 사람에게만 보이는 정적 문구)
+// ---------------------------------------------------------------------------
+
+/** 「성재의 Claude Code는」 처럼 주제 조사를 붙인다. */
+function withTopic(name: string): string {
+  return `${name}${particleFor(name, "topic")}`;
+}
+
+/**
+ * 비소유자가 구독 에이전트를 멘션한 뒤 타임라인에 보이는 안내(나만 보여요).
+ * 비소유자가 아니거나 구독 에이전트가 아니면 null. 팀 에이전트가 없으면 앞 문장만.
+ */
+export function nonOwnerNotice(
+  c: AiAgentClassification,
+  agentName: string,
+  teamAgentName?: string | null
+): string | null {
+  if (c.brain !== "subscription" || c.ownership !== "other") return null;
+  const owner = ownerRef(c);
+  const first = `${withTopic(agentName)} ${owner} 개인 구독이라 ${owner}만 부를 수 있어요.`;
+  const team = cleanName(teamAgentName);
+  if (!team) return first;
+  return `${first} 팀 키로 답하는 @${team}에게 물어보거나, ${owner}에게 부탁해 보세요.`;
+}
+
+/** 작성 중 composer 위 한 줄. 비소유자일 때만. */
+export function nonOwnerComposerNotice(c: AiAgentClassification, agentName: string): string | null {
+  if (c.brain !== "subscription" || c.ownership !== "other") return null;
+  return `${withTopic(agentName)} ${ownerRef(c)}만 부를 수 있어요. 보내도 답하지 않아요.`;
+}
+
+/** 구독 에이전트의 맥이 꺼져 있을 때. 어떤 경우에도 팀 키로 대신한다고 하지 않는다. */
+export function hostOfflineNotice(c: AiAgentClassification): string | null {
+  if (c.brain !== "subscription" || c.hostOnline !== false) return null;
+  const whose = c.ownership === "mine" ? "내 맥이" : `${ownerRef(c)} 맥이`;
+  return `${whose} 꺼져 있어요. 켜지면 답해요. 팀 키로 대신하지 않아요.`;
+}
+
+// ---------------------------------------------------------------------------
+// 에이전트 기본 이름 (결재 2026-10-03, 플랜 §10-2)
+// ---------------------------------------------------------------------------
+
+/** 서버 `DISPLAY_NAME_MAX`(문자 수)와 같다. 기본 이름이 그 한도를 넘지 않게 한다. */
+const NAME_MAX_CHARS = 100;
+
+function nameToken(raw: string | null | undefined): string {
+  return (raw ?? "")
+    .trim()
+    .replace(/^@+/, "")
+    .replace(/\s+/g, "-")
+    .replace(/\p{Cc}/gu, "");
+}
+
+export interface DefaultAgentNameInput {
+  /** 만드는 사람의 표시 이름. */
+  displayName: string;
+  harness: AiHarness;
+  /** 이미 쓰는 이름·핸들 전부. 대소문자는 가리지 않는다. */
+  takenNames: readonly string[];
+  /** 이 맥의 기기 이름. `multipleDevices` 일 때만 쓴다. */
+  deviceName?: string | null;
+  /** 이 사람이 에이전트를 만든 맥이 여러 대인가. */
+  multipleDevices?: boolean;
+}
+
+/**
+ * `<표시이름>-claude` / `-codex`. 맥이 여러 대면 뒤에 `-<기기이름>`. 겹치면 `-2`, `-3`.
+ * 만들기 전에 사용자가 고칠 수 있는 기본값일 뿐이고, 최종 검증은 서버 몫이다.
+ */
+export function defaultAgentName(input: DefaultAgentNameInput): string {
+  const who = nameToken(input.displayName) || "me";
+  const kind = input.harness === "codex" ? "codex" : "claude";
+  const device = input.multipleDevices ? nameToken(input.deviceName) : "";
+  const tail = device ? `-${kind}-${device}` : `-${kind}`;
+
+  // 한도에 걸리면 표시이름 쪽을 깎는다. 꼬리(종류·기기)가 이름의 뜻이다.
+  // `-99` 같은 중복 번호가 붙을 자리 5자를 남긴다.
+  const roomForWho = Math.max(1, NAME_MAX_CHARS - [...tail].length - 5);
+  const base = `${[...who].slice(0, roomForWho).join("")}${tail}`;
+
+  const taken = new Set(input.takenNames.map((name) => name.trim().toLowerCase()));
+  if (!taken.has(base.toLowerCase())) return base;
+  for (let n = 2; ; n += 1) {
+    const candidate = `${base}-${n}`;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 옛 말 → 새 말 (AIH-10 grep 게이트의 입력)
+// ---------------------------------------------------------------------------
+
+export interface LegacyTermEntry {
+  /** 사용자에게 보이는 글에서 없애거나 바꿀 말. */
+  old: string;
+  /** 대신 쓸 말. */
+  next: string;
+  /**
+   * true: 사용자에게 보이는 글에 이 글자열이 있으면 그대로 위반(grep 게이트 대상).
+   * false: 새 문구도 같은 글자를 쓰거나(「팀 키」, 「개인 구독」), 다른 뜻으로 흔히 쓰여서
+   * 글자 검사로는 판정할 수 없다. 사람이 문맥으로 본다.
+   */
+  grepGate: boolean;
+  note?: string;
+}
+
+export const LEGACY_TERM_MAP: readonly LegacyTermEntry[] = [
+  { old: "AI 연결", next: "AI", grepGate: true, note: "허브 이름으로 흡수" },
+  { old: "합류", next: "만들기 · 초대", grepGate: true, note: "합류시키기 포함. 화면에서 쓰지 않아요" },
+  { old: "호스티드 에이전트", next: "에이전트", grepGate: true },
+  { old: "구독 에이전트", next: "에이전트", grepGate: true, note: "쓰는 AI 열이 내 구독을 말해요" },
+  { old: "owner_only", next: "부를 수 있는 사람", grepGate: true, note: "코드·API 값은 유지, 화면 문구만" },
+  { old: "오너 전용", next: "부를 수 있는 사람", grepGate: true },
+  { old: "소유자 전용", next: "부를 수 있는 사람", grepGate: true },
+  { old: "본인 1인", next: "부를 수 있는 사람", grepGate: true },
+  { old: "과금", next: "비용", grepGate: true },
+  { old: "사용량 소스", next: "비용", grepGate: true },
+  { old: "팀 연결", next: "팀 AI 키", grepGate: true },
+  { old: "팀 API 키", next: "팀 AI 키", grepGate: true },
+  { old: "팀 기본", next: "기본 AI", grepGate: true },
+  { old: "운영자 설정", next: "팀 AI 키", grepGate: true },
+  { old: "앱 명령", next: "기본 AI (기능 이름은 평문)", grepGate: true },
+  { old: "원격 작업 기본 계정", next: "기본 AI (기능 이름은 평문)", grepGate: true },
+  { old: "팀 에이전트 대답", next: "기본 AI (기능 이름은 평문)", grepGate: true },
+  { old: "로컬 터미널 새 세션", next: "기본 AI (기능 이름은 평문)", grepGate: true },
+  { old: "로컬 터미널 기본 로그인", next: "내 AI 계정", grepGate: true },
+  { old: "구독 추가", next: "내 AI 계정", grepGate: true },
+  { old: "1회용 연결 값", next: "외부 에이전트 연결", grepGate: true, note: "발급 화면에서만 사용" },
+  { old: "내 계정", next: "내 AI 계정", grepGate: false, note: "프로필 화면의 「내 계정」과 겹쳐요" },
+  { old: "이 맥", next: "내 AI 계정", grepGate: false, note: "「이 맥의 Claude Code」 같은 정상 문장이 있어요" },
+  { old: "구독", next: "내 AI 계정 · 내 구독", grepGate: false, note: "새 문구도 「내 구독」을 써요" },
+  { old: "개인 구독", next: "내 AI 계정", grepGate: false, note: "남의 구독을 말하는 새 문구가 이 글자를 써요" },
+  { old: "내 설정", next: "내 AI 계정", grepGate: false },
+  { old: "팀 키", next: "팀 AI 키", grepGate: false, note: "멘션 칩 「팀 키」는 새 문구예요" },
+  { old: "로그인", next: "내 AI 계정 (Claude Code로 로그인)", grepGate: false, note: "단독 사용만 바꿔요" },
+  { old: "봇", next: "에이전트", grepGate: false, note: "「호스티드 봇 초대」 이름은 유지해요" },
+  { old: "웹훅", next: "채널로 들어오는 주소", grepGate: false, note: "상세 화면 괄호 안은 허용" },
+  { old: "이벤트 구독", next: "밖으로 보내는 알림", grepGate: false, note: "상세 화면 괄호 안은 허용" },
+  { old: "에이전트 자격", next: "외부 에이전트 연결", grepGate: false, note: "상세 화면 괄호 안은 허용" },
+  { old: "MCP", next: "외부 에이전트 연결", grepGate: false, note: "외부 에이전트 연결 상세 괄호 안에서만" },
+  { old: "Agent Port", next: "외부 에이전트 연결", grepGate: false, note: "외부 에이전트 연결 상세 괄호 안에서만" },
+];
+
+/**
+ * 글에 남은 옛 말(grepGate 항목만)을 찾는다. AIH-10 의 게이트가 쓰고, 이 모듈의
+ * 새 문구가 옛 말을 되살리지 않는다는 시험이 쓴다.
+ */
+export function findLegacyTerms(text: string): LegacyTermEntry[] {
+  return LEGACY_TERM_MAP.filter((entry) => entry.grepGate && text.includes(entry.old));
+}
