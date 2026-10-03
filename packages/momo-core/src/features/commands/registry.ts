@@ -36,6 +36,7 @@
 import { serverSurface, type SurfaceId } from "../capabilities/serverSurfaces";
 import { attachDirection } from "../../lib/koreanParticle";
 import { WORK_CONSOLE_VIEW_PATH } from "../workbench/workTab";
+import { AI_HUB_PATH, AI_HUB_SECTIONS, glossaryEntry } from "../ai/aiHubModel";
 
 /**
  * 팔레트가 명령을 묶는 갈래.
@@ -96,6 +97,7 @@ export type CommandIcon =
   | "create-channel"
   | "agent"
   | "ai-connect"
+  | "ai-hub"
   | "sidebar";
 
 /** 명령이 알아야 하는 나 자신. 지금은 멤버 id 하나면 충분하다. */
@@ -235,7 +237,7 @@ export interface CommandEnv {
   readonly agents: readonly CommandAgent[];
   /**
    * 지금 이 카드를 붙일 자리가 있는가(#2943). 줄의 작은 글씨가 이 답을 따른다:
-   * 자리가 있으면 「이 채널 · 나에게만」, 없으면 「설정에서 열려요」. 누르면
+   * 자리가 있으면 「이 채널 · 나에게만」, 없으면 「AI에서 열려요」. 누르면
    * 무엇이 일어나는지를 줄이 거짓 없이 말하게 한다.
    */
   readonly canOpenLocalCard: (card: LocalCardId) => boolean;
@@ -263,11 +265,11 @@ function sidebarTitle(collapsed: boolean): string {
   return collapsed ? "탐색 패널 열기" : "탐색 패널 접기";
 }
 
-/** 설정 › AI 연결의 주소. 카드와 폴백과 이동 명령이 같은 자리를 가리킨다. */
-export const AI_CONNECT_SETTINGS_PATH = "/settings?section=ai";
+/** AI 허브 › 내 AI 계정의 주소(AIH-3). 카드와 폴백과 이동 명령이 같은 자리를 가리킨다. */
+export const AI_CONNECT_HUB_PATH = "/ai/accounts";
 
-/** 설정 목차의 그 섹션 이름(`settingsNav.ts` `ai`). */
-const AI_CONNECT_SETTINGS_LABEL = "AI 연결";
+/** 허브 화면의 이름. */
+const AI_CONNECT_HUB_LABEL = "AI";
 
 const AI_CONNECT_LINES: ReadonlySet<string> = new Set<AiConnectLine>([
   "claude",
@@ -291,9 +293,9 @@ function runAiConnect(ctx: CommandContext, args?: LocalCardArgs): CommandResult 
   if (ctx.openLocalCard("ai.connect", aiConnectArgs(args))) {
     return { status: "AI 연결 카드 열기", closesSurface: true };
   }
-  ctx.navigate(AI_CONNECT_SETTINGS_PATH);
+  ctx.navigate(AI_CONNECT_HUB_PATH);
   return {
-    status: `${attachDirection(AI_CONNECT_SETTINGS_LABEL)} 이동`,
+    status: `${attachDirection(AI_CONNECT_HUB_LABEL)} 이동`,
     closesSurface: true,
   };
 }
@@ -383,6 +385,31 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
     run: navigateTo("/settings", "설정"),
   },
   {
+    id: "nav.ai",
+    title: "AI",
+    group: "navigate",
+    kind: "navigate",
+    keywords: ["ai", "허브", "구독", "에이전트 비용", "연결"],
+    icon: "ai-hub",
+    testId: "switcher-ai",
+    available: always,
+    run: navigateTo(AI_HUB_PATH, "AI"),
+  },
+  ...AI_HUB_SECTIONS.map((section): StaticCommand => {
+    const title = section.id === "agents" ? "AI 에이전트" : glossaryEntry(section.glossaryId).term;
+    return {
+      id: `nav.ai.${section.id}`,
+      title,
+      group: "navigate",
+      kind: "navigate",
+      keywords: ["ai", ...section.keywords],
+      icon: "ai-hub",
+      testId: `switcher-ai-${section.id}`,
+      available: always,
+      run: navigateTo(section.path, title),
+    };
+  }),
+  {
     id: "nav.settings.agents",
     title: "에이전트 자격",
     group: "settings",
@@ -408,12 +435,12 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
     agentSuggestable: true,
     available: always,
     metaFor: (env) =>
-      env.canOpenLocalCard("ai.connect") ? "이 채널 · 나에게만" : "설정에서 열려요",
+      env.canOpenLocalCard("ai.connect") ? "이 채널 · 나에게만" : "AI에서 열려요",
     slash: {
       name: "연결",
       aliases: ["connect", "ai"],
       hint: "AI 연결 카드 열기 · 나에게만 보여요",
-      fallbackHint: "설정 › AI 연결로 이동 · 메시지로 보내지 않아요",
+      fallbackHint: "AI로 이동 · 메시지로 보내지 않아요",
       args: [
         {
           value: "claude",
@@ -439,19 +466,6 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
       ],
     },
     run: runAiConnect,
-  },
-  {
-    // 시안 ① ⌘K 프레임의 두 번째 줄. 이름은 목적지(설정 목차)가 쓰는 말이다.
-    id: "nav.settings.ai",
-    title: AI_CONNECT_SETTINGS_LABEL,
-    meta: "설정",
-    group: "settings",
-    kind: "navigate",
-    keywords: ["설정", "ai", "구독", "api 키", "claude", "codex"],
-    icon: "settings",
-    testId: "switcher-settings-ai",
-    available: always,
-    run: navigateTo(AI_CONNECT_SETTINGS_PATH, AI_CONNECT_SETTINGS_LABEL),
   },
   {
     // 표면 이름은 판정표에서 든다. 진입점과 도착지가 각자 적으면 갈라진다.

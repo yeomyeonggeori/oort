@@ -33,9 +33,9 @@ export const DETECT_MAX_DELAY_MS = 30_000;
 export const DETECT_CAP_MS = 5 * 60_000;
 
 export const FIRST_AGENT_RETRY_LABEL = "다시 시도";
-export const FIRST_AGENT_REENTRY_LABEL = "설정 › 연결 › 에이전트 자격";
-export const FIRST_AGENT_REENTRY_HREF = "/settings?section=agents";
-export const FIRST_AGENT_AI_HREF = "/settings?section=ai";
+export const FIRST_AGENT_REENTRY_LABEL = "AI › 외부 연결";
+export const FIRST_AGENT_REENTRY_HREF = "/ai/external";
+export const FIRST_AGENT_AI_HREF = "/ai/accounts";
 
 export const FIRST_AGENT_HEADING_ID = "first-agent-heading";
 export const FIRST_AGENT_OFFLINE_REASON_ID = "first-agent-offline-reason";
