@@ -230,7 +230,7 @@ export const AI_TEAM_KEYS_COPY = {
     heading: "개인 API 키",
     badge: "준비 중",
     body: "운영자가 사람마다 발급하는 API 키를 준비하고 있어요. 발급받은 키는 그 사람의 본인 전용 에이전트에서만 쓰이고, 다른 사람이 부르거나 같이 쓸 수 없어요.",
-    nowLine: "지금은 팀이 같이 쓸 키를 위 「팀 AI 키」에 넣고, 내 구독은 「내 AI 계정」에서 로그인해요.",
+    nowLine: "지금은 팀이 같이 쓸 키는 운영자가 「팀 AI 키」에 넣고, 내 구독은 「내 AI 계정」에서 로그인해요.",
   },
   defaultsHeading: "기본 AI",
   defaultsSubtitle: "기능마다 먼저 쓸 AI",

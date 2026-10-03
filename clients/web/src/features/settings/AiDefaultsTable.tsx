@@ -371,7 +371,8 @@ function DefaultRow({
   if (resolved.state === "ok" && resolved.note && !(row.id === "remoteWork" && remote.note?.tone === "warn")) {
     lines.push({ key: "note", text: resolved.note, tone: "muted" });
   }
-  if (resolved.state !== "ok") {
+  // 허브의 팀 줄은 아래 「고르지 않으면」 문장이 같은 사실을 말한다: 한 칸에 같은 말을 두 번 하지 않는다.
+  if (resolved.state !== "ok" && !(hub && !personal)) {
     lines.push({ key: "fallback", text: resolved.sentence, tone: "warn" });
   }
 
