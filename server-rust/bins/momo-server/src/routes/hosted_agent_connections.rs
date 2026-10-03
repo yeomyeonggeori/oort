@@ -40,7 +40,7 @@ use crate::routes::shared::{
 };
 use crate::AppState;
 
-fn dto(connection: HostedConnection) -> HostedAgentConnectionDto {
+pub(crate) fn dto(connection: HostedConnection) -> HostedAgentConnectionDto {
     HostedAgentConnectionDto {
         id: connection.id.to_string(),
         agent_member_id: connection.agent_member_id.to_string(),
@@ -62,6 +62,11 @@ fn dto(connection: HostedConnection) -> HostedAgentConnectionDto {
         doorbell_last_status: None,
         invocation_scope: None,
         subscription_harness: None,
+        brain: None,
+        callable_by: None,
+        owner: None,
+        host_online: None,
+        brain_unavailable_reason: None,
     }
 }
 
@@ -74,12 +79,14 @@ async fn attach_invocation_scopes(
     conn: &mut momo_db::PgConnection,
     workspace_id: uuid::Uuid,
     dtos: &mut [HostedAgentConnectionDto],
+    claude_enabled: bool,
 ) -> Result<(), momo_db::DbError> {
     let ids: Vec<uuid::Uuid> = dtos
         .iter()
         .filter_map(|dto| uuid::Uuid::parse_str(&dto.agent_member_id).ok())
         .collect();
     let scopes = momo_agent::load_invocation_scopes_in_tx(conn, workspace_id, &ids).await?;
+    let facts = momo_agent::load_agent_read_facts_in_tx(conn, workspace_id, &ids).await?;
     for dto in dtos.iter_mut() {
         if let Some((_, scope, harness)) = scopes
             .iter()
@@ -87,6 +94,12 @@ async fn attach_invocation_scopes(
         {
             dto.invocation_scope = Some(scope.clone());
             dto.subscription_harness = harness.clone();
+        }
+        if let Some(fact) = facts
+            .iter()
+            .find(|fact| fact.agent_member_id.to_string() == dto.agent_member_id)
+        {
+            dto.apply_read_facts(fact, claude_enabled);
         }
     }
     Ok(())
@@ -160,7 +173,7 @@ fn artifact_dtos(artifacts: Vec<HostedArtifact>) -> Vec<HostedCleanupArtifactDto
     artifacts.into_iter().map(artifact_dto).collect()
 }
 
-fn no_store<T: serde::Serialize>(status: StatusCode, body: T) -> Response {
+pub(crate) fn no_store<T: serde::Serialize>(status: StatusCode, body: T) -> Response {
     let mut response = (status, Json(body)).into_response();
     response
         .headers_mut()
@@ -171,7 +184,7 @@ fn no_store<T: serde::Serialize>(status: StatusCode, body: T) -> Response {
     response
 }
 
-async fn require_admin(
+pub(crate) async fn require_admin(
     conn: &mut momo_db::PgConnection,
     workspace_id: uuid::Uuid,
     actor_member_id: uuid::Uuid,
@@ -184,6 +197,111 @@ async fn require_admin(
     } else {
         Ok(Err(ApiError::forbidden("workspace admin required")))
     }
+}
+
+/// What [`provision_hosted_agent_in_tx`] decided.
+pub(crate) enum Provisioned {
+    Created(
+        momo_agent::AgentMember,
+        Box<momo_auth::HostedPairingIssuance>,
+    ),
+    DuplicateHandle,
+    Rejected(ApiError),
+}
+
+/// The one place a dedicated hosted identity is born: member + agent row, paused
+/// profile, the optional `owner_only` mark (ADR-0193 D4), the pairing connection
+/// and its audit row — one transaction supplied by the caller.
+///
+/// Both `POST …/hosted-agent-connections` and the register-after-login endpoint
+/// (#3392) call it, so a subscription agent made by either path gets exactly the
+/// same guarantees (owner = the creating human, scope recorded in the same
+/// transaction as the identity, so there is no window in which it is a team
+/// agent). `device_id` is recorded on `owner_only` agents only.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn provision_hosted_agent_in_tx(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: uuid::Uuid,
+    actor_member_id: uuid::Uuid,
+    via_token_id: Option<uuid::Uuid>,
+    display_name: String,
+    handle: String,
+    owner_only: Option<momo_agent::SubscriptionHarness>,
+    device_id: Option<&str>,
+) -> Result<Provisioned, momo_db::DbError> {
+    // The non-routable sentinel is display metadata only. Hosted
+    // execution never dereferences agent.base_url (#1364 guard).
+    let member = match create_agent_identity_in_tx(
+        conn,
+        workspace_id,
+        &NewAgentMember {
+            display_name,
+            handle,
+            model: momo_auth::HOSTED_AGENT_MODEL.to_string(),
+            model_source: momo_agent::ModelSource::Agent,
+            base_url: momo_auth::HOSTED_AGENT_INERT_BASE_URL.to_string(),
+            system_prompt: None,
+            config: json!({"execution_mode":"hosted_dial_in"}),
+            owner_human_id: actor_member_id,
+        },
+    )
+    .await?
+    {
+        AgentCreation::Created(member) => member,
+        AgentCreation::DuplicateHandle => return Ok(Provisioned::DuplicateHandle),
+        AgentCreation::InvalidOwner => {
+            return Ok(Provisioned::Rejected(ApiError::forbidden(
+                "active human owner required",
+            )))
+        }
+    };
+    if set_agent_paused_in_tx(conn, workspace_id, member.id, actor_member_id, true)
+        .await?
+        .is_none()
+    {
+        return Err(momo_db::DbError::from(momo_db::sqlx::Error::RowNotFound));
+    }
+    // ADR-0193 D4 — the owner is the human creating it
+    // (`owner_human_id` above), and the scope is recorded in the
+    // same transaction as the identity, so there is no window in
+    // which the new agent exists as a team agent.
+    if let Some(harness) = owner_only {
+        if !momo_agent::mark_agent_owner_only_in_tx(conn, workspace_id, member.id, harness).await? {
+            return Err(momo_db::DbError::from(momo_db::sqlx::Error::RowNotFound));
+        }
+    }
+    let issuance =
+        create_hosted_connection_in_tx(conn, workspace_id, member.id, actor_member_id).await?;
+    write_audit(
+        conn,
+        &AuditEntry::new(workspace_id, "hosted_agent.connection.created")
+            .by(actor_member_id)
+            .about(member.id)
+            .target("hosted_agent_connection", issuance.connection.id)
+            .via_token(via_token_id)
+            .with_schema(
+                "momo.hosted_agent.connection.created.v1",
+                json!({
+                    "auth_mode": "static_bearer",
+                    "status": "pairing_pending",
+                    "invocation_scope": if owner_only.is_some() {
+                        momo_agent::INVOCATION_SCOPE_OWNER_ONLY
+                    } else {
+                        momo_agent::INVOCATION_SCOPE_WORKSPACE
+                    },
+                }),
+            ),
+    )
+    .await?;
+    if let (Some(harness), Some(device_id)) = (owner_only, device_id) {
+        let _ = harness;
+        if !momo_agent::set_subscription_device_in_tx(conn, workspace_id, member.id, device_id)
+            .await?
+        {
+            return Err(momo_db::DbError::from(momo_db::sqlx::Error::RowNotFound));
+        }
+    }
+    Ok(Provisioned::Created(member, Box::new(issuance)))
 }
 
 pub async fn create(
@@ -207,6 +325,18 @@ pub async fn create(
             "subscription agents are disabled on this server",
         ));
     }
+    // #3397 결재 (security review F1): the Claude opt-in covers EVERY creation
+    // path, not just the register-after-login endpoint — otherwise this legacy
+    // route would register what the default-off decision closed.
+    if owner_only == Some(momo_agent::SubscriptionHarness::ClaudeCode)
+        && !state.agent_port.config.claude_subscription_agents_enabled
+    {
+        return Err(ApiError::coded(
+            StatusCode::CONFLICT,
+            momo_agent::CLAUDE_SUBSCRIPTION_AGENT_PAUSED,
+            "claude subscription agents are paused on this server",
+        ));
+    }
     let display_name = normalized_join_display_name(&request.display_name)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     let handle = normalized_requested_handle(Some(&request.handle))
@@ -226,82 +356,25 @@ pub async fn create(
                         "member is banned from this workspace",
                     )));
                 }
-                // The non-routable sentinel is display metadata only. Hosted
-                // execution never dereferences agent.base_url (#1364 guard).
-                let member = match create_agent_identity_in_tx(
+                match provision_hosted_agent_in_tx(
                     conn,
                     workspace_id,
-                    &NewAgentMember {
-                        display_name,
-                        handle,
-                        model: momo_auth::HOSTED_AGENT_MODEL.to_string(),
-                        model_source: momo_agent::ModelSource::Agent,
-                        base_url: momo_auth::HOSTED_AGENT_INERT_BASE_URL.to_string(),
-                        system_prompt: None,
-                        config: json!({"execution_mode":"hosted_dial_in"}),
-                        owner_human_id: actor_member_id,
-                    },
+                    actor_member_id,
+                    via_token_id,
+                    display_name,
+                    handle,
+                    owner_only,
+                    None,
                 )
                 .await?
                 {
-                    AgentCreation::Created(member) => member,
-                    AgentCreation::DuplicateHandle => {
-                        return Ok(Err(ApiError::new(
-                            StatusCode::CONFLICT,
-                            "agent handle already exists",
-                        )))
-                    }
-                    AgentCreation::InvalidOwner => {
-                        return Ok(Err(ApiError::forbidden("active human owner required")))
-                    }
-                };
-                if set_agent_paused_in_tx(conn, workspace_id, member.id, actor_member_id, true)
-                    .await?
-                    .is_none()
-                {
-                    return Err(momo_db::DbError::from(momo_db::sqlx::Error::RowNotFound));
+                    Provisioned::Created(_, issuance) => Ok(Ok(*issuance)),
+                    Provisioned::DuplicateHandle => Ok(Err(ApiError::new(
+                        StatusCode::CONFLICT,
+                        "agent handle already exists",
+                    ))),
+                    Provisioned::Rejected(error) => Ok(Err(error)),
                 }
-                // ADR-0193 D4 — the owner is the human creating it
-                // (`owner_human_id` above), and the scope is recorded in the
-                // same transaction as the identity, so there is no window in
-                // which the new agent exists as a team agent.
-                if let Some(harness) = owner_only {
-                    if !momo_agent::mark_agent_owner_only_in_tx(
-                        conn,
-                        workspace_id,
-                        member.id,
-                        harness,
-                    )
-                    .await?
-                    {
-                        return Err(momo_db::DbError::from(momo_db::sqlx::Error::RowNotFound));
-                    }
-                }
-                let issuance =
-                    create_hosted_connection_in_tx(conn, workspace_id, member.id, actor_member_id)
-                        .await?;
-                write_audit(
-                    conn,
-                    &AuditEntry::new(workspace_id, "hosted_agent.connection.created")
-                        .by(actor_member_id)
-                        .about(member.id)
-                        .target("hosted_agent_connection", issuance.connection.id)
-                        .via_token(via_token_id)
-                        .with_schema(
-                            "momo.hosted_agent.connection.created.v1",
-                            json!({
-                                "auth_mode": "static_bearer",
-                                "status": "pairing_pending",
-                                "invocation_scope": if owner_only.is_some() {
-                                    momo_agent::INVOCATION_SCOPE_OWNER_ONLY
-                                } else {
-                                    momo_agent::INVOCATION_SCOPE_WORKSPACE
-                                },
-                            }),
-                        ),
-                )
-                .await?;
-                Ok(Ok(issuance))
             })
         })
         .await,
@@ -335,6 +408,7 @@ pub async fn list(
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let actor = principal.member_id;
     let doorbell_enabled = state.webhook.doorbell_enabled;
+    let claude_enabled = state.agent_port.config.claude_subscription_agents_enabled;
     let dtos = settle_db(
         "hosted_agent_connections.list",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
@@ -358,7 +432,7 @@ pub async fn list(
                         attach_doorbell(dto(row), doorbells.remove(&id))
                     })
                     .collect();
-                attach_invocation_scopes(conn, workspace_id, &mut dtos).await?;
+                attach_invocation_scopes(conn, workspace_id, &mut dtos, claude_enabled).await?;
                 Ok(Ok(dtos))
             })
         })
@@ -379,6 +453,7 @@ pub async fn get(
     let connection_id = path_uuid(&connection, "invalid hosted connection id")?;
     let actor = principal.member_id;
     let doorbell_enabled = state.webhook.doorbell_enabled;
+    let claude_enabled = state.agent_port.config.claude_subscription_agents_enabled;
     let (connection, artifacts) = settle_db(
         "hosted_agent_connections.get",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
@@ -400,7 +475,8 @@ pub async fn get(
                     None
                 };
                 let mut projected = [attach_doorbell(dto(row), doorbell)];
-                attach_invocation_scopes(conn, workspace_id, &mut projected).await?;
+                attach_invocation_scopes(conn, workspace_id, &mut projected, claude_enabled)
+                    .await?;
                 let [projected] = projected;
                 Ok(Ok((projected, artifacts)))
             })
