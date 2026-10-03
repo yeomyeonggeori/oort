@@ -377,7 +377,7 @@ pub fn action_block(action: &WorkspaceAction, rows: Vec<Value>, rationale: Optio
 /// nothing downstream reads the name out of it.
 pub fn proposal_summary(action: &WorkspaceAction) -> String {
     format!(
-        "에이전트가 제안했습니다. 승인하면 {} 권한으로 {}.",
+        "에이전트가 제안했어요. 승인하면 {} 권한으로 {}.",
         action.required_role.korean(),
         action.effect
     )
@@ -583,7 +583,7 @@ pub fn invite_result_rows(role: &str, expires_on: &str) -> Vec<Value> {
 /// Says what was made and its three bounds, and **not** the link: this body is
 /// as durable as the props beside it (ADR-0186 D4).
 pub fn invite_result_body(role: &str, max_uses: i32, expires_in_days: i64) -> String {
-    format!("초대 링크를 만들었습니다({role} · {max_uses}회 · {expires_in_days}일)")
+    format!("초대 링크를 만들었어요({role} · {max_uses}회 · {expires_in_days}일)")
 }
 
 /// The props patch a refused decision leaves on the request card.
@@ -931,12 +931,12 @@ mod tests {
     #[test]
     fn the_result_body_names_the_bounds_and_never_the_link() {
         let body = invite_result_body("member", 1, 7);
-        assert_eq!(body, "초대 링크를 만들었습니다(member · 1회 · 7일)");
+        assert_eq!(body, "초대 링크를 만들었어요(member · 1회 · 7일)");
         assert!(!body.contains("http"));
         assert!(!body.contains("code"));
         assert_eq!(
             invite_result_body("admin", 5, 30),
-            "초대 링크를 만들었습니다(admin · 5회 · 30일)"
+            "초대 링크를 만들었어요(admin · 5회 · 30일)"
         );
     }
 
