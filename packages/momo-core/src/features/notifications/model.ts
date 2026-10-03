@@ -13,7 +13,9 @@ import { agentCardModel } from "../timeline/agentCardModel";
 // be shown at all**. The default answer is no. A notification interrupts, so it
 // has to earn the interruption:
 //
-//   - only inside the desktop shell (a browser tab notifies about nothing);
+//   - only on a surface that can raise OS notifications: the desktop shell, or
+//     a browser tab whose user opted in and was granted permission (#3340). The
+//     rules below are the same for both; only the gate differs;
 //   - only for the two events that are addressed to a person — a mention the
 //     SERVER recorded, and an approval request waiting on a human decision;
 //   - never when the window already has focus (zero-noise: the message is on
@@ -37,7 +39,7 @@ export type NotifyKind = "mention" | "approval" | "dm";
 
 /** Why nothing was shown. Every value is a rule someone can argue with. */
 export type NotifySkip =
-  /** No desktop shell underneath: the web build stays silent by contract. */
+  /** No OS-notification surface: neither the desktop shell nor a granted, opted-in tab. */
   | "browser"
   /** Ordinary channel traffic — not addressed to this member. */
   | "not-notifiable"
@@ -165,10 +167,26 @@ export function notifiableKind(
  */
 export const MAX_AGE_MS = 120_000;
 
+/**
+ * Is a browser tab in front of the person? Both halves are needed: a tab can be
+ * `visible` while another window has focus (split screen), and `hasFocus` alone
+ * misses a hidden tab (#3340). Only a visible AND focused tab counts as front.
+ */
+export function windowIsFront(
+  visibilityState: string | undefined,
+  hasFocus: boolean
+): boolean {
+  return visibilityState === "visible" && hasFocus;
+}
+
 export interface NotifyContext {
-  /** Running inside the Tauri shell. False = the whole feature is off. */
+  /**
+   * This surface can raise OS notifications: the Tauri shell, or a browser tab
+   * with Notification permission granted by an explicit click (#3340). False =
+   * the whole feature is off. (Name kept for the desktop callers.)
+   */
   isDesktop: boolean;
-  /** The momo window has focus right now. */
+  /** The momo window is in front right now (see `windowIsFront` for a tab). */
   windowFocused: boolean;
   /**
    * Is this channel what the window is showing right now? A banner is

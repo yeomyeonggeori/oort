@@ -792,6 +792,7 @@ pub async fn run(
             requirement: requirement.clone(),
             state_folder: state_folder(&config),
             grants: sessions.grant_epoch(),
+            share: Some(api.clone()),
         },
     )?;
     // Always with the requirement (#3117): R2 is on while it says so, and the

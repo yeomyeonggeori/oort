@@ -7,6 +7,7 @@ import {
   notifiableKind,
   notificationBody,
   notifyDecision,
+  windowIsFront,
   openTarget,
   OPEN_ARM_TTL_MS,
   rememberAnnounced,
@@ -508,5 +509,14 @@ describe("notifyDecision: DM kind and target visibility (#3339)", () => {
         context({ windowFocused: true, isTargetVisible: () => true })
       )
     ).toEqual({ show: false, skip: "focused" });
+  });
+});
+
+describe("windowIsFront (#3340)", () => {
+  it("needs the tab visible AND focused", () => {
+    expect(windowIsFront("visible", true)).toBe(true);
+    expect(windowIsFront("visible", false)).toBe(false);
+    expect(windowIsFront("hidden", true)).toBe(false);
+    expect(windowIsFront(undefined, true)).toBe(false);
   });
 });

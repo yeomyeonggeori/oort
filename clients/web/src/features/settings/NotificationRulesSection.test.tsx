@@ -222,7 +222,7 @@ describe("NotificationRulesSection DND regression", () => {
       "알림 일시 중지와 멘션 예외는 서버에 하나만 있습니다."
     );
     expect(host.textContent).toContain(
-      "데스크톱 알림을 종류별로 끄는 선택은 이 기기에만 저장됩니다."
+      "OS 알림을 종류별로 끄는 선택은 이 기기에만 저장됩니다."
     );
     expect(host.textContent).not.toContain("하나만 있는 규칙입니다");
     const mention = host.querySelector(

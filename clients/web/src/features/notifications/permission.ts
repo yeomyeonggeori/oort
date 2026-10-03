@@ -4,15 +4,15 @@ import {
   requestNotificationPermission,
   type DesktopNotificationPermission,
 } from "@/lib/tauri";
+import { readBrowserPermission, requestBrowserPermission } from "./browserNotify";
 
 // =============================================================================
 // Desktop notification permission as the settings panel can show it (BF-A4).
 //
-// The rail only fires inside the Tauri shell (`notifyDecision` skip "browser").
-// A tab therefore has no permission to request, and the honest state is
-// `unsupported` (WKWebView without the shell, a plain browser, a missing API).
-// Inside the shell the three Notification-API values are the ones the OS
-// returns: granted / default / denied.
+// Inside the Tauri shell the three Notification-API values are the ones the OS
+// returns: granted / default / denied. In a plain browser tab (#3340) they are
+// the Notification API's own values, read live and requested only from the
+// settings button; `unsupported` is a browser (or webview) without the API.
 // =============================================================================
 
 export type DesktopNotificationPermissionView =
@@ -28,7 +28,7 @@ export function desktopNotificationPermissionView(input: {
 }
 
 export async function readDesktopNotificationPermission(): Promise<DesktopNotificationPermissionView> {
-  if (!isDesktop()) return "unsupported";
+  if (!isDesktop()) return readBrowserPermission();
   return desktopNotificationPermissionView({
     desktop: true,
     native: await notificationPermission(),
@@ -36,7 +36,7 @@ export async function readDesktopNotificationPermission(): Promise<DesktopNotifi
 }
 
 export async function requestDesktopNotificationPermission(): Promise<DesktopNotificationPermissionView> {
-  if (!isDesktop()) return "unsupported";
+  if (!isDesktop()) return requestBrowserPermission();
   return desktopNotificationPermissionView({
     desktop: true,
     native: await requestNotificationPermission(),

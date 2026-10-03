@@ -49,6 +49,11 @@ pub async fn work_host_prepare_remote_profile() -> Result<(), String> {
     Err(UNSUPPORTED.into())
 }
 
+#[tauri::command]
+pub async fn work_host_share() -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}
+
 /// The remote-work sign-in folder needs the sidecar: nothing here.
 pub fn remote_profile_for_pty(
     _app: &tauri::AppHandle,
