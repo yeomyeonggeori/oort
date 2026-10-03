@@ -277,7 +277,7 @@ export function TeamKeyForm({
         <p className="break-keep text-meta text-ink-muted">지금 주소({link.endpointLabel})에 새 키를 넣어요.</p>
       ) : (
         <p className="break-keep text-meta text-ink-muted" data-testid={tid("no-presets")}>
-          이 서버는 provider 목록을 주지 않아요. 주소는 설정 › AI 연결에서 넣어 주세요.
+          이 서버는 provider 목록을 주지 않아요. 주소는 AI의 팀 AI 키에서 넣어 주세요.
         </p>
       )}
       {custom && (

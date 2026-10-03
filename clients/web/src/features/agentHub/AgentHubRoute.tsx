@@ -11,6 +11,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { AI_HUB_NAV_COPY } from "@momo/core/features/ai/aiHubModel";
 import { Bot, Loader2 } from "lucide-react";
 import { useSession } from "@/app/session";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
@@ -355,7 +356,14 @@ export function AgentHubRoute() {
             </div>
             <p className="text-meta text-ink-muted">
               워크스페이스 에이전트를 만들고, 상태와 기억, 작업 이력을 한 곳에서
-              봅니다.
+              봅니다.{" "}
+              <Link
+                to="/ai"
+                className="underline underline-offset-4 press focus-visible:focus-ring"
+                data-testid="agent-hub-to-ai"
+              >
+                {AI_HUB_NAV_COPY.agentsPageLine}
+              </Link>
             </p>
           </div>
           {/* 머리 행동이 셋이 되며(#2870) 폰 폭에서 줄을 넘긴다. */}
@@ -1110,7 +1118,7 @@ function PermissionsSection({
           사이드바의 작업 흐름처럼 **일급 목적지**에만 쓴다: 설정의 한 줄과
           달리 그것은 셸의 상시 네비게이션이고, 죽은 채로 서 있는 값이 다르다. */}
       <Button variant="outline" size="sm" className="self-start" asChild>
-        <Link to="/settings?section=plugins">설정의 앱에서 권한 보기</Link>
+        <Link to="/ai/external">AI의 외부 연결에서 권한 보기</Link>
       </Button>
     </section>
   );
