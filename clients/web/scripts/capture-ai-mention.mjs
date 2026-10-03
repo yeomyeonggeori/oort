@@ -115,32 +115,6 @@ async function installRealtime(page) {
   });
 }
 
-async function installDesktop(page) {
-  await page.addInitScript((probes) => {
-    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
-    window.__TAURI_INTERNALS__ = {
-      metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main", windowLabel: "main" } },
-      transformCallback: () => 1,
-      unregisterCallback() {},
-      convertFileSrc: (p) => p,
-      async invoke(cmd) {
-        if (cmd === "keychain_store_refresh_token") { window.__h = "shell:" + "c".repeat(32); return null; }
-        if (cmd === "keychain_refresh_token_handle") return window.__h ?? null;
-        if (cmd === "detect_local_harnesses") return probes;
-        if (cmd === "harness_profile_list") return [];
-        if (cmd === "detect_hosted_agents") return [];
-        if (cmd === "keychain_available") return false;
-        if (cmd === "deep_link_take_pending") return [];
-        if (cmd === "app_version") return "0.1.17";
-        if (cmd === "notification_permission") return "denied";
-        if (cmd === "updater_check") return null;
-        if (cmd.startsWith("plugin:event|")) return 1;
-        return null;
-      },
-    };
-  }, [{ id: "claude", installed: true, auth: "logged_in" }, { id: "codex", installed: true, auth: "logged_in" }]);
-}
-
 const failures = [];
 function check(name, ok, detail = "") {
   console.log(`${ok ? "ok  " : "FAIL"} ${name}${ok ? "" : ` ${detail}`}`);
