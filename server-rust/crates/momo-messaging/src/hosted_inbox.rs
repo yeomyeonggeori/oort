@@ -330,6 +330,7 @@ pub async fn hosted_inbox_recipients_in_tx(
     channel_id: Uuid,
     author_member_id: Uuid,
     subscription_agents_enabled: bool,
+    claude_subscription_agents_enabled: bool,
 ) -> Result<Vec<(Uuid, Uuid)>, DbError> {
     let rows: Vec<(Uuid, Uuid)> = sqlx::query_as(
         "SELECT hc.agent_member_id, hc.id \
@@ -347,7 +348,9 @@ pub async fn hosted_inbox_recipients_in_tx(
              ON a.workspace_id=hc.workspace_id AND a.member_id=hc.agent_member_id \
           WHERE hc.workspace_id=$1 \
             AND (a.invocation_scope <> 'owner_only' \
-                 OR ($4 AND a.owner_human_id=$3)) \
+                 OR ($4 AND a.owner_human_id=$3 \
+                     AND ($5 OR a.uses_owner_key \
+                          OR COALESCE(a.subscription_harness,'claude_code') <> 'claude_code'))) \
             AND hc.status='active' AND hc.proved_at IS NOT NULL \
             AND t.kind='agent_bearer' \
             AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
@@ -366,6 +369,7 @@ pub async fn hosted_inbox_recipients_in_tx(
     .bind(channel_id)
     .bind(author_member_id)
     .bind(subscription_agents_enabled)
+    .bind(claude_subscription_agents_enabled)
     .fetch_all(&mut *conn)
     .await?;
     Ok(rows)
@@ -396,6 +400,7 @@ pub async fn fan_out_message_reference_in_tx(
     message_id: Uuid,
     author_member_id: Uuid,
     subscription_agents_enabled: bool,
+    claude_subscription_agents_enabled: bool,
 ) -> Result<Vec<(Uuid, i64)>, DbError> {
     let recipients = hosted_inbox_recipients_in_tx(
         conn,
@@ -403,6 +408,7 @@ pub async fn fan_out_message_reference_in_tx(
         channel_id,
         author_member_id,
         subscription_agents_enabled,
+        claude_subscription_agents_enabled,
     )
     .await?;
     let mut appended = Vec::new();

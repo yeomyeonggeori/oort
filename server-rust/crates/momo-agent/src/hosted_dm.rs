@@ -65,6 +65,10 @@ pub enum HostedDmDelivery {
     DeliveryDisabled,
     /// The subscription kill switch is off (ADR-0193 D6).
     SubscriptionDisabled,
+    /// A Claude subscription agent on an instance that has not opted in
+    /// (ADR-0193 D18, #3397). Same word as the mention skip reason, the work
+    /// request 409 and `brainUnavailableReason`.
+    ClaudeSubscriptionPaused,
 }
 
 impl HostedDmDelivery {
@@ -78,6 +82,7 @@ impl HostedDmDelivery {
             Self::ConnectionUnavailable => "connection_unavailable",
             Self::DeliveryDisabled => "delivery_disabled",
             Self::SubscriptionDisabled => "subscription_disabled",
+            Self::ClaudeSubscriptionPaused => "claude_subscription_agent_paused",
         }
     }
 }
@@ -90,14 +95,17 @@ pub fn hosted_dm_delivery(
     one_to_one: bool,
     hosted_delivery_enabled: bool,
     subscription_agents_enabled: bool,
+    claude_subscription_agents_enabled: bool,
 ) -> HostedDmDelivery {
     if let Some(kind) = owner_only_gate(
         agent.owner_only.as_ref(),
         caller_member_id,
         subscription_agents_enabled,
+        claude_subscription_agents_enabled,
     ) {
         return match kind {
             SubscriptionNoticeKind::NonOwner => HostedDmDelivery::OwnerOnly,
+            SubscriptionNoticeKind::ClaudePaused => HostedDmDelivery::ClaudeSubscriptionPaused,
             _ => HostedDmDelivery::SubscriptionDisabled,
         };
     }

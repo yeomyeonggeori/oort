@@ -84,6 +84,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
              so the surface is now narrower than the operator intended."
         );
     }
+    // #3397 (결재 2026-10-03): the owner kept Claude subscription use conservative
+    // until Anthropic replies, so this switch is off unless an operator turns it on
+    // knowingly. Said once at startup so nobody enables it by habit.
+    if config.agent_port.claude_subscription_agents_enabled {
+        tracing::warn!(
+            "MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED=true: this instance lets oort drive \
+             Claude subscription agents on behalf of their owners (ACP / `claude -p`). That \
+             use is 「회색·문의 중」 under Anthropic's consumer terms until Anthropic \
+             confirms it (ADR-0193 증보 2026-10-03, #3397). A person typing in the \
+             terminal or Remote Control is unaffected either way. Enable only knowingly."
+        );
+    }
     if config.rate_limit.per_ip_limit == 0 {
         tracing::warn!(
             "RATE_LIMIT_PER_IP=0 disables the per-IP limiter on POST /v1/join; \

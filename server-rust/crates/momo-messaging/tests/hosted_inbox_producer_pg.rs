@@ -538,7 +538,7 @@ async fn hosted_inbox_authority_checks_the_token_audience_actor_and_connection()
     assert!(read(app.clone()).await.is_ok(), "baseline is readable");
     let recipients = with_tenant_tx(&app, workspace, move |conn| {
         Box::pin(async move {
-            hosted_inbox_recipients_in_tx(conn, workspace, channel, Uuid::nil(), true).await
+            hosted_inbox_recipients_in_tx(conn, workspace, channel, Uuid::nil(), true, true).await
         })
     })
     .await
@@ -583,7 +583,7 @@ async fn hosted_inbox_authority_checks_the_token_audience_actor_and_connection()
     );
     assert!(
         with_tenant_tx(&app, workspace, move |conn| Box::pin(async move {
-            hosted_inbox_recipients_in_tx(conn, workspace, channel, Uuid::nil(), true).await
+            hosted_inbox_recipients_in_tx(conn, workspace, channel, Uuid::nil(), true, true).await
         }))
         .await
         .unwrap()
