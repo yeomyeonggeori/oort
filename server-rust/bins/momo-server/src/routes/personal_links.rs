@@ -75,7 +75,7 @@ fn master_key(state: &AppState) -> Result<&str, ApiError> {
             ApiError::new(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "이 서버에는 PROVIDER_LINK_MASTER_KEY가 설정되어 있지 않아 개인 API 키를 \
-                 저장하거나 읽을 수 없습니다. 인스턴스 운영자에게 문의하세요.",
+                 저장하거나 읽을 수 없어요. 인스턴스 운영자에게 문의해 주세요.",
             )
         })
 }
