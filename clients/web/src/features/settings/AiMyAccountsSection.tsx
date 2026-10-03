@@ -38,11 +38,9 @@ import {
   harnessProfileRemove,
   harnessProfileStatus,
 } from "@/lib/tauri";
-import {
-  AI_CONNECT_REENTRY_PATH,
-  openAiConnectReentry,
-} from "@/features/welcome/aiConnectReentry";
-import { HarnessLoginDialog } from "@/features/welcome/harnessLogin/HarnessLoginDialog";
+import { AI_CONNECT_REENTRY_PATH } from "@/features/welcome/aiConnectReentry";
+import { SubscriptionAgentStart } from "@/features/welcome/harnessLogin/SubscriptionAgentStart";
+import { RegisterAwareLoginDialog } from "@/features/welcome/harnessLogin/RegisterAwareLoginDialog";
 import { HarnessUnlinkDialog } from "@/features/welcome/harnessLogin/HarnessUnlinkDialog";
 import { useSubscriptionEntryState } from "@/features/welcome/SubscriptionAgentEntry";
 import { useLocalHarnessWatch } from "@/features/welcome/useLocalHarnessWatch";
@@ -246,6 +244,7 @@ function MyAccountRows({ onAddApiKey }: { onAddApiKey?: () => void }) {
 
   const [hidden, setHidden] = useState<LocalHarnessId[]>(readHiddenDefaults);
   const [login, setLogin] = useState<LoginTarget | null>(null);
+  const [startOpen, setStartOpen] = useState(false);
   const loginConnected = useRef(false);
   const pendingDiscard = useRef<AddSubscriptionDraft | null>(null);
   const [adding, setAdding] = useState<{
@@ -335,7 +334,7 @@ function MyAccountRows({ onAddApiKey }: { onAddApiKey?: () => void }) {
   const openAdd = () => {
     // 설치된 CLI가 없으면 추가할 곳이 없다: 설치 안내가 있는 AI 연결 화면으로.
     if (installed.length === 0) {
-      openAiConnectReentry("settings");
+      setStartOpen(true);
       return;
     }
     setAddError(null);
@@ -501,7 +500,8 @@ function MyAccountRows({ onAddApiKey }: { onAddApiKey?: () => void }) {
         }
       />
 
-      <HarnessLoginDialog
+      {startOpen && <SubscriptionAgentStart open onClose={() => setStartOpen(false)} />}
+      <RegisterAwareLoginDialog
         harness={login?.harness ?? null}
         profile={login?.profile ?? null}
         onClose={closeLogin}

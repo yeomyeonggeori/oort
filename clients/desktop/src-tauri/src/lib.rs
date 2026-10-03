@@ -22,6 +22,13 @@
 // what to prefill, when to notify and how a discovered server is offered are all
 // the web layer's calls.
 
+// Sign-in -> agent registration, the app's part (#3389 AIH-5, ADR-0190 D3-h /
+// D3-i): two fixed CLI commands, the connection value kept in the app's own
+// store and handed to the CLI by a header helper, never in argv or a log.
+// Reachable only through the four `agent_port_*` commands, which only
+// `capabilities/agent-port.json` grants; `main.rs` also runs the helper.
+#[cfg(desktop)]
+pub mod agent_port;
 mod deeplink;
 #[cfg(desktop)]
 mod detect;
@@ -197,6 +204,10 @@ pub fn run() {
             start_folder::workbench_folder_pick,
             start_folder::workbench_folder_inspect,
             start_folder::workbench_worktree_create,
+            agent_port::agent_port_device,
+            agent_port::agent_port_connect,
+            agent_port::agent_port_replace_credential,
+            agent_port::agent_port_disconnect,
             harness_profile::harness_profile_list,
             harness_profile::harness_profile_create,
             harness_profile::harness_profile_status,
