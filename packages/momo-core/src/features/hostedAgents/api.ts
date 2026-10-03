@@ -56,8 +56,11 @@ async function hostedRequest(
   if (!res.ok) {
     // STATUS 만 쓴다. 화면은 `hostedFailureMessage` 로 한국어를 짓고, 이 문자열은
     // 진단용으로 오류에만 남는다.
-    const body = res.jsonOrNull<{ error?: { message?: string } }>();
-    throw new ApiError(res.status, body?.error?.message ?? `HTTP ${res.status}`);
+    const body = res.jsonOrNull<{ error?: { message?: string; code?: string } }>();
+    // `error.code`는 서버가 이름 붙인 거절(예: claude_subscription_agent_paused)이다.
+    // 문장은 다시 쓰일 수 있지만 코드는 그렇지 않다 — 화면은 코드로 가른다(#3389).
+    const code = typeof body?.error?.code === "string" ? body.error.code : undefined;
+    throw new ApiError(res.status, body?.error?.message ?? `HTTP ${res.status}`, code);
   }
   return responseRecord(res.json<unknown>());
 }
@@ -96,6 +99,32 @@ export function createHostedConnection(
     cache: "no-store",
     body: JSON.stringify(input),
   });
+}
+
+export interface RegisterSubscriptionAgentInput {
+  harness: SubscriptionHarnessWire;
+  /** 이 설치의 임의 id(앱이 만든다, 8-64자). 호출자·하네스와 함께 멱등 키다. */
+  deviceId: string;
+  deviceLabel?: string;
+  /** 사람이 이름을 직접 고쳤을 때만. 생략하면 서버가 `<이름>-claude` 기본값과 -2… 를 정한다. */
+  handle?: string;
+  displayName?: string;
+}
+
+/**
+ * 로그인 직후 대행 등록(ADR-0193 D15, #3392). 201(새로)/200(재사용). 연결 값은
+ * 새로 만들었을 때만 오고 한 번만 나간다. 409 `subscription_agents_disabled`·
+ * `claude_subscription_agent_paused`는 `ApiError.code`로 가른다(D6·D17).
+ * 이 파일은 아무것도 로그하지 않는다(위 비밀값 경계).
+ */
+export function registerSubscriptionAgent(
+  workspaceId: string,
+  input: RegisterSubscriptionAgentInput
+): Promise<unknown> {
+  return hostedRequest(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/subscription-agents/register`,
+    { method: "POST", cache: "no-store", body: JSON.stringify(input) }
+  );
 }
 
 /** 비밀값 없는 목록. human owner/admin 이 아니면 403 이다. */

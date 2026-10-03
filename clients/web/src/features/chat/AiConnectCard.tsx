@@ -66,6 +66,13 @@ import {
   HarnessLoginDialog,
   type HarnessLoginFixture,
 } from "@/features/welcome/harnessLogin/HarnessLoginDialog";
+import { useRegisterContext } from "@/features/welcome/harnessLogin/useRegisterContext";
+import {
+  isRegisterPose,
+  registerPoseFixture,
+  type RegisterPose,
+} from "@/features/welcome/harnessLogin/registerFixtures";
+import { START_CREATE_LABEL } from "@momo/core/features/onboarding/subscriptionRegister";
 
 // Reading this as: agent card family (local tool card at the timeline tail) for
 // internal team users on web+Tauri, density 6/10, motion 2/10.
@@ -121,7 +128,7 @@ function markFor(label: string): string {
 
 // ---- design 캡처 전용 자세 ------------------------------------------------------
 
-type CardPose = "login-modal" | "logged" | "unfinished";
+type CardPose = "login-modal" | "logged" | "unfinished" | RegisterPose;
 
 /** `?aiCard=login-modal|logged|unfinished`. 제품 빌드에서는 늘 null이다. */
 function readCardPose(): CardPose | null {
@@ -129,6 +136,7 @@ function readCardPose(): CardPose | null {
   const hash = window.location.hash;
   const query = hash.includes("?") ? hash.slice(hash.indexOf("?")) : window.location.search;
   const pose = new URLSearchParams(query).get("aiCard");
+  if (isRegisterPose(pose)) return pose;
   return pose === "login-modal" || pose === "logged" || pose === "unfinished" ? pose : null;
 }
 
@@ -675,11 +683,15 @@ function HarnessRows({ only }: { only: LocalHarnessId | null }) {
     enabled: true,
     fixture: fixture ? { probes: fixture } : null,
   });
+  const registerPose = pose !== null && isRegisterPose(pose) ? registerPoseFixture(pose) : null;
   const [loginFor, setLoginFor] = useState<LocalHarnessId | null>(() =>
-    pose === "login-modal" ? "claude" : null
+    registerPose ? registerPose.harness : pose === "login-modal" ? "claude" : null
   );
-  const loginFixture: HarnessLoginFixture | null =
-    pose === "login-modal" ? { status: { phase: "waiting" } } : null;
+  const loginFixture: HarnessLoginFixture | null = registerPose
+    ? { status: { phase: "connected" }, register: { state: registerPose.state } }
+    : pose === "login-modal"
+      ? { status: { phase: "waiting" } }
+      : null;
   const [results, setResults] = useState<Partial<Record<LocalHarnessId, HarnessResult>>>(() => {
     const now = Date.now();
     if (pose === "logged") return { claude: { kind: "connected", at: now } };
@@ -688,12 +700,22 @@ function HarnessRows({ only }: { only: LocalHarnessId | null }) {
   });
   // 모달이 「연결됐어요」로 끝난 하네스. 닫기(취소·시간 초과)와 성공을 가른다.
   const connectedRef = useRef<Set<LocalHarnessId>>(new Set());
+  // 로그인 뒤 「에이전트로 만들기」(#3389). 이미 로그인된 줄에서는 곧장 확인 단계로 연다.
+  const register = useRegisterContext();
+  const [registerOnly, setRegisterOnly] = useState(false);
 
   const record = (id: LocalHarnessId, result: HarnessResult) =>
     setResults((prev) => ({ ...prev, [id]: result }));
 
   function openLogin(id: LocalHarnessId) {
     connectedRef.current.delete(id);
+    setRegisterOnly(false);
+    setLoginFor(id);
+  }
+
+  function openRegister(id: LocalHarnessId) {
+    connectedRef.current.delete(id);
+    setRegisterOnly(true);
     setLoginFor(id);
   }
 
@@ -758,6 +780,17 @@ function HarnessRows({ only }: { only: LocalHarnessId | null }) {
             const checking = pill === "checking";
             // 도는 동안은 시안처럼 흐리고 낱말도 바뀐다(design-review M1).
             action = (
+              <>
+                {pill === "ready" && register !== null && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => openRegister(id)}
+                    data-testid={`ai-connect-card-${id}-register`}
+                  >
+                    {START_CREATE_LABEL}
+                  </Button>
+                )}
               <Button
                 type="button"
                 variant="secondary"
@@ -774,6 +807,7 @@ function HarnessRows({ only }: { only: LocalHarnessId | null }) {
                 {!checking && <RefreshCw aria-hidden="true" />}
                 {checking ? "확인 중" : "연결 확인"}
               </Button>
+              </>
             );
           }
           return (
@@ -808,6 +842,8 @@ function HarnessRows({ only }: { only: LocalHarnessId | null }) {
       <HarnessLoginDialog
         harness={loginFor}
         fixture={loginFixture}
+        register={register}
+        startAt={registerOnly ? "register" : "login"}
         onClose={() => {
           const id = loginFor;
           setLoginFor(null);
