@@ -56,6 +56,8 @@ import {
 import { useMentionRouting } from "@/features/routing/useMentionRouting";
 import { mentionRoutingTarget } from "@momo/core/features/routing/mentionTargets";
 import { routingPayload } from "@momo/core/features/routing/routingModel";
+import { calledAgents } from "@momo/core/features/routing/mentionTargets";
+import { composerAgentNotice } from "@momo/core/features/ai/aiMention";
 import type { QuoteDraft } from "@momo/core/features/timeline/quote";
 import { QuoteChip } from "@/features/timeline/QuoteBlock";
 import { TypingLine } from "@/features/chat/TypingLine";
@@ -449,9 +451,11 @@ export function Composer({
   const [secretBlocks, setSecretBlocks] = useState(0);
   const secretBlocked = secretBlocks > 0;
   const cardAvailable = hasLocalCardHost(channelId);
+  const { session, connStatus } = useSession();
   const autocomplete = useComposerAutocomplete({
     value: text,
     members: directory.members,
+    viewerHumanId: session.member.id,
     channels,
     inputRef,
     onValueChange: (next) => {
@@ -497,7 +501,6 @@ export function Composer({
   // moment the socket died, `isStaleSignal` compared two fixed numbers, and the
   // 90s TTL could never fire on this surface at all. Now every render, from
   // whatever cause, re-reads the wall clock and drops what has gone quiet.
-  const { session, connStatus } = useSession();
   const navigate = useNavigate();
   // 폰에서는 Enter가 계속 줄바꿈이다 (goal B8 H4). 소프트 키보드에는 Shift+Enter가
   // 없어서, Enter를 전송으로 바꾸면 여러 줄 쓰기를 통째로 없애게 된다. 힌트 줄도
@@ -599,6 +602,11 @@ export function Composer({
     [text, directory.members]
   );
   const routing = useMentionRouting(routingTarget);
+  // 못 부르는(남의 구독·개인 키) 또는 쉬는(Claude 문의 중) 에이전트를 부르는 글이면 한 줄 (AIH-9).
+  const agentNotice = useMemo(
+    () => composerAgentNotice(calledAgents(routingTarget), session.member.id),
+    [routingTarget, session.member.id]
+  );
 
   // 줄이 한 번 생기면 이 글을 다 쓸 때까지 자리를 비워 둔다.
   //
@@ -912,6 +920,17 @@ export function Composer({
             data-testid="composer-routing-reserved"
           />
         )
+      )}
+
+      {agentNotice !== null && (
+        // 보내기 전에 말한다: 선택은 막지 않지만 보내도 답이 오지 않는다. 문장은 코어가 만든다.
+        <p
+          role="status"
+          className="px-6 pb-2 text-meta text-warn"
+          data-testid="composer-agent-notice"
+        >
+          {agentNotice}
+        </p>
       )}
 
       {/* 상태 행은 그릇 위에 선다. 힌트·작성 중 교대 슬롯은 액션 행 안으로 내려가

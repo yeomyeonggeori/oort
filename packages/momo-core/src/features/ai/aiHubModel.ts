@@ -1023,3 +1023,17 @@ export function mySubscriptionAgents(
   }
   return found.sort((a, b) => a.name.localeCompare(b.name, "ko"));
 }
+
+// ---------------------------------------------------------------------------
+// 작성 중 composer 위 한 줄: Claude 구독 대행이 쉬는 중일 때 (AIH-9, #3439)
+// ---------------------------------------------------------------------------
+
+/**
+ * 서버가 「Claude 구독 대행은 확인 전까지 쉰다」(`brain_unavailable_reason`)고 알린 에이전트를
+ * 부르는 글을 쓰는 중에 composer 위에 올리는 한 줄. 소유자든 아니든 같다: 이 에이전트는 지금
+ * 아무에게도 답하지 않는다. 사유가 없으면 null. 팀 키로 대신 답한다고 말하지 않는다.
+ */
+export function pausedComposerNotice(c: AiAgentClassification, agentName: string): string | null {
+  if (c.unavailableReason !== CLAUDE_SUBSCRIPTION_AGENT_PAUSED) return null;
+  return `${withTopic(agentName)} Claude 구독 대행이 Anthropic 약관 확인 전까지 쉬고 있어요. 보내도 답하지 않아요.`;
+}

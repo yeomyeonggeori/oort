@@ -127,47 +127,74 @@ export function ComposerAutocompleteList({
     );
   }
   if (candidates.length === 0) return null;
+  // 보조 줄이 있는 목록(AI 주석, AIH-9)은 `쓰는 AI · 부를 수 있는 사람 · 맥 꺼짐` 이 들어갈
+  // 폭이 필요하다. 192 에서는 줄이 두세 줄로 접혀 후보 하나가 목록의 반을 먹는다.
+  const annotated = candidates.some((candidate) => candidate.agent !== undefined);
   return (
     <ul
       id={id}
       role="listbox"
       aria-label={spec.listLabel}
       data-testid={testId}
-      className={cn(PANEL_CLASS, "w-pane-sm", className)}
+      className={cn(PANEL_CLASS, annotated ? "w-pane max-w-full" : "w-pane-sm", className)}
     >
-      {candidates.map((candidate, index) => (
-        <li key={candidate.id}>
-          <button
-            id={`${id}-option-${index}`}
-            type="button"
-            role="option"
-            aria-selected={index === highlight}
-            data-testid={optionTestId}
-            onMouseDown={(event) => {
-              event.preventDefault();
-              onChoose(candidate);
-            }}
-            className={cn(
-              "flex w-full flex-wrap items-center gap-x-2 rounded-sm px-2 py-1 text-left text-body",
-              index === highlight
-                ? "bg-accent-soft text-ink active:bg-surface-pressed"
-                : "text-ink hover:bg-surface-hover active:bg-surface-pressed"
-            )}
-          >
-            {candidate.mark === "private-channel" && (
-              // 사이드바·⌘K 와 같은 글리프이고 같은 자리다(이름 앞, `#` 대신).
-              // 행의 접근 이름은 방 이름이 진다 — 그 두 표면도 같은 규율이다.
-              <Lock className="size-4 shrink-0" aria-hidden="true" />
-            )}
-            <span className="line-clamp-2 break-words">{candidate.lead}</span>
-            {candidate.hint !== "" && (
-              <span className="min-w-0 flex-1 truncate text-meta text-ink-muted">
-                {candidate.hint}
-              </span>
-            )}
-          </button>
-        </li>
-      ))}
+      {candidates.map((candidate, index) => {
+        const agent = candidate.agent;
+        const locked = agent?.locked === true;
+        return (
+          <li key={candidate.id}>
+            <button
+              id={`${id}-option-${index}`}
+              type="button"
+              role="option"
+              aria-selected={index === highlight}
+              data-testid={optionTestId}
+              data-locked={locked ? "" : undefined}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                onChoose(candidate);
+              }}
+              className={cn(
+                "flex w-full flex-wrap items-center gap-x-2 rounded-sm px-2 py-1 text-left text-body",
+                index === highlight
+                  ? "bg-accent-soft active:bg-surface-pressed"
+                  : "hover:bg-surface-hover active:bg-surface-pressed",
+                // 못 부르는 에이전트는 흐리게: 고를 수는 있다(보내기 전 composer 위 한 줄이 말한다).
+                locked ? "text-ink-muted" : "text-ink"
+              )}
+            >
+              {candidate.mark === "private-channel" && (
+                // 사이드바·⌘K 와 같은 글리프이고 같은 자리다(이름 앞, `#` 대신).
+                // 행의 접근 이름은 방 이름이 진다 — 그 두 표면도 같은 규율이다.
+                <Lock className="size-4 shrink-0" aria-hidden="true" />
+              )}
+              <span className="line-clamp-2 break-words">{candidate.lead}</span>
+              {locked && <Lock className="size-3 shrink-0" aria-hidden="true" data-testid="mention-locked-mark" />}
+              {candidate.hint !== "" && (
+                <span className="min-w-0 flex-1 truncate text-meta text-ink-muted">
+                  {candidate.hint}
+                </span>
+              )}
+              {agent?.badge && (
+                <span
+                  className="ml-auto shrink-0 rounded-full bg-surface-muted px-2 text-timestamp text-ink-muted"
+                  data-testid="mention-badge"
+                >
+                  {agent.badge}
+                </span>
+              )}
+              {agent && (
+                <span
+                  className="basis-full break-words text-meta text-ink-muted"
+                  data-testid="mention-agent-line"
+                >
+                  {agent.line}
+                </span>
+              )}
+            </button>
+          </li>
+        );
+      })}
     </ul>
   );
 }
