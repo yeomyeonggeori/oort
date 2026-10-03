@@ -495,6 +495,26 @@ pub struct AgentReadFacts {
     pub owner: Option<(Uuid, String)>,
     /// `Some` only for an agent that dials in; see [`HOSTED_RECENTLY_SEEN_SQL`].
     pub host_online: Option<bool>,
+    /// Which official CLI a subscription agent runs; `None` for every other agent.
+    pub subscription_harness: Option<SubscriptionHarness>,
+}
+
+/// `brainUnavailableReason` for a Claude subscription agent on an instance that
+/// has not opted in (#3397 결재 2026-10-03: 「회색·문의 중」, default off).
+pub const CLAUDE_SUBSCRIPTION_AGENT_PAUSED: &str = "claude_subscription_agent_paused";
+
+impl AgentReadFacts {
+    /// The wire's `brainUnavailableReason`: set when this agent's brain is a
+    /// Claude subscription and the instance has not opted in. Reporting only —
+    /// runtime blocking of existing agents is #3397's.
+    pub fn unavailable_reason(
+        &self,
+        claude_subscription_agents_enabled: bool,
+    ) -> Option<&'static str> {
+        (self.subscription_harness == Some(SubscriptionHarness::ClaudeCode)
+            && !claude_subscription_agents_enabled)
+            .then_some(CLAUDE_SUBSCRIPTION_AGENT_PAUSED)
+    }
 }
 
 /// Read-contract facts for `agent_member_ids`. Tenant-scoped by the caller's
@@ -507,7 +527,8 @@ pub async fn load_agent_read_facts_in_tx(
 ) -> Result<Vec<AgentReadFacts>, DbError> {
     use sqlx::Row;
     let sql = format!(
-        "SELECT m.id AS agent_id, a.invocation_scope, a.model_source, a.owner_human_id, \
+        "SELECT m.id AS agent_id, a.invocation_scope, a.subscription_harness, a.model_source, \
+                a.owner_human_id, \
                 COALESCE(a.config->>'execution_mode', '') = 'hosted_dial_in' AS config_hosted, \
                 EXISTS (SELECT 1 FROM hosted_agent_connection hc \
                          WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
@@ -548,6 +569,13 @@ pub async fn load_agent_read_facts_in_tx(
             owner: match (subscription, owner_id, owner_name) {
                 (true, Some(id), Some(name)) => Some((id, name)),
                 _ => None,
+            },
+            subscription_harness: if subscription {
+                row.try_get::<Option<String>, _>("subscription_harness")?
+                    .as_deref()
+                    .and_then(SubscriptionHarness::parse)
+            } else {
+                None
             },
             host_online: if hosted || subscription {
                 Some(row.try_get("host_online")?)
@@ -924,6 +952,30 @@ mod tests {
             mention.contains(&predicate),
             "mention.rs no longer carries HOSTED_RECENTLY_SEEN_SQL verbatim"
         );
+    }
+
+    #[test]
+    fn only_a_claude_subscription_agent_reports_the_paused_reason_and_only_while_off() {
+        let facts = |harness: Option<SubscriptionHarness>| AgentReadFacts {
+            agent_member_id: Uuid::nil(),
+            brain: AgentBrain::Subscription,
+            callable_by: CALLABLE_BY_OWNER_ONLY,
+            owner: None,
+            host_online: None,
+            subscription_harness: harness,
+        };
+        let claude = facts(Some(SubscriptionHarness::ClaudeCode));
+        assert_eq!(
+            claude.unavailable_reason(false),
+            Some("claude_subscription_agent_paused")
+        );
+        assert_eq!(claude.unavailable_reason(true), None);
+        assert_eq!(
+            facts(Some(SubscriptionHarness::Codex)).unavailable_reason(false),
+            None,
+            "Codex is not paused"
+        );
+        assert_eq!(facts(None).unavailable_reason(false), None);
     }
 
     #[test]

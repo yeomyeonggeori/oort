@@ -66,6 +66,7 @@ pub(crate) fn dto(connection: HostedConnection) -> HostedAgentConnectionDto {
         callable_by: None,
         owner: None,
         host_online: None,
+        brain_unavailable_reason: None,
     }
 }
 
@@ -78,6 +79,7 @@ async fn attach_invocation_scopes(
     conn: &mut momo_db::PgConnection,
     workspace_id: uuid::Uuid,
     dtos: &mut [HostedAgentConnectionDto],
+    claude_enabled: bool,
 ) -> Result<(), momo_db::DbError> {
     let ids: Vec<uuid::Uuid> = dtos
         .iter()
@@ -97,7 +99,7 @@ async fn attach_invocation_scopes(
             .iter()
             .find(|fact| fact.agent_member_id.to_string() == dto.agent_member_id)
         {
-            dto.apply_read_facts(fact);
+            dto.apply_read_facts(fact, claude_enabled);
         }
     }
     Ok(())
@@ -199,7 +201,10 @@ pub(crate) async fn require_admin(
 
 /// What [`provision_hosted_agent_in_tx`] decided.
 pub(crate) enum Provisioned {
-    Created(momo_agent::AgentMember, momo_auth::HostedPairingIssuance),
+    Created(
+        momo_agent::AgentMember,
+        Box<momo_auth::HostedPairingIssuance>,
+    ),
     DuplicateHandle,
     Rejected(ApiError),
 }
@@ -296,7 +301,7 @@ pub(crate) async fn provision_hosted_agent_in_tx(
             return Err(momo_db::DbError::from(momo_db::sqlx::Error::RowNotFound));
         }
     }
-    Ok(Provisioned::Created(member, issuance))
+    Ok(Provisioned::Created(member, Box::new(issuance)))
 }
 
 pub async fn create(
@@ -351,7 +356,7 @@ pub async fn create(
                 )
                 .await?
                 {
-                    Provisioned::Created(_, issuance) => Ok(Ok(issuance)),
+                    Provisioned::Created(_, issuance) => Ok(Ok(*issuance)),
                     Provisioned::DuplicateHandle => Ok(Err(ApiError::new(
                         StatusCode::CONFLICT,
                         "agent handle already exists",
@@ -391,6 +396,7 @@ pub async fn list(
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let actor = principal.member_id;
     let doorbell_enabled = state.webhook.doorbell_enabled;
+    let claude_enabled = state.agent_port.config.claude_subscription_agents_enabled;
     let dtos = settle_db(
         "hosted_agent_connections.list",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
@@ -414,7 +420,7 @@ pub async fn list(
                         attach_doorbell(dto(row), doorbells.remove(&id))
                     })
                     .collect();
-                attach_invocation_scopes(conn, workspace_id, &mut dtos).await?;
+                attach_invocation_scopes(conn, workspace_id, &mut dtos, claude_enabled).await?;
                 Ok(Ok(dtos))
             })
         })
@@ -435,6 +441,7 @@ pub async fn get(
     let connection_id = path_uuid(&connection, "invalid hosted connection id")?;
     let actor = principal.member_id;
     let doorbell_enabled = state.webhook.doorbell_enabled;
+    let claude_enabled = state.agent_port.config.claude_subscription_agents_enabled;
     let (connection, artifacts) = settle_db(
         "hosted_agent_connections.get",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
@@ -456,7 +463,8 @@ pub async fn get(
                     None
                 };
                 let mut projected = [attach_doorbell(dto(row), doorbell)];
-                attach_invocation_scopes(conn, workspace_id, &mut projected).await?;
+                attach_invocation_scopes(conn, workspace_id, &mut projected, claude_enabled)
+                    .await?;
                 let [projected] = projected;
                 Ok(Ok((projected, artifacts)))
             })

@@ -2586,6 +2586,12 @@ pub struct RosterMemberDto {
     /// Port within the last 10 minutes. Present only for agents that dial in.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host_online: Option<bool>,
+    /// #3397 결재 (ADR-0193 증보 2026-10-03). Present only when this agent's brain
+    /// cannot be used on this server: `claude_subscription_agent_paused` = a
+    /// Claude subscription agent on an instance that has not opted in. Reports
+    /// status; it blocks nothing by itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub brain_unavailable_reason: Option<String>,
     /// `agent_profile.paused` — goal SRV-R2, the one key here Swift's DTO does
     /// not have.
     ///
@@ -4066,7 +4072,14 @@ pub struct AgentOwnerDto {
 
 impl RosterMemberDto {
     /// Stamp the AIH-2 read contract onto an agent row.
-    pub fn apply_read_facts(&mut self, facts: &momo_agent::AgentReadFacts) {
+    pub fn apply_read_facts(
+        &mut self,
+        facts: &momo_agent::AgentReadFacts,
+        claude_subscription_agents_enabled: bool,
+    ) {
+        self.brain_unavailable_reason = facts
+            .unavailable_reason(claude_subscription_agents_enabled)
+            .map(str::to_string);
         self.brain = Some(facts.brain.as_str().to_string());
         self.callable_by = Some(facts.callable_by.to_string());
         self.owner = facts.owner.as_ref().map(|(id, name)| AgentOwnerDto {
@@ -4079,7 +4092,14 @@ impl RosterMemberDto {
 
 impl HostedAgentConnectionDto {
     /// Same contract on the hosted-connection list the hub's agent table reads.
-    pub fn apply_read_facts(&mut self, facts: &momo_agent::AgentReadFacts) {
+    pub fn apply_read_facts(
+        &mut self,
+        facts: &momo_agent::AgentReadFacts,
+        claude_subscription_agents_enabled: bool,
+    ) {
+        self.brain_unavailable_reason = facts
+            .unavailable_reason(claude_subscription_agents_enabled)
+            .map(str::to_string);
         self.brain = Some(facts.brain.as_str().to_string());
         self.callable_by = Some(facts.callable_by.to_string());
         self.owner = facts.owner.as_ref().map(|(id, name)| AgentOwnerDto {
@@ -4176,6 +4196,12 @@ pub struct HostedAgentConnectionDto {
     /// Port within the last 10 minutes. Present only for agents that dial in.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host_online: Option<bool>,
+    /// #3397 결재 (ADR-0193 증보 2026-10-03). Present only when this agent's brain
+    /// cannot be used on this server: `claude_subscription_agent_paused` = a
+    /// Claude subscription agent on an instance that has not opted in. Reports
+    /// status; it blocks nothing by itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub brain_unavailable_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

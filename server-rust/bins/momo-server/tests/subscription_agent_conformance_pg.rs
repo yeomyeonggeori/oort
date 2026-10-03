@@ -26,6 +26,7 @@
 //! | `register_is_gated_validated_and_capped` (#3392) | member 403, bad input 400, explicit duplicate 409, cap 409 | `require_admin`, validators, `SUBSCRIPTION_AGENTS_PER_HARNESS_LIMIT` |
 //! | `register_answers_a_code_when_the_switch_is_off_and_writes_nothing` (#3392) | 409 `subscription_agents_disabled`, 0 rows; non-admin still 403 | kill-switch arm after admin gate |
 //! | `register_is_tenant_scoped_and_survives_a_dead_agent_and_a_race` (#3392) | other tenant, dead agent frees its slot, 4 concurrent → 1 row | advisory lock + migration 116 index |
+//! | `claude_registration_is_paused_by_default_and_codex_is_not` (#3397 결재) | claude_code → 409 `claude_subscription_agent_paused`, 0 rows; codex → 201; rows report `brainUnavailableReason` only for Claude while off | `claude_enabled` gate in `register`, `AgentReadFacts::unavailable_reason` |
 //! | `a_registered_but_unconnected_subscription_agent_is_never_a_worker_job` (#2924/#2940 regression) | owner call to a freshly registered agent → 0 jobs | `OR a.invocation_scope = 'owner_only'` hosted predicates |
 
 use std::net::SocketAddr;
@@ -144,6 +145,15 @@ fn ensure_schema_and_roles() {
 }
 
 async fn start_server(pool: PgPool, subscription_agents_enabled: bool) -> String {
+    // The pre-#3397 tests exercise Claude subscription agents, so they opt in.
+    start_server_with(pool, subscription_agents_enabled, true).await
+}
+
+async fn start_server_with(
+    pool: PgPool,
+    subscription_agents_enabled: bool,
+    claude_subscription_agents_enabled: bool,
+) -> String {
     let state = AppState::new(
         pool,
         TEST_JWT_SECRET.to_string(),
@@ -163,6 +173,7 @@ async fn start_server(pool: PgPool, subscription_agents_enabled: bool) -> String
         // every hosted call is skipped and a missing owner check would hide.
         hosted_delivery_enabled: true,
         subscription_agents_enabled,
+        claude_subscription_agents_enabled,
         ..AgentPortConfig::default()
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -1703,7 +1714,7 @@ async fn plain_agent(
     id
 }
 
-fn roster_row<'a>(roster: &'a Value, id: Uuid) -> &'a Value {
+fn roster_row(roster: &Value, id: Uuid) -> &Value {
     roster["members"]
         .as_array()
         .expect("members")
@@ -2291,4 +2302,124 @@ async fn a_registered_but_unconnected_subscription_agent_is_never_a_worker_job()
         runs, 0,
         "no run — and so no team-key spend — was created for it"
     );
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3392-*)"]
+async fn claude_registration_is_paused_by_default_and_codex_is_not() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su).await;
+    let client = reqwest::Client::new();
+    let before: i64 = sqlx::query_scalar("SELECT count(*) FROM member WHERE workspace_id=$1")
+        .bind(f.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+
+    // Default config of this decision: the Claude opt-in is off.
+    let off = start_server_with(momo_app_pool().await, true, false).await;
+    let (status, body, _) = register(
+        &client,
+        &off,
+        f.workspace,
+        &f.owner_jwt,
+        json!({"harness": "claude_code", "deviceId": "paused-device-1"}),
+    )
+    .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(body["error"]["code"], "claude_subscription_agent_paused");
+    let after: i64 = sqlx::query_scalar("SELECT count(*) FROM member WHERE workspace_id=$1")
+        .bind(f.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(before, after, "a paused registration wrote nothing");
+    // A member who may not register still hears 403 first.
+    let (status, _, _) = register(
+        &client,
+        &off,
+        f.workspace,
+        &f.teammate_jwt,
+        json!({"harness": "claude_code", "deviceId": "paused-device-1"}),
+    )
+    .await;
+    assert_eq!(status, 403);
+    // The general kill switch speaks before the Claude one.
+    let both_off = start_server_with(momo_app_pool().await, false, false).await;
+    let (_, body, _) = register(
+        &client,
+        &both_off,
+        f.workspace,
+        &f.owner_jwt,
+        json!({"harness": "claude_code", "deviceId": "paused-device-1"}),
+    )
+    .await;
+    assert_eq!(body["error"]["code"], "subscription_agents_disabled");
+
+    // Codex is unaffected by the Claude opt-in.
+    let (status, codex, _) = register(
+        &client,
+        &off,
+        f.workspace,
+        &f.owner_jwt,
+        json!({"harness": "codex", "deviceId": "paused-device-1"}),
+    )
+    .await;
+    assert_eq!(status, 201, "{codex}");
+    let codex_id = Uuid::parse_str(codex["agent"]["id"].as_str().unwrap()).unwrap();
+
+    // Status field: only a Claude subscription agent, only while the opt-in is off.
+    let url = format!("{off}/v1/workspaces/{}/roster", f.workspace);
+    let (_, roster) = get_json(&client, &url, &f.teammate_jwt).await;
+    assert_eq!(
+        roster_row(&roster, f.agent)["brainUnavailableReason"],
+        "claude_subscription_agent_paused"
+    );
+    assert!(roster_row(&roster, codex_id)
+        .get("brainUnavailableReason")
+        .is_none());
+    assert!(roster_row(&roster, f.owner)
+        .get("brainUnavailableReason")
+        .is_none());
+    let (_, list) = get_json(
+        &client,
+        &format!(
+            "{off}/v1/workspaces/{}/hosted-agent-connections",
+            f.workspace
+        ),
+        &f.owner_jwt,
+    )
+    .await;
+    let claude_row = list["connections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["agentMemberId"] == json!(f.agent.to_string()))
+        .unwrap();
+    assert_eq!(
+        claude_row["brainUnavailableReason"],
+        "claude_subscription_agent_paused"
+    );
+
+    // Opted in: the same agent reports nothing and Claude registers.
+    let on = start_server_with(momo_app_pool().await, true, true).await;
+    let (_, roster) = get_json(
+        &client,
+        &format!("{on}/v1/workspaces/{}/roster", f.workspace),
+        &f.teammate_jwt,
+    )
+    .await;
+    assert!(roster_row(&roster, f.agent)
+        .get("brainUnavailableReason")
+        .is_none());
+    let (status, body, _) = register(
+        &client,
+        &on,
+        f.workspace,
+        &f.owner_jwt,
+        json!({"harness": "claude_code", "deviceId": "paused-device-1"}),
+    )
+    .await;
+    assert_eq!(status, 201, "{body}");
 }

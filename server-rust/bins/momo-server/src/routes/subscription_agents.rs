@@ -14,6 +14,9 @@
 //!   connection come from [`provision_hosted_agent_in_tx`] — the function
 //!   `POST …/hosted-agent-connections` uses — so #2940's guarantee (an
 //!   `owner_only` agent never runs on the team key) is carried by the same rows.
+//! * The Claude opt-in is `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`, **off by
+//!   default** (owner decision 2026-10-03, #3397): `harness: claude_code` answers
+//!   409 `claude_subscription_agent_paused` and writes nothing. Codex is not affected.
 //! * The kill switch is `MOMO_SUBSCRIPTION_AGENTS_ENABLED`. Off answers 409 with
 //!   the code `subscription_agents_disabled` so a client can say 「이 서버에서는
 //!   꺼져 있어요」 instead of hiding the option.
@@ -59,6 +62,8 @@ use crate::AppState;
 const NAME_ATTEMPTS: usize = 20;
 
 pub const CODE_DISABLED: &str = "subscription_agents_disabled";
+/// #3397 결재: Claude subscription agents are off by default until Anthropic replies.
+pub const CODE_CLAUDE_PAUSED: &str = momo_agent::CLAUDE_SUBSCRIPTION_AGENT_PAUSED;
 pub const CODE_LIMIT: &str = "subscription_agent_limit";
 pub const CODE_CLEANUP_PENDING: &str = "subscription_agent_cleanup_pending";
 
@@ -98,6 +103,7 @@ pub async fn register(
         .map(momo_agent::device_slug)
         .unwrap_or_default();
     let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
+    let claude_enabled = state.agent_port.config.claude_subscription_agents_enabled;
     let device_id = request.device_id.clone();
     let actor = principal.member_id;
     let via_token_id = audit_via_token_id(&principal);
@@ -116,6 +122,16 @@ pub async fn register(
                         StatusCode::CONFLICT,
                         CODE_DISABLED,
                         "subscription agents are disabled on this server",
+                    )));
+                }
+                // #3397 결재 2026-10-03: a Claude subscription agent is not
+                // registered unless the operator opted in. After the admin gate and
+                // the general switch; before any lock or write. Codex is unaffected.
+                if harness == SubscriptionHarness::ClaudeCode && !claude_enabled {
+                    return Ok(Err(ApiError::coded(
+                        StatusCode::CONFLICT,
+                        CODE_CLAUDE_PAUSED,
+                        "claude subscription agents are paused on this server",
                     )));
                 }
                 momo_agent::lock_subscription_registration_in_tx(

@@ -103,6 +103,7 @@ fn roster_dto(member: &RosterMember) -> RosterMemberDto {
         callable_by: None,
         owner: None,
         host_online: None,
+        brain_unavailable_reason: None,
     }
 }
 
@@ -152,6 +153,7 @@ pub async fn roster(
         })
         .await;
 
+    let claude_enabled = state.agent_port.config.claude_subscription_agents_enabled;
     let (members, facts) = settle_db("roster.list", outcome)?;
     let human_count = members
         .iter()
@@ -167,7 +169,7 @@ pub async fn roster(
             .map(|member| {
                 let mut dto = roster_dto(member);
                 if let Some(facts) = facts.iter().find(|f| f.agent_member_id == member.id) {
-                    dto.apply_read_facts(facts);
+                    dto.apply_read_facts(facts, claude_enabled);
                 }
                 dto
             })

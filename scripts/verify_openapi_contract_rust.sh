@@ -2326,7 +2326,7 @@ append_secret_with_derivatives "$HOSTED_PAIRING"
 record_sample hosted-agent-create post "/v1/workspaces/{workspaceId}/hosted-agent-connections" 201
 # #3392 AIH-2 — register-after-login. A second call with the same device must reuse.
 api post "/v1/workspaces/$WS/subscription-agents/register" \
-  '{"harness":"claude_code","deviceId":"gate-device-3392"}' "$ACCESS"
+  '{"harness":"codex","deviceId":"gate-device-3392"}' "$ACCESS"
 if [ "$RESPONSE_STATUS" != "201" ]; then
   gate_fail subscription-agent-register "expected HTTP 201, got $RESPONSE_STATUS" "$(redacted_body)"
 fi
