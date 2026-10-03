@@ -42,24 +42,24 @@ export const FIRST_AGENT_OFFLINE_REASON_ID = "first-agent-offline-reason";
 export const FIRST_AGENT_ERROR_REASON_ID = "first-agent-error-reason";
 
 export const FIRST_AGENT_DETECTING_WAIT =
-  "이 서버가 에이전트 접속을 확인하면 다음 화면으로 넘어갑니다.";
+  "이 서버가 에이전트 접속을 확인하면 다음 화면으로 넘어가요.";
 
 export const FIRST_AGENT_CHANNEL_PENDING =
-  "이 에이전트가 답할 채널 승인이 아직 끝나지 않았습니다.";
+  "이 에이전트가 답할 채널 승인이 아직 끝나지 않았어요.";
 
-export const FIRST_AGENT_LIST_ERROR = "연결 목록을 불러오지 못했습니다.";
+export const FIRST_AGENT_LIST_ERROR = "연결 목록을 불러오지 못했어요.";
 export const FIRST_AGENT_OFFLINE_REASON =
-  "연결이 끊겼습니다. 목록은 이어서 볼 수 있고, 발급은 다시 연결된 뒤에 할 수 있습니다.";
+  "연결이 끊겼어요. 목록은 이어서 볼 수 있고, 발급은 다시 연결된 뒤에 할 수 있어요.";
 
 export const FIRST_AGENT_RECHECKING = "다시 확인 중…";
 
 export const FIRST_AGENT_CONNECTED_CLAIM = "연결됨";
 
 export const FIRST_AGENT_OPENAI_DETAIL =
-  "AI에서 이 서버의 provider를 붙입니다.";
+  "AI에서 이 서버의 provider를 붙이에요.";
 
 export const FIRST_AGENT_GROK_WHAT_HAPPENS =
-  "고르면 그록봇 연결 값을 발급합니다.";
+  "고르면 그록봇 연결 값을 발급해요.";
 
 export const FIRST_AGENT_DETAIL_FORBIDDEN = [
   "아래",
@@ -70,11 +70,11 @@ export const FIRST_AGENT_DETAIL_FORBIDDEN = [
 
 /** Claude Code 줄: 고르면 생기는 일. generic 프리셋의 「원격 MCP 서버를 등록」. */
 export const FIRST_AGENT_CLAUDE_DETAIL =
-  "원격 MCP 서버 주소를 등록하면 이 팀에 붙습니다.";
+  "원격 MCP 서버 주소를 등록하면 이 팀에 붙어요.";
 
 /** Codex 줄: 고르면 생기는 일. generic 단계의 「MCP 커넥터」·「원격 서버를 추가」. */
 export const FIRST_AGENT_CODEX_DETAIL =
-  "MCP 커넥터에 원격 서버를 추가하면 이 팀에 붙습니다.";
+  "MCP 커넥터에 원격 서버를 추가하면 이 팀에 붙어요.";
 
 export type FirstAgentCardId =
   | "claude-code"
@@ -161,7 +161,7 @@ export function firstAgentDetectingDetail(
 }
 
 export function formatDetectPollWait(delayMs: number): string {
-  return `${Math.round(delayMs / 1000)}초 뒤 다시 확인합니다`;
+  return `${Math.round(delayMs / 1000)}초 뒤 다시 확인해요`;
 }
 
 /** 프리셋 문구 정책: 네 줄이 서로 다른 한 줄이고, 단계는 카드에 없다. */

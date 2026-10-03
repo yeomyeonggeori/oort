@@ -58,61 +58,65 @@ export interface AiGlossaryEntry {
   term: string;
   /** 화면에 쓰는 한 줄. */
   meaning: string;
-  /** 이 말이 흡수하는 지금의 말(시안 용어집 오른쪽 열). */
-  absorbs: readonly string[];
 }
 
-// design-preflight-allow: absorbs 는 용어집이 흡수하는 옛 말의 데이터이고 화면에 그려지지 않는다(시험·문서용, #3445)
 export const AI_GLOSSARY: readonly AiGlossaryEntry[] = [
   {
     id: "myAiAccount",
     term: "내 AI 계정",
     meaning: "내가 로그인한 Claude Code·Codex 구독과 내 API 키. 나만 써요.",
-    absorbs: ["내 계정", "이 맥", "구독", "구독 추가", "로그인(단독)", "개인 구독", "내 설정", "로컬 터미널 기본 로그인"],
   },
   {
     id: "teamAiKey",
     term: "팀 AI 키",
     meaning: "운영자가 넣은 API 키. 팀이 같이 쓰고 비용은 팀 몫이에요.",
-    absorbs: ["팀 연결", "팀 API 키", "팀 키", "팀 기본", "운영자 설정"],
   },
   {
     id: "defaultAi",
     term: "기본 AI",
     meaning: "기능마다 먼저 쓸 AI. 표에서 기능별로 골라요.",
-    absorbs: ["기본 AI(유지)", "앱 명령", "원격 작업 기본 계정", "팀 에이전트 대답", "로컬 터미널 새 세션"],
   },
   {
     id: "agent",
     term: "에이전트",
     meaning: "@로 부르는 AI 멤버. 쓰는 AI는 내 구독, 팀 키, 외부 중 하나예요.",
-    absorbs: ["호스티드 에이전트", "구독 에이전트", "합류/합류시키기", "봇(AI 봇)", "에이전트 초대(초대하기만 유지)"],
   },
   {
     id: "callableBy",
     term: "부를 수 있는 사람",
     meaning: "누구나 또는 한 사람만. 에이전트마다 하나예요.",
-    absorbs: ["owner_only", "오너 전용", "소유자 전용", "본인 1인"],
   },
   {
     id: "cost",
     term: "비용",
     meaning: "답할 때 나가는 돈이 누구 몫인지: 내 구독, 팀, 외부 운영자.",
-    absorbs: ["과금", "사용량 소스", "팀 키만"],
   },
   {
     id: "externalConnection",
     term: "외부 연결",
     meaning: "oort 밖과 주고받는 통로. 앱 · 채널로 들어오는 주소 · 밖으로 보내는 알림 · 외부 에이전트 연결.",
-    absorbs: ["웹훅", "이벤트 구독", "에이전트 자격", "MCP", "Agent Port", "1회용 연결 값(발급 화면에서만 사용)", "앱"],
   },
   {
     id: "myWork",
     term: "내 작업",
     meaning: "내 맥 터미널에서 내 계정으로 직접 하는 일.",
-    absorbs: ["내 작업(유지)", "로컬 터미널", "코드 실행 호스트(설정에 유지)"],
   },
 ];
+
+/**
+ * 각 용어가 흡수하는 지금의 말(시안 용어집 오른쪽 열). 화면에 그려지지 않는 데이터라 옛 말 글자가 그대로 있다.
+ * design-preflight-allow: 옛 말을 정의하는 표(#3445). 제목·설명을 든 `AI_GLOSSARY`는 마커 없이 게이트를 받는다.
+ */
+export const AI_GLOSSARY_ABSORBS: Readonly<Record<AiGlossaryId, readonly string[]>> = {
+  myAiAccount: ["내 계정", "이 맥", "구독", "구독 추가", "로그인(단독)", "개인 구독", "내 설정", "로컬 터미널 기본 로그인"],
+  teamAiKey: ["팀 연결", "팀 API 키", "팀 키", "팀 기본", "운영자 설정"],
+  defaultAi: ["기본 AI(유지)", "앱 명령", "원격 작업 기본 계정", "팀 에이전트 대답", "로컬 터미널 새 세션"],
+  agent: ["호스티드 에이전트", "구독 에이전트", "합류/합류시키기", "봇(AI 봇)", "에이전트 초대(초대하기만 유지)"],
+  callableBy: ["owner_only", "오너 전용", "소유자 전용", "본인 1인"],
+  cost: ["과금", "사용량 소스", "팀 키만"],
+  externalConnection: ["웹훅", "이벤트 구독", "에이전트 자격", "MCP", "Agent Port", "1회용 연결 값(발급 화면에서만 사용)", "앱"],
+  myWork: ["내 작업(유지)", "로컬 터미널", "코드 실행 호스트(설정에 유지)"],
+};
 
 /** 시안 용어집 아래 「금지」 줄. design-preflight-allow: 금지어를 말하는 문장이라 옛 말을 인용한다(화면에는 그려지지 않는다, #3445). */
 export const AI_GLOSSARY_BANS =

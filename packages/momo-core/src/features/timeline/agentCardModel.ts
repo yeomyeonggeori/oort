@@ -619,7 +619,7 @@ const FAILURE_GUIDANCE: ReadonlyMap<string, FailureGuidance> = new Map([
     "provider_auth_failed",
     {
       label: "연결된 계정 인증이 만료되었습니다.",
-      detail: `AI에서 계정을 다시 등록하면 이어서 실행할 수 있습니다. ${WHERE_THE_ORIGINAL_IS}`,
+      detail: `AI에서 계정을 다시 등록하면 이어서 실행할 수 있어요. ${WHERE_THE_ORIGINAL_IS}`,
     },
   ],
 ]);
