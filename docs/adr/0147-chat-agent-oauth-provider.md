@@ -183,10 +183,9 @@
   - 에이전트는 자기 모델을 따른다(`model_source = agent`). 생성 경로가 그렇게 만들고 워커는 개인 턴에 팀 행을 적용하지 않는다.
 - **D7. 엔드포인트와 SSRF.** `baseUrl`은 팀 링크 PUT과 같은 `validated_base_url`을 지난다(HTTPS, userinfo·query·fragment 금지, 사설·메타데이터 리터럴과 loopback은 운영자 옵트인). 호출 시점의 연결 가드(`momo-egress`)는 모든 provider 호출에 같다. 수정 경로가 없어서 저장된 키가 편집된 URL을 따라 다른 origin으로 가지 못한다(증보 2026-09-28과 같은 이유). origin을 바꾸려면 회수와 재발급이다.
 - **D8. API·감사.** `POST/GET /v1/workspaces/{ws}/personal-keys`, `GET …/mine`, `POST …/{key}/revoke`, `POST …/{key}/agent`(소유자 또는 관리자가 그 사람의 개인 에이전트를 만든다). 키는 쓰기 전용(`apiKey`)이고 어떤 응답·감사·로그에도 나오지 않는다. 응답은 id·소유자·형식·가린 endpoint label·label·상태·시각이다. 감사 `provider.personal_link.issued`·`provider.personal_link.revoked`는 id·형식·label만 싣는다(재회수는 감사 행을 늘리지 않는다). OpenAPI에 올렸다.
+- **D9. 읽기 계약(AIH-2, ADR-0193 증보 D14).** `brain`에 값 `personal_key`를 더한다: `owner_only`이고 `uses_owner_key`인 에이전트(`derive_brain`이 `owner_only` 안에서 저장된 두뇌 종류로 가른다). `callableBy`는 `owner_only`, `owner`는 `subscription`과 `personal_key` 에이전트에 나온다. `hostOnline`은 나오지 않는다(서버 워커가 돌려서 기다릴 호스트가 없다). `brainUnavailableReason`은 없다. 값이 하나 늘었으므로 모르는 값을 만난 클라이언트는 보조 줄을 그리지 않는다(기존 규칙).
 - **정직한 한계.**
   - 비용 귀속: `usage_ledger`는 에이전트 기준이라 개인 키 에이전트의 사용량도 워크스페이스 집계에 들어간다. 키 출처 컬럼은 없다. 청구 주체는 provider 쪽 키 소유자(조직)다.
   - 환영·hosted 인박스 같은 일부 입구는 `owner_only`를 구독으로 읽는다. 개인 키 에이전트는 그 입구에서 호출되지 않거나(환영) 워커 큐로만 간다. 이 증보가 보장하는 호출 입구는 멘션·1:1 DM·스레드 답글(멘션)·작업 요청이다.
-  - AIH-2(#3392)의 에이전트 읽기 계약 `brain`은 `owner_only`를 항상 `subscription`으로 파생한다. 개인 키 에이전트의 `brain` 값(`personal_key`)은 두 PR이 합쳐진 뒤 후속에서 더한다. 그 전까지 읽기 계약의 라벨이 부정확할 수 있고, 호출·키 해석 동작에는 영향이 없다.
   - UI(발급·회수·내 키 화면)는 AIH-6이다. 멤버 직접 추가 정책 스위치는 열지 않았다.
 - **검증.** 격리 PG: `momo-agent-worker/tests/personal_key_conformance_pg.rs`(개인 턴은 소유자 키만, 팀 턴은 개인 키를 못 봄, 다른 사람의 에이전트, 회수는 다음 턴, 읽을 수 없는 키와 OAuth 봉투, 위임·환영 없음, 어떤 행에도 키 없음)와 `momo-server/tests/personal_key_conformance_pg.rs`(발급·목록·회수·인가, 한 키 한 사람, 입력 거부, 개인 에이전트 전달, RLS). 사보타주 기록은 PR 본문.
-
