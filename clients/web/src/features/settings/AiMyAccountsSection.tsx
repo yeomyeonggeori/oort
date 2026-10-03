@@ -69,6 +69,7 @@ import {
   AiSection,
   AiSectionHead,
   AiSource,
+  type AiPillTone,
 } from "./aiAccountsParts";
 import {
   MY_ACCOUNTS_BROWSER_LINE,
@@ -113,11 +114,29 @@ const OWN_ACCOUNT_FOOT =
 
 const PROFILES_KEY = ["local", "harness-profiles"] as const;
 
+/**
+ * 구독 줄 밑에 붙는 「연결된 에이전트」 한 줄(AIH-4, #3399). 내용은 코어 `aiHubModel`이
+ * 정한 문장이고 이 파일은 그리기만 한다. 기본 로그인 줄(프로필 없음)에만 붙는다.
+ */
+export interface AccountAgentLine {
+  text: string;
+  chip: { text: string; tone: AiPillTone } | null;
+  detail: string | null;
+}
+
+export type AccountAgentLineFor = (harness: LocalHarnessId) => AccountAgentLine | null;
+
 export function AiMyAccountsSection({
   onAddApiKey,
+  title = "내 계정",
+  scope = "이 맥",
+  agentLineFor,
 }: {
   /** 운영자면 팀 연결 절의 키 폼을 연다. 없으면 추가 창의 API 키 선택이 잠긴다. */
   onAddApiKey?: () => void;
+  title?: string;
+  scope?: string;
+  agentLineFor?: AccountAgentLineFor;
 }) {
   const state = useSubscriptionEntryState();
   const browserTab = myAccountsBrowserTab(state, IS_TAURI);
@@ -127,8 +146,8 @@ export function AiMyAccountsSection({
     <AiSection labelledBy={MY_ACCOUNTS_HEADING_ID} testId="ai-my-accounts">
       <AiSectionHead
         id={MY_ACCOUNTS_HEADING_ID}
-        title="내 계정"
-        scope="이 맥"
+        title={title}
+        scope={scope}
       />
       {state === "pending" && !browserTab ? (
         <Skeleton ready={false} rows={1} className="py-3" />
@@ -139,7 +158,7 @@ export function AiMyAccountsSection({
           </span>
         </AiLineRow>
       ) : state === "rows" ? (
-        <MyAccountRows onAddApiKey={onAddApiKey} />
+        <MyAccountRows onAddApiKey={onAddApiKey} agentLineFor={agentLineFor} />
       ) : (
         <AiLineRow testId="subscription-entry" surface={state} last>
           <span>{MY_ACCOUNTS_EMPTY_LINE}</span>
@@ -206,7 +225,13 @@ function profileKey(profile: HarnessProfileRef): string {
   return `${profile.harness}/${profile.label}`;
 }
 
-function MyAccountRows({ onAddApiKey }: { onAddApiKey?: () => void }) {
+function MyAccountRows({
+  onAddApiKey,
+  agentLineFor,
+}: {
+  onAddApiKey?: () => void;
+  agentLineFor?: AccountAgentLineFor;
+}) {
   const client = useQueryClient();
   const probeFixture = readProbeFixture();
   const profilesFixture = readProfilesFixture();
@@ -435,6 +460,7 @@ function MyAccountRows({ onAddApiKey }: { onAddApiKey?: () => void }) {
                   row={row}
                   pill={pill}
                   moreTestId={moreId(row)}
+                  agentLine={row.profile === null ? (agentLineFor?.(row.harness) ?? null) : null}
                   onLogin={() => {
                     loginConnected.current = false;
                     setLogin({
@@ -577,12 +603,14 @@ function MyAccountRowView({
   row,
   pill,
   moreTestId,
+  agentLine,
   onLogin,
   onDestructive,
 }: {
   row: MyAccountRow;
   pill: HarnessPill;
   moreTestId: string;
+  agentLine: AccountAgentLine | null;
   onLogin: () => void;
   onDestructive: (opener: HTMLElement | null) => void;
 }) {
@@ -614,6 +642,26 @@ function MyAccountRowView({
             <AiSource>구독</AiSource>
             {myAccountRowDetail(row)}
           </span>
+          {agentLine && (
+            <span
+              className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pt-1 text-meta text-ink-muted"
+              data-testid={`${testId}-agent`}
+            >
+              <span className="break-keep [overflow-wrap:anywhere]" data-testid={`${testId}-agent-text`}>
+                {agentLine.text}
+              </span>
+              {agentLine.chip && (
+                <span data-testid={`${testId}-agent-chip`}>
+                  <AiPill tone={agentLine.chip.tone}>{agentLine.chip.text}</AiPill>
+                </span>
+              )}
+              {agentLine.detail && (
+                <span className="basis-full break-keep" data-testid={`${testId}-agent-detail`}>
+                  {agentLine.detail}
+                </span>
+              )}
+            </span>
+          )}
         </div>
       </div>
       <div className="ms-auto flex shrink-0 items-center gap-3">

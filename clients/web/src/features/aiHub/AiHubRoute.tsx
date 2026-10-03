@@ -54,7 +54,7 @@ export function AiHubRoute() {
       <div className="min-w-0 flex-1 overflow-y-auto p-6">
         <Routes>
           <Route index element={<AiHubOverview mayCreateAgent={mayCreate} />} />
-          <Route path="accounts" element={<AiAccountsPane {...pane} />} />
+          <Route path="accounts" element={<AiAccountsPane />} />
           <Route path="team-keys" element={<AiTeamKeysPane {...pane} />} />
           <Route path="agents" element={<AiAgentsPane />} />
           <Route path="external" element={<AiExternalPane {...pane} />} />

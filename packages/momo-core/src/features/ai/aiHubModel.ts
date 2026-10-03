@@ -638,3 +638,119 @@ export const AI_HUB_OVERVIEW_COPY = {
     items: (n: number) => `${n}개`,
   },
 } as const;
+
+// ---------------------------------------------------------------------------
+// 내 AI 계정 구획 (AIH-4, #3399)
+// ---------------------------------------------------------------------------
+
+export const AI_HUB_ACCOUNTS_COPY = {
+  /** 데스크탑 머리 아래 한 줄(시안 2-a). */
+  desktopSubtitle: "이 맥에 로그인한 구독과 내 API 키예요. 나만 쓰고, 로그인은 각 회사의 공식 CLI가 해요.",
+  /** 웹 머리 아래 한 줄(시안 2-b). */
+  webSubtitle: "웹에서는 보기만 해요.",
+  subscriptionHead: "구독",
+  subscriptionScope: "이 맥",
+  /** 구독 줄 옆 연결된 에이전트가 없을 때. */
+  noAgent: "아직 에이전트 없음",
+  /** 웹: 로그인은 못 하지만 길이 있다(막다른 길 금지). */
+  web: {
+    getApp: "데스크탑 앱 받기",
+    openApp: "이미 설치했어요: oort 앱 열기",
+    myAgentsHead: "내가 만든 에이전트",
+    myAgentsScope: "서버에 있는 것만 보여요",
+    myAgentsEmpty: "아직 만든 에이전트가 없어요.",
+    myAgentsLoading: "에이전트를 불러오는 중이에요.",
+    myAgentsFailed: "에이전트를 불러오지 못했어요.",
+    apiKeyNote: "API 키는 웹에 저장하지 않아요.",
+  },
+  /** 폰: 같은 상태를 작게. */
+  phone: {
+    myAgentsHead: "내가 만든 에이전트",
+    apiKeyNote: "API 키는 폰에 저장하지 않아요.",
+  },
+} as const;
+
+/** 데스크탑 앱을 받는 곳과 이미 설치한 앱을 여는 주소(`oort` 스킴은 tauri.conf.json deep-link). */
+export const AI_HUB_DESKTOP_APP = {
+  downloadUrl: "https://github.com/yeomyeonggeori/oort/releases/latest",
+  openUrl: "oort://open",
+} as const;
+
+/** 구독 줄 옆의 「에이전트 @이름」 또는 「아직 에이전트 없음」. */
+export function subscriptionAgentText(agentName: string | null | undefined): string {
+  const name = cleanName(agentName)?.replace(/^@/, "") ?? null;
+  return name ? `에이전트 @${name}` : AI_HUB_ACCOUNTS_COPY.noAgent;
+}
+
+export type SubscriptionAgentTone = "ok" | "neutral";
+
+export interface SubscriptionAgentStatus {
+  /** 줄 오른쪽 칩. 에이전트가 없으면 null. */
+  chip: { text: string; tone: SubscriptionAgentTone } | null;
+  /** 칩으로 못 담는 설명 한 줄. 없으면 null. */
+  detail: string | null;
+  /** 이 구독 에이전트를 지금 부를 수 있다고 말해도 되는가. */
+  callable: boolean;
+}
+
+/**
+ * Claude 구독 에이전트 대행 보수 모드 (#3397, 성재 2026-10-03). Anthropic 해석 답이 올 때까지
+ * oort가 `claude -p`/ACP로 대신 구동하는 @내-claude는 「회색 · 문의 중」이다. 오류가 아니다.
+ * 서버가 대행을 명시적으로 켠 값(`claudeDriveEnabled === true`)을 내려줄 때만 풀린다. 값이 없거나
+ * 모르면 보수 모드다(AIH-2 전에는 서버 필드가 없다). Codex는 영향이 없다.
+ * 내 작업의 직접 PTY 로그인은 이 상태와 무관하다.
+ */
+export function subscriptionAgentStatus(
+  harness: AiHarness,
+  hasAgent: boolean,
+  opts: { claudeDriveEnabled?: boolean | null } = {}
+): SubscriptionAgentStatus {
+  if (harness === "claude_code" && opts.claudeDriveEnabled !== true) {
+    return {
+      chip: hasAgent ? { text: "문의 중", tone: "neutral" } : null,
+      detail:
+        "Anthropic에 확인하는 중이라 oort가 Claude Code 구독으로 에이전트를 대신 구동하지 않아요. 내 맥 터미널의 로그인은 그대로 써요.",
+      callable: false,
+    };
+  }
+  return {
+    chip: hasAgent ? { text: "나만 부름", tone: "ok" } : null,
+    detail: null,
+    callable: hasAgent,
+  };
+}
+
+export interface MySubscriptionAgent {
+  agentId: string;
+  name: string;
+  harness: AiHarness;
+}
+
+/**
+ * 내가 만든 구독 에이전트: 명부의 에이전트 중 소유자가 나이고 호스티드 연결에 구독
+ * 하니스가 적힌 것(끊긴 연결 제외). 소유자나 하니스를 모르면 넣지 않는다(남의 것을 내 줄에 올리지 않는다).
+ * 같은 하니스에 여럿이면 이름순 첫 번째가 앞에 온다.
+ */
+export function mySubscriptionAgents(
+  roster: ReadonlyArray<{ id: string; displayName: string; ownerHumanId?: string | null }>,
+  connections: ReadonlyArray<{ agentMemberId: string; subscriptionHarness?: string | null; status?: string | null }>,
+  viewerHumanId: string | null | undefined
+): MySubscriptionAgent[] {
+  const viewer = cleanName(viewerHumanId);
+  if (!viewer) return [];
+  const harnessByAgent = new Map<string, AiHarness>();
+  for (const conn of connections) {
+    // 끊겼거나 정리 중인 연결의 에이전트는 내 줄에 올리지 않는다.
+    if (conn.status === "disconnected" || conn.status === "cleanup_pending") continue;
+    const harness = toHarness(conn.subscriptionHarness);
+    if (harness) harnessByAgent.set(conn.agentMemberId.toLowerCase(), harness);
+  }
+  const found: MySubscriptionAgent[] = [];
+  for (const agent of roster) {
+    const owner = cleanName(agent.ownerHumanId);
+    const harness = harnessByAgent.get(agent.id.toLowerCase());
+    if (!owner || !harness || !sameId(owner, viewer)) continue;
+    found.push({ agentId: agent.id, name: agent.displayName, harness });
+  }
+  return found.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+}

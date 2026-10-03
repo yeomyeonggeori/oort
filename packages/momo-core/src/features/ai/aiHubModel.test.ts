@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  AI_HUB_ACCOUNTS_COPY,
+  mySubscriptionAgents,
+  subscriptionAgentStatus,
+  subscriptionAgentText,
   AI_GLOSSARY,
   AI_HUB_COPY,
   AI_HUB_FROM_SETTINGS,
@@ -531,5 +535,83 @@ describe("허브 구획과 옛 입구 (AIH-3)", () => {
       AI_HUB_OVERVIEW_COPY.webNote,
     ];
     for (const text of texts) expect(findLegacyTerms(text), text).toEqual([]);
+  });
+});
+
+describe("내 AI 계정 구독 에이전트 줄 (AIH-4)", () => {
+  it("에이전트 줄: 이름이 있으면 @이름, 없으면 아직 없음", () => {
+    expect(subscriptionAgentText("성재-claude")).toBe("에이전트 @성재-claude");
+    expect(subscriptionAgentText("@성재-claude")).toBe("에이전트 @성재-claude");
+    expect(subscriptionAgentText(null)).toBe("아직 에이전트 없음");
+    expect(subscriptionAgentText("  ")).toBe("아직 에이전트 없음");
+  });
+
+  it("Claude: 기본은 보수 모드라 회색 문의 중이고 부를 수 있다고 말하지 않는다", () => {
+    for (const opts of [{}, { claudeDriveEnabled: null }, { claudeDriveEnabled: false }]) {
+      const status = subscriptionAgentStatus("claude_code", true, opts);
+      expect(status.chip).toEqual({ text: "문의 중", tone: "neutral" });
+      expect(status.callable).toBe(false);
+      const spoken = `${status.chip?.text} ${status.detail}`;
+      expect(spoken).not.toMatch(/연결됨|부를 수 있|나만 부름|준비/);
+      expect(status.detail).toContain("대신 구동하지 않아요");
+    }
+  });
+
+  it("Claude: 에이전트가 없어도 이유 한 줄은 있다(칩은 없다)", () => {
+    const status = subscriptionAgentStatus("claude_code", false);
+    expect(status.chip).toBeNull();
+    expect(status.detail).not.toBeNull();
+  });
+
+  it("Claude: 서버가 대행을 명시적으로 켠 값만 보수 모드를 푼다", () => {
+    const status = subscriptionAgentStatus("claude_code", true, { claudeDriveEnabled: true });
+    expect(status.chip).toEqual({ text: "나만 부름", tone: "ok" });
+    expect(status.callable).toBe(true);
+  });
+
+  it("Codex는 보수 모드와 무관하다", () => {
+    expect(subscriptionAgentStatus("codex", true)).toEqual({ chip: { text: "나만 부름", tone: "ok" }, detail: null, callable: true });
+    expect(subscriptionAgentStatus("codex", true, { claudeDriveEnabled: false }).callable).toBe(true);
+    expect(subscriptionAgentStatus("codex", false)).toEqual({ chip: null, detail: null, callable: false });
+  });
+
+  it("새 문구는 줄표·금지어 없이 해요체", () => {
+    const strings: string[] = [];
+    const walk = (v: unknown) => {
+      if (typeof v === "string") strings.push(v);
+      else if (v && typeof v === "object") Object.values(v).forEach(walk);
+    };
+    walk(AI_HUB_ACCOUNTS_COPY);
+    for (const s of strings) expect(s).not.toMatch(/[—–]|합류/);
+  });
+});
+
+describe("내가 만든 구독 에이전트 (AIH-4)", () => {
+  const roster = [
+    { id: "A1", displayName: "성재-claude", ownerHumanId: "ME" },
+    { id: "A2", displayName: "서연-codex", ownerHumanId: "OTHER" },
+    { id: "A3", displayName: "김인턴", ownerHumanId: "ME" },
+    { id: "A4", displayName: "성재-codex", ownerHumanId: null },
+  ];
+  const connections = [
+    { agentMemberId: "a1", subscriptionHarness: "claude_code" },
+    { agentMemberId: "A2", subscriptionHarness: "codex" },
+    { agentMemberId: "A3", subscriptionHarness: null },
+    { agentMemberId: "A4", subscriptionHarness: "codex" },
+  ];
+  it("소유자가 나이고 구독 하니스가 있는 것만 올린다", () => {
+    expect(mySubscriptionAgents(roster, connections, "me")).toEqual([
+      { agentId: "A1", name: "성재-claude", harness: "claude_code" },
+    ]);
+  });
+  it("끊겼거나 정리 중인 연결은 올리지 않는다", () => {
+    for (const status of ["disconnected", "cleanup_pending"]) {
+      expect(mySubscriptionAgents(roster, [{ agentMemberId: "A1", subscriptionHarness: "claude_code", status }], "ME")).toEqual([]);
+    }
+    expect(mySubscriptionAgents(roster, [{ agentMemberId: "A1", subscriptionHarness: "claude_code", status: "active" }], "ME")).toHaveLength(1);
+  });
+  it("나를 모르면 아무것도 올리지 않는다", () => {
+    expect(mySubscriptionAgents(roster, connections, null)).toEqual([]);
+    expect(mySubscriptionAgents(roster, connections, " ")).toEqual([]);
   });
 });
