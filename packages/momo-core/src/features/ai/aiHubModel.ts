@@ -153,7 +153,7 @@ export const AI_HUB_COPY = {
     team: {
       title: "팀 에이전트",
       description: "팀 AI 키로 답해요. 누구나 부르고, 비용은 팀 몫이에요.",
-      audience: "운영자",
+      audience: "소유자·관리자",
     },
     mySubscription: {
       title: "내 Claude Code·Codex",
@@ -165,6 +165,49 @@ export const AI_HUB_COPY = {
       description: "직접 운영하는 에이전트를 초대해요. 비용은 운영하는 쪽이 내요.",
       audience: "소유자·관리자",
     },
+  },
+} as const;
+
+/**
+ * 「에이전트」 구획(/ai/agents) 화면 문구 (AIH-7, #3428). 표 머리·상태·만들기 3종 선택.
+ * 칸의 값은 `aiAgentLabels` 가 만든다; 여기는 표 둘레의 말만 둔다.
+ */
+export const AI_AGENTS_PANE_COPY = {
+  columns: {
+    agent: "에이전트",
+    brain: "쓰는 AI",
+    callable: "부를 수 있는 사람",
+    cost: "비용",
+    status: "상태",
+  },
+  tableLabel: "에이전트별 쓰는 AI · 부를 수 있는 사람 · 비용 · 상태",
+  loading: "에이전트를 불러오는 중이에요.",
+  error: "에이전트를 불러오지 못했어요.",
+  retry: "다시 불러오기",
+  empty: "아직 에이전트가 없어요.",
+  emptyCanCreate: "만들면 채널에서 @로 부를 수 있어요.",
+  emptyCannotCreate: "에이전트는 워크스페이스 소유자나 관리자가 만들 수 있어요.",
+  unknownBrain: "쓰는 AI를 아직 몰라요",
+  locked: "내가 부를 수 없어요",
+  inactive: "사용 중지",
+  paused: "일시정지",
+  active: "활성",
+  statusUnknown: "상태를 볼 수 없어요",
+  manageLine: "프로필 · 이력 · 연결 상세는 에이전트에서 봐요.",
+  manageLink: "에이전트 열기",
+  offline: "연결이 끊겼어요. 마지막으로 받은 내용을 보여 줘요.",
+  create: {
+    button: "에이전트 만들기",
+    title: "에이전트 만들기",
+    description: "어떤 AI로 답하게 할지 골라요.",
+    cancel: "닫기",
+    desktopHint: "데스크탑에서 해요",
+    webReason: "로그인과 만들기는 데스크탑 앱에서 해요. 웹에서는 만들 수 없어요.",
+    pending: "확인하는 중이에요.",
+    serverOff: "이 서버에서는 꺼져 있어요. 운영자에게 요청하세요.",
+    unavailable: "이 빌드에서는 쓸 수 없어요.",
+    denied: "소유자·관리자만 만들 수 있어요.",
+    externalOff: "이 빌드에서는 외부 에이전트를 초대할 수 없어요.",
   },
 } as const;
 
@@ -451,7 +494,9 @@ export function classifyAiAgent(facts: AiAgentFacts, viewer: AiViewer = {}): AiA
   let callableBy: AiCallableBy | "unknown";
   // 개인 키도 발급받은 사람의 본인 전용 에이전트만 쓴다(#3396, 서버가 팀 키로 대신하지 않는다).
   if (brain === "subscription" || brain === "personal_key") callableBy = "owner";
-  else if (facts.callableBy === "owner" || facts.callableBy === "everyone") callableBy = facts.callableBy;
+  // 서버(`callable_by`)는 `owner_only` | `everyone` 을 내려준다. 코어 안에서는 `owner` 로 읽는다.
+  else if (facts.callableBy === "owner" || facts.callableBy === "owner_only") callableBy = "owner";
+  else if (facts.callableBy === "everyone") callableBy = "everyone";
   else if (facts.invocationScope === "owner_only") callableBy = "owner";
   else if (facts.invocationScope === "workspace") callableBy = "everyone";
   else if (brain === "team_key" || brain === "external") callableBy = "everyone";
@@ -549,8 +594,8 @@ export function aiAgentLabels(c: AiAgentClassification): AiAgentLabels {
   switch (c.brain) {
     case "subscription":
       brain = `${mine ? "내 구독" : "개인 구독"}${harness}`;
-      callable = mine ? "나만" : `${c.ownerName ? `${c.ownerName} 님` : "만든 사람"}만`;
-      cost = mine ? "내 구독" : `${c.ownerName ? `${c.ownerName} 님` : "만든 사람"} 구독`;
+      callable = mine ? "나만" : `${ownerRef(c)}만`;
+      cost = mine ? "내 구독" : `${ownerRef(c)} 구독`;
       mentionBrain = mine ? "내 구독" : named ? `${ownerRef(c)} 개인 구독` : "개인 구독";
       mentionCallable = mine ? "나만 부를 수 있어요" : `${ownerRef(c)}만 부를 수 있어요`;
       mentionBadge = mine ? "내 구독" : named ? `${ownerRef(c)}만` : "개인 구독";
@@ -558,7 +603,7 @@ export function aiAgentLabels(c: AiAgentClassification): AiAgentLabels {
     case "personal_key":
       // 운영자가 사람마다 발급한 API 키. 그 사람의 본인 전용 에이전트만 쓴다. 구독이 아니다.
       brain = "개인 키";
-      callable = mine ? "나만" : `${c.ownerName ? `${c.ownerName} 님` : "만든 사람"}만`;
+      callable = mine ? "나만" : `${ownerRef(c)}만`;
       cost = "개인 키";
       mentionBrain = "개인 키";
       mentionCallable = mine ? "나만" : `${ownerRef(c)}만`;
@@ -587,16 +632,15 @@ export function aiAgentLabels(c: AiAgentClassification): AiAgentLabels {
   // brain 을 모르는 채 callable 만 아는 경우(서버가 callable_by 만 내려준 경우)에도
   // 표의 칩은 그린다. 보조 줄은 두 값을 다 알 때만.
   if (callable === null && c.callableBy === "everyone") callable = "누구나";
-  if (callable === null && c.callableBy === "owner") callable = `${c.ownerName ? `${c.ownerName} 님` : "만든 사람"}만`;
+  if (callable === null && c.callableBy === "owner") callable = `${ownerRef(c)}만`;
 
   const status = c.unavailableReason === CLAUDE_SUBSCRIPTION_AGENT_PAUSED ? AI_AGENT_PAUSED_STATUS : null;
 
+  // 「문의 중」이면 맥 상태는 말하지 않는다(위 status 주석).
   let host: AiAgentLabels["host"] = null;
-  if (status !== null) {
-    host = null;
-  } else if (c.brain === "subscription" && c.hostOnline === true) {
+  if (status === null && c.brain === "subscription" && c.hostOnline === true) {
     host = { label: mine ? "내 맥 켜짐" : "맥 켜짐", detail: null };
-  } else if (c.brain === "subscription" && c.hostOnline === false) {
+  } else if (status === null && c.brain === "subscription" && c.hostOnline === false) {
     host = { label: "맥 꺼짐", detail: AI_HUB_COPY.subscriptionHostOfflineDetail };
   }
 
