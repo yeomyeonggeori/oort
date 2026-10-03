@@ -67,6 +67,11 @@ import {
   type HarnessLoginFixture,
 } from "@/features/welcome/harnessLogin/HarnessLoginDialog";
 import { useRegisterContext } from "@/features/welcome/harnessLogin/useRegisterContext";
+import {
+  isRegisterPose,
+  registerPoseFixture,
+  type RegisterPose,
+} from "@/features/welcome/harnessLogin/registerFixtures";
 import { START_CREATE_LABEL } from "@momo/core/features/onboarding/subscriptionRegister";
 
 // Reading this as: agent card family (local tool card at the timeline tail) for
@@ -123,7 +128,7 @@ function markFor(label: string): string {
 
 // ---- design 캡처 전용 자세 ------------------------------------------------------
 
-type CardPose = "login-modal" | "logged" | "unfinished";
+type CardPose = "login-modal" | "logged" | "unfinished" | RegisterPose;
 
 /** `?aiCard=login-modal|logged|unfinished`. 제품 빌드에서는 늘 null이다. */
 function readCardPose(): CardPose | null {
@@ -131,6 +136,7 @@ function readCardPose(): CardPose | null {
   const hash = window.location.hash;
   const query = hash.includes("?") ? hash.slice(hash.indexOf("?")) : window.location.search;
   const pose = new URLSearchParams(query).get("aiCard");
+  if (isRegisterPose(pose)) return pose;
   return pose === "login-modal" || pose === "logged" || pose === "unfinished" ? pose : null;
 }
 
@@ -677,11 +683,15 @@ function HarnessRows({ only }: { only: LocalHarnessId | null }) {
     enabled: true,
     fixture: fixture ? { probes: fixture } : null,
   });
+  const registerPose = pose !== null && isRegisterPose(pose) ? registerPoseFixture(pose) : null;
   const [loginFor, setLoginFor] = useState<LocalHarnessId | null>(() =>
-    pose === "login-modal" ? "claude" : null
+    registerPose ? registerPose.harness : pose === "login-modal" ? "claude" : null
   );
-  const loginFixture: HarnessLoginFixture | null =
-    pose === "login-modal" ? { status: { phase: "waiting" } } : null;
+  const loginFixture: HarnessLoginFixture | null = registerPose
+    ? { status: { phase: "connected" }, register: { state: registerPose.state } }
+    : pose === "login-modal"
+      ? { status: { phase: "waiting" } }
+      : null;
   const [results, setResults] = useState<Partial<Record<LocalHarnessId, HarnessResult>>>(() => {
     const now = Date.now();
     if (pose === "logged") return { claude: { kind: "connected", at: now } };
