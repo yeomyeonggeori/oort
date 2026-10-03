@@ -10,7 +10,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { AI_HUB_NAV_COPY } from "@momo/core/features/ai/aiHubModel";
 import { Bot, Loader2 } from "lucide-react";
 import { useSession } from "@/app/session";
@@ -86,12 +86,9 @@ import { EnabledToolsSection } from "./EnabledToolsSection";
 import { StatusChip } from "./StatusChip";
 import { useAgentToolCatalog } from "./useAgentToolCatalog";
 import { toolsProfilePut } from "./enabledToolsModel";
-import {
-  EMPTY_AGENT_DRAFT,
-  canCreateAgentNow,
-  type AgentDraft,
-} from "./createModel";
-import { CreateAgentDialog } from "./CreateAgentDialog";
+import { canCreateAgentNow } from "./createModel";
+import { rosterStatusView } from "@/features/aiHub/aiAgentsModel";
+import { CreateAgentFlow } from "@/features/aiHub/CreateAgentFlow";
 import { GrokBotInvite } from "@/features/hostedAgents/GrokBotInvite";
 import { HostedAgentWizard } from "@/features/hostedAgents/HostedAgentWizard";
 import { HostedConnectionSection } from "@/features/hostedAgents/HostedConnectionSection";
@@ -188,6 +185,7 @@ function AgentListRow({
   signals,
   live,
   onSelect,
+  viewerId,
 }: {
   agent: RosterMember;
   profile: AgentProfile | null;
@@ -197,9 +195,15 @@ function AgentListRow({
   signals: ReturnType<typeof signalsForAgent>;
   live: boolean;
   onSelect: () => void;
+  viewerId: string;
 }) {
   const current = signals[0];
-  const lifecycle = lifecycleLabel(agent, profile, profilePending, profileFailed);
+  // 「AI」 표와 같은 우선순위: 문의 중·맥 꺼짐 같은 서버 사유가 있으면 「활성」보다 앞선다.
+  const server = rosterStatusView(agent, viewerId);
+  const serverSpecific = server !== null && server.label !== "활성";
+  const lifecycle = serverSpecific
+    ? server.label
+    : lifecycleLabel(agent, profile, profilePending, profileFailed);
   return (
     <li className="border-b border-line">
       <button
@@ -226,7 +230,17 @@ function AgentListRow({
             <span className="min-w-0 flex-1 truncate text-body font-medium text-ink">
               {agent.displayName}
             </span>
-            <StatusChip>{lifecycle}</StatusChip>
+            <StatusChip
+              tone={
+                serverSpecific && server.tone !== "mute"
+                  ? server.tone
+                  : lifecycle === "활성"
+                    ? "ok"
+                    : "neutral"
+              }
+            >
+              {lifecycle}
+            </StatusChip>
           </span>
           <span className="truncate text-meta text-ink-muted">@{agent.handle}</span>
           {current && (
@@ -288,9 +302,12 @@ export function AgentHubRoute() {
       ),
     [agents, profiles]
   );
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // `/agents?agent=<id>` 로 오면 그 에이전트를 먼저 연다(「AI」 표의 이름 링크).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get("agent")?.toLowerCase() ?? null);
   const [section, setSection] = useState<AgentHubSection>("profile");
   const [creating, setCreating] = useState(false);
+  const [createOpener, setCreateOpener] = useState<HTMLElement | null>(null);
   // 호스티드 연결은 「에이전트 만들기」와 **다른 물건**이라 다른 버튼이다: 하나는
   // 이 워크스페이스가 실행할 에이전트를 만들고, 하나는 남이 실행 중인 에이전트를
   // 들인다. 한 다이얼로그의 탭으로 합치면 만들기 폼 위에 pairing 상태가 얹히고,
@@ -300,7 +317,6 @@ export function AgentHubRoute() {
   const [wizardLaunch, setWizardLaunch] = useState<HostedWizardLaunch | null>(
     null
   );
-  const [agentDraft, setAgentDraft] = useState<AgentDraft>(EMPTY_AGENT_DRAFT);
   const allSignals = useAgentWorkingSignals();
   // 만들 수 없는 사람에게 [만들기]를 내주지 않는다: `routes::agents::create`는
   // human + owner/admin을 요구하므로 그 밖의 모든 시도는 403으로 끝난다. 명부가
@@ -329,6 +345,8 @@ export function AgentHubRoute() {
 
   useEffect(() => {
     setSelectedId((current) => {
+      // 명부가 오기 전(비어 있음)에는 고르지 않는다: `?agent=` 로 온 선택을 지우면 첫 줄로 바뀐다.
+      if (agents.length === 0) return current;
       if (
         current !== null &&
         agents.some((agent) => uuidEq(agent.id, current))
@@ -358,7 +376,7 @@ export function AgentHubRoute() {
               워크스페이스 에이전트를 만들고, 상태와 기억, 작업 이력을 한 곳에서
               봅니다.{" "}
               <Link
-                to="/ai"
+                to="/ai/agents"
                 className="underline underline-offset-4 press focus-visible:focus-ring"
                 data-testid="agent-hub-to-ai"
               >
@@ -393,7 +411,10 @@ export function AgentHubRoute() {
               <Button
                 type="button"
                 size="sm"
-                onClick={() => setCreating(true)}
+                onClick={(event) => {
+                  setCreateOpener(event.currentTarget);
+                  setCreating(true);
+                }}
                 data-testid="agent-hub-create"
               >
                 에이전트 만들기
@@ -449,7 +470,13 @@ export function AgentHubRoute() {
               }
               actions={
                 mayCreate ? (
-                  <Button size="sm" onClick={() => setCreating(true)}>
+                  <Button
+                    size="sm"
+                    onClick={(event) => {
+                      setCreateOpener(event.currentTarget);
+                      setCreating(true);
+                    }}
+                  >
                     에이전트 만들기
                   </Button>
                 ) : (
@@ -478,7 +505,14 @@ export function AgentHubRoute() {
                     selected={uuidEq(agent.id, selectedId ?? undefined)}
                     signals={signalsForAgent(allSignals, agent.id, nowMs)}
                     live={railLive}
-                    onSelect={() => setSelectedId(normalizedId(agent.id))}
+                    onSelect={() => {
+                      setSelectedId(normalizedId(agent.id));
+                      // `?agent=` 로 열렸다면 주소도 따라간다(기록을 쌓지 않고 바꾼다).
+                      if (searchParams.has("agent")) {
+                        setSearchParams({ agent: normalizedId(agent.id) }, { replace: true });
+                      }
+                    }}
+                    viewerId={session.member.id}
                   />
                 );
               })}
@@ -560,11 +594,11 @@ export function AgentHubRoute() {
         </div>
       </div>
 
-      <CreateAgentDialog
+      <CreateAgentFlow
         open={creating}
         onOpenChange={setCreating}
-        draft={agentDraft}
-        setDraft={setAgentDraft}
+        mayCreate={mayCreate}
+        opener={createOpener}
         // 만든 뒤 그 에이전트를 연다. 방금 만든 것이 화면에 없으면 만든 것이
         // 아니고, 다음 행동(채널에 넣기)이 바로 그 판에 있다.
         onCreated={(created) => {

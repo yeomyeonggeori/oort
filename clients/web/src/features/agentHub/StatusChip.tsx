@@ -12,7 +12,7 @@ export function StatusChip({
   testId,
 }: {
   children: ReactNode;
-  tone?: "neutral" | "agent" | "warn";
+  tone?: "neutral" | "agent" | "warn" | "ok";
   testId?: string;
 }) {
   return (
@@ -21,7 +21,8 @@ export function StatusChip({
         "rounded-sm px-1 text-timestamp",
         tone === "neutral" && "bg-muted-soft text-ink-muted",
         tone === "agent" && "bg-agent-soft text-agent",
-        tone === "warn" && "bg-warn-soft text-warn"
+        tone === "warn" && "bg-warn-soft text-warn",
+        tone === "ok" && "bg-ok-soft text-ok"
       )}
       data-testid={testId}
     >
