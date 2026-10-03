@@ -2306,6 +2306,103 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </Frame>
       );
     }
+    // ---- #3386: 연속 메시지 묶음을 Buzz 처럼 ----------------------------------
+    //
+    // owner 스크린샷(IMG_4193 oort 채널 / IMG_4192 Buzz DM)과 같은 상황이다.
+    // `buzz-channel`: 같은 저자의 짧은 연속 발화 셋(머리 하나, 시각 칸 없음).
+    // `buzz-dm`: 두 사람의 DM — 반응이 달린 연속 발화·긴 문단·저자 교대.
+    // `buzz-sheet`: 연속 행을 길게 눌렀을 때 시트 머리에 그 메시지의 시각이 선다.
+    case 'buzz-channel': {
+      const at = (min: number) => NOW - (14 - min) * 60_000;
+      const lines = ['ㅎㅇ', '@claude-code ㅎㅇ', 'ㅎㅇㅎㅇ'];
+      return (
+        <Frame label="# agent-lab — 같은 저자 연속 발화: 머리 하나, 이후는 문단 (#3386)">
+          {lines.map((body, i) => (
+            <MessageRow
+              key={i}
+              message={{
+                ...MESSAGE,
+                id: `buzz-ch-${i}`,
+                seq: 60 + i,
+                body,
+                createdAtMs: at(i),
+                thread: undefined,
+              } as unknown as Message}
+              startsGroup={i === 0}
+              directory={DIRECTORY}
+              chips={[]}
+              nowMs={NOW}
+            />
+          ))}
+        </Frame>
+      );
+    }
+    case 'buzz-dm': {
+      const at = (min: number) => NOW - (14 - min) * 60_000;
+      const ok = [{emoji: '✅', count: 1, mine: true}];
+      const rows: Array<{who: string; body: string; min: number; head: boolean; chips: typeof ok}> = [
+        {who: OTHER, head: true, min: 0, chips: [], body: '여명님 정본부장과 명함 교환하셨을까요 ? 연락처가 없어서 요청드렸는데, 아직 연락이 없으십니다. 곧 연휴라서 금일 미팅 일정은 잡아놓으면 좋을 거 같아서 금일 연락 취하고 진행 상황 및 중간 보고 드리려 합니다.'},
+        {who: SELF, head: true, min: 1, chips: [], body: '네 연락처 저한테'},
+        {who: SELF, head: false, min: 2, chips: ok, body: '있고 오이사님 3일날 미국 출발해서 정신이 없으실거에요'},
+        {who: SELF, head: false, min: 3, chips: ok, body: '6일 오후 3시 본사 확정이에요'},
+        {who: OTHER, head: true, min: 4, chips: [], body: '넵 확인했습니다 !\n이전에 미국에 계실 때 소통관련해서 말씀해주신게, 저는 이사님 제외의 담당자 분과 소통을 말씀하신 줄 알았는데\n단톡으로 계속 소통을 진행하면 되는 걸까요 ?'},
+        {who: SELF, head: true, min: 5, chips: ok, body: '네네'},
+      ];
+      return (
+        <Frame label="DM — 반응·긴 문단·저자 교대. 연속 행에 시각 칸 없음 (#3386)">
+          {rows.map((r, i) => (
+            <MessageRow
+              key={i}
+              message={{
+                ...MESSAGE,
+                id: `buzz-dm-${i}`,
+                seq: 70 + i,
+                authorMemberId: r.who,
+                body: r.body,
+                createdAtMs: at(r.min),
+                thread: undefined,
+              } as unknown as Message}
+              startsGroup={r.head}
+              directory={DIRECTORY}
+              chips={r.chips}
+              nowMs={NOW}
+            />
+          ))}
+        </Frame>
+      );
+    }
+    case 'buzz-sheet':
+      return (
+        <Frame label="연속 행을 길게 누름 — 시트 머리에 그 메시지의 시각 (#3386)">
+          <MessageRow
+            message={{...MESSAGE, id: 'buzz-sh-0', seq: 80, body: 'ㅎㅇ', createdAtMs: NOW - 120_000, thread: undefined} as unknown as Message}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+          <MessageRow
+            message={{...MESSAGE, id: 'buzz-sh-1', seq: 81, body: '@claude-code ㅎㅇ', createdAtMs: NOW - 60_000, thread: undefined} as unknown as Message}
+            startsGroup={false}
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+          <MessageActionSheet
+            message={{...MESSAGE, id: 'buzz-sh-1', seq: 81, body: '@claude-code ㅎㅇ', createdAtMs: NOW - 60_000, thread: undefined} as unknown as Message}
+            chips={[]}
+            availability={AVAILABILITY}
+            authorLabel="곽성재"
+            onClose={() => {}}
+            onToggleReaction={() => {}}
+            onReply={() => {}}
+            onQuote={() => {}}
+            onCopy={() => {}}
+            onEdit={() => {}}
+            onDelete={() => {}}
+          />
+        </Frame>
+      );
     case 'dividers':
       return (
         <Frame label="구분선 — 오늘/어제/절대 · 좌측 라벨 (감사 H-4·M-2)">
