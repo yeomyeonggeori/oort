@@ -1729,6 +1729,7 @@ export default function ConversationScreen({
             {aiCard !== null && aiCard.channelId === channelId ? (
               <AiConnectCard
                 line={aiCard.line}
+                mine={{workspaceId, memberId: member.id}}
                 offline={!networkOnline}
                 onClose={closeAiCard}
                 foldForKey={composerKeyBlocked}
