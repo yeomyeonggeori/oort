@@ -595,6 +595,14 @@ async fn a_bad_endpoint_or_key_is_refused_before_anything_is_stored() {
             json!({"ownerMemberId": w.m, "apiKey": "sk-has space-1234567", "baseUrl": BASE}),
         ),
         (
+            "operator host (egress-exempt)",
+            json!({"ownerMemberId": w.m, "apiKey": KEY_ONE, "baseUrl": "https://operator-gateway.example:8443/anything"}),
+        ),
+        (
+            "non-ascii key",
+            json!({"ownerMemberId": w.m, "apiKey": "sk-live-\u{200b}personal-3396-zero-width", "baseUrl": BASE}),
+        ),
+        (
             "short key",
             json!({"ownerMemberId": w.m, "apiKey": "sk-1", "baseUrl": BASE}),
         ),
@@ -629,7 +637,7 @@ async fn a_bad_endpoint_or_key_is_refused_before_anything_is_stored() {
         )
         .await;
         assert!(
-            (400..500).contains(&status) && status != 403,
+            status == 400 || status == 422,
             "{name}: expected a 4xx refusal, got {status}: {value}"
         );
         let text = value.to_string();
