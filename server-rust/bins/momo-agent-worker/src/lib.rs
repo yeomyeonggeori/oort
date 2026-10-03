@@ -83,8 +83,8 @@ pub mod embed;
 pub mod extract;
 pub mod oauth;
 pub mod partial;
-mod personal;
 pub mod payload;
+mod personal;
 pub mod provider;
 pub mod responses;
 pub mod serving;
@@ -2733,7 +2733,7 @@ impl AgentWorker {
     }
 
     /// Which kind of `owner_only` agent is the job's agent, if any? Read in the
-    /// job's own workspace (RLS), from the two columns migrations 089 and 116
+    /// job's own workspace (RLS), from the two columns migrations 089 and 117
     /// make one-way.
     async fn agent_owner_only_brain(
         &self,
@@ -2828,7 +2828,11 @@ impl AgentWorker {
         if let Err(error) = audit {
             let endpoint = self.resolve_transport().await.endpoint;
             return self
-                .settle_retryable(job, &format!("personal key audit failed: {error}"), &endpoint)
+                .settle_retryable(
+                    job,
+                    &format!("personal key audit failed: {error}"),
+                    &endpoint,
+                )
                 .await;
         }
         self.settle_refused_turn(

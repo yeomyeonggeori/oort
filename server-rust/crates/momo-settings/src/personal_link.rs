@@ -1,4 +1,4 @@
-//! Personal API keys — an owner-scoped BYOK (migration 116, ADR-0147 증보
+//! Personal API keys — an owner-scoped BYOK (migration 117, ADR-0147 증보
 //! 2026-10-03, 성재 결재 2026-10-03).
 //!
 //! The organisation (a workspace admin) issues one provider API key to one

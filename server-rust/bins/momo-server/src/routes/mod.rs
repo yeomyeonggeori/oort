@@ -70,6 +70,7 @@ pub mod self_profile;
 pub mod shared;
 /// ADR-0177 / #1932 — member-owned sidebar sections (human-only, no outbox).
 pub mod sidebar_prefs;
+pub mod subscription_agents;
 pub mod terminal_attach;
 /// ADR-0170 — link unfurl settings, message-level remove, image proxy.
 pub mod unfurl;

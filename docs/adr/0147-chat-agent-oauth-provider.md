@@ -9,7 +9,7 @@
 - 증보: 2026-09-28 기본 AI 운영자 행(#3009) — `GET/PUT /v1/provider/default-ai`와 새 테이블 `provider_default_ai`(migration 093), 그리고 연결 확인 응답의 `modelIds`. 연결 확인 증보의 「provider 문자열은 크레이트 밖으로 나가지 않는다」를 모델 id 한 가지만큼 좁힌다. 파일 끝 「증보 2026-09-28 — 기본 AI 운영자 행」 절
 - 증보: 2026-09-28 키는 origin에 묶인다(#3040) — `PUT /v1/provider/link/chain`이 키 없이 hop의 origin을 바꾸면 409 `key_required_for_new_origin`. 파일 끝 「증보 2026-09-28 — 체인 키는 origin에 묶인다」 절
 - 증보: 2026-09-29 에이전트 모델 출처(#3147) — `agent.model_source`(migration 098)와 payload `model_source`가 #3146의 「모델 이름 비교」 휴리스틱을 대체한다. 파일 끝 「증보 2026-09-29 — 에이전트 모델 출처」 절
-- 증보: 2026-10-03 개인 API 키(#3396) — 조직이 한 사람에게 발급하는 소유자 있는 BYOK. 새 테이블 `personal_provider_link`와 `agent.uses_owner_key`(migration 116), 그 사람의 본인 전용 에이전트만 해석한다. 파일 끝 「증보 2026-10-03 — 개인 API 키」 절
+- 증보: 2026-10-03 개인 API 키(#3396) — 조직이 한 사람에게 발급하는 소유자 있는 BYOK. 새 테이블 `personal_provider_link`와 `agent.uses_owner_key`(migration 117), 그 사람의 본인 전용 에이전트만 해석한다. 파일 끝 「증보 2026-10-03 — 개인 API 키」 절
 - 발단: 티키타카 smoke의 provider 선택에서 성재가 API 키 대신 ChatGPT 구독 OAuth(Codex CLI 방식)를 지정.
 
 ## 결정
@@ -171,7 +171,7 @@
 - Status: **Accepted**. 결재 인용: 성재 2026-10-03 AskUserQuestion ③ 「조직이 개인에게 주는 『개인 API 키』(소유자 있는 BYOK) 신설」. 원문: 「조직 레벨에서는 에이전트를 통한 소통이나 BYOK로 조직의 오케스트레이터… 내 개인적인 호출·작업 요청·터미널 개발 요청은 내 개인 OAuth나 조직에서 받은 BYOK로 내 개인 에이전트…」. 약관 근거는 로컬 조사 `claudedocs/diag-ai-connect-2026-10-03/policy-architecture.md` §2 B·§4.1(Anthropic 상업 약관의 「customer's own authorized users」, 키 소유·과금 주체는 조직, 키 1개를 여러 사람이 돌려 쓰지 않기).
 - 기안·구현: Sonnet 5.5 worker(#3396, 엔진).
 - **무엇이 새로운가.** 팀 키(`provider_link`·`provider_link_chain`)는 인스턴스 전역이고 팀이 함께 부르는 에이전트가 쓴다. 이 증보는 둘째 층이다. 워크스페이스 안의 한 사람에게 발급된 API 키이고, 그 사람의 `owner_only` 에이전트만 쓴다. 구독 OAuth를 서버가 쥐지 않는다는 위 증보 2026-09-26의 결정은 그대로다. 개인 키는 API 키다.
-- **D1. 그릇.** `personal_provider_link`(migration 116): `workspace_id`, `owner_member_id`(같은 워크스페이스의 사람만, 트리거), `format`(`openai`|`anthropic`), `base_url`, 봉인된 키(`bearer_ciphertext`, 팀 키와 같은 AES-GCM·`PROVIDER_LINK_MASTER_KEY`), `key_fingerprint`, `label`, 발급자, 회수 시각·회수자. RLS FORCE + `ws_isolation`이다. `app.provider_link_admin` GUC는 일반 멤버 tx에 켜지 않는다. 키 평문 컬럼은 없다. 소유자·키·origin은 갱신할 수 없고(트리거), 회수는 되돌릴 수 없다.
+- **D1. 그릇.** `personal_provider_link`(migration 117): `workspace_id`, `owner_member_id`(같은 워크스페이스의 사람만, 트리거), `format`(`openai`|`anthropic`), `base_url`, 봉인된 키(`bearer_ciphertext`, 팀 키와 같은 AES-GCM·`PROVIDER_LINK_MASTER_KEY`), `key_fingerprint`, `label`, 발급자, 회수 시각·회수자. RLS FORCE + `ws_isolation`이다. `app.provider_link_admin` GUC는 일반 멤버 tx에 켜지 않는다. 키 평문 컬럼은 없다. 소유자·키·origin은 갱신할 수 없고(트리거), 회수는 되돌릴 수 없다.
 - **D2. 발급 정책: 운영자 발급만.** 워크스페이스 owner/admin이 `POST /v1/workspaces/{ws}/personal-keys`로 한 사람에게 준다. 멤버가 자기 키를 직접 넣는 경로는 **없다**. 「정책이 허용하면 멤버도 추가」는 별도 결정(별도 설정 스위치)이고 이 증보가 열지 않는다. 회수는 관리자 또는 키의 소유자다. 목록은 관리자 전체, 멤버는 `GET …/personal-keys/mine`(본인 것만; 소유자 필터가 호출자 id라 매개변수가 아니다).
 - **D3. 해석 규칙: 에이전트를 통해서만.** 워커는 에이전트 행에서 시작한다: `invocation_scope = 'owner_only'`이고 `uses_owner_key`이며, 키는 그 에이전트의 `owner_human_id`가 소유한 활성(회수 안 됨) 행이고 소유자는 아직 활성 사람이다(`read_owner_key_for_agent`). 질문한 사람으로 키를 찾지 않는다. 별도 문(`AgentWorker::resolve_owner_key_transport`)이고 팀의 `resolve_transport`는 이 표를 모른다(구조 시험이 그 함수 안의 단어를 막는다). 캐시가 없어 회수는 다음 턴에 효력이 있다.
 - **D4. 폴백 없음.** 키가 없거나(발급 전·소유자 퇴장) 회수됐거나 열 수 없거나 API 키가 아니면(구독 OAuth 봉투 포함) 그 턴은 답하지 않는다. 팀 env 키, 팀 `provider_link`, 체인 hop, 「기본 AI」 행 중 아무것도 대신 쓰지 않는다(ADR-0135 D1, #2897·PR #2940과 같은 규칙). 사용자에게는 에이전트 이름의 한 줄(`personal_key_unavailable`), 감사 `agent.personal_key.unavailable`(고정 사유 라벨만). 그 턴은 팀의 「기본 AI」 행도 계산하지 않는다(과금 혼동).

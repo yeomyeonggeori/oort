@@ -235,6 +235,7 @@ PUT /v1/workspaces/{workspaceId}/agents/{agentId}/pause
 GET /v1/workspaces/{workspaceId}/agents/{agentId}/allowed-models
 POST /v1/workspaces/{workspaceId}/agent-runs/{runId}/cancel
 POST /v1/workspaces/{workspaceId}/hosted-agent-connections
+POST /v1/workspaces/{workspaceId}/subscription-agents/register
 GET /v1/workspaces/{workspaceId}/hosted-agent-connections
 GET /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}
 POST /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/confirm

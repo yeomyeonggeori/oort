@@ -1,5 +1,5 @@
 //! The `owner_only` agent whose brain is its owner's personal API key
-//! (#3396, ADR-0147 증보 2026-10-03, migration 116).
+//! (#3396, ADR-0147 증보 2026-10-03, migration 117).
 //!
 //! An `owner_only` agent has exactly one brain: a subscription CLI
 //! (`agent.subscription_harness`, ADR-0193) or the owner's own API key
@@ -48,7 +48,7 @@ pub async fn agent_owner_only_brain_in_tx(
 }
 
 /// Make a freshly created agent the owner's personal-key agent. One way
-/// (migration 116's trigger): the scope, owner and brain can never change again.
+/// (migration 117's trigger): the scope, owner and brain can never change again.
 ///
 /// The WHERE clause is the whole authorization of the transition: the agent's
 /// owner must be `owner_human_id` already, it must not be `owner_only` yet, and

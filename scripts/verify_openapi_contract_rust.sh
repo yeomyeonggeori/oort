@@ -2324,6 +2324,15 @@ HOSTED_AGENT_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.agentMembe
 HOSTED_PAIRING="$(printf '%s' "$RESPONSE_BODY" | jq -er '.pairingCredential')"
 append_secret_with_derivatives "$HOSTED_PAIRING"
 record_sample hosted-agent-create post "/v1/workspaces/{workspaceId}/hosted-agent-connections" 201
+# #3392 AIH-2 — register-after-login. A second call with the same device must reuse.
+api post "/v1/workspaces/$WS/subscription-agents/register" \
+  '{"harness":"codex","deviceId":"gate-device-3392"}' "$ACCESS"
+if [ "$RESPONSE_STATUS" != "201" ]; then
+  gate_fail subscription-agent-register "expected HTTP 201, got $RESPONSE_STATUS" "$(redacted_body)"
+fi
+SUBSCRIPTION_PAIRING="$(printf '%s' "$RESPONSE_BODY" | jq -er '.pairingCredential')"
+append_secret_with_derivatives "$SUBSCRIPTION_PAIRING"
+record_sample subscription-agent-register post "/v1/workspaces/{workspaceId}/subscription-agents/register" 201
 CONCURRENT_DIR="$TMP_DIR/hosted-concurrency"
 mkdir -m 700 "$CONCURRENT_DIR"
 # Register every concurrency scratch inode before a bearer or one-time response

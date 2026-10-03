@@ -5,7 +5,7 @@
 //!
 //! | test | proves | revert that makes it red |
 //! |---|---|---|
-//! | `issue_list_revoke_keep_the_key_write_only_and_one_to_one` | admin-only issue; own-only `mine`; revoke by admin or holder; 409 on a second key for a member and on the same key twice (same member, other member, other workspace); no response or audit row carries the key; RLS hides the table across workspaces | the unique indexes of migration 116; the role checks; selecting `bearer_ciphertext` in a list statement |
+//! | `issue_list_revoke_keep_the_key_write_only_and_one_to_one` | admin-only issue; own-only `mine`; revoke by admin or holder; 409 on a second key for a member and on the same key twice (same member, other member, other workspace); no response or audit row carries the key; RLS hides the table across workspaces | the unique indexes of migration 117; the role checks; selecting `bearer_ciphertext` in a list statement |
 //! | `a_bad_endpoint_or_key_is_refused_before_anything_is_stored` | SSRF/plaintext/credential-shaped input → 400, 0 rows | `validated_base_url`, `requested_key` |
 //! | `the_personal_agent_is_the_holders_and_is_delivered_to_the_holder_only` | the created agent is `owner_only` + `uses_owner_key`; holder's mention → a worker job even with the subscription kill switch off; a non-holder's mention → 0 jobs and the owner_only skip | `owner_only_gate`, the `uses_owner_key` narrowing in `mention.rs` |
 
@@ -699,6 +699,44 @@ async fn the_personal_agent_is_the_holders_and_is_delivered_to_the_holder_only()
         ),
         ("owner_only", true, None, Some(w.m), "agent", BASE)
     );
+
+    // The read contract (AIH-2) names this brain: a personal key, the holder's
+    // alone, served by the worker (so no host to be online).
+    let (status, roster) = call(
+        &client,
+        "GET",
+        format!("{base}/v1/workspaces/{}/roster", w.workspace),
+        &w.n_jwt,
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{roster}");
+    let row = roster
+        .to_string()
+        .contains(&agent.to_string())
+        .then(|| {
+            let members = roster
+                .get("members")
+                .or_else(|| roster.get("roster"))
+                .unwrap_or(&roster);
+            members
+                .as_array()
+                .and_then(|rows| {
+                    rows.iter().find(|row| {
+                        row["id"]
+                            .as_str()
+                            .is_some_and(|id| id.eq_ignore_ascii_case(&agent.to_string()))
+                    })
+                })
+                .cloned()
+                .expect("the personal agent is on the roster")
+        })
+        .expect("the personal agent is on the roster");
+    assert_eq!(row["brain"], "personal_key", "{row}");
+    assert_eq!(row["callableBy"], "owner_only");
+    assert_eq!(row["owner"]["id"], json!(w.m.to_string()));
+    assert!(row.get("hostOnline").is_none(), "{row}");
+    assert!(row.get("brainUnavailableReason").is_none(), "{row}");
 
     // Put the agent in the room (the join the product does elsewhere), then call it.
     sqlx::query("INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)")
