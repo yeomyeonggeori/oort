@@ -327,10 +327,10 @@ async function waitFor(
 }
 
 describe("진입점", () => {
-  it("설정 내비에 「에이전트 자격」이 하나다", () => {
+  it("설정 내비에 「외부 에이전트 연결」이 하나다", () => {
     const agents = SETTINGS_SECTIONS.filter((item) => item.id === "agents");
     expect(agents).toHaveLength(1);
-    expect(agents[0]?.label).toBe("에이전트 자격");
+    expect(agents[0]?.label).toBe("외부 에이전트 연결");
     expect(agents[0]?.group).toBe("연결");
   });
 
@@ -338,7 +338,7 @@ describe("진입점", () => {
     const source = switcherSource();
     expect(source).toContain('testId: "switcher-settings-agents"');
     expect(source).toContain("/settings?section=agents");
-    expect(countNeedle(source, "에이전트 자격")).toBeGreaterThanOrEqual(1);
+    expect(countNeedle(source, "외부 에이전트 연결")).toBeGreaterThanOrEqual(1);
   });
 
   it("그 줄이 실제로 레지스트리에서 나온다", () => {

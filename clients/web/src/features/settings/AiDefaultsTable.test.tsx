@@ -130,7 +130,7 @@ describe("기본 AI 표 화면", () => {
   it("팀 키가 없으면 앱 명령·팀 에이전트는 막히고 이유를 말한다", () => {
     render(AiDefaultsTable, { teamKey: { status: "absent" }, operator: true, browserTab: false });
     expect(q("ai-default-appCommand-select")).toBeNull();
-    expect(q("ai-default-appCommand-fallback")?.textContent).toContain("AI 계정을 연결하면 쓸 수 있어요");
+    expect(q("ai-default-appCommand-fallback")?.textContent).toContain("운영자가 팀 AI 키를 넣으면 쓸 수 있어요");
     expect(q("ai-default-teamAgent-fallback")?.textContent).toContain("내 구독으로 넘어가지 않아요");
   });
 

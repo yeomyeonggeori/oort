@@ -65,8 +65,7 @@ import { createRequire } from "node:module";
  * 두 게이트를 함께 통과하려는 사람이 어느 쪽 마커인지부터 배워야 한다.
  *
  * 다는 자리는 둘이다: 문자열이 시작하는 줄의 뒤꼬리 주석, 또는 그 문자열을 담은
- * **선언의 머리 주석**(#3445부터 바깥 선언들의 머리 주석도 본다: 옛 말을 정의하는 표처럼
- * 항목마다 마커를 달 수 없는 큰 선언 하나의 사유가 그 안 문자열 전부를 덮는다). 뒤꼬리만 허용하면 사유가 100자짜리 문자열 뒤에 매달려
+ * **선언의 머리 주석**(`legacy_term` 만 바깥 선언들의 머리 주석도 본다, #3445). 뒤꼬리만 허용하면 사유가 100자짜리 문자열 뒤에 매달려
  * 아무도 읽지 않는데, 검토된 예외에서 정작 읽혀야 하는 것이 그 사유다.
  */
 export const ALLOW_MARKER = "design-preflight-allow";
@@ -302,17 +301,19 @@ export function scanSource(ts, fileName, text, categories) {
     return null;
   };
 
-  const allowed = (node, line) => {
+  // outer=false: 가장 가까운 칸만(모든 기존 분류의 의미). outer=true: 바깥 선언들의 머리
+  // 주석도 본다 — `legacy_term` 만 쓴다(#3445). 옛 말을 **정의**하는 표(LEGACY_TERM_MAP)는
+  // 항목마다 마커를 달 수 없어서 표 선언 하나의 머리 주석이 그 안 전부를 덮어야 한다.
+  // 다른 분류에 이 상승을 주면 컴포넌트 머리의 마커 하나가 본문 전체의 em-dash 를 지운다.
+  const allowed = (node, line, outer) => {
     // ① 문자열이 시작하는 줄의 뒤꼬리 주석. 여러 줄 템플릿이면 그 시작 줄이다.
     if ((lines[line] ?? "").includes(ALLOW_MARKER)) return true;
     // ② 그 칸의 머리 주석(`//` 든 `/** */` 든). 파서가 붙여 주므로 「주석을 어떻게
     //    알아보나」를 여기서도 다시 풀지 않는다.
-    //    가장 가까운 칸뿐 아니라 바깥 선언들의 머리 주석도 본다(#3445): 옛 말을 **정의**하는
-    //    표(LEGACY_TERM_MAP)는 항목마다 마커를 달 수 없고, 표 선언 하나의 머리 주석이 그
-    //    표 전체의 사유를 말한다.
     for (let declaration = enclosingDeclaration(node); declaration; ) {
       const ranges = ts.getLeadingCommentRanges(text, declaration.getFullStart()) ?? [];
       if (ranges.some((r) => text.slice(r.pos, r.end).includes(ALLOW_MARKER))) return true;
+      if (!outer) return false;
       declaration = enclosingDeclaration(declaration);
     }
     return false;
@@ -322,8 +323,8 @@ export function scanSource(ts, fileName, text, categories) {
     // JsxText 의 getStart 는 앞 공백을 건너뛰므로 보고되는 줄이 글자가 실제로
     // 시작하는 줄이다(TS 의 getTokenPosOfNode 가 JsxText 를 특례로 다룬다).
     const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line;
-    if (allowed(node, line)) return;
     for (const category of categories) {
+      if (allowed(node, line, category.key === "legacy_term")) continue;
       if (category.hit(literalText)) {
         hits.push({
           key: category.key,

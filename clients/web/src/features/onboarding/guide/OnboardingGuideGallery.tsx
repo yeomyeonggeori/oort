@@ -20,7 +20,7 @@ const SAMPLE_LINES: Record<GuideState, string> = {
   success: "이 맥에서 Claude Code를 찾았어요.",
   trouble: "서버에 닿지 않았어요. 주소를 다시 볼까요?",
   preparing: "성재의 Claude가 인사하러 오고 있어요.",
-  skipped: "나중에 AI에서 이어가요.",
+  skipped: "나중에 AI 화면에서 이어가요.",
 };
 
 /**

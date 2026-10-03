@@ -56,7 +56,7 @@ export const FIRST_AGENT_RECHECKING = "다시 확인 중…";
 export const FIRST_AGENT_CONNECTED_CLAIM = "연결됨";
 
 export const FIRST_AGENT_OPENAI_DETAIL =
-  "AI에서 이 서버의 provider를 붙이에요.";
+  "AI 화면에서 이 서버의 provider를 붙여요.";
 
 export const FIRST_AGENT_GROK_WHAT_HAPPENS =
   "고르면 그록봇 연결 값을 발급해요.";

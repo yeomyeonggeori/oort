@@ -187,7 +187,7 @@ describe("명령 레지스트리", () => {
     expect(status("nav.inbox")).toBe("인박스로 이동");
     expect(status("nav.activity")).toBe("활동으로 이동");
     expect(status("nav.directory")).toBe("멤버로 이동");
-    expect(status("nav.settings.agents")).toBe("에이전트 자격으로 이동");
+    expect(status("nav.settings.agents")).toBe("외부 에이전트 연결로 이동");
   });
 
   it("작업 콘솔은 웹·데스크탑 모두 /work?view=console로 간다 (#2854·#3334 — /work는 데스크탑에서 「내 작업」 격자, 웹에서 설명 상태)", () => {

@@ -118,7 +118,7 @@ export const AI_GLOSSARY_ABSORBS: Readonly<Record<AiGlossaryId, readonly string[
   myWork: ["내 작업(유지)", "로컬 터미널", "코드 실행 호스트(설정에 유지)"],
 };
 
-/** 시안 용어집 아래 「금지」 줄. design-preflight-allow: 금지어를 말하는 문장이라 옛 말을 인용한다(화면에는 그려지지 않는다, #3445). */
+/** 시안 용어집 아래 「금지」 줄. **화면에 렌더하면 안 된다**(옛 말을 인용하는 문장이다). design-preflight-allow: 금지어를 말하는 문장이라 옛 말을 인용한다(화면에는 그려지지 않는다, #3445). */
 export const AI_GLOSSARY_BANS =
   "「AI 연결」은 허브 이름 「AI」로 흡수해요. 「합류」는 화면에서 안 써요(만들기·초대). 영어 약자 MCP·Agent Port는 외부 에이전트 연결 상세 화면의 괄호 안에서만 써요.";
 
@@ -922,6 +922,7 @@ export const LEGACY_TERM_MAP: readonly LegacyTermEntry[] = [
   { old: "1회용 연결 값", next: "외부 에이전트 연결", grepGate: true, note: "발급 화면에서만 사용" },
   { old: "오너", next: "소유자", grepGate: true, note: "워크스페이스 역할 이름은 화면에서 「소유자」로 써요" },
   { old: "구독 붙이기", next: "에이전트 만들기", grepGate: true },
+  { old: "owner·admin", next: "소유자·관리자", grepGate: true, note: "한글 문장 안의 영문 역할 이름" },
   { old: "내 계정", next: "내 AI 계정", grepGate: false, note: "프로필 화면의 「내 계정」과 겹쳐요" },
   { old: "이 맥", next: "내 AI 계정", grepGate: false, note: "「이 맥의 Claude Code」 같은 정상 문장이 있어요" },
   { old: "구독", next: "내 AI 계정 · 내 구독", grepGate: false, note: "새 문구도 「내 구독」을 써요" },
@@ -987,7 +988,7 @@ export const AI_HUB_FROM_SETTINGS: Readonly<Record<string, AiHubSectionId>> = {
 
 /** 허브 화면과 옛 입구의 안내 문구 (플랜 §7). */
 export const AI_HUB_NAV_COPY = {
-  movedToHub: "AI 허브로 옮겼어요",
+  movedToHub: "AI 화면으로 옮겼어요",
   movedToHubAction: "AI에서 열기",
   agentsPageLine: "설정·권한·비용은 AI에서",
   openAiAction: "AI에서 열기",

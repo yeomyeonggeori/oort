@@ -377,7 +377,7 @@ export function dispositionChoices(
       },
       {
         id: "preserve",
-        label: "봇을 남길어요",
+        label: "봇을 남겨 뒀어요",
         detail:
           "봇을 그대로 둬요. 대화 기록은 지켜지지만, 남은 봇을 나중에 다시 쓰면 이 워크스페이스와 무관한 자리에서 쓰이게 돼요.",
         destructive: false,

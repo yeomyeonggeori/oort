@@ -1,3 +1,4 @@
+import { hasFinalConsonant } from "../../lib/koreanParticle";
 import { bool, num, record, WireShapeError } from "../../lib/wire";
 import {
   cleanupRowTitle,
@@ -209,7 +210,7 @@ export function cleanupProgress(
 /** 진행 표시 옆의 한 문장. 숫자만 있는 줄은 다음 행동을 말하지 않는다. */
 export function cleanupProgressSentence(progress: CleanupProgress): string {
   if (progress.total === 0) {
-    return "정리 목록이 아직 없어요. 해제를 시작하면 확인할 항목이 여기 생길어요.";
+    return "정리 목록이 아직 없어요. 해제를 시작하면 확인할 항목이 여기 생겨요.";
   }
   if (progress.remainingRequired === 0) {
     return "필수 항목을 모두 확인했어요. 이제 해제를 끝낼 수 있어요.";
@@ -217,7 +218,7 @@ export function cleanupProgressSentence(progress: CleanupProgress): string {
   const next = progress.nextTitle;
   return next === null
     ? `아직 확인하지 않은 항목이 ${progress.remainingRequired}개 남았어요.`
-    : `아직 확인하지 않은 항목이 ${progress.remainingRequired}개 남았어요. 다음은 ${next}이에요.`;
+    : `아직 확인하지 않은 항목이 ${progress.remainingRequired}개 남았어요. 다음은 ${next}${hasFinalConsonant(next) ? "이에요" : "예요"}.`;
 }
 
 // ---- 게이트 -----------------------------------------------------------------

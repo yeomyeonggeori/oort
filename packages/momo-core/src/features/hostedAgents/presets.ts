@@ -156,14 +156,14 @@ export const HOSTED_PRESETS: readonly HostedPreset[] = [
     unverifiedNote:
       "Grok이 이 인증 헤더를 실제로 보내는지는 아직 확인되지 않았어요. 감지가 되지 않으면 값이 아니라 이 방식이 원인일 수 있어요.",
     steps: [
-      "그록봇에게 아래 주소와 연결 값을 말로 전하세요. 그록봇이 직접 붙이에요.",
+      "그록봇에게 아래 주소와 연결 값을 말로 전하세요. 그록봇이 직접 붙여요.",
       "말로 전하지 못하면 Grok의 Create Plugin으로 비공개 플러그인을 만들어요.",
       "그 플러그인의 mcp.json에 아래 Agent Port 주소를 원격 서버로 적어요.",
       "인증 헤더의 bearer 값에 아래 연결 값을 넣고 커넥터를 설치해요.",
       "아래 이름으로 routine을 만들고 아래 문장을 넣은 뒤 한 번 수동 실행하면 이 화면이 감지 상태로 넘어가요.",
     ],
     leavesBehind:
-      "이 방식은 로컬에 플러그인 소스를 남길어요. 나중에 연결을 해제할 때 커넥터 제거와 별개로 그 소스도 지워야 해요.",
+      "이 방식은 로컬에 플러그인 소스를 남겨요. 나중에 연결을 해제할 때 커넥터 제거와 별개로 그 소스도 지워야 해요.",
   },
 ];
 
@@ -232,7 +232,7 @@ export const HOSTED_AUTH_MODE_CHOICES: readonly HostedAuthModeChoice[] = [
     id: HOSTED_AUTH_MODE,
     label: "고정 bearer",
     detail:
-      "provider 설정에 값을 직접 붙이에요. 승인 뒤에는 그 값을 새 자격증명으로 한 번 더 바꿔야 해요.",
+      "provider 설정에 값을 직접 붙여요. 승인 뒤에는 그 값을 새 자격증명으로 한 번 더 바꿔야 해요.",
     disabled: false,
   },
   {
@@ -270,7 +270,7 @@ export const PAIRING_REVEAL_SCOPE_NOTE =
  * 말로 전하는 것이 1순위이고, 사람이 직접 붙여 넣는 순서는 다른 방법이다.
  */
 export const PAIRING_NATURAL_LANGUAGE_HANDOFF =
-  "그록봇이 값을 받아 자기 쪽에 붙이에요. 직접 붙여 넣으려면 아래 순서를 따르세요.";
+  "그록봇이 값을 받아 자기 쪽에 붙여요. 직접 붙여 넣으려면 아래 순서를 따르세요.";
 
 export const ACTIVE_REVEAL_HEADLINE = "지금 provider 설정의 값을 이 자격증명으로 바꾸세요.";
 

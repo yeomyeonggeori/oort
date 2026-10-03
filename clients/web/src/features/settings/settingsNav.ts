@@ -80,7 +80,7 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   },
   { id: "plugins", label: "앱", group: "워크스페이스" },
   { id: "members", label: "멤버와 초대", group: "워크스페이스" },
-  { id: "agents", label: "에이전트 자격", group: "연결" },
+  { id: "agents", label: "외부 에이전트 연결", group: "연결" },
   {
     id: "code",
     label: "코드 실행 호스트",
@@ -91,11 +91,11 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   { id: "usage", label: "사용량", group: "연결" },
   // 연결 그룹 안에서의 상대 순서: 사용량 다음, 이벤트 구독 앞. 전역으로
   // 「앱 바로 뒤」나 「멤버와 초대 앞」이 아니다 — 그 두 섹션은 다른 그룹이다.
-  { id: "webhooks", label: "웹훅", group: "연결" },
+  { id: "webhooks", label: "채널로 들어오는 주소", group: "연결" },
   // 마지막인 것은 빈도 순서다 (#1202): 한 번 붙이고 나면 다시 열 일이 드물고,
   // 여는 사람은 소유자나 관리자뿐이다. 이름이 '외부 전송'이 아니라 '이벤트 구독'인
   // 것은 서버가 그 이름으로 부르기 때문이다 (openapi event-subscriptions).
-  { id: "events", label: "이벤트 구독", group: "연결" },
+  { id: "events", label: "밖으로 보내는 알림", group: "연결" },
 ];
 
 export const SETTINGS_GROUPS: SettingsGroupId[] = [

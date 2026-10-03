@@ -328,7 +328,7 @@ describe("EnabledToolsSection", () => {
 
   it("M-1: 빈 카탈로그는 한 문장이고 저장 버튼이 없다", () => {
     const { host } = mount({ catalog: [], enabledTools: [] });
-    expect(host.textContent).toContain("이 서버가 공개한 도구가 없습니다");
+    expect(host.textContent).toContain("이 서버가 공개한 도구가 없어요");
     expect(
       host.querySelector('[data-testid="agent-hub-enabled-tools-save"]')
     ).toBeNull();

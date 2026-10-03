@@ -91,7 +91,7 @@ export function teamUnlinkBody(affected: readonly TeamLinkAffectedAgent[] | null
  * 보인다: 그래서 「어떤 키로도」라고 단정하지 않는다.
  */
 export const TEAM_UNLINK_NO_SILENT_SWITCH =
-  "예비 provider로 조용히 넘어가지 않아요. 에이전트는 대답 대신 AI로 가는 안내를 남겨요.";
+  "예비 provider로 조용히 넘어가지 않아요. 에이전트는 대답 대신 AI 화면으로 가는 안내를 남겨요.";
 
 /** 첫 인사·채널 요약은 키가 없으면 정해 둔 문구로 바뀐다(#2897 welcome provider-required). */
 export const TEAM_UNLINK_FIXED_COPY = "채널 요약과 첫 인사는 정해 둔 문구로 바뀌어요.";

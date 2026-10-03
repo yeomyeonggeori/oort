@@ -612,14 +612,14 @@ const FAILURE_GUIDANCE: ReadonlyMap<string, FailureGuidance> = new Map([
       // Does NOT repeat the body's "잠시 뒤에 다시 멘션해 주세요." The reader who
       // opened this fold already read that sentence 40px above; what they came
       // here for is the step after it.
-      detail: `같은 실패가 이어지면 AI에서 연결 상태를 확인하세요. ${WHERE_THE_ORIGINAL_IS}`,
+      detail: `같은 실패가 이어지면 AI 화면에서 연결 상태를 확인하세요. ${WHERE_THE_ORIGINAL_IS}`,
     },
   ],
   [
     "provider_auth_failed",
     {
       label: "연결된 계정 인증이 만료되었습니다.",
-      detail: `AI에서 계정을 다시 등록하면 이어서 실행할 수 있어요. ${WHERE_THE_ORIGINAL_IS}`,
+      detail: `AI 화면에서 계정을 다시 등록하면 이어서 실행할 수 있어요. ${WHERE_THE_ORIGINAL_IS}`,
     },
   ],
 ]);

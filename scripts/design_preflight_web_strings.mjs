@@ -108,6 +108,22 @@ function scanWeb() {
 const SELFTEST_CASES = [
   // ---- legacy_term (#3445) ----
   {
+    want: ["emdash"],
+    file: "features/ai/Comp.tsx",
+    why: "바깥 선언의 마커는 legacy_term 외 분류를 덮지 않는다(#3445): 컴포넌트 머리 마커 하나가 본문 em-dash 를 지우면 안 된다",
+    src:
+      "// design-preflight-allow: 컴포넌트 전체\n" +
+      'export const Comp = () => {\n  const x = { note: "다시 연결되면 — 여기서" };\n  return <p>{x.note}</p>;\n};',
+  },
+  {
+    want: [],
+    file: "features/ai/Table.ts",
+    why: "legacy_term 은 바깥 선언 마커를 본다(옛 말을 정의하는 표)",
+    src:
+      "// design-preflight-allow: 옛 말 표\n" +
+      'export const TABLE = { rows: [{ old: "합류" }] };',
+  },
+  {
     want: ["legacy_term"],
     file: "features/settings/Hint.ts",
     why: "렌더 문자열의 「설정 › AI 연결」 — 옛 위치 이름",

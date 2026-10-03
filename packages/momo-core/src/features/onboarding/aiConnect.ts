@@ -329,8 +329,8 @@ export function primaryActionLabel(id: AiConnectRowId | null): string {
 }
 
 export const AI_CONNECT_SKIP_LABEL = "지금은 건너뛰기";
-export const AI_CONNECT_REENTRY = "나중에 AI에서 이어갈 수 있어요.";
-export const AI_CONNECT_SKIPPED_LINE = "AI에서 언제든 이어서 할 수 있어요.";
+export const AI_CONNECT_REENTRY = "나중에 AI 화면에서 이어갈 수 있어요.";
+export const AI_CONNECT_SKIPPED_LINE = "AI 화면에서 언제든 이어서 할 수 있어요.";
 export const AI_CONNECT_CONTINUE_LABEL = "계속";
 
 // ---- 재진입 (#2870, RCA 1-b·1-c) -------------------------------------------

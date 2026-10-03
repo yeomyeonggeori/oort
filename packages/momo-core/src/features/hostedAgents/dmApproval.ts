@@ -116,7 +116,7 @@ export const DM_APPROVAL_OWNER_ONLY_LEAD =
   "개인 에이전트라 소유자와의 1:1 대화에서만 답해요. 다른 멤버와의 대화는 열 수 없어요.";
 export const DM_APPROVAL_EMPTY_HEADLINE = "아직 이 에이전트와 나눈 1:1 대화가 없어요.";
 export const DM_APPROVAL_EMPTY_DETAIL =
-  "멤버가 이 에이전트에게 1:1 대화를 시작하면 여기에 줄이 생길어요.";
+  "멤버가 이 에이전트에게 1:1 대화를 시작하면 여기에 줄이 생겨요.";
 export const DM_APPROVAL_LOADING_LABEL = "1:1 대화 목록을 불러오는 중이에요.";
 export const DM_APPROVAL_OPEN_LABEL = "대화 열기";
 export const DM_APPROVAL_CLOSE_LABEL = "대화 닫기";
@@ -248,8 +248,8 @@ export function dmComposerHint(
     case "delivery_disabled":
       return "이 서버에서 외부 에이전트 전달이 꺼져 있어 답하지 않아요";
     case "subscription_disabled":
-      return "이 서버에서 구독으로 쓰는 에이전트가 꺼져 있어 답하지 않아요";
+      return "이 서버에서 구독 대행이 꺼져 있어 답하지 않아요";
     case "claude_subscription_agent_paused":
-      return "Claude 구독으로 쓰는 에이전트는 Anthropic 확인 중이라 지금은 답하지 않아요";
+      return "Claude 구독 대행은 확인 중이라 지금은 답하지 않아요";
   }
 }

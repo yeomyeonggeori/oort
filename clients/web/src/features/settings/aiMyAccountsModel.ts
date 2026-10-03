@@ -24,7 +24,7 @@ export const MY_ACCOUNTS_EMPTY_DETAIL =
 export const MY_ACCOUNTS_BROWSER_LINE =
   "구독 계정은 데스크탑 앱에서만 연결하고 볼 수 있어요. 이 브라우저 탭에는 이 맥의 CLI가 없어요.";
 export const MY_ACCOUNTS_DENIED_DETAIL =
-  "구독으로 쓰는 에이전트는 워크스페이스 owner·admin이 붙일 수 있어요.";
+  "구독으로 쓰는 에이전트는 워크스페이스 소유자·관리자가 만들 수 있어요.";
 
 /**
  * 이 화면이 브라우저 탭인가. design 캡처의 `?aiEntry=desktop-only`는 브라우저

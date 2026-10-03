@@ -209,6 +209,7 @@ function ComposerHint({
         dmHint === null && !pendingLink && "wide-only"
       )}
       data-testid="composer-hint"
+      title={typeof dmHint === "string" ? dmHint : undefined}
       data-composer-meta-slot={sharedRow ? "" : undefined}
     >
       {pendingLink && (

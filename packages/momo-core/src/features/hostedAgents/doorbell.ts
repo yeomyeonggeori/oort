@@ -45,7 +45,7 @@ export const DOORBELL_GATE_OFF_DETAIL =
 export const DOORBELL_URL_HINT =
   "https 주소만 등록돼요. 사설망과 로컬 주소는 거절돼요.";
 export const DOORBELL_SECRET_HINT =
-  "저장 후에는 끝자리만 보여요. 다시 넣으면 교체되고 다시 봉인되며, 마지막 발화 시각은 초기화돼요.";
+  "저장 후에는 끝자리만 보여요. 다시 넣으면 교체되고 서버에 다시 저장되며, 마지막 발화 시각은 초기화돼요.";
 export const DOORBELL_NEVER_FIRED = "아직 울린 적 없음";
 export const DOORBELL_STATUS_NONE = "없음";
 export const DOORBELL_NOT_ACTIVE =

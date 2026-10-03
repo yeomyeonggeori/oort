@@ -405,7 +405,7 @@ export function resolveRow(
         return {
           state: "blocked",
           using: AI_DEFAULT_FALLBACK.appCommand,
-          sentence: "팀 AI 키가 없어 말로 앱 설정 바꾸기를 쓸 수 없어요. AI 계정을 연결하면 쓸 수 있어요.",
+          sentence: "팀 AI 키가 없어 말로 앱 설정 바꾸기를 쓸 수 없어요. 운영자가 팀 AI 키를 넣으면 쓸 수 있어요.",
         };
       }
       if (teamKey.status === "present" && teamKey.failed) {

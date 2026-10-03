@@ -411,14 +411,14 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
   }),
   {
     id: "nav.settings.agents",
-    title: "에이전트 자격",
+    title: "외부 에이전트 연결",
     group: "settings",
     kind: "navigate",
     keywords: ["설정", "연결", "hosted", "pairing"],
     icon: "credentials",
     testId: "switcher-settings-agents",
     available: always,
-    run: navigateTo("/settings?section=agents", "에이전트 자격"),
+    run: navigateTo("/settings?section=agents", "외부 에이전트 연결"),
   },
   {
     // 채팅 연결 카드의 입구(#2939 brief §3.1). 슬래시·⌘K·(2단계) 에이전트

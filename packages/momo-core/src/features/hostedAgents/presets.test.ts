@@ -49,7 +49,7 @@ describe("RED PROOF ① 실측되지 않은 것을 실측된 것처럼 말하지
   it("Grok 방식이 남기는 것을 미리 적는다", () => {
     // #1344 실측: connector Uninstall 은 앱 목록만 지우고 local plugin source 를
     // 남겼다. 나중에 해제할 사람이 그 사실을 지금 알아야 한다.
-    expect(hostedPreset("grok").leavesBehind).toContain("플러그인 소스를 남길어요");
+    expect(hostedPreset("grok").leavesBehind).toContain("플러그인 소스를 남겨요");
   });
 
   it("모르는 preset id 는 일반 recipe 로 떨어진다", () => {
@@ -137,7 +137,7 @@ describe("RED PROOF ④ 두 비밀값의 문구는 서로를 대신하지 않는
     );
     expect(GROK_PAIRING_PURPOSE).toContain("말로 전하는 것이 기본");
     expect(GROK_PAIRING_PURPOSE).toContain("다른 방법");
-    expect(PAIRING_NATURAL_LANGUAGE_HANDOFF).toContain("자기 쪽에 붙이에요");
+    expect(PAIRING_NATURAL_LANGUAGE_HANDOFF).toContain("자기 쪽에 붙여요");
     expect(PAIRING_NATURAL_LANGUAGE_HANDOFF).toContain("직접 붙여 넣으려면");
     expect(PAIRING_NATURAL_LANGUAGE_HANDOFF).not.toMatch(/자연어/);
     expect(PAIRING_NATURAL_LANGUAGE_HANDOFF).not.toMatch(/[—–]/);

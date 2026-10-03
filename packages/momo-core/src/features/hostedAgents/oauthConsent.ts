@@ -591,7 +591,7 @@ export const OAUTH_CONSENT_SECURITY_NOTE =
 
 /** candidate 하나를 골라야 하는 자리의 안내. */
 export const OAUTH_CONSENT_PICK_AGENT_HINT =
-  "이 인가는 대기 중인 전용 에이전트 하나에 묶이에요. 어느 에이전트로 접속을 허용할지 고르세요.";
+  "이 인가는 대기 중인 전용 에이전트 하나에 묶여요. 어느 에이전트로 접속을 허용할지 고르세요.";
 
 /** candidate 가 없을 때. capability 0 의 정직한 종료. */
 export const OAUTH_CONSENT_NO_CANDIDATE_HEADLINE =

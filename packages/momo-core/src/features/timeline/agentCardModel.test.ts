@@ -476,7 +476,7 @@ describe("provider failure notice (goal B8 H2)", () => {
     const auth = failureGuidance("provider_auth_failed");
     const generic = failureGuidance("provider_failed");
     expect(auth?.label).not.toBe(generic?.label);
-    expect(auth?.detail).toContain("AI에서");
+    expect(auth?.detail).toContain("AI 화면에서");
     // The fold must not repeat the sentence the body already said 40px above.
     expect(generic?.detail).not.toContain("다시 멘션");
   });
@@ -489,7 +489,7 @@ describe("provider failure notice (goal B8 H2)", () => {
     // host or a policy: "AI을 확인하세요" would be a confidently wrong
     // instruction, and "AI 제공자가 보낸 원문" a confidently wrong attribution,
     // which sends a reader looking for provider output that does not exist.
-    expect(unknown?.detail).not.toContain("AI에서");
+    expect(unknown?.detail).not.toContain("AI 화면에서");
     expect(unknown?.detail).not.toContain("AI 제공자");
     expect(unknown?.detail).toContain("실행 기록");
     // The key is server data, so the lookup must not answer for Object's own

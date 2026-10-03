@@ -31,9 +31,9 @@ describe("옛 설정 구획의 허브 안내 (AIH-3)", () => {
     ["plugins", "/ai/external/apps"],
     ["webhooks", "/ai/external/incoming"],
     ["events", "/ai/external/outgoing"],
-  ])("설정 %s 위에 「AI 허브로 옮겼어요」와 %s 링크가 선다", (section, href) => {
+  ])("설정 %s 위에 「AI 화면으로 옮겼어요」와 %s 링크가 선다", (section, href) => {
     const el = mount(section);
-    expect(el.textContent).toContain(section === "ai" ? "AI 허브로 옮겼어요" : "옮겼어요");
+    expect(el.textContent).toContain(section === "ai" ? "AI 화면으로 옮겼어요" : "옮겼어요");
     expect(el.querySelector("a")?.getAttribute("href")).toBe(href);
   });
 

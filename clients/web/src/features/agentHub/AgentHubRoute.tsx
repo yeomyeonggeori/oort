@@ -1129,7 +1129,7 @@ function PermissionsSection({
       <div>
         <h3 className="text-body font-semibold text-ink">권한</h3>
         <p className="text-meta text-ink-muted">
-          서버가 공개한 capability이에요. 앱 권한은 설정에서 봐요.
+          서버가 공개한 capability예요. 앱 권한은 설정에서 봐요.
         </p>
       </div>
       <dl className="flex flex-col gap-3 text-body">
