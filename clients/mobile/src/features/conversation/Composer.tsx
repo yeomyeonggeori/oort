@@ -1570,11 +1570,10 @@ export function Composer({
                       alignItems: 'flex-start',
                     },
                     pressed && styles.pressed,
-                    // 못 부르는 행은 흐리게, 단 눌린(고르는) 동안은 아니다 — 눌렸다는 신호가
-                    // 흐림에 묻히면 안 된다. 선택은 막지 않는다(보내기 전 위 한 줄이 말한다).
-                    locked && !pressed && styles.mentionRowLocked,
                   ]}
                   testID="mention-option">
+                  {({pressed}) => (
+                    <>
                   {/* 왼쪽 칸 = 첫 줄(이름+핸들) + 보조 줄. 오른쪽 칩은 첫 줄에 맞춰 선다. */}
                   <View
                     style={[
@@ -1586,7 +1585,12 @@ export function Composer({
                         함께 줄어든다. 형제 셋(`AgentsScreen`·`SidebarScreen`·
                         `HostedConnectionsScreen`)의 `rowText` + `rowTitleLine` 과 같은
                         구조이고, 스타일 쪽 주석이 왜 그 구조여야 하는지를 든다. */}
-                    <View style={styles.mentionIdentity} testID="mention-identity">
+                    <View
+                      style={[
+                        styles.mentionIdentity,
+                        locked && !pressed && styles.mentionLockedDim,
+                      ]}
+                      testID="mention-identity">
                       <Text
                         style={[
                           styles.mentionName,
@@ -1620,7 +1624,7 @@ export function Composer({
                   </View>
                   {showBadge ? (
                     <Text
-                      style={styles.mentionBadge}
+                      style={[styles.mentionBadge, locked && !pressed && styles.mentionLockedDim]}
                       numberOfLines={1}
                       testID="mention-badge">
                       {badge}
@@ -1633,6 +1637,8 @@ export function Composer({
                       {MENTION_AGENT_KIND}
                     </Text>
                   ) : null}
+                    </>
+                  )}
                 </Pressable>
               );
             })}
@@ -1671,6 +1677,11 @@ export function Composer({
           accessibilityRole="alert"
           accessibilityLiveRegion="polite"
           lineBreakStrategyIOS="hangul-word"
+          // 최대 두 줄 — 도크가 열 안에 들게(design-review H2). 열 예산(`composerColumnBudget`)은
+          // 이 줄을 세지 않으므로 상한이 곧 예산이다: 두 줄 × `line.meta` × 글자 배수가 가장 큰
+          // 배수에서도 입력창 상한 뒤 열에 든다(`mentionAiAnnotation.test.tsx`). 잘린 문장은 라벨이 끝까지 읽는다.
+          numberOfLines={2}
+          accessibilityLabel={agentNotice}
           testID="composer-agent-notice">
           {agentNotice}
         </Text>
@@ -2130,7 +2141,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   mentionAnnotation: {
     fontSize: font.meta,
     lineHeight: line.meta,
-    color: color.textFaint,
+    // `textFaint` 는 본문 AA 를 노리지 않는 값이다 — 이 줄은 읽어야 하는 문장이다.
+    color: color.textMuted,
   },
   mentionLock: {
     width: font.meta,
@@ -2150,7 +2162,10 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     lineHeight: line.head,
     color: color.textFaint,
   },
-  mentionRowLocked: {opacity: 0.6},
+  // 못 부르는 행은 이름·핸들·자물쇠·칩만 흐리게 한다 — 보조 줄은 **흐리지 않다**. 그 줄이 못
+  // 부르는 까닭(「박다연 님만 부를 수 있어요」)의 유일한 눈에 보이는 문장이라, 행 전체에 0.6 을
+  // 주면 가장 안 읽히는 글자가 가장 중요한 말을 든다(design-review H1). 눌린 동안은 흐리지 않다.
+  mentionLockedDim: {opacity: 0.6},
   agentNotice: {
     paddingHorizontal: SAFE_GUTTER,
     paddingTop: space.sm,

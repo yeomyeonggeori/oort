@@ -2,7 +2,7 @@ import {CLAUDE_SUBSCRIPTION_AGENT_PAUSED} from '@momo/core/features/ai/aiHubMode
 import {composerAgentNotice, mentionAnnotation} from '@momo/core/features/ai/aiMention';
 import type {RosterMember} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import {cleanup, fireEvent, render, screen, within} from '@testing-library/react-native';
 import React from 'react';
 import {Dimensions, StyleSheet} from 'react-native';
 
@@ -160,16 +160,22 @@ describe('멘션 시트 — 에이전트 행의 보조 줄·칩·잠금', () => 
     composer([teamKey, mineSub, otherSub, otherKey]);
     openSheet();
     const rows = screen.getAllByTestId('mention-option');
-    const opacity = (i: number) => flat(screen.getAllByTestId('mention-option')[i]).opacity;
-    // 팀 키 · 내 구독은 흐리지 않다. 남의 구독·개인 키는 흐리다.
-    expect(opacity(0)).toBeUndefined();
-    expect(opacity(1)).toBeUndefined();
-    expect(opacity(2)).toBe(0.6);
-    expect(opacity(3)).toBe(0.6);
+    const dim = (i: number, id: string) =>
+      flat(within(screen.getAllByTestId('mention-option')[i]).getByTestId(id)).opacity;
+    // 팀 키 · 내 구독은 흐리지 않다. 남의 구독·개인 키는 이름 묶음과 칩이 흐리다.
+    expect(dim(0, 'mention-identity')).toBeUndefined();
+    expect(dim(1, 'mention-badge')).toBeUndefined();
+    expect(dim(2, 'mention-identity')).toBe(0.6);
+    expect(dim(2, 'mention-badge')).toBe(0.6);
+    expect(dim(3, 'mention-identity')).toBe(0.6);
+    // 까닭을 말하는 보조 줄은 흐리지 않다 — 줄에도 행에도 opacity 가 없다.
+    expect(flat(within(rows[2]).getByTestId('mention-agent-line')).opacity).toBeUndefined();
+    expect(flat(rows[2]).opacity).toBeUndefined();
     expect(screen.getAllByTestId('mention-locked-mark', {includeHiddenElements: true})).toHaveLength(2);
     // 눌린(고르는) 동안은 흐림이 눌림 신호를 덮지 않는다.
     fireEvent(rows[2], 'responderGrant', {nativeEvent: {touches: []}, persist: () => {}});
-    expect(opacity(2)).toBeUndefined();
+    expect(dim(2, 'mention-identity')).toBeUndefined();
+    expect(dim(2, 'mention-badge')).toBeUndefined();
   });
 
   it('잠긴 행도 고를 수 있다 — 막지 않고 위 한 줄이 말한다', () => {
@@ -324,6 +330,24 @@ describe('입력창 위 한 줄 — 답하지 않을 에이전트를 부르는 �
     expect(screen.getByTestId('composer-agent-notice')).toBeTruthy();
     fireEvent.changeText(input, '안녕 ');
     expect(screen.queryByTestId('composer-agent-notice')).toBeNull();
+  });
+
+  it('두 줄까지만 서고 라벨이 문장 전부를 읽는다', () => {
+    composer([otherSub]);
+    fireEvent.changeText(screen.getByTestId('composer-input'), '@sj 안녕 ');
+    const notice = screen.getByTestId('composer-agent-notice');
+    expect(notice.props.numberOfLines).toBe(2);
+    expect(notice.props.accessibilityLabel).toBe(notice.props.children);
+  });
+
+  it('두 줄 한 줄이 가장 큰 글자에서도 입력창 상한 뒤 열에 든다 — 도크 예산', () => {
+    for (const fs of [1, 2.143, 3.143, 3.571]) {
+      for (const h of [812, 874, 956]) {
+        const b = composerColumnBudget(fs, h);
+        const noticeMax = 2 * 17 * fs; // 두 줄 × line.meta × 글자 배수
+        expect(b.composer + b.dockChrome + noticeMax).toBeLessThanOrEqual(b.column);
+      }
+    }
   });
 
   it('후보 시트가 열린 동안은 서지 않는다 — 도크가 열 안에 들게', () => {
