@@ -222,9 +222,13 @@ pub async fn register(
                 let explicit_only = candidates.len() == 1;
                 for (display_name, handle) in candidates {
                     if is_handle_banned_in_tx(conn, &handle).await? {
-                        return Ok(Err(ApiError::forbidden(
-                            "member is banned from this workspace",
-                        )));
+                        if explicit_only {
+                            return Ok(Err(ApiError::forbidden(
+                                "member is banned from this workspace",
+                            )));
+                        }
+                        // A banned default candidate is skipped like a taken one.
+                        continue;
                     }
                     match provision_hosted_agent_in_tx(
                         conn,

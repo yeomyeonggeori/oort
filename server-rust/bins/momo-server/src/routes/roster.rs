@@ -121,7 +121,7 @@ pub async fn roster(
         .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?;
     let limit = query.limit();
 
-    let outcome: DbRejectable<(Vec<RosterMember>, Vec<momo_agent::AgentReadFacts>)> =
+    let outcome: DbRejectable<(Vec<RosterMember>, Vec<momo_agent::AgentReadFacts>, bool)> =
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
                 let Some(role) =
@@ -148,13 +148,13 @@ pub async fn roster(
                     .collect();
                 let facts =
                     momo_agent::load_agent_read_facts_in_tx(conn, workspace_id, &agent_ids).await?;
-                Ok(Ok((members, facts)))
+                Ok(Ok((members, facts, role == WorkspaceRole::Guest)))
             })
         })
         .await;
 
     let claude_enabled = state.agent_port.config.claude_subscription_agents_enabled;
-    let (members, facts) = settle_db("roster.list", outcome)?;
+    let (members, facts, viewer_is_guest) = settle_db("roster.list", outcome)?;
     let human_count = members
         .iter()
         .filter(|member| member.kind == MemberKind::Human)
@@ -170,6 +170,18 @@ pub async fn roster(
                 let mut dto = roster_dto(member);
                 if let Some(facts) = facts.iter().find(|f| f.agent_member_id == member.id) {
                     dto.apply_read_facts(facts, claude_enabled);
+                    // Security review F2: a guest sees only what it shares. The
+                    // owner's id and name are shown only when the owner is itself on
+                    // the guest's roster, and liveness is not shown to guests at all.
+                    if viewer_is_guest {
+                        dto.host_online = None;
+                        let owner_visible = dto.owner.as_ref().is_some_and(|owner| {
+                            members.iter().any(|m| m.id.to_string() == owner.id)
+                        });
+                        if !owner_visible {
+                            dto.owner = None;
+                        }
+                    }
                 }
                 dto
             })

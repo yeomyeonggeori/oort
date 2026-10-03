@@ -27,6 +27,8 @@
 //! | `register_answers_a_code_when_the_switch_is_off_and_writes_nothing` (#3392) | 409 `subscription_agents_disabled`, 0 rows; non-admin still 403 | kill-switch arm after admin gate |
 //! | `register_is_tenant_scoped_and_survives_a_dead_agent_and_a_race` (#3392) | other tenant, dead agent frees its slot, 4 concurrent → 1 row | advisory lock + migration 116 index |
 //! | `claude_registration_is_paused_by_default_and_codex_is_not` (#3397 결재) | claude_code → 409 `claude_subscription_agent_paused`, 0 rows; codex → 201; rows report `brainUnavailableReason` only for Claude while off | `claude_enabled` gate in `register`, `AgentReadFacts::unavailable_reason` |
+//! | `the_legacy_create_route_honours_the_claude_opt_in_too` (review F1) | `POST …/hosted-agent-connections` with claude_code → 409 coded, 0 rows; codex → 201 | Claude check in `hosted_agent_connections::create` |
+//! | `a_guest_sees_neither_the_owner_nor_liveness_of_an_agent_it_shares` (review F2) | guest roster: brain/callableBy yes; owner/hostOnline no when owner is not visible | guest narrowing in `roster` |
 //! | `a_registered_but_unconnected_subscription_agent_is_never_a_worker_job` (#2924/#2940 regression) | owner call to a freshly registered agent → 0 jobs | `OR a.invocation_scope = 'owner_only'` hosted predicates |
 
 use std::net::SocketAddr;
@@ -2422,4 +2424,92 @@ async fn claude_registration_is_paused_by_default_and_codex_is_not() {
     )
     .await;
     assert_eq!(status, 201, "{body}");
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3392-*)"]
+async fn the_legacy_create_route_honours_the_claude_opt_in_too() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su).await;
+    let client = reqwest::Client::new();
+    let off = start_server_with(momo_app_pool().await, true, false).await;
+    let url = format!(
+        "{off}/v1/workspaces/{}/hosted-agent-connections",
+        f.workspace
+    );
+    let before: i64 = sqlx::query_scalar("SELECT count(*) FROM member WHERE workspace_id=$1")
+        .bind(f.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    let response = client
+        .post(&url)
+        .bearer_auth(&f.owner_jwt)
+        .json(
+            &json!({"displayName": "클로드", "handle": short_handle("cl"),
+                      "invocationScope": "owner_only", "subscriptionHarness": "claude_code"}),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 409);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "claude_subscription_agent_paused");
+    let after: i64 = sqlx::query_scalar("SELECT count(*) FROM member WHERE workspace_id=$1")
+        .bind(f.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(before, after, "the refused legacy create wrote nothing");
+    let response = client
+        .post(&url)
+        .bearer_auth(&f.owner_jwt)
+        .json(
+            &json!({"displayName": "코덱스", "handle": short_handle("cx"),
+                      "invocationScope": "owner_only", "subscriptionHarness": "codex"}),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 201, "Codex is not paused");
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3392-*)"]
+async fn a_guest_sees_neither_the_owner_nor_liveness_of_an_agent_it_shares() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su).await;
+    let (guest, guest_jwt) = insert_human(&su, f.workspace, "손님", "guest").await;
+    // A room with only the guest and the agent: the owner is in none of the
+    // guest's channels.
+    let room = insert_channel(&su, f.workspace, "public", Some("guest-room")).await;
+    join(&su, f.workspace, room, guest).await;
+    join(&su, f.workspace, room, f.agent).await;
+    let base = start_server(momo_app_pool().await, true).await;
+    let client = reqwest::Client::new();
+    let (status, roster) = get_json(
+        &client,
+        &format!("{base}/v1/workspaces/{}/roster", f.workspace),
+        &guest_jwt,
+    )
+    .await;
+    assert_eq!(status, 200, "{roster}");
+    let row = roster_row(&roster, f.agent);
+    assert_eq!(row["brain"], "subscription");
+    assert_eq!(row["callableBy"], "owner_only");
+    assert!(row.get("owner").is_none(), "owner leaked to a guest: {row}");
+    assert!(
+        row.get("hostOnline").is_none(),
+        "liveness leaked to a guest: {row}"
+    );
+    assert!(
+        !roster["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["id"] == json!(f.owner.to_string())),
+        "the owner is not on the guest's roster"
+    );
 }

@@ -242,6 +242,7 @@
 | `brainUnavailableReason` | `claude_subscription_agent_paused` | 두뇌를 이 서버에서 쓸 수 없을 때만(D17) |
 
 - **`hostOnline`은 휴리스틱이다.** 활성 연결의 credential이 최근 10분 안에 Agent Port에 닿았는가(`token.last_used_at`, D5의 `SUBSCRIPTION_AGENT_ONLINE_WINDOW_SECONDS`)다. 열려 있지만 한가한 CLI 세션은 포트를 부르지 않으면 false로 읽힌다. 접속·presence가 아니다. 화면은 「오프라인」이 아니라 「최근 10분 안에 응답이 없어요」 수준으로 쓰고, 이 값으로 호출을 막지 않는다. 질의문은 `momo_agent::HOSTED_RECENTLY_SEEN_SQL` 하나이고, D5 문구를 고르는 후보 질의(`mention.rs`)와 같은 글자임을 단위 시험이 단정한다(둘이 갈라지면 같은 에이전트에 두 말을 하게 된다).
+- **게스트.** 게스트는 자기가 채널을 공유하는 에이전트만 본다(명부 질의가 정한다). 이 필드들 중 `owner`는 **소유자가 게스트의 명부에도 보일 때만**, `hostOnline`은 **게스트에게 내지 않는다**(게스트는 이미 `ownerHumanId`도 받지 못하는 경계라서 이 증보가 넓히지 않는다). `brain`·`callableBy`는 구조 정보라 그대로다.
 - **새 노출이 아닌 근거.** 명부는 이미 워크스페이스 활성 멤버 모두에게 `ownerHumanId`·`paused`를 준다. 비소유자가 멘션하면 D4 안내가 소유자의 표시 이름을 이미 말한다. D5는 채널의 다른 사람에게 「오프라인」까지를 허용했다. 그래서 `owner`는 구독 에이전트에만(범위를 줄여 둔다), `hostOnline`은 불리언 하나로 둔다. 기기 이름·위치·마지막 접속 시각은 이 필드들에 없다. 워크스페이스 비멤버는 명부 자체가 403이라 아무것도 보지 못한다(교차 테넌트 시험). 게스트의 가시 범위는 명부 질의가 정하고 사실 조회는 그 보이는 에이전트에만 돈다.
 - OpenAPI(`RosterMember`, `HostedAgentConnection`)와 DTO가 같은 글자임을 계약 시험이 단정한다.
 
@@ -264,7 +265,7 @@
 
 ### D17. Claude 구독 에이전트 등록은 기본 꺼짐이고 켜는 것은 인스턴스 운영자다 (#3397 결재)
 - **설정.** `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`. **기본 off, 정확히 `true`만 on**이다(없음·빈 값·`True`·`1`·오타는 전부 off). 일반 킬 스위치 `MOMO_SUBSCRIPTION_AGENTS_ENABLED`(D6, 기본 on)와 별개이고, 서버 전체 설정이다(약관 문의 결과를 기다리는 인스턴스 단위 결정이라 워크스페이스 관리자가 다시 열 수 없다).
-- **등록.** D15의 엔드포인트가 `harness: claude_code`이고 이 설정이 off이면 409 `error.code = claude_subscription_agent_paused`를 돌려주고 아무것도 쓰지 않는다. 순서: 사람·owner/admin(403) → 일반 킬 스위치(409 `subscription_agents_disabled`) → 이 코드. 클라이언트는 이 코드로 「이 서버에서는 Claude 구독 에이전트가 잠시 멈춰 있어요」를 말하고 선택지를 숨기지 않는다. **Codex(`codex`)는 영향이 없다.**
+- **등록.** 구독 에이전트를 만드는 **모든 경로**(D15의 대행 등록 엔드포인트와 `POST …/hosted-agent-connections`의 `owner_only` 생성)가 `harness: claude_code`이고 이 설정이 off이면 409 `error.code = claude_subscription_agent_paused`를 돌려주고 아무것도 쓰지 않는다. 순서: 사람·owner/admin(403) → 일반 킬 스위치(409 `subscription_agents_disabled`) → 이 코드(레거시 생성 경로는 기존 관례대로 트랜잭션 전에 두 스위치를 본다). 클라이언트는 이 코드로 「이 서버에서는 Claude 구독 에이전트가 잠시 멈춰 있어요」를 말하고 선택지를 숨기지 않는다. **Codex(`codex`)는 영향이 없다.**
 - **상태 필드.** D14의 명부·연결 목록 행에 `brainUnavailableReason`을 더한다. 값은 `claude_subscription_agent_paused` 하나이고, **Claude 구독 에이전트이면서 이 설정이 off일 때만** 나온다(그 밖의 에이전트·사람 행에는 없다). 상태 보고일 뿐 이 필드가 호출을 막지는 않는다.
 - **이 증보가 하지 않는 것.** 이미 등록된 Claude `owner_only` 에이전트에 대한 전달 차단과 채널 안내 문장은 #3397이 구현한다(D4·D6 경로). 이 PR은 그 경로를 건드리지 않는다. 따라서 이 설정이 off인 인스턴스에 기존 Claude 에이전트가 있으면 상태 필드는 「멈춤」을 말하지만 런타임은 #3397 전까지 기존 동작 그대로다.
 - 이 증보의 회색 판단은 ADR-0193 약관 판단(2026-09-27 증보)을 바꾸지 않는다. 같은 위험을 기본값으로 먼저 닫는 것이다. Anthropic 회신 뒤 새 증보로 기본값을 다시 정한다.

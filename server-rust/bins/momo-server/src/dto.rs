@@ -4046,7 +4046,9 @@ pub struct RegisterSubscriptionAgentRequest {
     pub handle: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+// No `Debug`: this carries the one-time connection value, and a stray `{:?}` in a
+// log line must not be able to print it.
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegisterSubscriptionAgentResponse {
     pub agent: AgentMemberDto,

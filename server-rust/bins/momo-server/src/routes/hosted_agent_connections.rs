@@ -325,6 +325,18 @@ pub async fn create(
             "subscription agents are disabled on this server",
         ));
     }
+    // #3397 결재 (security review F1): the Claude opt-in covers EVERY creation
+    // path, not just the register-after-login endpoint — otherwise this legacy
+    // route would register what the default-off decision closed.
+    if owner_only == Some(momo_agent::SubscriptionHarness::ClaudeCode)
+        && !state.agent_port.config.claude_subscription_agents_enabled
+    {
+        return Err(ApiError::coded(
+            StatusCode::CONFLICT,
+            momo_agent::CLAUDE_SUBSCRIPTION_AGENT_PAUSED,
+            "claude subscription agents are paused on this server",
+        ));
+    }
     let display_name = normalized_join_display_name(&request.display_name)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     let handle = normalized_requested_handle(Some(&request.handle))
