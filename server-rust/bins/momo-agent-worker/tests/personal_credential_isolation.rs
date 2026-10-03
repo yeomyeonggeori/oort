@@ -81,6 +81,11 @@ const PERSONAL_RUNTIME_FACTS: &[&str] = &[
     "owner_only",
     "invocation_scope",
     "subscription_harness",
+    // #3396 — the owner-key door's own vocabulary: a team turn never names it.
+    "personal_provider_link",
+    "uses_owner_key",
+    "read_owner_key_for_agent",
+    "decrypt_personal_link",
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",
     ".credentials.json",

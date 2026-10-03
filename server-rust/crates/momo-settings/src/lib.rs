@@ -65,6 +65,7 @@ pub mod join;
 pub mod link;
 pub mod membership_lifecycle;
 pub mod oauth;
+pub mod personal_link;
 pub mod presets;
 pub mod provider;
 pub mod quota;
@@ -118,6 +119,13 @@ pub use oauth::{
     LinkCredential, OpenAiOAuthCredential, ANTHROPIC_KEY_KIND, ATTRIBUTION_NOTICE_KO,
     ATTRIBUTION_PERSONAL, DEFAULT_OPENAI_TOKEN_ENDPOINT, OAUTH_OPENAI_KIND,
     USAGE_SCOPE_INTERNAL_ONLY,
+};
+pub use personal_link::{
+    decrypt_personal_link, find_personal_link_in_tx, issue_personal_link_in_tx, key_fingerprint,
+    list_personal_links_in_tx, read_owner_key_for_agent, revoke_personal_link_in_tx,
+    DecryptedOwnerKey, IssueOutcome, NewPersonalLink, PersonalKeyUnusable, PersonalLinkInfo,
+    RevokeOutcome, StoredOwnerKey, PERSONAL_LINK_AUDIT_SCHEMA, PERSONAL_LINK_ISSUED_ACTION,
+    PERSONAL_LINK_REVOKED_ACTION,
 };
 pub use presets::{ProviderFormat, ProviderPreset, PROVIDER_PRESETS};
 pub use provider::{

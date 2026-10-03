@@ -83,6 +83,7 @@ pub mod embed;
 pub mod extract;
 pub mod oauth;
 pub mod partial;
+mod personal;
 pub mod payload;
 pub mod provider;
 pub mod responses;
@@ -586,9 +587,15 @@ impl AgentWorker {
         // whichever door wrote it: a subscription agent is never run here, on
         // the team key, even for its owner. Before the welcome's preparation
         // (it speaks) and before any run moves.
-        match self.agent_is_owner_only(&job, &payload).await {
-            Ok(false) => {}
-            Ok(true) => {
+        //
+        // #3396 — the one `owner_only` kind this worker does run is the agent
+        // whose brain is its owner's personal API key. It runs on that key and
+        // on nothing else (see `personal`); every other `owner_only` agent is
+        // refused exactly as before.
+        let owner_key_turn = match self.agent_owner_only_brain(&job, &payload).await {
+            Ok(momo_agent::OwnerOnlyBrain::NotOwnerOnly) => false,
+            Ok(momo_agent::OwnerOnlyBrain::OwnerKey) => true,
+            Ok(momo_agent::OwnerOnlyBrain::Subscription) => {
                 tracing::warn!(
                     outbox_id = job.id,
                     agent_member_id = %payload.agent_member_id,
@@ -609,6 +616,13 @@ impl AgentWorker {
                     .settle_retryable(&job, &format!("owner-only check: {error}"), &endpoint)
                     .await;
             }
+        };
+
+        if owner_key_turn && payload.is_welcome() {
+            // A welcome speaks on the team's behalf (the team's opener); a
+            // personal agent has no team voice and the team key is not its key.
+            self.settle_done(job.id, Some(OWNER_KEY_NO_WELCOME)).await;
+            return Settlement::Skipped;
         }
 
         if payload.is_welcome() {
@@ -630,7 +644,35 @@ impl AgentWorker {
             return Settlement::Skipped;
         };
 
-        let mut transport = self.resolve_transport().await;
+        // #3396 — the owner-key door and the team door are two roads that never
+        // meet: an owner-key turn resolves its owner's key here and does not
+        // compute the team transport, the 「기본 AI」 row or any chain hop at
+        // all; a team turn never reaches `resolve_owner_key_transport`.
+        let mut transport = if owner_key_turn {
+            match self
+                .resolve_owner_key_transport(job.workspace_id, payload.agent_member_id)
+                .await
+            {
+                personal::OwnerKeyTransport::Ready(transport) => *transport,
+                personal::OwnerKeyTransport::Unavailable(reason) => {
+                    return self
+                        .settle_personal_key_unavailable(&job, &payload, run_id, reason)
+                        .await;
+                }
+                personal::OwnerKeyTransport::ReadFailed(reason) => {
+                    let endpoint = self.resolve_transport().await.endpoint;
+                    return self
+                        .settle_retryable(
+                            &job,
+                            &format!("personal key read failed: {reason}"),
+                            &endpoint,
+                        )
+                        .await;
+                }
+            }
+        } else {
+            self.resolve_transport().await
+        };
 
         // #2897 (ADR-0135 D1: no silent fallback) — no team key, no model call,
         // on every turn and not only the welcome's. Checked before anything
@@ -638,7 +680,7 @@ impl AgentWorker {
         // answer must not act either, and the placeholder env bearer must never
         // be presented to an endpoint. The caller is told why in the #2871
         // shape instead.
-        if !self.provider_is_configured(&transport) {
+        if !owner_key_turn && !self.provider_is_configured(&transport) {
             return self.settle_provider_required(&job, &payload, run_id).await;
         }
 
@@ -646,7 +688,14 @@ impl AgentWorker {
         // model of its own. Resolved once, here, before anything runs: a row
         // that no longer points at the link it was chosen on refuses the turn
         // (the #2871 line) instead of answering on some other provider.
-        match self.resolve_default_ai(&payload, run_id, &transport).await {
+        let default_ai = if owner_key_turn {
+            // The team's row (and the chain hop it may point at) is the team's
+            // key: it must not reroute a personal agent (billing confusion).
+            DefaultAiOutcome::NotApplicable
+        } else {
+            self.resolve_default_ai(&payload, run_id, &transport).await
+        };
+        match default_ai {
             DefaultAiOutcome::NotApplicable => {}
             DefaultAiOutcome::Applied {
                 hop_transport,
@@ -2107,7 +2156,17 @@ impl AgentWorker {
                 // the close above happens exactly once per run, because the
                 // second one finds `streaming: false` and does nothing.
                 let first_delivery = !sent.deduped || closed_stream;
-                let (delegated, blocked) = if delegates && first_delivery {
+                // #3396 — an owner-key agent speaks for one person on that
+                // person's key; what it says does not spawn team agents on the
+                // team's key (the cost and the context would cross over).
+                let owner_key_agent = momo_agent::agent_owner_only_brain_in_tx(
+                    conn,
+                    workspace_id,
+                    snapshot.agent_member_id,
+                )
+                .await?
+                    == momo_agent::OwnerOnlyBrain::OwnerKey;
+                let (delegated, blocked) = if delegates && first_delivery && !owner_key_agent {
                     let routed = route_a2a_mentions_in_tx(
                         conn,
                         A2aSend {
@@ -2673,19 +2732,19 @@ impl AgentWorker {
         }
     }
 
-    /// Is the job's agent a subscription (`owner_only`) agent? Read in the
-    /// job's own workspace (RLS), from the one column migration 089 makes
-    /// one-way.
-    async fn agent_is_owner_only(
+    /// Which kind of `owner_only` agent is the job's agent, if any? Read in the
+    /// job's own workspace (RLS), from the two columns migrations 089 and 116
+    /// make one-way.
+    async fn agent_owner_only_brain(
         &self,
         job: &ClaimedAgentJob,
         payload: &AgentJobPayload,
-    ) -> Result<bool, momo_db::DbError> {
+    ) -> Result<momo_agent::OwnerOnlyBrain, momo_db::DbError> {
         let agent_member_id = payload.agent_member_id;
         let workspace_id = job.workspace_id;
         with_tenant_tx(&self.pool, workspace_id, move |conn| {
             Box::pin(async move {
-                momo_agent::agent_is_owner_only_in_tx(conn, workspace_id, agent_member_id).await
+                momo_agent::agent_owner_only_brain_in_tx(conn, workspace_id, agent_member_id).await
             })
         })
         .await
@@ -2732,6 +2791,52 @@ impl AgentWorker {
             run_id,
             HostedSkipReason::ConnectionUnavailable,
             json!({"code": OWNER_ONLY_NOT_WORKER, "reason": "subscription agent"}),
+        )
+        .await
+    }
+
+    /// #3396 — a turn for an owner-key agent whose owner's key is not there
+    /// (revoked, never issued, the owner left, or unreadable). Closed as the
+    /// agent's own line, with an audit row naming the reason; the team key is
+    /// never tried. `reason` is a fixed label, not a message from a provider.
+    async fn settle_personal_key_unavailable(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        reason: &'static str,
+    ) -> Settlement {
+        let workspace_id = job.workspace_id;
+        let agent_member_id = payload.agent_member_id;
+        let audit = with_tenant_tx(&self.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, PERSONAL_KEY_UNAVAILABLE_AUDIT)
+                        .run(run_id)
+                        .about(agent_member_id)
+                        .with_schema(
+                            PERSONAL_KEY_UNAVAILABLE_AUDIT_SCHEMA,
+                            json!({"reason": reason, "run_id": run_id}),
+                        ),
+                )
+                .await?;
+                Ok(())
+            })
+        })
+        .await;
+        if let Err(error) = audit {
+            let endpoint = self.resolve_transport().await.endpoint;
+            return self
+                .settle_retryable(job, &format!("personal key audit failed: {error}"), &endpoint)
+                .await;
+        }
+        self.settle_refused_turn(
+            job,
+            payload,
+            run_id,
+            HostedSkipReason::PersonalKeyUnavailable,
+            json!({"code": PERSONAL_KEY_UNAVAILABLE, "reason": reason}),
         )
         .await
     }
@@ -3485,6 +3590,12 @@ const PROVIDER_REQUIRED: &str = "provider_required";
 /// #2924 — the run error / outbox reason of a subscription agent's job that
 /// reached the team worker.
 const OWNER_ONLY_NOT_WORKER: &str = "owner_only_not_worker";
+/// #3396 — the settle code of a welcome job for an owner-key agent (skipped).
+const OWNER_KEY_NO_WELCOME: &str = "owner_key_no_welcome";
+/// #3396 — an owner-key agent's turn found no usable personal key.
+const PERSONAL_KEY_UNAVAILABLE: &str = "personal_key_unavailable";
+const PERSONAL_KEY_UNAVAILABLE_AUDIT: &str = "agent.personal_key.unavailable";
+const PERSONAL_KEY_UNAVAILABLE_AUDIT_SCHEMA: &str = "momo.agent.personal_key_unavailable.v1";
 /// #3041 — the run error code / job done reason of a turn refused because the
 /// 「기본 AI」 row it would run on no longer resolves.
 const DEFAULT_AI_UNRESOLVED: &str = "default_ai_unresolved";

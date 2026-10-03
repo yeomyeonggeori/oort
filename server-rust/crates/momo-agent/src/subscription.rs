@@ -116,6 +116,11 @@ pub struct OwnerOnlyScope {
     /// connections need a new pairing, so no "다시 열면" sentence is true for
     /// them and none is posted.
     pub reconnectable: bool,
+    /// #3396 (ADR-0147 증보 2026-10-03): this `owner_only` agent's brain is its
+    /// owner's personal API key, not a subscription. The operator's
+    /// subscription kill switch (`subscription_agents_enabled`) does not apply
+    /// to it — it governs subscription CLIs, and a personal key is neither.
+    pub uses_owner_key: bool,
 }
 
 /// The three sentences (ADR-0193 D4·D5·D6).
@@ -188,7 +193,7 @@ pub fn owner_only_gate(
     if author_member_id != scope.owner_member_id {
         return Some(SubscriptionNoticeKind::NonOwner);
     }
-    if !subscription_agents_enabled {
+    if !subscription_agents_enabled && !scope.uses_owner_key {
         return Some(SubscriptionNoticeKind::Disabled);
     }
     None
@@ -407,6 +412,7 @@ mod tests {
             harness: SubscriptionHarness::ClaudeCode,
             recently_seen: true,
             reconnectable: false,
+            uses_owner_key: false,
         }
     }
 

@@ -914,7 +914,7 @@ pub async fn load_eligible_agent_in_tx(
                 COALESCE(ap.paused, false) AS paused \
                 , (EXISTS (SELECT 1 FROM hosted_agent_connection hc \
                             WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
-                   OR a.invocation_scope = 'owner_only') \
+                   OR (a.invocation_scope = 'owner_only' AND NOT a.uses_owner_key)) \
                     AS hosted_delivery_disabled \
            FROM member m \
            JOIN agent a ON a.member_id = m.id AND a.workspace_id = m.workspace_id \
