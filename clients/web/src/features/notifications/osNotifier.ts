@@ -1,4 +1,5 @@
 import { isDesktop, showNotification } from "@/lib/tauri";
+import { showBrowserNotification, type BrowserNotifyTarget } from "./browserNotify";
 
 // =============================================================================
 // OS 알림의 마지막 관문: 같은 종류를 한 묶음으로 쌓는다 (#3339).
@@ -19,6 +20,17 @@ export interface OsNotifyItem {
   body?: string;
   /** 묶음 요약에 이름으로 올라가는 한 줄(보낸 사람, 칸 이름). */
   label: string;
+  /** 브라우저 알림을 눌렀을 때 갈 곳(채널 경로). 데스크탑은 포커스 때 따로 간다. */
+  route?: string;
+}
+
+/** 여러 건이 한 곳을 가리키면 그곳, 흩어지면 멘션 인박스(데스크탑 `openTarget`과 같은 말). */
+export const MIXED_ROUTE = "/inbox?filter=mentions";
+
+export function routeFor(items: readonly OsNotifyItem[]): string | undefined {
+  const routes = items.map((i) => i.route);
+  if (routes.some((r) => r === undefined)) return undefined;
+  return routes.every((r) => r === routes[0]) ? routes[0] : MIXED_ROUTE;
 }
 
 /** 묶였을 때의 제목. 「무엇이 일어났나」가 먼저, 건수가 뒤다. */
@@ -51,7 +63,7 @@ export function summarize(items: readonly OsNotifyItem[]): { title: string; body
 }
 
 export interface OsNotifierDeps {
-  send: (title: string, body?: string) => Promise<boolean>;
+  send: (title: string, body: string | undefined, target: BrowserNotifyTarget) => Promise<boolean>;
   windowMs?: number;
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
@@ -69,7 +81,8 @@ export function createOsNotifier(deps: OsNotifierDeps) {
     pending.delete(kind);
     clearTimer(slot.timer);
     const { title, body } = summarize(slot.items);
-    void deps.send(title, body).catch(() => false);
+    const route = routeFor(slot.items);
+    void deps.send(title, body, { kind, ...(route === undefined ? {} : { route }) }).catch(() => false);
   }
 
   return {
@@ -99,7 +112,9 @@ let shared: OsNotifier | null = null;
 /** 앱에 하나다: 메시지 레일과 로컬 칸이 같은 묶음을 쓴다. */
 export function osNotifier(): OsNotifier {
   shared ??= createOsNotifier({
-    send: (title, body) => (isDesktop() ? showNotification(title, body) : Promise.resolve(false)),
+    // 데스크탑은 셸로, 브라우저는 옵트인한 탭의 Notification API로(#3340). 같은 묶음 규칙이다.
+    send: (title, body, target) =>
+      isDesktop() ? showNotification(title, body) : showBrowserNotification(title, body, target),
   });
   return shared;
 }
