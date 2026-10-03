@@ -126,7 +126,7 @@ export type AccountAgentLineFor = (harness: LocalHarnessId) => AccountAgentLine 
 
 export function AiMyAccountsSection({
   onAddApiKey,
-  title = "내 계정",
+  title = "내 AI 계정",
   scope = "이 맥",
   agentLineFor,
 }: {

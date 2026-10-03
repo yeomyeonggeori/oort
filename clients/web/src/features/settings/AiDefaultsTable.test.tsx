@@ -77,7 +77,7 @@ describe("기본 AI 표 화면", () => {
     ]);
     // 앱 명령의 모델 줄은 한 번만 선다(저장 값이 팀 키여도).
     expect(q("ai-default-appCommand")?.querySelectorAll('[data-testid="ai-default-appCommand-model"]')).toHaveLength(1);
-    expect(q("ai-default-summary-model")?.textContent).toBe("모델은 서버가 정함 · 이 키로 쓸 수 있는 모델 12개");
+    expect(q("ai-default-summary-model")?.textContent).toBe("모델은 서버가 정해요 · 이 키로 쓸 수 있는 모델 12개");
   });
 
   it("고르면 이 기기에 저장되고, 저장 값에는 하네스 id와 라벨뿐이다", () => {
@@ -258,7 +258,7 @@ describe("기본 AI 표 팀 줄 저장 (#3042)", () => {
     expect(q("ai-default-teamAgent-select")).toBeNull();
     expect(q("ai-default-teamAgent")?.textContent).toContain("api.openai.com · gpt-4o");
     expect(q("ai-default-teamAgent-model")?.textContent).toBe("연결 확인을 하면 고를 수 있는 모델이 보여요.");
-    expect(q("ai-default-summary")?.textContent).toContain("고르지 않음 · 서버가 정함");
+    expect(q("ai-default-summary")?.textContent).toContain("고르지 않으면 서버가 정해요");
   });
 
   it("고른 연결이 바뀌었으면(linkResolved:false) 조용히 따라가지 않고 말한다", () => {

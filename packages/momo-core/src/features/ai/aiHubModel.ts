@@ -216,7 +216,7 @@ export const AI_EXTERNAL_ROWS: readonly AiExternalRow[] = [
     summary: "다른 곳에서 도는 에이전트를 멤버로 들여요. 연결 값은 발급할 때 한 번만 보여요.",
     detail: [
       "다른 인프라에서 도는 에이전트를 이 워크스페이스의 멤버로 들이는 연결이에요.",
-      "연결 값은 발급 직후 한 번만 보여요. 끊기는 서버가 끊겼다고 답한 뒤에야 끝나요.",
+      "연결 값은 발급 직후 한 번만 보여요. 해제는 서버가 끊겼다고 답한 뒤에야 끝나요.",
     ],
     countNoun: "연결",
     path: `${AI_EXTERNAL_BASE_PATH}/agents`,

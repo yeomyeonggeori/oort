@@ -636,10 +636,10 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
           title={hasRow ? rowName : "팀 AI 키 추가"}
           subtitle={
             !hasRow
-              ? "운영자만 · 서버에 봉인해요"
+              ? "운영자만 · 서버에 저장해요"
               : legacy
                 ? "내부용 연결 · 이 서버"
-                : "API 키 · 이 서버 · 팀 에이전트가 씀"
+                : "API 키 · 이 서버 · 팀 에이전트가 써요"
           }
           onClose={closeAside}
           headingRef={asideHeadingRef}

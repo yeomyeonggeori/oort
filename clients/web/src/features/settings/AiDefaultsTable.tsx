@@ -435,7 +435,7 @@ function DefaultRow({
             </span>
           </>
         ) : personal ? (
-          <span className="text-agent">내 설정</span>
+          <span className="text-agent">내 AI 계정</span>
         ) : teamEditable ? (
           <span className="text-ink-muted">운영자</span>
         ) : (

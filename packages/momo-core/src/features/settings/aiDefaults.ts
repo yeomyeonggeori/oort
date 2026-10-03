@@ -82,14 +82,14 @@ export const AI_DEFAULT_ROWS: readonly AiDefaultRow[] = [
   {
     id: "teamAgent",
     title: "팀 에이전트의 답",
-    hint: "멘션·DM, 팀이 봄",
+    hint: "멘션·DM, 팀이 같이 봐요",
     audience: "team",
     sources: ["teamKey"],
   },
   {
     id: "summary",
     title: "채널 요약 · 첫 인사",
-    hint: "서버에서 돌고 팀이 봄",
+    hint: "서버에서 돌고 팀이 같이 봐요",
     audience: "team",
     sources: ["teamKey"],
   },
@@ -263,9 +263,9 @@ export function optionsFor(rowId: AiDefaultRowId, input: AiDefaultsInput): AiDef
 export function modelLine(ref: AiCredentialRef, teamKey: AiDefaultsTeamKey): string {
   if (ref.kind === "profile") return "모델은 CLI 기본값";
   if (teamKey.status === "present" && teamKey.modelCount !== null) {
-    return `모델은 서버가 정함 · 이 키로 쓸 수 있는 모델 ${teamKey.modelCount}개`;
+    return `모델은 서버가 정해요 · 이 키로 쓸 수 있는 모델 ${teamKey.modelCount}개`;
   }
-  return "모델은 서버가 정함";
+  return "모델은 서버가 정해요";
 }
 
 // ---- 저장(이 기기) ----------------------------------------------------------------

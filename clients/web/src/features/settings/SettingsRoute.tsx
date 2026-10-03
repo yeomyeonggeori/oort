@@ -212,7 +212,7 @@ export function SettingsRoute() {
       {offline && section !== "ai" && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼습니다. 저장은 다시 연결된 뒤에 할 수 있습니다."
+          message="연결이 끊겼어요. 저장은 다시 연결된 뒤에 할 수 있어요."
           testId="settings-offline-banner"
         />
       )}

@@ -261,7 +261,7 @@ describe("틀: 두 절과 순서 (#2877 시안 §1)", () => {
     const titles = Array.from(
       host?.querySelectorAll("#ai-my-accounts-title, #ai-team-title, #ai-defaults-title") ?? []
     ).map((h) => h.textContent);
-    expect(titles).toEqual(["내 계정", "팀 AI 키", "기본 AI"]);
+    expect(titles).toEqual(["내 AI 계정", "팀 AI 키", "기본 AI"]);
     expect(q("ai-my-accounts")?.textContent).toContain("이 맥");
     expect(q("ai-team")?.textContent).toContain("이 서버");
     expect(q("ai-team")?.textContent).toContain("운영자만 바꿔요");

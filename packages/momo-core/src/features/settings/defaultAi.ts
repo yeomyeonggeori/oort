@@ -156,7 +156,7 @@ export function probeModelLists(probe: unknown): TeamLinkModels[] {
 /** 고르지 않음 = 줄을 지운다. 그때 무엇이 정하는지를 말한다(PR #3039 우선순위). */
 export const TEAM_DEFAULT_UNSET_LABEL: Record<TeamDefaultRowId, string> = {
   teamAgent: "고르지 않음 · 에이전트마다 정함",
-  summary: "고르지 않음 · 서버가 정함",
+  summary: "고르지 않으면 서버가 정해요",
 };
 
 export const DEFAULT_MODEL_LABEL = "기본 모델";

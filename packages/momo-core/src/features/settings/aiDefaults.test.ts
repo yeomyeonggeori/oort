@@ -109,8 +109,8 @@ describe("개인 행 선택지와 모델 줄", () => {
   it("모델 이름을 지어내지 않는다: 구독은 CLI 기본값, 팀 키는 서버가 준 개수만", () => {
     const team = { status: "present", name: "OpenAI", failed: false, modelCount: 12 } as const;
     expect(modelLine({ kind: "profile", harness: "claude", label: "개인" }, team)).toBe("모델은 CLI 기본값");
-    expect(modelLine({ kind: "teamKey" }, team)).toBe("모델은 서버가 정함 · 이 키로 쓸 수 있는 모델 12개");
-    expect(modelLine({ kind: "teamKey" }, { ...team, modelCount: null })).toBe("모델은 서버가 정함");
+    expect(modelLine({ kind: "teamKey" }, team)).toBe("모델은 서버가 정해요 · 이 키로 쓸 수 있는 모델 12개");
+    expect(modelLine({ kind: "teamKey" }, { ...team, modelCount: null })).toBe("모델은 서버가 정해요");
   });
 });
 
