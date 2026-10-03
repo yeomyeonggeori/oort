@@ -6,7 +6,7 @@
 - 표기: [V] 이 세션에서 실행해 확인 · **runtime-unverified** 실제 WebSocket·TLS·Railway·실기기 Secure Enclave는 실행하지 않음
 
 ## 한 줄 결론
-**M4 GO (조건 7개).** 독립 보안 검수가 High 1건(H1: 서버가 만든 박스에 소유자가 붙어 평문·입력이 서버 쪽으로 샘)을 찾았고, 이 PR에서 고쳤다(감사를 타입 상태로 강제, 아래 「검수 결과」). 수정 후 서버가 평문을 읽거나 PTY 입력을 주입하는 경로는 이 프로토콜에서 찾지 못했다([V] 시험 34개 + 변이 31개 중 29개 RED + null-cipher 사보타주). 단 아래 「M4 착수 조건」 7개를 M4 수용 기준에 넣어야 하고, 그중 ①(새 기기 등록의 신뢰 뿌리)과 ②(감사의 타입 상태 유지)가 없으면 NO-GO다.
+**M4 GO (조건 7개).** 독립 보안 검수가 High 1건(H1: 서버가 만든 박스에 소유자가 붙어 평문·입력이 서버 쪽으로 샘)을 찾았고, 이 PR에서 고쳤다(감사를 타입 상태로 강제, 아래 「검수 결과」). 수정 후 서버가 평문을 읽거나 PTY 입력을 주입하는 경로는 이 프로토콜에서 찾지 못했다([V] 시험 35개 + 변이 32개 중 30개 RED + null-cipher 사보타주). 단 아래 「M4 착수 조건」 7개를 M4 수용 기준에 넣어야 하고, 그중 ①(새 기기 등록의 신뢰 뿌리)과 ②(감사의 타입 상태 유지)가 없으면 NO-GO다.
 
 ## 프로토콜 (암호군 1개, 협상 없음, 스키마 `momo.blind_pty.v1`)
 
@@ -48,7 +48,7 @@ T = SHA-256(스키마 ‖ box_id ‖ host_pub ‖ dev_pub ‖ nonce_d ‖ nonce_
 `p256`의 `ecdh` 기능이 `hkdf 0.13.0` 패키지를 잠금 파일에 **하나 추가**한다(MIT OR Apache-2.0, RustCrypto). `legal/generated/GHCR_*`를 재생성했고 `scripts/check_ghcr_notice_bundle.sh` PASS. 새 크레이트 매니페스트는 `server-rust/Dockerfile` COPY에 추가했다.
 
 ## 시험과 사보타주 [V]
-`cargo test -p momo-blind-pty`: 프로토콜 29 + 단위 2 + 서버 라우트 1 + loopback 1 + 격리 1 = 34개, 전부 GREEN. 모든 단정은 거부 **이유**(`Error` 변종)를 구분해 확인한다.
+`cargo test -p momo-blind-pty`: 프로토콜 30 + 단위 2 + 서버 라우트 1 + loopback 1 + 격리 1 = 35개, 전부 GREEN. 모든 단정은 거부 **이유**(`Error` 변종)를 구분해 확인한다.
 
 ### 수용 기준 ①: 각 거부를 RED로 잠금
 | 시험 | 닫는 위협 |
@@ -71,7 +71,7 @@ T = SHA-256(스키마 ‖ box_id ‖ host_pub ‖ dev_pub ‖ nonce_d ‖ nonce_
 | `truncation_by_the_relay_is_visible_as_a_missing_close` | 꼬리 절단은 인증된 Close 부재로 보임 |
 | `pending_challenges_are_capped_before_authentication`, `hello_for_another_box_is_refused` | 인증 전 상태 상한, 다른 박스 |
 | `box_provisioned_with_a_server_chosen_device_never_yields_a_usable_session`, `owner_audit_checks_signer_and_member_set_independently`, `box_list_for_a_different_box_is_refused_by_agent_and_by_audit` | 서버가 박스 생성 때 기기를 끼워 넣음(H1), 다른 박스용 목록 재사용 |
-| `device_list_version_must_advance_by_exactly_one`, `device_list_wire_format_roundtrips_and_rejects_garbage` | 버전 점프로 얼리기, 목록 직렬화 |
+| `device_list_version_must_advance_by_exactly_one`, `accepted_device_lists_must_be_non_empty_and_bounded`, `device_list_wire_format_roundtrips_and_rejects_garbage` | 버전 점프·빈 목록으로 얼리기, 목록 직렬화 |
 | `device_never_gets_a_usable_session_from_a_forged_ready` | 위조 Ready |
 | `isolation::no_other_workspace_member_depends_on_the_spike_crate` | 프로덕션 미연결(다른 멤버가 의존하면 RED, 수동으로 확인) |
 
@@ -88,7 +88,7 @@ test result: FAILED. 23 passed; 6 failed
 한계: 코어 덤프·APM·패닉 덤프는 실행하지 않았다(M4/H4의 라우트 시험).
 
 ### 변조 시험(가드를 하나씩 제거했을 때 RED가 되는가)
-`~/.cache/momo-scratch/3409/mutate.py`(로컬 스크래치, 커밋하지 않음)로 소스의 가드 한 줄씩을 `if false`/삭제로 바꿔 전체 시험을 돌렸다. 31개 변이 중 29개가 RED이고 2개는 RED가 아니다(아래).
+`~/.cache/momo-scratch/3409/mutate.py`(로컬 스크래치, 커밋하지 않음)로 소스의 가드 한 줄씩을 `if false`/삭제로 바꿔 전체 시험을 돌렸다. 32개 변이 중 30개가 RED이고 2개는 RED가 아니다(아래).
 기기 목록 확인(hello·auth 각각), 기기 서명 검증, 영속 소비 저장소, 만료, 목록 버전(단조·+1)·서명자, 기기의 host 키 고정·서명 검증, 지문 대조·지문 필수, 런너 증명, 소유자 보증(검증·서명자 목록), 카운터, 방향 키 분리, transcript의 임시키 포함, 대기 챌린지 상한, 박스 id(hello·에이전트 생성·감사), Ready 선행, 핀 덮어쓰기, 감사(서명자·구성원·건너뜀), `peer_closed`가 Close에만 묶임.
 **RED가 아닌 2개(= 중복 방어층, 막힌 위협이 없다는 뜻이 아님):** ① AEAD AAD의 transcript(키 도출이 이미 transcript를 salt로 씀), ② `confirm`의 Ready 종류 검사(세션의 `awaiting_ready`가 이미 첫 프레임을 Ready로 한정). 별개로, AAD의 방향 바이트는 방향별 키와 중복이라 독립 방어의 증거가 없다: 방향 바이트를 한쪽만 바꾸면 RED이지만 그것은 양 끝이 어긋나서일 뿐이다.
 
@@ -114,7 +114,16 @@ test result: FAILED. 23 passed; 6 failed
 | L1 | Low | 서버가 대기 챌린지 8개를 60초마다 점유해 정상 붙기를 막음(DoS) | 문서화, M4 |
 | L2 | Low | 기기가 `expires_ms`를 로컬에서 안 봄(박스가 강제하므로 무해), 키 zeroize 없음 | M4 하드닝 |
 | L3 | Low | 새 기기 페어링은 목록과 런너 지문을 QR로 함께 받아야 함 | **M4 조건 ①** |
-수정 뒤 재검수 결과는 PR 본문에 있다.
+
+**재검수(수정 뒤 `eaa45b749`, 새 fresh 검수자): 판정 `High 0` (Blocker 0).** H1은 닫혔다. 기기 쪽에서 감사를 거치지 않고 `Session`을 얻는 경로가 없고(`Session::new`는 `pub(crate)`, `PendingDevice` 필드는 private, `confirm`이 유일한 출구), 새 시험은 가드를 하나씩 제거하면 모두 RED였다. 새로 찾은 항목:
+| # | 심각도 | 내용 | 처리 |
+|---|---|---|---|
+| N1 | Medium | `+1` 규칙 아래 폐기 경합은 선착순이고 서버가 도착 순서를 고를 수 있다(도난 기기의 목록이 소유자의 폐기 목록을 이길 수 있음) | **M4 조건 ④에 추가** |
+| N2 | Medium | 낡은 `owner` 상태의 기기는 서버가 숨긴 폐기를 감사에서 못 본다 | **M4 조건 ④(신선도)** |
+| N3 | Low | `accept`가 빈 목록·16개 초과를 받음 | **수정함**(`well_formed`), 시험·변이 M25 RED |
+| N4 | Low | 감사 false reject: 박스가 v+1을 알고 기기가 모르면 거부(서버가 갱신을 보류해 키울 수 있으나 DoS뿐) | M4: Ready의 서명된 +1 목록을 `owner.accept`로 채택 |
+| N5 | Low | 클라이언트 부트스트랩 목록에 자기 키가 있는지 검사 안 함 | 조건 ①에 포함 |
+| N6 | Low | 목록 갱신 서명이 내용을 보여 주지 않는 blind signing | M4 UX 조건(서명 화면에 기기 변경 내용 표시) |
 
 ## 위협 — 막음 / 못 막음
 | 위협 (ADR-0197) | 이 프로토타입 | 비고 |
@@ -137,11 +146,11 @@ test result: FAILED. 23 passed; 6 failed
 1. **새 소유자 기기 등록의 신뢰 뿌리.** 새 기기가 처음 받는 `DeviceList`와 런너 지문은 서버를 거치면 안 된다. 기존 기기가 QR/단문 코드로 직접 넘기는 대면 페어링이 필요하다. 이 프로토타입은 `DeviceListState::bootstrap`이 자기 서명 목록을 그냥 받는다(TOFU). **가장 큰 열린 구멍이다.**
 2. **감사의 타입 상태를 지킨다.** 실제 클라이언트(웹·폰·데스크탑)도 「감사 통과 전에는 보낼 수 없는」 API만 노출해야 한다. 감사는 `Ready` 안의 목록으로 하고 서버가 중계한 사본으로 하면 무의미하다.
 3. **박스 생성 컨트롤은 소유자 기기 서명**(R2)이고 런너가 지문으로 고정한 서명자만 받아 첫 목록을 만든다(생성 요청의 `box_id`와 첫 목록 서명자를 런너가 대조). 이 프로토타입은 첫 목록이 런너 로컬에서 온다고 가정한다.
-4. **폐기 전달과 영속.** 소유자 기기가 붙은 직후 자기 최신 목록을 암호화 채널로 밀어 넣고 box-agent는 +1 버전을 받아들인다. box-agent의 현재 목록은 볼륨에 영속하고 재시작 때 초기 목록으로 되돌리지 않는다. 목록에서 빠진 기기의 열린 세션은 즉시 끊는다. 서버가 전달을 막는 경우(폐기 억제)는 이 채널 푸시로만 닫힌다.
+4. **폐기 전달·신선도·영속.** 소유자 기기가 붙은 직후 자기 최신 목록을 암호화 채널로 밀어 넣고 box-agent는 +1 버전을 받아들인다. box-agent의 현재 목록은 볼륨에 영속하고 재시작 때 초기 목록으로 되돌리지 않는다. 목록에서 빠진 기기의 열린 세션은 즉시 끊는다. 서버가 전달을 막는 경우(폐기 억제)는 이 채널 푸시로만 닫힌다. 기기의 `owner` 상태도 최신이어야 한다(N2). 동시에 서로 다른 v+1이 오면 선착순이므로(N1) 소유자 기기끼리 충돌 해소 규칙(예: 폐기가 항상 우선하거나 `prev_hash`)을 M4에서 정한다. 감사는 Ready의 서명된 +1 목록을 채택해 false reject를 풀어야 한다(N4).
 5. **붙기 단위의 서버측 인가는 중복 방어층**으로 둔다(소유자·박스 켜짐·host 폐기). 서버 판단이 틀려도 box-agent와 기기가 막는다는 것이 이 설계의 핵심이므로 시험은 서버 검증을 끈 상태로 돌린다.
 6. **자원 상한.** 프레임 속도·최대 세션 길이·유휴·박스당 동시 붙기·기기별 대기 챌린지 한도(L1)는 M4 시험으로 잠근다.
 7. **서버 라우트 시험 확장.** 이 PR의 로그 grep은 하네스 중계가 쓴 `tracing` 로그와 기록 바이트만 본다(실제 서버 라우트가 아님). M4에서 실제 라우트에 같은 표식 방식을 적용하고 코어 덤프 비활성·패닉 덤프·메트릭 라벨 시험을 더한다.
 
 ## 이탈과 한계 기록
 - 이슈 #3409가 `status:ready`가 아니어서 `goal_claim.sh --force`로 시작했다(ADR PR #3406이 머지 대기 중이었다. 시작 시 ADR 파일을 PR 워크트리에서 읽었고 머지 후 rebase했다).
-- 보안 검수 결과는 PR 본문에 있다.
+- 보안 검수는 두 번 했다(위 「검수 결과」). 첫 검수 High 1은 수정했고 재검수는 High 0이다.

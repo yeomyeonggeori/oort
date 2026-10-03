@@ -718,3 +718,24 @@ fn owner_audit_checks_signer_and_member_set_independently() {
         Some(Error::BoxListUntrusted)
     );
 }
+
+#[test]
+fn accepted_device_lists_must_be_non_empty_and_bounded() {
+    let mut f = Fixture::new();
+    // An empty list (owner mistake or stolen device) would lock the box forever.
+    let empty = DeviceList::sign(f.box_id, 2, vec![], &f.dev_a);
+    assert_eq!(
+        f.agent.on_device_list(empty).unwrap_err(),
+        Error::DeviceListBadSigner
+    );
+    // More devices than the Ready frame can carry.
+    let many: Vec<_> = (1u8..=20).map(|i| dev_pub(&dev_key(i + 100))).collect();
+    let mut with_signer = many.clone();
+    with_signer.push(dev_pub(&f.dev_a));
+    let big = DeviceList::sign(f.box_id, 2, with_signer, &f.dev_a);
+    assert_eq!(
+        f.agent.on_device_list(big).unwrap_err(),
+        Error::DeviceListBadSigner
+    );
+    assert_eq!(f.agent.device_list_version(), 1);
+}

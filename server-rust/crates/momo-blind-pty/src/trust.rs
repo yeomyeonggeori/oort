@@ -206,6 +206,12 @@ impl DeviceList {
         })
     }
 
+    /// Shape every accepted list must have: non-empty (an empty list locks the
+    /// box forever) and small enough to fit the Ready frame.
+    pub(crate) fn well_formed(&self) -> bool {
+        !self.devices.is_empty() && self.devices.len() <= Self::MAX_DEVICES
+    }
+
     pub(crate) fn signature_ok(&self) -> bool {
         verify_dev(
             &self.signer,
@@ -235,6 +241,7 @@ impl DeviceListState {
     /// relay of any list therefore changes nothing without an owner signature.
     pub fn accept(&mut self, next: DeviceList) -> Result<(), Error> {
         if next.box_id != self.current.box_id
+            || !next.well_formed()
             || !next.signature_ok()
             || !self.current.devices.contains(&next.signer)
         {
