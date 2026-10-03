@@ -245,6 +245,28 @@ pub async fn get_hosted_connection_in_tx(
         .transpose()
 }
 
+/// The newest connection of one agent (any status), locked `FOR UPDATE`.
+/// #3392: the register endpoint decides reuse from it.
+pub async fn latest_hosted_connection_for_agent_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<Option<HostedConnection>, sqlx::Error> {
+    let sql = format!(
+        "SELECT {PROJECTION} FROM hosted_agent_connection \
+          WHERE workspace_id = $1 AND agent_member_id = $2 \
+          ORDER BY created_at DESC, id DESC LIMIT 1 FOR UPDATE"
+    );
+    sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(agent_member_id)
+        .fetch_optional(&mut *conn)
+        .await?
+        .as_ref()
+        .map(decode)
+        .transpose()
+}
+
 pub async fn list_hosted_connections_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,

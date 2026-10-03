@@ -470,6 +470,24 @@ pub struct AgentPortConfig {
     /// every other value — `false`, `0`, `off`, a typo — turns it off, so a
     /// misspelled kill never leaves the path open.
     pub subscription_agents_enabled: bool,
+    /// ADR-0193 증보 2026-10-03 (#3397 결재) — **Claude subscription agents:
+    /// off by default, on only for an exact `true`.**
+    ///
+    /// `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`. The owner's decision: driving a
+    /// Claude subscription agent on someone's behalf stays 「회색·문의 중」 until
+    /// Anthropic replies, so a fresh instance does not register one. Off means:
+    /// `POST …/subscription-agents/register` with `harness: claude_code` is
+    /// refused with `error.code = claude_subscription_agent_paused` and writes
+    /// nothing, and agent rows of that kind report
+    /// `brainUnavailableReason = claude_subscription_agent_paused`. Codex is not
+    /// affected. An operator turns it on knowingly, per instance.
+    ///
+    /// This flag governs the **registration path and the status field only**.
+    /// Blocking and announcing runtime delivery to Claude `owner_only` agents
+    /// that already exist is #3397's job, not this switch's.
+    ///
+    /// The parse leans toward *off*: unset, blank, `True`, `1`, a typo — all off.
+    pub claude_subscription_agents_enabled: bool,
     /// ADR-0162 증보 1 / HAP-E7 — the MCP OAuth 2.1 authorization server.
     ///
     /// **Disabled by default, and disabled is not "degraded".** With this off
@@ -685,6 +703,7 @@ impl Default for AgentPortConfig {
             per_ip_limit: 1200,
             hosted_delivery_enabled: false,
             subscription_agents_enabled: true,
+            claude_subscription_agents_enabled: false,
             oauth: AgentPortOauthConfig::default(),
         }
     }
@@ -711,6 +730,15 @@ fn hosted_delivery_gate_open(value: Option<&str>) -> bool {
 /// ADR-0193 D6 (#2815) — read the subscription-agent kill switch.
 fn subscription_agents_from_env() -> bool {
     subscription_agents_switch_on(env("MOMO_SUBSCRIPTION_AGENTS_ENABLED").as_deref())
+}
+
+/// #3397 — read the Claude subscription-agent opt-in. Off unless an exact `true`.
+fn claude_subscription_agents_from_env() -> bool {
+    claude_subscription_agents_switch_on(env("MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED").as_deref())
+}
+
+fn claude_subscription_agents_switch_on(value: Option<&str>) -> bool {
+    value.is_some_and(|value| value.trim() == "true")
 }
 
 /// Unset = on (the shipped default); an exact `true` = on; **anything else =
@@ -760,6 +788,7 @@ impl AgentPortConfig {
             per_ip_limit: env_number("MOMO_AGENT_PORT_RATE_LIMIT_PER_IP", defaults.per_ip_limit)?,
             hosted_delivery_enabled: hosted_delivery_from_env(),
             subscription_agents_enabled: subscription_agents_from_env(),
+            claude_subscription_agents_enabled: claude_subscription_agents_from_env(),
             oauth: AgentPortOauthConfig::from_env()?,
         })
     }
@@ -2332,6 +2361,26 @@ mod tests {
             Some("fasle"),
         ] {
             assert!(!subscription_agents_switch_on(off), "{off:?}");
+        }
+    }
+
+    /// #3397 결재. Off by default; only an exact `true` opens it.
+    #[test]
+    fn the_claude_subscription_opt_in_is_off_by_default_and_only_an_exact_true_opens_it() {
+        assert!(!AgentPortConfig::default().claude_subscription_agents_enabled);
+        for on in [Some("true"), Some(" true\n")] {
+            assert!(claude_subscription_agents_switch_on(on), "{on:?}");
+        }
+        for off in [
+            None,
+            Some(""),
+            Some("false"),
+            Some("True"),
+            Some("1"),
+            Some("yes"),
+            Some("ture"),
+        ] {
+            assert!(!claude_subscription_agents_switch_on(off), "{off:?}");
         }
     }
 

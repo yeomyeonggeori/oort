@@ -1269,6 +1269,12 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/agents/{agent}/credentials/{credential}/revoke",
             post(routes::agent_credentials::revoke),
         )
+        // #3392 AIH-2 (ADR-0193 증보 2026-10-03) — 로그인 직후 대행 등록. Owner/admin
+        // only, idempotent per (caller, harness, device), kill-switch aware.
+        .route(
+            "/v1/workspaces/{ws}/subscription-agents/register",
+            post(routes::subscription_agents::register),
+        )
         .route(
             "/v1/workspaces/{ws}/hosted-agent-connections",
             post(routes::hosted_agent_connections::create)
