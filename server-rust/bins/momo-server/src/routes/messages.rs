@@ -626,6 +626,8 @@ pub async fn send(
     // visibly independent knobs rather than one.
     let hosted_delivery_enabled = state.agent_port.config.hosted_delivery_enabled;
     let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
+    let claude_subscription_agents_enabled =
+        state.agent_port.config.claude_subscription_agents_enabled;
     let context_max_messages = state.mentions.context_max_messages;
     // ADR-0158 D2 — the refinement block becomes props here, *before* the
     // transaction, because it is a pure rewrite of an already-validated value.
@@ -741,6 +743,7 @@ pub async fn send(
                     via_token_id,
                     opens_stream,
                     subscription_agents_disabled: !subscription_agents_enabled,
+                    claude_subscription_agents_disabled: !claude_subscription_agents_enabled,
                 },
             )
             .await?
@@ -778,6 +781,7 @@ pub async fn send(
                         gateway_enabled,
                         hosted_delivery_enabled,
                         subscription_agents_enabled,
+                        claude_subscription_agents_enabled,
                         context_max_messages,
                         routing: requested_routing.as_ref(),
                     },

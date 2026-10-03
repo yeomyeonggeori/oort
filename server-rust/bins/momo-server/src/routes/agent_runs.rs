@@ -141,6 +141,8 @@ pub async fn create(
     let via_token_id = audit_via_token_id(&principal);
     let client_run_id = request.client_run_id;
     let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
+    let claude_subscription_agents_enabled =
+        state.agent_port.config.claude_subscription_agents_enabled;
 
     let outcome = settle_db(
         "agent_runs.create",
@@ -189,6 +191,26 @@ pub async fn create(
                         return Ok(Err(ApiError::new(
                             StatusCode::CONFLICT,
                             "subscription agents are disabled on this server",
+                        )));
+                    }
+                    // #3397 (결재 2026-10-03) — a Claude subscription agent is
+                    // 「회색·문의 중」: oort does not drive it on anyone's behalf
+                    // until the instance opts in, whenever it was registered.
+                    // The code is the same one the read contract reports as
+                    // `brainUnavailableReason`.
+                    if !claude_subscription_agents_enabled
+                        && momo_agent::agent_claude_subscription_blocked_in_tx(
+                            conn,
+                            workspace_id,
+                            agent_member_id,
+                            false,
+                        )
+                        .await?
+                    {
+                        return Ok(Err(ApiError::coded(
+                            StatusCode::CONFLICT,
+                            momo_agent::CLAUDE_SUBSCRIPTION_AGENT_PAUSED,
+                            "Claude subscription agents are paused on this server",
                         )));
                     }
                 }

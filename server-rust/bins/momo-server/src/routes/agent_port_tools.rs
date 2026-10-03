@@ -133,6 +133,23 @@ pub(crate) async fn tool_view_for(state: &AppState, caller: HostedCaller) -> Too
             }
         }
     }
+    // #3397 (결재 2026-10-03) — the same door for a Claude subscription agent
+    // while the instance has not opted in: agents registered before the flag
+    // existed, and jobs queued for them, deliver nothing. Fail closed.
+    if !state.agent_port.config.claude_subscription_agents_enabled {
+        match claude_subscription_blocked_caller(&state.pool, caller).await {
+            Ok(false) => {}
+            Ok(true) => return ToolView::empty(),
+            Err(error) => {
+                tracing::error!(
+                    error = %error,
+                    route = "/v1/mcp/agent-port",
+                    "Agent Port Claude subscription resolution failed"
+                );
+                return ToolView::empty();
+            }
+        }
+    }
     match hosted_identity(&state.pool, caller).await {
         Ok(Some(identity)) => ToolView::intersect(
             &identity.approved_scopes,
@@ -160,6 +177,24 @@ async fn owner_only_caller(pool: &PgPool, caller: HostedCaller) -> Result<bool, 
         Box::pin(async move {
             momo_agent::agent_is_owner_only_in_tx(conn, caller.workspace_id, caller.agent_member_id)
                 .await
+        })
+    })
+    .await
+}
+
+async fn claude_subscription_blocked_caller(
+    pool: &PgPool,
+    caller: HostedCaller,
+) -> Result<bool, DbError> {
+    momo_db::with_tenant_tx(pool, caller.workspace_id, move |conn| {
+        Box::pin(async move {
+            momo_agent::agent_claude_subscription_blocked_in_tx(
+                conn,
+                caller.workspace_id,
+                caller.agent_member_id,
+                false,
+            )
+            .await
         })
     })
     .await
@@ -477,6 +512,8 @@ async fn message_post(
     let gateway_enabled = state.agent_gateway.enabled();
     let hosted_delivery_enabled = state.agent_port.config.hosted_delivery_enabled;
     let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
+    let claude_subscription_agents_enabled =
+        state.agent_port.config.claude_subscription_agents_enabled;
     let context_max_messages = state.mentions.context_max_messages;
 
     let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
@@ -535,6 +572,7 @@ async fn message_post(
                     via_token_id: Some(caller.token_id),
                     opens_stream: false,
                     subscription_agents_disabled: !subscription_agents_enabled,
+                    claude_subscription_agents_disabled: !claude_subscription_agents_enabled,
                 },
             )
             .await?;
@@ -564,6 +602,7 @@ async fn message_post(
                         gateway_enabled,
                         hosted_delivery_enabled,
                         subscription_agents_enabled,
+                        claude_subscription_agents_enabled,
                         context_max_messages,
                         routing: None,
                     },
@@ -930,6 +969,8 @@ async fn run_complete(
     let (usage, usage_detail) = usage_from_arguments(args)?;
     let secret = state.agent_port.envelope_secret().to_string();
     let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
+    let claude_subscription_agents_enabled =
+        state.agent_port.config.claude_subscription_agents_enabled;
 
     let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
         Box::pin(async move {
@@ -961,6 +1002,7 @@ async fn run_complete(
                     actor_member_id: Some(caller.agent_member_id),
                     via_token_id: Some(caller.token_id),
                     subscription_agents_enabled,
+                    claude_subscription_agents_enabled,
                 },
             )
             .await?;

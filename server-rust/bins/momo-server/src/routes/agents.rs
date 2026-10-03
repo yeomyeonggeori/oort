@@ -177,6 +177,8 @@ pub async fn create(
     let gateway_enabled = state.agent_gateway.enabled();
     let hosted_delivery_enabled = state.agent_port.config.hosted_delivery_enabled;
     let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
+    let claude_subscription_agents_enabled =
+        state.agent_port.config.claude_subscription_agents_enabled;
     let input = NewAgentMember {
         display_name,
         handle,
@@ -274,6 +276,7 @@ pub async fn create(
                         gateway_enabled,
                         hosted_delivery_enabled,
                         subscription_agents_enabled,
+                        claude_subscription_agents_enabled,
                     )
                     .await?;
 

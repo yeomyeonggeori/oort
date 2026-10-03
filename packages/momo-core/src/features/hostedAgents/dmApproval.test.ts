@@ -22,6 +22,7 @@ describe("DM composer hint (#2891)", () => {
       "connection_unavailable",
       "delivery_disabled",
       "subscription_disabled",
+      "claude_subscription_agent_paused",
     ];
     for (const state of all) {
       const hint = dmComposerHint(state, names);
