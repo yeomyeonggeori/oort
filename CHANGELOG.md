@@ -11,6 +11,22 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.16] - 2026-10-03
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.16>. Tag target: `main=31f4916e`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Five database migrations since 0.1.15 (111-115): the schema goes from 110 to 115 on the api pre-deploy. 111 adds `member_avatar_media` (member profile photos: own-write only, composite FK, FORCE row-level security). 112 adds the `drive_reclaimed_at` marker for avatar Drive reclaim (rows are kept). 113 adds `work_session.origin` (`host` or `local_pty`) and `folder_label`, plus a trigger that refuses work-control creation on a shared local session. 114 adds `work_session_share` (shared summary S1, FORCE row-level security) and widens the `tool` CHECK. 115 adds `work_session.turn_started_at` and `notification_rule.work_complete_push` (default true). No data is dropped. Rolling the app image back to 0.1.15 keeps schema 115: 0.1.15 does not read the new columns or tables, so only the new features turn off.
+
+### Added
+- Server: team work sharing (ADR-0190 D4, ADR-0194). Sharing a "My work" terminal pane to a channel posts a card in the home channel; only repo, branch, harness, status, phase, diff counts, PR URL and last activity (S1) reach the server, never terminal text, input or commit titles. The server refuses every input, run, read and terminate control on a shared pane. A "Team work" board and a read-only session detail (web, desktop, phone "Work" tab) show the same data.
+- Web, desktop and phone: sidebar and notification rework. The rail is workspace-only (collapse with Cmd+B to destination icons), destinations sit under "Search and go", the message-search row is removed, the inbox ("Needs you") and the activity log are separate with a single source for the count, ink/amber pills and session status chips, desktop dock badge and OS notification kinds, opt-in browser notifications on web, and a phone tab badge.
+- Server: "work finished" push (ADR-0120 appendix A). Sent only for a session you started, after a turn of 60 seconds or more, and only when you are not looking; it can be switched off in Settings.
+- Server, web, desktop and phone: profile photos (ADR-0161 amendment). Upload, replace and delete in Settings; 4096 px and 5 MiB limits, 20 uploads per hour.
+- Desktop: "My work" new-session start location (recent, folder, home; worktree off by default, ADR-0190 amendment D3-c), "Needs reply", lighter pane chrome, shortcut settings with rebinding and conflict detection, and a Cmd+K "collapse the explorer" command.
+
+### Not in this release
+- Desktop and phone app changes ship with the desktop DMG and iOS builds, not the image.
+- The Drive reclaim job only runs on the Google Drive backend; oort-team uses the local backend (#3312).
+- `oort://work` deep link (#2865), agent approval owner assignment (#3336), wider agent delegation settings (#3356).
+
 ## [0.1.15] - 2026-10-01
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.15>. Tag target: `main=a6e5cd1b`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Thirteen database migrations since 0.1.14 (098–110): the schema goes from 097 to 110 on the api pre-deploy. 098 adds `agent.model_source` (backfill: `hermes-agent` models read `instance_default`). **099 drops the legacy memory plane** (ADR-0129: the eight tables `memory_item`, `memory_source_ref`, `memory_visibility_grant`, `memory_lifecycle_event`, `memory_candidate`, `memory_extraction_cursor`, `workspace_memory_policy`, `context_packet`, their functions, and three `workspace.memory_external_provider_consent*` columns); it has no consumers and the data loss is intended (ADR-0196 D11); the `vector` extension stays. 100–110 add the team memory v2 `mem_*` tables, definer functions and the `mem_definer` and `momo_memory` roles; every new table has FORCE row-level security, writes go through definer functions only, and `message` gets one RESTRICTIVE lock-down policy. Rolling the app image back to 0.1.14 keeps schema 110: 0.1.14 does not read `mem_*`, but the tables 099 dropped do not come back (0.1.14 does not use them either).
