@@ -1388,7 +1388,7 @@ async fn b53a_4_the_operating_surface_refuses_the_unauthorized() {
 
 /// **A Hangul-named agent's paused line reads like Korean** (goal SRV-B5b).
 ///
-/// `paused_mention_body` wrote `루나은(는) 현재 일시정지되어 있습니다.` into the
+/// `paused_mention_body` wrote `루나은(는) 지금 일시정지돼 있어요.` into the
 /// channel — a durable `message.body`, not a label — where the particle was
 /// fully decidable from 나. Every agent 성재 actually runs is named in Hangul,
 /// so the hedge was on screen every time an agent was paused.
@@ -1437,7 +1437,7 @@ async fn b5b_a_hangul_named_agent_is_paused_in_korean() {
     let lines = messages_by(&su, &tenant, agent).await;
     assert_eq!(lines.len(), 1, "one paused notice: {lines:?}");
     assert_eq!(
-        lines[0].1, "루나는 현재 일시정지되어 있습니다.",
+        lines[0].1, "루나는 지금 일시정지돼 있어요.",
         "나 is an open syllable, so the particle is 는 — decided, not hedged"
     );
     assert!(

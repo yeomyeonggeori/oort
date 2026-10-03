@@ -55,9 +55,9 @@ pub const HOSTED_DELIVERY_GUIDE_URL: &str =
 pub const HOSTED_SKIP_ACTION_HREF: &str = "/settings?section=agents";
 pub const HOSTED_SKIP_ACTION_LABEL: &str = "에이전트 자격 열기";
 
-/// #2897 — the door for `provider_required`: the team key lives on 설정 › AI 연결.
+/// #2897 — the door for `provider_required`: the team key lives on AI.
 pub const PROVIDER_REQUIRED_ACTION_HREF: &str = "/settings?section=ai";
-pub const PROVIDER_REQUIRED_ACTION_LABEL: &str = "AI 연결 열기";
+pub const PROVIDER_REQUIRED_ACTION_LABEL: &str = "AI 열기";
 
 /// The three hosted skip reasons that get a visible line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,13 +76,13 @@ pub enum HostedSkipReason {
     /// #2897 — a worker-served agent's turn found no team key (no provider
     /// link, no operator env key). Not a hosted reason, but the same fact
     /// shape ("why this agent did not answer") and the same line, so the
-    /// clients' one door rule (`noticeAction.ts`) opens 설정 › AI 연결.
+    /// clients' one door rule (`noticeAction.ts`) opens AI.
     ProviderRequired,
     /// #3041 — the operator's 「기본 AI」 row this turn would run on points at a
     /// team link that is no longer the one it was chosen on (the chain was
     /// re-saved, or the position is not one the worker calls). The worker does
     /// not answer on some other model instead; the line says so and opens the
-    /// same door (설정 › AI 연결) where the operator re-picks the row.
+    /// same door (AI) where the operator re-picks the row.
     DefaultAiUnresolved,
     /// #3396 — an agent whose brain is its owner's personal API key was asked
     /// to answer and that key is not there (revoked, never issued, owner gone,
@@ -162,11 +162,11 @@ pub fn hosted_skip_notice_body_with_owner(
         ),
         HostedSkipReason::ConnectionUnavailable => format!(
             "{agent_display_name}의 연결이 끊겨 있어서 답하지 못했어요. \
-             워크스페이스 관리자가 설정 › 연결 › 에이전트 자격에서 다시 연결할 수 있어요."
+             워크스페이스 관리자가 AI › 외부 연결에서 다시 연결할 수 있어요."
         ),
         HostedSkipReason::ChannelUnapproved => format!(
             "이 채널은 아직 {agent_display_name}에게 승인되지 않아서 전달하지 못했어요. \
-             워크스페이스 관리자가 설정 › 연결 › 에이전트 자격에서 이 채널을 승인할 수 있어요."
+             워크스페이스 관리자가 AI › 외부 연결에서 이 채널을 승인할 수 있어요."
         ),
         HostedSkipReason::DirectMessageNotApprovable => format!(
             "이 대화는 {agent_display_name}에게 전달되지 않아요. 외부 에이전트는 승인된 채널이나 1:1 대화에서 불러 주세요."
@@ -177,11 +177,11 @@ pub fn hosted_skip_notice_body_with_owner(
         ),
         HostedSkipReason::ProviderRequired => format!(
             "{agent_display_name}에게 연결된 AI가 없어서 답하지 못했어요. \
-             워크스페이스 관리자가 설정 › AI 연결에서 API 키를 연결할 수 있어요."
+             운영자가 AI에서 팀 AI 키를 연결할 수 있어요."
         ),
         HostedSkipReason::DefaultAiUnresolved => format!(
-            "{agent_display_name}의 기본 AI 연결이 바뀌어서 답하지 못했어요. \
-             다른 모델로 대신 답하지 않았어요. 워크스페이스 관리자가 설정 › AI 연결에서 기본 AI를 다시 고를 수 있어요."
+            "{agent_display_name}에 정해 둔 기본 AI를 쓸 수 없어서 답하지 못했어요. \
+             다른 모델로 대신 답하지 않았어요. 운영자가 AI에서 기본 AI를 다시 고를 수 있어요."
         ),
         HostedSkipReason::PersonalKeyUnavailable => format!(
             "{agent_display_name}에게 연결된 개인 API 키가 없어서 답하지 못했어요. \
@@ -275,12 +275,12 @@ mod tests {
         assert_eq!(
             hosted_skip_notice_body(HostedSkipReason::ConnectionUnavailable, "Claude Code"),
             "Claude Code의 연결이 끊겨 있어서 답하지 못했어요. \
-             워크스페이스 관리자가 설정 › 연결 › 에이전트 자격에서 다시 연결할 수 있어요."
+             워크스페이스 관리자가 AI › 외부 연결에서 다시 연결할 수 있어요."
         );
         assert_eq!(
             hosted_skip_notice_body(HostedSkipReason::ChannelUnapproved, "hermes"),
             "이 채널은 아직 hermes에게 승인되지 않아서 전달하지 못했어요. \
-             워크스페이스 관리자가 설정 › 연결 › 에이전트 자격에서 이 채널을 승인할 수 있어요."
+             워크스페이스 관리자가 AI › 외부 연결에서 이 채널을 승인할 수 있어요."
         );
         assert_eq!(
             hosted_skip_notice_body(HostedSkipReason::DirectMessageNotApprovable, "Claude Code"),
@@ -396,7 +396,7 @@ mod tests {
         assert_eq!(
             hosted_skip_notice_body(HostedSkipReason::ProviderRequired, "hermes"),
             "hermes에게 연결된 AI가 없어서 답하지 못했어요. \
-             워크스페이스 관리자가 설정 › AI 연결에서 API 키를 연결할 수 있어요."
+             운영자가 AI에서 팀 AI 키를 연결할 수 있어요."
         );
         let props = hosted_skip_notice_props(
             HostedSkipReason::ProviderRequired,
@@ -408,7 +408,7 @@ mod tests {
         assert_eq!(props["source"], HOSTED_SKIP_NOTICE_SOURCE);
         assert_eq!(props["reason"], "provider_required");
         assert_eq!(props["notice_action"]["href"], "/settings?section=ai");
-        assert_eq!(props["notice_action"]["label"], "AI 연결 열기");
+        assert_eq!(props["notice_action"]["label"], "AI 열기");
     }
 
     #[test]

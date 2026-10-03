@@ -266,7 +266,7 @@ pub struct DrainStats {
 /// A turn that fails silently is still worse than one that says so, so this is
 /// written on the timeline exactly where the answer would have been.
 pub fn degraded_provider_message() -> &'static str {
-    "지금은 답변을 만들지 못했습니다. 잠시 뒤에 다시 멘션해 주세요."
+    "지금은 답변을 만들지 못했어요. 잠시 뒤에 다시 멘션해 주세요."
 }
 
 /// Strip anything credential-shaped out of a string that is about to be
