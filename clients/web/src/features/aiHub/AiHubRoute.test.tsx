@@ -40,11 +40,14 @@ vi.mock("./AiHubPanes", async () => {
   const stub = (id: string) => () => createElement("div", { "data-testid": `ai-hub-pane-${id}` }, id);
   return {
     AiAccountsPane: stub("accounts"),
-    AiTeamKeysPane: stub("teamKeys"),
     AiAgentsPane: stub("agents"),
     AiExternalPane: stub("external"),
   };
 });
+
+vi.mock("./AiTeamKeysPane", () => ({
+  AiTeamKeysPane: () => createElement("div", { "data-testid": "ai-hub-pane-teamKeys" }, "teamKeys"),
+}));
 
 const reactActEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 beforeAll(() => {

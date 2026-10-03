@@ -3,6 +3,7 @@ import { Lock } from "lucide-react";
 import {
   AI_DEFAULT_ROWS,
   AI_DEFAULT_UNSET_LABEL,
+  aiDefaultRow,
   credentialKey,
   credentialName,
   credentialSource,
@@ -31,6 +32,12 @@ import {
   type TeamDefaultRowId,
   type TeamLinkModels,
 } from "@momo/core/features/settings/defaultAi";
+import {
+  AI_HUB_DEFAULT_ROWS,
+  AI_TEAM_KEYS_COPY,
+  aiDefaultFeatureRow,
+  defaultAiUnsetSentence,
+} from "@momo/core/features/ai/aiHubModel";
 import { cn } from "@/design/lib/cn";
 import { HarnessLoginDialog } from "@/features/welcome/harnessLogin/HarnessLoginDialog";
 import { Select } from "@/design/ui/select";
@@ -94,6 +101,7 @@ export function AiDefaultsTable({
   operator,
   browserTab,
   team,
+  variant = "settings",
 }: {
   teamKey: AiDefaultsTeamKey;
   /** 서버가 운영자라고 답했나(200)·아니라고 답했나(403). 모르면 null. */
@@ -101,11 +109,19 @@ export function AiDefaultsTable({
   browserTab: boolean;
   /** 팀 줄의 서버 값. 없으면 팀 줄은 읽기 전용이다. */
   team?: TeamDefaultsState;
+  /**
+   * `hub` = AI 허브 「팀 AI 키」 구획(AIH-6): 기능 이름을 평문으로 바꾸고, 줄마다 누구를 위한
+   * 것인지와 「고르지 않으면」 문장을 붙인다. 선택 칸·저장·폴백 판정은 그대로다.
+   */
+  variant?: "settings" | "hub";
 }) {
   const prefs = useAiDefaults();
   const accounts = useMyAccounts();
   const input: AiDefaultsInput = { accounts: accounts ?? [], teamKey, browserTab };
   const remote = useRemoteWork();
+  // 허브는 기능 이름 순서(팀 줄 먼저)를 모델이 정한다. 설정의 옛 표는 코어의 행 순서 그대로.
+  const tableRows: readonly AiDefaultRow[] =
+    variant === "hub" ? AI_HUB_DEFAULT_ROWS.map((hubRow) => aiDefaultRow(hubRow.rowId)) : AI_DEFAULT_ROWS;
   // 저장된 원격 작업 계정이 이 맥에 있는지 맞춘다(#3157). 브라우저 탭에는 이 맥이 없다.
   const savedRemote = prefs.remoteWork;
   const savedRemoteKey = savedRemote?.kind === "profile" ? `${savedRemote.harness}/${savedRemote.label ?? ""}` : "";
@@ -130,11 +146,12 @@ export function AiDefaultsTable({
         />
       )}
       <ul className="flex min-w-0 flex-col" aria-label="기능마다 부를 AI" data-testid="ai-defaults-table">
-        {AI_DEFAULT_ROWS.map((row, index) => (
+        {tableRows.map((row, index) => (
           <DefaultRow
             key={row.id}
             row={row}
-            last={index === AI_DEFAULT_ROWS.length - 1}
+            hub={variant === "hub"}
+            last={index === tableRows.length - 1}
             prefs={prefs}
             input={input}
             accountsKnown={accounts !== null}
@@ -143,14 +160,18 @@ export function AiDefaultsTable({
           />
         ))}
       </ul>
-      <AiFoot>{PERSONAL_FOOT}</AiFoot>
+      <AiFoot>{variant === "hub" ? AI_TEAM_KEYS_COPY.defaultsFootPersonal : PERSONAL_FOOT}</AiFoot>
       {operator !== null && (
         <AiFoot>
           <span data-testid="ai-defaults-team-foot" data-operator={operator ? "yes" : "no"}>
             {!operator
-              ? TEAM_FOOT_MEMBER
+              ? variant === "hub"
+                ? AI_TEAM_KEYS_COPY.readOnlyDefaults
+                : TEAM_FOOT_MEMBER
               : team?.status === "ready"
-                ? TEAM_DEFAULTS_APPLIED
+                ? variant === "hub"
+                  ? AI_TEAM_KEYS_COPY.defaultsFootTeam
+                  : TEAM_DEFAULTS_APPLIED
                 : team?.status === "error"
                   ? TEAM_FOOT_OPERATOR
                   : TEAM_FOOT_OPERATOR_LOADING}
@@ -163,6 +184,7 @@ export function AiDefaultsTable({
 
 function DefaultRow({
   row,
+  hub,
   last,
   prefs,
   input,
@@ -171,6 +193,7 @@ function DefaultRow({
   remote,
 }: {
   row: AiDefaultRow;
+  hub: boolean;
   last: boolean;
   prefs: AiDefaultsPrefs;
   input: AiDefaultsInput;
@@ -352,6 +375,7 @@ function DefaultRow({
     lines.push({ key: "fallback", text: resolved.sentence, tone: "warn" });
   }
 
+  const hubRow = hub ? aiDefaultFeatureRow(row.id) : null;
   return (
     <li
       className={cn("ai-default-row px-2 py-2", !last && "border-b border-line")}
@@ -361,9 +385,9 @@ function DefaultRow({
     >
       <div data-slot="feature" className="flex min-w-0 flex-col">
         <span id={titleId} className="break-keep text-body font-semibold text-ink">
-          {row.title}
+          {hubRow ? hubRow.feature : row.title}
         </span>
-        <span className="break-keep text-meta text-ink-muted">{row.hint}</span>
+        <span className="break-keep text-meta text-ink-muted">{hubRow ? hubRow.hint : row.hint}</span>
       </div>
       <div data-slot="choice" className="flex min-w-0 flex-col gap-1">
         {choice}
@@ -381,9 +405,25 @@ function DefaultRow({
             {line.text}
           </span>
         ))}
+        {hubRow && (
+          <span className="break-keep text-timestamp text-ink-muted" data-testid={`ai-default-${row.id}-unset`}>
+            <b className="font-semibold text-ink">고르지 않으면 </b>
+            {defaultAiUnsetSentence(row.id, input.teamKey.status)}
+          </span>
+        )}
       </div>
-      <span data-slot="who" className="flex h-control items-center text-meta">
-        {personal ? (
+      <span data-slot="who" className={cn("flex text-meta", hubRow ? "flex-col gap-1 pt-1" : "h-control items-center")}>
+        {hubRow ? (
+          <>
+            <span className="font-semibold text-ink" data-testid={`ai-default-${row.id}-serves`}>
+              {hubRow.servesText}
+            </span>
+            <span className="inline-flex items-center gap-1 text-timestamp text-ink-muted">
+              {personal || teamEditable ? null : <Lock className="size-3 shrink-0" aria-hidden="true" />}
+              {personal ? "내가 바꿔요" : "운영자가 바꿔요"}
+            </span>
+          </>
+        ) : personal ? (
           <span className="text-agent">내 설정</span>
         ) : teamEditable ? (
           <span className="text-ink-muted">운영자</span>
