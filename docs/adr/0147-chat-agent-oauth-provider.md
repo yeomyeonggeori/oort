@@ -9,6 +9,7 @@
 - 증보: 2026-09-28 기본 AI 운영자 행(#3009) — `GET/PUT /v1/provider/default-ai`와 새 테이블 `provider_default_ai`(migration 093), 그리고 연결 확인 응답의 `modelIds`. 연결 확인 증보의 「provider 문자열은 크레이트 밖으로 나가지 않는다」를 모델 id 한 가지만큼 좁힌다. 파일 끝 「증보 2026-09-28 — 기본 AI 운영자 행」 절
 - 증보: 2026-09-28 키는 origin에 묶인다(#3040) — `PUT /v1/provider/link/chain`이 키 없이 hop의 origin을 바꾸면 409 `key_required_for_new_origin`. 파일 끝 「증보 2026-09-28 — 체인 키는 origin에 묶인다」 절
 - 증보: 2026-09-29 에이전트 모델 출처(#3147) — `agent.model_source`(migration 098)와 payload `model_source`가 #3146의 「모델 이름 비교」 휴리스틱을 대체한다. 파일 끝 「증보 2026-09-29 — 에이전트 모델 출처」 절
+- 증보: 2026-10-03 개인 API 키(#3396) — 조직이 한 사람에게 발급하는 소유자 있는 BYOK. 새 테이블 `personal_provider_link`와 `agent.uses_owner_key`(migration 117), 그 사람의 본인 전용 에이전트만 해석한다. 파일 끝 「증보 2026-10-03 — 개인 API 키」 절
 - 발단: 티키타카 smoke의 provider 선택에서 성재가 API 키 대신 ChatGPT 구독 OAuth(Codex CLI 방식)를 지정.
 
 ## 결정
@@ -164,3 +165,30 @@
 - **D5. worker 판정.** `model_source == "instance_default"`일 때만 행을 읽는다. 키가 없으면(이 증보 이전에 넣은 잡) `agent`로 본다. 이름 비교 휴리스틱은 남기지 않는다. 링크 label 대조·정직한 실패(#3041)는 그대로다.
 - **범위 밖.** 채널 요약을 만드는 워커 경로(`summary` 행)는 기억 기능 계획과 함께 결정한다. 웹 설정 UI(에이전트 모델 선택에 「인스턴스 기본 따르기」, 「아직 적용 전」 문구 제거)는 uxui 후속이다.
 - **검증.** 격리 PG: `default_ai_conformance_pg::the_model_source_decides_not_the_models_name`(같은 이름이어도 출처로 구분), `mention_routing_conformance_pg::m3147_1`(생성·수정·payload), `m3147_2`(098 백필). 사보타주 기록은 PR 본문.
+
+## 증보 2026-10-03 — 개인 API 키
+
+- Status: **Accepted**. 결재 인용: 성재 2026-10-03 AskUserQuestion ③ 「조직이 개인에게 주는 『개인 API 키』(소유자 있는 BYOK) 신설」. 원문: 「조직 레벨에서는 에이전트를 통한 소통이나 BYOK로 조직의 오케스트레이터… 내 개인적인 호출·작업 요청·터미널 개발 요청은 내 개인 OAuth나 조직에서 받은 BYOK로 내 개인 에이전트…」. 약관 근거는 로컬 조사 `claudedocs/diag-ai-connect-2026-10-03/policy-architecture.md` §2 B·§4.1(Anthropic 상업 약관의 「customer's own authorized users」, 키 소유·과금 주체는 조직, 키 1개를 여러 사람이 돌려 쓰지 않기).
+- 기안·구현: Sonnet 5.5 worker(#3396, 엔진).
+- **무엇이 새로운가.** 팀 키(`provider_link`·`provider_link_chain`)는 인스턴스 전역이고 팀이 함께 부르는 에이전트가 쓴다. 이 증보는 둘째 층이다. 워크스페이스 안의 한 사람에게 발급된 API 키이고, 그 사람의 `owner_only` 에이전트만 쓴다. 구독 OAuth를 서버가 쥐지 않는다는 위 증보 2026-09-26의 결정은 그대로다. 개인 키는 API 키다.
+- **D1. 그릇.** `personal_provider_link`(migration 117): `workspace_id`, `owner_member_id`(같은 워크스페이스의 사람만, 트리거), `format`(`openai`|`anthropic`), `base_url`, 봉인된 키(`bearer_ciphertext`, 팀 키와 같은 AES-GCM·`PROVIDER_LINK_MASTER_KEY`), `key_fingerprint`, `label`, 발급자, 회수 시각·회수자. RLS FORCE + `ws_isolation`이다. `app.provider_link_admin` GUC는 일반 멤버 tx에 켜지 않는다. 키 평문 컬럼은 없다. 소유자·키·origin은 갱신할 수 없고(트리거), 회수는 되돌릴 수 없다.
+- **D2. 발급 정책: 운영자 발급만.** 워크스페이스 owner/admin이 `POST /v1/workspaces/{ws}/personal-keys`로 한 사람에게 준다. 멤버가 자기 키를 직접 넣는 경로는 **없다**. 「정책이 허용하면 멤버도 추가」는 별도 결정(별도 설정 스위치)이고 이 증보가 열지 않는다. 회수는 관리자 또는 키의 소유자다. 목록은 관리자 전체, 멤버는 `GET …/personal-keys/mine`(본인 것만; 소유자 필터가 호출자 id라 매개변수가 아니다).
+- **D3. 해석 규칙: 에이전트를 통해서만.** 워커는 에이전트 행에서 시작한다: `invocation_scope = 'owner_only'`이고 `uses_owner_key`이며, 키는 그 에이전트의 `owner_human_id`가 소유한 활성(회수 안 됨) 행이고 소유자는 아직 활성 사람이다(`read_owner_key_for_agent`). 질문한 사람으로 키를 찾지 않는다. 별도 문(`AgentWorker::resolve_owner_key_transport`)이고 팀의 `resolve_transport`는 이 표를 모른다(구조 시험이 그 함수 안의 단어를 막는다). 캐시가 없어 회수는 다음 턴에 효력이 있다.
+- **D4. 폴백 없음.** 키가 없거나(발급 전·소유자 퇴장) 회수됐거나 열 수 없거나 API 키가 아니면(구독 OAuth 봉투 포함) 그 턴은 답하지 않는다. 팀 env 키, 팀 `provider_link`, 체인 hop, 「기본 AI」 행 중 아무것도 대신 쓰지 않는다(ADR-0135 D1, #2897·PR #2940과 같은 규칙). 사용자에게는 에이전트 이름의 한 줄(`personal_key_unavailable`), 감사 `agent.personal_key.unavailable`(고정 사유 라벨만). 그 턴은 팀의 「기본 AI」 행도 계산하지 않는다(과금 혼동).
+- **D5. 키 1개 = 한 사람.** 키 지문은 마스터 키로 만든 HMAC-SHA256이다(봉투는 nonce가 달라 비교할 수 없고, 마스터 키 없이는 지문으로 키를 대입해 볼 수 없다). **활성 행끼리 인스턴스 전역으로 UNIQUE**라 같은 키를 두 번(같은 사람·다른 사람·다른 워크스페이스) 발급하면 `409 personal_key_already_attached`다. 사람당 활성 키는 하나(`409 personal_key_owner_has_active_key`). 교체는 회수 뒤 재발급이고, 회수된 행의 지문은 재발급을 막지 않는다. 한계: 지문은 DB 안에서만 비교되고 응답·감사에 나오지 않는다. 키는 출력 가능한 ASCII만 받아 같은 키의 다른 표기(제로폭 문자 등)를 막는다. UNIQUE가 인스턴스 전역이라 다른 워크스페이스의 운영자가 후보 키를 제출하면 409로 「어딘가에서 쓰이는 키」임을 알 수 있다(키를 알아야 하므로 노출은 작다). 마스터 키를 회전하면 지문이 모두 바뀌므로 회전 절차에서 활성 행을 다시 봉인할 때 다시 지문을 찍는다.
+- **D6. 도달 불가의 경계.**
+  - 팀 에이전트와 다른 사람의 에이전트는 구조적으로 닿지 못한다: 키는 에이전트의 `owner_human_id`로만 열리고, 그 컬럼과 `uses_owner_key`는 `owner_only` 행에서 한 방향이다(트리거 확장). 호출 문은 기존 `owner_only_gate` 그대로라 소유자 아닌 사람은 호출하지 못한다(운영자도 아니다).
+  - 개인 키 에이전트의 답이 팀 에이전트를 부르지 않는다(A2A 출발 차단). 팀 에이전트가 개인 키 에이전트를 부르지도 못한다(기존 ADR-0193 D4·#2897). 환영(welcome)은 하지 않는다.
+  - 운영자의 구독 킬 스위치(`subscription_agents_enabled`)와 hosted 전달 게이트는 개인 키 에이전트에 적용하지 않는다. 그 스위치는 구독 CLI에 대한 것이고 개인 키는 구독이 아니다.
+  - 에이전트는 자기 모델을 따른다(`model_source = agent`). 생성 경로가 그렇게 만들고 워커는 개인 턴에 팀 행을 적용하지 않는다.
+  - 워커는 호출자(작성자, 재개 턴이면 승인자)가 키의 소유자인지 한 번 더 본다. 입구들이 이미 소유자만 통과시키지만, 앞으로 생길 입구가 게이트를 빠뜨려도 키가 쓰이지 않게 하는 이중 방어다.
+  - 한 사람에 개인 키 에이전트는 하나다(`agent_owner_key_holder_uk`). 키를 회수·재발급해도 같은 에이전트가 새 키로 이어 쓴다. 새 키가 다른 origin이면 발급 감사에 `origin_changed_from`(가린 이전 endpoint label)이 남고, 소유자는 `mine`에서 현재 endpoint label을 본다. 에이전트를 만드는 사람은 키의 소유자 또는 관리자이고, 소유자가 게스트면 만들 수 없다.
+- **D7. 엔드포인트와 SSRF.** `baseUrl`은 팀 링크 PUT과 같은 `validated_base_url`을 지난다(HTTPS, userinfo·query·fragment 금지, 사설·메타데이터 리터럴과 loopback은 운영자 옵트인). 호출 시점의 연결 가드(`momo-egress`)는 모든 provider 호출에 같다. 단, 연결 가드는 **운영자가 쓴** 호스트(`HERMES_BASE_URL`의 호스트)와 로컬 옵트인(`AGENT_PROVIDER_LOCAL_HOSTS`·loopback)을 주소 검사에서 면제한다. 워크스페이스 관리자가 개인 키로 그 호스트를 겨냥하면 운영자 네트워크로의 SSRF가 되므로, 그 호스트는 개인 키에 쓸 수 없다: 발급은 400이고 워커도 같은 판정으로 그 턴을 거절한다(둘 다 `EgressPolicy::host_exempt`). 수정 경로가 없어서 저장된 키가 편집된 URL을 따라 다른 origin으로 가지 못한다(증보 2026-09-28과 같은 이유). origin을 바꾸려면 회수와 재발급이다.
+- **D8. API·감사.** `POST/GET /v1/workspaces/{ws}/personal-keys`, `GET …/mine`, `POST …/{key}/revoke`, `POST …/{key}/agent`(소유자 또는 관리자가 그 사람의 개인 에이전트를 만든다). 키는 쓰기 전용(`apiKey`)이고 어떤 응답·감사·로그에도 나오지 않는다. 응답은 id·소유자·형식·가린 endpoint label·label·상태·시각이다. 감사 `provider.personal_link.issued`·`provider.personal_link.revoked`는 id·형식·label만 싣는다(재회수는 감사 행을 늘리지 않는다). OpenAPI에 올렸다.
+- **D9. 읽기 계약(AIH-2, ADR-0193 증보 D14).** `brain`에 값 `personal_key`를 더한다: `owner_only`이고 `uses_owner_key`인 에이전트(`derive_brain`이 `owner_only` 안에서 저장된 두뇌 종류로 가른다). `callableBy`는 `owner_only`, `owner`는 `subscription`과 `personal_key` 에이전트에 나온다. `hostOnline`은 나오지 않는다(서버 워커가 돌려서 기다릴 호스트가 없다). `brainUnavailableReason`은 없다. 값이 하나 늘었다. 이 값을 아직 모르는 클라이언트는 `brain`을 닫힌 어휘에서 찾지 못해 `invocationScope = owner_only`에서 추론하므로(`aiHubModel.ts`) 개인 키 에이전트를 구독으로 표시한다. `momo-core`의 `BRAINS`에 `personal_key`를 더하는 일은 UXUI 후속(AIH-6)이고, 서버의 호출·키 해석 동작과는 무관하다.
+- **정직한 한계.**
+  - 이미 키를 읽은 진행 중 턴은 그 턴이 끝날 때까지 그 키로 돈다. 회수는 다음 턴부터 효력이 있다.
+  - 비용 귀속: `usage_ledger`는 에이전트 기준이라 개인 키 에이전트의 사용량도 워크스페이스 집계에 들어간다. 키 출처 컬럼은 없다. 청구 주체는 provider 쪽 키 소유자(조직)다.
+  - 환영·hosted 인박스 같은 일부 입구는 `owner_only`를 구독으로 읽는다. 개인 키 에이전트는 그 입구에서 호출되지 않거나(환영) 워커 큐로만 간다. 이 증보가 보장하는 호출 입구는 멘션·1:1 DM·스레드 답글(멘션)·작업 요청이다.
+  - UI(발급·회수·내 키 화면)는 AIH-6이다. 멤버 직접 추가 정책 스위치는 열지 않았다.
+- **검증.** 격리 PG: `momo-agent-worker/tests/personal_key_conformance_pg.rs`(개인 턴은 소유자 키만, 팀 턴은 개인 키를 못 봄, 다른 사람의 에이전트, 회수는 다음 턴, 읽을 수 없는 키와 OAuth 봉투, 위임·환영 없음, 어떤 행에도 키 없음)와 `momo-server/tests/personal_key_conformance_pg.rs`(발급·목록·회수·인가, 한 키 한 사람, 입력 거부, 개인 에이전트 전달, RLS). 사보타주 기록은 PR 본문.

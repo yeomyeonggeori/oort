@@ -1,0 +1,34 @@
+[package]
+name = "momo-blind-pty"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+# ADR-0197 S2 (#3409) — blind-relay PTY **prototype**. Nothing in `momo-server`
+# or any bin depends on this crate; it exists to prove the protocol in tests
+# (docs/planning/research/2026-10-03-blind-pty-spike-s2.md). No new primitives:
+# P-256 (ADR-0146 device keys), Ed25519 (workd host key), AES-GCM (momo-settings),
+# HKDF-SHA256 and SHA-256 are all already in the lock.
+
+[dependencies]
+p256 = { workspace = true, features = ["ecdh"] }
+ed25519-dalek.workspace = true
+sha2.workspace = true
+aes-gcm = "0.10"
+hkdf = "0.12"
+getrandom = "0.2"
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true
+tokio = { workspace = true, features = ["net", "io-util", "time", "sync"] }
+
+# The sabotage switch is a `--cfg sabotage_null_cipher` rustc flag, NOT a cargo
+# feature, so `--all-features` or workspace feature unification can never turn
+# the AEAD into the identity function. Only the spike's sabotage run sets it:
+#   RUSTFLAGS="--cfg sabotage_null_cipher" cargo test -p momo-blind-pty
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(sabotage_null_cipher)"] }

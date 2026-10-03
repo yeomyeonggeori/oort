@@ -84,6 +84,11 @@ pub enum HostedSkipReason {
     /// not answer on some other model instead; the line says so and opens the
     /// same door (설정 › AI 연결) where the operator re-picks the row.
     DefaultAiUnresolved,
+    /// #3396 — an agent whose brain is its owner's personal API key was asked
+    /// to answer and that key is not there (revoked, never issued, owner gone,
+    /// or unreadable). The worker does not answer on the team key instead —
+    /// that would bill the team for a personal agent (ADR-0147 증보 2026-10-03).
+    PersonalKeyUnavailable,
 }
 
 impl HostedSkipReason {
@@ -100,6 +105,7 @@ impl HostedSkipReason {
             Self::DirectMessageAwaitingOwner => "hosted_dm_owner_approval_required",
             Self::ProviderRequired => "provider_required",
             Self::DefaultAiUnresolved => "default_ai_unresolved",
+            Self::PersonalKeyUnavailable => "personal_key_unavailable",
         }
     }
 
@@ -109,7 +115,8 @@ impl HostedSkipReason {
         match self {
             Self::DeliveryNotEnabled
             | Self::DirectMessageNotApprovable
-            | Self::DirectMessageAwaitingOwner => None,
+            | Self::DirectMessageAwaitingOwner
+            | Self::PersonalKeyUnavailable => None,
             Self::ConnectionUnavailable | Self::ChannelUnapproved => {
                 Some((HOSTED_SKIP_ACTION_LABEL, HOSTED_SKIP_ACTION_HREF))
             }
@@ -176,6 +183,10 @@ pub fn hosted_skip_notice_body_with_owner(
             "{agent_display_name}의 기본 AI 연결이 바뀌어서 답하지 못했어요. \
              다른 모델로 대신 답하지 않았어요. 워크스페이스 관리자가 설정 › AI 연결에서 기본 AI를 다시 고를 수 있어요."
         ),
+        HostedSkipReason::PersonalKeyUnavailable => format!(
+            "{agent_display_name}에게 연결된 개인 API 키가 없어서 답하지 못했어요. \
+             팀 키로 대신 답하지 않았어요. 워크스페이스 관리자에게 개인 키를 다시 발급해 달라고 부탁해 주세요."
+        ),
     }
 }
 
@@ -241,7 +252,7 @@ pub fn hosted_skip_notice_key(
 mod tests {
     use super::*;
 
-    const ALL_REASONS: [HostedSkipReason; 7] = [
+    const ALL_REASONS: [HostedSkipReason; 8] = [
         HostedSkipReason::DeliveryNotEnabled,
         HostedSkipReason::ConnectionUnavailable,
         HostedSkipReason::ChannelUnapproved,
@@ -249,6 +260,7 @@ mod tests {
         HostedSkipReason::DirectMessageAwaitingOwner,
         HostedSkipReason::ProviderRequired,
         HostedSkipReason::DefaultAiUnresolved,
+        HostedSkipReason::PersonalKeyUnavailable,
     ];
 
     #[test]

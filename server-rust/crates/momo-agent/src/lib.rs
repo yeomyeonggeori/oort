@@ -153,6 +153,7 @@ pub mod memory_cons;
 pub mod memory_items;
 pub mod memory_suggest;
 pub mod mention;
+pub mod owner_key;
 pub mod provisioning;
 pub mod routing;
 pub mod run;
@@ -244,6 +245,7 @@ pub use mention::{
     AGENT_PROFILE_POLICY_PREAMBLE, MENTION_JOB_CREATED_FROM, MENTION_JOB_METHOD_GATEWAY,
     MENTION_JOB_METHOD_WORKER, MENTION_RUN_INPUT_SCHEMA,
 };
+pub use owner_key::{agent_owner_only_brain_in_tx, mark_agent_owner_key_in_tx, OwnerOnlyBrain};
 pub use provisioning::{
     agent_owner_in_tx, create_agent_identity_in_tx, default_enabled_tools,
     load_agent_model_policy_in_tx, load_agent_profile_in_tx, normalized_model,

@@ -1257,6 +1257,24 @@ pub fn build_app(state: AppState) -> Router {
         // `member` with `kind='agent'`, so creating one puts it in the roster
         // beside the humans and makes it mentionable as soon as it is added to a
         // channel. The profile read is the minimum a hub UI consumes.
+        // #3396 (ADR-0147 증보 2026-10-03) — 개인 API 키(소유자 있는 BYOK). 발급·전체 목록은
+        // 워크스페이스 관리자, `mine`은 본인, 회수는 관리자 또는 키의 소유자. 키는 쓰기 전용.
+        .route(
+            "/v1/workspaces/{ws}/personal-keys",
+            post(routes::personal_links::issue).get(routes::personal_links::list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/personal-keys/mine",
+            get(routes::personal_links::list_mine),
+        )
+        .route(
+            "/v1/workspaces/{ws}/personal-keys/{key}/revoke",
+            post(routes::personal_links::revoke),
+        )
+        .route(
+            "/v1/workspaces/{ws}/personal-keys/{key}/agent",
+            post(routes::personal_links::create_agent),
+        )
         .route("/v1/workspaces/{ws}/agents", post(routes::agents::create))
         // HAP-E1 — human owner/admin lifecycle for generic per-agent bearer
         // credentials. Hosted-connection credentials will be connection-managed

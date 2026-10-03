@@ -1913,6 +1913,227 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
 
+  /v1/workspaces/{workspaceId}/personal-keys:
+    post:
+      tags: [agents]
+      operationId: issuePersonalKey
+      summary: Issue a personal API key to one member (workspace admin only).
+      description: >
+        ADR-0147 증보 2026-10-03 (#3396). The organisation issues one provider
+        API key to one human member; only that member's own `owner_only` agent
+        (`POST …/personal-keys/{keyId}/agent`) ever uses it. v1 is
+        operator-issued only: there is no route by which a member adds their
+        own key. `apiKey` is write-only — it is sealed with the instance's
+        `PROVIDER_LINK_MASTER_KEY` and never returned, audited or logged.
+        `baseUrl` passes the same gate as `PUT /v1/provider/link` (HTTPS
+        outside the local-host opt-in, no userinfo/query/fragment, no private
+        or metadata literal) and, because the server operator's own provider
+        host and the local-host opt-ins are exempt from the connect-time
+        address check, a key may not be aimed at those hosts (400). It is fixed for the life of the key; there is no
+        update route, so a revoke and a new issue are the only way to change
+        it. One key belongs to one member: the same key twice (same member,
+        another member, another workspace) is `409
+        personal_key_already_attached`, and a member with an active key gets
+        `409 personal_key_owner_has_active_key`. Audit `provider.personal_link.issued`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssuePersonalKeyRequest"
+      responses:
+        "201":
+          description: Key issued. The key itself is not in the response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PersonalKey"
+        "400":
+          description: Invalid key, endpoint, format, or a holder who is not an active human of this workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller is not a human workspace owner/admin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The key is already attached to a member, or the holder already has an active key (`error.code`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The server has no `PROVIDER_LINK_MASTER_KEY`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      tags: [agents]
+      operationId: listPersonalKeys
+      summary: List every personal key of the workspace, revoked ones included (workspace admin only).
+      description: No key material is returned, only ids, holder, format, endpoint label, label, status and timestamps.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Keys, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PersonalKeyList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller is not a human workspace owner/admin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/personal-keys/mine:
+    get:
+      tags: [agents]
+      operationId: listMyPersonalKeys
+      summary: List the caller's own personal keys (any active member).
+      description: >
+        The holder filter is the caller's own member id, not a parameter: a
+        member cannot list anyone else's keys through this route.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The caller's keys, newest first. No key material.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PersonalKeyList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller is not an active member of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/personal-keys/{keyId}/revoke:
+    post:
+      tags: [agents]
+      operationId: revokePersonalKey
+      summary: Revoke a personal key (workspace admin or the key's holder).
+      description: >
+        One way and idempotent: a second call answers 200 with the revoked key
+        and writes no second audit row. The worker reads the key on every turn,
+        so the holder's agent stops answering with the next turn — it does
+        not fall back to the team's key (ADR-0135 D1). A caller who is neither
+        admin nor holder gets 404, as does an unknown id. Audit
+        `provider.personal_link.revoked`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The key, now revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PersonalKey"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No such key, or the caller may not see it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/personal-keys/{keyId}/agent:
+    post:
+      tags: [agents]
+      operationId: createPersonalKeyAgent
+      summary: Create the holder's personal agent on this key (holder or workspace admin).
+      description: >
+        Creates an agent member owned by the key's holder with
+        `invocationScope = owner_only` and a brain that is the holder's key
+        (`agent.uses_owner_key`). It follows its own model (`modelSource =
+        agent`), never the team's 기본 AI row. Only the holder can call it
+        (mention, DM, thread reply, work request); a non-holder is refused as
+        for any `owner_only` agent. A holder has one personal agent; it keeps
+        working across key re-issues (a second create is `409
+        personal_agent_exists`), and a guest holder cannot mint a member (403).
+        The operator's subscription kill switch and
+        the hosted-delivery gate do not apply to it. It does not delegate to
+        team agents and speaks no welcome. A revoked key creates nothing (409
+        `personal_key_revoked`). The agent joins channels through the existing
+        channel-member route.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePersonalKeyAgentRequest"
+      responses:
+        "201":
+          description: Personal agent created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateAgentResponse"
+        "400":
+          description: Invalid identity or model.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The key's holder is a guest (a guest cannot mint a workspace member).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No such key, or the caller may not see it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The handle exists, the holder already has a personal agent (`personal_agent_exists`), or the key is revoked (`personal_key_revoked`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /v1/workspaces/{workspaceId}/agents:
     post:
       tags: [agents]
@@ -11382,7 +11603,7 @@ components:
             owner-gated profile read.
         brain:
           type: string
-          enum: [subscription, team_key, external, instance_default]
+          enum: [subscription, team_key, external, instance_default, personal_key]
           description: >
             #3392 (ADR-0193 amendment 2026-10-03). Where this agent's thinking comes from,
             derived from existing columns and never stored. Agents only; absent from servers
@@ -11390,7 +11611,9 @@ components:
             `subscription` = the owner's own CLI session on the owner's own plan (invocationScope
             owner_only); `external` = a hosted connection or confirmed A2A card dials in;
             `instance_default` = follows the team's default-AI row; `team_key` = the team's
-            provider key with the agent's own model.
+            provider key with the agent's own model; `personal_key` (#3396, ADR-0147 amendment
+            2026-10-03) = the owner's own API key issued by the organisation, run by the server
+            worker on that key only (invocationScope owner_only).
         callableBy:
           type: string
           enum: [owner_only, everyone]
@@ -11401,7 +11624,7 @@ components:
         owner:
           type: object
           description: >
-            The person whose subscription this is. Present on `brain: subscription` agents only.
+            The person whose agent this is. Present on `brain: subscription` and `brain: personal_key` agents only.
             The name is the one a non-owner is already told by the D4 notice.
           required: [id, displayName]
           properties:
@@ -11665,6 +11888,94 @@ components:
           items: {$ref: "#/components/schemas/WorkspaceBan"}
 
     # ---- Agent creation -------------------------------------------------------
+    IssuePersonalKeyRequest:
+      type: object
+      required: [ownerMemberId, apiKey, baseUrl]
+      additionalProperties: false
+      properties:
+        ownerMemberId:
+          type: string
+          format: uuid
+          description: An active human member of the workspace. An agent or a stranger is a 400.
+        apiKey:
+          type: string
+          minLength: 8
+          maxLength: 512
+          writeOnly: true
+          description: >-
+            A plain provider API key (no whitespace, not an envelope document,
+            never a subscription token). Write-only; sealed at rest.
+        format:
+          type: string
+          enum: [openai, anthropic]
+          description: Defaults to `openai`.
+        baseUrl:
+          type: string
+          format: uri
+          description: Same gate as `PUT /v1/provider/link`. Fixed for the life of the key.
+        label:
+          type: string
+          maxLength: 80
+    PersonalKey:
+      type: object
+      required: [id, ownerMemberId, format, endpointLabel, status, issuedAtMs]
+      properties:
+        id:
+          type: string
+          format: uuid
+        ownerMemberId:
+          type: string
+          format: uuid
+        format:
+          type: string
+          enum: [openai, anthropic]
+        endpointLabel:
+          type: string
+          description: The redacted endpoint label. No key material of any kind is in this object.
+        label:
+          type: string
+          description: Omitted when the key has no label.
+        status:
+          type: string
+          enum: [active, revoked]
+        issuedBy:
+          type: string
+          format: uuid
+          description: Omitted when the issuing member no longer exists.
+        issuedAtMs:
+          type: integer
+          format: int64
+        revokedAtMs:
+          type: integer
+          format: int64
+          description: Present only on a revoked key.
+    PersonalKeyList:
+      type: object
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items:
+            $ref: "#/components/schemas/PersonalKey"
+    CreatePersonalKeyAgentRequest:
+      type: object
+      required: [displayName, handle, model]
+      additionalProperties: false
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 100
+        handle:
+          type: string
+          pattern: "^[a-z0-9_-]{2,32}$"
+        model:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: A model of the key's provider. The team's 기본 AI row never applies.
+        systemPrompt:
+          type: string
     CreateAgentRequest:
       type: object
       required: [displayName, handle, model, baseUrl]
@@ -12057,7 +12368,7 @@ components:
           description: Which official CLI the owner runs. Present only on owner_only agents.
         brain:
           type: string
-          enum: [subscription, team_key, external, instance_default]
+          enum: [subscription, team_key, external, instance_default, personal_key]
           description: >
             #3392 (ADR-0193 amendment 2026-10-03). Where this agent's thinking comes from,
             derived from existing columns and never stored. Agents only; absent from servers
@@ -12065,7 +12376,9 @@ components:
             `subscription` = the owner's own CLI session on the owner's own plan (invocationScope
             owner_only); `external` = a hosted connection or confirmed A2A card dials in;
             `instance_default` = follows the team's default-AI row; `team_key` = the team's
-            provider key with the agent's own model.
+            provider key with the agent's own model; `personal_key` (#3396, ADR-0147 amendment
+            2026-10-03) = the owner's own API key issued by the organisation, run by the server
+            worker on that key only (invocationScope owner_only).
         callableBy:
           type: string
           enum: [owner_only, everyone]
@@ -12076,7 +12389,7 @@ components:
         owner:
           type: object
           description: >
-            The person whose subscription this is. Present on `brain: subscription` agents only.
+            The person whose agent this is. Present on `brain: subscription` and `brain: personal_key` agents only.
             The name is the one a non-owner is already told by the D4 notice.
           required: [id, displayName]
           properties:

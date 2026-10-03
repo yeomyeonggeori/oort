@@ -176,7 +176,7 @@ pub async fn load_mention_candidates_in_tx(
                 COALESCE(ap.paused, false) AS paused, \
                 (EXISTS (SELECT 1 FROM hosted_agent_connection hc \
                           WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
-                 OR a.invocation_scope = 'owner_only') \
+                 OR (a.invocation_scope = 'owner_only' AND NOT a.uses_owner_key)) \
                   AS hosted_delivery_disabled, \
                 (SELECT hc.id FROM hosted_agent_connection hc \
                    JOIN token t ON t.workspace_id = hc.workspace_id \
@@ -216,7 +216,7 @@ pub async fn load_mention_candidates_in_tx(
                      AND acr.agent_member_id = m.id \
                      AND acr.status = 'confirmed' \
                 ) AS is_external_runtime, \
-                a.invocation_scope, a.subscription_harness, a.owner_human_id, \
+                a.invocation_scope, a.subscription_harness, a.owner_human_id, a.uses_owner_key, \
                 (SELECT o.display_name FROM member o \
                   WHERE o.workspace_id = m.workspace_id AND o.id = a.owner_human_id) \
                   AS owner_display_name, \
@@ -372,6 +372,7 @@ fn owner_only_scope(
             .unwrap_or(crate::subscription::SubscriptionHarness::ClaudeCode),
         recently_seen: row.try_get("hosted_recently_seen").map_err(DbError::from)?,
         reconnectable: row.try_get("hosted_reconnectable").map_err(DbError::from)?,
+        uses_owner_key: row.try_get("uses_owner_key").map_err(DbError::from)?,
     }))
 }
 
@@ -1588,6 +1589,7 @@ mod tests {
                 harness: crate::subscription::SubscriptionHarness::ClaudeCode,
                 recently_seen: true,
                 reconnectable: true,
+                uses_owner_key: false,
             }),
             ..candidate()
         };
