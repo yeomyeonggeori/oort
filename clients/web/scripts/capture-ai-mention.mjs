@@ -27,6 +27,32 @@ const ROUTING = JSON.parse(readFileSync(resolve(WEB_ROOT, "src/features/routing/
 const workspaceId = "00000000-0000-7000-8000-000000000001";
 const memberId = "00000000-0000-7000-8000-000000000101";
 const otherHuman = "00000000-0000-7000-8000-000000000102";
+const WORK_HOSTS = [
+  {
+    id: "019f9b10-0000-7000-8000-0000000000a1",
+    workspaceId: workspaceId,
+    scope: "member",
+    ownerMemberId: memberId,
+    type: "app",
+    displayName: "성재 iMac, 집 작업실",
+    capabilities: { code: true },
+    lastSeenAtMs: Date.now() - 20_000,
+    createdAtMs: Date.now() - 86_400_000,
+    online: true,
+  },
+  {
+    id: "019f9b10-0000-7000-8000-0000000000a2",
+    workspaceId: workspaceId,
+    scope: "workspace",
+    ownerMemberId: memberId,
+    type: "workd",
+    displayName: "엔진 빌드 서버",
+    capabilities: { code: true },
+    lastSeenAtMs: Date.now() - 4 * 3_600_000,
+    createdAtMs: Date.now() - 30 * 86_400_000,
+    online: false,
+  },
+];
 const channels = [{ id: "00000000-0000-7000-8000-000000000201", workspaceId, kind: "public", name: "general", muted: false }];
 const auth = {
   accessToken: "capture-only-not-a-credential",
@@ -87,7 +113,10 @@ async function installRoutes(context) {
       return json(route, { workspace: { id: workspaceId, name: "여명거리", slug: "team", updatedAtMs: 1, roleLabels: {}, welcomeAgentMemberId: null, welcomePrompt: "", subscriptionAgentsEnabled: true } });
     }
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
-    if (path.endsWith("/work-hosts")) return json(route, { workHosts: [] });
+    if (path.endsWith("/work-hosts")) return json(route, { workHosts: WORK_HOSTS });
+    if (path.endsWith("/work-tier-policy/me")) {
+      return json(route, { workTierPolicy: { workspaceId, memberId, mode: "ask", inherited: true, updatedAtMs: Date.now() - 3 * 86_400_000 } });
+    }
     if (path.endsWith("/work-sessions/shared")) return json(route, { sessions: [], nextCursor: null });
     if (path.endsWith("/work-sessions")) return json(route, { workSessions: [] });
     if (path.endsWith("/effort-table")) return json(route, ROUTING.effortTable);
@@ -192,6 +221,7 @@ async function scenes(browser, origin, scheme, viewport) {
     await notice.waitFor();
     await page.waitForTimeout(300);
     await page.screenshot({ path: resolve(OUT_DIR, `composer-locked-notice-${tag}.png`) });
+    check(`${tag} 못 부르는 글: 빈 예약 띠 없음`, (await page.getByTestId("composer-routing-reserved").count()) === 0);
     check(`${tag} 못 부르는 글: 라우팅 줄(이번만 바꾸기)이 없고 한 줄이 대신한다`, (await page.getByText("이번만 바꾸기").count()) === 0 && (await page.getByText("확인하지 못했습니다").count()) === 0);
     check(`${tag} 한 줄: 못 부름`, ((await notice.textContent()) ?? "").endsWith("성재 님만 부를 수 있어요. 보내도 답하지 않아요."), String(await notice.textContent()));
 
@@ -208,7 +238,7 @@ async function scenes(browser, origin, scheme, viewport) {
     await page.waitForTimeout(600);
     await page.screenshot({ path: resolve(OUT_DIR, `composer-callable-routing-${tag}.png`) });
     check(`${tag} 부를 수 있으면 라우팅 줄이 선다`, (await page.getByText("이번만 바꾸기").count()) > 0);
-    check(`${tag} 라우팅 줄에 오류 문구 없음`, (await page.getByText("확인하지 못했습니다").count()) === 0 && (await page.getByText("불러오지 못해").count()) === 0);
+    check(`${tag} 라우팅 줄에 오류 문구 없음`, (await page.getByText("실행 위치 확인 필요").count()) === 0 && (await page.getByText("확인하지 못했습니다").count()) === 0 && (await page.getByText("불러오지 못해").count()) === 0);
     // 왼쪽 안쪽 여백: 한 줄과 라우팅 줄이 같은 x 에서 시작한다
     await input.fill("@seongjae-codex 요약 부탁해요");
     await notice.waitFor();

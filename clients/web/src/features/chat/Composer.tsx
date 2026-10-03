@@ -53,6 +53,7 @@ import {
   MENTION_ROUTING_ROW_CLASS,
   MentionRoutingBar,
 } from "@/features/routing/MentionRoutingBar";
+import { composerRoutingSlot } from "@/features/chat/composerRoutingSlot";
 import { useMentionRouting } from "@/features/routing/useMentionRouting";
 import { mentionRoutingTarget } from "@momo/core/features/routing/mentionTargets";
 import { routingPayload } from "@momo/core/features/routing/routingModel";
@@ -621,6 +622,7 @@ export function Composer({
     if (hasTarget) setRowReserved(true);
     else if (text.trim() === "") setRowReserved(false);
   }, [hasTarget, text]);
+  const routingSlot = composerRoutingSlot({ hasTarget, noneAnswer, rowReserved, hasNotice: agentNotice !== null });
 
   // ── 초안 (U4-f · 진단 H-10) ────────────────────────────────────────────────
   //
@@ -906,21 +908,20 @@ export function Composer({
           보여야 한다. Cursor가 모델 피커를 입력창 하단 바에 둔 이유와 같고
           (레퍼런스 §2), 상속 상태에서도 사라지지 않는 이유는 "바꾸지 않으면
           무엇이 되는가"가 이 줄의 본래 내용이기 때문이다. */}
-      {hasTarget && !noneAnswer ? (
+      {routingSlot === "bar" && (
         <MentionRoutingBar
           channelId={channelId}
           target={routingTarget}
           draft={routing.draft}
           onDraftChange={routing.setDraft}
         />
-      ) : (
-        rowReserved && (
-          <div
-            className={MENTION_ROUTING_ROW_CLASS}
-            aria-hidden="true"
-            data-testid="composer-routing-reserved"
-          />
-        )
+      )}
+      {routingSlot === "reserved" && (
+        <div
+          className={MENTION_ROUTING_ROW_CLASS}
+          aria-hidden="true"
+          data-testid="composer-routing-reserved"
+        />
       )}
 
       {agentNotice !== null && (
@@ -931,7 +932,7 @@ export function Composer({
           role="status"
           className={cn(
             "flex min-h-8 items-center px-4 py-1 text-meta text-warn",
-            noneAnswer && "border-t border-line"
+            routingSlot === "warning" && "border-t border-line"
           )}
           data-testid="composer-agent-notice"
         >
