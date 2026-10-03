@@ -623,7 +623,7 @@ fn summary_dto(row: &AgentRunSummaryRow) -> AgentRunSummaryDto {
 /// not say this — and it is written at all because a run that simply goes quiet
 /// is indistinguishable from a run that is thinking. The stop has to be visible
 /// to the room, not just to the person who tapped it.
-const CANCEL_SYSTEM_LINE: &str = "실행이 사람에 의해 중지되었습니다.";
+const CANCEL_SYSTEM_LINE: &str = "사람이 실행을 중지했어요.";
 
 /// `message.props.kind` (Swift :532) — what a client switches on to render the
 /// line as a stop rather than as generic system chatter.

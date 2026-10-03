@@ -56,7 +56,7 @@ const AGENT_MODEL: &str = "hermes-agent";
 
 /// The line the room sees. Pinned here rather than imported so that changing the
 /// server's copy is a two-file edit somebody has to mean.
-const CANCEL_LINE: &str = "실행이 사람에 의해 중지되었습니다.";
+const CANCEL_LINE: &str = "사람이 실행을 중지했어요.";
 
 fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("set DATABASE_URL to a pgvector/pg18 superuser DB")
@@ -734,7 +734,7 @@ async fn srv_c2_1_a_stop_ends_the_run_retires_its_job_and_says_so_in_the_room() 
 /// **Stopping an already-stopped run changes nothing.**
 ///
 /// A double-tap on a phone, or a retry of a request whose response was lost,
-/// must not append a second "중지되었습니다" to the room or a second audit row to
+/// must not append a second "중지했어요" to the room or a second audit row to
 /// the record. The guard is the `already_cancelled` early return in
 /// `cancel_in_tx`; remove it and this test fails by name with two system lines
 /// and two audit rows, which is the red proof this suite is built around.
