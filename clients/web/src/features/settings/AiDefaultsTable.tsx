@@ -3,6 +3,7 @@ import { Lock } from "lucide-react";
 import {
   AI_DEFAULT_ROWS,
   AI_DEFAULT_UNSET_LABEL,
+  aiDefaultRow,
   credentialKey,
   credentialName,
   credentialSource,
@@ -31,6 +32,12 @@ import {
   type TeamDefaultRowId,
   type TeamLinkModels,
 } from "@momo/core/features/settings/defaultAi";
+import {
+  AI_HUB_DEFAULT_ROWS,
+  AI_TEAM_KEYS_COPY,
+  aiDefaultFeatureRow,
+  defaultAiUnsetSentence,
+} from "@momo/core/features/ai/aiHubModel";
 import { cn } from "@/design/lib/cn";
 import { HarnessLoginDialog } from "@/features/welcome/harnessLogin/HarnessLoginDialog";
 import { Select } from "@/design/ui/select";
@@ -94,6 +101,7 @@ export function AiDefaultsTable({
   operator,
   browserTab,
   team,
+  variant = "settings",
 }: {
   teamKey: AiDefaultsTeamKey;
   /** 서버가 운영자라고 답했나(200)·아니라고 답했나(403). 모르면 null. */
@@ -101,11 +109,19 @@ export function AiDefaultsTable({
   browserTab: boolean;
   /** 팀 줄의 서버 값. 없으면 팀 줄은 읽기 전용이다. */
   team?: TeamDefaultsState;
+  /**
+   * `hub` = AI 허브 「팀 AI 키」 구획(AIH-6): 기능 이름을 평문으로 바꾸고, 줄마다 누구를 위한
+   * 것인지와 「고르지 않으면」 문장을 붙인다. 선택 칸·저장·폴백 판정은 그대로다.
+   */
+  variant?: "settings" | "hub";
 }) {
   const prefs = useAiDefaults();
   const accounts = useMyAccounts();
   const input: AiDefaultsInput = { accounts: accounts ?? [], teamKey, browserTab };
   const remote = useRemoteWork();
+  // 허브는 기능 이름 순서(팀 줄 먼저)를 모델이 정한다. 설정의 옛 표는 코어의 행 순서 그대로.
+  const tableRows: readonly AiDefaultRow[] =
+    variant === "hub" ? AI_HUB_DEFAULT_ROWS.map((hubRow) => aiDefaultRow(hubRow.rowId)) : AI_DEFAULT_ROWS;
   // 저장된 원격 작업 계정이 이 맥에 있는지 맞춘다(#3157). 브라우저 탭에는 이 맥이 없다.
   const savedRemote = prefs.remoteWork;
   const savedRemoteKey = savedRemote?.kind === "profile" ? `${savedRemote.harness}/${savedRemote.label ?? ""}` : "";
@@ -130,11 +146,13 @@ export function AiDefaultsTable({
         />
       )}
       <ul className="flex min-w-0 flex-col" aria-label="기능마다 부를 AI" data-testid="ai-defaults-table">
-        {AI_DEFAULT_ROWS.map((row, index) => (
+        {tableRows.map((row, index) => (
           <DefaultRow
             key={row.id}
             row={row}
-            last={index === AI_DEFAULT_ROWS.length - 1}
+            hub={variant === "hub"}
+            operator={operator}
+            last={index === tableRows.length - 1}
             prefs={prefs}
             input={input}
             accountsKnown={accounts !== null}
@@ -143,14 +161,18 @@ export function AiDefaultsTable({
           />
         ))}
       </ul>
-      <AiFoot>{PERSONAL_FOOT}</AiFoot>
+      <AiFoot>{variant === "hub" ? AI_TEAM_KEYS_COPY.defaultsFootPersonal : PERSONAL_FOOT}</AiFoot>
       {operator !== null && (
         <AiFoot>
           <span data-testid="ai-defaults-team-foot" data-operator={operator ? "yes" : "no"}>
             {!operator
-              ? TEAM_FOOT_MEMBER
+              ? variant === "hub"
+                ? AI_TEAM_KEYS_COPY.readOnlyDefaults
+                : TEAM_FOOT_MEMBER
               : team?.status === "ready"
-                ? TEAM_DEFAULTS_APPLIED
+                ? variant === "hub"
+                  ? AI_TEAM_KEYS_COPY.defaultsFootTeam
+                  : TEAM_DEFAULTS_APPLIED
                 : team?.status === "error"
                   ? TEAM_FOOT_OPERATOR
                   : TEAM_FOOT_OPERATOR_LOADING}
@@ -163,6 +185,8 @@ export function AiDefaultsTable({
 
 function DefaultRow({
   row,
+  hub,
+  operator,
   last,
   prefs,
   input,
@@ -171,6 +195,8 @@ function DefaultRow({
   remote,
 }: {
   row: AiDefaultRow;
+  hub: boolean;
+  operator: boolean | null;
   last: boolean;
   prefs: AiDefaultsPrefs;
   input: AiDefaultsInput;
@@ -187,6 +213,8 @@ function DefaultRow({
   const describedBy = ["model", "note", "fallback", "saved", "error"].map(lineId).join(" ");
 
   let choice;
+  // 허브 「바꾸는 사람」 칸의 개인 줄 문장. 칸이 잠겨 있으면 「내가 바꿔요」라고 말하지 않는다.
+  let personalWho = "내가 바꿔요";
   // 운영자에게 열린 팀 줄: 「운영자」 표지에 자물쇠를 달지 않는다(잠김이 아니다).
   let teamEditable = false;
   if (personal) {
@@ -194,6 +222,7 @@ function DefaultRow({
     const saved = prefs[id] ?? null;
     if (id !== "appCommand" && input.browserTab) {
       choice = <ReadOnlyBox>데스크탑 앱에서 고를 수 있어요</ReadOnlyBox>;
+      personalWho = "데스크탑에서 바꿔요";
     } else if (id !== "appCommand" && !accountsKnown) {
       choice = <ReadOnlyBox>이 맥의 계정을 확인하고 있어요</ReadOnlyBox>;
     } else if (id === "appCommand" && input.teamKey.status !== "present") {
@@ -201,6 +230,7 @@ function DefaultRow({
       choice = (
         <ReadOnlyBox>{resolved.state === "blocked" ? "쓸 수 있는 자격이 없어요" : resolved.using}</ReadOnlyBox>
       );
+      personalWho = "지금은 팀 키만 써요";
     } else {
       const options = optionsFor(id, input);
       // 저장한 계정이 목록에서 사라졌으면 그 값을 선택지로 남겨 둔다: 칸이 다른 값을
@@ -348,10 +378,12 @@ function DefaultRow({
   if (resolved.state === "ok" && resolved.note && !(row.id === "remoteWork" && remote.note?.tone === "warn")) {
     lines.push({ key: "note", text: resolved.note, tone: "muted" });
   }
-  if (resolved.state !== "ok") {
+  // 허브의 팀 줄은 아래 「고르지 않으면」 문장이 같은 사실을 말한다: 한 칸에 같은 말을 두 번 하지 않는다.
+  if (resolved.state !== "ok" && !(hub && !personal)) {
     lines.push({ key: "fallback", text: resolved.sentence, tone: "warn" });
   }
 
+  const hubRow = hub ? aiDefaultFeatureRow(row.id) : null;
   return (
     <li
       className={cn("ai-default-row px-2 py-2", !last && "border-b border-line")}
@@ -361,9 +393,9 @@ function DefaultRow({
     >
       <div data-slot="feature" className="flex min-w-0 flex-col">
         <span id={titleId} className="break-keep text-body font-semibold text-ink">
-          {row.title}
+          {hubRow ? hubRow.feature : row.title}
         </span>
-        <span className="break-keep text-meta text-ink-muted">{row.hint}</span>
+        <span className="break-keep text-meta text-ink-muted">{hubRow ? hubRow.hint : row.hint}</span>
       </div>
       <div data-slot="choice" className="flex min-w-0 flex-col gap-1">
         {choice}
@@ -381,9 +413,28 @@ function DefaultRow({
             {line.text}
           </span>
         ))}
+        {hubRow && (
+          <span className="break-keep text-timestamp text-ink-muted" data-testid={`ai-default-${row.id}-unset`}>
+            <b className="font-semibold text-ink">고르지 않으면 </b>
+            {defaultAiUnsetSentence(row.id, input.teamKey.status)}
+          </span>
+        )}
       </div>
-      <span data-slot="who" className="flex h-control items-center text-meta">
-        {personal ? (
+      <span data-slot="who" className={cn("flex text-meta", hubRow ? "flex-col gap-1 pt-1" : "h-control items-center")}>
+        {hubRow ? (
+          <>
+            <span className="font-semibold text-ink" data-testid={`ai-default-${row.id}-serves`}>
+              {hubRow.servesText}
+            </span>
+            <span className="inline-flex items-center gap-1 text-timestamp text-ink-muted">
+              {/* 자물쇠는 이 사람에게 영구히 막힌 줄에만: 운영자가 연결 확인 전이라 못 고르는 줄은 잠긴 게 아니다. */}
+              {personal || operator !== false ? null : (
+                <Lock className="size-3 shrink-0" aria-hidden="true" data-testid={`ai-default-${row.id}-locked`} />
+              )}
+              {personal ? personalWho : "운영자가 바꿔요"}
+            </span>
+          </>
+        ) : personal ? (
           <span className="text-agent">내 설정</span>
         ) : teamEditable ? (
           <span className="text-ink-muted">운영자</span>
