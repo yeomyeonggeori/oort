@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { isDesktop } from "@/lib/tauri";
+import { readBrowserPermission } from "@/features/notifications/browserNotify";
 import { CHIP_CLASS } from "@/features/common/chip";
 import { InlineBanner, Skeleton } from "@/features/common/States";
 import {
@@ -35,6 +36,21 @@ export const DESKTOP_NOTIFICATION_DENIED_MESSAGE =
   "이 앱의 알림이 macOS에서 막혀 있습니다. 시스템 설정 › 알림에서 oort를 허용하세요.";
 export const DESKTOP_NOTIFICATION_UNSUPPORTED_MESSAGE =
   "이 화면에서는 데스크톱 알림을 쓸 수 없습니다. 데스크톱 앱을 쓰면 알림이 옵니다.";
+
+// 브라우저 탭 문장(#3340). 권한은 이 단추를 누른 뒤에만 묻는다.
+export const BROWSER_NOTIFICATION_GRANTED_DETAIL =
+  "이 브라우저에서 알림을 보낼 수 있습니다. 탭이 가려져 있을 때 알려요.";
+export const BROWSER_NOTIFICATION_DEFAULT_DETAIL =
+  "탭이 가려져 있을 때 알려 주려면 알림을 켜세요. 누르면 브라우저가 허용 여부를 물어요.";
+export const BROWSER_NOTIFICATION_DENIED_MESSAGE =
+  "이 브라우저에서 oort의 알림이 막혀 있습니다. 주소창 왼쪽의 사이트 설정(자물쇠)에서 알림을 허용한 뒤 이 페이지를 새로 고치세요.";
+export const BROWSER_NOTIFICATION_UNSUPPORTED_MESSAGE =
+  "이 브라우저는 알림을 지원하지 않습니다. 데스크탑 앱이나 최신 브라우저를 쓰세요.";
+
+/** 로컬 칸·기한 확인은 데스크탑 앱만 신호를 갖는다. 브라우저 탭에서는 스위치가 아니라 안내다. */
+const DESKTOP_ONLY_KINDS: ReadonlySet<string> = new Set(["pane-waiting", "work-mine-done", "reminder"]);
+
+export type NotificationSurface = "desktop" | "browser";
 
 /** 독 배지 열의 모습: 수에 들어가는 종류, 세지 않는 종류, 사람이 켜는 종류(DM). */
 type DockCell = "counted" | "never" | "dm";
@@ -72,7 +88,9 @@ export function DesktopNotificationPermissionPanel({
   requesting,
   onRequest,
   unsupportedReasonId,
+  surface = "desktop",
 }: {
+  surface?: NotificationSurface;
   permission: DesktopNotificationPermissionView | "loading";
   requesting: boolean;
   onRequest: () => void;
@@ -110,7 +128,11 @@ export function DesktopNotificationPermissionPanel({
       >
         <InlineBanner
           separator={false}
-          message={DESKTOP_NOTIFICATION_DENIED_MESSAGE}
+          message={
+            surface === "browser"
+              ? BROWSER_NOTIFICATION_DENIED_MESSAGE
+              : DESKTOP_NOTIFICATION_DENIED_MESSAGE
+          }
           testId="desktop-notifications-denied"
         />
       </div>
@@ -129,7 +151,9 @@ export function DesktopNotificationPermissionPanel({
           className="break-keep text-meta text-ink-muted"
           data-testid="desktop-notifications-unsupported"
         >
-          {DESKTOP_NOTIFICATION_UNSUPPORTED_MESSAGE}
+          {surface === "browser"
+            ? BROWSER_NOTIFICATION_UNSUPPORTED_MESSAGE
+            : DESKTOP_NOTIFICATION_UNSUPPORTED_MESSAGE}
         </p>
       </div>
     );
@@ -160,13 +184,17 @@ export function DesktopNotificationPermissionPanel({
             {DESKTOP_NOTIFICATION_GRANTED_LABEL}
           </span>
           <p className="min-w-0 break-keep text-meta text-ink-muted">
-            {DESKTOP_NOTIFICATION_GRANTED_DETAIL}
+            {surface === "browser"
+              ? BROWSER_NOTIFICATION_GRANTED_DETAIL
+              : DESKTOP_NOTIFICATION_GRANTED_DETAIL}
           </p>
         </div>
       ) : (
         <>
           <p className="break-keep text-meta text-ink-muted">
-            {DESKTOP_NOTIFICATION_DEFAULT_DETAIL}
+            {surface === "browser"
+              ? BROWSER_NOTIFICATION_DEFAULT_DETAIL
+              : DESKTOP_NOTIFICATION_DEFAULT_DETAIL}
           </p>
           {/* InviteSection.tsx:287: 행 안 고유폭 버튼. flex-col stretch 는
               전폭 amber 바가 된다 (taste §8). */}
@@ -191,18 +219,21 @@ export function DesktopNotificationPermissionPanel({
 }
 
 export function DesktopNotificationGroup() {
+  const desktop = isDesktop();
+  const surface: NotificationSurface = desktop ? "desktop" : "browser";
+  // 브라우저는 읽기가 동기라 첫 그림부터 실제 상태다(권한 요청과는 별개).
   const [permission, setPermission] = useState<
     DesktopNotificationPermissionView | "loading"
-  >(() => (isDesktop() ? "loading" : "unsupported"));
+  >(() => (desktop ? "loading" : readBrowserPermission()));
   const [requesting, setRequesting] = useState(false);
   const requestingRef = useRef(false);
   const kinds = useDesktopNotificationKinds();
   const unsupportedReasonId = useId();
   const dockOffReasonId = useId();
   const kindsLocked = permission === "unsupported";
+  const browser = surface === "browser";
 
   useEffect(() => {
-    if (!isDesktop()) return;
     let cancelled = false;
     async function refresh() {
       if (requestingRef.current) return;
@@ -243,7 +274,9 @@ export function DesktopNotificationGroup() {
       <Subsection
         title="이 기기 알림"
         lines={[
-          "창이 앞에 있고 그 대상이 화면에 보이면 알리지 않아요. 같은 종류가 연달아 오면 한 묶음으로 보내요. 나중에 알림은 기한이 되면 앱이 앞에 있어도 알려요.",
+          browser
+            ? "탭이 앞에 있고 그 대상이 화면에 보이면 알리지 않아요. 같은 종류가 연달아 오면 한 묶음으로 보내요. 이 탭이 열려 있을 때만 와요. 탭 제목의 (숫자)는 알림 설정과 상관없이 항상 켜 있어요."
+            : "창이 앞에 있고 그 대상이 화면에 보이면 알리지 않아요. 같은 종류가 연달아 오면 한 묶음으로 보내요. 나중에 알림은 기한이 되면 앱이 앞에 있어도 알려요.",
         ]}
       >
         <div data-testid="desktop-notifications-permission-host">
@@ -252,6 +285,7 @@ export function DesktopNotificationGroup() {
             requesting={requesting}
             onRequest={() => void onRequest()}
             unsupportedReasonId={unsupportedReasonId}
+            surface={surface}
           />
         </div>
       </Subsection>
@@ -259,7 +293,9 @@ export function DesktopNotificationGroup() {
       <Subsection
         title="종류별"
         lines={[
-          "앱 안의 배지와 줄 표시는 항상 켜 있어요. 아래는 OS 알림과 독 배지만 정해요.",
+          browser
+            ? "앱 안의 배지와 줄 표시는 항상 켜 있어요. 아래는 이 브라우저의 OS 알림만 정해요."
+            : "앱 안의 배지와 줄 표시는 항상 켜 있어요. 아래는 OS 알림과 독 배지만 정해요.",
         ]}
       >
         <div
@@ -270,12 +306,16 @@ export function DesktopNotificationGroup() {
           tabIndex={0}
         >
           <table className="w-full border-collapse text-left">
-            <caption className="sr-only">알림 종류별 OS 알림, 독 배지, 폰 푸시</caption>
+            <caption className="sr-only">
+              {browser ? "알림 종류별 OS 알림, 폰 푸시" : "알림 종류별 OS 알림, 독 배지, 폰 푸시"}
+            </caption>
             <thead>
               <tr className="border-b border-line bg-surface-sunken text-meta text-ink-muted">
                 <th scope="col" className="p-3 font-normal">종류</th>
                 <th scope="col" className="whitespace-nowrap p-3 text-center font-normal">OS 알림</th>
-                <th scope="col" className="whitespace-nowrap p-3 text-center font-normal">독 배지</th>
+                {!browser && (
+                  <th scope="col" className="whitespace-nowrap p-3 text-center font-normal">독 배지</th>
+                )}
                 <th scope="col" className="whitespace-nowrap p-3 text-center font-normal">폰 푸시</th>
               </tr>
             </thead>
@@ -293,6 +333,8 @@ export function DesktopNotificationGroup() {
                     <td className="whitespace-nowrap p-3 text-center align-top">
                       {row.id === null ? (
                         <span className="text-meta text-ink-muted">연결 전</span>
+                      ) : browser && DESKTOP_ONLY_KINDS.has(row.id) ? (
+                        <span className="text-meta text-ink-muted">데스크탑 전용</span>
                       ) : (
                         <input
                           type="checkbox"
@@ -308,6 +350,7 @@ export function DesktopNotificationGroup() {
                         />
                       )}
                     </td>
+                    {!browser && (
                     <td className="whitespace-nowrap p-3 text-center align-top text-meta text-ink-muted">
                       {row.dock === "dm" ? (
                         <input
@@ -330,6 +373,7 @@ export function DesktopNotificationGroup() {
                         "세지 않아요"
                       )}
                     </td>
+                    )}
                     <td className="whitespace-nowrap p-3 text-center align-top text-meta text-ink-muted">
                       {PHONE_CELL_TEXT[row.phone]}
                     </td>
@@ -339,6 +383,7 @@ export function DesktopNotificationGroup() {
             </tbody>
           </table>
         </div>
+        {!browser && (
         <div className="flex min-w-0 flex-col overflow-hidden rounded-md border border-line">
           <SettingsToggleRow
             testId="desktop-notification-dock-badge"
@@ -355,6 +400,7 @@ export function DesktopNotificationGroup() {
             </p>
           )}
         </div>
+        )}
       </Subsection>
     </>
   );

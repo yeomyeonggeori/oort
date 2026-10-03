@@ -640,7 +640,7 @@ fn the_only_git_write_is_worktree_add_in_start_folder() {
     }
 }
 
-const WORK_HOST_COMMANDS: [&str; 7] = [
+const WORK_HOST_COMMANDS: [&str; 8] = [
     "work_host_status",
     "work_host_register",
     "work_host_start",
@@ -648,8 +648,9 @@ const WORK_HOST_COMMANDS: [&str; 7] = [
     "work_host_forget",
     "work_host_set_remote_profile",
     "work_host_prepare_remote_profile",
+    "work_host_share",
 ];
-const WORK_HOST_PERMISSIONS: [&str; 7] = [
+const WORK_HOST_PERMISSIONS: [&str; 8] = [
     "allow-work-host-status",
     "allow-work-host-register",
     "allow-work-host-start",
@@ -657,6 +658,7 @@ const WORK_HOST_PERMISSIONS: [&str; 7] = [
     "allow-work-host-forget",
     "allow-work-host-set-remote-profile",
     "allow-work-host-prepare-remote-profile",
+    "allow-work-host-share",
 ];
 
 /// Tauri's resolver: the work host commands (ADR-0188 D2, #2778) answer the
@@ -961,8 +963,8 @@ fn only_the_local_terminal_capability_grants_pty_and_none_is_remote() {
             assert_eq!(host, WORK_HOST_PERMISSIONS);
             assert_eq!(
                 permission_ids(cap).len(),
-                7,
-                "work-host.json grants seven commands"
+                8,
+                "work-host.json grants eight commands"
             );
             assert_eq!(cap["webviews"], serde_json::json!(["main"]));
             assert_eq!(cap["platforms"], serde_json::json!(["macOS"]));

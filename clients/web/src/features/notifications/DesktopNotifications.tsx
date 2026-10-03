@@ -14,10 +14,12 @@ import {
   armOpen,
   openTarget,
   rememberAnnounced,
+  windowIsFront,
   type ArmedOpen,
 } from "@momo/core/features/notifications/model";
 import { notifyThisDevice } from "./deviceNotify";
 import { osNotifier, type OsNotifyKind } from "./osNotifier";
+import { setBrowserOpenHandler, useBrowserPermission } from "./browserNotify";
 
 // =============================================================================
 // Desktop notification rail (MOMO-607, ADR-0133 P2) — the trigger MOMO-603 left
@@ -30,8 +32,11 @@ import { osNotifier, type OsNotifyKind } from "./osNotifier";
 // `preference.ts`; every other rule lives in the core model. This file is the
 // impure half — subscriptions, window focus, and the OS call.
 //
-// In a browser it does nothing at all: no notification, and no extra Centrifugo
-// subscription either, so the web build pays nothing for a desktop capability.
+// In a browser it does nothing until the person opted in (a click in settings
+// that ended in a granted Notification permission, #3340). Before that: no
+// banner and no extra Centrifugo subscription, so a tab pays nothing for it.
+// After: the same rules, defaults and grouping as the shell; "in front" means
+// the tab is visible AND focused, and a banner click focuses the tab and routes.
 // =============================================================================
 
 /**
@@ -51,6 +56,10 @@ export function DesktopNotifications() {
   const navigate = useNavigate();
   const location = useLocation();
   const selfId = session.member.id;
+  const desktop = isDesktop();
+  const browserPermission = useBrowserPermission();
+  // 데스크탑 셸이거나, 사람이 켜고 브라우저가 허락한 탭만 알릴 수 있다.
+  const canNotify = desktop || browserPermission === "granted";
 
   const focusedRef = useRef(
     typeof document === "undefined" ? true : document.hasFocus()
@@ -85,12 +94,17 @@ export function DesktopNotifications() {
   const contextRef = useRef({ channels, directory, selfId });
   contextRef.current = { channels, directory, selfId };
 
+  const canNotifyRef = useRef(canNotify);
+  canNotifyRef.current = canNotify;
+
   const handle = useCallback((event: MessageNewEvent) => {
     const current = contextRef.current;
     const nowMs = Date.now();
     const decision = notifyThisDevice(event, {
-      isDesktop: isDesktop(),
-      windowFocused: focusedRef.current,
+      isDesktop: canNotifyRef.current,
+      windowFocused: isDesktop()
+        ? focusedRef.current
+        : windowIsFront(document.visibilityState, document.hasFocus()),
       // 창이 앞이어도 대상 채널이 화면에 없으면 알린다(#3339).
       isTargetVisible: (channelId) => {
         // 경로의 id와 이벤트의 id는 대소문자가 다를 수 있다: uuidEq로 비교한다.
@@ -121,7 +135,8 @@ export function DesktopNotifications() {
     if (!decision.show) return;
     const { messageId, channelId, title, body } = decision.notification;
     announcedRef.current = rememberAnnounced(announcedRef.current, messageId);
-    armedRef.current = armOpen(armedRef.current, channelId, nowMs);
+    // 데스크탑은 알림을 눌러 창이 앞에 오는 순간 이동한다(arm). 브라우저는 배너 클릭이 직접 간다.
+    if (isDesktop()) armedRef.current = armOpen(armedRef.current, channelId, nowMs);
     // 같은 종류는 한 묶음으로 쌓아 보낸다(osNotifier). 보내기는 fire and forget:
     // 브라우저나 거절된 권한은 false로 끝나는 정상 상태다.
     const kindMap: Record<typeof decision.notification.kind, OsNotifyKind> = {
@@ -134,13 +149,14 @@ export function DesktopNotifications() {
       title,
       ...(body === undefined ? {} : { body }),
       label: title.replace(/^승인 필요 · /, ""),
+      route: `/c/${channelId}`,
     });
   }, []);
 
   // ---- the rail -----------------------------------------------------------
 
   useEffect(() => {
-    if (!isDesktop() || !realtime || watched === "") return;
+    if (!canNotify || !realtime || watched === "") return;
     const stops = watched
       .split(",")
       .map((channelId) =>
@@ -152,7 +168,14 @@ export function DesktopNotifications() {
     return () => {
       for (const stop of stops) stop();
     };
-  }, [realtime, workspaceId, watched, handle]);
+  }, [canNotify, realtime, workspaceId, watched, handle]);
+
+  // 브라우저 배너를 누르면 이 탭이 앞에 오고 대상으로 간다.
+  useEffect(() => {
+    if (desktop) return;
+    setBrowserOpenHandler((route) => navigate(route));
+    return () => setBrowserOpenHandler(null);
+  }, [desktop, navigate]);
 
   // ---- window focus -------------------------------------------------------
 

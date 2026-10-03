@@ -167,3 +167,12 @@
 - 모양: `ShareSummaryS1`(`repo`·`branch`·`harness`·`state`·`stages`·`diff`·`prUrl`·`lastActivityAt` 초)에 소유자 멤버·집 채널·`origin`·`status`·시각을 더한 것. A 레인 세션(`origin=host`, #2779)은 같은 모양에 값 없는 필드를 `null`(`stages`는 빈 배열)로 싣고, `harness`=도구 키, `state`는 원장에서 파생(running·idle·done·stopped), `lastActivityAt`은 스레드의 마지막 메시지 시각이다. 터미널 원문·입력·컨트롤·PTY·host 필드와 커밋 제목은 응답에 없다.
 - 보존: 종료 30일이 지난 세션은 L·A 모두 읽기에서 안 보인다(알림 sweep의 지연과 무관하게 읽기가 직접 판정).
 - 실시간(D8): 새 이벤트는 없다. `work.session.share_changed`(켜기·끄기·상태 변화)를 받은 클라이언트가 이 GET으로 다시 읽는다. 단건 404는 보드에서 지우라는 뜻이다. diff 숫자만 바뀐 갱신은 이벤트가 없어 포커스·느린 타이머로 재조회한다.
+
+## 증보 2026-10-03 — 「채널에 공유」: 데스크탑이 host 서명 PATCH를 보내는 길 (#2867, D4)
+
+- Status: **Accepted** (결재 인용: 성재 「전부 권장대로」, 2026-09-27 — Q4·Q5. D4가 이미 정한 「공유 PATCH는 host 서명만」을 구현하는 길을 못 박는다. 서버 계약은 바뀌지 않는다)
+- 문제: host 키는 `momo-workd`만 쥔다(ADR-0188 D2). 웹뷰는 서명할 수 없고, 기기 키(Secure Enclave)는 다른 키다. 그래서 공유 PATCH를 보내려면 앱 → workd 길이 필요했다.
+- 결정: workd 제어 소켓(사용자 전용 Unix 소켓 + 앱 코드 서명 확인, 0188 D2)에 op **`share_session`**(`{sessionId, body}`)을 더한다. workd가 `PATCH /v1/workspaces/{ws}/work-sessions/{session}/share`를 **자기 host 키로 v2 서명**해 보낸다. 경로는 workd가 파싱한 uuid로 만들고, 호스트 id·워크스페이스는 workd 자신의 것이다. 앱(Tauri `work_host_share`)은 세션 id와 본문만 건넨다. 서버 쪽 검증(스키마, 서명한 host = 세션의 host, 소유자 핀, `origin=local_pty`)은 그대로이고 유일한 강제 지점이다.
+- workd의 방어(서버 검증을 대신하지 않는다): 본문은 JSON 객체이고 `shared`가 불리언이며, 키는 S1 필드 목록 안이고, 끄기는 `{shared:false}` 하나뿐이며, 8 KiB 이하다. 거절은 닫힌 라벨(`share_forbidden`·`share_session_ended`·`share_invalid`·`share_unreachable` 등)로만 돌려주고 서버 메시지는 웹뷰에 가지 않는다. 제어 소켓 요청 상한은 4 KiB → 16 KiB로 넓힌다(S1 본문 상한 8 KiB + 봉투).
+- 집 채널·root 카드: 사람 토큰 `POST …/work-sessions {origin:"local_pty", hostId, channelId, tool, label, folderLabel}`가 서버의 한 트랜잭션에서 카드를 올리고 행을 만든다(#2793). 클라이언트는 직접 게시하지 않는다. 저장소 → 마지막 채널 기억은 이 기기에만 둔다(D4-b, ADR-0174).
+- 링크: 공유된 세션의 팀 보드 주소 `<서버 오리진>/work?view=team&card=<session_id>`를 복사한다. `oort://work/<id>` 발급은 #2865(딥링크)가 붙으면 바꾼다.

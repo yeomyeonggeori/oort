@@ -209,6 +209,7 @@ pub fn run() {
             work_host::work_host_forget,
             work_host::work_host_set_remote_profile,
             work_host::work_host_prepare_remote_profile,
+            work_host::work_host_share,
             device_key::device_key_status,
             device_key::device_key_create,
             device_key::device_key_bind_root,

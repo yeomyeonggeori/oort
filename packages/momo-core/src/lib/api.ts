@@ -3427,6 +3427,50 @@ export async function fetchSharedWorkSession(
 }
 
 /**
+ * 「채널에 공유」 (#2867, ADR-0190 D4·D4-b, Q5): register one local pane as a
+ * shared session. A HUMAN call (the person shares their own pane; a work host
+ * never registers one for them). The server does the rest in one transaction:
+ * it checks the host is this person's own registered desktop and that the person
+ * is an active member of `channelId`, posts the root card into that channel and
+ * inserts the ledger row (`origin = local_pty`). The page never publishes.
+ *
+ * Refusals the caller must tell apart, by `ApiError.code` (not by message):
+ * `local_share_requires_registered_host` (403) → the desktop is not registered,
+ * `local_share_limit` (409) → too many shared panes. A plain 403 is a channel the
+ * person cannot post in.
+ *
+ * `folderLabel` is the folder's last path element, never a path.
+ */
+export interface CreateLocalWorkSessionInput {
+  channelId: string;
+  hostId: string;
+  tool: string;
+  label: string;
+  folderLabel?: string | null;
+}
+
+export async function createLocalWorkSession(
+  workspaceId: string,
+  input: CreateLocalWorkSessionInput
+): Promise<WorkSession> {
+  const res = await request<{ workSession: WorkSession }>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/work-sessions`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        origin: "local_pty",
+        channelId: input.channelId,
+        hostId: input.hostId,
+        tool: input.tool,
+        label: input.label,
+        ...(input.folderLabel ? { folderLabel: input.folderLabel } : {}),
+      }),
+    }
+  );
+  return res.workSession;
+}
+
+/**
  * End a session. This is the PROCESS side of the ledger (the host stops holding
  * it), not "stop the current turn": the server has no turn-scoped stop for a
  * work session, and the two are deliberately different words in the UI.
