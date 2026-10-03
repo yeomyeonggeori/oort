@@ -218,9 +218,43 @@ impl CliError {
     }
 }
 
+/// ADR-0197 D8: a production box never keeps its key in a dev file. The box
+/// image sets `OORT_BOX`; while it is set `--dev-key-file` is a usage error.
+pub(crate) fn dev_key_file_allowed(get: &dyn Fn(&str) -> Option<String>) -> Result<(), CliError> {
+    if get(crate::keystore::box_store::ENV_BOX_MARKER).is_some_and(|v| !v.is_empty()) {
+        return Err(CliError::Usage(
+            "--dev-key-file is refused inside an oort box; the host key lives on the box volume"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
+/// The Linux box store (spike S4), selected by the box image's environment.
+/// Compiled everywhere so it is type-checked on a Mac; only Linux uses it.
+fn box_key_store(get: &dyn Fn(&str) -> Option<String>) -> Result<Option<KeyStore>, CliError> {
+    if get(crate::keystore::box_store::ENV_KEY_DIR).is_none() {
+        return Ok(None);
+    }
+    let mountinfo = std::fs::read_to_string("/proc/self/mountinfo").map_err(|error| {
+        CliError::Usage(format!(
+            "cannot read /proc/self/mountinfo to check the key mount: {error}"
+        ))
+    })?;
+    let store = crate::keystore::box_store::BoxKeyStore::from_env(get, Some(&mountinfo))?;
+    Ok(Some(KeyStore::Box(store)))
+}
+
 fn key_store(config: &WorkdConfig, dev_key_file: Option<PathBuf>) -> Result<KeyStore, CliError> {
+    let env = |name: &str| std::env::var(name).ok();
+    if cfg!(target_os = "linux") && dev_key_file.is_none() {
+        if let Some(store) = box_key_store(&env)? {
+            return Ok(store);
+        }
+    }
     match dev_key_file {
         Some(path) => {
+            dev_key_file_allowed(&env)?;
             // ADR-0188 D2: a shipped (team-signed) host keeps its key in the
             // ThisDeviceOnly keychain, never in a file (#2778 security M1).
             #[cfg(target_os = "macos")]
