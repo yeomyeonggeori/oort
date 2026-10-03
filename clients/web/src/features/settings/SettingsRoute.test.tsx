@@ -2,7 +2,7 @@
 
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RosterMember } from "@momo/core/lib/api";
@@ -35,10 +35,6 @@ vi.mock("react-router-dom", async (importOriginal) => {
 vi.mock("./AiLinkSection", () => ({
   AiLinkSection: () => createElement("div", { "data-testid": "section-ai" }),
 }));
-vi.mock("./AgentCredentialsSection", () => ({
-  AgentCredentialsSection: () =>
-    createElement("div", { "data-testid": "section-agents" }),
-}));
 vi.mock("./WorkHostSection", () => ({
   WorkHostSection: () => createElement("div", { "data-testid": "section-code" }),
 }));
@@ -46,24 +42,12 @@ vi.mock("./WorkspaceSection", () => ({
   WorkspaceSection: () =>
     createElement("div", { "data-testid": "section-workspace" }),
 }));
-vi.mock("@/features/plugins/PluginSection", () => ({
-  PluginSection: () =>
-    createElement("div", { "data-testid": "section-plugins" }),
-}));
 vi.mock("./UsageSection", () => ({
   UsageSection: () => createElement("div", { "data-testid": "section-usage" }),
-}));
-vi.mock("./WebhookSection", () => ({
-  WebhookSection: () =>
-    createElement("div", { "data-testid": "section-webhooks" }),
 }));
 vi.mock("./InviteSection", () => ({
   InviteSection: () =>
     createElement("div", { "data-testid": "section-members" }),
-}));
-vi.mock("./EventSubscriptionSection", () => ({
-  EventSubscriptionSection: () =>
-    createElement("div", { "data-testid": "section-events" }),
 }));
 vi.mock("./NotificationRulesSection", () => ({
   NotificationRulesSection: () =>
@@ -277,24 +261,15 @@ describe("SettingsRoute 전면 레이아웃", () => {
     expect(members.querySelector('[data-testid="section-members"]')).not.toBeNull();
   });
 
-  it("허브로 옮긴 다섯 구획 위에는 「AI 허브로 옮겼어요」 링크가 서고, 그 밖의 구획에는 없다 (AIH-3)", () => {
+  it("AI 연결 구획 위에는 「AI 허브로 옮겼어요」 링크가 서고, 그 밖의 구획에는 없다 (AIH-3)", () => {
     const host = mountRoute("/settings?section=profile");
     expect(host.querySelector('[data-testid="ai-hub-moved-link"]')).toBeNull();
-    const expected: Array<[string, string]> = [
-      ["settings-nav-ai", "/ai/accounts"],
-      ["settings-nav-agents", "/ai/external"],
-      ["settings-nav-plugins", "/ai/external"],
-      ["settings-nav-webhooks", "/ai/external"],
-      ["settings-nav-events", "/ai/external"],
-    ];
-    for (const [navId, href] of expected) {
-      act(() => {
-        (host.querySelector(`[data-testid="${navId}"]`) as HTMLButtonElement).click();
-      });
-      const line = host.querySelector('[data-testid="ai-hub-moved-link"]');
-      expect(line?.textContent, navId).toContain("AI 허브로 옮겼어요");
-      expect(line?.querySelector("a")?.getAttribute("href"), navId).toBe(href);
-    }
+    act(() => {
+      (host.querySelector('[data-testid="settings-nav-ai"]') as HTMLButtonElement).click();
+    });
+    const line = host.querySelector('[data-testid="ai-hub-moved-link"]');
+    expect(line?.textContent).toContain("AI 허브로 옮겼어요");
+    expect(line?.querySelector("a")?.getAttribute("href")).toContain("/ai/accounts");
     act(() => {
       (host.querySelector('[data-testid="settings-nav-account"]') as HTMLButtonElement).click();
     });
@@ -310,13 +285,9 @@ describe("SettingsRoute 전면 레이아웃", () => {
       ["settings-nav-link-previews", "section-link-previews"],
       ["settings-nav-notifications", "section-notifications"],
       ["settings-nav-workspace", "section-workspace"],
-      ["settings-nav-plugins", "section-plugins"],
       ["settings-nav-members", "section-members"],
       ["settings-nav-ai", "section-ai"],
-      ["settings-nav-agents", "section-agents"],
       ["settings-nav-usage", "section-usage"],
-      ["settings-nav-webhooks", "section-webhooks"],
-      ["settings-nav-events", "section-events"],
     ];
     for (const [navId, panelId] of clicks) {
       act(() => {
@@ -325,4 +296,67 @@ describe("SettingsRoute 전면 레이아웃", () => {
       expect(host.querySelector(`[data-testid="${panelId}"]`)).not.toBeNull();
     }
   });
+
+  it("외부 연결로 옮긴 네 구획은 눌러도 설정에 머물지 않고 그 줄 상세로 간다 (AIH-8)", () => {
+    const host = mountRoute("/settings?section=profile");
+    const expected: Array<[string, string]> = [
+      ["settings-nav-agents", "/ai/external/agents"],
+      ["settings-nav-plugins", "/ai/external/apps"],
+      ["settings-nav-webhooks", "/ai/external/incoming"],
+      ["settings-nav-events", "/ai/external/outgoing"],
+    ];
+    for (const [navId, path] of expected) {
+      navigate.mockClear();
+      act(() => {
+        (host.querySelector(`[data-testid="${navId}"]`) as HTMLButtonElement).click();
+      });
+      expect(navigate).toHaveBeenCalledWith(path);
+    }
+  });
+
+  it.each([
+    ["agents", "/ai/external/agents"],
+    ["plugins", "/ai/external/apps"],
+    ["webhooks", "/ai/external/incoming"],
+    ["events", "/ai/external/outgoing"],
+  ])("옛 딥링크 ?section=%s 는 %s 로 바꿔 보낸다 (AIH-8)", (section, target) => {
+    const client = new QueryClient();
+    const host = document.createElement("div");
+    document.body.append(host);
+    mountedHost = host;
+    mountedRoot = createRoot(host);
+    act(() =>
+      mountedRoot?.render(
+        createElement(
+          QueryClientProvider,
+          { client },
+          createElement(
+            SessionProvider,
+            { value: sessionValue() },
+            createElement(
+              MemoryRouter,
+              { initialEntries: [`/settings?section=${section}`] },
+              createElement(
+                Routes,
+                null,
+                createElement(Route, { path: "/settings", element: createElement(SettingsRoute) }),
+                createElement(Route, { path: "*", element: createElement(LocationProbe) })
+              )
+            )
+          )
+        )
+      )
+    );
+    expect(host.querySelector('[data-testid="settings-route"]')).toBeNull();
+    expect(host.querySelector('[data-testid="location-probe"]')?.textContent).toBe(target);
+  });
+
+  it("옮기지 않은 ?section=ai 는 리다이렉트하지 않는다 (AIH-8)", () => {
+    const host = mountRoute("/settings?section=ai");
+    expect(host.querySelector('[data-testid="settings-route"]')).not.toBeNull();
+  });
 });
+
+function LocationProbe() {
+  return createElement("span", { "data-testid": "location-probe" }, useLocation().pathname);
+}

@@ -9,6 +9,9 @@ import {
   AI_GLOSSARY,
   AI_HUB_COPY,
   AI_HUB_FROM_SETTINGS,
+  AI_EXTERNAL_ROWS,
+  AI_EXTERNAL_SUBSECTIONS,
+  aiExternalRowFromSettings,
   AI_HUB_NAV_COPY,
   AI_HUB_OVERVIEW_COPY,
   AI_HUB_SECTIONS,
@@ -731,5 +734,28 @@ describe("개인 키 brain 과 서버 사유 (#3416)", () => {
 
   it("서버 사유 문자열이 서버 상수와 같다", () => {
     expect(CLAUDE_SUBSCRIPTION_AGENT_PAUSED).toBe("claude_subscription_agent_paused");
+  });
+});
+
+describe("외부 연결 줄 (AIH-8)", () => {
+  it("하위 이름을 빠짐없이 한 번씩, 같은 순서로 덮는다", () => {
+    expect(AI_EXTERNAL_ROWS.map((row) => row.id)).toEqual(Object.keys(AI_EXTERNAL_SUBSECTIONS));
+    for (const row of AI_EXTERNAL_ROWS) expect(row.title).toBe(AI_EXTERNAL_SUBSECTIONS[row.id]);
+  });
+
+  it("옛 설정 구획 넷은 각자 다른 상세 주소로 간다", () => {
+    const moved = Object.entries(AI_HUB_FROM_SETTINGS).filter(([, target]) => target === "external").map(([id]) => id);
+    expect(moved.sort()).toEqual(["agents", "events", "plugins", "webhooks"]);
+    const paths = moved.map((id) => aiExternalRowFromSettings(id)?.path);
+    expect(new Set(paths).size).toBe(4);
+    for (const path of paths) expect(path?.startsWith("/ai/external/")).toBe(true);
+    expect(aiExternalRowFromSettings("ai")).toBeNull();
+  });
+
+  it("영어 약자는 상세 머리 괄호에만 있고 목차 줄에는 없다", () => {
+    for (const row of AI_EXTERNAL_ROWS) {
+      for (const text of [row.title, row.legacy ?? "", row.summary]) expect(text).not.toMatch(/MCP|Agent Port/);
+    }
+    expect(AI_EXTERNAL_ROWS.find((row) => row.id === "externalAgents")?.detailLegacy).toContain("MCP");
   });
 });

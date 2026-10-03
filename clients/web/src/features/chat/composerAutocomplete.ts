@@ -8,6 +8,7 @@ import type {
   CommandIcon,
   LocalCardArgs,
 } from "@momo/core/features/commands/registry";
+import { mentionAnnotation } from "@momo/core/features/ai/aiMention";
 import { slashCandidates } from "@momo/core/features/commands/slash";
 
 // =============================================================================
@@ -282,6 +283,15 @@ export function mentionQueryAt(value: string, caret: number): MentionQuery | nul
  */
 export type ComposerCandidateMark = "private-channel";
 
+/** 멘션 후보 아래 보조 줄과 오른쪽 칩. `mentionAnnotation` 의 결과 그대로다. */
+export interface ComposerAgentAnnotation {
+  /** `쓰는 AI · 부를 수 있는 사람` (+ 맥 꺼짐 · 문의 중 꼬리). */
+  line: string;
+  badge: string | null;
+  /** 보는 사람이 못 부른다: 자물쇠 + 흐리게. 고르는 것은 막지 않는다. */
+  locked: boolean;
+}
+
 /** 후보 한 줄. 세 트리거가 같은 모양으로 그려지고 같은 방식으로 삽입된다. */
 export interface ComposerCandidate {
   kind: ComposerTriggerKind;
@@ -291,6 +301,11 @@ export interface ComposerCandidate {
   lead: string;
   /** 이름 앞에 설 격 글리프. 없으면 이름만. */
   mark?: ComposerCandidateMark;
+  /**
+   * 멘션 후보의 AI 주석 (AIH-9, #3439). 에이전트에만 붙는다. 문장은 코어 `aiAgentLabels` 가
+   * 만들고 이 목록은 그리기만 한다. 서버가 쓰는 AI를 알려주지 않았으면 없다(줄을 그리지 않는다).
+   */
+  agent?: ComposerAgentAnnotation;
   /** 오른쪽 흐린 자리. 사람 이름 · 채널 주제 · 이모지 숏코드. */
   hint: string;
   /** 트리거 자리부터 캐럿까지를 대체할 문자열. 뒤 공백을 포함한다. */
@@ -365,17 +380,24 @@ export function matchChannels(
 export function memberCandidates(
   members: RosterMember[],
   query: string,
-  limit = COMPOSER_CANDIDATE_LIMIT
+  limit = COMPOSER_CANDIDATE_LIMIT,
+  viewerHumanId?: string | null
 ): ComposerCandidate[] {
-  return matchMembers(members, query, limit).map((member) => ({
-    kind: "mention" as const,
-    id: member.id,
-    lead: `@${member.handle}`,
-    hint: member.displayName,
-    // 코어 `mentionTokenAt` 이 읽는 그 문법이다. 삽입은 평문이고, 렌더가
-    // 그 평문을 다시 토큰으로 읽는다 — 보이지 않는 신원을 본문에 심지 않는다.
-    insert: `@${member.handle} `,
-  }));
+  return matchMembers(members, query, limit).map((member) => {
+    const note = mentionAnnotation(member, viewerHumanId);
+    return {
+      kind: "mention" as const,
+      id: member.id,
+      lead: `@${member.handle}`,
+      hint: member.displayName,
+      // 코어 `mentionTokenAt` 이 읽는 그 문법이다. 삽입은 평문이고, 렌더가
+      // 그 평문을 다시 토큰으로 읽는다 — 보이지 않는 신원을 본문에 심지 않는다.
+      insert: `@${member.handle} `,
+      ...(note !== null && note.line !== null
+        ? { agent: { line: note.line, badge: note.badge, locked: note.locked } }
+        : {}),
+    };
+  });
 }
 
 // ## `#` 는 v1 에서 **삽입까지**다 — 렌더 링크화는 이 티켓이 하지 않는다 (#1930)
