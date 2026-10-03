@@ -72,6 +72,12 @@ const APP_COMMANDS: &[&str] = &[
     "workbench_folder_pick",
     "workbench_folder_inspect",
     "workbench_worktree_create",
+    // Sign-in -> agent registration (#3389, ADR-0190 D3-h). Granted only by
+    // capabilities/agent-port.json.
+    "agent_port_device",
+    "agent_port_connect",
+    "agent_port_replace_credential",
+    "agent_port_disconnect",
     // Account profile folders (ADR-0191 D1, ADR-0190 D3-f, #2878). Granted
     // only by capabilities/harness-profile.json.
     "harness_profile_list",

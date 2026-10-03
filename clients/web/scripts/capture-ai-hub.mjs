@@ -2,6 +2,8 @@
 // =============================================================================
 // 「AI」 허브 입구 캡처 (AIH-3, #3393): 사이드바 AI 행, 허브 개요(웹·데스크탑), 네 구획 머리,
 // 옛 입구(설정 › AI 연결·에이전트 화면)의 「AI 허브로 옮겼어요」 한 줄.
+// AIH-4(#3399): 내 AI 계정 구획 — 데스크탑 세 상태(Claude 준비됨·Codex 로그인 필요+Claude 에이전트 /
+// 에이전트 없음 / 둘 다 준비됨+에이전트 둘)와 웹 두 상태(에이전트 있음 / 없음).
 //
 //   npm run build && OUT_DIR=~/.cache/momo-scratch/3393/captures node scripts/capture-ai-hub.mjs
 //
@@ -68,11 +70,22 @@ const plugins = {
   })),
 };
 
+// AIH-6: 팀 AI 키 장면이 서버 답을 바꾼다. operator=false 면 팀 키 읽기는 403, empty 면 저장된 키가 없다.
+const scenario = { operator: true, empty: false };
+const emptyLink = {
+  schema: "momo.provider_link.v0", configured: false, source: "environment", mode: "local-mock",
+  baseUrl: "http://mock", endpointLabel: "mock", bearerConfigured: false, availability: "mock", keyConfigured: false, diagnostics: [],
+  presets: [
+    { id: "anthropic", label: "Anthropic", baseUrl: "https://api.anthropic.com/v1", format: "anthropic" },
+    { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", format: "openai" },
+  ],
+};
+
 function json(route, body, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-async function installRoutes(context) {
+async function installRoutes(context, connectionsFor = connections) {
   await context.route("**/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/v1/auth/login") return json(route, auth);
@@ -81,11 +94,20 @@ async function installRoutes(context) {
       return json(route, { token: "capture", tokenType: "Bearer", expiresAtMs: Date.now() + 600_000, ttlSeconds: 60, workspaceId, memberId });
     }
     if (path.endsWith("/channels")) return json(route, { channels });
-    if (path.endsWith("/roster")) return json(route, { members: roster });
+    if (path.endsWith("/roster")) {
+      const members = scenario.operator ? roster : roster.map((m) => (m.id === memberId ? { ...m, role: "member" } : m.id === otherHuman ? { ...m, role: "owner" } : m));
+      return json(route, { members });
+    }
     if (path.endsWith("/read-state")) return json(route, { read_states: [] });
-    if (path.endsWith("/hosted-agent-connections")) return json(route, { connections });
-    if (path.endsWith("/provider/link")) return json(route, providerLink);
-    if (path.endsWith("/provider/default-ai")) return json(route, { schema: "momo.provider.default_ai.v0", teamAgent: null, summary: null, guardrail: { mode: "off", available: false } });
+    if (path.endsWith("/hosted-agent-connections")) return json(route, { connections: connectionsFor });
+    if (path.endsWith("/provider/link")) {
+      if (!scenario.operator) return json(route, { error: { code: "forbidden", message: "operators only" } }, 403);
+      return json(route, scenario.empty ? emptyLink : providerLink);
+    }
+    if (path.endsWith("/provider/default-ai")) {
+      if (!scenario.operator) return json(route, { error: { code: "forbidden", message: "operators only" } }, 403);
+      return json(route, { schema: "momo.provider.default_ai.v0", teamAgent: null, summary: null, guardrail: { mode: "off", available: false } });
+    }
     if (path.includes("/provider/link/chain")) return json(route, { error: { code: "not_found", message: "no chain" } }, 404);
     if (path.endsWith("/webhooks")) {
       return json(route, { installations: [{ id: "w1", channelId: channels[0].id, authorMemberId: memberId, mode: "native", status: "active", createdAtMs: 1, updatedAtMs: 1 }] });
@@ -98,7 +120,7 @@ async function installRoutes(context) {
     if (path.endsWith("/work-hosts")) return json(route, { workHosts: [] });
     if (path.endsWith("/work-sessions/shared")) return json(route, { sessions: [], nextCursor: null });
     if (path.endsWith("/work-sessions")) return json(route, { workSessions: [] });
-    if (path.endsWith(`/workspaces/${workspaceId}`)) return json(route, { workspace: { id: workspaceId, name: "여명거리" } });
+    if (path.endsWith(`/workspaces/${workspaceId}`)) return json(route, { workspace: { id: workspaceId, name: "여명거리", slug: "team", updatedAtMs: 1, roleLabels: {}, welcomeAgentMemberId: null, welcomePrompt: "", subscriptionAgentsEnabled: true } });
     if (path.includes("/messages")) return json(route, { messages: [] });
     return json(route, {});
   });
@@ -128,8 +150,8 @@ async function installRealtime(page) {
   });
 }
 
-async function installDesktop(page) {
-  await page.addInitScript(() => {
+async function installDesktop(page, probes) {
+  await page.addInitScript((probes) => {
     window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
     window.__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main", windowLabel: "main" } },
@@ -139,7 +161,8 @@ async function installDesktop(page) {
       async invoke(cmd) {
         if (cmd === "keychain_store_refresh_token") { window.__h = "shell:" + "c".repeat(32); return null; }
         if (cmd === "keychain_refresh_token_handle") return window.__h ?? null;
-        if (cmd === "detect_local_harnesses") return [{ id: "claude", installed: true, auth: "logged_in" }, { id: "codex", installed: true, auth: "needs_login" }];
+        if (cmd === "detect_local_harnesses") return probes;
+        if (cmd === "harness_profile_list") return [];
         if (cmd === "detect_hosted_agents") return [];
         if (cmd === "keychain_available") return false;
         if (cmd === "deep_link_take_pending") return [];
@@ -150,7 +173,7 @@ async function installDesktop(page) {
         return null;
       },
     };
-  });
+  }, probes);
 }
 
 const failures = [];
@@ -160,12 +183,14 @@ function check(name, ok, detail = "") {
 }
 const overflowX = (page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
-async function open(browser, origin, scheme, viewport, desktop) {
+const DEFAULT_PROBES = [{ id: "claude", installed: true, auth: "logged_in" }, { id: "codex", installed: true, auth: "needs_login" }];
+
+async function open(browser, origin, scheme, viewport, desktop, opts = {}) {
   const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce", serviceWorkers: "block" });
-  await installRoutes(context);
+  await installRoutes(context, opts.connections);
   const page = await context.newPage();
   await installRealtime(page);
-  if (desktop) await installDesktop(page);
+  if (desktop) await installDesktop(page, opts.probes ?? DEFAULT_PROBES);
   await page.addInitScript((server) => { try { localStorage.setItem("momo.web.server.v1", server); } catch { /* 저장소 없는 캡처 */ } }, origin);
   await page.goto(origin, { waitUntil: "domcontentloaded" });
   await advanceToAccount(page);
@@ -252,6 +277,149 @@ async function scenes(browser, origin, scheme, viewport) {
   }
 }
 
+// ---- AIH-4 (#3399): 내 AI 계정 구획 ----------------------------------------------
+const text = (page, testId) => page.getByTestId(testId).textContent();
+const BOTH_READY = [{ id: "claude", installed: true, auth: "logged_in" }, { id: "codex", installed: true, auth: "logged_in" }];
+
+async function accountsScene(browser, origin, scheme, viewport, name, desktop, opts, assertions) {
+  const tag = `${viewport.width}-${scheme}`;
+  const { context, page } = await open(browser, origin, scheme, viewport, desktop, opts);
+  try {
+    if ((await page.getByTestId("sidebar-toggle").getAttribute("aria-expanded")) === "false") {
+      await page.getByTestId("sidebar-toggle").click();
+      await page.waitForTimeout(400);
+    }
+    await page.goto(`${origin}/#/ai/accounts`);
+    await page.getByTestId("ai-hub-pane-accounts").waitFor();
+    await page.getByTestId(desktop ? "ai-accounts-desktop" : "ai-accounts-web").waitFor();
+    // 에이전트 줄이 읽힐 때까지(데스크탑) / 목록이 설 때까지(웹).
+    await page.waitForFunction(
+      () => !document.querySelector("[data-testid='ai-accounts-my-agents']")?.textContent?.includes("불러오는 중") && !document.querySelector("[data-testid='ai-accounts-desktop'] [role='status']"),
+      null,
+      { timeout: 8000 },
+    );
+    await page.waitForTimeout(800);
+    await page.screenshot({ path: resolve(OUT_DIR, `accounts-${name}-${tag}.png`) });
+    await assertions(page, `${tag} ${name}`);
+    check(`${tag} ${name}: 가로 넘침 0`, (await overflowX(page)) === 0);
+  } finally {
+    await context.close();
+  }
+}
+
+async function accountScenes(browser, origin, scheme, viewport) {
+  const mineCodex = conn(4, ids.team, { invocationScope: "owner_only", subscriptionHarness: "codex" });
+  await accountsScene(browser, origin, scheme, viewport, "desktop-claude-ready", true, {}, async (page, label) => {
+    check(`${label}: Claude 로그인 준비됨`, (await text(page, "my-account-claude-state")).includes("준비됨"));
+    check(`${label}: Claude 에이전트 줄은 @성재-claude + 문의 중`, (await text(page, "my-account-claude-agent-text")) === "에이전트 @성재-claude" && (await text(page, "my-account-claude-agent-chip")) === "문의 중");
+    const claudeLine = await text(page, "my-account-claude-agent");
+    check(`${label}: Claude 줄에 연결됨·부를 수 있어요·나만 부름이 없다`, !/연결됨|부를 수 있|나만 부름/.test(claudeLine), claudeLine);
+    check(`${label}: Codex 로그인 필요 + 로그인 버튼 + 아직 에이전트 없음`, (await text(page, "my-account-codex-state")).includes("로그인 필요") && (await page.getByTestId("my-account-codex-login").isVisible()) && (await text(page, "my-account-codex-agent-text")) === "아직 에이전트 없음");
+  });
+  await accountsScene(browser, origin, scheme, viewport, "desktop-no-agents", true, { connections: [] }, async (page, label) => {
+    check(`${label}: 두 줄 모두 아직 에이전트 없음`, (await text(page, "my-account-claude-agent-text")) === "아직 에이전트 없음" && (await text(page, "my-account-codex-agent-text")) === "아직 에이전트 없음");
+    check(`${label}: Claude 줄에도 문의 중 이유가 남는다(칩은 없다)`, (await page.getByTestId("my-account-claude-agent-chip").count()) === 0 && (await text(page, "my-account-claude-agent-detail")).includes("대신 구동하지 않아요"));
+  });
+  await accountsScene(browser, origin, scheme, viewport, "desktop-both-agents", true, { probes: BOTH_READY, connections: [...connections, mineCodex] }, async (page, label) => {
+    check(`${label}: Codex는 나만 부름(보수 모드와 무관)`, (await text(page, "my-account-codex-agent-chip")) === "나만 부름" && (await text(page, "my-account-codex-agent-text")).startsWith("에이전트 @"));
+    check(`${label}: Claude는 여전히 문의 중`, (await text(page, "my-account-claude-agent-chip")) === "문의 중");
+  });
+  for (const [name, opts] of [["web-agents", {}], ["web-no-agents", { connections: [] }]]) {
+    await accountsScene(browser, origin, scheme, viewport, name, false, opts, async (page, label) => {
+      check(`${label}: 데스크탑에서 로그인한다는 말 + 앱 받기·열기 길`, (await text(page, "ai-accounts-web-notice")).includes("로그인은 데스크탑 앱에서 해요") && (await page.getByTestId("ai-accounts-get-app").isVisible()) && (await page.getByTestId("ai-accounts-open-app").isVisible()));
+      check(`${label}: 옛 막다른 길 줄이 없다`, (await page.getByTestId("subscription-entry-detail").count()) === 0);
+      if (name === "web-agents") {
+        check(`${label}: 내 Claude 에이전트는 문의 중(켜짐·부를 수 있어요 아님)`, (await text(page, "ai-accounts-agent-claude_code-chip")) === "문의 중" && !/연결됨|부를 수 있|나만 부름|켜짐/.test(await text(page, "ai-accounts-agent-claude_code")));
+        check(`${label}: 남의 에이전트는 없다`, !(await text(page, "ai-accounts-my-agents")).includes("서연-codex"));
+      } else {
+        check(`${label}: 에이전트가 없으면 빈 줄`, (await page.getByTestId("ai-accounts-my-agents-empty").isVisible()));
+      }
+    });
+  }
+}
+
+// =============================================================================
+// AIH-6 (#3400): 팀 AI 키 — 운영자 / 비운영자 / 키 추가 / 기본 AI 표 / 끊기 확인. 라이트·다크.
+// =============================================================================
+async function teamKeysScenes(browser, origin, scheme, viewport) {
+  const tag = `${viewport.width}-${scheme}`;
+  const OPERATOR_ONLY = ["ai-team-add", "ai-link-edit", "ai-link-check", "ai-link-unlink", "ai-team-chain-toggle", "ai-default-teamAgent-select", "ai-default-summary-select", "ai-team-keys-form"];
+  const run = async (name, setup, body) => {
+    Object.assign(scenario, { operator: true, empty: false }, setup);
+    const { context, page } = await open(browser, origin, scheme, viewport, true);
+    try {
+      await page.goto(`${origin}/#/ai/team-keys`);
+      await page.getByTestId("ai-team-keys").waitFor();
+      await page.waitForFunction(() => !document.querySelector("[data-testid='ai-team-keys']")?.querySelector("[aria-busy='true'], .animate-pulse"), null, { timeout: 8000 }).catch(() => {});
+      await page.waitForTimeout(600);
+      // 본문은 안쪽 스크롤이라 fullPage 가 닫혀 있다: 내용 높이만큼 창을 키워 한 장에 담는다.
+      const shot = async (file) => {
+        const full = await page.evaluate(() => {
+          const pane = document.querySelector("[data-testid='ai-hub-route'] .overflow-y-auto");
+          return pane ? pane.scrollHeight + pane.getBoundingClientRect().top + 8 : 0;
+        });
+        await page.setViewportSize({ width: viewport.width, height: Math.max(viewport.height, Math.ceil(full)) });
+        await page.waitForTimeout(200);
+        await page.screenshot({ path: resolve(OUT_DIR, `team-keys-${file}-${tag}.png`) });
+        await page.setViewportSize(viewport);
+      };
+      await body(page, shot);
+    } finally {
+      await context.close();
+    }
+  };
+  await run("operator", {}, async (page, shot) => {
+    await page.getByTestId("ai-link-row").waitFor();
+    await page.waitForFunction(() => document.querySelector("[data-testid='ai-link-row-uses']")?.textContent?.includes("@"), null, { timeout: 8000 });
+    await shot("operator");
+    const row = await page.getByTestId("ai-link-row").textContent();
+    check(`${tag} 팀 키 운영자: Anthropic · ••7c1e · 맨 위 키`, row.includes("Anthropic") && row.includes("7c1e") && row.includes("맨 위 키"), row);
+    const uses = await page.getByTestId("ai-link-row-uses").textContent();
+    check(`${tag} 팀 키 운영자: 쓰는 곳 = 기능 + 에이전트 이름`, uses.includes("팀 에이전트 대답") && uses.includes("@"), uses);
+    for (const id of ["ai-link-edit", "ai-link-check", "ai-link-unlink"]) check(`${tag} 팀 키 운영자: ${id} 있음`, (await page.getByTestId(id).count()) === 1);
+    check(`${tag} 팀 키 운영자: 개인 API 키 자리는 준비 중이고 컨트롤 없음`, (await page.getByTestId("ai-personal-keys").locator("button, input, select, a").count()) === 0 && (await page.getByTestId("ai-personal-keys").textContent()).includes("준비 중"));
+    check(`${tag} 팀 키 운영자: 가로 넘침 0`, (await overflowX(page)) === 0);
+    // 기본 AI 표
+    const unset = await page.locator("[data-testid$='-unset']").evaluateAll((els) => els.map((e) => [e.getAttribute("data-testid"), e.textContent]));
+    const byId = Object.fromEntries(unset);
+    check(`${tag} 기본 AI: 여섯 줄에 「고르지 않으면」`, unset.length === 6, JSON.stringify(unset));
+    check(`${tag} 기본 AI: 채널 요약은 고를 때까지 만들지 않는다고 말한다`, byId["ai-default-summary-unset"].includes("채널 요약은 여기서 고를 때까지 만들지 않아요"));
+    await page.getByTestId("ai-defaults").scrollIntoViewIfNeeded();
+    await shot("defaults");
+    // 끊기 확인: 영향 문장
+    await page.getByTestId("ai-link-unlink").click();
+    await page.getByTestId("ai-link-unlink-dialog").waitFor();
+    await page.waitForFunction(() => !document.querySelector("[data-testid='ai-link-unlink-dialog']")?.textContent?.includes("찾고 있어요"), null, { timeout: 8000 });
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: resolve(OUT_DIR, `team-keys-unlink-${tag}.png`) });
+    check(`${tag} 끊기 확인: 영향 받는 에이전트 이름`, (await page.getByTestId("ai-link-unlink-impact").textContent()).includes("@"));
+    await page.keyboard.press("Escape");
+  });
+  await run("add-key", { empty: true }, async (page, shot) => {
+    await page.getByTestId("ai-link-empty").waitFor();
+    check(`${tag} 키 추가: 비어 있는 서버에 가짜 회사 행 없음`, (await page.getByTestId("ai-link-row").count()) === 0 && !(await page.getByTestId("ai-team-keys").textContent()).includes("추가 안 됨"));
+    await page.getByTestId("ai-team-add").click();
+    await page.getByTestId("ai-team-keys-form").waitFor();
+    await page.waitForTimeout(300);
+    await shot("add-key");
+    check(`${tag} 키 추가: 프리셋 칩(Anthropic·OpenAI)과 비밀번호 칸`, (await page.getByTestId("ai-team-keys-form").textContent()).includes("Anthropic") && (await page.getByTestId("ai-team-keys-form").locator("input[type='password']").count()) === 1);
+    check(`${tag} 키 추가: 기본 AI 모의 응답 문장`, (await page.getByTestId("ai-default-teamAgent-unset").textContent()).includes("모의 응답"));
+    check(`${tag} 키 추가: 가로 넘침 0`, (await overflowX(page)) === 0);
+  });
+  await run("non-operator", { operator: false }, async (page, shot) => {
+    await page.getByTestId("operator-notice").waitFor();
+    await page.getByTestId("ai-default-teamAgent").waitFor();
+    await shot("non-operator");
+    let present = [];
+    for (const id of OPERATOR_ONLY) if ((await page.getByTestId(id).count()) > 0) present.push(id);
+    check(`${tag} 비운영자: 운영자 컨트롤 0개`, present.length === 0, present.join(","));
+    check(`${tag} 비운영자: 읽기 전용 안내와 운영자에게 요청`, (await page.getByTestId("ai-team-keys-readonly").textContent()).startsWith("팀 키는 운영자만 보고 바꿀 수 있어요") && (await page.getByTestId("ai-team-keys-request").count()) >= 1);
+    check(`${tag} 비운영자: 키의 있고 없음을 지어내지 않음`, !/추가 안 됨|연결됨|아직 팀 AI 키가 없어요/.test(await page.getByTestId("ai-team-keys").textContent()));
+    check(`${tag} 비운영자: 가로 넘침 0`, (await overflowX(page)) === 0);
+  });
+  Object.assign(scenario, { operator: true, empty: false });
+}
+
 async function main() {
   if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) throw new Error("dist/ is missing. Run npm run build first.");
   mkdirSync(OUT_DIR, { recursive: true });
@@ -261,6 +429,8 @@ async function main() {
     for (const scheme of ["light", "dark"]) {
       for (const viewport of [{ width: 1440, height: 900 }, { width: 900, height: 700 }]) {
         await scenes(browser, preview.origin, scheme, viewport);
+        await accountScenes(browser, preview.origin, scheme, viewport);
+        await teamKeysScenes(browser, preview.origin, scheme, viewport);
       }
     }
   } finally {

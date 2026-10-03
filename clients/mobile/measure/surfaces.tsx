@@ -3161,8 +3161,18 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       );
     }
     case 'ai-connect-card':
+    case 'ai-connect-card-mine':
     case 'ai-connect-card-denied': {
-      if (name === 'ai-connect-card') {
+      if (name === 'ai-connect-card-mine') {
+        // AIH-4 (#3399): 내 구독 에이전트의 서버 상태. 하네스는 데이터를 받지 않으므로
+        // 명부와 호스티드 연결 목록에 씨앗을 뿌린다(쿼리 키는 앱 것 그대로).
+        harnessClient.setQueryData(TEAM_QUERY_KEY, AI_CONNECT_LINK);
+        harnessClient.setQueryData(['roster', AIH4_WS], AIH4_ROSTER);
+        harnessClient.setQueryData(
+          ['hosted-agents', 'connections', AIH4_WS],
+          AIH4_CONNECTIONS,
+        );
+      } else if (name === 'ai-connect-card') {
         harnessClient.setQueryData(TEAM_QUERY_KEY, AI_CONNECT_LINK);
       } else {
         harnessClient
@@ -3179,7 +3189,9 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           label={
             name === 'ai-connect-card'
               ? '폰 로컬 카드 — 운영자 (#2945)'
-              : '폰 로컬 카드 — 비운영자 (#2945)'
+              : name === 'ai-connect-card-mine'
+                ? '폰 로컬 카드 — 내 에이전트 (#3399)'
+                : '폰 로컬 카드 — 비운영자 (#2945)'
           }>
           {/* 앱과 같은 `ConversationLayout` — 자판이 오르면 카드와 입력창이 함께
               들린다(자판 위 접힘 캡처, maestro 92). */}
@@ -3195,7 +3207,15 @@ export function Surface({name}: {name: string}): React.JSX.Element {
                 />
               </View>
             }
-            composer={<AiConnectCardWithComposer />}
+            composer={
+              <AiConnectCardWithComposer
+                mine={
+                  name === 'ai-connect-card-mine'
+                    ? {workspaceId: AIH4_WS, memberId: AIH4_ME}
+                    : undefined
+                }
+              />
+            }
           />
         </Frame>
       );
@@ -4345,17 +4365,32 @@ export default function SurfacesHarness({
   );
 }
 
+const AIH4_WS = '00000000-0000-7000-8000-0000000000a1';
+const AIH4_ME = '00000000-0000-7000-8000-0000000000a2';
+const AIH4_ROSTER = [
+  {id: AIH4_ME, workspaceId: AIH4_WS, kind: 'human', status: 'active', displayName: '곽성재', handle: 'seongjae', role: 'owner', channelCount: 1, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0},
+  {id: '00000000-0000-7000-8000-0000000000a3', workspaceId: AIH4_WS, kind: 'agent', status: 'active', displayName: '성재-claude', handle: 'seongjae-claude', channelCount: 1, channelIds: [], capabilities: [], ownerHumanId: AIH4_ME, createdAtMs: 0, updatedAtMs: 0},
+];
+const AIH4_CONNECTIONS = [
+  {id: 'c1', agentMemberId: '00000000-0000-7000-8000-0000000000a3', status: 'active', authMode: 'bearer', audience: 'oort', approvedChannelIds: [], approvedScopes: [], createdAtMs: 1, updatedAtMs: 1, invocationScope: 'owner_only', subscriptionHarness: 'claude_code'},
+];
+
 /** 네트워크로 나가지 않는다. 하네스는 사진을 찍지 데이터를 받지 않는다. */
 /**
  * 대화 화면과 같은 배선: 입력창의 키 붙여넣기 안내가 서면 카드가 접힌다
  * (design-review #2945 R3-B1). 스위치 안에서는 훅을 쓸 수 없어 따로 둔다.
  */
-function AiConnectCardWithComposer(): React.JSX.Element {
+function AiConnectCardWithComposer({
+  mine,
+}: {
+  mine?: {workspaceId: string; memberId: string};
+}): React.JSX.Element {
   const [keyBlocked, setKeyBlocked] = React.useState(false);
   return (
     <>
       <AiConnectCard
         line={null}
+        mine={mine}
         offline={false}
         onClose={() => {}}
         foldForKey={keyBlocked}
