@@ -1976,6 +1976,49 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/subscription-agents/register:
+    post:
+      tags: [agents]
+      operationId: registerSubscriptionAgent
+      summary: Create or reuse the caller's own owner-only subscription agent right after the CLI login (ADR-0193 amendment 2026-10-03).
+      description: >
+        Human workspace owner/admin only, exactly like creating a hosted connection with
+        invocationScope owner_only. Idempotent per (caller, harness, deviceId): a repeat returns the
+        same agent (200, reused true) and never a second one. Default name is `<display name>-claude`
+        or `-codex` (`-2`, `-3` on collision; `-<device>` when the caller already has one for this CLI
+        on another Mac). The one-time pairing credential is the "connection value" the desktop app
+        passes to the official CLI; it is returned once, never logged, and absent when the existing
+        connection is already active. Off when the operator set MOMO_SUBSCRIPTION_AGENTS_ENABLED=0.
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/RegisterSubscriptionAgentRequest"}}}
+      responses:
+        "200":
+          description: Existing agent reused. A fresh pairing credential is present when the connection was still waiting for the CLI.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+            Pragma: {required: true, schema: {type: string, enum: [no-cache]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/RegisterSubscriptionAgentResponse"}}}
+        "201":
+          description: Agent and pairing credential created atomically.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+            Pragma: {required: true, schema: {type: string, enum: [no-cache]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/RegisterSubscriptionAgentResponse"}}}
+        "400": {description: Invalid harness, deviceId, displayName or handle, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409":
+          description: >
+            error.code `subscription_agents_disabled` (the operator turned the path off; show
+            "this server has it off", do not hide the option), `claude_subscription_agent_paused`
+            (harness claude_code on an instance that has not opted in; the default; Codex is not affected), `subscription_agent_limit` (5 per
+            CLI), `subscription_agent_cleanup_pending` (finish disconnecting first), or an explicit
+            handle that already exists (no code).
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+
   /v1/workspaces/{workspaceId}/hosted-agent-connections:
     post:
       tags: [agents]
@@ -11337,6 +11380,48 @@ components:
             a public system line in the channel saying so, and the rest of the
             profile (instructions, enabled tools, triggers) stays behind the
             owner-gated profile read.
+        brain:
+          type: string
+          enum: [subscription, team_key, external, instance_default]
+          description: >
+            #3392 (ADR-0193 amendment 2026-10-03). Where this agent's thinking comes from,
+            derived from existing columns and never stored. Agents only; absent from servers
+            that predate it (clients then draw no secondary line).
+            `subscription` = the owner's own CLI session on the owner's own plan (invocationScope
+            owner_only); `external` = a hosted connection or confirmed A2A card dials in;
+            `instance_default` = follows the team's default-AI row; `team_key` = the team's
+            provider key with the agent's own model.
+        callableBy:
+          type: string
+          enum: [owner_only, everyone]
+          description: >
+            Who the server delivers a call from (mention, DM, thread reply, work request).
+            `owner_only` is enforced server-side on the delivery path (ADR-0193 D4); this field
+            only reports it. Agents only.
+        owner:
+          type: object
+          description: >
+            The person whose subscription this is. Present on `brain: subscription` agents only.
+            The name is the one a non-owner is already told by the D4 notice.
+          required: [id, displayName]
+          properties:
+            id: {type: string, format: uuid}
+            displayName: {type: string}
+        brainUnavailableReason:
+          type: string
+          enum: [claude_subscription_agent_paused]
+          description: >
+            #3397 (owner decision 2026-10-03). Present only when this agent's brain cannot be
+            used on this server. `claude_subscription_agent_paused` = a Claude subscription agent
+            on an instance that has not opted in (MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED, off by
+            default while Anthropic's reply is pending). Status only; it blocks nothing by itself.
+        hostOnline:
+          type: boolean
+          description: >
+            A HEURISTIC, not presence. True when the agent's active Agent Port credential was
+            used within the last 10 minutes (`token.last_used_at`); an idle but open CLI session
+            that has not called the port reads false. Present only for agents that dial in
+            (brain subscription or external). Others see "offline" and nothing more (ADR-0193 D5).
         presenceStatus:
           type: string
           enum: [auto, away, dnd]
@@ -11970,6 +12055,80 @@ components:
           type: string
           enum: [claude_code, codex]
           description: Which official CLI the owner runs. Present only on owner_only agents.
+        brain:
+          type: string
+          enum: [subscription, team_key, external, instance_default]
+          description: >
+            #3392 (ADR-0193 amendment 2026-10-03). Where this agent's thinking comes from,
+            derived from existing columns and never stored. Agents only; absent from servers
+            that predate it (clients then draw no secondary line).
+            `subscription` = the owner's own CLI session on the owner's own plan (invocationScope
+            owner_only); `external` = a hosted connection or confirmed A2A card dials in;
+            `instance_default` = follows the team's default-AI row; `team_key` = the team's
+            provider key with the agent's own model.
+        callableBy:
+          type: string
+          enum: [owner_only, everyone]
+          description: >
+            Who the server delivers a call from (mention, DM, thread reply, work request).
+            `owner_only` is enforced server-side on the delivery path (ADR-0193 D4); this field
+            only reports it. Agents only.
+        owner:
+          type: object
+          description: >
+            The person whose subscription this is. Present on `brain: subscription` agents only.
+            The name is the one a non-owner is already told by the D4 notice.
+          required: [id, displayName]
+          properties:
+            id: {type: string, format: uuid}
+            displayName: {type: string}
+        brainUnavailableReason:
+          type: string
+          enum: [claude_subscription_agent_paused]
+          description: >
+            #3397 (owner decision 2026-10-03). Present only when this agent's brain cannot be
+            used on this server. `claude_subscription_agent_paused` = a Claude subscription agent
+            on an instance that has not opted in (MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED, off by
+            default while Anthropic's reply is pending). Status only; it blocks nothing by itself.
+        hostOnline:
+          type: boolean
+          description: >
+            A HEURISTIC, not presence. True when the agent's active Agent Port credential was
+            used within the last 10 minutes (`token.last_used_at`); an idle but open CLI session
+            that has not called the port reads false. Present only for agents that dial in
+            (brain subscription or external). Others see "offline" and nothing more (ADR-0193 D5).
+
+    RegisterSubscriptionAgentRequest:
+      type: object
+      additionalProperties: false
+      required: [harness, deviceId]
+      properties:
+        harness: {type: string, enum: [claude_code, codex]}
+        deviceId:
+          type: string
+          minLength: 8
+          maxLength: 64
+          pattern: "^[A-Za-z0-9._-]+$"
+          description: An opaque install id the app made. Not a hardware id, not a secret. With the caller and harness it is the idempotency key.
+        deviceLabel: {type: string, description: What the person calls this Mac. Used only to build a default name when another Mac already has an agent for this CLI.}
+        displayName: {type: string, maxLength: 100, description: Edit made before creating. Replaces the default display name.}
+        handle: {type: string, description: Edit made before creating. Taken as is; 409 when it exists.}
+
+    RegisterSubscriptionAgentResponse:
+      type: object
+      required: [agent, connection, reused]
+      properties:
+        agent:
+          type: object
+          required: [id, handle, displayName]
+          properties:
+            id: {type: string, format: uuid}
+            handle: {type: string}
+            displayName: {type: string}
+        connection: {$ref: "#/components/schemas/HostedAgentConnection"}
+        reused: {type: boolean}
+        pairingCredential: {type: string, description: Returned once. PostgreSQL stores only sha256. Absent when the connection is already active.}
+        pairingExpiresAtMs: {type: integer, format: int64}
 
     RegisterHostedDoorbellRequest:
       type: object
