@@ -54,7 +54,7 @@ describe("카드 자리가 없으면 폴백을 말한다 (design-review H-1)", (
   it("인자 줄을 명령당 한 줄로 접고 설정 이동을 말한다", () => {
     const rows = slashCandidates("연");
     expect(rows.map((row) => row.label)).toEqual(["/연결"]);
-    expect(rows[0].hint).toBe("설정 › AI 연결로 이동 · 메시지로 보내지 않아요");
+    expect(rows[0].hint).toBe("AI로 이동 · 메시지로 보내지 않아요");
     expect(rows[0].hint).not.toContain("나에게만");
     expect(rows[0].matched).toBe(2);
   });
@@ -102,7 +102,7 @@ describe("전송 직전 해석", () => {
     } satisfies CommandContext;
     parsed.command.run(ctx, parsed.args);
     expect(ctx.openLocalCard).toHaveBeenCalledWith("ai.connect", { line: "claude" });
-    expect(ctx.navigate).toHaveBeenCalledWith("/settings?section=ai");
+    expect(ctx.navigate).toHaveBeenCalledWith("/ai/accounts");
     expect(slashCommandById("ai.connect")?.id).toBe("ai.connect");
     expect(slashCommandById("nav.inbox")).toBeNull();
   });

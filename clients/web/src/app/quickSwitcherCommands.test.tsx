@@ -377,7 +377,8 @@ describe("「명령」 그룹은 레지스트리를 그린다", () => {
     expect(rendered).not.toContain("nav.workConsole");
     expect(rendered).not.toContain("nav.workstreams");
     // 두 환경의 숫자가 실제로 다르다 — 그래야 이 시험이 무언가를 잰다.
-    expect(rendered.length).toBeLessThan(10);
+    // (허브 이동 명령 다섯은 환경과 무관하게 서므로 바닥이 그만큼 올랐다, AIH-3.)
+    expect(rendered.length).toBeLessThan(12);
   });
 
   it("옛 머리글 셋 대신 「명령」 하나다", async () => {
@@ -582,15 +583,15 @@ describe("AI 연결 카드 열기 (#2943 GC-2)", () => {
   const aiRow = () =>
     commandRows().find((row) => row.dataset.commandId === "ai.connect")!;
 
-  it("채널 안이라도 카드 자리가 없으면(GC-3 전) 설정 › AI 연결로 간다", async () => {
+  it("채널 안이라도 카드 자리가 없으면(GC-3 전) AI 허브로 간다", async () => {
     await mount({ path: `/c/${CH}` });
     expect(aiRow().textContent).toContain("AI 연결 카드 열기");
-    expect(aiRow().textContent).toContain("설정에서 열려요");
+    expect(aiRow().textContent).toContain("AI에서 열려요");
     await act(async () => {
       aiRow().click();
     });
     await settle();
-    expect(currentPath).toBe("/settings?section=ai");
+    expect(currentPath).toBe("/ai/accounts");
     expect(openChangeCalls).toContain(false);
   });
 
@@ -653,13 +654,13 @@ describe("AI 연결 카드 열기 (#2943 GC-2)", () => {
     const release = registerLocalCardHost(CH, host);
     try {
       await mount({ path: "/inbox" });
-      expect(aiRow().textContent).toContain("설정에서 열려요");
+      expect(aiRow().textContent).toContain("AI에서 열려요");
       await act(async () => {
         aiRow().click();
       });
       await settle();
       expect(host).not.toHaveBeenCalled();
-      expect(currentPath).toBe("/settings?section=ai");
+      expect(currentPath).toBe("/ai/accounts");
     } finally {
       release();
     }

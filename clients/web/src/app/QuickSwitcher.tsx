@@ -23,6 +23,7 @@ import {
   Milestone,
   PanelLeft,
   Plug,
+  Sparkles,
   Plus,
   Search,
   Settings,
@@ -174,6 +175,7 @@ const COMMAND_ICONS: Record<CommandIcon, LucideIcon> = {
   agent: Bot,
   // 시안 ①의 `i-plug`. AI 연결 카드와 컴포저 `/연결` 줄이 같은 글리프를 든다.
   "ai-connect": Plug,
+  "ai-hub": Sparkles,
   sidebar: PanelLeft,
 };
 

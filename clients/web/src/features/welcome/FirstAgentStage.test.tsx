@@ -897,13 +897,13 @@ describe("구독 합류: 연결 명령 → 감지 대기 → 합류 (같은 화�
 
 // ---- 팀 에이전트·그록봇 -----------------------------------------------------
 
-describe("API 키 줄은 설정 › AI 연결로 (보류 마커)", () => {
+describe("API 키 줄은 AI 허브로 (보류 마커)", () => {
   it("설정으로 넘기기 전에 deferred 를 쓰고 done 은 쓰지 않는다", async () => {
     const host = mountStage();
     await waitFor(() => host.querySelector("#ai-connect-api-key") !== null, "rows");
     pick(host, "api-key");
     await flush();
-    expect(window.location.hash).toContain("/settings?section=ai");
+    expect(window.location.hash).toContain("/ai/accounts");
     expect(readFirstAgentMarker(WS)).toBe("deferred");
     expect(continued).toBe(1);
     expect(vi.mocked(createHostedConnection)).not.toHaveBeenCalled();
@@ -1178,7 +1178,7 @@ describe("재진입 (#2870, RCA 1-b): 설정·에이전트 화면에서 다시 �
     expect(continued).toBe(1);
   });
 
-  it("API 키 줄은 설정 › AI 연결로 가고 deferred 를 쓰지 않는다", async () => {
+  it("API 키 줄은 AI 허브로 가고 deferred 를 쓰지 않는다", async () => {
     const host = mountStage({ mode: "reentry", reentryFrom: "agents" });
     await waitFor(() => host.querySelector("#ai-connect-api-key") !== null, "rows");
     pick(host, "api-key");

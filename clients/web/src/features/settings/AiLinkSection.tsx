@@ -167,17 +167,28 @@ function markFor(label: string): string {
   return first === "" ? "?" : first.toUpperCase();
 }
 
-export function AiLinkSection({ offline, workspaceId }: { offline: boolean; workspaceId: string }) {
+export function AiLinkSection({
+  offline,
+  workspaceId,
+  heading = true,
+}: {
+  offline: boolean;
+  workspaceId: string;
+  /** AI 허브가 자기 제목을 들고 이 절을 품을 때(AIH-3) 옛 제목을 그리지 않는다. */
+  heading?: boolean;
+}) {
   return (
     <div className="ai-board-host flex min-w-0 flex-col gap-6" data-testid="ai-page">
-      <div className="flex break-keep flex-col gap-1">
-        <h2 id={PAGE_HEADING_ID} className="text-display font-bold text-ink">
-          AI 연결
-        </h2>
-        <p className="text-body text-ink-muted">
-          내가 쓰는 구독과 팀이 함께 쓰는 API 키를 봅니다. 로그인은 각 회사의 공식 CLI가 합니다.
-        </p>
-      </div>
+      {heading && (
+        <div className="flex break-keep flex-col gap-1">
+          <h2 id={PAGE_HEADING_ID} className="text-display font-bold text-ink">
+            AI 연결
+          </h2>
+          <p className="text-body text-ink-muted">
+            내가 쓰는 구독과 팀이 함께 쓰는 API 키를 봅니다. 로그인은 각 회사의 공식 CLI가 합니다.
+          </p>
+        </div>
+      )}
       {offline && <AiOfflineBanner />}
       <TeamBoard offline={offline} workspaceId={workspaceId} />
     </div>

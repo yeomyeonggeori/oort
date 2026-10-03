@@ -543,3 +543,98 @@ export const LEGACY_TERM_MAP: readonly LegacyTermEntry[] = [
 export function findLegacyTerms(text: string): LegacyTermEntry[] {
   return LEGACY_TERM_MAP.filter((entry) => entry.grepGate && text.includes(entry.old));
 }
+
+// ---------------------------------------------------------------------------
+// 허브 구획과 주소 (AIH-3, #3393, 플랜 §1·§7)
+// ---------------------------------------------------------------------------
+
+export type AiHubSectionId = "accounts" | "teamKeys" | "agents" | "external";
+
+export interface AiHubSection {
+  id: AiHubSectionId;
+  /** 허브 안 상대 주소가 아니라 앱의 절대 주소(해시 라우터 기준). */
+  path: string;
+  /** 용어집 이름. 화면의 제목이다. */
+  glossaryId: AiGlossaryId;
+  /** ⌘K 항목의 검색 낱말. */
+  keywords: readonly string[];
+}
+
+export const AI_HUB_PATH = "/ai";
+
+export const AI_HUB_SECTIONS: readonly AiHubSection[] = [
+  { id: "accounts", path: "/ai/accounts", glossaryId: "myAiAccount", keywords: ["구독", "로그인", "claude", "codex", "api 키"] },
+  { id: "teamKeys", path: "/ai/team-keys", glossaryId: "teamAiKey", keywords: ["팀", "api 키", "기본 ai", "운영자"] },
+  { id: "agents", path: "/ai/agents", glossaryId: "agent", keywords: ["에이전트", "비용", "부를 수 있는 사람"] },
+  { id: "external", path: "/ai/external", glossaryId: "externalConnection", keywords: ["앱", "웹훅", "이벤트", "mcp", "외부"] },
+];
+
+export function aiHubSection(id: AiHubSectionId): AiHubSection {
+  const found = AI_HUB_SECTIONS.find((section) => section.id === id);
+  if (!found) throw new Error(`unknown AI hub section: ${id}`);
+  return found;
+}
+
+/** 옛 입구(설정 섹션 id)가 옮겨 간 허브 구획. 설정 쪽의 한 줄 링크가 쓴다. */
+export const AI_HUB_FROM_SETTINGS: Readonly<Record<string, AiHubSectionId>> = {
+  ai: "accounts",
+  agents: "external",
+  plugins: "external",
+  webhooks: "external",
+  events: "external",
+};
+
+/** 허브 화면과 옛 입구의 안내 문구 (플랜 §7). */
+export const AI_HUB_NAV_COPY = {
+  movedToHub: "AI 허브로 옮겼어요",
+  movedToHubAction: "AI에서 열기",
+  agentsPageLine: "설정·권한·비용은 AI에서",
+  openAiAction: "AI에서 열기",
+  tabsLabel: "AI 구획",
+  overviewTab: "개요",
+  paneNote: "이 화면은 지금 있는 설정을 그대로 보여줘요. 곧 이 자리에 맞게 다시 짜요.",
+} as const;
+
+/** 허브 개요 카드의 문구. 숫자가 없으면 없다고 말하고 0으로 채우지 않는다. */
+export const AI_HUB_OVERVIEW_COPY = {
+  cardBadge: {
+    accounts: "나만 써요",
+    teamKeys: "팀이 같이 써요",
+  },
+  openLink: {
+    accounts: "내 AI 계정 열기",
+    teamKeys: "팀 AI 키 열기",
+    agents: "에이전트 열기",
+    external: "외부 연결 열기",
+  },
+  chip: {
+    ready: "준비됨",
+    loginNeeded: "로그인 필요",
+    notInstalled: "설치 안 됨",
+    unknown: "확인 못 했어요",
+    checking: "확인하는 중이에요",
+    connected: "연결됨",
+    notConnected: "아직 없어요",
+    desktopOnly: "로그인은 데스크탑 앱에서 해요",
+    operatorOnly: "운영자만 볼 수 있어요",
+    readFailed: "읽지 못했어요",
+    onlyMe: "나만 부름",
+    everyone: "모두 부름",
+    kindUnknown: "쓰는 AI를 아직 몰라요",
+  },
+  /** 팀 키 연결 종류. 서버가 알려준 와이어 이름일 때만 쓴다. */
+  providerLabel: {
+    anthropic: "Anthropic",
+    openai: "OpenAI",
+  },
+  nextAction: {
+    loginNeeded: "Claude Code 구독을 채널에서 @로 부르려면 먼저 「내 AI 계정」에서 로그인하세요. 로그인하면 바로 이어서 에이전트로 만들 수 있어요.",
+    goAccounts: "내 AI 계정으로 가기",
+  },
+  webNote: "웹에서도 같은 화면이 열려요. 로그인이 필요한 줄만 「데스크탑 앱에서 해요」로 바뀌어요.",
+  createAgent: "에이전트 만들기",
+  count: {
+    people: (n: number) => `${n}명`,
+    items: (n: number) => `${n}개`,
+  },
+} as const;
