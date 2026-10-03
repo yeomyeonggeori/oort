@@ -174,7 +174,8 @@ export function AiTeamKeysPane({ offline, workspaceId, memberId }: PaneProps) {
   const checkLocked = offline || (busy && !check.isPending);
   const unlinkLocked = offline || (busy && !unlink.isPending);
   const pill = link ? linkPill({ link, offline, probe, checking: check.isPending }) : null;
-  const rowName = link ? (configured ? `${link.endpointLabel} · 팀 기본` : link.endpointLabel) : "";
+  // 끊기 창 제목도 표와 같은 이름(회사)으로 부른다. 모르는 주소는 주소 이름 그대로.
+  const rowName = link ? teamKeyCompany(link.baseUrl).name : "";
 
   // 기본 AI 표가 읽는 팀 키 사실: 설정 › AI 연결과 같은 판정.
   const defaultsTeamKey: AiDefaultsTeamKey = linkQuery.isPending
@@ -279,7 +280,7 @@ export function AiTeamKeysPane({ offline, workspaceId, memberId }: PaneProps) {
               )}
             </div>
             <div
-              className={cn("hidden gap-3 border-b border-line px-2 py-2 text-meta text-ink-muted sm:grid", COLS)}
+              className={cn("hidden gap-3 border-b border-line px-2 py-2 text-meta text-ink-muted", hasRow && "sm:grid", COLS)}
               aria-hidden="true"
             >
               <span>{AI_TEAM_KEYS_COPY.columns.company}</span>

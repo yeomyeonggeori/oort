@@ -211,6 +211,12 @@ describe("운영자 화면", () => {
     for (const id of ["ai-link-edit", "ai-link-check", "ai-link-unlink", "ai-team-chain-toggle"]) {
       expect(q(id), id).not.toBeNull();
     }
+    // 운영자에게는 팀 줄이 잠긴 줄이 아니다(연결 확인 전이라 고르지 못할 뿐): 자물쇠가 없다.
+    await until("ai-default-teamAgent");
+    expect(q("ai-default-teamAgent-locked")).toBeNull();
+    // 끊기 창 제목은 표와 같은 이름(회사)으로 부른다.
+    act(() => q("ai-link-unlink")?.click());
+    await rtlWaitFor(() => expect(dq("ai-link-unlink-dialog")?.textContent).toContain("Anthropic 연결을 끊을까요?"));
     expect(q("ai-team-add")).toBeNull();
   });
 
@@ -260,6 +266,15 @@ describe("비운영자 화면(읽기 전용)", () => {
     await until("ai-defaults-team-foot");
     expect(q("ai-defaults-team-foot")?.getAttribute("data-operator")).toBe("no");
     expect(q("ai-defaults-team-foot")?.textContent).toContain("볼 수만 있어요");
+  });
+
+  it("잠긴 줄은 잠겼다고 말한다: 팀 줄에 자물쇠, 잠긴 내 줄은 「내가 바꿔요」라고 하지 않는다", async () => {
+    mount();
+    await until("ai-default-teamAgent");
+    await rtlWaitFor(() => expect(q("ai-default-teamAgent-locked")).not.toBeNull());
+    // 팀 키를 읽을 수 없는 사람에게 앱 명령은 고를 수 없는 칸이다.
+    expect(q("ai-default-appCommand")?.textContent).not.toContain("내가 바꿔요");
+    expect(q("ai-default-appCommand")?.textContent).toContain("지금은 팀 키만 써요");
   });
 
   it("개인 줄은 내 것이라 그대로 고를 수 있다(팀 줄과 구별)", async () => {

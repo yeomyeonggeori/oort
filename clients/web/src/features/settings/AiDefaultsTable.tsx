@@ -151,6 +151,7 @@ export function AiDefaultsTable({
             key={row.id}
             row={row}
             hub={variant === "hub"}
+            operator={operator}
             last={index === tableRows.length - 1}
             prefs={prefs}
             input={input}
@@ -185,6 +186,7 @@ export function AiDefaultsTable({
 function DefaultRow({
   row,
   hub,
+  operator,
   last,
   prefs,
   input,
@@ -194,6 +196,7 @@ function DefaultRow({
 }: {
   row: AiDefaultRow;
   hub: boolean;
+  operator: boolean | null;
   last: boolean;
   prefs: AiDefaultsPrefs;
   input: AiDefaultsInput;
@@ -210,6 +213,8 @@ function DefaultRow({
   const describedBy = ["model", "note", "fallback", "saved", "error"].map(lineId).join(" ");
 
   let choice;
+  // 허브 「바꾸는 사람」 칸의 개인 줄 문장. 칸이 잠겨 있으면 「내가 바꿔요」라고 말하지 않는다.
+  let personalWho = "내가 바꿔요";
   // 운영자에게 열린 팀 줄: 「운영자」 표지에 자물쇠를 달지 않는다(잠김이 아니다).
   let teamEditable = false;
   if (personal) {
@@ -217,6 +222,7 @@ function DefaultRow({
     const saved = prefs[id] ?? null;
     if (id !== "appCommand" && input.browserTab) {
       choice = <ReadOnlyBox>데스크탑 앱에서 고를 수 있어요</ReadOnlyBox>;
+      personalWho = "데스크탑에서 바꿔요";
     } else if (id !== "appCommand" && !accountsKnown) {
       choice = <ReadOnlyBox>이 맥의 계정을 확인하고 있어요</ReadOnlyBox>;
     } else if (id === "appCommand" && input.teamKey.status !== "present") {
@@ -224,6 +230,7 @@ function DefaultRow({
       choice = (
         <ReadOnlyBox>{resolved.state === "blocked" ? "쓸 수 있는 자격이 없어요" : resolved.using}</ReadOnlyBox>
       );
+      personalWho = "지금은 팀 키만 써요";
     } else {
       const options = optionsFor(id, input);
       // 저장한 계정이 목록에서 사라졌으면 그 값을 선택지로 남겨 둔다: 칸이 다른 값을
@@ -420,8 +427,11 @@ function DefaultRow({
               {hubRow.servesText}
             </span>
             <span className="inline-flex items-center gap-1 text-timestamp text-ink-muted">
-              {personal || teamEditable ? null : <Lock className="size-3 shrink-0" aria-hidden="true" />}
-              {personal ? "내가 바꿔요" : "운영자가 바꿔요"}
+              {/* 자물쇠는 이 사람에게 영구히 막힌 줄에만: 운영자가 연결 확인 전이라 못 고르는 줄은 잠긴 게 아니다. */}
+              {personal || operator !== false ? null : (
+                <Lock className="size-3 shrink-0" aria-hidden="true" data-testid={`ai-default-${row.id}-locked`} />
+              )}
+              {personal ? personalWho : "운영자가 바꿔요"}
             </span>
           </>
         ) : personal ? (
