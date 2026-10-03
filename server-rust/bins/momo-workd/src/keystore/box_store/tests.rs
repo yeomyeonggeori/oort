@@ -550,3 +550,108 @@ fn from_env_on_first_start_sees_the_volume_device_before_the_key_folder_exists()
     );
     assert!(device_of(&f.dir).is_some());
 }
+
+#[test]
+fn a_racing_first_start_cannot_overwrite_the_key_another_start_registered() {
+    let f = Fixture::new("race");
+    let store = f.store(BackupState::Unknown, true);
+    let first = HostKey::generate().unwrap();
+    store.store(&first, false).unwrap();
+    // The existence check passed for the loser before the winner wrote: go
+    // straight to the writer, as the interleaving would.
+    let loser = HostKey::generate().unwrap();
+    assert!(matches!(
+        store.write_atomic(&store.current_path(), &loser, false),
+        Err(KeyStoreError::AlreadyExists(_))
+    ));
+    assert_eq!(current_public(&store), first.public_key_b64());
+    let leftovers: Vec<_> = std::fs::read_dir(&f.dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(leftovers, vec![std::ffi::OsString::from(HOST_KEY_FILE)]);
+}
+
+#[tokio::test]
+async fn a_new_rotation_refuses_to_clobber_a_staged_key_left_by_a_crash() {
+    let (_f, store, old) = registered_box("rot-stale-stage");
+    let staged = store.stage_next().unwrap(); // crash after persist, before promote
+    let registry = FakeRegistry::default();
+    let result = rotate(&store, &registry, &old, &mut |_| Ok(())).await;
+    assert!(matches!(
+        result,
+        Err(RotationError::Store(KeyStoreError::Refused(_)))
+    ));
+    assert!(registry.calls.lock().unwrap().is_empty(), "no server call");
+    assert_eq!(store.recover(&staged).unwrap(), Recovery::PromotedStaged);
+}
+
+#[test]
+fn shredding_never_follows_a_symlink_and_always_removes_the_name() {
+    let f = Fixture::new("shred-link");
+    let victim = f.root.join("victim");
+    std::fs::write(&victim, b"precious").unwrap();
+    let link = f.root.join("seal-link");
+    std::os::unix::fs::symlink(&victim, &link).unwrap();
+    destroy_seal_key(&link).unwrap();
+    assert!(std::fs::symlink_metadata(&link).is_err(), "name removed");
+    assert_eq!(std::fs::read(&victim).unwrap(), b"precious");
+    // A read-only file whose overwrite fails is still unlinked.
+    std::fs::set_permissions(&f.seal, std::fs::Permissions::from_mode(0o400)).unwrap();
+    destroy_seal_key(&f.seal).unwrap();
+    assert!(!f.seal.exists());
+}
+
+#[test]
+fn a_plaintext_file_is_refused_when_a_seal_key_is_configured() {
+    let f = Fixture::new("downgrade");
+    let key = HostKey::generate().unwrap();
+    f.store(BackupState::ProvenOff, false)
+        .store(&key, false)
+        .unwrap();
+    assert!(matches!(
+        f.store(BackupState::ProvenOff, true).load(),
+        Err(KeyStoreError::Refused(_))
+    ));
+}
+
+#[test]
+fn from_env_rejects_dot_dot_and_wants_the_seal_key_on_tmpfs() {
+    let env = |pairs: Vec<(&'static str, &'static str)>| {
+        move |name: &str| {
+            pairs
+                .iter()
+                .find(|(k, _)| *k == name)
+                .map(|(_, v)| v.to_string())
+        }
+    };
+    let dotted = env(vec![
+        (ENV_KEY_DIR, "/var/lib/oort/box/../../../tmp/k"),
+        (ENV_BOX_ID, "b"),
+    ]);
+    assert!(BoxKeyStore::from_env(&dotted, Some(MOUNTINFO)).is_err());
+
+    let on_tmpfs = env(vec![
+        (ENV_KEY_DIR, "/var/lib/oort/box/keys"),
+        (ENV_BOX_ID, "b"),
+        (ENV_SEAL_KEY_FILE, "/run/oort/seal.key"),
+    ]);
+    let on_volume = env(vec![
+        (ENV_KEY_DIR, "/var/lib/oort/box/keys"),
+        (ENV_BOX_ID, "b"),
+        (ENV_SEAL_KEY_FILE, "/srv/with space/seal.key"),
+    ]);
+    let tmpfs_store = BoxKeyStore::from_env(&on_tmpfs, Some(MOUNTINFO)).unwrap();
+    let volume_store = BoxKeyStore::from_env(&on_volume, Some(MOUNTINFO)).unwrap();
+    assert!(tmpfs_store.config.seal_key_on_other_device);
+    assert!(
+        !volume_store.config.seal_key_on_other_device,
+        "another persistent volume is not a separate failure domain"
+    );
+}
+
+#[test]
+fn the_dev_key_file_is_also_refused_when_the_box_key_dir_is_set() {
+    let get = |name: &str| (name == ENV_KEY_DIR).then(|| "/v/keys".to_string());
+    assert!(crate::cli::dev_key_file_allowed(&get).is_err());
+}

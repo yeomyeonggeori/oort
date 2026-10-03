@@ -24,7 +24,7 @@
 
 ## 시험 [V] (모두 사보타주 RED→GREEN 확인)
 
-`cargo test -p momo-workd --lib keystore` 27개(기존 dev 파일 5 + 박스 21 + 1). 박스 시험은 `rust:latest` 리눅스 컨테이너(root, ext4 overlay)에서도 26개 통과를 확인했다(첫 부팅 시험 추가 전 실행). 사보타주는 한 줄씩 깨뜨려 해당 가드 시험이 실제로 실패함을 확인한 뒤 복구했다.
+`cargo test -p momo-workd --lib keystore` 33개(기존 dev 파일 5 + 박스 28). 리뷰 반영 뒤 최종 트리를 `rust:latest` 리눅스 컨테이너(root)에서도 돌렸다(결과는 PR 본문). 사보타주는 한 줄씩 깨뜨려 해당 가드 시험이 실제로 실패함을 확인한 뒤 복구했다.
 
 | 사보타주 | 실패한 시험 |
 |---|---|
@@ -40,6 +40,10 @@
 | 마운트 검사에서 `nodev` 제외 | `the_key_mount_must_be_nosuid_nodev_and_a_login_tmpfs_must_be_tmpfs`(처음엔 통과해 버렸다. 픽스처에 `nosuid`만 있는 마운트가 없었기 때문이다. 추가 후 RED) |
 
 crypto-shred 시험은 (a) 스냅샷 바이트를 떠 두고 (b) 봉인 키만 파기하고 (c) 같은 파일을 읽으면 `SealKeyGone`, (d) 새 봉인 키를 만들고 스냅샷을 복원해도 `Unseal`, (e) 원본 바이트 어디에도 시드·시드 base64가 없음을 확인한다.
+
+## 보안 검수 반영 (fresh security-engineer, High 0)
+검수에서 High 0, Medium 5·Low 7. 고친 것(각각 RED→GREEN 시험): M1 최초 기록의 경합 덮어쓰기(`replace=false`는 `link`로 EEXIST), M2 크래시로 남은 staged 키를 새 회전이 덮어쓰는 문제(`stage_next`가 거부 → `recover` 먼저), M4 `destroy_seal_key`의 심볼릭 링크 추종·쓰기 실패 시 unlink 생략(`O_NOFOLLOW`, unlink는 항상 실행), M5 경로의 `..`와 봉인 키 위치(`mountinfo`가 있으면 봉인 키 폴더가 **tmpfs**여야 「다른 장치」), L2 `OORT_BOX_KEY_DIR`만 있어도 dev 플래그 거부, L5 봉인 설정인데 평문 파일이면 다운그레이드로 거부, L6 8진수 이스케이프 엄격화.
+남기고 M3로 넘기는 것: **M3-리뷰** promote와 revoke 사이 크래시 시 `RevokePending`이 메모리에만 있다 → `persist` 콜백이 `old_host_id`를 함께 남기고 시작 시 revoke를 재시도해야 한다. L1 증명을 시작 때 한 번만 읽는다(런타임에 `present`로 바뀌면 다음 쓰기에도 반영되지 않음. 증명 폴더 소유자·모드 검사 없음). L3 시드·봉인 키 사본이 메모리에서 지워지지 않는다(`Zeroizing` 후속, 같은 uid 메모리 읽기는 위협 모델 안). L4 AAD가 파일명·세대를 묶지 않는다. L7 `create_seal_key`가 소유 uid를 지정하지 않는다(런너 root가 만들면 박스에서 `SealKeyGone`으로 안전하게 실패). 환경 변수 가드는 실수 방지용이고 벽은 box-agent 별도 uid다.
 
 ## 위협 모델 개정 (ADR-0197 D8 「위협 모델 개정은 S4가 한다」)
 

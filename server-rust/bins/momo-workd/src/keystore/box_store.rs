@@ -135,7 +135,9 @@ fn unescape_mount_field(field: &str) -> String {
     while i < bytes.len() {
         if bytes[i] == b'\\'
             && i + 3 < bytes.len()
-            && bytes[i + 1..i + 4].iter().all(u8::is_ascii_digit)
+            && bytes[i + 1..i + 4]
+                .iter()
+                .all(|b| (b'0'..=b'7').contains(b))
         {
             let value = u32::from(bytes[i + 1] - b'0') * 64
                 + u32::from(bytes[i + 2] - b'0') * 8
@@ -243,9 +245,9 @@ impl BoxKeyStore {
                 .ok_or_else(|| KeyStoreError::Refused(format!("{name} is not set")))
         };
         let dir = PathBuf::from(need(ENV_KEY_DIR)?);
-        if !dir.is_absolute() {
+        if !dir.is_absolute() || has_dot_dot(&dir) {
             return Err(KeyStoreError::Refused(format!(
-                "{ENV_KEY_DIR} must be an absolute path"
+                "{ENV_KEY_DIR} must be an absolute path without '..'"
             )));
         }
         let box_id = need(ENV_BOX_ID)?;
@@ -253,9 +255,9 @@ impl BoxKeyStore {
             .filter(|v| !v.is_empty())
             .map(PathBuf::from);
         if let Some(path) = &seal_key_file {
-            if !path.is_absolute() {
+            if !path.is_absolute() || has_dot_dot(path) {
                 return Err(KeyStoreError::Refused(format!(
-                    "{ENV_SEAL_KEY_FILE} must be an absolute path"
+                    "{ENV_SEAL_KEY_FILE} must be an absolute path without '..'"
                 )));
             }
         }
@@ -268,11 +270,17 @@ impl BoxKeyStore {
         if let Some(mountinfo) = mountinfo {
             require_nosuid_nodev(mountinfo, &dir)?;
         }
-        let seal_key_on_other_device = seal_key_file
-            .as_deref()
-            .and_then(Path::parent)
-            .and_then(|seal_dir| Some((device_of(seal_dir)?, device_of(&dir)?)))
-            .is_some_and(|(a, b)| a != b);
+        // With the mount table, "another device" means tmpfs: a different but
+        // persistent (backed-up) volume does not count.
+        let seal_key_on_other_device = seal_key_file.as_deref().and_then(Path::parent).is_some_and(
+            |seal_dir| match mountinfo {
+                Some(table) => is_tmpfs(table, seal_dir),
+                None => matches!(
+                    (device_of(seal_dir), device_of(&dir)),
+                    (Some(a), Some(b)) if a != b
+                ),
+            },
+        );
         Ok(Self::new(BoxKeyConfig {
             dir,
             box_id,
@@ -390,7 +398,12 @@ impl BoxKeyStore {
         let origin_name = origin.display().to_string();
         let mut lines = text.lines();
         if lines.next() != Some(SEALED_MAGIC) {
-            // Plaintext form.
+            // Plaintext form. With a seal key configured it is a downgrade.
+            if self.config.seal_key_file.is_some() {
+                return Err(KeyStoreError::Refused(
+                    "the host key file is not sealed but a seal key is configured".into(),
+                ));
+            }
             self.admit(false)?;
             let bytes = BASE64
                 .decode(text.trim())
@@ -467,10 +480,10 @@ impl BoxKeyStore {
         if !replace && std::fs::symlink_metadata(&path).is_ok() {
             return Err(KeyStoreError::AlreadyExists(path.display().to_string()));
         }
-        self.write_atomic(&path, key)
+        self.write_atomic(&path, key, replace)
     }
 
-    fn write_atomic(&self, path: &Path, key: &HostKey) -> Result<(), KeyStoreError> {
+    fn write_atomic(&self, path: &Path, key: &HostKey, replace: bool) -> Result<(), KeyStoreError> {
         // Gate and seal key are checked BEFORE a byte is written.
         self.admit(self.config.seal_key_file.is_some())?;
         let encoded = self.encode(key)?;
@@ -508,10 +521,24 @@ impl BoxKeyStore {
             let _ = std::fs::remove_file(&temporary);
             return Err(Self::io(&temporary, e));
         }
-        std::fs::rename(&temporary, path).map_err(|e| {
+        if replace {
+            std::fs::rename(&temporary, path).map_err(|e| {
+                let _ = std::fs::remove_file(&temporary);
+                Self::io(path, e)
+            })?;
+        } else {
+            // `link` fails with EEXIST instead of replacing: two first starts
+            // racing cannot overwrite the key the other one registered.
+            let linked = std::fs::hard_link(&temporary, path);
             let _ = std::fs::remove_file(&temporary);
-            Self::io(path, e)
-        })?;
+            linked.map_err(|e| {
+                if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    KeyStoreError::AlreadyExists(path.display().to_string())
+                } else {
+                    Self::io(path, e)
+                }
+            })?;
+        }
         // Persist the rename itself.
         if let Ok(dir) = std::fs::File::open(parent) {
             let _ = dir.sync_all();
@@ -536,10 +563,17 @@ impl BoxKeyStore {
     // ---- rotation ---------------------------------------------------------
 
     /// Generate the next key and keep it beside the current one. Returns its
-    /// public half for registration. A stale staged key is replaced.
+    /// public half for registration. Refuses while a staged key is left over.
     pub fn stage_next(&self) -> Result<String, KeyStoreError> {
+        // A leftover staged key may be the registered one of an interrupted
+        // rotation: `recover` decides its fate, never a new rotation.
+        if std::fs::symlink_metadata(self.staged_path()).is_ok() {
+            return Err(KeyStoreError::Refused(
+                "a staged host key exists; run recover first".into(),
+            ));
+        }
         let key = HostKey::generate()?;
-        self.write_atomic(&self.staged_path(), &key)?;
+        self.write_atomic(&self.staged_path(), &key, false)?;
         Ok(key.public_key_b64())
     }
 
@@ -599,16 +633,25 @@ pub enum Recovery {
 /// Runner-side crypto-shred: overwrite and unlink the per-box seal key. The
 /// runner needs nothing else, and never opens `host.key`. Idempotent.
 pub fn destroy_seal_key(path: &Path) -> std::io::Result<()> {
-    match std::fs::OpenOptions::new().write(true).open(path) {
-        Ok(mut file) => {
-            let len = file.metadata()?.len() as usize;
-            file.write_all(&vec![0u8; len])?;
-            file.sync_all()?;
+    // Best-effort overwrite on a descriptor that is not a symlink; the unlink
+    // always runs, so a failed overwrite can never leave the key behind.
+    let overwritten = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(path)?;
+        let metadata = file.metadata()?;
+        if !metadata.file_type().is_file() {
+            return Ok(());
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e),
+        file.write_all(&vec![0u8; metadata.len() as usize])?;
+        file.sync_all()
+    })();
+    match std::fs::remove_file(path) {
+        Ok(()) => overwritten.or(Ok(())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
     }
-    std::fs::remove_file(path)
 }
 
 /// Runner-side: create a fresh per-box seal key file (`0600`).
@@ -629,6 +672,11 @@ pub fn create_seal_key(path: &Path) -> Result<(), KeyStoreError> {
 /// The device `path` lives on — or, when it does not exist yet (the key folder
 /// on first start), the device of its nearest existing ancestor, which is the
 /// volume mount the folder will be created in.
+fn has_dot_dot(path: &Path) -> bool {
+    path.components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+}
+
 fn device_of(path: &Path) -> Option<u64> {
     path.ancestors()
         .find_map(|p| std::fs::metadata(p).ok())

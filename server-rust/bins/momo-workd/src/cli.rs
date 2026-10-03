@@ -221,7 +221,12 @@ impl CliError {
 /// ADR-0197 D8: a production box never keeps its key in a dev file. The box
 /// image sets `OORT_BOX`; while it is set `--dev-key-file` is a usage error.
 pub(crate) fn dev_key_file_allowed(get: &dyn Fn(&str) -> Option<String>) -> Result<(), CliError> {
-    if get(crate::keystore::box_store::ENV_BOX_MARKER).is_some_and(|v| !v.is_empty()) {
+    // A guard against mistakes (the same uid can unset a variable); the real
+    // wall is the separate box-agent uid (ADR-0197 D1).
+    let set = |name: &str| get(name).is_some_and(|v| !v.is_empty());
+    if set(crate::keystore::box_store::ENV_BOX_MARKER)
+        || set(crate::keystore::box_store::ENV_KEY_DIR)
+    {
         return Err(CliError::Usage(
             "--dev-key-file is refused inside an oort box; the host key lives on the box volume"
                 .into(),
