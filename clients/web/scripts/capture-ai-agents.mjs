@@ -254,16 +254,25 @@ async function widthScenes(browser, origin, scheme, viewport) {
       (await page.getByTestId("ai-agent-row-seongjae-codex").locator("th").textContent()).includes("X") &&
       (await page.getByTestId("ai-agent-row-seongjae-claude").locator("th").textContent()).includes("C"));
     const nameBox = await page.getByTestId("ai-agent-link-seongjae-claude").boundingBox();
-    check(`${tag} 이름 한 줄(높이 ${Math.round(nameBox.height)})`, viewport.width < 1024 || nameBox.height < 24, String(nameBox.height));
+    check(`${tag} 이름 한 줄(높이 ${Math.round(nameBox.height)})`, viewport.width < 1400 || nameBox.height < 24, String(nameBox.height));
     const tone = (h) => page.getByTestId(`ai-agent-callable-${h}`).locator("[data-tone]").getAttribute("data-tone");
     check(`${tag} 「나만」 회색, 「서연 님만」 호박색`, (await tone("seongjae-codex")) === "mute" && (await tone("seoyeon-codex")) === "warn");
     check(`${tag} 문서 가로 넘침 0`, (await overflowX(page)) === 0);
+    const statusW = await page.getByTestId("ai-agent-status-seongjae-claude").evaluate((el) => el.getBoundingClientRect().width);
+    const wide = await page.locator("[role='region']").getAttribute("data-wide");
+    check(`${tag} 표 모양이면 상태 열이 충분히 넓고(${Math.round(statusW)}px), 아니면 카드`, wide === null || statusW >= 380, `wide=${wide} status=${statusW}`);
     const region = await page.locator("[role='region']").evaluate((el) => ({ over: el.scrollWidth > el.clientWidth + 1, tab: el.getAttribute("tabindex") }));
     check(`${tag} 스크롤 영역 정차점은 넘칠 때만`, region.over === (region.tab === "0"), JSON.stringify(region));
     await page.getByTestId("ai-agent-link-seongjae-codex").click();
     await page.getByTestId("agent-hub-route").waitFor();
     await page.waitForTimeout(600);
     check(`${tag} 이름 링크 → /agents 에서 그 에이전트가 열린다`, page.url().includes("agent=") && (await page.getByTestId("agent-hub-agent-row").evaluateAll((els) => els.some((e) => e.getAttribute("aria-current") === "page" && e.textContent.includes("seongjae-codex")))));
+    // 새로고침(처음 열기): 명부가 오기 전에 선택을 지우지 않아서 ?agent= 의 에이전트가 그대로 선택된다.
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("agent-hub-route").waitFor({ timeout: 20000 });
+    await page.waitForFunction(() => document.querySelectorAll("[data-testid='agent-hub-agent-row']").length > 1, null, { timeout: 8000 });
+    await page.waitForTimeout(600);
+    check(`${tag} 처음 열기(새로고침) /agents?agent= : 첫 줄이 아니라 그 에이전트`, await page.getByTestId("agent-hub-agent-row").evaluateAll((els) => els.filter((e) => e.getAttribute("aria-current") === "page").map((e) => e.textContent).join("|").includes("seongjae-codex")));
     if (viewport.width > 700) {
       await page.screenshot({ path: resolve(OUT_DIR, `v2-agents-list-chips-${tag}.png`) });
       const chips = await page.getByTestId("agent-hub-agent-row").evaluateAll((els) => els.map((e) => e.textContent));
@@ -347,6 +356,10 @@ async function chooser420(browser, origin, scheme) {
     await page.getByTestId("ai-agents-create").click();
     await page.getByTestId("create-agent-chooser").waitFor();
     await page.waitForTimeout(500);
+    // 마우스를 첫 줄 위에 올려(원래 클릭 자리와 같은 상황) 채움을 잰다.
+    const box = await page.getByTestId("create-kind-team").boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.waitForTimeout(400);
     const atClick = await BG(page, "create-kind-team");
     await page.screenshot({ path: resolve(OUT_DIR, `v2-chooser-mouse-over-${tag}.png`) });
     await page.mouse.move(5, 5);
@@ -371,6 +384,8 @@ async function main() {
         await scenes(browser, preview.origin, scheme, viewport);
       }
       await widthScenes(browser, preview.origin, scheme, { width: 900, height: 700 });
+      await widthScenes(browser, preview.origin, scheme, { width: 1024, height: 800 });
+      await widthScenes(browser, preview.origin, scheme, { width: 1100, height: 800 });
       await widthScenes(browser, preview.origin, scheme, { width: 420, height: 2000 });
       await chooser420(browser, preview.origin, scheme);
       await stateScenes(browser, preview.origin, scheme);

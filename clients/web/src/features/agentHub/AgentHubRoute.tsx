@@ -230,7 +230,17 @@ function AgentListRow({
             <span className="min-w-0 flex-1 truncate text-body font-medium text-ink">
               {agent.displayName}
             </span>
-            <StatusChip tone={serverSpecific && server.tone === "warn" ? "warn" : "neutral"}>{lifecycle}</StatusChip>
+            <StatusChip
+              tone={
+                serverSpecific && server.tone !== "mute"
+                  ? server.tone
+                  : lifecycle === "활성"
+                    ? "ok"
+                    : "neutral"
+              }
+            >
+              {lifecycle}
+            </StatusChip>
           </span>
           <span className="truncate text-meta text-ink-muted">@{agent.handle}</span>
           {current && (
@@ -293,7 +303,7 @@ export function AgentHubRoute() {
     [agents, profiles]
   );
   // `/agents?agent=<id>` 로 오면 그 에이전트를 먼저 연다(「AI」 표의 이름 링크).
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get("agent")?.toLowerCase() ?? null);
   const [section, setSection] = useState<AgentHubSection>("profile");
   const [creating, setCreating] = useState(false);
@@ -335,6 +345,8 @@ export function AgentHubRoute() {
 
   useEffect(() => {
     setSelectedId((current) => {
+      // 명부가 오기 전(비어 있음)에는 고르지 않는다: `?agent=` 로 온 선택을 지우면 첫 줄로 바뀐다.
+      if (agents.length === 0) return current;
       if (
         current !== null &&
         agents.some((agent) => uuidEq(agent.id, current))
@@ -493,7 +505,13 @@ export function AgentHubRoute() {
                     selected={uuidEq(agent.id, selectedId ?? undefined)}
                     signals={signalsForAgent(allSignals, agent.id, nowMs)}
                     live={railLive}
-                    onSelect={() => setSelectedId(normalizedId(agent.id))}
+                    onSelect={() => {
+                      setSelectedId(normalizedId(agent.id));
+                      // `?agent=` 로 열렸다면 주소도 따라간다(기록을 쌓지 않고 바꾼다).
+                      if (searchParams.has("agent")) {
+                        setSearchParams({ agent: normalizedId(agent.id) }, { replace: true });
+                      }
+                    }}
                     viewerId={session.member.id}
                   />
                 );
