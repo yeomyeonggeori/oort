@@ -523,7 +523,7 @@ export const desktopStart = {
 // ---- this Mac as a work host (#2778, ADR-0188 D2) -----------------------------
 
 /**
- * The five `work_host_*` commands (`clients/desktop/src-tauri/src/work_host.rs`).
+ * The six `work_host_*` commands (`clients/desktop/src-tauri/src/work_host.rs`).
  * Every call rejects with the shell's error code (a short snake_case string,
  * `thisMacErrorMessage` turns it into a sentence); in a browser tab each one
  * rejects with `unsupported_platform`, and `status` resolves `null`.
@@ -556,6 +556,18 @@ export const desktopWorkHost = {
   async forget(): Promise<LocalWorkHostStatus> {
     if (!IS_TAURI) throw "unsupported_platform";
     return invoke<LocalWorkHostStatus>("work_host_forget");
+  },
+  /**
+   * 「채널에 공유」·「공유 끄기」(#2867): hand the shell one shared pane's S1 body.
+   * `momo-workd` signs `PATCH …/work-sessions/{id}/share` as THIS host (the host
+   * key never reaches the page) and sends it. The page names a session id and
+   * the body; it never builds a path, a signature or a header. Rejects with a
+   * closed code: workd's `share_*` labels (`share_forbidden`, `share_session_ended`…)
+   * or a socket code (`not_running`, `socket_unavailable`).
+   */
+  async share(sessionId: string, body: Record<string, unknown>): Promise<void> {
+    if (!IS_TAURI) throw "unsupported_platform";
+    await invoke<void>("work_host_share", { sessionId, body });
   },
 };
 

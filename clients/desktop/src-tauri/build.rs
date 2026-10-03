@@ -91,6 +91,9 @@ const APP_COMMANDS: &[&str] = &[
     // capabilities/work-host.json.
     "work_host_set_remote_profile",
     "work_host_prepare_remote_profile",
+    // 「채널에 공유」(#2867): the webview hands workd one S1 body; workd signs and
+    // sends the share PATCH as this host. Granted only by capabilities/work-host.json.
+    "work_host_share",
     // This Mac's human device key (ADR-0146 개정 R2-E5, #3025). Granted only
     // by capabilities/device-key.json.
     "device_key_status",
