@@ -21,6 +21,15 @@
 //! | `the_welcome_opener_never_spends_someone_elses_subscription` | welcome speaker | `load_welcome_agent_in_tx` predicate |
 //! | `the_subscription_join_records_owner_only_and_refuses_bad_shapes` | create path | `requested_owner_only` / `mark_agent_owner_only_in_tx` |
 //! | `an_owner_call_to_a_subscription_agent_with_no_connection_row_is_never_a_worker_job` (#2924) | the owner's mention, work request and welcome of a row-less subscription agent → 0 jobs, the 「연결 안 됨」 line | `OR a.invocation_scope = 'owner_only'` in the three hosted predicates (`mention.rs`, `run.rs`, `welcome.rs`) |
+//! | `the_roster_reports_brain_callable_by_owner_and_host_online` (#3392) | roster/hosted-list read contract; humans carry none; other tenant sees nothing | `derive_brain`, `load_agent_read_facts_in_tx`, `HOSTED_RECENTLY_SEEN_SQL` |
+//! | `register_creates_names_and_reuses_per_device` (#3392) | default names, `-2`, device suffix, codex, repeat → same agent, active → no value | `default_name_candidates`, `find_subscription_agent_by_device_in_tx`, `reuse_in_tx` |
+//! | `register_is_gated_validated_and_capped` (#3392) | member 403, bad input 400, explicit duplicate 409, cap 409 | `require_admin`, validators, `SUBSCRIPTION_AGENTS_PER_HARNESS_LIMIT` |
+//! | `register_answers_a_code_when_the_switch_is_off_and_writes_nothing` (#3392) | 409 `subscription_agents_disabled`, 0 rows; non-admin still 403 | kill-switch arm after admin gate |
+//! | `register_is_tenant_scoped_and_survives_a_dead_agent_and_a_race` (#3392) | other tenant, dead agent frees its slot, 4 concurrent → 1 row | advisory lock + migration 116 index |
+//! | `claude_registration_is_paused_by_default_and_codex_is_not` (#3397 결재) | claude_code → 409 `claude_subscription_agent_paused`, 0 rows; codex → 201; rows report `brainUnavailableReason` only for Claude while off | `claude_enabled` gate in `register`, `AgentReadFacts::unavailable_reason` |
+//! | `the_legacy_create_route_honours_the_claude_opt_in_too` (review F1) | `POST …/hosted-agent-connections` with claude_code → 409 coded, 0 rows; codex → 201 | Claude check in `hosted_agent_connections::create` |
+//! | `a_guest_sees_neither_the_owner_nor_liveness_of_an_agent_it_shares` (review F2) | guest roster: brain/callableBy yes; owner/hostOnline no when owner is not visible | guest narrowing in `roster` |
+//! | `a_registered_but_unconnected_subscription_agent_is_never_a_worker_job` (#2924/#2940 regression) | owner call to a freshly registered agent → 0 jobs | `OR a.invocation_scope = 'owner_only'` hosted predicates |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -138,6 +147,15 @@ fn ensure_schema_and_roles() {
 }
 
 async fn start_server(pool: PgPool, subscription_agents_enabled: bool) -> String {
+    // The pre-#3397 tests exercise Claude subscription agents, so they opt in.
+    start_server_with(pool, subscription_agents_enabled, true).await
+}
+
+async fn start_server_with(
+    pool: PgPool,
+    subscription_agents_enabled: bool,
+    claude_subscription_agents_enabled: bool,
+) -> String {
     let state = AppState::new(
         pool,
         TEST_JWT_SECRET.to_string(),
@@ -157,6 +175,7 @@ async fn start_server(pool: PgPool, subscription_agents_enabled: bool) -> String
         // every hosted call is skipped and a missing owner check would hide.
         hosted_delivery_enabled: true,
         subscription_agents_enabled,
+        claude_subscription_agents_enabled,
         ..AgentPortConfig::default()
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -1611,4 +1630,886 @@ async fn an_owner_call_to_a_subscription_agent_with_no_connection_row_is_never_a
     .await
     .unwrap();
     assert_eq!(agent_runs, 0, "no run was ever created for it");
+}
+
+// ---------------------------------------------------------------------------
+// #3392 AIH-2 — read contract + register-after-login
+// ---------------------------------------------------------------------------
+
+async fn get_json(client: &reqwest::Client, url: &str, jwt: &str) -> (u16, Value) {
+    let response = client.get(url).bearer_auth(jwt).send().await.expect("get");
+    let status = response.status().as_u16();
+    let value = response.json().await.unwrap_or(Value::Null);
+    (status, value)
+}
+
+async fn register(
+    client: &reqwest::Client,
+    base: &str,
+    workspace: Uuid,
+    jwt: &str,
+    body: Value,
+) -> (u16, Value, Option<String>) {
+    let response = client
+        .post(format!(
+            "{base}/v1/workspaces/{workspace}/subscription-agents/register"
+        ))
+        .bearer_auth(jwt)
+        .json(&body)
+        .send()
+        .await
+        .expect("register");
+    let status = response.status().as_u16();
+    let cache = response
+        .headers()
+        .get("cache-control")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let value = response.json().await.unwrap_or(Value::Null);
+    (status, value, cache)
+}
+
+async fn plain_agent(
+    pool: &PgPool,
+    f: &Fixture,
+    handle: &str,
+    model_source: &str,
+    hosted: bool,
+) -> Uuid {
+    let id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member(id, workspace_id, kind, display_name, handle) VALUES($1,$2,'agent',$3,$3)",
+    )
+    .bind(id)
+    .bind(f.workspace)
+    .bind(handle)
+    .execute(pool)
+    .await
+    .expect("agent member");
+    sqlx::query(
+        "INSERT INTO agent(member_id, workspace_id, model, base_url, owner_human_id, config, model_source) \
+         VALUES($1,$2,CASE WHEN $6 THEN 'hosted-agent' ELSE 'm' END, \
+                CASE WHEN $6 THEN 'https://hosted-agent.invalid/disabled' ELSE 'https://x.invalid/' END, \
+                $3,$4::jsonb,$5)",
+    )
+    .bind(id)
+    .bind(f.workspace)
+    .bind(f.owner)
+    .bind(if hosted {
+        json!({"execution_mode": "hosted_dial_in"})
+    } else {
+        json!({})
+    })
+    .bind(model_source)
+    .bind(hosted)
+    .execute(pool)
+    .await
+    .expect("agent row");
+    sqlx::query(
+        "INSERT INTO workspace_membership(workspace_id, member_id, role) VALUES($1,$2,'member')",
+    )
+    .bind(f.workspace)
+    .bind(id)
+    .execute(pool)
+    .await
+    .expect("agent membership");
+    id
+}
+
+fn roster_row(roster: &Value, id: Uuid) -> &Value {
+    roster["members"]
+        .as_array()
+        .expect("members")
+        .iter()
+        .find(|row| row["id"] == json!(id.to_string()))
+        .unwrap_or_else(|| panic!("{id} missing from roster: {roster}"))
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3392-*)"]
+async fn the_roster_reports_brain_callable_by_owner_and_host_online() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su).await;
+    let team = plain_agent(&su, &f, &short_handle("team"), "agent", false).await;
+    let dflt = plain_agent(&su, &f, &short_handle("dflt"), "instance_default", false).await;
+    let ext = plain_agent(&su, &f, &short_handle("ext"), "agent", true).await;
+    sqlx::query(
+        "INSERT INTO hosted_agent_connection(workspace_id, agent_member_id, pairing_challenge_hash, \
+           pairing_expires_at, created_by) VALUES($1,$2,digest('x','sha256'), now()+interval '5 min', $3)",
+    )
+    .bind(f.workspace)
+    .bind(ext)
+    .bind(f.owner)
+    .execute(&su)
+    .await
+    .expect("external connection");
+    let base = start_server(momo_app_pool().await, true).await;
+    let client = reqwest::Client::new();
+    let url = format!("{base}/v1/workspaces/{}/roster", f.workspace);
+
+    // A plain member (not the owner, not an admin) reads the same facts.
+    let (status, roster) = get_json(&client, &url, &f.teammate_jwt).await;
+    assert_eq!(status, 200, "{roster}");
+    let sub = roster_row(&roster, f.agent);
+    assert_eq!(sub["brain"], "subscription");
+    assert_eq!(sub["callableBy"], "owner_only");
+    assert_eq!(sub["owner"]["id"], json!(f.owner.to_string()));
+    assert_eq!(sub["owner"]["displayName"], "성재");
+    assert_eq!(sub["hostOnline"], true, "the fixture's token was just used");
+    let row = roster_row(&roster, team);
+    assert_eq!(
+        (row["brain"].as_str(), row["callableBy"].as_str()),
+        (Some("team_key"), Some("everyone"))
+    );
+    assert!(
+        row.get("owner").is_none() && row.get("hostOnline").is_none(),
+        "{row}"
+    );
+    let row = roster_row(&roster, dflt);
+    assert_eq!(row["brain"], "instance_default");
+    let row = roster_row(&roster, ext);
+    assert_eq!(
+        (row["brain"].as_str(), row["callableBy"].as_str()),
+        (Some("external"), Some("everyone"))
+    );
+    assert!(row.get("owner").is_none(), "{row}");
+    assert_eq!(row["hostOnline"], false, "dials in, never seen");
+    for human in [f.owner, f.teammate] {
+        let row = roster_row(&roster, human);
+        for key in ["brain", "callableBy", "owner", "hostOnline"] {
+            assert!(row.get(key).is_none(), "human row carries {key}: {row}");
+        }
+    }
+
+    // hostOnline is the 10-minute heuristic: 20 minutes of silence reads false.
+    sqlx::query("UPDATE token SET last_used_at = now() - interval '20 minutes' WHERE id=$1")
+        .bind(f.token)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (_, roster) = get_json(&client, &url, &f.teammate_jwt).await;
+    assert_eq!(roster_row(&roster, f.agent)["hostOnline"], false);
+
+    // The hosted-connection list (admin) carries the same four.
+    let (status, list) = get_json(
+        &client,
+        &format!(
+            "{base}/v1/workspaces/{}/hosted-agent-connections",
+            f.workspace
+        ),
+        &f.owner_jwt,
+    )
+    .await;
+    assert_eq!(status, 200, "{list}");
+    let connection = list["connections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["agentMemberId"] == json!(f.agent.to_string()))
+        .expect("fixture connection");
+    assert_eq!(connection["brain"], "subscription");
+    assert_eq!(connection["callableBy"], "owner_only");
+    assert_eq!(connection["owner"]["displayName"], "성재");
+
+    // Someone from another workspace sees nothing of it.
+    let other = Uuid::new_v4();
+    sqlx::query("INSERT INTO workspace(id, slug, name) VALUES($1,$2,$2)")
+        .bind(other)
+        .bind(format!("sub-{}", other.simple()))
+        .execute(&su)
+        .await
+        .unwrap();
+    let (_, outsider_jwt) = insert_human(&su, other, "외부", "owner").await;
+    let (status, body) = get_json(&client, &url, &outsider_jwt).await;
+    assert!(matches!(status, 401 | 403), "{status} {body}");
+    assert!(!body.to_string().contains("subscription"), "{body}");
+}
+
+async fn agent_rows_of(pool: &PgPool, f: &Fixture, owner: Uuid) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM agent WHERE workspace_id=$1 AND owner_human_id=$2 \
+           AND subscription_device_id IS NOT NULL",
+    )
+    .bind(f.workspace)
+    .bind(owner)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3392-*)"]
+async fn register_creates_names_and_reuses_per_device() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su).await;
+    let (minsu, minsu_jwt) = insert_human(&su, f.workspace, "민수", "owner").await;
+    let base = start_server(momo_app_pool().await, true).await;
+    let client = reqwest::Client::new();
+
+    // 1. First call creates: default name, owner_only, paused, value minted once.
+    let (status, first, cache) = register(
+        &client,
+        &base,
+        f.workspace,
+        &minsu_jwt,
+        json!({"harness": "claude_code", "deviceId": "mac-aaaaaaaa"}),
+    )
+    .await;
+    assert_eq!(status, 201, "{first}");
+    assert_eq!(cache.as_deref(), Some("no-store"));
+    assert_eq!(first["reused"], false);
+    assert_eq!(first["agent"]["displayName"], "민수-claude");
+    assert!(first["agent"]["handle"]
+        .as_str()
+        .unwrap()
+        .ends_with("-claude"));
+    let value = first["pairingCredential"].as_str().expect("one-time value");
+    assert!(value.starts_with("momo_pair_v1"), "{value}");
+    assert_eq!(first["connection"]["invocationScope"], "owner_only");
+    assert_eq!(first["connection"]["subscriptionHarness"], "claude_code");
+    let agent_id = Uuid::parse_str(first["agent"]["id"].as_str().unwrap()).unwrap();
+    let row: (String, Option<String>, Uuid, String, bool) = sqlx::query_as(
+        "SELECT a.invocation_scope, a.subscription_harness, a.owner_human_id, \
+                a.subscription_device_id, ap.paused \
+           FROM agent a JOIN agent_profile ap ON ap.agent_member_id=a.member_id \
+          WHERE a.member_id=$1",
+    )
+    .bind(agent_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        row,
+        (
+            "owner_only".into(),
+            Some("claude_code".into()),
+            minsu,
+            "mac-aaaaaaaa".into(),
+            true
+        )
+    );
+    // Stored as a hash, never the value.
+    let leaked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM hosted_agent_connection WHERE pairing_challenge_hash = convert_to($1,'UTF8')",
+    )
+    .bind(value)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(leaked, 0);
+    let audited: Vec<(String,)> = sqlx::query_as(
+        "SELECT detail::text FROM audit_log WHERE workspace_id=$1 AND action='subscription_agent.registered'",
+    )
+    .bind(f.workspace)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(audited.len(), 1);
+    assert!(
+        !audited[0].0.contains(value) && !audited[0].0.contains("mac-aaaaaaaa"),
+        "{}",
+        audited[0].0
+    );
+
+    // 2. Same (caller, harness, device) again: same agent, fresh value, no second row.
+    let hash_before: Vec<u8> = sqlx::query_scalar(
+        "SELECT pairing_challenge_hash FROM hosted_agent_connection WHERE agent_member_id=$1",
+    )
+    .bind(agent_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let (status, again, _) = register(
+        &client,
+        &base,
+        f.workspace,
+        &minsu_jwt,
+        json!({"harness": "claude_code", "deviceId": "mac-aaaaaaaa"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{again}");
+    assert_eq!(again["reused"], true);
+    assert_eq!(again["agent"]["id"], first["agent"]["id"]);
+    assert_ne!(again["pairingCredential"], first["pairingCredential"]);
+    let hash_after: Vec<u8> = sqlx::query_scalar(
+        "SELECT pairing_challenge_hash FROM hosted_agent_connection WHERE agent_member_id=$1",
+    )
+    .bind(agent_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_ne!(hash_before, hash_after, "the old value must stop working");
+    assert_eq!(agent_rows_of(&su, &f, minsu).await, 1);
+
+    // 3. Another Mac, no label: the default collides, so -2.
+    let (status, second, _) = register(
+        &client,
+        &base,
+        f.workspace,
+        &minsu_jwt,
+        json!({"harness": "claude_code", "deviceId": "mac-bbbbbbbb"}),
+    )
+    .await;
+    assert_eq!(status, 201, "{second}");
+    assert_eq!(second["agent"]["displayName"], "민수-claude-2");
+    assert!(second["agent"]["handle"]
+        .as_str()
+        .unwrap()
+        .ends_with("-claude-2"));
+
+    // 4. Another Mac with a label: the device name is part of the default.
+    let (status, third, _) = register(
+        &client,
+        &base,
+        f.workspace,
+        &minsu_jwt,
+        json!({"harness": "claude_code", "deviceId": "mac-cccccccc", "deviceLabel": "민수의 MacBook Pro"}),
+    )
+    .await;
+    assert_eq!(status, 201, "{third}");
+    assert_eq!(third["agent"]["displayName"], "민수-claude-macbookpro");
+
+    // 5. Codex has its own name.
+    let (status, codex, _) = register(
+        &client,
+        &base,
+        f.workspace,
+        &minsu_jwt,
+        json!({"harness": "codex", "deviceId": "mac-aaaaaaaa"}),
+    )
+    .await;
+    assert_eq!(status, 201, "{codex}");
+    assert_eq!(codex["agent"]["displayName"], "민수-codex");
+    assert_eq!(codex["connection"]["subscriptionHarness"], "codex");
+
+    // 6. Edited before creating: the person's own handle is taken as is.
+    let (status, edited, _) = register(
+        &client,
+        &base,
+        f.workspace,
+        &minsu_jwt,
+        json!({"harness": "codex", "deviceId": "mac-dddddddd", "displayName": "민수의 코덱스", "handle": "minsu-cdx"}),
+    )
+    .await;
+    assert_eq!(status, 201, "{edited}");
+    assert_eq!(edited["agent"]["handle"], "minsu-cdx");
+    assert_eq!(edited["agent"]["displayName"], "민수의 코덱스");
+
+    // 7. An active connection is reused with no new value (「이미 있음」).
+    sqlx::query("UPDATE agent SET subscription_device_id='fixture-device-1' WHERE member_id=$1")
+        .bind(f.agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, active, _) = register(
+        &client,
+        &base,
+        f.workspace,
+        &f.owner_jwt,
+        json!({"harness": "claude_code", "deviceId": "fixture-device-1"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{active}");
+    assert_eq!(active["reused"], true);
+    assert_eq!(active["connection"]["status"], "active");
+    assert!(active.get("pairingCredential").is_none(), "{active}");
+
+    // 8. A disconnected connection gets a new pairing on the same agent.
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET status='cleanup_pending' WHERE agent_member_id=$1",
+    )
+    .bind(f.agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, pending, _) = register(
+        &client,
+        &base,
+        f.workspace,
+        &f.owner_jwt,
+        json!({"harness": "claude_code", "deviceId": "fixture-device-1"}),
+    )
+    .await;
+    assert_eq!(status, 409, "{pending}");
+    assert_eq!(
+        pending["error"]["code"],
+        "subscription_agent_cleanup_pending"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3392-*)"]
+async fn register_is_gated_validated_and_capped() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su).await;
+    let (suyeon, suyeon_jwt) = insert_human(&su, f.workspace, "수연", "admin").await;
+    let base = start_server(momo_app_pool().await, true).await;
+    let client = reqwest::Client::new();
+    let ok = json!({"harness": "claude_code", "deviceId": "gate-aaaaaaaa"});
+
+    // A plain member may not (same as 「구독 추가」), and nothing is written.
+    let (status, body, _) =
+        register(&client, &base, f.workspace, &f.teammate_jwt, ok.clone()).await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(agent_rows_of(&su, &f, f.teammate).await, 0);
+    // Unauthenticated.
+    let response = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/subscription-agents/register",
+            f.workspace
+        ))
+        .json(&ok)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 401);
+
+    for bad in [
+        json!({"harness": "grok", "deviceId": "gate-aaaaaaaa"}),
+        json!({"harness": "claude_code", "deviceId": "short"}),
+        json!({"harness": "claude_code", "deviceId": "has space in it"}),
+        json!({"harness": "claude_code", "deviceId": "gate-aaaaaaaa", "handle": "Bad Handle!"}),
+        json!({"harness": "claude_code", "deviceId": "gate-aaaaaaaa", "invocationScope": "workspace"}),
+    ] {
+        let (status, body, _) =
+            register(&client, &base, f.workspace, &suyeon_jwt, bad.clone()).await;
+        assert!(matches!(status, 400 | 422), "{bad} -> {status} {body}");
+    }
+    assert_eq!(
+        agent_rows_of(&su, &f, suyeon).await,
+        0,
+        "a refused call wrote nothing"
+    );
+
+    // An explicit handle that exists is a plain 409 (no suffixing the person's choice).
+    let (status, _, _) = register(
+        &client,
+        &base,
+        f.workspace,
+        &suyeon_jwt,
+        json!({"harness": "codex", "deviceId": "gate-bbbbbbbb", "handle": "suyeon-x"}),
+    )
+    .await;
+    assert_eq!(status, 201);
+    let (status, body, _) = register(
+        &client,
+        &base,
+        f.workspace,
+        &suyeon_jwt,
+        json!({"harness": "codex", "deviceId": "gate-cccccccc", "handle": "suyeon-x"}),
+    )
+    .await;
+    assert_eq!(status, 409, "{body}");
+    assert!(body["error"].get("code").is_none(), "{body}");
+
+    // The cap: five per CLI, the sixth is refused with a code.
+    for n in 0..5 {
+        let (status, body, _) = register(
+            &client,
+            &base,
+            f.workspace,
+            &suyeon_jwt,
+            json!({"harness": "claude_code", "deviceId": format!("cap-device-{n}")}),
+        )
+        .await;
+        assert_eq!(status, 201, "{n}: {body}");
+    }
+    let (status, body, _) = register(
+        &client,
+        &base,
+        f.workspace,
+        &suyeon_jwt,
+        json!({"harness": "claude_code", "deviceId": "cap-device-5"}),
+    )
+    .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(body["error"]["code"], "subscription_agent_limit");
+    // Already-registered devices still answer (reuse is not capped).
+    let (status, _, _) = register(
+        &client,
+        &base,
+        f.workspace,
+        &suyeon_jwt,
+        json!({"harness": "claude_code", "deviceId": "cap-device-0"}),
+    )
+    .await;
+    assert_eq!(status, 200);
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3392-*)"]
+async fn register_answers_a_code_when_the_switch_is_off_and_writes_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su).await;
+    let base = start_server(momo_app_pool().await, false).await;
+    let client = reqwest::Client::new();
+    let before: i64 = sqlx::query_scalar("SELECT count(*) FROM member WHERE workspace_id=$1")
+        .bind(f.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    let body = json!({"harness": "claude_code", "deviceId": "off-device-1"});
+    let (status, value, _) =
+        register(&client, &base, f.workspace, &f.owner_jwt, body.clone()).await;
+    assert_eq!(status, 409, "{value}");
+    assert_eq!(value["error"]["code"], "subscription_agents_disabled");
+    // A member who may not register hears 403, not the operator's switch.
+    let (status, value, _) = register(&client, &base, f.workspace, &f.teammate_jwt, body).await;
+    assert_eq!(status, 403, "{value}");
+    let after: i64 = sqlx::query_scalar("SELECT count(*) FROM member WHERE workspace_id=$1")
+        .bind(f.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(before, after);
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3392-*)"]
+async fn register_is_tenant_scoped_and_survives_a_dead_agent_and_a_race() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su).await;
+    let base = start_server(momo_app_pool().await, true).await;
+    let client = reqwest::Client::new();
+
+    // Another workspace: the same device id is a different agent; this workspace's
+    // path refuses that workspace's token.
+    let other = Uuid::new_v4();
+    sqlx::query("INSERT INTO workspace(id, slug, name) VALUES($1,$2,$2)")
+        .bind(other)
+        .bind(format!("sub-{}", other.simple()))
+        .execute(&su)
+        .await
+        .unwrap();
+    let (other_owner, other_jwt) = insert_human(&su, other, "다른팀", "owner").await;
+    let body = json!({"harness": "claude_code", "deviceId": "shared-device-1"});
+    let (status, mine, _) = register(&client, &base, f.workspace, &f.owner_jwt, body.clone()).await;
+    assert_eq!(status, 201, "{mine}");
+    let (status, theirs, _) = register(&client, &base, other, &other_jwt, body.clone()).await;
+    assert_eq!(status, 201, "{theirs}");
+    assert_ne!(mine["agent"]["id"], theirs["agent"]["id"]);
+    let (status, cross, _) = register(&client, &base, f.workspace, &other_jwt, body.clone()).await;
+    assert!(matches!(status, 401 | 403), "{status} {cross}");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM agent WHERE workspace_id=$1 AND owner_human_id=$2"
+        )
+        .bind(f.workspace)
+        .bind(other_owner)
+        .fetch_one(&su)
+        .await
+        .unwrap(),
+        0
+    );
+
+    // A dead agent frees its Mac's slot: registering again makes a new one.
+    sqlx::query("UPDATE member SET status='suspended' WHERE id=$1")
+        .bind(Uuid::parse_str(mine["agent"]["id"].as_str().unwrap()).unwrap())
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, reborn, _) =
+        register(&client, &base, f.workspace, &f.owner_jwt, body.clone()).await;
+    assert_eq!(status, 201, "{reborn}");
+    assert_ne!(reborn["agent"]["id"], mine["agent"]["id"]);
+
+    // Four concurrent first calls for one new device converge on one row.
+    let (racer, racer_jwt) = insert_human(&su, f.workspace, "경합", "owner").await;
+    let race = json!({"harness": "codex", "deviceId": "race-device-1"});
+    let handles: Vec<_> = (0..4)
+        .map(|_| {
+            let (client, base, jwt, race) = (
+                client.clone(),
+                base.clone(),
+                racer_jwt.clone(),
+                race.clone(),
+            );
+            let workspace = f.workspace;
+            tokio::spawn(async move { register(&client, &base, workspace, &jwt, race).await })
+        })
+        .collect();
+    let mut results = Vec::new();
+    for handle in handles {
+        results.push(handle.await.expect("racer"));
+    }
+    let created = results
+        .iter()
+        .filter(|(status, _, _)| *status == 201)
+        .count();
+    let reused = results
+        .iter()
+        .filter(|(status, _, _)| *status == 200)
+        .count();
+    assert_eq!((created, reused), (1, 3), "{results:?}");
+    assert_eq!(agent_rows_of(&su, &f, racer).await, 1);
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3392-*)"]
+async fn a_registered_but_unconnected_subscription_agent_is_never_a_worker_job() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su).await;
+    let base = start_server(momo_app_pool().await, true).await;
+    let client = reqwest::Client::new();
+    let (status, made, _) = register(
+        &client,
+        &base,
+        f.workspace,
+        &f.owner_jwt,
+        json!({"harness": "claude_code", "deviceId": "regress-device-1"}),
+    )
+    .await;
+    assert_eq!(status, 201, "{made}");
+    let agent = Uuid::parse_str(made["agent"]["id"].as_str().unwrap()).unwrap();
+    let handle = made["agent"]["handle"].as_str().unwrap().to_string();
+    join(&su, f.workspace, f.channel, agent).await;
+    send(
+        &client,
+        &base,
+        &f,
+        &f.owner_jwt,
+        f.channel,
+        &format!("@{handle} 부탁해"),
+        None,
+    )
+    .await;
+    let for_agent: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='agent_job' \
+           AND payload::text LIKE '%' || $2::text || '%'",
+    )
+    .bind(f.workspace)
+    .bind(agent.to_string())
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        for_agent, 0,
+        "the owner's call to a registered, unconnected subscription agent became a job"
+    );
+    let runs: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(f.workspace)
+    .bind(agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        runs, 0,
+        "no run — and so no team-key spend — was created for it"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3392-*)"]
+async fn claude_registration_is_paused_by_default_and_codex_is_not() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su).await;
+    let client = reqwest::Client::new();
+    let before: i64 = sqlx::query_scalar("SELECT count(*) FROM member WHERE workspace_id=$1")
+        .bind(f.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+
+    // Default config of this decision: the Claude opt-in is off.
+    let off = start_server_with(momo_app_pool().await, true, false).await;
+    let (status, body, _) = register(
+        &client,
+        &off,
+        f.workspace,
+        &f.owner_jwt,
+        json!({"harness": "claude_code", "deviceId": "paused-device-1"}),
+    )
+    .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(body["error"]["code"], "claude_subscription_agent_paused");
+    let after: i64 = sqlx::query_scalar("SELECT count(*) FROM member WHERE workspace_id=$1")
+        .bind(f.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(before, after, "a paused registration wrote nothing");
+    // A member who may not register still hears 403 first.
+    let (status, _, _) = register(
+        &client,
+        &off,
+        f.workspace,
+        &f.teammate_jwt,
+        json!({"harness": "claude_code", "deviceId": "paused-device-1"}),
+    )
+    .await;
+    assert_eq!(status, 403);
+    // The general kill switch speaks before the Claude one.
+    let both_off = start_server_with(momo_app_pool().await, false, false).await;
+    let (_, body, _) = register(
+        &client,
+        &both_off,
+        f.workspace,
+        &f.owner_jwt,
+        json!({"harness": "claude_code", "deviceId": "paused-device-1"}),
+    )
+    .await;
+    assert_eq!(body["error"]["code"], "subscription_agents_disabled");
+
+    // Codex is unaffected by the Claude opt-in.
+    let (status, codex, _) = register(
+        &client,
+        &off,
+        f.workspace,
+        &f.owner_jwt,
+        json!({"harness": "codex", "deviceId": "paused-device-1"}),
+    )
+    .await;
+    assert_eq!(status, 201, "{codex}");
+    let codex_id = Uuid::parse_str(codex["agent"]["id"].as_str().unwrap()).unwrap();
+
+    // Status field: only a Claude subscription agent, only while the opt-in is off.
+    let url = format!("{off}/v1/workspaces/{}/roster", f.workspace);
+    let (_, roster) = get_json(&client, &url, &f.teammate_jwt).await;
+    assert_eq!(
+        roster_row(&roster, f.agent)["brainUnavailableReason"],
+        "claude_subscription_agent_paused"
+    );
+    assert!(roster_row(&roster, codex_id)
+        .get("brainUnavailableReason")
+        .is_none());
+    assert!(roster_row(&roster, f.owner)
+        .get("brainUnavailableReason")
+        .is_none());
+    let (_, list) = get_json(
+        &client,
+        &format!(
+            "{off}/v1/workspaces/{}/hosted-agent-connections",
+            f.workspace
+        ),
+        &f.owner_jwt,
+    )
+    .await;
+    let claude_row = list["connections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["agentMemberId"] == json!(f.agent.to_string()))
+        .unwrap();
+    assert_eq!(
+        claude_row["brainUnavailableReason"],
+        "claude_subscription_agent_paused"
+    );
+
+    // Opted in: the same agent reports nothing and Claude registers.
+    let on = start_server_with(momo_app_pool().await, true, true).await;
+    let (_, roster) = get_json(
+        &client,
+        &format!("{on}/v1/workspaces/{}/roster", f.workspace),
+        &f.teammate_jwt,
+    )
+    .await;
+    assert!(roster_row(&roster, f.agent)
+        .get("brainUnavailableReason")
+        .is_none());
+    let (status, body, _) = register(
+        &client,
+        &on,
+        f.workspace,
+        &f.owner_jwt,
+        json!({"harness": "claude_code", "deviceId": "paused-device-1"}),
+    )
+    .await;
+    assert_eq!(status, 201, "{body}");
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3392-*)"]
+async fn the_legacy_create_route_honours_the_claude_opt_in_too() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su).await;
+    let client = reqwest::Client::new();
+    let off = start_server_with(momo_app_pool().await, true, false).await;
+    let url = format!(
+        "{off}/v1/workspaces/{}/hosted-agent-connections",
+        f.workspace
+    );
+    let before: i64 = sqlx::query_scalar("SELECT count(*) FROM member WHERE workspace_id=$1")
+        .bind(f.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    let response = client
+        .post(&url)
+        .bearer_auth(&f.owner_jwt)
+        .json(
+            &json!({"displayName": "클로드", "handle": short_handle("cl"),
+                      "invocationScope": "owner_only", "subscriptionHarness": "claude_code"}),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 409);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "claude_subscription_agent_paused");
+    let after: i64 = sqlx::query_scalar("SELECT count(*) FROM member WHERE workspace_id=$1")
+        .bind(f.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(before, after, "the refused legacy create wrote nothing");
+    let response = client
+        .post(&url)
+        .bearer_auth(&f.owner_jwt)
+        .json(
+            &json!({"displayName": "코덱스", "handle": short_handle("cx"),
+                      "invocationScope": "owner_only", "subscriptionHarness": "codex"}),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 201, "Codex is not paused");
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3392-*)"]
+async fn a_guest_sees_neither_the_owner_nor_liveness_of_an_agent_it_shares() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su).await;
+    let (guest, guest_jwt) = insert_human(&su, f.workspace, "손님", "guest").await;
+    // A room with only the guest and the agent: the owner is in none of the
+    // guest's channels.
+    let room = insert_channel(&su, f.workspace, "public", Some("guest-room")).await;
+    join(&su, f.workspace, room, guest).await;
+    join(&su, f.workspace, room, f.agent).await;
+    let base = start_server(momo_app_pool().await, true).await;
+    let client = reqwest::Client::new();
+    let (status, roster) = get_json(
+        &client,
+        &format!("{base}/v1/workspaces/{}/roster", f.workspace),
+        &guest_jwt,
+    )
+    .await;
+    assert_eq!(status, 200, "{roster}");
+    let row = roster_row(&roster, f.agent);
+    assert_eq!(row["brain"], "subscription");
+    assert_eq!(row["callableBy"], "owner_only");
+    assert!(row.get("owner").is_none(), "owner leaked to a guest: {row}");
+    assert!(
+        row.get("hostOnline").is_none(),
+        "liveness leaked to a guest: {row}"
+    );
+    assert!(
+        !roster["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["id"] == json!(f.owner.to_string())),
+        "the owner is not on the guest's roster"
+    );
 }
