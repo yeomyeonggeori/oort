@@ -95,6 +95,7 @@ function useEmojiCatalog(active: boolean): EmojiCatalogState {
 export function useComposerAutocomplete({
   value,
   members,
+  viewerHumanId,
   channels,
   inputRef,
   onValueChange,
@@ -103,6 +104,11 @@ export function useComposerAutocomplete({
 }: {
   value: string;
   members: RosterMember[];
+  /**
+   * 보는 사람의 사람 멤버 id (AIH-9). 멘션 후보의 「나만 / <이름> 님만」을 가른다.
+   * 없으면 소유 여부를 모르므로 자물쇠를 붙이지 않는다.
+   */
+  viewerHumanId?: string | null;
   /** 이 워크스페이스의 채널 스토어. `#` 후보는 여기서만 온다. */
   channels: Channel[];
   inputRef: RefObject<HTMLTextAreaElement | null>;
@@ -139,7 +145,7 @@ export function useComposerAutocomplete({
   const entries = catalog.entries;
   const candidates = useMemo(() => {
     if (kind === null || queryText === null) return NO_CANDIDATES;
-    if (kind === "mention") return memberCandidates(members, queryText);
+    if (kind === "mention") return memberCandidates(members, queryText, undefined, viewerHumanId);
     if (kind === "channel") return channelCandidates(channels, queryText);
     if (kind === "command") {
       return commandsEnabled
@@ -151,6 +157,7 @@ export function useComposerAutocomplete({
     kind,
     queryText,
     members,
+    viewerHumanId,
     channels,
     entries,
     tone,

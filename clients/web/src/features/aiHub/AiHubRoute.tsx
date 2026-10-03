@@ -14,7 +14,9 @@ import { useDirectory } from "@/features/workspace/useWorkspace";
 import { memberFor } from "@momo/core/features/workspace/directory";
 import { useOffline } from "@/features/common/useOffline";
 import { AiHubOverview } from "./AiHubOverview";
-import { AiAccountsPane, AiAgentsPane, AiExternalPane } from "./AiHubPanes";
+import { AiAccountsPane } from "./AiAccountsPane";
+import { AiAgentsPane } from "./AiAgentsPane";
+import { AiExternalPane } from "./AiExternalPane";
 import { AiTeamKeysPane } from "./AiTeamKeysPane";
 
 const TAB_CLASS =
@@ -58,7 +60,7 @@ export function AiHubRoute() {
           <Route path="accounts" element={<AiAccountsPane />} />
           <Route path="team-keys" element={<AiTeamKeysPane {...pane} />} />
           <Route path="agents" element={<AiAgentsPane />} />
-          <Route path="external" element={<AiExternalPane {...pane} />} />
+          <Route path="external/*" element={<AiExternalPane {...pane} />} />
           <Route path="*" element={<AiHubOverview mayCreateAgent={mayCreate} />} />
         </Routes>
       </div>
