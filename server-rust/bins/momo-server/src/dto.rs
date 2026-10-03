@@ -2570,6 +2570,22 @@ pub struct RosterMemberDto {
     pub max_concurrent_runs: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_run_steps: Option<i32>,
+    /// #3392 AIH-2 (ADR-0193 증보 2026-10-03) — where this agent's thinking comes
+    /// from: `subscription` | `team_key` | `external` | `instance_default`.
+    /// Agents only; derived from existing columns, never stored.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub brain: Option<String>,
+    /// `owner_only` | `everyone` — who the server will deliver a call from.
+    /// Agents only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub callable_by: Option<String>,
+    /// The person whose subscription this is. **Subscription agents only**.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<AgentOwnerDto>,
+    /// Heuristic, not presence: the agent's active credential reached the Agent
+    /// Port within the last 10 minutes. Present only for agents that dial in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_online: Option<bool>,
     /// `agent_profile.paused` — goal SRV-R2, the one key here Swift's DTO does
     /// not have.
     ///
@@ -3999,6 +4015,81 @@ pub struct AgentProfileInput {
     pub model_source: Option<String>,
 }
 
+/// `POST /v1/workspaces/{ws}/subscription-agents/register` (#3392 AIH-2,
+/// ADR-0193 증보 2026-10-03). Called by the desktop app right after a successful
+/// 「Claude Code로 로그인」 / 「Codex로 로그인」.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RegisterSubscriptionAgentRequest {
+    /// `"claude_code"` or `"codex"`.
+    pub harness: String,
+    /// An opaque install id the app made (8-64 of `[A-Za-z0-9._-]`). Not a
+    /// hardware id and not a secret. With the caller and `harness` it is the
+    /// idempotency key.
+    pub device_id: String,
+    /// What the person calls this Mac; used only to build a default name when the
+    /// caller already has an agent for this harness on another Mac.
+    #[serde(default)]
+    pub device_label: Option<String>,
+    /// Optional edits made before creating (owner decision 2026-10-03). A given
+    /// `handle` is taken as is and refused with 409 when it exists; defaults get
+    /// `-2`, `-3`, ... on collision.
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub handle: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterSubscriptionAgentResponse {
+    pub agent: AgentMemberDto,
+    pub connection: HostedAgentConnectionDto,
+    /// `true` when this (caller, harness, device) already had an agent.
+    pub reused: bool,
+    /// The one-time connection value the app passes to the official CLI. Present
+    /// when a fresh value was minted; absent when the existing connection is
+    /// already active. Returned once; PostgreSQL stores only its sha256.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pairing_credential: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pairing_expires_at_ms: Option<i64>,
+}
+
+/// The owner of a subscription agent (#3392). Name and id only.
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentOwnerDto {
+    pub id: String,
+    pub display_name: String,
+}
+
+impl RosterMemberDto {
+    /// Stamp the AIH-2 read contract onto an agent row.
+    pub fn apply_read_facts(&mut self, facts: &momo_agent::AgentReadFacts) {
+        self.brain = Some(facts.brain.as_str().to_string());
+        self.callable_by = Some(facts.callable_by.to_string());
+        self.owner = facts.owner.as_ref().map(|(id, name)| AgentOwnerDto {
+            id: id.to_string(),
+            display_name: name.clone(),
+        });
+        self.host_online = facts.host_online;
+    }
+}
+
+impl HostedAgentConnectionDto {
+    /// Same contract on the hosted-connection list the hub's agent table reads.
+    pub fn apply_read_facts(&mut self, facts: &momo_agent::AgentReadFacts) {
+        self.brain = Some(facts.brain.as_str().to_string());
+        self.callable_by = Some(facts.callable_by.to_string());
+        self.owner = facts.owner.as_ref().map(|(id, name)| AgentOwnerDto {
+            id: id.to_string(),
+            display_name: name.clone(),
+        });
+        self.host_online = facts.host_online;
+    }
+}
+
 /// Swift `AgentMemberDTO` (:339-343).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -4068,6 +4159,23 @@ pub struct HostedAgentConnectionDto {
     /// `"claude_code"` / `"codex"` on an `owner_only` agent; omitted otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subscription_harness: Option<String>,
+
+    /// #3392 AIH-2 (ADR-0193 증보 2026-10-03) — where this agent's thinking comes
+    /// from: `subscription` | `team_key` | `external` | `instance_default`.
+    /// Agents only; derived from existing columns, never stored.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub brain: Option<String>,
+    /// `owner_only` | `everyone` — who the server will deliver a call from.
+    /// Agents only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub callable_by: Option<String>,
+    /// The person whose subscription this is. **Subscription agents only**.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<AgentOwnerDto>,
+    /// Heuristic, not presence: the agent's active credential reached the Agent
+    /// Port within the last 10 minutes. Present only for agents that dial in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_online: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

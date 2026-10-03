@@ -552,19 +552,22 @@ mod tests {
     ///
     /// 115 is #3341's 「작업 끝남」 push inputs (ADR-0120 부록 A): `work_session.turn_started_at` and
     /// `notification_rule.work_complete_push`.
+    ///
+    /// 116 is #3392's subscription-agent registration key (ADR-0193 증보 2026-10-03):
+    /// `agent.subscription_device_id` and its partial unique index.
     #[test]
-    fn discovers_contiguous_migrations_001_to_115() {
+    fn discovers_contiguous_migrations_001_to_116() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            115,
-            "expected 115 migrations under {}",
+            116,
+            "expected 116 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 115);
+        assert_eq!(migrations.last().unwrap().version, 116);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

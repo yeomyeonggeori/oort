@@ -128,13 +128,14 @@ pub use ephemeral_grant::{
 pub use hosted_connection::{
     active_hosted_connection_in_tx, confirm_hosted_connection_in_tx,
     create_hosted_connection_in_tx, detect_pairing_in_tx, get_hosted_connection_in_tx,
-    is_hosted_agent_activated_in_tx, is_hosted_agent_in_tx, list_hosted_connections_in_tx,
-    pairing_workspace_id, prove_hosted_binding_in_tx, regenerate_pairing_in_tx,
-    resolve_hosted_tool_identity_in_tx, resolve_pairing_in_tx, validate_channel_ids,
-    validate_hosted_scopes, HostedActivationIssuance, HostedConnection, HostedConnectionApproval,
-    HostedInputError, HostedMutation, HostedPairingIssuance, HostedProof, HostedToolIdentity,
-    HOSTED_AGENT_INERT_BASE_URL, HOSTED_AGENT_MODEL, HOSTED_AGENT_PORT_AUDIENCE,
-    HOSTED_AGENT_SCOPES, HOSTED_PAIRING_PREFIX, HOSTED_PAIRING_TTL_SECONDS,
+    is_hosted_agent_activated_in_tx, is_hosted_agent_in_tx,
+    latest_hosted_connection_for_agent_in_tx, list_hosted_connections_in_tx, pairing_workspace_id,
+    prove_hosted_binding_in_tx, regenerate_pairing_in_tx, resolve_hosted_tool_identity_in_tx,
+    resolve_pairing_in_tx, validate_channel_ids, validate_hosted_scopes, HostedActivationIssuance,
+    HostedConnection, HostedConnectionApproval, HostedInputError, HostedMutation,
+    HostedPairingIssuance, HostedProof, HostedToolIdentity, HOSTED_AGENT_INERT_BASE_URL,
+    HOSTED_AGENT_MODEL, HOSTED_AGENT_PORT_AUDIENCE, HOSTED_AGENT_SCOPES, HOSTED_PAIRING_PREFIX,
+    HOSTED_PAIRING_TTL_SECONDS,
 };
 pub use hosted_disconnect::{
     acknowledge_hosted_artifact_in_tx, artifact_audit_detail, complete_hosted_disconnect_in_tx,

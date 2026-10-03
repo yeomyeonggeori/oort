@@ -99,6 +99,10 @@ fn roster_dto(member: &RosterMember) -> RosterMemberDto {
         status_expires_at_ms: member.status_expires_at_ms,
         created_at_ms: member.created_at_ms,
         updated_at_ms: member.updated_at_ms,
+        brain: None,
+        callable_by: None,
+        owner: None,
+        host_online: None,
     }
 }
 
@@ -116,7 +120,7 @@ pub async fn roster(
         .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?;
     let limit = query.limit();
 
-    let outcome: DbRejectable<Vec<RosterMember>> =
+    let outcome: DbRejectable<(Vec<RosterMember>, Vec<momo_agent::AgentReadFacts>)> =
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
                 let Some(role) =
@@ -133,12 +137,22 @@ pub async fn roster(
                     limit,
                 )
                 .await?;
-                Ok(Ok(members))
+                // #3392 AIH-2 — the read contract for the agents this viewer may
+                // see (the guest narrowing above already decided which). Same
+                // transaction, so a row and its facts are one snapshot.
+                let agent_ids: Vec<uuid::Uuid> = members
+                    .iter()
+                    .filter(|member| member.kind == MemberKind::Agent)
+                    .map(|member| member.id)
+                    .collect();
+                let facts =
+                    momo_agent::load_agent_read_facts_in_tx(conn, workspace_id, &agent_ids).await?;
+                Ok(Ok((members, facts)))
             })
         })
         .await;
 
-    let members = settle_db("roster.list", outcome)?;
+    let (members, facts) = settle_db("roster.list", outcome)?;
     let human_count = members
         .iter()
         .filter(|member| member.kind == MemberKind::Human)
@@ -148,7 +162,16 @@ pub async fn roster(
         .filter(|member| member.kind == MemberKind::Agent)
         .count();
     Ok(Json(WorkspaceRosterResponse {
-        members: members.iter().map(roster_dto).collect(),
+        members: members
+            .iter()
+            .map(|member| {
+                let mut dto = roster_dto(member);
+                if let Some(facts) = facts.iter().find(|f| f.agent_member_id == member.id) {
+                    dto.apply_read_facts(facts);
+                }
+                dto
+            })
+            .collect(),
         human_count,
         agent_count,
     }))

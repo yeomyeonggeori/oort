@@ -396,6 +396,379 @@ pub async fn load_invocation_scopes_in_tx(
     Ok(rows)
 }
 
+// ---------------------------------------------------------------------------
+// Read contract (#3392 AIH-2, ADR-0193 증보 2026-10-03)
+// ---------------------------------------------------------------------------
+
+/// Where an agent's thinking comes from, as the roster reports it. A closed
+/// vocabulary derived from columns that already exist — nothing is stored for
+/// it, so it cannot disagree with the delivery path that really runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentBrain {
+    /// The owner's own CLI session on the owner's own consumer plan
+    /// (`invocation_scope = 'owner_only'`).
+    Subscription,
+    /// Runs on the team's provider key with the agent's own model choice.
+    TeamKey,
+    /// Runs somewhere else and dials in (hosted connection, A2A card).
+    External,
+    /// Follows the team's 「기본 AI」 row (`model_source = 'instance_default'`).
+    InstanceDefault,
+}
+
+impl AgentBrain {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Subscription => "subscription",
+            Self::TeamKey => "team_key",
+            Self::External => "external",
+            Self::InstanceDefault => "instance_default",
+        }
+    }
+}
+
+/// `callableBy` on the wire: who the server will deliver a call from.
+pub const CALLABLE_BY_OWNER_ONLY: &str = "owner_only";
+pub const CALLABLE_BY_EVERYONE: &str = "everyone";
+
+/// Pure derivation of [`AgentBrain`]. `owner_only` wins over everything: a
+/// subscription agent is also hosted, and calling it `external` would hide the
+/// one rule (only the owner may call) the hub exists to show.
+pub fn derive_brain(
+    invocation_scope: &str,
+    is_hosted: bool,
+    is_card: bool,
+    model_source: &str,
+) -> AgentBrain {
+    if invocation_scope == INVOCATION_SCOPE_OWNER_ONLY {
+        AgentBrain::Subscription
+    } else if is_hosted || is_card {
+        AgentBrain::External
+    } else if model_source == "instance_default" {
+        AgentBrain::InstanceDefault
+    } else {
+        AgentBrain::TeamKey
+    }
+}
+
+pub fn callable_by(invocation_scope: &str) -> &'static str {
+    if invocation_scope == INVOCATION_SCOPE_OWNER_ONLY {
+        CALLABLE_BY_OWNER_ONLY
+    } else {
+        CALLABLE_BY_EVERYONE
+    }
+}
+
+/// The liveness heuristic as one SQL expression over the aliases `m`
+/// (`member`) and the bind `$3` (window seconds, `f64`). `mention.rs` inlines
+/// the same predicate in its candidate query; a unit test below pins that text
+/// there, so the two cannot drift apart silently.
+///
+/// **A heuristic, not presence.** The only liveness fact the server observes
+/// for a hosted runtime is `token.last_used_at` of the active credential,
+/// touched on every admitted Agent Port request. Whether an idle, open Claude
+/// Code or Codex session reaches the port on its own is not visible here (see
+/// [`SUBSCRIPTION_AGENT_ONLINE_WINDOW_SECONDS`]).
+pub const HOSTED_RECENTLY_SEEN_SQL: &str =
+    "COALESCE((SELECT t.last_used_at > now() - make_interval(secs => $3) \
+                   FROM hosted_agent_connection hc \
+                   JOIN token t ON t.workspace_id = hc.workspace_id \
+                                AND t.id = hc.active_token_id \
+                  WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id \
+                    AND hc.status = 'active' AND hc.proved_at IS NOT NULL \
+                    AND t.kind = 'agent_bearer' \
+                    AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
+                    AND t.revoked_at IS NULL \
+                    AND (t.expires_at IS NULL OR t.expires_at > now()) \
+                    AND t.hosted_connection_id = hc.id \
+                    AND t.actor_member_id = hc.agent_member_id \
+                    AND t.audience = '/v1/mcp/agent-port' \
+                  ORDER BY hc.id LIMIT 1), false)";
+
+/// What the roster and the hosted-connection list say about one agent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentReadFacts {
+    pub agent_member_id: Uuid,
+    pub brain: AgentBrain,
+    pub callable_by: &'static str,
+    /// `(member id, display name)` — **subscription agents only**.
+    pub owner: Option<(Uuid, String)>,
+    /// `Some` only for an agent that dials in; see [`HOSTED_RECENTLY_SEEN_SQL`].
+    pub host_online: Option<bool>,
+}
+
+/// Read-contract facts for `agent_member_ids`. Tenant-scoped by the caller's
+/// transaction (RLS FORCE) and by the explicit `workspace_id` predicate. An id
+/// that is not an agent of this workspace simply returns no row.
+pub async fn load_agent_read_facts_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_ids: &[Uuid],
+) -> Result<Vec<AgentReadFacts>, DbError> {
+    use sqlx::Row;
+    let sql = format!(
+        "SELECT m.id AS agent_id, a.invocation_scope, a.model_source, a.owner_human_id, \
+                COALESCE(a.config->>'execution_mode', '') = 'hosted_dial_in' AS config_hosted, \
+                EXISTS (SELECT 1 FROM hosted_agent_connection hc \
+                         WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
+                  AS has_connection, \
+                EXISTS (SELECT 1 FROM agent_card_registration acr \
+                         WHERE acr.workspace_id = m.workspace_id \
+                           AND acr.agent_member_id = m.id AND acr.status = 'confirmed') \
+                  AS is_card, \
+                (SELECT o.display_name FROM member o \
+                  WHERE o.workspace_id = m.workspace_id AND o.id = a.owner_human_id) \
+                  AS owner_display_name, \
+                {HOSTED_RECENTLY_SEEN_SQL} AS host_online \
+           FROM member m \
+           JOIN agent a ON a.member_id = m.id AND a.workspace_id = m.workspace_id \
+          WHERE m.workspace_id = $1 AND m.id = ANY($2) AND m.kind = 'agent'"
+    );
+    let rows = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(agent_member_ids)
+        .bind(SUBSCRIPTION_AGENT_ONLINE_WINDOW_SECONDS as f64)
+        .fetch_all(&mut *conn)
+        .await?;
+    let mut facts = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let scope: String = row.try_get("invocation_scope")?;
+        let model_source: String = row.try_get("model_source")?;
+        let has_connection: bool = row.try_get("has_connection")?;
+        let config_hosted: bool = row.try_get("config_hosted")?;
+        let is_card: bool = row.try_get("is_card")?;
+        let hosted = has_connection || config_hosted;
+        let owner_id: Option<Uuid> = row.try_get("owner_human_id")?;
+        let owner_name: Option<String> = row.try_get("owner_display_name")?;
+        let subscription = scope == INVOCATION_SCOPE_OWNER_ONLY;
+        facts.push(AgentReadFacts {
+            agent_member_id: row.try_get("agent_id")?,
+            brain: derive_brain(&scope, hosted, is_card, &model_source),
+            callable_by: callable_by(&scope),
+            owner: match (subscription, owner_id, owner_name) {
+                (true, Some(id), Some(name)) => Some((id, name)),
+                _ => None,
+            },
+            host_online: if hosted || subscription {
+                Some(row.try_get("host_online")?)
+            } else {
+                None
+            },
+        });
+    }
+    Ok(facts)
+}
+
+// ---------------------------------------------------------------------------
+// Register-after-login (#3392 AIH-2)
+// ---------------------------------------------------------------------------
+
+/// At most this many live subscription agents per (owner, harness): one per Mac
+/// plus slack. The cap keeps a script from minting connection values without
+/// bound, and keeps "one person's own CLI" literal (ADR-0193 D2).
+pub const SUBSCRIPTION_AGENTS_PER_HARNESS_LIMIT: i64 = 5;
+
+/// A device id is an opaque, app-made install id — not a hardware id.
+pub fn valid_device_id(value: &str) -> bool {
+    (8..=64).contains(&value.len())
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+/// `claude` / `codex` — the suffix of the default name (owner decision
+/// 2026-10-03: `<표시이름>-claude`, `<표시이름>-codex`).
+pub fn harness_name_suffix(harness: SubscriptionHarness) -> &'static str {
+    match harness {
+        SubscriptionHarness::ClaudeCode => "claude",
+        SubscriptionHarness::Codex => "codex",
+    }
+}
+
+/// A device label reduced to something safe inside a handle and a display name:
+/// ascii lowercase letters and digits, at most 12. Empty when nothing survives.
+pub fn device_slug(label: &str) -> String {
+    label
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(12)
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
+
+/// Candidate `(display_name, handle)` pairs for a default-named agent, in the
+/// order they are tried: `X-claude`, `X-claude-2`, `X-claude-3`, …
+///
+/// `device_part` (a [`device_slug`]) is appended first when the owner already
+/// has an agent of this harness on another Mac (owner decision: 여러 맥이면
+/// -기기). The handle base is capped so every suffix still fits the 32-char
+/// handle limit.
+pub fn default_name_candidates(
+    owner_display_name: &str,
+    owner_handle: &str,
+    harness: SubscriptionHarness,
+    device_part: Option<&str>,
+    attempts: usize,
+) -> Vec<(String, String)> {
+    let suffix = harness_name_suffix(harness);
+    let extra = device_part
+        .filter(|part| !part.is_empty())
+        .map(|part| format!("-{part}"))
+        .unwrap_or_default();
+    let display_base = format!("{}-{suffix}{extra}", owner_display_name.trim());
+    let handle_tail = format!("-{suffix}{extra}");
+    // Room for "-99" after the tail.
+    let head_budget = 32usize.saturating_sub(handle_tail.len() + 3).max(2);
+    let mut head: String = owner_handle
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '_' || *c == '-')
+        .take(head_budget)
+        .collect();
+    if head.len() < 2 {
+        head = "my".to_string();
+    }
+    (1..=attempts)
+        .map(|n| {
+            let n_part = if n == 1 {
+                String::new()
+            } else {
+                format!("-{n}")
+            };
+            (
+                format!("{display_base}{n_part}"),
+                format!("{head}{handle_tail}{n_part}"),
+            )
+        })
+        .collect()
+}
+
+/// The owner's own name and handle, for the default agent name.
+pub async fn load_member_naming_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<Option<(String, String)>, DbError> {
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT display_name, handle FROM member \
+          WHERE workspace_id = $1 AND id = $2 AND kind = 'human' \
+            AND status = 'active' AND deleted_at IS NULL",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(row)
+}
+
+/// Serialize concurrent registrations of the same (owner, harness, device) so
+/// the lookup and the insert that follows are one decision. The partial unique
+/// index (migration 116) is the backstop.
+pub async fn lock_subscription_registration_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    owner_member_id: Uuid,
+    harness: SubscriptionHarness,
+    device_id: &str,
+) -> Result<(), DbError> {
+    let key = format!(
+        "subscription_register:{workspace_id}:{owner_member_id}:{}:{device_id}",
+        harness.as_str()
+    );
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1::text))")
+        .bind(key)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
+/// The agent already registered for this (owner, harness, device), with
+/// whether its member row is still live. Locked `FOR UPDATE`.
+pub async fn find_subscription_agent_by_device_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    owner_member_id: Uuid,
+    harness: SubscriptionHarness,
+    device_id: &str,
+) -> Result<Option<(Uuid, String, String, bool)>, DbError> {
+    let row: Option<(Uuid, String, String, bool)> = sqlx::query_as(
+        "SELECT m.id, m.handle, m.display_name, \
+                (m.status = 'active' AND m.deleted_at IS NULL) AS live \
+           FROM agent a \
+           JOIN member m ON m.id = a.member_id AND m.workspace_id = a.workspace_id \
+          WHERE a.workspace_id = $1 AND a.owner_human_id = $2 \
+            AND a.subscription_harness = $3 AND a.subscription_device_id = $4 \
+          FOR UPDATE OF a",
+    )
+    .bind(workspace_id)
+    .bind(owner_member_id)
+    .bind(harness.as_str())
+    .bind(device_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(row)
+}
+
+/// Free a dead agent's device slot so the Mac can register again.
+pub async fn release_subscription_device_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<(), DbError> {
+    sqlx::query(
+        "UPDATE agent SET subscription_device_id = NULL, updated_at = now() \
+          WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+/// Record the registration's device on a freshly marked `owner_only` agent.
+pub async fn set_subscription_device_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    device_id: &str,
+) -> Result<bool, DbError> {
+    let updated = sqlx::query(
+        "UPDATE agent SET subscription_device_id = $3, updated_at = now() \
+          WHERE workspace_id = $1 AND member_id = $2 \
+            AND invocation_scope = 'owner_only'",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .bind(device_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(updated.rows_affected() == 1)
+}
+
+/// Live subscription agents this owner already has for `harness`, and how many
+/// of them sit on a different device.
+pub async fn count_owner_subscription_agents_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    owner_member_id: Uuid,
+    harness: SubscriptionHarness,
+) -> Result<i64, DbError> {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM agent a \
+           JOIN member m ON m.id = a.member_id AND m.workspace_id = a.workspace_id \
+          WHERE a.workspace_id = $1 AND a.owner_human_id = $2 \
+            AND a.subscription_harness = $3 \
+            AND m.status = 'active' AND m.deleted_at IS NULL",
+    )
+    .bind(workspace_id)
+    .bind(owner_member_id)
+    .bind(harness.as_str())
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -510,6 +883,96 @@ mod tests {
             SubscriptionNoticeKind::NonOwner.as_str(),
             SubscriptionNoticeKind::Disabled.as_str()
         );
+    }
+
+    #[test]
+    fn brain_is_derived_with_owner_only_first() {
+        assert_eq!(
+            derive_brain("owner_only", true, false, "agent"),
+            AgentBrain::Subscription,
+            "a subscription agent is hosted too; it must not read as external"
+        );
+        assert_eq!(
+            derive_brain("workspace", true, false, "agent"),
+            AgentBrain::External
+        );
+        assert_eq!(
+            derive_brain("workspace", false, true, "agent"),
+            AgentBrain::External
+        );
+        assert_eq!(
+            derive_brain("workspace", false, false, "instance_default"),
+            AgentBrain::InstanceDefault
+        );
+        assert_eq!(
+            derive_brain("workspace", false, false, "agent"),
+            AgentBrain::TeamKey
+        );
+        assert_eq!(callable_by("owner_only"), "owner_only");
+        assert_eq!(callable_by("workspace"), "everyone");
+    }
+
+    /// `mention.rs` keeps its own inline copy of the liveness predicate (it sits
+    /// inside a larger candidate query). If either copy is edited alone the roster's
+    /// `hostOnline` and the D5 offline sentence would disagree about the same agent.
+    #[test]
+    fn the_roster_liveness_predicate_is_the_one_mention_uses() {
+        let compact = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let mention = compact(include_str!("mention.rs").replace("\\\n", " ").as_str());
+        let predicate = compact(HOSTED_RECENTLY_SEEN_SQL.replace("\\\n", " ").as_str());
+        assert!(
+            mention.contains(&predicate),
+            "mention.rs no longer carries HOSTED_RECENTLY_SEEN_SQL verbatim"
+        );
+    }
+
+    #[test]
+    fn device_ids_and_slugs_are_closed() {
+        assert!(valid_device_id("a1b2c3d4-e5"));
+        assert!(!valid_device_id("short"));
+        assert!(!valid_device_id("has space in it"));
+        assert!(!valid_device_id("emoji-\u{1F600}-aaaaaaaa"));
+        assert!(!valid_device_id(&"a".repeat(65)));
+        assert_eq!(device_slug("성재의 MacBook Pro 14\""), "macbookpro14");
+        assert_eq!(device_slug("맥북"), "");
+    }
+
+    #[test]
+    fn default_names_follow_the_owner_decision_and_stay_inside_the_handle_limit() {
+        let names =
+            default_name_candidates("성재", "seongjae", SubscriptionHarness::ClaudeCode, None, 3);
+        assert_eq!(names[0], ("성재-claude".into(), "seongjae-claude".into()));
+        assert_eq!(
+            names[1],
+            ("성재-claude-2".into(), "seongjae-claude-2".into())
+        );
+        assert_eq!(names[2].1, "seongjae-claude-3");
+        let codex = default_name_candidates(
+            "성재",
+            "seongjae",
+            SubscriptionHarness::Codex,
+            Some("macbookpro"),
+            2,
+        );
+        assert_eq!(
+            codex[0],
+            (
+                "성재-codex-macbookpro".into(),
+                "seongjae-codex-macbookpro".into()
+            )
+        );
+        let long = default_name_candidates(
+            "x",
+            &"a".repeat(60),
+            SubscriptionHarness::Codex,
+            Some("abcdefghijkl"),
+            20,
+        );
+        for (_, handle) in &long {
+            assert!(handle.len() <= 32, "{handle}");
+        }
+        let hostile = default_name_candidates("x", "!!", SubscriptionHarness::ClaudeCode, None, 1);
+        assert_eq!(hostile[0].1, "my-claude");
     }
 
     #[test]
