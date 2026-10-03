@@ -650,6 +650,40 @@ describe("개인 키 brain 과 서버 사유 (#3416)", () => {
     expect(hostOfflineNotice(classifyAiAgent({ brain: "personal_key", hostOnline: false }, ME))).toBeNull();
   });
 
+  it("개인 키 문장도 옛 말(grep 게이트 대상)이 없고, 소유자 이름 유무와 관계없이 줄표·빈 값이 없다 (#3426 Low)", () => {
+    for (const [id, facts, viewer] of [
+      ["내 것", { brain: "personal_key", ownerHumanId: "h-me" }, ME],
+      ["남의 것(이름 있음)", { brain: "personal_key", ownerHumanId: "h-me", ownerDisplayName: "성재" }, OTHER],
+      ["남의 것(이름 없음)", { brain: "personal_key", ownerHumanId: "h-me" }, OTHER],
+      ["소유자 모름", { brain: "personal_key" }, {}],
+    ] as const) {
+      const c = classifyAiAgent(facts, viewer);
+      const l = aiAgentLabels(c);
+      const texts = [
+        l.brain, l.callable, l.cost, l.mentionLine, l.mentionBadge, l.host?.label,
+        nonOwnerNotice(c, "성재의 봇", "김인턴"), nonOwnerComposerNotice(c, "성재의 봇"),
+      ].filter((t): t is string => t !== null && t !== undefined);
+      expect(texts.length, id).toBeGreaterThan(0);
+      for (const t of texts) {
+        expect(t.trim(), id).not.toBe("");
+        expect(findLegacyTerms(t), `${id}: ${t}`).toEqual([]);
+        expect(t, id).not.toMatch(/[—–]|undefined|null/);
+      }
+    }
+  });
+
+  it("소유자를 모르거나 이름이 없을 때 「만든 사람만」 한 가지로 말한다 (구독·개인 키·서버 callable_by)", () => {
+    expect(labelsFor({ brain: "subscription", invocationScope: "owner_only" }, OTHER).callable).toBe("만든 사람만");
+    expect(labelsFor({ brain: "subscription", invocationScope: "owner_only" }, OTHER).cost).toBe("만든 사람 구독");
+    expect(labelsFor({ brain: "personal_key" }, OTHER).callable).toBe("만든 사람만");
+    expect(labelsFor({ callableBy: "owner_only" }).callable).toBe("만든 사람만");
+  });
+
+  it("서버 callable_by 의 와이어 값 owner_only 를 소유자 전용으로 읽는다", () => {
+        expect(classifyAiAgent({ brain: "external", callableBy: "everyone" }).callableBy).toBe("everyone");
+    expect(classifyAiAgent({ callableBy: "owner_only" }).callableBy).toBe("owner");
+  });
+
   it("모르는 brain 문자열은 개인 키로 읽지 않는다", () => {
     expect(classifyAiAgent({ brain: "personal_keys" }).brain).toBe("unknown");
     expect(labelsFor({ brain: "personal_keys" }).brain).toBeNull();

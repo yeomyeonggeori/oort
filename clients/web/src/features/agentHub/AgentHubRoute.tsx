@@ -86,12 +86,8 @@ import { EnabledToolsSection } from "./EnabledToolsSection";
 import { StatusChip } from "./StatusChip";
 import { useAgentToolCatalog } from "./useAgentToolCatalog";
 import { toolsProfilePut } from "./enabledToolsModel";
-import {
-  EMPTY_AGENT_DRAFT,
-  canCreateAgentNow,
-  type AgentDraft,
-} from "./createModel";
-import { CreateAgentDialog } from "./CreateAgentDialog";
+import { canCreateAgentNow } from "./createModel";
+import { CreateAgentFlow } from "@/features/aiHub/CreateAgentFlow";
 import { GrokBotInvite } from "@/features/hostedAgents/GrokBotInvite";
 import { HostedAgentWizard } from "@/features/hostedAgents/HostedAgentWizard";
 import { HostedConnectionSection } from "@/features/hostedAgents/HostedConnectionSection";
@@ -291,6 +287,7 @@ export function AgentHubRoute() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [section, setSection] = useState<AgentHubSection>("profile");
   const [creating, setCreating] = useState(false);
+  const [createOpener, setCreateOpener] = useState<HTMLElement | null>(null);
   // 호스티드 연결은 「에이전트 만들기」와 **다른 물건**이라 다른 버튼이다: 하나는
   // 이 워크스페이스가 실행할 에이전트를 만들고, 하나는 남이 실행 중인 에이전트를
   // 들인다. 한 다이얼로그의 탭으로 합치면 만들기 폼 위에 pairing 상태가 얹히고,
@@ -300,7 +297,6 @@ export function AgentHubRoute() {
   const [wizardLaunch, setWizardLaunch] = useState<HostedWizardLaunch | null>(
     null
   );
-  const [agentDraft, setAgentDraft] = useState<AgentDraft>(EMPTY_AGENT_DRAFT);
   const allSignals = useAgentWorkingSignals();
   // 만들 수 없는 사람에게 [만들기]를 내주지 않는다: `routes::agents::create`는
   // human + owner/admin을 요구하므로 그 밖의 모든 시도는 403으로 끝난다. 명부가
@@ -358,7 +354,7 @@ export function AgentHubRoute() {
               워크스페이스 에이전트를 만들고, 상태와 기억, 작업 이력을 한 곳에서
               봅니다.{" "}
               <Link
-                to="/ai"
+                to="/ai/agents"
                 className="underline underline-offset-4 press focus-visible:focus-ring"
                 data-testid="agent-hub-to-ai"
               >
@@ -393,7 +389,10 @@ export function AgentHubRoute() {
               <Button
                 type="button"
                 size="sm"
-                onClick={() => setCreating(true)}
+                onClick={(event) => {
+                  setCreateOpener(event.currentTarget);
+                  setCreating(true);
+                }}
                 data-testid="agent-hub-create"
               >
                 에이전트 만들기
@@ -449,7 +448,13 @@ export function AgentHubRoute() {
               }
               actions={
                 mayCreate ? (
-                  <Button size="sm" onClick={() => setCreating(true)}>
+                  <Button
+                    size="sm"
+                    onClick={(event) => {
+                      setCreateOpener(event.currentTarget);
+                      setCreating(true);
+                    }}
+                  >
                     에이전트 만들기
                   </Button>
                 ) : (
@@ -560,11 +565,11 @@ export function AgentHubRoute() {
         </div>
       </div>
 
-      <CreateAgentDialog
+      <CreateAgentFlow
         open={creating}
         onOpenChange={setCreating}
-        draft={agentDraft}
-        setDraft={setAgentDraft}
+        mayCreate={mayCreate}
+        opener={createOpener}
         // 만든 뒤 그 에이전트를 연다. 방금 만든 것이 화면에 없으면 만든 것이
         // 아니고, 다음 행동(채널에 넣기)이 바로 그 판에 있다.
         onCreated={(created) => {

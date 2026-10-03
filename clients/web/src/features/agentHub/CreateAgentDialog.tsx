@@ -6,6 +6,7 @@ import {
   DialogContent,
   DialogDescription,
   DialogTitle,
+  type DialogFocusTarget,
 } from "@/design/ui/dialog";
 import { Input } from "@/design/ui/input";
 import { InlineBanner } from "@/features/common/States";
@@ -97,11 +98,13 @@ function CreateAgentPanel({
   setDraft,
   onCreated,
   onOpenChange,
+  opener,
 }: {
   draft: AgentDraft;
   setDraft: (next: AgentDraft) => void;
   onCreated: (created: CreatedAgent) => void;
   onOpenChange: (open: boolean) => void;
+  opener?: DialogFocusTarget | null;
 }) {
   const { pending, failure, create, clearFailure } = useCreateAgent();
   const offline = useOffline();
@@ -212,6 +215,7 @@ function CreateAgentPanel({
 
   return (
     <DialogContent
+      opener={opener}
       data-testid="create-agent-dialog"
       onKeyDown={(event) => {
         // ⌘↵ = 다이얼로그 기본 액션 (R-1 5장). On the panel root rather than the
@@ -445,12 +449,15 @@ export function CreateAgentDialog({
   draft,
   setDraft,
   onCreated,
+  opener,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   draft: AgentDraft;
   setDraft: (next: AgentDraft) => void;
   onCreated: (created: CreatedAgent) => void;
+  /** 여는 단추를 알면 넘긴다. 고르는 창을 거쳐 열릴 때는 activeElement 가 이미 사라져 있다. */
+  opener?: DialogFocusTarget | null;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -464,6 +471,7 @@ export function CreateAgentDialog({
           setDraft={setDraft}
           onCreated={onCreated}
           onOpenChange={onOpenChange}
+          opener={opener}
         />
       )}
     </Dialog>
