@@ -2,6 +2,7 @@
 
 - Status: **Accepted** (2026-09-26 성재 결재. 근거는 아래 인용)
 - Date: 2026-09-26
+- 역방향: D7의 「팀 샌드박스 host」 중 **멤버 개인 컨테이너(scope=member)** 는 [ADR-0197](0197-personal-cloud-workspace.md)(Proposed, 2026-10-03, #3395, 성재 결재로 앞당김)이 다룬다. 스파이크 #2788은 그 S1~S4로 재범위화를 제안한다. 팀 공용(scope=workspace)은 계속 목표 A 뒤다.
 - Deciders: 성재
 - 결재 인용: 작업 공간 2.0 제안서 §4 Q1~Q11에 성재가 「전부 권장대로 가자」고 답했다. 이 ADR은 Q6, Q8, Q9, Q10, Q11을 적는다.
 - 기안: Opus 5.5 worker(#2754). O4(D2 초안화)는 PR #2794 검수 뒤 planner가 위임 범위 안에서 판정했다.
