@@ -262,8 +262,8 @@ async function scenes(browser, origin, scheme, viewport) {
       await page.waitForTimeout(500);
       await shot("old-agents-header");
       await page.getByTestId("agent-hub-to-ai").click();
-      await page.getByTestId("ai-hub-overview").waitFor();
-      check(`${tag} 에이전트 화면 → 허브 개요`, page.url().endsWith("#/ai"), page.url());
+      await page.getByTestId("ai-hub-pane-agents").waitFor();
+      check(`${tag} 에이전트 화면 → 허브 에이전트 구획 (AIH-7)`, page.url().endsWith("#/ai/agents"), page.url());
       // ⌘K
       await page.keyboard.press("Meta+KeyK");
       await page.getByTestId("quick-switcher").waitFor();

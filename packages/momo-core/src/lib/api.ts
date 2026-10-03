@@ -119,6 +119,20 @@ export interface RosterMember {
   ownerHumanId?: string;
   agentModel?: string;
   /**
+   * AI 허브 읽기 계약(AIH-2, #3392). 에이전트 행에만 실린다. 값은 서버 문자열을 그대로 받고,
+   * 해석은 코어 `classifyAiAgent` 가 한다(모르는 값은 부재와 같다). 구서버는 보내지 않는다.
+   */
+  /** `subscription` | `team_key` | `external` | `personal_key` | `instance_default`. */
+  brain?: string;
+  /** `owner_only` | `everyone`. */
+  callableBy?: string;
+  /** 구독 에이전트의 소유자. 손님에게는 명부에 없는 소유자가 빠진다. */
+  owner?: { id: string; displayName: string };
+  /** 에이전트 자격이 최근 10분 안에 Agent Port 에 닿았는가(추정). 손님에게는 없다. */
+  hostOnline?: boolean;
+  /** 이 에이전트의 brain 이 이 서버에서 지금 쓸 수 없는 이유(`claude_subscription_agent_paused`). */
+  brainUnavailableReason?: string;
+  /**
    * Agents only: is this agent asleep (goal SRV-R2)?
    *
    * ABSENT is a real answer here, not a default waiting to be filled in. The

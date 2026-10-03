@@ -98,7 +98,7 @@ describe("AI 허브 라우트 (AIH-3)", () => {
     expect(cards).toEqual(["내 AI 계정", "팀 AI 키", "에이전트", "외부 연결"]);
     const hrefs = [...el.querySelectorAll('a[data-testid^="ai-hub-open-"]')].map((a) => a.getAttribute("href"));
     expect(hrefs).toEqual(["/ai/accounts", "/ai/team-keys", "/ai/agents", "/ai/external"]);
-    expect(el.querySelector('[data-testid="ai-hub-create-agent"]')?.getAttribute("href")).toBe("/agents");
+    expect(el.querySelector('[data-testid="ai-hub-create-agent"]')?.getAttribute("href")).toBe("/ai/agents?create=1");
   });
 
   it("탭은 개요와 네 구획이고 현재 자리가 aria-current다", async () => {
