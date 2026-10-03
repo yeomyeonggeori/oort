@@ -56,6 +56,13 @@ import {
   openTerminalApp,
 } from "@/lib/tauri";
 import { createLoginController, type LoginController } from "./loginController";
+import {
+  RegisterStepBody,
+  type RegisterContext,
+  type RegisterFixture,
+} from "./RegisterStepBody";
+
+export type { RegisterContext, RegisterFixture } from "./RegisterStepBody";
 
 // Reading this as: onboarding (AI 연결 · 로그인 모달) for internal team users on
 // Tauri desktop, density 5/10, motion 1/10 (the dialog's own enter/exit only).
@@ -64,6 +71,8 @@ import { createLoginController, type LoginController } from "./loginController";
 export interface HarnessLoginFixture {
   status: HarnessLoginPhase;
   method?: HarnessLoginMethod;
+  /** 로그인 뒤 「에이전트로 만들기」 단계를 세운다(컨트롤러 없이). */
+  register?: RegisterFixture;
 }
 
 /**
@@ -87,9 +96,19 @@ export function HarnessLoginDialog({
   focusAfterConnected,
   onLoginEnded,
   fixture,
+  register = null,
+  startAt = "login",
 }: {
   /** 로그인할 CLI. null이면 닫혀 있다. */
   harness: LocalHarnessId | null;
+  /**
+   * 있으면 로그인이 끝난 뒤 같은 창이 「이 맥의 Claude Code를 @이름으로 부를 수 있게
+   * 할까요?」로 이어진다(#3389). 기본 위치 로그인에만 준다(프로필·원격 작업 로그인은
+   * 다른 설정 폴더라 이 연결의 대상이 아니다). 없으면 예전처럼 「연결됐어요」 뒤 닫힌다.
+   */
+  register?: RegisterContext | null;
+  /** `register`: 이미 로그인된 CLI에서 곧바로 확인 단계로 연다. */
+  startAt?: "login" | "register";
   /**
    * oort 프로필 라벨(#2878, 시안 §3 「재연동 연결 지점」·§4 2a). 계정 목록이 넘기는
    * 것은 이것 하나다. 셸이 그 폴더를 CLI의 설정 폴더로 넘기고, 완료 판정도 그
@@ -139,6 +158,8 @@ export function HarnessLoginDialog({
           onConnected={onConnected}
           onFallbackStarted={onFallbackStarted}
           fixture={fixture ?? null}
+          register={profile === null && !remote ? register : null}
+          startAt={profile === null && !remote && register ? startAt : "login"}
         />
       )}
     </Dialog>
@@ -153,13 +174,14 @@ function useController(
   remote: boolean,
   method: HarnessLoginMethod,
   fixture: HarnessLoginFixture | null,
-  onLoginEnded: ((ended: boolean) => void) | undefined
+  onLoginEnded: ((ended: boolean) => void) | undefined,
+  skipLogin: boolean
 ): LoginController | null {
   const endedRef = useRef(onLoginEnded);
   endedRef.current = onLoginEnded;
   const controller = useMemo(
     () =>
-      fixture
+      fixture || skipLogin
         ? null
         : createLoginController(
             harness,
@@ -208,7 +230,11 @@ function LoginDialogBody({
   onConnected,
   onFallbackStarted,
   fixture,
+  register,
+  startAt,
 }: {
+  register: RegisterContext | null;
+  startAt: "login" | "register";
   harness: LocalHarnessId;
   profile: string | null;
   remote: boolean;
@@ -220,7 +246,21 @@ function LoginDialogBody({
   onFallbackStarted: (harness: LocalHarnessId) => void;
   fixture: HarnessLoginFixture | null;
 }) {
-  const controller = useController(harness, profile, remote, method, fixture, onLoginEnded);
+  const skipLogin = register !== null && startAt === "register";
+  const controller = useController(
+    harness,
+    profile,
+    remote,
+    method,
+    fixture,
+    onLoginEnded,
+    skipLogin
+  );
+  // 로그인 뒤의 「에이전트로 만들기」 단계(#3389). 로그인을 막 마쳤는지(`fresh`)에 따라
+  // 첫 줄의 「로그인됐어요」가 달라진다.
+  const [stage, setStage] = useState<"login" | "register">(
+    register !== null && (startAt === "register" || fixture?.register) ? "register" : "login"
+  );
   const live = useSyncExternalStore(
     controller?.subscribe ?? noopSubscribe,
     controller?.getState ?? (() => IDLE_STATE),
@@ -244,9 +284,14 @@ function LoginDialogBody({
     if (fixture || status.phase !== "connected" || connectedRef.current) return;
     connectedRef.current = true;
     onConnected(harness);
+    // 에이전트로 만들 수 있는 로그인은 닫지 않고 같은 창에서 물어본다.
+    if (register !== null) {
+      setStage("register");
+      return;
+    }
     const timer = window.setTimeout(onClose, HARNESS_LOGIN_CONNECTED_CLOSE_MS);
     return () => window.clearTimeout(timer);
-  }, [fixture, status.phase, harness, onClose, onConnected]);
+  }, [fixture, status.phase, harness, onClose, onConnected, register]);
 
   const guide = guideFor(harness, currentMethod, status, profile);
   const spawnFailed = status.phase === "failed" && status.reason === "spawn";
@@ -265,6 +310,27 @@ function LoginDialogBody({
     if (next === "device") setTerminalOpen(true);
     controller?.retry(next);
   };
+
+  if (stage === "register" && register !== null) {
+    return (
+      <DialogContent
+        className="harness-login gap-4 p-6"
+        data-testid="harness-login-dialog"
+        data-phase="register"
+        onEscapeKeyDown={() => onClose()}
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
+        <DialogTitle className="sr-only">{loginDialogTitle(harness)}</DialogTitle>
+        <RegisterStepBody
+          harness={harness}
+          context={register}
+          onClose={onClose}
+          fixture={fixture?.register ?? null}
+          showLoggedIn={startAt !== "register"}
+        />
+      </DialogContent>
+    );
+  }
 
   return (
     <DialogContent

@@ -66,6 +66,8 @@ import {
   HarnessLoginDialog,
   type HarnessLoginFixture,
 } from "@/features/welcome/harnessLogin/HarnessLoginDialog";
+import { useRegisterContext } from "@/features/welcome/harnessLogin/useRegisterContext";
+import { START_CREATE_LABEL } from "@momo/core/features/onboarding/subscriptionRegister";
 
 // Reading this as: agent card family (local tool card at the timeline tail) for
 // internal team users on web+Tauri, density 6/10, motion 2/10.
@@ -688,12 +690,22 @@ function HarnessRows({ only }: { only: LocalHarnessId | null }) {
   });
   // 모달이 「연결됐어요」로 끝난 하네스. 닫기(취소·시간 초과)와 성공을 가른다.
   const connectedRef = useRef<Set<LocalHarnessId>>(new Set());
+  // 로그인 뒤 「에이전트로 만들기」(#3389). 이미 로그인된 줄에서는 곧장 확인 단계로 연다.
+  const register = useRegisterContext();
+  const [registerOnly, setRegisterOnly] = useState(false);
 
   const record = (id: LocalHarnessId, result: HarnessResult) =>
     setResults((prev) => ({ ...prev, [id]: result }));
 
   function openLogin(id: LocalHarnessId) {
     connectedRef.current.delete(id);
+    setRegisterOnly(false);
+    setLoginFor(id);
+  }
+
+  function openRegister(id: LocalHarnessId) {
+    connectedRef.current.delete(id);
+    setRegisterOnly(true);
     setLoginFor(id);
   }
 
@@ -758,6 +770,17 @@ function HarnessRows({ only }: { only: LocalHarnessId | null }) {
             const checking = pill === "checking";
             // 도는 동안은 시안처럼 흐리고 낱말도 바뀐다(design-review M1).
             action = (
+              <>
+                {pill === "ready" && register !== null && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => openRegister(id)}
+                    data-testid={`ai-connect-card-${id}-register`}
+                  >
+                    {START_CREATE_LABEL}
+                  </Button>
+                )}
               <Button
                 type="button"
                 variant="secondary"
@@ -774,6 +797,7 @@ function HarnessRows({ only }: { only: LocalHarnessId | null }) {
                 {!checking && <RefreshCw aria-hidden="true" />}
                 {checking ? "확인 중" : "연결 확인"}
               </Button>
+              </>
             );
           }
           return (
@@ -808,6 +832,8 @@ function HarnessRows({ only }: { only: LocalHarnessId | null }) {
       <HarnessLoginDialog
         harness={loginFor}
         fixture={loginFixture}
+        register={register}
+        startAt={registerOnly ? "register" : "login"}
         onClose={() => {
           const id = loginFor;
           setLoginFor(null);

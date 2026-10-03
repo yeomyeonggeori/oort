@@ -111,6 +111,7 @@ import {
   serverSurface,
 } from "@momo/core/features/capabilities/serverSurfaces";
 import { absoluteApiBase } from "@/lib/serverBase";
+import { agentPortReplaceCredential } from "@/lib/tauri";
 import { ChoiceList, type ChoiceListItem } from "./ChoiceList";
 import {
   hostedConnectionQuery,
@@ -245,6 +246,8 @@ function HostedWizardBody({
   );
   const [pairing, setPairing] = useState<RevealedPairingChallenge | null>(null);
   const [issued, setIssued] = useState<RevealedActiveCredential | null>(null);
+  // 앱이 저장소의 값을 직접 바꿨다(D16): 화면에 자격증명을 내지 않는다.
+  const [appManaged, setAppManaged] = useState(false);
   const [channelSelection, setChannelSelection] = useState<string[]>([]);
   const [scopeSelection, setScopeSelection] = useState<string[]>([
     ...DEFAULT_HOSTED_SCOPES,
@@ -325,6 +328,7 @@ function HostedWizardBody({
   function forgetSecrets() {
     setPairing(null);
     setIssued(null);
+    setAppManaged(false);
     purgeHostedCredentials(client);
   }
 
@@ -442,12 +446,21 @@ function HostedWizardBody({
         scopeSelection
       );
       const wire = await confirmHostedConnection(workspaceId, selectedId, approval);
-      return parseActivationIssuance(wire, { connectionId: selectedId });
+      const activation = parseActivationIssuance(wire, { connectionId: selectedId });
+      // ADR-0193 D16 (#3389): 앱이 이 맥에서 이 에이전트를 직접 연결해 뒀다면 active
+      // 자격은 앱 저장소의 값만 바꾼다. CLI 명령은 다시 부르지 않고, 화면에도 값을
+      // 한 번 더 내지 않는다.
+      const swapped = await agentPortReplaceCredential({
+        agentId: activation.connection.agentMemberId.toLowerCase(),
+        credential: activation.credential,
+      });
+      return { activation, swapped };
     },
-    onSuccess: (activation) => {
+    onSuccess: ({ activation, swapped }) => {
       setFailure(null);
       setPairing(null);
-      setIssued(activation);
+      setAppManaged(swapped);
+      setIssued(swapped ? null : activation);
       client.setQueryData(
         hostedConnectionQueryKey(workspaceId, normalizedId(activation.connection.id)),
         activation.connection
@@ -616,6 +629,7 @@ function HostedWizardBody({
             agentLabel={agentLabel}
             agentHandle={agentHandle}
             issued={issued}
+            appManaged={appManaged}
             checking={detail.isFetching}
             channelName={approvedChannelName(connection, channelInputs)}
             onRecheck={() => void detail.refetch()}
@@ -1294,11 +1308,13 @@ function ActivationStep({
   agentLabel,
   agentHandle,
   issued,
+  appManaged,
   checking,
   channelName,
   onRecheck,
   onDone,
 }: {
+  appManaged: boolean;
   connection: HostedAgentConnection;
   agentLabel: string;
   agentHandle: string;
@@ -1330,7 +1346,11 @@ function ActivationStep({
         <EmptyInvite
           className="px-0"
           headline="새 자격증명으로 첫 요청이 오기를 기다리는 중입니다."
-          detail="provider 설정의 값을 새 자격증명으로 바꾸고 커넥터나 routine을 한 번 실행하세요. 그 요청이 성공해야 활성이 됩니다."
+          detail={
+            appManaged
+              ? "이 맥의 연결 값은 앱이 바꿔 뒀습니다. Claude Code를 한 번 열어 첫 요청이 성공하면 활성이 됩니다."
+              : "provider 설정의 값을 새 자격증명으로 바꾸고 커넥터나 routine을 한 번 실행하세요. 그 요청이 성공해야 활성이 됩니다."
+          }
           actions={
             <Button
               type="button"

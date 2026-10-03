@@ -302,6 +302,40 @@ export function parsePairingIssuance(
   return { connection, pairingCredential, pairingExpiresAtMs };
 }
 
+/** 로그인 직후 대행 등록 응답(ADR-0193 D15). 연결 값은 새로 만들었을 때만 있다. */
+export interface RegisteredSubscriptionAgent {
+  agent: { id: string; handle: string; displayName: string };
+  connection: HostedAgentConnection;
+  /** 같은 (호출자, 하네스, 기기)의 에이전트가 이미 있었다. */
+  reused: boolean;
+  pairingCredential?: string;
+  pairingExpiresAtMs?: number;
+}
+
+export function parseRegisteredSubscriptionAgent(wire: unknown): RegisteredSubscriptionAgent {
+  const row = record(wire);
+  const agent = record(row?.["agent"]);
+  const connection = toHostedConnection(row?.["connection"]);
+  const id = str(agent, "id");
+  const handle = str(agent, "handle");
+  const displayName = str(agent, "displayName");
+  const reused = row?.["reused"];
+  if (!connection || !id || !handle || displayName === undefined || typeof reused !== "boolean") {
+    throw new WireShapeError();
+  }
+  // 이 응답은 방금 요청한 에이전트의 연결이어야 한다.
+  if (connection.agentMemberId.toLowerCase() !== id.toLowerCase()) throw new WireShapeError();
+  const pairingCredential = str(row, "pairingCredential");
+  const pairingExpiresAtMs = num(row, "pairingExpiresAtMs");
+  return {
+    agent: { id, handle, displayName },
+    connection,
+    reused,
+    ...(pairingCredential ? { pairingCredential } : {}),
+    ...(pairingExpiresAtMs !== undefined ? { pairingExpiresAtMs } : {}),
+  };
+}
+
 /**
  * 승인 응답.
  *
