@@ -203,6 +203,7 @@ SCAN_SCOPE = [
         "path": "server-rust/crates/momo-t3/src/work_share.rs",
         "mode": "symbols",
         "symbols": ["workspaces_with_expired_shares"],
+        "column_reads": {"work_session_share": ["workspace_id", "session_id"]},
         "why": (
             "share_retention_sweep.rs: the cross-tenant candidate READ on the "
             "notifier pool (#3377; v0.1.16 incident). Only this symbol: "
@@ -214,15 +215,26 @@ SCAN_SCOPE = [
         "path": "server-rust/crates/momo-messaging/src/avatar_reclaim.rs",
         "mode": "symbols",
         "symbols": ["candidate_sql", "avatar_reclaim_candidates"],
-        "literal_tables": ["member_avatar_media", "workspace_avatar_media", "member"],
-        "column_reads": {"workspace": ["avatar_media_id"]},
+        "literal_tables": ["member"],
+        "column_reads": {
+            "member_avatar_media": [
+                "id", "workspace_id", "drive_file_id", "status", "created_at",
+                "drive_reclaimed_at",
+            ],
+            "workspace_avatar_media": [
+                "id", "workspace_id", "drive_file_id", "status", "created_at",
+                "drive_reclaimed_at",
+            ],
+            "workspace": ["avatar_media_id"],
+        },
         "why": (
             "notifier avatar_reclaim.rs: avatar_reclaim_candidates on the "
             "notifier pool. candidate_sql builds `FROM {table} a … FROM {owner} o` "
             "from AvatarKind (Member → member_avatar_media / member, Workspace → "
             "workspace_avatar_media / workspace), which a literal scan cannot see, "
-            "so the four relations are named here. `workspace` is read for one "
-            "column only (o.avatar_media_id), hence a column grant. "
+            "so the relations are named here: `member` (table grant) and, as column "
+            "reads, the two media tables (never name/mime/member_id) and "
+            "`workspace.avatar_media_id` (o.avatar_media_id), hence column grants. "
             "reclaim_avatar_media_in_tx is the momo_app write half and is not scanned."
         ),
     },
@@ -481,7 +493,7 @@ def parse_verbs(sql):
 
 COLUMN_GRANT_RE = re.compile(
     r'GRANT\s+SELECT\s*\(([^)]*)\)\s+ON\s+([a-z][a-z0-9_]*)\s+TO\s+momo_notifier',
-    re.I,
+    re.I | re.S,
 )
 
 
@@ -673,6 +685,8 @@ def compare(used, grants, real, col_grants=None, col_reads=None):
         for verb in sorted(verbs):
             if verb == "DELETE":
                 continue
+            if verb == "SELECT" and table in col_reads:
+                continue  # column-scoped read: judged by the column rules above
             if verb not in have:
                 have_s = ",".join(sorted(have)) if have else "(none)"
                 problems.append(
@@ -789,14 +803,25 @@ print(
 )
 
 # (d) #3377: the grant the v0.1.16 share retention sweep lacked. Drop it → RED.
-grants_d = {t: set(vs) for t, vs in grants.items()}
-grants_d.pop("work_session_share", None)
-probs_d = compare(used_real, grants_d, real)
-if not any("SELECT work_session_share" in p for p in probs_d):
+col_d = {t: set(c) for t, c in COLUMN_GRANTS.items()}
+col_d.pop("work_session_share", None)
+probs_d = compare(used_real, grants, real, col_grants=col_d)
+if not any("column read work_session_share.session_id" in p for p in probs_d):
     fail(f"sabotage drop work_session_share GRANT stayed GREEN (problems={probs_d})")
 print(
     "[test-notifier-role-grants] ok: sabotage drop work_session_share GRANT → RED "
     f"({[p for p in probs_d if 'work_session_share' in p][0]})"
+)
+
+# (d2) #3377: widening a column grant to the whole table is an over-grant → RED.
+grants_d2 = {t: set(vs) for t, vs in grants.items()}
+grants_d2["work_session_share"] = {"SELECT"}
+probs_d2 = compare(used_real, grants_d2, real)
+if not any("table-level SELECT work_session_share" in p for p in probs_d2):
+    fail(f"sabotage table-level work_session_share stayed GREEN (problems={probs_d2})")
+print(
+    "[test-notifier-role-grants] ok: sabotage table-level SELECT work_session_share → RED "
+    f"({[p for p in probs_d2 if 'work_session_share' in p][0]})"
 )
 
 # (e) #3377: drop the one-column workspace grant the avatar reclaim read needs → RED.

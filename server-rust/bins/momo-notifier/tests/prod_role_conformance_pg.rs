@@ -102,6 +102,49 @@ fn apply_runtime_roles(database_url: &str) {
     assert!(status.success(), "bootstrap_runtime_roles.sql failed");
 }
 
+/// `bootstrap_runtime_roles.sql` rotates the four runtime roles' passwords and
+/// attributes, and roles are cluster-global: only a disposable cluster may be the
+/// target. Loopback is accepted; anything else needs an explicit opt-in.
+fn assert_disposable_cluster() {
+    let options: PgConnectOptions = cluster_url().parse().expect("DATABASE_URL parses");
+    let host = options.get_host().to_string();
+    let loopback = matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1");
+    let opted_in = std::env::var("MOMO_ALLOW_ROLE_REPROVISION").as_deref() == Ok("1");
+    assert!(
+        loopback || opted_in,
+        "refusing to re-provision the runtime roles on non-loopback host {host}; \
+         set MOMO_ALLOW_ROLE_REPROVISION=1 only for a disposable cluster"
+    );
+}
+
+/// Drop databases an earlier panicked run left behind (`finish` never ran).
+/// Names carry their creation time, so a sibling test's live database is safe.
+async fn drop_stale_databases(admin: &PgPool) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    let names: Vec<String> = sqlx::query_scalar(
+        "SELECT datname::text FROM pg_database WHERE datname LIKE 'prodrole\\_%'",
+    )
+    .fetch_all(admin)
+    .await
+    .expect("list databases");
+    for name in names {
+        let created: u64 = name
+            .split('_')
+            .nth(1)
+            .and_then(|secs| secs.parse().ok())
+            .unwrap_or(0);
+        if now.saturating_sub(created) > 3600 {
+            sqlx::query(&format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)"))
+                .execute(admin)
+                .await
+                .expect("drop stale database");
+        }
+    }
+}
+
 /// A throwaway database provisioned the production way. Dropped on `finish`.
 struct ProdDb {
     name: String,
@@ -111,12 +154,21 @@ struct ProdDb {
 
 impl ProdDb {
     async fn create() -> ProdDb {
+        assert_disposable_cluster();
         let admin = PgPoolOptions::new()
             .max_connections(2)
             .connect(&cluster_url())
             .await
             .expect("connect as superuser");
-        let name = format!("prodrole_{}", &Uuid::new_v4().simple().to_string()[..12]);
+        drop_stale_databases(&admin).await;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_secs();
+        let name = format!(
+            "prodrole_{now}_{}",
+            &Uuid::new_v4().simple().to_string()[..8]
+        );
         sqlx::query(&format!("CREATE DATABASE {name}"))
             .execute(&admin)
             .await
