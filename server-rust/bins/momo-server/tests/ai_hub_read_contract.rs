@@ -159,10 +159,11 @@ fn the_brain_and_callable_by_lists_in_the_spec_are_the_ones_the_server_derives()
         AgentBrain::TeamKey,
         AgentBrain::External,
         AgentBrain::InstanceDefault,
+        AgentBrain::PersonalKey,
     ]
     .map(|brain| brain.as_str());
     assert!(
-        spec.contains("enum: [subscription, team_key, external, instance_default]"),
+        spec.contains("enum: [subscription, team_key, external, instance_default, personal_key]"),
         "brain enum"
     );
     for value in derived {

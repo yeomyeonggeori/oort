@@ -166,6 +166,7 @@ ENV CARGO_TERM_COLOR=never \
 COPY server-rust/Cargo.toml server-rust/Cargo.lock ./
 COPY server-rust/crates/momo-agent/Cargo.toml crates/momo-agent/
 COPY server-rust/crates/momo-auth/Cargo.toml crates/momo-auth/
+COPY server-rust/crates/momo-blind-pty/Cargo.toml crates/momo-blind-pty/
 COPY server-rust/crates/momo-db/Cargo.toml crates/momo-db/
 COPY server-rust/crates/momo-drive/Cargo.toml crates/momo-drive/
 COPY server-rust/crates/momo-egress/Cargo.toml crates/momo-egress/

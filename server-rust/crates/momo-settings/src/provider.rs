@@ -443,7 +443,7 @@ fn validated_base_url_with_local_hosts(
 }
 
 /// The lower-cased host of an absolute URL (IPv6 without brackets), or `None`.
-pub(crate) fn url_host(raw: &str) -> Option<String> {
+pub fn url_host(raw: &str) -> Option<String> {
     split_url(raw).map(|parts| parts.host)
 }
 

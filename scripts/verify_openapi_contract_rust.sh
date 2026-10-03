@@ -4004,6 +4004,36 @@ sample agent-run-cancel post \
   "/v1/workspaces/$WS/agent-runs/$CANCEL_RUN_UUID/cancel" 200 "" "$ACCESS"
 guard_jq '.status == "cancelled"' "a person's stop ends the run"
 
+# #3396 (ADR-0147 증보 2026-10-03) — 개인 API 키. 운영자가 동료 한 사람에게 발급하고, 그 사람의
+# 본인 전용 에이전트가 쓴다. 키는 쓰기 전용이라 응답 어디에도 나오면 안 된다(비밀 needle 로 등록).
+PERSONAL_KEY_SECRET="sk-openapi-gate-personal-$(rand_hex)"
+append_secret_with_derivatives "$PERSONAL_KEY_SECRET"
+sample personal-key-issue post "/v1/workspaces/{workspaceId}/personal-keys" \
+  "/v1/workspaces/$WS/personal-keys" 201 \
+  "$(jq -cn --arg m "$GATE_PEER_ID" --arg k "$PERSONAL_KEY_SECRET" \
+      '{ownerMemberId:$m,apiKey:$k,baseUrl:"https://api.personal.openapi.example.test/v1",label:"gate"}')" \
+  "$ACCESS"
+PERSONAL_KEY_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.id')"
+guard_jq --arg m "$GATE_PEER_ID" '.status == "active" and (.ownerMemberId | ascii_downcase) == $m' \
+  "the key is issued to the named member and is active"
+sample personal-key-list get "/v1/workspaces/{workspaceId}/personal-keys" \
+  "/v1/workspaces/$WS/personal-keys" 200 "" "$ACCESS"
+guard_jq '(.keys | length) >= 1' "the operator list shows the issued key"
+sample personal-key-mine get "/v1/workspaces/{workspaceId}/personal-keys/mine" \
+  "/v1/workspaces/$WS/personal-keys/mine" 200 "" "$ACCESS"
+guard_jq '.keys | type == "array"' "a member's own list is an array"
+sample personal-key-agent post \
+  "/v1/workspaces/{workspaceId}/personal-keys/{keyId}/agent" \
+  "/v1/workspaces/$WS/personal-keys/$PERSONAL_KEY_ID/agent" 201 \
+  "$(jq -cn --arg h "rust-gate-personal-$RUN_EPOCH" \
+      '{displayName:"OpenAPI Rust Gate Personal",handle:$h,model:"gpt-personal-gate"}')" "$ACCESS"
+guard_jq --arg h "rust-gate-personal-$RUN_EPOCH" '.agent.handle == $h' \
+  "the personal agent is created for the key"
+sample personal-key-revoke post \
+  "/v1/workspaces/{workspaceId}/personal-keys/{keyId}/revoke" \
+  "/v1/workspaces/$WS/personal-keys/$PERSONAL_KEY_ID/revoke" 200 "" "$ACCESS"
+guard_jq '.status == "revoked" and (.revokedAtMs | type) == "number"' "the key is revoked"
+
 # ---------------------------------------------------------------------------
 # work host 레지스트리 — 등록 · 서명 하트비트 · 폴링 목록
 # ---------------------------------------------------------------------------

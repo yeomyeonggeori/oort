@@ -116,6 +116,11 @@ pub struct OwnerOnlyScope {
     /// connections need a new pairing, so no "다시 열면" sentence is true for
     /// them and none is posted.
     pub reconnectable: bool,
+    /// #3396 (ADR-0147 증보 2026-10-03): this `owner_only` agent's brain is its
+    /// owner's personal API key, not a subscription. The operator's
+    /// subscription kill switch (`subscription_agents_enabled`) does not apply
+    /// to it — it governs subscription CLIs, and a personal key is neither.
+    pub uses_owner_key: bool,
 }
 
 /// The three sentences (ADR-0193 D4·D5·D6).
@@ -188,7 +193,7 @@ pub fn owner_only_gate(
     if author_member_id != scope.owner_member_id {
         return Some(SubscriptionNoticeKind::NonOwner);
     }
-    if !subscription_agents_enabled {
+    if !subscription_agents_enabled && !scope.uses_owner_key {
         return Some(SubscriptionNoticeKind::Disabled);
     }
     None
@@ -414,6 +419,10 @@ pub enum AgentBrain {
     External,
     /// Follows the team's 「기본 AI」 row (`model_source = 'instance_default'`).
     InstanceDefault,
+    /// The owner's personal API key issued by the organisation (#3396, ADR-0147
+    /// 증보 2026-10-03): `owner_only` + `agent.uses_owner_key`. Run by the
+    /// server worker on that key only.
+    PersonalKey,
 }
 
 impl AgentBrain {
@@ -423,6 +432,7 @@ impl AgentBrain {
             Self::TeamKey => "team_key",
             Self::External => "external",
             Self::InstanceDefault => "instance_default",
+            Self::PersonalKey => "personal_key",
         }
     }
 }
@@ -433,15 +443,22 @@ pub const CALLABLE_BY_EVERYONE: &str = "everyone";
 
 /// Pure derivation of [`AgentBrain`]. `owner_only` wins over everything: a
 /// subscription agent is also hosted, and calling it `external` would hide the
-/// one rule (only the owner may call) the hub exists to show.
+/// one rule (only the owner may call) the hub exists to show. Within
+/// `owner_only` the stored brain kind (`uses_owner_key`, #3396) tells a personal
+/// API key from a subscription.
 pub fn derive_brain(
     invocation_scope: &str,
     is_hosted: bool,
     is_card: bool,
     model_source: &str,
+    uses_owner_key: bool,
 ) -> AgentBrain {
     if invocation_scope == INVOCATION_SCOPE_OWNER_ONLY {
-        AgentBrain::Subscription
+        if uses_owner_key {
+            AgentBrain::PersonalKey
+        } else {
+            AgentBrain::Subscription
+        }
     } else if is_hosted || is_card {
         AgentBrain::External
     } else if model_source == "instance_default" {
@@ -491,7 +508,7 @@ pub struct AgentReadFacts {
     pub agent_member_id: Uuid,
     pub brain: AgentBrain,
     pub callable_by: &'static str,
-    /// `(member id, display name)` — **subscription agents only**.
+    /// `(member id, display name)` — `owner_only` agents only (subscription and personal-key).
     pub owner: Option<(Uuid, String)>,
     /// `Some` only for an agent that dials in; see [`HOSTED_RECENTLY_SEEN_SQL`].
     pub host_online: Option<bool>,
@@ -528,7 +545,7 @@ pub async fn load_agent_read_facts_in_tx(
     use sqlx::Row;
     let sql = format!(
         "SELECT m.id AS agent_id, a.invocation_scope, a.subscription_harness, a.model_source, \
-                a.owner_human_id, \
+                a.owner_human_id, a.uses_owner_key, \
                 COALESCE(a.config->>'execution_mode', '') = 'hosted_dial_in' AS config_hosted, \
                 EXISTS (SELECT 1 FROM hosted_agent_connection hc \
                          WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
@@ -561,12 +578,16 @@ pub async fn load_agent_read_facts_in_tx(
         let hosted = has_connection || config_hosted;
         let owner_id: Option<Uuid> = row.try_get("owner_human_id")?;
         let owner_name: Option<String> = row.try_get("owner_display_name")?;
-        let subscription = scope == INVOCATION_SCOPE_OWNER_ONLY;
+        let owner_only = scope == INVOCATION_SCOPE_OWNER_ONLY;
+        let uses_owner_key: bool = row.try_get("uses_owner_key")?;
+        // A subscription agent dials in from the owner's machine; a personal-key
+        // agent is served by the server worker and has no host to be online.
+        let subscription = owner_only && !uses_owner_key;
         facts.push(AgentReadFacts {
             agent_member_id: row.try_get("agent_id")?,
-            brain: derive_brain(&scope, hosted, is_card, &model_source),
+            brain: derive_brain(&scope, hosted, is_card, &model_source, uses_owner_key),
             callable_by: callable_by(&scope),
-            owner: match (subscription, owner_id, owner_name) {
+            owner: match (owner_only, owner_id, owner_name) {
                 (true, Some(id), Some(name)) => Some((id, name)),
                 _ => None,
             },
@@ -808,6 +829,7 @@ mod tests {
             harness: SubscriptionHarness::ClaudeCode,
             recently_seen: true,
             reconnectable: false,
+            uses_owner_key: false,
         }
     }
 
@@ -916,24 +938,31 @@ mod tests {
     #[test]
     fn brain_is_derived_with_owner_only_first() {
         assert_eq!(
-            derive_brain("owner_only", true, false, "agent"),
+            derive_brain("owner_only", true, false, "agent", false),
             AgentBrain::Subscription,
             "a subscription agent is hosted too; it must not read as external"
         );
+        // #3396 — within owner_only the stored brain kind decides, and a
+        // personal-key agent is never read as external or team_key.
         assert_eq!(
-            derive_brain("workspace", true, false, "agent"),
+            derive_brain("owner_only", false, false, "agent", true),
+            AgentBrain::PersonalKey
+        );
+        assert_eq!(AgentBrain::PersonalKey.as_str(), "personal_key");
+        assert_eq!(
+            derive_brain("workspace", true, false, "agent", false),
             AgentBrain::External
         );
         assert_eq!(
-            derive_brain("workspace", false, true, "agent"),
+            derive_brain("workspace", false, true, "agent", false),
             AgentBrain::External
         );
         assert_eq!(
-            derive_brain("workspace", false, false, "instance_default"),
+            derive_brain("workspace", false, false, "instance_default", false),
             AgentBrain::InstanceDefault
         );
         assert_eq!(
-            derive_brain("workspace", false, false, "agent"),
+            derive_brain("workspace", false, false, "agent", false),
             AgentBrain::TeamKey
         );
         assert_eq!(callable_by("owner_only"), "owner_only");
