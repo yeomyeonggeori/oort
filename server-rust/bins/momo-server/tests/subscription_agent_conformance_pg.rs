@@ -29,6 +29,7 @@
 //! | `claude_registration_is_paused_by_default_and_codex_is_not` (#3397 결재) | claude_code → 409 `claude_subscription_agent_paused`, 0 rows; codex → 201; rows report `brainUnavailableReason` only for Claude while off | `claude_enabled` gate in `register`, `AgentReadFacts::unavailable_reason` |
 //! | `the_legacy_create_route_honours_the_claude_opt_in_too` (review F1) | `POST …/hosted-agent-connections` with claude_code → 409 coded, 0 rows; codex → 201 | Claude check in `hosted_agent_connections::create` |
 //! | `an_existing_claude_subscription_agent_is_not_driven_until_the_instance_opts_in` (#3397 결재) | agent registered before the flag: mention/work request/thread reply/Agent Port → refused with `claude_subscription_agent_paused` + one notice; Codex agent unaffected; flag on → delivered | `owner_only_gate` Claude arm, `tool_view_for` Claude arm, `agent_runs::create` Claude check |
+//! | `the_claude_pause_also_covers_welcome_dm_state_and_queued_work` (#3397 review M3) | welcome speaker, DM delivery state, work queued while ON not claimable while OFF | `load_welcome_agent_in_tx` Claude predicate, `hosted_dm_delivery` Claude arm, `tool_view_for` Claude arm |
 //! | `a_guest_sees_neither_the_owner_nor_liveness_of_an_agent_it_shares` (review F2) | guest roster: brain/callableBy yes; owner/hostOnline no when owner is not visible | guest narrowing in `roster` |
 //! | `a_registered_but_unconnected_subscription_agent_is_never_a_worker_job` (#2924/#2940 regression) | owner call to a freshly registered agent → 0 jobs | `OR a.invocation_scope = 'owner_only'` hosted predicates |
 
@@ -1211,6 +1212,9 @@ async fn an_existing_claude_subscription_agent_is_not_driven_until_the_instance_
     let client = reqwest::Client::new();
     let mention = format!("@{} 해 줘", f.agent_handle);
 
+    // Baseline BEFORE the mention, so the mention's own fan-out is compared too.
+    let events_before = inbox_message_events(&su, &f).await;
+
     // Mention by the owner: no job, a stable reason, one user-facing sentence.
     send(
         &client,
@@ -1222,6 +1226,11 @@ async fn an_existing_claude_subscription_agent_is_not_driven_until_the_instance_
         None,
     )
     .await;
+    assert_eq!(
+        inbox_message_events(&su, &f).await,
+        events_before,
+        "the mention itself reaches no inbox"
+    );
     assert_eq!(
         jobs(&su, &f).await,
         0,
@@ -1244,7 +1253,7 @@ async fn an_existing_claude_subscription_agent_is_not_driven_until_the_instance_
     );
 
     // Thread reply / plain message: not an inbox event either.
-    let events = inbox_message_events(&su, &f).await;
+    let events = events_before;
     send(
         &client,
         &paused,
@@ -1287,6 +1296,104 @@ async fn an_existing_claude_subscription_agent_is_not_driven_until_the_instance_
     assert!(!list_tools(&client, &on, &f.bearer).await.is_empty());
     send(&client, &on, &f, &f.owner_jwt, f.channel, &mention, None).await;
     assert_eq!(jobs(&su, &f).await, 1, "flag on → delivered");
+}
+
+// ---------------------------------------------------------------------------
+// #3397 review M3 — the remaining doors of the Claude pause
+// ---------------------------------------------------------------------------
+
+async fn claimed_job_count(client: &reqwest::Client, base: &str, bearer: &str) -> usize {
+    let (_status, body) = claim_jobs(client, base, bearer).await;
+    body["result"]["structuredContent"]["jobs"]
+        .as_array()
+        .map_or(0, Vec::len)
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3397-*)"]
+async fn the_claude_pause_also_covers_welcome_dm_state_and_queued_work() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su).await;
+    let app = momo_app_pool().await;
+    let client = reqwest::Client::new();
+    let on = start_server_with(app.clone(), true, true).await;
+    let paused = start_server_with(app.clone(), true, false).await;
+
+    // ---- welcome speaker: the owner is welcomed by their Claude agent only
+    // while the Claude opt-in is on.
+    let resolve = |claude_enabled: bool| {
+        let app = app.clone();
+        let (workspace, owner) = (f.workspace, f.owner);
+        async move {
+            momo_db::with_tenant_tx(&app, workspace, move |conn| {
+                Box::pin(async move {
+                    momo_agent::resolve_welcome_target_in_tx(
+                        conn,
+                        workspace,
+                        true,
+                        None,
+                        owner,
+                        true,
+                        claude_enabled,
+                    )
+                    .await
+                })
+            })
+            .await
+            .unwrap()
+            .map(|target| target.agent_member_id)
+        }
+    };
+    assert_eq!(resolve(true).await, Some(f.agent), "positive control");
+    assert_eq!(resolve(false).await, None, "Claude paused → no welcome");
+
+    // ---- the owner's 1:1 DM delivery state
+    let owner_dm = insert_channel(&su, f.workspace, "dm", None).await;
+    join(&su, f.workspace, owner_dm, f.owner).await;
+    join(&su, f.workspace, owner_dm, f.agent).await;
+    let dm_state = |base: String| {
+        let client = client.clone();
+        let (workspace, jwt) = (f.workspace, f.owner_jwt.clone());
+        async move {
+            let body: Value = client
+                .get(format!(
+                    "{base}/v1/workspaces/{workspace}/channels/{owner_dm}/agent-dm-delivery"
+                ))
+                .bearer_auth(jwt)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            body["state"].as_str().map(str::to_string)
+        }
+    };
+    assert_eq!(
+        dm_state(paused.clone()).await.as_deref(),
+        Some("claude_subscription_agent_paused")
+    );
+    assert_ne!(
+        dm_state(on.clone()).await.as_deref(),
+        Some("claude_subscription_agent_paused"),
+        "positive control"
+    );
+
+    // ---- work queued while ON is not claimable while OFF, and is again ON
+    let mention = format!("@{} 해 줘", f.agent_handle);
+    send(&client, &on, &f, &f.owner_jwt, f.channel, &mention, None).await;
+    assert_eq!(jobs(&su, &f).await, 1, "queued while the opt-in was on");
+    assert_eq!(
+        claimed_job_count(&client, &paused, &f.bearer).await,
+        0,
+        "a job queued earlier is not handed over while paused"
+    );
+    assert_eq!(
+        claimed_job_count(&client, &on, &f.bearer).await,
+        1,
+        "…and is handed over once the opt-in is on (no expiry drops it)"
+    );
 }
 
 // ---------------------------------------------------------------------------

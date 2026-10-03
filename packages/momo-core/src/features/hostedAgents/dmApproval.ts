@@ -186,7 +186,8 @@ export type AgentDmDeliveryState =
   | "not_approvable"
   | "connection_unavailable"
   | "delivery_disabled"
-  | "subscription_disabled";
+  | "subscription_disabled"
+  | "claude_subscription_agent_paused";
 
 const DELIVERY_STATES: readonly AgentDmDeliveryState[] = [
   "not_hosted",
@@ -197,6 +198,7 @@ const DELIVERY_STATES: readonly AgentDmDeliveryState[] = [
   "connection_unavailable",
   "delivery_disabled",
   "subscription_disabled",
+  "claude_subscription_agent_paused",
 ];
 
 export interface AgentDmDelivery {
@@ -247,5 +249,7 @@ export function dmComposerHint(
       return "이 서버에서 외부 에이전트 전달이 꺼져 있어 답하지 않습니다";
     case "subscription_disabled":
       return "이 서버에서 구독 에이전트가 꺼져 있어 답하지 않습니다";
+    case "claude_subscription_agent_paused":
+      return "Claude 구독 에이전트는 Anthropic 확인 중이라 지금은 답하지 않습니다";
   }
 }

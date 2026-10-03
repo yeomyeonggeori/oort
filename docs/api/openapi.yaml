@@ -12505,7 +12505,7 @@ components:
         state:
           type: string
           nullable: true
-          enum: [not_hosted, open, awaiting_owner, owner_only, not_approvable, connection_unavailable, delivery_disabled, subscription_disabled, null]
+          enum: [not_hosted, open, awaiting_owner, owner_only, not_approvable, connection_unavailable, delivery_disabled, subscription_disabled, claude_subscription_agent_paused, null]
 
     CreateHostedAgentConnectionRequest:
       type: object
