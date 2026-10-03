@@ -1,3 +1,13 @@
+import {
+  AI_HUB_ACCOUNTS_COPY,
+  AI_HUB_COPY,
+  HARNESS_LABEL,
+  mySubscriptionAgents,
+  subscriptionAgentStatus,
+  subscriptionAgentText,
+  type AiHarness,
+} from '@momo/core/features/ai/aiHubModel';
+import {agentMembers} from '@momo/core/features/agents/hubModel';
 import type {AiConnectLine} from '@momo/core/features/commands/registry';
 import {
   fetchProviderLink,
@@ -43,6 +53,8 @@ import {
 } from 'react-native';
 
 import {BAR_CONTROL_MAX_SCALE, Sentence} from '../../design/atoms';
+import {useHostedConnections} from '../hostedAgents/queries';
+import {useDirectory} from '../workspace/queries';
 import {useKeyboardShown} from '../../lib/useKeyboardShown';
 import {CARD_ICONS} from '../../design/icons/cardIcons';
 import {HOME_ICONS, SHELL_ICONS} from '../../design/icons';
@@ -105,7 +117,7 @@ export const AI_CONNECT_CARD_COPY = {
    * 아직 폰에 오지 않으므로, 보여 주지 않는 상태를 약속하지 않는다(brief §3.6
    * 「그 전에는 절 자체를 『맥에서 확인』 한 줄로」).
    */
-  mineLine: '구독 로그인과 상태 확인은 맥에서 해요.',
+  mineLine: AI_HUB_COPY.phoneAccountsNotice,
   teamHead: '팀 연결 · 이 서버',
   teamLoading: '팀 연결을 불러오는 중이에요.',
   teamDenied: '팀 키는 운영자만 바꾸고 확인할 수 있어요.',
@@ -258,10 +270,13 @@ export function AiConnectCard({
   offline,
   onClose,
   foldForKey = false,
+  mine,
 }: {
   line: AiConnectLine | null;
   offline: boolean;
   onClose: () => void;
+  /** 내가 만든 구독 에이전트를 읽을 워크스페이스와 나(AIH-4). 없으면 맥 안내 한 줄만. */
+  mine?: MineAgentsScope;
   /**
    * 입력창의 키 붙여넣기 안내가 서 있다(design-review #2945 R3-B1). 그동안 카드를
    * **통째로 숨긴다**(내리지 않는다 — 절의 상태를 지킨다). 큰 글씨 SE 에서는 접힌
@@ -331,7 +346,7 @@ export function AiConnectCard({
         variant="local"
         header={header}
         testID="ai-connect-card">
-        <AiConnectCardBody line={line} offline={offline} />
+        <AiConnectCardBody line={line} offline={offline} mine={mine} />
       </AiConnectCardShell>
     </View>
   );
@@ -346,9 +361,11 @@ export function AiConnectCard({
 export function AiConnectCardBody({
   line,
   offline,
+  mine,
 }: {
   line: AiConnectLine | null;
   offline: boolean;
+  mine?: MineAgentsScope;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
@@ -375,6 +392,7 @@ export function AiConnectCardBody({
               {AI_CONNECT_CARD_COPY.mineLine}
             </Sentence>
           </View>
+          {mine ? <AiConnectMineAgents scope={mine} /> : null}
         </View>
       ) : null}
       {showTeam ? <AiConnectTeamSection offline={offline} /> : null}
@@ -386,6 +404,58 @@ export function AiConnectCardBody({
         />
         <Sentence style={styles.footText}>{AI_CONNECT_CARD_COPY.foot}</Sentence>
       </View>
+    </View>
+  );
+}
+
+export interface MineAgentsScope {
+  workspaceId: string;
+  /** 보는 사람의 사람 멤버 id. */
+  memberId: string;
+}
+
+const MINE_HARNESSES: readonly AiHarness[] = ['claude_code', 'codex'];
+
+/**
+ * 내가 만든 구독 에이전트의 서버 상태(읽기 전용, AIH-4 #3399). 웹 「내 AI 계정」과 같은
+ * 코어 문장이다: Claude는 보수 모드(#3397) 동안 「문의 중」이고 부를 수 있다고 하지 않는다.
+ * 못 읽으면 없다고 하지 않고 줄을 만들지 않는다.
+ */
+export function AiConnectMineAgents({scope}: {scope: MineAgentsScope}): React.JSX.Element | null {
+  const styles = useStyles(buildStyles);
+  const directory = useDirectory(scope.workspaceId);
+  const hosted = useHostedConnections(scope.workspaceId);
+  if (directory.isPending || hosted.isPending || directory.isError || hosted.isError) {
+    return null;
+  }
+  const agents = mySubscriptionAgents(
+    agentMembers(directory.directory.members),
+    hosted.data,
+    scope.memberId,
+  );
+  return (
+    <View testID="ai-connect-card-mine-agents">
+      <Text style={styles.sectionHead} accessibilityRole="header">
+        {AI_HUB_ACCOUNTS_COPY.phone.myAgentsHead}
+      </Text>
+      {MINE_HARNESSES.map(harness => {
+        const agent = agents.find(a => a.harness === harness) ?? null;
+        const status = subscriptionAgentStatus(harness, agent !== null);
+        const head = [
+          HARNESS_LABEL[harness],
+          subscriptionAgentText(agent?.name),
+          status.chip?.text,
+        ]
+          .filter(Boolean)
+          .join(' · ');
+        return (
+          <View key={harness} style={styles.note} testID={`ai-connect-card-mine-${harness}`}>
+            <Sentence style={styles.noteText}>
+              {status.detail ? `${head}. ${status.detail}` : head}
+            </Sentence>
+          </View>
+        );
+      })}
     </View>
   );
 }

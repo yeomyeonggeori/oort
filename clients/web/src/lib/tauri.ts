@@ -807,6 +807,107 @@ export async function openTerminalApp(): Promise<boolean> {
   }
 }
 
+// ---- sign-in -> agent registration (#3389, ADR-0190 D3-h) -------------------
+
+/** This install's id for the server's idempotency key (`agent_port_device`). */
+export interface AgentPortDevice {
+  deviceId: string;
+  deviceLabel: string | null;
+}
+
+/** Why the shell left the CLI step to the person. Mirrors `agent_port.rs` `ManualReason`. */
+export type AgentPortManualReason =
+  | "unsupported_harness"
+  | "unsupported_platform"
+  | "endpoint_not_allowed"
+  | "helper_path_not_allowed"
+  | "cli_missing"
+  | "cli_failed"
+  | "store_failed";
+
+export type AgentPortConnectOutcome =
+  | { outcome: "connected" }
+  | { outcome: "manual"; reason: AgentPortManualReason };
+
+const MANUAL_REASONS: readonly AgentPortManualReason[] = [
+  "unsupported_harness",
+  "unsupported_platform",
+  "endpoint_not_allowed",
+  "helper_path_not_allowed",
+  "cli_missing",
+  "cli_failed",
+  "store_failed",
+];
+
+/** The shell's per-install id. `null` in a browser tab or when the call failed. */
+export async function agentPortDevice(): Promise<AgentPortDevice | null> {
+  if (!IS_TAURI) return null;
+  try {
+    const raw = await invoke<{ deviceId?: unknown; deviceLabel?: unknown }>("agent_port_device");
+    if (typeof raw?.deviceId !== "string") return null;
+    return {
+      deviceId: raw.deviceId,
+      deviceLabel: typeof raw.deviceLabel === "string" ? raw.deviceLabel : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Hand the one-time connection value to the shell, which stores it in the app's
+ * own store and runs the one allowlisted CLI command (`agent_port.rs`). The value
+ * crosses this IPC call once and is never put in an argument by the shell. Any
+ * failure — a browser tab, a refused request, a thrown error — reads as
+ * `manual`, so the caller shows the person the manual path.
+ *
+ * Nothing here logs: not the value, not the error.
+ */
+export async function agentPortConnect(request: {
+  harness: "claude";
+  endpoint: string;
+  agentId: string;
+  credential: string;
+}): Promise<AgentPortConnectOutcome> {
+  if (!IS_TAURI) return { outcome: "manual", reason: "unsupported_platform" };
+  try {
+    const raw = await invoke<{ outcome?: unknown; reason?: unknown }>("agent_port_connect", {
+      request,
+    });
+    if (raw?.outcome === "connected") return { outcome: "connected" };
+    const reason = MANUAL_REASONS.find((known) => known === raw?.reason);
+    return { outcome: "manual", reason: reason ?? "cli_failed" };
+  } catch {
+    return { outcome: "manual", reason: "cli_failed" };
+  }
+}
+
+/**
+ * ADR-0193 D16: the active value replaces the stored one after the owner's
+ * `confirm`. No CLI command. `false` = there was no app-made entry for that agent.
+ */
+export async function agentPortReplaceCredential(request: {
+  agentId: string;
+  credential: string;
+}): Promise<boolean> {
+  if (!IS_TAURI) return false;
+  try {
+    return (await invoke<boolean>("agent_port_replace_credential", { request })) === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Disconnect: the shell runs `mcp remove` only for a setting the app added. */
+export async function agentPortDisconnect(agentId: string): Promise<boolean> {
+  if (!IS_TAURI) return false;
+  try {
+    return (await invoke<boolean>("agent_port_disconnect", { request: { agentId } })) === true;
+  } catch {
+    return false;
+  }
+}
+
 // ---- native notifications ---------------------------------------------------
 
 /** Same vocabulary as the browser Notification API, minus the prompt variants. */

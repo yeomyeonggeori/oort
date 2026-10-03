@@ -790,6 +790,72 @@ fn tauri_grants_the_device_key_commands_to_the_local_main_webview_only() {
     }
 }
 
+const AGENT_PORT_COMMANDS: [&str; 4] = [
+    "agent_port_device",
+    "agent_port_connect",
+    "agent_port_replace_credential",
+    "agent_port_disconnect",
+];
+const AGENT_PORT_PERMISSIONS: [&str; 4] = [
+    "allow-agent-port-device",
+    "allow-agent-port-connect",
+    "allow-agent-port-replace-credential",
+    "allow-agent-port-disconnect",
+];
+
+/// Tauri's resolver: the sign-in -> agent registration commands (#3389)
+/// answer the main webview's bundled origin only. A page from the network —
+/// the team server's origin included — must never reach the hand-off of the
+/// connection value to the CLI, and a child webview must not either.
+#[test]
+fn tauri_grants_the_agent_port_commands_to_the_local_main_webview_only() {
+    let mut context = crate::context();
+    let authority = context.runtime_authority_mut();
+    let local = tauri::ipc::Origin::Local;
+    for command in AGENT_PORT_COMMANDS {
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &local)
+                .is_some(),
+            "{command} local main"
+        );
+        for url in [
+            "https://evil.example/",
+            "https://oort-team.up.railway.app/",
+            "http://127.0.0.1:8080/",
+        ] {
+            let remote = tauri::ipc::Origin::Remote {
+                url: url.parse().unwrap(),
+            };
+            assert!(
+                authority
+                    .resolve_access(command, "main", "main", &remote)
+                    .is_none(),
+                "{command} from {url}"
+            );
+        }
+        assert!(authority
+            .resolve_access(command, "other", "other", &local)
+            .is_none());
+        assert!(authority
+            .resolve_access(command, "main", "embedded", &local)
+            .is_none());
+    }
+    let blocks = handler_blocks(LIB_RS);
+    let desktop = blocks
+        .iter()
+        .find(|b| b.contains(&"updater_check".to_string()))
+        .unwrap();
+    let mobile = blocks
+        .iter()
+        .find(|b| !b.contains(&"updater_check".to_string()))
+        .unwrap();
+    for command in AGENT_PORT_COMMANDS {
+        assert!(desktop.iter().any(|c| c == command), "{command}");
+        assert!(!mobile.iter().any(|c| c == command), "{command}");
+    }
+}
+
 const HARNESS_PROFILE_COMMANDS: [&str; 5] = [
     "harness_profile_list",
     "harness_profile_create",
@@ -900,6 +966,7 @@ fn only_the_local_terminal_capability_grants_pty_and_none_is_remote() {
     assert_eq!(
         names,
         [
+            "agent-port.json",
             "default.json",
             "device-key.json",
             "git-read.json",
@@ -935,6 +1002,25 @@ fn only_the_local_terminal_capability_grants_pty_and_none_is_remote() {
             );
         } else {
             assert!(git.is_empty(), "{name} grants {git:?}");
+        }
+        let agent_port: Vec<&str> = permission_ids(cap)
+            .into_iter()
+            .filter(|p| p.contains("agent-port"))
+            .collect();
+        if name == "agent-port.json" {
+            assert_eq!(agent_port, AGENT_PORT_PERMISSIONS);
+            assert_eq!(
+                permission_ids(cap).len(),
+                AGENT_PORT_PERMISSIONS.len(),
+                "agent-port.json grants only the agent port commands"
+            );
+            assert_eq!(cap["webviews"], serde_json::json!(["main"]));
+            assert!(
+                cap.get("windows").is_none(),
+                "a window grant covers child webviews"
+            );
+        } else {
+            assert!(agent_port.is_empty(), "{name} grants {agent_port:?}");
         }
         let profile: Vec<&str> = permission_ids(cap)
             .into_iter()

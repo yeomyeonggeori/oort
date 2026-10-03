@@ -538,7 +538,7 @@ describe("구독 추가: 폴더 → 모달(그 프로필) → 취소면 폴더 �
     expect(tauri.harnessProfileCreate).not.toHaveBeenCalled();
   });
 
-  it("설치된 CLI가 없으면 설치 안내가 있는 AI 연결 화면으로 간다", async () => {
+  it("설치된 CLI가 없으면 설치 안내가 있는 구독 에이전트 창이 선다 (#3389)", async () => {
     shell.probes = [
       { id: "claude", installed: false, auth: "unknown" },
       { id: "codex", installed: false, auth: "unknown" },
@@ -548,7 +548,8 @@ describe("구독 추가: 폴더 → 모달(그 프로필) → 취소면 폴더 �
       const el = await until("subscription-entry-open");
       await act(async () => el.click());
     }
-    expect(window.location.hash).toBe("#/ai-connect?from=settings");
+    await until("subscription-start-dialog");
+    expect(window.location.hash).not.toContain("ai-connect");
     expect(q("add-subscription-dialog")).toBeNull();
   });
 });
@@ -617,10 +618,17 @@ describe("교차: 설정·채팅 카드·온보딩이 같은 로그인 모달을
   it("세 표면 모두 같은 모듈의 HarnessLoginDialog 를 그린다", () => {
     expect(Object.keys(CROSS)).toHaveLength(3);
     for (const [name, src] of Object.entries(CROSS)) {
-      expect(src, name).toMatch(
-        /\bHarnessLoginDialog\b[^;]*from "(@\/features\/welcome\/harnessLogin|\.\/harnessLogin)\/HarnessLoginDialog"/,
-      );
-      expect(src, name).toContain("<HarnessLoginDialog");
+      // 설정은 「에이전트로 만들기」 맥락을 붙이는 얇은 껍데기(#3389)를 거쳐 같은
+      // 모듈을 그린다. 껍데기도 같은 HarnessLoginDialog 하나만 그린다.
+      const direct =
+        /\bHarnessLoginDialog\b[^;]*from "(@\/features\/welcome\/harnessLogin|\.\/harnessLogin)\/HarnessLoginDialog"/.test(
+          src,
+        ) && src.includes("<HarnessLoginDialog");
+      const viaShell =
+        /RegisterAwareLoginDialog\b[^;]*from "@\/features\/welcome\/harnessLogin\/RegisterAwareLoginDialog"/.test(
+          src,
+        ) && src.includes("<RegisterAwareLoginDialog");
+      expect(direct || viaShell, name).toBe(true);
       // 스스로 로그인 명령을 만들지 않는다.
       expect(/kind:\s*"login"/.test(src), name).toBe(false);
     }

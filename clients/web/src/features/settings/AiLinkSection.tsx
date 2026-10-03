@@ -123,7 +123,7 @@ function loopbackHint(error: unknown, url: string): string | null {
   return loopbackProviderGuidance();
 }
 
-function LoopbackRefusalBanner({
+export function LoopbackRefusalBanner({
   error,
   url,
   serverSentence,
@@ -922,7 +922,7 @@ const PROBE_HEAD_TONE: Record<"ok" | "bad" | "mute", string> = {
  * 연결 카드와 같은 코어 `teamCheckResult`다. 예비 provider가 있는 서버(ADR-0135 D1
  * `entries[]`가 둘 이상)면 칸마다의 표가 그 밑에 선다.
  */
-function ProbeAnswer({
+export function ProbeAnswer({
   probe,
   link,
   chainPending,

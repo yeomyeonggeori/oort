@@ -32,14 +32,7 @@ function PaneHead({ id, children }: { id: AiHubSectionId; children?: ReactNode }
   );
 }
 
-export function AiAccountsPane({ offline, workspaceId }: PaneProps) {
-  return (
-    <div className="flex min-w-0 flex-col">
-      <PaneHead id="accounts" />
-      <AiLinkSection offline={offline} workspaceId={workspaceId} heading={false} />
-    </div>
-  );
-}
+export { AiAccountsPane } from "./AiAccountsPane";
 
 export function AiTeamKeysPane({ offline, workspaceId }: PaneProps) {
   return (
