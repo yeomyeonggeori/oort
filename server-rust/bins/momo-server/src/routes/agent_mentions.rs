@@ -103,8 +103,9 @@ use momo_agent::{
 use momo_agent::{
     lock_and_find_recent_notice_in_tx, notice_root, notice_thread_key, owner_only_gate,
     subscription_notice_body, subscription_notice_props, SubscriptionNoticeKind,
-    SKIP_OWNER_ONLY_NON_OWNER, SKIP_SUBSCRIPTION_AGENTS_DISABLED, SUBSCRIPTION_NOTICE_AUDIT_SCHEMA,
-    SUBSCRIPTION_NOTICE_POSTED_ACTION, SUBSCRIPTION_NOTICE_THROTTLED_ACTION,
+    CLAUDE_SUBSCRIPTION_AGENT_PAUSED, SKIP_OWNER_ONLY_NON_OWNER, SKIP_SUBSCRIPTION_AGENTS_DISABLED,
+    SUBSCRIPTION_NOTICE_AUDIT_SCHEMA, SUBSCRIPTION_NOTICE_POSTED_ACTION,
+    SUBSCRIPTION_NOTICE_THROTTLED_ACTION,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{DbError, PgConnection};
@@ -153,6 +154,10 @@ pub(crate) struct MentionSend<'a> {
     /// ADR-0193 D6 (#2815) — `AgentPortConfig::subscription_agents_enabled`,
     /// the operator's kill switch for `owner_only` (subscription) agents.
     pub subscription_agents_enabled: bool,
+    /// #3397 (결재 2026-10-03) — `AgentPortConfig::claude_subscription_agents_enabled`.
+    /// Off (the default) means a Claude subscription agent is not dispatched
+    /// to, whenever it was registered.
+    pub claude_subscription_agents_enabled: bool,
     pub context_max_messages: i64,
     /// ADR-0134 D1's per-request tier, already shape-validated by the route
     /// before the transaction opened. `None` = the caller chose nothing and the
@@ -286,9 +291,11 @@ pub(crate) async fn route_agent_mentions_in_tx(
             agent.owner_only.as_ref(),
             send.author_member_id,
             send.subscription_agents_enabled,
+            send.claude_subscription_agents_enabled,
         ) {
             let reason = match kind {
                 SubscriptionNoticeKind::NonOwner => SKIP_OWNER_ONLY_NON_OWNER,
+                SubscriptionNoticeKind::ClaudePaused => CLAUDE_SUBSCRIPTION_AGENT_PAUSED,
                 _ => SKIP_SUBSCRIPTION_AGENTS_DISABLED,
             };
             skip(&mut *conn, &send, &trigger, agent, *addressing, reason).await?;

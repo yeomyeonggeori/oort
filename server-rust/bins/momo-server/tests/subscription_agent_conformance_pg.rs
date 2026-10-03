@@ -28,6 +28,7 @@
 //! | `register_is_tenant_scoped_and_survives_a_dead_agent_and_a_race` (#3392) | other tenant, dead agent frees its slot, 4 concurrent → 1 row | advisory lock + migration 116 index |
 //! | `claude_registration_is_paused_by_default_and_codex_is_not` (#3397 결재) | claude_code → 409 `claude_subscription_agent_paused`, 0 rows; codex → 201; rows report `brainUnavailableReason` only for Claude while off | `claude_enabled` gate in `register`, `AgentReadFacts::unavailable_reason` |
 //! | `the_legacy_create_route_honours_the_claude_opt_in_too` (review F1) | `POST …/hosted-agent-connections` with claude_code → 409 coded, 0 rows; codex → 201 | Claude check in `hosted_agent_connections::create` |
+//! | `an_existing_claude_subscription_agent_is_not_driven_until_the_instance_opts_in` (#3397 결재) | agent registered before the flag: mention/work request/thread reply/Agent Port → refused with `claude_subscription_agent_paused` + one notice; Codex agent unaffected; flag on → delivered | `owner_only_gate` Claude arm, `tool_view_for` Claude arm, `agent_runs::create` Claude check |
 //! | `a_guest_sees_neither_the_owner_nor_liveness_of_an_agent_it_shares` (review F2) | guest roster: brain/callableBy yes; owner/hostOnline no when owner is not visible | guest narrowing in `roster` |
 //! | `a_registered_but_unconnected_subscription_agent_is_never_a_worker_job` (#2924/#2940 regression) | owner call to a freshly registered agent → 0 jobs | `OR a.invocation_scope = 'owner_only'` hosted predicates |
 
@@ -57,6 +58,7 @@ const OFFLINE_QUEUED_BODY: &str =
     "지금은 오프라인이에요. 맥에서 Claude Code를 다시 열면 이어서 답할게요.";
 const OFFLINE_NOT_QUEUED_BODY: &str =
     "지금은 오프라인이에요. 맥에서 Claude Code를 다시 열면 답할 수 있어요.";
+const CLAUDE_PAUSED_BODY: &str = "Claude 구독으로 대신 답하는 기능은 Anthropic 확인이 끝날 때까지 쉬고 있어요. 내 작업에서 직접 쓰거나, 설정 › AI 연결에서 API 키로 연결할 수 있어요.";
 const DISABLED_BODY: &str =
     "지금은 이 서버에서 구독 에이전트를 쓸 수 없어요. 설정 › AI 연결에서 API 키로 연결할 수 있어요.";
 
@@ -295,6 +297,10 @@ async fn join(pool: &PgPool, workspace: Uuid, channel: Uuid, member: Uuid) {
 }
 
 async fn seed(pool: &PgPool) -> Fixture {
+    seed_with_harness(pool, "claude_code").await
+}
+
+async fn seed_with_harness(pool: &PgPool, harness: &str) -> Fixture {
     let workspace = Uuid::new_v4();
     sqlx::query("INSERT INTO workspace(id, slug, name) VALUES($1,$2,$2)")
         .bind(workspace)
@@ -330,11 +336,12 @@ async fn seed(pool: &PgPool) -> Fixture {
     .expect("agent row");
     // The one transition migration 089 allows: workspace → owner_only.
     sqlx::query(
-        "UPDATE agent SET invocation_scope='owner_only', subscription_harness='claude_code' \
+        "UPDATE agent SET invocation_scope='owner_only', subscription_harness=$3 \
          WHERE workspace_id=$1 AND member_id=$2",
     )
     .bind(workspace)
     .bind(agent)
+    .bind(harness)
     .execute(pool)
     .await
     .expect("mark owner_only");
@@ -1187,6 +1194,102 @@ async fn the_kill_switch_stops_every_delivery_and_turning_it_on_resumes() {
 }
 
 // ---------------------------------------------------------------------------
+// #3397 (결재 2026-10-03) — an EXISTING Claude subscription agent is not driven
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3397-*)"]
+async fn an_existing_claude_subscription_agent_is_not_driven_until_the_instance_opts_in() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    // The fixture is an owner_only Claude Code agent that already exists and is
+    // live — registered before the flag, as far as the server can tell.
+    let f = seed(&su).await;
+    let app = momo_app_pool().await;
+    // The subscription switch is ON; only the Claude opt-in is off (the default).
+    let paused = start_server_with(app.clone(), true, false).await;
+    let client = reqwest::Client::new();
+    let mention = format!("@{} 해 줘", f.agent_handle);
+
+    // Mention by the owner: no job, a stable reason, one user-facing sentence.
+    send(
+        &client,
+        &paused,
+        &f,
+        &f.owner_jwt,
+        f.channel,
+        &mention,
+        None,
+    )
+    .await;
+    assert_eq!(
+        jobs(&su, &f).await,
+        0,
+        "paused → the owner's call is not delivered"
+    );
+    assert_eq!(
+        last_skip_reason(&su, &f).await,
+        "claude_subscription_agent_paused"
+    );
+    let posted = notices(&su, &f).await;
+    assert_eq!(
+        posted.len(),
+        1,
+        "refused with a reason, never silently dropped"
+    );
+    assert_eq!(posted[0].0, CLAUDE_PAUSED_BODY);
+    assert!(
+        !posted[0].0.contains(&f.bearer),
+        "the sentence never carries a credential"
+    );
+
+    // Thread reply / plain message: not an inbox event either.
+    let events = inbox_message_events(&su, &f).await;
+    send(
+        &client,
+        &paused,
+        &f,
+        &f.owner_jwt,
+        f.channel,
+        "평범한 말",
+        None,
+    )
+    .await;
+    assert_eq!(inbox_message_events(&su, &f).await, events);
+
+    // The dialled-in runtime can call nothing; a work request names the code.
+    assert!(list_tools(&client, &paused, &f.bearer).await.is_empty());
+    assert_eq!(work_request(&client, &paused, &f, &f.owner_jwt).await, 409);
+
+    // A Codex subscription agent is untouched by the Claude opt-in.
+    let codex = seed_with_harness(&su, "codex").await;
+    assert!(!list_tools(&client, &paused, &codex.bearer).await.is_empty());
+    let codex_mention = format!("@{} 해 줘", codex.agent_handle);
+    send(
+        &client,
+        &paused,
+        &codex,
+        &codex.owner_jwt,
+        codex.channel,
+        &codex_mention,
+        None,
+    )
+    .await;
+    assert_eq!(
+        jobs(&su, &codex).await,
+        1,
+        "Codex is delivered while Claude is paused"
+    );
+    assert_eq!(jobs(&su, &f).await, 0, "…and Claude still is not");
+
+    // Opted in: Claude is delivered again.
+    let on = start_server_with(app, true, true).await;
+    assert!(!list_tools(&client, &on, &f.bearer).await.is_empty());
+    send(&client, &on, &f, &f.owner_jwt, f.channel, &mention, None).await;
+    assert_eq!(jobs(&su, &f).await, 1, "flag on → delivered");
+}
+
+// ---------------------------------------------------------------------------
 // ⑥ — the notice is one write on the single path, and RLS bounds it
 // ---------------------------------------------------------------------------
 
@@ -1387,7 +1490,7 @@ async fn the_welcome_opener_never_spends_someone_elses_subscription() {
             momo_db::with_tenant_tx(&app, workspace, move |conn| {
                 Box::pin(async move {
                     momo_agent::resolve_welcome_target_in_tx(
-                        conn, workspace, true, None, member, enabled,
+                        conn, workspace, true, None, member, enabled, true,
                     )
                     .await
                 })
@@ -1614,7 +1717,8 @@ async fn an_owner_call_to_a_subscription_agent_with_no_connection_row_is_never_a
     let (workspace, owner) = (f.workspace, f.owner);
     let target = momo_db::with_tenant_tx(&app, workspace, move |conn| {
         Box::pin(async move {
-            momo_agent::resolve_welcome_target_in_tx(conn, workspace, true, None, owner, true).await
+            momo_agent::resolve_welcome_target_in_tx(conn, workspace, true, None, owner, true, true)
+                .await
         })
     })
     .await

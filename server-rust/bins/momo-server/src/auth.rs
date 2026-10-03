@@ -253,6 +253,8 @@ pub(crate) async fn authenticate_and_admit_agent_port_credential(
     let gateway_enabled = state.agent_gateway.enabled();
     let hosted_delivery_enabled = state.agent_port.config.hosted_delivery_enabled;
     let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
+    let claude_subscription_agents_enabled =
+        state.agent_port.config.claude_subscription_agents_enabled;
     let outcome = with_tenant_tx(&state.pool, claimed_workspace, move |conn| {
         Box::pin(async move {
             let (identity, scope_granted, pairing_detection) = if pairing.is_some() {
@@ -578,6 +580,7 @@ pub(crate) async fn authenticate_and_admit_agent_port_credential(
                         gateway_enabled,
                         hosted_delivery_enabled,
                         subscription_agents_enabled,
+                        claude_subscription_agents_enabled,
                     )
                     .await?;
                 }

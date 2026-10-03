@@ -90,11 +90,13 @@ pub fn hosted_dm_delivery(
     one_to_one: bool,
     hosted_delivery_enabled: bool,
     subscription_agents_enabled: bool,
+    claude_subscription_agents_enabled: bool,
 ) -> HostedDmDelivery {
     if let Some(kind) = owner_only_gate(
         agent.owner_only.as_ref(),
         caller_member_id,
         subscription_agents_enabled,
+        claude_subscription_agents_enabled,
     ) {
         return match kind {
             SubscriptionNoticeKind::NonOwner => HostedDmDelivery::OwnerOnly,

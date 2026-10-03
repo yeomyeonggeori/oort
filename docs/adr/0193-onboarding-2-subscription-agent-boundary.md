@@ -9,6 +9,7 @@
 - 증보: ADR-0190 D3(Q4), ADR-0147(Q2), ADR-0185 §5-2·§6(Q6·Q8). 각 파일 끝 「증보 2026-09-26 — 온보딩 2.0」 절이 이 ADR을 가리킨다.
 - 증보(이 ADR): 2026-09-27 AI 계정(#2876, #2816 결재) — D2 로그인 버튼 이름, D3 목록 확장 가리킴, Anthropic 약관 판단. 파일 끝 「증보 2026-09-27 — AI 계정」 절
 - 증보(이 ADR): 2026-10-03 AI 허브 서버 계약(#3392 AIH-2) — D14 에이전트 읽기 계약(`brain`·`callableBy`·`owner`·`hostOnline`·`brainUnavailableReason`), D15 로그인 직후 대행 등록 엔드포인트, D16 연결 값의 두 단계, D17 Claude 구독 에이전트 등록 기본 꺼짐(#3397 결재). 파일 끝 「증보 2026-10-03 — AI 허브 서버 계약」 절. CLI 실행 허용은 ADR-0190 D3-h
+- 증보(이 ADR): 2026-10-03 Claude 구독 에이전트 런타임 차단(#3397) — D18. 같은 날 D17이 미뤄 둔 기존 에이전트의 전달 차단을 닫는다. 파일 끝 「증보 2026-10-03 (2) — Claude 구독 에이전트 런타임 차단」 절
 - 참조: ADR-0162 「증보 2 — hosted 1:1 DM 승인」(2026-09-27, #2915)이 D4의 DM 규칙을 잇는다. 소유자와 자기 구독 에이전트의 1:1 DM은 자동 승인되어 전달되고, 타인 DM 승인은 서버가 거부한다.
 - 관계: ADR-0004(provider 자격 비유입), ADR-0101(에이전트 = 1급 멤버, 봇 래핑 금지), ADR-0180(기기 연결 QR), ADR-0181(웰컴 킥오프, D5 정적 문구 경로), ADR-0182(토스트 금지), ADR-0187(목표 A, 실기기 푸시 필수), ADR-0188(원격 결정자 = 소유자), ADR-0189(DS2 새벽하늘), ADR-0191 D2(공식 바이너리, 토큰 비열람), ADR-0192 D5(로그인이 든 체크포인트는 소유자 1인 것)
 
@@ -280,3 +281,24 @@
 ### 미검증(runtime-unverified)
 - 실제 CLI와의 왕복(로그인 → 등록 → `add-json` → 핸드셰이크 → 확인 → 교체)은 AIH-5가 실기기에서 닫는다. 이 증보는 서버 계약만 검증했다.
 - OpenAI의 계정 공유 정책 원문 확인과 ChatGPT 구독 경로 기록은 #3390에서 따로 한다.
+
+## 증보 2026-10-03 (2) — Claude 구독 에이전트 런타임 차단(D18)
+
+- Status: **Accepted** (2026-10-03 성재 결재, 아래 인용). 보안·정책 경계 변경이며 수용 근거는 이 결재다.
+- 기안: Sonnet 5.5 worker(#3397 engine). UI 표시(「문의 중」 칩)는 #3416이 맡는다.
+- 결재 인용(이슈 #3397, 성재 2026-10-03 AskUserQuestion): 「Claude 구독은 답 오기 전까지 보수적 — 사람이 직접 PTY·공식 Remote Control만 「허용」, oort가 ACP/`claude -p`로 대신 구동하는 @내-claude는 「회색·문의 중」 표시·기본 꺼짐, Anthropic 문의 발송.」
+- 관계: D17(등록 기본 꺼짐)이 「#3397이 구현한다」며 남긴 부분을 닫는다. D4·D5·D6은 풀지 않는다. 근거 판단은 2026-09-27 증보의 약관 판단이다.
+
+### D18. 설정이 off이면 기존 Claude 구독 에이전트에도 전달하지 않고, 이유를 말한다
+- **기준.** 전달 시점마다 에이전트 행에서 판단한다: `invocation_scope = 'owner_only'`이고 `subscription_harness`가 `claude_code`(기록 없음도 같음)이며 `uses_owner_key`가 아닐 때, `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`가 정확히 `true`가 아니면 막는다. 설정이 생기기 전에 등록된 행도 같다(등록 시점·마이그레이션에 의존하지 않는다). Codex와 개인 API 키(`uses_owner_key`) 에이전트는 영향이 없다.
+- **이유 코드.** 읽기 계약의 `brainUnavailableReason`과 같은 `claude_subscription_agent_paused`를 쓴다(D17). 새 코드는 만들지 않았다. 멘션 건너뜀 감사(`agent.mention.skipped`)의 reason, 작업 요청 응답의 `error.code`도 이 값이다.
+- **막는 경로(서버).**
+  1. 멘션·1:1 DM 규칙·스레드 안 멘션: `owner_only_gate`의 새 갈래. 작업(job)을 만들지 않고, D6과 같은 쓰로틀(스레드·사람·문장당 10분 1회)로 에이전트 이름의 한 문장을 남긴다. 「Claude 구독으로 대신 답하는 기능은 Anthropic 확인이 끝날 때까지 쉬고 있어요. 내 작업에서 직접 쓰거나, 설정 › AI 연결에서 API 키로 연결할 수 있어요.」 소유자가 아닌 사람은 기존 D4 문장을 먼저 듣는다.
+  2. 일반 메시지의 hosted 수신함 fan-out, 환영 대사 발화자 선택(`resolve_welcome_target_in_tx`), 에이전트 완료 응답의 fan-out: 대상에서 뺀다.
+  3. 작업 요청(`POST …/agent-runs`): 409 `claude_subscription_agent_paused`.
+  4. 1:1 DM 전달 상태 조회(`hosted_dm_delivery`): `subscription_disabled`로 답한다.
+  5. Agent Port: 켜지기 전 쌓인 작업과 수신함까지 막도록 도구 목록을 비운다(D6의 `tool_view_for`와 같은 문). 설정을 다시 켜면 다음 요청부터 복구되고 되돌릴 것이 없다. 조회 실패는 닫는 쪽으로 처리한다.
+- **영향이 없는 것.** 「내 작업」의 직접 PTY와 공식 Remote Control은 서버가 구동하지 않으므로 이 설정과 무관하다. 사람이 터미널에서 직접 쓰는 것은 막지 않는다.
+- **켤 때.** 인스턴스 운영자가 `true`로 켜면 서버가 시작할 때 경고 로그를 한 번 남긴다(회색 판단·ADR 번호·이슈). 시크릿·토큰은 로그와 사용자 문장에 넣지 않는다.
+- **이 증보가 하지 않는 것.** 데스크탑 host(momo-workd)가 사람이 시작한 원격 작업 세션에서 `claude-agent-acp`를 구동하는 경로(ADR-0188 A 레인)는 @멘션 대행이 아니라 별도 결정(#2786 확인 대기)이며 이 PR은 건드리지 않는다. 클라이언트 표시는 #3416이 맡는다.
+- **시험.** `subscription_agent_conformance_pg.rs`의 `an_existing_claude_subscription_agent_is_not_driven_until_the_instance_opts_in`(기존 Claude 에이전트 + 설정 off → 멘션 job 0·이유 코드·문장 1회·수신함 0·Agent Port 도구 0·작업 요청 409, Codex는 전달, 설정 on → 전달)와 `owner_only_gate` 단위 시험. 게이트가 Claude 설정을 무시하게 바꾸면 첫 단정에서 실패함을 확인했다.
