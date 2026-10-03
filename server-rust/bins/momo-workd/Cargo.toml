@@ -46,6 +46,9 @@ tracing-subscriber.workspace = true
 # OS CSPRNG directly rather than from UUIDv4 bytes, which carry fixed bits.
 getrandom = "0.2"
 libc.workspace = true
+# Linux box host key sealing (spike S4, ADR-0197 D8/D10): AES-256-GCM, the
+# same crate the other server crates already use.
+aes-gcm = "0.10"
 
 # The host key lives in the data-protection keychain as a ThisDeviceOnly item
 # (ADR-0188 D2). `OSX_10_15` exposes `kSecUseDataProtectionKeychain`.
