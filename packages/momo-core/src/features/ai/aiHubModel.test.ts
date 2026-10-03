@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   AI_GLOSSARY,
   AI_HUB_COPY,
+  AI_HUB_FROM_SETTINGS,
+  AI_HUB_NAV_COPY,
+  AI_HUB_OVERVIEW_COPY,
+  AI_HUB_SECTIONS,
   LEGACY_TERM_MAP,
   aiAgentLabels,
   classifyAiAgent,
@@ -499,5 +503,33 @@ describe("옛 말 → 새 말 표", () => {
     expect(findLegacyTerms("owner_only 에이전트의 과금").map((e) => e.old).sort()).toEqual(["owner_only", "과금"].sort());
     expect(findLegacyTerms("팀 키 · 누구나")).toEqual([]);
     expect(findLegacyTerms("성재 님 개인 구독 · 성재 님만 부를 수 있어요")).toEqual([]);
+  });
+});
+
+describe("허브 구획과 옛 입구 (AIH-3)", () => {
+  it("네 구획의 주소는 /ai 아래이고 제목은 용어집 이름이다", () => {
+    expect(AI_HUB_SECTIONS.map((s) => [s.path, glossaryEntry(s.glossaryId).term])).toEqual([
+      ["/ai/accounts", "내 AI 계정"],
+      ["/ai/team-keys", "팀 AI 키"],
+      ["/ai/agents", "에이전트"],
+      ["/ai/external", "외부 연결"],
+    ]);
+  });
+
+  it("옛 설정 섹션은 모두 존재하는 허브 구획을 가리킨다", () => {
+    const ids = new Set(AI_HUB_SECTIONS.map((s) => s.id));
+    for (const target of Object.values(AI_HUB_FROM_SETTINGS)) expect(ids.has(target)).toBe(true);
+    expect(Object.keys(AI_HUB_FROM_SETTINGS).sort()).toEqual(["agents", "ai", "events", "plugins", "webhooks"]);
+  });
+
+  it("새 안내 문구가 옛 말을 되살리지 않는다", () => {
+    const texts = [
+      ...Object.values(AI_HUB_NAV_COPY),
+      ...Object.values(AI_HUB_OVERVIEW_COPY.chip),
+      ...Object.values(AI_HUB_OVERVIEW_COPY.nextAction),
+      ...Object.values(AI_HUB_OVERVIEW_COPY.openLink),
+      AI_HUB_OVERVIEW_COPY.webNote,
+    ];
+    for (const text of texts) expect(findLegacyTerms(text), text).toEqual([]);
   });
 });

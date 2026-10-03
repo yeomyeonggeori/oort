@@ -282,7 +282,7 @@ describe("④′ 카드 자리가 없으면 줄이 폴백을 말한다 (design-r
     typeAll("/연");
     const rows = options();
     expect(rows).toHaveLength(1);
-    expect(rows[0].textContent).toContain("설정 › AI 연결로 이동");
+    expect(rows[0].textContent).toContain("AI로 이동");
     expect(rows[0].textContent).not.toContain("나에게만");
     press("Enter");
     expect(ran.map((row) => row.command?.commandId)).toEqual(["ai.connect"]);

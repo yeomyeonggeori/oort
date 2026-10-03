@@ -852,7 +852,7 @@ describe("펼침: 레일은 워크스페이스 전용, 목적지는 목록 열�
       [...head.querySelectorAll('[data-testid="sidebar-section-agent-work"] a')].map((a) =>
         a.textContent?.replace(/\d+$/, "").trim()
       )
-    ).toEqual(["에이전트", "내 작업", "팀 작업", "활동"]);
+    ).toEqual(["AI", "에이전트", "내 작업", "팀 작업", "활동"]);
     expect(head.querySelector('[data-testid="nav-team"]')?.getAttribute("href")).toBe("/work?view=team");
     expect(
       head.querySelector('[data-testid="sidebar-section-agent-work-header"]')?.textContent
@@ -906,6 +906,8 @@ describe("펼침: 레일은 워크스페이스 전용, 목적지는 목록 열�
     ["/c/" + CH, "nav-chat"],
     ["/inbox", "nav-inbox"],
     ["/agents", "nav-agents"],
+    ["/ai", "nav-ai"],
+    ["/ai/team-keys", "nav-ai"],
     ["/directory", "nav-directory"],
     ["/activity", "nav-activity"],
     ["/work", "nav-mine"],
@@ -917,6 +919,19 @@ describe("펼침: 레일은 워크스페이스 전용, 목적지는 목록 열�
       ...host.querySelectorAll('[data-testid="sidebar-list-head"] [aria-current="page"]'),
     ].map((a) => a.getAttribute("data-testid"));
     expect(current).toEqual([testId]);
+  });
+
+  it("「AI」 행은 「에이전트·작업」 맨 위에 서고 /ai 로 간다. 「에이전트」 행도 그대로다 (AIH-3)", async () => {
+    const host = await mount({ switcherOpen: false });
+    const ai = host.querySelector<HTMLAnchorElement>('[data-testid="nav-ai"]');
+    const agents = host.querySelector<HTMLAnchorElement>('[data-testid="nav-agents"]');
+    expect(ai?.getAttribute("href")).toBe("/ai");
+    expect(ai?.textContent).toContain("AI");
+    expect(agents?.getAttribute("href")).toBe("/agents");
+    expect(ai!.compareDocumentPosition(agents!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const section = ai!.closest("section, [data-testid^='sidebar-section']") ?? ai!.parentElement!.parentElement!;
+    const first = section.querySelector("a");
+    expect(first).toBe(ai);
   });
 
   it("안 읽은 멘션 수는 인박스 줄의 잉크 알약으로 서고 이름에 뜻이 붙는다", async () => {
@@ -1053,7 +1068,7 @@ describe("레일과 목록 열 머리는 탭마다 바뀌지 않는다 (#3280, #
     shell.desktop = true;
     const host = await mount({ switcherOpen: false });
     const q = (id: string) => host.querySelector<HTMLElement>(`[data-testid="${id}"]`);
-    const ROWS = ["nav-chat", "nav-inbox", "nav-directory", "nav-agents", "nav-mine", "nav-team", "nav-activity"];
+    const ROWS = ["nav-chat", "nav-inbox", "nav-directory", "nav-ai", "nav-agents", "nav-mine", "nav-team", "nav-activity"];
     const head = q("sidebar-list-head")!;
     const destinations = q("sidebar-destinations")!;
     const rows = ROWS.map((id) => q(id)!);

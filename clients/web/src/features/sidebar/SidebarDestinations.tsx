@@ -1,4 +1,4 @@
-import { Activity, Bot, Inbox, MessageSquare, Milestone, ServerCog, SquareKanban, SquareTerminal, Users } from "lucide-react";
+import { Activity, Bot, Inbox, MessageSquare, Milestone, ServerCog, Sparkles, SquareKanban, SquareTerminal, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { NeedsMe } from "@momo/core/features/inbox/needsMe";
@@ -15,7 +15,7 @@ import {
 import { DraftsNavItem } from "@/features/drafts/DraftsNavItem";
 import { useLocalPaneAttention } from "@/features/workbench/local/paneAttention";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
-import { AGENTS_NAV } from "./workspaceNav";
+import { AGENTS_NAV, AI_HUB_NAV } from "./workspaceNav";
 import { SessionStateChip } from "./SessionStateChip";
 import { destinationMarks } from "./sidebarBadge";
 import { AGENT_WORK_SECTION_ID, type SidebarDestinationActive } from "./sidebarDestinationsModel";
@@ -28,7 +28,7 @@ import {
 // 목록 열의 머리(#3334): 「검색과 이동」 바로 아래의 목적지 두 구획.
 //
 //   구획 A  대화 · 인박스 · 멤버(초안이 있으면 초안)
-//   구획 B  「에이전트·작업」 — 에이전트 · 내 작업 · 팀 작업 · 활동(+ 서버가 싣는 작업
+//   구획 B  「에이전트·작업」 — AI(허브, AIH-3) · 에이전트 · 내 작업 · 팀 작업 · 활동(+ 서버가 싣는 작업
 //           콘솔·작업 흐름) · 지금 도는 세션 줄
 //
 // 이 머리는 **모든 탭에서 같은 노드·같은 자리**다. 탭이 바뀌어도 바뀌는 것은 이 아래의 본문
@@ -101,6 +101,7 @@ export function SidebarDestinations({
         mentionCount={marks.mine.pill?.count ?? 0}
         dot={marks.mine.dot}
       >
+        <SidebarRow to={AI_HUB_NAV.to} icon={<Sparkles className="size-4" />} label={AI_HUB_NAV.label} testId="nav-ai" isActive={active.ai} />
         <SidebarRow to={AGENTS_NAV.to} icon={<Bot className="size-4" />} label={AGENTS_NAV.label} testId="nav-agents" isActive={active.agents} />
         <SidebarRow
           to={MY_WORK_PATH}
