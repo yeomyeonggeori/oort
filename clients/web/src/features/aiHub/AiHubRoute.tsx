@@ -14,7 +14,8 @@ import { useDirectory } from "@/features/workspace/useWorkspace";
 import { memberFor } from "@momo/core/features/workspace/directory";
 import { useOffline } from "@/features/common/useOffline";
 import { AiHubOverview } from "./AiHubOverview";
-import { AiAccountsPane, AiAgentsPane, AiExternalPane, AiTeamKeysPane } from "./AiHubPanes";
+import { AiAccountsPane, AiAgentsPane, AiExternalPane } from "./AiHubPanes";
+import { AiTeamKeysPane } from "./AiTeamKeysPane";
 
 const TAB_CLASS =
   "tap-target press rounded-full px-3 py-1 text-body text-ink-muted hover:bg-surface-hover focus-visible:focus-ring aria-[current=page]:bg-surface aria-[current=page]:font-semibold aria-[current=page]:text-ink aria-[current=page]:shadow-sm";

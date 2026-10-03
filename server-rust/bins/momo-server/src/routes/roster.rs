@@ -99,6 +99,11 @@ fn roster_dto(member: &RosterMember) -> RosterMemberDto {
         status_expires_at_ms: member.status_expires_at_ms,
         created_at_ms: member.created_at_ms,
         updated_at_ms: member.updated_at_ms,
+        brain: None,
+        callable_by: None,
+        owner: None,
+        host_online: None,
+        brain_unavailable_reason: None,
     }
 }
 
@@ -116,7 +121,7 @@ pub async fn roster(
         .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?;
     let limit = query.limit();
 
-    let outcome: DbRejectable<Vec<RosterMember>> =
+    let outcome: DbRejectable<(Vec<RosterMember>, Vec<momo_agent::AgentReadFacts>, bool)> =
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
                 let Some(role) =
@@ -133,12 +138,23 @@ pub async fn roster(
                     limit,
                 )
                 .await?;
-                Ok(Ok(members))
+                // #3392 AIH-2 — the read contract for the agents this viewer may
+                // see (the guest narrowing above already decided which). Same
+                // transaction, so a row and its facts are one snapshot.
+                let agent_ids: Vec<uuid::Uuid> = members
+                    .iter()
+                    .filter(|member| member.kind == MemberKind::Agent)
+                    .map(|member| member.id)
+                    .collect();
+                let facts =
+                    momo_agent::load_agent_read_facts_in_tx(conn, workspace_id, &agent_ids).await?;
+                Ok(Ok((members, facts, role == WorkspaceRole::Guest)))
             })
         })
         .await;
 
-    let members = settle_db("roster.list", outcome)?;
+    let claude_enabled = state.agent_port.config.claude_subscription_agents_enabled;
+    let (members, facts, viewer_is_guest) = settle_db("roster.list", outcome)?;
     let human_count = members
         .iter()
         .filter(|member| member.kind == MemberKind::Human)
@@ -148,7 +164,28 @@ pub async fn roster(
         .filter(|member| member.kind == MemberKind::Agent)
         .count();
     Ok(Json(WorkspaceRosterResponse {
-        members: members.iter().map(roster_dto).collect(),
+        members: members
+            .iter()
+            .map(|member| {
+                let mut dto = roster_dto(member);
+                if let Some(facts) = facts.iter().find(|f| f.agent_member_id == member.id) {
+                    dto.apply_read_facts(facts, claude_enabled);
+                    // Security review F2: a guest sees only what it shares. The
+                    // owner's id and name are shown only when the owner is itself on
+                    // the guest's roster, and liveness is not shown to guests at all.
+                    if viewer_is_guest {
+                        dto.host_online = None;
+                        let owner_visible = dto.owner.as_ref().is_some_and(|owner| {
+                            members.iter().any(|m| m.id.to_string() == owner.id)
+                        });
+                        if !owner_visible {
+                            dto.owner = None;
+                        }
+                    }
+                }
+                dto
+            })
+            .collect(),
         human_count,
         agent_count,
     }))

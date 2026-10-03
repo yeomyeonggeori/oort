@@ -506,6 +506,13 @@ Port `tools/list`는 비고, 에이전트가 「지금은 이 서버에서 구�
 전달이 재개된다. 구독 에이전트는 hosted 에이전트이므로 무엇이든 받으려면
 `MOMO_HOSTED_DELIVERY_ENABLED=true`도 필요하다.
 
+**Claude 구독 에이전트는 기본 꺼짐**이다(`MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`,
+Anthropic 회신 전 성재 결재 2026-10-03, [ADR-0193](adr/0193-onboarding-2-subscription-agent-boundary.md)
+D17). 정확히 `true`일 때만 로그인 직후 대행 등록이 Claude Code 에이전트를 받는다.
+아니면 `409 claude_subscription_agent_paused`로 답하고, Claude 구독 에이전트 행은
+`brainUnavailableReason`을 싣는다. Codex 에이전트는 영향이 없다. 바꾼 뒤 **api**를
+재시작한다.
+
 ---
 
 ## 방금 무엇이 떴나

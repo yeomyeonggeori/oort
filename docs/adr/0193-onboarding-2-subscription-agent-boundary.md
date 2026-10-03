@@ -8,6 +8,7 @@
 - 근거 자료: 제안서 `claudedocs/onboarding-2.0/brief.md`(§1 현황 감사, §2 Buzz·Aside 조사, §3 구독 연동과 약관, §4 흐름, §5 이슈 후보)와 시안 `claudedocs/onboarding-2.0/mockups.html`. 둘 다 gitignore 대상이라 로컬에만 있다. owner 공유본 시안은 https://claude.ai/artifact/6FQJ6LbTEXNN1j4uYE5nGz 이다. 이 ADR이 결정에 필요한 내용을 옮겨 적었다.
 - 증보: ADR-0190 D3(Q4), ADR-0147(Q2), ADR-0185 §5-2·§6(Q6·Q8). 각 파일 끝 「증보 2026-09-26 — 온보딩 2.0」 절이 이 ADR을 가리킨다.
 - 증보(이 ADR): 2026-09-27 AI 계정(#2876, #2816 결재) — D2 로그인 버튼 이름, D3 목록 확장 가리킴, Anthropic 약관 판단. 파일 끝 「증보 2026-09-27 — AI 계정」 절
+- 증보(이 ADR): 2026-10-03 AI 허브 서버 계약(#3392 AIH-2) — D14 에이전트 읽기 계약(`brain`·`callableBy`·`owner`·`hostOnline`·`brainUnavailableReason`), D15 로그인 직후 대행 등록 엔드포인트, D16 연결 값의 두 단계, D17 Claude 구독 에이전트 등록 기본 꺼짐(#3397 결재). 파일 끝 「증보 2026-10-03 — AI 허브 서버 계약」 절. CLI 실행 허용은 ADR-0190 D3-h
 - 참조: ADR-0162 「증보 2 — hosted 1:1 DM 승인」(2026-09-27, #2915)이 D4의 DM 규칙을 잇는다. 소유자와 자기 구독 에이전트의 1:1 DM은 자동 승인되어 전달되고, 타인 DM 승인은 서버가 거부한다.
 - 관계: ADR-0004(provider 자격 비유입), ADR-0101(에이전트 = 1급 멤버, 봇 래핑 금지), ADR-0180(기기 연결 QR), ADR-0181(웰컴 킥오프, D5 정적 문구 경로), ADR-0182(토스트 금지), ADR-0187(목표 A, 실기기 푸시 필수), ADR-0188(원격 결정자 = 소유자), ADR-0189(DS2 새벽하늘), ADR-0191 D2(공식 바이너리, 토큰 비열람), ADR-0192 D5(로그인이 든 체크포인트는 소유자 1인 것)
 
@@ -218,3 +219,64 @@
 ### 결재 기록(증보)
 - **2026-09-27 성재:** #2816 로그인 모달 결재(위 인용 1), AI 계정 Q1~Q7 「전부 권장대로」(인용 2).
 - worker 판단: 약관 1·2·3은 2026-09-27 1차 출처 재확인 결과다. 1(Claude headless 실행기 닫음)은 제안서 Q4 권장안이 「Commercial Terms 확인 뒤에 연다」고 건 조건의 결과이며, 2의 조건은 #2816 구현의 머지 조건이다.
+
+## 증보 2026-10-03 — AI 허브 서버 계약: 읽기 계약(D14)·로그인 직후 대행 등록(D15)·연결 값의 두 단계(D16)·Claude 등록 기본 꺼짐(D17)
+
+- Status: **Accepted** (2026-10-03 성재 결재, 아래 인용)
+- 기안: Sonnet 5.5 worker(#3392 AIH-2). 상위 #3388·#3389, 약관 #3390
+- 결재 인용(이슈 #3389, 진단 `claudedocs/diag-ai-connect-2026-10-03/report.md` 뒤 AskUserQuestion): 「①AI 입구=사이드바 「AI」 최상위(내 AI 계정·팀 AI 키·에이전트·외부 연결 한 흐름, 설정은 링크) ②「Claude Code로 로그인」 완료 뒤 앱이 합류(공식 CLI `mcp add`)까지 대행해 한 단계로(ADR-0190 D3 허용목록 증보) ③Claude 구독 에이전트=현행 유지(본인 1인·공식 CLI) + Anthropic 해석 문의 ④ChatGPT 구독=내 맥 경로만 유지(서버 보관 닫은 채) + OpenAI 약관 원문 확인해 ADR 기록.」
+- 결재 인용(이슈 #3392): 「결재(성재 2026-10-03): 시안대로 구현, 사이드바 「에이전트」 행 유지, 에이전트 이름 기본 `<내이름>-claude`/`-codex`(중복 -2, 만들기 전 편집, 여러 맥이면 -기기).」 시안·계획은 로컬 `claudedocs/ai-hub-2026-10/`(gitignore)이고 이 절이 결정에 필요한 내용을 옮겼다.
+- 결재 인용(이슈 #3397, 2026-10-03, 이 증보 작업 중 전달됨): 「Claude 구독 에이전트를 oort가 ACP/`claude -p`로 대신 구동하는 경로는 Anthropic 회신 전까지 「회색·문의 중」, 기본 꺼짐이에요. Codex는 유지.」 이 PR에서는 등록 경로와 상태 필드까지만 반영한다(D17). 이미 등록된 Claude `owner_only` 에이전트의 런타임 차단·안내는 #3397이 맡는다.
+- 관계: D2·D4·D5·D6(이 절은 하나도 풀지 않는다), ADR-0162(hosted pairing lifecycle), ADR-0190 D3-h, PR #2940(#2924 차단 — 아래 「유지하는 보장」)
+
+### D14. 에이전트 읽기 계약 — 필드를 명부와 연결 목록에 더한다
+- **대상 응답.** `GET /v1/workspaces/{ws}/roster`(별칭 `…/members`)의 에이전트 행, 그리고 `GET …/hosted-agent-connections`와 `…/{connection}`의 연결 행. 사람 행에는 아무것도 붙지 않는다. 서버가 더 오래되면 네 필드가 없고, 클라이언트는 보조 줄을 그리지 않는다(필드 부재 = 「모름」).
+- **필드(전부 additive, 에이전트에만, 비밀 없음).**
+
+| 필드 | 값 | 도출(기존 컬럼만, 저장 없음) |
+|---|---|---|
+| `brain` | `subscription` \| `team_key` \| `external` \| `instance_default` | `agent.invocation_scope = 'owner_only'` → `subscription`(**항상 우선**: 구독 에이전트도 hosted라서 `external`로 읽히면 안 된다). 아니면 hosted 연결이 있거나 `config.execution_mode = 'hosted_dial_in'`이거나 확정된 A2A 카드가 있으면 `external`. 아니면 `agent.model_source = 'instance_default'` → `instance_default`. 그 밖은 `team_key` |
+| `callableBy` | `owner_only` \| `everyone` | `invocation_scope`. **보고일 뿐이다.** 강제는 D4의 전달 경로이고 이 필드는 그것을 바꾸지 않는다 |
+| `owner` | `{id, displayName}` | **`brain = subscription`일 때만.** `agent.owner_human_id`의 표시 이름 |
+| `hostOnline` | boolean | hosted 연결로 들어오는 에이전트(`subscription`·`external`)에만 |
+| `brainUnavailableReason` | `claude_subscription_agent_paused` | 두뇌를 이 서버에서 쓸 수 없을 때만(D17) |
+
+- **`hostOnline`은 휴리스틱이다.** 활성 연결의 credential이 최근 10분 안에 Agent Port에 닿았는가(`token.last_used_at`, D5의 `SUBSCRIPTION_AGENT_ONLINE_WINDOW_SECONDS`)다. 열려 있지만 한가한 CLI 세션은 포트를 부르지 않으면 false로 읽힌다. 접속·presence가 아니다. 화면은 「오프라인」이 아니라 「최근 10분 안에 응답이 없어요」 수준으로 쓰고, 이 값으로 호출을 막지 않는다. 질의문은 `momo_agent::HOSTED_RECENTLY_SEEN_SQL` 하나이고, D5 문구를 고르는 후보 질의(`mention.rs`)와 같은 글자임을 단위 시험이 단정한다(둘이 갈라지면 같은 에이전트에 두 말을 하게 된다).
+- **게스트.** 게스트는 자기가 채널을 공유하는 에이전트만 본다(명부 질의가 정한다). 이 필드들 중 `owner`는 **소유자가 게스트의 명부에도 보일 때만**, `hostOnline`은 **게스트에게 내지 않는다**(게스트는 이미 `ownerHumanId`도 받지 못하는 경계라서 이 증보가 넓히지 않는다). `brain`·`callableBy`는 구조 정보라 그대로다.
+- **새 노출이 아닌 근거.** 명부는 이미 워크스페이스 활성 멤버 모두에게 `ownerHumanId`·`paused`를 준다. 비소유자가 멘션하면 D4 안내가 소유자의 표시 이름을 이미 말한다. D5는 채널의 다른 사람에게 「오프라인」까지를 허용했다. 그래서 `owner`는 구독 에이전트에만(범위를 줄여 둔다), `hostOnline`은 불리언 하나로 둔다. 기기 이름·위치·마지막 접속 시각은 이 필드들에 없다. 워크스페이스 비멤버는 명부 자체가 403이라 아무것도 보지 못한다(교차 테넌트 시험). 게스트의 가시 범위는 명부 질의가 정하고 사실 조회는 그 보이는 에이전트에만 돈다.
+- OpenAPI(`RosterMember`, `HostedAgentConnection`)와 DTO가 같은 글자임을 계약 시험이 단정한다.
+
+### D15. 로그인 직후 대행 등록 — `POST /v1/workspaces/{ws}/subscription-agents/register`
+- **누가.** 데스크탑 앱이 「Claude Code로 로그인」「Codex로 로그인」 성공 직후 부른다. 게이트는 오늘의 「구독 추가」(`POST …/hosted-agent-connections` + `owner_only`)와 **같다**: 사람 + 워크스페이스 owner/admin. 아니면 403이고, 서버 설정과 무관하게 403이 먼저다. 에이전트의 소유자는 호출한 사람이다(D4: 소유자는 바꿀 수 없다).
+- **같은 몸통.** 정체·일시정지 프로필·`owner_only` 표식·pairing 연결·감사 한 줄은 hosted 연결 생성과 **같은 함수**(`provision_hosted_agent_in_tx`)가 한 트랜잭션에서 쓴다. 그래서 PR #2940의 보장(`owner_only` 에이전트는 팀 키로 돌지 않는다. 연결 없는 구독 에이전트의 호출은 작업이 되지 않는다)이 새 경로에서도 같은 행으로 지켜진다. 이 보장의 회귀 시험을 새 경로로 만든 에이전트에 대해서도 둔다.
+- **요청.** `harness`(`claude_code` 또는 `codex`), `deviceId`(앱이 만든 임의 설치 id, 8-64자 `[A-Za-z0-9._-]`, 하드웨어 id·비밀 아님), 선택 `deviceLabel`·`displayName`·`handle`(만들기 전 편집). 알 수 없는 필드는 거절한다.
+- **이름(결재 2026-10-03).** 기본 표시 이름은 `<내 표시 이름>-claude` / `-codex`, 핸들은 `<내 핸들>-claude` / `-codex`(32자 안). 겹치면 `-2`, `-3`… (최대 20번). 같은 CLI의 에이전트가 이미 다른 맥에 있고 `deviceLabel`이 있으면 `-<기기>`(소문자 영숫자 12자 이내)가 먼저 붙는다. 사람이 `handle`을 직접 정했으면 그대로 쓰고 겹치면 코드 없는 409다(남의 선택을 몰래 바꾸지 않는다).
+- **멱등 키 (호출자, 하네스, 기기).** 이 조합에 살아 있는 에이전트가 있으면 같은 에이전트를 돌려준다(`reused: true`, 200). 새 행 0건. 연결 상태에 따라: `pairing_pending`·`detected`·`expired` → 새 값을 만들고 이전 값은 죽인다(`regenerate`). `active` → 값 없이 돌려준다(「이미 있음=질문 생략」). `disconnected` → 같은 에이전트에 새 pairing(ADR-0162 D6의 순차 재연결). `cleanup_pending` → 409 `subscription_agent_cleanup_pending`. 에이전트가 이미 죽었으면(멤버가 비활성) 그 기기 자리를 풀고 새로 만든다. 동시 호출은 advisory lock으로 한 줄이 된다. 저장은 migration 116의 `agent.subscription_device_id`와 `(workspace, owner, harness, device)` 부분 유니크 인덱스다(백스톱).
+- **상한.** 호출자·하네스당 살아 있는 구독 에이전트 5개. 6번째는 409 `subscription_agent_limit`. 「본인 1인」(D2)을 문자 그대로 두고 연결 값 발급을 무한히 열지 않는다. 재사용은 상한에 걸리지 않는다.
+- **끔(D6).** `MOMO_SUBSCRIPTION_AGENTS_ENABLED`가 꺼져 있으면 409 `error.code = subscription_agents_disabled`이고 아무것도 쓰지 않는다. 클라이언트는 이 코드로 「이 서버에서는 꺼져 있어요」를 말하고 선택지를 숨기지 않는다(계획 §9의 「조용한 숨김이 망가진 느낌의 원인」). 문장 정규식이 아니라 코드로 분류한다.
+- **응답.** 201(새로) 또는 200(재사용), `Cache-Control: no-store`. `agent{id,handle,displayName}`, `connection`(비밀 없음), `reused`, 그리고 값을 새로 만들었을 때만 `pairingCredential`·`pairingExpiresAtMs`. 이 `pairingCredential`이 앱이 공식 CLI에 건네는 「연결 값」이다. 서버에는 sha256만 남고 응답에서 한 번만 나간다.
+- **감사.** `subscription_agent.registered` 한 줄: 하네스, 재사용 여부, 값 발급 여부. 값·기기 id는 넣지 않는다.
+- **약관 선을 넘지 않는 이유.** 연결 값은 **oort 자신의** Agent Port 자격이지 Anthropic·OpenAI 자격이 아니다. 서버는 구독 토큰을 받지도 저장하지도 중계하지도 않는다(D2 (a)). 이 엔드포인트는 「이 맥의 CLI가 이 에이전트의 Agent Port 클라이언트」라는 사실만 서버에 둔다. 한 사람 · 자기 맥 · 자기가 부르는 에이전트 · 소유자만 호출(D4)은 그대로다. 흐름이 한 단계로 줄면 쓰기 쉬워져 노출이 늘 수 있다는 위험(계획 §9)은 상한 5, 끄는 스위치, 감사 한 줄, 본인 1인 고정으로 줄이고, Anthropic 해석 문의는 별도로 진행한다(#3390).
+
+### D16. 연결 값은 두 단계이고, 두 번째는 CLI 명령이 아니다
+- ADR-0162 D6은 pairing 값과 active 자격을 **다른 비밀**로 둔다. pairing 값은 15분·1회·핸드셰이크만(대화 읽기·쓰기 없음)이고, 소유자가 `detected` 연결을 확인(`confirm`)하면 별도의 active 자격이 한 번 나간다. 이 증보는 그 구조를 바꾸지 않는다.
+- 앱이 쓰는 순서: 등록(D15) → pairing 값을 앱의 자격 저장소에 둔다 → 공식 CLI 등록(ADR-0190 D3-h, 값 없는 고정 템플릿) → CLI가 핸드셰이크해 `detected` → 소유자가 기존 `confirm`으로 승인 → **앱이 저장소의 값을 active 자격으로 바꾼다. CLI 명령을 다시 부르지 않는다**(CLI의 설정에는 값이 없고 헬퍼가 저장소에서 읽는다. ADR-0190 D3-h).
+- 구현은 AIH-5다. 이 증보는 서버가 이미 가진 `confirm` 응답(`credential`, 한 번만)이 그 교체에 쓰인다는 사실만 못 박는다. 서버 쪽 새 코드는 없다.
+
+### D17. Claude 구독 에이전트 등록은 기본 꺼짐이고 켜는 것은 인스턴스 운영자다 (#3397 결재)
+- **설정.** `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`. **기본 off, 정확히 `true`만 on**이다(없음·빈 값·`True`·`1`·오타는 전부 off). 일반 킬 스위치 `MOMO_SUBSCRIPTION_AGENTS_ENABLED`(D6, 기본 on)와 별개이고, 서버 전체 설정이다(약관 문의 결과를 기다리는 인스턴스 단위 결정이라 워크스페이스 관리자가 다시 열 수 없다).
+- **등록.** 구독 에이전트를 만드는 **모든 경로**(D15의 대행 등록 엔드포인트와 `POST …/hosted-agent-connections`의 `owner_only` 생성)가 `harness: claude_code`이고 이 설정이 off이면 409 `error.code = claude_subscription_agent_paused`를 돌려주고 아무것도 쓰지 않는다. 순서: 사람·owner/admin(403) → 일반 킬 스위치(409 `subscription_agents_disabled`) → 이 코드(레거시 생성 경로는 기존 관례대로 트랜잭션 전에 두 스위치를 본다). 클라이언트는 이 코드로 「이 서버에서는 Claude 구독 에이전트가 잠시 멈춰 있어요」를 말하고 선택지를 숨기지 않는다. **Codex(`codex`)는 영향이 없다.**
+- **상태 필드.** D14의 명부·연결 목록 행에 `brainUnavailableReason`을 더한다. 값은 `claude_subscription_agent_paused` 하나이고, **Claude 구독 에이전트이면서 이 설정이 off일 때만** 나온다(그 밖의 에이전트·사람 행에는 없다). 상태 보고일 뿐 이 필드가 호출을 막지는 않는다.
+- **이 증보가 하지 않는 것.** 이미 등록된 Claude `owner_only` 에이전트에 대한 전달 차단과 채널 안내 문장은 #3397이 구현한다(D4·D6 경로). 이 PR은 그 경로를 건드리지 않는다. 따라서 이 설정이 off인 인스턴스에 기존 Claude 에이전트가 있으면 상태 필드는 「멈춤」을 말하지만 런타임은 #3397 전까지 기존 동작 그대로다.
+- 이 증보의 회색 판단은 ADR-0193 약관 판단(2026-09-27 증보)을 바꾸지 않는다. 같은 위험을 기본값으로 먼저 닫는 것이다. Anthropic 회신 뒤 새 증보로 기본값을 다시 정한다.
+
+### 유지하는 보장 — PR #2940 (#2924)
+- 연결 행이 없는 구독 에이전트의 소유자 호출, 작업 요청, 환영 대사는 작업을 만들지 않고, 팀 키 실행(`agent_run`)도 만들지 않는다. 시험 `an_owner_call_to_a_subscription_agent_with_no_connection_row_is_never_a_worker_job`는 그대로이고, 새 경로로 만든(연결은 `pairing_pending`) 에이전트에 대한 `a_registered_but_unconnected_subscription_agent_is_never_a_worker_job`를 더했다.
+
+### 시험으로 잠근다
+- 격리 PG 적합성(`subscription_agent_conformance_pg.rs`, 컨테이너 `3392-*`): 읽기 계약(네 상태 + 사람 행 무 필드 + 10분 휴리스틱 + 연결 목록 + 다른 워크스페이스 0건), 등록(이름 규칙, 재사용, 값 재발급 시 이전 값 무효, `active`는 값 없음, 감사에 비밀 없음), 게이트(멤버 403·잘못된 입력 400·명시 핸들 409·상한 409), 끔(코드, 쓰기 0, 비관리자는 403), 교차 테넌트, 죽은 에이전트, 4중 동시 호출 → 1행. Claude 등록 기본 꺼짐(409 코드·쓰기 0·Codex 201·상태 필드·켜면 해제)을 포함한다. 각 가드는 지우면 실패하며 PR에 RED를 남긴다.
+- 단위: `derive_brain`(owner_only 우선), 기본 이름 후보(32자 안, 적대적 핸들), `HOSTED_RECENTLY_SEEN_SQL` ≡ `mention.rs`.
+
+### 미검증(runtime-unverified)
+- 실제 CLI와의 왕복(로그인 → 등록 → `add-json` → 핸드셰이크 → 확인 → 교체)은 AIH-5가 실기기에서 닫는다. 이 증보는 서버 계약만 검증했다.
+- OpenAI의 계정 공유 정책 원문 확인과 ChatGPT 구독 경로 기록은 #3390에서 따로 한다.
