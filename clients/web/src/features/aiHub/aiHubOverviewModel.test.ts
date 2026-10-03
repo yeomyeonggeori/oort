@@ -111,7 +111,7 @@ describe("외부 연결 카드", () => {
     const ok = (n: number) => ({ state: "ok" as const, value: n });
     const card = externalCard({ apps: ok(2), incoming: { state: "denied" }, outgoing: { state: "error" }, externalAgents: READ_LOADING });
     expect(card.badge).toBeNull();
-    expect(texts(card)).toEqual(["앱 2", "채널로 들어오는 주소 운영자만 볼 수 있어요", "밖으로 보내는 알림 읽지 못했어요", "외부 에이전트 연결 확인하는 중이에요"]);
+    expect(texts(card)).toEqual(["앱 2", "채널로 들어오는 주소 소유자·관리자만 볼 수 있어요", "밖으로 보내는 알림 읽지 못했어요", "외부 에이전트 연결 확인하는 중이에요"]);
   });
 
   it("내 구독 연결은 외부 에이전트로 세지 않는다", () => {
