@@ -890,7 +890,7 @@ pub fn mention_diagnostic_detail(
 /// exactly when the original's was.
 pub fn paused_mention_body(display_name: &str) -> String {
     format!(
-        "{} 현재 일시정지되어 있습니다.",
+        "{} 지금 일시정지돼 있어요.",
         crate::korean::attach_particle(
             &crate::inert_display_name(display_name),
             crate::korean::ParticlePair::Topic
@@ -1430,7 +1430,7 @@ mod tests {
         // An ordinary name is untouched, particle included.
         assert_eq!(
             paused_mention_body("루나"),
-            "루나는 현재 일시정지되어 있습니다."
+            "루나는 지금 일시정지돼 있어요."
         );
     }
 

@@ -102,13 +102,13 @@ pub(crate) fn ready_t3(settings: &T3Settings) -> Result<String, ApiError> {
     momo_t3::provider::capabilities_for(&settings.default_provider_id).map_err(|_| {
         ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
-            "설정된 T3 provider가 어댑터 레지스트리에 없습니다. 인스턴스 운영자에게 문의하세요.",
+            "설정된 T3 provider가 어댑터 레지스트리에 없어요. 인스턴스 운영자에게 문의해 주세요.",
         )
     })?;
     settings.ready_public_base_url().ok_or_else(|| {
         ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
-            "oort Cloud 프로비저너 설정이 완전하지 않습니다. 인스턴스 운영자에게 문의하세요.",
+            "oort Cloud 프로비저너 설정이 완전하지 않아요. 인스턴스 운영자에게 문의해 주세요.",
         )
     })
 }
@@ -144,7 +144,7 @@ pub(crate) fn t3_error(context: &str, error: T3Error) -> ApiError {
         | T3Error::IntervalStateConflict) => conflict(error.to_string()),
         T3Error::UnknownProvider(_) | T3Error::Provider(_) => ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
-            "oort Cloud 호스트를 준비하지 못했습니다. 잠시 후 다시 시도하세요.",
+            "oort Cloud 호스트를 준비하지 못했어요. 잠시 후 다시 시도해 주세요.",
         ),
         // A ladder misuse, a missing work_pool row, or a reason this server
         // chose itself are all server bugs, not client input.
