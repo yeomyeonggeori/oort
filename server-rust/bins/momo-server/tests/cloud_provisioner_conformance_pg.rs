@@ -435,6 +435,12 @@ async fn start_server(
         TEST_JWT_SECRET.to_string(),
         "ws://127.0.0.1:8000/connection/websocket".to_string(),
     )
+    // #3431: these suites drive Claude Code on shared hosts for other reasons, so
+    // they opt in; the pause itself is pinned in remote_host_r0_conformance_pg.
+    .with_agent_port(momo_server::config::AgentPortConfig {
+        claude_subscription_agents_enabled: true,
+        ..momo_server::config::AgentPortConfig::default()
+    })
     .with_t3(T3Settings {
         enabled: t3_enabled,
         default_provider_id: MANAGED_PROVIDER_ID.to_string(),
