@@ -38,6 +38,12 @@
 //!   through `MOMO_AVATAR_RECLAIM_DATABASE_URL` (default
 //!   `MOMO_HUDDLE_SWEEP_DATABASE_URL`: the RLS-bound `momo_app` connection).
 //!
+//! * `MOMO_SHARE_RETENTION_DATABASE_URL` (default `MOMO_HUDDLE_SWEEP_DATABASE_URL`)
+//!   — the RLS-bound `momo_app` connection the shared-session retention sweep
+//!   (#2862) deletes through (#3377: the notifier role has no DELETE).
+//!   `MOMO_SHARE_RETENTION_INTERVAL_MS` (600000, floored at 10000) sets its cadence.
+//!   Without the URL the sweep does not run.
+//!
 //! No `.env` reading and no baked-in credential: a missing DB URL is a boot
 //! error, not a silent dev default.
 
@@ -149,6 +155,15 @@ pub struct NotifierConfig {
     /// `MOMO_HUDDLE_SWEEP_DATABASE_URL` (the same RLS-bound `momo_app`
     /// connection). Every reclaim write goes through it; never logged.
     pub avatar_reclaim_database_url: Option<String>,
+    /// #3377: `MOMO_SHARE_RETENTION_DATABASE_URL`, falling back to
+    /// `MOMO_HUDDLE_SWEEP_DATABASE_URL` (the same RLS-bound `momo_app`
+    /// connection). The shared-session retention sweep deletes through it and
+    /// nothing else: the notifier's own pool has no DELETE. Never logged.
+    pub share_retention_database_url: Option<String>,
+    /// #3377: `MOMO_SHARE_RETENTION_INTERVAL_MS` (600000, floored at 10000). A
+    /// payload that expires after 30 days does not need the 300 ms tier-sweep
+    /// cadence the loop used to borrow.
+    pub share_retention_interval: Duration,
 }
 
 fn env(key: &str) -> Option<String> {
@@ -219,6 +234,11 @@ impl NotifierConfig {
             ),
             avatar_reclaim_database_url: env("MOMO_AVATAR_RECLAIM_DATABASE_URL")
                 .or_else(|| env("MOMO_HUDDLE_SWEEP_DATABASE_URL")),
+            share_retention_database_url: env("MOMO_SHARE_RETENTION_DATABASE_URL")
+                .or_else(|| env("MOMO_HUDDLE_SWEEP_DATABASE_URL")),
+            share_retention_interval: Duration::from_millis(
+                env_number("MOMO_SHARE_RETENTION_INTERVAL_MS", 600_000u64)?.max(10_000),
+            ),
         })
     }
 
@@ -239,6 +259,8 @@ impl NotifierConfig {
             huddle_sweep_database_url: None,
             avatar_reclaim: None,
             avatar_reclaim_database_url: None,
+            share_retention_database_url: None,
+            share_retention_interval: Duration::from_millis(300),
         }
     }
 }

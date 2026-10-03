@@ -359,6 +359,44 @@ BEGIN
   IF to_regclass('public.unfurl_job') IS NOT NULL THEN
     GRANT INSERT ON TABLE unfurl_job TO momo_notifier;
   END IF;
+  -- #3377 (v0.1.16 incident). The cross-tenant candidate READS of the two-pool
+  -- sweeps run on the notifier pool; every write of those sweeps goes through the
+  -- RLS-bound `momo_app` pool, so none of these is more than SELECT — and where
+  -- the read touches a few columns of a table that also holds names or labels,
+  -- the grant is column-level (parsed by test_notifier_role_grants.sh as
+  -- `GRANT SELECT (cols) ON <table>`, a shape the table-grant parsers skip).
+  --  * share retention (#2862): workspaces_with_expired_shares joins
+  --    work_session_share to work_session (granted above) on workspace_id and
+  --    session_id; repo_label / branch / PR / stage markers stay unreadable.
+  --  * avatar reclaim (#3284): candidate_sql scans member_avatar_media and
+  --    workspace_avatar_media (ids, status, timestamps, drive_file_id — not the
+  --    file name, mime or member); the "is it somebody's current avatar" test
+  --    reads member (granted above) and workspace.avatar_media_id, the one
+  --    column of `workspace` the notifier may read (#2448: no table SELECT).
+  --  * huddle ghost sweep (#2758): active_huddles_for_sweep selects huddle and
+  --    huddle_participant (ids and timestamps). Latent since v0.1.10: it only
+  --    runs with LiveKit configured on the notifier, which is why no deploy
+  --    tripped on it yet.
+  IF to_regclass('public.work_session_share') IS NOT NULL THEN
+    GRANT SELECT (workspace_id, session_id) ON work_session_share TO momo_notifier;
+  END IF;
+  IF to_regclass('public.member_avatar_media') IS NOT NULL THEN
+    GRANT SELECT (id, workspace_id, drive_file_id, status, created_at, drive_reclaimed_at)
+      ON member_avatar_media TO momo_notifier;
+  END IF;
+  IF to_regclass('public.workspace_avatar_media') IS NOT NULL THEN
+    GRANT SELECT (id, workspace_id, drive_file_id, status, created_at, drive_reclaimed_at)
+      ON workspace_avatar_media TO momo_notifier;
+  END IF;
+  IF to_regclass('public.workspace') IS NOT NULL THEN
+    GRANT SELECT (avatar_media_id) ON workspace TO momo_notifier;
+  END IF;
+  IF to_regclass('public.huddle') IS NOT NULL THEN
+    GRANT SELECT ON TABLE huddle TO momo_notifier;
+  END IF;
+  IF to_regclass('public.huddle_participant') IS NOT NULL THEN
+    GRANT SELECT ON TABLE huddle_participant TO momo_notifier;
+  END IF;
   IF to_regprocedure('acquire_t3_lifecycle_lock(uuid)') IS NOT NULL THEN
     EXECUTE 'GRANT EXECUTE ON FUNCTION acquire_t3_lifecycle_lock(uuid) TO momo_notifier';
   END IF;
