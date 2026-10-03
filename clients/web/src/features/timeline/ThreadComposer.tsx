@@ -10,6 +10,9 @@ import { InlineBanner } from "@/features/common/States";
 import { replyFailureMessage } from "@momo/core/features/timeline/actionCopy";
 import { THREAD_COMPOSER_PLACEHOLDER } from "@momo/core/features/chat/composerCopy";
 import { cn } from "@/design/lib/cn";
+import { useSession } from "@/app/session";
+import { mentionRoutingTarget, calledAgents } from "@momo/core/features/routing/mentionTargets";
+import { composerAgentNotice } from "@momo/core/features/ai/aiMention";
 import { Button } from "@/design/ui/button";
 import { useIsMobileShell } from "@/app/shellNav";
 import type { Directory } from "@/features/workspace/useWorkspace";
@@ -105,9 +108,16 @@ export function ThreadComposer({
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const justComposedRef = useRef(false);
   const isMobile = useIsMobileShell();
+  const viewer = useSession().session.member;
+  // 못 부르는(남의 구독·개인 키) 또는 쉬는(Claude 문의 중) 에이전트를 부르는 글이면 한 줄 (AIH-9).
+  const agentNotice = useMemo(
+    () => composerAgentNotice(calledAgents(mentionRoutingTarget(draft, directory.members)), viewer.id),
+    [draft, directory.members, viewer.id]
+  );
   const autocomplete = useComposerAutocomplete({
     value: draft,
     members: directory.members,
+    viewerHumanId: viewer.id,
     channels,
     inputRef: ref,
     onValueChange: (next) => {
@@ -248,6 +258,11 @@ export function ThreadComposer({
             cardAvailable={hasLocalCardHost(channelId)}
             surface="thread"
           />
+        )}
+        {agentNotice !== null && (
+          <p role="status" className="px-3 pb-2 text-meta text-warn" data-testid="thread-composer-agent-notice">
+            {agentNotice}
+          </p>
         )}
         <div className="relative">
           <ComposerAutocompleteList
