@@ -20,7 +20,7 @@ const SAMPLE_LINES: Record<GuideState, string> = {
   success: "이 맥에서 Claude Code를 찾았어요.",
   trouble: "서버에 닿지 않았어요. 주소를 다시 볼까요?",
   preparing: "성재의 Claude가 인사하러 오고 있어요.",
-  skipped: "나중에 설정 › AI 연결에서 이어가요.",
+  skipped: "나중에 AI에서 이어가요.",
 };
 
 /**
@@ -53,7 +53,7 @@ export function OnboardingGuideGallery() {
           <dl className="grid grid-cols-2 items-center gap-3 text-meta text-ink-muted">
             <dt>로그인 (1)</dt>
             <dd><OnboardingDots dots={onboardingDots("login", "sign-in")} /></dd>
-            <dt>로그인 + AI 연결 (2)</dt>
+            <dt>로그인 + AI 계정 (2)</dt>
             <dd>
               <OnboardingDots
                 dots={onboardingDots("login", "ai-connect", { aiConnect: true })}
@@ -63,7 +63,7 @@ export function OnboardingGuideGallery() {
             <dd><OnboardingDots dots={onboardingDots("invite", "join")} /></dd>
             <dt>claim (4), 둘째 칸</dt>
             <dd><OnboardingDots dots={onboardingDots("claim", "workspace-profile")} /></dd>
-            <dt>claim (4), AI 연결</dt>
+            <dt>claim (4), AI 계정</dt>
             <dd><OnboardingDots dots={onboardingDots("claim", "ai-connect")} /></dd>
           </dl>
         </div>

@@ -28,7 +28,7 @@ import {
 // ## props는 의도만 — 상태는 읽지 않는다
 //
 // 이 파서는 연결 상태·결과·키 꼬리 같은 것을 읽는 코드가 **없다**. 카드는 보는
-// 사람의 클라이언트가 자기 설정 스토어(설정 › AI 연결과 같은 훅·같은 판정)에서
+// 사람의 클라이언트가 자기 설정 스토어(AI과 같은 훅·같은 판정)에서
 // 살아 있는 상태를 읽어 그린다(G3 불변식). 누가 props에 `state:"ready"`를 넣어
 // 보내도 그것을 옮길 칸이 모델에 없다.
 //
@@ -44,7 +44,7 @@ import {
 //    에이전트가 아니다(부록 D·G4 마지막 줄). 행은 평범한 메시지로 보인다.
 // 2. **한 줄 폴백(degraded)** — 봉투는 맞는데 안쪽이 이 빌드가 아는 모양이 아니다:
 //    모르는 최상위 키, 모르는 `args` 키, enum 밖 값, 짝이 어긋난 인자, `label`
-//    모양 위반. 누가 보든 「{이름}에게 AI 연결을 제안했어요」 한 줄만 보이고
+//    모양 위반. 누가 보든 「{이름}에게 AI 계정 연결을 제안했어요」 한 줄만 보이고
 //    입력·버튼은 0이다. 반쯤 아는 제안으로 조작 카드를 세우지 않는다.
 // =============================================================================
 
@@ -214,9 +214,9 @@ function nameText(name: MemberNameParts): string {
   return name.handle ? `${name.name}(${name.handle})` : name.name;
 }
 
-/** 남에게 보이는 한 줄. 「곽성재에게 AI 연결을 제안했어요」. */
+/** 남에게 보이는 한 줄. 「곽성재에게 AI 계정 연결을 제안했어요」. */
 export function commandSuggestOneLine(card: CommandSuggestCard): string {
-  return `${attachRecipient(nameText(card.forMemberName), "person")} AI 연결을 제안했어요`;
+  return `${attachRecipient(nameText(card.forMemberName), "person")} AI 계정 연결을 제안했어요`;
 }
 
 /** 대상에게 보이는 카드 머리. 「hermes가 제안했어요」. */
@@ -228,8 +228,8 @@ export function commandSuggestHead(card: CommandSuggestCard): string {
 export const COMMAND_SUGGEST_ONLY_ME = "나에게만 조작돼요";
 
 /** 운영자(대상 아님) 한 줄의 문. 팀 키 줄만 펼친다. */
-export const COMMAND_SUGGEST_TEAM_OPEN = "팀 연결 보기";
-export const COMMAND_SUGGEST_TEAM_CLOSE = "팀 연결 접기";
+export const COMMAND_SUGGEST_TEAM_OPEN = "팀 AI 키 보기";
+export const COMMAND_SUGGEST_TEAM_CLOSE = "팀 AI 키 접기";
 
 /**
  * 폰 대상 카드의 내 계정 절(Q5, #2816 결재: 폰은 구독 로그인 불가).

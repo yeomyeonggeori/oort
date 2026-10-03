@@ -24,7 +24,7 @@ import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { AiLinkSection } from "./AiLinkSection";
 
 // =============================================================================
-// 설정 › AI 연결 틀 (#2877). 시안 §1·§6: 두 절(내 계정 · 이 맥 / 팀 연결 · 이
+// AI 틀 (#2877). 시안 §1·§6: 두 절(내 계정 · 이 맥 / 팀 AI 키 · 이
 // 서버), 곁판, 네 상태(비어 있음·운영자 아님·오프라인·브라우저 탭), 그리고
 // auth.json 붙여넣기 제거(기존 링크는 읽기 전용 줄 + 끊기만).
 // =============================================================================
@@ -118,7 +118,7 @@ const OAUTH_LINK = {
     accountLabel: "성재 개인",
     accessTokenPresent: true,
     accessTokenExpiresAtMs: 1_790_000_000_000,
-    notice: "개인 구독으로 동작하는 내부용 연결입니다.",
+    notice: "개인 구독으로 동작하는 내부용 연결이에요.",
   },
 };
 
@@ -255,16 +255,16 @@ afterEach(() => {
 });
 
 describe("틀: 두 절과 순서 (#2877 시안 §1)", () => {
-  it("내 계정 · 이 맥 → 팀 연결 · 이 서버 → 기본 AI 순서로 선다", async () => {
+  it("내 계정 · 이 맥 → 팀 AI 키 · 이 서버 → 기본 AI 순서로 선다", async () => {
     mount();
     await until("ai-link-row");
     const titles = Array.from(
       host?.querySelectorAll("#ai-my-accounts-title, #ai-team-title, #ai-defaults-title") ?? []
     ).map((h) => h.textContent);
-    expect(titles).toEqual(["내 계정", "팀 연결", "기본 AI"]);
+    expect(titles).toEqual(["내 계정", "팀 AI 키", "기본 AI"]);
     expect(q("ai-my-accounts")?.textContent).toContain("이 맥");
     expect(q("ai-team")?.textContent).toContain("이 서버");
-    expect(q("ai-team")?.textContent).toContain("운영자 설정");
+    expect(q("ai-team")?.textContent).toContain("운영자만 바꿔요");
   });
 
   it("팀 줄은 마스킹 꼬리만 보이고, 곁판은 줄의 ⋯ 로 열리고 닫힌다", async () => {
@@ -289,7 +289,7 @@ describe("틀: 두 절과 순서 (#2877 시안 §1)", () => {
     await until("ai-link-row");
     act(() => (q("ai-link-row-more") as HTMLButtonElement).click());
     expect(q("ai-link-check")).not.toBeNull();
-    // 문구는 「연결 끊기」(#2878: 팀 API 키 줄).
+    // 문구는 「연결 끊기」(#2878: 팀 AI 키 줄).
     expect(q("ai-link-unlink")?.textContent).toBe("연결 끊기");
     act(() => (q("ai-link-edit") as HTMLButtonElement).click());
     expect(q("ai-link-key-form")).not.toBeNull();
@@ -319,12 +319,12 @@ describe("예비 provider 순서는 운영자에게 접혀 남는다 (#2877)", (
   });
 });
 
-describe("기본 AI 표의 운영자 판정 = 팀 연결의 서버 답 (#2881)", () => {
+describe("기본 AI 표의 운영자 판정 = 팀 AI 키의 서버 답 (#2881)", () => {
   it("provider link 200이면 운영자 줄, 팀 요약 칸은 그 연결 이름", async () => {
     mount();
     const foot = await until("ai-defaults-team-foot");
     expect(foot.dataset.operator).toBe("yes");
-    expect(q("ai-default-summary")?.textContent).toContain("팀 API 키");
+    expect(q("ai-default-summary")?.textContent).toContain("팀 AI 키");
   });
 
   it("403이면 운영자 아님 줄, 팀 키가 있다고도 없다고도 하지 않는다", async () => {
@@ -332,7 +332,7 @@ describe("기본 AI 표의 운영자 판정 = 팀 연결의 서버 답 (#2881)",
     mount();
     const foot = await until("ai-defaults-team-foot");
     expect(foot.dataset.operator).toBe("no");
-    expect(q("ai-default-summary")?.textContent).toContain("팀 API 키 · 운영자 설정");
+    expect(q("ai-default-summary")?.textContent).toContain("팀 AI 키 · 운영자만 바꿔요");
     expect(q("ai-default-teamAgent")?.dataset.state).toBe("ok");
   });
 });
@@ -567,12 +567,12 @@ describe("auth.json 붙여넣기 제거 (#2877, 제안서 Q3)", () => {
 });
 
 describe("네 상태 (#2877 시안 §6)", () => {
-  it("비어 있음: 내 계정은 한 줄 + [구독 추가], 팀 연결은 한 줄 + [API 키 추가]", async () => {
+  it("비어 있음: 내 계정은 한 줄 + [구독 추가], 팀 AI 키는 한 줄 + [API 키 추가]", async () => {
     vi.mocked(fetchProviderLink).mockResolvedValue(EMPTY_LINK);
     mount();
     await until("ai-link-empty");
     await until("subscription-entry-open");
-    expect(q("subscription-entry-open")?.textContent).toBe("구독 추가");
+    expect(q("subscription-entry-open")?.textContent).toBe("AI 계정 추가");
     expect(q("subscription-entry")?.textContent).toContain("아직 연결한 구독이 없어요.");
     expect(q("ai-team-add")?.textContent).toContain("API 키 추가");
     expect(q("ai-link-row")).toBeNull();
@@ -583,7 +583,7 @@ describe("네 상태 (#2877 시안 §6)", () => {
     mount();
     const notice = await until("operator-notice");
     expect(notice.textContent).toContain("운영자만");
-    expect(q("ai-team")?.textContent).toContain("운영자 설정");
+    expect(q("ai-team")?.textContent).toContain("운영자만 바꿔요");
     expect(q("ai-team-add")).toBeNull();
     expect(q("ai-link-row")).toBeNull();
     await until("subscription-entry-open");
@@ -611,7 +611,7 @@ describe("네 상태 (#2877 시안 §6)", () => {
   });
 });
 
-describe("팀 연결 AA-7 (#2880 시안 §3·§4 2b)", () => {
+describe("팀 AI 키 AA-7 (#2880 시안 §3·§4 2b)", () => {
   const agent = (id: string, displayName: string, channelIds: string[], paused?: boolean): RosterMember => ({
     ...me("member"),
     id,
@@ -670,9 +670,9 @@ describe("팀 연결 AA-7 (#2880 시안 §3·§4 2b)", () => {
     });
     const dialog = await openUnlink();
     expect(dialog.getAttribute("role")).toBe("alertdialog");
-    expect(dialog.textContent).toContain("OpenAI · 팀 기본 연결을 끊을까요?");
+    expect(dialog.textContent).toContain("OpenAI · 팀 AI 키 연결을 끊을까요?");
     expect(dq("ai-link-unlink-body")?.textContent).toBe(
-      "이 키를 쓰는 팀 에이전트 2개가 대답할 수 없게 됩니다. 저장된 키는 서버에서 지워지고 다시 볼 수 없어요."
+      "이 키를 쓰는 팀 에이전트 2개가 대답할 수 없게 돼요. 저장된 키는 서버에서 지워지고 다시 볼 수 없어요."
     );
     const names = Array.from(document.querySelectorAll('[data-testid="ai-link-unlink-agent"]')).map((li) => li.textContent);
     expect(names).toEqual(["@김인턴 (전체 채널 · 일시정지)", "@hermes (리서치 채널)"]);

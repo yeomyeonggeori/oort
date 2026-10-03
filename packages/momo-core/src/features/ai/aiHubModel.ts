@@ -62,6 +62,7 @@ export interface AiGlossaryEntry {
   absorbs: readonly string[];
 }
 
+// design-preflight-allow: absorbs 는 용어집이 흡수하는 옛 말의 데이터이고 화면에 그려지지 않는다(시험·문서용, #3445)
 export const AI_GLOSSARY: readonly AiGlossaryEntry[] = [
   {
     id: "myAiAccount",
@@ -113,7 +114,7 @@ export const AI_GLOSSARY: readonly AiGlossaryEntry[] = [
   },
 ];
 
-/** 시안 용어집 아래 「금지」 줄. */
+/** 시안 용어집 아래 「금지」 줄. design-preflight-allow: 금지어를 말하는 문장이라 옛 말을 인용한다(화면에는 그려지지 않는다, #3445). */
 export const AI_GLOSSARY_BANS =
   "「AI 연결」은 허브 이름 「AI」로 흡수해요. 「합류」는 화면에서 안 써요(만들기·초대). 영어 약자 MCP·Agent Port는 외부 에이전트 연결 상세 화면의 괄호 안에서만 써요.";
 
@@ -221,8 +222,8 @@ export const AI_EXTERNAL_ROWS: readonly AiExternalRow[] = [
   {
     id: "hostedBotInvite",
     title: AI_EXTERNAL_SUBSECTIONS.hostedBotInvite,
-    legacy: "호스티드 에이전트 연결",
-    detailLegacy: "호스티드 에이전트 연결",
+    legacy: null,
+    detailLegacy: null,
     summary: "서버가 대신 돌려 주는 봇을 초대해요. 에이전트 만들기 목록에서도 열려요.",
     detail: [],
     countNoun: "봇",
@@ -423,7 +424,7 @@ export type AiTeamFeatureId = "appCommand" | "teamAgent" | "greeting" | "channel
 
 const TEAM_FEATURE_NAME: Readonly<Record<AiTeamFeatureId, string>> = {
   appCommand: "말로 앱 설정 바꾸기",
-  teamAgent: "팀 에이전트 대답",
+  teamAgent: "팀 에이전트의 답",
   greeting: "첫 인사",
   channelSummary: "채널 요약",
 };
@@ -892,6 +893,7 @@ export interface LegacyTermEntry {
   note?: string;
 }
 
+// design-preflight-allow: 옛 말을 정의하는 표. 게이트(design_preflight_ast.mjs loadLegacyTerms)의 정본이라 옛 말 글자가 여기 있어야 한다(#3445)
 export const LEGACY_TERM_MAP: readonly LegacyTermEntry[] = [
   { old: "AI 연결", next: "AI", grepGate: true, note: "허브 이름으로 흡수" },
   { old: "합류", next: "만들기 · 초대", grepGate: true, note: "합류시키기 포함. 화면에서 쓰지 않아요" },
@@ -914,6 +916,8 @@ export const LEGACY_TERM_MAP: readonly LegacyTermEntry[] = [
   { old: "로컬 터미널 기본 로그인", next: "내 AI 계정", grepGate: true },
   { old: "구독 추가", next: "내 AI 계정", grepGate: true },
   { old: "1회용 연결 값", next: "외부 에이전트 연결", grepGate: true, note: "발급 화면에서만 사용" },
+  { old: "오너", next: "소유자", grepGate: true, note: "워크스페이스 역할 이름은 화면에서 「소유자」로 써요" },
+  { old: "구독 붙이기", next: "에이전트 만들기", grepGate: true },
   { old: "내 계정", next: "내 AI 계정", grepGate: false, note: "프로필 화면의 「내 계정」과 겹쳐요" },
   { old: "이 맥", next: "내 AI 계정", grepGate: false, note: "「이 맥의 Claude Code」 같은 정상 문장이 있어요" },
   { old: "구독", next: "내 AI 계정 · 내 구독", grepGate: false, note: "새 문구도 「내 구독」을 써요" },

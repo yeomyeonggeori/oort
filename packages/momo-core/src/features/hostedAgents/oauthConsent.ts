@@ -226,17 +226,17 @@ export function oauthConsentConsequence(
   const name = attachParticle(hostedAgentLabel(agentLabel), "topic");
   const actions = scopeActionList(approvedScopes);
   if (channelCount === 0) {
-    return `${name} 접속만 하고 어떤 대화에도 닿지 못합니다. 채널을 하나도 승인하지 않았기 때문입니다.`;
+    return `${name} 접속만 하고 어떤 대화에도 닿지 못해요. 채널을 하나도 승인하지 않았기 때문이에요.`;
   }
   if (actions.length === 0) {
-    return `${name} ${channelCount}개 채널의 멤버가 되지만 읽기도 쓰기도 하지 못합니다. 접속 말고 아무 권한도 고르지 않았기 때문입니다.`;
+    return `${name} ${channelCount}개 채널의 멤버가 되지만 읽기도 쓰기도 하지 못해요. 접속 말고 아무 권한도 고르지 않았기 때문이에요.`;
   }
   const list = actions.join(", ");
   // 주어는 하나다. 앞에 "이 외부 에이전트가"를 덧대면 조사가 붙은 이름(`Grok은`)과
   // 겹쳐 한 대상에 주격·주제격 두 표지가 달린다(design-review M1). 외부라는 사실은
   // 제목·머리글·보안 문구가 이미 말하므로, 이 문장은 wizard 의 `approvalConsequence`
   // 와 같은 단일 주어 형태를 그대로 쓴다.
-  return `승인하면 ${name} ${channelCount}개 채널에서 ${list}를 할 수 있습니다. 승인하지 않은 채널에서는 이 에이전트를 멘션해도 작업이 만들어지지 않습니다.`;
+  return `승인하면 ${name} ${channelCount}개 채널에서 ${list}를 할 수 있어요. 승인하지 않은 채널에서는 이 에이전트를 멘션해도 작업이 만들어지지 않아요.`;
 }
 
 // ---- 전송 본문 --------------------------------------------------------------
@@ -389,11 +389,11 @@ export function isOauthAlreadyDecided(error: unknown): boolean {
 function oauthActionPrefix(action: OauthConsentAction): string {
   switch (action) {
     case "preview":
-      return "인가 요청을 불러오지 못했습니다.";
+      return "인가 요청을 불러오지 못했어요.";
     case "approve":
-      return "승인을 저장하지 못했습니다.";
+      return "승인을 저장하지 못했어요.";
     case "deny":
-      return "거부를 저장하지 못했습니다.";
+      return "거부를 저장하지 못했어요.";
   }
 }
 
@@ -411,23 +411,23 @@ export function oauthConsentFailureMessage(
   if (error instanceof ApiError) {
     switch (error.status) {
       case 400:
-        return `${prefix} 고른 권한이나 채널을 서버가 거절했습니다. 요청된 범위 안에서만 승인할 수 있습니다.`;
+        return `${prefix} 고른 권한이나 채널을 서버가 거절했어요. 요청된 범위 안에서만 승인할 수 있어요.`;
       case 401:
-        return `${prefix} 로그인 세션이 만료되었습니다. 다시 로그인한 뒤 이 요청을 여세요.`;
+        return `${prefix} 로그인 세션이 만료되었어요. 다시 로그인한 뒤 이 요청을 여세요.`;
       case 403:
       case 404:
         // non-enumerable (규율 4). 사유를 나누지 않는다.
-        return `${prefix} 이 요청은 만료됐거나 이미 처리됐거나 이 워크스페이스에서 열 수 없는 요청입니다. 이 화면에서는 아무 권한도 열리지 않습니다. 필요하면 provider에서 연결을 다시 시작하세요.`;
+        return `${prefix} 이 요청은 만료됐거나 이미 처리됐거나 이 워크스페이스에서 열 수 없는 요청이에요. 이 화면에서는 아무 권한도 열리지 않아요. 필요하면 provider에서 연결을 다시 시작하세요.`;
       case 409:
-        return `${prefix} 이 요청은 이미 처리됐습니다. 결정은 하나만 기록되고 이 화면에서는 더 진행하지 않습니다.`;
+        return `${prefix} 이 요청은 이미 처리됐어요. 결정은 하나만 기록되고 이 화면에서는 더 진행하지 않아요.`;
       case 429:
-        return `${prefix} 요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.`;
+        return `${prefix} 요청이 너무 잦아요. 잠시 뒤에 다시 시도하세요.`;
       default:
         return `${prefix} 잠시 뒤에 다시 시도하세요.`;
     }
   }
   if (error instanceof WireShapeError) {
-    return `${prefix} 서버 응답을 확인하지 못했습니다. provider에서 연결을 다시 시작하세요.`;
+    return `${prefix} 서버 응답을 확인하지 못했어요. provider에서 연결을 다시 시작하세요.`;
   }
   return `${prefix} 잠시 뒤에 다시 시도하세요.`;
 }
@@ -579,44 +579,44 @@ export function oauthConsentFacts(preview: OauthConsentPreview): OauthConsentFac
 export const OAUTH_CONSENT_TITLE = "외부 에이전트 연결 승인";
 
 export const OAUTH_CONSENT_LEAD =
-  "외부 provider가 이 워크스페이스의 전용 에이전트로 접속하려고 합니다. 아래 권한을 직접 확인하고 승인하거나 거부하세요. 감지됐다는 사실은 권한의 근거가 아닙니다.";
+  "외부 provider가 이 워크스페이스의 전용 에이전트로 접속하려고 해요. 아래 권한을 직접 확인하고 승인하거나 거부하세요. 감지됐다는 사실은 권한의 근거가 아니에요.";
 
 /** clientId·redirectUri 가 무엇인지 (규율 3). 운영자가 검증한 값임을 말한다. */
 export const OAUTH_CONSENT_CLIENT_NOTE =
-  "요청한 클라이언트와 돌아갈 주소는 이 워크스페이스 운영자가 미리 등록한 값입니다. 등록되지 않은 provider는 이 화면까지 오지 못합니다.";
+  "요청한 클라이언트와 돌아갈 주소는 이 워크스페이스 운영자가 미리 등록한 값이에요. 등록되지 않은 provider는 이 화면까지 오지 못해요.";
 
 /** 승인이 사람만의 보안 결정이고, 닫기·뒤로가기가 권한을 열지 않는다는 사실. */
 export const OAUTH_CONSENT_SECURITY_NOTE =
-  "이 승인은 사람만 내릴 수 있는 보안 결정입니다. 이 창을 닫거나 뒤로 가면 아무 권한도 열리지 않고, 그것은 거부와 같습니다. 승인은 아래 버튼으로만 일어납니다.";
+  "이 승인은 사람만 내릴 수 있는 보안 결정이에요. 이 창을 닫거나 뒤로 가면 아무 권한도 열리지 않고, 그것은 거부와 같아요. 승인은 아래 버튼으로만 일어나요.";
 
 /** candidate 하나를 골라야 하는 자리의 안내. */
 export const OAUTH_CONSENT_PICK_AGENT_HINT =
-  "이 인가는 대기 중인 전용 에이전트 하나에 묶입니다. 어느 에이전트로 접속을 허용할지 고르세요.";
+  "이 인가는 대기 중인 전용 에이전트 하나에 묶이에요. 어느 에이전트로 접속을 허용할지 고르세요.";
 
 /** candidate 가 없을 때. capability 0 의 정직한 종료. */
 export const OAUTH_CONSENT_NO_CANDIDATE_HEADLINE =
-  "이 요청에 묶을 대기 중인 연결이 없습니다.";
+  "이 요청에 묶을 대기 중인 연결이 없어요.";
 
 export const OAUTH_CONSENT_NO_CANDIDATE_DETAIL =
-  "이 워크스페이스에는 이 인가 요청을 받을 대기 중인 OAuth 전용 에이전트가 없습니다. 이 화면에서는 아무 권한도 열리지 않습니다. provider에서 연결을 다시 시작하세요.";
+  "이 워크스페이스에는 이 인가 요청을 받을 대기 중인 OAuth 전용 에이전트가 없어요. 이 화면에서는 아무 권한도 열리지 않아요. provider에서 연결을 다시 시작하세요.";
 
 /** 요청이 만료된 자리. */
-export const OAUTH_CONSENT_EXPIRED_HEADLINE = "이 인가 요청이 만료됐습니다.";
+export const OAUTH_CONSENT_EXPIRED_HEADLINE = "이 인가 요청이 만료됐어요.";
 
 export const OAUTH_CONSENT_EXPIRED_DETAIL =
-  "만료된 요청은 승인할 수 없습니다. 이 화면에서는 아무 권한도 열리지 않습니다. provider에서 연결을 다시 시작하세요.";
+  "만료된 요청은 승인할 수 없어요. 이 화면에서는 아무 권한도 열리지 않아요. provider에서 연결을 다시 시작하세요.";
 
 /** 요청 id 없이 이 화면에 닿은 경우(잘못된 링크). */
-export const OAUTH_CONSENT_MISSING_HEADLINE = "인가 요청을 찾을 수 없습니다.";
+export const OAUTH_CONSENT_MISSING_HEADLINE = "인가 요청을 찾을 수 없어요.";
 
 export const OAUTH_CONSENT_MISSING_DETAIL =
-  "이 주소에는 확인할 인가 요청이 없습니다. provider의 연결 화면에서 다시 시작하면 올바른 요청으로 이 화면이 열립니다.";
+  "이 주소에는 확인할 인가 요청이 없어요. provider의 연결 화면에서 다시 시작하면 올바른 요청으로 이 화면이 열려요.";
 
 /** non-enumerable 종료 화면(404/403). */
-export const OAUTH_CONSENT_UNAVAILABLE_HEADLINE = "이 인가 요청을 열 수 없습니다.";
+export const OAUTH_CONSENT_UNAVAILABLE_HEADLINE = "이 인가 요청을 열 수 없어요.";
 
 export const OAUTH_CONSENT_UNAVAILABLE_DETAIL =
-  "이 요청은 만료됐거나 이미 처리됐거나 이 워크스페이스에서 열 수 없는 요청입니다. 이 화면에서는 아무 권한도 열리지 않습니다. 필요하면 provider에서 연결을 다시 시작하세요.";
+  "이 요청은 만료됐거나 이미 처리됐거나 이 워크스페이스에서 열 수 없는 요청이에요. 이 화면에서는 아무 권한도 열리지 않아요. 필요하면 provider에서 연결을 다시 시작하세요.";
 
 /**
  * 이미 하나의 terminal decision 이 기록된 자리(409).
@@ -625,26 +625,26 @@ export const OAUTH_CONSENT_UNAVAILABLE_DETAIL =
  * dismissible 배너가 아니다: 배너는 approve/deny 버튼을 살려 둔 채 "더 진행하지
  * 않습니다"라고 말해 자기모순을 그린다(design-review H1).
  */
-export const OAUTH_CONSENT_ALREADY_DECIDED_HEADLINE = "이 요청은 이미 처리됐습니다.";
+export const OAUTH_CONSENT_ALREADY_DECIDED_HEADLINE = "이 요청은 이미 처리됐어요.";
 
 export const OAUTH_CONSENT_ALREADY_DECIDED_DETAIL =
-  "결정은 하나만 기록되고 이 화면에서는 더 진행하지 않습니다. 필요하면 provider에서 연결을 다시 시작하세요.";
+  "결정은 하나만 기록되고 이 화면에서는 더 진행하지 않아요. 필요하면 provider에서 연결을 다시 시작하세요.";
 
 /** 결정 뒤 provider 로 돌아가는 짧은 종료. */
-export const OAUTH_CONSENT_RETURNING = "결정을 저장했습니다. provider로 돌아가는 중입니다.";
+export const OAUTH_CONSENT_RETURNING = "결정을 저장했어요. provider로 돌아가는 중이에요.";
 
 /** 로그아웃 상태에서 이 화면에 온 사람에게. */
 export const OAUTH_CONSENT_SIGNIN_HEADLINE = "먼저 로그인하세요.";
 
 export const OAUTH_CONSENT_SIGNIN_DETAIL =
-  "이 인가 요청을 확인하려면 이 워크스페이스에 로그인해야 합니다. 로그인하면 이 요청으로 돌아옵니다.";
+  "이 인가 요청을 확인하려면 이 워크스페이스에 로그인해야 해요. 로그인하면 이 요청으로 돌아와요.";
 
 /** 로딩 중 스크린리더가 읽을 한 문장. 비밀값은 담기지 않는다. */
-export const OAUTH_CONSENT_LOADING_SR = "인가 요청을 불러오는 중입니다.";
+export const OAUTH_CONSENT_LOADING_SR = "인가 요청을 불러오는 중이에요.";
 
 /** 오프라인 배너. 승인·거부는 서버에 닿아야 하므로 다시 연결될 때까지 막힌다. */
 export const OAUTH_CONSENT_OFFLINE_NOTE =
-  "연결이 끊겼습니다. 승인과 거부는 다시 연결된 뒤에 할 수 있습니다.";
+  "연결이 끊겼어요. 승인과 거부는 다시 연결된 뒤에 할 수 있어요.";
 
 // 화면이 세우는 구조적 라벨들. React 가 얇게 유지되도록 문구는 여기 산다
 // (design-taste-web §0, design-review N1). 값은 화면이 조립하되 낱말은 이 파일이 든다.
@@ -653,13 +653,13 @@ export const OAUTH_CONSENT_WORKSPACE_FALLBACK = "이 워크스페이스";
 export const OAUTH_CONSENT_AGENT_KEY = "전용 에이전트";
 export const OAUTH_CONSENT_CANDIDATE_LEGEND = "접속을 허용할 전용 에이전트";
 export const OAUTH_CONSENT_CANDIDATE_DETAIL =
-  "이 에이전트로 외부 provider의 접속을 허용합니다.";
+  "이 에이전트로 외부 provider의 접속을 허용해요.";
 export const OAUTH_CONSENT_SCOPES_LEGEND = "요청된 권한";
 export const OAUTH_CONSENT_SCOPES_HINT =
-  "provider가 요청한 권한입니다. 좁힐 수는 있어도 넓힐 수는 없습니다.";
+  "provider가 요청한 권한이에요. 좁힐 수는 있어도 넓힐 수는 없어요.";
 export const OAUTH_CONSENT_CHANNELS_LEGEND = "닿을 채널";
 export const OAUTH_CONSENT_CHANNELS_HINT =
-  "고른 채널에서만 이 에이전트가 부름을 받습니다.";
+  "고른 채널에서만 이 에이전트가 부름을 받아요.";
 
 export const OAUTH_CONSENT_APPROVE_LABEL = "이 범위로 승인";
 export const OAUTH_CONSENT_APPROVE_BUSY = "승인 저장 중";

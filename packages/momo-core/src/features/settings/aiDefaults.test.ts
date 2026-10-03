@@ -85,20 +85,20 @@ describe("개인 행 선택지와 모델 줄", () => {
   it("운영자가 아니면(403)·로딩·오류면 팀 키가 있다고도 없다고도 하지 않는다", () => {
     const hidden = input({ teamKey: { status: "hidden" } });
     expect(optionsFor("appCommand", hidden)).toEqual([]);
-    expect(resolveRow("summary", {}, hidden)).toEqual({ state: "ok", using: "팀 API 키 · 운영자 설정", note: null });
-    expect(resolveRow("appCommand", {}, input({ teamKey: { status: "loading" } })).using).toBe("팀 연결을 확인하고 있어요");
-    expect(resolveRow("teamAgent", {}, input({ teamKey: { status: "error" } })).using).toBe("팀 키만 · 팀 연결을 불러오지 못했어요");
+    expect(resolveRow("summary", {}, hidden)).toEqual({ state: "ok", using: "팀 AI 키 · 운영자만 바꿔요", note: null });
+    expect(resolveRow("appCommand", {}, input({ teamKey: { status: "loading" } })).using).toBe("팀 AI 키를 확인하고 있어요");
+    expect(resolveRow("teamAgent", {}, input({ teamKey: { status: "error" } })).using).toBe("팀 키만 · 팀 AI 키를 불러오지 못했어요");
   });
 
   it("팀 키 이름은 서버 주소의 호스트만(선택 칸 폭), 출처 글자는 반복하지 않는다", () => {
     const [team] = optionsFor("appCommand", input());
-    expect(team?.name).toBe("팀 API 키 · api.openai.com");
+    expect(team?.name).toBe("팀 AI 키 · api.openai.com");
     expect(team?.source).toBeNull();
     expect(teamKeyHost("https://openrouter.ai/api/v1")).toBe("openrouter.ai");
     expect(teamKeyHost("사내 게이트웨이")).toBe("사내 게이트웨이");
   });
 
-  it("모의 응답뿐이면 팀 연결 절과 같은 말을 한다(대답할 수 없음이 아니라 모의 응답)", () => {
+  it("모의 응답뿐이면 팀 AI 키 절과 같은 말을 한다(대답할 수 없음이 아니라 모의 응답)", () => {
     const mock = input({ teamKey: { status: "mock" } });
     const result = resolveRow("teamAgent", {}, mock);
     expect(result).toMatchObject({ state: "fallback", using: "모의 응답" });
@@ -224,8 +224,8 @@ describe("계정 해제의 영향", () => {
   it("그 계정을 고른 행을 이름과, 해제 뒤 표가 보일 글자로", () => {
     const impact = rowsUsingAccount(prefs, { harness: "claude", label: "회사" });
     expect(impact.map((item) => [item.title, item.fallback])).toEqual([
-      ["로컬 터미널 새 세션", "이 맥 기본 로그인"],
-      ["원격 작업 기본 계정", "매번 묻기"],
+      ["내 터미널의 새 세션", "이 맥 기본 로그인"],
+      ["폰에서 시작하는 작업", "매번 묻기"],
     ]);
     // 해제 창의 말 = 해제(forgetAccount) 뒤 표가 그리는 글자.
     const after = forgetAccount(prefs, { harness: "claude", label: "회사" });

@@ -248,7 +248,7 @@ describe("RED PROOF ⑤ 증거 없는 처분은 저장 대상이 아니다", () 
     expect(acknowledgeReady("connector", "delete", "목록에서 사라짐")).toBe(true);
     expect(acknowledgeReady("connector", null, "")).toBe(true);
     // 이 종류가 받지 않는 처분은 증거가 있어도 저장 대상이 아니다.
-    expect(acknowledgeReady("connector", "preserve", "남겨 뒀습니다")).toBe(false);
+    expect(acknowledgeReady("connector", "preserve", "남겨 뒀어요")).toBe(false);
   });
 
   it("본문은 legal 하지 않은 처분을 싣지 않는다 (fail-closed)", () => {
@@ -259,19 +259,19 @@ describe("RED PROOF ⑤ 증거 없는 처분은 저장 대상이 아니다", () 
       currentStatus: "inactive",
     });
     expect(
-      buildAcknowledgement("bot", "absent", "delete", "  지웠습니다  ")
+      buildAcknowledgement("bot", "absent", "delete", "  지웠어요  ")
     ).toEqual({
       currentStatus: "absent",
       disposition: "delete",
-      evidence: "지웠습니다",
+      evidence: "지웠어요",
     });
   });
 
   it("처분을 기록하기 전에 되돌릴 수 없다는 사실을 묻는다", () => {
     const question = acknowledgeQuestion("bot", "delete");
     expect(question).toContain("대화 기록");
-    expect(question).toContain("다시 정할 수 없습니다");
-    expect(acknowledgeQuestion("bot", "preserve")).toContain("다시 정할 수 없습니다");
+    expect(question).toContain("다시 정할 수 없어요");
+    expect(acknowledgeQuestion("bot", "preserve")).toContain("다시 정할 수 없어요");
   });
 
   it("본문에 출처를 실을 칸이 없다", () => {

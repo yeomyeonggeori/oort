@@ -84,7 +84,7 @@ import {
 } from "./aiMyAccountsModel";
 
 // =============================================================================
-// 설정 › AI 연결 › 내 계정 · 이 맥 (#2877 틀, #2938 감지, #2878 연결 지점).
+// AI › 내 계정 · 이 맥 (#2877 틀, #2938 감지, #2878 연결 지점).
 //
 // 이 절이 싣는 것은 이 맥의 공식 CLI 구독이다. 줄은 두 종류다(코어
 // `harnessProfiles.ts`).
@@ -108,7 +108,7 @@ import {
 export const MY_ACCOUNTS_HEADING_ID = "ai-my-accounts-title";
 
 const OWN_ACCOUNT_FOOT =
-  "본인 계정만 추가하세요. 이 계정은 이 맥에서 나만 씁니다. 팀 에이전트는 이 계정을 쓰지 않습니다.";
+  "본인 계정만 추가하세요. 이 계정은 이 맥에서 나만 써요. 팀 에이전트는 이 계정을 쓰지 않아요.";
 
 const PROFILES_KEY = ["local", "harness-profiles"] as const;
 
@@ -130,7 +130,7 @@ export function AiMyAccountsSection({
   scope = "이 맥",
   agentLineFor,
 }: {
-  /** 운영자면 팀 연결 절의 키 폼을 연다. 없으면 추가 창의 API 키 선택이 잠긴다. */
+  /** 운영자면 팀 AI 키 절의 키 폼을 연다. 없으면 추가 창의 API 키 선택이 잠긴다. */
   onAddApiKey?: () => void;
   title?: string;
   scope?: string;
@@ -593,7 +593,7 @@ const AddButton = forwardRef<HTMLButtonElement, { onClick: () => void }>(
         onClick={onClick}
         data-testid="subscription-entry-open"
       >
-        구독 추가
+        AI 계정 추가
       </Button>
     );
   },

@@ -236,11 +236,11 @@ export function webhookLabelIssue(raw: string): WebhookLabelIssue | null {
 export function webhookLabelIssueMessage(issue: WebhookLabelIssue): string {
   switch (issue) {
     case "empty":
-      return "이름을 입력하세요. 목록에서 이 웹훅을 구별하는 유일한 값입니다.";
+      return "이름을 입력하세요. 목록에서 이 웹훅을 구별하는 유일한 값이에요.";
     case "tooLong":
-      return `이름은 ${WEBHOOK_LABEL_MAX}자까지 쓸 수 있습니다.`;
+      return `이름은 ${WEBHOOK_LABEL_MAX}자까지 쓸 수 있어요.`;
     case "controlCharacter":
-      return "이름에 제어 문자를 쓸 수 없습니다. 붙여넣은 값이라면 줄바꿈이 섞였는지 확인하세요.";
+      return "이름에 제어 문자를 쓸 수 없어요. 붙여넣은 값이라면 줄바꿈이 섞였는지 확인하세요.";
   }
 }
 
@@ -263,13 +263,13 @@ export const WEBHOOK_MODES: readonly WebhookModeChoice[] = [
     id: "native",
     label: "oort 서명",
     detail:
-      "HMAC-SHA256 서명 비밀을 한 번만 보여줍니다. 수신 URL은 목록에서 다시 복사할 수 있습니다.",
+      "HMAC-SHA256 서명 비밀을 한 번만 보여줘요. 수신 URL은 목록에서 다시 복사할 수 있어요.",
   },
   {
     id: "slack_compatible",
     label: "Slack 호환",
     detail:
-      "URL 자체가 비밀값입니다. 지금 한 번만 보이고 목록에서 다시 볼 수 없습니다.",
+      "URL 자체가 비밀값이에요. 지금 한 번만 보이고 목록에서 다시 볼 수 없어요.",
   },
 ];
 
@@ -368,13 +368,13 @@ export type WebhookAction = "list" | "create" | "rotate" | "revoke";
 function actionPrefix(action: WebhookAction): string {
   switch (action) {
     case "list":
-      return "웹훅 목록을 불러오지 못했습니다.";
+      return "웹훅 목록을 불러오지 못했어요.";
     case "create":
-      return "웹훅을 만들지 못했습니다.";
+      return "웹훅을 만들지 못했어요.";
     case "rotate":
-      return "비밀값을 회전하지 못했습니다.";
+      return "비밀값을 회전하지 못했어요.";
     case "revoke":
-      return "웹훅을 폐기하지 못했습니다.";
+      return "웹훅을 폐기하지 못했어요.";
   }
 }
 
@@ -382,20 +382,20 @@ function statusAdvice(action: WebhookAction, status: number): string {
   switch (status) {
     case 400:
       return action === "rotate"
-        ? "겹침 시간이 서버가 허용하는 범위를 벗어났습니다."
-        : "채널, 수신 방식, 이름 중 하나를 서버가 거절했습니다. 값을 확인하고 다시 시도하세요.";
+        ? "겹침 시간이 서버가 허용하는 범위를 벗어났어요."
+        : "채널, 수신 방식, 이름 중 하나를 서버가 거절했어요. 값을 확인하고 다시 시도하세요.";
     case 401:
-      return "로그인 세션이 만료되었습니다. 다시 로그인한 뒤 시도하세요.";
+      return "로그인 세션이 만료되었어요. 다시 로그인한 뒤 시도하세요.";
     case 403:
-      return "이 워크스페이스의 웹훅은 오너나 관리자만 관리할 수 있습니다. 관리자에게 요청하세요.";
+      return "이 워크스페이스의 웹훅은 소유자나 관리자만 관리할 수 있어요. 관리자에게 요청하세요.";
     case 404:
       return action === "create"
-        ? "고른 채널을 서버에서 찾지 못했습니다. 목록을 다시 불러온 뒤 다른 채널을 고르세요."
-        : "이 웹훅이 서버에 없습니다. 목록을 다시 불러오세요.";
+        ? "고른 채널을 서버에서 찾지 못했어요. 목록을 다시 불러온 뒤 다른 채널을 고르세요."
+        : "이 웹훅이 서버에 없어요. 목록을 다시 불러오세요.";
     case 409:
-      return "이미 폐기된 웹훅입니다. 목록을 다시 불러오세요.";
+      return "이미 폐기된 웹훅이에요. 목록을 다시 불러오세요.";
     case 429:
-      return "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.";
+      return "요청이 너무 잦아요. 잠시 뒤에 다시 시도하세요.";
     default:
       return "잠시 뒤에 다시 시도하세요.";
   }
@@ -423,7 +423,7 @@ export function webhookFailureMessage(
     return `${prefix} ${statusAdvice(action, error.status)}`;
   }
   if (error instanceof WireShapeError) {
-    return `${prefix} 서버 응답을 확인하지 못했습니다. 목록을 다시 불러오세요.`;
+    return `${prefix} 서버 응답을 확인하지 못했어요. 목록을 다시 불러오세요.`;
   }
   return `${prefix} 잠시 뒤에 다시 시도하세요.`;
 }
@@ -443,8 +443,8 @@ export function revealHeadline(mode: WebhookMode): string {
 
 export function revealWarning(mode: WebhookMode): string {
   return mode === "native"
-    ? "이 화면을 벗어나면 서명 비밀을 다시 볼 수 없습니다. 서버는 원문을 보관하지 않습니다."
-    : "이 화면을 벗어나면 이 수신 URL을 다시 볼 수 없습니다. URL 자체가 비밀값입니다.";
+    ? "이 화면을 벗어나면 서명 비밀을 다시 볼 수 없어요. 서버는 원문을 보관하지 않아요."
+    : "이 화면을 벗어나면 이 수신 URL을 다시 볼 수 없어요. URL 자체가 비밀값이에요.";
 }
 
 export interface WebhookDetailRow {
@@ -495,11 +495,11 @@ export function overlapExpiryLabel(seconds: number): string {
 export function rotateConfirmQuestion(label: string): string {
   return `${label}의 비밀값을 회전하면 새 값이 한 번만 표시되고, 이전 값은 ${overlapExpiryLabel(
     WEBHOOK_ROTATE_OVERLAP_SECONDS
-  )}됩니다. 회전할까요?`;
+  )}돼요. 회전할까요?`;
 }
 
 export function revokeConfirmQuestion(label: string): string {
-  return `${label}의 모든 비밀값이 즉시 무효화되고 되돌릴 수 없습니다. 폐기할까요?`;
+  return `${label}의 모든 비밀값이 즉시 무효화되고 되돌릴 수 없어요. 폐기할까요?`;
 }
 
 /**
@@ -509,11 +509,11 @@ export function revokeConfirmQuestion(label: string): string {
  * 없다"는 뜻이다. 무슨 일이 있었는지에서 멈추면 할 일이 없는 사람을 남긴다.
  */
 export const UNRESOLVABLE_RECEIVE_URL_NOTICE =
-  "서버가 이 서버 주소로 해석되는 수신 URL을 주지 않았습니다. 이 웹훅을 폐기하고 다시 만드세요.";
+  "서버가 이 서버 주소로 해석되는 수신 URL을 주지 않았어요. 이 웹훅을 폐기하고 다시 만드세요.";
 
 /** Shown on a Slack-compatible row, where the list can never show the URL again. */
 export const SLACK_URL_RECOVERY_HINT =
-  "Slack 호환 수신 URL은 서버에 저장되지 않습니다. 새 URL이 필요하면 비밀값을 회전하세요.";
+  "Slack 호환 수신 URL은 서버에 저장되지 않아요. 새 URL이 필요하면 비밀값을 회전하세요.";
 
 // --- delivery failures ------------------------------------------------------
 
@@ -539,7 +539,7 @@ export const SLACK_URL_RECOVERY_HINT =
  * 아직 정직이 아니므로, 목록 바로 아래 평문으로 나온다.
  */
 export const WEBHOOK_DELIVERY_RECORD_NOTE =
-  "받은 전송은 채널의 메시지로 남습니다. 거절된 전송은 보낸 쪽에 코드로만 돌아가고, 이 화면에는 기록이 남지 않습니다.";
+  "받은 전송은 채널의 메시지로 남아요. 거절된 전송은 보낸 쪽에 코드로만 돌아가고, 이 화면에는 기록이 남지 않아요.";
 
 /**
  * 접힌 참고 자료의 이름표.
@@ -553,16 +553,16 @@ export const WEBHOOK_INGRESS_NOTES_LABEL = "웹훅이 조용할 때: 보낸 쪽�
 export function webhookIngressNotes(mode: WebhookMode): readonly string[] {
   if (mode === "native") {
     return [
-      "서명, 타임스탬프, 키 ID 중 하나라도 맞지 않으면 401로 거절됩니다. 보내는 쪽의 시계와 키 ID를 먼저 확인하세요.",
-      "지원하지 않는 본문은 400, 256KB를 넘는 본문은 413으로 거절됩니다.",
-      "같은 전송 ID가 다시 오면 메시지를 새로 만들지 않고 원래 접수를 200으로 돌려줍니다.",
-      "짧은 시간에 너무 많이 보내면 429로 거절됩니다.",
+      "서명, 타임스탬프, 키 ID 중 하나라도 맞지 않으면 401로 거절돼요. 보내는 쪽의 시계와 키 ID를 먼저 확인하세요.",
+      "지원하지 않는 본문은 400, 256KB를 넘는 본문은 413으로 거절돼요.",
+      "같은 전송 ID가 다시 오면 메시지를 새로 만들지 않고 원래 접수를 200으로 돌려줘요.",
+      "짧은 시간에 너무 많이 보내면 429로 거절돼요.",
     ];
   }
   return [
-    "URL이 틀렸거나 회전, 폐기된 뒤라면 401로 거절됩니다.",
-    "blocks 필드가 있으면 400으로 거절됩니다. text와 attachments만 읽습니다.",
-    "같은 본문이 짧은 시간 안에 다시 오면 원래 접수를 200으로 돌려줍니다.",
-    "256KB를 넘는 본문은 413, 너무 잦은 요청은 429로 거절됩니다.",
+    "URL이 틀렸거나 회전, 폐기된 뒤라면 401로 거절돼요.",
+    "blocks 필드가 있으면 400으로 거절돼요. text와 attachments만 읽어요.",
+    "같은 본문이 짧은 시간 안에 다시 오면 원래 접수를 200으로 돌려줘요.",
+    "256KB를 넘는 본문은 413, 너무 잦은 요청은 429로 거절돼요.",
   ];
 }

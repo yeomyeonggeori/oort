@@ -80,7 +80,7 @@ describe("차분한 문구에는 오류 어휘가 없다", () => {
   it("멈춤 안내는 사람이 직접 쓰는 길만 말한다", () => {
     expect(calmDetail("paused", "claude")).toContain("터미널에서 직접");
     expect(calmLine("paused", "claude")).toBe(
-      "이 서버에서는 Claude Code 구독 에이전트가 잠시 멈춰 있어요."
+      "이 서버에서는 Claude Code 구독으로 쓰는 에이전트가 잠시 멈춰 있어요."
     );
   });
 });

@@ -351,8 +351,8 @@ export function WebhookSection({
   }
 
   const lines = [
-    "외부 서비스가 이 워크스페이스의 채널로 알림을 보내도록 수신 주소를 발급합니다.",
-    "비밀값은 발급 직후 한 번만 보입니다. 서버는 원문을 보관하지 않습니다.",
+    "외부 서비스가 이 워크스페이스의 채널로 알림을 보내도록 수신 주소를 발급해요.",
+    "비밀값은 발급 직후 한 번만 보여요. 서버는 원문을 보관하지 않아요.",
   ];
 
   if (webhooks.isPending) {
@@ -368,7 +368,7 @@ export function WebhookSection({
       <SectionShell title="웹훅" lines={lines}>
         {isWebhookOperatorDenied(webhooks.error) ? (
           <OperatorNotice
-            who="채널로 들어오는 주소는 소유자·관리자만 만들고 폐기할 수 있습니다."
+            who="채널로 들어오는 주소는 소유자·관리자만 만들고 폐기할 수 있어요."
             contact="수신 주소가 필요하면 소유자·관리자에게 요청하세요."
           />
         ) : (
@@ -405,8 +405,8 @@ export function WebhookSection({
 
         {rows.length === 0 ? (
           <EmptyInvite
-            headline="아직 만든 웹훅이 없습니다."
-            detail="아래에서 받을 채널과 수신 방식을 정하면 수신 주소가 발급됩니다."
+            headline="아직 만든 웹훅이 없어요."
+            detail="아래에서 받을 채널과 수신 방식을 정하면 수신 주소가 발급돼요."
             className="px-0"
             testId="webhook-empty"
           />
@@ -486,7 +486,7 @@ export function WebhookSection({
         >
           <Subsection
             title="웹훅 만들기"
-            lines={["발급된 비밀값은 이 화면을 벗어나면 다시 볼 수 없습니다."]}
+            lines={["발급된 비밀값은 이 화면을 벗어나면 다시 볼 수 없어요."]}
           >
             <div className="flex min-w-0 flex-col gap-3">
               {/* 발급이 도는 동안 `disabled` 를 쓰지 않는다: 포커스를 가진 컨트롤이
@@ -500,7 +500,7 @@ export function WebhookSection({
                 choices={
                   channelChoices.length > 0
                     ? channelChoices
-                    : [{ id: "", label: "받을 수 있는 채널이 없습니다", disabled: true }]
+                    : [{ id: "", label: "받을 수 있는 채널이 없어요", disabled: true }]
                 }
                 onChange={setChannelId}
                 busy={create.isPending}
@@ -510,7 +510,7 @@ export function WebhookSection({
               <Field
                 label="이름"
                 htmlFor="webhook-label"
-                hint={`목록에서 이 웹훅을 구별하는 값입니다. ${WEBHOOK_LABEL_MAX}자까지.`}
+                hint={`목록에서 이 웹훅을 구별하는 값이에요. ${WEBHOOK_LABEL_MAX}자까지.`}
                 error={labelError}
               >
                 <Input
@@ -603,7 +603,7 @@ export function WebhookSection({
 
 /** 뒷절의 동사 둘은 이 줄이 실제로 내놓는 두 행동 그대로다 — 회전과 폐기. */
 const OFFLINE_ROW_REASON =
-  "연결이 끊겨 지금은 회전하거나 폐기할 수 없습니다.";
+  "연결이 끊겨 지금은 회전하거나 폐기할 수 없어요.";
 
 /**
  * 낱말이 「회전」이나 「폐기」가 아니라 「누른 것」인 이유는 형제 표면
@@ -613,7 +613,7 @@ const OFFLINE_ROW_REASON =
  * 것이다.
  */
 const BUSY_ROW_REASON =
-  "앞서 누른 것이 아직 끝나지 않았습니다. 그것이 끝나면 이어서 회전하거나 폐기할 수 있습니다.";
+  "앞서 누른 것이 아직 끝나지 않았어요. 그것이 끝나면 이어서 회전하거나 폐기할 수 있어요.";
 
 // --- 만들기의 세 사유 (#1559 회전 1 · design-review #1595 H2) ------------------
 //
@@ -630,7 +630,7 @@ const BUSY_ROW_REASON =
  * (`InviteSection.OFFLINE_CREATE_REASON` 이 같은 판정을 적는다).
  */
 const OFFLINE_CREATE_REASON =
-  "연결이 끊겨 지금은 웹훅을 만들 수 없습니다. 다시 연결되면 이어서 만들 수 있습니다.";
+  "연결이 끊겨 지금은 웹훅을 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요.";
 
 /**
  * 받을 채널이 없다는 사실은 위 `SelectField` 의 유일한 선택지가 이미 말하지만,
@@ -638,11 +638,11 @@ const OFFLINE_CREATE_REASON =
  * 뒷문장이 다음 행동을 든다 — 사유는 막다른 길이 아니라 다음 한 걸음이다.
  */
 const NO_CHANNEL_CREATE_REASON =
-  "받을 수 있는 채널이 없어 아직 만들 수 없습니다. 채널을 하나 만든 뒤 여기로 돌아오세요.";
+  "받을 수 있는 채널이 없어 아직 만들 수 없어요. 채널을 하나 만든 뒤 여기로 돌아오세요.";
 
 /** 낱말이 「누른 것」인 이유는 위 `BUSY_ROW_REASON` 과 같다. */
 const BUSY_CREATE_REASON =
-  "앞서 누른 것이 아직 끝나지 않았습니다. 그것이 끝나면 이어서 만들 수 있습니다.";
+  "앞서 누른 것이 아직 끝나지 않았어요. 그것이 끝나면 이어서 만들 수 있어요.";
 
 /**
  * 한 줄 = 한 웹훅. 행마다 상자를 두르지 않는다: 카드는 묶음을 뜻하고 여기서
@@ -976,7 +976,7 @@ function RevealCard({
       <p className="break-keep text-body text-ink-muted">{revealWarning(mode)}</p>
       {from === "rotate" && (
         <p className="break-keep text-meta text-ink-muted">
-          이전 비밀값은 아래 만료 시각까지 계속 받습니다. 보내는 쪽을 그 전에
+          이전 비밀값은 아래 만료 시각까지 계속 받아요. 보내는 쪽을 그 전에
           바꾸세요.
         </p>
       )}
@@ -1021,7 +1021,7 @@ function RevealCard({
           onClick={onDone}
           data-testid="webhook-reveal-done"
         >
-          저장했습니다
+          저장했어요
         </Button>
       </div>
     </div>

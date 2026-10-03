@@ -323,7 +323,7 @@ export interface ProviderCredentialMeta {
   accessTokenExpiresAtMs?: number;
 }
 
-/** 코어가 정본이다(#2941): 팀 연결 알약의 「읽기 전용」 판정이 같은 값을 쓴다. */
+/** 코어가 정본이다(#2941): 팀 AI 키 알약의 「읽기 전용」 판정이 같은 값을 쓴다. */
 export const OAUTH_CREDENTIAL_KIND = LEGACY_OAUTH_CREDENTIAL_KIND;
 
 /** `bearer` | `oauth-openai` | undefined (env fallback has no vault). */

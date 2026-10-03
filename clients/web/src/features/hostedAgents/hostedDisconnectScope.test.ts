@@ -498,10 +498,10 @@ describe("RED PROOF ⑤ 저장이 막힌 사유는 하나뿐이고 갈래가 없
   it("사유 문장은 코어가 들고 있고 컴포넌트가 지어내지 않는다", () => {
     expect(blockedCopySlot(row)).toContain("CLEANUP_EVIDENCE_REQUIRED_NOTE");
     expect(CLEANUP_EVIDENCE_REQUIRED_NOTE).toBe(
-      "확인한 내용을 적어야 이 답을 기록할 수 있습니다."
+      "확인한 내용을 적어야 이 답을 기록할 수 있어요."
     );
     // 지운 문장이 어디에도 되살아나지 않았다.
-    expect(row).not.toContain("처분을 고르지 않았습니다");
+    expect(row).not.toContain("처분을 고르지 않았어요");
   });
 });
 

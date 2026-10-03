@@ -578,7 +578,7 @@ describe("welcome kickoff product path", () => {
     expect(link?.textContent).toBe(AGENTS_NAV.label);
     await act(async () => {
       rail.handlers?.onMessage(
-        frame(OPENER_ID, AGENT, 1, "설정 › AI 연결에서 연결하고 돌아오면 시작해요")
+        frame(OPENER_ID, AGENT, 1, "AI에서 연결하고 돌아오면 시작해요")
       );
     });
     await settle();
@@ -677,7 +677,7 @@ describe("welcome kickoff product path", () => {
           OPENER_ID,
           AGENT,
           1,
-          "설정 › AI 연결에서 연결하고 돌아오면 시작해요"
+          "AI에서 연결하고 돌아오면 시작해요"
         )
       );
     });

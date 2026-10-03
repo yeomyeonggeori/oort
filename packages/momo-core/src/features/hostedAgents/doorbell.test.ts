@@ -141,7 +141,7 @@ describe("입력 규칙", () => {
   it("https 만 받는다", () => {
     expect(doorbellUrlIssue("")).toBe("https 주소를 입력하세요.");
     expect(doorbellUrlIssue("http://hooks.example/a")).toBe(
-      "https 주소만 등록됩니다."
+      "https 주소만 등록돼요."
     );
     expect(doorbellUrlIssue("not a url")).toBe("https 주소를 입력하세요.");
     expect(doorbellUrlIssue("https://hooks.example/a")).toBeNull();
@@ -152,7 +152,7 @@ describe("입력 규칙", () => {
     expect(doorbellSecretIssue("   ")).toBe("sender key를 입력하세요.");
     expect(doorbellSecretIssue("crsr_ok")).toBeNull();
     expect(doorbellSecretIssue("x".repeat(4097))).toBe(
-      "sender key가 너무 깁니다."
+      "sender key가 너무 길어요."
     );
   });
 });
@@ -176,7 +176,7 @@ describe("게이트 닫힘과 실패 문구", () => {
       new ApiError(400, "doorbell secret must not be empty")
     );
     expect(empty).toBe(
-      "도어벨을 등록하지 못했습니다. sender key가 비어 있습니다. 값을 넣고 다시 시도하세요."
+      "도어벨을 등록하지 못했어요. sender key가 비어 있어요. 값을 넣고 다시 시도하세요."
     );
     const notActive = doorbellFailureMessage(
       "register",
@@ -188,7 +188,7 @@ describe("게이트 닫힘과 실패 문구", () => {
       "unregister",
       new ApiError(404, "doorbell is not registered")
     );
-    expect(gone).toContain("등록된 도어벨이 없습니다");
+    expect(gone).toContain("등록된 도어벨이 없어요");
     expect(gone).not.toContain("not registered");
     const ssrf = doorbellFailureMessage(
       "register",
@@ -201,7 +201,7 @@ describe("게이트 닫힘과 실패 문구", () => {
       "register",
       new ApiError(400, "some future contract message")
     );
-    expect(unknown).toContain("입력값이 서버 계약과 맞지 않습니다");
+    expect(unknown).toContain("입력값이 서버 계약과 맞지 않아요");
     expect(unknown).not.toContain("some future contract message");
   });
 
@@ -211,7 +211,7 @@ describe("게이트 닫힘과 실패 문구", () => {
       new ApiError(500, SECRET)
     );
     expect(message).not.toContain(SECRET);
-    expect(message).toContain("도어벨을 등록하지 못했습니다.");
+    expect(message).toContain("도어벨을 등록하지 못했어요.");
   });
 
   it("아무도 답하지 않은 것과 서버가 거절한 것은 다른 문장이다", () => {
@@ -219,11 +219,11 @@ describe("게이트 닫힘과 실패 문구", () => {
       "register",
       new NetworkError("timeout", 15_000)
     );
-    expect(network).toContain("도어벨을 등록하지 못했습니다.");
+    expect(network).toContain("도어벨을 등록하지 못했어요.");
     expect(network).toContain("15초");
     expect(
       doorbellFailureMessage("unregister", new WireShapeError())
-    ).toContain("서버 응답을 확인하지 못했습니다");
+    ).toContain("서버 응답을 확인하지 못했어요");
   });
 });
 

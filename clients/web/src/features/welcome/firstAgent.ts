@@ -56,7 +56,7 @@ export const FIRST_AGENT_RECHECKING = "다시 확인 중…";
 export const FIRST_AGENT_CONNECTED_CLAIM = "연결됨";
 
 export const FIRST_AGENT_OPENAI_DETAIL =
-  "설정 › AI 연결에서 이 서버의 provider를 붙입니다.";
+  "AI에서 이 서버의 provider를 붙입니다.";
 
 export const FIRST_AGENT_GROK_WHAT_HAPPENS =
   "고르면 그록봇 연결 값을 발급합니다.";
@@ -86,7 +86,7 @@ export interface FirstAgentCard {
   id: FirstAgentCardId;
   label: string;
   detail: string;
-  /** Agent Port 위저드 프리셋. OpenAI 호환은 설정 › AI 연결이라 없다. */
+  /** Agent Port 위저드 프리셋. OpenAI 호환은 AI이라 없다. */
   presetId: HostedPresetId | null;
   displayName: string;
   handle: string;

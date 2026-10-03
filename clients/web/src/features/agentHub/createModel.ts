@@ -160,18 +160,18 @@ export function agentDisplayNameIssueMessage(
     case "required":
       return "에이전트가 뭐라고 불릴지 입력하세요.";
     case "tooLong":
-      return `표시 이름은 ${DISPLAY_NAME_MAX}자 이내여야 합니다.`;
+      return `표시 이름은 ${DISPLAY_NAME_MAX}자 이내여야 해요.`;
   }
 }
 
 export function agentHandleIssueMessage(issue: AgentHandleIssue): string {
   switch (issue) {
     case "required":
-      return "핸들을 입력하세요. 사람들이 이 이름으로 에이전트를 부릅니다.";
+      return "핸들을 입력하세요. 사람들이 이 이름으로 에이전트를 불러요.";
     case "length":
-      return `핸들은 ${HANDLE_MIN}자 이상 ${HANDLE_MAX}자 이내여야 합니다.`;
+      return `핸들은 ${HANDLE_MIN}자 이상 ${HANDLE_MAX}자 이내여야 해요.`;
     case "unsupportedCharacters":
-      return "핸들에는 영문 소문자, 숫자, 하이픈, 밑줄만 쓸 수 있습니다.";
+      return "핸들에는 영문 소문자, 숫자, 하이픈, 밑줄만 쓸 수 있어요.";
   }
 }
 
@@ -180,7 +180,7 @@ export function agentModelIssueMessage(issue: AgentModelIssue): string {
     case "required":
       return "이 에이전트가 쓸 모델 이름을 입력하세요.";
     case "tooLong":
-      return `모델 이름은 ${MODEL_MAX}자 이내여야 합니다.`;
+      return `모델 이름은 ${MODEL_MAX}자 이내여야 해요.`;
   }
 }
 
@@ -189,26 +189,26 @@ export function agentBaseUrlIssueMessage(issue: AgentBaseUrlIssue): string {
     case "required":
       return "이 에이전트를 실행할 게이트웨이 주소를 입력하세요.";
     case "shape":
-      return "주소는 scheme://host 형태여야 하고, 계정 정보나 물음표 뒤 값은 넣을 수 없습니다.";
+      return "주소는 scheme://host 형태여야 하고, 계정 정보나 물음표 뒤 값은 넣을 수 없어요.";
     case "scheme":
-      return "주소는 http:// 또는 https:// 로 시작해야 합니다.";
+      return "주소는 http:// 또는 https:// 로 시작해야 해요.";
     case "mockHost":
-      return "목 프로바이더 주소는 쓸 수 없습니다. 실제 게이트웨이 주소를 입력하세요.";
+      return "목 프로바이더 주소는 쓸 수 없어요. 실제 게이트웨이 주소를 입력하세요.";
     case "plaintextRemote":
-      return "외부 주소는 https:// 여야 합니다. http는 같은 기기(localhost)에서만 쓸 수 있습니다.";
+      return "외부 주소는 https:// 여야 해요. http는 같은 기기(localhost)에서만 쓸 수 있어요.";
   }
 }
 
 export function systemPromptIssueMessage(): string {
   return `시스템 프롬프트는 UTF-8 기준 ${SYSTEM_PROMPT_MAX_BYTES.toLocaleString(
     "ko-KR"
-  )} bytes 이내여야 합니다.`;
+  )} bytes 이내여야 해요.`;
 }
 
 export function instructionsIssueMessage(): string {
   return `지시문은 UTF-8 기준 ${INSTRUCTIONS_MAX_BYTES.toLocaleString(
     "ko-KR"
-  )} bytes 이내여야 합니다.`;
+  )} bytes 이내여야 해요.`;
 }
 
 // ---- who may do this at all -------------------------------------------------
@@ -280,7 +280,7 @@ export function createAgentFailure(error: unknown): CreateAgentFailure {
     if (error.status === 409) {
       return {
         field: "handle",
-        message: "같은 핸들의 멤버가 이미 있습니다. 다른 핸들로 다시 시도하세요.",
+        message: "같은 핸들의 멤버가 이미 있어요. 다른 핸들로 다시 시도하세요.",
       };
     }
     if (error.status === 400) {
@@ -289,32 +289,32 @@ export function createAgentFailure(error: unknown): CreateAgentFailure {
         return {
           field,
           message:
-            "서버가 이 주소를 거절했습니다. 외부 주소는 https여야 하고, localhost는 포트를 함께 적어야 합니다.",
+            "서버가 이 주소를 거절했어요. 외부 주소는 https여야 하고, localhost는 포트를 함께 적어야 해요.",
         };
       }
       if (field === "handle") {
         return {
           field,
           message:
-            "서버가 이 핸들을 거절했습니다. 영문 소문자, 숫자, 하이픈, 밑줄로 2자 이상 32자 이내여야 합니다.",
+            "서버가 이 핸들을 거절했어요. 영문 소문자, 숫자, 하이픈, 밑줄로 2자 이상 32자 이내여야 해요.",
         };
       }
       if (field === "model") {
         return {
           field,
-          message: "서버가 이 모델 이름을 거절했습니다. 200자 이내로 다시 적으세요.",
+          message: "서버가 이 모델 이름을 거절했어요. 200자 이내로 다시 적으세요.",
         };
       }
       return {
         field: null,
-        message: "서버가 이 내용을 거절했습니다. 입력한 값을 확인하고 다시 시도하세요.",
+        message: "서버가 이 내용을 거절했어요. 입력한 값을 확인하고 다시 시도하세요.",
       };
     }
     if (error.status === 403) {
       return {
         field: null,
         message:
-          "에이전트를 만들 권한이 없습니다. 워크스페이스 오너나 관리자에게 요청하세요.",
+          "에이전트를 만들 권한이 없어요. 워크스페이스 소유자나 관리자에게 요청하세요.",
       };
     }
     if (error.status === 404 || error.status === 405) {
@@ -323,13 +323,13 @@ export function createAgentFailure(error: unknown): CreateAgentFailure {
       return {
         field: null,
         message:
-          "이 서버는 아직 에이전트 만들기를 지원하지 않습니다. 서버 버전을 확인하세요.",
+          "이 서버는 아직 에이전트 만들기를 지원하지 않아요. 서버 버전을 확인하세요.",
       };
     }
     if (error.status === 429) {
       return {
         field: null,
-        message: "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.",
+        message: "요청이 너무 잦아요. 잠시 뒤에 다시 시도하세요.",
       };
     }
   }
@@ -338,11 +338,11 @@ export function createAgentFailure(error: unknown): CreateAgentFailure {
     // (timeout vs unreachable, with the deadline in seconds).
     return {
       field: null,
-      message: `에이전트를 만들지 못했습니다. ${error.message}`,
+      message: `에이전트를 만들지 못했어요. ${error.message}`,
     };
   }
   return {
     field: null,
-    message: "에이전트를 만들지 못했습니다. 잠시 뒤에 다시 시도하세요.",
+    message: "에이전트를 만들지 못했어요. 잠시 뒤에 다시 시도하세요.",
   };
 }

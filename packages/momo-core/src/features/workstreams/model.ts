@@ -193,7 +193,7 @@ export function runClockLabel(atMs: number, nowMs: number): RunClock {
  * 멤버 디렉터리·타임라인이 이미 쓰는 `{owner} 님이 관리` 그대로다 — 같은
  * 사실을 두 표면이 다른 말로 부르면 읽는 사람이 둘을 다른 사실로 읽는다.
  *
- * 오너를 로스터에서 찾지 못하면 비운다. MemberRow가 하는 것과 같고, 없는 이름을
+ * 소유자를 로스터에서 찾지 못하면 비운다. MemberRow가 하는 것과 같고, 없는 이름을
  * 지어내는 것보다 낫다.
  */
 export interface WorkstreamActor {

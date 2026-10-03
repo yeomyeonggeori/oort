@@ -326,11 +326,11 @@ describe("ai.connect (#2943 GC-2)", () => {
   const aiConnect = (overrides: Partial<CommandEnv> = {}) =>
     visibleCommands(env(overrides)).find((command) => command.id === "ai.connect")!;
 
-  it("client 명령이고 설정 갈래이며 제목은 「AI 연결 카드 열기」다", () => {
+  it("client 명령이고 설정 갈래이며 제목은 「AI 계정 카드 열기」다", () => {
     const command = aiConnect();
     expect(command.kind).toBe("client");
     expect(command.group).toBe("settings");
-    expect(command.title).toBe("AI 연결 카드 열기");
+    expect(command.title).toBe("AI 계정 카드 열기");
     expect(commandSearchValue(command)).toContain("connect");
   });
 
@@ -339,7 +339,7 @@ describe("ai.connect (#2943 GC-2)", () => {
     const result = aiConnect().run(ctx, { line: "claude" });
     expect(ctx.openLocalCard).toHaveBeenCalledWith("ai.connect", { line: "claude" });
     expect(ctx.navigate).not.toHaveBeenCalled();
-    expect(result).toEqual({ status: "AI 연결 카드 열기", closesSurface: true });
+    expect(result).toEqual({ status: "AI 계정 카드 열기", closesSurface: true });
   });
 
   it("카드 자리가 없으면 AI 허브로 간다(채널 밖·GC-3 전 폴백)", () => {
@@ -362,7 +362,7 @@ describe("ai.connect (#2943 GC-2)", () => {
     expect(aiConnect({ canOpenLocalCard: () => false }).meta).toBe("AI에서 열려요");
   });
 
-  it("옛 「설정 › AI 연결」 이동 줄은 허브 줄로 흡수됐다", () => {
+  it("옛 「AI」 이동 줄은 허브 줄로 흡수됐다", () => {
     const ids = visibleCommands(env()).map((command) => command.id);
     expect(ids).not.toContain("nav.settings.ai");
     expect(ids).toContain("nav.ai.accounts");

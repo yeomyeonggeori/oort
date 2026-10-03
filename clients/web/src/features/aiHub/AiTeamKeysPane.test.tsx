@@ -206,7 +206,7 @@ describe("운영자 화면", () => {
     expect(row.textContent).toContain("Claude 모델");
     expect(row.textContent).toContain("7c1e");
     await rtlWaitFor(() => expect(q("ai-link-row-uses")?.textContent).toContain("@김인턴"));
-    expect(q("ai-link-row-uses")?.textContent).toContain("말로 앱 설정 바꾸기 · 팀 에이전트 대답 · 첫 인사");
+    expect(q("ai-link-row-uses")?.textContent).toContain("말로 앱 설정 바꾸기 · 팀 에이전트의 답 · 첫 인사");
     expect(q("ai-team-keys-checked")?.textContent).toContain("아직 확인하지 않았어요");
     for (const id of ["ai-link-edit", "ai-link-check", "ai-link-unlink", "ai-team-chain-toggle"]) {
       expect(q(id), id).not.toBeNull();

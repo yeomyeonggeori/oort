@@ -56,14 +56,14 @@ import {
 export const HOSTED_SECTION_TITLE = "호스티드 연결";
 
 export const HOSTED_LIST_LEAD =
-  "다른 인프라에서 돌리는 에이전트를 이 워크스페이스에 들인 연결들입니다. 여기서는 상태만 봅니다.";
+  "다른 인프라에서 돌리는 에이전트를 이 워크스페이스에 들인 연결들이에요. 여기서는 상태만 봐요.";
 
 /**
  * 이 표면이 무엇을 하지 않는지. 폰은 관전만 하고, 연결·해제·정리 확인은 데스크톱
  * 에서 한다(ADR-0162, 이 화면의 out-of-scope).
  */
 export const HOSTED_READONLY_NOTE =
-  "연결을 만들고, 해제하고, 정리를 확인하는 일은 데스크톱에서 합니다. 이 화면은 지금 어떤 상태인지만 보여 줍니다.";
+  "연결을 만들고, 해제하고, 정리를 확인하는 일은 데스크톱에서 해요. 이 화면은 지금 어떤 상태인지만 보여 줘요.";
 
 /**
  * 시각의 정직함. 읽기 모델은 `createdAtMs`·`updatedAtMs` 만 싣고, 서버가 안에
@@ -72,33 +72,33 @@ export const HOSTED_READONLY_NOTE =
  * 답할 수 없는 질문이다 — 답할 수 없다는 것을 답한다.
  */
 export const HOSTED_LIVENESS_NOTE =
-  "이 시각은 연결 상태가 마지막으로 바뀐 때입니다. 에이전트가 지금 살아 있는지를 실시간으로 알려 주는 값은 아닙니다.";
+  "이 시각은 연결 상태가 마지막으로 바뀐 때예요. 에이전트가 지금 살아 있는지를 실시간으로 알려 주는 값은 아니에요.";
 
 export const HOSTED_CREATED_LABEL = "연결 만든 때";
 export const HOSTED_UPDATED_LABEL = "마지막 상태 변화";
 
-export const HOSTED_LIST_EMPTY_HEADLINE = "아직 호스티드 연결이 없습니다.";
+export const HOSTED_LIST_EMPTY_HEADLINE = "아직 호스티드 연결이 없어요.";
 export const HOSTED_LIST_EMPTY_DETAIL =
-  "다른 인프라의 에이전트를 들이는 것은 데스크톱에서 시작합니다.";
+  "다른 인프라의 에이전트를 들이는 것은 데스크톱에서 시작해요.";
 
 /** owner/admin 이 아니면 목록 자체가 403 이다(장애가 아니라 권한의 답). */
-export const HOSTED_LIST_DENIED_HEADLINE = "이 목록은 볼 수 없습니다.";
+export const HOSTED_LIST_DENIED_HEADLINE = "이 목록은 볼 수 없어요.";
 export const HOSTED_LIST_DENIED_DETAIL =
-  "호스티드 연결은 워크스페이스 오너나 관리자만 볼 수 있습니다.";
+  "호스티드 연결은 워크스페이스 소유자나 관리자만 볼 수 있어요.";
 
 /**
  * 오프라인 — 지금 이 기기가 네트워크에 닿지 않을 때 목록/상세 위에 서는 문장.
  * active 와 구분되어야 하는 값이라(끊긴 화면과 살아 있는 화면은 다르다) 따로 있다.
  */
 export const HOSTED_OFFLINE_NOTE =
-  "지금 이 기기가 네트워크에 닿지 않습니다. 아래는 마지막으로 받아 둔 상태이고, 그 뒤 provider에서 일어난 변화는 반영되지 않았습니다.";
+  "지금 이 기기가 네트워크에 닿지 않아요. 아래는 마지막으로 받아 둔 상태이고, 그 뒤 provider에서 일어난 변화는 반영되지 않았어요.";
 
 /** 캐시된 값을 그릴 때 시각 앞에 서는 말. */
 export const HOSTED_STALE_LABEL = "마지막으로 확인한 때";
 
 /** 목록/상세를 못 불러왔을 때. */
-export const HOSTED_LIST_ERROR_HEADLINE = "연결 목록을 불러오지 못했습니다.";
-export const HOSTED_DETAIL_ERROR_HEADLINE = "연결 상태를 불러오지 못했습니다.";
+export const HOSTED_LIST_ERROR_HEADLINE = "연결 목록을 불러오지 못했어요.";
+export const HOSTED_DETAIL_ERROR_HEADLINE = "연결 상태를 불러오지 못했어요.";
 
 // ---- 목록 한 줄 -------------------------------------------------------------
 

@@ -239,7 +239,7 @@ describe("webhookFailureMessage", () => {
 
   it("says who can act on a 403 rather than blaming the reader", () => {
     const message = webhookFailureMessage("create", new ApiError(403, "forbidden"));
-    expect(message).toContain("오너나 관리자");
+    expect(message).toContain("소유자나 관리자");
     expect(message).not.toContain("forbidden");
   });
 
@@ -255,16 +255,16 @@ describe("webhookFailureMessage", () => {
   it("carries the network copy this package wrote, which holds no wire text", () => {
     const offline = new NetworkError("unreachable", 15_000);
     const message = webhookFailureMessage("list", offline);
-    expect(message).toContain("웹훅 목록을 불러오지 못했습니다");
+    expect(message).toContain("웹훅 목록을 불러오지 못했어요");
     expect(message).toContain(offline.message);
   });
 
   it("names the action in every branch", () => {
     expect(webhookFailureMessage("rotate", new WireShapeError())).toContain(
-      "비밀값을 회전하지 못했습니다"
+      "비밀값을 회전하지 못했어요"
     );
     expect(webhookFailureMessage("revoke", new Error("boom"))).toContain(
-      "웹훅을 폐기하지 못했습니다"
+      "웹훅을 폐기하지 못했어요"
     );
     expect(webhookFailureMessage("revoke", new Error("boom"))).not.toContain(
       "boom"
@@ -386,7 +386,7 @@ describe("confirmation copy", () => {
   it("names the webhook and says the effect cannot be undone", () => {
     const question = revokeConfirmQuestion("배포 알림");
     expect(question).toContain("배포 알림");
-    expect(question).toContain("되돌릴 수 없습니다");
+    expect(question).toContain("되돌릴 수 없어요");
   });
 
   // #1205 리뷰 M1: 이름 없는 질문은 두 행이 동시에 물을 때 서로 구별되지 않는다.
@@ -408,7 +408,7 @@ describe("row date", () => {
 describe("honesty copy", () => {
   // #1205 리뷰 H4: 이 표면에 전송 기록이 없다는 사실은 접힌 자리에 두지 않는다.
   it("says plainly that no delivery record lives here, with a next step for a dead URL", () => {
-    expect(WEBHOOK_DELIVERY_RECORD_NOTE).toContain("기록이 남지 않습니다");
+    expect(WEBHOOK_DELIVERY_RECORD_NOTE).toContain("기록이 남지 않아요");
     expect(UNRESOLVABLE_RECEIVE_URL_NOTICE).toContain("폐기하고 다시 만드세요");
   });
 });

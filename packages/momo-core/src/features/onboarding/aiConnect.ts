@@ -199,7 +199,7 @@ export function subscriptionConnectPlan(
   return { kind: "fields", endpoint, credential };
 }
 
-// ---- 구독 에이전트 정체성 -----------------------------------------------------
+// ---- 구독으로 쓰는 에이전트 정체성 -----------------------------------------------------
 
 const HANDLE_MAX = 32;
 const HANDLE_OK = /^[a-z0-9_-]+$/;
@@ -298,7 +298,7 @@ export const AI_CONNECT_DESKTOP_ONLY_NOTE =
   "데스크탑 앱에서 이 맥의 Claude Code·Codex를 붙일 수 있어요.";
 
 export const AI_CONNECT_SERVER_OFF_NOTE =
-  "이 서버는 지금 구독 에이전트를 받지 않아요. 팀 에이전트는 API 키로 붙여요.";
+  "이 서버는 지금 구독으로 쓰는 에이전트를 받지 않아요. 팀 에이전트는 API 키로 붙여요.";
 
 export const COPY_ACTION_LABEL = "복사";
 export const COPIED_LABEL = "복사됨";
@@ -309,9 +309,9 @@ export function loginCommandAria(harness: LocalHarnessId): string {
 }
 
 export const LOGIN_OPENED_STATUS =
-  "명령을 복사했습니다. 터미널에 붙여 넣고 로그인을 마치면 이 줄이 바뀝니다.";
+  "명령을 복사했어요. 터미널에 붙여 넣고 로그인을 마치면 이 줄이 바뀌어요.";
 export const TERMINAL_OPEN_FAILED =
-  "터미널을 열지 못했습니다. 명령을 복사해 직접 여세요.";
+  "터미널을 열지 못했어요. 명령을 복사해 직접 여세요.";
 
 export function primaryActionLabel(id: AiConnectRowId | null): string {
   switch (id) {
@@ -329,23 +329,23 @@ export function primaryActionLabel(id: AiConnectRowId | null): string {
 }
 
 export const AI_CONNECT_SKIP_LABEL = "지금은 건너뛰기";
-export const AI_CONNECT_REENTRY = "나중에 설정 › AI 연결에서 이어갈 수 있습니다.";
-export const AI_CONNECT_SKIPPED_LINE = "설정 › AI 연결에서 언제든 이어서 할 수 있어요.";
+export const AI_CONNECT_REENTRY = "나중에 AI에서 이어갈 수 있어요.";
+export const AI_CONNECT_SKIPPED_LINE = "AI에서 언제든 이어서 할 수 있어요.";
 export const AI_CONNECT_CONTINUE_LABEL = "계속";
 
 // ---- 재진입 (#2870, RCA 1-b·1-c) -------------------------------------------
 //
-// 설정 › AI 연결과 에이전트 화면에서 같은 화면을 다시 연다. 온보딩의 [지금은
+// AI과 에이전트 화면에서 같은 화면을 다시 연다. 온보딩의 [지금은
 // 건너뛰기]는 재진입에서 [닫기]가 되고, 진행 점 자리에 [뒤로]가 선다.
 
 export const AI_CONNECT_BACK_LABEL = "뒤로";
 export const AI_CONNECT_CLOSE_LABEL = "닫기";
 
-/** 설정 › AI 연결 맨 위 블록의 제목·설명·행동. 해요체(ADR-0193 D11 구독 문구). */
-export const SUBSCRIPTION_ENTRY_TITLE = "내 구독 에이전트";
+/** AI 맨 위 블록의 제목·설명·행동. 해요체(ADR-0193 D11 구독 문구). */
+export const SUBSCRIPTION_ENTRY_TITLE = "내 구독으로 쓰는 에이전트";
 export const SUBSCRIPTION_ENTRY_DETAIL =
   "이 맥의 Claude Code·Codex 로그인으로 생각하는 개인 에이전트예요. 나만 부를 수 있어요.";
-export const SUBSCRIPTION_ENTRY_ACTION = "내 구독 에이전트 붙이기";
+export const SUBSCRIPTION_ENTRY_ACTION = "내 구독으로 에이전트 만들기";
 
 // ---- 합류 세 상태 (같은 화면) -------------------------------------------------
 
@@ -377,13 +377,13 @@ export const AI_CONNECT_OFFLINE_LINE = "지금은 서버에 닿지 않아요.";
 export const GROK_LABEL = "그록봇";
 export const CONNECT_COMMAND_ARIA = "연결 명령";
 export const CONNECT_HANDED_OFF_STATUS =
-  "명령을 복사했습니다. 터미널에 붙여 넣어 실행하세요.";
+  "명령을 복사했어요. 터미널에 붙여 넣어 실행하세요.";
 
 export const JOIN_CREATING_LINE = "연결을 준비하고 있어요.";
 export const JOIN_CAP_LINE = "5분 동안 들어오지 않았어요.";
 export const JOIN_CAP_DETAIL = "명령을 실행했는지 확인하고 다시 확인을 눌러 주세요.";
 export const JOIN_ERROR_LINE = "연결을 만들지 못했어요.";
-export const JOIN_OFF_LINE = "지금은 이 서버에서 구독 에이전트를 쓸 수 없어요.";
+export const JOIN_OFF_LINE = "지금은 이 서버에서 구독으로 쓰는 에이전트를 쓸 수 없어요.";
 export const JOIN_RECHECK_LABEL = "다시 확인";
 export const JOIN_RETRY_LABEL = "다시 시도";
 export const JOIN_BACK_LABEL = "다른 AI 고르기";

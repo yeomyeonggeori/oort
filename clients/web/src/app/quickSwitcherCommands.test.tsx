@@ -579,13 +579,13 @@ describe("명령을 실행하면 표면이 닫힌다", () => {
   });
 });
 
-describe("AI 연결 카드 열기 (#2943 GC-2)", () => {
+describe("AI 계정 카드 열기 (#2943 GC-2)", () => {
   const aiRow = () =>
     commandRows().find((row) => row.dataset.commandId === "ai.connect")!;
 
   it("채널 안이라도 카드 자리가 없으면(GC-3 전) AI 허브로 간다", async () => {
     await mount({ path: `/c/${CH}` });
-    expect(aiRow().textContent).toContain("AI 연결 카드 열기");
+    expect(aiRow().textContent).toContain("AI 계정 카드 열기");
     expect(aiRow().textContent).toContain("AI에서 열려요");
     await act(async () => {
       aiRow().click();

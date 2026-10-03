@@ -288,41 +288,41 @@ const CLEANUP_KIND_COPY: Record<HostedCleanupKind, CleanupKindCopy> = {
     expectation:
       "provider의 커넥터 목록에서 이 연결이 쓰던 커넥터를 제거하세요.",
     caution:
-      "커넥터를 제거해도 로컬에 받아 둔 플러그인 파일은 그대로 남습니다. 그 파일은 바로 아래 줄에서 따로 확인합니다.",
+      "커넥터를 제거해도 로컬에 받아 둔 플러그인 파일은 그대로 남아요. 그 파일은 바로 아래 줄에서 따로 확인해요.",
   },
   local_plugin_files: {
     label: "로컬 플러그인 파일",
     expectation:
       "이 기기에 남은 플러그인 소스 파일을 직접 찾아 지우세요.",
     caution:
-      "oort는 이 기기의 파일을 읽지도 지우지도 못합니다. 지웠다는 사실은 사람만 확인할 수 있고, 그 확인이 이 줄의 전부입니다.",
+      "oort는 이 기기의 파일을 읽지도 지우지도 못해요. 지웠다는 사실은 사람만 확인할 수 있고, 그 확인이 이 줄의 전부예요.",
   },
   plugin: {
     label: "플러그인 등록",
     expectation: "provider에 등록해 둔 비공개 플러그인 자체를 지우세요.",
     caution:
-      "커넥터 제거는 설치를 되돌릴 뿐이고 등록은 provider 계정에 남습니다. 남아 있으면 누구든 다시 설치할 수 있습니다.",
+      "커넥터 제거는 설치를 되돌릴 뿐이고 등록은 provider 계정에 남아요. 남아 있으면 누구든 다시 설치할 수 있어요.",
   },
   routine: {
     label: "자동 실행 루틴",
     expectation:
       "이 연결이 쓰던 routine을 provider 설정에서 제거하세요.",
     caution:
-      "Active를 끄는 것은 제거가 아닙니다. 꺼 둔 routine은 그대로 남아 있고, 이 줄은 끄는 것만으로 닫히지 않습니다.",
+      "Active를 끄는 것은 제거가 아니에요. 꺼 둔 routine은 그대로 남아 있고, 이 줄은 끄는 것만으로 닫히지 않아요.",
   },
   bot: {
     label: "provider의 봇",
     expectation:
-      "이 봇을 지울지 남길지 직접 정하세요. oort는 어느 쪽도 대신 하지 않습니다.",
+      "이 봇을 지울지 남길지 직접 정하세요. oort는 어느 쪽도 대신 하지 않아요.",
     caution:
-      "지우면 그 봇과 나눈 provider 쪽 대화 기록도 함께 사라집니다. 남기는 것도 정식 답이며, 그때는 남긴 이유가 기록에 남습니다.",
+      "지우면 그 봇과 나눈 provider 쪽 대화 기록도 함께 사라져요. 남기는 것도 정식 답이며, 그때는 남긴 이유가 기록에 남아요.",
   },
   secret: {
     label: "연결 자격증명",
     expectation:
       "이 연결이 쓰던 자격증명이 더 이상 통하지 않는지 확인하세요.",
     caution:
-      "oort가 발급한 값은 해제를 시작한 순간 이미 폐기됐습니다. provider나 비밀 저장소에 따로 복사해 둔 사본이 있으면 그것은 직접 지워야 합니다.",
+      "oort가 발급한 값은 해제를 시작한 순간 이미 폐기됐어요. provider나 비밀 저장소에 따로 복사해 둔 사본이 있으면 그것은 직접 지워야 해요.",
   },
 };
 
@@ -370,16 +370,16 @@ export function dispositionChoices(
     return [
       {
         id: "delete",
-        label: "봇을 지웠습니다",
+        label: "봇을 지웠어요",
         detail:
-          "provider에서 이 봇을 삭제했습니다. 그 봇과 나눈 provider 쪽 대화 기록도 함께 사라집니다.",
+          "provider에서 이 봇을 삭제했어요. 그 봇과 나눈 provider 쪽 대화 기록도 함께 사라져요.",
         destructive: true,
       },
       {
         id: "preserve",
-        label: "봇을 남깁니다",
+        label: "봇을 남길어요",
         detail:
-          "봇을 그대로 둡니다. 대화 기록은 지켜지지만, 남은 봇을 나중에 다시 쓰면 이 워크스페이스와 무관한 자리에서 쓰이게 됩니다.",
+          "봇을 그대로 둬요. 대화 기록은 지켜지지만, 남은 봇을 나중에 다시 쓰면 이 워크스페이스와 무관한 자리에서 쓰이게 돼요.",
         destructive: false,
       },
     ];
@@ -388,9 +388,9 @@ export function dispositionChoices(
     return [
       {
         id: "revoke",
-        label: "더 이상 통하지 않습니다",
+        label: "더 이상 통하지 않아요",
         detail:
-          "이 자격증명으로는 어떤 요청도 통과하지 못하고, 남겨 둔 사본도 없습니다.",
+          "이 자격증명으로는 어떤 요청도 통과하지 못하고, 남겨 둔 사본도 없어요.",
         destructive: false,
       },
     ];
@@ -398,7 +398,7 @@ export function dispositionChoices(
   return [
     {
       id: "delete",
-      label: "제거했습니다",
+      label: "제거했어요",
       detail: removalConsequence(kind),
       destructive: false,
     },
@@ -408,18 +408,18 @@ export function dispositionChoices(
 function removalConsequence(kind: HostedCleanupKind): string {
   switch (kind) {
     case "connector":
-      return "provider의 커넥터 목록에서 사라진 것을 확인했습니다. 로컬 파일은 이 확인에 포함되지 않습니다.";
+      return "provider의 커넥터 목록에서 사라진 것을 확인했어요. 로컬 파일은 이 확인에 포함되지 않아요.";
     case "local_plugin_files":
-      return "이 기기에서 그 파일들을 지운 것을 확인했습니다.";
+      return "이 기기에서 그 파일들을 지운 것을 확인했어요.";
     case "plugin":
-      return "provider 계정에서 플러그인 등록 자체가 사라진 것을 확인했습니다.";
+      return "provider 계정에서 플러그인 등록 자체가 사라진 것을 확인했어요.";
     case "routine":
-      return "routine이 목록에서 사라진 것을 확인했습니다. 꺼 두기만 한 것은 여기 해당하지 않습니다.";
+      return "routine이 목록에서 사라진 것을 확인했어요. 꺼 두기만 한 것은 여기 해당하지 않아요.";
     case "bot":
     case "secret":
       // 두 종류는 위에서 자기 문장을 갖는다. 여기 닿을 일은 없지만, 닿았을 때
       // 빈 문자열을 그리는 것보다 한 문장을 그리는 편이 낫다.
-      return "이 항목을 정리한 것을 확인했습니다.";
+      return "이 항목을 정리한 것을 확인했어요.";
   }
 }
 
@@ -465,18 +465,18 @@ export function statusChoices(
     kind === "local_plugin_files"
       ? {
           id: "present",
-          label: "아직 남아 있습니다",
-          detail: "지우지 못했거나 아직 손대지 않았습니다.",
+          label: "아직 남아 있어요",
+          detail: "지우지 못했거나 아직 손대지 않았어요.",
         }
       : {
           id: "present",
-          label: "아직 남아 있습니다",
-          detail: "provider에서 그대로 살아 있는 것을 확인했습니다.",
+          label: "아직 남아 있어요",
+          detail: "provider에서 그대로 살아 있는 것을 확인했어요.",
         };
   const absent: CleanupStatusChoice = {
     id: "absent",
-    label: "사라진 것을 확인했습니다",
-    detail: "찾아봤고 없었습니다.",
+    label: "사라진 것을 확인했어요",
+    detail: "찾아봤고 없었어요.",
   };
   if (kind === "local_plugin_files" || kind === "secret") {
     return [present, absent];
@@ -485,9 +485,9 @@ export function statusChoices(
     present,
     {
       id: "inactive",
-      label: "꺼져 있지만 남아 있습니다",
+      label: "꺼져 있지만 남아 있어요",
       detail:
-        "동작은 멈췄지만 항목 자체는 그대로입니다. 이 관측만으로는 이 줄이 닫히지 않습니다.",
+        "동작은 멈췄지만 항목 자체는 그대로예요. 이 관측만으로는 이 줄이 닫히지 않아요.",
     },
     absent,
   ];
@@ -585,13 +585,13 @@ export function cleanupRowDetail(artifact: HostedCleanupArtifact): string {
   const copy = cleanupKindCopy(artifact.kind);
   switch (cleanupRowState(artifact)) {
     case "server_confirmed":
-      return "oort가 직접 폐기하고 그 결과를 다시 읽어 확인했습니다. 사람이 승인할 것이 없습니다.";
+      return "oort가 직접 폐기하고 그 결과를 다시 읽어 확인했어요. 사람이 승인할 것이 없어요.";
     case "resolved":
       return artifact.disposition === "preserved"
-        ? "남기기로 정했고 그 사유가 기록에 남았습니다."
-        : "확인이 기록됐습니다.";
+        ? "남기기로 정했고 그 사유가 기록에 남았어요."
+        : "확인이 기록됐어요.";
     case "observed":
-      return `아직 확인으로 넘어가지 않았습니다. ${copy.expectation}`;
+      return `아직 확인으로 넘어가지 않았어요. ${copy.expectation}`;
     case "pending":
       return copy.expectation;
   }
@@ -633,7 +633,7 @@ export function acknowledgeQuestion(
 ): string {
   const detail =
     dispositionChoices(kind).find((item) => item.id === choice)?.detail ?? "";
-  return `${detail} 이 답은 기록에 남고 다시 정할 수 없습니다.`;
+  return `${detail} 이 답은 기록에 남고 다시 정할 수 없어요.`;
 }
 
 /** 질문에 답하는 버튼의 낱말. 저장이 아니라 **기록**이다. */
@@ -665,9 +665,9 @@ export function evidenceIssue(raw: string): CleanupEvidenceIssue | null {
 export function evidenceIssueMessage(issue: CleanupEvidenceIssue): string {
   switch (issue) {
     case "empty":
-      return "무엇을 보고 확인했는지 한 줄로 적어야 저장할 수 있습니다. 이 문장이 나중에 이 해제를 설명하는 유일한 기록입니다.";
+      return "무엇을 보고 확인했는지 한 줄로 적어야 저장할 수 있어요. 이 문장이 나중에 이 해제를 설명하는 유일한 기록이에요.";
     case "tooLong":
-      return `확인한 내용이 너무 깁니다. ${CLEANUP_EVIDENCE_MAX_BYTES}바이트 안으로 줄이세요. 한글은 한 글자가 3바이트입니다.`;
+      return `확인한 내용이 너무 길어요. ${CLEANUP_EVIDENCE_MAX_BYTES}바이트 안으로 줄이세요. 한글은 한 글자가 3바이트예요.`;
   }
 }
 
@@ -675,17 +675,17 @@ export function evidenceIssueMessage(issue: CleanupEvidenceIssue): string {
 export function evidencePlaceholder(kind: HostedCleanupKind): string {
   switch (kind) {
     case "connector":
-      return "예: 커넥터 목록에서 제거를 눌렀고 목록에서 사라진 것을 봤습니다";
+      return "예: 커넥터 목록에서 제거를 눌렀고 목록에서 사라진 것을 봤어요";
     case "local_plugin_files":
-      return "예: 이 기기의 플러그인 폴더를 열어 해당 소스 폴더를 지웠습니다";
+      return "예: 이 기기의 플러그인 폴더를 열어 해당 소스 폴더를 지웠어요";
     case "plugin":
-      return "예: 플러그인 관리 화면에서 등록을 삭제했습니다";
+      return "예: 플러그인 관리 화면에서 등록을 삭제했어요";
     case "routine":
-      return "예: routine 목록에서 이 항목을 삭제했고 목록이 비었습니다";
+      return "예: routine 목록에서 이 항목을 삭제했고 목록이 비었어요";
     case "bot":
-      return "예: 대화 기록을 팀에 알리고 봇을 삭제했습니다";
+      return "예: 대화 기록을 팀에 알리고 봇을 삭제했어요";
     case "secret":
-      return "예: 저장해 둔 사본을 비밀 저장소에서 지웠습니다";
+      return "예: 저장해 둔 사본을 비밀 저장소에서 지웠어요";
   }
 }
 

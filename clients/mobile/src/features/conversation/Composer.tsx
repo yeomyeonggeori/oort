@@ -596,7 +596,7 @@ const MENTION_AGENT_KIND = '에이전트';
  */
 /**
  * 슬래시 목록 설명이 접힐 수 있는 줄 수 (#2988). 기본 글씨에서는 한 줄이다(시안).
- * 글씨가 커지면 설명(「AI 연결 카드 열기 · 나에게만 보여요」, 스무 자 안팎)이 한
+ * 글씨가 커지면 설명(「AI 계정 카드 열기 · 나에게만 보여요」, 스무 자 안팎)이 한
  * 줄에 들지 않아 말줄임되고, 잘리는 것은 하필 「나에게만」·「운영자」 같은 표지다.
  * 375 폭에서 설명 칸은 ~260pt 이고 글자 폭은 `font.meta × 배수`라, 배수가 2 를 넘는
  * 접근성 크기에서는 두 줄로도 모자란다 — 그래서 2 까지는 두 줄, 그 위는 세 줄.
@@ -836,7 +836,7 @@ export interface ComposerSendOptions {
  */
 export const PHONE_SECRET_KEY_BLOCK_COPY = {
   lead: SECRET_KEY_BLOCK_COPY.lead,
-  tail: '키는 맥이나 웹의 AI 연결 칸에 넣어요. 저장만 되고 다시 보이지 않아요.',
+  tail: '키는 맥이나 웹의 AI 화면에 넣어요. 저장만 되고 다시 보이지 않아요.',
 } as const;
 
 /** 슬래시 목록의 머리(시안 `.menu .mh`). */
@@ -959,7 +959,7 @@ export function Composer({
   onSlashCommand?: (command: Command, args: LocalCardArgs) => void;
   /**
    * 키 붙여넣기 차단 안내가 서고 거둘 때 알린다 (design-review #2945 R3-B1). 대화
-   * 화면은 안내가 선 동안 AI 연결 카드를 접는다 — 큰 글씨 SE 에서 안내·입력창·
+   * 화면은 안내가 선 동안 AI 계정 카드를 접는다 — 큰 글씨 SE 에서 안내·입력창·
    * 카드가 한 화면을 넘어 카드 머리가 밀려 나가지 않게.
    */
   onKeyBlockedChange?: (blocked: boolean) => void;

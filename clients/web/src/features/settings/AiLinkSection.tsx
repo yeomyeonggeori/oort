@@ -75,17 +75,17 @@ import { TeamUnlinkDialog } from "./TeamUnlinkDialog";
 import { AiMyAccountsSection } from "./AiMyAccountsSection";
 
 // =============================================================================
-// 설정 › AI 연결 (#2877, 시안 claudedocs/ai-accounts/mockups.html §1·§6).
+// AI (#2877, 시안 claudedocs/ai-accounts/mockups.html §1·§6).
 //
 // 이름과 id(`ai`)는 그대로고 내용이 바뀌었다(제안서 Q3). 한 페이지에 절이
 // 위에서 아래로 선다.
 //   1. 내 계정 · 이 맥 — 이 맥의 공식 CLI 구독(`AiMyAccountsSection`)
-//   2. 팀 연결 · 이 서버 — 서버 provider 연결(아래). 운영자만 바꾼다
+//   2. 팀 AI 키 · 이 서버 — 서버 provider 연결(아래). 운영자만 바꾼다
 //   3. 기본 AI — 기능별 표(#2881 `AiDefaultsTable`). 개인 줄은 이 기기 저장, 팀 줄은
 //      운영자 서버 설정(읽기 전용)
 // 줄을 누르면 오른쪽 곁판이 열린다. 목록은 평평한 행, 곁판만 `sheet` 판이다.
 //
-// 팀 연결 줄은 R-1 §5의 인스턴스 전역 provider 연결 하나다(GET/PUT/DELETE +
+// 팀 AI 키 줄은 R-1 §5의 인스턴스 전역 provider 연결 하나다(GET/PUT/DELETE +
 // 확인). ADR-0004 때문에 자격증명은 쓰기 전용이다: 있는지와 마스킹 꼬리만 보이고
 // 「키 보기」는 없다. 「API 키 추가」·「키 바꾸기」는 채팅 연결 카드와 **같은**
 // `TeamKeyForm`(프리셋 칩 + 직접 주소 + password 칸)을 곁판에 연다(#2880 AA-7).
@@ -107,9 +107,9 @@ import { AiMyAccountsSection } from "./AiMyAccountsSection";
 const LINK_OFFLINE_NOTE_ID = "ai-link-offline-note";
 const LINK_BUSY_NOTE_ID = "ai-link-busy-note";
 const LINK_OFFLINE_REASON =
-  "연결이 끊겨 지금은 이 연결을 바꾸거나 확인할 수 없습니다.";
+  "연결이 끊겨 지금은 이 연결을 바꾸거나 확인할 수 없어요.";
 const LINK_BUSY_REASON =
-  "앞서 누른 것이 아직 끝나지 않았습니다. 그것이 끝나면 이어서 바꾸거나 확인할 수 있습니다.";
+  "앞서 누른 것이 아직 끝나지 않았어요. 그것이 끝나면 이어서 바꾸거나 확인할 수 있어요.";
 
 const PAGE_HEADING_ID = "ai-page-title";
 const TEAM_HEADING_ID = "ai-team-title";
@@ -182,10 +182,10 @@ export function AiLinkSection({
       {heading && (
         <div className="flex break-keep flex-col gap-1">
           <h2 id={PAGE_HEADING_ID} className="text-display font-bold text-ink">
-            AI 연결
+            AI
           </h2>
           <p className="text-body text-ink-muted">
-            내가 쓰는 구독과 팀이 함께 쓰는 API 키를 봅니다. 로그인은 각 회사의 공식 CLI가 합니다.
+            내가 쓰는 구독과 팀이 함께 쓰는 API 키를 봐요. 로그인은 각 회사의 공식 CLI가 해요.
           </p>
         </div>
       )}
@@ -196,7 +196,7 @@ export function AiLinkSection({
 }
 
 /**
- * 목록 열 + 곁판. 곁판을 여는 것은 팀 연결 줄뿐이라(내 계정 줄은 #2777 전까지
+ * 목록 열 + 곁판. 곁판을 여는 것은 팀 AI 키 줄뿐이라(내 계정 줄은 #2777 전까지
  * 비어 있다) 판의 상태를 이 한 곳이 든다.
  */
 function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: string }) {
@@ -435,11 +435,11 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
               failed,
               modelCount: teamProbeDetail(probe)?.modelCount ?? null,
             }
-          : // 팀 연결 절의 둘째 줄과 같은 판정(모의 응답 / 대답하지 못함).
+          : // 팀 AI 키 절의 둘째 줄과 같은 판정(모의 응답 / 대답하지 못함).
             link.availability === "mock"
             ? { status: "mock" }
             : { status: "absent" };
-  const rowName = link ? (configured ? `${link.endpointLabel} · 팀 기본` : link.endpointLabel) : "";
+  const rowName = link ? (configured ? `${link.endpointLabel} · 팀 AI 키` : link.endpointLabel) : "";
   const teamDefaults: TeamDefaultsState = {
     status: !query.isSuccess
       ? operatorAnswer === false
@@ -466,7 +466,7 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
     <AiSection labelledBy={TEAM_HEADING_ID} testId="ai-team">
       <AiSectionHead
         id={TEAM_HEADING_ID}
-        title="팀 연결"
+        title="팀 AI 키"
         scope="이 서버"
         locked
         action={teamAction}
@@ -478,7 +478,7 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
           <div data-testid="operator-notice" role="status">
             <AiLineRow last>
               <span>
-                팀 연결은 이 서버의 운영자만 보고 바꿀 수 있어요. 필요하면 이 서버를 운영하는
+                팀 AI 키는 이 서버의 운영자만 보고 바꿀 수 있어요. 필요하면 이 서버를 운영하는
                 사람에게 요청하세요.
               </span>
             </AiLineRow>
@@ -493,7 +493,7 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
         )
       ) : link && !hasRow ? (
         <AiLineRow testId="ai-link-empty" last>
-          <span>아직 팀 연결이 없어요. 팀 에이전트가 대답하려면 API 키가 하나 필요해요.</span>
+          <span>아직 팀 AI 키가 없어요. 팀 에이전트가 대답하려면 API 키가 하나 필요해요.</span>
           {/* 둘째 줄은 지금 팀 에이전트가 무엇으로 대답하는지 한 가지만 말한다
               (design-review #2877 3차 M1: 「서버 환경값 사용 중」이 무언가 쓰이는
               것처럼 읽혔다). 어휘는 가용성 줄과 같은 「모의 응답」이다. */}
@@ -630,10 +630,10 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
         <AiAside
           id={TEAM_ASIDE_ID}
           // 줄이 없는 서버에서 연 곁판은 추가 폼 하나다: 환경값의 모의 주소 이름을
-          // 제목으로 내밀지 않는다(시안 §4 2b 「팀 API 키 추가」).
-          label={hasRow ? `${link.endpointLabel} 상세` : "팀 API 키 추가"}
+          // 제목으로 내밀지 않는다(시안 §4 2b 「팀 AI 키 추가」).
+          label={hasRow ? `${link.endpointLabel} 상세` : "팀 AI 키 추가"}
           mark={hasRow ? markFor(link.endpointLabel) : "+"}
-          title={hasRow ? rowName : "팀 API 키 추가"}
+          title={hasRow ? rowName : "팀 AI 키 추가"}
           subtitle={
             !hasRow
               ? "운영자만 · 서버에 봉인해요"
@@ -714,7 +714,7 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
                   </>
                 )}
                 {configured && (
-                  // 문구는 「연결 끊기」(#2878 결정: 구독 줄은 「연결 해제」, 팀 API 키 줄은
+                  // 문구는 「연결 끊기」(#2878 결정: 구독 줄은 「연결 해제」, 팀 AI 키 줄은
                   // 「연결 끊기」). 누르면 영향 받는 에이전트를 먼저 보이는 확인 창이 뜬다.
                   <Button
                     ref={unlinkRef}
@@ -918,7 +918,7 @@ const PROBE_HEAD_TONE: Record<"ok" | "bad" | "mute", string> = {
 };
 
 /**
- * 확인 결과. 첫 칸(팀 기본 키)의 결과는 시안 §4 2b `.check` 칸 하나로, 문장은 채팅
+ * 확인 결과. 첫 칸(팀 AI 키)의 결과는 시안 §4 2b `.check` 칸 하나로, 문장은 채팅
  * 연결 카드와 같은 코어 `teamCheckResult`다. 예비 provider가 있는 서버(ADR-0135 D1
  * `entries[]`가 둘 이상)면 칸마다의 표가 그 밑에 선다.
  */

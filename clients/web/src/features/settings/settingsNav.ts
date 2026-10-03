@@ -65,10 +65,10 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   { id: "shortcuts", label: "단축키", group: "개인" },
   { id: "updates", label: "업데이트", group: "개인", desktopOnly: true },
   // AI 연결은 개인 묶음 맨 아래다(#2877, 제안서 Q3). 이름과 id 는 그대로다:
-  // 「설정 › AI 연결」 문구가 서버의 에이전트 안내 문장·온보딩에 박혀 있다. 첫 절이
-  // 내 구독(이 맥)이 되었으므로 개인에 서고, 팀 연결(운영자) 절은 같은 페이지 안에서
+  // 「AI」 문구가 서버의 에이전트 안내 문장·온보딩에 박혀 있다. 첫 절이
+  // 내 구독(이 맥)이 되었으므로 개인에 서고, 팀 AI 키(운영자) 절은 같은 페이지 안에서
   // 자물쇠로 가른다.
-  { id: "ai", label: "AI 연결", group: "개인" },
+  { id: "ai", label: "AI", group: "개인" },
   { id: "workspace", label: "워크스페이스", group: "워크스페이스" },
   // 팀 기억(ADR-0196 D9, #3165): 내 일시정지는 누구나, 팀 스위치는 관리자만 —
   // 권한은 섹션이 서버 답과 역할로 가른다. 서버가 싣지 않으면 목차에서 접힌다.
@@ -93,7 +93,7 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   // 「앱 바로 뒤」나 「멤버와 초대 앞」이 아니다 — 그 두 섹션은 다른 그룹이다.
   { id: "webhooks", label: "웹훅", group: "연결" },
   // 마지막인 것은 빈도 순서다 (#1202): 한 번 붙이고 나면 다시 열 일이 드물고,
-  // 여는 사람은 오너나 관리자뿐이다. 이름이 '외부 전송'이 아니라 '이벤트 구독'인
+  // 여는 사람은 소유자나 관리자뿐이다. 이름이 '외부 전송'이 아니라 '이벤트 구독'인
   // 것은 서버가 그 이름으로 부르기 때문이다 (openapi event-subscriptions).
   { id: "events", label: "이벤트 구독", group: "연결" },
 ];

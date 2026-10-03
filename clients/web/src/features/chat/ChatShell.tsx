@@ -1430,7 +1430,7 @@ export function ChatShell() {
               ) : (
                 <EmptyInvite
                   headline="아직 채널이 없습니다."
-                  detail="채널은 워크스페이스 오너나 관리자가 만들 수 있습니다. 관리자에게 요청하세요."
+                  detail="채널은 워크스페이스 소유자나 관리자가 만들 수 있습니다. 관리자에게 요청하세요."
                   testId="chat-no-channel"
                 />
               )}

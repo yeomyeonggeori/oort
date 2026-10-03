@@ -150,7 +150,7 @@ describe("DmApprovalSection", () => {
     expect(host.querySelector('[data-testid="hosted-dm-approval-toggle"]')).toBeNull();
     expect(
       host.querySelector('[data-testid="hosted-dm-approval-readonly"]')?.textContent
-    ).toBe("성재님(소유자)만 바꿀 수 있습니다.");
+    ).toBe("성재님(소유자)만 바꿀 수 있어요.");
     expect(rows()[1].textContent).toContain("열림");
   });
 
@@ -190,6 +190,6 @@ describe("DmApprovalSection", () => {
     });
     expect(
       rows()[1].querySelector('[data-testid="hosted-dm-approval-failure"]')?.textContent
-    ).toContain("이 대화는 지금 바꿀 수 없습니다.");
+    ).toContain("이 대화는 지금 바꿀 수 없어요.");
   });
 });

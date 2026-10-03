@@ -32,7 +32,7 @@ import { formatMoment } from "./oauthGrant";
 // #2204 설정 › 연결 › 에이전트 자격.
 //
 // 사보타주 두 줄은 제품이 그 규율을 깨면 이 파일이 붉어진다:
-//   ① 1회용 연결 값이 DOM/로그에 두 번
+//   ① 연결 값이 DOM/로그에 두 번
 //   ② 해제 시작 응답만으로 완료 문장
 // =============================================================================
 
@@ -380,7 +380,7 @@ describe("소스 규율", () => {
   it("해제 완료를 지역 상태로 선언하지 않는다", () => {
     const source = sectionSource();
     expect(source).not.toContain("TERMINAL_DONE_HEADLINE");
-    expect(source).not.toContain("이 연결은 해제됐습니다");
+    expect(source).not.toContain("이 연결은 해제됐어요");
     expect(source).not.toMatch(/status:\s*"disconnected"/);
   });
 
@@ -469,7 +469,7 @@ describe("목록 네 상태", () => {
       () => host.querySelector('[data-testid="agent-credentials-empty"]') !== null,
       "empty"
     );
-    expect(host.textContent).toContain("아직 연결된 에이전트가 없습니다");
+    expect(host.textContent).toContain("아직 연결된 에이전트가 없어요");
     expect(
       host.querySelector('[data-testid="agent-credentials-issue"]')?.textContent
     ).toBe("새 자격 발급");
@@ -523,7 +523,7 @@ describe("목록 네 상태", () => {
     expect(host.textContent).toContain("마지막 활동");
     expect(host.textContent).not.toContain("마지막 상태 변화");
     expect(host.textContent).not.toContain(
-      "자격증명 증명이 성공했고 승인한 채널에서 이 에이전트가 일할 수 있습니다."
+      "자격증명 증명이 성공했고 승인한 채널에서 이 에이전트가 일할 수 있어요."
     );
     expect(
       host.querySelector('[data-testid="agent-credentials-doorbell"]')
@@ -717,7 +717,7 @@ describe("재발급", () => {
     expect(
       document.querySelector('[data-testid="hosted-preset-unverified"]')
         ?.textContent
-    ).toContain("아직 확인되지 않았습니다");
+    ).toContain("아직 확인되지 않았어요");
   });
 });
 

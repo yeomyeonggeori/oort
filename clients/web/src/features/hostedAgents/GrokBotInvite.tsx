@@ -21,7 +21,7 @@ import { useHostedAgentProbe } from "./useHostedAgentProbe";
 // =============================================================================
 // 데스크탑에서 Grok Bot 이 보이면 한 줄 초대 (T-5 / #1655).
 //
-// 허브의 「호스티드 에이전트 연결」 버튼은 그대로 둔다. 감지가 실패하거나
+// 허브의 「호스티드 봇 초대」 버튼은 그대로 둔다. 감지가 실패하거나
 // 브라우저 탭이면 이 줄은 마운트되지 않고, 사람은 그 버튼으로 위저드에 들어간다.
 // 위저드 단계 구조는 이 줄이 바꾸지 않는다. 넘기는 것은 identity 프리필과
 // 첫 발급 한 번뿐이다.
@@ -63,7 +63,7 @@ export function GrokBotInvite({
     if (offline) return null;
     return (
       <div role="status" className="border-b border-line px-4 py-2" data-testid="grokbot-invite-loading">
-        <span className="sr-only">그록봇 연결 상태를 확인하는 중입니다.</span>
+        <span className="sr-only">그록봇 연결 상태를 확인하는 중이에요.</span>
         <Skeleton ready={false} rows={1} className="p-0" />
       </div>
     );
@@ -125,7 +125,7 @@ function InviteRow({
         aria-disabled={offline || undefined}
         aria-label={
           offline
-            ? `${plan.actionLabel}. 연결이 끊겨 지금은 할 수 없습니다`
+            ? `${plan.actionLabel}. 연결이 끊겨 지금은 할 수 없어요`
             : undefined
         }
         className={cn(offline && "opacity-50")}

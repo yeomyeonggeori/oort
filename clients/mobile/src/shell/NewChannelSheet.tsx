@@ -52,7 +52,7 @@ import {SheetTitleRow} from './NewMessageSheet';
 //   거절의 자리     `createChannelFailure`(409·400 은 이름 칸 밑, 403·429·망은 배너)
 //   캐시            `upsertChannel` 로 목록에 바로 넣고 무효화 — 웹 `useCreateChannel`
 //
-// 누가 볼 수 있는가(오너·관리자)는 메뉴가 정한다(`canCreateChannelNow`). 서버가 마지막
+// 누가 볼 수 있는가(소유자·관리자)는 메뉴가 정한다(`canCreateChannelNow`). 서버가 마지막
 // 말을 하므로 여기서 403 이 와도 배너로 말한다.
 // =============================================================================
 

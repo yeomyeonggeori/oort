@@ -69,7 +69,7 @@ export type CommandKind = "navigate" | "client";
  */
 export type LocalCardId = "ai.connect";
 
-/** AI 연결 카드에서 펼쳐 둘 줄. `/연결 claude`·`/연결 codex`·`/연결 팀키`. */
+/** AI 계정 카드에서 펼쳐 둘 줄. `/연결 claude`·`/연결 codex`·`/연결 팀키`. */
 export type AiConnectLine = "claude" | "codex" | "team";
 
 /**
@@ -121,7 +121,7 @@ export interface CommandContext {
   /**
    * 로컬 카드를 연다(#2943). 붙일 자리(지금 보고 있는 채널의 카드 자리)가
    * 있어서 **열었으면 true**, 없으면 false다. false를 받은 명령은 스스로 폴백한다
-   * — `ai.connect`는 설정 › AI 연결로 간다. 카드 자리가 아직 없는 클라이언트는
+   * — `ai.connect`는 AI로 간다. 카드 자리가 아직 없는 클라이언트는
    * 언제나 false를 돌려주면 된다(GC-3 전의 웹, 폰).
    */
   readonly openLocalCard: (card: LocalCardId, args: LocalCardArgs) => boolean;
@@ -287,11 +287,11 @@ function aiConnectArgs(args: LocalCardArgs | undefined): LocalCardArgs {
  * `ai.connect` 실행(#2943 GC-2).
  *
  * 카드를 붙일 자리가 있으면 거기 연다. 없으면(채널 밖, 또는 카드 본체 GC-3
- * 전) 설정 › AI 연결로 간다. 어느 쪽이든 표면(팔레트)은 닫힌다.
+ * 전) AI로 간다. 어느 쪽이든 표면(팔레트)은 닫힌다.
  */
 function runAiConnect(ctx: CommandContext, args?: LocalCardArgs): CommandResult {
   if (ctx.openLocalCard("ai.connect", aiConnectArgs(args))) {
-    return { status: "AI 연결 카드 열기", closesSurface: true };
+    return { status: "AI 계정 카드 열기", closesSurface: true };
   }
   ctx.navigate(AI_CONNECT_HUB_PATH);
   return {
@@ -424,7 +424,7 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
     // 채팅 연결 카드의 입구(#2939 brief §3.1). 슬래시·⌘K·(2단계) 에이전트
     // 제안 카드의 「열기」가 모두 이 한 정의의 `run`을 부른다.
     id: "ai.connect",
-    title: "AI 연결 카드 열기",
+    title: "AI 계정 카드 열기",
     group: "settings",
     kind: "client",
     keywords: ["연결", "connect", "ai", "구독", "api 키", "claude", "codex"],
@@ -439,7 +439,7 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
     slash: {
       name: "연결",
       aliases: ["connect", "ai"],
-      hint: "AI 연결 카드 열기 · 나에게만 보여요",
+      hint: "AI 계정 카드 열기 · 나에게만 보여요",
       fallbackHint: "AI로 이동 · 메시지로 보내지 않아요",
       args: [
         {
@@ -459,7 +459,7 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
         {
           value: "팀키",
           aliases: ["team", "팀"],
-          hint: "팀 API 키 줄만 펼쳐 열기 · 운영자",
+          hint: "팀 AI 키 줄만 펼쳐 열기 · 운영자",
           icon: "credentials",
           args: { line: "team" },
         },

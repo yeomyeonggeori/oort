@@ -65,8 +65,8 @@ import {
 // =============================================================================
 
 const LINES = [
-  "워크스페이스에서 일어난 일을 외부 HTTPS 주소로 보냅니다. 슬랙 알림, 사내 대시보드, 자동화 스크립트를 붙일 때 씁니다.",
-  "구독은 워크스페이스 전체에 걸립니다. 채널 하나만 골라 보낼 수는 없습니다.",
+  "워크스페이스에서 일어난 일을 외부 HTTPS 주소로 보내요. 슬랙 알림, 사내 대시보드, 자동화 스크립트를 붙일 때 써요.",
+  "구독은 워크스페이스 전체에 걸려요. 채널 하나만 골라 보낼 수는 없어요.",
 ];
 
 type RowIssue = { id: string; message: string };
@@ -171,7 +171,7 @@ export function EventSubscriptionSection({
       // Nothing on screen says an irreversible thing succeeded — the row simply
       // stops being there, which a screen reader does not narrate. Say it, and
       // name the row that went so it is not confusable with any other delete.
-      setRemoved(`${rowSubject(subscription)} 구독을 지웠습니다.`);
+      setRemoved(`${rowSubject(subscription)} 구독을 지웠어요.`);
       const rows = subscriptions.data ?? [];
       const gone = rows.findIndex((row) => row.id === subscription.id);
       const next = rows[gone + 1] ?? rows[gone - 1];
@@ -192,7 +192,7 @@ export function EventSubscriptionSection({
     return (
       <SectionShell title="이벤트 구독" lines={LINES}>
         <OperatorNotice
-          who="밖으로 보내는 알림은 소유자·관리자만 만들고 지울 수 있습니다."
+          who="밖으로 보내는 알림은 소유자·관리자만 만들고 지울 수 있어요."
           contact="외부로 보낼 이벤트가 필요하면 소유자·관리자에게 요청하세요."
         />
       </SectionShell>
@@ -238,8 +238,8 @@ export function EventSubscriptionSection({
         />
       ) : rows.length === 0 ? (
         <EmptyInvite
-          headline="보내는 구독이 아직 없습니다."
-          detail="아래에서 받을 주소와 이벤트를 고르면 그때부터 전송이 시작됩니다."
+          headline="보내는 구독이 아직 없어요."
+          detail="아래에서 받을 주소와 이벤트를 고르면 그때부터 전송이 시작돼요."
           className="px-0"
           testId="event-subscription-empty"
         />
@@ -317,7 +317,7 @@ export function EventSubscriptionSection({
 
 // --- 목록 --------------------------------------------------------------------
 
-const OFFLINE_ROW_REASON = "연결이 끊겨 지금은 멈추거나 지울 수 없습니다.";
+const OFFLINE_ROW_REASON = "연결이 끊겨 지금은 멈추거나 지울 수 없어요.";
 
 /**
  * 형제 쓰기로 잠긴 줄들이 가리키는 두 번째 사유 (#1542).
@@ -333,7 +333,7 @@ const OFFLINE_ROW_REASON = "연결이 끊겨 지금은 멈추거나 지울 수 �
  * 오프라인 문장의 동사를 그대로 받는다 — 같은 목록의 같은 두 행동이다.
  */
 const BUSY_ROW_REASON =
-  "앞서 누른 것이 아직 끝나지 않았습니다. 그것이 끝나면 이어서 멈추거나 지울 수 있습니다.";
+  "앞서 누른 것이 아직 끝나지 않았어요. 그것이 끝나면 이어서 멈추거나 지울 수 있어요.";
 
 /**
  * What tells two rows apart, and therefore what every per-row control has to
@@ -519,7 +519,7 @@ function SubscriptionRow({
           label="구독 지우기"
           subject={subject}
           describedBy={lockReason(removing)}
-          question="지우면 전송이 즉시 끊기고 되돌릴 수 없습니다."
+          question="지우면 전송이 즉시 끊기고 되돌릴 수 없어요."
           confirmLabel="지우기"
           disabled={offline || (busy && !removing)}
           busy={removing}
@@ -649,7 +649,7 @@ function CreateForm({
       <Field
         label="받을 주소"
         htmlFor={urlFieldId}
-        hint="운영 서버는 공개 https 주소만 받습니다. 저장 전에 서버가 주소를 확인하며, 사내망이나 로컬 주소는 거절됩니다."
+        hint="운영 서버는 공개 https 주소만 받아요. 저장 전에 서버가 주소를 확인하며, 사내망이나 로컬 주소는 거절돼요."
         error={attempted ? urlProblem : null}
       >
         <Input
@@ -742,7 +742,7 @@ function CreateForm({
           })}
         </div>
         <p id={`${kindsId}-hint`} className="break-keep text-meta text-ink-muted">
-          고른 이벤트는 워크스페이스 밖으로 나갑니다. 받는 쪽을 믿을 수 있을 때만
+          고른 이벤트는 워크스페이스 밖으로 나가요. 받는 쪽을 믿을 수 있을 때만
           만드세요.
         </p>
         {attempted && noKinds && (
@@ -810,7 +810,7 @@ function CreateForm({
             announces reliably, and it says nothing at all while online. */}
         {!offline && (
           <span className="break-keep text-meta text-ink-muted">
-            만들면 서명 비밀이 한 번만 표시됩니다.
+            만들면 서명 비밀이 한 번만 표시돼요.
           </span>
         )}
         {/* 「다시 연결되면 그대로 보내집니다」였다 — 지키지 못하는 약속이다
@@ -831,7 +831,7 @@ function CreateForm({
           data-testid="event-subscription-create-offline"
         >
           {offline
-            ? "서버와 연결이 끊겨 지금은 만들 수 없습니다. 다시 연결되면 이어서 만들 수 있습니다."
+            ? "서버와 연결이 끊겨 지금은 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요."
             : ""}
         </span>
       </div>
@@ -869,7 +869,7 @@ function OneTimeSecret({
       data-testid="event-subscription-secret"
     >
       <p className="break-keep text-body text-ink">
-        구독을 만들었습니다. 서명 비밀은 이 화면에서만 볼 수 있으니 지금
+        구독을 만들었어요. 서명 비밀은 이 화면에서만 볼 수 있으니 지금
         옮겨두세요.
       </p>
 
@@ -916,9 +916,9 @@ function OneTimeSecret({
       </div>
 
       <p className="break-keep text-meta text-ink-muted">
-        받는 쪽은 이 비밀로 요청 서명을 확인합니다. 비밀 관리 도구에 넣은 뒤 이
+        받는 쪽은 이 비밀로 요청 서명을 확인해요. 비밀 관리 도구에 넣은 뒤 이
         블록을 닫으세요. 다시 볼 수 없으며, 잃어버리면 구독을 지우고 새로
-        만들어야 합니다. 목록에는 주소와 상태만 남습니다.
+        만들어야 해요. 목록에는 주소와 상태만 남아요.
       </p>
     </div>
   );

@@ -29,15 +29,15 @@ describe("DM composer hint (#2891)", () => {
       expect(hint.includes("바로 말하면"), `${state}: ${hint}`).toBe(dmDeliveryAnswers(state));
       expect(hint).not.toMatch(/[—–]/);
     }
-    expect(dmComposerHint("open", names)).toBe("멘션 없이 바로 말하면 Claude Code가 답합니다");
+    expect(dmComposerHint("open", names)).toBe("멘션 없이 바로 말하면 Claude Code가 답해요");
     expect(dmComposerHint("awaiting_owner", names)).toBe(
-      "성재님이 이 대화를 열어야 Claude Code가 답합니다"
+      "성재님이 이 대화를 열어야 Claude Code가 답해요"
     );
     expect(dmComposerHint("awaiting_owner", { ...names, ownerName: null })).toBe(
-      "소유자가 이 대화를 열어야 Claude Code가 답합니다"
+      "소유자가 이 대화를 열어야 Claude Code가 답해요"
     );
     expect(dmComposerHint("owner_only", names)).toBe(
-      "성재님의 개인 에이전트라 이 대화에는 답하지 않습니다"
+      "성재님의 개인 에이전트라 이 대화에는 답하지 않아요"
     );
   });
 

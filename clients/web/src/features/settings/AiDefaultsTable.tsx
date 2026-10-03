@@ -58,7 +58,7 @@ import { REMOTE_WORK_APPLYING } from "@momo/core/features/settings/remoteWorkPro
 // density 6/10, motion 1/10 (none added).
 
 // =============================================================================
-// 설정 › AI 연결 › 기본 AI (#2881 AA-8, 시안 §5 왼쪽 판, brief §4).
+// AI › 기본 AI (#2881 AA-8, 시안 §5 왼쪽 판, brief §4).
 //
 // 여섯 줄: 개인 셋(앱 명령·로컬 터미널·원격 작업)은 이 기기에 저장되는 선택 칸이고,
 // 팀 셋(팀 에이전트·요약·가드레일)은 운영자 서버 설정이다. 선택지·폴백·저장은 코어
@@ -71,13 +71,13 @@ import { REMOTE_WORK_APPLYING } from "@momo/core/features/settings/remoteWorkPro
 // =============================================================================
 
 /** 운영자, 팀 줄을 아직 읽는 중. 실패라고 말하지 않는다(design-review #3042 H1). */
-const TEAM_FOOT_OPERATOR_LOADING = "팀 줄은 운영자 설정이에요.";
+const TEAM_FOOT_OPERATOR_LOADING = "팀 줄은 운영자만 바꿔요.";
 /** 운영자인데 팀 줄을 읽지 못했다(옛 서버 404·오류). 저장 칸이 없다는 사실만. */
 const TEAM_FOOT_OPERATOR =
-  "팀 줄은 운영자 설정이에요. 이 서버에서 팀 줄을 불러오지 못해 지금은 서버가 정한 값을 보여 줘요.";
+  "팀 줄은 운영자만 바꿔요. 이 서버에서 팀 줄을 불러오지 못해 지금은 서버가 정한 값을 보여 줘요.";
 const TEAM_FOOT_MEMBER = "팀 줄은 이 서버의 운영자만 바꿀 수 있어요.";
 const PERSONAL_FOOT =
-  "내 구독은 나만 보는 결과에만 쓰입니다. 팀 에이전트와 요약은 내 구독으로 넘어가지 않습니다.";
+  "내 구독은 나만 보는 결과에만 쓰여요. 팀 에이전트와 요약은 내 구독으로 넘어가지 않아요.";
 
 /**
  * 팀 줄의 서버 값(#3042). `ready` = default-ai GET 200(운영자), `hidden` = 403,
@@ -91,7 +91,7 @@ export interface TeamDefaultsState {
   /** 저장이 날고 있는 줄과 그 값. */
   readonly pending: { rowId: TeamDefaultRowId; input: TeamDefaultAiInput | null } | null;
   readonly saveError: { rowId: TeamDefaultRowId; message: string } | null;
-  /** 실시간 연결이 끊겼다: 팀 연결 절의 다른 쓰기처럼 칸을 잠그고 이유를 적는다. */
+  /** 실시간 연결이 끊겼다: 팀 AI 키 절의 다른 쓰기처럼 칸을 잠그고 이유를 적는다. */
   readonly offline: boolean;
   readonly onChoose: (rowId: TeamDefaultRowId, input: TeamDefaultAiInput | null) => void;
 }
@@ -335,7 +335,7 @@ function DefaultRow({
           value={value}
           title={current?.text}
           className="h-control rounded-md text-meta"
-          // 오프라인이면 잠근다(팀 연결 절의 확인·끊기와 같다). 저장이 날고 있는 동안은
+          // 오프라인이면 잠근다(팀 AI 키 절의 확인·끊기와 같다). 저장이 날고 있는 동안은
           // 초점을 뺏지 않게 aria-disabled 로만 막는다: 두 번째 고름이 첫 저장과 경합하지 않게.
           disabled={team.offline}
           aria-disabled={busy || undefined}

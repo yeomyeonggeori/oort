@@ -81,7 +81,7 @@ import { readOauthRequestId } from "./oauthConsentPath";
 // MCP OAuth 2.1 resource-owner consent 화면 (goal HAP-UX4 / #1369).
 //
 // provider 리다이렉트가 `/oauth/consent?request=<봉투>` 로 떨어뜨린 사람에게, 이
-// 워크스페이스의 오너/관리자가 무엇을 승인하는지 보여주고 approve/deny 를 받는다.
+// 워크스페이스의 소유자/관리자가 무엇을 승인하는지 보여주고 approve/deny 를 받는다.
 // 판정과 문구는 전부 `@momo/core/features/hostedAgents/oauthConsent` 에 있고, 이
 // 파일은 그 위에 화면을 얇게 얹는다(design-taste-web §0: judgment in core).
 //

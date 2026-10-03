@@ -5,7 +5,7 @@ import React from 'react';
 import {AiConnectCard} from '../src/features/aiConnect/AiConnectCard';
 import {AI_HUB_COPY} from '@momo/core/features/ai/aiHubModel';
 
-// AIH-4 (#3399): 폰 「내 계정 · 맥」 절의 내 구독 에이전트 상태(읽기 전용).
+// AIH-4 (#3399): 폰 「내 계정 · 맥」 절의 내 구독으로 쓰는 에이전트 상태(읽기 전용).
 // 로그인은 맥에서 하고, Claude 에이전트는 보수 모드(#3397) 동안 「문의 중」이며
 // 부를 수 있다고 말하지 않는다. 못 읽으면 없다고 하지 않는다.
 
@@ -68,7 +68,7 @@ function textOf(testId: string): string {
   return out.join('');
 }
 
-describe('폰 내 계정 절 — 내 구독 에이전트 (AIH-4)', () => {
+describe('폰 내 계정 절 — 내 구독으로 쓰는 에이전트 (AIH-4)', () => {
   it('로그인은 맥이라고 말하고, Claude 에이전트는 문의 중이며 부를 수 있다고 하지 않는다', () => {
     ready([agent('a1', '성재-claude', ME), agent('a2', '서연-codex', 'other')], [conn('a1', 'claude_code'), conn('a2', 'codex')]);
     card();

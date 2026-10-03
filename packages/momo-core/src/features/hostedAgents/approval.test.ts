@@ -74,15 +74,15 @@ describe("RED PROOF ② 자격 없는 줄은 사유와 함께 선다", () => {
     const dm = rows.find((row) => row.id === DM);
     const archived = rows.find((row) => row.id === ARCHIVED);
     expect(dm?.disabled).toBe(true);
-    expect(dm?.detail).toContain("1:1 대화는 여기서 고르지 않습니다");
+    expect(dm?.detail).toContain("1:1 대화는 여기서 고르지 않아요");
     expect(archived?.disabled).toBe(true);
-    expect(archived?.detail).toContain("보관된 채널입니다");
+    expect(archived?.detail).toContain("보관된 채널이에요");
   });
 
   it("고를 수 있는 줄도 무엇이 일어나는지 상시로 말한다", () => {
     const rows = channelApprovalChoices(channels());
-    expect(rows[0]?.detail).toContain("공개 채널입니다");
-    expect(rows[1]?.detail).toContain("비공개 채널입니다");
+    expect(rows[0]?.detail).toContain("공개 채널이에요");
+    expect(rows[1]?.detail).toContain("비공개 채널이에요");
   });
 
   it("자격 판정은 서버의 valid_channels 와 같은 규칙이다", () => {
@@ -157,7 +157,7 @@ describe("RED PROOF ④ 접속 권한은 꺼지지 않는다", () => {
     const connect = HOSTED_SCOPE_CHOICES[0];
     expect(connect?.id).toBe(REQUIRED_HOSTED_SCOPE);
     expect(connect?.required).toBe(true);
-    expect(connect?.requiredReason).toContain("항상 포함됩니다");
+    expect(connect?.requiredReason).toContain("항상 포함돼요");
   });
 
   it("기본값은 부르면 읽고 답하는 최소 조합이다", () => {
@@ -267,10 +267,10 @@ describe("RED PROOF ③ 결과 문장은 닫히는 쪽도 말한다", () => {
     const empty = approvalConsequence("", 2, scopes);
     const named = approvalConsequence("그록봇", 2, scopes);
     expect(empty).toBe(
-      "승인하면 이 에이전트는 2개 채널에서 자기를 부른 메시지 읽기, 메시지 쓰기를 할 수 있습니다. 승인하지 않은 채널에서는 이 에이전트를 멘션해도 작업이 만들어지지 않습니다."
+      "승인하면 이 에이전트는 2개 채널에서 자기를 부른 메시지 읽기, 메시지 쓰기를 할 수 있어요. 승인하지 않은 채널에서는 이 에이전트를 멘션해도 작업이 만들어지지 않아요."
     );
     expect(named).toBe(
-      "승인하면 그록봇은 2개 채널에서 자기를 부른 메시지 읽기, 메시지 쓰기를 할 수 있습니다. 승인하지 않은 채널에서는 이 에이전트를 멘션해도 작업이 만들어지지 않습니다."
+      "승인하면 그록봇은 2개 채널에서 자기를 부른 메시지 읽기, 메시지 쓰기를 할 수 있어요. 승인하지 않은 채널에서는 이 에이전트를 멘션해도 작업이 만들어지지 않아요."
     );
     expect(empty).not.toMatch(/승인하면\s+는\s/);
     expect(approvalConsequence("   ", 2, scopes)).toBe(empty);
@@ -281,12 +281,12 @@ describe("RED PROOF ③ 결과 문장은 닫히는 쪽도 말한다", () => {
       "agent:port:connect",
       "messages:write",
     ]);
-    expect(sentence).toContain("어떤 대화에도 닿지 못합니다");
+    expect(sentence).toContain("어떤 대화에도 닿지 못해요");
   });
 
   it("접속만 고른 것도 결과가 있는 선택이다", () => {
     const sentence = approvalConsequence("김인턴", 2, ["agent:port:connect"]);
-    expect(sentence).toContain("읽기도 쓰기도 하지 못합니다");
+    expect(sentence).toContain("읽기도 쓰기도 하지 못해요");
   });
 
   it("접속은 행동 목록에 들어가지 않는다", () => {

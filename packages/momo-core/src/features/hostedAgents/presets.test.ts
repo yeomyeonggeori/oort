@@ -36,20 +36,20 @@ describe("RED PROOF ① 실측되지 않은 것을 실측된 것처럼 말하지
   it("Grok preset 은 확인되지 않았다고 스스로 말한다", () => {
     const grok = hostedPreset("grok");
     expect(grok.verified).toBe(false);
-    expect(grok.unverifiedNote).toContain("아직 확인되지 않았습니다");
+    expect(grok.unverifiedNote).toContain("아직 확인되지 않았어요");
   });
 
   it("어느 preset 문구도 즉시나 매끄러움을 약속하지 않는다", () => {
     for (const preset of HOSTED_PRESETS) {
       const text = [preset.detail, preset.unverifiedNote ?? "", ...preset.steps].join(" ");
-      expect(text).not.toMatch(/즉시|자동으로 완료|바로 연결됩니다/);
+      expect(text).not.toMatch(/즉시|자동으로 완료|바로 연결돼요/);
     }
   });
 
   it("Grok 방식이 남기는 것을 미리 적는다", () => {
     // #1344 실측: connector Uninstall 은 앱 목록만 지우고 local plugin source 를
     // 남겼다. 나중에 해제할 사람이 그 사실을 지금 알아야 한다.
-    expect(hostedPreset("grok").leavesBehind).toContain("플러그인 소스를 남깁니다");
+    expect(hostedPreset("grok").leavesBehind).toContain("플러그인 소스를 남길어요");
   });
 
   it("모르는 preset id 는 일반 recipe 로 떨어진다", () => {
@@ -115,8 +115,8 @@ describe("RED PROOF ③ 주소는 조립하되 추측하지 않는다", () => {
 
 describe("RED PROOF ④ 두 비밀값의 문구는 서로를 대신하지 않는다", () => {
   it("연결 값 문구는 그 값이 권한이 아니라고 말한다", () => {
-    expect(PAIRING_REVEAL_SCOPE_NOTE).toContain("승격되지 않습니다");
-    expect(PAIRING_REVEAL_WARNING).toContain("한 번만 보입니다");
+    expect(PAIRING_REVEAL_SCOPE_NOTE).toContain("승격되지 않아요");
+    expect(PAIRING_REVEAL_WARNING).toContain("한 번만 보여요");
   });
 
   it("일반 프리셋 연결 값 문면은 그대로다", () => {
@@ -124,10 +124,10 @@ describe("RED PROOF ④ 두 비밀값의 문구는 서로를 대신하지 않는
       "지금 연결 값을 provider 설정에 붙이세요."
     );
     expect(hostedPreset("generic").steps).toEqual([
-      "provider의 MCP 커넥터 설정에서 원격 서버를 하나 추가합니다.",
-      "주소 칸에 아래 Agent Port 주소를 그대로 넣습니다.",
-      "인증 헤더의 bearer 값에 아래 연결 값을 넣습니다.",
-      "저장한 뒤 커넥터를 한 번 실행하면 이 화면이 감지 상태로 넘어갑니다.",
+      "provider의 MCP 커넥터 설정에서 원격 서버를 하나 추가해요.",
+      "주소 칸에 아래 Agent Port 주소를 그대로 넣어요.",
+      "인증 헤더의 bearer 값에 아래 연결 값을 넣어요.",
+      "저장한 뒤 커넥터를 한 번 실행하면 이 화면이 감지 상태로 넘어가요.",
     ]);
   });
 
@@ -137,7 +137,7 @@ describe("RED PROOF ④ 두 비밀값의 문구는 서로를 대신하지 않는
     );
     expect(GROK_PAIRING_PURPOSE).toContain("말로 전하는 것이 기본");
     expect(GROK_PAIRING_PURPOSE).toContain("다른 방법");
-    expect(PAIRING_NATURAL_LANGUAGE_HANDOFF).toContain("자기 쪽에 붙입니다");
+    expect(PAIRING_NATURAL_LANGUAGE_HANDOFF).toContain("자기 쪽에 붙이에요");
     expect(PAIRING_NATURAL_LANGUAGE_HANDOFF).toContain("직접 붙여 넣으려면");
     expect(PAIRING_NATURAL_LANGUAGE_HANDOFF).not.toMatch(/자연어/);
     expect(PAIRING_NATURAL_LANGUAGE_HANDOFF).not.toMatch(/[—–]/);
@@ -149,7 +149,7 @@ describe("RED PROOF ④ 두 비밀값의 문구는 서로를 대신하지 않는
   });
 
   it("자격증명 문구는 앞 값이 이미 죽었다고 말한다", () => {
-    expect(ACTIVE_REVEAL_WARNING).toContain("이미 소비돼 더 이상 통하지 않습니다");
+    expect(ACTIVE_REVEAL_WARNING).toContain("이미 소비돼 더 이상 통하지 않아요");
     expect(ACTIVE_REVEAL_PROOF_NOTE).toContain("첫 요청에 성공해야");
   });
 });

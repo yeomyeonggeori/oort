@@ -112,7 +112,7 @@ const SECTIONS: {
   id: AgentHubSection;
   label: string;
   surface?: SurfaceId;
-  /** 오너·관리자에게만 서는 탭인가. */
+  /** 소유자·관리자에게만 서는 탭인가. */
   operatorOnly?: boolean;
 }[] = [
   { id: "profile", label: "프로필" },
@@ -250,8 +250,8 @@ function AgentListRow({
                 text={current.state === "working" ? "작업 중" : "승인 대기"}
                 label={
                   current.state === "working"
-                    ? `${agent.displayName} 에이전트가 작업 중입니다.`
-                    : `${agent.displayName} 에이전트가 승인을 기다립니다.`
+                    ? `${agent.displayName} 에이전트가 작업 중이에요.`
+                    : `${agent.displayName} 에이전트가 승인을 기다려요.`
                 }
                 live={live}
                 testId="agent-hub-current-work"
@@ -374,7 +374,7 @@ export function AgentHubRoute() {
             </div>
             <p className="text-meta text-ink-muted">
               워크스페이스 에이전트를 만들고, 상태와 기억, 작업 이력을 한 곳에서
-              봅니다.{" "}
+              봐요.{" "}
               <Link
                 to="/ai/agents"
                 className="underline underline-offset-4 press focus-visible:focus-ring"
@@ -427,7 +427,7 @@ export function AgentHubRoute() {
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼습니다. 마지막으로 받은 내용은 계속 볼 수 있고, 변경은 다시 연결된 뒤에 할 수 있습니다."
+          message="연결이 끊겼어요. 마지막으로 받은 내용은 계속 볼 수 있고, 변경은 다시 연결된 뒤에 할 수 있어요."
           testId="agent-hub-offline"
         />
       )}
@@ -449,24 +449,24 @@ export function AgentHubRoute() {
         <aside className="agent-hub-roster">
           {directoryQuery.isPending && agents.length === 0 ? (
             <AgentHubLoading
-              message="에이전트 명부를 불러오는 중입니다."
+              message="에이전트 명부를 불러오는 중이에요."
               rows={5}
               className="p-4"
             />
           ) : directoryQuery.isError && agents.length === 0 ? (
             <InlineBanner
-              message="에이전트 명부를 불러오지 못했습니다."
+              message="에이전트 명부를 불러오지 못했어요."
               actionLabel="다시 시도"
               onAction={() => void directoryQuery.refetch()}
               testId="agent-hub-roster-error"
             />
           ) : agents.length === 0 ? (
             <EmptyInvite
-              headline="이 워크스페이스에는 에이전트가 없습니다."
+              headline="이 워크스페이스에는 에이전트가 없어요."
               detail={
                 mayCreate
-                  ? "에이전트를 만들고 채널에 넣으면 그 채널에서 멘션할 수 있습니다."
-                  : "에이전트는 워크스페이스 오너나 관리자가 만들 수 있습니다."
+                  ? "에이전트를 만들고 채널에 넣으면 그 채널에서 멘션할 수 있어요."
+                  : "에이전트는 워크스페이스 소유자나 관리자가 만들 수 있어요."
               }
               actions={
                 mayCreate ? (
@@ -689,9 +689,9 @@ function AgentProfileSection({
   const editing = useAgentEditingCapability(agent.id);
   const editable = editing.support === "ready";
   const editDisabledReason = offline
-    ? "연결이 끊긴 동안에는 바꿀 수 없습니다."
+    ? "연결이 끊긴 동안에는 바꿀 수 없어요."
     : editing.support === "checking"
-      ? "이 서버가 프로필 편집을 받는지 확인 중입니다."
+      ? "이 서버가 프로필 편집을 받는지 확인 중이에요."
       : (editing.reason ?? null);
 
   async function submit(event: React.FormEvent) {
@@ -707,7 +707,7 @@ function AgentProfileSection({
       return;
     }
     if (instructionBytes > 8_192) {
-      setLocalError("지시문은 UTF-8 기준 8KB 이하로 줄여야 합니다.");
+      setLocalError("지시문은 UTF-8 기준 8KB 이하로 줄여야 해요.");
       return;
     }
     setLocalError(null);
@@ -729,7 +729,7 @@ function AgentProfileSection({
   if (handle.isPending) {
     return (
       <AgentHubLoading
-        message="에이전트 프로필을 불러오는 중입니다."
+        message="에이전트 프로필을 불러오는 중이에요."
         rows={6}
         className="p-4"
       />
@@ -738,7 +738,7 @@ function AgentProfileSection({
   if (handle.error || currentDraft === null || currentInstructions === null) {
     return (
       <InlineBanner
-        message="에이전트 프로필을 불러오지 못했습니다."
+        message="에이전트 프로필을 불러오지 못했어요."
         actionLabel="다시 시도"
         onAction={handle.refetch}
         testId="agent-hub-profile-error"
@@ -759,14 +759,14 @@ function AgentProfileSection({
           separator={false}
           message={
             editable
-              ? "아직 저장된 프로필이 없습니다. 변경을 저장하면 프로필이 만들어집니다."
-              : "아직 저장된 프로필이 없습니다."
+              ? "아직 저장된 프로필이 없어요. 변경을 저장하면 프로필이 만들어져요."
+              : "아직 저장된 프로필이 없어요."
           }
           testId="agent-hub-profile-empty"
         />
       )}
       {/* 편집 표면이 없거나 확인되지 않은 서버에서는 그 사실을 먼저 말한다.
-          이 배너가 없던 동안 화면은 "저장하면 만들어집니다"라고 약속하고 404를
+          이 배너가 없던 동안 화면은 "저장하면 만들어져요"라고 약속하고 404를
           돌려줬다 — 프로필 읽기가 200을 답한다는 사실만으로 쓰기까지 있다고
           가정한 결과다(capability.ts ④).
 
@@ -781,8 +781,8 @@ function AgentProfileSection({
           separator={false}
           message={
             editing.support === "absent"
-              ? `${editing.reason ?? ""} 프로필 편집과 일시정지는 서버를 올린 뒤에 할 수 있습니다. 채널 배치는 지금도 됩니다.`.trim()
-              : (editing.reason ?? "이 서버가 프로필 편집을 받는지 확인하지 못했습니다.")
+              ? `${editing.reason ?? ""} 프로필 편집과 일시정지는 서버를 올린 뒤에 할 수 있어요. 채널 배치는 지금도 돼요.`.trim()
+              : (editing.reason ?? "이 서버가 프로필 편집을 받는지 확인하지 못했어요.")
           }
           {...(editing.support === "unknown"
             ? { actionLabel: "다시 확인", onAction: editing.recheck }
@@ -793,7 +793,7 @@ function AgentProfileSection({
       {pauseMutation.isError && (
         <InlineBanner
           separator={false}
-          message="에이전트 상태를 바꾸지 못했습니다. 연결을 확인하고 다시 시도하세요."
+          message="에이전트 상태를 바꾸지 못했어요. 연결을 확인하고 다시 시도하세요."
           testId="agent-hub-pause-error"
         />
       )}
@@ -802,7 +802,7 @@ function AgentProfileSection({
         <div>
           <h3 className="text-body font-semibold text-ink">상태</h3>
           <p className="text-meta text-ink-muted">
-            일시정지하면 새 멘션과 작업이 이 에이전트로 전달되지 않습니다.
+            일시정지하면 새 멘션과 작업이 이 에이전트로 전달되지 않아요.
           </p>
         </div>
         {/* 프로필 카드: 멘션하기 전에 확인하는 다섯 가지를 한 판에 둔다. 값이
@@ -892,7 +892,7 @@ function AgentProfileSection({
           <div>
             <h3 className="text-body font-semibold text-ink">지시문</h3>
             <p className="text-meta text-ink-muted">
-              이 에이전트가 답변과 작업에서 따를 워크스페이스 지시입니다.
+              이 에이전트가 답변과 작업에서 따를 워크스페이스 지시예요.
             </p>
           </div>
           <label htmlFor="agent-hub-instructions" className="sr-only">
@@ -919,7 +919,7 @@ function AgentProfileSection({
               // "not now" signal where it belongs and leaves the words legible.
               "disabled:cursor-not-allowed disabled:border-line disabled:bg-surface-hover disabled:opacity-100"
             )}
-            placeholder="답변 방식, 검증 기준, 작업 경계를 적습니다."
+            placeholder="답변 방식, 검증 기준, 작업 경계를 적어요."
             data-testid="agent-hub-instructions"
           />
           <p
@@ -937,7 +937,7 @@ function AgentProfileSection({
           <div>
             <h3 className="text-body font-semibold text-ink">모델</h3>
             <p className="text-meta text-ink-muted">
-              비워 두면 에이전트 기본 모델 {inheritedModel || "미지정"}을 사용합니다.
+              비워 두면 에이전트 기본 모델 {inheritedModel || "미지정"}을 사용해요.
             </p>
           </div>
           <RoutingFields
@@ -966,7 +966,7 @@ function AgentProfileSection({
               !editable
                 ? editDisabledReason
                 : routingCapability.reason ??
-                  "이 서버가 추론 강도 변경을 지원하는지 확인 중입니다."
+                  "이 서버가 추론 강도 변경을 지원하는지 확인 중이에요."
             }
             modelError={
               handle.failure?.field === "model"
@@ -1037,9 +1037,9 @@ function AgentProfileSection({
             ok: false as const,
             forbidden: result.forbidden,
             message: result.forbidden
-              ? "이 계정으로는 이 에이전트의 도구 허용을 바꿀 수 없습니다."
+              ? "이 계정으로는 이 에이전트의 도구 허용을 바꿀 수 없어요."
               : (handle.failure?.message ??
-                "도구 허용을 저장하지 못했습니다. 연결을 확인하고 다시 시도하세요."),
+                "도구 허용을 저장하지 못했어요. 연결을 확인하고 다시 시도하세요."),
           };
         }}
       />
@@ -1050,8 +1050,8 @@ function AgentProfileSection({
         <h3 className="text-body font-semibold text-ink">예약 작업</h3>
         <p className="text-body text-ink-muted" data-testid="agent-hub-schedule">
           {handle.profile?.triggers.schedule === undefined
-            ? "예약된 작업이 없습니다. 예약 실행기는 아직 구현되지 않았습니다."
-            : "예약 정보가 저장되어 있습니다. 실행기는 아직 구현되지 않았습니다."}
+            ? "예약된 작업이 없어요. 예약 실행기는 아직 구현되지 않았어요."
+            : "예약 정보가 저장되어 있어요. 실행기는 아직 구현되지 않았어요."}
         </p>
       </section>
     </div>
@@ -1079,8 +1079,8 @@ function CurrentWorkValue({
       text={work.state === "working" ? "작업 중" : "승인 대기"}
       label={
         work.state === "working"
-          ? `${agentName} 에이전트가 작업 중입니다.`
-          : `${agentName} 에이전트가 승인을 기다립니다.`
+          ? `${agentName} 에이전트가 작업 중이에요.`
+          : `${agentName} 에이전트가 승인을 기다려요.`
       }
       live={live}
     />
@@ -1129,7 +1129,7 @@ function PermissionsSection({
       <div>
         <h3 className="text-body font-semibold text-ink">권한</h3>
         <p className="text-meta text-ink-muted">
-          서버가 공개한 capability입니다. 앱 권한은 설정에서 봅니다.
+          서버가 공개한 capability이에요. 앱 권한은 설정에서 봐요.
         </p>
       </div>
       <dl className="flex flex-col gap-3 text-body">
@@ -1190,21 +1190,21 @@ function AgentHistorySection({
     <div className="flex flex-col">
       {query.isPending ? (
         <AgentHubLoading
-          message="에이전트 작업 이력을 불러오는 중입니다."
+          message="에이전트 작업 이력을 불러오는 중이에요."
           rows={6}
           className="p-4"
         />
       ) : query.isError ? (
         <InlineBanner
-          message="에이전트 작업 이력을 불러오지 못했습니다."
+          message="에이전트 작업 이력을 불러오지 못했어요."
           actionLabel="다시 시도"
           onAction={() => void query.refetch()}
           testId="agent-history-error"
         />
       ) : runs.length === 0 ? (
         <EmptyInvite
-          headline="표시할 작업 이력이 없습니다."
-          detail="현재 참여 중인 채널에서 이 에이전트가 실행한 작업이 생기면 최신순으로 표시됩니다."
+          headline="표시할 작업 이력이 없어요."
+          detail="현재 참여 중인 채널에서 이 에이전트가 실행한 작업이 생기면 최신순으로 표시돼요."
           actions={
             <Button variant="outline" size="sm" onClick={onOpenProfile}>
               프로필 보기
@@ -1332,18 +1332,18 @@ function AgentRunDetailDialog({
         <div className="flex flex-col gap-1 border-b border-line p-4">
           <DialogTitle>작업 상세</DialogTitle>
           <DialogDescription>
-            이 작업의 실행 상태와 기록된 작업 요약을 봅니다.
+            이 작업의 실행 상태와 기록된 작업 요약을 봐요.
           </DialogDescription>
         </div>
         {query.isPending ? (
           <AgentHubLoading
-            message="작업 상세를 불러오는 중입니다."
+            message="작업 상세를 불러오는 중이에요."
             rows={5}
             className="p-4"
           />
         ) : query.isError ? (
           <InlineBanner
-            message="작업 상세를 불러오지 못했습니다."
+            message="작업 상세를 불러오지 못했어요."
             actionLabel="다시 시도"
             onAction={() => void query.refetch()}
             testId="agent-run-detail-error"

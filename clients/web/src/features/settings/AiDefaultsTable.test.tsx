@@ -72,7 +72,7 @@ describe("기본 AI 표 화면", () => {
     // 앱 명령은 팀 키 하나 + 준비 중인 내 구독(고를 수 없음).
     const app = q("ai-default-appCommand-select") as HTMLSelectElement;
     expect(Array.from(app.options).map((o) => [o.textContent, o.disabled])).toEqual([
-      ["팀 API 키 · api.openai.com", false],
+      ["팀 AI 키 · api.openai.com", false],
       ["내 구독 · 준비 중", true],
     ]);
     // 앱 명령의 모델 줄은 한 번만 선다(저장 값이 팀 키여도).
@@ -123,8 +123,8 @@ describe("기본 AI 표 화면", () => {
     expect(q("ai-defaults-team-foot")?.textContent).toBe("팀 줄은 이 서버의 운영자만 바꿀 수 있어요.");
     // 팀 키가 있다고 단정하지 않는다: 앱 명령은 고르는 칸이 아니라 이유 칸.
     expect(q("ai-default-appCommand-select")).toBeNull();
-    expect(q("ai-default-appCommand")?.textContent).toContain("팀 API 키 · 운영자 설정");
-    expect(q("ai-default-summary")?.textContent).toContain("팀 API 키 · 운영자 설정");
+    expect(q("ai-default-appCommand")?.textContent).toContain("팀 AI 키 · 운영자만 바꿔요");
+    expect(q("ai-default-summary")?.textContent).toContain("팀 AI 키 · 운영자만 바꿔요");
   });
 
   it("팀 키가 없으면 앱 명령·팀 에이전트는 막히고 이유를 말한다", () => {
@@ -134,7 +134,7 @@ describe("기본 AI 표 화면", () => {
     expect(q("ai-default-teamAgent-fallback")?.textContent).toContain("내 구독으로 넘어가지 않아요");
   });
 
-  it("모의 응답뿐이면 팀 연결 절과 같은 말(모의 응답)", () => {
+  it("모의 응답뿐이면 팀 AI 키 절과 같은 말(모의 응답)", () => {
     render(AiDefaultsTable, { teamKey: { status: "mock" }, operator: true, browserTab: false });
     expect(q("ai-default-teamAgent-fallback")?.textContent).toContain("모의 응답으로만 대답해요");
     expect(q("ai-default-teamAgent")?.textContent).not.toContain("대답할 수 없어요");
@@ -300,7 +300,7 @@ describe("기본 AI 표 팀 줄 저장 (#3042)", () => {
 describe("팀 줄 상태 (design-review #3042)", () => {
   it("읽는 중에는 불러오지 못했다고 말하지 않는다", () => {
     render(AiDefaultsTable, { teamKey: TEAM, operator: true, browserTab: false, team: teamState({ status: "loading", value: null }) });
-    expect(q("ai-defaults-team-foot")?.textContent).toBe("팀 줄은 운영자 설정이에요.");
+    expect(q("ai-defaults-team-foot")?.textContent).toBe("팀 줄은 운영자만 바꿔요.");
     act(() => root?.unmount());
     host?.remove();
     render(AiDefaultsTable, { teamKey: TEAM, operator: true, browserTab: false, team: teamState({ status: "error", value: null }) });
