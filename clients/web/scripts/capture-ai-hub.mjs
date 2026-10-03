@@ -242,7 +242,7 @@ async function scenes(browser, origin, scheme, viewport) {
       // ⌘K
       await page.keyboard.press("Meta+KeyK");
       await page.getByTestId("quick-switcher").waitFor();
-      await page.keyboard.type("AI");
+      await page.locator("[cmdk-input]").fill("AI");
       await page.waitForTimeout(500);
       await shot("palette-ai");
       const palette = await page.locator("[cmdk-item]").evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")));

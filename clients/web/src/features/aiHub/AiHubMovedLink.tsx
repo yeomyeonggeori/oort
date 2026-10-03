@@ -15,6 +15,7 @@ export function AiHubMovedLink({ section }: { section: string }) {
   return (
     <p className="mb-4 flex flex-wrap items-center gap-2 text-meta text-ink-muted" data-testid="ai-hub-moved-link">
       <span>{AI_HUB_NAV_COPY.movedToHub}</span>
+      <span aria-hidden="true">·</span>
       <Link
         to={aiHubSection(target).path}
         className="font-semibold text-ink underline underline-offset-4 press focus-visible:focus-ring"
