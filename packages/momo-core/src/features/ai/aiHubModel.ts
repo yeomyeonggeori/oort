@@ -133,6 +133,130 @@ export const AI_EXTERNAL_SUBSECTIONS = {
   hostedBotInvite: "호스티드 봇 초대",
 } as const;
 
+export type AiExternalRowId = keyof typeof AI_EXTERNAL_SUBSECTIONS;
+
+/** 외부 연결 구획의 한 줄 (AIH-8, #3438, 시안 panel-external). */
+export interface AiExternalRow {
+  id: AiExternalRowId;
+  /** 용어집 이름. */
+  title: string;
+  /** 줄 머리의 작은 옛 이름. 영어 약자는 넣지 않는다(상세 화면 괄호에서만). */
+  legacy: string | null;
+  /** 상세 화면 머리의 괄호. 영어 약자가 여기서만 선다. */
+  detailLegacy: string | null;
+  /** 줄 아래 한 문장. */
+  summary: string;
+  /** 상세 화면 머리 설명(옛 구획 설명을 해요체로 옮긴 것). */
+  detail: readonly string[];
+  /** 개수 칩의 단위. 센 값이 없는 줄은 null. */
+  countNoun: string | null;
+  /** 상세 화면 주소. 상세 본문이 없는 줄은 null. */
+  path: string | null;
+  /** 이 줄로 옮겨 온 옛 설정 구획 id. */
+  fromSettings: string | null;
+  /** 설정의 옛 구획 자리에 서는 한 문장. 옮겨 온 줄이 없으면 null. */
+  settingsLine: string | null;
+}
+
+export const AI_EXTERNAL_BASE_PATH = "/ai/external";
+
+export const AI_EXTERNAL_ROWS: readonly AiExternalRow[] = [
+  {
+    id: "apps",
+    title: AI_EXTERNAL_SUBSECTIONS.apps,
+    legacy: null,
+    detailLegacy: null,
+    summary: "워크스페이스에 설치한 앱과 쓸 수 있는 도구를 관리해요.",
+    detail: ["워크스페이스에 설치한 앱과, 에이전트가 쓸 수 있는 도구를 관리해요."],
+    countNoun: "설치",
+    path: `${AI_EXTERNAL_BASE_PATH}/apps`,
+    fromSettings: "plugins",
+    settingsLine: "앱은 AI › 외부 연결의 「앱」으로 옮겼어요.",
+  },
+  {
+    id: "incoming",
+    title: AI_EXTERNAL_SUBSECTIONS.incoming,
+    legacy: "웹훅",
+    detailLegacy: "웹훅",
+    summary: "외부 서비스가 채널에 메시지를 보낼 때 써요. 주소와 비밀값을 발급해요.",
+    detail: [
+      "외부 서비스가 이 워크스페이스의 채널로 알림을 보내도록 받는 주소를 발급해요.",
+      "비밀값은 발급 직후 한 번만 보여요. 서버는 원문을 보관하지 않아요.",
+    ],
+    countNoun: "주소",
+    path: `${AI_EXTERNAL_BASE_PATH}/incoming`,
+    fromSettings: "webhooks",
+    settingsLine: "웹훅은 AI › 외부 연결의 「채널로 들어오는 주소」로 옮겼어요.",
+  },
+  {
+    id: "outgoing",
+    title: AI_EXTERNAL_SUBSECTIONS.outgoing,
+    legacy: "이벤트 구독",
+    detailLegacy: "이벤트 구독",
+    summary: "워크스페이스에서 일어난 일을 외부 HTTPS 주소로 보내요. 슬랙 알림, 대시보드에 써요.",
+    detail: [
+      "워크스페이스에서 일어난 일을 외부 HTTPS 주소로 보내요. 슬랙 알림, 사내 대시보드, 자동화 스크립트를 붙일 때 써요.",
+      "구독은 워크스페이스 전체에 걸려요. 채널 하나만 골라 보낼 수는 없어요.",
+    ],
+    countNoun: "구독",
+    path: `${AI_EXTERNAL_BASE_PATH}/outgoing`,
+    fromSettings: "events",
+    settingsLine: "이벤트 구독은 AI › 외부 연결의 「밖으로 보내는 알림」으로 옮겼어요.",
+  },
+  {
+    id: "externalAgents",
+    title: AI_EXTERNAL_SUBSECTIONS.externalAgents,
+    legacy: "에이전트 자격",
+    detailLegacy: "에이전트 자격 · MCP · Agent Port",
+    summary: "다른 곳에서 도는 에이전트를 멤버로 들여요. 연결 값은 발급할 때 한 번만 보여요.",
+    detail: [
+      "다른 인프라에서 도는 에이전트를 이 워크스페이스의 멤버로 들이는 연결이에요.",
+      "연결 값은 발급 직후 한 번만 보여요. 끊기는 서버가 끊겼다고 답한 뒤에야 끝나요.",
+    ],
+    countNoun: "연결",
+    path: `${AI_EXTERNAL_BASE_PATH}/agents`,
+    fromSettings: "agents",
+    settingsLine: "에이전트 자격은 AI › 외부 연결의 「외부 에이전트 연결」로 옮겼어요.",
+  },
+  {
+    id: "hostedBotInvite",
+    title: AI_EXTERNAL_SUBSECTIONS.hostedBotInvite,
+    legacy: "호스티드 에이전트 연결",
+    detailLegacy: "호스티드 에이전트 연결",
+    summary: "서버가 대신 돌려 주는 봇을 초대해요. 에이전트 만들기 목록에서도 열려요.",
+    detail: [],
+    countNoun: "봇",
+    path: null,
+    fromSettings: null,
+    settingsLine: null,
+  },
+];
+
+/** 외부 연결 구획 문구 (AIH-8). */
+export const AI_EXTERNAL_COPY = {
+  permission: "만들고 지우는 건 소유자·관리자만 해요. 그 밖의 멤버는 볼 수만 있어요.",
+  open: "열기",
+  back: "외부 연결",
+  inviteHref: "/ai/agents?create=1",
+  codeHost: {
+    text: "코드 실행 호스트(내 작업이 도는 맥·서버)는 「내 작업」 관련이라 설정에 있어요.",
+    action: "설정에서 열기",
+    href: "/settings?section=code",
+  },
+  notFound: "이 연결은 찾지 못했어요. 외부 연결에서 다시 골라 주세요.",
+} as const;
+
+export function aiExternalRow(id: AiExternalRowId): AiExternalRow {
+  const found = AI_EXTERNAL_ROWS.find((row) => row.id === id);
+  if (!found) throw new Error(`unknown external row: ${id}`);
+  return found;
+}
+
+/** 옛 설정 구획 id(`?section=`)가 옮겨 간 외부 연결 줄. 없으면 null. */
+export function aiExternalRowFromSettings(section: string): AiExternalRow | null {
+  return AI_EXTERNAL_ROWS.find((row) => row.fromSettings === section) ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // 화면 문구 상수 (플랜 §5)
 // ---------------------------------------------------------------------------
@@ -885,7 +1009,7 @@ export const AI_HUB_OVERVIEW_COPY = {
     connected: "연결됨",
     notConnected: "아직 없어요",
     desktopOnly: "로그인은 데스크탑 앱에서 해요",
-    operatorOnly: "운영자만 볼 수 있어요",
+    operatorOnly: "소유자·관리자만 볼 수 있어요",
     readFailed: "읽지 못했어요",
     onlyMe: "나만 부름",
     everyone: "모두 부름",

@@ -285,8 +285,8 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
 
         {list.isError && isHostedOperatorDenied(list.error) && (
           <OperatorNotice
-            who="에이전트 자격은 워크스페이스 오너와 관리자만 볼 수 있습니다."
-            contact="봐야 한다면 이 워크스페이스의 오너에게 문의하세요."
+            who="외부 에이전트 연결은 소유자·관리자만 볼 수 있습니다."
+            contact="봐야 한다면 소유자·관리자에게 문의하세요."
           />
         )}
 
