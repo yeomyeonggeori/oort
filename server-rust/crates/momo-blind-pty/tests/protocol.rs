@@ -331,7 +331,7 @@ fn server_posing_as_a_device_gets_no_session_and_no_pty_input() {
         nonce_b: ch.nonce_b,
         sig_dev: [0; SIG_LEN],
     };
-    assert_eq!(f.agent.on_auth(again).err(), Some(Error::ChallengeUnknown));
+    assert_eq!(f.agent.on_auth(again).err(), Some(Error::ChallengeReplayed));
 }
 
 // ---- replay / expiry ----
@@ -352,17 +352,18 @@ fn attach_signature_replay_is_refused_including_after_agent_restart() {
     // Same agent: the challenge is spent.
     assert_eq!(
         f.agent.on_auth(auth.clone()).err(),
-        Some(Error::ChallengeUnknown)
+        Some(Error::ChallengeReplayed)
     );
 
     // Box-agent restarts, nonce store reloaded from disk.
     let persisted = f.agent.nonce_store().to_bytes();
+    assert!(f.agent.nonce_store().contains(&auth.nonce_b));
     assert!(persisted.windows(NONCE_LEN).any(|w| w == auth.nonce_b));
     let restored = NonceStore::from_bytes(&persisted).unwrap();
     let mut f2 = Fixture::with_nonce_store(restored);
     assert_eq!(
         f2.agent.on_auth(auth.clone()).err(),
-        Some(Error::ChallengeUnknown)
+        Some(Error::ChallengeReplayed)
     );
     // ...and a restart that LOST the store is still safe: pending state is gone.
     let mut f3 = Fixture::new();
@@ -548,18 +549,17 @@ fn reconnect_derives_fresh_keys_so_old_frames_and_counters_are_dead() {
 }
 
 #[test]
-fn spoofed_ready_and_early_data_toward_the_device_are_refused() {
+fn device_never_gets_a_usable_session_from_a_forged_ready() {
     let mut f = Fixture::new();
     let (hello, hs) = f.client.hello(f.box_id).unwrap();
     let ch = f.agent.on_hello(hello).unwrap();
-    let (auth, mut dev) = hs.on_challenge(ch).unwrap();
-    // The relay never forwards Auth, so the box never derived keys; it hands
-    // the device a frame of its own making instead of the box's Ready.
+    let (_auth, pending) = hs.on_challenge(ch).unwrap();
+    // The relay never forwards Auth, so the box never derived keys; it hands the
+    // device a frame of its own making instead of the box's Ready.
     let junk = crypto::seal(&[5; 32], 0, b"", &[FrameKind::Ready as u8]);
     let mut w = 0u64.to_be_bytes().to_vec();
     w.extend_from_slice(&junk);
-    assert_eq!(dev.open(&w).err(), Some(Error::Decrypt));
-    let _ = auth;
+    assert_eq!(pending.confirm(&w).err(), Some(Error::Decrypt));
 }
 
 #[test]
@@ -615,7 +615,7 @@ fn device_revoked_between_hello_and_auth_cannot_finish() {
 }
 
 #[test]
-fn box_provisioned_with_a_server_chosen_device_is_caught_by_the_owner_audit() {
+fn box_provisioned_with_a_server_chosen_device_never_yields_a_usable_session() {
     let f = Fixture::new();
     let server = dev_key(99);
     // Compromised server provisions the box with [owner, server-device], signed
@@ -626,30 +626,78 @@ fn box_provisioned_with_a_server_chosen_device_is_caught_by_the_owner_audit() {
         vec![dev_pub(&f.dev_a), dev_pub(&server)],
         &server,
     );
-    let agent = BoxAgent::new(
+    let mut agent = BoxAgent::new(
         f.box_id,
         f.host.clone(),
         DeviceListState::bootstrap(dirty).unwrap(),
         NonceStore::default(),
         f.clock.clone(),
-    );
-    // The owner attaches fine (the box accepts the owner's key) ...
-    let mut agent = agent;
-    assert!(attach(&f.client, &mut agent, &mut honest()).is_ok());
-    // ... but the audit of the list the box really enforces refuses it.
+    )
+    .unwrap();
+    // The box accepts the owner's key, but the device-side API has no way to a
+    // sendable Session without auditing the list the box enforces: the attach
+    // ends in BoxListUntrusted and the owner never types a byte into this box.
     assert_eq!(
-        f.client.audit_box_list(agent.device_list()).err(),
+        attach(&f.client, &mut agent, &mut honest()).err(),
         Some(Error::BoxListUntrusted)
     );
-    // The genuine list passes.
-    assert!(f.client.audit_box_list(&f.list_v1).is_ok());
-    // A list that adds an unknown signer-less key to a genuine one fails too.
-    let mut tampered = f.list_v1.clone();
-    tampered.devices.push(dev_pub(&server));
+}
+
+#[test]
+fn box_list_for_a_different_box_is_refused_by_agent_and_by_audit() {
+    let f = Fixture::new();
+    // A list the owner legitimately signed for box A, replayed to provision B.
+    let other_box = [1u8; BOX_ID_LEN];
+    let list_for_other = DeviceList::sign(other_box, 1, vec![dev_pub(&f.dev_a)], &f.dev_a);
+    let agent = BoxAgent::new(
+        f.box_id,
+        f.host.clone(),
+        DeviceListState::bootstrap(list_for_other.clone()).unwrap(),
+        NonceStore::default(),
+        f.clock.clone(),
+    );
+    assert_eq!(agent.err(), Some(Error::WrongBox));
+    // And the audit ties the list to the box the device believes it reached.
     assert_eq!(
-        f.client.audit_box_list(&tampered).err(),
+        f.client.audit_box_list(&f.box_id, &list_for_other).err(),
         Some(Error::BoxListUntrusted)
     );
+}
+
+#[test]
+fn device_list_version_must_advance_by_exactly_one() {
+    let mut f = Fixture::new();
+    let a = dev_pub(&f.dev_a);
+    // A stolen listed device tries to freeze the counter.
+    let jump = DeviceList::sign(f.box_id, u64::MAX, vec![a], &f.dev_a);
+    assert_eq!(
+        f.agent.on_device_list(jump).unwrap_err(),
+        Error::DeviceListGap
+    );
+    let skip = DeviceList::sign(f.box_id, 3, vec![a], &f.dev_a);
+    assert_eq!(
+        f.agent.on_device_list(skip).unwrap_err(),
+        Error::DeviceListGap
+    );
+    let next = DeviceList::sign(f.box_id, 2, vec![a], &f.dev_a);
+    f.agent.on_device_list(next).unwrap();
+}
+
+#[test]
+fn device_list_wire_format_roundtrips_and_rejects_garbage() {
+    let f = Fixture::new();
+    let b = f.list_v1.to_bytes();
+    assert_eq!(DeviceList::from_bytes(&b).unwrap(), f.list_v1);
+    assert_eq!(
+        DeviceList::from_bytes(&b[..b.len() - 1]).err(),
+        Some(Error::Malformed)
+    );
+    let mut long = b.clone();
+    long.push(0);
+    assert_eq!(DeviceList::from_bytes(&long).err(), Some(Error::Malformed));
+    let mut huge = b.clone();
+    huge[BOX_ID_LEN + 8..BOX_ID_LEN + 12].copy_from_slice(&u32::MAX.to_be_bytes());
+    assert_eq!(DeviceList::from_bytes(&huge).err(), Some(Error::Malformed));
 }
 
 #[test]
@@ -660,13 +708,13 @@ fn owner_audit_checks_signer_and_member_set_independently() {
     // Every listed device is known, but the list is signed by an unknown key.
     let unknown_signer = DeviceList::sign(f.box_id, 1, vec![a], &server);
     assert_eq!(
-        f.client.audit_box_list(&unknown_signer).err(),
+        f.client.audit_box_list(&f.box_id, &unknown_signer).err(),
         Some(Error::BoxListUntrusted)
     );
     // Signed by the owner, yet it lists a device the owner never approved.
     let extra_member = DeviceList::sign(f.box_id, 1, vec![a, dev_pub(&server)], &f.dev_a);
     assert_eq!(
-        f.client.audit_box_list(&extra_member).err(),
+        f.client.audit_box_list(&f.box_id, &extra_member).err(),
         Some(Error::BoxListUntrusted)
     );
 }

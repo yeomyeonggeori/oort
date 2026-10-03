@@ -152,6 +152,60 @@ impl DeviceList {
             sig,
         }
     }
+    pub const MAX_DEVICES: usize = 16;
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut v = self.box_id.to_vec();
+        v.extend_from_slice(&self.version.to_be_bytes());
+        v.extend_from_slice(&(self.devices.len() as u32).to_be_bytes());
+        for d in &self.devices {
+            v.extend_from_slice(d);
+        }
+        v.extend_from_slice(&self.signer);
+        v.extend_from_slice(&self.sig);
+        v
+    }
+
+    pub fn from_bytes(b: &[u8]) -> Result<Self, Error> {
+        let fixed = BOX_ID_LEN + 8 + 4;
+        if b.len() < fixed + DEV_PUB_LEN + SIG_LEN {
+            return Err(Error::Malformed);
+        }
+        let n = u32::from_be_bytes(
+            b[BOX_ID_LEN + 8..fixed]
+                .try_into()
+                .map_err(|_| Error::Malformed)?,
+        ) as usize;
+        if n > Self::MAX_DEVICES || b.len() != fixed + n * DEV_PUB_LEN + DEV_PUB_LEN + SIG_LEN {
+            return Err(Error::Malformed);
+        }
+        let mut devices = Vec::with_capacity(n);
+        for i in 0..n {
+            let s = fixed + i * DEV_PUB_LEN;
+            devices.push(
+                b[s..s + DEV_PUB_LEN]
+                    .try_into()
+                    .map_err(|_| Error::Malformed)?,
+            );
+        }
+        let s = fixed + n * DEV_PUB_LEN;
+        Ok(Self {
+            box_id: b[..BOX_ID_LEN].try_into().map_err(|_| Error::Malformed)?,
+            version: u64::from_be_bytes(
+                b[BOX_ID_LEN..BOX_ID_LEN + 8]
+                    .try_into()
+                    .map_err(|_| Error::Malformed)?,
+            ),
+            devices,
+            signer: b[s..s + DEV_PUB_LEN]
+                .try_into()
+                .map_err(|_| Error::Malformed)?,
+            sig: b[s + DEV_PUB_LEN..]
+                .try_into()
+                .map_err(|_| Error::Malformed)?,
+        })
+    }
+
     pub(crate) fn signature_ok(&self) -> bool {
         verify_dev(
             &self.signer,
@@ -188,6 +242,11 @@ impl DeviceListState {
         }
         if next.version <= self.current.version {
             return Err(Error::DeviceListRollback);
+        }
+        // Exactly +1: a (stolen) listed device cannot jump the counter to
+        // u64::MAX and freeze every later update.
+        if next.version != self.current.version + 1 {
+            return Err(Error::DeviceListGap);
         }
         self.current = next;
         Ok(())

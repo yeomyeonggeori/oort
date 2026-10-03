@@ -7,12 +7,12 @@ use crate::codec::*;
 use crate::crypto::{
     self, derive_keys, signed_bytes, Ephemeral, Transcript, ROLE_BOX, ROLE_DEVICE,
 };
-use crate::session::{Role, Session};
+use crate::session::{FrameKind, Role, Session};
 use crate::trust::*;
 use crate::{Error, CHALLENGE_TTL_MS, MAX_PENDING};
 use ed25519_dalek::SigningKey as EdSigningKey;
 use p256::ecdsa::SigningKey as DevSigningKey;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Monotonic millisecond clock the box-agent trusts (ADR-0197: not wall time).
@@ -20,32 +20,49 @@ pub trait Clock: Send + Sync {
     fn now_ms(&self) -> u64;
 }
 
-/// Spent challenge nonces. Persisted across box-agent restarts (defence in
-/// depth: pending challenges are memory-only, so a restart already voids them).
+/// Spent challenge nonces with their expiry (entries are pruned once the
+/// challenge could no longer be answered anyway). Persisted across box-agent
+/// restarts: a replayed Auth is then reported as `ChallengeReplayed` even if the
+/// in-memory pending set was lost.
 #[derive(Clone, Debug, Default)]
 pub struct NonceStore {
-    used: HashSet<[u8; NONCE_LEN]>,
+    used: HashMap<[u8; NONCE_LEN], u64>,
 }
+
+const STORE_ENTRY: usize = NONCE_LEN + 8;
 
 impl NonceStore {
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut v: Vec<_> = self.used.iter().copied().collect();
+        let mut v: Vec<_> = self.used.iter().collect();
         v.sort();
-        v.concat()
+        v.into_iter()
+            .flat_map(|(n, e)| n.iter().copied().chain(e.to_be_bytes()))
+            .collect()
     }
     pub fn from_bytes(b: &[u8]) -> Result<Self, Error> {
-        if !b.len().is_multiple_of(NONCE_LEN) {
+        if !b.len().is_multiple_of(STORE_ENTRY) {
             return Err(Error::Malformed);
         }
-        Ok(Self {
-            used: b
-                .chunks_exact(NONCE_LEN)
-                .map(|c| c.try_into().expect("chunk length"))
-                .collect(),
-        })
+        let mut used = HashMap::new();
+        for c in b.chunks_exact(STORE_ENTRY) {
+            let n: [u8; NONCE_LEN] = c[..NONCE_LEN].try_into().map_err(|_| Error::Malformed)?;
+            let e = u64::from_be_bytes(c[NONCE_LEN..].try_into().map_err(|_| Error::Malformed)?);
+            used.insert(n, e);
+        }
+        Ok(Self { used })
     }
-    fn spend(&mut self, n: [u8; NONCE_LEN]) -> bool {
-        self.used.insert(n)
+    pub fn contains(&self, n: &[u8; NONCE_LEN]) -> bool {
+        self.used.contains_key(n)
+    }
+    pub fn len(&self) -> usize {
+        self.used.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.used.is_empty()
+    }
+    fn spend(&mut self, n: [u8; NONCE_LEN], expires_ms: u64, now_ms: u64) {
+        self.used.retain(|_, e| *e >= now_ms);
+        self.used.insert(n, expires_ms);
     }
 }
 
@@ -71,15 +88,19 @@ impl BoxAgent {
         devices: DeviceListState,
         used: NonceStore,
         clock: Arc<dyn Clock>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, Error> {
+        // A list signed for another box must never provision this one.
+        if devices.list().box_id != box_id {
+            return Err(Error::WrongBox);
+        }
+        Ok(Self {
             box_id,
             host,
             devices,
             pending: HashMap::new(),
             used,
             clock,
-        }
+        })
     }
     pub fn box_id(&self) -> BoxId {
         self.box_id
@@ -152,15 +173,18 @@ impl BoxAgent {
 
     /// Returns the established session and the sealed `Ready` frame to send.
     pub fn on_auth(&mut self, auth: Auth) -> Result<(Session, Vec<u8>), Error> {
-        // Take-once: a wrong signature also burns the challenge.
+        // Spent first (survives restarts), then take-once from pending; a wrong
+        // signature also burns the challenge.
+        if self.used.contains(&auth.nonce_b) {
+            return Err(Error::ChallengeReplayed);
+        }
         let p = self
             .pending
             .remove(&auth.nonce_b)
             .ok_or(Error::ChallengeUnknown)?;
-        if !self.used.spend(auth.nonce_b) {
-            return Err(Error::ChallengeUnknown);
-        }
-        if self.clock.now_ms() > p.expires_ms {
+        let now = self.clock.now_ms();
+        self.used.spend(auth.nonce_b, p.expires_ms, now);
+        if now > p.expires_ms {
             return Err(Error::Expired);
         }
         // Re-check at auth time: a device removed since Hello must not attach.
@@ -185,7 +209,12 @@ impl BoxAgent {
         }
         let shared = p.eph.agree(&p.hello.eph_d)?;
         let mut s = Session::new(Role::Box, derive_keys(&shared, &th), th);
-        let ready = s.seal(crate::session::FrameKind::Ready, &[])?;
+        // The Ready frame carries the list this box enforces, inside the encrypted
+        // channel, so the device can audit it before sending any input.
+        let ready = s.seal(
+            crate::session::FrameKind::Ready,
+            &self.devices.list().to_bytes(),
+        )?;
         Ok((s, ready))
     }
 }
@@ -238,18 +267,9 @@ impl DeviceClient {
         self.owner.accept(list)
     }
 
-    /// Catches a box provisioned (by a compromised server) with an extra or
-    /// substituted owner device: every device the box enforces, and the signer
-    /// of that list, must already be known to the owner. Must run over the
-    /// authenticated channel, never on a server-relayed copy.
-    pub fn audit_box_list(&self, list: &DeviceList) -> Result<(), Error> {
-        if !list.signature_ok()
-            || !self.owner.contains(&list.signer)
-            || list.devices.iter().any(|d| !self.owner.contains(d))
-        {
-            return Err(Error::BoxListUntrusted);
-        }
-        Ok(())
+    /// Standalone form of the audit that [`PendingDevice::confirm`] enforces.
+    pub fn audit_box_list(&self, box_id: &BoxId, list: &DeviceList) -> Result<(), Error> {
+        audit(&self.owner, box_id, list)
     }
 
     fn check_runner(
@@ -337,6 +357,7 @@ impl DeviceClient {
         Ok((
             hello.clone(),
             DeviceHandshake {
+                owner: self.owner.clone(),
                 sk: self.sk.clone(),
                 pinned_host: pin.host_pub,
                 hello,
@@ -346,7 +367,23 @@ impl DeviceClient {
     }
 }
 
+/// Catches a box provisioned (by a compromised server) with an extra or
+/// substituted owner device, or one belonging to someone else: the list must be
+/// for this box, signed by a device the owner already knows, and every listed
+/// device must be one the owner already knows.
+fn audit(owner: &DeviceListState, box_id: &BoxId, list: &DeviceList) -> Result<(), Error> {
+    if list.box_id != *box_id
+        || !list.signature_ok()
+        || !owner.contains(&list.signer)
+        || list.devices.iter().any(|d| !owner.contains(d))
+    {
+        return Err(Error::BoxListUntrusted);
+    }
+    Ok(())
+}
+
 pub struct DeviceHandshake {
+    owner: DeviceListState,
     sk: DevSigningKey,
     pinned_host: [u8; ED_PUB_LEN],
     hello: Hello,
@@ -354,7 +391,7 @@ pub struct DeviceHandshake {
 }
 
 impl DeviceHandshake {
-    pub fn on_challenge(self, ch: Challenge) -> Result<(Auth, Session), Error> {
+    pub fn on_challenge(self, ch: Challenge) -> Result<(Auth, PendingDevice), Error> {
         if ch.box_id != self.hello.box_id {
             return Err(Error::WrongBox);
         }
@@ -381,7 +418,32 @@ impl DeviceHandshake {
                 nonce_b: ch.nonce_b,
                 sig_dev,
             },
-            session,
+            PendingDevice {
+                session,
+                owner: self.owner,
+                box_id: ch.box_id,
+            },
         ))
+    }
+}
+
+/// A device-side session that cannot send yet. The only way to a usable
+/// [`Session`] is [`PendingDevice::confirm`], which opens the box's `Ready`
+/// frame (proof it derived the same keys) and audits the device list it carries.
+pub struct PendingDevice {
+    session: Session,
+    owner: DeviceListState,
+    box_id: BoxId,
+}
+
+impl PendingDevice {
+    pub fn confirm(mut self, ready_frame: &[u8]) -> Result<Session, Error> {
+        let (kind, payload) = self.session.open(ready_frame)?;
+        if kind != FrameKind::Ready {
+            return Err(Error::Malformed);
+        }
+        let list = DeviceList::from_bytes(&payload)?;
+        audit(&self.owner, &self.box_id, &list)?;
+        Ok(self.session)
     }
 }

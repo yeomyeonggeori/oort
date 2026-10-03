@@ -26,8 +26,9 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 tokio = { workspace = true, features = ["net", "io-util", "time", "sync"] }
 
-# `sabotage-null-cipher` turns the AEAD into the identity function. It exists
-# only so the test-suite can prove the plaintext-leak guard is able to fail
-# (spike doc §sabotage). Never enable it outside that run.
-[features]
-sabotage-null-cipher = []
+# The sabotage switch is a `--cfg sabotage_null_cipher` rustc flag, NOT a cargo
+# feature, so `--all-features` or workspace feature unification can never turn
+# the AEAD into the identity function. Only the spike's sabotage run sets it:
+#   RUSTFLAGS="--cfg sabotage_null_cipher" cargo test -p momo-blind-pty
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(sabotage_null_cipher)"] }

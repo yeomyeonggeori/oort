@@ -53,12 +53,16 @@ pub enum Error {
     BadDeviceSignature,
     #[error("challenge unknown, already used, or from before a restart")]
     ChallengeUnknown,
+    #[error("challenge already used (spent-nonce store)")]
+    ChallengeReplayed,
     #[error("challenge expired")]
     Expired,
     #[error("too many unanswered challenges")]
     TooManyPending,
     #[error("device list rejected: version not newer")]
     DeviceListRollback,
+    #[error("device list rejected: version must be exactly current + 1")]
+    DeviceListGap,
     #[error("device list rejected: signer is not on the current list or signature invalid")]
     DeviceListBadSigner,
     #[error("frame failed authentication")]

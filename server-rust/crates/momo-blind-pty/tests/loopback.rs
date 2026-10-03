@@ -46,12 +46,12 @@ async fn one_connection(fx: &mut Fixture, frames: usize) -> (f64, f64) {
     let ch = fx.agent.on_hello(hello).unwrap();
     put(&mut box_sock, &ch.to_bytes()).await;
     let ch = Challenge::from_bytes(&get(&mut dev_sock).await).unwrap();
-    let (auth, mut dev) = hs.on_challenge(ch).unwrap();
+    let (auth, pending) = hs.on_challenge(ch).unwrap();
     put(&mut dev_sock, &auth.to_bytes()).await;
     let auth = Auth::from_bytes(&get(&mut box_sock).await).unwrap();
     let (mut bx, ready) = fx.agent.on_auth(auth).unwrap();
     put(&mut box_sock, &ready).await;
-    dev.open(&get(&mut dev_sock).await).unwrap();
+    let mut dev = pending.confirm(&get(&mut dev_sock).await).unwrap();
     let handshake_ms = t0.elapsed().as_secs_f64() * 1e3;
 
     // Echo round trips: keystroke up, echo down.

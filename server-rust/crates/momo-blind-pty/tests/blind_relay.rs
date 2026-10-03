@@ -3,7 +3,7 @@
 //! The relay here is the *worst-case* server: it records every byte and writes
 //! all of them to its log (raw and hex). The marker planted in the PTY plaintext
 //! must still appear 0 times in logs, recorded bytes and counters. Run with
-//! `--features sabotage-null-cipher` to prove this guard can fail (it must RED).
+//! `RUSTFLAGS="--cfg sabotage_null_cipher"` to prove this guard can fail (it must RED).
 
 use momo_blind_pty::harness::*;
 use momo_blind_pty::session::FrameKind;

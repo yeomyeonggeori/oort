@@ -5,7 +5,7 @@
 
 use crate::codec::*;
 use crate::handshake::{BoxAgent, Clock, DeviceClient, NonceStore};
-use crate::session::{FrameKind, Session};
+use crate::session::Session;
 use crate::trust::*;
 use crate::Error;
 use ed25519_dalek::SigningKey as EdSigningKey;
@@ -112,7 +112,8 @@ impl Fixture {
             DeviceListState::bootstrap(list_v1.clone()).expect("list"),
             store,
             clock.clone(),
-        );
+        )
+        .expect("agent");
         let mut client = DeviceClient::new(
             dev_a.clone(),
             DeviceListState::bootstrap(list_v1.clone()).expect("list"),
@@ -167,14 +168,11 @@ pub fn attach(
     let hello = Hello::from_bytes(&first(relay.forward(Dir::DeviceToBox, hello.to_bytes()))?)?;
     let ch = agent.on_hello(hello)?;
     let ch = Challenge::from_bytes(&first(relay.forward(Dir::BoxToDevice, ch.to_bytes()))?)?;
-    let (auth, mut dev) = hs.on_challenge(ch)?;
+    let (auth, pending) = hs.on_challenge(ch)?;
     let auth = Auth::from_bytes(&first(relay.forward(Dir::DeviceToBox, auth.to_bytes()))?)?;
     let (boxs, ready) = agent.on_auth(auth)?;
     let ready = first(relay.forward(Dir::BoxToDevice, ready))?;
-    let (kind, _) = dev.open(&ready)?;
-    if kind != FrameKind::Ready {
-        return Err(Error::Malformed);
-    }
+    let dev = pending.confirm(&ready)?;
     Ok((dev, boxs))
 }
 

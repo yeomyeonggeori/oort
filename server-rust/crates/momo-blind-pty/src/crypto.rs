@@ -103,7 +103,7 @@ pub fn derive_keys(shared: &[u8; 32], transcript_hash: &[u8; 32]) -> DirKeys {
 }
 
 pub fn seal(key: &[u8; 32], counter: u64, aad: &[u8], plaintext: &[u8]) -> Vec<u8> {
-    #[cfg(feature = "sabotage-null-cipher")]
+    #[cfg(sabotage_null_cipher)]
     {
         let _ = (key, counter, aad);
         return plaintext.to_vec();
@@ -123,7 +123,7 @@ pub fn seal(key: &[u8; 32], counter: u64, aad: &[u8], plaintext: &[u8]) -> Vec<u
 }
 
 pub fn open(key: &[u8; 32], counter: u64, aad: &[u8], ct: &[u8]) -> Result<Vec<u8>, Error> {
-    #[cfg(feature = "sabotage-null-cipher")]
+    #[cfg(sabotage_null_cipher)]
     {
         let _ = (key, counter, aad);
         return Ok(ct.to_vec());
