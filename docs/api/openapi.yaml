@@ -1927,7 +1927,9 @@ paths:
         `PROVIDER_LINK_MASTER_KEY` and never returned, audited or logged.
         `baseUrl` passes the same gate as `PUT /v1/provider/link` (HTTPS
         outside the local-host opt-in, no userinfo/query/fragment, no private
-        or metadata literal) and is fixed for the life of the key; there is no
+        or metadata literal) and, because the server operator's own provider
+        host and the local-host opt-ins are exempt from the connect-time
+        address check, a key may not be aimed at those hosts (400). It is fixed for the life of the key; there is no
         update route, so a revoke and a new issue are the only way to change
         it. One key belongs to one member: the same key twice (same member,
         another member, another workspace) is `409
@@ -2075,7 +2077,10 @@ paths:
         (`agent.uses_owner_key`). It follows its own model (`modelSource =
         agent`), never the team's 기본 AI row. Only the holder can call it
         (mention, DM, thread reply, work request); a non-holder is refused as
-        for any `owner_only` agent. The operator's subscription kill switch and
+        for any `owner_only` agent. A holder has one personal agent; it keeps
+        working across key re-issues (a second create is `409
+        personal_agent_exists`), and a guest holder cannot mint a member (403).
+        The operator's subscription kill switch and
         the hosted-delivery gate do not apply to it. It does not delegate to
         team agents and speaks no welcome. A revoked key creates nothing (409
         `personal_key_revoked`). The agent joins channels through the existing
@@ -2111,6 +2116,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The key's holder is a guest (a guest cannot mint a workspace member).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: No such key, or the caller may not see it.
           content:
@@ -2118,7 +2129,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: The handle exists, or the key is revoked (`personal_key_revoked`).
+          description: The handle exists, the holder already has a personal agent (`personal_agent_exists`), or the key is revoked (`personal_key_revoked`).
           content:
             application/json:
               schema:
