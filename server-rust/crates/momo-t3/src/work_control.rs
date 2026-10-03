@@ -550,11 +550,15 @@ pub async fn fetch_work_control_in_tx(
 /// still settle one (`acknowledge`'s human arm) — their own authority.
 ///
 /// Workspace-scoped hosts are outside goal A and are handed exactly what they
-/// were before.
+/// were before — except, while the Claude opt-in is off (#3431, ADR-0193 D18),
+/// a Claude `spawn` and an `input` to a Claude session: the Claude login on a
+/// shared host may be somebody else's, so those rows are withheld (left
+/// `dispatched`) from every non-member host.
 pub async fn pending_controls_for_host_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     host_id: Uuid,
+    claude_subscription_agents_enabled: bool,
 ) -> Result<Vec<WorkControlRow>, T3Error> {
     // Swift writes the host predicate as a JOIN; here it is an `EXISTS` for a
     // mechanical reason — `work_control` and `work_host` share `id`,
@@ -597,6 +601,21 @@ pub async fn pending_controls_for_host_in_tx(
                    OR (work_control.kind = '{KIND_SPAWN}' AND {shell}) \
                  ) \
             ) \
+            AND ($4 OR NOT EXISTS ( \
+              SELECT 1 FROM work_host h \
+               WHERE h.id = work_control.target_host_id \
+                 AND h.workspace_id = work_control.workspace_id \
+                 AND h.scope <> '{HOST_SCOPE_MEMBER}' \
+                 AND ( \
+                   (work_control.kind = '{KIND_SPAWN}' AND {claude_spawn}) \
+                   OR (work_control.kind = '{KIND_INPUT}' AND EXISTS ( \
+                     SELECT 1 FROM work_session s \
+                      WHERE s.id = work_control.session_id \
+                        AND s.workspace_id = work_control.workspace_id \
+                        AND {claude_session} \
+                   )) \
+                 ) \
+            )) \
           ORDER BY created_at, id \
           LIMIT 100",
         shell = shell_tool_sql(
@@ -604,11 +623,19 @@ pub async fn pending_controls_for_host_in_tx(
             "(work_control.payload->>'tool')",
             "$3"
         ),
+        claude_spawn = claude_tool_sql(
+            "work_control.workspace_id",
+            "(work_control.payload->>'tool')",
+            "$5"
+        ),
+        claude_session = claude_tool_sql("work_control.workspace_id", "s.tool", "$5"),
     );
     let rows = sqlx::query(&sql)
         .bind(workspace_id)
         .bind(host_id)
         .bind(&shell_commands)
+        .bind(claude_subscription_agents_enabled)
+        .bind(claude_launch_commands())
         .fetch_all(&mut *conn)
         .await?;
     rows.iter()
@@ -1229,6 +1256,106 @@ pub async fn remote_host_refuses_tool_in_tx(
         .fetch_one(&mut *conn)
         .await?;
     Ok(refused)
+}
+
+/// #3431 (ADR-0193 D18, 성재 결재 2026-10-03): the profile key migration 029
+/// seeds for Claude Code.
+pub const TOOL_CLAUDE: &str = "claude";
+
+/// Launch commands that make a profile Claude Code whatever its key says —
+/// the same reasoning as [`SHELL_LAUNCH_COMMANDS`]: renaming the key must not
+/// be a way round the pause. `claude` is the CLI and `claude-agent-acp` is the
+/// ACP adapter `momo-workd` launches.
+pub const CLAUDE_LAUNCH_COMMANDS: &[&str] = &["claude", "claude-agent-acp"];
+
+/// The wire code a shared (workspace-scoped or cloud) work host answers when
+/// its Claude tool is asked for while `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`
+/// is off. **Deliberately the same word** as the agent-run, mention, DM and
+/// `brainUnavailableReason` surfaces (ADR-0193 D17·D18): a client writes one
+/// branch for 「Claude 구독 대행은 쉬는 중」.
+pub const REFUSAL_CLAUDE_SUBSCRIPTION_PAUSED: &str = "claude_subscription_agent_paused";
+
+/// The sentence every shared-host refusal carries (해요체, place names in
+/// 「」). One text for the REST ledger, the decision route, resume and the
+/// spawn tool, so a person hears the same thing wherever they were refused.
+pub const CLAUDE_SHARED_HOST_PAUSED_MESSAGE: &str = "작업 공간 공용 컴퓨터에서는 Claude 구독으로 \
+    작업을 시작할 수 없어요. 그 컴퓨터에 로그인된 Claude 계정이 다른 사람 것일 수 있어서, \
+    Anthropic 확인이 끝날 때까지 쉬고 있어요. 내 컴퓨터에서 직접 쓰거나 「AI 화면」에서 \
+    다른 방법을 확인해 주세요.";
+
+/// The SQL test for 「`tool` is Claude Code in `workspace`」: the seeded
+/// [`TOOL_CLAUDE`] key, or a profile whose launch command is one of
+/// [`CLAUDE_LAUNCH_COMMANDS`] (bound by the caller as a `text[]`). Same shape
+/// as [`shell_tool_sql`]; every profile counts, enabled or not.
+fn claude_tool_sql(workspace: &str, tool: &str, commands: &str) -> String {
+    format!(
+        "({tool} = '{TOOL_CLAUDE}' \
+          OR EXISTS ( \
+               SELECT 1 FROM work_tool_profile p \
+                WHERE p.workspace_id = {workspace} \
+                  AND p.tool_key = {tool} \
+                  AND p.launch_template->>'command' = ANY({commands}) \
+             ))"
+    )
+}
+
+fn claude_launch_commands() -> Vec<String> {
+    CLAUDE_LAUNCH_COMMANDS
+        .iter()
+        .map(|command| (*command).to_string())
+        .collect()
+}
+
+/// #3431 — is `tool` Claude Code **and** `host_id` a shared host (any scope but
+/// `member`: the admin-registered workspace host and every cloud host)?
+///
+/// The caller applies it only while the Claude opt-in is off. The server cannot
+/// see whose Claude login is on a shared machine — a workspace host has an
+/// admin registrant, not a login owner, and a cloud host is provisioned for the
+/// workspace — and any channel member may approve work headed there (the
+/// ADR-0188 owner-only rule is `scope = 'member'`). So there is no requester
+/// that is *provably* the login's owner, and the answer is refusal outright.
+/// A member-scoped host (somebody's own machine, owner-signed, owner-approved)
+/// is never matched: that is the 「본인 사용이라 허용」 path.
+pub async fn shared_host_refuses_claude_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    host_id: Uuid,
+    tool: &str,
+) -> Result<bool, T3Error> {
+    let sql = format!(
+        "SELECT EXISTS ( \
+                  SELECT 1 FROM work_host \
+                   WHERE id = $2 AND workspace_id = $1 AND scope <> $4 \
+                ) \
+            AND {claude}",
+        claude = claude_tool_sql("$1", "$3", "$5"),
+    );
+    let refused: bool = sqlx::query_scalar(&sql)
+        .bind(workspace_id)
+        .bind(host_id)
+        .bind(tool)
+        .bind(HOST_SCOPE_MEMBER)
+        .bind(claude_launch_commands())
+        .fetch_one(&mut *conn)
+        .await?;
+    Ok(refused)
+}
+
+/// The tool a work session runs, for a control that names the session rather
+/// than the tool (`input`).
+pub async fn work_session_tool_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+) -> Result<Option<String>, T3Error> {
+    let tool: Option<String> =
+        sqlx::query_scalar("SELECT tool FROM work_session WHERE id = $1 AND workspace_id = $2")
+            .bind(session_id)
+            .bind(workspace_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+    Ok(tool)
 }
 
 /// The SQL test for 「`tool` is a shell in `workspace`」: the seeded

@@ -1297,6 +1297,9 @@ impl AgentWorker {
                     agent_member_id: payload.agent_member_id,
                     approved_by: payload.agent_member_id,
                     approved_host_id: None,
+                    claude_subscription_agents_enabled: self
+                        .config
+                        .claude_subscription_agents_enabled,
                 };
                 match tool_exec::write_result(&self.pool, &context, result).await {
                     Ok(result) => {
@@ -1330,6 +1333,9 @@ impl AgentWorker {
                     // in advance (`work_auto_approve`), and the row names them.
                     approved_by: authorized_by.unwrap_or(payload.agent_member_id),
                     approved_host_id: host_id,
+                    claude_subscription_agents_enabled: self
+                        .config
+                        .claude_subscription_agents_enabled,
                 };
                 match tool_exec::execute(&self.pool, &context, &tool_call).await {
                     Ok(result) => {
@@ -1754,6 +1760,7 @@ impl AgentWorker {
             // `Uuid::nil()` matches no member and the executor refuses.
             approved_by: payload.approved_by.unwrap_or_else(Uuid::nil),
             approved_host_id: payload.approved_host_id,
+            claude_subscription_agents_enabled: self.config.claude_subscription_agents_enabled,
         };
         let call = ToolCall {
             call_id: approved.call_id.clone(),

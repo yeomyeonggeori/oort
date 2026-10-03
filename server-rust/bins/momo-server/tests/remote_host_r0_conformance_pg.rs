@@ -1593,6 +1593,7 @@ async fn r0_8_the_spawn_tool_refuses_a_remote_host_it_was_not_given() {
         agent_member_id: tenant.agent,
         approved_by,
         approved_host_id: Some(host),
+        claude_subscription_agents_enabled: true,
     };
 
     for (approved_by, tool, code, why) in [
@@ -3295,4 +3296,504 @@ async fn r1m2_1_the_owners_devices_hear_a_host_registered_and_revoked() {
         json!(teammate.to_string()),
         "the owner is told who revoked it"
     );
+}
+
+// ===========================================================================
+// #3431 (ADR-0193 D18) — Claude Code on a shared host, while the opt-in is off
+// ===========================================================================
+//
+// A workspace-scoped host (admin-registered) and a cloud host have no R0: any
+// channel member may approve work headed there, and the Claude login on that
+// machine may be somebody else's — which the server cannot see. So with
+// `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED` off, Claude Code is not started on
+// one, whoever asks or approves. A member-scoped host (somebody's own machine,
+// owner-approved) is the 「본인 사용이라 허용」 path and is not touched; Codex is
+// never touched.
+//
+// | test | entry point | the guard whose removal turns it red |
+// |---|---|---|
+// | `c3431_1_...request_and_decision` | REST ledger (spawn, input) + decision route | `shared_host_refuses_claude_in_tx` in `work_controls::create_in_tx` / `approvals::decide_in_tx` |
+// | `c3431_2_...delivery` | the host's signed poll | the claude clause in `pending_controls_for_host_in_tx` |
+// | `c3431_3_...sessions` | human session create + resume | the gates in `work_sessions::create_in_tx` / `resume_in_tx` |
+// | `c3431_4_...spawn_tool` | `work.session.spawn` executor | the gate in `tool_exec::spawn_session_in_tx` |
+
+const CLAUDE_PAUSED: &str = "claude_subscription_agent_paused";
+
+async fn start_server_claude(pool: PgPool, claude_subscription_agents_enabled: bool) -> String {
+    let state = app_state(pool).with_agent_port(momo_server::config::AgentPortConfig {
+        claude_subscription_agents_enabled,
+        ..momo_server::config::AgentPortConfig::default()
+    });
+    serve(build_app(state)).await
+}
+
+/// `claude` stays the seeded key; `assistant` is a profile under another key
+/// that launches the same adapter, so renaming the key is no way round.
+async fn seed_claude_profiles(su: &PgPool, tenant: &Tenant) {
+    seed_tool_profile(su, tenant.workspace, tenant.owner, "claude", "claude").await;
+    seed_tool_profile(
+        su,
+        tenant.workspace,
+        tenant.owner,
+        "assistant",
+        "claude-agent-acp",
+    )
+    .await;
+}
+
+async fn spawn_request(
+    http: &reqwest::Client,
+    base: &str,
+    bearer: &str,
+    tenant: &Tenant,
+    run: Uuid,
+    host: Uuid,
+    tool: &str,
+) -> reqwest::Response {
+    agent_control(
+        http,
+        base,
+        bearer,
+        tenant,
+        json!({
+            "channelId": tenant.channel,
+            "runId": run,
+            "targetHostId": host,
+            "kind": "spawn",
+            "payload": {"tool": tool, "label": "일"},
+        }),
+    )
+    .await
+}
+
+async fn create_session_as(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    tenant: &Tenant,
+    host: Uuid,
+    tool: &str,
+) -> reqwest::Response {
+    http.post(format!(
+        "{base}/v1/workspaces/{}/work-sessions",
+        tenant.workspace
+    ))
+    .bearer_auth(token)
+    .json(&json!({
+        "channelId": tenant.channel,
+        "hostId": host,
+        "tool": tool,
+        "label": "세션",
+    }))
+    .send()
+    .await
+    .expect("create work session")
+}
+
+/// **RED PROOF (#3431) — request and decision.** Flag off:
+///
+/// * an agent's spawn of `claude` (or a profile that launches it under another
+///   key) on a team box is 409 `claude_subscription_agent_paused` before the
+///   first write — no control, no card — and so is an `input` aimed at a
+///   `claude` session there;
+/// * a card made while the opt-in was on cannot be approved by anybody once it
+///   is off (the teammate, the owner, a retarget): 409, the card stays
+///   pending;
+/// * the same ask for `codex`, and a `claude` ask once the opt-in is on, are
+///   untouched.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn c3431_1_claude_is_not_asked_for_or_approved_on_a_shared_host_while_off() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    seed_claude_profiles(&su, &tenant).await;
+    let (teammate, teammate_email) = seed_teammate(&su, &tenant).await;
+    let vps = seed_team_box(&su, &tenant, "팀 VPS").await;
+    let run = seed_run(&su, &tenant).await;
+    let bearer = agent_bearer(&su, &tenant).await;
+
+    let off = start_server_claude(app_pool.clone(), false).await;
+    let on = start_server_claude(app_pool, true).await;
+    let http = reqwest::Client::new();
+    let teammate_token = login(&http, &off, tenant.workspace, &teammate_email).await;
+    let _ = teammate;
+
+    // ---- request: spawn ------------------------------------------------------
+    for tool in ["claude", "assistant"] {
+        let (status, code, message) =
+            error_of(spawn_request(&http, &off, &bearer, &tenant, run, vps, tool).await).await;
+        assert_eq!(status, 409, "{tool}: {message}");
+        assert_eq!(code, json!(CLAUDE_PAUSED), "{tool}");
+        assert!(message.contains("「AI 화면」"), "{message}");
+    }
+    assert_eq!(control_count(&su, tenant.workspace).await, 0, "no row");
+    assert_eq!(approvals_in(&su, tenant.workspace).await, 0, "no card");
+
+    // ---- the positives: the gate is tool × scope, not a blanket refusal -------
+    let codex = spawn_request(&http, &off, &bearer, &tenant, run, vps, "codex").await;
+    assert_eq!(codex.status(), 201, "codex is not paused");
+    let claude_on = spawn_request(&http, &on, &bearer, &tenant, run, vps, "claude").await;
+    assert_eq!(claude_on.status(), 201, "the opt-in opens it");
+    let body: Value = claude_on.json().await.expect("body");
+    let control = Uuid::parse_str(body["workControl"]["id"].as_str().unwrap()).unwrap();
+    assert_eq!(control_row(&su, control).await.0, "pending_approval");
+
+    // ---- decision: the card made while on cannot be approved once off ---------
+    let approval = approval_for(&su, control).await;
+    for (who, token) in [("teammate", &teammate_token)] {
+        let (status, receipt) = decide(
+            &http,
+            &off,
+            token,
+            tenant.workspace,
+            approval,
+            true,
+            Some(vps),
+        )
+        .await;
+        assert_eq!(status, 409, "{who}: {receipt}");
+        assert_eq!(receipt["status"], json!(CLAUDE_PAUSED), "{who}: {receipt}");
+    }
+    let owner_token = login(&http, &off, tenant.workspace, &tenant.owner_email).await;
+    let (status, receipt) = decide(
+        &http,
+        &off,
+        &owner_token,
+        tenant.workspace,
+        approval,
+        true,
+        None,
+    )
+    .await;
+    assert_eq!(
+        status, 409,
+        "the owner too — the default host is the box: {receipt}"
+    );
+    assert_eq!(control_row(&su, control).await.0, "pending_approval");
+    assert_eq!(approval_status(&su, approval).await, "pending");
+    assert_eq!(dispatched_to(&su, tenant.workspace, vps).await, 0);
+
+    // A rejection is not blocked: nothing will run.
+    let (status, _) = decide(
+        &http,
+        &off,
+        &teammate_token,
+        tenant.workspace,
+        approval,
+        false,
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "saying no is always allowed");
+
+    // ---- request: input to a running claude session on the box ----------------
+    let claude_session =
+        open_claude_session(&http, &on, &owner_token, &tenant, vps, "claude").await;
+    let codex_session = open_claude_session(&http, &on, &owner_token, &tenant, vps, "codex").await;
+    for session in [claude_session, codex_session] {
+        sqlx::query(
+            "INSERT INTO work_control \
+               (workspace_id, channel_id, requester_member_id, target_host_id, session_id, \
+                kind, payload, status) \
+             VALUES ($1, $2, $3, $4, $5, 'spawn', $6, 'acked')",
+        )
+        .bind(tenant.workspace)
+        .bind(tenant.channel)
+        .bind(tenant.agent)
+        .bind(vps)
+        .bind(session)
+        .bind(json!({"tool": "codex", "label": "l"}))
+        .execute(&su)
+        .await
+        .expect("lineage root");
+    }
+    let input = |session: Uuid| {
+        json!({
+            "channelId": tenant.channel,
+            "runId": run,
+            "targetHostId": vps,
+            "sessionId": session,
+            "kind": "input",
+            "payload": {"text": "계속해 줘"},
+        })
+    };
+    let (status, code, message) =
+        error_of(agent_control(&http, &off, &bearer, &tenant, input(claude_session)).await).await;
+    assert_eq!((status, code), (409, json!(CLAUDE_PAUSED)), "{message}");
+    assert_eq!(
+        agent_control(&http, &off, &bearer, &tenant, input(codex_session))
+            .await
+            .status(),
+        201,
+        "input to a codex session is untouched"
+    );
+    assert_eq!(
+        agent_control(&http, &on, &bearer, &tenant, input(claude_session))
+            .await
+            .status(),
+        201,
+        "the opt-in opens it"
+    );
+}
+
+async fn open_claude_session(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    tenant: &Tenant,
+    host: Uuid,
+    tool: &str,
+) -> Uuid {
+    let created = create_session_as(http, base, token, tenant, host, tool).await;
+    assert_eq!(created.status(), 201, "the {tool} session opens");
+    let created: Value = created.json().await.expect("session body");
+    Uuid::parse_str(created["workSession"]["id"].as_str().expect("id")).expect("uuid")
+}
+
+/// **RED PROOF (#3431) — delivery.** A `claude` spawn (and `input` to a
+/// `claude` session) already `dispatched` to a shared host — made while the
+/// opt-in was on — is not in that host's signed poll once it is off; codex and a
+/// member-scoped host's own rows are; the opt-in hands it back.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn c3431_2_a_dispatched_claude_row_is_withheld_from_a_shared_host_while_off() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    seed_claude_profiles(&su, &tenant).await;
+    let (vps, vps_seed) =
+        seed_host(&su, &tenant, tenant.owner, "workspace", "cloud", "클라우드").await;
+    let (laptop, laptop_seed) = seed_laptop(&su, &tenant).await;
+
+    let off = start_server_claude(app_pool.clone(), false).await;
+    let on = start_server_claude(app_pool, true).await;
+    let http = reqwest::Client::new();
+    let owner_token = login(&http, &off, tenant.workspace, &tenant.owner_email).await;
+
+    let claude_session =
+        open_claude_session(&http, &on, &owner_token, &tenant, vps, "claude").await;
+    let codex_session = open_claude_session(&http, &on, &owner_token, &tenant, vps, "codex").await;
+
+    let spawn_claude = insert_dispatched(
+        &su,
+        &tenant,
+        vps,
+        tenant.agent,
+        None,
+        "spawn",
+        json!({"tool": "claude", "label": "a"}),
+    )
+    .await;
+    let spawn_renamed = insert_dispatched(
+        &su,
+        &tenant,
+        vps,
+        tenant.agent,
+        None,
+        "spawn",
+        json!({"tool": "assistant", "label": "b"}),
+    )
+    .await;
+    let spawn_codex = insert_dispatched(
+        &su,
+        &tenant,
+        vps,
+        tenant.agent,
+        None,
+        "spawn",
+        json!({"tool": "codex", "label": "c"}),
+    )
+    .await;
+    let input_claude = insert_dispatched(
+        &su,
+        &tenant,
+        vps,
+        tenant.agent,
+        Some(claude_session),
+        "input",
+        json!({"text": "x"}),
+    )
+    .await;
+    let input_codex = insert_dispatched(
+        &su,
+        &tenant,
+        vps,
+        tenant.agent,
+        Some(codex_session),
+        "input",
+        json!({"text": "y"}),
+    )
+    .await;
+    // The owner's own laptop: the 「본인 사용이라 허용」 path. A claude spawn the
+    // owner requested is delivered whatever the opt-in says.
+    let own_claude = insert_dispatched(
+        &su,
+        &tenant,
+        laptop,
+        tenant.owner,
+        None,
+        "spawn",
+        json!({"tool": "claude", "label": "mine"}),
+    )
+    .await;
+
+    let handed = |ids: Vec<Uuid>| {
+        let mut ids = ids;
+        ids.sort();
+        ids
+    };
+    let mut expected_off = vec![spawn_codex, input_codex];
+    expected_off.sort();
+    assert_eq!(
+        handed(poll_pending(&http, &off, tenant.workspace, vps, &vps_seed).await),
+        expected_off,
+        "off: only the codex rows reach the shared host"
+    );
+    let mut expected_on = vec![
+        spawn_claude,
+        spawn_renamed,
+        spawn_codex,
+        input_claude,
+        input_codex,
+    ];
+    expected_on.sort();
+    assert_eq!(
+        handed(poll_pending(&http, &on, tenant.workspace, vps, &vps_seed).await),
+        expected_on,
+        "on: the opt-in hands every row back"
+    );
+    assert_eq!(
+        poll_pending(&http, &off, tenant.workspace, laptop, &laptop_seed).await,
+        vec![own_claude],
+        "off: the owner's own claude on their own member-scoped host is delivered"
+    );
+}
+
+/// **RED PROOF (#3431) — sessions.** A human may not open a `claude` session on
+/// a shared host (a row `momo-workd`-style daemons would then act on), nor
+/// resume one onto it, while the opt-in is off; a team box takes codex, and the
+/// owner's own member-scoped host still takes `claude`.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn c3431_3_a_claude_session_is_not_opened_or_resumed_on_a_shared_host_while_off() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    seed_claude_profiles(&su, &tenant).await;
+    let (laptop, _) = seed_laptop(&su, &tenant).await;
+    let vps = seed_team_box(&su, &tenant, "팀 VPS").await;
+    let spare = seed_team_box(&su, &tenant, "새 상자").await;
+
+    let off = start_server_claude(app_pool.clone(), false).await;
+    let on = start_server_claude(app_pool, true).await;
+    let http = reqwest::Client::new();
+    let owner_token = login(&http, &off, tenant.workspace, &tenant.owner_email).await;
+
+    for tool in ["claude", "assistant"] {
+        let (status, code, message) =
+            error_of(create_session_as(&http, &off, &owner_token, &tenant, vps, tool).await).await;
+        assert_eq!(
+            (status, code),
+            (409, json!(CLAUDE_PAUSED)),
+            "{tool}: {message}"
+        );
+    }
+    assert_eq!(sessions_on(&su, tenant.workspace, vps).await, 0);
+    assert_eq!(
+        create_session_as(&http, &off, &owner_token, &tenant, vps, "codex")
+            .await
+            .status(),
+        201,
+        "codex is not paused"
+    );
+    assert_eq!(
+        create_session_as(&http, &off, &owner_token, &tenant, laptop, "claude")
+            .await
+            .status(),
+        201,
+        "the owner's own member-scoped host takes claude (본인 사용)"
+    );
+
+    // ---- resume ----------------------------------------------------------------
+    let claude_session =
+        open_claude_session(&http, &on, &owner_token, &tenant, vps, "claude").await;
+    orphan_session(&su, claude_session).await;
+    let resume = |base: &str, target: Uuid| {
+        http.post(format!(
+            "{base}/v1/workspaces/{}/work-sessions/{claude_session}/resume",
+            tenant.workspace
+        ))
+        .bearer_auth(&owner_token)
+        .json(&json!({"targetHostId": target}))
+        .send()
+    };
+    let (status, code, message) = error_of(resume(&off, spare).await.expect("resume")).await;
+    assert_eq!((status, code), (409, json!(CLAUDE_PAUSED)), "{message}");
+    assert_eq!(
+        resume(&on, spare).await.expect("resume").status(),
+        201,
+        "the opt-in opens it"
+    );
+}
+
+/// **RED PROOF (#3431) — the spawn tool.** The executor is the last gate for a
+/// call that never met a card (a standing auto-approval, a G6 exemption): flag
+/// off, `claude` on a team box is refused with the code and starts nothing;
+/// codex runs; flag on, claude runs.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn c3431_4_the_spawn_tool_refuses_claude_on_a_shared_host_while_off() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let worker_pool = role_pool("momo_worker", &momo_worker_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    seed_claude_profiles(&su, &tenant).await;
+    let vps = seed_team_box(&su, &tenant, "팀 VPS").await;
+    let run = seed_run(&su, &tenant).await;
+
+    let spawn = |call_id: &str, tool: &str| momo_agent::tools::ToolCall {
+        call_id: call_id.to_string(),
+        name: momo_agent::tools::WORK_SESSION_SPAWN.to_string(),
+        arguments: json!({"tool": tool, "label": "실행기", "host_id": vps.to_string()}),
+    };
+    let context = |enabled: bool| ToolContext {
+        workspace_id: tenant.workspace,
+        run_id: run,
+        channel_id: tenant.channel,
+        agent_member_id: tenant.agent,
+        approved_by: tenant.owner,
+        approved_host_id: Some(vps),
+        claude_subscription_agents_enabled: enabled,
+    };
+
+    for tool in ["claude", "assistant"] {
+        let refused = tool_exec::execute(
+            &worker_pool,
+            &context(false),
+            &spawn(&format!("off-{tool}"), tool),
+        )
+        .await
+        .expect("execute");
+        assert!(
+            refused.is_error && refused.output.contains(CLAUDE_PAUSED),
+            "{tool}: {refused:?}"
+        );
+    }
+    assert_eq!(sessions_on(&su, tenant.workspace, vps).await, 0);
+    assert_eq!(control_count(&su, tenant.workspace).await, 0);
+
+    let codex = tool_exec::execute(&worker_pool, &context(false), &spawn("off-codex", "codex"))
+        .await
+        .expect("execute");
+    assert!(!codex.is_error, "codex is not paused: {codex:?}");
+    let claude = tool_exec::execute(&worker_pool, &context(true), &spawn("on-claude", "claude"))
+        .await
+        .expect("execute");
+    assert!(!claude.is_error, "the opt-in opens it: {claude:?}");
+    assert_eq!(sessions_on(&su, tenant.workspace, vps).await, 2);
 }
