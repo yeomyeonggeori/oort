@@ -1,6 +1,8 @@
 import {
   cloneElement,
+  createContext,
   isValidElement,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -87,6 +89,12 @@ export function SettingsToggleRow({
   );
 }
 
+/**
+ * AI 허브가 자기 제목·설명을 들고 이 구획 본문을 품을 때(AIH-8) false 로 감싼다. 구획마다
+ * SectionShell 호출이 여러 갈래(로딩·403·오류·본문)라 속성 전달 대신 한 곳에서 접는다.
+ */
+export const SectionHeadingContext = createContext(true);
+
 /** Section title plus the one or two lines that explain what it governs. */
 export function SectionShell({
   title,
@@ -100,6 +108,7 @@ export function SectionShell({
   /** Catalog/detail surfaces need both columns in the same viewport. */
   wide?: boolean;
 }) {
+  const showHeading = useContext(SectionHeadingContext);
   // A settings form is read line by line, so the panel keeps a measure instead
   // of stretching a slug field across a 1280px window.
   return (
@@ -108,14 +117,16 @@ export function SectionShell({
           (MOMO-676 M-5). 헤더 블록에만 걸고 children에는 걸지 않는다: 아래에는
           슬러그·토큰·수치처럼 산문이 아닌 값이 있고, 그것들은 각자의 규칙을
           갖는다. word-break는 상속되므로 한 번의 선언으로 두 줄 다 덮인다. */}
-      <div className="flex break-keep flex-col gap-1">
-        <h2 className="text-title font-semibold text-ink">{title}</h2>
-        {lines.map((line) => (
-          <p key={line} className="text-body text-ink-muted">
-            {line}
-          </p>
-        ))}
-      </div>
+      {showHeading && (
+        <div className="flex break-keep flex-col gap-1">
+          <h2 className="text-title font-semibold text-ink">{title}</h2>
+          {lines.map((line) => (
+            <p key={line} className="text-body text-ink-muted">
+              {line}
+            </p>
+          ))}
+        </div>
+      )}
       {children}
     </section>
   );

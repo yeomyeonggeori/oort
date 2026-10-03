@@ -20,6 +20,7 @@ import {
   loginNudge,
   teamKeysCard,
   type AccountsInput,
+  type ExternalInput,
   type HubCardView,
   type Read,
 } from "./aiHubOverviewModel";
@@ -34,6 +35,33 @@ function toRead<T, U>(
     return isOperatorDenied(query.error) ? { state: "denied" } : { state: "error" };
   }
   return { state: "ok", value: pick(query.data) };
+}
+
+/**
+ * 외부 연결 네 줄의 개수 읽기. 개요 카드와 외부 연결 구획이 같은 값을 보도록 한 곳에서 센다.
+ * `hosted`는 에이전트 카드도 쓰므로 함께 돌려준다.
+ */
+export function useExternalReads() {
+  const { workspaceId } = useSession();
+  const hosted = useQuery(hostedListQuery(workspaceId));
+  const webhooks = useQuery(webhookListQuery(workspaceId));
+  const events = useQuery({
+    queryKey: ["settings", "event-subscriptions", workspaceId],
+    queryFn: () => listEventSubscriptions(workspaceId),
+    retry: false,
+  });
+  const plugins = useQuery({
+    queryKey: ["plugins", workspaceId.toLowerCase()],
+    queryFn: () => listPlugins(workspaceId),
+    retry: false,
+  });
+  const input: ExternalInput = {
+    apps: toRead(plugins, (catalog) => catalog.plugins.filter((p) => p.installed).length),
+    incoming: toRead(webhooks, (rows) => rows.filter((row) => row.status === "active").length),
+    outgoing: toRead(events, (rows) => rows.filter((row) => row.enabled).length),
+    externalAgents: toRead(hosted, externalAgentCount),
+  };
+  return { input, hosted };
 }
 
 export interface AiHubOverview {
@@ -53,18 +81,7 @@ export function useAiHubOverview(): AiHubOverview {
     queryFn: fetchProviderLink,
     retry: false,
   });
-  const hosted = useQuery(hostedListQuery(workspaceId));
-  const webhooks = useQuery(webhookListQuery(workspaceId));
-  const events = useQuery({
-    queryKey: ["settings", "event-subscriptions", workspaceId],
-    queryFn: () => listEventSubscriptions(workspaceId),
-    retry: false,
-  });
-  const plugins = useQuery({
-    queryKey: ["plugins", workspaceId.toLowerCase()],
-    queryFn: () => listPlugins(workspaceId),
-    retry: false,
-  });
+  const { input: externalInput, hosted } = useExternalReads();
   const probeFixture = readProbeFixture();
   const harness = useLocalHarnessWatch({
     enabled: IS_TAURI,
@@ -86,12 +103,7 @@ export function useAiHubOverview(): AiHubOverview {
         toRead(providerLink, (link) => ({ configured: link.configured, format: link.format ?? null }))
       ),
       agentsCard({ roster, connections }),
-      externalCard({
-        apps: toRead(plugins, (catalog) => catalog.plugins.filter((p) => p.installed).length),
-        incoming: toRead(webhooks, (rows) => rows.filter((row) => row.status === "active").length),
-        outgoing: toRead(events, (rows) => rows.filter((row) => row.enabled).length),
-        externalAgents: toRead(hosted, externalAgentCount),
-      }),
+      externalCard(externalInput),
     ];
     return { cards, nudge: loginNudge(accountsInput) };
   }

@@ -368,7 +368,7 @@ export function WebhookSection({
       <SectionShell title="웹훅" lines={lines}>
         {isWebhookOperatorDenied(webhooks.error) ? (
           <OperatorNotice
-            who="웹훅은 워크스페이스 오너나 관리자만 만들고 폐기할 수 있습니다."
+            who="채널로 들어오는 주소는 워크스페이스 오너나 관리자만 만들고 폐기할 수 있습니다."
             contact="수신 주소가 필요하면 워크스페이스 관리자에게 요청하세요."
           />
         ) : (

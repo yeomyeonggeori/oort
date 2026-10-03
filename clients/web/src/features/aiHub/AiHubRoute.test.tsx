@@ -36,14 +36,10 @@ vi.mock("./useAiHubOverview", () => ({
     nudge: false,
   }),
 }));
-vi.mock("./AiHubPanes", async () => {
-  const stub = (id: string) => () => createElement("div", { "data-testid": `ai-hub-pane-${id}` }, id);
-  return {
-    AiAccountsPane: stub("accounts"),
-    AiAgentsPane: stub("agents"),
-    AiExternalPane: stub("external"),
-  };
-});
+const stub = (id: string) => () => createElement("div", { "data-testid": `ai-hub-pane-${id}` }, id);
+vi.mock("./AiAccountsPane", () => ({ AiAccountsPane: stub("accounts") }));
+vi.mock("./AiAgentsPane", () => ({ AiAgentsPane: stub("agents") }));
+vi.mock("./AiExternalPane", () => ({ AiExternalPane: stub("external") }));
 
 vi.mock("./AiTeamKeysPane", () => ({
   AiTeamKeysPane: () => createElement("div", { "data-testid": "ai-hub-pane-teamKeys" }, "teamKeys"),

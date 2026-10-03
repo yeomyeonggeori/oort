@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { useSession } from "@/app/session";
 import { useSurfaceProvidedPredicate } from "@/features/capabilities/useSurfaceProvided";
@@ -22,24 +22,21 @@ import { IS_TAURI } from "@/lib/env";
 import { UpdateSection } from "@/features/updates/UpdateSection";
 import { AccountSection } from "./AccountSection";
 import { DevicesSection } from "./DevicesSection";
-import { AgentCredentialsSection } from "./AgentCredentialsSection";
 import { AiLinkSection } from "./AiLinkSection";
 import { AppearanceSection } from "./AppearanceSection";
 import { TerminalSection } from "./TerminalSection";
 import { ShortcutsSection } from "./ShortcutsSection";
 import { LinkPreviewSection } from "./LinkPreviewSection";
-import { EventSubscriptionSection } from "./EventSubscriptionSection";
 import { InviteSection } from "./InviteSection";
 import { NotificationRulesSection } from "./NotificationRulesSection";
-import { PluginSection } from "@/features/plugins/PluginSection";
 import { ProfileSection } from "./ProfileSection";
 import { UsageSection } from "./UsageSection";
-import { WebhookSection } from "./WebhookSection";
 import { WorkHostSection } from "./WorkHostSection";
 import { WorkspaceSection } from "./WorkspaceSection";
 import { MemorySettingsSection } from "@/features/memory/MemorySettingsSection";
 import { leaveSettings } from "./settingsReturn";
 import { AiHubMovedLink } from "@/features/aiHub/AiHubMovedLink";
+import { aiExternalRowFromSettings } from "@momo/core/features/ai/aiHubModel";
 import {
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_GROUPS,
@@ -190,6 +187,11 @@ export function SettingsRoute() {
   // (PR 1203 design review H3: "오프라인 상태가 실물로 도달 불가").
   const offline = useOffline();
 
+  // AIH-8: 앱·웹훅·이벤트 구독·에이전트 자격은 AI 허브 › 외부 연결로 옮겼다. 옛 딥링크
+  // (?section=…, 서버 안내·팔레트가 아직 이 주소를 건넨다)는 그 줄 상세로 바꿔 보낸다.
+  const movedExternal = requested === null ? null : aiExternalRowFromSettings(requested);
+  if (movedExternal?.path) return <Navigate to={movedExternal.path} replace />;
+
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="settings-route">
       <h1 ref={headingRef} tabIndex={-1} className="sr-only">
@@ -301,9 +303,6 @@ export function SettingsRoute() {
           )}
           {section === "updates" && <UpdateSection />}
           {section === "ai" && <AiLinkSection offline={offline} workspaceId={workspaceId} />}
-          {section === "agents" && (
-            <AgentCredentialsSection offline={offline} />
-          )}
           {section === "code" && (
             <WorkHostSection
               workspaceId={workspaceId}
@@ -317,24 +316,13 @@ export function SettingsRoute() {
           {section === "memory" && (
             <MemorySettingsSection workspaceId={workspaceId} offline={offline} />
           )}
-          {section === "plugins" && <PluginSection offline={offline} />}
           {/* No `offline` prop: 사용량 is a read, and the realtime rail being
               down says nothing about whether this GET answers. The panel reads
               the browser's own offline state instead (react-query fetchStatus),
               which is the only signal that actually stops the request. */}
           {section === "usage" && <UsageSection workspaceId={workspaceId} />}
-          {section === "webhooks" && (
-            <WebhookSection
-              workspaceId={workspaceId}
-              memberId={session.member.id}
-              offline={offline}
-            />
-          )}
           {section === "members" && (
             <InviteSection workspaceId={workspaceId} offline={offline} />
-          )}
-          {section === "events" && (
-            <EventSubscriptionSection workspaceId={workspaceId} offline={offline} />
           )}
           </RenderErrorBoundary>
         </div>
