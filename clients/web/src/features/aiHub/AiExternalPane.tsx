@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { Link, Navigate, Route, Routes } from "react-router-dom";
+import { useEffect, useRef, type ReactNode } from "react";
+import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
@@ -62,15 +62,30 @@ function countChip(row: AiExternalRow, read: Read<number> | null): { text: strin
   return null;
 }
 
-function readFor(id: AiExternalRowId, input: ExternalInput): Read<number> | null {
-  if (id === "hostedBotInvite") return null;
-  return input[id];
+function readFor(id: AiExternalRowId, input: ExternalInput, hostedBots: Read<number>): Read<number> {
+  return id === "hostedBotInvite" ? hostedBots : input[id];
 }
 
-function RowItem({ row, input }: { row: AiExternalRow; input: ExternalInput }) {
-  const chip = countChip(row, readFor(row.id, input));
+function RowItem({
+  row,
+  input,
+  hostedBots,
+  restoreFocus,
+}: {
+  row: AiExternalRow;
+  input: ExternalInput;
+  hostedBots: Read<number>;
+  restoreFocus: boolean;
+}) {
+  const chip = countChip(row, readFor(row.id, input, hostedBots));
   const to = row.path ?? COPY.inviteHref;
   const titleId = `ai-external-row-title-${row.id}`;
+  const linkId = `ai-external-open-id-${row.id}`;
+  const linkRef = useRef<HTMLAnchorElement>(null);
+  // 상세에서 「‹ 외부 연결」로 돌아오면 방금 연 줄의 열기에 포커스를 돌려준다.
+  useEffect(() => {
+    if (restoreFocus) linkRef.current?.focus({ preventScroll: false });
+  }, [restoreFocus]);
   return (
     <li
       className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line py-4 first:border-t"
@@ -90,7 +105,7 @@ function RowItem({ row, input }: { row: AiExternalRow; input: ExternalInput }) {
           </span>
         )}
         <Button asChild variant="secondary" size="sm" className="tap-target">
-          <Link to={to} aria-labelledby={titleId} data-testid={`ai-external-open-${row.id}`}>
+          <Link ref={linkRef} id={linkId} to={to} aria-labelledby={`${linkId} ${titleId}`} data-testid={`ai-external-open-${row.id}`}>
             {COPY.open}
           </Link>
         </Button>
@@ -100,13 +115,14 @@ function RowItem({ row, input }: { row: AiExternalRow; input: ExternalInput }) {
 }
 
 function Index() {
-  const { input } = useExternalReads();
+  const { input, hostedBots } = useExternalReads();
+  const from = (useLocation().state as { from?: string } | null)?.from;
   return (
     <div className="flex min-w-0 flex-col">
       <PaneHead />
       <ul className="flex min-w-0 flex-col" aria-label={glossaryEntry("externalConnection").term}>
         {AI_EXTERNAL_ROWS.map((row) => (
-          <RowItem key={row.id} row={row} input={input} />
+          <RowItem key={row.id} row={row} input={input} hostedBots={hostedBots} restoreFocus={from === row.id} />
         ))}
       </ul>
       <div
@@ -127,17 +143,23 @@ function Index() {
 }
 
 function DetailHead({ row }: { row: AiExternalRow }) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  // 상세로 들어오면 포커스를 제목으로 옮겨 화면이 바뀐 것을 읽어 준다(설정 셸의 headingRef와 같은 방식).
+  useEffect(() => {
+    headingRef.current?.focus({ preventScroll: true });
+  }, []);
   return (
     <div className="mb-6 flex min-w-0 flex-col gap-1" data-testid={`ai-external-detail-${row.id}`}>
       <Link
         to={AI_EXTERNAL_BASE_PATH}
+        state={{ from: row.id }}
         data-testid="ai-external-back"
         className="tap-target mb-2 inline-flex items-center gap-1 self-start text-meta text-ink-muted press hover:text-ink focus-visible:focus-ring"
       >
         <ChevronLeft aria-hidden="true" className="size-4" />
         {COPY.back}
       </Link>
-      <h2 className="break-keep text-display font-bold text-ink">
+      <h2 ref={headingRef} tabIndex={-1} className="break-keep text-display font-bold text-ink">
         {row.title}
         {row.detailLegacy && <span className="ml-2 text-body font-normal text-ink-muted">({row.detailLegacy})</span>}
       </h2>

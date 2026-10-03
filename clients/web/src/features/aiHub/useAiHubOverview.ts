@@ -61,7 +61,9 @@ export function useExternalReads() {
     outgoing: toRead(events, (rows) => rows.filter((row) => row.enabled).length),
     externalAgents: toRead(hosted, externalAgentCount),
   };
-  return { input, hosted };
+  // 호스티드 봇 초대 줄의 개수: 같은 호스티드 연결 목록에서 센다(403이면 다른 칩과 같은 안내).
+  const hostedBots: Read<number> = toRead(hosted, externalAgentCount);
+  return { input, hosted, hostedBots };
 }
 
 export interface AiHubOverview {

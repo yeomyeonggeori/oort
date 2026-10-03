@@ -10,9 +10,10 @@ import type { ExternalInput } from "./aiHubOverviewModel";
 
 const reads = vi.hoisted(() => ({
   input: {} as ExternalInput,
+  bots: { state: "ok", value: 1 } as { state: "ok"; value: number } | { state: "denied" },
 }));
 vi.mock("./useAiHubOverview", () => ({
-  useExternalReads: () => ({ input: reads.input, hosted: {} }),
+  useExternalReads: () => ({ input: reads.input, hosted: {}, hostedBots: reads.bots }),
 }));
 const body = (id: string) => () => createElement("div", { "data-testid": `body-${id}` });
 vi.mock("@/features/plugins/PluginSection", () => ({ PluginSection: body("apps") }));
@@ -95,10 +96,16 @@ describe("외부 연결 목차 (AIH-8)", () => {
     const el = await mountAt("/");
     const chip = (id: string) => el.querySelector(`[data-testid="ai-external-chip-${id}"]`)?.textContent ?? null;
     expect(chip("apps")).toBe("설치 0");
-    expect(chip("incoming")).toBe("운영자만 볼 수 있어요");
+    expect(chip("incoming")).toBe("소유자·관리자만 볼 수 있어요");
     expect(chip("outgoing")).toBe("읽지 못했어요");
     expect(chip("externalAgents")).toBeNull();
-    expect(chip("hostedBotInvite")).toBeNull();
+    expect(chip("hostedBotInvite")).toBe("봇 1");
+    reads.bots = { state: "denied" };
+    act(() => root?.unmount());
+    host?.remove();
+    const again = await mountAt("/");
+    expect(again.querySelector('[data-testid="ai-external-chip-hostedBotInvite"]')?.textContent).toBe("소유자·관리자만 볼 수 있어요");
+    reads.bots = { state: "ok", value: 1 };
   });
 
   it("새 문구가 옛 말(합류 등)을 되살리지 않는다", () => {
@@ -121,6 +128,15 @@ describe("외부 연결 상세 (AIH-8)", () => {
     expect(el.querySelector(`[data-testid="body-${id}"]`)).not.toBeNull();
     expect(el.querySelector("h2")?.firstChild?.textContent).toBe(title);
     expect(el.querySelector('[data-testid="ai-external-back"]')?.getAttribute("href")).toBe("/ai/external");
+  });
+
+  it("상세에 들어오면 제목으로 포커스가 가고, 돌아오면 그 줄의 열기로 돌아온다", async () => {
+    reads.input = { apps: OK(0), incoming: OK(0), outgoing: OK(0), externalAgents: OK(0) };
+    const el = await mountAt("/incoming");
+    expect(document.activeElement).toBe(el.querySelector("h2"));
+    act(() => (el.querySelector('[data-testid="ai-external-back"]') as HTMLElement).click());
+    expect(document.activeElement).toBe(el.querySelector('[data-testid="ai-external-open-incoming"]'));
+    expect(el.querySelector('[data-testid="ai-external-open-incoming"]')?.getAttribute("aria-labelledby")).toContain("ai-external-row-title-incoming");
   });
 
   it("외부 에이전트 연결의 머리 괄호에서만 영어 약자가 선다", async () => {

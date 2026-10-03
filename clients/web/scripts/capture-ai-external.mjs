@@ -180,7 +180,7 @@ async function scenes(browser, origin, scheme, viewport, operator) {
   const tag = `${who}-${viewport.width}-${scheme}`;
   scenario.operator = operator;
   const { context, page } = await open(browser, origin, scheme, { width: viewport.width, height: viewport.height });
-  const shot = (name) => page.screenshot({ path: resolve(OUT_DIR, `${name}-${tag}.png`) });
+  const shot = (name) => page.screenshot({ path: resolve(OUT_DIR, `${name}-${tag}.png`), fullPage: true });
   try {
     await page.goto(`${origin}/#/ai/external`);
     await page.getByTestId("ai-hub-pane-external").waitFor();
@@ -192,11 +192,11 @@ async function scenes(browser, origin, scheme, viewport, operator) {
     check(`${tag} 목차 다섯 줄 이름`, titles.join("|") === "앱|채널로 들어오는 주소|밖으로 보내는 알림|외부 에이전트 연결|호스티드 봇 초대", titles.join("|"));
     const chip = async (id) => (await page.getByTestId(`ai-external-chip-${id}`).count()) ? text(page, `ai-external-chip-${id}`) : null;
     if (operator) {
-      check(`${tag} 개수 칩: 설치 2 · 주소 1 · 구독 2 · 연결 1`, [await chip("apps"), await chip("incoming"), await chip("outgoing"), await chip("externalAgents")].join("|") === "설치 2|주소 1|구독 2|연결 1");
+      check(`${tag} 개수 칩: 설치 2 · 주소 1 · 구독 2 · 연결 1`, [await chip("apps"), await chip("incoming"), await chip("outgoing"), await chip("externalAgents"), await chip("hostedBotInvite")].join("|") === "설치 2|주소 1|구독 2|연결 1|봇 1");
     } else {
-      check(`${tag} 일반 멤버: 설치 2 + 나머지는 운영자만 볼 수 있어요(0을 지어내지 않는다)`, [await chip("apps"), await chip("incoming"), await chip("outgoing"), await chip("externalAgents")].join("|") === "설치 2|운영자만 볼 수 있어요|운영자만 볼 수 있어요|운영자만 볼 수 있어요");
+      check(`${tag} 일반 멤버: 설치 2 + 나머지는 소유자·관리자만 볼 수 있어요(0을 지어내지 않는다)`, [await chip("apps"), await chip("incoming"), await chip("outgoing"), await chip("externalAgents")].join("|") === "설치 2|소유자·관리자만 볼 수 있어요|소유자·관리자만 볼 수 있어요|소유자·관리자만 볼 수 있어요");
     }
-    check(`${tag} 권한 문장`, (await text(page, "ai-external-permission")).includes("소유자와 관리자만"));
+    check(`${tag} 권한 문장`, (await text(page, "ai-external-permission")).includes("소유자·관리자만"));
     check(`${tag} 목차에 영어 약자·합류 없음`, !/MCP|Agent Port|합류/.test(await page.getByTestId("ai-hub-route").innerText()));
     check(`${tag} 코드 실행 호스트 링크 → 설정`, (await page.getByTestId("ai-external-code-host-link").getAttribute("href")).endsWith("/settings?section=code"));
     check(`${tag} 목차 가로 넘침 0`, (await overflowX(page)) === 0);
@@ -214,6 +214,7 @@ async function scenes(browser, origin, scheme, viewport, operator) {
       }
       await page.getByTestId("ai-external-back").click();
       await page.getByTestId("ai-external-row-apps").waitFor();
+      check(`${tag} ${sub} 돌아오면 그 줄의 열기에 포커스`, (await page.evaluate(() => document.activeElement?.getAttribute("data-testid"))) === `ai-external-open-${rowId}`);
     }
   } finally {
     await context.close();
@@ -228,16 +229,19 @@ async function settingsScenes(browser, origin, scheme, viewport) {
   try {
     await page.goto(`${origin}/#/settings?section=profile`);
     await page.getByTestId("settings-nav-events").waitFor();
-    await page.getByTestId("settings-nav-events").click();
+    await page.getByTestId("settings-nav-ai").click();
     await page.getByTestId("ai-hub-moved-link").waitFor();
     await page.waitForTimeout(500);
-    await page.screenshot({ path: resolve(OUT_DIR, `settings-one-liner-${tag}.png`) });
-    const settingsBody = await page.locator("[data-settings-scroll-viewport]").innerText();
-    check(`${tag} 설정 › 이벤트 구독: 안내 한 줄뿐(폼 없음)`, (await page.locator("[data-settings-scroll-viewport] form, [data-settings-scroll-viewport] input").count()) === 0 && settingsBody.includes("AI에서 열기"), settingsBody);
-    check(`${tag} 안내 링크는 밖으로 보내는 알림 상세`, (await page.getByTestId("ai-hub-moved-link").locator("a").getAttribute("href")).endsWith("/ai/external/outgoing"));
-    await page.getByTestId("ai-hub-moved-link").locator("a").click();
-    await page.getByTestId("ai-external-detail-outgoing").waitFor();
-    check(`${tag} 링크를 누르면 /ai/external/outgoing`, page.url().endsWith("#/ai/external/outgoing"), page.url());
+    await page.screenshot({ path: resolve(OUT_DIR, `settings-one-liner-${tag}.png`), fullPage: true });
+    check(`${tag} 설정 › AI 연결: 안내 한 줄 링크`, (await page.getByTestId("ai-hub-moved-link").locator("a").getAttribute("href")).endsWith("/ai/accounts"));
+    // 옮긴 네 구획은 사이드바에서 눌러도 그 줄 상세로 간다.
+    for (const [nav, target] of [["events", "outgoing"], ["webhooks", "incoming"], ["plugins", "apps"], ["agents", "agents"]]) {
+      await page.goto(`${origin}/#/settings?section=profile`);
+      await page.getByTestId(`settings-nav-${nav}`).click();
+      await page.getByTestId(`ai-external-detail-${target === "agents" ? "externalAgents" : target}`).waitFor();
+      check(`${tag} 설정 사이드바 ${nav} 클릭 → /ai/external/${target}`, page.url().endsWith(`#/ai/external/${target}`), page.url());
+      check(`${tag} 상세 진입 시 포커스가 제목에 있다(${target})`, await page.evaluate(() => document.activeElement?.tagName === "H2"));
+    }
     for (const [section, target] of [["webhooks", "incoming"], ["plugins", "apps"], ["agents", "agents"], ["events", "outgoing"]]) {
       await page.goto(`${origin}/#/settings?section=${section}`);
       await page.getByTestId(`ai-hub-pane-external`).waitFor({ state: "detached", timeout: 100 }).catch(() => {});
@@ -256,7 +260,7 @@ async function main() {
   const browser = await chromium.launch();
   try {
     for (const scheme of ["light", "dark"]) {
-      for (const viewport of [{ width: 1440, height: 900 }, { width: 1100, height: 800 }, { width: 420, height: 900 }]) {
+      for (const viewport of [{ width: 1440, height: 900 }, { width: 1100, height: 800 }, { width: 420, height: 1300 }]) {
         await scenes(browser, preview.origin, scheme, viewport, true);
         await scenes(browser, preview.origin, scheme, viewport, false);
       }

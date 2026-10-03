@@ -192,8 +192,8 @@ export function EventSubscriptionSection({
     return (
       <SectionShell title="이벤트 구독" lines={LINES}>
         <OperatorNotice
-          who="밖으로 보내는 알림은 워크스페이스 오너나 관리자만 만들고 지울 수 있습니다."
-          contact="외부로 보낼 이벤트가 필요하면 워크스페이스 관리자에게 요청하세요."
+          who="밖으로 보내는 알림은 소유자·관리자만 만들고 지울 수 있습니다."
+          contact="외부로 보낼 이벤트가 필요하면 소유자·관리자에게 요청하세요."
         />
       </SectionShell>
     );

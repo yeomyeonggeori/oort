@@ -261,24 +261,15 @@ describe("SettingsRoute 전면 레이아웃", () => {
     expect(members.querySelector('[data-testid="section-members"]')).not.toBeNull();
   });
 
-  it("허브로 옮긴 다섯 구획 위에는 「AI 허브로 옮겼어요」 링크가 서고, 그 밖의 구획에는 없다 (AIH-3)", () => {
+  it("AI 연결 구획 위에는 「AI 허브로 옮겼어요」 링크가 서고, 그 밖의 구획에는 없다 (AIH-3)", () => {
     const host = mountRoute("/settings?section=profile");
     expect(host.querySelector('[data-testid="ai-hub-moved-link"]')).toBeNull();
-    const expected: Array<[string, string]> = [
-      ["settings-nav-ai", "/ai/accounts"],
-      ["settings-nav-agents", "/ai/external/agents"],
-      ["settings-nav-plugins", "/ai/external/apps"],
-      ["settings-nav-webhooks", "/ai/external/incoming"],
-      ["settings-nav-events", "/ai/external/outgoing"],
-    ];
-    for (const [navId, href] of expected) {
-      act(() => {
-        (host.querySelector(`[data-testid="${navId}"]`) as HTMLButtonElement).click();
-      });
-      const line = host.querySelector('[data-testid="ai-hub-moved-link"]');
-      expect(line?.textContent, navId).toContain("옮겼어요");
-      expect(line?.querySelector("a")?.getAttribute("href"), navId).toBe(href);
-    }
+    act(() => {
+      (host.querySelector('[data-testid="settings-nav-ai"]') as HTMLButtonElement).click();
+    });
+    const line = host.querySelector('[data-testid="ai-hub-moved-link"]');
+    expect(line?.textContent).toContain("AI 허브로 옮겼어요");
+    expect(line?.querySelector("a")?.getAttribute("href")).toContain("/ai/accounts");
     act(() => {
       (host.querySelector('[data-testid="settings-nav-account"]') as HTMLButtonElement).click();
     });
@@ -306,20 +297,20 @@ describe("SettingsRoute 전면 레이아웃", () => {
     }
   });
 
-  it("외부 연결로 옮긴 네 구획은 본문 없이 안내 한 줄만 그린다 (AIH-8)", () => {
+  it("외부 연결로 옮긴 네 구획은 눌러도 설정에 머물지 않고 그 줄 상세로 간다 (AIH-8)", () => {
     const host = mountRoute("/settings?section=profile");
-    for (const navId of [
-      "settings-nav-agents",
-      "settings-nav-plugins",
-      "settings-nav-webhooks",
-      "settings-nav-events",
-    ]) {
+    const expected: Array<[string, string]> = [
+      ["settings-nav-agents", "/ai/external/agents"],
+      ["settings-nav-plugins", "/ai/external/apps"],
+      ["settings-nav-webhooks", "/ai/external/incoming"],
+      ["settings-nav-events", "/ai/external/outgoing"],
+    ];
+    for (const [navId, path] of expected) {
+      navigate.mockClear();
       act(() => {
         (host.querySelector(`[data-testid="${navId}"]`) as HTMLButtonElement).click();
       });
-      expect(host.querySelector('[data-testid="ai-hub-moved-link"]'), navId).not.toBeNull();
-      // 본문 컴포넌트(자격·앱·웹훅·구독)는 이 셸에서 더 이상 서지 않는다: 안내 한 줄 말고 폼이 없다.
-      expect(host.querySelectorAll("[data-settings-scroll-viewport] input, [data-settings-scroll-viewport] form")).toHaveLength(0);
+      expect(navigate).toHaveBeenCalledWith(path);
     }
   });
 

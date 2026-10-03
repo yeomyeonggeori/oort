@@ -249,7 +249,12 @@ export function SettingsRoute() {
                       ref={(el) => {
                         navRefs.current[item.id] = el;
                       }}
-                      onClick={() => setSection(item.id)}
+                      onClick={() => {
+                        // AIH-8: 옮긴 네 구획은 눌러도 AI › 외부 연결 줄로 간다(옛 딥링크와 같은 길).
+                        const moved = aiExternalRowFromSettings(item.id)?.path;
+                        if (moved) navigate(moved);
+                        else setSection(item.id);
+                      }}
                       aria-current={section === item.id ? "page" : undefined}
                       data-testid={`settings-nav-${item.id}`}
                       className={cn(

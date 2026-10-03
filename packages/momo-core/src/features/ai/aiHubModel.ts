@@ -225,7 +225,7 @@ export const AI_EXTERNAL_ROWS: readonly AiExternalRow[] = [
     detailLegacy: "호스티드 에이전트 연결",
     summary: "서버가 대신 돌려 주는 봇을 초대해요. 에이전트 만들기 목록에서도 열려요.",
     detail: [],
-    countNoun: null,
+    countNoun: "봇",
     path: null,
     fromSettings: null,
     settingsLine: null,
@@ -234,7 +234,7 @@ export const AI_EXTERNAL_ROWS: readonly AiExternalRow[] = [
 
 /** 외부 연결 구획 문구 (AIH-8). */
 export const AI_EXTERNAL_COPY = {
-  permission: "만들고 지우는 건 소유자와 관리자만 해요. 그 밖의 멤버는 볼 수만 있어요.",
+  permission: "만들고 지우는 건 소유자·관리자만 해요. 그 밖의 멤버는 볼 수만 있어요.",
   open: "열기",
   back: "외부 연결",
   inviteHref: "/ai/agents?create=1",
@@ -1009,7 +1009,7 @@ export const AI_HUB_OVERVIEW_COPY = {
     connected: "연결됨",
     notConnected: "아직 없어요",
     desktopOnly: "로그인은 데스크탑 앱에서 해요",
-    operatorOnly: "운영자만 볼 수 있어요",
+    operatorOnly: "소유자·관리자만 볼 수 있어요",
     readFailed: "읽지 못했어요",
     onlyMe: "나만 부름",
     everyone: "모두 부름",
