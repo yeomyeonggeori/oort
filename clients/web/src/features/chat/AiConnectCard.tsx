@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Check, ExternalLink, Eye, KeyRound, Lock, Plug, RefreshCw, X } from "lucide-react";
 import type { LocalHarnessId } from "@momo/core/features/hostedAgents/detect";
 import type { AiConnectLine } from "@momo/core/features/commands/registry";
-import { AI_CONNECT_SETTINGS_PATH } from "@momo/core/features/commands/registry";
+import { AI_HUB_NAV_COPY } from "@momo/core/features/ai/aiHubModel";
+import { AI_CONNECT_HUB_PATH } from "@momo/core/features/commands/registry";
 import {
   AI_CONNECT_ROW_COPY,
   AI_CONNECT_SERVER_OFF_NOTE,
@@ -367,13 +368,13 @@ export function AiConnectCard({
           <span className="flex-1" />
           <button
             type="button"
-            onClick={() => navigate(AI_CONNECT_SETTINGS_PATH)}
-            aria-label="설정에서 열기"
+            onClick={() => navigate(AI_CONNECT_HUB_PATH)}
+            aria-label={AI_HUB_NAV_COPY.openAiAction}
             className="tap-target press inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-meta text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
             data-testid="ai-connect-card-settings"
           >
             <ExternalLink className="size-3 shrink-0" aria-hidden="true" />
-            <span className="ai-card-wide">설정에서 열기</span>
+            <span className="ai-card-wide">{AI_HUB_NAV_COPY.openAiAction}</span>
           </button>
           <button
             type="button"
@@ -595,13 +596,13 @@ function SuggestedCard({
         <span className="flex-1" />
         <button
           type="button"
-          onClick={() => navigate(AI_CONNECT_SETTINGS_PATH)}
-          aria-label="설정에서 열기"
+          onClick={() => navigate(AI_CONNECT_HUB_PATH)}
+          aria-label={AI_HUB_NAV_COPY.openAiAction}
           className="tap-target press inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-meta text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
           data-testid="ai-suggest-settings"
         >
           <ExternalLink className="size-3 shrink-0" aria-hidden="true" />
-          <span className="ai-card-wide">설정에서 열기</span>
+          <span className="ai-card-wide">{AI_HUB_NAV_COPY.openAiAction}</span>
         </button>
       </div>
       {showMine && <MineSection only={focus === "claude" || focus === "codex" ? focus : null} />}

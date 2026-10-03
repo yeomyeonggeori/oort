@@ -28,6 +28,7 @@ import { ActivityRoute } from "@/features/activity/ActivityRoute";
 import { DirectoryRoute } from "@/features/directory/DirectoryRoute";
 import { SettingsRoute } from "@/features/settings/SettingsRoute";
 import { AgentHubRoute } from "@/features/agentHub/AgentHubRoute";
+import { AiHubRoute } from "@/features/aiHub/AiHubRoute";
 import { MemoryBrowserRoute } from "@/features/memory/MemoryBrowserRoute";
 import { WorkstreamListRoute } from "@/features/workstreams/WorkstreamListRoute";
 import { WorkstreamDetailRoute } from "@/features/workstreams/WorkstreamDetailRoute";
@@ -326,6 +327,8 @@ export function App() {
           <Route path="activity" element={<ActivityRoute />} />
           <Route path="directory" element={<DirectoryRoute />} />
           <Route path="agents" element={<AgentHubRoute />} />
+          {/* AI 허브(AIH-3, #3393). `ai-connect`는 이웃 세그먼트라 겹치지 않는다. */}
+          <Route path="ai/*" element={<AiHubRoute />} />
           {/* 기억 브라우저(ADR-0196 D12 V4, #3170). 주소가 기억 하나를 가리켜야 해서
               (제안 카드의 「기억 보기」) 설정의 한 절이 아니라 자기 라우트다. 서버가
               팀 기억을 싣지 않아도 주소는 남겨 두고 이유를 말한다. */}

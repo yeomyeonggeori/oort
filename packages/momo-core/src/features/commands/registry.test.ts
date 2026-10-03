@@ -3,7 +3,7 @@ import type { SurfaceId } from "../capabilities/serverSurfaces";
 import { serverSurface } from "../capabilities/serverSurfaces";
 import {
   AGENT_SUGGESTABLE_COMMANDS,
-  AI_CONNECT_SETTINGS_PATH,
+  AI_CONNECT_HUB_PATH,
   KNOWN_COMMAND_IDS,
   TOGGLE_SIDEBAR_COMMAND_ID,
   agentRoutingCommandId,
@@ -201,6 +201,27 @@ describe("명령 레지스트리", () => {
     expect(result.status).toBe("작업 콘솔로 이동");
   });
 
+  it("AI 허브 이동 명령 다섯이 ⌘K에 서고 제 경로로 간다 (AIH-3)", () => {
+    const commands = visibleCommands(env());
+    const ctx = context();
+    const ids = ["nav.ai", "nav.ai.accounts", "nav.ai.teamKeys", "nav.ai.agents", "nav.ai.external"];
+    for (const id of ids) commands.find((command) => command.id === id)!.run(ctx);
+    expect(ctx.navigate.mock.calls).toEqual([
+      ["/ai"],
+      ["/ai/accounts"],
+      ["/ai/team-keys"],
+      ["/ai/agents"],
+      ["/ai/external"],
+    ]);
+    expect(commands.filter((c) => c.id.startsWith("nav.ai")).map((c) => c.title)).toEqual([
+      "AI",
+      "내 AI 계정",
+      "팀 AI 키",
+      "AI 에이전트",
+      "외부 연결",
+    ]);
+  });
+
   it("설정 갈래의 두 명령이 제 경로로 간다", () => {
     const commands = visibleCommands(env());
     const ctx = context();
@@ -321,13 +342,13 @@ describe("ai.connect (#2943 GC-2)", () => {
     expect(result).toEqual({ status: "AI 연결 카드 열기", closesSurface: true });
   });
 
-  it("카드 자리가 없으면 설정 › AI 연결로 간다(채널 밖·GC-3 전 폴백)", () => {
+  it("카드 자리가 없으면 AI 허브로 간다(채널 밖·GC-3 전 폴백)", () => {
     const ctx = context(false);
     const result = aiConnect().run(ctx);
     expect(ctx.openLocalCard).toHaveBeenCalledWith("ai.connect", {});
-    expect(ctx.navigate.mock.calls).toEqual([[AI_CONNECT_SETTINGS_PATH]]);
-    expect(AI_CONNECT_SETTINGS_PATH).toBe("/settings?section=ai");
-    expect(result).toEqual({ status: "AI 연결로 이동", closesSurface: true });
+    expect(ctx.navigate.mock.calls).toEqual([[AI_CONNECT_HUB_PATH]]);
+    expect(AI_CONNECT_HUB_PATH).toBe("/ai/accounts");
+    expect(result).toEqual({ status: "AI로 이동", closesSurface: true });
   });
 
   it("모르는 인자는 카드에 가지 않는다(의도만, 비밀값 없음)", () => {
@@ -338,14 +359,13 @@ describe("ai.connect (#2943 GC-2)", () => {
 
   it("줄의 작은 글씨가 누른 결과를 거짓 없이 말한다", () => {
     expect(aiConnect({ canOpenLocalCard: () => true }).meta).toBe("이 채널 · 나에게만");
-    expect(aiConnect({ canOpenLocalCard: () => false }).meta).toBe("설정에서 열려요");
+    expect(aiConnect({ canOpenLocalCard: () => false }).meta).toBe("AI에서 열려요");
   });
 
-  it("설정 › AI 연결 이동 줄이 따로 선다", () => {
-    const ctx = context();
-    const nav = visibleCommands(env()).find((command) => command.id === "nav.settings.ai")!;
-    expect(nav.run(ctx).status).toBe("AI 연결로 이동");
-    expect(ctx.navigate.mock.calls).toEqual([["/settings?section=ai"]]);
+  it("옛 「설정 › AI 연결」 이동 줄은 허브 줄로 흡수됐다", () => {
+    const ids = visibleCommands(env()).map((command) => command.id);
+    expect(ids).not.toContain("nav.settings.ai");
+    expect(ids).toContain("nav.ai.accounts");
   });
 
   it("슬래시 이름은 client 명령만 갖는다", () => {

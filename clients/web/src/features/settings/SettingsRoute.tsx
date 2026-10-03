@@ -39,6 +39,7 @@ import { WorkHostSection } from "./WorkHostSection";
 import { WorkspaceSection } from "./WorkspaceSection";
 import { MemorySettingsSection } from "@/features/memory/MemorySettingsSection";
 import { leaveSettings } from "./settingsReturn";
+import { AiHubMovedLink } from "@/features/aiHub/AiHubMovedLink";
 import {
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_GROUPS,
@@ -281,6 +282,7 @@ export function SettingsRoute() {
             // inputs to mean anything, so the cache goes first.
             onRetry={() => resetSettingsQueries(queryClient)}
           >
+          <AiHubMovedLink section={section} />
           {section === "profile" && <ProfileSection offline={offline} />}
           {section === "account" && <AccountSection />}
           {section === "devices" && (
