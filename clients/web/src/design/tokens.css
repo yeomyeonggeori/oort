@@ -428,6 +428,11 @@
    * 가로이고 pane도 아니므로, 리듬 스케일에 없는 이 측정값도 이름을 갖는다. */
   --spacing-action: 144px;
 
+  /* 자격 행 이름 칸의 가로 바닥 (#3456). 한 칸 행에서 이름이 이 폭 밑으로
+   * 말줄임되기 전에 상태·시각 묶음이 아래 줄로 접힌다. 자격 스윕의 nameFloor
+   * (144)와 같은 값이다. */
+  --spacing-name-floor: 144px;
+
   /* 같은 규칙의 짧은 푸터 (MOMO-676 M-3). 한 다이얼로그의 두 푸터 버튼은 같은
    * 폭이고, 그 폭은 **그 푸터가 보일 수 있는 가장 긴 라벨**이 정한다. 위 144px는
    * 동의 다이얼로그의 "권한을 하나 이상 선택"(실측 127px)에서 나온 값이라, 라벨이
@@ -2440,6 +2445,12 @@
   grid-template-columns: minmax(0, 1fr) auto var(--spacing-action-band);
   column-gap: var(--spacing-3);
   align-items: stretch;
+}
+
+/* 한 칸(stack) 행 본문의 이름 칸: 하한 이름-바닥에서 시작해 남는 폭을 먹는다.
+ * `flex: 1`은 기준 폭이 0%라 `flex-wrap`이 접을 줄을 몰라서 이 유틸이 있다. */
+@utility credentials-row-name-fold {
+  flex: 1 1 var(--spacing-name-floor);
 }
 
 /* 선택 행의 2px 액센트 바. `cn("border-b","border-l-2")` 는 폭을 지우지 않는다.

@@ -145,10 +145,17 @@ function ActivityFacts({ updatedAtMs }: { updatedAtMs: number }) {
   );
 }
 
-function CredentialsRowName({ name }: { name: string }) {
+function CredentialsRowName({
+  name,
+  folds = false,
+}: {
+  name: string;
+  /** 좁은 한 칸 행: 이름 칸 하한(`--spacing-name-floor`)에서 사실 묶음이 접힌다. */
+  folds?: boolean;
+}) {
   return (
     <span
-      className="min-w-0 flex-1"
+      className={folds ? "min-w-0 credentials-row-name-fold" : "min-w-0 flex-1"}
       data-testid="agent-credentials-row-name"
     >
       <TruncatingName
@@ -415,10 +422,14 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
                         </>
                       ) : (
                         <div
-                          className="flex min-w-0 flex-nowrap items-center gap-2 overflow-hidden pr-3 py-1"
+                          className="flex min-w-0 flex-wrap items-center gap-x-2 overflow-hidden pr-3 py-1"
                           data-testid="agent-credentials-row-body"
                         >
-                          <CredentialsRowName name={fullName} />
+                          {/* 이름 칸 하한 144(9rem). 상태·시각이 그 하한을
+                              깎을 만큼 좁으면(AI 허브 안 600~700 폭) 사실 묶음이
+                              이름 아래 둘째 줄로 접힌다 — 이름이 말줄임으로
+                              먼저 사라지지 않는다. */}
+                          <CredentialsRowName name={fullName} folds />
                           {facts}
                         </div>
                       )}
@@ -426,7 +437,7 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
                         className={
                           wide
                             ? "contents"
-                            : "mx-3 flex min-w-0 flex-wrap items-center gap-1 border-t border-line/50 bg-surface px-2 py-1"
+                            : "mx-1 flex min-w-0 flex-wrap items-center gap-1 border-t border-line/50 bg-surface px-1 py-1"
                         }
                         data-testid={
                           wide
