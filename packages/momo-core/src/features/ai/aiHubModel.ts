@@ -780,7 +780,8 @@ export function aiAgentLabels(c: AiAgentClassification): AiAgentLabels {
     host = { label: "맥 꺼짐", detail: AI_HUB_COPY.subscriptionHostOfflineDetail };
   }
 
-  const offlineSuffix = status ? ` · ${status.label}` : host?.label === "맥 꺼짐" ? " · 맥 꺼짐" : "";
+  const statusWord = status ? status.label : host?.label === "맥 꺼짐" ? "맥 꺼짐" : null;
+  const offlineSuffix = statusWord !== null ? ` · ${statusWord}` : "";
   const mentionLine =
     mentionBrain !== null && mentionCallable !== null ? `${mentionBrain} · ${mentionCallable}${offlineSuffix}` : null;
 
@@ -793,8 +794,8 @@ export function aiAgentLabels(c: AiAgentClassification): AiAgentLabels {
     mentionLine,
     mentionBadge,
     mentionLineStatusFirst:
-      mentionLine !== null && offlineSuffix !== ""
-        ? `${offlineSuffix.slice(3)} · ${mentionBrain} · ${mentionCallable}`
+      mentionLine !== null && statusWord !== null
+        ? `${statusWord} · ${mentionBrain} · ${mentionCallable}`
         : mentionLine,
     lockedForViewer: (c.brain === "subscription" || c.brain === "personal_key") && other,
   };
