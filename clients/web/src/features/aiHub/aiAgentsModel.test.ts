@@ -129,7 +129,7 @@ describe("만들기 3종 권한", () => {
     expect(opts.every((o) => o.state === "locked" && o.reason !== null)).toBe(true);
   });
 
-  it("서버가 구독 에이전트를 꺼 두면 사유를 말하고, 외부 초대가 없는 빌드는 외부만 잠긴다", () => {
+  it("서버가 구독으로 쓰는 에이전트를 꺼 두면 사유를 말하고, 외부 초대가 없는 빌드는 외부만 잠긴다", () => {
     const off = createKindOptions({ mayCreate: true, subscription: "server-off", externalProvided: false });
     expect(off[1]?.reason).toContain("꺼져 있어요");
     expect(off[2]).toMatchObject({ state: "locked" });

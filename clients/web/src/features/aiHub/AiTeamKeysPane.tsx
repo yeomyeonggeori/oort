@@ -59,7 +59,7 @@ import { TeamUnlinkDialog } from "@/features/settings/TeamUnlinkDialog";
 // 위: 넣어 둔 키 표(AI 회사 · 키 · 쓰는 곳 · 상태). 가운데: 기본 AI 표(기능마다 누구를
 // 위한 것인지, 어떤 AI로, 고르지 않으면 무슨 일이 일어나는지). 아래: 「개인 API 키」 자리.
 //
-// 새 API는 없다. 쿼리 키와 함수는 설정 › AI 연결(`AiLinkSection`)과 같아서 두 화면이 같은
+// 새 API는 없다. 쿼리 키와 함수는 AI(`AiLinkSection`)과 같아서 두 화면이 같은
 // 캐시를 본다. 폼(`TeamKeyForm`)·끊기 확인(`TeamUnlinkDialog`)·확인 결과(`ProbeAnswer`)도 같은
 // 부품이다. 운영자인지는 서버 답(`GET /v1/provider/link` 200 / 403)이 정하고, 이 화면은
 // 역할 이름으로 편집 컨트롤을 열지 않는다.
@@ -70,7 +70,7 @@ import { TeamUnlinkDialog } from "@/features/settings/TeamUnlinkDialog";
 // =============================================================================
 
 const OFFLINE_NOTE_ID = "ai-team-keys-offline-note";
-const OFFLINE_REASON = "연결이 끊겨 지금은 이 연결을 바꾸거나 확인할 수 없습니다.";
+const OFFLINE_REASON = "연결이 끊겨 지금은 이 연결을 바꾸거나 확인할 수 없어요.";
 const COLS = "sm:grid-cols-[minmax(0,1.1fr)_minmax(0,0.8fr)_minmax(0,1.6fr)_minmax(0,1.1fr)]";
 
 function loopbackHint(error: unknown, url: string): string | null {
@@ -177,7 +177,7 @@ export function AiTeamKeysPane({ offline, workspaceId, memberId }: PaneProps) {
   // 끊기 창 제목도 표와 같은 이름(회사)으로 부른다. 모르는 주소는 주소 이름 그대로.
   const rowName = link ? teamKeyCompany(link.baseUrl).name : "";
 
-  // 기본 AI 표가 읽는 팀 키 사실: 설정 › AI 연결과 같은 판정.
+  // 기본 AI 표가 읽는 팀 키 사실: AI과 같은 판정.
   const defaultsTeamKey: AiDefaultsTeamKey = linkQuery.isPending
     ? { status: "loading" }
     : linkQuery.isError
@@ -405,7 +405,7 @@ export function AiTeamKeysPane({ offline, workspaceId, memberId }: PaneProps) {
                 data-testid="ai-team-keys-form"
               >
                 <h4 id="ai-team-keys-form-title" className="text-body font-bold text-ink">
-                  {configured ? "키 바꾸기" : "팀 API 키 추가"}
+                  {configured ? "키 바꾸기" : "팀 AI 키 추가"}
                 </h4>
                 <TeamKeyForm
                   link={link}
@@ -521,7 +521,7 @@ function usesFor(
 ): { features: string[] | null; agents: string | null } {
   if (!known) return { features: null, agents: null };
   const features = teamKeyFeatureUses(position, positions);
-  const answersAsTeamAgent = features.includes("팀 에이전트 대답");
+  const answersAsTeamAgent = features.includes("팀 에이전트의 답");
   return {
     features,
     agents: !answersAsTeamAgent

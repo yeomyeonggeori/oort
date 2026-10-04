@@ -58,7 +58,7 @@ describe("설정 › 기억: 권한", () => {
     expect(patchWorkspaceMemorySettings).toHaveBeenCalledWith(WS, { enabled: false });
   });
 
-  it("오너도 같다", async () => {
+  it("소유자도 같다", async () => {
     const { host } = await render("owner");
     expect(input(host, "memory-workspace-paused").disabled).toBe(false);
   });

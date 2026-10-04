@@ -522,6 +522,9 @@ services:
       # host.docker.internal resolve on Linux.
       AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK: ${AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK:-}
       AGENT_PROVIDER_LOCAL_HOSTS: ${AGENT_PROVIDER_LOCAL_HOSTS:-}
+      # #3431 (ADR-0193 D18): same key and rule as api — the spawn tool keeps Claude
+      # Code off shared hosts unless an exact `true`.
+      MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED: ${MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       postgres:

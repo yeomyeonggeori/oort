@@ -138,32 +138,32 @@ export const HOSTED_PRESETS: readonly HostedPreset[] = [
     id: "generic",
     label: "일반 MCP 에이전트",
     detail:
-      "원격 MCP 서버를 등록할 수 있는 에이전트라면 무엇이든 이 순서로 붙습니다.",
+      "원격 MCP 서버를 등록할 수 있는 에이전트라면 무엇이든 이 순서로 붙어요.",
     verified: true,
     steps: [
-      "provider의 MCP 커넥터 설정에서 원격 서버를 하나 추가합니다.",
-      "주소 칸에 아래 Agent Port 주소를 그대로 넣습니다.",
-      "인증 헤더의 bearer 값에 아래 연결 값을 넣습니다.",
-      "저장한 뒤 커넥터를 한 번 실행하면 이 화면이 감지 상태로 넘어갑니다.",
+      "provider의 MCP 커넥터 설정에서 원격 서버를 하나 추가해요.",
+      "주소 칸에 아래 Agent Port 주소를 그대로 넣어요.",
+      "인증 헤더의 bearer 값에 아래 연결 값을 넣어요.",
+      "저장한 뒤 커넥터를 한 번 실행하면 이 화면이 감지 상태로 넘어가요.",
     ],
   },
   {
     id: "grok",
     label: "Grok Bot",
     detail:
-      "Grok Bot은 아래 값을 말로 전하는 것이 기본입니다. 직접 붙여 넣는 순서는 다른 방법입니다.",
+      "Grok Bot은 아래 값을 말로 전하는 것이 기본이에요. 직접 붙여 넣는 순서는 다른 방법이에요.",
     verified: false,
     unverifiedNote:
-      "Grok이 이 인증 헤더를 실제로 보내는지는 아직 확인되지 않았습니다. 감지가 되지 않으면 값이 아니라 이 방식이 원인일 수 있습니다.",
+      "Grok이 이 인증 헤더를 실제로 보내는지는 아직 확인되지 않았어요. 감지가 되지 않으면 값이 아니라 이 방식이 원인일 수 있어요.",
     steps: [
-      "그록봇에게 아래 주소와 연결 값을 말로 전하세요. 그록봇이 직접 붙입니다.",
-      "말로 전하지 못하면 Grok의 Create Plugin으로 비공개 플러그인을 만듭니다.",
-      "그 플러그인의 mcp.json에 아래 Agent Port 주소를 원격 서버로 적습니다.",
-      "인증 헤더의 bearer 값에 아래 연결 값을 넣고 커넥터를 설치합니다.",
-      "아래 이름으로 routine을 만들고 아래 문장을 넣은 뒤 한 번 수동 실행하면 이 화면이 감지 상태로 넘어갑니다.",
+      "그록봇에게 아래 주소와 연결 값을 말로 전하세요. 그록봇이 직접 붙여요.",
+      "말로 전하지 못하면 Grok의 Create Plugin으로 비공개 플러그인을 만들어요.",
+      "그 플러그인의 mcp.json에 아래 Agent Port 주소를 원격 서버로 적어요.",
+      "인증 헤더의 bearer 값에 아래 연결 값을 넣고 커넥터를 설치해요.",
+      "아래 이름으로 routine을 만들고 아래 문장을 넣은 뒤 한 번 수동 실행하면 이 화면이 감지 상태로 넘어가요.",
     ],
     leavesBehind:
-      "이 방식은 로컬에 플러그인 소스를 남깁니다. 나중에 연결을 해제할 때 커넥터 제거와 별개로 그 소스도 지워야 합니다.",
+      "이 방식은 로컬에 플러그인 소스를 남겨요. 나중에 연결을 해제할 때 커넥터 제거와 별개로 그 소스도 지워야 해요.",
   },
 ];
 
@@ -209,7 +209,7 @@ export function agentPortEndpoint(baseUrl: string): string | null {
 }
 
 export const UNRESOLVABLE_ENDPOINT_NOTICE =
-  "이 기기가 이야기하는 서버 주소를 읽지 못해 Agent Port 주소를 만들 수 없습니다. 설정에서 서버 주소를 확인한 뒤 다시 여세요.";
+  "이 기기가 이야기하는 서버 주소를 읽지 못해 Agent Port 주소를 만들 수 없어요. 설정에서 서버 주소를 확인한 뒤 다시 여세요.";
 
 // ---- 인증 방식 --------------------------------------------------------------
 
@@ -232,14 +232,14 @@ export const HOSTED_AUTH_MODE_CHOICES: readonly HostedAuthModeChoice[] = [
     id: HOSTED_AUTH_MODE,
     label: "고정 bearer",
     detail:
-      "provider 설정에 값을 직접 붙입니다. 승인 뒤에는 그 값을 새 자격증명으로 한 번 더 바꿔야 합니다.",
+      "provider 설정에 값을 직접 붙여요. 승인 뒤에는 그 값을 새 자격증명으로 한 번 더 바꿔야 해요.",
     disabled: false,
   },
   {
     id: "oauth",
     label: "OAuth",
     detail:
-      "OAuth 방식은 provider의 인가 화면에서 승인해 연결합니다. 이 마법사에서 직접 시작하는 길은 아직 열려 있지 않아 여기서는 고를 수 없습니다.",
+      "OAuth 방식은 provider의 인가 화면에서 승인해 연결해요. 이 마법사에서 직접 시작하는 길은 아직 열려 있지 않아 여기서는 고를 수 없어요.",
     disabled: true,
   },
 ];
@@ -256,29 +256,29 @@ export const GROK_PAIRING_REVEAL_HEADLINE = "이 값을 그록봇에게 말로 �
  * (`wizard.ts` HOSTED_WIZARD_STEPS pairing)는 그대로 두고, 그록 화면만 여기를 쓴다.
  */
 export const GROK_PAIRING_PURPOSE =
-  "연결 값은 지금 한 번만 보입니다. 그록봇에게 말로 전하는 것이 기본이고, 직접 붙여 넣는 것은 다른 방법입니다. 옮긴 뒤 이 화면에서 저장을 마치세요.";
+  "연결 값은 지금 한 번만 보여요. 그록봇에게 말로 전하는 것이 기본이고, 직접 붙여 넣는 것은 다른 방법이에요. 옮긴 뒤 이 화면에서 저장을 마치세요.";
 
 export const PAIRING_REVEAL_WARNING =
-  "이 값은 지금 한 번만 보입니다. 서버는 원문을 보관하지 않고, 이 화면을 벗어나면 다시 볼 수 없습니다. 잃어버리면 값을 다시 발급하세요.";
+  "이 값은 지금 한 번만 보여요. 서버는 원문을 보관하지 않고, 이 화면을 벗어나면 다시 볼 수 없어요. 잃어버리면 값을 다시 발급하세요.";
 
 /** 이 값이 무엇이 아닌지. 두 비밀을 섞는 것이 이 흐름의 가장 비싼 오해다. */
 export const PAIRING_REVEAL_SCOPE_NOTE =
-  "이 값은 접속을 한 번 확인하는 용도입니다. 감지되는 순간 소비되고, 대화나 작업 권한으로 승격되지 않습니다.";
+  "이 값은 접속을 한 번 확인하는 용도예요. 감지되는 순간 소비되고, 대화나 작업 권한으로 승격되지 않아요.";
 
 /**
  * Grok Bot 전용. 그록봇 앱을 프로그램으로 제어하지 않는다(패킷 §0-2).
  * 말로 전하는 것이 1순위이고, 사람이 직접 붙여 넣는 순서는 다른 방법이다.
  */
 export const PAIRING_NATURAL_LANGUAGE_HANDOFF =
-  "그록봇이 값을 받아 자기 쪽에 붙입니다. 직접 붙여 넣으려면 아래 순서를 따르세요.";
+  "그록봇이 값을 받아 자기 쪽에 붙여요. 직접 붙여 넣으려면 아래 순서를 따르세요.";
 
 export const ACTIVE_REVEAL_HEADLINE = "지금 provider 설정의 값을 이 자격증명으로 바꾸세요.";
 
 export const ACTIVE_REVEAL_WARNING =
-  "이 자격증명도 지금 한 번만 보입니다. 앞서 붙인 연결 값은 이미 소비돼 더 이상 통하지 않습니다.";
+  "이 자격증명도 지금 한 번만 보여요. 앞서 붙인 연결 값은 이미 소비돼 더 이상 통하지 않아요.";
 
 export const ACTIVE_REVEAL_PROOF_NOTE =
-  "provider가 이 값으로 첫 요청에 성공해야 연결이 활성이 됩니다. 그 전까지 이 에이전트는 어떤 대화도 읽지 못합니다.";
+  "provider가 이 값으로 첫 요청에 성공해야 연결이 활성이 돼요. 그 전까지 이 에이전트는 어떤 대화도 읽지 못해요.";
 
 /** 값을 저장했다고 사람이 말하는 자리. 웹훅 카드와 같은 낱말을 쓴다. */
-export const REVEAL_DONE_LABEL = "저장했습니다";
+export const REVEAL_DONE_LABEL = "저장했어요";

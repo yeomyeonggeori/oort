@@ -289,7 +289,7 @@ export function getHostedDmApprovals(
   });
 }
 
-/** 200. 소유자만(403). 구독 에이전트의 타인 DM·소유자 DM은 409, 1:1 DM 아님은 422. */
+/** 200. 소유자만(403). 구독으로 쓰는 에이전트의 타인 DM·소유자 DM은 409, 1:1 DM 아님은 422. */
 export function setHostedDmApproval(
   workspaceId: string,
   connectionId: string,

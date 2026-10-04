@@ -44,6 +44,8 @@ import { fileURLToPath } from "node:url";
 import {
   LATIN_PARTICLE_CATEGORY,
   PROGRESS_WORD_CATEGORY,
+  loadLegacyTerms,
+  makeLegacyTermCategory,
   loadTypeScript,
   scanSource,
   shipsStrings,
@@ -53,8 +55,6 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
 const PHONE_SRC = join(REPO_ROOT, "clients/mobile/src");
-
-const CATEGORIES = [PROGRESS_WORD_CATEGORY, LATIN_PARTICLE_CATEGORY];
 
 const ts = loadTypeScript(REPO_ROOT, [
   join(REPO_ROOT, "clients/mobile/node_modules/typescript"),
@@ -69,6 +69,13 @@ if (!ts) {
   );
   process.exit(2);
 }
+
+// 옛 용어(legacy_term, #3445): 목록은 core LEGACY_TERM_MAP 에서 읽는다.
+const CATEGORIES = [
+  PROGRESS_WORD_CATEGORY,
+  LATIN_PARTICLE_CATEGORY,
+  makeLegacyTermCategory(loadLegacyTerms(ts, REPO_ROOT)),
+];
 
 function scanPhone() {
   if (!existsSync(PHONE_SRC)) {

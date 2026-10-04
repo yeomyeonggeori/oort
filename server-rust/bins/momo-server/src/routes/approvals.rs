@@ -344,6 +344,8 @@ async fn decide(
     // public base), not of any row. The executor judges its absence before the
     // first write — see `execute_workspace_action`.
     let public_origin = invite_link_origin(&state.t3, headers);
+    let claude_subscription_agents_enabled =
+        state.agent_port.config.claude_subscription_agents_enabled;
 
     let outcome: DbRejectable<Decision> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
@@ -360,6 +362,7 @@ async fn decide(
                     client_decision_id,
                     selected_host_id,
                     public_origin: public_origin.as_deref(),
+                    claude_subscription_agents_enabled,
                 },
             )
             .await
@@ -430,6 +433,8 @@ struct DecisionInput<'a> {
     /// The absolute origin an invite link should point at, or `None` when this
     /// instance cannot name itself (ADR-0186 부록 C).
     public_origin: Option<&'a str>,
+    /// `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED` (#3431, ADR-0193 D18).
+    claude_subscription_agents_enabled: bool,
 }
 
 async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRejectable<Decision> {
@@ -654,6 +659,39 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
                 "an agent's work cannot be sent to a member-scoped work host; pick a \
                  workspace host or reject",
                 StatusCode::FORBIDDEN,
+                now,
+            )));
+        }
+    }
+
+    // #3431 (ADR-0193 D18) — a shared host (workspace-scoped or cloud) does not
+    // run Claude Code while the Claude opt-in is off, whoever approves: any
+    // channel member may decide work headed to a shared host, and the Claude
+    // login on that machine may be somebody else's, which the server cannot
+    // see. Judged on the host the spawn will finally run on, so a retarget to
+    // a team box is caught too. Refused before the first write — the card stays
+    // pending, and the decider can pick another host or reject.
+    if let (true, false, Some(host_id), Some(tool)) = (
+        input.approve,
+        input.claude_subscription_agents_enabled,
+        host_choice.selected,
+        spawn_execution_tool(&approval.payload),
+    ) {
+        if momo_t3::work_control::shared_host_refuses_claude_in_tx(
+            conn,
+            input.workspace_id,
+            host_id,
+            tool,
+        )
+        .await
+        .map_err(control_failure)?
+        {
+            return Ok(Ok(refusal(
+                approval.id,
+                input.member_id,
+                momo_t3::work_control::REFUSAL_CLAUDE_SUBSCRIPTION_PAUSED,
+                momo_t3::work_control::CLAUDE_SHARED_HOST_PAUSED_MESSAGE,
+                StatusCode::CONFLICT,
                 now,
             )));
         }
@@ -1968,6 +2006,7 @@ mod tests {
             client_decision_id: Uuid::from_u128(8),
             selected_host_id: pick,
             public_origin: None,
+            claude_subscription_agents_enabled: false,
         }
     }
 

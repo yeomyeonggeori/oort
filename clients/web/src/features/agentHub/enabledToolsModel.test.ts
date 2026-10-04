@@ -21,7 +21,7 @@ const CATALOG: AgentToolCatalogEntry[] = [
   {
     name: LONG_NAME,
     description:
-      "배포 전 롤백 절차를 확인한 뒤에만 쓰는 작업 세션 종료입니다. 호스트 상태와 정산 원장을 닫으며, 한 번 실행하면 같은 세션으로 되돌리지 못합니다.",
+      "배포 전 롤백 절차를 확인한 뒤에만 쓰는 작업 세션 종료예요. 호스트 상태와 정산 원장을 닫으며, 한 번 실행하면 같은 세션으로 되돌리지 못해요.",
     executable: true,
     requiresApproval: true,
     unavailableReason: null,
@@ -29,14 +29,14 @@ const CATALOG: AgentToolCatalogEntry[] = [
   {
     name: "work.session.spawn",
     description:
-      "등록된 호스트에서 코딩 도구를 새 작업 세션으로 시작합니다. 승인하는 사람이 호스트를 고릅니다.",
+      "등록된 호스트에서 코딩 도구를 새 작업 세션으로 시작해요. 승인하는 사람이 호스트를 골라요.",
     executable: true,
     requiresApproval: true,
     unavailableReason: null,
   },
   {
     name: "work.session.resume",
-    description: "멈춘 작업 세션을 이어서 시작합니다.",
+    description: "멈춘 작업 세션을 이어서 시작해요.",
     executable: false,
     requiresApproval: true,
     unavailableReason: DECLARED_ONLY_REASON,

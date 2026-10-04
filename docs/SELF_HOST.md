@@ -559,7 +559,10 @@ owner decision 2026-10-03 while Anthropic's reply is pending, [ADR-0193](adr/019
 D17). Only an exact `true` lets the register-after-login endpoint accept a
 Claude Code agent; otherwise it answers `409 claude_subscription_agent_paused`
 and Claude subscription agents report `brainUnavailableReason`. Codex agents are
-not affected. Restart **api** after changing it.
+not affected. Off also keeps Claude Code from starting on a shared
+(workspace-scoped or cloud) work host (`409 claude_subscription_agent_paused`,
+#3431); a member's own host is unaffected. Restart **api** and **agent-worker**
+after changing it.
 
 ---
 

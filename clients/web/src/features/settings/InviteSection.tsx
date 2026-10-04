@@ -61,7 +61,7 @@ const DAY_MS = 86_400_000;
  */
 const OFFLINE_NOTE_ID = "invite-create-offline-note";
 const OFFLINE_CREATE_REASON =
-  "연결이 끊겨 지금은 초대 링크를 만들 수 없습니다. 다시 연결되면 이어서 만들 수 있습니다.";
+  "연결이 끊겨 지금은 초대 링크를 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요.";
 
 export function InviteSection({
   workspaceId,
@@ -95,7 +95,7 @@ export function InviteSection({
     if (offline || create.isPending) return;
     const uses = Number(maxUses);
     if (!Number.isInteger(uses) || uses < 1 || uses > 10_000) {
-      setFormError("사용 횟수는 1에서 10000 사이의 정수여야 합니다.");
+      setFormError("사용 횟수는 1에서 10000 사이의 정수여야 해요.");
       return;
     }
     setFormError(null);
@@ -110,8 +110,8 @@ export function InviteSection({
   const roles = inviteRoles(workspace.data?.roleLabels);
 
   const lines = [
-    "초대 링크를 발급해 사람을 이 워크스페이스로 부릅니다.",
-    "코드는 발급 직후 한 번만 보입니다. 서버는 해시만 보관합니다.",
+    "초대 링크를 발급해 사람을 이 워크스페이스로 불러요.",
+    "코드는 발급 직후 한 번만 보여요. 서버는 해시만 보관해요.",
   ];
 
   if (invites.isPending) {
@@ -127,7 +127,7 @@ export function InviteSection({
       <SectionShell title="멤버와 초대" lines={lines}>
         {isOperatorDenied(invites.error) ? (
           <OperatorNotice
-            who="초대 링크는 워크스페이스 오너나 관리자만 발급할 수 있습니다."
+            who="초대 링크는 워크스페이스 소유자나 관리자만 발급할 수 있어요."
             contact="초대가 필요하면 워크스페이스 관리자에게 문의하세요."
           />
         ) : (
@@ -149,7 +149,7 @@ export function InviteSection({
     <SectionShell title="멤버와 초대" lines={lines}>
       {rows.length === 0 ? (
         <EmptyInvite
-          headline="아직 발급한 초대 링크가 없습니다."
+          headline="아직 발급한 초대 링크가 없어요."
           detail="아래에서 역할과 사용 횟수를 정하고 링크를 만드세요."
           testId="invite-empty"
         />
@@ -207,7 +207,7 @@ export function InviteSection({
         <Field
           label="사용 횟수"
           htmlFor="invite-max-uses"
-          hint="이 링크로 참여할 수 있는 사람 수입니다."
+          hint="이 링크로 참여할 수 있는 사람 수예요."
         >
           {/* A count is not a URL: it gets the named narrow pane, not the
               full form width. max-w rather than a flat width so a window
@@ -231,7 +231,7 @@ export function InviteSection({
           choices={INVITE_EXPIRY_DAYS.map((d) => ({
             id: String(d),
             label: `${d}일`,
-            detail: `${formatDay(Date.now() + d * DAY_MS)}까지 쓸 수 있습니다.`,
+            detail: `${formatDay(Date.now() + d * DAY_MS)}까지 쓸 수 있어요.`,
           }))}
           value={days}
           onChange={setDays}

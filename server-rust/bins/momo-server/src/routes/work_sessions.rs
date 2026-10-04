@@ -257,6 +257,16 @@ fn reject_unsupported_create(request: &CreateWorkSessionRequest) -> Result<(), A
 // create
 // ---------------------------------------------------------------------------
 
+/// #3431 (ADR-0193 D18): the one refusal every work-session entry answers when
+/// Claude Code is asked for on a shared host while the Claude opt-in is off.
+fn claude_shared_host_paused() -> ApiError {
+    ApiError::coded(
+        StatusCode::CONFLICT,
+        momo_t3::work_control::REFUSAL_CLAUDE_SUBSCRIPTION_PAUSED,
+        momo_t3::work_control::CLAUDE_SHARED_HOST_PAUSED_MESSAGE,
+    )
+}
+
 /// `POST /v1/workspaces/{ws}/work-sessions` → 201 (Swift `create`, :126-326).
 pub async fn create(
     State(state): State<AppState>,
@@ -343,6 +353,8 @@ pub async fn create(
     let host_id = request.host_id;
     let control_id = request.control_id;
     let member_id = principal.member_id;
+    let claude_subscription_agents_enabled =
+        state.agent_port.config.claude_subscription_agents_enabled;
 
     // No lock: the id only chooses which advisory the transaction takes, and the
     // transaction re-reads it under the ladder.
@@ -363,6 +375,7 @@ pub async fn create(
                 &label,
                 control_id,
                 remote_pty,
+                claude_subscription_agents_enabled,
             )
             .await
         }) as _
@@ -529,6 +542,7 @@ async fn create_in_tx(
     label: &str,
     control_id: Option<Uuid>,
     remote_pty: Option<RemotePtyBinding>,
+    claude_subscription_agents_enabled: bool,
 ) -> Rejectable<WorkSessionDetail> {
     // ---- rejections first (nothing is written above this line) -------------
     if cloud_host_id_for_host_in_tx(conn, workspace_id, host_id).await? != expected_cloud_host_id {
@@ -541,6 +555,19 @@ async fn create_in_tx(
         return Ok(Err(ApiError::bad_request(
             "work tool is not registered or enabled",
         )));
+    }
+    // #3431 (ADR-0193 D18): no Claude Code session on a shared host while the
+    // Claude opt-in is off — a human-made row and a host-signed one alike.
+    if !claude_subscription_agents_enabled
+        && momo_t3::work_control::shared_host_refuses_claude_in_tx(
+            conn,
+            workspace_id,
+            host_id,
+            tool,
+        )
+        .await?
+    {
+        return Ok(Err(claude_shared_host_paused()));
     }
     // Host-signed create: the owner is the requesting agent's human, never the
     // host's own member_id. Human create keeps the bearer as owner.
@@ -2118,6 +2145,8 @@ pub async fn resume(
     let target_host_id = request.target_host_id;
     let member_id = principal.member_id;
     let settings = state.device_keys.clone();
+    let claude_subscription_agents_enabled =
+        state.agent_port.config.claude_subscription_agents_enabled;
     // #3027: the successor id and the signature over it travel together.
     if request.session_id.is_some() != request.human_signature.is_some() {
         return Err(ApiError::coded(
@@ -2158,6 +2187,7 @@ pub async fn resume(
                 target_cloud_host_id,
                 &settings,
                 signed.as_ref(),
+                claude_subscription_agents_enabled,
             )
             .await
         }) as _
@@ -2320,6 +2350,7 @@ async fn resume_in_tx(
     expected_target_cloud_host_id: Option<Uuid>,
     settings: &crate::config::DeviceKeySettings,
     signed: Option<&SignedResume>,
+    claude_subscription_agents_enabled: bool,
 ) -> Rejectable<WorkSessionDetail> {
     if cloud_host_id_for_session_in_tx(conn, workspace_id, source_session_id).await?
         != expected_source_cloud_host_id
@@ -2446,6 +2477,19 @@ async fn resume_in_tx(
             momo_t3::work_control::REFUSAL_REMOTE_HOST_SHELL,
             "a shell cannot be resumed onto a member-scoped work host",
         )));
+    }
+    // #3431 (ADR-0193 D18): a takeover is a spawn control too, so a shared
+    // target does not take Claude Code while the opt-in is off.
+    if !claude_subscription_agents_enabled
+        && momo_t3::work_control::shared_host_refuses_claude_in_tx(
+            conn,
+            workspace_id,
+            target_host_id,
+            &source.tool,
+        )
+        .await?
+    {
+        return Ok(Err(claude_shared_host_paused()));
     }
     // #3154 (ADR-0146 「서명 재개」 남은 것): the agent the owner signs for is
     // the agent of the session being resumed. Before the slot and before the

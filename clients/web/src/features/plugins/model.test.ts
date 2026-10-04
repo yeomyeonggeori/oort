@@ -41,19 +41,19 @@ describe("plugin marketplace copy", () => {
     expect(pluginActionErrorMessage(new ApiError(
       403,
       "plugin serverPolicy rejects installation"
-    ))).toBe("이 앱은 워크스페이스 정책이나 내 역할상 변경할 수 없습니다. 관리자에게 정책과 권한을 확인하세요.");
+    ))).toBe("이 앱은 워크스페이스 정책이나 내 역할상 변경할 수 없어요. 관리자에게 정책과 권한을 확인하세요.");
     expect(pluginActionErrorMessage(new ApiError(
       409,
       "plugin is not installed and enabled"
-    ))).toBe("이 앱이 설치되어 활성화된 상태가 아닙니다. 앱 목록을 다시 불러온 뒤 다시 시도하세요.");
+    ))).toBe("이 앱이 설치되어 활성화된 상태가 아니에요. 앱 목록을 다시 불러온 뒤 다시 시도하세요.");
     expect(pluginActionErrorMessage(new ApiError(
       400,
       "scope is not declared by this plugin"
-    ))).toBe("앱이 선언하지 않은 권한은 변경할 수 없습니다. 앱 정보를 다시 불러온 뒤 다시 시도하세요.");
+    ))).toBe("앱이 선언하지 않은 권한은 변경할 수 없어요. 앱 정보를 다시 불러온 뒤 다시 시도하세요.");
     expect(pluginDetailErrorMessage(new ApiError(
       403,
       "plugin is not installed and enabled"
-    ))).toBe("이 앱의 상세 정보를 볼 권한이 없습니다. 워크스페이스 관리자에게 권한을 확인하세요.");
+    ))).toBe("이 앱의 상세 정보를 볼 권한이 없어요. 워크스페이스 관리자에게 권한을 확인하세요.");
   });
 
   it("names the destructive target and uses the action verb", () => {
@@ -61,7 +61,7 @@ describe("plugin marketplace copy", () => {
       kind: "uninstall", pluginId: "linear", pluginName: "Linear",
     })).toEqual({
       title: "Linear 설치를 해제할까요?",
-      description: "Linear 앱의 모든 멤버 권한이 함께 회수됩니다.",
+      description: "Linear 앱의 모든 멤버 권한이 함께 회수돼요.",
       confirmLabel: "설치 해제",
     });
   });
@@ -226,7 +226,7 @@ describe("plugin marketplace copy", () => {
       ["github:write", true],
     ]);
     expect(pluginScopeChangeMessage("grant", outcomes))
-      .toContain("2개 권한을 허용했습니다: github 읽기 권한, github 쓰기 권한. 1개는 변경하지 못했습니다");
+      .toContain("2개 권한을 허용했어요: github 읽기 권한, github 쓰기 권한. 1개는 변경하지 못했어요");
   });
 
   it("keeps a full scope failure in the dialog and reports every distinct cause", () => {
