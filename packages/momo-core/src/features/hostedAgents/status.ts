@@ -91,7 +91,7 @@ export const HOSTED_LIST_DENIED_DETAIL =
  * active 와 구분되어야 하는 값이라(끊긴 화면과 살아 있는 화면은 다르다) 따로 있다.
  */
 export const HOSTED_OFFLINE_NOTE =
-  "지금 이 기기가 네트워크에 닿지 않아요. 아래는 마지막으로 받아 둔 상태이고, 그 뒤 provider에서 일어난 변화는 반영되지 않았어요.";
+  "지금 이 기기가 네트워크에 닿지 않아요. 아래는 마지막으로 받아 둔 상태이고, 그 뒤 AI 회사에서 일어난 변화는 반영되지 않았어요.";
 
 /** 캐시된 값을 그릴 때 시각 앞에 서는 말. */
 export const HOSTED_STALE_LABEL = "마지막으로 확인한 때";

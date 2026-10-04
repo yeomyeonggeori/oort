@@ -150,10 +150,32 @@ export function makeLegacyTermCategory(terms) {
     key: "legacy_term",
     rule:
       "옛 용어 (AI 허브 용어집 §2, #3445): 「AI 연결」→「AI」, 「오너」→「소유자」, 「합류」·「구독 붙이기」·「호스티드 에이전트」 등은 " +
-      "화면에서 쓰지 않는다. 목록 정본 = core LEGACY_TERM_MAP(grepGate). 예외는 design-preflight-allow 마커 + PR 근거",
-    hit: (text) =>
-      terms.some((term) => text.includes(term) && (!isIdentifier(term) || /[가-힣]/.test(text))),
+      "화면에서 쓰지 않는다. 목록 정본 = core LEGACY_TERM_MAP(grepGate). 호스티드 화면(HOSTED_SURFACE_RE)은 합쇼체(「-습니까」「-습니다」)와 " +
+      "한글 문장 속 영문 「provider」도 같은 분류로 잰다(#3479). 예외는 design-preflight-allow 마커 + PR 근거",
+    hit: (text, fileName = "") =>
+      terms.some((term) => text.includes(term) && (!isIdentifier(term) || /[가-힣]/.test(text))) ||
+      (HOSTED_SURFACE_RE.test(fileName.split("\\").join("/")) && hostedToneHit(text)),
   };
+}
+
+/**
+ * 호스티드 에이전트 화면의 파일 경로 (#3479). 해제·정리·페어링 마법사·OAuth 동의·DM 승인·
+ * 초인종과 그 폰 화면이다. 합쇼체 검사는 이 경로 안에서만 건다 — 다른 표면에는 아직
+ * 합쇼체 문장이 남아 있어서(별도 정리 대상) 전역으로 걸면 오탐이 아니라 미정리 부채가 빨개진다.
+ */
+export const HOSTED_SURFACE_RE =
+  /(?:^|\/)(?:hostedAgents|agentHub)\/|\/Hosted[A-Za-z]*(?:Screen|Section|Wizard)\.tsx?$/;
+
+/**
+ * 호스티드 화면 문장의 어투·용어 (#3479). 한글이 함께 든 문자열만 본다(맨 기계 값 제외):
+ *  · 합쇼체 종결 「-습니까」「-ㅂ니까」「-습니다」「-ㅂ니다」 (뒤가 한글이면 낱말의 일부라 제외)
+ *  · 영문 「provider」 낱말 (하이픈·밑줄·숫자가 붙은 식별자 꼴 「provider-link」는 제외) 과 「프로바이더」
+ */
+function hostedToneHit(text) {
+  if (!/[가-힣]/.test(text)) return false;
+  if (/(?:습|[합입됩옵갑납십])니[다까](?![가-힣])/.test(text)) return true;
+  if (/(?<![A-Za-z0-9_-])[Pp]rovider(?![A-Za-z0-9_-])/.test(text)) return true;
+  return /프로바이더/.test(text);
 }
 
 /** core 의 LEGACY_TERM_MAP 에서 grepGate 항목의 `old` 를 읽는다. 못 읽으면 던진다(조용한 초록 금지). */
@@ -325,7 +347,7 @@ export function scanSource(ts, fileName, text, categories) {
     const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line;
     for (const category of categories) {
       if (allowed(node, line, category.key === "legacy_term")) continue;
-      if (category.hit(literalText)) {
+      if (category.hit(literalText, fileName)) {
         hits.push({
           key: category.key,
           line: line + 1,

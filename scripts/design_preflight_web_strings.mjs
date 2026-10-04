@@ -107,6 +107,49 @@ function scanWeb() {
 // 모양(테스트 이름 · JSX 주석 · 진짜 문자열)이 전부 여기 있다.
 const SELFTEST_CASES = [
   // ---- legacy_term (#3445) ----
+  // ---- 호스티드 화면 어투·용어 (#3479, legacy_term 분류에 편입) ----
+  {
+    want: ["legacy_term"],
+    file: "features/hostedAgents/Cleanup.ts",
+    why: "호스티드 화면의 합쇼체 질문 — 「이 항목을 어떻게 했습니까」(#3478 캡처에서 나온 자리)",
+    src: 'export const L = "이 항목을 어떻게 했습니까";',
+  },
+  {
+    want: ["legacy_term"],
+    file: "features/hostedAgents/Cleanup.tsx",
+    why: "호스티드 화면 JSX 텍스트의 합쇼체 평서문",
+    src: "export const C = () => <p>정리를 마쳤습니다.</p>;",
+  },
+  {
+    want: ["legacy_term"],
+    file: "features/agentHub/Hint.ts",
+    why: "한글 문장 속 영문 provider — 「AI 회사」나 서비스 이름으로 쓴다",
+    src: 'export const H = "provider 설정에 붙여 넣으세요.";',
+  },
+  {
+    want: [],
+    file: "features/hostedAgents/Cleanup.ts",
+    why: "같은 뜻의 해요체·용어집 문장은 통과한다",
+    src: 'export const L = "이 항목을 어떻게 했나요? AI 회사 설정에서 지웠어요.";',
+  },
+  {
+    want: [],
+    file: "features/hostedAgents/keys.ts",
+    why: "기계 코드·식별자 꼴 provider(맨 값, 하이픈 키)는 통과한다",
+    src: 'export const K = ["provider", "provider-link"]; export const M = "provider-link 한글 아님 없음";',
+  },
+  {
+    want: [],
+    file: "features/hostedAgents/Cleanup.ts",
+    why: "주석 속 합쇼체·provider 는 렌더되지 않는다",
+    src: '// provider 에서 했습니까 를 묻던 옛 문장\nexport const L = "어떻게 했나요";',
+  },
+  {
+    want: [],
+    file: "features/settings/Other.ts",
+    why: "호스티드 화면 밖의 합쇼체는 이 분류의 범위 밖이다(미정리 부채를 오탐으로 세지 않는다)",
+    src: 'export const L = "지금은 보낼 수 없습니다";',
+  },
   {
     want: ["emdash"],
     file: "features/ai/Comp.tsx",
