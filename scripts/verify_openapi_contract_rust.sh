@@ -918,6 +918,8 @@ MOMO_LIVEKIT_URL=ws://livekit.invalid:7880
 AGENT_GATEWAY_MODE=gateway
 AGENT_GATEWAY_SECRET=$GATEWAY_SECRET
 MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1
+# #3500 (ADR-0197 M1): 개인 클라우드 박스 API 는 기본 닫힘이라 게이트가 명시로 연다.
+MOMO_CLOUD_BOX_ENABLED=true
 
 MOMO_CENTRIFUGO_WS_URL=ws://127.0.0.1:$CENT_PORT/connection/websocket
 
@@ -4033,6 +4035,39 @@ sample personal-key-revoke post \
   "/v1/workspaces/{workspaceId}/personal-keys/{keyId}/revoke" \
   "/v1/workspaces/$WS/personal-keys/$PERSONAL_KEY_ID/revoke" 200 "" "$ACCESS"
 guard_jq '.status == "revoked" and (.revokedAtMs | type) == "number"' "the key is revoked"
+
+# #3500 (ADR-0197 M1) — 개인 클라우드 박스 수명주기. 런너(M2)가 아직 없으므로 박스는 `creating` 에
+# 머문다. 런너의 「준비됨」 보고만 SQL 로 대신해 running 을 만든 뒤 나머지 동사를 왕복한다.
+sample cloud-box-create post "/v1/workspaces/{workspaceId}/cloud-boxes" \
+  "/v1/workspaces/$WS/cloud-boxes" 201 "" "$ACCESS"
+CLOUD_BOX_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.id')"
+guard_jq '.state == "creating" and .limits.cpuMillis == 1000 and .limits.memoryMb == 2048' \
+  "a new box is creating with the ADR-0197 D3 limits"
+sample cloud-box-mine get "/v1/workspaces/{workspaceId}/cloud-boxes/mine" \
+  "/v1/workspaces/$WS/cloud-boxes/mine" 200 "" "$ACCESS"
+guard_jq --arg id "$CLOUD_BOX_ID" '.box.id == $id' "mine is the box just created"
+sample cloud-box-list get "/v1/workspaces/{workspaceId}/cloud-boxes" \
+  "/v1/workspaces/$WS/cloud-boxes" 200 "" "$ACCESS"
+guard_jq '(.boxes | length) >= 1' "the admin list shows the box"
+run_sql -v box_id="$CLOUD_BOX_ID" <<'SQL'
+UPDATE cloud_box SET state = 'running', state_changed_at = now() WHERE id = :'box_id'::uuid;
+SQL
+sample cloud-box-keep-awake post \
+  "/v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/keep-awake" \
+  "/v1/workspaces/$WS/cloud-boxes/$CLOUD_BOX_ID/keep-awake" 200 '{"enabled":true}' "$ACCESS"
+guard_jq '(.keepAwakeUntilMs | type) == "number"' "keep-awake sets a deadline"
+sample cloud-box-stop post \
+  "/v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/stop" \
+  "/v1/workspaces/$WS/cloud-boxes/$CLOUD_BOX_ID/stop" 200 "" "$ACCESS"
+guard_jq '.state == "stopped" and (has("keepAwakeUntilMs") | not)' "stop ends keep-awake"
+sample cloud-box-start post \
+  "/v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/start" \
+  "/v1/workspaces/$WS/cloud-boxes/$CLOUD_BOX_ID/start" 200 "" "$ACCESS"
+guard_jq '.state == "running"' "start brings a stopped box back"
+sample cloud-box-delete post \
+  "/v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/delete" \
+  "/v1/workspaces/$WS/cloud-boxes/$CLOUD_BOX_ID/delete" 200 "" "$ACCESS"
+guard_jq '.state == "deleting" and .closedReason == "owner_delete"' "delete starts the deletion"
 
 # ---------------------------------------------------------------------------
 # work host 레지스트리 — 등록 · 서명 하트비트 · 폴링 목록

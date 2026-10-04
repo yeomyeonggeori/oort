@@ -233,6 +233,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ADR-0162: the Agent Port has its own token/agent/IP bounds and an optional
     // trusted Origin comparison. It never borrows the public join knobs.
     .with_agent_port(config.agent_port)
+    // ADR-0197 M1 (#3500): the personal cloud box API stays closed unless the
+    // operator sets MOMO_CLOUD_BOX_ENABLED=true.
+    .with_cloud_box(config.cloud_box.clone())
     // B5.2: mention→run routing is always on (routing an `@mention` to its agent
     // is the product); the only knob is how much history rides the job.
     .with_mentions(config.mentions.clone())
