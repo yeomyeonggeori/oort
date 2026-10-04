@@ -58,7 +58,7 @@ import { useMentionRouting } from "@/features/routing/useMentionRouting";
 import { mentionRoutingTarget } from "@momo/core/features/routing/mentionTargets";
 import { routingPayload } from "@momo/core/features/routing/routingModel";
 import { calledAgents } from "@momo/core/features/routing/mentionTargets";
-import { agentWillNotAnswer, composerAgentNotice } from "@momo/core/features/ai/aiMention";
+import { agentWillNotAnswer, answeringMentionTarget, composerAgentNotice } from "@momo/core/features/ai/aiMention";
 import type { QuoteDraft } from "@momo/core/features/timeline/quote";
 import { QuoteChip } from "@/features/timeline/QuoteBlock";
 import { TypingLine } from "@/features/chat/TypingLine";
@@ -603,7 +603,13 @@ export function Composer({
     () => mentionRoutingTarget(text, directory.members),
     [text, directory.members]
   );
-  const routing = useMentionRouting(routingTarget);
+  // 라우팅 줄·「이번만 바꾸기」 범위는 **답할 에이전트만** 센다(#3444). 답하지 않는 에이전트는
+  // 아래 한 줄이 말한다: 같은 에이전트가 두 줄에 서로 다른 말로 서 있으면 모순이다.
+  const answeringTarget = useMemo(
+    () => answeringMentionTarget(routingTarget, session.member.id),
+    [routingTarget, session.member.id]
+  );
+  const routing = useMentionRouting(answeringTarget);
   // 못 부르는(남의 구독·개인 키) 또는 쉬는(Claude 문의 중) 에이전트를 부르는 글이면 한 줄 (AIH-9).
   const calledNow = calledAgents(routingTarget);
   const agentNotice = composerAgentNotice(calledNow, session.member.id);
@@ -912,7 +918,7 @@ export function Composer({
       {routingSlot === "bar" && (
         <MentionRoutingBar
           channelId={channelId}
-          target={routingTarget}
+          target={answeringTarget}
           draft={routing.draft}
           onDraftChange={routing.setDraft}
         />

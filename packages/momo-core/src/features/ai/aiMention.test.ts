@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RosterMember } from "../../lib/api";
 import { CLAUDE_SUBSCRIPTION_AGENT_PAUSED } from "./aiHubModel";
-import { agentWillNotAnswer, composerAgentNotice, mentionAnnotation } from "./aiMention";
+import { agentWillNotAnswer, answeringMentionTarget, composerAgentNotice, mentionAnnotation } from "./aiMention";
 
 const VIEWER = "00000000-0000-7000-8000-00000000000a";
 const OWNER = "00000000-0000-7000-8000-00000000000b";
@@ -123,5 +123,33 @@ describe("agentWillNotAnswer", () => {
     expect(agentWillNotAnswer(teamKey, VIEWER)).toBe(false);
     expect(agentWillNotAnswer(mineSub, VIEWER)).toBe(false);
     expect(agentWillNotAnswer(otherSub, null)).toBe(false);
+  });
+});
+
+describe("answeringMentionTarget", () => {
+  it("keeps the target as is when everyone called answers", () => {
+    const many = { kind: "many" as const, agents: [teamKey, mineSub] };
+    expect(answeringMentionTarget(many, VIEWER)).toBe(many);
+    const one = { kind: "one" as const, agent: teamKey };
+    expect(answeringMentionTarget(one, VIEWER)).toBe(one);
+    expect(answeringMentionTarget({ kind: "none" }, VIEWER)).toEqual({ kind: "none" });
+  });
+
+  it("drops agents that will not answer and folds many into one", () => {
+    expect(answeringMentionTarget({ kind: "many", agents: [teamKey, otherSub] }, VIEWER)).toEqual({
+      kind: "one",
+      agent: teamKey,
+    });
+  });
+
+  it("keeps many when two or more still answer", () => {
+    expect(
+      answeringMentionTarget({ kind: "many", agents: [teamKey, otherSub, mineSub, pausedMine] }, VIEWER)
+    ).toEqual({ kind: "many", agents: [teamKey, mineSub] });
+  });
+
+  it("folds to none when nobody answers", () => {
+    expect(answeringMentionTarget({ kind: "many", agents: [otherSub, otherKey] }, VIEWER)).toEqual({ kind: "none" });
+    expect(answeringMentionTarget({ kind: "one", agent: pausedMine }, VIEWER)).toEqual({ kind: "none" });
   });
 });

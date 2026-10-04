@@ -123,6 +123,8 @@ async function installRoutes(context) {
     if (path.endsWith("/allowed-models")) return json(route, {});
     if (path.endsWith("/profile")) return json(route, { profile: ROUTING.inherit.profile });
     if (path.endsWith("/replies")) return json(route, { messages: [] });
+    // 전송 오버라이드 프로브(`routing` + 없는 rootId): 이 서버는 routing 블록을 읽고 값을 거절한다.
+    if (path.endsWith("/messages") && route.request().method() === "POST") return json(route, { error: { code: "invalid_request", message: "routing.effort is not allowed for this model" } }, 400);
     if (path.includes("/messages")) return json(route, { messages: [message] });
     return json(route, {});
   });
@@ -179,6 +181,25 @@ async function open(browser, origin, scheme, viewport) {
 
 const lineOf = (page, handle) =>
   page.locator("[data-testid='composer-mention-option']").filter({ hasText: `@${handle}` }).first();
+
+// 라우팅 줄의 직계 조각들이 가로로 겹치지 않고 줄 폭 안에 있다 (#3444).
+async function assertRowClean(page, name) {
+  const bar = page.getByTestId("composer-routing");
+  if ((await bar.count()) === 0) return check(`${name}: 라우팅 줄 있음`, false);
+  const r = await bar.evaluate((el) => {
+    const row = el.firstElementChild;
+    const rowBox = row.getBoundingClientRect();
+    const leaf = (n) => (n.children.length === 0 || n.tagName === "BUTTON" ? [n] : [...n.children].flatMap(leaf));
+    const boxes = [...row.children].flatMap(leaf).map((n) => n.getBoundingClientRect()).filter((b) => b.width > 0);
+    boxes.sort((a, b) => a.left - b.left);
+    let overlap = 0;
+    for (let i = 1; i < boxes.length; i++) overlap = Math.max(overlap, boxes[i - 1].right - boxes[i].left);
+    const outside = Math.max(0, ...boxes.map((b) => b.right - rowBox.right), ...boxes.map((b) => rowBox.left - b.left));
+    return { overlap, outside, scroll: row.scrollWidth - row.clientWidth };
+  });
+  check(`${name}: 줄 안 조각이 겹치지 않음 (겹침 ${r.overlap.toFixed(1)}px)`, r.overlap <= 0.5);
+  check(`${name}: 줄 밖으로 넘치지 않음 (${r.outside.toFixed(1)}px / scroll ${r.scroll})`, r.outside <= 0.5 && r.scroll <= 0);
+}
 
 async function scenes(browser, origin, scheme, viewport) {
   const tag = `${viewport.width}-${scheme}`;
@@ -248,6 +269,54 @@ async function scenes(browser, origin, scheme, viewport) {
     await page.screenshot({ path: resolve(OUT_DIR, `composer-mixed-${tag}.png`) });
     const routingX = await page.getByText("이번만 바꾸기").first().evaluate((el) => { const d = el.closest("div.px-4") ?? el.closest("div"); const r = d.getBoundingClientRect(); return r.x + parseFloat(getComputedStyle(d).paddingLeft); });
     check(`${tag} 한 줄 왼쪽 여백 = 라우팅 줄 왼쪽 여백 (${Math.round(noticePad)} / ${Math.round(routingX)})`, Math.abs(noticePad - routingX) <= 1);
+
+    // 일부만 답하는 글(#3444): 라우팅 줄은 답할 에이전트만 센다. 답하지 않는 에이전트는 아래 한 줄이 말한다.
+    const routingRow = page.getByTestId("composer-routing");
+    const routingLabel = async () => (await routingRow.textContent()) ?? "";
+    check(`${tag} 일부만 답함: 라우팅 줄에 답하지 않는 @seongjae-codex 없음`, !(await routingLabel()).includes("seongjae-codex"), await routingLabel());
+    check(`${tag} 일부만 답함: 라우팅 줄은 답하는 @kim-intern 하나`, (await routingLabel()).includes("@kim-intern") && (await routingRow.getAttribute("data-called")) === null);
+    check(`${tag} 일부만 답함: 한 줄이 답하지 않는 에이전트를 말함`, ((await notice.textContent()) ?? "").includes("성재의 Codex"));
+    await assertRowClean(page, `${tag} 일부만 답함`);
+
+    // 둘 다 답하는 글: 420폭에서도 줄 안의 조각이 서로 겹치지 않는다
+    await input.fill("@kim-intern @hermes 요약 부탁해요");
+    await page.waitForTimeout(600);
+    await page.screenshot({ path: resolve(OUT_DIR, `composer-two-answering-${tag}.png`) });
+    check(`${tag} 둘 다 답함: 라우팅 줄이 둘을 센다`, (await routingRow.getAttribute("data-called")) === "2");
+    check(`${tag} 둘 다 답함: 한 줄 없음`, (await page.getByTestId("composer-agent-notice").count()) === 0);
+    await assertRowClean(page, `${tag} 둘 다 답함`);
+    await input.fill("@kim-intern @hermes @haneul-codex 요약 부탁해요");
+    await page.waitForTimeout(600);
+    await page.screenshot({ path: resolve(OUT_DIR, `composer-three-answering-${tag}.png`) });
+    await assertRowClean(page, `${tag} 셋 다 답함`);
+    // 둘 답하고 하나 안 답함: 답할 둘만 센다
+    await input.fill("@kim-intern @hermes @seongjae-codex 요약 부탁해요");
+    await page.waitForTimeout(600);
+    await page.screenshot({ path: resolve(OUT_DIR, `composer-two-of-three-${tag}.png`) });
+    check(`${tag} 셋 중 둘 답함: 라우팅 줄은 둘`, (await routingRow.getAttribute("data-called")) === "2" && !(await routingLabel()).includes("seongjae-codex"));
+    await assertRowClean(page, `${tag} 셋 중 둘 답함`);
+
+    // 오버라이드가 걸린 줄(칩 + 되돌리기 + 접기)도 좁은 폭에서 겹치지 않는다
+    await input.fill("@kim-intern @hermes 요약 부탁해요");
+    await page.waitForTimeout(500);
+    await page.getByTestId("composer-routing-toggle").click();
+    const modelSelect = page.getByTestId("composer-routing-model");
+    await modelSelect.waitFor();
+    await page.waitForFunction(() => document.querySelector("[data-testid='composer-routing-model']")?.disabled === false, null, { timeout: 5000 }).catch(() => undefined);
+    const modelValue = await modelSelect.locator("option").evaluateAll((os) => os.map((o) => o.value).find((v) => v !== "") ?? "");
+    if (modelValue !== "") {
+      await modelSelect.selectOption(modelValue);
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: resolve(OUT_DIR, `composer-two-override-open-${tag}.png`) });
+      await page.getByTestId("composer-routing-toggle").click();
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: resolve(OUT_DIR, `composer-two-override-${tag}.png`) });
+      check(`${tag} 오버라이드: 한 번만 칩`, (await page.getByText("이번 한 번만").count()) > 0);
+      await assertRowClean(page, `${tag} 오버라이드`);
+    } else {
+      await page.getByTestId("composer-routing-toggle").click();
+      check(`${tag} 오버라이드: 고를 모델이 있다`, false);
+    }
 
     // 스레드 패널의 작성창
     await input.fill("");
