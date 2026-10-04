@@ -55,6 +55,7 @@ export const NAMED_MEASURES = [
   "avatar-action",
   "action",
   "action-band",
+  "name-floor",
   "chat-min",
   "rail",
   "rail-tile",
