@@ -134,7 +134,7 @@ impl RefreshError {
 /// refused at worst; that text belongs in `agent_run.error.reason`, which is
 /// where it now goes, and not on a channel timeline.
 pub fn relogin_message() -> &'static str {
-    "연결된 계정의 로그인이 만료됐어요. 내 맥에서 다시 로그인한 뒤 AI에서 다시 등록해 주세요."
+    "연결된 계정의 로그인이 만료됐어요. 내 맥에서 다시 로그인한 뒤 AI 화면에서 다시 등록해 주세요."
 }
 
 /// The seam the worker calls and the conformance harness points at its own
@@ -605,7 +605,7 @@ mod tests {
     fn the_relogin_message_names_the_repair_not_just_the_symptom() {
         let message = relogin_message();
         assert!(message.contains("다시 로그인"));
-        assert!(message.contains("AI에서"));
+        assert!(message.contains("AI 화면에서"));
         // goal B8 H2: a refused grant answers with the provider's own body,
         // which quotes the token it refused often enough that it can never ride
         // a channel message. It goes to `agent_run.error.reason` instead.
