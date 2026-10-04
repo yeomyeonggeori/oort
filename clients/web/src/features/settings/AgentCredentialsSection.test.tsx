@@ -415,7 +415,7 @@ describe("소스 규율", () => {
     );
     expect(source).toContain("border-line/50");
     expect(source).not.toContain("hidden sm:block");
-    expect(source).toContain("mx-3");
+    expect(source).toContain("mx-1 flex min-w-0 flex-wrap");
     expect(source).toContain("기록 보기");
     expect(source).toContain("relativeLabel");
     expect(source).not.toContain("agent-credentials-row-select");
@@ -434,7 +434,8 @@ describe("소스 규율", () => {
     expect(source).not.toMatch(/aria-label=\{fullName\}/);
     expect(source).toContain('<span className="sr-only">{name}</span>');
     expect(source).toContain('data-testid="agent-credentials-row-name"');
-    expect(source).toContain('className="min-w-0 flex-1"');
+    expect(source).toContain('"min-w-0 flex-1"');
+    expect(source).toContain("credentials-row-name-fold");
     expect(source).not.toContain("hover:bg-surface-hover");
     expect(source).toContain("도어벨 설정");
     expect(source).toContain("마지막 활동");

@@ -240,7 +240,7 @@ describe("RED PROOF ④ 진행 표시와 live region", () => {
 
   it("일반 pairing purpose 는 프리셋과 무관하게 그대로다", () => {
     expect(hostedStepSpec("pairing").purpose).toBe(
-      "연결 값은 지금 한 번만 보여요. provider 설정에 붙여 넣고 이 화면에서 저장을 마치세요."
+      "연결 값은 지금 한 번만 보여요. AI 회사 설정에 붙여 넣고 이 화면에서 저장을 마치세요."
     );
   });
 
@@ -255,7 +255,7 @@ describe("RED PROOF ④ 진행 표시와 live region", () => {
       connection({ status: "detected", activeCredentialId: CREDENTIAL })
     );
     const done = hostedLiveMessage("activation", connection({ status: "active" }));
-    expect(waiting).toContain("provider 설정의 값을 바꾸면");
+    expect(waiting).toContain("AI 회사 설정의 값을 바꾸면");
     expect(done).toContain("연결이 활성이에요");
   });
 

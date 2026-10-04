@@ -10747,14 +10747,31 @@ async function captureAgentCredentialsScenes(browser, scheme) {
               ? Number(contrast(bg.rgb, borderRgb).toFixed(3))
               : null;
           const onAccentSoft = bg?.css === accentSoft;
+          // ADR-0189 D6(DS2-1 #2713): 버튼은 테두리가 아니라 채움 알약이다.
+          // 컨트롤 식별은 (1) 글자 라벨 AA 4.5:1 과 (2) 채움이 선택 행 채움
+          // (--accent-soft)에 묻히지 않음으로 잰다. 테두리를 그리는 버튼이
+          // 생기면(너비 > 0) 옛 3:1 경계 규칙이 그대로 다시 걸린다.
+          const borderW = parseFloat(getComputedStyle(btn).borderTopWidth) || 0;
+          const inkRgb = parseRgb(getComputedStyle(btn).color);
+          const labelRatio =
+            bg?.rgb && inkRgb
+              ? Number(contrast(bg.rgb, inkRgb).toFixed(3))
+              : null;
+          const borderOk = borderW === 0 || (ratio !== null && ratio >= 3);
           return {
             testid: btn.getAttribute("data-testid"),
             text: (btn.textContent ?? "").trim(),
             border,
+            borderW,
             bg: bg?.css ?? null,
             ratio,
+            labelRatio,
             onAccentSoft,
-            ok: ratio !== null && ratio >= 3 && !onAccentSoft,
+            ok:
+              labelRatio !== null &&
+              labelRatio >= 4.5 &&
+              borderOk &&
+              !onAccentSoft,
           };
         });
         const selectedCs = selected ? getComputedStyle(selected) : null;
@@ -10828,8 +10845,35 @@ async function captureAgentCredentialsScenes(browser, scheme) {
           const offline = li.querySelector(
             '[id^="agent-credentials-offline-"]'
           );
-          const cap = offline ? (wide ? 64 : 124) : wide ? 40 : 76;
-          return h <= cap;
+          // 76은 본문 한 줄 + 행동 한 줄(옛 테두리 버튼 28 높이)의 상한이다.
+          // DS2-1(#2713)의 700 굵기 채움 알약은 글자가 넓어, 600~620 폭에서
+          // 세 행동(해제·도어벨 설정·재발급)의 행동 띠가 `flex-wrap`으로 둘째
+          // 줄을 낸다(띠 안쪽 폭 166 < 세 알약 187). 이는 의도된 접힘이므로
+          // 행동 줄 하나가 늘 때마다 한 줄 높이(알약 28 + gap 4 = 32)만 더
+          // 허용하되, 두 줄을 넘으면 실패한다. 상한 자체(76)는 낮추지 않았다.
+          const actionTops = new Set(
+            [...li.querySelectorAll(
+              '[data-testid="agent-credentials-row-actions"] button'
+            )].map((btn) => Math.round(btn.getBoundingClientRect().top))
+          );
+          const actionLines = Math.max(1, actionTops.size);
+          // 본문(이름 + 상태·시각)도 같다: 이름 칸 하한 144를 지키려고 사실
+          // 묶음이 이름 아래로 접히면 한 줄(칩 24 + 여유 4 = 28)을 더 허용한다.
+          const nameEl = li.querySelector(
+            '[data-testid="agent-credentials-row-name"]'
+          );
+          const factsEl = li.querySelector("[data-credentials-facts]");
+          const factsWrapped =
+            !wide &&
+            nameEl &&
+            factsEl &&
+            factsEl.getBoundingClientRect().top >=
+              nameEl.getBoundingClientRect().bottom - 1;
+          const extra = wide
+            ? 0
+            : (actionLines - 1) * 32 + (factsWrapped ? 28 : 0);
+          const cap = (offline ? (wide ? 64 : 124) : wide ? 40 : 76) + extra;
+          return h <= cap && (wide || actionLines <= 2);
         });
         const list20HeightOk =
           wide && rows.length >= 20
@@ -10909,7 +10953,19 @@ async function captureAgentCredentialsScenes(browser, scheme) {
             lh = parseFloat(cs.fontSize) * 1.5;
           }
           const lines = Math.max(1, Math.round(r.height / lh));
-          const cap = wide ? 64 : 124;
+          // 본문 사실 묶음이 이름 아래로 접힌 행은 한 줄(28)을 더 허용한다
+          // (위 rowHeight 규칙과 같은 이유).
+          const nm = li.querySelector(
+            '[data-testid="agent-credentials-row-name"]'
+          );
+          const fc = li.querySelector("[data-credentials-facts]");
+          const folded =
+            !wide &&
+            nm &&
+            fc &&
+            fc.getBoundingClientRect().top >=
+              nm.getBoundingClientRect().bottom - 1;
+          const cap = (wide ? 64 : 124) + (folded ? 28 : 0);
           const rowH = li.getBoundingClientRect().height;
           return {
             width: Number(r.width.toFixed(2)),
@@ -11454,13 +11510,24 @@ async function captureAgentCredentialsScenes(browser, scheme) {
             bg?.rgb && borderRgb
               ? Number(contrast(bg.rgb, borderRgb).toFixed(3))
               : null;
+          const borderW = parseFloat(getComputedStyle(btn).borderTopWidth) || 0;
+          const inkRgb = parseRgb(getComputedStyle(btn).color);
+          const labelRatio =
+            bg?.rgb && inkRgb
+              ? Number(contrast(bg.rgb, inkRgb).toFixed(3))
+              : null;
           return {
             testid: btn.getAttribute("data-testid"),
             text: (btn.textContent ?? "").trim(),
             border,
+            borderW,
             bg: bg?.css ?? null,
             ratio,
-            ok: ratio !== null && ratio >= 3,
+            labelRatio,
+            ok:
+              labelRatio !== null &&
+              labelRatio >= 4.5 &&
+              (borderW === 0 || (ratio !== null && ratio >= 3)),
           };
         });
         const actionCs = selectedActions
@@ -14342,9 +14409,17 @@ async function main() {
           all.push(...(await captureShellScenes(browser, scheme)));
         }
       } else if (profile === "agents") {
+        // 에이전트 연결 면 전체: 마법사(HostedAgentWizard) → 자격 목록·스윕 →
+        // 해제·정리 행 → 도어벨 → 동의(OAuthConsentRoute). 전부 `all`에서도 이
+        // 순서로 돈다. 스윕이 던지면 뒤 장면(정리 행·동의)이 못 찍히므로, 자격
+        // 스윕 하나만 도는 옛 프로파일은 이 장면들의 검증 길을 막고 있었다(#3456).
         for (const scheme of ["light", "dark"]) {
           assertThisPreview();
+          all.push(...(await captureHostedPairingScenes(browser, scheme)));
           all.push(...(await captureAgentCredentialsScenes(browser, scheme)));
+          all.push(...(await captureHostedDisconnectScenes(browser, scheme)));
+          all.push(...(await captureHostedDoorbellScenes(browser, scheme)));
+          all.push(...(await captureConsent(browser, scheme)));
         }
       } else if (profile === "gallery") {
         for (const scheme of ["light", "dark"]) {

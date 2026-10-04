@@ -121,10 +121,10 @@ describe("RED PROOF ④ 두 비밀값의 문구는 서로를 대신하지 않는
 
   it("일반 프리셋 연결 값 문면은 그대로다", () => {
     expect(PAIRING_REVEAL_HEADLINE).toBe(
-      "지금 연결 값을 provider 설정에 붙이세요."
+      "지금 연결 값을 AI 회사 설정에 붙이세요."
     );
     expect(hostedPreset("generic").steps).toEqual([
-      "provider의 MCP 커넥터 설정에서 원격 서버를 하나 추가해요.",
+      "AI 회사의 MCP 커넥터 설정에서 원격 서버를 하나 추가해요.",
       "주소 칸에 아래 Agent Port 주소를 그대로 넣어요.",
       "인증 헤더의 bearer 값에 아래 연결 값을 넣어요.",
       "저장한 뒤 커넥터를 한 번 실행하면 이 화면이 감지 상태로 넘어가요.",

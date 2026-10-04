@@ -16,8 +16,10 @@ cd "$REPO_ROOT"
 WEB_PROBE="clients/web/src/legacyTermGateProbe.ts"
 CORE_PROBE="packages/momo-core/src/legacyTermGateProbe.ts"
 PHONE_PROBE="clients/mobile/src/legacyTermGateProbe.ts"
+HOSTED_PROBE="clients/web/src/features/hostedAgents/toneGateProbe.ts"
+HOSTED_CORE_PROBE="packages/momo-core/src/features/hostedAgents/toneGateProbe.ts"
 OUT="$(mktemp "${TMPDIR:-/tmp}/momo-legacy-gate.XXXXXX")"
-cleanup() { rm -f "$WEB_PROBE" "$CORE_PROBE" "$PHONE_PROBE" "$OUT"; }
+cleanup() { rm -f "$WEB_PROBE" "$CORE_PROBE" "$PHONE_PROBE" "$HOSTED_PROBE" "$HOSTED_CORE_PROBE" "$OUT"; }
 trap cleanup EXIT INT TERM
 
 fail() { echo "[legacy-term-gate-test] FAIL: $*" >&2; exit 1; }
@@ -52,6 +54,25 @@ if node scripts/design_preflight_phone_strings.mjs >"$OUT" 2>&1; then fail "phon
 grep -q "legacy_term" "$OUT" || fail "phone: RED but not by legacy_term"
 rm -f "$PHONE_PROBE"
 node scripts/design_preflight_phone_strings.mjs >"$OUT" 2>&1 || { cat "$OUT" >&2; fail "phone: removing the legacy term did not return to GREEN"; }
+
+# 2c. 호스티드 화면 어투·용어(#3479): 합쇼체·영문 provider 는 RED(legacy_term), 호스티드 밖 합쇼체는 GREEN.
+for probe in "$HOSTED_PROBE" "$HOSTED_CORE_PROBE"; do
+  [ ! -e "$probe" ] || fail "probe file already exists: $probe"
+  printf 'export const PROBE = "이 항목을 어떻게 했습니까";\n' >"$probe"
+  rc="$(run_gate)"
+  [ "$rc" != "0" ] || fail "hosted tone: 합쇼체 in $probe but the gate stayed GREEN"
+  grep -q "legacy_term" "$OUT" || fail "hosted tone: RED but not by legacy_term ($probe)"
+  grep -q "toneGateProbe.ts" "$OUT" || fail "hosted tone: RED but the probe file is not named ($probe)"
+  printf 'export const PROBE = "provider 설정에 붙여 넣어요.";\n' >"$probe"
+  rc="$(run_gate)"
+  [ "$rc" != "0" ] || fail "hosted tone: English provider in $probe but the gate stayed GREEN"
+  printf 'export const PROBE = "이 항목을 어떻게 했나요? AI 회사 설정에서 지웠어요.";\n' >"$probe"
+  [ "$(run_gate)" = "0" ] || { cat "$OUT" >&2; fail "hosted tone: 해요체 sentence must stay GREEN ($probe)"; }
+  rm -f "$probe"
+done
+printf 'export const PROBE = "지금은 보낼 수 없습니다";\n' >"$WEB_PROBE"
+[ "$(run_gate)" = "0" ] || { cat "$OUT" >&2; fail "합쇼체 outside hosted surfaces is out of this rule's scope and must stay GREEN"; }
+rm -f "$WEB_PROBE"
 
 # 3. 기계 값은 통과한다 (와이어 코드는 바꾸지 않는다).
 printf 'export const SCOPE = "owner_only";\n' >"$WEB_PROBE"

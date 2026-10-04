@@ -143,7 +143,7 @@ export function HostedConnectionDetailView({
 
         {state === 'loading' ? (
           <LoadingState
-            label="연결 상태를 불러오는 중입니다."
+            label="연결 상태를 불러오는 중이에요."
             testID="hosted-detail-loading"
           />
         ) : state === 'denied' ? (
@@ -155,7 +155,7 @@ export function HostedConnectionDetailView({
         ) : state === 'error' || view === undefined ? (
           <ErrorState
             headline={HOSTED_DETAIL_ERROR_HEADLINE}
-            detail="지금 이 연결이 어떤 상태인지 알 수 없습니다."
+            detail="지금 이 연결이 어떤 상태인지 알 수 없어요."
             onRetry={onRetry}
             testID="hosted-detail-error"
           />
