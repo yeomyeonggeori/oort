@@ -1,0 +1,45 @@
+#!/usr/bin/env node
+// Runs INSIDE the box. Reads text on stdin (a log/stream from the host side) and reports
+// whether it contains any secret string value from /cred, or login URL/device-code shapes.
+// Only labels and counts are printed, never the secret values (they never leave the box).
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const label = process.argv[2] || 'stdin';
+const secrets = new Set();
+function addString(s) { if (typeof s === 'string' && s.length >= 16) secrets.add(s); }
+function walkJson(v) {
+  if (typeof v === 'string') addString(v);
+  else if (Array.isArray(v)) v.forEach(walkJson);
+  else if (v && typeof v === 'object') Object.values(v).forEach(walkJson);
+}
+function walk(dir) {
+  let entries = [];
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  for (const e of entries) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) { walk(p); continue; }
+    if (!e.isFile()) continue;
+    let text = '';
+    try { if (fs.statSync(p).size > 1 << 20) continue; text = fs.readFileSync(p, 'utf8'); } catch { continue; }
+    try { walkJson(JSON.parse(text)); } catch {
+      (text.match(/[A-Za-z0-9_\-.~+\/=]{24,}/g) || []).forEach(addString);
+    }
+  }
+}
+walk(process.env.MOMO_BOX_CRED_DIR || '/cred');
+const input = fs.readFileSync(0, 'utf8');
+let leaks = 0;
+for (const s of secrets) if (input.includes(s)) leaks++;
+const shapes = [
+  /claude\.ai\/oauth\/authorize/i,
+  /console\.anthropic\.com\/oauth/i,
+  /auth\.openai\.com\/(codex\/device|oauth\/authorize)/i,
+  /\b[A-Z0-9]{4}-[A-Z0-9]{4,5}\b.*(device|code)/i,
+  /sk-ant-[A-Za-z0-9_-]{10,}/,
+  /\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\./,
+];
+let shapeHits = 0;
+for (const re of shapes) if (re.test(input)) shapeHits++;
+console.log(`leakscan[${label}]: secret_values=${secrets.size} leaked=${leaks} login_shapes=${shapeHits}`);
+process.exit(leaks || shapeHits ? 1 : 0);
