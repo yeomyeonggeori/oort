@@ -193,7 +193,7 @@ export function agentBaseUrlIssueMessage(issue: AgentBaseUrlIssue): string {
     case "scheme":
       return "주소는 http:// 또는 https:// 로 시작해야 해요.";
     case "mockHost":
-      return "가짜 AI 회사 주소는 쓸 수 없어요. 실제 게이트웨이 주소를 입력하세요.";
+      return "테스트용(mock) 서버 주소는 쓸 수 없어요. 실제 게이트웨이 주소를 입력하세요.";
     case "plaintextRemote":
       return "외부 주소는 https:// 여야 해요. http는 같은 기기(localhost)에서만 쓸 수 있어요.";
   }
