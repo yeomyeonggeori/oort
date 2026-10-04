@@ -321,6 +321,39 @@ describe("운영자: 목록과 회수", () => {
   });
 });
 
+describe("권한 어긋남(403)과 응답 없음", () => {
+  it("운영자 구획의 목록이 403이면 일반 오류가 아니라 소유자·관리자 안내를 보이고 발급 단추를 숨긴다", async () => {
+    vi.mocked(listPersonalKeys).mockRejectedValue(new ApiError(403, "forbidden"));
+    mount("operator");
+    const note = await until("ai-personal-keys-forbidden");
+    expect(note.textContent).toContain("소유자·관리자만");
+    expect(byId("ai-personal-keys-error")).toBeNull();
+    expect(byId("ai-personal-issue")).toBeNull();
+  });
+
+  it("멤버 /mine 이 403이면 정확한 안내를 보인다", async () => {
+    vi.mocked(listMyPersonalKeys).mockRejectedValue(new ApiError(403, "forbidden"));
+    mount("mine", SEOYEON);
+    const note = await until("ai-my-personal-keys-forbidden");
+    expect(note.textContent).toContain("활성 멤버");
+    expect(byId("ai-my-personal-keys-error")).toBeNull();
+  });
+
+  it("발급 중 응답을 못 받으면(네트워크) 목록을 다시 읽는다. 서버가 거절한 경우에는 읽지 않는다", async () => {
+    vi.mocked(issuePersonalKey).mockRejectedValue(new TypeError("network"));
+    mount("operator");
+    await until("ai-personal-keys-empty");
+    click("ai-personal-issue");
+    await until("ai-personal-issue-form");
+    act(() => void fireEvent.change(byId("ai-personal-issue-holder") as HTMLSelectElement, { target: { value: SEOYEON } }));
+    (byId("ai-personal-issue-key") as HTMLInputElement).value = SECRET;
+    const before = vi.mocked(listPersonalKeys).mock.calls.length;
+    click("ai-personal-issue-submit");
+    await until("ai-personal-issue-error");
+    await waitFor(() => expect(vi.mocked(listPersonalKeys).mock.calls.length).toBeGreaterThan(before));
+  });
+});
+
 describe("멤버: 받은 개인 키", () => {
   it("내 키만 /mine으로 읽고 운영자 목록은 부르지 않는다", async () => {
     vi.mocked(listMyPersonalKeys).mockResolvedValue([key()]);

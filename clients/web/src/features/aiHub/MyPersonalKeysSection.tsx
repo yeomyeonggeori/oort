@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ApiError } from "@momo/core/lib/api";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/design/ui/dialog";
@@ -10,6 +11,7 @@ import { AiPill, AiSection, AiSectionHead } from "@/features/settings/aiAccounts
 import { rosterQueryKey, useDirectory } from "@/features/workspace/useWorkspace";
 import {
   createPersonalKeyAgent,
+  isPersonalKeyForbidden,
   listMyPersonalKeys,
   PERSONAL_KEYS_COPY as COPY,
   personalAgentDefaults,
@@ -56,6 +58,9 @@ export function MyPersonalKeysSection({ offline }: { offline: boolean }) {
       setRevoking(null);
       void client.invalidateQueries({ queryKey: personalKeysQueryPrefix(workspaceId) });
     },
+    onError: (error) => {
+      if (!(error instanceof ApiError)) void client.invalidateQueries({ queryKey: personalKeysQueryPrefix(workspaceId) });
+    },
   });
 
   const list = keys.data ?? [];
@@ -70,6 +75,10 @@ export function MyPersonalKeysSection({ offline }: { offline: boolean }) {
       )}
       {keys.isPending ? (
         <Skeleton ready={false} rows={1} className="py-3" />
+      ) : keys.isError && isPersonalKeyForbidden(keys.error) ? (
+        <p className="break-keep px-2 py-3 text-body text-ink-muted" role="status" data-testid="ai-my-personal-keys-forbidden">
+          {COPY.mine.notMember}
+        </p>
       ) : keys.isError ? (
         <InlineBanner
           message={COPY.mine.loadFailed}
@@ -202,6 +211,7 @@ function AgentForm({
   onClose: () => void;
   onCreated: (handle: string) => void;
 }) {
+  const client = useQueryClient();
   const company = companyOfKey(keyRow);
   const initial = personalAgentDefaults({ memberName, memberHandle, company, format: keyRow.format });
   const [displayName, setDisplayName] = useState(initial.displayName);
@@ -212,6 +222,9 @@ function AgentForm({
     mutationFn: (input: { displayName: string; handle: string; model: string }) =>
       createPersonalKeyAgent(workspaceId, keyRow.id, input),
     onSuccess: (agent) => onCreated(agent.handle),
+    onError: (error) => {
+      if (!(error instanceof ApiError)) void client.invalidateQueries({ queryKey: personalKeysQueryPrefix(workspaceId) });
+    },
   });
   const copy = COPY.agentDialog;
   const nameBad = displayName.trim() === "";

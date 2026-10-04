@@ -1,8 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { installCoreHost, resetCoreHost } from "../../runtime/host";
 import { ApiError } from "../../lib/api";
 import { findLegacyTerms } from "./aiHubModel";
 import {
   PERSONAL_KEYS_COPY,
+  issuePersonalKey,
+  listMyPersonalKeys,
+  listPersonalKeys,
+  revokePersonalKey,
+  createPersonalKeyAgent,
   parsePersonalKey,
   parsePersonalKeyList,
   personalAgentDefaults,
@@ -82,5 +88,88 @@ describe("문구", () => {
       expect(findLegacyTerms(s), s).toEqual([]);
       expect(s).not.toMatch(/[—–]/);
     }
+  });
+});
+
+describe("실제 API 클라이언트: 키는 발급 요청 하나에만 한 번 실린다", () => {
+  const SECRET = "sk-test-PERSONAL-9f3c1d7a2b4e6a8c0d";
+  const WS = "00000000-0000-7000-8000-000000000001";
+  const KEY_ID = "00000000-0000-7000-8000-0000000004a1";
+
+  function installHost(): void {
+    installCoreHost({
+      apiBase: () => "https://oort.test",
+      absoluteApiBase: () => "https://oort.test",
+      buildMode: () => "test",
+      session: {
+        getAccessToken: () => "access-token",
+        getRefreshToken: () => null,
+        getPersistedSession: () => null,
+        applyLogin: () => {},
+        applyRotation: () => {},
+        markAuthExpired: () => {},
+        clearSession: () => {},
+      },
+    });
+  }
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    resetCoreHost();
+  });
+
+  const ok = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+  it("발급: 요청 정확히 하나, POST …/personal-keys, 본문에 키 한 번, 다른 요청에는 없다", async () => {
+    installHost();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ok(ROW, 201));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await issuePersonalKey(WS, {
+      ownerMemberId: ROW.ownerMemberId, apiKey: SECRET, format: "anthropic", baseUrl: "https://api.anthropic.com", label: "메모",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url).endsWith(`/v1/workspaces/${WS}/personal-keys`)).toBe(true);
+    expect(init?.method).toBe("POST");
+    expect(String(init?.body).split(SECRET).length - 1).toBe(1);
+    expect(String(url)).not.toContain(SECRET);
+    expect(JSON.stringify([...new Headers(init?.headers).entries()])).not.toContain(SECRET);
+
+    // 이어지는 다른 모든 호출에는 키가 실리지 않는다.
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) =>
+      String(input).endsWith("/agent") ? ok({ agent: { id: "a", handle: "h", displayName: "d" } }, 201) : ok({ keys: [ROW], ...ROW })
+    );
+    await listPersonalKeys(WS);
+    await listMyPersonalKeys(WS);
+    await revokePersonalKey(WS, KEY_ID);
+    await createPersonalKeyAgent(WS, KEY_ID, { displayName: "d", handle: "hh", model: "m" });
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    for (const [input, req] of fetchMock.mock.calls.slice(1)) {
+      expect(String(input)).not.toContain(SECRET);
+      expect(String(req?.body ?? "")).not.toContain(SECRET);
+    }
+  });
+
+  it("빈 키는 요청 없이 막는다", async () => {
+    installHost();
+    const fetchMock = vi.fn(async () => ok(ROW, 201));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      issuePersonalKey(WS, { ownerMemberId: ROW.ownerMemberId, apiKey: "", format: "openai", baseUrl: "https://api.openai.com/v1" })
+    ).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("400 문장은 서버 메시지를 되풀이하지 않는다(키가 섞여 와도)", async () => {
+    installHost();
+    vi.stubGlobal("fetch", vi.fn(async () => ok({ error: { code: "invalid", message: `bad key ${SECRET}` } }, 400)));
+    const error = await issuePersonalKey(WS, {
+      ownerMemberId: ROW.ownerMemberId, apiKey: SECRET, format: "openai", baseUrl: "https://api.openai.com/v1",
+    }).catch((e: unknown) => e);
+    for (const action of ["issue", "revoke", "agent", "list"] as const) {
+      expect(personalKeyErrorMessage(error, action)).not.toContain(SECRET);
+    }
+    expect(personalKeyErrorMessage(new ApiError(418, `echo ${SECRET}`), "issue")).not.toContain(SECRET);
   });
 });

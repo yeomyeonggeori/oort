@@ -74,6 +74,8 @@ export interface IssuePersonalKeyInput {
 }
 
 export async function issuePersonalKey(workspaceId: string, input: IssuePersonalKeyInput): Promise<PersonalKey> {
+  // 빈 키는 보내지 않는다(서버 400을 부르지도 않는다).
+  if (input.apiKey === "") throw new Error("empty personal key");
   const body = await settingsRequest<unknown>(base(workspaceId), { method: "POST", body: JSON.stringify(input) });
   const key = parsePersonalKey(record(body)?.key ?? body);
   if (!key) throw new ApiError(502, "서버 답을 읽지 못했어요.");
@@ -127,6 +129,8 @@ export const PERSONAL_KEYS_COPY = {
   revokedAt: (date: string) => `${date} 회수`,
   empty: "아직 발급한 개인 키가 없어요. 사람마다 한 개씩 줄 수 있어요.",
   loadFailed: "개인 키를 불러오지 못했어요.",
+  /** 서버가 403으로 답했을 때(운영자 판정과 개인 키 권한이 어긋날 때). */
+  operatorOnly: "소유자·관리자만 개인 키를 발급하고 회수해요. 지금 계정은 그 권한이 없어요.",
   retry: "다시 시도",
   holderGone: "나간 멤버",
   revoke: "회수",
@@ -166,6 +170,7 @@ export const PERSONAL_KEYS_COPY = {
     body: "운영자가 나에게 발급한 API 키예요. 이 키로 만든 내 에이전트만 대답하고, 다른 사람은 부를 수 없어요.",
     empty: "받은 개인 키가 없어요. 필요하면 운영자에게 요청하세요.",
     loadFailed: "받은 개인 키를 불러오지 못했어요.",
+    notMember: "이 워크스페이스의 활성 멤버만 받은 개인 키를 볼 수 있어요.",
     createAgent: "이 키로 에이전트 만들기",
     hasAgent: (handle: string) => `에이전트 @${handle}가 이 키를 써요`,
     hasAgentUnnamed: "내 에이전트가 이 키를 써요",
@@ -211,12 +216,18 @@ export function personalKeyErrorMessage(error: unknown, action: "issue" | "revok
     }
     if (error.status === 404) return "이 키를 찾지 못했어요. 이미 사라졌을 수 있어요.";
     if (error.status === 409 && action === "agent") return "지금은 에이전트를 만들 수 없어요. 핸들이 이미 쓰이고 있을 수 있어요.";
+    // 서버 문장은 보여 주지 않는다: 어떤 문장도 입력한 값을 되풀이할 수 없게 고정 문구만 쓴다.
     if (error.status === 400 && action === "issue") {
-      return `${error.message} 키와 AI 회사를 확인하고 다시 붙여 넣어 주세요.`;
+      return "키나 AI 회사가 맞지 않아요. 키와 AI 회사를 확인하고 다시 붙여 넣어 주세요.";
     }
-    return error.message;
+    return "요청을 처리하지 못했어요. 잠시 뒤 다시 시도해 주세요.";
   }
   return "연결을 확인하고 다시 시도하세요.";
+}
+
+/** 서버가 권한 없음(403)으로 답했는가. */
+export function isPersonalKeyForbidden(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 403;
 }
 
 const HANDLE_RE = /^[a-z0-9_-]{2,32}$/;

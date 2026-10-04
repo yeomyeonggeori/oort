@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
+import { ApiError } from "@momo/core/lib/api";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { Select } from "@/design/ui/select";
@@ -11,6 +12,7 @@ import { AiPill } from "@/features/settings/aiAccountsParts";
 import { useDirectory } from "@/features/workspace/useWorkspace";
 import { glossaryEntry } from "@momo/core/features/ai/aiHubModel";
 import {
+  isPersonalKeyForbidden,
   issuePersonalKey,
   listPersonalKeys,
   PERSONAL_KEYS_COPY as COPY,
@@ -75,9 +77,15 @@ export function PersonalKeysOperatorSection({
       setRevoking(null);
       void client.invalidateQueries({ queryKey: personalKeysQueryPrefix(workspaceId) });
     },
+    // 응답을 못 받았다면 서버에서 회수됐는지 모른다: 목록을 다시 읽는다.
+    onError: (error) => {
+      if (!(error instanceof ApiError)) void client.invalidateQueries({ queryKey: personalKeysQueryPrefix(workspaceId) });
+    },
   });
 
   const list = keys.data ?? [];
+  // 운영자 판정(provider link 200)과 개인 키 권한(소유자·관리자)이 어긋나면 서버가 403이다.
+  const forbidden = keys.isError && isPersonalKeyForbidden(keys.error);
   const holders = useMemo(() => issuableHolders(roster, list), [roster, list]);
   const presets = teamKeyPresets(link);
   const entry = glossaryEntry("personalKey");
@@ -90,6 +98,7 @@ export function PersonalKeysOperatorSection({
         </h3>
         <span className="text-meta text-ink-muted">{COPY.operatorScope}</span>
         <span className="flex-1" />
+        {!forbidden && (
         <Button
           ref={issueRef}
           type="button"
@@ -106,6 +115,7 @@ export function PersonalKeysOperatorSection({
           <Plus aria-hidden="true" />
           {COPY.issue}
         </Button>
+        )}
       </div>
       <p className="max-w-2xl break-keep pt-3 text-meta text-ink-muted">
         <span className="me-1 inline-flex whitespace-nowrap rounded-sm bg-muted-soft px-1 py-px text-timestamp font-semibold">
@@ -121,6 +131,10 @@ export function PersonalKeysOperatorSection({
 
       {keys.isPending ? (
         <Skeleton ready={false} rows={2} className="py-3" />
+      ) : forbidden ? (
+        <p className="break-keep px-2 py-3 text-body text-ink-muted" role="status" data-testid="ai-personal-keys-forbidden">
+          {COPY.operatorOnly}
+        </p>
       ) : keys.isError ? (
         <InlineBanner
           message={COPY.loadFailed}
@@ -263,11 +277,17 @@ function IssueForm({ onOpenChange, workspaceId, offline, holders, presets }: Iss
     mutationFn: (input: { ownerMemberId: string; format: "openai" | "anthropic"; baseUrl: string; label?: string }) => {
       const apiKey = secretRef.current;
       secretRef.current = "";
+      // 빈 키는 보내지 않는다.
+      if (apiKey === "") return Promise.reject(new Error("empty personal key"));
       return issuePersonalKey(workspaceId, { ...input, apiKey });
     },
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: personalKeysQueryPrefix(workspaceId) });
       onOpenChange(false);
+    },
+    // 응답을 못 받았다면 서버에 발급됐는지 모른다: 목록을 다시 읽어 사실을 맞춘다.
+    onError: (error) => {
+      if (!(error instanceof ApiError)) void client.invalidateQueries({ queryKey: personalKeysQueryPrefix(workspaceId) });
     },
   });
 
