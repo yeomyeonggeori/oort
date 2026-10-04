@@ -417,7 +417,7 @@ export function oauthConsentFailureMessage(
       case 403:
       case 404:
         // non-enumerable (규율 4). 사유를 나누지 않는다.
-        return `${prefix} 이 요청은 만료됐거나 이미 처리됐거나 이 워크스페이스에서 열 수 없는 요청이에요. 이 화면에서는 아무 권한도 열리지 않아요. 필요하면 provider에서 연결을 다시 시작하세요.`;
+        return `${prefix} 이 요청은 만료됐거나 이미 처리됐거나 이 워크스페이스에서 열 수 없는 요청이에요. 이 화면에서는 아무 권한도 열리지 않아요. 필요하면 AI 회사에서 연결을 다시 시작하세요.`;
       case 409:
         return `${prefix} 이 요청은 이미 처리됐어요. 결정은 하나만 기록되고 이 화면에서는 더 진행하지 않아요.`;
       case 429:
@@ -427,7 +427,7 @@ export function oauthConsentFailureMessage(
     }
   }
   if (error instanceof WireShapeError) {
-    return `${prefix} 서버 응답을 확인하지 못했어요. provider에서 연결을 다시 시작하세요.`;
+    return `${prefix} 서버 응답을 확인하지 못했어요. AI 회사에서 연결을 다시 시작하세요.`;
   }
   return `${prefix} 잠시 뒤에 다시 시도하세요.`;
 }
@@ -579,11 +579,11 @@ export function oauthConsentFacts(preview: OauthConsentPreview): OauthConsentFac
 export const OAUTH_CONSENT_TITLE = "외부 에이전트 연결 승인";
 
 export const OAUTH_CONSENT_LEAD =
-  "외부 provider가 이 워크스페이스의 전용 에이전트로 접속하려고 해요. 아래 권한을 직접 확인하고 승인하거나 거부하세요. 감지됐다는 사실은 권한의 근거가 아니에요.";
+  "외부 AI 회사가 이 워크스페이스의 전용 에이전트로 접속하려고 해요. 아래 권한을 직접 확인하고 승인하거나 거부하세요. 감지됐다는 사실은 권한의 근거가 아니에요.";
 
 /** clientId·redirectUri 가 무엇인지 (규율 3). 운영자가 검증한 값임을 말한다. */
 export const OAUTH_CONSENT_CLIENT_NOTE =
-  "요청한 클라이언트와 돌아갈 주소는 이 워크스페이스 운영자가 미리 등록한 값이에요. 등록되지 않은 provider는 이 화면까지 오지 못해요.";
+  "요청한 클라이언트와 돌아갈 주소는 이 워크스페이스 운영자가 미리 등록한 값이에요. 등록되지 않은 AI 회사는 이 화면까지 오지 못해요.";
 
 /** 승인이 사람만의 보안 결정이고, 닫기·뒤로가기가 권한을 열지 않는다는 사실. */
 export const OAUTH_CONSENT_SECURITY_NOTE =
@@ -598,25 +598,25 @@ export const OAUTH_CONSENT_NO_CANDIDATE_HEADLINE =
   "이 요청에 묶을 대기 중인 연결이 없어요.";
 
 export const OAUTH_CONSENT_NO_CANDIDATE_DETAIL =
-  "이 워크스페이스에는 이 인가 요청을 받을 대기 중인 OAuth 전용 에이전트가 없어요. 이 화면에서는 아무 권한도 열리지 않아요. provider에서 연결을 다시 시작하세요.";
+  "이 워크스페이스에는 이 인가 요청을 받을 대기 중인 OAuth 전용 에이전트가 없어요. 이 화면에서는 아무 권한도 열리지 않아요. AI 회사에서 연결을 다시 시작하세요.";
 
 /** 요청이 만료된 자리. */
 export const OAUTH_CONSENT_EXPIRED_HEADLINE = "이 인가 요청이 만료됐어요.";
 
 export const OAUTH_CONSENT_EXPIRED_DETAIL =
-  "만료된 요청은 승인할 수 없어요. 이 화면에서는 아무 권한도 열리지 않아요. provider에서 연결을 다시 시작하세요.";
+  "만료된 요청은 승인할 수 없어요. 이 화면에서는 아무 권한도 열리지 않아요. AI 회사에서 연결을 다시 시작하세요.";
 
 /** 요청 id 없이 이 화면에 닿은 경우(잘못된 링크). */
 export const OAUTH_CONSENT_MISSING_HEADLINE = "인가 요청을 찾을 수 없어요.";
 
 export const OAUTH_CONSENT_MISSING_DETAIL =
-  "이 주소에는 확인할 인가 요청이 없어요. provider의 연결 화면에서 다시 시작하면 올바른 요청으로 이 화면이 열려요.";
+  "이 주소에는 확인할 인가 요청이 없어요. AI 회사의 연결 화면에서 다시 시작하면 올바른 요청으로 이 화면이 열려요.";
 
 /** non-enumerable 종료 화면(404/403). */
 export const OAUTH_CONSENT_UNAVAILABLE_HEADLINE = "이 인가 요청을 열 수 없어요.";
 
 export const OAUTH_CONSENT_UNAVAILABLE_DETAIL =
-  "이 요청은 만료됐거나 이미 처리됐거나 이 워크스페이스에서 열 수 없는 요청이에요. 이 화면에서는 아무 권한도 열리지 않아요. 필요하면 provider에서 연결을 다시 시작하세요.";
+  "이 요청은 만료됐거나 이미 처리됐거나 이 워크스페이스에서 열 수 없는 요청이에요. 이 화면에서는 아무 권한도 열리지 않아요. 필요하면 AI 회사에서 연결을 다시 시작하세요.";
 
 /**
  * 이미 하나의 terminal decision 이 기록된 자리(409).
@@ -628,10 +628,10 @@ export const OAUTH_CONSENT_UNAVAILABLE_DETAIL =
 export const OAUTH_CONSENT_ALREADY_DECIDED_HEADLINE = "이 요청은 이미 처리됐어요.";
 
 export const OAUTH_CONSENT_ALREADY_DECIDED_DETAIL =
-  "결정은 하나만 기록되고 이 화면에서는 더 진행하지 않아요. 필요하면 provider에서 연결을 다시 시작하세요.";
+  "결정은 하나만 기록되고 이 화면에서는 더 진행하지 않아요. 필요하면 AI 회사에서 연결을 다시 시작하세요.";
 
 /** 결정 뒤 provider 로 돌아가는 짧은 종료. */
-export const OAUTH_CONSENT_RETURNING = "결정을 저장했어요. provider로 돌아가는 중이에요.";
+export const OAUTH_CONSENT_RETURNING = "결정을 저장했어요. AI 회사로 돌아가는 중이에요.";
 
 /** 로그아웃 상태에서 이 화면에 온 사람에게. */
 export const OAUTH_CONSENT_SIGNIN_HEADLINE = "먼저 로그인하세요.";
@@ -653,10 +653,10 @@ export const OAUTH_CONSENT_WORKSPACE_FALLBACK = "이 워크스페이스";
 export const OAUTH_CONSENT_AGENT_KEY = "전용 에이전트";
 export const OAUTH_CONSENT_CANDIDATE_LEGEND = "접속을 허용할 전용 에이전트";
 export const OAUTH_CONSENT_CANDIDATE_DETAIL =
-  "이 에이전트로 외부 provider의 접속을 허용해요.";
+  "이 에이전트로 외부 AI 회사의 접속을 허용해요.";
 export const OAUTH_CONSENT_SCOPES_LEGEND = "요청된 권한";
 export const OAUTH_CONSENT_SCOPES_HINT =
-  "provider가 요청한 권한이에요. 좁힐 수는 있어도 넓힐 수는 없어요.";
+  "AI 회사가 요청한 권한이에요. 좁힐 수는 있어도 넓힐 수는 없어요.";
 export const OAUTH_CONSENT_CHANNELS_LEGEND = "닿을 채널";
 export const OAUTH_CONSENT_CHANNELS_HINT =
   "고른 채널에서만 이 에이전트가 부름을 받아요.";

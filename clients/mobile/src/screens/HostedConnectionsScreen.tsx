@@ -165,7 +165,7 @@ export function HostedConnectionsView({
 
       {state === 'loading' ? (
         <LoadingState
-          label="호스티드 연결을 불러오는 중입니다."
+          label="호스티드 연결을 불러오는 중이에요."
           testID="hosted-list-loading"
         />
       ) : state === 'denied' ? (
@@ -177,7 +177,7 @@ export function HostedConnectionsView({
       ) : state === 'error' ? (
         <ErrorState
           headline={HOSTED_LIST_ERROR_HEADLINE}
-          detail="지금 어떤 연결이 있는지 알 수 없습니다."
+          detail="지금 어떤 연결이 있는지 알 수 없어요."
           onRetry={onRetry}
           testID="hosted-list-error"
         />

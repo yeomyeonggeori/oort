@@ -286,7 +286,7 @@ const CLEANUP_KIND_COPY: Record<HostedCleanupKind, CleanupKindCopy> = {
   connector: {
     label: "커넥터 설치",
     expectation:
-      "provider의 커넥터 목록에서 이 연결이 쓰던 커넥터를 제거하세요.",
+      "AI 회사의 커넥터 목록에서 이 연결이 쓰던 커넥터를 제거하세요.",
     caution:
       "커넥터를 제거해도 로컬에 받아 둔 플러그인 파일은 그대로 남아요. 그 파일은 바로 아래 줄에서 따로 확인해요.",
   },
@@ -299,30 +299,30 @@ const CLEANUP_KIND_COPY: Record<HostedCleanupKind, CleanupKindCopy> = {
   },
   plugin: {
     label: "플러그인 등록",
-    expectation: "provider에 등록해 둔 비공개 플러그인 자체를 지우세요.",
+    expectation: "AI 회사에 등록해 둔 비공개 플러그인 자체를 지우세요.",
     caution:
-      "커넥터 제거는 설치를 되돌릴 뿐이고 등록은 provider 계정에 남아요. 남아 있으면 누구든 다시 설치할 수 있어요.",
+      "커넥터 제거는 설치를 되돌릴 뿐이고 등록은 AI 회사 계정에 남아요. 남아 있으면 누구든 다시 설치할 수 있어요.",
   },
   routine: {
     label: "자동 실행 루틴",
     expectation:
-      "이 연결이 쓰던 routine을 provider 설정에서 제거하세요.",
+      "이 연결이 쓰던 routine을 AI 회사 설정에서 제거하세요.",
     caution:
       "Active를 끄는 것은 제거가 아니에요. 꺼 둔 routine은 그대로 남아 있고, 이 줄은 끄는 것만으로 닫히지 않아요.",
   },
   bot: {
-    label: "provider의 봇",
+    label: "AI 회사의 봇",
     expectation:
       "이 봇을 지울지 남길지 직접 정하세요. oort는 어느 쪽도 대신 하지 않아요.",
     caution:
-      "지우면 그 봇과 나눈 provider 쪽 대화 기록도 함께 사라져요. 남기는 것도 정식 답이며, 그때는 남긴 이유가 기록에 남아요.",
+      "지우면 그 봇과 나눈 AI 회사 쪽 대화 기록도 함께 사라져요. 남기는 것도 정식 답이며, 그때는 남긴 이유가 기록에 남아요.",
   },
   secret: {
     label: "연결 자격증명",
     expectation:
       "이 연결이 쓰던 자격증명이 더 이상 통하지 않는지 확인하세요.",
     caution:
-      "oort가 발급한 값은 해제를 시작한 순간 이미 폐기됐어요. provider나 비밀 저장소에 따로 복사해 둔 사본이 있으면 그것은 직접 지워야 해요.",
+      "oort가 발급한 값은 해제를 시작한 순간 이미 폐기됐어요. AI 회사나 비밀 저장소에 따로 복사해 둔 사본이 있으면 그것은 직접 지워야 해요.",
   },
 };
 
@@ -372,7 +372,7 @@ export function dispositionChoices(
         id: "delete",
         label: "봇을 지웠어요",
         detail:
-          "provider에서 이 봇을 삭제했어요. 그 봇과 나눈 provider 쪽 대화 기록도 함께 사라져요.",
+          "AI 회사에서 이 봇을 삭제했어요. 그 봇과 나눈 AI 회사 쪽 대화 기록도 함께 사라져요.",
         destructive: true,
       },
       {
@@ -408,11 +408,11 @@ export function dispositionChoices(
 function removalConsequence(kind: HostedCleanupKind): string {
   switch (kind) {
     case "connector":
-      return "provider의 커넥터 목록에서 사라진 것을 확인했어요. 로컬 파일은 이 확인에 포함되지 않아요.";
+      return "AI 회사의 커넥터 목록에서 사라진 것을 확인했어요. 로컬 파일은 이 확인에 포함되지 않아요.";
     case "local_plugin_files":
       return "이 기기에서 그 파일들을 지운 것을 확인했어요.";
     case "plugin":
-      return "provider 계정에서 플러그인 등록 자체가 사라진 것을 확인했어요.";
+      return "AI 회사 계정에서 플러그인 등록 자체가 사라진 것을 확인했어요.";
     case "routine":
       return "routine이 목록에서 사라진 것을 확인했어요. 꺼 두기만 한 것은 여기 해당하지 않아요.";
     case "bot":
@@ -471,7 +471,7 @@ export function statusChoices(
       : {
           id: "present",
           label: "아직 남아 있어요",
-          detail: "provider에서 그대로 살아 있는 것을 확인했어요.",
+          detail: "AI 회사에서 그대로 살아 있는 것을 확인했어요.",
         };
   const absent: CleanupStatusChoice = {
     id: "absent",

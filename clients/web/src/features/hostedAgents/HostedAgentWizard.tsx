@@ -1156,7 +1156,7 @@ function DetectingStep({
       <EmptyInvite
         className="px-0"
         headline="아직 다이얼인이 오지 않았어요."
-        detail="provider 설정에 값을 넣고 커넥터나 routine을 한 번 실행하면 이 화면이 바뀌어요. 이 창을 열어 둔 채로 다녀와도 돼요."
+        detail="AI 회사 설정에 값을 넣고 커넥터나 routine을 한 번 실행하면 이 화면이 바뀌어요. 이 창을 열어 둔 채로 다녀와도 돼요."
         actions={
           <Button
             type="button"
@@ -1196,7 +1196,7 @@ function ExpiredStep({ connection }: { connection: HostedAgentConnection }) {
         testId="hosted-expired"
       />
       <p className="break-keep text-body text-ink-muted">
-        이미 넣어 둔 값은 더 이상 통하지 않아요. 새 값을 발급하면 provider 설정의
+        이미 넣어 둔 값은 더 이상 통하지 않아요. 새 값을 발급하면 AI 회사 설정의
         값을 그것으로 바꿔야 해요.
       </p>
     </div>
@@ -1349,7 +1349,7 @@ function ActivationStep({
           detail={
             appManaged
               ? "이 맥의 연결 값은 앱이 바꿔 뒀어요. Claude Code를 한 번 열어 첫 요청이 성공하면 활성이 돼요."
-              : "provider 설정의 값을 새 자격증명으로 바꾸고 커넥터나 routine을 한 번 실행하세요. 그 요청이 성공해야 활성이 돼요."
+              : "AI 회사 설정의 값을 새 자격증명으로 바꾸고 커넥터나 routine을 한 번 실행하세요. 그 요청이 성공해야 활성이 돼요."
           }
           actions={
             <Button
