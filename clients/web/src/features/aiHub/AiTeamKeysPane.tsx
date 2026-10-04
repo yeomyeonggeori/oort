@@ -52,12 +52,13 @@ import { myAccountsBrowserTab } from "@/features/settings/aiMyAccountsModel";
 import { formatMoment } from "@/features/settings/oauthGrant";
 import { TeamKeyForm } from "@/features/settings/TeamKeyForm";
 import { TeamUnlinkDialog } from "@/features/settings/TeamUnlinkDialog";
+import { PersonalKeysOperatorSection } from "./PersonalKeysOperatorSection";
 
 // =============================================================================
 // 「팀 AI 키」 구획 (AIH-6, #3400, 플랜 §8-6, 시안 panel-team-keys).
 //
 // 위: 넣어 둔 키 표(AI 회사 · 키 · 쓰는 곳 · 상태). 가운데: 기본 AI 표(기능마다 누구를
-// 위한 것인지, 어떤 AI로, 고르지 않으면 무슨 일이 일어나는지). 아래: 「개인 API 키」 자리.
+// 위한 것인지, 어떤 AI로, 고르지 않으면 무슨 일이 일어나는지). 아래: 「개인 API 키」(운영자 발급·회수, #3469).
 //
 // 새 API는 없다. 쿼리 키와 함수는 AI(`AiLinkSection`)과 같아서 두 화면이 같은
 // 캐시를 본다. 폼(`TeamKeyForm`)·끊기 확인(`TeamUnlinkDialog`)·확인 결과(`ProbeAnswer`)도 같은
@@ -506,7 +507,9 @@ export function AiTeamKeysPane({ offline, workspaceId, memberId }: PaneProps) {
         />
       </section>
 
-      <PersonalKeysReserved />
+      {link && !denied && !linkQuery.isError && !linkQuery.isPending && (
+        <PersonalKeysOperatorSection workspaceId={workspaceId} offline={offline} link={link} />
+      )}
     </div>
   );
 }
@@ -631,28 +634,5 @@ function NonOperatorNotice({ workspaceId, memberId }: { workspaceId: string; mem
         <span className="break-keep text-meta text-ink-muted">{AI_TEAM_KEYS_COPY.requestHint}</span>
       </div>
     </div>
-  );
-}
-
-/** 개인 API 키 자리. 아직 서버가 없다: 눌러 볼 컨트롤 없이 무엇이 오는지만 말한다. */
-function PersonalKeysReserved() {
-  const copy = AI_TEAM_KEYS_COPY.personalKeys;
-  return (
-    <section
-      aria-labelledby="ai-personal-keys-title"
-      className="flex min-w-0 flex-col gap-2 rounded-lg border border-dashed border-line p-4"
-      data-testid="ai-personal-keys"
-    >
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <h3 id="ai-personal-keys-title" className="text-body font-bold text-ink">
-          {copy.heading}
-        </h3>
-        <span className="rounded-full bg-muted-soft px-2 py-1 text-timestamp font-semibold leading-none text-ink-muted">
-          {copy.badge}
-        </span>
-      </div>
-      <p className="max-w-2xl break-keep text-body text-ink-muted">{copy.body}</p>
-      <p className="max-w-2xl break-keep text-meta text-ink-muted">{copy.nowLine}</p>
-    </section>
   );
 }
