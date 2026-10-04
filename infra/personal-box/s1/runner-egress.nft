@@ -1,0 +1,69 @@
+# S1 (#3408) 런너 호스트 박스 egress 선언 규칙 — ADR-0197 D9·T4·T8의 재현본.
+# 범위: 박스 브리지(momos1br)에서 나가거나 들어오는 패킷만. 다른 브리지·호스트 트래픽은 건드리지 않는다.
+# 적용: sudo nft -f runner-egress.nft   /   제거: sudo nft delete table inet momo_s1 && sudo nft delete table bridge momo_s1_l2
+# 주의: `nft flush ruleset` 금지(같은 호스트의 다른 Docker 규칙까지 지운다). 테이블 단위로만 추가·삭제한다.
+define BOX_BR = "momos1br"
+
+table inet momo_s1 {
+  set blocked4 {
+    type ipv4_addr
+    flags interval
+    elements = {
+      0.0.0.0/8,          # this-network
+      10.0.0.0/8,         # RFC1918
+      100.64.0.0/10,      # CGNAT (RFC6598)
+      127.0.0.0/8,        # loopback
+      169.254.0.0/16,     # link-local + 클라우드 메타데이터(169.254.169.254)
+      172.16.0.0/12,      # RFC1918 (Docker 기본 대역 포함)
+      192.0.0.0/24,       # IETF 프로토콜 할당
+      192.168.0.0/16,     # RFC1918
+      198.18.0.0/15,      # 벤치마크
+      224.0.0.0/4,        # multicast
+      240.0.0.0/4         # reserved + broadcast
+    }
+  }
+
+  set smtp_ports {
+    type inet_service
+    elements = { 25, 465, 587, 2525 }
+  }
+
+  counter box_to_host_drop { }
+  counter inbound_new_drop { }
+  counter v6_drop { }
+  counter private_drop { }
+  counter smtp_drop { }
+
+  # 박스 → 런너 호스트 자신. 응답 패킷 외에는 전부 거부(호스트 서비스·SSH·Docker 소켓 프록시 차단).
+  chain input {
+    type filter hook input priority -10; policy accept;
+    iifname $BOX_BR ct state established,related accept
+    iifname $BOX_BR counter name "box_to_host_drop" drop
+  }
+
+  # 박스 ↔ 그 밖. egress는 공용 인터넷(+허용 포트)만 열고 나머지는 거부한다.
+  chain forward {
+    type filter hook forward priority -10; policy accept;
+    # 박스 쪽으로 새로 시작되는 연결 금지(인바운드 노출·다른 네트워크의 침투 차단)
+    oifname $BOX_BR iifname != $BOX_BR ct state new counter name "inbound_new_drop" drop
+    iifname $BOX_BR jump box_egress
+  }
+
+  chain box_egress {
+    meta nfproto ipv6 counter name "v6_drop" drop
+    ip daddr @blocked4 counter name "private_drop" drop
+    meta l4proto { tcp, udp } th dport @smtp_ports counter name "smtp_drop" drop
+    # 이후는 Docker 체인이 평가한다(공용 인터넷으로의 masquerade).
+    return
+  }
+}
+
+# L2: 같은 브리지에 붙은 이웃 박스(ARP 포함) 간 프레임을 포트 사이에서 버린다.
+# 박스→게이트웨이(브리지 자신) 프레임은 forward 훅이 아니라 input 경로이므로 영향 없다.
+table bridge momo_s1_l2 {
+  counter l2_drop { }
+  chain forward {
+    type filter hook forward priority -10; policy accept;
+    meta ibrname $BOX_BR counter name "l2_drop" drop
+  }
+}
