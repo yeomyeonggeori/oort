@@ -131,6 +131,15 @@ fn standing(
         return Err(not_found());
     };
     if existing.member_id == actor {
+        // A member demoted to guest no longer controls their box (workspace roles are live);
+        // an admin can still stop or delete it for them.
+        if role == WorkspaceRole::Guest {
+            return Err(ApiError::coded(
+                StatusCode::FORBIDDEN,
+                "cloud_box_guest",
+                "게스트는 박스를 조작할 수 없어요.",
+            ));
+        }
         return Ok(Standing::Owner);
     }
     match (role.is_admin(), owner_only) {
@@ -231,11 +240,13 @@ pub async fn mine(
         "cloud_box.mine",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
-                if active_workspace_role(conn, workspace_id, actor)
-                    .await?
-                    .is_none()
-                {
-                    return Ok(Err(ApiError::forbidden("active workspace member required")));
+                match active_workspace_role(conn, workspace_id, actor).await? {
+                    None | Some(WorkspaceRole::Guest) => {
+                        return Ok(Err(ApiError::forbidden(
+                            "a workspace member (not a guest) is required",
+                        )))
+                    }
+                    Some(_) => {}
                 }
                 Ok(Ok(find_live_box_for_member_in_tx(
                     conn,

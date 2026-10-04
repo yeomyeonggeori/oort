@@ -163,6 +163,24 @@ CREATE TRIGGER cloud_box_transition_guard
   BEFORE UPDATE ON cloud_box
   FOR EACH ROW EXECUTE FUNCTION cloud_box_transition_guard();
 
+-- 방어 심층(보안 검수 M1): 박스 행은 `deleted` 확인 전까지 지우지 않는다(D10 tombstone). 권한 REVOKE 와
+-- 별개로 DB 가 삭제 자체를 거부한다.
+CREATE FUNCTION cloud_box_delete_guard()
+RETURNS trigger LANGUAGE plpgsql
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  IF OLD.state <> 'deleted' THEN
+    RAISE EXCEPTION 'cloud_box row is a tombstone until deleted; it cannot be removed in state % (ADR-0197 D10)', OLD.state
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN OLD;
+END $$;
+
+CREATE TRIGGER cloud_box_delete_guard
+  BEFORE DELETE ON cloud_box
+  FOR EACH ROW EXECUTE FUNCTION cloud_box_delete_guard();
+
 ALTER TABLE cloud_box ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cloud_box FORCE ROW LEVEL SECURITY;
 CREATE POLICY ws_isolation ON cloud_box
@@ -249,6 +267,23 @@ END $$;
 CREATE TRIGGER cloud_box_control_immutable_guard
   BEFORE UPDATE ON cloud_box_control
   FOR EACH ROW EXECUTE FUNCTION cloud_box_control_immutable();
+
+-- 진행 중(pending|claimed) 컨트롤은 지울 수 없다. 끝난 컨트롤의 정리만 허용한다.
+CREATE FUNCTION cloud_box_control_delete_guard()
+RETURNS trigger LANGUAGE plpgsql
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  IF OLD.status IN ('pending', 'claimed') THEN
+    RAISE EXCEPTION 'cloud_box_control in flight cannot be removed (ADR-0197 D2)'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN OLD;
+END $$;
+
+CREATE TRIGGER cloud_box_control_delete_guard
+  BEFORE DELETE ON cloud_box_control
+  FOR EACH ROW EXECUTE FUNCTION cloud_box_control_delete_guard();
 
 ALTER TABLE cloud_box_control ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cloud_box_control FORCE ROW LEVEL SECURITY;

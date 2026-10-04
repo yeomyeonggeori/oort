@@ -753,6 +753,7 @@ async fn rls_is_forced_and_hides_other_workspaces() {
     }
 
     let app = momo_app_pool().await;
+    // Returns the raw query result: only the no-GUC case below may tolerate an error.
     let table_rows = |table: &'static str, ws: Option<Uuid>, id: Uuid| {
         let app = app.clone();
         async move {
@@ -765,35 +766,41 @@ async fn rls_is_forced_and_hides_other_workspaces() {
                     .expect("guc");
             }
             let column = if table == "cloud_box" { "id" } else { "box_id" };
-            // No tenant GUC is either an empty result (never set on this connection) or
-            // an error (reset to '' by an earlier transaction): both are closed. Only
-            // a visible row would be a leak, so an error counts as zero rows.
-            let count: i64 =
+            let count: Result<i64, sqlx::Error> =
                 sqlx::query_scalar(&format!("SELECT count(*) FROM {table} WHERE {column} = $1"))
                     .bind(id)
                     .fetch_one(&mut *tx)
-                    .await
-                    .unwrap_or(0);
+                    .await;
             tx.rollback().await.expect("rollback");
             count
         }
     };
     for table in ["cloud_box", "cloud_box_control"] {
         assert_eq!(
-            table_rows(table, Some(a.workspace), ids[0]).await,
+            table_rows(table, Some(a.workspace), ids[0])
+                .await
+                .expect("own rows"),
             1,
             "{table}: own rows"
         );
         assert_eq!(
-            table_rows(table, Some(a.workspace), ids[1]).await,
+            table_rows(table, Some(a.workspace), ids[1])
+                .await
+                .expect("foreign count"),
             0,
             "{table}: workspace A saw workspace B's row"
         );
-        assert_eq!(
-            table_rows(table, None, ids[0]).await,
-            0,
-            "{table}: no tenant GUC must mean no rows"
-        );
+        // No tenant GUC: never set on this connection (zero rows) or reset to '' by an earlier
+        // transaction (the policy's uuid cast refuses). Anything else would be a leak.
+        match table_rows(table, None, ids[0]).await {
+            Ok(count) => assert_eq!(count, 0, "{table}: no tenant GUC must mean no rows"),
+            Err(error) => assert!(
+                error
+                    .to_string()
+                    .contains("invalid input syntax for type uuid"),
+                "{table}: unexpected error without a tenant GUC: {error}"
+            ),
+        }
     }
     // A write into another workspace is refused by the policy's WITH CHECK.
     let mut tx = app.begin().await.expect("tx");
@@ -802,16 +809,17 @@ async fn rls_is_forced_and_hides_other_workspaces() {
         .execute(&mut *tx)
         .await
         .expect("guc");
-    // cloud_box: refused (the owner trigger cannot even see B's member through RLS)…
-    assert!(
+    // The BEFORE INSERT owner trigger runs ahead of the policy's WITH CHECK and cannot see B's
+    // member through RLS, so it is the refusal here; the policy itself is proved on the control table below.
+    expect_db_error(
         sqlx::query("INSERT INTO cloud_box (workspace_id, member_id) VALUES ($1, $2)")
             .bind(b.workspace)
             .bind(b.n)
             .execute(&mut *tx)
-            .await
-            .is_err(),
-        "workspace A's tenant wrote a cloud_box row into workspace B"
-    );
+            .await,
+        "must be a human member of the workspace",
+    )
+    .await;
     tx.rollback().await.expect("rollback");
     // …and the policy's own WITH CHECK, on the table that has no insert trigger.
     let mut tx = app.begin().await.expect("tx");
@@ -1400,26 +1408,40 @@ async fn a_closed_instance_exposes_nothing() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let w = seed_world(&su).await;
+    // A real, running box of a real owner: a closed instance must not act on it.
+    let box_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO cloud_box (workspace_id, member_id) VALUES ($1, $2) RETURNING id",
+    )
+    .bind(w.workspace)
+    .bind(w.m)
+    .fetch_one(&su)
+    .await
+    .expect("box");
+    sqlx::query("UPDATE cloud_box SET state='running' WHERE id = $1")
+        .bind(box_id)
+        .execute(&su)
+        .await
+        .expect("running");
     // `None`: AppState's own default, not an explicit `enabled: false`.
     let base = start_server(momo_app_pool().await, None).await;
     let explicit_off = start_server(momo_app_pool().await, Some(false)).await;
     let client = reqwest::Client::new();
-    let any = Uuid::new_v4();
     for base in [&base, &explicit_off] {
         for (method, tail, body) in [
             ("POST", String::new(), None),
             ("GET", String::new(), None),
             ("GET", "/mine".to_string(), None),
-            ("POST", format!("/{any}/start"), None),
-            ("POST", format!("/{any}/stop"), None),
-            ("POST", format!("/{any}/delete"), None),
+            ("POST", format!("/{box_id}/start"), None),
+            ("POST", format!("/{box_id}/stop"), None),
+            ("POST", format!("/{box_id}/delete"), None),
             (
                 "POST",
-                format!("/{any}/keep-awake"),
+                format!("/{box_id}/keep-awake"),
                 Some(json!({"enabled": true})),
             ),
         ] {
-            for jwt in [&w.admin_jwt, &w.m_jwt] {
+            // The owner, who would be allowed on an open instance, and the admin.
+            for jwt in [&w.m_jwt, &w.admin_jwt] {
                 let (status, _) = call(
                     &client,
                     method,
@@ -1432,12 +1454,221 @@ async fn a_closed_instance_exposes_nothing() {
             }
         }
     }
+    // Nothing happened: same state, no control, no audit row, no new box.
+    assert_eq!(box_state(&su, &box_id.to_string()).await, "running");
+    assert!(controls_of(&su, &box_id.to_string()).await.is_empty());
+    assert!(audit_actions(&su, &box_id.to_string()).await.is_empty());
     let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM cloud_box WHERE workspace_id = $1")
         .bind(w.workspace)
         .fetch_one(&su)
         .await
         .expect("count");
-    assert_eq!(rows, 0);
+    assert_eq!(rows, 1);
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3500-*)"]
+async fn a_member_demoted_to_guest_no_longer_controls_their_box() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let w = seed_world(&su).await;
+    let app = momo_app_pool().await;
+    let base = start_server(app.clone(), Some(true)).await;
+    let client = reqwest::Client::new();
+    let ws = w.workspace;
+    let (_, created) = call(&client, "POST", boxes_url(&base, ws, ""), &w.m_jwt, None).await;
+    let id = created["id"].as_str().expect("id").to_string();
+    let box_uuid: Uuid = id.parse().expect("uuid");
+    runner_event(&app, ws, box_uuid, BoxEvent::RunnerReady).await;
+    drain_controls(&app, ws).await;
+
+    sqlx::query("UPDATE workspace_membership SET role = 'guest'::text::membership_role WHERE workspace_id = $1 AND member_id = $2")
+        .bind(ws)
+        .bind(w.m)
+        .execute(&su)
+        .await
+        .expect("demote");
+    for (verb, body) in [
+        ("start", None),
+        ("stop", None),
+        ("delete", None),
+        ("keep-awake", Some(json!({"enabled": true}))),
+    ] {
+        let (status, refused) = call(
+            &client,
+            "POST",
+            boxes_url(&base, ws, &format!("/{id}/{verb}")),
+            &w.m_jwt,
+            body,
+        )
+        .await;
+        assert_eq!(status, 403, "a guest owner {verb}: {refused}");
+        assert_eq!(error_code(&refused), "cloud_box_guest");
+    }
+    let (status, _) = call(
+        &client,
+        "GET",
+        boxes_url(&base, ws, "/mine"),
+        &w.m_jwt,
+        None,
+    )
+    .await;
+    assert_eq!(status, 403, "a guest read their box");
+    assert_eq!(
+        box_state(&su, &id).await,
+        "running",
+        "a refused guest changed the box"
+    );
+    // The admin still manages it.
+    let (status, stopped) = call(
+        &client,
+        "POST",
+        boxes_url(&base, ws, &format!("/{id}/stop")),
+        &w.admin_jwt,
+        None,
+    )
+    .await;
+    assert_eq!((status, stopped["state"].as_str()), (200, Some("stopped")));
+    let (status, deleting) = call(
+        &client,
+        "POST",
+        boxes_url(&base, ws, &format!("/{id}/delete")),
+        &w.admin_jwt,
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, deleting["state"].as_str()),
+        (200, Some("deleting"))
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3500-*)"]
+async fn runtime_roles_have_least_privilege_on_the_box_tables() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    for table in ["cloud_box", "cloud_box_control"] {
+        for role in ["momo_relay", "momo_worker", "momo_notifier"] {
+            for privilege in [
+                "SELECT",
+                "INSERT",
+                "UPDATE",
+                "DELETE",
+                "TRUNCATE",
+                "REFERENCES",
+                "TRIGGER",
+            ] {
+                let has: bool = sqlx::query_scalar("SELECT has_table_privilege($1, $2, $3)")
+                    .bind(role)
+                    .bind(table)
+                    .bind(privilege)
+                    .fetch_one(&su)
+                    .await
+                    .expect("privilege");
+                assert!(
+                    !has,
+                    "{role} has {privilege} on {table}: BYPASSRLS roles must not touch box rows"
+                );
+            }
+        }
+        for (privilege, want) in [
+            ("SELECT", true),
+            ("INSERT", true),
+            ("UPDATE", true),
+            ("DELETE", false),
+            ("TRUNCATE", false),
+            ("REFERENCES", false),
+            ("TRIGGER", false),
+        ] {
+            let has: bool = sqlx::query_scalar("SELECT has_table_privilege('momo_app', $1, $2)")
+                .bind(table)
+                .bind(privilege)
+                .fetch_one(&su)
+                .await
+                .expect("privilege");
+            assert_eq!(has, want, "momo_app {privilege} on {table}");
+        }
+    }
+    // The API role cannot delete, and the database refuses deletion of live rows even for the owner role.
+    let w = seed_world(&su).await;
+    let box_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO cloud_box (workspace_id, member_id) VALUES ($1, $2) RETURNING id",
+    )
+    .bind(w.workspace)
+    .bind(w.m)
+    .fetch_one(&su)
+    .await
+    .expect("box");
+    sqlx::query("INSERT INTO cloud_box_control (workspace_id, box_id, verb, cpu_millis, memory_mb, disk_gb, pids) VALUES ($1, $2, 'create', 1000, 2048, 10, 512)")
+        .bind(w.workspace)
+        .bind(box_id)
+        .execute(&su)
+        .await
+        .expect("control");
+    let app = momo_app_pool().await;
+    let mut tx = app.begin().await.expect("tx");
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(w.workspace.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("guc");
+    expect_db_error(
+        sqlx::query("DELETE FROM cloud_box WHERE id = $1")
+            .bind(box_id)
+            .execute(&mut *tx)
+            .await,
+        "permission denied",
+    )
+    .await;
+    tx.rollback().await.expect("rollback");
+    expect_db_error(
+        sqlx::query("DELETE FROM cloud_box WHERE id = $1")
+            .bind(box_id)
+            .execute(&su)
+            .await,
+        "tombstone until deleted",
+    )
+    .await;
+    expect_db_error(
+        sqlx::query("DELETE FROM cloud_box_control WHERE box_id = $1")
+            .bind(box_id)
+            .execute(&su)
+            .await,
+        "in flight cannot be removed",
+    )
+    .await;
+    // A finished control, and a box that reached `deleted`, can be removed by the owner role.
+    sqlx::query(
+        "UPDATE cloud_box_control SET status='cancelled', completed_at=now() WHERE box_id = $1",
+    )
+    .bind(box_id)
+    .execute(&su)
+    .await
+    .expect("cancel");
+    let removed = sqlx::query("DELETE FROM cloud_box_control WHERE box_id = $1")
+        .bind(box_id)
+        .execute(&su)
+        .await
+        .expect("finished control is removable");
+    assert_eq!(removed.rows_affected(), 1);
+    sqlx::query(
+        "UPDATE cloud_box SET state='deleting', closed_reason='owner_delete' WHERE id = $1",
+    )
+    .bind(box_id)
+    .execute(&su)
+    .await
+    .expect("deleting");
+    sqlx::query("UPDATE cloud_box SET state='deleted', deleted_at=now() WHERE id = $1")
+        .bind(box_id)
+        .execute(&su)
+        .await
+        .expect("deleted");
+    sqlx::query("DELETE FROM cloud_box WHERE id = $1")
+        .bind(box_id)
+        .execute(&su)
+        .await
+        .expect("tombstone removable");
 }
 
 // ---------------------------------------------------------------------------

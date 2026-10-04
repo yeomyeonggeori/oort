@@ -2238,7 +2238,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: Caller is not an active member of the workspace.
+          description: "Caller is not an active member of the workspace, or is a guest."
           content:
             application/json:
               schema:
@@ -2256,7 +2256,7 @@ paths:
       summary: Start a stopped box (the box's owner only).
       description: >
         ADR-0197 D3/D6. Only the box's owner. A workspace admin gets `403
-        cloud_box_owner_only`; any other member gets 404 and learns nothing
+        cloud_box_owner_only`; a guest owner (demoted since creating) gets `403 cloud_box_guest`; any other member gets 404 and learns nothing
         about whether the box exists. Starting a running or idle box answers
         200 and writes nothing. A box that is not `stopped` (creating,
         deleting, delete_failed) is `409 cloud_box_state_conflict`; a start
