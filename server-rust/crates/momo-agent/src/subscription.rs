@@ -160,7 +160,7 @@ impl SubscriptionNoticeKind {
 pub fn subscription_notice_body(kind: SubscriptionNoticeKind, scope: &OwnerOnlyScope) -> String {
     match kind {
         SubscriptionNoticeKind::NonOwner => format!(
-            "{}의 개인 에이전트예요. 팀이 함께 부르는 에이전트는 AI에서 만들 수 있어요.",
+            "{}의 개인 에이전트예요. 팀이 함께 부르는 에이전트는 AI 화면에서 만들 수 있어요.",
             // #2900: the owner chose this name; it must not become markup.
             crate::inert_display_name(&scope.owner_display_name)
         ),
@@ -173,11 +173,11 @@ pub fn subscription_notice_body(kind: SubscriptionNoticeKind, scope: &OwnerOnlyS
             scope.harness.product_name()
         ),
         SubscriptionNoticeKind::Disabled => {
-            "지금은 이 서버에서 구독 에이전트를 쓸 수 없어요. AI에서 팀 AI 키를 연결할 수 있어요."
+            "지금은 이 서버에서 구독 에이전트를 쓸 수 없어요. AI 화면에서 팀 AI 키를 연결할 수 있어요."
                 .to_string()
         }
         SubscriptionNoticeKind::ClaudePaused => {
-            "Claude 구독으로 대신 답하는 기능은 Anthropic 확인이 끝날 때까지 쉬고 있어요. 내 작업에서 직접 쓰거나, AI에서 팀 AI 키를 연결할 수 있어요."
+            "Claude 구독으로 대신 답하는 기능은 Anthropic 확인이 끝날 때까지 쉬고 있어요. 내 작업에서 직접 쓰거나, AI 화면에서 팀 AI 키를 연결할 수 있어요."
                 .to_string()
         }
     }
@@ -986,7 +986,7 @@ mod tests {
         let s = scope(Uuid::from_u128(1));
         assert_eq!(
             subscription_notice_body(SubscriptionNoticeKind::NonOwner, &s),
-            "성재의 개인 에이전트예요. 팀이 함께 부르는 에이전트는 AI에서 만들 수 있어요."
+            "성재의 개인 에이전트예요. 팀이 함께 부르는 에이전트는 AI 화면에서 만들 수 있어요."
         );
         assert_eq!(
             subscription_notice_body(SubscriptionNoticeKind::OfflineNotQueued, &s),
@@ -1006,7 +1006,7 @@ mod tests {
         );
         assert_eq!(
             subscription_notice_body(SubscriptionNoticeKind::Disabled, &s),
-            "지금은 이 서버에서 구독 에이전트를 쓸 수 없어요. AI에서 팀 AI 키를 연결할 수 있어요."
+            "지금은 이 서버에서 구독 에이전트를 쓸 수 없어요. AI 화면에서 팀 AI 키를 연결할 수 있어요."
         );
     }
 

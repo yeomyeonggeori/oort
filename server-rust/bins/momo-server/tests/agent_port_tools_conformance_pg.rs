@@ -5674,7 +5674,7 @@ async fn the_worker_card_suggest_lands_in_the_triggers_thread_once() {
     assert!(!first.output.contains("[여기]"), "{}", first.output);
     assert!(!first.output.contains("https://"), "{}", first.output);
     assert!(
-        first.output.contains("「팀 API 키 연결」"),
+        first.output.contains("「팀 AI 키 연결」"),
         "{}",
         first.output
     );
@@ -5687,7 +5687,7 @@ async fn the_worker_card_suggest_lands_in_the_triggers_thread_once() {
         props,
         fixture.human,
         json!({"harness": "team_key", "scope": "team"}),
-        "팀 API 키 연결",
+        "팀 AI 키 연결",
     );
     // #2959 M1: the card counts as a reply — the rollup moved and
     // `thread.updated` went out beside it.
