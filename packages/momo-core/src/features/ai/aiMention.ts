@@ -3,6 +3,7 @@ import type { MentionRoutingTarget } from "../routing/mentionTargets";
 import {
   aiAgentLabels,
   classifyAiAgent,
+  COMPOSER_WILL_NOT_ANSWER,
   nonOwnerComposerNotice,
   pausedComposerNotice,
   type AiAgentClassification,
@@ -39,18 +40,34 @@ export function classifyRosterAgent(member: RosterMember, viewerHumanId: string 
 export interface MentionAnnotation {
   /** 이름 아래 보조 줄(`쓰는 AI · 부를 수 있는 사람`). null 이면 줄을 그리지 않는다. */
   line: string | null;
+  /** `line` 과 같은 사실을 **상태(문의 중·맥 꺼짐)부터** 말한다. 한 줄로 접히는 큰 글자에서 쓴다. */
+  lineStatusFirst: string | null;
   /** 오른쪽 칩. */
   badge: string | null;
   /** 보는 사람이 못 부른다: 자물쇠 + 흐리게. 선택은 막지 않는다. */
   locked: boolean;
+  /**
+   * 잠긴 행을 스크린리더가 읽을 때 붙이는 힌트. 잠긴 행은 **고를 수 있으므로** `disabled` 로
+   * 말하지 않고(「흐림」이라 읽으면 눌러도 안 된다는 뜻이 된다) 결과를 힌트로 말한다.
+   */
+  lockedHint: string | null;
 }
+
+/** 잠긴 행의 읽기 힌트: 고르는 것은 되고, 보내는 것은 안 답한다. */
+export const MENTION_LOCKED_HINT = `고를 수는 있어요. ${COMPOSER_WILL_NOT_ANSWER}`;
 
 /** 에이전트가 아니거나 모르면 null. 사람 후보에는 아무것도 붙이지 않는다. */
 export function mentionAnnotation(member: RosterMember, viewerHumanId: string | null | undefined): MentionAnnotation | null {
   if (member.kind !== "agent") return null;
   const labels = aiAgentLabels(classifyRosterAgent(member, viewerHumanId));
   if (labels.mentionLine === null) return null;
-  return { line: labels.mentionLine, badge: labels.mentionBadge, locked: labels.lockedForViewer };
+  return {
+    line: labels.mentionLine,
+    lineStatusFirst: labels.mentionLineStatusFirst,
+    badge: labels.mentionBadge,
+    locked: labels.lockedForViewer,
+    lockedHint: labels.lockedForViewer ? MENTION_LOCKED_HINT : null,
+  };
 }
 
 /**
@@ -58,12 +75,18 @@ export function mentionAnnotation(member: RosterMember, viewerHumanId: string | 
  * 말하는 한 줄. 없으면 null. 여럿이면 처음 하나를 말하고 나머지 수를 덧붙인다.
  * 남의 구독이 쉬는 중이기도 하면 못 부른다는 말이 먼저다(더 근본적인 사실).
  */
-export function composerAgentNotice(agents: readonly RosterMember[], viewerHumanId: string | null | undefined): string | null {
+export function composerAgentNotice(
+  agents: readonly RosterMember[],
+  viewerHumanId: string | null | undefined,
+  options: { essentialFirst?: boolean } = {}
+): string | null {
+  const first = options.essentialFirst === true;
   const notices: string[] = [];
   for (const agent of agents) {
     if (agent.kind !== "agent") continue;
     const c = classifyRosterAgent(agent, viewerHumanId);
-    const notice = nonOwnerComposerNotice(c, agent.displayName) ?? pausedComposerNotice(c, agent.displayName);
+    const notice =
+      nonOwnerComposerNotice(c, agent.displayName, first) ?? pausedComposerNotice(c, agent.displayName, first);
     if (notice !== null) notices.push(notice);
   }
   if (notices.length === 0) return null;

@@ -32,6 +32,7 @@ import {
   AccessibilityInfo,
   Image,
   Keyboard,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -40,6 +41,7 @@ import {
   useWindowDimensions,
   View,
   type LayoutChangeEvent,
+  type NativeScrollEvent,
   type NativeSyntheticEvent,
   type TextInputSelectionChangeEventData,
   type TextLayoutEventData,
@@ -569,6 +571,9 @@ const SEND_SLOP = slopTo(CONV.composerSend);
 /** 시트가 담는 후보 수. 위 절이 이 넷을 고른 이유를 든다. */
 const MENTION_MAX_ROWS = 4;
 
+/** 「아래에 더 있다」 표지가 서는 오른쪽 띠의 폭. */
+const MENTION_CUE_GUTTER = 28;
+
 /** 시트가 절대로 그 아래로 안 내려가는 행 수 — 고른 것과 그 옆의 것. */
 const MENTION_MIN_ROWS = 2;
 
@@ -657,6 +662,15 @@ export function mentionAnnotationLines(fontScale: number): number {
 
 /** 보조 줄이 두 줄까지 접히는 글자 배수의 상한. 그 위는 한 줄. */
 const MENTION_TWO_LINE_MAX_SCALE = 1.3;
+
+/**
+ * 입력창 위 한 줄(최대 두 줄)이 문장 전부를 못 담는 글자 배수부터 핵심 절
+ * 「보내도 답하지 않아요」를 문장 앞에 둔 코어 변형을 쓴다. 줄 수를 늘리면 도크 예산
+ * (`composerColumnBudget`)을 넘으므로 줄을 늘리지 않고 **순서**로 지킨다.
+ */
+export function noticeEssentialFirst(fontScale: number): boolean {
+  return fontScale > MENTION_TWO_LINE_MAX_SCALE;
+}
 
 /**
  * 오른쪽 칩이 서는 글자 배수의 상한. 그 위(접근성 크기)는 칩이 왼쪽 칸의 폭을 반 넘게
@@ -1199,9 +1213,34 @@ export function Composer({
       composerAgentNotice(
         calledAgents(mentionRoutingTarget(text, directory.members)),
         viewerHumanId,
+        // 두 줄에 안 드는 큰 글자에서는 꼬리가 잘리므로 「보내도 답하지 않아요」를 앞에 둔다.
+        {essentialFirst: noticeEssentialFirst(fontScale)},
       ),
-    [text, directory.members, viewerHumanId],
+    [text, directory.members, viewerHumanId, fontScale],
   );
+  // iOS 에는 `accessibilityLiveRegion` 이 없다(Android 전용). 한 줄이 새로 서거나 말이 바뀔
+  // 때 VoiceOver 에 직접 알린다. 같은 말은 다시 읽지 않고(글을 치는 동안 효과가 되돌지 않게
+  // 의존성은 문장 하나), Android 는 live region 이 이미 하므로 겹쳐 읽지 않는다.
+  const noticeShown = agentNotice !== null && !showMentions && !showSlash;
+  const spokenNotice = noticeShown ? agentNotice : null;
+  useEffect(() => {
+    if (spokenNotice !== null && Platform.OS === 'ios') {
+      AccessibilityInfo.announceForAccessibility(spokenNotice);
+    }
+  }, [spokenNotice]);
+
+  // 후보 시트가 한 행만 보이는 큰 글자에서 「아래에 더 있다」를 말하는 표지의 상태.
+  const [sheetAtEnd, setSheetAtEnd] = useState(false);
+  const candidateKey = candidates.map(member => member.id).join('|');
+  useEffect(() => {
+    setSheetAtEnd(false);
+  }, [candidateKey]);
+  const onSheetScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const {contentOffset, layoutMeasurement, contentSize} = e.nativeEvent;
+    setSheetAtEnd(contentOffset.y + layoutMeasurement.height >= contentSize.height - 2);
+  }, []);
+  const sheetRows = Math.round(mentionsMaxHeight / mentionRowMin);
+  const sheetHasMore = annotated && sheetRows <= 1 && candidates.length > 1;
 
   // `onTyping` 을 의존성으로 들지 않기 위한 거울. 호출자가 핸들러 동일성을
   // 흘리면 `onChangeText` 가 키스트로크마다 새로 만들어지고, 그것은 이 파일이
@@ -1536,6 +1575,9 @@ export function Composer({
             // 안 찍힌다): 막대는 가장자리 바깥쪽 ~5pt 안에 서고, 행의 조각들은
             // `SAFE_GUTTER`(16) 만큼 안쪽에서 끝난다. 표지가 가장 오른쪽까지
             // 가는 AX-XXL 에서도 그 사이에 11pt 가 남는다.
+            onScroll={sheetHasMore ? onSheetScroll : undefined}
+            scrollEventThrottle={16}
+            contentContainerStyle={sheetHasMore ? styles.mentionScrollCue : undefined}
             showsVerticalScrollIndicator>
             {candidates.map(member => {
               const note = annotations.get(member.id) ?? null;
@@ -1549,6 +1591,10 @@ export function Composer({
                 <Pressable
                   key={member.id}
                   accessibilityRole="button"
+                  // 잠긴 행은 `accessibilityState.disabled` 가 아니라 **힌트**로 말한다: 이 행은
+                  // 고를 수 있고(멘션이 글에 들어간다) 막힌 것은 보낸 뒤의 답이다. `disabled` 는
+                  // VoiceOver 가 「흐림」이라 읽어 눌러도 안 된다는 뜻이 되고, 이 행의 사실과 다르다.
+                  accessibilityHint={note?.lockedHint ?? undefined}
                   // 눈에 보이는 것과 같은 것을 읽는다 (회전 2 M3). 이 `Pressable` 은
                   // `accessible` 기본값이 참이라 이 한 줄이 자식을 통째로 덮는다 — 표지와
                   // 보조 줄을 여기 안 실으면 스크린리더에서 자물쇠(못 부름)가 사라진다.
@@ -1618,7 +1664,11 @@ export function Composer({
                         numberOfLines={mentionAnnotationLines(fontScale)}
                         lineBreakStrategyIOS="hangul-word"
                         testID="mention-agent-line">
-                        {annotationLine}
+                        {/* 한 줄로 접히면 말줄임이 꼬리를 먹으므로 상태(문의 중·맥 꺼짐)를 앞에
+                            둔 같은 사실을 그린다. 읽는 라벨은 본래 순서 전문이다. */}
+                        {mentionAnnotationLines(fontScale) === 1
+                          ? note?.lineStatusFirst ?? annotationLine
+                          : annotationLine}
                       </Text>
                     ) : null}
                   </View>
@@ -1643,6 +1693,18 @@ export function Composer({
               );
             })}
           </ScrollView>
+          {sheetHasMore && !sheetAtEnd ? (
+            // 한 행만 보이는 큰 글자(막대는 끄는 동안에만 보인다)에서 「아래에 더 있다」. 높이를
+            // 먹지 않는 겹침이라 도크 예산(`mentionSheetMaxHeight`)은 그대로다. 글이 아니라 도형이다.
+            <View
+              style={styles.mentionMoreCue}
+              pointerEvents="none"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              testID="mention-more-cue">
+              <View style={styles.mentionMoreChevron} />
+            </View>
+          ) : null}
         </View>
       ) : null}
 
@@ -1666,7 +1728,7 @@ export function Composer({
         </Text>
       ) : null}
 
-      {agentNotice !== null && !showMentions && !showSlash ? (
+      {noticeShown ? (
         // 보내기 전에 말한다: 고르는 것은 막지 않지만 보내도 답이 오지 않는다. 문장은 전부
         // 코어(`composerAgentNotice`)가 만든다. 폰에는 라우팅 막대가 없어(웹의 「이번만 바꾸기」
         // 줄) 대신 들어갈 자리가 없고, 그래서 입력창 바로 위 한 줄이다.
@@ -1681,7 +1743,7 @@ export function Composer({
           // 이 줄을 세지 않으므로 상한이 곧 예산이다: 두 줄 × `line.meta` × 글자 배수가 가장 큰
           // 배수에서도 입력창 상한 뒤 열에 든다(`mentionAiAnnotation.test.tsx`). 잘린 문장은 라벨이 끝까지 읽는다.
           numberOfLines={2}
-          accessibilityLabel={agentNotice}
+          accessibilityLabel={agentNotice ?? undefined}
           testID="composer-agent-notice">
           {agentNotice}
         </Text>
@@ -2166,6 +2228,26 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // 부르는 까닭(「박다연 님만 부를 수 있어요」)의 유일한 눈에 보이는 문장이라, 행 전체에 0.6 을
   // 주면 가장 안 읽히는 글자가 가장 중요한 말을 든다(design-review H1). 눌린 동안은 흐리지 않다.
   mentionLockedDim: {opacity: 0.6},
+  // 「아래에 더 있다」 표지가 서는 오른쪽 띠. 행이 이 띠를 비워 두므로 줄이 표지 밑으로 안 간다.
+  mentionScrollCue: {paddingEnd: MENTION_CUE_GUTTER},
+  mentionMoreCue: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    right: 0,
+    width: MENTION_CUE_GUTTER,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mentionMoreChevron: {
+    width: 10,
+    height: 10,
+    borderRightWidth: 2,
+    borderBottomWidth: 2,
+    borderColor: color.textMuted,
+    // 회전한 네모의 시각 중심을 띠의 가운데로 끌어올린다.
+    transform: [{translateY: -3}, {rotate: '45deg'}],
+  },
   agentNotice: {
     paddingHorizontal: SAFE_GUTTER,
     paddingTop: space.sm,
