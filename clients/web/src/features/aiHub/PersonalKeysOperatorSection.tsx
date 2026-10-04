@@ -42,7 +42,7 @@ import { PersonalKeyRevokeDialog } from "./PersonalKeyRevokeDialog";
 // =============================================================================
 
 const OFFLINE_NOTE_ID = "ai-personal-keys-offline";
-const COLS = "sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)]";
+const COLS = "sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)_4rem]";
 const HINT_ID = "ai-personal-issue-key-hint";
 
 export function PersonalKeysOperatorSection({
@@ -142,6 +142,7 @@ export function PersonalKeysOperatorSection({
             <span>{COPY.columns.company}</span>
             <span>{COPY.columns.issuedAt}</span>
             <span>{COPY.columns.status}</span>
+            <span />
           </div>
           <ul className="flex min-w-0 flex-col" aria-label={COPY.heading} data-testid="ai-personal-keys-list">
             {list.map((key) => (
@@ -166,15 +167,13 @@ export function PersonalKeysOperatorSection({
                       <span className="text-timestamp text-ink-muted">{COPY.revokedAt(keyDate(key.revokedAtMs))}</span>
                     )}
                   </div>
-                </div>
-                {key.status === "active" && (
-                  <div className="flex flex-wrap items-center gap-2">
+                  {key.status === "active" ? (
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
                       aria-haspopup="dialog"
-                      className="tap-target bg-surface text-danger shadow-sm"
+                      className="tap-target w-max text-danger sm:justify-self-end"
                       onClick={(event) => {
                         revokeOpener.current = event.currentTarget;
                         revoke.reset();
@@ -184,8 +183,10 @@ export function PersonalKeysOperatorSection({
                     >
                       {COPY.revoke}
                     </Button>
-                  </div>
-                )}
+                  ) : (
+                    <span aria-hidden="true" className="hidden sm:block" />
+                  )}
+                </div>
               </li>
             ))}
           </ul>

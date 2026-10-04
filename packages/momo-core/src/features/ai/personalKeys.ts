@@ -147,7 +147,7 @@ export const PERSONAL_KEYS_COPY = {
     submitting: "발급 중",
     cancel: "취소",
     holderRequired: "받는 사람을 고르세요.",
-    addressFixed: "주소는 발급한 뒤 바꿀 수 없어요. 바꾸려면 회수하고 새로 발급해요.",
+    addressFixed: "AI 회사는 발급한 뒤 바꿀 수 없어요. 바꾸려면 회수하고 새로 발급해요.",
     keyCleared: "키는 칸에서 지웠으니 다시 붙여 넣어 주세요.",
     offline: "연결이 끊겨 지금은 발급할 수 없어요.",
   },
@@ -212,7 +212,7 @@ export function personalKeyErrorMessage(error: unknown, action: "issue" | "revok
     if (error.status === 404) return "이 키를 찾지 못했어요. 이미 사라졌을 수 있어요.";
     if (error.status === 409 && action === "agent") return "지금은 에이전트를 만들 수 없어요. 핸들이 이미 쓰이고 있을 수 있어요.";
     if (error.status === 400 && action === "issue") {
-      return `${error.message} 키와 주소를 확인하고 다시 붙여 넣어 주세요.`;
+      return `${error.message} 키와 AI 회사를 확인하고 다시 붙여 넣어 주세요.`;
     }
     return error.message;
   }

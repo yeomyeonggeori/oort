@@ -178,6 +178,7 @@ async function operator(browser, origin, scheme, viewport) {
         await shot(page, `revoke-confirm-${tag}`);
         await page.keyboard.press("Escape");
         await page.getByTestId("ai-personal-revoke-dialog").waitFor({ state: "detached" });
+        await page.waitForTimeout(300);
         const focused = await page.evaluate(() => document.activeElement?.getAttribute("data-testid"));
         check(`${tag} Esc 로 닫으면 회수 단추로 포커스가 돌아온다`, focused === "ai-personal-key-revoke", String(focused));
       } else {
