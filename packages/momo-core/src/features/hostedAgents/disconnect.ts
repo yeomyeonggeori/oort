@@ -1,3 +1,4 @@
+import { hasFinalConsonant } from "../../lib/koreanParticle";
 import { bool, num, record, WireShapeError } from "../../lib/wire";
 import {
   cleanupRowTitle,
@@ -209,15 +210,15 @@ export function cleanupProgress(
 /** 진행 표시 옆의 한 문장. 숫자만 있는 줄은 다음 행동을 말하지 않는다. */
 export function cleanupProgressSentence(progress: CleanupProgress): string {
   if (progress.total === 0) {
-    return "정리 목록이 아직 없습니다. 해제를 시작하면 확인할 항목이 여기 생깁니다.";
+    return "정리 목록이 아직 없어요. 해제를 시작하면 확인할 항목이 여기 생겨요.";
   }
   if (progress.remainingRequired === 0) {
-    return "필수 항목을 모두 확인했습니다. 이제 해제를 끝낼 수 있습니다.";
+    return "필수 항목을 모두 확인했어요. 이제 해제를 끝낼 수 있어요.";
   }
   const next = progress.nextTitle;
   return next === null
-    ? `아직 확인하지 않은 항목이 ${progress.remainingRequired}개 남았습니다.`
-    : `아직 확인하지 않은 항목이 ${progress.remainingRequired}개 남았습니다. 다음은 ${next}입니다.`;
+    ? `아직 확인하지 않은 항목이 ${progress.remainingRequired}개 남았어요.`
+    : `아직 확인하지 않은 항목이 ${progress.remainingRequired}개 남았어요. 다음은 ${next}${hasFinalConsonant(next) ? "이에요" : "예요"}.`;
 }
 
 // ---- 게이트 -----------------------------------------------------------------
@@ -234,7 +235,7 @@ export function disconnectStartGate(
   connection: HostedAgentConnection | null
 ): HostedGate {
   if (connection === null) {
-    return { allowed: false, blockedCopy: "이 에이전트에는 호스티드 연결이 없습니다." };
+    return { allowed: false, blockedCopy: "이 에이전트에는 호스티드 연결이 없어요." };
   }
   switch (connection.status) {
     case "detected":
@@ -244,21 +245,21 @@ export function disconnectStartGate(
       return {
         allowed: false,
         blockedCopy:
-          "아직 이 에이전트가 한 번도 다이얼인하지 않아 해제할 권한이 없습니다. 그대로 두면 연결 값이 만료됩니다.",
+          "아직 이 에이전트가 한 번도 다이얼인하지 않아 해제할 권한이 없어요. 그대로 두면 연결 값이 만료돼요.",
       };
     case "expired":
       return {
         allowed: false,
         blockedCopy:
-          "연결 값이 만료돼 이미 아무 권한도 열려 있지 않습니다. 정리할 provider 설정이 있으면 provider 화면에서 직접 지우세요.",
+          "연결 값이 만료돼 이미 아무 권한도 열려 있지 않아요. 정리할 provider 설정이 있으면 provider 화면에서 직접 지우세요.",
       };
     case "cleanup_pending":
       return {
         allowed: false,
-        blockedCopy: "이 연결은 이미 해제 중입니다. 아래 정리 목록을 이어서 확인하세요.",
+        blockedCopy: "이 연결은 이미 해제 중이에요. 아래 정리 목록을 이어서 확인하세요.",
       };
     case "disconnected":
-      return { allowed: false, blockedCopy: "이 연결은 이미 해제됐습니다." };
+      return { allowed: false, blockedCopy: "이 연결은 이미 해제됐어요." };
   }
 }
 
@@ -276,7 +277,7 @@ export function manifestRepairGate(
   if (connection === null || connection.status !== "cleanup_pending") {
     return {
       allowed: false,
-      blockedCopy: "정리 중인 연결에서만 목록을 복원할 수 있습니다.",
+      blockedCopy: "정리 중인 연결에서만 목록을 복원할 수 있어요.",
     };
   }
   return { allowed: true };
@@ -298,22 +299,22 @@ export function terminalGate(
   artifacts: readonly HostedCleanupArtifact[]
 ): HostedGate {
   if (connection === null) {
-    return { allowed: false, blockedCopy: "이 에이전트에는 호스티드 연결이 없습니다." };
+    return { allowed: false, blockedCopy: "이 에이전트에는 호스티드 연결이 없어요." };
   }
   if (connection.status === "disconnected") {
-    return { allowed: false, blockedCopy: "이 연결은 이미 해제됐습니다." };
+    return { allowed: false, blockedCopy: "이 연결은 이미 해제됐어요." };
   }
   if (connection.status !== "cleanup_pending") {
     return {
       allowed: false,
-      blockedCopy: "아직 해제를 시작하지 않았습니다. 먼저 연결 해제를 시작하세요.",
+      blockedCopy: "아직 해제를 시작하지 않았어요. 먼저 연결 해제를 시작하세요.",
     };
   }
   if (artifacts.length === 0) {
     return {
       allowed: false,
       blockedCopy:
-        "정리 목록이 비어 있어 무엇을 확인했는지 판단할 수 없습니다. 목록을 복원한 뒤 이어서 확인하세요.",
+        "정리 목록이 비어 있어 무엇을 확인했는지 판단할 수 없어요. 목록을 복원한 뒤 이어서 확인하세요.",
     };
   }
   const progress = cleanupProgress(artifacts);
@@ -353,17 +354,17 @@ export function revokeFacts(
     {
       key: "자격증명",
       value:
-        "폐기됐습니다. 이 연결이 쓰던 값으로는 어떤 요청도 통과하지 못하고, 도구 목록도 열리지 않습니다.",
+        "폐기됐어요. 이 연결이 쓰던 값으로는 어떤 요청도 통과하지 못하고, 도구 목록도 열리지 않아요.",
     },
     {
       key: "전용 에이전트",
       value:
-        "일시정지됐습니다. 멘션해도 응답하지 않고 새 작업을 가져가지 못합니다.",
+        "일시정지됐어요. 멘션해도 응답하지 않고 새 작업을 가져가지 못해요.",
     },
     {
       key: "진행 중이던 작업",
       value:
-        "정리됐습니다. 이미 넘겨 둔 작업의 점유가 풀렸고, 다음 폴링이 아니라 그 자리에서 멈췄습니다.",
+        "정리됐어요. 이미 넘겨 둔 작업의 점유가 풀렸고, 다음 폴링이 아니라 그 자리에서 멈췄어요.",
     },
   ];
 }
@@ -381,24 +382,24 @@ export const DISCONNECT_SECTION_TITLE = "호스티드 연결";
  * 실행하는 에이전트입니다」)과 정면으로 어긋났다.
  */
 export const DISCONNECT_SECTION_LEAD =
-  "호스티드 연결은 다른 곳에서 돌고 있는 에이전트를 이 워크스페이스에 들인 것입니다. 해제는 oort 쪽 권한을 즉시 끊는 일과, provider에 남은 설정을 사람이 정리했는지 확인하는 일 두 걸음입니다.";
+  "호스티드 연결은 다른 곳에서 돌고 있는 에이전트를 이 워크스페이스에 들인 것이에요. 해제는 oort 쪽 권한을 즉시 끊는 일과, provider에 남은 설정을 사람이 정리했는지 확인하는 일 두 걸음이에요.";
 
 /** 해제를 시작하기 전 화면이 반드시 나눠 말해야 하는 두 문단 중 첫째. */
 export const DISCONNECT_IMMEDIATE_HEADLINE = "지금 바로 일어나는 일";
 
 export const DISCONNECT_IMMEDIATE_ITEMS: readonly string[] = [
-  "이 연결의 자격증명이 폐기되고, 그 값으로는 아무 요청도 통과하지 못합니다.",
-  "전용 에이전트가 일시정지되어 멘션에도 응답하지 않습니다.",
-  "이미 넘겨 둔 작업의 점유가 풀리고 그 자리에서 멈춥니다.",
+  "이 연결의 자격증명이 폐기되고, 그 값으로는 아무 요청도 통과하지 못해요.",
+  "전용 에이전트가 일시정지되어 멘션에도 응답하지 않아요.",
+  "이미 넘겨 둔 작업의 점유가 풀리고 그 자리에서 멈춰요.",
 ];
 
 /** 둘째 문단. **이 버튼이 하지 않는 일**을 같은 크기로 적는다. */
 export const DISCONNECT_NOT_DONE_HEADLINE = "이 버튼이 하지 않는 일";
 
 export const DISCONNECT_NOT_DONE_ITEMS: readonly string[] = [
-  "provider에 만들어 둔 커넥터, 플러그인, routine, 봇은 그대로 남습니다. oort는 provider 안에 손을 넣지 못합니다.",
-  "이 기기에 받아 둔 플러그인 파일도 그대로 남습니다.",
-  "지금까지 나눈 대화, 채널, 작업 기록은 하나도 지워지지 않습니다.",
+  "provider에 만들어 둔 커넥터, 플러그인, routine, 봇은 그대로 남아요. oort는 provider 안에 손을 넣지 못해요.",
+  "이 기기에 받아 둔 플러그인 파일도 그대로 남아요.",
+  "지금까지 나눈 대화, 채널, 작업 기록은 하나도 지워지지 않아요.",
 ];
 
 /**
@@ -408,12 +409,12 @@ export const DISCONNECT_NOT_DONE_ITEMS: readonly string[] = [
  * 비싸다: 지워질까 봐 해제를 미루거나, 지워졌다고 믿고 남은 기록을 방치한다.
  */
 export const DISCONNECT_HISTORY_NOTE =
-  "해제는 기록을 지우는 일이 아닙니다. 이 에이전트가 남긴 메시지와 작업 기록은 채널에 그대로 남습니다.";
+  "해제는 기록을 지우는 일이 아니에요. 이 에이전트가 남긴 메시지와 작업 기록은 채널에 그대로 남아요.";
 
 export const DISCONNECT_START_LABEL = "연결 해제 시작";
 
 export const DISCONNECT_START_QUESTION =
-  "이 연결의 자격증명을 지금 폐기하고 정리 확인을 시작합니다. 폐기는 되돌릴 수 없고, 다시 쓰려면 새 연결을 만들어야 합니다.";
+  "이 연결의 자격증명을 지금 폐기하고 정리 확인을 시작해요. 폐기는 되돌릴 수 없고, 다시 쓰려면 새 연결을 만들어야 해요.";
 
 export const DISCONNECT_START_CONFIRM_LABEL = "폐기하고 시작";
 
@@ -429,11 +430,11 @@ export const CLEANUP_HEADLINE = "provider에 남은 것 정리";
  * 묻힌다.
  */
 export const CLEANUP_LEAD =
-  "아래 항목은 사람이 provider 화면에서 직접 정리하고, oort는 그 확인을 기록만 합니다. 확인한 내용은 나중에 이 해제를 설명하는 근거로 남습니다.";
+  "아래 항목은 사람이 provider 화면에서 직접 정리하고, oort는 그 확인을 기록만 해요. 확인한 내용은 나중에 이 해제를 설명하는 근거로 남아요.";
 
 /** 한 줄을 확인해도 다른 줄이 닫히지 않는다는 사실. 목록 머리에 상시 노출된다. */
 export const CLEANUP_INDEPENDENCE_NOTE =
-  "항목은 서로 대신하지 않습니다. 커넥터를 제거해도 로컬 파일 줄은 열린 채 남고, routine을 꺼 두는 것은 제거가 아닙니다.";
+  "항목은 서로 대신하지 않아요. 커넥터를 제거해도 로컬 파일 줄은 열린 채 남고, routine을 꺼 두는 것은 제거가 아니에요.";
 
 /**
  * 오프라인일 때 목록 머리에 한 번 서는 문장.
@@ -445,7 +446,7 @@ export const CLEANUP_INDEPENDENCE_NOTE =
  * 한 번 적고 여섯이 참조하는 규율은 `ConfirmButton.describedBy` 의 것이다.
  */
 export const CLEANUP_OFFLINE_NOTE =
-  "연결이 끊겨 있어 지금은 확인을 저장할 수 없습니다. 마지막으로 받은 목록은 그대로 읽을 수 있습니다.";
+  "연결이 끊겨 있어 지금은 확인을 저장할 수 없어요. 마지막으로 받은 목록은 그대로 읽을 수 있어요.";
 
 /**
  * 앞선 쓰기가 아직 날고 있어 목록이 잠겼을 때, 오프라인 문장과 **같은 자리에**
@@ -463,7 +464,7 @@ export const CLEANUP_OFFLINE_NOTE =
  * 확정이 날고 있는 경우가 생긴다.
  */
 export const CLEANUP_BUSY_NOTE =
-  "앞서 누른 것이 아직 끝나지 않았습니다. 그것이 끝나면 이어서 기록할 수 있습니다.";
+  "앞서 누른 것이 아직 끝나지 않았어요. 그것이 끝나면 이어서 기록할 수 있어요.";
 
 export const CLEANUP_ACKNOWLEDGE_LABEL = "확인 기록";
 
@@ -485,41 +486,41 @@ export const CLEANUP_EVIDENCE_LABEL = "무엇을 보고 확인했습니까";
  * 상시 말하는 한 줄이다. 잠긴 컨트롤은 언제나 사유를 가리킨다.
  */
 export const CLEANUP_EVIDENCE_REQUIRED_NOTE =
-  "확인한 내용을 적어야 이 답을 기록할 수 있습니다.";
+  "확인한 내용을 적어야 이 답을 기록할 수 있어요.";
 
 export const CLEANUP_STATUS_LEGEND = "지금 provider에서 본 상태";
 
 export const CLEANUP_DISPOSITION_LEGEND = "이 항목을 어떻게 했습니까";
 
 /** 처분을 아직 고르지 않은 선택지. 관측만 기록하는 길이 있다는 사실을 세운다. */
-export const CLEANUP_DISPOSITION_DEFER_LABEL = "아직 정하지 않았습니다";
+export const CLEANUP_DISPOSITION_DEFER_LABEL = "아직 정하지 않았어요";
 
 export const CLEANUP_DISPOSITION_DEFER_DETAIL =
-  "본 것만 기록하고 이 항목은 열어 둡니다. 열린 항목이 하나라도 있으면 해제를 끝낼 수 없습니다.";
+  "본 것만 기록하고 이 항목은 열어 둬요. 열린 항목이 하나라도 있으면 해제를 끝낼 수 없어요.";
 
 // ---- 마지막 걸음 ------------------------------------------------------------
 
 export const TERMINAL_HEADLINE = "해제 끝내기";
 
 export const TERMINAL_LEAD =
-  "필수 항목을 모두 확인하면 서버가 마지막으로 자기 쪽 상태를 다시 읽고 해제를 확정합니다. 확정은 한 번만 일어납니다.";
+  "필수 항목을 모두 확인하면 서버가 마지막으로 자기 쪽 상태를 다시 읽고 해제를 확정해요. 확정은 한 번만 일어나요.";
 
 export const TERMINAL_LABEL = "해제 확정";
 
 export const TERMINAL_QUESTION =
-  "정리 확인을 모두 마쳤다고 서버에 알리고 이 연결을 해제 상태로 확정합니다. 확정한 뒤에는 이 연결을 되살릴 수 없습니다.";
+  "정리 확인을 모두 마쳤다고 서버에 알리고 이 연결을 해제 상태로 확정해요. 확정한 뒤에는 이 연결을 되살릴 수 없어요.";
 
 export const TERMINAL_CONFIRM_LABEL = "확정";
 
-export const TERMINAL_DONE_HEADLINE = "이 연결은 해제됐습니다.";
+export const TERMINAL_DONE_HEADLINE = "이 연결은 해제됐어요.";
 
 export const TERMINAL_DONE_DETAIL =
-  "이 에이전트를 다시 들이려면 새 연결을 만들어야 하고, 그때 만들어지는 것은 새 전용 에이전트입니다. 지난 대화와 작업 기록은 그대로 남아 있습니다.";
+  "이 에이전트를 다시 들이려면 새 연결을 만들어야 하고, 그때 만들어지는 것은 새 전용 에이전트예요. 지난 대화와 작업 기록은 그대로 남아 있어요.";
 
 export const MANIFEST_REPAIR_LABEL = "정리 목록 복원";
 
 export const MANIFEST_REPAIR_NOTE =
-  "목록을 다시 채웁니다. 이미 확인한 항목은 되돌아가지 않고, 해제가 두 번 일어나지도 않습니다.";
+  "목록을 다시 채워요. 이미 확인한 항목은 되돌아가지 않고, 해제가 두 번 일어나지도 않아요.";
 
 // ---- live region ------------------------------------------------------------
 
@@ -534,15 +535,15 @@ export function disconnectLiveMessage(
   connection: HostedAgentConnection | null,
   artifacts: readonly HostedCleanupArtifact[]
 ): string {
-  if (connection === null) return "이 에이전트에는 호스티드 연결이 없습니다.";
+  if (connection === null) return "이 에이전트에는 호스티드 연결이 없어요.";
   switch (connection.status) {
     case "cleanup_pending": {
       const progress = cleanupProgress(artifacts);
-      return `oort 쪽 권한은 끊겼습니다. ${cleanupProgressSentence(progress)}`;
+      return `oort 쪽 권한은 끊겼어요. ${cleanupProgressSentence(progress)}`;
     }
     case "disconnected":
-      return "이 연결은 해제됐습니다.";
+      return "이 연결은 해제됐어요.";
     default:
-      return "이 연결은 아직 살아 있습니다. 해제를 시작하면 자격증명이 폐기됩니다.";
+      return "이 연결은 아직 살아 있어요. 해제를 시작하면 자격증명이 폐기돼요.";
   }
 }

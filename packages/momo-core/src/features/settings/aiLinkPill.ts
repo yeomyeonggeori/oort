@@ -5,7 +5,7 @@ import type { ProviderLink, ProviderLinkTest } from "./api";
 // =============================================================================
 // AI 연결 줄의 알약 판정 (#2941 GC-0, brief §3.5).
 //
-// 설정 › AI 연결과 채팅의 로컬 연결 카드(#2944)와 폰 카드(GC-4)가 **같은 입력에
+// AI과 채팅의 로컬 연결 카드(#2944)와 폰 카드(GC-4)가 **같은 입력에
 // 같은 알약**을 말해야 한다. 그래서 판정은 여기 한 곳에만 있다. 웹 컴포넌트
 // 안에 지역 함수로 있던 `linkPill`(AiLinkSection)과 구독 줄의 색 표
 // (AiMyAccountsSection `PILL_TONE`)를 옮겨 왔다. 렌더는 각 클라이언트가 하고,
@@ -36,7 +36,7 @@ export function isLegacyTeamLink(link: ProviderLink): boolean {
 }
 
 /**
- * 팀 연결(provider_link) 줄의 알약.
+ * 팀 AI 키(provider_link) 줄의 알약.
  *
  * 순서가 판정이다: 오프라인이면 마지막 값을 확인할 수 없고, 내부용 연결은 읽기
  * 전용이고, 이 화면에서 확인이 도는 중이면 확인 중, 확인 결과가 있으면 그 결과,

@@ -21,7 +21,7 @@ const CATALOG: AgentToolCatalogEntry[] = [
   {
     name: LONG_NAME,
     description:
-      "배포 전 롤백 절차를 확인한 뒤에만 쓰는 작업 세션 종료입니다. 호스트 상태와 정산 원장을 닫으며, 한 번 실행하면 같은 세션으로 되돌리지 못합니다.",
+      "배포 전 롤백 절차를 확인한 뒤에만 쓰는 작업 세션 종료예요. 호스트 상태와 정산 원장을 닫으며, 한 번 실행하면 같은 세션으로 되돌리지 못해요.",
     executable: true,
     requiresApproval: true,
     unavailableReason: null,
@@ -29,14 +29,14 @@ const CATALOG: AgentToolCatalogEntry[] = [
   {
     name: "work.session.spawn",
     description:
-      "등록된 호스트에서 코딩 도구를 새 작업 세션으로 시작합니다. 승인하는 사람이 호스트를 고릅니다.",
+      "등록된 호스트에서 코딩 도구를 새 작업 세션으로 시작해요. 승인하는 사람이 호스트를 골라요.",
     executable: true,
     requiresApproval: true,
     unavailableReason: null,
   },
   {
     name: "work.session.resume",
-    description: "멈춘 작업 세션을 이어서 시작합니다.",
+    description: "멈춘 작업 세션을 이어서 시작해요.",
     executable: false,
     requiresApproval: true,
     unavailableReason: DECLARED_ONLY_REASON,
@@ -203,7 +203,7 @@ describe("EnabledToolsSection", () => {
     save.mockResolvedValue({
       ok: false,
       forbidden: true,
-      message: "이 계정으로는 이 에이전트의 도구 허용을 바꿀 수 없습니다.",
+      message: "이 계정으로는 이 에이전트의 도구 허용을 바꿀 수 없어요.",
     });
     const { host } = mount({ save });
     act(() => {
@@ -220,7 +220,7 @@ describe("EnabledToolsSection", () => {
       '[data-testid="agent-hub-enabled-tools-forbidden"]'
     );
     expect(banner?.textContent).toContain(
-      "이 계정으로는 이 에이전트의 도구 허용을 바꿀 수 없습니다."
+      "이 계정으로는 이 에이전트의 도구 허용을 바꿀 수 없어요."
     );
     expect(toggle(host, LONG_NAME).getAttribute("aria-disabled")).toBe("true");
     expect(toggle(host, "work.session.spawn").getAttribute("aria-disabled")).toBe(
@@ -233,7 +233,7 @@ describe("EnabledToolsSection", () => {
     save.mockResolvedValue({
       ok: false,
       forbidden: false,
-      message: "도구 허용을 저장하지 못했습니다. 연결을 확인하고 다시 시도하세요.",
+      message: "도구 허용을 저장하지 못했어요. 연결을 확인하고 다시 시도하세요.",
     });
     const { host } = mount({ save });
     act(() => {
@@ -250,7 +250,7 @@ describe("EnabledToolsSection", () => {
     expect(
       host.querySelector('[data-testid="agent-hub-enabled-tools-error"]')
         ?.textContent
-    ).toContain("도구 허용을 저장하지 못했습니다");
+    ).toContain("도구 허용을 저장하지 못했어요");
     expect(toggle(host, LONG_NAME).checked).toBe(true);
     expect(toggle(host, "work.session.spawn").checked).toBe(true);
   });
@@ -328,7 +328,7 @@ describe("EnabledToolsSection", () => {
 
   it("M-1: 빈 카탈로그는 한 문장이고 저장 버튼이 없다", () => {
     const { host } = mount({ catalog: [], enabledTools: [] });
-    expect(host.textContent).toContain("이 서버가 공개한 도구가 없습니다");
+    expect(host.textContent).toContain("이 서버가 공개한 도구가 없어요");
     expect(
       host.querySelector('[data-testid="agent-hub-enabled-tools-save"]')
     ).toBeNull();
@@ -500,7 +500,7 @@ describe("EnabledToolsSection", () => {
       enabledTools: ["work.session.spawn"],
     });
     expect(host.textContent).not.toContain("저장해야");
-    expect(host.textContent).toContain("이 에이전트에 허용된 도구입니다.");
+    expect(host.textContent).toContain("이 에이전트에 허용된 도구예요.");
     expect(
       host.querySelector('[data-testid="agent-hub-enabled-tools-save"]')
     ).toBeNull();
@@ -509,7 +509,7 @@ describe("EnabledToolsSection", () => {
   it("M-8: 카탈로그가 온 편집기만 저장 문장을 말한다", () => {
     const { host } = mount();
     expect(host.textContent).toContain(
-      "바꾼 뒤에는 저장해야 반영됩니다"
+      "바꾼 뒤에는 저장해야 반영돼요"
     );
   });
 
@@ -529,7 +529,7 @@ describe("EnabledToolsSection", () => {
   });
 
   it("M-10: 편집 잠금 사유는 형제처럼 눈에 보인다", () => {
-    const reason = "이 서버가 프로필 편집을 받는지 확인 중입니다.";
+    const reason = "이 서버가 프로필 편집을 받는지 확인 중이에요.";
     const { host } = mount({
       editable: false,
       editDisabledReason: reason,
@@ -566,7 +566,7 @@ describe("EnabledToolsSection", () => {
   it("N-15: 읽기 전용에서도 Tab 정거장이 하나 있다", () => {
     const { host } = mount({
       editable: false,
-      editDisabledReason: "이 서버가 프로필 편집을 받는지 확인 중입니다.",
+      editDisabledReason: "이 서버가 프로필 편집을 받는지 확인 중이에요.",
     });
     expect(liveTabStops(host)).toHaveLength(1);
   });

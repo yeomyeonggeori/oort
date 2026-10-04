@@ -51,7 +51,7 @@ export type WelcomeKickoffPhase = "hidden" | "stage" | "exiting" | "backstop";
  */
 export const WELCOME_BAND_JOY_HOLD_MS = 1_200;
 
-/** 구독 에이전트의 CLI 세션을 기다릴 때(#2814 착수 전 확인 결과). */
+/** 구독으로 쓰는 에이전트의 CLI 세션을 기다릴 때(#2814 착수 전 확인 결과). */
 export const WELCOME_BAND_SLEEPY_COPY = "터미널에서 Claude Code를 열어 두면 인사해요.";
 
 /** 오프너가 도착한 순간(시안 D5 `.kband`의 굵은 문장). */
@@ -89,7 +89,7 @@ export interface WelcomeBandSpeaker {
    * 서버 사실(track/engine `hosted_agent_connections.rs`·`hosted_connection.rs`):
    * 호스티드(구독 포함) 에이전트는 `member.status='active'`, `paused=true`로
    * 만들어지고, 소유자 맥의 CLI가 자격을 처음 증명하는 트랜잭션에서
-   * `paused=false`가 되며 그때 오너 킥오프가 들어간다. 그래서 「활성 에이전트가
+   * `paused=false`가 되며 그때 소유자 킥오프가 들어간다. 그래서 「활성 에이전트가
    * 모두 잠들어 있고 그중 하나가 내 것」이면 오프너는 CLI가 열려야 온다.
    * 팀의 잠든 에이전트(내 것이 아님)만 있으면 이 문장을 쓰지 않는다.
    */

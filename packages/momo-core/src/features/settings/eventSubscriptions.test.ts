@@ -146,7 +146,7 @@ describe("subscription state", () => {
       tone: "danger",
       label: "상태 확인 필요",
     });
-    expect(disabledReasonLine(row({ enabled: false }))).toContain("기록되지 않았습니다");
+    expect(disabledReasonLine(row({ enabled: false }))).toContain("기록되지 않았어요");
 
     // An unknown future reason lands in the same honest bucket, not in a
     // silently wrong one.
@@ -163,7 +163,7 @@ describe("subscription state", () => {
     });
     expect(eventSubscriptionStatus(admin)).toEqual({ tone: "muted", label: "관리자 중지" });
     expect(eventSubscriptionStatus(auto)).toEqual({ tone: "warn", label: "자동 중지" });
-    expect(disabledReasonLine(auto)).toContain("0으로 돌아갑니다");
+    expect(disabledReasonLine(auto)).toContain("0으로 돌아가요");
     expect(eventSubscriptionStatus(row())).toEqual({ tone: "ok", label: "사용 중" });
     expect(disabledReasonLine(row())).toBeNull();
   });
@@ -217,7 +217,7 @@ describe("event kinds", () => {
     expect(eventKindPayload("mention").content).toContain("본문");
     expect(eventKindPayload("approval_request").content).toContain("본문");
     expect(eventKindPayload("work.status_changed").content).toContain(
-      "메시지 본문은 들어 있지 않습니다"
+      "메시지 본문은 들어 있지 않아요"
     );
   });
 
@@ -255,8 +255,8 @@ describe("event kinds", () => {
     // message kinds read as if they sent different things.
     for (const kind of EVENT_SUBSCRIPTION_KINDS) {
       const payload = eventKindPayload(kind);
-      expect(payload.content).toMatch(/나갑니다\./);
-      expect(payload.identifiers).toMatch(/ID.*함께 붙습니다\.$/);
+      expect(payload.content).toMatch(/나가요\./);
+      expect(payload.identifiers).toMatch(/ID.*함께 붙어요\.$/);
     }
 
     // 작업 상태 변경 says its own full set, message body explicitly excluded.
@@ -273,10 +273,10 @@ describe("event kinds", () => {
 describe("failure copy", () => {
   it("names the action and the next move for every status", () => {
     expect(eventSubscriptionErrorMessage("load", new ApiError(403, "nope"))).toContain(
-      "오너나 관리자"
+      "소유자나 관리자"
     );
     expect(eventSubscriptionErrorMessage("delete", new ApiError(404, "gone"))).toBe(
-      "구독을 지우지 못했습니다. 이 구독은 이미 바뀌었거나 지워졌습니다. 목록을 다시 불러오세요."
+      "구독을 지우지 못했어요. 이 구독은 이미 바뀌었거나 지워졌어요. 목록을 다시 불러오세요."
     );
     expect(eventSubscriptionErrorMessage("create", new ApiError(400, "bad"))).toContain(
       "공개 https"
@@ -312,7 +312,7 @@ describe("failure copy", () => {
   });
 
   it("passes a network failure's own Korean copy through", () => {
-    const network = new Error("서버에 닿지 못했습니다. 주소와 네트워크를 확인하고 다시 시도하세요.");
-    expect(eventSubscriptionErrorMessage("load", network)).toContain("닿지 못했습니다");
+    const network = new Error("서버에 닿지 못했어요. 주소와 네트워크를 확인하고 다시 시도하세요.");
+    expect(eventSubscriptionErrorMessage("load", network)).toContain("닿지 못했어요");
   });
 });

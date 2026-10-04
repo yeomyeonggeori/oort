@@ -195,7 +195,7 @@ describe("연결 명령", () => {
   });
 });
 
-describe("구독 에이전트 정체성", () => {
+describe("구독으로 쓰는 에이전트 정체성", () => {
   it("names the agent after its owner and picks a free handle", () => {
     expect(
       subscriptionAgentIdentity("claude", { displayName: "성재", handle: "seongjae" }, new Set())

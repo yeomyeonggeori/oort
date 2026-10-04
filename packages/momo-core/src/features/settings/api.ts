@@ -529,7 +529,7 @@ export interface WorkspaceIdentity {
   /**
    * ADR-0193 D6 (#2815, openapi `WorkspaceDto.subscriptionAgentsEnabled`). 서버
    * 킬 스위치. **부재는 false다**: 이 필드를 모르는 서버는 `owner_only`를 기록하지
-   * 못하므로, 그 서버에 구독 경로로 합류시키면 팀 전체가 부르는 구독 에이전트가
+   * 못하므로, 그 서버에 구독 경로로 합류시키면 팀 전체가 부르는 구독으로 쓰는 에이전트가
    * 생긴다(D4 위반). 그래서 참으로 명시된 경우만 켬이다.
    */
   subscriptionAgentsEnabled: boolean;

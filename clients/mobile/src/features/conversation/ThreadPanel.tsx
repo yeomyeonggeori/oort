@@ -408,6 +408,7 @@ export function ThreadPanel({
                 // 호출자가 모르는 채로 지나가지 못한다 (#1384).
                 recipient="place"
                 directory={directory}
+                viewerHumanId={myMemberId}
                 // 채널과 **다른 이름 공간**이다(`drafts.ts`). 스레드에 쓰다 만
                 // 답글이 채널 입력창에서 되살아나면 그 글은 잘못된 방으로 간다.
                 draftKey={threadDraftKey(root.id)}

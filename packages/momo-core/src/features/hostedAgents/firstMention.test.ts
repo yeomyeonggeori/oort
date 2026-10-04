@@ -207,7 +207,7 @@ describe("첫 왕복 네 상태", () => {
     expect(waiting.phase).toBe("loading");
     expect(waiting.loadingKind).toBe("wait");
     expect(waiting.waitStartedAtMs).toBe(NOW - 1_000);
-    expect(waiting.headline).toContain("답을 기다리는 중입니다");
+    expect(waiting.headline).toContain("답을 기다리는 중이에요");
     const fetching = view({ messagesStatus: "loading" });
     expect(fetching.phase).toBe("loading");
     expect(fetching.loadingKind).toBe("fetch");
@@ -313,7 +313,7 @@ describe("첫 왕복 네 상태", () => {
     });
     expect(timedOut.phase).toBe("error");
     expect(timedOut.errorKind).toBe("timeout");
-    expect(timedOut.headline).toContain("답이 오지 않았습니다");
+    expect(timedOut.headline).toContain("답이 오지 않았어요");
     expect(timedOut.actionLabel).toBe("다시 멘션하기");
     expect(timedOut.agentBadge).toBe("에이전트");
   });

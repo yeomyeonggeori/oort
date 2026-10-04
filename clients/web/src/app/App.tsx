@@ -258,7 +258,7 @@ export function App() {
     );
   }
 
-  // 설정 › AI 연결·에이전트 화면에서 다시 연 AI 연결(#2870)은 여기서 갈라지지
+  // AI·에이전트 화면에서 다시 연 AI 연결(#2870)은 여기서 갈라지지
   // 않는다. 셸 안의 라우트(`ai-connect`)라 셸이 내려가지 않는다(#2893).
   if (capturePose !== null || firstRun === "first-agent") {
     return (

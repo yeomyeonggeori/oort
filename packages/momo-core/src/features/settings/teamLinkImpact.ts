@@ -76,12 +76,12 @@ export function teamUnlinkTitle(rowName: string): string {
 export function teamUnlinkBody(affected: readonly TeamLinkAffectedAgent[] | null): string {
   const gone = "저장된 키는 서버에서 지워지고 다시 볼 수 없어요.";
   if (affected === null) {
-    return `이 키를 쓰는 팀 에이전트는 대답할 수 없게 됩니다. ${gone}`;
+    return `이 키를 쓰는 팀 에이전트는 대답할 수 없게 돼요. ${gone}`;
   }
   if (affected.length === 0) {
     return `지금 이 키를 쓰는 팀 에이전트는 없어요. ${gone}`;
   }
-  return `이 키를 쓰는 팀 에이전트 ${affected.length}개가 대답할 수 없게 됩니다. ${gone}`;
+  return `이 키를 쓰는 팀 에이전트 ${affected.length}개가 대답할 수 없게 돼요. ${gone}`;
 }
 
 /**
@@ -91,10 +91,10 @@ export function teamUnlinkBody(affected: readonly TeamLinkAffectedAgent[] | null
  * 보인다: 그래서 「어떤 키로도」라고 단정하지 않는다.
  */
 export const TEAM_UNLINK_NO_SILENT_SWITCH =
-  "예비 provider로 조용히 넘어가지 않아요. 에이전트는 대답 대신 설정 › AI 연결로 가는 안내를 남겨요.";
+  "예비 provider로 조용히 넘어가지 않아요. 에이전트는 대답 대신 AI 화면으로 가는 안내를 남겨요.";
 
 /** 첫 인사·채널 요약은 키가 없으면 정해 둔 문구로 바뀐다(#2897 welcome provider-required). */
-export const TEAM_UNLINK_FIXED_COPY = "채널 요약과 첫 인사는 정해 둔 문구로 바뀝니다.";
+export const TEAM_UNLINK_FIXED_COPY = "채널 요약과 첫 인사는 정해 둔 문구로 바뀌어요.";
 
 /** 호스티드 목록을 못 읽었을 때 영향 목록 자리의 문장. */
 export const TEAM_UNLINK_LIST_UNKNOWN =

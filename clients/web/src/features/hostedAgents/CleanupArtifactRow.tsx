@@ -414,8 +414,8 @@ function AcknowledgeForm({
         />
         <p id={`${evidenceId}-hint`} className="break-keep text-meta text-ink-muted">
           {choice === null
-            ? "본 것만 기록할 때는 비워 둘 수 있습니다. 처분을 고르면 반드시 적어야 합니다."
-            : "이 문장이 나중에 이 해제를 설명하는 근거로 남습니다."}
+            ? "본 것만 기록할 때는 비워 둘 수 있어요. 처분을 고르면 반드시 적어야 해요."
+            : "이 문장이 나중에 이 해제를 설명하는 근거로 남아요."}
         </p>
         {touched && issue !== null && (
           <p id={`${evidenceId}-error`} role="alert" className="break-keep text-meta text-danger">
@@ -442,7 +442,7 @@ function AcknowledgeForm({
           `choice === null` 이면 **무조건 참**이므로(관측만 적는 저장에는 막힐 것이
           없다) `!ready` 는 곧 「처분을 골랐는데 증거가 규칙을 어겼다」와 같은 말이다.
           여기 있던 `choice === null` 갈래는 그래서 한 번도 그려진 적이 없었고,
-          그려졌다면 저장을 막는 사유 자리에서 「막히지 않았습니다」라고 말했을
+          그려졌다면 저장을 막는 사유 자리에서 「막히지 않았어요」라고 말했을
           것이다. 그 사실(관측만 기록된다)을 말하는 자리는 이미 둘 있다 — 지금
           선택돼 있는 라디오 자신(`CLEANUP_DISPOSITION_DEFER_*`)과 증거 칸의 힌트.
           문장은 코어가 들고 있다: 같은 거절이 화면마다 다른 말이 되지 않도록. */}

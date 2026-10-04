@@ -262,7 +262,7 @@ describe("상태 어휘", () => {
       connection({ status: "detected", activeCredentialId: CREDENTIAL })
     );
     expect(before).not.toBe(after);
-    expect(before).toContain("아무 권한도 열리지 않았습니다");
+    expect(before).toContain("아무 권한도 열리지 않았어요");
     expect(after).toContain("첫 증명이 성공해야");
   });
 
@@ -372,7 +372,7 @@ describe("RED PROOF ④ 실패 문구", () => {
 
   it("권한 부족은 누가 할 수 있는지 말한다", () => {
     expect(hostedFailureMessage("list", new ApiError(403, "x"))).toContain(
-      "오너나 관리자"
+      "소유자나 관리자"
     );
     expect(isHostedOperatorDenied(new ApiError(403, "x"))).toBe(true);
     expect(isHostedOperatorDenied(new ApiError(500, "x"))).toBe(false);
@@ -383,10 +383,10 @@ describe("RED PROOF ④ 실패 문구", () => {
       "get",
       new NetworkError("timeout", 15_000)
     );
-    expect(network).toContain("연결 상태를 불러오지 못했습니다.");
+    expect(network).toContain("연결 상태를 불러오지 못했어요.");
     expect(network).toContain("15초");
     expect(hostedFailureMessage("get", new WireShapeError())).toContain(
-      "서버 응답을 확인하지 못했습니다"
+      "서버 응답을 확인하지 못했어요"
     );
   });
 });

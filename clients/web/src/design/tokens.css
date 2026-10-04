@@ -2535,7 +2535,7 @@
   }
 }
 
-/* 설정 › AI 연결 (#2877). 기하는 시안 claudedocs/ai-accounts/mockups.html §1·§6의
+/* AI (#2877). 기하는 시안 claudedocs/ai-accounts/mockups.html §1·§6의
  * CSS 값 그대로다: 곁판 340, 줄 = 로고 36 · 이름 1fr · 상태 108 · 사용량 150 · ⋯ 28,
  * 간격 12. 임의 `grid-cols-[…]` 금지 규칙 때문에 이름을 붙여 여기 둔다.
  *

@@ -139,7 +139,7 @@ export function Shell({
   const closeCreate = useCallback(() => setCreate(null), []);
   const {member, workspaceId} = useSession();
   const directoryQuery = useDirectory(workspaceId);
-  // 채널 만들기는 오너·관리자만(ADR-0128). 명단이 오기 전에는 행을 세우지 않는다 —
+  // 채널 만들기는 소유자·관리자만(ADR-0128). 명단이 오기 전에는 행을 세우지 않는다 —
   // 세웠다가 거두는 것이 한 박자 늦게 서는 것보다 나쁘다(core `canCreateChannelNow`).
   const canCreateChannel = canCreateChannelNow(
     !directoryQuery.isPending,

@@ -130,26 +130,26 @@ export function eventKindPayload(kind: EventSubscriptionKind): EventKindPayload 
   switch (kind) {
     case "mention":
       return {
-        content: "메시지 본문과 멘션된 멤버 ID가 나갑니다.",
+        content: "메시지 본문과 멘션된 멤버 ID가 나가요.",
         identifiers:
-          "메시지·채널·작성자·스레드·실행 ID, 메시지 종류, 순번이 함께 붙습니다.",
+          "메시지·채널·작성자·스레드·실행 ID, 메시지 종류, 순번이 함께 붙어요.",
       };
     case "approval_request":
       return {
         content:
-          "메시지 본문과 속성 전체가 나갑니다. 속성에는 멘션된 멤버 ID처럼 메시지에 붙은 값이 모두 들어 있습니다.",
-        identifiers: "메시지·채널·작성자·실행 ID, 순번이 함께 붙습니다.",
+          "메시지 본문과 속성 전체가 나가요. 속성에는 멘션된 멤버 ID처럼 메시지에 붙은 값이 모두 들어 있어요.",
+        identifiers: "메시지·채널·작성자·실행 ID, 순번이 함께 붙어요.",
       };
     case "work.status_changed":
       return {
         content:
-          "이전 상태와 새 상태, 도구 이름, 시작·끝 시각, 종료 코드, 종료 사유가 나갑니다. 메시지 본문은 들어 있지 않습니다.",
+          "이전 상태와 새 상태, 도구 이름, 시작·끝 시각, 종료 코드, 종료 사유가 나가요. 메시지 본문은 들어 있지 않아요.",
         // `resumed_from_session_id` is named too. It is not personal data, but
         // the rule this panel set for itself is that the enumeration is
         // COMPLETE, and 11 of 12 is the same kind of gap the two message kinds
         // were sent back for (R2 N-R1).
         identifiers:
-          "작업 세션·이어받은 세션·채널·스레드·멤버 ID가 함께 붙습니다.",
+          "작업 세션·이어받은 세션·채널·스레드·멤버 ID가 함께 붙어요.",
       };
   }
 }
@@ -292,11 +292,11 @@ export function disabledReasonLine(subscription: {
     case "enabled":
       return null;
     case "disabled_by_admin":
-      return "관리자가 전송을 멈췄습니다.";
+      return "관리자가 전송을 멈췄어요.";
     case "auto_disabled":
-      return "받는 서버가 오류를 반복해서 자동으로 멈췄습니다. 주소를 고친 뒤 다시 사용하면 실패 횟수가 0으로 돌아갑니다.";
+      return "받는 서버가 오류를 반복해서 자동으로 멈췄어요. 주소를 고친 뒤 다시 사용하면 실패 횟수가 0으로 돌아가요.";
     case "needs_review":
-      return "멈춘 이유가 기록되지 않았습니다. 다시 사용하거나 지우세요.";
+      return "멈춘 이유가 기록되지 않았어요. 다시 사용하거나 지우세요.";
   }
 }
 
@@ -369,15 +369,15 @@ export function destinationError(raw: string): string | null {
     // 한글 경로를 683자 넣은 사람이 2048자 제한에 걸린 이유를 알 수 없다 — 한영
     // 혼용이 기본값인 코드베이스에서 두 단위는 3배 어긋난다.
     case "too_long":
-      return `주소는 ${DESTINATION_MAX_LENGTH}바이트를 넘을 수 없습니다. 한글은 한 자에 3바이트를 씁니다.`;
+      return `주소는 ${DESTINATION_MAX_LENGTH}바이트를 넘을 수 없어요. 한글은 한 자에 3바이트를 써요.`;
     case "unparsable":
-      return "주소를 읽지 못했습니다. https://hooks.example.com/oort 형태로 입력하세요.";
+      return "주소를 읽지 못했어요. https://hooks.example.com/oort 형태로 입력하세요.";
     case "scheme":
-      return "https:// 또는 http:// 로 시작하는 주소만 등록됩니다. 운영 서버는 공개 https 주소만 받습니다.";
+      return "https:// 또는 http:// 로 시작하는 주소만 등록돼요. 운영 서버는 공개 https 주소만 받아요.";
     case "credentials":
-      return "주소에 아이디와 비밀번호를 넣을 수 없습니다. 받는 쪽 인증은 서명 비밀로 합니다.";
+      return "주소에 아이디와 비밀번호를 넣을 수 없어요. 받는 쪽 인증은 서명 비밀로 해요.";
     case "fragment":
-      return "# 뒤쪽은 서버로 전송되지 않습니다. # 없이 입력하세요.";
+      return "# 뒤쪽은 서버로 전송되지 않아요. # 없이 입력하세요.";
   }
 }
 
@@ -393,15 +393,15 @@ export type EventSubscriptionAction =
 function actionFailed(action: EventSubscriptionAction): string {
   switch (action) {
     case "load":
-      return "구독 목록을 불러오지 못했습니다.";
+      return "구독 목록을 불러오지 못했어요.";
     case "create":
-      return "구독을 만들지 못했습니다.";
+      return "구독을 만들지 못했어요.";
     case "enable":
-      return "구독을 다시 사용하지 못했습니다.";
+      return "구독을 다시 사용하지 못했어요.";
     case "disable":
-      return "구독을 멈추지 못했습니다.";
+      return "구독을 멈추지 못했어요.";
     case "delete":
-      return "구독을 지우지 못했습니다.";
+      return "구독을 지우지 못했어요.";
   }
 }
 
@@ -414,7 +414,7 @@ function actionFailed(action: EventSubscriptionAction): string {
  * "다시 시도" without saying that leaves a live, unusable destination behind.
  */
 export const UNVERIFIED_CREATE_MESSAGE =
-  "구독이 만들어졌는지 확인하지 못했습니다. 서명 비밀은 다시 받을 수 없으니, 목록을 새로 불러와 같은 주소가 있으면 지운 뒤 다시 만드세요.";
+  "구독이 만들어졌는지 확인하지 못했어요. 서명 비밀은 다시 받을 수 없으니, 목록을 새로 불러와 같은 주소가 있으면 지운 뒤 다시 만드세요.";
 
 function failureDetail(
   action: EventSubscriptionAction,
@@ -423,7 +423,7 @@ function failureDetail(
   if (error instanceof WireShapeError) {
     return action === "create"
       ? UNVERIFIED_CREATE_MESSAGE
-      : "서버 응답을 읽지 못했습니다. 목록을 다시 불러오세요.";
+      : "서버 응답을 읽지 못했어요. 목록을 다시 불러오세요.";
   }
   if (!(error instanceof ApiError)) {
     // NetworkError already carries Korean copy that names the next move; an
@@ -434,15 +434,15 @@ function failureDetail(
   }
   switch (error.status) {
     case 400:
-      return "서버가 주소나 이벤트 선택을 거절했습니다. 공개 https 주소인지 확인한 뒤 다시 시도하세요.";
+      return "서버가 주소나 이벤트 선택을 거절했어요. 공개 https 주소인지 확인한 뒤 다시 시도하세요.";
     case 401:
-      return "로그인이 만료되었습니다. 다시 로그인한 뒤 시도하세요.";
+      return "로그인이 만료되었어요. 다시 로그인한 뒤 시도하세요.";
     case 403:
-      return "이벤트 구독은 워크스페이스 오너나 관리자만 관리할 수 있습니다.";
+      return "밖으로 보내는 알림은 워크스페이스 소유자나 관리자만 관리할 수 있어요.";
     case 404:
-      return "이 구독은 이미 바뀌었거나 지워졌습니다. 목록을 다시 불러오세요.";
+      return "이 구독은 이미 바뀌었거나 지워졌어요. 목록을 다시 불러오세요.";
     case 429:
-      return "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.";
+      return "요청이 너무 잦아요. 잠시 뒤에 다시 시도하세요.";
     default:
       return "잠시 뒤에 다시 시도하세요.";
   }

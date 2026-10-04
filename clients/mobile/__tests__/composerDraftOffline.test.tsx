@@ -960,7 +960,11 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
     const handle = screen.getByText(`@${AGENT.handle}`);
     const kind = screen.getByText('에이전트');
     // 묶음이 자라고 표지는 자기 폭을 그대로 받는다.
-    expect(StyleSheet.flatten(identity.props.style).flex).toBe(1);
+    // (AIH-9b: 묶음은 왼쪽 칸의 첫 줄이 됐다 — 폭을 받는 것은 그 칸이다.)
+    expect(
+      StyleSheet.flatten(screen.getAllByTestId('mention-column')[0].props.style).flex,
+    ).toBe(1);
+    expect(StyleSheet.flatten(identity.props.style).flex).toBeUndefined();
     expect(StyleSheet.flatten(kind.props.style).flexShrink).toBe(0);
     // 묶음 **안의 둘은 함께** 낸다 — 둘 중 어느 것도 basis 0 이 아니다.
     for (const piece of [name, handle]) {

@@ -170,7 +170,7 @@ const BODY_INK: ReadonlyArray<readonly [keyof Palette, keyof Palette]> = [
   ['dangerText', 'dangerSurface'],
   ['ok', 'bg'],
   ['ok', 'surface'],
-  // AI 연결 카드의 상태 알약(#2945) — 12pt 글자가 톤 채움 위에 선다.
+  // AI 계정 카드의 상태 알약(#2945) — 12pt 글자가 톤 채움 위에 선다.
   ['ok', 'okSurface'],
   ['warn', 'warnSurface'],
   ['textMuted', 'surfaceMuted'],

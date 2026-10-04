@@ -209,6 +209,7 @@ function ComposerHint({
         dmHint === null && !pendingLink && "wide-only"
       )}
       data-testid="composer-hint"
+      title={typeof dmHint === "string" ? dmHint : undefined}
       data-composer-meta-slot={sharedRow ? "" : undefined}
     >
       {pendingLink && (
@@ -725,7 +726,7 @@ export function Composer({
   //
   // 슬래시로 연 명령은 **전송되지 않는다**(brief §3.1). 본문과 초안을 비우고
   // 레지스트리의 `run`을 부른다. 카드 자리는 이 채널의 것이고, 없으면(GC-3 전)
-  // 명령이 설정 › AI 연결로 폴백한다 — 그 이동은 팔레트와 같은 규율로 돌아올
+  // 명령이 AI로 폴백한다 — 그 이동은 팔레트와 같은 규율로 돌아올
   // 자리(이 입력창)를 기억한다.
   //
   // 채널 만들기·에이전트 프로필은 슬래시 목록에 없다(`slashCommands()`는 `client`

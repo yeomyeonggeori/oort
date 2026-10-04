@@ -107,7 +107,7 @@ export function channelMuteToggleLabel(muted: boolean): string {
 /**
  * 이 사람에게 「채널 나가기」를 내놓는가.
  *
- * 서버의 `remove_member`는 워크스페이스 오너/관리자만 멤버십을 지울 수 있게
+ * 서버의 `remove_member`는 워크스페이스 소유자/관리자만 멤버십을 지울 수 있게
  * 막는다(2026-08-10 실측, `channels.rs:378` `role_of_actor.is_admin()`) — 자기
  * 자신을 지우는 것도 포함이다. 그래서 일반 멤버에게 「나가기」를 내놓으면 확인
  * 다이얼로그 뒤에서 403으로 끝나는 막다른 길이 된다. 채널 만들기가 같은 이유로
@@ -128,7 +128,7 @@ export const CHANNEL_LEAVE_CONFIRM_TITLE = "이 채널에서 나갈까요?";
 
 /**
  * 확인 다이얼로그의 본문. 「관리자가 다시 추가해야」가 참인 이유: 채널에 멤버를
- * 넣는 라우트(`add_member`)도 오너/관리자 권한이라, 나간 뒤 스스로 다시 들어올
+ * 넣는 라우트(`add_member`)도 소유자/관리자 권한이라, 나간 뒤 스스로 다시 들어올
  * 길이 없다.
  */
 export function channelLeaveConfirmBody(name: string): string {
@@ -139,7 +139,7 @@ export function channelLeaveConfirmBody(name: string): string {
 export function channelLeaveFailureMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 403) {
-      // remove_member는 오너/관리자만 허용한다. `canLeaveChannel`이 앞에서
+      // remove_member는 소유자/관리자만 허용한다. `canLeaveChannel`이 앞에서
       // 걸러도, role이 늦게 왔거나 도중에 강등된 경우 서버가 여기로 답한다.
       return "채널에서 나갈 권한이 없습니다. 워크스페이스 관리자에게 요청하세요.";
     }
@@ -294,7 +294,7 @@ export function createChannelFailure(error: unknown): CreateChannelFailure {
       return {
         field: null,
         message:
-          "채널을 만들 권한이 없습니다. 워크스페이스 오너나 관리자에게 요청하세요.",
+          "채널을 만들 권한이 없습니다. 워크스페이스 소유자나 관리자에게 요청하세요.",
       };
     }
     if (error.status === 429) {

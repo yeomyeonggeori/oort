@@ -80,13 +80,13 @@ import { START_CREATE_LABEL } from "@momo/core/features/onboarding/subscriptionR
 // =============================================================================
 // 채팅의 로컬 연결 카드 (#2944 GC-3, brief §3, 시안 mockups.html ①②).
 //
-// `/연결`·⌘K 「AI 연결 카드 열기」가 지금 보고 있는 채널의 타임라인 꼬리에 여는
+// `/연결`·⌘K 「AI 계정 카드 열기」가 지금 보고 있는 채널의 타임라인 꼬리에 여는
 // 「나에게만 보여요」 카드다. **메시지가 아니다**: 서버에 아무것도 보내지 않고,
 // 닫기·Esc·채널 이동·새로고침에 사라진다(Q1). 에이전트 이름·아바타가 없다
 // (봇 래핑 금지, F14): 사람이 자기 화면에서 여는 도구 창이다.
 //
 // 같은 판정 규율(brief §3.5): 줄의 알약은 코어 `aiLinkPill.ts`(#2941)가, 구독
-// 감지는 설정 「내 계정」과 같은 `useLocalHarnessWatch`가, 팀 연결은 설정과 같은
+// 감지는 설정 「내 계정」과 같은 `useLocalHarnessWatch`가, 팀 AI 키는 설정과 같은
 // 쿼리 키(`["settings","provider-link"]`)가 준다. 그래서 설정과 카드는 같은 입력에
 // 같은 알약을 말한다. 구독 감지는 훅 지역 상태라 두 화면이 한 저장소를 나누지는
 // 않는다: 둘 다 열릴 때 이 맥의 CLI에 다시 묻기 때문에 같은 답을 받는다.
@@ -102,7 +102,7 @@ import { START_CREATE_LABEL } from "@momo/core/features/onboarding/subscriptionR
 
 const TEAM_QUERY_KEY = ["settings", "provider-link"] as const;
 
-const OFFLINE_NOTE = "연결이 끊겨 지금은 팀 연결을 확인하거나 바꿀 수 없어요.";
+const OFFLINE_NOTE = "연결이 끊겨 지금은 팀 AI 키를 확인하거나 바꿀 수 없어요.";
 const TEAM_DENIED_LINE = "팀 키는 운영자만 바꾸고 확인할 수 있어요.";
 const TEAM_EMPTY_SUB = "아직 없어요. 팀 에이전트가 대답하려면 키가 필요해요";
 const OPERATOR_FOOT = "운영자만 보이는 입력이에요. 키는 서버 금고에 봉인되고 쓰기 전용이에요.";
@@ -364,7 +364,7 @@ export function AiConnectCard({
             tabIndex={-1}
             className="shrink-0 rounded-sm text-body font-bold text-ink focus-visible:focus-ring"
           >
-            AI 연결
+            AI 계정
           </h3>
           <span
             className="inline-flex min-w-0 items-center gap-1 truncate rounded-full bg-muted-soft px-2 py-px text-timestamp font-semibold text-ink-muted"
@@ -387,7 +387,7 @@ export function AiConnectCard({
           <button
             type="button"
             onClick={onClose}
-            aria-label="AI 연결 카드 닫기"
+            aria-label="AI 계정 카드 닫기"
             className="tap-target press grid size-icon-button shrink-0 place-items-center rounded-full text-icon hover:bg-surface-hover focus-visible:focus-ring"
             data-testid="ai-connect-card-close"
           >
@@ -471,7 +471,7 @@ export function AiConnectSuggestion({
   return <SuggestionLine card={card} operator={viewer === "operator"} />;
 }
 
-/** 남에게 보이는 한 줄(시안 `.oneline`). 운영자면 「팀 연결 보기」가 팀 줄만 편다. */
+/** 남에게 보이는 한 줄(시안 `.oneline`). 운영자면 「팀 AI 키 보기」가 팀 줄만 편다. */
 function SuggestionLine({ card, operator }: { card: CommandSuggestCard; operator: boolean }) {
   const [open, setOpen] = useState(false);
   const offline = useOffline();
@@ -558,7 +558,7 @@ function SuggestedCard({
   const escapeFormRef = useRef<(() => boolean) | null>(null);
   const focus = card.focus;
   const showMine = focus !== "team";
-  // 시안 ③ 요청자: `harness:"claude"` 제안도 그 구독 줄 + 팀 연결 절을 함께 보인다
+  // 시안 ③ 요청자: `harness:"claude"` 제안도 그 구독 줄 + 팀 AI 키 절을 함께 보인다
   // (로컬 `/연결 claude`는 그 줄만 편다 — 제안은 「무엇을 연결할지」의 맥락이 대화에
   // 있으므로 팀 쪽 사실도 같이 놓는다). `scope:"mine"`만 온 제안은 내 계정 절만.
   const showTeam = focus !== "mine";
@@ -862,7 +862,7 @@ function HarnessRows({ only }: { only: LocalHarnessId | null }) {
   );
 }
 
-// ---- 팀 연결 · 이 서버 -------------------------------------------------------------
+// ---- 팀 AI 키 · 이 서버 -------------------------------------------------------------
 
 function TeamSection({
   offline,
@@ -1035,7 +1035,7 @@ function TeamSection({
     body = (
       <div className="flex min-w-0 flex-wrap items-center gap-2 py-2" role="alert" data-testid="ai-connect-card-team-error">
         <span className="min-w-0 flex-1 break-keep text-meta text-danger">
-          팀 연결을 불러오지 못했어요. {errorMessage(query.error)}
+          팀 AI 키를 불러오지 못했어요. {errorMessage(query.error)}
         </span>
         <Button type="button" variant="secondary" size="sm" onClick={() => void query.refetch()}>
           다시 불러오기
@@ -1048,7 +1048,7 @@ function TeamSection({
       <ul className="flex min-w-0 flex-col">
         <CardRow
           mark={hasRow ? markFor(link.endpointLabel) : "?"}
-          name={hasRow ? (configured ? `${link.endpointLabel} · 팀 기본` : link.endpointLabel) : "팀 API 키"}
+          name={hasRow ? (configured ? `${link.endpointLabel} · 팀 AI 키` : link.endpointLabel) : "팀 AI 키"}
           source={legacy ? "내부용" : "API 키"}
           mono={hasRow && configured}
           sub={
@@ -1086,7 +1086,7 @@ function TeamSection({
   return (
     <section className="flex min-w-0 flex-col" aria-labelledby={headId} data-testid="ai-connect-card-team-section">
       <div className="flex min-w-0 flex-col px-3 pb-1">
-        <SectionHead id={headId} title="팀 연결 · 이 서버" />
+        <SectionHead id={headId} title="팀 AI 키 · 이 서버" />
         {body}
         {offline && operator && (
           <p id={`${headId}-offline`} className="break-keep pb-2 text-meta text-ink-muted" data-testid="ai-connect-card-offline">

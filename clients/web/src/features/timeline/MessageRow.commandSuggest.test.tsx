@@ -3,7 +3,7 @@
 // MessageRow가 보는 사람별로 그린다(ADR-0186 증보 G4·G6).
 //
 // - 대상 본인: GC-3 카드와 같은 절 + 제안 머리. 에이전트의 본문은 위에 그대로.
-// - 운영자(대상 아님): 한 줄 + 「팀 연결 보기」 → 팀 줄만.
+// - 운영자(대상 아님): 한 줄 + 「팀 AI 키 보기」 → 팀 줄만.
 // - 그 밖: 한 줄, 입력·버튼 0.
 // - 상태는 props가 아니라 보는 사람의 스토어에서(모의 CLI 감지·provider_link).
 
@@ -351,7 +351,7 @@ describe("대상 본인 — 조작 카드(시안 ③ 요청자)", () => {
     const host = mountRow(suggestion({ ...G3, state: "ready", status: "connected" }), REQUESTER);
     const line = await until(host, "ai-suggest");
     expect(line.dataset.viewer).toBe("other");
-    expect(line.textContent).toContain("곽성재에게 AI 연결을 제안했어요");
+    expect(line.textContent).toContain("곽성재에게 AI 계정 연결을 제안했어요");
     expect(controls(line)).toBe(0);
     expect(host.textContent).not.toMatch(/준비됨|connected/);
   });
@@ -365,7 +365,7 @@ describe("대상이 아닌 사람 — 한 줄(시안 ③ 김하늘)", () => {
     await waitFor(() => expect(fetchProviderLink).toHaveBeenCalled());
     await act(async () => undefined);
     expect(line.dataset.viewer).toBe("other");
-    expect(q(line, "ai-suggest-line")?.textContent).toBe("곽성재에게 AI 연결을 제안했어요");
+    expect(q(line, "ai-suggest-line")?.textContent).toBe("곽성재에게 AI 계정 연결을 제안했어요");
     expect(controls(line)).toBe(0);
     expect(line.textContent).not.toContain("내 계정");
     expect(host.textContent).toContain(BODY);
@@ -380,12 +380,12 @@ describe("대상이 아닌 사람 — 한 줄(시안 ③ 김하늘)", () => {
     expect(controls(line)).toBe(0);
   });
 
-  it("운영자: 한 줄 + 「팀 연결 보기」 → 팀 줄만(남의 구독 줄 없음)", async () => {
+  it("운영자: 한 줄 + 「팀 AI 키 보기」 → 팀 줄만(남의 구독 줄 없음)", async () => {
     const host = mountRow(suggestion(G3), SKY);
     const open = await until(host, "ai-suggest-team-open");
     const line = q(host, "ai-suggest") as HTMLElement;
     expect(line.dataset.viewer).toBe("operator");
-    expect(open.textContent).toBe("팀 연결 보기");
+    expect(open.textContent).toBe("팀 AI 키 보기");
     expect(open.getAttribute("aria-expanded")).toBe("false");
     expect(q(line, "ai-suggest-team-panel")).toBeNull();
     act(() => open.click());

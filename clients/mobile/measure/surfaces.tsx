@@ -1,4 +1,4 @@
-import type {Message, MessageSearchHit} from '@momo/core/lib/api';
+import type {Message, MessageSearchHit, RosterMember} from '@momo/core/lib/api';
 import {makeStressRoster} from '@momo/core/features/timeline/stress';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {SearchPhase} from '@momo/core/features/search/searchModel';
@@ -27,10 +27,12 @@ import {
   composerMaxHeight,
   INPUT_CHROME,
   INPUT_CHROME_X,
+  mentionAnnotationLines,
   mentionRowHeight,
   withLatinWordBreaks,
 } from '../src/features/conversation/Composer';
 import {saveDraft} from '../src/features/conversation/drafts';
+import {CLAUDE_SUBSCRIPTION_AGENT_PAUSED} from '@momo/core/features/ai/aiHubModel';
 import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
 import {PinListPanel} from '../src/features/conversation/PinListPanel';
 import {TypingBar} from '../src/features/conversation/TypingBar';
@@ -904,6 +906,91 @@ const MENTION_DIRECTORY = makeDirectory([
   })),
 ]);
 
+// ---- AIH-9b (#3440): AI 보조 줄이 든 시트와 입력창 위 한 줄 -------------------
+
+/**
+ * 여섯 가지 후보가 한 시트에 선다: 팀 키 · 내 구독 · 남의 구독(잠김, 맥 꺼짐) · 개인 키(잠김) ·
+ * 문의 중(내 구독이지만 쉬는 중) · 내 구독 맥 꺼짐. 문장은 전부 코어가 만든다 — 이 파일은 필드만
+ * 심고, 사진에 찍히는 글자가 코어 문장 그대로다.
+ *
+ * 보는 사람은 `SELF`(로스터의 첫 사람)다. 소유자 필드(`ownerHumanId`)가 `SELF` 이면 「내 것」이다.
+ */
+const AI_BASE = {
+  ...(ROSTER.find(m => m.kind === 'agent') ?? ROSTER[0]),
+  kind: 'agent' as const,
+  status: 'active' as const,
+};
+const AI_OWNER = {id: OTHER, displayName: '박다연'};
+const AI_MEMBERS: RosterMember[] = [
+  {
+    ...AI_BASE,
+    id: 'ai-team',
+    displayName: '김인턴',
+    handle: 'hermes',
+    brain: 'team_key',
+    callableBy: 'everyone',
+  },
+  {
+    ...AI_BASE,
+    id: 'ai-mine',
+    displayName: '내 Claude',
+    handle: 'my-claude',
+    brain: 'subscription',
+    callableBy: 'owner_only',
+    ownerHumanId: SELF,
+    owner: {id: SELF, displayName: '곽성재'},
+    hostOnline: true,
+  },
+  {
+    ...AI_BASE,
+    id: 'ai-other-sub',
+    displayName: '다연의 Claude Code',
+    handle: 'dayeon-claude',
+    brain: 'subscription',
+    callableBy: 'owner_only',
+    ownerHumanId: AI_OWNER.id,
+    owner: AI_OWNER,
+    hostOnline: false,
+  },
+  {
+    ...AI_BASE,
+    id: 'ai-other-key',
+    displayName: '다연 키',
+    handle: 'dayeon-key',
+    brain: 'personal_key',
+    callableBy: 'owner_only',
+    ownerHumanId: AI_OWNER.id,
+    owner: AI_OWNER,
+  },
+  {
+    ...AI_BASE,
+    id: 'ai-paused',
+    displayName: '쉬는 Claude',
+    handle: 'paused-claude',
+    brain: 'subscription',
+    callableBy: 'owner_only',
+    ownerHumanId: SELF,
+    owner: {id: SELF, displayName: '곽성재'},
+    hostOnline: true,
+    brainUnavailableReason: CLAUDE_SUBSCRIPTION_AGENT_PAUSED,
+  },
+  {
+    ...AI_BASE,
+    id: 'ai-mine-off',
+    displayName: '맥 꺼진 Claude',
+    handle: 'mac-off-claude',
+    brain: 'subscription',
+    callableBy: 'owner_only',
+    ownerHumanId: SELF,
+    owner: {id: SELF, displayName: '곽성재'},
+    hostOnline: false,
+  },
+] as RosterMember[];
+const AI_DIRECTORY = makeDirectory([
+  ...AI_MEMBERS,
+  ...ROSTER.filter(m => m.kind === 'human').slice(0, 2),
+]);
+
 /**
  * 시트가 열렸을 때 **도크가 대화 열 안에 있는가**, 그리고 **얼마나 여유로** (#1480).
  *
@@ -925,11 +1012,16 @@ const MENTION_DIRECTORY = makeDirectory([
  * 열 밖으로 안 나간다」**이며, 「대화가 남는다」는 시트가 **쉬는** 상태의 약속이다
  * (그때 목록 몫은 `budget.list` — 874pt 기본 크기에서 212.9pt = 본문 9.7줄).
  */
-function MentionSheetProbe(): React.JSX.Element {
+function MentionSheetProbe({
+  annotated = false,
+}: {
+  /** 후보에 AI 보조 줄이 든 시트(AIH-9b) — 두 줄 행의 산식으로 잰다. */
+  annotated?: boolean;
+}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {fontScale, height: windowHeight} = useWindowDimensions();
-  const budget = composerColumnBudget(fontScale, windowHeight);
-  const row = mentionRowHeight(fontScale);
+  const budget = composerColumnBudget(fontScale, windowHeight, annotated);
+  const row = mentionRowHeight(fontScale, annotated);
   const dock = budget.mentions + budget.composer + budget.dockChrome;
   const slack = budget.column - dock;
   const bodyRow = lineBox.body * fontScale;
@@ -937,7 +1029,7 @@ function MentionSheetProbe(): React.JSX.Element {
   return (
     <View style={styles.probe}>
       <Text allowFontScaling={false} style={styles.probeRead}>
-        {`글자 배수 ${fontScale.toFixed(3)} · 창 ${Math.round(windowHeight)}pt · 후보 행 ${row.toFixed(1)}pt`}
+        {`글자 배수 ${fontScale.toFixed(3)} · 창 ${Math.round(windowHeight)}pt · 후보 행 ${row.toFixed(1)}pt${annotated ? ` (보조 줄 ${mentionAnnotationLines(fontScale)}줄 행 — 사람 행 ${mentionRowHeight(fontScale).toFixed(1)}pt)` : ''}`}
       </Text>
       <Text allowFontScaling={false} style={styles.probeRead}>
         {`시트 ${budget.mentions.toFixed(1)}pt = ${(budget.mentions / row).toFixed(1)}행 (옛 고정값 180pt = ${(180 / row).toFixed(1)}행)`}
@@ -3500,6 +3592,50 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             recipient="place"
             channelLabel="배포"
             directory={MENTION_DIRECTORY}
+            onSend={() => {}}
+          />
+        </Frame>
+      );
+    }
+    // ---- AIH-9b (#3440): AI 보조 줄이 든 시트 ------------------------------
+    case 'mention-sheet-ai': {
+      // 시트를 여는 것은 `maestro/96-mention-sheet-ai-capture.yaml` 이 치는 `@` 한 글자다
+      // (위 `mention-sheet` 와 같은 까닭). 로스터의 첫 여섯이 서로 다른 여섯 가지 에이전트다.
+      return (
+        <Frame label="멘션 시트 — AI 보조 줄·칩·잠금 (AIH-9b)">
+          <MentionSheetProbe annotated />
+          <Composer
+            recipient="place"
+            channelLabel="배포"
+            directory={AI_DIRECTORY}
+            viewerHumanId={SELF}
+            onSend={() => {}}
+          />
+        </Frame>
+      );
+    }
+    case 'composer-agent-notice': {
+      // 글에 못 부르는 에이전트가 있는 두 입력창: 남의 구독(위) · 쉬는 중(아래). 초안은 배송되는
+      // 경로(`saveDraft` → `draftKey`)로 심는다 — 한 줄은 캐럿이 아니라 글을 읽는다.
+      saveDraft('measure:agent-notice-other', '@dayeon-claude 이번 배포 확인해 줘');
+      saveDraft('measure:agent-notice-paused', '@paused-claude 어제 건 이어서 봐 줘');
+      return (
+        <Frame label="입력창 위 한 줄 — 못 부르는 · 쉬는 에이전트 (AIH-9b)">
+          <Composer
+            recipient="place"
+            channelLabel="배포"
+            directory={AI_DIRECTORY}
+            viewerHumanId={SELF}
+            draftKey="measure:agent-notice-other"
+            onSend={() => {}}
+          />
+          <View style={styles.gap} />
+          <Composer
+            recipient="place"
+            channelLabel="배포"
+            directory={AI_DIRECTORY}
+            viewerHumanId={SELF}
+            draftKey="measure:agent-notice-paused"
             onSend={() => {}}
           />
         </Frame>

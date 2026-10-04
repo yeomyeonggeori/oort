@@ -140,32 +140,32 @@ describe("parseAuthJson", () => {
       [
         "JSON 아님",
         "not json at all",
-        "JSON으로 읽지 못했습니다. auth.json 파일 내용을 잘라내지 말고 그대로 붙여넣으세요.",
+        "JSON으로 읽지 못했어요. auth.json 파일 내용을 잘라내지 말고 그대로 붙여넣으세요.",
       ],
       [
         "객체 아님",
         '["tokens"]',
-        "auth.json은 중괄호로 시작하는 객체여야 합니다. 파일 전체를 붙여넣었는지 확인하세요.",
+        "auth.json은 중괄호로 시작하는 객체여야 해요. 파일 전체를 붙여넣었는지 확인하세요.",
       ],
       [
         "tokens 없음",
         '{"OPENAI_API_KEY":null}',
-        "tokens 객체가 없습니다. ~/.codex/auth.json 파일 전체를 붙여넣었는지 확인하세요.",
+        "tokens 객체가 없어요. ~/.codex/auth.json 파일 전체를 붙여넣었는지 확인하세요.",
       ],
       [
         "tokens 가 객체가 아님",
         '{"tokens":"oops"}',
-        "tokens 값이 객체가 아닙니다. ~/.codex/auth.json 파일을 편집하지 말고 그대로 붙여넣으세요.",
+        "tokens 값이 객체가 아니에요. ~/.codex/auth.json 파일을 편집하지 말고 그대로 붙여넣으세요.",
       ],
       [
         "refresh_token 없음",
         '{"tokens":{"access_token":"at-test"}}',
-        "tokens.refresh_token이 없습니다. Codex CLI 로그인을 마친 계정의 auth.json인지 확인하세요.",
+        "tokens.refresh_token이 없어요. Codex CLI 로그인을 마친 계정의 auth.json인지 확인하세요.",
       ],
       [
         "refresh_token 이 공백",
         '{"tokens":{"refresh_token":"   "}}',
-        "tokens.refresh_token이 없습니다. Codex CLI 로그인을 마친 계정의 auth.json인지 확인하세요.",
+        "tokens.refresh_token이 없어요. Codex CLI 로그인을 마친 계정의 auth.json인지 확인하세요.",
       ],
     ];
 
@@ -246,7 +246,7 @@ describe("buildOAuthLinkBody", () => {
   // bound to its input for a screen reader.
   it.each([
     ["빈 주소", "", "provider 주소를 입력하세요."],
-    ["스킴 없음", "chatgpt.com/backend-api/codex", "주소는 http:// 또는 https:// 로 시작해야 합니다."],
+    ["스킴 없음", "chatgpt.com/backend-api/codex", "주소는 http:// 또는 https:// 로 시작해야 해요."],
     ["공백뿐", "   ", "provider 주소를 입력하세요."],
   ])("validateBaseUrl 이 두 방식의 유일한 주소 규칙이다: %s", (_name, baseUrl, message) => {
     const error = validateBaseUrl(baseUrl);
@@ -262,7 +262,7 @@ describe("buildOAuthLinkBody", () => {
 
   it.each([
     ["빈 주소", "", "provider 주소를 입력하세요."],
-    ["스킴 없음", "chatgpt.com/backend-api/codex", "주소는 http:// 또는 https:// 로 시작해야 합니다."],
+    ["스킴 없음", "chatgpt.com/backend-api/codex", "주소는 http:// 또는 https:// 로 시작해야 해요."],
   ])("주소 오류: %s", (_name, baseUrl, message) => {
     const built = buildOAuthLinkBody({
       baseUrl,
@@ -291,7 +291,7 @@ describe("비밀 재노출 금지", () => {
       expect(rendered).not.toContain(secret);
     }
     // Presence, not value: the operator learns their paste was the right file.
-    expect(rendered).toContain("함께 등록됩니다");
+    expect(rendered).toContain("함께 등록돼요");
   });
 
   it("does not echo the account id, which the server itself withholds", () => {
@@ -358,7 +358,7 @@ describe("연결 상태 표면 (Goal 2)", () => {
 
     it("a freshly registered grant with no token is normal, not a failure", () => {
       expect(accessTokenStatus({ accessTokenPresent: false }, now)).toEqual({
-        text: "없음. 다음 턴에 서버가 발급합니다",
+        text: "없음. 다음 턴에 서버가 발급해요",
         tone: "muted",
       });
     });
@@ -369,7 +369,7 @@ describe("연결 상태 표면 (Goal 2)", () => {
         now
       );
       expect(status.tone).toBe("warn");
-      expect(status.text).toContain("다음 턴에 서버가 갱신합니다");
+      expect(status.text).toContain("다음 턴에 서버가 갱신해요");
     });
 
     it("a live token reports its deadline", () => {

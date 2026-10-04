@@ -797,7 +797,7 @@ describe("구독 합류: 연결 명령 → 감지 대기 → 합류 (같은 화�
     click(open);
     await waitFor(() => q(host, "first-agent-detecting") !== null, "waiting");
     await waitFor(
-      () => q(host, "first-agent-connect-status")?.textContent === "터미널을 열지 못했습니다. 명령을 복사해 직접 여세요.",
+      () => q(host, "first-agent-connect-status")?.textContent === "터미널을 열지 못했어요. 명령을 복사해 직접 여세요.",
       "failure sentence"
     );
     expect(q(host, "first-agent-connect-status")?.getAttribute("role")).toBe("status");
@@ -1078,7 +1078,7 @@ describe("[지금은 건너뛰기] → 코메토 졸림 + 재진입 위치", () 
   it("재진입 문장이 목록 아래에 있다", async () => {
     const host = mountStage();
     await waitFor(() => q(host, "first-agent-reentry-line") !== null, "reentry");
-    expect(q(host, "first-agent-reentry-line")?.textContent).toContain("설정 › AI 연결");
+    expect(q(host, "first-agent-reentry-line")?.textContent).toContain("AI");
   });
 });
 

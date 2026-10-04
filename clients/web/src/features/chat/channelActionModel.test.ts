@@ -80,7 +80,7 @@ describe("channelActionAvailability", () => {
   });
 
   it("일반 멤버에게 나가기는 막다른 길이라 그리지 않는다", () => {
-    // 서버 remove_member 는 오너/관리자만 통과시킨다. 확인 다이얼로그 뒤의
+    // 서버 remove_member 는 소유자/관리자만 통과시킨다. 확인 다이얼로그 뒤의
     // 403 은 없는 항목보다 나쁘다.
     expect(
       channelActionAvailability({

@@ -140,7 +140,7 @@ export function parseAuthJson(pasted: string): OAuthParseResult {
   } catch {
     return fail(
       "paste",
-      "JSON으로 읽지 못했습니다. auth.json 파일 내용을 잘라내지 말고 그대로 붙여넣으세요."
+      "JSON으로 읽지 못했어요. auth.json 파일 내용을 잘라내지 말고 그대로 붙여넣으세요."
     );
   }
 
@@ -148,7 +148,7 @@ export function parseAuthJson(pasted: string): OAuthParseResult {
   if (!root) {
     return fail(
       "paste",
-      "auth.json은 중괄호로 시작하는 객체여야 합니다. 파일 전체를 붙여넣었는지 확인하세요."
+      "auth.json은 중괄호로 시작하는 객체여야 해요. 파일 전체를 붙여넣었는지 확인하세요."
     );
   }
 
@@ -159,7 +159,7 @@ export function parseAuthJson(pasted: string): OAuthParseResult {
   if (root.tokens !== undefined && nested === null) {
     return fail(
       "paste",
-      "tokens 값이 객체가 아닙니다. ~/.codex/auth.json 파일을 편집하지 말고 그대로 붙여넣으세요."
+      "tokens 값이 객체가 아니에요. ~/.codex/auth.json 파일을 편집하지 말고 그대로 붙여넣으세요."
     );
   }
   const tokens = nested ?? root;
@@ -169,7 +169,7 @@ export function parseAuthJson(pasted: string): OAuthParseResult {
   ) {
     return fail(
       "paste",
-      "tokens 객체가 없습니다. ~/.codex/auth.json 파일 전체를 붙여넣었는지 확인하세요."
+      "tokens 객체가 없어요. ~/.codex/auth.json 파일 전체를 붙여넣었는지 확인하세요."
     );
   }
 
@@ -177,7 +177,7 @@ export function parseAuthJson(pasted: string): OAuthParseResult {
   if (!refreshToken) {
     return fail(
       "paste",
-      "tokens.refresh_token이 없습니다. Codex CLI 로그인을 마친 계정의 auth.json인지 확인하세요."
+      "tokens.refresh_token이 없어요. Codex CLI 로그인을 마친 계정의 auth.json인지 확인하세요."
     );
   }
 
@@ -235,7 +235,7 @@ export function validateBaseUrl(raw: string): LinkFormError | null {
   if (!/^https?:\/\/.+/.test(baseUrl)) {
     return {
       field: "baseUrl",
-      message: "주소는 http:// 또는 https:// 로 시작해야 합니다.",
+      message: "주소는 http:// 또는 https:// 로 시작해야 해요.",
     };
   }
   return null;
@@ -257,7 +257,7 @@ export function buildOAuthLinkBody(input: {
       error: {
         field: "accountLabel",
         message:
-          "누구의 구독인지 적으세요. 이 연결이 쓰는 사용량은 그 사람의 한도에서 나갑니다.",
+          "누구의 구독인지 적으세요. 이 연결이 쓰는 사용량은 그 사람의 한도에서 나가요.",
       },
     };
   }
@@ -287,13 +287,13 @@ export function grantPreviewRows(
   grant: ProviderOAuthGrant
 ): { key: string; value: string; prose?: boolean }[] {
   return [
-    { key: "갱신 토큰", value: "읽었습니다" },
+    { key: "갱신 토큰", value: "읽었어요" },
     {
       key: "액세스 토큰",
       prose: true,
       value: grant.accessToken
-        ? "함께 등록됩니다"
-        : "없음. 다음 턴에 서버가 발급합니다",
+        ? "함께 등록돼요"
+        : "없음. 다음 턴에 서버가 발급해요",
     },
     { key: "계정 ID", value: grant.accountId ? "확인됨" : "없음" },
     ...(grant.clientId ? [{ key: "OAuth 클라이언트", value: "확인됨" }] : []),
@@ -323,7 +323,7 @@ export interface ProviderCredentialMeta {
   accessTokenExpiresAtMs?: number;
 }
 
-/** 코어가 정본이다(#2941): 팀 연결 알약의 「읽기 전용」 판정이 같은 값을 쓴다. */
+/** 코어가 정본이다(#2941): 팀 AI 키 알약의 「읽기 전용」 판정이 같은 값을 쓴다. */
 export const OAUTH_CREDENTIAL_KIND = LEGACY_OAUTH_CREDENTIAL_KIND;
 
 /** `bearer` | `oauth-openai` | undefined (env fallback has no vault). */
@@ -368,7 +368,7 @@ export function accessTokenStatus(
   nowMs: number
 ): { text: string; tone: "ok" | "warn" | "muted" } {
   if (meta.accessTokenPresent !== true) {
-    return { text: "없음. 다음 턴에 서버가 발급합니다", tone: "muted" };
+    return { text: "없음. 다음 턴에 서버가 발급해요", tone: "muted" };
   }
   const expires = meta.accessTokenExpiresAtMs;
   if (expires === undefined) {
@@ -376,7 +376,7 @@ export function accessTokenStatus(
   }
   if (expires <= nowMs) {
     return {
-      text: `${formatMoment(expires)}에 만료됨. 다음 턴에 서버가 갱신합니다`,
+      text: `${formatMoment(expires)}에 만료됨. 다음 턴에 서버가 갱신해요`,
       tone: "warn",
     };
   }

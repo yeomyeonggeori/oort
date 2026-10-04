@@ -283,7 +283,7 @@ describe("RoleLabelsEditor 비운영자 읽기", () => {
     expect(panel?.textContent).toContain("마스터");
     expect(panel?.textContent).toContain(DEFAULT_ROLE_LABELS.admin);
     expect(host.querySelector('[data-testid="operator-notice"]')?.textContent).toContain(
-      "오너와 관리자만"
+      "소유자와 관리자만"
     );
   });
 });
@@ -399,7 +399,7 @@ describe("워크스페이스 이름 E1", () => {
     expect(input?.getAttribute("aria-invalid")).toBeNull();
   });
 
-  it("오너는 이름 저장이 E1 PATCH 1회이다", async () => {
+  it("소유자는 이름 저장이 E1 PATCH 1회이다", async () => {
     renameWorkspace.mockResolvedValue({
       ...workspace({}),
       name: "여명거리",

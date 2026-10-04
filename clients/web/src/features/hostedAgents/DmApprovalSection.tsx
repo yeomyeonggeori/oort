@@ -114,8 +114,8 @@ export function DmApprovalSection({
       const name = nameOf(input.row.counterpartMemberId);
       setLive(
         input.approve
-          ? `${name}님과의 대화를 열었습니다.`
-          : `${name}님과의 대화를 닫았습니다.`,
+          ? `${name}님과의 대화를 열었어요.`
+          : `${name}님과의 대화를 닫았어요.`,
       );
     },
     onError: (error, input) =>
@@ -184,7 +184,7 @@ export function DmApprovalSection({
       {list.isError && (
         <InlineBanner
           separator={false}
-          message="1:1 대화 목록을 불러오지 못했습니다. 연결을 확인한 뒤 다시 시도해 주세요."
+          message="1:1 대화 목록을 불러오지 못했어요. 연결을 확인한 뒤 다시 시도해 주세요."
           actionLabel="다시 시도"
           onAction={() => void list.refetch()}
           testId="hosted-dm-approval-error"

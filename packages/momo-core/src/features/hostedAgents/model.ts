@@ -417,19 +417,19 @@ export function hostedStatusDetail(connection: HostedAgentConnection): string {
       // 이미 그렇게 적고 있고(presets.ts `PAIRING_REVEAL_SCOPE_NOTE`), 두 문장이
       // 어긋나면 사람은 값을 붙인 직후 그것이 죽었다고 읽어 아직 살아 있는 값을
       // 다시 발급한다.
-      return "아직 이 에이전트가 다이얼인하지 않았습니다. 연결 값은 감지되는 순간 소비됩니다.";
+      return "아직 이 에이전트가 다이얼인하지 않았어요. 연결 값은 감지되는 순간 소비돼요.";
     case "detected":
       return connection.activeCredentialId === undefined
-        ? "다이얼인은 확인했지만 아직 아무 권한도 열리지 않았습니다. 사람이 채널과 권한을 확인해야 다음으로 갑니다."
-        : "승인이 끝나고 새 자격증명이 발급됐습니다. 그 값으로 첫 증명이 성공해야 활성이 됩니다.";
+        ? "다이얼인은 확인했지만 아직 아무 권한도 열리지 않았어요. 사람이 채널과 권한을 확인해야 다음으로 가요."
+        : "승인이 끝나고 새 자격증명이 발급됐어요. 그 값으로 첫 증명이 성공해야 활성이 돼요.";
     case "active":
-      return "자격증명 증명이 성공했고 승인한 채널에서 이 에이전트가 일할 수 있습니다.";
+      return "자격증명 증명이 성공했고 승인한 채널에서 이 에이전트가 일할 수 있어요.";
     case "expired":
-      return "연결 값이 만료됐습니다. 새 값을 발급해 provider 설정을 다시 채우세요.";
+      return "연결 값이 만료됐어요. 새 값을 발급해 provider 설정을 다시 채우세요.";
     case "cleanup_pending":
-      return "oort 쪽 권한은 이미 끊겼습니다. provider에 남은 설정 정리가 끝나야 완전히 해제됩니다.";
+      return "oort 쪽 권한은 이미 끊겼어요. provider에 남은 설정 정리가 끝나야 완전히 해제돼요.";
     case "disconnected":
-      return "이 연결은 해제됐습니다. 다시 쓰려면 새 연결을 만드세요.";
+      return "이 연결은 해제됐어요. 다시 쓰려면 새 연결을 만드세요.";
   }
 }
 
@@ -554,21 +554,21 @@ export type HostedAction =
 function actionPrefix(action: HostedAction): string {
   switch (action) {
     case "list":
-      return "연결 목록을 불러오지 못했습니다.";
+      return "연결 목록을 불러오지 못했어요.";
     case "get":
-      return "연결 상태를 불러오지 못했습니다.";
+      return "연결 상태를 불러오지 못했어요.";
     case "create":
-      return "연결을 만들지 못했습니다.";
+      return "연결을 만들지 못했어요.";
     case "regenerate":
-      return "연결 값을 다시 발급하지 못했습니다.";
+      return "연결 값을 다시 발급하지 못했어요.";
     case "confirm":
-      return "승인을 저장하지 못했습니다.";
+      return "승인을 저장하지 못했어요.";
     case "disconnect":
-      return "연결 해제를 시작하지 못했습니다.";
+      return "연결 해제를 시작하지 못했어요.";
     case "acknowledge":
-      return "확인을 저장하지 못했습니다.";
+      return "확인을 저장하지 못했어요.";
     case "complete":
-      return "해제를 끝내지 못했습니다.";
+      return "해제를 끝내지 못했어요.";
   }
 }
 
@@ -576,51 +576,51 @@ function statusAdvice(action: HostedAction, status: number): string {
   switch (status) {
     case 400:
       if (action === "confirm") {
-        return "고른 채널이나 권한을 서버가 거절했습니다. 목록을 다시 불러온 뒤 다시 고르세요.";
+        return "고른 채널이나 권한을 서버가 거절했어요. 목록을 다시 불러온 뒤 다시 고르세요.";
       }
       if (action === "acknowledge") {
         // 서버는 셋을 같은 400 으로 답한다: 종류가 받지 않는 처분, 어휘 밖의
         // 관측, 증거 없는 처분. 화면이 그 셋을 앞에서 이미 막고 있으므로 여기
         // 닿았다는 것은 화면과 서버의 표가 갈렸다는 뜻이고, 그때 사람이 할 수
         // 있는 일은 다시 읽어 오는 것뿐이다.
-        return "이 항목에 쓸 수 없는 확인입니다. 목록을 다시 불러온 뒤 다시 고르세요.";
+        return "이 항목에 쓸 수 없는 확인이에요. 목록을 다시 불러온 뒤 다시 고르세요.";
       }
       if (action === "disconnect") {
-        return "정리 항목 이름을 서버가 거절했습니다. 이름을 확인하고 다시 시도하세요.";
+        return "정리 항목 이름을 서버가 거절했어요. 이름을 확인하고 다시 시도하세요.";
       }
-      return "이름이나 핸들을 서버가 거절했습니다. 값을 확인하고 다시 시도하세요.";
+      return "이름이나 핸들을 서버가 거절했어요. 값을 확인하고 다시 시도하세요.";
     case 401:
-      return "로그인 세션이 만료되었습니다. 다시 로그인한 뒤 시도하세요.";
+      return "로그인 세션이 만료되었어요. 다시 로그인한 뒤 시도하세요.";
     case 403:
-      return "호스티드 에이전트 연결은 워크스페이스 오너나 관리자만 다룰 수 있습니다. 관리자에게 요청하세요.";
+      return "호스티드 봇 초대는 워크스페이스 소유자나 관리자만 다룰 수 있어요. 관리자에게 요청하세요.";
     case 404:
       if (action === "acknowledge") {
-        return "이 정리 항목이 서버에 없습니다. 목록을 다시 불러오세요.";
+        return "이 정리 항목이 서버에 없어요. 목록을 다시 불러오세요.";
       }
-      return "이 연결이 서버에 없습니다. 목록을 다시 불러오세요.";
+      return "이 연결이 서버에 없어요. 목록을 다시 불러오세요.";
     case 409:
       if (action === "create") {
-        return "같은 핸들의 멤버가 이미 있습니다. 다른 핸들로 다시 시도하세요.";
+        return "같은 핸들의 멤버가 이미 있어요. 다른 핸들로 다시 시도하세요.";
       }
       if (action === "regenerate") {
-        return "이미 활성이거나 해제된 연결은 값을 다시 발급할 수 없습니다. 상태를 다시 불러오세요.";
+        return "이미 활성이거나 해제된 연결은 값을 다시 발급할 수 없어요. 상태를 다시 불러오세요.";
       }
       if (action === "disconnect") {
-        return "이 연결은 지금 해제할 수 있는 상태가 아닙니다. 이미 해제됐거나 자격증명이 발급된 적이 없습니다. 상태를 다시 불러오세요.";
+        return "이 연결은 지금 해제할 수 있는 상태가 아니에요. 이미 해제됐거나 자격증명이 발급된 적이 없어요. 상태를 다시 불러오세요.";
       }
       if (action === "acknowledge") {
-        return "이 항목은 이미 확인이 끝났거나, 이 연결이 정리 중이 아닙니다. 목록을 다시 불러오세요.";
+        return "이 항목은 이미 확인이 끝났거나, 이 연결이 정리 중이 아니에요. 목록을 다시 불러오세요.";
       }
       if (action === "complete") {
         // 서버는 미해결 항목과 「자기 쪽 폐기를 되읽지 못했다」를 같은 409 로
         // 답한다(두 갈래를 나누면 권한 없는 탐침에게 해제 진행 여부를 알려 준다).
         // 그래서 이 문장도 둘을 함께 말하되, 사람이 실제로 할 수 있는 행동을
         // 먼저 적는다.
-        return "아직 확인하지 않은 항목이 남아 있거나, 서버가 자기 쪽 폐기를 다시 읽지 못했습니다. 목록을 다시 불러와 남은 항목을 확인하세요.";
+        return "아직 확인하지 않은 항목이 남아 있거나, 서버가 자기 쪽 폐기를 다시 읽지 못했어요. 목록을 다시 불러와 남은 항목을 확인하세요.";
       }
-      return "이 연결은 지금 승인할 수 있는 상태가 아닙니다. 이미 승인됐거나 값이 만료됐습니다. 상태를 다시 불러오세요.";
+      return "이 연결은 지금 승인할 수 있는 상태가 아니에요. 이미 승인됐거나 값이 만료됐어요. 상태를 다시 불러오세요.";
     case 429:
-      return "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.";
+      return "요청이 너무 잦아요. 잠시 뒤에 다시 시도하세요.";
     default:
       return "잠시 뒤에 다시 시도하세요.";
   }
@@ -640,7 +640,7 @@ export function hostedFailureMessage(
   if (error instanceof NetworkError) return `${prefix} ${error.message}`;
   if (error instanceof ApiError) return `${prefix} ${statusAdvice(action, error.status)}`;
   if (error instanceof WireShapeError) {
-    return `${prefix} 서버 응답을 확인하지 못했습니다. 상태를 다시 불러오세요.`;
+    return `${prefix} 서버 응답을 확인하지 못했어요. 상태를 다시 불러오세요.`;
   }
   return `${prefix} 잠시 뒤에 다시 시도하세요.`;
 }

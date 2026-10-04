@@ -173,7 +173,7 @@ const COMMAND_ICONS: Record<CommandIcon, LucideIcon> = {
   workstreams: Milestone,
   "create-channel": Plus,
   agent: Bot,
-  // 시안 ①의 `i-plug`. AI 연결 카드와 컴포저 `/연결` 줄이 같은 글리프를 든다.
+  // 시안 ①의 `i-plug`. AI 계정 카드와 컴포저 `/연결` 줄이 같은 글리프를 든다.
   "ai-connect": Plug,
   "ai-hub": Sparkles,
   sidebar: PanelLeft,
@@ -699,7 +699,7 @@ export function QuickSwitcher({
     openAgentProfile: (memberId) =>
       requestAnimationFrame(() => openAgentProfile(memberId)),
     // 로컬 카드는 **지금 보고 있는 채널**에 붙는다(#2943, brief §3.1). 채널 밖이거나
-    // 그 채널에 카드 자리가 없으면 false이고, 명령이 설정 › AI 연결로 폴백한다 —
+    // 그 채널에 카드 자리가 없으면 false이고, 명령이 AI로 폴백한다 —
     // 그 이동도 위의 `navigateFromPalette` 규율(복귀 지점 기억)을 그대로 지난다.
     openLocalCard: (card, args) => openLocalCardIn(currentChannelId, card, args),
     session: { memberId: session.member.id },

@@ -72,15 +72,15 @@ import {
 } from '../../design/tokens';
 
 // =============================================================================
-// 폰의 AI 연결 카드 (#2945 GC-4, brief §3.6, 시안 mockups.html 「폰」 판).
+// 폰의 AI 계정 카드 (#2945 GC-4, brief §3.6, 시안 mockups.html 「폰」 판).
 //
 // `/연결`이 지금 보고 있는 채널의 입력창 위에 여는 「나에게만」 카드다. 웹 카드
 // (#2944)와 같은 **판정**을 쓰고 렌더는 폰 고유다(RN은 웹 부품을 쓸 수 없다):
 //
-//   · 팀 연결 줄의 알약은 코어 `linkPill`(#2941)이 정한다. 이 파일에 알약 판정을
+//   · 팀 AI 키 줄의 알약은 코어 `linkPill`(#2941)이 정한다. 이 파일에 알약 판정을
 //     새로 두지 않는다 — `__tests__/aiConnectCard.test.tsx`의 import 그래프 시험이
 //     지킨다.
-//   · 팀 연결은 설정·웹 카드와 **같은 쿼리 키**(`["settings","provider-link"]`)와
+//   · 팀 AI 키는 설정·웹 카드와 **같은 쿼리 키**(`["settings","provider-link"]`)와
 //     같은 코어 요청(`fetchProviderLink`·`testProviderLink`)을 쓴다.
 //
 // 폰이 하지 않는 것(Q5, #2816 결재):
@@ -93,8 +93,8 @@ import {
 // 것이다:
 //   · `AiConnectCardShell` — 테두리·머리 자리·높이 상한(로컬은 점선, 제안은 실선)
 //   · `AiConnectCardBody` — 두 절과 발(판정과 행동 전부)
-//   · `AiConnectCard` — 로컬 카드 = 셸 + 「AI 연결 · 나에게만 · ×」 머리 + 몸
-//   · `AiConnectTeamSection` — 「팀 연결 · 이 서버」 절. 제안 카드(GC-7,
+//   · `AiConnectCard` — 로컬 카드 = 셸 + 「AI 계정 · 나에게만 · ×」 머리 + 몸
+//   · `AiConnectTeamSection` — 「팀 AI 키 · 이 서버」 절. 제안 카드(GC-7,
 //     `conversation/AiConnectSuggestion.tsx`)도 이 절을 그대로 쓴다 — 팀 줄의
 //     요청·알약·확인·결과 판정이 폰에 한 벌만 있게(#2945 에서 GC-7 과 합침).
 // =============================================================================
@@ -108,9 +108,9 @@ export const TEAM_QUERY_KEY = ['settings', 'provider-link'] as const;
  * (`__tests__/projectShape.test.ts`). 코어로 옮기는 일은 후속으로 남긴다.
  */
 export const AI_CONNECT_CARD_COPY = {
-  title: 'AI 연결',
+  title: 'AI 계정',
   onlyMe: '나에게만',
-  close: 'AI 연결 카드 닫기',
+  close: 'AI 계정 카드 닫기',
   mineHead: '내 계정 · 맥',
   /**
    * 시안은 「이 폰에서는 상태만 봐요」다. 호스트가 보고한 구독 상태(#2781·#2782)가
@@ -118,15 +118,15 @@ export const AI_CONNECT_CARD_COPY = {
    * 「그 전에는 절 자체를 『맥에서 확인』 한 줄로」).
    */
   mineLine: AI_HUB_COPY.phoneAccountsNotice,
-  teamHead: '팀 연결 · 이 서버',
-  teamLoading: '팀 연결을 불러오는 중이에요.',
+  teamHead: '팀 AI 키 · 이 서버',
+  teamLoading: '팀 AI 키를 불러오는 중이에요.',
   teamDenied: '팀 키는 운영자만 바꾸고 확인할 수 있어요.',
-  teamLoadFailed: '팀 연결을 불러오지 못했어요.',
+  teamLoadFailed: '팀 AI 키를 불러오지 못했어요.',
   teamReload: '다시 불러오기',
-  teamEmptyName: '팀 API 키',
+  teamEmptyName: '팀 AI 키',
   teamEmptySub: '아직 없어요. 팀 에이전트가 대답하려면 키가 필요해요',
   teamEnvSub: '서버 환경값',
-  teamDefault: '팀 기본',
+  teamDefault: '팀 AI 키',
   /** 자판이 올라와 몸을 접었을 때 머리에 붙는 말(design-review #2945 H1). */
   folded: '자판을 내리고 카드 펼치기',
   source: 'API 키',
@@ -136,7 +136,7 @@ export const AI_CONNECT_CARD_COPY = {
   checkedOk: '응답을 확인했어요',
   /** 확인 실패 뒤: 폰에는 「키 바꾸기」가 없으므로 어디서 바꾸는지를 말한다. */
   changeOnMac: '키는 맥·웹에서 바꿀 수 있어요.',
-  offline: '연결이 끊겨 지금은 팀 연결을 확인할 수 없어요.',
+  offline: '연결이 끊겨 지금은 팀 AI 키를 확인할 수 없어요.',
   lastReceived: '마지막으로 받은 값',
   foot: '키 입력은 맥·웹에서 해요',
 } as const;
@@ -245,7 +245,7 @@ export function AiConnectCardShell({
         </Pressable>
       ) : null}
       {/* 접혀도 몸은 **내리지 않고 숨긴다**: 내리면 「연결 확인」 결과(절의 상태)가
-          자판을 한 번 올렸다 내리는 것만으로 사라지고, 팀 연결을 다시 불러온다. */}
+          자판을 한 번 올렸다 내리는 것만으로 사라지고, 팀 AI 키를 다시 불러온다. */}
       <ScrollView
         ref={scrollRef}
         style={[
@@ -275,7 +275,7 @@ export function AiConnectCard({
   line: AiConnectLine | null;
   offline: boolean;
   onClose: () => void;
-  /** 내가 만든 구독 에이전트를 읽을 워크스페이스와 나(AIH-4). 없으면 맥 안내 한 줄만. */
+  /** 내가 만든 구독으로 쓰는 에이전트를 읽을 워크스페이스와 나(AIH-4). 없으면 맥 안내 한 줄만. */
   mine?: MineAgentsScope;
   /**
    * 입력창의 키 붙여넣기 안내가 서 있다(design-review #2945 R3-B1). 그동안 카드를
@@ -417,7 +417,7 @@ export interface MineAgentsScope {
 const MINE_HARNESSES: readonly AiHarness[] = ['claude_code', 'codex'];
 
 /**
- * 내가 만든 구독 에이전트의 서버 상태(읽기 전용, AIH-4 #3399). 웹 「내 AI 계정」과 같은
+ * 내가 만든 구독으로 쓰는 에이전트의 서버 상태(읽기 전용, AIH-4 #3399). 웹 「내 AI 계정」과 같은
  * 코어 문장이다: Claude는 보수 모드(#3397) 동안 「문의 중」이고 부를 수 있다고 하지 않는다.
  * 못 읽으면 없다고 하지 않고 줄을 만들지 않는다.
  */
@@ -461,7 +461,7 @@ export function AiConnectMineAgents({scope}: {scope: MineAgentsScope}): React.JS
 }
 
 /**
- * 「팀 연결 · 이 서버」 절 — 로컬 카드와 제안 카드(GC-7)가 함께 쓰는 한 벌.
+ * 「팀 AI 키 · 이 서버」 절 — 로컬 카드와 제안 카드(GC-7)가 함께 쓰는 한 벌.
  * `idPrefix`는 시험·캡처가 찾는 이름의 앞머리다(`<prefix>-team`, `<prefix>-team-pill` …).
  */
 export function AiConnectTeamSection({
@@ -843,7 +843,7 @@ const MARK_SCALE_CAP = 1.3;
 /** 이 배수부터 알약이 이름 아래로 내려간다 — 한 줄에 셋을 세우면 이름이 부서진다. */
 const STACK_PILL_SCALE = 1.5;
 /**
- * 머리·접힌 줄의 글자 배수 상한(R5-H1). 375 폭에서 「플러그 · AI 연결 · 나에게만 ·
+ * 머리·접힌 줄의 글자 배수 상한(R5-H1). 375 폭에서 「플러그 · AI 계정 · 나에게만 ·
  * 닫기」가 한 줄에 드는 값. 화면 막대의 `BAR_CONTROL_MAX_SCALE`(1.6)과 같은 규율이고,
  * 이 카드는 입력창 위에 자판과 함께 서므로 더 낮다.
  */

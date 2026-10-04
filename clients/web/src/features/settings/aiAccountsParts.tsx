@@ -5,7 +5,7 @@ import { literalSegments } from "@momo/core/features/settings/teamKeyForm";
 import { cn } from "@/design/lib/cn";
 
 // =============================================================================
-// 설정 › AI 연결의 부품 (#2877). 시안: claudedocs/ai-accounts/mockups.html §1·§6.
+// AI의 부품 (#2877). 시안: claudedocs/ai-accounts/mockups.html §1·§6.
 //
 // 목록은 평평한 행이고(카드로 싸지 않음) 곁판만 `sheet` 판이다(제안서 §3.1).
 // 줄 하나는 「로고 · 이름과 라벨 · 출처 알약 · 상태 · 작은 사용량 · ⋯」이다. 줄의
@@ -103,7 +103,7 @@ export function AiSectionHead({
       {locked && (
         <span className="inline-flex items-center gap-1 text-meta text-ink-muted">
           <Lock className="size-3 shrink-0" aria-hidden="true" />
-          운영자 설정
+          운영자만 바꿔요
         </span>
       )}
       {action}
@@ -332,7 +332,7 @@ export function AiOfflineBanner() {
     >
       <WifiOff className="mt-1 size-4 shrink-0 text-warn" aria-hidden="true" />
       <p className="min-w-0 break-keep">
-        <b className="font-semibold">서버와 연결이 끊겼어요.</b> 팀 연결은 마지막으로 받은 값을
+        <b className="font-semibold">서버와 연결이 끊겼어요.</b> 팀 AI 키는 마지막으로 받은 값을
         보여 주고, 바꾸기는 다시 연결된 뒤에 할 수 있어요. 내 계정(이 맥)은 그대로 쓸 수 있어요.
       </p>
     </div>
