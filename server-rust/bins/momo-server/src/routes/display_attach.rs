@@ -174,6 +174,7 @@ pub async fn issue(
     let member_id = principal.member_id;
     let via_token_id = audit_via_token_id(&principal);
     let minted = token.clone();
+    let claude_enabled = state.agent_port.config.claude_subscription_agents_enabled;
 
     let issued = settle(
         "display_attach.issue",
@@ -187,6 +188,7 @@ pub async fn issue(
                     session_id,
                     mode,
                     &minted,
+                    claude_enabled,
                 )
                 .await
             })
@@ -252,6 +254,7 @@ async fn issue_in_tx(
     session_id: Uuid,
     mode: AttachMode,
     token: &str,
+    claude_subscription_agents_enabled: bool,
 ) -> Rejectable<IssuedDisplayGrant> {
     // ---- rejections first (nothing is written above the sweep) -------------
     // Workspace membership gates existence disclosure: a stranger learns 403,
@@ -284,6 +287,22 @@ async fn issue_in_tx(
                 return Ok(Err(ApiError::forbidden(
                     "only the session owner can attach as controller",
                 )));
+            }
+            // #3460 (ADR-0193 D18): no keyboard into a Claude session on a
+            // shared host while the Claude opt-in is off — the login there may
+            // be someone else's subscription. Observer stays allowed.
+            if !claude_subscription_agents_enabled
+                && momo_t3::work_control::shared_host_refuses_claude_session_in_tx(
+                    conn,
+                    workspace_id,
+                    session_id,
+                    target.host_id,
+                )
+                .await?
+            {
+                return Ok(Err(
+                    crate::routes::work_sessions::claude_shared_host_paused(),
+                ));
             }
         }
         AttachMode::Observer => {
@@ -984,6 +1003,7 @@ pub async fn validate(
     let revalidating = request.stream.unwrap_or(false);
     let signing_host = signed.host_id;
     let host_signature = signed.signature.clone();
+    let claude_enabled = state.agent_port.config.claude_subscription_agents_enabled;
 
     let validated = settle(
         "display_attach.validate",
@@ -1032,13 +1052,26 @@ pub async fn validate(
                 } else {
                     None
                 };
-                Ok(Ok(Some((validated, control_window))))
+                // #3460: a controller bearer minted before the pause (or on a
+                // host that became shared) must not keep a live keyboard into a
+                // shared host's Claude session. Evaluated on every validate,
+                // re-validation included, so it takes effect within one period.
+                let claude_paused = !claude_enabled
+                    && validated.mode == AttachMode::Controller
+                    && momo_t3::work_control::shared_host_refuses_claude_session_in_tx(
+                        conn,
+                        workspace_id,
+                        validated.work_session_id,
+                        signing_host,
+                    )
+                    .await?;
+                Ok(Ok(Some((validated, control_window, claude_paused))))
             })
         })
         .await,
     )?;
 
-    let (validated, control_window) = validated.ok_or_else(invalid_capability)?;
+    let (validated, control_window, claude_paused) = validated.ok_or_else(invalid_capability)?;
     // ADR-0165 D4, stated to the only process that can honour it — and stated as
     // a conjunction, not as the grade alone.
     //
@@ -1047,7 +1080,8 @@ pub async fn validate(
     // re-validation period the producer is told to stop accepting input. If this
     // read `mode == Controller` on its own, returning control would be a row in
     // a table and a keyboard that still worked.
-    let input_enabled = validated.mode == AttachMode::Controller && control_window.is_some();
+    let input_enabled =
+        validated.mode == AttachMode::Controller && control_window.is_some() && !claude_paused;
     Ok(Json(DisplayAttachValidationResponse {
         work_session_id: validated.work_session_id.to_string(),
         display_id: validated.target_id,

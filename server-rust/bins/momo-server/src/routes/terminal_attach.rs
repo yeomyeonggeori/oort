@@ -147,6 +147,7 @@ pub async fn issue(
     let member_id = principal.member_id;
     let via_token_id = audit_via_token_id(&principal);
     let minted = token.clone();
+    let claude_enabled = state.agent_port.config.claude_subscription_agents_enabled;
 
     let binding = settle(
         "terminal_attach.issue",
@@ -160,6 +161,7 @@ pub async fn issue(
                     session_id,
                     mode,
                     &minted,
+                    claude_enabled,
                 )
                 .await
             })
@@ -174,6 +176,7 @@ pub async fn issue(
     }))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn issue_in_tx(
     conn: &mut momo_db::PgConnection,
     workspace_id: Uuid,
@@ -182,6 +185,7 @@ async fn issue_in_tx(
     session_id: Uuid,
     mode: AttachMode,
     token: &str,
+    claude_subscription_agents_enabled: bool,
 ) -> Rejectable<momo_t3::RemotePtyBinding> {
     // ---- rejections first (nothing is written above the sweep) -------------
     // Workspace membership gates existence disclosure: a stranger learns 403,
@@ -203,6 +207,22 @@ async fn issue_in_tx(
                 return Ok(Err(ApiError::forbidden(
                     "only the session owner can attach as controller",
                 )));
+            }
+            // #3460 (ADR-0193 D18): the PTY controller types into the same
+            // shared-host Claude login the display controller does. Observer
+            // stays allowed.
+            if !claude_subscription_agents_enabled
+                && momo_t3::work_control::shared_host_refuses_claude_session_in_tx(
+                    conn,
+                    workspace_id,
+                    session_id,
+                    target.host_id,
+                )
+                .await?
+            {
+                return Ok(Err(
+                    crate::routes::work_sessions::claude_shared_host_paused(),
+                ));
             }
         }
         AttachMode::Observer => {
@@ -353,6 +373,7 @@ pub async fn validate(
     let revalidating = request.stream.unwrap_or(false);
     let signing_host = signed.host_id;
     let host_signature = signed.signature.clone();
+    let claude_enabled = state.agent_port.config.claude_subscription_agents_enabled;
 
     let validated = settle(
         "terminal_attach.validate",
@@ -374,6 +395,23 @@ pub async fn validate(
                 // it just claimed access to — but only on success. A refused
                 // capability is not an action, and writing a row for it would
                 // turn the provenance log into a probe log.
+                // #3460: a controller bearer for a shared host's Claude session
+                // is refused like an unknown one (same 401) while the opt-in is
+                // off; an observer bearer is untouched.
+                if let Some(v) = validated.as_ref() {
+                    if !claude_enabled
+                        && v.mode == AttachMode::Controller
+                        && momo_t3::work_control::shared_host_refuses_claude_session_in_tx(
+                            conn,
+                            workspace_id,
+                            v.work_session_id,
+                            signing_host,
+                        )
+                        .await?
+                    {
+                        return Ok(Ok(None));
+                    }
+                }
                 if let Some(validated) = validated.as_ref() {
                     if let Err(rejection) = record_attach_validation(
                         conn,
