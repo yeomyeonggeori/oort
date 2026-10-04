@@ -262,7 +262,13 @@ async fn start_server_with_turn(
         pool,
         TEST_JWT_SECRET.to_string(),
         "ws://127.0.0.1:8000/connection/websocket".to_string(),
-    );
+    )
+    // #3431: these suites drive Claude Code on shared hosts for other reasons, so
+    // they opt in; the pause itself is pinned in remote_host_r0_conformance_pg.
+    .with_agent_port(momo_server::config::AgentPortConfig {
+        claude_subscription_agents_enabled: true,
+        ..momo_server::config::AgentPortConfig::default()
+    });
     let state = match turn {
         Some(policy) => state.with_turn(policy),
         None => state,
@@ -3011,6 +3017,12 @@ async fn start_server_with_gateway(pool: PgPool) -> String {
         TEST_JWT_SECRET.to_string(),
         "ws://127.0.0.1:8000/connection/websocket".to_string(),
     )
+    // #3431: these suites drive Claude Code on shared hosts for other reasons, so
+    // they opt in; the pause itself is pinned in remote_host_r0_conformance_pg.
+    .with_agent_port(momo_server::config::AgentPortConfig {
+        claude_subscription_agents_enabled: true,
+        ..momo_server::config::AgentPortConfig::default()
+    })
     .with_agent_gateway(momo_server::config::AgentGatewaySettings {
         mode: momo_server::config::AgentGatewayMode::Gateway,
         secret: GATEWAY_SECRET.to_string(),

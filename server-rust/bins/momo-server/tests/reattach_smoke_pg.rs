@@ -147,7 +147,13 @@ async fn start_server(pool: PgPool) -> String {
         pool,
         TEST_JWT_SECRET.to_string(),
         "ws://127.0.0.1:8000/connection/websocket".to_string(),
-    );
+    )
+    // #3431: these suites drive Claude Code on shared hosts for other reasons, so
+    // they opt in; the pause itself is pinned in remote_host_r0_conformance_pg.
+    .with_agent_port(momo_server::config::AgentPortConfig {
+        claude_subscription_agents_enabled: true,
+        ..momo_server::config::AgentPortConfig::default()
+    });
     let app = build_app(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
