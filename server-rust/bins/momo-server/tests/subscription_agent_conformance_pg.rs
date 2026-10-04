@@ -54,14 +54,14 @@ const AUDIENCE: &str = "/v1/mcp/agent-port";
 const NOTICE_SOURCE: &str = "server.subscription_agent.notice.v1";
 
 const NON_OWNER_BODY: &str =
-    "성재의 개인 에이전트예요. 팀이 함께 부르는 에이전트는 AI에서 만들 수 있어요.";
+    "성재의 개인 에이전트예요. 팀이 함께 부르는 에이전트는 AI 화면에서 만들 수 있어요.";
 const OFFLINE_QUEUED_BODY: &str =
     "지금은 오프라인이에요. 맥에서 Claude Code를 다시 열면 이어서 답할게요.";
 const OFFLINE_NOT_QUEUED_BODY: &str =
     "지금은 오프라인이에요. 맥에서 Claude Code를 다시 열면 답할 수 있어요.";
-const CLAUDE_PAUSED_BODY: &str = "Claude 구독으로 대신 답하는 기능은 Anthropic 확인이 끝날 때까지 쉬고 있어요. 내 작업에서 직접 쓰거나, AI에서 팀 AI 키를 연결할 수 있어요.";
+const CLAUDE_PAUSED_BODY: &str = "Claude 구독으로 대신 답하는 기능은 Anthropic 확인이 끝날 때까지 쉬고 있어요. 내 작업에서 직접 쓰거나, AI 화면에서 팀 AI 키를 연결할 수 있어요.";
 const DISABLED_BODY: &str =
-    "지금은 이 서버에서 구독 에이전트를 쓸 수 없어요. AI에서 팀 AI 키를 연결할 수 있어요.";
+    "지금은 이 서버에서 구독 에이전트를 쓸 수 없어요. AI 화면에서 팀 AI 키를 연결할 수 있어요.";
 
 // ---------------------------------------------------------------------------
 // isolated database + server

@@ -922,7 +922,10 @@ async fn with_no_team_key_a_mention_turn_calls_no_model_and_says_why() {
         kind, "system",
         "a server fact about the agent, not its voice"
     );
-    assert!(body.contains(TEAM) && body.contains("AI에서"), "{body}");
+    assert!(
+        body.contains(TEAM) && body.contains("AI 화면에서"),
+        "{body}"
+    );
     assert_eq!(props["source"], momo_agent::HOSTED_SKIP_NOTICE_SOURCE);
     assert_eq!(props["reason"], "provider_required");
     assert_eq!(
