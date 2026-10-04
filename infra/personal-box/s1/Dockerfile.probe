@@ -1,0 +1,3 @@
+# S1 시험용 프로브 이미지(박스 이미지가 아니다). busybox nc + socat 리스너.
+FROM alpine:3.20
+RUN apk add --no-cache socat
