@@ -66,7 +66,7 @@ export const HOSTED_WIZARD_STEPS: readonly HostedWizardStepSpec[] = [
     title: "연결 값 발급",
     // 일반 프리셋 문면. Grok 은 presets.ts `GROK_PAIRING_PURPOSE` 가 같은 자리를 덮는다.
     purpose:
-      "연결 값은 지금 한 번만 보여요. provider 설정에 붙여 넣고 이 화면에서 저장을 마치세요.",
+      "연결 값은 지금 한 번만 보여요. AI 회사 설정에 붙여 넣고 이 화면에서 저장을 마치세요.",
   },
   {
     id: "detecting",
@@ -87,7 +87,7 @@ export const HOSTED_WIZARD_STEPS: readonly HostedWizardStepSpec[] = [
     number: 5,
     title: "자격증명 교체와 활성 확인",
     purpose:
-      "승인하면 새 자격증명이 한 번만 보여요. provider 설정의 연결 값을 그 값으로 바꿔야 활성이 돼요.",
+      "승인하면 새 자격증명이 한 번만 보여요. AI 회사 설정의 연결 값을 그 값으로 바꿔야 활성이 돼요.",
   },
 ];
 
@@ -329,14 +329,14 @@ export function hostedLiveMessage(
     case "identity":
       return "1단계. 전용 에이전트의 이름과 핸들을 정하세요.";
     case "pairing":
-      return "2단계. 연결 값이 발급됐어요. 화면에서 복사해 provider 설정에 넣으세요.";
+      return "2단계. 연결 값이 발급됐어요. 화면에서 복사해 AI 회사 설정에 넣으세요.";
     case "detecting":
       return "3단계. 이 에이전트의 다이얼인을 기다리는 중이에요.";
     case "approval":
       return "4단계. 다이얼인을 감지했어요. 닿을 채널과 권한을 확인하세요.";
     case "activation":
       return awaitingProof(connection)
-        ? "5단계. 새 자격증명을 발급했어요. provider 설정의 값을 바꾸면 증명이 진행돼요."
+        ? "5단계. 새 자격증명을 발급했어요. AI 회사 설정의 값을 바꾸면 증명이 진행돼요."
         : "5단계. 연결이 활성이에요. 승인한 채널에서 이 에이전트를 부를 수 있어요.";
     case "expired":
       return "연결 값이 만료됐어요. 새 값을 발급해야 이어서 진행할 수 있어요.";
