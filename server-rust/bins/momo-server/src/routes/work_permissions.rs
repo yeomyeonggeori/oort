@@ -237,6 +237,7 @@ pub async fn decide(
     let member_id = principal.member_id;
     let via_token_id = audit_via_token_id(&principal);
     let settings = state.device_keys.clone();
+    let claude_enabled = state.agent_port.config.claude_subscription_agents_enabled;
 
     let row = settle(
         "work_permissions.decide",
@@ -250,6 +251,7 @@ pub async fn decide(
                         member_id,
                         via_token_id,
                         settings: &settings,
+                        claude_subscription_agents_enabled: claude_enabled,
                     },
                     &decision,
                 )
@@ -331,6 +333,7 @@ struct DecideInput<'a> {
     member_id: Uuid,
     via_token_id: Option<Uuid>,
     settings: &'a DeviceKeySettings,
+    claude_subscription_agents_enabled: bool,
 }
 
 async fn decide_in_tx(
@@ -344,6 +347,7 @@ async fn decide_in_tx(
         member_id,
         via_token_id,
         settings,
+        claude_subscription_agents_enabled,
     } = input;
     // Lock order: session → host (share) → request, the order ingestion
     // (session → request) and revoke (host → request) agree with.
@@ -450,6 +454,24 @@ async fn decide_in_tx(
             "「이 세션 동안」 is available for a member host only",
         )));
     }
+    // #3460 (ADR-0193 D18): an ALLOW on a shared host's Claude session lets
+    // that login's Claude act, so it is paused with the rest while the opt-in
+    // is off. A rejection is the safe answer and stays open.
+    if !claude_subscription_agents_enabled
+        && decision.kind == KIND_ALLOW_ONCE
+        && momo_t3::work_control::shared_host_refuses_claude_session_in_tx(
+            conn,
+            workspace_id,
+            session_id,
+            session.host_id,
+        )
+        .await?
+    {
+        return Ok(Err(
+            crate::routes::work_sessions::claude_shared_host_paused(),
+        ));
+    }
+
     let required = settings.human_control_signature_required
         && host_is_member
         && option.kind == KIND_ALLOW_ONCE;

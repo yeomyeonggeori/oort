@@ -1379,6 +1379,23 @@ pub async fn shared_host_refuses_claude_in_tx(
     Ok(refused)
 }
 
+/// #3460 — the same shared-host Claude test as [`shared_host_refuses_claude_in_tx`],
+/// asked about a **session that is already open** (display / PTY attach as
+/// `controller`): the session's own `tool` is read from `work_session` and the
+/// host is the one the session runs on. `false` for a missing session, a
+/// member-scoped host and any non-Claude tool.
+pub async fn shared_host_refuses_claude_session_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    host_id: Uuid,
+) -> Result<bool, T3Error> {
+    let Some(tool) = work_session_tool_in_tx(&mut *conn, workspace_id, session_id).await? else {
+        return Ok(false);
+    };
+    shared_host_refuses_claude_in_tx(conn, workspace_id, host_id, &tool).await
+}
+
 /// The tool a work session runs, for a control that names the session rather
 /// than the tool (`input`).
 pub async fn work_session_tool_in_tx(

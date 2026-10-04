@@ -21,6 +21,7 @@
 //! | `a_resume_onto_a_member_host_is_refused_while_signatures_are_required` | drop the resume refusal |
 //! | `host_register_spends_its_nonce_and_records_provenance` | drop the nonce or the provenance on the signed registration |
 //! | `the_signing_context_serves_the_one_instance_id_and_the_clock` | serve a second source, or drop the 503 |
+//! | `c3460_a_shared_host_claude_allow_is_paused_while_the_opt_in_is_off` | drop the claude gate in `work_permissions::decide_in_tx`, gate a reject, or gate Codex / a member host / flag on |
 //! | `a_previewed_allow_must_name_the_stored_preview` (#3118) | rebuild the allow without the stored preview hash (a v2 allow or an allow over another preview then passes), broadcast the preview, or serve it to someone other than the owner |
 //!
 //! `#[ignore]` — needs a real Postgres plus the runtime roles:
@@ -2196,4 +2197,129 @@ async fn the_signing_context_serves_the_one_instance_id_and_the_clock() {
         "{body}"
     );
     let _ = (&s.other, &bare.other);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn c3460_a_shared_host_claude_allow_is_paused_while_the_opt_in_is_off() {
+    let _lock = test_lock().await;
+    let s = stage(false).await; // default server: the Claude opt-in is OFF
+    let allow = |request: Uuid| json!({ "requestEventId": request, "optionId": "allow-once", "kind": "allow_once" });
+
+    // positive control: the person's own member host, flag off, is untouched
+    // (flag_off_keeps_todays_decision_and_poll covers the wire; here the status).
+    let own_session = s.session().await;
+    let own_request = s.permission_request(own_session).await;
+    let (status, body) = s.decide(own_session, allow(own_request)).await;
+    assert_eq!(status, 200, "off: member host allow is unaffected: {body}");
+
+    // sessions are opened while the host is still the person's own (a shared
+    // host refuses a new claude session on its own, #3457)
+    let session = s.session().await;
+    let request = s.permission_request(session).await;
+    let session2 = s.session().await;
+    let request2 = s.permission_request(session2).await;
+    let codex = s.session().await;
+    sqlx::query("UPDATE work_session SET tool = 'codex' WHERE id = $1")
+        .bind(codex)
+        .execute(&s.su)
+        .await
+        .expect("codex session");
+    let codex_request = s.permission_request(codex).await;
+
+    // the same host becomes a shared one
+    sqlx::query("UPDATE work_host SET scope = 'workspace' WHERE id = $1")
+        .bind(s.host)
+        .execute(&s.su)
+        .await
+        .expect("make the host shared");
+
+    let (status, body) = s.decide(session, allow(request)).await;
+    assert_eq!(
+        status, 409,
+        "off: an allow on a shared host's claude is paused: {body}"
+    );
+    assert_eq!(
+        code(&body),
+        Some("claude_subscription_agent_paused"),
+        "{body}"
+    );
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("AI 화면"),
+        "{body}"
+    );
+    assert_eq!(
+        s.request_status(request).await,
+        "pending",
+        "nothing was decided"
+    );
+
+    // flag on: the same allow passes
+    let on = {
+        let app = build_app(
+            AppState::new(
+                s.app.clone(),
+                TEST_JWT_SECRET.to_string(),
+                RealtimeAdvert::SameOrigin,
+            )
+            .with_device_keys(settings(false))
+            .with_agent_port(momo_server::config::AgentPortConfig {
+                claude_subscription_agents_enabled: true,
+                ..momo_server::config::AgentPortConfig::default()
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address: SocketAddr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        format!("http://{address}")
+    };
+    let (status, body) = s
+        .http
+        .post(format!(
+            "{on}/v1/workspaces/{}/work-sessions/{session}/permission-decisions",
+            s.workspace
+        ))
+        .bearer_auth(&s.access)
+        .json(&allow(request))
+        .send()
+        .await
+        .map(|r| (r.status().as_u16(), r))
+        .expect("decide on");
+    assert_eq!(
+        status,
+        200,
+        "flag on: the opt-in opens it: {:?}",
+        body.text().await
+    );
+
+    // a rejection is the safe answer and stays open while off
+    let (status, body) = s
+        .decide(
+            session2,
+            json!({ "requestEventId": request2, "optionId": "reject-once", "kind": "reject_once" }),
+        )
+        .await;
+    assert_ne!(
+        code(&body),
+        Some("claude_subscription_agent_paused"),
+        "reject is not paused: {body}"
+    );
+    assert_eq!(
+        status, 200,
+        "off: a reject on a shared host still passes: {body}"
+    );
+
+    // Codex on the shared host is unaffected
+    let (status, body) = s.decide(codex, allow(codex_request)).await;
+    assert_eq!(
+        status, 200,
+        "off: codex on a shared host is unaffected: {body}"
+    );
 }
