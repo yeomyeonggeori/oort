@@ -24,7 +24,7 @@ use crate::run::{RunTrigger, WelcomeKind};
 pub const DEFAULT_WELCOME_PROMPT: &str = "무엇을 만들고 계세요? 하나 가져오시면 같이 시작해요";
 
 /// ADR-0181 D5. Static agent-attributed copy when no provider is linked.
-pub const PROVIDER_REQUIRED_BODY: &str = "AI에서 연결하고 돌아오면 시작해요";
+pub const PROVIDER_REQUIRED_BODY: &str = "AI 화면에서 연결하고 돌아오면 시작해요";
 
 pub const WELCOME_JOB_CREATED_FROM: &str = "server.welcome.kickoff.v1";
 pub const WELCOME_RUN_INPUT_SCHEMA: &str = "momo.agent_run.input.v0";
@@ -507,7 +507,7 @@ mod tests {
     fn default_copy_is_a_plain_korean_sentence() {
         assert!(DEFAULT_WELCOME_PROMPT.contains("무엇을 만들고 계세요"));
         assert!(!DEFAULT_WELCOME_PROMPT.contains('!'));
-        assert!(PROVIDER_REQUIRED_BODY.contains("AI에서"));
+        assert!(PROVIDER_REQUIRED_BODY.contains("AI 화면에서"));
     }
 
     /// #2897 (brief §4.5): the welcome job is handed to a runtime, so it

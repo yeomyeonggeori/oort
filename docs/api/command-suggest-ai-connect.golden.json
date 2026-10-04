@@ -5,7 +5,7 @@
     {
       "name": "no_args",
       "arguments": {"commandId": "ai.connect", "body": "여기서 바로 연결할 수 있어요."},
-      "props": {"momo.command_suggest": {"v": 1, "command_id": "ai.connect", "args": {}, "for_member_id": "00000000-0000-7000-8000-000000000101", "label": "AI 연결"}}
+      "props": {"momo.command_suggest": {"v": 1, "command_id": "ai.connect", "args": {}, "for_member_id": "00000000-0000-7000-8000-000000000101", "label": "내 AI 계정 연결"}}
     },
     {
       "name": "claude",
@@ -20,7 +20,7 @@
     {
       "name": "team_key",
       "arguments": {"commandId": "ai.connect", "args": {"scope": "team"}, "body": "여기서 바로 연결할 수 있어요."},
-      "props": {"momo.command_suggest": {"v": 1, "command_id": "ai.connect", "args": {"harness": "team_key", "scope": "team"}, "for_member_id": "00000000-0000-7000-8000-000000000101", "label": "팀 API 키 연결"}}
+      "props": {"momo.command_suggest": {"v": 1, "command_id": "ai.connect", "args": {"harness": "team_key", "scope": "team"}, "for_member_id": "00000000-0000-7000-8000-000000000101", "label": "팀 AI 키 연결"}}
     }
   ]
 }

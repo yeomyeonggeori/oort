@@ -177,11 +177,11 @@ pub fn hosted_skip_notice_body_with_owner(
         ),
         HostedSkipReason::ProviderRequired => format!(
             "{agent_display_name}에게 연결된 AI가 없어서 답하지 못했어요. \
-             운영자가 AI에서 팀 AI 키를 연결할 수 있어요."
+             운영자가 AI 화면에서 팀 AI 키를 연결할 수 있어요."
         ),
         HostedSkipReason::DefaultAiUnresolved => format!(
             "{agent_display_name}에 정해 둔 기본 AI를 쓸 수 없어서 답하지 못했어요. \
-             다른 모델로 대신 답하지 않았어요. 운영자가 AI에서 기본 AI를 다시 고를 수 있어요."
+             다른 모델로 대신 답하지 않았어요. 운영자가 AI 화면에서 기본 AI를 다시 고를 수 있어요."
         ),
         HostedSkipReason::PersonalKeyUnavailable => format!(
             "{agent_display_name}에게 연결된 개인 API 키가 없어서 답하지 못했어요. \
@@ -390,13 +390,13 @@ mod tests {
         );
     }
 
-    /// #2897: the no-team-key line says what is missing and opens AI 연결.
+    /// #2897: the no-team-key line says what is missing and opens the AI screen.
     #[test]
     fn provider_required_names_the_missing_key_and_opens_ai_settings() {
         assert_eq!(
             hosted_skip_notice_body(HostedSkipReason::ProviderRequired, "hermes"),
             "hermes에게 연결된 AI가 없어서 답하지 못했어요. \
-             운영자가 AI에서 팀 AI 키를 연결할 수 있어요."
+             운영자가 AI 화면에서 팀 AI 키를 연결할 수 있어요."
         );
         let props = hosted_skip_notice_props(
             HostedSkipReason::ProviderRequired,
