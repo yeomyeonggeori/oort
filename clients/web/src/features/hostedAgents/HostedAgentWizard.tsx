@@ -191,7 +191,7 @@ export function HostedAgentWizard({
    * 허브는 기존처럼 진행 중인 연결을 먼저 보여 준다.
    */
   entry?: "hub" | "settings";
-  /** 1회용 연결 값을 저장한 뒤. 호출부가 감지 폴링을 이어받을 때 쓴다. */
+  /** 연결 값을 저장한 뒤. 호출부가 감지 폴링을 이어받을 때 쓴다. */
   onPairingSaved?: (connectionId: string) => void;
 }) {
   if (!open) return null;
@@ -477,13 +477,13 @@ function HostedWizardBody({
   const preset = hostedPreset(presetId);
   const spec = hostedStepSpec(step);
   const live = advancingToPairing
-    ? "연결 값을 발급하는 중입니다."
+    ? "연결 값을 발급하는 중이에요."
     : screen === "picker"
-      ? "진행 중인 연결 목록입니다. 이어서 진행하거나 새 연결을 만드세요."
+      ? "진행 중인 연결 목록이에요. 이어서 진행하거나 새 연결을 만드세요."
       : detailLoading
-        ? "연결 상태를 불러오는 중입니다."
+        ? "연결 상태를 불러오는 중이에요."
         : presetId === "grok" && step === "pairing"
-          ? "2단계. 연결 값이 발급됐습니다. 그록봇에게 말로 전하세요."
+          ? "2단계. 연결 값이 발급됐어요. 그록봇에게 말로 전하세요."
           : hostedLiveMessage(step, connection);
 
   return (
@@ -515,7 +515,7 @@ function HostedWizardBody({
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼습니다. 마지막으로 받은 상태는 계속 볼 수 있고, 값 발급과 승인은 다시 연결된 뒤에 할 수 있습니다."
+          message="연결이 끊겼어요. 마지막으로 받은 상태는 계속 볼 수 있고, 값 발급과 승인은 다시 연결된 뒤에 할 수 있어요."
           testId="hosted-wizard-offline"
         />
       )}
@@ -844,7 +844,7 @@ function PickerScreen({
   if (pending) {
     return (
       <div role="status">
-        <span className="sr-only">진행 중인 연결을 불러오는 중입니다.</span>
+        <span className="sr-only">진행 중인 연결을 불러오는 중이에요.</span>
         <Skeleton ready={false} rows={3} className="p-0" />
       </div>
     );
@@ -854,7 +854,7 @@ function PickerScreen({
       return (
         <EmptyInvite
           className="px-0"
-          headline="호스티드 에이전트 연결은 오너나 관리자만 다룹니다."
+          headline="호스티드 봇 초대는 소유자나 관리자만 다뤄요."
           detail="이 워크스페이스의 관리자에게 연결을 요청하세요."
           testId="hosted-wizard-denied"
         />
@@ -888,7 +888,7 @@ function PickerScreen({
       <div>
         <h3 className="text-body font-semibold text-ink">진행 중인 연결</h3>
         <p className="break-keep text-meta text-ink-muted">
-          이어서 진행하면 중단한 자리에서 다시 시작합니다. 상태는 서버가 기억합니다.
+          이어서 진행하면 중단한 자리에서 다시 시작해요. 상태는 서버가 기억해요.
         </p>
       </div>
       <ul className="flex flex-col overflow-hidden rounded-md border border-line">
@@ -930,7 +930,7 @@ function PickerScreen({
           다른 에이전트 새로 연결
         </Button>
         <span className="break-keep text-meta text-ink-muted">
-          새 연결은 전용 에이전트를 하나 더 만듭니다.
+          새 연결은 전용 에이전트를 하나 더 만들어요.
         </span>
       </div>
     </div>
@@ -982,7 +982,7 @@ function IdentityStep({
         <Field
           label="표시 이름"
           htmlFor="hosted-display-name"
-          hint="사람들이 목록과 대화에서 보는 이름입니다."
+          hint="사람들이 목록과 대화에서 보는 이름이에요."
           error={touched && nameIssue ? agentDisplayNameIssueMessage(nameIssue) : null}
         >
           <Input
@@ -999,7 +999,7 @@ function IdentityStep({
         <Field
           label="핸들"
           htmlFor="hosted-handle"
-          hint="채널에서 이 이름으로 부릅니다. 영문 소문자, 숫자, 하이픈, 밑줄."
+          hint="채널에서 이 이름으로 불러요. 영문 소문자, 숫자, 하이픈, 밑줄."
           error={touched && handleIssue ? agentHandleIssueMessage(handleIssue) : null}
         >
           <Input
@@ -1015,7 +1015,7 @@ function IdentityStep({
       <ChoiceList
         name="hosted-preset"
         legend="어떤 에이전트를 붙이나요"
-        hint="preset은 설정 순서와 문구만 바꿉니다. 만들어지는 연결은 같습니다."
+        hint="preset은 설정 순서와 문구만 바꿔요. 만들어지는 연결은 같아요."
         multiple={false}
         items={presetItems}
         selected={[presetId]}
@@ -1155,8 +1155,8 @@ function DetectingStep({
       <StepHeading step="detecting" />
       <EmptyInvite
         className="px-0"
-        headline="아직 다이얼인이 오지 않았습니다."
-        detail="provider 설정에 값을 넣고 커넥터나 routine을 한 번 실행하면 이 화면이 바뀝니다. 이 창을 열어 둔 채로 다녀와도 됩니다."
+        headline="아직 다이얼인이 오지 않았어요."
+        detail="provider 설정에 값을 넣고 커넥터나 routine을 한 번 실행하면 이 화면이 바뀌어요. 이 창을 열어 둔 채로 다녀와도 돼요."
         actions={
           <Button
             type="button"
@@ -1196,8 +1196,8 @@ function ExpiredStep({ connection }: { connection: HostedAgentConnection }) {
         testId="hosted-expired"
       />
       <p className="break-keep text-body text-ink-muted">
-        이미 넣어 둔 값은 더 이상 통하지 않습니다. 새 값을 발급하면 provider 설정의
-        값을 그것으로 바꿔야 합니다.
+        이미 넣어 둔 값은 더 이상 통하지 않아요. 새 값을 발급하면 provider 설정의
+        값을 그것으로 바꿔야 해요.
       </p>
     </div>
   );
@@ -1264,15 +1264,15 @@ function ApprovalStep({
       {channelItems.length === 0 ? (
         <EmptyInvite
           className="px-0"
-          headline="승인할 채널이 없습니다."
-          detail="채널을 먼저 만들고 다시 열면 그 채널을 승인할 수 있습니다."
+          headline="승인할 채널이 없어요."
+          detail="채널을 먼저 만들고 다시 열면 그 채널을 승인할 수 있어요."
           testId="hosted-approval-no-channels"
         />
       ) : (
         <ChoiceList
           name="hosted-channels"
           legend="닿을 채널"
-          hint="고른 채널에서만 이 에이전트가 부름을 받습니다."
+          hint="고른 채널에서만 이 에이전트가 부름을 받아요."
           multiple
           items={channelItems}
           selected={channelSelection}
@@ -1345,11 +1345,11 @@ function ActivationStep({
       ) : waiting ? (
         <EmptyInvite
           className="px-0"
-          headline="새 자격증명으로 첫 요청이 오기를 기다리는 중입니다."
+          headline="새 자격증명으로 첫 요청이 오기를 기다리는 중이에요."
           detail={
             appManaged
-              ? "이 맥의 연결 값은 앱이 바꿔 뒀습니다. Claude Code를 한 번 열어 첫 요청이 성공하면 활성이 됩니다."
-              : "provider 설정의 값을 새 자격증명으로 바꾸고 커넥터나 routine을 한 번 실행하세요. 그 요청이 성공해야 활성이 됩니다."
+              ? "이 맥의 연결 값은 앱이 바꿔 뒀어요. Claude Code를 한 번 열어 첫 요청이 성공하면 활성이 돼요."
+              : "provider 설정의 값을 새 자격증명으로 바꾸고 커넥터나 routine을 한 번 실행하세요. 그 요청이 성공해야 활성이 돼요."
           }
           actions={
             <Button
@@ -1443,7 +1443,7 @@ function WizardActions({
   if (holdingSecret) {
     return (
       <p className="text-meta text-ink-muted" data-testid="hosted-hold-note">
-        값을 옮긴 뒤 저장했습니다를 누르면 이어서 진행합니다.
+        값을 옮긴 뒤 저장했어요를 누르면 이어서 진행해요.
       </p>
     );
   }

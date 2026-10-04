@@ -6,7 +6,7 @@
 // `ProviderProbeDetail.modelIds` (openapi.operator.yaml) and nowhere else.
 //
 // Rules this file holds (brief §4.2·§4.5, ADR-0147 증보 2026-09-28):
-//   1. 팀 줄은 팀 연결(`team_link`)만 가리킨다. 이 파일이 만드는 선택지와 PUT 본문
+//   1. 팀 줄은 팀 AI 키(`team_link`)만 가리킨다. 이 파일이 만드는 선택지와 PUT 본문
 //      어디에도 개인 구독이 들어갈 자리가 없다(`source`는 상수).
 //   2. 모델 이름은 지어내지 않는다. 선택지는 방금 한 연결 확인이 돌려준 `modelIds`
 //      뿐이고, 목록이 없으면 「기본 모델」(= `modelId: null`, 연결이 정한 모델)만.
@@ -156,7 +156,7 @@ export function probeModelLists(probe: unknown): TeamLinkModels[] {
 /** 고르지 않음 = 줄을 지운다. 그때 무엇이 정하는지를 말한다(PR #3039 우선순위). */
 export const TEAM_DEFAULT_UNSET_LABEL: Record<TeamDefaultRowId, string> = {
   teamAgent: "고르지 않음 · 에이전트마다 정함",
-  summary: "고르지 않음 · 서버가 정함",
+  summary: "고르지 않으면 서버가 정해요",
 };
 
 export const DEFAULT_MODEL_LABEL = "기본 모델";

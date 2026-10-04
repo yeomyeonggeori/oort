@@ -41,7 +41,7 @@ export interface AddSubscriptionDraft {
  *
  * CLI와 라벨을 고르면 부른 쪽이 그 라벨의 프로필 폴더를 만들고(셸) #2816 로그인
  * 모달을 그 프로필로 연다. 주 단추 이름은 로그인하는 주체다(「Claude Code로
- * 로그인」). API 키는 팀 연결 절의 「API 키 추가」가 맡는다(시안과의 차이 표).
+ * 로그인」). API 키는 팀 AI 키 절의 「API 키 추가」가 맡는다(시안과의 차이 표).
  */
 export function AddSubscriptionDialog({
   open,
@@ -68,7 +68,7 @@ export function AddSubscriptionDialog({
   error: string | null;
   onCancel: () => void;
   onSubmit: (draft: AddSubscriptionDraft) => void;
-  /** 운영자면 팀 연결 절의 키 폼으로 넘긴다. 없으면 API 키 선택이 잠긴다. */
+  /** 운영자면 팀 AI 키 절의 키 폼으로 넘긴다. 없으면 API 키 선택이 잠긴다. */
   onAddApiKey?: () => void;
 }) {
   return (

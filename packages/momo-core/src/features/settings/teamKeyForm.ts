@@ -187,7 +187,7 @@ function objectOf(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-/** 첫 칸(팀 기본 키)의 확인 세부. 모르는 모양이면 null(한 줄 문장으로 물러선다). */
+/** 첫 칸(팀 AI 키)의 확인 세부. 모르는 모양이면 null(한 줄 문장으로 물러선다). */
 export function teamProbeDetail(probe: ProviderLinkTest | null | undefined): TeamProbeDetail | null {
   if (!probe) return null;
   const entries = (probe as unknown as Record<string, unknown>).entries;

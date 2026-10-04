@@ -289,7 +289,7 @@ export function FirstAgentStage({
 }: {
   onContinue: () => void;
   /**
-   * `reentry`(#2870): 설정 › AI 연결·에이전트 화면에서 다시 연 같은 화면.
+   * `reentry`(#2870): AI·에이전트 화면에서 다시 연 같은 화면.
    * 자동 통과를 하지 않고(연결이 이미 있어도 목록이 선다), first-run 표지와
    * 이어갈 해시를 쓰지 않고, 진행 점 대신 [뒤로]를 두고, 건너뛰기 대신 닫는다.
    */
@@ -769,7 +769,7 @@ export function FirstAgentStage({
     }
   })();
 
-  // 「나중에 설정 › AI 연결에서…」는 온보딩의 약속이다. 그 자리에서 다시 연
+  // 「나중에 AI에서…」는 온보딩의 약속이다. 그 자리에서 다시 연
   // 화면에는 필요 없다.
   const reentryLine = reentry ? null : (
     <p className="onboarding-reentry" data-testid="first-agent-reentry-line">

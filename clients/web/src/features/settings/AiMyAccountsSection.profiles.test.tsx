@@ -538,7 +538,7 @@ describe("구독 추가: 폴더 → 모달(그 프로필) → 취소면 폴더 �
     expect(tauri.harnessProfileCreate).not.toHaveBeenCalled();
   });
 
-  it("설치된 CLI가 없으면 설치 안내가 있는 구독 에이전트 창이 선다 (#3389)", async () => {
+  it("설치된 CLI가 없으면 설치 안내가 있는 구독으로 쓰는 에이전트 창이 선다 (#3389)", async () => {
     shell.probes = [
       { id: "claude", installed: false, auth: "unknown" },
       { id: "codex", installed: false, auth: "unknown" },
@@ -568,7 +568,7 @@ describe("추가 창의 「API 키 · 팀이 함께」 (시안 §4 1)", () => {
     expect(q("add-kind-api-key")?.getAttribute("aria-checked")).toBe("false");
   });
 
-  it("운영자면 「다음」이 팀 연결의 같은 키 폼을 연다(폴더도 PTY도 없다)", async () => {
+  it("운영자면 「다음」이 팀 AI 키의 같은 키 폼을 연다(폴더도 PTY도 없다)", async () => {
     const onAddApiKey = vi.fn();
     mount({ onAddApiKey });
     {

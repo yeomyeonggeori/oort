@@ -1,0 +1,46 @@
+appId: app.momo.ios
+name: 96-mention-sheet-ai-capture
+---
+# 96-mention-sheet-ai-capture — AI 보조 줄이 든 멘션 시트가 **열린** 사진 (AIH-9b, #3440).
+#
+# 90-mention-sheet-capture 와 같은 까닭으로 `launchApp` 이 없고 로그인도 서버도 없다 —
+# 표면은 `-momoMeasure MENTION-SHEET-AI` 로 이미 떠 있다(`measure/surfaces.tsx` 의
+# `AI_MEMBERS`: 팀 키 · 내 구독 · 남의 구독(잠김·맥 꺼짐) · 개인 키(잠김) · 문의 중 ·
+# 내 구독 맥 꺼짐). 시트는 여섯을 담지만 열이 허락하는 만큼만 보이므로(`mentionSheetMaxHeight`)
+# 한 번 끌어서 나머지를 찍는다.
+#
+#   xcrun simctl ui booted content_size <large|accessibility-extra-extra-large>
+#   xcrun simctl launch booted app.momo.ios --args \
+#     -momoMeasure MENTION-SHEET-AI -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro test clients/mobile/maestro/96-mention-sheet-ai-capture.yaml
+#
+# 라이트는 `LIGHT-MENTION-SHEET-AI`.
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+
+# 탭이 키보드를 올리고, 시뮬레이터는 **키보드가 처음 오를 때마다** 받아쓰기 설정을
+# 묻는다. 시스템 알림이라 앱 트리를 통째로 가리므로 그 다음 선택자는 전부 「없다」로
+# 읽힌다 — 그래서 여는 탭과 치는 탭 사이에 알림을 걷어낸다.
+- tapOn:
+    id: "composer-input"
+- runFlow:
+    when:
+      visible: "지금 안 함"
+    commands:
+      - tapOn: "지금 안 함"
+- tapOn:
+    id: "composer-input"
+- inputText: "@"
+- extendedWaitUntil:
+    visible:
+      id: "mention-list"
+    timeout: 20000
+- takeScreenshot: mention-sheet-ai-top
+- swipe:
+    from:
+      id: "mention-list"
+    direction: UP
+- takeScreenshot: mention-sheet-ai-rest

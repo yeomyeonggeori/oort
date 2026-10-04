@@ -21,7 +21,7 @@ describe("슬래시 후보 (#2942 GC-1)", () => {
     ]);
     expect(rows[0]).toMatchObject({
       commandId: "ai.connect",
-      hint: "AI 연결 카드 열기 · 나에게만 보여요",
+      hint: "AI 계정 카드 열기 · 나에게만 보여요",
       icon: "ai-connect",
       args: {},
       matched: 2,

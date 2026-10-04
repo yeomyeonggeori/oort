@@ -126,7 +126,7 @@ export interface RosterMember {
   brain?: string;
   /** `owner_only` | `everyone`. */
   callableBy?: string;
-  /** 구독 에이전트의 소유자. 손님에게는 명부에 없는 소유자가 빠진다. */
+  /** 구독으로 쓰는 에이전트의 소유자. 손님에게는 명부에 없는 소유자가 빠진다. */
   owner?: { id: string; displayName: string };
   /** 에이전트 자격이 최근 10분 안에 Agent Port 에 닿았는가(추정). 손님에게는 없다. */
   hostOnline?: boolean;

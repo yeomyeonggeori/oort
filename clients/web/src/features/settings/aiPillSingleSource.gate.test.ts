@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 // =============================================================================
 // 같은 판정은 한 곳에서 (#2941 GC-0, brief §3.5).
 //
-// 설정 › AI 연결, 채팅 연결 카드(#2944), 폰 카드(GC-4)가 서로 다른 상태를 말할
+// AI, 채팅 연결 카드(#2944), 폰 카드(GC-4)가 서로 다른 상태를 말할
 // 길을 구조로 막는다. 알약의 판정 낱말(「확인 실패」「연결 안 됨」「자격증명
 // 없음」)과 판정 함수 정의는 코어 `aiLinkPill.ts`에만 있다. 클라이언트 트리에
 // 지역 사본이 생기면 이 시험이 실패한다.
@@ -34,7 +34,7 @@ function walk(dir: string, acc: string[] = []): string[] {
 
 /** 판정 함수의 지역 정의. 이름을 바꿔 숨겨도 판정 낱말 묶음이 잡는다. */
 const LOCAL_JUDGE = /\bfunction\s+(linkPill|harnessPillView)\b|\b(const|let)\s+(linkPill|harnessPillView)\s*=/;
-/** 팀 연결 판정에만 쓰이는 낱말. 한 파일에 둘 이상이면 판정표 사본이다. */
+/** 팀 AI 키 판정에만 쓰이는 낱말. 한 파일에 둘 이상이면 판정표 사본이다. */
 const VERDICT_WORDS = ["\"확인 실패\"", "\"자격증명 없음\"", "\"모의 응답\"", "\"확인할 수 없음\""];
 
 function offenders(files: readonly string[], read: (path: string) => string): string[] {

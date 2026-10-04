@@ -127,7 +127,7 @@ describe("RED PROOF ① 서버 상태가 화면을 정한다 (클라이언트 �
     });
     expect(detail.artifacts).toEqual([]);
     expect(disconnectLiveMessage(detail.connection, detail.artifacts)).toContain(
-      "아직 살아 있습니다"
+      "아직 살아 있어요"
     );
   });
 
@@ -343,8 +343,8 @@ describe("RED PROOF ⑦ 즉시 끊긴 것과 아직 남은 것을 나눠 말한�
   });
 
   it("기록이 지워지지 않는다는 사실을 명시한다", () => {
-    expect(DISCONNECT_HISTORY_NOTE).toContain("지우는 일이 아닙니다");
-    expect(DISCONNECT_NOT_DONE_ITEMS.join(" ")).toContain("지워지지 않습니다");
+    expect(DISCONNECT_HISTORY_NOTE).toContain("지우는 일이 아니에요");
+    expect(DISCONNECT_NOT_DONE_ITEMS.join(" ")).toContain("지워지지 않아요");
   });
 
   it("한 줄이 다른 줄을 대신하지 않는다는 사실이 목록 머리에 있다", () => {
@@ -391,8 +391,8 @@ describe("진행 표시", () => {
   it("빈 목록과 다 끝난 목록은 서로 다른 문장이다", () => {
     const empty = cleanupProgressSentence(cleanupProgress([]));
     const done = cleanupProgressSentence(cleanupProgress(resolvedManifest()));
-    expect(empty).toContain("아직 없습니다");
-    expect(done).toContain("모두 확인했습니다");
+    expect(empty).toContain("아직 없어요");
+    expect(done).toContain("모두 확인했어요");
   });
 });
 
@@ -402,12 +402,12 @@ describe("live region", () => {
       connection("cleanup_pending"),
       seededManifest()
     );
-    expect(message).toContain("권한은 끊겼습니다");
+    expect(message).toContain("권한은 끊겼어요");
     expect(message).toContain("6개");
   });
 
   it("연결이 없으면 그 사실만 말한다", () => {
-    expect(disconnectLiveMessage(null, [])).toContain("호스티드 연결이 없습니다");
+    expect(disconnectLiveMessage(null, [])).toContain("호스티드 연결이 없어요");
   });
 });
 

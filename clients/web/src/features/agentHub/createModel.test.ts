@@ -61,7 +61,7 @@ describe("에이전트 만들기 검증", () => {
 });
 
 describe("만들 수 있는 사람", () => {
-  it("사람인 오너·관리자만 만들 수 있고, 역할이 없으면 서버가 답하게 둔다", () => {
+  it("사람인 소유자·관리자만 만들 수 있고, 역할이 없으면 서버가 답하게 둔다", () => {
     expect(canCreateAgent("human", "owner")).toBe(true);
     expect(canCreateAgent("human", "admin")).toBe(true);
     expect(canCreateAgent("human", "member")).toBe(false);

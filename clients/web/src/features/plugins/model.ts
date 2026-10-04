@@ -276,13 +276,13 @@ export function pluginScopeConsentCompletion(
     if (causes.length === 1) {
       return {
         dismissDialog: false,
-        error: `선택한 권한을 변경하지 못했습니다. 원인: ${causes[0]} 영향받은 권한: ${affectedBy(causes[0])}`,
+        error: `선택한 권한을 변경하지 못했어요. 원인: ${causes[0]} 영향받은 권한: ${affectedBy(causes[0])}`,
         causes: [],
       };
     }
     return {
       dismissDialog: false,
-      error: `선택한 권한을 변경하지 못했습니다. 원인 ${causes.length}가지를 확인하세요.`,
+      error: `선택한 권한을 변경하지 못했어요. 원인 ${causes.length}가지를 확인하세요.`,
       causes: causes.map((cause) => `${cause} 영향받은 권한: ${affectedBy(cause)}`),
     };
   }
@@ -298,12 +298,12 @@ export function pluginScopeChangeMessage(
   const verb = kind === "grant" ? "허용" : "회수";
   const completedNames = completed.map((outcome) => scopeSentence(outcome.scope)).join(", ");
   if (failed.length === 0) {
-    return `선택한 ${completed.length}개 권한을 ${verb}했습니다: ${completedNames}`;
+    return `선택한 ${completed.length}개 권한을 ${verb}했어요: ${completedNames}`;
   }
   if (completed.length === 0) {
-    return `선택한 권한을 ${verb}하지 못했습니다. 현재 권한을 다시 확인하세요.`;
+    return `선택한 권한을 ${verb}하지 못했어요. 현재 권한을 다시 확인하세요.`;
   }
-  return `${completed.length}개 권한을 ${verb}했습니다: ${completedNames}. ${failed.length}개는 변경하지 못했습니다: ${failed.map((outcome) => scopeSentence(outcome.scope)).join(", ")}`;
+  return `${completed.length}개 권한을 ${verb}했어요: ${completedNames}. ${failed.length}개는 변경하지 못했어요: ${failed.map((outcome) => scopeSentence(outcome.scope)).join(", ")}`;
 }
 
 export function pluginScopeChangeTone(
@@ -361,7 +361,7 @@ export function nonAdminInstallGuidance(names: readonly string[]): string {
   const next = people
     ? `${people}에게 설치를 요청하세요.`
     : "워크스페이스 관리자에게 설치를 요청하세요.";
-  return `앱 설치는 워크스페이스 관리자만 할 수 있습니다. ${next}`;
+  return `앱 설치는 워크스페이스 관리자만 할 수 있어요. ${next}`;
 }
 
 export function pluginActionErrorMessage(error: unknown): string {
@@ -369,18 +369,18 @@ export function pluginActionErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     switch (error.status) {
       case 400:
-        return "앱이 선언하지 않은 권한은 변경할 수 없습니다. 앱 정보를 다시 불러온 뒤 다시 시도하세요.";
+        return "앱이 선언하지 않은 권한은 변경할 수 없어요. 앱 정보를 다시 불러온 뒤 다시 시도하세요.";
       case 403:
-        return "이 앱은 워크스페이스 정책이나 내 역할상 변경할 수 없습니다. 관리자에게 정책과 권한을 확인하세요.";
+        return "이 앱은 워크스페이스 정책이나 내 역할상 변경할 수 없어요. 관리자에게 정책과 권한을 확인하세요.";
       case 404:
-        return "앱 또는 내 권한을 찾지 못했습니다. 앱 목록을 다시 불러온 뒤 다시 시도하세요.";
+        return "앱 또는 내 권한을 찾지 못했어요. 앱 목록을 다시 불러온 뒤 다시 시도하세요.";
       case 409:
-        return "이 앱이 설치되어 활성화된 상태가 아닙니다. 앱 목록을 다시 불러온 뒤 다시 시도하세요.";
+        return "이 앱이 설치되어 활성화된 상태가 아니에요. 앱 목록을 다시 불러온 뒤 다시 시도하세요.";
       default:
-        return "앱 변경을 완료하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+        return "앱 변경을 완료하지 못했어요. 잠시 뒤에 다시 시도하세요.";
     }
   }
-  return "앱 변경을 완료하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+  return "앱 변경을 완료하지 못했어요. 잠시 뒤에 다시 시도하세요.";
 }
 
 /** An error stays with the plugin whose mutation produced it, even after the
@@ -399,13 +399,13 @@ export function pluginDetailErrorMessage(error: unknown): string {
   if (error instanceof NetworkError) return error.message;
   if (error instanceof ApiError) {
     if (error.status === 403) {
-      return "이 앱의 상세 정보를 볼 권한이 없습니다. 워크스페이스 관리자에게 권한을 확인하세요.";
+      return "이 앱의 상세 정보를 볼 권한이 없어요. 워크스페이스 관리자에게 권한을 확인하세요.";
     }
     if (error.status === 404) {
-      return "이 앱을 찾지 못했습니다. 앱 목록을 다시 불러온 뒤 다시 선택하세요.";
+      return "이 앱을 찾지 못했어요. 앱 목록을 다시 불러온 뒤 다시 선택하세요.";
     }
   }
-  return "앱 상세 정보를 읽지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+  return "앱 상세 정보를 읽지 못했어요. 잠시 뒤에 다시 시도하세요.";
 }
 
 export function pluginActionConfirmation(action: Extract<PluginAction, {
@@ -413,7 +413,7 @@ export function pluginActionConfirmation(action: Extract<PluginAction, {
 }>): { title: string; description: string; confirmLabel: string } {
   return {
     title: `${action.pluginName} 설치를 해제할까요?`,
-    description: `${action.pluginName} 앱의 모든 멤버 권한이 함께 회수됩니다.`,
+    description: `${action.pluginName} 앱의 모든 멤버 권한이 함께 회수돼요.`,
     confirmLabel: "설치 해제",
   };
 }

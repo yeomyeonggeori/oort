@@ -265,7 +265,7 @@ function HopRow({
           eight hops that need three screens stop being one.
 
           The error goes to the control it is about. `draftRowError` names the
-          field for that reason: "새 provider는 키를 입력해야 저장됩니다."
+          field for that reason: "새 provider는 키를 입력해야 저장돼요."
           rendered under 주소 sends a person to fix the one field they filled
           in correctly. */}
       <div className="flex min-w-0 flex-wrap items-start gap-2">

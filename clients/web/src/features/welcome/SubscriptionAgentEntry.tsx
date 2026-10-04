@@ -21,7 +21,7 @@ import type { AiConnectReentryFrom } from "./aiConnectReentry";
 // =============================================================================
 // 구독 줄 재진입 입구 (#2870, RCA 1-b·1-c).
 //
-// 설정 › AI 연결의 「내 계정」 절(#2877, `AiMyAccountsSection`)과 에이전트 화면
+// AI의 「내 계정」 절(#2877, `AiMyAccountsSection`)과 에이전트 화면
 // 머리에 선다. 누르면 온보딩의 AI 연결
 // 화면을 재진입 모드로 다시 연다(FirstAgentStage `mode="reentry"`).
 //
@@ -50,7 +50,7 @@ function readEntrySurfaceOverride(): SubscriptionSurface | null {
 }
 
 /**
- * 입구의 상태. 설정 › AI 연결의 「내 계정」 절(#2877)은 로딩·권한 없음·빌드가
+ * 입구의 상태. AI의 「내 계정」 절(#2877)은 로딩·권한 없음·빌드가
  * 걷음을 서로 다르게 그려야 해서 넷을 가른다.
  *
  * - `pending`: 명부나 서버 값이 아직 오지 않았다(깜빡임 방지로 행동을 세우지 않는다)

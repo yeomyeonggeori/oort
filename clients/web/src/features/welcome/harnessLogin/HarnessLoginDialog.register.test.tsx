@@ -292,7 +292,7 @@ describe("Claude 멈춤은 오류 모양이 아니다", () => {
     expect(calm?.getAttribute("data-refusal")).toBe("paused");
     expect(dq("register-calm-badge")?.textContent).toBe("회색 · 문의 중");
     expect(dq("register-line")?.textContent).toBe(
-      "이 서버에서는 Claude Code 구독 에이전트가 잠시 멈춰 있어요."
+      "이 서버에서는 Claude Code 구독으로 쓰는 에이전트가 잠시 멈춰 있어요."
     );
     // 오류 표현이 하나도 없다: 경고 역할, 위험 색, 오류 표정, 다시 시도.
     const dialog = dq("harness-login-dialog")!;

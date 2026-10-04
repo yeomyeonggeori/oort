@@ -419,7 +419,7 @@ describe("GC-8: 서버가 게시한 골든 props → 보는 사람별 렌더", (
     await act(async () => undefined);
     expect(line.dataset.viewer).toBe("other");
     expect(q(line, "ai-suggest-line")?.textContent).toBe(
-      "곽성재에게 AI 연결을 제안했어요",
+      "곽성재에게 AI 계정 연결을 제안했어요",
     );
     expect(controls(line)).toBe(0);
   });

@@ -276,7 +276,7 @@ describe("RED PROOF ④ 없는 것과 거절된 것은 한 문장이고 fallback
   it("409 는 이미 끝난 하나의 결정으로 읽는다", () => {
     expect(isOauthAlreadyDecided(new ApiError(409, ""))).toBe(true);
     expect(oauthConsentFailureMessage("approve", new ApiError(409, ""))).toContain(
-      "이미 처리됐습니다"
+      "이미 처리됐어요"
     );
   });
 
@@ -328,7 +328,7 @@ describe("RED PROOF ⑤ 결과 문장은 닫히는 쪽을 말한다", () => {
       "messages:write",
     ]);
     expect(empty).toBe(
-      "승인하면 이 에이전트는 2개 채널에서 메시지 쓰기를 할 수 있습니다. 승인하지 않은 채널에서는 이 에이전트를 멘션해도 작업이 만들어지지 않습니다."
+      "승인하면 이 에이전트는 2개 채널에서 메시지 쓰기를 할 수 있어요. 승인하지 않은 채널에서는 이 에이전트를 멘션해도 작업이 만들어지지 않아요."
     );
     expect(empty).not.toMatch(/승인하면\s+는\s/);
   });
@@ -429,7 +429,7 @@ describe("oauthConsentScreen — 어느 화면인가", () => {
     );
     expect(screen.kind).toBe("retry");
     if (screen.kind === "retry") {
-      expect(screen.message).toContain("불러오지 못했습니다");
+      expect(screen.message).toContain("불러오지 못했어요");
       expect(screen.message).not.toMatch(/고정 bearer|static/i);
     }
   });
