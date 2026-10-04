@@ -703,6 +703,12 @@ export interface AiAgentLabels {
   mentionLine: string | null;
   /** 멘션 후보 오른쪽 칩. */
   mentionBadge: string | null;
+  /**
+   * 보조 줄이 한 줄로 접히는 큰 글자용: **상태(문의 중·맥 꺼짐)를 앞에** 둔 같은 사실.
+   * 말줄임은 꼬리를 자르므로 「문의 중」/「맥 꺼짐」이 꼬리에 있으면 정작 둘을 가르는 말이 사라진다.
+   * 상태가 없으면 `mentionLine` 과 같다.
+   */
+  mentionLineStatusFirst: string | null;
   /** 멘션 후보에 자물쇠를 붙이고 흐리게: 보는 사람이 못 부르는 에이전트. */
   lockedForViewer: boolean;
 }
@@ -786,6 +792,10 @@ export function aiAgentLabels(c: AiAgentClassification): AiAgentLabels {
     status,
     mentionLine,
     mentionBadge,
+    mentionLineStatusFirst:
+      mentionLine !== null && offlineSuffix !== ""
+        ? `${offlineSuffix.slice(3)} · ${mentionBrain} · ${mentionCallable}`
+        : mentionLine,
     lockedForViewer: (c.brain === "subscription" || c.brain === "personal_key") && other,
   };
 }
@@ -817,10 +827,21 @@ export function nonOwnerNotice(
   return `${first} 팀 키로 답하는 @${team}에게 물어보거나, ${owner}에게 부탁해 보세요.`;
 }
 
-/** 작성 중 composer 위 한 줄. 비소유자일 때만. */
-export function nonOwnerComposerNotice(c: AiAgentClassification, agentName: string): string | null {
+/** 작성 중 composer 위 한 줄에서 가장 먼저 읽혀야 하는 말(큰 글자에서 꼬리가 잘려도 남는다). */
+export const COMPOSER_WILL_NOT_ANSWER = "보내도 답하지 않아요.";
+
+/**
+ * 작성 중 composer 위 한 줄. 비소유자일 때만.
+ * `essentialFirst`: 큰 글자에서 두 줄에 안 드는 폰용 — 「보내도 답하지 않아요」를 문장 앞으로 올린다.
+ */
+export function nonOwnerComposerNotice(
+  c: AiAgentClassification,
+  agentName: string,
+  essentialFirst = false
+): string | null {
   if ((c.brain !== "subscription" && c.brain !== "personal_key") || c.ownership !== "other") return null;
-  return `${withTopic(agentName)} ${ownerRef(c)}만 부를 수 있어요. 보내도 답하지 않아요.`;
+  const why = `${withTopic(agentName)} ${ownerRef(c)}만 부를 수 있어요.`;
+  return essentialFirst ? `${COMPOSER_WILL_NOT_ANSWER} ${why}` : `${why} ${COMPOSER_WILL_NOT_ANSWER}`;
 }
 
 /** 구독 에이전트의 맥이 꺼져 있을 때. 어떤 경우에도 팀 키로 대신한다고 하지 않는다. */
@@ -1167,7 +1188,12 @@ export function mySubscriptionAgents(
  * 부르는 글을 쓰는 중에 composer 위에 올리는 한 줄. 소유자든 아니든 같다: 이 에이전트는 지금
  * 아무에게도 답하지 않는다. 사유가 없으면 null. 팀 키로 대신 답한다고 말하지 않는다.
  */
-export function pausedComposerNotice(c: AiAgentClassification, agentName: string): string | null {
+export function pausedComposerNotice(
+  c: AiAgentClassification,
+  agentName: string,
+  essentialFirst = false
+): string | null {
   if (c.unavailableReason !== CLAUDE_SUBSCRIPTION_AGENT_PAUSED) return null;
-  return `${withTopic(agentName)} Claude 구독 대행이 Anthropic 약관 확인 전까지 쉬고 있어요. 보내도 답하지 않아요.`;
+  const why = `${withTopic(agentName)} Claude 구독 대행이 Anthropic 약관 확인 전까지 쉬고 있어요.`;
+  return essentialFirst ? `${COMPOSER_WILL_NOT_ANSWER} ${why}` : `${why} ${COMPOSER_WILL_NOT_ANSWER}`;
 }
