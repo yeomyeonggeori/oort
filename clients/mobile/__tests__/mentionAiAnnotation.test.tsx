@@ -1,15 +1,16 @@
 import {CLAUDE_SUBSCRIPTION_AGENT_PAUSED} from '@momo/core/features/ai/aiHubModel';
-import {composerAgentNotice, mentionAnnotation} from '@momo/core/features/ai/aiMention';
+import {composerAgentNotice, MENTION_LOCKED_HINT, mentionAnnotation} from '@momo/core/features/ai/aiMention';
 import type {RosterMember} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {cleanup, fireEvent, render, screen, within} from '@testing-library/react-native';
 import React from 'react';
-import {Dimensions, StyleSheet} from 'react-native';
+import {AccessibilityInfo, Dimensions, Platform, StyleSheet} from 'react-native';
 
 import {
   Composer,
   composerColumnBudget,
   mentionAnnotationLines,
+  noticeEssentialFirst,
   mentionRowHeight,
   mentionSheetMaxHeight,
 } from '../src/features/conversation/Composer';
@@ -122,6 +123,8 @@ function composer(members: RosterMember[], props: Partial<React.ComponentProps<t
   );
 }
 
+// 표지는 스크린리더에서 숨긴 도형이다 — 트리에는 있다.
+const HIDDEN = {includeHiddenElements: true};
 const flat = (node: {props: {style?: unknown}}) => StyleSheet.flatten(node.props.style as never) as Record<string, unknown>;
 
 function openSheet(text = '@') {
@@ -355,5 +358,136 @@ describe('입력창 위 한 줄 — 답하지 않을 에이전트를 부르는 �
     fireEvent.changeText(screen.getByTestId('composer-input'), '@sj 안녕 @');
     expect(screen.getByTestId('mention-list')).toBeTruthy();
     expect(screen.queryByTestId('composer-agent-notice')).toBeNull();
+  });
+});
+
+describe('후속 (#3459) — 큰 글자에서도 지켜지는 말', () => {
+  it('한 줄로 접히면 상태(문의 중·맥 꺼짐)를 앞에 둔 코어 문장을 그리고, 라벨은 본래 순서 전문이다', () => {
+    setWindow({fontScale: 2.143});
+    composer([otherSub, pausedMine, teamKey]);
+    openSheet();
+    const lines = screen.getAllByTestId('mention-agent-line').map(n => n.props.children);
+    expect(lines).toEqual([otherSub, pausedMine, teamKey].map(a => mentionAnnotation(a, VIEWER)?.lineStatusFirst));
+    // 못 박는 문자열: 꼬리에서 앞으로 옮겼을 뿐 사실은 같다.
+    expect(lines).toEqual([
+      '맥 꺼짐 · 성재 님 개인 구독 · 성재 님만 부를 수 있어요',
+      '문의 중 · 내 구독 · 나만 부를 수 있어요',
+      '팀 키 · 누구나',
+    ]);
+    // 말줄임이 어디서 자르든 앞 12자 안에 둘을 가르는 말이 있다.
+    expect(lines[0].slice(0, 5)).toBe('맥 꺼짐 ');
+    expect(lines[1].slice(0, 5)).toBe('문의 중 ');
+    const label = screen.getAllByTestId('mention-option')[1].props.accessibilityLabel as string;
+    expect(label).toContain(mentionAnnotation(pausedMine, VIEWER)?.line);
+  });
+
+  it('두 줄 크기에서는 본래 순서다', () => {
+    composer([pausedMine]);
+    openSheet();
+    expect(screen.getByTestId('mention-agent-line').props.children).toBe(
+      mentionAnnotation(pausedMine, VIEWER)?.line,
+    );
+  });
+
+  it('한 행만 보이는 큰 글자에서 「아래에 더 있다」 표지가 서고, 끝까지 내리면 사라진다', () => {
+    setWindow({fontScale: 3.571, height: 667});
+    composer([teamKey, mineSub, otherSub, otherKey, pausedMine]);
+    openSheet();
+    const row = mentionRowHeight(3.571, true);
+    expect(mentionSheetMaxHeight(3.571, 667, true)).toBe(row);
+    expect(screen.getByTestId('mention-more-cue', HIDDEN)).toBeTruthy();
+    const list = within(screen.getByTestId('mention-list'));
+    expect(list.getByTestId('mention-more-cue', HIDDEN).props.pointerEvents).toBe('none');
+    const scroll = screen.UNSAFE_getByType(require('react-native').ScrollView);
+    fireEvent.scroll(scroll, {
+      nativeEvent: {contentOffset: {y: 0}, layoutMeasurement: {height: row}, contentSize: {height: row * 5}},
+    });
+    expect(screen.getByTestId('mention-more-cue', HIDDEN)).toBeTruthy();
+    fireEvent.scroll(scroll, {
+      nativeEvent: {contentOffset: {y: row * 4}, layoutMeasurement: {height: row}, contentSize: {height: row * 5}},
+    });
+    expect(screen.queryByTestId('mention-more-cue', HIDDEN)).toBeNull();
+  });
+
+  it('여러 행이 보이는 시트와 후보가 하나뿐인 시트에는 표지가 없다 (실패할 수 있는 가드)', () => {
+    const first = composer([teamKey, mineSub, otherSub]);
+    openSheet();
+    expect(screen.queryByTestId('mention-more-cue', HIDDEN)).toBeNull();
+    first.unmount();
+    setWindow({fontScale: 3.571, height: 667});
+    composer([otherSub]);
+    openSheet();
+    expect(screen.queryByTestId('mention-more-cue', HIDDEN)).toBeNull();
+  });
+
+  it('큰 글자에서는 핵심 절이 문장 앞에 서서 두 줄 말줄임이 먹지 못한다', () => {
+    expect(noticeEssentialFirst(1)).toBe(false);
+    expect(noticeEssentialFirst(1.3)).toBe(false);
+    expect(noticeEssentialFirst(2.143)).toBe(true);
+    setWindow({fontScale: 3.143});
+    const large = composer([otherSub]);
+    fireEvent.changeText(screen.getByTestId('composer-input'), '@sj 안녕 ');
+    const notice = screen.getByTestId('composer-agent-notice');
+    expect(notice.props.children).toBe(composerAgentNotice([otherSub], VIEWER, {essentialFirst: true}));
+    expect(notice.props.children.startsWith('보내도 답하지 않아요.')).toBe(true);
+    // 같은 사실이다: 순서만 다르다.
+    expect(notice.props.children).toContain('성재 님만 부를 수 있어요.');
+    // 표준 크기에서는 본래 문장이다.
+    large.unmount();
+    setWindow({fontScale: 1});
+    composer([pausedMine]);
+    fireEvent.changeText(screen.getByTestId('composer-input'), '@pm 안녕 ');
+    expect(screen.getByTestId('composer-agent-notice').props.children).toBe(
+      composerAgentNotice([pausedMine], VIEWER),
+    );
+  });
+
+  it('한 줄이 서면 iOS 에서는 직접 알리고, 같은 말은 다시 알리지 않는다', () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => {});
+    announce.mockClear();
+    const os = Platform.OS;
+    expect(os).toBe('ios');
+    composer([otherSub]);
+    const input = screen.getByTestId('composer-input');
+    fireEvent.changeText(input, '@sj 안');
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(announce).toHaveBeenCalledWith(composerAgentNotice([otherSub], VIEWER));
+    fireEvent.changeText(input, '@sj 안녕');
+    expect(announce).toHaveBeenCalledTimes(1);
+    fireEvent.changeText(input, '안녕');
+    fireEvent.changeText(input, '@sj 다시');
+    expect(announce).toHaveBeenCalledTimes(2);
+    announce.mockRestore();
+  });
+
+  it('Android 에서는 live region 이 읽으므로 겹쳐 알리지 않는다', () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => {});
+    announce.mockClear();
+    const original = Platform.OS;
+    Object.defineProperty(Platform, 'OS', {get: () => 'android', configurable: true});
+    try {
+      composer([otherSub]);
+      fireEvent.changeText(screen.getByTestId('composer-input'), '@sj 안녕 ');
+      expect(announce).not.toHaveBeenCalled();
+      expect(screen.getByTestId('composer-agent-notice').props.accessibilityLiveRegion).toBe('polite');
+    } finally {
+      Object.defineProperty(Platform, 'OS', {get: () => original, configurable: true});
+      announce.mockRestore();
+    }
+  });
+
+  it('잠긴 행은 disabled 가 아니라 힌트로 말한다 — 고를 수 있기 때문이다', () => {
+    composer([teamKey, otherSub, otherKey, mineSub]);
+    openSheet();
+    const rows = screen.getAllByTestId('mention-option');
+    expect(rows[0].props.accessibilityHint).toBeUndefined();
+    expect(rows[3].props.accessibilityHint).toBeUndefined();
+    expect(rows[1].props.accessibilityHint).toBe(MENTION_LOCKED_HINT);
+    expect(rows[2].props.accessibilityHint).toBe(MENTION_LOCKED_HINT);
+    expect(MENTION_LOCKED_HINT).toBe('고를 수는 있어요. 보내도 답하지 않아요.');
+    // `disabled` 로 말하면 VoiceOver 가 「흐림」이라 읽어 선택까지 막힌 것처럼 들린다.
+    expect(rows[1].props.accessibilityState?.disabled).not.toBe(true);
+    fireEvent.press(rows[1]);
+    expect(screen.getByTestId('composer-input').props.value).toBe('@sj ');
   });
 });

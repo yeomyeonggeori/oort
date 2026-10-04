@@ -61,13 +61,13 @@ const pausedMine = agent({
 
 describe("mentionAnnotation", () => {
   it("writes the second line from the core labels, for each kind of agent", () => {
-    expect(mentionAnnotation(teamKey, VIEWER)).toEqual({ line: "팀 키 · 누구나", badge: "팀 키", locked: false });
-    expect(mentionAnnotation(mineSub, VIEWER)).toEqual({
+    expect(mentionAnnotation(teamKey, VIEWER)).toMatchObject({ line: "팀 키 · 누구나", badge: "팀 키", locked: false });
+    expect(mentionAnnotation(mineSub, VIEWER)).toMatchObject({
       line: "내 구독 · 나만 부를 수 있어요",
       badge: "내 구독",
       locked: false,
     });
-    expect(mentionAnnotation(otherSub, VIEWER)).toEqual({
+    expect(mentionAnnotation(otherSub, VIEWER)).toMatchObject({
       line: "성재 님 개인 구독 · 성재 님만 부를 수 있어요 · 맥 꺼짐",
       badge: "성재 님만",
       locked: true,
@@ -151,5 +151,35 @@ describe("answeringMentionTarget", () => {
   it("folds to none when nobody answers", () => {
     expect(answeringMentionTarget({ kind: "many", agents: [otherSub, otherKey] }, VIEWER)).toEqual({ kind: "none" });
     expect(answeringMentionTarget({ kind: "one", agent: pausedMine }, VIEWER)).toEqual({ kind: "none" });
+  });
+});
+
+describe("큰 글자용 변형 (#3459)", () => {
+  it("lineStatusFirst moves 문의 중 / 맥 꺼짐 to the front and keeps the same facts", () => {
+    expect(mentionAnnotation(pausedMine, VIEWER)?.lineStatusFirst).toBe("문의 중 · 내 구독 · 나만 부를 수 있어요");
+    expect(mentionAnnotation(otherSub, VIEWER)?.lineStatusFirst).toBe(
+      "맥 꺼짐 · 성재 님 개인 구독 · 성재 님만 부를 수 있어요"
+    );
+    // 상태가 없으면 본래 줄과 같다.
+    expect(mentionAnnotation(teamKey, VIEWER)?.lineStatusFirst).toBe(mentionAnnotation(teamKey, VIEWER)?.line);
+    expect(mentionAnnotation(otherKey, VIEWER)?.lineStatusFirst).toBe(mentionAnnotation(otherKey, VIEWER)?.line);
+  });
+
+  it("essentialFirst puts 보내도 답하지 않아요 in front without changing the facts", () => {
+    const normal = composerAgentNotice([otherSub], VIEWER);
+    const first = composerAgentNotice([otherSub], VIEWER, { essentialFirst: true });
+    expect(first).toBe("보내도 답하지 않아요. 성재의 Claude Code는 성재 님만 부를 수 있어요.");
+    expect(first).not.toBe(normal);
+    expect(composerAgentNotice([pausedMine], VIEWER, { essentialFirst: true })?.startsWith("보내도 답하지 않아요.")).toBe(
+      true
+    );
+    expect(composerAgentNotice([teamKey], VIEWER, { essentialFirst: true })).toBeNull();
+  });
+
+  it("only locked rows carry the screen-reader hint", () => {
+    expect(mentionAnnotation(otherSub, VIEWER)?.lockedHint).toBe("고를 수는 있어요. 보내도 답하지 않아요.");
+    expect(mentionAnnotation(otherKey, VIEWER)?.lockedHint).not.toBeNull();
+    expect(mentionAnnotation(mineSub, VIEWER)?.lockedHint).toBeNull();
+    expect(mentionAnnotation(pausedMine, VIEWER)?.lockedHint).toBeNull();
   });
 });
