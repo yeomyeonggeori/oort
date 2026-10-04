@@ -32,6 +32,8 @@
 //! | `live3_1_control_opens_only_for_the_owner_and_only_with_a_window` | issue control to a watcher, skip the host-advertisement clause for controller, open two windows on one session, or mint a controller grant without a window row |
 //! | `live3_2_the_agent_cannot_reach_a_session_under_human_control` | delete the window check in `work_controls::create_in_tx`, move it below the writes, drop the `NOT EXISTS` clause from `pending_controls_for_host_in_tx`, or start blocking spawns |
 //! | `live3_3_the_window_closes_three_ways_and_every_one_is_idempotent` | make a repeated return 4xx, stop sweeping lapsed leases, relabel a lapse `returned`, leave a window open on an ended session, or stop emitting the close envelope |
+//! | `c3460_1_display_controller_into_a_shared_host_claude_session_is_paused_while_off` | drop the claude gate in `display_attach::issue_in_tx` or in `display_attach::validate` (`input_enabled`) |
+//! | `c3460_2_pty_controller_into_a_shared_host_claude_session_is_paused_while_off` | drop the claude gate in `terminal_attach::issue_in_tx` or in `terminal_attach::validate` |
 //! | `live3_4_input_enabled_tracks_the_window_and_not_just_the_grade` | answer `input_enabled` from the grade alone, or stop renewing the lease on re-validation |
 //! | `live3_5_a_retaken_grant_carries_the_keyboard_and_the_replaced_one_does_not` | leave the window bound to the grant it was opened by when the same owner re-takes control, or mint a second window for the retry |
 //! | `live3_6_a_session_that_leaves_underneath_a_window_closes_it` | stop closing the window on the source session of a resume, or let an idempotent 재종료 return early past a window still standing on an ended session |
@@ -4975,5 +4977,395 @@ async fn live5a_5_the_session_surface_reconstructs_all_three_window_states() {
          `lease_expires_at > clock_timestamp()` clause the agent's refusal uses. \
          A projection that answered off `ended_at IS NULL` alone would tell a \
          person somebody is typing into a screen whose producer died."
+    );
+}
+
+// ---------------------------------------------------------------------------
+// c3460 — controller input into an open Claude session on a shared host, while
+// MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED is off (ADR-0193 D18)
+// ---------------------------------------------------------------------------
+
+const CLAUDE_PAUSED: &str = "claude_subscription_agent_paused";
+
+async fn start_server_claude(pool: PgPool, enabled: bool) -> String {
+    let state = AppState::new(
+        pool,
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    )
+    .with_agent_port(momo_server::config::AgentPortConfig {
+        claude_subscription_agents_enabled: enabled,
+        ..momo_server::config::AgentPortConfig::default()
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind momo-server");
+    let address: SocketAddr = listener.local_addr().expect("server address");
+    let app = build_app(state);
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    format!("http://{address}")
+}
+
+async fn create_tool_session(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    fixture: &Fixture,
+    host: &str,
+    tool: &str,
+) -> Uuid {
+    let response = http
+        .post(format!(
+            "{base}/v1/workspaces/{}/work-sessions",
+            fixture.workspace
+        ))
+        .bearer_auth(token)
+        .json(&json!({
+            "channelId": fixture.channel.to_string(),
+            "hostId": host,
+            "tool": tool,
+            "label": "c3460",
+        }))
+        .send()
+        .await
+        .expect("create work session");
+    let status = response.status();
+    let text = response.text().await.unwrap_or_default();
+    assert_eq!(status, 201, "the {tool} session is created: {text}");
+    let body: Value = serde_json::from_str(&text).expect("session body");
+    Uuid::parse_str(body["workSession"]["id"].as_str().expect("id")).expect("session uuid")
+}
+
+async fn assert_claude_paused(response: reqwest::Response, what: &str) {
+    assert_eq!(response.status(), 409, "{what}");
+    let body: Value = response.json().await.expect("error body");
+    assert_eq!(body["error"]["code"], json!(CLAUDE_PAUSED), "{what}");
+    let message = body["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("AI 화면") && message.ends_with("요."),
+        "{what}: 해요체 and names 「AI 화면」, got {message}"
+    );
+}
+
+struct AttachRig {
+    su: PgPool,
+    http: reqwest::Client,
+    off: String,
+    on: String,
+    fixture: Fixture,
+    owner_token: String,
+    watcher_token: String,
+}
+
+async fn attach_rig() -> AttachRig {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let off = start_server_claude(app_pool.clone(), false).await;
+    let on = start_server_claude(app_pool, true).await;
+    let http = reqwest::Client::new();
+    let owner_token = login(&http, &on, fixture.workspace, &fixture.owner_email).await;
+    let watcher_token = login(&http, &on, fixture.workspace, &fixture.watcher_email).await;
+    // L2 (#3460): Claude under another key (`other`, a key work_session accepts), launched through `npx`.
+    sqlx::query(
+        "INSERT INTO work_tool_profile \
+           (workspace_id, tool_key, display_name, launch_template, enabled, created_by, updated_by) \
+         VALUES ($1, 'other', 'other', $2, true, $3, $3) \
+         ON CONFLICT (workspace_id, tool_key) \
+         DO UPDATE SET enabled = true, launch_template = EXCLUDED.launch_template",
+    )
+    .bind(fixture.workspace)
+    .bind(json!({"command": "npx", "arguments": ["-y", "@agentclientprotocol/claude-agent-acp"]}))
+    .bind(fixture.owner)
+    .execute(&su)
+    .await
+    .expect("seed launcher-based claude profile");
+    AttachRig {
+        su,
+        http,
+        off,
+        on,
+        fixture,
+        owner_token,
+        watcher_token,
+    }
+}
+
+/// A display-capable workspace host with one bound session per `(tool)`; the
+/// sessions are created through the flag-on server (the pause stops *new* ones).
+async fn shared_host_session(
+    rig: &AttachRig,
+    tool: &str,
+    member_scoped: bool,
+) -> (String, [u8; 32], Uuid) {
+    let workspace = rig.fixture.workspace;
+    let (host, seed) = register_host(&rig.http, &rig.on, &rig.owner_token, workspace, true).await;
+    let session = create_tool_session(
+        &rig.http,
+        &rig.on,
+        &rig.owner_token,
+        &rig.fixture,
+        &host,
+        tool,
+    )
+    .await;
+    if member_scoped {
+        sqlx::query("UPDATE work_host SET scope = 'member', owner_member_id = $2 WHERE id = $1")
+            .bind(Uuid::parse_str(&host).expect("host uuid"))
+            .bind(rig.fixture.owner)
+            .execute(&rig.su)
+            .await
+            .expect("make the host member-scoped");
+    }
+    publish_display(&rig.http, &rig.on, &seed, workspace, &host, session).await;
+    bind_pty(&rig.su, session).await;
+    (host, seed, session)
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn c3460_1_display_controller_into_a_shared_host_claude_session_is_paused_while_off() {
+    let rig = attach_rig().await;
+    let ws = rig.fixture.workspace;
+    let (host, seed, claude) = shared_host_session(&rig, "claude", false).await;
+
+    // off: no controller grant, no window.
+    let refused = take_control(&rig.http, &rig.off, &rig.owner_token, ws, claude).await;
+    assert_claude_paused(
+        refused,
+        "off: a shared host's claude session has no display keyboard",
+    )
+    .await;
+    assert!(
+        open_window(&rig.su, claude).await.is_none(),
+        "a refused grant leaves no window"
+    );
+
+    // off: view-only stays.
+    let observer = issue_display_capability(
+        &rig.http,
+        &rig.off,
+        &rig.watcher_token,
+        ws,
+        claude,
+        Some(json!({"mode": "observer"})),
+    )
+    .await;
+    assert_eq!(observer.status(), 200, "off: watching is not gated");
+    let observer: Value = observer.json().await.expect("observer grant");
+    let observer_bearer = observer["capability_token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    let v_obs = validate_display(
+        &rig.http,
+        &rig.off,
+        &seed,
+        ws,
+        &host,
+        &observer_bearer,
+        true,
+    )
+    .await;
+    assert_eq!(
+        v_obs.status(),
+        200,
+        "off: an observer bearer still validates"
+    );
+    let v_obs: Value = v_obs.json().await.expect("body");
+    assert_eq!(v_obs["mode"], json!("observer"));
+
+    // L2: a launcher-based claude profile (`npx ... claude`) is paused too.
+    let (_h, _s, launcher) = shared_host_session(&rig, "other", false).await;
+    let refused = take_control(&rig.http, &rig.off, &rig.owner_token, ws, launcher).await;
+    assert_claude_paused(refused, "off: npx-launched claude on a shared host").await;
+
+    // on: the opt-in opens it, and the bearer then validates with input on.
+    let granted = take_control(&rig.http, &rig.on, &rig.owner_token, ws, claude).await;
+    assert_eq!(granted.status(), 200, "flag on: control opens");
+    let grant: Value = granted.json().await.expect("grant");
+    let bearer = grant["capability_token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    let v_on = validate_display(&rig.http, &rig.on, &seed, ws, &host, &bearer, true).await;
+    assert_eq!(v_on.status(), 200);
+    let v_on: Value = v_on.json().await.expect("body");
+    assert_eq!(v_on["input_enabled"], json!(true), "flag on: input enabled");
+
+    // off: the already-minted controller bearer is told input is disabled.
+    let v_off = validate_display(&rig.http, &rig.off, &seed, ws, &host, &bearer, true).await;
+    assert_eq!(v_off.status(), 200);
+    let v_off: Value = v_off.json().await.expect("body");
+    assert_eq!(v_off["mode"], json!("controller"));
+    assert_eq!(
+        v_off["input_enabled"],
+        json!(false),
+        "off: a controller bearer minted earlier must not type into a shared host's claude"
+    );
+    // L3: the control window itself is untouched by the pause — it stays open
+    // and keeps being renewed; only input is withheld.
+    assert!(
+        open_window(&rig.su, claude).await.is_some(),
+        "the control window stays standing while input is paused"
+    );
+    let _ = return_control(&rig.http, &rig.on, &rig.owner_token, ws, claude).await;
+
+    // positive control: Codex on the same kind of host is untouched.
+    let (_h, _s, codex) = shared_host_session(&rig, "codex", false).await;
+    let ok = take_control(&rig.http, &rig.off, &rig.owner_token, ws, codex).await;
+    assert_eq!(
+        ok.status(),
+        200,
+        "off: codex on a shared host is unaffected"
+    );
+
+    // positive control: a member-scoped own host is untouched.
+    let (_h, _s, own) = shared_host_session(&rig, "claude", true).await;
+    let ok = take_control(&rig.http, &rig.off, &rig.owner_token, ws, own).await;
+    assert_eq!(
+        ok.status(),
+        200,
+        "off: the owner's own member host is unaffected"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn c3460_2_pty_controller_into_a_shared_host_claude_session_is_paused_while_off() {
+    let rig = attach_rig().await;
+    let ws = rig.fixture.workspace;
+    let issue = |base: String, token: String, session: Uuid, mode: &'static str| {
+        let http = rig.http.clone();
+        async move {
+            http.post(format!(
+                "{base}/v1/workspaces/{ws}/work-sessions/{session}/terminal-attach"
+            ))
+            .bearer_auth(token)
+            .json(&json!({ "mode": mode }))
+            .send()
+            .await
+            .expect("issue pty grant")
+        }
+    };
+    let (host, seed, claude) = shared_host_session(&rig, "claude", false).await;
+
+    let refused = issue(
+        rig.off.clone(),
+        rig.owner_token.clone(),
+        claude,
+        "controller",
+    )
+    .await;
+    assert_claude_paused(
+        refused,
+        "off: a shared host's claude session has no PTY keyboard",
+    )
+    .await;
+    let default_mode = rig
+        .http
+        .post(format!(
+            "{}/v1/workspaces/{ws}/work-sessions/{claude}/terminal-attach",
+            rig.off
+        ))
+        .bearer_auth(&rig.owner_token)
+        .send()
+        .await
+        .expect("issue default-mode grant");
+    assert_claude_paused(default_mode, "off: the absent-body default is controller").await;
+
+    let observer = issue(
+        rig.off.clone(),
+        rig.watcher_token.clone(),
+        claude,
+        "observer",
+    )
+    .await;
+    assert_eq!(observer.status(), 200, "off: watching is not gated");
+    let observer: Value = observer.json().await.expect("observer grant");
+    let observer_bearer = observer["capability_token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+
+    // L2: a launcher-based claude profile (`npx ... claude`) is paused too.
+    let (_h, _s, launcher) = shared_host_session(&rig, "other", false).await;
+    let refused = issue(
+        rig.off.clone(),
+        rig.owner_token.clone(),
+        launcher,
+        "controller",
+    )
+    .await;
+    assert_claude_paused(refused, "off: npx-launched claude on a shared host (PTY)").await;
+
+    let granted = issue(
+        rig.on.clone(),
+        rig.owner_token.clone(),
+        claude,
+        "controller",
+    )
+    .await;
+    assert_eq!(granted.status(), 200, "flag on: control opens");
+    let grant: Value = granted.json().await.expect("grant");
+    let bearer = grant["capability_token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    let validate = |base: String, token: String| {
+        let http = rig.http.clone();
+        let host = host.clone();
+        async move {
+            signed_host_post(
+                &http,
+                &base,
+                &seed,
+                ws,
+                &host,
+                &format!("/v1/workspaces/{ws}/work-hosts/{host}/terminal-attach/validate"),
+                &json!({ "capability_token": token, "stream": true }),
+            )
+            .await
+        }
+    };
+    assert_eq!(
+        validate(rig.on.clone(), bearer.clone()).await.status(),
+        200,
+        "flag on: validates"
+    );
+    assert_eq!(
+        validate(rig.off.clone(), bearer.clone()).await.status(),
+        401,
+        "off: an earlier controller bearer no longer validates for a shared host's claude"
+    );
+
+    assert_eq!(
+        validate(rig.off.clone(), observer_bearer).await.status(),
+        200,
+        "off: an observer bearer still validates (the gate keys on controller mode)"
+    );
+
+    let (_h, _s, codex) = shared_host_session(&rig, "codex", false).await;
+    let ok = issue(
+        rig.off.clone(),
+        rig.owner_token.clone(),
+        codex,
+        "controller",
+    )
+    .await;
+    assert_eq!(
+        ok.status(),
+        200,
+        "off: codex on a shared host is unaffected"
+    );
+    let (_h, _s, own) = shared_host_session(&rig, "claude", true).await;
+    let ok = issue(rig.off.clone(), rig.owner_token.clone(), own, "controller").await;
+    assert_eq!(
+        ok.status(),
+        200,
+        "off: the owner's own member host is unaffected"
     );
 }
