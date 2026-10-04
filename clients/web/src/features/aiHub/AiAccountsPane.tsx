@@ -22,6 +22,8 @@ import {
 import { readProbeFixture } from "@/features/settings/aiMyAccountsModel";
 import { Skeleton } from "@/features/common/States";
 import { IS_TAURI } from "@/lib/env";
+import { MyPersonalKeysSection } from "./MyPersonalKeysSection";
+import { useOffline } from "@/features/common/useOffline";
 import { useMySubscriptionAgents, type MySubscriptionAgentsRead } from "./useMySubscriptionAgents";
 
 const HARNESS_OF: Record<LocalHarnessId, AiHarness> = { claude: "claude_code", codex: "codex" };
@@ -60,6 +62,7 @@ export function AiAccountsPane() {
 }
 
 function DesktopAccounts() {
+  const offline = useOffline();
   const read = useMySubscriptionAgents();
   const agentLineFor = useCallback<AccountAgentLineFor>(
     (harness) => accountAgentLine(HARNESS_OF[harness], read),
@@ -76,11 +79,13 @@ function DesktopAccounts() {
         scope={COPY.subscriptionScope}
         agentLineFor={agentLineFor}
       />
+      <MyPersonalKeysSection offline={offline} />
     </div>
   );
 }
 
 function WebAccounts() {
+  const offline = useOffline();
   const read = useMySubscriptionAgents();
   return (
     <div className="flex min-w-0 flex-col gap-6" data-testid="ai-accounts-web">
@@ -105,6 +110,7 @@ function WebAccounts() {
         </div>
       </section>
       <MyAgentsList read={read} />
+      <MyPersonalKeysSection offline={offline} />
       <AiFoot>{COPY.web.apiKeyNote}</AiFoot>
     </div>
   );

@@ -52,6 +52,15 @@ vi.mock("@momo/core/features/hostedAgents/api", async (importOriginal) => {
   return { ...actual, listHostedConnections: vi.fn() };
 });
 
+vi.mock("@momo/core/features/ai/personalKeys", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@momo/core/features/ai/personalKeys")>();
+  return {
+    ...actual,
+    listPersonalKeys: vi.fn(async () => []),
+    listMyPersonalKeys: vi.fn(async () => []),
+  };
+});
+
 const WS = "00000000-0000-7000-8000-000000000001";
 const ME = "00000000-0000-7000-8000-000000000101";
 const OTHER = "00000000-0000-7000-8000-000000000102";
