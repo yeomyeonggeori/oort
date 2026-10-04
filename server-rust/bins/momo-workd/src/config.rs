@@ -249,13 +249,43 @@ pub struct ToolEntry {
 
 impl WorkdConfig {
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
+        let box_profile = std::env::var(crate::keystore::box_store::ENV_BOX_MARKER)
+            .is_ok_and(|value| !value.is_empty());
+        Self::load_with_profile(path, box_profile)
+    }
+
+    /// [`Self::load`] with the profile chosen by the caller. `box_profile` is
+    /// the Linux personal-box profile (ADR-0197 D6): the box image sets
+    /// `OORT_BOX`, and in a box no Claude ACP adapter may be allowlisted.
+    pub fn load_with_profile(path: &Path, box_profile: bool) -> Result<Self, ConfigError> {
         let raw = read_owned_file(path)?;
         let config: Self = serde_json::from_str(&raw).map_err(|error| ConfigError::Parse {
             path: path.display().to_string(),
             message: error.to_string(),
         })?;
         config.validate()?;
+        if box_profile {
+            config.validate_box_profile()?;
+        }
         Ok(config)
+    }
+
+    /// ADR-0197 D6 / #3397: a box never drives Claude through an ACP adapter or
+    /// `claude -p` (a Claude subscription is only ever used by the person, in
+    /// the PTY). The server also refuses such a spawn; this is the host half,
+    /// so a config that allowlists it does not load at all.
+    pub fn validate_box_profile(&self) -> Result<(), ConfigError> {
+        if let Some((key, _)) = self
+            .tools
+            .iter()
+            .find(|(_, entry)| entry.adapter == AdapterKind::Claude)
+        {
+            return Err(ConfigError::Invalid(format!(
+                "tools.{key}: the Claude ACP adapter is not allowed in a personal-cloud box \
+                 (ADR-0197 D6); the person runs `claude` in the terminal"
+            )));
+        }
+        Ok(())
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
@@ -429,6 +459,50 @@ mod tests {
         assert_eq!(config.max_sessions, 4);
         assert_eq!(config.server_base(), "https://oort.example.com");
         assert!(!config.require_human_signatures, "R2 is off by default");
+    }
+
+    fn codex_only_json() -> serde_json::Value {
+        let mut value = base_json();
+        value["tools"] = serde_json::json!({
+            "codex": {"adapter": "codex", "executable": "/usr/local/bin/codex-acp"}
+        });
+        value
+    }
+
+    /// ADR-0197 D6 / M3: the Linux box profile has no Claude ACP adapter.
+    #[test]
+    fn the_box_profile_refuses_a_claude_acp_adapter_and_accepts_codex() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = std::env::temp_dir().join(format!("momo-workd-box-{}", Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let write = |name: &str, value: &serde_json::Value| {
+            let path = dir.join(name);
+            std::fs::write(&path, serde_json::to_vec(value).unwrap()).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+            path
+        };
+        let claude = write("claude.json", &base_json());
+        let codex = write("codex.json", &codex_only_json());
+        let mixed = {
+            let mut value = codex_only_json();
+            value["tools"]["claude"] =
+                serde_json::json!({"adapter": "claude", "executable": "/opt/tools/claude-acp"});
+            write("mixed.json", &value)
+        };
+
+        // The desktop profile is unchanged: Claude is allowlisted there.
+        WorkdConfig::load_with_profile(&claude, false).expect("desktop keeps Claude");
+        WorkdConfig::load_with_profile(&codex, true).expect("a box may run Codex over ACP");
+        for path in [&claude, &mixed] {
+            match WorkdConfig::load_with_profile(path, true) {
+                Err(ConfigError::Invalid(message)) => {
+                    assert!(message.contains("Claude ACP adapter"), "{message}")
+                }
+                other => panic!("a box must refuse a Claude adapter, got {other:?}"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

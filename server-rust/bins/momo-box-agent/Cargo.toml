@@ -1,0 +1,47 @@
+[package]
+name = "momo-box-agent"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# ADR-0197 M3 (#3501) — the box-side host of a personal-cloud box.
+#
+# It is the box's host identity (`scope='member'`, owner = the box's person),
+# keeps the host key in the box key store (S4), and opens the PTY the owner
+# attaches to over the blind relay (S2, `momo-blind-pty`). It runs under its OWN
+# uid; the person's shell and the harnesses run as another one (D1).
+#
+# It dials nothing in this slice: the relay route and the runner are M4 / M2.
+# What is here and tested: registration contract (inactive until the owner
+# confirms), PTY open + uid drop, environment allowlist, credential-path
+# refusal, process hardening. There is deliberately NO ACP code in this crate
+# (D6: the box never drives Claude over ACP) and no `momo_workd::acp` use;
+# `tests/no_acp.rs` reads the source to keep it that way.
+[lib]
+name = "momo_box_agent"
+path = "src/lib.rs"
+
+[[bin]]
+name = "momo-box-agent"
+path = "src/main.rs"
+
+# `src/bin/momo-box-probe.rs` is auto-discovered on purpose (no `[[bin]]`
+# entry), like workd's ACP stub: it is the test-only helper `infra/personal-box`'s
+# verify-m3.sh runs inside the box to attempt what the person's uid must not be
+# able to do. Nothing ships it.
+
+[dependencies]
+momo-blind-pty = { path = "../../crates/momo-blind-pty" }
+# Host key custody (S4, `keystore::box_store`) is reused, not re-implemented.
+momo-workd = { path = "../momo-workd" }
+base64.workspace = true
+ed25519-dalek.workspace = true
+libc.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+# The tests play the owner's device (P-256) exactly as momo-blind-pty's harness does.
+p256.workspace = true

@@ -184,6 +184,7 @@ COPY server-rust/crates/momo-unfurl/Cargo.toml crates/momo-unfurl/
 COPY server-rust/crates/momo-webhook/Cargo.toml crates/momo-webhook/
 COPY server-rust/crates/momo-wire/Cargo.toml crates/momo-wire/
 COPY server-rust/bins/momo-agent-worker/Cargo.toml bins/momo-agent-worker/
+COPY server-rust/bins/momo-box-agent/Cargo.toml bins/momo-box-agent/
 COPY server-rust/bins/momo-migrate/Cargo.toml bins/momo-migrate/
 COPY server-rust/bins/momo-notifier/Cargo.toml bins/momo-notifier/
 COPY server-rust/bins/momo-push-relay/Cargo.toml bins/momo-push-relay/

@@ -100,6 +100,14 @@ impl HostKey {
         Ok(Self { seed })
     }
 
+    /// The Ed25519 signing key, for the one process that signs with this host
+    /// key as a protocol endpoint: the box-agent's blind-relay handshake
+    /// (ADR-0197 D5). The seed leaves this type only inside that key; callers
+    /// must not log it.
+    pub fn signing_key(&self) -> SigningKey {
+        SigningKey::from_bytes(&self.seed)
+    }
+
     /// Canonical base64 of the raw 32-byte public key — the registration value.
     pub fn public_key_b64(&self) -> String {
         BASE64.encode(

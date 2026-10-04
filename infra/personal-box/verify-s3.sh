@@ -3,7 +3,7 @@
 # S3 box verification (ADR-0197 S3 items 1,3,4; #3410). Runs without any real login:
 # a fake credential marker stands in for tokens. Exit 0 = all checks pass.
 #   verify-s3.sh                        GREEN run (builds the image if missing)
-#   verify-s3.sh --sabotage <mode>      must exit non-zero: image | log | runner | writable-root | cap-add | root | no-new-privs | unconfined | swap | leakscan-blind
+#   verify-s3.sh --sabotage <mode>      must exit non-zero: image | log | runner | writable-root | cap-add | root | no-new-privs | unconfined | swap | leakscan-blind | path | acp-adapter
 #   verify-s3.sh --self-test            GREEN, then every sabotage mode must go RED
 # Names: everything is momo-s3-verify-* ; cleaned up on exit (image momo-s3-box:local is kept unless --rm-image).
 set -uo pipefail
@@ -17,7 +17,7 @@ case "${1:-}" in
     shift
     rc=0
     "$SELF" || rc=1
-    for m in image log runner writable-root cap-add root no-new-privs unconfined swap leakscan-blind; do
+    for m in image log runner writable-root cap-add root no-new-privs unconfined swap leakscan-blind path acp-adapter; do
       if "$SELF" --sabotage "$m" >/dev/null 2>&1; then echo "SELF-TEST FAIL: sabotage '$m' stayed GREEN"; rc=1
       else echo "SELF-TEST ok: sabotage '$m' is RED"; fi
     done
@@ -48,7 +48,7 @@ bad()  { echo "FAIL  $*"; FAILS=$((FAILS+1)); }
 check() { local desc="$1"; shift; if "$@"; then ok "$desc"; else bad "$desc"; fi; }
 
 cleanup() {
-  docker rm -f momo-s3-verify-a momo-s3-verify-b momo-s3-verify-c momo-s3-verify-d >/dev/null 2>&1
+  docker rm -f momo-s3-verify-a momo-s3-verify-b momo-s3-verify-c momo-s3-verify-d momo-s3-verify-e >/dev/null 2>&1
   docker volume rm -f "$MOMO_S3_CRED_VOLUME" >/dev/null 2>&1
   [[ -n "$SABOTAGE" ]] && docker rmi -f momo-s3-verify-sab:local >/dev/null 2>&1
   [[ "$RM_IMAGE" == 1 ]] && docker rmi -f "$BASE_IMAGE" >/dev/null 2>&1
@@ -74,6 +74,20 @@ fi
 if [[ "$SABOTAGE" == "leakscan-blind" ]]; then
   # A scanner that always says "clean": the shape/secret detection controls must go RED.
   printf 'FROM %s\nUSER root\nRUN printf "#!/bin/sh\\ncat >/dev/null; exit 0\\n" > /usr/local/bin/momo-box-leakscan\nUSER 10001:10001\n' "$BASE_IMAGE" \
+    | docker build -q -t momo-s3-verify-sab:local - >/dev/null
+  IMAGE="momo-s3-verify-sab:local"; export MOMO_S3_IMAGE="$IMAGE"
+fi
+
+if [[ "$SABOTAGE" == "path" ]]; then
+  # #3496 regression: no profile.d snippet, so a login shell drops /opt/tools/node_modules/.bin again.
+  printf 'FROM %s\nUSER root\nRUN rm -f /etc/profile.d/zz-momo-path.sh\nUSER 10001:10001\n' "$BASE_IMAGE" \
+    | docker build -q -t momo-s3-verify-sab:local - >/dev/null
+  IMAGE="momo-s3-verify-sab:local"; export MOMO_S3_IMAGE="$IMAGE"
+fi
+
+if [[ "$SABOTAGE" == "acp-adapter" ]]; then
+  # ADR-0197 D6: a Claude ACP adapter baked into the box image must turn the layer check RED.
+  printf 'FROM %s\nUSER root\nRUN mkdir -p /opt/acp/node_modules/@agentclientprotocol/claude-agent-acp && echo {} > /opt/acp/node_modules/@agentclientprotocol/claude-agent-acp/package.json\nUSER 10001:10001\n' "$BASE_IMAGE" \
     | docker build -q -t momo-s3-verify-sab:local - >/dev/null
   IMAGE="momo-s3-verify-sab:local"; export MOMO_S3_IMAGE="$IMAGE"
 fi
@@ -107,6 +121,8 @@ check "marker not in image history/config" bash -c '! grep -aq -- "$0" <<<"$1"' 
 check "no secret-like ENV names in image config" bash -c '! docker inspect "$0" --format "{{range .Config.Env}}{{println .}}{{end}}" | grep -Eiq "^[A-Z_]*(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)[A-Z_]*="' "$IMAGE"
 check "image user is non-root (10001)" test "$(docker inspect "$IMAGE" --format '{{.Config.User}}')" = "10001:10001"
 check "Claude Code CLI not redistributed in the image (proprietary; installed at first start)" bash -c '! grep -q "node_modules/@anthropic-ai/claude-code" "$0"' "$NAMES"
+check "no Claude ACP adapter in the image (ADR-0197 D6: the box never drives Claude over ACP)" bash -c '! grep -Eq "agentclientprotocol|claude-agent-acp" "$0"' "$NAMES"
+check "positive control: the same listing does contain the Codex package (the ACP grep reads real names)" grep -q 'node_modules/@openai/codex/' "$NAMES"
 rm -rf "$SAVE"
 
 # ---------------------------------------------------------------- 2. runtime hardening (item 1)
@@ -160,6 +176,28 @@ check "inside: no docker.sock" bash -c '! docker exec "$0" test -e /var/run/dock
 check "inside: /cred is tmpfs" bash -c 'docker exec "$0" sh -c "grep \" /cred \" /proc/mounts" | grep -q "^tmpfs"' "$A"
 check "inside: codex CLI runs unmodified" bash -c 'docker exec "$0" codex --version | grep -q "^codex-cli"' "$A"
 check "inside: Claude install script present, claude not baked" bash -c 'docker exec "$0" sh -c "test -x /usr/local/bin/momo-box-install-claude && ! test -e /opt/tools/node_modules/.bin/claude"' "$A"
+
+# ---------------------------------------------------------------- 2b. login-shell PATH (#3496)
+echo "== 2b. login shell keeps /opt/tools/node_modules/.bin (the first-start Claude install must resolve)"
+E=momo-s3-verify-e
+EARGS=(); while IFS= read -r _l; do EARGS+=("$_l"); done < <(box_run_args 0)
+docker run -d --name "$E" "${EARGS[@]}" "$IMAGE" sleep infinity >/dev/null
+# Stand-in for the installed CLI (no network needed): an executable where momo-box-install-claude puts it.
+docker exec "$E" sh -c 'mkdir -p /opt/tools/node_modules/.bin && printf "#!/bin/sh\necho stand-in-claude\n" > /opt/tools/node_modules/.bin/claude && chmod 0755 /opt/tools/node_modules/.bin/claude'
+check "bash -lc 'command -v claude' resolves to the tools dir (login shell, stand-in CLI)" test "$(docker exec "$E" bash -lc 'command -v claude')" = /opt/tools/node_modules/.bin/claude
+check "bash -lc 'claude' runs" test "$(docker exec "$E" bash -lc 'claude')" = stand-in-claude
+check "the tools dir is the LAST PATH entry of a login shell (distro and /usr/local/bin win)" bash -c 'docker exec "$0" bash -lc "echo \$PATH" | grep -Eq "^/usr/local/bin:.*:/opt/tools/node_modules/.bin$"' "$E"
+check "a login shell does not duplicate the entry when PATH already has it" test "$(docker exec "$E" bash -lc 'echo "$PATH" | tr : "\n" | grep -c "^/opt/tools/node_modules/.bin$"')" = 1
+check "nested login shell keeps exactly one entry" test "$(docker exec "$E" bash -lc 'bash -lc "echo \$PATH" | tr : "\n" | grep -c "^/opt/tools/node_modules/.bin$"')" = 1
+check "a tools-dir binary cannot shadow system commands (appended last: 'ls' stays /usr/bin or /bin)" bash -c 'docker exec "$0" sh -c "printf \"#!/bin/sh\necho shadow\n\" > /opt/tools/node_modules/.bin/ls && chmod 0755 /opt/tools/node_modules/.bin/ls"; p="$(docker exec "$0" bash -lc "command -v ls")"; [ "$p" != /opt/tools/node_modules/.bin/ls ]' "$E"
+# The real first-start install, when the registry is reachable (otherwise runtime-unverified, not a failure).
+docker exec "$E" sh -c 'rm -rf /opt/tools/node_modules /opt/tools/package.json /opt/tools/package-lock.json'
+if docker exec "$E" momo-box-install-claude >"$WORK/claude-install.log" 2>&1; then
+  check "after the real first-start install: bash -lc 'command -v claude' resolves (#3496)" test "$(docker exec "$E" bash -lc 'command -v claude')" = /opt/tools/node_modules/.bin/claude
+  check "after the real first-start install: bash -lc 'claude --version' runs" bash -c 'docker exec "$0" bash -lc "claude --version" | grep -Eq "[0-9]+\.[0-9]+"' "$E"
+else
+  echo "SKIP  real first-start Claude install (registry unreachable?): runtime-unverified; last log lines:"; tail -3 "$WORK/claude-install.log" | sed 's/^/        /'
+fi
 
 # ---------------------------------------------------------------- 3. tmpfs vs persistent login (item 3/4 + D8)
 echo "== 3. fake credentials on tmpfs; gone after restart; opt-in volume persists"
