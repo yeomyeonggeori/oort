@@ -251,7 +251,7 @@ export function disconnectStartGate(
       return {
         allowed: false,
         blockedCopy:
-          "연결 값이 만료돼 이미 아무 권한도 열려 있지 않아요. 정리할 provider 설정이 있으면 provider 화면에서 직접 지우세요.",
+          "연결 값이 만료돼 이미 아무 권한도 열려 있지 않아요. 정리할 AI 회사 설정이 있으면 AI 회사 화면에서 직접 지우세요.",
       };
     case "cleanup_pending":
       return {
@@ -382,7 +382,7 @@ export const DISCONNECT_SECTION_TITLE = "호스티드 연결";
  * 실행하는 에이전트입니다」)과 정면으로 어긋났다.
  */
 export const DISCONNECT_SECTION_LEAD =
-  "호스티드 연결은 다른 곳에서 돌고 있는 에이전트를 이 워크스페이스에 들인 것이에요. 해제는 oort 쪽 권한을 즉시 끊는 일과, provider에 남은 설정을 사람이 정리했는지 확인하는 일 두 걸음이에요.";
+  "호스티드 연결은 다른 곳에서 돌고 있는 에이전트를 이 워크스페이스에 들인 것이에요. 해제는 oort 쪽 권한을 즉시 끊는 일과, AI 회사에 남은 설정을 사람이 정리했는지 확인하는 일 두 걸음이에요.";
 
 /** 해제를 시작하기 전 화면이 반드시 나눠 말해야 하는 두 문단 중 첫째. */
 export const DISCONNECT_IMMEDIATE_HEADLINE = "지금 바로 일어나는 일";
@@ -397,7 +397,7 @@ export const DISCONNECT_IMMEDIATE_ITEMS: readonly string[] = [
 export const DISCONNECT_NOT_DONE_HEADLINE = "이 버튼이 하지 않는 일";
 
 export const DISCONNECT_NOT_DONE_ITEMS: readonly string[] = [
-  "provider에 만들어 둔 커넥터, 플러그인, routine, 봇은 그대로 남아요. oort는 provider 안에 손을 넣지 못해요.",
+  "AI 회사에 만들어 둔 커넥터, 플러그인, routine, 봇은 그대로 남아요. oort는 AI 회사 안에 손을 넣지 못해요.",
   "이 기기에 받아 둔 플러그인 파일도 그대로 남아요.",
   "지금까지 나눈 대화, 채널, 작업 기록은 하나도 지워지지 않아요.",
 ];
@@ -420,7 +420,7 @@ export const DISCONNECT_START_CONFIRM_LABEL = "폐기하고 시작";
 
 // ---- 정리 목록 --------------------------------------------------------------
 
-export const CLEANUP_HEADLINE = "provider에 남은 것 정리";
+export const CLEANUP_HEADLINE = "AI 회사에 남은 것 정리";
 
 /**
  * 목록 머리의 한 문단.
@@ -430,7 +430,7 @@ export const CLEANUP_HEADLINE = "provider에 남은 것 정리";
  * 묻힌다.
  */
 export const CLEANUP_LEAD =
-  "아래 항목은 사람이 provider 화면에서 직접 정리하고, oort는 그 확인을 기록만 해요. 확인한 내용은 나중에 이 해제를 설명하는 근거로 남아요.";
+  "아래 항목은 사람이 AI 회사 화면에서 직접 정리하고, oort는 그 확인을 기록만 해요. 확인한 내용은 나중에 이 해제를 설명하는 근거로 남아요.";
 
 /** 한 줄을 확인해도 다른 줄이 닫히지 않는다는 사실. 목록 머리에 상시 노출된다. */
 export const CLEANUP_INDEPENDENCE_NOTE =
@@ -470,7 +470,7 @@ export const CLEANUP_ACKNOWLEDGE_LABEL = "확인 기록";
 
 export const CLEANUP_SAVE_LABEL = "확인 저장";
 
-export const CLEANUP_EVIDENCE_LABEL = "무엇을 보고 확인했습니까";
+export const CLEANUP_EVIDENCE_LABEL = "무엇을 보고 확인했나요";
 
 /**
  * 확인 폼의 저장이 막혔을 때 버튼 옆에 서는 **유일한** 사유.
@@ -488,9 +488,9 @@ export const CLEANUP_EVIDENCE_LABEL = "무엇을 보고 확인했습니까";
 export const CLEANUP_EVIDENCE_REQUIRED_NOTE =
   "확인한 내용을 적어야 이 답을 기록할 수 있어요.";
 
-export const CLEANUP_STATUS_LEGEND = "지금 provider에서 본 상태";
+export const CLEANUP_STATUS_LEGEND = "지금 AI 회사에서 본 상태";
 
-export const CLEANUP_DISPOSITION_LEGEND = "이 항목을 어떻게 했습니까";
+export const CLEANUP_DISPOSITION_LEGEND = "이 항목을 어떻게 했나요";
 
 /** 처분을 아직 고르지 않은 선택지. 관측만 기록하는 길이 있다는 사실을 세운다. */
 export const CLEANUP_DISPOSITION_DEFER_LABEL = "아직 정하지 않았어요";

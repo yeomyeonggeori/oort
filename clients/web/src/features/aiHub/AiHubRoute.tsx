@@ -54,7 +54,7 @@ export function AiHubRoute() {
           ))}
         </nav>
       </header>
-      <div className="min-w-0 flex-1 overflow-y-auto p-6">
+      <div className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6">
         <Routes>
           <Route index element={<AiHubOverview mayCreateAgent={mayCreate} />} />
           <Route path="accounts" element={<AiAccountsPane />} />

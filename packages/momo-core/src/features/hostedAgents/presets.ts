@@ -129,7 +129,7 @@ export function parseHostedRoutineLabel(
   return { workspace, identifier };
 }
 
-/** routine 이 시킬 일. ADR-0162 D8 의 template 문장 그대로. */
+/** routine 이 시킬 일. ADR-0162 D8 의 template 문장 그대로. AI 회사의 routine 에 붙여 넣는 지시문이라 화면 문장(해요체)이 아니다. */
 export const HOSTED_ROUTINE_TEMPLATE =
   "oort inbox를 확인하고, 할 일이 있으면 claim한 뒤 결과를 원래 thread에 게시한다.";
 
@@ -141,7 +141,7 @@ export const HOSTED_PRESETS: readonly HostedPreset[] = [
       "원격 MCP 서버를 등록할 수 있는 에이전트라면 무엇이든 이 순서로 붙어요.",
     verified: true,
     steps: [
-      "provider의 MCP 커넥터 설정에서 원격 서버를 하나 추가해요.",
+      "AI 회사의 MCP 커넥터 설정에서 원격 서버를 하나 추가해요.",
       "주소 칸에 아래 Agent Port 주소를 그대로 넣어요.",
       "인증 헤더의 bearer 값에 아래 연결 값을 넣어요.",
       "저장한 뒤 커넥터를 한 번 실행하면 이 화면이 감지 상태로 넘어가요.",
@@ -232,21 +232,21 @@ export const HOSTED_AUTH_MODE_CHOICES: readonly HostedAuthModeChoice[] = [
     id: HOSTED_AUTH_MODE,
     label: "고정 bearer",
     detail:
-      "provider 설정에 값을 직접 붙여요. 승인 뒤에는 그 값을 새 자격증명으로 한 번 더 바꿔야 해요.",
+      "AI 회사 설정에 값을 직접 붙여요. 승인 뒤에는 그 값을 새 자격증명으로 한 번 더 바꿔야 해요.",
     disabled: false,
   },
   {
     id: "oauth",
     label: "OAuth",
     detail:
-      "OAuth 방식은 provider의 인가 화면에서 승인해 연결해요. 이 마법사에서 직접 시작하는 길은 아직 열려 있지 않아 여기서는 고를 수 없어요.",
+      "OAuth 방식은 AI 회사의 인가 화면에서 승인해 연결해요. 이 마법사에서 직접 시작하는 길은 아직 열려 있지 않아 여기서는 고를 수 없어요.",
     disabled: true,
   },
 ];
 
 // ---- 일회 노출 문구 ---------------------------------------------------------
 
-export const PAIRING_REVEAL_HEADLINE = "지금 연결 값을 provider 설정에 붙이세요.";
+export const PAIRING_REVEAL_HEADLINE = "지금 연결 값을 AI 회사 설정에 붙이세요.";
 
 /** Grok 프리셋 한정. 일반 헤드라인은 바꾸지 않는다. */
 export const GROK_PAIRING_REVEAL_HEADLINE = "이 값을 그록봇에게 말로 전하세요.";
@@ -272,13 +272,13 @@ export const PAIRING_REVEAL_SCOPE_NOTE =
 export const PAIRING_NATURAL_LANGUAGE_HANDOFF =
   "그록봇이 값을 받아 자기 쪽에 붙여요. 직접 붙여 넣으려면 아래 순서를 따르세요.";
 
-export const ACTIVE_REVEAL_HEADLINE = "지금 provider 설정의 값을 이 자격증명으로 바꾸세요.";
+export const ACTIVE_REVEAL_HEADLINE = "지금 AI 회사 설정의 값을 이 자격증명으로 바꾸세요.";
 
 export const ACTIVE_REVEAL_WARNING =
   "이 자격증명도 지금 한 번만 보여요. 앞서 붙인 연결 값은 이미 소비돼 더 이상 통하지 않아요.";
 
 export const ACTIVE_REVEAL_PROOF_NOTE =
-  "provider가 이 값으로 첫 요청에 성공해야 연결이 활성이 돼요. 그 전까지 이 에이전트는 어떤 대화도 읽지 못해요.";
+  "AI 회사가 이 값으로 첫 요청에 성공해야 연결이 활성이 돼요. 그 전까지 이 에이전트는 어떤 대화도 읽지 못해요.";
 
 /** 값을 저장했다고 사람이 말하는 자리. 웹훅 카드와 같은 낱말을 쓴다. */
 export const REVEAL_DONE_LABEL = "저장했어요";

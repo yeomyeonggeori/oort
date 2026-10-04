@@ -425,9 +425,9 @@ export function hostedStatusDetail(connection: HostedAgentConnection): string {
     case "active":
       return "자격증명 증명이 성공했고 승인한 채널에서 이 에이전트가 일할 수 있어요.";
     case "expired":
-      return "연결 값이 만료됐어요. 새 값을 발급해 provider 설정을 다시 채우세요.";
+      return "연결 값이 만료됐어요. 새 값을 발급해 AI 회사 설정을 다시 채우세요.";
     case "cleanup_pending":
-      return "oort 쪽 권한은 이미 끊겼어요. provider에 남은 설정 정리가 끝나야 완전히 해제돼요.";
+      return "oort 쪽 권한은 이미 끊겼어요. AI 회사에 남은 설정 정리가 끝나야 완전히 해제돼요.";
     case "disconnected":
       return "이 연결은 해제됐어요. 다시 쓰려면 새 연결을 만드세요.";
   }

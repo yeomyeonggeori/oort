@@ -359,7 +359,7 @@ export function HostedConnectionSection({
         <EmptyInvite
           className="px-0"
           headline="이 에이전트는 호스티드 연결로 들어오지 않았어요."
-          detail="이 워크스페이스가 직접 실행하는 에이전트이므로 provider에 정리할 설정이 없어요."
+          detail="이 워크스페이스가 직접 실행하는 에이전트이므로 AI 회사에 정리할 설정이 없어요."
           testId="hosted-disconnect-absent"
         />
       )}
