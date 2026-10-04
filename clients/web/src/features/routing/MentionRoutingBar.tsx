@@ -186,8 +186,9 @@ function ToggleAction({
 }
 
 /**
- * 접힌 줄의 요약. 모델·강도는 좁아지면 말줄임되지만 실행 위치 조각은 줄지 않는다
- * (`shrink-0`): 이 티켓이 더한 「상속 티어 상시 표기(접힌 요약 포함)」가 접힌
+ * 접힌 줄의 요약. 모델·강도가 먼저 말줄임되고 실행 위치 조각은 그다음에야 줄어든다
+ * (`shrink-0` + `max-w-full`: 줄이 아니라 이 요약 칸 안에서만 자리를 지킨다. 칸 밖으로 밀리면
+ * 옆의 「이번만 바꾸기」 위로 겹쳐 그려진다, #3444): 이 티켓이 더한 「상속 티어 상시 표기(접힌 요약 포함)」가 접힌
  * 요약에서 가장 먼저 잘려 나가면 안 된다 — 티어 조각이 줄 맨 끝에 붙어 있어
  * `truncate` 한 조각이던 앞판에서는 좁은 폭에서 그것부터 사라졌다(design-review M3).
  *
@@ -199,17 +200,29 @@ function ToggleAction({
 function SummaryLine({
   modelEffort,
   tier,
+  hideModelEffortWhenNarrow = false,
+  hideTierWhenNarrow = false,
 }: {
   modelEffort: string;
   tier: string | null;
+  /** 좁은 폭에서 모델·강도 조각을 접는다: 「모…」 같은 남은 토막은 아무것도 말하지 않는다. */
+  hideModelEffortWhenNarrow?: boolean;
+  /** 좁은 폭에서 실행 위치 조각을 접는다: 「실행 …」 토막도 같은 이유로 아무것도 말하지 않는다. */
+  hideTierWhenNarrow?: boolean;
 }) {
   return (
     <span
       className="flex min-w-0 flex-1 items-baseline gap-2 text-ink-muted"
       data-testid="composer-routing-summary"
     >
-      <span className="min-w-0 truncate">{modelEffort}</span>
-      {tier && <span className="shrink-0">{tier}</span>}
+      <span className={cn("min-w-0 truncate", hideModelEffortWhenNarrow && "max-sm:hidden")}>
+        {modelEffort}
+      </span>
+      {tier && (
+        <span className={cn("max-w-full shrink-0 truncate", hideTierWhenNarrow && "max-sm:hidden")}>
+          {tier}
+        </span>
+      )}
     </span>
   );
 }
@@ -346,6 +359,7 @@ function OneTargetRow({
         <SummaryLine
           modelEffort={modelEffortSummary}
           tier={showTier ? tier.summary : null}
+          hideModelEffortWhenNarrow={showTier && !override}
         />
         {profileFailed && (
           <RowAction onClick={profileHandle.refetch} testId="composer-routing-retry">
@@ -557,17 +571,22 @@ function ManyTargetRow({
       data-called={count}
     >
       <div className="flex h-8 items-center gap-2 px-4 text-meta">
-        {/* 핸들 두 개가 붙은 라벨은 한 명일 때보다 길다. 폭을 묶어 두지 않으면
-            긴 핸들 두 개가 요약 줄을 밀어내고, 그다음에는 행 자체를 민다. */}
-        <span className="max-w-pane-sm shrink-0 truncate text-agent">{calledLabel}</span>
+        {/* 핸들 두 개가 붙은 라벨은 한 명일 때보다 길다. 라벨은 폭을 묶고 모자라면 줄어든다:
+            조각이 줄어들 곳이 없으면 요약의 실행 위치가 「이번만 바꾸기」 위로 겹쳐 그려진다(#3444).
+            좁은 폭에서는 「이번 메시지」를 접어 실행 위치 조각이 읽힐 자리를 남긴다. */}
+        <span className="min-w-0 max-w-pane-sm truncate text-agent" title={calledLabel}>
+          {calledLabel}
+        </span>
         {override ? (
           <Chip>이번 한 번만</Chip>
         ) : (
-          <span className="shrink-0 text-ink-muted">이번 메시지</span>
+          <span className="shrink-0 text-ink-muted max-sm:hidden">이번 메시지</span>
         )}
         <SummaryLine
           modelEffort={modelEffortSummary}
           tier={showTier ? tier.summary : null}
+          hideModelEffortWhenNarrow={showTier && !override}
+          hideTierWhenNarrow={override}
         />
         {unreadable.length > 0 && (
           <RowAction onClick={called.refetch} testId="composer-routing-retry">
