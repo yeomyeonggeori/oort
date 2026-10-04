@@ -1782,6 +1782,7 @@ export default function ConversationScreen({
               // "다이렉트 메시지"이고(`channelLabelParts`), 그때는 에가 맞아서다.
               recipient={peer ? 'person' : 'place'}
               directory={directory}
+              viewerHumanId={member.id}
               dmAgent={dmAgent}
               dmHint={dmHint}
               // 승인 컨트롤과 **같은 신호**다. 전송도 REST POST 이므로 레일이

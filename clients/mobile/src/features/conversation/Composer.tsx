@@ -25,6 +25,8 @@ import {
   type SlashCandidate,
 } from '@momo/core/features/commands/slash';
 import type {Directory} from '@momo/core/features/workspace/directory';
+import {composerAgentNotice, mentionAnnotation} from '@momo/core/features/ai/aiMention';
+import {calledAgents, mentionRoutingTarget} from '@momo/core/features/routing/mentionTargets';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
@@ -417,6 +419,7 @@ export interface ComposerColumnBudget {
 export function composerColumnBudget(
   fontScale: number,
   windowHeight: number,
+  annotated = false,
 ): ComposerColumnBudget {
   const column = conversationColumn(windowHeight);
   const composer = composerMaxHeight(fontScale, windowHeight);
@@ -427,7 +430,7 @@ export function composerColumnBudget(
     composer,
     list: column - composer,
     dockChrome: DOCK_CHROME,
-    mentions: mentionSheetMaxHeight(fontScale, windowHeight),
+    mentions: mentionSheetMaxHeight(fontScale, windowHeight, annotated),
   };
 }
 
@@ -638,8 +641,39 @@ export function slashListMaxHeight(fontScale: number, windowHeight: number): num
   return rows * row;
 }
 
-export function mentionRowHeight(fontScale: number): number {
-  return Math.max(TOUCH_TARGET, line.head * fontScale);
+/**
+ * 보조 줄(`쓰는 AI · 부를 수 있는 사람 · 맥 꺼짐`)이 접힐 수 있는 줄 수 (AIH-9b, #3440).
+ *
+ * 가장 긴 줄(「곽성재 개인 구독 · 곽성재만 부를 수 있어요 · 맥 꺼짐」, 스무 자 남짓)은
+ * 오른쪽 칩이 서는 기본 크기에서 왼쪽 칸(~250pt)에 두 줄이 든다. 글자가 커지면
+ * 줄 수를 늘리는 대신 **한 줄로 줄이고 말줄임**한다 — 슬래시 목록(`slashHintLines`)과
+ * 반대 방향인 이유는 시트가 열린 도크가 열 안에 들어야 해서다(`mentionSheetMaxHeight`):
+ * 접근성 크기에서 한 행이 세 줄이면 한 행이 열 몫을 넘는다. 잘린 문장은 읽는 라벨
+ * (`accessibilityLabel`)이 끝까지 든다.
+ */
+export function mentionAnnotationLines(fontScale: number): number {
+  return fontScale <= MENTION_TWO_LINE_MAX_SCALE ? 2 : 1;
+}
+
+/** 보조 줄이 두 줄까지 접히는 글자 배수의 상한. 그 위는 한 줄. */
+const MENTION_TWO_LINE_MAX_SCALE = 1.3;
+
+/**
+ * 오른쪽 칩이 서는 글자 배수의 상한. 그 위(접근성 크기)는 칩이 왼쪽 칸의 폭을 반 넘게
+ * 먹어 이름·보조 줄이 두세 글자씩 접힌다 — 칩이 말하는 것은 보조 줄이 이미 말하고
+ * 있으므로(둘 다 코어 `aiAgentLabels` 의 같은 사실) 칩을 접는다.
+ */
+const MENTION_BADGE_MAX_SCALE = 2;
+
+export function mentionRowHeight(fontScale: number, annotated = false): number {
+  if (!annotated) return Math.max(TOUCH_TARGET, line.head * fontScale);
+  // 이름 한 줄(`line.head`) + 보조 줄(`line.meta` × 줄 수) + 위아래 여백. 후보 중 하나라도
+  // 보조 줄이 있으면 **모든 행이 이 높이**다 — 높이가 섞이면 아래 정수 행 산술이 깨진다.
+  return Math.max(
+    TOUCH_TARGET,
+    Math.ceil((line.head + line.meta * mentionAnnotationLines(fontScale)) * fontScale) +
+      space.xs * 2,
+  );
 }
 
 /**
@@ -647,22 +681,25 @@ export function mentionRowHeight(fontScale: number): number {
  *
  * `composerMaxHeight` 과 같은 모양이고 같은 이유로 export 된다: 계측 하네스와
  * 테스트가 이 산수를 **다시 적지 않고** 읽는다.
+ *
+ * `annotated` (AIH-9b): 후보에 AI 보조 줄이 든 시트. 행이 두 줄이라 같은 열에 덜
+ * 들어가므로 **바닥이 한 행**이다(보통은 둘) — 두 행이 열을 넘는 자리에서 바닥을
+ * 지키면 도크가 열 밖으로 나간다. 나머지는 스크롤 막대가 말한다.
  */
 export function mentionSheetMaxHeight(
   fontScale: number,
   windowHeight: number,
+  annotated = false,
 ): number {
-  const row = mentionRowHeight(fontScale);
+  const row = mentionRowHeight(fontScale, annotated);
+  const minRows = annotated ? 1 : MENTION_MIN_ROWS;
   const byColumn =
     conversationColumn(windowHeight) -
     composerMaxHeight(fontScale, windowHeight) -
     DOCK_CHROME;
   // 열이 허락하는 것을 **행으로 내림**한다 — 반쪽 행은 이름의 이마만 보여 준다.
   const rowsByColumn = Math.floor(byColumn / row);
-  return Math.max(
-    MENTION_MIN_ROWS * row,
-    Math.min(MENTION_MAX_ROWS, rowsByColumn) * row,
-  );
+  return Math.max(minRows * row, Math.min(MENTION_MAX_ROWS, rowsByColumn) * row);
 }
 
 // =============================================================================
@@ -851,6 +888,7 @@ export function Composer({
   channelLabel,
   recipient,
   directory,
+  viewerHumanId,
   dmAgent,
   dmHint,
   offline,
@@ -875,6 +913,12 @@ export function Composer({
    */
   recipient: RecipientKind;
   directory: Directory;
+  /**
+   * 보는 사람의 멤버 id. 멘션 후보의 AI 보조 줄(「내 구독」·「김인턴만 부를 수 있어요」)과
+   * 입력창 위 한 줄이 「누가 부르는가」로 갈리므로 필요하다(AIH-9b, #3440). 없으면 누가
+   * 보는지 모르는 것이라 코어는 남의 것으로 읽지 않는다(`classifyAiAgent`).
+   */
+  viewerHumanId?: string | null;
   /** Overrides `composerPlaceholder`. A thread is not a channel. */
   placeholder?: string;
   /** Overrides 보내기. A reply says what it is. */
@@ -974,7 +1018,6 @@ export function Composer({
   const maxHeight = composerMaxHeight(fontScale, windowHeight);
   // 시트의 상한도 같은 두 값이 정한다 (#1480). 위 상한과 나란히 여기서 계산하는
   // 이유가 그것이다 — 둘은 같은 열을 나눠 갖고, 스타일시트는 그 열을 모른다.
-  const mentionsMaxHeight = mentionSheetMaxHeight(fontScale, windowHeight);
   // 절 예산의 자 (#1479). 상한이 든 높이에서 세로 크롬을 빼면 **글이 서는 자리**다.
   const placeholderRoom = maxHeight - INPUT_CHROME;
   // 첫 렌더가 이미 초안을 들고 있다 (`drafts.ts`). 효과로 채우면 빈 상자가 한
@@ -1135,6 +1178,30 @@ export function Composer({
     [query, directory.members],
   );
   const showMentions = candidates.length > 0;
+  // 후보의 AI 보조 줄 (AIH-9b). 문장은 전부 코어 `mentionAnnotation` 이 만든다 — 폰은
+  // 그리기만 한다. 서버가 쓰는 AI를 안 알려 준 에이전트(구서버)는 null 이라 줄이 없다.
+  const annotations = useMemo(
+    () =>
+      new Map(
+        candidates.map(member => [member.id, mentionAnnotation(member, viewerHumanId)] as const),
+      ),
+    [candidates, viewerHumanId],
+  );
+  const annotated = candidates.some(member => annotations.get(member.id)?.line != null);
+  // 보조 줄이 있는 시트는 행이 크다 — 높이를 같은 식에서 읽어야 반 행이 안 생긴다.
+  const mentionsMaxHeight = mentionSheetMaxHeight(fontScale, windowHeight, annotated);
+  const mentionRowMin = mentionRowHeight(fontScale, annotated);
+  // 못 부르는(남의 구독·개인 키) 또는 쉬는(Claude 문의 중) 에이전트를 부르는 글이면 입력창
+  // 위 한 줄. 후보 시트·명령 목록이 열린 동안은 그리지 않는다: 시트가 열린 도크는 이미
+  // 열 예산(`mentionSheetMaxHeight`)이 꽉 차 있고, 행이 같은 말을 이미 하고 있다(자물쇠+흐림).
+  const agentNotice = useMemo(
+    () =>
+      composerAgentNotice(
+        calledAgents(mentionRoutingTarget(text, directory.members)),
+        viewerHumanId,
+      ),
+    [text, directory.members, viewerHumanId],
+  );
 
   // `onTyping` 을 의존성으로 들지 않기 위한 거울. 호출자가 핸들러 동일성을
   // 흘리면 `onChangeText` 가 키스트로크마다 새로 만들어지고, 그것은 이 파일이
@@ -1470,54 +1537,111 @@ export function Composer({
             // `SAFE_GUTTER`(16) 만큼 안쪽에서 끝난다. 표지가 가장 오른쪽까지
             // 가는 AX-XXL 에서도 그 사이에 11pt 가 남는다.
             showsVerticalScrollIndicator>
-            {candidates.map(member => (
-              <Pressable
-                key={member.id}
-                accessibilityRole="button"
-                // 눈에 보이는 것과 같은 것을 읽는다 (회전 2 M3). 이 `Pressable` 은
-                // `accessible` 기본값이 참이라 이 한 줄이 자식 셋을 통째로 덮는다 —
-                // 표지를 여기 안 실으면 스크린리더에서 사람 행과 에이전트 행이
-                // 구별되지 않는다.
-                accessibilityLabel={[
-                  member.displayName,
-                  `@${member.handle}`,
-                  member.kind === 'agent' ? MENTION_AGENT_KIND : null,
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
-                onPress={() => accept(member)}
-                style={({pressed}) => [
-                  styles.mentionRow,
-                  pressed && styles.pressed,
-                ]}
-                testID="mention-option">
-                {/* 이름과 핸들은 **한 묶음**이다 — 그 묶음이 자라고, 그 안에서 둘이
-                    함께 줄어든다. 형제 셋(`AgentsScreen`·`SidebarScreen`·
-                    `HostedConnectionsScreen`)의 `rowText` + `rowTitleLine` 과 같은
-                    구조이고, 스타일 쪽 주석이 왜 그 구조여야 하는지를 든다. */}
-                <View style={styles.mentionIdentity} testID="mention-identity">
-                  <Text
+            {candidates.map(member => {
+              const note = annotations.get(member.id) ?? null;
+              const annotationLine = note?.line ?? null;
+              // 칩은 보조 줄이 있는 에이전트에만 선다. 줄을 모르는(구서버) 에이전트는
+              // 옛 표지 「에이전트」 그대로다.
+              const badge = annotationLine !== null ? note?.badge ?? null : null;
+              const locked = note?.locked === true;
+              const showBadge = badge !== null && fontScale <= MENTION_BADGE_MAX_SCALE;
+              return (
+                <Pressable
+                  key={member.id}
+                  accessibilityRole="button"
+                  // 눈에 보이는 것과 같은 것을 읽는다 (회전 2 M3). 이 `Pressable` 은
+                  // `accessible` 기본값이 참이라 이 한 줄이 자식을 통째로 덮는다 — 표지와
+                  // 보조 줄을 여기 안 실으면 스크린리더에서 자물쇠(못 부름)가 사라진다.
+                  // 보조 줄은 칩의 말을 이미 포함하므로(코어 `mentionLine`) 칩은 따로 안 읽는다.
+                  accessibilityLabel={[
+                    member.displayName,
+                    `@${member.handle}`,
+                    member.kind === 'agent' ? MENTION_AGENT_KIND : null,
+                    annotationLine,
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  onPress={() => accept(member)}
+                  style={({pressed}) => [
+                    styles.mentionRow,
+                    annotated && {
+                      minHeight: mentionRowMin,
+                      paddingVertical: space.xs,
+                      alignItems: 'flex-start',
+                    },
+                    pressed && styles.pressed,
+                  ]}
+                  testID="mention-option">
+                  {({pressed}) => (
+                    <>
+                  {/* 왼쪽 칸 = 첫 줄(이름+핸들) + 보조 줄. 오른쪽 칩은 첫 줄에 맞춰 선다. */}
+                  <View
                     style={[
-                      styles.mentionName,
-                      member.kind === 'agent' && styles.mentionNameAgent,
+                      styles.mentionColumn,
+                      annotationLine === null && styles.mentionColumnCenter,
                     ]}
-                    numberOfLines={1}>
-                    {member.displayName}
-                  </Text>
-                  <Text style={styles.mentionHandle} numberOfLines={1}>
-                    {`@${member.handle}`}
-                  </Text>
-                </View>
-                {member.kind === 'agent' ? (
-                  // 한 줄로 못 박는다 — 줄어들 수 있게 해 둔 조각이(스타일의
-                  // `flexShrink`) 한 줄로 안 묶이면 접히고, 접힌 행은 이 배치가
-                  // 세운 정수 행 산술이 세는 높이를 넘는다.
-                  <Text style={styles.mentionKind} numberOfLines={1}>
-                    {MENTION_AGENT_KIND}
-                  </Text>
-                ) : null}
-              </Pressable>
-            ))}
+                    testID="mention-column">
+                    {/* 이름과 핸들은 **한 묶음**이다 — 그 묶음이 자라고, 그 안에서 둘이
+                        함께 줄어든다. 형제 셋(`AgentsScreen`·`SidebarScreen`·
+                        `HostedConnectionsScreen`)의 `rowText` + `rowTitleLine` 과 같은
+                        구조이고, 스타일 쪽 주석이 왜 그 구조여야 하는지를 든다. */}
+                    <View
+                      style={[
+                        styles.mentionIdentity,
+                        locked && !pressed && styles.mentionLockedDim,
+                      ]}
+                      testID="mention-identity">
+                      <Text
+                        style={[
+                          styles.mentionName,
+                          member.kind === 'agent' && styles.mentionNameAgent,
+                        ]}
+                        numberOfLines={1}>
+                        {member.displayName}
+                      </Text>
+                      <Text style={styles.mentionHandle} numberOfLines={1}>
+                        {`@${member.handle}`}
+                      </Text>
+                      {locked ? (
+                        <Image
+                          source={HOME_ICONS.lock}
+                          style={styles.mentionLock}
+                          accessibilityElementsHidden
+                          importantForAccessibility="no"
+                          testID="mention-locked-mark"
+                        />
+                      ) : null}
+                    </View>
+                    {annotationLine !== null ? (
+                      <Text
+                        style={styles.mentionAnnotation}
+                        numberOfLines={mentionAnnotationLines(fontScale)}
+                        lineBreakStrategyIOS="hangul-word"
+                        testID="mention-agent-line">
+                        {annotationLine}
+                      </Text>
+                    ) : null}
+                  </View>
+                  {showBadge ? (
+                    <Text
+                      style={[styles.mentionBadge, locked && !pressed && styles.mentionLockedDim]}
+                      numberOfLines={1}
+                      testID="mention-badge">
+                      {badge}
+                    </Text>
+                  ) : member.kind === 'agent' && annotationLine === null ? (
+                    // 한 줄로 못 박는다 — 줄어들 수 있게 해 둔 조각이(스타일의
+                    // `flexShrink`) 한 줄로 안 묶이면 접히고, 접힌 행은 이 배치가
+                    // 세운 정수 행 산술이 세는 높이를 넘는다.
+                    <Text style={styles.mentionKind} numberOfLines={1}>
+                      {MENTION_AGENT_KIND}
+                    </Text>
+                  ) : null}
+                    </>
+                  )}
+                </Pressable>
+              );
+            })}
           </ScrollView>
         </View>
       ) : null}
@@ -1539,6 +1663,27 @@ export function Composer({
             dmAgent.displayName,
             'subject',
           )} 답합니다.`}
+        </Text>
+      ) : null}
+
+      {agentNotice !== null && !showMentions && !showSlash ? (
+        // 보내기 전에 말한다: 고르는 것은 막지 않지만 보내도 답이 오지 않는다. 문장은 전부
+        // 코어(`composerAgentNotice`)가 만든다. 폰에는 라우팅 막대가 없어(웹의 「이번만 바꾸기」
+        // 줄) 대신 들어갈 자리가 없고, 그래서 입력창 바로 위 한 줄이다.
+        // `color.warn` 인 이유: 오프라인 줄이 앰버가 아닌 것(U4-6 M-2)은 「지금은 못 보낸다」라는
+        // 때의 문제라서였다. 이 줄은 반대로 「보내기 전에 볼 것」 — `warn` 이 뜻하는 그 한 가지다.
+        <Text
+          style={styles.agentNotice}
+          accessibilityRole="alert"
+          accessibilityLiveRegion="polite"
+          lineBreakStrategyIOS="hangul-word"
+          // 최대 두 줄 — 도크가 열 안에 들게(design-review H2). 열 예산(`composerColumnBudget`)은
+          // 이 줄을 세지 않으므로 상한이 곧 예산이다: 두 줄 × `line.meta` × 글자 배수가 가장 큰
+          // 배수에서도 입력창 상한 뒤 열에 든다(`mentionAiAnnotation.test.tsx`). 잘린 문장은 라벨이 끝까지 읽는다.
+          numberOfLines={2}
+          accessibilityLabel={agentNotice}
+          testID="composer-agent-notice">
+          {agentNotice}
         </Text>
       ) : null}
 
@@ -1886,6 +2031,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     minHeight: TOUCH_TARGET,
     flexDirection: 'row',
     alignItems: 'center',
+
     gap: space.sm,
     paddingHorizontal: SAFE_GUTTER,
   },
@@ -1968,11 +2114,12 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   /**
    * 이름 + 핸들의 묶음 — 형제 셋의 `rowText`/`rowTitleLine` 과 같은 것.
    *
-   * `flex: 1` 이라 표지가 자기 폭을 다 받고 이 묶음이 나머지를 받는다. 안에서
+   * 묶음은 이제 왼쪽 칸(`mentionColumn`, `flex: 1`) 안의 첫 줄이라 폭은 칸이 받는다 —
+   * 묶음 자신이 `flex: 1` 이면 세로로도 자라 보조 줄과 벌어진다(AIH-9b 캡처에서 잡았다).
+   * 칩이 자기 폭을 먼저 받고 칸이 나머지를 받는 것은 그대로다. 안에서
    * 두 조각이 폭에 비례해 함께 줄어드는 것이 위 절의 요점이다.
    */
   mentionIdentity: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
@@ -1985,6 +2132,47 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     color: color.text,
   },
   mentionNameAgent: {color: color.agent},
+  // ---- AI 보조 줄 (AIH-9b, #3440; 웹 `ComposerAutocompleteList` 두 칸 구조) ----------
+  // 왼쪽 칸이 자라고(`flex: 1`) 오른쪽 칩은 제 폭을 받는다(`flexShrink: 0`). 칩은 첫 줄에
+  // 맞춰 서므로(`alignSelf: 'flex-start'`) 칸은 위에 붙는다. 보조 줄이 없는 후보(사람)는
+  // 같은 시트에서 위로 붙지 않게 칸을 행 높이에 채워 가운데에 놓는다(`mentionColumnCenter`).
+  mentionColumn: {flex: 1},
+  mentionColumnCenter: {alignSelf: 'stretch', justifyContent: 'center'},
+  mentionAnnotation: {
+    fontSize: font.meta,
+    lineHeight: line.meta,
+    // `textFaint` 는 본문 AA 를 노리지 않는 값이다 — 이 줄은 읽어야 하는 문장이다.
+    color: color.textMuted,
+  },
+  mentionLock: {
+    width: font.meta,
+    height: font.meta,
+    flexShrink: 0,
+    tintColor: color.textFaint,
+  },
+  mentionBadge: {
+    flexShrink: 0,
+    alignSelf: 'flex-start',
+    // 첫 줄(`line.head`)과 같은 줄 상자 — 이름과 같은 줄에 선다.
+    paddingHorizontal: space.sm,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+    backgroundColor: color.surfaceMuted,
+    fontSize: font.meta,
+    lineHeight: line.head,
+    color: color.textFaint,
+  },
+  // 못 부르는 행은 이름·핸들·자물쇠·칩만 흐리게 한다 — 보조 줄은 **흐리지 않다**. 그 줄이 못
+  // 부르는 까닭(「박다연 님만 부를 수 있어요」)의 유일한 눈에 보이는 문장이라, 행 전체에 0.6 을
+  // 주면 가장 안 읽히는 글자가 가장 중요한 말을 든다(design-review H1). 눌린 동안은 흐리지 않다.
+  mentionLockedDim: {opacity: 0.6},
+  agentNotice: {
+    paddingHorizontal: SAFE_GUTTER,
+    paddingTop: space.sm,
+    fontSize: font.meta,
+    lineHeight: line.meta,
+    color: color.warn,
+  },
   mentionHandle: {
     flexShrink: 1,
     fontSize: font.meta,
