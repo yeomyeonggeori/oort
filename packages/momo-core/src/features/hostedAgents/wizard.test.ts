@@ -123,7 +123,7 @@ describe("RED PROOF ② 증명 전에는 테스트 멘션이 열리지 않는다
       })
     );
     expect(gate.allowed).toBe(false);
-    expect(gate.blockedCopy).toContain("증명이 아직 성공하지 않았습니다");
+    expect(gate.blockedCopy).toContain("증명이 아직 성공하지 않았어요");
   });
 
   it("활성이고 승인 채널이 있어야 열린다", () => {
@@ -137,7 +137,7 @@ describe("RED PROOF ② 증명 전에는 테스트 멘션이 열리지 않는다
   it("활성이어도 승인 채널이 없으면 멘션할 자리가 없다고 말한다", () => {
     const gate = testMentionGate(connection({ status: "active" }));
     expect(gate.allowed).toBe(false);
-    expect(gate.blockedCopy).toContain("승인한 채널이 없습니다");
+    expect(gate.blockedCopy).toContain("승인한 채널이 없어요");
   });
 
   it("멘션 문장의 조사는 핸들이 정한다", () => {
@@ -160,7 +160,7 @@ describe("RED PROOF ③ 재발급 게이트는 서버의 409를 미리 말한다
   it("활성 연결을 끊으려 시도한 뒤에야 이유를 듣게 하지 않는다", () => {
     const gate = regenerateGate(connection({ status: "active" }));
     expect(gate.allowed).toBe(false);
-    expect(gate.blockedCopy).toContain("먼저 이 연결을 해제해야 합니다");
+    expect(gate.blockedCopy).toContain("먼저 이 연결을 해제해야 해요");
   });
 
   it("해제된 연결은 새 연결을 만들라고 말한다", () => {
@@ -240,7 +240,7 @@ describe("RED PROOF ④ 진행 표시와 live region", () => {
 
   it("일반 pairing purpose 는 프리셋과 무관하게 그대로다", () => {
     expect(hostedStepSpec("pairing").purpose).toBe(
-      "연결 값은 지금 한 번만 보입니다. provider 설정에 붙여 넣고 이 화면에서 저장을 마치세요."
+      "연결 값은 지금 한 번만 보여요. provider 설정에 붙여 넣고 이 화면에서 저장을 마치세요."
     );
   });
 
@@ -256,7 +256,7 @@ describe("RED PROOF ④ 진행 표시와 live region", () => {
     );
     const done = hostedLiveMessage("activation", connection({ status: "active" }));
     expect(waiting).toContain("provider 설정의 값을 바꾸면");
-    expect(done).toContain("연결이 활성입니다");
+    expect(done).toContain("연결이 활성이에요");
   });
 
   it("5단계 목적 문장도 활성 뒤에는 교체를 과거형으로 말한다", () => {
@@ -267,7 +267,7 @@ describe("RED PROOF ④ 진행 표시와 live region", () => {
       connection({ status: "detected", activeCredentialId: CREDENTIAL })
     );
     expect(waiting).toBe(hostedStepSpec("activation").purpose);
-    expect(waiting).toContain("바꿔야 활성이 됩니다");
+    expect(waiting).toContain("바꿔야 활성이 돼요");
 
     expect(hostedStepPurpose("activation", connection({ status: "active" }))).toBe(
       HOSTED_ACTIVATION_DONE_PURPOSE

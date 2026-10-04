@@ -348,7 +348,7 @@ export function HostedConnectionSection({
 
       {list.isPending && (
         <div role="status">
-          <span className="sr-only">호스티드 연결을 불러오는 중입니다.</span>
+          <span className="sr-only">호스티드 연결을 불러오는 중이에요.</span>
           <Skeleton ready={false} rows={3} className="p-0" />
         </div>
       )}
@@ -358,8 +358,8 @@ export function HostedConnectionSection({
       {!list.isPending && !list.isError && found === null && (
         <EmptyInvite
           className="px-0"
-          headline="이 에이전트는 호스티드 연결로 들어오지 않았습니다."
-          detail="이 워크스페이스가 직접 실행하는 에이전트이므로 provider에 정리할 설정이 없습니다."
+          headline="이 에이전트는 호스티드 연결로 들어오지 않았어요."
+          detail="이 워크스페이스가 직접 실행하는 에이전트이므로 provider에 정리할 설정이 없어요."
           testId="hosted-disconnect-absent"
         />
       )}
@@ -377,7 +377,7 @@ export function HostedConnectionSection({
 
           {detail.isPending && (
             <div role="status">
-              <span className="sr-only">정리 목록을 불러오는 중입니다.</span>
+              <span className="sr-only">정리 목록을 불러오는 중이에요.</span>
               <Skeleton ready={false} rows={4} className="p-0" />
             </div>
           )}
@@ -500,7 +500,7 @@ function ListFailure({ error, onRetry }: { error: unknown; onRetry: () => void }
     return (
       <EmptyInvite
         className="px-0"
-        headline="호스티드 에이전트 연결은 오너나 관리자만 다룹니다."
+        headline="호스티드 봇 초대는 소유자나 관리자만 다뤄요."
         detail="이 연결을 해제하려면 이 워크스페이스의 관리자에게 요청하세요."
         testId="hosted-disconnect-denied"
       />
@@ -620,7 +620,7 @@ function StartPanel({
       {blocked && (
         <p id={blockedId} className="break-keep text-meta text-ink-muted">
           {gate.allowed
-            ? "연결이 끊겨 있어 지금은 해제를 시작할 수 없습니다."
+            ? "연결이 끊겨 있어 지금은 해제를 시작할 수 없어요."
             : gate.blockedCopy}
         </p>
       )}
@@ -760,9 +760,9 @@ function CleanupPanel({
           {CLEANUP_INDEPENDENCE_NOTE}
         </p>
         {/* 두 분모가 다르다 (follow-up #6): 「resolved/total」은 필수·선택을 가리지
-            않는 전체이고, 문장의 「N개 남았습니다」는 미해결 **필수** 수다. 지금
+            않는 전체이고, 문장의 「N개 남았어요」는 미해결 **필수** 수다. 지금
             픽스처는 전부 required:true 라 둘이 어긋나지 않지만, 선택 항목이 서면
-            (미해결 선택 줄은 total 에는 들지만 「남았습니다」에는 안 든다) 두 수가
+            (미해결 선택 줄은 total 에는 들지만 「남았어요」에는 안 든다) 두 수가
             벌어진다. 그때는 분모를 필수 수로 맞추거나 문장이 선택 줄을 따로 말해야
             한다. */}
         <p
@@ -800,7 +800,7 @@ function CleanupPanel({
       {artifacts.length === 0 ? (
         <EmptyInvite
           className="px-0"
-          headline="정리 목록이 비어 있습니다."
+          headline="정리 목록이 비어 있어요."
           detail={MANIFEST_REPAIR_NOTE}
           actions={
             // 잠긴 버튼은 tab order 를 떠나지 않는다 (#1403, 줄의 트리거와 같은
@@ -936,7 +936,7 @@ function TerminalPanel({
           data-testid="hosted-terminal-blocked"
         >
           {gate.allowed
-            ? "연결이 끊겨 있어 지금은 해제를 확정할 수 없습니다."
+            ? "연결이 끊겨 있어 지금은 해제를 확정할 수 없어요."
             : gate.blockedCopy}
         </p>
       )}

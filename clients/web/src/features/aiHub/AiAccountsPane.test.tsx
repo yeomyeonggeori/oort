@@ -13,7 +13,7 @@ import { AiAccountsPane } from "./AiAccountsPane";
 
 // AIH-4 (#3399): 「내 AI 계정」. 두 가지를 못 박는다.
 // - 웹에서 로그인 줄만 던지는 막다른 길이 아니다(앱 받기·열기 + 서버에 있는 내 에이전트).
-// - Claude 구독 에이전트는 보수 모드(#3397) 동안 「연결됨/부를 수 있어요」라 말하지 않는다.
+// - Claude 구독으로 쓰는 에이전트는 보수 모드(#3397) 동안 「연결됨/부를 수 있어요」라 말하지 않는다.
 
 const envSlot = vi.hoisted(() => ({ tauri: true }));
 vi.mock("@/lib/env", async (importOriginal) => {

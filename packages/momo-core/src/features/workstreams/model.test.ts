@@ -397,7 +397,7 @@ describe("실행한 사람의 이름", () => {
   });
 
   it("leaves the attribution empty rather than inventing an owner", () => {
-    // 오너가 로스터에 없으면 비운다. MemberRow가 하는 것과 같다.
+    // 소유자가 로스터에 없으면 비운다. MemberRow가 하는 것과 같다.
     expect(workstreamActor(directory, orphanAgent).ownerName).toBeNull();
   });
 

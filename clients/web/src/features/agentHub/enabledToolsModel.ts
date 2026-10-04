@@ -13,9 +13,9 @@ export const INSTRUCTION_BYTE_LIMIT = 8_192;
 
 export const UNKNOWN_TOOL_CHIP = "이 서버 목록에 없음";
 export const UNKNOWN_TOOL_REASON =
-  "이 서버가 공개한 도구 목록에 없는 이름입니다.";
+  "이 서버가 공개한 도구 목록에 없는 이름이에요.";
 
-export const EMPTY_CATALOG_COPY = "이 서버가 공개한 도구가 없습니다";
+export const EMPTY_CATALOG_COPY = "이 서버가 공개한 도구가 없어요";
 
 export function mergeToolRows(
   catalog: readonly AgentToolCatalogEntry[],
@@ -88,7 +88,7 @@ export function toolsProfilePut(
   if (instructionByteLength(instructions) > INSTRUCTION_BYTE_LIMIT) {
     return {
       ok: false,
-      message: "지시문은 UTF-8 기준 8KB 이하로 줄여야 합니다.",
+      message: "지시문은 UTF-8 기준 8KB 이하로 줄여야 해요.",
     };
   }
   const input: AgentProfileInput = {

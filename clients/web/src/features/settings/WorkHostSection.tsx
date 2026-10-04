@@ -113,8 +113,8 @@ export function WorkHostSection({
     <SectionShell
       title="코드 실행 호스트"
       lines={[
-        "에이전트가 실제로 명령을 돌리는 자리입니다. 어떤 엔진으로 돌릴지, 어디에 등록돼 있는지, 그 자리를 잃으면 어떻게 할지를 정합니다.",
-        "서버에는 엔진 이름과 정책만 저장됩니다. 호스트 키는 그 호스트를 떠나지 않습니다.",
+        "에이전트가 실제로 명령을 돌리는 자리예요. 어떤 엔진으로 돌릴지, 어디에 등록돼 있는지, 그 자리를 잃으면 어떻게 할지를 정해요.",
+        "서버에는 엔진 이름과 정책만 저장돼요. 호스트 키는 그 호스트를 떠나지 않아요.",
       ]}
     >
       {/* #2778: the desktop's own door to becoming a host, first because with
@@ -165,7 +165,7 @@ function EngineBlock({ offline }: { offline: boolean }) {
       client.invalidateQueries({ queryKey: ["settings", "work-host-engine"] }),
   });
 
-  const lines = ["엔진은 워크스페이스마다 하나입니다. 오너나 관리자만 바꿉니다."];
+  const lines = ["엔진은 워크스페이스마다 하나예요. 소유자나 관리자만 바꿔요."];
   // 이름을 한 번만 적는다: 아래 되돌리기가 이 그룹의 상태 문장을 자기 사유로
   // 가리키므로, 이름이 두 곳에 적히면 한쪽이 조용히 낡는다.
   const engineRadiosName = "work-host-engine";
@@ -183,13 +183,13 @@ function EngineBlock({ offline }: { offline: boolean }) {
       <Subsection title="실행 엔진" lines={lines}>
         {isOperatorDenied(query.error) ? (
           <OperatorNotice
-            who="코드 실행 엔진은 워크스페이스 오너나 관리자만 바꿀 수 있습니다."
+            who="코드 실행 엔진은 워크스페이스 소유자나 관리자만 바꿀 수 있어요."
             contact="변경이 필요하면 워크스페이스 관리자에게 문의하세요."
           />
         ) : offline ? (
           /* No retry while the uplink is down: it can only fail. */
           <InlineBanner
-            message="연결이 끊겨 실행 엔진을 불러올 수 없습니다. 다시 연결되면 불러옵니다."
+            message="연결이 끊겨 실행 엔진을 불러올 수 없어요. 다시 연결되면 불러와요."
             testId="work-host-error"
           />
         ) : (
@@ -247,11 +247,11 @@ function EngineBlock({ offline }: { offline: boolean }) {
         busy={save.isPending}
         hint={
           save.isPending
-            ? "엔진을 저장하는 중입니다."
+            ? "엔진을 저장하는 중이에요."
             : dirty
-              ? "아직 저장되지 않았습니다. 저장 버튼을 눌러야 적용됩니다."
+              ? "아직 저장되지 않았어요. 저장 버튼을 눌러야 적용돼요."
               : offline
-                ? "연결이 끊겨 지금은 바꿀 수 없습니다."
+                ? "연결이 끊겨 지금은 바꿀 수 없어요."
                 : undefined
         }
       />
@@ -278,7 +278,7 @@ function EngineBlock({ offline }: { offline: boolean }) {
             아무 일도 일어나지 않고 왜인지도 말하지 않는, 두 가드 어느 쪽도
             보지 못한 자리다 (#1559 회전 1 · design-review #1595 M5).
 
-            사유는 새로 쓰지 않는다. 이 프레임에서 「엔진을 저장하는 중입니다」는
+            사유는 새로 쓰지 않는다. 이 프레임에서 「엔진을 저장하는 중이에요」는
             위 그룹이 이미 화면에 세워 둔 문장이고, 잠금 하나에 문장 하나가
             규율이다 — 여기 한 번 더 쓰면 같은 사실이 한 화면에 두 번 선다. */}
         {dirty && (
@@ -303,8 +303,8 @@ function EngineBlock({ offline }: { offline: boolean }) {
       </div>
 
       <p className="text-meta text-ink-muted">
-        실행 하나하나의 승인 경계는 에이전트 카드의 승인 흐름에서 다룹니다. 이
-        블록은 어떤 엔진을 쓸지만 정합니다.
+        실행 하나하나의 승인 경계는 에이전트 카드의 승인 흐름에서 다뤄요. 이
+        블록은 어떤 엔진을 쓸지만 정해요.
       </p>
     </Subsection>
   );
@@ -313,8 +313,8 @@ function EngineBlock({ offline }: { offline: boolean }) {
 // --- 등록된 호스트 -----------------------------------------------------------
 
 const REGISTRY_LINES = [
-  "데스크톱 앱은 설정의 「이 맥」에서 등록하고, 리눅스 서버의 workd 데몬은 스스로 등록합니다.",
-  "온라인 여부는 서버가 정하고, 이 목록은 30초마다 다시 읽습니다. 행은 ID 끝 6자리로 구분하고, 전체 ID는 복사 버튼으로 가져갑니다.",
+  "데스크톱 앱은 설정의 「이 맥」에서 등록하고, 리눅스 서버의 workd 데몬은 스스로 등록해요.",
+  "온라인 여부는 서버가 정하고, 이 목록은 30초마다 다시 읽어요. 행은 ID 끝 6자리로 구분하고, 전체 ID는 복사 버튼으로 가져가요.",
 ];
 
 /**
@@ -398,7 +398,7 @@ function RegistryBlock({
             message ("not a workspace member") the route logs. */}
         {isOperatorDenied(hosts.error) ? (
           <OperatorNotice
-            who="등록된 호스트 목록은 이 워크스페이스의 멤버만 볼 수 있습니다."
+            who="등록된 호스트 목록은 이 워크스페이스의 멤버만 볼 수 있어요."
             contact="초대가 아직 처리되지 않았는지 워크스페이스 관리자에게 확인하세요."
           />
         ) : offline ? (
@@ -406,7 +406,7 @@ function RegistryBlock({
              socket is down is a button that cannot succeed, which is the same
              defect as an operator form whose save always 403s. */
           <InlineBanner
-            message="연결이 끊겨 등록된 호스트 목록을 불러올 수 없습니다. 다시 연결되면 목록을 불러옵니다."
+            message="연결이 끊겨 등록된 호스트 목록을 불러올 수 없어요. 다시 연결되면 목록을 불러와요."
             testId="work-hosts-error"
           />
         ) : (
@@ -429,8 +429,8 @@ function RegistryBlock({
             one thing a person who just started a host actually wants: look
             again. The copy names the app and the moment that creates the row. */}
         <EmptyInvite
-          headline="등록된 호스트가 아직 없습니다."
-          detail="oort 데스크톱 앱의 이 화면 「이 맥」에서 등록하면 여기에 나타나고, 리눅스 서버는 workd 데몬이 켜질 때 스스로 등록합니다."
+          headline="등록된 호스트가 아직 없어요."
+          detail="oort 데스크톱 앱의 이 화면 「이 맥」에서 등록하면 여기에 나타나고, 리눅스 서버는 workd 데몬이 켜질 때 스스로 등록해요."
           actions={<RegistryRefreshButton hosts={hosts} offline={offline} />}
           testId="work-hosts-empty"
         />
@@ -531,7 +531,7 @@ function HostRow({ host }: { host: WorkHost }) {
 // --- 호스트 상실 시 재개 -----------------------------------------------------
 
 const POLICY_LINES = [
-  "세션을 돌리던 호스트를 잃었을 때 무엇을 할지 정합니다. 이미 돌고 있는 세션은 이 값을 바꿔도 그대로입니다.",
+  "세션을 돌리던 호스트를 잃었을 때 무엇을 할지 정해요. 이미 돌고 있는 세션은 이 값을 바꿔도 그대로예요.",
 ];
 
 /**
@@ -579,19 +579,19 @@ function TierPolicyBlock({
             retry button is then a button that can only fail. */}
         {isOperatorDenied(mine.error) ? (
           <OperatorNotice
-            who="내 정책은 이 워크스페이스의 멤버만 보고 바꿀 수 있습니다."
+            who="내 정책은 이 워크스페이스의 멤버만 보고 바꿀 수 있어요."
             contact="초대가 아직 처리되지 않았는지 워크스페이스 관리자에게 확인하세요."
           />
         ) : offline ? (
           <InlineBanner
-            message="연결이 끊겨 정책을 불러올 수 없습니다. 기존 세션은 그대로 유지됩니다."
+            message="연결이 끊겨 정책을 불러올 수 없어요. 기존 세션은 그대로 유지돼요."
             testId="work-tier-policy-error"
           />
         ) : (
           /* mac 정본과 같은 문장: 실패했다는 사실보다 세션이 무사하다는 사실이
              먼저 필요하다. */
           <InlineBanner
-            message="정책을 불러오지 못했습니다. 기존 세션은 그대로 유지됩니다."
+            message="정책을 불러오지 못했어요. 기존 세션은 그대로 유지돼요."
             actionLabel="정책 다시 불러오기"
             onAction={() => void mine.refetch()}
             testId="work-tier-policy-error"
@@ -650,14 +650,14 @@ function TierPolicyBlock({
         {workspace.isError &&
           (isOperatorDenied(workspace.error) ? (
             <p className="text-meta text-ink-muted">
-              워크스페이스 기본값은 오너나 관리자만 보고 바꿉니다. 내 정책은 그
-              기본값 위에 얹힙니다.
+              워크스페이스 기본값은 소유자나 관리자만 보고 바꿔요. 내 정책은 그
+              기본값 위에 얹혀요.
             </p>
           ) : (
             <div className="flex min-w-0 flex-col gap-1">
               <p className="text-meta text-ink-muted">워크스페이스 기본</p>
               <InlineBanner
-                message="워크스페이스 기본값을 불러오지 못했습니다. 내 정책은 그대로 바꿀 수 있습니다."
+                message="워크스페이스 기본값을 불러오지 못했어요. 내 정책은 그대로 바꿀 수 있어요."
                 actionLabel="기본값 다시 불러오기"
                 onAction={() => void workspace.refetch()}
                 testId="work-tier-workspace-error"
@@ -798,15 +798,15 @@ function TierPolicyScope({
 
   // Save state in words, most transient first.
   const stateHint = save.isPending
-    ? "정책을 저장하는 중입니다."
+    ? "정책을 저장하는 중이에요."
     : needsTarget
-      ? "자동 재개는 재개 대상을 고른 뒤에 저장됩니다."
+      ? "자동 재개는 재개 대상을 고른 뒤에 저장돼요."
       : dirty
-        ? "아직 저장되지 않았습니다. 저장 버튼을 눌러야 적용됩니다."
+        ? "아직 저장되지 않았어요. 저장 버튼을 눌러야 적용돼요."
         : offline
-          ? "연결이 끊겨 지금은 바꿀 수 없습니다."
+          ? "연결이 끊겨 지금은 바꿀 수 없어요."
           : scope === "member" && policy.inherited
-            ? "워크스페이스 기본값을 상속 중입니다. 다른 값을 골라 저장하면 내 정책이 됩니다."
+            ? "워크스페이스 기본값을 상속 중이에요. 다른 값을 골라 저장하면 내 정책이 돼요."
             : undefined;
 
   // Two scopes draw the same two buttons, so the visible labels carry the scope
@@ -864,7 +864,7 @@ function TierPolicyScope({
         />
         {/* 위 엔진 블록의 되돌리기와 같은 규칙이다 (#1559 회전 1 · #1595 M5):
             저장 중에는 잠기고, 잠긴 사실은 흐림과 `aria-disabled` 로 말하며,
-            사유는 이 그룹이 이미 세워 둔 「정책을 저장하는 중입니다」를 가리킨다.
+            사유는 이 그룹이 이미 세워 둔 「정책을 저장하는 중이에요」를 가리킨다.
             한 패널의 같은 자리가 다른 모양이면 다음 사람은 그 차이가 의도인지
             알 수 없다. */}
         {dirty && (
@@ -933,8 +933,8 @@ function AutoTargetField({
           data-testid={`${id}-unavailable`}
         >
           {registry.status === "loading"
-            ? "등록된 호스트를 불러오는 중입니다. 목록이 도착하면 대상을 고를 수 있습니다."
-            : "등록된 호스트를 불러오지 못해 지금은 대상을 고를 수 없습니다. 위 등록된 호스트 블록을 확인하세요."}
+            ? "등록된 호스트를 불러오는 중이에요. 목록이 도착하면 대상을 고를 수 있어요."
+            : "등록된 호스트를 불러오지 못해 지금은 대상을 고를 수 없어요. 위 등록된 호스트 블록을 확인하세요."}
         </p>
       </div>
     );
@@ -975,14 +975,14 @@ function AutoTargetField({
   // that reads like help text next to a normally selected 자동 재개 radio.
   const hint = staleTarget
     ? stored?.revokedAtMs
-      ? "지금 저장된 대상은 해지된 호스트여서 이 정책은 실행되지 않습니다. 다른 대상을 고른 뒤 저장하세요."
+      ? "지금 저장된 대상은 해지된 호스트여서 이 정책은 실행되지 않아요. 다른 대상을 고른 뒤 저장하세요."
       : stored
-        ? "지금 저장된 대상은 이 정책이 쓸 수 없는 호스트여서 이 정책은 실행되지 않습니다. 다른 대상을 고른 뒤 저장하세요."
-        : "지금 저장된 대상이 등록 목록에 없어 이 정책은 실행되지 않습니다. 다른 대상을 고른 뒤 저장하세요."
+        ? "지금 저장된 대상은 이 정책이 쓸 수 없는 호스트여서 이 정책은 실행되지 않아요. 다른 대상을 고른 뒤 저장하세요."
+        : "지금 저장된 대상이 등록 목록에 없어 이 정책은 실행되지 않아요. 다른 대상을 고른 뒤 저장하세요."
     : unsaved
-      ? "아직 저장되지 않았습니다. 저장 버튼을 눌러야 적용됩니다."
+      ? "아직 저장되지 않았어요. 저장 버튼을 눌러야 적용돼요."
       : eligible.length === 0
-        ? "등록된 호스트 중 고를 수 있는 것이 없어 oort Cloud만 고를 수 있습니다."
+        ? "등록된 호스트 중 고를 수 있는 것이 없어 oort Cloud만 고를 수 있어요."
         : undefined;
 
   return (

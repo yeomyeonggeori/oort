@@ -369,7 +369,7 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
   },
   hostedAgentPairing: {
     id: "hostedAgentPairing",
-    label: "호스티드 에이전트 연결",
+    label: "호스티드 봇 초대",
     // 2026-08-14, 이 표에서 처음부터 참으로 들어오는 첫 줄이다. 앞선 셋(승인·작업
     // 기록·메시지 검색)은 거짓에서 뒤집힌 것이고, 이 줄은 HAP-E3(#1364)가 라우트를
     // 올린 뒤에 표에 들어왔다. 그래도 문구를 함께 적는다: 이 칸은 **이 코드베이스의

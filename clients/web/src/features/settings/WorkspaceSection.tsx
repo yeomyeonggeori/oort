@@ -122,8 +122,8 @@ function WorkspaceUnfurlSetting({
       {query.isPending && <Skeleton ready={false} rows={1} />}
       {denied && (
         <OperatorNotice
-          who="링크 미리보기는 워크스페이스 오너와 관리자만 바꿀 수 있습니다."
-          contact="바꿔야 한다면 이 워크스페이스의 오너에게 문의하세요."
+          who="링크 미리보기는 워크스페이스 소유자와 관리자만 바꿀 수 있습니다."
+          contact="바꿔야 한다면 이 워크스페이스의 소유자에게 문의하세요."
         />
       )}
       {query.isError && !denied && (
@@ -312,7 +312,7 @@ function WorkspaceAvatarField({
             {uploading ? "올리는 중" : "이미지 변경"}
           </Button>
           <p className="text-meta text-ink-muted">
-            PNG, JPG, WebP. 5MB까지. 오너와 관리자가 바꿀 수 있습니다.
+            PNG, JPG, WebP. 5MB까지. 소유자와 관리자가 바꿀 수 있습니다.
           </p>
         </div>
         <input
@@ -328,8 +328,8 @@ function WorkspaceAvatarField({
       </div>
       {denied && (
         <OperatorNotice
-          who="워크스페이스 아바타는 오너와 관리자만 바꿀 수 있습니다."
-          contact="바꿔야 한다면 이 워크스페이스의 오너에게 문의하세요."
+          who="워크스페이스 아바타는 소유자와 관리자만 바꿀 수 있습니다."
+          contact="바꿔야 한다면 이 워크스페이스의 소유자에게 문의하세요."
         />
       )}
       {localError && (
@@ -472,9 +472,9 @@ function RoleLabelsEditor({
           who={
             denied
               ? roleLabelsSaveMessage(save.error)
-              : "역할 표시명은 워크스페이스 오너와 관리자만 바꿀 수 있습니다."
+              : "역할 표시명은 워크스페이스 소유자와 관리자만 바꿀 수 있습니다."
           }
-          contact="바꿔야 한다면 이 워크스페이스의 오너에게 문의하세요."
+          contact="바꿔야 한다면 이 워크스페이스의 소유자에게 문의하세요."
         />
       )}
       {confirmedNonOperator ? (
@@ -657,9 +657,9 @@ function WelcomeKickoffEditor({
           who={
             denied
               ? errorMessage(save.error)
-              : "웰컴 킥오프는 워크스페이스 오너와 관리자만 바꿀 수 있습니다."
+              : "웰컴 킥오프는 워크스페이스 소유자와 관리자만 바꿀 수 있습니다."
           }
-          contact="바꿔야 한다면 이 워크스페이스의 오너에게 문의하세요."
+          contact="바꿔야 한다면 이 워크스페이스의 소유자에게 문의하세요."
         />
       )}
       {confirmedNonOperator ? (
@@ -1021,7 +1021,7 @@ function LeaveWorkspace({
       </p>
       {lastOwner && (
         <p className="text-meta text-danger" role="alert" data-testid="workspace-leave-last-owner">
-          마지막 오너는 나갈 수 없습니다. 먼저 다른 사람에게 오너를 넘기세요.
+          마지막 소유자는 나갈 수 없습니다. 먼저 다른 사람에게 소유자를 넘기세요.
         </p>
       )}
       {otherError && (
@@ -1111,7 +1111,7 @@ export function WorkspaceSection({
 
   const lines = [
     "지금 열려 있는 워크스페이스를 확인하고, 새 워크스페이스를 만듭니다.",
-    "새 워크스페이스는 만든 사람이 오너가 되고 #general 채널 하나로 시작합니다.",
+    "새 워크스페이스는 만든 사람이 소유자가 되고 #general 채널 하나로 시작합니다.",
   ];
 
   return (

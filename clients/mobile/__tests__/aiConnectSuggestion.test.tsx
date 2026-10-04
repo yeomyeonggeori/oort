@@ -35,7 +35,7 @@ import {SessionProvider} from '../src/session/useSession';
 //
 // 웹 `MessageRow.commandSuggest.test.tsx`와 같은 픽스처(G3 샘플)를 같은 규칙으로 잰다:
 //   - 대상 본인: 읽기 카드. 로그인·키 입력 없음(Q5). 운영자면 「연결 확인」 하나.
-//   - 운영자(대상 아님): 한 줄 + 「팀 연결 보기」 → 팀 줄만.
+//   - 운영자(대상 아님): 한 줄 + 「팀 AI 키 보기」 → 팀 줄만.
 //   - 그 밖: 한 줄, 누를 것 0.
 //   - 알약은 props가 아니라 provider_link 응답 → 코어 `linkPill`.
 // =============================================================================
@@ -230,7 +230,7 @@ describe('대상 본인 — 폰 읽기 카드', () => {
   it('props에 상태를 실어도 믿지 않는다: 한 줄 폴백, 누를 것 0', async () => {
     renderRow(message({...G3, state: 'ready'}), REQUESTER);
     const line = await screen.findByTestId('ai-suggest-other', {}, {timeout: 5000});
-    expect(within(line).getByText('곽성재에게 AI 연결을 제안했어요')).toBeTruthy();
+    expect(within(line).getByText('곽성재에게 AI 계정 연결을 제안했어요')).toBeTruthy();
     expect(pressables(line)).toBe(0);
     expect(screen.queryByTestId('ai-suggest-target')).toBeNull();
   });
@@ -242,12 +242,12 @@ describe('대상이 아닌 사람', () => {
     renderRow(message(G3), SKY);
     await waitFor(() => expect(fetchProviderLink).toHaveBeenCalled());
     const line = await screen.findByTestId('ai-suggest-other', {}, {timeout: 5000});
-    expect(within(line).getByText('곽성재에게 AI 연결을 제안했어요')).toBeTruthy();
+    expect(within(line).getByText('곽성재에게 AI 계정 연결을 제안했어요')).toBeTruthy();
     expect(pressables(line)).toBe(0);
     expect(screen.queryByText(/내 계정/)).toBeNull();
   });
 
-  it('운영자: 한 줄 + 「팀 연결 보기」 → 팀 줄만', async () => {
+  it('운영자: 한 줄 + 「팀 AI 키 보기」 → 팀 줄만', async () => {
     renderRow(message(G3), SKY);
     const open = await screen.findByTestId('ai-suggest-team-open', {}, {timeout: 5000});
     expect(screen.queryByTestId('ai-suggest-team-panel')).toBeNull();

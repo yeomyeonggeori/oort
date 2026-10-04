@@ -204,6 +204,14 @@ ORIGINAL_CONTENT_SIZE=""
 # 회전 1 의 같은 사진에서는 핸들이 2.143 에서 맨 「@」 한 글자였고 3.143 에서는
 # 아예 없었다(`flex: 1` = basis 0 이라 압력 전부터 자기 폭이 없는 조각이었다).
 #
+# AIH-9b(#3440)가 붙인 두 장면도 같은 Maestro 레인이 진다:
+#
+#   -momoMeasure MENTION-SHEET-AI        maestro/96-mention-sheet-ai-capture.yaml
+#       AI 보조 줄(두 줄 행)·칩·잠금이 든 시트. 행 높이·시트 상한은 보조 줄 산식
+#       (`mentionRowHeight(fontScale, true)`)으로 잰다 — 프로브가 그 수를 찍는다.
+#   -momoMeasure COMPOSER-AGENT-NOTICE   maestro/97-composer-agent-notice-capture.yaml
+#       못 부르는·쉬는 에이전트를 부르는 글 위의 한 줄.
+#
 # 여기 안 넣는 이유: 캡처 하나를 위해 계측 레인 전체가 Maestro 를 요구하게 되고,
 # 이 스크립트는 오늘 그 의존이 없다.
 

@@ -70,7 +70,7 @@ describe('list — the four states plus permission and offline', () => {
     );
     // detected-without-credential is a different sentence than active.
     expect(
-      screen.getByText(/아직 아무 권한도 열리지 않았습니다/),
+      screen.getByText(/아직 아무 권한도 열리지 않았어요/),
     ).toBeTruthy();
     const row = screen.getByTestId(`hosted-row-${CONNECTION_ID}`);
     expect(row.props.accessibilityLabel).toContain('감지됨');
@@ -151,9 +151,9 @@ describe('detail — read-only status, honest time, cleanup progress', () => {
     expect(screen.getByTestId('hosted-detail-status-chip')).toHaveTextContent('감지됨');
     expect(screen.getByText(/사람이 채널과 권한을 확인해야/)).toBeTruthy();
     // read-only honesty: mutations live on the desktop.
-    expect(screen.getByText(/데스크톱에서 합니다/)).toBeTruthy();
+    expect(screen.getByText(/데스크톱에서 해요/)).toBeTruthy();
     // liveness honesty: updatedAtMs is not a live heartbeat.
-    expect(screen.getByText(/실시간으로 알려 주는 값은 아닙니다/)).toBeTruthy();
+    expect(screen.getByText(/실시간으로 알려 주는 값은 아니에요/)).toBeTruthy();
   });
 
   it('counts unresolved-required cleanup items and lists the manifest read-only', () => {
@@ -215,7 +215,7 @@ describe('detail — read-only status, honest time, cleanup progress', () => {
         resolved: true,
         required: true,
         source: 'manual',
-        evidence: '커넥터 목록에서 제거를 눌렀고 사라졌습니다',
+        evidence: '커넥터 목록에서 제거를 눌렀고 사라졌어요',
         updatedAtMs: 7_000,
       },
     ]);
@@ -231,12 +231,12 @@ describe('detail — read-only status, honest time, cleanup progress', () => {
     );
     expect(
       screen.getByTestId('hosted-artifact-evidence-connector-2'),
-    ).toHaveTextContent('커넥터 목록에서 제거를 눌렀고 사라졌습니다');
+    ).toHaveTextContent('커넥터 목록에서 제거를 눌렀고 사라졌어요');
     // The row is one a11y element, so the evidence must ride in its label too —
     // otherwise VoiceOver never reaches the person's own words (review H1).
     expect(
       screen.getByTestId('hosted-artifact-connector-2').props.accessibilityLabel,
-    ).toContain('커넥터 목록에서 제거를 눌렀고 사라졌습니다');
+    ).toContain('커넥터 목록에서 제거를 눌렀고 사라졌어요');
   });
 
   it('rebuilds by named fields, so an injected secret never reaches the tree', () => {

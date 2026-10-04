@@ -11,7 +11,7 @@ import type { LocalCardArgs, LocalCardId } from "@momo/core/features/commands/re
 // 그 부탁을 받을 자리가 여기다: 채널 화면이 마운트될 때 자기 채널 id로 자리를
 // 등록하고(`registerLocalCardHost`), 명령을 부른 쪽(팔레트·컴포저)은 채널 id로
 // 부탁한다(`openLocalCardIn`). 자리가 없으면 false이고, 명령이 스스로 폴백한다
-// (`ai.connect`는 설정 › AI 연결로 간다).
+// (`ai.connect`는 AI로 간다).
 //
 // **GC-3 전에는 자리를 등록하는 화면이 없다.** 그래서 지금 제품에서 이 부탁은
 // 언제나 false이고 ⌘K·`/연결`은 설정으로 간다. 그것이 계약된 폴백이다.

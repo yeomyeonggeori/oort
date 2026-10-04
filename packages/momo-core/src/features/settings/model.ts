@@ -518,7 +518,7 @@ export function isOperatorDenied(error: unknown): boolean {
 /** Save failure on the role-label form. Never the wire 400 sentence. */
 export function roleLabelsSaveMessage(error: unknown): string {
   if (isOperatorDenied(error)) {
-    return "역할 표시명은 오너나 관리자만 바꿀 수 있습니다.";
+    return "역할 표시명은 소유자나 관리자만 바꿀 수 있습니다.";
   }
   return "표시명을 저장하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
 }
@@ -530,8 +530,8 @@ export function isSlugConflict(error: unknown): boolean {
 /**
  * 서버가 준 문장이 있으면 그것, 없으면 읽을 수 있는 폴백.
  *
- * 폴백은 해요체다(#2988): 이 문장은 AI 연결 카드(웹·폰)의 해요체 앞말
- * 「팀 연결을 불러오지 못했어요.」 뒤에 이어 붙고, 확인 실패 줄에도 홀로 선다.
+ * 폴백은 해요체다(#2988): 이 문장은 AI 계정 카드(웹·폰)의 해요체 앞말
+ * 「팀 AI 키를 불러오지 못했어요.」 뒤에 이어 붙고, 확인 실패 줄에도 홀로 선다.
  */
 export const ERROR_MESSAGE_FALLBACK = "요청을 끝내지 못했어요. 잠시 뒤에 다시 시도해 주세요.";
 
@@ -649,7 +649,7 @@ export function workTierPolicySaveMessage(error: unknown): string {
     case 400:
       return "자동 재개는 재개 대상을 함께 골라야 저장됩니다. 대상을 고른 뒤 다시 저장하세요.";
     case 403:
-      return "워크스페이스 기본값은 오너나 관리자만 바꿀 수 있습니다. 내 정책은 그대로 바꿀 수 있습니다.";
+      return "워크스페이스 기본값은 소유자나 관리자만 바꿀 수 있습니다. 내 정책은 그대로 바꿀 수 있습니다.";
     case 409:
       // The next step names a control that exists: 등록된 호스트 블록의
       // '등록 목록 다시 불러오기'. Before MOMO-617 R2 that sentence asked for an

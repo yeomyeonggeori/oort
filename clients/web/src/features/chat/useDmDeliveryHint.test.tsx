@@ -80,7 +80,7 @@ describe("useDmDeliveryHint", () => {
     });
     await settle();
     expect(seen[0]).toBeNull();
-    expect(seen.at(-1)).toBe("성재님이 이 대화를 열어야 Claude Code가 답합니다");
+    expect(seen.at(-1)).toBe("성재님이 이 대화를 열어야 Claude Code가 답해요");
     expect(seen.some((hint) => hint?.includes("바로 말하면"))).toBe(false);
   });
 
@@ -91,7 +91,7 @@ describe("useDmDeliveryHint", () => {
       state: "open",
     });
     await settle();
-    expect(seen.at(-1)).toBe("멘션 없이 바로 말하면 Claude Code가 답합니다");
+    expect(seen.at(-1)).toBe("멘션 없이 바로 말하면 Claude Code가 답해요");
   });
 
   it("promises nothing when the lookup fails for any other reason", async () => {
@@ -105,6 +105,6 @@ describe("useDmDeliveryHint", () => {
     const { ApiError } = await import("@momo/core/lib/api");
     vi.mocked(getAgentDmDelivery).mockRejectedValue(new ApiError(404, "not found"));
     await settle();
-    expect(seen.at(-1)).toBe("멘션 없이 바로 말하면 Claude Code가 답합니다");
+    expect(seen.at(-1)).toBe("멘션 없이 바로 말하면 Claude Code가 답해요");
   });
 });

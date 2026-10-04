@@ -14,7 +14,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 //   * 소유자와 자기 에이전트의 1:1 DM은 저절로 열린다. 저장된 값이 아니라서
 //     끄는 버튼이 없다.
 //   * 다른 멤버와의 DM은 소유자가 한 DM씩 연다. 기본은 닫힘.
-//   * 구독 에이전트(소유자 전용)는 소유자 DM만. 다른 DM은 열 수 없다.
+//   * 구독으로 쓰는 에이전트(소유자 전용)는 소유자 DM만. 다른 DM은 열 수 없다.
 //
 // 컴포저 힌트는 「멘션 없이 바로 말하면 …가 답합니다」를 **전달이 열린 DM에서만**
 // 쓴다. 호스티드 에이전트에게 그 문장은 승인 전까지 거짓이었다(#2891).
@@ -109,39 +109,39 @@ export function applyHostedDmApproval(
 export const DM_APPROVAL_HEADLINE = "1:1 대화";
 
 export function dmApprovalLead(agentName: string): string {
-  return `${agentName}${particleFor(agentName, "topic")} 소유자와의 1:1 대화에서 바로 답합니다. 다른 멤버와의 대화는 소유자가 하나씩 열어야 답합니다.`;
+  return `${agentName}${particleFor(agentName, "topic")} 소유자와의 1:1 대화에서 바로 답해요. 다른 멤버와의 대화는 소유자가 하나씩 열어야 답해요.`;
 }
 
 export const DM_APPROVAL_OWNER_ONLY_LEAD =
-  "개인 에이전트라 소유자와의 1:1 대화에서만 답합니다. 다른 멤버와의 대화는 열 수 없습니다.";
-export const DM_APPROVAL_EMPTY_HEADLINE = "아직 이 에이전트와 나눈 1:1 대화가 없습니다.";
+  "개인 에이전트라 소유자와의 1:1 대화에서만 답해요. 다른 멤버와의 대화는 열 수 없어요.";
+export const DM_APPROVAL_EMPTY_HEADLINE = "아직 이 에이전트와 나눈 1:1 대화가 없어요.";
 export const DM_APPROVAL_EMPTY_DETAIL =
-  "멤버가 이 에이전트에게 1:1 대화를 시작하면 여기에 줄이 생깁니다.";
-export const DM_APPROVAL_LOADING_LABEL = "1:1 대화 목록을 불러오는 중입니다.";
+  "멤버가 이 에이전트에게 1:1 대화를 시작하면 여기에 줄이 생겨요.";
+export const DM_APPROVAL_LOADING_LABEL = "1:1 대화 목록을 불러오는 중이에요.";
 export const DM_APPROVAL_OPEN_LABEL = "대화 열기";
 export const DM_APPROVAL_CLOSE_LABEL = "대화 닫기";
 export const DM_APPROVAL_OPEN_CONFIRM = "열기";
 export const DM_APPROVAL_CLOSE_CONFIRM = "닫기";
 export const DM_APPROVAL_BUSY_LABEL = "바꾸는 중";
 export const DM_APPROVAL_OFFLINE_NOTE =
-  "연결이 끊겨 지금은 바꿀 수 없습니다. 다시 연결되면 여기서 바꿀 수 있습니다.";
+  "연결이 끊겨 지금은 바꿀 수 없어요. 다시 연결되면 여기서 바꿀 수 있어요.";
 
 export function dmApprovalOpenQuestion(memberName: string): string {
   return `${memberName}님과의 대화 내용을 이 에이전트가 읽고 답하게 할까요?`;
 }
 
 export function dmApprovalCloseQuestion(memberName: string): string {
-  return `${memberName}님과의 대화를 닫을까요? 이후 메시지는 에이전트에게 가지 않습니다.`;
+  return `${memberName}님과의 대화를 닫을까요? 이후 메시지는 에이전트에게 가지 않아요.`;
 }
 
 export const DM_APPROVAL_CONFIRMED_BY_NON_OWNER_NOTE =
-  "소유자가 아닌 멤버가 이 연결을 확인해서 1:1 대화는 모두 닫혀 있습니다. 소유자가 다시 연결하면 열 수 있습니다.";
+  "소유자가 아닌 멤버가 이 연결을 확인해서 1:1 대화는 모두 닫혀 있어요. 소유자가 다시 연결하면 열 수 있어요.";
 
 /** 읽기 전용일 때 목록 위에 한 번 선다. */
 export function dmApprovalReadOnlyNote(ownerName: string | null): string {
   return ownerName === null
-    ? "소유자가 없는 에이전트라 다른 멤버와의 대화를 열 수 없습니다."
-    : `${ownerName}님(소유자)만 바꿀 수 있습니다.`;
+    ? "소유자가 없는 에이전트라 다른 멤버와의 대화를 열 수 없어요."
+    : `${ownerName}님(소유자)만 바꿀 수 있어요.`;
 }
 
 export function dmApprovalStateLabel(state: HostedDmApprovalState): string {
@@ -166,13 +166,13 @@ export function dmApprovalStateTone(
 export function dmApprovalFailureMessage(status: number | null): string {
   switch (status) {
     case 403:
-      return "소유자만 이 대화를 열거나 닫을 수 있습니다.";
+      return "소유자만 이 대화를 열거나 닫을 수 있어요.";
     case 409:
-      return "이 대화는 지금 바꿀 수 없습니다. 목록을 새로 불러와 상태를 확인해 주세요.";
+      return "이 대화는 지금 바꿀 수 없어요. 목록을 새로 불러와 상태를 확인해 주세요.";
     case 422:
-      return "이제 1:1 대화가 아니라 열 수 없습니다. 목록을 새로 불러와 주세요.";
+      return "이제 1:1 대화가 아니라 열 수 없어요. 목록을 새로 불러와 주세요.";
     default:
-      return "바꾸지 못했습니다. 연결을 확인한 뒤 다시 시도해 주세요.";
+      return "바꾸지 못했어요. 연결을 확인한 뒤 다시 시도해 주세요.";
   }
 }
 
@@ -236,20 +236,20 @@ export function dmComposerHint(
   switch (state) {
     case "not_hosted":
     case "open":
-      return `멘션 없이 바로 말하면 ${names.agentSubject} 답합니다`;
+      return `멘션 없이 바로 말하면 ${names.agentSubject} 답해요`;
     case "awaiting_owner":
-      return `${attachParticle(owner)} 이 대화를 열어야 ${names.agentSubject} 답합니다`;
+      return `${attachParticle(owner)} 이 대화를 열어야 ${names.agentSubject} 답해요`;
     case "owner_only":
-      return `${owner}의 개인 에이전트라 이 대화에는 답하지 않습니다`;
+      return `${owner}의 개인 에이전트라 이 대화에는 답하지 않아요`;
     case "not_approvable":
-      return `${names.agentSubject} 이 대화에는 답하지 않습니다`;
+      return `${names.agentSubject} 이 대화에는 답하지 않아요`;
     case "connection_unavailable":
-      return `${names.agentName}의 연결이 끊겨 있어 지금은 답하지 않습니다`;
+      return `${names.agentName}의 연결이 끊겨 있어 지금은 답하지 않아요`;
     case "delivery_disabled":
-      return "이 서버에서 외부 에이전트 전달이 꺼져 있어 답하지 않습니다";
+      return "이 서버에서 외부 에이전트 전달이 꺼져 있어 답하지 않아요";
     case "subscription_disabled":
-      return "이 서버에서 구독 에이전트가 꺼져 있어 답하지 않습니다";
+      return "이 서버에서 구독 대행이 꺼져 있어 답하지 않아요";
     case "claude_subscription_agent_paused":
-      return "Claude 구독 에이전트는 Anthropic 확인 중이라 지금은 답하지 않습니다";
+      return "Claude 구독 대행은 확인 중이라 지금은 답하지 않아요";
   }
 }

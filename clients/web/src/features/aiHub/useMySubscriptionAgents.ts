@@ -12,7 +12,7 @@ export type MySubscriptionAgentsRead =
   | { state: "ok"; agents: MySubscriptionAgent[] };
 
 /**
- * 내가 만든 구독 에이전트(서버 값). 명부와 호스티드 연결 목록, 개요 카드가 쓰는 같은
+ * 내가 만든 구독으로 쓰는 에이전트(서버 값). 명부와 호스티드 연결 목록, 개요 카드가 쓰는 같은
  * 쿼리다. 못 읽으면 `error`: 호출부는 「아직 에이전트 없음」이라 말하지 않는다.
  */
 export function useMySubscriptionAgents(): MySubscriptionAgentsRead {

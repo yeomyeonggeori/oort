@@ -96,7 +96,7 @@ export function withChannelMemberAdded(
 export function addChannelMemberFailure(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 403) {
-      return "멤버를 추가할 권한이 없습니다. 워크스페이스 오너나 관리자에게 요청하세요.";
+      return "멤버를 추가할 권한이 없습니다. 워크스페이스 소유자나 관리자에게 요청하세요.";
     }
     if (error.status === 404) {
       return "이 채널에는 멤버를 추가할 수 없습니다. 채널이 보관되었거나 사라졌을 수 있습니다.";

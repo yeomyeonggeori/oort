@@ -310,7 +310,7 @@ describe("role display override draft and payload", () => {
 
   it("maps a save failure without leaking the wire 400 sentence", () => {
     expect(roleLabelsSaveMessage(new ApiError(403, "operator required"))).toContain(
-      "오너나 관리자"
+      "소유자나 관리자"
     );
     expect(roleLabelsSaveMessage(new ApiError(400, "role_labels value exceeds 48 bytes"))).toBe(
       "표시명을 저장하지 못했습니다. 잠시 뒤에 다시 시도하세요."
@@ -479,7 +479,7 @@ describe("코드 실행 호스트 error copy", () => {
 
     expect(at(400, "auto mode requires autoTarget")).toContain("재개 대상");
     expect(at(403, "workspace tier policy requires owner or admin")).toContain(
-      "오너나 관리자"
+      "소유자나 관리자"
     );
     expect(at(409, "auto target work host is unavailable")).toContain("해지");
     expect(at(500, "boom")).toBe(

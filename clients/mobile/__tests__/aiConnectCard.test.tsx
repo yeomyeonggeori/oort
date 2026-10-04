@@ -139,7 +139,7 @@ const pillText = () =>
 
 // -----------------------------------------------------------------------------
 describe('카드 — 판정은 코어, 행동은 연결 확인 하나', () => {
-  it('머리는 「AI 연결 · 나에게만」이고 내 계정 절은 맥으로 보낸다', async () => {
+  it('머리는 「AI 계정 · 나에게만」이고 내 계정 절은 맥으로 보낸다', async () => {
     mockFetch.mockResolvedValue(LINK);
     card();
     expect(screen.getByText(AI_CONNECT_CARD_COPY.title)).toBeTruthy();
@@ -273,7 +273,7 @@ describe('카드 — 판정은 코어, 행동은 연결 확인 하나', () => {
     }
   });
 
-  it('자판을 올렸다 내려도 「연결 확인」 결과가 남고 팀 연결을 다시 부르지 않는다', async () => {
+  it('자판을 올렸다 내려도 「연결 확인」 결과가 남고 팀 AI 키를 다시 부르지 않는다', async () => {
     mockFetch.mockResolvedValue(LINK);
     mockTest.mockResolvedValue(PROBE_OK);
     const handlers = new Map<string, (event: KeyboardEvent) => void>();

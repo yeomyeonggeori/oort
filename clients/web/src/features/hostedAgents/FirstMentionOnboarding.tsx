@@ -44,7 +44,7 @@ import {
 // =============================================================================
 
 const hostedPairingProvided = isSurfaceProvided("hostedAgentPairing");
-const OFFLINE_LOCK_REASON = "연결이 끊겨 지금은 할 수 없습니다";
+const OFFLINE_LOCK_REASON = "연결이 끊겨 지금은 할 수 없어요";
 
 function asMentionMessages(
   messages: readonly Message[],

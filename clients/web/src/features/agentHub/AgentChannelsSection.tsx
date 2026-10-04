@@ -113,8 +113,8 @@ export function AgentChannelsSection({
       <div>
         <h3 className="text-body font-semibold text-ink">채널</h3>
         <p className="text-meta text-ink-muted">
-          이 에이전트가 들어가 있는 채널입니다. 채널에 있어야 그 채널에서 멘션할
-          수 있습니다.
+          이 에이전트가 들어가 있는 채널이에요. 채널에 있어야 그 채널에서 멘션할
+          수 있어요.
         </p>
       </div>
 
@@ -140,21 +140,21 @@ export function AgentChannelsSection({
 
       {channelsQuery.isPending ? (
         <div role="status">
-          <span className="sr-only">채널 목록을 불러오는 중입니다.</span>
+          <span className="sr-only">채널 목록을 불러오는 중이에요.</span>
           <Skeleton ready={false} rows={3} className="p-0" />
         </div>
       ) : channelsQuery.isError ? (
         <InlineBanner
           separator={false}
-          message="채널 목록을 불러오지 못해 어디에 들어가 있는지 확인할 수 없습니다."
+          message="채널 목록을 불러오지 못해 어디에 들어가 있는지 확인할 수 없어요."
           actionLabel="다시 시도"
           onAction={() => void channelsQuery.refetch()}
           testId="agent-hub-channels-list-error"
         />
       ) : placement.present.length === 0 ? (
         <EmptyInvite
-          headline="아직 어떤 채널에도 들어가 있지 않습니다."
-          detail="채널에 넣으면 그 채널의 멤버들이 이 에이전트를 멘션할 수 있습니다."
+          headline="아직 어떤 채널에도 들어가 있지 않아요."
+          detail="채널에 넣으면 그 채널의 멤버들이 이 에이전트를 멘션할 수 있어요."
           testId="agent-hub-channels-empty"
         />
       ) : (
@@ -182,7 +182,7 @@ export function AgentChannelsSection({
                 {confirming ? (
                   <span className="flex flex-wrap items-center gap-2">
                     <span className="text-meta text-ink">
-                      내보내면 이 채널의 멘션이 더 이상 전달되지 않습니다.
+                      내보내면 이 채널의 멘션이 더 이상 전달되지 않아요.
                     </span>
                     <Button
                       type="button"
@@ -241,8 +241,8 @@ export function AgentChannelsSection({
         <p className="text-meta text-ink-muted" data-testid="agent-hub-channels-unresolved">
           이 밖에{" "}
           <span data-numeric>{placement.unresolved.toLocaleString("ko-KR")}</span>
-          개의 대화에 더 들어가 있습니다. 회원님이 볼 수 없는 채널이거나 다이렉트
-          메시지라 이름을 표시하지 않습니다.
+          개의 대화에 더 들어가 있어요. 회원님이 볼 수 없는 채널이거나 다이렉트
+          메시지라 이름을 표시하지 않아요.
         </p>
       )}
 
@@ -283,7 +283,7 @@ export function AgentChannelsSection({
             >
               <option value="">
                 {placement.available.length === 0
-                  ? "추가할 수 있는 채널이 없습니다"
+                  ? "추가할 수 있는 채널이 없어요"
                   : "채널 고르기"}
               </option>
               {/* The popup is OS-drawn and takes no markup, so the private

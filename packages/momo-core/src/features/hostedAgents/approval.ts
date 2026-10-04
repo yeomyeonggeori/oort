@@ -66,43 +66,43 @@ export const HOSTED_SCOPE_CHOICES: readonly HostedScopeChoice[] = [
     id: "agent:port:connect",
     label: "접속",
     detail:
-      "이 에이전트가 oort에 접속만 합니다. 대화도 작업도 이 권한만으로는 열리지 않습니다.",
+      "이 에이전트가 oort에 접속만 해요. 대화도 작업도 이 권한만으로는 열리지 않아요.",
     required: true,
-    requiredReason: "접속 없이는 나머지 권한이 아무것도 열지 못하므로 항상 포함됩니다.",
+    requiredReason: "접속 없이는 나머지 권한이 아무것도 열지 못하므로 항상 포함돼요.",
   },
   {
     id: "agent:inbox:read",
     label: "부름 읽기",
     detail:
-      "승인한 채널에서 이 에이전트를 부른 메시지를 순서대로 읽습니다. 부르지 않은 대화는 오지 않습니다.",
+      "승인한 채널에서 이 에이전트를 부른 메시지를 순서대로 읽어요. 부르지 않은 대화는 오지 않아요.",
     required: false,
   },
   {
     id: "messages:read",
     label: "지난 대화 읽기",
     detail:
-      "승인한 채널의 지난 메시지를 읽습니다. 승인하지 않은 채널의 대화는 읽지 못합니다.",
+      "승인한 채널의 지난 메시지를 읽어요. 승인하지 않은 채널의 대화는 읽지 못해요.",
     required: false,
   },
   {
     id: "messages:write",
     label: "메시지 쓰기",
     detail:
-      "승인한 채널에 이 에이전트 이름으로 메시지를 씁니다. 사람이 쓴 것과 같은 자리에 남습니다.",
+      "승인한 채널에 이 에이전트 이름으로 메시지를 써요. 사람이 쓴 것과 같은 자리에 남아요.",
     required: false,
   },
   {
     id: "agent:jobs:read",
     label: "작업 가져가기",
     detail:
-      "승인한 채널에서 만들어진 작업을 가져가 진행합니다. 다른 에이전트의 작업은 가져가지 못합니다.",
+      "승인한 채널에서 만들어진 작업을 가져가 진행해요. 다른 에이전트의 작업은 가져가지 못해요.",
     required: false,
   },
   {
     id: "agent:runs:callback",
     label: "작업 결과 보고",
     detail:
-      "가져간 작업의 진행과 결과를 보고합니다. 이 권한이 없으면 작업이 끝났는지 알 수 없습니다.",
+      "가져간 작업의 진행과 결과를 보고해요. 이 권한이 없으면 작업이 끝났는지 알 수 없어요.",
     required: false,
   },
   {
@@ -116,7 +116,7 @@ export const HOSTED_SCOPE_CHOICES: readonly HostedScopeChoice[] = [
     id: "workspace:propose",
     label: "워크스페이스 변경 제안",
     detail:
-      "워크스페이스 변경을 제안할 수 있음(실행은 사람 승인). 제안은 채널에 승인 카드로 서고, 승인하면 승인한 사람의 권한으로 실행됩니다.",
+      "워크스페이스 변경을 제안할 수 있음(실행은 사람 승인). 제안은 채널에 승인 카드로 서고, 승인하면 승인한 사람의 권한으로 실행돼요.",
     required: false,
   },
 ];
@@ -163,7 +163,7 @@ export function scopeGate(scopes: readonly HostedAgentScope[]): HostedGate {
   if (!scopes.includes(REQUIRED_HOSTED_SCOPE)) {
     return {
       allowed: false,
-      blockedCopy: "접속 권한 없이는 저장할 수 없습니다.",
+      blockedCopy: "접속 권한 없이는 저장할 수 없어요.",
     };
   }
   return { allowed: true };
@@ -201,14 +201,14 @@ export function isApprovableChannel(channel: ApprovalChannelInput): boolean {
 
 function channelDetail(channel: ApprovalChannelInput): string {
   if (channel.kind === "dm") {
-    return "1:1 대화는 여기서 고르지 않습니다. 연결한 뒤 에이전트 자격의 1:1 대화 목록에서 소유자가 엽니다.";
+    return "1:1 대화는 여기서 고르지 않아요. 연결한 뒤 외부 에이전트 연결의 1:1 대화 목록에서 소유자가 열어요.";
   }
   if (channel.archivedAtMs !== undefined) {
-    return "보관된 채널입니다. 다시 열면 승인할 수 있습니다.";
+    return "보관된 채널이에요. 다시 열면 승인할 수 있어요.";
   }
   return channel.kind === "private"
-    ? "비공개 채널입니다. 승인하면 이 채널의 멤버가 됩니다."
-    : "공개 채널입니다. 승인하면 이 채널의 멤버가 됩니다.";
+    ? "비공개 채널이에요. 승인하면 이 채널의 멤버가 돼요."
+    : "공개 채널이에요. 승인하면 이 채널의 멤버가 돼요.";
 }
 
 /**
@@ -300,22 +300,22 @@ export function approvalConsequence(
   const name = attachParticle(hostedAgentLabel(agentLabel), "topic");
   const actions = scopeActionList(scopes);
   if (channelCount === 0) {
-    return `${name} 접속만 하고 어떤 대화에도 닿지 못합니다. 채널을 하나도 승인하지 않았기 때문입니다.`;
+    return `${name} 접속만 하고 어떤 대화에도 닿지 못해요. 채널을 하나도 승인하지 않았기 때문이에요.`;
   }
   if (actions.length === 0) {
-    return `${name} ${channelCount}개 채널의 멤버가 되지만 읽기도 쓰기도 하지 못합니다. 접속 말고 아무 권한도 고르지 않았기 때문입니다.`;
+    return `${name} ${channelCount}개 채널의 멤버가 되지만 읽기도 쓰기도 하지 못해요. 접속 말고 아무 권한도 고르지 않았기 때문이에요.`;
   }
   const list = actions.join(", ");
-  return `승인하면 ${name} ${channelCount}개 채널에서 ${list}를 할 수 있습니다. 승인하지 않은 채널에서는 이 에이전트를 멘션해도 작업이 만들어지지 않습니다.`;
+  return `승인하면 ${name} ${channelCount}개 채널에서 ${list}를 할 수 있어요. 승인하지 않은 채널에서는 이 에이전트를 멘션해도 작업이 만들어지지 않아요.`;
 }
 
 /** 승인이 되돌릴 수 없는 결정이라는 사실. 확인 버튼 옆에 상시 노출된다. */
 export const APPROVAL_SECURITY_NOTE =
-  "이 승인은 사람만 내릴 수 있는 보안 결정입니다. 감지됐다는 사실은 권한의 근거가 아니고, 저장하기 전까지 이 에이전트는 아무 대화에도 닿지 못합니다.";
+  "이 승인은 사람만 내릴 수 있는 보안 결정이에요. 감지됐다는 사실은 권한의 근거가 아니고, 저장하기 전까지 이 에이전트는 아무 대화에도 닿지 못해요.";
 
 /** 승인을 나중에 좁히거나 넓히는 법. 되돌릴 수 없다고만 말하고 끝내지 않는다. */
 export const APPROVAL_CHANGE_NOTE =
-  "저장한 뒤 승인 범위를 바꾸려면 연결 값을 다시 발급해 처음부터 진행합니다. 이미 발급된 자격증명은 그때 폐기됩니다.";
+  "저장한 뒤 승인 범위를 바꾸려면 연결 값을 다시 발급해 처음부터 진행해요. 이미 발급된 자격증명은 그때 폐기돼요.";
 
 // ---- 전송 본문 --------------------------------------------------------------
 

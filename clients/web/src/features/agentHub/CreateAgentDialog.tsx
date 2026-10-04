@@ -235,15 +235,15 @@ function CreateAgentPanel({
       <div className="flex flex-col gap-1 border-b border-line p-4">
         <DialogTitle>에이전트 만들기</DialogTitle>
         <DialogDescription>
-          에이전트는 워크스페이스의 멤버가 됩니다. 만든 뒤 채널에 넣으면 그
-          채널에서 멘션할 수 있습니다.
+          에이전트는 워크스페이스의 멤버가 돼요. 만든 뒤 채널에 넣으면 그
+          채널에서 멘션할 수 있어요.
         </DialogDescription>
       </div>
 
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼습니다. 에이전트 만들기는 다시 연결된 뒤에 할 수 있습니다."
+          message="연결이 끊겼어요. 에이전트 만들기는 다시 연결된 뒤에 할 수 있어요."
           testId="create-agent-offline"
         />
       )}
@@ -257,7 +257,7 @@ function CreateAgentPanel({
         <DialogField
           label="표시 이름"
           htmlFor="create-agent-display-name"
-          hint="사람들이 목록과 메시지에서 보게 될 이름입니다. 100자 이내."
+          hint="사람들이 목록과 메시지에서 보게 될 이름이에요. 100자 이내."
           error={displayNameError}
         >
           <Input
@@ -282,7 +282,7 @@ function CreateAgentPanel({
         <DialogField
           label="핸들"
           htmlFor="create-agent-handle"
-          hint="멘션에 쓰는 이름입니다. 영문 소문자, 숫자, 하이픈, 밑줄로 2자 이상 32자 이내. 대문자는 소문자로 저장됩니다."
+          hint="멘션에 쓰는 이름이에요. 영문 소문자, 숫자, 하이픈, 밑줄로 2자 이상 32자 이내. 대문자는 소문자로 저장돼요."
           error={handleError}
         >
           <Input
@@ -306,7 +306,7 @@ function CreateAgentPanel({
         <DialogField
           label="모델"
           htmlFor="create-agent-model"
-          hint="이 에이전트가 기본으로 쓸 모델 이름입니다. 나중에 프로필에서 바꿀 수 있습니다."
+          hint="이 에이전트가 기본으로 쓸 모델 이름이에요. 나중에 프로필에서 바꿀 수 있어요."
           error={modelError}
         >
           <Input
@@ -330,7 +330,7 @@ function CreateAgentPanel({
         <DialogField
           label="게이트웨이 주소"
           htmlFor="create-agent-base-url"
-          hint="이 에이전트를 실행할 곳입니다. 외부 주소는 https, 같은 기기라면 포트까지 적습니다."
+          hint="이 에이전트를 실행할 곳이에요. 외부 주소는 https, 같은 기기라면 포트까지 적어요."
           error={baseUrlError}
         >
           <Input
@@ -357,7 +357,7 @@ function CreateAgentPanel({
         <DialogField
           label="지시문"
           htmlFor="create-agent-instructions"
-          hint="선택 사항입니다. 답변 방식과 작업 경계를 적으면 첫 프로필로 저장됩니다."
+          hint="선택 사항이에요. 답변 방식과 작업 경계를 적으면 첫 프로필로 저장돼요."
           error={instructionsError}
         >
           <textarea
@@ -369,7 +369,7 @@ function CreateAgentPanel({
             rows={4}
             disabled={pending}
             className="w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 text-body text-ink placeholder:text-ink-muted focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50"
-            placeholder="검증 근거를 먼저 보여 주고, 확실하지 않으면 확실하지 않다고 말합니다."
+            placeholder="검증 근거를 먼저 보여 주고, 확실하지 않으면 확실하지 않다고 말해요."
             aria-invalid={instructionsError ? true : undefined}
             aria-describedby={
               instructionsError
@@ -398,8 +398,8 @@ function CreateAgentPanel({
           className="border-t border-line pt-4 text-meta text-ink-muted"
           data-testid="create-agent-credential-note"
         >
-          API 키는 여기에 넣지 않습니다. 프로바이더 자격증명은 AI의 팀 AI 키에서
-          한 번만 등록하고, 에이전트는 그 연결을 통해 실행됩니다.
+          API 키는 여기에 넣지 않아요. 프로바이더 자격증명은 AI의 팀 AI 키에서
+          한 번만 등록하고, 에이전트는 그 연결을 통해 실행돼요.
         </p>
 
         {formError && (

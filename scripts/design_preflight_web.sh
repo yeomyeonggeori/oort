@@ -29,6 +29,7 @@
 #   12 latin_particle 라틴 낱말과 조사 사이 공백 (「Esc 는」)          [AST, #1511]
 #   13 raw_motion    사다리 밖 \d+ms · duration-[0-9]+ 손기입 (ADR-0179 D10)
 #   14 motion_lib_scope  motion family (motion, motion/…, motion-dom, motion-utils, framer-motion, framer-motion/…) 허용 3파일 외 hard-zero (grep, ADR-0179 D8 / UX-R1b)
+#   15 legacy_term   옛 용어(「AI 연결」「오너」「합류」…) 화면 문자열 잔존           [AST, #3445]
 #
 # 11·12 는 emdash 와 같은 AST 단계가 판정한다(렌더 문자열·JSX 텍스트만, 주석·
 # 테스트 이름 제외 — 규칙 정의는 scripts/design_preflight_ast.mjs). 코어 단계도
@@ -183,7 +184,7 @@ drop_issue_refs() {
   done
 }
 
-KEYS="emdash raw_color inline_style arbitrary_tw ai_gradient toast naked_focus external_font hype pure_bw progress_word latin_particle raw_motion motion_lib_scope"
+KEYS="emdash raw_color inline_style arbitrary_tw ai_gradient toast naked_focus external_font hype pure_bw progress_word latin_particle legacy_term raw_motion motion_lib_scope"
 
 label_for() {
   case "$1" in
@@ -199,6 +200,7 @@ label_for() {
     pure_bw)       echo "pure black/white (use the surface tokens, they adapt to scheme)" ;;
     progress_word) echo "진행 낱말은 「명사 + 중」 (#1501 정본·#1511 게이트) — 「-하는 중」은 고유어 어간(ast.mjs NATIVE_HANEUN_STEMS)만, 문장 꼴 「-하는 중입니다」는 검사 밖" ;;
     latin_particle) echo "라틴 낱말 뒤 조사는 붙여 쓴다 (「Esc 는」→「Esc는」, #1511·#1560 M①) — break-keep 아래서 띈 조사가 줄머리 고아로 선다" ;;
+    legacy_term)   echo "옛 용어 (AI 허브 용어집 §2, #3445) — 「AI 연결」→「AI」·「오너」→「소유자」·「합류」·「구독 붙이기」 등. 목록 정본 core LEGACY_TERM_MAP(grepGate), 예외는 design-preflight-allow 마커 + PR 근거" ;;
     raw_motion)    echo "사다리 밖 duration 손기입 (ADR-0179 D10): \\d+ms 와 duration-[0-9]+ 는 motion.css·motion.ts 에만. 온보딩 키프레임 블록은 ADR-0159 예외" ;;
     motion_lib_scope) echo "motion family import 허용 범위 (ADR-0179 D8): QuickSwitcher.tsx · ThreadPanel.tsx · Sidebar.tsx 세 파일만. from/side-effect import/import()/require() · motion · motion/… · motion-dom · motion-utils · framer-motion · framer-motion/…. 네 번째 파일은 hard-zero" ;;
     *)             echo "$1" ;;
@@ -414,6 +416,9 @@ scan_category() {
       ;;
     latin_particle)
       sed -n 's/^latin_particle|//p' "$STRINGS_AST_OUT" | filter_common
+      ;;
+    legacy_term)
+      sed -n 's/^legacy_term|//p' "$STRINGS_AST_OUT" | filter_common
       ;;
     raw_color)
       grep -rnE "$COLOR_RE" \
@@ -791,7 +796,7 @@ fi
 echo "== design pre-flight (web), SKILL momo-design-taste-web §10 =="
 echo "   scanned: $SRC, $HTML"
 echo "   excluded: src/design/tokens.css, src/design/tokens.contrast.test.ts, src/design/themes/ (pre-validated bindings only)"
-echo "   emdash·progress_word·latin_particle: AST (문자열 리터럴·JSX 텍스트만, *.test.ts(x)·*.d.ts 제외) — #1141·#1511"
+echo "   emdash·progress_word·latin_particle·legacy_term: AST (문자열 리터럴·JSX 텍스트만, *.test.ts(x)·*.d.ts 제외) — #1141·#1511"
 echo ""
 
 overall=0
@@ -832,7 +837,7 @@ if [ "$overall" -ne 0 ]; then
   exit 1
 fi
 
-echo "RESULT: PASS, web 14/14 + core 5/5 categories clean."
+echo "RESULT: PASS, web 14/14 + core 6/6 categories clean."
 echo "  Still manual (SKILL §10 checklist): light AND dark reviewed, four states"
 echo "  present, keyboard path exists, long Korean strings do not overflow."
 exit 0

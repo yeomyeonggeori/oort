@@ -21,11 +21,11 @@ import { useLocalHarnessWatch } from "../useLocalHarnessWatch";
 import { HarnessLoginDialog } from "./HarnessLoginDialog";
 import { useRegisterContext } from "./useRegisterContext";
 
-// Reading this as: agent hub / settings entry (내 구독 에이전트 붙이기) for internal
+// Reading this as: agent hub / settings entry (내 구독으로 에이전트 만들기) for internal
 // team users on Tauri desktop, density 5/10, motion 1/10.
 
 /**
- * 「내 구독 에이전트 붙이기」의 첫 창(#3389). 이 맥의 Claude Code·Codex를 줄로 보여
+ * 「내 구독으로 에이전트 만들기」의 첫 창(#3389). 이 맥의 Claude Code·Codex를 줄로 보여
  * 주고, 줄의 행동이 곧 로그인 → 에이전트로 만들기 모달이다. 예전처럼 온보딩 화면을
  * 다시 열지 않는다.
  */

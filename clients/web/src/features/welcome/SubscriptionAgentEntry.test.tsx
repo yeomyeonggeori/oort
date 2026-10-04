@@ -14,7 +14,7 @@ import { AiLinkSection } from "@/features/settings/AiLinkSection";
 import { AiMyAccountsSection } from "@/features/settings/AiMyAccountsSection";
 import { SubscriptionAgentEntryButton } from "./SubscriptionAgentEntry";
 
-// #2870: 설정 › AI 연결과 에이전트 화면의 구독 줄 입구.
+// #2870: AI과 에이전트 화면의 구독 줄 입구.
 // #2877: 설정 쪽 입구는 「내 계정 · 이 맥」 절의 빈 줄 행동([구독 추가])이 되었다.
 
 const envSlot = vi.hoisted(() => ({ tauri: true, flag: true }));
@@ -156,8 +156,8 @@ afterEach(() => {
   host = null;
 });
 
-describe("설정 › AI 연결 입구 (#2870)", () => {
-  it("owner + 데스크탑 + 서버 켬: 버튼이 온보딩 화면이 아니라 구독 에이전트 창을 연다 (#3389)", async () => {
+describe("AI 입구 (#2870)", () => {
+  it("owner + 데스크탑 + 서버 켬: 버튼이 온보딩 화면이 아니라 구독으로 쓰는 에이전트 창을 연다 (#3389)", async () => {
     mount(createElement(AiMyAccountsSection));
     await rtlWaitFor(() => {
       if (!q("subscription-entry-open")) throw new Error("entry");
@@ -293,7 +293,7 @@ describe("설정 › AI 연결 입구 (#2870)", () => {
 });
 
 describe("에이전트 화면 입구 (#2870)", () => {
-  it("구독 줄이 설 때만 머리 버튼이 서고, 누르면 온보딩이 아니라 구독 에이전트 창이 선다 (#3389)", async () => {
+  it("구독 줄이 설 때만 머리 버튼이 서고, 누르면 온보딩이 아니라 구독으로 쓰는 에이전트 창이 선다 (#3389)", async () => {
     mount(createElement(SubscriptionAgentEntryButton, { from: "agents" }));
     await rtlWaitFor(() => {
       if (!q("agent-hub-subscription-entry")) throw new Error("entry");

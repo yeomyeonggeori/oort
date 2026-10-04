@@ -53,7 +53,9 @@ import {
   EMDASH_CATEGORY,
   LATIN_PARTICLE_CATEGORY,
   PROGRESS_WORD_CATEGORY,
+  loadLegacyTerms,
   loadTypeScript,
+  makeLegacyTermCategory,
   runCases,
   scanSource,
   shipsStrings,
@@ -67,8 +69,6 @@ const WEB_SRC = join(REPO_ROOT, "clients/web/src");
 // emdash 하나로 시작한 파일이지만(#1141), 낱말꼴 게이트(#1511)가 같은 판정
 // (렌더 문자열만, 주석·테스트 이름 제외)을 필요로 해서 분류가 셋이 됐다.
 // 쉘(design_preflight_web.sh)은 --emit 의 `key|` 접두로 셋을 가른다.
-const CATEGORIES = [EMDASH_CATEGORY, PROGRESS_WORD_CATEGORY, LATIN_PARTICLE_CATEGORY];
-
 const ts = loadTypeScript(REPO_ROOT, [
   join(REPO_ROOT, "clients/web/node_modules/typescript"),
 ]);
@@ -79,6 +79,10 @@ if (!ts) {
   );
   process.exit(2);
 }
+
+// 옛 용어(legacy_term, #3445)는 core LEGACY_TERM_MAP 에서 읽는다 — 목록을 베끼지 않는다.
+const LEGACY_TERM_CATEGORY = makeLegacyTermCategory(loadLegacyTerms(ts, REPO_ROOT));
+const CATEGORIES = [EMDASH_CATEGORY, PROGRESS_WORD_CATEGORY, LATIN_PARTICLE_CATEGORY, LEGACY_TERM_CATEGORY];
 
 function scanWeb() {
   if (!existsSync(WEB_SRC)) {
@@ -102,6 +106,73 @@ function scanWeb() {
 // 틀렸을 자리에는 그렇게 적어 두었고, 그 표가 곧 이관의 근거다. 12건 부채의 세
 // 모양(테스트 이름 · JSX 주석 · 진짜 문자열)이 전부 여기 있다.
 const SELFTEST_CASES = [
+  // ---- legacy_term (#3445) ----
+  {
+    want: ["emdash"],
+    file: "features/ai/Comp.tsx",
+    why: "바깥 선언의 마커는 legacy_term 외 분류를 덮지 않는다(#3445): 컴포넌트 머리 마커 하나가 본문 em-dash 를 지우면 안 된다",
+    src:
+      "// design-preflight-allow: 컴포넌트 전체\n" +
+      'export const Comp = () => {\n  const x = { note: "다시 연결되면 — 여기서" };\n  return <p>{x.note}</p>;\n};',
+  },
+  {
+    want: [],
+    file: "features/ai/Table.ts",
+    why: "legacy_term 은 바깥 선언 마커를 본다(옛 말을 정의하는 표)",
+    src:
+      "// design-preflight-allow: 옛 말 표\n" +
+      'export const TABLE = { rows: [{ old: "합류" }] };',
+  },
+  {
+    want: ["legacy_term"],
+    file: "features/settings/Hint.ts",
+    why: "렌더 문자열의 「설정 › AI 연결」 — 옛 위치 이름",
+    src: 'export const HINT = "나중에 설정 › AI 연결에서 이어가요.";',
+  },
+  {
+    want: ["legacy_term"],
+    file: "features/settings/Hint.tsx",
+    why: "JSX 텍스트의 「오너」",
+    src: "export const L = () => <p>오너에게 문의하세요.</p>;",
+  },
+  {
+    want: ["legacy_term"],
+    file: "features/settings/Hint.ts",
+    why: "한글 문장 속 owner_only 는 화면 문구(기계 값이 아니다)",
+    src: 'export const HINT = "이 에이전트는 owner_only 라서 못 불러요.";',
+  },
+  {
+    want: [],
+    file: "features/work/stream.ts",
+    why: "맨 기계 값 owner_only 는 와이어 코드라 바꾸지 않는다",
+    src: 'export const SCOPE = "owner_only";',
+  },
+  {
+    want: [],
+    file: "features/settings/Hint.test.ts",
+    why: "테스트 파일은 인용만 한다",
+    src: 'export const HINT = "설정 › AI 연결에서 이어가요.";',
+  },
+  {
+    want: [],
+    file: "features/settings/Hint.ts",
+    why: "주석 속 옛 말은 렌더되지 않는다",
+    src: '// 옛 이름: 설정 › AI 연결\nexport const HINT = "AI에서 이어가요.";',
+  },
+  {
+    want: [],
+    file: "features/ai/Table.ts",
+    why: "옛 말을 정의하는 표는 선언 머리 주석의 마커로 허용한다(바깥 선언 포함)",
+    src:
+      '// design-preflight-allow: 옛 말을 정의하는 표\n' +
+      'export const TABLE = [{ old: "합류", next: "만들기" }];',
+  },
+  {
+    want: ["legacy_term"],
+    file: "features/ai/Table.ts",
+    why: "마커 없는 같은 표는 RED",
+    src: 'export const TABLE = [{ old: "합류", next: "만들기" }];',
+  },
   {
     want: ["emdash"],
     file: "features/chat/copy.ts",

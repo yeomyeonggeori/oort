@@ -1,0 +1,17 @@
+appId: app.momo.ios
+name: 97-composer-agent-notice-capture
+---
+# 97-composer-agent-notice-capture — 입력창 위 한 줄 (AIH-9b, #3440).
+#
+# 표면 `-momoMeasure COMPOSER-AGENT-NOTICE` 는 초안을 심은 입력창 둘(남의 구독을 부르는 글 ·
+# 문의 중인 내 에이전트를 부르는 글)을 세운다. 한 줄은 캐럿이 아니라 **글**을 읽으므로 칠 것이 없다.
+#
+#   xcrun simctl launch booted app.momo.ios --args \
+#     -momoMeasure COMPOSER-AGENT-NOTICE -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro test clients/mobile/maestro/97-composer-agent-notice-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: "composer-agent-notice"
+    timeout: 60000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- takeScreenshot: composer-agent-notice

@@ -101,11 +101,11 @@ describe("키 표의 보조 계산", () => {
   it("쓰는 곳: 맨 위 키는 고르지 않은 기능을 모두 받고, 채널 요약은 고른 자리에서만 돈다", () => {
     expect(teamKeyFeatureUses(0, { teamAgent: null, summary: null })).toEqual([
       "말로 앱 설정 바꾸기",
-      "팀 에이전트 대답",
+      "팀 에이전트의 답",
       "첫 인사",
     ]);
     expect(teamKeyFeatureUses(1, { teamAgent: null, summary: null })).toEqual([]);
-    expect(teamKeyFeatureUses(1, { teamAgent: 1, summary: 1 })).toEqual(["팀 에이전트 대답", "첫 인사", "채널 요약"]);
+    expect(teamKeyFeatureUses(1, { teamAgent: 1, summary: 1 })).toEqual(["팀 에이전트의 답", "첫 인사", "채널 요약"]);
     // 줄을 다른 자리로 옮기면 맨 위 키는 그 기능을 잃는다.
     expect(teamKeyFeatureUses(0, { teamAgent: 1, summary: 1 })).toEqual(["말로 앱 설정 바꾸기"]);
     expect(teamKeyFeatureUses(0, { teamAgent: 0, summary: 0 })).toContain("채널 요약");

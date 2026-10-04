@@ -224,7 +224,7 @@ describe("기억 초기화", () => {
     expect(resetWorkspaceMemory).not.toHaveBeenCalled();
   });
 
-  it("관리자와 오너에게는 버튼이 있다", async () => {
+  it("관리자와 소유자에게는 버튼이 있다", async () => {
     for (const role of ["admin", "owner"] as const) {
       unmount();
       const { host } = await render(role);

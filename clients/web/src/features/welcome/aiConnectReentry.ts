@@ -3,7 +3,7 @@
 //
 // 온보딩의 AI 연결 화면(FirstAgentStage)은 first-run 표지가 있을 때만 섰다.
 // 표지가 done·skipped 이거나 연결이 하나라도 있으면(자동 통과) 다시 설 길이
-// 없었다. 그래서 「나중에 설정 › AI 연결에서 이어갈 수 있습니다」가 가리키는 곳에
+// 없었다. 그래서 「나중에 AI에서 이어갈 수 있습니다」가 가리키는 곳에
 // 구독 줄이 없었다.
 //
 // 재진입은 같은 화면을 `#/ai-connect?from=<출발지>`로 다시 세운다. App이 이
@@ -21,7 +21,7 @@ const RETURN_HASH: Record<AiConnectReentryFrom, string> = {
   settings: "#/settings?section=ai",
 };
 
-/** API 키 줄이 넘기는 곳(설정 › AI 연결). */
+/** API 키 줄이 넘기는 곳(AI). */
 export const AI_CONNECT_SETTINGS_HASH = RETURN_HASH.settings;
 
 export function aiConnectReentryHash(from: AiConnectReentryFrom): string {

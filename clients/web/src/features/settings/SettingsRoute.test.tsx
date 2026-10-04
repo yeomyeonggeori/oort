@@ -261,14 +261,14 @@ describe("SettingsRoute 전면 레이아웃", () => {
     expect(members.querySelector('[data-testid="section-members"]')).not.toBeNull();
   });
 
-  it("AI 연결 구획 위에는 「AI 허브로 옮겼어요」 링크가 서고, 그 밖의 구획에는 없다 (AIH-3)", () => {
+  it("AI 연결 구획 위에는 「AI 화면으로 옮겼어요」 링크가 서고, 그 밖의 구획에는 없다 (AIH-3)", () => {
     const host = mountRoute("/settings?section=profile");
     expect(host.querySelector('[data-testid="ai-hub-moved-link"]')).toBeNull();
     act(() => {
       (host.querySelector('[data-testid="settings-nav-ai"]') as HTMLButtonElement).click();
     });
     const line = host.querySelector('[data-testid="ai-hub-moved-link"]');
-    expect(line?.textContent).toContain("AI 허브로 옮겼어요");
+    expect(line?.textContent).toContain("AI 화면으로 옮겼어요");
     expect(line?.querySelector("a")?.getAttribute("href")).toContain("/ai/accounts");
     act(() => {
       (host.querySelector('[data-testid="settings-nav-account"]') as HTMLButtonElement).click();
