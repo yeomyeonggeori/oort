@@ -5691,6 +5691,11 @@ paths:
         serving (`stream: true`), which is what makes a revoke reach a socket
         that is already open. This endpoint returns binding metadata only:
         terminal bytes never traverse MomoServer, OutboxRelay, or Centrifugo.
+        While MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED is off, a controller
+        bearer for a Claude Code session on a workspace or cloud host answers
+        the ordinary 401 (#3460, ADR-0193 D18); observer bearers are untouched.
+        The cut lands on the host's next `stream: true` re-validation; this
+        repository does not define the PTY daemon's re-validation period.
       security:
         - workHostAuth: []
       parameters:
@@ -7132,6 +7137,11 @@ paths:
         the producer must close the channel. For an observer grant it is always
         false, and view-only remains the ABSENCE of a channel rather than a flag
         beside one (ADR-0165 D4).
+        While MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED is off, input_enabled is
+        false for a controller bearer on a Claude Code session of a workspace
+        or cloud host (#3460, ADR-0193 D18); the control window itself stays
+        open. The display producer re-validates every 30 seconds by default
+        (MOMO_DISPLAY_REVALIDATE_SECONDS).
         A controller re-validation also RENEWS the control window's lease. That
         is deliberate and is why the window is not keyed to the capability's
         60-second expiry: a live WebRTC session outlives its dial window by

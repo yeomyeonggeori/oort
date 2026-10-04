@@ -259,7 +259,7 @@ fn reject_unsupported_create(request: &CreateWorkSessionRequest) -> Result<(), A
 
 /// #3431 (ADR-0193 D18): the one refusal every work-session entry answers when
 /// Claude Code is asked for on a shared host while the Claude opt-in is off.
-fn claude_shared_host_paused() -> ApiError {
+pub(crate) fn claude_shared_host_paused() -> ApiError {
     ApiError::coded(
         StatusCode::CONFLICT,
         momo_t3::work_control::REFUSAL_CLAUDE_SUBSCRIPTION_PAUSED,
