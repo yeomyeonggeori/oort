@@ -51,7 +51,29 @@ pub const ENV_KEY_DIR: &str = "OORT_BOX_KEY_DIR";
 pub const ENV_SEAL_KEY_FILE: &str = "OORT_BOX_SEAL_KEY_FILE";
 pub const ENV_BACKUP_ATTESTATION: &str = "OORT_BOX_BACKUP_ATTESTATION";
 /// Set by the box image. While it is set `--dev-key-file` is refused.
+/// **Advisory only**: an environment variable is stripped from the person's
+/// PTY (the box-agent's allowlist drops `OORT_*`) and can be emptied by anyone,
+/// so nothing that must hold in a box may rest on it alone. The authority is
+/// [`BOX_MARKER_FILE`].
 pub const ENV_BOX_MARKER: &str = "OORT_BOX";
+
+/// The image's marker file (ADR-0197 D6/D8): a root-owned regular file the
+/// person's uid cannot create, change or remove. `momo-workd` checks it at
+/// startup, so a workd started from the person's own shell is still in the box
+/// profile (no Claude ACP adapter, no dev key file).
+pub const BOX_MARKER_FILE: &str = "/etc/oort-box";
+
+/// `path` is a marker only if it is a regular file (not a link) owned by
+/// `trusted_uid` that neither group nor others can write.
+pub fn marker_file_present(path: &Path, trusted_uid: u32) -> bool {
+    std::fs::symlink_metadata(path)
+        .is_ok_and(|m| m.file_type().is_file() && m.uid() == trusted_uid && m.mode() & 0o022 == 0)
+}
+
+/// Whether this process runs inside an oort box: the root-owned marker file.
+pub fn in_box() -> bool {
+    marker_file_present(Path::new(BOX_MARKER_FILE), 0)
+}
 
 /// What the runner attests about backups of the box volume.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

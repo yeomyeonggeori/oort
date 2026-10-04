@@ -3,7 +3,7 @@
 # S3 box verification (ADR-0197 S3 items 1,3,4; #3410). Runs without any real login:
 # a fake credential marker stands in for tokens. Exit 0 = all checks pass.
 #   verify-s3.sh                        GREEN run (builds the image if missing)
-#   verify-s3.sh --sabotage <mode>      must exit non-zero: image | log | runner | writable-root | cap-add | root | no-new-privs | unconfined | swap | leakscan-blind | path | acp-adapter
+#   verify-s3.sh --sabotage <mode>      must exit non-zero: image | log | runner | writable-root | cap-add | root | no-new-privs | unconfined | swap | leakscan-blind | path | acp-adapter | marker
 #   verify-s3.sh --self-test            GREEN, then every sabotage mode must go RED
 # Names: everything is momo-s3-verify-* ; cleaned up on exit (image momo-s3-box:local is kept unless --rm-image).
 set -uo pipefail
@@ -17,7 +17,7 @@ case "${1:-}" in
     shift
     rc=0
     "$SELF" || rc=1
-    for m in image log runner writable-root cap-add root no-new-privs unconfined swap leakscan-blind path acp-adapter; do
+    for m in image log runner writable-root cap-add root no-new-privs unconfined swap leakscan-blind path acp-adapter marker; do
       if "$SELF" --sabotage "$m" >/dev/null 2>&1; then echo "SELF-TEST FAIL: sabotage '$m' stayed GREEN"; rc=1
       else echo "SELF-TEST ok: sabotage '$m' is RED"; fi
     done
@@ -81,6 +81,13 @@ fi
 if [[ "$SABOTAGE" == "path" ]]; then
   # #3496 regression: no profile.d snippet, so a login shell drops /opt/tools/node_modules/.bin again.
   printf 'FROM %s\nUSER root\nRUN rm -f /etc/profile.d/zz-momo-path.sh\nUSER 10001:10001\n' "$BASE_IMAGE" \
+    | docker build -q -t momo-s3-verify-sab:local - >/dev/null
+  IMAGE="momo-s3-verify-sab:local"; export MOMO_S3_IMAGE="$IMAGE"
+fi
+
+if [[ "$SABOTAGE" == "marker" ]]; then
+  # H1: without the marker file workd cannot tell it is in a box.
+  printf 'FROM %s\nUSER root\nRUN rm -f /etc/oort-box\nUSER 10001:10001\n' "$BASE_IMAGE" \
     | docker build -q -t momo-s3-verify-sab:local - >/dev/null
   IMAGE="momo-s3-verify-sab:local"; export MOMO_S3_IMAGE="$IMAGE"
 fi
@@ -166,6 +173,7 @@ check "no secret-like env names in container" bash -c '! docker inspect "$0" --f
 INSIDE() { docker exec "$A" sh -c "$1"; }
 check "inside: umask 077 in login shell" test "$(docker exec "$A" bash -lc umask)" = 0077
 check "inside: /opt/tools/node_modules/.bin is last in PATH" bash -c 'docker exec "$0" sh -c "echo \$PATH" | grep -q "/opt/tools/node_modules/.bin$"' "$A"
+check "inside: box marker /etc/oort-box is a root-owned 0644 regular file (workd's box profile, H1)" test "$(INSIDE 'stat -c "%u %a %F" /etc/oort-box')" = "0 644 regular file"
 check "inside: uid != 0" test "$(INSIDE 'id -u')" != 0
 check "inside: CapEff all zero" bash -c 'docker exec "$0" sh -c "grep ^CapEff /proc/self/status" | grep -q "0000000000000000"' "$A"
 check "inside: NoNewPrivs=1" bash -c 'docker exec "$0" sh -c "grep ^NoNewPrivs /proc/self/status" | grep -q "1$"' "$A"

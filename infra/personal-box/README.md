@@ -86,10 +86,12 @@ exit
 | 환경 허용목록 | `env.rs`(상속 없이 허용목록으로 구성, 금지 조각 목록과 교차 시험) + 컨테이너 안 실제 PTY 자식의 환경 검사 |
 | 별도 uid, 사용자 uid에서 host 키 읽기·ptrace 거부 | `verify-m3.sh`: 에이전트 uid 10002(SETUID/SETGID만), 사람 uid 10001의 probe가 키 읽기·덮어쓰기·이름 바꾸기·삭제, `/proc/<pid>/{environ,mem,maps,fd}`, `PTRACE_ATTACH`를 모두 거부당함 |
 
-### 컨테이너 프로필 (S3와 다른 두 가지)
-컨테이너가 root로 시작하되 **`SETUID`·`SETGID`만** 가져요(`--cap-drop ALL --cap-add SETUID --cap-add SETGID`, `no-new-privileges`, 읽기 전용 루트는 그대로). `momo-m3-entry`(M2 러너가 할 일의 대역)가 `setpriv`로 에이전트를 uid 10002에서 그 두 capability를 ambient로 가진 채 띄워요. 에이전트는 사람의 PTY를 열 때 `setgroups([])` → `setresgid` → `setresuid(10001)` → ambient 비움 → `capset`으로 비움 → `no_new_privs` 순서로 떨어져요. 자식의 `CapInh/Prm/Eff/Amb`는 전부 0이에요. root는 에이전트도 사용자 코드도 돌리지 않아요. 에이전트는 평생 SETUID/SETGID를 쥐어요(에이전트가 뚫리면 이미 host 키가 뚫린 것이라 T5와 같은 선이에요).
+### 컨테이너 프로필 (S3와 다른 두 가지)와 spawn helper
+컨테이너가 root로 시작하되 **`SETUID`·`SETGID`만** 가져요(`--cap-drop ALL --cap-add SETUID --cap-add SETGID`, `no-new-privileges`, 읽기 전용 루트는 그대로). `momo-m3-entry`(M2 러너가 할 일의 대역)가 `setpriv`로 에이전트를 uid 10002에서 그 두 capability를 ambient로 가진 채 띄워요. root는 에이전트도 사용자 코드도 돌리지 않아요.
 
-에이전트 프로세스는 `PR_SET_DUMPABLE=0`, `RLIMIT_CORE=0`, `no_new_privs`예요. 그래서 `/proc/<pid>/*`가 root 소유가 되어 같은 uid여도 `environ`·`mem`을 못 읽고 ptrace도 못 붙어요. 사람 uid의 `PTRACE_ATTACH`는 uid가 달라 `EPERM`이고, 같은 probe가 **자기 자식은 ptrace할 수 있다**는 양성 대조를 같이 내요.
+에이전트는 시작하자마자 **spawn helper**(`momo-box-agent spawn-helper`, uid 10003)를 띄우고 **자기 capability를 전부 버려요**(`CapPrm/Eff/Inh/Amb`=0, 검증까지 해요). 사람 uid로 내려가는 능력은 helper만 쥐어요(리뷰 M1). helper는 host 키를 못 읽는 세 번째 uid이고, 빈 환경과 시작 때 고정된 셸·환경 인자만 받으며, 요청은 터미널 크기 4바이트뿐이에요. 요청마다 `setgroups([])` → `setresgid` → `setresuid(10001)` → 모든 capability 비움 → `no_new_privs` 순서로 셸을 띄우고 PTY master를 `SCM_RIGHTS`로 에이전트에 넘겨요. 에이전트가 뚫려도 사람 uid로 `setuid`할 수 없어서 `/cred`를 읽지 못해요(`agent_can_setuid_after_drop=false`). 셸이 뚫려도 부모(helper)와 에이전트에게 신호를 보낼 수 없어요(EPERM).
+
+에이전트 프로세스는 `PR_SET_DUMPABLE=0`, `RLIMIT_CORE=0`, `no_new_privs`예요. 그래서 `/proc/<pid>/*`가 root 소유가 되어 같은 uid여도 `environ`·`mem`을 못 읽고 ptrace도 못 붙어요. 사람 uid의 `PTRACE_ATTACH`는 uid가 달라 `EPERM`이고, 같은 probe가 **자기 자식은 ptrace할 수 있다**는 양성 대조를 같이 내요. 이미지의 `/etc/oort-box`(root 소유 0644)는 `momo-workd`의 박스 프로필 표식이에요. 환경 변수는 사람의 PTY에서 걸러지거나 비워질 수 있어서 권위가 아니에요(리뷰 H1).
 
 `verify-m3.sh`는 호스트에서 Rust를 `rust:1-bookworm` 컨테이너(glibc 2.36, 박스 이미지와 같음)에서 빌드해요. 빌드 결과(target·registry)는 tmpfs에만 두고 디스크 볼륨을 남기지 않아요. 키 디렉터리는 `nosuid,nodev` tmpfs, 봉인 키는 별도 tmpfs로 대역을 세워요(영속 게이트의 「다른 장치」). 실제 볼륨·런너 증명은 M2예요.
 ```

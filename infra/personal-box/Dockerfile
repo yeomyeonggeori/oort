@@ -55,6 +55,11 @@ RUN printf '%s\n' \
   'export PATH' > /etc/profile.d/zz-momo-path.sh \
  && chmod 0644 /etc/profile.d/zz-momo-path.sh
 
+# H1 (#3503 review): the box marker. momo-workd keys its box profile (no Claude ACP adapter, no dev key
+# file) on this root-owned file, not on an environment variable the person's PTY strips or can empty.
+# Root-owned, 0644, in a read-only root: the person's uid can neither create nor change it.
+RUN printf 'oort-box\n' > /etc/oort-box && chmod 0644 /etc/oort-box && chown root:root /etc/oort-box
+
 # Credential homes are redirected into /cred (tmpfs or an opt-in volume) so nothing lands in HOME or the image.
 ENV OORT_BOX=1 \
     HOME=/home/box \

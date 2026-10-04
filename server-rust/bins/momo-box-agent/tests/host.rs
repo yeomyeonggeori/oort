@@ -52,15 +52,14 @@ fn rig() -> Rig {
 }
 
 fn template(script: &str, parent_env: Vec<(OsString, OsString)>) -> SpawnTemplate {
-    SpawnTemplate {
-        profile: UserProfile {
+    SpawnTemplate::same_uid_for_tests(
+        UserProfile {
             cwd: std::env::temp_dir().display().to_string(),
             ..UserProfile::box_default()
         },
         parent_env,
-        drop_to: None,
-        program: Some(("/bin/sh".into(), vec!["-c".into(), script.into()])),
-    }
+        Some(("/bin/sh".into(), vec!["-c".into(), script.into()])),
+    )
 }
 
 fn host_with(rig: &Rig, script: &str, parent_env: Vec<(OsString, OsString)>) -> BoxHost {
@@ -573,4 +572,99 @@ fn the_runner_mount_reader_refuses_a_credential_path() {
             Ok(_) => panic!("{path}: a credential path was read"),
         }
     }
+}
+
+// ---------------------------------------------------------------- M2 / L3 / L4
+
+#[test]
+fn a_shell_that_never_reads_cannot_stall_the_agent() {
+    let rig = rig();
+    let mut relay = BlindRelay::default();
+    // Never reads its terminal, in raw mode (canonical mode would discard the
+    // excess instead of blocking): the line discipline buffer (a few KB) fills.
+    let mut host = active_host(&rig, "stty raw -echo; sleep 20", vec![]);
+    let (mut device, mut attachment) = attach(&rig, &mut host, &mut relay).unwrap();
+    open_terminal(&mut device, &mut attachment, &mut relay, 80, 24);
+    let started = std::time::Instant::now();
+    let chunk = vec![b'x'; 8 * 1024]; // > 4 KB per paste, many pastes
+    let mut failure = None;
+    for _ in 0..64 {
+        match send(
+            &mut device,
+            &mut attachment,
+            &mut relay,
+            FrameKind::Data,
+            &chunk,
+        ) {
+            Ok(_) => {}
+            Err(e) => {
+                failure = Some(e);
+                break;
+            }
+        }
+    }
+    match failure {
+        Some(HostError::Pty(e)) => assert_eq!(e.kind(), std::io::ErrorKind::TimedOut, "{e}"),
+        // macOS's tty layer discards what a canonical-mode reader never takes
+        // instead of blocking the writer; the stall is a Linux behaviour.
+        None if cfg!(target_os = "macos") => {}
+        other => panic!("a paste into a stalled terminal must time out, got {other:?}"),
+    }
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "bounded wait, not a hang: {:?}",
+        started.elapsed()
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn on_linux_a_shell_at_the_agents_own_uid_is_refused_unless_a_test_says_so() {
+    use momo_box_agent::pty::{Pty, SpawnSpec};
+    let spec = |allow_same_uid| SpawnSpec {
+        program: "/bin/sh".into(),
+        args: vec!["-c".into(), "true".into()],
+        env: vec![],
+        cwd: std::env::temp_dir(),
+        size: WinSize { cols: 80, rows: 24 },
+        drop_to: None,
+        allow_same_uid,
+    };
+    match Pty::spawn(&spec(false)) {
+        Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied),
+        Ok(_) => panic!("a same-uid shell must be refused on Linux"),
+    }
+    assert!(Pty::spawn(&spec(true)).is_ok());
+}
+
+#[test]
+fn dropping_a_pty_whose_shell_ignores_the_hangup_neither_hangs_nor_leaves_a_zombie() {
+    use momo_box_agent::pty::{Pty, SpawnSpec};
+    let pty = Pty::spawn(&SpawnSpec {
+        program: "/bin/sh".into(),
+        args: vec!["-c".into(), "trap '' HUP TERM; sleep 30".into()],
+        env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+        cwd: std::env::temp_dir(),
+        size: WinSize { cols: 80, rows: 24 },
+        drop_to: None,
+        allow_same_uid: true,
+    })
+    .unwrap();
+    let pid = pty.child_id() as i32;
+    let started = std::time::Instant::now();
+    drop(pty);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(2),
+        "drop must not block"
+    );
+    // A reaped process is gone (ESRCH); an unreaped zombie would still answer kill(pid, 0).
+    let gone = (0..200).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        // SAFETY: signal 0 only checks existence.
+        unsafe {
+            libc::kill(pid, 0) == -1
+                && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+        }
+    });
+    assert!(gone, "the shell was killed and reaped");
 }

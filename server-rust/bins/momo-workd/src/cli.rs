@@ -224,7 +224,8 @@ pub(crate) fn dev_key_file_allowed(get: &dyn Fn(&str) -> Option<String>) -> Resu
     // A guard against mistakes (the same uid can unset a variable); the real
     // wall is the separate box-agent uid (ADR-0197 D1).
     let set = |name: &str| get(name).is_some_and(|v| !v.is_empty());
-    if set(crate::keystore::box_store::ENV_BOX_MARKER)
+    if crate::keystore::box_store::in_box()
+        || set(crate::keystore::box_store::ENV_BOX_MARKER)
         || set(crate::keystore::box_store::ENV_KEY_DIR)
     {
         return Err(CliError::Usage(

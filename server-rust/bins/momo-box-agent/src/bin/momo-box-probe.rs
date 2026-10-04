@@ -9,8 +9,11 @@
 //!
 //! ```text
 //! momo-box-probe report --key-file F --agent-pid N [--read PATH]...
-//! momo-box-probe spawn-report <same args>     (as the AGENT uid, with the
-//!                                              setuid/setgid ambient caps)
+//! momo-box-probe spawn-report --agent-exe P <same args>
+//!                                             (as the AGENT uid, with the
+//!                                              setuid/setgid ambient caps: starts
+//!                                              the spawn helper like the agent does,
+//!                                              drops its own caps, asks for a PTY)
 //! momo-box-probe make-seal-key PATH           (runner stand-in, creates the seal key)
 //! ```
 //!
@@ -172,7 +175,82 @@ fn report(args: &[String]) {
         }
         i += 1;
     }
+    // Descriptors this process holds (none but 0,1,2 may leak from the agent or
+    // the helper into the person's shell).
+    if let Ok(dir) = std::fs::read_dir("/proc/self/fd") {
+        let mut fds: Vec<i32> = dir
+            .flatten()
+            .filter(|e| {
+                // the descriptor read_dir itself holds points at /proc/<pid>/fd
+                std::fs::read_link(e.path())
+                    .map(|t| !t.to_string_lossy().starts_with("/proc/"))
+                    .unwrap_or(false)
+            })
+            .filter_map(|e| e.file_name().to_string_lossy().parse().ok())
+            .collect();
+        fds.sort_unstable();
+        println!(
+            "open_fds={}",
+            fds.iter()
+                .map(|f| f.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+    }
+    // SAFETY: getppid cannot fail.
+    let ppid = unsafe { libc::getppid() };
+    println!("ppid_uid={}", proc_uid(ppid));
+    println!("kill_parent={}", kill_check(ppid));
+    if let Some(pid) = flag(args, "--agent-pid").and_then(|p| p.parse::<i32>().ok()) {
+        println!("kill_agent={}", kill_check(pid));
+        println!("agent_uid={}", proc_uid(pid));
+        if let Ok(raw) = std::fs::read(format!("/proc/{pid}/cmdline")) {
+            println!(
+                "agent_cmdline={}",
+                String::from_utf8_lossy(&raw)
+                    .trim_end_matches('\0')
+                    .replace('\0', " ")
+            );
+        }
+        if let Ok(status) = std::fs::read_to_string(format!("/proc/{pid}/status")) {
+            for line in status.lines() {
+                for key in ["CapPrm", "CapEff", "CapAmb"] {
+                    if let Some(rest) = line.strip_prefix(&format!("{key}:")) {
+                        println!("agent_{key}={}", rest.trim());
+                    }
+                }
+            }
+        }
+    }
     println!("report=done");
+}
+
+/// `kill(pid, 0)`: may this process signal that one? (EPERM = no.)
+#[cfg(unix)]
+fn kill_check(pid: i32) -> String {
+    // SAFETY: signal 0 only checks permission.
+    let rc = unsafe { libc::kill(pid, 0) };
+    if rc == 0 {
+        "OK".to_string()
+    } else {
+        outcome::<()>(Err(std::io::Error::last_os_error()))
+    }
+}
+
+/// The real uid of a process from its world-readable `/proc/<pid>/status`.
+#[cfg(unix)]
+fn proc_uid(pid: i32) -> String {
+    std::fs::read_to_string(format!("/proc/{pid}/status"))
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find_map(|l| {
+                    l.strip_prefix("Uid:")
+                        .map(|r| r.split_whitespace().next().map(str::to_string))
+                })
+                .flatten()
+        })
+        .unwrap_or_else(|| "?".to_string())
 }
 
 /// `OK` only if the attach really happened (and is undone); otherwise the errno.
@@ -213,36 +291,69 @@ fn ptrace_own_child() -> String {
     "UNSUPPORTED".to_string()
 }
 
-/// Start `report` as a PTY child through the library and relay its output.
+/// What the agent does at start, then asks for a `report` PTY: start the spawn
+/// helper while holding the capabilities, drop them, and request a terminal.
+/// The report is produced by the shell-side process the helper started, so the
+/// uid, groups, capabilities, descriptors and environment it prints are the
+/// PTY child's.
 #[cfg(unix)]
 fn spawn_report(args: &[String]) -> i32 {
     use momo_box_agent::env::{child_env, UserProfile};
-    use momo_box_agent::pty::{Ids, Pty, Read, SpawnSpec, WinSize};
+    use momo_box_agent::preflight::drop_capabilities;
+    use momo_box_agent::pty::{Ids, Read, WinSize};
+    use momo_box_agent::spawn_helper::{HelperClient, HelperSpec};
 
-    let mut profile = UserProfile::box_default();
-    if let Some(uid) = flag(args, "--user-uid").and_then(|v| v.parse().ok()) {
-        profile.uid = uid;
-    }
-    if let Some(gid) = flag(args, "--user-gid").and_then(|v| v.parse().ok()) {
-        profile.gid = gid;
-    }
-    let me = std::env::current_exe().expect("own path");
-    let mut argv = vec!["report".to_string()];
-    argv.extend(args.iter().cloned());
-    let spec = SpawnSpec {
-        program: me,
-        args: argv,
-        // The caller's environment is the *polluted* one on purpose; the
-        // child only gets what the allowlist admits.
-        env: child_env(&profile, None, std::env::vars_os()),
-        cwd: "/work".into(),
-        size: WinSize { cols: 80, rows: 24 },
-        drop_to: Some(Ids {
-            uid: profile.uid,
-            gid: profile.gid,
-        }),
+    let num = |name: &str, default: u32| {
+        flag(args, name)
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(default)
     };
-    let mut pty = match Pty::spawn(&spec) {
+    let mut profile = UserProfile::box_default();
+    profile.uid = num("--user-uid", profile.uid);
+    profile.gid = num("--user-gid", profile.gid);
+    let helper_ids = Ids {
+        uid: num("--helper-uid", 10003),
+        gid: num("--helper-gid", 10003),
+    };
+    let exe = flag(args, "--agent-exe").unwrap_or_else(|| "/usr/local/bin/momo-box-agent".into());
+    let me = std::env::current_exe().expect("own path");
+    let mut spec = HelperSpec::login_shell(
+        &profile,
+        // The caller's environment is the *polluted* one on purpose; the child
+        // only gets what the allowlist admits.
+        child_env(&profile, None, std::env::vars_os()),
+    );
+    spec.program = me;
+    spec.args = std::iter::once("report".to_string())
+        .chain(args.iter().cloned())
+        .collect();
+    spec.cwd = flag(args, "--cwd").unwrap_or_else(|| "/work".into()).into();
+    let helper = match HelperClient::start(std::path::Path::new(&exe), &spec, helper_ids) {
+        Ok(h) => h,
+        Err(e) => {
+            println!("helper_start={}", outcome::<()>(Err(e)));
+            return 1;
+        }
+    };
+    println!("helper_pid={}", helper.pid());
+    match drop_capabilities() {
+        Ok(()) => println!("agent_drop_capabilities=OK"),
+        Err(e) => println!("agent_drop_capabilities={}", outcome::<()>(Err(e))),
+    }
+    // SAFETY: plain getters/setters; after the drop, setuid to the person must fail.
+    let (cap_eff, can_setuid) = unsafe {
+        let eff = std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|s| {
+                s.lines()
+                    .find_map(|l| l.strip_prefix("CapEff:").map(|r| r.trim().to_string()))
+            })
+            .unwrap_or_default();
+        (eff, libc::setuid(profile.uid) == 0)
+    };
+    println!("agent_CapEff_after_drop={cap_eff}");
+    println!("agent_can_setuid_after_drop={can_setuid}");
+    let mut pty = match helper.spawn(WinSize { cols: 80, rows: 24 }) {
         Ok(pty) => pty,
         Err(e) => {
             println!("spawn={}", outcome::<()>(Err(e)));

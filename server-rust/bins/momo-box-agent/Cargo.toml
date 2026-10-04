@@ -45,3 +45,4 @@ uuid.workspace = true
 [dev-dependencies]
 # The tests play the owner's device (P-256) exactly as momo-blind-pty's harness does.
 p256.workspace = true
+libc.workspace = true

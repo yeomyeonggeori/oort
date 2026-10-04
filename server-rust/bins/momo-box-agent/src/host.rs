@@ -30,8 +30,9 @@ use serde_json::Value;
 
 use crate::env::{child_env, UserProfile};
 use crate::fsgate::{FsError, FsGate};
-use crate::pty::{Ids, Pty, Read, SpawnSpec, WinSize};
+use crate::pty::{Pty, Read, SpawnSpec, WinSize};
 use crate::register::{check_registered, RegisterError, Registered};
+use crate::spawn_helper::HelperClient;
 
 /// At most this many owner devices attached to one box at once (D5: 2). M4
 /// makes it configurable; the box never serves more.
@@ -108,44 +109,69 @@ impl RunnerLocalOwnerList {
 }
 
 /// How the person's shell is started.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SpawnTemplate {
-    pub profile: UserProfile,
-    /// A snapshot of the agent's environment. Only the allowlisted part of it
-    /// ever reaches a child.
-    pub parent_env: Vec<(OsString, OsString)>,
-    /// Drop to the person's uid before exec (the box); `None` in development.
-    pub drop_to: Option<Ids>,
-    /// Overrides the profile's shell (tests run `/bin/sh -c ...` this way).
-    pub program: Option<(PathBuf, Vec<String>)>,
+    mode: SpawnMode,
+}
+
+#[derive(Clone)]
+enum SpawnMode {
+    /// The box: the spawn helper (the only process with CAP_SETUID/SETGID)
+    /// starts the shell at the person's uid; this process holds no capability.
+    Helper(Arc<HelperClient>),
+    /// A shell at the caller's own uid. Development and tests only: on Linux
+    /// `Pty::spawn` refuses it unless `allow_same_uid` is set, and only
+    /// [`SpawnTemplate::same_uid_for_tests`] sets that.
+    SameUid {
+        profile: UserProfile,
+        parent_env: Vec<(OsString, OsString)>,
+        program: Option<(PathBuf, Vec<String>)>,
+    },
 }
 
 impl SpawnTemplate {
-    pub fn for_box(profile: UserProfile, parent_env: Vec<(OsString, OsString)>) -> Self {
-        let drop_to = cfg!(target_os = "linux").then_some(Ids {
-            uid: profile.uid,
-            gid: profile.gid,
-        });
+    pub fn for_box(helper: Arc<HelperClient>) -> Self {
         Self {
-            profile,
-            parent_env,
-            drop_to,
-            program: None,
+            mode: SpawnMode::Helper(helper),
         }
     }
 
-    fn spec(&self, size: WinSize) -> SpawnSpec {
-        let (program, args) = self
-            .program
-            .clone()
-            .unwrap_or_else(|| (PathBuf::from(&self.profile.shell), vec!["-l".to_string()]));
-        SpawnSpec {
-            program,
-            args,
-            env: child_env(&self.profile, None, self.parent_env.clone()),
-            cwd: PathBuf::from(&self.profile.cwd),
-            size,
-            drop_to: self.drop_to,
+    /// **Not for a box.** Starts the shell at this process's uid.
+    pub fn same_uid_for_tests(
+        profile: UserProfile,
+        parent_env: Vec<(OsString, OsString)>,
+        program: Option<(PathBuf, Vec<String>)>,
+    ) -> Self {
+        Self {
+            mode: SpawnMode::SameUid {
+                profile,
+                parent_env,
+                program,
+            },
+        }
+    }
+
+    fn open(&self, size: WinSize) -> std::io::Result<Pty> {
+        match &self.mode {
+            SpawnMode::Helper(helper) => helper.spawn(size),
+            SpawnMode::SameUid {
+                profile,
+                parent_env,
+                program,
+            } => {
+                let (program, args) = program
+                    .clone()
+                    .unwrap_or_else(|| (PathBuf::from(&profile.shell), vec!["-l".to_string()]));
+                Pty::spawn(&SpawnSpec {
+                    program,
+                    args,
+                    env: child_env(profile, None, parent_env.clone()),
+                    cwd: PathBuf::from(&profile.cwd),
+                    size,
+                    drop_to: None,
+                    allow_same_uid: true,
+                })
+            }
         }
     }
 }
@@ -339,7 +365,7 @@ impl Attachment {
                         Ok(Inbound::Resized)
                     }
                     None => {
-                        self.pty = Some(Pty::spawn(&self.template.spec(size))?);
+                        self.pty = Some(self.template.open(size)?);
                         Ok(Inbound::Opened)
                     }
                 }

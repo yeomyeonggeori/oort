@@ -5,7 +5,8 @@
 //! |---|---|
 //! | [`host`] | registration state, **inactive until the owner confirms**, attach, PTY |
 //! | [`register`] | the member-scope registration request and its answer checks |
-//! | [`pty`] | `openpty`, the child at the person's uid, no capabilities |
+//! | [`pty`] | the PTY, non-blocking writes, the child at the person's uid with no capabilities |
+//! | [`spawn_helper`] | the only process that holds `CAP_SETUID/SETGID`; starts the person's shell, never sees the host key |
 //! | [`env`] | the child's environment, built from an allowlist |
 //! | [`fsgate`] | the only door to the filesystem; credential paths are refused |
 //! | [`preflight`] | separate-uid check, non-dumpable process, no core files |
@@ -19,3 +20,4 @@ pub mod host;
 pub mod preflight;
 pub mod pty;
 pub mod register;
+pub mod spawn_helper;

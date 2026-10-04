@@ -3,7 +3,8 @@
 //! ```text
 //! momo-box-agent init-key   create the host key in this box if there is none,
 //!                           print its public half and fingerprint
-//! momo-box-agent run        preflight, load the host key, hold the box identity
+//! momo-box-agent run        start the spawn helper, drop every capability, load the
+//!                           host key, hold the box identity
 //! ```
 //!
 //! There is no `--dev-key-file`, no `--config` and no flag that names a key
@@ -21,10 +22,12 @@ mod linux {
     use std::sync::Arc;
 
     use momo_blind_pty::handshake::NonceStore;
-    use momo_box_agent::env::UserProfile;
+    use momo_box_agent::env::{child_env, UserProfile};
     use momo_box_agent::fsgate::FsGate;
     use momo_box_agent::host::{box_id_from_text, BoxHost, MonotonicClock, Phase, SpawnTemplate};
     use momo_box_agent::preflight;
+    use momo_box_agent::pty::Ids;
+    use momo_box_agent::spawn_helper::{HelperClient, HelperSpec};
     use momo_workd::cli::host_key_fingerprint;
     use momo_workd::keystore::box_store::{BoxKeyStore, ENV_BOX_ID};
     use momo_workd::keystore::HostKey;
@@ -35,13 +38,44 @@ mod linux {
         std::env::var(name).ok()
     }
 
-    /// Everything both commands need, in the order that matters: uid first, then
-    /// the process is made opaque, then (and only then) the key store opens.
-    fn open_store() -> Result<(BoxKeyStore, momo_box_agent::pty::Ids), String> {
+    fn own_ids() -> Ids {
+        // SAFETY: getters cannot fail.
+        Ids {
+            uid: unsafe { libc::geteuid() },
+            gid: unsafe { libc::getegid() },
+        }
+    }
+
+    /// The order matters: ids first, then (for `run`) the spawn helper is
+    /// started while this process still holds CAP_SETUID/SETGID, then every
+    /// capability is dropped, the process is made opaque, and only then does
+    /// the key store open.
+    fn open_store(
+        start_helper: bool,
+    ) -> Result<(BoxKeyStore, Ids, Option<Arc<HelperClient>>), String> {
         let user = preflight::user_ids(&getenv).map_err(|e| e.to_string())?;
-        // SAFETY: geteuid cannot fail.
-        let euid = unsafe { libc::geteuid() };
-        preflight::check_separation(euid, user.uid).map_err(|e| e.to_string())?;
+        let agent = own_ids();
+        preflight::check_separation(agent, user).map_err(|e| e.to_string())?;
+        let helper = if start_helper {
+            let helper_ids =
+                preflight::helper_ids(&getenv, agent, user).map_err(|e| e.to_string())?;
+            let profile = UserProfile {
+                uid: user.uid,
+                gid: user.gid,
+                ..UserProfile::box_default()
+            };
+            // The helper gets the allowlisted environment, never ours.
+            let env = child_env(&profile, None, std::env::vars_os());
+            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            let spec = HelperSpec::login_shell(&profile, env);
+            Some(Arc::new(
+                HelperClient::start(&exe, &spec, helper_ids)
+                    .map_err(|e| format!("cannot start the spawn helper: {e}"))?,
+            ))
+        } else {
+            None
+        };
+        preflight::drop_capabilities().map_err(|e| format!("cannot drop capabilities: {e}"))?;
         preflight::harden_process().map_err(|e| format!("hardening failed: {e}"))?;
         // Through the one filesystem door like everything else the agent reads.
         let gate = FsGate::for_box(&getenv, &UserProfile::box_default().home);
@@ -51,11 +85,11 @@ mod linux {
         )
         .map_err(|_| "the mount table is not UTF-8".to_string())?;
         let store = BoxKeyStore::from_env(&getenv, Some(&mountinfo)).map_err(|e| e.to_string())?;
-        Ok((store, user))
+        Ok((store, user, helper))
     }
 
     pub fn init_key() -> Result<(), String> {
-        let (store, _) = open_store()?;
+        let (store, _, _) = open_store(false)?;
         let key = match store.load().map_err(|e| e.to_string())? {
             Some(key) => key,
             None => {
@@ -74,7 +108,8 @@ mod linux {
     }
 
     pub fn run() -> Result<(), String> {
-        let (store, user) = open_store()?;
+        let (store, user, helper) = open_store(true)?;
+        let helper = helper.ok_or("no spawn helper")?;
         let key = store
             .load()
             .map_err(|e| e.to_string())?
@@ -101,25 +136,31 @@ mod linux {
             }
             Err(e) => return Err(e.to_string()),
         };
-        let template = SpawnTemplate::for_box(profile, std::env::vars_os().collect());
         let host = BoxHost::new(
             box_id,
             key.signing_key(),
             Arc::new(MonotonicClock::new()),
             nonces,
-            template,
+            SpawnTemplate::for_box(helper.clone()),
         );
         eprintln!(
-            "momo-box-agent: phase={} key={} (relay transport lands with M4; nothing is served)",
+            "momo-box-agent: phase={} key={} helper_pid={} (relay transport lands with M4; nothing is served)",
             match host.phase() {
                 Phase::Pending => "pending",
                 Phase::Active => "active",
             },
-            store.describe()
+            store.describe(),
+            helper.pid()
         );
         loop {
             std::thread::park();
         }
+    }
+
+    /// `momo-box-agent spawn-helper <spec json>`: the helper process.
+    pub fn spawn_helper(spec_json: &str) -> Result<(), String> {
+        let spec = HelperSpec::from_json(spec_json).ok_or("bad helper spec")?;
+        momo_box_agent::spawn_helper::serve(&spec).map_err(|e| e.to_string())
     }
 }
 
@@ -134,6 +175,8 @@ fn main() -> ExitCode {
         [c] if c == "init-key" => linux::init_key(),
         #[cfg(target_os = "linux")]
         [c] if c == "run" => linux::run(),
+        #[cfg(target_os = "linux")]
+        [c, spec] if c == momo_box_agent::spawn_helper::SUBCOMMAND => linux::spawn_helper(spec),
         #[cfg(not(target_os = "linux"))]
         [c] if c == "init-key" || c == "run" => {
             Err("momo-box-agent runs inside a Linux personal-cloud box only".to_string())

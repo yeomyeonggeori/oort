@@ -19,8 +19,11 @@ pub const HOST_TYPE: &str = "cloud";
 pub const SCOPE: &str = "member";
 
 /// A one-time pairing code, injected by the runner (D2). It is consumed by
-/// [`PairingCode::into_request_value`], never printed, never cloned, and
-/// overwritten when dropped.
+/// [`PairingCode::into_request_value`], never printed and never cloned. This
+/// type overwrites **its own copy** of the bytes (volatile writes, on drop and
+/// after conversion); it does not and cannot wipe the `String` it returns, the
+/// request JSON, or copies the allocator or the caller made. It limits how long
+/// one copy lives; it is not a guarantee of erasure.
 pub struct PairingCode(Vec<u8>);
 
 impl PairingCode {
@@ -31,8 +34,12 @@ impl PairingCode {
     }
 
     fn into_request_value(mut self) -> String {
-        // Consumed here: the bytes leave this object exactly once.
-        String::from_utf8_lossy(&std::mem::take(&mut self.0)).into_owned()
+        // Consumed here: the bytes leave this object exactly once, and the
+        // buffer they came from is overwritten before it is freed.
+        let mut bytes = std::mem::take(&mut self.0);
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        wipe(&mut bytes);
+        text
     }
 }
 
@@ -42,12 +49,16 @@ impl fmt::Debug for PairingCode {
     }
 }
 
+fn wipe(bytes: &mut [u8]) {
+    for byte in bytes.iter_mut() {
+        // SAFETY: a valid &mut u8; volatile so the wipe is not optimised out.
+        unsafe { std::ptr::write_volatile(byte, 0) };
+    }
+}
+
 impl Drop for PairingCode {
     fn drop(&mut self) {
-        for byte in self.0.iter_mut() {
-            // SAFETY: a valid &mut u8; volatile so the wipe is not optimised out.
-            unsafe { std::ptr::write_volatile(byte, 0) };
-        }
+        wipe(&mut self.0);
     }
 }
 

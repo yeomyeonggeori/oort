@@ -159,10 +159,12 @@ check "key mount is nosuid,nodev (ADR-0197 D1) and a tmpfs stand-in" bash -c 'do
 check "the seal key is on a different tmpfs than the key directory" bash -c 'a=$(docker exec "$0" stat -c %d /run/oort-box-seal); b=$(docker exec "$0" stat -c %d /var/lib/oort-box/key); [ "$a" != "$b" ]' "$NAME"
 
 # ---------------------------------------------------------------- the agent process
-echo "== the agent: own uid, only SETUID/SETGID, opaque to others"
+echo "== the agent: own uid, no capability, opaque to others"
 check "agent runs as uid $AGENT_UID (real/effective/saved/fs)" test "$(field Uid)" = "$(printf '%s\t%s\t%s\t%s' $AGENT_UID $AGENT_UID $AGENT_UID $AGENT_UID)"
 check "agent has no supplementary groups" test -z "$(field Groups | tr -d ' \t')"
-check "agent CapEff is exactly SETGID|SETUID (0xc0)" test "$(field CapEff)" = 00000000000000c0
+for c in CapPrm CapEff CapInh CapAmb; do
+  check "agent $c is empty: it started the spawn helper, then dropped every capability (M1)" test "$(field $c)" = 0000000000000000
+done
 check "agent NoNewPrivs=1" test "$(field NoNewPrivs)" = 1
 check "agent is not dumpable: its /proc files belong to root, not to its own uid (PR_SET_DUMPABLE 0)" test "$(docker exec "$NAME" stat -c %u "/proc/$PID/environ")" = 0
 check "agent core file limit is 0" bash -c 'docker exec "$0" grep "Max core file size" "/proc/$1/limits" | grep -Eq "[[:space:]]0[[:space:]]+0[[:space:]]"' "$NAME" "$PID"
@@ -172,6 +174,22 @@ check "the key file is a sealed envelope, larger than a bare base64 seed (44 byt
 check "dev key files are refused: unknown flag is a usage error" bash -c 'docker exec --user 0:0 "$0" timeout 5 momo-box-agent run --dev-key-file /tmp/x 2>&1 | grep -q usage' "$NAME"
 check "agent refuses to start at the person's uid" bash -c 'out=$(docker exec --user $0:$0 "$1" timeout 5 momo-box-agent run 2>&1); rc=$?; [ $rc = 2 ] && grep -q "same uid" <<<"$out"' "$PERSON_UID" "$NAME"
 check "agent refuses to start as root" bash -c 'out=$(docker exec --user 0:0 "$0" timeout 5 momo-box-agent run 2>&1); rc=$?; [ $rc = 2 ] && grep -q "never runs as root" <<<"$out"' "$NAME"
+
+# ---------------------------------------------------------------- the spawn helper
+echo "== the spawn helper: the only capability holder, no host key, no environment"
+HPID="$(docker exec "$NAME" pgrep -f 'momo-box-agent spawn-helper' | head -1)"
+check "spawn helper process found" test -n "$HPID"
+HSTATUS="$(docker exec "$NAME" cat "/proc/$HPID/status")"
+hfield() { grep -m1 "^$1:" <<<"$HSTATUS" | cut -f2-; }
+check "helper runs under its own third uid 10003 (not the agent's, not the person's)" test "$(hfield Uid)" = "$(printf '10003\t10003\t10003\t10003')"
+check "helper holds exactly SETGID|SETUID (0xc0)" test "$(hfield CapEff)" = 00000000000000c0
+check "helper NoNewPrivs=1" test "$(hfield NoNewPrivs)" = 1
+check "helper is the agent's child" test "$(hfield PPid)" = "$PID"
+check "helper is not dumpable (its /proc files belong to root)" test "$(docker exec "$NAME" stat -c %u "/proc/$HPID/environ")" = 0
+check "helper cannot read the host key (uid 10003, EACCES): the capability holder never sees it" bash -c 'docker exec --user 10003:10003 "$0" momo-box-probe report --read "$1" | grep -qF "read[$1]=EACCES"' "$NAME" "$KEY"
+check "helper command line carries no OORT_*/token (it is given the allowlisted shell environment only)" bash -c '! docker exec "$0" cat "/proc/$1/cmdline" | tr "\0" " " | grep -Eiq "OORT_|ANTHROPIC|OPENAI|TOKEN|SEAL"' "$NAME" "$HPID"
+check "marker file /etc/oort-box exists, root-owned, not writable by others (H1: workd keys its box profile on it, not on the environment)" bash -c 'o=$(docker exec "$0" stat -c "%u %a" /etc/oort-box); [ "$o" = "0 644" ]' "$NAME"
+check "the person cannot create or change the marker (read-only root and root ownership)" bash -c '! docker exec --user 10001:10001 "$0" sh -c "echo x > /etc/oort-box" 2>/dev/null' "$NAME"
 
 # ---------------------------------------------------------------- the person's uid, probing
 probe_asserts() { # file, label
@@ -186,6 +204,9 @@ probe_asserts() { # file, label
   check "$l: /proc/<agent>/fd unreadable (EACCES)" test "$(grep -m1 '^proc_fd=' "$f" | cut -d= -f2)" = EACCES
   check "$l: ptrace(PTRACE_ATTACH, agent) refused (EPERM)" test "$(grep -m1 '^ptrace_agent=' "$f" | cut -d= -f2)" = EPERM
   check "$l: positive control: the probe CAN ptrace its own child (so the EPERM above is the box's doing)" test "$(grep -m1 '^ptrace_own_child=' "$f" | cut -d= -f2)" = OK
+  check "$l: kill(agent) refused (EPERM): the person cannot signal the agent" test "$(grep -m1 '^kill_agent=' "$f" | cut -d= -f2)" = EPERM
+  check "$l: /proc/<agent>/cmdline shows only the subcommand (no secret on the command line)" test "$(grep -m1 '^agent_cmdline=' "$f" | cut -d= -f2-)" = "momo-box-agent run"
+  check "$l: open descriptors are exactly 0,1,2 (nothing leaked from the agent or the helper)" test "$(grep -m1 '^open_fds=' "$f" | cut -d= -f2)" = 0,1,2
   check "$l: report completed" grep -q '^report=done' "$f"
 }
 echo "== docker exec as the person (uid $PERSON_UID)"
@@ -199,14 +220,19 @@ SPAWN_EXTRA=()
 docker exec --user 0:0 \
   -e ANTHROPIC_API_KEY=sk-ant-MOMO-M3-MARKER -e CLAUDE_CODE_OAUTH_TOKEN=MOMO-M3-MARKER -e OPENAI_API_KEY=sk-MOMO-M3-MARKER \
   "$NAME" setpriv --reuid "$AGENT_UID" --regid "$AGENT_UID" --clear-groups --inh-caps +setuid,+setgid --ambient-caps +setuid,+setgid -- \
-  momo-box-probe spawn-report --key-file "$KEY" --agent-pid "$PID" ${SPAWN_EXTRA[@]+"${SPAWN_EXTRA[@]}"} >"$WORK/pty.txt" 2>&1
-sed -n '/^\(uid\|euid\|gid\|groups\|Cap\|NoNew\)/p' "$WORK/pty.txt" | sed 's/^/      /'
+  momo-box-probe spawn-report --agent-exe /usr/local/bin/momo-box-agent --key-file "$KEY" --agent-pid "$PID" ${SPAWN_EXTRA[@]+"${SPAWN_EXTRA[@]}"} >"$WORK/pty.txt" 2>&1
+sed -n '/^\(uid\|euid\|gid\|groups\|Cap\|NoNew\|agent_\|ppid\|kill\|open_fds\)/p' "$WORK/pty.txt" | sed 's/^/      /'
 check "PTY child runs as the person: uid=euid=gid=$PERSON_UID" bash -c 'grep -qx "uid=$0" "$1" && grep -qx "euid=$0" "$1" && grep -qx "gid=$0" "$1"' "$PERSON_UID" "$WORK/pty.txt"
 check "PTY child has no supplementary groups" grep -qx 'groups=' "$WORK/pty.txt"
 for c in CapInh CapPrm CapEff CapAmb; do
   check "PTY child $c is empty" grep -qx "$c=0000000000000000" "$WORK/pty.txt"
 done
 check "PTY child NoNewPrivs=1" grep -qx 'NoNewPrivs=1' "$WORK/pty.txt"
+check "an agent that started the helper then dropped its capabilities: drop verified" grep -qx 'agent_drop_capabilities=OK' "$WORK/pty.txt"
+check "that agent's CapEff is 0 afterwards" grep -qx 'agent_CapEff_after_drop=0000000000000000' "$WORK/pty.txt"
+check "that agent can no longer setuid to the person (a compromised agent cannot read /cred)" grep -qx 'agent_can_setuid_after_drop=false' "$WORK/pty.txt"
+check "the PTY child's parent is the helper (uid 10003), not the agent" grep -qx 'ppid_uid=10003' "$WORK/pty.txt"
+check "the PTY child cannot signal its parent, the helper (EPERM)" grep -qx 'kill_parent=EPERM' "$WORK/pty.txt"
 check "PTY child environment is the allowlist (no OORT_*, MOMO_*, ANTHROPIC*, OPENAI*, CLAUDE_CODE*, no *KEY/*TOKEN)" bash -c '! grep "^envname=" "$0" | grep -Eiq "OORT_|MOMO_|ANTHROPIC|OPENAI|CLAUDE_CODE|KEY|TOKEN|SECRET"' "$WORK/pty.txt"
 check "positive control: the child does see HOME USER SHELL TERM PATH CLAUDE_CONFIG_DIR CODEX_HOME" bash -c 'for n in HOME USER SHELL TERM PATH CLAUDE_CONFIG_DIR CODEX_HOME; do grep -qx "envname=$n" "$0" || exit 1; done' "$WORK/pty.txt"
 check "no injected marker value printed anywhere in the PTY output" bash -c '! grep -q "MOMO-M3-MARKER" "$0"' "$WORK/pty.txt"

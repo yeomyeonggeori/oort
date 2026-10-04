@@ -231,6 +231,13 @@ pub struct WorkdConfig {
     pub require_human_signatures: bool,
 }
 
+/// The Linux box profile applies when the image's root-owned marker file
+/// exists **or** the advisory env variable is set. The env alone can be unset
+/// or emptied by the person; the marker cannot (H1 of the #3503 review).
+pub fn box_profile_active(marker_file: bool, env_value: Option<&str>) -> bool {
+    marker_file || env_value.is_some_and(|value| !value.is_empty())
+}
+
 /// One allowlisted tool.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -249,8 +256,8 @@ pub struct ToolEntry {
 
 impl WorkdConfig {
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
-        let box_profile = std::env::var(crate::keystore::box_store::ENV_BOX_MARKER)
-            .is_ok_and(|value| !value.is_empty());
+        let env = std::env::var(crate::keystore::box_store::ENV_BOX_MARKER).ok();
+        let box_profile = box_profile_active(crate::keystore::box_store::in_box(), env.as_deref());
         Self::load_with_profile(path, box_profile)
     }
 
@@ -459,6 +466,18 @@ mod tests {
         assert_eq!(config.max_sessions, 4);
         assert_eq!(config.server_base(), "https://oort.example.com");
         assert!(!config.require_human_signatures, "R2 is off by default");
+    }
+
+    #[test]
+    fn the_box_profile_rests_on_the_marker_file_not_on_the_environment() {
+        // An emptied or absent env does not leave a box: the marker decides.
+        assert!(box_profile_active(true, Some("")));
+        assert!(box_profile_active(true, None));
+        assert!(box_profile_active(true, Some("1")));
+        // Outside a box the env is still honoured (a Mac developer opting in).
+        assert!(box_profile_active(false, Some("1")));
+        assert!(!box_profile_active(false, Some("")));
+        assert!(!box_profile_active(false, None));
     }
 
     fn codex_only_json() -> serde_json::Value {
