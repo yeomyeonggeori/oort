@@ -39,12 +39,13 @@ import { teamKeyHost } from "../settings/aiDefaults";
 // =============================================================================
 
 // ---------------------------------------------------------------------------
-// 용어집 (8개)
+// 용어집 (9개)
 // ---------------------------------------------------------------------------
 
 export type AiGlossaryId =
   | "myAiAccount"
   | "teamAiKey"
+  | "personalKey"
   | "defaultAi"
   | "agent"
   | "callableBy"
@@ -70,6 +71,11 @@ export const AI_GLOSSARY: readonly AiGlossaryEntry[] = [
     id: "teamAiKey",
     term: "팀 AI 키",
     meaning: "운영자가 넣은 API 키. 팀이 같이 쓰고 비용은 팀 몫이에요.",
+  },
+  {
+    id: "personalKey",
+    term: "개인 키 · 나만",
+    meaning: "운영자가 한 사람에게 발급한 API 키. 그 사람의 본인 전용 에이전트만 써요.",
   },
   {
     id: "defaultAi",
@@ -109,6 +115,7 @@ export const AI_GLOSSARY: readonly AiGlossaryEntry[] = [
  */
 export const AI_GLOSSARY_ABSORBS: Readonly<Record<AiGlossaryId, readonly string[]>> = {
   myAiAccount: ["내 계정", "이 맥", "구독", "구독 추가", "로그인(단독)", "개인 구독", "내 설정", "로컬 터미널 기본 로그인"],
+  personalKey: ["개인 API 키", "owner_only 키", "본인 키"],
   teamAiKey: ["팀 연결", "팀 API 키", "팀 키", "팀 기본", "운영자 설정"],
   defaultAi: ["기본 AI(유지)", "앱 명령", "원격 작업 기본 계정", "팀 에이전트 대답", "로컬 터미널 새 세션"],
   agent: ["호스티드 에이전트", "구독 에이전트", "합류/합류시키기", "봇(AI 봇)", "에이전트 초대(초대하기만 유지)"],
@@ -398,12 +405,6 @@ export const AI_TEAM_KEYS_COPY = {
   requestHint: "키를 넣거나 바꾸는 일은 운영자가 해요.",
   readOnlyDefaults: "기본 AI는 볼 수만 있어요. 팀 줄은 운영자가 바꿔요.",
   checkFirst: "연결 확인을 하면 줄마다 고를 수 있는 모델이 보여요.",
-  personalKeys: {
-    heading: "개인 API 키",
-    badge: "준비 중",
-    body: "운영자가 사람마다 발급하는 API 키를 준비하고 있어요. 발급받은 키는 그 사람의 본인 전용 에이전트에서만 쓰이고, 다른 사람이 부르거나 같이 쓸 수 없어요.",
-    nowLine: "지금은 팀이 같이 쓸 키는 운영자가 「팀 AI 키」에 넣고, 내 구독은 「내 AI 계정」에서 로그인해요.",
-  },
   defaultsHeading: "기본 AI",
   defaultsSubtitle: "기능마다 먼저 쓸 AI",
   defaultsColumns: {

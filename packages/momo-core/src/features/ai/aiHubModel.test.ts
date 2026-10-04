@@ -38,10 +38,11 @@ function labelsFor(facts: AiAgentFacts, viewer: AiViewer = ME) {
 }
 
 describe("용어집", () => {
-  it("용어 8개, 시안 순서, id 중복 없음", () => {
+  it("용어 9개, 시안 순서, id 중복 없음", () => {
     expect(AI_GLOSSARY.map((e) => e.term)).toEqual([
       "내 AI 계정",
       "팀 AI 키",
+      "개인 키 · 나만",
       "기본 AI",
       "에이전트",
       "부를 수 있는 사람",
@@ -49,12 +50,12 @@ describe("용어집", () => {
       "외부 연결",
       "내 작업",
     ]);
-    expect(new Set(AI_GLOSSARY.map((e) => e.id)).size).toBe(8);
+    expect(new Set(AI_GLOSSARY.map((e) => e.id)).size).toBe(9);
   });
 
   it("모든 id 를 조회할 수 있고 한 줄 뜻은 해요체 문장이다", () => {
     const ids: AiGlossaryId[] = [
-      "myAiAccount", "teamAiKey", "defaultAi", "agent",
+      "myAiAccount", "teamAiKey", "personalKey", "defaultAi", "agent",
       "callableBy", "cost", "externalConnection", "myWork",
     ];
     for (const id of ids) {

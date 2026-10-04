@@ -16,6 +16,7 @@ import {
   testProviderLink,
 } from "@momo/core/features/settings/api";
 import { fetchProviderDefaultAi, putProviderDefaultAi } from "@momo/core/features/settings/defaultAi";
+import { listPersonalKeys } from "@momo/core/features/ai/personalKeys";
 import { defaultAiUnsetSentence } from "@momo/core/features/ai/aiHubModel";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { AiTeamKeysPane } from "./AiTeamKeysPane";
@@ -52,6 +53,15 @@ vi.mock("@momo/core/features/settings/api", async (importOriginal) => {
 vi.mock("@momo/core/features/settings/defaultAi", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/features/settings/defaultAi")>();
   return { ...actual, fetchProviderDefaultAi: vi.fn(), putProviderDefaultAi: vi.fn() };
+});
+
+vi.mock("@momo/core/features/ai/personalKeys", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@momo/core/features/ai/personalKeys")>();
+  return {
+    ...actual,
+    listPersonalKeys: vi.fn(async () => []),
+    listMyPersonalKeys: vi.fn(async () => []),
+  };
 });
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -308,13 +318,24 @@ describe("기본 AI 표: 평문 기능 이름, 누구를 위한지, 고르지 �
   });
 });
 
-describe("개인 API 키 자리", () => {
-  it("준비 중이라고 말하고 누를 것이 없다", async () => {
+describe("개인 API 키 구획", () => {
+  it("운영자에게는 발급 단추와 빈 목록 한 줄이 있고 준비 중이라 말하지 않는다", async () => {
     mount();
     const area = await until("ai-personal-keys");
+    await rtlWaitFor(() => expect(q("ai-personal-keys-empty")).not.toBeNull());
     expect(area.textContent).toContain("개인 API 키");
-    expect(area.textContent).toContain("준비 중");
-    expect(area.querySelectorAll("button, input, select, a, [role='button']")).toHaveLength(0);
+    expect(area.textContent).not.toContain("준비 중");
+    expect(q("ai-personal-issue")).not.toBeNull();
     expect(area.textContent).not.toMatch(/#\d{3,}/);
+  });
+
+  it("비운영자 화면에는 구획이 없고 목록도 부르지 않는다", async () => {
+    vi.mocked(fetchProviderLink).mockRejectedValue(new ApiError(403, "forbidden"));
+    vi.mocked(listPersonalKeys).mockClear();
+    mount();
+    await until("operator-notice");
+    expect(q("ai-personal-keys")).toBeNull();
+    expect(q("ai-personal-issue")).toBeNull();
+    expect(listPersonalKeys).not.toHaveBeenCalled();
   });
 });
