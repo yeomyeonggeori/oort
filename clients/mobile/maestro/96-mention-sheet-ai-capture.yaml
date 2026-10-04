@@ -15,6 +15,10 @@ name: 96-mention-sheet-ai-capture
 #   maestro test clients/mobile/maestro/96-mention-sheet-ai-capture.yaml
 #
 # 라이트는 `LIGHT-MENTION-SHEET-AI`.
+#
+# #3459: 접근성 크기(한 행만 보임)의 `top` 사진에는 오른쪽에 「아래에 더 있다」 도형(`mention-more-cue`)이,
+# 한 줄로 접힌 보조 줄에는 상태(문의 중·맥 꺼짐)가 앞에 선다. `rest` 사진에서는 도형이 사라진다.
+# 사진 경로: Maestro 는 `--test-output-dir <dir>` 아래 `takeScreenshot/` 에 쓴다.
 - extendedWaitUntil:
     visible:
       id: "composer-input"
