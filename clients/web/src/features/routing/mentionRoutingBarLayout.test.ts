@@ -9,13 +9,14 @@ const source = readFileSync(resolve(__dirname, "MentionRoutingBar.tsx"), "utf8")
 
 describe("MentionRoutingBar 접힌 줄의 폭 계약 (#3444)", () => {
   it("요약의 실행 위치 조각은 요약 칸 안에서 줄어든다(칸 밖으로 밀리지 않는다)", () => {
-    expect(source).toContain('{tier && <span className="max-w-full shrink-0 truncate">{tier}</span>}');
+    expect(source).toContain('cn("max-w-full shrink-0 truncate", hideTierWhenNarrow && "max-sm:hidden")');
   });
 
   it("여럿을 부른 줄의 라벨은 모자라면 줄어들고, 좁은 폭에서는 「이번 메시지」를 접는다", () => {
     expect(source).toContain('className="min-w-0 max-w-pane-sm truncate text-agent"');
     expect(source).toContain("max-sm:hidden");
     // 기본(상속) 요약의 모델·강도 토막은 접지만, 오류·확인 중 말과 오버라이드 값은 접지 않는다.
-    expect(source).toContain("hideModelEffortWhenNarrow={showTier && !override}");
+    expect(source.match(/hideModelEffortWhenNarrow=\{showTier && !override\}/g)).toHaveLength(2);
+    expect(source).toContain("hideTierWhenNarrow={override}");
   });
 });

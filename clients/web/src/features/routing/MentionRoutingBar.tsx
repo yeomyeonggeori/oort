@@ -201,11 +201,14 @@ function SummaryLine({
   modelEffort,
   tier,
   hideModelEffortWhenNarrow = false,
+  hideTierWhenNarrow = false,
 }: {
   modelEffort: string;
   tier: string | null;
   /** 좁은 폭에서 모델·강도 조각을 접는다: 「모…」 같은 남은 토막은 아무것도 말하지 않는다. */
   hideModelEffortWhenNarrow?: boolean;
+  /** 좁은 폭에서 실행 위치 조각을 접는다: 「실행 …」 토막도 같은 이유로 아무것도 말하지 않는다. */
+  hideTierWhenNarrow?: boolean;
 }) {
   return (
     <span
@@ -215,7 +218,11 @@ function SummaryLine({
       <span className={cn("min-w-0 truncate", hideModelEffortWhenNarrow && "max-sm:hidden")}>
         {modelEffort}
       </span>
-      {tier && <span className="max-w-full shrink-0 truncate">{tier}</span>}
+      {tier && (
+        <span className={cn("max-w-full shrink-0 truncate", hideTierWhenNarrow && "max-sm:hidden")}>
+          {tier}
+        </span>
+      )}
     </span>
   );
 }
@@ -352,6 +359,7 @@ function OneTargetRow({
         <SummaryLine
           modelEffort={modelEffortSummary}
           tier={showTier ? tier.summary : null}
+          hideModelEffortWhenNarrow={showTier && !override}
         />
         {profileFailed && (
           <RowAction onClick={profileHandle.refetch} testId="composer-routing-retry">
@@ -578,6 +586,7 @@ function ManyTargetRow({
           modelEffort={modelEffortSummary}
           tier={showTier ? tier.summary : null}
           hideModelEffortWhenNarrow={showTier && !override}
+          hideTierWhenNarrow={override}
         />
         {unreadable.length > 0 && (
           <RowAction onClick={called.refetch} testId="composer-routing-retry">
