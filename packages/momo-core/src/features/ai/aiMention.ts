@@ -1,4 +1,5 @@
 import type { RosterMember } from "../../lib/api";
+import type { MentionRoutingTarget } from "../routing/mentionTargets";
 import {
   aiAgentLabels,
   classifyAiAgent,
@@ -76,4 +77,23 @@ export function agentWillNotAnswer(agent: RosterMember, viewerHumanId: string | 
   const c = classifyRosterAgent(agent, viewerHumanId);
   const name = agent.displayName;
   return (nonOwnerComposerNotice(c, name) ?? pausedComposerNotice(c, name)) !== null;
+}
+
+/**
+ * 라우팅 줄이 센 대상: 부른 에이전트 가운데 **답할 에이전트만** 남긴다(#3444).
+ * 답하지 않는 에이전트는 바로 아래 「답하지 않아요」 줄이 말하므로, 같은 에이전트가 두 줄에
+ * 서로 다른 말(「이번 메시지에 적용돼요」 / 「답하지 않아요」)로 서 있으면 모순이다.
+ * 하나만 남으면 `one`, 아무도 안 남으면 `none` 으로 접는다.
+ */
+export function answeringMentionTarget(
+  target: MentionRoutingTarget,
+  viewerHumanId: string | null | undefined
+): MentionRoutingTarget {
+  if (target.kind === "none") return target;
+  const agents = target.kind === "one" ? [target.agent] : target.agents;
+  const answering = agents.filter((agent) => !agentWillNotAnswer(agent, viewerHumanId));
+  if (answering.length === agents.length) return target;
+  if (answering.length === 0) return { kind: "none" };
+  if (answering.length === 1) return { kind: "one", agent: answering[0] };
+  return { kind: "many", agents: answering };
 }
