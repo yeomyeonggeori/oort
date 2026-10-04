@@ -10,6 +10,13 @@ fi
 cp /opt/momo-box/claude-pin/package.json /opt/momo-box/claude-pin/package-lock.json "$TOOLS/"
 cd "$TOOLS"
 export npm_config_cache=/tmp/npm-cache npm_config_update_notifier=false
+# The package's postinstall (install.cjs) only copies the matching native binary over the
+# bin/claude.exe placeholder (no network, no downloads), so scripts stay enabled: with
+# --ignore-scripts `claude` would stay a stub. Integrity of every tarball is enforced by the lockfile.
 npm ci --no-audit --no-fund
 rm -rf /tmp/npm-cache
+{
+  echo "package-integrity: $(node -e "const l=require('./package-lock.json');console.log(l.packages['node_modules/@anthropic-ai/claude-code'].integrity)")"
+  echo "binary-sha256: $(sha256sum "$(readlink -f "$TOOLS/node_modules/.bin/claude")" | cut -d' ' -f1)"
+} | tee "$TOOLS/install-record.txt"
 echo "claude installed: $("$TOOLS/node_modules/.bin/claude" --version)"

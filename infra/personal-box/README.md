@@ -12,7 +12,7 @@
 | `verify-s3.sh` | 가짜 표식으로 하는 검증(실로그인 불필요). `--sabotage <mode>`와 `--self-test` 포함 |
 
 ## 설계 요점
-- 컨테이너 플래그: `--read-only`, `--cap-drop ALL`, `--security-opt no-new-privileges`, `--user 10001:10001`, `--ulimit core=0`, pids/메모리/CPU 상한, 바인드 마운트·docker 소켓 없음, docker 로그 드라이버 `none`(TTY 로그인 화면이 docker 로그에 남지 않게. ADR-0197 D8).
+- 컨테이너 플래그: `--read-only`, `--cap-drop ALL`, `--security-opt no-new-privileges`, `--user 10001:10001`, `--ulimit core=0`, pids/메모리/CPU 상한과 `--memory-swap`=메모리(tmpfs 자격이 swap으로 나가지 않게), 바인드 마운트·docker 소켓 없음, docker 로그 드라이버 `none`(TTY 로그인 화면이 docker 로그에 남지 않게. ADR-0197 D8).
 - 자격 디렉터리: `CLAUDE_CONFIG_DIR=/cred/claude`, `CODEX_HOME=/cred/codex`. 기본은 **tmpfs**(정지하면 사라짐, 다시 로그인). `up --persist-login`은 이름 있는 볼륨 `momo-s3-cred`를 쓰는 **옵트인** 모드이고, ADR D8 게이트(런너에 백업·스냅샷이 없음)를 통과한 런너에서만 켜야 해요.
 - HOME도 tmpfs라서 `~/.claude.json` 같은 홈 파일이 이미지나 쓰기 레이어에 남지 않아요. 읽기 전용 루트의 쓰기 가능 지점은 tmpfs(`/cred`, `/home/box`, `/tmp`, `/opt/tools`, `/work`)뿐이에요.
 - 운영 런너(M2)는 `exec`/`cp`/`commit` 동사가 없어요. 이 스파이크 러너의 `shell`(docker exec)은 로컬 수동 왕복용이에요.
@@ -53,7 +53,7 @@ exit
 ```
 ! infra/personal-box/momo-s3-box.sh audit
 ```
-`audit`는 `/cred`의 비밀 값 전부와 로그인 URL·코드 모양이 docker 로그·러너 로그·Colima VM 컨테이너 디렉터리에 없는지 박스 안에서 판정하고(`leaked=0 login_shapes=0`이어야 해요), 자격 파일 이름·크기만 출력해요(내용은 출력하지 않아요).
+`audit`는 `/cred`의 비밀 값 전부와 로그인 URL·코드 모양이 docker 로그·러너 로그·Colima VM 컨테이너 디렉터리에 없는지 박스 안에서 판정하고(`leaked=0 login_shapes=0`이어야 하고, **`secret_values`가 0보다 커야 해요**. 0이면 비교할 비밀이 없다는 뜻이라 audit이 실패해요. 로그인 전 점검은 `audit --pre-login`), 자격 파일 이름·크기만 출력해요(내용은 출력하지 않아요).
 
 캡처해서 PR/이슈에 남길 것(토큰·코드·URL 값은 가리거나 빼요): ① `audit` 출력 전체 ② 로그인 성공을 보여주는 `claude` 상태 화면과 `codex login status` ③ `docker inspect momo-s3-box --format '{{.HostConfig.ReadonlyRootfs}} {{.HostConfig.CapDrop}} {{.HostConfig.LogConfig.Type}}'`. 이어서 tmpfs 확인:
 ```
@@ -65,5 +65,11 @@ exit
 ```
 
 읽을 때 주의할 점 두 가지예요.
-- 러너 기본 로그 드라이버가 `none`이라 `audit`의 `docker-logs` 줄은 「로그가 없어서 0」이에요. 로그를 읽어 깨끗하다고 확인한 것이 아니에요. 로그가 있을 때 잡아내는 증명은 `verify-s3.sh`의 json-file 양성 대조가 맡아요.
+- 러너 기본 로그 드라이버가 `none`이라 `audit`의 `docker-logs` 줄은 `N/A`로 표시돼요(로그가 없다는 뜻이지 깨끗하다는 결과가 아니에요). 읽지 못한 대상은 `UNREAD`로 실패 처리돼요. 로그가 있을 때 잡아내는 증명은 `verify-s3.sh`의 json-file 양성 대조가 맡아요.
 - leakscan은 `/cred` 안의 16자 이상 문자열을 전부 비밀로 봐요. 실제 로그인 뒤에는 시각·계정 UUID·경로 같은 비밀이 아닌 값도 들어 있어서 오탐이 날 수 있어요. `leaked>0`이 나오면 값은 적지 말고 줄의 라벨만 보고해 주세요. 오탐인지 분류하고 누출로 단정하지 않아요.
+
+## 첫 시작 설치와 후속 항목
+- Claude 패키지의 `postinstall`(`install.cjs`)은 플랫폼 네이티브 바이너리를 `bin/claude.exe` 자리표시자 위에 복사할 뿐 네트워크를 쓰지 않아요. `--ignore-scripts`로 막으면 `claude`가 스텁으로 남아서 스크립트를 켜 둬요. 락파일이 모든 타르볼 무결성을 강제하고, 설치 직후 패키지 integrity와 바이너리 sha256을 출력하고 `/opt/tools/install-record.txt`(tmpfs)에 남겨요.
+- 로그인 셸은 `umask 077`이고 `/opt/tools/node_modules/.bin`은 PATH 맨 끝이에요.
+- 러너 호스트 점검(`verify-s3.sh`가 Colima VM의 swap·core_pattern 상태를 출력)은 정보용이에요. 기계 검증 항목화는 ADR D8/H5가 맡아요.
+- 후속(이 PR 범위 밖): 리뷰의 M7–M9, L3–L6, ADR H3/H5.

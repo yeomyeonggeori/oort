@@ -28,18 +28,25 @@ function walk(dir) {
   }
 }
 walk(process.env.MOMO_BOX_CRED_DIR || '/cred');
-const input = fs.readFileSync(0, 'utf8');
+// Exit codes: 0 clean, 1 leak/login shape found, 2 vacuous (no secrets to compare, empty input).
+const allowEmpty = process.argv.includes('--allow-empty');
+const raw = fs.readFileSync(0, 'utf8');
+// Normalise terminal noise: strip ANSI escapes, then also test a form with line wraps removed.
+const stripped = raw.replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '').replace(/\r/g, '');
+const joined = stripped.replace(/\n/g, '');
+const views = [raw, stripped, joined];
 let leaks = 0;
-for (const s of secrets) if (input.includes(s)) leaks++;
-const shapes = [
-  /claude\.ai\/oauth\/authorize/i,
-  /console\.anthropic\.com\/oauth/i,
-  /auth\.openai\.com\/(codex\/device|oauth\/authorize)/i,
-  /\b[A-Z0-9]{4}-[A-Z0-9]{4,5}\b.*(device|code)/i,
-  /sk-ant-[A-Za-z0-9_-]{10,}/,
-  /\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\./,
-];
-let shapeHits = 0;
-for (const re of shapes) if (re.test(input)) shapeHits++;
-console.log(`leakscan[${label}]: secret_values=${secrets.size} leaked=${leaks} login_shapes=${shapeHits}`);
-process.exit(leaks || shapeHits ? 1 : 0);
+for (const s of secrets) if (views.some((v) => v.includes(s))) leaks++;
+const shapes = {
+  claude_oauth_url: /claude\.ai\/oauth\/authorize/i,
+  anthropic_oauth_url: /console\.anthropic\.com\/oauth/i,
+  openai_device_or_oauth_url: /auth\.openai\.com\/(codex\/device|oauth\/authorize)/i,
+  device_code: { test: (v) => /\b[A-Z0-9]{4}-[A-Z0-9]{4,5}\b/.test(v) && /(device|one-time|verification)\s+code|code[^\n]{0,40}device/i.test(v) },
+  anthropic_key: /sk-ant-[A-Za-z0-9_-]{10,}/,
+  jwt: /\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\./,
+};
+const hit = Object.entries(shapes).filter(([, re]) => views.some((v) => re.test(v))).map(([k]) => k);
+console.log(`leakscan[${label}]: bytes=${raw.length} secret_values=${secrets.size} leaked=${leaks} login_shapes=${hit.length}${hit.length ? ' (' + hit.join(',') + ')' : ''}`);
+if (leaks || hit.length) process.exit(1);
+if (raw.length === 0) { console.log(`leakscan[${label}]: UNREAD empty input`); process.exit(2); }
+if (secrets.size === 0 && !allowEmpty) { console.log(`leakscan[${label}]: VACUOUS no secret values under /cred to compare (pre-login? use --allow-empty)`); process.exit(2); }

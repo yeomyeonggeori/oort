@@ -33,12 +33,19 @@ COPY claude/package.json claude/package-lock.json /opt/momo-box/claude-pin/
 COPY momo-box-install-claude momo-box-entry momo-box-leakscan /usr/local/bin/
 RUN chmod 0755 /usr/local/bin/momo-box-install-claude /usr/local/bin/momo-box-entry /usr/local/bin/momo-box-leakscan
 
+# Interactive shells (docker exec bash -l / bashrc) get umask 077 so credential files are never group/world readable.
+RUN printf 'umask 077\n' > /etc/profile.d/momo-umask.sh && printf '\numask 077\n' >> /etc/bash.bashrc
+
 # Credential homes are redirected into /cred (tmpfs or an opt-in volume) so nothing lands in HOME or the image.
 ENV HOME=/home/box \
     CLAUDE_CONFIG_DIR=/cred/claude \
     CODEX_HOME=/cred/codex \
     DISABLE_AUTOUPDATER=1 \
-    PATH=/opt/tools/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
+    PATH=/usr/local/bin:/usr/bin:/bin:/opt/tools/node_modules/.bin
+
+# Source hash of the build context, so the verifier can refuse a stale image (see momo-s3-box.sh src_hash).
+ARG SRC_HASH=unset
+LABEL io.momo.s3.src-hash=$SRC_HASH
 
 USER 10001:10001
 WORKDIR /work
