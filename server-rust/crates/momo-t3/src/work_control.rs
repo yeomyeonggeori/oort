@@ -626,9 +626,10 @@ pub async fn pending_controls_for_host_in_tx(
         claude_spawn = claude_tool_sql(
             "work_control.workspace_id",
             "(work_control.payload->>'tool')",
-            "$5"
+            "$5",
+            "$6"
         ),
-        claude_session = claude_tool_sql("work_control.workspace_id", "s.tool", "$5"),
+        claude_session = claude_tool_sql("work_control.workspace_id", "s.tool", "$5", "$6"),
     );
     let rows = sqlx::query(&sql)
         .bind(workspace_id)
@@ -636,6 +637,7 @@ pub async fn pending_controls_for_host_in_tx(
         .bind(&shell_commands)
         .bind(claude_subscription_agents_enabled)
         .bind(claude_launch_commands())
+        .bind(claude_launchers())
         .fetch_all(&mut *conn)
         .await?;
     rows.iter()
@@ -1266,7 +1268,25 @@ pub const TOOL_CLAUDE: &str = "claude";
 /// the same reasoning as [`SHELL_LAUNCH_COMMANDS`]: renaming the key must not
 /// be a way round the pause. `claude` is the CLI and `claude-agent-acp` is the
 /// ACP adapter `momo-workd` launches.
-pub const CLAUDE_LAUNCH_COMMANDS: &[&str] = &["claude", "claude-agent-acp"];
+pub const CLAUDE_LAUNCH_COMMANDS: &[&str] = &[
+    "claude",
+    "claude-agent-acp",
+    "claude-code-acp",
+    "claude-code",
+];
+
+/// Launchers that run another program named in `arguments` (`npx
+/// @agentclientprotocol/claude-agent-acp`, `env claude`, `node
+/// .../claude.js`, `sh -c "claude ..."`). A profile whose command is one of
+/// these **and** whose arguments mention `claude` anywhere (case-insensitive;
+/// a path basename is a substring, so it is covered) is Claude Code. Fail
+/// closed: a false positive costs a refusal with a clear message, a false
+/// negative drives somebody's subscription.
+pub const CLAUDE_LAUNCHERS: &[&str] = &[
+    "npx", "bunx", "pnpm", "pnpx", "npm", "yarn", "node", "bun", "deno", "env", "uvx", "pipx",
+    "python", "python3", "sh", "bash", "zsh", "dash", "ksh", "fish", "nohup", "exec", "xargs",
+    "sudo", "time",
+];
 
 /// The wire code a shared (workspace-scoped or cloud) work host answers when
 /// its Claude tool is asked for while `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`
@@ -1287,16 +1307,32 @@ pub const CLAUDE_SHARED_HOST_PAUSED_MESSAGE: &str = "작업 공간 공용 컴퓨
 /// [`TOOL_CLAUDE`] key, or a profile whose launch command is one of
 /// [`CLAUDE_LAUNCH_COMMANDS`] (bound by the caller as a `text[]`). Same shape
 /// as [`shell_tool_sql`]; every profile counts, enabled or not.
-fn claude_tool_sql(workspace: &str, tool: &str, commands: &str) -> String {
+fn claude_tool_sql(workspace: &str, tool: &str, commands: &str, launchers: &str) -> String {
     format!(
-        "({tool} = '{TOOL_CLAUDE}' \
+        "({tool} = ANY({commands}) \
           OR EXISTS ( \
                SELECT 1 FROM work_tool_profile p \
                 WHERE p.workspace_id = {workspace} \
                   AND p.tool_key = {tool} \
-                  AND p.launch_template->>'command' = ANY({commands}) \
+                  AND ( \
+                    p.launch_template->>'command' = ANY({commands}) \
+                    OR ( \
+                      p.launch_template->>'command' = ANY({launchers}) \
+                      AND EXISTS ( \
+                        SELECT 1 FROM jsonb_array_elements_text(p.launch_template->'arguments') a(value) \
+                         WHERE a.value ~* 'claude' \
+                      ) \
+                    ) \
+                  ) \
              ))"
     )
+}
+
+fn claude_launchers() -> Vec<String> {
+    CLAUDE_LAUNCHERS
+        .iter()
+        .map(|command| (*command).to_string())
+        .collect()
 }
 
 fn claude_launch_commands() -> Vec<String> {
@@ -1329,7 +1365,7 @@ pub async fn shared_host_refuses_claude_in_tx(
                    WHERE id = $2 AND workspace_id = $1 AND scope <> $4 \
                 ) \
             AND {claude}",
-        claude = claude_tool_sql("$1", "$3", "$5"),
+        claude = claude_tool_sql("$1", "$3", "$5", "$6"),
     );
     let refused: bool = sqlx::query_scalar(&sql)
         .bind(workspace_id)
@@ -1337,6 +1373,7 @@ pub async fn shared_host_refuses_claude_in_tx(
         .bind(tool)
         .bind(HOST_SCOPE_MEMBER)
         .bind(claude_launch_commands())
+        .bind(claude_launchers())
         .fetch_one(&mut *conn)
         .await?;
     Ok(refused)

@@ -3797,3 +3797,254 @@ async fn c3431_4_the_spawn_tool_refuses_claude_on_a_shared_host_while_off() {
     assert!(!claude.is_error, "the opt-in opens it: {claude:?}");
     assert_eq!(sessions_on(&su, tenant.workspace, vps).await, 2);
 }
+
+async fn seed_profile_with_args(
+    su: &PgPool,
+    tenant: &Tenant,
+    tool: &str,
+    command: &str,
+    arguments: Value,
+) {
+    sqlx::query(
+        "INSERT INTO work_tool_profile \
+           (workspace_id, tool_key, display_name, launch_template, enabled, created_by, updated_by) \
+         VALUES ($1, $2, $2, $3, true, $4, $4) \
+         ON CONFLICT (workspace_id, tool_key) \
+         DO UPDATE SET enabled = true, launch_template = EXCLUDED.launch_template",
+    )
+    .bind(tenant.workspace)
+    .bind(tool)
+    .bind(json!({"command": command, "arguments": arguments}))
+    .bind(tenant.owner)
+    .execute(su)
+    .await
+    .expect("seed work tool profile with arguments");
+}
+
+/// **RED PROOF (#3431 H1) — the standing auto-approval.** The host owner ticked
+/// `work_auto_approve` for `claude`; a shared host is auto-approvable by scope
+/// (r0_4), so without the gate in front of the auto-approval question the spawn
+/// would be `dispatched` with no card. Flag off: 409, **no `work_control` row,
+/// no card, nothing dispatched** — which is what fails if the gate is moved
+/// after the insert/dispatch. Flag on: the same request dispatches (the
+/// positive), so the refusal is the gate and not a broken permission.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn c3431_5_a_standing_auto_approval_does_not_dispatch_claude_to_a_shared_host_while_off() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    seed_claude_profiles(&su, &tenant).await;
+    let (cloud, _) = seed_host(&su, &tenant, tenant.owner, "workspace", "cloud", "클라우드").await;
+    let run = seed_run(&su, &tenant).await;
+    let bearer = agent_bearer(&su, &tenant).await;
+
+    let off = start_server_claude(app_pool.clone(), false).await;
+    let on = start_server_claude(app_pool, true).await;
+    let http = reqwest::Client::new();
+    let owner_token = login(&http, &off, tenant.workspace, &tenant.owner_email).await;
+    for tool in ["claude", "assistant"] {
+        let enabled = http
+            .put(format!(
+                "{off}/v1/workspaces/{}/work-auto-approvals/{tool}",
+                tenant.workspace
+            ))
+            .bearer_auth(&owner_token)
+            .send()
+            .await
+            .expect("enable auto approve");
+        assert_eq!(enabled.status(), 200, "the standing permission for {tool}");
+    }
+
+    for tool in ["claude", "assistant"] {
+        let (status, code, message) =
+            error_of(spawn_request(&http, &off, &bearer, &tenant, run, cloud, tool).await).await;
+        assert_eq!(
+            (status, code),
+            (409, json!(CLAUDE_PAUSED)),
+            "{tool}: {message}"
+        );
+    }
+    assert_eq!(
+        control_count(&su, tenant.workspace).await,
+        0,
+        "no row at all"
+    );
+    assert_eq!(approvals_in(&su, tenant.workspace).await, 0, "no card");
+    assert_eq!(
+        dispatched_to(&su, tenant.workspace, cloud).await,
+        0,
+        "nothing dispatched"
+    );
+
+    let allowed = spawn_request(&http, &on, &bearer, &tenant, run, cloud, "claude").await;
+    assert_eq!(allowed.status(), 201);
+    assert_eq!(
+        dispatched_to(&su, tenant.workspace, cloud).await,
+        1,
+        "flag on: the standing permission dispatches it without a card"
+    );
+}
+
+/// **RED PROOF (#3431 M1/M2) — how Claude is recognised.** Known aliases and a
+/// launcher whose arguments name Claude are Claude Code whatever the profile
+/// key says; a launcher running something else is not. Judged through the REST
+/// ledger (flag off, cloud host) and the host's poll.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn c3431_6_claude_aliases_and_launchers_are_recognised_and_other_launchers_are_not() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let (cloud, cloud_seed) =
+        seed_host(&su, &tenant, tenant.owner, "workspace", "cloud", "클라우드").await;
+    let run = seed_run(&su, &tenant).await;
+    let bearer = agent_bearer(&su, &tenant).await;
+
+    let claude_like: [(&str, &str, Value); 9] = [
+        ("alias-code", "claude-code", json!([])),
+        ("alias-code-acp", "claude-code-acp", json!([])),
+        (
+            "npx-acp",
+            "npx",
+            json!(["-y", "@agentclientprotocol/claude-agent-acp"]),
+        ),
+        ("bunx-up", "bunx", json!(["CLAUDE-AGENT-ACP"])),
+        ("env-wrap", "env", json!(["FOO=1", "claude"])),
+        ("node-js", "node", json!(["tools/Claude.js"])),
+        (
+            "pnpm-dlx",
+            "pnpm",
+            json!(["dlx", "@anthropic-ai/claude-code"]),
+        ),
+        ("sh-c", "sh", json!(["-c", "exec claude --acp"])),
+        ("python-m", "python3", json!(["-m", "claude_agent_acp"])),
+    ];
+    let not_claude: [(&str, &str, Value); 3] = [
+        ("npx-fmt", "npx", json!(["-y", "prettier"])),
+        ("node-srv", "node", json!(["server.js"])),
+        ("env-plain", "env", json!(["FOO=1", "codex"])),
+    ];
+    for (tool, command, arguments) in claude_like.iter().chain(not_claude.iter()) {
+        seed_profile_with_args(&su, &tenant, tool, command, arguments.clone()).await;
+    }
+
+    let off = start_server_claude(app_pool.clone(), false).await;
+    let on = start_server_claude(app_pool, true).await;
+    let http = reqwest::Client::new();
+
+    for (tool, command, _) in &claude_like {
+        let (status, code, message) =
+            error_of(spawn_request(&http, &off, &bearer, &tenant, run, cloud, tool).await).await;
+        assert_eq!(
+            (status, code),
+            (409, json!(CLAUDE_PAUSED)),
+            "{tool} ({command}) is Claude Code: {message}"
+        );
+    }
+    for (tool, command, _) in &not_claude {
+        assert_eq!(
+            spawn_request(&http, &off, &bearer, &tenant, run, cloud, tool)
+                .await
+                .status(),
+            201,
+            "{tool} ({command}) is not Claude Code"
+        );
+    }
+    assert_eq!(
+        spawn_request(&http, &on, &bearer, &tenant, run, cloud, "npx-acp")
+            .await
+            .status(),
+        201,
+        "flag on opens it"
+    );
+
+    // The poll applies the same recognition to rows dispatched earlier.
+    let mut withheld = Vec::new();
+    for (tool, _, _) in &claude_like {
+        withheld.push(
+            insert_dispatched(
+                &su,
+                &tenant,
+                cloud,
+                tenant.agent,
+                None,
+                "spawn",
+                json!({"tool": tool, "label": "p"}),
+            )
+            .await,
+        );
+    }
+    let handed = poll_pending(&http, &off, tenant.workspace, cloud, &cloud_seed).await;
+    for control in &withheld {
+        assert!(
+            !handed.contains(control),
+            "{control} reached the shared host"
+        );
+    }
+}
+
+/// **(#3431 L2) — the host-signed create on a cloud host.** A cloud host's own
+/// signed `POST work-sessions` with a `controlId` is refused while the opt-in is
+/// off; with it on, the same signed create is accepted.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn c3431_7_a_cloud_hosts_signed_session_create_is_refused_while_off() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    seed_claude_profiles(&su, &tenant).await;
+    let (cloud, cloud_seed) =
+        seed_host(&su, &tenant, tenant.owner, "workspace", "cloud", "클라우드").await;
+    let off = start_server_claude(app_pool.clone(), false).await;
+    let on = start_server_claude(app_pool, true).await;
+    let http = reqwest::Client::new();
+
+    // (The approval picker never offers a cloud host — `default_spawn_host` and
+    // the candidate list skip it — so the decision gate is exercised on a
+    // workspace `workd` host in c3431_1; the cloud host's entry points are the
+    // REST ledger, the poll and its own signed create below.)
+    // ---- host-signed create with controlId --------------------------------------
+    let dispatched = insert_dispatched(
+        &su,
+        &tenant,
+        cloud,
+        tenant.agent,
+        None,
+        "spawn",
+        json!({"tool": "claude", "label": "일"}),
+    )
+    .await;
+    let create = |base: String| {
+        let body = serde_json::to_vec(&json!({
+            "channelId": tenant.channel,
+            "hostId": cloud,
+            "tool": "claude",
+            "label": "일",
+            "controlId": dispatched,
+        }))
+        .unwrap();
+        let request = SignedRequest::new(
+            reqwest::Method::POST,
+            &format!("/v1/workspaces/{}/work-sessions", tenant.workspace),
+            tenant.workspace,
+            cloud,
+            &cloud_seed,
+            body,
+        );
+        let http = http.clone();
+        async move { request.send(&http, &base).await }
+    };
+    let (status, code, message) = error_of(create(off.clone()).await).await;
+    assert_eq!((status, code), (409, json!(CLAUDE_PAUSED)), "{message}");
+    assert_eq!(sessions_on(&su, tenant.workspace, cloud).await, 0);
+    let accepted = create(on.clone()).await;
+    assert_eq!(
+        accepted.status(),
+        201,
+        "flag on: the signed create is accepted"
+    );
+}
