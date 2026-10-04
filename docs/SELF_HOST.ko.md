@@ -510,8 +510,9 @@ Port `tools/list`는 비고, 에이전트가 「지금은 이 서버에서 구�
 Anthropic 회신 전 성재 결재 2026-10-03, [ADR-0193](adr/0193-onboarding-2-subscription-agent-boundary.md)
 D17). 정확히 `true`일 때만 로그인 직후 대행 등록이 Claude Code 에이전트를 받는다.
 아니면 `409 claude_subscription_agent_paused`로 답하고, Claude 구독 에이전트 행은
-`brainUnavailableReason`을 싣는다. Codex 에이전트는 영향이 없다. 바꾼 뒤 **api**를
-재시작한다.
+`brainUnavailableReason`을 싣는다. Codex 에이전트는 영향이 없다. 꺼져 있으면 워크스페이스 범위·클라우드 work host(공용
+컴퓨터)에서 Claude Code 작업도 시작되지 않고(`409 claude_subscription_agent_paused`,
+#3431) 본인 소유 host는 영향이 없다. 바꾼 뒤 **api**와 **agent-worker**를 재시작한다.
 
 ---
 

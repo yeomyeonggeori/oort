@@ -5550,6 +5550,7 @@ async fn a_run_an_agent_raised_has_nobody_to_suggest_a_card_to() {
                 agent_member_id: fixture.hosted_agent,
                 approved_by: fixture.hosted_agent,
                 approved_host_id: None,
+                claude_subscription_agents_enabled: true,
             },
             &momo_agent::tools::ToolCall {
                 call_id: format!("call-{trigger:?}"),
@@ -5628,6 +5629,7 @@ async fn the_worker_card_suggest_lands_in_the_triggers_thread_once() {
         agent_member_id: fixture.hosted_agent,
         approved_by: fixture.hosted_agent,
         approved_host_id: None,
+        claude_subscription_agents_enabled: true,
     };
     let call_with = |call_id: &str, arguments: Value| momo_agent::tools::ToolCall {
         call_id: call_id.to_string(),

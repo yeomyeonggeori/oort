@@ -43,7 +43,11 @@
 //!   made, in [`crate::routes::approvals`], against the host the spawn will
 //!   finally run on.
 //!
-//! Workspace-scoped hosts are outside goal A and keep every rule they had.
+//! Workspace-scoped hosts are outside goal A and keep every rule they had —
+//! except one (#3431, ADR-0193 D18): while the Claude opt-in is off, Claude Code
+//! is not started on any shared (workspace-scoped or cloud) host, because the
+//! Claude login on it may be somebody else's and any member may approve work
+//! headed there. Refused in [`create_in_tx`] with `claude_subscription_agent_paused`.
 //!
 //! ## The daemon arm (#1114, closing #1132's first deviation)
 //!
@@ -97,12 +101,14 @@ use momo_t3::work_control::{
     insert_work_control_in_tx, last_used_spawn_host_in_tx, list_auto_approvals_in_tx,
     lock_work_control_in_tx, mark_control_dispatched_in_tx, record_host_last_used_in_tx,
     session_control_lineage_status_in_tx, session_is_local_pty_in_tx, settle_control_ack_in_tx,
-    spawn_ack_session_matches_in_tx, spawn_execution_object, spawn_host_candidates_in_tx,
-    spawn_is_auto_approved_in_tx, target_host_scope_allows, target_work_host_in_tx,
-    validated_error_label, validated_payload, validated_session_shape, validated_tool_key,
-    work_host_is_active_in_tx, NewWorkControl, WorkControlRow, ACTION_TYPE_WORK_SPAWN,
-    APPROVAL_SOURCE_WORK_CONTROL, KIND_INPUT, KIND_KILL, KIND_READ, KIND_SPAWN,
-    REFUSAL_REMOTE_HOST_KILL_ONLY, STATUS_APPROVED, STATUS_DISPATCHED, STATUS_PENDING_APPROVAL,
+    shared_host_refuses_claude_in_tx, spawn_ack_session_matches_in_tx, spawn_execution_object,
+    spawn_host_candidates_in_tx, spawn_is_auto_approved_in_tx, target_host_scope_allows,
+    target_work_host_in_tx, validated_error_label, validated_payload, validated_session_shape,
+    validated_tool_key, work_host_is_active_in_tx, work_session_tool_in_tx, NewWorkControl,
+    WorkControlRow, ACTION_TYPE_WORK_SPAWN, APPROVAL_SOURCE_WORK_CONTROL,
+    CLAUDE_SHARED_HOST_PAUSED_MESSAGE, KIND_INPUT, KIND_KILL, KIND_READ, KIND_SPAWN,
+    REFUSAL_CLAUDE_SUBSCRIPTION_PAUSED, REFUSAL_REMOTE_HOST_KILL_ONLY, STATUS_APPROVED,
+    STATUS_DISPATCHED, STATUS_PENDING_APPROVAL,
 };
 use momo_t3::{
     active_control_window_in_tx, expire_lapsed_control_windows_in_tx, work_tool_is_enabled_in_tx,
@@ -205,6 +211,8 @@ pub async fn create(
     let run_id = request.run_id;
     let target_host_id = request.target_host_id;
     let session_id = request.session_id;
+    let claude_subscription_agents_enabled =
+        state.agent_port.config.claude_subscription_agents_enabled;
 
     let control = settle(
         "work_controls.create",
@@ -222,6 +230,7 @@ pub async fn create(
                         session_id,
                         kind,
                         payload,
+                        claude_subscription_agents_enabled,
                     },
                 )
                 .await
@@ -248,6 +257,8 @@ struct CreateInput {
     session_id: Option<Uuid>,
     kind: &'static str,
     payload: Value,
+    /// `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED` (#3431, ADR-0193 D18).
+    claude_subscription_agents_enabled: bool,
 }
 
 async fn create_in_tx(conn: &mut PgConnection, input: CreateInput) -> Rejectable<WorkControlRow> {
@@ -401,6 +412,40 @@ async fn create_in_tx(conn: &mut PgConnection, input: CreateInput) -> Rejectable
                 StatusCode::CONFLICT,
                 "work session is under human control",
             )));
+        }
+    }
+
+    // #3431 (ADR-0193 D18) — a shared host (workspace-scoped or cloud) never
+    // runs Claude Code for an agent's request while the Claude opt-in is off:
+    // the Claude login on that machine may be somebody else's, and any channel
+    // member may approve work headed there. Before the auto-approval question
+    // below, so an owner's standing pre-authorisation cannot dispatch it either,
+    // and before the first write, so a refusal leaves no row, card or audit.
+    if !input.claude_subscription_agents_enabled
+        && (input.kind == KIND_SPAWN || input.kind == KIND_INPUT)
+    {
+        let claude_tool = match (input.kind, tool, input.session_id) {
+            (KIND_SPAWN, Some(tool), _) => Some(tool.to_string()),
+            (_, _, Some(session_id)) => {
+                work_session_tool_in_tx(conn, input.workspace_id, session_id).await?
+            }
+            _ => None,
+        };
+        if let Some(claude_tool) = claude_tool {
+            if shared_host_refuses_claude_in_tx(
+                conn,
+                input.workspace_id,
+                input.target_host_id,
+                &claude_tool,
+            )
+            .await?
+            {
+                return Ok(Err(ApiError::coded(
+                    StatusCode::CONFLICT,
+                    REFUSAL_CLAUDE_SUBSCRIPTION_PAUSED,
+                    CLAUDE_SHARED_HOST_PAUSED_MESSAGE,
+                )));
+            }
         }
     }
 

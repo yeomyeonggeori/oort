@@ -1637,6 +1637,7 @@ async fn ade1_6_a_tool_result_stands_beside_its_call_and_survives_a_replay() {
         agent_member_id: agent,
         approved_by: tenant.human,
         approved_host_id: None,
+        claude_subscription_agents_enabled: true,
     };
 
     let first = tool_exec::execute(&worker_pool, &context, &call)

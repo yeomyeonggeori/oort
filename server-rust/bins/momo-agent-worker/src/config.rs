@@ -119,6 +119,11 @@ pub struct WorkerConfig {
     pub report_protocol_enabled: bool,
     /// #3162 — the team-memory summary loop (`MEMORY_*` keys).
     pub memory: MemoryConfig,
+    /// `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED` (#3431, ADR-0193 D18) — read
+    /// from the **same key and by the same rule** as `momo-server`'s
+    /// `AgentPortConfig`: only an exact `true` opens it. Off keeps the
+    /// `work.session.spawn` tool from starting Claude Code on a shared host.
+    pub claude_subscription_agents_enabled: bool,
 }
 
 /// The team-memory summary loop's knobs (#3162, ADR-0196 D10, plan §6.1/§6.6). Every default
@@ -564,6 +569,12 @@ fn clamp_utc_offset(minutes: i32) -> i32 {
 /// [`momo_settings::ProviderConfig::from_env`] already accepts for
 /// `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK`, so one env block reads the same in
 /// both directions.
+/// Off unless the value is exactly `true` (after trimming) — the rule
+/// `momo-server` applies to the same key.
+fn claude_subscription_agents_switch_on(value: Option<&str>) -> bool {
+    value.is_some_and(|value| value.trim() == "true")
+}
+
 fn report_protocol_enabled(raw: Option<&str>) -> bool {
     !matches!(
         raw.map(|value| value.trim().to_ascii_lowercase())
@@ -651,6 +662,9 @@ impl WorkerConfig {
                 env("AGENT_REPORT_PROTOCOL_ENABLED").as_deref(),
             ),
             memory: MemoryConfig::from_env()?,
+            claude_subscription_agents_enabled: claude_subscription_agents_switch_on(
+                env("MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED").as_deref(),
+            ),
         })
     }
 
@@ -677,6 +691,7 @@ impl WorkerConfig {
             egress: momo_settings::EgressPolicy::default(),
             report_protocol_enabled: true,
             memory: MemoryConfig::default(),
+            claude_subscription_agents_enabled: false,
         }
     }
 
@@ -768,6 +783,24 @@ fn choose_log_filter(rust_log: Option<&str>, log_level: Option<&str>) -> String 
 
 #[cfg(test)]
 mod tests {
+    /// #3431: the worker reads the Claude opt-in by the server's rule — only an
+    /// exact `true` opens it, and the shipped default (`for_target`) is off.
+    #[test]
+    fn the_claude_opt_in_is_off_unless_exactly_true() {
+        assert!(!WorkerConfig::for_target("postgres://x").claude_subscription_agents_enabled);
+        assert!(claude_subscription_agents_switch_on(Some("true")));
+        assert!(claude_subscription_agents_switch_on(Some(" true ")));
+        for off in [
+            None,
+            Some(""),
+            Some("True"),
+            Some("1"),
+            Some("yes"),
+            Some("tru"),
+        ] {
+            assert!(!claude_subscription_agents_switch_on(off), "{off:?}");
+        }
+    }
 
     /// Review M-1: the built-in `http://localhost:8088/v1` default must not
     /// become a connect-time exemption; an operator-written value does.
