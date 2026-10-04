@@ -590,7 +590,9 @@ pub async fn list(
 /// *What* the queue holds is the ledger's answer, not this route's: on a
 /// member-scoped host it withholds every non-`kill` control its owner did not
 /// request, and every shell (ADR-0188 R0.1 —
-/// [`momo_t3::pending_controls_for_host_in_tx`]).
+/// [`momo_t3::work_control::pending_controls_for_host_in_tx`]). On a shared
+/// (workspace-scoped or cloud) host it withholds Claude spawns and Claude
+/// `input` while the Claude opt-in is off (#3431, ADR-0193 D18).
 pub async fn pending_controls(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -609,12 +611,19 @@ pub async fn pending_controls(
         return Err(crate::work_host_auth::signed_request_unauthorized());
     }
 
+    let claude_subscription_agents_enabled =
+        state.agent_port.config.claude_subscription_agents_enabled;
     let (controls, envelopes, letters) = settle(
         "work_hosts.pending_controls",
         tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
-                let controls =
-                    momo_t3::pending_controls_for_host_in_tx(conn, workspace_id, host_id).await?;
+                let controls = momo_t3::work_control::pending_controls_for_host_in_tx(
+                    conn,
+                    workspace_id,
+                    host_id,
+                    claude_subscription_agents_enabled,
+                )
+                .await?;
                 // ADR-0146 개정 D-10 (#3023): a signed control travels with
                 // the person's signature, in the shape the host re-verifies.
                 let envelopes = crate::human_control::envelopes_in_tx(conn, &controls).await?;

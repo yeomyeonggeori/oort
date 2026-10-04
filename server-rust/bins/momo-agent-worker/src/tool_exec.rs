@@ -74,6 +74,9 @@ pub struct ToolContext {
     /// ADR-0125 D6-A (#1114) — the host the approver chose, when the approval
     /// asked. `None` means the call's own `host_id` argument stands.
     pub approved_host_id: Option<Uuid>,
+    /// `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED` (#3431, ADR-0193 D18): off
+    /// keeps Claude Code off every shared (workspace-scoped or cloud) host.
+    pub claude_subscription_agents_enabled: bool,
 }
 
 /// Run an approved tool call and record its `tool_result` in the channel, in one
@@ -738,6 +741,7 @@ async fn spawn_session(
     let channel_id = context.channel_id;
     let agent_member_id = context.agent_member_id;
     let approved_by = context.approved_by;
+    let claude_subscription_agents_enabled = context.claude_subscription_agents_enabled;
     let call_id = call.call_id.clone();
 
     let owner_member_id = match momo_db::with_tenant_tx(pool, workspace_id, move |conn| {
@@ -786,6 +790,7 @@ async fn spawn_session(
                     expected_cloud_host_id: cloud_host_id,
                     arguments: spawn,
                     call_id,
+                    claude_subscription_agents_enabled,
                 },
             )
             .await
@@ -835,6 +840,7 @@ struct SpawnInTx {
     expected_cloud_host_id: Option<Uuid>,
     arguments: SpawnArguments,
     call_id: String,
+    claude_subscription_agents_enabled: bool,
 }
 
 /// The eligibility re-check, the session, and the control row — one transaction.
@@ -927,6 +933,28 @@ async fn spawn_session_in_tx(
             format!(
                 "`{}` is not enabled in this workspace.",
                 input.arguments.tool
+            ),
+        ));
+    }
+    // #3431 (ADR-0193 D18) — the last gate before a session: no Claude Code on a
+    // shared (workspace-scoped or cloud) host while the Claude opt-in is off,
+    // whoever approved. The callers that reach here without a card (a standing
+    // auto-approval, a G6 exemption) are why it is asked again.
+    if !input.claude_subscription_agents_enabled
+        && momo_t3::work_control::shared_host_refuses_claude_in_tx(
+            conn,
+            input.workspace_id,
+            input.host_id,
+            &input.arguments.tool,
+        )
+        .await?
+    {
+        return Ok(ToolResult::error(
+            call_id,
+            format!(
+                "{} ({})",
+                momo_t3::work_control::CLAUDE_SHARED_HOST_PAUSED_MESSAGE,
+                momo_t3::work_control::REFUSAL_CLAUDE_SUBSCRIPTION_PAUSED
             ),
         ));
     }
