@@ -315,7 +315,7 @@ const CLEANUP_KIND_COPY: Record<HostedCleanupKind, CleanupKindCopy> = {
     expectation:
       "이 봇을 지울지 남길지 직접 정하세요. oort는 어느 쪽도 대신 하지 않아요.",
     caution:
-      "지우면 그 봇과 나눈 AI 회사 쪽 대화 기록도 함께 사라져요. 남기는 것도 정식 답이며, 그때는 남긴 이유가 기록에 남아요.",
+      "지우면 그 봇과 나눈 대화 기록도 AI 회사에서 함께 사라져요. 남기는 것도 정식 답이며, 그때는 남긴 이유가 기록에 남아요.",
   },
   secret: {
     label: "연결 자격증명",
@@ -372,7 +372,7 @@ export function dispositionChoices(
         id: "delete",
         label: "봇을 지웠어요",
         detail:
-          "AI 회사에서 이 봇을 삭제했어요. 그 봇과 나눈 AI 회사 쪽 대화 기록도 함께 사라져요.",
+          "AI 회사에서 이 봇을 삭제했어요. 그 봇과 나눈 대화 기록도 함께 사라져요.",
         destructive: true,
       },
       {

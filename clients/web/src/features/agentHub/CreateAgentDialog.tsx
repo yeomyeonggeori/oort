@@ -398,7 +398,7 @@ function CreateAgentPanel({
           className="border-t border-line pt-4 text-meta text-ink-muted"
           data-testid="create-agent-credential-note"
         >
-          API 키는 여기에 넣지 않아요. AI 회사 자격증명은 AI의 팀 AI 키에서
+          API 키는 여기에 넣지 않아요. AI 회사 자격증명은 AI 화면의 팀 AI 키에서
           한 번만 등록하고, 에이전트는 그 연결을 통해 실행돼요.
         </p>
 

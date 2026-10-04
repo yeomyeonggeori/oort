@@ -579,11 +579,11 @@ export function oauthConsentFacts(preview: OauthConsentPreview): OauthConsentFac
 export const OAUTH_CONSENT_TITLE = "외부 에이전트 연결 승인";
 
 export const OAUTH_CONSENT_LEAD =
-  "외부 AI 회사가 이 워크스페이스의 전용 에이전트로 접속하려고 해요. 아래 권한을 직접 확인하고 승인하거나 거부하세요. 감지됐다는 사실은 권한의 근거가 아니에요.";
+  "외부 AI 서비스가 이 워크스페이스의 전용 에이전트로 접속하려고 해요. 아래 권한을 직접 확인하고 승인하거나 거부하세요. 감지됐다는 사실은 권한의 근거가 아니에요.";
 
 /** clientId·redirectUri 가 무엇인지 (규율 3). 운영자가 검증한 값임을 말한다. */
 export const OAUTH_CONSENT_CLIENT_NOTE =
-  "요청한 클라이언트와 돌아갈 주소는 이 워크스페이스 운영자가 미리 등록한 값이에요. 등록되지 않은 AI 회사는 이 화면까지 오지 못해요.";
+  "요청한 클라이언트와 돌아갈 주소는 이 워크스페이스 운영자가 미리 등록한 값이에요. 등록되지 않은 클라이언트는 이 화면까지 오지 못해요.";
 
 /** 승인이 사람만의 보안 결정이고, 닫기·뒤로가기가 권한을 열지 않는다는 사실. */
 export const OAUTH_CONSENT_SECURITY_NOTE =
@@ -653,10 +653,10 @@ export const OAUTH_CONSENT_WORKSPACE_FALLBACK = "이 워크스페이스";
 export const OAUTH_CONSENT_AGENT_KEY = "전용 에이전트";
 export const OAUTH_CONSENT_CANDIDATE_LEGEND = "접속을 허용할 전용 에이전트";
 export const OAUTH_CONSENT_CANDIDATE_DETAIL =
-  "이 에이전트로 외부 AI 회사의 접속을 허용해요.";
+  "이 에이전트로 외부 AI 서비스의 접속을 허용해요.";
 export const OAUTH_CONSENT_SCOPES_LEGEND = "요청된 권한";
 export const OAUTH_CONSENT_SCOPES_HINT =
-  "AI 회사가 요청한 권한이에요. 좁힐 수는 있어도 넓힐 수는 없어요.";
+  "외부 AI 서비스가 요청한 권한이에요. 좁힐 수는 있어도 넓힐 수는 없어요.";
 export const OAUTH_CONSENT_CHANNELS_LEGEND = "닿을 채널";
 export const OAUTH_CONSENT_CHANNELS_HINT =
   "고른 채널에서만 이 에이전트가 부름을 받아요.";

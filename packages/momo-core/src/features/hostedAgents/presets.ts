@@ -129,7 +129,7 @@ export function parseHostedRoutineLabel(
   return { workspace, identifier };
 }
 
-/** routine 이 시킬 일. ADR-0162 D8 의 template 문장 그대로. */
+/** routine 이 시킬 일. ADR-0162 D8 의 template 문장 그대로. AI 회사의 routine 에 붙여 넣는 지시문이라 화면 문장(해요체)이 아니다. */
 export const HOSTED_ROUTINE_TEMPLATE =
   "oort inbox를 확인하고, 할 일이 있으면 claim한 뒤 결과를 원래 thread에 게시한다.";
 
