@@ -238,7 +238,11 @@ fn run_event_schema() -> Value {
             })),
             "detail": nullable(text(2_048)),
             "textDelta": nullable(text(8_192)),
-            "eventId": nullable(uuid_property())
+            "eventId": nullable(uuid_property()),
+            // ADR-0162 증보 3 D11. 1..=80 *characters* after trimming, no control /
+            // bidi character, no `/` or backslash; the byte ceiling is the 4-byte-per-char
+            // envelope of that, and the server applies the shared character rule.
+            "stage": nullable(text(MAX_STAGE_BYTES))
         }
     })
 }
@@ -264,7 +268,36 @@ fn run_complete_schema() -> Value {
                     "cachedTokens": token_count(),
                     "reasoningTokens": token_count()
                 }
-            }))
+            })),
+            "artifacts": nullable(artifacts_schema())
+        }
+    })
+}
+
+/// 80 characters at the UTF-8 worst case of 4 bytes each (ADR-0162 증보 3 D11).
+pub const MAX_STAGE_BYTES: u64 = 320;
+
+/// The ceiling of `added`/`deleted`/`commits`: the `integer` column the same
+/// numbers take in `work_session_share`. A server-side test measures this
+/// against `momo_t3::work_share::MAX_COUNT`, which this crate may not import.
+pub const MAX_ARTIFACT_COUNT: i64 = i32::MAX as i64;
+
+/// ADR-0162 증보 3 D12 — the finished work's outputs, all optional, nothing else.
+///
+/// `additionalProperties:false` is the defence: a commit title, a file name or a
+/// remote URL has no key, so it can neither be sent nor stored.
+fn artifacts_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            // 300 is `validated_pr_url`'s own ceiling.
+            "prUrl": nullable(text(300)),
+            // 200 characters at the UTF-8 worst case.
+            "branch": nullable(text(800)),
+            "added": nullable(integer(0, MAX_ARTIFACT_COUNT)),
+            "deleted": nullable(integer(0, MAX_ARTIFACT_COUNT)),
+            "commits": nullable(integer(0, MAX_ARTIFACT_COUNT))
         }
     })
 }
@@ -1141,6 +1174,65 @@ mod tests {
             assert_eq!(property["minimum"], json!(0), "{field}");
             assert_eq!(property["maximum"], json!(MAX_TOKEN_COUNT), "{field}");
         }
+    }
+
+    /// ADR-0162 증보 3 D11/D12: the optional report fields are in the published
+    /// schema, `artifacts` is closed, and a call without them still validates.
+    #[test]
+    fn progress_and_artifact_fields_are_declared_and_closed() {
+        let find = |name: &str| {
+            TOOL_CATALOG
+                .iter()
+                .find(|tool| tool.name == name)
+                .expect("tool")
+        };
+        let (event, complete) = (find(TOOL_RUN_EVENT), find(TOOL_RUN_COMPLETE));
+
+        let base = json!({"leaseHandle": "x"});
+        assert!(
+            validate_arguments(event, &base).is_ok(),
+            "old callers still validate"
+        );
+        let staged = json!({"leaseHandle": "x", "stage": "원인 찾음"});
+        assert!(validate_arguments(event, &staged).is_ok());
+        let null_stage = json!({"leaseHandle": "x", "stage": null});
+        assert!(validate_arguments(event, &null_stage).is_ok());
+        let too_long =
+            json!({"leaseHandle": "x", "stage": "x".repeat(MAX_STAGE_BYTES as usize + 1)});
+        assert_eq!(
+            validate_arguments(event, &too_long),
+            Err(ToolFailure::InvalidArguments)
+        );
+        let not_text = json!({"leaseHandle": "x", "stage": 3});
+        assert_eq!(
+            validate_arguments(event, &not_text),
+            Err(ToolFailure::InvalidArguments)
+        );
+
+        let done = |artifacts: Value| json!({"leaseHandle": "x", "status": "succeeded", "artifacts": artifacts});
+        assert!(validate_arguments(complete, &done(json!({"prUrl": "https://github.com/a/b/pull/1", "branch": "x", "added": 1, "deleted": 2, "commits": 3}))).is_ok());
+        assert!(validate_arguments(complete, &done(json!({}))).is_ok());
+        assert!(validate_arguments(complete, &done(Value::Null)).is_ok());
+        for bad in [
+            json!({"title": "fix"}),
+            json!({"files": ["a.rs"]}),
+            json!({"added": -1}),
+            json!({"commits": MAX_ARTIFACT_COUNT + 1}),
+            json!({"added": 1.5}),
+            json!({"prUrl": 5}),
+            json!("https://github.com/a/b/pull/1"),
+        ] {
+            assert_eq!(
+                validate_arguments(complete, &done(bad.clone())),
+                Err(ToolFailure::InvalidArguments),
+                "{bad}"
+            );
+        }
+        let schema = complete.input_schema();
+        assert_eq!(
+            schema["properties"]["artifacts"]["additionalProperties"],
+            json!(false)
+        );
     }
 
     #[test]

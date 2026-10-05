@@ -57,7 +57,10 @@ use momo_outbox::{
     lock_gateway_lease_in_tx, release_gateway_lease_in_tx, renew_gateway_lease_in_tx,
     settle_gateway_job_in_tx, GatewayLeaseBinding,
 };
-use serde_json::{json, Value};
+use momo_t3::work_share::{
+    validated_branch, validated_count, validated_pr_url, validated_stage_markers, MAX_COUNT,
+};
+use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::auth::GatewayCaller;
@@ -239,6 +242,7 @@ pub async fn event(
         status,
         detail,
         text_delta,
+        stage: None,
         event_id,
         actor_member_id,
         via_token_id,
@@ -296,6 +300,10 @@ pub(crate) struct GatewayEventInput {
     pub status: &'static str,
     pub detail: Option<String>,
     pub text_delta: Option<String>,
+    /// ADR-0162 증보 3 D11 — one already-validated progress marker
+    /// ([`validated_gateway_stage`]). Only the Agent Port tool carries one; the
+    /// REST callback is not extended (`None`).
+    pub stage: Option<String>,
     pub event_id: Uuid,
     /// `None` only for the deprecated process secret, which names no member.
     pub actor_member_id: Option<Uuid>,
@@ -321,6 +329,7 @@ pub(crate) async fn record_gateway_event_in_tx(
         status,
         detail,
         text_delta,
+        stage,
         event_id,
         actor_member_id,
         via_token_id,
@@ -419,6 +428,13 @@ pub(crate) async fn record_gateway_event_in_tx(
         }
     }
 
+    // ADR-0162 증보 3 D11 — the marker and the step it spends. A settled run
+    // (`cancelled` acknowledgement) takes none: the run is over and its record
+    // must not move.
+    if let Some(stage) = stage.as_deref().filter(|_| !run.status.is_terminal()) {
+        record_stage_in_tx(conn, workspace_id, run_id, stage).await?;
+    }
+
     write_audit(
         conn,
         &AuditEntry::new(workspace_id, EVENT_AUDIT_ACTION)
@@ -481,6 +497,7 @@ pub async fn complete(
         safe_error,
         usage,
         usage_detail,
+        artifacts: None,
         actor_member_id,
         via_token_id,
         subscription_agents_enabled: state.agent_port.config.subscription_agents_enabled,
@@ -528,6 +545,9 @@ pub(crate) struct GatewayCompleteInput {
     pub safe_error: Option<String>,
     pub usage: Option<RunUsageReport>,
     pub usage_detail: Option<Value>,
+    /// ADR-0162 증보 3 D12 — already validated ([`validated_gateway_artifacts`]);
+    /// the REST callback is not extended (`None`).
+    pub artifacts: Option<GatewayArtifacts>,
     pub actor_member_id: Option<Uuid>,
     pub via_token_id: Option<Uuid>,
     /// ADR-0193 D6 (#2815) — `AgentPortConfig::subscription_agents_enabled`,
@@ -559,6 +579,7 @@ pub(crate) async fn complete_gateway_run_in_tx(
         safe_error,
         usage,
         usage_detail,
+        artifacts,
         actor_member_id,
         via_token_id,
         subscription_agents_enabled,
@@ -692,13 +713,25 @@ pub(crate) async fn complete_gateway_run_in_tx(
     .await?;
 
     // 3. the terminal status.
-    let output = json!({
-        "schema": "momo.agent_gateway.output.v0",
-        "status": if succeeded { "succeeded" } else { "failed" },
-        "body": body,
-        "message_id": message.message.id.to_string(),
-        "usage": usage_detail,
-    });
+    // Start from what the run already carries (`stages`, D11) so completing
+    // never erases the progress it reported; the completion's own keys win.
+    let mut output = existing_output_object_in_tx(conn, run_id).await?;
+    for (key, value) in [
+        ("schema", json!("momo.agent_gateway.output.v0")),
+        (
+            "status",
+            json!(if succeeded { "succeeded" } else { "failed" }),
+        ),
+        ("body", json!(body)),
+        ("message_id", json!(message.message.id.to_string())),
+        ("usage", usage_detail.clone().unwrap_or(Value::Null)),
+    ] {
+        output.insert(key.into(), value);
+    }
+    if let Some(artifacts) = artifacts.as_ref() {
+        output.insert("artifacts".into(), artifacts.to_json());
+    }
+    let output = Value::Object(output);
     let error_json = (!succeeded).then(|| {
         json!({
             "code": "hermes_gateway_failed",
@@ -750,6 +783,27 @@ pub(crate) async fn complete_gateway_run_in_tx(
     .await
     .map_err(momo_db::DbError::from)?;
 
+    // ADR-0162 증보 3 D15 — one row per completion that carried artifacts: the
+    // key names only, never a value.
+    if let Some(artifacts) = artifacts.as_ref() {
+        write_audit(
+            conn,
+            &AuditEntry::new(workspace_id, ARTIFACTS_AUDIT_ACTION)
+                .by(run.agent_member_id)
+                .target("agent_run", run_id)
+                .via_token(via_token_id)
+                .run(run_id)
+                .with_schema(
+                    "momo.agent_run.artifacts_reported.v0",
+                    json!({
+                        "run_id": run_id.to_string(),
+                        "keys": artifacts.keys(),
+                    }),
+                ),
+        )
+        .await?;
+    }
+
     write_audit(
         conn,
         &AuditEntry::new(workspace_id, "agent.gateway.completed")
@@ -775,6 +829,285 @@ pub(crate) async fn complete_gateway_run_in_tx(
         message.message.seq,
         if succeeded { "succeeded" } else { "failed" },
     )))
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0162 증보 3 — progress markers and artifacts (D11, D12, D15)
+// ---------------------------------------------------------------------------
+
+const ARTIFACTS_AUDIT_ACTION: &str = "agent.run.artifacts_reported";
+const REPORT_REJECTED_AUDIT_ACTION: &str = "agent.run.report_rejected";
+/// `agent_run.output.stages` keeps the newest this many (the share's
+/// `MAX_STAGE_MARKERS`).
+const MAX_STORED_STAGES: usize = momo_t3::work_share::MAX_STAGE_MARKERS;
+
+/// The closed set of refusal reasons a report can be audited with. A code, never
+/// the offending text: the value is attacker-shaped and the audit row is not the
+/// place to keep it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReportRejection {
+    Stage,
+    ArtifactsShape,
+    ArtifactsPrUrl,
+    ArtifactsBranch,
+    ArtifactsCount,
+}
+
+impl ReportRejection {
+    pub(crate) const fn code(self) -> &'static str {
+        match self {
+            Self::Stage => "stage_invalid",
+            Self::ArtifactsShape => "artifacts_shape_invalid",
+            Self::ArtifactsPrUrl => "artifacts_pr_url_invalid",
+            Self::ArtifactsBranch => "artifacts_branch_invalid",
+            Self::ArtifactsCount => "artifacts_count_invalid",
+        }
+    }
+}
+
+/// One stage marker, under the share's own rule ([`validated_stage_markers`] —
+/// the very function `work_session_share` runs; 1..=80 characters, no control or
+/// bidi character, no `/` or `\\`). Trimmed, as the share trims.
+pub(crate) fn validated_gateway_stage(raw: &str) -> Result<String, ReportRejection> {
+    validated_stage_markers(&[raw.to_string()])
+        .ok()
+        .and_then(|mut markers| markers.pop())
+        .ok_or(ReportRejection::Stage)
+}
+
+/// The finished work's outputs (D12), after validation. Every field is optional.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct GatewayArtifacts {
+    pub pr_url: Option<String>,
+    pub branch: Option<String>,
+    pub added: Option<i64>,
+    pub deleted: Option<i64>,
+    pub commits: Option<i64>,
+}
+
+impl GatewayArtifacts {
+    fn is_empty(&self) -> bool {
+        self.pr_url.is_none()
+            && self.branch.is_none()
+            && self.added.is_none()
+            && self.deleted.is_none()
+            && self.commits.is_none()
+    }
+
+    /// The stored shape — only the keys that were reported.
+    pub(crate) fn to_json(&self) -> Value {
+        let mut object = Map::new();
+        if let Some(value) = &self.pr_url {
+            object.insert("prUrl".into(), json!(value));
+        }
+        if let Some(value) = &self.branch {
+            object.insert("branch".into(), json!(value));
+        }
+        for (key, value) in [
+            ("added", self.added),
+            ("deleted", self.deleted),
+            ("commits", self.commits),
+        ] {
+            if let Some(value) = value {
+                object.insert(key.into(), json!(value));
+            }
+        }
+        Value::Object(object)
+    }
+
+    /// The key names present, for the audit row.
+    fn keys(&self) -> Vec<&'static str> {
+        let mut keys = Vec::new();
+        for (key, present) in [
+            ("prUrl", self.pr_url.is_some()),
+            ("branch", self.branch.is_some()),
+            ("added", self.added.is_some()),
+            ("deleted", self.deleted.is_some()),
+            ("commits", self.commits.is_some()),
+        ] {
+            if present {
+                keys.push(key);
+            }
+        }
+        keys
+    }
+}
+
+/// `artifacts` (D12) against the share's rules. `Ok(None)` for an absent, `null`
+/// or empty object; any malformed field is an `Err` — the caller rejects the
+/// **whole** completion, nothing is dropped and nothing is stored.
+///
+/// `additionalProperties:false` is enforced here as well as by the published
+/// schema, so the contract does not depend on the transport having checked it.
+pub(crate) fn validated_gateway_artifacts(
+    raw: Option<&Value>,
+    allowed_hosts: &[String],
+) -> Result<Option<GatewayArtifacts>, ReportRejection> {
+    let object = match raw {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::Object(object)) => object,
+        Some(_) => return Err(ReportRejection::ArtifactsShape),
+    };
+    if object.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "prUrl" | "branch" | "added" | "deleted" | "commits"
+        )
+    }) {
+        return Err(ReportRejection::ArtifactsShape);
+    }
+    let text = |key: &str| -> Result<Option<&str>, ReportRejection> {
+        match object.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::String(value)) => Ok(Some(value.as_str())),
+            Some(_) => Err(ReportRejection::ArtifactsShape),
+        }
+    };
+    let count = |key: &str| -> Result<Option<i64>, ReportRejection> {
+        let raw = match object.get(key) {
+            None | Some(Value::Null) => return Ok(None),
+            Some(Value::Number(number)) => number.as_i64(),
+            Some(_) => return Err(ReportRejection::ArtifactsShape),
+        };
+        // A fractional or beyond-i64 number is not a count either.
+        if raw.is_none() {
+            return Err(ReportRejection::ArtifactsCount);
+        }
+        validated_count(raw, key, MAX_COUNT).map_err(|_| ReportRejection::ArtifactsCount)
+    };
+    let artifacts = GatewayArtifacts {
+        pr_url: text("prUrl")?
+            .map(|value| validated_pr_url(value, allowed_hosts))
+            .transpose()
+            .map_err(|_| ReportRejection::ArtifactsPrUrl)?,
+        branch: text("branch")?
+            .map(validated_branch)
+            .transpose()
+            .map_err(|_| ReportRejection::ArtifactsBranch)?,
+        added: count("added")?,
+        deleted: count("deleted")?,
+        commits: count("commits")?,
+    };
+    Ok((!artifacts.is_empty()).then_some(artifacts))
+}
+
+/// Where a report stands before its refusal may be recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReportStanding {
+    /// A live lease on a run that can still take a report: a refusal is audited
+    /// and answered 400.
+    Live,
+    /// Anything else (stale or expired lease, terminal run, approval hold,
+    /// foreign run): the bad field is ignored and the call takes its ordinary
+    /// path, so a finished run's retried completion replays its first answer and
+    /// a lost lease answers the one 409 — and **no audit row is written**, so a
+    /// dead handle cannot grow the audit log.
+    NotLive,
+}
+
+/// Judge [`ReportStanding`] under the run's row lock.
+pub(crate) async fn report_standing_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+    lease: GatewayLeaseBinding,
+) -> Result<ReportStanding, momo_db::DbError> {
+    let Some(run) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await? else {
+        return Ok(ReportStanding::NotLive);
+    };
+    if run.agent_member_id != agent_member_id
+        || run.status.is_terminal()
+        || run.status.is_approval_held()
+        || !lease_is_authorized(conn, workspace_id, run_id, &run, lease, false).await?
+    {
+        return Ok(ReportStanding::NotLive);
+    }
+    Ok(ReportStanding::Live)
+}
+
+/// The audit row a refused report leaves (D15): the run, the tool and a reason
+/// code — no text from the report.
+pub(crate) async fn write_report_rejected_audit(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+    via_token_id: Option<Uuid>,
+    tool: &'static str,
+    reason: ReportRejection,
+) -> Result<(), momo_db::DbError> {
+    write_audit(
+        conn,
+        &AuditEntry::new(workspace_id, REPORT_REJECTED_AUDIT_ACTION)
+            .by(agent_member_id)
+            .target("agent_run", run_id)
+            .via_token(via_token_id)
+            .run(run_id)
+            .with_schema(
+                "momo.agent_run.report_rejected.v0",
+                json!({
+                    "run_id": run_id.to_string(),
+                    "tool": tool,
+                    "reason": reason.code(),
+                }),
+            ),
+    )
+    .await?;
+    Ok(())
+}
+
+/// The run's `output` as an object to extend, or an empty one. A stored value
+/// that is not an object (never written by this code) is not carried forward.
+async fn existing_output_object_in_tx(
+    conn: &mut PgConnection,
+    run_id: Uuid,
+) -> Result<Map<String, Value>, momo_db::DbError> {
+    let stored: Option<Value> =
+        momo_db::sqlx::query_scalar("SELECT output FROM agent_run WHERE id = $1")
+            .bind(run_id)
+            .fetch_one(&mut *conn)
+            .await?;
+    Ok(match stored {
+        Some(Value::Object(object)) => object,
+        _ => Map::new(),
+    })
+}
+
+/// Append one marker to `output.stages` (newest [`MAX_STORED_STAGES`] kept, an
+/// immediate repeat folded) and spend one step, saturating at `max_steps`
+/// (`agent_run_step_cap_ck`). The caller holds the run's row lock.
+async fn record_stage_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    stage: &str,
+) -> Result<(), momo_db::DbError> {
+    let mut output = existing_output_object_in_tx(conn, run_id).await?;
+    let mut stages: Vec<Value> = match output.remove("stages") {
+        Some(Value::Array(items)) => items.into_iter().filter(Value::is_string).collect(),
+        _ => Vec::new(),
+    };
+    if stages.last().and_then(Value::as_str) != Some(stage) {
+        stages.push(json!(stage));
+    }
+    if stages.len() > MAX_STORED_STAGES {
+        stages.drain(..stages.len() - MAX_STORED_STAGES);
+    }
+    output.insert("stages".into(), Value::Array(stages));
+    momo_db::sqlx::query(
+        "UPDATE agent_run \
+            SET output = $3, \
+                step_count = LEAST(step_count + 1, max_steps), \
+                updated_at = now() \
+          WHERE id = $1 AND workspace_id = $2",
+    )
+    .bind(run_id)
+    .bind(workspace_id)
+    .bind(Value::Object(output))
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1127,6 +1460,132 @@ fn event_progress_phase(status: &str) -> momo_agent::AgentPhase {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hosts() -> Vec<String> {
+        vec!["github.com".to_string()]
+    }
+
+    /// D11 — the stage rule is the share's rule, not a copy of it: the same
+    /// inputs the share test refuses are refused here, and a Korean marker of 80
+    /// characters (more than 80 bytes) is accepted.
+    #[test]
+    fn a_stage_marker_follows_the_share_rule() {
+        assert_eq!(
+            validated_gateway_stage("  원인 찾음 ").as_deref(),
+            Ok("원인 찾음")
+        );
+        assert!(validated_gateway_stage(&"가".repeat(80)).is_ok());
+        for bad in [
+            "",
+            "   ",
+            &"x".repeat(81),
+            "bad\u{7}",
+            "\u{202E}rtl",
+            "a/b",
+            "a\\b",
+            "/Users/me/secret/auth.rs",
+        ] {
+            assert_eq!(
+                validated_gateway_stage(bad),
+                Err(ReportRejection::Stage),
+                "{bad:?}"
+            );
+        }
+    }
+
+    /// D12 — a valid report is stored as sent (PR URL canonicalised), an absent
+    /// or empty one stores nothing.
+    #[test]
+    fn valid_artifacts_are_normalised_and_an_empty_report_is_nothing() {
+        let artifacts = validated_gateway_artifacts(
+            Some(&json!({
+                "prUrl": "https://GitHub.com/acme/app/pull/42?x=1#y",
+                "branch": "feat/x",
+                "added": 10, "deleted": 0, "commits": 3
+            })),
+            &hosts(),
+        )
+        .expect("valid")
+        .expect("present");
+        assert_eq!(
+            artifacts.to_json(),
+            json!({
+                "prUrl": "https://github.com/acme/app/pull/42",
+                "branch": "feat/x", "added": 10, "deleted": 0, "commits": 3
+            })
+        );
+        assert_eq!(
+            artifacts.keys(),
+            ["prUrl", "branch", "added", "deleted", "commits"]
+        );
+        for none in [
+            None,
+            Some(&Value::Null),
+            Some(&json!({})),
+            Some(&json!({"added": null})),
+        ] {
+            assert_eq!(validated_gateway_artifacts(none, &hosts()), Ok(None));
+        }
+    }
+
+    /// D12 — every malformed field refuses the whole report, and says which kind
+    /// of field with a closed code.
+    #[test]
+    fn each_malformed_artifact_field_refuses_the_report() {
+        let cases = [
+            (json!("x"), ReportRejection::ArtifactsShape),
+            (json!({"title": "fix"}), ReportRejection::ArtifactsShape),
+            (json!({"prUrl": 5}), ReportRejection::ArtifactsShape),
+            (
+                json!({"prUrl": "http://github.com/a/b/pull/1"}),
+                ReportRejection::ArtifactsPrUrl,
+            ),
+            (
+                json!({"prUrl": "https://evil.example/a/b/pull/1"}),
+                ReportRejection::ArtifactsPrUrl,
+            ),
+            (
+                json!({"prUrl": "https://github.com/a/b/pull/1/files"}),
+                ReportRejection::ArtifactsPrUrl,
+            ),
+            (
+                json!({"branch": "/etc/passwd"}),
+                ReportRejection::ArtifactsBranch,
+            ),
+            (
+                json!({"branch": "fix: rotate"}),
+                ReportRejection::ArtifactsBranch,
+            ),
+            (json!({"branch": "C:\\x"}), ReportRejection::ArtifactsBranch),
+            (json!({"added": -1}), ReportRejection::ArtifactsCount),
+            (json!({"deleted": 1.5}), ReportRejection::ArtifactsCount),
+            (
+                json!({"commits": MAX_COUNT + 1}),
+                ReportRejection::ArtifactsCount,
+            ),
+            (json!({"commits": "3"}), ReportRejection::ArtifactsShape),
+        ];
+        for (value, expected) in cases {
+            assert_eq!(
+                validated_gateway_artifacts(Some(&value), &hosts()),
+                Err(expected),
+                "{value}"
+            );
+        }
+        assert!(
+            validated_gateway_artifacts(Some(&json!({"commits": MAX_COUNT})), &hosts()).is_ok()
+        );
+    }
+
+    /// The published schema's ceiling is the share's.
+    #[test]
+    fn the_published_count_ceiling_is_the_shares() {
+        assert_eq!(momo_mcp::MAX_ARTIFACT_COUNT, MAX_COUNT);
+        assert_eq!(
+            momo_mcp::MAX_STAGE_BYTES as usize,
+            momo_t3::work_share::MAX_STAGE_MARKER_CHARS * 4
+        );
+    }
 
     /// The three statuses that mean "running" project onto two phases, and
     /// **neither is terminal** — a progress frame that spelled `done` would
