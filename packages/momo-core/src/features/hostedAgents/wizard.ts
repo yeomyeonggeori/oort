@@ -586,7 +586,7 @@ const TTL_MINUTES = HOSTED_PAIRING_TTL_MS / 60_000;
 
 const BASIS_NOTE: Record<HostedDeadlineBasis, string> = {
   issued: "발급 응답에 적힌 만료 시각 기준이에요.",
-  recorded: `이 화면에서 발급 응답을 받지 않아 발급 기록에서 ${TTL_MINUTES}분을 더해 계산한 근사치예요. 실제 만료는 이보다 빠를 수 있어요.`,
+  recorded: `이번에 이 화면에서 발급한 값이 아니라 정확한 시각을 몰라요. 발급 시점에서 ${TTL_MINUTES}분을 더해 계산한 근사치라 실제 만료는 이보다 빠를 수 있어요.`,
 };
 
 export function hostedDetectCountdown(
@@ -610,7 +610,7 @@ export function hostedDetectCountdown(
       // 이미 지난 뒤에는 근사의 방향을 말해 봐야 모순이다.
       basisNote: "",
       guidance:
-        "연결 값이 만료됐어요. 연결 값 다시 발급을 누르고, 새로 받은 값으로 AI 회사 설정의 값을 바꾼 뒤 커넥터나 routine을 한 번 실행하세요. 이미 넣어 둔 값은 더 이상 통하지 않아요.",
+        "연결 값 다시 발급을 누르고, 새로 받은 값으로 AI 회사 설정의 값을 바꾼 뒤 커넥터나 routine을 한 번 실행하세요.",
     };
   }
   return {

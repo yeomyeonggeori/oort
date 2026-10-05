@@ -3,7 +3,15 @@
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { fetchRoster, listChannels } from "@momo/core/lib/api";
 import {
   getHostedConnection,
@@ -132,7 +140,9 @@ function wireConnection(overrides: Record<string, unknown>) {
   };
 }
 
-function mountWizard(connection: ReturnType<typeof wireConnection> | null): void {
+function mountWizard(
+  connection: ReturnType<typeof wireConnection> | null,
+): void {
   vi.mocked(listHostedConnections).mockResolvedValue({
     connections: connection ? [connection] : [],
   });
@@ -144,7 +154,9 @@ function mountWizard(connection: ReturnType<typeof wireConnection> | null): void
   }
   vi.mocked(fetchRoster).mockResolvedValue([]);
   vi.mocked(listChannels).mockResolvedValue([]);
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   const host = document.createElement("div");
   document.body.append(host);
   mountedHost = host;
@@ -168,7 +180,7 @@ function mountWizard(connection: ReturnType<typeof wireConnection> | null): void
               connectionId: CONNECTION_ID,
             }
           : null,
-      })
+      }),
     ),
   );
   act(() => {
@@ -202,10 +214,12 @@ afterEach(() => {
 describe("3단계 감지 대기 (#3522)", () => {
   it("방금 발급한 연결이면 남은 시간과 원인 후보를 함께 보인다", async () => {
     mountWizard(
-      wireConnection({ status: "pairing_pending", updatedAtMs: Date.now() })
+      wireConnection({ status: "pairing_pending", updatedAtMs: Date.now() }),
     );
     await waitFor(() => byId("hosted-detect-countdown") !== null, "countdown");
-    expect(byId("hosted-detect-countdown-label")?.textContent).toBe("길어야 약 14분 뒤 만료");
+    expect(byId("hosted-detect-countdown-label")?.textContent).toBe(
+      "길어야 약 14분 뒤 만료",
+    );
     expect(byId("hosted-detect-countdown")?.textContent).toContain("근사치");
     const causes = byId("hosted-detect-causes");
     expect(causes?.textContent).toContain("구분하지 못해요");
@@ -219,17 +233,20 @@ describe("3단계 감지 대기 (#3522)", () => {
       wireConnection({
         status: "pairing_pending",
         updatedAtMs: Date.now() - 16 * 60 * 1000,
-      })
+      }),
     );
     await waitFor(() => byId("hosted-detect-countdown") !== null, "countdown");
     expect(byId("hosted-detect-countdown-label")?.textContent).toBe("만료됨");
     const text = byId("hosted-detect-countdown")?.textContent ?? "";
     expect(text).toContain("연결 값 다시 발급");
     expect(byId("hosted-regenerate")).not.toBeNull();
-    // 만료 뒤에는 기다려도 된다는 말과 원인 목록은 서지 않는다. 지금 확인은 남는다(시계 오차).
+    // 만료 뒤에는 기다려도 된다는 말이 서지 않는다. 지금 확인은 남는다(시계 오차).
     expect(byId("hosted-detecting-empty")?.textContent).toContain("만료됐어요");
-    expect(byId("hosted-detecting-empty")?.textContent).not.toContain("다녀와도");
+    expect(byId("hosted-detecting-empty")?.textContent).not.toContain(
+      "다녀와도",
+    );
     expect(byId("hosted-recheck")).not.toBeNull();
-    expect(byId("hosted-detect-causes")).toBeNull();
+    // 원인 목록은 만료 뒤에도 접힌 채 남는다(시계 오차로 만료 판정이 틀릴 수 있다).
+    expect(byId("hosted-detect-causes")).not.toBeNull();
   });
 });

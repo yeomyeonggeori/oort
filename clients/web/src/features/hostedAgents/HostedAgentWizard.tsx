@@ -1303,13 +1303,12 @@ function DetectingStep({
           )}
         </div>
       )}
-      {!countdown?.expired && (
       <details
         open={countdown?.urgent || undefined}
         className="flex min-w-0 flex-col gap-2"
         data-testid="hosted-detect-causes"
       >
-        <summary className="min-h-8 cursor-pointer rounded-sm py-1 text-meta font-medium text-ink focus-visible:focus-ring">
+        <summary className="flex min-h-11 cursor-pointer items-center rounded-sm text-meta font-medium text-ink focus-visible:focus-ring active:bg-surface-pressed">
           {HOSTED_DETECT_CAUSES_TITLE}
         </summary>
         <p className="mt-2 break-keep text-meta text-ink-muted">{HOSTED_DETECT_CAUSES_NOTE}</p>
@@ -1322,7 +1321,6 @@ function DetectingStep({
           ))}
         </ol>
       </details>
-      )}
       <KeyValueRows
         rows={connectionFacts(connection, agentLabel, agentHandle).map((fact) => ({
           key: fact.key,

@@ -444,7 +444,7 @@ describe("3단계 만료 카운트다운", () => {
     expect(gone.expired).toBe(true);
     expect(gone.label).toBe("만료됨");
     expect(gone.guidance).toContain("연결 값 다시 발급");
-    expect(gone.guidance).toContain("더 이상 통하지 않아요");
+    expect(gone.basisNote).toBe("");
   });
 });
 
