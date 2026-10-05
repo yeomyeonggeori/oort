@@ -19,6 +19,7 @@ pub mod auth_routes;
 pub mod channels;
 /// ADR-0166 / T-1 — public first-owner claim (unauthenticated write).
 pub mod claim;
+pub mod cloud_boxes;
 pub mod cloud_hosts;
 pub mod credits;
 pub mod device_keys;

@@ -3,6 +3,7 @@
 - 날짜: 2026-10-03 · 트랙: 엔진 · 기안: Sonnet 5.5 worker
 - 계약: [ADR-0197](../../adr/0197-personal-cloud-workspace.md) D5 PTY 레인, 위협 T1·T7·T9·T11, 구현 계획 S2 ①~④
 - 코드: `server-rust/crates/momo-blind-pty/` (시험 전용 라이브러리, 어떤 bin·라우트도 의존하지 않음)
+- 2026-10-05 갱신(M3, #3501): 의존자는 박스 쪽 끝점 `momo-box-agent` **하나뿐**이다(`tests/isolation.rs`가 `momo-server`·`momo-relay`·`momo-workd` 등 나머지 멤버의 의존을 계속 거부한다). 서버 라우트(M4)는 이 크레이트가 아니라 바이트를 전달한다.
 - 표기: [V] 이 세션에서 실행해 확인 · **runtime-unverified** 실제 WebSocket·TLS·Railway·실기기 Secure Enclave는 실행하지 않음
 
 ## 한 줄 결론

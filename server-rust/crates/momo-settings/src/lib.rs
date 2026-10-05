@@ -56,6 +56,7 @@
 //! [`join`]'s module docs for why that placement is the invariant-preserving one.
 
 pub mod chain;
+pub mod cloud_box;
 pub mod crypto;
 pub mod default_ai;
 pub mod egress;

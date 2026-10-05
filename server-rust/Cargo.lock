@@ -1674,6 +1674,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "momo-box-agent"
+version = "0.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "ed25519-dalek",
+ "libc",
+ "momo-blind-pty",
+ "momo-workd",
+ "p256",
+ "serde_json",
+ "thiserror 1.0.69",
+ "uuid",
+]
+
+[[package]]
 name = "momo-db"
 version = "0.0.0"
 dependencies = [
