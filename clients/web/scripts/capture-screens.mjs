@@ -12336,6 +12336,8 @@ async function captureHostedDoorbellScenes(browser, scheme) {
 
   await shoot("empty", surface(connection), async (page) => {
     await page.getByTestId("hosted-doorbell-empty").waitFor({ state: "visible" });
+    // #3523: 미등록이면 시작 전 준비물 셋과 「서버는 저장할 때 알 수 있다」 한 줄이 같이 선다.
+    await page.getByTestId("hosted-doorbell-precheck").waitFor({ state: "visible" });
   });
 
   await shoot(
