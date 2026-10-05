@@ -3,6 +3,7 @@
 - Status: **Accepted** (2026-08-12 · 성재가 제품 방향과 D1~D8의 벤더 중립 기술 경계를 승인)
 - 증보: **증보 1 — OAuth lifecycle (2026-08-15, HAP-E7 #1368) · Accepted (성재 승인 2026-08-15).** Accept는 D4/D6의 OAuth 경계를 승인한 것이지 flag 개방이 아니다 — 구현은 여전히 feature flag로 완전히 닫혀 있고(metadata 미광고·모든 route 404) static bearer 경로는 byte 동일하며, flag를 여는 것은 #1369 랜딩과 runtime proof 폐곡선 뒤의 별도 운영 결정이다.
 - 증보: **증보 2 — hosted 1:1 DM 승인 (2026-09-27, #2915) · Accepted (성재 결재 「권장대로」 2026-09-27).** 소유자↔자기 에이전트 1:1 DM은 자동 승인, 다른 멤버↔에이전트 1:1 DM은 에이전트 소유자가 DM 단위로 승인한다. 파일 끝 「증보 2」 절.
+- 증보: **증보 3 — 호스티드 에이전트 작업 추적 (2026-10-05, #3514 AT-1) · Accepted (성재 결재 「이대로 진행」 2026-10-05).** 외부 VM에서 일하는 호스팅 에이전트의 작업 요청·진행 표식·결과 산출물·팀 보드·끝남 푸시를 기존 `agent_run`/`agent_job`·Agent Port 도구의 확장으로 정한다. 새 저장소·터미널 보기 없음. 파일 끝 「증보 3」 절.
 - 관련: ADR-0100(결정 거버넌스), ADR-0101(에이전트 신원·bearer), ADR-0102(worker/gateway 실행 경로), ADR-0130(외부 에이전트 fabric·ACP), ADR-0145(Rust/Axum), ADR-0150(대화 반출 경계)
 - 리서치: `docs/planning/research/2026-08-12-grok-bot-integration-feasibility.md`, `docs/planning/research/2026-08-12-grok-bot-reverse-teammate-direction.md`, `docs/planning/research/2026-08-12-external-agent-reception-audit.md`
 - 제품 문장: **Bring your hosted agent.** Grok Bot은 첫 setup preset이자 실증 클라이언트이며, 코어 계약은 벤더 중립이다.
@@ -342,3 +343,155 @@ pairing_pending ──human owner/admin consent (authorization code 발급)─�
 
 - 그룹 DM, 채널 승인 권한 주체(여전히 관리자의 confirm), 웰컴 킥오프 대상, 운영 인스턴스 설정.
 - 실제 Claude Code MCP 합류 왕복은 runtime-unverified로 남는다.
+
+## 증보 3 — 호스티드 에이전트 작업 추적 (Accepted · 성재 결재 「이대로 진행」 2026-10-05 · #3514 AT-1)
+
+> 호스팅 에이전트(Grok Bot 등)는 자기 벤더 VM 안에서 일한다. oort는 그 안의 터미널을 보지 않는다. 대신 에이전트가 oort로 보고하는 **작은 진행 표식과 결과 산출물**만 팀이 본다. 이 증보는 그 계약을 기존 `agent_run`/`agent_job`과 Agent Port 도구의 확장으로만 정한다. 비목표 「Agent Port 안 새 task/job SoT 구축」은 그대로 지킨다(D9).
+
+### 결재 인용
+
+이슈 #3514 본문이 옮긴 성재 2026-10-05 결재(AskUserQuestion, 답 「이대로 진행」): 「개인 클라우드 작업 공간(ADR-0197) 보류, 외부 VM 에이전트 작업 추적으로 간소화.」 이 결재가 이 증보의 수용 근거다. 공개 API·보안 경계 증보이므로 ADR-0100에 따라 이 Accepted 기록이 구현 PR의 머지 조건이다. 이 증보가 열지 않는 것은 D17에 모았다.
+
+### 현황 (2026-10-05 코드 실측)
+
+| 지점 | 사실 | 이 증보 |
+|---|---|---|
+| 호스팅 에이전트에 작업 요청 | `POST …/agent-runs`는 호스팅 연결 행이 있거나 `owner_only`(비 `uses_owner_key`)이면 `hosted_delivery_disabled`로 409 (`momo-agent/src/run.rs`) | D10 |
+| `oort_run_event` | `status` 4종·`detail`(≤2048, 감사 전용)·`textDelta`(≤8192)·`eventId`. 단계 표식·링크 없음 (`momo-mcp/src/tools.rs`) | D11 |
+| `oort_run_complete` | `status`·`body`(≤8000)·`error`·`usage`. 산출물 없음 | D12 |
+| 팀 보드 | `work_session`(공유 L 세션·A 세션)만 읽음 (`momo-t3/src/work_board.rs`, ADR-0194 D5) | D13 |
+| 끝남 푸시 | `work_session_idle`만 있음(ADR-0120 부록 A). run 완료 푸시 없음 | D14 |
+| 그록봇 루틴 | `docs/SELF_HOST_AGENT.md` §3.3.17.4는 run 도구를 쓰지 않음 | D16 |
+
+### D9. 기본 원칙: 기존 원장의 확장이며 새 저장소가 아니다
+
+- 작업의 단일 원본은 `agent_run`(상태기계)과 `agent_job`(전달)이다. 진행·산출물은 **`agent_run`의 기존 컬럼**(`step_count`, `output` jsonb)에 쓴다. 새 테이블·새 큐·MCP Tasks 연동을 만들지 않는다.
+- 새 도구를 만들지 않는다. 기존 `oort_jobs_claim`/`oort_job_renew`/`oort_job_release`/`oort_run_event`/`oort_run_complete`에 **선택 필드**를 더한다. 선택 필드를 모르는 에이전트(구버전 루틴)는 그대로 동작한다.
+- 새 scope를 만들지 않는다. 진행·산출물 보고는 기존 `agent:runs:callback`, 작업 가져오기는 기존 `agent:jobs:read`다. D3의 6-scope 상한과 D4 인증 경계는 바뀌지 않는다.
+- 이 보고는 **자기 보고(self-report)** 다. 서버는 PR이 실제로 있는지, 숫자가 맞는지 검증하지 않는다(D7 ADR-0194와 같은 1단계: 서버는 GitHub 토큰을 쥐지 않고 API를 부르지 않는다). 화면은 「에이전트가 보고한 값」으로 그린다.
+
+### D10. 호스팅 에이전트에 작업 요청(`type=work`)을 허용하는 조건
+
+`POST /v1/workspaces/{ws}/channels/{ch}/agent-runs`의 `type=work`가 호스팅 에이전트를 대상으로 할 수 있다. 모든 조건을 첫 쓰기 전에 판정하며, 하나라도 어긋나면 409(아래 코드)이고 run·job은 0건이다.
+
+1. **연결이 active이고 증명됨.** 그 dedicated member의 connection이 `active`이고 active credential 증명(D6 4단계)을 마쳤다. `pairing_pending`·`detected`·`expired`·`cleanup_pending`·`disconnected`는 `hosted_connection_not_active`. dedicated member가 `paused`이면 기존 `agent_paused`.
+2. **채널이 승인됨.** 요청 채널이 B5의 단일 술어 `hosted_connection_channel_ids`(승인 채널 ∪ 소유자 DM ∪ 승인 DM)에 든다. 아니면 `hosted_channel_not_approved`. 요청만 따로 여는 별도 승인 목록을 만들지 않는다. mention과 work 요청이 같은 술어를 쓰므로 둘이 갈라지지 않는다.
+3. **요청자는 사람.** 기존 `requireHumanPrincipal` 그대로. 에이전트가 에이전트 작업을 일으키지 못한다. 요청자는 그 채널의 활성 멤버여야 한다.
+4. **`owner_only`는 변하지 않는다.** `invocation_scope='owner_only'`이고 `uses_owner_key`가 아닌 에이전트(구독 에이전트)는 호스팅 여부와 상관없이 지금처럼 작업 요청이 막힌다. 증보 3은 이 경계를 열지 않는다.
+5. **보수 모드가 먼저다(ADR-0193 D18).** 판정 순서는 D18 → `owner_only` → 위 1~3이다. `claude_subscription_agent_paused` 409는 이 증보가 와도 같은 자리에서 같은 코드로 나온다. D18의 「공용 host」·구독 토큰 정책은 이 증보가 건드리지 않는다.
+6. **전달은 기존 agent_job이다.** run은 `queued`, 같은 tx에서 기존 `agent_job`이 pending으로 쌓인다. mention과 같은 per-agent delivery selector(D3)가 목적지를 고르며, 호스팅 에이전트가 불일치 상태이면 managed로 새지 않고 fail-closed다. 호스팅 에이전트는 doorbell(ADR-0171)·routine이 깨어나 `oort_jobs_claim`으로 가져간다. 깨우는 시각은 벤더 routine에 종속이라 「즉시」를 약속하지 않는다(Consequences의 지연 문장 그대로). 미claim run은 기존 `deadline_at`/만료 규율이 정리하며 새 타이머를 두지 않는다.
+7. **취소.** 기존 `POST …/agent-runs/{run}/cancel`이 그대로 쓰이고, 호스팅 에이전트는 다음 `oort_job_renew`/`oort_run_event`가 거부되면서 알게 된다(D7의 lease 규율). 벤더 VM 안의 프로세스를 oort가 죽이지는 않는다.
+
+`run.rs`의 `hosted_delivery_disabled` 하나가 두 사유(호스팅 연결 존재 / `owner_only`)를 한 불리언으로 합쳐 두었다. 구현은 두 사유를 **분리**해 호스팅 연결은 위 1~2 판정으로 대체하고, `owner_only`는 그대로 막아야 한다(둘을 한꺼번에 풀면 4번이 깨진다).
+
+### D11. `oort_run_event`: 단계 표식과 step_count
+
+- 선택 필드 `stage`(문자열, 1..80자)를 더한다. 형식·상한은 `work_session_share`의 단계 표식(migration 114 `work_session_share_stage_markers_ok`, ADR-0194)을 **그대로 재사용**한다: 한 표식 1~80자, 제어 문자·bidi 제어·`/`·`\` 불가, 저장 목록 ≤12개. 구현은 같은 검증 함수를 공유해 두 곳이 어긋나지 않게 한다(복사 금지).
+- 저장: `agent_run.output.stages`(문자열 배열, 최대 12). 12개를 넘으면 **가장 오래된 것부터 버린다**(최근 12개 유지, 연속 동일 표식은 하나로). 에이전트가 12번째에 거절당해 막히는 것보다 최근 진행이 보이는 편이 낫다.
+- `stage`가 있는 이벤트마다 `agent_run.step_count`를 1 올린다. 단 기존 `CHECK (step_count <= max_steps)`가 있으므로 `LEAST(step_count + 1, max_steps)`로 포화시킨다(상한 도달이 완료 보고를 막지 않는다). `stage` 없는 이벤트(heartbeat·status만)는 `step_count`를 올리지 않는다.
+- 이벤트는 현재 lease 소유 에이전트의 것만 받는다(기존 규율). `eventId` 멱등성이 있으면 재시도가 `step_count`를 두 번 올리지 않는다.
+- 기존 필드는 그대로다. `detail`은 **여전히 감사 전용**이고 보드·카드에 싣지 않는다. `textDelta`도 기존 동작을 따르며 보드는 읽지 않는다.
+- 단계 표식은 realtime 이벤트를 만들지 않는다(ADR-0194 D8과 같다). 다음 조회·보드 재조회에서 보인다.
+- 검증 실패(길이·문자·형식)는 run 상태를 바꾸지 않고 400, 어느 것도 쓰지 않는다.
+
+### D12. `oort_run_complete`: 선택 산출물(artifacts)
+
+- 선택 필드 `artifacts`(객체, `additionalProperties:false`)를 더한다. 키는 전부 선택이다:
+
+| 키 | 형식 | 검증 |
+|---|---|---|
+| `prUrl` | 문자열 | `validated_pr_url`(`momo-t3/src/work_share.rs`)을 그대로 재사용. `https`, 허용 호스트(`github.com`+운영자 설정 GHE), 경로 정확히 `/<소유자>/<저장소>/pull/<번호>`, 쿼리·조각 버림. 저장은 정규화한 URL |
+| `branch` | 문자열 | share와 같은 규칙: 절대 경로처럼 보이는 값(`/`·`~` 시작, 드라이브 문자, 역슬래시)·제어 문자 불가, 길이 상한은 share 컬럼과 같은 값 |
+| `added`, `deleted` | 정수 | 0 이상, `MAX_COUNT` 이하 (share의 `diff_added`/`diff_deleted`와 같다) |
+| `commits` | 정수 | 0 이상, `MAX_COUNT` 이하 (share의 `commits_ahead`에 대응하는 「이 작업이 만든 커밋 수」) |
+
+  커밋 제목·파일 이름·경로·원격 URL 필드는 **정의하지 않는다**(없는 필드는 보낼 수도 저장될 수도 없다). `additionalProperties:false`가 그 방어다.
+- 저장: `agent_run.output`의 고정 모양 jsonb에 둔다. 새 테이블은 만들지 않는다.
+
+```text
+agent_run.output = {
+  "stages":    ["…", …],                       // D11, 0..12개, 각 1..80자
+  "artifacts": { "prUrl"?: "https://…/pull/N", "branch"?: "…",
+                 "added"?: n, "deleted"?: n, "commits"?: n }
+  // 기존 키(body 등)는 그대로 유지. 위 두 키만 이 증보가 추가한다.
+}
+```
+
+  테이블을 만들지 않는 이유: run당 한 번만 쓰는 닫힌 모양의 작은 값이고, 목록·해제·보존이 모두 `agent_run` 행의 수명을 따른다. `work_session_share`가 별 테이블이었던 이유(세션 원장과 분리된 공유 해제·보존 삭제)는 run에 없다. 따로 해제할 공유가 아니라 run의 결과이기 때문이다. 판독은 검증을 거쳐 쓴 값만 읽으므로 DB에는 모양 CHECK를 필수로 두지 않는다. 구현이 CHECK 함수를 추가하는 것은 허용하되 신규 migration이어야 하고 `schema_v0.sql`은 건드리지 않는다.
+- `succeeded`와 `failed` 모두 `artifacts`를 실을 수 있다(실패해도 만든 브랜치·부분 PR을 남길 수 있다).
+- **형식이 틀린 `artifacts`는 완료 전체를 거절한다**(400, 어떤 쓰기도 없음, 거절 사유 코드만 반환). 일부만 버리고 완료시키지 않는 이유는 보고가 조용히 틀린 채 남지 않게 하기 위해서다. 에이전트는 `artifacts` 없이 같은 lease로 다시 완료할 수 있다(lease는 거절로 풀리지 않는다).
+- PR URL이 드러내는 `소유자/저장소`는 ADR-0194 D7의 Q2가 이미 받아들인 노출이다. 서버는 PR 제목·체크·리뷰를 가져오지 않는다.
+
+### D13. 팀 보드의 두 번째 출처: 호스팅 에이전트 work run
+
+- 보드(`GET /v1/workspaces/{ws}/work-sessions?scope=team`, ADR-0194 D5)는 **같은 응답 목록에 두 출처**를 섞어 낸다: ① `work_session`(기존) ② `agent_run` 중 `input.type='work'`이고 **호스팅 연결을 가진 에이전트**의 run.
+- 항목은 출처 표시 `source: "session" | "run"`을 갖는다. `run` 항목은 `session_id` 대신 `run_id`를 쓰고, 카드 조회는 `GET /v1/workspaces/{ws}/agent-runs/{run}`(기존 상세 판정을 재사용)이 같은 화면을 준다. 필드(보드 요약):
+
+| 필드 | 출처 |
+|---|---|
+| `run_id`, `agent_member_id`, `requested_by_member_id`, `home_channel_id` | `agent_run` |
+| `title` | 기존 `trigger_summary`(work 입력 제목, 상한 있음) |
+| `status` | `queued`→`waiting`, `running`·`awaiting_approval`·`paused`→`running`, `succeeded`→`done`, `failed`·`timed_out`→`failed`, `cancelled`→`stopped` (보드의 파생 상태 어휘로 매핑) |
+| `steps[]`, `step_count` | `output.stages`, `agent_run.step_count` |
+| `pr{url, number}`, `branch`, `diff{additions, deletions}`, `commits` | `output.artifacts`(`number`는 URL에서 추출) |
+| `started_at`, `finished_at`, `last_activity_at` | `agent_run` |
+
+- **가시성은 읽기 SQL 한 문장에서 결정한다.** 보는 사람이 `agent_run.channel_id`의 활성 멤버(채널 미보관·`left_at IS NULL`)여야 한다. 아니면 「멤버 아님」·「없는 run」·「다른 테넌트」가 모두 같은 빈 결과/404다. 워크스페이스 전체 보기는 없다(Q4 유지). DM 채널의 run은 그 DM의 두 사람에게만 보인다.
+- **중복 제거.** run에 이미 연결된 `work_session`이 있으면(`linked_work_session_ids_in_tx`) 세션 쪽 항목이 대표이고 run 항목은 내지 않는다. 같은 일이 두 줄로 나오지 않는다.
+- **mention run은 v1에 넣지 않는다.** 채팅 답을 만드는 mention run은 이미 스레드의 메시지로 보이고, 보드에 넣으면 잡음이 되며 「작업」 정의가 흐려진다. `type=work`만 보드 대상이다.
+- **managed·BYOA의 work run은 v1에 넣지 않는다.** 이 증보의 대상은 호스팅 에이전트다(해당 run은 이미 A 세션 경로로 보인다). 넓히는 것은 별도 결정이다.
+- 보존: 끝난 뒤 `SHARE_RETENTION_DAYS`가 지나면 읽기가 스스로 거른다(세션 쪽과 같은 규칙, notifier 정리를 기다리지 않는다). `agent_run` 행 자체의 보존은 이 증보가 바꾸지 않는다.
+- 정렬·페이징: 두 출처를 `(last_activity µs, id)` 하나로 합쳐 같은 opaque cursor를 쓴다.
+- **실시간.** run의 **상태 전환**(queued→running, 종결: succeeded/failed/timed_out/cancelled)과 같은 tx 안의 outbox INSERT → relay → Centrifugo로 집 채널 토픽에 `work.run.updated`(`run_id`와 전환 종류만, 이름·제목·숫자 없음)를 보낸다. 클라는 이벤트에 보드/카드를 다시 조회하고 가시성은 조회가 다시 강제한다(ADR-0194 D8과 같은 구조). 단계 표식 갱신과 `step_count` 증가는 이벤트를 만들지 않는다. 이미 같은 의미의 agent_run 채널 이벤트가 있으면 새 이름을 만들지 않고 그것을 재사용한다(구현 티켓이 확인하고 PR에 기록).
+
+### D14. 작업 끝남 푸시
+
+- run이 **종결**하면 run을 만든 사람(요청자)에게 푸시를 보낼 수 있다. 종결은 `succeeded`·`failed`·`timed_out`이다. 요청자 자신이 취소한 `cancelled`는 보내지 않는다. 요청자가 기록돼 있지 않거나 사람이 아니면 보내지 않는다(fail-closed).
+- 판정은 ADR-0120 부록 A-8을 그대로 따른다: ① 수신자 = run 요청자 본인, ② 진행 시간(`finished_at − started_at`) ≥ 60초, ③ run당 1회(종결 전이 자체가 한 번만 일어나므로 이중 방어), ④ `notification_rule.work_complete_push`가 꺼져 있으면 보내지 않음(종류별 설정 재사용, 새 토글 없음), ⑤ DND·채널 mute·`read_state` 30초 전경 휴리스틱 억제는 그대로. 이 규칙들을 호스팅 run에 맞게 복제하지 않고 같은 판정 모듈이 두 출처를 받게 한다.
+- **푸시 어휘.** relay는 닫힌 reason 어휘를 검증한다(0120 A-3). run 종결은 `work_session_idle`의 카드 문구(「작업 완료 — idle 대기」)와 뜻이 달라서, 구현은 6번째 reason `work_run_done`을 더한다(부록 A-6과 같은 방식: relay 먼저·클라 뒤따르는 순차 배포, 구버전 앱은 정적 자리표시자로 fail-open). 문구는 고정이고 run 제목·산출물·에이전트 출력을 싣지 않는다.
+- 스레드 안의 알림은 기존 완료 응답 메시지(`oort_run_complete`의 `body`가 기존 경로로 게시하는 메시지)가 맡는다. 푸시는 그 위의 추가다. 단계 표식마다·전환마다 푸시는 없다.
+
+### D15. 프라이버시와 감사
+
+- **터미널 바이트 없음.** 벤더 VM의 터미널·화면·파일 시스템은 oort로 오지 않는다. ADR-0125 D10(서버는 터미널 바이트를 싣지 않는다)·ADR-0188/0190의 경계는 그대로다. 보드·카드에 입력 칸·attach·제어는 없다.
+- **자유 텍스트는 기존 상한 안에서만.** 새로 보이게 되는 에이전트 문자열은 단계 표식(≤12×80)과 `branch`(검증됨)뿐이다. `detail`·`textDelta`·`body`·`error`는 보드가 읽지 않는다. 커밋 제목·파일 이름·경로·원격 URL은 필드가 없다.
+- **화면 처리.** 표식·브랜치는 외부 에이전트가 쓴 신뢰할 수 없는 텍스트다. 일반 텍스트로 이스케이프해 그리고(마크다운·링크 자동 변환·멘션 해석 없음, `inert_display_name`과 같은 결), 링크로 그려지는 것은 검증된 `prUrl` 하나뿐이다.
+- **요청 본문 상한.** 단계 표식·산출물 요청은 share 본문 상한(`MAX_SHARE_BODY_BYTES` 8 KiB)과 같은 층의 작은 상한을 받는다. 기존 `oort_run_complete.body` 상한(8000)은 그대로다.
+- **감사.** 종결 보고에 `artifacts`가 실리면 감사 1행(`agent.run.artifacts_reported`: run id·존재한 키 이름만, 값·URL 없음), 형식 거절은 사유 코드만 담은 감사 1행(`agent.run.report_rejected`)을 남긴다. 단계 표식마다는 감사하지 않는다(`step_count`와 `output.stages`가 기록이다). 토큰·lease handle은 어디에도 남기지 않는다.
+- **권한.** 다른 에이전트의 run, 다른 lease, 연결이 끊긴·paused 에이전트의 보고는 기존 gateway 규율대로 거부된다(D7). 이 증보가 입구를 넓히지 않는다.
+
+### D16. Grok Bot·dots: 소유자 본인 계정·VM에서만
+
+- 호스팅 에이전트는 **소유자가 자기 벤더 계정으로 자기 VM에서 돌리는 것**만 대상이다. oort는 벤더 VM·계정을 운영하지 않고(ADR-0197 보류), 벤더 API를 부르거나 계정을 읽거나 토큰을 풀링하지 않는다. 구독을 가진 사람이 아닌 사람이 그 계정을 쓰게 하는 연결·대행 기능을 만들지 않는다. Grok Bot·dots 등 어떤 벤더의 약관 변경도 oort가 보증하지 않으며, 공개 런칭 전 약관·법무 검토(이 ADR의 「봉인할 파라미터」 5번)는 그대로 열려 있다.
+- 채널 승인(D10 2)이 이미 허용한 채널에서 다른 멤버가 호스팅 에이전트에 작업을 요청하면 소유자의 벤더 구독 한도를 쓴다. 이는 mention과 같은 노출이며, 소유자가 승인한 채널·DM에만 열린다(B3). 구독형 에이전트의 `owner_only`는 D10 4로 계속 막혀 있다.
+- 벤더별 루틴 레시피의 변경은 코어 계약이 아니다(D8). 구현 티켓이 `docs/SELF_HOST_AGENT.md` §3.3.17.4의 생산 루틴 문구를 **run 도구를 쓰도록** 고친다: `oort_jobs_claim` → 단계마다 `oort_run_event(stage)` → `oort_run_complete(artifacts)`. 실계정 동작은 `runtime-unverified`로 남고, 별도 `[manual]/[runtime]` 증거 전에는 카피에 「실시간」·「자동 보고」를 쓰지 않는다.
+
+### D17. 비목표와 열지 않는 것
+
+- 벤더 VM 터미널·화면·셸 보기, 원격 입력, attach, 파일 반입(D15)
+- 새 task/run 저장소·큐·테이블, MCP Tasks의 SoT화(D9, 비목표 유지)
+- mention run·managed/BYOA work run의 보드 노출(D13)
+- GitHub API·토큰·PR 제목/체크/리뷰 수집, PR 자동 생성, 서버 측 PR 존재 검증(D9, ADR-0194 D7 2단계는 별도)
+- 단계 표식·진행률 마다의 실시간 이벤트·푸시, 자유 서술 진행 보고, 벤더 비용 측정
+- `owner_only`·보수 모드·공용 host 정책 변경(D10 4·5)
+- oort 운영 VM·개인 클라우드 컨테이너(ADR-0197은 보류, 코드는 main에 기본 꺼짐)
+- 새 scope, 새 MCP 도구, 새 인증 경로
+
+### 불변식 대조 (증보 3)
+
+| 불변식 | 판정 |
+|---|---|
+| Postgres = SoT / 단일 쓰기경로 | 유지 — 진행·산출물은 gateway의 기존 tx에서 `agent_run`에 쓰고, 이벤트는 같은 tx의 outbox → relay |
+| Centrifugo = 전송전용 | 유지 — 상태 전환 이벤트만, 클라 직접 publish 없음 |
+| 에이전트 = member / RLS FORCE | 유지 — 모든 읽기·쓰기가 `workspace_id`+현재 멤버십 재검증, 신규 테이블 없음 |
+| gateway job/run | 유지 — claim/lease/events/complete의 선택 필드 추가만 |
+| 순서 SoT = `message.seq` | 무관 — 진행 표식은 메시지가 아니다 |
+
+### 구현 단위 (Accepted 후, 후속 이슈로 편성)
+
+1. **AT-2 서버(engine):** D10 게이트 분리, D11·D12 도구 스키마·검증(공유 검증 함수 재사용)·`step_count`, `agent_run.output` 모양, 감사. OpenAPI/MCP 계약 갱신.
+2. **AT-3 보드(engine):** D13 두 번째 출처 읽기 SQL·응답·이벤트, 중복 제거.
+3. **AT-4 푸시(engine+relay):** D14 판정 모듈 확장과 `work_run_done` reason. relay 먼저 배포.
+4. **AT-5 표면·레시피(UXUI·docs):** 보드·카드에 run 항목, 루틴 문구 수정(D16). 캡처·실계정은 `runtime-unverified`로 표기.
+
+각 단위의 수용기준은 되돌리면 실패하는 시험을 요구한다: ① 호스팅 연결이 active가 아니거나 채널이 승인 밖이면 409이고 job 0건, `owner_only`·D18은 호스팅 연결과 무관하게 계속 409, ② 13번째 표식이 가장 오래된 것을 밀어내고 `step_count`가 `max_steps`에서 포화해도 완료가 막히지 않음, ③ 잘못된 `prUrl`·`branch`·음수 숫자는 완료 전체를 거절하고 아무것도 쓰지 않음, 알 수 없는 `artifacts` 키는 거절, ④ 채널 비멤버·다른 DM·다른 테넌트의 run이 보드에 0건이고 세션에 연결된 run은 한 줄, ⑤ 푸시는 요청자 외·60초 미만·설정 off·자기 취소에서 0건.
