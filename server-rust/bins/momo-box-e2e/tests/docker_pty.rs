@@ -94,6 +94,14 @@ async fn wait_state(world: &World, bearer: &str, want: &str, timeout: Duration, 
         }
         if Instant::now() >= deadline {
             eprintln!("RUNNER LOG:\n{}", runner_log.lock().unwrap());
+            let errors: Vec<String> = world
+                .capture
+                .text()
+                .lines()
+                .filter(|l| l.contains(" ERROR ") || l.contains(" WARN "))
+                .map(|l| l.chars().take(400).collect())
+                .collect();
+            eprintln!("SERVER ERRORS:\n{}", errors.join("\n"));
             panic!("the box never reached `{want}` (last: {state:?}, server said {raw})");
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -172,14 +180,21 @@ async fn a_real_box_started_by_the_real_runner_serves_the_blind_relay() {
     // The runner's own URL must be https, or http to a loopback host (a dev-only switch). Inside the VM the server is
     // not on loopback, so a forwarder in the VM (a copy of socat under the runner's directory, so cleanup finds it)
     // makes it so; the BOXES, which dial `boxServerUrl`, reach this machine directly.
-    let port = world.base.rsplit(':').next().unwrap().to_string();
+    // The forwarder must NOT listen on the server's own port: Lima forwards every port a guest process listens on to
+    // the same port on this machine, and a clash with the real listener here takes Lima's ssh master (and with it the
+    // docker socket forward) down with it. A free port of this machine's, not the server's.
+    let port = {
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        probe.local_addr().unwrap().port().to_string()
+    };
+    let server_port = world.base.rsplit(':').next().unwrap().to_string();
     let (ok, out) = vm_sudo(&format!("install -d -m 0755 {runner_dir} && cp /usr/bin/socat {runner_dir}/socat"));
     assert!(ok, "{out}");
     let mut forwarder = tokio::process::Command::new("colima")
         .args([
             "ssh", "--", "sudo", &format!("{runner_dir}/socat"),
             &format!("TCP-LISTEN:{port},bind=127.0.0.1,fork,reuseaddr"),
-            &format!("TCP:{host}:{port}"),
+            &format!("TCP:{host}:{server_port}"),
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())

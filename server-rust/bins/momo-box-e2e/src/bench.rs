@@ -965,6 +965,12 @@ pub async fn next_binary(socket: &mut RelaySocket, timeout: Duration) -> Result<
     }
 }
 
+fn lossy_tail(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let tail: String = text.chars().rev().take(400).collect::<Vec<_>>().into_iter().rev().collect();
+    tail
+}
+
 /// The owner's end of an attached session.
 pub struct DeviceConn {
     pub session: Session,
@@ -1006,8 +1012,10 @@ impl DeviceConn {
         let mut collected = Vec::new();
         while !done(&collected) {
             let remaining = deadline.saturating_duration_since(Instant::now());
-            let Some(frame) = next_binary(&mut self.socket, remaining).await? else {
-                return Err("the socket ended".into());
+            let frame = match next_binary(&mut self.socket, remaining).await {
+                Ok(Some(frame)) => frame,
+                Ok(None) => return Err(format!("the socket ended after {:?}", lossy_tail(&collected))),
+                Err(e) => return Err(format!("{e}; the terminal had said {:?}", lossy_tail(&collected))),
             };
             let (kind, payload) = self.session.open(&frame).map_err(|e| e.to_string())?;
             match kind {
