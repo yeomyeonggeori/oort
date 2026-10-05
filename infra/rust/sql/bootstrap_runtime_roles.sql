@@ -212,6 +212,38 @@ END
 $$;
 -- END mem-lockdown
 
+-- BEGIN cloud-box-lockdown (#3500 security review M1; ADR-0197 D10). Identical in bootstrap_roles.sql and
+-- bootstrap_runtime_roles.sql; idempotent (re-applied on every pre-deploy, and a no-op before migration 118).
+-- The BYPASSRLS roles (relay/worker/notifier) never touch box rows: a runner polls inside a tenant tx as momo_app.
+-- momo_app may SELECT/INSERT/UPDATE only; rows are never deleted by the API role (a box row is a tombstone
+-- until `deleted`, and `deleted` rows are kept).
+DO $$
+DECLARE
+  t text;
+  r text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['cloud_box', 'cloud_box_control'] LOOP
+    CONTINUE WHEN to_regclass('public.' || t) IS NULL;
+    EXECUTE format('REVOKE ALL ON TABLE public.%I FROM PUBLIC', t);
+    FOREACH r IN ARRAY ARRAY['momo_relay', 'momo_worker', 'momo_notifier'] LOOP
+      CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+      EXECUTE format('REVOKE ALL ON TABLE public.%I FROM %I', t, r);
+    END LOOP;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_app') THEN
+      EXECUTE format('REVOKE DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.%I FROM momo_app', t);
+      EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE public.%I TO momo_app', t);
+    END IF;
+  END LOOP;
+  IF to_regclass('public.cloud_box_control_seq_seq') IS NOT NULL THEN
+    FOREACH r IN ARRAY ARRAY['momo_relay', 'momo_worker', 'momo_notifier'] LOOP
+      CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+      EXECUTE format('REVOKE ALL ON SEQUENCE public.cloud_box_control_seq_seq FROM %I', r);
+    END LOOP;
+  END IF;
+END
+$$;
+-- END cloud-box-lockdown
+
 -- #3212 (migration 110): the memory reset and the team-notice read are API entry points reserved for momo_app
 -- (not PUBLIC). Migration 110 can run before the runtime roles exist, so reassert the grant here.
 DO $$

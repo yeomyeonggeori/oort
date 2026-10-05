@@ -226,6 +226,13 @@ GET /v1/workspaces/{workspaceId}/personal-keys
 GET /v1/workspaces/{workspaceId}/personal-keys/mine
 POST /v1/workspaces/{workspaceId}/personal-keys/{keyId}/revoke
 POST /v1/workspaces/{workspaceId}/personal-keys/{keyId}/agent
+POST /v1/workspaces/{workspaceId}/cloud-boxes
+GET /v1/workspaces/{workspaceId}/cloud-boxes
+GET /v1/workspaces/{workspaceId}/cloud-boxes/mine
+POST /v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/keep-awake
+POST /v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/stop
+POST /v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/start
+POST /v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/delete
 POST /v1/workspaces/{workspaceId}/agents/{agentId}/credentials
 GET /v1/workspaces/{workspaceId}/agents/{agentId}/credentials
 POST /v1/workspaces/{workspaceId}/agents/{agentId}/credentials/{credentialId}/revoke

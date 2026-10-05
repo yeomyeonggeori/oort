@@ -94,6 +94,10 @@ pub struct Config {
     /// switches close until the R1 re-review PASS); turning it on without an
     /// instance id is a boot error.
     pub device_keys: DeviceKeySettings,
+    /// ADR-0197 M1 (#3500) — the personal cloud box API switch. **Off unless the
+    /// operator sets `MOMO_CLOUD_BOX_ENABLED=true`** (M5's per-workspace consent
+    /// is a separate, later gate; this one keeps the whole surface unexposed).
+    pub cloud_box: CloudBoxConfig,
     /// 휘발 신호 (ADR-0149, goal SRV-T2) — **off unless the operator hands this
     /// process the Centrifugo publish credential**, which no deployment did
     /// before this batch.
@@ -1126,6 +1130,31 @@ impl MentionSettings {
     }
 }
 
+/// ADR-0197 M1 (#3500) — whether the personal cloud box routes answer at all.
+///
+/// `MOMO_CLOUD_BOX_ENABLED`, **exact `true` opens it**; unset, `True`, `1`, `yes`,
+/// a typo all stay closed. Closed means every cloud-box route answers 404 before
+/// any database read, so a production instance that never opted in exposes
+/// nothing. Constructing the struct directly overrides the environment (how the
+/// PG suites open it).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CloudBoxConfig {
+    pub enabled: bool,
+}
+
+impl CloudBoxConfig {
+    pub fn from_env() -> Self {
+        CloudBoxConfig {
+            enabled: cloud_box_gate_open(env("MOMO_CLOUD_BOX_ENABLED").as_deref()),
+        }
+    }
+}
+
+/// The parse, separated from the environment so the table is a test.
+fn cloud_box_gate_open(value: Option<&str>) -> bool {
+    value.is_some_and(|value| value.trim() == "true")
+}
+
 /// Human device-key settings (ADR-0146 개정 2026-09-28, #3022).
 ///
 /// * `MOMO_INSTANCE_ID` — the value every `momo.human.control.v2` statement
@@ -2012,6 +2041,7 @@ impl Config {
             agent_port: AgentPortConfig::from_env()?,
             mentions: MentionSettings::from_env(),
             device_keys,
+            cloud_box: CloudBoxConfig::from_env(),
             // ADR-0149: never fatal. An instance that was not given the
             // Centrifugo publish credential keeps 휘발 신호 off and answers 503
             // on the two routes — the same posture as every other subsystem
@@ -2261,6 +2291,20 @@ mod tests {
             ..DeviceKeySettings::default()
         };
         assert!(oversized.boot_error().is_some());
+    }
+
+    #[test]
+    fn cloud_box_gate_is_closed_unless_exactly_true() {
+        assert!(!CloudBoxConfig::default().enabled);
+        assert!(!cloud_box_gate_open(None));
+        for closed in ["", "false", "0", "1", "yes", "True", "TRUE", "on", "tru"] {
+            assert!(
+                !cloud_box_gate_open(Some(closed)),
+                "{closed:?} must stay closed"
+            );
+        }
+        assert!(cloud_box_gate_open(Some("true")));
+        assert!(cloud_box_gate_open(Some(" true\n")));
     }
 
     #[test]
