@@ -490,9 +490,13 @@ async fn ends_with(bench: &Bench, reason: &str, budget: Duration, trigger: impl 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "needs an isolated PostgreSQL 18 (3511)"]
 async fn each_lifecycle_change_ends_the_session_at_once() {
+    // Cases 1-4 go through a route (or the switch), which kicks the supervisor: the interval is made so long here
+    // that only the kick can end the session within the budget. Cases 5-8 change the database behind the server's
+    // back, so the supervisor's own short interval is what they test.
+    let routed = || limits(|l| l.recheck = Duration::from_secs(30));
     // 1. Device revoked: the owner's sign-in ends (logout), which revokes its device key.
     {
-        let bench = Bench::up(BenchOptions::default()).await;
+        let bench = Bench::up(routed()).await;
         let owner = bench.world.owner.clone();
         ends_with(&bench, "device_revoked", Duration::from_secs(2), async {
             let response = bench
@@ -510,7 +514,7 @@ async fn each_lifecycle_change_ends_the_session_at_once() {
     }
     // 2. The box is stopped by its owner (the route kicks the supervisor).
     {
-        let bench = Bench::up(BenchOptions::default()).await;
+        let bench = Bench::up(routed()).await;
         let owner = bench.world.owner.access.clone();
         let id = bench.box_id;
         ends_with(&bench, "box_not_running", Duration::from_secs(2), async {
@@ -521,7 +525,7 @@ async fn each_lifecycle_change_ends_the_session_at_once() {
     }
     // 3. ... or deleted.
     {
-        let bench = Bench::up(BenchOptions::default()).await;
+        let bench = Bench::up(routed()).await;
         let owner = bench.world.owner.access.clone();
         let id = bench.box_id;
         ends_with(&bench, "box_not_running", Duration::from_secs(2), async {
@@ -532,7 +536,7 @@ async fn each_lifecycle_change_ends_the_session_at_once() {
     }
     // 4. The instance switch (「설정 끄기」).
     {
-        let bench = Bench::up(BenchOptions::default()).await;
+        let bench = Bench::up(routed()).await;
         ends_with(&bench, "setting_off", Duration::from_secs(2), async {
             bench.world.state.cloud_relay.set_enabled(false);
         })
@@ -1114,4 +1118,31 @@ async fn the_spent_challenge_store_is_persisted_after_an_attach() {
     // 0600, like everything the agent keeps.
     use std::os::unix::fs::PermissionsExt as _;
     assert_eq!(std::fs::metadata(state_dir.join("nonces.bin")).unwrap().permissions().mode() & 0o777, 0o600);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs an isolated PostgreSQL 18 (3511)"]
+async fn the_box_ends_a_session_on_its_own_when_the_server_would_not() {
+    // Defence in depth: the box holds its own clocks. The server's limits are set sky-high here; the box's are short.
+    let bench = Bench::up(BenchOptions {
+        relay: RelayLimits {
+            max_session: Duration::from_secs(3600),
+            idle: Duration::from_secs(3600),
+            recheck: Duration::from_secs(3600),
+            ..RelayLimits::default()
+        },
+        box_limits: momo_box_agent::serve::BoxLimits {
+            max_session: Duration::from_millis(1200),
+            idle: Duration::from_secs(3600),
+            handshake: Duration::from_secs(20),
+            poll_ms: 10,
+        },
+        ..BenchOptions::default()
+    })
+    .await;
+    let mut conn = attached(&bench).await;
+    let started = Instant::now();
+    assert!(conn.wait_closed(Duration::from_secs(8)).await.is_some(), "the box hung up on its own");
+    assert!(started.elapsed() < Duration::from_secs(5));
+    wait_for_end_audit(&bench, "peer_closed").await;
 }
