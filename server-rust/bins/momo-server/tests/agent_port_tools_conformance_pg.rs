@@ -5963,3 +5963,398 @@ async fn a_threaded_card_is_counted_and_a_withdrawn_request_gets_none() {
         "only the threaded card"
     );
 }
+
+// ---------------------------------------------------------------------------
+// (10) ADR-0162 증보 3 D11/D12/D15 — progress markers and artifacts (#3516)
+// ---------------------------------------------------------------------------
+
+/// Raise a mention for the hosted agent and claim it. Returns the lease handle
+/// and the run id.
+async fn claimed_run_3516(
+    client: &reqwest::Client,
+    base: &str,
+    su: &PgPool,
+    fixture: &Fixture,
+) -> (String, Uuid) {
+    let handle_name = hosted_handle(su, fixture.hosted_agent).await;
+    let trigger: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{handle_name} 작업해줘")
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+    let (status, claimed) = call(
+        client,
+        base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("lease handle")
+        .to_string();
+    let run: Uuid = sqlx::query_scalar(
+        "SELECT id FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2 \
+          ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .fetch_one(su)
+    .await
+    .expect("the run the mention raised");
+    (handle, run)
+}
+
+/// `(step_count, output)` of one run.
+async fn run_record_3516(su: &PgPool, run: Uuid) -> (i32, Value) {
+    let row: (i32, Option<Value>) =
+        sqlx::query_as("SELECT step_count, output FROM agent_run WHERE id=$1")
+            .bind(run)
+            .fetch_one(su)
+            .await
+            .expect("run row");
+    (row.0, row.1.unwrap_or(Value::Null))
+}
+
+async fn rejected_audits_3516(su: &PgPool, run: Uuid) -> Vec<Value> {
+    sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE action='agent.run.report_rejected' \
+           AND detail->>'run_id'=$1 ORDER BY created_at",
+    )
+    .bind(run.to_string())
+    .fetch_all(su)
+    .await
+    .expect("rejected audits")
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn stage_markers_keep_the_latest_twelve_spend_steps_and_refuse_bad_text() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (handle, run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+    // A budget small enough to saturate, so the cap is measured and not assumed.
+    sqlx::query("UPDATE agent_run SET max_steps=5 WHERE id=$1")
+        .bind(run)
+        .execute(&su)
+        .await
+        .unwrap();
+    let event = |args: Value| {
+        let (client, base, bearer) = (&client, &base, &fixture.hosted_bearer);
+        async move { call(client, base, bearer, "oort_run_event", args).await }
+    };
+
+    // An event with no marker (the old shape) spends nothing.
+    let (status, ok) = event(json!({"leaseHandle": handle, "status": "running"})).await;
+    assert_eq!(status, 200, "{ok}");
+    assert_eq!(run_record_3516(&su, run).await.0, 0);
+
+    // A retried event (same `eventId`) is one marker and one step, not two.
+    let replay_id = Uuid::new_v4();
+    for _ in 0..2 {
+        let (status, ok) =
+            event(json!({"leaseHandle": handle, "stage": "재시도", "eventId": replay_id})).await;
+        assert_eq!(status, 200, "{ok}");
+    }
+    let (steps, output) = run_record_3516(&su, run).await;
+    assert_eq!(steps, 1, "a replayed event spends one step");
+    assert_eq!(output["stages"], json!(["재시도"]));
+
+    // 14 markers: the newest 12 stay, in order; the step count stops at the cap
+    // and no event is refused for reaching it.
+    for index in 1..=14 {
+        let (status, ok) =
+            event(json!({"leaseHandle": handle, "stage": format!("  단계 {index} ")})).await;
+        assert_eq!(status, 200, "{index}: {ok}");
+    }
+    let (steps, output) = run_record_3516(&su, run).await;
+    let expected: Vec<Value> = (3..=14)
+        .map(|index| json!(format!("단계 {index}")))
+        .collect();
+    assert_eq!(output["stages"], Value::Array(expected.clone()));
+    assert_eq!(steps, 5, "saturates at max_steps");
+
+    // An immediate repeat is one marker.
+    let (status, _) = event(json!({"leaseHandle": handle, "stage": "단계 14"})).await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        run_record_3516(&su, run).await.1["stages"],
+        Value::Array(expected.clone())
+    );
+
+    // Each bad marker is refused with nothing written: no step, no stage, no
+    // state change — and one audit row carrying a reason code and no text.
+    let before = run_record_3516(&su, run).await;
+    let bad_markers = [
+        "".to_string(),
+        "   ".to_string(),
+        "x".repeat(81),
+        "a/b".to_string(),
+        "a\\b".to_string(),
+        "bad\u{7}".to_string(),
+        "\u{202E}rtl".to_string(),
+    ];
+    for bad in &bad_markers {
+        let (status, refused) = event(json!({"leaseHandle": handle, "stage": bad})).await;
+        assert_eq!(status, 400, "{bad:?}: {refused}");
+        assert_eq!(error_code(&refused), -32602);
+    }
+    // Schema-level refusals (wrong type, over the byte envelope) write nothing either.
+    for bad in [json!(3), json!("x".repeat(321))] {
+        let (status, _) = event(json!({"leaseHandle": handle, "stage": bad})).await;
+        assert_eq!(status, 400);
+    }
+    assert_eq!(run_record_3516(&su, run).await, before, "no write");
+    let audits = rejected_audits_3516(&su, run).await;
+    assert_eq!(
+        audits.len(),
+        bad_markers.len(),
+        "one row per refused report"
+    );
+    for audit in &audits {
+        assert_eq!(audit["reason"], json!("stage_invalid"));
+        assert_eq!(audit["tool"], json!("oort_run_event"));
+        let mut keys: Vec<&str> = audit
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["reason", "run_id", "schema", "tool"],
+            "no free text: {audit}"
+        );
+    }
+
+    // Completing after the markers keeps them; reaching the step cap did not
+    // block the completion.
+    let (status, done) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_complete",
+        json!({"leaseHandle": handle, "status": "succeeded", "body": "끝"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{done}");
+    let (steps, output) = run_record_3516(&su, run).await;
+    assert_eq!(steps, 5);
+    assert_eq!(output["stages"], Value::Array(expected));
+    assert_eq!(output["body"], json!("끝"));
+    assert_eq!(output["status"], json!("succeeded"));
+    assert!(output.get("artifacts").is_none());
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn artifacts_are_stored_when_valid_and_a_bad_one_refuses_the_whole_completion() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (handle, run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+    let complete = |args: Value| {
+        let (client, base, bearer) = (&client, &base, &fixture.hosted_bearer);
+        async move { call(client, base, bearer, "oort_run_complete", args).await }
+    };
+
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_event",
+        json!({"leaseHandle": handle, "stage": "시작"}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let before = run_record_3516(&su, run).await;
+    let messages_before = channel_message_count(&su, fixture.workspace, fixture.channel).await;
+
+    // (artifacts, reason code the audit must carry; None = refused by the
+    // transport schema before any transaction opens, so no audit row)
+    let refused: Vec<(Value, Option<&str>)> = vec![
+        (
+            json!({"prUrl": "http://github.com/a/b/pull/1"}),
+            Some("artifacts_pr_url_invalid"),
+        ),
+        (
+            json!({"prUrl": "https://evil.example/a/b/pull/1"}),
+            Some("artifacts_pr_url_invalid"),
+        ),
+        (
+            json!({"prUrl": "https://github.com/a/b/pull/1/files"}),
+            Some("artifacts_pr_url_invalid"),
+        ),
+        (
+            json!({"branch": "/etc/passwd"}),
+            Some("artifacts_branch_invalid"),
+        ),
+        (
+            json!({"branch": "fix: rotate the key"}),
+            Some("artifacts_branch_invalid"),
+        ),
+        (
+            json!({"branch": "C:\\work"}),
+            Some("artifacts_branch_invalid"),
+        ),
+        (json!({"added": -1}), None),
+        (json!({"deleted": 2147483648_i64}), None),
+        (json!({"commits": 1.5}), None),
+        (json!({"title": "fix the bug"}), None),
+        (json!({"files": ["a.rs"]}), None),
+        (json!("https://github.com/a/b/pull/1"), None),
+        // A good field next to a bad one: the whole report goes.
+        (
+            json!({"prUrl": "https://github.com/a/b/pull/1", "branch": "bad branch"}),
+            Some("artifacts_branch_invalid"),
+        ),
+    ];
+    let mut expected_audits = 0;
+    for (artifacts, reason) in &refused {
+        let (status, answer) = complete(json!({
+            "leaseHandle": handle, "status": "succeeded", "body": "done", "artifacts": artifacts
+        }))
+        .await;
+        assert_eq!(status, 400, "{artifacts}: {answer}");
+        assert_eq!(error_code(&answer), -32602);
+        if reason.is_some() {
+            expected_audits += 1;
+        }
+    }
+    // Nothing was written: the run is still running with the same record, no
+    // answer message, no usage row, the lease untouched.
+    assert_eq!(run_record_3516(&su, run).await, before);
+    let status: String = sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id=$1")
+        .bind(run)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(status, "running");
+    assert_eq!(
+        channel_message_count(&su, fixture.workspace, fixture.channel).await,
+        messages_before
+    );
+    let usage_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM usage_ledger WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(usage_rows, 0);
+    let audits = rejected_audits_3516(&su, run).await;
+    assert_eq!(
+        audits.len(),
+        expected_audits,
+        "one row per report that reached the tool"
+    );
+    let codes: Vec<&str> = audits
+        .iter()
+        .map(|a| a["reason"].as_str().unwrap())
+        .collect();
+    for (_, reason) in refused.iter().filter(|(_, reason)| reason.is_some()) {
+        assert!(codes.contains(&reason.unwrap()), "{reason:?} in {codes:?}");
+    }
+    for audit in &audits {
+        assert_eq!(audit["tool"], json!("oort_run_complete"));
+        let mut keys: Vec<&str> = audit
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["reason", "run_id", "schema", "tool"],
+            "no free text: {audit}"
+        );
+    }
+    let artifacts_audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action='agent.run.artifacts_reported' \
+           AND detail->>'run_id'=$1",
+    )
+    .bind(run.to_string())
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        artifacts_audits, 0,
+        "a refused report is not a reported one"
+    );
+
+    // The same lease completes with a valid report (the refusals did not burn it).
+    let (status, done) = complete(json!({
+        "leaseHandle": handle, "status": "failed", "error": "tests red",
+        "artifacts": {
+            "prUrl": "https://GitHub.com/acme/app/pull/42?utm=1#frag",
+            "branch": "feat/3516-x", "added": 12, "deleted": 3, "commits": 2
+        }
+    }))
+    .await;
+    assert_eq!(status, 200, "{done}");
+    let (_, output) = run_record_3516(&su, run).await;
+    assert_eq!(
+        output["artifacts"],
+        json!({
+            "prUrl": "https://github.com/acme/app/pull/42",
+            "branch": "feat/3516-x", "added": 12, "deleted": 3, "commits": 2
+        })
+    );
+    assert_eq!(output["stages"], json!(["시작"]), "existing keys kept");
+    assert_eq!(output["status"], json!("failed"));
+    assert!(output["message_id"].is_string());
+    let reported: Vec<Value> = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE action='agent.run.artifacts_reported' \
+           AND detail->>'run_id'=$1",
+    )
+    .bind(run.to_string())
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(reported.len(), 1, "one row per completion with artifacts");
+    assert_eq!(
+        reported[0]["keys"],
+        json!(["prUrl", "branch", "added", "deleted", "commits"])
+    );
+    let rendered = reported[0].to_string();
+    assert!(
+        !rendered.contains("github.com") && !rendered.contains("feat/3516"),
+        "{rendered}"
+    );
+
+    // A replayed completion answers, and writes no second report row.
+    let (status, _) = complete(json!({
+        "leaseHandle": handle, "status": "failed", "error": "tests red",
+        "artifacts": {"added": 1}
+    }))
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        run_record_3516(&su, run).await.1["artifacts"]["added"],
+        json!(12)
+    );
+}

@@ -72,7 +72,8 @@ use uuid::Uuid;
 use crate::error::ApiError;
 use crate::routes::agent_gateway::{
     complete_gateway_run_in_tx, record_gateway_event_in_tx, sanitized_gateway_error,
-    validated_event_fields, GatewayCompleteInput, GatewayEventInput,
+    validated_event_fields, validated_gateway_artifacts, validated_gateway_stage,
+    write_report_rejected_audit, GatewayCompleteInput, GatewayEventInput,
 };
 use crate::routes::agent_mentions::{route_agent_mentions_in_tx, MentionSend};
 use crate::AppState;
@@ -910,6 +911,15 @@ async fn run_event(
     )
     .map_err(|error| failure_of(&error))?;
     let event_id = optional_uuid(args, "eventId")?.unwrap_or_else(Uuid::new_v4);
+    // Read here, judged inside the transaction: a refused marker leaves an audit
+    // row, and a row needs the caller's run to be proven first (D15).
+    let raw_stage = match args.get("stage") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(raw)) if raw.len() <= momo_mcp::MAX_STAGE_BYTES as usize => {
+            Some(raw.clone())
+        }
+        Some(_) => return Err(ToolFailure::InvalidArguments),
+    };
     let secret = state.agent_port.envelope_secret().to_string();
 
     let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
@@ -923,6 +933,26 @@ async fn run_event(
                 Ok(handle) => handle,
                 Err(failure) => return Ok(Err(failure)),
             };
+            let stage = match raw_stage
+                .as_deref()
+                .map(validated_gateway_stage)
+                .transpose()
+            {
+                Ok(stage) => stage,
+                Err(reason) => {
+                    write_report_rejected_audit(
+                        conn,
+                        caller.workspace_id,
+                        handle.run_id,
+                        caller.agent_member_id,
+                        Some(caller.token_id),
+                        momo_mcp::TOOL_RUN_EVENT,
+                        reason,
+                    )
+                    .await?;
+                    return Ok(Err(ToolFailure::InvalidArguments));
+                }
+            };
             let recorded = record_gateway_event_in_tx(
                 conn,
                 caller.workspace_id,
@@ -935,6 +965,7 @@ async fn run_event(
                     status,
                     detail,
                     text_delta,
+                    stage,
                     event_id,
                     actor_member_id: Some(caller.agent_member_id),
                     via_token_id: Some(caller.token_id),
@@ -967,6 +998,7 @@ async fn run_complete(
     let safe_error = sanitized_gateway_error(error_text, &state.agent_gateway.secret);
     let body = optional_str(args, "body", 8_000)?.map(str::to_string);
     let (usage, usage_detail) = usage_from_arguments(args)?;
+    let raw_artifacts = args.get("artifacts").cloned();
     let secret = state.agent_port.envelope_secret().to_string();
     let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
     let claude_subscription_agents_enabled =
@@ -982,6 +1014,28 @@ async fn run_complete(
             let handle = match bound_handle(&identity, caller, &raw_handle, &secret) {
                 Ok(handle) => handle,
                 Err(failure) => return Ok(Err(failure)),
+            };
+            // D12 — a malformed `artifacts` refuses the WHOLE completion before
+            // anything is written; the audit row is the only trace, and the lease
+            // is untouched so the agent can complete again without it.
+            let artifacts = match validated_gateway_artifacts(
+                raw_artifacts.as_ref(),
+                momo_t3::work_share::allowed_pr_hosts(),
+            ) {
+                Ok(artifacts) => artifacts,
+                Err(reason) => {
+                    write_report_rejected_audit(
+                        conn,
+                        caller.workspace_id,
+                        handle.run_id,
+                        caller.agent_member_id,
+                        Some(caller.token_id),
+                        momo_mcp::TOOL_RUN_COMPLETE,
+                        reason,
+                    )
+                    .await?;
+                    return Ok(Err(ToolFailure::InvalidArguments));
+                }
             };
             let completed = complete_gateway_run_in_tx(
                 conn,
@@ -999,6 +1053,7 @@ async fn run_complete(
                     safe_error,
                     usage,
                     usage_detail,
+                    artifacts,
                     actor_member_id: Some(caller.agent_member_id),
                     via_token_id: Some(caller.token_id),
                     subscription_agents_enabled,
