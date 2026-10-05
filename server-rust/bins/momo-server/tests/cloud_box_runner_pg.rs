@@ -1336,6 +1336,13 @@ async fn revoke_waits_for_an_in_flight_runner_authentication() {
     let base = start_server(app.clone(), Some(true), &[w.operator], None).await;
     let client = reqwest::Client::new();
     let (runner, token) = register_runner(&client, &base, &w, "런너").await;
+    // Fresh last_seen_at: the throttled touch writes nothing, so the ONLY lock the authentication
+    // holds is the share lock under test (a row write would also block a revoke, masking its absence).
+    sqlx::query("UPDATE cloud_box_runner SET last_seen_at = now() WHERE id = $1")
+        .bind(runner)
+        .execute(&su)
+        .await
+        .expect("touch");
     let (ws, operator) = (w.workspace, w.operator);
     let revoked = Arc::new(AtomicBool::new(false));
     let seen_during = Arc::new(AtomicBool::new(true));
