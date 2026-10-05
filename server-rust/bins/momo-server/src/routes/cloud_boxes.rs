@@ -52,7 +52,7 @@ use crate::routes::shared::{
 };
 use crate::AppState;
 
-fn gate(state: &AppState) -> Result<(), ApiError> {
+pub(crate) fn gate(state: &AppState) -> Result<(), ApiError> {
     if state.cloud_box.enabled {
         Ok(())
     } else {

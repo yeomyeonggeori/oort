@@ -1973,7 +1973,9 @@ name = "momo-settings"
 version = "0.0.0"
 dependencies = [
  "aes-gcm",
+ "base64 0.22.1",
  "chrono",
+ "getrandom 0.2.17",
  "momo-auth",
  "momo-db",
  "serde",

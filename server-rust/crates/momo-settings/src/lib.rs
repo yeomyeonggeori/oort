@@ -57,6 +57,7 @@
 
 pub mod chain;
 pub mod cloud_box;
+pub mod cloud_box_runner;
 pub mod crypto;
 pub mod default_ai;
 pub mod egress;

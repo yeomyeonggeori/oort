@@ -399,6 +399,52 @@ pub async fn per_ip_drive_upload(
     too_many_requests(verdict.retry_after_seconds)
 }
 
+/// A per-IP budget that only **refused credentials** spend (#3505): the handler
+/// runs first and a `401` counts against the caller's address; once the budget is
+/// spent the address's refusals become `429` + `Retry-After`. An accepted request
+/// spends nothing, so a runner polling every few seconds is never throttled.
+pub(crate) async fn per_ip_refused(
+    state: AppState,
+    request: Request,
+    next: Next,
+    key_prefix: &'static str,
+    limit_of: fn(&RateLimitConfig) -> u32,
+) -> Response {
+    let config: &RateLimitConfig = &state.rate_limit.config;
+    let limit = limit_of(config);
+    let peer = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ConnectInfo(address)| *address);
+    let ip = client_ip(request.headers(), peer);
+
+    let response = next.run(request).await;
+    if limit == 0 || response.status() != StatusCode::UNAUTHORIZED {
+        return response;
+    }
+    let Some(ip) = ip else {
+        return response;
+    };
+    let verdict = state.rate_limit.limiter.check(
+        &format!("{key_prefix}:{ip}"),
+        limit,
+        Duration::from_secs(config.window_seconds),
+    );
+    if verdict.allowed {
+        return response;
+    }
+    if verdict.should_log {
+        tracing::warn!(
+            ip = %ip,
+            limit,
+            window_seconds = config.window_seconds,
+            surface = key_prefix,
+            "rate limit exceeded (per-ip, refused credentials)"
+        );
+    }
+    too_many_requests(verdict.retry_after_seconds)
+}
+
 /// The upload budget's own key prefix — never the join/claim prefixes, so
 /// spending one surface's budget cannot refuse another's (#2631 review S10).
 const DRIVE_UPLOAD_KEY: &str = "ip:drive-upload";
