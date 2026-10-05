@@ -455,6 +455,7 @@ agent_run.output = {
 
 - **터미널 바이트 없음.** 벤더 VM의 터미널·화면·파일 시스템은 oort로 오지 않는다. ADR-0125 D10(서버는 터미널 바이트를 싣지 않는다)·ADR-0188/0190의 경계는 그대로다. 보드·카드에 입력 칸·attach·제어는 없다.
 - **자유 텍스트는 기존 상한 안에서만.** 새로 보이게 되는 에이전트 문자열은 단계 표식(≤12×80)과 `branch`(검증됨)뿐이다. `detail`·`textDelta`·`body`·`error`는 보드가 읽지 않는다. 커밋 제목·파일 이름·경로·원격 URL은 필드가 없다.
+- **추가로 보이는 문자열(#3517 보안 검수 M2).** run 항목의 `label`은 요청자가 쓴 작업 제목(`input.title`, 200자)이다. 에이전트의 문자열은 아니지만 사용자 입력이므로 같은 규칙을 받는다: 표면(AT-5, #3518)은 일반 텍스트로만 그린다(마크다운·링크 변환·멘션 해석 없음).
 - **화면 처리.** 표식·브랜치는 외부 에이전트가 쓴 신뢰할 수 없는 텍스트다. 일반 텍스트로 이스케이프해 그리고(마크다운·링크 자동 변환·멘션 해석 없음, `inert_display_name`과 같은 결), 링크로 그려지는 것은 검증된 `prUrl` 하나뿐이다.
 - **요청 본문 상한.** 단계 표식·산출물 요청은 share 본문 상한(`MAX_SHARE_BODY_BYTES` 8 KiB)과 같은 층의 작은 상한을 받는다. 기존 `oort_run_complete.body` 상한(8000)은 그대로다.
 - **감사.** 종결 보고에 `artifacts`가 실리면 감사 1행(`agent.run.artifacts_reported`: run id·존재한 키 이름만, 값·URL 없음), 형식 거절은 사유 코드만 담은 감사 1행(`agent.run.report_rejected`)을 남긴다. 단계 표식마다는 감사하지 않는다(`step_count`와 `output.stages`가 기록이다). 토큰·lease handle은 어디에도 남기지 않는다.
@@ -506,4 +507,4 @@ D13·D14를 구현하면서 정한 세부다. 계약을 바꾸지 않고, 실측
 - **실시간.** 기존 `agent.status`(rail) 프레임은 `agent:` 네임스페이스·에이전트별 토픽이라 여러 채널을 함께 보는 보드의 신호로 쓸 수 없어 재사용하지 않고, 집 채널 토픽에 `work.run.updated`(`run_id`, `channel_id`, `to`=보드 어휘)를 새로 낸다. `agent_run.status` 쓰기 지점이 여럿이라 migration 120의 `agent_run` 트리거가 같은 트랜잭션에서 outbox에 넣는다. 보드 어휘가 바뀌는 전환(생성 포함)에서만 내고, 승인 보류·정지(보드에서 모두 running)와 단계·step 갱신은 내지 않는다. 호스팅 연결이 없는 에이전트의 run과 mention run은 내지 않는다.
 - **푸시.** 완료 응답 메시지(`client_msg_id = run_id`, 성공은 text·실패는 system)가 이미 push candidate를 만들므로 새 outbox kind 없이 `judge_targets`에 `work_run_done` 팔을 더했다. 수신자 = 요청자(감사 행) 한 명, `finished_at − started_at ≥ 60초`, A-8 전경 휴리스틱, `work_complete_push`(새 토글 없음). 요청자에게 조건이 안 맞으면 `dm`으로 떨어지지 않고 무음이다(끄기가 실제로 끄도록). 취소는 완료 응답이 없어 후보 자체가 없고, `timed_out`을 쓰는 코드는 아직 없어 그 갈래는 잠복이다(쓰는 코드가 생길 때 응답 메시지를 함께 넣어야 푸시가 간다).
 - **배포 순서.** relay(`momo-push-relay`, `ALLOWED_REASONS`에 `work_run_done`)를 먼저, 그 다음 notifier·server. 모바일의 닫힌 reason 목록(`contract.ts`·`PushNotification.swift`)은 뒤따르고, 구 앱은 정적 자리표시자로 fail-open한다.
-
+- **보안 검수 반영(#3533).** iOS NSE는 `work_run_done`을 고정 문구(「작업이 끝났어요」/「요청한 작업이 끝났어요」)로만 그리고 메시지 본문을 읽지 않는다. 보드는 끝나지 않은 run도 생성 후 30일이면 거르고, 저장된 `prUrl`이 `https://`가 아니면 읽을 때 버린다.

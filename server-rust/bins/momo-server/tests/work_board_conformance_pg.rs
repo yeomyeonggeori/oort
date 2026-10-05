@@ -1841,6 +1841,20 @@ async fn b9_a_hosted_work_run_is_a_run_item_only_when_asked_and_shows_no_detail(
         .expect("listed without a requester");
     assert!(found.get("requestedBy").is_none());
 
+    // L4: a stored prUrl that is not https is dropped on read, never relayed.
+    let mut odd = RunSpec::work(&b.tenant, "succeeded");
+    odd.output = Some(json!({"artifacts": {"prUrl": "javascript:alert(1)//pull/9"}}));
+    let odd_id = seed_work_run(&b.su, &b.tenant, odd).await;
+    let list = b.list(&b.alice_token, "?include=runs&limit=100").await;
+    let found = run_items(&list)
+        .into_iter()
+        .find(|item| item["runId"] == odd_id.to_string())
+        .expect("listed");
+    assert!(
+        found["prUrl"].is_null() && found.get("pr").is_none(),
+        "{found}"
+    );
+
     // A run item never has a single-read route (the card is the agent-runs detail).
     assert_eq!(b.one(&b.alice_token, run).await.status(), 404);
 }
@@ -2020,6 +2034,16 @@ async fn b11_mention_managed_linked_and_stale_runs_are_not_listed() {
         RunSpec {
             age_secs: 31 * 24 * 3600,
             ..RunSpec::work(&b.tenant, "succeeded")
+        },
+    )
+    .await;
+    // L3: a run that never finished does not stay on the board forever either.
+    let abandoned = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            age_secs: 31 * 24 * 3600,
+            ..RunSpec::work(&b.tenant, "queued")
         },
     )
     .await;

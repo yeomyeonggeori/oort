@@ -311,6 +311,20 @@ public enum PushWorkCompleteCopy {
     }
 }
 
+/// 「작업 끝남」 — 호스팅 에이전트의 작업(run)이 끝났을 때 (ADR-0162 증보 3 D14, `work_run_done`).
+///
+/// 문구는 **고정**이다. 이 알림을 부르는 메시지는 에이전트의 답(성공) 또는 오류 시스템
+/// 메시지(실패)라서 일반 경로를 타면 그 본문이 잠금 화면에 그대로 뜬다. 제목·산출물·답·
+/// 오류는 싣지 않고, 메시지 본문도 읽지 않는다(성공·실패 구분 없이 같은 문구).
+public enum PushWorkRunDoneCopy {
+    public static let title = "작업이 끝났어요"
+    public static let body = "요청한 작업이 끝났어요"
+
+    public static func display() -> PushDisplayContent {
+        PushDisplayContent(title: title, body: body)
+    }
+}
+
 public actor MomoPushRESTFetcher: PushMessageFetching {
     private struct MessagePage: Decodable {
         let messages: [Message]
@@ -372,6 +386,12 @@ public actor MomoPushRESTFetcher: PushMessageFetching {
             root + "/channels/\(envelope.channelID)/messages?limit=200",
             fetchSession: fetchSession
         )
+        // `work_run_done` 은 메시지를 읽기 전에 고정 문구로 끝낸다: 본문(에이전트의 답·오류)을
+        // 디코드하지도 않는다. 일반 경로로 새면 잠금 화면에 답 전문이 뜬다.
+        if envelope.reason == "work_run_done" {
+            _ = try await messageData
+            return PushWorkRunDoneCopy.display()
+        }
         let page = try decoder.decode(MessagePage.self, from: try await messageData)
         // 「작업 끝남」 카드의 작성자는 **받는 사람 본인**(세션을 시작한 사람)이라, 아래의
         // 「작성자 이름 + 본문」 규칙을 타면 「내 이름 / 작업 완료 — idle 대기」가 된다.

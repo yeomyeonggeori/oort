@@ -83,6 +83,23 @@ describe('the JS push contract matches the Swift the extension runs', () => {
     expect(PUSH_REASONS).toContain('work_run_done');
   });
 
+  it('renders work_run_done with fixed copy, never the agent reply (ADR-0162 D14)', () => {
+    const branch = SWIFT.indexOf('envelope.reason == "work_run_done"');
+    const generic = SWIFT.indexOf('return PushDisplayContent(title: author.displayName, body: body)');
+    const decode = SWIFT.indexOf('decoder.decode(MessagePage.self');
+    expect(branch).toBeGreaterThan(-1);
+    // The branch returns before the page is decoded and before the generic
+    // author-name + body path, so the reply text can never reach the lock screen.
+    expect(branch).toBeLessThan(decode);
+    expect(branch).toBeLessThan(generic);
+    const returns = SWIFT.slice(branch, decode);
+    expect(returns).toContain('PushWorkRunDoneCopy.display()');
+    expect(returns).not.toMatch(/\.body|message\./);
+    const copy = SWIFT.match(/enum PushWorkRunDoneCopy \{[\s\S]*?\n\}/);
+    if (!copy) throw new Error('no PushWorkRunDoneCopy');
+    expect(copy[0]).toContain('"요청한 작업이 끝났어요"');
+  });
+
   it('registers under the app bundle id, never the extension bundle id', () => {
     // The APNs topic is the APP's bundle id. Sending the extension's would make
     // every push undeliverable — APNs rejects a topic no certificate covers.

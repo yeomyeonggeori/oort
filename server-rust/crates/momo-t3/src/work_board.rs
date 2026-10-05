@@ -197,6 +197,7 @@ runs AS ( \
          NULL::int AS diff_files, NULL::int AS commits_ahead, NULL::int AS commits_behind, \
          NULL::int AS uncommitted, \
          CASE WHEN jsonb_typeof(r.output->'artifacts'->'prUrl') = 'string' \
+               AND (r.output->'artifacts'->>'prUrl') LIKE 'https://%' \
               THEN r.output->'artifacts'->>'prUrl' END AS pr_url, \
          NULL::timestamptz AS shared_at, \
          (extract(epoch FROM GREATEST(r.created_at, r.updated_at, r.finished_at)) * 1000000)::bigint \
@@ -234,8 +235,8 @@ runs AS ( \
                          ON wc.workspace_id = al.workspace_id AND wc.id = al.target_id \
                       WHERE al.workspace_id = r.workspace_id AND al.run_id = r.id \
                         AND al.target_type = 'work_control' AND wc.session_id IS NOT NULL) \
-     AND (r.finished_at IS NULL \
-          OR r.finished_at > clock_timestamp() - make_interval(days => $4)) \
+     AND (CASE WHEN r.finished_at IS NULL THEN r.created_at ELSE r.finished_at END) \
+         > clock_timestamp() - make_interval(days => $4) \
 ), \
 board AS ( \
   SELECT * FROM sess UNION ALL SELECT * FROM runs \
