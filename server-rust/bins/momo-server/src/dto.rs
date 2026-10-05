@@ -6359,3 +6359,164 @@ pub struct CloudBoxReconcileEntryDto {
 pub struct CloudBoxReconcileResponse {
     pub boxes: Vec<CloudBoxReconcileEntryDto>,
 }
+
+// ---------------------------------------------------------------------------
+// #3511 (ADR-0197 M4 증보 2) — the blind relay's trust chain and attach
+// ---------------------------------------------------------------------------
+
+/// `PUT /cloud-boxes/{box}/owner-device-list`: the box's first owner `DeviceList` (opaque bytes the
+/// owner device signed) plus the owner device's signed `cloud_box_owner_list` control. The signature is
+/// optional in the schema only so its absence can be a named 403 instead of a 422.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudBoxOwnerListRequest {
+    /// base64 of the signed `DeviceList` bytes (≤ 2 KiB).
+    pub list: String,
+    #[serde(default)]
+    pub signature: Option<HumanSignatureRequest>,
+}
+
+/// `PUT /cloud-boxes/{box}/pin`: the owner device's `HostPin` (opaque bytes).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudBoxPinRequest {
+    pub pin: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudBoxStoredResponse {
+    pub stored: bool,
+}
+
+/// `POST /cloud-boxes/{box}/attach`: the `Hello` the device will send first (its SHA-256 is what the
+/// signed `cloud_pty_attach` control binds) and that control's signature.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudBoxAttachRequest {
+    /// base64 of the `Hello` bytes (≤ 256).
+    pub hello: String,
+    #[serde(default)]
+    pub signature: Option<HumanSignatureRequest>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudBoxRelayDto {
+    /// The WebSocket path of the device's relay socket.
+    pub path: String,
+    /// The `Sec-WebSocket-Protocol` values to send: the fixed protocol name, then `ticket.<ticket>`.
+    pub subprotocol: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudBoxAttachResponse {
+    pub session_id: String,
+    /// Single use, valid for a few seconds; shown once.
+    pub ticket: String,
+    pub expires_at_ms: i64,
+    pub relay: CloudBoxRelayDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudBoxRunnerKeyDto {
+    /// base64 of the runner's 32-byte Ed25519 public key. There is **no fingerprint field**: the device
+    /// computes SHA-256 of these bytes itself and compares it with what the operator told the member.
+    pub public_key: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudBoxHostKeyDto {
+    pub public_key: String,
+    /// base64 of the runner's attestation of this host key for this box.
+    pub attestation: String,
+}
+
+/// `GET /cloud-boxes/{box}/trust-bundle`. Everything here is stored-and-forwarded, none of it made by the
+/// server. It carries **no owner device list** (a new device gets that in person, never from the server) and no
+/// fingerprint.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudBoxTrustBundleResponse {
+    pub box_id: String,
+    pub host_id: Option<String>,
+    pub agent_online: bool,
+    pub runner: Option<CloudBoxRunnerKeyDto>,
+    pub host: Option<CloudBoxHostKeyDto>,
+    pub pin: Option<String>,
+}
+
+/// `POST /cloud-boxes/{box}/agent/register` (public). The MAC is HMAC-SHA256 over the box id and host key,
+/// keyed by a pairing code only the runner and the box know.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudBoxAgentRegisterRequest {
+    pub host_public_key: String,
+    pub mac: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudBoxAgentHostDto {
+    pub id: String,
+    pub owner_member_id: String,
+    pub scope: &'static str,
+    #[serde(rename = "type")]
+    pub host_type: &'static str,
+    pub public_key: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudBoxAgentRegisterResponse {
+    /// `pending` (the runner has not attested yet) | `active`.
+    pub state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub work_host: Option<CloudBoxAgentHostDto>,
+}
+
+/// `PUT /cloud-box-runner/identity`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudBoxRunnerIdentityRequest {
+    pub public_key: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudBoxPendingRegistrationDto {
+    pub box_id: String,
+    pub host_public_key: String,
+    pub mac: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CloudBoxRunnerRegistrationsResponse {
+    pub registrations: Vec<CloudBoxPendingRegistrationDto>,
+}
+
+/// `POST /cloud-box-runner/boxes/{box}/attestation`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudBoxRunnerAttestationRequest {
+    pub host_public_key: String,
+    pub attestation: String,
+}
+
+/// `POST /cloud-box-runner/boxes/{box}/registration/reject`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudBoxRunnerRejectRequest {
+    pub host_public_key: String,
+}
+
+/// `GET /cloud-box-runner/boxes/{box}/provisioning`: what the runner needs beyond a `create` control (which
+/// stays the closed `{box, limits}` shape): the box's first owner device list, opaque.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudBoxRunnerProvisioningResponse {
+    pub owner_device_list: String,
+}

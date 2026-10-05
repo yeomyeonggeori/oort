@@ -25,7 +25,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
-use momo_auth::{active_workspace_role, load_device_key_in_tx, WorkspaceRole};
+use momo_auth::device_key::load_device_key_in_tx;
+use momo_auth::{active_workspace_role, WorkspaceRole};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, PgPool};
 use momo_settings::cloud_box::BoxState;
@@ -164,6 +165,9 @@ pub struct SessionMeta {
 }
 
 pub struct OpenParams {
+    /// Pre-assigned by the route so the verified signature can be recorded against it in the same
+    /// transaction that authorised the attach.
+    pub session_id: Uuid,
     pub workspace_id: Uuid,
     pub box_id: Uuid,
     pub host_id: Uuid,
@@ -412,7 +416,7 @@ impl RelayHub {
         {
             return Err(OpenError::TooManyPendingForMember);
         }
-        let session_id = Uuid::new_v4();
+        let session_id = params.session_id;
         let mut raw = [0u8; 32];
         if getrandom::getrandom(&mut raw).is_err() {
             return Err(OpenError::Disabled);

@@ -81,7 +81,7 @@ momo-unfurl = { path = "../../crates/momo-unfurl" }
 momo-provider-probe = { path = "../../crates/momo-provider-probe" }
 
 axum.workspace = true
-tokio = { workspace = true, features = ["net", "signal", "time"] }
+tokio = { workspace = true, features = ["net", "signal", "time", "sync"] }
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
@@ -92,6 +92,12 @@ tracing-subscriber.workspace = true
 # ADR-0122 / HD-1: signs the ten-minute LiveKit room grant. This package was
 # already in this crate's test graph, so promotion does not change Cargo.lock.
 jsonwebtoken.workspace = true
+# ADR-0197 M4: the blind relay hashes the one `Hello` its signed attach control binds and mints single-use
+# tickets. Already in the lock (sqlx/momo-settings); no new package.
+sha2.workspace = true
+base64.workspace = true
+hex.workspace = true
+getrandom = "0.2"
 
 # NOTE (invariant #2, amended by ADR-0149): there is still deliberately no
 # `reqwest` here. Until goal SRV-T2 that meant "momo-server never talks to

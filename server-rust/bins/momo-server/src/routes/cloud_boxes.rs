@@ -53,7 +53,9 @@ use crate::routes::shared::{
 use crate::AppState;
 
 pub(crate) fn gate(state: &AppState) -> Result<(), ApiError> {
-    if state.cloud_box.enabled {
+    // `enabled` is the startup switch; the relay hub's runtime switch is the one a kill (and the M5 workspace
+    // setting, later) flips while sessions are live.
+    if state.cloud_box.enabled && state.cloud_relay.enabled() {
         Ok(())
     } else {
         Err(ApiError::not_found("not found"))
@@ -84,8 +86,24 @@ fn dto(info: &BoxInfo) -> CloudBoxDto {
     }
 }
 
-fn not_found() -> ApiError {
+pub(crate) fn not_found() -> ApiError {
     ApiError::not_found("cloud box not found")
+}
+
+/// The box `box_id` for its **owner** `actor` (D6): a member who is not the owner learns nothing (404), a workspace
+/// admin who is not the owner gets 403 `cloud_box_owner_only`, a guest 403. The relay and trust-chain routes are
+/// owner-only without exception.
+pub(crate) async fn load_owner_box(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    box_id: Uuid,
+    actor: Uuid,
+) -> Result<Result<BoxInfo, ApiError>, momo_db::DbError> {
+    let Some(existing) = find_box_in_tx(conn, workspace_id, box_id).await? else {
+        return Ok(Err(not_found()));
+    };
+    let role = active_workspace_role(conn, workspace_id, actor).await?;
+    Ok(standing(role, &existing, actor, true).map(|_| existing))
 }
 
 fn conflict(from: BoxState) -> ApiError {
@@ -349,6 +367,8 @@ async fn lifecycle(
         })
         .await,
     )?;
+    // A stop or a delete changes what made an attach lawful: end the live relay sessions now.
+    state.cloud_relay.kick();
     Ok(Json(dto(&info)))
 }
 

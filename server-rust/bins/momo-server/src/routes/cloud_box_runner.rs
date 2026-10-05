@@ -18,6 +18,11 @@
 //! POST /v1/workspaces/{ws}/cloud-box-runner/claim                          poll: take controls (each with a lease)
 //! POST /v1/workspaces/{ws}/cloud-box-runner/controls/{control}/complete    report one (fenced by lease + attempts)
 //! GET  /v1/workspaces/{ws}/cloud-box-runner/boxes                          ids + states, for orphan reconciliation
+//! PUT  /v1/workspaces/{ws}/cloud-box-runner/identity                       the runner's Ed25519 public key (set once)
+//! GET  /v1/workspaces/{ws}/cloud-box-runner/registrations                  box-agent registrations waiting for the runner
+//! POST /v1/workspaces/{ws}/cloud-box-runner/boxes/{box}/attestation        the runner attests a host key (M4)
+//! POST /v1/workspaces/{ws}/cloud-box-runner/boxes/{box}/registration/reject the runner could not verify the MAC (M4)
+//! GET  /v1/workspaces/{ws}/cloud-box-runner/boxes/{box}/provisioning       the box's first owner device list (M4)
 //! ```
 //!
 //! ## Rules this module is the door for
@@ -58,6 +63,9 @@ use momo_settings::cloud_box_runner::{
 use uuid::Uuid;
 
 use crate::dto::{
+    CloudBoxPendingRegistrationDto, CloudBoxRunnerAttestationRequest,
+    CloudBoxRunnerIdentityRequest, CloudBoxRunnerProvisioningResponse,
+    CloudBoxRunnerRegistrationsResponse, CloudBoxRunnerRejectRequest, CloudBoxStoredResponse,
     CloudBoxControlDto, CloudBoxControlLimitsDto, CloudBoxReconcileEntryDto,
     CloudBoxReconcileResponse, CloudBoxRunnerClaimRequest, CloudBoxRunnerClaimResponse,
     CloudBoxRunnerCompleteRequest, CloudBoxRunnerCompleteResponse,
@@ -462,6 +470,8 @@ pub async fn complete(
         },
     )
     .await?;
+    // A box that is gone has no host any more: the relay supervisor ends its sessions now.
+    state.cloud_relay.kick();
     Ok(Json(CloudBoxRunnerCompleteResponse {
         box_state: outcome.map(BoxState::as_str),
     }))
@@ -507,4 +517,237 @@ pub async fn refused_credential_budget(
         config.claim_per_ip_limit
     })
     .await
+}
+
+// ---------------------------------------------------------------------------
+// #3511 (ADR-0197 M4 증보 2) — the runner's part of the trust chain
+// ---------------------------------------------------------------------------
+
+fn fixed<const N: usize>(value: &str, what: &'static str) -> Result<[u8; N], ApiError> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(value.trim())
+        .ok()
+        .and_then(|bytes| <[u8; N]>::try_from(bytes).ok())
+        .ok_or_else(|| ApiError::bad_request(format!("{what} must be {N} bytes, base64")))
+}
+
+/// `PUT /v1/workspaces/{ws}/cloud-box-runner/identity` — the runner's Ed25519 public key, set once.
+pub async fn identity(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(workspace): Path<String>,
+    body: Bytes,
+) -> Result<Json<CloudBoxStoredResponse>, ApiError> {
+    with_runner(
+        &state,
+        &headers,
+        &workspace,
+        "cloud_box_runner.identity",
+        move |conn, workspace_id, runner| {
+            Box::pin(async move {
+                use momo_settings::cloud_box_relay::{set_runner_signing_key_in_tx, SigningKeyOutcome};
+                let request: CloudBoxRunnerIdentityRequest = match parse_body(&body) {
+                    Ok(request) => request,
+                    Err(refusal) => return Ok(Err(refusal)),
+                };
+                let key: [u8; 32] = match fixed(&request.public_key, "publicKey") {
+                    Ok(key) => key,
+                    Err(refusal) => return Ok(Err(refusal)),
+                };
+                Ok(
+                    match set_runner_signing_key_in_tx(conn, workspace_id, runner.id, &key).await? {
+                        SigningKeyOutcome::Set | SigningKeyOutcome::Same => Ok(()),
+                        SigningKeyOutcome::Conflict => Err(ApiError::coded(
+                            StatusCode::CONFLICT,
+                            "cloud_box_runner_key_conflict",
+                            "이 런너의 서명 키는 이미 정해져 있어요. 키를 바꾸려면 런너를 새로 등록해야 해요.",
+                        )),
+                        SigningKeyOutcome::NotFound => Err(unauthorized()),
+                    },
+                )
+            })
+        },
+    )
+    .await?;
+    Ok(Json(CloudBoxStoredResponse { stored: true }))
+}
+
+/// `GET /v1/workspaces/{ws}/cloud-box-runner/registrations`.
+pub async fn registrations(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(workspace): Path<String>,
+) -> Result<Json<CloudBoxRunnerRegistrationsResponse>, ApiError> {
+    use base64::Engine as _;
+    let listed = with_runner(
+        &state,
+        &headers,
+        &workspace,
+        "cloud_box_runner.registrations",
+        move |conn, workspace_id, _runner| {
+            Box::pin(async move {
+                Ok(Ok(
+                    momo_settings::cloud_box_relay::list_pending_registrations_in_tx(
+                        conn,
+                        workspace_id,
+                    )
+                    .await?,
+                ))
+            })
+        },
+    )
+    .await?;
+    let b64 = base64::engine::general_purpose::STANDARD;
+    Ok(Json(CloudBoxRunnerRegistrationsResponse {
+        registrations: listed
+            .iter()
+            .map(|entry| CloudBoxPendingRegistrationDto {
+                box_id: entry.box_id.to_string(),
+                host_public_key: b64.encode(&entry.host_public_key),
+                mac: b64.encode(&entry.mac),
+            })
+            .collect(),
+    }))
+}
+
+/// `POST /v1/workspaces/{ws}/cloud-box-runner/boxes/{box}/attestation`.
+pub async fn attestation(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((workspace, cloud_box)): Path<(String, String)>,
+    body: Bytes,
+) -> Result<Json<CloudBoxStoredResponse>, ApiError> {
+    with_runner(
+        &state,
+        &headers,
+        &workspace,
+        "cloud_box_runner.attestation",
+        move |conn, workspace_id, runner| {
+            Box::pin(async move {
+                use momo_settings::cloud_box_relay::{activate_agent_in_tx, ActivateOutcome};
+                let request: CloudBoxRunnerAttestationRequest = match parse_body(&body) {
+                    Ok(request) => request,
+                    Err(refusal) => return Ok(Err(refusal)),
+                };
+                let Ok(box_id) = Uuid::parse_str(&cloud_box) else {
+                    return Ok(Err(ApiError::bad_request("invalid cloud box id")));
+                };
+                let host_key: [u8; 32] = match fixed(&request.host_public_key, "hostPublicKey") {
+                    Ok(key) => key,
+                    Err(refusal) => return Ok(Err(refusal)),
+                };
+                let attestation: [u8; 64] = match fixed(&request.attestation, "attestation") {
+                    Ok(value) => value,
+                    Err(refusal) => return Ok(Err(refusal)),
+                };
+                Ok(
+                    match activate_agent_in_tx(
+                        conn,
+                        workspace_id,
+                        runner.id,
+                        box_id,
+                        &host_key,
+                        &attestation,
+                    )
+                    .await?
+                    {
+                        ActivateOutcome::Activated { .. } | ActivateOutcome::AlreadyActive { .. } => {
+                            Ok(())
+                        }
+                        ActivateOutcome::NoMatchingRegistration => Err(ApiError::coded(
+                            StatusCode::CONFLICT,
+                            "cloud_box_registration_changed",
+                            "대기 중인 등록이 증명한 키와 달라요.",
+                        )),
+                        ActivateOutcome::KeyConflict => Err(ApiError::coded(
+                            StatusCode::CONFLICT,
+                            "cloud_box_agent_key_conflict",
+                            "이 박스에는 이미 다른 host 키가 등록돼 있어요.",
+                        )),
+                        ActivateOutcome::NotFound => Err(ApiError::not_found("cloud box not found")),
+                    },
+                )
+            })
+        },
+    )
+    .await?;
+    Ok(Json(CloudBoxStoredResponse { stored: true }))
+}
+
+/// `POST /v1/workspaces/{ws}/cloud-box-runner/boxes/{box}/registration/reject`.
+pub async fn reject_registration(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((workspace, cloud_box)): Path<(String, String)>,
+    body: Bytes,
+) -> Result<Json<CloudBoxStoredResponse>, ApiError> {
+    let cleared = with_runner(
+        &state,
+        &headers,
+        &workspace,
+        "cloud_box_runner.reject_registration",
+        move |conn, workspace_id, _runner| {
+            Box::pin(async move {
+                let request: CloudBoxRunnerRejectRequest = match parse_body(&body) {
+                    Ok(request) => request,
+                    Err(refusal) => return Ok(Err(refusal)),
+                };
+                let Ok(box_id) = Uuid::parse_str(&cloud_box) else {
+                    return Ok(Err(ApiError::bad_request("invalid cloud box id")));
+                };
+                let host_key: [u8; 32] = match fixed(&request.host_public_key, "hostPublicKey") {
+                    Ok(key) => key,
+                    Err(refusal) => return Ok(Err(refusal)),
+                };
+                Ok(Ok(momo_settings::cloud_box_relay::reject_registration_in_tx(
+                    conn,
+                    workspace_id,
+                    box_id,
+                    &host_key,
+                )
+                .await?))
+            })
+        },
+    )
+    .await?;
+    Ok(Json(CloudBoxStoredResponse { stored: cleared }))
+}
+
+/// `GET /v1/workspaces/{ws}/cloud-box-runner/boxes/{box}/provisioning`.
+pub async fn provisioning(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((workspace, cloud_box)): Path<(String, String)>,
+) -> Result<Json<CloudBoxRunnerProvisioningResponse>, ApiError> {
+    use base64::Engine as _;
+    let list = with_runner(
+        &state,
+        &headers,
+        &workspace,
+        "cloud_box_runner.provisioning",
+        move |conn, workspace_id, _runner| {
+            Box::pin(async move {
+                let Ok(box_id) = Uuid::parse_str(&cloud_box) else {
+                    return Ok(Err(ApiError::bad_request("invalid cloud box id")));
+                };
+                Ok(
+                    match momo_settings::cloud_box_relay::owner_list_in_tx(conn, workspace_id, box_id)
+                        .await?
+                    {
+                        Some(list) => Ok(list),
+                        None => Err(ApiError::coded(
+                            StatusCode::NOT_FOUND,
+                            "cloud_box_list_missing",
+                            "이 박스에는 소유자 목록이 아직 없어요.",
+                        )),
+                    },
+                )
+            })
+        },
+    )
+    .await?;
+    Ok(Json(CloudBoxRunnerProvisioningResponse {
+        owner_device_list: base64::engine::general_purpose::STANDARD.encode(list),
+    }))
 }

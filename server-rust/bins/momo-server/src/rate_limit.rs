@@ -346,6 +346,23 @@ pub async fn per_ip_claim(State(state): State<AppState>, request: Request, next:
     .await
 }
 
+/// Per-IP gate for the public box-agent registration route (ADR-0197 M4). Its own key, the claim budget.
+pub async fn per_ip_cloud_agent_register(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    gate_per_ip(
+        state,
+        request,
+        next,
+        "ip:cloud-agent-register",
+        |config| config.claim_per_ip_limit,
+        "/cloud-boxes/{box}/agent/register",
+    )
+    .await
+}
+
 /// Per-IP gate for public device-link redeem. Reuses the claim budget (no new
 /// env) on an independent key so claim traffic cannot starve QR redeem.
 pub async fn per_ip_device_link(

@@ -29,6 +29,7 @@
 //! an ephemeral port; `main.rs` only reads the environment and serves.
 
 pub mod auth;
+pub mod cloud_box_relay;
 pub mod config;
 pub mod cors;
 pub mod dto;
@@ -206,6 +207,8 @@ pub struct AppState {
     /// ADR-0197 M1 (#3500): the personal cloud box API. **Closed** unless
     /// [`AppState::with_cloud_box`] opens it.
     pub cloud_box: Arc<CloudBoxConfig>,
+    /// ADR-0197 M4: the blind relay's registry and supervisor (in-process; see `cloud_box_relay`).
+    pub cloud_relay: Arc<cloud_box_relay::RelayHub>,
     /// MOMO-605 CORS origin allowlist (ADR-0133 P2). Fail-closed-empty like the
     /// rest: an instance that named no origin mounts no CORS middleware at all,
     /// which is byte-for-byte today's behaviour.
@@ -283,7 +286,10 @@ impl AppState {
         realtime_ws_url: impl Into<RealtimeAdvert>,
     ) -> Self {
         let ephemeral_grant_key = momo_auth::ephemeral_grant_key(&jwt_secret);
+        let cloud_relay =
+            cloud_box_relay::RelayHub::new(pool.clone(), cloud_box_relay::RelayLimits::default());
         AppState {
+            cloud_relay,
             pool,
             jwt_secret: Arc::new(jwt_secret),
             realtime_ws_url: Arc::new(realtime_ws_url.into()),
@@ -486,6 +492,12 @@ impl AppState {
         self
     }
 
+    /// Replace the blind relay's limits (tests shrink them; production keeps the ADR defaults).
+    pub fn with_cloud_relay_limits(mut self, limits: cloud_box_relay::RelayLimits) -> Self {
+        self.cloud_relay = cloud_box_relay::RelayHub::new(self.pool.clone(), limits);
+        self
+    }
+
     /// Attach the MOMO-605 CORS allowlist. Same rationale as every builder
     /// above: the default is "no cross-origin surface at all", and an operator
     /// has to name each origin to open one.
@@ -548,6 +560,23 @@ impl std::fmt::Debug for AppState {
 ///     inverted its authorization.
 ///
 /// Everything else this batch mounts sits behind [`auth::require_principal`].
+/// See the layer in [`build_app`]: a successful non-read request wakes the relay supervisor when sessions exist.
+async fn kick_relay_after_write(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let reads = matches!(
+        *request.method(),
+        axum::http::Method::GET | axum::http::Method::HEAD | axum::http::Method::OPTIONS
+    );
+    let response = next.run(request).await;
+    if !reads && response.status().is_success() && state.cloud_relay.session_count() > 0 {
+        state.cloud_relay.kick();
+    }
+    response
+}
+
 pub fn build_app(state: AppState) -> Router {
     let protected = Router::new()
         .route(
@@ -1311,6 +1340,24 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/cloud-boxes/{box}/keep-awake",
             post(routes::cloud_boxes::keep_awake),
         )
+        // #3511 (ADR-0197 M4 증보 2) — 눈먼 중계의 소유자 쪽. 전부 박스 주인만. 첫 소유자 목록과 붙기는
+        // 기기 서명 필수(MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED 와 무관). 소켓은 아래 공개 라우터(티켓).
+        .route(
+            "/v1/workspaces/{ws}/cloud-boxes/{box}/owner-device-list",
+            axum::routing::put(routes::cloud_box_pty::put_owner_list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/cloud-boxes/{box}/trust-bundle",
+            get(routes::cloud_box_pty::trust_bundle),
+        )
+        .route(
+            "/v1/workspaces/{ws}/cloud-boxes/{box}/pin",
+            axum::routing::put(routes::cloud_box_pty::put_pin),
+        )
+        .route(
+            "/v1/workspaces/{ws}/cloud-boxes/{box}/attach",
+            post(routes::cloud_box_pty::attach),
+        )
         // #3505 (ADR-0197 M2) — 런너 등록·회전·폐기. 인스턴스 운영자만(D2 역할 분리). 런너가 쓰는
         // claim/complete/boxes 는 이 라우터가 아니라 아래 공개 라우터에 있다(런너 자격 하나만 받는다).
         .route(
@@ -1668,6 +1715,88 @@ pub fn build_app(state: AppState) -> Router {
                 routes::cloud_box_runner::refused_credential_budget,
             )),
         )
+        // #3511 (ADR-0197 M4 증보 2) — 런너가 쓰는 신뢰 사슬 문. 런너 자격 하나만(위와 같은 문, 같은 401).
+        .route(
+            "/v1/workspaces/{ws}/cloud-box-runner/identity",
+            axum::routing::put(routes::cloud_box_runner::identity)
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    routes::cloud_box_runner::refused_credential_budget,
+                ))
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    routes::cloud_box_runner::MAX_RUNNER_BODY_BYTES,
+                )),
+        )
+        .route(
+            "/v1/workspaces/{ws}/cloud-box-runner/registrations",
+            get(routes::cloud_box_runner::registrations).route_layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    routes::cloud_box_runner::refused_credential_budget,
+                ),
+            ),
+        )
+        .route(
+            "/v1/workspaces/{ws}/cloud-box-runner/boxes/{box}/attestation",
+            post(routes::cloud_box_runner::attestation)
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    routes::cloud_box_runner::refused_credential_budget,
+                ))
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    routes::cloud_box_runner::MAX_RUNNER_BODY_BYTES,
+                )),
+        )
+        .route(
+            "/v1/workspaces/{ws}/cloud-box-runner/boxes/{box}/registration/reject",
+            post(routes::cloud_box_runner::reject_registration)
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    routes::cloud_box_runner::refused_credential_budget,
+                ))
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    routes::cloud_box_runner::MAX_RUNNER_BODY_BYTES,
+                )),
+        )
+        .route(
+            "/v1/workspaces/{ws}/cloud-box-runner/boxes/{box}/provisioning",
+            get(routes::cloud_box_runner::provisioning).route_layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    routes::cloud_box_runner::refused_credential_budget,
+                ),
+            ),
+        )
+        // #3511 — 박스-agent 의 문. 등록은 공개(IP 예산, 서버는 MAC 을 검증하지 못하고 런너가 한다), 두 소켓은
+        // host 서명 v2(베어러 아님), 기기 소켓은 티켓(Sec-WebSocket-Protocol). 전부 베어러 미들웨어 밖.
+        .route(
+            "/v1/workspaces/{ws}/cloud-boxes/{box}/agent/register",
+            post(routes::cloud_box_agent::register)
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    routes::cloud_box_agent::register_budget,
+                ))
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    routes::cloud_box_runner::MAX_RUNNER_BODY_BYTES,
+                )),
+        )
+        .route(
+            "/v1/workspaces/{ws}/work-hosts/{host}/cloud-box/listen",
+            get(routes::cloud_box_agent::listen),
+        )
+        .route(
+            "/v1/workspaces/{ws}/work-hosts/{host}/cloud-box/relay/{session}",
+            get(routes::cloud_box_agent::session_socket),
+        )
+        .route(
+            "/v1/workspaces/{ws}/cloud-boxes/{box}/relay/{session}",
+            get(routes::cloud_box_pty::device_socket).route_layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    routes::cloud_box_pty::refused_ticket_budget,
+                ),
+            ),
+        )
         // #1265 / ADR-0115 — public ingress. Authenticated by HMAC headers or
         // the URL token, never by a bearer. Mounted outside require_principal
         // for the same reason Swift's `addPublic` did.
@@ -1709,6 +1838,13 @@ pub fn build_app(state: AppState) -> Router {
     } else {
         app
     };
+    // ADR-0197 M4: any write that succeeds may have revoked a device key, deactivated a member, stopped or deleted a
+    // box or flipped a setting. While a relay session is live, re-check every session right away (the supervisor
+    // coalesces bursts into one pass); with no live session this costs a counter read.
+    let app = app.layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        kick_relay_after_write,
+    ));
     let app = app.with_state(state);
 
     // MOMO-605 / ADR-0133 P2 — the desktop webview's cross-origin gate.

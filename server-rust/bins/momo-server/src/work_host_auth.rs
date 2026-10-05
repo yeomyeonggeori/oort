@@ -277,6 +277,26 @@ pub(crate) fn is_allowed_signed_path(method: &Method, path: &str) -> bool {
     {
         return true;
     }
+    // `GET …/work-hosts/{host}/cloud-box/listen` and `GET …/work-hosts/{host}/cloud-box/relay/{session}` (ADR-0197
+    // M4) — the box-agent's two sockets. The first names the host (the `{host}` pin applies); the second also
+    // names a session, whose pin lives in the relay hub (the session is claimed only by the host it was
+    // authorised for).
+    if method == Method::GET
+        && segments.len() == 7
+        && segments[3] == "work-hosts"
+        && segments[5] == "cloud-box"
+        && segments[6] == "listen"
+    {
+        return true;
+    }
+    if method == Method::GET
+        && segments.len() == 8
+        && segments[3] == "work-hosts"
+        && segments[5] == "cloud-box"
+        && segments[6] == "relay"
+    {
+        return true;
+    }
     // `GET …/work-tool-profiles` (#1777) — the daemon's boot catalog. The path
     // names no host; the handler serves the enabled projection to any signed
     // host in the workspace (Swift `WorkToolProfileRoutes.list`).
