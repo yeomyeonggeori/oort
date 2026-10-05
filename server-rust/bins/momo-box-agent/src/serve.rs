@@ -18,7 +18,7 @@
 //! a server that fails to end a session does not keep a terminal open.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -166,8 +166,27 @@ async fn connect_signed(
 // ---------------------------------------------------------------------------
 
 struct SessionIo {
-    inbound: mpsc::Receiver<Vec<u8>>,
+    inbound: async_mpsc::Receiver<Vec<u8>>,
     outbound: async_mpsc::Sender<Vec<u8>>,
+}
+
+/// The next inbound message, waiting at most `timeout` (the thread has no runtime: it polls).
+fn recv_within(io: &mut SessionIo, timeout: Duration) -> Result<Vec<u8>, RecvTimeoutError> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match io.inbound.try_recv() {
+            Ok(bytes) => return Ok(bytes),
+            Err(async_mpsc::error::TryRecvError::Disconnected) => {
+                return Err(RecvTimeoutError::Disconnected)
+            }
+            Err(async_mpsc::error::TryRecvError::Empty) => {
+                if Instant::now() >= deadline {
+                    return Err(RecvTimeoutError::Timeout);
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
 }
 
 fn send_out(io: &SessionIo, bytes: Vec<u8>) -> bool {
@@ -178,14 +197,14 @@ fn send_out(io: &SessionIo, bytes: Vec<u8>) -> bool {
 /// channels is what closes the WebSocket.
 fn session_thread(
     host: Arc<Mutex<BoxHost>>,
-    io: SessionIo,
+    mut io: SessionIo,
     limits: BoxLimits,
     nonces: NonceSink,
     poisoned: Arc<AtomicBool>,
 ) {
     let started = Instant::now();
     // 1. Hello → Challenge. A device that is not on the owner's list gets no challenge at all.
-    let Ok(first) = io.inbound.recv_timeout(limits.handshake) else {
+    let Ok(first) = recv_within(&mut io, limits.handshake) else {
         return;
     };
     let Ok(hello) = Hello::from_bytes(&first) else {
@@ -200,7 +219,7 @@ fn session_thread(
     }
     // 2. Auth → Ready. The box verifies the owner device's signature itself.
     let remaining = limits.handshake.saturating_sub(started.elapsed());
-    let Ok(second) = io.inbound.recv_timeout(remaining) else {
+    let Ok(second) = recv_within(&mut io, remaining) else {
         return;
     };
     let Ok(auth) = Auth::from_bytes(&second) else {
@@ -232,25 +251,28 @@ fn session_thread(
         if started.elapsed() > limits.max_session || last_activity.elapsed() > limits.idle {
             return;
         }
-        match io.inbound.recv_timeout(Duration::from_millis(1)) {
-            Ok(frame) => {
-                last_activity = Instant::now();
-                match attachment.on_frame(&frame) {
-                    Ok(Inbound::Closed) => return,
-                    Ok(_) => {}
-                    Err(error) => {
-                        // A helper that cannot give a terminal is dead for this agent (L-A): say so, end this
-                        // session; the agent restarts once nothing is attached.
-                        if host.lock().is_ok_and(|h| h.helper_poisoned()) {
-                            poisoned.store(true, Ordering::SeqCst);
+        // Take what has arrived (a bounded batch, so output keeps flowing under a burst of input).
+        for _ in 0..64 {
+            match io.inbound.try_recv() {
+                Ok(frame) => {
+                    last_activity = Instant::now();
+                    match attachment.on_frame(&frame) {
+                        Ok(Inbound::Closed) => return,
+                        Ok(_) => {}
+                        Err(error) => {
+                            // A helper that cannot give a terminal is dead for this agent (L-A): say so, end this
+                            // session; the agent restarts once nothing is attached.
+                            if host.lock().is_ok_and(|h| h.helper_poisoned()) {
+                                poisoned.store(true, Ordering::SeqCst);
+                            }
+                            tracing_log(&format!("session ends: {}", error_kind(&error)));
+                            return;
                         }
-                        tracing_log(&format!("session ends: {}", error_kind(&error)));
-                        return;
                     }
                 }
+                Err(async_mpsc::error::TryRecvError::Empty) => break,
+                Err(async_mpsc::error::TryRecvError::Disconnected) => return,
             }
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => return,
         }
         match attachment.pump(limits.poll_ms) {
             Ok(frames) => {
@@ -306,7 +328,9 @@ async fn run_session(
         return;
     };
     let (mut sink, mut stream) = socket.split();
-    let (in_tx, in_rx) = mpsc::sync_channel::<Vec<u8>>(64);
+    // Bounded both ways. Inbound waits for room (`send().await`), so a burst of input slows the WebSocket read —
+    // TCP back-pressure to the relay — instead of ending the session or growing without limit.
+    let (in_tx, in_rx) = async_mpsc::channel::<Vec<u8>>(64);
     let (out_tx, mut out_rx) = async_mpsc::channel::<Vec<u8>>(64);
     let limits = cfg.limits;
     let worker = std::thread::spawn(move || {
@@ -326,7 +350,7 @@ async fn run_session(
             incoming = stream.next() => {
                 match incoming {
                     Some(Ok(Message::Binary(bytes))) => {
-                        if bytes.len() > MAX_MESSAGE || in_tx.try_send(bytes.to_vec()).is_err() {
+                        if bytes.len() > MAX_MESSAGE || in_tx.send(bytes.to_vec()).await.is_err() {
                             break;
                         }
                     }

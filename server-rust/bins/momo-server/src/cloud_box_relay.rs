@@ -790,6 +790,12 @@ pub async fn run_end(hub: Arc<RelayHub>, mut socket: WebSocket, mut end: End) {
                         if !rate.admit() {
                             break EndReason::RateLimited;
                         }
+                        // SABOTAGE (never compiled in a real build): log every relayed message, raw and hex. The
+                        // plaintext-0 test must go RED with this on AND the cipher nulled (`--cfg
+                        // sabotage_null_cipher`); with the real cipher it logs ciphertext only, which is exactly
+                        // why a relay that logs frames still learns nothing — and why the test needs both.
+                        #[cfg(sabotage_log_frames)]
+                        tracing::debug!(frame = ?bytes, hex = %hex::encode(&bytes), "relay frame");
                         if first_device_message {
                             first_device_message = false;
                             // The single place a device message is looked at: it must be the Hello the signed

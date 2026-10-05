@@ -379,6 +379,25 @@ impl Pty {
         Ok(())
     }
 
+    /// Write as much as the terminal accepts **right now** and return how many bytes that was (0 when it accepts
+    /// none). Never waits: the caller keeps the rest and reads the terminal's output meanwhile, so a large paste
+    /// into a program that echoes cannot deadlock against its own output (ADR-0197 M4).
+    pub fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        loop {
+            // SAFETY: valid pointer/length of a live slice, owned descriptor.
+            let n = unsafe { libc::write(self.fd(), bytes.as_ptr().cast(), bytes.len()) };
+            if n >= 0 {
+                return Ok(n as usize);
+            }
+            let error = io::Error::last_os_error();
+            match error.kind() {
+                io::ErrorKind::Interrupted => continue,
+                io::ErrorKind::WouldBlock => return Ok(0),
+                _ => return Err(error),
+            }
+        }
+    }
+
     /// Read up to `buf.len()` bytes, waiting at most `timeout_ms`.
     pub fn read_timeout(&mut self, buf: &mut [u8], timeout_ms: i32) -> io::Result<Read> {
         let mut poll = libc::pollfd {

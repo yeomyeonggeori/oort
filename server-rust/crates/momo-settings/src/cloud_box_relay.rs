@@ -305,7 +305,7 @@ pub async fn register_agent_in_tx(
             });
         }
         sqlx::query(
-            "UPDATE cloud_box_agent SET host_public_key = $3, mac = $4, registered_at = now() \
+            "UPDATE cloud_box_agent SET host_public_key = $3, mac = $4, state = 'pending', registered_at = now() \
               WHERE workspace_id = $1 AND box_id = $2",
         )
         .bind(workspace_id)
@@ -417,7 +417,8 @@ pub async fn activate_agent_in_tx(
             _ => ActivateOutcome::KeyConflict,
         });
     }
-    if stored != host_public_key {
+    // A `rejected` slot is empty; a `pending` one must hold exactly the key the runner attested.
+    if state != "pending" || stored != host_public_key {
         return Ok(ActivateOutcome::NoMatchingRegistration);
     }
     let host_id = insert_work_host(
@@ -450,7 +451,8 @@ pub async fn activate_agent_in_tx(
     Ok(ActivateOutcome::Activated { host_id })
 }
 
-/// The runner could not verify the parked registration: free the slot (only a `pending` one).
+/// The runner could not verify the parked registration: free the slot (only a `pending` one holding exactly that
+/// key becomes `rejected`; the API role may not delete these rows, and a `rejected` slot is simply empty).
 pub async fn reject_registration_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -458,7 +460,7 @@ pub async fn reject_registration_in_tx(
     host_public_key: &[u8; KEY_LEN],
 ) -> Result<bool, DbError> {
     let done = sqlx::query(
-        "DELETE FROM cloud_box_agent \
+        "UPDATE cloud_box_agent SET state = 'rejected' \
           WHERE workspace_id = $1 AND box_id = $2 AND state = 'pending' AND host_public_key = $3",
     )
     .bind(workspace_id)

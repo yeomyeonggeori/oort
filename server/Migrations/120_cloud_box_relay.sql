@@ -89,7 +89,9 @@ CREATE TABLE cloud_box_agent (
     REFERENCES cloud_box (id, workspace_id) ON DELETE RESTRICT,
   CONSTRAINT cloud_box_agent_runner_fk FOREIGN KEY (runner_id, workspace_id)
     REFERENCES cloud_box_runner (id, workspace_id) ON DELETE RESTRICT,
-  CONSTRAINT cloud_box_agent_state_ck CHECK (state IN ('pending', 'active')),
+  -- `rejected`: the runner could not verify the parked MAC. The row stays (the API role may not DELETE these tables) and
+  -- the slot is free: a new registration turns it back into `pending`.
+  CONSTRAINT cloud_box_agent_state_ck CHECK (state IN ('pending', 'rejected', 'active')),
   CONSTRAINT cloud_box_agent_shape_ck CHECK (
     octet_length(host_public_key) = 32 AND octet_length(mac) = 32
     AND ((state = 'active') = (host_id IS NOT NULL AND attestation IS NOT NULL
@@ -99,7 +101,7 @@ CREATE TABLE cloud_box_agent (
 );
 
 COMMENT ON TABLE cloud_box_agent IS
-  '#3511 ADR-0197 M4: box-agent 등록 슬롯. pending 은 마지막 쓰기가 이긴다(런너가 거부하기 전까지), active 가 되면 host 키는 바뀌지 않는다.';
+  '#3511 ADR-0197 M4: box-agent 등록 슬롯. pending 은 마지막 쓰기가 이긴다(런너가 거부하면 rejected 로 비운다), active 가 되면 host 키는 바뀌지 않는다.';
 
 CREATE FUNCTION cloud_box_agent_guard()
 RETURNS trigger LANGUAGE plpgsql

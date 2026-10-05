@@ -547,6 +547,9 @@ pub struct Bench {
     pub runner_identity_fingerprint: [u8; 32],
     pub runner_public: [u8; 32],
     pub host_public: [u8; 32],
+    /// The box-agent's host key. Tests that need to speak AS the box (a second listen socket, a replayed
+    /// request) sign with it; the server never has it.
+    pub host_key: ed25519_dalek::SigningKey,
     pub agent: Option<Agent>,
     pub docker: Arc<FakeDocker>,
 }
@@ -715,7 +718,7 @@ impl Bench {
                 host_id,
                 limits: opts.box_limits,
             },
-            host_key,
+            host_key.clone(),
             host.clone(),
             sink,
             rx,
@@ -732,6 +735,7 @@ impl Bench {
             runner_identity_fingerprint: fingerprint,
             runner_public,
             host_public,
+            host_key,
             agent: Some(Agent {
                 shutdown,
                 join,
@@ -996,4 +1000,20 @@ pub fn temp_path(label: &str) -> PathBuf {
 
 pub fn exists(path: &Path) -> bool {
     path.exists()
+}
+
+/// The HTTP status a WebSocket upgrade was answered with when it did **not** upgrade (`None` when it did).
+pub async fn upgrade_refused_with(url: &str, headers: &[(&str, String)]) -> Option<u16> {
+    let mut request = url.into_client_request().expect("request");
+    for (name, value) in headers {
+        request.headers_mut().insert(
+            tokio_tungstenite::tungstenite::http::HeaderName::from_bytes(name.as_bytes()).expect("header name"),
+            value.parse().expect("header value"),
+        );
+    }
+    match tokio_tungstenite::connect_async(request).await {
+        Err(tokio_tungstenite::tungstenite::Error::Http(response)) => Some(response.status().as_u16()),
+        Err(_) => Some(0),
+        Ok(_) => None,
+    }
 }

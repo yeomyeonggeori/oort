@@ -161,3 +161,8 @@ momo-agent-worker = { path = "../momo-agent-worker" }
 # links nor starts a notifier, and the two processes still meet through nothing
 # but the ledger.
 momo-notifier = { path = "../momo-notifier" }
+
+# ADR-0197 M4: the plaintext-0 sabotage switch is a `--cfg sabotage_log_frames` rustc flag, NOT a cargo feature, so
+# `--all-features` or feature unification can never turn frame logging on. Only `verify-m4.sh --sabotage` sets it.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(sabotage_log_frames)"] }

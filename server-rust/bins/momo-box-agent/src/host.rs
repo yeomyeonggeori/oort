@@ -310,6 +310,8 @@ impl BoxHost {
                 pty: None,
                 template,
                 finished: false,
+                pending_input: Vec::new(),
+                blocked_since: None,
                 _slot: Slot(self.attached.clone()),
             },
             ready,
@@ -347,6 +349,12 @@ pub enum Inbound {
     Closed,
 }
 
+/// Input the terminal has not accepted yet may grow to this much before the attach is cut (a paste into a
+/// program that never reads). Above the largest burst a person pastes; far below anything that matters to memory.
+pub const MAX_PENDING_INPUT: usize = 256 * 1024;
+/// How long the terminal may accept none of the pending input before the attach is cut.
+pub const INPUT_STALL: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// One authenticated attach: a protocol session and, once the device has said
 /// how big its terminal is, a PTY.
 pub struct Attachment {
@@ -354,6 +362,10 @@ pub struct Attachment {
     pty: Option<Pty>,
     template: SpawnTemplate,
     finished: bool,
+    /// Input the terminal has not taken yet. Written without waiting, between reads of the terminal's output, so
+    /// neither direction can block the other.
+    pending_input: Vec<u8>,
+    blocked_since: Option<Instant>,
     _slot: Slot,
 }
 
@@ -385,8 +397,17 @@ impl Attachment {
                 }
             }
             FrameKind::Data => {
-                let pty = self.pty.as_mut().ok_or(HostError::NotOpened)?;
-                pty.write_all(&payload)?;
+                if self.pty.is_none() {
+                    return Err(HostError::NotOpened);
+                }
+                if self.pending_input.len() + payload.len() > MAX_PENDING_INPUT {
+                    return Err(HostError::Pty(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "the terminal is not taking input",
+                    )));
+                }
+                self.pending_input.extend_from_slice(&payload);
+                self.flush_input()?;
                 Ok(Inbound::Input)
             }
             FrameKind::Close => {
@@ -399,6 +420,31 @@ impl Attachment {
         }
     }
 
+    /// Write what the terminal will take now; keep the rest. No progress for [`INPUT_STALL`] while input waits is the
+    /// terminal not reading (`TimedOut`, the same verdict the blocking write gave at M3).
+    fn flush_input(&mut self) -> Result<(), HostError> {
+        let Some(pty) = self.pty.as_mut() else {
+            return Ok(());
+        };
+        while !self.pending_input.is_empty() {
+            let written = pty.try_write(&self.pending_input)?;
+            if written == 0 {
+                let since = *self.blocked_since.get_or_insert_with(Instant::now);
+                if since.elapsed() > INPUT_STALL {
+                    return Err(HostError::Pty(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "the terminal did not accept input in time",
+                    )));
+                }
+                return Ok(());
+            }
+            self.blocked_since = None;
+            self.pending_input.drain(..written);
+        }
+        self.blocked_since = None;
+        Ok(())
+    }
+
     /// Output ready within `wait_ms`, sealed as frames for the device. When
     /// the shell exits the last frame is an authenticated `Close`.
     pub fn pump(&mut self, wait_ms: i32) -> Result<Vec<Vec<u8>>, HostError> {
@@ -406,6 +452,7 @@ impl Attachment {
         if self.finished {
             return Ok(frames);
         }
+        self.flush_input()?;
         let Some(pty) = self.pty.as_mut() else {
             return Ok(frames);
         };
