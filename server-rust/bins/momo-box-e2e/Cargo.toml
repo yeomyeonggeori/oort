@@ -1,0 +1,48 @@
+[package]
+name = "momo-box-e2e"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+# ADR-0197 M4 (#3511) — the test-only crate that plays the owner's DEVICE against the real server routes. Nothing
+# ships it and nothing depends on it. It exists because the one thing the end-to-end test needs — the S2 device
+# endpoint (`momo-blind-pty`'s `DeviceClient`) next to the real `momo-server` router, the real `momo-box-agent`
+# serving code and the real `momo-box-runner` — cannot live in `momo-server` (tests/isolation.rs keeps the server
+# free of the protocol crate: a relay that carries bytes must not be able to read them). The relay's route code
+# is therefore tested here from the outside, exactly as a client reaches it.
+#
+# Suites (all `#[ignore]` ones are driven by infra/personal-box/verify-m4.sh):
+#   relay_pg      real router + PG, the box-agent's real serving code in-process, the runner's real code with a
+#                 fake docker: signatures, refusals, plaintext-0, termination, limits
+#   docker_pty    the same, with the box-agent in a REAL box container started by the real runner binary (Colima)
+#   guards        source/constant guards (no PG, no docker)
+
+[lib]
+name = "momo_box_e2e"
+path = "src/lib.rs"
+
+[dependencies]
+momo-server = { path = "../momo-server" }
+momo-db = { path = "../../crates/momo-db" }
+momo-settings = { path = "../../crates/momo-settings" }
+momo-wire = { path = "../../crates/momo-wire" }
+momo-blind-pty = { path = "../../crates/momo-blind-pty" }
+momo-box-agent = { path = "../momo-box-agent" }
+momo-box-runner = { path = "../momo-box-runner" }
+async-trait.workspace = true
+axum.workspace = true
+base64.workspace = true
+ed25519-dalek.workspace = true
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+hex.workspace = true
+p256.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio = { workspace = true, features = ["net", "time", "sync", "rt", "macros", "process", "io-util"] }
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true

@@ -1705,6 +1705,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "momo-box-e2e"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "ed25519-dalek",
+ "futures-util",
+ "hex",
+ "momo-blind-pty",
+ "momo-box-agent",
+ "momo-box-runner",
+ "momo-db",
+ "momo-server",
+ "momo-settings",
+ "momo-wire",
+ "p256",
+ "reqwest",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "momo-box-runner"
 version = "0.0.0"
 dependencies = [

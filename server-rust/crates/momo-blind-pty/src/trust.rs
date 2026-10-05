@@ -151,6 +151,41 @@ impl HostPin {
     pub fn runner_fp(&self) -> [u8; 32] {
         sha256(&[&self.runner_pub])
     }
+
+    /// Wire form the server stores opaquely and serves back (ADR-0197 M4 증보 2):
+    /// `box_id 16 ‖ host_pub 32 ‖ runner_pub 32 ‖ attestation 64 ‖ signer_dev 33 ‖ sig_owner 64`.
+    pub const WIRE_LEN: usize = BOX_ID_LEN + ED_PUB_LEN + ED_PUB_LEN + SIG_LEN + DEV_PUB_LEN + SIG_LEN;
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut v = Vec::with_capacity(Self::WIRE_LEN);
+        v.extend_from_slice(&self.box_id);
+        v.extend_from_slice(&self.host_pub);
+        v.extend_from_slice(&self.runner_pub);
+        v.extend_from_slice(&self.attestation);
+        v.extend_from_slice(&self.signer_dev);
+        v.extend_from_slice(&self.sig_owner);
+        v
+    }
+
+    pub fn from_bytes(b: &[u8]) -> Result<Self, Error> {
+        if b.len() != Self::WIRE_LEN {
+            return Err(Error::Malformed);
+        }
+        let mut at = 0;
+        let mut take = |n: usize| {
+            let part = &b[at..at + n];
+            at += n;
+            part
+        };
+        Ok(Self {
+            box_id: take(BOX_ID_LEN).try_into().map_err(|_| Error::Malformed)?,
+            host_pub: take(ED_PUB_LEN).try_into().map_err(|_| Error::Malformed)?,
+            runner_pub: take(ED_PUB_LEN).try_into().map_err(|_| Error::Malformed)?,
+            attestation: take(SIG_LEN).try_into().map_err(|_| Error::Malformed)?,
+            signer_dev: take(DEV_PUB_LEN).try_into().map_err(|_| Error::Malformed)?,
+            sig_owner: take(SIG_LEN).try_into().map_err(|_| Error::Malformed)?,
+        })
+    }
 }
 
 /// Owner-signed, versioned list of devices allowed to attach.

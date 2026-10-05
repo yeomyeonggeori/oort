@@ -315,7 +315,25 @@ async fn ensure_runner(
 /// event (M1's tests drive the runner's lifecycle edges by hand through
 /// `runner_event`; `cloud_box_runner_pg.rs` covers `complete_control_in_tx`
 /// applying them).
+/// ADR-0197 M4 (증보 2): the runner is not handed a `create` until the box's owner has put its first device list
+/// (`PUT …/owner-device-list`, an owner-device-signed control). These suites test the queue, not the trust chain
+/// (`cloud_box_relay_pg.rs` in `momo-box-e2e` does), so they plant an opaque list for every box still `creating`.
+async fn plant_owner_lists() {
+    let su = superuser_pool().await;
+    sqlx::query(
+        "INSERT INTO cloud_box_trust (box_id, workspace_id, owner_list, owner_list_at) \
+         SELECT id, workspace_id, '\\x01'::bytea, now() FROM cloud_box WHERE state = 'creating' \
+         ON CONFLICT (box_id) DO UPDATE SET \
+           owner_list = COALESCE(cloud_box_trust.owner_list, EXCLUDED.owner_list), \
+           owner_list_at = COALESCE(cloud_box_trust.owner_list_at, now())",
+    )
+    .execute(&su)
+    .await
+    .expect("plant owner lists");
+}
+
 async fn drain_controls(app: &PgPool, workspace: Uuid) -> Vec<String> {
+    plant_owner_lists().await;
     momo_db::with_tenant_tx(app, workspace, move |conn| {
         Box::pin(async move {
             let runner = ensure_runner(conn, workspace).await?;
@@ -1826,6 +1844,7 @@ async fn the_control_queue_is_closed_ordered_and_leased() {
     // Claim, lease, complete — inside the tenant, nobody else's.
     let ws = w.workspace;
     let other_ws = other.workspace;
+    plant_owner_lists().await;
     let foreign = momo_db::with_tenant_tx(&app, other_ws, move |conn| {
         Box::pin(async move {
             let runner = ensure_runner(conn, other_ws).await?;
@@ -1844,6 +1863,7 @@ async fn the_control_queue_is_closed_ordered_and_leased() {
     .await
     .expect("runner");
     let claim = move |app: PgPool| async move {
+        plant_owner_lists().await;
         momo_db::with_tenant_tx(&app, ws, move |conn| {
             Box::pin(async move { claim_controls_in_tx(conn, ws, runner, 10).await })
         })

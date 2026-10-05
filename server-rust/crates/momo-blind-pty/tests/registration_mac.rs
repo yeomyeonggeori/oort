@@ -32,3 +32,24 @@ fn the_mac_is_a_function_of_the_label_box_and_key_only() {
         registration_mac(&code, &BOX, &[10u8; 32])
     );
 }
+
+#[test]
+fn a_host_pin_roundtrips_through_its_wire_form_and_rejects_garbage() {
+    use momo_blind_pty::trust::HostPin;
+    let pin = HostPin {
+        box_id: [1; 16],
+        host_pub: [2; 32],
+        runner_pub: [3; 32],
+        attestation: [4; 64],
+        signer_dev: [5; 33],
+        sig_owner: [6; 64],
+    };
+    let bytes = pin.to_bytes();
+    assert_eq!(bytes.len(), HostPin::WIRE_LEN);
+    assert_eq!(HostPin::from_bytes(&bytes).unwrap(), pin);
+    assert!(HostPin::from_bytes(&bytes[1..]).is_err());
+    let mut longer = bytes.clone();
+    longer.push(0);
+    assert!(HostPin::from_bytes(&longer).is_err());
+    assert!(HostPin::from_bytes(&[]).is_err());
+}

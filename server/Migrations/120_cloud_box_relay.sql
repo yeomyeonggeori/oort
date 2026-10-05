@@ -147,3 +147,11 @@ ALTER TABLE cloud_box_agent FORCE ROW LEVEL SECURITY;
 CREATE POLICY ws_isolation ON cloud_box_agent
   USING (workspace_id = current_setting('app.workspace_id', true)::uuid)
   WITH CHECK (workspace_id = current_setting('app.workspace_id', true)::uuid);
+
+-- ---- 서명 컨트롤의 nonce 장부가 새 종류 둘을 받는다 -------------------------------------------------------
+-- `human_control_nonce.kind` 는 서명이 덮은 `kind` 줄이다(감사용). M4 의 두 종류(`cloud_pty_attach`,
+-- `cloud_box_owner_list`)가 같은 장부로 1회용이 된다. 095 의 제약을 넓힌다(기존 값은 그대로).
+ALTER TABLE human_control_nonce DROP CONSTRAINT human_control_nonce_kind_ck;
+ALTER TABLE human_control_nonce ADD CONSTRAINT human_control_nonce_kind_ck
+  CHECK (kind IN ('spawn', 'input', 'permission', 'bundle_manifest', 'host_register',
+                  'cloud_pty_attach', 'cloud_box_owner_list'));

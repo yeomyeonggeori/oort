@@ -160,6 +160,24 @@ async fn insert_human(pool: &PgPool, workspace: Uuid, name: &str, role: &str) ->
     (id, jwt)
 }
 
+
+/// ADR-0197 M4 (증보 2): the runner is not handed a `create` until the box's owner has put its first device list
+/// (`PUT …/owner-device-list`, an owner-device-signed control). These suites test the queue, not the trust chain
+/// (`cloud_box_relay_pg.rs` in `momo-box-e2e` does), so they plant an opaque list for every box still `creating`.
+async fn plant_owner_lists() {
+    let su = superuser_pool().await;
+    sqlx::query(
+        "INSERT INTO cloud_box_trust (box_id, workspace_id, owner_list, owner_list_at) \
+         SELECT id, workspace_id, '\\x01'::bytea, now() FROM cloud_box WHERE state = 'creating' \
+         ON CONFLICT (box_id) DO UPDATE SET \
+           owner_list = COALESCE(cloud_box_trust.owner_list, EXCLUDED.owner_list), \
+           owner_list_at = COALESCE(cloud_box_trust.owner_list_at, now())",
+    )
+    .execute(&su)
+    .await
+    .expect("plant owner lists");
+}
+
 async fn call(
     client: &reqwest::Client,
     method: &str,
@@ -167,6 +185,9 @@ async fn call(
     jwt: &str,
     body: Option<Value>,
 ) -> (u16, Value) {
+    if url.ends_with("/claim") {
+        plant_owner_lists().await;
+    }
     let mut request = match method {
         "GET" => client.get(url),
         _ => client.post(url),
@@ -1479,6 +1500,7 @@ async fn refusals_are_cheap_bodies_are_capped_and_last_seen_is_throttled() {
     let client = reqwest::Client::new();
     let (runner, token) = register_runner(&client, &base, &w, "런너").await;
     // Body cap: a 5 KB body is refused before it is read.
+    plant_owner_lists().await;
     let big = client
         .post(runner_url(&base, w.workspace, "/claim"))
         .bearer_auth(&token)
@@ -1966,6 +1988,9 @@ async fn the_runner_table_is_rls_forced_least_privilege_and_holds_no_plaintext()
             "registered_by",
             "revoked_at",
             "rotated_at",
+            // ADR-0197 M4 (migration 120): the runner's PUBLIC signing key — set once, never a seed. No
+            // fingerprint column: the device computes it from these bytes.
+            "signing_public_key",
             "workspace_id",
         ]
     );
