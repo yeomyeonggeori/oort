@@ -64,7 +64,7 @@ function PresetRow({
         </span>
         <span
           id={noteId}
-          className={cn("break-keep text-meta", soon ? "text-ink-faint" : "text-ink-muted")}
+          className={cn("break-keep text-meta", "text-ink-muted")}
         >
           {card.note}
         </span>

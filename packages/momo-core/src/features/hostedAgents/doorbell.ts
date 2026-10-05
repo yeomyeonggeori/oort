@@ -48,9 +48,9 @@ export const DOORBELL_PRECHECK_HEADLINE = "시작하기 전에 준비해요";
 export const DOORBELL_PRECHECK_NOTE =
   "서버가 도어벨을 켜 뒀는지는 미리 알 수 없어요. 저장할 때 꺼져 있으면 알려줘요.";
 export const DOORBELL_PRECHECK_ITEMS: readonly string[] = [
-  "서버 운영자가 MOMO_DOORBELL_ENABLED를 true로 켰어요.",
-  "그록봇에 webhook 루틴을 만들었어요.",
-  "루틴이 준 https 주소와 sender key를 갖고 있어요.",
+  "서버 운영자가 MOMO_DOORBELL_ENABLED를 true로 켜 둬야 해요.",
+  "그록봇에 webhook 루틴을 만들어 둬야 해요.",
+  "루틴이 준 https 주소와 sender key가 있어야 해요.",
 ];
 export const DOORBELL_GATE_OFF_HEADLINE = "이 서버는 도어벨이 꺼져 있어요.";
 export const DOORBELL_GATE_OFF_DETAIL =
