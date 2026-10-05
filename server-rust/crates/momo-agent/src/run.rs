@@ -879,9 +879,26 @@ pub struct EligibleAgent {
     /// `agent_profile.paused`, defaulted to `false` when the agent has no
     /// profile row: an agent nobody has configured is not a paused agent.
     pub paused: bool,
-    /// A hosted connection row exists, or the agent is `owner_only` (#2924):
-    /// either way no team-served work run may exist for it.
-    pub hosted_delivery_disabled: bool,
+    /// A `hosted_agent_connection` row exists for the agent (any status). ADR-0162
+    /// 증보 3 D10 (#3515): such an agent takes a work run only through the hosted
+    /// conditions below, never through the managed/BYOA delivery selector.
+    pub has_hosted_connection: bool,
+    /// The agent is `owner_only` and either a subscription agent (no
+    /// `uses_owner_key`, #2924) or a personal-key agent that also has a hosted
+    /// connection. D10 4: no hosted work run for any `owner_only` agent whatever
+    /// its brain — the mention path's `hosted_delivery_disabled` is the same rule,
+    /// so the two entrances cannot diverge (#3531 review M1). Kept as its own fact so that
+    /// opening the hosted conditions cannot open this boundary (the old single
+    /// `hosted_delivery_disabled` boolean merged the two reasons).
+    pub owner_only_blocked: bool,
+    /// The agent's ACTIVE, proved connection with a live Agent Port credential —
+    /// the same predicate the mention path reads (`hosted_active_connection_id`).
+    /// `None` when there is no connection or it is not `active`/proved.
+    pub hosted_active_connection_id: Option<Uuid>,
+    /// The requesting channel is in the connection's approved set
+    /// (`hosted_connection_channel_ids`: approved channels ∪ owner DM ∪ approved
+    /// DMs, ADR-0162 증보 2 B5) — one predicate shared with mention delivery.
+    pub hosted_channel_approved: bool,
     /// `agent.tool_schema` — the operator's own provider-format function defs
     /// (goal SRV-B5a). Read here so a **work** run carries the same two tool
     /// sources a mention does; before this the work payload had no `tools` key
@@ -893,6 +910,31 @@ pub struct EligibleAgent {
     /// what a build can run belongs to `momo_agent::tools`, resolved by whichever
     /// worker claims the job.
     pub enabled_tools: Vec<String>,
+}
+
+/// Is this member a guest of the workspace or of this channel? Guests may not
+/// spend a hosted agent's vendor quota (#3531 review L5).
+pub async fn is_guest_in_channel_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    member_id: Uuid,
+) -> Result<bool, DbError> {
+    let found: Option<i32> = sqlx::query_scalar(
+        "SELECT 1 WHERE EXISTS (SELECT 1 FROM workspace_membership wm \
+                                 WHERE wm.workspace_id = $1 AND wm.member_id = $3 \
+                                   AND wm.role = 'guest') \
+            OR EXISTS (SELECT 1 FROM membership ms \
+                        WHERE ms.workspace_id = $1 AND ms.channel_id = $2 \
+                          AND ms.member_id = $3 AND ms.left_at IS NULL \
+                          AND ms.role = 'guest')",
+    )
+    .bind(workspace_id)
+    .bind(channel_id)
+    .bind(member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(found.is_some())
 }
 
 /// Load the agent's run-eligibility facts, or `None` when it may not take a run
@@ -912,10 +954,42 @@ pub async fn load_eligible_agent_in_tx(
         "SELECT a.model, a.model_source, a.max_run_steps, a.max_concurrent_runs, \
                 a.tool_schema, ap.enabled_tools, \
                 COALESCE(ap.paused, false) AS paused \
-                , (EXISTS (SELECT 1 FROM hosted_agent_connection hc \
-                            WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
-                   OR (a.invocation_scope = 'owner_only' AND NOT a.uses_owner_key)) \
-                    AS hosted_delivery_disabled \
+                , EXISTS (SELECT 1 FROM hosted_agent_connection hc \
+                           WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
+                    AS has_hosted_connection, \
+                (a.invocation_scope = 'owner_only' \
+                 AND (NOT a.uses_owner_key \
+                      OR EXISTS (SELECT 1 FROM hosted_agent_connection hc \
+                                  WHERE hc.workspace_id = m.workspace_id \
+                                    AND hc.agent_member_id = m.id))) \
+                    AS owner_only_blocked, \
+                (SELECT hc.id FROM hosted_agent_connection hc \
+                   JOIN token t ON t.workspace_id = hc.workspace_id \
+                                AND t.id = hc.active_token_id \
+                  WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id \
+                    AND hc.status = 'active' AND hc.proved_at IS NOT NULL \
+                    AND t.kind = 'agent_bearer' \
+                    AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
+                    AND t.revoked_at IS NULL \
+                    AND (t.expires_at IS NULL OR t.expires_at > now()) \
+                    AND t.hosted_connection_id = hc.id \
+                    AND t.actor_member_id = hc.agent_member_id \
+                    AND t.audience = '/v1/mcp/agent-port' \
+                  ORDER BY hc.id LIMIT 1) AS hosted_active_connection_id, \
+                EXISTS (SELECT 1 FROM hosted_agent_connection hc \
+                   JOIN token t ON t.workspace_id = hc.workspace_id \
+                                AND t.id = hc.active_token_id \
+                  WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id \
+                    AND hc.status = 'active' AND hc.proved_at IS NOT NULL \
+                    AND t.kind = 'agent_bearer' \
+                    AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
+                    AND t.revoked_at IS NULL \
+                    AND (t.expires_at IS NULL OR t.expires_at > now()) \
+                    AND t.hosted_connection_id = hc.id \
+                    AND t.actor_member_id = hc.agent_member_id \
+                    AND t.audience = '/v1/mcp/agent-port' \
+                    AND $2 = ANY(hosted_connection_channel_ids(hc.workspace_id, hc.id))) \
+                    AS hosted_channel_approved \
            FROM member m \
            JOIN agent a ON a.member_id = m.id AND a.workspace_id = m.workspace_id \
            JOIN membership ms \
@@ -961,7 +1035,10 @@ pub async fn load_eligible_agent_in_tx(
         max_run_steps: row.try_get("max_run_steps")?,
         max_concurrent_runs: row.try_get("max_concurrent_runs")?,
         paused: row.try_get("paused")?,
-        hosted_delivery_disabled: row.try_get("hosted_delivery_disabled")?,
+        has_hosted_connection: row.try_get("has_hosted_connection")?,
+        owner_only_blocked: row.try_get("owner_only_blocked")?,
+        hosted_active_connection_id: row.try_get("hosted_active_connection_id")?,
+        hosted_channel_approved: row.try_get("hosted_channel_approved")?,
         tool_schema: row.try_get("tool_schema")?,
         enabled_tools,
     }))
