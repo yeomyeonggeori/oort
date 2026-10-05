@@ -579,10 +579,11 @@ export interface HostedDetectCountdown {
 
 export const HOSTED_COUNTDOWN_TITLE = "연결 값 유효 시간";
 
+const TTL_MINUTES = HOSTED_PAIRING_TTL_MS / 60_000;
+
 const BASIS_NOTE: Record<HostedDeadlineBasis, string> = {
   issued: "발급 응답에 적힌 만료 시각 기준이에요.",
-  recorded:
-    "이 화면에서 발급 응답을 받지 않아, 연결이 마지막으로 바뀐 기록에서 15분을 더해 계산한 근사치예요.",
+  recorded: `이 화면에서 발급 응답을 받지 않아 발급 기록에서 ${TTL_MINUTES}분을 더해 계산한 근사치예요. 실제 만료는 이보다 빠를 수 있어요.`,
 };
 
 export function hostedDetectCountdown(
@@ -593,11 +594,16 @@ export function hostedDetectCountdown(
   const remaining = deadline.expiresAtMs - nowMs;
   const urgent = !expiry.expired && remaining <= HOSTED_DEADLINE_URGENT_MS;
   const basisNote = BASIS_NOTE[deadline.basis];
+  // 근사 출처는 실제보다 늦게 잡힐 수만 있다(머리말). 그래서 남은 시간을 상한으로 말한다.
+  const label =
+    deadline.basis === "recorded" && !expiry.expired
+      ? `길어야 ${expiry.label}`
+      : expiry.label;
   if (expiry.expired) {
     return {
       expired: true,
       urgent: false,
-      label: expiry.label,
+      label,
       basisNote,
       guidance:
         "연결 값이 만료됐어요. 연결 값 다시 발급을 누르고, 새로 받은 값으로 AI 회사 설정의 값을 바꾼 뒤 커넥터나 routine을 한 번 실행하세요. 이미 넣어 둔 값은 더 이상 통하지 않아요.",
@@ -606,11 +612,11 @@ export function hostedDetectCountdown(
   return {
     expired: false,
     urgent,
-    label: expiry.label,
+    label,
     basisNote,
     guidance: urgent
-      ? "곧 만료돼요. 지금 넣고 실행하기 어렵다면 연결 값 다시 발급으로 새 15분을 받으세요."
-      : "연결 값은 발급한 뒤 15분 동안만 통해요. 그 안에 AI 회사 설정에 넣고 한 번 실행하세요.",
+      ? `곧 만료돼요. 지금 넣고 실행하기 어렵다면 연결 값 다시 발급으로 새 ${TTL_MINUTES}분을 받으세요.`
+      : `연결 값은 발급한 뒤 ${TTL_MINUTES}분 동안만 통해요. 만료되기 전에 AI 회사 설정에 넣고 한 번 실행하세요.`,
   };
 }
 
@@ -625,11 +631,11 @@ export interface HostedDetectCause {
 export const HOSTED_DETECT_CAUSES_TITLE = "오지 않을 때 이 순서로 확인하세요";
 
 /**
- * oort가 원인을 구분하지 못한다는 사실. 목록 위에 상시 서서, 아래 항목이 진단이
+ * oort가 원인을 구분하지 못한다는 사실. 목록 위에 서서, 아래 항목이 진단이
  * 아니라 후보라는 것을 먼저 말한다.
  */
 export const HOSTED_DETECT_CAUSES_NOTE =
-  "oort는 접속이 왜 오지 않는지 구분하지 못해요. 접속이 거절돼도 이 화면에는 아무 흔적이 남지 않아서, 흔한 원인부터 차례로 적었어요.";
+  "oort는 접속이 왜 오지 않는지 구분하지 못해요. 접속이 거절돼도 이 화면에는 아무 흔적이 남지 않아서, 확인하기 쉬운 것부터 차례로 적었어요.";
 
 export const HOSTED_DETECT_CAUSES: readonly HostedDetectCause[] = [
   {
@@ -676,7 +682,7 @@ export const HOSTED_DETECT_UNVERIFIED_CAUSE: HostedDetectCause = {
  * 확인할 것의 순서. 확인되지 않은 프리셋이면 그 사실을 마지막 후보로 더한다.
  *
  * 순서는 사람이 가장 싸게 확인할 수 있는 것부터다: 실행 여부 → 값 → 헤더 → 주소
- * → 상대 쪽 상태. 앞의 둘이 대부분을 설명하므로 맨 위에 둔다.
+ * → 상대 쪽 상태. 발생 빈도 자료는 없고, 확인 비용만으로 줄을 세운다.
  */
 export function hostedDetectCauses(verifiedPreset: boolean): HostedDetectCause[] {
   return verifiedPreset

@@ -205,7 +205,7 @@ describe("3단계 감지 대기 (#3522)", () => {
       wireConnection({ status: "pairing_pending", updatedAtMs: Date.now() })
     );
     await waitFor(() => byId("hosted-detect-countdown") !== null, "countdown");
-    expect(byId("hosted-detect-countdown-label")?.textContent).toBe("약 14분 뒤 만료");
+    expect(byId("hosted-detect-countdown-label")?.textContent).toBe("길어야 약 14분 뒤 만료");
     expect(byId("hosted-detect-countdown")?.textContent).toContain("근사치");
     const causes = byId("hosted-detect-causes");
     expect(causes?.textContent).toContain("구분하지 못해요");
@@ -226,5 +226,10 @@ describe("3단계 감지 대기 (#3522)", () => {
     const text = byId("hosted-detect-countdown")?.textContent ?? "";
     expect(text).toContain("연결 값 다시 발급");
     expect(byId("hosted-regenerate")).not.toBeNull();
+    // 만료 뒤에는 기다려도 된다는 말도, 지금 확인도, 원인 목록도 서지 않는다.
+    expect(byId("hosted-detecting-empty")?.textContent).toContain("만료됐어요");
+    expect(byId("hosted-detecting-empty")?.textContent).not.toContain("다녀와도");
+    expect(byId("hosted-recheck")).toBeNull();
+    expect(byId("hosted-detect-causes")).toBeNull();
   });
 });

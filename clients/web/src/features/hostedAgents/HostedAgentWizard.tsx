@@ -1245,9 +1245,18 @@ function DetectingStep({
       <StepHeading step="detecting" />
       <EmptyInvite
         className="px-0"
-        headline="아직 다이얼인이 오지 않았어요."
-        detail="AI 회사 설정에 값을 넣고 커넥터나 routine을 한 번 실행하면 이 화면이 바뀌어요. 이 창을 열어 둔 채로 다녀와도 돼요."
+        headline={
+          countdown?.expired
+            ? "연결 값이 만료됐어요."
+            : "아직 다이얼인이 오지 않았어요."
+        }
+        detail={
+          countdown?.expired
+            ? "이 값으로는 더 이상 접속할 수 없어요. 아래 연결 값 다시 발급을 눌러 새 값을 받으세요."
+            : "AI 회사 설정에 값을 넣고 커넥터나 routine을 한 번 실행하면 이 화면이 바뀌어요. 이 창을 열어 둔 채로 다녀와도 돼요."
+        }
         actions={
+          countdown?.expired ? undefined : (
           <Button
             type="button"
             variant="outline"
@@ -1259,6 +1268,7 @@ function DetectingStep({
             {checking && <Loader2 aria-hidden="true" className="spinner-busy" />}
             {checking ? "확인 중" : "지금 확인"}
           </Button>
+          )
         }
         testId="hosted-detecting-empty"
       />
@@ -1277,14 +1287,19 @@ function DetectingStep({
           >
             {countdown.label}
           </p>
-          <p className="break-keep text-body text-ink-muted">{countdown.guidance}</p>
+          <p role="status" className="break-keep text-body text-ink-muted">
+            {countdown.guidance}
+          </p>
           <p className="break-keep text-meta text-ink-muted">{countdown.basisNote}</p>
         </div>
       )}
-      <div className="flex min-w-0 flex-col gap-2" data-testid="hosted-detect-causes">
-        <h4 className="text-meta font-medium text-ink">{HOSTED_DETECT_CAUSES_TITLE}</h4>
-        <p className="break-keep text-meta text-ink-muted">{HOSTED_DETECT_CAUSES_NOTE}</p>
-        <ol className="flex list-outside list-decimal flex-col gap-2 ps-4">
+      {!countdown?.expired && (
+      <details className="flex min-w-0 flex-col gap-2" data-testid="hosted-detect-causes">
+        <summary className="cursor-pointer text-meta font-medium text-ink">
+          {HOSTED_DETECT_CAUSES_TITLE}
+        </summary>
+        <p className="mt-2 break-keep text-meta text-ink-muted">{HOSTED_DETECT_CAUSES_NOTE}</p>
+        <ol className="mt-2 flex list-outside list-decimal flex-col gap-2 ps-4">
           {causes.map((cause) => (
             <li key={cause.id} className="break-keep text-body text-ink">
               {cause.label}
@@ -1292,7 +1307,8 @@ function DetectingStep({
             </li>
           ))}
         </ol>
-      </div>
+      </details>
+      )}
       <KeyValueRows
         rows={connectionFacts(connection, agentLabel, agentHandle).map((fact) => ({
           key: fact.key,

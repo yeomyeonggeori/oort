@@ -417,7 +417,8 @@ describe("3단계 만료 카운트다운", () => {
     });
     const view = hostedDetectCountdown(deadline!, T0);
     expect(view.basisNote).toContain("근사치");
-    expect(view.label).toBe("약 15분 뒤 만료");
+    expect(view.label).toBe("길어야 약 15분 뒤 만료");
+    expect(view.basisNote).toContain("빠를 수");
   });
 
   it("임박하면 서두르라고, 지나면 재발급을 말한다", () => {
@@ -425,6 +426,7 @@ describe("3단계 만료 카운트다운", () => {
     const calm = hostedDetectCountdown(deadline, T0);
     expect(calm.urgent).toBe(false);
     expect(calm.guidance).toContain("15분 동안만");
+    expect(calm.label).toBe("약 15분 뒤 만료");
     const urgent = hostedDetectCountdown(
       deadline,
       T0 + HOSTED_PAIRING_TTL_MS - HOSTED_DEADLINE_URGENT_MS
