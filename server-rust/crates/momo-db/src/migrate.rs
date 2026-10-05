@@ -558,19 +558,22 @@ mod tests {
     ///
     /// 117 is #3396's personal API key (ADR-0147 증보 2026-10-03): the RLS-FORCE table `personal_provider_link`
     /// (sealed owner-scoped BYOK key, key fingerprint unique among active rows) and `agent.uses_owner_key`.
+    ///
+    /// 118 is #3500's personal cloud box (ADR-0197 M1): the RLS-FORCE tables `cloud_box` (one live
+    /// box per member, lifecycle-table trigger) and `cloud_box_control` (closed five-verb runner queue).
     #[test]
-    fn discovers_contiguous_migrations_001_to_117() {
+    fn discovers_contiguous_migrations_001_to_118() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            117,
-            "expected 117 migrations under {}",
+            118,
+            "expected 118 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 117);
+        assert_eq!(migrations.last().unwrap().version, 118);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {
