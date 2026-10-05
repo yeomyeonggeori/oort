@@ -2101,6 +2101,10 @@ async fn b11_mention_managed_linked_and_stale_runs_are_not_listed() {
         "31 days after the end: gone"
     );
     assert!(
+        !got.contains(&abandoned.to_string()),
+        "an unfinished run created 31 days ago is gone"
+    );
+    assert!(
         !got.contains(&linked.to_string()),
         "a run linked to a session is not a second row"
     );
