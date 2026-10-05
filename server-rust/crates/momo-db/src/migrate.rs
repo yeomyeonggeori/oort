@@ -564,19 +564,23 @@ mod tests {
     ///
     /// 119 is #3505's box runner (ADR-0197 M2): the RLS-FORCE table `cloud_box_runner` (one live runner per
     /// workspace, sha256-hashed credential) and the fencing/report columns of `cloud_box_control`.
+    ///
+    /// 120 is #3511's blind relay trust chain (ADR-0197 M4 증보 2): `cloud_box_runner.signing_public_key` (set-once),
+    /// and the RLS-FORCE tables `cloud_box_trust` (opaque owner list / HostPin) and `cloud_box_agent` (registration slot,
+    /// immutable once active).
     #[test]
-    fn discovers_contiguous_migrations_001_to_119() {
+    fn discovers_contiguous_migrations_001_to_120() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            119,
-            "expected 119 migrations under {}",
+            120,
+            "expected 120 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 119);
+        assert_eq!(migrations.last().unwrap().version, 120);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

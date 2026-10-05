@@ -25,7 +25,8 @@ pub mod signing;
 
 pub use provenance::{
     record_human_provenance, record_provenance, EntityRef, MessageContent, Provenance,
-    ProvenanceError, SignedAction, Signer, ENTITY_MESSAGE, ENTITY_WORK_CONTROL,
+    ProvenanceError, SignedAction, Signer, ENTITY_CLOUD_BOX_OWNER_LIST, ENTITY_CLOUD_PTY_ATTACH,
+    ENTITY_MESSAGE, ENTITY_WORK_CONTROL,
     ENTITY_WORK_HOST_HEARTBEAT, ENTITY_WORK_HOST_REGISTER,
     ENTITY_WORK_HOST_TERMINAL_ATTACH_VALIDATE, MESSAGE_SCHEMA_V1,
 };

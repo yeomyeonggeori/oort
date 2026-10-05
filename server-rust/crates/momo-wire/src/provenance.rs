@@ -386,6 +386,11 @@ pub const ENTITY_WORK_CONTROL: &str = "work_control";
 /// `entity_type` for a root key's signed `host_register` (ADR-0146 개정 D-8,
 /// #3023 taking over #3022's handoff); `entity_id` = the registered host id.
 pub const ENTITY_WORK_HOST_REGISTER: &str = "work_host.register";
+/// `entity_type` for an owner device's signed `cloud_pty_attach` (ADR-0197 M4); `entity_id` = the relay
+/// session id the server assigned. The session id never leaves the server except in the attach answer.
+pub const ENTITY_CLOUD_PTY_ATTACH: &str = "cloud_box.pty_attach";
+/// `entity_type` for an owner device's signed `cloud_box_owner_list` (ADR-0197 M4); `entity_id` = the box id.
+pub const ENTITY_CLOUD_BOX_OWNER_LIST: &str = "cloud_box.owner_list";
 
 /// The person's half of [`record_provenance`] (ADR-0146 개정 2026-09-28, D-1 ·
 /// D-5 · D-10, #3023): a `momo.human.control.v2` statement signed by a device
@@ -625,6 +630,8 @@ mod tests {
             ENTITY_WORK_HOST_HEARTBEAT,
             ENTITY_WORK_HOST_TERMINAL_ATTACH_VALIDATE,
             ENTITY_MESSAGE,
+            ENTITY_CLOUD_PTY_ATTACH,
+            ENTITY_CLOUD_BOX_OWNER_LIST,
         ] {
             assert!(
                 grammar(entity_type),

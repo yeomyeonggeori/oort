@@ -999,7 +999,15 @@ async fn settle_box_after_control(
     if let Some(event) = event_for_outcome(verb, ok) {
         return Ok(
             match apply_event_in_tx(conn, workspace_id, box_id, event, None, None).await? {
-                ApplyOutcome::Applied { info, .. } => Some(info.state),
+                ApplyOutcome::Applied { info, .. } => {
+                    // A box that is gone has no host any more (ADR-0197 D10): the relay supervisor
+                    // ends its sessions at the next check and its sockets stop authenticating.
+                    if info.state == BoxState::Deleted {
+                        crate::cloud_box_relay::revoke_box_host_in_tx(conn, workspace_id, box_id)
+                            .await?;
+                    }
+                    Some(info.state)
+                }
                 // The box moved on while the runner worked (an owner deleted a box that
                 // was still being created): the report changes nothing.
                 ApplyOutcome::Illegal { info, .. } => Some(info.state),
@@ -1094,6 +1102,9 @@ pub async fn claim_controls_in_tx(
             WHERE workspace_id = $1 \
               AND (status = 'pending' OR (status = 'claimed' AND lease_expires_at < now())) \
               AND attempts < $4 \
+              AND (verb <> 'create' OR EXISTS ( \
+                    SELECT 1 FROM cloud_box_trust t \
+                     WHERE t.box_id = cloud_box_control.box_id AND t.owner_list IS NOT NULL)) \
             ORDER BY seq \
             LIMIT $2 \
             FOR UPDATE SKIP LOCKED) \

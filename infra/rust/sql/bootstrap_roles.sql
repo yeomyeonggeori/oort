@@ -215,7 +215,7 @@ DECLARE
   t text;
   r text;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['cloud_box', 'cloud_box_control', 'cloud_box_runner'] LOOP
+  FOREACH t IN ARRAY ARRAY['cloud_box', 'cloud_box_control', 'cloud_box_runner', 'cloud_box_trust', 'cloud_box_agent'] LOOP
     CONTINUE WHEN to_regclass('public.' || t) IS NULL;
     EXECUTE format('REVOKE ALL ON TABLE public.%I FROM PUBLIC', t);
     FOREACH r IN ARRAY ARRAY['momo_relay', 'momo_worker', 'momo_notifier'] LOOP

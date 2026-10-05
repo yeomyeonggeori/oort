@@ -278,3 +278,47 @@ ADR-0157 D1~D3를 박스에 적용한다.
 3. **백업 전제 수정.** Railway 볼륨에는 기본 백업 일정이 없다 [V]. 다만 토큰 보유자가 일정이나 수동 백업을 만들 수 있다 [V]. 따라서 결재 기록의 「Railway 볼륨은 백업이 붙으므로 자격을 tmpfs에만」은 B를 닫았으므로 유효하지 않다. A에서 영속 게이트(D8)는 런너 증명(S4)을 따른다.
 4. **런너 호스트 egress 선언을 D9의 기준 규칙으로 삼는다.** `infra/personal-box/s1/runner-egress.nft`가 사설 대역·CGNAT·메타데이터·IPv6·이웃 박스(L2)·SMTP·호스트 자신을 차단함을 전후 비교와 카운터로 확인했다 [V]. 연결률·PPS·대역폭 상한과 br_netfilter 호스트는 M2 배포 게이트에서 다시 잰다 [?].
 5. **후속:** Railway Sandboxes(`networkIsolation: ISOLATED`)는 별도 평가 대상이다 [?]. exec·체크포인트 API가 D2·D7과 충돌하므로 런너 인터페이스 뒤 후보로는 올리지 않는다.
+
+### 증보 2 — M4: `cloud_pty_attach` 컨트롤과 눈먼 중계 라우트의 스키마·라우트 계약 (#3511)
+상태: **Proposed — 성재 Accept 필요.** (ADR-0100: 새 공개 API는 Accepted ADR 참조가 머지 조건이다. 이 증보를 Accept하기 전에는 M4 PR을 머지하지 않는다. 워커는 Accept하지 않는다.) 모든 라우트는 `MOMO_CLOUD_BOX_ENABLED`(기본 꺼짐) 뒤에 있고 꺼져 있으면 DB를 읽기 전에 404다. 운영에서 붙기를 여는 것은 R2 기기 서명 플래그(#3030 R2-E10) 뒤다.
+
+**신뢰 사슬에서 서버를 거치는 조각 4개** (S2 「M4 착수 조건」 ①~④를 라우트로 옮긴 것). 서버는 아래를 **저장·전달만** 하고 만들지 못한다. 위조는 기기(S2 `DeviceClient`)와 box-agent가 각자 검증해 거부한다.
+
+| 조각 | 누가 만들고 누가 검증하나 | 서버가 하는 일 |
+|---|---|---|
+| 런너 서명 키(Ed25519) | 런너가 설치 때 만든다(`momo-box-runner init-identity`, 시드는 런너 상태 디렉터리 0600). **지문은 런너 콘솔에만** 나온다 | 공개키를 set-once로 받아 보관, 기기에 전달. **지문 필드를 응답에 싣지 않는다**(기기가 공개키로 직접 계산해 사람이 입력한 값과 대조) |
+| 박스 host 키 + 런너 증명 | box-agent가 박스 안에서 만들고, 런너가 `attest_host(box_id, host_pub)`로 증명 | 아래 「등록」 순서로 받아 보관 |
+| 소유자 첫 `DeviceList` | 소유자 기기가 서명(P-256) | 불투명 바이트로 보관(≤ 2 KiB), 런너 `create` 컨트롤에 실어 전달 |
+| `HostPin`(소유자 기기가 host 키+런너 지문+증명에 서명) | 기기가 지문 대조 뒤에 만든다 | 불투명 바이트로 보관(≤ 2 KiB), 기기가 다시 받아 `import_pin`으로 재검증 |
+
+**등록(박스 host 신원, 페어링 코드는 네트워크를 지나지 않는다).**
+1. 런너가 `create`를 실행하며 박스마다 **32바이트 1회용 코드**를 만든다. 런너 상태 디렉터리(0600)에만 두고 박스 환경 `OORT_BOX_PAIRING_CODE`로 주입한다(ADR 본문의 「읽기 전용 마운트」 대신 환경으로 한 이탈: 마운트를 더하면 「박스 볼륨 외 마운트 없음」이 깨진다. 코드는 첫 등록이 끝나면 런너가 폐기하는 1회용이고 사람 uid는 에이전트 uid의 환경을 읽지 못한다). 서버는 이 코드를 **한 번도 보지 못한다**(해시도 받지 않는다).
+2. box-agent가 `POST …/cloud-boxes/{box}/agent/register`(공개, IP 예산) `{hostPublicKey, mac}`을 보낸다. `mac = HMAC-SHA256(코드, "momo.box.register.v1" ‖ box_id ‖ host_pub)`. 서버는 mac을 **검증하지 못하고** 박스당 대기 슬롯 하나에 `pending`으로 둔다.
+3. 런너가 폴링 중 `GET …/cloud-box-runner/registrations`로 대기 등록을 받아 자기 코드로 mac을 검증한다. 맞으면 `attest_host`로 서명해 `POST …/cloud-box-runner/boxes/{box}/attestation`, 틀리면 `…/registration/reject`(슬롯을 비운다).
+4. 서버는 증명을 받으면 박스 소유자(`cloud_box.member_id`)를 소유자로 하는 **`work_host`(`scope='member'`, `type='cloud'`)** 를 만들고 `cloud_box_agent`를 `active`로 둔다. 이 시점부터 **host 키는 바뀌지 않는다**: 같은 키의 재등록은 200(멱등), 다른 키는 409 `cloud_box_agent_key_conflict`이고 아무것도 덮어쓰지 않는다. 키를 바꾸는 길은 박스 삭제 후 재생성이다.
+서버가 침해돼 자기 키로 등록해도 코드를 모르니 mac을 못 만들고, 런너가 거부한다. 서버가 런너 증명을 위조할 수는 없다.
+
+**라우트** (전부 한 JSON 오류 모양, 유효하지 않은 상태·소유자 위반은 M1의 코드를 따른다). 「주인」 = 박스 소유자 본인 하나. 관리자는 403 `cloud_box_owner_only`, 다른 멤버는 404.
+
+| 라우트 | 인증 | 뜻 |
+|---|---|---|
+| `PUT /v1/workspaces/{ws}/cloud-boxes/{box}/owner-device-list` `{"list": b64}` | bearer, 주인 | 첫 소유자 목록. `create` 컨트롤이 아직 `pending`일 때만(409 `cloud_box_list_locked`). 런너는 이 목록이 있어야 `create`를 받는다 |
+| `GET …/cloud-boxes/{box}/trust-bundle` | bearer, 주인 | `{boxId, hostId, agentOnline, runner:{publicKey}\|null, host:{publicKey, attestation}\|null, ownerDeviceList\|null, pin\|null}` |
+| `PUT …/cloud-boxes/{box}/pin` `{"pin": b64}` | bearer, 주인 | `HostPin` 저장(host가 `active`일 때만) |
+| `POST …/cloud-boxes/{box}/attach` | bearer, 주인 | 서명된 `cloud_pty_attach` 컨트롤 → 1회용 티켓(30초) |
+| `GET …/cloud-boxes/{box}/relay/{session}` (WebSocket) | 티켓(`Sec-WebSocket-Protocol: oort.cloud-pty.v1, ticket.<b64url>`) | 기기 쪽 중계 소켓 |
+| `POST …/cloud-boxes/{box}/agent/register` | 공개(IP 예산) | box-agent 등록 요청(위) |
+| `GET …/work-hosts/{host}/cloud-box/listen` (WebSocket) | host 서명 v2 | box-agent의 대기 소켓. 서버가 `{"t":"attach","session":"…"}` 텍스트 메시지만 보낸다 |
+| `GET …/work-hosts/{host}/cloud-box/relay/{session}` (WebSocket) | host 서명 v2 | box-agent의 세션 소켓 |
+| `PUT …/cloud-box-runner/identity` `{"publicKey": b64}` | 런너 자격 | 런너 공개키(set-once, 다르면 409) |
+| `GET …/cloud-box-runner/registrations` · `POST …/boxes/{box}/attestation` · `POST …/boxes/{box}/registration/reject` | 런너 자격 | 위 등록 3·4 |
+
+**`cloud_pty_attach` 컨트롤 = `momo.human.control.v3` 틀의 새 `kind`.** 13줄 틀 그대로: `session = "-"`, `mode = "-"`, `host_id` = **서버가 박스 행에서 도출한 box-agent host**(요청이 아니다, ADR-0188 D3 문법), `content_sha256 = SHA-256("{box_id}\n{sha256_hex(Hello 바이트)}")`. Hello(S2 `Hello`, 115바이트)의 SHA-256을 묶으므로 서버가 다른 임시키·nonce를 끼워 넣을 수 없고, 서버는 Hello의 `dev_pub`가 서명한 기기 키의 공개키와 같은지 확인한다. 서명은 **`MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`와 무관하게 항상 필수**(없으면 403 `device_signature_required`). 키·사슬·시간창·nonce는 기존 R2 검증(`verify_human_control_in_tx`) 그대로이고 nonce는 1회용이다. 기기 서명은 두 번 쓰인다: 서버용 이 컨트롤(붙기 허가)과 box-agent용 핸드셰이크 `Auth`(S2). 서버용은 중복 방어층이다 — 서버가 틀려도 box-agent가 직접 막는다.
+
+**서버의 인가(접속 때 한 번이 아니다).** 붙기 허가는 DB 트랜잭션을 한 번 쓰고 닫는다(소켓 동안 트랜잭션·RLS 컨텍스트를 잡지 않는다). 이후 소켓 수명 동안 세션 감독기가 즉시 신호와 2초 점검으로 아래가 하나라도 깨지면 두 소켓을 닫는다(종결 사유는 감사 행에 남고 내용은 없다): 기기 키 폐기·세션 계보 종료, 멤버 비활성·게스트 강등, 박스 주인 변경, 박스가 `running|idle`이 아님(정지·삭제), host 폐기, 설정 끄기(`MOMO_CLOUD_BOX_ENABLED` 런타임 스위치. 워크스페이스 설정 표면은 M5가 채우는 자리 `CloudBoxPolicy`만 둔다), 최대 세션 길이(8시간), 유휴(30분, 양방향 프레임 없음).
+
+**자원 상한(기본값).** 프레임 한 개 = WebSocket 이진 메시지 ≤ 16 448바이트(`counter 8 + kind 1 + payload ≤ 16 384 + tag 16`에 여유 64; 넘으면 소켓을 닫는다). 방향별 큐 32프레임이고 가득 차면 **버리지 않고** 기다린다(버리면 카운터 틈으로 세션이 죽는다). 10초 이상 소비되지 않으면 `slow_consumer`로 닫는다. 방향별 초당 2 000프레임 상한. 박스당 동시 세션 2(대기 중 포함). **인증 전(티켓 발급~핸드셰이크 완료) 상한:** 멤버당 3, 전역 64, 티켓 수명 30초, 핸드셰이크 마감 20초. 서버는 프레임 내용을 해석·로그·메트릭 라벨에 싣지 않는다(바이트 수·시각만). 핸드셰이크 첫 메시지(Hello)만 SHA-256이 컨트롤에 묶인 값과 같은지 본다.
+
+**범위 밖으로 남기는 것(숨기지 않는다).** (1) S2 조건 ③ 중 「런너가 지문으로 고정한 서명자만 첫 목록을 만든다」: 첫 목록은 서버를 거쳐 런너 환경으로 간다. 서버가 자기 기기를 넣은 목록을 심으면 box-agent는 받아들이지만 소유자 기기의 감사(`PendingDevice::confirm`)가 `BoxListUntrusted`로 끊는다(H1 수정이 이 구멍을 닫는다). 남는 것은 소유자가 쓰기 전에 서버가 그 박스에 자기 세션을 여는 것뿐이고 소유자 데이터는 거기 없다. (2) S2 조건 ④ 중 목록 갱신 푸시(`+1`)와 box-agent 쪽 폐기 반영: M4의 폐기는 서버 쪽 즉시 종료와 box-agent 재시작 때의 첫 목록 재적용이다. 푸시는 후속 이슈로 둔다. (3) 서버 인스턴스가 둘 이상이면 두 소켓이 같은 프로세스에 도착해야 한다(중계 레지스트리는 프로세스 메모리). (4) 서명된 delete는 M6.
+
+**첫 페어링 지문 확인(UI 계약, UI는 M7).** ① 런너 운영자가 콘솔의 지문을 oort 밖 채널로 알린다. ② 멤버가 기기에 직접 입력한다. ③ 기기가 `trust-bundle`을 받아 `SHA-256(runner.publicKey)`를 **스스로 계산**해 입력값과 대조한다(서버가 지문을 내려 주지 않는다. 안내 문구 「지문이 운영자가 알려 준 값과 같아요」는 대조가 이 비교일 때만). ④ 증명을 검증하고 `pin_host`로 `HostPin`을 만들어 `PUT …/pin`. ⑤ 이후 붙기마다 `hello`(핀 필수) → `attach` → 소켓 → 핸드셰이크 → `confirm`(목록 감사)이 끝난 뒤에야 입력할 수 있다.

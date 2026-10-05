@@ -299,6 +299,24 @@ pub enum ControlContent<'a> {
         host_id: Uuid,
         label: &'a str,
     },
+    /// ADR-0197 M4 (증보 2): the owner's device lets itself attach to its own
+    /// personal-cloud box. `host_id` of the statement is the box-agent host the
+    /// **server** derived from the box row. Binds the one handshake `Hello` the
+    /// device is about to send (its SHA-256), so the server cannot pair the
+    /// authorisation with another ephemeral key or nonce. v3 only.
+    CloudPtyAttach {
+        box_id: Uuid,
+        /// Lowercase hex SHA-256 of the relayed `Hello` bytes.
+        hello_sha256: &'a str,
+    },
+    /// ADR-0197 M4 (증보 2): the owner's device plants the first owner device
+    /// list of its box (the box's trust root). `host_id` of the statement is the
+    /// box id. v3 only.
+    CloudBoxOwnerList {
+        box_id: Uuid,
+        /// Lowercase hex SHA-256 of the signed `DeviceList` bytes.
+        list_sha256: &'a str,
+    },
 }
 
 impl ControlContent<'_> {
@@ -309,7 +327,17 @@ impl ControlContent<'_> {
             ControlContent::Permission { .. } => "permission",
             ControlContent::BundleManifest { .. } => "bundle_manifest",
             ControlContent::HostRegister { .. } => "host_register",
+            ControlContent::CloudPtyAttach { .. } => "cloud_pty_attach",
+            ControlContent::CloudBoxOwnerList { .. } => "cloud_box_owner_list",
         }
+    }
+
+    /// Kinds that exist only in v3 (a later kind than v2 ever knew).
+    pub fn v3_only(&self) -> bool {
+        matches!(
+            self,
+            ControlContent::CloudPtyAttach { .. } | ControlContent::CloudBoxOwnerList { .. }
+        )
     }
 
     /// `mode` line: `queue`/`interrupt` for `input`, [`ABSENT`] otherwise.
@@ -409,6 +437,22 @@ impl ControlContent<'_> {
                 canonical_b64_of_len("host_public_key_b64", host_public_key_b64, 32)?;
                 label_ok(label)?;
                 format!("{host_public_key_b64}\n{host_id}\n{}", nfc(label))
+            }
+            ControlContent::CloudPtyAttach {
+                box_id,
+                hello_sha256,
+            } => {
+                only_v3(schema)?;
+                lower_hex_sha256("hello_sha256", hello_sha256)?;
+                format!("{box_id}\n{hello_sha256}")
+            }
+            ControlContent::CloudBoxOwnerList {
+                box_id,
+                list_sha256,
+            } => {
+                only_v3(schema)?;
+                lower_hex_sha256("list_sha256", list_sha256)?;
+                format!("{box_id}\n{list_sha256}")
             }
         };
         Ok(text.into_bytes())
@@ -550,7 +594,7 @@ impl HumanControl<'_> {
         ) {
             schemas.push(ControlSchema::V3);
         }
-        if !previewed {
+        if !previewed && !self.content.v3_only() {
             schemas.push(ControlSchema::V2);
         }
         let mut first_error = None;
@@ -1014,6 +1058,18 @@ fn write_json_string(s: &str, out: &mut String) {
 
 fn nfc(s: &str) -> String {
     s.nfc().collect()
+}
+
+/// ADR-0197 M4: the personal-cloud kinds are built under v3 only.
+fn only_v3(schema: ControlSchema) -> Result<(), HumanSigningError> {
+    if schema == ControlSchema::V3 {
+        Ok(())
+    } else {
+        Err(HumanSigningError::InvalidField {
+            field: "schema",
+            reason: "this kind exists only under momo.human.control.v3",
+        })
+    }
 }
 
 /// 64 lowercase hex characters (a SHA-256 line).

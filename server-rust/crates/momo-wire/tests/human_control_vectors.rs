@@ -847,6 +847,11 @@ fn every_structured_field_is_load_bearing() {
                             },
                         )]
                     }
+                    // ADR-0197 M4 kinds have no shared vector yet (their bytes are pinned in
+                    // `cloud_box_kinds` below, not mutated here).
+                    ControlContent::CloudPtyAttach { .. } | ControlContent::CloudBoxOwnerList { .. } => {
+                        vec![]
+                    }
                     ControlContent::HostRegister {
                         host_public_key_b64,
                         host_id,

@@ -147,6 +147,20 @@ pub enum ControlSubject<'a> {
         option_kind: &'a str,
         preview_sha256: Option<&'a str>,
     },
+    /// ADR-0197 M4: the owner's device authorises one attach to its own
+    /// personal-cloud box. `ControlTarget::host_id` is the box-agent host the
+    /// route read off the box row; the statement binds the box and the SHA-256
+    /// of the `Hello` that will be relayed. No envelope extras are allowed.
+    CloudPtyAttach {
+        box_id: Uuid,
+        hello_sha256: &'a str,
+    },
+    /// ADR-0197 M4: the owner's device plants the first owner device list.
+    /// `ControlTarget::host_id` is the box id.
+    CloudBoxOwnerList {
+        box_id: Uuid,
+        list_sha256: &'a str,
+    },
 }
 
 impl ControlSubject<'_> {
@@ -155,6 +169,8 @@ impl ControlSubject<'_> {
             ControlSubject::Input { .. } => "input",
             ControlSubject::Spawn { .. } => "spawn",
             ControlSubject::Permission { .. } => "permission",
+            ControlSubject::CloudPtyAttach { .. } => "cloud_pty_attach",
+            ControlSubject::CloudBoxOwnerList { .. } => "cloud_box_owner_list",
         }
     }
 }
@@ -433,6 +449,50 @@ pub async fn verify_human_control_in_tx(
                 },
                 None,
                 Some(scope.as_str()),
+                None,
+            )
+        }
+        ControlSubject::CloudPtyAttach {
+            box_id,
+            hello_sha256,
+        } => {
+            if input.mode.is_some()
+                || input.scope.is_some()
+                || input.agent_member_id.is_some()
+                || input.folder_id.is_some()
+                || target.session_id.is_some()
+            {
+                return Ok(Err(HumanControlRefusal::Invalid));
+            }
+            (
+                ControlContent::CloudPtyAttach {
+                    box_id,
+                    hello_sha256,
+                },
+                None,
+                None,
+                None,
+            )
+        }
+        ControlSubject::CloudBoxOwnerList {
+            box_id,
+            list_sha256,
+        } => {
+            if input.mode.is_some()
+                || input.scope.is_some()
+                || input.agent_member_id.is_some()
+                || input.folder_id.is_some()
+                || target.session_id.is_some()
+            {
+                return Ok(Err(HumanControlRefusal::Invalid));
+            }
+            (
+                ControlContent::CloudBoxOwnerList {
+                    box_id,
+                    list_sha256,
+                },
+                None,
+                None,
                 None,
             )
         }
