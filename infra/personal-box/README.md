@@ -70,6 +70,33 @@ exit
 
 ## 첫 시작 설치와 후속 항목
 - Claude 패키지의 `postinstall`(`install.cjs`)은 플랫폼 네이티브 바이너리를 `bin/claude.exe` 자리표시자 위에 복사할 뿐 네트워크를 쓰지 않아요. `--ignore-scripts`로 막으면 `claude`가 스텁으로 남아서 스크립트를 켜 둬요. 락파일이 모든 타르볼 무결성을 강제하고, 설치 직후 패키지 integrity와 바이너리 sha256을 출력하고 `/opt/tools/install-record.txt`(tmpfs)에 남겨요.
-- 로그인 셸은 `umask 077`이고 `/opt/tools/node_modules/.bin`은 PATH 맨 끝이에요.
+- 로그인 셸은 `umask 077`이고 `/opt/tools/node_modules/.bin`은 PATH 맨 끝이에요. Debian의 `/etc/profile`이 로그인 셸의 PATH를 다시 쓰기 때문에, 이미지의 `ENV PATH`만으로는 `bash -lc 'command -v claude'`가 실패했어요(#3496). `/etc/profile.d/zz-momo-path.sh`가 배포판 스크립트 뒤에 그 경로를 **맨 끝에, 이미 있으면 건너뛰며** 붙여요. `verify-s3.sh` 2b가 설치 전 자리표시자 CLI와 실제 첫 시작 설치(레지스트리에 닿을 때) 양쪽에서 이를 확인하고, `--sabotage path`가 스니펫을 지우면 RED가 돼요.
 - 러너 호스트 점검(`verify-s3.sh`가 Colima VM의 swap·core_pattern 상태를 출력)은 정보용이에요. 기계 검증 항목화는 ADR D8/H5가 맡아요.
 - 후속(이 PR 범위 밖): 리뷰의 M7–M9, L3–L6, ADR H3/H5.
+
+## M3 — `momo-box-agent`와 Linux 박스 프로필 (ADR-0197 M3, #3501)
+박스 안의 호스트 신원이에요. 코드는 `server-rust/bins/momo-box-agent/`예요. 릴레이 라우트(M4)와 러너(M2)는 아직 없어서 `run`은 신원만 쥐고 `pending`으로 기다려요.
+
+| 수용 기준 | 증거 |
+|---|---|
+| host 등록 `scope=member`, 소유자 확인 전 비활성 | `register.rs`(요청은 scope를 고정, 응답의 scope·type·키가 다르면 거부) + `host.rs`(`Phase::Pending`은 hello·기기 목록·PTY 모두 거부, 소유자 첫 목록은 런너 로컬 마운트로만) + `tests/host.rs` |
+| PTY 열기, workd는 PTY 불가 유지 | `tests/host.rs`(blind-pty 핸드셰이크 → 첫 Resize가 PTY를 열고, 릴레이가 평문 표식을 못 봄) / `momo-workd/tests/no_pty.rs`(소스·매니페스트 검사) |
+| Claude ACP 어댑터 없음 | `tests/no_acp.rs`(소스·매니페스트·허용된 `momo_workd::` 경로 검사) + `momo-workd`의 박스 프로필(`OORT_BOX`)이 claude 어댑터 설정을 거부 + `verify-s3.sh`/`verify-m3.sh`의 이미지·바이너리 검사 |
+| 자격 경로 접근 거부 | `fsgate.rs`가 에이전트의 유일한 파일 문(`tests/fs_discipline.rs`가 소스로 잠금). `..`·심볼릭 링크·대소문자·열린 fd 경로까지 거부. 커널 쪽 벽은 `verify-m3.sh`("agent uid cannot open /cred/…") |
+| 환경 허용목록 | `env.rs`(상속 없이 허용목록으로 구성, 금지 조각 목록과 교차 시험) + 컨테이너 안 실제 PTY 자식의 환경 검사 |
+| 별도 uid, 사용자 uid에서 host 키 읽기·ptrace 거부 | `verify-m3.sh`: 에이전트 uid 10002(SETUID/SETGID만), 사람 uid 10001의 probe가 키 읽기·덮어쓰기·이름 바꾸기·삭제, `/proc/<pid>/{environ,mem,maps,fd}`, `PTRACE_ATTACH`를 모두 거부당함 |
+
+### 컨테이너 프로필 (S3와 다른 두 가지)와 spawn helper
+컨테이너가 root로 시작하되 **`SETUID`·`SETGID`만** 가져요(`--cap-drop ALL --cap-add SETUID --cap-add SETGID`, `no-new-privileges`, 읽기 전용 루트는 그대로). `momo-m3-entry`(M2 러너가 할 일의 대역)가 `setpriv`로 에이전트를 uid 10002에서 그 두 capability를 ambient로 가진 채 띄워요. root는 에이전트도 사용자 코드도 돌리지 않아요.
+
+에이전트는 시작하자마자 **spawn helper**(`momo-box-agent spawn-helper`, uid 10003)를 띄우고 **자기 capability를 전부 버려요**(`CapPrm/Eff/Inh/Amb`=0, 검증까지 해요). 사람 uid로 내려가는 능력은 helper만 쥐어요(리뷰 M1). helper는 host 키를 못 읽는 세 번째 uid이고, 빈 환경과 시작 때 고정된 셸·환경 인자만 받으며, 요청은 터미널 크기 4바이트뿐이에요. 요청마다 `setgroups([])` → `setresgid` → `setresuid(10001)` → 모든 capability 비움 → `no_new_privs` 순서로 셸을 띄우고 PTY master를 `SCM_RIGHTS`로 에이전트에 넘겨요. 에이전트가 뚫려도 사람 uid로 `setuid`할 수 없어서 `/cred`를 읽지 못해요(`agent_can_setuid_after_drop=false`). 셸이 뚫려도 부모(helper)와 에이전트에게 신호를 보낼 수 없어요(EPERM).
+
+에이전트 프로세스는 `PR_SET_DUMPABLE=0`, `RLIMIT_CORE=0`, `no_new_privs`예요. 그래서 `/proc/<pid>/*`가 root 소유가 되어 같은 uid여도 `environ`·`mem`을 못 읽고 ptrace도 못 붙어요. 사람 uid의 `PTRACE_ATTACH`는 uid가 달라 `EPERM`이고, 같은 probe가 **자기 자식은 ptrace할 수 있다**는 양성 대조를 같이 내요. 이미지의 `/etc/oort-box`(root 소유 0644)는 `momo-workd`의 박스 프로필 표식이에요. 환경 변수는 사람의 PTY에서 걸러지거나 비워질 수 있어서 권위가 아니에요(리뷰 H1).
+
+`verify-m3.sh`는 호스트에서 Rust를 `rust:1-bookworm` 컨테이너(glibc 2.36, 박스 이미지와 같음)에서 빌드해요. 빌드 결과(target·registry)는 tmpfs에만 두고 디스크 볼륨을 남기지 않아요. 키 디렉터리는 `nosuid,nodev` tmpfs, 봉인 키는 별도 tmpfs로 대역을 세워요(영속 게이트의 「다른 장치」). 실제 볼륨·런너 증명은 M2예요.
+```
+infra/personal-box/verify-m3.sh                      # GREEN
+infra/personal-box/verify-m3.sh --sabotage same-uid  # 에이전트를 사람 uid로: RED여야 해요 (pty-as-agent, cred-readable도)
+infra/personal-box/verify-m3.sh --self-test          # GREEN + 세 sabotage 모두 RED
+```
+**검증하지 않은 것(runtime-unverified):** `hidepid=2`(docker run으로 설정 불가, M2 러너 템플릿 항목), 실제 볼륨·LUKS·크립토 슈레드, 서버 쪽 등록·페어링 라우트(M1/M4)와 중계 WebSocket. PTY 자식의 bounding set은 `CAP_SETPCAP`이 없어 비우지 못하지만(`CapBnd=c0`), 다른 집합이 비어 있고 `no_new_privs`·setuid 바이너리 없음이라 얻을 길이 없어요. Colima VM의 `ptrace_scope`는 1이에요. 거부가 Yama에 기대지 않도록 같은 uid여도 dumpable=0이 `/proc`과 ptrace를 막아요.

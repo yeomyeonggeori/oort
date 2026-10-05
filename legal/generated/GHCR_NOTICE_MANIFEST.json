@@ -7,7 +7,7 @@
   "format": "ghcr-notice-bundle/v1",
   "generator": "scripts/generate_ghcr_notice_bundle.py",
   "image_files": {
-    "GHCR_THIRD_PARTY_NOTICES.txt": "37922a97b67ac5233ea77110bdbebdf7c65bf4ccdeb533a355f21f5b87bc9467",
+    "GHCR_THIRD_PARTY_NOTICES.txt": "1198cb9124d52c23953b7df5619d8391ea5538d747aeef9f19937bced158d874",
     "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
     "NOTICE": "a6d4fe7ecfc042cda323035dfa7b014504c63ef74f5ba2dc811c5101044735e4",
     "THIRD_PARTY_NOTICES.md": "cc812563cb42db6d67a69571dbcbd20b7ce7a0e0b3df8c3899f00d5fcaf5d0a2"
@@ -15,7 +15,7 @@
   "inputs": {
     "clarify_sha256": "366b7c68569c49f9fab915342fc2c620d1ee6318ab3567d337fd4f7d1a0f79c3",
     "clients_web_package_lock_sha256": "3fe4cf55556ea18354f1024dfe564626553ceacb9310b290404e9e2af5ee736a",
-    "server_rust_cargo_lock_sha256": "abdb99be67840ed568f2a0d19e84726a273474dd2d3128f5c1177c1737b6eaa8",
+    "server_rust_cargo_lock_sha256": "9e67ba2ff958b44fc3985477765ea803d864754123b48b98e7e6b82ac88375e6",
     "spdx_texts_sha256": {
       "0BSD.txt": "3662a9adfe6feddb077f96dfad3cb30408540a2a3eae5a656b7ff4375e622be0",
       "Apache-2.0.txt": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
@@ -29,8 +29,8 @@
     }
   },
   "outputs": {
-    "bundle_sha256": "37922a97b67ac5233ea77110bdbebdf7c65bf4ccdeb533a355f21f5b87bc9467",
-    "sha256_manifest_sha256": "e45dc7c8e3ffcdfc82bed8cea1f61a5f4f21add794a73c67a329b0b1ef04cfa4"
+    "bundle_sha256": "1198cb9124d52c23953b7df5619d8391ea5538d747aeef9f19937bced158d874",
+    "sha256_manifest_sha256": "a4e17f3453a0819fd76e3019b80d8beafa2197457cebe70edeeeef337d6aee2c"
   },
   "packages": [
     {

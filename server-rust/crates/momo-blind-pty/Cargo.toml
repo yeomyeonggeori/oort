@@ -6,8 +6,9 @@ license.workspace = true
 rust-version.workspace = true
 publish = false
 
-# ADR-0197 S2 (#3409) — blind-relay PTY **prototype**. Nothing in `momo-server`
-# or any bin depends on this crate; it exists to prove the protocol in tests
+# ADR-0197 S2 (#3409) — blind-relay PTY protocol. Nothing in `momo-server`
+# or the relay depends on this crate; the only dependent is `momo-box-agent`
+# (M3, #3501), enforced by tests/isolation.rs
 # (docs/planning/research/2026-10-03-blind-pty-spike-s2.md). No new primitives:
 # P-256 (ADR-0146 device keys), Ed25519 (workd host key), AES-GCM (momo-settings),
 # HKDF-SHA256 and SHA-256 are all already in the lock.

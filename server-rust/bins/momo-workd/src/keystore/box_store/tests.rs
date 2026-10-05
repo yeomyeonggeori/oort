@@ -655,3 +655,39 @@ fn the_dev_key_file_is_also_refused_when_the_box_key_dir_is_set() {
     let get = |name: &str| (name == ENV_KEY_DIR).then(|| "/v/keys".to_string());
     assert!(crate::cli::dev_key_file_allowed(&get).is_err());
 }
+
+/// H1 (#3503 review): the box marker is a root-owned regular file; a link, a
+/// group/world-writable file, a file of another owner or a missing file is not.
+#[test]
+fn the_box_marker_file_must_be_a_trusted_regular_file() {
+    use std::os::unix::fs::{symlink, PermissionsExt as _};
+    let dir = std::env::temp_dir().join(format!("momo-marker-{}", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // SAFETY: geteuid cannot fail.
+    let me = unsafe { libc::geteuid() };
+    let marker = dir.join("oort-box");
+    assert!(!marker_file_present(&marker, me), "missing");
+    std::fs::write(&marker, b"oort-box\n").unwrap();
+    std::fs::set_permissions(&marker, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(
+        marker_file_present(&marker, me),
+        "the trusted owner's 0644 file"
+    );
+    assert!(
+        !marker_file_present(&marker, me.wrapping_add(1)),
+        "another owner"
+    );
+    std::fs::set_permissions(&marker, std::fs::Permissions::from_mode(0o664)).unwrap();
+    assert!(!marker_file_present(&marker, me), "group-writable");
+    std::fs::set_permissions(&marker, std::fs::Permissions::from_mode(0o646)).unwrap();
+    assert!(!marker_file_present(&marker, me), "world-writable");
+    std::fs::set_permissions(&marker, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let link = dir.join("link");
+    symlink(&marker, &link).unwrap();
+    assert!(!marker_file_present(&link, me), "a symlink is not a marker");
+    assert!(
+        !marker_file_present(&dir, me),
+        "a directory is not a marker"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
