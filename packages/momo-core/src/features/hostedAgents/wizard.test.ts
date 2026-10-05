@@ -405,8 +405,15 @@ describe("3단계 만료 카운트다운", () => {
   });
 
   it("이 탭이 받은 발급 응답이 있으면 그 시각을 그대로 쓴다", () => {
-    const deadline = hostedPairingDeadline(connection({ updatedAtMs: T0 }), T0 + 5_000);
-    expect(deadline).toEqual({ expiresAtMs: T0 + 5_000, basis: "issued" });
+    const at = T0 + HOSTED_PAIRING_TTL_MS + 5_000;
+    const deadline = hostedPairingDeadline(connection({ updatedAtMs: T0 }), at);
+    expect(deadline).toEqual({ expiresAtMs: at, basis: "issued" });
+  });
+
+  it("기록과 1분 넘게 어긋난 낡은 발급 시각은 버린다(다른 탭이 재발급한 경우)", () => {
+    const stale = T0 + HOSTED_PAIRING_TTL_MS - 20 * 60_000;
+    const deadline = hostedPairingDeadline(connection({ updatedAtMs: T0 }), stale);
+    expect(deadline?.basis).toBe("recorded");
   });
 
   it("발급 응답이 없으면 기록 시각에 15분을 더한 근사를 쓰고 그렇다고 밝힌다", () => {

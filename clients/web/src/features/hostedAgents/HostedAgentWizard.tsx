@@ -350,7 +350,17 @@ function HostedWizardBody({
     if (pairing === null && !waitingForProof && !countingDown) return;
     setNowMs(Date.now());
     const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
-    return () => window.clearInterval(timer);
+    // 백그라운드 탭은 타이머가 멈춘다. 돌아온 순간 낡은 남은 시간을 보이지 않게 한다.
+    const refresh = () => {
+      if (document.visibilityState === "visible") setNowMs(Date.now());
+    };
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
   }, [pairing, waitingForProof, countingDown]);
 
   // 서버가 "그 값은 이미 소비됐다"고 말하면 메모리 사본도 버린다. 감지된 뒤의
@@ -1252,11 +1262,10 @@ function DetectingStep({
         }
         detail={
           countdown?.expired
-            ? "이 값으로는 더 이상 접속할 수 없어요. 아래 연결 값 다시 발급을 눌러 새 값을 받으세요."
+            ? "시간이 지나 이 값은 통하지 않을 가능성이 높아요. 방금 실행했다면 지금 확인을 누르고, 아니면 아래 연결 값 다시 발급으로 새 값을 받으세요."
             : "AI 회사 설정에 값을 넣고 커넥터나 routine을 한 번 실행하면 이 화면이 바뀌어요. 이 창을 열어 둔 채로 다녀와도 돼요."
         }
         actions={
-          countdown?.expired ? undefined : (
           <Button
             type="button"
             variant="outline"
@@ -1268,7 +1277,6 @@ function DetectingStep({
             {checking && <Loader2 aria-hidden="true" className="spinner-busy" />}
             {checking ? "확인 중" : "지금 확인"}
           </Button>
-          )
         }
         testId="hosted-detecting-empty"
       />
@@ -1290,12 +1298,18 @@ function DetectingStep({
           <p role="status" className="break-keep text-body text-ink-muted">
             {countdown.guidance}
           </p>
-          <p className="break-keep text-meta text-ink-muted">{countdown.basisNote}</p>
+          {countdown.basisNote !== "" && (
+            <p className="break-keep text-meta text-ink-muted">{countdown.basisNote}</p>
+          )}
         </div>
       )}
       {!countdown?.expired && (
-      <details className="flex min-w-0 flex-col gap-2" data-testid="hosted-detect-causes">
-        <summary className="cursor-pointer text-meta font-medium text-ink">
+      <details
+        open={countdown?.urgent || undefined}
+        className="flex min-w-0 flex-col gap-2"
+        data-testid="hosted-detect-causes"
+      >
+        <summary className="min-h-8 cursor-pointer rounded-sm py-1 text-meta font-medium text-ink focus-visible:focus-ring">
           {HOSTED_DETECT_CAUSES_TITLE}
         </summary>
         <p className="mt-2 break-keep text-meta text-ink-muted">{HOSTED_DETECT_CAUSES_NOTE}</p>

@@ -553,13 +553,16 @@ export function hostedPairingDeadline(
   issuedExpiresAtMs: number | null
 ): HostedPairingDeadline | null {
   if (connection === null || connection.status !== "pairing_pending") return null;
-  if (issuedExpiresAtMs !== null) {
+  // 다른 탭·기기가 재발급하면 `updatedAtMs` 가 새 발급을 따라간다. 캐시한 시각이 기록과
+  // 1분 넘게 어긋나면 낡은 것이므로 버리고 기록에서 계산한다.
+  const recordedExpiry = connection.updatedAtMs + HOSTED_PAIRING_TTL_MS;
+  if (
+    issuedExpiresAtMs !== null &&
+    Math.abs(issuedExpiresAtMs - recordedExpiry) <= 60_000
+  ) {
     return { expiresAtMs: issuedExpiresAtMs, basis: "issued" };
   }
-  return {
-    expiresAtMs: connection.updatedAtMs + HOSTED_PAIRING_TTL_MS,
-    basis: "recorded",
-  };
+  return { expiresAtMs: recordedExpiry, basis: "recorded" };
 }
 
 /** 남은 시간이 이만큼 이하면 서두르라고 말한다. */
@@ -604,7 +607,8 @@ export function hostedDetectCountdown(
       expired: true,
       urgent: false,
       label,
-      basisNote,
+      // 이미 지난 뒤에는 근사의 방향을 말해 봐야 모순이다.
+      basisNote: "",
       guidance:
         "연결 값이 만료됐어요. 연결 값 다시 발급을 누르고, 새로 받은 값으로 AI 회사 설정의 값을 바꾼 뒤 커넥터나 routine을 한 번 실행하세요. 이미 넣어 둔 값은 더 이상 통하지 않아요.",
     };

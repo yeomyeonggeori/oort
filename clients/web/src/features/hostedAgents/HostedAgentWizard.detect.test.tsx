@@ -226,10 +226,10 @@ describe("3단계 감지 대기 (#3522)", () => {
     const text = byId("hosted-detect-countdown")?.textContent ?? "";
     expect(text).toContain("연결 값 다시 발급");
     expect(byId("hosted-regenerate")).not.toBeNull();
-    // 만료 뒤에는 기다려도 된다는 말도, 지금 확인도, 원인 목록도 서지 않는다.
+    // 만료 뒤에는 기다려도 된다는 말과 원인 목록은 서지 않는다. 지금 확인은 남는다(시계 오차).
     expect(byId("hosted-detecting-empty")?.textContent).toContain("만료됐어요");
     expect(byId("hosted-detecting-empty")?.textContent).not.toContain("다녀와도");
-    expect(byId("hosted-recheck")).toBeNull();
+    expect(byId("hosted-recheck")).not.toBeNull();
     expect(byId("hosted-detect-causes")).toBeNull();
   });
 });

@@ -10319,6 +10319,7 @@ async function captureHostedPairingScenes(browser, scheme) {
   const scrollCauses = [
     "causes",
     async (page) => {
+      await page.getByTestId("hosted-detect-causes").locator("summary").click();
       await page.getByTestId("hosted-detect-causes").scrollIntoViewIfNeeded();
       await page.waitForTimeout(100);
     },
