@@ -50,15 +50,27 @@ use uuid::Uuid;
 
 /// Lease duration (Swift `AgentGatewayRoutes.leaseDurationSeconds` :17).
 ///
-/// **Hosted agents that wake rarely (#3516 finding).** The window is fixed and a
-/// renewal only extends it to `now() + 30s` while it is still live
-/// (`renew_gateway_lease_in_tx` requires `lease_expires_at > now()`; it is not
-/// cumulative). A vendor routine that sleeps for tens of minutes between wakes
-/// therefore cannot renew across the gap: the job becomes claimable again and
-/// the old handle's `oort_run_event`/`oort_run_complete` answer the one 409 lease
-/// refusal. This is the documented lease contract, not changed here; a
-/// long-gap runtime must finish inside one wake or re-claim and re-do the turn.
+/// The **managed** gateway window: fixed, and a renewal only extends a live
+/// lease. Hosted (Agent Port) claims use the longer
+/// [`HOSTED_LEASE_SECONDS_DEFAULT`] window instead (#3530, AT-8: a vendor VM
+/// that wakes every tens of minutes could never renew across the gap), and an
+/// expired-but-unclaimed hosted lease still authorizes its own handle
+/// ([`gateway_lease_authorized_hosted`]). This constant is unchanged.
 pub const GATEWAY_LEASE_SECONDS: i64 = 30;
+
+/// Hosted (Agent Port) lease bounds and default — ADR-0162 증보 3 부록 (#3530,
+/// AT-8). A hosted agent wakes every tens of minutes, so its lease is measured
+/// in minutes; the managed gateway keeps [`GATEWAY_LEASE_SECONDS`].
+pub const HOSTED_LEASE_SECONDS_DEFAULT: i64 = 30 * 60;
+pub const HOSTED_LEASE_SECONDS_MIN: i64 = 5 * 60;
+pub const HOSTED_LEASE_SECONDS_MAX: i64 = 120 * 60;
+
+/// Clamp an operator-supplied hosted lease into `[5 min, 120 min]`. The claim
+/// and renew statements both go through this, so an out-of-range value cannot
+/// reach SQL whichever caller built the number.
+pub fn clamp_hosted_lease_seconds(seconds: i64) -> i64 {
+    seconds.clamp(HOSTED_LEASE_SECONDS_MIN, HOSTED_LEASE_SECONDS_MAX)
+}
 
 /// Bounds on `?limit=` for the pending-jobs claim (Swift :64).
 pub const CLAIM_LIMIT_DEFAULT: i64 = 20;
@@ -155,6 +167,31 @@ pub fn gateway_lease_authorized(
         || (snapshot.status == GatewayJobStatus::Done && allow_settled)
 }
 
+/// The hosted variant of [`gateway_lease_authorized`] (#3530, AT-8).
+///
+/// A hosted agent that sleeps past its lease and wakes again still holds the
+/// only lease the row has ever had: nobody re-claimed it, so `lease_owner` is
+/// still the presented id. That is proof enough that the work was never handed
+/// to anyone else, so an expired-but-unclaimed lease is treated as implicitly
+/// renewed. The moment anybody re-claims, the claim mints a fresh `lease_owner`
+/// and the owner comparison refuses the old handle — the 409 the contract keeps.
+/// Status must still be `pending` (`done` only with `allow_settled`), and a
+/// released lease has no owner, so it never authorizes.
+pub fn gateway_lease_authorized_hosted(
+    snapshot: Option<GatewayLeaseSnapshot>,
+    presented_lease_id: Uuid,
+    allow_settled: bool,
+) -> bool {
+    let Some(snapshot) = snapshot else {
+        return false;
+    };
+    if snapshot.owner != Some(presented_lease_id) {
+        return false;
+    }
+    snapshot.status == GatewayJobStatus::Pending
+        || (snapshot.status == GatewayJobStatus::Done && allow_settled)
+}
+
 /// Claim up to `limit` pending gateway jobs for one agent, minting a lease on
 /// each. Ports the Swift CTE (:76-118) statement-for-statement.
 ///
@@ -171,7 +208,15 @@ pub async fn claim_gateway_jobs_in_tx(
     agent_member_id: Uuid,
     limit: i64,
 ) -> Result<Vec<ClaimedGatewayJob>, sqlx::Error> {
-    claim_gateway_jobs(conn, workspace_id, agent_member_id, limit, None).await
+    claim_gateway_jobs(
+        conn,
+        workspace_id,
+        agent_member_id,
+        limit,
+        None,
+        GATEWAY_LEASE_SECONDS,
+    )
+    .await
 }
 
 /// The **hosted** half of the same claim (ADR-0162 / HAP-E5).
@@ -224,6 +269,7 @@ pub async fn claim_hosted_gateway_jobs_in_tx(
     agent_member_id: Uuid,
     connection_id: Uuid,
     limit: i64,
+    lease_seconds: i64,
 ) -> Result<Vec<ClaimedGatewayJob>, sqlx::Error> {
     claim_gateway_jobs(
         conn,
@@ -231,6 +277,7 @@ pub async fn claim_hosted_gateway_jobs_in_tx(
         agent_member_id,
         limit,
         Some(connection_id),
+        clamp_hosted_lease_seconds(lease_seconds),
     )
     .await
 }
@@ -241,6 +288,7 @@ async fn claim_gateway_jobs(
     agent_member_id: Uuid,
     limit: i64,
     hosted_connection_id: Option<Uuid>,
+    lease_seconds: i64,
 ) -> Result<Vec<ClaimedGatewayJob>, sqlx::Error> {
     // `$5 IS NULL` selects the managed branch, so both callers execute one
     // prepared statement whose only difference is which hosted predicate is
@@ -321,7 +369,7 @@ async fn claim_gateway_jobs(
     .bind(workspace_id)
     .bind(agent_member_id)
     .bind(limit)
-    .bind(GATEWAY_LEASE_SECONDS as f64)
+    .bind(lease_seconds as f64)
     .bind(hosted_connection_id)
     .fetch_all(&mut *conn)
     .await?;
@@ -443,6 +491,40 @@ pub async fn renew_gateway_lease_in_tx(
     .bind(lease.job_id)
     .bind(lease.lease_id)
     .bind(GATEWAY_LEASE_SECONDS as f64)
+    .fetch_optional(&mut *conn)
+    .await
+}
+
+/// Hosted renew (#3530, AT-8): extend the lease to `now() + lease_seconds`
+/// **even if it already expired**, as long as the row still names this lease id.
+/// An unclaimed expired lease is implicitly renewed; a re-claimed row carries a
+/// fresh `lease_owner`, so the old handle matches nothing and gets `None` (409).
+/// Managed callers keep [`renew_gateway_lease_in_tx`].
+pub async fn renew_hosted_gateway_lease_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    lease: GatewayLeaseBinding,
+    lease_seconds: i64,
+) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
+    sqlx::query_scalar(
+        "UPDATE outbox \
+            SET lease_expires_at = now() + make_interval(secs => $5) \
+          WHERE id = $3 \
+            AND workspace_id = $1 \
+            AND kind = 'agent_job' \
+            AND method = 'gateway' \
+            AND status = 'pending' \
+            AND partition_key = $2 \
+            AND lower(payload->>'agent_member_id') = lower($2::text) \
+            AND lease_owner = $4 \
+        RETURNING lease_expires_at",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .bind(lease.job_id)
+    .bind(lease.lease_id)
+    .bind(clamp_hosted_lease_seconds(lease_seconds) as f64)
     .fetch_optional(&mut *conn)
     .await
 }
@@ -576,6 +658,54 @@ mod tests {
             owner,
             active,
         })
+    }
+
+    #[test]
+    fn the_hosted_lease_is_clamped_to_five_to_one_twenty_minutes() {
+        assert_eq!(clamp_hosted_lease_seconds(0), 300);
+        assert_eq!(clamp_hosted_lease_seconds(-1), 300);
+        assert_eq!(clamp_hosted_lease_seconds(1_800), 1_800);
+        assert_eq!(clamp_hosted_lease_seconds(99_999), 7_200);
+        assert_eq!(HOSTED_LEASE_SECONDS_DEFAULT, 1_800);
+        assert_eq!(GATEWAY_LEASE_SECONDS, 30, "the managed window is unchanged");
+    }
+
+    /// Hosted: ownership alone decides while pending; expiry does not.
+    #[test]
+    fn a_hosted_lease_survives_expiry_until_somebody_else_owns_it() {
+        let mine = Uuid::from_u128(1);
+        let theirs = Uuid::from_u128(2);
+        assert!(gateway_lease_authorized_hosted(
+            snapshot(GatewayJobStatus::Pending, Some(mine), false),
+            mine,
+            false
+        ));
+        assert!(!gateway_lease_authorized(
+            snapshot(GatewayJobStatus::Pending, Some(mine), false),
+            mine,
+            false
+        ));
+        assert!(!gateway_lease_authorized_hosted(
+            snapshot(GatewayJobStatus::Pending, Some(theirs), true),
+            mine,
+            false
+        ));
+        assert!(!gateway_lease_authorized_hosted(
+            snapshot(GatewayJobStatus::Pending, None, false),
+            mine,
+            false
+        ));
+        assert!(!gateway_lease_authorized_hosted(
+            snapshot(GatewayJobStatus::Done, Some(mine), false),
+            mine,
+            false
+        ));
+        assert!(gateway_lease_authorized_hosted(
+            snapshot(GatewayJobStatus::Done, Some(mine), false),
+            mine,
+            true
+        ));
+        assert!(!gateway_lease_authorized_hosted(None, mine, true));
     }
 
     #[test]

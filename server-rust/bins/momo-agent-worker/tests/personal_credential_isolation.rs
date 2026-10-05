@@ -620,6 +620,7 @@ async fn subscription_reach(su: &PgPool, t: &Tenant) -> SubscriptionReach {
         t.subscription_agent_id,
         t.subscription_connection_id,
         50,
+        momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT,
     )
     .await
     .unwrap()

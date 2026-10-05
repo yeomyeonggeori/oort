@@ -453,6 +453,10 @@ pub struct AgentPortConfig {
     /// Enabling hosted delivery in production is now an operator's explicit act,
     /// backed by the disconnect lifecycle that makes it revocable.
     pub hosted_delivery_enabled: bool,
+    /// ADR-0162 증보 3 부록 (#3530, AT-8) — the lease a **hosted** claim/renew
+    /// mints, in seconds. `MOMO_AGENT_PORT_HOSTED_LEASE_MINUTES` (default 30),
+    /// clamped to 5..=120 minutes. The managed gateway keeps its 30 seconds.
+    pub hosted_lease_seconds: i64,
     /// ADR-0193 D6 (#2815) — **the subscription-agent kill switch: on by
     /// default, off on any value but an exact `true`.**
     ///
@@ -706,6 +710,7 @@ impl Default for AgentPortConfig {
             per_agent_limit: 480,
             per_ip_limit: 1200,
             hosted_delivery_enabled: false,
+            hosted_lease_seconds: momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT,
             subscription_agents_enabled: true,
             claude_subscription_agents_enabled: false,
             oauth: AgentPortOauthConfig::default(),
@@ -791,6 +796,13 @@ impl AgentPortConfig {
             )?,
             per_ip_limit: env_number("MOMO_AGENT_PORT_RATE_LIMIT_PER_IP", defaults.per_ip_limit)?,
             hosted_delivery_enabled: hosted_delivery_from_env(),
+            hosted_lease_seconds: momo_outbox::clamp_hosted_lease_seconds(
+                env_number::<i64>(
+                    "MOMO_AGENT_PORT_HOSTED_LEASE_MINUTES",
+                    momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT / 60,
+                )?
+                .saturating_mul(60),
+            ),
             subscription_agents_enabled: subscription_agents_from_env(),
             claude_subscription_agents_enabled: claude_subscription_agents_from_env(),
             oauth: AgentPortOauthConfig::from_env()?,

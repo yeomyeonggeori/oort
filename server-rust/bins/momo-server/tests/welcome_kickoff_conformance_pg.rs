@@ -176,6 +176,7 @@ async fn start_server_with_delivery(pool: PgPool, hosted_delivery_enabled: bool)
         per_agent_limit: 0,
         per_ip_limit: 0,
         hosted_delivery_enabled,
+        hosted_lease_seconds: momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT,
         subscription_agents_enabled: true,
         claude_subscription_agents_enabled: false,
         oauth: Default::default(),
@@ -454,6 +455,7 @@ async fn claim_hosted_welcome_jobs(
                 agent_member_id,
                 connection_id,
                 10,
+                momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT,
             )
             .await
             .map_err(momo_db::DbError::from)
