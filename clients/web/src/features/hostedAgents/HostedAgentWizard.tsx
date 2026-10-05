@@ -64,9 +64,16 @@ import {
   confirmStateGate,
   hostedLiveMessage,
   hostedStepPurpose,
+  hostedSwapRows,
+  hostedSwapStall,
   hostedStepSpec,
   hostedWizardStep,
   HOSTED_CLOSED_NOTICE,
+  HOSTED_PREVIEW_HEADLINE,
+  HOSTED_PREVIEW_NOTE,
+  HOSTED_PREVIEW_STEPS,
+  HOSTED_SWAP_DONE_NOTE,
+  HOSTED_SWAP_TITLE,
   HOSTED_WIZARD_LEAD,
   HOSTED_WIZARD_STEPS,
   HOSTED_WIZARD_TITLE,
@@ -302,15 +309,25 @@ function HostedWizardBody({
   // 않으므로 Esc 한 번이 다시 만들 수 없는 값을 확인 없이 없앤다.
   const holdingSecret = pairing !== null || issued !== null;
 
+  // 5단계에서 증명을 기다리는 동안에도 시계를 돌린다: 멈춤 안내(#3521)가 시간으로 선다.
+  const waitingForProof = awaitingProof(connection);
+  // 교체 체크리스트 표시. 서버가 알 수 없는 사람의 말이라 지역 상태이고, 연결을
+  // 바꾸면 처음으로 돌아간다(다른 연결의 표시를 이어받지 않는다).
+  const [swapTicks, setSwapTicks] = useState({ replace: false, run: false });
+  useEffect(() => {
+    setSwapTicks({ replace: false, run: false });
+  }, [selectedId]);
+  const stall = appManaged ? null : hostedSwapStall(connection, nowMs, swapTicks.replace);
+
   // 30초에 한 번 시계를 돌린다. 만료 표시가 그리는 것은 분이므로(`pairingExpiry`)
   // 초 단위로 뛰는 숫자는 읽는 사람을 재촉할 뿐이지만, 간격을 표시 단위와 같은
   // 60초로 두면 그 둘의 위상이 어긋나 라벨이 최대 1분까지 묵는다. 절반 간격이 그
   // 지연을 30초로 줄이는 동안 화면에 보이는 숫자는 여전히 분 단위로만 바뀐다.
   useEffect(() => {
-    if (pairing === null) return;
+    if (pairing === null && !waitingForProof) return;
     const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
     return () => window.clearInterval(timer);
-  }, [pairing]);
+  }, [pairing, waitingForProof]);
 
   // 서버가 "그 값은 이미 소비됐다"고 말하면 메모리 사본도 버린다. 감지된 뒤의
   // 연결 값은 죽은 문자열이고, 화면에 남겨 두면 아직 쓸 수 있는 것처럼 보인다.
@@ -629,6 +646,9 @@ function HostedWizardBody({
             agentLabel={agentLabel}
             agentHandle={agentHandle}
             issued={issued}
+            ticks={swapTicks}
+            onTicks={setSwapTicks}
+            stall={issued === null ? stall : null}
             appManaged={appManaged}
             checking={detail.isFetching}
             channelName={approvedChannelName(connection, channelInputs)}
@@ -654,6 +674,7 @@ function HostedWizardBody({
         <WizardActions
           screen={screen}
           connection={connection}
+          stalled={stall !== null && issued === null}
           // 몸통이 아직 아무 화면도 아닌 두 구간 (design-review M3-a). 고른
           // 연결의 상태를 못 읽는 동안 `resolveScreen` 은 1단계를 답하고
           // (연결이 `null` 이므로 `hostedWizardStep` 이 "identity" 다), 몸통은
@@ -944,6 +965,32 @@ function chipTone(connection: HostedAgentConnection) {
 
 // ---- 1. 이름 ----------------------------------------------------------------
 
+/** 시작 전 미리 안내(#3521): 값을 두 번 옮긴다는 사실을 1단계에서 먼저 말한다. */
+function TwoValuesPreview() {
+  return (
+    <section
+      aria-labelledby="hosted-preview-headline"
+      className="flex min-w-0 flex-col gap-2 rounded-md border border-line p-3"
+      data-testid="hosted-preview"
+    >
+      <h4 id="hosted-preview-headline" className="break-keep text-body font-medium text-ink">
+        {HOSTED_PREVIEW_HEADLINE}
+      </h4>
+      <ol className="flex min-w-0 flex-col gap-2">
+        {HOSTED_PREVIEW_STEPS.map((item) => (
+          <li key={item.id} className="flex min-w-0 flex-col gap-px">
+            <span className="break-keep text-body text-ink">
+              {item.order}: {item.label}
+            </span>
+            <span className="break-keep text-meta text-ink-muted">{item.detail}</span>
+          </li>
+        ))}
+      </ol>
+      <p className="break-keep text-meta text-ink-muted">{HOSTED_PREVIEW_NOTE}</p>
+    </section>
+  );
+}
+
 function IdentityStep({
   draft,
   setDraft,
@@ -978,6 +1025,7 @@ function IdentityStep({
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <StepHeading step="identity" />
+      <TwoValuesPreview />
       <div className="flex min-w-0 flex-col gap-3">
         <Field
           label="표시 이름"
@@ -1303,17 +1351,60 @@ function ApprovalStep({
 
 // ---- 5. 자격증명 교체과 활성 -------------------------------------------------
 
+/** 교체 체크리스트(#3521). 두 줄은 사람이 표시하고, 마지막 줄은 서버가 채운다. */
+function SwapChecklist({
+  connection,
+  ticks,
+  onTicks,
+}: {
+  connection: HostedAgentConnection;
+  ticks: { replace: boolean; run: boolean };
+  onTicks: (next: { replace: boolean; run: boolean }) => void;
+}) {
+  const rows = hostedSwapRows(connection, ticks);
+  const active = connection.status === "active";
+  const items: ChoiceListItem[] = rows.map((row) => ({
+    id: row.id,
+    label: row.label,
+    detail: "",
+    // 활성이면 전부 끝난 줄로 잠근다. 서버가 채우는 줄은 활성 전까지 눌러 볼 수 없다.
+    ...(active ? { locked: true } : row.manual ? {} : { disabled: true }),
+  }));
+  return (
+    <div className="flex min-w-0 flex-col gap-1" data-testid="hosted-swap-checklist">
+      <ChoiceList
+        name="hosted-swap"
+        legend={active ? `${HOSTED_SWAP_TITLE}: ${HOSTED_SWAP_DONE_NOTE}` : HOSTED_SWAP_TITLE}
+        multiple
+        items={items}
+        selected={rows.filter((row) => row.done && row.manual).map((row) => row.id)}
+        onChange={(next) =>
+          onTicks({ replace: next.includes("replace"), run: next.includes("run") })
+        }
+        disabled={false}
+        testId="hosted-swap-list"
+      />
+    </div>
+  );
+}
+
 function ActivationStep({
   connection,
   agentLabel,
   agentHandle,
   issued,
+  ticks,
+  onTicks,
+  stall,
   appManaged,
   checking,
   channelName,
   onRecheck,
   onDone,
 }: {
+  ticks: { replace: boolean; run: boolean };
+  onTicks: (next: { replace: boolean; run: boolean }) => void;
+  stall: { cause: string; action: string } | null;
   appManaged: boolean;
   connection: HostedAgentConnection;
   agentLabel: string;
@@ -1331,7 +1422,21 @@ function ActivationStep({
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <StepHeading step="activation" connection={connection} />
+      {!appManaged && issued === null && (
+        <SwapChecklist connection={connection} ticks={ticks} onTicks={onTicks} />
+      )}
+      {stall !== null && issued === null && (
+        <div
+          role="status"
+          className="flex min-w-0 flex-col gap-1 rounded-md border border-line-strong p-3"
+          data-testid="hosted-swap-stall"
+        >
+          <p className="break-keep text-body font-medium text-ink">{stall.cause}</p>
+          <p className="break-keep text-meta text-ink-muted">{stall.action}</p>
+        </div>
+      )}
       {issued !== null ? (
+        <>
         <OneTimeSecretCard
           headline={ACTIVE_REVEAL_HEADLINE}
           warning={ACTIVE_REVEAL_WARNING}
@@ -1342,12 +1447,18 @@ function ActivationStep({
           onDone={onDone}
           testId="hosted-active-card"
         />
+        {!appManaged && (
+          <SwapChecklist connection={connection} ticks={ticks} onTicks={onTicks} />
+        )}
+        </>
       ) : waiting ? (
         <EmptyInvite
           className="px-0"
           headline="새 자격증명으로 첫 요청이 오기를 기다리는 중이에요."
           detail={
-            appManaged
+            stall !== null
+              ? "위 안내를 따른 뒤 지금 확인을 눌러 보세요."
+              : appManaged
               ? "이 맥의 연결 값은 앱이 바꿔 뒀어요. Claude Code를 한 번 열어 첫 요청이 성공하면 활성이 돼요."
               : "AI 회사 설정의 값을 새 자격증명으로 바꾸고 커넥터나 routine을 한 번 실행하세요. 그 요청이 성공해야 활성이 돼요."
           }
@@ -1409,6 +1520,7 @@ function ActivationStep({
 function WizardActions({
   screen,
   connection,
+  stalled,
   unsettled,
   holdingSecret,
   offline,
@@ -1424,6 +1536,8 @@ function WizardActions({
 }: {
   screen: WizardScreen;
   connection: HostedAgentConnection | null;
+  /** 5단계가 멈췄다(#3521). 연결 값을 다시 발급하는 길을 함께 세운다. */
+  stalled: boolean;
   /** 몸통이 스켈레톤이거나 오류 배너다. 이 푸터는 그 위에 결정을 세우지 않는다. */
   unsettled: boolean;
   holdingSecret: boolean;
@@ -1459,7 +1573,7 @@ function WizardActions({
 
   return (
     <>
-      {(screen === "detecting" || screen === "expired") &&
+      {(screen === "detecting" || screen === "expired" || stalled) &&
         (regen.allowed ? (
           <Button
             type="button"

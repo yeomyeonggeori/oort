@@ -10,6 +10,13 @@ import {
   hostedWizardStep,
   HOSTED_ACTIVATION_DONE_PURPOSE,
   HOSTED_PAIRING_TTL_MS,
+  HOSTED_PREVIEW_HEADLINE,
+  HOSTED_PREVIEW_NOTE,
+  HOSTED_PREVIEW_STEPS,
+  HOSTED_SWAP_ITEMS,
+  HOSTED_SWAP_STALL_MS,
+  hostedSwapRows,
+  hostedSwapStall,
   HOSTED_WIZARD_STEPS,
   pairingExpiry,
   regenerateGate,
@@ -291,5 +298,91 @@ describe("RED PROOF ④ 진행 표시와 live region", () => {
       expect(sentence).not.toMatch(/momo_pair_v1|momo_agent/);
       expect(sentence.length).toBeGreaterThan(0);
     }
+  });
+});
+
+// =============================================================================
+// #3521 — 두 번째 교체 이탈 방지 (미리 안내 · 체크리스트 · 멈춤 원인).
+//
+// RED PROOF: `hostedSwapStall` 에서 시간 문턱이나 `awaitingProof` 검사를 지우면
+// 붉어지고, 문구 묶음에서 「두 번」 또는 두 값의 이름을 지우면 미리 안내 시험이 붉어진다.
+// =============================================================================
+
+const WAITING = () =>
+  connection({
+    status: "detected",
+    activeCredentialId: CREDENTIAL,
+    updatedAtMs: 1_000_000,
+  });
+
+describe("시작 전 미리 안내", () => {
+  it("값이 두 번이라는 것과 두 값의 이름을 말한다", () => {
+    expect(HOSTED_PREVIEW_HEADLINE).toContain("두 번");
+    expect(HOSTED_PREVIEW_STEPS.map((step) => step.label)).toEqual([
+      "연결 값",
+      "활성 자격증명",
+    ]);
+    expect(HOSTED_PREVIEW_NOTE).toContain("두 번째를 놓치면");
+  });
+});
+
+describe("교체 체크리스트", () => {
+  const none = { replace: false, run: false };
+
+  it("증명 대기 중에는 사람이 표시한 줄만 끝나고 마지막 줄은 서버를 기다린다", () => {
+    const rows = hostedSwapRows(WAITING(), { replace: true, run: false });
+    expect(rows.map((row) => [row.id, row.done])).toEqual([
+      ["replace", true],
+      ["run", false],
+      ["proof", false],
+    ]);
+  });
+
+  it("활성이면 표시와 무관하게 세 줄이 모두 끝난다", () => {
+    const rows = hostedSwapRows(
+      connection({ status: "active", activeCredentialId: CREDENTIAL }),
+      none
+    );
+    expect(rows.every((row) => row.done)).toBe(true);
+  });
+
+  it("마지막 줄만 사람이 표시하지 않는 줄이다", () => {
+    expect(HOSTED_SWAP_ITEMS.filter((item) => !item.manual).map((item) => item.id)).toEqual([
+      "proof",
+    ]);
+  });
+});
+
+describe("교체가 안 됐을 때의 멈춤 원인", () => {
+  const T0 = 1_000_000;
+
+  it("문턱 전에는 말하지 않는다", () => {
+    expect(hostedSwapStall(WAITING(), T0 + HOSTED_SWAP_STALL_MS - 1, false)).toBeNull();
+  });
+
+  it("문턱 뒤 교체 표시가 없으면 값을 바꾸라고 원인과 행동을 말한다", () => {
+    const stall = hostedSwapStall(WAITING(), T0 + HOSTED_SWAP_STALL_MS, false);
+    expect(stall?.cause).toContain("바꾸지 않았다면");
+    expect(stall?.cause).toContain("이미 소비");
+    expect(stall?.action).toContain("활성 자격증명으로 바꾸고");
+  });
+
+  it("교체했다고 표시했으면 다른 원인과 행동을 말한다", () => {
+    const stall = hostedSwapStall(WAITING(), T0 + HOSTED_SWAP_STALL_MS, true);
+    expect(stall?.cause).toContain("바꿨다고 표시했는데");
+    expect(stall?.action).toContain("공백");
+  });
+
+  it("증명 대기가 아니면(승인 전·활성) 멈춤이 없다", () => {
+    const later = T0 + HOSTED_SWAP_STALL_MS * 10;
+    expect(hostedSwapStall(connection({ status: "detected", updatedAtMs: T0 }), later, false)).toBeNull();
+    expect(
+      hostedSwapStall(
+        connection({ status: "active", activeCredentialId: CREDENTIAL, updatedAtMs: T0 }),
+        later,
+        false
+      )
+    ).toBeNull();
+    expect(hostedSwapStall(null, later, false)).toBeNull();
   });
 });

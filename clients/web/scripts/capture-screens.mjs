@@ -10187,9 +10187,9 @@ async function captureHostedPairingScenes(browser, scheme) {
    * 않는 화면은 한 장으로 리뷰될 수 없다: 접힌 아래는 존재하지 않는 것처럼 보이고,
    * 리뷰는 자기가 보지 못한 것을 지적하지 못한다.
    */
-  async function shoot(name, install, settle, frames = []) {
+  async function shoot(name, install, settle, frames = [], viewport = VIEWPORT) {
     const context = await browser.newContext({
-      viewport: VIEWPORT,
+      viewport,
       deviceScaleFactor: 2,
       colorScheme: scheme,
       reducedMotion: "reduce",
@@ -10313,26 +10313,102 @@ async function captureHostedPairingScenes(browser, scheme) {
     ]
   );
 
-  // 5단계 앞면. 승인은 끝났고 증명이 아직 안 왔다.
-  await shoot(
-    "awaiting-proof",
-    listWith(
-      hostedConnection({
-        status: "detected",
-        activeCredentialId: HOSTED_CREDENTIAL_ID,
-        approvedChannelIds: [GENERAL_ID],
-        approvedScopes: [
-          "agent:port:connect",
-          "agent:inbox:read",
-          "messages:write",
-        ],
-      })
-    ),
+  // 5단계 앞면 + 시작 전 미리 안내 + 교체 체크리스트 + 멈춤 안내 (#3521).
+  // 폭을 바꿔 세 번(1280 기본, 1440, 420) 찍는다. 페이지 시계가 FIXTURE_NOW 로
+  // 얼어 있어, 멈춤 문턱은 `updatedAtMs` 가 얼마나 오래됐는가로만 갈린다.
+  const proofConnection = (updatedAtMs) =>
+    hostedConnection({
+      status: "detected",
+      activeCredentialId: HOSTED_CREDENTIAL_ID,
+      approvedChannelIds: [GENERAL_ID],
+      approvedScopes: ["agent:port:connect", "agent:inbox:read", "messages:write"],
+      updatedAtMs,
+    });
+  const openProof = async (page) => {
+    await sceneClick(page, page.getByTestId("hosted-wizard-resume"));
+    await page.getByTestId("hosted-awaiting-proof").waitFor({ state: "visible" });
+  };
+  const tickReplace = [
+    "ticked",
     async (page) => {
-      await sceneClick(page, page.getByTestId("hosted-wizard-resume"));
-      await page.getByTestId("hosted-awaiting-proof").waitFor({ state: "visible" });
+      await page.locator("#hosted-swap-replace").check();
+      await page.waitForTimeout(100);
+    },
+  ];
+  for (const [sfx, vp] of [
+    ["", VIEWPORT],
+    ["-1440", { width: 1440, height: 900 }],
+    ["-420", { width: 420, height: 860 }],
+  ]) {
+    // 1단계: 시작 전 미리 안내가 첫 화면에 선다.
+    if (sfx !== "") {
+      await shoot(
+        `identity${sfx}`,
+        emptyList,
+        (page) => page.getByTestId("hosted-preview").waitFor({ state: "visible" }),
+        [],
+        vp
+      );
     }
-  );
+    // 5단계 앞면: 교체 직후(멈춤 전). 표시 전, 표시 후 두 프레임.
+    await shoot(
+      `awaiting-proof${sfx}`,
+      listWith(proofConnection(FIXTURE_NOW - 60_000)),
+      openProof,
+      [[`awaiting-proof-ticked${sfx}`, tickReplace[1]]],
+      vp
+    );
+    // 5단계 멈춤: 교체 표시가 없고 오래됐다 / 표시했는데도 오래됐다.
+    await shoot(
+      `swap-stall${sfx}`,
+      listWith(proofConnection(1_700_000_000_000)),
+      async (page) => {
+        await openProof(page);
+        await page.getByTestId("hosted-swap-stall").waitFor({ state: "visible" });
+      },
+      [[`swap-stall-ticked${sfx}`, tickReplace[1]]],
+      vp
+    );
+  }
+
+  // 5단계: 방금 발급된 활성 자격증명 카드 아래의 교체 체크리스트 (#3521).
+  for (const [sfx, vp] of [
+    ["", VIEWPORT],
+    ["-420", { width: 420, height: 860 }],
+  ]) {
+    await shoot(
+      `swap-issued${sfx}`,
+      async (context) => {
+        const detected = hostedConnection({
+          status: "detected",
+          approvedChannelIds: [],
+          approvedScopes: [],
+        });
+        await listWith(detected)(context);
+        await context.route(
+          "**/v1/workspaces/*/hosted-agent-connections/*/confirm",
+          (route) =>
+            json(route, {
+              connection: proofConnection(FIXTURE_NOW),
+              credentialId: HOSTED_CREDENTIAL_ID,
+              credential: "oort_ac_capture_example_value",
+              tokenType: "bearer",
+            })
+        );
+      },
+      async (page) => {
+        await sceneClick(page, page.getByTestId("hosted-wizard-resume"));
+        await page.getByTestId("hosted-consequence").waitFor({ state: "visible" });
+        await page.getByTestId("hosted-channels").getByRole("checkbox").first().check();
+        await sceneClick(page, page.getByTestId("hosted-confirm"));
+        await page.getByTestId("hosted-active-card").waitFor({ state: "visible" });
+        await page.getByTestId("hosted-swap-checklist").scrollIntoViewIfNeeded();
+        await page.waitForTimeout(200);
+      },
+      [],
+      vp
+    );
+  }
 
   // 5단계 뒷면. 활성 + 테스트 멘션.
   await shoot(

@@ -375,3 +375,131 @@ export const HOSTED_WIZARD_LEAD =
  */
 export const HOSTED_CLOSED_NOTICE =
   "이 연결은 해제 절차에 들어갔어요. 남은 정리는 에이전트 화면의 연결 탭에서 이어서 해요.";
+
+// ---- 시작 전 미리 안내 · 자격증명 교체 체크리스트 · 멈춤 원인 (#3521) -------------
+//
+// 이 마법사에서 가장 많이 이탈하는 자리는 5단계의 두 번째 교체다(AT-7 점검 마찰
+// 1·2). 값이 둘이라는 사실을 사람은 5단계에 와서야 처음 듣고, 그래서 첫 번째
+// 연결 값만 붙인 채 4단계 승인 뒤에 멈춘다. 세 문구 묶음은 모두 그 한 사건을
+// 겨냥한다: 미리 말하고(1단계), 하는 중에 보이게 하고(5단계), 놓쳤을 때 이름을
+// 붙여 알린다(5단계가 길어질 때).
+
+/** 1단계 머리에 서는 한 줄. 몇 번 붙여 넣는지가 핵심이라 숫자로 말한다. */
+export const HOSTED_PREVIEW_HEADLINE = "두 번 붙여 넣어요: 연결 값, 그다음 활성 자격증명";
+
+export interface HostedPreviewStep {
+  id: "pairing" | "credential";
+  /** 몇 번째 값인가. */
+  order: string;
+  label: string;
+  detail: string;
+}
+
+export const HOSTED_PREVIEW_STEPS: readonly HostedPreviewStep[] = [
+  {
+    id: "pairing",
+    order: "첫 번째",
+    label: "연결 값",
+    detail: "2단계에서 받아 AI 회사 설정에 붙여 넣어요.",
+  },
+  {
+    id: "credential",
+    order: "두 번째",
+    label: "활성 자격증명",
+    detail: "승인한 뒤 5단계에서 받아, 연결 값을 이 값으로 바꿔요.",
+  },
+];
+
+export const HOSTED_PREVIEW_NOTE =
+  "두 번째를 놓치면 승인 뒤에 멈춘 채 활성이 되지 않아요.";
+
+export type HostedSwapItemId = "replace" | "run" | "proof";
+
+export interface HostedSwapItem {
+  id: HostedSwapItemId;
+  label: string;
+  /** 사람이 직접 표시하는 줄인가. `false` 면 서버 상태가 채운다. */
+  manual: boolean;
+}
+
+export const HOSTED_SWAP_TITLE = "교체 체크리스트";
+
+export const HOSTED_SWAP_ITEMS: readonly HostedSwapItem[] = [
+  {
+    id: "replace",
+    label: "AI 회사 설정의 연결 값을 이 자격증명으로 바꿨어요",
+    manual: true,
+  },
+  { id: "run", label: "커넥터나 routine을 한 번 실행했어요", manual: true },
+  { id: "proof", label: "첫 요청이 성공해 활성이 됐어요", manual: false },
+];
+
+export const HOSTED_SWAP_DONE_NOTE = "교체가 끝났고 첫 요청도 성공했어요.";
+
+export interface HostedSwapTicks {
+  replace: boolean;
+  run: boolean;
+}
+
+export interface HostedSwapRow extends HostedSwapItem {
+  done: boolean;
+}
+
+/**
+ * 체크리스트의 각 줄이 끝났는가.
+ *
+ * 마지막 줄은 사람이 표시하지 않는다: 활성은 서버만 아는 사실이다. 활성이면 앞의
+ * 두 줄도 반드시 일어난 일이므로(증명이 새 자격증명으로 왔다) 표시 여부와 무관하게
+ * 끝으로 본다. 화면을 닫았다 다시 열어 표시가 사라져도 활성 연결이 빈 칸으로
+ * 보이지 않게 하는 것이 이유다.
+ */
+export function hostedSwapRows(
+  connection: HostedAgentConnection | null,
+  ticks: HostedSwapTicks
+): HostedSwapRow[] {
+  const active = connection?.status === "active";
+  return HOSTED_SWAP_ITEMS.map((item) => ({
+    ...item,
+    done: active ? true : item.id === "proof" ? false : ticks[item.id],
+  }));
+}
+
+/** 연결이 마지막으로 바뀐 뒤(승인으로 자격증명을 발급한 시각) 이만큼 증명이 없으면 멈춘 것으로 본다. */
+export const HOSTED_SWAP_STALL_MS = 3 * 60 * 1000;
+
+export interface HostedSwapStall {
+  /** 왜 멈췄을 가능성이 높은가. */
+  cause: string;
+  /** 지금 무엇을 하면 되는가. */
+  action: string;
+}
+
+/**
+ * 5단계가 길어지는데 증명이 오지 않을 때의 원인과 다음 행동.
+ *
+ * 서버는 거절 사유를 상태로 내주지 않으므로(AT-7 제안 3은 서버 변경이다) 이 판정은
+ * 사람이 남긴 표시와 시간으로만 말한다. 그래서 단정하지 않고 가장 흔한 원인을
+ * 앞에 둔다. 교체했다고 표시한 사람과 안 한 사람의 다음 행동이 달라 문장이 둘이다.
+ */
+export function hostedSwapStall(
+  connection: HostedAgentConnection | null,
+  nowMs: number,
+  replaced: boolean
+): HostedSwapStall | null {
+  if (!awaitingProof(connection) || connection === null) return null;
+  if (nowMs - connection.updatedAtMs < HOSTED_SWAP_STALL_MS) return null;
+  if (!replaced) {
+    return {
+      cause:
+        "아직 AI 회사 설정의 값을 바꾸지 않았다면 그 때문일 수 있어요. 처음 붙인 연결 값은 이미 소비돼 활성이 되지 않아요. 위 표시는 창을 닫으면 사라져요.",
+      action:
+        "AI 회사 설정을 열어 값을 이 연결에서 받은 활성 자격증명으로 바꾸고, 커넥터나 routine을 한 번 실행하세요. 자격증명을 잃어버렸다면 연결 값을 다시 발급해 처음부터 진행하세요.",
+    };
+  }
+  return {
+    cause:
+      "바꿨다고 표시했는데 첫 요청이 오지 않아요. 붙인 값이 잘렸거나, 커넥터나 routine이 아직 실행되지 않았을 수 있어요.",
+    action:
+      "붙인 값 앞뒤에 공백이 없는지 보고 커넥터나 routine을 한 번 더 실행한 뒤 지금 확인을 누르세요. 그래도 안 되면 연결 값을 다시 발급하세요.",
+  };
+}
