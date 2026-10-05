@@ -10313,6 +10313,39 @@ async function captureHostedPairingScenes(browser, scheme) {
     ]
   );
 
+  // 3단계: 만료 카운트다운과 오지 않는 원인 후보 (#3522). 페이지 시계가
+  // FIXTURE_NOW 로 얼어 있어 남은 시간은 `updatedAtMs` 가 얼마나 오래됐는가로만 갈린다
+  // (발급 응답 없이 연 화면이라 근사 출처). 위 프레임은 카운트다운, 아래 프레임은 원인 목록.
+  const scrollCauses = [
+    "causes",
+    async (page) => {
+      await page.getByTestId("hosted-detect-causes").locator("summary").click();
+      await page.getByTestId("hosted-detect-causes").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(100);
+    },
+  ];
+  for (const [sfx, vp] of [
+    ["-1440", { width: 1440, height: 900 }],
+    ["-420", { width: 420, height: 860 }],
+  ]) {
+    for (const [tag, ageMs] of [
+      ["countdown", 5 * 60_000],
+      ["urgent", 13 * 60_000],
+      ["timeout", 16 * 60_000],
+    ]) {
+      await shoot(
+        `detect-${tag}${sfx}`,
+        listWith(hostedConnection({ updatedAtMs: FIXTURE_NOW - ageMs })),
+        async (page) => {
+          await sceneClick(page, page.getByTestId("hosted-wizard-resume"));
+          await page.getByTestId("hosted-detect-countdown").waitFor({ state: "visible" });
+        },
+        tag === "countdown" ? [[`detect-causes${sfx}`, scrollCauses[1]]] : [],
+        vp
+      );
+    }
+  }
+
   // 5단계 앞면 + 시작 전 미리 안내 + 교체 체크리스트 + 멈춤 안내 (#3521).
   // 폭을 바꿔 세 번(1280 기본, 1440, 420) 찍는다. 페이지 시계가 FIXTURE_NOW 로
   // 얼어 있어, 멈춤 문턱은 `updatedAtMs` 가 얼마나 오래됐는가로만 갈린다.
