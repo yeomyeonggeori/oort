@@ -1024,6 +1024,36 @@ async fn a_closed_instance_gate_refuses_hosted_work_requests() {
     );
     assert_eq!(snapshot(&su, f.workspace).await, before, "gate closed");
 
+    // Gateway off AND gate closed: nobody can take a work run, answered before
+    // any transaction (the pre-#3515 fast path), whoever asks.
+    let dark = start_server(
+        momo_app_pool().await,
+        Knobs {
+            hosted_delivery_enabled: false,
+            gateway_mode: false,
+            ..Knobs::open()
+        },
+    )
+    .await;
+    for jwt in [&f.human_jwt, &f.outsider_jwt] {
+        let (status, body) = post_run(
+            &client,
+            &dark,
+            &f,
+            jwt,
+            f.channel,
+            f.hosted_agent,
+            Uuid::new_v4(),
+        )
+        .await;
+        assert_eq!(status, 409, "{body}");
+        assert!(
+            body.to_string().contains("BYOA agent gateway"),
+            "all-off answer: {body}"
+        );
+    }
+    assert_eq!(snapshot(&su, f.workspace).await, before, "all off");
+
     // The same fixture on an open server accepts the request: the gate was the
     // only thing in the way.
     let open = start_server(momo_app_pool().await, Knobs::open()).await;

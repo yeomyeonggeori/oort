@@ -143,6 +143,16 @@ pub async fn create(
         state.agent_port.config.claude_subscription_agents_enabled;
     let hosted_delivery_enabled = state.agent_port.config.hosted_delivery_enabled;
     let gateway_enabled = state.agent_gateway.enabled();
+    // With the managed gateway off AND hosted delivery closed no agent can take
+    // a work run, so the answer needs no transaction (the pre-#3515 fast path,
+    // and the same precedence over the membership/agent lookups). When either
+    // is on, the per-agent selector inside the transaction decides.
+    if !gateway_enabled && !hosted_delivery_enabled {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "work runs require an enabled BYOA agent gateway",
+        ));
+    }
 
     let outcome = settle_db(
         "agent_runs.create",
