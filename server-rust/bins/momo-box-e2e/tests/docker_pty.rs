@@ -79,19 +79,23 @@ async fn eventually<T>(what: &str, timeout: Duration, mut probe: impl FnMut() ->
     }
 }
 
-async fn box_state(world: &World, bearer: &str) -> Option<String> {
-    let (_, mine) = world.get("/cloud-boxes/mine", bearer).await;
-    mine["box"]["state"].as_str().map(str::to_string)
+async fn box_state(world: &World, bearer: &str) -> (Option<String>, Value) {
+    let (status, mine) = world.get("/cloud-boxes/mine", bearer).await;
+    (mine["box"]["state"].as_str().map(str::to_string), json!({ "status": status, "body": mine }))
 }
 
-async fn wait_state(world: &World, bearer: &str, want: &str, timeout: Duration) {
+/// Wait for the box to reach `want`; on a timeout say what the server answered and what the runner printed.
+async fn wait_state(world: &World, bearer: &str, want: &str, timeout: Duration, runner_log: &Mutex<String>) {
     let deadline = Instant::now() + timeout;
     loop {
-        let state = box_state(world, bearer).await;
+        let (state, raw) = box_state(world, bearer).await;
         if state.as_deref() == Some(want) {
             return;
         }
-        assert!(Instant::now() < deadline, "the box never reached `{want}` (last: {state:?})");
+        if Instant::now() >= deadline {
+            eprintln!("RUNNER LOG:\n{}", runner_log.lock().unwrap());
+            panic!("the box never reached `{want}` (last: {state:?}, server said {raw})");
+        }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
@@ -165,8 +169,27 @@ async fn a_real_box_started_by_the_real_runner_serves_the_blind_relay() {
     assert_eq!(status, 201, "{body}");
     let credential = body["credential"].as_str().unwrap().to_string();
     std::fs::write(work.join("credential"), format!("{credential}\n")).unwrap();
+    // The runner's own URL must be https, or http to a loopback host (a dev-only switch). Inside the VM the server is
+    // not on loopback, so a forwarder in the VM (a copy of socat under the runner's directory, so cleanup finds it)
+    // makes it so; the BOXES, which dial `boxServerUrl`, reach this machine directly.
+    let port = world.base.rsplit(':').next().unwrap().to_string();
+    let (ok, out) = vm_sudo(&format!("install -d -m 0755 {runner_dir} && cp /usr/bin/socat {runner_dir}/socat"));
+    assert!(ok, "{out}");
+    let mut forwarder = tokio::process::Command::new("colima")
+        .args([
+            "ssh", "--", "sudo", &format!("{runner_dir}/socat"),
+            &format!("TCP-LISTEN:{port},bind=127.0.0.1,fork,reuseaddr"),
+            &format!("TCP:{host}:{port}"),
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("start the forwarder in the VM");
+    tokio::time::sleep(Duration::from_secs(1)).await;
     let config = json!({
-        "serverUrl": external,
+        "serverUrl": format!("http://127.0.0.1:{port}"),
         "allowInsecureLoopback": true,
         "workspaceId": world.workspace,
         "credentialFile": format!("{runner_dir}/credential"),
@@ -228,7 +251,7 @@ async fn a_real_box_started_by_the_real_runner_serves_the_blind_relay() {
 
     // ---- the box comes up on its own: create → register (MAC) → attest → listen -------------------------------------
     step!("the runner creates the box container; the agent registers, the runner attests, the agent listens");
-    wait_state(&world, &world.owner.access, "running", Duration::from_secs(120)).await;
+    wait_state(&world, &world.owner.access, "running", Duration::from_secs(120), &runner_log).await;
     let bundle = wait_agent(&world, box_id, &world.owner.access, true, Duration::from_secs(120)).await;
     let host_key_first = bundle["host"]["publicKey"].clone();
     let name = format!("momo-m4-{box_id}");
@@ -324,7 +347,7 @@ async fn a_real_box_started_by_the_real_runner_serves_the_blind_relay() {
     step!("stop and start: same host key, no new registration, nonces and sealed key on the key mount");
     let (status, _) = world.post(&format!("/cloud-boxes/{box_id}/stop"), &world.owner.access, json!({})).await;
     assert_eq!(status, 200);
-    wait_state(&world, &world.owner.access, "stopped", Duration::from_secs(60)).await;
+    wait_state(&world, &world.owner.access, "stopped", Duration::from_secs(60), &runner_log).await;
     eventually("the container to stop", Duration::from_secs(60), || {
         let (_, state) = docker(&["inspect", "--format", "{{.State.Running}}", &name]);
         (state.trim() == "false").then_some(())
@@ -336,7 +359,7 @@ async fn a_real_box_started_by_the_real_runner_serves_the_blind_relay() {
     assert!(listing.contains("oort-hostkey-sealed-v1"), "the host key at rest is sealed: {listing}");
     let (status, _) = world.post(&format!("/cloud-boxes/{box_id}/start"), &world.owner.access, json!({})).await;
     assert_eq!(status, 200);
-    wait_state(&world, &world.owner.access, "running", Duration::from_secs(60)).await;
+    wait_state(&world, &world.owner.access, "running", Duration::from_secs(60), &runner_log).await;
     let bundle = wait_agent(&world, box_id, &world.owner.access, true, Duration::from_secs(120)).await;
     assert_eq!(bundle["host"]["publicKey"], host_key_first, "the host key survived the stop");
     let mut conn = target.attach(&client, &owner_device).await.expect("the SAME pin attaches after a restart");
@@ -408,6 +431,7 @@ async fn a_real_box_started_by_the_real_runner_serves_the_blind_relay() {
     let runner_text = runner_log.lock().unwrap().clone();
     assert!(!runner_text.contains(&credential));
     let _ = runner.start_kill();
+    let _ = forwarder.start_kill();
     step!("done");
 }
 

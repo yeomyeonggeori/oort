@@ -4,6 +4,7 @@
 - 계약: [ADR-0197](../../adr/0197-personal-cloud-workspace.md) D5 PTY 레인, 위협 T1·T7·T9·T11, 구현 계획 S2 ①~④
 - 코드: `server-rust/crates/momo-blind-pty/` (시험 전용 라이브러리, 어떤 bin·라우트도 의존하지 않음)
 - 2026-10-05 갱신(M3, #3501): 의존자는 박스 쪽 끝점 `momo-box-agent` **하나뿐**이다(`tests/isolation.rs`가 `momo-server`·`momo-relay`·`momo-workd` 등 나머지 멤버의 의존을 계속 거부한다). 서버 라우트(M4)는 이 크레이트가 아니라 바이트를 전달한다.
+- 2026-10-05 갱신(M4, #3511): 아래 「M4 착수 조건」 7개의 처리는 [ADR-0197 증보 2](../../adr/0197-personal-cloud-workspace.md)(Proposed)에 있다. ① 소유자 첫 목록은 서버에서 내려받지 않는다(`trust-bundle`에 없음, 새 기기는 대면) — 런너가 지문으로 서명자를 고정하는 부분과 ④의 목록 갱신 푸시·폐기 반영은 **이 PR에 없다**(후속). ② 감사의 타입 상태는 `momo-box-e2e`가 실제 라우트로 다시 잠근다. ③ 박스 생성 서명은 `cloud_box_owner_list`(R2 서명 필수). ⑤ 서버 판단을 건너뛴 세션(허가 없이 허브에서 연 세션)에서도 box-agent가 막는다. ⑥ 상한은 `RelayLimits`·`BoxLimits`. ⑦ 실제 라우트에 같은 표식 방식(로그·카운터·pg_dump), 프로세스 코어 덤프 끔. 이 문서의 N1(폐기 경합)·N2(낡은 목록)는 ④와 함께 후속이다.
 - 표기: [V] 이 세션에서 실행해 확인 · **runtime-unverified** 실제 WebSocket·TLS·Railway·실기기 Secure Enclave는 실행하지 않음
 
 ## 한 줄 결론

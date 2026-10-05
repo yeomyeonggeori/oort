@@ -52,7 +52,8 @@ check() { local desc="$1"; shift; if "$@"; then ok "$desc"; else bad "$desc"; fi
 vm() { colima ssh -- "$@"; }
 
 cleanup() {
-  vm sudo pkill -f "$RUNNER_DIR/momo-box-runner" >/dev/null 2>&1
+  # The runner and the forwarder both run from the runner dir. ([v] keeps pkill from matching its own command line.)
+  vm sudo pkill -f "[${RUNNER_DIR:0:1}]${RUNNER_DIR:1}/" >/dev/null 2>&1
   # Only momo-m4-* objects, never anything else on a shared Colima.
   # shellcheck disable=SC2046
   docker rm -f $(docker ps -aq --filter name=momo-m4-) >/dev/null 2>&1

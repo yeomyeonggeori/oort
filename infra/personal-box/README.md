@@ -107,18 +107,20 @@ infra/personal-box/verify-m3.sh --self-test          # GREEN + 세 sabotage 모�
 | 파일 | 역할 |
 |---|---|
 | `Dockerfile.agent` | S3 이미지 위에 **세 파일만** 얹어요: `momo-box-agent`, `momo-box-agent-entry`, `momo-box-volume-shred`. `momo-box-probe`는 이미지에 없어요 |
-| `momo-box-agent-entry` | root(`CAP_SETUID`·`CAP_SETGID`만)로 시작해 seal 키·host 키를 만들고 에이전트를 uid 10002 + 그 두 ambient capability로 띄워요(M3의 `momo-m3-entry`와 같은 모양, 시험 도구 없이) |
+| `momo-box-agent-entry` | root(`CAP_SETUID`·`CAP_SETGID`만)로 시작해 런너의 봉인 키를 tmpfs에 설치하고(없으면 새로 만들어요) host 키를 만들고 에이전트를 uid 10002 + 그 두 ambient capability로 띄워요(M3의 `momo-m3-entry`와 같은 모양, 시험 도구 없이). 에이전트가 종료 코드 75(spawn helper가 죽음)로 나가면 다시 띄워요(M4) |
 | `momo-box-volume-shred` | 박스 볼륨 하나(`/v`)의 파일을 덮어쓰고 지워요. 네트워크 없는 일회용 컨테이너에서만 돌고 아무것도 읽지 않아요 |
 | `build-image.sh` | S3 이미지 + 에이전트(release, `rust:1-bookworm`에서 빌드)로 런너의 이미지를 만들고 이미지 ID를 출력해요 |
 | `verify-m2.sh` | 이미지 검사 + 실제 Docker e2e(`server-rust/bins/momo-server/tests/box_runner_e2e.rs`). `--image-only`, `--sabotage probe`, `--self-test` |
+| `verify-m4.sh` | M4: 이미지 검사 + **진짜 박스 컨테이너**(Colima VM에서 root로 도는 진짜 런너가 만든)와 서버 중계·소유자 기기의 e2e(`server-rust/bins/momo-box-e2e/tests/docker_pty.rs`). `--image-only`, `--sabotage probe\|mount-flags`, `--self-test` |
 
 런너의 박스 템플릿(`template.rs`)은 S3 하드닝에 M3의 두 가지 차이를 더한 것이에요. **박스 볼륨이 유일한 마운트**(이름 있는 볼륨 하나를 `/home/box`에)이고 나머지는 전부 tmpfs예요. 한도는 컨트롤의 네 숫자(CPU·메모리·디스크·PID)이고 `--memory-swap`=메모리, `--cpus`, `--pids-limit`이 그대로 적용돼요. 이미지·이름·네트워크·DNS는 런너 로컬 설정에만 있어요.
 
-**M2가 M3에서 확인한 격차 (런북 6번):** host 키 저장소는 키 디렉터리가 `nosuid,nodev` 마운트이길 요구하지만 Docker 볼륨은 그렇게 마운트되지 않아요(실측). 그래서 host 키와 seal 키는 M4/H5 전까지 시작마다 새로 만들어지는 tmpfs에 있어요. 등록·페어링이 붙기 전이라 잃을 신원은 없어요.
+**M2가 M3에서 확인한 격차는 M4에서 닫았어요 (런북 4.2):** host 키 저장소는 키 디렉터리가 `nosuid,nodev` 마운트이길 요구하지만 Docker 볼륨은 그렇게 마운트되지 않아요(실측). 런너 설정에 `hostKeyRoot`(호스트가 `nosuid,nodev`로 마운트한 전용 파일시스템)가 있으면 박스마다 `<root>/<박스 id>`를 `/var/lib/oort-box`에 바인드하고, 런너의 inject 디렉터리(`/run/oort-runner`, 읽기 전용: 봉인 키·1회용 페어링 코드·소유자 첫 목록)와 함께 박스의 마운트는 **볼륨·inject·키 디렉터리 셋뿐**이에요(`hostKeyRoot`가 없으면 둘). `hostKeyRoot`가 없으면 M2처럼 tmpfs예요.
 
 ```bash
 infra/personal-box/build-image.sh                         # 이미지 ID 출력
 infra/personal-box/verify-m2.sh --image-only              # 이미지 검사 (PG 불필요)
 infra/personal-box/verify-m2.sh                           # + e2e (격리 PG 18 필요: DATABASE_URL, PG*)
 infra/personal-box/verify-m2.sh --self-test               # GREEN + sabotage(probe) RED
+infra/personal-box/verify-m4.sh --self-test               # M4: GREEN + sabotage(probe, mount-flags) RED (Colima + PG 필요)
 ```
