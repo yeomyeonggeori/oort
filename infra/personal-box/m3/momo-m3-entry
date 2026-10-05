@@ -1,0 +1,17 @@
+#!/bin/sh
+# M3 test entry — stands in for what the M2 runner does at box start, inside the container:
+# the container starts as root with ONLY CAP_SETUID/CAP_SETGID (everything else dropped,
+# no-new-privileges, read-only rootfs); this script starts momo-box-agent at the agent uid with
+# those two capabilities as ambient, so the agent can later start the person's PTY at uid 10001
+# and strip every capability from it. Root itself never runs the agent or any user code.
+set -eu
+umask 077
+AGENT_UID="${MOMO_M3_AGENT_UID:-10002}"
+AS_AGENT="setpriv --reuid $AGENT_UID --regid $AGENT_UID --clear-groups --inh-caps +setuid,+setgid --ambient-caps +setuid,+setgid --"
+# Runner stand-in: the per-box seal key lives on its own tmpfs, never on the key volume.
+# shellcheck disable=SC2086
+$AS_AGENT momo-box-probe make-seal-key "$OORT_BOX_SEAL_KEY_FILE"
+# shellcheck disable=SC2086
+$AS_AGENT momo-box-agent init-key
+# shellcheck disable=SC2086
+exec $AS_AGENT momo-box-agent run

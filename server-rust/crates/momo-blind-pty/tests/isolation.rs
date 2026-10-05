@@ -1,5 +1,9 @@
-//! The spike must stay unreachable from production: no other workspace member
-//! may depend on it (ADR-0197 S2 "not wired into production routes").
+//! The blind-relay protocol crate stays unreachable from every production
+//! route: exactly one workspace member may depend on it, the box-side endpoint
+//! `momo-box-agent` (ADR-0197 M3). `momo-server`, `momo-relay`, `momo-workd` and
+//! every other member must not (S2 "not wired into production routes"; the
+//! server relays opaque frames and never holds protocol state, and workd opens
+//! no PTY, ADR-0190 D1). The relay route (M4) carries bytes, not this crate.
 
 use std::fs;
 use std::path::Path;
@@ -16,8 +20,19 @@ fn manifests(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
     }
 }
 
+/// The only members allowed to depend on the protocol crate (directory names).
+const ALLOWED_DEPENDENTS: &[&str] = &["momo-box-agent"];
+
+fn member_name(manifest: &Path) -> String {
+    manifest
+        .parent()
+        .and_then(Path::file_name)
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
 #[test]
-fn no_other_workspace_member_depends_on_the_spike_crate() {
+fn only_the_box_agent_depends_on_the_protocol_crate() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut ms = vec![];
     manifests(&root.join("crates"), &mut ms);
@@ -33,10 +48,33 @@ fn no_other_workspace_member_depends_on_the_spike_crate() {
         .filter(|m| m.canonicalize().ok() != own.canonicalize().ok())
     {
         let text = fs::read_to_string(&m).unwrap();
+        let depends = text
+            .lines()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .any(|l| l.contains("momo-blind-pty"));
+        if ALLOWED_DEPENDENTS.contains(&member_name(&m).as_str()) {
+            continue;
+        }
         assert!(
-            !text.contains("momo-blind-pty"),
-            "{} depends on the S2 spike crate",
+            !depends,
+            "{} depends on the blind-relay protocol crate; only {ALLOWED_DEPENDENTS:?} may",
             m.display()
         );
     }
+}
+
+#[test]
+fn the_box_agent_is_the_dependent_this_test_expects() {
+    // Positive control: the allowlisted member really depends on the crate,
+    // so the allowlist cannot silently go stale (a renamed member would
+    // otherwise leave the test checking nothing about the one allowed edge).
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let manifest = root.join("bins/momo-box-agent/Cargo.toml");
+    let text = fs::read_to_string(&manifest).expect("momo-box-agent manifest");
+    assert!(
+        text.lines()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .any(|l| l.contains("momo-blind-pty")),
+        "momo-box-agent must depend on momo-blind-pty"
+    );
 }

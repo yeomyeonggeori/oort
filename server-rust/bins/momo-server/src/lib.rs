@@ -54,9 +54,9 @@ use axum::Router;
 use momo_db::PgPool;
 
 use crate::config::{
-    AgentGatewaySettings, AgentPortConfig, CorsConfig, DeviceKeySettings, EphemeralSettings,
-    LiveKitConfig, MentionSettings, RateLimitConfig, RealtimeSettings, SettingsConfig, T3Settings,
-    WebhookSettings,
+    AgentGatewaySettings, AgentPortConfig, CloudBoxConfig, CorsConfig, DeviceKeySettings,
+    EphemeralSettings, LiveKitConfig, MentionSettings, RateLimitConfig, RealtimeSettings,
+    SettingsConfig, T3Settings, WebhookSettings,
 };
 use crate::error::ApiError;
 use crate::rate_limit::SlidingWindowRateLimiter;
@@ -203,6 +203,9 @@ pub struct AppState {
     /// ADR-0146 개정 2026-09-28 (#3022): the instance id signed statements echo
     /// and the (default-off) host-registration signature requirement.
     pub device_keys: Arc<DeviceKeySettings>,
+    /// ADR-0197 M1 (#3500): the personal cloud box API. **Closed** unless
+    /// [`AppState::with_cloud_box`] opens it.
+    pub cloud_box: Arc<CloudBoxConfig>,
     /// MOMO-605 CORS origin allowlist (ADR-0133 P2). Fail-closed-empty like the
     /// rest: an instance that named no origin mounts no CORS middleware at all,
     /// which is byte-for-byte today's behaviour.
@@ -293,6 +296,7 @@ impl AppState {
             agent_port: Arc::new(AgentPortState::default()),
             mentions: Arc::new(MentionSettings::default()),
             device_keys: Arc::new(DeviceKeySettings::default()),
+            cloud_box: Arc::new(CloudBoxConfig::default()),
             cors: Arc::new(CorsConfig::default()),
             ephemeral: Arc::new(EphemeralState::default()),
             webhook: Arc::new(WebhookSettings::default()),
@@ -473,6 +477,12 @@ impl AppState {
     /// host-registration signature requirement.
     pub fn with_device_keys(mut self, settings: DeviceKeySettings) -> Self {
         self.device_keys = Arc::new(settings);
+        self
+    }
+
+    /// Attach the personal-cloud-box switch (#3500). Default: closed.
+    pub fn with_cloud_box(mut self, config: CloudBoxConfig) -> Self {
+        self.cloud_box = Arc::new(config);
         self
     }
 
@@ -1274,6 +1284,32 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/personal-keys/{key}/agent",
             post(routes::personal_links::create_agent),
+        )
+        // #3500 (ADR-0197 M1) — 개인 클라우드 박스 수명주기. 기본 닫힘(MOMO_CLOUD_BOX_ENABLED).
+        // 만들기·켜기·계속 켜 둠은 박스 주인만, 정지·삭제·전체 목록은 주인 또는 워크스페이스 관리자.
+        .route(
+            "/v1/workspaces/{ws}/cloud-boxes",
+            post(routes::cloud_boxes::create).get(routes::cloud_boxes::list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/cloud-boxes/mine",
+            get(routes::cloud_boxes::mine),
+        )
+        .route(
+            "/v1/workspaces/{ws}/cloud-boxes/{box}/start",
+            post(routes::cloud_boxes::start),
+        )
+        .route(
+            "/v1/workspaces/{ws}/cloud-boxes/{box}/stop",
+            post(routes::cloud_boxes::stop),
+        )
+        .route(
+            "/v1/workspaces/{ws}/cloud-boxes/{box}/delete",
+            post(routes::cloud_boxes::delete),
+        )
+        .route(
+            "/v1/workspaces/{ws}/cloud-boxes/{box}/keep-awake",
+            post(routes::cloud_boxes::keep_awake),
         )
         .route("/v1/workspaces/{ws}/agents", post(routes::agents::create))
         // HAP-E1 — human owner/admin lifecycle for generic per-agent bearer

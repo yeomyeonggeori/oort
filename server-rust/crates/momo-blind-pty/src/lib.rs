@@ -1,4 +1,6 @@
-//! ADR-0197 S2 (#3409): blind-relay PTY prototype. **Test-only, not wired into any route.**
+//! ADR-0197 S2 (#3409): blind-relay PTY protocol. **Not wired into any server route**;
+//! since M3 (#3501) its one production dependent is the box-side endpoint
+//! `momo-box-agent` (see `tests/isolation.rs`).
 //!
 //! Three parties: the owner **device** (P-256 ECDSA key, ADR-0146 R2), the
 //! **box-agent** (Ed25519 host key, attested by the runner's Ed25519 key and

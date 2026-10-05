@@ -6163,3 +6163,65 @@ mod tests {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// #3500 (ADR-0197 M1) — personal cloud box
+// ---------------------------------------------------------------------------
+
+/// `POST /cloud-boxes/{box}/keep-awake`. `enabled: false` clears the deadline;
+/// `hours` defaults to the box's own maximum (12 by default).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudBoxKeepAwakeRequest {
+    pub enabled: bool,
+    #[serde(default)]
+    pub hours: Option<i32>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudBoxLimitsDto {
+    pub cpu_millis: i32,
+    pub memory_mb: i32,
+    pub disk_gb: i32,
+    pub pids: i32,
+    pub idle_minutes: i32,
+    pub stopped_delete_days: i32,
+    pub keep_awake_max_hours: i32,
+}
+
+/// One box. State, limits and times only: the server holds nothing else about a
+/// box (no credential, host key, login state or terminal content exists to show).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudBoxDto {
+    pub id: String,
+    pub member_id: String,
+    /// `creating` | `running` | `idle` | `stopped` | `deleting` | `delete_failed` | `deleted`.
+    pub state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closed_reason: Option<String>,
+    pub limits: CloudBoxLimitsDto,
+    pub created_at_ms: i64,
+    pub state_changed_at_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idle_since_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stopped_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keep_awake_until_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_attached_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CloudBoxListResponse {
+    pub boxes: Vec<CloudBoxDto>,
+}
+
+/// `GET /cloud-boxes/mine`: the caller's live box, or `null`.
+#[derive(Debug, Serialize)]
+pub struct CloudBoxMineResponse {
+    #[serde(rename = "box")]
+    pub cloud_box: Option<CloudBoxDto>,
+}

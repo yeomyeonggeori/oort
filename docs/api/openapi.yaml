@@ -88,6 +88,10 @@ tags:
     description: ADR-0128 workspace/channel roles, suspension, removal, and bans.
   - name: agents
     description: Human-admin agent identity creation; channel membership and credentials remain explicit follow-up steps.
+  - name: cloud-box
+    description: >
+      ADR-0197 M1 personal cloud box lifecycle (create, list, start, stop,
+      delete, keep-awake). Off unless the operator sets MOMO_CLOUD_BOX_ENABLED=true.
   - name: channels
     description: Workspace channels.
   - name: huddles
@@ -2130,6 +2134,315 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: The handle exists, the holder already has a personal agent (`personal_agent_exists`), or the key is revoked (`personal_key_revoked`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-boxes:
+    post:
+      tags: [cloud-box]
+      operationId: createCloudBox
+      summary: Create the caller's personal cloud box.
+      description: >
+        ADR-0197 M1 (#3500). **Off by default**: unless the operator set
+        `MOMO_CLOUD_BOX_ENABLED=true`, every `cloud-boxes` route answers 404.
+        A member has at most one live box per workspace (`409
+        cloud_box_already_exists`; a `deleted` tombstone does not count), a
+        guest has none (403), and the workspace runs at most 5 boxes that are
+        creating, running or idle at once (`409 cloud_box_no_capacity`). The
+        box starts `creating` and a `create` control (the four limits only) is
+        queued for the runner in the same transaction. The server holds the
+        row, the queue and audit rows; no credential, host key, login state or
+        terminal content. Audit `cloud_box.created`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "201":
+          description: Box created, state `creating`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBox"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: A guest, or a principal that is not an active human member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The cloud box API is not enabled on this instance.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`cloud_box_already_exists` or `cloud_box_no_capacity` (`error.code`)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      tags: [cloud-box]
+      operationId: listCloudBoxes
+      summary: List every live box of the workspace (workspace admin only).
+      description: >
+        Resource management view (ADR-0197 D3/D6): owner, state, limits and
+        times, including the last attach time. Nothing about the box's content
+        exists on the server to show.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Live boxes (anything but a `deleted` tombstone), newest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBoxList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller is not a human workspace owner/admin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The cloud box API is not enabled on this instance.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-boxes/mine:
+    get:
+      tags: [cloud-box]
+      operationId: getMyCloudBox
+      summary: The caller's own live box, or null.
+      description: The owner filter is the caller's own member id, not a parameter.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: "The caller's live box, or `box: null` when there is none."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBoxMine"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "Caller is not an active member of the workspace, or is a guest."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The cloud box API is not enabled on this instance.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/start:
+    post:
+      tags: [cloud-box]
+      operationId: startCloudBox
+      summary: Start a stopped box (the box's owner only).
+      description: >
+        ADR-0197 D3/D6. Only the box's owner. A workspace admin gets `403
+        cloud_box_owner_only`; a guest owner (demoted since creating) gets `403 cloud_box_guest`; any other member gets 404 and learns nothing
+        about whether the box exists. Starting a running or idle box answers
+        200 and writes nothing. A box that is not `stopped` (creating,
+        deleting, delete_failed) is `409 cloud_box_state_conflict`; a start
+        past the workspace's 5 concurrent boxes is `409 cloud_box_no_capacity`;
+        a control the runner has not finished is `409 cloud_box_control_in_flight`.
+        A `start` control is queued and an unclaimed older control is
+        cancelled. Audit `cloud_box.started`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: boxId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The box after the request (or unchanged, for a repeated request).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBox"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller is the workspace admin but not the box's owner (`cloud_box_owner_only`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No such box or the caller may not see it, or the API is not enabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`cloud_box_state_conflict`, `cloud_box_no_capacity` or `cloud_box_control_in_flight`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/stop:
+    post:
+      tags: [cloud-box]
+      operationId: stopCloudBox
+      summary: Stop a running or idle box (owner or workspace admin).
+      description: >
+        ADR-0197 D3 (the admin may stop: resource management). Stopping a
+        stopped box answers 200 and writes nothing. Volume stays. A `stop`
+        control is queued. Audit `cloud_box.stopped` with `actor_role`
+        `owner` or `admin`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: boxId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The box after the request (or unchanged, for a repeated request).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBox"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No such box or the caller may not see it, or the API is not enabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`cloud_box_state_conflict` (for example a box still `creating`) or `cloud_box_control_in_flight`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/delete:
+    post:
+      tags: [cloud-box]
+      operationId: deleteCloudBox
+      summary: Delete a box, or retry a failed deletion (owner or workspace admin).
+      description: >
+        ADR-0197 D3/D10. Moves the box to `deleting` (`closedReason`
+        `owner_delete` or `admin_delete`) and queues a `delete` control. The row
+        is kept as a tombstone until the runner confirms (`deleted`); a
+        `delete_failed` box is retried by calling this again. Repeating the
+        call on a box already `deleting` or `deleted` answers 200 and writes
+        nothing. Audit `cloud_box.delete_requested` / `cloud_box.delete_retried`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: boxId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The box after the request (or unchanged, for a repeated request).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBox"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No such box or the caller may not see it, or the API is not enabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`cloud_box_control_in_flight`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/keep-awake:
+    post:
+      tags: [cloud-box]
+      operationId: keepCloudBoxAwake
+      summary: Keep a running box awake for up to its maximum (the box's owner only).
+      description: >
+        ADR-0197 D3 「계속 켜 둠」. Owner only (admin `403
+        cloud_box_owner_only`, other members 404). `enabled: true` sets a
+        deadline of `hours` (default and ceiling: the box's
+        `keepAwakeMaxHours`, 12 by default; more is 400); `enabled: false`
+        clears it. Only a running or idle box (409 otherwise). The runner
+        extends it only while a device is attached. Audit
+        `cloud_box.keep_awake_set` / `cloud_box.keep_awake_cleared`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: boxId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloudBoxKeepAwakeRequest"
+      responses:
+        "200":
+          description: The box after the request (or unchanged, for a repeated request).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBox"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "400":
+          description: "`hours` outside 1...keepAwakeMaxHours."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is the workspace admin but not the box's owner (`cloud_box_owner_only`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No such box or the caller may not see it, or the API is not enabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`cloud_box_state_conflict`: the box is not running or idle."
           content:
             application/json:
               schema:
@@ -11975,6 +12288,65 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PersonalKey"
+    CloudBoxLimits:
+      type: object
+      required: [cpuMillis, memoryMb, diskGb, pids, idleMinutes, stoppedDeleteDays, keepAwakeMaxHours]
+      properties:
+        cpuMillis: {type: integer, maximum: 1000, description: "1000 = 1 vCPU (ADR-0197 D3 ceiling)."}
+        memoryMb: {type: integer, maximum: 2048}
+        diskGb: {type: integer, maximum: 10}
+        pids: {type: integer, maximum: 512}
+        idleMinutes: {type: integer, maximum: 30, description: Unattended minutes before an idle box is stopped.}
+        stoppedDeleteDays: {type: integer, maximum: 30, description: Days stopped before the box is deleted.}
+        keepAwakeMaxHours: {type: integer, maximum: 12}
+    CloudBox:
+      type: object
+      required: [id, memberId, state, limits, createdAtMs, stateChangedAtMs]
+      description: >-
+        A personal cloud box as the server knows it: state, limits and times.
+        There is no credential, host key, login state or terminal content in
+        this object because the server has none.
+      properties:
+        id: {type: string, format: uuid}
+        memberId: {type: string, format: uuid, description: The owner (a human member).}
+        state:
+          type: string
+          enum: [creating, running, idle, stopped, deleting, delete_failed, deleted]
+        closedReason:
+          type: string
+          enum: [owner_delete, admin_delete, stopped_expired, create_failed, member_removed, workspace_deleted]
+          description: Present once deletion has begun.
+        limits:
+          $ref: "#/components/schemas/CloudBoxLimits"
+        createdAtMs: {type: integer, format: int64}
+        stateChangedAtMs: {type: integer, format: int64}
+        idleSinceMs: {type: integer, format: int64, description: Present while idle.}
+        stoppedAtMs: {type: integer, format: int64, description: Present while stopped.}
+        keepAwakeUntilMs: {type: integer, format: int64, description: Present while 「계속 켜 둠」 is on.}
+        lastAttachedAtMs: {type: integer, format: int64}
+    CloudBoxList:
+      type: object
+      required: [boxes]
+      properties:
+        boxes:
+          type: array
+          items:
+            $ref: "#/components/schemas/CloudBox"
+    CloudBoxMine:
+      type: object
+      required: [box]
+      properties:
+        box:
+          nullable: true
+          oneOf:
+            - $ref: "#/components/schemas/CloudBox"
+    CloudBoxKeepAwakeRequest:
+      type: object
+      required: [enabled]
+      additionalProperties: false
+      properties:
+        enabled: {type: boolean}
+        hours: {type: integer, minimum: 1, maximum: 12, description: Defaults to the box's keepAwakeMaxHours.}
     CreatePersonalKeyAgentRequest:
       type: object
       required: [displayName, handle, model]
