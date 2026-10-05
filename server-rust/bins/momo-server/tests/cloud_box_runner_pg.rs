@@ -518,15 +518,31 @@ async fn registration_is_the_instance_operators_and_the_credential_is_only_store
     // The credential works; rotation kills it at once and the new one works.
     let first = claim_http(&client, &base, w.workspace, &token).await;
     assert_eq!(first["controls"], json!([]));
-    let (status, rotated) = call(
-        &client,
-        "POST",
-        runners_url(&base, w.workspace, &format!("/{runner}/rotate")),
-        &w.operator_jwt,
-        None,
-    )
-    .await;
+    let raw = client
+        .post(runners_url(
+            &base,
+            w.workspace,
+            &format!("/{runner}/rotate"),
+        ))
+        .bearer_auth(&w.operator_jwt)
+        .send()
+        .await
+        .expect("rotate");
+    let (status, cache_control, pragma) = (
+        raw.status().as_u16(),
+        raw.headers().get("cache-control").cloned(),
+        raw.headers().get("pragma").cloned(),
+    );
+    let rotated: Value = raw.json().await.expect("json");
     assert_eq!(status, 200, "{rotated}");
+    assert_eq!(
+        (
+            cache_control.as_ref().and_then(|v| v.to_str().ok()),
+            pragma.as_ref().and_then(|v| v.to_str().ok())
+        ),
+        (Some("no-store"), Some("no-cache")),
+        "a one-time credential response must not be cacheable"
+    );
     let new_token = rotated["credential"]
         .as_str()
         .expect("new credential")

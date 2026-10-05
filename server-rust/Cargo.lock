@@ -1689,6 +1689,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "momo-box-runner"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "libc",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "momo-db"
 version = "0.0.0"
 dependencies = [

@@ -38,7 +38,7 @@
 
 use axum::body::Bytes;
 use axum::extract::{Path, Request, State};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::middleware::Next;
 use axum::response::Response;
 use axum::{Extension, Json};
@@ -87,6 +87,16 @@ fn runner_dto(info: &RunnerInfo) -> CloudBoxRunnerDto {
 // operator routes
 // ---------------------------------------------------------------------------
 
+/// A credential is shown once: the response must not be cached or stored by anything on the way.
+type OneTime = [(HeaderName, HeaderValue); 2];
+
+fn no_store() -> OneTime {
+    [
+        (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
+        (header::PRAGMA, HeaderValue::from_static("no-cache")),
+    ]
+}
+
 fn mint(runner_id: Uuid) -> Result<String, ApiError> {
     mint_runner_credential(runner_id)
         .map_err(|error| ApiError::internal("cloud_box_runner.mint", error))
@@ -98,7 +108,7 @@ pub async fn register(
     Extension(principal): Extension<Principal>,
     Path(workspace): Path<String>,
     Json(request): Json<CloudBoxRunnerRegisterRequest>,
-) -> Result<(StatusCode, Json<CloudBoxRunnerCredentialResponse>), ApiError> {
+) -> Result<(StatusCode, OneTime, Json<CloudBoxRunnerCredentialResponse>), ApiError> {
     gate(&state)?;
     require_human(&principal, "human operator required")?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
@@ -140,6 +150,7 @@ pub async fn register(
     )?;
     Ok((
         StatusCode::CREATED,
+        no_store(),
         Json(CloudBoxRunnerCredentialResponse {
             runner: runner_dto(&info),
             credential,
@@ -174,7 +185,7 @@ pub async fn rotate(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path((workspace, runner)): Path<(String, String)>,
-) -> Result<Json<CloudBoxRunnerCredentialResponse>, ApiError> {
+) -> Result<(OneTime, Json<CloudBoxRunnerCredentialResponse>), ApiError> {
     gate(&state)?;
     require_human(&principal, "human operator required")?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
@@ -198,10 +209,13 @@ pub async fn rotate(
         })
         .await,
     )?;
-    Ok(Json(CloudBoxRunnerCredentialResponse {
-        runner: runner_dto(&info),
-        credential,
-    }))
+    Ok((
+        no_store(),
+        Json(CloudBoxRunnerCredentialResponse {
+            runner: runner_dto(&info),
+            credential,
+        }),
+    ))
 }
 
 /// `POST /v1/workspaces/{ws}/cloud-box-runners/{runner}/revoke` — instance operator only.
