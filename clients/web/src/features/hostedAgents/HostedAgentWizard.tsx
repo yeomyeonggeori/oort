@@ -68,7 +68,14 @@ import {
   hostedSwapStall,
   hostedStepSpec,
   hostedWizardStep,
+  hostedDetectCauses,
+  hostedDetectCountdown,
+  hostedPairingDeadline,
   HOSTED_CLOSED_NOTICE,
+  HOSTED_COUNTDOWN_TITLE,
+  HOSTED_DETECT_CAUSES_NOTE,
+  HOSTED_DETECT_CAUSES_TITLE,
+  type HostedPairingDeadline,
   HOSTED_PREVIEW_HEADLINE,
   HOSTED_PREVIEW_NOTE,
   HOSTED_PREVIEW_STEPS,
@@ -262,6 +269,12 @@ function HostedWizardBody({
   const [failure, setFailure] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  // 이 탭이 받은 발급 응답의 만료 시각(#3522). 비밀이 아니라 시각이므로 값 카드를 닫은
+  // 뒤에도 3단계 시계가 쓴다. 연결 id를 함께 들어 다른 연결의 시각을 이어받지 않는다.
+  const [issuedExpiry, setIssuedExpiry] = useState<{
+    id: string;
+    expiresAtMs: number;
+  } | null>(null);
 
   const list = useQuery(hostedListQuery(workspaceId));
   const workspace = useQuery(hostedWorkspaceQuery(workspaceId));
@@ -319,19 +332,37 @@ function HostedWizardBody({
   }, [selectedId]);
   const stall = appManaged ? null : hostedSwapStall(connection, nowMs, swapTicks.replace);
 
+  // 3단계의 만료 카운트다운(#3522). 이 탭이 발급을 받았으면 서버가 적은 시각을,
+  // 아니면 기록에서 계산한 근사를 쓴다(`hostedPairingDeadline`).
+  const deadline: HostedPairingDeadline | null = hostedPairingDeadline(
+    connection,
+    connection !== null && issuedExpiry?.id === connection.id.toLowerCase()
+      ? issuedExpiry.expiresAtMs
+      : null
+  );
+  const countingDown = deadline !== null && pairing === null;
+
   // 30초에 한 번 시계를 돌린다. 만료 표시가 그리는 것은 분이므로(`pairingExpiry`)
   // 초 단위로 뛰는 숫자는 읽는 사람을 재촉할 뿐이지만, 간격을 표시 단위와 같은
   // 60초로 두면 그 둘의 위상이 어긋나 라벨이 최대 1분까지 묵는다. 절반 간격이 그
   // 지연을 30초로 줄이는 동안 화면에 보이는 숫자는 여전히 분 단위로만 바뀐다.
   useEffect(() => {
-    if (pairing === null && !waitingForProof) return;
+    if (pairing === null && !waitingForProof && !countingDown) return;
+    setNowMs(Date.now());
     const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
     return () => window.clearInterval(timer);
-  }, [pairing, waitingForProof]);
+  }, [pairing, waitingForProof, countingDown]);
 
   // 서버가 "그 값은 이미 소비됐다"고 말하면 메모리 사본도 버린다. 감지된 뒤의
   // 연결 값은 죽은 문자열이고, 화면에 남겨 두면 아직 쓸 수 있는 것처럼 보인다.
   const serverStatus = connection?.status;
+  useEffect(() => {
+    if (pairing === null) return;
+    setIssuedExpiry({
+      id: pairing.connection.id.toLowerCase(),
+      expiresAtMs: pairing.pairingExpiresAtMs,
+    });
+  }, [pairing]);
   useEffect(() => {
     if (serverStatus !== undefined && serverStatus !== "pairing_pending") {
       setPairing(null);
@@ -619,6 +650,9 @@ function HostedWizardBody({
             agentHandle={agentHandle}
             checking={detail.isFetching}
             onRecheck={() => void detail.refetch()}
+            deadline={deadline}
+            nowMs={nowMs}
+            verifiedPreset={preset.verified}
           />
         )}
 
@@ -1191,13 +1225,21 @@ function DetectingStep({
   agentHandle,
   checking,
   onRecheck,
+  deadline,
+  nowMs,
+  verifiedPreset,
 }: {
   connection: HostedAgentConnection;
   agentLabel: string;
   agentHandle: string;
   checking: boolean;
   onRecheck: () => void;
+  deadline: HostedPairingDeadline | null;
+  nowMs: number;
+  verifiedPreset: boolean;
 }) {
+  const countdown = deadline ? hostedDetectCountdown(deadline, nowMs) : null;
+  const causes = hostedDetectCauses(verifiedPreset);
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <StepHeading step="detecting" />
@@ -1220,6 +1262,37 @@ function DetectingStep({
         }
         testId="hosted-detecting-empty"
       />
+      {countdown !== null && (
+        <div
+          className="flex min-w-0 flex-col gap-1"
+          data-testid="hosted-detect-countdown"
+        >
+          <h4 className="text-meta font-medium text-ink">{HOSTED_COUNTDOWN_TITLE}</h4>
+          <p
+            className={cn(
+              "break-keep text-body font-medium",
+              countdown.expired || countdown.urgent ? "text-warn" : "text-ink"
+            )}
+            data-testid="hosted-detect-countdown-label"
+          >
+            {countdown.label}
+          </p>
+          <p className="break-keep text-body text-ink-muted">{countdown.guidance}</p>
+          <p className="break-keep text-meta text-ink-muted">{countdown.basisNote}</p>
+        </div>
+      )}
+      <div className="flex min-w-0 flex-col gap-2" data-testid="hosted-detect-causes">
+        <h4 className="text-meta font-medium text-ink">{HOSTED_DETECT_CAUSES_TITLE}</h4>
+        <p className="break-keep text-meta text-ink-muted">{HOSTED_DETECT_CAUSES_NOTE}</p>
+        <ol className="flex list-outside list-decimal flex-col gap-2 ps-4">
+          {causes.map((cause) => (
+            <li key={cause.id} className="break-keep text-body text-ink">
+              {cause.label}
+              <span className="block text-meta text-ink-muted">{cause.detail}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
       <KeyValueRows
         rows={connectionFacts(connection, agentLabel, agentHandle).map((fact) => ({
           key: fact.key,

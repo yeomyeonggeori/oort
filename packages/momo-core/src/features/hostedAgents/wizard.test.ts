@@ -4,6 +4,11 @@ import {
   awaitingProof,
   confirmStateGate,
   hostedAwaitsRemoteEvent,
+  hostedDetectCauses,
+  hostedDetectCountdown,
+  hostedPairingDeadline,
+  HOSTED_DEADLINE_URGENT_MS,
+  HOSTED_DETECT_CAUSES_NOTE,
   hostedLiveMessage,
   hostedStepPurpose,
   hostedStepSpec,
@@ -384,5 +389,71 @@ describe("교체가 안 됐을 때의 멈춤 원인", () => {
       )
     ).toBeNull();
     expect(hostedSwapStall(null, later, false)).toBeNull();
+  });
+});
+
+// #3522 — 3단계 만료 카운트다운과 오지 않는 원인.
+// RED PROOF: `hostedPairingDeadline` 의 출처 분기·`hostedDetectCountdown` 의 만료/임박
+// 분기·`hostedDetectCauses` 의 확인되지 않은 프리셋 갈래를 지우면 붉어진다.
+describe("3단계 만료 카운트다운", () => {
+  const T0 = 1_700_000_000_000;
+
+  it("대기 중이 아니면 시각이 없다", () => {
+    expect(hostedPairingDeadline(null, T0)).toBeNull();
+    expect(hostedPairingDeadline(connection({ status: "detected" }), T0)).toBeNull();
+    expect(hostedPairingDeadline(connection({ status: "expired" }), T0)).toBeNull();
+  });
+
+  it("이 탭이 받은 발급 응답이 있으면 그 시각을 그대로 쓴다", () => {
+    const deadline = hostedPairingDeadline(connection({ updatedAtMs: T0 }), T0 + 5_000);
+    expect(deadline).toEqual({ expiresAtMs: T0 + 5_000, basis: "issued" });
+  });
+
+  it("발급 응답이 없으면 기록 시각에 15분을 더한 근사를 쓰고 그렇다고 밝힌다", () => {
+    const deadline = hostedPairingDeadline(connection({ updatedAtMs: T0 }), null);
+    expect(deadline).toEqual({
+      expiresAtMs: T0 + HOSTED_PAIRING_TTL_MS,
+      basis: "recorded",
+    });
+    const view = hostedDetectCountdown(deadline!, T0);
+    expect(view.basisNote).toContain("근사치");
+    expect(view.label).toBe("약 15분 뒤 만료");
+  });
+
+  it("임박하면 서두르라고, 지나면 재발급을 말한다", () => {
+    const deadline = { expiresAtMs: T0 + HOSTED_PAIRING_TTL_MS, basis: "issued" as const };
+    const calm = hostedDetectCountdown(deadline, T0);
+    expect(calm.urgent).toBe(false);
+    expect(calm.guidance).toContain("15분 동안만");
+    const urgent = hostedDetectCountdown(
+      deadline,
+      T0 + HOSTED_PAIRING_TTL_MS - HOSTED_DEADLINE_URGENT_MS
+    );
+    expect(urgent.urgent).toBe(true);
+    expect(urgent.guidance).toContain("곧 만료");
+    const gone = hostedDetectCountdown(deadline, T0 + HOSTED_PAIRING_TTL_MS);
+    expect(gone.expired).toBe(true);
+    expect(gone.label).toBe("만료됨");
+    expect(gone.guidance).toContain("연결 값 다시 발급");
+    expect(gone.guidance).toContain("더 이상 통하지 않아요");
+  });
+});
+
+describe("3단계 오지 않는 원인", () => {
+  it("원인을 단정하지 않고 구분하지 못한다고 밝히며 흔한 순서로 적는다", () => {
+    expect(HOSTED_DETECT_CAUSES_NOTE).toContain("구분하지 못해요");
+    expect(hostedDetectCauses(true).map((cause) => cause.id)).toEqual([
+      "not-run",
+      "value",
+      "header",
+      "network",
+      "vendor",
+    ]);
+  });
+
+  it("확인되지 않은 프리셋이면 방식 자체가 원인일 수 있다는 후보를 마지막에 더한다", () => {
+    const causes = hostedDetectCauses(false);
+    expect(causes).toHaveLength(6);
+    expect(causes[5]?.id).toBe("unverified");
   });
 });
