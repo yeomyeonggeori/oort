@@ -6163,6 +6163,17 @@ async fn stage_markers_keep_the_latest_twelve_spend_steps_and_refuse_bad_text() 
     assert_eq!(output["body"], json!("끝"));
     assert_eq!(output["status"], json!("succeeded"));
     assert!(output.get("artifacts").is_none());
+
+    // The handle is dead now (terminal run): a bad marker is answered by the
+    // ordinary refusal and adds no audit row, however often it is repeated.
+    for _ in 0..5 {
+        let (status, _) = event(json!({"leaseHandle": handle, "stage": "a/b"})).await;
+        assert_eq!(status, 409);
+    }
+    assert_eq!(
+        rejected_audits_3516(&su, run).await.len(),
+        bad_markers.len()
+    );
 }
 
 #[tokio::test]
@@ -6357,4 +6368,64 @@ async fn artifacts_are_stored_when_valid_and_a_bad_one_refuses_the_whole_complet
         run_record_3516(&su, run).await.1["artifacts"]["added"],
         json!(12)
     );
+
+    // A retried completion on the finished run answers its first answer even
+    // when the retry carries a malformed `artifacts`, and audits nothing.
+    let answer = structured(&done)["messageId"].clone();
+    let audits_before = rejected_audits_3516(&su, run).await.len();
+    for _ in 0..3 {
+        let (status, replay) = complete(json!({
+            "leaseHandle": handle, "status": "failed", "error": "tests red",
+            "artifacts": {"prUrl": "http://evil.example/x"}
+        }))
+        .await;
+        assert_eq!(status, 200, "{replay}");
+        assert_eq!(structured(&replay)["messageId"], answer);
+    }
+    assert_eq!(rejected_audits_3516(&su, run).await.len(), audits_before);
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_dead_lease_cannot_grow_the_audit_log_with_bad_reports() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (handle, run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+    // The lease lapses (both timestamps move: `outbox_gateway_lease_shape_ck`).
+    sqlx::query(
+        "UPDATE outbox SET lease_acquired_at = now() - interval '10 minutes', \
+                lease_expires_at = now() - interval '1 minute' \
+          WHERE kind='agent_job' AND method='gateway' AND status='pending' \
+            AND lower(payload->>'run_id') = lower($1)",
+    )
+    .bind(run.to_string())
+    .execute(&su)
+    .await
+    .unwrap();
+    for _ in 0..4 {
+        let (status, _) = call(
+            &client,
+            &base,
+            &fixture.hosted_bearer,
+            "oort_run_event",
+            json!({"leaseHandle": handle, "stage": "a/b"}),
+        )
+        .await;
+        assert_eq!(status, 409);
+        let (status, _) = call(
+            &client,
+            &base,
+            &fixture.hosted_bearer,
+            "oort_run_complete",
+            json!({"leaseHandle": handle, "status": "succeeded",
+                   "artifacts": {"branch": "/etc/passwd"}}),
+        )
+        .await;
+        assert_eq!(status, 409);
+    }
+    assert!(rejected_audits_3516(&su, run).await.is_empty());
 }

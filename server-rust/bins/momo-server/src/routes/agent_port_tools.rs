@@ -71,9 +71,10 @@ use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::routes::agent_gateway::{
-    complete_gateway_run_in_tx, record_gateway_event_in_tx, sanitized_gateway_error,
-    validated_event_fields, validated_gateway_artifacts, validated_gateway_stage,
-    write_report_rejected_audit, GatewayCompleteInput, GatewayEventInput,
+    complete_gateway_run_in_tx, record_gateway_event_in_tx, report_standing_in_tx,
+    sanitized_gateway_error, validated_event_fields, validated_gateway_artifacts,
+    validated_gateway_stage, write_report_rejected_audit, GatewayCompleteInput, GatewayEventInput,
+    ReportStanding,
 };
 use crate::routes::agent_mentions::{route_agent_mentions_in_tx, MentionSend};
 use crate::AppState;
@@ -940,17 +941,34 @@ async fn run_event(
             {
                 Ok(stage) => stage,
                 Err(reason) => {
-                    write_report_rejected_audit(
+                    let lease = GatewayLeaseBinding {
+                        job_id: handle.job_id,
+                        lease_id: handle.lease_id,
+                    };
+                    let standing = report_standing_in_tx(
                         conn,
                         caller.workspace_id,
                         handle.run_id,
                         caller.agent_member_id,
-                        Some(caller.token_id),
-                        momo_mcp::TOOL_RUN_EVENT,
-                        reason,
+                        lease,
                     )
                     .await?;
-                    return Ok(Err(ToolFailure::InvalidArguments));
+                    if standing == ReportStanding::Live {
+                        write_report_rejected_audit(
+                            conn,
+                            caller.workspace_id,
+                            handle.run_id,
+                            caller.agent_member_id,
+                            Some(caller.token_id),
+                            momo_mcp::TOOL_RUN_EVENT,
+                            reason,
+                        )
+                        .await?;
+                        return Ok(Err(ToolFailure::InvalidArguments));
+                    }
+                    // Not live: drop the marker and let the ordinary lease
+                    // verdict answer (no audit row for a dead handle).
+                    None
                 }
             };
             let recorded = record_gateway_event_in_tx(
@@ -1024,17 +1042,34 @@ async fn run_complete(
             ) {
                 Ok(artifacts) => artifacts,
                 Err(reason) => {
-                    write_report_rejected_audit(
+                    let lease = GatewayLeaseBinding {
+                        job_id: handle.job_id,
+                        lease_id: handle.lease_id,
+                    };
+                    let standing = report_standing_in_tx(
                         conn,
                         caller.workspace_id,
                         handle.run_id,
                         caller.agent_member_id,
-                        Some(caller.token_id),
-                        momo_mcp::TOOL_RUN_COMPLETE,
-                        reason,
+                        lease,
                     )
                     .await?;
-                    return Ok(Err(ToolFailure::InvalidArguments));
+                    if standing == ReportStanding::Live {
+                        write_report_rejected_audit(
+                            conn,
+                            caller.workspace_id,
+                            handle.run_id,
+                            caller.agent_member_id,
+                            Some(caller.token_id),
+                            momo_mcp::TOOL_RUN_COMPLETE,
+                            reason,
+                        )
+                        .await?;
+                        return Ok(Err(ToolFailure::InvalidArguments));
+                    }
+                    // Not live: drop the artifacts and let the ordinary
+                    // path answer (a finished run replays its first answer) (no audit row for a dead handle).
+                    None
                 }
             };
             let completed = complete_gateway_run_in_tx(

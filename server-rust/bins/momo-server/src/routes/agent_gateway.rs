@@ -991,6 +991,41 @@ pub(crate) fn validated_gateway_artifacts(
     Ok((!artifacts.is_empty()).then_some(artifacts))
 }
 
+/// Where a report stands before its refusal may be recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReportStanding {
+    /// A live lease on a run that can still take a report: a refusal is audited
+    /// and answered 400.
+    Live,
+    /// Anything else (stale or expired lease, terminal run, approval hold,
+    /// foreign run): the bad field is ignored and the call takes its ordinary
+    /// path, so a finished run's retried completion replays its first answer and
+    /// a lost lease answers the one 409 — and **no audit row is written**, so a
+    /// dead handle cannot grow the audit log.
+    NotLive,
+}
+
+/// Judge [`ReportStanding`] under the run's row lock.
+pub(crate) async fn report_standing_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+    lease: GatewayLeaseBinding,
+) -> Result<ReportStanding, momo_db::DbError> {
+    let Some(run) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await? else {
+        return Ok(ReportStanding::NotLive);
+    };
+    if run.agent_member_id != agent_member_id
+        || run.status.is_terminal()
+        || run.status.is_approval_held()
+        || !lease_is_authorized(conn, workspace_id, run_id, &run, lease, false).await?
+    {
+        return Ok(ReportStanding::NotLive);
+    }
+    Ok(ReportStanding::Live)
+}
+
 /// The audit row a refused report leaves (D15): the run, the tool and a reason
 /// code — no text from the report.
 pub(crate) async fn write_report_rejected_audit(
