@@ -815,6 +815,16 @@ async fn the_runner_creates_starts_stops_and_deletes_a_real_hardened_box() {
         !log_text.contains(&credential) && !log_text.contains("oort_runner."),
         "the runner logged its credential"
     );
+    // The overwrite helper really ran to completion for both deletes and the orphan (a failing helper only warns).
+    assert!(
+        !log_text.contains("overwrite before removal failed")
+            && !log_text.contains("overwrite failed"),
+        "the volume overwrite helper failed during the run: {log_text}"
+    );
+    assert!(
+        log_text.contains("orphan volume destroyed"),
+        "the orphan path never logged its destruction"
+    );
     std::fs::remove_dir_all(&dir).ok();
     remove_all_e2e_objects();
 }

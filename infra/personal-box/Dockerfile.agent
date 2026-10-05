@@ -16,6 +16,7 @@ RUN chmod 0755 /usr/local/bin/momo-box-agent /usr/local/bin/momo-box-agent-entry
 ARG AGENT_SHA=unset
 LABEL io.momo.m2.agent-sha=$AGENT_SHA
 # The runner starts the container as root with CAP_SETUID/CAP_SETGID only (template.rs); the entry drops
-# to the agent uid. The image's own default user stays the person's uid.
+# to the agent uid. The image's own default user stays the person's uid, so a bare `docker run` is not root.
+USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/momo-box-agent-entry"]
 CMD []

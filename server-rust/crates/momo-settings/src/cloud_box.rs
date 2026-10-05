@@ -1024,7 +1024,8 @@ async fn settle_box_after_control(
     Ok(None)
 }
 
-/// Turn controls whose lease ran out `MAX_CONTROL_ATTEMPTS` times into
+/// Turn controls whose lease ran out `MAX_CONTROL_ATTEMPTS` times (including one a revoked
+/// runner's lease handed back to `pending` with its attempts kept) into
 /// `failed`/`poisoned` and settle their boxes. Lock order matches every other
 /// writer: the box row first, then the control row.
 async fn poison_exhausted_controls(
@@ -1033,8 +1034,8 @@ async fn poison_exhausted_controls(
 ) -> Result<Vec<Uuid>, DbError> {
     let candidates: Vec<(Uuid, Uuid, String)> = sqlx::query_as(
         "SELECT id, box_id, verb FROM cloud_box_control \
-          WHERE workspace_id = $1 AND status = 'claimed' AND lease_expires_at < now() \
-            AND attempts >= $2 \
+          WHERE workspace_id = $1 AND attempts >= $2 \
+            AND ((status = 'claimed' AND lease_expires_at < now()) OR status = 'pending') \
           ORDER BY seq LIMIT 50",
     )
     .bind(workspace_id)
@@ -1049,8 +1050,8 @@ async fn poison_exhausted_controls(
         let done = sqlx::query(
             "UPDATE cloud_box_control \
                 SET status = 'failed', result_code = 'poisoned', completed_at = now() \
-              WHERE workspace_id = $1 AND id = $2 AND status = 'claimed' \
-                AND lease_expires_at < now() AND attempts >= $3",
+              WHERE workspace_id = $1 AND id = $2 AND attempts >= $3 \
+                AND ((status = 'claimed' AND lease_expires_at < now()) OR status = 'pending')",
         )
         .bind(workspace_id)
         .bind(control_id)

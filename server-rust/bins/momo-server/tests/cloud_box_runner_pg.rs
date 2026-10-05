@@ -1257,6 +1257,54 @@ async fn the_attempts_cap_poisons_a_control_and_settles_its_box() {
     );
 }
 
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3505-*)"]
+async fn a_control_handed_back_by_a_revoked_runner_at_the_cap_is_still_poisoned() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let w = seed_world(&su).await;
+    let base = start_server(app.clone(), Some(true), &[w.operator], None).await;
+    let client = reqwest::Client::new();
+    let (runner, token) = register_runner(&client, &base, &w, "런너").await;
+    let box_id = create_box(&client, &base, &w).await;
+    let mut control = String::new();
+    for attempt in 1..=MAX_CONTROL_ATTEMPTS {
+        let got = claim_http(&client, &base, w.workspace, &token).await;
+        control = got["controls"][0]["id"].as_str().expect("id").to_string();
+        if attempt < MAX_CONTROL_ATTEMPTS {
+            expire_lease(&su, &control).await;
+        }
+    }
+    // The 5th lease is live; the operator revokes the runner: the control returns to pending at attempts = 5.
+    let (status, _) = call(
+        &client,
+        "POST",
+        runners_url(&base, w.workspace, &format!("/{runner}/revoke")),
+        &w.operator_jwt,
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        control_row(&su, &control).await,
+        ("pending".to_string(), None, MAX_CONTROL_ATTEMPTS)
+    );
+    let (_, second_token) = register_runner(&client, &base, &w, "런너 B").await;
+    let got = claim_http(&client, &base, w.workspace, &second_token).await;
+    assert_eq!(
+        got["controls"],
+        json!([]),
+        "a control at the cap was handed out again"
+    );
+    assert_eq!(got["poisoned"], json!([control]));
+    assert_eq!(
+        box_state(&su, box_id).await,
+        "deleted",
+        "its box never settled"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // reports
 // ---------------------------------------------------------------------------
