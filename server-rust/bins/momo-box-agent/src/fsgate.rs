@@ -254,6 +254,7 @@ mod tests {
     use std::os::unix::fs::symlink;
 
     /// Descriptor-counting tests elsewhere in this crate need a quiet table.
+    #[allow(dead_code)] // the guard is held, never read
     struct Scratch(PathBuf, std::sync::MutexGuard<'static, ()>);
     impl Scratch {
         fn new(tag: &str) -> Self {
