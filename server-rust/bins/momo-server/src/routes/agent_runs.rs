@@ -108,6 +108,11 @@ const BRIEF_LIMIT: usize = 16_384;
 const REPO_LIMIT: usize = 2_048;
 const BRANCH_LIMIT: usize = 512;
 
+/// ADR-0162 증보 3 D10 refusal codes (all HTTP 409, all before any write).
+const HOSTED_CONNECTION_NOT_ACTIVE: &str = "hosted_connection_not_active";
+const HOSTED_CHANNEL_NOT_APPROVED: &str = "hosted_channel_not_approved";
+const AGENT_PAUSED: &str = "agent_paused";
+
 /// `POST /v1/workspaces/{ws}/channels/{ch}/agent-runs`.
 pub async fn create(
     State(state): State<AppState>,
@@ -123,13 +128,6 @@ pub async fn create(
     // body must not cost a connection or leave a half-written row behind.
     let input = validated_work_input(&request)?;
 
-    if !state.agent_gateway.enabled() {
-        return Err(ApiError::new(
-            StatusCode::CONFLICT,
-            "work runs require an enabled BYOA agent gateway",
-        ));
-    }
-
     let trigger = RunTrigger::Work {
         channel_id,
         actor_member_id: principal.member_id,
@@ -143,6 +141,18 @@ pub async fn create(
     let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
     let claude_subscription_agents_enabled =
         state.agent_port.config.claude_subscription_agents_enabled;
+    let hosted_delivery_enabled = state.agent_port.config.hosted_delivery_enabled;
+    let gateway_enabled = state.agent_gateway.enabled();
+    // With the managed gateway off AND hosted delivery closed no agent can take
+    // a work run, so the answer needs no transaction (the pre-#3515 fast path,
+    // and the same precedence over the membership/agent lookups). When either
+    // is on, the per-agent selector inside the transaction decides.
+    if !gateway_enabled && !hosted_delivery_enabled {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "work runs require an enabled BYOA agent gateway",
+        ));
+    }
 
     let outcome = settle_db(
         "agent_runs.create",
@@ -214,20 +224,89 @@ pub async fn create(
                         )));
                     }
                 }
-                // Hosted delivery remains production-disabled before any run,
-                // job, outbox, or message row can exist. Idempotency cannot
-                // override this boundary because no hosted run is legal yet.
-                if agent.hosted_delivery_disabled {
+                // ADR-0162 증보 3 D10 (#3515). The old single boolean merged two
+                // reasons — a hosted connection row, and `owner_only` — and
+                // refused both. They are separate facts now: `owner_only` stays
+                // closed (D10 4) and a hosted connection is judged by the
+                // conditions below. Every refusal here is returned before the
+                // first write, so no run, job, inbox row or audit row exists
+                // for a 409.
+                if agent.owner_only_blocked {
                     return Ok(Err(ApiError::new(
                         StatusCode::CONFLICT,
                         "hosted agent delivery is not enabled",
                     )));
                 }
+                let hosted_connection_id = if agent.has_hosted_connection {
+                    // A guest must not spend the owner's vendor quota.
+                    if momo_agent::is_guest_in_channel_in_tx(
+                        conn,
+                        workspace_id,
+                        channel_id,
+                        actor_member_id,
+                    )
+                    .await?
+                    {
+                        return Ok(Err(ApiError::forbidden(
+                            "guests cannot request work from a hosted agent",
+                        )));
+                    }
+                    // The instance gate (HAP-E6) governs hosted delivery for a
+                    // mention and for a work request alike.
+                    if !hosted_delivery_enabled {
+                        return Ok(Err(ApiError::new(
+                            StatusCode::CONFLICT,
+                            "hosted agent delivery is not enabled",
+                        )));
+                    }
+                    // D10 1: active AND proved, with a live Agent Port credential.
+                    let Some(connection_id) = agent.hosted_active_connection_id else {
+                        return Ok(Err(ApiError::coded(
+                            StatusCode::CONFLICT,
+                            HOSTED_CONNECTION_NOT_ACTIVE,
+                            "the hosted agent connection is not active",
+                        )));
+                    };
+                    if agent.paused {
+                        return Ok(Err(ApiError::coded(
+                            StatusCode::CONFLICT,
+                            AGENT_PAUSED,
+                            "agent is paused",
+                        )));
+                    }
+                    // D10 2: the single B5 predicate, shared with mention delivery.
+                    if !agent.hosted_channel_approved {
+                        return Ok(Err(ApiError::coded(
+                            StatusCode::CONFLICT,
+                            HOSTED_CHANNEL_NOT_APPROVED,
+                            "this channel is not approved for the hosted agent",
+                        )));
+                    }
+                    Some(connection_id)
+                } else {
+                    // A hosted agent is delivered to through its own inbox and
+                    // never consults the managed gateway (the mention selector's
+                    // rule); every other agent still needs it.
+                    if !gateway_enabled {
+                        return Ok(Err(ApiError::new(
+                            StatusCode::CONFLICT,
+                            "work runs require an enabled BYOA agent gateway",
+                        )));
+                    }
+                    None
+                };
 
                 // The run may already exist — a retry of a request whose response
                 // was lost. Resolve that BEFORE the eligibility conflicts below,
                 // exactly like Swift (:71-84): a paused agent must not turn a
                 // successful earlier create into a 409 on retry.
+                // `settle_db` commits an `Ok(Err(_))`, so a refusal that comes
+                // AFTER the INSERT below would leave a queued run with no job —
+                // counted live against the cap forever. The savepoint lets those
+                // refusals take the run back out with them.
+                sqlx::query("SAVEPOINT agent_run_create")
+                    .execute(&mut *conn)
+                    .await?;
                 let created = create_agent_run_in_tx(
                     conn,
                     workspace_id,
@@ -266,6 +345,9 @@ pub async fn create(
 
                 // Eligibility conflicts apply to a genuinely NEW run only.
                 if agent.paused {
+                    sqlx::query("ROLLBACK TO SAVEPOINT agent_run_create")
+                        .execute(&mut *conn)
+                        .await?;
                     return Ok(Err(ApiError::new(StatusCode::CONFLICT, "agent is paused")));
                 }
                 let live =
@@ -273,6 +355,9 @@ pub async fn create(
                 // The run just inserted is itself live, so the cap compares the
                 // count including it.
                 if live > i64::from(agent.max_concurrent_runs) {
+                    sqlx::query("ROLLBACK TO SAVEPOINT agent_run_create")
+                        .execute(&mut *conn)
+                        .await?;
                     return Ok(Err(ApiError::new(
                         StatusCode::CONFLICT,
                         "agent concurrent run limit reached",
@@ -305,22 +390,49 @@ pub async fn create(
                 )
                 .await?;
 
-                let wake = agent_job_broadcast_payload(
-                    workspace_id,
-                    agent_member_id,
-                    job_id,
-                    run.id,
-                    &job_payload,
-                );
-                emit_outbox(
-                    &mut *conn,
-                    workspace_id,
-                    OutboxKind::Broadcast,
-                    "publish",
-                    &wake,
-                    Some(agent_member_id),
-                )
-                .await?;
+                if let Some(connection_id) = hosted_connection_id {
+                    // D10 6. A hosted agent is woken through its own inbox, not
+                    // the managed gateway's wake broadcast (the mention path's
+                    // rule, and migration 071 refuses the broadcast row beside a
+                    // hosted job). The job above is the durable item either way:
+                    // an inbox reference that cannot be written (a credential
+                    // without `agent:inbox:read`) leaves it claimable by
+                    // `oort_jobs_claim`, exactly like a mention.
+                    if momo_messaging::append_job_reference_in_tx(
+                        &mut *conn,
+                        workspace_id,
+                        agent_member_id,
+                        connection_id,
+                        channel_id,
+                        job_id,
+                        run.id,
+                    )
+                    .await?
+                    .is_none()
+                    {
+                        tracing::warn!(
+                            %workspace_id, %agent_member_id, run_id = %run.id, job_id,
+                            "hosted work job has no inbox reference; claimable by polling only"
+                        );
+                    }
+                } else {
+                    let wake = agent_job_broadcast_payload(
+                        workspace_id,
+                        agent_member_id,
+                        job_id,
+                        run.id,
+                        &job_payload,
+                    );
+                    emit_outbox(
+                        &mut *conn,
+                        workspace_id,
+                        OutboxKind::Broadcast,
+                        "publish",
+                        &wake,
+                        Some(agent_member_id),
+                    )
+                    .await?;
+                }
 
                 // The opening frame (goal SRV-B3d) — the work surface's twin of
                 // the mention path's. A work run is started by a person tapping
