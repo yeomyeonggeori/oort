@@ -7,7 +7,8 @@
 #      newer glibc does not start in the box).
 # What runs where: the Rust build runs in a rust container with the source mounted read-only and the
 # target + registry on tmpfs (no disk volume, nothing left behind); only `momo-box-agent` is built and
-# copied. Every docker object this makes is named momo-m2-*.
+# copied. Every docker object this makes is named momo-m2-* (MOMO_BUILD_NAME renames the build container: verify-m4.sh
+# sets momo-m4-build so a run only ever touches its own prefix).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,7 +16,8 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 TAG="${1:-momo-m2-box:local}"
 RUST_IMAGE="${MOMO_M2_RUST_IMAGE:-rust:1-bookworm}"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/momo-m2-image.XXXXXX")"
-trap 'docker rm -f momo-m2-build >/dev/null 2>&1 || true; rm -rf "$WORK"' EXIT
+BUILD_NAME="${MOMO_BUILD_NAME:-momo-m2-build}"
+trap 'docker rm -f "$BUILD_NAME" >/dev/null 2>&1 || true; rm -rf "$WORK"' EXIT
 
 # the S3 base (rebuilt only when its sources changed)
 # shellcheck source=momo-s3-box.sh
@@ -31,14 +33,14 @@ BIN="${MOMO_M2_BIN_DIR:-$WORK/bin}"
 if [[ -z "${MOMO_M2_BIN_DIR:-}" ]]; then
   mkdir -p "$BIN"
   echo "== building momo-box-agent (release) in $RUST_IMAGE" >&2
-  docker rm -f momo-m2-build >/dev/null 2>&1 || true
-  docker run --name momo-m2-build \
+  docker rm -f "$BUILD_NAME" >/dev/null 2>&1 || true
+  docker run --name "$BUILD_NAME" \
     -v "$ROOT/server-rust":/src:ro \
     --tmpfs /target:rw,exec,size=4g --tmpfs /usr/local/cargo/registry:rw,exec,size=1g \
     -e CARGO_TARGET_DIR=/target -e CARGO_PROFILE_RELEASE_DEBUG=0 -e CARGO_INCREMENTAL=0 -e CARGO_TERM_COLOR=never -w /src \
     "$RUST_IMAGE" sh -c 'cargo build --locked --release -p momo-box-agent --bin momo-box-agent 2>&1 | tail -3 && mkdir -p /out && cp /target/release/momo-box-agent /out/' >&2
-  docker cp momo-m2-build:/out/. "$BIN/" >&2
-  docker rm -f momo-m2-build >/dev/null 2>&1
+  docker cp "$BUILD_NAME":/out/. "$BIN/" >&2
+  docker rm -f "$BUILD_NAME" >/dev/null 2>&1
 fi
 head -c 4 "$BIN/momo-box-agent" | grep -q ELF || { echo "momo-box-agent is not a Linux binary" >&2; exit 1; }
 

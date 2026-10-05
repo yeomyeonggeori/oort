@@ -2797,6 +2797,729 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/owner-device-list:
+    put:
+      tags: [cloud-box]
+      operationId: putCloudBoxOwnerDeviceList
+      summary: Plant the box's first owner device list (box owner only, owner-device-signed).
+      description: >
+        ADR-0197 M4 증보 2. The box's **trust root**: the `DeviceList` bytes the owner's device signed
+        (opaque to the server, at most 2 KiB), carried with the device's signed
+        `momo.human.control.v3` statement of kind `cloud_box_owner_list` (content = SHA-256 of the list
+        bytes, host line = the box id). **The signature is always required**, whatever
+        `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED` says: a bearer alone must not plant a trust root. Allowed only
+        while the box is `creating` and its `create` control is still pending; the runner is not handed the
+        `create` until a list is present. A list that is not planted stays `creating` and the owner may delete
+        it.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: boxId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloudBoxOwnerListRequest"
+      responses:
+        "200":
+          description: Stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBoxStored"
+        "400":
+          description: "`list` is not base64 or not 1...2048 bytes."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: No or invalid bearer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is the workspace admin but not the box's owner (`cloud_box_owner_only`), or the signed control is refused (`device_signature_required`, `device_signature_invalid`, `device_signature_expired`, `device_key_revoked`, `device_key_not_endorsed`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No such box, the caller may not see it, or the cloud box API is not enabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "The box or the control is in a state that cannot take this (named by `error.code`: `cloud_box_list_locked`, `cloud_box_agent_not_active`, `cloud_box_not_running`, `cloud_box_agent_unavailable`, `cloud_box_agent_offline`, `cloud_box_busy`, `device_nonce_replayed`)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/trust-bundle:
+    get:
+      tags: [cloud-box]
+      operationId: getCloudBoxTrustBundle
+      summary: The box's trust chain as the server stores it (box owner only).
+      description: >
+        ADR-0197 M4 증보 2. The runner's public key, the box host key with the runner's attestation, the
+        owner's `HostPin` if one was stored, and whether the box-agent is connected. **Everything here is
+        stored-and-forwarded: the server made none of it** — the owner's device verifies each piece itself.
+        There is **no fingerprint field** (the device computes SHA-256 of `runner.publicKey` and compares it
+        with the value the runner operator told the member out of band) and **no owner device list** (a new
+        device gets that in person, never from the server).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: boxId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The trust bundle.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBoxTrustBundle"
+        "401":
+          description: No or invalid bearer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is the workspace admin but not the box's owner (`cloud_box_owner_only`), or the signed control is refused (`device_signature_required`, `device_signature_invalid`, `device_signature_expired`, `device_key_revoked`, `device_key_not_endorsed`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No such box, the caller may not see it, or the cloud box API is not enabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "The box or the control is in a state that cannot take this (named by `error.code`: `cloud_box_list_locked`, `cloud_box_agent_not_active`, `cloud_box_not_running`, `cloud_box_agent_unavailable`, `cloud_box_agent_offline`, `cloud_box_busy`, `device_nonce_replayed`)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/pin:
+    put:
+      tags: [cloud-box]
+      operationId: putCloudBoxPin
+      summary: Store the owner device's `HostPin` for the box's host key (box owner only).
+      description: >
+        ADR-0197 M4 증보 2. The `HostPin` bytes the owner's device made after it compared the typed runner
+        fingerprint and verified the runner's attestation (opaque to the server, at most 2 KiB). Devices
+        re-verify a served pin before trusting it. Only once the box host has been attested.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: boxId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloudBoxPinRequest"
+      responses:
+        "200":
+          description: Stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBoxStored"
+        "400":
+          description: "`pin` is not base64 or not 1...2048 bytes."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: No or invalid bearer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is the workspace admin but not the box's owner (`cloud_box_owner_only`), or the signed control is refused (`device_signature_required`, `device_signature_invalid`, `device_signature_expired`, `device_key_revoked`, `device_key_not_endorsed`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No such box, the caller may not see it, or the cloud box API is not enabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "The box or the control is in a state that cannot take this (named by `error.code`: `cloud_box_list_locked`, `cloud_box_agent_not_active`, `cloud_box_not_running`, `cloud_box_agent_unavailable`, `cloud_box_agent_offline`, `cloud_box_busy`, `device_nonce_replayed`)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/attach:
+    post:
+      tags: [cloud-box]
+      operationId: attachCloudBox
+      summary: Authorise one terminal attach with the owner device's signed `cloud_pty_attach` control (box owner only).
+      description: >
+        ADR-0197 M4 증보 2. The owner's device sends the handshake `Hello` it is about to relay (at most 256 bytes)
+        and its signed `momo.human.control.v3` statement of kind `cloud_pty_attach`: the content is
+        `{box_id}\n{sha256_hex(Hello)}`, `session` and `mode` are `-`, and the host line is the box-agent
+        host **the server derives from the box row** (never from the request). **The signature is always
+        required** (a missing one is `403 device_signature_required`), whatever
+        `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED` says: that flag gates production enablement with R2 (#3030) and
+        never makes this control optional. Key, chain, time window and one-time nonce are the R2 verification
+        (`device_nonce_replayed` on reuse). The box must be `running` or `idle`, its host attested and listening,
+        the box under its two sessions, and the caller under the pre-handshake caps (3 per member, 64 global:
+        `429 cloud_box_attach_throttled`). The answer is a **single-use ticket** (30 s) and the relay path. The
+        server's check is a second layer: the box-agent verifies the owner device's signature itself (S2).
+        No transaction or tenant context is held after this answer; a supervisor ends the session when the device
+        key is revoked or its sign-in ends, the member is deactivated, the box is stopped or deleted, the owner or
+        host changes, the instance is switched off, or the session reaches 8 hours or 30 idle minutes. Audit
+        `cloud_box.pty_attach` / `cloud_box.pty_end` (ids and a reason word; never a message).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: boxId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloudBoxAttachRequest"
+      responses:
+        "200":
+          description: The ticket and the relay path.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBoxAttach"
+        "400":
+          description: "`hello` is not base64 or not 1...256 bytes."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: No or invalid bearer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is the workspace admin but not the box's owner (`cloud_box_owner_only`), or the signed control is refused (`device_signature_required`, `device_signature_invalid`, `device_signature_expired`, `device_key_revoked`, `device_key_not_endorsed`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No such box, the caller may not see it, or the cloud box API is not enabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "The box or the control is in a state that cannot take this (named by `error.code`: `cloud_box_list_locked`, `cloud_box_agent_not_active`, `cloud_box_not_running`, `cloud_box_agent_unavailable`, `cloud_box_agent_offline`, `cloud_box_busy`, `device_nonce_replayed`)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: "`cloud_box_attach_throttled` — too many attaches that have not finished their handshake."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/relay/{sessionId}:
+    get:
+      tags: [cloud-box]
+      operationId: connectCloudBoxRelayDevice
+      summary: The owner device's WebSocket of a blind-relay session (single-use ticket).
+      description: >
+        ADR-0197 M4 증보 2 (D5). WebSocket upgrade. The credential is the ticket from `attachCloudBox`, offered as
+        `Sec-WebSocket-Protocol: oort.cloud-pty.v1, ticket.<ticket>` (a browser cannot set headers; a query string
+        would reach access logs). Every failure — unknown or spent or expired ticket, wrong box, wrong session —
+        is the same 401. Binary messages only, at most 16 409 bytes; the first message must be the `Hello` the
+        signed control bound. The server forwards messages **unread**: handshake, owner-device authentication,
+        encryption keys and terminal bytes are between the device and the box-agent. Ends with a WebSocket close
+        whose reason is one word: `peer_closed`, `device_revoked`, `member_inactive`, `owner_changed`,
+        `box_not_running`, `box_gone`, `host_revoked`, `setting_off`, `max_length`, `idle`, `slow_consumer`,
+        `message_too_large`, `rate_limited`, `protocol_violation`, `handshake_timeout`, `hello_mismatch`,
+        `ticket_expired`.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: boxId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "101":
+          description: Switching Protocols — the relay socket is open.
+        "401":
+          description: The ticket is missing or not accepted (one uniform answer).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The cloud box API is not enabled on this instance.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Too many refused tickets from this address.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/agent/register:
+    post:
+      tags: [cloud-box]
+      operationId: registerCloudBoxAgent
+      summary: The box-agent's registration (public; the runner verifies it, not the server).
+      description: >
+        ADR-0197 M4 증보 2 (D2). No bearer: the box-agent has no credential yet. The body is its host public key
+        and `mac = HMAC-SHA256(pairingCode, "momo.box.register.v1" || boxId || hostPublicKey)`, where the pairing
+        code is known only to the runner and the box and **is never sent**. The server cannot verify the MAC: it
+        parks the pair (last writer wins) until the runner verifies and attests the key. Then it creates the box's
+        host — `scope=member`, `type=cloud`, owner = the **box's** owner — and the host key is fixed: the same
+        key again is an idempotent `active`, another key is `409 cloud_box_agent_key_conflict` and nothing is
+        overwritten. The runner's attestation plus the owner device's `HostPin` stand where ADR-0146's
+        `host_register` signature stands for other hosts. Per-IP budget.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: boxId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloudBoxAgentRegisterRequest"
+      responses:
+        "200":
+          description: "`pending` (the runner has not attested yet) or `active` with the host."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBoxAgentRegister"
+        "400":
+          description: "`hostPublicKey` or `mac` is not 32 bytes of base64."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No such box (or one that can no longer host an agent), or the API is not enabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`cloud_box_agent_key_conflict` — another host key is already active for this box."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Too many requests from this address.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/cloud-box/listen:
+    get:
+      tags: [cloud-box]
+      operationId: listenCloudBoxAgent
+      summary: The box-agent's listen WebSocket (host-signed v2).
+      description: >
+        ADR-0197 M4 증보 2. Outbound only: the box-agent dials. The v2 request signature covers the path, so no
+        query string. The signing host must be an `active` box-agent of a box that is `running` or `idle` whose
+        owner is the host's owner. **One listener per host key**: a second is `409
+        cloud_box_agent_already_connected` while the first has been heard from in the last 45 seconds (a copy of
+        the volume must not displace the box). The server sends only text notices
+        `{"t":"attach","session":"<uuid>"}` and pings.
+      security:
+        - workHostAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkHostId"
+        - $ref: "#/components/parameters/WorkHostSentAt"
+        - $ref: "#/components/parameters/WorkHostSignature"
+        - $ref: "#/components/parameters/WorkHostRequestId"
+      responses:
+        "101":
+          description: Switching Protocols.
+        "401":
+          description: The signature, the host or its box is not accepted (one uniform answer).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The cloud box API is not enabled on this instance.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`cloud_box_agent_already_connected`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/cloud-box/relay/{sessionId}:
+    get:
+      tags: [cloud-box]
+      operationId: connectCloudBoxRelayAgent
+      summary: The box-agent's WebSocket of a blind-relay session (host-signed v2).
+      description: >
+        ADR-0197 M4 증보 2. Dialled by the box-agent after an attach notice. Claimed once, and only by the host the
+        session was authorised for. Binary messages only, at most 16 409 bytes, forwarded **unread** to and from
+        the owner device. The box-agent, not the server, verifies the owner device's signature and holds the keys.
+      security:
+        - workHostAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkHostId"
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/WorkHostSentAt"
+        - $ref: "#/components/parameters/WorkHostSignature"
+        - $ref: "#/components/parameters/WorkHostRequestId"
+      responses:
+        "101":
+          description: Switching Protocols.
+        "401":
+          description: The signature, the host or the session claim is not accepted (one uniform answer).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The cloud box API is not enabled on this instance.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-box-runner/identity:
+    put:
+      tags: [cloud-box]
+      operationId: putCloudBoxRunnerIdentity
+      summary: The runner's Ed25519 public key (set once).
+      description: >
+        ADR-0197 M4 증보 2. Runner credential only. The runner's public key, set once: the same key again is
+        200, another key is `409 cloud_box_runner_key_conflict` (a new key means a new runner registration and a
+        new fingerprint told to members out of band). The server stores and serves the key and **no fingerprint**.
+      security:
+        - cloudBoxRunnerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloudBoxRunnerIdentityRequest"
+      responses:
+        "200":
+          description: Stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBoxStored"
+        "400":
+          description: "`publicKey` is not 32 bytes of base64."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The runner credential is missing or not accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The cloud box API is not enabled on this instance, or no such box.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Too many refused credentials from this address.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`cloud_box_runner_key_conflict`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: An unknown field in the body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-box-runner/registrations:
+    get:
+      tags: [cloud-box]
+      operationId: listCloudBoxRegistrationsForRunner
+      summary: Box-agent registrations waiting for the runner to verify.
+      description: >
+        ADR-0197 M4 증보 2. Runner credential only. Parked registrations of live boxes (oldest first, at most 50):
+        the box id, the host key and the MAC. The runner verifies each MAC with the pairing code it injected and
+        attests or rejects. The server never sees the code.
+      security:
+        - cloudBoxRunnerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The parked registrations.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBoxRunnerRegistrations"
+        "401":
+          description: The runner credential is missing or not accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The cloud box API is not enabled on this instance, or no such box.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Too many refused credentials from this address.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-box-runner/boxes/{boxId}/attestation:
+    post:
+      tags: [cloud-box]
+      operationId: attestCloudBoxHost
+      summary: The runner attests a box's host key; the server creates the box's host.
+      description: >
+        ADR-0197 M4 증보 2. Runner credential only. The runner verified the registration MAC and signed
+        `attest_host(boxId, hostPublicKey)`. If the parked registration holds exactly this key, the server
+        creates the box's host (`scope=member`, `type=cloud`, owner = the box's owner) and marks the registration
+        `active`; the attestation is stored opaque for owner devices to verify against the runner key they pinned.
+        Idempotent for the same key; `409 cloud_box_registration_changed` when the parked key differs;
+        `409 cloud_box_agent_key_conflict` when another key is already active.
+      security:
+        - cloudBoxRunnerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: boxId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloudBoxRunnerAttestationRequest"
+      responses:
+        "200":
+          description: Stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBoxStored"
+        "400":
+          description: A key or attestation that is not base64 of 32 / 64 bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The runner credential is missing or not accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The cloud box API is not enabled on this instance, or no such box.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Too many refused credentials from this address.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`cloud_box_registration_changed` or `cloud_box_agent_key_conflict`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: An unknown field in the body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-box-runner/boxes/{boxId}/registration/reject:
+    post:
+      tags: [cloud-box]
+      operationId: rejectCloudBoxRegistration
+      summary: The runner could not verify a parked registration; free the slot.
+      description: >
+        ADR-0197 M4 증보 2. Runner credential only. The slot holding exactly this key becomes `rejected` (empty);
+        `stored` is whether one was. An `active` registration is never touched.
+      security:
+        - cloudBoxRunnerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: boxId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloudBoxRunnerRejectRequest"
+      responses:
+        "200":
+          description: Whether a pending slot was freed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBoxStored"
+        "401":
+          description: The runner credential is missing or not accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The cloud box API is not enabled on this instance, or no such box.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Too many refused credentials from this address.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: An unknown field in the body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-box-runner/boxes/{boxId}/provisioning:
+    get:
+      tags: [cloud-box]
+      operationId: getCloudBoxProvisioningForRunner
+      summary: The box's first owner device list, for the runner's `create`.
+      description: >
+        ADR-0197 M4 증보 2. Runner credential only. The `create` control stays the closed `{box, limits}` shape;
+        what the box additionally needs — the owner's signed first device list, opaque — is read here. `404
+        cloud_box_list_missing` when none was planted.
+      security:
+        - cloudBoxRunnerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: boxId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The owner device list bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBoxRunnerProvisioning"
+        "401":
+          description: The runner credential is missing or not accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The cloud box API is not enabled on this instance, or no such box.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Too many refused credentials from this address.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /v1/workspaces/{workspaceId}/agents:
     post:
       tags: [agents]
@@ -10951,7 +11674,7 @@ components:
       description: >
         ADR-0197 M2 runner credential `oort_runner.<runnerId>.<secret>`, minted by the
         instance operator's registration/rotation call and shown once. Bound to one workspace and
-        one runner; accepted only on the three `cloud-box-runner/*` routes, never as a human or
+        one runner; accepted only on the `cloud-box-runner/*` routes, never as a human or
         agent bearer. The server keeps its SHA-256 only.
     agentPortBearerAuth:
       type: http
@@ -12821,6 +13544,139 @@ components:
               state:
                 type: string
                 enum: [creating, running, idle, stopped, deleting, delete_failed, deleted]
+    CloudBoxStored:
+      type: object
+      required: [stored]
+      properties:
+        stored: {type: boolean}
+    CloudBoxHumanSignature:
+      type: object
+      required: [deviceKeyId, nonce, issuedAtMs, expiresAtMs, signature]
+      additionalProperties: false
+      description: >-
+        The envelope of a signed `momo.human.control.v3` control (ADR-0146 R2). The server rebuilds the 13-line
+        statement from its own rows plus these fields and verifies it under the device key.
+      properties:
+        deviceKeyId: {type: string, format: uuid}
+        nonce: {type: string, format: uuid, description: Spent once.}
+        issuedAtMs: {type: integer, format: int64}
+        expiresAtMs: {type: integer, format: int64, description: At most 10 minutes after issuedAtMs.}
+        signature: {type: string, description: "Raw r||s P-256 signature, standard base64."}
+    CloudBoxOwnerListRequest:
+      type: object
+      required: [list]
+      additionalProperties: false
+      properties:
+        list: {type: string, description: "Base64 of the owner-device-signed `DeviceList` bytes (1...2048)."}
+        signature:
+          $ref: "#/components/schemas/CloudBoxHumanSignature"
+    CloudBoxPinRequest:
+      type: object
+      required: [pin]
+      additionalProperties: false
+      properties:
+        pin: {type: string, description: "Base64 of the `HostPin` bytes (1...2048)."}
+    CloudBoxTrustBundle:
+      type: object
+      required: [boxId, agentOnline]
+      description: >-
+        Stored-and-forwarded trust chain. Deliberately has no fingerprint and no owner device list.
+      properties:
+        boxId: {type: string, format: uuid}
+        hostId: {type: string, format: uuid, nullable: true}
+        agentOnline: {type: boolean}
+        runner:
+          type: object
+          nullable: true
+          properties:
+            publicKey: {type: string, description: Base64 of the runner's 32-byte Ed25519 public key.}
+        host:
+          type: object
+          nullable: true
+          properties:
+            publicKey: {type: string, description: Base64 of the box host's 32-byte Ed25519 public key.}
+            attestation: {type: string, description: Base64 of the runner's 64-byte attestation of this host key for this box.}
+        pin: {type: string, nullable: true, description: Base64 of the stored `HostPin`.}
+    CloudBoxAttachRequest:
+      type: object
+      required: [hello]
+      additionalProperties: false
+      properties:
+        hello: {type: string, description: "Base64 of the handshake `Hello` the device will send first (1...256 bytes)."}
+        signature:
+          $ref: "#/components/schemas/CloudBoxHumanSignature"
+    CloudBoxAttach:
+      type: object
+      required: [sessionId, ticket, expiresAtMs, relay]
+      properties:
+        sessionId: {type: string, format: uuid}
+        ticket: {type: string, description: Single use, shown once. Offered as `ticket.<ticket>` in `Sec-WebSocket-Protocol`.}
+        expiresAtMs: {type: integer, format: int64}
+        relay:
+          type: object
+          required: [path, subprotocol]
+          properties:
+            path: {type: string, description: The WebSocket path of the device's relay socket.}
+            subprotocol: {type: string, enum: [oort.cloud-pty.v1]}
+    CloudBoxAgentRegisterRequest:
+      type: object
+      required: [hostPublicKey, mac]
+      additionalProperties: false
+      properties:
+        hostPublicKey: {type: string, description: Base64 of the box-agent's 32-byte Ed25519 host public key.}
+        mac: {type: string, description: Base64 of the 32-byte registration MAC (see the operation).}
+    CloudBoxAgentRegister:
+      type: object
+      required: [state]
+      properties:
+        state: {type: string, enum: [pending, active]}
+        workHost:
+          type: object
+          description: The box's host, once `active` (what `momo-workd register` is answered with, checked the same way).
+          required: [id, ownerMemberId, scope, type, publicKey]
+          properties:
+            id: {type: string, format: uuid}
+            ownerMemberId: {type: string, format: uuid}
+            scope: {type: string, enum: [member]}
+            type: {type: string, enum: [cloud]}
+            publicKey: {type: string}
+    CloudBoxRunnerIdentityRequest:
+      type: object
+      required: [publicKey]
+      additionalProperties: false
+      properties:
+        publicKey: {type: string, description: Base64 of the runner's 32-byte Ed25519 public key.}
+    CloudBoxRunnerRegistrations:
+      type: object
+      required: [registrations]
+      properties:
+        registrations:
+          type: array
+          items:
+            type: object
+            required: [boxId, hostPublicKey, mac]
+            properties:
+              boxId: {type: string, format: uuid}
+              hostPublicKey: {type: string}
+              mac: {type: string}
+    CloudBoxRunnerAttestationRequest:
+      type: object
+      required: [hostPublicKey, attestation]
+      additionalProperties: false
+      properties:
+        hostPublicKey: {type: string}
+        attestation: {type: string, description: Base64 of the 64-byte Ed25519 attestation.}
+    CloudBoxRunnerRejectRequest:
+      type: object
+      required: [hostPublicKey]
+      additionalProperties: false
+      properties:
+        hostPublicKey: {type: string}
+    CloudBoxRunnerProvisioning:
+      type: object
+      required: [ownerDeviceList]
+      properties:
+        ownerDeviceList: {type: string, description: Base64 of the owner-signed first `DeviceList` bytes.}
     CreatePersonalKeyAgentRequest:
       type: object
       required: [displayName, handle, model]

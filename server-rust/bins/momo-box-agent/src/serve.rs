@@ -433,6 +433,14 @@ pub async fn run(
                             let _ = socket.close(None).await;
                             return Exit::Shutdown;
                         }
+                        // A dead spawn helper is noticed here even when no notice arrives (L-A): the session thread
+                        // sets the flag, this tick acts on it.
+                        _ = tokio::time::sleep(Duration::from_millis(500)) => {
+                            while tasks.try_join_next().is_some() {}
+                            if poisoned.load(Ordering::SeqCst) {
+                                break;
+                            }
+                        }
                         message = socket.next() => {
                             match message {
                                 Some(Ok(Message::Text(text))) => {

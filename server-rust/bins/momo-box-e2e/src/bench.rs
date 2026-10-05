@@ -251,6 +251,8 @@ pub struct World {
     pub su: PgPool,
     pub http: reqwest::Client,
     pub base: String,
+    /// The server as the VM and the boxes reach it (`base` unless `external_host` was set).
+    pub external_base: String,
     pub state: AppState,
     pub workspace: Uuid,
     pub owner: Person,
@@ -326,6 +328,8 @@ pub struct BenchOptions {
     pub box_limits: BoxLimits,
     /// The program the PTY starts (same uid as this test process). `cat` echoes what is typed.
     pub program: (String, Vec<String>),
+    /// Listen on every interface and name this machine as `host` to everything outside (a VM, a box container).
+    pub external_host: Option<String>,
 }
 
 impl Default for BenchOptions {
@@ -340,6 +344,7 @@ impl Default for BenchOptions {
                 ..BoxLimits::default()
             },
             program: ("/bin/cat".to_string(), vec![]),
+            external_host: None,
         }
     }
 }
@@ -382,9 +387,8 @@ impl World {
                 claim_per_ip_limit: 0,
                 ..RateLimitConfig::default()
             });
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind");
+        let bind_to = if opts.external_host.is_some() { "0.0.0.0:0" } else { "127.0.0.1:0" };
+        let listener = tokio::net::TcpListener::bind(bind_to).await.expect("bind");
         let address: SocketAddr = listener.local_addr().expect("address");
         let serving = state.clone();
         tokio::spawn(async move {
@@ -394,7 +398,11 @@ impl World {
             )
             .await;
         });
-        let base = format!("http://{address}");
+        let base = format!("http://127.0.0.1:{}", address.port());
+        let external_base = match &opts.external_host {
+            Some(host) => format!("http://{host}:{}", address.port()),
+            None => base.clone(),
+        };
         let http = reqwest::Client::new();
         let owner = login(&http, &base, workspace, owner_id, &owner_email).await;
         let admin = login(&http, &base, workspace, admin_id, &admin_email).await;
@@ -403,6 +411,7 @@ impl World {
             su,
             http,
             base,
+            external_base,
             state,
             workspace,
             owner,
@@ -772,6 +781,51 @@ impl Bench {
             .and_then(Result::ok)
     }
 
+    pub fn target(&self) -> Target<'_> {
+        Target {
+            world: &self.world,
+            box_id: self.box_id,
+            host_id: self.host_id,
+            owner_device: &self.owner_device,
+            owner_list: &self.owner_list,
+            runner_fingerprint: self.runner_identity_fingerprint,
+        }
+    }
+
+    pub async fn pinned_client(&self, device: &Device) -> DeviceClient {
+        self.target().pinned_client(device).await
+    }
+
+    pub fn attach_body(&self, person: &Person, device: &Device, hello: &[u8]) -> Value {
+        self.target().attach_body(person, device, hello)
+    }
+
+    pub async fn attach(&self, client: &DeviceClient, device: &Device) -> Result<DeviceConn, String> {
+        self.target().attach(client, device).await
+    }
+
+    pub async fn open_relay_socket(&self, attach_answer: &Value) -> Result<RelaySocket, String> {
+        self.target().open_relay_socket(attach_answer).await
+    }
+}
+
+/// What a device needs to reach one box: the server, the box and its host, the owner's own device and list, and the
+/// runner fingerprint the member typed in (from the operator, NOT from the server). The in-process bench and the
+/// docker run both build one.
+pub struct Target<'a> {
+    pub world: &'a World,
+    pub box_id: Uuid,
+    pub host_id: Uuid,
+    pub owner_device: &'a Device,
+    pub owner_list: &'a DeviceList,
+    pub runner_fingerprint: [u8; 32],
+}
+
+impl Target<'_> {
+    pub fn box16(&self) -> [u8; BOX_ID_LEN] {
+        *self.box_id.as_bytes()
+    }
+
     /// A device client for `device` that knows the owner's list and the typed-in runner fingerprint, and has
     /// pinned the host (trust-bundle → `pin_host` → `PUT pin`), as the first-pairing UI does.
     pub async fn pinned_client(&self, device: &Device) -> DeviceClient {
@@ -780,7 +834,7 @@ impl Bench {
             DeviceListState::bootstrap(self.owner_list.clone()).expect("owner list"),
         );
         // What the member typed in from the operator, out of band: NOT from the server.
-        client.set_runner_fingerprint(self.runner_identity_fingerprint);
+        client.set_runner_fingerprint(self.runner_fingerprint);
         let (status, bundle) = self
             .world
             .get(&format!("/cloud-boxes/{}/trust-bundle", self.box_id), &self.world.owner.access)
@@ -1016,4 +1070,15 @@ pub async fn upgrade_refused_with(url: &str, headers: &[(&str, String)]) -> Opti
         Err(_) => Some(0),
         Ok(_) => None,
     }
+}
+
+/// Whether the box's host row is revoked (`None` when the box has no host).
+pub async fn host_revoked(world: &World, box_id: Uuid) -> Option<bool> {
+    sqlx::query_scalar(
+        "SELECT h.revoked_at IS NOT NULL FROM cloud_box_agent a JOIN work_host h ON h.id = a.host_id WHERE a.box_id = $1",
+    )
+    .bind(box_id)
+    .fetch_optional(&world.su)
+    .await
+    .expect("host row")
 }

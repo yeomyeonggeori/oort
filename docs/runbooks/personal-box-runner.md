@@ -1,4 +1,4 @@
-# 개인 클라우드 박스 — 런너 설치 런북 (ADR-0197 M2, H5 항목의 체크리스트)
+# 개인 클라우드 박스 — 런너 설치 런북 (ADR-0197 M2·M4, H5 항목의 체크리스트)
 
 `momo-box-runner`는 **런너 호스트 한 대**에서 한 워크스페이스의 박스(멤버당 컨테이너 1 + 볼륨 1)를 만들고 지우는 데몬이다. 서버로 outbound HTTPS만 하고(포트를 열지 않는다) 허용 동사 다섯 개(`create|start|stop|delete|status`)만 실행한다. 이 문서는 호스트를 준비하는 사람(런너 운영자)을 위한 것이다.
 
@@ -106,6 +106,52 @@
 
 6. **자격 회전**(분기마다·침해 의심 때): 인스턴스 운영자가 `POST …/cloud-box-runners/{runner}/rotate` 를 부르면 새 자격이 한 번 나오고 **옛 자격은 즉시 죽는다**(런너가 보유한 lease는 그대로). 새 자격으로 파일을 바꾸고 런너를 재시작한다. 폐기(`…/revoke`)는 되돌릴 수 없고, 런너가 쥔 컨트롤은 `pending`으로 돌아가며 새 런너가 등록되면 이어서 받는다. 런너가 401을 받으면 스스로 멈춘다.
 
+### 4.1 런너 신원과 지문 (M4, ADR-0197 D5 신뢰 사슬 1단계)
+
+런너는 박스 host 키를 **증명**하는 Ed25519 키를 가진다. 멤버의 기기는 서버가 아니라 **이 지문**을 믿음의 뿌리로 쓴다.
+
+```bash
+# 설정에 "signingKeyFile": "/var/lib/momo-box-runner/identity.key" (절대 경로)를 더한 뒤 한 번만:
+MOMO_BOX_RUNNER_CONFIG=/etc/momo-box-runner/runner.json momo-box-runner init-identity
+#   public_key=...
+#   fingerprint=<SHA-256, 소문자 hex 64자>
+```
+
+- **지문은 이 호스트의 콘솔에만 나온다**(`init-identity`와 런너 시작 때). 서버는 공개키만 받고(`PUT …/cloud-box-runner/identity`, 한 번만 정해진다), **지문을 응답에 싣지 않는다**: 기기가 공개키로 직접 계산한다.
+- **지문을 멤버에게 oort 밖 채널로 전한다**(대면, 별도 메신저, 사내 문서). 멤버는 박스를 처음 열 때 이 값을 기기에 **직접 입력**하고, 입력값과 서버가 준 공개키의 SHA-256이 같을 때만 「지문이 운영자가 알려 준 값과 같아요」가 나온다(UI는 M7, API 계약은 ADR 증보 2).
+- 시드 파일은 0600이고 `create_new`로만 만들어진다(덮어쓰지 않는다). 런너 키를 바꾸려면 런너를 새로 등록하고 새 지문을 다시 전한다(서버의 키는 한 번만 정해진다).
+- `signingKeyFile`을 설정하면 런너는 박스마다 **봉인 키·1회용 페어링 코드·소유자 첫 기기 목록**을 `stateDir/boxes/<박스 id>/inject/` 에 만들어 박스에 **읽기 전용**으로 바인드한다(`/run/oort-runner`, 파일은 root 소유·박스-agent 그룹만 읽기 0440). 페어링 코드는 서버로 가지 않는다: box-agent가 코드로 만든 MAC만 보내고 런너가 같은 코드로 검증해 host 키를 증명한다. 증명이 끝나면 코드 파일은 지워진다.
+
+### 4.2 host 키 영속: 호스트가 마운트한 `nosuid,nodev` 파일시스템 (M4, #3509 검수)
+
+Docker 볼륨은 `nosuid,nodev`로 마운트할 수 없고(실측: 로컬 드라이버의 `o=bind,nosuid,nodev` 옵션은 무시된다) box-agent의 host 키 저장소는 키 디렉터리가 그 마운트이길 요구한다. 그래서 **호스트가 미리 마운트한 전용 파일시스템**을 박스별 디렉터리로 바인드한다.
+
+```bash
+# 전용 파일시스템(전용 디스크·루프 파일 어느 쪽이든). 로컬 시험용은 tmpfs여도 된다(재부팅하면 사라진다).
+sudo mkdir -p /srv/oort-box-keys
+sudo mount -t tmpfs -o nosuid,nodev,noexec,size=64m tmpfs /srv/oort-box-keys     # 시험
+# 영속이 필요하면 루프 파일: truncate -s 256M /var/lib/oort-box-keys.img && mkfs.ext4 -q /var/lib/oort-box-keys.img \
+#   && sudo mount -o loop,nosuid,nodev,noexec /var/lib/oort-box-keys.img /srv/oort-box-keys
+findmnt -no OPTIONS /srv/oort-box-keys     # nosuid,nodev 가 보여야 한다
+```
+
+```json
+"hostKeyRoot": {"path": "/srv/oort-box-keys", "prepare": "runner"}
+```
+
+- 박스마다 `<path>/<박스 id>/{key,state}` 가 **박스-agent uid 0700**으로 만들어져 `/var/lib/oort-box` 에 바인드된다. 런너는 그 안을 **읽지 않는다**(만들고, 박스를 지울 때 지운다. `tests/no_volume_reads.rs`가 소스로 잠근다). 봉인된 host 키(`host.key`)와 에이전트 상태(`nonces.bin`, `registered.json`)가 여기 산다. **봉인 키는 이 마운트가 아니라 런너의 inject 디렉터리(tmpfs로 설치)에서만 온다**(D8: 키와 봉인 키가 한 장치에 있지 않다).
+- `prepare: "preexisting"` 은 런너가 이 경로를 볼 수 없는 호스트(개발 VM)용이다: 운영자가 디렉터리를 미리 만들고 소유자를 맞춘다. 없으면 박스 만들기가 닫힌 채 실패한다.
+- 마운트 옵션은 **박스 안에서** 다시 검사된다(`BoxKeyStore::from_env`가 mountinfo에서 `nosuid,nodev`를 요구한다). 바인드가 옵션을 물려받지 못하면 box-agent가 시작을 거부한다 — 조용히 완화하지 않는다.
+- `hostKeyRoot`가 없으면 host 키와 상태는 tmpfs(정지하면 사라짐, 개발 전용)이고 박스는 정지 뒤 다시 등록되지 못한다(host 키가 바뀌면 서버가 409로 거부한다).
+- 박스가 서버를 부르는 주소는 `boxServerUrl`(없으면 `serverUrl`). 운영은 https만(개발은 `allowInsecureLoopback` 로 http).
+
+### 4.3 박스를 만드는 순서와 막힌 곳 (M4)
+
+1. 소유자가 박스를 만든다(`POST …/cloud-boxes`).
+2. **소유자 기기가 첫 소유자 목록에 서명해 올린다**(`PUT …/cloud-boxes/{box}/owner-device-list`, R2 서명 필수). 이게 없으면 서버는 런너에게 `create`를 **내주지 않는다**(소유자 목록 없는 박스를 만들지 않는다). 목록이 끝내 오지 않는 박스는 `creating`에 머물며 자리를 차지하고, 소유자가 지우거나 M6 정리가 닫는다.
+3. 런너가 `create`를 받아 봉인 키·페어링 코드·목록을 준비하고 박스를 만든다. 박스-agent가 등록하면 런너가 MAC을 검증하고 host 키를 증명한다.
+4. 소유자의 기기가 지문을 입력해 대조하고 host 키에 서명해(`PUT …/pin`) 처음으로 붙는다.
+
 ## 5. 운영 중 보는 것
 
 - **고아 볼륨.** 런너는 주기적으로 호스트의 박스 볼륨과 서버의 박스 목록을 대조한다. 서버가 모르는(또는 `deleted`인) 볼륨은 **격리**(컨테이너 정지, 볼륨 유지)만 하고 장부에 적는다. **서버의 말만으로는 어떤 볼륨도 파기하지 않는다.** 파기는 ① 14일이 지나고 ② 운영자가 이 호스트에서 확인하고 ③ 일일 상한(기본 2개) 안일 때만 한다.
@@ -124,8 +170,10 @@
 
 | 한계 | 사정 |
 |---|---|
-| **host 키와 seal 키가 시작마다 새로 만들어지고 정지하면 사라진다**(tmpfs). | host 키 저장소는 키 디렉터리가 `nosuid,nodev` 마운트이길 요구하는데 **Docker 볼륨은 그렇게 마운트할 수 없다**(실측: 로컬 드라이버의 `o=bind,nosuid,nodev` 옵션은 무시된다). 영속은 호스트가 미리 `nosuid,nodev`로 마운트해 둔 전용 파일시스템 위의 디렉터리를 바인드해야 하고, 그 마운트 준비와 seal 키 전달(D8)은 M4/H5의 몫이다. box-agent 등록·페어링이 M4에서 붙기 전이라 지금은 잃을 신원이 없다. |
-| 서명된 tombstone으로 파기하는 길이 없다. | D10의 소유자·관리자 기기 서명 tombstone은 M4/M6의 기기 서명이 필요하다. 그때까지 서버 말만으로는 파기하지 않는다(5번). |
+| ~~host 키와 seal 키가 시작마다 새로 만들어진다~~ **(M4에서 닫음)** | `hostKeyRoot`(위 4.2)와 런너 inject 디렉터리(봉인 키)로 정지·재시작을 넘어 같은 host 키를 쓴다. `hostKeyRoot` 없이 쓰면 여전히 tmpfs다. |
+| **소유자 기기 목록 갱신 푸시와 box-agent 쪽 폐기 반영이 없다**(S2 조건 ④). | M4의 폐기는 서버 쪽 즉시 종료와 박스 재시작 때의 첫 목록 재적용이다. 서버가 폐기 전달을 막는 경우는 후속 이슈의 「채널 푸시」로만 닫힌다. |
+| **중계 레지스트리는 프로세스 메모리다.** | 기기와 box-agent의 두 소켓이 **같은 API 프로세스**에 도착해야 한다(API 인스턴스 하나, 또는 박스 단위 고정 라우팅). 다중 인스턴스는 후속 이슈. |
+| 서명된 tombstone으로 파기하는 길이 없다. | D10의 소유자·관리자 기기 서명 tombstone은 M6의 몫이다. 그때까지 서버 말만으로는 파기하지 않는다(5번). |
 | 박스의 bounding set을 비우지 못한다(`CapBnd=c0`). | `CAP_SETPCAP`이 없다. 나머지 capability 집합은 비어 있고 `no_new_privs`·setuid 바이너리 없음이라 얻을 길이 없다(M3 L-D). |
 | 디스크 한도가 호스트에 달려 있다. | 위 6번(pquota). 개발 호스트의 `unenforced-dev`는 한도를 적용하지 않는다. |
 | 컨테이너 탈출은 커널 취약점이다(T3). | gVisor/microVM은 H3. |
@@ -135,6 +183,9 @@
 ```bash
 infra/personal-box/verify-m2.sh --self-test
 infra/personal-box/verify-m2.sh --sabotage probe
+infra/personal-box/verify-m4.sh --self-test      # M4: 기기 ↔ 서버 중계 ↔ 진짜 박스 컨테이너(런너가 만든)
 ```
 
 `verify-m2.sh` 는 이미지(추가된 파일이 에이전트와 스크립트 둘뿐인지, `momo-box-probe` 없음, setuid 없음)를 검사하고, 실제 Docker에서 서버 라우터 ↔ 진짜 런너 ↔ 박스의 만들기·시작·정지·재시작·삭제(검증 보고)와 고아 볼륨 격리·파기를 돌린다. 격리된 PostgreSQL 18(`DATABASE_URL`)이 필요하고 이 스크립트가 만드는 Docker 객체는 모두 `momo-m2-` 접두사이며 끝나면 지운다.
+
+`verify-m4.sh` 는 같은 틀에 신뢰 사슬과 중계를 더한다: 런너 바이너리(Linux)를 Colima VM 안에서 root로 돌리고(`hostKeyRoot` 는 VM이 `nosuid,nodev` 로 마운트한 tmpfs), 진짜 박스 컨테이너의 box-agent가 등록·증명·핸드셰이크를 하며, 소유자 기기(소프트웨어 P-256 키)가 서버 중계를 거쳐 PTY를 열고 입력·출력하고, 표식이 서버 로그·DB 덤프에 없고, 기기 폐기에 세션이 끝나고, 정지·재시작 뒤 같은 host 키로 다시 붙고, helper를 죽이면 에이전트가 다시 시작해 이어 붙고, 삭제하면 봉인 키와 키 디렉터리가 사라진다. 이 스크립트가 만드는 Docker 객체는 모두 `momo-m4-` 접두사이며 끝나면 지운다.
