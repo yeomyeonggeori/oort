@@ -197,6 +197,10 @@ export PGHOST=127.0.0.1 PGPORT="$PG_PORT" PGDATABASE=momo PGUSER=momo PGPASSWORD
   # managed+hosted workspace and the inactive-hosted no-fallback proof.
   cargo test -p momo-server --test agent_port_tools_conformance_pg \
     -- --ignored --test-threads=1 --nocapture
+  # Layer 3 — ADR-0162 증보 3 D10 (#3515): a work request to a hosted agent, the
+  # refusals that write nothing, owner_only / Claude conservative mode unchanged.
+  cargo test -p momo-server --test hosted_work_request_conformance_pg \
+    -- --ignored --test-threads=1 --nocapture
 )
 
 remove_owned
