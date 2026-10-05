@@ -663,21 +663,13 @@ async fn limits_the_frame_size_cap_admits_the_largest_frame_and_ends_a_larger_me
         .send(tokio_tungstenite::tungstenite::Message::Binary(oversized.into()))
         .await;
     let closed = conn.wait_closed(Duration::from_secs(5)).await;
-    assert!(closed.is_some(), "the oversized message ended the socket");
+    assert_eq!(closed.as_deref(), Some("message_too_large"), "the oversized message ended the socket, by name");
     let deadline = Instant::now() + Duration::from_secs(5);
     while bench.world.state.cloud_relay.session_count() > 0 {
         assert!(Instant::now() < deadline, "the session outlived an oversized message");
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let reasons = end_reasons(&bench).await;
-        if reasons.iter().any(|r| r == "message_too_large" || r == "peer_closed") {
-            break;
-        }
-        assert!(Instant::now() < deadline, "no end row for the oversized message: {reasons:?}");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    wait_for_end_audit(&bench, "message_too_large").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1145,4 +1137,33 @@ async fn the_box_ends_a_session_on_its_own_when_the_server_would_not() {
     assert!(conn.wait_closed(Duration::from_secs(8)).await.is_some(), "the box hung up on its own");
     assert!(started.elapsed() < Duration::from_secs(5));
     wait_for_end_audit(&bench, "peer_closed").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs an isolated PostgreSQL 18 (3511)"]
+async fn a_session_socket_can_only_be_claimed_by_the_host_it_was_authorised_for() {
+    let bench = Bench::up(BenchOptions::default()).await;
+    let hub = &bench.world.state.cloud_relay;
+    let session_id = Uuid::new_v4();
+    let opened = hub
+        .open_session(OpenParams {
+            session_id,
+            workspace_id: bench.world.workspace,
+            box_id: bench.box_id,
+            host_id: bench.host_id,
+            member_id: bench.world.owner.id,
+            device_key_id: bench.owner_device.key_id,
+            hello_sha256: [1u8; 32],
+        })
+        .expect("open");
+    assert_eq!(opened.session_id, session_id);
+    // Another host (or another workspace) is refused; the real host gets it, once.
+    assert!(hub.claim_box(bench.world.workspace, Uuid::new_v4(), session_id).is_none());
+    assert!(hub.claim_box(Uuid::new_v4(), bench.host_id, session_id).is_none());
+    assert!(hub.claim_box(bench.world.workspace, bench.host_id, session_id).is_some());
+    assert!(hub.claim_box(bench.world.workspace, bench.host_id, session_id).is_none(), "claimed once");
+    // The device side likewise: wrong box, wrong workspace, wrong ticket are the same `None`.
+    assert!(hub.claim_device(bench.world.workspace, Uuid::new_v4(), session_id, &opened.ticket).is_none());
+    assert!(hub.claim_device(bench.world.workspace, bench.box_id, session_id, "nope").is_none());
+    assert!(hub.claim_device(bench.world.workspace, bench.box_id, session_id, &opened.ticket).is_some());
 }

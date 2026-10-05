@@ -219,7 +219,9 @@ pub async fn session_socket(
     };
     let hub = state.cloud_relay.clone();
     Ok(upgrade
-        .max_message_size(MAX_RELAY_MESSAGE)
-        .max_frame_size(MAX_RELAY_MESSAGE)
+        // The relay's own check (exactly `MAX_RELAY_MESSAGE`, answered `message_too_large`) sees every over-size message
+        // first; the socket's limit is a backstop a kilobyte above it so a huge message is never buffered.
+        .max_message_size(MAX_RELAY_MESSAGE + 1024)
+        .max_frame_size(MAX_RELAY_MESSAGE + 1024)
         .on_upgrade(move |socket| run_end(hub, socket, end)))
 }
