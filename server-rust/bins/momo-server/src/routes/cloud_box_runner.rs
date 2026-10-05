@@ -26,17 +26,17 @@
 //!    unless `MOMO_CLOUD_BOX_ENABLED=true` (the same gate as the box routes).
 //! 2. **Cheap to refuse.** A token without the runner shape and an address whose refused-credential
 //!    budget is spent are turned away before any database work; bodies are capped at 4 KiB.
-//! 2b. **One uniform 401.** Malformed token, another credential class, unknown
+//! 3. **One uniform 401.** Malformed token, another credential class, unknown
 //!    runner, another workspace's runner (RLS hides it), revoked runner, wrong
 //!    secret: the same status and the same sentence, so the answer teaches nothing
 //!    about which check failed. Only refusals count against the per-IP budget, so
 //!    a runner polling every few seconds is never throttled.
-//! 3. **The runner acts as itself, in its workspace.** The credential is bound to a
+//! 4. **The runner acts as itself, in its workspace.** The credential is bound to a
 //!    workspace; the `{ws}` in the path is where the tenant transaction opens and
 //!    the runner is looked up *inside it*, so a runner credential presented for
 //!    another workspace finds no row. Authentication and the action share one
 //!    transaction.
-//! 4. **Closed bodies.** Unknown fields are refused (422) on every request body.
+//! 5. **Closed bodies.** Unknown fields are refused (422) on every request body.
 
 use axum::body::Bytes;
 use axum::extract::{Path, Request, State};
