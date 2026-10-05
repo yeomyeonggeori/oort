@@ -39,6 +39,19 @@ export const DOORBELL_LEAD =
 export const DOORBELL_EMPTY_HEADLINE = "도어벨이 아직 없어요.";
 export const DOORBELL_EMPTY_DETAIL =
   "그록봇에 webhook 루틴을 만든 뒤, 받은 https 주소와 sender key를 넣으세요. 루틴 문안은 셀프호스트 에이전트 플레이북의 도어벨 절에 있어요.";
+/**
+ * 도어벨 사전 점검 (#3523). 서버가 도어벨을 켜 뒀는지 읽는 상태·설정 길은 없다.
+ * 꺼진 서버는 저장 때 본문 없는 404 로만 답한다(위 머리말). 그래서 켜졌다고 말하지 않고
+ * 준비물 셋을 보여 주고, 서버 쪽은 저장해 봐야 안다고 말한다. 점검용으로 쓰기를 쏘지 않는다.
+ */
+export const DOORBELL_PRECHECK_HEADLINE = "시작하기 전에 준비해요";
+export const DOORBELL_PRECHECK_NOTE =
+  "서버가 도어벨을 켜 뒀는지는 미리 알 수 없어요. 저장할 때 꺼져 있으면 알려줘요.";
+export const DOORBELL_PRECHECK_ITEMS: readonly string[] = [
+  "서버 운영자가 MOMO_DOORBELL_ENABLED를 true로 켰어요.",
+  "그록봇에 webhook 루틴을 만들었어요.",
+  "루틴이 준 https 주소와 sender key를 갖고 있어요.",
+];
 export const DOORBELL_GATE_OFF_HEADLINE = "이 서버는 도어벨이 꺼져 있어요.";
 export const DOORBELL_GATE_OFF_DETAIL =
   "운영자가 MOMO_DOORBELL_ENABLED를 열기 전에는 등록할 수 없어요. 꺼진 것은 고장이 아니에요.";
