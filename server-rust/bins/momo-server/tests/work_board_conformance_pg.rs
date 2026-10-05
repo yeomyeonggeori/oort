@@ -1818,6 +1818,16 @@ async fn b9_a_hosted_work_run_is_a_run_item_only_when_asked_and_shows_no_detail(
             .unwrap_or_else(|| panic!("{ledger} run listed"));
         assert_eq!(found["status"], board_word, "{ledger}");
         assert_eq!(found["state"], board_word, "{ledger}");
+        // Migration 120's SQL table (the realtime trigger) is the same mapping.
+        let sql_word: String = sqlx::query_scalar("SELECT work_run_board_state($1)")
+            .bind(ledger)
+            .fetch_one(&b.su)
+            .await
+            .unwrap();
+        assert_eq!(
+            sql_word, board_word,
+            "{ledger}: trigger vocabulary == board vocabulary"
+        );
     }
 
     // No request record: still listed, requestedBy absent.
