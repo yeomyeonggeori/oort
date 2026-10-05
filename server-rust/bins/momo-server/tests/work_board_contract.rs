@@ -265,11 +265,16 @@ fn the_closed_lists_and_the_realtime_contract_match_the_server() {
     let at = at + block[at..].find(key).unwrap() + key.len();
     let end = block[at..].find(']').unwrap();
     let documented: Vec<&str> = block[at..at + end].split(',').map(str::trim).collect();
-    assert_eq!(
-        documented,
-        momo_t3::work_share::DERIVED_STATES,
-        "state enum"
-    );
+    // The shared S1 states plus `failed`, which only a run item carries (D13).
+    let mut expected: Vec<&str> = momo_t3::work_share::DERIVED_STATES.to_vec();
+    expected.insert(expected.len() - 1, "failed");
+    assert_eq!(documented, expected, "state enum");
+    for word in ["waiting", "running", "done", "failed", "stopped"] {
+        assert!(
+            documented.contains(&word),
+            "a run's board status {word} is a state"
+        );
+    }
 
     // event -> refetch: the spec names the event the server emits.
     let event = momo_t3::work_share::share_changed_payload(
@@ -290,6 +295,18 @@ fn the_closed_lists_and_the_realtime_contract_match_the_server() {
         list_op.contains("re-reads this list"),
         "and says to refetch"
     );
+    // #3517: the run-state event is documented under its real name, and the
+    // trigger (migration 120) emits that name.
+    assert!(
+        list_op.contains("work.run.updated"),
+        "the run event is documented"
+    );
+    let migration = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../server/Migrations/120_work_run_updated_event.sql"
+    ))
+    .expect("read migration 120");
+    assert!(migration.contains("'work.run.updated'"));
     assert_eq!(
         json!(event["data"]["payload"].as_object().unwrap().len()),
         json!(3),

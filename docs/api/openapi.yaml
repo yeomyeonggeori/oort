@@ -7628,6 +7628,21 @@ paths:
         message events of the channel; clients re-read the same way. Diff-only
         updates emit no event, so a board that wants fresh numbers refetches on
         focus or on a slow timer.
+
+        Hosted agents' work runs (#3517, ADR-0162 증보 3 D13), opt-in with
+        include=runs: the same list also carries source="run" rows for runs of
+        type work whose agent has a hosted connection, behind the same
+        home-channel membership filter. A run linked to a work session is not
+        listed (the session row represents it); mention runs and managed or
+        BYOA work runs are never listed. A run row has runId instead of
+        sessionId, status waiting|running|done|failed|stopped, the agent as owner,
+        requestedBy (absent when no request record exists), stages, stepCount, the
+        validated artifacts (branch, diff added/deleted, commits, pr url and
+        number) and lastActivityAt; it never carries the agent's detail, text
+        deltas, reply body or error. A run's state transition (not a stage or
+        step update) is broadcast as work.run.updated (run_id, channel_id, to) on
+        the home channel; clients re-read as for sessions. The single read below
+        is sessions only; a run card is read from the agent-runs detail.
       security:
         - bearerAuth: []
       parameters:
@@ -15438,7 +15453,7 @@ components:
           description: >
             momo-core SessionStatus: waiting (나를 기다림), running (실행 중),
             review (검토 대기), idle (대기), done (끝남), stopped (멈춤).
-          enum: [waiting, running, review, idle, done, failed, stopped]
+          enum: [waiting, running, review, idle, done, stopped]
         stages:
           type: array
           nullable: true
@@ -15583,7 +15598,7 @@ components:
           description: Closed harness list for local_pty; the tool key for an agent-lane session.
         state:
           type: string
-          enum: [waiting, running, review, idle, done, stopped]
+          enum: [waiting, running, review, idle, done, failed, stopped]
         stages:
           type: array
           maxItems: 12
