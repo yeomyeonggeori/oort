@@ -21,6 +21,11 @@
 //! | `b6_host_and_agent_credentials_cannot_read_the_board` | 호스트 서명·에이전트 토큰 거부 | `require_human` |
 //! | `b7_no_terminal_control_or_commit_field_on_the_wire` | 응답 키 전수 · 금지 키 없음 | `SharedWorkSessionDto` field list |
 //! | `b8_agent_session_retention_and_archived_channel` | 종료 30일 뒤(A·L 모두, 공유 행이 남아 있어도)·보관 채널 사라짐 | the retention / `archived_at` predicates |
+//! | `b9_a_hosted_work_run_is_a_run_item_only_when_asked_and_shows_no_detail` | run 항목 모양·상태 매핑·요청자·단계/산출물·기본(`include` 없음)은 세션만·D15 비노출 | the `runs` CTE, the `$8` opt-in, the status map |
+//! | `b10_run_items_follow_channel_membership_and_tenant` | 비멤버·떠난 멤버·보관 채널·타 테넌트는 run을 못 봄 | the `membership ms` join in `runs` |
+//! | `b11_mention_managed_linked_and_stale_runs_are_not_listed` | mention·managed work run 제외, 세션에 연결된 run은 세션 한 줄만, 종료 30일 뒤 제외 | the `input.type` / hosted `EXISTS` / `NOT EXISTS` link / retention predicates |
+//! | `b12_a_cursor_is_stable_across_mixed_sources` | 세션+run 혼합 목록의 커서 완전·무중복·동률 안정 | the `(activity_us, id) <` keyset over `board` |
+//! | `b13_work_run_updated_fires_on_board_transitions_only` | 보드 어휘 전환·생성에서만 `work.run.updated`, 단계/step 갱신·승인 보류·mention/managed에서는 없음 | the trigger's state comparison and its type/hosted guards |
 //!
 //! Every refusal test also takes the legitimate path beside it, so none of them
 //! can pass by a route that refuses everything, and each asserts the status and
@@ -1174,10 +1179,16 @@ async fn b4_another_tenant_sees_nothing_under_rls_alone() {
                 momo_t3::work_board::get_board_item_in_tx(conn, workspace_a, viewer_a, session)
                     .await
                     .expect("query");
-            let page =
-                momo_t3::work_board::list_board_in_tx(conn, workspace_a, viewer_a, None, 100)
-                    .await
-                    .expect("query");
+            let page = momo_t3::work_board::list_board_in_tx(
+                conn,
+                workspace_a,
+                viewer_a,
+                false,
+                None,
+                100,
+            )
+            .await
+            .expect("query");
             Ok::<_, momo_db::DbError>((one.is_some(), page.items.len()))
         })
     })
@@ -1383,6 +1394,7 @@ async fn b7_no_terminal_control_or_commit_field_on_the_wire() {
     let mut allowed = vec![
         "sessions",
         "nextCursor",
+        "source",
         "sessionId",
         "origin",
         "label",
@@ -1529,4 +1541,753 @@ async fn b8_agent_session_retention_and_archived_channel() {
     assert_eq!(b.one(&b.alice_token, local).await.status(), 404);
     assert!(ids(&b.list(&b.alice_token, "").await).is_empty());
     let _ = b.bob;
+}
+
+// ---------------------------------------------------------------------------
+// 9..13 — hosted agents' work runs on the board (#3517, ADR-0162 증보 3 D13)
+// ---------------------------------------------------------------------------
+
+/// A hosted connection row is all the board's predicate asks for (the same
+/// `EXISTS` `load_eligible_agent_in_tx` uses for `has_hosted_connection`).
+async fn make_hosted(su: &PgPool, tenant: &Tenant, agent: Uuid) {
+    // Migration 069's guard: a hosted connection needs the sentinel agent shape.
+    sqlx::query(
+        "UPDATE agent SET model = 'hosted-agent', base_url = 'https://hosted-agent.invalid/disabled', \
+                config = jsonb_build_object('execution_mode', 'hosted_dial_in') \
+          WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(tenant.workspace)
+    .bind(agent)
+    .execute(su)
+    .await
+    .expect("make the agent a hosted sentinel");
+    sqlx::query(
+        "INSERT INTO hosted_agent_connection \
+           (workspace_id, agent_member_id, status, created_by, pairing_challenge_hash, pairing_expires_at) \
+         VALUES ($1, $2, 'pairing_pending', $3, '\\x00'::bytea, now() + interval '1 hour')",
+    )
+    .bind(tenant.workspace)
+    .bind(agent)
+    .bind(tenant.owner)
+    .execute(su)
+    .await
+    .expect("seed hosted connection");
+}
+
+async fn extra_agent(su: &PgPool, tenant: &Tenant, channel: Uuid, hosted: bool) -> Uuid {
+    let agent = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, 'agent', 'managed', $3)",
+    )
+    .bind(agent)
+    .bind(tenant.workspace)
+    .bind(format!("a{}", agent.simple()))
+    .execute(su)
+    .await
+    .expect("seed extra agent member");
+    sqlx::query(
+        "INSERT INTO agent (member_id, workspace_id, model, base_url, max_concurrent_runs, \
+                            max_run_steps, owner_human_id) \
+         VALUES ($1, $2, $3, 'https://gateway.invalid/v1', 4, 50, $4)",
+    )
+    .bind(agent)
+    .bind(tenant.workspace)
+    .bind(AGENT_MODEL)
+    .bind(tenant.owner)
+    .execute(su)
+    .await
+    .expect("seed extra agent");
+    join_channel(su, tenant.workspace, channel, agent).await;
+    if hosted {
+        make_hosted(su, tenant, agent).await;
+    }
+    agent
+}
+
+struct RunSpec {
+    agent: Uuid,
+    channel: Uuid,
+    status: &'static str,
+    input: Value,
+    output: Option<Value>,
+    requester: Option<Uuid>,
+    /// Seconds ago for created/updated/finished (all the same instant).
+    age_secs: i64,
+    step_count: i32,
+}
+
+impl RunSpec {
+    fn work(tenant: &Tenant, status: &'static str) -> Self {
+        RunSpec {
+            agent: tenant.agent,
+            channel: tenant.channel,
+            status,
+            input: json!({"type": "work", "title": "로그인 버그 수정", "brief": "SECRET-BRIEF"}),
+            output: None,
+            requester: Some(tenant.owner),
+            age_secs: 60,
+            step_count: 0,
+        }
+    }
+}
+
+async fn seed_work_run(su: &PgPool, tenant: &Tenant, spec: RunSpec) -> Uuid {
+    let run = Uuid::new_v4();
+    let terminal = matches!(
+        spec.status,
+        "succeeded" | "failed" | "cancelled" | "timed_out"
+    );
+    let error = (spec.status == "failed").then(|| json!({"message": "SECRET-ERROR"}));
+    sqlx::query(
+        "INSERT INTO agent_run \
+           (id, workspace_id, agent_member_id, channel_id, status, input, output, error, \
+            idempotency_key, step_count, started_at, finished_at, created_at, updated_at) \
+         VALUES ($1, $2, $3, $4, $5::run_status, $6, $7, $8, $9, $10, \
+                 now() - make_interval(secs => $11::double precision), \
+                 CASE WHEN $12 THEN now() - make_interval(secs => $11::double precision) END, \
+                 now() - make_interval(secs => $11::double precision), \
+                 now() - make_interval(secs => $11::double precision))",
+    )
+    .bind(run)
+    .bind(tenant.workspace)
+    .bind(spec.agent)
+    .bind(spec.channel)
+    .bind(spec.status)
+    .bind(&spec.input)
+    .bind(&spec.output)
+    .bind(error)
+    .bind(format!("b9:{run}"))
+    .bind(spec.step_count)
+    .bind(spec.age_secs as f64)
+    .bind(terminal)
+    .execute(su)
+    .await
+    .expect("seed work run");
+    if let Some(requester) = spec.requester {
+        sqlx::query(
+            "INSERT INTO audit_log (workspace_id, actor_member_id, action, target_type, target_id, run_id) \
+             VALUES ($1, $2, 'agent.work.queued', 'agent_run', $3, $3)",
+        )
+        .bind(tenant.workspace)
+        .bind(requester)
+        .bind(run)
+        .execute(su)
+        .await
+        .expect("seed requester audit row");
+    }
+    run
+}
+
+/// `runId` for a run row, `sessionId` for a session row.
+fn item_ids(list: &Value) -> Vec<String> {
+    list["sessions"]
+        .as_array()
+        .expect("sessions")
+        .iter()
+        .map(|item| {
+            item["runId"]
+                .as_str()
+                .or_else(|| item["sessionId"].as_str())
+                .expect("id")
+                .to_string()
+        })
+        .collect()
+}
+
+fn run_items(list: &Value) -> Vec<&Value> {
+    list["sessions"]
+        .as_array()
+        .expect("sessions")
+        .iter()
+        .filter(|item| item["source"] == "run")
+        .collect()
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL)"]
+async fn b9_a_hosted_work_run_is_a_run_item_only_when_asked_and_shows_no_detail() {
+    let b = board().await;
+    make_hosted(&b.su, &b.tenant, b.tenant.agent).await;
+    let now = now_ms() / 1000;
+    let session = b
+        .local(
+            b.tenant.channel,
+            "공유",
+            Some(payload_with(now - 500, "running")),
+        )
+        .await;
+    let mut spec = RunSpec::work(&b.tenant, "succeeded");
+    spec.output = Some(json!({
+        "stages": ["원인 찾음", "수정 커밋", "PR 올림"],
+        "artifacts": {
+            "prUrl": "https://github.com/yeomyeonggeori/oort/pull/3517",
+            "branch": "feat/3517-board",
+            "added": 128, "deleted": 40, "commits": 3
+        },
+        "body": "SECRET-BODY",
+        "usage": {"detail": "SECRET-USAGE"},
+        "message_id": Uuid::new_v4().to_string()
+    }));
+    spec.step_count = 3;
+    let run = seed_work_run(&b.su, &b.tenant, spec).await;
+
+    // Default: sessions only — a client that keys rows on sessionId never meets a run.
+    let plain = b.list(&b.alice_token, "").await;
+    assert_eq!(item_ids(&plain), vec![session.to_string()]);
+    assert_eq!(plain["sessions"][0]["source"], "session");
+    assert_eq!(plain["sessions"][0]["sessionId"], session.to_string());
+
+    // Opted in: the run is one more row, newest first.
+    let list = b.list(&b.alice_token, "?include=runs").await;
+    assert_eq!(item_ids(&list), vec![run.to_string(), session.to_string()]);
+    let item = &list["sessions"][0];
+    assert_eq!(item["source"], "run");
+    assert_eq!(item["runId"], run.to_string());
+    assert!(item.get("sessionId").is_none(), "{item}");
+    assert_eq!(item["label"], "로그인 버그 수정");
+    assert_eq!(item["origin"], "agent_run");
+    assert_eq!(item["status"], "done");
+    assert_eq!(item["state"], "done");
+    assert_eq!(item["owner"]["memberId"], b.tenant.agent.to_string());
+    assert_eq!(item["requestedBy"]["memberId"], b.tenant.owner.to_string());
+    assert_eq!(item["requestedBy"]["displayName"], "성재");
+    assert_eq!(item["homeChannel"]["id"], b.tenant.channel.to_string());
+    assert_eq!(item["stages"], json!(["원인 찾음", "수정 커밋", "PR 올림"]));
+    assert_eq!(item["stepCount"], 3);
+    assert_eq!(item["commits"], 3);
+    assert_eq!(item["branch"], "feat/3517-board");
+    assert_eq!(item["diff"]["added"], 128);
+    assert_eq!(item["diff"]["deleted"], 40);
+    assert_eq!(
+        item["pr"],
+        json!({"url": "https://github.com/yeomyeonggeori/oort/pull/3517", "number": 3517})
+    );
+    assert_eq!(
+        item["prUrl"],
+        "https://github.com/yeomyeonggeori/oort/pull/3517"
+    );
+    assert!(item["endedAtMs"].is_i64());
+
+    // D15: nothing the agent wrote in free text beyond markers/branch reaches the
+    // wire — not the brief, the reply body, the usage detail, nor the error.
+    let wire = serde_json::to_string(&list).unwrap();
+    for secret in [
+        "SECRET-BRIEF",
+        "SECRET-BODY",
+        "SECRET-USAGE",
+        "SECRET-ERROR",
+    ] {
+        assert!(!wire.contains(secret), "{secret} leaked: {wire}");
+    }
+    let mut keys = Vec::new();
+    collect_keys(item, &mut keys);
+    for forbidden in [
+        "body",
+        "detail",
+        "textDelta",
+        "error",
+        "input",
+        "output",
+        "props",
+        "message_id",
+    ] {
+        assert!(!keys.iter().any(|key| key == forbidden), "{forbidden}");
+    }
+
+    // D13's status words, one run per ledger status.
+    for (ledger, board_word) in [
+        ("queued", "waiting"),
+        ("running", "running"),
+        ("awaiting_approval", "running"),
+        ("paused", "running"),
+        ("failed", "failed"),
+        ("timed_out", "failed"),
+        ("cancelled", "stopped"),
+    ] {
+        let id = seed_work_run(
+            &b.su,
+            &b.tenant,
+            RunSpec::work(&b.tenant, ledger_static(ledger)),
+        )
+        .await;
+        let list = b.list(&b.alice_token, "?include=runs&limit=100").await;
+        let found = run_items(&list)
+            .into_iter()
+            .find(|item| item["runId"] == id.to_string())
+            .unwrap_or_else(|| panic!("{ledger} run listed"));
+        assert_eq!(found["status"], board_word, "{ledger}");
+        assert_eq!(found["state"], board_word, "{ledger}");
+    }
+
+    // No request record: still listed, requestedBy absent.
+    let mut anonymous = RunSpec::work(&b.tenant, "running");
+    anonymous.requester = None;
+    let id = seed_work_run(&b.su, &b.tenant, anonymous).await;
+    let list = b.list(&b.alice_token, "?include=runs&limit=100").await;
+    let found = run_items(&list)
+        .into_iter()
+        .find(|item| item["runId"] == id.to_string())
+        .expect("listed without a requester");
+    assert!(found.get("requestedBy").is_none());
+
+    // A run item never has a single-read route (the card is the agent-runs detail).
+    assert_eq!(b.one(&b.alice_token, run).await.status(), 404);
+}
+
+fn ledger_static(status: &str) -> &'static str {
+    match status {
+        "queued" => "queued",
+        "running" => "running",
+        "awaiting_approval" => "awaiting_approval",
+        "paused" => "paused",
+        "failed" => "failed",
+        "timed_out" => "timed_out",
+        "cancelled" => "cancelled",
+        other => panic!("{other}"),
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL)"]
+async fn b10_run_items_follow_channel_membership_and_tenant() {
+    let b = board().await;
+    make_hosted(&b.su, &b.tenant, b.tenant.agent).await;
+    let run = seed_work_run(&b.su, &b.tenant, RunSpec::work(&b.tenant, "running")).await;
+
+    // Legitimate neighbours: a channel member sees it.
+    for token in [&b.alice_token, &b.owner_token] {
+        let list = b.list(token, "?include=runs").await;
+        assert_eq!(item_ids(&list), vec![run.to_string()]);
+    }
+    // bob is only in channel 2 — nothing, not an error, and no count.
+    let bob = b.list(&b.bob_token, "?include=runs").await;
+    assert!(item_ids(&bob).is_empty(), "{bob}");
+    assert!(bob["nextCursor"].is_null());
+
+    // A member who left no longer sees it.
+    sqlx::query("UPDATE membership SET left_at = now() WHERE channel_id = $1 AND member_id = $2")
+        .bind(b.tenant.channel)
+        .bind(b.alice)
+        .execute(&b.su)
+        .await
+        .unwrap();
+    assert!(item_ids(&b.list(&b.alice_token, "?include=runs").await).is_empty());
+    assert_eq!(
+        item_ids(&b.list(&b.owner_token, "?include=runs").await),
+        vec![run.to_string()]
+    );
+
+    // A run in channel 2 is bob's, not alice's.
+    let two = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            channel: b.channel2,
+            ..RunSpec::work(&b.tenant, "running")
+        },
+    )
+    .await;
+    // (the agent must be a channel-2 member for nothing; membership of the
+    // *viewer* is what the board checks)
+    assert_eq!(
+        item_ids(&b.list(&b.bob_token, "?include=runs").await),
+        vec![two.to_string()]
+    );
+    assert!(
+        !item_ids(&b.list(&b.alice_token, "?include=runs").await).contains(&two.to_string()),
+        "alice (channel 1 only, rejoined below) does not see channel 2's run"
+    );
+    join_channel(&b.su, b.tenant.workspace, b.tenant.channel, b.alice).await;
+    assert_eq!(
+        item_ids(&b.list(&b.alice_token, "?include=runs").await),
+        vec![run.to_string()]
+    );
+
+    // An archived channel takes its runs off the board.
+    sqlx::query("UPDATE channel SET archived_at = now() WHERE id = $1")
+        .bind(b.tenant.channel)
+        .execute(&b.su)
+        .await
+        .unwrap();
+    assert!(item_ids(&b.list(&b.alice_token, "?include=runs").await).is_empty());
+    sqlx::query("UPDATE channel SET archived_at = NULL WHERE id = $1")
+        .bind(b.tenant.channel)
+        .execute(&b.su)
+        .await
+        .unwrap();
+
+    // Another tenant: its owner sees none of this tenant's runs (and its own
+    // listing is empty), and under RLS alone — the viewer id is this tenant's, the
+    // transaction is the other's — the read is empty as well.
+    let other = seed_tenant(&b.su, &b.app).await;
+    let other_token = token_for(&b, &other).await;
+    let theirs = b
+        .get(
+            &other_token,
+            board_list_url(&b.base, &other, "?include=runs"),
+        )
+        .await;
+    assert_eq!(theirs.status(), 200);
+    assert!(item_ids(&theirs.json::<Value>().await.unwrap()).is_empty());
+    let forged = b
+        .get(
+            &other_token,
+            board_list_url(&b.base, &b.tenant, "?include=runs"),
+        )
+        .await;
+    assert_eq!(
+        forged.status(),
+        403,
+        "path workspace is not the credential's"
+    );
+    let workspace_a = b.tenant.workspace;
+    let workspace_b = other.workspace;
+    let viewer_a = b.alice;
+    let rls_only = momo_db::with_tenant_tx(&b.app, workspace_b, move |conn| {
+        Box::pin(async move {
+            Ok::<_, momo_db::DbError>(
+                momo_t3::work_board::list_board_in_tx(conn, workspace_a, viewer_a, true, None, 100)
+                    .await
+                    .expect("read")
+                    .items
+                    .len(),
+            )
+        })
+    })
+    .await
+    .expect("tx");
+    assert_eq!(
+        rls_only, 0,
+        "RLS FORCE hides another tenant's runs by itself"
+    );
+    // Control: the same call in the owning tenant's transaction finds the run.
+    let control = momo_db::with_tenant_tx(&b.app, workspace_a, move |conn| {
+        Box::pin(async move {
+            Ok::<_, momo_db::DbError>(
+                momo_t3::work_board::list_board_in_tx(conn, workspace_a, viewer_a, true, None, 100)
+                    .await
+                    .expect("read")
+                    .items
+                    .len(),
+            )
+        })
+    })
+    .await
+    .expect("tx");
+    assert_eq!(control, 1, "the owning tenant's transaction sees its run");
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL)"]
+async fn b11_mention_managed_linked_and_stale_runs_are_not_listed() {
+    let b = board().await;
+    make_hosted(&b.su, &b.tenant, b.tenant.agent).await;
+    let managed = extra_agent(&b.su, &b.tenant, b.tenant.channel, false).await;
+
+    let listed = seed_work_run(&b.su, &b.tenant, RunSpec::work(&b.tenant, "running")).await;
+    let _mention = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            input: json!({"surface": "mention", "prompt": "SECRET-PROMPT"}),
+            ..RunSpec::work(&b.tenant, "running")
+        },
+    )
+    .await;
+    let _managed = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            agent: managed,
+            ..RunSpec::work(&b.tenant, "running")
+        },
+    )
+    .await;
+    let stale = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            age_secs: 31 * 24 * 3600,
+            ..RunSpec::work(&b.tenant, "succeeded")
+        },
+    )
+    .await;
+    let recent = seed_work_run(
+        &b.su,
+        &b.tenant,
+        RunSpec {
+            age_secs: 29 * 24 * 3600,
+            ..RunSpec::work(&b.tenant, "succeeded")
+        },
+    )
+    .await;
+
+    // A run that drove a work session: the audit row `work_controls::create`
+    // writes (`run_id` + the control as target) is what links them.
+    let session = open_host_session(&b.http, &b.base, &b.owner_token, &b.tenant, b.desktop).await;
+    let linked = seed_work_run(&b.su, &b.tenant, RunSpec::work(&b.tenant, "running")).await;
+    let control: Uuid = sqlx::query_scalar(
+        "INSERT INTO work_control (workspace_id, channel_id, requester_member_id, target_host_id, \
+                                   session_id, kind, status) \
+         VALUES ($1, $2, $3, $4, $5, 'read', 'acked') RETURNING id",
+    )
+    .bind(b.tenant.workspace)
+    .bind(b.tenant.channel)
+    .bind(b.tenant.agent)
+    .bind(b.desktop)
+    .bind(session)
+    .fetch_one(&b.su)
+    .await
+    .expect("seed a control against the session");
+    sqlx::query(
+        "INSERT INTO audit_log (workspace_id, actor_member_id, action, target_type, target_id, run_id) \
+         VALUES ($1, $2, 'work.control.requested', 'work_control', $3, $4)",
+    )
+    .bind(b.tenant.workspace)
+    .bind(b.tenant.agent)
+    .bind(control)
+    .bind(linked)
+    .execute(&b.su)
+    .await
+    .expect("link the run to the session");
+
+    let list = b.list(&b.alice_token, "?include=runs&limit=100").await;
+    let got = item_ids(&list);
+    assert!(
+        got.contains(&listed.to_string()),
+        "the plain hosted run is listed"
+    );
+    assert!(
+        got.contains(&recent.to_string()),
+        "29 days after the end: inside retention"
+    );
+    assert!(
+        !got.contains(&stale.to_string()),
+        "31 days after the end: gone"
+    );
+    assert!(
+        !got.contains(&linked.to_string()),
+        "a run linked to a session is not a second row"
+    );
+    assert_eq!(
+        got.iter().filter(|id| **id == session.to_string()).count(),
+        1,
+        "the session is the one row for that work"
+    );
+    assert_eq!(
+        got.len(),
+        3,
+        "listed + recent + the session; mention and managed runs are absent: {got:?}"
+    );
+    assert!(!serde_json::to_string(&list)
+        .unwrap()
+        .contains("SECRET-PROMPT"));
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL)"]
+async fn b12_a_cursor_is_stable_across_mixed_sources() {
+    let b = board().await;
+    make_hosted(&b.su, &b.tenant, b.tenant.agent).await;
+    let now = now_ms() / 1000;
+    let mut expected: Vec<(i64, String)> = Vec::new();
+    // Sessions at known activity seconds, runs at known ages; two runs share an
+    // age so the id tie-break orders them.
+    for (index, offset) in [10_i64, 40, 70].into_iter().enumerate() {
+        let id = b
+            .local(
+                b.tenant.channel,
+                &format!("세션 {index}"),
+                Some(payload_with(now - offset, "running")),
+            )
+            .await;
+        expected.push((now - offset, id.to_string()));
+    }
+    let mut run_ids = Vec::new();
+    for age in [20_i64, 50, 50, 80] {
+        let id = seed_work_run(
+            &b.su,
+            &b.tenant,
+            RunSpec {
+                age_secs: age,
+                ..RunSpec::work(&b.tenant, "running")
+            },
+        )
+        .await;
+        run_ids.push((age, id));
+    }
+    // Run activity µs straight from the ledger, so the expected order is the
+    // data's, not the query's.
+    let mut with_activity: Vec<(i64, String)> = Vec::new();
+    for (_, id) in &run_ids {
+        let us: i64 = sqlx::query_scalar(
+            "SELECT (extract(epoch FROM GREATEST(created_at, updated_at, finished_at)) * 1000000)::bigint \
+               FROM agent_run WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_one(&b.su)
+        .await
+        .unwrap();
+        with_activity.push((us, id.to_string()));
+    }
+    let mut all: Vec<(i64, String)> = expected
+        .iter()
+        .map(|(s, id)| (s * 1_000_000, id.clone()))
+        .collect();
+    all.extend(with_activity);
+    all.sort_by(|a, c| c.cmp(a));
+    let expected: Vec<String> = all.into_iter().map(|(_, id)| id).collect();
+    assert_eq!(expected.len(), 7);
+
+    let mut seen = Vec::new();
+    let mut cursor: Option<String> = None;
+    let mut pages = 0;
+    loop {
+        let query = match &cursor {
+            Some(cursor) => format!("?include=runs&limit=3&cursor={cursor}"),
+            None => "?include=runs&limit=3".to_string(),
+        };
+        let page = b.list(&b.alice_token, &query).await;
+        seen.extend(item_ids(&page));
+        pages += 1;
+        match page["nextCursor"].as_str() {
+            Some(next) => cursor = Some(next.to_string()),
+            None => break,
+        }
+        assert!(pages < 10);
+    }
+    assert_eq!(pages, 3, "7 rows at 3 per page");
+    assert_eq!(
+        seen, expected,
+        "complete, no duplicates, stable under ties, across both sources"
+    );
+}
+
+async fn run_events(su: &PgPool, workspace: Uuid) -> Vec<Value> {
+    sqlx::query_scalar::<_, Value>(
+        "SELECT payload FROM outbox WHERE workspace_id = $1 AND kind = 'broadcast' \
+            AND payload->'data'->>'type' = 'work.run.updated' ORDER BY id",
+    )
+    .bind(workspace)
+    .fetch_all(su)
+    .await
+    .expect("read outbox")
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL)"]
+async fn b13_work_run_updated_fires_on_board_transitions_only() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app).await;
+    make_hosted(&su, &tenant, tenant.agent).await;
+    let managed = extra_agent(&su, &tenant, tenant.channel, false).await;
+
+    // Creation is the first transition (a `waiting` row appears on the board).
+    let run = seed_work_run(&su, &tenant, RunSpec::work(&tenant, "queued")).await;
+    let events = run_events(&su, tenant.workspace).await;
+    assert_eq!(events.len(), 1, "{events:?}");
+    let event = &events[0];
+    assert_eq!(
+        event["channel"],
+        format!(
+            "ch:ws{}.{}",
+            tenant.workspace.to_string().to_uppercase(),
+            tenant.channel.to_string().to_uppercase()
+        )
+    );
+    assert_eq!(event["data"]["type"], "work.run.updated");
+    assert_eq!(event["data"]["v"], 1);
+    assert_eq!(
+        event["data"]["payload"],
+        json!({"run_id": run.to_string(), "channel_id": tenant.channel.to_string(), "to": "waiting"}),
+        "ids and the transition kind only — no title, name or number"
+    );
+    assert!(event["idempotency_key"]
+        .as_str()
+        .unwrap()
+        .contains(&run.to_string()));
+
+    let set_status = |status: &'static str| {
+        let su = su.clone();
+        async move {
+            sqlx::query(
+                "UPDATE agent_run SET status = $2::run_status, updated_at = now() WHERE id = $1",
+            )
+            .bind(run)
+            .bind(status)
+            .execute(&su)
+            .await
+            .expect("transition");
+        }
+    };
+    let count = || async { run_events(&su, tenant.workspace).await.len() };
+
+    set_status("running").await;
+    assert_eq!(count().await, 2, "queued -> running");
+    // Stage markers and step_count move without a status change: no event (D11).
+    sqlx::query(
+        "UPDATE agent_run SET output = '{\"stages\":[\"a\",\"b\"]}'::jsonb, step_count = 2, \
+                updated_at = now() WHERE id = $1",
+    )
+    .bind(run)
+    .execute(&su)
+    .await
+    .unwrap();
+    assert_eq!(count().await, 2, "a stage/step update is not a transition");
+    // Same status written again, and approval holds / control-window parks, which
+    // the board folds into `running`: no event.
+    set_status("running").await;
+    set_status("awaiting_approval").await;
+    set_status("running").await;
+    set_status("paused").await;
+    set_status("running").await;
+    assert_eq!(
+        count().await,
+        2,
+        "holds and re-writes are not board transitions"
+    );
+    set_status("succeeded").await;
+    let events = run_events(&su, tenant.workspace).await;
+    assert_eq!(events.len(), 3, "running -> done");
+    assert_eq!(events[2]["data"]["payload"]["to"], "done");
+
+    // mention runs and managed agents' work runs never emit.
+    let _ = seed_work_run(
+        &su,
+        &tenant,
+        RunSpec {
+            input: json!({"surface": "mention", "prompt": "x"}),
+            ..RunSpec::work(&tenant, "queued")
+        },
+    )
+    .await;
+    let managed_run = seed_work_run(
+        &su,
+        &tenant,
+        RunSpec {
+            agent: managed,
+            ..RunSpec::work(&tenant, "queued")
+        },
+    )
+    .await;
+    sqlx::query("UPDATE agent_run SET status = 'running'::run_status WHERE id = $1")
+        .bind(managed_run)
+        .execute(&su)
+        .await
+        .unwrap();
+    assert_eq!(count().await, 3, "mention and managed runs emit nothing");
+
+    // Cancelling a queued run is a transition to `stopped`.
+    let queued = seed_work_run(&su, &tenant, RunSpec::work(&tenant, "queued")).await;
+    sqlx::query("UPDATE agent_run SET status = 'cancelled'::run_status WHERE id = $1")
+        .bind(queued)
+        .execute(&su)
+        .await
+        .unwrap();
+    let events = run_events(&su, tenant.workspace).await;
+    assert_eq!(events.len(), 5, "create + cancel of the second run");
+    assert_eq!(events[4]["data"]["payload"]["to"], "stopped");
 }

@@ -7632,6 +7632,13 @@ paths:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
+        - name: include
+          in: query
+          required: false
+          description: "runs adds hosted agents' work runs (D13). Anything else, or omitted, lists sessions only so a client that keys rows on sessionId is never handed a run row."
+          schema:
+            type: string
+            enum: [runs]
         - name: limit
           in: query
           required: false
@@ -15431,7 +15438,7 @@ components:
           description: >
             momo-core SessionStatus: waiting (나를 기다림), running (실행 중),
             review (검토 대기), idle (대기), done (끝남), stopped (멈춤).
-          enum: [waiting, running, review, idle, done, stopped]
+          enum: [waiting, running, review, idle, done, failed, stopped]
         stages:
           type: array
           nullable: true
@@ -15493,7 +15500,7 @@ components:
     SharedWorkSession:
       type: object
       required:
-        - sessionId
+        - source
         - origin
         - label
         - folderLabel
@@ -15517,17 +15524,41 @@ components:
         lastActivityAt) plus owner, home channel and lane. No terminal text,
         input, control, PTY, host or commit-title field exists.
       properties:
-        sessionId: {type: string, format: uuid}
+        source:
+          type: string
+          enum: [session, run]
+          description: session = work_session row; run = a hosted agent's work run (D13, include=runs).
+        sessionId: {type: string, format: uuid, description: "Present on a session row only."}
+        runId: {type: string, format: uuid, description: "Present on a run row only."}
+        requestedBy:
+          type: object
+          nullable: true
+          required: [memberId, displayName]
+          additionalProperties: false
+          description: "Run row: the person who asked (the agent.work.queued audit actor). Omitted on a session row."
+          properties:
+            memberId: {type: string, format: uuid}
+            displayName: {type: string}
+        stepCount: {type: integer, description: "Run row only: the agent's reported step count."}
+        commits: {type: integer, description: "Run row only: reported commit count (a number, never a title)."}
+        pr:
+          type: object
+          required: [url, number]
+          additionalProperties: false
+          description: "Run row only: the validated pull request the agent reported."
+          properties:
+            url: {type: string}
+            number: {type: integer, format: int64, nullable: true}
         origin:
           type: string
-          enum: [local_pty, host]
-          description: local_pty = shared local pane; host = agent-lane session.
+          enum: [local_pty, host, agent_run]
+          description: local_pty = shared local pane; host = agent-lane session; agent_run = a hosted agent's work run.
         label: {type: string}
         folderLabel: {type: string, nullable: true, description: "Last path element only (local_pty)."}
         status:
           type: string
-          enum: [running, idle, orphaned, ended]
-          description: Ledger status.
+          enum: [running, idle, orphaned, ended, waiting, done, failed, stopped]
+          description: Session row = ledger status (running, idle, orphaned, ended). Run row = waiting, running, done, failed or stopped.
         owner:
           type: object
           required: [memberId, displayName]

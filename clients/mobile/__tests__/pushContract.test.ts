@@ -80,6 +80,7 @@ describe('the JS push contract matches the Swift the extension runs', () => {
     const swiftReasons = [...gate[1].matchAll(/"([a-z_]+)"/g)].map(m => m[1]);
     expect(swiftReasons).toEqual([...PUSH_REASONS]);
     expect(PUSH_REASONS).toContain('work_session_idle');
+    expect(PUSH_REASONS).toContain('work_run_done');
   });
 
   it('registers under the app bundle id, never the extension bundle id', () => {

@@ -24,6 +24,19 @@
 //!   and only while `notification_rule.work_complete_push` is on. An idle card
 //!   that fails any of these selects NO reason — it must never fall through to
 //!   `dm`, which would push the card's own text to a DM peer.
+//! * **Work run done (`work_run_done`, ADR-0162 증보 3 D14, #3517)** — the final
+//!   answer a hosted agent posts when its `type=work` run ends is the push
+//!   candidate (one message per run: `client_msg_id = run_id`). Only the person
+//!   who asked for the run (the actor of the run's `agent.work.queued` audit row —
+//!   `agent_run` has no requester column; no row, no push), only when the run
+//!   ended `succeeded`/`failed`/`timed_out` and ran at least
+//!   [`WORK_COMPLETE_MIN_RAN_MS`], only when they have not just been reading that
+//!   channel (same A-8 window as the idle card) and only while
+//!   `notification_rule.work_complete_push` is on. A cancelled run posts no
+//!   answer, so it has no candidate at all. For the requester, a run answer that
+//!   fails any of these selects NO reason — like the idle card it must not fall
+//!   through to `dm`, so turning the switch off really silences it. Everyone else
+//!   in the channel is judged as for any message.
 //! * **Mute (ADR-0124)** — the per-channel `notification_pref` row suppresses
 //!   every reason, mentions and approvals included. Read at judgment time; no
 //!   cache.
@@ -107,6 +120,8 @@ pub async fn judge_targets(
                   CASE WHEN jsonb_typeof(m.props->'ran_ms') = 'number' \
                        THEN (m.props->>'ran_ms')::numeric END AS ran_ms, \
                   m.seq, \
+                  m.run_id, \
+                  m.client_msg_id, \
                   m.created_at, \
                   m.root_id, \
                   c.kind::text AS channel_kind \
@@ -114,6 +129,25 @@ pub async fn judge_targets(
              JOIN channel c ON c.id = m.channel_id \
             WHERE m.id = $2 \
               AND m.workspace_id = $1 \
+         ), \
+         wrun AS ( \
+           SELECT r.id AS run_id, \
+                  CASE WHEN r.started_at IS NOT NULL AND r.finished_at IS NOT NULL \
+                       THEN extract(epoch FROM (r.finished_at - r.started_at)) * 1000 \
+                  END AS ran_ms, \
+                  (SELECT a.actor_member_id FROM audit_log a \
+                    WHERE a.workspace_id = $1 AND a.run_id = r.id \
+                      AND a.action = 'agent.work.queued' \
+                    ORDER BY a.created_at, a.id LIMIT 1) AS requester_id \
+             FROM agent_run r \
+             JOIN msg ON r.id = msg.run_id AND r.agent_member_id = msg.author_member_id \
+                     AND msg.client_msg_id = r.id \
+            WHERE r.workspace_id = $1 \
+              AND r.input->>'type' = 'work' \
+              AND r.status IN ('succeeded', 'failed', 'timed_out') \
+              AND EXISTS ( \
+                SELECT 1 FROM hosted_agent_connection hc \
+                 WHERE hc.workspace_id = $1 AND hc.agent_member_id = r.agent_member_id) \
          ), \
          recipients AS ( \
            SELECT ms.member_id, \
@@ -153,6 +187,19 @@ pub async fn judge_targets(
                                             - make_interval(secs => $4::double precision) ) \
                             ) \
                         THEN 'work_session_idle' END \
+                    WHEN mem.id = (SELECT requester_id FROM wrun) THEN \
+                      CASE WHEN COALESCE((SELECT ran_ms FROM wrun), 0) >= $3::bigint \
+                            AND NOT EXISTS ( \
+                              SELECT 1 FROM read_state seen \
+                               WHERE seen.workspace_id = $1 \
+                                 AND seen.channel_id = (SELECT channel_id FROM msg) \
+                                 AND seen.member_id = mem.id \
+                                 AND seen.last_read_seq > 0 \
+                                 AND ( seen.last_read_seq >= (SELECT seq FROM msg) \
+                                       OR seen.last_read_at >= (SELECT created_at FROM msg) \
+                                            - make_interval(secs => $4::double precision) ) \
+                            ) \
+                        THEN 'work_run_done' END \
                     WHEN (SELECT message_type FROM msg) = 'approval_request' \
                          AND mem.kind = 'human' THEN 'approval_request' \
                     WHEN EXISTS ( \
@@ -212,7 +259,8 @@ pub async fn judge_targets(
               COALESCE(nr.dnd, false) \
               AND (nr.dnd_until IS NULL OR nr.dnd_until > now()) \
             ) \
-            AND NOT (r.reason = 'work_session_idle' AND NOT COALESCE(nr.work_complete_push, true)) \
+            AND NOT (r.reason IN ('work_session_idle', 'work_run_done') \
+                     AND NOT COALESCE(nr.work_complete_push, true)) \
             AND ( \
               np.member_id IS NULL \
               OR (np.muted_until IS NOT NULL AND np.muted_until <= now()) \

@@ -43,6 +43,11 @@ pub enum PushReason {
     ApprovalRequest,
     ResumeOffer,
     WorkSessionIdle,
+    /// A hosted agent's work run ended (ADR-0162 증보 3 D14, #3517): the sixth
+    /// reason. Sent to the person who asked for the run, governed by the same
+    /// `work_complete_push` switch and ADR-0120 부록 A-8 rules as
+    /// `work_session_idle`.
+    WorkRunDone,
 }
 
 impl PushReason {
@@ -53,6 +58,7 @@ impl PushReason {
             PushReason::ApprovalRequest => "approval_request",
             PushReason::ResumeOffer => "resume_offer",
             PushReason::WorkSessionIdle => "work_session_idle",
+            PushReason::WorkRunDone => "work_run_done",
         }
     }
 
@@ -64,6 +70,7 @@ impl PushReason {
             "approval_request" => Some(PushReason::ApprovalRequest),
             "resume_offer" => Some(PushReason::ResumeOffer),
             "work_session_idle" => Some(PushReason::WorkSessionIdle),
+            "work_run_done" => Some(PushReason::WorkRunDone),
             _ => None,
         }
     }
@@ -100,7 +107,9 @@ pub fn category_for(
     props_kind: Option<&str>,
     reason: PushReason,
 ) -> PushCategory {
-    if matches!(props_kind, Some("resume_offer") | Some("work_session_idle")) {
+    if matches!(props_kind, Some("resume_offer") | Some("work_session_idle"))
+        || reason == PushReason::WorkRunDone
+    {
         return PushCategory::Work;
     }
     if message_type == "approval_request" {
@@ -444,6 +453,14 @@ mod tests {
             ),
             PushCategory::Work
         );
+        // The run's final answer is an ordinary text/system message; only the
+        // reason says it is a work-run completion (#3517).
+        for message_type in ["text", "system"] {
+            assert_eq!(
+                category_for(message_type, None, PushReason::WorkRunDone),
+                PushCategory::Work
+            );
+        }
     }
 
     /// Parity with `NotifierWorkerTests.testCollapseIDIsStableAndWithinAPNsLimit`.
@@ -460,20 +477,21 @@ mod tests {
         assert!(first.len() <= 64, "apns-collapse-id is capped at 64 bytes");
     }
 
-    /// The wire vocabulary is exactly these five strings (ADR-0120 부록 A,
-    /// Accepted 2026-10-02). The relay validator
-    /// (`momo-push-relay/src/dispatch.rs` `ALLOWED_REASONS`) and the phone's
-    /// `clients/mobile/src/push/contract.ts` + `PushNotification.swift` spell the
-    /// same five; each pins its own copy, so adding a reason here without
-    /// widening them turns one of those red instead of silently 400-ing in prod.
+    /// The wire vocabulary is exactly these six strings (ADR-0120 부록 A,
+    /// Accepted 2026-10-02, plus `work_run_done` from ADR-0162 증보 3 D14). The
+    /// relay validator (`momo-push-relay/src/dispatch.rs` `ALLOWED_REASONS`) and the
+    /// phone's `clients/mobile/src/push/contract.ts` spell the same set; each pins
+    /// its own copy, so adding a reason here without widening them turns one of
+    /// those red instead of silently 400-ing in prod.
     #[test]
-    fn the_judgment_vocabulary_is_the_five_wire_reasons() {
+    fn the_judgment_vocabulary_is_the_six_wire_reasons() {
         let all = [
             (PushReason::Dm, "dm"),
             (PushReason::Mention, "mention"),
             (PushReason::ApprovalRequest, "approval_request"),
             (PushReason::ResumeOffer, "resume_offer"),
             (PushReason::WorkSessionIdle, "work_session_idle"),
+            (PushReason::WorkRunDone, "work_run_done"),
         ];
         for (reason, label) in all {
             assert_eq!(reason.as_str(), label);
