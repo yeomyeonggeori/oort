@@ -883,8 +883,11 @@ pub struct EligibleAgent {
     /// 증보 3 D10 (#3515): such an agent takes a work run only through the hosted
     /// conditions below, never through the managed/BYOA delivery selector.
     pub has_hosted_connection: bool,
-    /// The agent is `owner_only` without `uses_owner_key` — a subscription agent
-    /// (#2924). D10 4: no work run, hosted or not. Kept as its own fact so that
+    /// The agent is `owner_only` and either a subscription agent (no
+    /// `uses_owner_key`, #2924) or a personal-key agent that also has a hosted
+    /// connection. D10 4: no hosted work run for any `owner_only` agent whatever
+    /// its brain — the mention path's `hosted_delivery_disabled` is the same rule,
+    /// so the two entrances cannot diverge (#3531 review M1). Kept as its own fact so that
     /// opening the hosted conditions cannot open this boundary (the old single
     /// `hosted_delivery_disabled` boolean merged the two reasons).
     pub owner_only_blocked: bool,
@@ -909,6 +912,31 @@ pub struct EligibleAgent {
     pub enabled_tools: Vec<String>,
 }
 
+/// Is this member a guest of the workspace or of this channel? Guests may not
+/// spend a hosted agent's vendor quota (#3531 review L5).
+pub async fn is_guest_in_channel_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    member_id: Uuid,
+) -> Result<bool, DbError> {
+    let found: Option<i32> = sqlx::query_scalar(
+        "SELECT 1 WHERE EXISTS (SELECT 1 FROM workspace_membership wm \
+                                 WHERE wm.workspace_id = $1 AND wm.member_id = $3 \
+                                   AND wm.role = 'guest') \
+            OR EXISTS (SELECT 1 FROM membership ms \
+                        WHERE ms.workspace_id = $1 AND ms.channel_id = $2 \
+                          AND ms.member_id = $3 AND ms.left_at IS NULL \
+                          AND ms.role = 'guest')",
+    )
+    .bind(workspace_id)
+    .bind(channel_id)
+    .bind(member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(found.is_some())
+}
+
 /// Load the agent's run-eligibility facts, or `None` when it may not take a run
 /// in this channel at all.
 ///
@@ -929,7 +957,11 @@ pub async fn load_eligible_agent_in_tx(
                 , EXISTS (SELECT 1 FROM hosted_agent_connection hc \
                            WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
                     AS has_hosted_connection, \
-                (a.invocation_scope = 'owner_only' AND NOT a.uses_owner_key) \
+                (a.invocation_scope = 'owner_only' \
+                 AND (NOT a.uses_owner_key \
+                      OR EXISTS (SELECT 1 FROM hosted_agent_connection hc \
+                                  WHERE hc.workspace_id = m.workspace_id \
+                                    AND hc.agent_member_id = m.id))) \
                     AS owner_only_blocked, \
                 (SELECT hc.id FROM hosted_agent_connection hc \
                    JOIN token t ON t.workspace_id = hc.workspace_id \

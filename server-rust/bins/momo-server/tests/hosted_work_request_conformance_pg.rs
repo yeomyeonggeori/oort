@@ -200,6 +200,7 @@ struct Fixture {
     private_channel: Uuid,
     /// A workspace human who is in NO channel.
     outsider_jwt: String,
+    outsider: Uuid,
 }
 
 fn raw_credential(workspace: Uuid) -> String {
@@ -533,6 +534,7 @@ async fn seed(pool: &PgPool) -> Fixture {
         channel,
         private_channel,
         outsider_jwt,
+        outsider,
     }
 }
 
@@ -1166,8 +1168,10 @@ async fn owner_only_stays_refused_even_with_an_active_approved_connection() {
     );
     assert_eq!(snapshot(&su, f.workspace).await, before);
 
-    // The same agent, owned by someone else, is refused earlier still (403): the
-    // owner_only call rule is not weakened either.
+    // The same agent, asked by a channel member who is NOT its owner, is
+    // refused earlier still — exactly 403 from the owner-only call rule, which
+    // is not weakened either.
+    add_to_channel(&su, &f, f.outsider, f.channel, "member").await;
     let before = snapshot(&su, f.workspace).await;
     let outcome = post_run(
         &client,
@@ -1179,8 +1183,7 @@ async fn owner_only_stays_refused_even_with_an_active_approved_connection() {
         Uuid::new_v4(),
     )
     .await;
-    assert_ne!(outcome.0, 201, "{}", outcome.1);
-    assert_eq!(snapshot(&su, f.workspace).await, before);
+    assert_refused(&su, &f, outcome, 403, None, &before, "non-owner member").await;
 }
 
 #[tokio::test]
@@ -1337,4 +1340,285 @@ async fn managed_agents_keep_their_gateway_rules_and_leave_no_orphan_run() {
     )
     .await;
     assert_refused(&su, &f, outcome, 409, None, &before, "paused managed agent").await;
+}
+
+async fn add_to_channel(su: &PgPool, f: &Fixture, member: Uuid, channel: Uuid, role: &str) {
+    sqlx::query(
+        "INSERT INTO membership(workspace_id, channel_id, member_id, role) \
+         VALUES($1,$2,$3,$4::membership_role) \
+         ON CONFLICT (channel_id, member_id) DO UPDATE SET role=EXCLUDED.role, left_at=NULL",
+    )
+    .bind(f.workspace)
+    .bind(channel)
+    .bind(member)
+    .bind(role)
+    .execute(su)
+    .await
+    .expect("add to channel");
+}
+
+// ---------------------------------------------------------------------------
+// #3531 review: M1 owner-key combo, M2 cap/replay, L5 guests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3515)"]
+async fn an_owner_key_owner_only_agent_with_a_hosted_connection_refuses_work_requests() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su).await;
+    let base = start_server(momo_app_pool().await, Knobs::open()).await;
+    let client = reqwest::Client::new();
+    // owner_only + personal key (migration 117 shape) + the active approved
+    // hosted connection. The mention path refuses this agent; so must work.
+    sqlx::query(
+        "UPDATE agent SET invocation_scope='owner_only', subscription_harness=NULL, \
+                uses_owner_key=true WHERE workspace_id=$1 AND member_id=$2",
+    )
+    .bind(f.workspace)
+    .bind(f.hosted_agent)
+    .execute(&su)
+    .await
+    .expect("mark owner-key owner_only");
+    add_to_channel(&su, &f, f.outsider, f.channel, "member").await;
+    let before = snapshot(&su, f.workspace).await;
+    // The owner: 409, the same refusal as a subscription agent.
+    let outcome = post_run(
+        &client,
+        &base,
+        &f,
+        &f.human_jwt,
+        f.channel,
+        f.hosted_agent,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_refused(
+        &su,
+        &f,
+        outcome,
+        409,
+        None,
+        &before,
+        "owner, owner-key hosted",
+    )
+    .await;
+    // A non-owner member: 403.
+    let outcome = post_run(
+        &client,
+        &base,
+        &f,
+        &f.outsider_jwt,
+        f.channel,
+        f.hosted_agent,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_refused(
+        &su,
+        &f,
+        outcome,
+        403,
+        None,
+        &before,
+        "non-owner, owner-key hosted",
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3515)"]
+async fn a_guest_requester_is_refused_for_a_hosted_agent() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su).await;
+    let base = start_server(momo_app_pool().await, Knobs::open()).await;
+    let client = reqwest::Client::new();
+    // Channel-level guest.
+    add_to_channel(&su, &f, f.outsider, f.channel, "guest").await;
+    let before = snapshot(&su, f.workspace).await;
+    let outcome = post_run(
+        &client,
+        &base,
+        &f,
+        &f.outsider_jwt,
+        f.channel,
+        f.hosted_agent,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_refused(&su, &f, outcome, 403, None, &before, "channel guest").await;
+    // Workspace-level guest in a regular channel seat.
+    add_to_channel(&su, &f, f.outsider, f.channel, "member").await;
+    sqlx::query(
+        "UPDATE workspace_membership SET role='guest' WHERE workspace_id=$1 AND member_id=$2",
+    )
+    .bind(f.workspace)
+    .bind(f.outsider)
+    .execute(&su)
+    .await
+    .expect("workspace guest");
+    let outcome = post_run(
+        &client,
+        &base,
+        &f,
+        &f.outsider_jwt,
+        f.channel,
+        f.hosted_agent,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_refused(&su, &f, outcome, 403, None, &before, "workspace guest").await;
+    // Control: the same person as a plain member is accepted.
+    sqlx::query(
+        "UPDATE workspace_membership SET role='member' WHERE workspace_id=$1 AND member_id=$2",
+    )
+    .bind(f.workspace)
+    .bind(f.outsider)
+    .execute(&su)
+    .await
+    .expect("promote");
+    let (status, body) = post_run(
+        &client,
+        &base,
+        &f,
+        &f.outsider_jwt,
+        f.channel,
+        f.hosted_agent,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 201, "{body}");
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3515)"]
+async fn a_hosted_agent_at_its_cap_rolls_the_second_run_back_whole() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su).await;
+    let base = start_server(momo_app_pool().await, Knobs::open()).await;
+    let client = reqwest::Client::new();
+    sqlx::query("UPDATE agent SET max_concurrent_runs=1 WHERE workspace_id=$1 AND member_id=$2")
+        .bind(f.workspace)
+        .bind(f.hosted_agent)
+        .execute(&su)
+        .await
+        .expect("cap");
+    let (status, first) = post_run(
+        &client,
+        &base,
+        &f,
+        &f.human_jwt,
+        f.channel,
+        f.hosted_agent,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 201, "{first}");
+    // The cap is judged AFTER the INSERT; the refusal must take the run, its
+    // job and its inbox reference back out with it.
+    let before = snapshot(&su, f.workspace).await;
+    assert_eq!((before.runs, before.inbox), (1, 1));
+    let outcome = post_run(
+        &client,
+        &base,
+        &f,
+        &f.human_jwt,
+        f.channel,
+        f.hosted_agent,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_refused(&su, &f, outcome, 409, None, &before, "hosted cap").await;
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3515)"]
+async fn a_replayed_hosted_request_is_200_until_the_state_changes_then_fails_closed() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su).await;
+    let base = start_server(momo_app_pool().await, Knobs::open()).await;
+    let client = reqwest::Client::new();
+    let key = Uuid::new_v4();
+    let (status, run) = post_run(
+        &client,
+        &base,
+        &f,
+        &f.human_jwt,
+        f.channel,
+        f.hosted_agent,
+        key,
+    )
+    .await;
+    assert_eq!(status, 201, "{run}");
+    let after_create = snapshot(&su, f.workspace).await;
+
+    // Before any state change: the same key is the same run (200, no new rows).
+    let (status, again) = post_run(
+        &client,
+        &base,
+        &f,
+        &f.human_jwt,
+        f.channel,
+        f.hosted_agent,
+        key,
+    )
+    .await;
+    assert_eq!((status, &again["id"]), (200, &run["id"]));
+    assert_eq!(snapshot(&su, f.workspace).await, after_create);
+
+    // After the agent is paused the replay is refused (intentional fail-closed:
+    // D10 judges every condition before the first write) and writes nothing.
+    sqlx::query(
+        "UPDATE agent_profile SET paused=true WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(f.workspace)
+    .bind(f.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let outcome = post_run(
+        &client,
+        &base,
+        &f,
+        &f.human_jwt,
+        f.channel,
+        f.hosted_agent,
+        key,
+    )
+    .await;
+    assert_refused(
+        &su,
+        &f,
+        outcome,
+        409,
+        Some("agent_paused"),
+        &after_create,
+        "replay after pause",
+    )
+    .await;
+
+    // Once the condition is restored the same key answers 200 again.
+    sqlx::query(
+        "UPDATE agent_profile SET paused=false WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(f.workspace)
+    .bind(f.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, back) = post_run(
+        &client,
+        &base,
+        &f,
+        &f.human_jwt,
+        f.channel,
+        f.hosted_agent,
+        key,
+    )
+    .await;
+    assert_eq!((status, &back["id"]), (200, &run["id"]));
+    assert_eq!(snapshot(&su, f.workspace).await, after_create);
 }

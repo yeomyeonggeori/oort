@@ -238,6 +238,19 @@ pub async fn create(
                     )));
                 }
                 let hosted_connection_id = if agent.has_hosted_connection {
+                    // A guest must not spend the owner's vendor quota.
+                    if momo_agent::is_guest_in_channel_in_tx(
+                        conn,
+                        workspace_id,
+                        channel_id,
+                        actor_member_id,
+                    )
+                    .await?
+                    {
+                        return Ok(Err(ApiError::forbidden(
+                            "guests cannot request work from a hosted agent",
+                        )));
+                    }
                     // The instance gate (HAP-E6) governs hosted delivery for a
                     // mention and for a work request alike.
                     if !hosted_delivery_enabled {
@@ -385,7 +398,7 @@ pub async fn create(
                     // an inbox reference that cannot be written (a credential
                     // without `agent:inbox:read`) leaves it claimable by
                     // `oort_jobs_claim`, exactly like a mention.
-                    momo_messaging::append_job_reference_in_tx(
+                    if momo_messaging::append_job_reference_in_tx(
                         &mut *conn,
                         workspace_id,
                         agent_member_id,
@@ -394,7 +407,14 @@ pub async fn create(
                         job_id,
                         run.id,
                     )
-                    .await?;
+                    .await?
+                    .is_none()
+                    {
+                        tracing::warn!(
+                            %workspace_id, %agent_member_id, run_id = %run.id, job_id,
+                            "hosted work job has no inbox reference; claimable by polling only"
+                        );
+                    }
                 } else {
                     let wake = agent_job_broadcast_payload(
                         workspace_id,
