@@ -1311,6 +1311,20 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/cloud-boxes/{box}/keep-awake",
             post(routes::cloud_boxes::keep_awake),
         )
+        // #3505 (ADR-0197 M2) — 런너 등록·회전·폐기. 인스턴스 운영자만(D2 역할 분리). 런너가 쓰는
+        // claim/complete/boxes 는 이 라우터가 아니라 아래 공개 라우터에 있다(런너 자격 하나만 받는다).
+        .route(
+            "/v1/workspaces/{ws}/cloud-box-runners",
+            post(routes::cloud_box_runner::register).get(routes::cloud_box_runner::list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/cloud-box-runners/{runner}/rotate",
+            post(routes::cloud_box_runner::rotate),
+        )
+        .route(
+            "/v1/workspaces/{ws}/cloud-box-runners/{runner}/revoke",
+            post(routes::cloud_box_runner::revoke),
+        )
         .route("/v1/workspaces/{ws}/agents", post(routes::agents::create))
         // HAP-E1 — human owner/admin lifecycle for generic per-agent bearer
         // credentials. Hosted-connection credentials will be connection-managed
@@ -1619,6 +1633,39 @@ pub fn build_app(state: AppState) -> Router {
             post(routes::device_link::redeem).route_layer(axum::middleware::from_fn_with_state(
                 state.clone(),
                 rate_limit::per_ip_device_link,
+            )),
+        )
+        // #3505 (ADR-0197 M2) — 런너의 문. 베어러 미들웨어 밖이다: 호출자는 사람·에이전트·work host 가
+        // 아니라 런너 자격 하나(`oort_runner.…`)만 쥔다. 인증은 핸들러가 경로의 워크스페이스 tenant
+        // tx 안에서 하고(런너 행을 그 안에서 읽는다), 실패는 한 가지 401 이다. 거절된 자격만 IP 예산을
+        // 쓴다(폴링은 막지 않는다). 모두 MOMO_CLOUD_BOX_ENABLED 가 닫혀 있으면 404.
+        .route(
+            "/v1/workspaces/{ws}/cloud-box-runner/claim",
+            post(routes::cloud_box_runner::claim)
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    routes::cloud_box_runner::refused_credential_budget,
+                ))
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    routes::cloud_box_runner::MAX_RUNNER_BODY_BYTES,
+                )),
+        )
+        .route(
+            "/v1/workspaces/{ws}/cloud-box-runner/controls/{control}/complete",
+            post(routes::cloud_box_runner::complete)
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    routes::cloud_box_runner::refused_credential_budget,
+                ))
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    routes::cloud_box_runner::MAX_RUNNER_BODY_BYTES,
+                )),
+        )
+        .route(
+            "/v1/workspaces/{ws}/cloud-box-runner/boxes",
+            get(routes::cloud_box_runner::boxes).route_layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                routes::cloud_box_runner::refused_credential_budget,
             )),
         )
         // #1265 / ADR-0115 — public ingress. Authenticated by HMAC headers or

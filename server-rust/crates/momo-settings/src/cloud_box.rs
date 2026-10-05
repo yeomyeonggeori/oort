@@ -416,6 +416,9 @@ pub struct ControlInfo {
     pub verb: String,
     pub limits: Option<BoxLimits>,
     pub attempts: i32,
+    /// Fresh at every hand-out. The runner sends it back with `attempts` to complete
+    /// (fencing): a lease that was re-issued has a different one.
+    pub lease_id: Uuid,
 }
 
 // ---------------------------------------------------------------------------
@@ -866,36 +869,249 @@ pub async fn set_keep_awake_in_tx(
 }
 
 // ---------------------------------------------------------------------------
-// the runner's side of the queue (tenant-scoped; the HTTP door is M2's)
+// the runner's side of the queue (tenant-scoped; the HTTP door is
+// `routes/cloud_box_runner.rs`, which authenticates the runner credential first)
 // ---------------------------------------------------------------------------
 
+/// How many times a control may be handed out before it is **poisoned** (ADR-0197
+/// M2): a control whose lease ran out `MAX_CONTROL_ATTEMPTS` times (a runner that
+/// crashes on it, or a verb that can never finish) stops being re-issued and ends
+/// as `failed`/`poisoned`. Migration 119 keeps a hard floor above this (10).
+pub const MAX_CONTROL_ATTEMPTS: i32 = 5;
+/// Lease for the verbs that pull an image or wipe a volume.
+pub const LONG_LEASE_SECONDS: i64 = 600;
+/// Lease for everything else.
+pub const SHORT_LEASE_SECONDS: i64 = 120;
+
+/// The lease a verb gets at claim time. `create` pulls an image and `delete` wipes a
+/// volume; the rest are one docker call.
+pub fn lease_seconds_for(verb: &str) -> i64 {
+    match verb {
+        "create" | "delete" => LONG_LEASE_SECONDS,
+        _ => SHORT_LEASE_SECONDS,
+    }
+}
+
+/// What a `status` control reports: three words, never docker's `inspect` output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Observed {
+    Running,
+    Stopped,
+    Absent,
+}
+
+impl Observed {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Observed::Running => "running",
+            Observed::Stopped => "stopped",
+            Observed::Absent => "absent",
+        }
+    }
+}
+
+/// The runner's own check, after a `delete`, that nothing of the box is left (D10).
+/// Both must be true for the server to close the box as `deleted`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeletionReport {
+    pub container_absent: bool,
+    pub volume_absent: bool,
+}
+
+impl DeletionReport {
+    pub fn verified(self) -> bool {
+        self.container_absent && self.volume_absent
+    }
+}
+
+/// Everything a runner may say about a finished control. A closed shape: a flag,
+/// one of three words for `status`, two booleans for `delete`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompleteReport {
+    pub ok: bool,
+    pub observed: Option<Observed>,
+    pub deletion: Option<DeletionReport>,
+}
+
+/// What a claim hands the runner: the controls (each with its own fresh lease) and
+/// the controls this call poisoned instead of handing out again.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ClaimResult {
+    pub controls: Vec<ControlInfo>,
+    pub poisoned: Vec<Uuid>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompleteOutcome {
+    /// The control is finished. `box_state` is the box's state after the report
+    /// (`None` for verbs that move no state: start, stop, status).
+    Completed { box_state: Option<BoxState> },
+    /// Fenced out: the control is not claimed by this runner under this lease and
+    /// attempt (expired and re-issued, cancelled by a newer request, already
+    /// finished, or somebody else's). Nothing was written.
+    Stale,
+    /// No such control in this workspace.
+    NotFound,
+    /// The report does not fit the verb (a `status` word on a `create`, a `delete`
+    /// that says it is done without the verification). Nothing was written.
+    InvalidReport(&'static str),
+}
+
+/// The box event a finished control implies, if any. `start`/`stop`/`status` do not
+/// move state: the owner's request already did (M1), and a failed `start` is the
+/// runner's report to the operator, not a lifecycle edge in the D3 table.
+fn event_for_outcome(verb: &str, ok: bool) -> Option<BoxEvent> {
+    match (verb, ok) {
+        ("create", true) => Some(BoxEvent::RunnerReady),
+        ("create", false) => Some(BoxEvent::RunnerCreateFailed),
+        ("delete", true) => Some(BoxEvent::RunnerDeleted),
+        ("delete", false) => Some(BoxEvent::RunnerDeleteFailed),
+        _ => None,
+    }
+}
+
+async fn lock_box_row(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    box_id: Uuid,
+) -> Result<Option<BoxInfo>, DbError> {
+    let row = sqlx::query(&format!(
+        "SELECT {} FROM cloud_box WHERE workspace_id = $1 AND id = $2 FOR UPDATE",
+        box_columns()
+    ))
+    .bind(workspace_id)
+    .bind(box_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    row.as_ref().map(box_from_row).transpose()
+}
+
+/// Apply the lifecycle edge a finished control implies, or write the audit row for
+/// the ones that have none. The box row is already locked by the caller.
+async fn settle_box_after_control(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    box_id: Uuid,
+    verb: &str,
+    ok: bool,
+    audit_failure: &'static str,
+) -> Result<Option<BoxState>, DbError> {
+    if let Some(event) = event_for_outcome(verb, ok) {
+        return Ok(
+            match apply_event_in_tx(conn, workspace_id, box_id, event, None, None).await? {
+                ApplyOutcome::Applied { info, .. } => Some(info.state),
+                // The box moved on while the runner worked (an owner deleted a box that
+                // was still being created): the report changes nothing.
+                ApplyOutcome::Illegal { info, .. } => Some(info.state),
+                ApplyOutcome::NotFound
+                | ApplyOutcome::NoCapacity
+                | ApplyOutcome::ControlInFlight => None,
+            },
+        );
+    }
+    if !ok {
+        if let Some(info) = find_box_in_tx(conn, workspace_id, box_id).await? {
+            let mut detail = audit_detail(&info, Some(info.state), "runner");
+            detail["verb"] = json!(verb);
+            let mut entry = AuditEntry::new(info.workspace_id, audit_failure)
+                .about(info.member_id)
+                .target("cloud_box", info.id)
+                .with_schema(CLOUD_BOX_AUDIT_SCHEMA, detail);
+            entry.actor_member_id = None;
+            write_audit(conn, &entry).await?;
+        }
+    }
+    Ok(None)
+}
+
+/// Turn controls whose lease ran out `MAX_CONTROL_ATTEMPTS` times (including one a revoked
+/// runner's lease handed back to `pending` with its attempts kept) into
+/// `failed`/`poisoned` and settle their boxes. Lock order matches every other
+/// writer: the box row first, then the control row.
+async fn poison_exhausted_controls(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+) -> Result<Vec<Uuid>, DbError> {
+    let candidates: Vec<(Uuid, Uuid, String)> = sqlx::query_as(
+        "SELECT id, box_id, verb FROM cloud_box_control \
+          WHERE workspace_id = $1 AND attempts >= $2 \
+            AND ((status = 'claimed' AND lease_expires_at < now()) OR status = 'pending') \
+          ORDER BY seq LIMIT 50",
+    )
+    .bind(workspace_id)
+    .bind(MAX_CONTROL_ATTEMPTS)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut poisoned = Vec::new();
+    for (control_id, box_id, verb) in candidates {
+        if lock_box_row(conn, workspace_id, box_id).await?.is_none() {
+            continue;
+        }
+        let done = sqlx::query(
+            "UPDATE cloud_box_control \
+                SET status = 'failed', result_code = 'poisoned', completed_at = now() \
+              WHERE workspace_id = $1 AND id = $2 AND attempts >= $3 \
+                AND ((status = 'claimed' AND lease_expires_at < now()) OR status = 'pending')",
+        )
+        .bind(workspace_id)
+        .bind(control_id)
+        .bind(MAX_CONTROL_ATTEMPTS)
+        .execute(&mut *conn)
+        .await?;
+        if done.rows_affected() != 1 {
+            continue;
+        }
+        settle_box_after_control(
+            conn,
+            workspace_id,
+            box_id,
+            &verb,
+            false,
+            "cloud_box.control_poisoned",
+        )
+        .await?;
+        poisoned.push(control_id);
+    }
+    Ok(poisoned)
+}
+
 /// Hand the runner up to `limit` controls, oldest first: `pending` ones and ones
-/// whose lease ran out. Runs inside a tenant transaction — one runner serves one
-/// workspace (D2), so polling needs no cross-tenant role.
+/// whose lease ran out. Every hand-out gets a **fresh `lease_id`** and bumps
+/// `attempts`; completing needs both back (fencing). A control that already used
+/// [`MAX_CONTROL_ATTEMPTS`] attempts is poisoned instead of handed out again.
+/// Runs inside a tenant transaction — one runner serves one workspace (D2), so
+/// polling needs no cross-tenant role.
 pub async fn claim_controls_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
+    runner_id: Uuid,
     limit: i64,
-    lease_seconds: i64,
-) -> Result<Vec<ControlInfo>, DbError> {
+) -> Result<ClaimResult, DbError> {
+    let poisoned = poison_exhausted_controls(conn, workspace_id).await?;
     let rows = sqlx::query(
         "WITH next AS ( \
            SELECT id FROM cloud_box_control \
             WHERE workspace_id = $1 \
               AND (status = 'pending' OR (status = 'claimed' AND lease_expires_at < now())) \
+              AND attempts < $4 \
             ORDER BY seq \
             LIMIT $2 \
             FOR UPDATE SKIP LOCKED) \
          UPDATE cloud_box_control c SET status = 'claimed', claimed_at = now(), \
-                lease_expires_at = now() + make_interval(secs => $3::int), \
+                runner_id = $3, lease_id = gen_random_uuid(), \
+                lease_expires_at = now() + make_interval( \
+                  secs => CASE WHEN c.verb IN ('create', 'delete') THEN $5::int ELSE $6::int END), \
                 attempts = c.attempts + 1 \
            FROM next WHERE c.id = next.id \
          RETURNING c.id, c.seq, c.box_id, c.verb, c.cpu_millis, c.memory_mb, c.disk_gb, \
-                   c.pids, c.attempts",
+                   c.pids, c.attempts, c.lease_id",
     )
     .bind(workspace_id)
     .bind(limit.clamp(1, 50))
-    .bind(lease_seconds.clamp(5, 3600))
+    .bind(runner_id)
+    .bind(MAX_CONTROL_ATTEMPTS)
+    .bind(LONG_LEASE_SECONDS as i32)
+    .bind(SHORT_LEASE_SECONDS as i32)
     .fetch_all(&mut *conn)
     .await?;
     let mut controls = rows
@@ -922,32 +1138,148 @@ pub async fn claim_controls_in_tx(
                     _ => None,
                 },
                 attempts: row.try_get(8)?,
+                lease_id: row.try_get(9)?,
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
     controls.sort_by_key(|control| control.seq);
-    Ok(controls)
+    Ok(ClaimResult { controls, poisoned })
 }
 
-/// The runner reports a claimed control done (`ok`) or failed. `false` = the
-/// control is not claimed (already finished, cancelled, or unknown).
+/// The runner reports a claimed control finished. **Fenced:** the update only
+/// lands when the control is still `claimed` by this `runner_id` under exactly this
+/// `lease_id` and `attempts`; a lease that expired and was re-issued (new lease id,
+/// attempts + 1), a control a newer owner request cancelled, one already finished,
+/// or one claimed by another runner is [`CompleteOutcome::Stale`] and writes
+/// nothing. The report is checked against the verb, and the box's lifecycle edge
+/// (create → running, delete → deleted, …) is applied in the same transaction.
 pub async fn complete_control_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
+    runner_id: Uuid,
     control_id: Uuid,
-    ok: bool,
-) -> Result<bool, DbError> {
-    let done = sqlx::query(
-        "UPDATE cloud_box_control SET status = $3, result_code = $4, completed_at = now() \
-          WHERE workspace_id = $1 AND id = $2 AND status = 'claimed'",
+    lease_id: Uuid,
+    attempts: i32,
+    report: CompleteReport,
+) -> Result<CompleteOutcome, DbError> {
+    let found: Option<(Uuid, String)> = sqlx::query_as(
+        "SELECT box_id, verb FROM cloud_box_control WHERE workspace_id = $1 AND id = $2",
     )
     .bind(workspace_id)
     .bind(control_id)
-    .bind(if ok { "done" } else { "failed" })
-    .bind(if ok { "ok" } else { "failed" })
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some((box_id, verb)) = found else {
+        return Ok(CompleteOutcome::NotFound);
+    };
+    // The report must fit the verb before anything is written.
+    match verb.as_str() {
+        "status" if report.deletion.is_some() => {
+            return Ok(CompleteOutcome::InvalidReport(
+                "status carries no deletion report",
+            ))
+        }
+        "status" if report.ok != report.observed.is_some() => {
+            return Ok(CompleteOutcome::InvalidReport(
+                "a finished status reports one observed word; a failed one reports none",
+            ))
+        }
+        "delete" if report.observed.is_some() => {
+            return Ok(CompleteOutcome::InvalidReport(
+                "delete reports no observed word",
+            ))
+        }
+        "delete" if report.ok && report.deletion.is_none() => {
+            return Ok(CompleteOutcome::InvalidReport(
+                "a delete is done only with the deletion verification report",
+            ))
+        }
+        "create" | "start" | "stop" if report.observed.is_some() || report.deletion.is_some() => {
+            return Ok(CompleteOutcome::InvalidReport(
+                "this verb carries no observed word or deletion report",
+            ))
+        }
+        _ => {}
+    }
+    // A delete counts as done only when the runner verified both absences.
+    let effective_ok = match (verb.as_str(), report.deletion) {
+        ("delete", Some(deletion)) => report.ok && deletion.verified(),
+        _ => report.ok,
+    };
+    // Box row first, then the control row (the order every other writer takes).
+    if lock_box_row(conn, workspace_id, box_id).await?.is_none() {
+        return Ok(CompleteOutcome::NotFound);
+    }
+    let done = sqlx::query(
+        "UPDATE cloud_box_control \
+            SET status = $5, result_code = $6, completed_at = now(), \
+                observed = $7, container_absent = $8, volume_absent = $9 \
+          WHERE workspace_id = $1 AND id = $2 AND status = 'claimed' \
+            AND runner_id = $3 AND lease_id = $4 AND attempts = $10",
+    )
+    .bind(workspace_id)
+    .bind(control_id)
+    .bind(runner_id)
+    .bind(lease_id)
+    .bind(if effective_ok { "done" } else { "failed" })
+    .bind(if effective_ok { "ok" } else { "failed" })
+    .bind(report.observed.map(Observed::as_str))
+    .bind(report.deletion.map(|d| d.container_absent))
+    .bind(report.deletion.map(|d| d.volume_absent))
+    .bind(attempts)
     .execute(&mut *conn)
     .await?;
-    Ok(done.rows_affected() == 1)
+    if done.rows_affected() != 1 {
+        return Ok(CompleteOutcome::Stale);
+    }
+    let box_state = settle_box_after_control(
+        conn,
+        workspace_id,
+        box_id,
+        &verb,
+        effective_ok,
+        "cloud_box.control_failed",
+    )
+    .await?;
+    Ok(CompleteOutcome::Completed { box_state })
+}
+
+/// One row of the runner's reconciliation list: a box the server still knows
+/// about and the state it is in. Ids and states only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReconcileBox {
+    pub box_id: Uuid,
+    pub state: BoxState,
+}
+
+/// Every box the runner's local volume list is checked against: all live boxes
+/// plus `deleted` tombstones of the last 30 days. A volume the server has no row
+/// for at all (or a `deleted` one) is what the runner quarantines (D10).
+pub async fn list_reconcile_boxes_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+) -> Result<Vec<ReconcileBox>, DbError> {
+    let rows: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT id, state FROM cloud_box \
+          WHERE workspace_id = $1 \
+            AND (state <> 'deleted' OR deleted_at > now() - interval '30 days') \
+          ORDER BY created_at, id",
+    )
+    .bind(workspace_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.into_iter()
+        .map(|(box_id, state)| {
+            Ok(ReconcileBox {
+                box_id,
+                state: BoxState::parse(&state).ok_or_else(|| {
+                    DbError::Sqlx(sqlx::Error::Decode(
+                        format!("unknown cloud_box state {state}").into(),
+                    ))
+                })?,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]

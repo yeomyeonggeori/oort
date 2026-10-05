@@ -186,7 +186,7 @@ use std::collections::BTreeSet;
 
 use momo_settings::cloud_box::{
     apply_event_in_tx, claim_controls_in_tx, complete_control_in_tx, next_state, ApplyOutcome,
-    BoxEvent, BoxState, ControlVerb,
+    BoxEvent, BoxState, CompleteOutcome, CompleteReport, ControlVerb,
 };
 
 struct World {
@@ -287,14 +287,48 @@ async fn runner_event(
     .expect("runner event")
 }
 
-/// The runner takes every control and reports it done.
+/// The workspace's live runner (created once). M2 gave the queue an owner: a claim
+/// names its runner, so even the M1 fixtures need one.
+async fn ensure_runner(
+    conn: &mut momo_db::PgConnection,
+    workspace: Uuid,
+) -> Result<Uuid, momo_db::DbError> {
+    sqlx::query(
+        "INSERT INTO cloud_box_runner (workspace_id, name, credential_hash, credential_fingerprint) \
+         SELECT $1, 'test-runner', h, substr(encode(h, 'hex'), 1, 16) \
+           FROM (SELECT digest(gen_random_uuid()::text, 'sha256') AS h) x \
+          WHERE NOT EXISTS (SELECT 1 FROM cloud_box_runner WHERE workspace_id = $1 AND revoked_at IS NULL)",
+    )
+    .bind(workspace)
+    .execute(&mut *conn)
+    .await?;
+    let id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM cloud_box_runner WHERE workspace_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(workspace)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(id)
+}
+
+/// The runner takes every control and finishes it **without** reporting a box
+/// event (M1's tests drive the runner's lifecycle edges by hand through
+/// `runner_event`; `cloud_box_runner_pg.rs` covers `complete_control_in_tx`
+/// applying them).
 async fn drain_controls(app: &PgPool, workspace: Uuid) -> Vec<String> {
     momo_db::with_tenant_tx(app, workspace, move |conn| {
         Box::pin(async move {
-            let controls = claim_controls_in_tx(conn, workspace, 50, 60).await?;
+            let runner = ensure_runner(conn, workspace).await?;
+            let claimed = claim_controls_in_tx(conn, workspace, runner, 50).await?;
             let mut verbs = Vec::new();
-            for control in controls {
-                assert!(complete_control_in_tx(conn, workspace, control.id, true).await?);
+            for control in claimed.controls {
+                sqlx::query(
+                    "UPDATE cloud_box_control SET status = 'done', result_code = 'ok', completed_at = now() \
+                      WHERE id = $1 AND status = 'claimed'",
+                )
+                .bind(control.id)
+                .execute(&mut *conn)
+                .await?;
                 verbs.push(control.verb);
             }
             Ok(verbs)
@@ -659,18 +693,23 @@ async fn neither_table_has_a_secret_column_or_a_free_payload() {
                 "box_id",
                 "claimed_at",
                 "completed_at",
+                "container_absent",
                 "cpu_millis",
                 "created_at",
                 "disk_gb",
                 "id",
                 "lease_expires_at",
+                "lease_id",
                 "memory_mb",
+                "observed",
                 "pids",
                 "requested_by",
                 "result_code",
+                "runner_id",
                 "seq",
                 "status",
                 "verb",
+                "volume_absent",
                 "workspace_id",
             ],
         ),
@@ -1786,20 +1825,32 @@ async fn the_control_queue_is_closed_ordered_and_leased() {
 
     // Claim, lease, complete — inside the tenant, nobody else's.
     let ws = w.workspace;
-    let foreign = momo_db::with_tenant_tx(&app, other.workspace, move |conn| {
-        Box::pin(async move { claim_controls_in_tx(conn, other.workspace, 10, 60).await })
+    let other_ws = other.workspace;
+    let foreign = momo_db::with_tenant_tx(&app, other_ws, move |conn| {
+        Box::pin(async move {
+            let runner = ensure_runner(conn, other_ws).await?;
+            claim_controls_in_tx(conn, other_ws, runner, 10).await
+        })
     })
     .await
     .expect("foreign claim");
     assert!(
-        foreign.is_empty(),
+        foreign.controls.is_empty(),
         "another workspace's runner was handed this workspace's control"
     );
-    let claimed = momo_db::with_tenant_tx(&app, ws, move |conn| {
-        Box::pin(async move { claim_controls_in_tx(conn, ws, 10, 60).await })
+    let runner = momo_db::with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move { ensure_runner(conn, ws).await })
     })
     .await
-    .expect("claim");
+    .expect("runner");
+    let claim = move |app: PgPool| async move {
+        momo_db::with_tenant_tx(&app, ws, move |conn| {
+            Box::pin(async move { claim_controls_in_tx(conn, ws, runner, 10).await })
+        })
+        .await
+        .expect("claim")
+    };
+    let claimed = claim(app.clone()).await.controls;
     assert_eq!(claimed.len(), 1);
     assert_eq!(
         (
@@ -1809,13 +1860,9 @@ async fn the_control_queue_is_closed_ordered_and_leased() {
         ),
         ("status", 1, box_id)
     );
-    let again = momo_db::with_tenant_tx(&app, ws, move |conn| {
-        Box::pin(async move { claim_controls_in_tx(conn, ws, 10, 60).await })
-    })
-    .await
-    .expect("second claim");
+    let again = claim(app.clone()).await.controls;
     assert!(again.is_empty(), "a leased control was handed out twice");
-    // The lease runs out: the same control comes back, attempt 2.
+    // The lease runs out: the same control comes back, attempt 2, under a NEW lease id.
     sqlx::query(
         "UPDATE cloud_box_control SET lease_expires_at = now() - interval '1 second' WHERE id = $1",
     )
@@ -1823,20 +1870,25 @@ async fn the_control_queue_is_closed_ordered_and_leased() {
     .execute(&su)
     .await
     .expect("expire lease");
-    let retaken = momo_db::with_tenant_tx(&app, ws, move |conn| {
-        Box::pin(async move { claim_controls_in_tx(conn, ws, 10, 60).await })
-    })
-    .await
-    .expect("reclaim");
+    let retaken = claim(app.clone()).await.controls;
     assert_eq!(
         (retaken.len(), retaken[0].id, retaken[0].attempts),
         (1, claimed[0].id, 2)
     );
+    assert_ne!(retaken[0].lease_id, claimed[0].lease_id);
     let control_id = retaken[0].id;
+    let lease_id = retaken[0].lease_id;
     let completed = momo_db::with_tenant_tx(&app, ws, move |conn| {
         Box::pin(async move {
-            let first = complete_control_in_tx(conn, ws, control_id, false).await?;
-            let second = complete_control_in_tx(conn, ws, control_id, true).await?;
+            let failed = CompleteReport {
+                ok: false,
+                observed: None,
+                deletion: None,
+            };
+            let first =
+                complete_control_in_tx(conn, ws, runner, control_id, lease_id, 2, failed).await?;
+            let second =
+                complete_control_in_tx(conn, ws, runner, control_id, lease_id, 2, failed).await?;
             Ok((first, second))
         })
     })
@@ -1844,7 +1896,10 @@ async fn the_control_queue_is_closed_ordered_and_leased() {
     .expect("complete");
     assert_eq!(
         completed,
-        (true, false),
+        (
+            CompleteOutcome::Completed { box_state: None },
+            CompleteOutcome::Stale
+        ),
         "a finished control must not be completed twice"
     );
     let result: (String, String) =
@@ -1873,11 +1928,7 @@ async fn the_control_queue_is_closed_ordered_and_leased() {
             .bind(w.workspace).bind(id).execute(&su).await.expect("control");
         members.push(id);
     }
-    let order = momo_db::with_tenant_tx(&app, ws, move |conn| {
-        Box::pin(async move { claim_controls_in_tx(conn, ws, 10, 60).await })
-    })
-    .await
-    .expect("ordered claim");
+    let order = claim(app.clone()).await.controls;
     assert_eq!(order.iter().map(|c| c.box_id).collect::<Vec<_>>(), members);
     assert!(order.windows(2).all(|pair| pair[0].seq < pair[1].seq));
 }

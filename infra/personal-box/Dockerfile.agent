@@ -1,0 +1,22 @@
+# oort personal-cloud box — the runner's image (ADR-0197 M2, #3505): the S3 image
+# (`Dockerfile`, built by momo-s3-box.sh) plus the box-agent and the two scripts the runner template uses.
+#
+# Exactly three files are added and nothing else:
+#   momo-box-agent        the box's host identity (built by build-image.sh from server-rust, release)
+#   momo-box-agent-entry  the root entry that starts it as its own uid with two ambient capabilities
+#   momo-box-volume-shred the runner's volume overwrite helper
+# `momo-box-probe` (the M3 test helper) is NOT copied: build-image.sh builds the agent only, and
+# verify-m2.sh fails if the probe is in the image.
+ARG BASE=momo-s3-box:local
+FROM ${BASE}
+USER root
+COPY momo-box-agent momo-box-agent-entry momo-box-volume-shred /usr/local/bin/
+RUN chmod 0755 /usr/local/bin/momo-box-agent /usr/local/bin/momo-box-agent-entry /usr/local/bin/momo-box-volume-shred \
+ && find / -xdev -type f \( -perm -4000 -o -perm -2000 \) -exec chmod a-s {} +
+ARG AGENT_SHA=unset
+LABEL io.momo.m2.agent-sha=$AGENT_SHA
+# The runner starts the container as root with CAP_SETUID/CAP_SETGID only (template.rs); the entry drops
+# to the agent uid. The image's own default user stays the person's uid, so a bare `docker run` is not root.
+USER 10001:10001
+ENTRYPOINT ["/usr/local/bin/momo-box-agent-entry"]
+CMD []
