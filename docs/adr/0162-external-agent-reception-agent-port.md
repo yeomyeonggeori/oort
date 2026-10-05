@@ -512,6 +512,7 @@ agent_run.output = {
 | A3 | **암묵 갱신.** 호스티드 lease가 만료됐어도 job 행의 `lease_owner`가 여전히 그 핸들의 lease id이면(= 아무도 재클레임하지 않음) 같은 핸들의 `oort_run_event`·`oort_run_complete`·`oort_job_renew`·`oort_card_suggest`·`oort_action_propose`를 받는다. `oort_job_renew`는 이 경우 lease를 `now()+TTL`로 되살린다. | 재클레임은 새 `lease_owner`를 발급하므로 "누가 가져갔는가"는 소유자 비교만으로 정확히 판정된다. 만료 시각을 따로 믿을 필요가 없다. |
 | A4 | **재클레임되면 옛 핸들은 계속 409.** 해제(`oort_job_release`)로 소유자가 비워진 행도 옛 핸들을 받지 않는다. job 상태는 여전히 `pending`이어야 하고(`done`은 재생 창구에서만), 실행·run·채널·연결 결속 검사는 그대로다. `oort_job_release`는 살아 있는 lease만 받는다(바꾸지 않음). | 같은 일을 두 워커가 동시에 끝내는 길을 열지 않는다. |
 | A5 | **되살아남 경쟁.** 만료된 lease는 그 즉시 다음 `oort_jobs_claim`의 후보가 된다. 늦게 깨어난 에이전트가 보고 전에 `oort_jobs_claim`을 먼저 부르면 자기 job을 다시 가져오며 **새 핸들**을 받고, 옛 핸들은 A4로 409가 된다. 레시피는 "깨면 새 핸들을 쓰거나, claim 전에 옛 핸들로 보고"를 안내한다(D16 루틴 문구). | 모호함 없이 한 쪽만 유효하다. |
+| A6 | **만료 뒤에는 해제하지 말고 보고하거나 claim한다.** 만료된 lease에 `oort_job_release`를 부르면 409다(살아 있는 lease만 해제). 매 호출의 연결·채널 승인·run 상태 재검사는 lease 상태와 무관하게 그대로라서, 만료 뒤 암묵 갱신이 해제된 연결·좁혀진 승인·취소된 run을 되살리지 않는다. 만료된 미재클레임 핸들의 잘못된 보고가 남기는 감사 행의 상한은 살아 있는 lease와 같다(속도 제한이 적용된다). 레시피는 SELF_HOST_AGENT 「Long gaps between wakes」. | 보안 검수(#3532) M1·M2·L3 |
 
 **다른 재큐 경로 확인(2026-10-06 실측).** `agent_job` 행을 되돌리는 주기 청소(스위프)는 코드에 없다. 유일한 재클레임 경로는 claim의 `lease_expires_at <= now()` 조건이며 이 부록의 TTL을 그대로 따른다. 노출 한도 G1의 `G1_STALE_RUNNING_SECONDS`(600초)는 동시 실행 수 계산에서 오래된 `running` run을 빼는 값일 뿐 job·lease를 건드리지 않는다. 도어벨(`momo-webhook::doorbell`)은 job·lease 열을 읽지 않는다.
 

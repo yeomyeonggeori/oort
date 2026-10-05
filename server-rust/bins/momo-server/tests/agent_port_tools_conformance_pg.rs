@@ -558,6 +558,37 @@ async fn call(
     (status, value)
 }
 
+/// Like [`call`], but a refusal at the transport/auth layer carries no JSON-RPC
+/// body (an inactive credential is answered before the tool runs): that is
+/// `(status, None)` rather than a decode panic.
+async fn call_maybe_empty_3530(
+    client: &reqwest::Client,
+    base: &str,
+    bearer: &str,
+    tool: &str,
+    arguments: Value,
+) -> (u16, Option<Value>) {
+    let body = modern_body(
+        "tools/call",
+        json!(Uuid::new_v4().to_string()),
+        json!({"name": tool, "arguments": arguments}),
+    );
+    let response = client
+        .post(format!("{base}{PATH}"))
+        .header("content-type", "application/json")
+        .header("accept", "application/json, text/event-stream")
+        .header("mcp-protocol-version", MODERN_VERSION)
+        .header("mcp-method", "tools/call")
+        .header("mcp-name", tool)
+        .bearer_auth(bearer)
+        .json(&body)
+        .send()
+        .await
+        .expect("tools/call responds");
+    let status = response.status().as_u16();
+    (status, response.json().await.ok())
+}
+
 async fn list_tools(client: &reqwest::Client, base: &str, bearer: &str) -> Vec<String> {
     let body = modern_body("tools/list", json!(1), json!({}));
     let response = client
@@ -6757,4 +6788,149 @@ async fn the_managed_gateway_keeps_its_thirty_second_strict_lease() {
         409,
         "an expired managed lease is not implicitly renewed"
     );
+}
+
+/// #3530 review M1: an expired-but-unreclaimed lease must not out-live the
+/// per-call re-checks (connection, channel grant, run state). Each case claims,
+/// lapses the lease, breaks one precondition, and expects the old handle to be
+/// refused by renew, event and complete. `live_first` runs the same breakage
+/// on a still-live lease so the two are compared, not just asserted.
+async fn expired_then_broken_3530(case: &str) {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (handle, run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+    lapse_lease_3530(&su, run).await;
+    match case {
+        "disconnect" => {
+            sqlx::query(
+                "UPDATE hosted_agent_connection SET status='cleanup_pending', active_token_id=NULL \
+                 WHERE workspace_id=$1 AND id=$2",
+            )
+            .bind(fixture.workspace)
+            .bind(fixture.hosted_connection)
+            .execute(&su)
+            .await
+            .unwrap();
+        }
+        "narrowed" => {
+            sqlx::query(
+                "UPDATE hosted_agent_connection SET approved_channel_ids=ARRAY[gen_random_uuid()]::uuid[] \
+                 WHERE workspace_id=$1 AND id=$2",
+            )
+            .bind(fixture.workspace)
+            .bind(fixture.hosted_connection)
+            .execute(&su)
+            .await
+            .unwrap();
+        }
+        "paused" => {
+            sqlx::query(
+                "UPDATE agent_profile SET paused=true WHERE workspace_id=$1 AND agent_member_id=$2",
+            )
+            .bind(fixture.workspace)
+            .bind(fixture.hosted_agent)
+            .execute(&su)
+            .await
+            .unwrap();
+        }
+        "cancelled" => {
+            sqlx::query("UPDATE agent_run SET status='cancelled' WHERE id=$1")
+                .bind(run)
+                .execute(&su)
+                .await
+                .unwrap();
+        }
+        other => panic!("unknown case {other}"),
+    }
+    for (tool, args) in [
+        ("oort_job_renew", json!({"leaseHandle": handle})),
+        (
+            "oort_run_event",
+            json!({"leaseHandle": handle, "stage": "late"}),
+        ),
+        (
+            "oort_run_complete",
+            json!({"leaseHandle": handle, "status": "succeeded", "body": "x"}),
+        ),
+    ] {
+        // `oort_job_renew` is a lease verb with no run check of its own, for a
+        // live lease as much as an expired one (it only keeps a lease alive,
+        // see the ADR-0186 D2 note above `LeaseVerb::Release`); a cancelled run
+        // is stopped at event/complete.
+        if case == "cancelled" && tool == "oort_job_renew" {
+            continue;
+        }
+        let (status, refused) =
+            call_maybe_empty_3530(&client, &base, &fixture.hosted_bearer, tool, args).await;
+        assert!(
+            status != 200,
+            "{case}/{tool}: an expired lease must not bypass the re-check, got {status}: {refused:?}"
+        );
+        if let Some(refused) = refused {
+            assert!(
+                [-32001, -32003, -32004, -32005].contains(&error_code(&refused)),
+                "{case}/{tool}: {refused}"
+            );
+        }
+    }
+    let run_status: String = sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id=$1")
+        .bind(run)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_ne!(run_status, "succeeded", "{case}: nothing was completed");
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_expired_hosted_lease_still_meets_every_per_call_recheck_3530() {
+    for case in ["disconnect", "narrowed", "cancelled"] {
+        expired_then_broken_3530(case).await;
+    }
+}
+
+/// A paused agent: the gateway lease path never consulted `paused` for a live
+/// lease, so an expired one must not behave differently from a live one.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_paused_agent_treats_an_expired_lease_like_a_live_one_3530() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (handle, run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+    sqlx::query(
+        "UPDATE agent_profile SET paused=true WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let live = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_event",
+        json!({"leaseHandle": handle, "stage": "a"}),
+    )
+    .await
+    .0;
+    lapse_lease_3530(&su, run).await;
+    let expired = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_event",
+        json!({"leaseHandle": handle, "stage": "b"}),
+    )
+    .await
+    .0;
+    assert_eq!(live, expired, "pause must not be a lease-expiry side door");
 }

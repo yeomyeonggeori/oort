@@ -766,6 +766,25 @@ fn doorbell_gate_open(value: Option<&str>) -> bool {
     hosted_delivery_gate_open(value)
 }
 
+/// `MOMO_AGENT_PORT_HOSTED_LEASE_MINUTES` -> clamped seconds. A value outside
+/// 5..=120 minutes is clamped, and the operator is told once at boot (#3530).
+fn hosted_lease_seconds_from_env() -> Result<i64, ConfigError> {
+    let minutes = env_number::<i64>(
+        "MOMO_AGENT_PORT_HOSTED_LEASE_MINUTES",
+        momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT / 60,
+    )?;
+    let requested = minutes.saturating_mul(60);
+    let clamped = momo_outbox::clamp_hosted_lease_seconds(requested);
+    if clamped != requested {
+        tracing::warn!(
+            requested_minutes = minutes,
+            effective_minutes = clamped / 60,
+            "MOMO_AGENT_PORT_HOSTED_LEASE_MINUTES is outside 5..=120 and was clamped"
+        );
+    }
+    Ok(clamped)
+}
+
 impl AgentPortConfig {
     pub fn from_env() -> Result<AgentPortConfig, ConfigError> {
         let defaults = AgentPortConfig::default();
@@ -796,13 +815,7 @@ impl AgentPortConfig {
             )?,
             per_ip_limit: env_number("MOMO_AGENT_PORT_RATE_LIMIT_PER_IP", defaults.per_ip_limit)?,
             hosted_delivery_enabled: hosted_delivery_from_env(),
-            hosted_lease_seconds: momo_outbox::clamp_hosted_lease_seconds(
-                env_number::<i64>(
-                    "MOMO_AGENT_PORT_HOSTED_LEASE_MINUTES",
-                    momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT / 60,
-                )?
-                .saturating_mul(60),
-            ),
+            hosted_lease_seconds: hosted_lease_seconds_from_env()?,
             subscription_agents_enabled: subscription_agents_from_env(),
             claude_subscription_agents_enabled: claude_subscription_agents_from_env(),
             oauth: AgentPortOauthConfig::from_env()?,
