@@ -1,10 +1,9 @@
 //! How the box-agent presents itself to the server (ADR-0197 D2): a **member
 //! host**, `scope = "member"`, whose owner is the box's person.
 //!
-//! The server route that consumes a pairing code is M1/M4 work; this module is
-//! the box side of that contract: the request it would send, and the checks it
-//! makes on the answer. Registration alone activates nothing: until the owner
-//! confirms (see [`crate::host::BoxHost::confirm_owner`]) the host answers no
+//! The box side of the contract (ADR-0197 M4 증보 2): the request it sends (a MAC over its host key, keyed by a
+//! pairing code only the runner and the box know), and the checks it makes on the answer. Registration alone
+//! activates nothing: until the owner confirms (see [`crate::host::BoxHost::confirm_owner`]) the host answers no
 //! attach, however the server answers here.
 
 use std::fmt;
@@ -18,67 +17,51 @@ pub const HOST_TYPE: &str = "cloud";
 /// The only scope a box host ever has (ADR-0197 D2, ADR-0188 D3).
 pub const SCOPE: &str = "member";
 
-/// A one-time pairing code, injected by the runner (D2). It is consumed by
-/// [`PairingCode::into_request_value`], never printed and never cloned. This
-/// type overwrites **its own copy** of the bytes (volatile writes, on drop and
-/// after conversion); it does not and cannot wipe the `String` it returns, the
-/// request JSON, or copies the allocator or the caller made. It limits how long
-/// one copy lives; it is not a guarantee of erasure.
-pub struct PairingCode(Vec<u8>);
+/// The one-time pairing code the runner injected (ADR-0197 M4 증보 2): 32 CSPRNG bytes. It is the key of the
+/// registration MAC and **is never sent anywhere**: the server sees only the MAC, which it cannot check; the runner,
+/// which holds the same code, can. This type overwrites its own copy on drop (volatile writes); it cannot wipe copies
+/// the allocator or the caller made, so it limits how long one copy lives and guarantees nothing more.
+pub struct PairingSecret(Vec<u8>);
 
-impl PairingCode {
-    pub fn new(code: &str) -> Option<Self> {
-        let trimmed = code.trim();
-        (!trimmed.is_empty() && trimmed.len() <= 256 && !trimmed.contains('\0'))
-            .then(|| Self(trimmed.as_bytes().to_vec()))
+impl PairingSecret {
+    /// From the injected file's text: base64 of exactly 32 bytes.
+    pub fn from_file_text(text: &str) -> Option<Self> {
+        use base64::Engine as _;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(text.trim())
+            .ok()?;
+        (bytes.len() == 32).then_some(Self(bytes))
     }
 
-    fn into_request_value(mut self) -> String {
-        // Consumed here: the bytes leave this object exactly once, and the
-        // buffer they came from is overwritten before it is freed.
-        let mut bytes = std::mem::take(&mut self.0);
-        let text = String::from_utf8_lossy(&bytes).into_owned();
-        wipe(&mut bytes);
-        text
+    /// `HMAC-SHA256(code, "momo.box.register.v1" ‖ box_id ‖ host_pub)`.
+    pub fn mac(&self, box_id: &[u8; 16], host_pub: &[u8; 32]) -> [u8; 32] {
+        momo_blind_pty::trust::registration_mac(&self.0, box_id, host_pub)
     }
 }
 
-impl fmt::Debug for PairingCode {
+impl fmt::Debug for PairingSecret {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("PairingCode([redacted])")
+        f.write_str("PairingSecret([redacted])")
     }
 }
 
-fn wipe(bytes: &mut [u8]) {
-    for byte in bytes.iter_mut() {
-        // SAFETY: a valid &mut u8; volatile so the wipe is not optimised out.
-        unsafe { std::ptr::write_volatile(byte, 0) };
-    }
-}
-
-impl Drop for PairingCode {
+impl Drop for PairingSecret {
     fn drop(&mut self) {
-        wipe(&mut self.0);
+        for byte in self.0.iter_mut() {
+            // SAFETY: a valid &mut u8; volatile so the wipe is not optimised out.
+            unsafe { std::ptr::write_volatile(byte, 0) };
+        }
     }
 }
 
-/// The registration request body. `scope` is fixed here; there is no parameter
-/// that could widen it.
-pub fn registration_request(
-    box_id: &str,
-    display_name: &str,
-    public_key_b64: &str,
-    code: PairingCode,
-) -> Value {
+/// The registration request body: the box's host public key and the MAC proving the pairing code. There is no
+/// field for the code, a scope, a type, an owner or a workspace: the server derives every one of them from the
+/// box row (owner = the box's owner, `scope = "member"`, `type = "cloud"`).
+pub fn registration_body(host_public_key_b64: &str, mac: &[u8; 32]) -> Value {
+    use base64::Engine as _;
     json!({
-        "scope": SCOPE,
-        "type": HOST_TYPE,
-        "displayName": display_name.trim(),
-        "publicKey": public_key_b64,
-        // A box host serves the owner's terminal. Claude is never driven over
-        // ACP in a box (D6), so it advertises no ACP either.
-        "capabilities": { "acp": false, "terminal_attach": true },
-        "pairing": { "boxId": box_id, "code": code.into_request_value() },
+        "hostPublicKey": host_public_key_b64,
+        "mac": base64::engine::general_purpose::STANDARD.encode(mac),
     })
 }
 
@@ -142,17 +125,37 @@ mod tests {
     }
 
     #[test]
-    fn the_request_is_a_member_scope_cloud_host_and_carries_the_code_once() {
-        let code = PairingCode::new("  PAIR-1234  ").unwrap();
-        assert_eq!(format!("{code:?}"), "PairingCode([redacted])");
-        let body = registration_request("box-1", " 성재의 클라우드 ", "KEY", code);
-        assert_eq!(body["scope"], "member");
-        assert_eq!(body["type"], "cloud");
-        assert_eq!(body["displayName"], "성재의 클라우드");
-        assert_eq!(body["capabilities"]["acp"], false);
-        assert_eq!(body["capabilities"]["terminal_attach"], true);
-        assert_eq!(body["pairing"]["code"], "PAIR-1234");
-        assert!(body.get("workspace").is_none());
+    fn the_request_carries_a_key_and_a_mac_and_never_the_code() {
+        use base64::Engine as _;
+        let code_text = base64::engine::general_purpose::STANDARD.encode([9u8; 32]);
+        let secret = PairingSecret::from_file_text(&format!("{code_text}\n")).unwrap();
+        assert_eq!(format!("{secret:?}"), "PairingSecret([redacted])");
+        let mac = secret.mac(&[1u8; 16], &[2u8; 32]);
+        let body = registration_body("KEY", &mac);
+        let text = body.to_string();
+        assert_eq!(body.as_object().unwrap().len(), 2, "exactly a key and a mac");
+        assert!(!text.contains(&code_text), "the code itself is never in the body");
+        for widened in ["scope", "type", "owner", "workspace", "capabilities", "pairing", "code"] {
+            assert!(body.get(widened).is_none(), "{widened}");
+        }
+        // The runner verifies exactly this MAC with the same code.
+        assert!(momo_blind_pty::trust::verify_registration_mac(
+            &[9u8; 32],
+            &[1u8; 16],
+            &[2u8; 32],
+            &mac
+        ));
+    }
+
+    #[test]
+    fn a_pairing_file_is_32_bytes_of_base64() {
+        use base64::Engine as _;
+        let b64 = |n: usize| base64::engine::general_purpose::STANDARD.encode(vec![1u8; n]);
+        assert!(PairingSecret::from_file_text(&b64(32)).is_some());
+        assert!(PairingSecret::from_file_text(&b64(31)).is_none());
+        assert!(PairingSecret::from_file_text(&b64(33)).is_none());
+        assert!(PairingSecret::from_file_text("not base64!").is_none());
+        assert!(PairingSecret::from_file_text("").is_none());
     }
 
     #[test]
@@ -175,12 +178,5 @@ mod tests {
             check_registered(&json!({"nothing": 1}), "KEY"),
             Err(RegisterError::Malformed)
         );
-    }
-
-    #[test]
-    fn empty_or_oversized_codes_are_not_codes() {
-        assert!(PairingCode::new("   ").is_none());
-        assert!(PairingCode::new(&"x".repeat(257)).is_none());
-        assert!(PairingCode::new("a\0b").is_none());
     }
 }

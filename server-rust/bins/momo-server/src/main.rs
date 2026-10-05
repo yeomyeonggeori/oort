@@ -11,6 +11,8 @@ use momo_server::{build_app, AppState};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // ADR-0197 T9: no core file, no dump of a process that may hold a person's terminal bytes in flight.
+    momo_server::harden::disable_core_dumps();
     // `RUST_LOG` first, then the prod compose's `LOG_LEVEL`, then `info`
     // (`config::log_filter`). An unparsable directive degrades to `info` rather
     // than killing the process over a logging knob.

@@ -259,7 +259,19 @@ struct Watched {
     activity: Arc<AtomicU64>,
 }
 
+/// The only thing the relay measures: how many messages and bytes it forwarded and how many sessions it opened and
+/// ended (ADR-0197 D5: 「바이트 수와 시각만 센다」). Numbers; there is no label, no key, no content, no per-session
+/// breakdown that could carry one.
+#[derive(Debug, Default)]
+pub struct RelayStats {
+    pub messages_forwarded: AtomicU64,
+    pub bytes_forwarded: AtomicU64,
+    pub sessions_opened: AtomicU64,
+    pub sessions_ended: AtomicU64,
+}
+
 pub struct RelayHub {
+    stats: RelayStats,
     pool: PgPool,
     limits: RelayLimits,
     enabled: AtomicBool,
@@ -287,6 +299,7 @@ fn now_ms() -> i64 {
 impl RelayHub {
     pub fn new(pool: PgPool, limits: RelayLimits) -> Arc<Self> {
         Arc::new(RelayHub {
+            stats: RelayStats::default(),
             pool,
             limits,
             enabled: AtomicBool::new(true),
@@ -299,6 +312,10 @@ impl RelayHub {
 
     pub fn limits(&self) -> &RelayLimits {
         &self.limits
+    }
+
+    pub fn stats(&self) -> &RelayStats {
+        &self.stats
     }
 
     /// The instance switch (runtime). `false` ends every session at the next supervisor pass (immediately
@@ -428,6 +445,7 @@ impl RelayHub {
         if listener_tx.try_send(notice).is_err() {
             return Err(OpenError::AgentOffline);
         }
+        self.stats.sessions_opened.fetch_add(1, Ordering::Relaxed);
         let (d2b_tx, d2b_rx) = mpsc::channel(self.limits.queue_messages);
         let (b2d_tx, b2d_rx) = mpsc::channel(self.limits.queue_messages);
         let (cancel, _) = watch::channel(None);
@@ -528,6 +546,7 @@ impl RelayHub {
     pub fn end(self: &Arc<Self>, session_id: Uuid, reason: EndReason) -> bool {
         let removed = self.lock().sessions.remove(&session_id);
         let Some(entry) = removed else { return false };
+        self.stats.sessions_ended.fetch_add(1, Ordering::Relaxed);
         let _ = entry.cancel.send(Some(reason));
         let hub = self.clone();
         let meta = entry.meta;
@@ -785,6 +804,8 @@ pub async fn run_end(hub: Arc<RelayHub>, mut socket: WebSocket, mut end: End) {
                             end.box_messages.fetch_add(1, Ordering::Relaxed);
                         }
                         end.activity.store(hub.mono_ms(), Ordering::Relaxed);
+                        hub.stats.messages_forwarded.fetch_add(1, Ordering::Relaxed);
+                        hub.stats.bytes_forwarded.fetch_add(bytes.len() as u64, Ordering::Relaxed);
                         // Back-pressure: wait for room; never drop.
                         match tokio::time::timeout(limits.stall_timeout, end.to_peer.send(bytes.to_vec())).await {
                             Ok(Ok(())) => {}

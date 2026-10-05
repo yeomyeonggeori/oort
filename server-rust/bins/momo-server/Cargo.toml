@@ -97,6 +97,7 @@ jsonwebtoken.workspace = true
 sha2.workspace = true
 base64.workspace = true
 hex.workspace = true
+libc.workspace = true
 getrandom = "0.2"
 
 # NOTE (invariant #2, amended by ADR-0149): there is still deliberately no

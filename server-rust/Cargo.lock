@@ -1689,12 +1689,18 @@ version = "0.0.0"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
+ "futures-util",
+ "getrandom 0.2.17",
  "libc",
  "momo-blind-pty",
+ "momo-wire",
  "momo-workd",
  "p256",
+ "reqwest",
  "serde_json",
  "thiserror 1.0.69",
+ "tokio",
+ "tokio-tungstenite",
  "uuid",
 ]
 
@@ -1973,6 +1979,7 @@ dependencies = [
  "getrandom 0.2.17",
  "hex",
  "jsonwebtoken",
+ "libc",
  "momo-agent",
  "momo-agent-worker",
  "momo-auth",
@@ -3710,8 +3717,12 @@ checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
 dependencies = [
  "futures-util",
  "log",
+ "rustls",
+ "rustls-pki-types",
  "tokio",
+ "tokio-rustls",
  "tungstenite",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]
@@ -3854,6 +3865,8 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.9.5",
+ "rustls",
+ "rustls-pki-types",
  "sha1",
  "thiserror 2.0.19",
 ]

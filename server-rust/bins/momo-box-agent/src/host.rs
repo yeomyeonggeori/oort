@@ -151,6 +151,14 @@ impl SpawnTemplate {
         }
     }
 
+    /// The spawn helper stopped answering (L-A). Always `false` for the same-uid test template.
+    pub fn is_poisoned(&self) -> bool {
+        match &self.mode {
+            SpawnMode::Helper(helper) => helper.is_poisoned(),
+            SpawnMode::SameUid { .. } => false,
+        }
+    }
+
     fn open(&self, size: WinSize) -> std::io::Result<Pty> {
         match &self.mode {
             SpawnMode::Helper(helper) => helper.spawn(size),
@@ -222,6 +230,12 @@ impl BoxHost {
         } else {
             Phase::Pending
         }
+    }
+
+    /// The person's terminal cannot be started any more: the spawn helper is poisoned and this process holds no
+    /// capability to start another (ADR-0197 M4, review L-A).
+    pub fn helper_poisoned(&self) -> bool {
+        self.template.is_poisoned()
     }
 
     pub fn host_public_key(&self) -> [u8; ED_PUB_LEN] {

@@ -4,18 +4,23 @@
 //! momo-box-agent make-seal-key PATH
 //!                           create this start's seal key at PATH (0600, create-new);
 //!                           the box entry runs it before `init-key` (ADR-0197 M2)
+//! momo-box-agent install-seal-key FROM TO
+//!                           copy the runner's per-box seal key (read-only inject dir) onto tmpfs (0600, create-new)
 //! momo-box-agent init-key   create the host key in this box if there is none,
 //!                           print its public half and fingerprint
 //! momo-box-agent run        start the spawn helper, drop every capability, load the
-//!                           host key, hold the box identity
+//!                           host key, register with the server (proving the runner's
+//!                           pairing code), confirm the owner's first device list and
+//!                           serve the blind relay (outbound only) until stopped
 //! ```
 //!
 //! There is no `--dev-key-file`, no `--config` and no flag that names a key
 //! path: the key location comes from the box image's environment
 //! (`OORT_BOX_KEY_DIR` …, the same variables `momo-workd` reads on Linux) and
-//! is checked against the mount table. `run` serves nothing yet — the relay
-//! route is M4 and the runner is M2 — so it holds the identity, stays
-//! `pending` until the owner confirms, and waits.
+//! is checked against the mount table. The server URL, the workspace and the
+//! inject directory come from the environment the **runner** set at create.
+//! Exit status 75 (EX_TEMPFAIL) means "the spawn helper is gone; start me again":
+//! this process holds no capability to start another helper, the box entry does.
 
 use std::process::ExitCode;
 
@@ -25,10 +30,15 @@ mod linux {
     use std::sync::Arc;
 
     use momo_blind_pty::handshake::NonceStore;
+    use std::process::ExitCode;
+
     use momo_box_agent::env::{child_env, UserProfile};
     use momo_box_agent::fsgate::FsGate;
-    use momo_box_agent::host::{box_id_from_text, BoxHost, MonotonicClock, Phase, SpawnTemplate};
+    use momo_box_agent::host::{
+        box_id_from_text, BoxHost, MonotonicClock, Phase, SpawnTemplate,
+    };
     use momo_box_agent::preflight;
+    use momo_box_agent::{boot, serve};
     use momo_box_agent::pty::Ids;
     use momo_box_agent::spawn_helper::{HelperClient, HelperSpec};
     use momo_workd::cli::host_key_fingerprint;
@@ -119,17 +129,69 @@ mod linux {
         Ok(())
     }
 
-    pub fn run() -> Result<(), String> {
+    const ENV_SERVER_URL: &str = "OORT_SERVER_URL";
+    const ENV_WORKSPACE_ID: &str = "OORT_WORKSPACE_ID";
+    const ENV_INJECT_DIR: &str = "OORT_BOX_INJECT_DIR";
+    const DEFAULT_INJECT_DIR: &str = "/run/oort-runner";
+    /// How long a box waits for the runner's attestation before giving up (the box entry does not restart it).
+    const ENROLL_GIVE_UP: std::time::Duration = std::time::Duration::from_secs(900);
+
+    /// `install-seal-key FROM TO`: the runner's seal key (a read-only file only the agent's group can read) onto
+    /// the box's tmpfs, `0600`, owned by the agent, through the same fs gate as everything the agent reads.
+    pub fn install_seal_key(from: &str, to: &str) -> Result<(), String> {
+        let profile = UserProfile::box_default();
+        let gate = FsGate::for_box(&getenv, &profile.home);
+        let bytes = gate
+            .read(std::path::Path::new(from))
+            .map_err(|e| e.to_string())?;
+        let text = String::from_utf8(bytes).map_err(|_| "the seal key is not text".to_string())?;
+        use base64::Engine as _;
+        let ok = base64::engine::general_purpose::STANDARD
+            .decode(text.trim())
+            .is_ok_and(|k| k.len() == 32);
+        if !ok {
+            return Err("the runner's seal key is not 32 bytes of base64".into());
+        }
+        if std::path::Path::new(to).exists() {
+            return Err(format!("{to} already exists; the seal key is installed once per start"));
+        }
+        gate.write_private(std::path::Path::new(to), text.trim().as_bytes().iter().chain(b"\n").copied().collect::<Vec<u8>>().as_slice())
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn run() -> Result<ExitCode, String> {
         let (store, user, helper) = open_store(true)?;
         let helper = helper.ok_or("no spawn helper")?;
         let key = store
             .load()
             .map_err(|e| e.to_string())?
             .ok_or("no host key in this box; run `momo-box-agent init-key` first")?;
-        let box_id = getenv(ENV_BOX_ID)
-            .as_deref()
-            .and_then(box_id_from_text)
-            .ok_or("OORT_BOX_ID must be the box's UUID")?;
+        let box_id_text = getenv(ENV_BOX_ID).ok_or("OORT_BOX_ID must be the box's UUID")?;
+        let box_id = box_id_from_text(&box_id_text).ok_or("OORT_BOX_ID must be the box's UUID")?;
+        let box_uuid = uuid::Uuid::from_bytes(box_id);
+        // Without a server URL the runner gave this box no trust chain (the M2 shape, and `verify-m3.sh`'s box): it
+        // holds its identity, stays `pending`, serves nothing and waits, exactly as at M3.
+        let Some(server_url) = getenv(ENV_SERVER_URL).filter(|v| !v.is_empty()) else {
+            let host = BoxHost::new(
+                box_id,
+                key.signing_key(),
+                Arc::new(MonotonicClock::new()),
+                NonceStore::default(),
+                SpawnTemplate::for_box(helper.clone()),
+            );
+            eprintln!(
+                "momo-box-agent: phase={} key={} helper_pid={} (no OORT_SERVER_URL: nothing is served)",
+                if host.phase() == Phase::Active { "active" } else { "pending" },
+                store.describe(),
+                helper.pid()
+            );
+            loop {
+                std::thread::park();
+            }
+        };
+        let workspace_id = getenv(ENV_WORKSPACE_ID)
+            .and_then(|t| uuid::Uuid::parse_str(t.trim()).ok())
+            .ok_or("OORT_WORKSPACE_ID must be the workspace's UUID")?;
         let profile = UserProfile {
             uid: user.uid,
             gid: user.gid,
@@ -139,7 +201,10 @@ mod linux {
         let state_dir = PathBuf::from(
             getenv(ENV_STATE_DIR).unwrap_or_else(|| "/var/lib/oort-box/state".into()),
         );
-        let nonces = match gate.read(&state_dir.join("nonces.bin")) {
+        let inject_dir = PathBuf::from(
+            getenv(ENV_INJECT_DIR).unwrap_or_else(|| DEFAULT_INJECT_DIR.into()),
+        );
+        let nonces = match gate.read(&boot::nonce_path(&state_dir)) {
             Ok(bytes) => NonceStore::from_bytes(&bytes).map_err(|e| e.to_string())?,
             Err(momo_box_agent::fsgate::FsError::Io { source, .. })
                 if source.kind() == std::io::ErrorKind::NotFound =>
@@ -148,25 +213,79 @@ mod linux {
             }
             Err(e) => return Err(e.to_string()),
         };
-        let host = BoxHost::new(
+        let mut host = BoxHost::new(
             box_id,
             key.signing_key(),
             Arc::new(MonotonicClock::new()),
             nonces,
             SpawnTemplate::for_box(helper.clone()),
         );
+        let public_b64 = key.public_key_b64();
         eprintln!(
-            "momo-box-agent: phase={} key={} helper_pid={} (relay transport lands with M4; nothing is served)",
-            match host.phase() {
-                Phase::Pending => "pending",
-                Phase::Active => "active",
-            },
+            "momo-box-agent: key={} helper_pid={} fingerprint={}",
             store.describe(),
-            helper.pid()
+            helper.pid(),
+            host_key_fingerprint(&public_b64).unwrap_or_default()
         );
-        loop {
-            std::thread::park();
-        }
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .map_err(|e| e.to_string())?;
+        // Registration (or the remembered one) and the owner's first device list: `boot` is what the end-to-end
+        // tests run, too.
+        let env = boot::BootEnv {
+            server_url: server_url.clone(),
+            workspace_id,
+            box_id: box_uuid,
+            inject_dir: inject_dir.clone(),
+            state_dir: state_dir.clone(),
+            give_up_after: ENROLL_GIVE_UP,
+            poll: std::time::Duration::from_secs(3),
+        };
+        let host_id = runtime
+            .block_on(boot::enroll_and_confirm(&mut host, &gate, &env))
+            .map_err(|e| e.to_string())?;
+        eprintln!("momo-box-agent: phase=active; serving the blind relay (outbound only)");
+        let host = Arc::new(std::sync::Mutex::new(host));
+        let nonce_gate = gate.clone();
+        let nonce_path = boot::nonce_path(&state_dir);
+        let nonces_sink: serve::NonceSink = Arc::new(move |bytes: Vec<u8>| {
+            if nonce_gate.write_private(&nonce_path, &bytes).is_err() {
+                eprintln!("momo-box-agent: could not persist the spent-challenge store");
+            }
+        });
+        let (stop, shutdown) = tokio::sync::watch::channel(false);
+        let exit = runtime.block_on(async move {
+            tokio::spawn(async move {
+                if let Ok(mut term) =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                {
+                    term.recv().await;
+                    let _ = stop.send(true);
+                }
+            });
+            serve::run(
+                serve::ServeConfig {
+                    server_url,
+                    workspace_id,
+                    host_id,
+                    limits: serve::BoxLimits::default(),
+                },
+                key.signing_key(),
+                host,
+                nonces_sink,
+                shutdown,
+            )
+            .await
+        });
+        Ok(match exit {
+            serve::Exit::Shutdown => ExitCode::SUCCESS,
+            serve::Exit::HelperPoisoned => {
+                eprintln!("momo-box-agent: the spawn helper is gone; exiting so the box entry starts a new one");
+                ExitCode::from(75)
+            }
+        })
     }
 
     /// `momo-box-agent spawn-helper <spec json>`: the helper process.
@@ -188,7 +307,17 @@ fn main() -> ExitCode {
         #[cfg(target_os = "linux")]
         [c] if c == "init-key" => linux::init_key(),
         #[cfg(target_os = "linux")]
-        [c] if c == "run" => linux::run(),
+        [c] if c == "run" => {
+            return match linux::run() {
+                Ok(code) => code,
+                Err(message) => {
+                    eprintln!("momo-box-agent: {message}");
+                    ExitCode::from(2)
+                }
+            };
+        }
+        #[cfg(target_os = "linux")]
+        [c, from, to] if c == "install-seal-key" => linux::install_seal_key(from, to),
         #[cfg(target_os = "linux")]
         [c, spec] if c == momo_box_agent::spawn_helper::SUBCOMMAND => linux::spawn_helper(spec),
         #[cfg(not(target_os = "linux"))]
@@ -196,7 +325,7 @@ fn main() -> ExitCode {
             Err("momo-box-agent runs inside a Linux personal-cloud box only".to_string())
         }
         _ => {
-            Err("usage: momo-box-agent make-seal-key PATH | init-key | run | --version".to_string())
+            Err("usage: momo-box-agent make-seal-key PATH | install-seal-key FROM TO | init-key | run | --version".to_string())
         }
     };
     match result {

@@ -11,7 +11,11 @@ ARG BASE=momo-s3-box:local
 FROM ${BASE}
 USER root
 COPY momo-box-agent momo-box-agent-entry momo-box-volume-shred /usr/local/bin/
+# /run/oort-runner is where the runner's read-only inject directory (seal key, pairing code, first owner device list)
+# is bound (ADR-0197 M4); /var/lib/oort-box is where the persistent key directory is bound when the runner has a
+# hostKeyRoot. Both are mount points only: nothing is in them in the image.
 RUN chmod 0755 /usr/local/bin/momo-box-agent /usr/local/bin/momo-box-agent-entry /usr/local/bin/momo-box-volume-shred \
+ && mkdir -p /run/oort-runner && chmod 0755 /run/oort-runner \
  && find / -xdev -type f \( -perm -4000 -o -perm -2000 \) -exec chmod a-s {} +
 ARG AGENT_SHA=unset
 LABEL io.momo.m2.agent-sha=$AGENT_SHA

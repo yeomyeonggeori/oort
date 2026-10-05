@@ -126,12 +126,9 @@ fn the_box_agent_has_no_acp_adapter_and_reaches_no_acp_module() {
 
 #[test]
 fn the_box_hosts_registration_advertises_no_acp() {
-    // The capability the server sees: terminal only.
-    let body = momo_box_agent::register::registration_request(
-        "box",
-        "name",
-        "KEY",
-        momo_box_agent::register::PairingCode::new("code").unwrap(),
-    );
-    assert_eq!(body["capabilities"]["acp"], false);
+    // The registration body has no capabilities at all (the server creates the host as `scope=member`,
+    // `type=cloud`, `{"acp": false, "terminal_attach": true}`): the agent cannot advertise ACP even by mistake.
+    let body = momo_box_agent::register::registration_body("KEY", &[0u8; 32]);
+    assert!(body.get("capabilities").is_none());
+    assert_eq!(body.as_object().unwrap().len(), 2);
 }

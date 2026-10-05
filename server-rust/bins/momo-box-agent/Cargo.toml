@@ -12,10 +12,10 @@ rust-version.workspace = true
 # attaches to over the blind relay (S2, `momo-blind-pty`). It runs under its OWN
 # uid; the person's shell and the harnesses run as another one (D1).
 #
-# It dials nothing in this slice: the relay route and the runner are M4 / M2.
-# What is here and tested: registration contract (inactive until the owner
-# confirms), PTY open + uid drop, environment allowlist, credential-path
-# refusal, process hardening. There is deliberately NO ACP code in this crate
+# M4 (#3511): it dials the server — outbound only, no listener — registers (proving a pairing code only the
+# runner knows, never sending it), listens for attach notices and serves the blind relay over WebSocket
+# (`src/serve.rs`). What was there already and is tested: registration contract (inactive until the owner
+# confirms), PTY open + uid drop, environment allowlist, credential-path refusal, process hardening. There is deliberately NO ACP code in this crate
 # (D6: the box never drives Claude over ACP) and no `momo_workd::acp` use;
 # `tests/no_acp.rs` reads the source to keep it that way.
 [lib]
@@ -33,11 +33,19 @@ path = "src/main.rs"
 
 [dependencies]
 momo-blind-pty = { path = "../../crates/momo-blind-pty" }
+# The v2 signed host request (the same one `momo-workd` signs with) for the two WebSocket upgrades.
+momo-wire = { path = "../../crates/momo-wire" }
 # Host key custody (S4, `keystore::box_store`) is reused, not re-implemented.
 momo-workd = { path = "../momo-workd" }
 base64.workspace = true
 ed25519-dalek.workspace = true
 libc.workspace = true
+# M4: the agent's network side. tokio only for the sockets; the PTY and the protocol stay on plain threads.
+tokio = { workspace = true, features = ["net", "time", "sync", "rt", "macros"] }
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+reqwest.workspace = true
+getrandom = "0.2"
 serde_json.workspace = true
 thiserror.workspace = true
 uuid.workspace = true

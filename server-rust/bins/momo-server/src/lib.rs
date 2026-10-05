@@ -34,6 +34,7 @@ pub mod config;
 pub mod cors;
 pub mod dto;
 pub mod error;
+pub mod harden;
 pub mod human_control;
 mod livekit;
 pub mod rate_limit;
