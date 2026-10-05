@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::client::{ClientError, ServerApi};
+use crate::client::{ClientError, PendingRegistration, ServerApi};
 use crate::docker::{Docker, DockerError, DockerOp, DockerOutput};
 use crate::reconcile::ServerBox;
 use crate::wire::{ClaimEnvelope, CompleteBody};
@@ -227,6 +227,12 @@ pub struct FakeServer {
     completions: Mutex<Vec<(Uuid, Value)>>,
     boxes: Mutex<Vec<ServerBox>>,
     stale_on_complete: Mutex<bool>,
+    /// ADR-0197 M4: the box's first owner list, the parked registrations, and what the runner answered.
+    owner_list: Mutex<Option<Vec<u8>>>,
+    registrations: Mutex<Vec<PendingRegistration>>,
+    attested: Mutex<Vec<(Uuid, [u8; 32], [u8; 64])>>,
+    rejected: Mutex<Vec<(Uuid, [u8; 32])>>,
+    identity: Mutex<Option<[u8; 32]>>,
 }
 
 impl FakeServer {
@@ -249,6 +255,26 @@ impl FakeServer {
 
     pub fn completions(&self) -> Vec<(Uuid, Value)> {
         self.completions.lock().expect("fake").clone()
+    }
+
+    pub fn set_owner_list(&self, list: Option<Vec<u8>>) {
+        *self.owner_list.lock().expect("fake") = list;
+    }
+
+    pub fn park_registration(&self, registration: PendingRegistration) {
+        self.registrations.lock().expect("fake").push(registration);
+    }
+
+    pub fn attested(&self) -> Vec<(Uuid, [u8; 32], [u8; 64])> {
+        self.attested.lock().expect("fake").clone()
+    }
+
+    pub fn rejected(&self) -> Vec<(Uuid, [u8; 32])> {
+        self.rejected.lock().expect("fake").clone()
+    }
+
+    pub fn announced_identity(&self) -> Option<[u8; 32]> {
+        *self.identity.lock().expect("fake")
     }
 }
 
@@ -277,5 +303,52 @@ impl ServerApi for FakeServer {
 
     async fn boxes(&self) -> Result<Vec<ServerBox>, ClientError> {
         Ok(self.boxes.lock().expect("fake").clone())
+    }
+
+    async fn provisioning(&self, _box_id: Uuid) -> Result<Vec<u8>, ClientError> {
+        self.owner_list
+            .lock()
+            .expect("fake")
+            .clone()
+            .ok_or(ClientError::Status(404))
+    }
+
+    async fn registrations(&self) -> Result<Vec<PendingRegistration>, ClientError> {
+        Ok(self.registrations.lock().expect("fake").clone())
+    }
+
+    async fn attest(
+        &self,
+        box_id: Uuid,
+        host_public_key: &[u8; 32],
+        attestation: &[u8; 64],
+    ) -> Result<(), ClientError> {
+        self.attested
+            .lock()
+            .expect("fake")
+            .push((box_id, *host_public_key, *attestation));
+        // The slot is no longer parked.
+        self.registrations
+            .lock()
+            .expect("fake")
+            .retain(|r| r.box_id != box_id);
+        Ok(())
+    }
+
+    async fn reject(&self, box_id: Uuid, host_public_key: &[u8; 32]) -> Result<(), ClientError> {
+        self.rejected
+            .lock()
+            .expect("fake")
+            .push((box_id, *host_public_key));
+        self.registrations
+            .lock()
+            .expect("fake")
+            .retain(|r| r.box_id != box_id);
+        Ok(())
+    }
+
+    async fn set_identity(&self, public_key: &[u8; 32]) -> Result<(), ClientError> {
+        *self.identity.lock().expect("fake") = Some(*public_key);
+        Ok(())
     }
 }

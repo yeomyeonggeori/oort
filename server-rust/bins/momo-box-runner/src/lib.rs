@@ -8,6 +8,8 @@
 //! docker     the closed list of docker operations, by argv vector
 //! engine     typed presence / run-state of a box's container and volume
 //! executor   one function per verb; deletion verification
+//! identity   the runner's Ed25519 key (attests a box's host key; fingerprint on this console only)
+//! provision  what a box is handed beyond its volume (seal key, pairing code, owner list, key dirs)
 //! ledger     the quarantine ledger
 //! reconcile  orphan-volume reconciliation (pure)
 //! client     outbound HTTPS to the server
@@ -19,7 +21,9 @@ pub mod config;
 pub mod docker;
 pub mod engine;
 pub mod executor;
+pub mod identity;
 pub mod ledger;
+pub mod provision;
 pub mod reconcile;
 pub mod runner;
 pub mod template;

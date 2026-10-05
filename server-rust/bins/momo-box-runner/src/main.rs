@@ -3,6 +3,8 @@
 //! ```text
 //! momo-box-runner run                    poll the server and run lifecycle controls
 //! momo-box-runner check-config           validate the configuration and exit
+//! momo-box-runner init-identity          create the runner's Ed25519 identity (signingKeyFile) and print its
+//!                                        fingerprint — the value members must be told out of band
 //! momo-box-runner quarantine             list quarantined orphan volumes (ids, times, confirmed?)
 //! momo-box-runner confirm-shred <uuid>   operator confirmation: this quarantined volume may be destroyed
 //! ```
@@ -19,15 +21,17 @@ use momo_box_runner::config::{load_config, load_credential};
 use momo_box_runner::docker::CliDocker;
 use momo_box_runner::engine::Engine;
 use momo_box_runner::executor::{Executor, Pacing};
+use momo_box_runner::identity::RunnerIdentity;
 use momo_box_runner::ledger::Ledger;
-use momo_box_runner::runner::Runner;
+use momo_box_runner::provision::HostProvisioner;
+use momo_box_runner::runner::{Runner, Trust};
 use tokio::sync::watch;
 use uuid::Uuid;
 
 const ENV_CONFIG: &str = "MOMO_BOX_RUNNER_CONFIG";
 
 fn usage() -> ExitCode {
-    eprintln!("usage: momo-box-runner run | check-config | quarantine | confirm-shred <box uuid>");
+    eprintln!("usage: momo-box-runner run | check-config | init-identity | quarantine | confirm-shred <box uuid>");
     ExitCode::from(2)
 }
 
@@ -64,6 +68,23 @@ async fn main() -> ExitCode {
                 cfg.workspace_id, cfg.image, cfg.name_prefix, cfg.network
             );
             ExitCode::SUCCESS
+        }
+        ["init-identity"] => {
+            let Some(path) = &cfg.signing_key_file else {
+                eprintln!("momo-box-runner: set signingKeyFile in the configuration first");
+                return ExitCode::from(2);
+            };
+            match RunnerIdentity::create(path) {
+                Ok(identity) => {
+                    println!("public_key={}", identity.public_key_b64());
+                    println!("fingerprint={}", identity.fingerprint_hex());
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("momo-box-runner: {error}");
+                    ExitCode::from(1)
+                }
+            }
         }
         ["quarantine"] => match Ledger::load(&cfg.state_dir) {
             Ok(ledger) => {
@@ -125,12 +146,33 @@ async fn main() -> ExitCode {
             };
             let docker = Arc::new(CliDocker::new(cfg.docker_bin.clone()));
             let engine = Engine::new(docker, cfg.clone());
-            let runner = Runner::new(
-                cfg.clone(),
-                engine.clone(),
-                Executor::new(engine, Pacing::default()),
-                server,
-            );
+            // ADR-0197 M4: with a signing key the runner provisions each box (seal key, pairing code, owner list)
+            // and attests the host keys it registers.
+            let trust = match &cfg.signing_key_file {
+                None => None,
+                Some(path) => match RunnerIdentity::load(path) {
+                    Ok(identity) => {
+                        let provisioner: Arc<dyn momo_box_runner::provision::Provisioner> =
+                            Arc::new(HostProvisioner::new(cfg.clone(), server.clone()));
+                        Some(Trust {
+                            identity,
+                            provisioner,
+                        })
+                    }
+                    Err(error) => {
+                        eprintln!("momo-box-runner: {error} (run `momo-box-runner init-identity`)");
+                        return ExitCode::from(2);
+                    }
+                },
+            };
+            let mut executor = Executor::new(engine.clone(), Pacing::default());
+            if let Some(trust) = &trust {
+                executor = executor.with_provisioner(trust.provisioner.clone());
+            }
+            let mut runner = Runner::new(cfg.clone(), engine, executor, server);
+            if let Some(trust) = trust {
+                runner = runner.with_trust(trust);
+            }
             let (stop, shutdown) = watch::channel(false);
             tokio::spawn(async move {
                 let _ = tokio::signal::ctrl_c().await;

@@ -21,7 +21,22 @@ pub const LABEL_BOX_ID: &str = "io.oort.box-id";
 pub const VOLUME_MOUNT: &str = "/home/box";
 
 const PERSON_UID: u32 = 10001;
-const AGENT_UID: u32 = 10002;
+/// The box-agent's uid and gid (the image's `box-agent` account).
+pub const AGENT_UID: u32 = 10002;
+/// Where the runner's read-only inject directory appears inside a box.
+pub const INJECT_MOUNT: &str = "/run/oort-runner";
+/// Where the persistent host key and agent state live inside a box when the runner has a `hostKeyRoot`.
+pub const KEY_MOUNT: &str = "/var/lib/oort-box";
+
+/// What a box gets beyond its volume (ADR-0197 M4 증보 2). Both are runner-created host directories:
+/// the **inject** directory is read-only (seal key, pairing code, first owner device list — the runner's, root-owned,
+/// readable by the agent's group alone), the **key** directory is the persistent, box-agent-owned home of the host key
+/// and the agent's state, on a host filesystem mounted `nosuid,nodev`.
+#[derive(Debug, Clone)]
+pub struct BoxMounts {
+    pub inject_dir: std::path::PathBuf,
+    pub key_dir: Option<std::path::PathBuf>,
+}
 
 fn labels(cfg: &RunnerConfig, box_id: Uuid) -> Vec<String> {
     vec![
@@ -54,8 +69,21 @@ fn tmpfs(path: &str, options: &str) -> [String; 2] {
     ["--tmpfs".to_string(), format!("{path}:{options}")]
 }
 
-/// `docker create` arguments for a box. The image is the last argument.
+/// `docker create` arguments for a box with nothing but its volume (the M2 shape; every host-key and agent
+/// state path is tmpfs). The image is the last argument.
 pub fn create_args(cfg: &RunnerConfig, box_id: Uuid, limits: &Limits) -> Vec<String> {
+    create_args_with(cfg, box_id, limits, None)
+}
+
+/// `docker create` arguments for a box, with the M4 mounts when the runner has them. The mount set is then
+/// exactly: the box volume, the runner's read-only inject directory, and (with a `hostKeyRoot`) the persistent
+/// key directory. The image is the last argument.
+pub fn create_args_with(
+    cfg: &RunnerConfig,
+    box_id: Uuid,
+    limits: &Limits,
+    mounts: Option<&BoxMounts>,
+) -> Vec<String> {
     let name = cfg.resource_name(box_id);
     let memory = format!("{}m", limits.memory_mb);
     let mut args: Vec<String> = vec![
@@ -130,20 +158,38 @@ pub fn create_args(cfg: &RunnerConfig, box_id: Uuid, limits: &Limits) -> Vec<Str
         "/work",
         &format!("rw,noexec,nosuid,nodev,size=256m,mode=0755,{person}"),
     ));
-    // The agent's key, state and seal key stay on tmpfs until M4: Docker volumes cannot be
-    // mounted nosuid,nodev, which the host-key store requires (ADR-0197 D1; see the PR).
-    for path in [
-        "/var/lib/oort-box/key",
-        "/var/lib/oort-box/state",
-        "/run/oort-box-seal",
-    ] {
+    // The seal key is always on tmpfs (it must not share a device with the key it seals, D8). The host key and
+    // the agent's state stay on tmpfs too unless the runner has a `hostKeyRoot`: Docker volumes cannot be mounted
+    // nosuid,nodev, which the host-key store requires (ADR-0197 D1), so persistence needs the host's own mount.
+    let persistent_key_dir = mounts.and_then(|m| m.key_dir.as_ref());
+    let mut tmpfs_paths = vec!["/run/oort-box-seal"];
+    if persistent_key_dir.is_none() {
+        tmpfs_paths.extend(["/var/lib/oort-box/key", "/var/lib/oort-box/state"]);
+    }
+    for path in tmpfs_paths {
         args.extend(tmpfs(
             path,
             &format!("rw,nosuid,nodev,noexec,size=1m,mode=0700,{agent}"),
         ));
     }
-    // The only environment: plumbing the agent needs, no secrets, nothing the server chose.
-    for (key, value) in [
+    if let Some(mounts) = mounts {
+        args.extend([
+            "--mount".into(),
+            format!(
+                "type=bind,src={},dst={INJECT_MOUNT},readonly",
+                mounts.inject_dir.display()
+            ),
+        ]);
+        if let Some(key_dir) = &mounts.key_dir {
+            args.extend([
+                "--mount".into(),
+                format!("type=bind,src={},dst={KEY_MOUNT}", key_dir.display()),
+            ]);
+        }
+    }
+    // The only environment: plumbing the agent needs, no secrets, nothing the server chose. (The pairing code, the
+    // seal key and the owner list are files in the read-only inject directory, not environment.)
+    let mut environment = vec![
         ("OORT_BOX_ID", box_id.as_hyphenated().to_string()),
         ("OORT_BOX_KEY_DIR", "/var/lib/oort-box/key".to_string()),
         (
@@ -151,7 +197,18 @@ pub fn create_args(cfg: &RunnerConfig, box_id: Uuid, limits: &Limits) -> Vec<Str
             "/run/oort-box-seal/seal.key".to_string(),
         ),
         ("OORT_BOX_USER_UID", PERSON_UID.to_string()),
-    ] {
+    ];
+    if mounts.is_some() {
+        environment.extend([
+            ("OORT_SERVER_URL", cfg.box_server().to_string()),
+            (
+                "OORT_WORKSPACE_ID",
+                cfg.workspace_id.as_hyphenated().to_string(),
+            ),
+            ("OORT_BOX_INJECT_DIR", INJECT_MOUNT.to_string()),
+        ]);
+    }
+    for (key, value) in environment {
         args.extend(["--env".into(), format!("{key}={value}")]);
     }
     args.push(cfg.image.clone());

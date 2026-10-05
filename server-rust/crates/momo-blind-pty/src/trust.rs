@@ -82,6 +82,45 @@ pub fn verify_attestation(
     verify_ed(runner_pub, &attest_bytes(box_id, host_pub), attestation)
 }
 
+/// ADR-0197 M4 (증보 2): the box-agent proves to the **runner** that it holds the one-time pairing code (which only
+/// the runner and the box know) without sending the code anywhere. The server relays this MAC and cannot verify it.
+pub const REGISTER_MAC_LABEL: &str = "momo.box.register.v1";
+pub const REGISTER_MAC_LEN: usize = 32;
+
+fn register_mac_input(box_id: &BoxId, host_pub: &[u8; ED_PUB_LEN]) -> Vec<u8> {
+    let mut v = REGISTER_MAC_LABEL.as_bytes().to_vec();
+    v.extend_from_slice(box_id);
+    v.extend_from_slice(host_pub);
+    v
+}
+
+/// `HMAC-SHA256(code, "momo.box.register.v1" ‖ box_id ‖ host_pub)`.
+pub fn registration_mac(
+    code: &[u8],
+    box_id: &BoxId,
+    host_pub: &[u8; ED_PUB_LEN],
+) -> [u8; REGISTER_MAC_LEN] {
+    use hmac::{Hmac, Mac};
+    let mut mac = <Hmac<sha2::Sha256> as Mac>::new_from_slice(code).expect("HMAC takes any key length");
+    mac.update(&register_mac_input(box_id, host_pub));
+    mac.finalize().into_bytes().into()
+}
+
+/// Constant-time check of [`registration_mac`].
+pub fn verify_registration_mac(
+    code: &[u8],
+    box_id: &BoxId,
+    host_pub: &[u8; ED_PUB_LEN],
+    mac: &[u8],
+) -> bool {
+    use hmac::{Hmac, Mac};
+    let Ok(mut expected) = <Hmac<sha2::Sha256> as Mac>::new_from_slice(code) else {
+        return false;
+    };
+    expected.update(&register_mac_input(box_id, host_pub));
+    expected.verify_slice(mac).is_ok()
+}
+
 /// A host key that carries both proofs a device needs: the runner made it and
 /// an owner device endorsed it. The server may store and serve this record; it
 /// cannot mint one.

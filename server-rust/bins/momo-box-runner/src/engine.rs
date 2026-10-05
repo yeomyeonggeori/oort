@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::config::RunnerConfig;
 use crate::docker::{Docker, DockerError, DockerOp, DockerOutput};
-use crate::template::{self, LABEL_BOX, LABEL_WORKSPACE};
+use crate::template::{self, BoxMounts, LABEL_BOX, LABEL_WORKSPACE};
 use crate::wire::Limits;
 
 #[derive(Debug, thiserror::Error)]
@@ -177,12 +177,17 @@ impl Engine {
         ensure(output, "volume create").map(|_| ())
     }
 
-    pub async fn create_container(&self, box_id: Uuid, limits: &Limits) -> Result<(), EngineError> {
+    pub async fn create_container(
+        &self,
+        box_id: Uuid,
+        limits: &Limits,
+        mounts: Option<&BoxMounts>,
+    ) -> Result<(), EngineError> {
         let output = self
             .docker
             .run(
                 DockerOp::ContainerCreate,
-                template::create_args(&self.cfg, box_id, limits),
+                template::create_args_with(&self.cfg, box_id, limits, mounts),
             )
             .await?;
         ensure(output, "create").map(|_| ())

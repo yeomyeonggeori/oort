@@ -40,10 +40,13 @@ fn only_the_config_and_the_ledger_touch_the_filesystem() {
     for (file, source) in common::source_files() {
         let code = common::strip_line_comments(&source);
         let touches = fs_markers.iter().any(|m| code.contains(m));
-        let allowed = file == "config.rs" || file == "ledger.rs";
+        // config.rs: its config and credential file. ledger.rs: its own ledger. identity.rs: its own signing seed
+        // (ADR-0197 M4). provision.rs: the per-box files the RUNNER writes under its state directory and the box
+        // directories it creates and removes under `hostKeyRoot` (see the next test for what it must not read).
+        let allowed = ["config.rs", "ledger.rs", "identity.rs", "provision.rs"].contains(&file.as_str());
         assert!(
             !touches || allowed,
-            "{file} touches the filesystem; only config.rs (its config and credential file) and ledger.rs (its own ledger) may"
+            "{file} touches the filesystem; only config.rs, ledger.rs, identity.rs and provision.rs may"
         );
     }
 }
@@ -140,5 +143,43 @@ fn no_log_line_or_error_carries_docker_output_or_the_credential() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn the_runner_never_reads_inside_the_host_key_root() {
+    // ADR-0197 D1/D2 (M4): the box's host key and agent state live under `hostKeyRoot/<box id>`. The runner creates
+    // that directory and removes it on delete; it never opens, lists or reads anything in it — the registration
+    // proof reaches the runner through the server's parked MAC, not through the box's files.
+    let provision = code("provision.rs");
+    for (n, line) in provision.lines().enumerate() {
+        if !(line.contains("host_key_root") || line.contains("key_dir") || line.contains("root.path")) {
+            continue;
+        }
+        for read in [
+            "read_to_string",
+            "File::open",
+            "fs::read(",
+            "read_dir",
+            "OpenOptions",
+            "fs::copy",
+        ] {
+            assert!(
+                !line.contains(read),
+                "provision.rs:{} reads inside the host key root: {line}",
+                n + 1
+            );
+        }
+    }
+    // And no other file names the key root's content at all.
+    for (file, source) in common::source_files() {
+        if file == "provision.rs" || file == "config.rs" || file == "template.rs" {
+            continue;
+        }
+        let code = common::strip_line_comments(&source);
+        assert!(
+            !code.contains("host_key_root") && !code.contains("host.key"),
+            "{file} reaches for the host key root"
+        );
     }
 }

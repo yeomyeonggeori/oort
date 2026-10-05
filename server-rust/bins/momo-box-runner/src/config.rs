@@ -90,6 +90,35 @@ fn default_docker() -> String {
     "docker".to_string()
 }
 
+/// Who prepares a box's directory under [`HostKeyRoot::path`] (ADR-0197 M4, #3509 review).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PrepareKeyDirs {
+    /// The runner creates `<root>/<box id>/{key,state}` (0700, owned by the box-agent uid). Needs root, which a
+    /// runner host's daemon has anyway (docker group = root, ADR-0197 D2).
+    Runner,
+    /// The operator's provisioning created them and the runner never touches the root (a runner that cannot see
+    /// the docker daemon's filesystem, a dev VM). A missing directory fails the box's `create`, closed.
+    Preexisting,
+}
+
+fn default_prepare() -> PrepareKeyDirs {
+    PrepareKeyDirs::Runner
+}
+
+/// The host directory that holds every box's **host key and agent state** (ADR-0197 D1/D8, #3509 review: Docker
+/// volumes cannot be mounted `nosuid,nodev`, which the host-key store requires, so persistence needs a filesystem
+/// the host mounted that way). The box gets `<path>/<box id>` bound at `/var/lib/oort-box`. The runner never reads
+/// what is inside: it creates and, on delete, removes the box's directory.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HostKeyRoot {
+    /// Absolute path **as the docker daemon sees it**, on a `nosuid,nodev` filesystem the host mounted for this.
+    pub path: PathBuf,
+    #[serde(default = "default_prepare")]
+    pub prepare: PrepareKeyDirs,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RunnerConfig {
@@ -127,6 +156,18 @@ pub struct RunnerConfig {
     pub shred: ShredConfig,
     #[serde(default = "default_docker")]
     pub docker_bin: String,
+    /// ADR-0197 M4 (증보 2): the runner's Ed25519 seed file (0600). Setting it turns the box trust chain on: a box
+    /// gets its pairing code, seal key and owner device list, and the runner attests the host key it registers.
+    /// `momo-box-runner init-identity` creates it and prints the fingerprint to this machine's console.
+    #[serde(default)]
+    pub signing_key_file: Option<PathBuf>,
+    /// The server URL **a box** dials (what its box-agent connects to). Defaults to `serverUrl`.
+    #[serde(default)]
+    pub box_server_url: Option<String>,
+    /// Persist the box host key and agent state (nonces, registration) across a stop. Unset: they live on tmpfs
+    /// and a stop forgets them (development only; the ADR requires persistence).
+    #[serde(default)]
+    pub host_key_root: Option<HostKeyRoot>,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -149,6 +190,10 @@ pub enum ConfigError {
     BadCaps,
     #[error("poll and reconcile intervals must be at least 1 second")]
     BadInterval,
+    #[error("boxServerUrl must be https (http only with allowInsecureLoopback, which is a development switch)")]
+    InsecureBoxServer,
+    #[error("hostKeyRoot.path, signingKeyFile and stateDir must be absolute paths")]
+    NotAbsolute,
 }
 
 fn is_hex64(text: &str) -> bool {
@@ -219,7 +264,27 @@ impl RunnerConfig {
         if self.poll_interval_seconds == 0 || self.reconcile_interval_seconds == 0 {
             return Err(ConfigError::BadInterval);
         }
+        if let Some(url) = &self.box_server_url {
+            let secure = url.starts_with("https://");
+            let dev_http = self.allow_insecure_loopback && url.starts_with("http://");
+            if !(secure || dev_http) {
+                return Err(ConfigError::InsecureBoxServer);
+            }
+        }
+        // Paths handed to docker as bind sources must mean the same thing to the daemon.
+        let absolute = |path: &Path| path.is_absolute();
+        if self.host_key_root.as_ref().is_some_and(|r| !absolute(&r.path))
+            || self.signing_key_file.as_deref().is_some_and(|p| !absolute(p))
+            || (self.signing_key_file.is_some() && !absolute(&self.state_dir))
+        {
+            return Err(ConfigError::NotAbsolute);
+        }
         Ok(())
+    }
+
+    /// The URL a box's agent dials.
+    pub fn box_server(&self) -> &str {
+        self.box_server_url.as_deref().unwrap_or(&self.server_url)
     }
 
     /// Container and volume name for a box.

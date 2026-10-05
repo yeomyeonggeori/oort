@@ -1,9 +1,15 @@
 //! The blind-relay protocol crate stays unreachable from every production
-//! route: exactly one workspace member may depend on it, the box-side endpoint
-//! `momo-box-agent` (ADR-0197 M3). `momo-server`, `momo-relay`, `momo-workd` and
-//! every other member must not (S2 "not wired into production routes"; the
-//! server relays opaque frames and never holds protocol state, and workd opens
-//! no PTY, ADR-0190 D1). The relay route (M4) carries bytes, not this crate.
+//! route. Exactly three workspace members may depend on it:
+//!
+//! * `momo-box-agent` — the box-side endpoint (ADR-0197 M3);
+//! * `momo-box-runner` (M4) — it holds the runner's Ed25519 key, attests a box's host key and verifies the
+//!   box-agent's registration MAC (`trust::Runner`, `registration_mac`). The runner is the trust anchor the owner
+//!   pins by fingerprint; it is not a relay;
+//! * `momo-box-e2e` (M4) — the test-only crate that plays the owner's device against the real server routes.
+//!
+//! `momo-server`, `momo-relay`, `momo-workd` and every other member must not (S2 "not wired into production
+//! routes"; the server relays opaque frames and never holds protocol state, and workd opens no PTY, ADR-0190 D1).
+//! The relay route (M4) carries bytes, not this crate.
 
 use std::fs;
 use std::path::Path;
@@ -21,7 +27,7 @@ fn manifests(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
 }
 
 /// The only members allowed to depend on the protocol crate (directory names).
-const ALLOWED_DEPENDENTS: &[&str] = &["momo-box-agent"];
+const ALLOWED_DEPENDENTS: &[&str] = &["momo-box-agent", "momo-box-runner", "momo-box-e2e"];
 
 fn member_name(manifest: &Path) -> String {
     manifest
@@ -32,7 +38,7 @@ fn member_name(manifest: &Path) -> String {
 }
 
 #[test]
-fn only_the_box_agent_depends_on_the_protocol_crate() {
+fn only_the_box_side_and_its_trust_anchor_depend_on_the_protocol_crate() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut ms = vec![];
     manifests(&root.join("crates"), &mut ms);

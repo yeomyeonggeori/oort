@@ -17,7 +17,9 @@ use crate::client::{ClientError, ServerApi};
 use crate::config::RunnerConfig;
 use crate::engine::{ContainerState, Engine, EngineError};
 use crate::executor::Executor;
+use crate::identity::RunnerIdentity;
 use crate::ledger::{Ledger, LedgerError};
+use crate::provision::Provisioner;
 use crate::reconcile::{plan, Action, Plan, ServerBox};
 use crate::wire::{intake, CompleteBody, Control, Intake, Refused, Task};
 
@@ -44,12 +46,27 @@ pub struct PollSummary {
     pub poisoned: usize,
 }
 
+/// The runner's part of a box's trust chain (ADR-0197 M4 증보 2): its signing identity and what it handed each
+/// box (the pairing code it verifies a registration against).
+pub struct Trust {
+    pub identity: RunnerIdentity,
+    pub provisioner: Arc<dyn Provisioner>,
+}
+
+/// What one pass over the parked registrations did, for logs and tests.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AttestSummary {
+    pub attested: usize,
+    pub rejected: usize,
+}
+
 pub struct Runner {
     cfg: Arc<RunnerConfig>,
     engine: Engine,
     executor: Executor,
     server: Arc<dyn ServerApi>,
     state_dir: PathBuf,
+    trust: Option<Trust>,
 }
 
 fn now_seconds() -> u64 {
@@ -73,7 +90,77 @@ impl Runner {
             executor,
             server,
             state_dir,
+            trust: None,
         }
+    }
+
+    pub fn with_trust(mut self, trust: Trust) -> Self {
+        self.trust = Some(trust);
+        self
+    }
+
+    /// Verify the box-agent registrations the server parked and attest the ones that prove they hold the pairing
+    /// code the runner injected (ADR-0197 M4 증보 2). The server cannot make this check — it never sees the code —
+    /// so a registration it forged, or relayed from anyone else, is rejected here and attested by nobody.
+    pub async fn attest_registrations(&self) -> Result<AttestSummary, RunnerError> {
+        let mut summary = AttestSummary::default();
+        let Some(trust) = &self.trust else {
+            return Ok(summary);
+        };
+        for registration in self.server.registrations().await? {
+            let box_id = registration.box_id;
+            let proven = trust.provisioner.pairing_code(box_id).is_some_and(|code| {
+                momo_blind_pty::trust::verify_registration_mac(
+                    &code,
+                    box_id.as_bytes(),
+                    &registration.host_public_key,
+                    &registration.mac,
+                )
+            });
+            if !proven {
+                tracing::warn!(%box_id, "box registration rejected: it does not prove the pairing code");
+                let _ = self
+                    .server
+                    .reject(box_id, &registration.host_public_key)
+                    .await;
+                summary.rejected += 1;
+                continue;
+            }
+            let attestation = trust
+                .identity
+                .attest_host(box_id, &registration.host_public_key);
+            match self
+                .server
+                .attest(box_id, &registration.host_public_key, &attestation)
+                .await
+            {
+                Ok(()) => {
+                    trust.provisioner.mark_registered(box_id);
+                    tracing::info!(%box_id, "box host key attested");
+                    summary.attested += 1;
+                }
+                // The slot changed under us (the box re-registered, or the box is gone): try again next pass.
+                Err(ClientError::Stale) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(summary)
+    }
+
+    /// Tell the server this runner's public key, and show the fingerprint on this console: the one place a
+    /// member's trust in the runner can start (they get it from the operator, out of band).
+    pub async fn announce_identity(&self) -> Result<(), RunnerError> {
+        let Some(trust) = &self.trust else {
+            return Ok(());
+        };
+        self.server
+            .set_identity(&trust.identity.public_key())
+            .await?;
+        eprintln!(
+            "momo-box-runner: runner fingerprint (give this to members out of band): {}",
+            trust.identity.fingerprint_hex()
+        );
+        Ok(())
     }
 
     /// Refuse to start on a host that already carries another workspace's boxes (D2).
@@ -270,12 +357,24 @@ impl Runner {
     /// do would help); transport errors back off and retry.
     pub async fn run(&self, mut shutdown: watch::Receiver<bool>) -> Result<(), RunnerError> {
         self.preflight().await?;
+        self.announce_identity().await?;
         let poll = Duration::from_secs(self.cfg.poll_interval_seconds);
         let reconcile_every = Duration::from_secs(self.cfg.reconcile_interval_seconds);
         let mut last_reconcile: Option<std::time::Instant> = None;
         loop {
             if *shutdown.borrow() {
                 return Ok(());
+            }
+            match self.attest_registrations().await {
+                Ok(summary) => {
+                    if summary.attested + summary.rejected > 0 {
+                        tracing::info!(?summary, "registrations");
+                    }
+                }
+                Err(RunnerError::Client(ClientError::Unauthorized)) => {
+                    return Err(ClientError::Unauthorized.into());
+                }
+                Err(error) => tracing::warn!(error = %error, "registration pass failed"),
             }
             match self.poll_once().await {
                 Ok(summary) => {

@@ -9,7 +9,11 @@ use std::time::Duration;
 
 use uuid::Uuid;
 
+use std::sync::Arc;
+
 use crate::engine::{ContainerState, Engine, EngineError};
+use crate::provision::Provisioner;
+use crate::template::BoxMounts;
 use crate::wire::{CompleteBody, Control, DeletionReport, Limits, Observed, Task};
 
 /// How the runner waits for a started container to be seen running.
@@ -36,11 +40,23 @@ impl Default for Pacing {
 pub struct Executor {
     engine: Engine,
     pacing: Pacing,
+    /// ADR-0197 M4: the box's inject directory, seal key and persistent key directories. `None` is the M2
+    /// shape (nothing injected, key and state on tmpfs).
+    provisioner: Option<Arc<dyn Provisioner>>,
 }
 
 impl Executor {
     pub fn new(engine: Engine, pacing: Pacing) -> Self {
-        Executor { engine, pacing }
+        Executor {
+            engine,
+            pacing,
+            provisioner: None,
+        }
+    }
+
+    pub fn with_provisioner(mut self, provisioner: Arc<dyn Provisioner>) -> Self {
+        self.provisioner = Some(provisioner);
+        self
     }
 
     /// Run a control and build what is reported back for it.
@@ -89,13 +105,18 @@ impl Executor {
         Err(EngineError::Refused("container did not reach running"))
     }
 
-    async fn create_once(&self, box_id: Uuid, limits: &Limits) -> Result<(), EngineError> {
+    async fn create_once(
+        &self,
+        box_id: Uuid,
+        limits: &Limits,
+        mounts: Option<&BoxMounts>,
+    ) -> Result<(), EngineError> {
         if !self.engine.volume_present(box_id).await? {
             self.engine.create_volume(box_id, limits).await?;
         }
         match self.engine.container_state(box_id).await? {
             ContainerState::Absent => {
-                self.engine.create_container(box_id, limits).await?;
+                self.engine.create_container(box_id, limits, mounts).await?;
                 self.engine.start(box_id).await?;
             }
             ContainerState::Stopped => self.engine.start(box_id).await?,
@@ -115,8 +136,20 @@ impl Executor {
             self.engine.container_state(box_id).await,
             Ok(ContainerState::Absent)
         );
+        // What the box is handed beyond its volume (M4): prepared once, before anything is created. A box that
+        // cannot be provisioned is not created at all.
+        let mounts = match &self.provisioner {
+            Some(provisioner) => match provisioner.prepare(box_id).await {
+                Ok(mounts) => Some(mounts),
+                Err(error) => {
+                    tracing::warn!(%box_id, error = %error, "create refused: the box could not be provisioned");
+                    return false;
+                }
+            },
+            None => None,
+        };
         for attempt in 1..=self.pacing.create_attempts.max(1) {
-            match self.create_once(box_id, limits).await {
+            match self.create_once(box_id, limits, mounts.as_ref()).await {
                 Ok(()) => return true,
                 Err(error) => {
                     tracing::warn!(%box_id, attempt, error = %error, "create failed");
@@ -175,6 +208,10 @@ impl Executor {
             }
         }
         let _ = self.engine.remove_volume(box_id).await;
+        if let Some(provisioner) = &self.provisioner {
+            // Crypto-shred (D10): the seal key goes with the box.
+            provisioner.forget(box_id);
+        }
         DeletionReport {
             // A check that cannot be made is not an absence.
             container_absent: matches!(

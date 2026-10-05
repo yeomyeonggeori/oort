@@ -27,6 +27,13 @@ name = "momo-box-runner"
 path = "src/main.rs"
 
 [dependencies]
+# ADR-0197 M4 (증보 2): the runner is the trust anchor a member pins by fingerprint. It holds an Ed25519 key,
+# attests a box's host key and verifies the box-agent's registration MAC. Only those two helpers of the protocol
+# crate are used (`trust::Runner`, `registration_mac`); tests/isolation.rs lists this crate as an allowed dependent.
+momo-blind-pty = { path = "../../crates/momo-blind-pty" }
+base64.workspace = true
+hex.workspace = true
+getrandom = "0.2"
 async-trait.workspace = true
 libc.workspace = true
 reqwest.workspace = true
@@ -41,3 +48,4 @@ uuid.workspace = true
 [dev-dependencies]
 # A mock oort server for the poll→execute→complete loop test.
 axum.workspace = true
+sha2.workspace = true
