@@ -2456,8 +2456,9 @@ paths:
         ADR-0197 M2 (#3505, D2 역할 분리). Registers the one runner that serves this
         workspace's boxes and returns its credential **once** (`oort_runner.<id>.<secret>`);
         the server stores only a SHA-256 hash and a fingerprint. Requires a listed
-        instance operator (`platform:read` scope, or a workspace owner/admin whose verified
-        email is in `PLATFORM_ADMIN_EMAILS`): a workspace admin alone gets 403. One live
+        instance operator — a workspace owner/admin whose verified email is in
+        `PLATFORM_ADMIN_EMAILS`. A workspace admin alone, and a `platform:read` token (a read
+        scope), get 403; `platform:read` may only list. One live
         runner per workspace (`409 cloud_box_runner_exists`). Off by default like every
         `cloud-box*` route (404 unless `MOMO_CLOUD_BOX_ENABLED=true`). Audit
         `cloud_box_runner.registered` (name and fingerprint, never the credential).
@@ -2487,7 +2488,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: Not an instance operator, or the path workspace is not the caller's.
+          description: Not a listed instance operator (a `platform:read` token is not enough), or the path workspace is not the caller's.
           content:
             application/json:
               schema:
@@ -2513,7 +2514,7 @@ paths:
     get:
       tags: [cloud-box]
       operationId: listCloudBoxRunners
-      summary: List the workspace's runners (instance operator only).
+      summary: List the workspace's runners (instance operator or `platform:read`).
       description: Live runner first, revoked ones after. Fingerprints and times; never a hash or a credential.
       security:
         - bearerAuth: []

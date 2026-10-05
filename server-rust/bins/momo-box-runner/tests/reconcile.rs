@@ -23,6 +23,7 @@ fn shred_cfg() -> ShredConfig {
         grace_days: 14,
         daily_cap: 2,
         on_delete: true,
+        delete_daily_cap: 10,
     }
 }
 
@@ -227,7 +228,7 @@ fn a_list_the_runner_has_reason_to_doubt_is_acted_on_not_at_all() {
         &shred_cfg(),
     );
     assert_eq!(half.actions, [Action::Quarantine(b)]);
-    // A single volume on the host can be an orphan.
+    // A host whose ONLY volume is an orphan is protected too: that is not a leftover.
     let one = plan(
         &[a],
         &[live(b, "running")],
@@ -235,7 +236,24 @@ fn a_list_the_runner_has_reason_to_doubt_is_acted_on_not_at_all() {
         NOW,
         &shred_cfg(),
     );
-    assert_eq!(one.actions, [Action::Quarantine(a)]);
+    assert_eq!(one.suspicion, Some(Suspicion::TooManyOrphans));
+    assert!(one.actions.is_empty(), "{one:?}");
+    // Already-quarantined orphans count in the ratio: a wave does not become normal after the first poll.
+    let e = Uuid::new_v4();
+    let ledger = ledger_with(&[(b, NOW - DAY, false), (c, NOW - DAY, false)]);
+    let wave = plan(
+        &[a, b, c, d],
+        &[live(a, "running"), live(e, "running")],
+        &ledger,
+        NOW,
+        &shred_cfg(),
+    );
+    assert_eq!(
+        wave.suspicion,
+        Some(Suspicion::TooManyOrphans),
+        "quarantined orphans were left out of the ratio"
+    );
+    assert!(wave.actions.is_empty(), "{wave:?}");
 }
 
 fn name(id: Uuid) -> String {

@@ -66,6 +66,8 @@ fn the_image_must_be_pinned_by_digest() {
         parse(value).expect("pinned");
     }
     for bad in [
+        "-v",
+        "--privileged@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         "node:22",
         "ghcr.io/example/box:latest",
         "ghcr.io/example/box",

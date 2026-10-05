@@ -105,9 +105,16 @@ impl Executor {
     }
 
     /// `create`: the box's volume, then its container from the fixed template, started and
-    /// seen running. A failure removes what this box has (the server closes a failed
-    /// create as `deleted`, so nothing of it may stay behind).
+    /// seen running. A failure removes only what this call created.
     async fn create(&self, box_id: Uuid, limits: &Limits) -> bool {
+        // What was already here before this call. A failed create removes only what it made: a
+        // pre-existing volume (a retried lease, a quarantined orphan that shares the id) is not
+        // this call's to delete. An answer that cannot be had counts as "was there".
+        let volume_before = self.engine.volume_present(box_id).await.unwrap_or(true);
+        let container_before = !matches!(
+            self.engine.container_state(box_id).await,
+            Ok(ContainerState::Absent)
+        );
         for attempt in 1..=self.pacing.create_attempts.max(1) {
             match self.create_once(box_id, limits).await {
                 Ok(()) => return true,
@@ -119,8 +126,12 @@ impl Executor {
                 }
             }
         }
-        let _ = self.engine.remove_container(box_id).await;
-        let _ = self.engine.remove_volume(box_id).await;
+        if !container_before {
+            let _ = self.engine.remove_container(box_id).await;
+        }
+        if !volume_before {
+            let _ = self.engine.remove_volume(box_id).await;
+        }
         false
     }
 

@@ -32,6 +32,9 @@ pub struct Ledger {
     /// Unix seconds of each volume the orphan path destroyed (pruned past a day on write).
     #[serde(default)]
     pub shredded: Vec<u64>,
+    /// Unix seconds of each box deletion this runner carried out (pruned past a day on write).
+    #[serde(default)]
+    pub deleted: Vec<u64>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -86,6 +89,20 @@ impl Ledger {
             .iter()
             .filter(|at| now.saturating_sub(**at) < DAY_SECONDS)
             .count() as u32
+    }
+
+    /// Box deletions carried out in the 24 hours before `now`.
+    pub fn deleted_in_last_day(&self, now: u64) -> u32 {
+        self.deleted
+            .iter()
+            .filter(|at| now.saturating_sub(**at) < DAY_SECONDS)
+            .count() as u32
+    }
+
+    pub fn record_delete(&mut self, now: u64) {
+        self.deleted
+            .retain(|at| now.saturating_sub(*at) < DAY_SECONDS);
+        self.deleted.push(now);
     }
 
     pub fn record_shred(&mut self, now: u64) {

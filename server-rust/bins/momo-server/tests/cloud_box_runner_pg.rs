@@ -904,6 +904,20 @@ async fn only_the_runner_credential_opens_the_runner_routes() {
         refused[5..].iter().all(|s| *s == 429),
         "the 6th refusal must be a 429: {refused:?}"
     );
+    // The pre-check: once the address's refusal budget is spent even a VALID credential from it is
+    // turned away before the handler runs.
+    let (status, _) = call(
+        &client,
+        "POST",
+        runner_url(&limited, w.workspace, "/claim"),
+        &token,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(
+        status, 429,
+        "an exhausted address still reached the handler"
+    );
     // Body is closed even for the right credential: unknown fields are 422, bad limit 400.
     let (status, _) = call(
         &client,
@@ -1303,6 +1317,203 @@ async fn a_control_handed_back_by_a_revoked_runner_at_the_cap_is_still_poisoned(
         "deleted",
         "its box never settled"
     );
+}
+
+// ---------------------------------------------------------------------------
+// #3509 review: M1 race, M2 write scope, M3 cheap refusals, L5 throttle
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3505-*)"]
+async fn revoke_waits_for_an_in_flight_runner_authentication() {
+    use momo_settings::cloud_box_runner::{authenticate_runner_in_tx, revoke_runner_in_tx};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let w = seed_world(&su).await;
+    let base = start_server(app.clone(), Some(true), &[w.operator], None).await;
+    let client = reqwest::Client::new();
+    let (runner, token) = register_runner(&client, &base, &w, "런너").await;
+    let (ws, operator) = (w.workspace, w.operator);
+    let revoked = Arc::new(AtomicBool::new(false));
+    let seen_during = Arc::new(AtomicBool::new(true));
+    let handle: Arc<std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>> = Arc::default();
+    let (app2, revoked2, seen2, handle2) = (
+        app.clone(),
+        revoked.clone(),
+        seen_during.clone(),
+        handle.clone(),
+    );
+    momo_db::with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move {
+            // Authentication (a claim's first step) holds the runner row…
+            let info = authenticate_runner_in_tx(conn, ws, &token).await?;
+            assert!(info.is_some());
+            // …so a revoke started now must wait for this transaction.
+            let (app3, revoked3) = (app2.clone(), revoked2.clone());
+            *handle2.lock().expect("handle") = Some(tokio::spawn(async move {
+                momo_db::with_tenant_tx(&app3, ws, move |c| {
+                    Box::pin(
+                        async move { revoke_runner_in_tx(c, ws, runner, operator, None).await },
+                    )
+                })
+                .await
+                .expect("revoke");
+                revoked3.store(true, Ordering::SeqCst);
+            }));
+            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+            seen2.store(revoked2.load(Ordering::SeqCst), Ordering::SeqCst);
+            Ok(())
+        })
+    })
+    .await
+    .expect("auth tx");
+    assert!(
+        !seen_during.load(Ordering::SeqCst),
+        "a revoke interleaved with an in-flight claim authentication"
+    );
+    let join = handle.lock().expect("handle").take().expect("spawned");
+    join.await.expect("revoke task");
+    assert!(
+        revoked.load(Ordering::SeqCst),
+        "the revoke never completed after the claim finished"
+    );
+    let (status, _) = call(
+        &client,
+        "POST",
+        runner_url(&base, w.workspace, "/claim"),
+        "x",
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, 401);
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3505-*)"]
+async fn a_platform_read_token_cannot_register_rotate_or_revoke_a_runner() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let w = seed_world(&su).await;
+    let base = start_server(app.clone(), Some(true), &[w.operator], None).await;
+    let client = reqwest::Client::new();
+    let (runner, _token) = register_runner(&client, &base, &w, "런너").await;
+    // An admin whose only credential is a `platform:read` token (and who is not on the allow-list).
+    let (viewer, _) = insert_human(&su, w.workspace, "읽기 운영자", "admin").await;
+    let scopes = vec!["platform:read".to_string()];
+    let jwt = momo_auth::sign_access(viewer, w.workspace, &scopes, TEST_JWT_SECRET)
+        .expect("sign")
+        .token;
+    sqlx::query(
+        "INSERT INTO token(workspace_id, kind, actor_member_id, token_hash, scopes, label) \
+         VALUES($1,'session',$2,digest($3::text,'sha256'),$4,'platform-read')",
+    )
+    .bind(w.workspace)
+    .bind(viewer)
+    .bind(&jwt)
+    .bind(&scopes)
+    .execute(&su)
+    .await
+    .expect("token");
+    let (status, _) = call(
+        &client,
+        "GET",
+        runners_url(&base, w.workspace, ""),
+        &jwt,
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "platform:read may still READ the runner list");
+    for (method, url, body) in [
+        (
+            "POST",
+            runners_url(&base, w.workspace, ""),
+            Some(json!({"name": "x"})),
+        ),
+        (
+            "POST",
+            runners_url(&base, w.workspace, &format!("/{runner}/rotate")),
+            None,
+        ),
+        (
+            "POST",
+            runners_url(&base, w.workspace, &format!("/{runner}/revoke")),
+            None,
+        ),
+    ] {
+        let (status, body) = call(&client, method, url.clone(), &jwt, body).await;
+        assert_eq!(
+            status, 403,
+            "{url}: a platform:read token wrote the runner: {body}"
+        );
+    }
+    // Nothing changed: the one runner is still live.
+    let live: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM cloud_box_runner WHERE workspace_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(w.workspace)
+    .fetch_one(&su)
+    .await
+    .expect("count");
+    assert_eq!(live, 1);
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3505-*)"]
+async fn refusals_are_cheap_bodies_are_capped_and_last_seen_is_throttled() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let w = seed_world(&su).await;
+    let base = start_server(app.clone(), Some(true), &[w.operator], None).await;
+    let client = reqwest::Client::new();
+    let (runner, token) = register_runner(&client, &base, &w, "런너").await;
+    // Body cap: a 5 KB body is refused before it is read.
+    let big = client
+        .post(runner_url(&base, w.workspace, "/claim"))
+        .bearer_auth(&token)
+        .header("content-type", "application/json")
+        .body(format!(
+            "{{\"limit\": 1, \"pad\": \"{}\"}}",
+            "x".repeat(5000)
+        ))
+        .send()
+        .await
+        .expect("big");
+    assert_eq!(big.status().as_u16(), 413);
+    // last_seen_at moves at most once a minute.
+    claim_http(&client, &base, w.workspace, &token).await;
+    let first: Option<i64> = sqlx::query_scalar("SELECT (extract(epoch from last_seen_at) * 1000)::bigint FROM cloud_box_runner WHERE id = $1")
+        .bind(runner)
+        .fetch_one(&su)
+        .await
+        .expect("seen");
+    assert!(first.is_some());
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    claim_http(&client, &base, w.workspace, &token).await;
+    let second: Option<i64> = sqlx::query_scalar("SELECT (extract(epoch from last_seen_at) * 1000)::bigint FROM cloud_box_runner WHERE id = $1")
+        .bind(runner)
+        .fetch_one(&su)
+        .await
+        .expect("seen");
+    assert_eq!(first, second, "last_seen_at was rewritten on every poll");
+    sqlx::query(
+        "UPDATE cloud_box_runner SET last_seen_at = now() - interval '2 minutes' WHERE id = $1",
+    )
+    .bind(runner)
+    .execute(&su)
+    .await
+    .expect("age");
+    claim_http(&client, &base, w.workspace, &token).await;
+    let third: Option<i64> = sqlx::query_scalar("SELECT (extract(epoch from last_seen_at) * 1000)::bigint FROM cloud_box_runner WHERE id = $1")
+        .bind(runner)
+        .fetch_one(&su)
+        .await
+        .expect("seen");
+    assert!(third > first, "a stale last_seen_at was not refreshed");
 }
 
 // ---------------------------------------------------------------------------

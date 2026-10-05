@@ -290,3 +290,29 @@ async fn a_poll_runs_what_the_server_sent_and_reports_through_http() {
     ));
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[tokio::test]
+async fn a_redirect_is_never_followed_with_the_bearer() {
+    // A second server that would receive the bearer if the client followed.
+    let (other, other_mock) = serve().await;
+    let app = Router::new().route(
+        "/v1/workspaces/{ws}/cloud-box-runner/claim",
+        post(move || {
+            let target = format!("{other}/v1/workspaces/x/cloud-box-runner/claim");
+            async move { (StatusCode::TEMPORARY_REDIRECT, [("location", target)]) }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let address: SocketAddr = listener.local_addr().expect("addr");
+    tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+    let client = HttpServer::new(&format!("http://{address}"), workspace(), TOKEN.to_string())
+        .expect("client");
+    let error = client.claim(1).await.expect_err("a redirect is an error");
+    assert!(matches!(error, ClientError::Status(307)), "{error}");
+    assert!(
+        other_mock.seen.lock().expect("mock").is_empty(),
+        "the bearer followed a redirect"
+    );
+}

@@ -60,6 +60,8 @@ impl std::fmt::Debug for HttpServer {
 impl HttpServer {
     pub fn new(base: &str, workspace: Uuid, credential: String) -> Result<Self, ClientError> {
         let http = reqwest::Client::builder()
+            // The bearer must never follow a redirect to another host.
+            .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(30))
             .connect_timeout(Duration::from_secs(10))
             .user_agent(concat!("momo-box-runner/", env!("CARGO_PKG_VERSION")))

@@ -362,3 +362,42 @@ async fn only_this_runners_named_resources_are_ever_touched() {
         }
     }
 }
+
+/// #3509 review M4: a failed create removes only what this call made.
+#[tokio::test]
+async fn a_failed_create_leaves_a_pre_existing_volume_alone() {
+    let rig = rig();
+    let id = Uuid::new_v4();
+    rig.docker.add_volume(&name(id), common::WORKSPACE);
+    rig.docker.crash_on_start(true);
+    for _ in 0..3 {
+        let body = rig
+            .executor
+            .execute(&control(id, Task::Create(Limits::ADR_CEILING)))
+            .await;
+        assert!(!body.ok);
+    }
+    assert_eq!(
+        rig.docker.volumes(),
+        [name(id)],
+        "a failed create deleted a volume it did not create"
+    );
+    assert_eq!(
+        rig.docker.containers(),
+        Vec::<(String, bool)>::new(),
+        "the container this call made is removed"
+    );
+    let rig2 = self::rig();
+    let id2 = Uuid::new_v4();
+    rig2.docker
+        .add_container(&name(id2), false, common::WORKSPACE);
+    rig2.docker.crash_on_start(true);
+    assert!(
+        !rig2
+            .executor
+            .execute(&control(id2, Task::Create(Limits::ADR_CEILING)))
+            .await
+            .ok
+    );
+    assert_eq!(rig2.docker.containers(), [(name(id2), false)]);
+}

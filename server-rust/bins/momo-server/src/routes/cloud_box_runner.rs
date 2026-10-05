@@ -24,7 +24,9 @@
 //!
 //! 1. **Closed by default.** Every route here answers 404 before any database read
 //!    unless `MOMO_CLOUD_BOX_ENABLED=true` (the same gate as the box routes).
-//! 2. **One uniform 401.** Malformed token, another credential class, unknown
+//! 2. **Cheap to refuse.** A token without the runner shape and an address whose refused-credential
+//!    budget is spent are turned away before any database work; bodies are capped at 4 KiB.
+//! 2b. **One uniform 401.** Malformed token, another credential class, unknown
 //!    runner, another workspace's runner (RLS hides it), revoked runner, wrong
 //!    secret: the same status and the same sentence, so the answer teaches nothing
 //!    about which check failed. Only refusals count against the per-IP budget, so
@@ -66,9 +68,12 @@ use crate::error::ApiError;
 use crate::routes::cloud_boxes::gate;
 use crate::routes::shared::{
     agent_tenant_tx, audit_via_token_id, futures_box, path_uuid, require_human,
-    require_instance_operator, settle_db, workspace_scope,
+    require_instance_operator, require_instance_operator_write, settle_db, workspace_scope,
 };
 use crate::AppState;
+
+/// Runner request bodies are tiny (a limit, a lease, a report); anything bigger is refused before it is read.
+pub const MAX_RUNNER_BODY_BYTES: usize = 4096;
 
 fn runner_dto(info: &RunnerInfo) -> CloudBoxRunnerDto {
     CloudBoxRunnerDto {
@@ -112,7 +117,7 @@ pub async fn register(
     gate(&state)?;
     require_human(&principal, "human operator required")?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
-    require_instance_operator(&state, &principal).await?;
+    require_instance_operator_write(&state, &principal).await?;
     let runner_id = Uuid::new_v4();
     let credential = mint(runner_id)?;
     let hash = hash_runner_credential(&credential);
@@ -190,7 +195,7 @@ pub async fn rotate(
     require_human(&principal, "human operator required")?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let runner_id = path_uuid(&runner, "invalid runner id")?;
-    require_instance_operator(&state, &principal).await?;
+    require_instance_operator_write(&state, &principal).await?;
     let credential = mint(runner_id)?;
     let hash = hash_runner_credential(&credential);
     let actor = principal.member_id;
@@ -228,7 +233,7 @@ pub async fn revoke(
     require_human(&principal, "human operator required")?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let runner_id = path_uuid(&runner, "invalid runner id")?;
-    require_instance_operator(&state, &principal).await?;
+    require_instance_operator_write(&state, &principal).await?;
     let actor = principal.member_id;
     let via_token = audit_via_token_id(&principal);
     let info = settle_db(
@@ -292,6 +297,10 @@ where
     let Ok(workspace_id) = Uuid::parse_str(workspace_raw) else {
         return Err(unauthorized());
     };
+    // A token that does not even have the runner's shape never opens a transaction.
+    if momo_settings::cloud_box_runner::runner_id_of_token(&token).is_none() {
+        return Err(unauthorized());
+    }
     settle_db(
         context,
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {

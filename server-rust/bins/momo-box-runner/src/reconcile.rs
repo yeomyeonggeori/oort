@@ -10,8 +10,8 @@
 //! * a quarantined volume is destroyed only after the grace period (14 days), **and** only
 //!   after an operator confirmed it on this host (`momo-box-runner confirm-shred`), **and**
 //!   within the daily cap on the orphan path. Until then it is held;
-//! * a server that answers with nothing while volumes exist, or that would orphan more than
-//!   half of the host's volumes at once, makes the runner act on none of it (a database
+//! * a server that answers with nothing while volumes exist, or that has more than half of the
+//!   host's volumes (a lone volume included) orphaned, makes the runner act on none of it (a database
 //!   restore, an outage or a compromised server must not stop or destroy everyone's box).
 //!
 //! The owner/admin-signed tombstone D10 describes (verified by the runner itself) needs
@@ -83,14 +83,12 @@ pub fn plan(
 ) -> Plan {
     let live = |id: &Uuid| server.iter().any(|b| b.box_id == *id && is_live(&b.state));
     let orphans: Vec<&Uuid> = local.iter().filter(|id| !live(id)).collect();
-    let new_orphans = orphans
-        .iter()
-        .filter(|id| !ledger.entries.contains_key(**id))
-        .count();
-
+    // Every orphan counts — already quarantined ones too (a wave of orphans does not become
+    // normal because the first poll quarantined them) — and a host with a single volume is
+    // protected as well: "all of this host's volumes are orphans" is never a leftover.
     let suspicion = if !local.is_empty() && server.is_empty() {
         Some(Suspicion::EmptyServerList)
-    } else if local.len() >= 2 && new_orphans * 2 > local.len() {
+    } else if orphans.len() * 2 > local.len() {
         Some(Suspicion::TooManyOrphans)
     } else {
         None

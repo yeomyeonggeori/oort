@@ -387,6 +387,42 @@ pub(crate) async fn require_instance_operator(
     }
 }
 
+/// The **write** variant of [`require_instance_operator`] (ADR-0197 D2, #3509 review M2): a
+/// `platform:read` scope is a read scope and is NOT enough. Only a human who is an owner/admin
+/// of their workspace **and** whose verified email is on the `PLATFORM_ADMIN_EMAILS`
+/// allow-list passes. Used for registering, rotating and revoking a box runner.
+pub(crate) async fn require_instance_operator_write(
+    state: &crate::AppState,
+    principal: &Principal,
+) -> Result<(), ApiError> {
+    require_human(principal, "human operator required")?;
+    let workspace_id = principal.workspace_id;
+    let member_id = principal.member_id;
+    let checked = settle_db(
+        "settings.authorize_instance_operator_write",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                let role = momo_auth::active_workspace_role(conn, workspace_id, member_id).await?;
+                let email =
+                    momo_auth::verified_operator_email(conn, workspace_id, member_id).await?;
+                Ok(Ok((role, email)))
+            })
+        })
+        .await,
+    )?;
+    let listed = checked.0.is_some_and(|role| role.is_admin())
+        && checked
+            .1
+            .is_some_and(|email| state.settings.platform_admin_emails.contains(&email));
+    if listed {
+        Ok(())
+    } else {
+        Err(ApiError::forbidden(
+            "a listed instance operator (PLATFORM_ADMIN_EMAILS) is required; platform:read is not enough",
+        ))
+    }
+}
+
 /// Per-workspace gate (Swift `ProviderLinkRoutes.isOperatorAuthorized` :281-289
 /// as used by `WorkHostEngineRoutes.requireOperator` :127-154): a human that
 /// carries `platform:read` **or** is an owner/admin of its own workspace.

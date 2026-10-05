@@ -19,7 +19,7 @@ use crate::engine::{ContainerState, Engine, EngineError};
 use crate::executor::Executor;
 use crate::ledger::{Ledger, LedgerError};
 use crate::reconcile::{plan, Action, Plan, ServerBox};
-use crate::wire::{intake, CompleteBody, Intake, Refused};
+use crate::wire::{intake, CompleteBody, Control, Intake, Refused, Task};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RunnerError {
@@ -97,6 +97,31 @@ impl Runner {
         Ok(())
     }
 
+    /// Before a `delete` destroys anything (#3509 review M5): the runner does not take the
+    /// control's word alone. The server's own box list must show this box as `deleting`, and the
+    /// runner's daily deletion cap must have room. Refusals are loud and reported failed (the box
+    /// stays `delete_failed` for a person to look at). Residual risk — a compromised server that
+    /// also lies in the list, up to the cap per day — ends with the owner/admin-signed delete of
+    /// M4/M6 (ADR-0197 D10).
+    async fn delete_guard(&self, control: &Control) -> Result<(), &'static str> {
+        let boxes = self
+            .server
+            .boxes()
+            .await
+            .map_err(|_| "could not cross-check the server's box list")?;
+        let listed_deleting = boxes
+            .iter()
+            .any(|b| b.box_id == control.box_id && b.state == "deleting");
+        if !listed_deleting {
+            return Err("the server's box list does not show this box as deleting");
+        }
+        let ledger = Ledger::load(&self.state_dir).map_err(|_| "ledger unreadable")?;
+        if ledger.deleted_in_last_day(now_seconds()) >= self.cfg.shred.delete_daily_cap {
+            return Err("the daily box deletion cap is reached");
+        }
+        Ok(())
+    }
+
     async fn report(&self, control_id: Uuid, body: CompleteBody) -> bool {
         match self.server.complete(control_id, &body).await {
             Ok(()) => true,
@@ -124,7 +149,33 @@ impl Runner {
         for raw in &claimed.controls {
             match intake(raw, &self.cfg.caps) {
                 Intake::Accepted(control) => {
-                    let body = self.executor.execute(&control).await;
+                    let body = if control.task == Task::Delete {
+                        match self.delete_guard(&control).await {
+                            Ok(()) => {
+                                tracing::warn!(box_id = %control.box_id, "DELETE: destroying a box's container and volume on the server's delete control");
+                                let body = self.executor.execute(&control).await;
+                                if body.ok {
+                                    if let Ok(mut ledger) = Ledger::load(&self.state_dir) {
+                                        ledger.record_delete(now_seconds());
+                                        let _ = ledger.save(&self.state_dir);
+                                    }
+                                }
+                                body
+                            }
+                            Err(reason) => {
+                                tracing::error!(box_id = %control.box_id, reason, "DELETE REFUSED: nothing was destroyed");
+                                CompleteBody {
+                                    lease_id: control.lease_id,
+                                    attempts: control.attempts,
+                                    ok: false,
+                                    observed: None,
+                                    deletion: None,
+                                }
+                            }
+                        }
+                    } else {
+                        self.executor.execute(&control).await
+                    };
                     tracing::info!(
                         control_id = %control.id,
                         verb = control.task.verb().as_str(),

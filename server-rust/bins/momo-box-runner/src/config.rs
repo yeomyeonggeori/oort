@@ -41,6 +41,11 @@ pub struct ShredConfig {
     /// key destruction of D10 is S4/M4's, and is a residual risk until then).
     #[serde(default = "default_true")]
     pub on_delete: bool,
+    /// The most box deletions this runner carries out in any rolling 24 hours, whoever asked
+    /// (#3509 review M5): a compromised server cannot wipe every box in one sweep. Over the cap a
+    /// `delete` control is refused and reported failed (the box stays `delete_failed`).
+    #[serde(default = "default_delete_cap")]
+    pub delete_daily_cap: u32,
 }
 
 impl Default for ShredConfig {
@@ -49,6 +54,7 @@ impl Default for ShredConfig {
             grace_days: default_grace_days(),
             daily_cap: default_daily_cap(),
             on_delete: true,
+            delete_daily_cap: default_delete_cap(),
         }
     }
 }
@@ -58,6 +64,9 @@ fn default_grace_days() -> u32 {
 }
 fn default_daily_cap() -> u32 {
     2
+}
+fn default_delete_cap() -> u32 {
+    10
 }
 fn default_true() -> bool {
     true
@@ -162,6 +171,10 @@ impl RunnerConfig {
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
+        // An image reference that starts with `-` would be read by docker as a flag.
+        if self.image.starts_with('-') {
+            return Err(ConfigError::ImageNotPinned);
+        }
         let digest_ok = match self.image.rsplit_once("@sha256:") {
             Some((name, digest)) => !name.is_empty() && is_hex64(digest),
             None => self.image.strip_prefix("sha256:").is_some_and(is_hex64),

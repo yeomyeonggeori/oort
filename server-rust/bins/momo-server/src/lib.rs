@@ -1641,21 +1641,25 @@ pub fn build_app(state: AppState) -> Router {
         // 쓴다(폴링은 막지 않는다). 모두 MOMO_CLOUD_BOX_ENABLED 가 닫혀 있으면 404.
         .route(
             "/v1/workspaces/{ws}/cloud-box-runner/claim",
-            post(routes::cloud_box_runner::claim).route_layer(
-                axum::middleware::from_fn_with_state(
+            post(routes::cloud_box_runner::claim)
+                .route_layer(axum::middleware::from_fn_with_state(
                     state.clone(),
                     routes::cloud_box_runner::refused_credential_budget,
-                ),
-            ),
+                ))
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    routes::cloud_box_runner::MAX_RUNNER_BODY_BYTES,
+                )),
         )
         .route(
             "/v1/workspaces/{ws}/cloud-box-runner/controls/{control}/complete",
-            post(routes::cloud_box_runner::complete).route_layer(
-                axum::middleware::from_fn_with_state(
+            post(routes::cloud_box_runner::complete)
+                .route_layer(axum::middleware::from_fn_with_state(
                     state.clone(),
                     routes::cloud_box_runner::refused_credential_budget,
-                ),
-            ),
+                ))
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    routes::cloud_box_runner::MAX_RUNNER_BODY_BYTES,
+                )),
         )
         .route(
             "/v1/workspaces/{ws}/cloud-box-runner/boxes",

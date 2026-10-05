@@ -261,6 +261,12 @@ pub async fn rotate_runner_in_tx(
     actor: Uuid,
     via_token: Option<Uuid>,
 ) -> Result<RotateOutcome, DbError> {
+    // Serialize with in-flight authentications (they hold FOR KEY SHARE).
+    sqlx::query("SELECT 1 FROM cloud_box_runner WHERE workspace_id = $1 AND id = $2 FOR UPDATE")
+        .bind(workspace_id)
+        .bind(runner_id)
+        .fetch_optional(&mut *conn)
+        .await?;
     let row = sqlx::query(&format!(
         "UPDATE cloud_box_runner \
             SET credential_hash = $3, credential_fingerprint = $4, rotated_at = now() \
@@ -359,7 +365,10 @@ pub async fn list_runners_in_tx(
 /// Authenticate a presented runner token inside the **path workspace's** tenant
 /// transaction. `None` for every failure alike (malformed, unknown, another
 /// workspace's runner — RLS hides it —, revoked, wrong secret), so the caller can
-/// answer one uniform 401. On success the runner's `last_seen_at` is touched.
+/// answer one uniform 401. The runner row is read `FOR KEY SHARE` (which the throttled
+/// `last_seen_at` update does not conflict with, so concurrent polls cannot deadlock), so a
+/// concurrent revoke or rotation (both `FOR UPDATE`) waits for this transaction and cannot interleave with an
+/// in-flight claim. On success `last_seen_at` is touched at most once a minute.
 pub async fn authenticate_runner_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -371,7 +380,7 @@ pub async fn authenticate_runner_in_tx(
     let presented = hash_runner_credential(presented_token);
     let row = sqlx::query(&format!(
         "SELECT {}, credential_hash FROM cloud_box_runner \
-          WHERE workspace_id = $1 AND id = $2 AND revoked_at IS NULL",
+          WHERE workspace_id = $1 AND id = $2 AND revoked_at IS NULL FOR KEY SHARE",
         runner_columns()
     ))
     .bind(workspace_id)
@@ -387,7 +396,9 @@ pub async fn authenticate_runner_in_tx(
     }
     let info = runner_from_row(&row)?;
     sqlx::query(
-        "UPDATE cloud_box_runner SET last_seen_at = now() WHERE workspace_id = $1 AND id = $2",
+        "UPDATE cloud_box_runner SET last_seen_at = now() \
+          WHERE workspace_id = $1 AND id = $2 \
+            AND (last_seen_at IS NULL OR last_seen_at < now() - interval '1 minute')",
     )
     .bind(workspace_id)
     .bind(runner_id)
