@@ -31,3 +31,6 @@ tracing.workspace = true
 # combined layout) so a row sealed by either server opens on the other.
 aes-gcm = "0.10"
 sha2.workspace = true
+# ADR-0197 M2 (#3505): the runner credential is 32 CSPRNG bytes, base64url, stored as sha256.
+base64.workspace = true
+getrandom = "0.2"

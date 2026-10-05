@@ -100,3 +100,25 @@ infra/personal-box/verify-m3.sh --sabotage same-uid  # 에이전트를 사람 ui
 infra/personal-box/verify-m3.sh --self-test          # GREEN + 세 sabotage 모두 RED
 ```
 **검증하지 않은 것(runtime-unverified):** `hidepid=2`(docker run으로 설정 불가, M2 러너 템플릿 항목), 실제 볼륨·LUKS·크립토 슈레드, 서버 쪽 등록·페어링 라우트(M1/M4)와 중계 WebSocket. PTY 자식의 bounding set은 `CAP_SETPCAP`이 없어 비우지 못하지만(`CapBnd=c0`), 다른 집합이 비어 있고 `no_new_privs`·setuid 바이너리 없음이라 얻을 길이 없어요. Colima VM의 `ptrace_scope`는 1이에요. 거부가 Yama에 기대지 않도록 같은 uid여도 dumpable=0이 `/proc`과 ptrace를 막아요.
+
+## M2 — `momo-box-runner`와 런너의 박스 이미지 (ADR-0197 M2, #3505)
+런너 호스트에서 한 워크스페이스의 박스를 만들고 지우는 데몬이에요. 코드는 `server-rust/bins/momo-box-runner/`, 서버 쪽(런너 자격·claim/complete)은 `routes/cloud_box_runner.rs`와 migration 119예요. 설치·호스트 준비(H5 체크리스트)·S1 egress 규칙 적용은 [런너 설치 런북](../../docs/runbooks/personal-box-runner.md)에 있어요.
+
+| 파일 | 역할 |
+|---|---|
+| `Dockerfile.agent` | S3 이미지 위에 **세 파일만** 얹어요: `momo-box-agent`, `momo-box-agent-entry`, `momo-box-volume-shred`. `momo-box-probe`는 이미지에 없어요 |
+| `momo-box-agent-entry` | root(`CAP_SETUID`·`CAP_SETGID`만)로 시작해 seal 키·host 키를 만들고 에이전트를 uid 10002 + 그 두 ambient capability로 띄워요(M3의 `momo-m3-entry`와 같은 모양, 시험 도구 없이) |
+| `momo-box-volume-shred` | 박스 볼륨 하나(`/v`)의 파일을 덮어쓰고 지워요. 네트워크 없는 일회용 컨테이너에서만 돌고 아무것도 읽지 않아요 |
+| `build-image.sh` | S3 이미지 + 에이전트(release, `rust:1-bookworm`에서 빌드)로 런너의 이미지를 만들고 이미지 ID를 출력해요 |
+| `verify-m2.sh` | 이미지 검사 + 실제 Docker e2e(`server-rust/bins/momo-server/tests/box_runner_e2e.rs`). `--image-only`, `--sabotage probe`, `--self-test` |
+
+런너의 박스 템플릿(`template.rs`)은 S3 하드닝에 M3의 두 가지 차이를 더한 것이에요. **박스 볼륨이 유일한 마운트**(이름 있는 볼륨 하나를 `/home/box`에)이고 나머지는 전부 tmpfs예요. 한도는 컨트롤의 네 숫자(CPU·메모리·디스크·PID)이고 `--memory-swap`=메모리, `--cpus`, `--pids-limit`이 그대로 적용돼요. 이미지·이름·네트워크·DNS는 런너 로컬 설정에만 있어요.
+
+**M2가 M3에서 확인한 격차 (런북 6번):** host 키 저장소는 키 디렉터리가 `nosuid,nodev` 마운트이길 요구하지만 Docker 볼륨은 그렇게 마운트되지 않아요(실측). 그래서 host 키와 seal 키는 M4/H5 전까지 시작마다 새로 만들어지는 tmpfs에 있어요. 등록·페어링이 붙기 전이라 잃을 신원은 없어요.
+
+```bash
+infra/personal-box/build-image.sh                         # 이미지 ID 출력
+infra/personal-box/verify-m2.sh --image-only              # 이미지 검사 (PG 불필요)
+infra/personal-box/verify-m2.sh                           # + e2e (격리 PG 18 필요: DATABASE_URL, PG*)
+infra/personal-box/verify-m2.sh --self-test               # GREEN + sabotage(probe) RED
+```

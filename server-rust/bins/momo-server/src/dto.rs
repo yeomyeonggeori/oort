@@ -6225,3 +6225,137 @@ pub struct CloudBoxMineResponse {
     #[serde(rename = "box")]
     pub cloud_box: Option<CloudBoxDto>,
 }
+
+// ---------------------------------------------------------------------------
+// #3505 (ADR-0197 M2) — the box runner
+// ---------------------------------------------------------------------------
+
+/// `POST /cloud-box-runners`: register the workspace's runner. A name and nothing
+/// else (D2: what the runner runs is fixed in the runner's own configuration).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudBoxRunnerRegisterRequest {
+    pub name: String,
+}
+
+/// One runner. Identity and times only: the credential's hash is not selected and
+/// its plaintext exists only in [`CloudBoxRunnerCredentialResponse`].
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudBoxRunnerDto {
+    pub id: String,
+    pub name: String,
+    /// First 8 bytes of the credential hash, hex: lets the operator tell which
+    /// credential a runner holds without revealing it.
+    pub credential_fingerprint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registered_by: Option<String>,
+    pub created_at_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rotated_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_seen_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at_ms: Option<i64>,
+}
+
+/// Registration and rotation answer: the runner and its credential, **once**.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudBoxRunnerCredentialResponse {
+    pub runner: CloudBoxRunnerDto,
+    pub credential: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CloudBoxRunnerListResponse {
+    pub runners: Vec<CloudBoxRunnerDto>,
+}
+
+/// `POST /cloud-box-runner/claim`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudBoxRunnerClaimRequest {
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// The four limits of a `create` (the only payload a control has).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudBoxControlLimitsDto {
+    pub cpu_millis: i32,
+    pub memory_mb: i32,
+    pub disk_gb: i32,
+    pub pids: i32,
+}
+
+/// One control as the runner receives it: verb, box, the lease to send back, and
+/// for `create` the limits. No image, command, mount, network profile or env field
+/// exists to be sent.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudBoxControlDto {
+    pub id: String,
+    pub lease_id: String,
+    pub attempts: i32,
+    pub seq: i64,
+    pub box_id: String,
+    pub verb: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limits: Option<CloudBoxControlLimitsDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudBoxRunnerClaimResponse {
+    pub controls: Vec<CloudBoxControlDto>,
+    /// Controls this poll gave up on (attempts exhausted) instead of re-issuing.
+    pub poisoned: Vec<String>,
+}
+
+/// The runner's own check after a `delete` (D10).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudBoxDeletionReportRequest {
+    pub container_absent: bool,
+    pub volume_absent: bool,
+}
+
+/// `POST /cloud-box-runner/controls/{control}/complete`. Closed: the lease and
+/// attempt it was handed, whether it worked, and — by verb — one observed word or
+/// the deletion report. Any other field is a 422.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudBoxRunnerCompleteRequest {
+    pub lease_id: uuid::Uuid,
+    pub attempts: i32,
+    pub ok: bool,
+    /// `running` | `stopped` | `absent` — `status` controls only.
+    #[serde(default)]
+    pub observed: Option<String>,
+    #[serde(default)]
+    pub deletion: Option<CloudBoxDeletionReportRequest>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudBoxRunnerCompleteResponse {
+    /// The box's state after the report, when the verb moves state.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub box_state: Option<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudBoxReconcileEntryDto {
+    pub box_id: String,
+    pub state: &'static str,
+}
+
+/// `GET /cloud-box-runner/boxes`: the list the runner's local volumes are checked
+/// against. Ids and states.
+#[derive(Debug, Serialize)]
+pub struct CloudBoxReconcileResponse {
+    pub boxes: Vec<CloudBoxReconcileEntryDto>,
+}

@@ -1,6 +1,9 @@
 //! `momo-box-agent` entry point (ADR-0197 M3).
 //!
 //! ```text
+//! momo-box-agent make-seal-key PATH
+//!                           create this start's seal key at PATH (0600, create-new);
+//!                           the box entry runs it before `init-key` (ADR-0197 M2)
 //! momo-box-agent init-key   create the host key in this box if there is none,
 //!                           print its public half and fingerprint
 //! momo-box-agent run        start the spawn helper, drop every capability, load the
@@ -88,6 +91,15 @@ mod linux {
         Ok((store, user, helper))
     }
 
+    /// Create a fresh per-start seal key file. This is what the box entry (the runner's image)
+    /// runs under the agent uid before `init-key`: the production stand-in for what the test
+    /// probe's `make-seal-key` did, without shipping the probe. `create_new`: it never
+    /// overwrites a seal key, and the path is the box image's seal tmpfs.
+    pub fn make_seal_key(path: &str) -> Result<(), String> {
+        momo_workd::keystore::box_store::create_seal_key(std::path::Path::new(path))
+            .map_err(|e| e.to_string())
+    }
+
     pub fn init_key() -> Result<(), String> {
         let (store, _, _) = open_store(false)?;
         let key = match store.load().map_err(|e| e.to_string())? {
@@ -172,6 +184,8 @@ fn main() -> ExitCode {
             Ok(())
         }
         #[cfg(target_os = "linux")]
+        [c, path] if c == "make-seal-key" => linux::make_seal_key(path),
+        #[cfg(target_os = "linux")]
         [c] if c == "init-key" => linux::init_key(),
         #[cfg(target_os = "linux")]
         [c] if c == "run" => linux::run(),
@@ -181,7 +195,9 @@ fn main() -> ExitCode {
         [c] if c == "init-key" || c == "run" => {
             Err("momo-box-agent runs inside a Linux personal-cloud box only".to_string())
         }
-        _ => Err("usage: momo-box-agent init-key | run | --version".to_string()),
+        _ => {
+            Err("usage: momo-box-agent make-seal-key PATH | init-key | run | --version".to_string())
+        }
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
