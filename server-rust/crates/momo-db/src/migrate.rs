@@ -561,19 +561,22 @@ mod tests {
     ///
     /// 118 is #3500's personal cloud box (ADR-0197 M1): the RLS-FORCE tables `cloud_box` (one live
     /// box per member, lifecycle-table trigger) and `cloud_box_control` (closed five-verb runner queue).
+    ///
+    /// 119 is #3505's box runner (ADR-0197 M2): the RLS-FORCE table `cloud_box_runner` (one live runner per
+    /// workspace, sha256-hashed credential) and the fencing/report columns of `cloud_box_control`.
     #[test]
-    fn discovers_contiguous_migrations_001_to_118() {
+    fn discovers_contiguous_migrations_001_to_119() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            118,
-            "expected 118 migrations under {}",
+            119,
+            "expected 119 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 118);
+        assert_eq!(migrations.last().unwrap().version, 119);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

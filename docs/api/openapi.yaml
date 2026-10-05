@@ -2447,6 +2447,356 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-box-runners:
+    post:
+      tags: [cloud-box]
+      operationId: registerCloudBoxRunner
+      summary: Register the workspace's box runner (instance operator only).
+      description: >
+        ADR-0197 M2 (#3505, D2 역할 분리). Registers the one runner that serves this
+        workspace's boxes and returns its credential **once** (`oort_runner.<id>.<secret>`);
+        the server stores only a SHA-256 hash and a fingerprint. Requires a listed
+        instance operator — a workspace owner/admin whose verified email is in
+        `PLATFORM_ADMIN_EMAILS`. A workspace admin alone, and a `platform:read` token (a read
+        scope), get 403; `platform:read` may only list. One live
+        runner per workspace (`409 cloud_box_runner_exists`). Off by default like every
+        `cloud-box*` route (404 unless `MOMO_CLOUD_BOX_ENABLED=true`). Audit
+        `cloud_box_runner.registered` (name and fingerprint, never the credential).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloudBoxRunnerRegisterRequest"
+      responses:
+        "201":
+          description: The runner and its credential (shown once).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBoxRunnerCredential"
+        "400":
+          description: The name is empty or longer than 64 characters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not a listed instance operator (a `platform:read` token is not enough), or the path workspace is not the caller's.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The cloud box API is not enabled on this instance.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`cloud_box_runner_exists`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: An unknown field in the body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      tags: [cloud-box]
+      operationId: listCloudBoxRunners
+      summary: List the workspace's runners (instance operator or `platform:read`).
+      description: Live runner first, revoked ones after. Fingerprints and times; never a hash or a credential.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The workspace's runners.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBoxRunnerList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not an instance operator.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The cloud box API is not enabled on this instance.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-box-runners/{runnerId}/rotate:
+    post:
+      tags: [cloud-box]
+      operationId: rotateCloudBoxRunnerCredential
+      summary: Replace the runner's credential (instance operator only).
+      description: >
+        The old credential stops working immediately; leases the runner holds are kept (same
+        runner, new secret). A revoked runner cannot be rotated (404): register a new one.
+        Audit `cloud_box_runner.rotated`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: runnerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The runner and its new credential (shown once).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBoxRunnerCredential"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not an instance operator.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No such live runner, or the API is not enabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-box-runners/{runnerId}/revoke:
+    post:
+      tags: [cloud-box]
+      operationId: revokeCloudBoxRunner
+      summary: Revoke the runner (instance operator only).
+      description: >
+        Irreversible. Controls the runner still holds go back to `pending` so the next runner
+        takes them, and the revoked runner's late completions are fenced out. Asking twice is
+        200. Audit `cloud_box_runner.revoked`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: runnerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The revoked runner.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBoxRunner"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not an instance operator.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No such runner, or the API is not enabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-box-runner/claim:
+    post:
+      tags: [cloud-box]
+      operationId: claimCloudBoxControls
+      summary: Runner poll — take up to `limit` lifecycle controls, each under a fresh lease.
+      description: >
+        ADR-0197 M2 (D2). **Runner credential only** (`cloudBoxRunnerAuth`): a human JWT, agent
+        bearer or work-host signature is a 401, as is a malformed, unknown, revoked, wrong-secret
+        or other-workspace credential — one uniform answer. Outbound polling: the runner dials the
+        server. Controls arrive oldest first; each carries a fresh `leaseId` and its `attempts`
+        count, which the runner must send back to complete (fencing). A control whose lease ran
+        out is handed out again (attempts + 1) until 5 attempts, then it is poisoned
+        (`failed`/`poisoned`, its box settled as a failed create or delete) and listed once in
+        `poisoned`. The control schema is closed: verb and box, plus the four limits for `create`;
+        there is no field for an image, command, mount, network or environment. Only refused
+        credentials count against the per-IP budget (429 + `Retry-After`).
+      security:
+        - cloudBoxRunnerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloudBoxRunnerClaimRequest"
+      responses:
+        "200":
+          description: The controls taken by this poll (possibly none).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBoxRunnerClaim"
+        "400":
+          description: "`limit` outside 1...50."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The runner credential is missing or not accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The cloud box API is not enabled on this instance.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: An unknown field in the body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Too many refused credentials from this address.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-box-runner/controls/{controlId}/complete:
+    post:
+      tags: [cloud-box]
+      operationId: completeCloudBoxControl
+      summary: Runner report — finish a claimed control (fenced by lease and attempts).
+      description: >
+        Runner credential only. **Fenced**: the report lands only while the control is still
+        `claimed` by this runner under exactly this `leaseId` and `attempts`; an expired and
+        re-issued lease, a control a newer owner request cancelled, one already finished, or
+        another runner's is `409 cloud_box_control_stale` and writes nothing. The report is
+        closed: `ok`, for `status` one `observed` word (`running|stopped|absent` — never inspect
+        output or environment), for `delete` the `deletion` verification (`containerAbsent`,
+        `volumeAbsent`). A `delete` counts as done only when both are true; a runner that says
+        `ok` with a surviving volume leaves the box `delete_failed`. The box's lifecycle edge is
+        applied in the same transaction (create ok → running, create failed → deleted, delete
+        verified → deleted, delete not verified → delete_failed); start/stop/status move no state.
+      security:
+        - cloudBoxRunnerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: controlId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloudBoxRunnerCompleteRequest"
+      responses:
+        "200":
+          description: Recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBoxRunnerComplete"
+        "400":
+          description: The report does not fit the verb, or `observed` is not one of the three words.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: The runner credential is missing or not accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No such control in this workspace, or the API is not enabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`cloud_box_control_stale`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: An unknown field in the body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Too many refused credentials from this address.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/cloud-box-runner/boxes:
+    get:
+      tags: [cloud-box]
+      operationId: listCloudBoxesForRunner
+      summary: Runner reconciliation list — box ids and states only.
+      description: >
+        Runner credential only. Every live box plus `deleted` tombstones of the last 30 days, as
+        ids and states, for the runner's orphan-volume reconciliation (ADR-0197 D10): a volume the
+        server lists as live is kept; any other is quarantined, never destroyed on this list alone.
+      security:
+        - cloudBoxRunnerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Boxes the runner's local volumes are checked against.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CloudBoxReconcileList"
+        "401":
+          description: The runner credential is missing or not accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The cloud box API is not enabled on this instance.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Too many refused credentials from this address.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /v1/workspaces/{workspaceId}/agents:
     post:
       tags: [agents]
@@ -10594,6 +10944,15 @@ components:
         App access token (15m TTL) from login/join/refresh, sent as
         `Authorization: Bearer <accessToken>`. Tokens are hash-persisted
         server-side and revocable (MOMO-300).
+    cloudBoxRunnerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: oort runner credential
+      description: >
+        ADR-0197 M2 runner credential `oort_runner.<runnerId>.<secret>`, minted by the
+        instance operator's registration/rotation call and shown once. Bound to one workspace and
+        one runner; accepted only on the three `cloud-box-runner/*` routes, never as a human or
+        agent bearer. The server keeps its SHA-256 only.
     agentPortBearerAuth:
       type: http
       scheme: bearer
@@ -12347,6 +12706,121 @@ components:
       properties:
         enabled: {type: boolean}
         hours: {type: integer, minimum: 1, maximum: 12, description: Defaults to the box's keepAwakeMaxHours.}
+    CloudBoxRunner:
+      type: object
+      required: [id, name, credentialFingerprint, createdAtMs]
+      description: A box runner. Identity and times; the credential's hash is never returned.
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string, minLength: 1, maxLength: 64}
+        credentialFingerprint: {type: string, pattern: "^[0-9a-f]{16}$", description: First 8 bytes of the credential hash, hex.}
+        registeredBy: {type: string, format: uuid}
+        createdAtMs: {type: integer, format: int64}
+        rotatedAtMs: {type: integer, format: int64}
+        lastSeenAtMs: {type: integer, format: int64}
+        revokedAtMs: {type: integer, format: int64}
+    CloudBoxRunnerList:
+      type: object
+      required: [runners]
+      properties:
+        runners:
+          type: array
+          items:
+            $ref: "#/components/schemas/CloudBoxRunner"
+    CloudBoxRunnerRegisterRequest:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: {type: string, minLength: 1, maxLength: 64}
+    CloudBoxRunnerCredential:
+      type: object
+      required: [runner, credential]
+      properties:
+        runner:
+          $ref: "#/components/schemas/CloudBoxRunner"
+        credential:
+          type: string
+          description: The runner credential, shown once (registration and rotation only).
+    CloudBoxRunnerClaimRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        limit: {type: integer, minimum: 1, maximum: 50, default: 10}
+    CloudBoxControlLimits:
+      type: object
+      required: [cpuMillis, memoryMb, diskGb, pids]
+      properties:
+        cpuMillis: {type: integer, maximum: 1000}
+        memoryMb: {type: integer, maximum: 2048}
+        diskGb: {type: integer, maximum: 10}
+        pids: {type: integer, maximum: 512}
+    CloudBoxControl:
+      type: object
+      required: [id, leaseId, attempts, seq, boxId, verb]
+      description: >-
+        One lifecycle control. The whole schema: there is no field for an image, a command, a
+        mount, a network profile or an environment variable.
+      properties:
+        id: {type: string, format: uuid}
+        leaseId: {type: string, format: uuid, description: Fresh at every hand-out; send it back to complete.}
+        attempts: {type: integer, minimum: 1, maximum: 5}
+        seq: {type: integer, format: int64}
+        boxId: {type: string, format: uuid}
+        verb: {type: string, enum: [create, start, stop, delete, status]}
+        limits:
+          $ref: "#/components/schemas/CloudBoxControlLimits"
+    CloudBoxRunnerClaim:
+      type: object
+      required: [controls, poisoned]
+      properties:
+        controls:
+          type: array
+          items:
+            $ref: "#/components/schemas/CloudBoxControl"
+        poisoned:
+          type: array
+          description: Controls this poll gave up on (5 attempts used) instead of handing out again.
+          items: {type: string, format: uuid}
+    CloudBoxDeletionReport:
+      type: object
+      required: [containerAbsent, volumeAbsent]
+      additionalProperties: false
+      properties:
+        containerAbsent: {type: boolean}
+        volumeAbsent: {type: boolean}
+    CloudBoxRunnerCompleteRequest:
+      type: object
+      required: [leaseId, attempts, ok]
+      additionalProperties: false
+      properties:
+        leaseId: {type: string, format: uuid}
+        attempts: {type: integer, minimum: 1}
+        ok: {type: boolean}
+        observed: {type: string, enum: [running, stopped, absent], description: "`status` controls only."}
+        deletion:
+          $ref: "#/components/schemas/CloudBoxDeletionReport"
+    CloudBoxRunnerComplete:
+      type: object
+      properties:
+        boxState:
+          type: string
+          enum: [creating, running, idle, stopped, deleting, delete_failed, deleted]
+          description: The box's state after the report, for the verbs that move state.
+    CloudBoxReconcileList:
+      type: object
+      required: [boxes]
+      properties:
+        boxes:
+          type: array
+          items:
+            type: object
+            required: [boxId, state]
+            properties:
+              boxId: {type: string, format: uuid}
+              state:
+                type: string
+                enum: [creating, running, idle, stopped, deleting, delete_failed, deleted]
     CreatePersonalKeyAgentRequest:
       type: object
       required: [displayName, handle, model]

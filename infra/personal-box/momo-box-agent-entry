@@ -1,0 +1,23 @@
+#!/bin/sh
+# The entry of a runner-created box (ADR-0197 M2). `momo-box-runner` starts the container as root with
+# ONLY CAP_SETUID + CAP_SETGID (everything else dropped, no-new-privileges, read-only root) — the shape M3
+# documented in verify-m3.sh. This script is what runs as root: it starts the box-agent at the agent uid
+# (10002) carrying those two capabilities as ambient, so the agent can start the person's PTY under uid
+# 10001 and strip every capability from it. Root itself never runs the agent or any user code.
+#
+# Per start, on tmpfs (nothing here survives a stop):
+#   1. a fresh seal key       (the runner's crypto-shred anchor; it must not share a device with the key)
+#   2. the host key, sealed   (born in the box; the runner, the server and the image never see it)
+#   3. the agent itself       (holds the identity, stays `pending` until the owner confirms; M4 serves)
+# The host key and the seal key live on tmpfs until M4: a Docker volume cannot be mounted nosuid,nodev,
+# which the host-key store requires (ADR-0197 D1), so the key does not yet persist across a stop.
+set -eu
+umask 077
+AGENT_UID=10002
+AS_AGENT="setpriv --reuid $AGENT_UID --regid $AGENT_UID --clear-groups --inh-caps +setuid,+setgid --ambient-caps +setuid,+setgid --"
+# shellcheck disable=SC2086
+$AS_AGENT momo-box-agent make-seal-key "$OORT_BOX_SEAL_KEY_FILE"
+# shellcheck disable=SC2086
+$AS_AGENT momo-box-agent init-key >/dev/null
+# shellcheck disable=SC2086
+exec $AS_AGENT momo-box-agent run

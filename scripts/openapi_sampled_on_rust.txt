@@ -233,6 +233,13 @@ POST /v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/keep-awake
 POST /v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/stop
 POST /v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/start
 POST /v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/delete
+POST /v1/workspaces/{workspaceId}/cloud-box-runners
+GET /v1/workspaces/{workspaceId}/cloud-box-runners
+POST /v1/workspaces/{workspaceId}/cloud-box-runners/{runnerId}/rotate
+POST /v1/workspaces/{workspaceId}/cloud-box-runners/{runnerId}/revoke
+POST /v1/workspaces/{workspaceId}/cloud-box-runner/claim
+POST /v1/workspaces/{workspaceId}/cloud-box-runner/controls/{controlId}/complete
+GET /v1/workspaces/{workspaceId}/cloud-box-runner/boxes
 POST /v1/workspaces/{workspaceId}/agents/{agentId}/credentials
 GET /v1/workspaces/{workspaceId}/agents/{agentId}/credentials
 POST /v1/workspaces/{workspaceId}/agents/{agentId}/credentials/{credentialId}/revoke
