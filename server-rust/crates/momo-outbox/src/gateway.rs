@@ -49,6 +49,15 @@ use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
 /// Lease duration (Swift `AgentGatewayRoutes.leaseDurationSeconds` :17).
+///
+/// **Hosted agents that wake rarely (#3516 finding).** The window is fixed and a
+/// renewal only extends it to `now() + 30s` while it is still live
+/// (`renew_gateway_lease_in_tx` requires `lease_expires_at > now()`; it is not
+/// cumulative). A vendor routine that sleeps for tens of minutes between wakes
+/// therefore cannot renew across the gap: the job becomes claimable again and
+/// the old handle's `oort_run_event`/`oort_run_complete` answer the one 409 lease
+/// refusal. This is the documented lease contract, not changed here; a
+/// long-gap runtime must finish inside one wake or re-claim and re-do the turn.
 pub const GATEWAY_LEASE_SECONDS: i64 = 30;
 
 /// Bounds on `?limit=` for the pending-jobs claim (Swift :64).
