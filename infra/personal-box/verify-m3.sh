@@ -220,7 +220,7 @@ SPAWN_EXTRA=()
 docker exec --user 0:0 \
   -e ANTHROPIC_API_KEY=sk-ant-MOMO-M3-MARKER -e CLAUDE_CODE_OAUTH_TOKEN=MOMO-M3-MARKER -e OPENAI_API_KEY=sk-MOMO-M3-MARKER \
   "$NAME" setpriv --reuid "$AGENT_UID" --regid "$AGENT_UID" --clear-groups --inh-caps +setuid,+setgid --ambient-caps +setuid,+setgid -- \
-  momo-box-probe spawn-report --agent-exe /usr/local/bin/momo-box-agent --key-file "$KEY" --agent-pid "$PID" ${SPAWN_EXTRA[@]+"${SPAWN_EXTRA[@]}"} >"$WORK/pty.txt" 2>&1
+  momo-box-probe spawn-report --agent-exe /usr/local/bin/momo-box-agent --flood-fds 10 --key-file "$KEY" --agent-pid "$PID" ${SPAWN_EXTRA[@]+"${SPAWN_EXTRA[@]}"} >"$WORK/pty.txt" 2>&1
 sed -n '/^\(uid\|euid\|gid\|groups\|Cap\|NoNew\|agent_\|ppid\|kill\|open_fds\)/p' "$WORK/pty.txt" | sed 's/^/      /'
 check "PTY child runs as the person: uid=euid=gid=$PERSON_UID" bash -c 'grep -qx "uid=$0" "$1" && grep -qx "euid=$0" "$1" && grep -qx "gid=$0" "$1"' "$PERSON_UID" "$WORK/pty.txt"
 check "PTY child has no supplementary groups" grep -qx 'groups=' "$WORK/pty.txt"
@@ -228,6 +228,7 @@ for c in CapInh CapPrm CapEff CapAmb; do
   check "PTY child $c is empty" grep -qx "$c=0000000000000000" "$WORK/pty.txt"
 done
 check "PTY child NoNewPrivs=1" grep -qx 'NoNewPrivs=1' "$WORK/pty.txt"
+check "a request carrying 10 extra descriptors is refused by the helper (status 4) (M-A)" grep -qx 'flood_status=4' "$WORK/pty.txt"
 check "an agent that started the helper then dropped its capabilities: drop verified" grep -qx 'agent_drop_capabilities=OK' "$WORK/pty.txt"
 check "that agent's CapEff is 0 afterwards" grep -qx 'agent_CapEff_after_drop=0000000000000000' "$WORK/pty.txt"
 check "that agent can no longer setuid to the person (a compromised agent cannot read /cred)" grep -qx 'agent_can_setuid_after_drop=false' "$WORK/pty.txt"

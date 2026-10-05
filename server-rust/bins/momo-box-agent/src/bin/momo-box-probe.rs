@@ -353,6 +353,16 @@ fn spawn_report(args: &[String]) -> i32 {
     };
     println!("agent_CapEff_after_drop={cap_eff}");
     println!("agent_can_setuid_after_drop={can_setuid}");
+    if let Some(n) = flag(args, "--flood-fds").and_then(|v| v.parse().ok()) {
+        // M-A: a request carrying extra descriptors is refused and must leak
+        // nothing into the helper or the shell started next.
+        println!(
+            "flood_status={}",
+            helper
+                .flood_for_test(n)
+                .map_or_else(|e| format!("ERR({e})"), |s| s.to_string())
+        );
+    }
     let mut pty = match helper.spawn(WinSize { cols: 80, rows: 24 }) {
         Ok(pty) => pty,
         Err(e) => {

@@ -78,7 +78,20 @@ impl HelperSpec {
         .to_string()
     }
 
+    /// Parse a spec for the helper running as the calling process.
     pub fn from_json(text: &str) -> Option<Self> {
+        // SAFETY: getters cannot fail.
+        let own = Ids {
+            uid: unsafe { libc::geteuid() },
+            gid: unsafe { libc::getegid() },
+        };
+        Self::from_json_for(text, own)
+    }
+
+    /// As [`Self::from_json`] for a helper running as `own`: a spec that names
+    /// the helper's own uid or gid as the person (a shell with the helper's
+    /// identity) is refused (L-C).
+    pub fn from_json_for(text: &str, own: Ids) -> Option<Self> {
         let v: Value = serde_json::from_str(text).ok()?;
         let s = |k: &str| v.get(k)?.as_str().map(str::to_string);
         let env = v
@@ -103,7 +116,8 @@ impl HelperSpec {
             gid: u32::try_from(v.get("gid")?.as_u64()?).ok()?,
         };
         // The helper never starts a shell as root, whatever it is told.
-        (user.uid != 0 && user.gid != 0).then_some(())?;
+        (user.uid != 0 && user.gid != 0 && user.uid != own.uid && user.gid != own.gid)
+            .then_some(())?;
         Some(Self {
             user,
             program: PathBuf::from(s("program")?),
@@ -122,30 +136,28 @@ fn cvt(rc: libc::c_int) -> io::Result<libc::c_int> {
     }
 }
 
-/// `data` plus, optionally, one descriptor (SCM_RIGHTS).
-fn send_with_fd(sock: RawFd, data: &[u8], fd: Option<RawFd>) -> io::Result<()> {
-    let mut cbuf = [0u64; 8]; // aligned, larger than CMSG_SPACE(4)
+/// `data` plus any number of descriptors (SCM_RIGHTS). Production sends zero
+/// or one; the test sends many to prove the receiver owns every one.
+fn send_with_fds(sock: RawFd, data: &[u8], fds: &[RawFd]) -> io::Result<()> {
+    let mut cbuf = [0u64; 64]; // aligned, larger than CMSG_SPACE(4 * 100)
     let mut iov = libc::iovec {
         iov_base: data.as_ptr() as *mut libc::c_void,
         iov_len: data.len(),
     };
+    let bytes = std::mem::size_of_val(fds);
     // SAFETY: msghdr is zero-initialised then filled with pointers that outlive the call.
     unsafe {
         let mut msg: libc::msghdr = std::mem::zeroed();
         msg.msg_iov = &mut iov;
         msg.msg_iovlen = 1;
-        if let Some(fd) = fd {
+        if !fds.is_empty() {
             msg.msg_control = cbuf.as_mut_ptr().cast();
-            msg.msg_controllen = libc::CMSG_SPACE(4) as _;
+            msg.msg_controllen = libc::CMSG_SPACE(bytes as u32) as _;
             let cmsg = libc::CMSG_FIRSTHDR(&msg);
             (*cmsg).cmsg_level = libc::SOL_SOCKET;
             (*cmsg).cmsg_type = libc::SCM_RIGHTS;
-            (*cmsg).cmsg_len = libc::CMSG_LEN(4) as _;
-            std::ptr::copy_nonoverlapping(
-                (&fd as *const RawFd).cast::<u8>(),
-                libc::CMSG_DATA(cmsg),
-                4,
-            );
+            (*cmsg).cmsg_len = libc::CMSG_LEN(bytes as u32) as _;
+            std::ptr::copy_nonoverlapping(fds.as_ptr().cast::<u8>(), libc::CMSG_DATA(cmsg), bytes);
         }
         loop {
             let n = libc::sendmsg(sock, &msg, 0);
@@ -153,9 +165,8 @@ fn send_with_fd(sock: RawFd, data: &[u8], fd: Option<RawFd>) -> io::Result<()> {
                 if n as usize == data.len() {
                     return Ok(());
                 }
-                // The descriptor travelled with the first bytes; send the rest plainly.
-                let rest = &data[n as usize..];
-                return write_all_fd(sock, rest);
+                // The descriptors travelled with the first bytes; send the rest plainly.
+                return write_all_fd(sock, &data[n as usize..]);
             }
             let e = io::Error::last_os_error();
             if e.kind() != io::ErrorKind::Interrupted {
@@ -181,42 +192,60 @@ fn write_all_fd(sock: RawFd, mut bytes: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-/// Read exactly `buf.len()` bytes; the first `recvmsg` may carry a descriptor.
-fn recv_exact_with_fd(sock: RawFd, buf: &mut [u8]) -> io::Result<Option<OwnedFd>> {
+/// Read exactly `buf.len()` bytes. Returns **every** descriptor that arrived
+/// (M-A of the #3503 re-review): all are wrapped as `OwnedFd` the moment they
+/// are taken from the message, so none can leak, and each is close-on-exec
+/// (`MSG_CMSG_CLOEXEC` on Linux, `fcntl` elsewhere). A truncated control
+/// message (`MSG_CTRUNC`: more descriptors than the buffer holds, the kernel
+/// has already closed the excess) is an error.
+fn recv_exact_with_fds(sock: RawFd, buf: &mut [u8]) -> io::Result<Vec<OwnedFd>> {
+    #[cfg(target_os = "linux")]
+    const RECV_FLAGS: libc::c_int = libc::MSG_CMSG_CLOEXEC;
+    #[cfg(not(target_os = "linux"))]
+    const RECV_FLAGS: libc::c_int = 0;
     let mut got = 0usize;
-    let mut received: Option<OwnedFd> = None;
+    let mut received: Vec<OwnedFd> = Vec::new();
+    let mut truncated = false;
     while got < buf.len() {
         let mut cbuf = [0u64; 8];
         let mut iov = libc::iovec {
             iov_base: buf[got..].as_mut_ptr().cast(),
             iov_len: buf.len() - got,
         };
-        // SAFETY: as in send_with_fd; the control buffer outlives the call.
+        // SAFETY: as in send_with_fds; the control buffer outlives the call and
+        // every descriptor found in it is owned exactly once.
         let n = unsafe {
             let mut msg: libc::msghdr = std::mem::zeroed();
             msg.msg_iov = &mut iov;
             msg.msg_iovlen = 1;
             msg.msg_control = cbuf.as_mut_ptr().cast();
             msg.msg_controllen = std::mem::size_of_val(&cbuf) as _;
-            let n = libc::recvmsg(sock, &mut msg, 0);
+            let n = libc::recvmsg(sock, &mut msg, RECV_FLAGS);
             if n >= 0 {
+                truncated |= msg.msg_flags & libc::MSG_CTRUNC != 0;
                 let mut cmsg = libc::CMSG_FIRSTHDR(&msg);
                 while !cmsg.is_null() {
                     if (*cmsg).cmsg_level == libc::SOL_SOCKET
                         && (*cmsg).cmsg_type == libc::SCM_RIGHTS
                     {
-                        let mut fd: RawFd = -1;
-                        std::ptr::copy_nonoverlapping(
-                            libc::CMSG_DATA(cmsg),
-                            (&mut fd as *mut RawFd).cast::<u8>(),
-                            4,
-                        );
-                        if fd >= 0 {
-                            let owned = OwnedFd::from_raw_fd(fd);
-                            // Close-on-exec at once (MSG_CMSG_CLOEXEC is Linux-only).
-                            let _ = libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
-                            if received.is_none() {
-                                received = Some(owned);
+                        // Never read past the control buffer, whatever cmsg_len claims
+                        // (a truncated message may report more than it holds).
+                        let data = libc::CMSG_DATA(cmsg);
+                        let end = cbuf.as_ptr() as usize + std::mem::size_of_val(&cbuf);
+                        let room = end.saturating_sub(data as usize);
+                        let claimed =
+                            ((*cmsg).cmsg_len as usize).saturating_sub(libc::CMSG_LEN(0) as usize);
+                        let payload = claimed.min(room);
+                        for i in 0..payload / 4 {
+                            let mut fd: RawFd = -1;
+                            std::ptr::copy_nonoverlapping(
+                                data.add(i * 4),
+                                (&mut fd as *mut RawFd).cast::<u8>(),
+                                4,
+                            );
+                            if fd >= 0 {
+                                let _ = libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
+                                received.push(OwnedFd::from_raw_fd(fd));
                             }
                         }
                     }
@@ -237,6 +266,12 @@ fn recv_exact_with_fd(sock: RawFd, buf: &mut [u8]) -> io::Result<Option<OwnedFd>
         }
         got += n as usize;
     }
+    if truncated {
+        // `received` drops here: everything that did arrive is closed.
+        return Err(io::Error::other(
+            "control message truncated (too many descriptors)",
+        ));
+    }
     Ok(received)
 }
 
@@ -244,6 +279,10 @@ fn recv_exact_with_fd(sock: RawFd, buf: &mut [u8]) -> io::Result<Option<OwnedFd>
 pub struct HelperClient {
     sock: Mutex<Option<OwnedFd>>,
     process: Mutex<Child>,
+    /// Set after any I/O failure on the socket (L-A): the connection is closed
+    /// and never reused, so a late reply cannot be read as a later session's
+    /// master. The agent must start a new helper to continue.
+    poisoned: std::sync::atomic::AtomicBool,
 }
 
 impl HelperClient {
@@ -314,6 +353,7 @@ impl HelperClient {
         Ok(Self {
             sock: Mutex::new(Some(mine)),
             process: Mutex::new(process),
+            poisoned: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -323,24 +363,83 @@ impl HelperClient {
 
     /// A new PTY of `size`, its shell started by the helper.
     pub fn spawn(&self, size: WinSize) -> io::Result<Pty> {
+        use std::sync::atomic::Ordering;
+        let mut guard = self
+            .sock
+            .lock()
+            .map_err(|_| io::Error::other("helper socket poisoned"))?;
+        let Some(fd) = guard.as_ref().map(|f| f.as_raw_fd()) else {
+            return Err(io::Error::other(
+                "the spawn helper connection was closed; start a new helper",
+            ));
+        };
+        let exchange = (|| {
+            write_all_fd(fd, &size.to_payload())?;
+            let mut reply = [0u8; REPLY_LEN];
+            let fds = recv_exact_with_fds(fd, &mut reply)?;
+            Ok::<_, io::Error>((reply, fds))
+        })();
+        let (reply, mut fds) = match exchange {
+            Ok(done) => done,
+            Err(e) => {
+                // Timeout, EOF, truncation: the stream's state is unknown.
+                self.poisoned.store(true, Ordering::SeqCst);
+                drop(guard.take());
+                return Err(e);
+            }
+        };
+        match (reply[0], fds.len()) {
+            (0, 1) => Pty::from_remote(
+                fds.remove(0),
+                u32::from_be_bytes([reply[1], reply[2], reply[3], reply[4]]),
+            ),
+            (0, _) => {
+                // A success carries exactly one descriptor; anything else is a
+                // protocol violation, and the stream cannot be trusted.
+                self.poisoned.store(true, Ordering::SeqCst);
+                drop(guard.take());
+                Err(io::Error::other(
+                    "spawn helper sent an unexpected descriptor count",
+                ))
+            }
+            (status, _) => Err(io::Error::other(format!("spawn helper refused ({status})"))),
+        }
+    }
+
+    /// Test hook for `momo-box-probe` (M-A): send a valid request that carries
+    /// `n` extra pipe descriptors and return the helper's status byte (4 =
+    /// refused). A real agent never does this.
+    #[doc(hidden)]
+    pub fn flood_for_test(&self, n: usize) -> io::Result<u8> {
         let guard = self
             .sock
             .lock()
             .map_err(|_| io::Error::other("helper socket poisoned"))?;
-        let sock = guard
+        let fd = guard
             .as_ref()
-            .ok_or_else(|| io::Error::other("helper closed"))?
+            .ok_or_else(|| io::Error::other("closed"))?
             .as_raw_fd();
-        write_all_fd(sock, &size.to_payload())?;
-        let mut reply = [0u8; REPLY_LEN];
-        let fd = recv_exact_with_fd(sock, &mut reply)?;
-        match (reply[0], fd) {
-            (0, Some(master)) => Pty::from_remote(
-                master,
-                u32::from_be_bytes([reply[1], reply[2], reply[3], reply[4]]),
-            ),
-            (status, _) => Err(io::Error::other(format!("spawn helper refused ({status})"))),
+        let mut held = Vec::new();
+        for _ in 0..n {
+            let mut p = [0 as RawFd; 2];
+            cvt(unsafe { libc::pipe(p.as_mut_ptr()) })?;
+            held.push(unsafe { OwnedFd::from_raw_fd(p[0]) });
+            held.push(unsafe { OwnedFd::from_raw_fd(p[1]) });
         }
+        let raws: Vec<RawFd> = held.iter().map(|f| f.as_raw_fd()).collect();
+        send_with_fds(fd, &WinSize { cols: 80, rows: 24 }.to_payload(), &raws)?;
+        let mut reply = [0u8; REPLY_LEN];
+        let fds = recv_exact_with_fds(fd, &mut reply)?;
+        if fds.is_empty() {
+            Ok(reply[0])
+        } else {
+            Err(io::Error::other("unexpected descriptor"))
+        }
+    }
+
+    /// Whether this client gave up its connection after a failure.
+    pub fn is_poisoned(&self) -> bool {
+        self.poisoned.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -389,17 +488,17 @@ pub fn serve(spec: &HelperSpec) -> io::Result<()> {
             continue;
         }
         let mut request = [0u8; 4];
-        match recv_exact_with_fd(sock.as_raw_fd(), &mut request) {
-            Ok(_) => {}
-            Err(_) => return Ok(()), // the agent is gone
-        }
-        let reply = match serve_one(spec, &request, &mut shells) {
+        let fds = match recv_exact_with_fds(sock.as_raw_fd(), &mut request) {
+            Ok(fds) => fds,
+            Err(_) => return Ok(()), // the agent is gone, or sent something it must not
+        };
+        let reply = match serve_one(spec, &request, fds.len(), &mut shells) {
             Ok((master, pid)) => {
                 let mut out = [0u8; REPLY_LEN];
                 out[1..].copy_from_slice(&pid.to_be_bytes());
-                send_with_fd(sock.as_raw_fd(), &out, Some(master.as_raw_fd()))
+                send_with_fds(sock.as_raw_fd(), &out, &[master.as_raw_fd()])
             }
-            Err(status) => send_with_fd(sock.as_raw_fd(), &[status, 0, 0, 0, 0], None),
+            Err(status) => send_with_fds(sock.as_raw_fd(), &[status, 0, 0, 0, 0], &[]),
         };
         if reply.is_err() {
             return Ok(());
@@ -407,11 +506,17 @@ pub fn serve(spec: &HelperSpec) -> io::Result<()> {
     }
 }
 
+/// One request. A request carries a window size and **nothing else**: any
+/// descriptor attached to it is refused (the received ones are already closed).
 fn serve_one(
     spec: &HelperSpec,
     request: &[u8],
+    attached_fds: usize,
     shells: &mut Vec<Child>,
 ) -> Result<(OwnedFd, u32), u8> {
+    if attached_fds != 0 {
+        return Err(4);
+    }
     let size = WinSize::from_payload(request).ok_or(1u8)?;
     if shells.len() >= MAX_SHELLS {
         return Err(2);
@@ -433,43 +538,172 @@ fn serve_one(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
+    /// The descriptor table is per process: tests that count it must not overlap
+    /// with tests that open descriptors.
+    pub(crate) static FD_TABLE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    const OWN: Ids = Ids {
+        uid: 10003,
+        gid: 10003,
+    };
+
+    fn pair() -> (OwnedFd, OwnedFd) {
+        let mut fds = [0 as RawFd; 2];
+        cvt(unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr()) })
+            .unwrap();
+        unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) }
+    }
+
+    fn pipes(n: usize) -> Vec<OwnedFd> {
+        (0..n)
+            .flat_map(|_| {
+                let mut p = [0 as RawFd; 2];
+                cvt(unsafe { libc::pipe(p.as_mut_ptr()) }).unwrap();
+                unsafe { [OwnedFd::from_raw_fd(p[0]), OwnedFd::from_raw_fd(p[1])] }
+            })
+            .collect()
+    }
+
+    /// Open descriptors of this process (Linux and macOS), via the fd table.
+    fn open_fd_count() -> usize {
+        (0..4096)
+            .filter(|fd| unsafe { libc::fcntl(*fd, libc::F_GETFD) } != -1)
+            .count()
+    }
+
     #[test]
-    fn the_spec_round_trips_and_refuses_root() {
+    fn the_spec_round_trips_and_refuses_root_and_the_helpers_own_ids() {
         let spec = HelperSpec::login_shell(
             &UserProfile::box_default(),
             vec![("PATH".into(), "/usr/bin".into())],
         );
-        assert_eq!(HelperSpec::from_json(&spec.to_json()), Some(spec.clone()));
+        assert_eq!(
+            HelperSpec::from_json_for(&spec.to_json(), OWN),
+            Some(spec.clone())
+        );
         let root = spec.to_json().replace("10001", "0");
-        assert_eq!(HelperSpec::from_json(&root), None, "never a root shell");
-        assert_eq!(HelperSpec::from_json("{"), None);
+        assert_eq!(
+            HelperSpec::from_json_for(&root, OWN),
+            None,
+            "never a root shell"
+        );
+        assert_eq!(HelperSpec::from_json_for("{", OWN), None);
+        // A shell with the helper's own identity (L-C).
+        let as_helper = spec.to_json().replace("10001", "10003");
+        assert_eq!(HelperSpec::from_json_for(&as_helper, OWN), None);
+        let own_uid_only = Ids { uid: 10001, gid: 7 };
+        assert_eq!(
+            HelperSpec::from_json_for(&spec.to_json(), own_uid_only),
+            None
+        );
+        let own_gid_only = Ids { uid: 7, gid: 10001 };
+        assert_eq!(
+            HelperSpec::from_json_for(&spec.to_json(), own_gid_only),
+            None
+        );
     }
 
     #[test]
     fn a_descriptor_travels_over_the_socket() {
-        let mut fds = [0 as RawFd; 2];
-        cvt(unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr()) })
-            .unwrap();
-        let (a, b) = unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) };
-        let mut pipe = [0 as RawFd; 2];
-        cvt(unsafe { libc::pipe(pipe.as_mut_ptr()) }).unwrap();
-        let (r, w) = unsafe { (OwnedFd::from_raw_fd(pipe[0]), OwnedFd::from_raw_fd(pipe[1])) };
-        send_with_fd(a.as_raw_fd(), &[0, 0, 0, 0, 7], Some(w.as_raw_fd())).unwrap();
+        let _fd_table = FD_TABLE.lock().unwrap_or_else(|e| e.into_inner());
+        let (a, b) = pair();
+        let mut it = pipes(1).into_iter();
+        let (r, w) = (it.next().unwrap(), it.next().unwrap());
+        send_with_fds(a.as_raw_fd(), &[0, 0, 0, 0, 7], &[w.as_raw_fd()]).unwrap();
         let mut reply = [0u8; REPLY_LEN];
-        let got = recv_exact_with_fd(b.as_raw_fd(), &mut reply)
-            .unwrap()
-            .expect("fd");
-        assert_eq!(reply, [0, 0, 0, 0, 7]);
-        // The received descriptor is the pipe's write end.
+        let mut got = recv_exact_with_fds(b.as_raw_fd(), &mut reply).unwrap();
+        assert_eq!((reply, got.len()), ([0, 0, 0, 0, 7], 1));
+        let got = got.remove(0);
         write_all_fd(got.as_raw_fd(), b"x").unwrap();
         let mut one = [0u8; 1];
         let n = unsafe { libc::read(r.as_raw_fd(), one.as_mut_ptr().cast(), 1) };
         assert_eq!((n, one[0]), (1, b'x'));
-        // And it is close-on-exec.
         let flags = unsafe { libc::fcntl(got.as_raw_fd(), libc::F_GETFD) };
-        assert_ne!(flags & libc::FD_CLOEXEC, 0);
+        assert_ne!(flags & libc::FD_CLOEXEC, 0, "close-on-exec");
+    }
+
+    /// M-A: a message carrying several descriptors hands the receiver ALL of
+    /// them as owned, close-on-exec descriptors; dropping them leaves no leak.
+    #[test]
+    fn every_descriptor_in_a_message_is_owned_cloexec_and_closed_on_drop() {
+        let _fd_table = FD_TABLE.lock().unwrap_or_else(|e| e.into_inner());
+        let (a, b) = pair();
+        let held = pipes(5); // 10 descriptors to send
+        let raws: Vec<RawFd> = held.iter().map(|f| f.as_raw_fd()).collect();
+        send_with_fds(a.as_raw_fd(), &[1, 2, 3, 4], &raws).unwrap();
+        let before = open_fd_count();
+        let mut request = [0u8; 4];
+        let got = recv_exact_with_fds(b.as_raw_fd(), &mut request).unwrap();
+        assert_eq!(got.len(), 10, "all of them, not just the first");
+        assert_eq!(open_fd_count(), before + 10);
+        for fd in &got {
+            let flags = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFD) };
+            assert_ne!(flags & libc::FD_CLOEXEC, 0);
+        }
+        drop(got);
+        assert_eq!(open_fd_count(), before, "nothing leaked after the drop");
+    }
+
+    /// More descriptors than the control buffer holds: an error, and the
+    /// descriptors that did arrive are closed (nothing leaks).
+    // Linux: the kernel closes the descriptors a too-small control buffer cannot
+    // hold. BSD/macOS leaves them open in the process, which is why the helper
+    // (Linux only) is where this guarantee matters.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_over_long_descriptor_list_is_an_error_and_leaks_nothing() {
+        let _fd_table = FD_TABLE.lock().unwrap_or_else(|e| e.into_inner());
+        let (a, b) = pair();
+        let held = pipes(40); // 80 descriptors > what 64 bytes of control data hold
+        let raws: Vec<RawFd> = held.iter().map(|f| f.as_raw_fd()).collect();
+        send_with_fds(a.as_raw_fd(), &[1, 2, 3, 4], &raws).unwrap();
+        let before = open_fd_count();
+        let mut request = [0u8; 4];
+        assert!(recv_exact_with_fds(b.as_raw_fd(), &mut request).is_err());
+        assert_eq!(
+            open_fd_count(),
+            before,
+            "the descriptors that arrived were closed"
+        );
+    }
+
+    #[test]
+    fn a_request_that_carries_descriptors_is_refused_without_starting_anything() {
+        let spec = HelperSpec::login_shell(&UserProfile::box_default(), vec![]);
+        let mut shells = Vec::new();
+        for n in [1usize, 2, 9] {
+            assert_eq!(
+                serve_one(
+                    &spec,
+                    &WinSize { cols: 80, rows: 24 }.to_payload(),
+                    n,
+                    &mut shells
+                )
+                .err(),
+                Some(4)
+            );
+        }
+        assert!(shells.is_empty());
+    }
+
+    /// L-A: after any failed exchange the connection is closed and never reused,
+    /// so a late reply cannot be read as a later session's master. (The helper
+    /// here exits at once, so the first request sees EOF.)
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_failed_exchange_poisons_the_client() {
+        let _fd_table = FD_TABLE.lock().unwrap_or_else(|e| e.into_inner());
+        let spec = HelperSpec::login_shell(&UserProfile::box_default(), vec![]);
+        let client =
+            HelperClient::start(Path::new("/usr/bin/true"), &spec, Ids { uid: 1, gid: 1 }).unwrap();
+        assert!(!client.is_poisoned());
+        let size = WinSize { cols: 80, rows: 24 };
+        assert!(client.spawn(size).is_err());
+        assert!(client.is_poisoned());
+        let again = client.spawn(size).err().expect("no reuse").to_string();
+        assert!(again.contains("start a new helper"), "{again}");
     }
 }

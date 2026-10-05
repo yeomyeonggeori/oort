@@ -253,7 +253,8 @@ mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
 
-    struct Scratch(PathBuf);
+    /// Descriptor-counting tests elsewhere in this crate need a quiet table.
+    struct Scratch(PathBuf, std::sync::MutexGuard<'static, ()>);
     impl Scratch {
         fn new(tag: &str) -> Self {
             let dir = std::env::temp_dir().join(format!(
@@ -263,7 +264,10 @@ mod tests {
             ));
             std::fs::create_dir_all(&dir).unwrap();
             // macOS /tmp is a symlink: work on the real path.
-            Self(std::fs::canonicalize(dir).unwrap())
+            let guard = crate::spawn_helper::tests::FD_TABLE
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            Self(std::fs::canonicalize(dir).unwrap(), guard)
         }
     }
     impl Drop for Scratch {
