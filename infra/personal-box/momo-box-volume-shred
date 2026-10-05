@@ -1,0 +1,11 @@
+#!/bin/sh
+# Overwrite then unlink every regular file of ONE box volume (mounted at /v), for the runner's `delete`
+# and its operator-confirmed orphan path (ADR-0197 D10). It runs in a one-shot container with no network,
+# a read-only root, and only DAC_OVERRIDE + FOWNER (root can write files other uids own); it never reads
+# a file back. The runner removes the (now empty) volume afterwards. Symlinks are not followed (-type f);
+# -xdev stays on the volume.
+#
+# Overwriting is best effort on SSD and copy-on-write storage: the destruction D10 relies on is key
+# destruction (crypto-shred), which S4/M4 deliver. Until then this is a residual risk (T14).
+set -eu
+find /v -xdev -type f -exec shred -n 1 -z -u -- {} +

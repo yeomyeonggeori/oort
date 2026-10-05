@@ -920,6 +920,8 @@ AGENT_GATEWAY_SECRET=$GATEWAY_SECRET
 MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1
 # #3500 (ADR-0197 M1): 개인 클라우드 박스 API 는 기본 닫힘이라 게이트가 명시로 연다.
 MOMO_CLOUD_BOX_ENABLED=true
+# #3505 (ADR-0197 M2): 런너 등록·회전·폐기는 인스턴스 운영자(D2 역할 분리)만 한다. 게이트의 owner 가 그 운영자다.
+PLATFORM_ADMIN_EMAILS=$GATE_EMAIL
 
 MOMO_CENTRIFUGO_WS_URL=ws://127.0.0.1:$CENT_PORT/connection/websocket
 
@@ -4068,6 +4070,80 @@ sample cloud-box-delete post \
   "/v1/workspaces/{workspaceId}/cloud-boxes/{boxId}/delete" \
   "/v1/workspaces/$WS/cloud-boxes/$CLOUD_BOX_ID/delete" 200 "" "$ACCESS"
 guard_jq '.state == "deleting" and .closedReason == "owner_delete"' "delete starts the deletion"
+
+# #3505 (ADR-0197 M2) — 런너의 서버 쪽. 운영자(게이트 owner)가 런너를 등록하고, 런너 자격 하나로 claim → complete →
+# boxes 를 왕복한 뒤 회전·폐기한다. 위 delete 가 남긴 컨트롤(앞의 create/start/stop 은 새 요청에 취소됐다)이 claim 에 나온다.
+api post "/v1/workspaces/$WS/cloud-box-runners" '{"name":"openapi rust runner"}' "$ACCESS"
+if [ "$RESPONSE_STATUS" != "201" ]; then
+  gate_fail cloud-box-runner-register "expected HTTP 201, got $RESPONSE_STATUS" "$(redacted_body)"
+fi
+RUNNER_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.runner.id' 2>/dev/null || true)"
+RUNNER_TOKEN="$(printf '%s' "$RESPONSE_BODY" | jq -er '.credential' 2>/dev/null || true)"
+append_secret_with_derivatives "$RUNNER_TOKEN" || {
+  echo "[openapi-rust] could not register the runner credential secret" >&2
+  exit 1
+}
+{ [ -n "$RUNNER_TOKEN" ] && canonical_uuid "$RUNNER_ID"; } || {
+  echo "[openapi-rust] runner registration omitted a credential or canonical id" >&2
+  exit 1
+}
+guard_jq '(.credential | startswith("oort_runner.")) and (.runner | has("credentialFingerprint")) and (.runner | has("credentialHash") | not)' \
+  "registration returns the credential once and only a fingerprint of it"
+if [ "$(response_header Cache-Control)" != "no-store" ] || \
+  [ "$(response_header Pragma)" != "no-cache" ]; then
+  gate_fail cloud-box-runner-register "missing one-time response cache headers" "$(redacted_headers)"
+fi
+record_sample cloud-box-runner-register post \
+  "/v1/workspaces/{workspaceId}/cloud-box-runners" 201
+sample cloud-box-runner-list get \
+  "/v1/workspaces/{workspaceId}/cloud-box-runners" \
+  "/v1/workspaces/$WS/cloud-box-runners" 200 "" "$ACCESS"
+guard_jq --arg id "$RUNNER_ID" 'any(.runners[]; .id == $id) and (tostring | contains("oort_runner.") | not)' \
+  "the runner list is metadata-only"
+sample cloud-box-runner-claim post \
+  "/v1/workspaces/{workspaceId}/cloud-box-runner/claim" \
+  "/v1/workspaces/$WS/cloud-box-runner/claim" 200 '{"limit":10}' "$RUNNER_TOKEN"
+guard_jq --arg id "$CLOUD_BOX_ID" '.controls | length == 1 and .[0].verb == "delete" and .[0].boxId == $id and .[0].attempts == 1 and (.[0] | has("limits") | not)' \
+  "the runner takes the delete control, with a lease and no limits"
+CONTROL_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.controls[0].id')"
+CONTROL_LEASE="$(printf '%s' "$RESPONSE_BODY" | jq -er '.controls[0].leaseId')"
+# 런너 자격이 아닌 것은 같은 401 이다: 사람 JWT 는 런너 문을 열지 못한다.
+expect cloud-box-runner-human-denied post \
+  "/v1/workspaces/$WS/cloud-box-runner/claim" 401 '{"limit":1}' "$ACCESS"
+# 지난 lease 는 완료할 수 없다(펜싱): 이 컨트롤의 lease 가 아닌 값은 409.
+expect cloud-box-runner-fenced post \
+  "/v1/workspaces/$WS/cloud-box-runner/controls/$CONTROL_ID/complete" 409 \
+  "$(jq -cn --arg l "$(lower_uuid)" '{leaseId:$l,attempts:1,ok:true,deletion:{containerAbsent:true,volumeAbsent:true}}')" "$RUNNER_TOKEN"
+sample cloud-box-runner-complete post \
+  "/v1/workspaces/{workspaceId}/cloud-box-runner/controls/{controlId}/complete" \
+  "/v1/workspaces/$WS/cloud-box-runner/controls/$CONTROL_ID/complete" 200 \
+  "$(jq -cn --arg l "$CONTROL_LEASE" '{leaseId:$l,attempts:1,ok:true,deletion:{containerAbsent:true,volumeAbsent:true}}')" "$RUNNER_TOKEN"
+guard_jq '.boxState == "deleted"' "a verified delete closes the box as deleted"
+sample cloud-box-runner-boxes get \
+  "/v1/workspaces/{workspaceId}/cloud-box-runner/boxes" \
+  "/v1/workspaces/$WS/cloud-box-runner/boxes" 200 "" "$RUNNER_TOKEN"
+guard_jq --arg id "$CLOUD_BOX_ID" 'any(.boxes[]; .boxId == $id and .state == "deleted") and all(.boxes[]; keys == ["boxId","state"])' \
+  "the reconcile list is ids and states only"
+api post "/v1/workspaces/$WS/cloud-box-runners/$RUNNER_ID/rotate" "" "$ACCESS"
+if [ "$RESPONSE_STATUS" != "200" ]; then
+  gate_fail cloud-box-runner-rotate "expected HTTP 200, got $RESPONSE_STATUS" "$(redacted_body)"
+fi
+NEW_RUNNER_TOKEN="$(printf '%s' "$RESPONSE_BODY" | jq -er '.credential' 2>/dev/null || true)"
+append_secret_with_derivatives "$NEW_RUNNER_TOKEN" || {
+  echo "[openapi-rust] could not register the rotated runner credential secret" >&2
+  exit 1
+}
+[ -n "$NEW_RUNNER_TOKEN" ] || { echo "[openapi-rust] rotation returned no credential" >&2; exit 1; }
+record_sample cloud-box-runner-rotate post \
+  "/v1/workspaces/{workspaceId}/cloud-box-runners/{runnerId}/rotate" 200
+expect cloud-box-runner-rotated-out post \
+  "/v1/workspaces/$WS/cloud-box-runner/claim" 401 '{"limit":1}' "$RUNNER_TOKEN"
+sample cloud-box-runner-revoke post \
+  "/v1/workspaces/{workspaceId}/cloud-box-runners/{runnerId}/revoke" \
+  "/v1/workspaces/$WS/cloud-box-runners/$RUNNER_ID/revoke" 200 "" "$ACCESS"
+guard_jq '(.revokedAtMs | type) == "number"' "revocation is recorded"
+expect cloud-box-runner-revoked post \
+  "/v1/workspaces/$WS/cloud-box-runner/claim" 401 '{"limit":1}' "$NEW_RUNNER_TOKEN"
 
 # ---------------------------------------------------------------------------
 # work host 레지스트리 — 등록 · 서명 하트비트 · 폴링 목록

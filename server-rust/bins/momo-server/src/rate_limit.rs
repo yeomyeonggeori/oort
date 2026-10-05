@@ -92,6 +92,38 @@ impl SlidingWindowRateLimiter {
         SlidingWindowRateLimiter::default()
     }
 
+    /// Without counting anything: is `key` already at `limit` inside the window? `Some(retry
+    /// after seconds)` when it is. Used to turn an address away **before** the handler runs
+    /// (the refused-credential budget of the runner routes), so an exhausted address no longer
+    /// costs a transaction per guess.
+    pub fn exhausted(&self, key: &str, limit: u32, window: Duration) -> Option<u64> {
+        if limit == 0 {
+            return None;
+        }
+        let now = Instant::now();
+        let buckets = match self.buckets.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let bucket = buckets.get(key)?;
+        let cutoff = now.checked_sub(window);
+        let live: Vec<&Instant> = bucket
+            .timestamps
+            .iter()
+            .filter(|at| cutoff.is_none_or(|cutoff| **at > cutoff))
+            .collect();
+        if live.len() < limit as usize {
+            return None;
+        }
+        let oldest = live.iter().min().copied()?;
+        Some(
+            window
+                .saturating_sub(now.duration_since(*oldest))
+                .as_secs()
+                .max(1),
+        )
+    }
+
     /// Count one request against `key`. A `limit` of 0 disables the axis
     /// entirely (Swift :52-54), which is how an operator turns it off.
     pub fn check(&self, key: &str, limit: u32, window: Duration) -> Verdict {
@@ -394,6 +426,63 @@ pub async fn per_ip_drive_upload(
             window_seconds = config.window_seconds,
             surface = "PUT /__momo_stub/drive/uploads/{token}",
             "rate limit exceeded (per-ip, refused upload capabilities)"
+        );
+    }
+    too_many_requests(verdict.retry_after_seconds)
+}
+
+/// A per-IP budget that only **refused credentials** spend (#3505): the handler
+/// runs first and a `401` counts against the caller's address; once the budget is
+/// spent the address's refusals become `429` + `Retry-After`. An accepted request
+/// spends nothing, so a runner polling every few seconds is never throttled.
+pub(crate) async fn per_ip_refused(
+    state: AppState,
+    request: Request,
+    next: Next,
+    key_prefix: &'static str,
+    limit_of: fn(&RateLimitConfig) -> u32,
+) -> Response {
+    let config: &RateLimitConfig = &state.rate_limit.config;
+    let limit = limit_of(config);
+    let peer = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ConnectInfo(address)| *address);
+    let ip = client_ip(request.headers(), peer);
+    // Pre-check: an address whose refused-credential budget is already spent is turned away
+    // before the handler (and its database transaction) runs.
+    if let Some(ip) = ip.as_deref() {
+        if let Some(retry_after) = state.rate_limit.limiter.exhausted(
+            &format!("{key_prefix}:{ip}"),
+            limit,
+            Duration::from_secs(config.window_seconds),
+        ) {
+            return too_many_requests(retry_after);
+        }
+    }
+
+    let response = next.run(request).await;
+    if limit == 0 || response.status() != StatusCode::UNAUTHORIZED {
+        return response;
+    }
+    let Some(ip) = ip else {
+        return response;
+    };
+    let verdict = state.rate_limit.limiter.check(
+        &format!("{key_prefix}:{ip}"),
+        limit,
+        Duration::from_secs(config.window_seconds),
+    );
+    if verdict.allowed {
+        return response;
+    }
+    if verdict.should_log {
+        tracing::warn!(
+            ip = %ip,
+            limit,
+            window_seconds = config.window_seconds,
+            surface = key_prefix,
+            "rate limit exceeded (per-ip, refused credentials)"
         );
     }
     too_many_requests(verdict.retry_after_seconds)
