@@ -52,6 +52,7 @@ import {
   parseAgentToolCatalog,
   type AgentToolCatalogEntry,
 } from "../features/agents/toolCatalog";
+import { normalizeWorkRunInput, type WorkRunDraft } from "../features/agents/workRunRequest";
 
 export type { AgentToolCatalogEntry };
 
@@ -4812,6 +4813,55 @@ export async function fetchAgentRunDetail(
       workspaceId.toLowerCase()
     )}/agent-runs/${encodeURIComponent(runId.toLowerCase())}`
   ));
+}
+
+/**
+ * 에이전트에게 작업을 맡기는 요청의 결과.
+ * `replayed`는 같은 `clientRunId`의 요청이 이미 접수돼 있어서 서버가 새로 만들지
+ * 않고 그 run을 돌려줬다는 뜻이다(HTTP 200, 새로 만들면 201). 두 경우 모두 성공이다.
+ */
+export interface CreatedAgentWorkRun {
+  run: AgentRun;
+  replayed: boolean;
+}
+
+/**
+ * `POST /v1/workspaces/{ws}/channels/{ch}/agent-runs` 의 `type=work` (ADR-0198 D4
+ * 「에이전트」 경로, ADR-0162 증보 3). 서버 변경 없음 — 이미 있는 경로의 호출이다.
+ *
+ * 멱등: 서버는 `(channel, actor, agent, clientRunId)`로 run을 한 건만 만든다.
+ * 요청이 갔는지 모를 때(네트워크 끊김·5xx) **같은 `clientRunId`와 같은 내용**으로
+ * 다시 보내면 중복 없이 같은 run이 온다. 같은 id에 다른 내용을 실으면 409다.
+ *
+ * 입력은 보내기 전에 서버와 같은 방식(공백 다듬기·빈 선택값 생략·UTF-8 바이트 한도)
+ * 으로 정규화하고, 어긋나면 `WorkRunDraftError`를 던진다(서버는 호출되지 않는다).
+ * 거절은 `ApiError`로 던져지고 문장은 `features/agents/workRunRequest`의
+ * `workRunFailure`가 만든다. 응답은 느슨하게 읽는다: 모르는 필드는 무시하고,
+ * run을 가리킬 `id`·`channelId`·`status` 등 필수 값이 없을 때만 `WireShapeError`다.
+ */
+export async function createAgentWorkRun(
+  workspaceId: string,
+  channelId: string,
+  draft: WorkRunDraft
+): Promise<CreatedAgentWorkRun> {
+  const input = normalizeWorkRunInput(draft);
+  const res = await authedRequest(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId.toLowerCase()
+    )}/channels/${encodeURIComponent(channelId.toLowerCase())}/agent-runs`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        agentMemberId: draft.agentMemberId.toLowerCase(),
+        clientRunId: draft.clientRunId.toLowerCase(),
+        input,
+      }),
+    }
+  );
+  return {
+    run: agentRunDetailFromWire(responseRecord(res.json<unknown>())),
+    replayed: res.status === 200,
+  };
 }
 
 // ---- 모델·추론 강도 라우팅 (ADR-0134) ---------------------------------------

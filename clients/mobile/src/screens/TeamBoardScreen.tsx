@@ -54,6 +54,7 @@ import {
   StateChip,
 } from '../features/work/teamBoard/TeamBoardParts';
 import {
+  useBoardForegroundRefresh,
   useTeamBoardItem,
   useTeamBoardList,
   useTeamBoardRail,
@@ -119,6 +120,7 @@ export default function TeamBoardScreen({
 
   const list = useTeamBoardList(workspaceId, active);
   useTeamBoardRail(workspaceId, list.items, active);
+  useBoardForegroundRefresh(workspaceId, active);
 
   // 구간은 한 번만 만든다. 개수는 「전체」와 「내 것」이 같은 구간 규칙 위에서 센다.
   const allSections = useMemo(
