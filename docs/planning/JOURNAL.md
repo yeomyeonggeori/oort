@@ -3,6 +3,12 @@
 > 세션 종료 시 공용 계약에 따라 짧은 항목을 맨 위에 추가한다.
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 갱신할 때 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-10-05~06 · Opus 5.5 planner(+Sonnet 5.5 워커·독립 보안·사실·design-review 검수) · ★개인 작업 공간 보류 → 외부 VM 에이전트 작업 추적 main
+
+- 성재 방향 전환(10-05): 개인 클라우드 작업 공간(ADR-0197)은 VM 비용·운영 부담으로 보류(M1~M3은 기본 꺼짐으로 main, M4는 WIP 브랜치), 그록봇·dots의 무료 VM에서 에이전트가 일하고 oort는 진행만 추적. AT 6티켓 「이대로 진행」, v0.1.18은 「추적 기능까지 넣고」.
+- AT-1~AT-8(#3525~#3535)을 승격 1006a·1006b로 main(`cb3b92f9`). 새 저장소 없이 기존 `agent_run.output`(stages·artifacts) 사용, 보드는 opt-in `include=runs`, 요청자는 감사 `agent.work.queued` actor.
+- 교훈: ①호스티드 lease 30초는 VM 깨우기 간격과 안 맞아 AT-3 조사에서 AT-8로 분리 ②독립 보안 검수가 데스크탑 `target=_blank` 죽은 링크(High)와 실패할 수 없는 폰 보안 시험을 잡음 — RN `fireEvent.press`는 자식에 닿지 않음 ③문서도 코드 대조 사실 검수가 한도·조건 누락을 잡음 ④서브에이전트 스트림 정지 2회는 SendMessage 재개로 복구.
+
 ## 2026-10-03~04 · Opus 5.5 planner(+Sonnet 5.5 워커·독립 design-review·보안 검수) · ★AI 허브 AIH-1~10·Claude 대행 보수 모드·개인 API 키 main
 
 - 성재 진단 요청(AI 연동 UX 붕괴)과 약관 원문 대조 뒤 결재: 조직=에이전트·팀 BYOK, 개인=내 구독·개인 키·개인 클라우드 작업 공간(ADR-0197), Claude 구독 대행은 문의 회신 전까지 보수(기본 꺼짐), 본인 맥 원격 작업 허용(10-03), 공용 host 열린 세션 직접 입력 막기(10-04).
@@ -232,17 +238,3 @@
 - **경량화 최종**(main `47f4d6f0` vs 진단 시점 `f399e417`): 추적 파일 **3,416 → 2,491(−27%)** · 코드 LOC ≈768k → 624k(−19%) · md 107k → 67k(−38%) · `.swift` 224→7 · scripts 265→151 · docs 663→364(루트 34→18) · handoffs 302→80 · research 112→36 · CI 레인 5→4. LS-5 17 close · LS-6 원장 #2187.
 - 선재 이슈: #2157(pgbackrest 시험) · #2181(gate:csp-deploy 템플릿) · #2193(momo_notifier 롤). 교훈: 정책 파일 변경은 track·승격·sync 셋 다 감사(자동화) · GHCR 매니페스트가 NOTICE 해시 고정 · Rust 의존 추가 시 고지 번들 재생성 · 체인 update-branch 뒤 로컬은 pull --no-rebase.
 - 다음: §7(G2에 iOS 앱스토어 v0) 성재 확인 → 출시 계획 개정 → G1' 파도(SH-6a ∥ SH-5a 브리프) · 실기기 APNs 실수신(`checklist-apns-real-device.md`, 성재 iPhone).
-
-## 2026-09-07 (재개·밤3) · Fable · ★LS-β 완결(LS-1·LS-2 main 정본화) + LS-5 이슈 위생 + LS-γ 패킷(LS-3 #2182 · SH-10 #1255) — 스냅샷 92
-
-- **LS-1 랜딩**(PR #2177 R1 8 + R2 2; 정정 1회 PushRelay): Swift 4트리·infra/prod·Swift e2e·eve·workd·codex-workbench·examples 삭제(313), `.swift` 224→8(RN 셸), Swift e2e 전제 verifier 19 삭제·재조준, 부록 A 실측(Swift 169 vs Rust 183, Swift-only 패밀리 전부 폐기), LinkShort 대체 없이 삭제 → 감사 랜딩·승격 ai·sync 감사 → main. R2 발견 선재 **#2181**(gate:csp-deploy가 SH-2 템플릿에서 빨강).
-- **LS-2 랜딩**(PR #2175): clients 1250→1136, work 표면 4 id 셀프호스트 기본 숨김(진입점 0/5), Case 6 라이선스 시험 정합, NOTICE 2본은 GHCR 매니페스트 해시 고정으로 base 유지 → 승격 ah → main. dependabot web-legacy 3건 close.
-- **LS-5**: `area:ios`·`area:macos` 29건 판정 — Swift 시대 17건 close(superseded/은퇴), iOS 앱스토어 v0 요건·RN 패리티 10건 유지(#20·#21·#22·#30·#31 등).
-- **경량화 누계**: 추적 파일 3,416 → **2,502**(−914, 27%) · scripts 265→149 · `.swift` 224→8 · handoffs 302→76 · research 112→36 · CI 레인 5→4. 남은 LS: **LS-3 #2182**(은퇴 문서·INDEX·Codex·G3·ncp 런북 회전 절 이식, 감사) — 패킷 발급. **SH-10 #1255**(momo-push-relay Rust, 셀프호스트 동봉 3 모드) 패킷 발급 → LS-γ = LS-3 ∥ SH-10(병렬 2), 발사는 go.
-- 열린 결재(성재): G2에 iOS 앱스토어 v0 포함(§7). 교훈: ①정책 파일 변경은 track·승격·sync PR 셋 다 감사(자동화됨) ②GHCR 고지 매니페스트가 NOTICE 해시를 고정 — 문구 정리 금지 ③수동 게이트(gate:csp-deploy)는 배선이 없으면 드리프트가 안 보인다(#2181 배선 결정).
-
-## 2026-09-07 (밤2) · Fable · ★안전 중단 — LS-2 main 정본화 · LS-1 PR #2177 R2 대기 · 재개 절차 고정
-
-- **LS-2 랜딩**(PR #2175 R1 6 + R2 2 + planner 위생 1: NOTICE·THIRD_PARTY는 GHCR 고지 매니페스트 해시 고정이라 base 바이트 유지) → 감사(AGENTS 1행·test_license_gate Case 6) → track/uxui → #2166·dependabot #1355~1357 close → 승격 ah #2176 → main → sync engine #2178(자동 감사)·uxui #2179. 결과: clients 1250→1136, work 표면 4 id 셀프호스트 기본 숨김(진입점 0/5).
-- **LS-1 R1 완주**(PR #2177, 커밋 8, 정정 1회: PushRelay 소스만 삭제·계약 보존): 삭제 313, `.swift` 224→8(RN 셸), 추적 2,929→2,616, 부록 A 실측(Swift 169 vs Rust 183, Swift-only 패밀리 전부 폐기), LinkShort 대체 없이 삭제. planner 검토 수용 + **R2 2건 대기**(engine 합류·AGENTS/INDEX 충돌 해소 / `gate-csp-deploy.mjs`의 삭제된 `infra/prod/Caddyfile` 대상 → `infra/rust/Caddyfile.local`). 랜딩은 감사 체인(`audit-ls1.md` 초안).
-- 재개 절차: `claudedocs/resume-2026-09-07/RESUME.md` 「★ 재개 첫 행동」. 열린 결재: G2에 iOS 앱스토어 v0 포함(§7).
