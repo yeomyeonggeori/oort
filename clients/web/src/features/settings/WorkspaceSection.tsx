@@ -115,20 +115,20 @@ function WorkspaceUnfurlSetting({
     <Subsection
       title="링크 미리보기"
       lines={[
-        "워크스페이스 전체에서 서버가 새 링크를 확인하고 미리보기를 만들지 정합니다.",
-        "개인의 「링크 미리보기 접기」는 렌더만 바꾸며 이 서버 설정과 별개입니다.",
+        "워크스페이스 전체에서 서버가 새 링크를 확인하고 미리보기를 만들지 정해요.",
+        "개인의 「링크 미리보기 접기」는 보이는 방식만 바꾸고 이 서버 설정과는 별개예요.",
       ]}
     >
       {query.isPending && <Skeleton ready={false} rows={1} />}
       {denied && (
         <OperatorNotice
-          who="링크 미리보기는 워크스페이스 소유자와 관리자만 바꿀 수 있습니다."
+          who="링크 미리보기는 워크스페이스 소유자와 관리자만 바꿀 수 있어요."
           contact="바꿔야 한다면 이 워크스페이스의 소유자에게 문의하세요."
         />
       )}
       {query.isError && !denied && (
         <InlineBanner
-          message="링크 미리보기 설정을 불러오지 못했습니다."
+          message="링크 미리보기 설정을 불러오지 못했어요."
           actionLabel="다시 시도"
           onAction={() => void query.refetch()}
           testId="workspace-unfurls-error"
@@ -169,21 +169,21 @@ function WorkspaceUnfurlSetting({
                 : "새 링크 미리보기 만들기"}
             </span>
             <span id={descId} className="break-keep text-meta text-ink-muted">
-              끄면 서버가 새 링크를 가져오지 않습니다. 이미 만들어진 카드는 남고,
+              끄면 서버가 새 링크를 가져오지 않아요. 이미 만들어진 카드는 남고,
               인스턴스 운영자가 기능을 꺼 둔 경우에는 이 설정이 켜져 있어도 카드가
-              생기지 않습니다.
+              생기지 않아요.
             </span>
           </label>
         </div>
       )}
       {offline && query.data && !denied && (
         <p id={offlineId} className="text-meta text-ink-muted">
-          연결이 끊겨 지금은 이 설정을 바꿀 수 없습니다.
+          연결이 끊겨 지금은 이 설정을 바꿀 수 없어요.
         </p>
       )}
       {save.isError && !denied && (
         <p className="text-meta text-danger" role="alert" data-testid="workspace-unfurls-save-error">
-          설정을 저장하지 못했습니다. 연결을 확인하고 다시 시도하세요.
+          설정을 저장하지 못했어요. 연결을 확인하고 다시 시도하세요.
         </p>
       )}
     </Subsection>
@@ -226,7 +226,7 @@ function WorkspaceAvatarField({
       const put = putAttachmentBytes(created.uploadUrl, file, file.type, () => {});
       const result = await put.done;
       if (!result.ok) {
-        throw new ApiError(result.status ?? 0, "이미지를 올리지 못했습니다. 다시 시도하세요.");
+        throw new ApiError(result.status ?? 0, "이미지를 올리지 못했어요. 다시 시도하세요.");
       }
       await completeWorkspaceAvatarUpload(workspaceId, created.id);
     },
@@ -247,11 +247,11 @@ function WorkspaceAvatarField({
     setLocalError(null);
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      setLocalError("이미지 파일만 워크스페이스 아바타로 쓸 수 있습니다.");
+      setLocalError("이미지 파일만 워크스페이스 아바타로 쓸 수 있어요.");
       return;
     }
     if (file.size > MAX_AVATAR_BYTES) {
-      setLocalError("아바타는 5MB까지 올릴 수 있습니다.");
+      setLocalError("아바타는 5MB까지 올릴 수 있어요.");
       return;
     }
     upload.mutate(file);
@@ -312,7 +312,7 @@ function WorkspaceAvatarField({
             {uploading ? "올리는 중" : "이미지 변경"}
           </Button>
           <p className="text-meta text-ink-muted">
-            PNG, JPG, WebP. 5MB까지. 소유자와 관리자가 바꿀 수 있습니다.
+            PNG, JPG, WebP. 5MB까지. 소유자와 관리자가 바꿀 수 있어요.
           </p>
         </div>
         <input
@@ -328,7 +328,7 @@ function WorkspaceAvatarField({
       </div>
       {denied && (
         <OperatorNotice
-          who="워크스페이스 아바타는 소유자와 관리자만 바꿀 수 있습니다."
+          who="워크스페이스 아바타는 소유자와 관리자만 바꿀 수 있어요."
           contact="바꿔야 한다면 이 워크스페이스의 소유자에게 문의하세요."
         />
       )}
@@ -463,8 +463,8 @@ function RoleLabelsEditor({
     <Subsection
       title="역할 표시명"
       lines={[
-        "이름만 바뀝니다. 권한은 그대로입니다. 소유자를 마스터로 불러도 권한 체계는 같습니다.",
-        "칸을 비우고 저장하면 기본 이름으로 돌아갑니다.",
+        "이름만 바뀌고 권한은 그대로예요. 소유자를 마스터로 불러도 권한은 같아요.",
+        "칸을 비우고 저장하면 기본 이름으로 돌아가요.",
       ]}
     >
       {(confirmedNonOperator || denied) && (
@@ -472,7 +472,7 @@ function RoleLabelsEditor({
           who={
             denied
               ? roleLabelsSaveMessage(save.error)
-              : "역할 표시명은 워크스페이스 소유자와 관리자만 바꿀 수 있습니다."
+              : "역할 표시명은 워크스페이스 소유자와 관리자만 바꿀 수 있어요."
           }
           contact="바꿔야 한다면 이 워크스페이스의 소유자에게 문의하세요."
         />
@@ -501,7 +501,7 @@ function RoleLabelsEditor({
                 hint={
                   locked
                     ? undefined
-                    : `${DEFAULT_ROLE_LABELS[key]}의 표시 이름입니다. 비우면 이 기본 이름이 쓰입니다.`
+                    : `${DEFAULT_ROLE_LABELS[key]}의 표시 이름이에요. 비우면 이 기본 이름이 쓰여요.`
                 }
                 error={error}
               >
@@ -524,7 +524,7 @@ function RoleLabelsEditor({
           })}
           {offline && canEdit && (
             <p className="text-meta text-ink-muted" id="workspace-role-labels-offline">
-              연결이 끊겨 지금은 표시 이름을 저장할 수 없습니다.
+              연결이 끊겨 지금은 표시 이름을 저장할 수 없어요.
             </p>
           )}
           {save.isError && !denied && (
@@ -648,8 +648,8 @@ function WelcomeKickoffEditor({
     <Subsection
       title="웰컴 킥오프"
       lines={[
-        "새로 들어온 사람에게 첫 메시지를 보내는 에이전트와 프롬프트입니다.",
-        "비워 두면 첫 활성 에이전트와 서버 기본 프롬프트가 쓰입니다.",
+        "새로 들어온 사람에게 첫 메시지를 보내는 에이전트와 프롬프트예요.",
+        "비워 두면 첫 활성 에이전트와 서버 기본 프롬프트가 쓰여요.",
       ]}
     >
       {(confirmedNonOperator || denied) && (
@@ -657,7 +657,7 @@ function WelcomeKickoffEditor({
           who={
             denied
               ? errorMessage(save.error)
-              : "웰컴 킥오프는 워크스페이스 소유자와 관리자만 바꿀 수 있습니다."
+              : "웰컴 킥오프는 워크스페이스 소유자와 관리자만 바꿀 수 있어요."
           }
           contact="바꿔야 한다면 이 워크스페이스의 소유자에게 문의하세요."
         />
@@ -690,7 +690,7 @@ function WelcomeKickoffEditor({
             hint={
               locked
                 ? undefined
-                : "비우면 첫 활성 에이전트가 웰컴을 보냅니다."
+                : "비우면 첫 활성 에이전트가 웰컴을 보내요."
             }
           >
             <Select
@@ -742,7 +742,7 @@ function WelcomeKickoffEditor({
           </Field>
           {offline && canEdit && (
             <p className="text-meta text-ink-muted" id="workspace-welcome-offline">
-              연결이 끊겨 지금은 웰컴 설정을 저장할 수 없습니다.
+              연결이 끊겨 지금은 웰컴 설정을 저장할 수 없어요.
             </p>
           )}
           {save.isError && !denied && (
@@ -974,7 +974,7 @@ function WorkspaceRenameField({
       )}
       {offline && canEdit && (
         <p className="text-meta text-ink-muted">
-          연결이 끊겨 지금은 이름을 저장할 수 없습니다.
+          연결이 끊겨 지금은 이름을 저장할 수 없어요.
         </p>
       )}
       {canEdit && !staleName && (
@@ -1017,11 +1017,11 @@ function LeaveWorkspace({
     <div className="flex flex-col items-start gap-2 rounded-md border border-line bg-surface-raised p-4">
       <h3 className="text-body font-medium text-ink">워크스페이스 나가기</h3>
       <p className="text-meta text-ink-muted">
-        이 워크스페이스에서 내 멤버십을 끝냅니다. 다시 들어오려면 초대가 필요합니다.
+        이 워크스페이스에서 나가요. 다시 들어오려면 초대가 필요해요.
       </p>
       {lastOwner && (
         <p className="text-meta text-danger" role="alert" data-testid="workspace-leave-last-owner">
-          마지막 소유자는 나갈 수 없습니다. 먼저 다른 사람에게 소유자를 넘기세요.
+          마지막 소유자는 나갈 수 없어요. 먼저 다른 사람에게 소유자를 넘기세요.
         </p>
       )}
       {otherError && (
@@ -1042,7 +1042,7 @@ function LeaveWorkspace({
             그중 하나는 회색 버튼 옆에서 자기가 무엇의 진행인지 말하지 못한다. */}
         <ConfirmButton
           label="워크스페이스 나가기"
-          question="나가면 멤버십이 끝나고, 확인하면 바로 로그아웃됩니다. 다시 들어오려면 초대가 필요합니다."
+          question="나가면 멤버십이 끝나고, 확인하면 바로 로그아웃돼요. 다시 들어오려면 초대가 필요해요."
           confirmLabel="나가기"
           disabled={offline}
           busy={leave.isPending}
@@ -1086,7 +1086,7 @@ export function WorkspaceSection({
     },
     onError: (error) => {
       if (isSlugConflict(error)) {
-        setFieldErrors({ slug: "이미 쓰이는 슬러그입니다. 다른 값을 고르세요." });
+        setFieldErrors({ slug: "이미 쓰이는 슬러그예요. 다른 값을 고르세요." });
       }
     },
   });
@@ -1110,8 +1110,8 @@ export function WorkspaceSection({
   }
 
   const lines = [
-    "지금 열려 있는 워크스페이스를 확인하고, 새 워크스페이스를 만듭니다.",
-    "새 워크스페이스는 만든 사람이 소유자가 되고 #general 채널 하나로 시작합니다.",
+    "지금 열려 있는 워크스페이스를 확인하고, 새 워크스페이스를 만들어요.",
+    "새 워크스페이스는 만든 사람이 소유자가 되고 #general 채널 하나로 시작해요.",
   ];
 
   return (
@@ -1175,7 +1175,7 @@ export function WorkspaceSection({
 
       {create.isError && isOperatorDenied(create.error) ? (
         <OperatorNotice
-          who="새 워크스페이스는 이 서버의 운영자만 만들 수 있습니다."
+          who="새 워크스페이스는 이 서버의 운영자만 만들 수 있어요."
           contact="워크스페이스가 필요하면 이 서버를 운영하는 사람에게 문의하세요."
         />
       ) : (
@@ -1187,7 +1187,7 @@ export function WorkspaceSection({
           <Field
             label="이름"
             htmlFor="workspace-name"
-            hint="사람이 읽는 이름입니다. 80자까지 쓸 수 있습니다."
+            hint="사람이 읽는 이름이에요. 80자까지 쓸 수 있어요."
             error={fieldErrors.name}
           >
             <Input
@@ -1205,7 +1205,7 @@ export function WorkspaceSection({
           <Field
             label="슬러그"
             htmlFor="workspace-slug"
-            hint="영문 소문자, 숫자, 하이픈만 쓸 수 있습니다. 서버 전체에서 하나뿐이어야 합니다."
+            hint="영문 소문자, 숫자, 하이픈만 쓸 수 있어요. 서버 전체에서 하나뿐이어야 해요."
             error={fieldErrors.slug}
           >
             <Input
@@ -1256,7 +1256,7 @@ export function WorkspaceSection({
           data-testid="workspace-created"
         >
           <p className="text-body text-ink">
-            {created.name} 워크스페이스를 만들었습니다.
+            {created.name} 워크스페이스를 만들었어요.
           </p>
           <KeyValueRows
             rows={[
@@ -1265,7 +1265,7 @@ export function WorkspaceSection({
             ]}
           />
           <p className="text-meta text-ink-muted">
-            새 워크스페이스로는 그 슬러그로 다시 로그인해서 들어갑니다.
+            새 워크스페이스에는 그 슬러그로 다시 로그인해서 들어가요.
           </p>
         </div>
       )}

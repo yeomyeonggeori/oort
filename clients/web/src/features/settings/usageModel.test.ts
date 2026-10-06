@@ -187,7 +187,7 @@ describe("budget", () => {
     expect(status.observedMicroUsd).toBe(19_682_500);
     expect(status.usedPercent).toBe(39);
     expect(status.detail).toBe(
-      "한도 $50.00 중 예약을 포함한 사용액이 $19.68입니다."
+      "한도 $50.00 중 예약을 포함한 사용액이 $19.68이에요."
     );
   });
 
@@ -298,7 +298,7 @@ describe("formatting", () => {
 describe("failure copy", () => {
   it("turns the pre-engine 404 into a sentence with a next step", () => {
     expect(usageErrorCopy(404, "HTTP 404")).toBe(
-      "이 서버는 아직 사용량 집계를 제공하지 않습니다. 서버를 업데이트한 뒤 다시 열어보세요."
+      "이 서버는 아직 사용량 집계를 제공하지 않아요. 서버를 업데이트한 뒤 다시 열어보세요."
     );
   });
 
@@ -390,7 +390,7 @@ describe("마지막 확인값 폴백 (P15 내구층)", () => {
     expect(state.kind).toBe("last-known");
     if (state.kind !== "last-known") throw new Error("expected last-known");
     expect(state.checkedAtMs).toBe(CHECKED);
-    expect(state.notice).toContain(`${CHECKED_CLOCK}에 확인한 값을 표시합니다.`);
+    expect(state.notice).toContain(`${CHECKED_CLOCK}에 확인한 값을 보여줘요.`);
   });
 
   it("shows the last confirmed answer with its age when the read fails", () => {
@@ -403,15 +403,15 @@ describe("마지막 확인값 폴백 (P15 내구층)", () => {
     // One line, one statement of when: the panel used to repeat the same fact
     // on a second line, once relative and once absolute.
     expect(state.notice).toBe(
-      `서버가 15초 안에 응답하지 않았습니다. ${CHECKED_CLOCK}에 확인한 값을 표시합니다.`
+      `서버가 15초 안에 응답하지 않았습니다. ${CHECKED_CLOCK}에 확인한 값을 보여줘요.`
     );
     expect(state.checkedAtMs).toBe(CHECKED);
     expect(state.summary.totals.costMicroUsd).toBe(18_432_500);
   });
 
   it("says what happened with nothing to fall back on", () => {
-    const state = view({ errorMessage: "요청을 끝내지 못했습니다." });
-    expect(state).toEqual({ kind: "error", message: "요청을 끝내지 못했습니다." });
+    const state = view({ errorMessage: "요청을 끝내지 못했어요." });
+    expect(state).toEqual({ kind: "error", message: "요청을 끝내지 못했어요." });
   });
 
   // `paused` is react-query's own fetchStatus for "the browser is offline, so
@@ -424,14 +424,14 @@ describe("마지막 확인값 폴백 (P15 내구층)", () => {
       lastKnown: { summary: normal, checkedAtMs: CHECKED },
     });
     expect(state.kind).toBe("last-known");
-    expect(state.kind === "last-known" && state.notice).toContain("연결이 끊겼습니다.");
+    expect(state.kind === "last-known" && state.notice).toContain("연결이 끊겼어요.");
   });
 
   it("states the offline case plainly when there is no cached answer", () => {
     const state = view({ paused: true });
     expect(state).toEqual({
       kind: "error",
-      message: "연결이 끊겼습니다. 다시 연결되면 사용량을 불러옵니다.",
+      message: "연결이 끊겼어요. 다시 연결되면 사용량을 불러와요.",
     });
   });
 
@@ -439,7 +439,7 @@ describe("마지막 확인값 폴백 (P15 내구층)", () => {
     const state = view({ data: normal, dataUpdatedAtMs: CHECKED, paused: true });
     expect(state.kind).toBe("last-known");
     expect(state.kind === "last-known" && state.notice).toContain(
-      "연결이 끊겼습니다."
+      "연결이 끊겼어요."
     );
   });
 
@@ -452,7 +452,7 @@ describe("마지막 확인값 폴백 (P15 내구층)", () => {
 
   it("carries the empty flag through the cached path too", () => {
     const state = view({
-      errorMessage: "요청을 끝내지 못했습니다.",
+      errorMessage: "요청을 끝내지 못했어요.",
       lastKnown: { summary: emptyPeriod, checkedAtMs: CHECKED },
     });
     expect(state.kind === "last-known" && state.empty).toBe(true);
@@ -470,20 +470,20 @@ describe("마지막 확인값 폴백 (P15 내구층)", () => {
   describe("live region copy", () => {
     it("announces the wait and then the number", () => {
       expect(usageAnnouncement({ kind: "loading" }, formatMicroUsd)).toBe(
-        "사용량을 불러오는 중입니다."
+        "사용량을 불러오고 있어요."
       );
       expect(
         usageAnnouncement(
           { kind: "ready", summary: normal, empty: false },
           formatMicroUsd
         )
-      ).toBe("사용량 합계 $18.43을 불러왔습니다.");
+      ).toBe("사용량 합계 $18.43을 불러왔어요.");
       expect(
         usageAnnouncement(
           { kind: "ready", summary: emptyPeriod, empty: true },
           formatMicroUsd
         )
-      ).toBe("이 기간에 기록된 사용량이 없습니다.");
+      ).toBe("이 기간에 기록된 사용량이 없어요.");
     });
 
     it("stays silent where a banner is already a live region", () => {

@@ -16,7 +16,7 @@ const TABLE: readonly [label: string, input: string, expected: EntryDecision["ki
   ["https 웹 초대 (해시 쿼리)", `https://team.example.com/#/?code=${CODE}`, "invite", { serverUrl: "https://team.example.com", inviteCode: CODE }],
   ["https 웹 초대 (?join= 감싼 링크)", `https://team.example.com/?join=${encodeURIComponent(`oort://join?server=https%3A%2F%2Fother.example.com&code=${CODE}`)}`, "invite", { serverUrl: "https://other.example.com", inviteCode: CODE }],
   ["초대 코드만", CODE, "invite", { serverUrl: "", inviteCode: CODE }],
-  ["초대 카드 문단 통째로", `여명거리 워크스페이스에 초대합니다.\n\n1. oort 앱을 설치하고 아래 링크를 엽니다.\n   oort://join?server=https%3A%2F%2Fteam.example.com&code=${CODE}\n\n2. 링크가 앱에서 열리지 않으면 직접 입력하세요.\n   서버 주소: https://team.example.com\n   초대 코드: ${CODE}`, "invite", { serverUrl: "https://team.example.com", inviteCode: CODE }],
+  ["초대 카드 문단 통째로", `여명거리 워크스페이스에 초대해요.\n\n1. oort 앱을 설치하고 아래 링크를 열어요.\n   oort://join?server=https%3A%2F%2Fteam.example.com&code=${CODE}\n\n2. 링크가 앱에서 열리지 않으면 직접 입력하세요.\n   서버 주소: https://team.example.com\n   초대 코드: ${CODE}`, "invite", { serverUrl: "https://team.example.com", inviteCode: CODE }],
   ["꺾쇠·따옴표로 감싼 초대", `  "<oort://join?server=https%3A%2F%2Fteam.example.com&code=${CODE}>"  `, "invite", { serverUrl: "https://team.example.com", inviteCode: CODE }],
   // --- claim 링크 → D1″ (#2811)
   ["https claim", `https://team.example.com/claim/${TOKEN}`, "claim", { origin: "https://team.example.com", token: TOKEN }],

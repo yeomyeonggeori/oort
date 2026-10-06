@@ -146,9 +146,52 @@ const SELFTEST_CASES = [
   },
   {
     want: [],
-    file: "features/settings/Other.ts",
-    why: "호스티드 화면 밖의 합쇼체는 이 분류의 범위 밖이다(미정리 부채를 오탐으로 세지 않는다)",
+    file: "features/chat/Other.ts",
+    why: "호스티드·설정 화면 밖의 합쇼체는 이 분류의 범위 밖이다(미정리 부채를 오탐으로 세지 않는다)",
     src: 'export const L = "지금은 보낼 수 없습니다";',
+  },
+  // ---- 설정 화면 어투·용어 (#3573) ----
+  {
+    want: ["legacy_term"],
+    file: "features/settings/DeviceKeysBlock.tsx",
+    why: "설정 › 기기의 합쇼체 JSX 텍스트 — 성재 피드백(0.1.18 캡처)이 나온 자리",
+    src: "export const C = () => <p>이 맥을 등록해야 폰을 승인할 수 있습니다.</p>;",
+  },
+  {
+    want: ["legacy_term"],
+    file: "features/settings/Hint.ts",
+    why: "설정의 합쇼체 문자열 (-ㅂ니다: 「보냅니다」)",
+    src: 'export const H = "다시 연결되면 여기서 보냅니다";',
+  },
+  {
+    want: ["legacy_term"],
+    file: "features/settings/DeviceKeysBlock.tsx",
+    why: "내부 용어 「뿌리」 — 서명을 맡는 맥은 「서명 기기」(LEGACY_TERM_MAP, 전역)",
+    src: 'export const B = "이 맥을 뿌리로 등록";',
+  },
+  {
+    want: ["legacy_term"],
+    file: "features/settings/DevicesSection.tsx",
+    why: "내부 용어 「지시 기기」 — 설정 표면에서는 「지시를 보낼 수 있는 폰」",
+    src: 'export const H = "지시 기기";',
+  },
+  {
+    want: ["legacy_term"],
+    file: "features/settings/LinkedDevicesList.tsx",
+    why: "내부 용어 「붙인 세션」(전역)",
+    src: 'export const H = "QR로 붙인 세션이에요";',
+  },
+  {
+    want: [],
+    file: "features/settings/DeviceKeysBlock.tsx",
+    why: "같은 뜻의 해요체·쉬운 말은 통과한다",
+    src: 'export const B = "이 맥을 서명 기기로 등록해야 폰이 지시를 보낼 수 있게 승인할 수 있어요.";',
+  },
+  {
+    want: [],
+    file: "features/settings/Other.ts",
+    why: "주석 속 옛 말·합쇼체는 렌더되지 않는다",
+    src: '// 이 맥이 뿌리입니다. 지시 기기\nexport const L = "서명 기기";',
   },
   {
     want: ["emdash"],

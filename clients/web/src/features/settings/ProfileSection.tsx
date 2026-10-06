@@ -151,7 +151,7 @@ export function ProfileSection({ offline }: { offline: boolean }) {
   return (
     <SectionShell
       title="프로필"
-      lines={["이 워크스페이스에서 다른 멤버에게 보이는 이름, 핸들, 프로필 사진입니다."]}
+      lines={["이 워크스페이스에서 다른 멤버에게 보이는 이름, 핸들, 프로필 사진이에요."]}
     >
       <div className="flex items-center gap-3">
         <Avatar member={me ?? null} />
@@ -163,7 +163,7 @@ export function ProfileSection({ offline }: { offline: boolean }) {
       {offline ? (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겨 지금은 표시 이름, 핸들, 프로필 사진을 바꿀 수 없습니다."
+          message="연결이 끊겨 지금은 표시 이름, 핸들, 프로필 사진을 바꿀 수 없어요."
           messageId="profile-offline-reason"
           testId="profile-offline-banner"
         />

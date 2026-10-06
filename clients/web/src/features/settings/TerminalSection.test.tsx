@@ -24,13 +24,13 @@ describe("설정 > 터미널 (#2774, ADR-0190 D5 「이 목록은 설정에서 �
     const rows = host.querySelectorAll('[data-testid="terminal-shortcut-row"]');
     expect(rows.length).toBe(TERMINAL_APP_BINDINGS.length);
     expect(host.textContent).toContain("⌃`");
-    expect(host.textContent).toContain("Esc를 포함해 모두 터미널로 갑니다");
+    expect(host.textContent).toContain("Esc를 포함해 모두 터미널로 가요");
     unmount();
   });
 
   it("브라우저에서는 로컬 터미널이 없다고 말한다", () => {
     const { host, unmount } = render(false);
-    expect(host.textContent).toContain("이 브라우저에는 로컬 터미널이 없습니다");
+    expect(host.textContent).toContain("이 브라우저에는 로컬 터미널이 없어요");
     unmount();
   });
 
@@ -85,7 +85,7 @@ describe("설정 > 터미널 색 (#2849)", () => {
       resetTerminalThemeForTest();
       expect(terminalThemeSnapshot()).toEqual({ theme: "dark", storageFailed: true });
       const { host, unmount } = render(true);
-      expect(host.textContent).toContain("이 기기에 저장하지 못했습니다");
+      expect(host.textContent).toContain("이 기기에 저장하지 못했어요");
       unmount();
     } finally {
       Object.defineProperty(window, "localStorage", original);

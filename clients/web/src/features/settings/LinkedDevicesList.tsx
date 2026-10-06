@@ -27,28 +27,28 @@ const LINKED_AT = new Intl.DateTimeFormat("ko-KR", {
 });
 
 const CURRENT_REASON =
-  "지금 쓰는 기기는 여기서 끊을 수 없습니다. 이 세션을 끝내려면 로그아웃하세요.";
+  "지금 쓰는 기기는 여기서 끊을 수 없어요. 이 기기에서 나가려면 로그아웃하세요.";
 const SERVER_CURRENT_REASON =
-  "서버가 이 기기를 지금 쓰는 기기로 봅니다. 이 세션을 끝내려면 로그아웃하세요.";
+  "서버가 이 기기를 지금 쓰는 기기로 봐요. 이 기기에서 나가려면 로그아웃하세요.";
 const OFFLINE_REASON =
-  "연결이 끊겨 지금은 기기를 해제할 수 없습니다. 다시 연결되면 이어서 해제할 수 있습니다.";
-const GONE_NOTICE = "그 기기는 이미 목록에 없습니다.";
+  "연결이 끊겨서 지금은 기기를 해제할 수 없어요. 다시 연결되면 이어서 해제할 수 있어요.";
+const GONE_NOTICE = "그 기기는 이미 목록에 없어요.";
 const REVOKE_QUESTION =
-  "이 기기 연결을 끊으면 그 기기는 다시 QR을 찍어야 합니다.";
+  "이 기기 연결을 끊으면 그 기기에서 QR을 다시 찍어야 해요.";
 
 function listFailureCopy(error: unknown): string {
   if (error instanceof NetworkError) return error.message;
   if (error instanceof ApiError && error.status === 403) {
-    return "사람 계정만 연결된 기기를 볼 수 있습니다.";
+    return "사람 계정만 연결된 기기를 볼 수 있어요.";
   }
-  return "기기 목록을 불러오지 못했습니다. 다시 시도하세요.";
+  return "기기 목록을 불러오지 못했어요. 다시 시도해 주세요.";
 }
 
 function revokeFailureCopy(error: unknown): string {
   if (error instanceof NetworkError) return error.message;
   if (isCannotRevokeCurrent(error)) return SERVER_CURRENT_REASON;
   if (error instanceof ApiError && error.status === 404) return GONE_NOTICE;
-  return "기기를 해제하지 못했습니다. 다시 시도하세요.";
+  return "기기를 해제하지 못했어요. 다시 시도해 주세요.";
 }
 
 function linkedAtCopy(linkedAt: number): string {
@@ -126,7 +126,7 @@ export function LinkedDevicesList({
       landing.current = neighbour?.id ?? "";
       unlinking.current = current[gone] ?? null;
       const label = current[gone]?.label;
-      setRemoved(label ? `${label} 연결을 해제했습니다.` : "");
+      setRemoved(label ? `${label} 연결을 해제했어요.` : "");
       client.setQueryData<LinkedDevice[]>(
         LINKED_DEVICES_QUERY_KEY,
         (next) => (next ?? []).filter((row) => row.id !== id)
@@ -158,12 +158,12 @@ export function LinkedDevicesList({
     <Subsection
       title="연결된 기기"
       lines={[
-        "QR로 붙인 세션입니다. 마지막 사용 시각은 아직 기록하지 않습니다.",
+        "QR로 연결한 기기예요. 마지막으로 쓴 시각은 아직 기록하지 않았어요.",
       ]}
     >
       {list.isPending && (
         <div role="status" data-testid="linked-devices-loading">
-          <span className="sr-only">연결된 기기를 불러오는 중입니다.</span>
+          <span className="sr-only">연결된 기기를 불러오고 있어요.</span>
           <Skeleton ready={false} rows={2} className="p-0" />
         </div>
       )}
@@ -184,7 +184,7 @@ export function LinkedDevicesList({
           className="break-keep text-body text-ink-muted"
           data-testid="linked-devices-empty"
         >
-          연결된 기기가 없습니다.
+          연결된 기기가 없어요.
         </p>
       )}
 

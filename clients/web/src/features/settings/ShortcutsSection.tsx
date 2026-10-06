@@ -109,7 +109,7 @@ export function ShortcutsSection({
     (announce: boolean, rowId: string | null) => {
       setCapturingId(null);
       setNotice(null);
-      if (announce) setLive("키 지정을 취소했습니다.");
+      if (announce) setLive("키 지정을 취소했어요.");
       if (rowId !== null) focusChange(rowId);
     },
     [focusChange]
@@ -136,7 +136,7 @@ export function ShortcutsSection({
           : event.ctrlKey && !event.metaKey;
       const modName = platform === "mac" ? "⌘" : "Ctrl";
       if (!modOk) {
-        const message = `${modName} 키와 함께 누르세요. 글자만 누르면 입력과 구분되지 않습니다.`;
+        const message = `${modName} 키와 함께 누르세요. 글자만 누르면 입력과 구분되지 않아요.`;
         setNotice({ rowId, message });
         setLive(message);
         return;
@@ -150,7 +150,7 @@ export function ShortcutsSection({
         current.shift === combo.shift &&
         current.alt === combo.alt
       ) {
-        const message = "이미 이 항목에 지정된 키입니다.";
+        const message = "이미 이 항목에 지정된 키예요.";
         setNotice({ rowId, message });
         setLive(message);
         return;
@@ -160,7 +160,7 @@ export function ShortcutsSection({
         setBinding(rowId, combo);
         setCapturingId(null);
         setNotice(null);
-        setLive(`「${names[rowId] ?? rowId}」 키를 ${keycapLabel(platform, comboKeycap(combo))}(으)로 바꿨습니다.`);
+        setLive(`「${names[rowId] ?? rowId}」 키를 ${keycapLabel(platform, comboKeycap(combo))}(으)로 바꿨어요.`);
         focusChange(rowId);
         return;
       }
@@ -204,7 +204,7 @@ export function ShortcutsSection({
   const startCapture = (row: ShortcutRow) => {
     setNotice(null);
     setCapturingId(row.id);
-    setLive(`「${row.name}」에 지정할 키를 누르세요. Esc로 취소합니다.`);
+    setLive(`「${row.name}」에 지정할 키를 누르세요. Esc로 취소해요.`);
   };
 
   const confirmSwap = () => {
@@ -213,7 +213,7 @@ export function ShortcutsSection({
     const rowId = notice.rowId;
     // 내 새 키를 먼저 상대 자리에서 비우기 위해 한 번에 맞바꾼다. 새 키는 상대의 현재 키다.
     swapBindings(rowId, conflictId);
-    setLive(`「${names[rowId] ?? rowId}」과 「${names[conflictId] ?? conflictId}」의 키를 서로 바꿨습니다.`);
+    setLive(`「${names[rowId] ?? rowId}」과 「${names[conflictId] ?? conflictId}」의 키를 서로 바꿨어요.`);
     setNotice(null);
     focusChange(rowId);
   };
@@ -222,17 +222,17 @@ export function ShortcutsSection({
     resetAllBindings();
     setCapturingId(null);
     setNotice(null);
-    setLive("모든 단축키를 기본 키로 되돌렸습니다.");
+    setLive("모든 단축키를 기본 키로 되돌렸어요.");
   };
 
   const lines = desktop
     ? [
-        "메신저 안에서 쓰는 단축키와 데스크탑의 작업 공간 키입니다. 바꾼 키는 이 기기에만 저장됩니다.",
-        "터미널에 포커스가 있으면 터미널이 키를 먼저 가집니다. 아래 키를 바꿔도 터미널로 넘어가는 키가 늘지 않습니다.",
+        "메신저 안에서 쓰는 단축키와 데스크탑의 작업 공간 키예요. 바꾼 키는 이 기기에만 저장돼요.",
+        "터미널에 포커스가 있으면 터미널이 키를 먼저 가져요. 아래 키를 바꿔도 터미널로 넘어가는 키가 늘지 않아요.",
       ]
     : [
-        "메신저 안에서 쓰는 단축키입니다. 바꾼 키는 이 브라우저에만 저장됩니다.",
-        "브라우저가 먼저 받는 키(새 탭, 새로고침 등)와 입력 칸의 서식 키(굵게, 기울임)는 지정할 수 없습니다. 「데스크탑 전용」 표시가 있는 키는 데스크탑 앱에서만 동작합니다.",
+        "메신저 안에서 쓰는 단축키예요. 바꾼 키는 이 브라우저에만 저장돼요.",
+        "브라우저가 먼저 받는 키(새 탭, 새로고침 등)와 입력 칸의 서식 키(굵게, 기울임)는 지정할 수 없어요. 「데스크탑 전용」 표시가 있는 키는 데스크탑 앱에서만 동작해요.",
       ];
   const modifierName = platform === "mac" ? "⌘" : "Ctrl";
   const customized = customizedCount();
@@ -265,7 +265,7 @@ export function ShortcutsSection({
 
       {storageFailed ? (
         <p className="text-meta text-danger" role="alert" data-testid="shortcut-storage-failed">
-          이 기기에 저장하지 못했습니다. 앱을 다시 열면 기본 키로 돌아갑니다.
+          이 기기에 저장하지 못했어요. 앱을 다시 열면 기본 키로 돌아가요.
         </p>
       ) : null}
 
@@ -276,7 +276,7 @@ export function ShortcutsSection({
 
       {groups.length === 0 ? (
         <p className="text-body text-ink-muted" data-testid="shortcut-empty">
-          일치하는 단축키가 없습니다. 이름이나 키를 다시 확인해 주세요.
+          일치하는 단축키가 없어요. 이름이나 키를 다시 확인해 주세요.
         </p>
       ) : (
         <div className="flex flex-col gap-4" data-testid="shortcut-list">
@@ -309,7 +309,7 @@ export function ShortcutsSection({
                           <span className="text-body text-ink">{row.name}</span>
                           <span className="text-meta text-ink-muted">
                             {capturing
-                              ? `${modifierName} 키를 누른 채 키를 누르세요. Esc로 취소합니다.`
+                              ? `${modifierName} 키를 누른 채 키를 누르세요. Esc로 취소해요.`
                               : [
                                   row.desktopOnly ? "데스크탑 전용" : null,
                                   row.rebindable ? null : "고정",
@@ -325,13 +325,13 @@ export function ShortcutsSection({
                               ref={captureRef}
                               type="button"
                               className="w-action rounded-sm border border-line-strong bg-surface px-2 py-1 text-meta text-ink press focus-visible:focus-ring"
-                              aria-label={`키를 누르세요. 「${row.name}」에 지정합니다. Esc로 취소합니다.`}
+                              aria-label={`키를 누르세요. 「${row.name}」에 지정해요. Esc로 취소해요.`}
                               onBlur={() => {
                                 // 포커스가 입력 칸을 벗어나면 입력이 끝난다. 끝났다고 알리고 남은 경고를 걷는다.
                                 if (capturingId !== row.id) return;
                                 setCapturingId(null);
                                 setNotice((current) => (current?.swap === undefined ? null : current));
-                                setLive("포커스를 옮겨 키 지정을 끝냈습니다. 키는 그대로입니다.");
+                                setLive("포커스를 옮겨 키 지정을 끝냈어요. 키는 그대로예요.");
                               }}
                               data-testid="shortcut-capture"
                             >
@@ -373,7 +373,7 @@ export function ShortcutsSection({
                                   onClick={() => {
                                     resetBinding(row.id);
                                     setNotice(null);
-                                    setLive(`「${row.name}」 키를 기본 키로 되돌렸습니다.`);
+                                    setLive(`「${row.name}」 키를 기본 키로 되돌렸어요.`);
                                   }}
                                   aria-label={`초기화, 「${row.name}」 단축키를 기본 키로`}
                                   data-testid={`shortcut-reset-${row.id}`}

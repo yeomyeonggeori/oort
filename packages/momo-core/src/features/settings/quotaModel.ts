@@ -100,13 +100,13 @@ function clampRatio(ratio: number): number {
 
 export function parseQuotaSnapshots(raw: unknown): QuotaSnapshots {
   const root = asRecord(raw);
-  if (!root) throw new Error("잔여량 응답을 읽지 못했습니다.");
+  if (!root) throw new Error("잔여량 응답을 읽지 못했어요.");
   if (str(root, "schema") !== "momo.provider_quota_snapshots.v0") {
-    throw new Error("지원하지 않는 잔여량 응답 형식입니다.");
+    throw new Error("지원하지 않는 잔여량 응답 형식이에요.");
   }
   const observedAt = str(root, "observedAt");
   if (Number.isNaN(Date.parse(observedAt))) {
-    throw new Error("잔여량 응답의 확인 시각을 읽지 못했습니다.");
+    throw new Error("잔여량 응답의 확인 시각을 읽지 못했어요.");
   }
 
   const rows = Array.isArray(root["snapshots"]) ? root["snapshots"] : [];
@@ -498,10 +498,10 @@ export function lowestGauge(
  */
 export function quotaErrorCopy(status: number | null, fallback: string): string {
   if (status === 404) {
-    return "이 서버는 아직 구독 잔여량을 제공하지 않습니다. 서버를 업데이트한 뒤 다시 열어보세요.";
+    return "이 서버는 아직 구독 잔여량을 제공하지 않아요. 서버를 업데이트한 뒤 다시 열어보세요.";
   }
   if (status === 403) {
-    return "이 워크스페이스의 멤버만 구독 잔여량을 볼 수 있습니다.";
+    return "이 워크스페이스의 멤버만 구독 잔여량을 볼 수 있어요.";
   }
   return fallback;
 }
@@ -595,8 +595,8 @@ export type QuotaView =
     }
   | { kind: "error"; message: string };
 
-const OFFLINE_REASON = "연결이 끊겼습니다.";
-const OFFLINE_EMPTY = "연결이 끊겼습니다. 다시 연결되면 잔여량을 불러옵니다.";
+const OFFLINE_REASON = "연결이 끊겼어요.";
+const OFFLINE_EMPTY = "연결이 끊겼어요. 다시 연결되면 잔여량을 불러와요.";
 
 /** Local day and clock for "언제 확인한 값인가". Absolute, not relative: the
  *  banner is written once and nothing re-renders it on a timer. */
@@ -627,7 +627,7 @@ export function quotaView(input: QuotaViewInput): QuotaView {
     kind: "last-known",
     providers: groupByProvider(cached.snapshots.snapshots),
     empty: cached.snapshots.snapshots.length === 0,
-    notice: `${reason} ${formatCheckedAt(cached.checkedAtMs)}에 확인한 값을 표시합니다.`,
+    notice: `${reason} ${formatCheckedAt(cached.checkedAtMs)}에 확인한 값을 보여줘요.`,
     checkedAtMs: cached.checkedAtMs,
     elapsedMs: Math.max(0, input.nowMs - cached.checkedAtMs),
   });
@@ -663,22 +663,22 @@ export function quotaView(input: QuotaViewInput): QuotaView {
  * sentence read it twice.
  */
 export function quotaAnnouncement(view: QuotaView, nowMs: number): string {
-  if (view.kind === "loading") return "구독 잔여량을 불러오는 중입니다.";
+  if (view.kind === "loading") return "구독 잔여량을 불러오고 있어요.";
   if (view.kind !== "ready") return "";
-  if (view.empty) return "보고된 구독 잔여량이 없습니다.";
+  if (view.empty) return "보고된 구독 잔여량이 없어요.";
   const lowest = lowestGauge(view.providers, nowMs, view.elapsedMs);
   if (!lowest) {
     // Not "오래된 값" as a blanket: a gauge can also be excluded because its
     // window has reset since it was read, which is a fresh number about a dead
     // window rather than an old one (R1 M1).
-    return "구독 잔여량을 불러왔습니다. 모두 지금 잔여율과 다를 수 있는 값입니다.";
+    return "구독 잔여량을 불러왔어요. 모두 지금 잔여율과 다를 수 있는 값이에요.";
   }
   // 단기 takes 가 and 주간 takes 이, and a sentence that reads "단기이(가)" is a
   // machine refusing to decide in front of the reader (koreanParticle.ts).
   return (
-    `구독 잔여량을 불러왔습니다. ` +
+    `구독 잔여량을 불러왔어요. ` +
     `${providerLabel(lowest.providerRef)} ` +
     `${attachParticle(lowest.gauge.windowLabel, "subject")} ` +
-    `${lowest.gauge.remainingPercent}%로 가장 적게 남았습니다.`
+    `${lowest.gauge.remainingPercent}%로 가장 적게 남았어요.`
   );
 }

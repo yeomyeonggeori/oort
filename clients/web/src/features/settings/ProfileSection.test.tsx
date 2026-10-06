@@ -244,7 +244,7 @@ describe("ProfileSection", () => {
       await Promise.resolve();
     });
     expect(host.querySelector("#profile-display-name-error")?.textContent).toBe(
-      "표시 이름을 비울 수 없습니다. 한 글자 이상 적으세요."
+      "표시 이름을 비울 수 없어요. 한 글자 이상 적으세요."
     );
     expect(changeMyProfile).not.toHaveBeenCalled();
     expect(replaceSessionMember).not.toHaveBeenCalled();
@@ -265,7 +265,7 @@ describe("ProfileSection", () => {
     });
     await vi.waitFor(() => {
       expect(host.querySelector('[data-testid="profile-save-error"]')?.textContent).toBe(
-        "요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요."
+        "요청을 끝내지 못했어요. 잠시 뒤에 다시 시도하세요."
       );
     });
     expect(host.querySelector("#profile-display-name-error")?.textContent ?? "").toBe("");
@@ -289,7 +289,7 @@ describe("ProfileSection", () => {
       save.click();
     });
     expect(host.querySelector("#profile-display-name-error")?.textContent).toBe(
-      "표시 이름은 100자까지 쓸 수 있습니다."
+      "표시 이름은 100자까지 쓸 수 있어요."
     );
     expect(changeMyProfile).not.toHaveBeenCalled();
   });

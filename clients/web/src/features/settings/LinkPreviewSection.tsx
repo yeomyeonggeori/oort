@@ -18,17 +18,17 @@ const CHOICES = [
     id: "rich",
     label: "사진 카드",
     detail:
-      "이미지가 있으면 사진을 위에 두고, 제목과 설명을 그 아래에 둡니다. 사진이 없으면 작은 카드와 같습니다.",
+      "이미지가 있으면 사진을 위에 두고, 제목과 설명을 그 아래에 둬요. 사진이 없으면 작은 카드와 같아요.",
   },
   {
     id: "compact",
     label: "작은 카드",
-    detail: "제목, 설명, 작은 그림을 한 덩어리로 보여줍니다.",
+    detail: "제목, 설명, 작은 그림을 한 덩어리로 보여줘요.",
   },
   {
     id: "off",
     label: "숨기기",
-    detail: "메시지 속 링크만 남기고 카드는 그리지 않습니다.",
+    detail: "메시지 속 링크만 남기고 카드는 그리지 않아요.",
   },
 ];
 
@@ -39,8 +39,8 @@ export function LinkPreviewSection() {
     <SectionShell
       title="링크 미리보기"
       lines={[
-        "메시지 아래 링크 미리보기 카드를 사진 카드, 작은 카드, 숨기기 중 하나로 고릅니다.",
-        "이 선택은 서버의 링크 확인이나 다른 멤버의 화면에 영향을 주지 않습니다.",
+        "메시지 아래 링크 미리보기 카드를 사진 카드, 작은 카드, 숨기기 중 하나로 골라요.",
+        "이 선택은 서버의 링크 확인이나 다른 멤버의 화면에 영향을 주지 않아요.",
       ]}
     >
       <ChoiceRadios
@@ -52,7 +52,7 @@ export function LinkPreviewSection() {
         testId="link-preview-choice"
       />
       <p className="text-meta text-ink-muted">
-        이 기기에만 저장됩니다. 다른 기기에서는 각자 고릅니다.
+        이 기기에만 저장돼요. 다른 기기에서는 각자 골라요.
       </p>
     </SectionShell>
   );
