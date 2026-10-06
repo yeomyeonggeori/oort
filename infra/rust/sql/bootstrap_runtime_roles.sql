@@ -409,6 +409,12 @@ BEGIN
   --    huddle_participant (ids and timestamps). Latent since v0.1.10: it only
   --    runs with LiveKit configured on the notifier, which is why no deploy
   --    tripped on it yet.
+  --  * hosted work-run existence test (#3553, v0.1.18): the push judgment's
+  --    `wrun` arm (judgment.rs, #3517) and migration 120's `agent_run` status
+  --    trigger (fired by the approval-expiry and control-window sweeps' UPDATEs)
+  --    both ask only `EXISTS (… hc.workspace_id = … AND hc.agent_member_id = …)`.
+  --    The table also holds pairing_challenge_hash, active_token_id and the
+  --    cleanup manifest, so the grant is exactly those two columns.
   IF to_regclass('public.work_session_share') IS NOT NULL THEN
     GRANT SELECT (workspace_id, session_id) ON work_session_share TO momo_notifier;
   END IF;
@@ -422,6 +428,9 @@ BEGIN
   END IF;
   IF to_regclass('public.workspace') IS NOT NULL THEN
     GRANT SELECT (avatar_media_id) ON workspace TO momo_notifier;
+  END IF;
+  IF to_regclass('public.hosted_agent_connection') IS NOT NULL THEN
+    GRANT SELECT (workspace_id, agent_member_id) ON hosted_agent_connection TO momo_notifier;
   END IF;
   IF to_regclass('public.huddle') IS NOT NULL THEN
     GRANT SELECT ON TABLE huddle TO momo_notifier;
