@@ -253,7 +253,7 @@ describe("데스크탑 셸: target=_blank가 죽은 컨트롤이라 OS 브라우
 });
 
 describe("실시간 재읽기: 신호가 끊임없이 와도 굶지 않는다 (#3518)", () => {
-  it("100ms 간격 신호가 2.5초 계속돼도 최대 대기(2초) 안에 한 번은 읽는다", async () => {
+  it("0.1초 간격 신호가 2.5초 계속돼도 최대 대기(2초) 안에 한 번은 읽는다", async () => {
     board([runRow()]);
     render(mount());
     await screen.findByTestId("team-board-row");
