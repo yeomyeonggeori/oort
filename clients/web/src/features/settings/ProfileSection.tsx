@@ -280,13 +280,19 @@ export function ProfileSection({ offline }: { offline: boolean }) {
 
       <SettingsSection title="로그인" testId="profile-login-card">
         <SettingsRow label="로그아웃" description="이 기기에서 로그아웃해요. 다시 로그인하면 돌아와요.">
-          <Button variant="outline" size="sm" onClick={logout} data-testid="logout">
+          <Button
+            variant="outline"
+            size="sm"
+            className="tap-target"
+            onClick={logout}
+            data-testid="logout"
+          >
             로그아웃
           </Button>
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title="이 워크스페이스" testId="profile-danger-card">
+      <SettingsSection title="나가기" testId="profile-danger-card">
         <LeaveWorkspaceRow workspaceId={workspaceId} offline={offline} />
       </SettingsSection>
     </>

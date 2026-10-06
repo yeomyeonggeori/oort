@@ -30,18 +30,22 @@ export function ProfileAvatarField({
   workspaceId,
   me,
   offline,
-  inputRef: externalInputRef,
+  changeRef: externalChangeRef,
 }: {
   workspaceId: string;
   me: RosterMember | null;
   offline: boolean;
-  /** 히어로의 카메라 단추가 같은 파일 입력을 열 수 있게 밖에서 쥔 ref (#3603). */
-  inputRef?: RefObject<HTMLInputElement>;
+  /**
+   * 히어로의 카메라 손잡이가 「사진 바꾸기」 단추를 대신 누를 수 있게 밖에서 쥔 ref (#3603).
+   * 손잡이가 파일 입력을 직접 열면 업로드·지우는 중의 잠금을 건너뛰므로, 잠금을 지는
+   * 진짜 단추 하나로 길을 모은다.
+   */
+  changeRef?: RefObject<HTMLButtonElement>;
 }) {
   const client = useQueryClient();
-  const ownInputRef = useRef<HTMLInputElement>(null);
-  const inputRef = externalInputRef ?? ownInputRef;
-  const changeRef = useRef<HTMLButtonElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const ownChangeRef = useRef<HTMLButtonElement>(null);
+  const changeRef = externalChangeRef ?? ownChangeRef;
   const hintId = useId();
   const statusId = useId();
   const [progress, setProgress] = useState(0);
@@ -118,7 +122,7 @@ export function ProfileAvatarField({
 
   return (
     <div className="flex flex-col gap-2" data-testid="profile-avatar-field">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center justify-center gap-2 @sm:justify-start">
         <Button
           ref={changeRef}
           type="button"
@@ -134,7 +138,7 @@ export function ProfileAvatarField({
           aria-describedby={describedBy}
           aria-disabled={changeLocked || undefined}
           aria-busy={uploading || undefined}
-          className={cn("min-w-avatar-action", changeLocked && "opacity-50")}
+          className={cn("tap-target min-w-avatar-action", changeLocked && "opacity-50")}
           onClick={() => {
             if (changeLocked || busy) return;
             inputRef.current?.click();
@@ -166,7 +170,7 @@ export function ProfileAvatarField({
               setDone(null);
               remove.mutate();
             }}
-            triggerClassName="min-w-avatar-action"
+            triggerClassName="tap-target min-w-avatar-action"
             testId="profile-avatar-remove"
           />
         ) : null}

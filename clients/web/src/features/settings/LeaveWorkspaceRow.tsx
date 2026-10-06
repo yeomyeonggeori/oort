@@ -54,6 +54,7 @@ export function LeaveWorkspaceRow({
           busy={leave.isPending}
           busyLabel="나가는 중"
           onConfirm={() => leave.mutate()}
+          triggerClassName="tap-target"
           testId="workspace-leave"
         />
       </SettingsRow>

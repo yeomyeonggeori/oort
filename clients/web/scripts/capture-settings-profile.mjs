@@ -30,8 +30,9 @@ const auth = {
   member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
   realtimeWebSocketUrl: "ws://settings-profile-capture.invalid/connection/websocket",
 };
-const rosterMember = (withPhoto) => ({
-  id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "곽성재",
+const LONG_NAME = "가나다라마바사아자차카타파하".repeat(7).slice(0, 100);
+const rosterMember = (withPhoto, longName) => ({
+  id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: longName ? LONG_NAME : "곽성재",
   handle: "seongjae", channelCount: 1, channelIds: channels.map((c) => c.id), capabilities: [],
   ...(withPhoto ? { avatarUrl: `/v1/workspaces/${workspaceId}/members/${memberId}/avatar/content?v=cap` } : {}),
   createdAtMs: 0, updatedAtMs: 0,
@@ -62,7 +63,7 @@ function makePng() {
 const PNG = makePng();
 
 const json = (route, body, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
-async function installRoutes(context, { photo, handleTaken }) {
+async function installRoutes(context, { photo, handleTaken, longName }) {
   await context.route("**/v1/**", async (route) => {
     const req = route.request();
     const path = new URL(req.url()).pathname;
@@ -74,7 +75,7 @@ async function installRoutes(context, { photo, handleTaken }) {
       return json(route, { error: { code: "conflict", message: "handle is already in use" } }, 409);
     }
     if (path.endsWith("/channels")) return json(route, { channels });
-    if (path.endsWith("/roster")) return json(route, { members: [rosterMember(photo)] });
+    if (path.endsWith("/roster")) return json(route, { members: [rosterMember(photo, longName)] });
     if (path.endsWith("/read-state")) return json(route, { read_states: [] });
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     if (path.endsWith(`/workspaces/${workspaceId}`)) return json(route, { workspace: { id: workspaceId, name: "여명거리" } });
@@ -150,6 +151,9 @@ async function main() {
       await r.page.getByTestId("workspace-leave").click();
       await r.page.getByTestId("workspace-leave-question").waitFor({ state: "visible" });
       await shot(r.page, `profile-leave-confirm-1440-${scheme}`);
+      await r.context.close();
+      r = await open(browser, preview.origin, scheme, { width: 390, height: 1900 }, { photo: false, longName: true });
+      await shot(r.page, `profile-longname-390-${scheme}`);
       await r.context.close();
       r = await open(browser, preview.origin, scheme, wide, { photo: true });
       await r.context.setOffline(true);
