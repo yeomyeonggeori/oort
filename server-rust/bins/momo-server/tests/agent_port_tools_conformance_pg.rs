@@ -180,6 +180,7 @@ async fn start_server_with_gateway(
         // The production gate is closed by default; the fixture is the only
         // thing allowed to open it before HAP-E6 (#1367).
         hosted_delivery_enabled,
+        hosted_lease_seconds: momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT,
         subscription_agents_enabled: true,
         // #3397: these suites drive Claude subscription agents; the opt-in is on.
         claude_subscription_agents_enabled: true,
@@ -555,6 +556,37 @@ async fn call(
     let status = response.status().as_u16();
     let value: Value = response.json().await.expect("JSON-RPC body");
     (status, value)
+}
+
+/// Like [`call`], but a refusal at the transport/auth layer carries no JSON-RPC
+/// body (an inactive credential is answered before the tool runs): that is
+/// `(status, None)` rather than a decode panic.
+async fn call_maybe_empty_3530(
+    client: &reqwest::Client,
+    base: &str,
+    bearer: &str,
+    tool: &str,
+    arguments: Value,
+) -> (u16, Option<Value>) {
+    let body = modern_body(
+        "tools/call",
+        json!(Uuid::new_v4().to_string()),
+        json!({"name": tool, "arguments": arguments}),
+    );
+    let response = client
+        .post(format!("{base}{PATH}"))
+        .header("content-type", "application/json")
+        .header("accept", "application/json, text/event-stream")
+        .header("mcp-protocol-version", MODERN_VERSION)
+        .header("mcp-method", "tools/call")
+        .header("mcp-name", tool)
+        .bearer_auth(bearer)
+        .json(&body)
+        .send()
+        .await
+        .expect("tools/call responds");
+    let status = response.status().as_u16();
+    (status, response.json().await.ok())
 }
 
 async fn list_tools(client: &reqwest::Client, base: &str, bearer: &str) -> Vec<String> {
@@ -5962,4 +5994,943 @@ async fn a_threaded_card_is_counted_and_a_withdrawn_request_gets_none() {
         1,
         "only the threaded card"
     );
+}
+
+// ---------------------------------------------------------------------------
+// (10) ADR-0162 증보 3 D11/D12/D15 — progress markers and artifacts (#3516)
+// ---------------------------------------------------------------------------
+
+/// Raise a mention for the hosted agent and claim it. Returns the lease handle
+/// and the run id.
+async fn claimed_run_3516(
+    client: &reqwest::Client,
+    base: &str,
+    su: &PgPool,
+    fixture: &Fixture,
+) -> (String, Uuid) {
+    let handle_name = hosted_handle(su, fixture.hosted_agent).await;
+    let trigger: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{handle_name} 작업해줘")
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+    let (status, claimed) = call(
+        client,
+        base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("lease handle")
+        .to_string();
+    let run: Uuid = sqlx::query_scalar(
+        "SELECT id FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2 \
+          ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .fetch_one(su)
+    .await
+    .expect("the run the mention raised");
+    (handle, run)
+}
+
+/// `(step_count, output)` of one run.
+async fn run_record_3516(su: &PgPool, run: Uuid) -> (i32, Value) {
+    let row: (i32, Option<Value>) =
+        sqlx::query_as("SELECT step_count, output FROM agent_run WHERE id=$1")
+            .bind(run)
+            .fetch_one(su)
+            .await
+            .expect("run row");
+    (row.0, row.1.unwrap_or(Value::Null))
+}
+
+async fn rejected_audits_3516(su: &PgPool, run: Uuid) -> Vec<Value> {
+    sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE action='agent.run.report_rejected' \
+           AND detail->>'run_id'=$1 ORDER BY created_at",
+    )
+    .bind(run.to_string())
+    .fetch_all(su)
+    .await
+    .expect("rejected audits")
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn stage_markers_keep_the_latest_twelve_spend_steps_and_refuse_bad_text() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (handle, run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+    // A budget small enough to saturate, so the cap is measured and not assumed.
+    sqlx::query("UPDATE agent_run SET max_steps=5 WHERE id=$1")
+        .bind(run)
+        .execute(&su)
+        .await
+        .unwrap();
+    let event = |args: Value| {
+        let (client, base, bearer) = (&client, &base, &fixture.hosted_bearer);
+        async move { call(client, base, bearer, "oort_run_event", args).await }
+    };
+
+    // An event with no marker (the old shape) spends nothing.
+    let (status, ok) = event(json!({"leaseHandle": handle, "status": "running"})).await;
+    assert_eq!(status, 200, "{ok}");
+    assert_eq!(run_record_3516(&su, run).await.0, 0);
+
+    // A retried event (same `eventId`) is one marker and one step, not two.
+    let replay_id = Uuid::new_v4();
+    for _ in 0..2 {
+        let (status, ok) =
+            event(json!({"leaseHandle": handle, "stage": "재시도", "eventId": replay_id})).await;
+        assert_eq!(status, 200, "{ok}");
+    }
+    let (steps, output) = run_record_3516(&su, run).await;
+    assert_eq!(steps, 1, "a replayed event spends one step");
+    assert_eq!(output["stages"], json!(["재시도"]));
+
+    // 14 markers: the newest 12 stay, in order; the step count stops at the cap
+    // and no event is refused for reaching it.
+    for index in 1..=14 {
+        let (status, ok) =
+            event(json!({"leaseHandle": handle, "stage": format!("  단계 {index} ")})).await;
+        assert_eq!(status, 200, "{index}: {ok}");
+    }
+    let (steps, output) = run_record_3516(&su, run).await;
+    let expected: Vec<Value> = (3..=14)
+        .map(|index| json!(format!("단계 {index}")))
+        .collect();
+    assert_eq!(output["stages"], Value::Array(expected.clone()));
+    assert_eq!(steps, 5, "saturates at max_steps");
+
+    // An immediate repeat is one marker.
+    let (status, _) = event(json!({"leaseHandle": handle, "stage": "단계 14"})).await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        run_record_3516(&su, run).await.1["stages"],
+        Value::Array(expected.clone())
+    );
+
+    // Each bad marker is refused with nothing written: no step, no stage, no
+    // state change — and one audit row carrying a reason code and no text.
+    let before = run_record_3516(&su, run).await;
+    let bad_markers = [
+        "".to_string(),
+        "   ".to_string(),
+        "x".repeat(81),
+        "a/b".to_string(),
+        "a\\b".to_string(),
+        "bad\u{7}".to_string(),
+        "\u{202E}rtl".to_string(),
+    ];
+    for bad in &bad_markers {
+        let (status, refused) = event(json!({"leaseHandle": handle, "stage": bad})).await;
+        assert_eq!(status, 400, "{bad:?}: {refused}");
+        assert_eq!(error_code(&refused), -32602);
+    }
+    // Schema-level refusals (wrong type, over the byte envelope) write nothing either.
+    for bad in [json!(3), json!("x".repeat(321))] {
+        let (status, _) = event(json!({"leaseHandle": handle, "stage": bad})).await;
+        assert_eq!(status, 400);
+    }
+    assert_eq!(run_record_3516(&su, run).await, before, "no write");
+    let audits = rejected_audits_3516(&su, run).await;
+    assert_eq!(
+        audits.len(),
+        bad_markers.len(),
+        "one row per refused report"
+    );
+    for audit in &audits {
+        assert_eq!(audit["reason"], json!("stage_invalid"));
+        assert_eq!(audit["tool"], json!("oort_run_event"));
+        let mut keys: Vec<&str> = audit
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["reason", "run_id", "schema", "tool"],
+            "no free text: {audit}"
+        );
+    }
+
+    // Completing after the markers keeps them; reaching the step cap did not
+    // block the completion.
+    let (status, done) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_complete",
+        json!({"leaseHandle": handle, "status": "succeeded", "body": "끝"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{done}");
+    let (steps, output) = run_record_3516(&su, run).await;
+    assert_eq!(steps, 5);
+    assert_eq!(output["stages"], Value::Array(expected));
+    assert_eq!(output["body"], json!("끝"));
+    assert_eq!(output["status"], json!("succeeded"));
+    assert!(output.get("artifacts").is_none());
+
+    // The handle is dead now (terminal run): a bad marker is answered by the
+    // ordinary refusal and adds no audit row, however often it is repeated.
+    for _ in 0..5 {
+        let (status, _) = event(json!({"leaseHandle": handle, "stage": "a/b"})).await;
+        assert_eq!(status, 409);
+    }
+    assert_eq!(
+        rejected_audits_3516(&su, run).await.len(),
+        bad_markers.len()
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn artifacts_are_stored_when_valid_and_a_bad_one_refuses_the_whole_completion() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (handle, run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+    let complete = |args: Value| {
+        let (client, base, bearer) = (&client, &base, &fixture.hosted_bearer);
+        async move { call(client, base, bearer, "oort_run_complete", args).await }
+    };
+
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_event",
+        json!({"leaseHandle": handle, "stage": "시작"}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let before = run_record_3516(&su, run).await;
+    let messages_before = channel_message_count(&su, fixture.workspace, fixture.channel).await;
+
+    // (artifacts, reason code the audit must carry; None = refused by the
+    // transport schema before any transaction opens, so no audit row)
+    let refused: Vec<(Value, Option<&str>)> = vec![
+        (
+            json!({"prUrl": "http://github.com/a/b/pull/1"}),
+            Some("artifacts_pr_url_invalid"),
+        ),
+        (
+            json!({"prUrl": "https://evil.example/a/b/pull/1"}),
+            Some("artifacts_pr_url_invalid"),
+        ),
+        (
+            json!({"prUrl": "https://github.com/a/b/pull/1/files"}),
+            Some("artifacts_pr_url_invalid"),
+        ),
+        (
+            json!({"branch": "/etc/passwd"}),
+            Some("artifacts_branch_invalid"),
+        ),
+        (
+            json!({"branch": "fix: rotate the key"}),
+            Some("artifacts_branch_invalid"),
+        ),
+        (
+            json!({"branch": "C:\\work"}),
+            Some("artifacts_branch_invalid"),
+        ),
+        (json!({"added": -1}), None),
+        (json!({"deleted": 2147483648_i64}), None),
+        (json!({"commits": 1.5}), None),
+        (json!({"title": "fix the bug"}), None),
+        (json!({"files": ["a.rs"]}), None),
+        (json!("https://github.com/a/b/pull/1"), None),
+        // A good field next to a bad one: the whole report goes.
+        (
+            json!({"prUrl": "https://github.com/a/b/pull/1", "branch": "bad branch"}),
+            Some("artifacts_branch_invalid"),
+        ),
+    ];
+    let mut expected_audits = 0;
+    for (artifacts, reason) in &refused {
+        let (status, answer) = complete(json!({
+            "leaseHandle": handle, "status": "succeeded", "body": "done", "artifacts": artifacts
+        }))
+        .await;
+        assert_eq!(status, 400, "{artifacts}: {answer}");
+        assert_eq!(error_code(&answer), -32602);
+        if reason.is_some() {
+            expected_audits += 1;
+        }
+    }
+    // Nothing was written: the run is still running with the same record, no
+    // answer message, no usage row, the lease untouched.
+    assert_eq!(run_record_3516(&su, run).await, before);
+    let status: String = sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id=$1")
+        .bind(run)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(status, "running");
+    assert_eq!(
+        channel_message_count(&su, fixture.workspace, fixture.channel).await,
+        messages_before
+    );
+    let usage_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM usage_ledger WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(usage_rows, 0);
+    let audits = rejected_audits_3516(&su, run).await;
+    assert_eq!(
+        audits.len(),
+        expected_audits,
+        "one row per report that reached the tool"
+    );
+    let codes: Vec<&str> = audits
+        .iter()
+        .map(|a| a["reason"].as_str().unwrap())
+        .collect();
+    for (_, reason) in refused.iter().filter(|(_, reason)| reason.is_some()) {
+        assert!(codes.contains(&reason.unwrap()), "{reason:?} in {codes:?}");
+    }
+    for audit in &audits {
+        assert_eq!(audit["tool"], json!("oort_run_complete"));
+        let mut keys: Vec<&str> = audit
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["reason", "run_id", "schema", "tool"],
+            "no free text: {audit}"
+        );
+    }
+    let artifacts_audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action='agent.run.artifacts_reported' \
+           AND detail->>'run_id'=$1",
+    )
+    .bind(run.to_string())
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        artifacts_audits, 0,
+        "a refused report is not a reported one"
+    );
+
+    // The same lease completes with a valid report (the refusals did not burn it).
+    let (status, done) = complete(json!({
+        "leaseHandle": handle, "status": "failed", "error": "tests red",
+        "artifacts": {
+            "prUrl": "https://GitHub.com/acme/app/pull/42?utm=1#frag",
+            "branch": "feat/3516-x", "added": 12, "deleted": 3, "commits": 2
+        }
+    }))
+    .await;
+    assert_eq!(status, 200, "{done}");
+    let (_, output) = run_record_3516(&su, run).await;
+    assert_eq!(
+        output["artifacts"],
+        json!({
+            "prUrl": "https://github.com/acme/app/pull/42",
+            "branch": "feat/3516-x", "added": 12, "deleted": 3, "commits": 2
+        })
+    );
+    assert_eq!(output["stages"], json!(["시작"]), "existing keys kept");
+    assert_eq!(output["status"], json!("failed"));
+    assert!(output["message_id"].is_string());
+    let reported: Vec<Value> = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE action='agent.run.artifacts_reported' \
+           AND detail->>'run_id'=$1",
+    )
+    .bind(run.to_string())
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(reported.len(), 1, "one row per completion with artifacts");
+    assert_eq!(
+        reported[0]["keys"],
+        json!(["prUrl", "branch", "added", "deleted", "commits"])
+    );
+    let rendered = reported[0].to_string();
+    assert!(
+        !rendered.contains("github.com") && !rendered.contains("feat/3516"),
+        "{rendered}"
+    );
+
+    // A replayed completion answers, and writes no second report row.
+    let (status, _) = complete(json!({
+        "leaseHandle": handle, "status": "failed", "error": "tests red",
+        "artifacts": {"added": 1}
+    }))
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        run_record_3516(&su, run).await.1["artifacts"]["added"],
+        json!(12)
+    );
+
+    // A retried completion on the finished run answers its first answer even
+    // when the retry carries a malformed `artifacts`, and audits nothing.
+    let answer = structured(&done)["messageId"].clone();
+    let audits_before = rejected_audits_3516(&su, run).await.len();
+    for _ in 0..3 {
+        let (status, replay) = complete(json!({
+            "leaseHandle": handle, "status": "failed", "error": "tests red",
+            "artifacts": {"prUrl": "http://evil.example/x"}
+        }))
+        .await;
+        assert_eq!(status, 200, "{replay}");
+        assert_eq!(structured(&replay)["messageId"], answer);
+    }
+    assert_eq!(rejected_audits_3516(&su, run).await.len(), audits_before);
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_dead_lease_cannot_grow_the_audit_log_with_bad_reports() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (handle, run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+    // The lease lapses (both timestamps move: `outbox_gateway_lease_shape_ck`).
+    sqlx::query(
+        "UPDATE outbox SET lease_acquired_at = now() - interval '10 minutes', \
+                lease_expires_at = now() - interval '1 minute' \
+          WHERE kind='agent_job' AND method='gateway' AND status='pending' \
+            AND lower(payload->>'run_id') = lower($1)",
+    )
+    .bind(run.to_string())
+    .execute(&su)
+    .await
+    .unwrap();
+    // #3530: a lapsed lease nobody re-claimed still authorizes its handle, so
+    // "dead" now means a takeover — the job is claimed again and the old
+    // handle is the stale one.
+    let (status, reclaimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{reclaimed}");
+    assert_ne!(
+        structured(&reclaimed)["jobs"][0]["leaseHandle"].as_str(),
+        Some(handle.as_str()),
+        "a takeover must mint a new lease, or this proves nothing"
+    );
+    for _ in 0..4 {
+        let (status, _) = call(
+            &client,
+            &base,
+            &fixture.hosted_bearer,
+            "oort_run_event",
+            json!({"leaseHandle": handle, "stage": "a/b"}),
+        )
+        .await;
+        assert_eq!(status, 409);
+        let (status, _) = call(
+            &client,
+            &base,
+            &fixture.hosted_bearer,
+            "oort_run_complete",
+            json!({"leaseHandle": handle, "status": "succeeded",
+                   "artifacts": {"branch": "/etc/passwd"}}),
+        )
+        .await;
+        assert_eq!(status, 409);
+    }
+    assert!(rejected_audits_3516(&su, run).await.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// #3530 AT-8 — hosted lease TTL, implicit renewal, takeover
+// ---------------------------------------------------------------------------
+
+/// Seconds until the run's job lease expires, by the database clock (negative
+/// once lapsed).
+async fn lease_secs_left_3530(su: &PgPool, run: Uuid) -> f64 {
+    sqlx::query_scalar(
+        "SELECT extract(epoch FROM (lease_expires_at - now()))::float8 FROM outbox \
+          WHERE kind='agent_job' AND method='gateway' AND lower(payload->>'run_id') = lower($1)",
+    )
+    .bind(run.to_string())
+    .fetch_one(su)
+    .await
+    .expect("lease expiry")
+}
+
+/// Lapse the run's lease without clearing its owner (both timestamps move for
+/// `outbox_gateway_lease_shape_ck`).
+async fn lapse_lease_3530(su: &PgPool, run: Uuid) {
+    sqlx::query(
+        "UPDATE outbox SET lease_acquired_at = now() - interval '2 hours', \
+                lease_expires_at = now() - interval '1 minute' \
+          WHERE kind='agent_job' AND method='gateway' AND status='pending' \
+            AND lower(payload->>'run_id') = lower($1)",
+    )
+    .bind(run.to_string())
+    .execute(su)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_hosted_claim_leases_for_the_hosted_ttl_and_renew_extends_to_it() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (handle, run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+
+    // Default 30 minutes — not the managed 30 seconds.
+    let left = lease_secs_left_3530(&su, run).await;
+    assert!(
+        (1700.0..=1800.5).contains(&left),
+        "a hosted claim must lease ~30 minutes, got {left}s"
+    );
+
+    // Nothing re-queues the job inside the TTL: a second claim 5 minutes in
+    // (a lease a 30-second window would long have lost) finds no job.
+    sqlx::query(
+        "UPDATE outbox SET lease_acquired_at = now() - interval '5 minutes', \
+                lease_expires_at = now() + interval '25 minutes' \
+          WHERE kind='agent_job' AND method='gateway' AND status='pending' \
+            AND lower(payload->>'run_id') = lower($1)",
+    )
+    .bind(run.to_string())
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, again) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{again}");
+    assert!(
+        structured(&again)["jobs"]
+            .as_array()
+            .is_some_and(|jobs| jobs.is_empty()),
+        "a live hosted lease must not be claimable by anyone: {again}"
+    );
+
+    // Renew extends to the TTL again from a short remainder.
+    sqlx::query(
+        "UPDATE outbox SET lease_acquired_at = now() - interval '29 minutes', \
+                lease_expires_at = now() + interval '20 seconds' \
+          WHERE kind='agent_job' AND method='gateway' AND status='pending' \
+            AND lower(payload->>'run_id') = lower($1)",
+    )
+    .bind(run.to_string())
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, renewed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_job_renew",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    assert_eq!(status, 200, "{renewed}");
+    let left = lease_secs_left_3530(&su, run).await;
+    assert!(
+        (1700.0..=1800.5).contains(&left),
+        "renew must extend to the hosted TTL, got {left}s"
+    );
+
+    // An expired lease nobody re-claimed is implicitly renewed.
+    lapse_lease_3530(&su, run).await;
+    let (status, renewed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_job_renew",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    assert_eq!(status, 200, "an unclaimed expired lease renews: {renewed}");
+    assert!((1700.0..=1800.5).contains(&lease_secs_left_3530(&su, run).await));
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_expired_unreclaimed_hosted_handle_still_reports_and_completes() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (handle, run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+
+    // The VM slept past the lease and nobody took the job.
+    lapse_lease_3530(&su, run).await;
+    let (status, event) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_event",
+        json!({"leaseHandle": handle, "stage": "coding"}),
+    )
+    .await;
+    assert_eq!(status, 200, "progress after the gap must land: {event}");
+
+    lapse_lease_3530(&su, run).await;
+    let (status, done) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_complete",
+        json!({"leaseHandle": handle, "status": "succeeded", "body": "다 했어요"}),
+    )
+    .await;
+    assert_eq!(status, 200, "completion after the gap must land: {done}");
+    let run_status: String = sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id=$1")
+        .bind(run)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(run_status, "succeeded");
+    let job_status: String = sqlx::query_scalar(
+        "SELECT status::text FROM outbox WHERE kind='agent_job' AND method='gateway' \
+            AND lower(payload->>'run_id') = lower($1)",
+    )
+    .bind(run.to_string())
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(job_status, "done");
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_reclaimed_hosted_job_refuses_the_old_handle_everywhere() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (old, run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+
+    lapse_lease_3530(&su, run).await;
+    let (status, reclaimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{reclaimed}");
+    let fresh = structured(&reclaimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("takeover handle")
+        .to_string();
+    assert_ne!(fresh, old);
+
+    for (tool, args) in [
+        ("oort_job_renew", json!({"leaseHandle": old})),
+        (
+            "oort_run_event",
+            json!({"leaseHandle": old, "stage": "late"}),
+        ),
+        (
+            "oort_run_complete",
+            json!({"leaseHandle": old, "status": "succeeded", "body": "x"}),
+        ),
+    ] {
+        let (status, refused) = call(&client, &base, &fixture.hosted_bearer, tool, args).await;
+        assert_eq!(status, 409, "{tool}: {refused}");
+        assert_eq!(error_code(&refused), -32005, "{tool}");
+    }
+    // The takeover's own handle works, and the old refusal changed nothing.
+    let (status, done) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_complete",
+        json!({"leaseHandle": fresh, "status": "succeeded", "body": "새 손잡이로 끝"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{done}");
+}
+
+/// The managed gateway keeps its 30 seconds and its strict expiry (#3530
+/// changes hosted claims only).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_managed_gateway_keeps_its_thirty_second_strict_lease() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server_with_gateway(app, true, true).await;
+    let client = reqwest::Client::new();
+    let bearer = raw_credential(fixture.workspace);
+    sqlx::query(
+        "INSERT INTO token(workspace_id, kind, actor_member_id, token_hash, scopes, label) \
+         VALUES($1,'agent_bearer',$2,digest($3::text,'sha256'), \
+                ARRAY['agent:jobs:read','agent:runs:callback']::text[],'at8-managed')",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.managed_agent)
+    .bind(&bearer)
+    .execute(&su)
+    .await
+    .unwrap();
+    let handle_name = hosted_handle(&su, fixture.managed_agent).await;
+    let _: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"clientMsgId": Uuid::new_v4(), "body": format!("@{handle_name} hi")}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let pending: Value = client
+        .get(format!(
+            "{base}/v1/workspaces/{}/agents/{}/gateway/jobs/pending",
+            fixture.workspace, fixture.managed_agent
+        ))
+        .bearer_auth(&bearer)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let job = &pending["jobs"][0];
+    let job_id = job["id"].as_i64().expect("job id");
+    let lease_id = job["leaseId"].as_str().expect("lease").to_string();
+    let run_id = job["runId"].as_str().expect("run").to_string();
+    let run: Uuid = run_id.parse().unwrap();
+    let left = lease_secs_left_3530(&su, run).await;
+    assert!(
+        (20.0..=30.5).contains(&left),
+        "a managed claim must stay at 30 seconds, got {left}s"
+    );
+
+    lapse_lease_3530(&su, run).await;
+    let renew = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/agents/{}/gateway/jobs/{job_id}/lease/renew",
+            fixture.workspace, fixture.managed_agent
+        ))
+        .bearer_auth(&bearer)
+        .json(&json!({"job_id": job_id, "lease_id": lease_id}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(renew.status().as_u16(), 409, "managed renew stays strict");
+    let complete = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/agent-runs/{run_id}/gateway/complete",
+            fixture.workspace
+        ))
+        .bearer_auth(&bearer)
+        .json(&json!({"job_id": job_id, "lease_id": lease_id, "status": "succeeded", "body": "x"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        complete.status().as_u16(),
+        409,
+        "an expired managed lease is not implicitly renewed"
+    );
+}
+
+/// #3530 review M1: an expired-but-unreclaimed lease must not out-live the
+/// per-call re-checks (connection, channel grant, run state). Each case claims,
+/// lapses the lease, breaks one precondition, and expects the old handle to be
+/// refused by renew, event and complete. `live_first` runs the same breakage
+/// on a still-live lease so the two are compared, not just asserted.
+async fn expired_then_broken_3530(case: &str) {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (handle, run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+    lapse_lease_3530(&su, run).await;
+    match case {
+        "disconnect" => {
+            sqlx::query(
+                "UPDATE hosted_agent_connection SET status='cleanup_pending', active_token_id=NULL \
+                 WHERE workspace_id=$1 AND id=$2",
+            )
+            .bind(fixture.workspace)
+            .bind(fixture.hosted_connection)
+            .execute(&su)
+            .await
+            .unwrap();
+        }
+        "narrowed" => {
+            sqlx::query(
+                "UPDATE hosted_agent_connection SET approved_channel_ids=ARRAY[gen_random_uuid()]::uuid[] \
+                 WHERE workspace_id=$1 AND id=$2",
+            )
+            .bind(fixture.workspace)
+            .bind(fixture.hosted_connection)
+            .execute(&su)
+            .await
+            .unwrap();
+        }
+        "paused" => {
+            sqlx::query(
+                "UPDATE agent_profile SET paused=true WHERE workspace_id=$1 AND agent_member_id=$2",
+            )
+            .bind(fixture.workspace)
+            .bind(fixture.hosted_agent)
+            .execute(&su)
+            .await
+            .unwrap();
+        }
+        "cancelled" => {
+            sqlx::query("UPDATE agent_run SET status='cancelled' WHERE id=$1")
+                .bind(run)
+                .execute(&su)
+                .await
+                .unwrap();
+        }
+        other => panic!("unknown case {other}"),
+    }
+    for (tool, args) in [
+        ("oort_job_renew", json!({"leaseHandle": handle})),
+        (
+            "oort_run_event",
+            json!({"leaseHandle": handle, "stage": "late"}),
+        ),
+        (
+            "oort_run_complete",
+            json!({"leaseHandle": handle, "status": "succeeded", "body": "x"}),
+        ),
+    ] {
+        // `oort_job_renew` is a lease verb with no run check of its own, for a
+        // live lease as much as an expired one (it only keeps a lease alive,
+        // see the ADR-0186 D2 note above `LeaseVerb::Release`); a cancelled run
+        // is stopped at event/complete.
+        if case == "cancelled" && tool == "oort_job_renew" {
+            continue;
+        }
+        let (status, refused) =
+            call_maybe_empty_3530(&client, &base, &fixture.hosted_bearer, tool, args).await;
+        assert!(
+            status != 200,
+            "{case}/{tool}: an expired lease must not bypass the re-check, got {status}: {refused:?}"
+        );
+        if let Some(refused) = refused {
+            assert!(
+                [-32001, -32003, -32004, -32005].contains(&error_code(&refused)),
+                "{case}/{tool}: {refused}"
+            );
+        }
+    }
+    let run_status: String = sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id=$1")
+        .bind(run)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_ne!(run_status, "succeeded", "{case}: nothing was completed");
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_expired_hosted_lease_still_meets_every_per_call_recheck_3530() {
+    for case in ["disconnect", "narrowed", "cancelled"] {
+        expired_then_broken_3530(case).await;
+    }
+}
+
+/// A paused agent: the gateway lease path never consulted `paused` for a live
+/// lease, so an expired one must not behave differently from a live one.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_paused_agent_treats_an_expired_lease_like_a_live_one_3530() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (handle, run) = claimed_run_3516(&client, &base, &su, &fixture).await;
+    sqlx::query(
+        "UPDATE agent_profile SET paused=true WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let live = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_event",
+        json!({"leaseHandle": handle, "stage": "a"}),
+    )
+    .await
+    .0;
+    lapse_lease_3530(&su, run).await;
+    let expired = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_event",
+        json!({"leaseHandle": handle, "stage": "b"}),
+    )
+    .await
+    .0;
+    assert_eq!(live, expired, "pause must not be a lease-expiry side door");
 }

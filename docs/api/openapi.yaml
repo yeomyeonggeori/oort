@@ -7628,10 +7628,32 @@ paths:
         message events of the channel; clients re-read the same way. Diff-only
         updates emit no event, so a board that wants fresh numbers refetches on
         focus or on a slow timer.
+
+        Hosted agents' work runs (#3517, ADR-0162 증보 3 D13), opt-in with
+        include=runs: the same list also carries source="run" rows for runs of
+        type work whose agent has a hosted connection, behind the same
+        home-channel membership filter. A run linked to a work session is not
+        listed (the session row represents it); mention runs and managed or
+        BYOA work runs are never listed. A run row has runId instead of
+        sessionId, status waiting|running|done|failed|stopped, the agent as owner,
+        requestedBy (absent when no request record exists), stages, stepCount, the
+        validated artifacts (branch, diff added/deleted, commits, pr url and
+        number) and lastActivityAt; it never carries the agent's detail, text
+        deltas, reply body or error. A run's state transition (not a stage or
+        step update) is broadcast as work.run.updated (run_id, channel_id, to) on
+        the home channel; clients re-read as for sessions. The single read below
+        is sessions only; a run card is read from the agent-runs detail.
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
+        - name: include
+          in: query
+          required: false
+          description: "runs adds hosted agents' work runs (D13). Anything else, or omitted, lists sessions only so a client that keys rows on sessionId is never handed a run row."
+          schema:
+            type: string
+            enum: [runs]
         - name: limit
           in: query
           required: false
@@ -10219,7 +10241,16 @@ paths:
         `oort_conversation_read`, `oort_message_post`, `oort_jobs_claim`,
         `oort_job_renew`, `oort_job_release`, `oort_run_event`,
         `oort_run_complete`, `oort_action_propose` (ADR-0186 D2) and
-        `oort_card_suggest` (ADR-0186 증보 G1). Each binds an existing domain rather than a second one, and job authority travels only as an opaque `leaseHandle` that
+        `oort_card_suggest` (ADR-0186 증보 G1).
+        ADR-0162 증보 3 adds two optional report fields to existing tools, no new
+        tool: `oort_run_event.stage` (one progress marker, 1..80 characters under
+        the `work_session_share` stage rule; the newest 12 are kept in
+        `agent_run.output.stages` and each marker spends one step, saturating at
+        `max_steps`) and `oort_run_complete.artifacts` (closed object `prUrl`,
+        `branch`, `added`, `deleted`, `commits`, all optional; stored in
+        `agent_run.output.artifacts`; a malformed one refuses the whole
+        completion with nothing written). Both are self-reports the server does
+        not verify. Each tool binds an existing domain rather than a second one, and job authority travels only as an opaque `leaseHandle` that
         carries the channel its work came from, so the confirming human's exact
         channel grant is re-checked on every later verb. Arguments are validated
         against the tool's published `inputSchema` before execution, so
@@ -15484,7 +15515,7 @@ components:
     SharedWorkSession:
       type: object
       required:
-        - sessionId
+        - source
         - origin
         - label
         - folderLabel
@@ -15508,17 +15539,41 @@ components:
         lastActivityAt) plus owner, home channel and lane. No terminal text,
         input, control, PTY, host or commit-title field exists.
       properties:
-        sessionId: {type: string, format: uuid}
+        source:
+          type: string
+          enum: [session, run]
+          description: session = work_session row; run = a hosted agent's work run (D13, include=runs).
+        sessionId: {type: string, format: uuid, description: "Present on a session row only."}
+        runId: {type: string, format: uuid, description: "Present on a run row only."}
+        requestedBy:
+          type: object
+          nullable: true
+          required: [memberId, displayName]
+          additionalProperties: false
+          description: "Run row: the person who asked (the agent.work.queued audit actor). Omitted on a session row."
+          properties:
+            memberId: {type: string, format: uuid}
+            displayName: {type: string}
+        stepCount: {type: integer, description: "Run row only: the agent's reported step count."}
+        commits: {type: integer, description: "Run row only: reported commit count (a number, never a title)."}
+        pr:
+          type: object
+          required: [url, number]
+          additionalProperties: false
+          description: "Run row only: the validated pull request the agent reported."
+          properties:
+            url: {type: string}
+            number: {type: integer, format: int64, nullable: true}
         origin:
           type: string
-          enum: [local_pty, host]
-          description: local_pty = shared local pane; host = agent-lane session.
+          enum: [local_pty, host, agent_run]
+          description: local_pty = shared local pane; host = agent-lane session; agent_run = a hosted agent's work run.
         label: {type: string}
         folderLabel: {type: string, nullable: true, description: "Last path element only (local_pty)."}
         status:
           type: string
-          enum: [running, idle, orphaned, ended]
-          description: Ledger status.
+          enum: [running, idle, orphaned, ended, waiting, done, failed, stopped]
+          description: Session row = ledger status (running, idle, orphaned, ended). Run row = waiting, running, done, failed or stopped.
         owner:
           type: object
           required: [memberId, displayName]
@@ -15543,7 +15598,7 @@ components:
           description: Closed harness list for local_pty; the tool key for an agent-lane session.
         state:
           type: string
-          enum: [waiting, running, review, idle, done, stopped]
+          enum: [waiting, running, review, idle, done, failed, stopped]
         stages:
           type: array
           maxItems: 12

@@ -1140,6 +1140,14 @@ posts an approval card into the run's channel. After it returns:
 - `oort_job_renew` **is** allowed while a person decides, and is the right way
   to keep a long-lived lease alive.
 
+**Long gaps between wakes (#3530, ADR-0162 증보 3 부록 A).** A hosted lease
+lasts 30 minutes by default (`MOMO_AGENT_PORT_HOSTED_LEASE_MINUTES`, 5-120).
+If the VM wakes after it expired and nobody re-claimed the job, the same
+`leaseHandle` still works for `oort_run_event` / `oort_run_complete` /
+`oort_job_renew`. After expiry **report or claim; do not release**:
+`oort_job_release` on an expired lease answers 409. If you call
+`oort_jobs_claim` first you get a new handle and the old one answers 409.
+
 The decision arrives as new inbox work, not as a return value from this call.
 An unanswered proposal expires on its own (one hour) and releases the run.
 
@@ -1403,6 +1411,47 @@ tunnel, with the active credential from join.
 3) If there is work, do it, and write the reply with oort_message_post on
    the same channel. clientMsgId is a new UUID every send. Retrying the
    same clientMsgId stays one message.
+   If an event is kind agent_job, the work is a tracked run. Do it like this
+   instead of a bare oort_message_post:
+   a) oort_jobs_claim {} . Each job has leaseHandle, leaseExpiresAtMs and
+      work (channelId, prompt, ...). Keep leaseHandle in
+      /workspace/oort-run.handle (mode 600); never write it in a reply. If
+      jobs is empty and that file exists, the job is already yours: use the
+      stored handle.
+   b) Read the request with oort_conversation_read on work.channelId.
+   c) Each time a phase starts, call oort_run_event {leaseHandle,
+      stage:"<short label>", eventId:<new UUID>}. stage is plain text, 1 to
+      80 characters (trimmed), no "/" or "\", no control characters. A stage
+      equal to your previous one is folded into it but still costs a step.
+      Examples:
+      "reading code", "fix written", "tests running", "PR opened". Never put
+      a secret, a file path, a commit title or code in a stage. Only the
+      latest 12 are kept.
+   d) When finished, call oort_run_complete {leaseHandle, status:"succeeded",
+      body:"<your reply, at most 8000 bytes>", artifacts:{prUrl, branch,
+      added, deleted, commits}}. Include only what you really have: prUrl
+      is https://github.com/<owner>/<repo>/pull/<n>; branch is the branch
+      name; added / deleted / commits are non-negative integers. No other
+      key is accepted. body is posted to the channel as your reply, so do not
+      also send it with oort_message_post. If you failed, call it with
+      status:"failed" and error:"<reason, at most 4000 bytes>"; artifacts is
+      allowed there too (a branch or partial PR you left behind). Right after
+      oort_run_complete (done or failed), delete /workspace/oort-run.handle so
+      a later wake never reuses a dead handle.
+   e) If work may outlast leaseExpiresAtMs, call oort_job_renew {leaseHandle}
+      before it (the reply has the new leaseExpiresAtMs). Do not call
+      oort_job_release after the lease expired.
+   f) Errors are fixed answers. HTTP 400 / -32602: the call was malformed
+      (a bad stage or artifacts key rejects the whole call; the lease is
+      untouched); fix it and send again with the same handle. HTTP 409 /
+      -32005: the lease is gone or the run is settled or cancelled; stop,
+      do not retry. HTTP 409 / -32004: this agent is paused, disconnected or
+      the target is not visible; stop. HTTP 403 / -32003: scope or channel
+      approval is missing; stop and tell the user to review the connection.
+   g) Woke up after a long sleep with a stored handle: report with that
+      handle first (oort_run_event or oort_run_complete). Calling
+      oort_jobs_claim first gives you a new handle and the old one answers
+      409.
    If a person asks you to connect an AI, sign in to an AI subscription
    (Claude, Codex) or connect a team API key, do not try to do it yourself
    and never ask for a key, token, password or login code. Suggest the
@@ -1432,6 +1481,141 @@ mcp-name: oort_inbox_read
 oort_message_post / oort_conversation_read use the same headers with mcp-name
 and params.name changed. Do not repeat credentials or cursors in a reply.
 ```
+
+##### 3.3.17.4a Tracked work: claim, stage, complete (#3519 AT-6)
+
+Scope: this is for **your own** Grok Bot account and VM, personal and
+non-commercial use. oort never runs, reads or pools the vendor VM or account;
+it only receives what the agent reports. dots follows the same pattern and
+will be supported soon; this page makes no dots-specific claims. The adding
+flow itself (wizard, secrets, doorbell) is unchanged; its audit lives in
+`claudedocs/agent-tracking-2026-10/at7-add-flow-audit.md` (local notes, not in
+the repo) and §3.3.1 to §3.3.16 stay the source for it.
+
+The §3.3.17.4 routine turns a person's work request into a run the team can
+see. The sequence, the limits and the ADR it comes from (ADR-0162 증보 3 D10
+to D16 and 부록 A):
+
+| Step | Call | Arguments (UTF-8 byte bounds) | Answer |
+|---|---|---|---|
+| 0. A person asks | `POST /v1/workspaces/{ws}/channels/{ch}/agent-runs` with `type=work` (by a human, in a channel or DM the owner approved) | n/a | run `queued` + one job + one inbox item (`agent_job`); 409 with a closed reason if the connection is not active, the channel is not approved, or the agent is `owner_only` |
+| 1. Claim | `oort_jobs_claim` (scope `agent:jobs:read`) | `limit` 1..100 | `{jobs:[{leaseHandle, createdAtMs, leaseExpiresAtMs, work:{channelId, authorMemberId, triggerMessageId, prompt, ...}}]}` |
+| 2. Progress | `oort_run_event` (scope `agent:runs:callback`) | `leaseHandle` (512), `stage` (1 to 80 characters, at most 320 bytes, no `/` `\` control or bidi characters), `status` (`running` `thinking` `streaming` `cancelled`), `detail` (2048, audit only), `textDelta` (8192), `eventId` (UUID, makes a retry count once) | `{status:"accepted"}` |
+| 3. Finish | `oort_run_complete` (scope `agent:runs:callback`) | `leaseHandle`, `status` (`succeeded` / `failed`), `body` (8000), `error` (4000), `usage`, `artifacts` | `{status, messageId, seq}` |
+| renew | `oort_job_renew` | `leaseHandle` | `{status:"renewed", leaseExpiresAtMs}` |
+
+`artifacts` is closed (`additionalProperties:false`) and every key is optional:
+`prUrl` (300; `https`, host `github.com` or an operator-listed GitHub
+Enterprise host, path exactly `/<owner>/<repo>/pull/<n>`, query and fragment
+dropped), `branch` (a git-branch-like name, at most 200 characters (800 is only the
+byte envelope); no whitespace, none of `~ ^ : ? * [`, no backslash, no
+control characters, and not an absolute path, a leading `~` or a drive
+letter), `added` / `deleted` / `commits` (integer 0 to
+2147483647). There is no key for a commit title, a file name or a remote URL,
+so none can be sent. While the lease is live, a bad `artifacts` (or a bad
+`stage`) refuses the whole call with HTTP 400 / `-32602`, stores nothing from
+it, writes one audit row with a reason code only, and leaves the lease intact,
+so the agent can send the same call again without the bad part. If the
+handle is dead or the run already finished, the bad value is simply dropped
+and the normal path answers instead (a dead handle is 409; a finished run
+replays its first answer). Stages are trimmed and at most 12 are kept (the
+13th pushes out the oldest). A stage equal to the one just before it is
+folded into it but still costs a step, and every stage costs a step only up
+to the run's step limit (the limit never blocks completion). A finished run
+records no more stages.
+
+**Errors** are the five fixed answers (the server never says which of
+"absent", "invisible", "forbidden" it was): HTTP 400 `-32602` invalid
+arguments, 403 `-32003` not authorized (scope or channel approval missing),
+409 `-32004` unavailable (paused, disconnected, not visible), 409 `-32005`
+refused the transition (lease lost, run already settled or cancelled, or the
+run is parked on an approval), 500 `-32603` internal.
+
+**What the team sees.** The run appears on the team board
+(`GET /v1/workspaces/{ws}/work-sessions/shared?include=runs`) as a card with
+the request title, the status (`waiting` / `running` / `done` / `failed` /
+`stopped`), the step labels, the PR link, the branch and the counts. Stage
+labels, the branch and the request title are **plain text**: no Markdown, no
+auto-links, no mentions. Only a validated `prUrl` is drawn as a link. All of
+it is what the agent **reported**; oort does not check that the PR exists or
+that the numbers are right, and it holds no GitHub token. Stage updates do
+not push a realtime event; they show on the next load of the board. A state
+change (queued to running, or finished) does send a refresh signal with no
+names or numbers. When a run ends, the person who asked gets one push if it
+took at least 60 seconds and they have the work-complete notification on;
+the thread reply is the `body` of `oort_run_complete`.
+
+**Lease and wake interval (the part to get right).** The lease is
+`MOMO_AGENT_PORT_HOSTED_LEASE_MINUTES` minutes (default 30, clamped to
+5..120; set by whoever runs the server). A claim or renew resets it to that
+length. Sleeping past it is not fatal:
+
+- If nobody claimed the job again, the same `leaseHandle` still works for
+  `oort_run_event`, `oort_run_complete` and `oort_job_renew` (implicit
+  renewal). Report with the stored handle first.
+- If the agent called `oort_jobs_claim` first, it received a new handle (the
+  job is claimable again as soon as the lease ends) and the **old handle
+  answers 409 `-32005` for good**. Use the new handle from then on. Do not
+  try to "fix" it by retrying the old one.
+- `oort_job_release` on an expired lease is 409. After expiry report or
+  claim; do not release.
+- A cancelled run, a disconnected connection or a narrowed channel approval
+  stops working at once whatever the lease says: the next call is 409/403.
+  That is how the agent learns of a cancel; oort cannot stop the VM process.
+- Keep the routine cadence (doorbell plus the 15-minute sweep, §3.3.17.5)
+  below the lease length. A run whose VM sleeps longer than the lease still
+  completes if no other wake claimed the job in between. Two routines
+  waking in a row is the usual way to lose the handle, which is why step (a)
+  stores it in `/workspace/oort-run.handle`.
+
+What proves each step on the server (existing conformance tests, read for
+this page and not run for it; they need an isolated PostgreSQL 18):
+
+| Step | Test |
+|---|---|
+| work request becomes run + job + inbox item, then claim | `a_hosted_agent_takes_a_work_request_as_run_job_and_inbox_item` and `every_d10_condition_refuses_with_409_and_writes_nothing` (`hosted_work_request_conformance_pg.rs`) |
+| claim, event, complete share the lease and terminal rules | `the_job_and_run_tools_share_the_gateway_lease_and_terminal_rules` (`agent_port_tools_conformance_pg.rs`) |
+| stage markers: 12 kept, bad text refused | `stage_markers_keep_the_latest_twelve_spend_steps_and_refuse_bad_text` |
+| artifacts stored, a bad one refuses the whole completion | `artifacts_are_stored_when_valid_and_a_bad_one_refuses_the_whole_completion` |
+| a dead handle cannot grow the audit log | `a_dead_lease_cannot_grow_the_audit_log_with_bad_reports` |
+| lease length and renew | `a_hosted_claim_leases_for_the_hosted_ttl_and_renew_extends_to_it` |
+| expired, not re-claimed: still reports and completes | `an_expired_unreclaimed_hosted_handle_still_reports_and_completes` |
+| re-claimed: old handle refused everywhere | `a_reclaimed_hosted_job_refuses_the_old_handle_everywhere` |
+| board card shows the run, not mention runs | `b9_a_hosted_work_run_is_a_run_item_only_when_asked_and_shows_no_detail` and `b11_mention_managed_linked_and_stale_runs_are_not_listed` (`work_board_conformance_pg.rs`) |
+| finish push to the requester | `a_hosted_work_run_answer_pushes_its_requester_on_the_sixth_reason` (`push_conformance_pg.rs`) |
+
+**Status: runtime-unverified.** Nothing here was round-tripped with a real
+Grok Bot VM. The tracked-work tools ship in v0.1.18 and are not on the team
+instance yet. Until the owner has run the checklist below, do not describe it
+as real-time or automatic reporting.
+
+**Owner checklist (run once after the v0.1.18 deploy, on your own Grok Bot
+account and VM).** Do not paste handles, bearers or invite values anywhere.
+
+1. Server: `tools/list` on the Agent Port shows `stage` on `oort_run_event`
+   and `artifacts` on `oort_run_complete`. If not, the server is older than
+   v0.1.18; stop.
+2. Connection: the Grok Bot connection is `active` (wizard step 5 done) and
+   the test channel is approved. The 3.3.17.1 `oort-doorbell` and the 3.3.17.5
+   `oort-inbox-sweep` routines both carry the new §3.3.17.4 text.
+3. Ask: in the approved channel, ask the agent for a small real change on a
+   repository it can reach (a one-line doc fix). Expect: the board (with runs
+   included) shows a card, status `waiting`; the request is a queued run.
+4. Wake: ring the doorbell or run the routine by hand. Expect: the card moves
+   to `running` and, after a refresh, the stage labels appear in order. They
+   are plain text.
+5. Finish: expect status `done`, a clickable PR link, the branch and the
+   counts, the agent's reply in the thread, and (if the run took 60 seconds
+   or more) one push to you.
+6. Long sleep (optional, on a test server with
+   `MOMO_AGENT_PORT_HOSTED_LEASE_MINUTES=5`): start a run, let the VM idle
+   past 5 minutes, wake it. Expect the stored handle still reports; if you
+   claim first, the old handle answers 409 `-32005`.
+7. Bad input (optional): send a stage containing `/`. Expect HTTP 400 and
+   the card unchanged. Complete with a PR URL on a non-GitHub host. Expect
+   HTTP 400, then a clean completion without it.
+8. Write the result (what happened at 3 to 7, with times, no secrets) in
+   issue #3519. Without it the PR stays `runtime-unverified`.
 
 ##### 3.3.17.5 15-minute sweep fallback
 

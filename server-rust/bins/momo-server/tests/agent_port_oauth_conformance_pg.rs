@@ -182,6 +182,7 @@ async fn start_server(pool: PgPool, oauth_enabled: bool) -> String {
         per_agent_limit: 0,
         per_ip_limit: 0,
         hosted_delivery_enabled: false,
+        hosted_lease_seconds: momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT,
         subscription_agents_enabled: true,
         claude_subscription_agents_enabled: false,
         oauth: if oauth_enabled {
