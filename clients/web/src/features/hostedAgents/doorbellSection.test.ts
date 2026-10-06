@@ -56,6 +56,15 @@ describe("도어벨 섹션 구조", () => {
     expect(section).toContain("doorbellFailureMessage(");
   });
 
+  it("미등록·게이트 열림일 때만 사전 점검 준비물을 보이고, 점검용 쓰기는 쏘지 않는다 (#3523)", () => {
+    expect(section).toContain("hosted-doorbell-precheck");
+    expect(section).toMatch(/projection === null && \(\s*<div[^>]*data-testid="hosted-doorbell-precheck"/);
+    expect(section).toContain("DOORBELL_PRECHECK_ITEMS");
+    // 등록(register)·해제(unregister) 호출은 사용자가 제출·확인했을 때만 mutation 으로 간다.
+    expect(section.match(/\bregisterHostedDoorbell\(/g)).toHaveLength(1);
+    expect(section.match(/unregisterHostedDoorbell\(/g)).toHaveLength(1);
+  });
+
   it("도어벨 mutation 키는 마법사 자격증명 키와 다르다", () => {
     expect(HOSTED_DOORBELL_MUTATION_KEY).not.toEqual(
       HOSTED_CREDENTIAL_MUTATION_KEY

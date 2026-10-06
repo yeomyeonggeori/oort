@@ -11,6 +11,9 @@ import type { CreatedAgent } from "@momo/core/lib/api";
 import { CreateAgentDialog } from "@/features/agentHub/CreateAgentDialog";
 import { EMPTY_AGENT_DRAFT, type AgentDraft } from "@/features/agentHub/createModel";
 import { HostedAgentWizard } from "@/features/hostedAgents/HostedAgentWizard";
+import type { HostedWizardLaunch } from "@/features/hostedAgents/hostedWizardLaunch";
+import { externalPresetSeed } from "@momo/core/features/hostedAgents/externalPresets";
+import { ExternalPresetPicker } from "./ExternalPresetPicker";
 import { SubscriptionAgentStart } from "@/features/welcome/harnessLogin/SubscriptionAgentStart";
 import { useSubscriptionEntryState } from "@/features/welcome/SubscriptionAgentEntry";
 import { createKindOptions, type CreateKindId, type CreateKindOption } from "./aiAgentsModel";
@@ -21,7 +24,7 @@ import { createKindOptions, type CreateKindId, type CreateKindOption } from "./a
 // 새 서버 길이 없다. 고른 종류가 이미 있는 창을 연다:
 //   팀 에이전트       → CreateAgentDialog (팀 AI 키로 답하는 멤버를 만든다)
 //   내 Claude Code·Codex → SubscriptionAgentStart (로그인 → 에이전트로 만들기 한 흐름, #3419, 데스크탑)
-//   다른 곳에서 도는 에이전트 → HostedAgentWizard (연결 값 발급)
+//   다른 곳에서 도는 에이전트 → ExternalPresetPicker(그록봇·일반·dots 곧) → HostedAgentWizard (연결 값 발급, #3523)
 // 잠긴 종류는 숨기지 않고 사유를 보여 준다: 웹에서 내 구독은 「데스크탑에서 해요」.
 // =============================================================================
 
@@ -104,6 +107,7 @@ export function CreateAgentFlow({
   const subscription = useSubscriptionEntryState();
   const [flow, setFlow] = useState<CreateKindId | null>(null);
   const [draft, setDraft] = useState<AgentDraft>(EMPTY_AGENT_DRAFT);
+  const [externalLaunch, setExternalLaunch] = useState<HostedWizardLaunch | null>(null);
   const openerRef = useRef<HTMLElement | null>(null);
   const options = createKindOptions({ mayCreate, subscription, externalProvided: isExternalProvided() });
 
@@ -145,11 +149,23 @@ export function CreateAgentFlow({
         onCreated={(created) => onCreated?.(created)}
       />
       {flow === "mySubscription" && <SubscriptionAgentStart open onClose={() => setFlow(null)} />}
-      <HostedAgentWizard
-        open={flow === "external"}
+      <ExternalPresetPicker
+        open={flow === "external" && externalLaunch === null}
         onOpenChange={(next) => {
           if (!next) setFlow(null);
         }}
+        onChoose={(presetId) => setExternalLaunch({ presetId, ...externalPresetSeed(presetId) })}
+        opener={opener ?? openerRef.current}
+      />
+      <HostedAgentWizard
+        open={flow === "external" && externalLaunch !== null}
+        onOpenChange={(next) => {
+          if (!next) {
+            setFlow(null);
+            setExternalLaunch(null);
+          }
+        }}
+        launch={externalLaunch}
         opener={opener ?? openerRef.current}
       />
     </>

@@ -6,7 +6,9 @@ import {
   boardSections,
   boardSummary,
   channelLabel,
+  isRunItem,
   ownedBy,
+  prFacts,
   sessionTitle,
   stateChipLabel,
   whereLabel,
@@ -140,11 +142,16 @@ export default function TeamBoardScreen({
   );
   const summary = useMemo(() => boardSummary(list.items), [list.items]);
 
-  const single = useTeamBoardItem(workspaceId, openId);
   const fromList =
     openId === null
       ? null
       : (list.items.find(item => uuidEq(item.sessionId, openId)) ?? null);
+  // 단건 읽기는 세션 전용이다(실행 줄은 목록의 줄이 정본이고 실시간 신호가 다시 읽게 한다).
+  const single = useTeamBoardItem(
+    workspaceId,
+    openId,
+    fromList === null || !isRunItem(fromList),
+  );
   // 단건 읽기가 더 최근의 답이다. 없으면 목록의 줄을 쓴다.
   const openItem: SharedWorkSession | null = single.data ?? fromList;
   const sheetGone = openId !== null && single.gone && fromList === null;
@@ -414,6 +421,9 @@ function BoardRow({
     .join(' / ');
   const activity = relativeLabel(item.lastActivityAt * 1000, nowMs);
   const channel = channelLabel(item);
+  const latestStage =
+    item.stages.length > 0 ? item.stages[item.stages.length - 1] : null;
+  const pr = prFacts(item.prUrl);
   return (
     <TapRow
       rowRef={rowRef}
@@ -437,6 +447,14 @@ function BoardRow({
           <StateChip item={item} testID={`team-board-state-${item.sessionId}`} />
           <LaneLabel item={item} />
         </View>
+        {latestStage !== null ? (
+          <Text
+            style={styles.rowStage}
+            numberOfLines={1}
+            testID={`team-board-stage-${item.sessionId}`}>
+            {latestStage}
+          </Text>
+        ) : null}
         {whereText !== '' ? (
           <Text style={styles.rowMono} numberOfLines={1}>
             {whereText}
@@ -445,6 +463,7 @@ function BoardRow({
         <View style={styles.metaLine}>
           <Text style={styles.rowMeta} numberOfLines={1}>
             {item.owner.displayName} · {channel} · {activity}
+            {pr !== null ? ` · ${pr.number}` : ''}
           </Text>
           <DiffNumbers item={item} />
         </View>
@@ -509,6 +528,11 @@ const buildStyles = (color: Palette) =>
       flexWrap: 'wrap',
       alignItems: 'center',
       gap: space.sm,
+    },
+    rowStage: {
+      fontSize: font.meta,
+      lineHeight: line.meta,
+      color: color.textMuted,
     },
     rowMono: {
       fontSize: font.meta,

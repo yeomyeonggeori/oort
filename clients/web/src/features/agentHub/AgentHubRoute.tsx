@@ -83,6 +83,7 @@ import {
 } from "@momo/core/features/agents/hubModel";
 import { AgentChannelsSection } from "./AgentChannelsSection";
 import { EnabledToolsSection } from "./EnabledToolsSection";
+import { RunReportSection } from "./RunReportSection";
 import { StatusChip } from "./StatusChip";
 import { useAgentToolCatalog } from "./useAgentToolCatalog";
 import { toolsProfilePut } from "./enabledToolsModel";
@@ -1398,6 +1399,7 @@ function RunDetail({ run }: { run: AgentRun }) {
             : DATE_TIME.format(run.finishedAtMs)}
         </RunDetailField>
       </dl>
+      <RunReportSection output={run.output} />
     </div>
   );
 }

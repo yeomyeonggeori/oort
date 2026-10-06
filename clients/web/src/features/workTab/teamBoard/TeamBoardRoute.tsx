@@ -6,7 +6,7 @@ import {
   useState,
   type KeyboardEvent,
 } from "react";
-import { Bot, SquareKanban, UserRound } from "lucide-react";
+import { Bot, GitPullRequest, SquareKanban, UserRound } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import type { SharedWorkSession } from "@momo/core/lib/api";
 import { uuidEq } from "@momo/core/lib/api";
@@ -16,7 +16,10 @@ import {
   doneSummary,
   channelLabel,
   groupByOwner,
+  harnessLabel,
+  isRunItem,
   itemsForView,
+  prFacts,
   sessionTitle,
   whereLabel,
   type BoardView,
@@ -25,6 +28,7 @@ import { relativeLabel } from "@momo/core/features/inbox/model";
 import { useSession } from "@/app/session";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { cn } from "@/design/lib/cn";
+import { isDesktop, openExternalUrl } from "@/lib/tauri";
 import { Button } from "@/design/ui/button";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import {
@@ -92,11 +96,16 @@ export function TeamBoardRoute() {
     [list.items, nowMs]
   );
 
-  const single = useTeamBoardItem(workspaceId, openId);
   const fromList =
     openId === null
       ? null
       : list.items.find((i) => uuidEq(i.sessionId, openId)) ?? null;
+  // 단건 읽기는 세션 전용이다(실행 줄은 목록의 줄이 정본이고 실시간 신호가 다시 읽게 한다).
+  const single = useTeamBoardItem(
+    workspaceId,
+    openId,
+    fromList === null || !isRunItem(fromList)
+  );
   // 단건 읽기가 더 최근의 답이다. 없으면 목록의 줄을 쓴다.
   const openItem: SharedWorkSession | null = single.data ?? fromList;
   const drawerGone = openId !== null && single.gone && fromList === null;
@@ -470,6 +479,9 @@ function BoardRow({
 }) {
   const where = whereLabel(item);
   const latestStage = item.stages.length > 0 ? item.stages[item.stages.length - 1] : null;
+  // 에이전트가 알린 PR만, 검증된 https 주소일 때만 링크가 된다. 줄 전체가 단추라서(안에
+  // 링크를 넣을 수 없다) 줄 아래에 형제로 둔다.
+  const pr = isRunItem(item) ? prFacts(item.prUrl) : null;
   return (
     <li>
       <button
@@ -483,6 +495,7 @@ function BoardRow({
         data-testid="team-board-row"
         data-session-id={item.sessionId}
         data-origin={item.origin}
+        data-source={item.source}
         className={cn(
           "team-board-row w-full rounded-lg px-3 py-2 text-start text-body text-ink focus-visible:focus-ring",
           // 전폭 행은 눌림을 채움으로만 한다(press 스케일 없음, ADR-0179 D5).
@@ -492,9 +505,9 @@ function BoardRow({
       >
         <span className="flex min-w-0 flex-col" data-col="task">
           <span className="truncate font-medium">{sessionTitle(item)}</span>
-          <span className="flex min-w-0 items-center gap-2 text-timestamp text-ink-muted">
+          <span className="flex min-w-0 flex-wrap items-center gap-x-2 text-timestamp text-ink-muted">
             <LaneLabel item={item} />
-            <span className="shrink-0">{item.harness}</span>
+            <span className="shrink-0">{harnessLabel(item)}</span>
             {latestStage !== null && (
               <span className="min-w-0 truncate" data-testid="team-board-stage">
                 {latestStage}
@@ -536,6 +549,27 @@ function BoardRow({
           {channelLabel(item)}
         </span>
       </button>
+      {pr !== null && (
+        <a
+          href={pr.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid="team-board-row-pr"
+          onClick={(event) => {
+        // 데스크탑 셸(wry)에서는 target="_blank"가 죽은 컨트롤이다: OS 브라우저로 넘긴다.
+        if (!isDesktop()) return;
+        event.preventDefault();
+        void openExternalUrl(pr.href);
+      }}
+          className="mb-1 ms-3 inline-flex min-h-6 max-w-full items-center gap-1 rounded-md px-1 py-1 text-timestamp text-ink-muted press hover:text-ink focus-visible:focus-ring"
+        >
+          <GitPullRequest aria-hidden className="size-3 shrink-0" />
+          <span className="truncate">
+            {pr.number} · {pr.repo}
+          </span>
+          <span className="sr-only">{TEAM_BOARD_COPY.openNewTab}</span>
+        </a>
+      )}
     </li>
   );
 }
