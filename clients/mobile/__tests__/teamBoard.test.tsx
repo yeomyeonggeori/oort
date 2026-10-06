@@ -12,7 +12,7 @@ import {
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
-import {Linking, StyleSheet, TextInput} from 'react-native';
+import {AppState, Linking, StyleSheet, TextInput} from 'react-native';
 import type {Centrifuge} from 'centrifuge';
 
 import '../src/boot/polyfills';
@@ -153,6 +153,26 @@ const sharedReads = (mock: jest.Mock) =>
   ).length;
 
 let queryClient: QueryClient | null = null;
+
+/** `AppState` 전이를 손으로 낸다(RN jest mock 은 emit 이 없다). 렌더 전에 건다. */
+function captureAppState(): (status: string) => void {
+  const handlers: ((status: string) => void)[] = [];
+  jest.spyOn(AppState, 'addEventListener').mockImplementation(((
+    _event: string,
+    fn: (status: string) => void,
+  ) => {
+    handlers.push(fn);
+    return {
+      remove: () => {
+        const at = handlers.indexOf(fn);
+        if (at >= 0) handlers.splice(at, 1);
+      },
+    };
+  }) as never);
+  return status => {
+    for (const fn of [...handlers]) fn(status);
+  };
+}
 
 interface FakeRail {
   value: RealtimeContextValue;
@@ -793,5 +813,55 @@ describe('소스 잠금: 보드는 터미널·컨트롤·원장 읽기를 끌어
       'fetchSharedWorkSession',
       'fetchSharedWorkSessions',
     ]);
+  });
+});
+
+describe('앱 복귀 재조회 (#3589 N9) — 단계에는 realtime이 없다', () => {
+  const stageRow = (stages: string[]) =>
+    row({sessionId: 'S-RUN-AGENT', origin: 'host', state: 'running', stages});
+
+  it('앱이 앞으로 돌아오면 보드를 다시 읽고 바뀐 단계를 보인다', async () => {
+    let stages = ['세션 시작'];
+    const mock = installFetch({
+      shared: () =>
+        jsonResponse(200, {sessions: [stageRow(stages)], nextCursor: null}),
+    });
+    const emit = captureAppState();
+    renderBoard();
+    await waitFor(() =>
+      expect(screen.getByTestId('team-board-stage-S-RUN-AGENT')).toHaveTextContent(
+        '세션 시작',
+      ),
+    );
+    const before = sharedReads(mock);
+    stages = ['세션 시작', 'PR 만드는 중'];
+    act(() => emit('background'));
+    expect(sharedReads(mock)).toBe(before);
+    act(() => emit('active'));
+    await waitFor(() =>
+      expect(screen.getByTestId('team-board-stage-S-RUN-AGENT')).toHaveTextContent(
+        'PR 만드는 중',
+      ),
+    );
+    expect(sharedReads(mock)).toBe(before + 1);
+  });
+
+  it('가려진 층은 앱이 돌아와도 읽지 않는다', async () => {
+    const mock = installFetch();
+    const emit = captureAppState();
+    renderBoard({active: false});
+    act(() => emit('active'));
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    });
+    expect(sharedReads(mock)).toBe(0);
+  });
+
+  it('「즉시」를 약속하는 문구가 없다', () => {
+    const src = fs.readFileSync(
+      path.join(__dirname, '../src/screens/TeamBoardScreen.tsx'),
+      'utf8',
+    );
+    expect(src).not.toMatch(/["'`>][^"'`<]*즉시/);
   });
 });
