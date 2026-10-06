@@ -126,8 +126,8 @@ use momo_auth::device_key::{
 use momo_auth::human_control::{consume_human_nonce_in_tx, db_now_ms, HumanControlRefusal};
 use momo_auth::{
     active_workspace_role, insert_work_host, insert_work_host_with_id, list_work_hosts,
-    load_work_host, lock_work_host_ownership, mark_work_host_revoked, normalize_public_key_b64,
-    touch_work_host_last_seen, NewWorkHost, Principal, WorkHostRecord,
+    load_work_host, lock_work_host_ownership, mark_work_host_revoked, member_display_names,
+    normalize_public_key_b64, touch_work_host_last_seen, NewWorkHost, Principal, WorkHostRecord,
 };
 use momo_db::{with_tenant_tx, DbError, PgConnection};
 use momo_outbox::{emit_outbox, OutboxKind};
@@ -284,8 +284,8 @@ pub(crate) fn work_host_dto(record: WorkHostRecord) -> Result<WorkHostDto, ApiEr
         owner_member_id: record.owner_member_id.to_string(),
         host_type: record.host_type,
         display_name: record.display_name,
-        public_key: record.public_key,
-        capabilities,
+        public_key: Some(record.public_key),
+        capabilities: Some(capabilities),
         last_seen_at_ms: record.last_seen_at_ms,
         revoked_at_ms: record.revoked_at_ms,
         created_at_ms: record.created_at_ms,
@@ -544,7 +544,7 @@ pub async fn list(
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let member_id = principal.member_id;
 
-    let records = with_tenant_tx(&state.pool, workspace_id, move |conn| {
+    let (records, owner_names) = with_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
             if active_workspace_role(conn, workspace_id, member_id)
                 .await?
@@ -552,7 +552,15 @@ pub async fn list(
             {
                 return Ok(None);
             }
-            Ok::<_, DbError>(Some(list_work_hosts(conn).await?))
+            let hosts = list_work_hosts(conn).await?;
+            // Only the owners of hosts the caller does not own are looked up.
+            let foreign_owners: Vec<Uuid> = hosts
+                .iter()
+                .filter(|host| host.scope == "member" && host.owner_member_id != member_id)
+                .map(|host| host.owner_member_id)
+                .collect();
+            let names = member_display_names(conn, &foreign_owners).await?;
+            Ok::<_, DbError>(Some((hosts, names)))
         })
     })
     .await
@@ -562,9 +570,35 @@ pub async fn list(
     Ok(Json(WorkHostListResponse {
         work_hosts: records
             .into_iter()
-            .map(work_host_dto)
+            .map(|record| {
+                let foreign = record.scope == "member" && record.owner_member_id != member_id;
+                let owner_name = owner_names.get(&record.owner_member_id).cloned();
+                work_host_dto(record).map(|dto| {
+                    if foreign {
+                        presence_only(dto, owner_name)
+                    } else {
+                        dto
+                    }
+                })
+            })
             .collect::<Result<Vec<_>, _>>()?,
     }))
+}
+
+/// ADR-0188 증보 (#3583): somebody else's personal machine is listed as
+/// presence only. The chosen device name is replaced by a generic one built from
+/// the owner's name, and the public key and capability flags are withheld. The
+/// id, scope, type, owner, `online` and revocation stay, so the observing
+/// surfaces (`hasOnlineWorkHost`, `showsOneWayNote`) and an admin's revoke by id
+/// keep working.
+pub(crate) fn presence_only(mut dto: WorkHostDto, owner_name: Option<String>) -> WorkHostDto {
+    dto.display_name = match owner_name.as_deref().map(str::trim) {
+        Some(name) if !name.is_empty() => format!("{name}의 맥"),
+        _ => "팀원의 맥".to_string(),
+    };
+    dto.public_key = None;
+    dto.capabilities = None;
+    dto
 }
 
 /// `GET /v1/workspaces/{ws}/work-hosts/{host}/pending-controls` (Swift

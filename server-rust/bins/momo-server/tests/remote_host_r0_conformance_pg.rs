@@ -4048,3 +4048,91 @@ async fn c3431_7_a_cloud_hosts_signed_session_create_is_refused_while_off() {
         "flag on: the signed create is accepted"
     );
 }
+
+/// #3583 / ADR-0188 증보: `GET …/work-hosts` hands a member **who is not the
+/// owner** only presence for somebody else's personal machine — id, scope, type,
+/// owner, online, revoked. The device name is replaced by a generic one built
+/// from the owner's name, and the public key and capability flags are absent.
+/// The owner and the workspace-scoped box keep the full row, and the observing
+/// surfaces still see that a host is online.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn r0_3583_other_members_personal_host_is_listed_as_presence_only() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let (member, member_email) = seed_human(&su, tenant.workspace, "member", "민준").await;
+    join_channel(&su, tenant.workspace, tenant.channel, member).await;
+    let (admin, admin_email) = seed_teammate(&su, &tenant).await;
+    let secret_name = "서재의 비밀 맥북";
+    let (laptop, _) = seed_host(&su, &tenant, tenant.owner, "member", "app", secret_name).await;
+    let vps = seed_team_box(&su, &tenant, "팀 VPS").await;
+    let _ = admin;
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let list = |token: String| {
+        let http = http.clone();
+        let url = format!("{base}/v1/workspaces/{}/work-hosts", tenant.workspace);
+        async move {
+            let response = http
+                .get(url)
+                .header("Authorization", format!("Bearer {token}"))
+                .send()
+                .await
+                .expect("list work hosts");
+            assert_eq!(response.status(), 200);
+            let body: Value = response.json().await.expect("list body");
+            body["workHosts"].as_array().cloned().expect("workHosts")
+        }
+    };
+    let find = |rows: &[Value], id: Uuid| -> Value {
+        rows.iter()
+            .find(|row| row["id"] == json!(id.to_string()))
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+
+    // The owner sees the whole row.
+    let owner_token = login(&http, &base, tenant.workspace, &tenant.owner_email).await;
+    let owner_rows = list(owner_token).await;
+    let own = find(&owner_rows, laptop);
+    assert_eq!(own["displayName"], json!(secret_name));
+    assert!(own["publicKey"].as_str().is_some_and(|k| !k.is_empty()));
+    assert!(own.get("capabilities").is_some());
+
+    // A plain member and an admin both get presence only for the owner's laptop.
+    for email in [&member_email, &admin_email] {
+        let token = login(&http, &base, tenant.workspace, email).await;
+        let rows = list(token).await;
+        let theirs = find(&rows, laptop);
+        assert_ne!(
+            theirs,
+            Value::Null,
+            "presence of the laptop is still listed"
+        );
+        assert_eq!(theirs["ownerMemberId"], json!(tenant.owner.to_string()));
+        assert_eq!(theirs["scope"], json!("member"));
+        assert_eq!(theirs["type"], json!("app"));
+        assert_eq!(theirs["online"], json!(true));
+        assert_eq!(theirs["displayName"], json!("성재의 맥"));
+        assert!(
+            theirs.get("publicKey").is_none(),
+            "public key leaked: {theirs}"
+        );
+        assert!(
+            theirs.get("capabilities").is_none(),
+            "capabilities leaked: {theirs}"
+        );
+        assert!(
+            !serde_json::to_string(&rows).unwrap().contains(secret_name),
+            "the device name leaked into the list"
+        );
+        // The workspace box is unchanged for everybody.
+        let team = find(&rows, vps);
+        assert_eq!(team["displayName"], json!("팀 VPS"));
+        assert!(team["publicKey"].as_str().is_some_and(|k| !k.is_empty()));
+        assert!(team.get("capabilities").is_some());
+    }
+}

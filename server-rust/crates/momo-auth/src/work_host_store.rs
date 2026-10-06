@@ -198,6 +198,24 @@ pub async fn list_work_hosts(conn: &mut PgConnection) -> Result<Vec<WorkHostReco
     rows.iter().map(decode_host).collect()
 }
 
+/// Display names of the given members (RLS confines it to the transaction's
+/// workspace). Used to name a host the viewer does not own (#3583).
+pub async fn member_display_names(
+    conn: &mut PgConnection,
+    member_ids: &[Uuid],
+) -> Result<std::collections::HashMap<Uuid, String>, sqlx::Error> {
+    if member_ids.is_empty() {
+        return Ok(Default::default());
+    }
+    let rows = sqlx::query("SELECT id, display_name FROM member WHERE id = ANY($1)")
+        .bind(member_ids)
+        .fetch_all(&mut *conn)
+        .await?;
+    rows.iter()
+        .map(|row| Ok((row.try_get("id")?, row.try_get("display_name")?)))
+        .collect()
+}
+
 /// Lock a host and report who owns it / whether it is already revoked
 /// (Swift `revoke` :477-489).
 pub async fn lock_work_host_ownership(
