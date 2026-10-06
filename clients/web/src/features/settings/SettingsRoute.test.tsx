@@ -418,6 +418,23 @@ describe("SettingsRoute 전면 레이아웃", () => {
       profile.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
     });
     expect(document.activeElement).toBe(host.querySelector('[data-testid="settings-nav-ai"]'));
+    // 가로 한 줄(폰)에서는 ←→, 양 끝은 Home/End.
+    act(() => {
+      (document.activeElement as HTMLElement).dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Home", bubbles: true })
+      );
+    });
+    expect(document.activeElement).toBe(profile);
+    act(() => {
+      profile.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    });
+    expect(document.activeElement).toBe(host.querySelector('[data-testid="settings-nav-appearance"]'));
+    act(() => {
+      (document.activeElement as HTMLElement).dispatchEvent(
+        new KeyboardEvent("keydown", { key: "End", bubbles: true })
+      );
+    });
+    expect(document.activeElement).toBe(host.querySelector('[data-testid="settings-nav-ai"]'));
     expect(nav).not.toBeNull();
   });
 });

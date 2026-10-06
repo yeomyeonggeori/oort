@@ -47,6 +47,11 @@ describe("SettingsPageHeader", () => {
     );
   });
 
+  it("바뀐 제목을 보조기술이 읽도록 머리가 polite live 영역이다", () => {
+    const h = mount(<SettingsPageHeader title="모양" />);
+    expect(h.querySelector("header")?.getAttribute("aria-live")).toBe("polite");
+  });
+
   it("h1은 포커스를 받을 수 있다(진입 포커스 폴백)", () => {
     const h = mount(<SettingsPageHeader title="프로필" />);
     expect(h.querySelector("h1")?.getAttribute("tabindex")).toBe("-1");

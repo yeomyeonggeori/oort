@@ -17,8 +17,14 @@ export const SettingsPageHeader = forwardRef<
     scope?: SettingsScope;
   }
 >(function SettingsPageHeader({ title, description, scope }, ref) {
+  // aria-live: 목록에서 다른 페이지를 고르면 포커스는 목록에 남으므로, 바뀐 제목을
+  // 보조기술이 읽게 한다(처음 그릴 때는 읽지 않는다).
   return (
-    <header className="flex min-w-0 flex-col gap-1" data-testid="settings-page-header">
+    <header
+      className="flex min-w-0 flex-col gap-1"
+      aria-live="polite"
+      data-testid="settings-page-header"
+    >
       <h1
         ref={ref}
         tabIndex={-1}

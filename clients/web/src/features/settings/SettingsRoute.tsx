@@ -181,17 +181,26 @@ export function SettingsRoute() {
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [close]);
 
-  // Arrow keys move focus through the nav; Enter and Space activate through the
-  // native button, so no key handling is duplicated for activation.
+  // Arrow keys move focus through the nav (↑↓ in the column, ←→ in the phone's one-row
+  // list, Home/End to the ends); Enter and Space activate through the native button, so no
+  // key handling is duplicated for activation.
   function onNavKeyDown(event: React.KeyboardEvent) {
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    const next = event.key === "ArrowDown" || event.key === "ArrowRight";
+    const prev = event.key === "ArrowUp" || event.key === "ArrowLeft";
+    const home = event.key === "Home";
+    const end = event.key === "End";
+    if (!next && !prev && !home && !end) return;
     event.preventDefault();
     const ids = sections.map((s) => s.id);
+    if (home || end) {
+      navRefs.current[ids[home ? 0 : ids.length - 1]]?.focus();
+      return;
+    }
     const focused = ids.findIndex(
       (id) => navRefs.current[id] === document.activeElement
     );
     const from = focused >= 0 ? focused : ids.indexOf(section);
-    const step = event.key === "ArrowDown" ? 1 : ids.length - 1;
+    const step = next ? 1 : ids.length - 1;
     navRefs.current[ids[(from + step) % ids.length]]?.focus();
   }
 
