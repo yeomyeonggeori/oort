@@ -146,6 +146,8 @@ full transitive graph is still only license-gated, not bundled.
 | Component | Version | License | Where | Introduced by |
 |---|---|---|---|---|
 | expo-blur | 57.0.3 | MIT | `clients/mobile` (npm + CocoaPods `ExpoBlur`) | ADR-0189 D6, #2714 (tab bar glass) |
+| expo-haptics | 57.0.3 | MIT | `clients/mobile` (npm + CocoaPods `ExpoHaptics`) | #3580 (tab·profile·filter haptics; 1st-party Expo SDK 57 module) |
+| expo-glass-effect | 57.0.4 | MIT | `clients/mobile` (npm + CocoaPods `ExpoGlassEffect`) | #3580 (iOS 26 Liquid Glass tab bar; falls back to expo-blur below iOS 26) |
 | Lucide icon paths `home`·`inbox`·`search`·`plus` | via design mockup A | ISC | `clients/mobile/src/design/icons/*.png` (rasterized) | #2714 (shell icons; same set the web uses as `lucide-react`) |
 
 ### Desktop client direct additions

@@ -49,6 +49,7 @@ import {
   useNeedsAction,
   type Feed,
 } from '../features/inbox/useInbox';
+import {haptics} from '../lib/haptics';
 import {useTabBarClearance} from '../shell/ShellChrome';
 import {useSession} from '../session/useSession';
 
@@ -359,7 +360,11 @@ export default function InboxScreen({
                   ? `${filterLabel(value)}, ${chipCount(value)}개`
                   : filterLabel(value)
               }
-              onPress={() => setFilter(value)}
+              onPress={() => {
+                // 이미 고른 칩을 다시 누르는 것은 값이 넘어가는 것이 아니다.
+                if (value !== filter) haptics.selection();
+                setFilter(value);
+              }}
               style={({pressed}) => [
                 styles.tab,
                 value === filter && styles.tabActive,
