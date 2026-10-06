@@ -12,7 +12,7 @@ import {
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
-import {StyleSheet, TextInput} from 'react-native';
+import {Linking, StyleSheet, TextInput} from 'react-native';
 import type {Centrifuge} from 'centrifuge';
 
 import '../src/boot/polyfills';
@@ -624,6 +624,101 @@ describe('레일: subscribeWorkBoard', () => {
         ts: 1,
         payload: {session_id: 'S-1', channel_id: CH_A, kind: 'state_changed'},
       },
+    });
+    expect(signals).toBe(1);
+    off();
+  });
+});
+
+const lit = (text: string): RegExp =>
+  new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+
+describe('에이전트 작업 줄 (#3518)', () => {
+  const RUN_WIRE = {
+    source: 'run',
+    runId: 'R-1',
+    requestedBy: {memberId: SELF_ID, displayName: '곽성재'},
+    stepCount: 2,
+    commits: 2,
+    origin: 'agent_run',
+    label: '[label](javascript:alert(2))',
+    folderLabel: null,
+    status: 'running',
+    owner: {memberId: OTHER_ID, displayName: '그록봇'},
+    homeChannel: {id: CH_B, name: 'agent-lab'},
+    startedAtMs: Date.now() - 600_000,
+    endedAtMs: null,
+    sharedAtMs: null,
+    repo: null,
+    branch: '<b>evil</b>',
+    harness: 'hosted',
+    state: 'running',
+    stages: ['[x](javascript:alert(1))', '<img src=x onerror=alert(1)>'],
+    diff: {added: 30, deleted: 4, files: null, ahead: null, behind: null, uncommitted: null},
+    prUrl: 'https://github.com/acme/oort/pull/12',
+    lastActivityAt: Math.floor(Date.now() / 1000) - 60,
+  };
+
+  it('include=runs로 읽고, runId 줄을 그리고, 열어도 단건 읽기를 하지 않는다', async () => {
+    const mock = installFetch({
+      shared: () => jsonResponse(200, {sessions: [RUN_WIRE], nextCursor: null}),
+    });
+    renderBoard();
+    await waitFor(() => expect(screen.getByTestId('team-board-row-R-1')).toBeTruthy());
+    expect(
+      mock.mock.calls.some(([url]) => String(url).includes('include=runs')),
+    ).toBe(true);
+    fireEvent.press(screen.getByTestId('team-board-row-R-1'));
+    await waitFor(() => expect(screen.getByTestId('team-detail-sheet')).toBeTruthy());
+    expect(
+      mock.mock.calls.some(([url]) => /\/work-sessions\/R-1\/shared/.test(String(url))),
+    ).toBe(false);
+    expect(screen.getByTestId('team-detail-lane')).toHaveTextContent(
+      /에이전트 · 곽성재가 시킴/,
+    );
+    expect(screen.getByTestId('team-detail-pr')).toHaveTextContent(/PR #12/);
+    expect(screen.getByTestId('team-detail-terminal-note')).toHaveTextContent(
+      /에이전트가 스스로 알린/,
+    );
+  });
+
+  it('보안: 단계·브랜치·이름은 글자 그대로이고 누르면 어디도 열리지 않는다', async () => {
+    installFetch({
+      shared: () => jsonResponse(200, {sessions: [RUN_WIRE], nextCursor: null}),
+    });
+    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    renderBoard();
+    await waitFor(() => expect(screen.getByTestId('team-board-row-R-1')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('team-board-row-R-1'));
+    await waitFor(() => expect(screen.getByTestId('team-detail-sheet')).toBeTruthy());
+    expect(screen.getByTestId('team-detail-stages')).toHaveTextContent(
+      lit('[x](javascript:alert(1))'),
+    );
+    expect(screen.getByTestId('team-detail-stages')).toHaveTextContent(
+      lit('<img src=x onerror=alert(1)>'),
+    );
+    expect(screen.getByTestId('team-detail-title')).toHaveTextContent(
+      lit('[label](javascript:alert(2))'),
+    );
+    expect(screen.getByTestId('team-detail-where')).toHaveTextContent(lit('<b>evil</b>'));
+    fireEvent.press(screen.getByTestId('team-detail-stages'));
+    fireEvent.press(screen.getByTestId('team-detail-title'));
+    expect(open).not.toHaveBeenCalled();
+    open.mockRestore();
+  });
+
+  it('work.run.updated 프레임은 신호가 된다', () => {
+    const {Centrifuge: Fake} = jest.requireMock('centrifuge') as {
+      Centrifuge: new (url: string, options: unknown) => Centrifuge;
+    };
+    const client = new Fake('wss://example.test/connection/websocket', {}) as Centrifuge & {
+      subs: Map<string, {__emit: (e: string, c: unknown) => void}>;
+    };
+    const rail = createChannelRail(() => client);
+    let signals = 0;
+    const off = rail.subscribeWorkBoard(WS, CH_A, {onSignal: () => (signals += 1)});
+    client.subs.get(centrifugoChannelName(WS, CH_A))?.__emit('publication', {
+      data: {type: 'work.run.updated', v: 1, ts: 1, payload: {run_id: 'R-1', channel_id: CH_A, to: 'done'}},
     });
     expect(signals).toBe(1);
     off();

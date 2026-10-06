@@ -50,3 +50,30 @@ export function agentRow(overrides: Partial<SharedWorkSession> = {}): SharedWork
     ...overrides,
   });
 }
+
+/** 호스팅 에이전트의 작업 실행 줄(AT-4 `source: "run"`). `sessionId`는 runId다. */
+export function runRow(overrides: Partial<SharedWorkSession> = {}): SharedWorkSession {
+  const now = Date.now();
+  return sharedRow({
+    sessionId: "00000000-0000-7000-8000-0000000000c1",
+    source: "run",
+    runId: "00000000-0000-7000-8000-0000000000c1",
+    requestedBy: { memberId: ME, displayName: "곽성재" },
+    stepCount: 3,
+    origin: "agent_run",
+    label: "온보딩 문구 다듬기",
+    folderLabel: null,
+    status: "running",
+    owner: { memberId: "00000000-0000-7000-8000-0000000000aa", displayName: "그록봇" },
+    homeChannel: { id: CH_AGENT_LAB, name: "agent-lab" },
+    repo: null,
+    branch: "feat/onboarding-copy",
+    harness: "hosted",
+    state: "running",
+    stages: ["코드 읽는 중", "문구 고치는 중"],
+    diff: { added: 30, deleted: 4, files: null, ahead: 2, behind: null, uncommitted: null },
+    prUrl: null,
+    lastActivityAt: Math.floor((now - 120_000) / 1000),
+    ...overrides,
+  });
+}
