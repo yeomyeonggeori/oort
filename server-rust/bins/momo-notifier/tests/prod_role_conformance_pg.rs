@@ -23,12 +23,23 @@
 //! |---|---|
 //! | `every_notifier_job_iteration_runs_as_its_production_role` | drop a notifier GRANT the job needs (e.g. `work_session_share`), or move a write back onto the notifier pool |
 //! | `the_notifier_role_has_no_delete_and_no_table_it_does_not_name` | add DELETE / `ALL TABLES` for `momo_notifier` |
-//! | `the_other_runtime_roles_reach_every_table_the_migrations_created` | a new table that `app`/`relay`/`worker` cannot read or write |
+//! | `a_hosted_work_run_push_and_run_status_trigger_run_as_the_notifier_role` (#3553) | drop `GRANT SELECT (workspace_id, agent_member_id) ON hosted_agent_connection` — the push judgment `wrun` arm and the migration-120 `agent_run` trigger both read it |
+//! | `the_other_runtime_roles_reach_every_table_the_migrations_created` | a new table that `app`/`relay`/`worker` cannot read or write, or a cloud-box lockdown that drifts |
+//!
+//! Why #3553 got through anyway: the first test below already called
+//! `judge_targets` as the notifier (Postgres checks table privileges when a
+//! statement starts, even for an unknown message id), so it was red from the
+//! moment #3533 added `hosted_agent_connection` to the judgment SQL — but nothing
+//! ran this suite: it is not wired into any PR gate, only into the manual
+//! `scripts/verify_notifier_prod_roles.sh`. The #3553 test also drives a real
+//! hosted work run through claim -> judge -> dispatch -> settle and the
+//! `agent_run` status trigger, so the proof does not rest on that accident.
 
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
+use momo_agent::{end_parked_run_in_tx, RunStatus};
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::PgPool;
 use momo_drive::StubDriveArchive;
@@ -218,6 +229,22 @@ struct NoPush;
 #[async_trait::async_trait]
 impl PushDispatcher for NoPush {
     async fn dispatch(&self, _dispatch: &PushDispatch) -> DispatchOutcome {
+        DispatchOutcome::Accepted {
+            apns_status: 200,
+            apns_reason: None,
+        }
+    }
+}
+
+/// Records every dispatch (the stand-in for the push relay) and accepts it.
+struct RecordingPush {
+    sent: Mutex<Vec<PushDispatch>>,
+}
+
+#[async_trait::async_trait]
+impl PushDispatcher for RecordingPush {
+    async fn dispatch(&self, dispatch: &PushDispatch) -> DispatchOutcome {
+        self.sent.lock().unwrap().push(dispatch.clone());
         DispatchOutcome::Accepted {
             apns_status: 200,
             apns_reason: None,
@@ -456,6 +483,273 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
     assert_eq!(unreclaimed, 0, "the abandoned avatar row was reclaimed");
 }
 
+/// A hosted agent's finished `type=work` run, seeded as the production code
+/// leaves it: hosted sentinel agent + `hosted_agent_connection`, a succeeded run
+/// of 90 s, the requester's `agent.work.queued` audit row, and the agent's answer
+/// (`client_msg_id = run_id`) — whose insert fires the 011 trigger and enqueues the
+/// push candidate. A second run is parked on an approval for the status trigger.
+struct HostedRun {
+    workspace: Uuid,
+    requester: Uuid,
+    answer: Uuid,
+    parked_run: Uuid,
+}
+
+async fn seed_hosted_work_run(su: &PgPool) -> HostedRun {
+    let workspace = Uuid::new_v4();
+    let requester = Uuid::new_v4();
+    let agent = Uuid::new_v4();
+    let channel = Uuid::new_v4();
+    let device = Uuid::new_v4();
+    sqlx::query("INSERT INTO workspace (id, slug, name) VALUES ($1, $2, $2)")
+        .bind(workspace)
+        .bind(workspace.to_string())
+        .execute(su)
+        .await
+        .expect("workspace");
+    for (id, kind, handle) in [(requester, "human", "req"), (agent, "agent", "hosted")] {
+        sqlx::query(
+            "INSERT INTO member (id, workspace_id, kind, status, display_name, handle) \
+             VALUES ($1, $2, $3::member_kind, 'active', $4, $5)",
+        )
+        .bind(id)
+        .bind(workspace)
+        .bind(kind)
+        .bind(handle)
+        .bind(format!("{handle}{}", id.simple()))
+        .execute(su)
+        .await
+        .expect("member");
+    }
+    sqlx::query(
+        "INSERT INTO agent (member_id, workspace_id, model, base_url, max_concurrent_runs, \
+                            max_run_steps, owner_human_id, config) \
+         VALUES ($1, $2, 'hosted-agent', 'https://hosted-agent.invalid/disabled', 4, 50, $3, \
+                 jsonb_build_object('execution_mode', 'hosted_dial_in'))",
+    )
+    .bind(agent)
+    .bind(workspace)
+    .bind(requester)
+    .execute(su)
+    .await
+    .expect("agent");
+    sqlx::query(
+        "INSERT INTO hosted_agent_connection \
+           (workspace_id, agent_member_id, status, created_by, pairing_challenge_hash, \
+            pairing_expires_at) \
+         VALUES ($1, $2, 'pairing_pending', $3, '\\x00'::bytea, now() + interval '1 hour')",
+    )
+    .bind(workspace)
+    .bind(agent)
+    .bind(requester)
+    .execute(su)
+    .await
+    .expect("hosted connection");
+    sqlx::query(
+        "INSERT INTO channel (id, workspace_id, kind, name) VALUES ($1, $2, 'public', 'work')",
+    )
+    .bind(channel)
+    .bind(workspace)
+    .execute(su)
+    .await
+    .expect("channel");
+    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
+        .bind(channel)
+        .bind(workspace)
+        .execute(su)
+        .await
+        .expect("channel_seq");
+    for member in [requester, agent] {
+        sqlx::query(
+            "INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)",
+        )
+        .bind(workspace)
+        .bind(channel)
+        .bind(member)
+        .execute(su)
+        .await
+        .expect("membership");
+    }
+    sqlx::query(
+        "INSERT INTO device (id, workspace_id, member_id, platform) \
+         VALUES ($1, $2, $3, 'ios'::device_platform)",
+    )
+    .bind(device)
+    .bind(workspace)
+    .bind(requester)
+    .execute(su)
+    .await
+    .expect("device");
+    sqlx::query(
+        "INSERT INTO push_token (workspace_id, device_id, member_id, apns_token, env, topic) \
+         VALUES ($1, $2, $3, $4, 'sandbox'::push_env, 'kim.dawn.momo.e2e')",
+    )
+    .bind(workspace)
+    .bind(device)
+    .bind(requester)
+    .bind(Uuid::new_v4().simple().to_string().repeat(2))
+    .execute(su)
+    .await
+    .expect("push token");
+
+    let run = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO agent_run \
+           (id, workspace_id, agent_member_id, channel_id, status, input, idempotency_key, \
+            started_at, finished_at) \
+         VALUES ($1, $2, $3, $4, 'succeeded', jsonb_build_object('type', 'work'), $5, \
+                 now() - interval '90 seconds', now())",
+    )
+    .bind(run)
+    .bind(workspace)
+    .bind(agent)
+    .bind(channel)
+    .bind(format!("t:{run}"))
+    .execute(su)
+    .await
+    .expect("finished run");
+    sqlx::query(
+        "INSERT INTO audit_log (workspace_id, actor_member_id, action, target_type, target_id, run_id) \
+         VALUES ($1, $2, 'agent.work.queued', 'agent_run', $3, $3)",
+    )
+    .bind(workspace)
+    .bind(requester)
+    .bind(run)
+    .execute(su)
+    .await
+    .expect("requester audit row");
+    let answer: Uuid = sqlx::query_scalar(
+        "INSERT INTO message \
+           (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, \
+            client_msg_id, run_id) \
+         VALUES ($1, $2, 1, 1, 0, $3, 'text', 'answer', $4, $4) RETURNING id",
+    )
+    .bind(workspace)
+    .bind(channel)
+    .bind(agent)
+    .bind(run)
+    .fetch_one(su)
+    .await
+    .expect("run answer (fires push_candidate_enqueue_trg)");
+
+    let parked_run = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO agent_run \
+           (id, workspace_id, agent_member_id, channel_id, status, input, idempotency_key, \
+            started_at) \
+         VALUES ($1, $2, $3, $4, 'awaiting_approval', jsonb_build_object('type', 'work'), $5, now())",
+    )
+    .bind(parked_run)
+    .bind(workspace)
+    .bind(agent)
+    .bind(channel)
+    .bind(format!("t:{parked_run}"))
+    .execute(su)
+    .await
+    .expect("parked run");
+    HostedRun {
+        workspace,
+        requester,
+        answer,
+        parked_run,
+    }
+}
+
+/// #3553 — the v0.1.18 incident: the push judgment's hosted-work-run arm and the
+/// migration-120 `agent_run` status trigger both read `hosted_agent_connection`,
+/// which the notifier role could not. Runs the real paths as `momo_notifier`.
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn a_hosted_work_run_push_and_run_status_trigger_run_as_the_notifier_role() {
+    let db = ProdDb::create().await;
+    let seeded = seed_hosted_work_run(&db.su).await;
+    let notifier = db.role("momo_notifier", "momo_notifier_dev_pw").await;
+    let mut report = Report { failures: vec![] };
+
+    // The judgment itself, on the real message: the `wrun` arm must select the
+    // requester for `work_run_done`.
+    {
+        let mut conn = notifier.acquire().await.expect("acquire");
+        match momo_push::judge_targets(&mut conn, seeded.workspace, seeded.answer).await {
+            Ok(targets) => {
+                let hit = targets.iter().any(|t| {
+                    t.member_id == seeded.requester && t.reason.as_str() == "work_run_done"
+                });
+                if !hit {
+                    report.failures.push(format!(
+                        "push judgment (as momo_notifier): no work_run_done target for the requester: {targets:?}"
+                    ));
+                }
+            }
+            Err(error) => report
+                .failures
+                .push(format!("push judgment (as momo_notifier): {error}")),
+        }
+    }
+
+    // The whole drain: claim → judge → badge → dispatch log → settle.
+    let relay = Arc::new(RecordingPush {
+        sent: Mutex::new(Vec::new()),
+    });
+    let drain = PushDrain::new(notifier.clone(), PushConfig::for_target(), relay.clone());
+    report.check("push drain", "momo_notifier", drain.drain_once(16).await);
+    let sent = relay.sent.lock().unwrap().clone();
+    let delivered = sent
+        .iter()
+        .filter(|d| d.reason == "work_run_done" && d.message_id == seeded.answer.to_string())
+        .count();
+    if delivered != 1 {
+        report.failures.push(format!(
+            "push drain (as momo_notifier): expected one work_run_done dispatch, got {delivered}: {sent:?}"
+        ));
+    }
+
+    // The status trigger: the approval sweep's real statement ends a parked hosted
+    // run; migration 120's trigger then reads `hosted_agent_connection` and writes
+    // `outbox`, both as the notifier.
+    let ended: Result<bool, String> = async {
+        let mut tx = notifier.begin().await.map_err(|e| e.to_string())?;
+        let ended = end_parked_run_in_tx(
+            &mut tx,
+            seeded.parked_run,
+            RunStatus::TimedOut,
+            &serde_json::json!({"code": "approval_expired"}),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        tx.commit().await.map_err(|e| e.to_string())?;
+        Ok(ended)
+    }
+    .await;
+    report.check("agent_run status trigger", "momo_notifier", ended.clone());
+    if ended == Ok(false) {
+        report
+            .failures
+            .push("agent_run status trigger: the parked run was not ended".to_string());
+    }
+    let board_events: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox \
+          WHERE workspace_id = $1 AND payload->'data'->>'type' = 'work.run.updated' \
+            AND payload->'data'->'payload'->>'run_id' = $2",
+    )
+    .bind(seeded.workspace)
+    .bind(seeded.parked_run.to_string())
+    .fetch_one(&db.su)
+    .await
+    .expect("count board events");
+
+    db.finish().await;
+    assert!(
+        report.failures.is_empty(),
+        "hosted work run paths failed as the production notifier role:\n  {}",
+        report.failures.join("\n  ")
+    );
+    assert!(
+        board_events >= 1,
+        "the migration-120 trigger wrote a work.run.updated outbox row"
+    );
+}
+
 #[tokio::test]
 #[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
 async fn the_notifier_role_has_no_delete_and_no_table_it_does_not_name() {
@@ -482,9 +776,10 @@ async fn the_notifier_role_has_no_delete_and_no_table_it_does_not_name() {
 #[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
 async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     let db = ProdDb::create().await;
-    // `mem_*` tables (#3161) and the migration-owned `plugin_registry` (revoked from
-    // momo_app on purpose) are the only tables outside the rule; everything else must
-    // be readable and writable by the three ALL-TABLES roles.
+    // `mem_*` tables (#3161), the migration-owned `plugin_registry` (revoked from
+    // momo_app on purpose) and the `cloud_box*` tables (ADR-0197 D10 lockdown, see
+    // below) are the only tables outside the rule; everything else must be readable
+    // and writable by the three ALL-TABLES roles.
     let missing: Vec<String> = sqlx::query_scalar(
         "SELECT format('%s:%s:%s', r.rolname, c.relname, p.priv) \
            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
@@ -492,15 +787,37 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
            CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')) AS p(priv) \
           WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') \
             AND c.relname NOT LIKE 'mem\\_%' AND c.relname <> 'plugin_registry' \
+            AND c.relname NOT LIKE 'cloud\\_box%' \
             AND NOT has_table_privilege(r.rolname, c.oid, p.priv) \
           ORDER BY 1",
     )
     .fetch_all(&db.su)
     .await
     .expect("privilege scan");
+    // `cloud-box-lockdown` (bootstrap_runtime_roles.sql, #3500 M1): momo_app holds
+    // exactly SELECT/INSERT/UPDATE on the box tables; relay/worker/notifier none.
+    let box_drift: Vec<String> = sqlx::query_scalar(
+        "SELECT format('%s:%s:%s has=%s', r.rolname, c.relname, p.priv, \
+                       has_table_privilege(r.rolname, c.oid, p.priv)) \
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+           CROSS JOIN (VALUES ('momo_app'), ('momo_relay'), ('momo_worker'), ('momo_notifier')) AS r(rolname) \
+           CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')) AS p(priv) \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') \
+            AND c.relname LIKE 'cloud\\_box%' \
+            AND has_table_privilege(r.rolname, c.oid, p.priv) \
+                IS DISTINCT FROM (r.rolname = 'momo_app' AND p.priv <> 'DELETE') \
+          ORDER BY 1",
+    )
+    .fetch_all(&db.su)
+    .await
+    .expect("cloud box privilege scan");
     db.finish().await;
     assert!(
         missing.is_empty(),
         "runtime roles cannot reach tables: {missing:?}"
+    );
+    assert!(
+        box_drift.is_empty(),
+        "cloud_box* privileges drifted from the lockdown: {box_drift:?}"
     );
 }
