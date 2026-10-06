@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ArrowUp, Hash, Search } from "lucide-react";
+import { ArrowUp, Hash, Moon, Search, Sun, SunMoon } from "lucide-react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cn } from "@/design/lib/cn";
 import { setTheme, useSystemScheme, useThemeChoice } from "@/design/theme";
@@ -58,6 +58,8 @@ import {
   PopoverTrigger,
 } from "@/design/ui/popover";
 import { Select } from "@/design/ui/select";
+import { SegmentedControl } from "@/design/ui/segmented-control";
+import { Switch } from "@/design/ui/switch";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { OpenMemberProfileContext } from "@/features/directory/memberProfileContext";
 import { CHIP_CLASS } from "@/features/common/chip";
@@ -904,6 +906,52 @@ function GalleryBody() {
               </CardContent>
             </Export>
           </Card>
+        </Export>
+      </section>
+
+      <section className="flex flex-col gap-3 border-b border-line py-6">
+        <h2 className="text-title font-medium text-ink">SegmentedControl</h2>
+        <p className="text-meta text-ink-muted">
+          네이티브 라디오 그룹. 고른 칸이 면으로 올라온다. busy 없음.
+        </p>
+        <Export name="SegmentedControl">
+          <div className="flex flex-wrap items-center gap-4">
+            <SegmentedControl
+              legend="색상 모드"
+              value="system"
+              onValueChange={() => undefined}
+              options={[
+                { value: "system", label: "시스템", Icon: SunMoon },
+                { value: "light", label: "라이트", Icon: Sun },
+                { value: "dark", label: "다크", Icon: Moon },
+              ]}
+            />
+            <SegmentedControl
+              legend="대화 밀도"
+              value="comfortable"
+              disabled
+              onValueChange={() => undefined}
+              options={[
+                { value: "compact", label: "촘촘하게" },
+                { value: "comfortable", label: "편하게" },
+                { value: "spacious", label: "여유롭게" },
+              ]}
+            />
+          </div>
+        </Export>
+      </section>
+
+      <section className="flex flex-col gap-3 border-b border-line py-6">
+        <h2 className="text-title font-medium text-ink">Switch</h2>
+        <p className="text-meta text-ink-muted">
+          켬은 잉크, 끔은 line-strong. busy 시각 상태 없음.
+        </p>
+        <Export name="Switch">
+          <div className="flex flex-wrap items-center gap-4">
+            <Switch checked={false} onCheckedChange={() => undefined} aria-label="끔" />
+            <Switch checked onCheckedChange={() => undefined} aria-label="켬" />
+            <Switch checked disabled onCheckedChange={() => undefined} aria-label="잠긴 켬" />
+          </div>
         </Export>
       </section>
 

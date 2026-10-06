@@ -242,6 +242,9 @@
   --w-sidebar-list: 268px;
   --w-sidebar: calc(var(--spacing-rail) + var(--w-sidebar-list));
   --w-settings-nav: 240px;
+  /* 설정 본문의 읽는 폭 (#3578). 카드 안 컨트롤(세그먼트·스와치)이 라벨과 한 줄에
+   * 들어갈 폭이다. 옛 `SectionShell`의 `max-w-2xl`(672)은 그 폭이 모자랐다. */
+  --w-settings-content: 720px;
 
   /* 드로어로 설 때의 사이드바 (B6). 폰에서는 사이드바가 행을 나눠 갖지 않고 채널
    * 표면을 **덮으므로**, 열을 좁게 유지할 이유가 사라진다. 280px는 390px 폰
@@ -1377,14 +1380,25 @@
     }
   }
 
-  /* 설정 전면 (#1867). 앱 사이드바·타이틀바 대신 설정 전용 열이 창을 채운다.
-   * 전환은 라우트가 맡고, 여기 그리드는 즉시 한 칸이 된다. */
+  /* 설정 전면 (#1867, #3578). 앱 사이드바·타이틀바 대신 설정 전용 열이 창을
+   * 채운다. 전환은 라우트가 맡고, 여기 그리드는 즉시 한 칸이 된다.
+   *
+   * 설정도 떠 있는 판 문법 안에 든다(DS2-6): 창 바닥은 `app-shell`의 그라데이션이
+   * 그대로이고 목록 열은 그 위에 자기 바탕 없이 서며, 본문은 라우트가 그리는 판
+   * (`app-pane`) 하나다. 그래서 `<main>` 자신은 투명이고 판 문법(인셋·반경·그림자)은
+   * 걷는다. 앞 판은 평면 `--pane` 위에 목록 열의 세로선만 그어서 선이 허공에 떴다.
+   * 띠(`--band`)는 목록 열 폭(`--w-settings-nav`)까지만 칠한다. 폰(<600)은 판이
+   * 창 자체라 예전처럼 `--pane` 평면이다. */
   &[data-settings-surface] {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
     transition: none;
-    /* 설정 전면은 떠 있는 판 문법 밖이다(DS2-6 범위 밖, 설정 자기 목록 열). */
-    background: var(--pane);
+
+    @media (width >= 600px) {
+      background-size:
+        var(--w-settings-nav) 100%,
+        100% 100%;
+    }
 
     > main {
       grid-row: 1;
@@ -1392,6 +1406,10 @@
       margin: 0;
       border-radius: 0;
       box-shadow: none;
+
+      @media (width >= 600px) {
+        background-color: transparent;
+      }
     }
   }
 
@@ -2410,9 +2428,9 @@
   }
 }
 
-/* 설정의 두 열 (B6 / #1867). 앱 사이드바를 대체하므로 넓은 창의 목록 폭은
- * `--w-settings-nav`(240px)다. 390px 폰에서는 그 열이 본문을 밀어내므로 목록이
- * 본문 위로 올라가 한 줄로 눕는다(`settings-nav`, #3064). */
+/* 설정의 두 열 (B6 / #1867, #3578). 넓은 창은 목록 열(`--w-settings-nav`) + 떠
+ * 있는 판, 폰(<600)은 한 열이다: 240px 목록이 390px 화면의 본문을 밀어내므로 목록이
+ * 본문 위의 **한 줄**로 눕는다(`settings-nav`, #3064). */
 @utility settings-layout {
   display: flex;
   min-block-size: 0;
@@ -2420,6 +2438,127 @@
 
   @media (width < 600px) {
     flex-direction: column;
+  }
+}
+
+/* 떠 있는 본문 판 (시안 `.a-main`: 인셋 8 · 반경 18 · rest 그림자 + 1px 선 고리,
+ * `app-pane`과 같은 값). 면은 `--sheet`다: 카드(`--surface`)가 그 위에서 떠 보이려면
+ * 판이 카드와 같은 면이면 안 된다. 폰에서는 판이 창 자체라 인셋·반경이 없다. */
+@utility settings-pane {
+  display: flex;
+  min-inline-size: 0;
+  min-block-size: 0;
+  flex: 1;
+  flex-direction: column;
+  background-color: var(--sheet);
+
+  @media (width >= 600px) {
+    margin-block: var(--spacing-2);
+    margin-inline-end: var(--spacing-2);
+    border-radius: var(--radius-xl);
+    box-shadow:
+      var(--elevation-rest),
+      0 0 0 1px var(--line);
+    overflow: clip;
+
+    @media (prefers-contrast: more) {
+      box-shadow:
+        var(--elevation-rest),
+        0 0 0 1px var(--line-strong);
+    }
+  }
+}
+
+/* 본문 한 페이지: 읽는 폭에 가운데 정렬, 섹션 사이 32. */
+@utility settings-page {
+  display: flex;
+  min-inline-size: 0;
+  max-inline-size: var(--w-settings-content);
+  margin-inline: auto;
+  flex-direction: column;
+  gap: var(--spacing-8);
+
+  &[data-wide] {
+    max-inline-size: none;
+  }
+}
+
+/* 설정 섹션의 카드 (시안 `.a-group`): 행들이 한 면에 서고 행 사이는 선 하나다. 컨테이너
+ * 질의의 기준이므로 행이 **뷰포트가 아니라 카드 폭**으로 접힌다. */
+@utility settings-card {
+  container-type: inline-size;
+  overflow: hidden;
+
+  & > * + * {
+    border-top: 1px solid var(--line);
+  }
+}
+
+/* 카드 안의 한 행. 라벨·설명은 왼쪽, 컨트롤은 오른쪽. 카드 폭이 34rem 아래이면
+ * 컨트롤이 아래로 내려온다(`data-stack`은 처음부터 세로: 입력칸). 최소 높이는
+ * 컨트롤 40 + 위아래 12 - 8 = 56이다(`--spacing-control-lg` 기준, 임의 값 없음). */
+@utility settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-4);
+  padding: var(--spacing-3) var(--spacing-4);
+  min-block-size: calc(
+    var(--spacing-control-lg) + var(--spacing-3) * 2 - var(--spacing-2)
+  );
+
+  &[data-align="start"] {
+    align-items: flex-start;
+  }
+
+  &[data-stack] {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--spacing-2);
+  }
+
+  @container (width < 34rem) {
+    &:not([data-keep]) {
+      flex-direction: column;
+      align-items: stretch;
+      gap: var(--spacing-2);
+    }
+  }
+}
+
+/* 스위치 (`design/ui/switch.tsx`). 트랙 40×24, 알 20. 값은 간격 사다리의 합이다. */
+@utility switch-track {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  inline-size: calc(var(--spacing-8) + var(--spacing-2));
+  block-size: var(--spacing-6);
+  border-radius: 9999px;
+  background-color: var(--line-strong);
+  transition: background-color var(--motion-fast) var(--motion-ease-standard);
+
+  &[aria-checked="true"] {
+    background-color: var(--primary);
+  }
+}
+@utility switch-thumb {
+  position: absolute;
+  inset-inline-start: var(--spacing-marker);
+  inline-size: calc(var(--spacing-6) - var(--spacing-marker) * 2);
+  block-size: calc(var(--spacing-6) - var(--spacing-marker) * 2);
+  border-radius: 9999px;
+  background-color: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--motion-fast) var(--motion-ease-standard);
+
+  [aria-checked="true"] > & {
+    transform: translateX(var(--spacing-4));
+    background-color: var(--on-primary);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
   }
 }
 
@@ -2453,34 +2592,24 @@
   border-inline-start: var(--spacing-marker) solid var(--accent);
 }
 
-/* 설정 섹션 목록 (#1867, #3064). 넓은 창에서는 240 열, 600 미만에서는 본문 위의
- * **한 줄**이다.
+/* 설정 섹션 목록 (#1867, #3064, #3578). 넓은 창에서는 240 열이고 **선이 없다**:
+ * 목록은 창 바닥(그라데이션) 위에 자기 바탕 없이 서고, 선택 행은 앱 사이드바와 같은
+ * `sidebar-row-selected`(흰 면 + rest 그림자)다. 600 미만에서는 본문 위의 **한 줄**이다.
  *
  * 한 줄인 이유(#3064): 앞 판은 폰에서 목록을 세로로 두고 높이를 308로 잘랐다
  * (#1867 M-1). 그러면 390×844에서 목록과 본문이 위아래로 포개진 두 스크롤 판이
- * 된다. 목록은 화면의 36%를 들고, 본문은 536에 갇혀 스크롤할 때마다 글줄이
- * 목록의 아래 선에 반쯤 잘려 들어갔다. z-index도 겹침도 없었지만 사람 눈에는
- * 「메뉴가 본문을 덮는다」로 읽혔다(#3010·#3042 캡처). 한 줄이면 목록은 61
- * (아래 산술)이고 본문이 나머지를 받는다. 섹션은 가로로 스크롤하고,
- * 고른 섹션은 SettingsRoute가 `scrollIntoView({ inline: "nearest" })`로 줄 안에
- * 들인다. 그룹 라벨(개인·워크스페이스·연결)은 줄 안의 구분 글자로 남는다.
+ * 된다. 한 줄이면 목록은 61(아래 산술)이고 본문이 나머지를 받는다. 섹션은 가로로
+ * 스크롤하고, 고른 섹션은 SettingsRoute가 `scrollIntoView({ inline: "nearest" })`로
+ * 줄 안에 들인다. 그룹 라벨(개인·워크스페이스·앱·연결)은 줄 안의 구분 글자로 남는다.
  *
- * 「더 있다」는 단서(#3064 design-review H1): 세로 캡이 다섯째 행을 반쯤 보여
- * 준 것과 같은 일을 가로에서 둘이 한다.
- * - 양 끝 24(본문 p-6과 같은 여백)를 흐리는 마스크. 줄 가운데의 섹션이 창
- *   끝에서 잘려 사라지며 이어진다는 것을 말한다. 끝까지 밀면 흐린 자리에는 빈
- *   여백만 남아 첫·끝 섹션은 온전히 보인다. 항상 보이는 스크롤 막대
- *   (`scrollbar-visible`)는 쓰지 않는다: 폰 WebKit은 ::-webkit-scrollbar 를
- *   그리지 않고, 헤드리스 Chromium도 그리지 않아 잴 수 없었다(실측 0px).
- *   마스크는 칠이 아니라 가림이라 색 토큰이 없다.
- * - `scroll-padding-inline` = 탭 하나(44): 고른 섹션을 들일 때 창 끝에 붙이지
- *   않고 이웃 한 칸 자리를 남긴다.
- * 줄 높이는 탭 44 + p-2 위아래 16 + 선 1 = 61이다. */
+ * 「더 있다」는 단서(#3064 design-review H1): 양 끝 24(본문 p-6과 같은 여백)를
+ * 흐리는 마스크와 `scroll-padding-inline` = 탭 하나(44). 줄 높이는 탭 44 + p-2
+ * 위아래 16 + 선 1 = 61이다. 이 아래 가로선은 줄과 본문 **사이**의 실제 경계라
+ * 허공에 뜬 선이 아니다. */
 @utility settings-nav {
   inline-size: var(--w-settings-nav);
   flex-shrink: 0;
   overflow-y: auto;
-  border-inline-end: 1px solid var(--line);
 
   @media (width < 600px) {
     display: flex;
@@ -2498,23 +2627,38 @@
       black calc(100% - var(--spacing-6)),
       transparent
     );
-    border-inline-end: 0;
     border-block-end: 1px solid var(--line);
   }
 }
 
-/* 목록의 한 묶음(돌아가기 · 그룹 라벨 + 섹션들). 넓은 창은 세로 쌓기와 아래
- * 여백 12, 폰은 줄 안에서 옆으로 선다. */
+/* 목록의 한 묶음(그룹 라벨 + 섹션들). 넓은 창은 세로 쌓기이고 묶음 사이는 **여백만**
+ * 둔다(선 없음). 폰은 줄 안에서 옆으로 선다. */
 @utility settings-nav-group {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-1);
-  padding-block-end: var(--spacing-3);
+  padding-block-start: var(--spacing-4);
 
   @media (width < 600px) {
     flex-direction: row;
     align-items: center;
     flex-shrink: 0;
+    padding-block-start: 0;
+  }
+}
+
+/* 그룹 라벨: `sidebar-row`와 같은 좌우 10 inset에 서서 행 글자와 줄이 맞는다. */
+@utility settings-nav-label {
+  flex-shrink: 0;
+  padding-inline: 10px;
+  padding-block-end: var(--spacing-1);
+  white-space: nowrap;
+  font-size: var(--text-meta);
+  line-height: var(--text-meta--line-height);
+  font-weight: 600;
+  color: var(--ink-muted);
+
+  @media (width < 600px) {
     padding-block-end: 0;
   }
 }

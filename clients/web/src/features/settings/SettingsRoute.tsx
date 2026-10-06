@@ -5,16 +5,16 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
 import { useSession } from "@/app/session";
 import { useSurfaceProvidedPredicate } from "@/features/capabilities/useSurfaceProvided";
 import { queryClient } from "@/app/queryClient";
+import { Card } from "@/design/ui/card";
 import { resetSettingsQueries } from "@/app/retryScope";
 import { titlebarDragProps } from "@/app/sidebarPane";
 import { escapeIsClaimed } from "@/design/ui/escapeLayer";
-import { cn } from "@/design/lib/cn";
 import { InlineBanner } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
@@ -22,7 +22,6 @@ import { IS_TAURI } from "@/lib/env";
 import { UpdateSection } from "@/features/updates/UpdateSection";
 import { AccountSection } from "./AccountSection";
 import { DevicesSection } from "./DevicesSection";
-import { AiLinkSection } from "./AiLinkSection";
 import { AppearanceSection } from "./AppearanceSection";
 import { TerminalSection } from "./TerminalSection";
 import { ShortcutsSection } from "./ShortcutsSection";
@@ -35,18 +34,25 @@ import { WorkHostSection } from "./WorkHostSection";
 import { WorkspaceSection } from "./WorkspaceSection";
 import { MemorySettingsSection } from "@/features/memory/MemorySettingsSection";
 import { leaveSettings } from "./settingsReturn";
+import { aiHubSection } from "@momo/core/features/ai/aiHubModel";
 import { AiHubMovedLink } from "@/features/aiHub/AiHubMovedLink";
-import { aiExternalRowFromSettings } from "@momo/core/features/ai/aiHubModel";
+import { AiLinkSection } from "./AiLinkSection";
 import {
   DEFAULT_SETTINGS_SECTION,
-  SETTINGS_GROUPS,
   reachableSettingsSections,
+  resolveSettingsSection,
   type SettingsSectionId,
+  type SettingsSectionMeta,
 } from "./settingsNav";
+import { SectionTitleHiddenContext } from "./SettingsFields";
+import { SettingsNav } from "./shell/SettingsNav";
+import { SettingsPageHeader } from "./shell/SettingsPageHeader";
+import { SettingsShell } from "./shell/SettingsShell";
 
 // =============================================================================
-// 설정 셸 (R-1 §5 / #1867): 앱 사이드바·타이틀바를 대체하는 전면 레이아웃.
-// 왼쪽은 섹션 전용 사이드바, 최상단은 앱으로 돌아가기, 본문은 기존 섹션 재사용.
+// 설정 셸 (R-1 §5 / #1867 / #3578 S1): 앱 사이드바·타이틀바를 대체하는 전면 레이아웃.
+// 왼쪽은 아이콘 목록(shell/SettingsNav), 최상단은 앱으로 돌아가기, 본문은 떠 있는 판
+// (shell/SettingsShell) 안의 페이지 머리 + 기존 섹션 재사용. 합친 페이지는 옛 본문을 이어 붙인다.
 //
 // Operator gating is answered by the server, not guessed by the client: each
 // operator section calls its own GET and swaps in the "서버 운영자에게 문의"
@@ -69,12 +75,18 @@ export function SettingsRoute() {
     [surfaceProvided]
   );
   const requested = params.get("section");
-  const [section, setSection] = useState<SettingsSectionId>(() =>
-    sections.some((item) => item.id === requested)
-      ? (requested as SettingsSectionId)
-      : DEFAULT_SETTINGS_SECTION
+  // `?section=`은 별칭(합친 옛 구획)과 AI 허브로 옮겨 간 옛 구획을 풀어서 읽는다
+  // (`resolveSettingsSection`, 판정은 거기 한 곳). 목차에 선 것만 도착할 수 있다.
+  const requestedResolution = resolveSettingsSection(requested);
+  const requestedId =
+    requestedResolution.kind === "section" &&
+    sections.some((item) => item.id === requestedResolution.id)
+      ? requestedResolution.id
+      : null;
+  const [section, setSection] = useState<SettingsSectionId>(
+    () => requestedId ?? DEFAULT_SETTINGS_SECTION
   );
-  // #2780: 「코드 실행 호스트」는 호스트 목록이 도착한 뒤에야 목차에 선다. 그 전에
+  // #2780: 「실행 호스트」는 호스트 목록이 도착한 뒤에야 목차에 선다. 그 전에
   // `?section=code`로 들어온 사람을 기본 섹션에 둔 채 놓아 두지 않고, 목차가
   // 그 섹션을 받는 순간 한 번 옮긴다. 이미 다른 섹션을 고른 사람은 건드리지 않는다.
   // 반대로 호스트가 사라져 지금 섹션이 목차에서 빠지면 기본 섹션으로 접는다.
@@ -86,18 +98,23 @@ export function SettingsRoute() {
     }
     if (
       section === DEFAULT_SETTINGS_SECTION &&
-      requested !== null &&
-      requested !== section &&
-      sections.some((item) => item.id === requested)
+      requestedId !== null &&
+      requestedId !== section
     ) {
-      setSection(requested as SettingsSectionId);
+      setSection(requestedId);
     }
     // `section`을 의존에 넣으면 사용자가 기본 섹션으로 돌아간 순간 다시 끌려간다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sections, requested]);
+  }, [sections, requestedId]);
   const navRefs = useRef<
     Partial<Record<SettingsSectionId, HTMLButtonElement | null>>
   >({});
+  const registerRef = useCallback(
+    (id: SettingsSectionId, el: HTMLButtonElement | null) => {
+      navRefs.current[id] = el;
+    },
+    []
+  );
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   const didEnterFocus = useRef(false);
 
@@ -189,14 +206,21 @@ export function SettingsRoute() {
 
   // AIH-8: 앱·웹훅·이벤트 구독·에이전트 자격은 AI 허브 › 외부 연결로 옮겼다. 옛 딥링크
   // (?section=…, 서버 안내·팔레트가 아직 이 주소를 건넨다)는 그 줄 상세로 바꿔 보낸다.
-  const movedExternal = requested === null ? null : aiExternalRowFromSettings(requested);
-  if (movedExternal?.path) return <Navigate to={movedExternal.path} replace />;
+  // `ai`는 목차에서 허브로 가는 링크 행이지만 `?section=ai`는 옛 AI 연결 화면이 그대로
+  // 열린다(그 주소를 부르는 게이트·캡처·되돌아옴이 많다. T3가 끝나면 걷는다).
+  if (requestedResolution.kind === "ai-hub") {
+    return <Navigate to={requestedResolution.path} replace />;
+  }
+
+  function onSelect(item: SettingsSectionMeta) {
+    if (item.link === "ai-hub") navigate(aiHubSection("accounts").path);
+    else setSection(item.id);
+  }
+
+  const current = sections.find((item) => item.id === section) ?? sections[0];
 
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="settings-route">
-      <h1 ref={headingRef} tabIndex={-1} className="sr-only">
-        설정
-      </h1>
       {IS_TAURI ? (
         <div
           className="wide-only h-control-lg shrink-0"
@@ -206,10 +230,9 @@ export function SettingsRoute() {
         />
       ) : null}
 
-      {/* AI 연결은 자기 오프라인 배너를 든다(#2877, 시안 §6): 두 절이 서로 다르게
-          끊기므로(팀 AI 키는 서버, 내 계정은 이 맥) 이 일반 문장이 겹쳐 서면 한
-          순간에 배너가 둘이 된다. */}
-      {offline && section !== "ai" && (
+      {/* 오프라인 배너는 페이지 위 한 줄이다. 옛 AI 연결 화면은 자기 배너를 들었으나
+          (#2877) 그 화면은 AI 허브로 옮겼다. */}
+      {offline && (
         <InlineBanner
           tone="neutral"
           message="연결이 끊겼어요. 저장은 다시 연결된 뒤에 할 수 있어요."
@@ -220,118 +243,141 @@ export function SettingsRoute() {
       {/* 폰에서는 두 열이 되지 못한다 (goal B6): 240px 섹션 목록이 390px 화면의
           본문을 밀어내므로, 그 폭에서는 목록이 본문 **위의 한 줄**로 눕고(#3064),
           본문이 남은 높이를 전부 받는다 (tokens.css settings-layout / settings-nav). */}
-      <div className="settings-layout">
-        <nav
-          aria-label="설정 섹션"
-          onKeyDown={onNavKeyDown}
-          className="settings-nav p-2"
-          data-testid="settings-nav"
+      <SettingsShell
+        wide={section === "ai"}
+        nav={
+          <SettingsNav
+            sections={sections}
+            current={section}
+            onSelect={onSelect}
+            onBack={close}
+            onKeyDown={onNavKeyDown}
+            registerRef={registerRef}
+          />
+        }
+      >
+        <SettingsPageHeader
+          ref={headingRef}
+          title={current.label}
+          scope={current.scope}
+        />
+        <RenderErrorBoundary
+          key={section}
+          padded={false}
+          title="이 설정을 열지 못했어요"
+          message="서버에서 받은 설정을 읽지 못했어요."
+          retryLabel="다시 시도"
+          // Remounting alone re-reads the same cache — `staleTime` is 30s, so
+          // within that window nothing is even refetched and the section
+          // throws again on the same data. The action has to change the
+          // inputs to mean anything, so the cache goes first.
+          onRetry={() => resetSettingsQueries(queryClient)}
         >
-          <div className="settings-nav-group">
-            <button
-              type="button"
-              onClick={close}
-              data-testid="settings-back-to-app"
-              className="settings-nav-item tap-target flex items-center gap-2 rounded-sm px-2 py-1 text-left text-body hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
+          {/* 옛 섹션 본문은 아직 카드 문법으로 다시 짜이지 않았다(S2~S5). 판(`--sheet`) 위에
+              맨바닥으로 놓으면 보조 알약(`surface-muted`)이 판에 묻혀 보이지 않으므로(대비
+              1.01), 본문 전체를 카드 한 장(`--surface`)에 얹는다. 페이지를 이식하는 슬라이스가
+              그 페이지의 이 껍질을 걷고 `SettingsSection` 카드로 바꾼다. 옛 AI 연결 화면은
+              자기 판(곁판 포함)을 가져서 껍질과 폭 제한 없이 그대로 둔다. */}
+          {section === "ai" ? (
+            <SectionPage
+              section={section}
+              offline={offline}
+              workspaceId={workspaceId}
+              memberId={session.member.id}
+            />
+          ) : (
+            <Card
+              className="flex min-w-0 flex-col gap-8 p-6"
+              data-testid="settings-legacy-card"
             >
-              <ArrowLeft className="size-4 shrink-0" aria-hidden="true" />
-              앱으로 돌아가기
-            </button>
-          </div>
-          {SETTINGS_GROUPS.map((group) => (
-            <div key={group} className="settings-nav-group">
-              <p className="shrink-0 whitespace-nowrap px-2 text-meta text-ink-muted">{group}</p>
-              <ul className="settings-nav-list">
-                {sections.filter((item) => item.group === group).map((item) => (
-                  <li key={item.id}>
-                    <button
-                      type="button"
-                      ref={(el) => {
-                        navRefs.current[item.id] = el;
-                      }}
-                      onClick={() => {
-                        // AIH-8: 옮긴 네 구획은 눌러도 AI › 외부 연결 줄로 간다(옛 딥링크와 같은 길).
-                        const moved = aiExternalRowFromSettings(item.id)?.path;
-                        if (moved) navigate(moved);
-                        else setSection(item.id);
-                      }}
-                      aria-current={section === item.id ? "page" : undefined}
-                      data-testid={`settings-nav-${item.id}`}
-                      className={cn(
-                        "settings-nav-item tap-target rounded-sm px-2 py-1 text-left text-body focus-visible:focus-ring",
-                        section === item.id
-                          ? "bg-accent-soft text-ink active:bg-surface-pressed"
-                          : "hover:bg-surface-hover active:bg-surface-pressed"
-                      )}
-                    >
-                      {item.label}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </nav>
-
-        <div
-          className="min-w-0 flex-1 overflow-y-auto p-6"
-          data-settings-scroll-viewport
-        >
-          <RenderErrorBoundary
-            key={section}
-            padded={false}
-            title="이 설정을 열지 못했어요"
-            message="서버에서 받은 설정을 읽지 못했어요."
-            retryLabel="다시 시도"
-            // Remounting alone re-reads the same cache — `staleTime` is 30s, so
-            // within that window nothing is even refetched and the section
-            // throws again on the same data. The action has to change the
-            // inputs to mean anything, so the cache goes first.
-            onRetry={() => resetSettingsQueries(queryClient)}
-          >
-          <AiHubMovedLink section={section} />
-          {section === "profile" && <ProfileSection offline={offline} />}
-          {section === "account" && <AccountSection />}
-          {section === "devices" && (
-            <DevicesSection
-              offline={offline}
-              workspaceId={workspaceId}
-              memberId={session.member.id}
-            />
+              <SectionPage
+                section={section}
+                offline={offline}
+                workspaceId={workspaceId}
+                memberId={session.member.id}
+              />
+            </Card>
           )}
-          {section === "appearance" && <AppearanceSection />}
-          {section === "terminal" && <TerminalSection />}
-          {section === "shortcuts" && <ShortcutsSection />}
-          {section === "link-previews" && <LinkPreviewSection />}
-          {section === "notifications" && (
-            <NotificationRulesSection offline={offline} />
-          )}
-          {section === "updates" && <UpdateSection />}
-          {section === "ai" && <AiLinkSection offline={offline} workspaceId={workspaceId} />}
-          {section === "code" && (
-            <WorkHostSection
-              workspaceId={workspaceId}
-              memberId={session.member.id}
-              offline={offline}
-            />
-          )}
-          {section === "workspace" && (
-            <WorkspaceSection workspaceId={workspaceId} offline={offline} />
-          )}
-          {section === "memory" && (
-            <MemorySettingsSection workspaceId={workspaceId} offline={offline} />
-          )}
-          {/* No `offline` prop: 사용량 is a read, and the realtime rail being
-              down says nothing about whether this GET answers. The panel reads
-              the browser's own offline state instead (react-query fetchStatus),
-              which is the only signal that actually stops the request. */}
-          {section === "usage" && <UsageSection workspaceId={workspaceId} />}
-          {section === "members" && (
-            <InviteSection workspaceId={workspaceId} offline={offline} />
-          )}
-          </RenderErrorBoundary>
-        </div>
-      </div>
+        </RenderErrorBoundary>
+      </SettingsShell>
     </div>
   );
+}
+
+/**
+ * 한 페이지의 본문. 페이지 머리(h1)가 제목을 이미 말하므로 첫 본문은 자기 제목(h2)을
+ * 접고 설명 줄만 남긴다(`SectionTitleHiddenContext`). 합친 페이지는 옛 구획 본문을 그
+ * 아래에 **제 제목을 단 채** 잇는다: 계정·링크 미리보기·터미널은 S2·S3·S5가 카드로 다시
+ * 짜면서 흡수한다.
+ */
+function SectionPage({
+  section,
+  offline,
+  workspaceId,
+  memberId,
+}: {
+  section: SettingsSectionId;
+  offline: boolean;
+  workspaceId: string;
+  memberId: string;
+}) {
+  const primary = (node: ReactNode) => (
+    <SectionTitleHiddenContext.Provider value={true}>{node}</SectionTitleHiddenContext.Provider>
+  );
+  switch (section) {
+    case "profile":
+      return (
+        <>
+          {primary(<ProfileSection offline={offline} />)}
+          <AccountSection />
+        </>
+      );
+    case "appearance":
+      return (
+        <>
+          {primary(<AppearanceSection />)}
+          <LinkPreviewSection />
+        </>
+      );
+    case "notifications":
+      return primary(<NotificationRulesSection offline={offline} />);
+    case "shortcuts":
+      return (
+        <>
+          {primary(<ShortcutsSection />)}
+          <TerminalSection />
+        </>
+      );
+    case "devices":
+      return primary(
+        <DevicesSection offline={offline} workspaceId={workspaceId} memberId={memberId} />
+      );
+    case "workspace":
+      return primary(<WorkspaceSection workspaceId={workspaceId} offline={offline} />);
+    case "members":
+      return primary(<InviteSection workspaceId={workspaceId} offline={offline} />);
+    case "memory":
+      return primary(<MemorySettingsSection workspaceId={workspaceId} offline={offline} />);
+    // No `offline` prop: 사용량 is a read, and the realtime rail being down says nothing
+    // about whether this GET answers. The panel reads the browser's own offline state
+    // instead (react-query fetchStatus), which is the only signal that actually stops
+    // the request.
+    case "usage":
+      return primary(<UsageSection workspaceId={workspaceId} />);
+    case "code":
+      return primary(
+        <WorkHostSection workspaceId={workspaceId} memberId={memberId} offline={offline} />
+      );
+    case "updates":
+      return primary(<UpdateSection />);
+    case "ai":
+      return (
+        <>
+          <AiHubMovedLink section="ai" />
+          <AiLinkSection offline={offline} workspaceId={workspaceId} />
+        </>
+      );
+    default:
+      return null;
+  }
 }
