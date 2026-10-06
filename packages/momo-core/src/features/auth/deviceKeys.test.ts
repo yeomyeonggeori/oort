@@ -256,7 +256,7 @@ describe("rebind (#3103, ADR-0146 D-7 증보 #3097)", () => {
     answer({ deviceKey: row({ current: false, lineageLive: true }) });
     const error = await rebindDeviceKey(WS, input).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(DeviceKeyRebindError);
-    expect(deviceKeyErrorMessage(error)).toContain("옮기지 않았습니다");
+    expect(deviceKeyErrorMessage(error)).toContain("옮기지 않았어요");
     answer({ deviceKey: row({ current: true, lineageLive: false }) });
     expect(await rebindDeviceKey(WS, input).catch((e: unknown) => e)).toBeInstanceOf(
       DeviceKeyRebindError

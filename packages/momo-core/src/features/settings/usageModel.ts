@@ -122,7 +122,7 @@ function parseBudgetState(raw: string): BudgetState {
 
 export function parseUsageSummary(raw: unknown): UsageSummary {
   const root = asRecord(raw);
-  if (!root) throw new Error("사용량 응답을 읽지 못했습니다.");
+  if (!root) throw new Error("사용량 응답을 읽지 못했어요.");
 
   const range = asRecord(root["range"]);
   const totals = asRecord(root["totals"]);
@@ -452,7 +452,7 @@ export function budgetStatus(
     return {
       tone: "danger",
       label: "한도 도달",
-      detail: `예약을 포함한 사용액 ${used}이 한도 ${limit}에 닿았습니다. 예산을 다시 정하거나 다음 기간을 기다리세요.`,
+      detail: `예약을 포함한 사용액 ${used}이 한도 ${limit}에 닿았어요. 예산을 다시 정하거나 다음 기간을 기다리세요.`,
       observedMicroUsd: observed,
       usedPercent,
     };
@@ -461,7 +461,7 @@ export function budgetStatus(
     return {
       tone: "warn",
       label: "주의",
-      detail: `한도 ${limit} 중 예약을 포함한 사용액이 ${used}입니다. 소프트 한도를 넘었습니다.`,
+      detail: `한도 ${limit} 중 예약을 포함한 사용액이 ${used}이에요. 소프트 한도를 넘었어요.`,
       observedMicroUsd: observed,
       usedPercent,
     };
@@ -469,7 +469,7 @@ export function budgetStatus(
   return {
     tone: "ok",
     label: "한도 안",
-    detail: `한도 ${limit} 중 예약을 포함한 사용액이 ${used}입니다.`,
+    detail: `한도 ${limit} 중 예약을 포함한 사용액이 ${used}이에요.`,
     observedMicroUsd: observed,
     usedPercent,
   };
@@ -487,10 +487,10 @@ export function budgetStatus(
  */
 export function usageErrorCopy(status: number | null, fallback: string): string {
   if (status === 404) {
-    return "이 서버는 아직 사용량 집계를 제공하지 않습니다. 서버를 업데이트한 뒤 다시 열어보세요.";
+    return "이 서버는 아직 사용량 집계를 제공하지 않아요. 서버를 업데이트한 뒤 다시 열어보세요.";
   }
   if (status === 400) {
-    return "서버가 이 기간을 받지 않았습니다. 기간을 좁혀 다시 시도하세요.";
+    return "서버가 이 기간을 받지 않았어요. 기간을 좁혀 다시 시도하세요.";
   }
   return fallback;
 }
@@ -598,9 +598,9 @@ export type UsageView =
     }
   | { kind: "error"; message: string };
 
-const OFFLINE_REASON = "연결이 끊겼습니다.";
+const OFFLINE_REASON = "연결이 끊겼어요.";
 const OFFLINE_EMPTY =
-  "연결이 끊겼습니다. 다시 연결되면 사용량을 불러옵니다.";
+  "연결이 끊겼어요. 다시 연결되면 사용량을 불러와요.";
 
 /**
  * One line carries the whole fallback: what happened, and the instant the
@@ -614,7 +614,7 @@ function lastKnownView(cached: LastKnownUsage, reason: string): UsageView {
     kind: "last-known",
     summary: cached.summary,
     empty: isEmptyUsage(cached.summary),
-    notice: `${reason} ${formatClock(cached.checkedAtMs)}에 확인한 값을 표시합니다.`,
+    notice: `${reason} ${formatClock(cached.checkedAtMs)}에 확인한 값을 보여줘요.`,
     checkedAtMs: cached.checkedAtMs,
   };
 }
@@ -674,11 +674,11 @@ export function usageAnnouncement(
   view: UsageView,
   formatCost: (microUsd: number) => string
 ): string {
-  if (view.kind === "loading") return "사용량을 불러오는 중입니다.";
+  if (view.kind === "loading") return "사용량을 불러오고 있어요.";
   if (view.kind === "ready") {
     return view.empty
-      ? "이 기간에 기록된 사용량이 없습니다."
-      : `사용량 합계 ${formatCost(view.summary.totals.costMicroUsd)}을 불러왔습니다.`;
+      ? "이 기간에 기록된 사용량이 없어요."
+      : `사용량 합계 ${formatCost(view.summary.totals.costMicroUsd)}을 불러왔어요.`;
   }
   return "";
 }

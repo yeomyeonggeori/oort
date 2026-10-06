@@ -28,17 +28,17 @@ const TERMINAL_THEME_OPTIONS: { id: TerminalThemeChoice; label: string; detail: 
   {
     id: "dark",
     label: "어둡게 (기본)",
-    detail: "앱 테마와 상관없이 어두운 바탕에 그립니다. 셸 프롬프트와 TUI 대부분이 이 바탕을 전제로 색을 고릅니다.",
+    detail: "앱 테마와 상관없이 어두운 바탕에 그려요. 셸 프롬프트와 TUI 대부분이 이 바탕을 전제로 색을 골라요.",
   },
   {
     id: "app",
     label: "앱 테마 따르기",
-    detail: "앱이 라이트면 밝게, 다크면 어둡게 그립니다.",
+    detail: "앱이 라이트면 밝게, 다크면 어둡게 그려요.",
   },
   {
     id: "light",
     label: "밝게",
-    detail: "앱 테마와 상관없이 밝은 바탕에 그립니다. 어두운 바탕을 전제로 한 프롬프트는 덜 읽힐 수 있습니다.",
+    detail: "앱 테마와 상관없이 밝은 바탕에 그려요. 어두운 바탕을 전제로 한 프롬프트는 덜 읽힐 수 있어요.",
   },
 ];
 
@@ -53,8 +53,8 @@ export function TerminalThemeChoiceGroup() {
       onChange={(id) => setTerminalTheme(id as TerminalThemeChoice)}
       hint={
         storageFailed
-          ? "이 기기에 저장하지 못했습니다. 앱을 다시 열면 어둡게로 돌아갑니다."
-          : "이 기기에만 저장됩니다. 칸 테두리와 머리 줄은 앱 테마를 따릅니다."
+          ? "이 기기에 저장하지 못했어요. 앱을 다시 열면 어둡게로 돌아가요."
+          : "이 기기에만 저장돼요. 칸 테두리와 머리 줄은 앱 테마를 따라요."
       }
       testId="terminal-theme-choice"
     />
@@ -86,11 +86,11 @@ export function TerminalSection({
 }) {
   const lines = desktop
     ? [
-        "로컬 터미널은 이 기기에서 셸과 하네스를 엽니다. 출력은 이 기기에만 있고 서버에 기록하지 않습니다.",
-        "터미널에 포커스가 있으면 아래 표의 키만 앱이 받고, 나머지 키는 Esc를 포함해 모두 터미널로 갑니다.",
+        "로컬 터미널은 이 기기에서 셸과 하네스를 열어요. 출력은 이 기기에만 있고 서버에 기록하지 않아요.",
+        "터미널에 포커스가 있으면 아래 표의 키만 앱이 받고, 나머지 키는 Esc를 포함해 모두 터미널로 가요.",
       ]
     : [
-        "이 브라우저에는 로컬 터미널이 없습니다. 로컬 터미널과 아래 단축키는 oort 데스크탑 앱에서 씁니다.",
+        "이 브라우저에는 로컬 터미널이 없어요. 로컬 터미널과 아래 단축키는 oort 데스크탑 앱에서 써요.",
       ];
   return (
     <SectionShell title="터미널" lines={lines}>

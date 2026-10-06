@@ -32,17 +32,17 @@ export const PROVIDER_MODES: Choice[] = [
   {
     id: "external-hermes",
     label: "외부 provider",
-    detail: "저장한 주소와 키로 실제 provider에 연결합니다.",
+    detail: "저장한 주소와 키로 실제 provider에 연결해요.",
   },
   {
     id: "internal-host-mock",
     label: "내부 호스트 목",
-    detail: "서버가 자체 목 응답을 돌려줍니다. 실제 provider를 부르지 않습니다.",
+    detail: "서버가 자체 목 응답을 돌려줘요. 실제 provider는 부르지 않아요.",
   },
   {
     id: "local-mock",
     label: "로컬 목",
-    detail: "개발용 목 응답입니다. 실제 provider를 부르지 않습니다.",
+    detail: "개발용 목 응답이에요. 실제 provider는 부르지 않아요.",
   },
 ];
 
@@ -51,17 +51,17 @@ export const WORK_ENGINES: Choice[] = [
   {
     id: "opencode",
     label: "opencode",
-    detail: "동봉 엔진. 아무 것도 고르지 않으면 이 값이 쓰입니다.",
+    detail: "동봉 엔진. 아무 것도 고르지 않으면 이 값이 쓰여요.",
   },
   {
     id: "goose",
     label: "goose",
-    detail: "동봉 엔진. opencode 대신 쓸 때 고릅니다.",
+    detail: "동봉 엔진. opencode 대신 쓸 때 골라요.",
   },
   {
     id: "codex-local",
     label: "codex-local",
-    detail: "호스트에 설치된 Codex에 붙습니다. 호스트 페어링이 먼저 필요합니다.",
+    detail: "호스트에 설치된 Codex에 붙어요. 호스트 페어링이 먼저 필요해요.",
   },
 ];
 
@@ -78,17 +78,17 @@ export const WORK_TIER_MODES: Choice[] = [
   {
     id: "t1_only",
     label: "처음 시작한 호스트에서만",
-    detail: "연결이 끊겨도 다른 곳으로 옮기지 않고, 그 호스트가 돌아오기를 기다립니다.",
+    detail: "연결이 끊겨도 다른 곳으로 옮기지 않고, 그 호스트가 돌아오기를 기다려요.",
   },
   {
     id: "ask",
     label: "연결 끊김 시 묻기",
-    detail: "호스트를 잃으면 어디서 이어갈지 물어봅니다. 고르지 않으면 이 값이 쓰입니다.",
+    detail: "호스트를 잃으면 어디서 이어갈지 물어봐요. 고르지 않으면 이 값이 쓰여요.",
   },
   {
     id: "auto",
     label: "자동 재개",
-    detail: "고른 호스트에서 마지막 push 커밋으로 새 세션을 시작합니다. 비용이 생길 수 있습니다.",
+    detail: "고른 호스트에서 마지막 push 커밋으로 새 세션을 시작해요. 비용이 생길 수 있어요.",
   },
 ];
 
@@ -253,9 +253,9 @@ export function autoTargetLabel(
 
 /** `InviteRoutes.normalizedRole`. Labels are defaults; use `inviteRoles`. */
 export const INVITE_ROLES: Choice[] = [
-  { id: "member", label: DEFAULT_ROLE_LABELS.member, detail: "채널을 읽고 씁니다." },
-  { id: "admin", label: DEFAULT_ROLE_LABELS.admin, detail: "초대와 워크스페이스 설정을 다룹니다." },
-  { id: "guest", label: DEFAULT_ROLE_LABELS.guest, detail: "초대받은 채널만 봅니다." },
+  { id: "member", label: DEFAULT_ROLE_LABELS.member, detail: "채널을 읽고 써요." },
+  { id: "admin", label: DEFAULT_ROLE_LABELS.admin, detail: "초대와 워크스페이스 설정을 다뤄요." },
+  { id: "guest", label: DEFAULT_ROLE_LABELS.guest, detail: "초대받은 채널만 봐요." },
 ];
 
 /**
@@ -295,9 +295,9 @@ export function roleLabelUtf8Bytes(value: string): number {
 export function roleLabelFieldError(raw: string): string | null {
   if (raw.length === 0) return null;
   const trimmed = raw.trim();
-  if (trimmed.length === 0) return "공백만으로는 저장할 수 없습니다. 비우면 기본 이름이 쓰입니다.";
+  if (trimmed.length === 0) return "공백만으로는 저장할 수 없어요. 비우면 기본 이름이 쓰여요.";
   if (roleLabelUtf8Bytes(trimmed) > ROLE_LABEL_MAX_BYTES) {
-    return "역할 이름은 한글 기준 16자까지 쓸 수 있습니다.";
+    return "역할 이름은 한글 기준 16자까지 쓸 수 있어요.";
   }
   return null;
 }
@@ -358,12 +358,12 @@ export function providerSourceLabel(source: string): string {
 }
 
 /**
- * `provider_egress_denied` (#2960) in the settings panel's 합니다체: the server's
+ * `provider_egress_denied` (#2960) in the settings panel's 해요체: the server's
  * egress guard refused a private, loopback or metadata address before dialling.
  * Only the operator's opt-in (ADR-0004 증보 2026-09-08) changes that.
  */
 export const PROVIDER_EGRESS_DENIED_HINT =
-  "사설·루프백·메타데이터 주소라 서버가 부르지 않았습니다. 같은 망의 provider를 쓰려면 서버 운영자가 AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1을 켜고 그 호스트를 AGENT_PROVIDER_LOCAL_HOSTS에 넣어야 합니다.";
+  "사설·루프백·메타데이터 주소라 서버가 부르지 않았어요. 같은 망의 provider를 쓰려면 서버 운영자가 AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1을 켜고 그 호스트를 AGENT_PROVIDER_LOCAL_HOSTS에 넣어야 해요.";
 
 /**
  * POST /v1/provider/link/test returns a machine label. Turn it into what
@@ -374,33 +374,33 @@ export function providerTestMessage(test: {
   reason?: string;
   endpointLabel: string;
 }): string {
-  if (test.ok) return `${test.endpointLabel} 응답을 확인했습니다.`;
+  if (test.ok) return `${test.endpointLabel} 응답을 확인했어요.`;
   switch (test.reason) {
     case "not_external_provider":
-      return "지금은 목 모드입니다. 실제 provider를 쓰려면 모드를 외부 provider로 바꾸고 주소와 키를 저장하세요.";
+      return "지금은 목 모드예요. 실제 provider를 쓰려면 모드를 외부 provider로 바꾸고 주소와 키를 저장하세요.";
     case "provider_not_configured":
-      return "저장된 키가 없습니다. 키를 입력해 저장한 뒤 다시 확인하세요.";
+      return "저장된 키가 없어요. 키를 입력해 저장한 뒤 다시 확인하세요.";
     case "provider_unreachable":
-      return `${test.endpointLabel} 에 연결하지 못했습니다. 주소를 확인하고, 이 서버에서 그 주소로 나갈 수 있는지 확인하세요.`;
+      return `${test.endpointLabel} 에 연결하지 못했어요. 주소를 확인하고, 이 서버에서 그 주소로 나갈 수 있는지 확인하세요.`;
     // #2960: the server now dials, so these are real answers, not the default.
     case "provider_auth_failed":
-      return "provider가 저장된 키를 받아들이지 않았습니다. 키가 맞는지, 만료되지 않았는지 확인한 뒤 새 키를 저장하세요.";
+      return "provider가 저장된 키를 받아들이지 않았어요. 키가 맞는지, 만료되지 않았는지 확인한 뒤 새 키를 저장하세요.";
     case "provider_rate_limited":
-      return "provider의 요청 한도에 걸렸습니다. 잠시 뒤 다시 확인하세요.";
+      return "provider의 요청 한도에 걸렸어요. 잠시 뒤 다시 확인하세요.";
     case "provider_egress_denied":
       return PROVIDER_EGRESS_DENIED_HINT;
     case "provider_invalid_response":
-      return `${test.endpointLabel} 의 응답이 provider API 모양이 아닙니다. API 주소(예: …/v1)인지 확인하세요.`;
+      return `${test.endpointLabel} 의 응답이 provider API 모양이 아니에요. API 주소(예: …/v1)인지 확인하세요.`;
     case "hop_disabled":
-      return "꺼 둔 연결이라 확인하지 않았습니다.";
+      return "꺼 둔 연결이라 확인하지 않았어요.";
     case "probe_not_run":
       // Legacy oauth-openai head: the worker refreshes that token, so the server
       // does not dial it. Not a failure of the key.
-      return "이 연결은 서버가 직접 확인하지 않습니다.";
+      return "이 연결은 서버가 직접 확인하지 않아요.";
     default: {
       const status = /^provider_status_(\d{3})$/.exec(test.reason ?? "");
-      if (status) return `provider가 ${status[1]} 응답을 줬습니다. 주소와 키를 확인하세요.`;
-      return `연결을 확인하지 못했습니다. 서버가 보고한 사유: ${test.reason ?? "알 수 없음"}`;
+      if (status) return `provider가 ${status[1]} 응답을 줬어요. 주소와 키를 확인하세요.`;
+      return `연결을 확인하지 못했어요. 서버가 보고한 사유: ${test.reason ?? "알 수 없음"}`;
     }
   }
 }
@@ -418,9 +418,9 @@ const SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 export function slugError(raw: string): string | null {
   const value = normalizeSlug(raw);
   if (value.length === 0) return "슬러그를 입력하세요.";
-  if (value.length > 63) return "슬러그는 63자까지 쓸 수 있습니다.";
+  if (value.length > 63) return "슬러그는 63자까지 쓸 수 있어요.";
   if (!SLUG_PATTERN.test(value)) {
-    return "슬러그는 영문 소문자, 숫자, 하이픈만 쓸 수 있고 하이픈으로 시작하거나 끝날 수 없습니다.";
+    return "슬러그는 영문 소문자, 숫자, 하이픈만 쓸 수 있고 하이픈으로 시작하거나 끝날 수 없어요.";
   }
   return null;
 }
@@ -436,8 +436,8 @@ function hasControlCharacter(value: string): boolean {
 export function workspaceNameError(raw: string): string | null {
   const value = raw.trim();
   if (value.length === 0) return "이름을 입력하세요.";
-  if (value.length > 80) return "이름은 80자까지 쓸 수 있습니다.";
-  if (hasControlCharacter(value)) return "이름에 쓸 수 없는 문자가 있습니다.";
+  if (value.length > 80) return "이름은 80자까지 쓸 수 있어요.";
+  if (hasControlCharacter(value)) return "이름에 쓸 수 없는 문자가 있어요.";
   return null;
 }
 
@@ -487,16 +487,16 @@ export interface InviteCardInput {
  */
 export function inviteCardText(input: InviteCardInput): string {
   return [
-    `${input.workspaceName} 워크스페이스에 초대합니다.`,
+    `${input.workspaceName} 워크스페이스에 초대해요.`,
     "",
-    "1. oort 앱을 설치하고 아래 링크를 엽니다.",
+    "1. oort 앱을 설치하고 아래 링크를 열어요.",
     `   ${buildJoinLink(input.serverBaseUrl, input.code)}`,
     "",
     "2. 링크가 앱에서 열리지 않으면 직접 입력하세요.",
     `   서버 주소: ${input.serverBaseUrl}`,
     `   초대 코드: ${input.code}`,
     "",
-    `이 코드는 ${formatDay(input.expiresAtMs)}까지, ${input.maxUses}명까지 쓸 수 있습니다.`,
+    `이 코드는 ${formatDay(input.expiresAtMs)}까지, ${input.maxUses}명까지 쓸 수 있어요.`,
   ].join("\n");
 }
 
@@ -518,9 +518,9 @@ export function isOperatorDenied(error: unknown): boolean {
 /** Save failure on the role-label form. Never the wire 400 sentence. */
 export function roleLabelsSaveMessage(error: unknown): string {
   if (isOperatorDenied(error)) {
-    return "역할 표시명은 소유자나 관리자만 바꿀 수 있습니다.";
+    return "역할 표시명은 소유자나 관리자만 바꿀 수 있어요.";
   }
-  return "표시명을 저장하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+  return "표시명을 저장하지 못했어요. 잠시 뒤에 다시 시도하세요.";
 }
 
 export function isSlugConflict(error: unknown): boolean {
@@ -560,9 +560,9 @@ export function displayNameSaveMessage(error: unknown): string {
     error.status === 400 &&
     error.message === "displayName is required"
   ) {
-    return "표시 이름을 비울 수 없습니다. 한 글자 이상 적고 다시 저장하세요.";
+    return "표시 이름을 비울 수 없어요. 한 글자 이상 적고 다시 저장하세요.";
   }
-  return "요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+  return "요청을 끝내지 못했어요. 잠시 뒤에 다시 시도하세요.";
 }
 
 /** Wire sentence for a taken handle. Never render this; map through handleSaveMessage. */
@@ -600,7 +600,7 @@ export function handleSaveMessage(error: unknown): string {
   if (error instanceof ApiError && error.status === 400) {
     return "핸들은 영문 소문자·숫자·하이픈 2~32자예요.";
   }
-  return "핸들을 저장하지 못했습니다. 다시 시도해 주세요.";
+  return "핸들을 저장하지 못했어요. 다시 시도해 주세요.";
 }
 
 /** Workspace rename 400 answers in Korean and names the next move. */
@@ -608,7 +608,7 @@ export function workspaceNameSaveMessage(error: unknown): string {
   if (error instanceof ApiError && error.status === 400) {
     return "이름은 1~80자예요. 다시 입력해 주세요.";
   }
-  return "이름을 저장하지 못했습니다. 다시 시도해 주세요.";
+  return "이름을 저장하지 못했어요. 다시 시도해 주세요.";
 }
 
 /**
@@ -626,10 +626,10 @@ export const DISPLAY_NAME_MAX_CHARS = 100;
 export function displayNameFieldError(raw: string): string | null {
   const trimmed = raw.trim();
   if (trimmed.length === 0) {
-    return "표시 이름을 비울 수 없습니다. 한 글자 이상 적으세요.";
+    return "표시 이름을 비울 수 없어요. 한 글자 이상 적으세요.";
   }
   if ([...trimmed].length > DISPLAY_NAME_MAX_CHARS) {
-    return "표시 이름은 100자까지 쓸 수 있습니다.";
+    return "표시 이름은 100자까지 쓸 수 있어요.";
   }
   return null;
 }
@@ -647,23 +647,23 @@ export function displayNameFieldError(raw: string): string | null {
 export function workTierPolicySaveMessage(error: unknown): string {
   switch (statusOf(error)) {
     case 400:
-      return "자동 재개는 재개 대상을 함께 골라야 저장됩니다. 대상을 고른 뒤 다시 저장하세요.";
+      return "자동 재개는 재개 대상을 함께 골라야 저장돼요. 대상을 고른 뒤 다시 저장하세요.";
     case 403:
-      return "워크스페이스 기본값은 소유자나 관리자만 바꿀 수 있습니다. 내 정책은 그대로 바꿀 수 있습니다.";
+      return "워크스페이스 기본값은 소유자나 관리자만 바꿀 수 있어요. 내 정책은 그대로 바꿀 수 있어요.";
     case 409:
       // The next step names a control that exists: 등록된 호스트 블록의
       // '등록 목록 다시 불러오기'. Before MOMO-617 R2 that sentence asked for an
       // action the panel had no button for, so the only way to do it was a
       // browser reload.
-      return "고른 호스트는 지금 재개 대상이 될 수 없습니다. 해지됐거나 이 정책이 쓸 수 없는 호스트입니다. 등록된 호스트에서 등록 목록 다시 불러오기를 누른 뒤 고르세요.";
+      return "고른 호스트는 지금 재개 대상이 될 수 없어요. 해지됐거나 이 정책이 쓸 수 없는 호스트예요. 등록된 호스트에서 등록 목록 다시 불러오기를 누른 뒤 고르세요.";
     default:
-      return "정책을 저장하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+      return "정책을 저장하지 못했어요. 잠시 뒤에 다시 시도하세요.";
   }
 }
 
 /** 403 is answered by OperatorNotice, so this is only the non-permission half. */
 export function workHostRegistryMessage(): string {
-  return "등록된 호스트 목록을 불러오지 못했습니다. 잠시 뒤에 다시 불러오세요.";
+  return "등록된 호스트 목록을 불러오지 못했어요. 잠시 뒤에 다시 불러오세요.";
 }
 
 /** Invite status for the list, derived from the server row (never guessed). */

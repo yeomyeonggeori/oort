@@ -47,7 +47,7 @@ const LOCAL_POLL_MS = 15_000;
 const THIS_MAC_QUERY_KEY = ["settings", "this-mac-host"] as const;
 
 const LINES = [
-  "이 맥을 작업 호스트로 등록하면 폰이나 다른 기기에서 시킨 작업이 이 맥에서 돕니다. 결정과 승인은 등록한 본인만 합니다.",
+  "이 맥을 작업 호스트로 등록하면 폰이나 다른 기기에서 시킨 작업이 이 맥에서 돌아가요. 결정과 승인은 등록한 본인만 할 수 있어요.",
 ];
 
 function errorText(error: unknown): string {
@@ -95,7 +95,7 @@ export function ThisMacHostBlock({
     return (
       <Subsection title="이 맥" lines={LINES}>
         <InlineBanner
-          message="이 맥의 작업 호스트 상태를 읽지 못했습니다. 다시 확인하세요."
+          message="이 맥의 작업 호스트 상태를 읽지 못했어요. 다시 확인하세요."
           actionLabel="상태 다시 확인"
           onAction={() => void local.refetch()}
           testId="this-mac-error"
@@ -163,8 +163,8 @@ function ThisMacBody({
       return (
         <EmptyInvite
           className="px-0"
-          headline="이 빌드에는 작업 호스트 프로그램이 들어 있지 않습니다."
-          detail="배포된 oort 앱에는 들어 있습니다. 개발 빌드라면 작업 호스트 프로그램을 함께 빌드한 뒤 앱을 다시 여세요."
+          headline="이 빌드에는 작업 호스트 프로그램이 없어요."
+          detail="배포된 oort 앱에는 들어 있어요. 개발 빌드라면 작업 호스트 프로그램을 함께 빌드한 뒤 앱을 다시 여세요."
           actions={<RecheckButton recheck={recheck} />}
           testId="this-mac-no-sidecar"
         />
@@ -183,7 +183,7 @@ function ThisMacBody({
         <div className="flex min-w-0 flex-col gap-2" data-testid="this-mac-no-adapter">
           <NotRegisteredHeader />
           <p className="break-keep text-meta text-ink-muted">
-            등록하려면 ACP 어댑터(claude-agent-acp나 codex-acp)가 이 맥에 있어야 합니다. 설치한 뒤 다시 확인하세요.
+            등록하려면 ACP 어댑터(claude-agent-acp나 codex-acp)가 이 맥에 있어야 해요. 설치한 뒤 다시 확인하세요.
           </p>
           <div>
             <RecheckButton recheck={recheck} />
@@ -193,7 +193,7 @@ function ThisMacBody({
     case "elsewhere":
       return (
         <ForgetOnly
-          headline="이 맥은 다른 워크스페이스나 서버의 호스트로 등록돼 있습니다."
+          headline="이 맥은 다른 워크스페이스나 서버의 호스트로 등록돼 있어요."
           chip="다른 곳에 등록됨"
           detail="여기서 쓰려면 이 맥의 등록 정보를 지우고 새로 등록하세요. 다른 워크스페이스의 호스트 목록에는 남으니 그쪽에서 해지하세요."
           settle={settle}
@@ -203,9 +203,9 @@ function ThisMacBody({
     case "revoked":
       return (
         <ForgetOnly
-          headline="이 맥의 호스트 등록이 해지되었습니다."
+          headline="이 맥의 호스트 등록이 해지됐어요."
           chip="해지됨"
-          detail="해지된 호스트로는 작업이 오지 않습니다. 다시 쓰려면 이 맥의 등록 정보를 지우고 새로 등록하세요."
+          detail="해지된 호스트로는 작업이 오지 않아요. 다시 쓰려면 이 맥의 등록 정보를 지우고 새로 등록하세요."
           settle={settle}
           testId="this-mac-revoked"
         />
@@ -228,7 +228,7 @@ function ThisMacBody({
 function NotRegisteredHeader() {
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
-      <p className="text-body font-medium text-ink">이 맥은 아직 작업 호스트가 아닙니다.</p>
+      <p className="text-body font-medium text-ink">이 맥은 아직 작업 호스트가 아니에요.</p>
       <StatusChip tone="muted">등록 안 됨</StatusChip>
     </div>
   );
@@ -290,7 +290,7 @@ function RegisterForm({
       <Field
         label="호스트 이름"
         htmlFor={nameId}
-        hint="폰과 다른 기기의 호스트 목록에 이 이름으로 보입니다."
+        hint="폰과 다른 기기의 호스트 목록에 이 이름으로 보여요."
         error={nameError}
       >
         <Input
@@ -323,12 +323,12 @@ function RegisterForm({
         </Button>
         {offline && (
           <span id={reasonId} className="text-meta text-ink-muted">
-            연결이 끊겨 지금은 등록할 수 없습니다.
+            연결이 끊겨 지금은 등록할 수 없어요.
           </span>
         )}
       </div>
       <p className="text-meta text-ink-muted">
-        등록하면 내 계정으로 로그인한 모든 기기에 알림이 갑니다. 원격 작업은 작업 폴더 안에서만 돕니다.
+        등록하면 내 계정으로 로그인한 모든 기기에 알림이 가요. 원격 작업은 작업 폴더 안에서만 돌아가요.
       </p>
     </div>
   );
@@ -382,10 +382,10 @@ function Registered({
     );
   const sentence =
     state.kind === "online"
-      ? "작업을 받고 있습니다. 앱을 닫으면 작업 호스트도 꺼집니다."
+      ? "작업을 받고 있어요. 앱을 닫으면 작업 호스트도 꺼져요."
       : state.reason === "stopped"
-        ? "등록돼 있지만 작업 호스트가 꺼져 있어 작업을 받지 않습니다."
-        : `작업 호스트가 켜져 있지만 서버에 닿지 못하고 있습니다.${
+        ? "등록돼 있지만 작업 호스트가 꺼져 있어 작업을 받지 않아요."
+        : `작업 호스트가 켜져 있지만 서버에 닿지 못하고 있어요.${
             state.lastSeenAtMs ? ` 마지막 연결 ${relativeSince(state.lastSeenAtMs)}.` : ""
           }`;
 
@@ -456,7 +456,7 @@ function Registered({
         <ConfirmButton
           label="등록 해제"
           subject={name}
-          question="서버에서 해지하고 이 맥의 호스트 키를 지울까요? 돌고 있는 원격 작업은 끝납니다."
+          question="서버에서 해지하고 이 맥의 호스트 키를 지울까요? 돌고 있는 원격 작업은 끝나요."
           confirmLabel="등록 해제"
           busy={unregister.isPending}
           busyLabel="해제 중"
@@ -467,7 +467,7 @@ function Registered({
         />
         {offline && (
           <p id={offlineReasonId} className="text-meta text-ink-muted">
-            연결이 끊겨 지금은 등록을 해제할 수 없습니다.
+            연결이 끊겨 지금은 등록을 해제할 수 없어요.
           </p>
         )}
       </div>
@@ -506,7 +506,7 @@ function ForgetOnly({
       <div>
         <ConfirmButton
           label="등록 정보 지우기"
-          question="이 맥의 호스트 키와 등록 정보를 지울까요? 되돌릴 수 없습니다."
+          question="이 맥의 호스트 키와 등록 정보를 지울까요? 되돌릴 수 없어요."
           confirmLabel="지우기"
           busy={forget.isPending}
           busyLabel="지우는 중"

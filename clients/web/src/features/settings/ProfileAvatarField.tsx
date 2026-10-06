@@ -56,7 +56,7 @@ export function ProfileAvatarField({
     },
     onSuccess: async () => {
       await refreshRoster();
-      setDone(hadAvatarRef.current ? "프로필 사진을 바꿨습니다." : "프로필 사진을 올렸습니다.");
+      setDone(hadAvatarRef.current ? "프로필 사진을 바꿨어요." : "프로필 사진을 올렸어요.");
     },
     onError: (failure) => setError(memberAvatarUploadError(failure)),
   });
@@ -65,7 +65,7 @@ export function ProfileAvatarField({
     mutationFn: () => removeMyAvatar(workspaceId),
     onSuccess: async () => {
       await refreshRoster();
-      setDone("프로필 사진을 지웠습니다.");
+      setDone("프로필 사진을 지웠어요.");
       // 지운 단추는 사라졌다. 초점이 거기(또는 <body>)에 있으면 남는 단추로 옮긴다.
       const active = document.activeElement;
       if (
@@ -102,9 +102,9 @@ export function ProfileAvatarField({
   // 한 칸에 하나만 선다: 오류 > 진행 > 형제 잠금 사유 > 완료. 칸의 높이는 늘 예약해
   // 두므로(min-h-6) 문장이 나타나도 아래 폼이 밀리지 않는다.
   const status = uploading
-    ? `올리는 중 ${Math.round(progress * 100)}%.${hasAvatar ? " 끝나면 지울 수 있습니다." : ""}`
+    ? `올리는 중 ${Math.round(progress * 100)}%.${hasAvatar ? " 끝나면 지울 수 있어요." : ""}`
     : removing
-      ? "지우는 중입니다. 끝나면 다시 바꿀 수 있습니다."
+      ? "지우는 중이에요. 끝나면 다시 바꿀 수 있어요."
       : done;
   const changeLocked = offline || removing;
   const describedBy =
@@ -144,7 +144,7 @@ export function ProfileAvatarField({
           <ConfirmButton
             label="사진 지우기"
             ariaLabel="프로필 사진 지우기"
-            question="프로필 사진을 지우면 이름의 첫 글자로 돌아갑니다."
+            question="프로필 사진을 지우면 이름의 첫 글자로 돌아가요."
             confirmLabel="지우기"
             disabled={offline || uploading}
             describedBy={
@@ -178,7 +178,7 @@ export function ProfileAvatarField({
         />
       </div>
       <p id={hintId} className="text-meta text-ink-muted">
-        PNG, JPG, GIF, WebP. 5MB까지 올릴 수 있습니다.
+        PNG, JPG, GIF, WebP. 5MB까지 올릴 수 있어요.
       </p>
       <div className="min-h-6">
         <p

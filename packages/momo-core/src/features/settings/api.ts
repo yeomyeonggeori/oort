@@ -422,7 +422,7 @@ export async function fetchWorkTierPolicy(
   );
   return (res.workTierPolicy && typeof res.workTierPolicy === "object")
     ? res.workTierPolicy
-    : Promise.reject(new Error("서버 응답을 읽지 못했습니다. 다시 시도하세요."));
+    : Promise.reject(new Error("서버 응답을 읽지 못했어요. 다시 시도하세요."));
 }
 
 export async function putWorkTierPolicy(
@@ -436,7 +436,7 @@ export async function putWorkTierPolicy(
   );
   return (res.workTierPolicy && typeof res.workTierPolicy === "object")
     ? res.workTierPolicy
-    : Promise.reject(new Error("서버 응답을 읽지 못했습니다. 다시 시도하세요."));
+    : Promise.reject(new Error("서버 응답을 읽지 못했어요. 다시 시도하세요."));
 }
 
 // --- 등록된 호스트: GET /v1/workspaces/:ws/work-hosts -----------------------
@@ -552,7 +552,7 @@ export async function fetchWorkspace(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}`
   );
   if (!res.workspace || typeof res.workspace !== "object") {
-    throw new Error("서버 응답을 읽지 못했습니다. 다시 시도하세요.");
+    throw new Error("서버 응답을 읽지 못했어요. 다시 시도하세요.");
   }
   const workspace = res.workspace;
   const raw = workspace as WorkspaceIdentity & {
@@ -585,7 +585,7 @@ export async function renameWorkspace(
     { method: "PATCH", body: JSON.stringify({ name, updatedAtMs }) }
   );
   if (!res.workspace || typeof res.workspace !== "object") {
-    throw new Error("서버 응답을 읽지 못했습니다. 다시 시도하세요.");
+    throw new Error("서버 응답을 읽지 못했어요. 다시 시도하세요.");
   }
   const workspace = res.workspace;
   const raw = workspace as WorkspaceIdentity & {

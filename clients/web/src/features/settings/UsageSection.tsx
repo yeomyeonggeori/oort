@@ -152,8 +152,8 @@ export function UsageSection({ workspaceId }: { workspaceId: string }) {
   // 제공하지 않습니다"). The ledger is what this section always has; the gauges
   // are conditional, and the sentence says so in that order.
   const lines = [
-    "이 워크스페이스에서 에이전트가 쓴 비용입니다. 이 서버가 AI 구독 잔여량을 제공하면 위에 함께 표시됩니다.",
-    "워크스페이스 멤버라면 누구나 볼 수 있습니다.",
+    "이 워크스페이스에서 에이전트가 쓴 비용이에요. 이 서버가 AI 구독 잔여량을 제공하면 위에 함께 보여요.",
+    "워크스페이스 멤버라면 누구나 볼 수 있어요.",
   ];
 
   return (
@@ -299,8 +299,8 @@ function UsageBody({
         <div className="flex min-w-0 flex-col gap-2">
           <p className="text-meta text-ink-muted">{formatRange(summary.range)}</p>
           <EmptyInvite
-            headline="이 기간에 기록된 사용량이 없습니다."
-            detail="에이전트가 실행되면 모델별, 에이전트별 비용이 여기에 쌓입니다."
+            headline="이 기간에 기록된 사용량이 없어요."
+            detail="에이전트가 실행되면 모델별, 에이전트별 비용이 여기에 쌓여요."
             testId="usage-empty"
             actions={
               period === "7d" ? (
@@ -366,8 +366,8 @@ function UsageBody({
             stays out of shared copy). */}
         <p className="text-meta text-ink-muted">
           {confidence.allSettled
-            ? "AI 제공자가 확정한 청구 값입니다."
-            : "AI 제공자가 아직 확정하지 않은 부분이 있어 두 값을 나눠 적습니다."}
+            ? "AI 제공자가 확정한 청구 값이에요."
+            : "AI 제공자가 아직 확정하지 않은 부분이 있어 두 값을 나눠 적었어요."}
         </p>
 
         <dl className="flex min-w-0 flex-col gap-2">
@@ -406,7 +406,7 @@ function UsageBody({
       <Breakdown
         title="모델별"
         testId="usage-model"
-        emptyCopy="이 기간에 기록된 모델이 없습니다."
+        emptyCopy="이 기간에 기록된 모델이 없어요."
         rows={summary.byModel.map((row) => ({
           key: row.model,
           label: modelRowLabel(row.model),
@@ -421,7 +421,7 @@ function UsageBody({
       <Breakdown
         title="에이전트별"
         testId="usage-agent"
-        emptyCopy="이 기간에 기록된 에이전트가 없습니다."
+        emptyCopy="이 기간에 기록된 에이전트가 없어요."
         rows={summary.byAgent.map((row) => {
           // The ledger sends an id and a name; the roster is what says whether
           // that name belongs to one member or to two of them.
@@ -651,7 +651,7 @@ function BudgetBlock({ summary }: { summary: UsageSummary }) {
   if (!budget) {
     return (
       <p className="text-meta text-ink-muted" data-testid="usage-budget-none">
-        이 워크스페이스에는 설정된 예산이 없습니다. 합계는 계속 기록됩니다.
+        이 워크스페이스에는 설정된 예산이 없어요. 합계는 계속 기록돼요.
       </p>
     );
   }
