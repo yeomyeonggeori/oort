@@ -7015,7 +7015,7 @@ async function captureMobile(browser, scheme) {
   await page.waitForTimeout(200);
   await page.evaluate('location.hash = "/settings?section=appearance"');
   await page.getByTestId("settings-route").waitFor({ state: "visible" });
-  await page.getByRole("heading", { name: "테마", exact: true }).waitFor({
+  await page.getByRole("heading", { name: "모양", exact: true }).first().waitFor({
     state: "visible",
   });
   await page.getByTestId("accent-swatch-dawn").waitFor({ state: "visible" });
@@ -8660,8 +8660,7 @@ async function captureScheme(browser, scheme) {
     // 다크 각각에서 성립하는지가 리뷰 증거로 남는다. 고르는 값은 localStorage이고
     // signIn()이 매번 그것을 비우므로, 찍히는 것은 언제나 기본값(시스템)의 화면이다.
     // 고른 뒤의 화면은 gates/gate-theme.mjs가 실행마다 다시 찍는다.
-    ["appearance", "테마", "appearance"],
-    ["link-previews", "링크 미리보기", "link-previews"],
+    ["appearance", "모양", "appearance"],
     // notifications is owned by the parked-pointer scene above (H6-1).
     // Listing it here overwrote that file with an unguarded hover fill.
     ["workspace", "워크스페이스", "workspace"],

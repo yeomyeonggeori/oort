@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { THEME_IDS } from "@momo/core/design/themes";
 import {
   ACCENT_ATTRIBUTE,
   ACTIVE_PALETTE_ID,
@@ -327,5 +328,28 @@ describe("index.html loads the boot script in the only order that works", () => 
 
   it("runs before the app bundle", () => {
     expect(at).toBeLessThan(HTML.indexOf("/src/main.tsx"));
+  });
+});
+
+describe("the preview card's scoped palette variant (#3578 S3a)", () => {
+  // 설정 > 모양의 미리보기 카드는 루트가 아니라 **요소**에 팔레트를 묶는다. 루트에는
+  // 팔레트가 하나만 찍히므로, 세 팔레트를 한 화면에 그리는 길은 생성 팔레트 CSS의
+  // 주 규칙이 같은 선언을 `[data-palette-preview]`로도 싣는 것뿐이다. 이 단언이
+  // 걸치는 두 자리: 생성 CSS가 그 선택자를 갖는가, tokens.css의 카드 층이 두 모드의
+  // `color-scheme`을 요소에 주는가(없으면 `light-dark()`가 루트 스킴으로 풀려 카드가
+  // 앱 색을 따라가고, 라이트/다크 대각 분할이 한 색이 된다).
+  const palettes = new URL("./themes/palettes/", import.meta.url);
+
+  it.each(THEME_IDS)("%s.css carries the scoped selector on its main rule", (id) => {
+    const css = readFileSync(new URL(`${id}.css`, palettes), "utf8");
+    expect(css).toContain(`:root[data-palette="${id}"], [data-palette-preview="${id}"] {`);
+    // 신호 프리셋 블록은 범위 변형이 없다(알약은 `data-accent-swatch`가 자기 요소에서 묶는다).
+    expect(css).not.toMatch(/\[data-palette-preview="[a-z]+"\]\[data-signal/);
+  });
+
+  it("binds color-scheme per preview layer, light and dark", () => {
+    const layer = TOKENS.split("@utility theme-preview-layer {")[1]?.split("\n}\n")[0] ?? "";
+    expect(layer).toMatch(/\[data-preview-mode="light"\]\s*\{\s*color-scheme:\s*light;/);
+    expect(layer).toMatch(/\[data-preview-mode="dark"\]\s*\{\s*color-scheme:\s*dark;/);
   });
 });

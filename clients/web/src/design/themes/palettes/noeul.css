@@ -1,7 +1,7 @@
 /* GENERATED from packages/momo-core/src/design (ADR-0189 D5). Do not edit by hand.
  * Regenerate: npm --prefix clients/web run gen:palettes
  * Drift test: clients/web/src/design/themes/palettes/palettes.drift.test.ts */
-:root[data-palette="noeul"] {
+:root[data-palette="noeul"], [data-palette-preview="noeul"] {
   --canvas-top: light-dark(#f5f1e8, #161a25);
   --canvas-mid: light-dark(#f5f1e8, #161a25);
   --canvas-bottom: light-dark(#f5f1e8, #161a25);

@@ -28,7 +28,7 @@ const TEXT_ROLES = ["timestamp", "meta", "body", "title", "display"] as const;
  * The named measures from tokens.css `@theme { --spacing-* }` that are words,
  * not numbers: marker(2) · row(6) · control-sm/control/control-lg(28/32/40) ·
  * action-sm/action/action-band(96/144/240) · chat-min · rail 3종 · pane 5종 ·
- * diff-body · terminal-body · terminal-dock 3종 · terminal-floor ·
+ * diff-body · terminal-body · terminal-dock 3종 · terminal-floor · theme-tile-min ·
  * timeline-strip · preview-frame · unfurl-hero · tray-max · tray-thumb · onboarding-mark ·
  * onboarding-copy · overflow-bowl · 새벽하늘 프리미티브(ADR-0189, DS2-1) pill ·
  * pill-inline · field · icon-button · card.
@@ -76,6 +76,7 @@ export const NAMED_MEASURES = [
   "terminal-dock-lg",
   "terminal-dock-reserve",
   "terminal-floor",
+  "theme-tile-min",
   "timeline-strip",
   "preview-frame",
   "unfurl-hero",

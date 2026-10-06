@@ -25,7 +25,6 @@ import { DevicesSection } from "./DevicesSection";
 import { AppearanceSection } from "./AppearanceSection";
 import { TerminalSection } from "./TerminalSection";
 import { ShortcutsSection } from "./ShortcutsSection";
-import { LinkPreviewSection } from "./LinkPreviewSection";
 import { InviteSection } from "./InviteSection";
 import { NotificationRulesSection } from "./NotificationRulesSection";
 import { ProfileSection } from "./ProfileSection";
@@ -287,7 +286,7 @@ export function SettingsRoute() {
               1.01), 본문 전체를 카드 한 장(`--surface`)에 얹는다. 페이지를 이식하는 슬라이스가
               그 페이지의 이 껍질을 걷고 `SettingsSection` 카드로 바꾼다. 옛 AI 연결 화면은
               자기 판(곁판 포함)을 가져서 껍질과 폭 제한 없이 그대로 둔다. */}
-          {section === "ai" ? (
+          {section === "ai" || section === "appearance" ? (
             <SectionPage
               section={section}
               offline={offline}
@@ -342,12 +341,7 @@ function SectionPage({
         </>
       );
     case "appearance":
-      return (
-        <>
-          {primary(<AppearanceSection />)}
-          <LinkPreviewSection />
-        </>
-      );
+      return <AppearanceSection />;
     case "notifications":
       return primary(<NotificationRulesSection offline={offline} />);
     case "shortcuts":

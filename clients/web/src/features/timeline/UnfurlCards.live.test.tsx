@@ -4,7 +4,7 @@ import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { MessageUnfurl } from "@momo/core/features/timeline/unfurl";
-import { LinkPreviewSection } from "@/features/settings/LinkPreviewSection";
+import { AppearanceSection } from "@/features/settings/AppearanceSection";
 import { UnfurlCardView, UnfurlCards } from "./UnfurlCards";
 import { reloadLinkPreviewPreferenceForTest } from "./linkPreviewPreference";
 import { resetUnfurlImagesForTest } from "./useUnfurlImage";
@@ -65,7 +65,7 @@ function Harness() {
   return createElement(
     "div",
     null,
-    createElement(LinkPreviewSection),
+    createElement(AppearanceSection),
     createElement(UnfurlCards, {
       unfurls: [base],
       canRemove: false,
@@ -79,7 +79,7 @@ describe("link preview live preference", () => {
     const host = mount(createElement(Harness));
     expect(host.querySelector('[data-testid="unfurl-card"]')).not.toBeNull();
 
-    const off = host.querySelector<HTMLInputElement>("#link-preview-off");
+    const off = host.querySelector<HTMLInputElement>('[data-testid="link-preview-choice-off"]');
     expect(off).not.toBeNull();
     act(() => {
       off?.click();
@@ -91,12 +91,12 @@ describe("link preview live preference", () => {
   it("restores the compact card from 숨기기 immediately", () => {
     const host = mount(createElement(Harness));
     act(() => {
-      host.querySelector<HTMLInputElement>("#link-preview-off")?.click();
+      host.querySelector<HTMLInputElement>('[data-testid="link-preview-choice-off"]')?.click();
     });
     expect(host.querySelector('[data-testid="unfurl-card"]')).toBeNull();
 
     act(() => {
-      host.querySelector<HTMLInputElement>("#link-preview-compact")?.click();
+      host.querySelector<HTMLInputElement>('[data-testid="link-preview-choice-compact"]')?.click();
     });
     const card = host.querySelector('[data-testid="unfurl-card"]');
     expect(card).not.toBeNull();

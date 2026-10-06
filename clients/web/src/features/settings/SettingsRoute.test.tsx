@@ -65,10 +65,6 @@ vi.mock("./AppearanceSection", () => ({
   AppearanceSection: () =>
     createElement("div", { "data-testid": "section-appearance" }),
 }));
-vi.mock("./LinkPreviewSection", () => ({
-  LinkPreviewSection: () =>
-    createElement("div", { "data-testid": "section-link-previews" }),
-}));
 vi.mock("@/features/updates/UpdateSection", () => ({
   UpdateSection: () =>
     createElement("div", { "data-testid": "section-updates" }),
@@ -333,7 +329,7 @@ describe("SettingsRoute 전면 레이아웃", () => {
     expect(host.querySelector('[data-testid="logout"]')).not.toBeNull();
     const clicks: Array<[string, string[]]> = [
       ["settings-nav-devices", ["device-link-card"]],
-      ["settings-nav-appearance", ["section-appearance", "section-link-previews"]],
+      ["settings-nav-appearance", ["section-appearance"]],
       ["settings-nav-shortcuts", ["section-shortcuts", "section-terminal"]],
       ["settings-nav-notifications", ["section-notifications"]],
       ["settings-nav-workspace", ["section-workspace"]],

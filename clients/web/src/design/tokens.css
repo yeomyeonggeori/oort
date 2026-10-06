@@ -245,6 +245,9 @@
   /* 설정 본문의 읽는 폭 (#3578). 카드 안 컨트롤(세그먼트·스와치)이 라벨과 한 줄에
    * 들어갈 폭이다. 옛 `SectionShell`의 `max-w-2xl`(672)은 그 폭이 모자랐다. */
   --w-settings-content: 720px;
+  /* 설정 > 모양의 테마 미리보기 카드 폭 (#3578 S3a). 3:2 한 장의 기준 폭이고, S3b가
+   * 세 장을 한 줄에 놓을 때 열 최소 폭이다(900px 창에서 3열이 들어가는 값). */
+  --spacing-theme-tile-min: 160px;
 
   /* 드로어로 설 때의 사이드바 (B6). 폰에서는 사이드바가 행을 나눠 갖지 않고 채널
    * 표면을 **덮으므로**, 열을 좁게 유지할 이유가 사라진다. 280px는 390px 폰
@@ -2523,6 +2526,41 @@
       align-items: stretch;
       gap: var(--spacing-2);
     }
+  }
+}
+
+/* 테마 미리보기 카드 (`features/settings/shell/ThemePreviewCard.tsx`, #3578 S3a).
+ * 미니 앱 화면 한 장. 색은 요소에 붙은 `data-palette-preview`(생성 팔레트 CSS의
+ * 범위 변형)가 그 팔레트의 역할로 묶고, 스킴은 `data-preview-mode`가 `color-scheme`으로
+ * 가른다. 그래서 `light-dark()`가 루트 스킴이 아니라 이 요소의 스킴을 따른다. 「시스템」은
+ * 라이트 층 위에 다크 층을 대각선으로 반만 겹친다. */
+@utility theme-preview {
+  position: relative;
+  display: grid;
+  inline-size: 100%;
+  max-inline-size: calc(var(--spacing-theme-tile-min) * 2);
+  aspect-ratio: 3 / 2;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+@utility theme-preview-layer {
+  grid-area: 1 / 1;
+  display: grid;
+  grid-template-columns: 30% 1fr;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2);
+  min-inline-size: 0;
+  color: var(--ink);
+
+  &[data-preview-mode="light"] {
+    color-scheme: light;
+  }
+  &[data-preview-mode="dark"] {
+    color-scheme: dark;
+  }
+  &[data-split] {
+    clip-path: polygon(100% 0, 100% 100%, 0 100%);
   }
 }
 
