@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useId, useRef, useState, type RefObject } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { removeMyAvatar } from "@momo/core/lib/api";
@@ -30,13 +30,17 @@ export function ProfileAvatarField({
   workspaceId,
   me,
   offline,
+  inputRef: externalInputRef,
 }: {
   workspaceId: string;
   me: RosterMember | null;
   offline: boolean;
+  /** 히어로의 카메라 단추가 같은 파일 입력을 열 수 있게 밖에서 쥔 ref (#3603). */
+  inputRef?: RefObject<HTMLInputElement>;
 }) {
   const client = useQueryClient();
-  const inputRef = useRef<HTMLInputElement>(null);
+  const ownInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = externalInputRef ?? ownInputRef;
   const changeRef = useRef<HTMLButtonElement>(null);
   const hintId = useId();
   const statusId = useId();

@@ -19,6 +19,13 @@ const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
 
 const changeMyProfile = vi.hoisted(() => vi.fn());
 const fetchRoster = vi.hoisted(() => vi.fn());
+const uploadAvatar = vi.hoisted(() => vi.fn());
+const removeMyAvatar = vi.hoisted(() => vi.fn());
+const leaveWorkspace = vi.hoisted(() => vi.fn());
+
+vi.mock("./uploadMyAvatar", () => ({
+  uploadMyAvatar: (...a: unknown[]) => uploadAvatar(...a),
+}));
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
@@ -30,6 +37,9 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
     ) => changeMyProfile(workspaceId, patch) as Promise<Member>,
     fetchRoster: (workspaceId: string) =>
       fetchRoster(workspaceId) as Promise<RosterMember[]>,
+    removeMyAvatar: (...a: unknown[]) => removeMyAvatar(...a),
+    leaveWorkspace: (...a: unknown[]) => leaveWorkspace(...a),
+    fetchMemberAvatar: async () => new Blob(["x"]),
   };
 });
 
@@ -46,6 +56,14 @@ beforeAll(() => {
 beforeEach(() => {
   changeMyProfile.mockReset();
   fetchRoster.mockReset();
+  uploadAvatar.mockReset().mockResolvedValue({
+    id: "m",
+    memberId: MEMBER_ID,
+    status: "ready",
+    avatarUrl: "/v1/avatar?v=m",
+  });
+  removeMyAvatar.mockReset().mockResolvedValue(undefined);
+  leaveWorkspace.mockReset().mockResolvedValue(undefined);
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: false,
     media: query,
@@ -107,6 +125,9 @@ function setInputValue(input: HTMLInputElement, value: string) {
 
 function mountSection(options?: {
   client?: QueryClient;
+  offline?: boolean;
+  logout?: () => void;
+  avatarUrl?: string;
 }): {
   host: HTMLElement;
   client: QueryClient;
@@ -120,7 +141,10 @@ function mountSection(options?: {
         mutations: { retry: false },
       },
     });
-  client.setQueryData(["roster", WS], [rosterMember()]);
+  client.setQueryData(
+    ["roster", WS],
+    [{ ...rosterMember(), ...(options?.avatarUrl ? { avatarUrl: options.avatarUrl } : {}) }]
+  );
   fetchRoster.mockResolvedValue([rosterMember("성재")]);
   const replaceSessionMember = vi.fn();
   const session: SessionContextValue = {
@@ -133,7 +157,7 @@ function mountSection(options?: {
     workspaceId: WS,
     realtime: null,
     connStatus: "connected",
-    logout: () => undefined,
+    logout: options?.logout ?? (() => undefined),
     replaceSessionMember,
   };
   const host = document.createElement("div");
@@ -146,7 +170,7 @@ function mountSection(options?: {
     createElement(
       SessionProvider,
       { value: session },
-      createElement(ProfileSection, { offline: false })
+      createElement(ProfileSection, { offline: options?.offline ?? false })
     )
   );
   act(() => mountedRoot?.render(tree));
@@ -187,7 +211,6 @@ describe("ProfileSection", () => {
           (call[1] as RosterMember[])[0]?.displayName === "성재"
       )
     ).toBe(false);
-    expect(host.querySelector('[data-testid="logout"]')).toBeNull();
     expect(
       (host.querySelector('[data-testid="profile-handle"]') as HTMLInputElement)
         .value
@@ -489,5 +512,111 @@ describe("ProfileSection", () => {
     expect(hasOwnerOnboardingSettingsDoor("profile")).toBe(true);
     expect(readS1Draft()?.handle).toBe("");
     expect(readS1Draft()?.workspaceName).toBe("여명거리");
+  });
+});
+
+// =============================================================================
+// 프로필 + 계정 한 페이지 (#3578 S2). 옛 「계정」 페이지가 흡수된 뒤의 계약.
+// =============================================================================
+
+const tid = (host: HTMLElement, id: string) =>
+  host.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+
+async function pickPng(host: HTMLElement) {
+  const input = tid(host, "profile-avatar-input") as HTMLInputElement;
+  Object.defineProperty(input, "files", {
+    value: [new File([new Uint8Array(8)], "a.png", { type: "image/png" })],
+    configurable: true,
+  });
+  await act(async () => {
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 10));
+  });
+}
+
+describe("ProfileSection 한 페이지", () => {
+  it("히어로가 이름·핸들·역할을 큰 글씨로 말하고 계정 정보 카드는 두 ID만 든다", () => {
+    const { host } = mountSection();
+    expect(tid(host, "profile-hero-name")?.textContent).toBe("곽성재");
+    expect(tid(host, "profile-hero-handle")?.textContent).toContain("@seongjae");
+    expect(tid(host, "profile-hero-role")?.textContent).toBe("소유자");
+    expect(tid(host, "profile-avatar")?.getAttribute("data-avatar-size")).toBe("hero");
+    const account = tid(host, "profile-account-card")!;
+    expect(account.textContent).toContain(WS);
+    expect(account.textContent).toContain(MEMBER_ID);
+    // 이름·핸들은 프로필 카드와 히어로가 이미 말한다: 계정 카드에서 되풀이하지 않는다.
+    expect(account.textContent).not.toContain("곽성재");
+    expect(account.textContent).not.toContain("@seongjae");
+  });
+
+  it("로그아웃은 로그인 카드의 한 행이고 누르면 세션 logout을 한 번 부른다", () => {
+    const logout = vi.fn();
+    const { host } = mountSection({ logout });
+    const button = tid(host, "logout") as HTMLButtonElement;
+    expect(tid(host, "profile-login-card")?.contains(button)).toBe(true);
+    act(() => button.click());
+    expect(logout).toHaveBeenCalledTimes(1);
+  });
+
+  it("워크스페이스 나가기는 페이지 맨 아래 위험 행이고 로그아웃보다 뒤에 있다", () => {
+    const { host } = mountSection();
+    const leave = tid(host, "workspace-leave")!;
+    const logout = tid(host, "logout")!;
+    expect(tid(host, "profile-danger-card")?.contains(leave)).toBe(true);
+    expect(
+      logout.compareDocumentPosition(leave) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    // 별도의 「위험 구역」 상자는 만들지 않는다(장식 박스 금지).
+    expect(host.textContent).not.toContain("위험 구역");
+  });
+
+  it("사진 올리기: 카메라 손잡이와 「사진 올리기」 단추가 같은 파일 입력을 열고 업로드 후 로스터를 다시 받는다", async () => {
+    const { host, client } = mountSection();
+    const spy = vi.spyOn(client, "invalidateQueries");
+    const input = tid(host, "profile-avatar-input") as HTMLInputElement;
+    const click = vi.spyOn(input, "click").mockImplementation(() => undefined);
+    act(() => (tid(host, "profile-hero-camera") as HTMLButtonElement).click());
+    act(() => (tid(host, "profile-avatar-change") as HTMLButtonElement).click());
+    expect(click).toHaveBeenCalledTimes(2);
+    await pickPng(host);
+    expect(uploadAvatar).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith({ queryKey: ["roster", WS] });
+  });
+
+  it("사진 지우기: 사진이 있을 때만 보이고 제자리 확인 뒤에야 지운다", async () => {
+    const without = mountSection();
+    expect(tid(without.host, "profile-avatar-remove")).toBeNull();
+    act(() => mountedRoot?.unmount());
+    mountedRoot = null;
+    mountedHost?.remove();
+
+    const { host } = mountSection({ avatarUrl: "/v1/avatar?v=m" });
+    await act(async () => {
+      tid(host, "profile-avatar-remove")!.click();
+    });
+    expect(removeMyAvatar).not.toHaveBeenCalled();
+    const confirm = [...host.querySelectorAll("button")].find(
+      (b) => b.textContent === "지우기"
+    );
+    expect(confirm).toBeTruthy();
+    await act(async () => {
+      confirm!.click();
+    });
+    expect(removeMyAvatar).toHaveBeenCalledTimes(1);
+  });
+
+  it("오프라인이면 사진·이름·핸들·카메라가 잠기고 이유를 한 번 말한다", () => {
+    const { host } = mountSection({ offline: true, avatarUrl: "/v1/avatar?v=m" });
+    expect(tid(host, "profile-offline-banner")).not.toBeNull();
+    expect((tid(host, "profile-display-name") as HTMLInputElement).disabled).toBe(true);
+    expect((tid(host, "profile-handle") as HTMLInputElement).disabled).toBe(true);
+    expect((tid(host, "profile-hero-camera") as HTMLButtonElement).disabled).toBe(true);
+    expect(tid(host, "profile-avatar-change")?.getAttribute("aria-disabled")).toBe("true");
+    expect(tid(host, "profile-avatar-remove")?.getAttribute("aria-disabled")).toBe("true");
+    expect(tid(host, "profile-save")?.getAttribute("aria-disabled")).toBe("true");
+    // 나가기도 오프라인에서는 잠긴다.
+    expect(tid(host, "workspace-leave")?.getAttribute("aria-disabled")).toBe("true");
   });
 });

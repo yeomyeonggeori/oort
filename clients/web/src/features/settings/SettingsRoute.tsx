@@ -20,7 +20,6 @@ import { useOffline } from "@/features/common/useOffline";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { IS_TAURI } from "@/lib/env";
 import { UpdateSection } from "@/features/updates/UpdateSection";
-import { AccountSection } from "./AccountSection";
 import { DevicesSection } from "./DevicesSection";
 import { AppearanceSection } from "./AppearanceSection";
 import { TerminalSection } from "./TerminalSection";
@@ -282,12 +281,12 @@ export function SettingsRoute() {
           // inputs to mean anything, so the cache goes first.
           onRetry={() => resetSettingsQueries(queryClient)}
         >
-          {/* 옛 섹션 본문은 아직 카드 문법으로 다시 짜이지 않았다(S2~S5). 판(`--sheet`) 위에
+          {/* 옛 섹션 본문은 아직 카드 문법으로 다시 짜이지 않았다(S3~S5; 프로필은 S2가 끝냈다). 판(`--sheet`) 위에
               맨바닥으로 놓으면 보조 알약(`surface-muted`)이 판에 묻혀 보이지 않으므로(대비
               1.01), 본문 전체를 카드 한 장(`--surface`)에 얹는다. 페이지를 이식하는 슬라이스가
               그 페이지의 이 껍질을 걷고 `SettingsSection` 카드로 바꾼다. 옛 AI 연결 화면은
               자기 판(곁판 포함)을 가져서 껍질과 폭 제한 없이 그대로 둔다. */}
-          {section === "ai" ? (
+          {section === "ai" || section === "profile" ? (
             <SectionPage
               section={section}
               offline={offline}
@@ -316,8 +315,8 @@ export function SettingsRoute() {
 /**
  * 한 페이지의 본문. 페이지 머리(h1)가 제목을 이미 말하므로 첫 본문은 자기 제목(h2)을
  * 접고 설명 줄만 남긴다(`SectionTitleHiddenContext`). 합친 페이지는 옛 구획 본문을 그
- * 아래에 **제 제목을 단 채** 잇는다: 계정·링크 미리보기·터미널은 S2·S3·S5가 카드로 다시
- * 짜면서 흡수한다.
+ * 아래에 **제 제목을 단 채** 잇는다: 링크 미리보기·터미널은 S3·S5가 카드로 다시 짜면서
+ * 흡수한다. 프로필은 S2가 카드로 다시 짜서 계정을 흡수했다(껍질 없이 제 카드를 든다).
  */
 function SectionPage({
   section,
@@ -335,12 +334,7 @@ function SectionPage({
   );
   switch (section) {
     case "profile":
-      return (
-        <>
-          {primary(<ProfileSection offline={offline} />)}
-          <AccountSection />
-        </>
-      );
+      return <ProfileSection offline={offline} />;
     case "appearance":
       return (
         <>
