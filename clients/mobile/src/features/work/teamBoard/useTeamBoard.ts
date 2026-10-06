@@ -30,6 +30,8 @@ import {useChannels} from '../../workspace/queries';
 const BOARD_PAGE = 50;
 /** 겹쳐 오는 신호를 한 번의 읽기로 합치는 간격. */
 export const REREAD_COALESCE_MS = 150;
+/** 신호가 계속 와도 읽기가 이 시간 안에는 반드시 한 번 시작된다. */
+export const REREAD_MAX_WAIT_MS = 2_000;
 /** diff 숫자는 이벤트가 없다: 느린 타이머가 바닥이다. */
 export const BOARD_POLL_MS = 60_000;
 /** 듣는 채널 상한. 넘는 채널은 타이머와 당겨서 새로고침이 받친다. */
@@ -46,6 +48,8 @@ export function useTeamBoardList(workspaceId: string, enabled: boolean) {
       fetchSharedWorkSessions(workspaceId, {
         cursor: pageParam,
         limit: BOARD_PAGE,
+        // 호스팅 에이전트의 작업 실행도 섞는다(AT-5 #3518). 모르는 서버는 무시한다.
+        include: 'runs',
       }),
     initialPageParam: null as string | null,
     getNextPageParam: last => last.nextCursor,
@@ -66,11 +70,13 @@ export function useTeamBoardList(workspaceId: string, enabled: boolean) {
 export function useTeamBoardItem(
   workspaceId: string,
   sessionId: string | null,
+  /** 단건 읽기는 세션 전용이다. 실행 줄은 목록의 줄을 그대로 쓰므로 읽지 않는다. */
+  enabled = true,
 ) {
   const query = useQuery({
     queryKey: [...teamBoardKey(workspaceId), 'item', sessionId],
     queryFn: () => fetchSharedWorkSession(workspaceId, sessionId ?? ''),
-    enabled: workspaceId !== '' && sessionId !== null,
+    enabled: enabled && workspaceId !== '' && sessionId !== null,
     retry: (count, error) =>
       !(error instanceof ApiError && error.status === 404) && count < 2,
   });
@@ -109,14 +115,24 @@ export function useTeamBoardRail(
   // 채널마다 같은 신호가 겹쳐 오거나 재구독이 채널 수만큼 한꺼번에 끝난다. 한 번의
   // 읽기로 합친다: 마지막 신호가 읽기를 시작시킨다.
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 끊임없이 신호가 오면 뒤로 밀리기만 해서 읽기가 굶는다. 첫 신호부터 최대 대기가 지나면
+  // 마지막 신호를 기다리지 않고 읽는다.
+  const firstSignalAt = useRef<number | null>(null);
   const reread = useCallback(() => {
     if (timer.current !== null) clearTimeout(timer.current);
+    const now = Date.now();
+    if (firstSignalAt.current === null) firstSignalAt.current = now;
+    const remaining = Math.max(
+      0,
+      firstSignalAt.current + REREAD_MAX_WAIT_MS - now,
+    );
     timer.current = setTimeout(() => {
       timer.current = null;
+      firstSignalAt.current = null;
       void queryClient.invalidateQueries({
         queryKey: teamBoardKey(workspaceId),
       });
-    }, REREAD_COALESCE_MS);
+    }, Math.min(REREAD_COALESCE_MS, remaining));
   }, [queryClient, workspaceId]);
   useEffect(
     () => () => {

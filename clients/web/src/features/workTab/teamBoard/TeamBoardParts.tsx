@@ -3,6 +3,7 @@ import {
   Check,
   CircleAlert,
   Circle,
+  CircleX,
   Eye,
   LoaderCircle,
   SquareDot,
@@ -11,6 +12,7 @@ import {
 import type { SharedSessionState, SharedWorkSession } from "@momo/core/lib/api";
 import {
   diffFacts,
+  isAgentLane,
   laneLabel,
   stateChipLabel,
 } from "@momo/core/features/workbench/teamBoard";
@@ -30,6 +32,7 @@ const STATE_ICON: Readonly<Record<SharedSessionState, LucideIcon>> = {
   review: Eye,
   idle: Circle,
   done: Check,
+  failed: CircleX,
   stopped: SquareDot,
 };
 
@@ -40,6 +43,7 @@ const STATE_TONE: Readonly<Record<SharedSessionState, string>> = {
   review: "bg-muted-soft text-ink",
   idle: "bg-muted-soft text-ink-muted",
   done: "bg-ok-soft text-ok",
+  failed: "bg-danger-soft text-danger",
   stopped: "bg-danger-soft text-danger",
 };
 
@@ -62,11 +66,11 @@ export function StateChip({ item }: { item: SharedWorkSession }) {
 }
 
 export function LaneLabel({ item }: { item: SharedWorkSession }) {
-  const agent = item.origin === "host";
+  const agent = isAgentLane(item);
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 text-timestamp font-medium",
+        "inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-timestamp font-medium",
         agent ? "text-agent" : "text-ink-muted"
       )}
       data-testid="team-board-lane"

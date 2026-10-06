@@ -2,6 +2,11 @@ import type { Approval, AgentRun, Message } from "../../lib/api";
 import { uuidEq } from "../../lib/api";
 import type { SpawnExecutionPlan } from "../../lib/executionPlan";
 import type { FilterTabsSpec } from "../common/filterTabs";
+import {
+  agentRunReport,
+  artifactSummary,
+  hasRunReport,
+} from "../workbench/runReport";
 
 // =============================================================================
 // Inbox / activity model (R-1 §2), pure. Everything the two surfaces render is
@@ -403,6 +408,15 @@ export function runItem(
   const live = isLiveRun(run);
   const title = runTitle(run);
   const atMs = run.finishedAtMs ?? run.startedAtMs ?? run.createdAtMs;
+  // 호스팅 에이전트가 알린 보고(AT-5 #3518): 마지막 단계와 결과 한 줄. 일반 텍스트다.
+  // 이 줄은 통째로 채널 링크라서 PR을 링크로 만들지 않는다(링크는 보드·작업 상세에 있다).
+  const report = agentRunReport(run.output);
+  const reported = hasRunReport(report);
+  const lastStage = report.stages.length > 0 ? report.stages[report.stages.length - 1] : null;
+  const summary = artifactSummary(report);
+  const detail = reported
+    ? [lastStage, summary].filter((part): part is string => part !== null).join(" · ")
+    : `${run.stepCount}/${run.maxSteps} 단계`;
   return {
     key: `run:${run.id}`,
     kind: "run",
@@ -411,7 +425,7 @@ export function runItem(
     actorIsAgent: actor.isAgent,
     // The title is quoted BEFORE 작업 so the particle stays fixed (작업을).
     predicate: title ? `"${title}" 작업을 실행했습니다` : "작업을 실행했습니다",
-    detail: `${run.stepCount}/${run.maxSteps} 단계`,
+    detail: detail === "" ? `${run.stepCount}/${run.maxSteps} 단계` : detail,
     outcome: outcome.label,
     outcomeTone: outcome.tone,
     channelId: run.channelId,
