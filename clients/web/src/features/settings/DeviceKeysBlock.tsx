@@ -29,6 +29,7 @@ import {
 } from "@/lib/tauri";
 import {
   autoRebindTried,
+  DEVICE_KEYS_POLL_MS,
   DEVICE_KEYS_QUERY_KEY,
   deviceKeyFingerprint,
   hostDeliveryCopy,
@@ -124,6 +125,11 @@ export function DeviceKeysBlock({
     queryKey: DEVICE_KEYS_QUERY_KEY(workspaceId),
     queryFn: () => listDeviceKeys(workspaceId),
     retry: false,
+    // #3577: a phone's row appears after the link is redeemed; keep looking
+    // while the panel is open (paused when the window is hidden), and again
+    // when the window comes back to the front.
+    refetchInterval: DEVICE_KEYS_POLL_MS,
+    refetchOnWindowFocus: true,
   });
 
   return (

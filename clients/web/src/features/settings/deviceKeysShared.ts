@@ -4,6 +4,15 @@ import type { DesktopHostDelivery } from "@/lib/tauri";
 export const DEVICE_KEYS_QUERY_KEY = (workspaceId: string) =>
   ["settings", "device-keys", workspaceId] as const;
 
+/**
+ * How often the open 지시 서명 panel re-reads the server's key list (#3577).
+ * A phone registers its key a moment AFTER its QR link is redeemed (key
+ * generation, then `POST device-keys`), so the Mac's one refetch at link time
+ * (`DevicesSection.onLinked`) runs before the row exists and the 30 s staleTime
+ * then froze an empty list: 「승인 전」 on the phone, 「승인할 폰이 없습니다」 here.
+ */
+export const DEVICE_KEYS_POLL_MS = 5_000;
+
 /** What the local workd did with a revocation letter, in one sentence (D-7). */
 export function hostDeliveryCopy(host: DesktopHostDelivery): string {
   switch (host.state) {
