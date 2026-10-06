@@ -1,4 +1,4 @@
-import {createAgentWorkRun, uuidEq, type Channel} from '@momo/core/lib/api';
+import { createAgentWorkRun, uuidEq, type Channel } from '@momo/core/lib/api';
 import {
   normalizeWorkRunInput,
   newWorkRunClientId,
@@ -11,8 +11,8 @@ import {
   type WorkRunField,
   type WorkRunFailure,
 } from '@momo/core/features/agents/workRunRequest';
-import {useMutation, useQueryClient} from '@tanstack/react-query';
-import React, {useCallback, useMemo, useRef, useState} from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -32,8 +32,8 @@ import {
   OutlineButton,
   Sentence,
 } from '../design/atoms';
-import {PageSheet, usePageSheetClose} from '../design/PageSheet';
-import {usePalette, useStyles} from '../design/theme';
+import { PageSheet, usePageSheetClose } from '../design/PageSheet';
+import { usePalette, useStyles } from '../design/theme';
 import {
   ds2Radius,
   ds2Type,
@@ -68,12 +68,12 @@ import {
   writeLastTarget,
   type DelegateDraft,
 } from '../features/work/delegate/session';
-import {teamBoardKey} from '../features/work/teamBoard/useTeamBoard';
-import {useHostedConnections} from '../features/hostedAgents/queries';
-import {useChannels, useDirectory} from '../features/workspace/queries';
-import {haptics} from '../lib/haptics';
-import {useSession} from '../session/useSession';
-import {SheetTitleRow} from './NewMessageSheet';
+import { teamBoardKey } from '../features/work/teamBoard/useTeamBoard';
+import { useHostedConnections } from '../features/hostedAgents/queries';
+import { useChannels, useDirectory } from '../features/workspace/queries';
+import { haptics } from '../lib/haptics';
+import { useSession } from '../session/useSession';
+import { SheetTitleRow } from './NewMessageSheet';
 
 // =============================================================================
 // 작업 맡기기 — 폰에서 에이전트에게 type=work 요청을 만든다 (#3588 N8, ADR-0198 D4 증보 1).
@@ -116,9 +116,9 @@ export interface DelegatePrefill {
  */
 export interface DelegatePreview {
   step?: Step;
-  pick?: {agentMemberId: string; channelId: string};
+  pick?: { agentMemberId: string; channelId: string };
   draft?: Partial<DelegateDraft>;
-  refusal?: {failure: WorkRunFailure; agentId: string; channelId: string};
+  refusal?: { failure: WorkRunFailure; agentId: string; channelId: string };
 }
 
 export function DelegateWorkSheet({
@@ -140,7 +140,11 @@ export function DelegateWorkSheet({
   onSubmitted: () => void;
 }): React.JSX.Element {
   return (
-    <PageSheet onClose={onClose} accessibilityLabel="작업 맡기기" testID="delegate-sheet">
+    <PageSheet
+      onClose={onClose}
+      accessibilityLabel="작업 맡기기"
+      testID="delegate-sheet"
+    >
       <SheetBody
         prefill={prefill}
         preview={preview}
@@ -151,7 +155,6 @@ export function DelegateWorkSheet({
     </PageSheet>
   );
 }
-
 
 interface Refusal {
   failure: WorkRunFailure;
@@ -171,12 +174,12 @@ function closedBy(
   failure: WorkRunFailure,
   agentId: string,
   channelId: string,
-): {pair?: string; agent?: string} {
+): { pair?: string; agent?: string } {
   if (failure.reason === 'hosted_channel_not_approved') {
-    return {pair: pairKey(agentId, channelId)};
+    return { pair: pairKey(agentId, channelId) };
   }
   if (failure.next === 'fix_elsewhere' || failure.reason === 'agent_paused') {
-    return {agent: agentId};
+    return { agent: agentId };
   }
   return {};
 }
@@ -196,7 +199,7 @@ function SheetBody({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
-  const {member, workspaceId} = useSession();
+  const { member, workspaceId } = useSession();
   const client = useQueryClient();
   const slideClose = usePageSheetClose() ?? onClose;
 
@@ -211,7 +214,7 @@ function SheetBody({
     () =>
       hostedQuery.data === undefined
         ? HOSTED_UNKNOWN
-        : {kind: 'known', connections: hostedQuery.data},
+        : { kind: 'known', connections: hostedQuery.data },
     [hostedQuery.data],
   );
 
@@ -243,16 +246,22 @@ function SheetBody({
     field: WorkRunField;
     sentence: string;
   } | null>(null);
-  const [refusal, setRefusal] = useState<Refusal | null>(preview?.refusal ?? null);
+  const [refusal, setRefusal] = useState<Refusal | null>(
+    preview?.refusal ?? null,
+  );
   // 서버가 닫은 곳은 이 시트가 열려 있는 동안 다시 권하지 않는다.
   const [refusedAgents, setRefusedAgents] = useState<readonly string[]>(() => {
     const r = preview?.refusal;
-    const closed = r ? closedBy(r.failure, r.agentId, r.channelId).agent : undefined;
+    const closed = r
+      ? closedBy(r.failure, r.agentId, r.channelId).agent
+      : undefined;
     return closed === undefined ? [] : [closed];
   });
   const [refusedPairs, setRefusedPairs] = useState<readonly string[]>(() => {
     const r = preview?.refusal;
-    const closed = r ? closedBy(r.failure, r.agentId, r.channelId).pair : undefined;
+    const closed = r
+      ? closedBy(r.failure, r.agentId, r.channelId).pair
+      : undefined;
     return closed === undefined ? [] : [closed];
   });
   const [preselected, setPreselected] = useState(preview?.pick !== undefined);
@@ -262,7 +271,9 @@ function SheetBody({
   const inputs = useRef<Partial<Record<WorkRunField, TextInput | null>>>({});
 
   const loading =
-    directoryQuery.isPending || channelsQuery.isPending || hostedQuery.isPending;
+    directoryQuery.isPending ||
+    channelsQuery.isPending ||
+    hostedQuery.isPending;
 
   // ---- 후보 ---------------------------------------------------------------
   const agents = useMemo(
@@ -280,7 +291,8 @@ function SheetBody({
     () =>
       lockedChannelId === undefined
         ? null
-        : (allChannels.find(channel => uuidEq(channel.id, lockedChannelId)) ?? null),
+        : allChannels.find(channel => uuidEq(channel.id, lockedChannelId)) ??
+          null,
     [allChannels, lockedChannelId],
   );
 
@@ -307,14 +319,17 @@ function SheetBody({
   const resolvedChannel = useMemo<Channel | null>(() => {
     if (channelOptions.length === 0) return null;
     if (channelId !== null) {
-      const picked = channelOptions.find(option => uuidEq(option.id, channelId));
+      const picked = channelOptions.find(option =>
+        uuidEq(option.id, channelId),
+      );
       if (picked !== undefined) return picked;
     }
     return channelOptions.length === 1 ? (channelOptions[0] as Channel) : null;
   }, [channelOptions, channelId]);
 
   const agentRefused =
-    selected !== null && refusedAgents.some(id => uuidEq(id, selected.member.id));
+    selected !== null &&
+    refusedAgents.some(id => uuidEq(id, selected.member.id));
   // 서버가 닫은 (에이전트, 채널) 짝: 목록에서 지우지 않고 회색으로 둔다. 지우면 B 단계에서
   // 방금 쓴 도착지가 사라져 화면이 갑자기 A로 떨어진다.
   const pairRefused = (agent: string, channel: string) =>
@@ -338,7 +353,9 @@ function SheetBody({
               candidate =>
                 uuidEq(candidate.member.id, last.agentMemberId) &&
                 candidate.rest === null &&
-                candidate.channels.some(channel => uuidEq(channel.id, last.channelId)),
+                candidate.channels.some(channel =>
+                  uuidEq(channel.id, last.channelId),
+                ),
             );
       if (last !== null && match !== undefined) {
         setAgentId(match.member.id);
@@ -356,7 +373,7 @@ function SheetBody({
   const setField = useCallback(
     (field: keyof DelegateDraft, value: string) => {
       setDraftState(current => {
-        const next = {...current, [field]: value};
+        const next = { ...current, [field]: value };
         writeDraft(workspaceId, next);
         return next;
       });
@@ -380,7 +397,7 @@ function SheetBody({
 
   // ---- 보내기 -------------------------------------------------------------
   const mutation = useMutation({
-    mutationFn: (variables: {channelId: string; draft: WorkRunDraft}) =>
+    mutationFn: (variables: { channelId: string; draft: WorkRunDraft }) =>
       createAgentWorkRun(workspaceId, variables.channelId, variables.draft),
     onSuccess: () => {
       haptics.success();
@@ -391,7 +408,7 @@ function SheetBody({
           channelId: resolvedChannel.id,
         });
       }
-      void client.invalidateQueries({queryKey: teamBoardKey(workspaceId)});
+      void client.invalidateQueries({ queryKey: teamBoardKey(workspaceId) });
       if (boardAvailable) {
         onSubmitted();
         slideClose();
@@ -424,7 +441,8 @@ function SheetBody({
   });
 
   const submit = (forceFresh = false) => {
-    if (selected === null || resolvedChannel === null || mutation.isPending) return;
+    if (selected === null || resolvedChannel === null || mutation.isPending)
+      return;
     const base: WorkRunDraft = {
       agentMemberId: selected.member.id,
       clientRunId: '',
@@ -440,20 +458,26 @@ function SheetBody({
     } catch (error) {
       if (error instanceof WorkRunDraftError) {
         // 보내기 전에 막은 입력: 서버는 호출되지 않았다. 햅틱 없이 그 칸으로만 간다.
-        setFieldError({field: error.field, sentence: error.sentence});
-        if (error.field === 'repo' || error.field === 'branch') setShowMore(true);
+        setFieldError({ field: error.field, sentence: error.sentence });
+        if (error.field === 'repo' || error.field === 'branch')
+          setShowMore(true);
         inputs.current[error.field]?.focus();
         return;
       }
       throw error;
     }
-    runId.current = nextRunId(runId.current, key, newWorkRunClientId, forceFresh);
+    runId.current = nextRunId(
+      runId.current,
+      key,
+      newWorkRunClientId,
+      forceFresh,
+    );
     setRefusal(null);
     setFieldError(null);
     haptics.light();
     mutation.mutate({
       channelId: resolvedChannel.id,
-      draft: {...base, clientRunId: runId.current.id},
+      draft: { ...base, clientRunId: runId.current.id },
     });
   };
 
@@ -497,10 +521,7 @@ function SheetBody({
 
   if (effectiveStep === 'A') {
     return (
-      <ScrollView
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={styles.list}
-        testID="delegate-step-a">
+      <View style={styles.fill}>
         {header(
           <TrailingAction
             label="다음"
@@ -511,117 +532,143 @@ function SheetBody({
             testID="delegate-next"
           />,
         )}
-        <Sentence style={styles.intro}>
-          에이전트에게 일을 맡기면 작업 탭에서 진행을 볼 수 있어요.
-        </Sentence>
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.list}
+          testID="delegate-step-a"
+        >
+          <Sentence style={styles.intro}>
+            에이전트에게 일을 맡기면 작업 탭에서 진행을 볼 수 있어요.
+          </Sentence>
 
-        {!lockedAgent ? (
-          agents.length === 0 ? (
+          {!lockedAgent ? (
+            agents.length === 0 ? (
+              <View style={styles.gap}>
+                <NoticeBlock
+                  headline={NO_AGENT_SENTENCE}
+                  testID="delegate-no-agent"
+                />
+              </View>
+            ) : (
+              <View style={styles.gap}>
+                <GroupSection
+                  label="누구에게 맡길까요"
+                  testID="delegate-agents"
+                >
+                  {agents.map((candidate, index) => {
+                    const refused = refusedAgents.some(id =>
+                      uuidEq(id, candidate.member.id),
+                    );
+                    const rest = candidate.rest;
+                    const isSelected =
+                      agentId !== null && uuidEq(agentId, candidate.member.id);
+                    return (
+                      <GroupRow
+                        key={candidate.member.id}
+                        title={candidate.member.displayName}
+                        detail={
+                          rest !== null
+                            ? REST_SENTENCE[rest]
+                            : refused
+                            ? '방금은 받아 주지 않았어요'
+                            : `@${candidate.member.handle}`
+                        }
+                        separated={index > 0}
+                        disabled={rest !== null || refused}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: isSelected }}
+                        onPress={() => pickAgent(candidate)}
+                        trailing={<Check on={isSelected} />}
+                        testID={`delegate-agent-${candidate.member.handle}`}
+                      />
+                    );
+                  })}
+                </GroupSection>
+              </View>
+            )
+          ) : selected !== null ? (
             <View style={styles.gap}>
-              <NoticeBlock headline={NO_AGENT_SENTENCE} testID="delegate-no-agent" />
+              <GroupSection
+                label="맡길 에이전트"
+                testID="delegate-agent-locked"
+              >
+                <GroupRow
+                  title={selected.member.displayName}
+                  detail={
+                    selected.rest !== null
+                      ? REST_SENTENCE[selected.rest]
+                      : `@${selected.member.handle}`
+                  }
+                  testID="delegate-agent-fixed"
+                />
+              </GroupSection>
             </View>
           ) : (
             <View style={styles.gap}>
-              <GroupSection label="누구에게 맡길까요" testID="delegate-agents">
-                {agents.map((candidate, index) => {
-                  const refused = refusedAgents.some(id =>
-                    uuidEq(id, candidate.member.id),
-                  );
-                  const rest = candidate.rest;
-                  const isSelected =
-                    agentId !== null && uuidEq(agentId, candidate.member.id);
-                  return (
-                    <GroupRow
-                      key={candidate.member.id}
-                      title={candidate.member.displayName}
-                      detail={
-                        rest !== null
-                          ? REST_SENTENCE[rest]
-                          : refused
-                            ? '방금은 받아 주지 않았어요'
-                            : `@${candidate.member.handle}`
-                      }
-                      separated={index > 0}
-                      disabled={rest !== null || refused}
-                      accessibilityRole="radio"
-                      accessibilityState={{selected: isSelected}}
-                      onPress={() => pickAgent(candidate)}
-                      trailing={<Check on={isSelected} />}
-                      testID={`delegate-agent-${candidate.member.handle}`}
-                    />
-                  );
-                })}
-              </GroupSection>
-            </View>
-          )
-        ) : selected !== null ? (
-          <View style={styles.gap}>
-            <GroupSection label="맡길 에이전트" testID="delegate-agent-locked">
-              <GroupRow
-                title={selected.member.displayName}
-                detail={
-                  selected.rest !== null
-                    ? REST_SENTENCE[selected.rest]
-                    : `@${selected.member.handle}`
-                }
-                testID="delegate-agent-fixed"
-              />
-            </GroupSection>
-          </View>
-        ) : (
-          <View style={styles.gap}>
-            <NoticeBlock
-              headline="이 에이전트를 찾지 못했어요. 목록을 새로 불러온 뒤에 다시 열어 주세요."
-              testID="delegate-agent-missing"
-            />
-          </View>
-        )}
-
-        {selected !== null && selected.rest === null ? (
-          channelOptions.length === 0 ? (
-            <View style={styles.gap}>
               <NoticeBlock
-                headline={
-                  selected.filteredByApproval
-                    ? NO_APPROVED_CHANNEL_SENTENCE
-                    : '이 에이전트가 들어 있는 채널이 없어요. 에이전트를 채널에 넣은 뒤에 맡겨 주세요.'
-                }
-                testID="delegate-no-channel"
+                headline="이 에이전트를 찾지 못했어요. 목록을 새로 불러온 뒤에 다시 열어 주세요."
+                testID="delegate-agent-missing"
               />
             </View>
-          ) : lockedChannel === null ? (
-            <View style={styles.gap}>
-              <GroupSection label="어느 채널에서 할까요" testID="delegate-channels">
-                {channelOptions.map((option, index) => {
-                  const isSelected =
-                    resolvedChannel !== null && uuidEq(resolvedChannel.id, option.id);
-                  const refused = pairRefused(selected.member.id, option.id);
-                  return (
-                    <GroupRow
-                      key={option.id}
-                      title={`#${option.name ?? '이름 없는 채널'}`}
-                      detail={refused ? '이 채널은 아직 승인되지 않았어요' : undefined}
-                      disabled={refused}
-                      separated={index > 0}
-                      accessibilityRole="radio"
-                      accessibilityState={{selected: isSelected}}
-                      onPress={() => pickChannel(option)}
-                      trailing={<Check on={isSelected} />}
-                      testID={`delegate-channel-${option.name ?? option.id}`}
-                    />
-                  );
-                })}
-              </GroupSection>
-            </View>
-          ) : null
-        ) : null}
+          )}
 
-        {refusal !== null ? (
-          <View style={styles.bannerWrap}>
-            <FailureBanner message={refusal.failure.sentence} testID="delegate-error" />
-          </View>
-        ) : null}
-      </ScrollView>
+          {selected !== null && selected.rest === null ? (
+            channelOptions.length === 0 ? (
+              <View style={styles.gap}>
+                <NoticeBlock
+                  headline={
+                    selected.filteredByApproval
+                      ? NO_APPROVED_CHANNEL_SENTENCE
+                      : '이 에이전트가 들어 있는 채널이 없어요. 에이전트를 채널에 넣은 뒤에 맡겨 주세요.'
+                  }
+                  testID="delegate-no-channel"
+                />
+              </View>
+            ) : lockedChannel === null ? (
+              <View style={styles.gap}>
+                <GroupSection
+                  label="어느 채널에서 할까요"
+                  testID="delegate-channels"
+                >
+                  {channelOptions.map((option, index) => {
+                    const isSelected =
+                      resolvedChannel !== null &&
+                      uuidEq(resolvedChannel.id, option.id);
+                    const refused = pairRefused(selected.member.id, option.id);
+                    return (
+                      <GroupRow
+                        key={option.id}
+                        title={`#${option.name ?? '이름 없는 채널'}`}
+                        detail={
+                          refused
+                            ? '이 채널은 아직 승인되지 않았어요'
+                            : undefined
+                        }
+                        disabled={refused}
+                        separated={index > 0}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: isSelected }}
+                        onPress={() => pickChannel(option)}
+                        trailing={<Check on={isSelected} />}
+                        testID={`delegate-channel-${option.name ?? option.id}`}
+                      />
+                    );
+                  })}
+                </GroupSection>
+              </View>
+            ) : null
+          ) : null}
+
+          {refusal !== null ? (
+            <View style={styles.bannerWrap}>
+              <FailureBanner
+                message={refusal.failure.sentence}
+                testID="delegate-error"
+              />
+            </View>
+          ) : null}
+        </ScrollView>
+      </View>
     );
   }
 
@@ -635,28 +682,32 @@ function SheetBody({
     uuidEq(refusal.agentId, selected.member.id) &&
     uuidEq(refusal.channelId, resolvedChannel.id);
   const sendDisabled =
-    mutation.isPending || blocked || selected === null || resolvedChannel === null;
+    mutation.isPending ||
+    blocked ||
+    selected === null ||
+    resolvedChannel === null;
   const fixed = lockedAgent && lockedChannelId !== undefined;
   const titleBytes = utf8ByteLength(draft.title.trim());
   const briefBytes = utf8ByteLength(draft.brief.trim());
 
   return (
-    <ScrollView
+    <View style={styles.fill}>
+      {header(
+        <TrailingAction
+          label={mutation.isPending ? '보내는 중' : '맡기기'}
+          disabled={sendDisabled}
+          onPress={() => submit()}
+          testID="delegate-send"
+        />,
+      )}
+      <ScrollView
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         // 키보드가 시트 아래를 덮는다. 네이티브 스크롤이 입력 칸을 키보드 위로 올려 준다.
         automaticallyAdjustKeyboardInsets
         contentContainerStyle={styles.list}
-        testID="delegate-step-b">
-        {header(
-          <TrailingAction
-            label={mutation.isPending ? '보내는 중' : '맡기기'}
-            disabled={sendDisabled}
-            onPress={() => submit()}
-            testID="delegate-send"
-          />,
-        )}
-
+        testID="delegate-step-b"
+      >
         <View style={styles.destination} testID="delegate-destination">
           <View style={styles.destinationText}>
             <Text style={styles.destinationLabel}>보낼 곳</Text>
@@ -689,8 +740,8 @@ function SheetBody({
                 action === 'retry'
                   ? () => submit()
                   : action === 'new'
-                    ? () => submit(true)
-                    : undefined
+                  ? () => submit(true)
+                  : undefined
               }
               retryLabel={
                 action === 'retry' || action === 'new'
@@ -699,7 +750,7 @@ function SheetBody({
               }
               testID="delegate-error"
             />
-            {action === 'repick' ? (
+            {action === 'repick' && !fixed ? (
               <View style={styles.repick}>
                 <OutlineButton
                   label={FAILURE_ACTION_LABEL.repick}
@@ -713,13 +764,18 @@ function SheetBody({
 
         <FieldLabel
           label="제목"
-          note={nearLimit(titleBytes, WORK_TITLE_MAX_BYTES) ? '조금 남았어요' : null}
+          note={
+            nearLimit(titleBytes, WORK_TITLE_MAX_BYTES) ? '조금 남았어요' : null
+          }
         />
         <TextInput
           ref={node => {
             inputs.current.title = node;
           }}
-          style={[styles.input, fieldError?.field === 'title' && styles.inputError]}
+          style={[
+            styles.input,
+            fieldError?.field === 'title' && styles.inputError,
+          ]}
           value={draft.title}
           onChangeText={value => setField('title', value)}
           placeholder="예: 로그인 버그 고치기"
@@ -733,7 +789,9 @@ function SheetBody({
 
         <FieldLabel
           label="설명"
-          note={nearLimit(briefBytes, WORK_BRIEF_MAX_BYTES) ? '조금 남았어요' : null}
+          note={
+            nearLimit(briefBytes, WORK_BRIEF_MAX_BYTES) ? '조금 남았어요' : null
+          }
         />
         <TextInput
           ref={node => {
@@ -759,10 +817,11 @@ function SheetBody({
 
         <Pressable
           accessibilityRole="button"
-          accessibilityState={{expanded: showMore}}
+          accessibilityState={{ expanded: showMore }}
           onPress={() => setShowMore(current => !current)}
-          style={({pressed}) => [styles.more, pressed && styles.pressed]}
-          testID="delegate-more">
+          style={({ pressed }) => [styles.more, pressed && styles.pressed]}
+          testID="delegate-more"
+        >
           <Text style={styles.moreLabel}>
             {showMore ? '저장소·브랜치 접기' : '저장소·브랜치 더 보기'}
           </Text>
@@ -774,7 +833,10 @@ function SheetBody({
               ref={node => {
                 inputs.current.repo = node;
               }}
-              style={[styles.input, fieldError?.field === 'repo' && styles.inputError]}
+              style={[
+                styles.input,
+                fieldError?.field === 'repo' && styles.inputError,
+              ]}
               value={draft.repo}
               onChangeText={value => setField('repo', value)}
               placeholder="예: https://github.com/oort/app"
@@ -792,7 +854,10 @@ function SheetBody({
               ref={node => {
                 inputs.current.branch = node;
               }}
-              style={[styles.input, fieldError?.field === 'branch' && styles.inputError]}
+              style={[
+                styles.input,
+                fieldError?.field === 'branch' && styles.inputError,
+              ]}
               value={draft.branch}
               onChangeText={value => setField('branch', value)}
               placeholder="예: main"
@@ -804,10 +869,13 @@ function SheetBody({
               testID="delegate-branch"
             />
             <FieldIssue error={fieldError} field="branch" />
-            <Text style={styles.rule}>둘 다 비워 두면 서버에 보내지 않아요.</Text>
+            <Text style={styles.rule}>
+              둘 다 비워 두면 서버에 보내지 않아요.
+            </Text>
           </View>
         ) : null}
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -827,21 +895,23 @@ function TrailingAction({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{disabled}}
+      accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
-      style={({pressed}) => [styles.trailing, pressed && styles.pressed]}
-      testID={testID}>
+      style={({ pressed }) => [styles.trailing, pressed && styles.pressed]}
+      testID={testID}
+    >
       <Text
         style={[styles.trailingLabel, disabled && styles.trailingLabelOff]}
-        maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+        maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+      >
         {label}
       </Text>
     </Pressable>
   );
 }
 
-function Check({on}: {on: boolean}): React.JSX.Element | null {
+function Check({ on }: { on: boolean }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
   return on ? (
     <Text style={styles.check} importantForAccessibility="no">
@@ -872,7 +942,7 @@ function FieldIssue({
   error,
   field,
 }: {
-  error: {field: WorkRunField; sentence: string} | null;
+  error: { field: WorkRunField; sentence: string } | null;
   field: WorkRunField;
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
@@ -881,7 +951,8 @@ function FieldIssue({
     <Text
       accessibilityLiveRegion="polite"
       style={styles.issue}
-      testID={`delegate-issue-${field}`}>
+      testID={`delegate-issue-${field}`}
+    >
       {error.sentence}
     </Text>
   );
@@ -889,8 +960,9 @@ function FieldIssue({
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    list: {paddingBottom: space.xl * 2},
-    gap: {marginTop: space.lg},
+    fill: { flex: 1 },
+    list: { paddingBottom: space.xl * 2 },
+    gap: { marginTop: space.lg },
     intro: {
       marginHorizontal: SAFE_GUTTER,
       fontSize: font.label,
@@ -904,8 +976,8 @@ const buildStyles = (color: Palette) =>
       marginBottom: space.sm,
       marginHorizontal: SAFE_GUTTER,
     },
-    label: {fontSize: font.label, fontWeight: '700', color: color.textMuted},
-    note: {fontSize: font.label, color: color.warn},
+    label: { fontSize: font.label, fontWeight: '700', color: color.textMuted },
+    note: { fontSize: font.label, color: color.warn },
     // 입력 그릇만 선을 든다(ADR-0189 D6: outline 은 텍스트 입력에만).
     input: {
       minHeight: TOUCH_TARGET,
@@ -919,8 +991,8 @@ const buildStyles = (color: Palette) =>
       fontSize: font.body,
       color: color.text,
     },
-    inputError: {borderColor: color.dangerText},
-    multiline: {minHeight: 132},
+    inputError: { borderColor: color.dangerText },
+    multiline: { minHeight: 132 },
     issue: {
       marginTop: space.sm,
       marginHorizontal: SAFE_GUTTER,
@@ -939,7 +1011,11 @@ const buildStyles = (color: Palette) =>
       marginTop: space.sm,
       marginHorizontal: SAFE_GUTTER,
     },
-    moreLabel: {fontSize: font.body, fontWeight: '600', color: color.accentText},
+    moreLabel: {
+      fontSize: font.body,
+      fontWeight: '600',
+      color: color.accentText,
+    },
     destination: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -950,19 +1026,31 @@ const buildStyles = (color: Palette) =>
       borderRadius: ds2Radius.card,
       backgroundColor: color.surface,
     },
-    destinationText: {flex: 1, minWidth: 0, gap: space.xs},
-    destinationLabel: {fontSize: font.label, color: color.textMuted, fontWeight: '700'},
-    destinationValue: {fontSize: font.body, color: color.text, fontWeight: '600'},
-    bannerWrap: {marginTop: space.lg, marginHorizontal: SAFE_GUTTER},
-    repick: {marginTop: space.sm, alignSelf: 'flex-start'},
+    destinationText: { flex: 1, minWidth: 0, gap: space.xs },
+    destinationLabel: {
+      fontSize: font.label,
+      color: color.textMuted,
+      fontWeight: '700',
+    },
+    destinationValue: {
+      fontSize: font.body,
+      color: color.text,
+      fontWeight: '600',
+    },
+    bannerWrap: { marginTop: space.lg, marginHorizontal: SAFE_GUTTER },
+    repick: { marginTop: space.sm, alignSelf: 'flex-start' },
     trailing: {
       minWidth: TOUCH_TARGET,
       minHeight: TOUCH_TARGET,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    trailingLabel: {fontSize: ds2Type.callout, fontWeight: '700', color: color.text},
-    trailingLabelOff: {color: color.textFaint},
-    pressed: {opacity: 0.6},
-    check: {fontSize: font.body, fontWeight: '700', color: color.text},
+    trailingLabel: {
+      fontSize: ds2Type.callout,
+      fontWeight: '700',
+      color: color.text,
+    },
+    trailingLabelOff: { color: color.textFaint },
+    pressed: { opacity: 0.6 },
+    check: { fontSize: font.body, fontWeight: '700', color: color.text },
   });
