@@ -362,7 +362,7 @@ describe("프로필 줄: #2816 모달과 해제 (ADR-0190 D3-f)", () => {
       "Claude · 회사 연결을 해제할까요?",
     );
     expect(q("my-account-unlink-body")?.textContent).toBe(
-      "이 계정 전용 폴더의 로그인을 Claude Code로 로그아웃하고 목록에서 뺍니다. 터미널에서 쓰던 claude 로그인은 그대로예요.",
+      "이 계정 전용 폴더의 로그인을 Claude Code로 로그아웃하고 목록에서 빼요. 터미널에서 쓰던 claude 로그인은 그대로예요.",
     );
     // 확인 전에는 아무것도 돌지 않는다.
     expect(shell.spawns).toEqual([]);

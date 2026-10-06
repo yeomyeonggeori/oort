@@ -43,13 +43,13 @@ import { SectionShell, SettingsToggleRow, Subsection } from "./SettingsFields";
 
 const LINES = [
   NOTIFICATION_RULES_SERVER_NOTE,
-  "OS 알림을 종류별로 끄는 선택은 이 기기에만 저장됩니다.",
+  "OS 알림을 종류별로 끄는 선택은 이 기기에만 저장돼요.",
 ];
 
 const CHANNEL_NOTE =
-  "채널 하나만 조용히 하려면 그 채널 이름을 눌러 알림 끄기를 고르세요. 이 화면은 워크스페이스 전체에 걸리는 규칙만 다룹니다.";
+  "채널 하나만 조용히 하려면 그 채널 이름을 눌러 알림 끄기를 고르세요. 이 화면은 워크스페이스 전체에 걸리는 규칙만 다뤄요.";
 
-const OFFLINE_REASON = "연결이 끊겨 지금은 규칙을 바꿀 수 없습니다.";
+const OFFLINE_REASON = "연결이 끊겨 지금은 규칙을 바꿀 수 없어요.";
 
 export function NotificationRulesSection({ offline }: { offline: boolean }) {
   const { workspaceId } = useSession();
@@ -79,7 +79,7 @@ export function NotificationRulesSection({ offline }: { offline: boolean }) {
     },
     onError: (_error, _next, context) => {
       if (context?.previous) client.setQueryData(queryKey, context.previous);
-      setIssue("규칙을 저장하지 못했습니다. 잠시 후 다시 시도하세요.");
+      setIssue("규칙을 저장하지 못했어요. 잠시 후 다시 시도하세요.");
     },
     onSuccess: (saved) => client.setQueryData(queryKey, saved),
   });
@@ -98,7 +98,7 @@ export function NotificationRulesSection({ offline }: { offline: boolean }) {
       ) : rules.isError ? (
         <Subsection title="워크스페이스 규칙">
           <InlineBanner
-            message="알림 규칙을 불러오지 못했습니다."
+            message="알림 규칙을 불러오지 못했어요."
             actionLabel="다시 불러오기"
             onAction={() => void rules.refetch()}
             testId="notification-rules-error"

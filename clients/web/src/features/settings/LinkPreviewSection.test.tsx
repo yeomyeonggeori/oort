@@ -90,10 +90,10 @@ describe("LinkPreviewSection", () => {
 
   it("keeps the device-scope sentence out of the save-state live region", () => {
     const host = mount(createElement(LinkPreviewSection));
-    expect(host.textContent).toContain("이 기기에만 저장됩니다");
+    expect(host.textContent).toContain("이 기기에만 저장돼요");
     const statuses = [...host.querySelectorAll('[role="status"]')];
     expect(
-      statuses.some((node) => node.textContent?.includes("이 기기에만 저장됩니다"))
+      statuses.some((node) => node.textContent?.includes("이 기기에만 저장돼요"))
     ).toBe(false);
   });
 });

@@ -25,17 +25,17 @@ const CHOICES = [
   {
     id: "system",
     label: "시스템 설정 따르기",
-    detail: "이 기기의 라이트/다크 설정을 그대로 씁니다.",
+    detail: "이 기기의 라이트/다크 설정을 그대로 써요.",
   },
   {
     id: "light",
     label: "라이트",
-    detail: "기기 설정과 상관없이 밝은 종이로 고정합니다.",
+    detail: "기기 설정과 상관없이 밝은 종이로 고정해요.",
   },
   {
     id: "dark",
     label: "다크",
-    detail: "기기 설정과 상관없이 어두운 하늘로 고정합니다.",
+    detail: "기기 설정과 상관없이 어두운 하늘로 고정해요.",
   },
 ];
 
@@ -49,14 +49,14 @@ export function AppearanceSection() {
   // 말해야 사람이 자기가 보게 될 화면을 안다.
   const hint =
     choice === "system"
-      ? `지금 이 기기의 시스템은 ${system === "dark" ? "다크" : "라이트"}입니다.`
-      : "다른 기기에서는 각자 고릅니다.";
+      ? `지금 이 기기의 시스템은 ${system === "dark" ? "다크" : "라이트"}예요.`
+      : "다른 기기에서는 각자 골라요.";
 
   return (
     <SectionShell
       title="테마"
       lines={[
-        "이 앱을 밝게 볼지 어둡게 볼지, 그리고 액센트 색을 고릅니다. 이 브라우저에만 저장됩니다.",
+        "이 앱을 밝게 볼지 어둡게 볼지, 그리고 액센트 색을 골라요. 이 브라우저에만 저장돼요.",
       ]}
     >
       <ChoiceRadios
@@ -93,7 +93,7 @@ export function AppearanceSection() {
             </label>
           ))}
         </div>
-        <p className="pt-1 text-meta text-ink-muted">기본은 새벽입니다.</p>
+        <p className="pt-1 text-meta text-ink-muted">기본은 새벽이에요.</p>
       </fieldset>
     </SectionShell>
   );

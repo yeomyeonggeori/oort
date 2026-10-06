@@ -17,7 +17,7 @@ export function AccountSection() {
   return (
     <SectionShell
       title="계정"
-      lines={["이 서버에서 나를 가리키는 정보입니다."]}
+      lines={["이 서버에서 나를 나타내는 정보예요."]}
     >
       <KeyValueRows
         rows={[

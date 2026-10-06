@@ -401,7 +401,7 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
     });
     const copied = String(writeText.mock.calls[0]?.[0] ?? "");
     expect(copied).toContain("새벽");
-    expect(copied).toContain("새벽 워크스페이스에 초대합니다.");
+    expect(copied).toContain("새벽 워크스페이스에 초대해요.");
     expect(copied).not.toMatch(/^oort 워크스페이스/);
   });
 });
