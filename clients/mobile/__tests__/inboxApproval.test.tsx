@@ -1080,6 +1080,21 @@ describe('아직 배포되지 않은 서버 (3R N-A)', () => {
   });
 });
 
+describe('인박스 필터 칩의 햅틱 (#3580)', () => {
+  it('다른 칩으로 넘어갈 때 selection 한 번, 이미 고른 칩을 다시 누르면 0번', async () => {
+    const calls = (jest.requireMock('expo-haptics') as {__calls: string[]}).__calls;
+    installFetch();
+    await openPendingRow();
+    calls.length = 0;
+    fireEvent.press(screen.getByTestId('inbox-tab-mentions'));
+    expect(calls).toEqual(['selection']);
+    fireEvent.press(screen.getByTestId('inbox-tab-mentions'));
+    expect(calls).toEqual(['selection']);
+    fireEvent.press(screen.getByTestId('inbox-tab-needs-action'));
+    expect(calls).toEqual(['selection', 'selection']);
+  });
+});
+
 describe('더는 반쪽이 아닌 「에이전트」 탭 (3R N-B → #1223)', () => {
   it('두 원장이 다 서면 반쪽 고지를 걷고, 목록은 그대로 둔다', async () => {
     // 이 탭은 승인 원장과 작업 실행 기록 **두** 원장 위에 서 있다. #1223 이전에는
