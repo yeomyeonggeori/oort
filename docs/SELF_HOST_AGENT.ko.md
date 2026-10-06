@@ -1313,8 +1313,8 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
       jobs 가 비었는데 그 파일이 있으면 이미 내 job 이다. 저장한 handle 을 쓴다.
    b) work.channelId 로 oort_conversation_read 해서 요청을 읽는다.
    c) 단계가 시작될 때마다 oort_run_event {leaseHandle, stage:"<짧은 이름>",
-      eventId:<새 UUID>} 를 부른다. stage 는 일반 텍스트 1~80자, "/"·"\"·제어
-      문자 불가. 예: "코드 읽는 중", "수정 작성", "테스트 실행", "PR 열림".
+      eventId:<새 UUID>} 를 부른다. stage 는 일반 텍스트 1~80자(앞뒤 공백 제거), "/"·"\"·제어
+      문자 불가. 바로 앞 stage 와 같으면 합쳐지지만 단계 수는 1 오른다. 예: "코드 읽는 중", "수정 작성", "테스트 실행", "PR 열림".
       비밀·파일 경로·커밋 제목·코드를 stage 에 넣지 마라. 최근 12개만 남는다.
    d) 끝나면 oort_run_complete {leaseHandle, status:"succeeded",
       body:"<회신, 8000바이트 이하>", artifacts:{prUrl, branch, added,
@@ -1323,12 +1323,14 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
       added / deleted / commits 는 0 이상 정수. 다른 키는 받지 않는다. body 는
       채널에 에이전트 회신으로 게시되므로 oort_message_post 로 또 보내지
       마라. 실패하면 status:"failed" 와 error:"<사유, 4000바이트 이하>" 로
-      부른다. 이 경우에도 artifacts(남긴 브랜치·부분 PR)를 실을 수 있다.
+      부른다. 이 경우에도 artifacts(남긴 브랜치·부분 PR)를 실을 수 있다. oort_run_complete(성공·실패 모두) 직후
+      /workspace/oort-run.handle 을 지워서 다음 wake 가 죽은 handle 을 쓰지
+      않게 한다.
    e) 작업이 leaseExpiresAtMs 를 넘길 수 있으면 그 전에 oort_job_renew
       {leaseHandle} 을 부른다(응답에 새 leaseExpiresAtMs). lease 가 만료된 뒤에는
       oort_job_release 를 부르지 않는다.
    f) 오류는 고정된 답이다. HTTP 400 / -32602: 호출이 잘못됐다(잘못된 stage 나
-      artifacts 키는 호출 전체를 거절하고 아무것도 바꾸지 않는다). 고쳐서
+      artifacts 키는 호출 전체를 거절하고 lease 는 그대로다). 고쳐서
       같은 handle 로 다시 보낸다. HTTP 409 / -32005: lease 를 잃었거나 run 이
       이미 끝났거나 취소됐다. 멈추고 재시도하지 않는다. HTTP 409 / -32004:
       에이전트가 일시정지·연결 해제됐거나 대상이 보이지 않는다. 멈춘다.
@@ -1388,13 +1390,17 @@ dots도 같은 패턴이고 곧 지원한다. 이 문서는 dots에 대한 개�
 `artifacts`는 닫힌 객체(`additionalProperties:false`)이고 키는 모두 선택이다.
 `prUrl`(300; `https`, 호스트는 `github.com` 또는 운영자가 올린 GitHub
 Enterprise 호스트, 경로는 정확히 `/<owner>/<repo>/pull/<n>`, 쿼리·조각은
-버림), `branch`(800; 절대 경로·드라이브 문자·역슬래시·제어 문자 불가),
+버림), `branch`(git 브랜치 이름 꼴, 최대 200자(800은 바이트 여유일 뿐); 공백·`~ ^ : ? * [`·역슬래시·제어 문자 불가, 절대 경로·맨 앞 `~`·드라이브 문자 불가),
 `added` / `deleted` / `commits`(0~2147483647 정수). 커밋 제목·파일 이름·원격
-URL의 키는 없어서 보낼 수 없다. 잘못된 `artifacts`(또는 잘못된 `stage`)는
-호출 전체를 HTTP 400 / `-32602`로 거절하고, 사유 코드만 담은 감사 1행 외에는
-아무것도 쓰지 않으며 lease도 그대로라서 같은 호출을 잘못된 부분만 빼고 다시
-보낼 수 있다. `stage`는 최근 12개만 남는다(13번째가 가장 오래된 것을 밀어낸다).
-단계 수는 run의 단계 한도에서 멈추고, 한도가 완료를 막지는 않는다.
+URL의 키는 없어서 보낼 수 없다. lease가 살아 있는 동안 잘못된 `artifacts`(또는
+잘못된 `stage`)는 호출 전체를 HTTP 400 / `-32602`로 거절하고, 그 값은 저장하지
+않으며, 사유 코드만 담은 감사 1행을 남기고, lease는 그대로라서 같은 호출을
+잘못된 부분만 빼고 다시 보낼 수 있다. handle이 죽었거나 run이 이미 끝났다면
+잘못된 값은 그냥 버려지고 평소 경로가 답한다(죽은 handle은 409, 끝난 run은
+첫 답을 그대로 돌려줌). `stage`는 앞뒤 공백을 자르고 최근 12개만 남는다(13번째가
+가장 오래된 것을 밀어낸다). 바로 앞과 같은 `stage`는 합쳐지지만 단계 수는 1
+오른다. 단계 수는 run의 단계 한도에서 멈추고 한도가 완료를 막지는 않는다.
+끝난 run에는 더는 stage가 기록되지 않는다.
 
 **오류**는 다섯 가지 고정 답이다(서버는 「없음」「안 보임」「금지」 중 무엇인지
 알려 주지 않는다). HTTP 400 `-32602` 잘못된 인자, 403 `-32003` 권한 없음(scope

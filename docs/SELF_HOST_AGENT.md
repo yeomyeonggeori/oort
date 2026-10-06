@@ -1421,7 +1421,9 @@ tunnel, with the active credential from join.
    b) Read the request with oort_conversation_read on work.channelId.
    c) Each time a phase starts, call oort_run_event {leaseHandle,
       stage:"<short label>", eventId:<new UUID>}. stage is plain text, 1 to
-      80 characters, no "/" or "\", no control characters. Examples:
+      80 characters (trimmed), no "/" or "\", no control characters. A stage
+      equal to your previous one is folded into it but still costs a step.
+      Examples:
       "reading code", "fix written", "tests running", "PR opened". Never put
       a secret, a file path, a commit title or code in a stage. Only the
       latest 12 are kept.
@@ -1433,13 +1435,15 @@ tunnel, with the active credential from join.
       key is accepted. body is posted to the channel as your reply, so do not
       also send it with oort_message_post. If you failed, call it with
       status:"failed" and error:"<reason, at most 4000 bytes>"; artifacts is
-      allowed there too (a branch or partial PR you left behind).
+      allowed there too (a branch or partial PR you left behind). Right after
+      oort_run_complete (done or failed), delete /workspace/oort-run.handle so
+      a later wake never reuses a dead handle.
    e) If work may outlast leaseExpiresAtMs, call oort_job_renew {leaseHandle}
       before it (the reply has the new leaseExpiresAtMs). Do not call
       oort_job_release after the lease expired.
    f) Errors are fixed answers. HTTP 400 / -32602: the call was malformed
-      (a bad stage or artifacts key rejects the whole call and changes
-      nothing); fix it and send again with the same handle. HTTP 409 /
+      (a bad stage or artifacts key rejects the whole call; the lease is
+      untouched); fix it and send again with the same handle. HTTP 409 /
       -32005: the lease is gone or the run is settled or cancelled; stop,
       do not retry. HTTP 409 / -32004: this agent is paused, disconnected or
       the target is not visible; stop. HTTP 403 / -32003: scope or channel
@@ -1503,15 +1507,22 @@ to D16 and 부록 A):
 `artifacts` is closed (`additionalProperties:false`) and every key is optional:
 `prUrl` (300; `https`, host `github.com` or an operator-listed GitHub
 Enterprise host, path exactly `/<owner>/<repo>/pull/<n>`, query and fragment
-dropped), `branch` (800; not an absolute path, no drive letter, no backslash,
-no control characters), `added` / `deleted` / `commits` (integer 0 to
+dropped), `branch` (a git-branch-like name, at most 200 characters (800 is only the
+byte envelope); no whitespace, none of `~ ^ : ? * [`, no backslash, no
+control characters, and not an absolute path, a leading `~` or a drive
+letter), `added` / `deleted` / `commits` (integer 0 to
 2147483647). There is no key for a commit title, a file name or a remote URL,
-so none can be sent. A bad `artifacts` (or a bad `stage`) refuses the whole
-call with HTTP 400 / `-32602`, writes nothing except one audit row with a
-reason code, and leaves the lease intact, so the agent can send the same call
-again without the bad part. Twelve `stage` markers are kept; the 13th pushes
-out the oldest, and a stage costs a step only up to the run's step limit (the
-step limit never blocks completion).
+so none can be sent. While the lease is live, a bad `artifacts` (or a bad
+`stage`) refuses the whole call with HTTP 400 / `-32602`, stores nothing from
+it, writes one audit row with a reason code only, and leaves the lease intact,
+so the agent can send the same call again without the bad part. If the
+handle is dead or the run already finished, the bad value is simply dropped
+and the normal path answers instead (a dead handle is 409; a finished run
+replays its first answer). Stages are trimmed and at most 12 are kept (the
+13th pushes out the oldest). A stage equal to the one just before it is
+folded into it but still costs a step, and every stage costs a step only up
+to the run's step limit (the limit never blocks completion). A finished run
+records no more stages.
 
 **Errors** are the five fixed answers (the server never says which of
 "absent", "invisible", "forbidden" it was): HTTP 400 `-32602` invalid
