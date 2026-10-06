@@ -558,7 +558,7 @@ function ThisMacRoot({
         detail={
           local.root && !rootRow
             ? "로그아웃 등으로 이 맥의 키 등록이 풀렸어요. 다시 등록해 주세요."
-            : "이 맥을 서명 기기로 등록해야 폰이 지시를 보낼 수 있게 승인할 수 있어요."
+            : "이 맥을 서명 기기로 등록해야 폰을 승인할 수 있어요."
         }
         notice={notice}
       />

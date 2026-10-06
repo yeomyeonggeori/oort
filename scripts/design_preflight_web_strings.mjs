@@ -185,7 +185,7 @@ const SELFTEST_CASES = [
     want: [],
     file: "features/settings/DeviceKeysBlock.tsx",
     why: "같은 뜻의 해요체·쉬운 말은 통과한다",
-    src: 'export const B = "이 맥을 서명 기기로 등록해야 폰이 지시를 보낼 수 있게 승인할 수 있어요.";',
+    src: 'export const B = "이 맥을 서명 기기로 등록해야 폰을 승인할 수 있어요.";',
   },
   {
     want: [],
