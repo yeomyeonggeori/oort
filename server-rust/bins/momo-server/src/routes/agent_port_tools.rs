@@ -10,7 +10,7 @@
 //! | `oort_conversation_read` | `momo_messaging::list_channel_page` — the REST history's own read |
 //! | `oort_message_post` | `momo_messaging::send_message_with_mentions_in_tx` — the REST send's own transaction |
 //! | `oort_jobs_claim` | `momo_outbox::claim_hosted_gateway_jobs_in_tx` — the gateway claim, hosted branch |
-//! | `oort_job_renew` / `oort_job_release` | `momo_outbox`'s existing lease verbs, unchanged |
+//! | `oort_job_renew` / `oort_job_release` | `momo_outbox`'s lease verbs; renew uses the hosted TTL and revives an unclaimed expired lease (#3530) |
 //! | `oort_run_event` | `routes::agent_gateway::record_gateway_event_in_tx` |
 //! | `oort_run_complete` | `routes::agent_gateway::complete_gateway_run_in_tx` |
 //! | `oort_action_propose` | `momo_agent::approval`'s producer — the *same* park #979 already wrote for tool calls |
@@ -667,6 +667,7 @@ async fn jobs_claim(
     let args = arguments(arguments_value)?;
     let limit = momo_outbox::clamp_claim_limit(optional_i64(args, "limit")?);
     let secret = state.agent_port.envelope_secret().to_string();
+    let lease_seconds = state.agent_port.config.hosted_lease_seconds;
 
     let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
         Box::pin(async move {
@@ -681,6 +682,7 @@ async fn jobs_claim(
                 caller.agent_member_id,
                 identity.connection_id,
                 limit,
+                lease_seconds,
             )
             .await
             .map_err(DbError::from)?;
@@ -786,6 +788,7 @@ async fn job_lease(
     let args = arguments(arguments_value)?;
     let raw_handle = required_str(args, "leaseHandle", 512)?.to_string();
     let secret = state.agent_port.envelope_secret().to_string();
+    let lease_seconds = state.agent_port.config.hosted_lease_seconds;
 
     let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
         Box::pin(async move {
@@ -804,11 +807,12 @@ async fn job_lease(
             };
             match verb {
                 LeaseVerb::Renew => {
-                    let expires = momo_outbox::renew_gateway_lease_in_tx(
+                    let expires = momo_outbox::renew_hosted_gateway_lease_in_tx(
                         conn,
                         caller.workspace_id,
                         caller.agent_member_id,
                         lease,
+                        lease_seconds,
                     )
                     .await
                     .map_err(DbError::from)?;
@@ -951,6 +955,7 @@ async fn run_event(
                         handle.run_id,
                         caller.agent_member_id,
                         lease,
+                        true,
                     )
                     .await?;
                     if standing == ReportStanding::Live {
@@ -987,6 +992,7 @@ async fn run_event(
                     event_id,
                     actor_member_id: Some(caller.agent_member_id),
                     via_token_id: Some(caller.token_id),
+                    hosted_lease: true,
                 },
             )
             .await?;
@@ -1052,6 +1058,7 @@ async fn run_complete(
                         handle.run_id,
                         caller.agent_member_id,
                         lease,
+                        true,
                     )
                     .await?;
                     if standing == ReportStanding::Live {
@@ -1093,6 +1100,7 @@ async fn run_complete(
                     via_token_id: Some(caller.token_id),
                     subscription_agents_enabled,
                     claude_subscription_agents_enabled,
+                    hosted_lease: true,
                 },
             )
             .await?;
@@ -1210,7 +1218,8 @@ async fn action_propose(
             )
             .await
             .map_err(DbError::from)?;
-            if !momo_outbox::gateway_lease_authorized(lease_snapshot, handle.lease_id, false) {
+            if !momo_outbox::gateway_lease_authorized_hosted(lease_snapshot, handle.lease_id, false)
+            {
                 return Ok(Err(ToolFailure::Conflict));
             }
             if run.agent_member_id != caller.agent_member_id
@@ -1413,7 +1422,8 @@ async fn card_suggest(
             )
             .await
             .map_err(DbError::from)?;
-            if !momo_outbox::gateway_lease_authorized(lease_snapshot, handle.lease_id, false) {
+            if !momo_outbox::gateway_lease_authorized_hosted(lease_snapshot, handle.lease_id, false)
+            {
                 return Ok(Err(ToolFailure::Conflict));
             }
             if run.agent_member_id != caller.agent_member_id || run.channel_id != handle.channel_id

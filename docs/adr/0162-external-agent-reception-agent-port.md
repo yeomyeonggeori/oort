@@ -4,6 +4,7 @@
 - 증보: **증보 1 — OAuth lifecycle (2026-08-15, HAP-E7 #1368) · Accepted (성재 승인 2026-08-15).** Accept는 D4/D6의 OAuth 경계를 승인한 것이지 flag 개방이 아니다 — 구현은 여전히 feature flag로 완전히 닫혀 있고(metadata 미광고·모든 route 404) static bearer 경로는 byte 동일하며, flag를 여는 것은 #1369 랜딩과 runtime proof 폐곡선 뒤의 별도 운영 결정이다.
 - 증보: **증보 2 — hosted 1:1 DM 승인 (2026-09-27, #2915) · Accepted (성재 결재 「권장대로」 2026-09-27).** 소유자↔자기 에이전트 1:1 DM은 자동 승인, 다른 멤버↔에이전트 1:1 DM은 에이전트 소유자가 DM 단위로 승인한다. 파일 끝 「증보 2」 절.
 - 증보: **증보 3 — 호스티드 에이전트 작업 추적 (2026-10-05, #3514 AT-1) · Accepted (성재 결재 「이대로 진행」 2026-10-05).** 외부 VM에서 일하는 호스팅 에이전트의 작업 요청·진행 표식·결과 산출물·팀 보드·끝남 푸시를 기존 `agent_run`/`agent_job`·Agent Port 도구의 확장으로 정한다. 새 저장소·터미널 보기 없음. 파일 끝 「증보 3」 절.
+- 증보: **증보 3 부록 A — 호스티드 lease 길이와 암묵 갱신 (2026-10-06, #3530 AT-8) · Accepted (성재 AT 계획 결재 「이대로 진행」 2026-10-05의 구현 세부).** 호스티드 claim·renew만 분 단위 lease를 쓰고, 만료됐어도 아무도 재클레임하지 않았다면 같은 핸들의 보고·완료를 받는다. 파일 끝 「증보 3 부록 A」 절.
 - 관련: ADR-0100(결정 거버넌스), ADR-0101(에이전트 신원·bearer), ADR-0102(worker/gateway 실행 경로), ADR-0130(외부 에이전트 fabric·ACP), ADR-0145(Rust/Axum), ADR-0150(대화 반출 경계)
 - 리서치: `docs/planning/research/2026-08-12-grok-bot-integration-feasibility.md`, `docs/planning/research/2026-08-12-grok-bot-reverse-teammate-direction.md`, `docs/planning/research/2026-08-12-external-agent-reception-audit.md`
 - 제품 문장: **Bring your hosted agent.** Grok Bot은 첫 setup preset이자 실증 클라이언트이며, 코어 계약은 벤더 중립이다.
@@ -495,3 +496,26 @@ agent_run.output = {
 4. **AT-5 표면·레시피(UXUI·docs):** 보드·카드에 run 항목, 루틴 문구 수정(D16). 캡처·실계정은 `runtime-unverified`로 표기.
 
 각 단위의 수용기준은 되돌리면 실패하는 시험을 요구한다: ① 호스팅 연결이 active가 아니거나 채널이 승인 밖이면 409이고 job 0건, `owner_only`·D18은 호스팅 연결과 무관하게 계속 409, ② 13번째 표식이 가장 오래된 것을 밀어내고 `step_count`가 `max_steps`에서 포화해도 완료가 막히지 않음, ③ 잘못된 `prUrl`·`branch`·음수 숫자는 완료 전체를 거절하고 아무것도 쓰지 않음, 알 수 없는 `artifacts` 키는 거절, ④ 채널 비멤버·다른 DM·다른 테넌트의 run이 보드에 0건이고 세션에 연결된 run은 한 줄, ⑤ 푸시는 요청자 외·60초 미만·설정 off·자기 취소에서 0건.
+
+### 증보 3 부록 A — 호스티드 lease 길이와 암묵 갱신 (Accepted · 성재 AT 계획 결재 「이대로 진행」 2026-10-05 · #3530 AT-8)
+
+> 이 부록은 증보 3(D11·D12)의 **도구 계약 의미**를 바꾼다(공개 도구의 409 조건). 그래서 ADR-0100에 따라 이 Accepted 기록이 구현 PR의 머지 조건이다.
+
+**문제(AT-3 #3516 조사).** 게이트웨이 lease는 고정 30초(`GATEWAY_LEASE_SECONDS`)이고 `oort_job_renew`는 살아 있는 lease만 늘린다. 벤더 VM이 수십 분 간격으로 깨는 호스팅 에이전트는 깨어날 때마다 lease를 잃어, `oort_run_event`/`oort_run_complete`가 lease 상실 409(-32005)를 받고 job은 재클레임 가능해진다. 증보 3의 작업 추적이 Grok Bot에서 쓸 수 없는 상태였다.
+
+**결정.**
+
+| # | 결정 | 근거 |
+|---|---|---|
+| A1 | 호스티드(Agent Port) claim과 renew는 **환경변수로 설정하는 긴 lease**를 쓴다. `MOMO_AGENT_PORT_HOSTED_LEASE_MINUTES`, 기본 **30분**, 범위 **5~120분**(범위 밖 값은 경계로 맞춤, 숫자가 아니면 부팅 실패). | VM 깨움 간격(수십 분)을 한 lease가 덮는다. 상한이 있어 죽은 연결의 job이 영영 묶이지 않는다. |
+| A2 | 관리형 gateway(REST 콜백)는 **30초 그대로**다. 같은 claim SQL을 공유하되 lease 초만 인자로 받고, 관리형 호출은 `GATEWAY_LEASE_SECONDS`를 넘긴다. | 관리형 에이전트 동작 불변. |
+| A3 | **암묵 갱신.** 호스티드 lease가 만료됐어도 job 행의 `lease_owner`가 여전히 그 핸들의 lease id이면(= 아무도 재클레임하지 않음) 같은 핸들의 `oort_run_event`·`oort_run_complete`·`oort_job_renew`·`oort_card_suggest`·`oort_action_propose`를 받는다. `oort_job_renew`는 이 경우 lease를 `now()+TTL`로 되살린다. | 재클레임은 새 `lease_owner`를 발급하므로 "누가 가져갔는가"는 소유자 비교만으로 정확히 판정된다. 만료 시각을 따로 믿을 필요가 없다. |
+| A4 | **재클레임되면 옛 핸들은 계속 409.** 해제(`oort_job_release`)로 소유자가 비워진 행도 옛 핸들을 받지 않는다. job 상태는 여전히 `pending`이어야 하고(`done`은 재생 창구에서만), 실행·run·채널·연결 결속 검사는 그대로다. `oort_job_release`는 살아 있는 lease만 받는다(바꾸지 않음). | 같은 일을 두 워커가 동시에 끝내는 길을 열지 않는다. |
+| A5 | **되살아남 경쟁.** 만료된 lease는 그 즉시 다음 `oort_jobs_claim`의 후보가 된다. 늦게 깨어난 에이전트가 보고 전에 `oort_jobs_claim`을 먼저 부르면 자기 job을 다시 가져오며 **새 핸들**을 받고, 옛 핸들은 A4로 409가 된다. 레시피는 "깨면 새 핸들을 쓰거나, claim 전에 옛 핸들로 보고"를 안내한다(D16 루틴 문구). | 모호함 없이 한 쪽만 유효하다. |
+| A6 | **만료 뒤에는 해제하지 말고 보고하거나 claim한다.** 만료된 lease에 `oort_job_release`를 부르면 409다(살아 있는 lease만 해제). 매 호출의 연결·채널 승인·run 상태 재검사는 lease 상태와 무관하게 그대로라서, 만료 뒤 암묵 갱신이 해제된 연결·좁혀진 승인·취소된 run을 되살리지 않는다. 만료된 미재클레임 핸들의 잘못된 보고가 남기는 감사 행의 상한은 살아 있는 lease와 같다(속도 제한이 적용된다). 레시피는 SELF_HOST_AGENT 「Long gaps between wakes」. | 보안 검수(#3532) M1·M2·L3 |
+
+**다른 재큐 경로 확인(2026-10-06 실측).** `agent_job` 행을 되돌리는 주기 청소(스위프)는 코드에 없다. 유일한 재클레임 경로는 claim의 `lease_expires_at <= now()` 조건이며 이 부록의 TTL을 그대로 따른다. 노출 한도 G1의 `G1_STALE_RUNNING_SECONDS`(600초)는 동시 실행 수 계산에서 오래된 `running` run을 빼는 값일 뿐 job·lease를 건드리지 않는다. 도어벨(`momo-webhook::doorbell`)은 job·lease 열을 읽지 않는다.
+
+**열지 않는 것.** 새 컬럼·테이블·마이그레이션 없음(기존 lease 열만 쓴다). lease를 늘려도 연결 해제·채널 승인 축소·`agent_run` 취소는 즉시 유효하다(핸들 검증이 매번 연결·채널을 다시 읽는다). 관리형 에이전트와 BYOA gateway의 lease 의미는 바꾸지 않는다.
+
+**수용기준(시험, 되돌리면 실패).** ① 호스티드 claim의 lease가 약 30분이고 renew도 TTL까지 늘린다(30초로 되돌리면 실패), ② 만료됐지만 재클레임 없는 핸들로 run_event·run_complete가 200이고 job이 `done`(활성 요구로 되돌리면 실패), ③ 재클레임 뒤 옛 핸들의 renew·event·complete는 모두 409(소유자 비교를 빼면 실패), ④ 관리형 claim은 30초이고 만료된 관리형 lease의 renew·complete는 409, ⑤ TTL 안(예: 5분 지남)에는 두 번째 claim이 job을 못 가져간다, ⑥ 5~120분 경계 단위 시험.

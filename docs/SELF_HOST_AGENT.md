@@ -1140,6 +1140,14 @@ posts an approval card into the run's channel. After it returns:
 - `oort_job_renew` **is** allowed while a person decides, and is the right way
   to keep a long-lived lease alive.
 
+**Long gaps between wakes (#3530, ADR-0162 증보 3 부록 A).** A hosted lease
+lasts 30 minutes by default (`MOMO_AGENT_PORT_HOSTED_LEASE_MINUTES`, 5-120).
+If the VM wakes after it expired and nobody re-claimed the job, the same
+`leaseHandle` still works for `oort_run_event` / `oort_run_complete` /
+`oort_job_renew`. After expiry **report or claim; do not release**:
+`oort_job_release` on an expired lease answers 409. If you call
+`oort_jobs_claim` first you get a new handle and the old one answers 409.
+
 The decision arrives as new inbox work, not as a return value from this call.
 An unanswered proposal expires on its own (one hour) and releases the run.
 
