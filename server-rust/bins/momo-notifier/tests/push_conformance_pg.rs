@@ -38,6 +38,10 @@
 //! | `work_complete_skips_when_the_owner_was_just_reading_the_channel` | drop the `read_state` recency predicate |
 //! | `work_complete_is_pushed_once_per_turn` | drop the per-turn `prior` dedupe predicate |
 //! | `work_complete_respects_the_members_own_switch` | drop the `work_complete_push` filter |
+//! | `a_hosted_work_run_answer_pushes_its_requester_on_the_sixth_reason` (ADR-0162 증보 3 D14, #3517) | drop the `wrun` arm, or the requester join |
+//! | `a_hosted_work_run_under_a_minute_or_just_read_is_silent_not_a_dm` | drop the `ran_ms >= $3` / `read_state` predicates in the `work_run_done` arm |
+//! | `a_hosted_work_run_push_needs_a_requester_a_hosted_work_run_and_the_agents_own_answer` | drop the audit-requester, `input.type`, hosted-connection, status or author predicates in `wrun` |
+//! | `a_hosted_work_run_push_respects_the_work_complete_switch` | drop `work_run_done` from the `work_complete_push` filter |
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -1488,4 +1492,511 @@ async fn work_complete_respects_the_members_own_switch() {
             .any(|d| d.message_id == dm.to_string() && d.reason == "dm"),
         "the switch is per kind — a DM still notifies: {sent:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0162 증보 3 D14 (#3517) — 「작업 끝남」 for a hosted agent's work run
+// ---------------------------------------------------------------------------
+
+/// The requester is `fixture.recipient_id` (the member with a device); the DM
+/// peer `fixture.author_id` has a device too, so "only the requester" is a real
+/// claim. `agent` is a hosted agent in the channel.
+struct RunFixture {
+    agent: Uuid,
+}
+
+async fn seed_hosted_agent(su: &PgPool, fixture: &Fixture, hosted: bool) -> RunFixture {
+    let agent = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, status, display_name, handle) \
+         VALUES ($1, $2, 'agent'::member_kind, 'active', 'hermes', $3)",
+    )
+    .bind(agent)
+    .bind(fixture.workspace_id)
+    .bind(format!("a{}", agent.simple()))
+    .execute(su)
+    .await
+    .expect("seed agent member");
+    sqlx::query(
+        "INSERT INTO agent (member_id, workspace_id, model, base_url, max_concurrent_runs, \
+                            max_run_steps, owner_human_id) \
+         VALUES ($1, $2, 'hermes-agent', 'https://gateway.invalid/v1', 4, 50, $3)",
+    )
+    .bind(agent)
+    .bind(fixture.workspace_id)
+    .bind(fixture.recipient_id)
+    .execute(su)
+    .await
+    .expect("seed agent");
+    sqlx::query("INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)")
+        .bind(fixture.workspace_id)
+        .bind(fixture.channel_id)
+        .bind(agent)
+        .execute(su)
+        .await
+        .expect("agent joins the channel");
+    if hosted {
+        // Migration 069's guard: a hosted connection needs the sentinel agent shape.
+        sqlx::query(
+            "UPDATE agent SET model = 'hosted-agent', \
+                    base_url = 'https://hosted-agent.invalid/disabled', \
+                    config = jsonb_build_object('execution_mode', 'hosted_dial_in') \
+              WHERE workspace_id = $1 AND member_id = $2",
+        )
+        .bind(fixture.workspace_id)
+        .bind(agent)
+        .execute(su)
+        .await
+        .expect("make the agent a hosted sentinel");
+        sqlx::query(
+            "INSERT INTO hosted_agent_connection \
+               (workspace_id, agent_member_id, status, created_by, pairing_challenge_hash, \
+                pairing_expires_at) \
+             VALUES ($1, $2, 'pairing_pending', $3, '\\x00'::bytea, now() + interval '1 hour')",
+        )
+        .bind(fixture.workspace_id)
+        .bind(agent)
+        .bind(fixture.recipient_id)
+        .execute(su)
+        .await
+        .expect("seed hosted connection");
+    }
+    RunFixture { agent }
+}
+
+async fn run_work_fixture(su: &PgPool) -> (Fixture, RunFixture) {
+    let secrets = Secrets::mint();
+    let fixture = seed_dm_fixture(su, &secrets).await;
+    give_device(su, &fixture, fixture.author_id).await;
+    let run = seed_hosted_agent(su, &fixture, true).await;
+    (fixture, run)
+}
+
+/// A run that ended `status` after `ran_ms`, asked for by `requester` (`None` =
+/// no `agent.work.queued` audit row), of input type `input_type`.
+#[allow(clippy::too_many_arguments)]
+async fn seed_run(
+    su: &PgPool,
+    fixture: &Fixture,
+    agent: Uuid,
+    status: &str,
+    ran_ms: i64,
+    input_type: &str,
+    requester: Option<Uuid>,
+) -> Uuid {
+    let run = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO agent_run \
+           (id, workspace_id, agent_member_id, channel_id, status, input, idempotency_key, \
+            started_at, finished_at) \
+         VALUES ($1, $2, $3, $4, $5::run_status, jsonb_build_object('type', $6::text, 'title', 'SECRET-TITLE'), \
+                 $7, now() - make_interval(secs => $8::double precision / 1000.0), now())",
+    )
+    .bind(run)
+    .bind(fixture.workspace_id)
+    .bind(agent)
+    .bind(fixture.channel_id)
+    .bind(status)
+    .bind(input_type)
+    .bind(format!("t:{run}"))
+    .bind(ran_ms)
+    .execute(su)
+    .await
+    .expect("seed run");
+    if let Some(requester) = requester {
+        sqlx::query(
+            "INSERT INTO audit_log (workspace_id, actor_member_id, action, target_type, target_id, run_id) \
+             VALUES ($1, $2, 'agent.work.queued', 'agent_run', $3, $3)",
+        )
+        .bind(fixture.workspace_id)
+        .bind(requester)
+        .bind(run)
+        .execute(su)
+        .await
+        .expect("seed requester audit row");
+    }
+    run
+}
+
+/// The run's final answer exactly as `complete_gateway_run_in_tx` shapes it:
+/// authored by the agent, `client_msg_id = run_id`, `run_id` set.
+async fn run_answer(
+    su: &PgPool,
+    fixture: &Fixture,
+    run: Uuid,
+    author: Uuid,
+    seq: i64,
+    kind: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        "INSERT INTO message \
+           (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, \
+            client_msg_id, run_id) \
+         VALUES ($1, $2, $3, $3, 0, $4, $5::message_type, 'SECRET-ANSWER', $6, $6) RETURNING id",
+    )
+    .bind(fixture.workspace_id)
+    .bind(fixture.channel_id)
+    .bind(seq)
+    .bind(author)
+    .bind(kind)
+    .bind(run)
+    .fetch_one(su)
+    .await
+    .expect("insert run answer (fires push_candidate_enqueue_trg)")
+}
+
+fn only_reason<'a>(sent: &'a [PushDispatch], reason: &str) -> Vec<&'a PushDispatch> {
+    sent.iter().filter(|d| d.reason == reason).collect()
+}
+
+/// Happy path: the requester hears a 90 s hosted work run ended, on the sixth
+/// reason, the `momo.work` category, ids only. The DM peer (a device, in the
+/// channel) is NOT told on that reason, and a failed run pushes the same way.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_hosted_work_run_answer_pushes_its_requester_on_the_sixth_reason() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let (fixture, run) = run_work_fixture(&su).await;
+    let requester = fixture.recipient_id;
+    let ok = seed_run(
+        &su,
+        &fixture,
+        run.agent,
+        "succeeded",
+        90_000,
+        "work",
+        Some(requester),
+    )
+    .await;
+    let ok_msg = run_answer(&su, &fixture, ok, run.agent, 2, "text").await;
+    let bad = seed_run(
+        &su,
+        &fixture,
+        run.agent,
+        "failed",
+        90_000,
+        "work",
+        Some(requester),
+    )
+    .await;
+    let bad_msg = run_answer(&su, &fixture, bad, run.agent, 3, "system").await;
+
+    focus_candidates(&su, &[fixture.workspace_id]).await;
+    let relay = RecordingDispatcher::accepting();
+    let pool = momo_notifier_pool().await;
+    drain(&pool, relay.clone())
+        .drain_once(64)
+        .await
+        .expect("drain");
+    // A second drain (redelivery) sends nothing new for the same runs.
+    drain(&pool, relay.clone())
+        .drain_once(64)
+        .await
+        .expect("redrain");
+    let sent = relay.sent();
+    for message in [ok_msg, bad_msg] {
+        let hits: Vec<_> = sent
+            .iter()
+            .filter(|d| d.message_id == message.to_string() && d.reason == "work_run_done")
+            .collect();
+        assert_eq!(
+            hits.len(),
+            1,
+            "one push per run, to the requester's one device: {sent:?}"
+        );
+        assert_eq!(hits[0].category, "momo.work");
+        assert_eq!(hits[0].approval_id, None);
+        let rendered = serde_json::to_string(hits[0]).expect("render");
+        assert!(
+            !rendered.contains("SECRET-TITLE") && !rendered.contains("SECRET-ANSWER"),
+            "title and answer stay off the wire: {rendered}"
+        );
+    }
+    // The requester has one device; the peer (the other device) got the ordinary
+    // DM reason, never `work_run_done`.
+    assert_eq!(only_reason(&sent, "work_run_done").len(), 2);
+}
+
+/// 「1분 이상」 and A-8: a 59.999 s run, and a run whose requester was just
+/// reading the channel, push NOTHING to the requester — silent, not the DM arm.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_hosted_work_run_under_a_minute_or_just_read_is_silent_not_a_dm() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let (fixture, run) = run_work_fixture(&su).await;
+    let requester = fixture.recipient_id;
+    let short = seed_run(
+        &su,
+        &fixture,
+        run.agent,
+        "succeeded",
+        59_000,
+        "work",
+        Some(requester),
+    )
+    .await;
+    let short_msg = run_answer(&su, &fixture, short, run.agent, 2, "text").await;
+    let edge = seed_run(
+        &su,
+        &fixture,
+        run.agent,
+        "succeeded",
+        61_000,
+        "work",
+        Some(requester),
+    )
+    .await;
+    let edge_msg = run_answer(&su, &fixture, edge, run.agent, 3, "text").await;
+
+    focus_candidates(&su, &[fixture.workspace_id]).await;
+    let relay = RecordingDispatcher::accepting();
+    let pool = momo_notifier_pool().await;
+    drain(&pool, relay.clone())
+        .drain_once(64)
+        .await
+        .expect("drain");
+    let sent = relay.sent();
+    let to_requester = |message: Uuid| -> Vec<&PushDispatch> {
+        sent.iter()
+            .filter(|d| d.message_id == message.to_string() && d.reason != "dm")
+            .collect()
+    };
+    assert!(
+        to_requester(short_msg).is_empty(),
+        "59 s is under a minute: {sent:?}"
+    );
+    assert_eq!(
+        to_requester(edge_msg)
+            .iter()
+            .filter(|d| d.reason == "work_run_done")
+            .count(),
+        1,
+        "61 s is long enough"
+    );
+    // The requester's own device never got `dm` for the short run's answer: the
+    // arm yields no reason for them (the peer's `dm` is the ordinary DM rule).
+    let requester_device: String = sqlx::query_scalar(
+        "SELECT d.id::text FROM device d WHERE d.workspace_id = $1 AND d.member_id = $2",
+    )
+    .bind(fixture.workspace_id)
+    .bind(requester)
+    .fetch_one(&su)
+    .await
+    .expect("requester device");
+    assert!(
+        sent.iter()
+            .all(|d| !(d.message_id == short_msg.to_string() && d.device_id == requester_device)),
+        "a short run does not fall through to dm for the requester: {sent:?}"
+    );
+
+    // Just reading the channel -> silent for the requester.
+    let (fixture, run) = run_work_fixture(&su).await;
+    let requester = fixture.recipient_id;
+    sqlx::query(
+        "INSERT INTO read_state (workspace_id, channel_id, member_id, last_read_seq, last_read_at) \
+         VALUES ($1, $2, $3, 1, now())",
+    )
+    .bind(fixture.workspace_id)
+    .bind(fixture.channel_id)
+    .bind(requester)
+    .execute(&su)
+    .await
+    .expect("requester just read the channel");
+    let watched = seed_run(
+        &su,
+        &fixture,
+        run.agent,
+        "succeeded",
+        90_000,
+        "work",
+        Some(requester),
+    )
+    .await;
+    let watched_msg = run_answer(&su, &fixture, watched, run.agent, 2, "text").await;
+    let sent = dispatched_for(&su, &fixture, watched_msg).await;
+    assert!(
+        only_reason(&sent, "work_run_done").is_empty(),
+        "the requester is looking at the channel: {sent:?}"
+    );
+}
+
+/// Fail-closed inputs: no requester record, a mention run, a managed (not hosted)
+/// agent, a cancelled run, a message that is not the agent's own answer, and a
+/// peer who did not ask — none of them selects `work_run_done`.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_hosted_work_run_push_needs_a_requester_a_hosted_work_run_and_the_agents_own_answer() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let (fixture, run) = run_work_fixture(&su).await;
+    let managed = seed_hosted_agent(&su, &fixture, false).await;
+    let requester = fixture.recipient_id;
+    let peer = fixture.author_id;
+
+    let no_requester = seed_run(&su, &fixture, run.agent, "succeeded", 90_000, "work", None).await;
+    let no_requester_msg = run_answer(&su, &fixture, no_requester, run.agent, 2, "text").await;
+    let mention = seed_run(
+        &su,
+        &fixture,
+        run.agent,
+        "succeeded",
+        90_000,
+        "mention",
+        Some(requester),
+    )
+    .await;
+    let mention_msg = run_answer(&su, &fixture, mention, run.agent, 3, "text").await;
+    let managed_run = seed_run(
+        &su,
+        &fixture,
+        managed.agent,
+        "succeeded",
+        90_000,
+        "work",
+        Some(requester),
+    )
+    .await;
+    let managed_msg = run_answer(&su, &fixture, managed_run, managed.agent, 4, "text").await;
+    let cancelled = seed_run(
+        &su,
+        &fixture,
+        run.agent,
+        "cancelled",
+        90_000,
+        "work",
+        Some(requester),
+    )
+    .await;
+    let cancelled_msg = run_answer(&su, &fixture, cancelled, run.agent, 5, "text").await;
+    let still_running = seed_run(
+        &su,
+        &fixture,
+        run.agent,
+        "running",
+        90_000,
+        "work",
+        Some(requester),
+    )
+    .await;
+    let running_msg = run_answer(&su, &fixture, still_running, run.agent, 6, "text").await;
+    // Not the agent's own answer: the peer posts a message carrying a real run's id.
+    let forged_run = seed_run(
+        &su,
+        &fixture,
+        run.agent,
+        "succeeded",
+        90_000,
+        "work",
+        Some(requester),
+    )
+    .await;
+    let forged_msg = run_answer(&su, &fixture, forged_run, peer, 7, "text").await;
+    // The peer asked for this run: the requester is NOT told.
+    let peer_asked = seed_run(
+        &su,
+        &fixture,
+        run.agent,
+        "succeeded",
+        90_000,
+        "work",
+        Some(peer),
+    )
+    .await;
+    let peer_asked_msg = run_answer(&su, &fixture, peer_asked, run.agent, 8, "text").await;
+
+    focus_candidates(&su, &[fixture.workspace_id]).await;
+    let relay = RecordingDispatcher::accepting();
+    let pool = momo_notifier_pool().await;
+    drain(&pool, relay.clone())
+        .drain_once(64)
+        .await
+        .expect("drain");
+    let sent = relay.sent();
+    for (name, message) in [
+        ("no requester", no_requester_msg),
+        ("mention run", mention_msg),
+        ("managed agent", managed_msg),
+        ("cancelled", cancelled_msg),
+        ("still running", running_msg),
+        ("not the agent's answer", forged_msg),
+    ] {
+        let hits: Vec<_> = sent
+            .iter()
+            .filter(|d| d.message_id == message.to_string() && d.reason == "work_run_done")
+            .collect();
+        assert!(hits.is_empty(), "{name} pushed work_run_done: {hits:?}");
+    }
+    // The peer asked (and has a device): the peer gets it, the requester-of-record
+    // being someone else means the owner (recipient) does not.
+    let peer_hits: Vec<_> = sent
+        .iter()
+        .filter(|d| d.message_id == peer_asked_msg.to_string() && d.reason == "work_run_done")
+        .collect();
+    assert_eq!(peer_hits.len(), 1, "exactly the person who asked: {sent:?}");
+    let peer_device: String = sqlx::query_scalar(
+        "SELECT d.id::text FROM device d WHERE d.workspace_id = $1 AND d.member_id = $2",
+    )
+    .bind(fixture.workspace_id)
+    .bind(peer)
+    .fetch_one(&su)
+    .await
+    .expect("peer device");
+    assert_eq!(peer_hits[0].device_id, peer_device);
+}
+
+/// The member's own switch governs the run push too, and turns off that kind
+/// only: the requester is silent for the run, not for a plain DM.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_hosted_work_run_push_respects_the_work_complete_switch() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let (fixture, run) = run_work_fixture(&su).await;
+    let requester = fixture.recipient_id;
+    sqlx::query(
+        "INSERT INTO notification_rule (workspace_id, member_id, work_complete_push) \
+         VALUES ($1, $2, false)",
+    )
+    .bind(fixture.workspace_id)
+    .bind(requester)
+    .execute(&su)
+    .await
+    .expect("requester switches 작업 끝남 off");
+    let done = seed_run(
+        &su,
+        &fixture,
+        run.agent,
+        "succeeded",
+        90_000,
+        "work",
+        Some(requester),
+    )
+    .await;
+    let done_msg = run_answer(&su, &fixture, done, run.agent, 2, "text").await;
+    let dm = send_message(&su, &fixture, "hello", 3).await;
+
+    focus_candidates(&su, &[fixture.workspace_id]).await;
+    let relay = RecordingDispatcher::accepting();
+    let pool = momo_notifier_pool().await;
+    drain(&pool, relay.clone())
+        .drain_once(64)
+        .await
+        .expect("drain");
+    let sent = relay.sent();
+    assert!(
+        only_reason(&sent, "work_run_done").is_empty(),
+        "the switch is off: {sent:?}"
+    );
+    assert!(
+        sent.iter()
+            .any(|d| d.message_id == dm.to_string() && d.reason == "dm"),
+        "the switch is per kind — a DM still notifies: {sent:?}"
+    );
+    let _ = done_msg;
 }

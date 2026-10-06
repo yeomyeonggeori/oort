@@ -164,6 +164,7 @@ async fn start_server(pool: PgPool) -> String {
         // the default is still closed. A fixture that needs delivery opens it
         // by construction, exactly as an operator now opens it by env var.
         hosted_delivery_enabled: true,
+        hosted_lease_seconds: momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT,
         subscription_agents_enabled: true,
         // #3397: these suites drive Claude subscription agents; the opt-in is on.
         claude_subscription_agents_enabled: true,

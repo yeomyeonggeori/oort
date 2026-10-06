@@ -10,7 +10,7 @@
 //! | `oort_conversation_read` | `momo_messaging::list_channel_page` — the REST history's own read |
 //! | `oort_message_post` | `momo_messaging::send_message_with_mentions_in_tx` — the REST send's own transaction |
 //! | `oort_jobs_claim` | `momo_outbox::claim_hosted_gateway_jobs_in_tx` — the gateway claim, hosted branch |
-//! | `oort_job_renew` / `oort_job_release` | `momo_outbox`'s existing lease verbs, unchanged |
+//! | `oort_job_renew` / `oort_job_release` | `momo_outbox`'s lease verbs; renew uses the hosted TTL and revives an unclaimed expired lease (#3530) |
 //! | `oort_run_event` | `routes::agent_gateway::record_gateway_event_in_tx` |
 //! | `oort_run_complete` | `routes::agent_gateway::complete_gateway_run_in_tx` |
 //! | `oort_action_propose` | `momo_agent::approval`'s producer — the *same* park #979 already wrote for tool calls |
@@ -71,8 +71,10 @@ use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::routes::agent_gateway::{
-    complete_gateway_run_in_tx, record_gateway_event_in_tx, sanitized_gateway_error,
-    validated_event_fields, GatewayCompleteInput, GatewayEventInput,
+    complete_gateway_run_in_tx, record_gateway_event_in_tx, report_standing_in_tx,
+    sanitized_gateway_error, validated_event_fields, validated_gateway_artifacts,
+    validated_gateway_stage, write_report_rejected_audit, GatewayCompleteInput, GatewayEventInput,
+    ReportStanding,
 };
 use crate::routes::agent_mentions::{route_agent_mentions_in_tx, MentionSend};
 use crate::AppState;
@@ -665,6 +667,7 @@ async fn jobs_claim(
     let args = arguments(arguments_value)?;
     let limit = momo_outbox::clamp_claim_limit(optional_i64(args, "limit")?);
     let secret = state.agent_port.envelope_secret().to_string();
+    let lease_seconds = state.agent_port.config.hosted_lease_seconds;
 
     let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
         Box::pin(async move {
@@ -679,6 +682,7 @@ async fn jobs_claim(
                 caller.agent_member_id,
                 identity.connection_id,
                 limit,
+                lease_seconds,
             )
             .await
             .map_err(DbError::from)?;
@@ -784,6 +788,7 @@ async fn job_lease(
     let args = arguments(arguments_value)?;
     let raw_handle = required_str(args, "leaseHandle", 512)?.to_string();
     let secret = state.agent_port.envelope_secret().to_string();
+    let lease_seconds = state.agent_port.config.hosted_lease_seconds;
 
     let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
         Box::pin(async move {
@@ -802,11 +807,12 @@ async fn job_lease(
             };
             match verb {
                 LeaseVerb::Renew => {
-                    let expires = momo_outbox::renew_gateway_lease_in_tx(
+                    let expires = momo_outbox::renew_hosted_gateway_lease_in_tx(
                         conn,
                         caller.workspace_id,
                         caller.agent_member_id,
                         lease,
+                        lease_seconds,
                     )
                     .await
                     .map_err(DbError::from)?;
@@ -910,6 +916,15 @@ async fn run_event(
     )
     .map_err(|error| failure_of(&error))?;
     let event_id = optional_uuid(args, "eventId")?.unwrap_or_else(Uuid::new_v4);
+    // Read here, judged inside the transaction: a refused marker leaves an audit
+    // row, and a row needs the caller's run to be proven first (D15).
+    let raw_stage = match args.get("stage") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(raw)) if raw.len() <= momo_mcp::MAX_STAGE_BYTES as usize => {
+            Some(raw.clone())
+        }
+        Some(_) => return Err(ToolFailure::InvalidArguments),
+    };
     let secret = state.agent_port.envelope_secret().to_string();
 
     let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
@@ -923,6 +938,44 @@ async fn run_event(
                 Ok(handle) => handle,
                 Err(failure) => return Ok(Err(failure)),
             };
+            let stage = match raw_stage
+                .as_deref()
+                .map(validated_gateway_stage)
+                .transpose()
+            {
+                Ok(stage) => stage,
+                Err(reason) => {
+                    let lease = GatewayLeaseBinding {
+                        job_id: handle.job_id,
+                        lease_id: handle.lease_id,
+                    };
+                    let standing = report_standing_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        handle.run_id,
+                        caller.agent_member_id,
+                        lease,
+                        true,
+                    )
+                    .await?;
+                    if standing == ReportStanding::Live {
+                        write_report_rejected_audit(
+                            conn,
+                            caller.workspace_id,
+                            handle.run_id,
+                            caller.agent_member_id,
+                            Some(caller.token_id),
+                            momo_mcp::TOOL_RUN_EVENT,
+                            reason,
+                        )
+                        .await?;
+                        return Ok(Err(ToolFailure::InvalidArguments));
+                    }
+                    // Not live: drop the marker and let the ordinary lease
+                    // verdict answer (no audit row for a dead handle).
+                    None
+                }
+            };
             let recorded = record_gateway_event_in_tx(
                 conn,
                 caller.workspace_id,
@@ -935,9 +988,11 @@ async fn run_event(
                     status,
                     detail,
                     text_delta,
+                    stage,
                     event_id,
                     actor_member_id: Some(caller.agent_member_id),
                     via_token_id: Some(caller.token_id),
+                    hosted_lease: true,
                 },
             )
             .await?;
@@ -967,6 +1022,7 @@ async fn run_complete(
     let safe_error = sanitized_gateway_error(error_text, &state.agent_gateway.secret);
     let body = optional_str(args, "body", 8_000)?.map(str::to_string);
     let (usage, usage_detail) = usage_from_arguments(args)?;
+    let raw_artifacts = args.get("artifacts").cloned();
     let secret = state.agent_port.envelope_secret().to_string();
     let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
     let claude_subscription_agents_enabled =
@@ -982,6 +1038,46 @@ async fn run_complete(
             let handle = match bound_handle(&identity, caller, &raw_handle, &secret) {
                 Ok(handle) => handle,
                 Err(failure) => return Ok(Err(failure)),
+            };
+            // D12 — a malformed `artifacts` refuses the WHOLE completion before
+            // anything is written; the audit row is the only trace, and the lease
+            // is untouched so the agent can complete again without it.
+            let artifacts = match validated_gateway_artifacts(
+                raw_artifacts.as_ref(),
+                momo_t3::work_share::allowed_pr_hosts(),
+            ) {
+                Ok(artifacts) => artifacts,
+                Err(reason) => {
+                    let lease = GatewayLeaseBinding {
+                        job_id: handle.job_id,
+                        lease_id: handle.lease_id,
+                    };
+                    let standing = report_standing_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        handle.run_id,
+                        caller.agent_member_id,
+                        lease,
+                        true,
+                    )
+                    .await?;
+                    if standing == ReportStanding::Live {
+                        write_report_rejected_audit(
+                            conn,
+                            caller.workspace_id,
+                            handle.run_id,
+                            caller.agent_member_id,
+                            Some(caller.token_id),
+                            momo_mcp::TOOL_RUN_COMPLETE,
+                            reason,
+                        )
+                        .await?;
+                        return Ok(Err(ToolFailure::InvalidArguments));
+                    }
+                    // Not live: drop the artifacts and let the ordinary
+                    // path answer (a finished run replays its first answer) (no audit row for a dead handle).
+                    None
+                }
             };
             let completed = complete_gateway_run_in_tx(
                 conn,
@@ -999,10 +1095,12 @@ async fn run_complete(
                     safe_error,
                     usage,
                     usage_detail,
+                    artifacts,
                     actor_member_id: Some(caller.agent_member_id),
                     via_token_id: Some(caller.token_id),
                     subscription_agents_enabled,
                     claude_subscription_agents_enabled,
+                    hosted_lease: true,
                 },
             )
             .await?;
@@ -1120,7 +1218,8 @@ async fn action_propose(
             )
             .await
             .map_err(DbError::from)?;
-            if !momo_outbox::gateway_lease_authorized(lease_snapshot, handle.lease_id, false) {
+            if !momo_outbox::gateway_lease_authorized_hosted(lease_snapshot, handle.lease_id, false)
+            {
                 return Ok(Err(ToolFailure::Conflict));
             }
             if run.agent_member_id != caller.agent_member_id
@@ -1323,7 +1422,8 @@ async fn card_suggest(
             )
             .await
             .map_err(DbError::from)?;
-            if !momo_outbox::gateway_lease_authorized(lease_snapshot, handle.lease_id, false) {
+            if !momo_outbox::gateway_lease_authorized_hosted(lease_snapshot, handle.lease_id, false)
+            {
                 return Ok(Err(ToolFailure::Conflict));
             }
             if run.agent_member_id != caller.agent_member_id || run.channel_id != handle.channel_id

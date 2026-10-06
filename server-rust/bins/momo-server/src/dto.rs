@@ -1328,6 +1328,11 @@ pub struct SharedWorkSessionListQuery {
     pub limit: Option<String>,
     #[serde(default)]
     pub cursor: Option<String>,
+    /// `runs` adds hosted agents' work runs (ADR-0162 증보 3 D13). Opt-in so a
+    /// shipped client that keys every row on `sessionId` is never handed a row
+    /// without one.
+    #[serde(default)]
+    pub include: Option<String>,
 }
 
 /// The S1 diff numbers as the board returns them. `null` = unknown.
@@ -1351,6 +1356,13 @@ pub struct SharedSessionOwnerDto {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SharedPrDto {
+    pub url: String,
+    pub number: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SharedSessionChannelDto {
     pub id: String,
     pub name: Option<String>,
@@ -1362,7 +1374,24 @@ pub struct SharedSessionChannelDto {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SharedWorkSessionDto {
-    pub session_id: String,
+    /// `session` (work_session) or `run` (a hosted agent's work run, D13).
+    pub source: &'static str,
+    /// Absent on a run item.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    /// Present on a run item only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    /// Run item: who asked (the `agent.work.queued` audit actor). `null` = no
+    /// record, which is also why no push is sent for it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requested_by: Option<SharedSessionOwnerDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_count: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commits: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr: Option<SharedPrDto>,
     /// `local_pty` (shared L pane) or `host` (agent lane, #2779).
     pub origin: String,
     pub label: String,

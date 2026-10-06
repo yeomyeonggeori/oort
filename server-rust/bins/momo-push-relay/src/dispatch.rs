@@ -30,16 +30,23 @@ const REQUIRED_KEYS: &[&str] = &[
     "message_id",
 ];
 
-/// The closed reason vocabulary (ADR-0120 부록 A, Accepted 2026-10-02: five).
+/// The closed reason vocabulary (ADR-0120 부록 A, Accepted 2026-10-02: five; the
+/// sixth, `work_run_done`, is ADR-0162 증보 3 D14 / #3517).
 /// `work_session_idle` is the 「작업 끝남」 push; the server decides who gets it
 /// (the starter only, turns of 60 s or more, not while looking) — the relay only
-/// checks the label is one it knows.
+/// checks the label is one it knows. `work_run_done` is the same push for a hosted
+/// agent's work run (the requester only), under the same `momo.work` category.
+///
+/// **Deploy order:** ship this relay BEFORE the notifier that can emit
+/// `work_run_done`; an old relay answers an unknown reason with a closed-vocabulary
+/// refusal, so the notifier's first such dispatch would fail.
 const ALLOWED_REASONS: &[&str] = &[
     "dm",
     "mention",
     "approval_request",
     "resume_offer",
     "work_session_idle",
+    "work_run_done",
 ];
 const ALLOWED_CATEGORIES: &[&str] = &["momo.message", "momo.mention", "momo.approval", "momo.work"];
 
@@ -528,14 +535,40 @@ mod tests {
         assert_eq!(object["aps"]["category"], "momo.work");
     }
 
+    /// ADR-0162 증보 3 D14 (#3517): a hosted work run's completion is the sixth
+    /// reason under the same `momo.work` category; the payload gains no field.
     #[test]
-    fn the_reason_vocabulary_is_exactly_five() {
+    fn work_run_done_is_an_allowed_work_dispatch() {
+        let json = DISPATCH_JSON
+            .replace("\"reason\":\"mention\"", "\"reason\":\"work_run_done\"")
+            .replace(
+                "\"category\":\"momo.mention\"",
+                "\"category\":\"momo.work\"",
+            );
+        let dispatch = PushDispatch::decode_closed(json.as_bytes()).unwrap();
+        assert_eq!(dispatch.reason, "work_run_done");
+        let encoded = serde_json::to_vec(&ApnsPayload::from_dispatch(&dispatch)).unwrap();
+        let object: Value = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(object["momo"]["reason"], "work_run_done");
+        assert_eq!(object["aps"]["category"], "momo.work");
+        let keys: BTreeSet<&str> = object["momo"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(keys.len(), 7, "a reason adds a label, not a field");
+    }
+
+    #[test]
+    fn the_reason_vocabulary_is_exactly_six() {
         let expected: BTreeSet<&str> = [
             "dm",
             "mention",
             "approval_request",
             "resume_offer",
             "work_session_idle",
+            "work_run_done",
         ]
         .into_iter()
         .collect();

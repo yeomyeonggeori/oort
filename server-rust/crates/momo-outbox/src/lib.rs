@@ -53,11 +53,13 @@ pub use agent_job::{
 pub use emit::{emit_outbox, OutboxKind};
 pub use gateway::{
     claim_gateway_jobs_in_tx, claim_hosted_gateway_jobs_in_tx, clamp_claim_limit,
-    gateway_lease_authorized, lock_gateway_lease_in_tx, release_gateway_lease_in_tx,
-    renew_gateway_lease_in_tx, settle_gateway_job_in_tx, suppress_hosted_agent_jobs_in_tx,
+    clamp_hosted_lease_seconds, gateway_lease_authorized, gateway_lease_authorized_hosted,
+    lock_gateway_lease_in_tx, release_gateway_lease_in_tx, renew_gateway_lease_in_tx,
+    renew_hosted_gateway_lease_in_tx, settle_gateway_job_in_tx, suppress_hosted_agent_jobs_in_tx,
     ClaimedGatewayJob, GatewayJobStatus, GatewayLeaseBinding, GatewayLeaseSnapshot,
     HostedWorkSuppression, CLAIM_LIMIT_DEFAULT, CLAIM_LIMIT_MAX, GATEWAY_LEASE_SECONDS,
-    HOSTED_DISCONNECT_JOB_LAST_ERROR,
+    HOSTED_DISCONNECT_JOB_LAST_ERROR, HOSTED_LEASE_SECONDS_DEFAULT, HOSTED_LEASE_SECONDS_MAX,
+    HOSTED_LEASE_SECONDS_MIN,
 };
 pub use push::{claim_push_candidate_batch, reclaim_stuck_push_candidates, ClaimedPushCandidate};
 pub use relay::{
