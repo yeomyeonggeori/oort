@@ -103,6 +103,12 @@ import {ThemeControl} from '../src/design/ThemeControl';
 import {parseExecutionPlan} from '@momo/core/lib/executionPlan';
 import {measureMode} from './root';
 import {Shell} from '../src/shell/AppShell';
+import {
+  DelegateWorkSheet,
+  type DelegatePreview,
+  type DelegatePrefill,
+} from '../src/shell/DelegateWorkSheet';
+import {workRunFailure} from '@momo/core/features/agents/workRunRequest';
 import {INITIAL_NAV, navReducer} from '../src/nav/state';
 import {ProfilePage, ProfileSheet} from '../src/features/profile/ProfileSheet';
 import {PageSheet} from '../src/design/PageSheet';
@@ -4020,6 +4026,23 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           }}
         />
       );
+    // #3588 N8: 「작업 맡기기」 시트의 네 판. 시트는 셸 위에 뜬다(실제 앱과 같은 층).
+    case 'shell-delegate-a':
+    case 'shell-delegate-b':
+    case 'shell-delegate-error':
+    case 'shell-delegate-empty':
+      return (
+        <View style={styles.fill}>
+          <Shell />
+          <DelegateWorkSheet
+            prefill={delegatePrefill(name)}
+            preview={delegatePreview(name)}
+            boardAvailable
+            onClose={() => {}}
+            onSubmitted={() => {}}
+          />
+        </View>
+      );
     case 'shell-profile-sheet':
       return (
         <View style={styles.fill}>
@@ -4782,6 +4805,94 @@ const SHELL_ROSTER = [
   })),
 ];
 
+// ---- #3588 N8: 작업 맡기기 시트의 판 -------------------------------------------
+// 에이전트 셋: 그록봇(호스티드, 승인 채널 둘), 김인턴(쉬는 중), Hermes(호스티드 아님).
+const DELEGATE_TEMPLATE = SHELL_ROSTER.find(member => member.kind === 'agent') ?? SHELL_ROSTER[0];
+const DELEGATE_GROK = 'measure-agent-grokbot';
+const DELEGATE_AGENTS = [
+  {
+    ...DELEGATE_TEMPLATE,
+    id: DELEGATE_GROK,
+    displayName: '그록봇',
+    handle: 'grokbot',
+    channelIds: ['ch-agent-lab', 'ch-release', 'ch-general'],
+    paused: false,
+  },
+  {
+    ...DELEGATE_TEMPLATE,
+    id: 'measure-agent-intern',
+    displayName: '김인턴',
+    handle: 'kim-intern',
+    channelIds: ['ch-agent-lab'],
+    paused: true,
+  },
+  {
+    ...DELEGATE_TEMPLATE,
+    id: 'measure-agent-hermes',
+    displayName: 'Hermes',
+    handle: 'hermes',
+    channelIds: ['ch-general'],
+    paused: false,
+  },
+];
+
+function delegatePrefill(name: string): DelegatePrefill {
+  if (name === 'shell-delegate-a') return {};
+  return {agentMemberId: DELEGATE_GROK};
+}
+
+function delegatePreview(name: string): DelegatePreview {
+  const pick = {agentMemberId: DELEGATE_GROK, channelId: 'ch-agent-lab'};
+  const draft = {
+    title: '로그인 버그 고치기',
+    brief: '재현 순서는 이슈 #812에 있어요. 원인을 찾고 고친 PR을 올려 주세요.',
+  };
+  if (name === 'shell-delegate-a') return {pick};
+  if (name === 'shell-delegate-b') return {step: 'B', pick, draft};
+  if (name === 'shell-delegate-error') {
+    return {
+      step: 'B',
+      pick,
+      draft,
+      refusal: {
+        failure: workRunFailure(
+          new ApiError(
+            409,
+            'this channel is not approved for the hosted agent',
+            'hosted_channel_not_approved',
+          ),
+        ),
+        agentId: DELEGATE_GROK,
+        channelId: 'ch-agent-lab',
+      },
+    };
+  }
+  return {};
+}
+
+function seedDelegate(surface: string): void {
+  harnessClient.setQueryData(['roster', ADE_WS], [
+    ...SHELL_ROSTER.filter(member => member.kind !== 'agent'),
+    ...DELEGATE_AGENTS,
+  ]);
+  const connection = (approved: string[]) => ({
+    id: 'measure-hosted-connection',
+    agentMemberId: DELEGATE_GROK,
+    status: 'active' as const,
+    authMode: 'static_bearer',
+    audience: '/v1/mcp/agent-port',
+    approvedChannelIds: approved,
+    approvedScopes: [],
+    createdAtMs: 0,
+    updatedAtMs: 0,
+  });
+  // 빈 판(승인 채널 0개)만 승인 목록이 비어 있다.
+  harnessClient.setQueryData(
+    ['hosted-agents', 'connections', ADE_WS],
+    [connection(surface === 'shell-delegate-empty' ? [] : ['ch-agent-lab', 'ch-release'])],
+  );
+}
+
 function seedShell(surface: string): void {
   // 셸은 명시적으로 켜진 질의(인박스·에이전트 레일)도 세운다. 서버가 없는 하네스에서
   // 그 요청이 실패하면 세션 만료로 읽혀 캐시가 통째로 지워지고(`useSession` 의
@@ -5219,4 +5330,5 @@ if (
   LAUNCHED.name.startsWith('shell-')
 ) {
   seedShell(LAUNCHED.name);
+  if (LAUNCHED.name.startsWith('shell-delegate-')) seedDelegate(LAUNCHED.name);
 }

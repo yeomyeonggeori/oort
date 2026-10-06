@@ -92,6 +92,12 @@ export const NON_SECRET_KEYS = {
    * 화면 배치에 대한 사람의 선택일 뿐이고, 잃으면 섹션이 다시 펼쳐져 있을 뿐이다.
    */
   homeCollapsedSections: 'momo.mobile.home.collapsed.v1',
+  /**
+   * 「작업 맡기기」 시트가 마지막에 쓴 에이전트·채널 (#3588). 워크스페이스 id → {에이전트 id,
+   * 채널 id}의 JSON — **id 둘뿐**이다. 제목·설명 같은 글은 여기에 쓰지 않는다(그 글은 같은
+   * 앱 실행 안의 메모리에서만 산다). 잃으면 처음처럼 아무것도 미리 고르지 않을 뿐이다.
+   */
+  delegateLastTarget: 'momo.mobile.delegate.last-target.v1',
 } as const;
 
 export type NonSecretKey = (typeof NON_SECRET_KEYS)[keyof typeof NON_SECRET_KEYS];
