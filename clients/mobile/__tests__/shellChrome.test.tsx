@@ -17,7 +17,7 @@ import '../src/boot/coreHost';
 
 import {DS2_COMBOS} from '../src/design/ds2Tokens';
 import {EASE_OUT, TAB_FADE_MS} from '../src/design/motion';
-import {resetBlurSupportForTests, resetLiquidGlassSupportForTests} from '../src/design/glass';
+import {GlassSurface, LiquidGlassAllowed, resetBlurSupportForTests, resetLiquidGlassSupportForTests} from '../src/design/glass';
 import {SHEET_RADIUS, SHEET_TOP} from '../src/design/PageSheet';
 import {
   darkPalette,
@@ -935,6 +935,9 @@ describe('햅틱 — 사용자가 만든 순간에 한 번 (#3580)', () => {
     await renderReady();
     fireEvent.press(screen.getByTestId('shell-plus'));
     expect(hapticCalls).toEqual(['impact:light']);
+    // 닫는 누름에는 없다(메뉴가 모달이라 + 는 보조기술 조회에서 숨는다).
+    fireEvent.press(screen.getByTestId('shell-plus', {includeHiddenElements: true}));
+    expect(hapticCalls).toEqual(['impact:light']);
   });
 
   it('프로필 아바타는 light 한 번, 시트는 같은 누름에 열린다', async () => {
@@ -1082,6 +1085,35 @@ describe('리퀴드 글래스 (#3580)', () => {
     expect(screen.queryByTestId('shell-tabbar-fallback')).toBeNull();
     // 이중선 방지 — 두께는 남겨 안쪽 46 의 산수를 지킨다.
     expect(flat('shell-tabbar')).toMatchObject({borderWidth: 1, borderColor: 'transparent', height: 54});
+  });
+
+  it('페이드되는 조상 안의 유리는 리퀴드가 아니라 blur 다(조상 알파가 낮으면 UIKit 이 효과를 버린다)', () => {
+    resetLiquidGlassSupportForTests(true);
+    resetBlurSupportForTests(true);
+    const {Text} = jest.requireActual('react-native') as typeof import('react-native');
+    const {ThemeProvider} = jest.requireActual('../src/design/theme') as typeof import('../src/design/theme');
+    const Probe = ({allowed}: {allowed: boolean}) => (
+      <ThemeProvider>
+        <LiquidGlassAllowed.Provider value={allowed}>
+          <GlassSurface radius={10} testID="probe">
+            <Text>x</Text>
+          </GlassSurface>
+        </LiquidGlassAllowed.Provider>
+      </ThemeProvider>
+    );
+    const view = render(<Probe allowed />);
+    expect(screen.getByTestId('probe-liquid')).toBeTruthy();
+    view.rerender(<Probe allowed={false} />);
+    expect(screen.queryByTestId('probe-liquid')).toBeNull();
+    expect(screen.getByTestId('probe-blur')).toBeTruthy();
+  });
+
+  it('탭 칸(페이드)이 정말 그 문맥을 닫는다: 홈 칸 안에서는 리퀴드가 허용되지 않는다', () => {
+    const src = require('fs').readFileSync(
+      require('path').join(__dirname, '../src/shell/AppShell.tsx'),
+      'utf8',
+    ) as string;
+    expect(src).toMatch(/<LiquidGlassAllowed\.Provider value=\{false\}>\{children\}/);
   });
 
   it('투명도 줄이기가 켜지면 리퀴드 글래스도 불투명이다 — 접근성이 먼저다', async () => {

@@ -250,8 +250,16 @@ export function ShellBottomBar({
   const step = tabWidth + SHELL.barGap;
   const index = Math.max(0, tabs.indexOf(current));
   const slide = useRef(new Animated.Value(index * step)).current;
+  // 폭이 바뀌면(회전·창 크기) 옛 자리에서 미끄러지지 않고 새 자리에 선다 — 움직임은
+  // 선택이 바뀔 때만이다.
+  const lastStep = useRef(step);
   useEffect(() => {
     const target = index * step;
+    if (lastStep.current !== step) {
+      lastStep.current = step;
+      slide.setValue(target);
+      return;
+    }
     if (reduceMotion.current) {
       slide.setValue(target);
       return;
@@ -411,7 +419,8 @@ function PlusButton({
       accessibilityHint="만들기 메뉴를 엽니다."
       accessibilityState={{expanded: open}}
       onPress={() => {
-        haptics.light();
+        // 메뉴가 **열리는** 누름에만 — 닫는 누름은 열림의 반대라 같은 말이 아니다.
+        if (!open) haptics.light();
         onPress();
       }}
       style={({pressed}) => [

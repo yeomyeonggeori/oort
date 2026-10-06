@@ -11,6 +11,7 @@ import React, {
   useState,
 } from 'react';
 import {Animated, StyleSheet, View} from 'react-native';
+import {LiquidGlassAllowed} from '../design/glass';
 import {EASE_OUT, TAB_FADE_MS} from '../design/motion';
 import {useReduceMotionRef} from '../lib/useReduceMotion';
 import type {Palette} from '../design/tokens';
@@ -526,7 +527,8 @@ export function TabPane({
     <Animated.View
       style={[active ? styles.visible : styles.hidden, {opacity}]}
       testID={active ? 'tab-pane-active' : undefined}>
-      {children}
+      {/* 페이드되는 조상 안의 유리는 리퀴드가 될 수 없다(`LiquidGlassAllowed`). */}
+      <LiquidGlassAllowed.Provider value={false}>{children}</LiquidGlassAllowed.Provider>
     </Animated.View>
   );
 }

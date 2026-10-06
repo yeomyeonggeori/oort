@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from 'react';
+import React, {createContext, useContext, useEffect, useState} from 'react';
 import {
   AccessibilityInfo,
   StyleSheet,
@@ -136,10 +136,19 @@ export function glassMaterial(
   return supported ? 'blur' : 'fallback';
 }
 
+/**
+ * 조상에 불투명도 애니메이션이 걸려 있는가의 반대. `TabPane` 이 탭 칸에 페이드를 걸므로
+ * 그 안의 유리는 리퀴드가 될 수 없다 — UIKit 은 알파가 낮은 동안 효과를 건너뛰고 다시
+ * 설치하지 않아(`GlassView.swift`) 한 번 페이드된 칸의 카드가 세션 내내 평평해진다
+ * (design-review #3580 High). 그 안에서는 지금까지의 `blur` 갈래로 내린다.
+ */
+export const LiquidGlassAllowed = createContext(true);
+
 /** 지금 이 환경에서 유리 면이 입을 재료. 탭바가 재료에 따라 테두리를 가르므로 훅으로 연다. */
 export function useGlassMaterial(): GlassMaterial {
   const reduce = useReduceTransparency();
-  return glassMaterial(reduce, blurSupported(), liquidGlassSupported());
+  const liquidAllowed = useContext(LiquidGlassAllowed);
+  return glassMaterial(reduce, blurSupported(), liquidAllowed && liquidGlassSupported());
 }
 
 /** BlurView 세기(1~100). CSS `blur(22px)`와 1:1 대응이 없다 — PR 「시안과의 차이」. */
