@@ -65,6 +65,7 @@ import {
 } from '../features/workspace/queries';
 import {Avatar} from '../features/conversation/Avatar';
 import {ProfileSheet} from '../features/profile/ProfileSheet';
+import {haptics} from '../lib/haptics';
 import {useReduceMotion} from '../lib/useReduceMotion';
 import {useTabBarClearance} from '../shell/ShellChrome';
 import {useRealtime} from '../realtime/RealtimeProvider';
@@ -225,7 +226,11 @@ export function ProfileAvatarButton({
       accessibilityRole="button"
       accessibilityLabel={`내 프로필, ${name}`}
       accessibilityHint="테마·알림·로그아웃을 엽니다."
-      onPress={onPress}
+      onPress={() => {
+        // 시트가 열리는 그 프레임에 — 시각이 단독으로도 선다(시스템 햅틱을 끈 사람 포함).
+        haptics.light();
+        onPress();
+      }}
       style={({pressed}) => [styles.avatarButton, pressed && styles.avatarPressed]}
       testID="profile-avatar">
       {/* 사진 없는 이니셜 얼굴은 바탕 위 1.07:1 이다 — 이 앱의 계정 문이 이것
@@ -721,7 +726,10 @@ function SectionHead({
           accessibilityLabel={`${section.label} 섹션`}
           accessibilityState={{expanded: !collapsed}}
           accessibilityHint={collapsed ? '펼칩니다.' : '접습니다. 안 읽은 대화는 남습니다.'}
-          onPress={onToggle}
+          onPress={() => {
+            haptics.selection();
+            onToggle();
+          }}
           hitSlop={CTL_SLOP_DOWN}
           style={({pressed}) => pressed && styles.pressedGlyph}
           testID={`home-section-toggle-${section.key}`}>

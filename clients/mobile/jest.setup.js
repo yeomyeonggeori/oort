@@ -612,3 +612,40 @@ jest.mock('expo-blur', () => {
   const BlurView = props => React.createElement(View, {...props, testID: 'blur-view'});
   return {BlurView};
 });
+
+// ---- expo-haptics -------------------------------------------------------------
+// #3580. 시뮬레이터에도 Jest 에도 햅틱 엔진은 없다. 이 대역은 **무엇을 몇 번 요청했는가**
+// 만 기록한다 (plain 함수: `restoreAllMocks` 가 jest.fn 구현을 지운다) — 「탭을 바꿀 때 한 번, 재탭에는 0번」을 시험이 `__calls` 에서 읽는다.
+// 실제 진동의 세기·타이밍은 실기기에서만 잰다(PR 본문 「미검증」).
+jest.mock('expo-haptics', () => {
+  const calls = [];
+  return {
+    __calls: calls,
+    ImpactFeedbackStyle: {Light: 'light', Medium: 'medium', Heavy: 'heavy', Soft: 'soft', Rigid: 'rigid'},
+    NotificationFeedbackType: {Success: 'success', Warning: 'warning', Error: 'error'},
+    selectionAsync: () => {
+      calls.push('selection');
+      return Promise.resolve();
+    },
+    impactAsync: style => {
+      calls.push(`impact:${style}`);
+      return Promise.resolve();
+    },
+    notificationAsync: type => {
+      calls.push(`notification:${type}`);
+      return Promise.resolve();
+    },
+  };
+});
+
+// ---- expo-glass-effect ---------------------------------------------------------
+// #3580. 리퀴드 글래스는 iOS 26 네이티브 뷰라 Jest 에 그릴 것이 없다. `liquidGlassSupported()`
+// 는 `requireOptionalNativeModule`(위에서 null)로 묻고 Jest 에서는 false 이므로 이 모듈은
+// 시험이 `resetLiquidGlassSupportForTests(true)` 로 그 갈래를 못 박을 때만 불린다. 그때도
+// props 를 단 View 로 남아 `glassEffectStyle`·`colorScheme` 를 렌더 트리에서 읽는다.
+jest.mock('expo-glass-effect', () => {
+  const React = require('react');
+  const {View} = require('react-native');
+  const GlassView = props => React.createElement(View, props);
+  return {GlassView};
+});
