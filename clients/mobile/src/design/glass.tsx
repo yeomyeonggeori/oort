@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from 'react';
+import React, {createContext, useContext, useEffect, useState} from 'react';
 import {
   AccessibilityInfo,
   StyleSheet,
@@ -22,6 +22,16 @@ import type {Palette} from './tokens';
 //   2. 블러 네이티브 모듈이 없다(저사양·구성 실패) → `surface` 94%(`glassFallback`).
 //      94%에서도 글자 대비가 유지되는 것은 core가 쟀다(themes-2.0 §유리).
 //   3. 그 밖 → `BlurView` + `glass` 틴트.
+//
+// #3580 — iOS 26 의 **리퀴드 글래스**가 맨 위 갈래로 선다(`expo-glass-effect`, MIT):
+//
+//   0. iOS 26+ 이고 이 빌드가 Xcode 26 SDK 로 나왔다(`isLiquidGlassAvailable`) 그리고 런타임에
+//      `UIGlassEffect` 가 실제로 있다(`isGlassEffectAPIAvailable` — 일부 iOS 26 베타는 초기화에서
+//      죽는다, expo#40911) → 네이티브 `GlassView`. 투명도 줄이기가 켜져 있으면 이 갈래도
+//      타지 않는다(1번이 먼저다).
+//
+// `GlassView` 를 쓰는 곳의 **조상에 불투명도 애니메이션을 걸지 않는다**: UIKit 은 알파가
+// 낮은 뷰에서 효과를 조용히 건너뛰고 다시 설치하지 않는다(`GlassView.swift`).
 //
 // 「저사양」을 기기 등급으로 추측하지 않는다. 모델 이름표로 느린 기기를 고르는
 // 규칙은 틀리는 날이 반드시 오고, 틀리면 빠른 기기가 불투명을 입거나 느린 기기가
@@ -50,6 +60,37 @@ export function blurSupported(): boolean {
 /** 시험 전용: 기억한 답을 지운다. */
 export function resetBlurSupportForTests(value: boolean | null = null): void {
   blurAnswer = value;
+}
+
+/** 이 빌드·이 OS 에서 리퀴드 글래스를 그릴 수 있는가. 한 번 묻고 기억한다. */
+let liquidAnswer: boolean | null = null;
+
+export function liquidGlassSupported(): boolean {
+  if (liquidAnswer !== null) return liquidAnswer;
+  try {
+    // `blurSupported` 와 같은 이유로 `requireOptionalNativeModule` 로 묻는다: 패키지의
+    // `isLiquidGlassAvailable()` 는 `requireNativeModule` 이라 모듈이 없으면 던진다.
+    // 상수 둘은 네이티브가 `Constant(...)` 로 내므로 모듈 객체에서 바로 읽힌다.
+    const core = require('expo-modules-core') as {
+      requireOptionalNativeModule?: (name: string) => unknown;
+    };
+    const mod = core.requireOptionalNativeModule?.('ExpoGlassEffect') as
+      | {isLiquidGlassAvailable?: boolean; isGlassEffectAPIAvailable?: boolean}
+      | null
+      | undefined;
+    liquidAnswer =
+      mod != null &&
+      mod.isLiquidGlassAvailable === true &&
+      mod.isGlassEffectAPIAvailable === true;
+  } catch {
+    liquidAnswer = false;
+  }
+  return liquidAnswer;
+}
+
+/** 시험 전용: 기억한 답을 지우거나 못 박는다. */
+export function resetLiquidGlassSupportForTests(value: boolean | null = null): void {
+  liquidAnswer = value;
 }
 
 /**
@@ -82,12 +123,32 @@ export function useReduceTransparency(): boolean {
   return reduce;
 }
 
-export type GlassMaterial = 'opaque' | 'fallback' | 'blur';
+export type GlassMaterial = 'opaque' | 'fallback' | 'blur' | 'liquid';
 
-/** 세 갈래 중 어느 재료로 그릴지 (파일 머리 주석). */
-export function glassMaterial(reduceTransparency: boolean, supported: boolean): GlassMaterial {
+/** 어느 재료로 그릴지 (파일 머리 주석). 투명도 줄이기가 언제나 먼저다. */
+export function glassMaterial(
+  reduceTransparency: boolean,
+  supported: boolean,
+  liquid = false,
+): GlassMaterial {
   if (reduceTransparency) return 'opaque';
+  if (liquid) return 'liquid';
   return supported ? 'blur' : 'fallback';
+}
+
+/**
+ * 조상에 불투명도 애니메이션이 걸려 있는가의 반대. `TabPane` 이 탭 칸에 페이드를 걸므로
+ * 그 안의 유리는 리퀴드가 될 수 없다 — UIKit 은 알파가 낮은 동안 효과를 건너뛰고 다시
+ * 설치하지 않아(`GlassView.swift`) 한 번 페이드된 칸의 카드가 세션 내내 평평해진다
+ * (design-review #3580 High). 그 안에서는 지금까지의 `blur` 갈래로 내린다.
+ */
+export const LiquidGlassAllowed = createContext(true);
+
+/** 지금 이 환경에서 유리 면이 입을 재료. 탭바가 재료에 따라 테두리를 가르므로 훅으로 연다. */
+export function useGlassMaterial(): GlassMaterial {
+  const reduce = useReduceTransparency();
+  const liquidAllowed = useContext(LiquidGlassAllowed);
+  return glassMaterial(reduce, blurSupported(), liquidAllowed && liquidGlassSupported());
 }
 
 /** BlurView 세기(1~100). CSS `blur(22px)`와 1:1 대응이 없다 — PR 「시안과의 차이」. */
@@ -113,11 +174,22 @@ export function GlassSurface({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {scheme} = useTheme();
-  const reduce = useReduceTransparency();
-  const material = glassMaterial(reduce, blurSupported());
+  const material = useGlassMaterial();
 
   let layer: React.ReactNode;
-  if (material === 'blur') {
+  if (material === 'liquid') {
+    // 모듈이 있을 때만 불러온다(위 `BlurView` 와 같은 이유). 조상에 알파를 걸지 않는다.
+    const {GlassView} = require('expo-glass-effect') as typeof import('expo-glass-effect');
+    layer = (
+      <GlassView
+        glassEffectStyle="regular"
+        // 앱 자체 테마 토글을 따른다 — `auto` 는 OS 외형을 따라 앱 테마와 어긋난다.
+        colorScheme={scheme === 'light' ? 'light' : 'dark'}
+        style={[StyleSheet.absoluteFill, {borderRadius: radius}]}
+        testID={testID && `${testID}-liquid`}
+      />
+    );
+  } else if (material === 'blur') {
     // 모듈이 있을 때만 불러온다. 없는 빌드에서 import 가 평가되면 네이티브 뷰
     // 매니저를 찾다가 경고를 남긴다.
     const {BlurView} = require('expo-blur') as typeof import('expo-blur');

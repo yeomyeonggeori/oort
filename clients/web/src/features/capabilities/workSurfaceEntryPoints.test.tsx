@@ -213,9 +213,10 @@ vi.mock("@/features/emoji/useHoverNone", () => ({
 }));
 
 vi.mock("@/features/sidebar/ProfileCard", () => ({
-  // 레일(#3280)은 아바타만 선 컴팩트 카드를 쓴다. 그 자리만 표시해 둔다.
+  // 접힘 레일(#3280)은 아바타만 선 컴팩트 카드를, 펼침(#3574)은 목록 끝 줄의 카드를 쓴다.
+  // 두 자리를 모두 표시해 둔다.
   ProfileCard: ({ compact }: { compact?: boolean }) =>
-    compact ? createElement("span", { "data-testid": "profile-card" }) : null,
+    createElement("span", { "data-testid": "profile-card", "data-compact": compact ? "true" : "false" }),
 }));
 
 // 다이얼로그만 재운다. 같은 모듈의 `Keycaps`는 ⌘K 팔레트가 키캡 힌트를 그릴 때
@@ -819,13 +820,16 @@ describe("펼침: 레일은 워크스페이스 전용, 목적지는 목록 열�
     [...host.querySelectorAll(`${selector} a`)].map((a) => a.textContent?.replace(/\d+$/, "").trim());
   const RAIL_DEST_IDS = ["rail-chat", "rail-inbox", "rail-agents", "rail-mine", "rail-team"];
 
-  it("레일에는 워크스페이스 타일·「+」·프로필만 있고 목적지·구분선은 없다", async () => {
+  it("레일에는 워크스페이스 타일·「+」만 있고 목적지·구분선·프로필은 없다 (프로필은 목록 끝 줄, #3574)", async () => {
     shell.desktop = true;
     const host = await mount({ switcherOpen: false });
     const rail = host.querySelector('[data-testid="workspace-rail"]')!;
-    for (const id of ["workspace-current", "add-workspace", "profile-card"]) {
+    for (const id of ["workspace-current", "add-workspace"]) {
       expect(rail.querySelector(`[data-testid="${id}"]`), id).not.toBeNull();
     }
+    expect(rail.querySelector('[data-testid="profile-card"]')).toBeNull();
+    const foot = host.querySelector('[data-testid="sidebar-profile-foot"]')!;
+    expect(foot.querySelector('[data-testid="profile-card"]')).not.toBeNull();
     for (const id of [...RAIL_DEST_IDS, "rail-divider", "rail-destinations"]) {
       expect(rail.querySelector(`[data-testid="${id}"]`), id).toBeNull();
     }
