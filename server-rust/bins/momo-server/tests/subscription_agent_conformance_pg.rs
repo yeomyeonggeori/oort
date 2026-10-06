@@ -177,6 +177,7 @@ async fn start_server_with(
         // Opened so "delivered" means delivered: with the hosted gate closed
         // every hosted call is skipped and a missing owner check would hide.
         hosted_delivery_enabled: true,
+        hosted_lease_seconds: momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT,
         subscription_agents_enabled,
         claude_subscription_agents_enabled,
         ..AgentPortConfig::default()

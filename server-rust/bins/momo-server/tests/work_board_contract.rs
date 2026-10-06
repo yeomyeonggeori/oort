@@ -4,8 +4,8 @@
 //! documents (event -> refetch) must name the event the server really emits.
 
 use momo_server::dto::{
-    SharedDiffDto, SharedSessionChannelDto, SharedSessionOwnerDto, SharedWorkSessionDto,
-    SharedWorkSessionListResponse,
+    SharedDiffDto, SharedPrDto, SharedSessionChannelDto, SharedSessionOwnerDto,
+    SharedWorkSessionDto, SharedWorkSessionListResponse,
 };
 use serde_json::{json, Value};
 
@@ -66,7 +66,13 @@ fn property_names(spec: &str, schema: &str, nested: Option<&str>) -> Vec<String>
 
 fn sample() -> SharedWorkSessionDto {
     SharedWorkSessionDto {
-        session_id: "s".into(),
+        source: "session",
+        session_id: Some("s".into()),
+        run_id: None,
+        requested_by: None,
+        step_count: None,
+        commits: None,
+        pr: None,
         origin: "host".into(),
         label: "l".into(),
         folder_label: None,
@@ -100,6 +106,27 @@ fn sample() -> SharedWorkSessionDto {
     }
 }
 
+/// A run item with every optional key present: the union of its keys and a
+/// session item's is the whole documented shape.
+fn sample_run() -> SharedWorkSessionDto {
+    SharedWorkSessionDto {
+        source: "run",
+        session_id: None,
+        run_id: Some("r".into()),
+        requested_by: Some(SharedSessionOwnerDto {
+            member_id: "m".into(),
+            display_name: "n".into(),
+        }),
+        step_count: Some(1),
+        commits: Some(1),
+        pr: Some(SharedPrDto {
+            url: "https://github.com/a/b/pull/1".into(),
+            number: Some(1),
+        }),
+        ..sample()
+    }
+}
+
 fn sorted_keys(value: &Value) -> Vec<String> {
     let mut keys: Vec<String> = value.as_object().expect("object").keys().cloned().collect();
     keys.sort();
@@ -121,10 +148,33 @@ fn the_spec_and_the_board_dto_name_the_same_fields() {
         assert!(spec.contains(path), "{path} is documented");
     }
     let wire = serde_json::to_value(sample()).unwrap();
+    let run_wire = serde_json::to_value(sample_run()).unwrap();
+    let mut all_keys = sorted_keys(&wire);
+    all_keys.extend(sorted_keys(&run_wire));
+    all_keys.sort();
+    all_keys.dedup();
     assert_eq!(
         sorted(property_names(&spec, "SharedWorkSession", None)),
-        sorted_keys(&wire),
-        "SharedWorkSession fields"
+        all_keys,
+        "SharedWorkSession fields (session ∪ run item)"
+    );
+    // A session item never carries a run-only key and a run item never carries
+    // `sessionId` (D13: `run_id` instead of `session_id`).
+    assert!(wire.get("runId").is_none() && wire.get("requestedBy").is_none());
+    assert!(run_wire.get("sessionId").is_none() && run_wire["source"] == "run");
+    assert_eq!(
+        sorted(property_names(&spec, "SharedWorkSession", Some("pr"))),
+        sorted_keys(&run_wire["pr"]),
+        "pr fields"
+    );
+    assert_eq!(
+        sorted(property_names(
+            &spec,
+            "SharedWorkSession",
+            Some("requestedBy")
+        )),
+        sorted_keys(&run_wire["requestedBy"]),
+        "requestedBy fields"
     );
     assert_eq!(
         sorted(property_names(&spec, "SharedWorkSession", Some("owner"))),
@@ -173,6 +223,13 @@ fn the_board_shape_has_no_terminal_control_or_commit_vocabulary() {
         .into_iter()
         .map(|name| name.to_lowercase())
         .collect();
+    // `commits` is a count (D12); no other commit-shaped name may appear.
+    assert!(
+        names
+            .iter()
+            .all(|name| !name.contains("commit") || name == "commits"),
+        "a commit title/message must not be a board field"
+    );
     for forbidden in [
         "pty",
         "attach",
@@ -182,7 +239,6 @@ fn the_board_shape_has_no_terminal_control_or_commit_vocabulary() {
         "text",
         "cwd",
         "path",
-        "commit",
         "body",
         "hostid",
         "props",
@@ -209,11 +265,16 @@ fn the_closed_lists_and_the_realtime_contract_match_the_server() {
     let at = at + block[at..].find(key).unwrap() + key.len();
     let end = block[at..].find(']').unwrap();
     let documented: Vec<&str> = block[at..at + end].split(',').map(str::trim).collect();
-    assert_eq!(
-        documented,
-        momo_t3::work_share::DERIVED_STATES,
-        "state enum"
-    );
+    // The shared S1 states plus `failed`, which only a run item carries (D13).
+    let mut expected: Vec<&str> = momo_t3::work_share::DERIVED_STATES.to_vec();
+    expected.insert(expected.len() - 1, "failed");
+    assert_eq!(documented, expected, "state enum");
+    for word in ["waiting", "running", "done", "failed", "stopped"] {
+        assert!(
+            documented.contains(&word),
+            "a run's board status {word} is a state"
+        );
+    }
 
     // event -> refetch: the spec names the event the server emits.
     let event = momo_t3::work_share::share_changed_payload(
@@ -234,6 +295,18 @@ fn the_closed_lists_and_the_realtime_contract_match_the_server() {
         list_op.contains("re-reads this list"),
         "and says to refetch"
     );
+    // #3517: the run-state event is documented under its real name, and the
+    // trigger (migration 120) emits that name.
+    assert!(
+        list_op.contains("work.run.updated"),
+        "the run event is documented"
+    );
+    let migration = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../server/Migrations/120_work_run_updated_event.sql"
+    ))
+    .expect("read migration 120");
+    assert!(migration.contains("'work.run.updated'"));
     assert_eq!(
         json!(event["data"]["payload"].as_object().unwrap().len()),
         json!(3),
