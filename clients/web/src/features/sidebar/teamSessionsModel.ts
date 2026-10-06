@@ -1,6 +1,5 @@
 import type { SharedWorkSession } from "@momo/core/lib/api";
-import { uuidEq } from "@momo/core/lib/api";
-import { isFinishedState } from "@momo/core/features/workbench/teamBoard";
+import { isFinishedState, ownedBy } from "@momo/core/features/workbench/teamBoard";
 
 export type TeamFilter = "all" | "mine" | "waiting";
 
@@ -16,7 +15,7 @@ export function filterTeamSessions(
   selfMemberId: string
 ): SharedWorkSession[] {
   const live = items.filter((i) => !isFinishedState(i.state));
-  if (filter === "mine") return live.filter((i) => uuidEq(i.owner.memberId, selfMemberId));
+  if (filter === "mine") return ownedBy(live, selfMemberId);
   if (filter === "waiting") return live.filter((i) => i.state === "waiting");
   return live;
 }

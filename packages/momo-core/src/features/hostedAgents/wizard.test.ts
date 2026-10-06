@@ -4,12 +4,24 @@ import {
   awaitingProof,
   confirmStateGate,
   hostedAwaitsRemoteEvent,
+  hostedDetectCauses,
+  hostedDetectCountdown,
+  hostedPairingDeadline,
+  HOSTED_DEADLINE_URGENT_MS,
+  HOSTED_DETECT_CAUSES_NOTE,
   hostedLiveMessage,
   hostedStepPurpose,
   hostedStepSpec,
   hostedWizardStep,
   HOSTED_ACTIVATION_DONE_PURPOSE,
   HOSTED_PAIRING_TTL_MS,
+  HOSTED_PREVIEW_HEADLINE,
+  HOSTED_PREVIEW_NOTE,
+  HOSTED_PREVIEW_STEPS,
+  HOSTED_SWAP_ITEMS,
+  HOSTED_SWAP_STALL_MS,
+  hostedSwapRows,
+  hostedSwapStall,
   HOSTED_WIZARD_STEPS,
   pairingExpiry,
   regenerateGate,
@@ -291,5 +303,166 @@ describe("RED PROOF ④ 진행 표시와 live region", () => {
       expect(sentence).not.toMatch(/momo_pair_v1|momo_agent/);
       expect(sentence.length).toBeGreaterThan(0);
     }
+  });
+});
+
+// =============================================================================
+// #3521 — 두 번째 교체 이탈 방지 (미리 안내 · 체크리스트 · 멈춤 원인).
+//
+// RED PROOF: `hostedSwapStall` 에서 시간 문턱이나 `awaitingProof` 검사를 지우면
+// 붉어지고, 문구 묶음에서 「두 번」 또는 두 값의 이름을 지우면 미리 안내 시험이 붉어진다.
+// =============================================================================
+
+const WAITING = () =>
+  connection({
+    status: "detected",
+    activeCredentialId: CREDENTIAL,
+    updatedAtMs: 1_000_000,
+  });
+
+describe("시작 전 미리 안내", () => {
+  it("값이 두 번이라는 것과 두 값의 이름을 말한다", () => {
+    expect(HOSTED_PREVIEW_HEADLINE).toContain("두 번");
+    expect(HOSTED_PREVIEW_STEPS.map((step) => step.label)).toEqual([
+      "연결 값",
+      "활성 자격증명",
+    ]);
+    expect(HOSTED_PREVIEW_NOTE).toContain("두 번째를 놓치면");
+  });
+});
+
+describe("교체 체크리스트", () => {
+  const none = { replace: false, run: false };
+
+  it("증명 대기 중에는 사람이 표시한 줄만 끝나고 마지막 줄은 서버를 기다린다", () => {
+    const rows = hostedSwapRows(WAITING(), { replace: true, run: false });
+    expect(rows.map((row) => [row.id, row.done])).toEqual([
+      ["replace", true],
+      ["run", false],
+      ["proof", false],
+    ]);
+  });
+
+  it("활성이면 표시와 무관하게 세 줄이 모두 끝난다", () => {
+    const rows = hostedSwapRows(
+      connection({ status: "active", activeCredentialId: CREDENTIAL }),
+      none
+    );
+    expect(rows.every((row) => row.done)).toBe(true);
+  });
+
+  it("마지막 줄만 사람이 표시하지 않는 줄이다", () => {
+    expect(HOSTED_SWAP_ITEMS.filter((item) => !item.manual).map((item) => item.id)).toEqual([
+      "proof",
+    ]);
+  });
+});
+
+describe("교체가 안 됐을 때의 멈춤 원인", () => {
+  const T0 = 1_000_000;
+
+  it("문턱 전에는 말하지 않는다", () => {
+    expect(hostedSwapStall(WAITING(), T0 + HOSTED_SWAP_STALL_MS - 1, false)).toBeNull();
+  });
+
+  it("문턱 뒤 교체 표시가 없으면 값을 바꾸라고 원인과 행동을 말한다", () => {
+    const stall = hostedSwapStall(WAITING(), T0 + HOSTED_SWAP_STALL_MS, false);
+    expect(stall?.cause).toContain("바꾸지 않았다면");
+    expect(stall?.cause).toContain("이미 소비");
+    expect(stall?.action).toContain("활성 자격증명으로 바꾸고");
+  });
+
+  it("교체했다고 표시했으면 다른 원인과 행동을 말한다", () => {
+    const stall = hostedSwapStall(WAITING(), T0 + HOSTED_SWAP_STALL_MS, true);
+    expect(stall?.cause).toContain("바꿨다고 표시했는데");
+    expect(stall?.action).toContain("공백");
+  });
+
+  it("증명 대기가 아니면(승인 전·활성) 멈춤이 없다", () => {
+    const later = T0 + HOSTED_SWAP_STALL_MS * 10;
+    expect(hostedSwapStall(connection({ status: "detected", updatedAtMs: T0 }), later, false)).toBeNull();
+    expect(
+      hostedSwapStall(
+        connection({ status: "active", activeCredentialId: CREDENTIAL, updatedAtMs: T0 }),
+        later,
+        false
+      )
+    ).toBeNull();
+    expect(hostedSwapStall(null, later, false)).toBeNull();
+  });
+});
+
+// #3522 — 3단계 만료 카운트다운과 오지 않는 원인.
+// RED PROOF: `hostedPairingDeadline` 의 출처 분기·`hostedDetectCountdown` 의 만료/임박
+// 분기·`hostedDetectCauses` 의 확인되지 않은 프리셋 갈래를 지우면 붉어진다.
+describe("3단계 만료 카운트다운", () => {
+  const T0 = 1_700_000_000_000;
+
+  it("대기 중이 아니면 시각이 없다", () => {
+    expect(hostedPairingDeadline(null, T0)).toBeNull();
+    expect(hostedPairingDeadline(connection({ status: "detected" }), T0)).toBeNull();
+    expect(hostedPairingDeadline(connection({ status: "expired" }), T0)).toBeNull();
+  });
+
+  it("이 탭이 받은 발급 응답이 있으면 그 시각을 그대로 쓴다", () => {
+    const at = T0 + HOSTED_PAIRING_TTL_MS + 5_000;
+    const deadline = hostedPairingDeadline(connection({ updatedAtMs: T0 }), at);
+    expect(deadline).toEqual({ expiresAtMs: at, basis: "issued" });
+  });
+
+  it("기록과 1분 넘게 어긋난 낡은 발급 시각은 버린다(다른 탭이 재발급한 경우)", () => {
+    const stale = T0 + HOSTED_PAIRING_TTL_MS - 20 * 60_000;
+    const deadline = hostedPairingDeadline(connection({ updatedAtMs: T0 }), stale);
+    expect(deadline?.basis).toBe("recorded");
+  });
+
+  it("발급 응답이 없으면 기록 시각에 15분을 더한 근사를 쓰고 그렇다고 밝힌다", () => {
+    const deadline = hostedPairingDeadline(connection({ updatedAtMs: T0 }), null);
+    expect(deadline).toEqual({
+      expiresAtMs: T0 + HOSTED_PAIRING_TTL_MS,
+      basis: "recorded",
+    });
+    const view = hostedDetectCountdown(deadline!, T0);
+    expect(view.basisNote).toContain("근사치");
+    expect(view.label).toBe("길어야 약 15분 뒤 만료");
+    expect(view.basisNote).toContain("빠를 수");
+  });
+
+  it("임박하면 서두르라고, 지나면 재발급을 말한다", () => {
+    const deadline = { expiresAtMs: T0 + HOSTED_PAIRING_TTL_MS, basis: "issued" as const };
+    const calm = hostedDetectCountdown(deadline, T0);
+    expect(calm.urgent).toBe(false);
+    expect(calm.guidance).toContain("15분 동안만");
+    expect(calm.label).toBe("약 15분 뒤 만료");
+    const urgent = hostedDetectCountdown(
+      deadline,
+      T0 + HOSTED_PAIRING_TTL_MS - HOSTED_DEADLINE_URGENT_MS
+    );
+    expect(urgent.urgent).toBe(true);
+    expect(urgent.guidance).toContain("곧 만료");
+    const gone = hostedDetectCountdown(deadline, T0 + HOSTED_PAIRING_TTL_MS);
+    expect(gone.expired).toBe(true);
+    expect(gone.label).toBe("만료됨");
+    expect(gone.guidance).toContain("연결 값 다시 발급");
+    expect(gone.basisNote).toBe("");
+  });
+});
+
+describe("3단계 오지 않는 원인", () => {
+  it("원인을 단정하지 않고 구분하지 못한다고 밝히며 흔한 순서로 적는다", () => {
+    expect(HOSTED_DETECT_CAUSES_NOTE).toContain("구분하지 못해요");
+    expect(hostedDetectCauses(true).map((cause) => cause.id)).toEqual([
+      "not-run",
+      "value",
+      "header",
+      "network",
+      "vendor",
+    ]);
+  });
+
+  it("확인되지 않은 프리셋이면 방식 자체가 원인일 수 있다는 후보를 마지막에 더한다", () => {
+    const causes = hostedDetectCauses(false);
+    expect(causes).toHaveLength(6);
+    expect(causes[5]?.id).toBe("unverified");
   });
 });

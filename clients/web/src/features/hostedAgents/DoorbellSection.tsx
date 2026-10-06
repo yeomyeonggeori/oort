@@ -39,6 +39,9 @@ import {
   DOORBELL_MASK_LABEL,
   DOORBELL_NEVER_FIRED,
   DOORBELL_NOT_ACTIVE,
+  DOORBELL_PRECHECK_HEADLINE,
+  DOORBELL_PRECHECK_ITEMS,
+  DOORBELL_PRECHECK_NOTE,
   DOORBELL_OFFLINE_NOTE,
   DOORBELL_REGISTER_LABEL,
   DOORBELL_REGISTERED_LIVE,
@@ -293,6 +296,22 @@ export function DoorbellSection({
 
       {!loading && !gateClosed && (
         <>
+          {projection === null && (
+            <div
+              className="flex min-w-0 flex-col gap-1"
+              data-testid="hosted-doorbell-precheck"
+            >
+              <p className="text-meta font-medium text-ink">{DOORBELL_PRECHECK_HEADLINE}</p>
+              <ol className="flex list-inside list-decimal flex-col gap-0.5 text-meta text-ink-muted">
+                {DOORBELL_PRECHECK_ITEMS.map((item) => (
+                  <li key={item} className="break-keep">
+                    {item}
+                  </li>
+                ))}
+              </ol>
+              <p className="break-keep text-meta text-ink-muted">{DOORBELL_PRECHECK_NOTE}</p>
+            </div>
+          )}
           {projection === null ? (
             <EmptyInvite
               className="px-0 py-2"

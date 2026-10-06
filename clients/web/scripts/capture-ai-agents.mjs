@@ -120,8 +120,8 @@ async function installRealtime(page) {
   });
 }
 
-async function installDesktop(page) {
-  await page.addInitScript((probes) => {
+async function installDesktop(page, hosted = []) {
+  await page.addInitScript(([probes, hostedProbes]) => {
     window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
     window.__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main", windowLabel: "main" } },
@@ -133,7 +133,7 @@ async function installDesktop(page) {
         if (cmd === "keychain_refresh_token_handle") return window.__h ?? null;
         if (cmd === "detect_local_harnesses") return probes;
         if (cmd === "harness_profile_list") return [];
-        if (cmd === "detect_hosted_agents") return [];
+        if (cmd === "detect_hosted_agents") return hostedProbes;
         if (cmd === "keychain_available") return false;
         if (cmd === "deep_link_take_pending") return [];
         if (cmd === "app_version") return "0.1.17";
@@ -143,7 +143,7 @@ async function installDesktop(page) {
         return null;
       },
     };
-  }, [{ id: "claude", installed: true, auth: "logged_in" }, { id: "codex", installed: true, auth: "logged_in" }]);
+  }, [[{ id: "claude", installed: true, auth: "logged_in" }, { id: "codex", installed: true, auth: "logged_in" }], hosted]);
 }
 
 const failures = [];
@@ -159,12 +159,13 @@ const cell = (page, kind, handle) =>
     return (copy.textContent ?? "").replace(/\s+/g, " ").trim();
   });
 
+// desktop: false(웹) | true(데스크탑, 그록봇 못 찾음) | "grok"(데스크탑, 그록봇 앱 감지)
 async function open(browser, origin, scheme, viewport, desktop = false) {
   const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce", serviceWorkers: "block" });
   await installRoutes(context);
   const page = await context.newPage();
   await installRealtime(page);
-  if (desktop) await installDesktop(page);
+  if (desktop) await installDesktop(page, desktop === "grok" ? [{ id: "grok", bundlePresent: true, processRunning: false }] : [{ id: "grok", bundlePresent: false, processRunning: false }]);
   await page.addInitScript((server) => { try { localStorage.setItem("momo.web.server.v1", server); } catch { /* 저장소 없는 캡처 */ } }, origin);
   await page.goto(origin, { waitUntil: "domcontentloaded" });
   await advanceToAccount(page);
@@ -373,6 +374,36 @@ async function chooser420(browser, origin, scheme) {
   }
 }
 
+// #3523: 「외부」를 고르면 위저드 앞에 프리셋 고르기. 웹(감지 없음)·데스크탑 못 찾음·데스크탑 감지.
+async function externalPicker(browser, origin, scheme, viewport) {
+  for (const [kind, desktop] of [["web", false], ["desktop-notfound", true], ["desktop-detected", "grok"]]) {
+    const tag = `${kind}-${viewport.width}-${scheme}`;
+    Object.assign(scenario, { role: "owner", members: "full", rosterDelayMs: 0, rosterError: false });
+    const { context, page } = await open(browser, origin, scheme, viewport, desktop);
+    try {
+      await page.goto(`${origin}/#/ai/agents`);
+      await page.getByTestId("ai-agents-table").waitFor();
+      await page.getByTestId("ai-agents-create").click();
+      await page.getByTestId("create-agent-chooser").waitFor();
+      await page.getByTestId("create-kind-external").click();
+      await page.getByTestId("external-preset-picker").waitFor();
+      await page.waitForTimeout(600);
+      await page.mouse.move(5, 5);
+      await page.screenshot({ path: resolve(OUT_DIR, `external-picker-${tag}.png`) });
+      const recommended = (await page.getByTestId("external-preset-grok-badge").count()) > 0;
+      check(`${tag} 그록봇 추천 표지는 감지됐을 때만 (${recommended})`, recommended === (desktop === "grok"));
+      check(`${tag} dots 는 곧 지원으로 잠김`, (await page.getByTestId("external-preset-dots").getAttribute("aria-disabled")) === "true" && (await page.getByTestId("external-preset-dots-badge").textContent()) === "곧 지원");
+      check(`${tag} 선택 창 가로 넘침 0`, (await overflowX(page)) === 0);
+      await page.getByTestId("external-preset-grok").click();
+      await page.getByTestId("hosted-agent-wizard").waitFor({ timeout: 10_000 }).catch(() => {});
+      await page.waitForTimeout(700);
+      await page.screenshot({ path: resolve(OUT_DIR, `external-wizard-after-grok-${tag}.png`) });
+    } finally {
+      await context.close();
+    }
+  }
+}
+
 async function main() {
   if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) throw new Error("dist/ is missing. Run npm run build first.");
   mkdirSync(OUT_DIR, { recursive: true });
@@ -388,6 +419,7 @@ async function main() {
       await widthScenes(browser, preview.origin, scheme, { width: 1100, height: 800 });
       await widthScenes(browser, preview.origin, scheme, { width: 420, height: 2000 });
       await chooser420(browser, preview.origin, scheme);
+      for (const viewport of [{ width: 1440, height: 900 }, { width: 420, height: 900 }]) await externalPicker(browser, preview.origin, scheme, viewport);
       await stateScenes(browser, preview.origin, scheme);
     }
   } finally {

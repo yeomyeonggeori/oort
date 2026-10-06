@@ -3364,13 +3364,18 @@ export async function fetchWorkSessions(
 // 이 모양에는 터미널 글, 입력, 컨트롤, PTY, 호스트, 커밋 제목 필드가 없다. 클라이언트는
 // 받은 줄을 그대로 그린다: 멤버십 거르기를 다시 하지 않는다(서버가 정본이다).
 
-export type SharedSessionOrigin = "local_pty" | "host";
+/**
+ * `agent_run`은 호스팅 에이전트의 작업 실행 한 건이다(ADR-0162 증보 3 D13, AT-4 #3517).
+ * 세션 원장이 아니라 `agent_run` 원장에서 온 줄이라 `sessionId`가 없고 `runId`가 있다.
+ */
+export type SharedSessionOrigin = "local_pty" | "host" | "agent_run";
 export type SharedSessionState =
   | "waiting"
   | "running"
   | "review"
   | "idle"
   | "done"
+  | "failed"
   | "stopped";
 
 /** 숫자만. null = 모름(에이전트 레인은 항상 null). 파일 이름은 없다. */
@@ -3384,22 +3389,41 @@ export interface SharedWorkSessionDiff {
 }
 
 export interface SharedWorkSession {
+  /**
+   * 보드 줄의 **한 가지 id**. 세션 줄은 `sessionId`, 실행(run) 줄은 `runId`다(서버는 run
+   * 줄에 `sessionId` 키를 내지 않는다). 키·열기·포커스는 모두 이 값 하나로 한다.
+   */
   sessionId: string;
+  /** 줄의 출처. 없으면(AT-4 이전 서버·옛 시험 줄) `session`이다. */
+  source?: SharedBoardSource;
+  /** 실행 줄에만. `sessionId`와 같은 값이다. */
+  runId?: string | null;
+  /** 실행 줄: 시킨 사람. 없거나 null이면 기록이 없는 것이다(푸시도 가지 않는다). */
+  requestedBy?: { memberId: string; displayName: string } | null;
+  /** 실행 줄: 에이전트가 보고한 단계 수. */
+  stepCount?: number | null;
   origin: SharedSessionOrigin;
+  /** 세션 줄은 사람이 쓴 이름, 실행 줄은 요청자가 쓴 작업 제목. 둘 다 일반 텍스트로만 그린다. */
   label: string;
   folderLabel: string | null;
-  /** 원장 상태. 칩은 `state`를 쓴다. */
-  status: WorkSessionStatusWire;
+  /**
+   * 세션 줄은 원장 상태(칩은 `state`를 쓴다). 실행 줄은 보드 어휘다
+   * (`waiting|running|done|failed|stopped`).
+   */
+  status: string;
+  /** 세션 줄은 시킨 사람, 실행 줄은 에이전트 멤버다. */
   owner: { memberId: string; displayName: string };
   homeChannel: { id: string; name: string | null };
   startedAtMs: number;
   endedAtMs: number | null;
   sharedAtMs: number | null;
   repo: string | null;
+  /** 에이전트가 보고한 문자열일 수 있다(신뢰하지 않는다): 일반 텍스트로만 그린다. */
   branch: string | null;
-  /** 로컬은 닫힌 하네스 목록, 에이전트 레인은 도구 키. */
+  /** 로컬은 닫힌 하네스 목록, 에이전트 레인은 도구 키, 실행 줄은 `hosted`. */
   harness: string;
   state: SharedSessionState;
+  /** 에이전트가 보고한 단계 표식. 신뢰하지 않는다: 일반 텍스트로만 그린다. */
   stages: string[];
   diff: SharedWorkSessionDiff;
   prUrl: string | null;
@@ -3407,24 +3431,150 @@ export interface SharedWorkSession {
   lastActivityAt: number;
 }
 
+export type SharedBoardSource = "session" | "run";
+
 export interface SharedWorkSessionPage {
   sessions: SharedWorkSession[];
   nextCursor: string | null;
 }
 
+const SHARED_STATES: ReadonlySet<string> = new Set<SharedSessionState>([
+  "waiting",
+  "running",
+  "review",
+  "idle",
+  "done",
+  "failed",
+  "stopped",
+]);
+
+function sharedCount(source: Record<string, unknown>, key: string): number | null {
+  const value = source[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function sharedText(source: Record<string, unknown>, key: string): string | null {
+  const value = source[key];
+  return typeof value === "string" ? value : null;
+}
+
+function sharedPerson(
+  value: unknown
+): { memberId: string; displayName: string } | null {
+  const source = record(value);
+  if (source === null) return null;
+  const memberId = str(source, "memberId");
+  const displayName = str(source, "displayName");
+  return memberId === undefined || displayName === undefined
+    ? null
+    : { memberId, displayName };
+}
+
+/**
+ * 보드 한 줄을 **너그럽게** 읽는다(AT-5 #3518). 모르는 키는 버리고, 빠진 키는 비운다.
+ * 줄의 id(`sessionId` 또는 `runId`)가 없으면 그릴 수 없으니 그 줄만 건너뛴다(null).
+ *
+ * 실행 줄은 두 가지를 세션 줄의 모양에 맞춘다(화면이 한 벌로 그리도록):
+ * - 보드 어휘 `waiting`(= 큐에 있고 아직 시작 전)은 **사람의 응답을 기다리는** 세션의
+ *   `waiting`과 다른 뜻이다. 그 칸에 섞이면 「응답 필요」로 읽히므로 `idle`로 옮긴다.
+ * - `commits`(이 작업이 만든 커밋 수)는 `diff.ahead` 자리에 둔다.
+ */
+export function sharedWorkSessionFromWire(value: unknown): SharedWorkSession | null {
+  const raw = record(value);
+  if (raw === null) return null;
+  const isRun = raw.source === "run";
+  const id = isRun ? str(raw, "runId") : str(raw, "sessionId");
+  if (id === undefined) return null;
+  const owner = sharedPerson(raw.owner);
+  const channel = record(raw.homeChannel);
+  const channelId = channel === null ? undefined : str(channel, "id");
+  if (owner === null || channel === null || channelId === undefined) return null;
+  const diffRaw = record(raw.diff) ?? {};
+  const wireState = sharedText(raw, "state") ?? "";
+  const known = SHARED_STATES.has(wireState)
+    ? (wireState as SharedSessionState)
+    : "idle";
+  const state: SharedSessionState = isRun && known === "waiting" ? "idle" : known;
+  const commits = isRun ? sharedCount(raw, "commits") : null;
+  const pr = record(raw.pr);
+  const origin: SharedSessionOrigin = isRun
+    ? "agent_run"
+    : raw.origin === "host"
+      ? "host"
+      : "local_pty";
+  const stages = Array.isArray(raw.stages)
+    ? raw.stages.filter((stage): stage is string => typeof stage === "string")
+    : [];
+  return {
+    sessionId: id,
+    source: isRun ? "run" : "session",
+    runId: isRun ? id : null,
+    requestedBy: isRun ? sharedPerson(raw.requestedBy) : null,
+    stepCount: isRun ? sharedCount(raw, "stepCount") : null,
+    origin,
+    label: sharedText(raw, "label") ?? "",
+    folderLabel: sharedText(raw, "folderLabel"),
+    status: sharedText(raw, "status") ?? "",
+    owner,
+    homeChannel: { id: channelId, name: sharedText(channel, "name") },
+    startedAtMs: sharedCount(raw, "startedAtMs") ?? 0,
+    endedAtMs: sharedCount(raw, "endedAtMs"),
+    sharedAtMs: sharedCount(raw, "sharedAtMs"),
+    repo: sharedText(raw, "repo"),
+    branch: sharedText(raw, "branch"),
+    harness: sharedText(raw, "harness") ?? "",
+    state,
+    stages,
+    diff: {
+      added: sharedCount(diffRaw, "added"),
+      deleted: sharedCount(diffRaw, "deleted"),
+      files: sharedCount(diffRaw, "files"),
+      ahead: sharedCount(diffRaw, "ahead") ?? commits,
+      behind: sharedCount(diffRaw, "behind"),
+      uncommitted: sharedCount(diffRaw, "uncommitted"),
+    },
+    // 최상위 `prUrl`이 정본이고, 없으면 run 줄의 `pr.url`을 쓴다. 링크로 그리기 전에
+    // 화면이 한 번 더 https·모양을 확인한다(`prFacts`).
+    prUrl: sharedText(raw, "prUrl") ?? (pr === null ? null : sharedText(pr, "url")),
+    lastActivityAt: sharedCount(raw, "lastActivityAt") ?? 0,
+  };
+}
+
+export function sharedWorkSessionPageFromWire(value: unknown): SharedWorkSessionPage {
+  const source = record(value);
+  const rows = source === null ? null : arrayField(source, "sessions");
+  const sessions = (rows ?? [])
+    .map(sharedWorkSessionFromWire)
+    .filter((row): row is SharedWorkSession => row !== null);
+  const next = source === null ? undefined : source["nextCursor"];
+  return {
+    sessions,
+    nextCursor: typeof next === "string" ? next : null,
+  };
+}
+
 export async function fetchSharedWorkSessions(
   workspaceId: string,
-  opts: { cursor?: string | null; limit?: number } = {}
+  opts: {
+    cursor?: string | null;
+    limit?: number;
+    /**
+     * `runs`: 호스팅 에이전트의 작업 실행도 같은 목록에 섞어 달라고 한다(AT-4 #3517,
+     * opt-in). 이 값을 모르는 서버는 무시하고 세션 줄만 준다.
+     */
+    include?: "runs";
+  } = {}
 ): Promise<SharedWorkSessionPage> {
   const query = new URLSearchParams();
   if (opts.limit !== undefined) query.set("limit", String(opts.limit));
   if (opts.cursor) query.set("cursor", opts.cursor);
+  if (opts.include) query.set("include", opts.include);
   const text = query.toString();
   const suffix = text === "" ? "" : `?${text}`;
-  const res = await request<SharedWorkSessionPage>(
+  const res = await request<unknown>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/work-sessions/shared${suffix}`
   );
-  return { sessions: res.sessions, nextCursor: res.nextCursor ?? null };
+  return sharedWorkSessionPageFromWire(res);
 }
 
 /** 단건. 보이지 않는 이유가 무엇이든 404 하나다(보드에서 지우라는 뜻). */
@@ -3432,12 +3582,14 @@ export async function fetchSharedWorkSession(
   workspaceId: string,
   sessionId: string
 ): Promise<SharedWorkSession> {
-  const res = await request<{ session: SharedWorkSession }>(
+  const res = await request<unknown>(
     `/v1/workspaces/${encodeURIComponent(
       workspaceId
     )}/work-sessions/${encodeURIComponent(sessionId)}/shared`
   );
-  return res.session;
+  const session = sharedWorkSessionFromWire(record(res)?.["session"]);
+  if (session === null) throw new WireShapeError();
+  return session;
 }
 
 /**
@@ -4425,6 +4577,11 @@ export interface AgentRun {
   maxSteps: number;
   /** Validated work input: `{ type, title, brief, repo?, branch? }`. */
   input?: Record<string, unknown>;
+  /**
+   * 에이전트가 스스로 알린 보고(`{ stages, artifacts }`, ADR-0162 증보 3 D11·D12).
+   * 모양을 믿지 않는다: `agentRunReport`가 읽는다.
+   */
+  output?: unknown;
   startedAtMs?: number;
   finishedAtMs?: number;
   createdAtMs: number;
@@ -4634,6 +4791,7 @@ function agentRunDetailFromWire(value: unknown): AgentRun {
     throw new WireShapeError();
   }
   const input = record(source.input);
+  const output = source.output;
   return {
     ...summary,
     workspaceId: workspaceId.toLowerCase(),
@@ -4641,6 +4799,7 @@ function agentRunDetailFromWire(value: unknown): AgentRun {
     stepCount,
     maxSteps,
     ...(input === null ? {} : { input }),
+    ...(output === undefined || output === null ? {} : { output }),
   };
 }
 
