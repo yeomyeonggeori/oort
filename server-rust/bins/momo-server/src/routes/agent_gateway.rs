@@ -54,8 +54,8 @@ use momo_db::PgConnection;
 use momo_messaging::{find_client_message_in_tx, send_message_in_tx, MessageType, NewMessage};
 use momo_outbox::{
     claim_gateway_jobs_in_tx, clamp_claim_limit, gateway_lease_authorized,
-    lock_gateway_lease_in_tx, release_gateway_lease_in_tx, renew_gateway_lease_in_tx,
-    settle_gateway_job_in_tx, GatewayLeaseBinding,
+    gateway_lease_authorized_hosted, lock_gateway_lease_in_tx, release_gateway_lease_in_tx,
+    renew_gateway_lease_in_tx, settle_gateway_job_in_tx, GatewayLeaseBinding,
 };
 use momo_t3::work_share::{
     validated_branch, validated_count, validated_pr_url, validated_stage_markers, MAX_COUNT,
@@ -246,6 +246,7 @@ pub async fn event(
         event_id,
         actor_member_id,
         via_token_id,
+        hosted_lease: false,
     };
 
     settle_db(
@@ -308,6 +309,10 @@ pub(crate) struct GatewayEventInput {
     /// `None` only for the deprecated process secret, which names no member.
     pub actor_member_id: Option<Uuid>,
     pub via_token_id: Option<Uuid>,
+    /// ADR-0162 증보 3 부록 (#3530) — the lease is a hosted (Agent Port) one, so
+    /// an expired-but-unclaimed lease still authorizes its own handle. `false`
+    /// on the REST callback: the managed gateway's rule is unchanged.
+    pub hosted_lease: bool,
 }
 
 /// **The** gateway progress transaction. Both doors reach the run ledger
@@ -333,6 +338,7 @@ pub(crate) async fn record_gateway_event_in_tx(
         event_id,
         actor_member_id,
         via_token_id,
+        hosted_lease,
     } = input;
     let Some(run) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await? else {
         return Ok(Err(ApiError::not_found("agent run not found")));
@@ -344,7 +350,17 @@ pub(crate) async fn record_gateway_event_in_tx(
     // settled state may still carry, so the lease check widens only
     // for that exact pair (Swift :341).
     let allow_settled = status == "cancelled" && run.status == momo_agent::RunStatus::Cancelled;
-    if !lease_is_authorized(conn, workspace_id, run_id, &run, lease, allow_settled).await? {
+    if !lease_is_authorized(
+        conn,
+        workspace_id,
+        run_id,
+        &run,
+        lease,
+        allow_settled,
+        hosted_lease,
+    )
+    .await?
+    {
         return Ok(Err(lease_rejected()));
     }
 
@@ -505,6 +521,7 @@ pub async fn complete(
             .agent_port
             .config
             .claude_subscription_agents_enabled,
+        hosted_lease: false,
     };
 
     let outcome = settle_db(
@@ -555,6 +572,8 @@ pub(crate) struct GatewayCompleteInput {
     pub subscription_agents_enabled: bool,
     /// #3397 — `AgentPortConfig::claude_subscription_agents_enabled`.
     pub claude_subscription_agents_enabled: bool,
+    /// ADR-0162 증보 3 부록 (#3530) — see [`GatewayEventInput::hosted_lease`].
+    pub hosted_lease: bool,
 }
 
 /// **The** gateway completion transaction — four writes, one transaction, two
@@ -584,6 +603,7 @@ pub(crate) async fn complete_gateway_run_in_tx(
         via_token_id,
         subscription_agents_enabled,
         claude_subscription_agents_enabled,
+        hosted_lease,
     } = input;
     let body_text = timeline_body(body.as_deref(), succeeded, safe_error.as_deref());
     let Some(run) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await? else {
@@ -611,7 +631,17 @@ pub(crate) async fn complete_gateway_run_in_tx(
         return Ok(Err(lease_rejected()));
     };
     let terminal = run.status.is_terminal();
-    if !lease_is_authorized(conn, workspace_id, run_id, &run, lease, terminal).await? {
+    if !lease_is_authorized(
+        conn,
+        workspace_id,
+        run_id,
+        &run,
+        lease,
+        terminal,
+        hosted_lease,
+    )
+    .await?
+    {
         return Ok(Err(lease_rejected()));
     }
 
@@ -1012,6 +1042,7 @@ pub(crate) async fn report_standing_in_tx(
     run_id: Uuid,
     agent_member_id: Uuid,
     lease: GatewayLeaseBinding,
+    hosted_lease: bool,
 ) -> Result<ReportStanding, momo_db::DbError> {
     let Some(run) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await? else {
         return Ok(ReportStanding::NotLive);
@@ -1019,7 +1050,8 @@ pub(crate) async fn report_standing_in_tx(
     if run.agent_member_id != agent_member_id
         || run.status.is_terminal()
         || run.status.is_approval_held()
-        || !lease_is_authorized(conn, workspace_id, run_id, &run, lease, false).await?
+        || !lease_is_authorized(conn, workspace_id, run_id, &run, lease, false, hosted_lease)
+            .await?
     {
         return Ok(ReportStanding::NotLive);
     }
@@ -1217,15 +1249,16 @@ async fn lease_is_authorized(
     run: &GatewayRunSnapshot,
     lease: GatewayLeaseBinding,
     allow_settled: bool,
+    hosted_lease: bool,
 ) -> Result<bool, momo_db::DbError> {
     let snapshot = lock_gateway_lease_in_tx(conn, workspace_id, run_id, run.agent_member_id, lease)
         .await
         .map_err(momo_db::DbError::from)?;
-    Ok(gateway_lease_authorized(
-        snapshot,
-        lease.lease_id,
-        allow_settled,
-    ))
+    Ok(if hosted_lease {
+        gateway_lease_authorized_hosted(snapshot, lease.lease_id, allow_settled)
+    } else {
+        gateway_lease_authorized(snapshot, lease.lease_id, allow_settled)
+    })
 }
 
 /// Swift `normalizedStatus` (:1471-1474) + `validatedProgress`'s closed set

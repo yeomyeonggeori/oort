@@ -165,6 +165,7 @@ async fn start_server(pool: PgPool, knobs: Knobs) -> String {
         subscription_agents_enabled: true,
         // #3397: these suites drive Claude subscription agents; the opt-in is on.
         claude_subscription_agents_enabled: knobs.claude_subscription_agents_enabled,
+        hosted_lease_seconds: momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT,
         oauth: Default::default(),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
