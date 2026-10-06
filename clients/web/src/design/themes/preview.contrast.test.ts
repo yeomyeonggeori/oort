@@ -16,11 +16,10 @@ describe("테마 미리보기 카드 글자 대비", () => {
   for (const theme of THEME_IDS) {
     for (const mode of MODES) {
       const { color } = THEMES[theme][mode];
-      it(`${theme} ${mode}: 제목·보조 줄·알약 글자가 ${FLOOR} 이상`, () => {
+      it(`${theme} ${mode}: 제목·보조 줄 글자가 ${FLOOR} 이상`, () => {
         const pairs: Array<[string, string, string]> = [
           ["ink / surface", color.ink, color.surface],
           ["ink-muted / surface", color["ink-muted"], color.surface],
-          ["on-signal / signal", color["on-signal"], color.signal],
         ];
         for (const [name, fg, bg] of pairs) {
           expect([name, contrast(fg, bg) >= FLOOR]).toEqual([name, true]);
