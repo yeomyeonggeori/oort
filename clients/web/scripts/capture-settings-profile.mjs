@@ -146,12 +146,26 @@ async function main() {
       r = await open(browser, preview.origin, scheme, wide, { photo: true, handleTaken: true });
       await r.page.getByTestId("profile-handle").fill("taken");
       await r.page.getByTestId("profile-save").click();
-      await r.page.getByTestId("profile-handle-error").waitFor({ state: "visible" });
+      // 오류 칸은 늘 그려져 있으므로(reserveErrorSlot) 실제 문장이 뜰 때까지 기다린다.
+      await r.page.getByText("이미 쓰는 핸들이에요", { exact: false }).waitFor({ state: "visible", timeout: 10_000 });
+      // 포커스를 다른 칸으로 옮겨도 서버 오류가 남아야 한다(blur 로컬 검사가 덮지 않는다).
+      await r.page.getByTestId("profile-display-name").focus();
+      await r.page.waitForTimeout(200);
+      if (!(await r.page.getByText("이미 쓰는 핸들이에요", { exact: false }).isVisible())) {
+        throw new Error("핸들 409 오류가 blur 뒤에 사라졌다");
+      }
       await shot(r.page, `profile-handle-taken-1440-${scheme}`);
       await r.page.getByTestId("workspace-leave").click();
       await r.page.getByTestId("workspace-leave-question").waitFor({ state: "visible" });
       await shot(r.page, `profile-leave-confirm-1440-${scheme}`);
       await r.context.close();
+      for (const w of [640, 390]) {
+        r = await open(browser, preview.origin, scheme, { width: w, height: w === 390 ? 1900 : 1500 }, { photo: true });
+        await r.page.getByTestId("workspace-leave").click();
+        await r.page.getByTestId("workspace-leave-question").waitFor({ state: "visible" });
+        await shot(r.page, `profile-leave-confirm-${w}-${scheme}`);
+        await r.context.close();
+      }
       r = await open(browser, preview.origin, scheme, { width: 390, height: 1900 }, { photo: false, longName: true });
       await shot(r.page, `profile-longname-390-${scheme}`);
       await r.context.close();

@@ -619,4 +619,54 @@ describe("ProfileSection 한 페이지", () => {
     // 나가기도 오프라인에서는 잠긴다.
     expect(tid(host, "workspace-leave")?.getAttribute("aria-disabled")).toBe("true");
   });
+
+  it("핸들 409 뒤 칸에서 포커스가 빠져도 서버 오류가 남고, 값을 고치면 사라진다 (M2)", async () => {
+    changeMyProfile.mockRejectedValue(new ApiError(409, "handle is already in use"));
+    const { host } = mountSection();
+    const input = tid(host, "profile-handle") as HTMLInputElement;
+    act(() => input.focus());
+    act(() => setInputValue(input, "taken"));
+    await act(async () => {
+      (tid(host, "profile-save") as HTMLButtonElement).click();
+    });
+    const message = "이미 쓰는 핸들이에요. 다른 핸들을 골라주세요.";
+    await vi.waitFor(() => {
+      expect(tid(host, "profile-handle-error")?.textContent).toBe(message);
+    });
+    act(() => input.blur());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(tid(host, "profile-handle-error")?.textContent).toBe(message);
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    // 값이 바뀌면 서버 오류는 낡은 것이므로 걷힌다.
+    act(() => setInputValue(input, "taken2"));
+    expect(tid(host, "profile-handle-error")?.textContent ?? "").not.toContain("이미 쓰는");
+  });
+
+  it("올리는 중에는 카메라 손잡이가 잠겨 파일 창을 열지 않는다 (L1)", async () => {
+    uploadAvatar.mockReturnValue(new Promise(() => undefined));
+    const { host } = mountSection();
+    const camera = tid(host, "profile-hero-camera") as HTMLButtonElement;
+    expect(camera.disabled).toBe(false);
+    await pickPng(host);
+    expect(camera.disabled).toBe(true);
+    const input = tid(host, "profile-avatar-input") as HTMLInputElement;
+    const click = vi.spyOn(input, "click").mockImplementation(() => undefined);
+    act(() => camera.click());
+    expect(click).not.toHaveBeenCalled();
+  });
+
+  it("지우는 중에도 카메라 손잡이가 잠긴다 (L1)", async () => {
+    removeMyAvatar.mockReturnValue(new Promise(() => undefined));
+    const { host } = mountSection({ avatarUrl: "/v1/avatar?v=m" });
+    await act(async () => {
+      tid(host, "profile-avatar-remove")!.click();
+    });
+    const confirm = [...host.querySelectorAll("button")].find((b) => b.textContent === "지우기");
+    await act(async () => {
+      confirm!.click();
+    });
+    expect((tid(host, "profile-hero-camera") as HTMLButtonElement).disabled).toBe(true);
+  });
 });

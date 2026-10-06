@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Camera } from "lucide-react";
 import type { RosterMember } from "@momo/core/lib/api";
 import { Card } from "@/design/ui/card";
@@ -33,6 +33,7 @@ export function ProfileHero({
   offline: boolean;
 }) {
   const changeRef = useRef<HTMLButtonElement>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
   const role = me?.role ? ROLE_LABEL[me.role] : undefined;
   return (
     <Card className="@container p-6" data-testid="profile-hero">
@@ -43,10 +44,10 @@ export function ProfileHero({
           type="button"
           tabIndex={-1}
           aria-hidden="true"
-          disabled={offline}
+          disabled={offline || photoBusy}
           onClick={() => changeRef.current?.click()}
           data-testid="profile-hero-camera"
-          className="press tap-target absolute bottom-0 end-0 flex size-icon-button items-center justify-center rounded-full bg-primary text-on-primary ring-2 ring-surface-raised hover:opacity-90 disabled:opacity-50"
+          className="press tap-target absolute bottom-0 end-0 flex size-icon-button items-center justify-center rounded-full bg-primary text-on-primary ring-2 ring-surface-raised enabled:hover:opacity-90 disabled:opacity-50"
         >
           <Camera aria-hidden className="size-4" />
         </button>
@@ -54,7 +55,7 @@ export function ProfileHero({
       <div className="flex w-full min-w-0 flex-1 flex-col items-center gap-3 @sm:items-start">
         <div className="flex min-w-0 max-w-full flex-col gap-1">
           <p
-            className="min-w-0 break-words text-display font-bold text-ink"
+            className="min-w-0 break-keep break-words text-display font-bold text-ink"
             data-testid="profile-hero-name"
           >
             {name}
@@ -76,6 +77,7 @@ export function ProfileHero({
           me={me}
           offline={offline}
           changeRef={changeRef}
+          onBusyChange={setPhotoBusy}
         />
       </div>
      </div>

@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type RefObject } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { removeMyAvatar } from "@momo/core/lib/api";
@@ -31,6 +31,7 @@ export function ProfileAvatarField({
   me,
   offline,
   changeRef: externalChangeRef,
+  onBusyChange,
 }: {
   workspaceId: string;
   me: RosterMember | null;
@@ -41,6 +42,8 @@ export function ProfileAvatarField({
    * 진짜 단추 하나로 길을 모은다.
    */
   changeRef?: RefObject<HTMLButtonElement>;
+  /** 올리는 중·지우는 중을 히어로가 알아 카메라 손잡이를 같이 잠글 수 있게 한다. */
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const client = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -90,6 +93,9 @@ export function ProfileAvatarField({
   const uploading = upload.isPending;
   const removing = remove.isPending;
   const busy = uploading || removing;
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
   const hasAvatar = Boolean(me?.avatarUrl);
 
   function onPick(event: React.ChangeEvent<HTMLInputElement>) {

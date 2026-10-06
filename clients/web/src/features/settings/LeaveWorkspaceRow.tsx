@@ -47,7 +47,7 @@ export function LeaveWorkspaceRow({
             거기다. 잠그는 사실로 남는 것은 오프라인 하나다. */}
         <ConfirmButton
           label="워크스페이스 나가기"
-          question="나가면 멤버십이 끝나고, 확인하면 바로 로그아웃돼요. 다시 들어오려면 초대가 필요해요."
+          question="나가면 멤버십이 끝나고, 확인하면 바로 로그아웃돼요."
           confirmLabel="나가기"
           disabled={offline}
           onAskingChange={setAsking}

@@ -52,6 +52,8 @@ export function ProfileSection({ offline }: { offline: boolean }) {
   const [handleError, setHandleError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const saveStarted = useRef(false);
+  // 서버가 거절한 핸들(정규화 값). 값이 그대로인 동안 blur의 로컬 검사가 서버 오류를 덮지 않는다.
+  const serverRejectedHandle = useRef<string | null>(null);
   const displayInputRef = useRef<HTMLInputElement>(null);
   const handleInputRef = useRef<HTMLInputElement>(null);
   const bannerRef = useRef<HTMLDivElement>(null);
@@ -87,6 +89,9 @@ export function ProfileSection({ offline }: { offline: boolean }) {
     if (!handleDirty) return;
     const next = event.relatedTarget;
     if (next instanceof HTMLElement && next.closest('[data-testid="profile-save"]')) {
+      return;
+    }
+    if (handleError && serverRejectedHandle.current === normalizeHandle(handleDraft)) {
       return;
     }
     setHandleError(handleFieldError(handleDraft));
@@ -131,6 +136,7 @@ export function ProfileSection({ offline }: { offline: boolean }) {
         isHandleTaken(failure) ||
         (isField400(failure) && failure.message.toLowerCase().includes("handle"))
       ) {
+        serverRejectedHandle.current = normalizeHandle(handleDraft);
         setHandleError(handleSaveMessage(failure));
         handleInputRef.current?.focus({ preventScroll: true });
         return;
