@@ -65,7 +65,8 @@ describe("두 표시는 모양이 다르다 (H1)", () => {
   });
 
   it("프레즌스는 원이다 — 그리고 연결 표시는 더 이상 원이 아니다", () => {
-    expect(presenceControl).toContain("size-2 rounded-full border");
+    expect(presenceControl).toContain("absolute bottom-0 right-0 rounded-full border");
+    expect(presenceControl).toContain('size === "md" ? "size-3" : "size-2"');
     // 8px 상자 + `rounded-sm`(6px)은 클램프되어 원이 된다. 연결 표시가 그
     // 조합으로 돌아가면 두 원이 다시 한 줄에 선다.
     expect(sidebar).not.toMatch(/size-2[^"]*rounded-sm/);
@@ -76,7 +77,7 @@ describe("상태 트리거는 이웃과 같은 크기로 눌린다 (H2)", () => 
   it("프로필 카드 전체가 tap-target 이다", () => {
     // 예전 트리거는 아바타 24×24 이고 옆 톱니가 44px 이었다. UX-D4 는 행
     // 전체를 트리거로 올려 그 불일치를 없앤다.
-    expect(profileCard).toContain("tap-target flex min-w-0 flex-1");
+    expect(profileCard).toContain("sidebar-row tap-target min-w-0 flex-1");
     expect(presenceControl).not.toContain('"tap-target flex size-6 shrink-0');
   });
 
@@ -85,9 +86,10 @@ describe("상태 트리거는 이웃과 같은 크기로 눌린다 (H2)", () => 
     // 24px 아바타에서 떨어져 허공에 뜬다. 앵커는 아바타 span 이어야 한다.
     expect(presenceControl).toContain(
       // DS2-6: 아바타 면은 흰 면 + rest(바닥에 녹지 않게). 앵커(relative size-6)는 그대로.
-      '"band-surface relative flex size-6 shrink-0 items-center justify-center rounded-full bg-surface'
+      '"band-surface relative flex shrink-0 items-center justify-center rounded-full bg-surface'
     );
-    expect(presenceControl).toContain("absolute bottom-0 right-0 size-2");
+    expect(presenceControl).toContain('size === "md" ? "size-8 text-body" : "size-6 text-meta"');
+    expect(presenceControl).toContain("absolute bottom-0 right-0 rounded-full border");
   });
 });
 

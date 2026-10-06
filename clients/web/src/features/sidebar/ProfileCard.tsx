@@ -31,9 +31,12 @@ import { SetStatusDialog } from "./SetStatusDialog";
 import { useCustomStatusView } from "./useCustomStatusView";
 
 // =============================================================================
-// Bottom identity card (UX-D4 #1756, buzz 36). The trigger is the identity
-// cluster (avatar + name + badge). `tap-target` grows that button to the row
-// under 600px; the connection bar and help sit outside it. The open panel is
+// Bottom identity card (UX-D4 #1756, buzz 36; #3574 Buzz-style foot). The trigger is
+// the identity cluster (avatar + name + status line). `tap-target` grows that button
+// to the row under 600px; the help button sits outside it. #3574: the card is the
+// natural last row of the list column (same `sidebar-row` inset, no band, no rule),
+// and only while the list column is folded (⌘B) does it shrink to the avatar alone
+// in the rail. The open panel is
 // a DropdownMenu (not a submenu, house rule #1383): declared status radios,
 // then custom status (#1889, a second axis, not a replacement), then the
 // real workspace verb that already lives on the rail (+), then settings,
@@ -58,6 +61,7 @@ export function ProfileCard({
   selfMember,
   selfName,
   connected,
+  workspaceName,
   compact = false,
 }: {
   workspaceId: string;
@@ -65,6 +69,11 @@ export function ProfileCard({
   selfMember: RosterMember | null | undefined;
   selfName: string;
   connected: boolean;
+  /**
+   * 둘째 줄의 기본값(#3574). 상태 메시지가 없을 때 이 워크스페이스 이름이 선다. 이름이 아직
+   * 오지 않았으면(없음) 줄을 그리지 않는다: 근처의 아무 글자로 대신하지 않는다.
+   */
+  workspaceName?: string;
   /**
    * 작업 탭 레일(#2854, 시안 ① `.rail`의 아바타)에서는 이름 없이 아바타만 선다.
    * 메뉴는 같다. 이름은 단추의 접근 이름과 툴팁이 말한다.
@@ -111,24 +120,32 @@ export function ProfileCard({
             className={
               compact
                 ? "flex size-rail-tile shrink-0 items-center justify-center rounded-md press-instant-fill hover:bg-surface-hover focus-visible:focus-ring"
-                : "tap-target flex min-w-0 flex-1 items-center gap-2 rounded-sm px-1 text-left press-instant-fill hover:bg-surface-hover data-[state=open]:bg-surface-hover focus-visible:focus-ring"
+                : "sidebar-row tap-target min-w-0 flex-1 py-1 text-left press-instant-fill hover:bg-surface-hover data-[state=open]:bg-surface-hover focus-visible:focus-ring"
             }
           >
             <PresenceBadge
               selfName={selfName}
               effective={effective}
               avatarUrl={selfMember?.avatarUrl}
+              size={compact ? "sm" : "md"}
             />
             <span className={compact ? "hidden" : "flex min-w-0 flex-1 flex-col"}>
-              <span className="truncate text-body" data-testid="self-name">
+              <span className="truncate font-semibold" data-testid="self-name">
                 {selfName}
               </span>
+              {/* 둘째 줄: 상태 메시지(이모지+글)가 있으면 그것, 없으면 워크스페이스 이름. */}
               {custom ? (
                 <CustomStatusMark
                   status={custom}
-                  emojiOnly
                   className="text-meta text-ink-muted"
                 />
+              ) : workspaceName ? (
+                <span
+                  className="truncate text-meta text-ink-muted"
+                  data-testid="self-subline"
+                >
+                  {workspaceName}
+                </span>
               ) : null}
             </span>
           </button>
