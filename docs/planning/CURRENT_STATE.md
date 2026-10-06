@@ -6,8 +6,8 @@
 | 단계 | 완료 / 현재 | 다음 조건 |
 |---|---|---|
 | 실행 체계 | planner=Opus 5.5 · worker=Opus 5.5 서브에이전트 · 리뷰어 C·보안 검수·design-review=fresh 서브에이전트. 묶음 승격(상시 위임), STATUS 동결(증거=PR 본문) | 병렬은 PIPELINE §2 기준. 엔진 워커 1개당 `target` 20~30GB — 랜딩 직후 회수 |
-| 팀 인스턴스 | `oort-team` https://oort-team.up.railway.app **v0.1.17**(schema 115, 10-03, build `main=4d623fe1`, [릴리스](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.17), SLSA VERIFIED). v0.1.16은 notifier 권한 결함(#3377)으로 미배포·prerelease 강등, 핫픽스 #3378. 배포 기록 #3375 | main은 schema 120(mig 116 구독 에이전트 기기·117 개인 키·118~119 클라우드 박스(기본 꺼짐)·120 `work.run.updated`) — v0.1.18 준비 중, 배포 순서 relay→notifier·server→폰, 배포는 owner 승인 · **팀 「기본 AI」 채널 요약 행 미설정(owner)** · LiveKit #2759 |
-| 증거 빌드 | 데스크탑 0.1.15 공증 DMG(`~/Downloads/oort-0.1.15-evidence.dmg`, owner 기기) · iOS 3030 `momo-internal-test`(owner 1인), 10-01(#2568·#1607 기록) | owner 스모크 대기: 팀 기억(카드·칩·제안·브라우저) + 0.1.14 잔여(「Claude Code로 로그인」 왕복, 폰 프로필 상태·알림 일시 중지, 터미널 테마, 팀 키 채널 대화, Claude Code DM) |
+| 팀 인스턴스 | `oort-team` https://oort-team.up.railway.app **v0.1.19**(schema 120, 10-06, build `main=6558910e`, [릴리스](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.19), SLSA VERIFIED, push-relay 먼저 배포). v0.1.18은 notifier `hosted_agent_connection` 권한 누락(#3553)을 배포 전 사전 점검에서 잡아 미배포·prerelease 강등, 핫픽스 #3554. 배포 기록 #3550 | 운영자 토큰 검증(`include=runs` 200)·`work_run_done` 실제 푸시 runtime-unverified · 그록봇 VM 실측 #3542(owner) · 운영 역할 시험 CI 연결 #3555 · **팀 「기본 AI」 채널 요약 행 미설정(owner)** · LiveKit #2759 |
+| 증거 빌드 | 데스크탑 0.1.18 공증 DMG(`~/Downloads/oort-0.1.18-evidence.dmg`, owner 기기, 앱 코드 = v0.1.19) · iOS 3035 `momo-internal-test`(owner 1인, `work_run_done` NSE 첫 컴파일 성공), 10-06(#2568·#1607 기록) | owner 스모크 대기: 팀 기억(카드·칩·제안·브라우저) + 0.1.14 잔여(「Claude Code로 로그인」 왕복, 폰 프로필 상태·알림 일시 중지, 터미널 테마, 팀 키 채널 대화, Claude Code DM) |
 | 팀 기억 v2 | [ADR-0196](../adr/0196-team-memory-v2.md)(0129 대체) M0~M3 main `58cfd534`, migration 098~110, #3158~#3174·#3208·#3212 닫힘. 요약·롤업, 항목(결정·사실·약속), 에이전트 문맥 공급+영수증, 「기억해 둘게요」 제안, 기억 브라우저·편집·잊기, 야간 정리, 로컬 e5-small 벡터 검색+가중 RRF, 워크스페이스 초기화·팀 공지, 웹·폰 화면. 보안 검수 약 15라운드 | 후속 #3189·#3201·#3211·#3225·#3234·#3236·#3243. 그래프 뷰(M4)는 목표 A 밖 |
 | 에이전트 쓰기 | BYOK Anthropic·xAI·OpenRouter(#2872, ADR-0147·0004 증보), provider egress SSRF 가드(#2852·#2894), 답 못 한 이유 안내(#2871), hosted 1:1 DM 승인(#2915, ADR-0162 증보 2), 개인 구독 격리(#2882·#2897) | 실사용 왕복 runtime-unverified — owner 확인 |
 | AI 계정 설정 | 결재 Q1~Q7(09-27, [시안](https://claude.ai/artifact/Y8GWHyaW2Z41bKxKB2uutB)). 랜딩: 재진입 #2870, 틀 #2877, 로그인 모달 #2816(공식 CLI 숨은 PTY, oort 자체 OAuth 금지), ADR-0190 D3-d~g·0193·0147 증보(#2876). Claude 구독으로 앱 명령 실행기는 닫음(Anthropic 약관) | #2878 추가·해제 연결 · #2880 팀 키 흐름 · #2881 기본 AI 표 · #2777·#2781·#2782 확장 · #2879 · #2883 Jev(판정기 ADR 뒤) |
@@ -20,7 +20,7 @@
 | 디자인 2.0·브랜드 | ADR-0189, 코메토 K6, 앱 아이콘 I4, 터미널 다크 #2849 | DS2-5 #2717 · DS2-7 #2719 · DS2-8 #2720 |
 
 ## 다음 행동
-1. **v0.1.18 릴리스(mig 116~120):** `gate:csp-deploy` → `publish-images` dispatch(owner 승인) → 태그·Release → oort-team 배포(relay→notifier·server→폰, owner 승인). 이어서 그록봇 VM 실측 #3542(owner 계정).
+1. **owner 스모크(v0.1.19 서버 + iOS 3035·DMG 0.1.18):** AI 허브, 멘션 AI 주석, 에이전트 만들기 「외부」·연결 위저드, 팀 보드 에이전트 작업 카드·상세(데스크탑 PR 링크가 시스템 브라우저로), 폰 작업 탭, 「작업 끝남」 푸시. 이어서 그록봇 VM 실측 #3542.
 2. **owner:** 팀 「기본 AI」 채널 요약 행 설정 · 증거 빌드(DMG·iOS) 건마다 승인과 스모크(AT 화면·`work_run_done` 푸시 NSE 문구 포함, Swift NSE는 미컴파일).
 3. 후속: OAuth 원격 MCP 프리셋 #3524 · `DeviceKeysBlock` 시험 플레이키 #3489 · 팀 작업·팀 기억 후속(#3345·#3347·#3353~#3356·#3336·#3189 등) · ADR-0197 M4 #3511은 재개 결재 전까지 보류.
 
