@@ -2362,3 +2362,42 @@ describe('「작업 끝남」 탭 (#3342)', () => {
     expect(screen.queryByTestId('work-detail-pane')).toBeNull();
   });
 });
+
+describe('팀 보드 재조회 (#3589 N9)', () => {
+  const boardKey = ['team-board', WS, 'list'];
+  const RUN_AIM: Aim = {
+    messageId: REPLY,
+    threadId: ROOT,
+    category: 'momo.work',
+    reason: 'work_run_done',
+  };
+
+  it.each([
+    ['work_run_done', true],
+    ['work_session_idle', true],
+    ['mention', false],
+  ] as const)('%s 탭은 보드 쿼리를 낡게 한다: %s', async (reason, stale) => {
+    installFetch();
+    workSessionRows = [sessionRow()];
+    renderShell();
+    await waitForSidebar();
+    // 관찰자 없는 쿼리는 gcTime 0 이 지운다. 이 시험은 상태 플래그만 본다.
+    queryClient?.setQueryDefaults(['team-board'], {gcTime: Infinity});
+    queryClient?.setQueryData(boardKey, {pages: [], pageParams: []});
+    expect(queryClient?.getQueryState(boardKey)?.isInvalidated).toBe(false);
+
+    await tapWhileRunning(
+      apnsPayload(
+        reason === 'mention'
+          ? {messageId: PLAIN}
+          : {...RUN_AIM, reason},
+      ),
+    );
+
+    await waitFor(
+      () =>
+        expect(queryClient?.getQueryState(boardKey)?.isInvalidated).toBe(stale),
+      SETTLE,
+    );
+  });
+});
