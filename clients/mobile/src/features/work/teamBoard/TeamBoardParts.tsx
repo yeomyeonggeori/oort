@@ -1,6 +1,7 @@
 import type {SharedSessionState, SharedWorkSession} from '@momo/core/lib/api';
 import {
   diffFacts,
+  isAgentLane,
   laneLabel,
   stateChipLabel,
 } from '@momo/core/features/workbench/teamBoard';
@@ -24,6 +25,7 @@ const STATE_MARK: Readonly<Record<SharedSessionState, string>> = {
   review: '◐',
   idle: '○',
   done: '✓',
+  failed: '✕',
   stopped: '■',
 };
 
@@ -41,7 +43,7 @@ export function StateChip({
       ? styles.chipWarn
       : item.state === 'done'
         ? styles.chipOk
-        : item.state === 'stopped'
+        : item.state === 'stopped' || item.state === 'failed'
           ? styles.chipDanger
           : styles.chipNeutral;
   const textTone =
@@ -49,7 +51,7 @@ export function StateChip({
       ? styles.textWarn
       : item.state === 'done'
         ? styles.textOk
-        : item.state === 'stopped'
+        : item.state === 'stopped' || item.state === 'failed'
           ? styles.textDanger
           : item.state === 'idle'
             ? styles.textMuted
@@ -80,7 +82,7 @@ export function LaneLabel({
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const agent = item.origin === 'host';
+  const agent = isAgentLane(item);
   return (
     <Text
       style={[styles.lane, agent ? styles.laneAgent : styles.laneLocal]}

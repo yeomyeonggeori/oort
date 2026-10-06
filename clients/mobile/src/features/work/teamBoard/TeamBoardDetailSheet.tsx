@@ -3,6 +3,8 @@ import {
   TEAM_BOARD_COPY,
   channelLabel,
   diffFacts,
+  harnessLabel,
+  isRunItem,
   prFacts,
   sessionTitle,
   stageMarkers,
@@ -152,7 +154,7 @@ function SheetBody({
             {sessionTitle(item)}
           </Text>
           <Text style={styles.meta} testID="team-detail-meta">
-            {item.owner.displayName} · {item.harness}
+            {item.owner.displayName} · {harnessLabel(item)}
           </Text>
           {whereText !== '' ? (
             <Text style={styles.where} testID="team-detail-where">
@@ -213,13 +215,19 @@ function SheetBody({
           ) : (
             <View style={styles.card} testID="team-detail-no-pr">
               <Text style={styles.cardTitle}>{TEAM_BOARD_COPY.noPr}</Text>
-              <Text style={styles.cardSub}>{TEAM_BOARD_COPY.noPrBody}</Text>
+              <Text style={styles.cardSub}>
+                {isRunItem(item)
+                  ? TEAM_BOARD_COPY.runNoPrBody
+                  : TEAM_BOARD_COPY.noPrBody}
+              </Text>
             </View>
           )}
         </Section>
 
         <Text style={styles.terminalNote} testID="team-detail-terminal-note">
-          {TEAM_BOARD_COPY.terminalNote}
+          {isRunItem(item)
+            ? TEAM_BOARD_COPY.runNote
+            : TEAM_BOARD_COPY.terminalNote}
         </Text>
 
         {/* 행동은 대화에서 한다. 바닥에는 이동만 있다. */}

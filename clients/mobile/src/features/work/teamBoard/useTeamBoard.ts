@@ -46,6 +46,8 @@ export function useTeamBoardList(workspaceId: string, enabled: boolean) {
       fetchSharedWorkSessions(workspaceId, {
         cursor: pageParam,
         limit: BOARD_PAGE,
+        // 호스팅 에이전트의 작업 실행도 섞는다(AT-5 #3518). 모르는 서버는 무시한다.
+        include: 'runs',
       }),
     initialPageParam: null as string | null,
     getNextPageParam: last => last.nextCursor,
@@ -66,11 +68,13 @@ export function useTeamBoardList(workspaceId: string, enabled: boolean) {
 export function useTeamBoardItem(
   workspaceId: string,
   sessionId: string | null,
+  /** 단건 읽기는 세션 전용이다. 실행 줄은 목록의 줄을 그대로 쓰므로 읽지 않는다. */
+  enabled = true,
 ) {
   const query = useQuery({
     queryKey: [...teamBoardKey(workspaceId), 'item', sessionId],
     queryFn: () => fetchSharedWorkSession(workspaceId, sessionId ?? ''),
-    enabled: workspaceId !== '' && sessionId !== null,
+    enabled: enabled && workspaceId !== '' && sessionId !== null,
     retry: (count, error) =>
       !(error instanceof ApiError && error.status === 404) && count < 2,
   });

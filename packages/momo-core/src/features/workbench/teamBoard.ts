@@ -49,6 +49,16 @@ export const TEAM_BOARD_COPY = {
   noPrBody: "PR이 열리면 채널 카드에 붙어요",
   terminalNote:
     "터미널 원문은 주인의 기기에만 있어요. 여기서는 이름, 상태, 작업 위치와 하네스가 알린 단계만 보여요.",
+  // 호스팅 에이전트의 작업 실행 줄(AT-5 #3518). 값은 에이전트가 스스로 알린 것이다.
+  runNote:
+    "에이전트가 스스로 알린 단계와 결과만 보여요. 작업 화면이나 터미널은 oort로 오지 않아요.",
+  runLane: "에이전트 작업",
+  runHarness: "호스팅 에이전트",
+  runStepsHeading: "에이전트가 알린 단계",
+  runArtifactsHeading: "결과",
+  runBranch: "브랜치",
+  runNoStages: "아직 알린 단계가 없어요",
+  runNoPrBody: "에이전트가 PR을 알리면 여기에 보여요",
   goneTitle: "이 세션은 더 이상 보이지 않아요",
   goneBody: "공유가 꺼졌거나 이 채널의 멤버가 아니에요.",
   // 폰 한 열 판(#2864). 보기 전환은 「전체 | 내 것」, 한 줄 목록은 상태 구간으로 끊는다.
@@ -60,6 +70,8 @@ export const TEAM_BOARD_COPY = {
 
 /** 목록 한 줄의 상태 칩 말(시안 ④). 색만으로 말하지 않고 글자가 붙는다. */
 export function stateChipLabel(item: SharedWorkSession): string {
+  // 실행 줄의 `idle`은 큐에서 시작을 기다리는 것이다(`sharedWorkSessionFromWire`).
+  if (isRunItem(item) && item.state === "idle") return "시작 전";
   switch (item.state) {
     case "waiting":
       return SESSION_STATUS_LABEL.waiting;
@@ -71,20 +83,37 @@ export function stateChipLabel(item: SharedWorkSession): string {
       return "대기";
     case "done":
       return item.prUrl !== null ? "끝남 · PR" : "끝남";
+    case "failed":
+      return "실패";
     case "stopped":
       return "멈춤";
   }
 }
 
+/** 호스팅 에이전트의 작업 실행 줄인가(세션 원장이 아니라 `agent_run` 원장에서 온 줄). */
+export function isRunItem(item: SharedWorkSession): boolean {
+  return item.source === "run";
+}
+
 /** 레인 말. 로컬 공유 세션과 에이전트 세션은 서로 다른 말을 쓴다(제안서 §4.2). */
 export function laneLabel(item: SharedWorkSession): string {
+  if (isRunItem(item)) {
+    return item.requestedBy == null
+      ? TEAM_BOARD_COPY.runLane
+      : `에이전트 · ${attachParticle(item.requestedBy.displayName, "subject")} 시킴`;
+  }
   return item.origin === "host"
     ? `에이전트 · ${attachParticle(item.owner.displayName, "subject")} 시킴`
     : "로컬 · 공유됨";
 }
 
 export function isAgentLane(item: SharedWorkSession): boolean {
-  return item.origin === "host";
+  return item.origin === "host" || isRunItem(item);
+}
+
+/** 상세 머리의 도구 칸. 실행 줄의 하네스는 서버 상수(`hosted`)라 사람의 말로 바꾼다. */
+export function harnessLabel(item: SharedWorkSession): string {
+  return isRunItem(item) ? TEAM_BOARD_COPY.runHarness : item.harness;
 }
 
 /** 홈 채널의 표시. 이름이 없으면(모르면) 그대로 「채널」이다. */
@@ -108,6 +137,20 @@ export function whereLabel(item: SharedWorkSession): {
  */
 export function stateSentence(item: SharedWorkSession, nowMs: number): string {
   const owner = item.owner.displayName;
+  if (isRunItem(item)) {
+    switch (item.state) {
+      case "idle":
+        return "에이전트가 시작하기를 기다려요";
+      case "running":
+        return `${attachParticle(owner, "subject")} 작업하고 있어요`;
+      case "done":
+        return "끝났어요";
+      case "failed":
+        return "실패했어요";
+      default:
+        return "멈췄어요";
+    }
+  }
   switch (item.state) {
     case "waiting": {
       const minutes = Math.max(
@@ -125,6 +168,8 @@ export function stateSentence(item: SharedWorkSession, nowMs: number): string {
       return "잠시 쉬고 있어요";
     case "done":
       return "끝났어요";
+    case "failed":
+      return "실패했어요";
     case "stopped":
       return "멈췄어요";
   }
@@ -132,7 +177,7 @@ export function stateSentence(item: SharedWorkSession, nowMs: number): string {
 
 /** 상태가 끝났는가. 「지금」 보기와 「오늘 끝난 것」 보기를 가른다. */
 export function isFinishedState(state: SharedSessionState): boolean {
-  return state === "done" || state === "stopped";
+  return state === "done" || state === "failed" || state === "stopped";
 }
 
 export type BoardView = "now" | "done";
@@ -179,19 +224,23 @@ export function groupByOwner(
   const groups: BoardGroup[] = [];
   const index = new Map<string, BoardGroup>();
   for (const item of items) {
-    const key = item.owner.memberId.toLowerCase();
+    // 보드는 사람별로 묶는다. 실행 줄의 주인은 에이전트 멤버라서 시킨 사람 밑에 모은다
+    // (시킨 기록이 없으면 에이전트 이름 밑).
+    const head =
+      isRunItem(item) && item.requestedBy != null ? item.requestedBy : item.owner;
+    const key = head.memberId.toLowerCase();
     let group = index.get(key);
     if (!group) {
       group = {
         key,
-        ownerName: item.owner.displayName,
+        ownerName: head.displayName,
         agentOnly: true,
         items: [],
       };
       index.set(key, group);
       groups.push(group);
     }
-    if (item.origin !== "host") group.agentOnly = false;
+    if (!isAgentLane(item)) group.agentOnly = false;
     group.items.push(item);
   }
   return groups;
@@ -256,6 +305,8 @@ export function prFacts(
     return null;
   }
   if (parsed.protocol !== "https:") return null;
+  // 자격 증명이 박힌 주소는 링크로 만들지 않는다(서버가 이미 정규화하지만 화면이 한 번 더 본다).
+  if (parsed.username !== "" || parsed.password !== "") return null;
   const match = /^\/([^/]+)\/([^/]+)\/pull\/(\d{1,9})$/.exec(parsed.pathname);
   if (!match) return null;
   return {
@@ -352,5 +403,9 @@ export function ownedBy(
   items: readonly SharedWorkSession[],
   memberId: string
 ): SharedWorkSession[] {
-  return items.filter((i) => uuidEq(i.owner.memberId, memberId));
+  return items.filter((i) =>
+    isRunItem(i)
+      ? i.requestedBy != null && uuidEq(i.requestedBy.memberId, memberId)
+      : uuidEq(i.owner.memberId, memberId)
+  );
 }

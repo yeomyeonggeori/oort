@@ -46,6 +46,8 @@ export function useTeamBoardList(workspaceId: string) {
       fetchSharedWorkSessions(workspaceId, {
         cursor: pageParam,
         limit: BOARD_PAGE,
+        // 호스팅 에이전트의 작업 실행도 섞는다(AT-5 #3518). 모르는 서버는 무시한다.
+        include: "runs",
       }),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextCursor,
@@ -64,11 +66,16 @@ export function useTeamBoardList(workspaceId: string) {
  * 단건. 드로어가 목록에 아직 없는 줄(깊은 링크, 다음 쪽)을 열 때와, 열려 있는 줄이
  * 아직 보이는지 확인할 때 쓴다. 404는 하나다: 공유가 꺼졌거나 더는 보이지 않는다.
  */
-export function useTeamBoardItem(workspaceId: string, sessionId: string | null) {
+export function useTeamBoardItem(
+  workspaceId: string,
+  sessionId: string | null,
+  /** 단건 읽기는 세션 전용이다. 실행 줄은 목록의 줄을 그대로 쓰므로 읽지 않는다. */
+  enabled = true
+) {
   const query = useQuery({
     queryKey: [...teamBoardKey(workspaceId), "item", sessionId],
     queryFn: () => fetchSharedWorkSession(workspaceId, sessionId ?? ""),
-    enabled: workspaceId !== "" && sessionId !== null,
+    enabled: enabled && workspaceId !== "" && sessionId !== null,
     retry: (count, error) =>
       !(error instanceof ApiError && error.status === 404) && count < 2,
   });
@@ -130,6 +137,8 @@ export function useTeamBoardRail(
       realtime.subscribeWorkSession(workspaceId, channelId, {
         // 신호만 받는다. 이 보드는 프레임 안의 어떤 값도 화면에 쓰지 않는다.
         onShareChanged: reread,
+        // 호스팅 에이전트 작업 실행의 상태 전환도 같은 신호다(#3518).
+        onRunUpdated: reread,
         // 에이전트 레인의 진행은 기존 work.session.* 프레임으로 온다. 같은 방식으로 다시 읽는다.
         onLifecycle: reread,
         onToolTransition: reread,
