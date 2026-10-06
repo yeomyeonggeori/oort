@@ -172,6 +172,8 @@ interface Refusal {
   message: string;
 }
 
+// `instanceof ApiError`가 아니라 구조로 읽는다: `lib/api.ts`가 이 파일의 `normalizeWorkRunInput`을
+// 가져오므로 반대 방향 import는 순환이 된다. (`runCancel.ts`와 달리 일부러 이렇다.)
 function asRefusal(error: unknown): Refusal | null {
   if (typeof error !== "object" || error === null) return null;
   const e = error as { name?: unknown; status?: unknown; code?: unknown; message?: unknown };
@@ -246,7 +248,7 @@ export function workRunFailure(error: unknown): WorkRunFailure {
       case WORK_RUN_REFUSAL_CODES.claudeSubscriptionAgentPaused:
         return fail(
           "claude_subscription_agent_paused",
-          "이 서버에서는 Claude 구독 에이전트를 쉬게 해 두었어요. 지금은 이 에이전트에게 맡길 수 없어요.",
+          "이 서버에서는 Claude로 쓰는 에이전트를 쉬게 해 두었어요. 지금은 이 에이전트에게 맡길 수 없어요.",
           "fix_elsewhere"
         );
       case WORK_RUN_REFUSAL_CODES.agentPaused:
@@ -282,7 +284,7 @@ export function workRunFailure(error: unknown): WorkRunFailure {
     if (message.includes(MESSAGE_HINTS.subscriptionOff)) {
       return fail(
         "subscription_agents_off",
-        "이 서버에서는 구독 에이전트를 쓰지 않도록 꺼 두었어요. 운영자가 켜면 맡길 수 있어요.",
+        "이 서버에서는 내 AI 계정으로 쓰는 에이전트를 꺼 두었어요. 운영자가 켜면 맡길 수 있어요.",
         "fix_elsewhere"
       );
     }
