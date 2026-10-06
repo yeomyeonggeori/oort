@@ -6,6 +6,8 @@ import {
   TEAM_BOARD_COPY,
   channelLabel,
   diffFacts,
+  harnessLabel,
+  isRunItem,
   prFacts,
   sessionTitle,
   stageMarkers,
@@ -13,6 +15,7 @@ import {
   whereLabel,
 } from "@momo/core/features/workbench/teamBoard";
 import { cn } from "@/design/lib/cn";
+import { isDesktop, openExternalUrl } from "@/lib/tauri";
 import { StateChip, LaneLabel } from "./TeamBoardParts";
 
 // =============================================================================
@@ -49,6 +52,7 @@ export const TeamBoardDrawer = forwardRef<
       aria-labelledby="team-board-drawer-title"
       data-testid="team-board-drawer"
       data-session-id={item.sessionId}
+      data-source={item.source}
       className="flex min-h-0 min-w-0 flex-1 flex-col border-s border-line bg-surface focus-visible:focus-ring"
     >
       <div className="flex flex-col gap-2 border-b border-line px-4 pt-3 pb-3">
@@ -76,7 +80,7 @@ export const TeamBoardDrawer = forwardRef<
           data-testid="team-board-drawer-meta"
         >
           <span>{item.owner.displayName}</span>
-          <span>{item.harness}</span>
+          <span>{harnessLabel(item)}</span>
           {(where.primary !== null || where.secondary !== null) && (
             <span className="min-w-0 break-all font-mono text-timestamp text-ink">
               {[where.primary, where.secondary].filter(Boolean).join(" / ")}
@@ -163,6 +167,12 @@ export const TeamBoardDrawer = forwardRef<
               target="_blank"
               rel="noopener noreferrer"
               data-testid="team-board-pr"
+              onClick={(event) => {
+        // 데스크탑 셸(wry)에서는 target="_blank"가 죽은 컨트롤이다: OS 브라우저로 넘긴다.
+        if (!isDesktop()) return;
+        event.preventDefault();
+        void openExternalUrl(pr.href);
+      }}
               className="mx-4 flex min-w-0 items-center gap-2 rounded-lg border border-line px-3 py-2 text-body text-ink press hover:bg-surface-hover focus-visible:focus-ring"
             >
               <GitPullRequest aria-hidden className="size-4 shrink-0 text-icon" />
@@ -185,7 +195,9 @@ export const TeamBoardDrawer = forwardRef<
                 {TEAM_BOARD_COPY.noPr}
               </p>
               <p className="break-keep text-meta text-ink-muted">
-                {TEAM_BOARD_COPY.noPrBody}
+                {isRunItem(item)
+                  ? TEAM_BOARD_COPY.runNoPrBody
+                  : TEAM_BOARD_COPY.noPrBody}
               </p>
             </div>
           )}
@@ -196,7 +208,11 @@ export const TeamBoardDrawer = forwardRef<
           data-testid="team-board-terminal-note"
         >
           <Lock aria-hidden className="mt-px size-3 shrink-0 text-icon" />
-          <span>{TEAM_BOARD_COPY.terminalNote}</span>
+          <span>
+            {isRunItem(item)
+              ? TEAM_BOARD_COPY.runNote
+              : TEAM_BOARD_COPY.terminalNote}
+          </span>
         </p>
       </div>
 

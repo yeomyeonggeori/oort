@@ -13,6 +13,7 @@ import {
   asWorkSessionControlFrame,
   asWorkSessionObserverFrame,
   asWorkSessionToolTransitionFrame,
+  asWorkRunUpdatedFrame,
   asWorkSessionShareChangedFrame,
   centrifugoAgentChannelName,
   centrifugoChannelName,
@@ -35,6 +36,7 @@ import {
   type WorkSessionControlFrame,
   type WorkSessionObserverFrame,
   type WorkSessionToolTransitionFrame,
+  type WorkRunUpdatedFrame,
   type WorkSessionShareChangedFrame,
 } from "@momo/core/lib/realtimeEvents";
 import { isTerminalProgressFrame } from "@momo/core/features/agents/agentRail";
@@ -370,6 +372,8 @@ export function createRealtime(
       onControl?: (frame: WorkSessionControlFrame) => void;
       /** 팀 보드(#2863): 공유 켜짐·꺼짐·상태 변화. 신호일 뿐이니 받으면 GET으로 다시 읽는다. */
       onShareChanged?: (frame: WorkSessionShareChangedFrame) => void;
+      /** 팀 보드(#3518): 호스팅 에이전트 작업 실행의 보드 상태 전환. 신호일 뿐이다. */
+      onRunUpdated?: (frame: WorkRunUpdatedFrame) => void;
       onResync: () => void;
     }
   ): () => void {
@@ -424,6 +428,11 @@ export function createRealtime(
           const shareChanged = asWorkSessionShareChangedFrame(ctx.data);
           if (shareChanged) {
             handlers.onShareChanged?.(shareChanged);
+            return;
+          }
+          const runUpdated = asWorkRunUpdatedFrame(ctx.data);
+          if (runUpdated) {
+            handlers.onRunUpdated?.(runUpdated);
             return;
           }
           const acp = asWorkSessionACPFrame(ctx.data);

@@ -12,7 +12,7 @@ import {
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
-import {StyleSheet, TextInput} from 'react-native';
+import {Linking, StyleSheet, TextInput} from 'react-native';
 import type {Centrifuge} from 'centrifuge';
 
 import '../src/boot/polyfills';
@@ -570,6 +570,25 @@ describe('실시간은 신호이고 읽기가 진실이다', () => {
     expect(rail.signals.size).toBe(0);
   });
 
+  it('신호가 끊임없이 와도 읽기가 굶지 않는다(첫 신호부터 최대 2초)', async () => {
+    const mock = installFetch();
+    const rail = fakeRail();
+    renderBoard({}, rail.value);
+    await waitFor(() => expect(rail.signals.size).toBe(2));
+    await waitFor(() => expect(sharedReads(mock)).toBeGreaterThan(0));
+    const before = sharedReads(mock);
+    jest.useFakeTimers({doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask']});
+    for (let i = 0; i < 25; i += 1) {
+      act(() => {
+        rail.signals.get(CH_A)?.();
+      });
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(100);
+      });
+    }
+    expect(sharedReads(mock)).toBeGreaterThan(before);
+  });
+
   it('떠날 때 구독을 모두 푼다', async () => {
     installFetch();
     const rail = fakeRail();
@@ -624,6 +643,114 @@ describe('레일: subscribeWorkBoard', () => {
         ts: 1,
         payload: {session_id: 'S-1', channel_id: CH_A, kind: 'state_changed'},
       },
+    });
+    expect(signals).toBe(1);
+    off();
+  });
+});
+
+const lit = (text: string): RegExp =>
+  new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+
+describe('에이전트 작업 줄 (#3518)', () => {
+  const RUN_WIRE = {
+    source: 'run',
+    runId: 'R-1',
+    requestedBy: {memberId: SELF_ID, displayName: '곽성재'},
+    stepCount: 2,
+    commits: 2,
+    origin: 'agent_run',
+    label: '[label](javascript:alert(2))',
+    folderLabel: null,
+    status: 'running',
+    owner: {memberId: OTHER_ID, displayName: '그록봇'},
+    homeChannel: {id: CH_B, name: 'agent-lab'},
+    startedAtMs: Date.now() - 600_000,
+    endedAtMs: null,
+    sharedAtMs: null,
+    repo: null,
+    branch: '<b>evil</b>',
+    harness: 'hosted',
+    state: 'running',
+    stages: ['[x](javascript:alert(1))', '<img src=x onerror=alert(1)>'],
+    diff: {added: 30, deleted: 4, files: null, ahead: null, behind: null, uncommitted: null},
+    prUrl: 'https://github.com/acme/oort/pull/12',
+    lastActivityAt: Math.floor(Date.now() / 1000) - 60,
+  };
+
+  it('include=runs로 읽고, runId 줄을 그리고, 열어도 단건 읽기를 하지 않는다', async () => {
+    const mock = installFetch({
+      shared: () => jsonResponse(200, {sessions: [RUN_WIRE], nextCursor: null}),
+    });
+    renderBoard();
+    await waitFor(() => expect(screen.getByTestId('team-board-row-R-1')).toBeTruthy());
+    expect(
+      mock.mock.calls.some(([url]) => String(url).includes('include=runs')),
+    ).toBe(true);
+    fireEvent.press(screen.getByTestId('team-board-row-R-1'));
+    await waitFor(() => expect(screen.getByTestId('team-detail-sheet')).toBeTruthy());
+    expect(
+      mock.mock.calls.some(([url]) => /\/work-sessions\/R-1\/shared/.test(String(url))),
+    ).toBe(false);
+    expect(screen.getByTestId('team-detail-lane')).toHaveTextContent(
+      /에이전트 · 곽성재가 시킴/,
+    );
+    expect(screen.getByTestId('team-detail-pr')).toHaveTextContent(/PR #12/);
+    expect(screen.getByTestId('team-detail-terminal-note')).toHaveTextContent(
+      /에이전트가 스스로 알린/,
+    );
+  });
+
+  async function openRun(wire: object, id: string) {
+    installFetch({
+      shared: () => jsonResponse(200, {sessions: [wire], nextCursor: null}),
+    });
+    renderBoard();
+    await waitFor(() => expect(screen.getByTestId(`team-board-row-${id}`)).toBeTruthy());
+    fireEvent.press(screen.getByTestId(`team-board-row-${id}`));
+    await waitFor(() => expect(screen.getByTestId('team-detail-sheet')).toBeTruthy());
+  }
+
+  it('보안: 단계·브랜치·이름 글자를 직접 눌러도 어디도 열리지 않고, 잘못된 PR 주소는 링크가 아니다', async () => {
+    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    await openRun({...RUN_WIRE, prUrl: 'javascript:alert(1)'}, 'R-1');
+    for (const text of [
+      '[x](javascript:alert(1))',
+      '<img src=x onerror=alert(1)>',
+      '<b>evil</b>',
+      '[label](javascript:alert(2))',
+    ]) {
+      const nodes = screen.getAllByText(lit(text));
+      expect(nodes.length).toBeGreaterThan(0);
+      for (const node of nodes) fireEvent.press(node);
+    }
+    expect(screen.queryByTestId('team-detail-pr')).toBeNull();
+    expect(screen.getByTestId('team-detail-no-pr')).toBeTruthy();
+    expect(open).toHaveBeenCalledTimes(0);
+    open.mockRestore();
+  });
+
+  it('대조: 올바른 PR 주소는 링크이고 누르면 그 주소 하나만 열린다(스파이가 실제로 듣고 있다)', async () => {
+    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    await openRun(RUN_WIRE, 'R-1');
+    fireEvent.press(screen.getByTestId('team-detail-pr'));
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(open).toHaveBeenCalledWith('https://github.com/acme/oort/pull/12');
+    open.mockRestore();
+  });
+
+  it('work.run.updated 프레임은 신호가 된다', () => {
+    const {Centrifuge: Fake} = jest.requireMock('centrifuge') as {
+      Centrifuge: new (url: string, options: unknown) => Centrifuge;
+    };
+    const client = new Fake('wss://example.test/connection/websocket', {}) as Centrifuge & {
+      subs: Map<string, {__emit: (e: string, c: unknown) => void}>;
+    };
+    const rail = createChannelRail(() => client);
+    let signals = 0;
+    const off = rail.subscribeWorkBoard(WS, CH_A, {onSignal: () => (signals += 1)});
+    client.subs.get(centrifugoChannelName(WS, CH_A))?.__emit('publication', {
+      data: {type: 'work.run.updated', v: 1, ts: 1, payload: {run_id: 'R-1', channel_id: CH_A, to: 'done'}},
     });
     expect(signals).toBe(1);
     off();

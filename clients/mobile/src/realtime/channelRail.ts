@@ -6,6 +6,7 @@ import {
   asReactionFrame,
   asTypingFrame,
   asWorkSessionLifecycleFrame,
+  asWorkRunUpdatedFrame,
   asWorkSessionShareChangedFrame,
   asWorkSessionToolTransitionFrame,
   centrifugoAgentChannelName,
@@ -233,6 +234,8 @@ export function createChannelRail(getClient: () => Centrifuge): ChannelRail {
             if (gate.isReplaying()) return;
             if (
               asWorkSessionShareChangedFrame(ctx.data) ||
+              // 호스팅 에이전트 작업 실행의 보드 상태 전환(#3518). 신호만이다.
+              asWorkRunUpdatedFrame(ctx.data) ||
               asWorkSessionLifecycleFrame(ctx.data) ||
               asWorkSessionToolTransitionFrame(ctx.data)
             ) {

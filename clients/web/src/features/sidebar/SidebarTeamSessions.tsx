@@ -94,7 +94,7 @@ export function SidebarTeamSessions() {
                     >
                       {sessionTitle(item)}
                     </span>
-                    <SessionStateChip status={item.state} label={stateChipLabel(item)} testId="sidebar-team-session-chip" />
+                    <SessionStateChip status={item.state === "failed" ? "stopped" : item.state} label={stateChipLabel(item)} testId="sidebar-team-session-chip" />
                   </span>
                   <span className="min-w-0 truncate text-meta text-ink-muted">
                     {[item.owner.displayName, where.primary].filter(Boolean).join(" · ")}

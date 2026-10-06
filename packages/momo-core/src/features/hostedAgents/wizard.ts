@@ -375,3 +375,321 @@ export const HOSTED_WIZARD_LEAD =
  */
 export const HOSTED_CLOSED_NOTICE =
   "이 연결은 해제 절차에 들어갔어요. 남은 정리는 에이전트 화면의 연결 탭에서 이어서 해요.";
+
+// ---- 시작 전 미리 안내 · 자격증명 교체 체크리스트 · 멈춤 원인 (#3521) -------------
+//
+// 이 마법사에서 가장 많이 이탈하는 자리는 5단계의 두 번째 교체다(AT-7 점검 마찰
+// 1·2). 값이 둘이라는 사실을 사람은 5단계에 와서야 처음 듣고, 그래서 첫 번째
+// 연결 값만 붙인 채 4단계 승인 뒤에 멈춘다. 세 문구 묶음은 모두 그 한 사건을
+// 겨냥한다: 미리 말하고(1단계), 하는 중에 보이게 하고(5단계), 놓쳤을 때 이름을
+// 붙여 알린다(5단계가 길어질 때).
+
+/** 1단계 머리에 서는 한 줄. 몇 번 붙여 넣는지가 핵심이라 숫자로 말한다. */
+export const HOSTED_PREVIEW_HEADLINE = "두 번 붙여 넣어요: 연결 값, 그다음 활성 자격증명";
+
+export interface HostedPreviewStep {
+  id: "pairing" | "credential";
+  /** 몇 번째 값인가. */
+  order: string;
+  label: string;
+  detail: string;
+}
+
+export const HOSTED_PREVIEW_STEPS: readonly HostedPreviewStep[] = [
+  {
+    id: "pairing",
+    order: "첫 번째",
+    label: "연결 값",
+    detail: "2단계에서 받아 AI 회사 설정에 붙여 넣어요.",
+  },
+  {
+    id: "credential",
+    order: "두 번째",
+    label: "활성 자격증명",
+    detail: "승인한 뒤 5단계에서 받아, 연결 값을 이 값으로 바꿔요.",
+  },
+];
+
+export const HOSTED_PREVIEW_NOTE =
+  "두 번째를 놓치면 승인 뒤에 멈춘 채 활성이 되지 않아요.";
+
+export type HostedSwapItemId = "replace" | "run" | "proof";
+
+export interface HostedSwapItem {
+  id: HostedSwapItemId;
+  label: string;
+  /** 사람이 직접 표시하는 줄인가. `false` 면 서버 상태가 채운다. */
+  manual: boolean;
+}
+
+export const HOSTED_SWAP_TITLE = "교체 체크리스트";
+
+export const HOSTED_SWAP_ITEMS: readonly HostedSwapItem[] = [
+  {
+    id: "replace",
+    label: "AI 회사 설정의 연결 값을 이 자격증명으로 바꿨어요",
+    manual: true,
+  },
+  { id: "run", label: "커넥터나 routine을 한 번 실행했어요", manual: true },
+  { id: "proof", label: "첫 요청이 성공해 활성이 됐어요", manual: false },
+];
+
+export const HOSTED_SWAP_DONE_NOTE = "교체가 끝났고 첫 요청도 성공했어요.";
+
+export interface HostedSwapTicks {
+  replace: boolean;
+  run: boolean;
+}
+
+export interface HostedSwapRow extends HostedSwapItem {
+  done: boolean;
+}
+
+/**
+ * 체크리스트의 각 줄이 끝났는가.
+ *
+ * 마지막 줄은 사람이 표시하지 않는다: 활성은 서버만 아는 사실이다. 활성이면 앞의
+ * 두 줄도 반드시 일어난 일이므로(증명이 새 자격증명으로 왔다) 표시 여부와 무관하게
+ * 끝으로 본다. 화면을 닫았다 다시 열어 표시가 사라져도 활성 연결이 빈 칸으로
+ * 보이지 않게 하는 것이 이유다.
+ */
+export function hostedSwapRows(
+  connection: HostedAgentConnection | null,
+  ticks: HostedSwapTicks
+): HostedSwapRow[] {
+  const active = connection?.status === "active";
+  return HOSTED_SWAP_ITEMS.map((item) => ({
+    ...item,
+    done: active ? true : item.id === "proof" ? false : ticks[item.id],
+  }));
+}
+
+/** 연결이 마지막으로 바뀐 뒤(승인으로 자격증명을 발급한 시각) 이만큼 증명이 없으면 멈춘 것으로 본다. */
+export const HOSTED_SWAP_STALL_MS = 3 * 60 * 1000;
+
+export interface HostedSwapStall {
+  /** 왜 멈췄을 가능성이 높은가. */
+  cause: string;
+  /** 지금 무엇을 하면 되는가. */
+  action: string;
+}
+
+/**
+ * 5단계가 길어지는데 증명이 오지 않을 때의 원인과 다음 행동.
+ *
+ * 서버는 거절 사유를 상태로 내주지 않으므로(AT-7 제안 3은 서버 변경이다) 이 판정은
+ * 사람이 남긴 표시와 시간으로만 말한다. 그래서 단정하지 않고 가장 흔한 원인을
+ * 앞에 둔다. 교체했다고 표시한 사람과 안 한 사람의 다음 행동이 달라 문장이 둘이다.
+ */
+export function hostedSwapStall(
+  connection: HostedAgentConnection | null,
+  nowMs: number,
+  replaced: boolean
+): HostedSwapStall | null {
+  if (!awaitingProof(connection) || connection === null) return null;
+  if (nowMs - connection.updatedAtMs < HOSTED_SWAP_STALL_MS) return null;
+  if (!replaced) {
+    return {
+      cause:
+        "아직 AI 회사 설정의 값을 바꾸지 않았다면 그 때문일 수 있어요. 처음 붙인 연결 값은 이미 소비돼 활성이 되지 않아요. 위 표시는 창을 닫으면 사라져요.",
+      action:
+        "AI 회사 설정을 열어 값을 이 연결에서 받은 활성 자격증명으로 바꾸고, 커넥터나 routine을 한 번 실행하세요. 자격증명을 잃어버렸다면 연결 값을 다시 발급해 처음부터 진행하세요.",
+    };
+  }
+  return {
+    cause:
+      "바꿨다고 표시했는데 첫 요청이 오지 않아요. 붙인 값이 잘렸거나, 커넥터나 routine이 아직 실행되지 않았을 수 있어요.",
+    action:
+      "붙인 값 앞뒤에 공백이 없는지 보고 커넥터나 routine을 한 번 더 실행한 뒤 지금 확인을 누르세요. 그래도 안 되면 연결 값을 다시 발급하세요.",
+  };
+}
+
+// ---- 3단계 감지 대기: 만료 카운트다운과 오지 않는 원인 (#3522) ------------------
+//
+// AT-7 점검 마찰 3·4. 3단계는 "아직 오지 않았어요"만 말했고, 연결 값이 15분 뒤
+// 죽는다는 사실은 2단계 카드 안에만 살았다. 사람이 값을 넣고 돌아왔을 때 이 화면
+// 에는 시계도, 안 오는 이유의 후보도 없었다.
+//
+// ## 서버가 아는 것과 모르는 것
+//
+// 연결(`HostedAgentConnection`)은 만료 시각을 싣지 않는다. 만료 시각
+// (`pairingExpiresAtMs`)은 **발급 응답에만** 있고, 그 응답을 받은 탭만 안다. 그래서
+// 시계는 두 출처를 가진다:
+//
+//   1. 이 탭이 발급을 받았다 → 응답의 `pairingExpiresAtMs` (서버가 정한 정확한 시각)
+//   2. 아니다(새로고침·다른 탭·이어서 진행) → `updatedAtMs + TTL`
+//
+// 2번이 근사인 까닭: 서버는 `pairing_pending` 으로 들어갈 때(생성·재발급) 마다
+// `updated_at` 을 갱신하지만, 같은 상태에서 다른 사건(예: 도어벨 등록)이 갱신할
+// 수도 있다. 그 경우 실제 만료보다 늦게 계산된다. 그래서 2번 출처는 라벨이
+// "기록 기준"이라고 스스로 밝힌다.
+//
+// 또 하나: 서버는 만료를 **게으르게** 적는다. 시각이 지나도 상태는 누가 그 값으로
+// 다이얼인을 시도하는 순간까지 `pairing_pending` 이다. 그래서 화면은 서버 상태가
+// `expired` 가 되기를 기다리지 않고 시각이 지난 순간 먼저 재발급을 말한다.
+//
+// ## 원인을 단정하지 않는다
+//
+// 서버는 거절된 다이얼인을 상태로 남기지 않는다(헤더 누락·값 오타·벤더 미실행이
+// 모두 "아무 일도 안 일어남"으로 보인다). 그래서 이 화면은 어느 원인인지 말할 수
+// 없고, 흔한 순서로 **확인할 것**을 적는다. 구분이 서버 변경을 요구하는 일이라는
+// 사실도 문구가 숨기지 않는다.
+
+export type HostedDeadlineBasis = "issued" | "recorded";
+
+export interface HostedPairingDeadline {
+  expiresAtMs: number;
+  /** `issued` 는 서버가 발급 응답에 적은 시각, `recorded` 는 기록 시각에서 계산한 근사. */
+  basis: HostedDeadlineBasis;
+}
+
+/**
+ * 연결 값이 언제 죽는가. 대기 중(`pairing_pending`)이 아니면 `null`.
+ *
+ * @param issuedExpiresAtMs 이 탭이 이 연결의 발급 응답에서 받은 만료 시각. 없으면 `null`.
+ */
+export function hostedPairingDeadline(
+  connection: HostedAgentConnection | null,
+  issuedExpiresAtMs: number | null
+): HostedPairingDeadline | null {
+  if (connection === null || connection.status !== "pairing_pending") return null;
+  // 다른 탭·기기가 재발급하면 `updatedAtMs` 가 새 발급을 따라간다. 캐시한 시각이 기록과
+  // 1분 넘게 어긋나면 낡은 것이므로 버리고 기록에서 계산한다.
+  const recordedExpiry = connection.updatedAtMs + HOSTED_PAIRING_TTL_MS;
+  if (
+    issuedExpiresAtMs !== null &&
+    Math.abs(issuedExpiresAtMs - recordedExpiry) <= 60_000
+  ) {
+    return { expiresAtMs: issuedExpiresAtMs, basis: "issued" };
+  }
+  return { expiresAtMs: recordedExpiry, basis: "recorded" };
+}
+
+/** 남은 시간이 이만큼 이하면 서두르라고 말한다. */
+export const HOSTED_DEADLINE_URGENT_MS = 3 * 60 * 1000;
+
+export interface HostedDetectCountdown {
+  expired: boolean;
+  /** 곧 만료다. 색이 아니라 문장이 말한다. */
+  urgent: boolean;
+  /** 「약 N분 뒤 만료」. 근사 출처면 뒤에 기준을 밝힌다. */
+  label: string;
+  /** 시각이 어디서 왔는지 한 줄. */
+  basisNote: string;
+  /** 지금 무엇을 하라는 문장. 만료 전에는 값을 이어 쓰라고, 지나면 다시 발급하라고 한다. */
+  guidance: string;
+}
+
+export const HOSTED_COUNTDOWN_TITLE = "연결 값 유효 시간";
+
+const TTL_MINUTES = HOSTED_PAIRING_TTL_MS / 60_000;
+
+const BASIS_NOTE: Record<HostedDeadlineBasis, string> = {
+  issued: "발급 응답에 적힌 만료 시각 기준이에요.",
+  recorded: `이번에 이 화면에서 발급한 값이 아니라 정확한 시각을 몰라요. 발급 시점에서 ${TTL_MINUTES}분을 더해 계산한 근사치라 실제 만료는 이보다 빠를 수 있어요.`,
+};
+
+export function hostedDetectCountdown(
+  deadline: HostedPairingDeadline,
+  nowMs: number
+): HostedDetectCountdown {
+  const expiry = pairingExpiry(deadline.expiresAtMs, nowMs);
+  const remaining = deadline.expiresAtMs - nowMs;
+  const urgent = !expiry.expired && remaining <= HOSTED_DEADLINE_URGENT_MS;
+  const basisNote = BASIS_NOTE[deadline.basis];
+  // 근사 출처는 실제보다 늦게 잡힐 수만 있다(머리말). 그래서 남은 시간을 상한으로 말한다.
+  const label =
+    deadline.basis === "recorded" && !expiry.expired
+      ? `길어야 ${expiry.label}`
+      : expiry.label;
+  if (expiry.expired) {
+    return {
+      expired: true,
+      urgent: false,
+      label,
+      // 이미 지난 뒤에는 근사의 방향을 말해 봐야 모순이다.
+      basisNote: "",
+      guidance:
+        "연결 값 다시 발급을 누르고, 새로 받은 값으로 AI 회사 설정의 값을 바꾼 뒤 커넥터나 routine을 한 번 실행하세요.",
+    };
+  }
+  return {
+    expired: false,
+    urgent,
+    label,
+    basisNote,
+    guidance: urgent
+      ? `곧 만료돼요. 지금 넣고 실행하기 어렵다면 연결 값 다시 발급으로 새 ${TTL_MINUTES}분을 받으세요.`
+      : `연결 값은 발급한 뒤 ${TTL_MINUTES}분 동안만 통해요. 만료되기 전에 AI 회사 설정에 넣고 한 번 실행하세요.`,
+  };
+}
+
+export interface HostedDetectCause {
+  id: "not-run" | "value" | "header" | "network" | "vendor" | "unverified";
+  /** 확인할 것 한 줄. */
+  label: string;
+  /** 어디서 어떻게 보는가. */
+  detail: string;
+}
+
+export const HOSTED_DETECT_CAUSES_TITLE = "오지 않을 때 이 순서로 확인하세요";
+
+/**
+ * oort가 원인을 구분하지 못한다는 사실. 목록 위에 서서, 아래 항목이 진단이
+ * 아니라 후보라는 것을 먼저 말한다.
+ */
+export const HOSTED_DETECT_CAUSES_NOTE =
+  "oort는 접속이 왜 오지 않는지 구분하지 못해요. 접속이 거절돼도 이 화면에는 아무 흔적이 남지 않아서, 확인하기 쉬운 것부터 차례로 적었어요.";
+
+export const HOSTED_DETECT_CAUSES: readonly HostedDetectCause[] = [
+  {
+    id: "not-run",
+    label: "커넥터나 routine을 아직 실행하지 않았어요",
+    detail:
+      "값을 저장만 해서는 접속이 일어나지 않아요. AI 회사 설정에서 커넥터나 routine을 한 번 실행하세요.",
+  },
+  {
+    id: "value",
+    label: "붙인 값이 틀렸거나 잘렸어요",
+    detail:
+      "연결 값은 다시 볼 수 없어요. 앞뒤 공백이나 줄바꿈이 섞였거나 일부만 붙었다면 새로 발급해서 처음부터 넣는 편이 빨라요.",
+  },
+  {
+    id: "header",
+    label: "인증 헤더 이름이나 형식이 달라요",
+    detail:
+      "Agent Port는 bearer 인증 헤더로 받아요. 헤더 이름과 값 앞의 bearer 표기를 AI 회사 설정에서 확인하세요.",
+  },
+  {
+    id: "network",
+    label: "주소가 틀렸거나 그쪽에서 닿지 못해요",
+    detail:
+      "Agent Port 주소를 그대로 넣었는지 보세요. 셀프호스트라면 AI 회사의 서버에서 이 주소로 접속할 수 있어야 해요.",
+  },
+  {
+    id: "vendor",
+    label: "AI 회사 쪽 에이전트가 켜져 있지 않아요",
+    detail:
+      "에이전트가 꺼져 있거나 이 헤더를 지원하지 않으면 값이 맞아도 접속이 오지 않아요. 그쪽 상태를 확인하세요.",
+  },
+];
+
+/** 확인되지 않은 프리셋(예: Grok)에서 목록 맨 끝에 더해지는 후보. */
+export const HOSTED_DETECT_UNVERIFIED_CAUSE: HostedDetectCause = {
+  id: "unverified",
+  label: "이 방식이 인증 헤더를 보내지 않을 수 있어요",
+  detail:
+    "이 프리셋은 헤더를 실제로 보내는지 아직 확인되지 않았어요. 위를 모두 확인했는데도 안 오면 값이 아니라 이 방식이 원인일 수 있어요.",
+};
+
+/**
+ * 확인할 것의 순서. 확인되지 않은 프리셋이면 그 사실을 마지막 후보로 더한다.
+ *
+ * 순서는 사람이 가장 싸게 확인할 수 있는 것부터다: 실행 여부 → 값 → 헤더 → 주소
+ * → 상대 쪽 상태. 발생 빈도 자료는 없고, 확인 비용만으로 줄을 세운다.
+ */
+export function hostedDetectCauses(verifiedPreset: boolean): HostedDetectCause[] {
+  return verifiedPreset
+    ? [...HOSTED_DETECT_CAUSES]
+    : [...HOSTED_DETECT_CAUSES, HOSTED_DETECT_UNVERIFIED_CAUSE];
+}

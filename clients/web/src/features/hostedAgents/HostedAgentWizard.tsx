@@ -64,9 +64,23 @@ import {
   confirmStateGate,
   hostedLiveMessage,
   hostedStepPurpose,
+  hostedSwapRows,
+  hostedSwapStall,
   hostedStepSpec,
   hostedWizardStep,
+  hostedDetectCauses,
+  hostedDetectCountdown,
+  hostedPairingDeadline,
   HOSTED_CLOSED_NOTICE,
+  HOSTED_COUNTDOWN_TITLE,
+  HOSTED_DETECT_CAUSES_NOTE,
+  HOSTED_DETECT_CAUSES_TITLE,
+  type HostedPairingDeadline,
+  HOSTED_PREVIEW_HEADLINE,
+  HOSTED_PREVIEW_NOTE,
+  HOSTED_PREVIEW_STEPS,
+  HOSTED_SWAP_DONE_NOTE,
+  HOSTED_SWAP_TITLE,
   HOSTED_WIZARD_LEAD,
   HOSTED_WIZARD_STEPS,
   HOSTED_WIZARD_TITLE,
@@ -255,6 +269,12 @@ function HostedWizardBody({
   const [failure, setFailure] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  // 이 탭이 받은 발급 응답의 만료 시각(#3522). 비밀이 아니라 시각이므로 값 카드를 닫은
+  // 뒤에도 3단계 시계가 쓴다. 연결 id를 함께 들어 다른 연결의 시각을 이어받지 않는다.
+  const [issuedExpiry, setIssuedExpiry] = useState<{
+    id: string;
+    expiresAtMs: number;
+  } | null>(null);
 
   const list = useQuery(hostedListQuery(workspaceId));
   const workspace = useQuery(hostedWorkspaceQuery(workspaceId));
@@ -302,19 +322,57 @@ function HostedWizardBody({
   // 않으므로 Esc 한 번이 다시 만들 수 없는 값을 확인 없이 없앤다.
   const holdingSecret = pairing !== null || issued !== null;
 
+  // 5단계에서 증명을 기다리는 동안에도 시계를 돌린다: 멈춤 안내(#3521)가 시간으로 선다.
+  const waitingForProof = awaitingProof(connection);
+  // 교체 체크리스트 표시. 서버가 알 수 없는 사람의 말이라 지역 상태이고, 연결을
+  // 바꾸면 처음으로 돌아간다(다른 연결의 표시를 이어받지 않는다).
+  const [swapTicks, setSwapTicks] = useState({ replace: false, run: false });
+  useEffect(() => {
+    setSwapTicks({ replace: false, run: false });
+  }, [selectedId]);
+  const stall = appManaged ? null : hostedSwapStall(connection, nowMs, swapTicks.replace);
+
+  // 3단계의 만료 카운트다운(#3522). 이 탭이 발급을 받았으면 서버가 적은 시각을,
+  // 아니면 기록에서 계산한 근사를 쓴다(`hostedPairingDeadline`).
+  const deadline: HostedPairingDeadline | null = hostedPairingDeadline(
+    connection,
+    connection !== null && issuedExpiry?.id === connection.id.toLowerCase()
+      ? issuedExpiry.expiresAtMs
+      : null
+  );
+  const countingDown = deadline !== null && pairing === null;
+
   // 30초에 한 번 시계를 돌린다. 만료 표시가 그리는 것은 분이므로(`pairingExpiry`)
   // 초 단위로 뛰는 숫자는 읽는 사람을 재촉할 뿐이지만, 간격을 표시 단위와 같은
   // 60초로 두면 그 둘의 위상이 어긋나 라벨이 최대 1분까지 묵는다. 절반 간격이 그
   // 지연을 30초로 줄이는 동안 화면에 보이는 숫자는 여전히 분 단위로만 바뀐다.
   useEffect(() => {
-    if (pairing === null) return;
+    if (pairing === null && !waitingForProof && !countingDown) return;
+    setNowMs(Date.now());
     const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
-    return () => window.clearInterval(timer);
-  }, [pairing]);
+    // 백그라운드 탭은 타이머가 멈춘다. 돌아온 순간 낡은 남은 시간을 보이지 않게 한다.
+    const refresh = () => {
+      if (document.visibilityState === "visible") setNowMs(Date.now());
+    };
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [pairing, waitingForProof, countingDown]);
 
   // 서버가 "그 값은 이미 소비됐다"고 말하면 메모리 사본도 버린다. 감지된 뒤의
   // 연결 값은 죽은 문자열이고, 화면에 남겨 두면 아직 쓸 수 있는 것처럼 보인다.
   const serverStatus = connection?.status;
+  useEffect(() => {
+    if (pairing === null) return;
+    setIssuedExpiry({
+      id: pairing.connection.id.toLowerCase(),
+      expiresAtMs: pairing.pairingExpiresAtMs,
+    });
+  }, [pairing]);
   useEffect(() => {
     if (serverStatus !== undefined && serverStatus !== "pairing_pending") {
       setPairing(null);
@@ -602,6 +660,9 @@ function HostedWizardBody({
             agentHandle={agentHandle}
             checking={detail.isFetching}
             onRecheck={() => void detail.refetch()}
+            deadline={deadline}
+            nowMs={nowMs}
+            verifiedPreset={preset.verified}
           />
         )}
 
@@ -629,6 +690,9 @@ function HostedWizardBody({
             agentLabel={agentLabel}
             agentHandle={agentHandle}
             issued={issued}
+            ticks={swapTicks}
+            onTicks={setSwapTicks}
+            stall={issued === null ? stall : null}
             appManaged={appManaged}
             checking={detail.isFetching}
             channelName={approvedChannelName(connection, channelInputs)}
@@ -654,6 +718,7 @@ function HostedWizardBody({
         <WizardActions
           screen={screen}
           connection={connection}
+          stalled={stall !== null && issued === null}
           // 몸통이 아직 아무 화면도 아닌 두 구간 (design-review M3-a). 고른
           // 연결의 상태를 못 읽는 동안 `resolveScreen` 은 1단계를 답하고
           // (연결이 `null` 이므로 `hostedWizardStep` 이 "identity" 다), 몸통은
@@ -944,6 +1009,32 @@ function chipTone(connection: HostedAgentConnection) {
 
 // ---- 1. 이름 ----------------------------------------------------------------
 
+/** 시작 전 미리 안내(#3521): 값을 두 번 옮긴다는 사실을 1단계에서 먼저 말한다. */
+function TwoValuesPreview() {
+  return (
+    <section
+      aria-labelledby="hosted-preview-headline"
+      className="flex min-w-0 flex-col gap-2 rounded-md border border-line p-3"
+      data-testid="hosted-preview"
+    >
+      <h4 id="hosted-preview-headline" className="break-keep text-body font-medium text-ink">
+        {HOSTED_PREVIEW_HEADLINE}
+      </h4>
+      <ol className="flex min-w-0 flex-col gap-2">
+        {HOSTED_PREVIEW_STEPS.map((item) => (
+          <li key={item.id} className="flex min-w-0 flex-col gap-px">
+            <span className="break-keep text-body text-ink">
+              {item.order}: {item.label}
+            </span>
+            <span className="break-keep text-meta text-ink-muted">{item.detail}</span>
+          </li>
+        ))}
+      </ol>
+      <p className="break-keep text-meta text-ink-muted">{HOSTED_PREVIEW_NOTE}</p>
+    </section>
+  );
+}
+
 function IdentityStep({
   draft,
   setDraft,
@@ -978,6 +1069,7 @@ function IdentityStep({
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <StepHeading step="identity" />
+      <TwoValuesPreview />
       <div className="flex min-w-0 flex-col gap-3">
         <Field
           label="표시 이름"
@@ -1143,20 +1235,36 @@ function DetectingStep({
   agentHandle,
   checking,
   onRecheck,
+  deadline,
+  nowMs,
+  verifiedPreset,
 }: {
   connection: HostedAgentConnection;
   agentLabel: string;
   agentHandle: string;
   checking: boolean;
   onRecheck: () => void;
+  deadline: HostedPairingDeadline | null;
+  nowMs: number;
+  verifiedPreset: boolean;
 }) {
+  const countdown = deadline ? hostedDetectCountdown(deadline, nowMs) : null;
+  const causes = hostedDetectCauses(verifiedPreset);
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <StepHeading step="detecting" />
       <EmptyInvite
         className="px-0"
-        headline="아직 다이얼인이 오지 않았어요."
-        detail="AI 회사 설정에 값을 넣고 커넥터나 routine을 한 번 실행하면 이 화면이 바뀌어요. 이 창을 열어 둔 채로 다녀와도 돼요."
+        headline={
+          countdown?.expired
+            ? "연결 값이 만료됐어요."
+            : "아직 다이얼인이 오지 않았어요."
+        }
+        detail={
+          countdown?.expired
+            ? "시간이 지나 이 값은 통하지 않을 가능성이 높아요. 방금 실행했다면 지금 확인을 누르고, 아니면 아래 연결 값 다시 발급으로 새 값을 받으세요."
+            : "AI 회사 설정에 값을 넣고 커넥터나 routine을 한 번 실행하면 이 화면이 바뀌어요. 이 창을 열어 둔 채로 다녀와도 돼요."
+        }
         actions={
           <Button
             type="button"
@@ -1172,6 +1280,47 @@ function DetectingStep({
         }
         testId="hosted-detecting-empty"
       />
+      {countdown !== null && (
+        <div
+          className="flex min-w-0 flex-col gap-1"
+          data-testid="hosted-detect-countdown"
+        >
+          <h4 className="text-meta font-medium text-ink">{HOSTED_COUNTDOWN_TITLE}</h4>
+          <p
+            className={cn(
+              "break-keep text-body font-medium",
+              countdown.expired || countdown.urgent ? "text-warn" : "text-ink"
+            )}
+            data-testid="hosted-detect-countdown-label"
+          >
+            {countdown.label}
+          </p>
+          <p role="status" className="break-keep text-body text-ink-muted">
+            {countdown.guidance}
+          </p>
+          {countdown.basisNote !== "" && (
+            <p className="break-keep text-meta text-ink-muted">{countdown.basisNote}</p>
+          )}
+        </div>
+      )}
+      <details
+        open={countdown?.urgent || undefined}
+        className="flex min-w-0 flex-col gap-2"
+        data-testid="hosted-detect-causes"
+      >
+        <summary className="flex min-h-11 cursor-pointer items-center rounded-sm text-meta font-medium text-ink focus-visible:focus-ring active:bg-surface-pressed">
+          {HOSTED_DETECT_CAUSES_TITLE}
+        </summary>
+        <p className="mt-2 break-keep text-meta text-ink-muted">{HOSTED_DETECT_CAUSES_NOTE}</p>
+        <ol className="mt-2 flex list-outside list-decimal flex-col gap-2 ps-4">
+          {causes.map((cause) => (
+            <li key={cause.id} className="break-keep text-body text-ink">
+              {cause.label}
+              <span className="block text-meta text-ink-muted">{cause.detail}</span>
+            </li>
+          ))}
+        </ol>
+      </details>
       <KeyValueRows
         rows={connectionFacts(connection, agentLabel, agentHandle).map((fact) => ({
           key: fact.key,
@@ -1303,17 +1452,60 @@ function ApprovalStep({
 
 // ---- 5. 자격증명 교체과 활성 -------------------------------------------------
 
+/** 교체 체크리스트(#3521). 두 줄은 사람이 표시하고, 마지막 줄은 서버가 채운다. */
+function SwapChecklist({
+  connection,
+  ticks,
+  onTicks,
+}: {
+  connection: HostedAgentConnection;
+  ticks: { replace: boolean; run: boolean };
+  onTicks: (next: { replace: boolean; run: boolean }) => void;
+}) {
+  const rows = hostedSwapRows(connection, ticks);
+  const active = connection.status === "active";
+  const items: ChoiceListItem[] = rows.map((row) => ({
+    id: row.id,
+    label: row.label,
+    detail: "",
+    // 활성이면 전부 끝난 줄로 잠근다. 서버가 채우는 줄은 활성 전까지 눌러 볼 수 없다.
+    ...(active ? { locked: true } : row.manual ? {} : { disabled: true }),
+  }));
+  return (
+    <div className="flex min-w-0 flex-col gap-1" data-testid="hosted-swap-checklist">
+      <ChoiceList
+        name="hosted-swap"
+        legend={active ? `${HOSTED_SWAP_TITLE}: ${HOSTED_SWAP_DONE_NOTE}` : HOSTED_SWAP_TITLE}
+        multiple
+        items={items}
+        selected={rows.filter((row) => row.done && row.manual).map((row) => row.id)}
+        onChange={(next) =>
+          onTicks({ replace: next.includes("replace"), run: next.includes("run") })
+        }
+        disabled={false}
+        testId="hosted-swap-list"
+      />
+    </div>
+  );
+}
+
 function ActivationStep({
   connection,
   agentLabel,
   agentHandle,
   issued,
+  ticks,
+  onTicks,
+  stall,
   appManaged,
   checking,
   channelName,
   onRecheck,
   onDone,
 }: {
+  ticks: { replace: boolean; run: boolean };
+  onTicks: (next: { replace: boolean; run: boolean }) => void;
+  stall: { cause: string; action: string } | null;
   appManaged: boolean;
   connection: HostedAgentConnection;
   agentLabel: string;
@@ -1331,7 +1523,21 @@ function ActivationStep({
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <StepHeading step="activation" connection={connection} />
+      {!appManaged && issued === null && (
+        <SwapChecklist connection={connection} ticks={ticks} onTicks={onTicks} />
+      )}
+      {stall !== null && issued === null && (
+        <div
+          role="status"
+          className="flex min-w-0 flex-col gap-1 rounded-md border border-line-strong p-3"
+          data-testid="hosted-swap-stall"
+        >
+          <p className="break-keep text-body font-medium text-ink">{stall.cause}</p>
+          <p className="break-keep text-meta text-ink-muted">{stall.action}</p>
+        </div>
+      )}
       {issued !== null ? (
+        <>
         <OneTimeSecretCard
           headline={ACTIVE_REVEAL_HEADLINE}
           warning={ACTIVE_REVEAL_WARNING}
@@ -1342,12 +1548,18 @@ function ActivationStep({
           onDone={onDone}
           testId="hosted-active-card"
         />
+        {!appManaged && (
+          <SwapChecklist connection={connection} ticks={ticks} onTicks={onTicks} />
+        )}
+        </>
       ) : waiting ? (
         <EmptyInvite
           className="px-0"
           headline="새 자격증명으로 첫 요청이 오기를 기다리는 중이에요."
           detail={
-            appManaged
+            stall !== null
+              ? "위 안내를 따른 뒤 지금 확인을 눌러 보세요."
+              : appManaged
               ? "이 맥의 연결 값은 앱이 바꿔 뒀어요. Claude Code를 한 번 열어 첫 요청이 성공하면 활성이 돼요."
               : "AI 회사 설정의 값을 새 자격증명으로 바꾸고 커넥터나 routine을 한 번 실행하세요. 그 요청이 성공해야 활성이 돼요."
           }
@@ -1409,6 +1621,7 @@ function ActivationStep({
 function WizardActions({
   screen,
   connection,
+  stalled,
   unsettled,
   holdingSecret,
   offline,
@@ -1424,6 +1637,8 @@ function WizardActions({
 }: {
   screen: WizardScreen;
   connection: HostedAgentConnection | null;
+  /** 5단계가 멈췄다(#3521). 연결 값을 다시 발급하는 길을 함께 세운다. */
+  stalled: boolean;
   /** 몸통이 스켈레톤이거나 오류 배너다. 이 푸터는 그 위에 결정을 세우지 않는다. */
   unsettled: boolean;
   holdingSecret: boolean;
@@ -1459,7 +1674,7 @@ function WizardActions({
 
   return (
     <>
-      {(screen === "detecting" || screen === "expired") &&
+      {(screen === "detecting" || screen === "expired" || stalled) &&
         (regen.allowed ? (
           <Button
             type="button"
