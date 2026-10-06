@@ -1,28 +1,28 @@
 {
-  "version": "v0.1.18",
+  "version": "v0.1.19",
   "released_at": "2026-10-06",
   "images": {
     "app": {
       "ref": "ghcr.io/yeomyeonggeori/oort",
-      "digest_list": "sha256:1b09ba048a5d7e6940c43c946745e0d87cace344861121088c7eac236288afda",
+      "digest_list": "sha256:e74ca7ba187e57345146a5ac736c0baa7788dba8072367dde01ee442f8821158",
       "digests": {
-        "amd64": "sha256:8f900acc59a5cd0599e2d0b2a3916f336a01410b7e21cef3bf8f71792de70be7",
-        "arm64": "sha256:6261e9eda980c8262285dec80d4fc30d0d3819242601228619b1596c59a29ba3"
+        "amd64": "sha256:781674131295f88b6f0a95dec1fce87aad2dad15a8b283f5e91ccf25da0e3195",
+        "arm64": "sha256:0098e1dd2c5ac0956ca1c67ba10600fa244ae84f1bd97664be2f3e7b0352cf3e"
       }
     },
     "postgres": {
       "ref": "ghcr.io/yeomyeonggeori/oort-postgres",
-      "digest_list": "sha256:2640c751e61859ae5288cfefea57c00a773f8ac5ccc28250af5afab5a2109d9a",
+      "digest_list": "sha256:5bf48cdde6b69f47dd7128698fc10b6a6c0c77c1f47eb92a5fc161950f9afd8c",
       "digests": {
-        "amd64": "sha256:133b8d8d21b9bce0dd62a1bc5eb1a85aa17bceac1f953a856214fbc3225a567c",
-        "arm64": "sha256:ec85731edbc31c11842396fe397e4d397c0a6ebbfd78fbda4b97e5bc1502f126"
+        "amd64": "sha256:8d109d3362982a0091e48663681abac8e3e42eb3438262e494692c2d08974fb7",
+        "arm64": "sha256:3b6b3c8602549f3ba1175e5004e21d33748ba59565132fbb6587397a4cb641fb"
       }
     }
   },
   "attestation": {
-    "verify_cmd": "gh attestation verify \"oci://ghcr.io/yeomyeonggeori/oort@sha256:1b09ba048a5d7e6940c43c946745e0d87cace344861121088c7eac236288afda\" --repo yeomyeonggeori/oort --predicate-type https://slsa.dev/provenance/v1"
+    "verify_cmd": "gh attestation verify \"oci://ghcr.io/yeomyeonggeori/oort@sha256:e74ca7ba187e57345146a5ac736c0baa7788dba8072367dde01ee442f8821158\" --repo yeomyeonggeori/oort --predicate-type https://slsa.dev/provenance/v1"
   },
   "sources": {
-    "release_url": "https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.18"
+    "release_url": "https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.19"
   }
 }
