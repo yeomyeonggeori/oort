@@ -174,10 +174,22 @@ describe("에이전트 보고 읽기 (agent_run.output)", () => {
       "https://u:p@github.com/a/b/pull/1",
       "https://github.com/a/b/issues/1",
       "data:text/html,<script>1</script>",
+      "https://github.com/a/b/pull/1/files",
+      "https://github.com/a/b/pull/1x",
+      "https://github.com:8443/a/b/pull/1",
+      "https://github.com//a/b/pull/1",
+      "https://github.com/a/b/pull/1/",
     ]) {
       expect(prFacts(bad)).toBeNull();
       expect(agentRunReport({ artifacts: { prUrl: bad } }).artifacts.pr).toBeNull();
     }
+  });
+
+  it("빈 보고는 얼려 있어 한 호출이 오염시킬 수 없다", () => {
+    const report = agentRunReport(null);
+    expect(Object.isFrozen(report)).toBe(true);
+    expect(Object.isFrozen(report.stages)).toBe(true);
+    expect(Object.isFrozen(report.artifacts)).toBe(true);
   });
 
   it("모양이 틀린 output은 비어 있고 던지지 않는다", () => {

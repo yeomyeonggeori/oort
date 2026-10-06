@@ -570,6 +570,25 @@ describe('실시간은 신호이고 읽기가 진실이다', () => {
     expect(rail.signals.size).toBe(0);
   });
 
+  it('신호가 끊임없이 와도 읽기가 굶지 않는다(첫 신호부터 최대 2초)', async () => {
+    const mock = installFetch();
+    const rail = fakeRail();
+    renderBoard({}, rail.value);
+    await waitFor(() => expect(rail.signals.size).toBe(2));
+    await waitFor(() => expect(sharedReads(mock)).toBeGreaterThan(0));
+    const before = sharedReads(mock);
+    jest.useFakeTimers({doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask']});
+    for (let i = 0; i < 25; i += 1) {
+      act(() => {
+        rail.signals.get(CH_A)?.();
+      });
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(100);
+      });
+    }
+    expect(sharedReads(mock)).toBeGreaterThan(before);
+  });
+
   it('떠날 때 구독을 모두 푼다', async () => {
     installFetch();
     const rail = fakeRail();
@@ -682,28 +701,41 @@ describe('에이전트 작업 줄 (#3518)', () => {
     );
   });
 
-  it('보안: 단계·브랜치·이름은 글자 그대로이고 누르면 어디도 열리지 않는다', async () => {
+  async function openRun(wire: object, id: string) {
     installFetch({
-      shared: () => jsonResponse(200, {sessions: [RUN_WIRE], nextCursor: null}),
+      shared: () => jsonResponse(200, {sessions: [wire], nextCursor: null}),
     });
-    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
     renderBoard();
-    await waitFor(() => expect(screen.getByTestId('team-board-row-R-1')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('team-board-row-R-1'));
+    await waitFor(() => expect(screen.getByTestId(`team-board-row-${id}`)).toBeTruthy());
+    fireEvent.press(screen.getByTestId(`team-board-row-${id}`));
     await waitFor(() => expect(screen.getByTestId('team-detail-sheet')).toBeTruthy());
-    expect(screen.getByTestId('team-detail-stages')).toHaveTextContent(
-      lit('[x](javascript:alert(1))'),
-    );
-    expect(screen.getByTestId('team-detail-stages')).toHaveTextContent(
-      lit('<img src=x onerror=alert(1)>'),
-    );
-    expect(screen.getByTestId('team-detail-title')).toHaveTextContent(
-      lit('[label](javascript:alert(2))'),
-    );
-    expect(screen.getByTestId('team-detail-where')).toHaveTextContent(lit('<b>evil</b>'));
-    fireEvent.press(screen.getByTestId('team-detail-stages'));
-    fireEvent.press(screen.getByTestId('team-detail-title'));
-    expect(open).not.toHaveBeenCalled();
+  }
+
+  it('보안: 단계·브랜치·이름 글자를 직접 눌러도 어디도 열리지 않고, 잘못된 PR 주소는 링크가 아니다', async () => {
+    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    await openRun({...RUN_WIRE, prUrl: 'javascript:alert(1)'}, 'R-1');
+    for (const text of [
+      '[x](javascript:alert(1))',
+      '<img src=x onerror=alert(1)>',
+      '<b>evil</b>',
+      '[label](javascript:alert(2))',
+    ]) {
+      const nodes = screen.getAllByText(lit(text));
+      expect(nodes.length).toBeGreaterThan(0);
+      for (const node of nodes) fireEvent.press(node);
+    }
+    expect(screen.queryByTestId('team-detail-pr')).toBeNull();
+    expect(screen.getByTestId('team-detail-no-pr')).toBeTruthy();
+    expect(open).toHaveBeenCalledTimes(0);
+    open.mockRestore();
+  });
+
+  it('대조: 올바른 PR 주소는 링크이고 누르면 그 주소 하나만 열린다(스파이가 실제로 듣고 있다)', async () => {
+    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    await openRun(RUN_WIRE, 'R-1');
+    fireEvent.press(screen.getByTestId('team-detail-pr'));
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(open).toHaveBeenCalledWith('https://github.com/acme/oort/pull/12');
     open.mockRestore();
   });
 

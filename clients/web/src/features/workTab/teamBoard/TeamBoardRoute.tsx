@@ -28,6 +28,7 @@ import { relativeLabel } from "@momo/core/features/inbox/model";
 import { useSession } from "@/app/session";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { cn } from "@/design/lib/cn";
+import { isDesktop, openExternalUrl } from "@/lib/tauri";
 import { Button } from "@/design/ui/button";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import {
@@ -554,6 +555,12 @@ function BoardRow({
           target="_blank"
           rel="noopener noreferrer"
           data-testid="team-board-row-pr"
+          onClick={(event) => {
+        // 데스크탑 셸(wry)에서는 target="_blank"가 죽은 컨트롤이다: OS 브라우저로 넘긴다.
+        if (!isDesktop()) return;
+        event.preventDefault();
+        void openExternalUrl(pr.href);
+      }}
           className="mb-1 ms-3 inline-flex min-h-6 max-w-full items-center gap-1 rounded-md px-1 py-1 text-timestamp text-ink-muted press hover:text-ink focus-visible:focus-ring"
         >
           <GitPullRequest aria-hidden className="size-3 shrink-0" />

@@ -30,6 +30,8 @@ import { useChannels } from "@/features/workspace/useWorkspace";
 const BOARD_PAGE = 50;
 /** 겹쳐 오는 신호를 한 번의 읽기로 합치는 간격. */
 export const REREAD_COALESCE_MS = 150;
+/** 신호가 계속 와도 읽기가 이 시간 안에는 반드시 한 번 시작된다. */
+export const REREAD_MAX_WAIT_MS = 2_000;
 /** diff 숫자는 이벤트가 없다: 느린 타이머가 바닥이다. */
 const BOARD_POLL_MS = 60_000;
 /** 듣는 채널 상한. 넘는 채널은 타이머와 포커스 재읽기가 받친다. */
@@ -114,14 +116,24 @@ export function useTeamBoardRail(
   // 채널마다 같은 신호가 겹쳐 오거나(재구독이 채널 수만큼 한꺼번에 끝난다) 한 전환이 여러
   // 프레임을 부른다. 한 번의 읽기로 합친다: 마지막 신호가 읽기를 시작시킨다.
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 끊임없이 신호가 오면 뒤로 밀리기만 해서 읽기가 굶는다. 첫 신호부터 최대 대기가 지나면
+  // 마지막 신호를 기다리지 않고 읽는다.
+  const firstSignalAt = useRef<number | null>(null);
   const reread = useCallback(() => {
     if (timer.current !== null) clearTimeout(timer.current);
+    const now = Date.now();
+    if (firstSignalAt.current === null) firstSignalAt.current = now;
+    const remaining = Math.max(
+      0,
+      firstSignalAt.current + REREAD_MAX_WAIT_MS - now,
+    );
     timer.current = setTimeout(() => {
       timer.current = null;
+      firstSignalAt.current = null;
       void queryClient.invalidateQueries({
         queryKey: teamBoardKey(workspaceId),
       });
-    }, REREAD_COALESCE_MS);
+    }, Math.min(REREAD_COALESCE_MS, remaining));
   }, [queryClient, workspaceId]);
   useEffect(
     () => () => {

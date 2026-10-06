@@ -42,10 +42,16 @@ function plain(source: Record<string, unknown>, key: string): string | null {
   return typeof value === "string" && value !== "" ? value : null;
 }
 
-export const EMPTY_RUN_REPORT: RunReport = {
-  stages: [],
-  artifacts: { pr: null, branch: null, added: null, deleted: null, commits: null },
-};
+export const EMPTY_RUN_REPORT: RunReport = Object.freeze({
+  stages: Object.freeze([]) as unknown as string[],
+  artifacts: Object.freeze({
+    pr: null,
+    branch: null,
+    added: null,
+    deleted: null,
+    commits: null,
+  }),
+});
 
 export function agentRunReport(output: unknown): RunReport {
   if (typeof output !== "object" || output === null || Array.isArray(output)) {

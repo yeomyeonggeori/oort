@@ -309,6 +309,8 @@ export function prFacts(
   if (parsed.protocol !== "https:") return null;
   // 자격 증명이 박힌 주소는 링크로 만들지 않는다(서버가 이미 정규화하지만 화면이 한 번 더 본다).
   if (parsed.username !== "" || parsed.password !== "") return null;
+  // 포트가 있는 주소(`host:8443`)도 링크로 만들지 않는다.
+  if (parsed.port !== "") return null;
   const match = /^\/([^/]+)\/([^/]+)\/pull\/(\d{1,9})$/.exec(parsed.pathname);
   if (!match) return null;
   return {

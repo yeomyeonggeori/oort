@@ -21,6 +21,12 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@momo/core/lib/api")>()),
   ...api,
 }));
+const tauri = vi.hoisted(() => ({ desktop: false, open: vi.fn(async () => true) }));
+vi.mock("@/lib/tauri", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tauri")>()),
+  isDesktop: () => tauri.desktop,
+  openExternalUrl: tauri.open,
+}));
 vi.mock("@/app/SidebarDrawerToggle", () => ({ SidebarDrawerToggle: () => null }));
 vi.mock("@/features/common/useOffline", () => ({ useOffline: () => false }));
 vi.mock("@/features/workspace/useWorkspace", () => ({
@@ -79,10 +85,13 @@ const globals = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: b
 beforeEach(() => {
   globals.IS_REACT_ACT_ENVIRONMENT = true;
   subscriptions.length = 0;
+  tauri.desktop = false;
+  tauri.open.mockClear();
   for (const fn of Object.values(api)) fn.mockReset();
   api.fetchSharedWorkSession.mockRejectedValue(new ApiError(404, "nope"));
 });
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   resetEscapeLayers();
 });
@@ -201,5 +210,61 @@ describe("보안: 에이전트·요청자 문자열은 일반 텍스트로만 �
     const view = render(<RunReportSection output={undefined} />);
     expect(view.container.innerHTML).toBe("");
     void sharedRow;
+  });
+});
+
+const PR = "https://github.com/acme/oort/pull/12";
+
+describe("데스크탑 셸: target=_blank가 죽은 컨트롤이라 OS 브라우저로 넘긴다 (#3518)", () => {
+  function clickAndCheck(link: HTMLElement, desktop: boolean) {
+    tauri.desktop = desktop;
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    link.dispatchEvent(event);
+    if (desktop) {
+      expect(event.defaultPrevented).toBe(true);
+      expect(tauri.open).toHaveBeenCalledTimes(1);
+      expect(tauri.open).toHaveBeenCalledWith(PR);
+    } else {
+      expect(event.defaultPrevented).toBe(false);
+      expect(tauri.open).not.toHaveBeenCalled();
+    }
+  }
+
+  it.each([true, false])("드로어 PR 링크 (desktop=%s)", (desktop) => {
+    const view = render(
+      <MemoryRouter>
+        <TeamBoardDrawer item={runRow({ state: "done", prUrl: PR })} nowMs={Date.now()} onClose={() => undefined} />
+      </MemoryRouter>
+    );
+    clickAndCheck(view.getByTestId("team-board-pr"), desktop);
+  });
+
+  it.each([true, false])("작업 상세 PR 링크 (desktop=%s)", (desktop) => {
+    const view = render(<RunReportSection output={{ artifacts: { prUrl: PR } }} />);
+    clickAndCheck(view.getByTestId("run-report-pr"), desktop);
+  });
+
+  it.each([true, false])("보드 카드 PR 링크 (desktop=%s)", async (desktop) => {
+    board([runRow({ state: "done", status: "done", prUrl: PR })]);
+    render(mount());
+    fireEvent.click(await screen.findByTestId("team-board-view-done"));
+    clickAndCheck(await screen.findByTestId("team-board-row-pr"), desktop);
+  });
+});
+
+describe("실시간 재읽기: 신호가 끊임없이 와도 굶지 않는다 (#3518)", () => {
+  it("100ms 간격 신호가 2.5초 계속돼도 최대 대기(2초) 안에 한 번은 읽는다", async () => {
+    board([runRow()]);
+    render(mount());
+    await screen.findByTestId("team-board-row");
+    const before = api.fetchSharedWorkSessions.mock.calls.length;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    for (let i = 0; i < 25; i++) {
+      act(() => {
+        subscriptions[0]!.onRunUpdated?.({ type: "work.run.updated", payload: { run_id: "x", channel_id: "y" } });
+      });
+      await vi.advanceTimersByTimeAsync(100);
+    }
+    expect(api.fetchSharedWorkSessions.mock.calls.length).toBeGreaterThan(before);
   });
 });

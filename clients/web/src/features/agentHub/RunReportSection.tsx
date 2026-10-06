@@ -7,6 +7,7 @@ import {
 } from "@momo/core/features/workbench/runReport";
 import { TEAM_BOARD_COPY } from "@momo/core/features/workbench/teamBoard";
 import { cn } from "@/design/lib/cn";
+import { isDesktop, openExternalUrl } from "@/lib/tauri";
 
 // =============================================================================
 // 작업 상세의 「에이전트가 알린 단계·결과」 (AT-5 #3518, ADR-0162 증보 3 D11·D12).
@@ -29,6 +30,7 @@ export function RunReportSection({ output }: { output: unknown }) {
   if (!hasRunReport(report)) return null;
   const { artifacts, stages } = report;
   const change = artifactChangeText(artifacts);
+  const pr = artifacts.pr;
   const hasArtifacts =
     artifacts.pr !== null ||
     artifacts.branch !== null ||
@@ -75,19 +77,25 @@ export function RunReportSection({ output }: { output: unknown }) {
             {TEAM_BOARD_COPY.runArtifactsHeading}
           </h3>
           <div className="mt-1 flex flex-col gap-2">
-            {artifacts.pr !== null && (
+            {pr !== null && (
               <a
-                href={artifacts.pr.href}
+                href={pr.href}
                 target="_blank"
                 rel="noopener noreferrer"
                 data-testid="run-report-pr"
+                onClick={(event) => {
+        // 데스크탑 셸(wry)에서는 target="_blank"가 죽은 컨트롤이다: OS 브라우저로 넘긴다.
+        if (!isDesktop()) return;
+        event.preventDefault();
+        void openExternalUrl(pr.href);
+      }}
                 className="flex min-w-0 items-center gap-2 rounded-lg border border-line px-3 py-2 text-body text-ink press hover:bg-surface-hover focus-visible:focus-ring"
               >
                 <GitPullRequest aria-hidden className="size-4 shrink-0 text-icon" />
                 <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="font-medium">{artifacts.pr.number}</span>
+                  <span className="font-medium">{pr.number}</span>
                   <span className="truncate text-meta text-ink-muted">
-                    {artifacts.pr.repo}
+                    {pr.repo}
                   </span>
                 </span>
                 <ExternalLink aria-hidden className="size-3 shrink-0 text-icon" />

@@ -15,6 +15,7 @@ import {
   whereLabel,
 } from "@momo/core/features/workbench/teamBoard";
 import { cn } from "@/design/lib/cn";
+import { isDesktop, openExternalUrl } from "@/lib/tauri";
 import { StateChip, LaneLabel } from "./TeamBoardParts";
 
 // =============================================================================
@@ -166,6 +167,12 @@ export const TeamBoardDrawer = forwardRef<
               target="_blank"
               rel="noopener noreferrer"
               data-testid="team-board-pr"
+              onClick={(event) => {
+        // 데스크탑 셸(wry)에서는 target="_blank"가 죽은 컨트롤이다: OS 브라우저로 넘긴다.
+        if (!isDesktop()) return;
+        event.preventDefault();
+        void openExternalUrl(pr.href);
+      }}
               className="mx-4 flex min-w-0 items-center gap-2 rounded-lg border border-line px-3 py-2 text-body text-ink press hover:bg-surface-hover focus-visible:focus-ring"
             >
               <GitPullRequest aria-hidden className="size-4 shrink-0 text-icon" />
