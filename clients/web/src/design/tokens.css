@@ -454,6 +454,11 @@
    * 가로이고 pane도 아니므로 --spacing-action 과 같은 이유로 이름을 갖는다. */
   --spacing-avatar-action: 112px;
 
+  /* 프로필 히어로 아바타 (#3603). 사진 행(`--spacing-avatar-action` 112)과 같은 숫자지만
+   * 쓰임이 다른 이름이다: 이쪽은 정사각 상자 한 변이고 이니셜 글자는 그 0.4배다
+   * (`avatar-hero` 유틸). 글자 역할을 다섯 번째로 늘리지 않고 계산식으로만 둔다. */
+  --spacing-avatar-hero: 112px;
+
   /* 자격 행 액션 띠 (#2204 R7). `--spacing-action`(144) 은 다이얼로그 주 버튼
    * 최소 폭이고 `--spacing-action-sm`(96) 은 짧은 푸터 짝이다. 이 칸은 설정 ›
    * 연결 목록에서 size="sm" 아웃라인 세 개(해제 · 도어벨 설정 · 재발급)를 **한 줄**
@@ -2481,6 +2486,20 @@
   &[data-wide] {
     max-inline-size: none;
   }
+}
+
+/* 프로필 히어로 아바타 상자 (#3603). 한 변과 이니셜 크기가 한 이름에서 나온다. */
+@utility avatar-hero {
+  inline-size: var(--spacing-avatar-hero);
+  block-size: var(--spacing-avatar-hero);
+  font-size: calc(var(--spacing-avatar-hero) * 0.4);
+  line-height: 1;
+  /* 판(`--sheet`) 위에서 면이 묻히지 않게: rest 그림자 + 1px 선, 다크에서는 거기에
+   * 3:1 링(`--selected-edge`)을 덧댄다. */
+  box-shadow:
+    var(--elevation-rest),
+    inset 0 0 0 1px var(--line),
+    inset 0 0 0 1px var(--selected-edge);
 }
 
 /* 설정 섹션의 카드 (시안 `.a-group`): 행들이 한 면에 서고 행 사이는 선 하나다. 컨테이너
