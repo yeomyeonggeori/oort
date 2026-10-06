@@ -650,7 +650,7 @@ describe("ProfileSection 한 페이지", () => {
     const camera = tid(host, "profile-hero-camera") as HTMLButtonElement;
     expect(camera.disabled).toBe(false);
     await pickPng(host);
-    expect(camera.disabled).toBe(true);
+    await vi.waitFor(() => expect(camera.disabled).toBe(true));
     const input = tid(host, "profile-avatar-input") as HTMLInputElement;
     const click = vi.spyOn(input, "click").mockImplementation(() => undefined);
     act(() => camera.click());
@@ -667,6 +667,8 @@ describe("ProfileSection 한 페이지", () => {
     await act(async () => {
       confirm!.click();
     });
-    expect((tid(host, "profile-hero-camera") as HTMLButtonElement).disabled).toBe(true);
+    await vi.waitFor(() => {
+      expect((tid(host, "profile-hero-camera") as HTMLButtonElement).disabled).toBe(true);
+    });
   });
 });
