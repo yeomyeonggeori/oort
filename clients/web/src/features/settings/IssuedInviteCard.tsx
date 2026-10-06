@@ -50,7 +50,7 @@ export function IssuedInviteCard({
       data-testid="invite-issued"
     >
       <p className="break-keep text-body text-ink">
-        초대 링크를 만들었습니다. 코드는 이 화면에서만 볼 수 있으니 지금
+        초대 링크를 만들었어요. 코드는 이 화면에서만 볼 수 있으니 지금
         전달하세요.
       </p>
 
@@ -99,8 +99,8 @@ export function IssuedInviteCard({
       </div>
 
       <p className="break-keep text-meta text-ink-muted">
-        받는 사람은 앱을 설치한 뒤 딥링크를 열면 서버 주소와 코드가 채워진
-        상태로 참여 화면에 도착합니다.
+        받는 사람이 앱을 설치한 뒤 딥링크를 열면 서버 주소와 코드가 채워진
+        상태로 참여 화면이 열려요.
       </p>
       {footnote ? (
         <p

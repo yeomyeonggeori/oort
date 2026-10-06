@@ -46,9 +46,9 @@ export function DevicesSection({
             revokedAtMs: letter.revokedAtMs,
             signature: letter.signature,
           });
-          return `그 폰의 지시 권한도 끊었습니다. ${hostDeliveryCopy(letter.host)}`;
+          return `그 폰의 지시 권한도 끊었어요. ${hostDeliveryCopy(letter.host)}`;
         } catch {
-          return "지시 권한 해제에 서명하지 못했습니다. 연결을 끊으면 서버에서는 그 폰의 키도 함께 해제됩니다.";
+          return "지시 권한 해제에 서명하지 못했어요. 연결을 끊으면 서버에서는 그 폰의 키도 함께 해제돼요.";
         } finally {
           void client.invalidateQueries({
             queryKey: DEVICE_KEYS_QUERY_KEY(signing.workspaceId),
@@ -62,8 +62,8 @@ export function DevicesSection({
       title="기기"
       lines={[
         signing
-          ? "지시에 서명하는 기기와, 이 계정에 QR로 붙인 기기입니다."
-          : "이 계정에 QR로 붙인 기기입니다.",
+          ? "지시에 서명하는 기기와, 이 계정에 QR로 연결한 기기예요."
+          : "이 계정에 QR로 연결한 기기예요.",
       ]}
     >
       {signing && (

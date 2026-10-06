@@ -18,8 +18,10 @@ CORE_PROBE="packages/momo-core/src/legacyTermGateProbe.ts"
 PHONE_PROBE="clients/mobile/src/legacyTermGateProbe.ts"
 HOSTED_PROBE="clients/web/src/features/hostedAgents/toneGateProbe.ts"
 HOSTED_CORE_PROBE="packages/momo-core/src/features/hostedAgents/toneGateProbe.ts"
+SETTINGS_PROBE="clients/web/src/features/settings/toneGateProbe.ts"
+SETTINGS_CORE_PROBE="packages/momo-core/src/features/settings/toneGateProbe.ts"
 OUT="$(mktemp "${TMPDIR:-/tmp}/momo-legacy-gate.XXXXXX")"
-cleanup() { rm -f "$WEB_PROBE" "$CORE_PROBE" "$PHONE_PROBE" "$HOSTED_PROBE" "$HOSTED_CORE_PROBE" "$OUT"; }
+cleanup() { rm -f "$WEB_PROBE" "$CORE_PROBE" "$PHONE_PROBE" "$HOSTED_PROBE" "$HOSTED_CORE_PROBE" "$SETTINGS_PROBE" "$SETTINGS_CORE_PROBE" "$OUT"; }
 trap cleanup EXIT INT TERM
 
 fail() { echo "[legacy-term-gate-test] FAIL: $*" >&2; exit 1; }
@@ -73,6 +75,21 @@ done
 printf 'export const PROBE = "지금은 보낼 수 없습니다";\n' >"$WEB_PROBE"
 [ "$(run_gate)" = "0" ] || { cat "$OUT" >&2; fail "합쇼체 outside hosted surfaces is out of this rule's scope and must stay GREEN"; }
 rm -f "$WEB_PROBE"
+
+# 2d. 설정 화면 어투·용어(#3573): 합쇼체·「뿌리」·「지시 기기」는 RED(legacy_term), 해요체·쉬운 말은 GREEN.
+for probe in "$SETTINGS_PROBE" "$SETTINGS_CORE_PROBE"; do
+  [ ! -e "$probe" ] || fail "probe file already exists: $probe"
+  for bad in "이 맥을 뿌리로 등록해야 폰을 승인할 수 있습니다." "승인할 폰이 없습니다" "지시 기기" "QR로 붙인 세션이에요"; do
+    printf 'export const PROBE = "%s";\n' "$bad" >"$probe"
+    rc="$(run_gate)"
+    [ "$rc" != "0" ] || fail "settings tone: 「$bad」 in $probe but the gate stayed GREEN"
+    grep -q "legacy_term" "$OUT" || fail "settings tone: RED but not by legacy_term (「$bad」, $probe)"
+    grep -q "toneGateProbe.ts" "$OUT" || fail "settings tone: RED but the probe file is not named ($probe)"
+  done
+  printf 'export const PROBE = "이 맥을 서명 기기로 등록해야 폰이 지시를 보낼 수 있어요.";\n' >"$probe"
+  [ "$(run_gate)" = "0" ] || { cat "$OUT" >&2; fail "settings tone: 해요체 sentence must stay GREEN ($probe)"; }
+  rm -f "$probe"
+done
 
 # 3. 기계 값은 통과한다 (와이어 코드는 바꾸지 않는다).
 printf 'export const SCOPE = "owner_only";\n' >"$WEB_PROBE"

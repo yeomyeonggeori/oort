@@ -280,8 +280,8 @@ export function SettingsRoute() {
           <RenderErrorBoundary
             key={section}
             padded={false}
-            title="이 설정을 열지 못했습니다"
-            message="서버에서 받은 설정을 읽지 못했습니다."
+            title="이 설정을 열지 못했어요"
+            message="서버에서 받은 설정을 읽지 못했어요."
             retryLabel="다시 시도"
             // Remounting alone re-reads the same cache — `staleTime` is 30s, so
             // within that window nothing is even refetched and the section

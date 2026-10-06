@@ -8,7 +8,7 @@ import { errorMessage } from "@momo/core/features/settings/model";
 // =============================================================================
 
 export const INVITE_ISSUE_ERROR =
-  "초대 링크를 만들지 못했습니다. 설정 › 멤버와 초대에서 다시 시도하세요.";
+  "초대 링크를 만들지 못했어요. 설정 › 멤버와 초대에서 다시 시도하세요.";
 
 const HTTP_STATUS = /^HTTP \d+$/;
 

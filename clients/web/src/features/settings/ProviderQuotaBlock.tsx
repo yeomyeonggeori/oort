@@ -137,8 +137,8 @@ export function ProviderQuotaBlock({ workspaceId }: { workspaceId: string }) {
               direction they fill (what is LEFT), and that they are not the money
               below, which is the one misread §5 found across the field. */}
           <p className="text-meta text-ink-muted">
-            이 서버가 연결한 AI 구독에 지금 남은 비율입니다. 아래 비용 집계와는
-            다른 값입니다.
+            이 서버가 연결한 AI 구독에 지금 남은 비율이에요. 아래 비용 집계와는
+            다른 값이에요.
           </p>
         </div>
         {/* The block's ONE refresh, in all four states (R1 M6). It used to share
@@ -284,8 +284,8 @@ function QuotaBody({
     // it a differently named button of its own was the R1 M6 finding.
     return (
       <EmptyInvite
-        headline="아직 보고된 구독 잔여량이 없습니다."
-        detail="이 서버가 AI 제공자에게서 잔여량을 받아오면 제공자별로 단기와 주간 남은 비율이 여기에 표시됩니다."
+        headline="아직 보고된 구독 잔여량이 없어요."
+        detail="이 서버가 AI 제공자에게서 잔여량을 받아오면 제공자별로 단기와 주간 남은 비율이 여기에 보여요."
         testId="usage-quota-empty"
       />
     );
@@ -383,7 +383,7 @@ function Gauge({
       >
         <span className="text-meta text-ink-muted">{windowLabel(windowKind)}</span>
         <span className="text-meta text-ink-muted">
-          아직 보고되지 않았습니다
+          아직 보고되지 않았어요
         </span>
       </div>
     );
@@ -466,12 +466,12 @@ function Gauge({
           statement. */}
       {gauge.reset?.passed && (
         <p className="text-timestamp text-warn" data-testid="usage-quota-reset-passed">
-          리셋 시각이 지나 지금 잔여율은 이 값과 다릅니다.
+          리셋 시각이 지나 지금 잔여율은 이 값과 달라요.
         </p>
       )}
       {gauge.age.stale && !gauge.reset?.passed && (
         <p className="text-timestamp text-warn" data-testid="usage-quota-outdated">
-          확인한 지 오래된 값이라 지금 잔여율과 다를 수 있습니다.
+          확인한 지 오래된 값이라 지금 잔여율과 다를 수 있어요.
         </p>
       )}
     </div>

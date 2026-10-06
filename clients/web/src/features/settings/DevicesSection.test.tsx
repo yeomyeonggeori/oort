@@ -223,7 +223,7 @@ describe("설정 › 기기 목록", () => {
     expect(host.textContent).toContain("iOS");
     expect(host.textContent).not.toContain("macos");
     expect(host.textContent).not.toContain("ios,");
-    expect(host.textContent).toContain("마지막 사용 시각은 아직 기록하지 않습니다");
+    expect(host.textContent).toContain("마지막으로 쓴 시각은 아직 기록하지 않았어요");
     expect(host.textContent).not.toContain("lastSeenAt");
     expect(host.textContent).not.toContain("최근 활동 미기록");
   });
@@ -243,7 +243,7 @@ describe("설정 › 기기 목록", () => {
     expect(rows(host)).toHaveLength(1);
     expect(currentBadges(host)).toHaveLength(1);
     expect(host.querySelector('[data-testid="linked-devices-removed"]')?.textContent).toContain(
-      "연결을 해제했습니다"
+      "연결을 해제했어요"
     );
     expect(document.activeElement).toBe(disconnectOf(host, CURRENT_ID));
   });
@@ -287,7 +287,7 @@ describe("설정 › 기기 목록", () => {
       0
     );
     expect(host.querySelector('[data-testid="linked-devices-error"]')?.textContent).toMatch(
-      /불러오지 못했습니다/
+      /불러오지 못했어요/
     );
     expect(host.querySelector('[data-testid="linked-devices-error"]')?.textContent).not.toMatch(
       /세션이 만료/
@@ -307,7 +307,7 @@ describe("설정 › 기기 목록", () => {
       1
     );
     expect(host.querySelector('[data-testid="linked-devices-empty"]')?.textContent).toBe(
-      "연결된 기기가 없습니다."
+      "연결된 기기가 없어요."
     );
     expect(host.querySelector('[data-testid="device-link-card"]')).not.toBeNull();
   });

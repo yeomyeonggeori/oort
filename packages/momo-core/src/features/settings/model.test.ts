@@ -163,7 +163,7 @@ describe("provider link presentation (ADR-0004 write-only bearer)", () => {
   it("turns each probe reason into a next step", () => {
     expect(
       providerTestMessage({ ok: true, endpointLabel: "https://api.example.com/v1" })
-    ).toContain("응답을 확인했습니다");
+    ).toContain("응답을 확인했어요");
 
     const unreachable = providerTestMessage({
       ok: false,
@@ -187,23 +187,23 @@ describe("provider link presentation (ADR-0004 write-only bearer)", () => {
         reason: "provider_not_configured",
         endpointLabel: "x",
       })
-    ).toContain("저장된 키가 없습니다");
+    ).toContain("저장된 키가 없어요");
 
     // #2960 made these real answers; they fell through to the default (#2975).
     expect(
       providerTestMessage({ ok: false, reason: "provider_auth_failed", endpointLabel: "x" })
     ).toBe(
-      "provider가 저장된 키를 받아들이지 않았습니다. 키가 맞는지, 만료되지 않았는지 확인한 뒤 새 키를 저장하세요."
+      "provider가 저장된 키를 받아들이지 않았어요. 키가 맞는지, 만료되지 않았는지 확인한 뒤 새 키를 저장하세요."
     );
     expect(
       providerTestMessage({ ok: false, reason: "provider_rate_limited", endpointLabel: "x" })
-    ).toBe("provider의 요청 한도에 걸렸습니다. 잠시 뒤 다시 확인하세요.");
+    ).toBe("provider의 요청 한도에 걸렸어요. 잠시 뒤 다시 확인하세요.");
     expect(
       providerTestMessage({ ok: false, reason: "provider_egress_denied", endpointLabel: "x" })
     ).toContain("AGENT_PROVIDER_LOCAL_HOSTS");
     expect(
       providerTestMessage({ ok: false, reason: "provider_invalid_response", endpointLabel: "x" })
-    ).toBe("x 의 응답이 provider API 모양이 아닙니다. API 주소(예: …/v1)인지 확인하세요.");
+    ).toBe("x 의 응답이 provider API 모양이 아니에요. API 주소(예: …/v1)인지 확인하세요.");
 
     // An unknown reason is reported, not swallowed and not apologised for.
     expect(
@@ -263,7 +263,7 @@ describe("role display override draft and payload", () => {
     expect(roleLabelFieldError("   ")).toContain("공백만");
     expect(roleLabelFieldError("가".repeat(16))).toBeNull();
     expect(roleLabelFieldError("가".repeat(17))).toBe(
-      "역할 이름은 한글 기준 16자까지 쓸 수 있습니다."
+      "역할 이름은 한글 기준 16자까지 쓸 수 있어요."
     );
     expect(ROLE_LABEL_MAX_BYTES).toBe(48);
   });
@@ -313,7 +313,7 @@ describe("role display override draft and payload", () => {
       "소유자나 관리자"
     );
     expect(roleLabelsSaveMessage(new ApiError(400, "role_labels value exceeds 48 bytes"))).toBe(
-      "표시명을 저장하지 못했습니다. 잠시 뒤에 다시 시도하세요."
+      "표시명을 저장하지 못했어요. 잠시 뒤에 다시 시도하세요."
     );
   });
 });
@@ -405,15 +405,15 @@ describe("프로필 표시 이름 error copy", () => {
   it("maps the empty-name 400 and never leaks the wire sentence", () => {
     expect(
       displayNameSaveMessage(new ApiError(400, "displayName is required"))
-    ).toBe("표시 이름을 비울 수 없습니다. 한 글자 이상 적고 다시 저장하세요.");
+    ).toBe("표시 이름을 비울 수 없어요. 한 글자 이상 적고 다시 저장하세요.");
     expect(
       displayNameSaveMessage(new ApiError(400, "displayName is required"))
     ).not.toContain("displayName");
     expect(displayNameSaveMessage(new ApiError(500, "displayName is required"))).toBe(
-      "요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요."
+      "요청을 끝내지 못했어요. 잠시 뒤에 다시 시도하세요."
     );
     expect(displayNameSaveMessage(new Error("network"))).toBe(
-      "요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요."
+      "요청을 끝내지 못했어요. 잠시 뒤에 다시 시도하세요."
     );
   });
 
@@ -421,7 +421,7 @@ describe("프로필 표시 이름 error copy", () => {
     expect(DISPLAY_NAME_MAX_CHARS).toBe(100);
     expect(displayNameFieldError("가".repeat(100))).toBeNull();
     expect(displayNameFieldError("가".repeat(101))).toBe(
-      "표시 이름은 100자까지 쓸 수 있습니다."
+      "표시 이름은 100자까지 쓸 수 있어요."
     );
     expect(displayNameFieldError("가".repeat(101))).not.toMatch(/100자 초과/);
   });
@@ -429,14 +429,14 @@ describe("프로필 표시 이름 error copy", () => {
   it("rejects empty and whitespace client-side, and accepts 100 characters", () => {
     expect(DISPLAY_NAME_MAX_CHARS).toBe(100);
     expect(displayNameFieldError("")).toBe(
-      "표시 이름을 비울 수 없습니다. 한 글자 이상 적으세요."
+      "표시 이름을 비울 수 없어요. 한 글자 이상 적으세요."
     );
     expect(displayNameFieldError("   ")).toBe(
-      "표시 이름을 비울 수 없습니다. 한 글자 이상 적으세요."
+      "표시 이름을 비울 수 없어요. 한 글자 이상 적으세요."
     );
     expect(displayNameFieldError("가".repeat(100))).toBeNull();
     expect(displayNameFieldError("가".repeat(101))).toBe(
-      "표시 이름은 100자까지 쓸 수 있습니다."
+      "표시 이름은 100자까지 쓸 수 있어요."
     );
     expect(displayNameFieldError("가".repeat(101))).not.toMatch(/100자 초과/);
   });
@@ -483,10 +483,10 @@ describe("코드 실행 호스트 error copy", () => {
     );
     expect(at(409, "auto target work host is unavailable")).toContain("해지");
     expect(at(500, "boom")).toBe(
-      "정책을 저장하지 못했습니다. 잠시 뒤에 다시 시도하세요."
+      "정책을 저장하지 못했어요. 잠시 뒤에 다시 시도하세요."
     );
     expect(workTierPolicySaveMessage(new Error("network"))).toBe(
-      "정책을 저장하지 못했습니다. 잠시 뒤에 다시 시도하세요."
+      "정책을 저장하지 못했어요. 잠시 뒤에 다시 시도하세요."
     );
   });
 
