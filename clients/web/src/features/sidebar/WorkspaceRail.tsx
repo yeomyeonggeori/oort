@@ -64,7 +64,7 @@ export function WorkspaceRail({
    * 아이콘 모서리에 알약(잉크=나에게 필요, 호박=안 읽음) 또는 수를 못 그리는 점이 선다.
    */
   marks?: DestinationMarks;
-  /** 아래 프로필(연결 상태 막대 포함). */
+  /** 아래 칸: 연결 상태 막대, 그리고 ⌘B 접힘일 때만 프로필 아바타(#3574). 펼친 동안 프로필은 목록 끝 줄이다. */
   footer?: ReactNode;
 }) {
   const tile = workspaceRailTile(workspace, workspaceId);

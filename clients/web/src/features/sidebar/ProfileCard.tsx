@@ -110,7 +110,7 @@ export function ProfileCard({
               state is a fill (`press-instant-fill`), never geometry.
               `tap-target` (44px under 600px) is the whole row now: the old
               24×24 avatar-only hit sat next to a 44px gear (6b H2). The avatar
-              itself stays 24px; the badge stays on that span. */}
+              is 32px in the list-end row (24px in the rail); the badge stays on that span. */}
           <button
             ref={triggerRef}
             type="button"

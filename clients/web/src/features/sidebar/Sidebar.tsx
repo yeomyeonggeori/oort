@@ -1166,19 +1166,15 @@ export function Sidebar({
               Renders nothing at all unless there is something to act on. */}
           <UpdateBadge />
 
-          {/* #3280: the identity row ("who I am") and the connection bar moved to the
-              rail footer, so this row now holds only the shortcut help. What follows is
-              the rationale they were built under. The identity row is "who I am". Two DIFFERENT facts can appear here and
-              ADR-0160 keeps them apart (guard 6) — 6b design-review H1 is what made
-              the separation real rather than asserted:
-              • the presence badge (③) is on the avatar: the declared status
-                (auto/away/dnd) as a ROUND badge, the universally read presence
-                spot. It is the only thing on this row that is ever green.
-              • the connection indicator (①, moved here in 6a) is a BAR next to
-                the card, and only when the rail is unhealthy.
-              UX-D4 (#1756) made the whole row the profile-card trigger: status
-              radios, the rail's 워크스페이스 추가, and settings live in that
-              card. The collapse control lives on the titlebar (#1864). */}
+          {/* The identity row ("who I am"). Two DIFFERENT facts appear around it and
+              ADR-0160 keeps them apart (guard 6, 6b design-review H1):
+              • the presence badge (③) on the avatar: the declared status
+                (auto/away/dnd) as a ROUND badge, the universally read presence spot;
+              • the connection indicator (①) is a BAR, only when the rail is unhealthy,
+                and it lives in the rail footer (#3280), not on this row.
+              UX-D4 (#1756) made the whole row the profile-card trigger: status radios,
+              the rail's 워크스페이스 추가, and settings live in that card. The collapse
+              control lives on the titlebar (#1864). */}
           {/* #3574: 목록 끝에 이어지는 한 줄. 띠도 구분선도 없이 목록 행과 같은 안쪽 여백으로
               서고, 도움말은 같은 줄 끝의 조용한 아이콘이다. 접힘(⌘B)에서는 이 줄 대신 레일의
               아바타가 같은 메뉴를 연다(위 footer). */}
