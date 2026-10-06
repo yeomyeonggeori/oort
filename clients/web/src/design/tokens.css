@@ -1677,19 +1677,13 @@
 }
 @utility sidebar-list-cue {
   @media (height <= 780px) {
-    /* 끝까지 스크롤하면 마지막 줄이 그늘 아래 여백에 놓이도록 같은 28px을 채운다. */
-    padding-block-end: 28px;
-    &::after {
-      content: "";
-      position: sticky;
-      inset-block-end: 0;
-      flex: none;
-      display: block;
-      block-size: 28px;
-      margin-block-start: -28px;
-      pointer-events: none;
-      background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--ink) 9%, transparent));
-    }
+    /* #3574: 예전 그늘은 ::after 로 잉크 9%의 **칠한 띠**를 목록 아래에 얹었고, 낮은 창에서 그
+     * 띠가 「채널」 머리 위에 떠 있는 회색 구분 블록으로 읽혔다(성재 2026-10-07, 데스크탑 0.1.18).
+     * 이제 단서는 칠하지 않는다: 열의 아래 16px을 마스크로 투명하게 녹여 「더 있다」를 말하고,
+     * 같은 16px을 끝 여백으로 채워 끝까지 스크롤하면 마지막 줄이 녹는 구간 위에 온전히 선다.
+     * 마스크는 알파만 읽으므로 색 토큰이 아무 색이어도 같다. 바탕이 그라데이션이어도 이음매가 없다. */
+    padding-block-end: var(--spacing-4);
+    mask-image: linear-gradient(to bottom, var(--ink) calc(100% - var(--spacing-4)), transparent);
   }
 }
 @utility sidebar-list-head {

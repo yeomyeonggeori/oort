@@ -120,7 +120,7 @@ export function ProfileCard({
             className={
               compact
                 ? "flex size-rail-tile shrink-0 items-center justify-center rounded-md press-instant-fill hover:bg-surface-hover focus-visible:focus-ring"
-                : "sidebar-row tap-target min-w-0 flex-1 py-1 text-left press-instant-fill hover:bg-surface-hover data-[state=open]:bg-surface-hover focus-visible:focus-ring"
+                : "sidebar-row tap-target min-w-0 flex-1 py-2 text-left press-instant-fill hover:bg-surface-hover data-[state=open]:bg-surface-hover focus-visible:focus-ring"
             }
           >
             <PresenceBadge

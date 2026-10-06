@@ -77,7 +77,7 @@ describe("상태 트리거는 이웃과 같은 크기로 눌린다 (H2)", () => 
   it("프로필 카드 전체가 tap-target 이다", () => {
     // 예전 트리거는 아바타 24×24 이고 옆 톱니가 44px 이었다. UX-D4 는 행
     // 전체를 트리거로 올려 그 불일치를 없앤다.
-    expect(profileCard).toContain("sidebar-row tap-target min-w-0 flex-1");
+    expect(profileCard).toContain("sidebar-row tap-target min-w-0 flex-1 py-2");
     expect(presenceControl).not.toContain('"tap-target flex size-6 shrink-0');
   });
 

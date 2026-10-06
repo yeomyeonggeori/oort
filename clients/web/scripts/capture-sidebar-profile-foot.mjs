@@ -102,6 +102,13 @@ async function main() {
     jobs.push({ scheme, scene: "status", collapsed: true, viewport: { width: 1280, height: 800 } });
     jobs.push({ scheme, scene: "plain", collapsed: true, viewport: { width: 1280, height: 800 } });
     jobs.push({ scheme, scene: "long", collapsed: false, viewport: { width: 900, height: 600 }, tag: "narrow" });
+    // 낮은 창(#3574 재작업): 열 전체가 스크롤하는 높이. 스크롤 그늘·마지막 행·프로필 줄이 겹치지 않는지.
+    for (const height of [600, 480]) {
+      jobs.push({ scheme, scene: "status", collapsed: false, viewport: { width: 1280, height }, tag: `h${height}` });
+      jobs.push({ scheme, scene: "plain", collapsed: true, viewport: { width: 1280, height }, tag: `h${height}` });
+      jobs.push({ scheme, scene: "long", collapsed: false, viewport: { width: 800, height }, tag: `h${height}-narrow` });
+      jobs.push({ scheme, scene: "status", collapsed: false, viewport: { width: 1280, height }, tag: `h${height}-scrolled`, scrollEnd: true });
+    }
     jobs.push({ scheme, scene: "long", collapsed: false, viewport: { width: 390, height: 780 }, tag: "phone", drawer: true });
   }
   try {
@@ -111,11 +118,17 @@ async function main() {
         await page.getByTestId("open-sidebar-drawer").first().click();
         await page.waitForTimeout(500);
       }
+      if (job.scrollEnd) {
+        await page.evaluate(() => {
+          for (const el of document.querySelectorAll("[data-testid='sidebar-list-root'], [data-testid='channel-list']")) el.scrollTop = el.scrollHeight;
+        });
+        await page.waitForTimeout(200);
+      }
       const name = `${PREFIX}-${job.tag ?? "web"}-${job.scene}-${job.collapsed ? "collapsed" : "expanded"}-${job.scheme}`;
       await page.screenshot({ path: resolve(OUT_DIR, `${name}-full.png`) });
       const h = job.viewport.height;
       const w = job.collapsed ? 120 : Math.min(job.viewport.width, 360);
-      const top = Math.max(0, h - 220);
+      const top = Math.max(0, h - (h < 700 ? Math.min(h, 340) : 220));
       await page.screenshot({ path: resolve(OUT_DIR, `${name}.png`), clip: { x: 0, y: top, width: w, height: h - top } });
       console.log("shot", name);
       await context.close();
