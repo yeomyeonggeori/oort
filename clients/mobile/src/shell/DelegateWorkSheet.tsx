@@ -1,4 +1,4 @@
-import { createAgentWorkRun, uuidEq, type Channel } from '@momo/core/lib/api';
+import {createAgentWorkRun, uuidEq, type Channel} from '@momo/core/lib/api';
 import {
   normalizeWorkRunInput,
   newWorkRunClientId,
@@ -11,9 +11,10 @@ import {
   type WorkRunField,
   type WorkRunFailure,
 } from '@momo/core/features/agents/workRunRequest';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import {useMutation, useQueryClient} from '@tanstack/react-query';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
+  AccessibilityInfo,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -32,8 +33,8 @@ import {
   OutlineButton,
   Sentence,
 } from '../design/atoms';
-import { PageSheet, usePageSheetClose } from '../design/PageSheet';
-import { usePalette, useStyles } from '../design/theme';
+import {PageSheet, usePageSheetClose} from '../design/PageSheet';
+import {usePalette, useStyles} from '../design/theme';
 import {
   ds2Radius,
   ds2Type,
@@ -68,12 +69,12 @@ import {
   writeLastTarget,
   type DelegateDraft,
 } from '../features/work/delegate/session';
-import { teamBoardKey } from '../features/work/teamBoard/useTeamBoard';
-import { useHostedConnections } from '../features/hostedAgents/queries';
-import { useChannels, useDirectory } from '../features/workspace/queries';
-import { haptics } from '../lib/haptics';
-import { useSession } from '../session/useSession';
-import { SheetTitleRow } from './NewMessageSheet';
+import {teamBoardKey} from '../features/work/teamBoard/useTeamBoard';
+import {useHostedConnections} from '../features/hostedAgents/queries';
+import {useChannels, useDirectory} from '../features/workspace/queries';
+import {haptics} from '../lib/haptics';
+import {useSession} from '../session/useSession';
+import {SheetTitleRow} from './NewMessageSheet';
 
 // =============================================================================
 // 작업 맡기기 — 폰에서 에이전트에게 type=work 요청을 만든다 (#3588 N8, ADR-0198 D4 증보 1).
@@ -116,9 +117,9 @@ export interface DelegatePrefill {
  */
 export interface DelegatePreview {
   step?: Step;
-  pick?: { agentMemberId: string; channelId: string };
+  pick?: {agentMemberId: string; channelId: string};
   draft?: Partial<DelegateDraft>;
-  refusal?: { failure: WorkRunFailure; agentId: string; channelId: string };
+  refusal?: {failure: WorkRunFailure; agentId: string; channelId: string};
 }
 
 export function DelegateWorkSheet({
@@ -174,12 +175,12 @@ function closedBy(
   failure: WorkRunFailure,
   agentId: string,
   channelId: string,
-): { pair?: string; agent?: string } {
+): {pair?: string; agent?: string} {
   if (failure.reason === 'hosted_channel_not_approved') {
-    return { pair: pairKey(agentId, channelId) };
+    return {pair: pairKey(agentId, channelId)};
   }
   if (failure.next === 'fix_elsewhere' || failure.reason === 'agent_paused') {
-    return { agent: agentId };
+    return {agent: agentId};
   }
   return {};
 }
@@ -199,7 +200,7 @@ function SheetBody({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
-  const { member, workspaceId } = useSession();
+  const {member, workspaceId} = useSession();
   const client = useQueryClient();
   const slideClose = usePageSheetClose() ?? onClose;
 
@@ -214,7 +215,7 @@ function SheetBody({
     () =>
       hostedQuery.data === undefined
         ? HOSTED_UNKNOWN
-        : { kind: 'known', connections: hostedQuery.data },
+        : {kind: 'known', connections: hostedQuery.data},
     [hostedQuery.data],
   );
 
@@ -266,6 +267,21 @@ function SheetBody({
   });
   const [preselected, setPreselected] = useState(preview?.pick !== undefined);
   const [received, setReceived] = useState(false);
+
+  // VoiceOver: iOS 는 `accessibilityLiveRegion` 을 읽지 않는다(Android 전용). 거절 배너와
+  // 칸 오류는 포커스 밖에서 생기므로 문장을 직접 알린다(`ApprovalDecision` 과 같은 길).
+  const refusalSentence = refusal?.failure.sentence;
+  useEffect(() => {
+    if (refusalSentence !== undefined) {
+      AccessibilityInfo.announceForAccessibility(refusalSentence);
+    }
+  }, [refusalSentence, refusal]);
+  const fieldSentence = fieldError?.sentence;
+  useEffect(() => {
+    if (fieldSentence !== undefined) {
+      AccessibilityInfo.announceForAccessibility(fieldSentence);
+    }
+  }, [fieldSentence, fieldError]);
 
   const runId = useRef<RunIdSlot | null>(null);
   const inputs = useRef<Partial<Record<WorkRunField, TextInput | null>>>({});
@@ -373,7 +389,7 @@ function SheetBody({
   const setField = useCallback(
     (field: keyof DelegateDraft, value: string) => {
       setDraftState(current => {
-        const next = { ...current, [field]: value };
+        const next = {...current, [field]: value};
         writeDraft(workspaceId, next);
         return next;
       });
@@ -397,7 +413,7 @@ function SheetBody({
 
   // ---- 보내기 -------------------------------------------------------------
   const mutation = useMutation({
-    mutationFn: (variables: { channelId: string; draft: WorkRunDraft }) =>
+    mutationFn: (variables: {channelId: string; draft: WorkRunDraft}) =>
       createAgentWorkRun(workspaceId, variables.channelId, variables.draft),
     onSuccess: () => {
       haptics.success();
@@ -408,7 +424,7 @@ function SheetBody({
           channelId: resolvedChannel.id,
         });
       }
-      void client.invalidateQueries({ queryKey: teamBoardKey(workspaceId) });
+      void client.invalidateQueries({queryKey: teamBoardKey(workspaceId)});
       if (boardAvailable) {
         onSubmitted();
         slideClose();
@@ -458,7 +474,7 @@ function SheetBody({
     } catch (error) {
       if (error instanceof WorkRunDraftError) {
         // 보내기 전에 막은 입력: 서버는 호출되지 않았다. 햅틱 없이 그 칸으로만 간다.
-        setFieldError({ field: error.field, sentence: error.sentence });
+        setFieldError({field: error.field, sentence: error.sentence});
         if (error.field === 'repo' || error.field === 'branch')
           setShowMore(true);
         inputs.current[error.field]?.focus();
@@ -477,7 +493,7 @@ function SheetBody({
     haptics.light();
     mutation.mutate({
       channelId: resolvedChannel.id,
-      draft: { ...base, clientRunId: runId.current.id },
+      draft: {...base, clientRunId: runId.current.id},
     });
   };
 
@@ -576,7 +592,7 @@ function SheetBody({
                         separated={index > 0}
                         disabled={rest !== null || refused}
                         accessibilityRole="radio"
-                        accessibilityState={{ selected: isSelected }}
+                        accessibilityState={{selected: isSelected}}
                         onPress={() => pickAgent(candidate)}
                         trailing={<Check on={isSelected} />}
                         testID={`delegate-agent-${candidate.member.handle}`}
@@ -647,7 +663,7 @@ function SheetBody({
                         disabled={refused}
                         separated={index > 0}
                         accessibilityRole="radio"
-                        accessibilityState={{ selected: isSelected }}
+                        accessibilityState={{selected: isSelected}}
                         onPress={() => pickChannel(option)}
                         trailing={<Check on={isSelected} />}
                         testID={`delegate-channel-${option.name ?? option.id}`}
@@ -817,9 +833,9 @@ function SheetBody({
 
         <Pressable
           accessibilityRole="button"
-          accessibilityState={{ expanded: showMore }}
+          accessibilityState={{expanded: showMore}}
           onPress={() => setShowMore(current => !current)}
-          style={({ pressed }) => [styles.more, pressed && styles.pressed]}
+          style={({pressed}) => [styles.more, pressed && styles.pressed]}
           testID="delegate-more"
         >
           <Text style={styles.moreLabel}>
@@ -895,10 +911,10 @@ function TrailingAction({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ disabled }}
+      accessibilityState={{disabled}}
       disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [styles.trailing, pressed && styles.pressed]}
+      style={({pressed}) => [styles.trailing, pressed && styles.pressed]}
       testID={testID}
     >
       <Text
@@ -911,7 +927,7 @@ function TrailingAction({
   );
 }
 
-function Check({ on }: { on: boolean }): React.JSX.Element | null {
+function Check({on}: {on: boolean}): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
   return on ? (
     <Text style={styles.check} importantForAccessibility="no">
@@ -942,7 +958,7 @@ function FieldIssue({
   error,
   field,
 }: {
-  error: { field: WorkRunField; sentence: string } | null;
+  error: {field: WorkRunField; sentence: string} | null;
   field: WorkRunField;
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
@@ -960,9 +976,9 @@ function FieldIssue({
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    fill: { flex: 1 },
-    list: { paddingBottom: space.xl * 2 },
-    gap: { marginTop: space.lg },
+    fill: {flex: 1},
+    list: {paddingBottom: space.xl * 2},
+    gap: {marginTop: space.lg},
     intro: {
       marginHorizontal: SAFE_GUTTER,
       fontSize: font.label,
@@ -976,8 +992,8 @@ const buildStyles = (color: Palette) =>
       marginBottom: space.sm,
       marginHorizontal: SAFE_GUTTER,
     },
-    label: { fontSize: font.label, fontWeight: '700', color: color.textMuted },
-    note: { fontSize: font.label, color: color.warn },
+    label: {fontSize: font.label, fontWeight: '700', color: color.textMuted},
+    note: {fontSize: font.label, color: color.warn},
     // 입력 그릇만 선을 든다(ADR-0189 D6: outline 은 텍스트 입력에만).
     input: {
       minHeight: TOUCH_TARGET,
@@ -991,8 +1007,8 @@ const buildStyles = (color: Palette) =>
       fontSize: font.body,
       color: color.text,
     },
-    inputError: { borderColor: color.dangerText },
-    multiline: { minHeight: 132 },
+    inputError: {borderColor: color.dangerText},
+    multiline: {minHeight: 132},
     issue: {
       marginTop: space.sm,
       marginHorizontal: SAFE_GUTTER,
@@ -1026,7 +1042,7 @@ const buildStyles = (color: Palette) =>
       borderRadius: ds2Radius.card,
       backgroundColor: color.surface,
     },
-    destinationText: { flex: 1, minWidth: 0, gap: space.xs },
+    destinationText: {flex: 1, minWidth: 0, gap: space.xs},
     destinationLabel: {
       fontSize: font.label,
       color: color.textMuted,
@@ -1037,8 +1053,8 @@ const buildStyles = (color: Palette) =>
       color: color.text,
       fontWeight: '600',
     },
-    bannerWrap: { marginTop: space.lg, marginHorizontal: SAFE_GUTTER },
-    repick: { marginTop: space.sm, alignSelf: 'flex-start' },
+    bannerWrap: {marginTop: space.lg, marginHorizontal: SAFE_GUTTER},
+    repick: {marginTop: space.sm, alignSelf: 'flex-start'},
     trailing: {
       minWidth: TOUCH_TARGET,
       minHeight: TOUCH_TARGET,
@@ -1050,7 +1066,7 @@ const buildStyles = (color: Palette) =>
       fontWeight: '700',
       color: color.text,
     },
-    trailingLabelOff: { color: color.textFaint },
-    pressed: { opacity: 0.6 },
-    check: { fontSize: font.body, fontWeight: '700', color: color.text },
+    trailingLabelOff: {color: color.textFaint},
+    pressed: {opacity: 0.6},
+    check: {fontSize: font.body, fontWeight: '700', color: color.text},
   });

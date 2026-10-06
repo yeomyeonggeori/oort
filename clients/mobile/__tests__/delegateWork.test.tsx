@@ -9,6 +9,7 @@ import {
   waitFor,
 } from '@testing-library/react-native';
 import React from 'react';
+import {AccessibilityInfo} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -490,6 +491,31 @@ describe('햅틱은 사용자 행동 한 번에 한 번, 입력 검증 오류에
     await waitFor(() => expect(view.onSubmitted).toHaveBeenCalled());
     expect(haptics.success).toHaveBeenCalledTimes(1);
     expect(haptics.error).not.toHaveBeenCalled();
+  });
+});
+
+describe('VoiceOver: 거절과 칸 오류는 직접 알린다(iOS 는 live region 을 읽지 않는다)', () => {
+  it('거절 문장과 검증 문장이 announceForAccessibility 로 나간다', async () => {
+    const announce = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => {});
+    installFetch({
+      members: [rosterMember({channelIds: [CH_DEV], channelCount: 1})],
+      runs: [{kind: 'refuse', status: 500, message: 'boom'}],
+    });
+    mount({agentMemberId: AGENT});
+    await fillAndSend('', '설명');
+    await screen.findByTestId('delegate-issue-title');
+    expect(announce).toHaveBeenCalledWith('제목을 적어 주세요.');
+
+    fireEvent.changeText(screen.getByTestId('delegate-title'), '제목');
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('delegate-send'));
+    });
+    await screen.findByTestId('delegate-error');
+    expect(announce).toHaveBeenCalledWith(
+      expect.stringContaining('서버에 문제가 생겼어요'),
+    );
   });
 });
 
