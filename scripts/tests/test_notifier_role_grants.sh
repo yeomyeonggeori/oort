@@ -156,6 +156,9 @@ SCAN_SCOPE = [
     {
         "path": "server-rust/crates/momo-push/src/judgment.rs",
         "mode": "all",
+        # #3553: the `wrun` arm only asks EXISTS (workspace_id, agent_member_id);
+        # migration 120's agent_run trigger (derived below) asks the same.
+        "column_reads": {"hosted_agent_connection": ["workspace_id", "agent_member_id"]},
         "why": "push.rs:139 judge_targets / :212 unread_badge",
     },
     {
@@ -831,6 +834,18 @@ if not any("column read workspace.avatar_media_id" in p for p in probs_e):
 print(
     "[test-notifier-role-grants] ok: sabotage drop workspace.avatar_media_id column GRANT → RED "
     f"({[p for p in probs_e if 'avatar_media_id' in p][0]})"
+)
+
+# (g) #3553: drop the hosted_agent_connection column grant the v0.1.18 push
+# judgment (and migration 120's agent_run trigger) needs → RED.
+col_g = {t: set(c) for t, c in COLUMN_GRANTS.items()}
+col_g.pop("hosted_agent_connection", None)
+probs_g = compare(used_real, grants, real, col_grants=col_g)
+if not any("column read hosted_agent_connection.agent_member_id" in p for p in probs_g):
+    fail(f"sabotage drop hosted_agent_connection GRANT stayed GREEN (problems={probs_g})")
+print(
+    "[test-notifier-role-grants] ok: sabotage drop hosted_agent_connection column GRANT → RED "
+    f"({[p for p in probs_g if 'hosted_agent_connection' in p][0]})"
 )
 
 # (f) #3377: a share-retention DELETE in the scanned notifier source → RED.
