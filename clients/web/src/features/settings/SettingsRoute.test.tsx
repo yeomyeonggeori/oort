@@ -295,6 +295,11 @@ describe("SettingsRoute 전면 레이아웃", () => {
         ?.getAttribute("aria-current")
     ).toBe("page");
     expect(account.querySelector('[data-testid="logout"]')).not.toBeNull();
+    // 별칭은 프로필 한 페이지를 연다: 옛 「계정」 페이지는 따로 없다.
+    expect(account.querySelector("h1")?.textContent).toBe("프로필");
+    expect(account.querySelector('[data-testid="profile-account-card"]')).not.toBeNull();
+    expect(account.querySelector('[data-testid="workspace-leave"]')).not.toBeNull();
+    expect(account.querySelectorAll('[data-testid="logout"]').length).toBe(1);
 
     const members = mountRoute("/settings?section=members");
     expect(members.querySelector('[data-testid="section-members"]')).not.toBeNull();

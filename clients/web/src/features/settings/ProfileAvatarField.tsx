@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { removeMyAvatar } from "@momo/core/lib/api";
@@ -30,14 +30,25 @@ export function ProfileAvatarField({
   workspaceId,
   me,
   offline,
+  changeRef: externalChangeRef,
+  onBusyChange,
 }: {
   workspaceId: string;
   me: RosterMember | null;
   offline: boolean;
+  /**
+   * 히어로의 카메라 손잡이가 「사진 바꾸기」 단추를 대신 누를 수 있게 밖에서 쥔 ref (#3603).
+   * 손잡이가 파일 입력을 직접 열면 업로드·지우는 중의 잠금을 건너뛰므로, 잠금을 지는
+   * 진짜 단추 하나로 길을 모은다.
+   */
+  changeRef?: RefObject<HTMLButtonElement>;
+  /** 올리는 중·지우는 중을 히어로가 알아 카메라 손잡이를 같이 잠글 수 있게 한다. */
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const client = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
-  const changeRef = useRef<HTMLButtonElement>(null);
+  const ownChangeRef = useRef<HTMLButtonElement>(null);
+  const changeRef = externalChangeRef ?? ownChangeRef;
   const hintId = useId();
   const statusId = useId();
   const [progress, setProgress] = useState(0);
@@ -82,6 +93,9 @@ export function ProfileAvatarField({
   const uploading = upload.isPending;
   const removing = remove.isPending;
   const busy = uploading || removing;
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
   const hasAvatar = Boolean(me?.avatarUrl);
 
   function onPick(event: React.ChangeEvent<HTMLInputElement>) {
@@ -114,7 +128,7 @@ export function ProfileAvatarField({
 
   return (
     <div className="flex flex-col gap-2" data-testid="profile-avatar-field">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center justify-center gap-2 @sm:justify-start">
         <Button
           ref={changeRef}
           type="button"
@@ -130,7 +144,7 @@ export function ProfileAvatarField({
           aria-describedby={describedBy}
           aria-disabled={changeLocked || undefined}
           aria-busy={uploading || undefined}
-          className={cn("min-w-avatar-action", changeLocked && "opacity-50")}
+          className={cn("tap-target min-w-avatar-action", changeLocked && "opacity-50")}
           onClick={() => {
             if (changeLocked || busy) return;
             inputRef.current?.click();
@@ -162,7 +176,7 @@ export function ProfileAvatarField({
               setDone(null);
               remove.mutate();
             }}
-            triggerClassName="min-w-avatar-action"
+            triggerClassName="tap-target min-w-avatar-action"
             testId="profile-avatar-remove"
           />
         ) : null}

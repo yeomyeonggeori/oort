@@ -53,6 +53,7 @@ export const NAMED_MEASURES = [
   "control-lg",
   "action-sm",
   "avatar-action",
+  "avatar-hero",
   "action",
   "action-band",
   "name-floor",

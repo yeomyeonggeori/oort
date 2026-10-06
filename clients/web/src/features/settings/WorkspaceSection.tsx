@@ -13,7 +13,6 @@ import {
   completeWorkspaceAvatarUpload,
   createWorkspaceAvatarUpload,
   fetchWorkspaceUnfurlSettings,
-  leaveWorkspace,
   updateWorkspaceUnfurlSettings,
   uuidEq,
 } from "@momo/core/lib/api";
@@ -54,7 +53,6 @@ import {
   welcomePromptTooLong,
 } from "@/features/welcome/welcomeKickoff";
 import {
-  ConfirmButton,
   Field,
   KeyValueRows,
   OperatorNotice,
@@ -65,12 +63,12 @@ import {
 
 // =============================================================================
 // 워크스페이스 (R-1 §5 / ADR-0117 · ADR-0161): read the current tenant, set its
-// avatar, leave it, and provision a new one.
+// avatar, and provision a new one.
 //
 // Creating a workspace mints a tenant on the shared instance, so the server
 // gates it on the instance operator, not on an ordinary owner. Setting the
-// avatar and leaving are workspace-scoped: the avatar is an owner/admin write
-// (ADR-0161 D5), self-leave is any member (D4) with the last-owner refused.
+// avatar is workspace-scoped: the avatar is an owner/admin write
+// (ADR-0161 D5). Self-leave (D4) moved to the profile page (LeaveWorkspaceRow, #3603).
 // =============================================================================
 
 /** 5 MiB — server `workspace_avatar_size_ck`. Checked here so an oversize file
@@ -291,7 +289,7 @@ function WorkspaceAvatarField({
               말하고 있었다 — 그 겹침이 하나뿐인 진행 낱말을 opacity-50 아래에서
               죽이고(「올리는 중, 사용 안 함」), 파일 창을 연 손에서 초점을 <body>
               로 떨궜다. 잠그는 사실로 남는 것은 오프라인 하나다.
-              (같은 파일 아래쪽 「워크스페이스 나가기」가 #1502 에서 받은 수리와
+              (`LeaveWorkspaceRow`의 「워크스페이스 나가기」가 #1502 에서 받은 수리와
               같은 갈라내기다.) */}
           <Button
             type="button"
@@ -992,69 +990,6 @@ function WorkspaceRenameField({
   );
 }
 
-function LeaveWorkspace({
-  workspaceId,
-  offline,
-}: {
-  workspaceId: string;
-  offline: boolean;
-}) {
-  const session = useSession();
-
-  const leave = useMutation({
-    mutationFn: () => leaveWorkspace(workspaceId),
-    onSuccess: () => {
-      // 나가면 이 세션은 끝이다: 서버가 이미 토큰을 파기했고, 로컬도 정리한다.
-      session.logout();
-    },
-  });
-
-  const lastOwner =
-    leave.isError && leave.error instanceof ApiError && leave.error.status === 409;
-  const otherError = leave.isError && !lastOwner ? errorMessage(leave.error) : null;
-
-  return (
-    <div className="flex flex-col items-start gap-2 rounded-md border border-line bg-surface-raised p-4">
-      <h3 className="text-body font-medium text-ink">워크스페이스 나가기</h3>
-      <p className="text-meta text-ink-muted">
-        이 워크스페이스에서 나가요. 다시 들어오려면 초대가 필요해요.
-      </p>
-      {lastOwner && (
-        <p className="text-meta text-danger" role="alert" data-testid="workspace-leave-last-owner">
-          마지막 소유자는 나갈 수 없어요. 먼저 다른 사람에게 소유자를 넘기세요.
-        </p>
-      )}
-      {otherError && (
-        <p className="text-meta text-danger" role="alert" data-testid="workspace-leave-error">
-          {otherError}
-        </p>
-      )}
-      <div className="flex flex-wrap items-center gap-2">
-        {/* 진행은 잠금이 아니다 (#1403 리뷰 H-1 · #1486 문법). 이 버튼은 자기가
-            낸 쓰기로 자신을 잠그고 있었고, 그래서 나가기를 누른 사람 앞의 트리거가
-            회색이 됐다 — 「당신은 이걸 못 한다」로 읽히는 칠이다. 진행을 말하는
-            일은 그 옆의 형제 상태 줄 하나가 대신 지고 있었다.
-
-            #1490 이 `ConfirmButton` 에 `busy` 를 실은 뒤로는 그 줄이 있을 이유가
-            없다. 낱말은 트리거 자신이 진다 — 확정이 질문을 먼저 닫으므로 쓰기가
-            나가는 순간 초점이 서 있는 자리가 거기다. 잠그는 사실로 남는 것은
-            오프라인 하나다. 형제 줄을 함께 두면 100px 안에 같은 낱말이 둘 서고,
-            그중 하나는 회색 버튼 옆에서 자기가 무엇의 진행인지 말하지 못한다. */}
-        <ConfirmButton
-          label="워크스페이스 나가기"
-          question="나가면 멤버십이 끝나고, 확인하면 바로 로그아웃돼요. 다시 들어오려면 초대가 필요해요."
-          confirmLabel="나가기"
-          disabled={offline}
-          busy={leave.isPending}
-          busyLabel="나가는 중"
-          onConfirm={() => leave.mutate()}
-          testId="workspace-leave"
-        />
-      </div>
-    </div>
-  );
-}
-
 export function WorkspaceSection({
   workspaceId,
   offline,
@@ -1169,8 +1104,6 @@ export function WorkspaceSection({
 
       <WorkspaceUnfurlSetting workspaceId={workspaceId} offline={offline} />
 
-      {query.data && <LeaveWorkspace workspaceId={workspaceId} offline={offline} />}
-
       <h3 className="text-body font-medium text-ink">새 워크스페이스 만들기</h3>
 
       {create.isError && isOperatorDenied(create.error) ? (
@@ -1234,7 +1167,7 @@ export function WorkspaceSection({
                 (#1541) — 만들기를 누른 사람 앞에서 「만드는 중」이 opacity-50
                 아래로 들어가고, 방금 Enter 를 누른 손에서 초점이 <body> 로
                 떨어졌다. 진행은 `aria-busy` 와 낱말이, 잠금은 오프라인 하나가
-                진다. 위 「워크스페이스 나가기」와 같은 문법이다. */}
+                진다. 프로필의 「워크스페이스 나가기」와 같은 문법이다. */}
             <Button
               type="submit"
               size="sm"
