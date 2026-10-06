@@ -11,6 +11,13 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-10-06
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.19>. Tag target: `main=6558910e`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. **v0.1.18 was published but never deployed**: its `momo-notifier` had no privilege on `hosted_agent_connection`, so push judgment and the migration 120 trigger would fail with `permission denied` (#3553, caught in the pre-deploy check). 0.1.19 contains everything in 0.1.18 plus the fix. There is no new migration for the fix: the api pre-deploy re-applies `bootstrap_runtime_roles.sql`.
+
+### Fixed
+- Server: `momo-notifier` can read `hosted_agent_connection(workspace_id, agent_member_id)` (column grant only), so hosted work-run pushes and the `work.run.updated` trigger work under the production role; a production-role conformance test now runs push judgment, the push drain and the trigger as `momo_notifier` (#3554).
+
 ## [0.1.18] - 2026-10-06
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.18>. Tag target: `main=eff10223`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Five database migrations since 0.1.17 (116-120): 116 adds the subscription-agent fields and device registration (ADR-0193 D14-D17); 117 adds `personal_provider_link` for personal API keys (FORCE row-level security); 118 adds `cloud_box` and its lifecycle control queue and 119 adds the box runner registration (personal cloud workspace, ADR-0197 M1-M2; both unused while `MOMO_CLOUD_BOX_ENABLED` is off, the default); 120 adds a trigger that emits the realtime event `work.run.updated` when a hosted agent's work run changes (ADR-0162 amendment 3 D13). No data is dropped. Deploy order for this release: push relay first, then notifier and server (migration 120), then the phone app, so the new `work_run_done` push reason is understood before it is sent.
