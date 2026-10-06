@@ -57,6 +57,8 @@ export const TEAM_BOARD_COPY = {
   runStepsHeading: "에이전트가 알린 단계",
   runArtifactsHeading: "결과",
   runBranch: "브랜치",
+  openNewTab: "새 탭에서 열기",
+  runChange: "변경",
   runNoStages: "아직 알린 단계가 없어요",
   runNoPrBody: "에이전트가 PR을 알리면 여기에 보여요",
   goneTitle: "이 세션은 더 이상 보이지 않아요",

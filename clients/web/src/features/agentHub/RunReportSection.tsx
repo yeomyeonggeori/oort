@@ -62,6 +62,7 @@ export function RunReportSection({ output }: { output: unknown }) {
                     )}
                   />
                   <span className="min-w-0 break-words">{stage}</span>
+                  <span className="sr-only">{current ? "지금 단계" : "지난 단계"}</span>
                 </li>
               );
             })}
@@ -90,7 +91,7 @@ export function RunReportSection({ output }: { output: unknown }) {
                   </span>
                 </span>
                 <ExternalLink aria-hidden className="size-3 shrink-0 text-icon" />
-                <span className="sr-only">새 탭에서 열기</span>
+                <span className="sr-only">{TEAM_BOARD_COPY.openNewTab}</span>
               </a>
             )}
             <dl className="flex flex-col gap-1 text-body">
@@ -107,7 +108,7 @@ export function RunReportSection({ output }: { output: unknown }) {
               )}
               {(artifacts.commits !== null || change !== null) && (
                 <div className="grid grid-cols-3 gap-2">
-                  <dt className="min-w-0 text-ink-muted">변경</dt>
+                  <dt className="min-w-0 text-ink-muted">{TEAM_BOARD_COPY.runChange}</dt>
                   <dd
                     className="col-span-2 min-w-0 text-ink"
                     data-numeric

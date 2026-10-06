@@ -70,7 +70,7 @@ export function LaneLabel({ item }: { item: SharedWorkSession }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 text-timestamp font-medium",
+        "inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-timestamp font-medium",
         agent ? "text-agent" : "text-ink-muted"
       )}
       data-testid="team-board-lane"

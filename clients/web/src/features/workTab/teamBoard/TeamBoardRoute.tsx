@@ -504,7 +504,7 @@ function BoardRow({
       >
         <span className="flex min-w-0 flex-col" data-col="task">
           <span className="truncate font-medium">{sessionTitle(item)}</span>
-          <span className="flex min-w-0 items-center gap-2 text-timestamp text-ink-muted">
+          <span className="flex min-w-0 flex-wrap items-center gap-x-2 text-timestamp text-ink-muted">
             <LaneLabel item={item} />
             <span className="shrink-0">{harnessLabel(item)}</span>
             {latestStage !== null && (
@@ -554,13 +554,13 @@ function BoardRow({
           target="_blank"
           rel="noopener noreferrer"
           data-testid="team-board-row-pr"
-          className="mb-1 ms-3 inline-flex max-w-full items-center gap-1 rounded-md px-1 text-timestamp text-ink-muted press hover:text-ink focus-visible:focus-ring"
+          className="mb-1 ms-3 inline-flex min-h-6 max-w-full items-center gap-1 rounded-md px-1 py-1 text-timestamp text-ink-muted press hover:text-ink focus-visible:focus-ring"
         >
           <GitPullRequest aria-hidden className="size-3 shrink-0" />
           <span className="truncate">
             {pr.number} · {pr.repo}
           </span>
-          <span className="sr-only">새 탭에서 열기</span>
+          <span className="sr-only">{TEAM_BOARD_COPY.openNewTab}</span>
         </a>
       )}
     </li>
