@@ -456,6 +456,7 @@ agent_run.output = {
 
 - **터미널 바이트 없음.** 벤더 VM의 터미널·화면·파일 시스템은 oort로 오지 않는다. ADR-0125 D10(서버는 터미널 바이트를 싣지 않는다)·ADR-0188/0190의 경계는 그대로다. 보드·카드에 입력 칸·attach·제어는 없다.
 - **자유 텍스트는 기존 상한 안에서만.** 새로 보이게 되는 에이전트 문자열은 단계 표식(≤12×80)과 `branch`(검증됨)뿐이다. `detail`·`textDelta`·`body`·`error`는 보드가 읽지 않는다. 커밋 제목·파일 이름·경로·원격 URL은 필드가 없다.
+- **추가로 보이는 문자열(#3517 보안 검수 M2).** run 항목의 `label`은 요청자가 쓴 작업 제목(`input.title`, 200자)이다. 에이전트의 문자열은 아니지만 사용자 입력이므로 같은 규칙을 받는다: 표면(AT-5, #3518)은 일반 텍스트로만 그린다(마크다운·링크 변환·멘션 해석 없음).
 - **화면 처리.** 표식·브랜치는 외부 에이전트가 쓴 신뢰할 수 없는 텍스트다. 일반 텍스트로 이스케이프해 그리고(마크다운·링크 자동 변환·멘션 해석 없음, `inert_display_name`과 같은 결), 링크로 그려지는 것은 검증된 `prUrl` 하나뿐이다.
 - **요청 본문 상한.** 단계 표식·산출물 요청은 share 본문 상한(`MAX_SHARE_BODY_BYTES` 8 KiB)과 같은 층의 작은 상한을 받는다. 기존 `oort_run_complete.body` 상한(8000)은 그대로다.
 - **감사.** 종결 보고에 `artifacts`가 실리면 감사 1행(`agent.run.artifacts_reported`: run id·존재한 키 이름만, 값·URL 없음), 형식 거절은 사유 코드만 담은 감사 1행(`agent.run.report_rejected`)을 남긴다. 단계 표식마다는 감사하지 않는다(`step_count`와 `output.stages`가 기록이다). 토큰·lease handle은 어디에도 남기지 않는다.
@@ -496,6 +497,18 @@ agent_run.output = {
 4. **AT-5 표면·레시피(UXUI·docs):** 보드·카드에 run 항목, 루틴 문구 수정(D16). 캡처·실계정은 `runtime-unverified`로 표기.
 
 각 단위의 수용기준은 되돌리면 실패하는 시험을 요구한다: ① 호스팅 연결이 active가 아니거나 채널이 승인 밖이면 409이고 job 0건, `owner_only`·D18은 호스팅 연결과 무관하게 계속 409, ② 13번째 표식이 가장 오래된 것을 밀어내고 `step_count`가 `max_steps`에서 포화해도 완료가 막히지 않음, ③ 잘못된 `prUrl`·`branch`·음수 숫자는 완료 전체를 거절하고 아무것도 쓰지 않음, 알 수 없는 `artifacts` 키는 거절, ④ 채널 비멤버·다른 DM·다른 테넌트의 run이 보드에 0건이고 세션에 연결된 run은 한 줄, ⑤ 푸시는 요청자 외·60초 미만·설정 off·자기 취소에서 0건.
+
+### AT-4 구현 기록 (#3517, 2026-10-06)
+
+D13·D14를 구현하면서 정한 세부다. 계약을 바꾸지 않고, 실측과 어긋난 표기만 바로잡는다.
+
+- **엔드포인트.** 보드는 `GET /v1/workspaces/{ws}/work-sessions/shared`(ADR-0194 D5가 만든 실제 경로, `?scope=team`은 없다)다. run 항목은 `?include=runs`를 준 호출에만 섞는다. 이미 배포된 클라이언트가 모든 행을 `sessionId`로 키 잡는데, 기본 응답에 `sessionId` 없는 행이 끼면 깨지기 때문이다. 항목은 `source: "session" | "run"`을 갖고, run 항목은 `sessionId` 대신 `runId`를 낸다(키 자체가 없다). 단건 `…/{id}/shared`는 세션 전용이고 run 카드는 agent-runs 상세다.
+- **요청자.** `agent_run`에는 요청자 컬럼이 없어 `audit_log` action `agent.work.queued`의 `actor_member_id`(`run_id`로 조인, 가장 이른 행)를 읽는다. 행이 없으면 보드에는 `requestedBy` 없이 나오고 푸시는 보내지 않는다.
+- **세션 연결 중복 제거.** 기존 `linked_work_session_ids_in_tx`와 같은 관계(`audit_log.run_id` → `work_control.session_id`)로 걸러, 연결된 세션이 있으면 run 항목은 내지 않는다. 연결된 세션이 그 보는 사람에게 보이지 않아도 run은 나오지 않는다(D13 문구 그대로).
+- **실시간.** 기존 `agent.status`(rail) 프레임은 `agent:` 네임스페이스·에이전트별 토픽이라 여러 채널을 함께 보는 보드의 신호로 쓸 수 없어 재사용하지 않고, 집 채널 토픽에 `work.run.updated`(`run_id`, `channel_id`, `to`=보드 어휘)를 새로 낸다. `agent_run.status` 쓰기 지점이 여럿이라 migration 120의 `agent_run` 트리거가 같은 트랜잭션에서 outbox에 넣는다. 보드 어휘가 바뀌는 전환(생성 포함)에서만 내고, 승인 보류·정지(보드에서 모두 running)와 단계·step 갱신은 내지 않는다. 호스팅 연결이 없는 에이전트의 run과 mention run은 내지 않는다.
+- **푸시.** 완료 응답 메시지(`client_msg_id = run_id`, 성공은 text·실패는 system)가 이미 push candidate를 만들므로 새 outbox kind 없이 `judge_targets`에 `work_run_done` 팔을 더했다. 수신자 = 요청자(감사 행) 한 명, `finished_at − started_at ≥ 60초`, A-8 전경 휴리스틱, `work_complete_push`(새 토글 없음). 요청자에게 조건이 안 맞으면 `dm`으로 떨어지지 않고 무음이다(끄기가 실제로 끄도록). 취소는 완료 응답이 없어 후보 자체가 없고, `timed_out`을 쓰는 코드는 아직 없어 그 갈래는 잠복이다(쓰는 코드가 생길 때 응답 메시지를 함께 넣어야 푸시가 간다).
+- **배포 순서.** relay(`momo-push-relay`, `ALLOWED_REASONS`에 `work_run_done`)를 먼저, 그 다음 notifier·server. 모바일의 닫힌 reason 목록(`contract.ts`·`PushNotification.swift`)은 뒤따르고, 구 앱은 정적 자리표시자로 fail-open한다.
+- **보안 검수 반영(#3533).** iOS NSE는 `work_run_done`을 고정 문구(「작업이 끝났어요」/「요청한 작업이 끝났어요」)로만 그리고 메시지 본문을 읽지 않는다. 보드는 끝나지 않은 run도 생성 후 30일이면 거르고, 저장된 `prUrl`이 `https://`가 아니면 읽을 때 버린다.
 
 ### 증보 3 부록 A — 호스티드 lease 길이와 암묵 갱신 (Accepted · 성재 AT 계획 결재 「이대로 진행」 2026-10-05 · #3530 AT-8)
 

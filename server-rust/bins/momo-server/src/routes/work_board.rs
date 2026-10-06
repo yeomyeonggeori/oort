@@ -22,13 +22,15 @@ use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_t3::work_board::{
-    get_board_item_in_tx, list_board_in_tx, BoardCursor, BoardItem, DEFAULT_PAGE, MAX_PAGE,
+    get_board_item_in_tx, list_board_in_tx, BoardCursor, BoardItem, BoardSource, DEFAULT_PAGE,
+    MAX_PAGE,
 };
 use uuid::Uuid;
 
 use crate::dto::{
-    SharedDiffDto, SharedSessionChannelDto, SharedSessionOwnerDto, SharedWorkSessionDto,
-    SharedWorkSessionListQuery, SharedWorkSessionListResponse, SharedWorkSessionResponse,
+    SharedDiffDto, SharedPrDto, SharedSessionChannelDto, SharedSessionOwnerDto,
+    SharedWorkSessionDto, SharedWorkSessionListQuery, SharedWorkSessionListResponse,
+    SharedWorkSessionResponse,
 };
 use crate::error::ApiError;
 use crate::routes::shared::{path_uuid, require_human, settle, tenant_tx, workspace_scope};
@@ -67,8 +69,30 @@ fn page_limit(raw: Option<&str>) -> i64 {
 }
 
 fn dto(item: BoardItem) -> SharedWorkSessionDto {
+    let is_run = item.source == BoardSource::Run;
+    let run = item.run;
+    let pr = match (is_run, item.pr_url.as_ref()) {
+        (true, Some(url)) => Some(SharedPrDto {
+            url: url.clone(),
+            number: run.as_ref().and_then(|run| run.pr_number),
+        }),
+        _ => None,
+    };
     SharedWorkSessionDto {
-        session_id: item.session_id.to_string(),
+        source: item.source.as_str(),
+        session_id: (!is_run).then(|| item.session_id.to_string()),
+        run_id: run.as_ref().map(|run| run.run_id.to_string()),
+        requested_by: run.as_ref().and_then(|run| {
+            run.requested_by
+                .as_ref()
+                .map(|(member_id, display_name)| SharedSessionOwnerDto {
+                    member_id: member_id.to_string(),
+                    display_name: display_name.clone(),
+                })
+        }),
+        step_count: run.as_ref().map(|run| run.step_count),
+        commits: run.as_ref().and_then(|run| run.commits),
+        pr,
         origin: item.origin,
         label: item.label,
         folder_label: item.folder_label,
@@ -113,6 +137,7 @@ pub async fn list(
     require_human(&principal, "the team board requires a signed-in member")?;
     let after = query.cursor.as_deref().map(decode_cursor).transpose()?;
     let limit = page_limit(query.limit.as_deref());
+    let include_runs = query.include.as_deref() == Some("runs");
     let viewer = principal.member_id;
 
     let page = settle(
@@ -123,6 +148,7 @@ pub async fn list(
                     conn,
                     workspace_id,
                     viewer,
+                    include_runs,
                     after,
                     limit,
                 )
