@@ -53,6 +53,14 @@ vi.mock("./NotificationRulesSection", () => ({
   NotificationRulesSection: () =>
     createElement("div", { "data-testid": "section-notifications" }),
 }));
+vi.mock("./ShortcutsSection", () => ({
+  ShortcutsSection: () =>
+    createElement("div", { "data-testid": "section-shortcuts" }),
+}));
+vi.mock("./TerminalSection", () => ({
+  TerminalSection: () =>
+    createElement("div", { "data-testid": "section-terminal" }),
+}));
 vi.mock("./AppearanceSection", () => ({
   AppearanceSection: () =>
     createElement("div", { "data-testid": "section-appearance" }),
@@ -187,32 +195,62 @@ describe("SettingsRoute 전면 레이아웃", () => {
     ).toBe(false);
   });
 
-  it("개인 그룹 최상단이 프로필이고 기존 섹션이 모두 있다", () => {
+  it("개인 그룹 최상단이 프로필이고 12행이 세 그룹에 선다", () => {
     const host = mountRoute();
     const nav = host.querySelector('[data-testid="settings-nav"]');
     expect(nav?.textContent).toContain("개인");
     expect(nav?.textContent).toContain("워크스페이스");
-    expect(nav?.textContent).toContain("연결");
+    expect(nav?.textContent).toContain("앱·연결");
     const buttons = [
       ...host.querySelectorAll('[data-testid^="settings-nav-"]'),
     ].map((el) => el.getAttribute("data-testid"));
-    expect(buttons[0]).toBe("settings-nav-profile");
-    expect(buttons).toEqual(
-      expect.arrayContaining([
-        "settings-nav-account",
-        "settings-nav-devices",
-        "settings-nav-appearance",
-        "settings-nav-link-previews",
-        "settings-nav-notifications",
-        "settings-nav-ai",
-        "settings-nav-agents",
-        "settings-nav-workspace",
-        "settings-nav-plugins",
-        "settings-nav-usage",
-        "settings-nav-webhooks",
-        "settings-nav-members",
-        "settings-nav-events",
-      ])
+    // 브라우저에는 업데이트(데스크톱 전용)와 실행 호스트(서버 표면)가 없다. 기억은 서버 표면이 있다.
+    expect(buttons).toEqual([
+      "settings-nav-profile",
+      "settings-nav-appearance",
+      "settings-nav-notifications",
+      "settings-nav-shortcuts",
+      "settings-nav-devices",
+      "settings-nav-workspace",
+      "settings-nav-members",
+      "settings-nav-memory",
+      "settings-nav-usage",
+      "settings-nav-ai",
+    ]);
+    // 닫힌 네 행(앱·외부 에이전트 연결·채널로 들어오는 주소·밖으로 보내는 알림)은 목차에 없다.
+    for (const gone of ["agents", "plugins", "webhooks", "events", "account", "terminal", "link-previews"]) {
+      expect(host.querySelector(`[data-testid="settings-nav-${gone}"]`), gone).toBeNull();
+    }
+  });
+
+  it("목록 행은 앱 사이드바와 같은 sidebar-row이고 아이콘이 있으며 선택 행만 selected다", () => {
+    const host = mountRoute();
+    const profile = host.querySelector('[data-testid="settings-nav-profile"]') as HTMLElement;
+    const appearance = host.querySelector('[data-testid="settings-nav-appearance"]') as HTMLElement;
+    for (const row of [profile, appearance]) {
+      expect(row.classList.contains("sidebar-row")).toBe(true);
+      expect(row.querySelector("[data-row-icon] svg")).not.toBeNull();
+    }
+    expect(profile.classList.contains("sidebar-row-selected")).toBe(true);
+    expect(appearance.classList.contains("sidebar-row-selected")).toBe(false);
+    // 선·구분 상자 대신 그룹 라벨뿐이다: 목록 안에 <hr>·separator가 없다.
+    const nav = host.querySelector('[data-testid="settings-nav"]')!;
+    expect(nav.querySelector('hr, [role="separator"]')).toBeNull();
+  });
+
+  it("페이지 머리는 보이는 h1 하나이고 범위 칩을 단다", () => {
+    const host = mountRoute();
+    expect(host.querySelectorAll("h1")).toHaveLength(1);
+    expect(host.querySelector("h1")?.textContent).toBe("프로필");
+    expect(host.querySelector('[data-testid="settings-scope-chip"]')?.textContent).toContain(
+      "이 워크스페이스에서 보여요"
+    );
+    act(() => {
+      (host.querySelector('[data-testid="settings-nav-appearance"]') as HTMLButtonElement).click();
+    });
+    expect(host.querySelector("h1")?.textContent).toBe("모양");
+    expect(host.querySelector('[data-testid="settings-scope-chip"]')?.textContent).toContain(
+      "이 기기에만 저장돼요"
     );
   });
 
@@ -221,9 +259,14 @@ describe("SettingsRoute 전면 레이아웃", () => {
     expect(document.activeElement).toBe(
       root.querySelector('[data-testid="settings-nav-profile"]')
     );
+    // 합친 옛 구획(account)은 그 구획이 들어간 프로필 행에 닿는다.
     const account = mountRoute("/settings?section=account");
     expect(document.activeElement).toBe(
-      account.querySelector('[data-testid="settings-nav-account"]')
+      account.querySelector('[data-testid="settings-nav-profile"]')
+    );
+    const devices = mountRoute("/settings?section=devices");
+    expect(document.activeElement).toBe(
+      devices.querySelector('[data-testid="settings-nav-devices"]')
     );
   });
 
@@ -234,7 +277,7 @@ describe("SettingsRoute 전면 레이아웃", () => {
         "aria-current"
       )
     ).toBe("page");
-    expect(root.querySelector("h2")?.textContent).toBe("프로필");
+    expect(root.querySelector("h1")?.textContent).toBe("프로필");
     const back = root.querySelector(
       '[data-testid="settings-back-to-app"]'
     ) as HTMLButtonElement;
@@ -252,7 +295,7 @@ describe("SettingsRoute 전면 레이아웃", () => {
     const account = mountRoute("/settings?section=account");
     expect(
       account
-        .querySelector('[data-testid="settings-nav-account"]')
+        .querySelector('[data-testid="settings-nav-profile"]')
         ?.getAttribute("aria-current")
     ).toBe("page");
     expect(account.querySelector('[data-testid="logout"]')).not.toBeNull();
@@ -261,56 +304,49 @@ describe("SettingsRoute 전면 레이아웃", () => {
     expect(members.querySelector('[data-testid="section-members"]')).not.toBeNull();
   });
 
-  it("AI 연결 구획 위에는 「AI 화면으로 옮겼어요」 링크가 서고, 그 밖의 구획에는 없다 (AIH-3)", () => {
+  it("AI 허브 행은 설정 페이지를 바꾸지 않고 허브로 간다", () => {
     const host = mountRoute("/settings?section=profile");
+    const row = host.querySelector('[data-testid="settings-nav-ai"]') as HTMLButtonElement;
+    expect(row.querySelector("svg")).not.toBeNull();
+    act(() => row.click());
+    expect(navigate).toHaveBeenCalledWith("/ai/accounts");
+    expect(host.querySelector("h1")?.textContent).toBe("프로필");
+    expect(row.getAttribute("aria-current")).toBeNull();
     expect(host.querySelector('[data-testid="ai-hub-moved-link"]')).toBeNull();
-    act(() => {
-      (host.querySelector('[data-testid="settings-nav-ai"]') as HTMLButtonElement).click();
-    });
+  });
+
+  it("옛 ?section=ai 는 리다이렉트하지 않고 옛 AI 연결 화면과 「AI 화면으로 옮겼어요」 줄을 연다", () => {
+    const host = mountRoute("/settings?section=ai");
+    expect(host.querySelector('[data-testid="settings-route"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="section-ai"]')).not.toBeNull();
     const line = host.querySelector('[data-testid="ai-hub-moved-link"]');
     expect(line?.textContent).toContain("AI 화면으로 옮겼어요");
     expect(line?.querySelector("a")?.getAttribute("href")).toContain("/ai/accounts");
-    act(() => {
-      (host.querySelector('[data-testid="settings-nav-account"]') as HTMLButtonElement).click();
-    });
-    expect(host.querySelector('[data-testid="ai-hub-moved-link"]')).toBeNull();
+    expect(host.querySelector('[data-testid="settings-nav-ai"]')?.getAttribute("aria-current")).toBe("page");
+    // 곁판이 있는 화면이라 읽는 폭 제한과 카드 껍질을 쓰지 않는다.
+    expect(host.querySelector('[data-testid="settings-legacy-card"]')).toBeNull();
+    expect(host.querySelector(".settings-page")?.hasAttribute("data-wide")).toBe(true);
   });
 
-  it("사이드바에서 기존 섹션에 모두 도달한다", () => {
+  it("사이드바에서 기존 섹션에 모두 도달한다 (합친 페이지는 옛 본문을 이어 붙인다)", () => {
     const host = mountRoute("/settings?section=profile");
-    const clicks: Array<[string, string]> = [
-      ["settings-nav-account", "logout"],
-      ["settings-nav-devices", "device-link-card"],
-      ["settings-nav-appearance", "section-appearance"],
-      ["settings-nav-link-previews", "section-link-previews"],
-      ["settings-nav-notifications", "section-notifications"],
-      ["settings-nav-workspace", "section-workspace"],
-      ["settings-nav-members", "section-members"],
-      ["settings-nav-ai", "section-ai"],
-      ["settings-nav-usage", "section-usage"],
+    expect(host.querySelector('[data-testid="logout"]')).not.toBeNull();
+    const clicks: Array<[string, string[]]> = [
+      ["settings-nav-devices", ["device-link-card"]],
+      ["settings-nav-appearance", ["section-appearance", "section-link-previews"]],
+      ["settings-nav-shortcuts", ["section-shortcuts", "section-terminal"]],
+      ["settings-nav-notifications", ["section-notifications"]],
+      ["settings-nav-workspace", ["section-workspace"]],
+      ["settings-nav-members", ["section-members"]],
+      ["settings-nav-usage", ["section-usage"]],
     ];
-    for (const [navId, panelId] of clicks) {
+    for (const [navId, panelIds] of clicks) {
       act(() => {
         (host.querySelector(`[data-testid="${navId}"]`) as HTMLButtonElement).click();
       });
-      expect(host.querySelector(`[data-testid="${panelId}"]`)).not.toBeNull();
-    }
-  });
-
-  it("외부 연결로 옮긴 네 구획은 눌러도 설정에 머물지 않고 그 줄 상세로 간다 (AIH-8)", () => {
-    const host = mountRoute("/settings?section=profile");
-    const expected: Array<[string, string]> = [
-      ["settings-nav-agents", "/ai/external/agents"],
-      ["settings-nav-plugins", "/ai/external/apps"],
-      ["settings-nav-webhooks", "/ai/external/incoming"],
-      ["settings-nav-events", "/ai/external/outgoing"],
-    ];
-    for (const [navId, path] of expected) {
-      navigate.mockClear();
-      act(() => {
-        (host.querySelector(`[data-testid="${navId}"]`) as HTMLButtonElement).click();
-      });
-      expect(navigate).toHaveBeenCalledWith(path);
+      for (const panelId of panelIds) {
+        expect(host.querySelector(`[data-testid="${panelId}"]`), `${navId} → ${panelId}`).not.toBeNull();
+      }
     }
   });
 
@@ -351,9 +387,55 @@ describe("SettingsRoute 전면 레이아웃", () => {
     expect(host.querySelector('[data-testid="location-probe"]')?.textContent).toBe(target);
   });
 
-  it("옮기지 않은 ?section=ai 는 리다이렉트하지 않는다 (AIH-8)", () => {
-    const host = mountRoute("/settings?section=ai");
-    expect(host.querySelector('[data-testid="settings-route"]')).not.toBeNull();
+  it("합친 옛 구획 딥링크는 설정에 머물며 합쳐진 페이지를 연다", () => {
+    for (const [legacy, nav] of [
+      ["account", "settings-nav-profile"],
+      ["link-previews", "settings-nav-appearance"],
+      ["terminal", "settings-nav-shortcuts"],
+    ]) {
+      const host = mountRoute(`/settings?section=${legacy}`);
+      expect(host.querySelector('[data-testid="settings-route"]'), legacy).not.toBeNull();
+      expect(host.querySelector(`[data-testid="${nav}"]`)?.getAttribute("aria-current"), legacy).toBe("page");
+    }
+  });
+
+  it("키보드: 목록에서 ↑↓가 행을 옮기고 끝에서 돌아온다", () => {
+    const host = mountRoute("/settings?section=profile");
+    const nav = host.querySelector('[data-testid="settings-nav"]') as HTMLElement;
+    const profile = host.querySelector('[data-testid="settings-nav-profile"]') as HTMLButtonElement;
+    profile.focus();
+    act(() => {
+      profile.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    expect(document.activeElement).toBe(host.querySelector('[data-testid="settings-nav-appearance"]'));
+    act(() => {
+      (document.activeElement as HTMLElement).dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })
+      );
+    });
+    expect(document.activeElement).toBe(profile);
+    act(() => {
+      profile.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    });
+    expect(document.activeElement).toBe(host.querySelector('[data-testid="settings-nav-ai"]'));
+    // 가로 한 줄(폰)에서는 ←→, 양 끝은 Home/End.
+    act(() => {
+      (document.activeElement as HTMLElement).dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Home", bubbles: true })
+      );
+    });
+    expect(document.activeElement).toBe(profile);
+    act(() => {
+      profile.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    });
+    expect(document.activeElement).toBe(host.querySelector('[data-testid="settings-nav-appearance"]'));
+    act(() => {
+      (document.activeElement as HTMLElement).dispatchEvent(
+        new KeyboardEvent("keydown", { key: "End", bubbles: true })
+      );
+    });
+    expect(document.activeElement).toBe(host.querySelector('[data-testid="settings-nav-ai"]'));
+    expect(nav).not.toBeNull();
   });
 });
 

@@ -1331,18 +1331,20 @@ async function measureSettingsSurface(browser) {
   );
   await page.screenshot({ path: `${OUT_DIR}/settings-focus-return.png` });
 
-  await go(page, "/settings?section=events");
+  // 딥링크: 이벤트 구독은 AIH-8로 AI 허브에 갔고 옛 `?section=` 주소는 허브로 바뀌어 간다.
+  // 목록에 남은 가장 오른쪽 설정 섹션(사용량)으로 잰다.
+  await go(page, "/settings?section=usage");
   await waitForPageCondition(
     page,
-    'document.activeElement?.getAttribute("data-testid") === "settings-nav-events"'
+    'document.activeElement?.getAttribute("data-testid") === "settings-nav-usage"'
   );
   const deep = await page.evaluate(`(() => ({
     focus: document.activeElement?.getAttribute("data-testid"),
-    current: document.querySelector('[data-testid="settings-nav-events"]')?.getAttribute("aria-current"),
+    current: document.querySelector('[data-testid="settings-nav-usage"]')?.getAttribute("aria-current"),
   }))()`);
   check(
     "딥링크 진입 시 포커스가 그 섹션 버튼으로 간다",
-    deep.focus === "settings-nav-events" && deep.current === "page",
+    deep.focus === "settings-nav-usage" && deep.current === "page",
     JSON.stringify(deep)
   );
   await desktop.close();
@@ -1393,7 +1395,7 @@ async function measureSettingsSurface(browser) {
     row.missing !== true &&
       row.top === SETTINGS_NAV_RESTING_TOP &&
       row.height === SETTINGS_NAV_PHONE_ROW &&
-      row.items >= 10 &&
+      row.items >= 9 &&
       row.tops.length === 1 &&
       row.scrollsInline === true &&
       row.scrollsBlock === false &&
@@ -1405,10 +1407,11 @@ async function measureSettingsSurface(browser) {
   );
   // 가운데 섹션: 창 끝에 붙지 않고 이웃 한 칸(44)을 남긴다(#3064 H1). 줄 끝의
   // 섹션은 더 스크롤할 곳이 없으니 이 단정의 대상이 아니다.
-  await mobile.getByTestId("settings-nav-ai").click();
+  // (AI 허브 행은 설정 화면을 바꾸지 않고 허브로 가는 링크라 이 단정의 대상이 아니다.)
+  await mobile.getByTestId("settings-nav-workspace").click();
   const middle = await mobile.evaluate(`(() => {
     const nav = document.querySelector('[data-testid="settings-nav"]');
-    const el = document.querySelector('[data-testid="settings-nav-ai"]');
+    const el = document.querySelector('[data-testid="settings-nav-workspace"]');
     if (!nav || !el) return { missing: true };
     const nr = nav.getBoundingClientRect();
     const r = el.getBoundingClientRect();
@@ -1425,10 +1428,10 @@ async function measureSettingsSurface(browser) {
       Math.min(middle.leftRoom, middle.rightRoom) >= SETTINGS_NAV_PHONE_PEEK - 1,
     JSON.stringify(middle)
   );
-  await mobile.getByTestId("settings-nav-events").click();
+  await mobile.getByTestId("settings-nav-usage").click();
   const scrolled = await mobile.evaluate(`(() => {
     const nav = document.querySelector('[data-testid="settings-nav"]');
-    const el = document.querySelector('[data-testid="settings-nav-events"]');
+    const el = document.querySelector('[data-testid="settings-nav-usage"]');
     if (!nav || !el) return { missing: true };
     const nr = nav.getBoundingClientRect();
     const r = el.getBoundingClientRect();
@@ -1442,7 +1445,7 @@ async function measureSettingsSurface(browser) {
   check(
     "390px에서 고른 설정 섹션이 줄 안으로 가로 스크롤된다",
     scrolled.missing !== true &&
-      scrolled.focus === "settings-nav-events" &&
+      scrolled.focus === "settings-nav-usage" &&
       scrolled.fully === true &&
       scrolled.navScrollLeft > 0 &&
       scrolled.current === "page",
