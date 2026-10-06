@@ -7,7 +7,8 @@
 # `permission denied for table work_session_share` (v0.1.16 incident). The suite
 # run here, prod_role_conformance_pg, builds a fresh database the way Railway's api
 # pre-deploy does (bootstrap_runtime_roles.sql, migrate, bootstrap_runtime_roles.sql)
-# and fails on any permission error. The two-pool sweeps' behaviour suites run too.
+# and fails on any permission error — including a real hosted work run through the
+# push drain and the migration-120 agent_run status trigger (#3553, v0.1.18). The two-pool sweeps' behaviour suites run too.
 #
 # Boots its own PostgreSQL 18 container and removes it (and its volume) on exit.
 # Override NOTIFIER_ROLES_GATE_IMAGE to use a locally available pgvector/PG18 image.
@@ -63,6 +64,10 @@ until docker exec "$CONTAINER" pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" 
   fi
   sleep 2
 done
+
+# #3553: the static statement-vs-grant scan first (cheap, no DB) — it names the
+# missing table/column before the DB suite has to.
+bash scripts/tests/test_notifier_role_grants.sh >/dev/null
 
 export DATABASE_URL="postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@127.0.0.1:$PG_PORT/$POSTGRES_DB"
 cargo test --manifest-path server-rust/Cargo.toml -p momo-notifier \
