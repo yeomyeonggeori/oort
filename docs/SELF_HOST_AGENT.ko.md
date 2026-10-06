@@ -1305,6 +1305,37 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
 3) 처리할 일이 있으면 처리하고, 응답은 oort_message_post 로 같은 채널에
    쓴다. clientMsgId 는 보낼 때마다 새 UUID. 같은 clientMsgId 재시도는
    한 메시지로 남는다.
+   이벤트 kind 가 agent_job 이면 추적되는 작업(run)이다. oort_message_post
+   만 쓰지 말고 아래처럼 한다.
+   a) oort_jobs_claim {} 을 부른다. 각 job 에는 leaseHandle, leaseExpiresAtMs,
+      work(channelId, prompt, ...)가 있다. leaseHandle 은
+      /workspace/oort-run.handle 에 저장하고(권한 600) 회신에 쓰지 않는다.
+      jobs 가 비었는데 그 파일이 있으면 이미 내 job 이다. 저장한 handle 을 쓴다.
+   b) work.channelId 로 oort_conversation_read 해서 요청을 읽는다.
+   c) 단계가 시작될 때마다 oort_run_event {leaseHandle, stage:"<짧은 이름>",
+      eventId:<새 UUID>} 를 부른다. stage 는 일반 텍스트 1~80자, "/"·"\"·제어
+      문자 불가. 예: "코드 읽는 중", "수정 작성", "테스트 실행", "PR 열림".
+      비밀·파일 경로·커밋 제목·코드를 stage 에 넣지 마라. 최근 12개만 남는다.
+   d) 끝나면 oort_run_complete {leaseHandle, status:"succeeded",
+      body:"<회신, 8000바이트 이하>", artifacts:{prUrl, branch, added,
+      deleted, commits}} 를 부른다. 실제로 가진 값만 넣는다. prUrl 은
+      https://github.com/<owner>/<repo>/pull/<n>, branch 는 브랜치 이름,
+      added / deleted / commits 는 0 이상 정수. 다른 키는 받지 않는다. body 는
+      채널에 에이전트 회신으로 게시되므로 oort_message_post 로 또 보내지
+      마라. 실패하면 status:"failed" 와 error:"<사유, 4000바이트 이하>" 로
+      부른다. 이 경우에도 artifacts(남긴 브랜치·부분 PR)를 실을 수 있다.
+   e) 작업이 leaseExpiresAtMs 를 넘길 수 있으면 그 전에 oort_job_renew
+      {leaseHandle} 을 부른다(응답에 새 leaseExpiresAtMs). lease 가 만료된 뒤에는
+      oort_job_release 를 부르지 않는다.
+   f) 오류는 고정된 답이다. HTTP 400 / -32602: 호출이 잘못됐다(잘못된 stage 나
+      artifacts 키는 호출 전체를 거절하고 아무것도 바꾸지 않는다). 고쳐서
+      같은 handle 로 다시 보낸다. HTTP 409 / -32005: lease 를 잃었거나 run 이
+      이미 끝났거나 취소됐다. 멈추고 재시도하지 않는다. HTTP 409 / -32004:
+      에이전트가 일시정지·연결 해제됐거나 대상이 보이지 않는다. 멈춘다.
+      HTTP 403 / -32003: scope 나 채널 승인이 없다. 멈추고 연결 확인을 안내한다.
+   g) 오래 잠들었다 깨어났고 저장한 handle 이 있으면 그 handle 로 먼저
+      보고한다(oort_run_event 또는 oort_run_complete). oort_jobs_claim 을 먼저
+      부르면 새 handle 을 받고 옛 handle 은 409 가 된다.
    사람이 AI 연결·AI 구독 로그인(Claude, Codex)·팀 API 키 연결을 부탁하면
    직접 하려 하지 말고, 키·토큰·비밀번호·로그인 코드를 묻지 마라. 연결
    카드를 제안한다. oort_jobs_claim 리스 handle이 있으면
@@ -1333,6 +1364,120 @@ mcp-name: oort_inbox_read
 oort_message_post / oort_conversation_read 도 같은 헤더에 mcp-name 과
 params.name 만 바꾼다. 자격·커서를 회신 본문에 반복하지 않는다.
 ```
+
+##### 3.3.17.4a 추적되는 작업: claim, 단계, 완료 (#3519 AT-6)
+
+범위: **본인** Grok Bot 계정과 VM에서 개인·비상업 용도로만 쓴다. oort는
+벤더 VM·계정을 운영하거나 읽거나 풀링하지 않고, 에이전트가 보고한 것만 받는다.
+dots도 같은 패턴이고 곧 지원한다. 이 문서는 dots에 대한 개별 약속을 하지
+않는다. 에이전트 추가 흐름(위저드·비밀·도어벨) 자체는 바뀌지 않았다. 그
+점검 기록은 `claudedocs/agent-tracking-2026-10/at7-add-flow-audit.md`(저장소에
+없는 로컬 노트)에 있고, 추가 절차의 정본은 §3.3.1~§3.3.16이다.
+
+§3.3.17.4 루틴은 사람의 작업 요청을 팀이 볼 수 있는 run으로 바꾼다. 순서·한도·
+근거(ADR-0162 증보 3 D10~D16, 부록 A)는 다음과 같다.
+
+| 단계 | 호출 | 인자(UTF-8 바이트 한도) | 응답 |
+|---|---|---|---|
+| 0. 사람이 요청 | `POST /v1/workspaces/{ws}/channels/{ch}/agent-runs` 의 `type=work` (소유자가 승인한 채널·DM에서 사람이) | 해당 없음 | run `queued` + job 1 + inbox 항목 1(`agent_job`). 연결이 active 가 아니거나 채널이 승인 밖이거나 `owner_only` 이면 닫힌 사유로 409 |
+| 1. claim | `oort_jobs_claim` (scope `agent:jobs:read`) | `limit` 1..100 | `{jobs:[{leaseHandle, createdAtMs, leaseExpiresAtMs, work:{channelId, authorMemberId, triggerMessageId, prompt, ...}}]}` |
+| 2. 진행 | `oort_run_event` (scope `agent:runs:callback`) | `leaseHandle`(512), `stage`(1~80자, 최대 320바이트, `/`·`\`·제어·bidi 문자 불가), `status`(`running` `thinking` `streaming` `cancelled`), `detail`(2048, 감사 전용), `textDelta`(8192), `eventId`(UUID, 재시도가 한 번만 세어짐) | `{status:"accepted"}` |
+| 3. 끝남 | `oort_run_complete` (scope `agent:runs:callback`) | `leaseHandle`, `status`(`succeeded` / `failed`), `body`(8000), `error`(4000), `usage`, `artifacts` | `{status, messageId, seq}` |
+| 갱신 | `oort_job_renew` | `leaseHandle` | `{status:"renewed", leaseExpiresAtMs}` |
+
+`artifacts`는 닫힌 객체(`additionalProperties:false`)이고 키는 모두 선택이다.
+`prUrl`(300; `https`, 호스트는 `github.com` 또는 운영자가 올린 GitHub
+Enterprise 호스트, 경로는 정확히 `/<owner>/<repo>/pull/<n>`, 쿼리·조각은
+버림), `branch`(800; 절대 경로·드라이브 문자·역슬래시·제어 문자 불가),
+`added` / `deleted` / `commits`(0~2147483647 정수). 커밋 제목·파일 이름·원격
+URL의 키는 없어서 보낼 수 없다. 잘못된 `artifacts`(또는 잘못된 `stage`)는
+호출 전체를 HTTP 400 / `-32602`로 거절하고, 사유 코드만 담은 감사 1행 외에는
+아무것도 쓰지 않으며 lease도 그대로라서 같은 호출을 잘못된 부분만 빼고 다시
+보낼 수 있다. `stage`는 최근 12개만 남는다(13번째가 가장 오래된 것을 밀어낸다).
+단계 수는 run의 단계 한도에서 멈추고, 한도가 완료를 막지는 않는다.
+
+**오류**는 다섯 가지 고정 답이다(서버는 「없음」「안 보임」「금지」 중 무엇인지
+알려 주지 않는다). HTTP 400 `-32602` 잘못된 인자, 403 `-32003` 권한 없음(scope
+또는 채널 승인 없음), 409 `-32004` 지금 닿지 않음(일시정지·연결 해제·안 보임),
+409 `-32005` 전이 거절(lease 상실, 이미 끝났거나 취소된 run, 승인 대기로 멈춘
+run), 500 `-32603` 서버 오류.
+
+**팀이 보는 것.** run은 팀 보드(`GET /v1/workspaces/{ws}/work-sessions/shared?include=runs`)에
+요청 제목·상태(`waiting` / `running` / `done` / `failed` / `stopped`)·단계
+이름·PR 링크·브랜치·숫자가 든 카드로 나온다. 단계 이름·브랜치·요청 제목은
+**일반 텍스트**다(마크다운·자동 링크·멘션 없음). 링크로 그려지는 것은 검증된
+`prUrl` 하나뿐이다. 모두 에이전트가 **보고한** 값이다. oort는 PR이 있는지, 숫자가
+맞는지 확인하지 않고 GitHub 토큰도 없다. 단계 갱신은 실시간 이벤트를 만들지
+않아 다음 보드 조회 때 보인다. 상태 전환(대기→진행, 끝남)은 이름·숫자 없는
+갱신 신호를 보낸다. run이 끝나면 60초 이상 걸렸고 요청자가 작업 완료 알림을
+켜 두었을 때 요청자에게 푸시 한 번이 간다. 스레드의 답은 `oort_run_complete`의
+`body`다.
+
+**lease와 깨우는 간격(여기가 핵심).** lease 길이는
+`MOMO_AGENT_PORT_HOSTED_LEASE_MINUTES`분(기본 30, 5~120으로 보정, 서버 운영자가
+설정)이다. claim·renew마다 그 길이로 다시 시작한다. 이를 넘겨 잠들어도
+치명적이지 않다.
+
+- 아무도 job을 다시 claim하지 않았다면 같은 `leaseHandle`이 `oort_run_event`·
+  `oort_run_complete`·`oort_job_renew`에 계속 통한다(암묵 갱신). 저장한 handle
+  로 먼저 보고한다.
+- 에이전트가 `oort_jobs_claim`을 먼저 불렀다면 새 handle을 받았고(lease가
+  끝나는 즉시 job은 다시 claim 가능) **옛 handle은 영구히 409 `-32005`**다.
+  이후엔 새 handle을 쓴다. 옛 handle 재시도로 고치려 하지 않는다.
+- 만료된 lease에 `oort_job_release`는 409다. 만료 뒤에는 보고하거나 claim하고
+  해제하지 않는다.
+- 취소된 run·끊긴 연결·좁혀진 채널 승인은 lease와 무관하게 즉시 막힌다.
+  다음 호출이 409/403이고 에이전트는 그렇게 취소를 안다. oort가 VM 프로세스를
+  멈추지는 못한다.
+- 루틴 주기(도어벨 + 15분 스윕, §3.3.17.5)는 lease 길이보다 짧게 둔다.
+  VM이 lease보다 오래 자도 그 사이 다른 wake가 job을 claim하지 않았다면 완료할
+  수 있다. 연달아 깨는 두 루틴이 handle을 잃는 흔한 경로라서 (a) 단계가
+  `/workspace/oort-run.handle`에 handle을 저장한다.
+
+각 단계를 서버에서 증명하는 기존 적합성 시험(이 문서를 위해 읽었고 실행하지는
+않았다. 격리 PostgreSQL 18이 필요하다).
+
+| 단계 | 시험 |
+|---|---|
+| 작업 요청이 run + job + inbox 가 되고 claim | `a_hosted_agent_takes_a_work_request_as_run_job_and_inbox_item`, `every_d10_condition_refuses_with_409_and_writes_nothing` (`hosted_work_request_conformance_pg.rs`) |
+| claim·event·complete 가 lease·종결 규칙을 공유 | `the_job_and_run_tools_share_the_gateway_lease_and_terminal_rules` (`agent_port_tools_conformance_pg.rs`) |
+| 단계: 12개 유지, 나쁜 문자 거절 | `stage_markers_keep_the_latest_twelve_spend_steps_and_refuse_bad_text` |
+| artifacts 저장, 나쁜 것은 완료 전체 거절 | `artifacts_are_stored_when_valid_and_a_bad_one_refuses_the_whole_completion` |
+| 죽은 handle 은 감사 로그를 키우지 못함 | `a_dead_lease_cannot_grow_the_audit_log_with_bad_reports` |
+| lease 길이와 renew | `a_hosted_claim_leases_for_the_hosted_ttl_and_renew_extends_to_it` |
+| 만료됐지만 재claim 없음: 보고·완료 가능 | `an_expired_unreclaimed_hosted_handle_still_reports_and_completes` |
+| 재claim 뒤 옛 handle 은 어디서나 거절 | `a_reclaimed_hosted_job_refuses_the_old_handle_everywhere` |
+| 보드 카드는 run 을 보이고 mention run 은 안 보임 | `b9_a_hosted_work_run_is_a_run_item_only_when_asked_and_shows_no_detail`, `b11_mention_managed_linked_and_stale_runs_are_not_listed` (`work_board_conformance_pg.rs`) |
+| 요청자에게 끝남 푸시 | `a_hosted_work_run_answer_pushes_its_requester_on_the_sixth_reason` (`push_conformance_pg.rs`) |
+
+**상태: runtime-unverified.** 실제 Grok Bot VM과의 왕복은 아직 하지 않았다.
+추적 도구는 v0.1.18에 실리고 아직 팀 인스턴스에는 없다. 아래 체크리스트를
+소유자가 실행하기 전에는 「실시간」「자동 보고」라고 쓰지 않는다.
+
+**소유자 체크리스트(v0.1.18 배포 뒤 한 번, 본인 Grok Bot 계정·VM).** handle·
+bearer·초대 값을 어디에도 붙여 넣지 않는다.
+
+1. 서버: Agent Port `tools/list` 에서 `oort_run_event` 에 `stage`,
+   `oort_run_complete` 에 `artifacts` 가 보인다. 없으면 v0.1.18 보다 오래된
+   서버이니 멈춘다.
+2. 연결: Grok Bot 연결이 `active`(위저드 5단계 완료)이고 시험 채널이 승인돼
+   있다. §3.3.17.1 `oort-doorbell` 과 §3.3.17.5 `oort-inbox-sweep` 둘 다 새
+   §3.3.17.4 문구를 갖고 있다.
+3. 요청: 승인된 채널에서 에이전트가 닿는 저장소의 작은 실제 변경(문서 한 줄
+   수정)을 시킨다. 기대: 보드(run 포함)에 카드가 뜨고 상태가 `waiting`,
+   요청은 queued run 이다.
+4. 깨우기: 도어벨을 울리거나 루틴을 손으로 돌린다. 기대: 카드가 `running` 으로
+   바뀌고 새로 고침하면 단계 이름이 순서대로 보인다. 일반 텍스트다.
+5. 끝남: 기대: 상태 `done`, 눌리는 PR 링크·브랜치·숫자, 스레드의 에이전트
+   답, (60초 이상 걸렸다면) 본인에게 푸시 한 번.
+6. 긴 잠(선택, `MOMO_AGENT_PORT_HOSTED_LEASE_MINUTES=5` 인 시험 서버): run 을
+   시작하고 VM 을 5분 넘게 놀린 뒤 깨운다. 기대: 저장한 handle 로 보고가
+   된다. 먼저 claim 하면 옛 handle 은 409 `-32005`.
+7. 잘못된 입력(선택): `/` 가 든 stage 를 보낸다. 기대: HTTP 400, 카드 그대로.
+   GitHub 가 아닌 호스트의 PR URL 로 완료를 보낸다. 기대: HTTP 400, 그 값을
+   빼고 다시 보내면 정상 완료.
+8. 결과(3~7에서 일어난 일, 시각, 비밀 없음)를 이슈 #3519 에 적는다. 이것이
+   없으면 PR 은 `runtime-unverified` 로 남는다.
 
 ##### 3.3.17.5 15분 스윕 폴백
 
