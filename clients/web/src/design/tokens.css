@@ -1670,9 +1670,7 @@
   @media (height <= 780px) {
     overflow-y: auto;
     overscroll-behavior: contain;
-    /* 스크롤 단서(#3358 검수 M): 열 전체가 스크롤하는 낮은 창에서 아래 가장자리에 옅은 그늘이 붙어
-     * 「더 있다」를 말한다(아래 ::after). 색을 칠하지 않고 잉크를 옅게 섞은 그라데이션이라 바탕이
-     * 그라데이션이어도 이음매가 없다. 행이 가장자리를 가로지르지 않아도 보인다. */
+    /* 스크롤 단서(#3358 검수 M)는 아래 `sidebar-list-cue`가 마스크로 맡는다(#3574). */
   }
 }
 @utility sidebar-list-cue {
