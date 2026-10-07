@@ -286,6 +286,99 @@ pub async fn touch_work_host_last_seen(
     Ok(updated.is_some())
 }
 
+/// One folder a host issued (ADR-0188 D6): an opaque id and the name to show.
+/// Never a path — the table refuses one (`work_host_folder_name_ck`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkHostFolderRecord {
+    pub folder_id: String,
+    pub display_name: String,
+    /// `project` (an owner-allowed folder) or `question` (the host-issued empty
+    /// 「질문용 폴더」, at most one per host).
+    pub kind: String,
+}
+
+/// Make `folders` exactly the set `host_id` has announced (#3590): rows the host
+/// no longer lists go, the rest are upserted. A revoked host writes nothing, so
+/// a revoke that lands between the heartbeat's authentication and this call
+/// still wins. `false` = the host is revoked or gone.
+pub async fn replace_work_host_folders(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    host_id: Uuid,
+    folders: &[WorkHostFolderRecord],
+) -> Result<bool, sqlx::Error> {
+    let live: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM work_host WHERE id = $1 AND revoked_at IS NULL FOR UPDATE",
+    )
+    .bind(host_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if live.is_none() {
+        return Ok(false);
+    }
+    let keep: Vec<&str> = folders.iter().map(|f| f.folder_id.as_str()).collect();
+    sqlx::query("DELETE FROM work_host_folder WHERE host_id = $1 AND NOT (folder_id = ANY($2))")
+        .bind(host_id)
+        .bind(&keep)
+        .execute(&mut *conn)
+        .await?;
+    // Project rows first, the question row last: a folder that stops being the
+    // question folder while another becomes it must not meet the one-question
+    // index mid-way.
+    let ordered = folders
+        .iter()
+        .filter(|f| f.kind != "question")
+        .chain(folders.iter().filter(|f| f.kind == "question"));
+    for folder in ordered {
+        sqlx::query(
+            "INSERT INTO work_host_folder (workspace_id, host_id, folder_id, display_name, kind) \
+             VALUES ($1, $2, $3, $4, $5) \
+             ON CONFLICT (host_id, folder_id) DO UPDATE \
+                SET display_name = EXCLUDED.display_name, kind = EXCLUDED.kind, \
+                    updated_at = now()",
+        )
+        .bind(workspace_id)
+        .bind(host_id)
+        .bind(&folder.folder_id)
+        .bind(&folder.display_name)
+        .bind(&folder.kind)
+        .execute(&mut *conn)
+        .await?;
+    }
+    Ok(true)
+}
+
+/// The folders of the given hosts, by host, in a stable order (project folders
+/// by name, then the question folder). RLS confines it to the workspace.
+pub async fn list_work_host_folders(
+    conn: &mut PgConnection,
+    host_ids: &[Uuid],
+) -> Result<std::collections::HashMap<Uuid, Vec<WorkHostFolderRecord>>, sqlx::Error> {
+    let mut by_host: std::collections::HashMap<Uuid, Vec<WorkHostFolderRecord>> =
+        Default::default();
+    if host_ids.is_empty() {
+        return Ok(by_host);
+    }
+    let rows = sqlx::query(
+        "SELECT host_id, folder_id, display_name, kind FROM work_host_folder \
+          WHERE host_id = ANY($1) ORDER BY kind DESC, display_name, folder_id",
+    )
+    .bind(host_ids)
+    .fetch_all(&mut *conn)
+    .await?;
+    for row in &rows {
+        by_host
+            .entry(row.try_get("host_id")?)
+            .or_default()
+            .push(WorkHostFolderRecord {
+                folder_id: row.try_get("folder_id")?,
+                display_name: row.try_get("display_name")?,
+                kind: row.try_get("kind")?,
+            });
+    }
+    Ok(by_host)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

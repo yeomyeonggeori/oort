@@ -207,6 +207,11 @@ pub struct WorkdConfig {
     /// The one folder a remote session may open in this slice (ADR-0188 D6
     /// 허용 폴더). Resolved with `realpath` at every spawn.
     pub working_directory: PathBuf,
+    /// The name the owner's devices show for `working_directory` (1…80
+    /// characters, no path separator). Default: the folder's own last component
+    /// (#3590). The path itself is never announced.
+    #[serde(default)]
+    pub working_directory_name: Option<String>,
     /// The host allowlist: tool key (as the server names it in a spawn) →
     /// how to launch it locally.
     pub tools: BTreeMap<String, ToolEntry>,
@@ -308,6 +313,19 @@ impl WorkdConfig {
         let home = std::env::var_os("HOME").map(PathBuf::from);
         check_working_directory(&self.working_directory, home.as_deref())
             .map_err(ConfigError::Invalid)?;
+        if let Some(name) = &self.working_directory_name {
+            let length = name.trim().chars().count();
+            if !(1..=80).contains(&length)
+                || name
+                    .chars()
+                    .any(|c| c == '/' || c == '\\' || c.is_control())
+            {
+                return invalid(
+                    "working_directory_name must be 1...80 characters without a path separator"
+                        .to_string(),
+                );
+            }
+        }
         if !self.state_path.is_absolute() {
             return invalid("state_path must be an absolute path".to_string());
         }

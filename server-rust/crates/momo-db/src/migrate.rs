@@ -567,19 +567,22 @@ mod tests {
     ///
     /// 120 is #3517's work-run board event (ADR-0162 증보 3 D13): the `agent_run` triggers that put
     /// `work.run.updated` on the outbox for a hosted work run's board-state transitions.
+    ///
+    /// 121 is #3590's work-host folders (ADR-0188 D6, ADR-0198 증보 1): the RLS-FORCE table
+    /// `work_host_folder` (opaque folder id + display name a host announces, never a path).
     #[test]
-    fn discovers_contiguous_migrations_001_to_120() {
+    fn discovers_contiguous_migrations_001_to_121() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            120,
-            "expected 120 migrations under {}",
+            121,
+            "expected 121 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 120);
+        assert_eq!(migrations.last().unwrap().version, 121);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

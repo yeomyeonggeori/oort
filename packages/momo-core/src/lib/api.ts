@@ -4113,6 +4113,25 @@ export interface WorkHost {
   revokedAtMs?: number;
   createdAtMs: number;
   online: boolean;
+  /**
+   * The folders this host issued (#3590, ADR-0188 D6): an opaque id and the
+   * name to show — never a path. Present only on the viewer's OWN live host;
+   * absent on anybody else's row (ADR-0188 §8.8) and on a revoked host.
+   */
+  folders?: WorkHostFolder[];
+  /**
+   * The folder a request that names none uses: the host's `question` folder
+   * (ADR-0198 증보 1 D7). Absent when the host has none — a client then asks the
+   * owner to pick; it never falls back to a project folder on its own.
+   */
+  defaultFolderId?: string;
+}
+
+export interface WorkHostFolder {
+  id: string;
+  displayName: string;
+  /** `question` = the host-issued empty 「질문용 폴더」. */
+  kind: "project" | "question";
 }
 
 export async function fetchWorkHosts(workspaceId: string): Promise<WorkHost[]> {

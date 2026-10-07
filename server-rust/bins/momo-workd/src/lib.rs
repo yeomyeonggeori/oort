@@ -30,6 +30,7 @@ pub mod config;
 #[cfg(target_os = "macos")]
 pub mod control_socket;
 pub mod controls;
+pub mod folders;
 pub mod human_trust;
 pub mod keystore;
 pub mod policy;

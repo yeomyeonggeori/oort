@@ -6206,9 +6206,14 @@ paths:
         workspace UUID>\n<lowercase host UUID>\n<sentAtMs>\n<SHA-256(raw body),
         lowercase hex>\n<lowercase request UUID>` with its registered Ed25519
         key; the request UUID is consumed atomically once, so a re-sent
-        heartbeat is refused rather than re-stamping liveness. The body is not
-        read — an empty body is the normal case, and any bytes sent are covered
-        by the digest. The retired v1 heartbeat (`momo.work_host.heartbeat.v1`
+        heartbeat is refused rather than re-stamping liveness. The body is
+        either empty (nothing to say) or a folder announcement `{folders:
+        [{id, displayName, kind}]}` (#3590, ADR-0188 D6; at most 32, one
+        `question`): absent `folders` leaves the stored set alone, `[]` clears
+        it. The announcement is read only after the signature verified (the
+        digest covers it). A path as id or name, a `path` field, a duplicate
+        id or a second question folder is a 400 that stores nothing and does
+        not echo the value. The retired v1 heartbeat (`momo.work_host.heartbeat.v1`
         in a `{sentAtMs, signature}` body, no request id) is not accepted. A
         query string, a timestamp outside the five-minute clock-skew window, a
         forged or replayed signature, an unknown or revoked host, and a host
@@ -6228,6 +6233,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorkHostResponse"
+        "400":
+          description: >
+            The folder announcement is refused (a path, a `path` field, a bad
+            id, a duplicate id, more than 32, or a second `question` folder).
+            Nothing is stored and liveness is not refreshed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "429":
@@ -15206,6 +15220,37 @@ components:
           format: int64
         online:
           type: boolean
+        folders:
+          type: array
+          description: >
+            The folders this host issued (ADR-0188 D6, #3590): an opaque id and
+            the name to show, never a path. Present only on the viewer's own
+            live host in the list and revoke answers; absent on anybody else's
+            row (ADR-0188 §8.8, an admin included) and on a revoked host.
+          items:
+            $ref: "#/components/schemas/WorkHostFolder"
+        defaultFolderId:
+          type: string
+          description: >
+            The `question` folder's id (ADR-0198 증보 1 D7); absent when the
+            host has none — never a project folder. Present only where
+            `folders` is.
+
+    WorkHostFolder:
+      type: object
+      required: [id, displayName, kind]
+      properties:
+        id:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{1,64}$"
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: No path separator or control character.
+        kind:
+          type: string
+          enum: [project, question]
 
     WorkHostResponse:
       type: object

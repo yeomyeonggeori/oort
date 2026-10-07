@@ -50,6 +50,7 @@ use crate::control_socket::{ControlSocket, ControlSocketError, HostIdentity, Pee
 use crate::controls::HostHealth;
 use crate::controls::SocketShared;
 use crate::controls::{heartbeat_loop, ControlLoop};
+use crate::folders::FolderBook;
 use crate::human_trust::{HumanTrust, TrustIdentity};
 use crate::keystore::{HostKey, KeyStore, KeyStoreError};
 use crate::policy::{AdapterKind, CodexHome};
@@ -744,6 +745,15 @@ pub async fn run(
         ));
     }
 
+    // #3590: the folders this host issues, announced (id + name, never a path)
+    // in every heartbeat. Spawn still opens `working_directory`; resolving a
+    // signed spawn's folder id is T5.
+    let folder_book = FolderBook::open(
+        &state_folder(&config),
+        &config.working_directory,
+        config.working_directory_name.as_deref(),
+    )
+    .map_err(|error| CliError::Usage(format!("host folders: {error}")))?;
     let api = Arc::new(
         HostClient::new(
             config.server_base(),
@@ -751,7 +761,8 @@ pub async fn run(
             state.host_id,
             Arc::new(key),
         )
-        .map_err(CliError::Register)?,
+        .map_err(CliError::Register)?
+        .with_folder_announcement(folder_book.announcement()),
     );
     // ADR-0188 §8: Codex runs from the host's own home, signed in once there.
     // #2630 F5: with an empty host folder as its HOME; the commands it runs
