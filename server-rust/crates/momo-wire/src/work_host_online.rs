@@ -25,6 +25,10 @@ pub const ONLINE_WINDOW_SECONDS: i64 = 90;
 /// `alias` is the `work_host` table alias (`"h"`), or `""` when unaliased.
 /// Evaluates to `false` (never NULL) for a host that has not beaten yet.
 pub fn work_host_online_sql(alias: &str) -> String {
+    debug_assert!(
+        alias.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+        "alias must be a plain SQL identifier"
+    );
     let p = if alias.is_empty() {
         String::new()
     } else {

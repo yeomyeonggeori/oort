@@ -432,12 +432,15 @@ async fn t4_1_every_online_decision_agrees_at_the_window_edges() {
     .await;
     let session = create_session(&http, &base, &token, &tenant, host, "t4").await;
 
-    // (seen_ago, revoked, expected online). The 1 s margins keep the cases off
+    // The literal 90 does not move with the constant: a window change must
+    // be a deliberate edit of this test too.
+    assert_eq!(WINDOW, 90);
+    // (seen_ago, revoked, expected online). The 10 s margins keep the cases off
     // the exact boundary so a slow CI box cannot flip them.
     let cases: [(Option<i64>, bool, bool, &str); 6] = [
         (Some(5), false, true, "fresh heartbeat"),
-        (Some(WINDOW - 2), false, true, "just inside the window"),
-        (Some(WINDOW + 2), false, false, "just outside the window"),
+        (Some(WINDOW - 10), false, true, "just inside the window"),
+        (Some(WINDOW + 10), false, false, "just outside the window"),
         (Some(3600), false, false, "long gone"),
         (None, false, false, "never heartbeated"),
         (Some(5), true, false, "revoked outranks a fresh heartbeat"),

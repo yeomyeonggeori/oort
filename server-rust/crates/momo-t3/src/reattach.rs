@@ -95,6 +95,7 @@ pub struct SessionReattachState {
     pub host_revoked: bool,
     /// The shared online expression (`momo_wire::work_host_online_sql`):
     /// unrevoked and heartbeated inside the window — what `online` publishes.
+    /// A revoked host is therefore never online here (`host_revoked` says why).
     pub host_online: bool,
     /// The stored PTY binding, re-validated on read.
     pub binding: Option<RemotePtyBinding>,
