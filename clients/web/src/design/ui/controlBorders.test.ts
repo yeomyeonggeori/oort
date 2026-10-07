@@ -48,6 +48,10 @@ const ROLE: Record<string, "control" | "filled" | "container"> = {
   //           destructive·secondary·outline) 채움 없는 ghost 다. 경계를 들이면
   //           「outline 테두리는 텍스트 입력 그릇에만」이 깨진다 — 아래 단정이 잰다.
   "button.tsx": "filled",
+  // 세그먼트(트랙 `surface-muted` + 고른 칸 `surface` 채움)와 스위치(켬 잉크 채움, 끔
+  // `line-strong` 채움 3:1)도 어포던스가 경계가 아니라 채움이다(#3578 S1).
+  "segmented-control.tsx": "filled",
+  "switch.tsx": "filled",
   // 값을 받는 상자. 비어 있을 때 경계 말고는 자기가 있다고 말할 것이 없다.
   "input.tsx": "control",
   // 같음. 닫힌 상태의 `<select>` 는 경계와 글자뿐이다.
