@@ -1072,9 +1072,13 @@ pub struct WorkHostDto {
     #[serde(rename = "type")]
     pub host_type: String,
     pub display_name: String,
-    pub public_key: String,
+    /// Absent on the list row of someone else's member-scoped host (#3583).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub public_key: Option<String>,
     /// Boolean availability flags only — never paths, credentials or state.
-    pub capabilities: Value,
+    /// Absent together with `public_key` (#3583).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_seen_at_ms: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -5476,8 +5480,8 @@ mod tests {
             owner_member_id: "m".into(),
             host_type: "cloud".into(),
             display_name: "box".into(),
-            public_key: "k".into(),
-            capabilities: serde_json::json!({"terminal_attach": true}),
+            public_key: Some("k".into()),
+            capabilities: Some(serde_json::json!({"terminal_attach": true})),
             last_seen_at_ms: None,
             revoked_at_ms: None,
             created_at_ms: 7,

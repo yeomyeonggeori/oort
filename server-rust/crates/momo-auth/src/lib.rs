@@ -208,8 +208,9 @@ pub use work_host_request::{
 };
 pub use work_host_store::{
     insert_work_host, insert_work_host_with_id, list_work_hosts, load_work_host,
-    lock_work_host_ownership, mark_work_host_revoked, touch_work_host_last_seen, NewWorkHost,
-    WorkHostOwnership, WorkHostRecord, ONLINE_WINDOW_SECONDS,
+    lock_work_host_ownership, mark_work_host_revoked, member_display_names,
+    touch_work_host_last_seen, NewWorkHost, WorkHostOwnership, WorkHostRecord,
+    ONLINE_WINDOW_SECONDS,
 };
 pub use workhost::{
     heartbeat_timestamp_is_fresh, normalize_public_key_b64, verify_work_host_request,

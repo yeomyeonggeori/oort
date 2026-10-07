@@ -117,6 +117,8 @@ use std::collections::BTreeMap;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
+use std::collections::HashMap;
+
 use axum::response::IntoResponse;
 use axum::{Extension, Json};
 use momo_auth::device_key::{
@@ -126,8 +128,8 @@ use momo_auth::device_key::{
 use momo_auth::human_control::{consume_human_nonce_in_tx, db_now_ms, HumanControlRefusal};
 use momo_auth::{
     active_workspace_role, insert_work_host, insert_work_host_with_id, list_work_hosts,
-    load_work_host, lock_work_host_ownership, mark_work_host_revoked, normalize_public_key_b64,
-    touch_work_host_last_seen, NewWorkHost, Principal, WorkHostRecord,
+    load_work_host, lock_work_host_ownership, mark_work_host_revoked, member_display_names,
+    normalize_public_key_b64, touch_work_host_last_seen, NewWorkHost, Principal, WorkHostRecord,
 };
 use momo_db::{with_tenant_tx, DbError, PgConnection};
 use momo_outbox::{emit_outbox, OutboxKind};
@@ -284,8 +286,8 @@ pub(crate) fn work_host_dto(record: WorkHostRecord) -> Result<WorkHostDto, ApiEr
         owner_member_id: record.owner_member_id.to_string(),
         host_type: record.host_type,
         display_name: record.display_name,
-        public_key: record.public_key,
-        capabilities,
+        public_key: Some(record.public_key),
+        capabilities: Some(capabilities),
         last_seen_at_ms: record.last_seen_at_ms,
         revoked_at_ms: record.revoked_at_ms,
         created_at_ms: record.created_at_ms,
@@ -544,7 +546,7 @@ pub async fn list(
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let member_id = principal.member_id;
 
-    let records = with_tenant_tx(&state.pool, workspace_id, move |conn| {
+    let (records, owner_names) = with_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
             if active_workspace_role(conn, workspace_id, member_id)
                 .await?
@@ -552,7 +554,9 @@ pub async fn list(
             {
                 return Ok(None);
             }
-            Ok::<_, DbError>(Some(list_work_hosts(conn).await?))
+            let hosts = list_work_hosts(conn).await?;
+            let names = foreign_owner_names(conn, &hosts, member_id).await?;
+            Ok::<_, DbError>(Some((hosts, names)))
         })
     })
     .await
@@ -562,9 +566,60 @@ pub async fn list(
     Ok(Json(WorkHostListResponse {
         work_hosts: records
             .into_iter()
-            .map(work_host_dto)
+            .map(|record| dto_for_viewer(record, member_id, &owner_names))
             .collect::<Result<Vec<_>, _>>()?,
     }))
+}
+
+/// Somebody else's personal machine: `scope=member` and the viewer is not its owner.
+fn is_foreign_member_host(record: &WorkHostRecord, viewer: Uuid) -> bool {
+    record.scope == "member" && record.owner_member_id != viewer
+}
+
+/// Names of the owners of the hosts `viewer` does not own (one query, or none).
+async fn foreign_owner_names(
+    conn: &mut PgConnection,
+    hosts: &[WorkHostRecord],
+    viewer: Uuid,
+) -> Result<HashMap<Uuid, String>, DbError> {
+    let owners: Vec<Uuid> = hosts
+        .iter()
+        .filter(|host| is_foreign_member_host(host, viewer))
+        .map(|host| host.owner_member_id)
+        .collect();
+    Ok(member_display_names(conn, &owners).await?)
+}
+
+/// The one function every route that shows a host to a *person* goes through
+/// (list and revoke). ADR-0188 §8.8 (#3583): somebody else's personal machine is
+/// presence only. The chosen device name is replaced by a generic one built from
+/// the owner's name (「○○의 맥」 for an `app`, 「○○의 호스트」 otherwise; 「팀원의 …」
+/// when the owner is gone or unnamed), and the public key and capability flags
+/// are withheld. The id, scope, type, owner, `online` and revocation stay, so the
+/// observing surfaces (`hasOnlineWorkHost`, `showsOneWayNote`) and an admin's
+/// revoke by id keep working.
+pub(crate) fn dto_for_viewer(
+    record: WorkHostRecord,
+    viewer: Uuid,
+    owner_names: &HashMap<Uuid, String>,
+) -> Result<WorkHostDto, ApiError> {
+    if !is_foreign_member_host(&record, viewer) {
+        return work_host_dto(record);
+    }
+    let owner_name = owner_names.get(&record.owner_member_id).cloned();
+    let noun = if record.host_type == "app" {
+        "맥"
+    } else {
+        "호스트"
+    };
+    let mut dto = work_host_dto(record)?;
+    dto.display_name = match owner_name.as_deref().map(str::trim) {
+        Some(name) if !name.is_empty() => format!("{name}의 {noun}"),
+        _ => format!("팀원의 {noun}"),
+    };
+    dto.public_key = None;
+    dto.capabilities = None;
+    Ok(dto)
 }
 
 /// `GET /v1/workspaces/{ws}/work-hosts/{host}/pending-controls` (Swift
@@ -711,16 +766,23 @@ pub async fn revoke(
             if let (true, Some(record)) = (was_live, &record) {
                 emit_work_host_notice(conn, record, WORK_HOST_REVOKED, member_id).await?;
             }
-            Ok::<_, DbError>(Ok(record))
+            let names = match &record {
+                Some(record) => {
+                    foreign_owner_names(conn, std::slice::from_ref(record), member_id).await?
+                }
+                None => HashMap::new(),
+            };
+            Ok::<_, DbError>(Ok((record, names)))
         })
     })
     .await
     .map_err(|error| ApiError::internal("work_hosts.revoke", error))?;
 
-    let record = outcome?
-        .ok_or_else(|| ApiError::internal("work_hosts.revoke", "work host reload failed"))?;
+    let (record, owner_names) = outcome?;
+    let record =
+        record.ok_or_else(|| ApiError::internal("work_hosts.revoke", "work host reload failed"))?;
     Ok(Json(WorkHostResponse {
-        work_host: work_host_dto(record)?,
+        work_host: dto_for_viewer(record, member_id, &owner_names)?,
     }))
 }
 
