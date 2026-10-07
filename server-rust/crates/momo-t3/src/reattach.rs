@@ -93,8 +93,8 @@ pub struct SessionReattachState {
     /// no replies yet. A client that already holds this cursor is up to date.
     pub last_event_seq: Option<i64>,
     pub host_revoked: bool,
-    /// `work_host.last_seen_at` inside the heartbeat window (`ONLINE_WINDOW`,
-    /// 021) — the same column `WorkHostRoutes` publishes as `online`.
+    /// The shared online expression (`momo_wire::work_host_online_sql`):
+    /// unrevoked and heartbeated inside the window — what `online` publishes.
     pub host_online: bool,
     /// The stored PTY binding, re-validated on read.
     pub binding: Option<RemotePtyBinding>,
@@ -146,6 +146,7 @@ impl SessionReattachState {
 /// point — two surfaces reporting different observer counts for the same
 /// session is exactly the drift this projection exists to prevent.
 fn reattach_columns() -> String {
+    let host_online = momo_wire::work_host_online_sql("h");
     format!(
         "ws.id, ws.workspace_id, ws.channel_id, ws.member_id, ws.host_id, \
      ws.root_message_id, ws.tool, ws.label, ws.status, ws.observation, \
@@ -182,9 +183,7 @@ fn reattach_columns() -> String {
      ws.pty_id, ws.attach_endpoint, ws.display_id, ws.display_endpoint, \
      root.seq AS root_message_seq, \
      (h.revoked_at IS NOT NULL) AS host_revoked, \
-     (h.last_seen_at IS NOT NULL \
-      AND h.last_seen_at > clock_timestamp() - make_interval(secs => $3::double precision)) \
-       AS host_online, \
+     {host_online} AS host_online, \
      (SELECT max(m.seq) FROM message m \
        WHERE m.channel_id = ws.channel_id AND m.root_id = ws.root_message_id) AS last_event_seq"
     )
@@ -194,15 +193,12 @@ fn reattach_columns() -> String {
 /// taking `FOR UPDATE` here would let a returning client block the host that is
 /// writing the session's next event.
 ///
-/// `online_window_seconds` is passed in rather than hard-coded so the one
-/// definition of "online" stays with the work-host registry
-/// (`momo_auth::ONLINE_WINDOW_SECONDS`) instead of being copied into a second
-/// crate.
+/// `host_online` is the shared `momo_wire::work_host_online_sql` expression, the
+/// same one the work-hosts read publishes as `online` (ADR-0198 T4).
 pub async fn load_session_reattach_state_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     session_id: Uuid,
-    online_window_seconds: i64,
 ) -> Result<Option<SessionReattachState>, T3Error> {
     let columns = reattach_columns();
     let sql = format!(
@@ -217,7 +213,6 @@ pub async fn load_session_reattach_state_in_tx(
     let row = sqlx::query(&sql)
         .bind(workspace_id)
         .bind(session_id)
-        .bind(online_window_seconds as f64)
         .fetch_optional(&mut *conn)
         .await?;
     let Some(row) = row else { return Ok(None) };

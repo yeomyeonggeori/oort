@@ -87,6 +87,8 @@ oort-team 현황으로는 두 행 모두 연결된 적이 없으므로 은퇴해
 
 **「온라인」 판정.** `work_host.last_seen_at`(host heartbeat 90초)이 기준이다: `revoked_at IS NULL`이고 `last_seen_at`이 heartbeat의 **2배(180초) 이내** [추정, 기존 work-hosts 읽기 필드의 정의와 맞추는 것이 T4 확인 항목]. 한 개의 서버 판정 식을 데스크탑·폰이 같이 쓴다. 구독 에이전트의 `hostOnline`(활성 토큰 10분 추정)은 하네스에 쓰지 않는다(조사 보고 (e)-4의 두 값 불일치 해소).
 
+**T4 확정 (#3569).** 실측: `momo-workd`의 heartbeat 주기는 30초(`heartbeat_interval_ms`), 서버의 기존 `online` 창은 90초(주기의 3배, 두 번 놓쳐도 온라인)다. 위 「heartbeat 90초」는 주기가 아니라 창이었으므로 식은 **90초 그대로**(`revoked_at IS NULL AND last_seen_at >= now() - 90초`) 두고, 180초로 늘리지 않는다(맥을 닫고 3분간 온라인으로 보이는 쪽이 더 나쁘다). 이 식은 `momo_wire::work_host_online_sql` 한 곳에 있고 work-hosts 읽기·spawn 대상 검사·spawn 후보·reattach `host_online`이 모두 이것으로 만든다. 클라이언트는 서버 `online`만 읽는다.
+
 **내 맥으로의 spawn은 소유자 서명이다 (E8의 빈칸을 메운다).**
 - 새 작업 spawn 컨트롤을 ADR-0146 사람 기기 키(R2) 서명으로 받는다. 서버는 서명·논스·만료를 검증하고 workd도 같은 검증을 한다(`require_human_signatures` 래칫 그대로).
 - 서버는 대상 host를 **요청자의 member host로부터 도출**한다. 요청 본문의 host id는 선택 힌트일 뿐이고, `scope=member`·`host.owner == requester`·`revoked_at IS NULL`·온라인이 아니면 거부한다. **다른 사람이 내 맥을 대상으로 삼을 길이 없다.** 팀원·에이전트(에이전트 bearer는 `kill`만)·웹훅·도어벨은 spawn을 만들 수 없다(ADR-0188 D3 불변식 그대로).
