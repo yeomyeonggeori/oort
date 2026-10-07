@@ -24,7 +24,6 @@ import { DevicesSection } from "./DevicesSection";
 import { AppearanceSection } from "./AppearanceSection";
 import { TerminalSection } from "./TerminalSection";
 import { ShortcutsSection } from "./ShortcutsSection";
-import { LinkPreviewSection } from "./LinkPreviewSection";
 import { InviteSection } from "./InviteSection";
 import { NotificationRulesSection } from "./NotificationRulesSection";
 import { ProfileSection } from "./ProfileSection";
@@ -71,7 +70,7 @@ export function SettingsRoute() {
   const surfaceProvided = useSurfaceProvidedPredicate();
   const sections = useMemo(
     () => reachableSettingsSections(surfaceProvided),
-    [surfaceProvided]
+    [surfaceProvided],
   );
   const requested = params.get("section");
   // `?section=`은 별칭(합친 옛 구획)과 AI 허브로 옮겨 간 옛 구획을 풀어서 읽는다
@@ -83,7 +82,7 @@ export function SettingsRoute() {
       ? requestedResolution.id
       : null;
   const [section, setSection] = useState<SettingsSectionId>(
-    () => requestedId ?? DEFAULT_SETTINGS_SECTION
+    () => requestedId ?? DEFAULT_SETTINGS_SECTION,
   );
   // #2780: 「실행 호스트」는 호스트 목록이 도착한 뒤에야 목차에 선다. 그 전에
   // `?section=code`로 들어온 사람을 기본 섹션에 둔 채 놓아 두지 않고, 목차가
@@ -112,7 +111,7 @@ export function SettingsRoute() {
     (id: SettingsSectionId, el: HTMLButtonElement | null) => {
       navRefs.current[id] = el;
     },
-    []
+    [],
   );
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   const didEnterFocus = useRef(false);
@@ -196,7 +195,7 @@ export function SettingsRoute() {
       return;
     }
     const focused = ids.findIndex(
-      (id) => navRefs.current[id] === document.activeElement
+      (id) => navRefs.current[id] === document.activeElement,
     );
     const from = focused >= 0 ? focused : ids.indexOf(section);
     const step = next ? 1 : ids.length - 1;
@@ -286,7 +285,9 @@ export function SettingsRoute() {
               1.01), 본문 전체를 카드 한 장(`--surface`)에 얹는다. 페이지를 이식하는 슬라이스가
               그 페이지의 이 껍질을 걷고 `SettingsSection` 카드로 바꾼다. 옛 AI 연결 화면은
               자기 판(곁판 포함)을 가져서 껍질과 폭 제한 없이 그대로 둔다. */}
-          {section === "ai" || section === "profile" ? (
+          {section === "ai" ||
+          section === "appearance" ||
+          section === "profile" ? (
             <SectionPage
               section={section}
               offline={offline}
@@ -330,18 +331,15 @@ function SectionPage({
   memberId: string;
 }) {
   const primary = (node: ReactNode) => (
-    <SectionTitleHiddenContext.Provider value={true}>{node}</SectionTitleHiddenContext.Provider>
+    <SectionTitleHiddenContext.Provider value={true}>
+      {node}
+    </SectionTitleHiddenContext.Provider>
   );
   switch (section) {
     case "profile":
       return <ProfileSection offline={offline} />;
     case "appearance":
-      return (
-        <>
-          {primary(<AppearanceSection />)}
-          <LinkPreviewSection />
-        </>
-      );
+      return <AppearanceSection />;
     case "notifications":
       return primary(<NotificationRulesSection offline={offline} />);
     case "shortcuts":
@@ -353,14 +351,24 @@ function SectionPage({
       );
     case "devices":
       return primary(
-        <DevicesSection offline={offline} workspaceId={workspaceId} memberId={memberId} />
+        <DevicesSection
+          offline={offline}
+          workspaceId={workspaceId}
+          memberId={memberId}
+        />,
       );
     case "workspace":
-      return primary(<WorkspaceSection workspaceId={workspaceId} offline={offline} />);
+      return primary(
+        <WorkspaceSection workspaceId={workspaceId} offline={offline} />,
+      );
     case "members":
-      return primary(<InviteSection workspaceId={workspaceId} offline={offline} />);
+      return primary(
+        <InviteSection workspaceId={workspaceId} offline={offline} />,
+      );
     case "memory":
-      return primary(<MemorySettingsSection workspaceId={workspaceId} offline={offline} />);
+      return primary(
+        <MemorySettingsSection workspaceId={workspaceId} offline={offline} />,
+      );
     // No `offline` prop: 사용량 is a read, and the realtime rail being down says nothing
     // about whether this GET answers. The panel reads the browser's own offline state
     // instead (react-query fetchStatus), which is the only signal that actually stops
@@ -369,7 +377,11 @@ function SectionPage({
       return primary(<UsageSection workspaceId={workspaceId} />);
     case "code":
       return primary(
-        <WorkHostSection workspaceId={workspaceId} memberId={memberId} offline={offline} />
+        <WorkHostSection
+          workspaceId={workspaceId}
+          memberId={memberId}
+          offline={offline}
+        />,
       );
     case "updates":
       return primary(<UpdateSection />);

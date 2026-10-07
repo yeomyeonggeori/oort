@@ -275,10 +275,6 @@ vi.mock("@/features/settings/AppearanceSection", () => ({
   AppearanceSection: () =>
     createElement("div", { "data-testid": "section-appearance" }),
 }));
-vi.mock("@/features/settings/LinkPreviewSection", () => ({
-  LinkPreviewSection: () =>
-    createElement("div", { "data-testid": "section-link-previews" }),
-}));
 vi.mock("@/features/updates/UpdateSection", () => ({
   UpdateSection: () =>
     createElement("div", { "data-testid": "section-updates" }),

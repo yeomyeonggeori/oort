@@ -7,7 +7,11 @@
 // 바이트로 비교해, 원천을 고치고 다시 생성하지 않으면 빨개진다.
 //
 // 모양:
-//   - 선택자는 `:root[data-palette="<id>"]`. 스킴은 기존 문법(`data-theme` +
+//   - 선택자는 `:root[data-palette="<id>"]`와, 같은 값을 **범위를 좁혀** 싣는
+//     `[data-palette-preview="<id>"]`(설정 > 모양의 미리보기 카드, #3578 S3a)다.
+//     루트에 팔레트가 하나만 찍히므로 한 화면에 세 팔레트를 그리려면 요소 단위로
+//     같은 역할을 다시 묶어야 한다. 신호 프리셋 블록은 범위 변형이 없다(미리보기의
+//     신호 알약은 `[data-accent-swatch]`가 자기 요소에서 다시 묶는다). 스킴은 기존 문법(`data-theme` +
 //     `color-scheme`)이 정하므로 두 모드를 `light-dark()` 한 줄에 싣는다.
 //   - 바닥은 세 정지점 토큰으로만 싣는다. 그라데이션을 조립하는 일은 셸(DS2-1·6)의
 //     몫이다.
@@ -52,7 +56,7 @@ export function renderPaletteCss(theme: ThemeId): string {
     "/* GENERATED from packages/momo-core/src/design (ADR-0189 D5). Do not edit by hand.",
     " * Regenerate: npm --prefix clients/web run gen:palettes",
     " * Drift test: clients/web/src/design/themes/palettes/palettes.drift.test.ts */",
-    `:root[data-palette="${theme}"] {`,
+    `:root[data-palette="${theme}"], [data-palette-preview="${theme}"] {`,
   ];
   CANVAS_STOPS.forEach((stop, i) => lines.push(`  --${stop}: ${lightDark(light.canvas[i], dark.canvas[i])};`));
   if (light.band && dark.band) {
