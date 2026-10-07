@@ -29,9 +29,9 @@
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
-/// `WorkHostRoutes.onlineWindowSeconds` (:89). A host is "online" when it is
-/// unrevoked and heartbeated inside this window.
-pub const ONLINE_WINDOW_SECONDS: i64 = 90;
+/// The one "online" definition lives in `momo_wire::work_host_online`
+/// (ADR-0198 T4); re-exported so existing callers keep their path.
+pub use momo_wire::{work_host_online_sql, ONLINE_WINDOW_SECONDS};
 
 /// One `work_host` row in the shape the wire DTO needs. `capabilities_json` is
 /// the raw `jsonb::text`, decoded by the route that owns the DTO — exactly how
@@ -81,7 +81,9 @@ pub struct WorkHostOwnership {
 
 /// The `hostJSONSelect` column list, as typed columns rather than a JSON
 /// document. Same expressions, same rounding.
-const HOST_COLUMNS: &str = "h.id, \
+fn host_columns() -> String {
+    format!(
+        "h.id, \
      h.workspace_id, \
      h.scope, \
      h.owner_member_id, \
@@ -96,9 +98,10 @@ const HOST_COLUMNS: &str = "h.id, \
           ELSE floor(extract(epoch from h.revoked_at) * 1000)::bigint END \
        AS revoked_at_ms, \
      floor(extract(epoch from h.created_at) * 1000)::bigint AS created_at_ms, \
-     (h.revoked_at IS NULL \
-      AND COALESCE(h.last_seen_at >= clock_timestamp() \
-                     - make_interval(secs => 90), false)) AS online";
+     {online} AS online",
+        online = work_host_online_sql("h")
+    )
+}
 
 fn decode_host(row: &sqlx::postgres::PgRow) -> Result<WorkHostRecord, sqlx::Error> {
     Ok(WorkHostRecord {
@@ -183,7 +186,7 @@ pub async fn load_work_host(
     conn: &mut PgConnection,
     host_id: Uuid,
 ) -> Result<Option<WorkHostRecord>, sqlx::Error> {
-    let sql = format!("SELECT {HOST_COLUMNS} FROM work_host h WHERE h.id = $1");
+    let sql = format!("SELECT {} FROM work_host h WHERE h.id = $1", host_columns());
     let row = sqlx::query(&sql)
         .bind(host_id)
         .fetch_optional(&mut *conn)
@@ -193,7 +196,10 @@ pub async fn load_work_host(
 
 /// Every host in the workspace, oldest first (Swift `list` :203-210).
 pub async fn list_work_hosts(conn: &mut PgConnection) -> Result<Vec<WorkHostRecord>, sqlx::Error> {
-    let sql = format!("SELECT {HOST_COLUMNS} FROM work_host h ORDER BY h.created_at, h.id");
+    let sql = format!(
+        "SELECT {} FROM work_host h ORDER BY h.created_at, h.id",
+        host_columns()
+    );
     let rows = sqlx::query(&sql).fetch_all(&mut *conn).await?;
     rows.iter().map(decode_host).collect()
 }
@@ -288,8 +294,8 @@ mod tests {
     fn online_window_matches_the_swift_constant() {
         assert_eq!(ONLINE_WINDOW_SECONDS, 90);
         assert!(
-            HOST_COLUMNS.contains("make_interval(secs => 90)"),
-            "the projection's window must be the same 90s the constant names"
+            host_columns().contains(&work_host_online_sql("h")),
+            "the work-hosts projection must embed the shared online expression"
         );
     }
 }

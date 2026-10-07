@@ -1006,18 +1006,19 @@ pub async fn target_work_host_in_tx(
     host_id: Uuid,
 ) -> Result<Option<TargetWorkHost>, T3Error> {
     use sqlx::Row as _;
-    let row = sqlx::query(
+    let sql = format!(
         "SELECT scope, owner_member_id, type AS host_type, display_name, \
-                COALESCE(last_seen_at >= clock_timestamp() - make_interval(secs => 90), false) \
-                  AS online \
+                {online} AS online \
            FROM work_host \
           WHERE id = $2 AND workspace_id = $1 AND revoked_at IS NULL \
           FOR SHARE",
-    )
-    .bind(workspace_id)
-    .bind(host_id)
-    .fetch_optional(&mut *conn)
-    .await?;
+        online = momo_wire::work_host_online_sql("")
+    );
+    let row = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(host_id)
+        .fetch_optional(&mut *conn)
+        .await?;
     let Some(row) = row else { return Ok(None) };
     Ok(Some(TargetWorkHost {
         scope: row.try_get("scope")?,
@@ -1874,22 +1875,22 @@ pub async fn spawn_host_candidates_in_tx(
     session_owner_member_id: Uuid,
 ) -> Result<Vec<SpawnHostCandidate>, T3Error> {
     use sqlx::Row as _;
-    let rows = sqlx::query(
+    let sql = format!(
         "SELECT id, display_name, type AS host_type, scope, owner_member_id, \
                 revoked_at IS NOT NULL AS revoked, \
-                (revoked_at IS NULL \
-                 AND COALESCE(last_seen_at >= clock_timestamp() \
-                                - make_interval(secs => 90), false)) AS online \
+                {online} AS online \
            FROM work_host \
           WHERE workspace_id = $1 \
             AND revoked_at IS NULL \
             AND (scope = 'workspace' OR owner_member_id = $2) \
           ORDER BY display_name, id",
-    )
-    .bind(workspace_id)
-    .bind(session_owner_member_id)
-    .fetch_all(&mut *conn)
-    .await?;
+        online = momo_wire::work_host_online_sql("")
+    );
+    let rows = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(session_owner_member_id)
+        .fetch_all(&mut *conn)
+        .await?;
 
     let mut candidates = Vec::with_capacity(rows.len());
     for row in &rows {

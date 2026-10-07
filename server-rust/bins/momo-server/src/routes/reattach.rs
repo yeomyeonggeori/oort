@@ -40,7 +40,7 @@
 
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
-use momo_auth::{active_workspace_role, Principal, ONLINE_WINDOW_SECONDS};
+use momo_auth::{active_workspace_role, Principal};
 use momo_t3::{
     clamp_replay_limit, is_active_channel_member_in_tx, list_session_events_in_tx,
     load_session_reattach_state_in_tx, ReattachVerdict, SessionEvent, T3Error,
@@ -193,9 +193,7 @@ async fn reattach_in_tx(
     {
         return Ok(Err(ApiError::forbidden("not an active workspace member")));
     }
-    let Some(state) =
-        load_session_reattach_state_in_tx(conn, workspace_id, session_id, ONLINE_WINDOW_SECONDS)
-            .await?
+    let Some(state) = load_session_reattach_state_in_tx(conn, workspace_id, session_id).await?
     else {
         return Ok(Err(ApiError::not_found("work session not found")));
     };
