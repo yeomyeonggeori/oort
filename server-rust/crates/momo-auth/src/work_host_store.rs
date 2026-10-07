@@ -199,7 +199,8 @@ pub async fn list_work_hosts(conn: &mut PgConnection) -> Result<Vec<WorkHostReco
 }
 
 /// Display names of the given members (RLS confines it to the transaction's
-/// workspace). Used to name a host the viewer does not own (#3583).
+/// workspace). Only active members are returned, so a departed owner's name is
+/// not shown. Used to name a host the viewer does not own (#3583).
 pub async fn member_display_names(
     conn: &mut PgConnection,
     member_ids: &[Uuid],
@@ -207,10 +208,13 @@ pub async fn member_display_names(
     if member_ids.is_empty() {
         return Ok(Default::default());
     }
-    let rows = sqlx::query("SELECT id, display_name FROM member WHERE id = ANY($1)")
-        .bind(member_ids)
-        .fetch_all(&mut *conn)
-        .await?;
+    let rows = sqlx::query(
+        "SELECT id, display_name FROM member \
+          WHERE id = ANY($1) AND status = 'active' AND deleted_at IS NULL",
+    )
+    .bind(member_ids)
+    .fetch_all(&mut *conn)
+    .await?;
     rows.iter()
         .map(|row| Ok((row.try_get("id")?, row.try_get("display_name")?)))
         .collect()
