@@ -268,6 +268,7 @@ export default function ConversationScreen({
   onBack,
   onOpenConversation,
   onOpenAgent,
+  onDelegateWork,
 }: {
   channelId: string;
   title: string;
@@ -297,6 +298,12 @@ export default function ConversationScreen({
    * 뒤로가기는 여전히 한 겹이다(`navReducer`).
    */
   onOpenConversation?: (channelId: string, title: string) => void;
+  /**
+   * 이 DM의 에이전트에게 「작업 맡기기」 시트를 연다 (#3588). 에이전트와 이 DM 채널이 정해진
+   * 채로 열린다. 서버가 DM 채널의 `agent-runs`를 구조상 받아 주므로(채널 종류를 거르지
+   * 않는다) 문은 서 있고, 호스티드 에이전트의 DM이 승인 전이면 409 문장으로 답한다.
+   */
+  onDelegateWork?: (prefill: {agentMemberId: string; channelId: string}) => void;
   /** 에이전트 프로필의 기존 상세 표면. 사람은 이 콜백을 쓰지 않는다. */
   onOpenAgent?: (agent: {
     memberId: string;
@@ -836,10 +843,18 @@ export default function ConversationScreen({
   // 그리고 **셀 자격이 있을 때만** 센다 (#1146 M2): 목록을 못 불러온 채로
   // 「고정 3개」라고 적으면, 목록 안에서 고친 거짓말이 헤더로 옮겨 갈 뿐이다.
   const pinLabel = pinListHeaderLabel(pinCount, timeline.pinsStatus);
-  const headerMenu = useMemo<ConversationHeaderMenuItem[]>(
-    () => [{label: pinLabel, run: openPins}],
-    [pinLabel, openPins],
-  );
+  const headerMenu = useMemo<ConversationHeaderMenuItem[]>(() => {
+    const items: ConversationHeaderMenuItem[] = [{label: pinLabel, run: openPins}];
+    // 일대일 DM의 상대가 활성 에이전트일 때만 — 그룹 DM·사람 DM에는 맡길 대상이 없다.
+    if (dmAgent !== null && onDelegateWork !== undefined) {
+      items.push({
+        label: '작업 맡기기',
+        run: () =>
+          onDelegateWork({agentMemberId: dmAgent.id, channelId}),
+      });
+    }
+    return items;
+  }, [pinLabel, openPins, dmAgent, onDelegateWork, channelId]);
   const headerSubtitle = useMemo(
     () => conversationSubtitle(channel, peer, directory),
     [channel, peer, directory],

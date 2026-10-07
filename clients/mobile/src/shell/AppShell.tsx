@@ -44,6 +44,7 @@ import SidebarScreen from '../screens/SidebarScreen';
 import TeamBoardScreen from '../screens/TeamBoardScreen';
 import WorkSessionDetailScreen from '../screens/WorkSessionDetailScreen';
 import {SessionProvider, useSession} from '../session/useSession';
+import {DelegateWorkSheet, type DelegatePrefill} from './DelegateWorkSheet';
 import {NewChannelSheet} from './NewChannelSheet';
 import {NewMessageSheet} from './NewMessageSheet';
 import {PlusMenu, type PlusMenuItem} from './PlusMenu';
@@ -141,6 +142,14 @@ export function Shell({
   // + 가 여는 것: 메뉴, 또는 메뉴에서 고른 무거운 시트 하나. 한 번에 하나만 선다.
   const [create, setCreate] = useState<CreateStep>(initialCreate);
   const closeCreate = useCallback(() => setCreate(null), []);
+  // 「작업 맡기기」 시트(#3588). `create` 와 따로 둔다: 진입점이 에이전트·채널을 미리
+  // 정해 넘기고, `CreateStep` 은 캡처 하네스의 시작값으로도 쓰이는 닫힌 집합이다.
+  const [delegate, setDelegate] = useState<DelegatePrefill | null>(null);
+  const closeDelegate = useCallback(() => setDelegate(null), []);
+  const onDelegateWork = useCallback(
+    (prefill: DelegatePrefill) => setDelegate(prefill),
+    [],
+  );
   const {member, workspaceId} = useSession();
   const directoryQuery = useDirectory(workspaceId);
   // 채널 만들기는 소유자·관리자만(ADR-0128). 명단이 오기 전에는 행을 세우지 않는다 —
@@ -241,6 +250,13 @@ export function Shell({
       label: '에이전트 부르기',
       hint: '에이전트 목록을 엽니다.',
       onPress: onOpenAgentList,
+    });
+    items.push({
+      key: 'delegate',
+      icon: 'work',
+      label: '작업 맡기기',
+      hint: '에이전트에게 맡길 작업을 쓰는 시트를 엽니다.',
+      onPress: () => setDelegate({}),
     });
     if (workConsole) {
       items.push({
@@ -376,6 +392,7 @@ export function Shell({
             agent={nav.agent}
             onBack={onBack}
             onOpenConversation={onOpenConversation}
+            onDelegateWork={onDelegateWork}
           />
         </EdgeSwipeBack>
       ) : null}
@@ -453,6 +470,7 @@ export function Shell({
             // 같은 액션이라 뒤로가기는 여전히 한 겹씩 벗겨진다.
             onOpenConversation={onOpenConversation}
             onOpenAgent={onOpenAgent}
+            onDelegateWork={onDelegateWork}
           />
         </EdgeSwipeBack>
       ) : null}
@@ -467,6 +485,16 @@ export function Shell({
         <NewChannelSheet
           onOpenConversation={onOpenConversation}
           onClose={closeCreate}
+        />
+      ) : null}
+      {delegate !== null ? (
+        <DelegateWorkSheet
+          prefill={delegate}
+          boardAvailable={workConsole}
+          onClose={closeDelegate}
+          // 접수되면 작업 보드로 간다. 보드는 닫혀 있던 사람에게도 한 번에 보이도록 층을
+          // 새로 연다(`openWorkList`는 열린 대화·에이전트 층을 걷는다).
+          onSubmitted={() => dispatch({type: 'openWorkList'})}
         />
       ) : null}
     </Canvas>

@@ -26,7 +26,7 @@ import {
   workSessionContinuityStatus,
 } from '@momo/core/features/work/workSessionModel';
 import {workExecutionLocation} from '@momo/core/features/work/workLocation';
-import {attachParticle} from '@momo/core/lib/koreanParticle';
+import {attachParticle, attachRecipient} from '@momo/core/lib/koreanParticle';
 import {channelLabel} from '@momo/core/features/workspace/directory';
 import {useMutation} from '@tanstack/react-query';
 import React, {useMemo, useState} from 'react';
@@ -97,10 +97,13 @@ export default function AgentDetailScreen({
   agent,
   onBack,
   onOpenConversation,
+  onDelegateWork,
 }: {
   agent: OpenAgent;
   onBack: () => void;
   onOpenConversation: (channelId: string, title: string) => void;
+  /** 「작업 맡기기」 시트를 이 에이전트로 정해 연다 (#3588). 없으면 버튼도 없다. */
+  onDelegateWork?: (prefill: {agentMemberId: string}) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {workspaceId, member} = useSession();
@@ -291,6 +294,16 @@ export default function AgentDetailScreen({
             {openDm.isPending ? '대화 여는 중…' : '대화 열기'}
           </Text>
         </Pressable>
+        {onDelegateWork ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${attachRecipient(agent.displayName, 'person')} 작업 맡기기`}
+            onPress={() => onDelegateWork({agentMemberId: agent.memberId})}
+            style={({pressed}) => [styles.secondary, pressed && styles.pressed]}
+            testID="agent-delegate-work">
+            <Text style={styles.secondaryLabel}>작업 맡기기</Text>
+          </Pressable>
+        ) : null}
         {openDm.isError ? (
           <View style={styles.bannerWrap}>
             <FailureBanner

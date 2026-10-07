@@ -350,7 +350,7 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(screen.queryByTestId('plus-menu-work')).toBeNull();
   });
 
-  it('메뉴의 행은 새 DM · 새 채널 · 에이전트 부르기 순서이고, 모두 메뉴 항목이다', async () => {
+  it('메뉴의 행은 새 DM · 새 채널 · 에이전트 부르기 · 작업 맡기기 순서이고, 모두 메뉴 항목이다', async () => {
     installFetch();
     await renderReady();
     openMenu();
@@ -365,7 +365,12 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
       .filter((id: string | undefined, i: number, all: Array<string | undefined>) =>
         all.indexOf(id) === i,
       );
-    expect(rows).toEqual(['plus-menu-dm', 'plus-menu-channel', 'plus-menu-agents']);
+    expect(rows).toEqual([
+      'plus-menu-dm',
+      'plus-menu-channel',
+      'plus-menu-agents',
+      'plus-menu-delegate',
+    ]);
     expect(screen.getByTestId('plus-menu-dm')).toHaveProp('accessibilityLabel', '새 DM');
     expect(screen.getByTestId('plus-menu-channel')).toHaveProp(
       'accessibilityLabel',
