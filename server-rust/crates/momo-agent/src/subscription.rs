@@ -581,8 +581,19 @@ pub struct AgentReadFacts {
     pub owner: Option<(Uuid, String)>,
     /// `Some` only for an agent that dials in; see [`HOSTED_RECENTLY_SEEN_SQL`].
     pub host_online: Option<bool>,
-    /// Which official CLI a subscription agent runs; `None` for every other agent.
+    /// Which official CLI a subscription agent runs; `None` for every other agent
+    /// and for a personal agent (#3591: the Claude opt-in does not govern D7).
     pub subscription_harness: Option<SubscriptionHarness>,
+    /// #3591 (ADR-0198 증보 1 D7): set for a personal agent.
+    pub personal: Option<PersonalAgentFacts>,
+}
+
+/// What the roster says about a personal agent (#3591).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PersonalAgentFacts {
+    pub harness: SubscriptionHarness,
+    /// `member.status = 'active'`: not switched off, not suspended.
+    pub enabled: bool,
 }
 
 /// `brainUnavailableReason` for a Claude subscription agent on an instance that
@@ -615,6 +626,7 @@ pub async fn load_agent_read_facts_in_tx(
     let sql = format!(
         "SELECT m.id AS agent_id, a.invocation_scope, a.subscription_harness, a.model_source, \
                 a.owner_human_id, a.uses_owner_key, \
+                a.personal_agent, (m.status = 'active') AS member_active, \
                 COALESCE(a.config->>'execution_mode', '') = 'hosted_dial_in' AS config_hosted, \
                 EXISTS (SELECT 1 FROM hosted_agent_connection hc \
                          WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
@@ -651,7 +663,16 @@ pub async fn load_agent_read_facts_in_tx(
         let uses_owner_key: bool = row.try_get("uses_owner_key")?;
         // A subscription agent dials in from the owner's machine; a personal-key
         // agent is served by the server worker and has no host to be online.
-        let subscription = owner_only && !uses_owner_key;
+        let personal: bool = row.try_get("personal_agent")?;
+        let member_active: bool = row.try_get("member_active")?;
+        // #3591: a personal agent runs on the owner's member host (signed spawn),
+        // never through the Agent Port, so the hosted liveness heuristic and the
+        // Claude opt-in say nothing about it.
+        let subscription = owner_only && !uses_owner_key && !personal;
+        let harness = row
+            .try_get::<Option<String>, _>("subscription_harness")?
+            .as_deref()
+            .and_then(SubscriptionHarness::parse);
         facts.push(AgentReadFacts {
             agent_member_id: row.try_get("agent_id")?,
             brain: derive_brain(&scope, hosted, is_card, &model_source, uses_owner_key),
@@ -660,14 +681,15 @@ pub async fn load_agent_read_facts_in_tx(
                 (true, Some(id), Some(name)) => Some((id, name)),
                 _ => None,
             },
-            subscription_harness: if subscription {
-                row.try_get::<Option<String>, _>("subscription_harness")?
-                    .as_deref()
-                    .and_then(SubscriptionHarness::parse)
-            } else {
-                None
+            subscription_harness: if subscription { harness } else { None },
+            personal: match (personal, harness) {
+                (true, Some(harness)) => Some(PersonalAgentFacts {
+                    harness,
+                    enabled: member_active,
+                }),
+                _ => None,
             },
-            host_online: if hosted || subscription {
+            host_online: if !personal && (hosted || subscription) {
                 Some(row.try_get("host_online")?)
             } else {
                 None
@@ -1117,6 +1139,7 @@ mod tests {
             owner: None,
             host_online: None,
             subscription_harness: harness,
+            personal: None,
         };
         let claude = facts(Some(SubscriptionHarness::ClaudeCode));
         assert_eq!(

@@ -573,19 +573,22 @@ mod tests {
     ///
     /// 122 is #3570's signed new-work spawn (ADR-0198 D4, 증보 1 D7): `work_control.payload.prompt`,
     /// the thread/origin-message columns, and the signature CHECK that lets only a new task name no agent.
+    ///
+    /// 123 is #3591's personal agent (ADR-0198 증보 1 D7): `agent.personal_agent`,
+    /// `agent.personal_disabled_at` and the one-per-(owner, harness) partial index.
     #[test]
-    fn discovers_contiguous_migrations_001_to_122() {
+    fn discovers_contiguous_migrations_001_to_123() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            122,
-            "expected 122 migrations under {}",
+            123,
+            "expected 123 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 122);
+        assert_eq!(migrations.last().unwrap().version, 123);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

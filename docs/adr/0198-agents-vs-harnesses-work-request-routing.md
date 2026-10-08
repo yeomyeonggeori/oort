@@ -351,6 +351,19 @@ D7의 소유자 호출은 본문 D2가 이미 정한 「member host 레인은 D1
 
 **미검증(`runtime-unverified`).** 실기기·실제 ACP 왕복(host 상태 폴더 안의 질문용 폴더에서 에이전트가 도는 것), v4 클라이언트 서명자(폰·데스크탑), 별칭 멤버 표시, 스레드 답글 위치. 서명 요구 플래그가 꺼져 있는 동안 새 작업 경로는 닫혀 있다.
 
+### P2 확정 (#3591) — 개인 에이전트 멤버 생성·별칭 API
+증보 1 안의 구현 사실이며 새 결정이 아니다. 근거는 D7(별칭은 소유자가 정하고 워크스페이스 안에서 유일, 부르는 사람은 소유자뿐, `NonOwner` 문장), 결재 2(팀원에게 「<소유자 이름>의 개인 에이전트」로 보이고 `@` 자동완성은 소유자에게만), 위 「ADR-0193 D18」 표(스위치 두 개는 D7을 켜고 끄는 값이 아니다), 「T5 확정」 3(에이전트를 이름으로 받는 조건)이다.
+
+- **행 재사용.** 새 테이블은 없다. 089의 owner_only 모양(`invocation_scope`, `subscription_harness`, `owner_human_id`)에 migration 123이 `agent.personal_agent`(D7 표지)와 `agent.personal_disabled_at`(소유자가 끈 시각) 두 열과 `(workspace, owner, harness)` 부분 유니크를 더한다. T5의 `personal_agent_ok_in_tx`(요청자 소유·살아 있는 `owner_only`·하네스 일치)는 코드 변경 없이 개인 에이전트를 받아들인다. #3567은 kwak-claude를 `agentMemberId`로 같은 멤버 id 그대로 전환한다.
+- **별칭 = `member.handle`.** 유일성은 001의 `member_handle_uniq`가 이미 지킨다(사람·에이전트·꺼 둔 에이전트의 핸들과 겹치지 않는다). 대소문자는 소문자로 접는다.
+- **API.** `POST /v1/workspaces/{ws}/personal-agents`(켜기), `GET …/personal-agents`(호출자 본인 것, 꺼 둔 것 포함), `POST …/personal-agents/{agent}/disable`(끄기). 소유자는 요청 필드가 아니라 호출자 본인이라 팀원이 남의 하네스에 별칭을 붙일 길이 없다. 남의 에이전트·개인 에이전트가 아닌 id·없는 id는 하나의 404다. 에이전트 bearer·guest는 거부한다. 켜기는 워크스페이스 관리자일 필요가 없다(게스트는 불가). 하네스당 개인 에이전트는 하나다.
+- **끄기 = `member.status='suspended'`.** 과거 메시지·작성자·별칭 예약은 그대로이고, 같은 별칭으로 다시 켜면 같은 멤버가 돌아온다. 소유자는 자기가 끈 것(`personal_disabled_at`)만 다시 켠다. 관리자가 정지한 것은 409다. 꺼진 에이전트는 T5가 「살아 있는」 조건으로 거절하고 로스터(활성 멤버만)에서 빠진다.
+- **만들지 않는 것.** 호스티드 연결·토큰·pairing 값·`agent_profile`·채널 멤버십. `config.execution_mode`는 `hosted_dial_in`이 아니라서 069의 센티넬 가드가 이 행에 호스티드 연결이 붙는 것을 막는다. 두 스위치(`MOMO_SUBSCRIPTION_AGENTS_ENABLED`, `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`)는 보지 않는다. 호스트가 이미 있어야 한다는 전제도 두지 않는다(T5가 spawn 때 host·폴더·하네스를 본다).
+- **읽기 값.** 로스터 멤버에 `personalAgent {label, ownerId, ownerDisplayName, harness, enabled, mentionable}`이 붙는다. `label`은 팀원이 읽는 「<소유자 이름>의 개인 에이전트」, `mentionable`은 **보는 사람 기준**으로 서버가 계산한다(소유자이고 켜져 있을 때만 true). 개인 에이전트에는 `hostOnline`·`brainUnavailableReason`이 없다(Agent Port 레인이 아니다).
+- **결재 (2026-10-08 성재, AskUserQuestion 선택 원문).** ① 채널 참여: 「소유자면 어디서나 (Recommended)」 — 소유자가 속한 채널이면 초대 없이 바로 부르고, 답은 그 채널에 남고 팀원은 읽기만 한다. ② 켜기 자격: 「누구나 자기 것 (Recommended)」 — 게스트 아닌 팀원 누구나 자기 하네스로 자기 개인 에이전트를 켠다. ③ work host 연동은 켜기의 전제로 요구하지 않는다(추천대로). **채널 참여의 구현 자체는 P1(#3592) 몫이다.** P2는 멤버만 만들고 채널 멤버십을 만들지 않으며, 그 전에는 멘션이 기존 `agent_not_channel_member` 건너뜀으로 끝나고 T5 확정 6의 「채널 활성 멤버가 아니면 소유자 이름으로 표시」가 받는다. 멘션 라우팅(P1)·UI는 이 이슈 밖이다.
+- **삭제·정지(보안 검수 M2·M3).** 멤버가 삭제되면(`deleted_at`/`status='deleted'`) 트리거가 개인 에이전트 표지를 풀어 같은 (소유자, 하네스)로 다시 켤 수 있다(행·핸들은 남는다). 소유자 경로가 아닌 곳의 `member.status` 쓰기(관리자 정지·복구)는 `personal_disabled_at`을 지우므로, 소유자 `enable`은 관리자 정지를 풀지 못한다(소유자가 먼저 끈 뒤 정지해도 같다).
+- **전환(M1).** `agentMemberId` 전환은 호출자 소유의 살아 있는 `owner_only` 에이전트(같은 하네스)만 받는다. `workspace` 범위(팀 호출 가능한 호스티드·외부 카드)는 404, 호스티드 연결(`expired`/`disconnected` 제외)이나 살아 있는 자격이 남아 있으면 409 `personal_agent_connections_remain`이다. revoke는 #3567 몫이다.
+
 ## 증보 2 (2026-10-08) — 워크스페이스 단위 「실행 엔진」 설정 API 제거 (#3584)
 
 D1(하네스 = 내 도구)과 D4(작업은 내 맥 우선, 호스트 소유자 == 요청자)가 확정한 결과로, 워크스페이스가 하나의 실행 엔진(opencode·goose·codex-local)을 골라 모두에게 적용하는 모델은 폐기한다. 성재 지시(#3578 S0, 2026-10-07): 「opencode goose codex-local 이런건 어찌보면 조금 옛날 레거시의 잔재 같은데 그 부분도 해소해줘.」.
