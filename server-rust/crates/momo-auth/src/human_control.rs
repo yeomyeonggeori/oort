@@ -154,6 +154,7 @@ pub enum ControlSubject<'a> {
     /// ([`HumanSignatureInput`]): the agent is optional (a harness spawn has
     /// none), the folder is not.
     SpawnTask {
+        label: &'a str,
         prompt: &'a str,
         tool: &'a str,
         channel_id: Uuid,
@@ -457,6 +458,7 @@ pub async fn verify_human_control_in_tx(
             )
         }
         ControlSubject::SpawnTask {
+            label,
             prompt,
             tool,
             channel_id,
@@ -470,7 +472,7 @@ pub async fn verify_human_control_in_tx(
             let Some(folder_id) = input.folder_id.as_deref() else {
                 return Ok(Err(HumanControlRefusal::Invalid));
             };
-            if !is_nfc(prompt) || folder_id.is_empty() || folder_id.len() > 256 {
+            if !is_nfc(prompt) || !is_nfc(label) || folder_id.is_empty() || folder_id.len() > 256 {
                 return Ok(Err(HumanControlRefusal::Invalid));
             }
             (
@@ -481,6 +483,7 @@ pub async fn verify_human_control_in_tx(
                     channel_id,
                     thread_root_id,
                     origin_message_id,
+                    label,
                     prompt,
                 },
                 None,

@@ -338,7 +338,14 @@ impl SessionManager {
         };
         // The first prompt: the owner's whole prompt for a new task (T5), the
         // label for a resume. Never an adapter command either way.
-        let first_prompt = control.payload_str("prompt").unwrap_or(label);
+        let new_work = control.payload.get("prompt").is_some();
+        let first_prompt = if new_work {
+            control
+                .payload_str("prompt")
+                .ok_or(Refusal::InvalidControl)?
+        } else {
+            label
+        };
         policy::check_prompt(first_prompt)?;
         // A resume names the session the server allocated for it; one this
         // host already runs is not opened a second time (#2607 N-6).
@@ -365,7 +372,7 @@ impl SessionManager {
         // the folder the owner signed, by the opaque id this host issued; it
         // is resolved here and nowhere else, and never falls back to the
         // configured folder. A resume (no id) keeps that folder.
-        let cwd = match (control.payload_str("prompt"), signed_folder) {
+        let cwd = match (new_work.then_some(()), signed_folder) {
             (Some(_), Some(folder_id)) => self
                 .settings
                 .folders

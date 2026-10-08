@@ -620,7 +620,7 @@ impl HumanTrust {
             // statement is v4: the prompt, the harness, the folder id, the
             // room, the thread and message it was called from, and the agent
             // only when one was named. A fresh task has no session yet.
-            "spawn" if payload("prompt").is_some() => {
+            "spawn" if control.payload.get("prompt").is_some() => {
                 let Some(folder_id) = envelope.folder_id.as_deref() else {
                     return Err(Refusal::DeviceSignatureInvalid);
                 };
@@ -629,7 +629,9 @@ impl HumanTrust {
                 }
                 let prompt = payload("prompt").ok_or(Refusal::InvalidControl)?;
                 let tool = payload("tool").ok_or(Refusal::InvalidControl)?;
+                let label = payload("label").ok_or(Refusal::InvalidControl)?;
                 require_nfc(prompt)?;
+                require_nfc(label)?;
                 (
                     ControlContent::SpawnTask {
                         agent_member_id: envelope.agent_member_id,
@@ -638,6 +640,7 @@ impl HumanTrust {
                         channel_id: control.channel_id,
                         thread_root_id: envelope.thread_root_id,
                         origin_message_id: envelope.origin_message_id,
+                        label,
                         prompt,
                     },
                     None,
@@ -843,7 +846,9 @@ fn require_nfc(text: &str) -> Result<(), Refusal> {
 /// verified the owner's signature itself — whether or not R2 is switched on
 /// here — and reads the folder id from nowhere else.
 pub fn is_new_work_spawn(control: &WorkControl) -> bool {
-    control.kind == "spawn" && control.payload_str("prompt").is_some()
+    // The KEY decides, not its type: a `prompt` that is not a string is a
+    // malformed new-work spawn to refuse, not a resume to fall back to.
+    control.kind == "spawn" && control.payload.get("prompt").is_some()
 }
 
 /// The folder id a **verified** new-work spawn names (its envelope's

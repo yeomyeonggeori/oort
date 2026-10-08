@@ -142,6 +142,21 @@ fn validated_spawn(
     }
     let label = validated_label(&request.label)
         .map_err(|error| ApiError::coded(StatusCode::BAD_REQUEST, CODE_LABEL_INVALID, error.0))?;
+    // The title is signed as the server stores it: one line of NFC text, no
+    // control character, and already trimmed (T5 review M-2, L-2).
+    let label_nfc = ControlContent::Input {
+        mode: InputMode::Queue,
+        text: &label,
+    }
+    .canonical_bytes()
+    .is_ok_and(|bytes| bytes == label.as_bytes());
+    if label != request.label || !label_nfc || label.chars().any(char::is_control) {
+        return Err(ApiError::coded(
+            StatusCode::BAD_REQUEST,
+            CODE_LABEL_INVALID,
+            "title must be one trimmed NFC line with no control character",
+        ));
+    }
     let prompt = &request.prompt;
     let chars = prompt.chars().count();
     if chars == 0 || chars > PROMPT_MAX_CHARS || prompt.trim().is_empty() {
@@ -164,6 +179,18 @@ fn validated_spawn(
             StatusCode::BAD_REQUEST,
             CODE_PROMPT_INVALID,
             "prompt must be NFC-normalized (the form the signature covers)",
+        ));
+    }
+    // A prompt is text: line breaks and tabs, no other control character
+    // (U+0000 would be a 500 from the database, T5 review L-2).
+    if prompt
+        .chars()
+        .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+    {
+        return Err(ApiError::coded(
+            StatusCode::BAD_REQUEST,
+            CODE_PROMPT_INVALID,
+            "prompt may not contain control characters other than line breaks and tabs",
         ));
     }
     // The host refuses an adapter command as a prompt (#2602 L-7).
@@ -558,6 +585,7 @@ async fn spawn_in_tx(
             host_id: derived.id,
             session_id: None,
             subject: ControlSubject::SpawnTask {
+                label: &task.label,
                 prompt: &request.prompt,
                 tool: &task.tool,
                 channel_id: request.channel_id,

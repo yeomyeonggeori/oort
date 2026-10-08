@@ -275,9 +275,12 @@ impl FolderBook {
                 let task = base.join(format!("t-{}", control_id.simple()));
                 match std::fs::DirBuilder::new().mode_0700().create(&task) {
                     Ok(()) => {}
-                    // A retry of the same control after a crash: only a real
-                    // directory of ours counts as the same one.
-                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    // T5 review L-3: a task's folder is made for it and never
+                    // reused — one that is already there (planted, or left by
+                    // an earlier run) is not a fresh private folder.
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                        return Err(Refusal::FolderUnsafe)
+                    }
                     Err(_) => return Err(Refusal::WorkdirUnavailable),
                 }
                 let meta = std::fs::symlink_metadata(&task).map_err(|_| Refusal::FolderUnsafe)?;
@@ -506,8 +509,19 @@ mod tests {
         let second = book.resolve_for_spawn(&question_id, b).unwrap();
         assert_ne!(first, second);
         assert!(std::fs::read_dir(&second).unwrap().next().is_none());
-        // A retry of the same control is the same folder.
-        assert_eq!(book.resolve_for_spawn(&question_id, a).unwrap(), first);
+        // L-3: a folder that already exists is never reused — not by a retry,
+        // not one somebody planted ahead of the control.
+        assert_eq!(
+            book.resolve_for_spawn(&question_id, a),
+            Err(Refusal::FolderUnsafe)
+        );
+        let planted = uuid::Uuid::new_v4();
+        let base = std::fs::canonicalize(dir.join(QUESTION_FOLDER_DIR)).unwrap();
+        std::fs::create_dir(base.join(format!("t-{}", planted.simple()))).unwrap();
+        assert_eq!(
+            book.resolve_for_spawn(&question_id, planted),
+            Err(Refusal::FolderUnsafe)
+        );
     }
 
     /// ADR-0188 D6 「매 spawn마다 realpath로 대조」: a project folder whose

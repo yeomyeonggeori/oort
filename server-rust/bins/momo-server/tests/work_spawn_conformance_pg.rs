@@ -660,6 +660,7 @@ impl Stage {
                 channel_id: req.channel,
                 thread_root_id: req.thread,
                 origin_message_id: req.origin,
+                label: req.label,
                 prompt: &req.prompt,
             },
         }
@@ -1870,4 +1871,128 @@ async fn the_ledger_itself_refuses_an_unsigned_prompt_and_a_resume_without_an_ag
         resume_with_position.is_err(),
         "a resume names no thread or message"
     );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_title_is_bound_by_the_signature() {
+    // M-2: the card title is signed too — the server cannot retitle a task.
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    s.host_online(s.host, true).await;
+    let signed = s.req();
+    let mut sent = signed.clone();
+    sent.label = "전혀 다른 제목";
+    assert_tamper_refused(&s, &signed, &sent).await;
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn two_requests_with_one_nonce_at_once_make_exactly_one_control() {
+    // M-3: the same signed statement sent twice concurrently.
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    s.host_online(s.host, true).await;
+    let req = s.req();
+    let nonce = Uuid::new_v4();
+    let issued = now_ms();
+    let signature = s.sign_for(
+        &s.phone_signer(),
+        s.host,
+        &req,
+        nonce,
+        issued,
+        issued + 300_000,
+    );
+    let body = Stage::body(&req, signature);
+    let path = s.spawns_path();
+    let (a, b) = tokio::join!(
+        s.post(&path, &s.access, body.clone()),
+        s.post(&path, &s.access, body.clone())
+    );
+    let mut statuses = [a.0, b.0];
+    statuses.sort_unstable();
+    assert!(
+        statuses == [200, 201] || statuses == [201, 409],
+        "one creates, the other is a retry or a replay: {a:?} {b:?}"
+    );
+    assert_eq!(s.spawn_controls().await, 1, "exactly one work_control row");
+    assert_eq!(s.spent_nonces().await, 1);
+    let rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM work_control WHERE workspace_id = $1 AND human_nonce = $2",
+    )
+    .bind(s.workspace)
+    .bind(nonce)
+    .fetch_one(&s.su)
+    .await
+    .unwrap();
+    assert_eq!(rows, 1);
+    let polled = s.poll().await;
+    let pending = polled["workControls"].as_array().unwrap().len();
+    assert_eq!(pending, 1, "the host is handed one control");
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn control_characters_are_refused_before_the_signature() {
+    // L-2: U+0000 and friends in the prompt or the title are a 400 by name,
+    // never a 500 from the database and never a spent nonce.
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    s.host_online(s.host, true).await;
+    for (what, prompt, label, expected) in [
+        (
+            "NUL in the prompt",
+            "앞\u{0}뒤",
+            "제목",
+            "spawn_prompt_invalid",
+        ),
+        (
+            "ESC in the prompt",
+            "앞\u{1b}[31m뒤",
+            "제목",
+            "spawn_prompt_invalid",
+        ),
+        (
+            "NUL in the title",
+            "질문",
+            "제\u{0}목",
+            "spawn_label_invalid",
+        ),
+        (
+            "newline in the title",
+            "질문",
+            "제\n목",
+            "spawn_label_invalid",
+        ),
+    ] {
+        // A signer would refuse these bytes; send a signature over the clean
+        // request beside the bad text — the route must refuse before it looks.
+        let clean = s.req();
+        let mut req = s.req();
+        req.prompt = prompt.to_string();
+        req.label = label;
+        let nonce = Uuid::new_v4();
+        let issued = now_ms();
+        let signature = s.sign_for(
+            &s.phone_signer(),
+            s.host,
+            &clean,
+            nonce,
+            issued,
+            issued + 300_000,
+        );
+        let (status, body) = s
+            .post(&s.spawns_path(), &s.access, Stage::body(&req, signature))
+            .await;
+        assert_eq!(status, 400, "{what}: {body}");
+        assert_eq!(code(&body), Some(expected), "{what}");
+    }
+    assert_eq!(s.spawn_controls().await, 0);
+    assert_eq!(s.spent_nonces().await, 0);
+    // Tabs and line breaks in a prompt are text.
+    let mut req = s.req();
+    req.prompt = "표:\n\t열1\t열2\r\n끝".to_string();
+    let (status, body, _) = s.spawn(&req).await;
+    assert_eq!(status, 201, "{body}");
 }

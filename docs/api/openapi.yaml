@@ -16633,7 +16633,7 @@ components:
           type: string
           minLength: 1
           maxLength: 120
-          description: The session card's title (display text; not signed).
+          description: The session card's title — one trimmed NFC line, no control character (signed, v4).
         prompt:
           type: string
           minLength: 1

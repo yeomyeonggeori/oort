@@ -54,7 +54,7 @@
 //! | `input`           | `NFC(text)`                                                   |
 //! | `spawn` (v2)      | `{agent_member_id}\n{folder_id}\n{tool}\n{channel_id}\n{NFC(first_prompt)}` |
 //! | `spawn` (v1)      | `{agent_member_id}\n{folder_id}\n{NFC(first_prompt)}` (retired) |
-//! | `spawn` (v4)      | `{agent_member_id \| -}\n{folder_id}\n{tool}\n{channel_id}\n{thread_root_id \| -}\n{origin_message_id \| -}\n{NFC(prompt)}` (new work, #3570) |
+//! | `spawn` (v4)      | `{agent_member_id \| -}\n{folder_id}\n{tool}\n{channel_id}\n{thread_root_id \| -}\n{origin_message_id \| -}\n{NFC(label)}\n{NFC(prompt)}` (new work, #3570) |
 //! | `permission` (v3) | `{request_event_id}\n{option_id}\n{option_kind}\n{scope}\n{preview_sha256}` |
 //! | `permission` (v1·v2) | `{request_event_id}\n{option_id}\n{option_kind}\n{scope}` (only for a request with no preview) |
 //! | `bundle_manifest` | [`canonical_json`] of the manifest                            |
@@ -322,6 +322,9 @@ pub enum ControlContent<'a> {
         thread_root_id: Option<Uuid>,
         /// The message the owner called from (`-` for a spawn with no message).
         origin_message_id: Option<Uuid>,
+        /// The session card's title (`payload.label`), one line, NFC. Signed so
+        /// a server cannot retitle the owner's task (T5 review M-2).
+        label: &'a str,
         /// The whole first prompt (`payload.prompt`), NFC.
         prompt: &'a str,
     },
@@ -438,17 +441,20 @@ impl ControlContent<'_> {
                 channel_id,
                 thread_root_id,
                 origin_message_id,
+                label,
                 prompt,
             } => {
                 token("folder_id", folder_id)?;
                 token("tool", tool)?;
+                token("label", label)?;
                 let optional =
                     |id: &Option<Uuid>| id.map_or_else(|| ABSENT.to_string(), |id| id.to_string());
                 format!(
-                    "{}\n{folder_id}\n{tool}\n{channel_id}\n{}\n{}\n{}",
+                    "{}\n{folder_id}\n{tool}\n{channel_id}\n{}\n{}\n{}\n{}",
                     optional(agent_member_id),
                     optional(thread_root_id),
                     optional(origin_message_id),
+                    nfc(label),
                     nfc(prompt)
                 )
             }

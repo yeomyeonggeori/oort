@@ -1099,6 +1099,7 @@ async fn a_new_work_spawn_passes_the_hosts_verifier() {
             channel_id: w.channel,
             thread_root_id: None,
             origin_message_id: Some(origin),
+            label: "빌드 확인",
             prompt,
         },
     }

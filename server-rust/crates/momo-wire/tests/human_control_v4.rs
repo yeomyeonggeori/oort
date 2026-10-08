@@ -42,6 +42,7 @@ struct Task {
     channel: Uuid,
     thread: Option<Uuid>,
     origin: Option<Uuid>,
+    label: &'static str,
     prompt: &'static str,
 }
 
@@ -53,6 +54,7 @@ fn task() -> Task {
         channel: id(0xc4a7),
         thread: Some(id(0x7ead)),
         origin: Some(id(0x0e16)),
+        label: "빌드 확인",
         prompt: "빌드가 왜 깨지는지 봐 줘\n첫째, 로그부터요.",
     }
 }
@@ -75,6 +77,7 @@ fn statement(t: &Task) -> HumanControl<'_> {
             channel_id: t.channel,
             thread_root_id: t.thread,
             origin_message_id: t.origin,
+            label: t.label,
             prompt: t.prompt,
         },
     }
@@ -89,13 +92,14 @@ fn v4(t: &Task) -> Vec<u8> {
 fn the_v4_bytes_are_exactly_these() {
     let t = task();
     let body = format!(
-        "{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
         id(0xa6e7),
         "fld_0123456789abcdef0123",
         "claude",
         id(0xc4a7),
         id(0x7ead),
         id(0x0e16),
+        "빌드 확인",
         "빌드가 왜 깨지는지 봐 줘\n첫째, 로그부터요."
     );
     let sha = hex::encode(Sha256::digest(body.as_bytes()));
@@ -117,8 +121,9 @@ fn the_v4_bytes_are_exactly_these() {
         ..task()
     };
     let body = format!(
-        "-\nfld_0123456789abcdef0123\nclaude\n{}\n-\n-\n{}",
+        "-\nfld_0123456789abcdef0123\nclaude\n{}\n-\n-\n{}\n{}",
         id(0xc4a7),
+        bare.label,
         bare.prompt
     );
     assert!(String::from_utf8(v4(&bare))
@@ -214,6 +219,13 @@ fn every_signed_field_is_bound() {
             "other origin",
             Task {
                 origin: Some(id(0xbad)),
+                ..task()
+            },
+        ),
+        (
+            "title",
+            Task {
+                label: "다른 제목",
                 ..task()
             },
         ),
