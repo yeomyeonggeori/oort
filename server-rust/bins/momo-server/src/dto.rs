@@ -4928,6 +4928,24 @@ pub struct WorkSpawnResponse {
     pub replayed: bool,
 }
 
+/// `POST …/work-sessions/{id}/kill` (#3628, ADR-0198 N4).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkKillResponse {
+    /// The `kill` control this answer is about: the one just made, the one
+    /// still waiting for the Mac (`replayed`), or — for a session that already
+    /// ended — the last one asked for, `null` when none ever was.
+    pub work_control: Option<WorkControlDto>,
+    /// The session's status as the server holds it (`running`/`idle` while the
+    /// Mac has not yet stopped it, `ended` once it has).
+    pub session_status: String,
+    /// Whether the session's Mac was heartbeating when this was answered. A
+    /// kill for an offline Mac is kept and runs when the Mac returns.
+    pub host_online: bool,
+    /// `true` when nothing new was written (a retry, or an already ended session).
+    pub replayed: bool,
+}
+
 /// One decided (or still pending) permission request.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

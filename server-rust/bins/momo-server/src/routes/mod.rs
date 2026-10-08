@@ -88,6 +88,7 @@ pub mod work_board;
 pub mod work_controls;
 pub mod work_hosts;
 pub mod work_instructions;
+pub mod work_kill;
 pub mod work_permissions;
 pub mod work_session_share;
 pub mod work_sessions;

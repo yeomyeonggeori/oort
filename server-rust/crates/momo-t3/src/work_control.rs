@@ -528,6 +528,11 @@ pub async fn fetch_work_control_in_tx(
 /// session yet, and the one it will create is not the one anybody is typing
 /// into.
 ///
+/// One exception (#3628, ADR-0198 N4): a `kill` its own **host owner** asked for
+/// is never withheld. The window is the owner's own keyboard on the owner's own
+/// screen, and 「즉시 멈추기」 must not wait for the lease to lapse; an agent's
+/// `kill` (a different requester) stays withheld as before (증보 3 D3).
+///
 /// ## ADR-0188 R0.1 (#2582) — what a remote host may be handed at all
 ///
 /// R0 refuses, at creation and at decision time, everything an agent or a
@@ -596,12 +601,21 @@ pub async fn pending_controls_for_host_in_tx(
                  AND h.workspace_id = work_control.workspace_id \
                  AND h.revoked_at IS NULL \
             ) \
-            AND NOT EXISTS ( \
-              SELECT 1 FROM display_control_window w \
-               WHERE w.workspace_id = work_control.workspace_id \
-                 AND w.work_session_id = work_control.session_id \
-                 AND w.ended_at IS NULL \
-                 AND w.lease_expires_at > clock_timestamp() \
+            AND ( \
+              (work_control.kind = '{KIND_KILL}' AND EXISTS ( \
+                 SELECT 1 FROM work_host h \
+                  WHERE h.id = work_control.target_host_id \
+                    AND h.workspace_id = work_control.workspace_id \
+                    AND h.scope = '{HOST_SCOPE_MEMBER}' \
+                    AND h.owner_member_id = work_control.requester_member_id \
+              )) \
+              OR NOT EXISTS ( \
+                SELECT 1 FROM display_control_window w \
+                 WHERE w.workspace_id = work_control.workspace_id \
+                   AND w.work_session_id = work_control.session_id \
+                   AND w.ended_at IS NULL \
+                   AND w.lease_expires_at > clock_timestamp() \
+              ) \
             ) \
             AND NOT EXISTS ( \
               SELECT 1 FROM work_host h \
