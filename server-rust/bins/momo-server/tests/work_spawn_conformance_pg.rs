@@ -1794,17 +1794,14 @@ async fn the_ledger_itself_refuses_an_unsigned_prompt_and_a_resume_without_an_ag
     let plain = insert("", "", json!({"tool": "claude", "label": "x"})).await;
     assert!(plain.is_ok(), "{plain:?}");
     // A signed spawn: a resume (no prompt) needs its agent; a new task does not.
-    let signed_columns = format!(
-        ", device_key_id, human_instance_id, human_nonce, human_issued_at_ms, \
-           human_expires_at_ms, human_spawn_folder_id, human_signature"
-    );
+    let signed_columns: &'static str = ", device_key_id, human_instance_id, human_nonce, \
+         human_issued_at_ms, human_expires_at_ms, human_spawn_folder_id, human_signature";
     let signed_values = format!(
         ", '{}', 'i', '{}', 1, 2, 'f', '{}=='",
         s.phone_id,
         Uuid::new_v4(),
         "A".repeat(86)
     );
-    let signed_columns: &'static str = Box::leak(signed_columns.into_boxed_str());
     let signed_values: &'static str = Box::leak(signed_values.into_boxed_str());
     let resume_without_agent = insert(
         signed_columns,

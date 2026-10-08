@@ -570,19 +570,22 @@ mod tests {
     ///
     /// 121 is #3590's work-host folders (ADR-0188 D6, ADR-0198 증보 1): the RLS-FORCE table
     /// `work_host_folder` (opaque folder id + display name a host announces, never a path).
+    ///
+    /// 122 is #3570's signed new-work spawn (ADR-0198 D4, 증보 1 D7): `work_control.payload.prompt`,
+    /// the thread/origin-message columns, and the signature CHECK that lets only a new task name no agent.
     #[test]
-    fn discovers_contiguous_migrations_001_to_121() {
+    fn discovers_contiguous_migrations_001_to_122() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            121,
-            "expected 121 migrations under {}",
+            122,
+            "expected 122 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 121);
+        assert_eq!(migrations.last().unwrap().version, 122);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

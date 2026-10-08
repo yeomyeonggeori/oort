@@ -7277,6 +7277,106 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /v1/workspaces/{workspaceId}/work-spawns:
+    post:
+      tags: [work-controls]
+      operationId: spawnWork
+      summary: The owner's signed new task on their own Mac (T5, #3570).
+      description: >
+        ADR-0198 D4 · 증보 1 D7 and the 「T5 확정」 section, ADR-0146, ADR-0188
+        D3 · D6. Closed (403 signed_spawn_disabled) unless the instance sets
+        `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`. Human bearer only (agent
+        bearers, signed hosts, webhooks and door bells never reach it). The host
+        is derived, not named: the requester's own `scope=member` host, unrevoked
+        and online (90 s), that announced the signed `folderId`; someone else's
+        host or folder is one non-disclosing 404 and a teammate has no path to
+        another person's Mac. `humanSignature` is the owner's
+        `momo.human.control.v4` statement over the host, the room, the thread and
+        message it was called from, the harness, the folder id, the agent (or
+        none — 「내 도구」) and the whole prompt; changing any of them breaks the
+        signature. The route writes one dispatched `spawn` work control, the
+        nonce, the `action_signature` row and an audit row (never the prompt) in
+        one tenant transaction and **nothing on the message path** — no
+        `channel_seq` bump, no message, no outbox event; the host reads its
+        ledger by polling `pending-controls`. Slot admission applies. A retry of
+        an accepted spawn answers 200 with the same control before anything that
+        could have changed since. Every refusal is before the nonce is spent
+        except the signature's own.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkSpawnRequest"
+      responses:
+        "201":
+          description: The spawn was accepted and dispatched to the owner's Mac.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkSpawnResponse"
+        "200":
+          description: A retry of a spawn already accepted (`replayed` true).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkSpawnResponse"
+        "400":
+          description: >
+            `error.code` spawn_prompt_invalid (empty, over 32768 characters or
+            not NFC), spawn_slash_command, spawn_label_invalid,
+            spawn_tool_invalid (not a registered, enabled, lower-case key),
+            spawn_folder_required, or spawn_origin_invalid (the thread or message
+            is not the owner's own, in this room).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            `error.code` signed_spawn_disabled (the flag is off), spawn_not_human,
+            spawn_channel_member_only, spawn_agent_not_allowed (not the owner's
+            live personal agent, or its harness does not match the tool),
+            remote_host_shell_refused, or a device-signature refusal:
+            device_signature_invalid, device_key_revoked, device_key_not_endorsed,
+            device_signature_expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: >
+            `error.code` spawn_host_not_found (the requester has no live member
+            host) or spawn_folder_not_found (no host of the requester's announced
+            that folder id — also for someone else's folder).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            `error.code` work_host_offline (no heartbeat in 90 s — not delivered;
+            resend the same signed statement later), spawn_host_ambiguous,
+            spawn_nonce_reused, device_nonce_replayed, pool_exhausted or
+            member_limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: >
+            `error.code` instance_id_unconfigured — no `MOMO_INSTANCE_ID`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/terminal-attach:
     post:
       tags: [work-sessions]
@@ -15008,6 +15108,14 @@ components:
           format: uuid
         folderId:
           type: string
+        threadRootId:
+          type: string
+          format: uuid
+          description: New-work spawn only (v4, #3570) — the thread the owner called from.
+        originMessageId:
+          type: string
+          format: uuid
+          description: New-work spawn only (v4, #3570) — the message the owner called from.
         signature:
           type: string
           description: canonical low-s raw r‖s, base64.
@@ -16422,7 +16530,9 @@ components:
 
     WorkControlPayload:
       description: >
-        Closed field union selected by kind: spawn requires exactly tool+label,
+        Closed field union selected by kind: spawn requires exactly tool+label
+        (plus the owner's whole `prompt` on a signed new-work spawn, #3570 — the
+        host receives it; the room's `work.control.*` events never carry it),
         input exactly text, read accepts only optional tail_lines, kill is
         empty, and permission (server-created, #3000) is exactly
         request_event_id+option_id+kind. No path, cwd, environment, process
@@ -16436,6 +16546,13 @@ components:
           type: string
           minLength: 1
           maxLength: 120
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 32768
+          description: >
+            spawn only, only on a signed new-work spawn (`POST …/work-spawns`).
+            NFC. The first prompt the host sends; bound by `momo.human.control.v4`.
         text:
           type: string
           minLength: 1
@@ -16502,6 +16619,64 @@ components:
           description: The thread message's idempotency key; must equal humanSignature.nonce.
         humanSignature:
           $ref: "#/components/schemas/HumanSignatureRequest"
+
+    WorkSpawnRequest:
+      type: object
+      required: [tool, label, prompt, channelId, humanSignature]
+      additionalProperties: false
+      properties:
+        tool:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9._-]{1,63}$'
+          description: The harness to launch, as the host allowlists it (signed).
+        label:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: The session card's title (display text; not signed).
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 32768
+          description: >
+            The whole first prompt, NFC, not starting with `/` (signed).
+        channelId:
+          type: string
+          format: uuid
+          description: The room the session belongs to; the owner must be an active member (signed).
+        threadRootId:
+          type: string
+          format: uuid
+          nullable: true
+          description: The thread the owner called from; must be the thread the origin message is in (signed).
+        originMessageId:
+          type: string
+          format: uuid
+          nullable: true
+          description: The owner's own plain message in this room they called from (signed).
+        targetHostId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >
+            A hint that can only narrow the owner's own Macs. The host is derived
+            from the signed folder id; this never redirects.
+        humanSignature:
+          $ref: "#/components/schemas/HumanSignatureRequest"
+          description: >
+            `momo.human.control.v4`. `folderId` is required (the opaque id one of
+            the owner's own hosts announced); `agentMemberId` only when the owner
+            names a personal agent (a harness spawn has none).
+
+    WorkSpawnResponse:
+      type: object
+      required: [workControl, replayed]
+      properties:
+        workControl:
+          $ref: "#/components/schemas/WorkControl"
+        replayed:
+          type: boolean
+          description: true when this answered a retry of a spawn already accepted.
 
     WorkInstructionMessage:
       type: object
