@@ -67,7 +67,7 @@ describe("StaleWorkspaceNamePhrase wrap and particle (B-R3-1, M-R3-5)", () => {
     expect(glue?.textContent).toBe("」으로");
     expect(glue?.textContent).not.toContain("다른 기기에서 바꾼 이름");
     expect(visibleText(host)).toContain(
-      "워크스페이스 이름이 「다른 기기에서 바꾼 이름」으로 바뀌었습니다."
+      "워크스페이스 이름이 「다른 기기에서 바꾼 이름」으로 바뀌었어요."
     );
     const bannerNowraps = [
       ...(host.querySelector('[data-testid="onboarding-s1-stale"]')?.querySelectorAll(
@@ -106,7 +106,7 @@ describe("StaleWorkspaceNamePhrase wrap and particle (B-R3-1, M-R3-5)", () => {
   it("rendered particle follows directionParticle for a vowel-final name", () => {
     const host = mountPhrase("여명거리 스튜디오");
     expect(host.querySelector('[data-testid="stale-name-particle"]')?.textContent).toBe("」로");
-    expect(visibleText(host)).toContain("「여명거리 스튜디오」로 바뀌었습니다.");
+    expect(visibleText(host)).toContain("「여명거리 스튜디오」로 바뀌었어요.");
     expect(visibleText(host)).not.toContain("」으로");
   });
 

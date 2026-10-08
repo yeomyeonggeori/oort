@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
 import { Button } from "@/design/ui/button";
+import { cn } from "@/design/lib/cn";
 import {
   buildInviteMailto,
   buildJoinLink,
@@ -23,6 +24,7 @@ export function IssuedInviteCard({
   issuedRef,
   copyMode = "full",
   footnote,
+  bare = false,
 }: {
   issued: CreatedInvite;
   workspaceName: string;
@@ -30,6 +32,8 @@ export function IssuedInviteCard({
   copyMode?: "full" | "single";
   /** 카드 맨 아래 작은 글씨 한 줄. 온보딩 S2만 준다(#2811 「해시만 보관」). */
   footnote?: string;
+  /** 이미 카드(`SettingsSection`) 안에 있다: 상자를 한 겹 더 두르지 않는다(#3578). */
+  bare?: boolean;
 }) {
   const serverBaseUrl = resolveServerBaseUrl();
   const card: InviteCardInput = {
@@ -45,7 +49,10 @@ export function IssuedInviteCard({
     <div
       ref={issuedRef}
       tabIndex={-1}
-      className="flex flex-col gap-3 rounded-md border border-ok bg-surface-raised p-4 focus-visible:focus-ring"
+      className={cn(
+        "flex flex-col gap-3 p-4 focus-visible:focus-ring",
+        !bare && "rounded-md border border-ok bg-surface-raised"
+      )}
       role="status"
       data-testid="invite-issued"
     >

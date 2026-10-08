@@ -26,7 +26,7 @@ export function StaleWorkspaceNamePhrase({
       <span className="whitespace-nowrap" data-testid="stale-name-particle">
         」{particle}
       </span>{" "}
-      바뀌었습니다.
+      바뀌었어요.
     </>
   );
 }

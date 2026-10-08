@@ -26,6 +26,7 @@ const WS_TOKEN = 1_700_000_000_123;
 const patchWorkspaceSettings = vi.hoisted(() => vi.fn());
 const renameWorkspace = vi.hoisted(() => vi.fn());
 const fetchWorkspace = vi.hoisted(() => vi.fn());
+const createWorkspaceMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@momo/core/features/settings/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/features/settings/api")>();
@@ -42,6 +43,21 @@ vi.mock("@momo/core/features/settings/api", async (importOriginal) => {
     renameWorkspace: (...args: unknown[]) =>
       renameWorkspace(...args) as Promise<WorkspaceIdentity>,
     fetchWorkspace: (...args: unknown[]) => fetchWorkspace(...args),
+    createWorkspace: (...args: unknown[]) => createWorkspaceMock(...args) as Promise<unknown>,
+  };
+});
+
+const fetchWorkspaceUnfurlSettings = vi.hoisted(() => vi.fn());
+const updateWorkspaceUnfurlSettings = vi.hoisted(() => vi.fn());
+
+vi.mock("@momo/core/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
+  return {
+    ...actual,
+    fetchWorkspaceUnfurlSettings: (...args: unknown[]) =>
+      fetchWorkspaceUnfurlSettings(...args) as Promise<unknown>,
+    updateWorkspaceUnfurlSettings: (...args: unknown[]) =>
+      updateWorkspaceUnfurlSettings(...args) as Promise<unknown>,
   };
 });
 
@@ -59,6 +75,9 @@ beforeEach(() => {
   patchWorkspaceSettings.mockReset();
   renameWorkspace.mockReset();
   fetchWorkspace.mockReset();
+  createWorkspaceMock.mockReset();
+  fetchWorkspaceUnfurlSettings.mockReset();
+  updateWorkspaceUnfurlSettings.mockReset();
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: false,
     media: query,
@@ -162,6 +181,11 @@ function setInputValue(input: HTMLInputElement, value: string) {
 function mountSection(options: {
   role: RosterMember["role"];
   labels?: RoleLabels;
+  offline?: boolean;
+  /** true면 링크 확인 설정을 캐시에 미리 두지 않고 mock 질의가 답하게 한다. */
+  liveUnfurl?: boolean;
+  /** true면 워크스페이스 본체를 캐시에 두지 않아 읽는 중 상태를 본다. */
+  loading?: boolean;
 }): HTMLElement {
   const client = new QueryClient({
     defaultOptions: {
@@ -169,14 +193,20 @@ function mountSection(options: {
       mutations: { retry: false },
     },
   });
-  client.setQueryData(workspaceIdentityKey(WS), workspace(options.labels ?? {}));
+  if (options.loading) {
+    fetchWorkspace.mockReturnValue(new Promise(() => undefined));
+  } else {
+    client.setQueryData(workspaceIdentityKey(WS), workspace(options.labels ?? {}));
+  }
   client.setQueryData(["roster", WS], [
     rosterMember(options.role),
     agentMember(),
   ]);
-  client.setQueryData(["settings", "workspace-unfurls", WS], {
-    enabled: true,
-  });
+  if (!options.liveUnfurl) {
+    client.setQueryData(["settings", "workspace-unfurls", WS], {
+      enabled: true,
+    });
+  }
 
   const host = document.createElement("div");
   document.body.append(host);
@@ -188,7 +218,7 @@ function mountSection(options: {
     createElement(
       SessionProvider,
       { value: sessionValue() },
-      createElement(WorkspaceSection, { workspaceId: WS, offline: false })
+      createElement(WorkspaceSection, { workspaceId: WS, offline: options.offline ?? false })
     )
   );
   act(() => mountedRoot?.render(tree));
@@ -342,8 +372,8 @@ describe("WelcomeKickoffEditor (#1800 패턴)", () => {
       setTextareaValue(prompt!, "가".repeat(2002));
     });
     expect(prompt?.value.length).toBe(2002);
-    expect(host.textContent).toContain("2000자까지 쓸 수 있습니다.");
-    expect(host.textContent?.split("2000자까지 쓸 수 있습니다.").length - 1).toBe(1);
+    expect(host.textContent).toContain("2000자까지 쓸 수 있어요.");
+    expect(host.textContent?.split("2000자까지 쓸 수 있어요.").length - 1).toBe(1);
     const save = host.querySelector(
       '[data-testid="workspace-welcome-save"]'
     ) as HTMLButtonElement | null;
@@ -570,3 +600,124 @@ describe("워크스페이스 이름 E1", () => {
   });
 });
 
+
+const unfurlSwitch = (host: HTMLElement) =>
+  host.querySelector('[data-testid="workspace-unfurls"]') as HTMLButtonElement | null;
+
+describe("링크 확인(서버) 스위치 (S5b)", () => {
+  it("서버 값을 aria-checked로 말하고 체크박스를 쓰지 않는다", () => {
+    const host = mountSection({ role: "owner" });
+    const toggle = unfurlSwitch(host);
+    expect(toggle?.getAttribute("role")).toBe("switch");
+    expect(toggle?.getAttribute("aria-checked")).toBe("true");
+    expect(host.querySelector("input[type=checkbox]")).toBeNull();
+    expect(host.querySelector('[data-testid="workspace-unfurl-card"]')?.textContent).toContain(
+      "링크 확인(서버)"
+    );
+  });
+
+  it("누르면 반대 값 하나만 PUT하고 저장된 값으로 바뀐다", async () => {
+    updateWorkspaceUnfurlSettings.mockResolvedValue({ enabled: false });
+    const host = mountSection({ role: "owner" });
+    await act(async () => {
+      unfurlSwitch(host)?.click();
+    });
+    await vi.waitFor(() => {
+      expect(updateWorkspaceUnfurlSettings).toHaveBeenCalledWith(WS, false);
+      expect(unfurlSwitch(host)?.getAttribute("aria-checked")).toBe("false");
+    });
+  });
+
+  it("GET이 403이면 스위치 대신 운영자 안내가 서고 다시 시도 단추는 없다", async () => {
+    fetchWorkspaceUnfurlSettings.mockRejectedValue(new ApiError(403, "operator required"));
+    const host = mountSection({ role: "member", liveUnfurl: true });
+    await vi.waitFor(() => {
+      expect(
+        host.querySelector('[data-testid="workspace-unfurl-card"] [data-testid="operator-notice"]')
+      ).not.toBeNull();
+    });
+    expect(unfurlSwitch(host)).toBeNull();
+    expect(host.querySelector('[data-testid="workspace-unfurls-error"]')).toBeNull();
+  });
+
+  it("GET이 500이면 403과 달리 다시 시도 단추가 있다", async () => {
+    fetchWorkspaceUnfurlSettings.mockRejectedValue(new ApiError(500, "boom"));
+    const host = mountSection({ role: "owner", liveUnfurl: true });
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="workspace-unfurls-error"] button')).not.toBeNull();
+    });
+    expect(host.querySelector('[data-testid="workspace-unfurl-card"] [data-testid="operator-notice"]')).toBeNull();
+  });
+
+  it("오프라인이면 스위치가 잠기고 이유를 말하며 쓰기를 내지 않는다", () => {
+    const host = mountSection({ role: "owner", offline: true });
+    const toggle = unfurlSwitch(host);
+    expect(toggle?.disabled).toBe(true);
+    expect(toggle?.getAttribute("aria-describedby")).toContain("workspace-unfurls-offline");
+    expect(host.textContent).toContain("연결이 끊겨 지금은 이 설정을 바꿀 수 없어요.");
+    act(() => toggle?.click());
+    expect(updateWorkspaceUnfurlSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe("워크스페이스 페이지 상태 (S5b)", () => {
+  it("읽는 중에는 일반 카드가 스켈레톤이고 편집 카드는 아직 없다", () => {
+    const host = mountSection({ role: "owner", loading: true });
+    expect(
+      host.querySelector('[data-testid="workspace-card"] [data-testid="skeleton"][data-ready="false"]')
+    ).not.toBeNull();
+    expect(host.querySelector('[data-testid="workspace-role-labels"]')).toBeNull();
+    expect(host.querySelector('[data-testid="workspace-welcome-kickoff"]')).toBeNull();
+  });
+
+  it("오프라인이면 표시명·웰컴 저장 이유가 서고 입력이 읽기 전용이다", () => {
+    const host = mountSection({ role: "owner", offline: true });
+    expect(host.textContent).toContain("연결이 끊겨 지금은 표시 이름을 저장할 수 없어요.");
+    expect(host.textContent).toContain("연결이 끊겨 지금은 웰컴 설정을 저장할 수 없어요.");
+    expect(host.textContent).toContain("연결이 끊겨 지금은 워크스페이스를 만들 수 없어요.");
+    const owner = host.querySelector('[data-testid="role-label-owner"]') as HTMLInputElement;
+    expect(owner.readOnly).toBe(true);
+  });
+
+  it("확정된 비운영자에게는 아바타 변경 단추가 없다", () => {
+    expect(
+      mountSection({ role: "member" }).querySelector('[data-testid="workspace-avatar-change"]')
+    ).toBeNull();
+  });
+
+  it("운영자에게는 아바타 변경 단추가 있다", () => {
+    expect(
+      mountSection({ role: "admin" }).querySelector('[data-testid="workspace-avatar-change"]')
+    ).not.toBeNull();
+  });
+
+  it("카드는 일반·링크 확인·역할 표시명·웰컴·새로 만들기 순이고 합쇼체가 없다", () => {
+    const host = mountSection({ role: "owner" });
+    const titles = [...host.querySelectorAll("h2")].map((node) => node.textContent);
+    expect(titles).toEqual([
+      "일반",
+      "링크 확인(서버)",
+      "역할 표시명",
+      "웰컴 킥오프",
+      "새 워크스페이스 만들기",
+    ]);
+    expect(host.textContent).not.toMatch(/습니다/);
+  });
+
+  it("새 워크스페이스 만들기가 403이면 서버 운영자 안내로 바뀐다", async () => {
+    createWorkspaceMock.mockRejectedValue(new ApiError(403, "instance operator required"));
+    const host = mountSection({ role: "owner" });
+    act(() => setInputValue(host.querySelector("#workspace-name") as HTMLInputElement, "새 팀"));
+    act(() => setInputValue(host.querySelector("#workspace-slug") as HTMLInputElement, "new-team"));
+    await act(async () => {
+      (host.querySelector('[data-testid="workspace-create"]') as HTMLButtonElement).click();
+    });
+    await vi.waitFor(() => {
+      expect(
+        host.querySelector('[data-testid="workspace-create-card"] [data-testid="operator-notice"]')
+          ?.textContent
+      ).toContain("서버의 운영자만");
+    });
+    expect(host.querySelector('[data-testid="workspace-create-form"]')).toBeNull();
+  });
+});

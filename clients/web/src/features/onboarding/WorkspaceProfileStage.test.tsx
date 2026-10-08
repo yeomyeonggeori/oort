@@ -395,7 +395,7 @@ describe("onboarding S1 우리 팀 이름 (#2332, 겉 #2811)", () => {
     });
     expect(visibleText(host)).toContain("다른 기기에서 바꾼 이름");
     expect(visibleText(host)).toContain(
-      "워크스페이스 이름이 「다른 기기에서 바꾼 이름」으로 바뀌었습니다."
+      "워크스페이스 이름이 「다른 기기에서 바꾼 이름」으로 바뀌었어요."
     );
     expect(host.querySelector('[data-testid="onboarding-s1-keep-theirs"]')?.textContent).toBe(
       S1_KEEP_THEIRS
