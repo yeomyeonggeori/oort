@@ -1793,15 +1793,6 @@ async fn the_ledger_itself_refuses_an_unsigned_prompt_and_a_resume_without_an_ag
     // The plain agent spawn is unchanged.
     let plain = insert("", "", json!({"tool": "claude", "label": "x"})).await;
     assert!(plain.is_ok(), "{plain:?}");
-    // A prompt beyond the bound.
-    let too_long = insert(
-        "",
-        "",
-        json!({"tool": "claude", "label": "x", "prompt": "가".repeat(32_769)}),
-    )
-    .await;
-    assert!(too_long.is_err(), "the prompt has the `input` bound");
-
     // A signed spawn: a resume (no prompt) needs its agent; a new task does not.
     let signed_columns = format!(
         ", device_key_id, human_instance_id, human_nonce, human_issued_at_ms, \
@@ -1825,6 +1816,22 @@ async fn the_ledger_itself_refuses_an_unsigned_prompt_and_a_resume_without_an_ag
         resume_without_agent.is_err(),
         "a signed resume with no agent is refused"
     );
+    // A prompt beyond the `input` bound, though signed.
+    let too_long = insert(
+        signed_columns,
+        Box::leak(
+            format!(
+                ", '{}', 'i', '{}', 1, 2, 'f', '{}=='",
+                s.phone_id,
+                Uuid::new_v4(),
+                "A".repeat(86)
+            )
+            .into_boxed_str(),
+        ),
+        json!({"tool": "claude", "label": "x", "prompt": "가".repeat(32_769)}),
+    )
+    .await;
+    assert!(too_long.is_err(), "the prompt has the `input` bound");
     let new_task_without_agent = insert(
         signed_columns,
         Box::leak(
