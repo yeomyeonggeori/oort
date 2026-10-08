@@ -374,6 +374,9 @@ fn verify_any_refuses_every_v1_statement() {
                     assert_eq!(v.schema, ControlSchema::V2, "{name}");
                     assert_eq!(v.signed_bytes, rebuild(&tc), "{name}");
                 }
+                // v4 (#3570) has its own tests (`human_control_v4.rs`); no
+                // shared vector is written in it yet.
+                ControlSchema::V4 => unreachable!("{name}: no shared v4 vector"),
                 ControlSchema::V1 => {
                     assert_eq!(
                         verdict,
@@ -838,6 +841,9 @@ fn every_structured_field_is_load_bearing() {
                             ));
                         }
                         v
+                    }
+                    ControlContent::SpawnTask { .. } => {
+                        unreachable!("{name}: no shared vector builds a new-work spawn")
                     }
                     ControlContent::BundleManifest { .. } => {
                         vec![(

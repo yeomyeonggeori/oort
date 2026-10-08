@@ -4913,6 +4913,46 @@ pub struct WorkInstructionResponse {
     pub replayed: bool,
 }
 
+/// `POST /v1/workspaces/{ws}/work-spawns` (#3570, T5, ADR-0198 D4 · 증보 1 D7):
+/// the owner's signed instruction to start a **new** task on their own Mac.
+/// Not a chat message and not an agent run: the server turns it into one
+/// `work_control` row addressed to the host it derives from the signed folder
+/// id, and writes nothing to the message path.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkSpawnRequest {
+    /// The harness to launch (`payload.tool`): signed.
+    pub tool: String,
+    /// The short card title of the session (display text; not signed).
+    pub label: String,
+    /// The whole first prompt, NFC, 1...32768 characters: signed.
+    pub prompt: String,
+    /// The room the session belongs to (a "home channel", ADR-0198 N5): signed.
+    pub channel_id: Uuid,
+    /// The thread the owner called from, when it was said in one: signed.
+    #[serde(default)]
+    pub thread_root_id: Option<Uuid>,
+    /// The message the owner called from (a mention or DM), when there is
+    /// one: signed.
+    #[serde(default)]
+    pub origin_message_id: Option<Uuid>,
+    /// A hint for which of the owner's own Macs. The server derives the host
+    /// from the signed folder id; this can only narrow, never redirect.
+    #[serde(default)]
+    pub target_host_id: Option<Uuid>,
+    /// `momo.human.control.v4`. `folderId` is required; `agentMemberId` only
+    /// when the owner named a personal agent (a harness spawn has none).
+    pub human_signature: HumanSignatureRequest,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkSpawnResponse {
+    pub work_control: WorkControlDto,
+    /// `true` when this answered a retry of a spawn already accepted.
+    pub replayed: bool,
+}
+
 /// One decided (or still pending) permission request.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

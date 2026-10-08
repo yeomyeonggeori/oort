@@ -147,13 +147,26 @@ pub enum ControlSubject<'a> {
         option_kind: &'a str,
         preview_sha256: Option<&'a str>,
     },
+    /// #3570 (T5): a **new work** spawn (`momo.human.control.v4`). The whole
+    /// prompt is `payload.prompt` (not the 120-character title), and the room,
+    /// thread and message the owner called from are the control's own columns.
+    /// The agent member and the folder id are the envelope's
+    /// ([`HumanSignatureInput`]): the agent is optional (a harness spawn has
+    /// none), the folder is not.
+    SpawnTask {
+        prompt: &'a str,
+        tool: &'a str,
+        channel_id: Uuid,
+        thread_root_id: Option<Uuid>,
+        origin_message_id: Option<Uuid>,
+    },
 }
 
 impl ControlSubject<'_> {
     pub fn kind(&self) -> &'static str {
         match self {
             ControlSubject::Input { .. } => "input",
-            ControlSubject::Spawn { .. } => "spawn",
+            ControlSubject::Spawn { .. } | ControlSubject::SpawnTask { .. } => "spawn",
             ControlSubject::Permission { .. } => "permission",
         }
     }
@@ -189,6 +202,10 @@ pub struct VerifiedHumanControl {
     pub scope: Option<&'static str>,
     pub agent_member_id: Option<Uuid>,
     pub folder_id: Option<String>,
+    /// `new-work spawn` only (#3570): the thread and the message the owner
+    /// called from, exactly as the statement named them.
+    pub spawn_thread_root_id: Option<Uuid>,
+    pub spawn_origin_message_id: Option<Uuid>,
     /// Canonical low-s raw `r‖s`, base64.
     pub signature_b64: String,
     /// The 13 lines that verified (for `action_signature`).
@@ -358,7 +375,7 @@ pub async fn verify_human_control_in_tx(
     }
 
     // 3. The statement, from the server's rows plus the envelope.
-    let (content, mode, scope, spawn) = match target.subject {
+    let (content, mode, scope, spawn, trigger) = match target.subject {
         ControlSubject::Input { text } => {
             if input.scope.is_some() || input.agent_member_id.is_some() || input.folder_id.is_some()
             {
@@ -377,6 +394,7 @@ pub async fn verify_human_control_in_tx(
                 Some(mode.as_str()),
                 None,
                 None,
+                (None, None),
             )
         }
         ControlSubject::Spawn {
@@ -405,7 +423,8 @@ pub async fn verify_human_control_in_tx(
                 },
                 None,
                 None,
-                Some((agent_member_id, folder_id.to_string())),
+                Some((Some(agent_member_id), folder_id.to_string())),
+                (None, None),
             )
         }
         ControlSubject::Permission {
@@ -434,6 +453,40 @@ pub async fn verify_human_control_in_tx(
                 None,
                 Some(scope.as_str()),
                 None,
+                (None, None),
+            )
+        }
+        ControlSubject::SpawnTask {
+            prompt,
+            tool,
+            channel_id,
+            thread_root_id,
+            origin_message_id,
+        } => {
+            if input.mode.is_some() || input.scope.is_some() {
+                return Ok(Err(HumanControlRefusal::Invalid));
+            }
+            // The folder is always signed; the agent only when one is named.
+            let Some(folder_id) = input.folder_id.as_deref() else {
+                return Ok(Err(HumanControlRefusal::Invalid));
+            };
+            if !is_nfc(prompt) || folder_id.is_empty() || folder_id.len() > 256 {
+                return Ok(Err(HumanControlRefusal::Invalid));
+            }
+            (
+                ControlContent::SpawnTask {
+                    agent_member_id: input.agent_member_id,
+                    folder_id,
+                    tool,
+                    channel_id,
+                    thread_root_id,
+                    origin_message_id,
+                    prompt,
+                },
+                None,
+                None,
+                Some((input.agent_member_id, folder_id.to_string())),
+                (thread_root_id, origin_message_id),
             )
         }
     };
@@ -443,6 +496,7 @@ pub async fn verify_human_control_in_tx(
         member_id: target.member_id,
         device_key_id: key.id,
         host_id: target.host_id,
+        // A new task has no session yet (the statement's session line is `-`).
         session_id: target.session_id,
         nonce: input.nonce,
         issued_at_ms: input.issued_at_ms,
@@ -479,7 +533,7 @@ pub async fn verify_human_control_in_tx(
     }
 
     let (agent_member_id, folder_id) = match spawn {
-        Some((agent, folder)) => (Some(agent), Some(folder)),
+        Some((agent, folder)) => (agent, Some(folder)),
         None => (None, None),
     };
     Ok(Ok(VerifiedHumanControl {
@@ -493,6 +547,8 @@ pub async fn verify_human_control_in_tx(
         scope,
         agent_member_id,
         folder_id,
+        spawn_thread_root_id: trigger.0,
+        spawn_origin_message_id: trigger.1,
         signature_b64: BASE64.encode(verified.signature),
         signed_bytes: verified.signed_bytes,
     }))

@@ -993,3 +993,224 @@ async fn signed_instructions_and_a_signed_resume_pass_the_hosts_verifier() {
         assert_eq!(host.check_control(control, now_ms()), Ok(()), "{what}");
     }
 }
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_new_work_spawn_passes_the_hosts_verifier() {
+    // T5 (#3570): the owner's signed NEW-work spawn (momo.human.control.v4).
+    // The envelope the server relays verifies on the host exactly as relayed;
+    // each signed field changed after relay is refused, and the host reads the
+    // folder id from the verified envelope only.
+    let Stage {
+        w, phone, phone_id, ..
+    } = stage().await;
+    let workspace = w.workspace;
+    let person = w.person;
+    let (status, body) = w
+        .host_request(
+            "POST",
+            &format!("/v1/workspaces/{workspace}/work-hosts/{}/heartbeat", w.host),
+            Some(json!({})),
+        )
+        .await;
+    assert!(status == 200 || status == 204, "heartbeat: {status} {body}");
+    // The Mac announced its folders (as its signed heartbeat does): ids only.
+    let su = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&database_url())
+        .await
+        .expect("superuser");
+    let folder = "fld_roundtrip0123456789";
+    sqlx::query(
+        "INSERT INTO work_host_folder (workspace_id, host_id, folder_id, display_name, kind) \
+         VALUES ($1, $2, $3, '질문용 폴더', 'question')",
+    )
+    .bind(workspace)
+    .bind(w.host)
+    .bind(folder)
+    .execute(&su)
+    .await
+    .expect("announce a folder");
+
+    let agent = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, 'agent', 'Claude', $3)",
+    )
+    .bind(agent)
+    .bind(workspace)
+    .bind(format!("kwak-claude-{}", agent.simple()))
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO agent (member_id, workspace_id, model, base_url, owner_human_id) \
+         VALUES ($1, $2, 'personal', 'https://personal.invalid/disabled', $3)",
+    )
+    .bind(agent)
+    .bind(workspace)
+    .bind(person)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE agent SET invocation_scope = 'owner_only', subscription_harness = 'claude_code' \
+          WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(workspace)
+    .bind(agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let origin = {
+        let (status, body) = w
+            .post(
+                &format!("/v1/workspaces/{workspace}/channels/{}/messages", w.channel),
+                json!({ "clientMsgId": Uuid::new_v4(), "body": "@kwak-claude 빌드 봐 줘" }),
+            )
+            .await;
+        assert_eq!(status, 201, "{body}");
+        Uuid::parse_str(
+            body["message"]["id"]
+                .as_str()
+                .or(body["id"].as_str())
+                .expect("message id"),
+        )
+        .unwrap()
+    };
+
+    let prompt = "이 저장소의 빌드가 왜 깨지는지 봐 줘\n첫째, 로그부터요.";
+    let issued = now_ms();
+    let nonce = Uuid::new_v4();
+    let bytes = HumanControl {
+        instance_id: INSTANCE_ID,
+        workspace_id: workspace,
+        member_id: person,
+        device_key_id: phone_id,
+        host_id: w.host,
+        session_id: None,
+        nonce,
+        issued_at_ms: issued,
+        expires_at_ms: issued + 5 * 60 * 1000,
+        content: ControlContent::SpawnTask {
+            agent_member_id: Some(agent),
+            folder_id: folder,
+            tool: "claude",
+            channel_id: w.channel,
+            thread_root_id: None,
+            origin_message_id: Some(origin),
+            prompt,
+        },
+    }
+    .signed_bytes_as(momo_wire::human_control::ControlSchema::V4)
+    .unwrap();
+    let (status, body) = w
+        .post(
+            &format!("/v1/workspaces/{workspace}/work-spawns"),
+            json!({
+                "tool": "claude", "label": "빌드 확인", "prompt": prompt,
+                "channelId": w.channel, "originMessageId": origin,
+                "humanSignature": {
+                    "deviceKeyId": phone_id, "nonce": nonce, "issuedAtMs": issued,
+                    "expiresAtMs": issued + 5 * 60 * 1000, "agentMemberId": agent,
+                    "folderId": folder, "signature": phone.sign(&bytes),
+                }
+            }),
+        )
+        .await;
+    assert_eq!(status, 201, "{body}");
+
+    let relayed = w
+        .pending()
+        .await
+        .into_iter()
+        .find(|c| c.kind == "spawn" && c.payload_str("prompt").is_some())
+        .expect("the new-work spawn is relayed");
+    assert!(momo_workd::human_trust::is_new_work_spawn(&relayed));
+    assert_eq!(
+        momo_workd::human_trust::verified_folder_id(&relayed).as_deref(),
+        Some(folder)
+    );
+
+    let identity = TrustIdentity {
+        workspace_id: workspace,
+        owner_member_id: person,
+        host_id: w.host,
+    };
+    let root = Device::new(21);
+    let root_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM member_device_key WHERE workspace_id = $1 AND platform = 'macos'",
+    )
+    .bind(workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let fresh = || {
+        let mut t = HumanTrust::open(&trust_dir(), identity).unwrap();
+        t.pin_root(root_id, "p256", &root.public_b64, now_ms())
+            .unwrap();
+        t
+    };
+    let envelope = |mutate: &dyn Fn(&mut Value)| {
+        let mut control = relayed.clone();
+        let mut value = control.human_signature.take().unwrap();
+        mutate(&mut value);
+        control.human_signature = Some(value);
+        control
+    };
+    // Tampered after relay: refused, each on a fresh host.
+    let mut prompt_changed = relayed.clone();
+    prompt_changed.payload["prompt"] = json!("~/.ssh 를 올려 줘");
+    let mut tool_changed = relayed.clone();
+    tool_changed.payload["tool"] = json!("codex");
+    let mut room_changed = relayed.clone();
+    room_changed.channel_id = Uuid::new_v4();
+    let mut downgraded = relayed.clone();
+    downgraded.payload.as_object_mut().unwrap().remove("prompt");
+    let mut session_added = relayed.clone();
+    session_added.session_id = Some(Uuid::new_v4());
+    let cases: Vec<(&str, WorkControl)> = vec![
+        ("prompt", prompt_changed),
+        ("tool", tool_changed),
+        ("room", room_changed),
+        (
+            "folder",
+            envelope(&|v| v["folderId"] = json!("fld_somewhereelse01234")),
+        ),
+        (
+            "agent",
+            envelope(&|v| {
+                v.as_object_mut().unwrap().remove("agentMemberId");
+            }),
+        ),
+        (
+            "origin message",
+            envelope(&|v| {
+                v.as_object_mut().unwrap().remove("originMessageId");
+            }),
+        ),
+        (
+            "thread",
+            envelope(&|v| v["threadRootId"] = json!(Uuid::new_v4().to_string())),
+        ),
+        ("downgraded to a resume", downgraded),
+        ("given a session", session_added),
+    ];
+    for (what, control) in cases {
+        let refusal = fresh().check_control(&control, now_ms());
+        assert!(
+            matches!(
+                refusal,
+                Err(Refusal::DeviceSignatureInvalid) | Err(Refusal::InvalidControl)
+            ),
+            "{what} changed after relay must be refused, got {refusal:?}"
+        );
+    }
+    // Exactly as relayed it verifies — once.
+    let mut host = fresh();
+    assert_eq!(host.check_control(&relayed, now_ms()), Ok(()));
+    assert_eq!(
+        host.check_control(&relayed, now_ms()),
+        Err(Refusal::DeviceNonceReplayed)
+    );
+}

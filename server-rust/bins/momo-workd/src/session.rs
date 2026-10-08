@@ -165,6 +165,10 @@ pub struct SessionSettings {
     /// The host state folder, where the desktop's 「원격 작업」 account choice
     /// lives ([`crate::profile`], #3033). Read at every spawn.
     pub state_folder: PathBuf,
+    /// The folders this host issued (#3590). A new-work spawn names one by its
+    /// opaque id and it is resolved here at every spawn (T5, #3570); `None`
+    /// refuses every such spawn.
+    pub folders: Option<crate::folders::FolderBook>,
     /// How long a bridged permission request waits for its owner
     /// ([`DEFAULT_PERMISSION_WAIT`]).
     pub permission_wait: Duration,
@@ -323,13 +327,19 @@ impl SessionManager {
     /// has been sent**: [`Self::activate`] sends the spawn label once the spawn
     /// ack has landed (the server only accepts that ack while the session is
     /// still `running`).
-    pub async fn spawn(&mut self, control: &WorkControl) -> Result<Uuid, Refusal> {
+    pub async fn spawn(
+        &mut self,
+        control: &WorkControl,
+        signed_folder: Option<&str>,
+    ) -> Result<Uuid, Refusal> {
         let (Some(tool), Some(label)) = (control.payload_str("tool"), control.payload_str("label"))
         else {
             return Err(Refusal::InvalidControl);
         };
-        // The label becomes the first prompt: never an adapter command.
-        policy::check_prompt(label)?;
+        // The first prompt: the owner's whole prompt for a new task (T5), the
+        // label for a resume. Never an adapter command either way.
+        let first_prompt = control.payload_str("prompt").unwrap_or(label);
+        policy::check_prompt(first_prompt)?;
         // A resume names the session the server allocated for it; one this
         // host already runs is not opened a second time (#2607 N-6).
         if control
@@ -351,11 +361,23 @@ impl SessionManager {
             .get(tool)
             .cloned()
             .ok_or(Refusal::ToolNotAllowlisted)?;
-        // (3) The allowed folder, resolved at every spawn.
-        let cwd = std::fs::canonicalize(&self.settings.working_directory)
-            .ok()
-            .filter(|path| path.is_dir())
-            .ok_or(Refusal::WorkdirUnavailable)?;
+        // (3) The allowed folder, resolved at every spawn. A new task names
+        // the folder the owner signed, by the opaque id this host issued; it
+        // is resolved here and nowhere else, and never falls back to the
+        // configured folder. A resume (no id) keeps that folder.
+        let cwd = match (control.payload_str("prompt"), signed_folder) {
+            (Some(_), Some(folder_id)) => self
+                .settings
+                .folders
+                .as_ref()
+                .ok_or(Refusal::FolderUnknown)?
+                .resolve_for_spawn(folder_id, control.id)?,
+            (Some(_), None) => return Err(Refusal::InvalidControl),
+            (None, _) => std::fs::canonicalize(&self.settings.working_directory)
+                .ok()
+                .filter(|path| path.is_dir())
+                .ok_or(Refusal::WorkdirUnavailable)?,
+        };
         // Project agent configuration the adapter would apply regardless.
         policy::check_project_config(entry.adapter, &cwd)?;
         // #3033 (ADR-0191 D1): this Mac's 「원격 작업」 account, if it chose
@@ -470,7 +492,7 @@ impl SessionManager {
             SessionHandle {
                 commands,
                 task: join,
-                initial_prompt: Some(label.to_string()),
+                initial_prompt: Some(first_prompt.to_string()),
             },
         );
         tracing::info!(%session_id, tool, "work session opened");

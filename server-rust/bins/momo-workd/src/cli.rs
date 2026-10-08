@@ -746,8 +746,9 @@ pub async fn run(
     }
 
     // #3590: the folders this host issues, announced (id + name, never a path)
-    // in every heartbeat. Spawn still opens `working_directory`; resolving a
-    // signed spawn's folder id is T5.
+    // in every heartbeat. A signed new-work spawn names one by its id and the
+    // session layer resolves it on this Mac at every spawn (T5, #3570); the
+    // record being damaged stops the host here, with no path in the message.
     let folder_book = FolderBook::open(
         &state_folder(&config),
         &config.working_directory,
@@ -805,6 +806,7 @@ pub async fn run(
             permission_wait: crate::session::DEFAULT_PERMISSION_WAIT,
             codex,
             state_folder: state_folder(&config),
+            folders: Some(folder_book.clone()),
         },
     );
     let health = Arc::new(HostHealth::default());
