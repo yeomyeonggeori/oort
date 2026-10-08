@@ -281,7 +281,7 @@ export function SettingsRoute() {
           // inputs to mean anything, so the cache goes first.
           onRetry={() => resetSettingsQueries(queryClient)}
         >
-          {/* 옛 섹션 본문은 아직 카드 문법으로 다시 짜이지 않았다(S5b·S5c; 프로필은 S2, 모양은 S3a, 기기·실행 호스트는 S4, 알림·단축키·업데이트는 S5a가 끝냈다). 판(`--sheet`) 위에
+          {/* 옛 섹션 본문은 아직 카드 문법으로 다시 짜이지 않았다(S5c의 사용량만 남았다; 프로필은 S2, 모양은 S3a, 기기·실행 호스트는 S4, 알림·단축키·업데이트는 S5a, 워크스페이스·멤버·기억은 S5b가 끝냈다). 판(`--sheet`) 위에
               맨바닥으로 놓으면 보조 알약(`surface-muted`)이 판에 묻혀 보이지 않으므로(대비
               1.01), 본문 전체를 카드 한 장(`--surface`)에 얹는다. 페이지를 이식하는 슬라이스가
               그 페이지의 이 껍질을 걷고 `SettingsSection` 카드로 바꾼다. 옛 AI 연결 화면은
@@ -293,6 +293,9 @@ export function SettingsRoute() {
           section === "notifications" ||
           section === "shortcuts" ||
           section === "updates" ||
+          section === "workspace" ||
+          section === "members" ||
+          section === "memory" ||
           section === "code" ? (
             <SectionPage
               section={section}
@@ -365,16 +368,12 @@ function SectionPage({
         />
       );
     case "workspace":
-      return primary(
-        <WorkspaceSection workspaceId={workspaceId} offline={offline} />,
-      );
+      return <WorkspaceSection workspaceId={workspaceId} offline={offline} />;
     case "members":
-      return primary(
-        <InviteSection workspaceId={workspaceId} offline={offline} />,
-      );
+      return <InviteSection workspaceId={workspaceId} offline={offline} />;
     case "memory":
-      return primary(
-        <MemorySettingsSection workspaceId={workspaceId} offline={offline} />,
+      return (
+        <MemorySettingsSection workspaceId={workspaceId} offline={offline} />
       );
     // No `offline` prop: 사용량 is a read, and the realtime rail being down says nothing
     // about whether this GET answers. The panel reads the browser's own offline state

@@ -348,7 +348,7 @@ describe("copy and constants", () => {
     expect(welcomePromptTooLong("가".repeat(2001))).toBe(
       WELCOME_PROMPT_LIMIT_SENTENCE
     );
-    expect(WELCOME_PROMPT_LIMIT_SENTENCE).toBe("2000자까지 쓸 수 있습니다.");
+    expect(WELCOME_PROMPT_LIMIT_SENTENCE).toBe("2000자까지 쓸 수 있어요.");
   });
 });
 
