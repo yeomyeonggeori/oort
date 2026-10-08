@@ -797,7 +797,7 @@ pub fn build_app(state: AppState) -> Router {
         //     INSTANCE-GLOBAL: one row (or one new tenant) that every workspace
         //     on this instance shares, so they take the MOMO-583 gate
         //     (`platform:read` or a listed instance operator).
-        //   * `work-host-engine`, `work-tier-policy` and the invite pair are
+        //   * `work-tier-policy` and the invite pair are
         //     PER-WORKSPACE rows under the uniform RLS policy, so a workspace
         //     owner/admin is the right authority.
         //   * `effort-table` and `quota-snapshots` are reads with no tenant row
@@ -822,11 +822,6 @@ pub fn build_app(state: AppState) -> Router {
             get(routes::provider_link::get_chain)
                 .put(routes::provider_link::put_chain)
                 .delete(routes::provider_link::delete_chain),
-        )
-        .route(
-            "/v1/provider/work-host-engine",
-            get(routes::provider_settings::get_work_host_engine)
-                .put(routes::provider_settings::put_work_host_engine),
         )
         .route(
             "/v1/provider/effort-table",
