@@ -2903,6 +2903,92 @@ paths:
             handle that already exists (no code).
           content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
 
+  /v1/workspaces/{workspaceId}/personal-agents:
+    post:
+      tags: [agents]
+      operationId: enablePersonalAgent
+      summary: Turn the caller's connected harness on as a personal agent under an alias (ADR-0198 amendment 1 D7, #3591).
+      description: >
+        Any active non-guest human member, for their OWN harness: the owner is the caller, never
+        a request field, so a teammate has no way to name an alias for someone else's harness. An
+        agent bearer is refused. Creates a `member.kind=agent` identity (alias = handle, unique
+        across humans, agents and switched-off agents) whose row is `invocation_scope owner_only`
+        with the harness, so T5's signed spawn (`POST …/work-spawns`) accepts it for the owner and
+        refuses everyone else. No hosted connection, token, pairing value, profile or channel
+        membership is created; how the alias joins a channel is P1's. One personal agent per
+        (owner, harness): a repeat with the same alias returns it (200, `reused` true) and turns it
+        back on when the owner had switched it off; a different alias is 409 `personal_agent_exists`.
+        `agentMemberId` converts the caller's own existing `owner_only` subscription agent of the
+        same harness IN PLACE (same member id, handle and history; #3567); `alias` must then be
+        omitted. Not governed by MOMO_SUBSCRIPTION_AGENTS_ENABLED or
+        MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED.
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/EnablePersonalAgentRequest"}}}
+      responses:
+        "200":
+          description: The caller's personal agent for this harness already existed (on, or switched back on by this call).
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/EnablePersonalAgentResponse"}}}
+        "201":
+          description: A personal agent was created, or an existing subscription agent converted.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/EnablePersonalAgentResponse"}}}
+        "400": {description: Invalid harness or alias, alias missing, or alias with agentMemberId, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Not a human workspace member (agent bearer, guest) or banned handle, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: "error.code `personal_agent_not_found`: agentMemberId is not a convertible agent of the caller's (someone else's, another harness, personal-key, already personal, not an agent: one non-disclosing answer)", content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409":
+          description: >
+            error.code `personal_agent_alias_taken` (the alias is a member handle in this workspace),
+            `personal_agent_exists` (the caller already has one for this harness under another
+            alias or id), or `personal_agent_suspended` (an administrator suspended it; the owner
+            cannot undo that).
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+    get:
+      tags: [agents]
+      operationId: listPersonalAgents
+      summary: The caller's own personal agents, switched-off ones included.
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
+      responses:
+        "200":
+          description: Only the caller's own; a teammate's are never listed.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/PersonalAgentListResponse"}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Not a human workspace member, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/personal-agents/{agentMemberId}/disable:
+    post:
+      tags: [agents]
+      operationId: disablePersonalAgent
+      summary: Switch a personal agent off (ADR-0198 amendment 1 D7, #3591).
+      description: >
+        Owner only. The member is suspended, not deleted: every past message keeps its author, the
+        alias stays reserved, and turning it back on (`POST …/personal-agents` with the same alias)
+        brings back the same member. A switched-off agent cannot be called (T5's signed spawn
+        requires a live agent) and leaves the roster. Idempotent. Someone else's agent, a
+        non-personal agent and an unknown id are one 404.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: agentMemberId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The agent, switched off.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/DisablePersonalAgentResponse"}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Not a human workspace member, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: "error.code `personal_agent_not_found`", content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
   /v1/workspaces/{workspaceId}/hosted-agent-connections:
     post:
       tags: [agents]
@@ -12473,6 +12559,26 @@ components:
             used on this server. `claude_subscription_agent_paused` = a Claude subscription agent
             on an instance that has not opted in (MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED, off by
             default while Anthropic's reply is pending). Status only; it blocks nothing by itself.
+        personalAgent:
+          type: object
+          description: >
+            #3591 (ADR-0198 amendment 1 D7). Present only on a personal agent: the owner's
+            connected harness turned on under an alias. `label` is the line teammates read
+            (the owner's display name + "의 개인 에이전트", decision 2). `mentionable` is
+            computed for the VIEWER: true only for the owner and only while on, so `@`
+            autocomplete offers it to the owner alone and never to a teammate. A personal
+            agent has no `hostOnline` or `brainUnavailableReason` (it runs on the owner's
+            member host through a signed spawn, not the Agent Port). A switched-off agent is
+            not on the roster (the roster lists active members); the owner reads it from
+            `GET …/personal-agents`.
+          required: [label, ownerId, ownerDisplayName, harness, enabled, mentionable]
+          properties:
+            label: {type: string}
+            ownerId: {type: string, format: uuid}
+            ownerDisplayName: {type: string}
+            harness: {type: string, enum: [claude_code, codex]}
+            enabled: {type: boolean}
+            mentionable: {type: boolean}
         hostOnline:
           type: boolean
           description: >
@@ -13419,6 +13525,48 @@ components:
             used within the last 10 minutes (`token.last_used_at`); an idle but open CLI session
             that has not called the port reads false. Present only for agents that dial in
             (brain subscription or external). Others see "offline" and nothing more (ADR-0193 D5).
+
+    EnablePersonalAgentRequest:
+      type: object
+      additionalProperties: false
+      required: [harness]
+      properties:
+        harness: {type: string, enum: [claude_code, codex]}
+        alias: {type: string, description: "The member handle (2-32 of a-z, 0-9, '_', '-'); lower-cased. Required unless agentMemberId is given or the agent already exists."}
+        displayName: {type: string, maxLength: 100, description: Defaults to the alias.}
+        agentMemberId: {type: string, format: uuid, description: "Convert the caller's own existing owner_only subscription agent of this harness in place (#3567). alias must be omitted."}
+
+    PersonalAgentSummary:
+      type: object
+      required: [id, handle, displayName, harness, enabled, label]
+      properties:
+        id: {type: string, format: uuid}
+        handle: {type: string}
+        displayName: {type: string}
+        harness: {type: string, enum: [claude_code, codex]}
+        enabled: {type: boolean}
+        label: {type: string, description: "The owner's display name + \"의 개인 에이전트\"."}
+
+    EnablePersonalAgentResponse:
+      type: object
+      required: [agent, reused]
+      properties:
+        agent: {$ref: "#/components/schemas/PersonalAgentSummary"}
+        reused: {type: boolean}
+
+    DisablePersonalAgentResponse:
+      type: object
+      required: [agent]
+      properties:
+        agent: {$ref: "#/components/schemas/PersonalAgentSummary"}
+
+    PersonalAgentListResponse:
+      type: object
+      required: [agents]
+      properties:
+        agents:
+          type: array
+          items: {$ref: "#/components/schemas/PersonalAgentSummary"}
 
     RegisterSubscriptionAgentRequest:
       type: object

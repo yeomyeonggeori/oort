@@ -154,6 +154,7 @@ pub mod memory_items;
 pub mod memory_suggest;
 pub mod mention;
 pub mod owner_key;
+pub mod personal;
 pub mod provisioning;
 pub mod routing;
 pub mod run;
@@ -246,6 +247,11 @@ pub use mention::{
     MENTION_JOB_METHOD_WORKER, MENTION_RUN_INPUT_SCHEMA,
 };
 pub use owner_key::{agent_owner_only_brain_in_tx, mark_agent_owner_key_in_tx, OwnerOnlyBrain};
+pub use personal::{
+    find_owned_personal_agent_in_tx, find_owner_personal_agent_in_tx,
+    list_owner_personal_agents_in_tx, lock_personal_agent_in_tx, mark_personal_agent_in_tx,
+    personal_agent_label, set_personal_agent_enabled_in_tx, PersonalAgentRow,
+};
 pub use provisioning::{
     agent_owner_in_tx, create_agent_identity_in_tx, default_enabled_tools,
     load_agent_model_policy_in_tx, load_agent_profile_in_tx, normalized_model,
@@ -289,13 +295,14 @@ pub use subscription::{
     notice_thread_key, owner_only_gate, release_subscription_device_in_tx,
     set_subscription_device_in_tx, subscription_notice_body, subscription_notice_key,
     subscription_notice_props, valid_device_id, AgentBrain, AgentReadFacts, OwnerOnlyScope,
-    RecentNotice, SubscriptionHarness, SubscriptionNoticeKind, CALLABLE_BY_EVERYONE,
-    CALLABLE_BY_OWNER_ONLY, CLAUDE_SUBSCRIPTION_AGENT_PAUSED, HOSTED_RECENTLY_SEEN_SQL,
-    INVOCATION_SCOPE_OWNER_ONLY, INVOCATION_SCOPE_WORKSPACE, SKIP_OWNER_ONLY_NON_OWNER,
-    SKIP_SUBSCRIPTION_AGENTS_DISABLED, SUBSCRIPTION_AGENTS_PER_HARNESS_LIMIT,
-    SUBSCRIPTION_AGENT_ONLINE_WINDOW_SECONDS, SUBSCRIPTION_NOTICE_AUDIT_SCHEMA,
-    SUBSCRIPTION_NOTICE_POSTED_ACTION, SUBSCRIPTION_NOTICE_SOURCE,
-    SUBSCRIPTION_NOTICE_THROTTLED_ACTION, SUBSCRIPTION_NOTICE_THROTTLE_SECONDS,
+    PersonalAgentFacts, RecentNotice, SubscriptionHarness, SubscriptionNoticeKind,
+    CALLABLE_BY_EVERYONE, CALLABLE_BY_OWNER_ONLY, CLAUDE_SUBSCRIPTION_AGENT_PAUSED,
+    HOSTED_RECENTLY_SEEN_SQL, INVOCATION_SCOPE_OWNER_ONLY, INVOCATION_SCOPE_WORKSPACE,
+    SKIP_OWNER_ONLY_NON_OWNER, SKIP_SUBSCRIPTION_AGENTS_DISABLED,
+    SUBSCRIPTION_AGENTS_PER_HARNESS_LIMIT, SUBSCRIPTION_AGENT_ONLINE_WINDOW_SECONDS,
+    SUBSCRIPTION_NOTICE_AUDIT_SCHEMA, SUBSCRIPTION_NOTICE_POSTED_ACTION,
+    SUBSCRIPTION_NOTICE_SOURCE, SUBSCRIPTION_NOTICE_THROTTLED_ACTION,
+    SUBSCRIPTION_NOTICE_THROTTLE_SECONDS,
 };
 pub use usage::{
     budget_state, chain_usage_in_tx, record_run_usage_in_tx, usage_summary_in_tx, validated_window,

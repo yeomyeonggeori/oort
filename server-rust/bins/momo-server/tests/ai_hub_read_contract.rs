@@ -68,6 +68,7 @@ fn facts(brain: AgentBrain) -> AgentReadFacts {
         host_online: Some(true),
         subscription_harness: (brain == AgentBrain::Subscription)
             .then_some(SubscriptionHarness::ClaudeCode),
+        personal: None,
     }
 }
 
