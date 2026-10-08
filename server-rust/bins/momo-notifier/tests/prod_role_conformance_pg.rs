@@ -24,6 +24,7 @@
 //! | `every_notifier_job_iteration_runs_as_its_production_role` | drop a notifier GRANT the job needs (e.g. `work_session_share`), or move a write back onto the notifier pool |
 //! | `the_notifier_role_has_no_delete_and_no_table_it_does_not_name` | add DELETE / `ALL TABLES` for `momo_notifier` |
 //! | `a_hosted_work_run_push_and_run_status_trigger_run_as_the_notifier_role` (#3553) | drop `GRANT SELECT (workspace_id, agent_member_id) ON hosted_agent_connection` — the push judgment `wrun` arm and the migration-120 `agent_run` trigger both read it |
+//! | `the_personal_agent_member_trigger_runs_as_every_role_that_writes_member` (#3591) | drop `GRANT UPDATE ON agent` from a role that can UPDATE `member` (the migration-123 trigger updates `agent` as the invoking role), or add the trigger's table to a lockdown |
 //! | `the_other_runtime_roles_reach_every_table_the_migrations_created` | a new table that `app`/`relay`/`worker` cannot read or write, or a cloud-box lockdown that drifts |
 //!
 //! Why #3553 got through anyway: the first test below already called
@@ -819,5 +820,254 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     assert!(
         box_drift.is_empty(),
         "cloud_box* privileges drifted from the lockdown: {box_drift:?}"
+    );
+}
+
+/// Seed one workspace with an owner and a personal agent, as the superuser.
+/// Returns `(workspace, owner, agent)`.
+async fn seed_personal_agent(su: &PgPool) -> (Uuid, Uuid, Uuid) {
+    let workspace = Uuid::new_v4();
+    sqlx::query("INSERT INTO workspace (id, slug, name) VALUES ($1, $2, $2)")
+        .bind(workspace)
+        .bind(format!("pa-{}", &workspace.simple().to_string()[..12]))
+        .execute(su)
+        .await
+        .expect("workspace");
+    let owner = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, 'human', 'owner', 'owner-h')",
+    )
+    .bind(owner)
+    .bind(workspace)
+    .execute(su)
+    .await
+    .expect("owner");
+    sqlx::query(
+        "INSERT INTO human (member_id, workspace_id, email, email_verified) \
+         VALUES ($1, $2, 'owner@pa.test', true)",
+    )
+    .bind(owner)
+    .bind(workspace)
+    .execute(su)
+    .await
+    .expect("human");
+    sqlx::query(
+        "INSERT INTO workspace_membership (workspace_id, member_id, role) VALUES ($1, $2, 'owner')",
+    )
+    .bind(workspace)
+    .bind(owner)
+    .execute(su)
+    .await
+    .expect("owner membership");
+    let agent = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, 'agent', 'kwak-claude', 'kwak-claude')",
+    )
+    .bind(agent)
+    .bind(workspace)
+    .execute(su)
+    .await
+    .expect("agent member");
+    sqlx::query(
+        "INSERT INTO agent (member_id, workspace_id, model, base_url, owner_human_id) \
+         VALUES ($1, $2, 'hosted-agent', 'https://hosted-agent.invalid/disabled', $3)",
+    )
+    .bind(agent)
+    .bind(workspace)
+    .bind(owner)
+    .execute(su)
+    .await
+    .expect("agent row");
+    sqlx::query(
+        "INSERT INTO workspace_membership (workspace_id, member_id, role) VALUES ($1, $2, 'member')",
+    )
+    .bind(workspace)
+    .bind(agent)
+    .execute(su)
+    .await
+    .expect("agent membership");
+    (workspace, owner, agent)
+}
+
+/// Put the agent back to "personal, switched off by its owner".
+async fn arm_personal_agent(su: &PgPool, workspace: Uuid, agent: Uuid) {
+    sqlx::query("UPDATE member SET status = 'suspended', deleted_at = NULL WHERE id = $1")
+        .bind(agent)
+        .execute(su)
+        .await
+        .expect("reset member");
+    sqlx::query(
+        "UPDATE agent SET invocation_scope = CASE WHEN subscription_harness IS NULL \
+                                                  THEN 'owner_only' ELSE invocation_scope END, \
+                subscription_harness = COALESCE(subscription_harness, 'claude_code'), \
+                personal_agent = true, personal_disabled_at = now() \
+          WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(workspace)
+    .bind(agent)
+    .execute(su)
+    .await
+    .expect("arm agent");
+}
+
+async fn personal_state(su: &PgPool, agent: Uuid) -> (bool, bool) {
+    sqlx::query_as(
+        "SELECT personal_agent, personal_disabled_at IS NOT NULL FROM agent WHERE member_id = $1",
+    )
+    .bind(agent)
+    .fetch_one(su)
+    .await
+    .expect("state")
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn the_personal_agent_member_trigger_runs_as_every_role_that_writes_member() {
+    let db = ProdDb::create().await;
+    let (workspace, owner, agent) = seed_personal_agent(&db.su).await;
+    let mut failures: Vec<String> = vec![];
+
+    // Every role the production grants let UPDATE `member`: the trigger's inner
+    // `UPDATE agent` runs as that role (SECURITY INVOKER) and must not be denied.
+    // The two BYPASSRLS roles write directly; momo_app writes in a tenant tx.
+    for (role, password) in [
+        ("momo_relay", "momo_relay_dev_pw"),
+        ("momo_worker", "momo_worker_dev_pw"),
+    ] {
+        let pool = db.role(role, password).await;
+        for (what, sql) in [
+            (
+                "status",
+                "UPDATE member SET status = 'suspended' WHERE id = $1",
+            ),
+            (
+                "deleted_at",
+                "UPDATE member SET deleted_at = now() WHERE id = $1",
+            ),
+        ] {
+            arm_personal_agent(&db.su, workspace, agent).await;
+            match sqlx::query(sql).bind(agent).execute(&pool).await {
+                Err(error) => failures.push(format!("{role} {what}: {error}")),
+                Ok(_) => {
+                    let (personal, disabled) = personal_state(&db.su, agent).await;
+                    let expected = if what == "deleted_at" {
+                        (false, false)
+                    } else {
+                        (true, false)
+                    };
+                    if (personal, disabled) != expected {
+                        failures.push(format!(
+                            "{role} {what}: trigger ran but left {personal}/{disabled}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    let app = db.role("momo_app", "momo_app_dev_pw").await;
+    for (what, sql) in [
+        (
+            "status",
+            "UPDATE member SET status = 'suspended' WHERE id = $1",
+        ),
+        (
+            "deleted_at",
+            "UPDATE member SET deleted_at = now() WHERE id = $1",
+        ),
+    ] {
+        arm_personal_agent(&db.su, workspace, agent).await;
+        let outcome = momo_db::tenant::with_tenant_tx(&app, workspace, move |conn| {
+            Box::pin(async move {
+                sqlx::query(sql).bind(agent).execute(&mut *conn).await?;
+                Ok(())
+            })
+        })
+        .await;
+        if let Err(error) = outcome {
+            failures.push(format!("momo_app {what}: {error}"));
+        }
+    }
+
+    // The real API through the app role: the administrator's suspension and the
+    // member removal (status 'deleted').
+    arm_personal_agent(&db.su, workspace, agent).await;
+    sqlx::query("UPDATE member SET status = 'active' WHERE id = $1")
+        .bind(agent)
+        .execute(&db.su)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE agent SET personal_disabled_at = now() WHERE member_id = $1")
+        .bind(agent)
+        .execute(&db.su)
+        .await
+        .unwrap();
+    let suspended = momo_db::tenant::with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            momo_settings::set_member_status_in_tx(
+                conn,
+                workspace,
+                owner,
+                agent,
+                momo_settings::StatusTransition::Suspend,
+            )
+            .await
+            .map(|inner| inner.is_ok())
+        })
+    })
+    .await;
+    match suspended {
+        Ok(true) => {
+            let (personal, disabled) = personal_state(&db.su, agent).await;
+            assert!(personal, "a suspension keeps the personal agent");
+            assert!(
+                !disabled,
+                "an administrator's suspension erases the owner's switch-off evidence"
+            );
+        }
+        Ok(false) => failures.push("set_member_status_in_tx refused the suspension".into()),
+        Err(error) => failures.push(format!("set_member_status_in_tx as momo_app: {error}")),
+    }
+    let removed = momo_db::tenant::with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            momo_settings::remove_workspace_member_in_tx(conn, workspace, owner, agent, false, None)
+                .await
+                .map(|inner| inner.is_ok())
+        })
+    })
+    .await;
+    match removed {
+        Ok(true) => {
+            let (personal, _) = personal_state(&db.su, agent).await;
+            assert!(!personal, "removing the member releases the personal slot");
+        }
+        Ok(false) => failures.push("remove_workspace_member_in_tx refused".into()),
+        Err(error) => failures.push(format!(
+            "remove_workspace_member_in_tx as momo_app: {error}"
+        )),
+    }
+
+    // The notifier never reaches the trigger: it holds SELECT on member only, so
+    // a write is denied on `member` itself, before any trigger could run.
+    let notifier = db.role("momo_notifier", "momo_notifier_dev_pw").await;
+    let denied = sqlx::query("UPDATE member SET status = 'suspended' WHERE id = $1")
+        .bind(agent)
+        .execute(&notifier)
+        .await
+        .expect_err("the notifier must not be able to write member");
+    assert!(
+        denied
+            .to_string()
+            .contains("permission denied for table member"),
+        "unexpected notifier error: {denied}"
+    );
+
+    db.finish().await;
+    assert!(
+        failures.is_empty(),
+        "role failures:\n{}",
+        failures.join("\n")
     );
 }
