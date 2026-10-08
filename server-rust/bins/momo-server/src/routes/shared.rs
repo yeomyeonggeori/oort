@@ -328,8 +328,8 @@ pub(crate) fn settle_db<T>(context: &str, outcome: DbRejectable<T>) -> Result<T,
 // `workspace_id`: whoever edits it changes provider resolution for EVERY
 // workspace on the instance, so the MOMO-576 "any workspace owner" rule was a
 // cross-tenant control leak the moment ADR-0117 opened multi-workspace, and
-// MOMO-583 removed it. `work_host_engine` and `work_tier_policy` are RLS-scoped
-// rows that only affect their own tenant, so an owner/admin is the right
+// MOMO-583 removed it. `work_tier_policy` is an RLS-scoped row
+// that only affects its own tenant, so an owner/admin is the right
 // authority there.
 //
 // Both helpers do their DB read in the operator's OWN workspace and complete
@@ -424,7 +424,7 @@ pub(crate) async fn require_instance_operator_write(
 }
 
 /// Per-workspace gate (Swift `ProviderLinkRoutes.isOperatorAuthorized` :281-289
-/// as used by `WorkHostEngineRoutes.requireOperator` :127-154): a human that
+/// as used by `WorkTierPolicyRoutes`): a human that
 /// carries `platform:read` **or** is an owner/admin of its own workspace.
 ///
 /// The platform path needs no DB lookup, so only the role fallback opens a

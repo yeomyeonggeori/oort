@@ -40,7 +40,6 @@
 //! | [`link`] | `provider_link` singleton store + DB-over-env resolution | `Provider/ProviderLinkStore.swift`, `ProviderLinkResolver.swift` |
 //! | [`oauth`] | the `oauth-openai` sealed-payload kind (ADR-0147) | no Swift source — Rust-only |
 //! | [`chain`] | `provider_link_chain` store + the cascade plan/classifier | `Provider/ProviderLinkChainStore.swift`, `ProviderCascade.swift` |
-//! | [`engine`] | `work_host_engine` per-workspace selection | `Provider/WorkHostEngineStore.swift` |
 //! | [`tier`] | `work_tier_policy` workspace default + member override | `Routes/WorkTierPolicyRoutes.swift` |
 //! | [`quota`] | `quota_snapshot` read side | `Routes/ProviderQuotaSnapshotRoutes.swift:list` |
 //! | [`invite`] | `invite_code` create/list/read/revoke/regenerate/redeem | `Routes/InviteRoutes.swift` |
@@ -61,7 +60,6 @@ pub mod cloud_box_runner;
 pub mod crypto;
 pub mod default_ai;
 pub mod egress;
-pub mod engine;
 pub mod invite;
 pub mod join;
 pub mod link;
@@ -87,10 +85,6 @@ pub use default_ai::{
     StoredDefaultAi, GUARDRAIL_OFF, MAX_MODEL_ID_BYTES, MAX_PROBE_MODEL_IDS, TEAM_LINK_SOURCE,
 };
 pub use egress::{is_non_public_ip, EgressDenied, EgressPolicy};
-pub use engine::{
-    read_work_host_engine, upsert_work_host_engine, validated_engine, StoredWorkHostEngine,
-    ALLOWED_ENGINES, DEFAULT_ENGINE,
-};
 pub use invite::{
     clamp_invite_list_limit, create_invite, list_invite_redemptions, list_invites,
     normalized_invite_role, normalized_revoke_reason, read_invite, redeem_invite_for_member,

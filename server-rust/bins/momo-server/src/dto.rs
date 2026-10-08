@@ -3717,31 +3717,6 @@ pub struct ProviderLinkTestResponse {
     pub entries: Vec<ProviderChainProbeDto>,
 }
 
-/// `GET|PUT /v1/provider/work-host-engine` response (Swift
-/// `WorkHostEngineResponse`, `WorkHostEngineRoutes.swift:189-195`).
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkHostEngineResponse {
-    pub engine: String,
-    /// `database` once a workspace has chosen; `default` means no row exists and
-    /// the boot default applies **without any write**.
-    pub source: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_by: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_at_ms: Option<i64>,
-    pub schema: &'static str,
-}
-
-/// Closed-world `PUT /v1/provider/work-host-engine` body (Swift
-/// `PutWorkHostEngineRequest` :200-221) — engine label only, so no credential or
-/// host-local path can be smuggled through (ADR-0004).
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct PutWorkHostEngineRequest {
-    pub engine: String,
-}
-
 /// `GET /v1/provider/effort-table` (Swift `ProviderEffortTableResponse`,
 /// `ProviderEffortTableRoutes.swift:192-197`).
 #[derive(Debug, Serialize)]

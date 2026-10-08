@@ -42,7 +42,7 @@ momo-outbox = { path = "../../crates/momo-outbox" }
 # SQL of its own beyond the two membership predicates it shares with Swift.
 momo-agent = { path = "../../crates/momo-agent" }
 # B4.2 (설정 표면). `momo-settings` owns every provider_link / provider_link_chain
-# / work_host_engine / work_tier_policy / quota_snapshot / invite_code statement
+# / work_tier_policy / quota_snapshot / invite_code statement
 # this batch mounts, plus the AES-GCM sealing of the provider bearer — so the
 # route layer still owns no SQL of its own and the plaintext bearer exists only
 # between the PUT body that carried it and the seal call.
