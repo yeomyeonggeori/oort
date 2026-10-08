@@ -1345,6 +1345,36 @@ async fn no_signature_a_stale_one_or_a_spent_nonce_is_refused() {
     assert_eq!(code(&body), Some("spawn_nonce_reused"));
     assert_eq!(s.spawn_controls().await, 1);
     assert_eq!(s.spent_nonces().await, 1);
+
+    // A nonce spent by a statement that left no control behind (a host
+    // registration, say) is spent all the same: the barrier is the nonce table,
+    // not the ledger.
+    let taken = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO human_control_nonce (workspace_id, nonce, device_key_id, kind, expires_at) \
+         VALUES ($1, $2, $3, 'host_register', now() + interval '10 minutes')",
+    )
+    .bind(s.workspace)
+    .bind(taken)
+    .bind(s.phone_id)
+    .execute(&s.su)
+    .await
+    .expect("spend a nonce elsewhere");
+    let req = s.req();
+    let signature = s.sign_for(
+        &s.phone_signer(),
+        s.host,
+        &req,
+        taken,
+        issued,
+        issued + 300_000,
+    );
+    let (status, body) = s
+        .post(&s.spawns_path(), &s.access, Stage::body(&req, signature))
+        .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(code(&body), Some("device_nonce_replayed"));
+    assert_eq!(s.spawn_controls().await, 1);
 }
 
 // ---- every signed field is bound -------------------------------------------
@@ -1722,4 +1752,118 @@ async fn malformed_prompts_are_refused_before_the_nonce_is_spent() {
     req.prompt = "첫 줄\n둘째 줄\n\n셋째 줄 — 길어도 괜찮아요".to_string();
     let (status, body, _) = s.spawn(&req).await;
     assert_eq!(status, 201, "{body}");
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_ledger_itself_refuses_an_unsigned_prompt_and_a_resume_without_an_agent() {
+    // The database is the invariant, the route is the sentence (migration 122):
+    // even a writer that skipped the route cannot leave an unsigned prompt, a
+    // new-work spawn with a stray session shape, or a resume with no agent.
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    let insert = |extra_columns: &'static str, extra_values: &'static str, payload: Value| {
+        let sql = format!(
+            "INSERT INTO work_control (workspace_id, channel_id, requester_member_id, \
+                target_host_id, kind, payload, status{extra_columns}) \
+             VALUES ($1, $2, $3, $4, 'spawn', $5, 'dispatched'{extra_values})"
+        );
+        let su = s.su.clone();
+        let (workspace, channel, person, host) = (s.workspace, s.channel, s.person, s.host);
+        async move {
+            sqlx::query(&sql)
+                .bind(workspace)
+                .bind(channel)
+                .bind(person)
+                .bind(host)
+                .bind(payload)
+                .execute(&su)
+                .await
+        }
+    };
+    // An agent bearer's spawn stays `{tool,label}`: a prompt without a signature
+    // is not a thing the ledger can hold.
+    let unsigned_prompt = insert(
+        "",
+        "",
+        json!({"tool": "claude", "label": "x", "prompt": "서명 없는 프롬프트"}),
+    )
+    .await;
+    assert!(unsigned_prompt.is_err(), "an unsigned prompt is refused");
+    // The plain agent spawn is unchanged.
+    let plain = insert("", "", json!({"tool": "claude", "label": "x"})).await;
+    assert!(plain.is_ok(), "{plain:?}");
+    // A prompt beyond the bound.
+    let too_long = insert(
+        "",
+        "",
+        json!({"tool": "claude", "label": "x", "prompt": "가".repeat(32_769)}),
+    )
+    .await;
+    assert!(too_long.is_err(), "the prompt has the `input` bound");
+
+    // A signed spawn: a resume (no prompt) needs its agent; a new task does not.
+    let signed_columns = format!(
+        ", device_key_id, human_instance_id, human_nonce, human_issued_at_ms, \
+           human_expires_at_ms, human_spawn_folder_id, human_signature"
+    );
+    let signed_values = format!(
+        ", '{}', 'i', '{}', 1, 2, 'f', '{}=='",
+        s.phone_id,
+        Uuid::new_v4(),
+        "A".repeat(86)
+    );
+    let signed_columns: &'static str = Box::leak(signed_columns.into_boxed_str());
+    let signed_values: &'static str = Box::leak(signed_values.into_boxed_str());
+    let resume_without_agent = insert(
+        signed_columns,
+        signed_values,
+        json!({"tool": "claude", "label": "x"}),
+    )
+    .await;
+    assert!(
+        resume_without_agent.is_err(),
+        "a signed resume with no agent is refused"
+    );
+    let new_task_without_agent = insert(
+        signed_columns,
+        Box::leak(
+            format!(
+                ", '{}', 'i', '{}', 1, 2, 'f', '{}=='",
+                s.phone_id,
+                Uuid::new_v4(),
+                "A".repeat(86)
+            )
+            .into_boxed_str(),
+        ),
+        json!({"tool": "claude", "label": "x", "prompt": "에이전트 없는 새 작업"}),
+    )
+    .await;
+    assert!(
+        new_task_without_agent.is_ok(),
+        "a new task may name no agent: {new_task_without_agent:?}"
+    );
+    // The thread and the message belong to a new task only.
+    let resume_with_position = insert(
+        ", device_key_id, human_instance_id, human_nonce, human_issued_at_ms, \
+           human_expires_at_ms, human_spawn_folder_id, human_spawn_agent_member_id, \
+           human_spawn_origin_message_id, human_signature",
+        Box::leak(
+            format!(
+                ", '{}', 'i', '{}', 1, 2, 'f', '{}', '{}', '{}=='",
+                s.phone_id,
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                "A".repeat(86)
+            )
+            .into_boxed_str(),
+        ),
+        json!({"tool": "claude", "label": "x"}),
+    )
+    .await;
+    assert!(
+        resume_with_position.is_err(),
+        "a resume names no thread or message"
+    );
 }
