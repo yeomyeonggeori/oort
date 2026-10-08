@@ -19,6 +19,8 @@ export function SettingsRow({
   descriptionId,
   className,
   testId,
+  role,
+  plain = false,
 }: {
   label: ReactNode;
   description?: ReactNode;
@@ -30,6 +32,9 @@ export function SettingsRow({
   descriptionId?: string;
   className?: string;
   testId?: string;
+  role?: "alert" | "status";
+  /** 라벨이 제목이 아니라 한 문장이다(안내·오류): 굵게 하지 않는다. */
+  plain?: boolean;
 }) {
   return (
     <div
@@ -38,9 +43,10 @@ export function SettingsRow({
       data-keep={keep ? "" : undefined}
       data-align={align === "start" ? "start" : undefined}
       data-testid={testId}
+      role={role}
     >
       <div className="flex min-w-0 flex-col gap-px">
-        <div id={labelId} className="break-keep text-body font-semibold text-ink">
+        <div id={labelId} className={cn("break-keep text-body text-ink", !plain && "font-semibold")}>
           {label}
         </div>
         {description ? (

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
-import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
+import { EmptyInvite, Skeleton } from "@/features/common/States";
 // The one cost formatter in this client. A second rounding rule would mean two
 // different answers to "how much did this cost" on two surfaces.
 import { formatCount, formatMicroUsd } from "@momo/core/features/timeline/agentCardModel";
@@ -227,16 +227,20 @@ export function UsageSection({ workspaceId }: { workspaceId: string }) {
 
         {view.kind === "error" && (
           <SettingsSection title="합계">
-            <CardBody>
-              <InlineBanner
-                message={view.message}
-                actionLabel="다시 시도"
-                onAction={() => void query.refetch()}
-                separator={false}
-                className="px-0"
-                testId="usage-error"
-              />
-            </CardBody>
+            <SettingsRow
+              label={view.message}
+              testId="usage-error"
+              role="alert"
+              plain
+            >
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void query.refetch()}
+              >
+                다시 시도
+              </Button>
+            </SettingsRow>
           </SettingsSection>
         )}
 
@@ -249,17 +253,20 @@ export function UsageSection({ workspaceId }: { workspaceId: string }) {
                 undimmed, and the banner carries the whole fallback in one line
                 (what happened, and when the numbers were last confirmed). */}
             <SettingsSection>
-              <CardBody>
-                <InlineBanner
-                  tone="neutral"
-                  message={view.notice}
-                  actionLabel="다시 시도"
-                  onAction={() => void query.refetch()}
-                  separator={false}
-                  className="px-0"
-                  testId="usage-last-known-banner"
-                />
-              </CardBody>
+              <SettingsRow
+                label={view.notice}
+                testId="usage-last-known-banner"
+                role="status"
+                plain
+              >
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void query.refetch()}
+                >
+                  다시 시도
+                </Button>
+              </SettingsRow>
             </SettingsSection>
             <UsageBody
               summary={view.summary}
@@ -615,8 +622,8 @@ function Breakdown({
               data-testid={`${testId}-row`}
             >
               <div className="flex min-w-0 items-baseline justify-between gap-3">
-                <span className="flex min-w-0 items-baseline gap-2 truncate">
-                  <span className="min-w-0 truncate text-body text-ink">
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <span className="min-w-0 break-all text-body text-ink">
                     {row.label}
                   </span>
                   {row.handle && (
@@ -625,25 +632,25 @@ function Breakdown({
                     </span>
                   )}
                 </span>
-                <span className="flex shrink-0 items-baseline gap-3">
-                  <span className="text-timestamp text-ink-muted">
-                    입력{" "}
-                    <span className="font-mono" data-numeric="">
-                      {formatCount(row.promptTokens)}
-                    </span>{" "}
-                    · 출력{" "}
-                    <span className="font-mono" data-numeric="">
-                      {formatCount(row.completionTokens)}
-                    </span>
-                  </span>
-                  <span
-                    className="font-mono text-body text-ink"
-                    data-numeric=""
-                  >
-                    {formatMicroUsd(row.costMicroUsd)}
-                  </span>
+                <span
+                  className="shrink-0 font-mono text-body text-ink"
+                  data-numeric=""
+                >
+                  {formatMicroUsd(row.costMicroUsd)}
                 </span>
               </div>
+              {/* 토큰은 이름 아래 둘째 줄이다: 좁은 폭에서 이름이 잘리면 같은 이름 둘을
+                  가르려고 붙인 핸들이 제 구실을 못 한다. */}
+              <p className="text-timestamp text-ink-muted">
+                입력{" "}
+                <span className="font-mono" data-numeric="">
+                  {formatCount(row.promptTokens)}
+                </span>{" "}
+                · 출력{" "}
+                <span className="font-mono" data-numeric="">
+                  {formatCount(row.completionTokens)}
+                </span>
+              </p>
               <progress
                 className="progress-bar"
                 data-tone="neutral"
