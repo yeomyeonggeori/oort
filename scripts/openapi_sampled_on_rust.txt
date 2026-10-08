@@ -68,7 +68,7 @@
 #       POST|GET|DELETE /v1/workspaces/{ws}/devices[/{device}]
 #       GET …/work-sessions/{session}/reattach · GET …/usage/summary
 #       POST /v1/agent-runs/{run}/approval-decisions
-#       GET|PUT /v1/provider/work-host-engine · GET /v1/provider/quota-snapshots
+#       GET /v1/provider/quota-snapshots (work-host-engine 은 #3584 로 삭제)
 #       POST /v1/centrifugo/subscribe · agent gateway 5 경로
 #
 # ── 등재 보류: attachments 3경로 (#1111 / ADR-0151) ──────────────────────────

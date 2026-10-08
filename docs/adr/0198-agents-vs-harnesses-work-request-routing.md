@@ -296,3 +296,12 @@ D7의 소유자 호출은 본문 D2가 이미 정한 「member host 레인은 D1
 - 새 읽기 API는 만들지 않는다. 후보 채널은 기존 채널 목록에서 소유자가 활성 멤버이고 글을 쓸 수 있는 것만 클라이언트가 거른다.
 
 **미검증·남는 위험.** 질문용 폴더가 세션 사이에 같은 폴더라 앞 질문의 파일이 남는다. 세션마다 새 하위 폴더나 worktree를 쓸지는 T5가 정한다(D6 「세션당 worktree」). host가 틀린 announcement를 보내면 서버가 400을 돌려 그 박동은 온라인으로 치지 않는다(host가 같은 검증을 설정 로드 때 한다). 별칭 DM 왕복과 실기기는 runtime-unverified.
+
+## 증보 2 (2026-10-08) — 워크스페이스 단위 「실행 엔진」 설정 API 제거 (#3584)
+
+D1(하네스 = 내 도구)과 D4(작업은 내 맥 우선, 호스트 소유자 == 요청자)가 확정한 결과로, 워크스페이스가 하나의 실행 엔진(opencode·goose·codex-local)을 골라 모두에게 적용하는 모델은 폐기한다. 성재 지시(#3578 S0, 2026-10-07): 「opencode goose codex-local 이런건 옛날 레거시의 잔재 같으니 해소해줘」.
+
+- **제거**: `GET·PUT /v1/provider/work-host-engine`(공개 API)와 그 코드(`momo-settings::engine`, DTO, 라우트, 시험, undocumented 허용목록). 호출자는 uxui 트랙의 S4(#3611)가 이미 제거했고(클라 UI·core API 함수), 두 트랙 승격 뒤에 정합한다. 승격 전 구 클라이언트는 이 경로를 404로 받는다.
+- **소비자**: 이 설정을 읽는 서버·workd 코드는 없었다(`server-rust` 전체에서 `work_host_engine`·`WorkEngine`·`MOMO_WORKD_ENGINE` 참조는 제거 대상 파일뿐이다. `momo-workd`·시험의 `opencode`는 `work_tool_profile`(migration 029)의 도구 어휘이고, `momo-t3`의 `HARNESSES`도 별개라서 유지).
+- **DB**: forward-only. `work_host_engine` 테이블(migration 040)은 삭제하지 않고 **미사용**으로 둔다. 쓰는 코드가 없으며 RLS FORCE 정책은 그대로다. 테이블 삭제는 필요해질 때 신규 migration으로 한다.
+- 이 증보는 D1·D4의 귀결이며 새 방향을 정하지 않는다.
