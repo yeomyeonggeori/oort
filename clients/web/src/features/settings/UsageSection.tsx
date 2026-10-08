@@ -623,7 +623,7 @@ function Breakdown({
             >
               <div className="flex min-w-0 items-baseline justify-between gap-3">
                 <span className="flex min-w-0 items-baseline gap-2">
-                  <span className="min-w-0 break-all text-body text-ink">
+                  <span className="min-w-0 break-keep break-words text-body text-ink">
                     {row.label}
                   </span>
                   {row.handle && (
