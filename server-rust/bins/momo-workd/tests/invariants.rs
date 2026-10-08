@@ -4793,8 +4793,11 @@ async fn inv_54_a_signed_v4_without_a_usable_prompt_is_refused_where_signatures_
         None,
     );
     stripped.payload.as_object_mut().unwrap().remove("prompt");
-    let ack = poll_and_ack(&mut locked, &stripped).await;
-    assert!(!ack.ok, "removed prompt on a locked host: {ack:?}");
+    assert_eq!(
+        poll_and_ack(&mut locked, &stripped).await,
+        ControlAck::refused("device_signature_invalid"),
+        "removed prompt on a locked host"
+    );
     for bad in [json!(7), json!(null), json!(["a"]), json!({"a": 1})] {
         let mut broken = signed_new_work(
             new_work(&locked, "빌드 봐 줘"),
@@ -4805,8 +4808,11 @@ async fn inv_54_a_signed_v4_without_a_usable_prompt_is_refused_where_signatures_
             None,
         );
         broken.payload["prompt"] = bad.clone();
-        let ack = poll_and_ack(&mut locked, &broken).await;
-        assert!(!ack.ok, "prompt {bad} on a locked host: {ack:?}");
+        assert_eq!(
+            poll_and_ack(&mut locked, &broken).await,
+            ControlAck::refused("invalid_control"),
+            "prompt {bad} on a locked host"
+        );
     }
     assert!(stub_log(&locked).is_empty(), "nothing was launched");
 
