@@ -251,7 +251,7 @@ export const TERMINAL_APP_BINDINGS: readonly TerminalAppBinding[] = [
     id: "toggle-sidebar",
     description: "탐색 패널(목록 열) 접고 펴기",
     keycaps: ["⌘B"],
-    note: "macOS에서만 터미널 안에서도 돼요. 다른 플랫폼의 Ctrl+B는 터미널(tmux prefix)이 가집니다.",
+    note: "macOS에서만 터미널 안에서도 돼요. 다른 플랫폼의 Ctrl+B는 터미널(tmux prefix)이 가져요.",
   },
 ];
 

@@ -22,7 +22,6 @@ import { IS_TAURI } from "@/lib/env";
 import { UpdateSection } from "@/features/updates/UpdateSection";
 import { DevicesSection } from "./DevicesSection";
 import { AppearanceSection } from "./AppearanceSection";
-import { TerminalSection } from "./TerminalSection";
 import { ShortcutsSection } from "./ShortcutsSection";
 import { InviteSection } from "./InviteSection";
 import { NotificationRulesSection } from "./NotificationRulesSection";
@@ -354,10 +353,7 @@ function SectionPage({
       return <NotificationRulesSection offline={offline} />;
     case "shortcuts":
       return (
-        <div className="flex min-w-0 flex-col gap-8">
-          <ShortcutsSection />
-          <TerminalSection />
-        </div>
+        <ShortcutsSection />
       );
     case "devices":
       return (

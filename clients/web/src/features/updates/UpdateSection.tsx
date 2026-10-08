@@ -60,7 +60,7 @@ function stateSentence(state: UpdateState): string {
     case "current":
       return "지금 쓰는 버전이 가장 최신이에요.";
     case "available":
-      return "새 버전을 받을 수 있어요.";
+      return "받을 수 있는 새 버전이 있어요.";
     case "installing":
       return "새 버전을 받고 있어요. 앱은 그대로 쓸 수 있어요.";
     case "installed":
@@ -84,7 +84,7 @@ export function UpdateSection() {
   return (
     <div className="flex min-w-0 flex-col gap-8" data-testid="updates-page">
       <SettingsSection
-        title="업데이트"
+        title="앱 업데이트"
         description="앱이 스스로 새 버전으로 바꿔요. 내려받은 파일은 서명을 검증한 뒤에만 설치해요. 설치는 지금 하고 재시작은 나중에 해도 돼요. 쓰던 화면은 그대로 있어요."
       >
         <SettingsRow label="지금 버전">
@@ -127,11 +127,11 @@ export function UpdateSection() {
         )}
 
         {state.kind === "available" && state.update.notes && (
-          <CardBody>
+          <SettingsRow label="변경 내용" stack>
             <p className="whitespace-pre-line text-body text-ink-muted" data-testid="update-notes">
               {state.update.notes}
             </p>
-          </CardBody>
+          </SettingsRow>
         )}
 
         {state.kind === "installing" && (
@@ -148,28 +148,36 @@ export function UpdateSection() {
           </CardBody>
         )}
 
-        <SettingsRow label="직접 확인" description="새 버전이 나왔는지 바로 물어봐요.">
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {state.kind === "available" && (
+        {(state.kind === "available" || state.kind === "installed") && (
+          <SettingsRow
+            label={state.kind === "available" ? "새 버전 설치" : "재시작"}
+            description={
+              state.kind === "available"
+                ? "설치는 지금 하고 재시작은 나중에 해도 돼요."
+                : "지금 재시작하거나, 쓰던 일을 마친 뒤에 열어도 돼요."
+            }
+          >
+            {state.kind === "available" ? (
               <Button size="sm" onClick={() => void installUpdate()} data-testid="update-install">
                 지금 업데이트
               </Button>
-            )}
-            {state.kind === "installed" && (
+            ) : (
               <Button size="sm" onClick={() => void relaunchIntoUpdate()} data-testid="update-relaunch">
                 지금 재시작
               </Button>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={busy}
-              onClick={() => void checkForUpdate()}
-              data-testid="update-check"
-            >
-              {state.kind === "checking" ? "확인 중" : "업데이트 확인"}
-            </Button>
-          </div>
+          </SettingsRow>
+        )}
+        <SettingsRow label="직접 확인" description="새 버전이 나왔는지 바로 물어봐요.">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            onClick={() => void checkForUpdate()}
+            data-testid="update-check"
+          >
+            {state.kind === "checking" ? "확인 중" : "업데이트 확인"}
+          </Button>
         </SettingsRow>
       </SettingsSection>
     </div>

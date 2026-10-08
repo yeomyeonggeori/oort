@@ -184,6 +184,13 @@ async function scene(browser, origin, def, scheme, vp) {
       return Math.max(document.documentElement.scrollWidth - document.documentElement.clientWidth, v.scrollWidth - v.clientWidth);
     });
     check(`${tag} 가로 넘침 0`, overflow <= 0, { overflow });
+    // 잘린 컨트롤이 없다: 모든 스위치가 화면 폭 안에 온전히 들어온다(좁은 폭에서 표 열이 잘리던 결함).
+    const clipped = await page.evaluate((width) =>
+      [...document.querySelectorAll('[role="switch"]')].filter((el) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && (r.right > width + 0.5 || r.left < -0.5);
+      }).length, vp.w);
+    check(`${tag} 화면 밖으로 잘린 스위치 0`, clipped === 0, { clipped });
     if (def.verify) await def.verify(page, tag);
     await page.screenshot({ path: resolve(OUT_DIR, `${tag}.png`) });
     report.scenes.push(tag);

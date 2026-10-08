@@ -52,7 +52,8 @@ const OFFLINE_REASON = "연결이 끊겨 지금은 규칙을 바꿀 수 없어�
 
 // 서버는 「활성 사람 멤버」만 이 규칙을 읽고 쓰게 한다(notification_rules.rs). 403은 운영자 권한이
 // 아니라 에이전트 계정이거나 멤버가 아니라는 뜻이라 「서버 운영자에게 문의」가 아니라 그 사실을 말한다.
-const FORBIDDEN_COPY = "사람 멤버만 알림 규칙을 정할 수 있어요.";
+const FORBIDDEN_COPY =
+  "사람 멤버만 알림 규칙을 정할 수 있어요. 에이전트 계정이거나 이 워크스페이스의 멤버가 아니면 쓸 수 없어요. 멤버라면 워크스페이스에 다시 참여한 뒤 열어 보세요.";
 
 function loadFailureCopy(error: unknown): { message: string; retry: boolean } {
   if (error instanceof ApiError && error.status === 403) {
@@ -115,14 +116,25 @@ export function NotificationRulesSection({ offline }: { offline: boolean }) {
           </CardBody>
         ) : failure ? (
           <CardBody>
+            {failure.retry ? (
             <InlineBanner
               message={failure.message}
-              actionLabel={failure.retry ? "다시 불러오기" : undefined}
-              onAction={failure.retry ? () => void rules.refetch() : undefined}
+              actionLabel="다시 불러오기"
+              onAction={() => void rules.refetch()}
               separator={false}
               className="px-0"
               testId="notification-rules-error"
             />
+            ) : (
+              // 403은 실패가 아니라 이 계정에 닫힌 상태다: 경고색이 아니라 안내 톤으로 말한다.
+              <p
+                className="break-keep text-body text-ink-muted"
+                role="status"
+                data-testid="notification-rules-error"
+              >
+                {failure.message}
+              </p>
+            )}
           </CardBody>
         ) : (
           <>

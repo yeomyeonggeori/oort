@@ -22,6 +22,7 @@ import { isDesktop } from "@/lib/tauri";
 import { SettingsRow } from "./shell/SettingsRow";
 import { SettingsSection } from "./shell/SettingsSection";
 import { CardBody } from "./workTierPolicy";
+import { TerminalSection } from "./TerminalSection";
 import {
   buildShortcutRows,
   filterShortcutRows,
@@ -301,7 +302,8 @@ export function ShortcutsSection({
                 const status = capturing
                   ? `${modifierName} 키를 누른 채 키를 누르세요. Esc로 취소해요.`
                   : [
-                      row.desktopOnly ? "데스크탑 전용" : null,
+                      // 데스크탑 앱 안에서는 모든 키가 동작하므로 표시가 소음이다. 브라우저에서만 말한다.
+                      row.desktopOnly && !desktop ? "데스크탑 전용" : null,
                       row.rebindable ? null : "고정",
                       row.customized ? "변경됨" : null,
                     ]
@@ -421,6 +423,9 @@ export function ShortcutsSection({
           ))}
         </div>
       )}
+      {/* 검색은 위 목록만 거른다: 검색 중에는 걸러지지 않는 터미널 목록을 숨겨서 「일치하는 키가
+          없어요」 옆에 안 걸린 표가 서지 않게 한다. */}
+      {query.trim() === "" ? <TerminalSection desktop={desktop} platform={platform} /> : null}
     </div>
   );
 }

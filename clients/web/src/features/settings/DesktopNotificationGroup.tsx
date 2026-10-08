@@ -234,6 +234,8 @@ export function DesktopNotificationGroup() {
   const dockOffReasonId = useId();
   const dockLabelId = useId();
   const dockDescId = useId();
+  const dockDmLabelId = useId();
+  const dockDmDescId = useId();
   const kindsLocked = permission === "unsupported";
   const browser = surface === "browser";
 
@@ -274,10 +276,17 @@ export function DesktopNotificationGroup() {
   }
 
   const lockedDescribedBy = kindsLocked ? unsupportedReasonId : undefined;
-  const dockCellText = (row: DesktopNotificationKindRow): string | null => {
-    if (browser) return null;
-    if (!kinds.dockBadge) return "독 배지 꺼짐";
-    return row.dock === "counted" ? "독 배지 수에 포함" : row.dock === "never" ? "독 배지에 세지 않아요" : null;
+  const dockCellText = (row: DesktopNotificationKindRow): string => {
+    if (!kinds.dockBadge) return "꺼짐";
+    if (row.dock === "counted") return "수에 포함";
+    if (row.dock === "dm") return kinds.dockDm ? "수에 포함" : "세지 않아요";
+    return "세지 않아요";
+  };
+  // 좁은 카드에서 접힌 열의 내용을 이름 아래 한 줄로 말한다.
+  const extraLine = (row: DesktopNotificationKindRow): string => {
+    const parts = browser ? [] : [`독 배지 ${dockCellText(row)}`];
+    parts.push(`폰 푸시 ${PHONE_CELL_TEXT[row.phone]}`);
+    return parts.join(" · ");
   };
 
   return (
@@ -326,9 +335,9 @@ export function DesktopNotificationGroup() {
                 <th scope="col" className="min-w-pane-sm px-4 py-3 font-normal">종류</th>
                 <th scope="col" className="whitespace-nowrap px-4 py-3 text-center font-normal">OS 알림</th>
                 {!browser && (
-                  <th scope="col" className="whitespace-nowrap px-4 py-3 text-center font-normal">독 배지</th>
+                  <th scope="col" className="kinds-extra-col whitespace-nowrap px-4 py-3 text-center font-normal">독 배지</th>
                 )}
-                <th scope="col" className="whitespace-nowrap px-4 py-3 text-center font-normal">폰 푸시</th>
+                <th scope="col" className="kinds-extra-col whitespace-nowrap px-4 py-3 text-center font-normal">폰 푸시</th>
               </tr>
             </thead>
             <tbody>
@@ -340,6 +349,9 @@ export function DesktopNotificationGroup() {
                       <span className="block text-body font-semibold text-ink">{row.name}</span>
                       <span className="block break-keep text-meta text-ink-muted">
                         {row.description}
+                      </span>
+                      <span className="kinds-extra-line block break-keep pt-1 text-meta text-ink-muted">
+                        {extraLine(row)}
                       </span>
                     </th>
                     <td className="whitespace-nowrap px-4 py-3 text-center align-top">
@@ -361,22 +373,11 @@ export function DesktopNotificationGroup() {
                       )}
                     </td>
                     {!browser && (
-                      <td className="whitespace-nowrap px-4 py-3 text-center align-top text-meta text-ink-muted">
-                        {row.dock === "dm" && kinds.dockBadge ? (
-                          <Switch
-                            aria-label={`${row.name} 독 배지`}
-                            checked={kinds.dockDm}
-                            disabled={kindsLocked}
-                            describedBy={lockedDescribedBy}
-                            onCheckedChange={(next) => setDesktopNotificationKind("dockDm", next)}
-                            testId="desktop-notification-dock-dm"
-                          />
-                        ) : (
-                          dockCellText(row) ?? "꺼짐"
-                        )}
+                      <td className="kinds-extra-col whitespace-nowrap px-4 py-3 text-center align-top text-meta text-ink-muted">
+                        {dockCellText(row)}
                       </td>
                     )}
-                    <td className="whitespace-nowrap px-4 py-3 text-center align-top text-meta text-ink-muted">
+                    <td className="kinds-extra-col whitespace-nowrap px-4 py-3 text-center align-top text-meta text-ink-muted">
                       {PHONE_CELL_TEXT[row.phone]}
                     </td>
                   </tr>
@@ -405,10 +406,32 @@ export function DesktopNotificationGroup() {
               onCheckedChange={(enabled) => setDesktopNotificationKind("dockBadge", enabled)}
             />
           </SettingsRow>
+          <SettingsRow
+            label="새 DM도 독 배지에 세기"
+            description="1:1 대화의 새 글을 독 배지 수에 더해요. 기본은 꺼짐이에요."
+            labelId={dockDmLabelId}
+            descriptionId={dockDmDescId}
+            keep
+          >
+            <Switch
+              testId="desktop-notification-dock-dm"
+              checked={kinds.dockDm}
+              disabled={kindsLocked || !kinds.dockBadge}
+              labelledBy={dockDmLabelId}
+              describedBy={
+                kindsLocked
+                  ? `${dockDmDescId} ${unsupportedReasonId}`
+                  : !kinds.dockBadge
+                    ? `${dockDmDescId} ${dockOffReasonId}`
+                    : dockDmDescId
+              }
+              onCheckedChange={(next) => setDesktopNotificationKind("dockDm", next)}
+            />
+          </SettingsRow>
           {!kinds.dockBadge && (
             <CardBody>
               <p id={dockOffReasonId} className="break-keep text-meta text-ink-muted">
-                독 배지가 꺼져 있어서 표의 독 배지 열은 모두 쉬어요.
+                독 배지가 꺼져 있어서 종류별 독 배지 표시도 모두 쉬어요.
               </p>
             </CardBody>
           )}

@@ -53,13 +53,15 @@ vi.mock("./NotificationRulesSection", () => ({
   NotificationRulesSection: () =>
     createElement("div", { "data-testid": "section-notifications" }),
 }));
+// 단축키 페이지는 로컬 터미널 카드를 스스로 든다(#3615 S5a: 검색 중에는 터미널 목록을 숨기려고
+// 한 컴포넌트가 둘 다 그린다). 그래서 이 한 목은 두 표지를 함께 낸다.
 vi.mock("./ShortcutsSection", () => ({
   ShortcutsSection: () =>
-    createElement("div", { "data-testid": "section-shortcuts" }),
-}));
-vi.mock("./TerminalSection", () => ({
-  TerminalSection: () =>
-    createElement("div", { "data-testid": "section-terminal" }),
+    createElement(
+      "div",
+      { "data-testid": "section-shortcuts" },
+      createElement("div", { "data-testid": "section-terminal" })
+    ),
 }));
 vi.mock("./AppearanceSection", () => ({
   AppearanceSection: () =>
