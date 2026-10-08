@@ -241,9 +241,9 @@ export interface TerminalAppBinding {
  * 표의 모든 키캡을 사건으로 바꿔 `isTerminalAppKey`가 참인지 잰다.
  */
 export const TERMINAL_APP_BINDINGS: readonly TerminalAppBinding[] = [
-  { id: "toggle-dock", description: "터미널 도크 열고 닫기", keycaps: ["⌃`"], note: "한글 입력 중에도 같은 자판으로 됩니다." },
-  { id: "toggle-fullscreen", description: "전체 화면 켜고 끄기", keycaps: ["⌃⇧`"], note: "도크를 본문 판 전체로 키웁니다." },
-  { id: "new-session", description: "새 세션", keycaps: ["⌃⇧N", "⌘T"], note: "⌘T는 도크에 포커스가 있을 때만 됩니다." },
+  { id: "toggle-dock", description: "터미널 도크 열고 닫기", keycaps: ["⌃`"], note: "한글 입력 중에도 같은 자판으로 돼요." },
+  { id: "toggle-fullscreen", description: "전체 화면 켜고 끄기", keycaps: ["⌃⇧`"], note: "도크를 본문 판 전체로 키워요." },
+  { id: "new-session", description: "새 세션", keycaps: ["⌃⇧N", "⌘T"], note: "⌘T는 도크에 포커스가 있을 때만 돼요." },
   ...WORKBENCH_BINDINGS.map((b) => ({ id: b.id, description: b.description, keycaps: b.keycaps })),
   { id: "jump-palette", description: "칸 목록 열기", keycaps: ["⌘J"] },
   { id: "next-waiting", description: "다음 「응답 필요」로", keycaps: ["⌃⇧J"] },
@@ -251,7 +251,7 @@ export const TERMINAL_APP_BINDINGS: readonly TerminalAppBinding[] = [
     id: "toggle-sidebar",
     description: "탐색 패널(목록 열) 접고 펴기",
     keycaps: ["⌘B"],
-    note: "macOS에서만 터미널 안에서도 됩니다. 다른 플랫폼의 Ctrl+B는 터미널(tmux prefix)이 가집니다.",
+    note: "macOS에서만 터미널 안에서도 돼요. 다른 플랫폼의 Ctrl+B는 터미널(tmux prefix)이 가집니다.",
   },
 ];
 

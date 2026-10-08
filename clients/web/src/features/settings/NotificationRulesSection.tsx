@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ApiError } from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
 import {
   DEFAULT_NOTIFICATION_RULES,
@@ -14,7 +15,10 @@ import {
 } from "@momo/core/features/settings/notificationRules";
 import { InlineBanner, Skeleton } from "@/features/common/States";
 import { DesktopNotificationGroup } from "./DesktopNotificationGroup";
-import { SectionShell, SettingsToggleRow, Subsection } from "./SettingsFields";
+import { Switch } from "@/design/ui/switch";
+import { SettingsRow } from "./shell/SettingsRow";
+import { SettingsSection } from "./shell/SettingsSection";
+import { CardBody } from "./workTierPolicy";
 
 // Design Read: settings for internal team users on web+Tauri, density 6/10,
 // motion 2/10.
@@ -32,24 +36,30 @@ import { SectionShell, SettingsToggleRow, Subsection } from "./SettingsFields";
 //   3. 채널 하나만 조용히 = 채널 헤더. Per-channel mute (018) lives in the channel
 //      name menu, not here; this panel is workspace-wide.
 //
-// The switches are the platform checkbox, not a custom control: it already gives
-// the space toggle, the accessible name, and a focus ring, and this bundle
-// carries no Radix Switch. Each write names only the switch it changed (PATCH,
+// 설정 > 알림 (#3578 S5a): 두 카드. 「내 알림 규칙」은 서버 규칙(모든 기기에서 같다),
+// 「이 기기 알림」은 이 기기 로컬 선택이다(DesktopNotificationGroup). 스위치는 `design/ui/Switch`
+// (네이티브 `button role="switch"`)다. Each write names only the switch it changed (PATCH,
 // #3042): the phone writes the pause from its profile sheet, and a whole-object
 // PUT of this panel's last read would erase whatever it changed since. Applied
 // optimistically so the toggle moves at click speed, rolled back if the round
 // trip fails, and replaced by the server's merged answer when it lands.
 // =============================================================================
 
-const LINES = [
-  NOTIFICATION_RULES_SERVER_NOTE,
-  "OS 알림을 종류별로 끄는 선택은 이 기기에만 저장돼요.",
-];
-
 const CHANNEL_NOTE =
   "채널 하나만 조용히 하려면 그 채널 이름을 눌러 알림 끄기를 고르세요. 이 화면은 워크스페이스 전체에 걸리는 규칙만 다뤄요.";
 
 const OFFLINE_REASON = "연결이 끊겨 지금은 규칙을 바꿀 수 없어요.";
+
+// 서버는 「활성 사람 멤버」만 이 규칙을 읽고 쓰게 한다(notification_rules.rs). 403은 운영자 권한이
+// 아니라 에이전트 계정이거나 멤버가 아니라는 뜻이라 「서버 운영자에게 문의」가 아니라 그 사실을 말한다.
+const FORBIDDEN_COPY = "사람 멤버만 알림 규칙을 정할 수 있어요.";
+
+function loadFailureCopy(error: unknown): { message: string; retry: boolean } {
+  if (error instanceof ApiError && error.status === 403) {
+    return { message: FORBIDDEN_COPY, retry: false };
+  }
+  return { message: "알림 규칙을 불러오지 못했어요.", retry: true };
+}
 
 export function NotificationRulesSection({ offline }: { offline: boolean }) {
   const { workspaceId } = useSession();
@@ -63,6 +73,8 @@ export function NotificationRulesSection({ offline }: { offline: boolean }) {
 
   const [issue, setIssue] = useState<string | null>(null);
   const offlineReasonId = useId();
+  const dndIds = { label: useId(), desc: useId() };
+  const mentionIds = { label: useId(), desc: useId() };
 
   const save = useMutation({
     mutationFn: (patch: NotificationRulesPatch) =>
@@ -86,77 +98,102 @@ export function NotificationRulesSection({ offline }: { offline: boolean }) {
 
   const current = rules.data ?? DEFAULT_NOTIFICATION_RULES;
   const disabled = offline || save.isPending;
+  const failure = rules.isError ? loadFailureCopy(rules.error) : null;
+  const describedBy = (descId: string) =>
+    offline ? `${descId} ${offlineReasonId}` : descId;
 
   return (
-    <SectionShell title="알림 규칙" lines={LINES}>
+    <div className="flex min-w-0 flex-col gap-8" data-testid="notifications-page">
+      <SettingsSection
+        title="내 알림 규칙"
+        description={NOTIFICATION_RULES_SERVER_NOTE}
+        testId="notification-rules-section"
+      >
+        {rules.isPending ? (
+          <CardBody>
+            <Skeleton ready={false} rows={2} />
+          </CardBody>
+        ) : failure ? (
+          <CardBody>
+            <InlineBanner
+              message={failure.message}
+              actionLabel={failure.retry ? "다시 불러오기" : undefined}
+              onAction={failure.retry ? () => void rules.refetch() : undefined}
+              separator={false}
+              className="px-0"
+              testId="notification-rules-error"
+            />
+          </CardBody>
+        ) : (
+          <>
+            {issue && (
+              <CardBody>
+                <InlineBanner
+                  separator={false}
+                  className="px-0"
+                  message={issue}
+                  testId="notification-rules-save-error"
+                />
+              </CardBody>
+            )}
+            <div className="flex min-w-0 flex-col divide-y divide-line" data-testid="notification-rules">
+              <SettingsRow
+                label={NOTIFICATION_PAUSE_LABEL}
+                description={NOTIFICATION_PAUSE_DESCRIPTION}
+                labelId={dndIds.label}
+                descriptionId={dndIds.desc}
+                keep
+              >
+                <Switch
+                  testId="notification-rules-dnd"
+                  checked={current.dnd}
+                  disabled={disabled}
+                  labelledBy={dndIds.label}
+                  describedBy={describedBy(dndIds.desc)}
+                  onCheckedChange={(dnd) => save.mutate({ dnd })}
+                />
+              </SettingsRow>
+              <SettingsRow
+                label="알림을 끈 채널에서도 멘션은 받기"
+                description={MENTION_OVERRIDES_MUTE_DESCRIPTION}
+                labelId={mentionIds.label}
+                descriptionId={mentionIds.desc}
+                keep
+              >
+                <Switch
+                  testId="notification-rules-mention"
+                  checked={current.mentionOverridesMute}
+                  disabled={disabled}
+                  labelledBy={mentionIds.label}
+                  describedBy={describedBy(mentionIds.desc)}
+                  onCheckedChange={(mentionOverridesMute) =>
+                    save.mutate({ mentionOverridesMute })
+                  }
+                />
+              </SettingsRow>
+            </div>
+            {/* 두 스위치가 오프라인에서 함께 회색이 되므로 이유를 한 문장으로 말한다. 설명 줄과
+                함께 두 스위치가 aria-describedby로 가리킨다. */}
+            {offline && (
+              <CardBody>
+                <p
+                  id={offlineReasonId}
+                  className="break-keep text-meta text-ink-muted"
+                  data-testid="notification-rules-offline"
+                >
+                  {OFFLINE_REASON}
+                </p>
+              </CardBody>
+            )}
+          </>
+        )}
+      </SettingsSection>
+
       <DesktopNotificationGroup />
 
-      {rules.isPending ? (
-        <Subsection title="워크스페이스 규칙">
-          <Skeleton ready={false} rows={2} />
-        </Subsection>
-      ) : rules.isError ? (
-        <Subsection title="워크스페이스 규칙">
-          <InlineBanner
-            message="알림 규칙을 불러오지 못했어요."
-            actionLabel="다시 불러오기"
-            onAction={() => void rules.refetch()}
-            testId="notification-rules-error"
-          />
-        </Subsection>
-      ) : (
-        <Subsection title="워크스페이스 규칙">
-          {issue && (
-            <InlineBanner
-              separator={false}
-              message={issue}
-              testId="notification-rules-save-error"
-            />
-          )}
-
-          <div
-            className="flex min-w-0 flex-col overflow-hidden rounded-md border border-line"
-            data-testid="notification-rules"
-          >
-            <SettingsToggleRow
-              testId="notification-rules-dnd"
-              name={NOTIFICATION_PAUSE_LABEL}
-              description={NOTIFICATION_PAUSE_DESCRIPTION}
-              checked={current.dnd}
-              disabled={disabled}
-              describedBy={offline ? offlineReasonId : undefined}
-              onToggle={(dnd) => save.mutate({ dnd })}
-            />
-            <SettingsToggleRow
-              testId="notification-rules-mention"
-              name="알림을 끈 채널에서도 멘션은 받기"
-              description={MENTION_OVERRIDES_MUTE_DESCRIPTION}
-              checked={current.mentionOverridesMute}
-              disabled={disabled}
-              describedBy={offline ? offlineReasonId : undefined}
-              onToggle={(mentionOverridesMute) => save.mutate({ mentionOverridesMute })}
-            />
-          </div>
-
-          {/* Both toggles go grey offline, so the reason stands with them: a control
-              that greys with no sentence reads as "you may not", which is the wrong
-              sentence about a setting this member owns. Written once, pointed at by
-              both checkboxes via aria-describedby. */}
-          {offline && (
-            <p
-              id={offlineReasonId}
-              className="break-keep text-meta text-ink-muted"
-              data-testid="notification-rules-offline"
-            >
-              {OFFLINE_REASON}
-            </p>
-          )}
-        </Subsection>
-      )}
-
-      <Subsection title="채널 하나만 조용히">
-        <p className="break-keep text-meta text-ink-muted">{CHANNEL_NOTE}</p>
-      </Subsection>
-    </SectionShell>
+      <SettingsSection title="채널 하나만 조용히">
+        <SettingsRow label="채널 이름 메뉴에서 정해요" description={CHANNEL_NOTE} />
+      </SettingsSection>
+    </div>
   );
 }

@@ -55,7 +55,8 @@ describe("설정 > 터미널 색 (#2849)", () => {
     const inputs = radios(host);
     expect(inputs.map((i) => i.value)).toEqual(["dark", "app", "light"]);
     expect(inputs.find((i) => i.checked)?.value).toBe("dark");
-    expect(host.textContent).toContain("어둡게 (기본)");
+    expect(host.textContent).toContain("어둡게");
+    expect(host.textContent).toContain("기본이에요");
     unmount();
   });
 
