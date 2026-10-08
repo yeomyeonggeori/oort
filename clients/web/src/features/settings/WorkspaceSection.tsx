@@ -316,41 +316,41 @@ function WorkspaceAvatarField({
           </div>
         )}
         {confirmedNonOperator ? null : (
-        <>
-        {/* 진행은 잠금이 아니다 (#1486 문법 · #1541). 이 버튼은 `aria-busy` 와
-            바뀐 낱말로 진행을 이미 말하면서, 같은 사실을 native `disabled` 로도
-            말하고 있었다 — 그 겹침이 하나뿐인 진행 낱말을 opacity-50 아래에서
-            죽이고(「올리는 중, 사용 안 함」), 파일 창을 연 손에서 초점을 <body>
-            로 떨궜다. 잠그는 사실로 남는 것은 오프라인 하나다.
-            (`LeaveWorkspaceRow`의 「워크스페이스 나가기」가 #1502 에서 받은 수리와
-            같은 갈라내기다.) */}
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          aria-disabled={offline || undefined}
-          aria-busy={uploading || undefined}
-          className={cn(offline && "opacity-50")}
-          onClick={() => {
-            if (offline || uploading) return;
-            inputRef.current?.click();
-          }}
-          data-testid="workspace-avatar-change"
-        >
-          {uploading && <Loader2 aria-hidden="true" className="spinner-busy" />}
-          {uploading ? "올리는 중" : "이미지 변경"}
-        </Button>
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/*"
-          className="sr-only"
-          onChange={onPick}
-          data-testid="workspace-avatar-input"
-          tabIndex={-1}
-          aria-hidden="true"
-        />
-        </>
+          <>
+          {/* 진행은 잠금이 아니다 (#1486 문법 · #1541). 이 버튼은 `aria-busy` 와
+              바뀐 낱말로 진행을 이미 말하면서, 같은 사실을 native `disabled` 로도
+              말하고 있었다 — 그 겹침이 하나뿐인 진행 낱말을 opacity-50 아래에서
+              죽이고(「올리는 중, 사용 안 함」), 파일 창을 연 손에서 초점을 <body>
+              로 떨궜다. 잠그는 사실로 남는 것은 오프라인 하나다.
+              (`LeaveWorkspaceRow`의 「워크스페이스 나가기」가 #1502 에서 받은 수리와
+              같은 갈라내기다.) */}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-disabled={offline || undefined}
+            aria-busy={uploading || undefined}
+            className={cn(offline && "opacity-50")}
+            onClick={() => {
+              if (offline || uploading) return;
+              inputRef.current?.click();
+            }}
+            data-testid="workspace-avatar-change"
+          >
+            {uploading && <Loader2 aria-hidden="true" className="spinner-busy" />}
+            {uploading ? "올리는 중" : "이미지 변경"}
+          </Button>
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/*"
+            className="sr-only"
+            onChange={onPick}
+            data-testid="workspace-avatar-input"
+            tabIndex={-1}
+            aria-hidden="true"
+          />
+          </>
         )}
       </SettingsRow>
       {denied && (
