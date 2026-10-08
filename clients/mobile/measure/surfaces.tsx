@@ -74,6 +74,7 @@ import {AdeControlPanel} from '../src/features/ade/AdeControlPanel';
 import {AdeSummaryLine} from '../src/features/ade/AdeSummaryLine';
 import {AgentActivityBar} from '../src/features/agents/turnSurfaces';
 import {markAgentWorking, resetAgentWorking} from '../src/features/agents/workingSignal';
+import type {ChannelRail} from '../src/realtime/channelRail';
 import {RealtimeContext} from '../src/realtime/RealtimeProvider';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
 import {
@@ -3822,6 +3823,24 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           onOpenConversation={() => {}}
         />
       );
+    // N2 (#3594): 돌고 있는 작업에 답 조각이 이어 붙는 모습. 하네스에는 소켓이 없어 가짜
+    // 레일이 프레임을 ~1.5초 뒤 두 조각, ~6초 뒤 한 조각 흘린다(실제 구독 경로를 그대로 탄다).
+    case 'work-detail-streaming':
+      return <WorkStreamingSurface />;
+    // 같은 작업이 끝난 모습: 조각들이 영속돼 한 줄로 합쳐지고 「작성 중」이 사라진다.
+    case 'work-detail-done':
+      return (
+        <View style={{flex: 1, overflow: 'hidden'}}>
+          <View style={{flex: 1, marginTop: -940, height: 3000}}>
+            <WorkSessionDetailScreen
+              active
+              sessionId="measure-work-t1"
+              onBack={() => {}}
+              onOpenConversation={() => {}}
+            />
+          </View>
+        </View>
+      );
     // #3152: 같은 화면을 진행 내역까지 끌어올려 찍는다(시뮬레이터는 스크롤할 수 없다).
     case 'work-detail-events':
       return (
@@ -5207,6 +5226,125 @@ function seedWorkConsole(): void {
   );
 }
 
+/** N2 (#3594): t1 의 답 조각. 영속된 것(`done`)과 라이브로 올 것을 같은 문장에서 자른다. */
+const STREAM_SENTENCES = [
+  '배포 구성을 확인했습니다. 롤백 순서는 문서와 일치합니다. ',
+  '장애가 반복되면 먼저 릴레이를 재시작하고, 그래도 같으면 ',
+  '담당자에게 알린 뒤 이전 버전으로 되돌리는 순서로 진행하면 됩니다.',
+];
+
+function streamEvent(index: number, text: string, atMs: number) {
+  return {
+    eventId: `measure-event-partial-${index}`,
+    type: 'agent.partial' as const,
+    sessionId: 'measure-work-t1',
+    atMs,
+    seq: 110 + index,
+    payload: {
+      work_session_id: 'measure-work-t1',
+      event_id: `measure-event-partial-${index}`,
+      text_delta: text,
+    },
+  };
+}
+
+function seedWorkStream(done: boolean): void {
+  const sessionsKey = ['work-sessions', ADE_WS];
+  const eventsKey = [
+    'work-session-events',
+    ADE_WS,
+    'ch-deploy',
+    'measure-work-root',
+  ];
+  const events = harnessClient.getQueryData(eventsKey) as
+    | {events: unknown[]; truncated: boolean}
+    | undefined;
+  const base = (events?.events ?? []) as unknown[];
+  // 라이브 판은 첫 문장만 이미 읽혀 있고 나머지는 프레임으로 온다.
+  const persisted = done ? STREAM_SENTENCES : STREAM_SENTENCES.slice(0, 1);
+  harnessClient.setQueryData(eventsKey, {
+    truncated: false,
+    events: [
+      ...base,
+      ...persisted.map((text, index) =>
+        streamEvent(index, text, Date.now() - 60_000 + index * 2_000),
+      ),
+    ],
+  });
+  if (done) {
+    const sessions = harnessClient.getQueryData(sessionsKey) as
+      | Record<string, unknown>[]
+      | undefined;
+    harnessClient.setQueryData(
+      sessionsKey,
+      (sessions ?? []).map(session =>
+        session.id === 'measure-work-t1'
+          ? {...session, status: 'ended', endedAtMs: Date.now() - 20_000}
+          : session,
+      ),
+    );
+  }
+}
+
+function WorkStreamingSurface(): React.JSX.Element {
+  const handlers = React.useRef<Pick<
+    Parameters<ChannelRail['subscribeWorkSession']>[2],
+    'onAcpEvent'
+  > | null>(null);
+  const value = React.useMemo(
+    () => ({
+      ...CONNECTED_RAIL,
+      rail: {
+        subscribeWorkSession: (_ws: string, _channel: string, h: never) => {
+          handlers.current = h;
+          return () => {
+            handlers.current = null;
+          };
+        },
+      } as never,
+    }),
+    [],
+  );
+  React.useEffect(() => {
+    const frame = (index: number, text: string) => ({
+      type: 'agent.partial' as const,
+      v: 1,
+      ts: Date.now(),
+      seq: 110 + index,
+      payload: {
+        event_id: `measure-event-partial-${index}`,
+        work_session_id: 'measure-work-t1',
+        run_id: 'measure-run',
+        channel_id: 'ch-deploy',
+        message_id: `measure-event-partial-${index}`,
+        root_message_id: 'measure-work-root',
+        text_delta: text,
+      },
+    });
+    const send = (index: number) => () =>
+      handlers.current?.onAcpEvent(frame(index, STREAM_SENTENCES[index]));
+    const timers = [
+      setTimeout(send(1), 1_500),
+      setTimeout(send(2), 6_000),
+    ];
+    return () => timers.forEach(clearTimeout);
+  }, []);
+  return (
+    <RealtimeContext.Provider value={value}>
+      <View style={{flex: 1, overflow: 'hidden'}}>
+        <View style={{flex: 1, marginTop: -940, height: 3000}}>
+          <WorkSessionDetailScreen
+            active
+            sessionId="measure-work-t1"
+            onBack={() => {}}
+            onOpenConversation={() => {}}
+          />
+        </View>
+      </View>
+    </RealtimeContext.Provider>
+  );
+}
+
 const buildStyles = (color: Palette) => StyleSheet.create({
     lockedFrame: {paddingHorizontal: 16, paddingTop: 8},
     // 하네스 자신의 라벨. 제품이 아니라 **사진의 캡션**이라 토큰을 든다: 라이트
@@ -5306,9 +5444,14 @@ if (
 if (
   LAUNCHED !== null &&
   LAUNCHED.kind === 'surface' &&
-  (LAUNCHED.name === 'work-detail' || LAUNCHED.name === 'work-detail-events')
+  (LAUNCHED.name === 'work-detail' ||
+    LAUNCHED.name === 'work-detail-events' ||
+    LAUNCHED.name === 'work-detail-streaming' ||
+    LAUNCHED.name === 'work-detail-done')
 ) {
   seedWorkConsole();
+  if (LAUNCHED.name === 'work-detail-streaming') seedWorkStream(false);
+  if (LAUNCHED.name === 'work-detail-done') seedWorkStream(true);
 }
 if (
   LAUNCHED !== null &&

@@ -41,18 +41,29 @@ async function fetchSessionEvents(
   return {events, truncated: true};
 }
 
-/** Durable, typed ACP projection only. No socket, attach grant, or PTY path. */
+export function workSessionEventsKey(
+  workspaceId: string,
+  channelId: string,
+  rootId: string,
+) {
+  return ['work-session-events', workspaceId, channelId, rootId] as const;
+}
+
+/**
+ * Durable, typed ACP projection (the source of truth). The live tail of a running
+ * session is `useWorkSessionLive`'s job and is merged over this, never instead of it.
+ * No attach grant or PTY path.
+ */
 export function useWorkSessionEvents(
   workspaceId: string,
   session: WorkSession | null,
 ) {
   return useQuery({
-    queryKey: [
-      'work-session-events',
+    queryKey: workSessionEventsKey(
       workspaceId,
       session?.channelId ?? '',
       session?.rootMessageId ?? '',
-    ],
+    ),
     queryFn: () =>
       fetchSessionEvents(
         workspaceId,
