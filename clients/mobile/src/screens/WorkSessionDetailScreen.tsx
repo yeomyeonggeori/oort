@@ -3,6 +3,7 @@ import {
   emptyStepsDetail,
   eventsForSession,
   foldSessionEvents,
+  mergeEvents,
   ROW_STATE_LABEL,
   workHostTrust,
   workSessionContinuityStatus,
@@ -48,6 +49,11 @@ import {
   workSessionPresentation,
 } from '../features/work/model';
 import {useWorkSessionEvents} from '../features/work/queries';
+import {useWorkSessionLive} from '../features/work/useWorkSessionLive';
+import {
+  computeStreamTiming,
+  recordWorkStreamTiming,
+} from '../features/work/workStreamTiming';
 import {
   SignedWorkControls,
   useSigningRequired,
@@ -106,13 +112,25 @@ export default function WorkSessionDetailScreen({
           ),
     [session, hostsQuery.data, channels, directoryQuery.directory, member.id],
   );
+  // N2 (#3594): 읽은 것(진실) 위에 열려 있는 동안 도착한 꼬리를 얹는다.
+  const live = useWorkSessionLive(workspaceId, session, active);
   const sessionEvents = useMemo(
     () =>
       session === null
         ? []
-        : eventsForSession(eventsQuery.data?.events ?? [], session.id),
-    [eventsQuery.data, session],
+        : eventsForSession(
+            mergeEvents(eventsQuery.data?.events ?? [], live.liveEvents),
+            session.id,
+          ),
+    [eventsQuery.data, live.liveEvents, session],
   );
+  const timing = useMemo(
+    () => (session === null ? null : computeStreamTiming(session, sessionEvents)),
+    [session, sessionEvents],
+  );
+  useEffect(() => {
+    if (timing !== null) recordWorkStreamTiming(timing);
+  }, [timing]);
   const folded = useMemo(
     () =>
       session === null
@@ -245,6 +263,8 @@ export default function WorkSessionDetailScreen({
   const status = workSessionContinuityStatus(session, hostsQuery.data);
   const trust = workHostTrust(session, hostsQuery.data);
   const hasCachedEvents = eventsQuery.data !== undefined;
+  // 돌고 있는 동안은 재조회 때마다 안내 블록이 나타났다 사라지면 아래 줄이 밀린다.
+  const streaming = session.status === 'running';
 
   return (
     <View style={styles.modalRoot}>
@@ -399,7 +419,7 @@ export default function WorkSessionDetailScreen({
                 testID="work-detail-events-stale"
               />
             </View>
-          ) : eventsQuery.isFetching && hasCachedEvents ? (
+          ) : eventsQuery.isFetching && hasCachedEvents && !streaming ? (
             <NoticeBlock
               headline="진행 내역을 새로 확인하는 중입니다."
               detail="불러온 내역은 그대로 유지합니다."
@@ -439,8 +459,16 @@ export default function WorkSessionDetailScreen({
             ) : null
           ) : (
             <View style={styles.eventList} testID="work-detail-event-list">
-              {folded.rows.map(row => (
-                <EventRow key={row.id} row={row} />
+              {folded.rows.map((row, index) => (
+                <EventRow
+                  key={row.id}
+                  row={row}
+                  writing={
+                    streaming &&
+                    row.kind === 'message' &&
+                    index === folded.rows.length - 1
+                  }
+                />
               ))}
             </View>
           )}
@@ -494,7 +522,14 @@ function PlanBlock({plan}: {plan: readonly WorkPlanItem[]}): React.JSX.Element {
   );
 }
 
-function EventRow({row}: {row: WorkEventRow}): React.JSX.Element {
+function EventRow({
+  row,
+  writing = false,
+}: {
+  row: WorkEventRow;
+  /** 지금 이어 붙고 있는 마지막 답 줄. 정적인 문구라 「동작 줄이기」와 무관하다. */
+  writing?: boolean;
+}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
     <View
@@ -504,6 +539,7 @@ function EventRow({row}: {row: WorkEventRow}): React.JSX.Element {
         row.headline,
         row.detail && row.detail !== row.headline ? row.detail : null,
         ROW_STATE_LABEL[row.state],
+        writing ? '작성 중' : null,
       ]
         .filter(Boolean)
         .join(', ')}
@@ -521,6 +557,11 @@ function EventRow({row}: {row: WorkEventRow}): React.JSX.Element {
       {row.kind === 'message' || row.kind === 'note' ? null : (
         <Text style={styles.eventState}>{ROW_STATE_LABEL[row.state]}</Text>
       )}
+      {writing ? (
+        <Text style={styles.eventState} testID="work-detail-writing">
+          작성 중
+        </Text>
+      ) : null}
     </View>
   );
 }
