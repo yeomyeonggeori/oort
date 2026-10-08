@@ -1164,6 +1164,13 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/work-sessions/{session}/instructions",
             post(routes::work_instructions::send),
         )
+        // ADR-0198 D4 (#3570, T5): the owner's signed NEW-work spawn onto their
+        // own Mac. Human bearer only — never signable by a host, absent from
+        // `momo_auth::required_agent_scope`. Writes a work_control, not a message.
+        .route(
+            "/v1/workspaces/{ws}/work-spawns",
+            post(routes::work_spawns::spawn),
+        )
         // work controls — the host-control ledger (#1114, ADR-0114 D4/D5)
         .route(
             "/v1/workspaces/{ws}/work-controls",

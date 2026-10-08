@@ -54,6 +54,7 @@
 //! | `input`           | `NFC(text)`                                                   |
 //! | `spawn` (v2)      | `{agent_member_id}\n{folder_id}\n{tool}\n{channel_id}\n{NFC(first_prompt)}` |
 //! | `spawn` (v1)      | `{agent_member_id}\n{folder_id}\n{NFC(first_prompt)}` (retired) |
+//! | `spawn` (v4)      | `{agent_member_id \| -}\n{folder_id}\n{tool}\n{channel_id}\n{thread_root_id \| -}\n{origin_message_id \| -}\n{NFC(label)}\n{NFC(prompt)}` (new work, #3570) |
 //! | `permission` (v3) | `{request_event_id}\n{option_id}\n{option_kind}\n{scope}\n{preview_sha256}` |
 //! | `permission` (v1·v2) | `{request_event_id}\n{option_id}\n{option_kind}\n{scope}` (only for a request with no preview) |
 //! | `bundle_manifest` | [`canonical_json`] of the manifest                            |
@@ -114,6 +115,22 @@
 //! stand for a request that has a preview. Every other kind is byte-identical
 //! to v2 under v3.
 //!
+//! ## v4 (#3570, ADR-0198 증보 1): a new work spawn
+//!
+//! `momo.human.control.v4` is the 13-line frame again with only the first line
+//! changed, and it exists for one body: the **new-work spawn**
+//! ([`ControlContent::SpawnTask`]). v2's `spawn` stays the resume's body.
+//! A new task is made of more than a resume restates, and the owner signs all
+//! of it: the whole prompt (a message body, not a 120-character title), the
+//! harness (`tool`), the allowed-folder id, the room, the thread and the
+//! message the owner called from, and an agent member only when one was named
+//! (a harness spawn has none, `-`). The session line is `-`: the session does
+//! not exist until the host acts.
+//!
+//! Nothing crosses schemas: a `SpawnTask` builds under v4 only, and no other
+//! content builds under v4, so a v2/v3 signature can never stand for a new
+//! task (nor a v4 one for a resume, an input or an allow).
+//!
 //! Freshness is a pure function here ([`check_control_window`]); the nonce
 //! ledger lives in E3 (server) and E4 (workd).
 
@@ -130,8 +147,13 @@ use uuid::Uuid;
 pub const HUMAN_CONTROL_SCHEMA_V1: &str = "momo.human.control.v1";
 /// R2-E7 #3027. Accepted for every kind but a previewed `permission`.
 pub const HUMAN_CONTROL_SCHEMA_V2: &str = "momo.human.control.v2";
-/// The current control schema (#3118): a `permission` binds its preview.
+/// #3118: a `permission` binds its preview.
 pub const HUMAN_CONTROL_SCHEMA_V3: &str = "momo.human.control.v3";
+/// #3570 (T5, ADR-0198 증보 1): a **new work** spawn ([`ControlContent::SpawnTask`])
+/// binds the prompt, the harness, the folder id, the room, the thread and the
+/// message it came from — and an agent only when the owner named one. Spawn
+/// only; every other kind refuses to build under it.
+pub const HUMAN_CONTROL_SCHEMA_V4: &str = "momo.human.control.v4";
 pub const DEVICE_ENDORSE_SCHEMA_V1: &str = "momo.human.device_endorse.v1";
 pub const DEVICE_REVOKE_SCHEMA_V1: &str = "momo.human.device_revoke.v1";
 /// v2 (#3068): the root signs the revoked device's public key too.
@@ -198,6 +220,8 @@ pub enum ControlSchema {
     V1,
     V2,
     V3,
+    /// New-work spawn only (#3570).
+    V4,
 }
 
 impl ControlSchema {
@@ -206,6 +230,7 @@ impl ControlSchema {
             ControlSchema::V1 => HUMAN_CONTROL_SCHEMA_V1,
             ControlSchema::V2 => HUMAN_CONTROL_SCHEMA_V2,
             ControlSchema::V3 => HUMAN_CONTROL_SCHEMA_V3,
+            ControlSchema::V4 => HUMAN_CONTROL_SCHEMA_V4,
         }
     }
 }
@@ -278,6 +303,31 @@ pub enum ControlContent<'a> {
         channel_id: Uuid,
         first_prompt: &'a str,
     },
+    /// #3570 (T5): a **new work** spawn, `v4` only. It is the same `spawn`
+    /// kind as [`ControlContent::Spawn`] (which stays the resume's v2 body),
+    /// but the owner signs what a new task is made of: the whole prompt (not
+    /// a 120-character title), the harness, the allowed-folder id, the room,
+    /// the thread and the message that triggered it, and the agent member only
+    /// when one was named (a harness spawn, 「내 도구」, has none: ADR-0198 D1).
+    SpawnTask {
+        /// `None`: a harness spawn with no member behind it (`-` on the wire).
+        agent_member_id: Option<Uuid>,
+        /// ADR-0188 D6 opaque folder id.
+        folder_id: &'a str,
+        /// The allowlist key the host launches (`payload.tool`).
+        tool: &'a str,
+        /// The room the session belongs to (`work_control.channel_id`).
+        channel_id: Uuid,
+        /// The thread the owner called from (`-` for the room's main line).
+        thread_root_id: Option<Uuid>,
+        /// The message the owner called from (`-` for a spawn with no message).
+        origin_message_id: Option<Uuid>,
+        /// The session card's title (`payload.label`), one line, NFC. Signed so
+        /// a server cannot retitle the owner's task (T5 review M-2).
+        label: &'a str,
+        /// The whole first prompt (`payload.prompt`), NFC.
+        prompt: &'a str,
+    },
     Permission {
         /// The D5 host nonce this decision answers.
         request_event_id: Uuid,
@@ -305,7 +355,7 @@ impl ControlContent<'_> {
     pub fn kind(&self) -> &'static str {
         match self {
             ControlContent::Input { .. } => "input",
-            ControlContent::Spawn { .. } => "spawn",
+            ControlContent::Spawn { .. } | ControlContent::SpawnTask { .. } => "spawn",
             ControlContent::Permission { .. } => "permission",
             ControlContent::BundleManifest { .. } => "bundle_manifest",
             ControlContent::HostRegister { .. } => "host_register",
@@ -329,6 +379,8 @@ impl ControlContent<'_> {
             (ControlContent::Spawn { .. }, ControlSchema::V2 | ControlSchema::V3) => {
                 SessionRule::Optional
             }
+            // A new task has no session yet: the host makes it after it acts.
+            (ControlContent::SpawnTask { .. }, _) => SessionRule::Forbidden,
             _ => SessionRule::Forbidden,
         }
     }
@@ -342,6 +394,16 @@ impl ControlContent<'_> {
     /// The canonical content bytes under `schema`. `spawn` differs between
     /// v1 and v2; `permission` between v2 and v3.
     pub fn canonical_bytes_as(&self, schema: ControlSchema) -> Result<Vec<u8>, HumanSigningError> {
+        // v4 is the new-work spawn's schema and its body has no other home:
+        // a v4 frame can never stand for another kind, and a new-work spawn
+        // can never be signed under an older frame (a v2/v3 signature cannot
+        // stand for it, nor can this body be downgraded to the resume's).
+        if (schema == ControlSchema::V4) != matches!(self, ControlContent::SpawnTask { .. }) {
+            return Err(HumanSigningError::InvalidField {
+                field: "schema",
+                reason: "v4 is the new-work spawn's schema, and only its",
+            });
+        }
         let text = match self {
             ControlContent::Input { text, .. } => nfc(text),
             ControlContent::Spawn {
@@ -363,7 +425,38 @@ impl ControlContent<'_> {
                             nfc(first_prompt)
                         )
                     }
+                    // The guard above keeps v4 for `SpawnTask`.
+                    ControlSchema::V4 => {
+                        return Err(HumanSigningError::InvalidField {
+                            field: "schema",
+                            reason: "a resume spawn is not signed under v4",
+                        })
+                    }
                 }
+            }
+            ControlContent::SpawnTask {
+                agent_member_id,
+                folder_id,
+                tool,
+                channel_id,
+                thread_root_id,
+                origin_message_id,
+                label,
+                prompt,
+            } => {
+                token("folder_id", folder_id)?;
+                token("tool", tool)?;
+                token("label", label)?;
+                let optional =
+                    |id: &Option<Uuid>| id.map_or_else(|| ABSENT.to_string(), |id| id.to_string());
+                format!(
+                    "{}\n{folder_id}\n{tool}\n{channel_id}\n{}\n{}\n{}\n{}",
+                    optional(agent_member_id),
+                    optional(thread_root_id),
+                    optional(origin_message_id),
+                    nfc(label),
+                    nfc(prompt)
+                )
             }
             ControlContent::Permission {
                 request_event_id,
@@ -382,6 +475,12 @@ impl ControlContent<'_> {
                     (ControlSchema::V3, Some(hash)) => {
                         lower_hex_sha256("preview_sha256", hash)?;
                         format!("{base}\n{hash}")
+                    }
+                    (ControlSchema::V4, _) => {
+                        return Err(HumanSigningError::InvalidField {
+                            field: "schema",
+                            reason: "a permission is not signed under v4",
+                        })
                     }
                     (ControlSchema::V3, None) => {
                         return Err(HumanSigningError::InvalidField {
@@ -540,18 +639,24 @@ impl HumanControl<'_> {
         // variant stays so the vectors can still build v1 bytes and prove
         // that they are refused.
         let mut schemas = Vec::with_capacity(2);
-        // A permission without a preview has no v3 body.
-        if !matches!(
-            self.content,
-            ControlContent::Permission {
-                preview_sha256: None,
-                ..
+        if matches!(self.content, ControlContent::SpawnTask { .. }) {
+            // #3570: a new-work spawn has one body, under v4. No v2/v3
+            // signature can stand for it (their frames refuse to build it).
+            schemas.push(ControlSchema::V4);
+        } else {
+            // A permission without a preview has no v3 body.
+            if !matches!(
+                self.content,
+                ControlContent::Permission {
+                    preview_sha256: None,
+                    ..
+                }
+            ) {
+                schemas.push(ControlSchema::V3);
             }
-        ) {
-            schemas.push(ControlSchema::V3);
-        }
-        if !previewed {
-            schemas.push(ControlSchema::V2);
+            if !previewed {
+                schemas.push(ControlSchema::V2);
+            }
         }
         let mut first_error = None;
         for schema in schemas {

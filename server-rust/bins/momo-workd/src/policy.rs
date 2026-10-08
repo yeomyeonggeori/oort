@@ -122,6 +122,12 @@ pub enum Refusal {
     ProjectConfigRefused,
     /// The allowed folder does not resolve to a directory.
     WorkdirUnavailable,
+    /// T5 (#3570): the signed spawn names a folder id this host never issued
+    /// (or no longer holds).
+    FolderUnknown,
+    /// T5 (#3570): the folder is not what this host issued — a link retargeted,
+    /// a 「질문용 폴더」 that is a symlink, another user's, or not private.
+    FolderUnsafe,
     /// ADR-0191 D1 (#3033): this Mac's 「원격 작업」 account names a profile
     /// folder that does not exist (removed, or never made). Never a silent
     /// switch to the default account.
@@ -211,6 +217,8 @@ impl Refusal {
             Self::CodexHomeRefused => "codex_home_refused",
             Self::ProjectConfigRefused => "project_config_refused",
             Self::WorkdirUnavailable => "workdir_unavailable",
+            Self::FolderUnknown => "folder_unknown",
+            Self::FolderUnsafe => "folder_unsafe",
             Self::ProfileNotFound => "profile_not_found",
             Self::ProfileRefused => "profile_refused",
             Self::ProfileLoginRequired => "profile_login_required",
