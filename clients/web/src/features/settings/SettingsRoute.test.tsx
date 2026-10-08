@@ -326,8 +326,7 @@ describe("SettingsRoute 전면 레이아웃", () => {
     expect(line?.textContent).toContain("AI 화면으로 옮겼어요");
     expect(line?.querySelector("a")?.getAttribute("href")).toContain("/ai/accounts");
     expect(host.querySelector('[data-testid="settings-nav-ai"]')?.getAttribute("aria-current")).toBe("page");
-    // 곁판이 있는 화면이라 읽는 폭 제한과 카드 껍질을 쓰지 않는다.
-    expect(host.querySelector('[data-testid="settings-legacy-card"]')).toBeNull();
+    // 곁판이 있는 화면이라 읽는 폭 제한을 쓰지 않는다.
     expect(host.querySelector(".settings-page")?.hasAttribute("data-wide")).toBe(true);
   });
 
@@ -350,6 +349,8 @@ describe("SettingsRoute 전면 레이아웃", () => {
       for (const panelId of panelIds) {
         expect(host.querySelector(`[data-testid="${panelId}"]`), `${navId} → ${panelId}`).not.toBeNull();
       }
+      // S5c: 옛 카드 껍질은 걷혔다. 어떤 페이지도 본문 전체를 카드 한 장에 얹지 않는다(각 페이지가 제 카드를 든다).
+      expect(host.querySelector('[data-testid="settings-legacy-card"]'), navId).toBeNull();
     }
   });
 

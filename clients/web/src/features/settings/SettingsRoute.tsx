@@ -5,13 +5,11 @@ import {
   useMemo,
   useRef,
   useState,
-  type ReactNode,
 } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useSession } from "@/app/session";
 import { useSurfaceProvidedPredicate } from "@/features/capabilities/useSurfaceProvided";
 import { queryClient } from "@/app/queryClient";
-import { Card } from "@/design/ui/card";
 import { resetSettingsQueries } from "@/app/retryScope";
 import { titlebarDragProps } from "@/app/sidebarPane";
 import { escapeIsClaimed } from "@/design/ui/escapeLayer";
@@ -41,7 +39,6 @@ import {
   type SettingsSectionId,
   type SettingsSectionMeta,
 } from "./settingsNav";
-import { SectionTitleHiddenContext } from "./SettingsFields";
 import { SettingsNav } from "./shell/SettingsNav";
 import { SettingsPageHeader } from "./shell/SettingsPageHeader";
 import { SettingsShell } from "./shell/SettingsShell";
@@ -281,42 +278,17 @@ export function SettingsRoute() {
           // inputs to mean anything, so the cache goes first.
           onRetry={() => resetSettingsQueries(queryClient)}
         >
-          {/* 옛 섹션 본문은 아직 카드 문법으로 다시 짜이지 않았다(S5c의 사용량만 남았다; 프로필은 S2, 모양은 S3a, 기기·실행 호스트는 S4, 알림·단축키·업데이트는 S5a, 워크스페이스·멤버·기억은 S5b가 끝냈다). 판(`--sheet`) 위에
-              맨바닥으로 놓으면 보조 알약(`surface-muted`)이 판에 묻혀 보이지 않으므로(대비
-              1.01), 본문 전체를 카드 한 장(`--surface`)에 얹는다. 페이지를 이식하는 슬라이스가
-              그 페이지의 이 껍질을 걷고 `SettingsSection` 카드로 바꾼다. 옛 AI 연결 화면은
-              자기 판(곁판 포함)을 가져서 껍질과 폭 제한 없이 그대로 둔다. */}
-          {section === "ai" ||
-          section === "appearance" ||
-          section === "profile" ||
-          section === "devices" ||
-          section === "notifications" ||
-          section === "shortcuts" ||
-          section === "updates" ||
-          section === "workspace" ||
-          section === "members" ||
-          section === "memory" ||
-          section === "code" ? (
-            <SectionPage
-              section={section}
-              offline={offline}
-              workspaceId={workspaceId}
-              memberId={session.member.id}
-              workPolicy={workPolicy}
-            />
-          ) : (
-            <Card
-              className="flex min-w-0 flex-col gap-8 p-6"
-              data-testid="settings-legacy-card"
-            >
-              <SectionPage
-                section={section}
-                offline={offline}
-                workspaceId={workspaceId}
-                memberId={session.member.id}
-              />
-            </Card>
-          )}
+          {/* 모든 페이지가 제 카드(`SettingsSection`)를 든다. 껍질은 없다: S5c가 마지막
+              사용처였던 옛 카드 껍질(`settings-legacy-card`)을 걷었다. 옛 AI 연결 화면
+              (`?section=ai`)은 자기 판(곁판 포함)을 가져서 폭 제한 없이 그대로 두고, 그 위에
+              허브로 가는 링크 행 카드만 얹는다. */}
+          <SectionPage
+            section={section}
+            offline={offline}
+            workspaceId={workspaceId}
+            memberId={session.member.id}
+            workPolicy={workPolicy}
+          />
         </RenderErrorBoundary>
       </SettingsShell>
     </div>
@@ -324,10 +296,10 @@ export function SettingsRoute() {
 }
 
 /**
- * 한 페이지의 본문. 페이지 머리(h1)가 제목을 이미 말하므로 첫 본문은 자기 제목(h2)을
- * 접고 설명 줄만 남긴다(`SectionTitleHiddenContext`). 합친 페이지는 옛 구획 본문을 그
- * 아래에 **제 제목을 단 채** 잇는다: 링크 미리보기·터미널은 S3·S5가 카드로 다시 짜면서
- * 흡수한다. 프로필은 S2가 카드로 다시 짜서 계정을 흡수했다(껍질 없이 제 카드를 든다). 기기·실행 호스트는 S4가 같은 문법으로 다시 짰다.
+ * 한 페이지의 본문. 페이지 머리(h1)가 제목을 말하고, 본문은 모두 `SettingsSection` 카드로
+ * 선다(프로필 S2, 모양 S3a, 기기·실행 호스트 S4, 알림·단축키·업데이트 S5a, 워크스페이스·멤버·
+ * 기억 S5b, 사용량 S5c). 합친 페이지(프로필+계정, 모양+링크 미리보기, 단축키+터미널)는 카드
+ * 여럿으로 잇는다.
  */
 function SectionPage({
   section,
@@ -342,11 +314,6 @@ function SectionPage({
   memberId: string;
   workPolicy?: boolean;
 }) {
-  const primary = (node: ReactNode) => (
-    <SectionTitleHiddenContext.Provider value={true}>
-      {node}
-    </SectionTitleHiddenContext.Provider>
-  );
   switch (section) {
     case "profile":
       return <ProfileSection offline={offline} />;
@@ -380,7 +347,7 @@ function SectionPage({
     // instead (react-query fetchStatus), which is the only signal that actually stops
     // the request.
     case "usage":
-      return primary(<UsageSection workspaceId={workspaceId} />);
+      return <UsageSection workspaceId={workspaceId} />;
     case "code":
       return (
         <WorkHostSection

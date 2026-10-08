@@ -97,10 +97,6 @@ const SETTINGS_FIELDS_SRC = readFileSync(
   new URL("../features/settings/SettingsFields.tsx", import.meta.url),
   "utf8"
 );
-const USAGE_SRC = readFileSync(
-  new URL("../features/settings/UsageSection.tsx", import.meta.url),
-  "utf8"
-);
 const WEBHOOK_SRC = readFileSync(
   new URL("../features/settings/WebhookSection.tsx", import.meta.url),
   "utf8"
@@ -1761,7 +1757,6 @@ export function Probe() {
     expect(SETTINGS_FIELDS_SRC).toMatch(
       /SETTINGS_COLLAPSIBLE_CARD_CLASS =\s*"min-w-0 overflow-hidden rounded-md border border-line"/
     );
-    expect(USAGE_SRC).toMatch(/SETTINGS_COLLAPSIBLE_CARD_CLASS/);
     expect(WEBHOOK_SRC).toMatch(/SETTINGS_COLLAPSIBLE_CARD_CLASS/);
     expect(GALLERY_SRC).toMatch(/SETTINGS_COLLAPSIBLE_CARD_CLASS/);
     expect(GALLERY_SRC).toMatch(/press-triplet-summary-card/);
