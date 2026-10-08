@@ -128,6 +128,16 @@ describe("설정 › 단축키 (#3281)", () => {
     expect(host.querySelector('[data-testid="shortcut-empty"]')).not.toBeNull();
   });
 
+  it("검색 중에는 걸러지지 않는 터미널 키 목록을 숨기고 비우면 되돌린다 (#3615)", () => {
+    const host = render(true);
+    const terminalRows = () => host.querySelectorAll('[data-testid="terminal-shortcut-row"]').length;
+    expect(terminalRows()).toBeGreaterThan(0);
+    setQuery(host, "zzzz");
+    expect(terminalRows()).toBe(0);
+    setQuery(host, "");
+    expect(terminalRows()).toBeGreaterThan(0);
+  });
+
   it("macOS 밖에서는 키캡을 Ctrl 표기로 적는다", () => {
     const host = render(false, "other");
     expect(host.querySelector('[data-shortcut-row="open-inbox"]')?.textContent).toContain("Ctrl+Shift+A");

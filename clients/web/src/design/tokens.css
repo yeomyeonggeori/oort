@@ -2548,6 +2548,20 @@
   }
 }
 
+/* 종류별 알림 표 (`DesktopNotificationGroup`). 카드 폭이 34rem 아래이면 독 배지·폰 푸시 열을
+ * 접고 그 내용은 종류 이름 아래 한 줄(`kinds-extra-line`)로 옮긴다. 열이 잘린 채 가로로 밀리는 대신
+ * 폰 폭에서도 스위치가 온전히 보인다. 기준은 `settings-card`(컨테이너)다. */
+@utility kinds-extra-col {
+  @container (width < 34rem) {
+    display: none;
+  }
+}
+@utility kinds-extra-line {
+  @container (width >= 34rem) {
+    display: none;
+  }
+}
+
 /* 테마 미리보기 카드 (`features/settings/shell/ThemePreviewCard.tsx`, #3578 S3a).
  * 미니 앱 화면 한 장. 색은 요소에 붙은 `data-palette-preview`(생성 팔레트 CSS의
  * 범위 변형)가 그 팔레트의 역할로 묶고, 스킴은 `data-preview-mode`가 `color-scheme`으로

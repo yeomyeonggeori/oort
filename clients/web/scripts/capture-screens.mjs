@@ -14087,7 +14087,7 @@ function parseCssRgb(css) {
 async function assertNotificationsDndRest(page, scheme) {
   const row = page
     .getByTestId("notification-rules-dnd")
-    .locator("xpath=ancestor::label[1]");
+    .locator("xpath=ancestor::div[contains(@class, 'settings-row')][1]");
   await row.waitFor({ state: "visible" });
   const { bg, hover, surface } = await row.evaluate((el) => {
     const probe = document.createElement("div");

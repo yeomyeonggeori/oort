@@ -952,8 +952,8 @@ describe("#1559 회전 1 · in-flight 는 fieldset 을 끄지 않는다 (#1595 H
         ).toBe(false);
       }
     }
-    // 하나도 안 잡히면 이 단정은 공허하게 초록이다. 오늘의 실측은 여섯이다(#3578 S4가 실행 엔진 블록을 걷은 뒤; 그 전에는 일곱).
-    expect(seen).toBeGreaterThanOrEqual(6);
+    // 하나도 안 잡히면 이 단정은 공허하게 초록이다. 오늘의 실측은 다섯이다(#3578 S5a가 터미널 색을 세그먼트로 옮긴 뒤; S4 뒤 여섯, 그 전에는 일곱).
+    expect(seen).toBeGreaterThanOrEqual(5);
   });
 });
 

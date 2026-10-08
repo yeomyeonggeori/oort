@@ -19,7 +19,10 @@ import {
   type ShortcutCombo,
 } from "@/app/shortcutBindings";
 import { isDesktop } from "@/lib/tauri";
-import { SectionShell } from "./SettingsFields";
+import { SettingsRow } from "./shell/SettingsRow";
+import { SettingsSection } from "./shell/SettingsSection";
+import { CardBody } from "./workTierPolicy";
+import { TerminalSection } from "./TerminalSection";
 import {
   buildShortcutRows,
   filterShortcutRows,
@@ -239,191 +242,190 @@ export function ShortcutsSection({
   const storageFailed = shortcutStorageFailed();
 
   return (
-    <SectionShell title="단축키" lines={lines}>
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="min-w-pane-sm flex-1">
-          <Input
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="이름이나 키로 검색"
-            aria-label="단축키 검색"
-            data-testid="shortcut-search"
-          />
+    <div className="flex min-w-0 flex-col gap-8" data-testid="shortcuts-page">
+      <div className="flex min-w-0 flex-col gap-4">
+        <p className="break-keep text-body text-ink-muted">{lines.join(" ")}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="min-w-pane-sm flex-1">
+            <Input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="이름이나 키로 검색"
+              aria-label="단축키 검색"
+              data-testid="shortcut-search"
+            />
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={customized === 0}
+            onClick={onResetAll}
+            data-testid="shortcut-reset-all"
+          >
+            모두 초기화
+          </Button>
         </div>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          disabled={customized === 0}
-          onClick={onResetAll}
-          data-testid="shortcut-reset-all"
-        >
-          모두 초기화
-        </Button>
+
+        {storageFailed ? (
+          <p className="text-meta text-danger" role="alert" data-testid="shortcut-storage-failed">
+            이 기기에 저장하지 못했어요. 앱을 다시 열면 기본 키로 돌아가요.
+          </p>
+        ) : null}
+
+        {/* 낭독 전용. 키 지정 시작·취소·충돌·완료를 한 자리에서 알린다. */}
+        <p className="sr-only" role="status" aria-live="polite" data-testid="shortcut-live">
+          {live}
+        </p>
       </div>
 
-      {storageFailed ? (
-        <p className="text-meta text-danger" role="alert" data-testid="shortcut-storage-failed">
-          이 기기에 저장하지 못했어요. 앱을 다시 열면 기본 키로 돌아가요.
-        </p>
-      ) : null}
-
-      {/* 낭독 전용. 키 지정 시작·취소·충돌·완료를 한 자리에서 알린다. */}
-      <p className="sr-only" role="status" aria-live="polite" data-testid="shortcut-live">
-        {live}
-      </p>
-
       {groups.length === 0 ? (
-        <p className="text-body text-ink-muted" data-testid="shortcut-empty">
-          일치하는 단축키가 없어요. 이름이나 키를 다시 확인해 주세요.
-        </p>
+        <SettingsSection>
+          <CardBody>
+            <p className="break-keep text-body text-ink-muted" data-testid="shortcut-empty">
+              일치하는 단축키가 없어요. 이름이나 키를 다시 확인해 주세요.
+            </p>
+          </CardBody>
+        </SettingsSection>
       ) : (
-        <div className="flex flex-col gap-4" data-testid="shortcut-list">
+        <div className="flex min-w-0 flex-col gap-8" data-testid="shortcut-list">
           {groups.map((group) => (
-            <section key={group.id} aria-labelledby={`shortcut-set-${group.id}`} className="flex flex-col">
-              <h3
-                id={`shortcut-set-${group.id}`}
-                className="border-b border-line pb-2 text-meta font-semibold text-ink-muted"
-              >
-                {group.title}
-              </h3>
-              {groupDescription(group.id, desktop) !== null ? (
-                <p className="break-keep pt-2 text-meta text-ink-muted">
-                  {groupDescription(group.id, desktop)}
-                </p>
-              ) : null}
-              <ul className="flex flex-col">
-                {group.rows.map((row) => {
-                  const capturing = capturingId === row.id;
-                  const rowNotice = notice?.rowId === row.id ? notice : null;
-                  return (
-                    <li
-                      key={row.id}
-                      className="flex flex-col gap-2 border-b border-line py-3"
-                      data-shortcut-row={row.id}
-                      data-rebindable={row.rebindable ? "true" : "false"}
-                    >
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                        <div className="flex min-w-pane-sm flex-1 flex-col gap-px break-keep">
-                          <span className="text-body text-ink">{row.name}</span>
-                          <span className="text-meta text-ink-muted">
-                            {capturing
-                              ? `${modifierName} 키를 누른 채 키를 누르세요. Esc로 취소해요.`
-                              : [
-                                  row.desktopOnly ? "데스크탑 전용" : null,
-                                  row.rebindable ? null : "고정",
-                                  row.customized ? "변경됨" : null,
-                                ]
-                                  .filter((part): part is string => part !== null)
-                                  .join(" · ") || "기본 키"}
-                          </span>
-                        </div>
-                        <div className="flex w-action flex-wrap items-center justify-end gap-1">
-                          {capturing ? (
-                            <button
-                              ref={captureRef}
-                              type="button"
-                              className="w-action rounded-sm border border-line-strong bg-surface px-2 py-1 text-meta text-ink press focus-visible:focus-ring"
-                              aria-label={`키를 누르세요. 「${row.name}」에 지정해요. Esc로 취소해요.`}
-                              onBlur={() => {
-                                // 포커스가 입력 칸을 벗어나면 입력이 끝난다. 끝났다고 알리고 남은 경고를 걷는다.
-                                if (capturingId !== row.id) return;
-                                setCapturingId(null);
-                                setNotice((current) => (current?.swap === undefined ? null : current));
-                                setLive("포커스를 옮겨 키 지정을 끝냈어요. 키는 그대로예요.");
-                              }}
-                              data-testid="shortcut-capture"
-                            >
-                              키를 누르세요
-                            </button>
-                          ) : (
-                            <Keycaps
-                              keycaps={row.keycaps}
-                              format={(cap) => keycapLabel(platform, cap)}
-                            />
-                          )}
-                        </div>
+            <SettingsSection
+              key={group.id}
+              title={group.title}
+              description={groupDescription(group.id, desktop) ?? undefined}
+            >
+              {group.rows.map((row) => {
+                const capturing = capturingId === row.id;
+                const rowNotice = notice?.rowId === row.id ? notice : null;
+                const status = capturing
+                  ? `${modifierName} 키를 누른 채 키를 누르세요. Esc로 취소해요.`
+                  : [
+                      // 데스크탑 앱 안에서는 모든 키가 동작하므로 표시가 소음이다. 브라우저에서만 말한다.
+                      row.desktopOnly && !desktop ? "데스크탑 전용" : null,
+                      row.rebindable ? null : "고정",
+                      row.customized ? "변경됨" : null,
+                    ]
+                      .filter((part): part is string => part !== null)
+                      .join(" · ") || "기본 키";
+                return (
+                  <div
+                    key={row.id}
+                    className="flex min-w-0 flex-col"
+                    data-shortcut-row={row.id}
+                    data-rebindable={row.rebindable ? "true" : "false"}
+                  >
+                    <SettingsRow label={row.name} description={status}>
+                      <div className="flex w-action flex-wrap items-center justify-end gap-1">
+                        {capturing ? (
+                          <button
+                            ref={captureRef}
+                            type="button"
+                            className="w-action rounded-md border border-line-strong bg-surface px-2 py-1 text-meta text-ink press focus-visible:focus-ring"
+                            aria-label={`키를 누르세요. 「${row.name}」에 지정해요. Esc로 취소해요.`}
+                            onBlur={() => {
+                              // 포커스가 입력 칸을 벗어나면 입력이 끝난다. 끝났다고 알리고 남은 경고를 걷는다.
+                              if (capturingId !== row.id) return;
+                              setCapturingId(null);
+                              setNotice((current) => (current?.swap === undefined ? null : current));
+                              setLive("포커스를 옮겨 키 지정을 끝냈어요. 키는 그대로예요.");
+                            }}
+                            data-testid="shortcut-capture"
+                          >
+                            키를 누르세요
+                          </button>
+                        ) : (
+                          <Keycaps
+                            keycaps={row.keycaps}
+                            format={(cap) => keycapLabel(platform, cap)}
+                          />
+                        )}
+                      </div>
+                      {row.rebindable ? (
                         <div className="flex w-action items-center justify-end gap-1">
-                          {row.rebindable ? (
-                            <>
-                              <Button
-                                id={changeButtonId(row.id)}
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                // 취소 단추를 눌러도 입력 칸의 포커스가 먼저 빠지지 않게 한다.
-                                // 빠지면 입력이 끝나고 같은 단추가 「변경」으로 바뀌어 다시 시작된다.
-                                onMouseDown={capturing ? (event) => event.preventDefault() : undefined}
-                                onClick={() => (capturing ? cancelCapture(true, row.id) : startCapture(row))}
-                                aria-label={
-                                  capturing
-                                    ? `취소, 「${row.name}」 키 지정`
-                                    : `변경, 「${row.name}」 단축키`
-                                }
-                                data-testid={`shortcut-change-${row.id}`}
-                              >
-                                {capturing ? "취소" : "변경"}
-                              </Button>
-                              {row.customized ? (
+                          <Button
+                            id={changeButtonId(row.id)}
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            // 취소 단추를 눌러도 입력 칸의 포커스가 먼저 빠지지 않게 한다.
+                            // 빠지면 입력이 끝나고 같은 단추가 「변경」으로 바뀌어 다시 시작된다.
+                            onMouseDown={capturing ? (event) => event.preventDefault() : undefined}
+                            onClick={() => (capturing ? cancelCapture(true, row.id) : startCapture(row))}
+                            aria-label={
+                              capturing
+                                ? `취소, 「${row.name}」 키 지정`
+                                : `변경, 「${row.name}」 단축키`
+                            }
+                            data-testid={`shortcut-change-${row.id}`}
+                          >
+                            {capturing ? "취소" : "변경"}
+                          </Button>
+                          {row.customized ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                resetBinding(row.id);
+                                setNotice(null);
+                                setLive(`「${row.name}」 키를 기본 키로 되돌렸어요.`);
+                              }}
+                              aria-label={`초기화, 「${row.name}」 단축키를 기본 키로`}
+                              data-testid={`shortcut-reset-${row.id}`}
+                            >
+                              초기화
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </SettingsRow>
+                    {row.terminalNote !== null || rowNotice !== null ? (
+                      <div className="flex flex-col gap-2 px-4 pb-3">
+                        {row.terminalNote !== null ? (
+                          <p className="break-keep text-meta text-ink-muted">{row.terminalNote}</p>
+                        ) : null}
+                        {rowNotice !== null ? (
+                          <div className="flex flex-col gap-2" data-testid="shortcut-notice">
+                            <p className="break-keep text-meta text-danger">{rowNotice.message}</p>
+                            {rowNotice.swap !== undefined ? (
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  ref={swapRef}
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={confirmSwap}
+                                  data-testid="shortcut-swap"
+                                >
+                                  서로 바꾸기
+                                </Button>
                                 <Button
                                   type="button"
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => {
-                                    resetBinding(row.id);
-                                    setNotice(null);
-                                    setLive(`「${row.name}」 키를 기본 키로 되돌렸어요.`);
-                                  }}
-                                  aria-label={`초기화, 「${row.name}」 단축키를 기본 키로`}
-                                  data-testid={`shortcut-reset-${row.id}`}
+                                  onClick={() => cancelCapture(true, row.id)}
+                                  data-testid="shortcut-swap-cancel"
                                 >
-                                  초기화
+                                  취소
                                 </Button>
-                              ) : null}
-                            </>
-                          ) : null}
-                        </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
-                      {row.terminalNote !== null ? (
-                        <p className="break-keep text-meta text-ink-muted">{row.terminalNote}</p>
-                      ) : null}
-                      {rowNotice !== null ? (
-                        <div className="flex flex-col gap-2" data-testid="shortcut-notice">
-                          <p className="break-keep text-meta text-danger">{rowNotice.message}</p>
-                          {rowNotice.swap !== undefined ? (
-                            <div className="flex items-center gap-2">
-                              <Button
-                                ref={swapRef}
-                                type="button"
-                                variant="secondary"
-                                size="sm"
-                                onClick={confirmSwap}
-                                data-testid="shortcut-swap"
-                              >
-                                서로 바꾸기
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => cancelCapture(true, row.id)}
-                                data-testid="shortcut-swap-cancel"
-                              >
-                                취소
-                              </Button>
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </SettingsSection>
           ))}
         </div>
       )}
-    </SectionShell>
+      {/* 검색은 위 목록만 거른다: 검색 중에는 걸러지지 않는 터미널 목록을 숨겨서 「일치하는 키가
+          없어요」 옆에 안 걸린 표가 서지 않게 한다. */}
+      {query.trim() === "" ? <TerminalSection desktop={desktop} platform={platform} /> : null}
+    </div>
   );
 }
