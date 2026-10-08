@@ -11,7 +11,7 @@
 //! | `a_teammate_kills_nothing` | drop the `session.member_id != member_id` check, or the host-owner / member-scope check |
 //! | `an_agent_bearer_kills_through_this_route_nothing` | add the route to `required_agent_scope` (the handler check is `work_kill::tests`) |
 //! | `an_ended_or_missing_session_writes_nothing` | create a control for an ended session, or answer a missing one with anything but 404 |
-//! | `a_dead_or_foreign_target_is_refused_by_name` | drop the revoked-host, `local_pty` or session-state refusals |
+//! | `a_dead_or_foreign_target_is_refused_by_name` | drop the revoked-host or session-state refusals (the handler's `local_pty` check is a pre-write fast path: without it trigger 113 `work_control_refuse_local_session` refuses the insert with the same code, so that one line stays green by design) |
 //! | `an_offline_mac_keeps_the_kill_and_says_so` | refuse an offline host, or lie in `hostOnline` |
 //! | `the_owners_kill_is_not_held_back_by_their_own_control_window` | drop the owner-kill exemption in `pending_controls_for_host_in_tx` (or widen it to an agent's kill) |
 //! | `patch_ended_does_not_reach_the_mac` | make `PATCH ended` write a control (then this route would be redundant) |

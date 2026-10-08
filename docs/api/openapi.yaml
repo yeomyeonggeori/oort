@@ -16769,7 +16769,8 @@ components:
         hostOnline:
           type: boolean
           description: >
-            Whether the session's Mac had a heartbeat within 90 s. A kill for an
+            Whether the session's Mac had a heartbeat within 90 s (always false
+            for an already ended session, which is not looked up). A kill for an
             offline Mac is kept and runs when the Mac returns.
         replayed:
           type: boolean

@@ -4939,8 +4939,9 @@ pub struct WorkKillResponse {
     /// The session's status as the server holds it (`running`/`idle` while the
     /// Mac has not yet stopped it, `ended` once it has).
     pub session_status: String,
-    /// Whether the session's Mac was heartbeating when this was answered. A
-    /// kill for an offline Mac is kept and runs when the Mac returns.
+    /// Whether the session's Mac was heartbeating when this was answered (false
+    /// for an already ended session, which is not looked up). A kill for an
+    /// offline Mac is kept and runs when the Mac returns.
     pub host_online: bool,
     /// `true` when nothing new was written (a retry, or an already ended session).
     pub replayed: bool,
