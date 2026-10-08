@@ -1056,9 +1056,40 @@ pub struct HumanSignatureRequest {
     pub folder_id: Option<String>,
 }
 
-// `POST …/work-hosts/{host}/heartbeat` has no request DTO since ADR-0188 D7:
-// the v1 body (`sentAtMs` + a v1 signature) is gone, the v2 proof travels in the
-// `MomoHost` headers, and the server reads nothing from the (signed) body.
+// `POST …/work-hosts/{host}/heartbeat`: since ADR-0188 D7 the v2 proof travels
+// in the `MomoHost` headers (the v1 `sentAtMs` + signature body is gone). The
+// only thing the server reads from the (signed) body is the folder announcement
+// below (#3590); an empty body is the normal case and changes nothing.
+
+/// The heartbeat body (#3590): the folders this host issues, by opaque id and
+/// display name. `folders` absent = unchanged; `[]` = none. Unknown top-level
+/// keys are ignored so a newer host can add fields.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeartbeatBody {
+    #[serde(default)]
+    pub folders: Option<Vec<AnnouncedFolder>>,
+}
+
+/// One announced folder. `deny_unknown_fields`: a host that sends a `path` (or
+/// anything else) is refused, never quietly stored or dropped (ADR-0188 D6).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AnnouncedFolder {
+    pub id: String,
+    pub display_name: String,
+    pub kind: String,
+}
+
+/// A folder as the owner reads it: an id and a name, never a path.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkHostFolderDto {
+    pub id: String,
+    pub display_name: String,
+    /// `project` or `question` (the host-issued empty 「질문용 폴더」).
+    pub kind: String,
+}
 
 /// Swift `WorkHostDTO` (:20-33). `lastSeenAtMs`/`revokedAtMs` are `Int64?` in a
 /// synthesized `Encodable`, so a null is **omitted**, not emitted.
@@ -1085,6 +1116,16 @@ pub struct WorkHostDto {
     pub revoked_at_ms: Option<i64>,
     pub created_at_ms: i64,
     pub online: bool,
+    /// The folders this host issued (#3590). Present only for the host's own
+    /// owner, on a live host, in the list and revoke answers; absent on
+    /// somebody else's row (ADR-0188 §8.8: presence only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub folders: Option<Vec<WorkHostFolderDto>>,
+    /// The folder a request with no explicit choice uses: the host's
+    /// `question` folder (ADR-0198 증보 1 D7), or absent when it has none —
+    /// never silently a project folder. Present exactly when `folders` is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_folder_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -5486,8 +5527,12 @@ mod tests {
             revoked_at_ms: None,
             created_at_ms: 7,
             online: false,
+            folders: None,
+            default_folder_id: None,
         };
         let json = serde_json::to_value(&dto).expect("serialize");
+        assert!(json.get("folders").is_none());
+        assert!(json.get("defaultFolderId").is_none());
         assert_eq!(json["ownerMemberId"], "m");
         assert_eq!(json["type"], "cloud", "`type` is not renamed to hostType");
         assert_eq!(json["capabilities"]["terminal_attach"], true);

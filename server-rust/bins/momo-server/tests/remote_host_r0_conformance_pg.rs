@@ -4254,3 +4254,410 @@ async fn r0_3583_generic_host_name_fallbacks() {
         assert!(row.get("publicKey").is_none() && row.get("capabilities").is_none());
     }
 }
+
+// ---------------------------------------------------------------------------
+// #3590 N5 — the folders a host issued (ADR-0188 D6, ADR-0198 증보 1 D7)
+// ---------------------------------------------------------------------------
+
+/// One signed heartbeat carrying `body` (a folder announcement), as the host.
+async fn announce_folders(
+    http: &reqwest::Client,
+    base: &str,
+    tenant: &Tenant,
+    host: Uuid,
+    seed: &[u8; 32],
+    body: Value,
+) -> reqwest::Response {
+    let raw = if body.is_null() {
+        Vec::new()
+    } else {
+        serde_json::to_vec(&body).expect("body")
+    };
+    SignedRequest::new(
+        reqwest::Method::POST,
+        &heartbeat_path(tenant.workspace, host),
+        tenant.workspace,
+        host,
+        seed,
+        raw,
+    )
+    .send(http, base)
+    .await
+}
+
+fn two_folders() -> Value {
+    json!({"folders": [
+        {"id": "fld_repo", "displayName": "momo", "kind": "project"},
+        {"id": "fld_ask", "displayName": "질문용 폴더", "kind": "question"},
+    ]})
+}
+
+async fn folder_rows(su: &PgPool, host: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM work_host_folder WHERE host_id = $1")
+        .bind(host)
+        .fetch_one(su)
+        .await
+        .expect("count folders")
+}
+
+/// The owner reads the ids and names a host issued, plus the 「질문용 폴더」
+/// default. Nobody else does: not a member, not an admin, and not the owner's
+/// teammates for a team box. No answer anywhere carries an absolute path.
+/// Sabotage: stop clearing `folders`/`default_folder_id` in the foreign branch of
+/// `dto_for_viewer`, or load folders for every host in `list`, and the member and
+/// admin assertions fail.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn r3590_1_the_owner_reads_folders_and_nobody_else_does() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let (member, member_email) = seed_human(&su, tenant.workspace, "member", "민준").await;
+    join_channel(&su, tenant.workspace, tenant.channel, member).await;
+    let (_admin, admin_email) = seed_teammate(&su, &tenant).await;
+    let (laptop, seed) = seed_laptop(&su, &tenant).await;
+    let (box_host, box_seed) =
+        seed_host(&su, &tenant, tenant.owner, "workspace", "workd", "팀 VPS").await;
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+
+    // Before any announcement: the owner has an empty list and no default.
+    let before = listed_host_as(&http, &base, &tenant, &tenant.owner_email, laptop).await;
+    assert_eq!(before["folders"], json!([]), "{before}");
+    assert!(before.get("defaultFolderId").is_none(), "{before}");
+
+    for (host, seed) in [(laptop, &seed), (box_host, &box_seed)] {
+        let response = announce_folders(&http, &base, &tenant, host, seed, two_folders()).await;
+        assert_eq!(response.status(), 200, "{}", response.text().await.unwrap());
+    }
+
+    // The owner: both folders, the question folder is the default.
+    let own = listed_host_as(&http, &base, &tenant, &tenant.owner_email, laptop).await;
+    assert_eq!(
+        own["folders"],
+        json!([
+            {"id": "fld_ask", "displayName": "질문용 폴더", "kind": "question"},
+            {"id": "fld_repo", "displayName": "momo", "kind": "project"},
+        ]),
+        "{own}"
+    );
+    assert_eq!(own["defaultFolderId"], json!("fld_ask"), "{own}");
+
+    // A member and an admin: presence only for the owner's personal Mac, and no
+    // folder, id, name or default anywhere in what they are sent (admins
+    // included: the list and the revoke answer share one function).
+    for email in [&member_email, &admin_email] {
+        let theirs = listed_host_as(&http, &base, &tenant, email, laptop).await;
+        assert_ne!(theirs, Value::Null);
+        assert!(theirs.get("folders").is_none(), "folders leaked: {theirs}");
+        assert!(
+            theirs.get("defaultFolderId").is_none(),
+            "default leaked: {theirs}"
+        );
+        let token = login(&http, &base, tenant.workspace, email).await;
+        let all = http
+            .get(format!(
+                "{base}/v1/workspaces/{}/work-hosts",
+                tenant.workspace
+            ))
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .expect("list")
+            .text()
+            .await
+            .expect("text");
+        for leaked in ["fld_repo", "fld_ask", "질문용 폴더", "\"momo\"", "folders"] {
+            assert!(!all.contains(leaked), "{leaked} reached {email}: {all}");
+        }
+        // The team box is the owner's alone to read folders from too.
+        let team = listed_host_as(&http, &base, &tenant, email, box_host).await;
+        assert!(team.get("folders").is_none(), "team box folders: {team}");
+    }
+    let team_owner = listed_host_as(&http, &base, &tenant, &tenant.owner_email, box_host).await;
+    assert_eq!(team_owner["defaultFolderId"], json!("fld_ask"));
+
+    // An admin who revokes the owner's Mac gets presence only back, and the
+    // revoked host stops showing folders even to its owner.
+    let admin_token = login(&http, &base, tenant.workspace, &admin_email).await;
+    let revoked = http
+        .delete(format!(
+            "{base}/v1/workspaces/{}/work-hosts/{laptop}",
+            tenant.workspace
+        ))
+        .header("Authorization", format!("Bearer {admin_token}"))
+        .send()
+        .await
+        .expect("revoke")
+        .text()
+        .await
+        .expect("text");
+    for leaked in ["fld_repo", "fld_ask", "folders", "defaultFolderId"] {
+        assert!(!revoked.contains(leaked), "{leaked} in revoke: {revoked}");
+    }
+    let after = listed_host_as(&http, &base, &tenant, &tenant.owner_email, laptop).await;
+    assert!(after.get("folders").is_none(), "revoked host: {after}");
+}
+
+/// What a host may announce. A path as a name, a `path` field, a bad id, two
+/// question folders: each is a 400 that stores nothing and echoes nothing. The
+/// table itself also refuses a path-shaped name (the DB half of the guarantee).
+/// An empty body leaves the stored folders alone; `[]` clears; re-announcing
+/// without the question folder removes the default (never falls back to a
+/// project folder). Sabotage: allow `/` in `validated_announced_folders` and the
+/// 400s fail; drop `work_host_folder_name_ck` and the insert test fails.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn r3590_2_a_host_announces_names_never_paths_and_the_default_rule_holds() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let (laptop, seed) = seed_laptop(&su, &tenant).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let path = "/Users/kwakseongjae/projects/momo";
+
+    for (label, body) in [
+        (
+            "path as name",
+            json!({"folders": [{"id": "f1", "displayName": path, "kind": "project"}]}),
+        ),
+        (
+            "windows path as name",
+            json!({"folders": [{"id": "f1", "displayName": "C:\\work\\momo", "kind": "project"}]}),
+        ),
+        (
+            "path field",
+            json!({"folders": [{"id": "f1", "displayName": "momo", "kind": "project", "path": path}]}),
+        ),
+        (
+            "path as id",
+            json!({"folders": [{"id": path, "displayName": "momo", "kind": "project"}]}),
+        ),
+        (
+            "two question folders",
+            json!({"folders": [
+                {"id": "q1", "displayName": "a", "kind": "question"},
+                {"id": "q2", "displayName": "b", "kind": "question"}]}),
+        ),
+        (
+            "duplicate ids",
+            json!({"folders": [
+                {"id": "d", "displayName": "a", "kind": "project"},
+                {"id": "d", "displayName": "b", "kind": "project"}]}),
+        ),
+        (
+            "unknown kind",
+            json!({"folders": [{"id": "f1", "displayName": "a", "kind": "shell"}]}),
+        ),
+    ] {
+        let response = announce_folders(&http, &base, &tenant, laptop, &seed, body).await;
+        let (status, _, text) = error_of(response).await;
+        assert_eq!(status, 400, "{label}: {text}");
+        assert!(
+            !text.contains("Users"),
+            "{label}: the path was echoed: {text}"
+        );
+        assert_eq!(folder_rows(&su, laptop).await, 0, "{label}: stored");
+    }
+
+    // The DB half: even a writer that skipped the route cannot store a path.
+    for name in [path, "a\\b", "x\ny"] {
+        let inserted = sqlx::query(
+            "INSERT INTO work_host_folder (workspace_id, host_id, folder_id, display_name, kind) \
+             VALUES ($1, $2, 'raw', $3, 'project')",
+        )
+        .bind(tenant.workspace)
+        .bind(laptop)
+        .bind(name)
+        .execute(&su)
+        .await;
+        assert!(inserted.is_err(), "the table accepted {name:?}");
+    }
+
+    // Accepted: both folders. An empty-body heartbeat leaves them alone.
+    let ok = announce_folders(&http, &base, &tenant, laptop, &seed, two_folders()).await;
+    assert_eq!(ok.status(), 200);
+    let empty = announce_folders(&http, &base, &tenant, laptop, &seed, Value::Null).await;
+    assert_eq!(empty.status(), 200);
+    assert_eq!(folder_rows(&su, laptop).await, 2);
+
+    // Without the question folder there is no default: the project folder is
+    // never promoted to it.
+    let only_project =
+        json!({"folders": [{"id": "fld_repo", "displayName": "momo", "kind": "project"}]});
+    let ok = announce_folders(&http, &base, &tenant, laptop, &seed, only_project).await;
+    assert_eq!(ok.status(), 200);
+    let own = listed_host_as(&http, &base, &tenant, &tenant.owner_email, laptop).await;
+    assert_eq!(own["folders"].as_array().map(Vec::len), Some(1), "{own}");
+    assert!(own.get("defaultFolderId").is_none(), "{own}");
+
+    // The question folder may change id and a project may become it (rekind).
+    let swap = json!({"folders": [
+        {"id": "fld_repo", "displayName": "momo", "kind": "question"},
+        {"id": "fld_new", "displayName": "새 폴더", "kind": "project"}]});
+    let ok = announce_folders(&http, &base, &tenant, laptop, &seed, swap).await;
+    assert_eq!(ok.status(), 200, "{}", ok.text().await.unwrap());
+    let own = listed_host_as(&http, &base, &tenant, &tenant.owner_email, laptop).await;
+    assert_eq!(own["defaultFolderId"], json!("fld_repo"), "{own}");
+    // ... and the two exchange kinds in one announcement without meeting the
+    // one-question-per-host index half way.
+    let exchange = json!({"folders": [
+        {"id": "fld_repo", "displayName": "momo", "kind": "project"},
+        {"id": "fld_new", "displayName": "새 폴더", "kind": "question"}]});
+    let ok = announce_folders(&http, &base, &tenant, laptop, &seed, exchange).await;
+    assert_eq!(ok.status(), 200, "{}", ok.text().await.unwrap());
+    let own = listed_host_as(&http, &base, &tenant, &tenant.owner_email, laptop).await;
+    assert_eq!(own["defaultFolderId"], json!("fld_new"), "{own}");
+
+    // `[]` clears.
+    let ok = announce_folders(&http, &base, &tenant, laptop, &seed, json!({"folders": []})).await;
+    assert_eq!(ok.status(), 200);
+    assert_eq!(folder_rows(&su, laptop).await, 0);
+}
+
+/// #3590 security review: the revoke, rewrite-only-on-change, look-alike name,
+/// cross-workspace and FORCE-RLS properties of the folder table.
+/// Sabotage: drop the DELETE in `mark_work_host_revoked` (M1), the `WHERE ...
+/// IS DISTINCT FROM` in `replace_work_host_folders` (M2), the Cf/look-alike
+/// ranges in `momo_wire::folder_name` or the migration's class (L1), the
+/// composite FK (L2), or FORCE RLS (L4), and the matching assertion fails.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn r3590_3_review_findings_revoke_unchanged_rewrites_lookalikes_and_tenancy() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let other = seed_tenant(&su, &app_pool).await;
+    let (laptop, seed) = seed_laptop(&su, &tenant).await;
+    let (other_laptop, _) = seed_laptop(&su, &other).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+
+    // ---- L4: FORCE RLS is on, as the bootstrap roles rely on ---------------
+    let (rls, forced): (bool, bool) = sqlx::query_as(
+        "SELECT relrowsecurity, relforcerowsecurity FROM pg_class \
+          WHERE relname = 'work_host_folder' AND relkind = 'r'",
+    )
+    .fetch_one(&su)
+    .await
+    .expect("pg_class");
+    assert!(rls && forced, "work_host_folder must be ENABLE + FORCE RLS");
+
+    // ---- L4: a heartbeat sent down another workspace's path is refused ------
+    let crossed = SignedRequest::new(
+        reqwest::Method::POST,
+        &heartbeat_path(other.workspace, laptop),
+        other.workspace,
+        laptop,
+        &seed,
+        serde_json::to_vec(&two_folders()).unwrap(),
+    )
+    .send(&http, &base)
+    .await;
+    assert_eq!(
+        crossed.status(),
+        401,
+        "a host's key signs nothing elsewhere"
+    );
+    assert_eq!(folder_rows(&su, laptop).await, 0);
+    assert_eq!(folder_rows(&su, other_laptop).await, 0);
+
+    // ---- L2: a folder row cannot name a host of another workspace ----------
+    let crossed_row = sqlx::query(
+        "INSERT INTO work_host_folder (workspace_id, host_id, folder_id, display_name, kind) \
+         VALUES ($1, $2, 'x', 'x', 'project')",
+    )
+    .bind(other.workspace)
+    .bind(laptop)
+    .execute(&su)
+    .await;
+    assert!(crossed_row.is_err(), "the composite FK must refuse it");
+
+    // ---- M2: an unchanged announcement rewrites nothing --------------------
+    let ok = announce_folders(&http, &base, &tenant, laptop, &seed, two_folders()).await;
+    assert_eq!(ok.status(), 200);
+    let snapshot = |su: PgPool| async move {
+        sqlx::query_as::<_, (String, String, String)>(
+            "SELECT folder_id, xmin::text, updated_at::text FROM work_host_folder \
+              WHERE host_id = $1 ORDER BY folder_id",
+        )
+        .bind(laptop)
+        .fetch_all(&su)
+        .await
+        .expect("snapshot")
+    };
+    let first = snapshot(su.clone()).await;
+    assert_eq!(first.len(), 2);
+    for _ in 0..2 {
+        let again = announce_folders(&http, &base, &tenant, laptop, &seed, two_folders()).await;
+        assert_eq!(again.status(), 200);
+    }
+    assert_eq!(
+        snapshot(su.clone()).await,
+        first,
+        "identical beats rewrote rows"
+    );
+    let renamed = json!({"folders": [
+        {"id": "fld_repo", "displayName": "momo 2", "kind": "project"},
+        {"id": "fld_ask", "displayName": "질문용 폴더", "kind": "question"}]});
+    let ok = announce_folders(&http, &base, &tenant, laptop, &seed, renamed).await;
+    assert_eq!(ok.status(), 200);
+    let after = snapshot(su.clone()).await;
+    assert_ne!(after[1], first[1], "a changed name is written");
+    assert_eq!(after[0], first[0], "the untouched row is not");
+
+    // ---- L1: look-alike separators and invisible/reordering characters -----
+    for name in [
+        "a\u{2215}b",
+        "a\u{FF0F}b",
+        "a\u{2044}b",
+        "a\u{202E}b",
+        "a\u{200B}b",
+        "a\u{FEFF}",
+        "a\u{2066}b",
+    ] {
+        let body = json!({"folders": [{"id": "l1", "displayName": name, "kind": "project"}]});
+        let response = announce_folders(&http, &base, &tenant, laptop, &seed, body).await;
+        assert_eq!(
+            response.status(),
+            400,
+            "{name:?} was accepted by the server"
+        );
+    }
+    // The table agrees with the shared rule on every range's two ends.
+    for &(lo, hi) in momo_wire::folder_name::FORBIDDEN_NAME_RANGES {
+        for cp in [lo, hi] {
+            let name = format!("a{}b", char::from_u32(cp).expect("scalar"));
+            let inserted = sqlx::query(
+                "INSERT INTO work_host_folder (workspace_id, host_id, folder_id, display_name, kind) \
+                 VALUES ($1, $2, 'rng', $3, 'project')",
+            )
+            .bind(tenant.workspace)
+            .bind(laptop)
+            .bind(&name)
+            .execute(&su)
+            .await;
+            assert!(inserted.is_err(), "the table accepted U+{cp:04X}");
+        }
+    }
+
+    // ---- M1: a revoked host keeps no folders --------------------------------
+    assert_eq!(folder_rows(&su, laptop).await, 2);
+    let token = login(&http, &base, tenant.workspace, &tenant.owner_email).await;
+    let revoked = http
+        .delete(format!(
+            "{base}/v1/workspaces/{}/work-hosts/{laptop}",
+            tenant.workspace
+        ))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("revoke");
+    assert_eq!(revoked.status(), 200);
+    assert_eq!(folder_rows(&su, laptop).await, 0, "revoke left folder rows");
+}

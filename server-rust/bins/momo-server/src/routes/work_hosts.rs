@@ -127,9 +127,10 @@ use momo_auth::device_key::{
 };
 use momo_auth::human_control::{consume_human_nonce_in_tx, db_now_ms, HumanControlRefusal};
 use momo_auth::{
-    active_workspace_role, insert_work_host, insert_work_host_with_id, list_work_hosts,
-    load_work_host, lock_work_host_ownership, mark_work_host_revoked, member_display_names,
-    normalize_public_key_b64, touch_work_host_last_seen, NewWorkHost, Principal, WorkHostRecord,
+    active_workspace_role, insert_work_host, insert_work_host_with_id, list_work_host_folders,
+    list_work_hosts, load_work_host, lock_work_host_ownership, mark_work_host_revoked,
+    member_display_names, normalize_public_key_b64, replace_work_host_folders,
+    touch_work_host_last_seen, NewWorkHost, Principal, WorkHostFolderRecord, WorkHostRecord,
 };
 use momo_db::{with_tenant_tx, DbError, PgConnection};
 use momo_outbox::{emit_outbox, OutboxKind};
@@ -145,8 +146,9 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::dto::{
-    DeviceRevocationDto, HostRegisterSignature, PendingWorkControlsResponse,
-    RegisterWorkHostRequest, WorkControlDto, WorkHostDto, WorkHostListResponse, WorkHostResponse,
+    AnnouncedFolder, DeviceRevocationDto, HeartbeatBody, HostRegisterSignature,
+    PendingWorkControlsResponse, RegisterWorkHostRequest, WorkControlDto, WorkHostDto,
+    WorkHostFolderDto, WorkHostListResponse, WorkHostResponse,
 };
 use crate::error::ApiError;
 use crate::routes::device_keys::refusal_error;
@@ -292,7 +294,77 @@ pub(crate) fn work_host_dto(record: WorkHostRecord) -> Result<WorkHostDto, ApiEr
         revoked_at_ms: record.revoked_at_ms,
         created_at_ms: record.created_at_ms,
         online: record.online,
+        folders: None,
+        default_folder_id: None,
     })
+}
+
+/// At most this many folders per host announcement (#3590).
+pub(crate) const MAX_ANNOUNCED_FOLDERS: usize = 32;
+
+/// Judge a host's folder announcement before it is stored (#3590, ADR-0188 D6).
+///
+/// The id is an opaque token from a closed alphabet and the name may not carry a
+/// path separator or a control character: a host that announces
+/// `/Users/x/project` as the name is refused here (and, if this check were ever
+/// bypassed, by `work_host_folder_name_ck`). At most one `question` folder, no
+/// duplicate ids, at most [`MAX_ANNOUNCED_FOLDERS`]. The error names the field,
+/// never echoes the value, so a path a host sent cannot reach a log through it.
+pub(crate) fn validated_announced_folders(
+    raw: Vec<AnnouncedFolder>,
+) -> Result<Vec<WorkHostFolderRecord>, ApiError> {
+    if raw.len() > MAX_ANNOUNCED_FOLDERS {
+        return Err(ApiError::bad_request("folders accepts at most 32 entries"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut questions = 0;
+    let mut out = Vec::with_capacity(raw.len());
+    for folder in raw {
+        let id_ok = (1..=64).contains(&folder.id.len())
+            && folder
+                .id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+        if !id_ok {
+            return Err(ApiError::bad_request(
+                "folder id must be 1...64 ASCII letters, digits, underscore, or dash",
+            ));
+        }
+        if !seen.insert(folder.id.clone()) {
+            return Err(ApiError::bad_request("folder ids must be unique"));
+        }
+        let name = folder.display_name.trim().to_string();
+        let name_len = name.chars().count();
+        if !(1..=80).contains(&name_len)
+            || name
+                .chars()
+                .any(momo_wire::folder_name::is_forbidden_name_char)
+        {
+            return Err(ApiError::bad_request(
+                "folder displayName must be 1...80 characters without a path separator or invisible character",
+            ));
+        }
+        match folder.kind.as_str() {
+            "project" => {}
+            "question" => questions += 1,
+            _ => {
+                return Err(ApiError::bad_request(
+                    "folder kind must be project or question",
+                ))
+            }
+        }
+        out.push(WorkHostFolderRecord {
+            folder_id: folder.id,
+            display_name: name,
+            kind: folder.kind,
+        });
+    }
+    if questions > 1 {
+        return Err(ApiError::bad_request(
+            "a host has at most one question folder",
+        ));
+    }
+    Ok(out)
 }
 
 /// `data.type` of the owner notice for a new host.
@@ -546,7 +618,7 @@ pub async fn list(
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let member_id = principal.member_id;
 
-    let (records, owner_names) = with_tenant_tx(&state.pool, workspace_id, move |conn| {
+    let (records, owner_names, folders) = with_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
             if active_workspace_role(conn, workspace_id, member_id)
                 .await?
@@ -556,7 +628,8 @@ pub async fn list(
             }
             let hosts = list_work_hosts(conn).await?;
             let names = foreign_owner_names(conn, &hosts, member_id).await?;
-            Ok::<_, DbError>(Some((hosts, names)))
+            let folders = own_host_folders(conn, &hosts, member_id).await?;
+            Ok::<_, DbError>(Some((hosts, names, folders)))
         })
     })
     .await
@@ -566,7 +639,7 @@ pub async fn list(
     Ok(Json(WorkHostListResponse {
         work_hosts: records
             .into_iter()
-            .map(|record| dto_for_viewer(record, member_id, &owner_names))
+            .map(|record| dto_for_viewer(record, member_id, &owner_names, &folders))
             .collect::<Result<Vec<_>, _>>()?,
     }))
 }
@@ -590,6 +663,22 @@ async fn foreign_owner_names(
     Ok(member_display_names(conn, &owners).await?)
 }
 
+/// The folders of the live hosts `viewer` owns (one query, or none). Only the
+/// owner's own hosts are asked for: a folder of somebody else's host is never
+/// loaded, so no later branch can leak it (#3590, ADR-0188 §8.8).
+async fn own_host_folders(
+    conn: &mut PgConnection,
+    hosts: &[WorkHostRecord],
+    viewer: Uuid,
+) -> Result<HashMap<Uuid, Vec<WorkHostFolderRecord>>, DbError> {
+    let owned: Vec<Uuid> = hosts
+        .iter()
+        .filter(|host| host.owner_member_id == viewer && host.revoked_at_ms.is_none())
+        .map(|host| host.id)
+        .collect();
+    Ok(list_work_host_folders(conn, &owned).await?)
+}
+
 /// The one function every route that shows a host to a *person* goes through
 /// (list and revoke). ADR-0188 §8.8 (#3583): somebody else's personal machine is
 /// presence only. The chosen device name is replaced by a generic one built from
@@ -602,9 +691,31 @@ pub(crate) fn dto_for_viewer(
     record: WorkHostRecord,
     viewer: Uuid,
     owner_names: &HashMap<Uuid, String>,
+    folders: &HashMap<Uuid, Vec<WorkHostFolderRecord>>,
 ) -> Result<WorkHostDto, ApiError> {
     if !is_foreign_member_host(&record, viewer) {
-        return work_host_dto(record);
+        // #3590: folders go to the host's owner, on a live host, and to nobody
+        // else — a teammate's or admin's view of a team host included.
+        let own = record.owner_member_id == viewer && record.revoked_at_ms.is_none();
+        let issued = if own { folders.get(&record.id) } else { None };
+        let mut dto = work_host_dto(record)?;
+        if own {
+            let list = issued.map(Vec::as_slice).unwrap_or_default();
+            dto.default_folder_id = list
+                .iter()
+                .find(|folder| folder.kind == "question")
+                .map(|folder| folder.folder_id.clone());
+            dto.folders = Some(
+                list.iter()
+                    .map(|folder| WorkHostFolderDto {
+                        id: folder.folder_id.clone(),
+                        display_name: folder.display_name.clone(),
+                        kind: folder.kind.clone(),
+                    })
+                    .collect(),
+            );
+        }
+        return Ok(dto);
     }
     let owner_name = owner_names.get(&record.owner_member_id).cloned();
     let noun = if record.host_type == "app" {
@@ -619,6 +730,10 @@ pub(crate) fn dto_for_viewer(
     };
     dto.public_key = None;
     dto.capabilities = None;
+    // #3590: somebody else's personal machine is presence only — no folders,
+    // no default, whoever asks (an admin included).
+    dto.folders = None;
+    dto.default_folder_id = None;
     Ok(dto)
 }
 
@@ -782,7 +897,7 @@ pub async fn revoke(
     let record =
         record.ok_or_else(|| ApiError::internal("work_hosts.revoke", "work host reload failed"))?;
     Ok(Json(WorkHostResponse {
-        work_host: dto_for_viewer(record, member_id, &owner_names)?,
+        work_host: dto_for_viewer(record, member_id, &owner_names, &HashMap::new())?,
     }))
 }
 
@@ -846,10 +961,32 @@ pub async fn heartbeat(
     }
     let signature = signed.signature;
 
+    // #3590: the body is the folder announcement, read only after the signature
+    // verified (the body digest is part of what was signed). Empty = nothing to
+    // say. A body that does not parse, or names a path, is a 400 that does not
+    // echo it; the host retries on its next beat and liveness is not stamped by
+    // a request the server refused to understand.
+    let announced = if body.is_empty() {
+        None
+    } else {
+        let parsed: HeartbeatBody = serde_json::from_slice(&body)
+            .map_err(|_| ApiError::bad_request("heartbeat body is not a folder announcement"))?;
+        parsed
+            .folders
+            .map(validated_announced_folders)
+            .transpose()?
+    };
+
     let outcome = with_tenant_tx(&state.pool, workspace_id, move |conn| {
+        let announced = announced.clone();
         Box::pin(async move {
             if !touch_work_host_last_seen(conn, host_id).await? {
                 return Ok(None);
+            }
+            if let Some(folders) = &announced {
+                if !replace_work_host_folders(conn, workspace_id, host_id, folders).await? {
+                    return Ok(None);
+                }
             }
             // ADR-0146: the same verified signature, recorded as provenance.
             match record_provenance(
