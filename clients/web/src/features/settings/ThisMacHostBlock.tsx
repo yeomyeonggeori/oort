@@ -22,18 +22,19 @@ import {
   type LocalWorkHostStatus,
   type ThisMacState,
 } from "@momo/core/features/settings/thisMacHost";
-import {
-  ConfirmButton,
-  Field,
-  KeyValueRows,
-  StatusChip,
-  Subsection,
-} from "./SettingsFields";
+import { ConfirmButton, Field, StatusChip } from "./SettingsFields";
+import { SettingsRow } from "./shell/SettingsRow";
+import { SettingsSection } from "./shell/SettingsSection";
+import { CardBody } from "./workTierPolicy";
 
 // =============================================================================
 // 이 맥 (ADR-0188 D2 · R1, #2778): the desktop's own door to becoming a work
 // host. Always drawn in the desktop shell, whatever the registry says (planner
 // decision on #2778): with zero hosts this block IS the way to the first one.
+//
+// 설정 > 기기의 카드다 (#3578 S4). 이 맥을 호스트로 등록할 때 소유자는 나(`scope:"member"`)
+// 이므로 개인이다. ADR-0198 T3(AI 허브 「내 도구」 카드)가 이것을 합쳐 가면 이 블록을
+// 그 카드로 옮긴다: 새 표면을 따로 만들지 않는다.
 //
 // Two sources, one state (`thisMacState`, core): the shell's `work_host_status`
 // (is momo-workd here, registered as which host, running, heartbeat) and the
@@ -46,9 +47,9 @@ const LOCAL_POLL_MS = 15_000;
 
 const THIS_MAC_QUERY_KEY = ["settings", "this-mac-host"] as const;
 
-const LINES = [
-  "이 맥을 작업 호스트로 등록하면 폰이나 다른 기기에서 시킨 작업이 이 맥에서 돌아가요. 결정과 승인은 등록한 본인만 할 수 있어요.",
-];
+const TITLE = "이 맥의 작업 호스트";
+const DESCRIPTION =
+  "이 맥을 작업 호스트로 등록하면 폰이나 다른 기기에서 시킨 작업이 이 맥에서 돌아가요. 결정과 승인은 등록한 본인만 할 수 있어요.";
 
 function errorText(error: unknown): string {
   return thisMacErrorMessage(typeof error === "string" ? error : String(error));
@@ -86,21 +87,27 @@ export function ThisMacHostBlock({
 
   if (local.isPending) {
     return (
-      <Subsection title="이 맥" lines={LINES}>
-        <Skeleton ready={false} rows={2} />
-      </Subsection>
+      <SettingsSection title={TITLE} description={DESCRIPTION} testId="this-mac-card">
+        <CardBody>
+          <Skeleton ready={false} rows={2} />
+        </CardBody>
+      </SettingsSection>
     );
   }
   if (local.isError) {
     return (
-      <Subsection title="이 맥" lines={LINES}>
-        <InlineBanner
-          message="이 맥의 작업 호스트 상태를 읽지 못했어요. 다시 확인하세요."
-          actionLabel="상태 다시 확인"
-          onAction={() => void local.refetch()}
-          testId="this-mac-error"
-        />
-      </Subsection>
+      <SettingsSection title={TITLE} description={DESCRIPTION} testId="this-mac-card">
+        <CardBody>
+          <InlineBanner
+            message="이 맥의 작업 호스트 상태를 읽지 못했어요. 다시 확인하세요."
+            actionLabel="상태 다시 확인"
+            onAction={() => void local.refetch()}
+            separator={false}
+            className="px-0"
+            testId="this-mac-error"
+          />
+        </CardBody>
+      </SettingsSection>
     );
   }
 
@@ -117,8 +124,14 @@ export function ThisMacHostBlock({
     : undefined;
 
   return (
-    <Subsection title="이 맥" lines={LINES}>
-      <div data-testid="this-mac" data-this-mac-state={state.kind}>
+    <SettingsSection title={TITLE} description={DESCRIPTION} testId="this-mac-card">
+      {/* 카드의 자식 사이에 선이 서므로(`settings-card`), 한 겹 감싼 이 상자가 같은 선을
+          행 사이에 이어 준다. 상태는 이 상자의 속성이 말한다. */}
+      <div
+        className="flex min-w-0 flex-col divide-y divide-line"
+        data-testid="this-mac"
+        data-this-mac-state={state.kind}
+      >
         <ThisMacBody
           state={state}
           local={local.data}
@@ -129,7 +142,7 @@ export function ThisMacHostBlock({
           settle={settle}
         />
       </div>
-    </Subsection>
+    </SettingsSection>
   );
 }
 
@@ -162,7 +175,7 @@ function ThisMacBody({
     case "no_sidecar":
       return (
         <EmptyInvite
-          className="px-0"
+          className="px-4"
           headline="이 빌드에는 작업 호스트 프로그램이 없어요."
           detail="배포된 oort 앱에는 들어 있어요. 개발 빌드라면 작업 호스트 프로그램을 함께 빌드한 뒤 앱을 다시 여세요."
           actions={<RecheckButton recheck={recheck} />}
@@ -180,15 +193,15 @@ function ThisMacBody({
       ) : (
         // Same header grammar as the ready form (headline, muted chip): one
         // state, one look, whether or not an adapter was found (#2778 DR M-4).
-        <div className="flex min-w-0 flex-col gap-2" data-testid="this-mac-no-adapter">
-          <NotRegisteredHeader />
-          <p className="break-keep text-meta text-ink-muted">
-            등록하려면 ACP 어댑터(claude-agent-acp나 codex-acp)가 이 맥에 있어야 해요. 설치한 뒤 다시 확인하세요.
-          </p>
-          <div>
+        <>
+          <NotRegisteredRow />
+          <div className="flex min-w-0 flex-col items-start gap-2 p-4" data-testid="this-mac-no-adapter">
+            <p className="break-keep text-meta text-ink-muted">
+              등록하려면 ACP 어댑터(claude-agent-acp나 codex-acp)가 이 맥에 있어야 해요. 설치한 뒤 다시 확인하세요.
+            </p>
             <RecheckButton recheck={recheck} />
           </div>
-        </div>
+        </>
       );
     case "elsewhere":
       return (
@@ -225,18 +238,37 @@ function ThisMacBody({
   }
 }
 
-function NotRegisteredHeader() {
+function NotRegisteredRow() {
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-2">
-      <p className="text-body font-medium text-ink">이 맥은 아직 작업 호스트가 아니에요.</p>
-      <StatusChip tone="muted">등록 안 됨</StatusChip>
-    </div>
+    <SettingsRow
+      keep
+      label={
+        <span className="flex min-w-0 flex-wrap items-center gap-2">
+          <span>이 맥은 아직 작업 호스트가 아니에요.</span>
+          <StatusChip tone="muted">등록 안 됨</StatusChip>
+        </span>
+      }
+    />
   );
 }
 
 function adapterSummary(local: LocalWorkHostStatus): string {
   const found = local.adapters.filter((adapter) => adapter.found).map((adapter) => adapter.key);
   return found.length > 0 ? found.join(", ") : "없음";
+}
+
+/** 도구와 작업 폴더: 등록 전·후 두 장면이 같은 두 행을 쓴다. 경로는 길어서 아래로 내려 쓴다. */
+function LocalFacts({ local }: { local: LocalWorkHostStatus }) {
+  return (
+    <>
+      <SettingsRow label="쓸 수 있는 도구" keep>
+        <span className="text-body text-ink">{adapterSummary(local)}</span>
+      </SettingsRow>
+      <SettingsRow label="작업 폴더" stack>
+        <span className="break-all text-body text-ink">{local.workFolder}</span>
+      </SettingsRow>
+    </>
+  );
 }
 
 function RegisterForm({
@@ -279,58 +311,57 @@ function RegisterForm({
   // field already shows its own error, so only the offline reason is new here.
 
   return (
-    <div className="flex min-w-0 flex-col gap-3" data-testid="this-mac-register">
-      <NotRegisteredHeader />
-      <KeyValueRows
-        rows={[
-          { key: "쓸 수 있는 도구", value: adapterSummary(local) },
-          { key: "작업 폴더", value: local.workFolder },
-        ]}
-      />
-      <Field
-        label="호스트 이름"
-        htmlFor={nameId}
-        hint="폰과 다른 기기의 호스트 목록에 이 이름으로 보여요."
-        error={nameError}
-      >
-        <Input
-          id={nameId}
-          value={name}
-          maxLength={120}
-          onChange={(event) => setName(event.target.value)}
-          data-testid="this-mac-name"
-        />
-      </Field>
-      {register.isError && (
-        <p className="text-meta text-danger" role="alert" data-testid="this-mac-register-error">
-          {errorText(register.error)}
-        </p>
-      )}
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          size="sm"
-          aria-disabled={!canRegister || undefined}
-          aria-describedby={offline ? reasonId : undefined}
-          aria-busy={register.isPending || undefined}
-          className={canRegister ? undefined : "opacity-50"}
-          onClick={() => {
-            if (!canRegister || register.isPending) return;
-            register.mutate();
-          }}
-          data-testid="this-mac-register-submit"
-        >
-          {register.isPending ? "등록 중" : "이 맥을 호스트로 등록"}
-        </Button>
-        {offline && (
-          <span id={reasonId} className="text-meta text-ink-muted">
-            연결이 끊겨 지금은 등록할 수 없어요.
-          </span>
-        )}
+    <>
+      <div data-testid="this-mac-register">
+        <NotRegisteredRow />
       </div>
-      <p className="text-meta text-ink-muted">
-        등록하면 내 계정으로 로그인한 모든 기기에 알림이 가요. 원격 작업은 작업 폴더 안에서만 돌아가요.
-      </p>
-    </div>
+      <LocalFacts local={local} />
+      <div className="flex min-w-0 flex-col gap-3 p-4">
+        <Field
+          label="호스트 이름"
+          htmlFor={nameId}
+          hint="폰과 다른 기기의 호스트 목록에 이 이름으로 보여요."
+          error={nameError}
+        >
+          <Input
+            id={nameId}
+            value={name}
+            maxLength={120}
+            onChange={(event) => setName(event.target.value)}
+            data-testid="this-mac-name"
+          />
+        </Field>
+        {register.isError && (
+          <p className="text-meta text-danger" role="alert" data-testid="this-mac-register-error">
+            {errorText(register.error)}
+          </p>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            aria-disabled={!canRegister || undefined}
+            aria-describedby={offline ? reasonId : undefined}
+            aria-busy={register.isPending || undefined}
+            className={canRegister ? undefined : "opacity-50"}
+            onClick={() => {
+              if (!canRegister || register.isPending) return;
+              register.mutate();
+            }}
+            data-testid="this-mac-register-submit"
+          >
+            {register.isPending ? "등록 중" : "이 맥을 호스트로 등록"}
+          </Button>
+          {offline && (
+            <span id={reasonId} className="text-meta text-ink-muted">
+              연결이 끊겨 지금은 등록할 수 없어요.
+            </span>
+          )}
+        </div>
+        <p className="break-keep text-meta text-ink-muted">
+          등록하면 내 계정으로 로그인한 모든 기기에 알림이 가요. 원격 작업은 작업 폴더 안에서만 돌아가요.
+        </p>
+      </div>
+    </>
   );
 }
 
@@ -390,69 +421,66 @@ function Registered({
           }`;
 
   return (
-    <div className="flex min-w-0 flex-col gap-3" data-testid="this-mac-registered">
-      <div className="flex min-w-0 flex-col gap-1">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <p className="min-w-0 break-words text-body font-medium text-ink">{name}</p>
-          {chip}
-        </div>
-        <p className="break-keep text-meta text-ink-muted" data-testid="this-mac-sentence">
-          {sentence}
-        </p>
+    <>
+      <div data-testid="this-mac-registered">
+        <SettingsRow
+          keep
+          label={
+            <span className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="min-w-0 break-words">{name}</span>
+              {chip}
+            </span>
+          }
+          description={<span data-testid="this-mac-sentence">{sentence}</span>}
+        >
+          {state.kind === "offline" && state.reason === "stopped" && (
+            <Button
+              size="sm"
+              aria-busy={start.isPending || undefined}
+              onClick={() => {
+                if (!start.isPending) start.mutate();
+              }}
+              data-testid="this-mac-start"
+            >
+              {start.isPending ? "켜는 중" : "작업 호스트 켜기"}
+            </Button>
+          )}
+          {state.kind === "offline" && state.reason === "not_reaching_server" && (
+            <Button
+              size="sm"
+              aria-busy={restart.isPending || undefined}
+              onClick={() => {
+                if (!restart.isPending) restart.mutate();
+              }}
+              data-testid="this-mac-restart"
+            >
+              {restart.isPending ? "다시 켜는 중" : "작업 호스트 다시 켜기"}
+            </Button>
+          )}
+          {state.kind === "online" && (
+            <Button
+              variant="outline"
+              size="sm"
+              aria-busy={stop.isPending || undefined}
+              onClick={() => {
+                if (!stop.isPending) stop.mutate();
+              }}
+              data-testid="this-mac-stop"
+            >
+              {stop.isPending ? "끄는 중" : "작업 호스트 끄기"}
+            </Button>
+          )}
+        </SettingsRow>
       </div>
-      <KeyValueRows
-        rows={[
-          { key: "쓸 수 있는 도구", value: adapterSummary(local) },
-          { key: "작업 폴더", value: local.workFolder },
-        ]}
-      />
-      {failed && (
-        <p className="text-meta text-danger" role="alert" data-testid="this-mac-action-error">
-          {errorText(failed.error)}
-        </p>
-      )}
-      <div className="flex flex-wrap items-center gap-2">
-        {state.kind === "offline" && state.reason === "stopped" && (
-          <Button
-            size="sm"
-            aria-busy={start.isPending || undefined}
-            onClick={() => {
-              if (!start.isPending) start.mutate();
-            }}
-            data-testid="this-mac-start"
-          >
-            {start.isPending ? "켜는 중" : "작업 호스트 켜기"}
-          </Button>
-        )}
-        {state.kind === "offline" && state.reason === "not_reaching_server" && (
-          <Button
-            size="sm"
-            aria-busy={restart.isPending || undefined}
-            onClick={() => {
-              if (!restart.isPending) restart.mutate();
-            }}
-            data-testid="this-mac-restart"
-          >
-            {restart.isPending ? "다시 켜는 중" : "작업 호스트 다시 켜기"}
-          </Button>
-        )}
-        {state.kind === "online" && (
-          <Button
-            variant="outline"
-            size="sm"
-            aria-busy={stop.isPending || undefined}
-            onClick={() => {
-              if (!stop.isPending) stop.mutate();
-            }}
-            data-testid="this-mac-stop"
-          >
-            {stop.isPending ? "끄는 중" : "작업 호스트 끄기"}
-          </Button>
-        )}
-      </div>
+      <LocalFacts local={local} />
       {/* Its own row: the two-step question and its 취소 stay together at the
           default window width (#2778 DR M-3). */}
-      <div className="flex min-w-0 flex-col gap-1">
+      <div className="flex min-w-0 flex-col items-start gap-2 p-4">
+        {failed && (
+          <p className="text-meta text-danger" role="alert" data-testid="this-mac-action-error">
+            {errorText(failed.error)}
+          </p>
+        )}
         <ConfirmButton
           label="등록 해제"
           subject={name}
@@ -466,12 +494,12 @@ function Registered({
           testId="this-mac-unregister"
         />
         {offline && (
-          <p id={offlineReasonId} className="text-meta text-ink-muted">
+          <p id={offlineReasonId} className="break-keep text-meta text-ink-muted">
             연결이 끊겨 지금은 등록을 해제할 수 없어요.
           </p>
         )}
       </div>
-    </div>
+    </>
   );
 }
 
@@ -490,30 +518,37 @@ function ForgetOnly({
 }) {
   const forget = useMutation({ mutationFn: desktopWorkHost.forget, onSuccess: settle });
   return (
-    <div className="flex min-w-0 flex-col gap-2" data-testid={testId}>
-      <div className="flex min-w-0 flex-col gap-1">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <p className="text-body font-medium text-ink">{headline}</p>
-          <StatusChip tone="muted">{chip}</StatusChip>
-        </div>
-        <p className="break-keep text-meta text-ink-muted">{detail}</p>
-      </div>
-      {forget.isError && (
-        <p className="text-meta text-danger" role="alert">
-          {errorText(forget.error)}
-        </p>
-      )}
-      <div>
-        <ConfirmButton
-          label="등록 정보 지우기"
-          question="이 맥의 호스트 키와 등록 정보를 지울까요? 되돌릴 수 없어요."
-          confirmLabel="지우기"
-          busy={forget.isPending}
-          busyLabel="지우는 중"
-          onConfirm={() => forget.mutate()}
-          testId={`${testId}-forget`}
+    <>
+      <div data-testid={testId}>
+        <SettingsRow
+          keep
+          label={
+            <span className="flex min-w-0 flex-wrap items-center gap-2">
+              <span>{headline}</span>
+              <StatusChip tone="muted">{chip}</StatusChip>
+            </span>
+          }
+          description={detail}
         />
       </div>
-    </div>
+      <div className="flex min-w-0 flex-col items-start gap-2 p-4">
+        {forget.isError && (
+          <p className="text-meta text-danger" role="alert">
+            {errorText(forget.error)}
+          </p>
+        )}
+        <div>
+          <ConfirmButton
+            label="등록 정보 지우기"
+            question="이 맥의 호스트 키와 등록 정보를 지울까요? 되돌릴 수 없어요."
+            confirmLabel="지우기"
+            busy={forget.isPending}
+            busyLabel="지우는 중"
+            onConfirm={() => forget.mutate()}
+            testId={`${testId}-forget`}
+          />
+        </div>
+      </div>
+    </>
   );
 }

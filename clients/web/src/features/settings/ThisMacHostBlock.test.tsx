@@ -8,7 +8,7 @@ import type { WorkHost } from "@momo/core/features/settings/api";
 import type { LocalWorkHostStatus } from "@momo/core/features/settings/thisMacHost";
 
 // =============================================================================
-// #2778 설정 › 코드 실행 호스트 › 이 맥.
+// #2778 설정 › 기기 › 이 맥의 작업 호스트 (#3578 S4가 코드 실행 호스트에서 옮겼다).
 //
 // 사보타주로 붉어지는 규율:
 //   ① 「등록됐지만 오프라인」과 「아직 없음」이 같은 화면이 되면

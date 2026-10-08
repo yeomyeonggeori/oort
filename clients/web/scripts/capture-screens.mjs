@@ -2078,15 +2078,6 @@ async function installMocks(context) {
   // 설정 > 코드 실행 호스트 (MOMO-617). The workspace default sits in 자동 재개
   // so the 재개 대상 control is on screen, and the member override inherits it,
   // which is the pair the panel has to keep apart.
-  await context.route("**/v1/provider/work-host-engine", (route) =>
-    json(route, {
-      engine: "opencode",
-      source: "database",
-      updatedBy: "곽성재",
-      updatedAtMs: FIXTURE_NOW - 2 * 86_400_000,
-      schema: "momo.work_host_engine.v0",
-    })
-  );
   await context.route("**/v1/workspaces/*/work-hosts", (route) =>
     json(route, { workHosts: WORK_HOSTS })
   );
@@ -8447,9 +8438,9 @@ async function captureScheme(browser, scheme) {
   await assertReminderKeyboardDelete(remindersPage, scheme);
   await remindersPage.close();
 
-  // 3g. 설정 > 코드 실행 호스트 (MOMO-617): the three blocks that decide where an
-  //     agent runs. Shot at the top of the panel, where the engine card, the
-  //     registry rows and the policy selects all land in one frame.
+  // 3g. 설정 > 실행 호스트 (MOMO-617, #3578 S4): the registry rows and the workspace
+  //     default resume policy. (The 실행 엔진 card is gone; this Mac and the member
+  //     policy live under 기기.) Shot at the top of the panel.
   const settings = await context.newPage();
   await settings.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(settings);
@@ -8460,8 +8451,8 @@ async function captureScheme(browser, scheme) {
   await settings.screenshot({ path: workHostShot });
   shots.push(workHostShot);
 
-  // …and the same panel scrolled to its foot, where the three status chips and
-  // the two policy scopes sit together. A section this tall is reviewed twice
+  // …and the same panel scrolled to its foot, where the workspace default policy
+  // sits. A section this tall is reviewed twice
   // or the half nobody sees is the half that regresses.
   await settings
     .getByTestId("work-tier-policy")

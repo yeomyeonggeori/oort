@@ -38,7 +38,9 @@ import {
   registeredAtCopy,
 } from "./deviceKeysShared";
 import { linkedDevicesQuery } from "./linkedDevicesQuery";
-import { ConfirmButton, Field, StatusChip, Subsection } from "./SettingsFields";
+import { ConfirmButton, Field, StatusChip } from "./SettingsFields";
+import { SettingsSection } from "./shell/SettingsSection";
+import { CardBody } from "./workTierPolicy";
 
 // Reading this as: settings for internal team users on web+Tauri,
 // density 6/10, motion 2/10.
@@ -127,7 +129,9 @@ export function DeviceKeysBlock({
   });
 
   return (
-    <Subsection title="지시 서명" lines={LINES}>
+    <SettingsSection title="지시 서명" description={LINES.join(" ")} testId="device-keys-card">
+      {(local.isPending || server.isPending || local.isError || server.isError) && (
+      <CardBody>
       {(local.isPending || server.isPending) && (
         <div role="status" data-testid="device-keys-loading">
           <span className="sr-only">지시 서명 상태를 불러오고 있어요.</span>
@@ -154,6 +158,8 @@ export function DeviceKeysBlock({
           testId="device-keys-server-error"
         />
       )}
+      </CardBody>
+      )}
       {local.isSuccess && server.isSuccess && (
         <DeviceKeysBody
           workspaceId={workspaceId}
@@ -163,7 +169,7 @@ export function DeviceKeysBlock({
           keys={server.data}
         />
       )}
-    </Subsection>
+    </SettingsSection>
   );
 }
 
@@ -203,32 +209,37 @@ function DeviceKeysBody({
 
   return (
     <div
-      className="flex min-w-0 flex-col gap-3"
+      className="flex min-w-0 flex-col divide-y divide-line"
       data-testid="device-keys"
       data-device-key-support={local.support}
       data-device-key-bound={bound ? "true" : "false"}
     >
-      <ThisMacRoot
-        workspaceId={workspaceId}
-        memberId={memberId}
-        offline={offline}
-        local={local}
-        rootRow={rootRow}
-        mute={mute}
-        bound={bound}
-      />
-      <HostSignatureRow
-        workspaceId={workspaceId}
-        host={local.host}
-        bound={bound}
-        pinned={
-          bound &&
-          local.host?.pinnedRootKeyId != null &&
-          local.root !== null &&
-          local.host.pinnedRootKeyId.toLowerCase() === local.root.keyId.toLowerCase()
-        }
-      />
-      <div className="flex min-w-0 flex-col gap-2">
+      {/* 카드의 행들: 이 맥, 작업 호스트 서명 검증, 폰 목록이 각자 한 행이고 행 사이는 선 하나다. */}
+      <div className="px-4 py-3">
+        <ThisMacRoot
+          workspaceId={workspaceId}
+          memberId={memberId}
+          offline={offline}
+          local={local}
+          rootRow={rootRow}
+          mute={mute}
+          bound={bound}
+        />
+      </div>
+      <div className="px-4 py-3">
+        <HostSignatureRow
+          workspaceId={workspaceId}
+          host={local.host}
+          bound={bound}
+          pinned={
+            bound &&
+            local.host?.pinnedRootKeyId != null &&
+            local.root !== null &&
+            local.host.pinnedRootKeyId.toLowerCase() === local.root.keyId.toLowerCase()
+          }
+        />
+      </div>
+      <div className="flex min-w-0 flex-col gap-2 px-4 py-3">
         <h4 className="text-meta font-semibold text-ink">지시를 보낼 수 있는 폰</h4>
         {phones.length === 0 && unapprovable.length === 0 ? (
           <p className="break-keep text-body text-ink-muted" data-testid="device-keys-no-phone">
@@ -236,7 +247,7 @@ function DeviceKeysBody({
           </p>
         ) : (
           <ul
-            className="flex flex-col overflow-hidden rounded-md border border-line"
+            className="flex flex-col divide-y divide-line"
             data-testid="device-keys-phones"
           >
             {phones.map((key) => (
@@ -901,7 +912,7 @@ function PhoneKeyRow({
 
   return (
     <li
-      className="flex min-w-0 flex-col gap-2 border-b border-line p-3 last:border-b-0"
+      className="flex min-w-0 flex-col gap-2 py-3 first:pt-0 last:pb-0"
       data-testid={`device-key-phone-${phone.id}`}
       data-device-key-state={phone.state}
     >
@@ -1105,7 +1116,7 @@ function UnapprovablePhoneRow({ phone }: { phone: DeviceKey }) {
   const copy = unapprovableCopy(phone);
   return (
     <li
-      className="flex min-w-0 items-start gap-2 border-b border-line p-3 last:border-b-0"
+      className="flex min-w-0 items-start gap-2 py-3 first:pt-0 last:pb-0"
       data-testid={`device-key-unapprovable-${phone.id}`}
       data-device-key-state={phone.state}
     >

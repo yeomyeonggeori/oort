@@ -46,25 +46,6 @@ export const PROVIDER_MODES: Choice[] = [
   },
 ];
 
-/** `WorkHostEngineRoutes.allowedEngines` (migration 040 CHECK). */
-export const WORK_ENGINES: Choice[] = [
-  {
-    id: "opencode",
-    label: "opencode",
-    detail: "동봉 엔진. 아무 것도 고르지 않으면 이 값이 쓰여요.",
-  },
-  {
-    id: "goose",
-    label: "goose",
-    detail: "동봉 엔진. opencode 대신 쓸 때 골라요.",
-  },
-  {
-    id: "codex-local",
-    label: "codex-local",
-    detail: "호스트에 설치된 Codex에 붙어요. 호스트 페어링이 먼저 필요해요.",
-  },
-];
-
 /**
  * `WorkTierPolicyRoutes.validatedMode`. The tier NUMBERS (T1/T2/T3) are an
  * internal ADR-0125 vocabulary and stay out of user copy, exactly as on macOS:

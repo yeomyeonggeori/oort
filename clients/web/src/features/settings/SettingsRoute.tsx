@@ -225,6 +225,8 @@ export function SettingsRoute() {
   }
 
   const current = sections.find((item) => item.id === section) ?? sections[0];
+  // 실행 호스트 행이 목차에 서 있는가: 같은 판정이 기기 페이지의 내 재개 정책 카드를 연다.
+  const workPolicy = sections.some((item) => item.id === "code");
 
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="settings-route">
@@ -280,19 +282,22 @@ export function SettingsRoute() {
           // inputs to mean anything, so the cache goes first.
           onRetry={() => resetSettingsQueries(queryClient)}
         >
-          {/* 옛 섹션 본문은 아직 카드 문법으로 다시 짜이지 않았다(S3~S5; 프로필은 S2가 끝냈다). 판(`--sheet`) 위에
+          {/* 옛 섹션 본문은 아직 카드 문법으로 다시 짜이지 않았다(S3b~S5; 프로필은 S2, 모양은 S3a, 기기·실행 호스트는 S4가 끝냈다). 판(`--sheet`) 위에
               맨바닥으로 놓으면 보조 알약(`surface-muted`)이 판에 묻혀 보이지 않으므로(대비
               1.01), 본문 전체를 카드 한 장(`--surface`)에 얹는다. 페이지를 이식하는 슬라이스가
               그 페이지의 이 껍질을 걷고 `SettingsSection` 카드로 바꾼다. 옛 AI 연결 화면은
               자기 판(곁판 포함)을 가져서 껍질과 폭 제한 없이 그대로 둔다. */}
           {section === "ai" ||
           section === "appearance" ||
-          section === "profile" ? (
+          section === "profile" ||
+          section === "devices" ||
+          section === "code" ? (
             <SectionPage
               section={section}
               offline={offline}
               workspaceId={workspaceId}
               memberId={session.member.id}
+              workPolicy={workPolicy}
             />
           ) : (
             <Card
@@ -317,18 +322,20 @@ export function SettingsRoute() {
  * 한 페이지의 본문. 페이지 머리(h1)가 제목을 이미 말하므로 첫 본문은 자기 제목(h2)을
  * 접고 설명 줄만 남긴다(`SectionTitleHiddenContext`). 합친 페이지는 옛 구획 본문을 그
  * 아래에 **제 제목을 단 채** 잇는다: 링크 미리보기·터미널은 S3·S5가 카드로 다시 짜면서
- * 흡수한다. 프로필은 S2가 카드로 다시 짜서 계정을 흡수했다(껍질 없이 제 카드를 든다).
+ * 흡수한다. 프로필은 S2가 카드로 다시 짜서 계정을 흡수했다(껍질 없이 제 카드를 든다). 기기·실행 호스트는 S4가 같은 문법으로 다시 짰다.
  */
 function SectionPage({
   section,
   offline,
   workspaceId,
   memberId,
+  workPolicy = false,
 }: {
   section: SettingsSectionId;
   offline: boolean;
   workspaceId: string;
   memberId: string;
+  workPolicy?: boolean;
 }) {
   const primary = (node: ReactNode) => (
     <SectionTitleHiddenContext.Provider value={true}>
@@ -350,12 +357,13 @@ function SectionPage({
         </>
       );
     case "devices":
-      return primary(
+      return (
         <DevicesSection
           offline={offline}
           workspaceId={workspaceId}
           memberId={memberId}
-        />,
+          workPolicy={workPolicy}
+        />
       );
     case "workspace":
       return primary(
@@ -376,12 +384,12 @@ function SectionPage({
     case "usage":
       return primary(<UsageSection workspaceId={workspaceId} />);
     case "code":
-      return primary(
+      return (
         <WorkHostSection
           workspaceId={workspaceId}
           memberId={memberId}
           offline={offline}
-        />,
+        />
       );
     case "updates":
       return primary(<UpdateSection />);

@@ -493,15 +493,6 @@ async function installMocks(context) {
       diagnostics: [LONG_KO, LONG_KO],
     })
   );
-  await context.route("**/v1/provider/work-host-engine", (route) =>
-    json(route, {
-      engine: "docker",
-      source: "database",
-      updatedBy: "곽성재",
-      updatedAtMs: Date.now(),
-      schema: "momo.work_host_engine.v0",
-    })
-  );
   await context.route("**/v1/workspaces/*/work-hosts", (route) =>
     json(route, { workHosts: WORK_HOSTS })
   );
