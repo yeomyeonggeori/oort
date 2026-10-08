@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Smartphone } from "lucide-react";
 import { ApiError } from "@momo/core/lib/api";
 import { NetworkError } from "@momo/core/lib/http";
 import { encodeQr, qrModulePath } from "@momo/core/lib/qr";
@@ -356,15 +355,15 @@ export function DeviceLinkCard({
 
   return (
     <div
-      className="flex min-w-0 flex-col items-start gap-3 rounded-md border border-line bg-surface-raised p-4 shadow-sm"
+      className={
+        // 설정 > 기기에서는 이미 「폰 연결」 카드 안이다(#3578): 상자를 한 겹 더 두르지 않는다.
+        // 채널 카드 안(`embedded`)은 자기 상자가 이 상자다.
+        embedded
+          ? "flex min-w-0 flex-col items-start gap-3 rounded-md border border-line bg-surface-raised p-4 shadow-sm"
+          : "flex min-w-0 flex-col items-start gap-3 p-4"
+      }
       data-testid="device-link-card"
     >
-      {!embedded && (
-        <div className="flex items-center gap-2">
-          <Smartphone className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
-          <h3 className="text-body font-semibold text-ink">폰 연결</h3>
-        </div>
-      )}
       <p
         className="break-keep text-body text-ink-muted"
         data-testid={

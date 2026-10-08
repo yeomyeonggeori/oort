@@ -337,14 +337,20 @@ export function KeyValueRows({ rows }: { rows: KeyValue[] }) {
 export function OperatorNotice({
   who,
   contact,
+  bare = false,
 }: {
   /** Full sentence: Korean particles depend on the noun, so callers write it. */
   who: string;
   contact: string;
+  /** 이미 카드 안에 있다: 상자를 한 겹 더 두르지 않는다(#3578). */
+  bare?: boolean;
 }) {
   return (
     <div
-      className="flex flex-col gap-2 rounded-md border border-line bg-surface-raised p-4"
+      className={cn(
+        "flex flex-col gap-2",
+        !bare && "rounded-md border border-line bg-surface-raised p-4"
+      )}
       data-testid="operator-notice"
       role="status"
     >

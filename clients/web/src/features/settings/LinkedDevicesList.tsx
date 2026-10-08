@@ -12,7 +12,9 @@ import {
 } from "@momo/core/features/auth/linkedDevices";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner, Skeleton } from "@/features/common/States";
-import { ConfirmButton, Subsection } from "./SettingsFields";
+import { ConfirmButton } from "./SettingsFields";
+import { SettingsSection } from "./shell/SettingsSection";
+import { CardBody } from "./workTierPolicy";
 import {
   LINKED_DEVICES_QUERY_KEY,
   linkedDevicesQuery,
@@ -154,44 +156,56 @@ export function LinkedDevicesList({
   const revokingId = revoke.isPending ? (revoke.variables ?? null) : null;
   const busy = revoke.isPending;
 
+  const hasNotes =
+    (list.isSuccess && rows.length > 0 && (hasCurrent || offline)) ||
+    Boolean(unlinkNote) ||
+    Boolean(goneNotice) ||
+    Boolean(rowError);
+
   return (
-    <Subsection
+    <SettingsSection
       title="연결된 기기"
-      lines={[
-        "QR로 연결한 기기예요. 마지막으로 쓴 시각은 아직 기록하지 않았어요.",
-      ]}
+      description="QR로 연결한 기기예요. 마지막으로 쓴 시각은 아직 기록하지 않았어요."
+      testId="linked-devices-card"
     >
       {list.isPending && (
-        <div role="status" data-testid="linked-devices-loading">
-          <span className="sr-only">연결된 기기를 불러오고 있어요.</span>
-          <Skeleton ready={false} rows={2} className="p-0" />
-        </div>
+        <CardBody>
+          <div role="status" data-testid="linked-devices-loading">
+            <span className="sr-only">연결된 기기를 불러오고 있어요.</span>
+            <Skeleton ready={false} rows={2} className="p-0" />
+          </div>
+        </CardBody>
       )}
 
       {list.isError && (
-        <InlineBanner
-          message={listFailureCopy(list.error)}
-          actionLabel="다시 시도"
-          onAction={() => void list.refetch()}
-          className="px-0"
-          separator={false}
-          testId="linked-devices-error"
-        />
+        <CardBody>
+          <InlineBanner
+            message={listFailureCopy(list.error)}
+            actionLabel="다시 시도"
+            onAction={() => void list.refetch()}
+            className="px-0"
+            separator={false}
+            testId="linked-devices-error"
+          />
+        </CardBody>
       )}
 
       {list.isSuccess && rows.length === 0 && (
-        <p
-          className="break-keep text-body text-ink-muted"
-          data-testid="linked-devices-empty"
-        >
-          연결된 기기가 없어요.
-        </p>
+        <CardBody>
+          <p
+            className="break-keep text-body text-ink-muted"
+            data-testid="linked-devices-empty"
+          >
+            연결된 기기가 없어요.
+          </p>
+        </CardBody>
       )}
 
+      {/* 행이 카드 폭을 다 쓰고 행 사이만 선 하나다(카드 안에 상자를 한 겹 더 두르지 않는다). */}
       {list.isSuccess && rows.length > 0 && (
         <ul
           ref={listRef}
-          className="flex flex-col overflow-hidden rounded-md border border-line"
+          className="flex flex-col divide-y divide-line"
           data-testid="linked-devices-list"
         >
           {rows.map((device) => (
@@ -209,23 +223,54 @@ export function LinkedDevicesList({
         </ul>
       )}
 
-      {list.isSuccess && rows.length > 0 && hasCurrent && (
-        <p
-          id={currentReasonId}
-          className="break-keep text-meta text-ink-muted"
-          data-testid="linked-devices-current-reason"
-        >
-          {CURRENT_REASON}
-        </p>
-      )}
-      {list.isSuccess && rows.length > 0 && offline && (
-        <p
-          id={offlineReasonId}
-          className="break-keep text-meta text-ink-muted"
-          data-testid="linked-devices-offline"
-        >
-          {OFFLINE_REASON}
-        </p>
+      {hasNotes && (
+        <CardBody>
+          {list.isSuccess && rows.length > 0 && hasCurrent && (
+            <p
+              id={currentReasonId}
+              className="break-keep text-meta text-ink-muted"
+              data-testid="linked-devices-current-reason"
+            >
+              {CURRENT_REASON}
+            </p>
+          )}
+          {list.isSuccess && rows.length > 0 && offline && (
+            <p
+              id={offlineReasonId}
+              className="break-keep text-meta text-ink-muted"
+              data-testid="linked-devices-offline"
+            >
+              {OFFLINE_REASON}
+            </p>
+          )}
+          {unlinkNote && (
+            <p
+              className="break-keep text-meta text-ink-muted"
+              role="status"
+              data-testid="linked-devices-unlink-note"
+            >
+              {unlinkNote}
+            </p>
+          )}
+          {goneNotice && (
+            <p
+              className="break-keep text-meta text-ink-muted"
+              role="status"
+              data-testid="linked-devices-gone"
+            >
+              {goneNotice}
+            </p>
+          )}
+          {rowError && (
+            <p
+              className="break-keep text-meta text-danger"
+              role="alert"
+              data-testid="linked-devices-revoke-error"
+            >
+              {rowError}
+            </p>
+          )}
+        </CardBody>
       )}
 
       <p
@@ -235,35 +280,7 @@ export function LinkedDevicesList({
       >
         {removed}
       </p>
-
-      {unlinkNote && (
-        <p
-          className="break-keep text-meta text-ink-muted"
-          role="status"
-          data-testid="linked-devices-unlink-note"
-        >
-          {unlinkNote}
-        </p>
-      )}
-      {goneNotice && (
-        <p
-          className="break-keep text-meta text-ink-muted"
-          role="status"
-          data-testid="linked-devices-gone"
-        >
-          {goneNotice}
-        </p>
-      )}
-      {rowError && (
-        <p
-          className="break-keep text-meta text-danger"
-          role="alert"
-          data-testid="linked-devices-revoke-error"
-        >
-          {rowError}
-        </p>
-      )}
-    </Subsection>
+    </SettingsSection>
   );
 }
 
@@ -297,7 +314,7 @@ function LinkedDeviceRow({
   return (
     <li
       className={cn(
-        "flex min-w-0 gap-3 border-b border-line p-3 last:border-b-0",
+        "flex min-w-0 gap-3 px-4 py-3",
         asking ? "flex-col items-stretch" : "items-start justify-between"
       )}
       data-testid={`linked-device-row-${device.id}`}

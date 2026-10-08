@@ -69,8 +69,10 @@ export interface SettingsSectionMeta {
   surface?: SurfaceId;
   /**
    * In the desktop shell the row stands whatever `surface` says (#2778 planner
-   * decision): 「실행 호스트」 is where this Mac BECOMES a host, so hiding it
-   * until a host is online would hide the only door to the first one.
+   * decision; kept by S4 #3578): 「실행 호스트」 is the workspace's registry of hosts
+   * and its default resume policy. Registering THIS Mac moved to 「기기」 (personal),
+   * which is always on the desktop, so the row no longer hides a first door; it
+   * stays so that a desktop member can still read the registry before any host is online.
    */
   desktopAlways?: boolean;
 }

@@ -277,6 +277,8 @@ b97d2240178b601d1f5e9b1183b36c00a5a14641:clients/web/src/features/welcome/freshS
 0ee16d8edae6298e9440c0ff82c121d7150cdedf:packages/momo-core/src/features/auth/deviceKeys.test.ts:generic-api-key:20
 #   clients/web/scripts/capture-device-keys.mjs:109  [generic-api-key]  시험용 기기 공개키 상수
 62b4bfbfcf979872ad51a1aacb8d7dc04f91ed79:clients/web/scripts/capture-device-keys.mjs:generic-api-key:109
+#   clients/web/scripts/capture-this-mac.mjs:117  [generic-api-key]  시험용 기기 공개키 상수(capture-device-keys.mjs와 같은 값, #3611)
+c00d3127d8761de2248cbc68815930414769e5e6:clients/web/scripts/capture-this-mac.mjs:generic-api-key:117
 #   clients/web/src/features/settings/DeviceKeysBlock.test.tsx:16  [generic-api-key]  시험용 기기 공개키 상수
 0ee16d8edae6298e9440c0ff82c121d7150cdedf:clients/web/src/features/settings/DeviceKeysBlock.test.tsx:generic-api-key:16
 #   clients/web/src/features/settings/DeviceKeysBlock.test.tsx:17  [generic-api-key]  시험용 기기 공개키 상수

@@ -31,7 +31,6 @@ import {
   relativeSince,
   slugError,
   sortWorkHosts,
-  WORK_ENGINES,
   WORK_TIER_MODES,
   workHostCounts,
   workHostIdTail,
@@ -213,14 +212,6 @@ describe("provider link presentation (ADR-0004 write-only bearer)", () => {
 });
 
 describe("catalogs match the server enums", () => {
-  it("offers exactly the three work engines migration 040 allows", () => {
-    expect(WORK_ENGINES.map((e) => e.id)).toEqual([
-      "opencode",
-      "goose",
-      "codex-local",
-    ]);
-  });
-
   it("offers exactly the three provider modes AgentProviderMode allows", () => {
     expect([...PROVIDER_MODES.map((m) => m.id)].sort()).toEqual([
       "external-hermes",

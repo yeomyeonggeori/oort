@@ -5,7 +5,6 @@
 // momowebqa before this file was written; the response types are transcribed
 // from the Swift DTOs, not guessed:
 //   server/Sources/MomoServer/Routes/ProviderLinkRoutes.swift   (link + test)
-//   server/Sources/MomoServer/Routes/WorkHostEngineRoutes.swift (engine)
 //   server/Sources/MomoServer/Routes/WorkTierPolicyRoutes.swift (tier policy)
 //   server/Sources/MomoServer/Routes/WorkHostRoutes.swift       (host registry)
 //   server/Sources/MomoServer/Routes/WorkspaceRoutes.swift      (create/read)
@@ -355,28 +354,6 @@ export function putProviderChain(
 export function deleteProviderChain(): Promise<unknown> {
   return settingsRequest<unknown>("/v1/provider/link/chain", {
     method: "DELETE",
-  });
-}
-
-// --- 코드 실행 호스트: GET/PUT /v1/provider/work-host-engine ----------------
-
-/** `momo.work_host_engine.v0`. source="default" means no row was ever written. */
-export interface WorkHostEngine {
-  engine: string;
-  source: string;
-  updatedBy?: string;
-  updatedAtMs?: number;
-  schema: string;
-}
-
-export function fetchWorkHostEngine(): Promise<WorkHostEngine> {
-  return settingsRequest<WorkHostEngine>("/v1/provider/work-host-engine");
-}
-
-export function putWorkHostEngine(engine: string): Promise<WorkHostEngine> {
-  return settingsRequest<WorkHostEngine>("/v1/provider/work-host-engine", {
-    method: "PUT",
-    body: JSON.stringify({ engine }),
   });
 }
 
