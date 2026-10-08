@@ -260,6 +260,12 @@ pub async fn mark_work_host_revoked(
     .bind(host_id)
     .execute(&mut *conn)
     .await?;
+    // #3590: a revoked host announces nothing and offers no folder; drop what
+    // it had issued in the same transaction (idempotent).
+    sqlx::query("DELETE FROM work_host_folder WHERE host_id = $1")
+        .bind(host_id)
+        .execute(&mut *conn)
+        .await?;
     Ok(())
 }
 
@@ -298,7 +304,8 @@ pub struct WorkHostFolderRecord {
 }
 
 /// Make `folders` exactly the set `host_id` has announced (#3590): rows the host
-/// no longer lists go, the rest are upserted. A revoked host writes nothing, so
+/// no longer lists go, the rest are upserted only when something changed (a
+/// beat every 30 s that repeats itself writes nothing). A revoked host writes nothing, so
 /// a revoke that lands between the heartbeat's authentication and this call
 /// still wins. `false` = the host is revoked or gone.
 pub async fn replace_work_host_folders(
@@ -335,7 +342,9 @@ pub async fn replace_work_host_folders(
              VALUES ($1, $2, $3, $4, $5) \
              ON CONFLICT (host_id, folder_id) DO UPDATE \
                 SET display_name = EXCLUDED.display_name, kind = EXCLUDED.kind, \
-                    updated_at = now()",
+                    updated_at = now() \
+              WHERE (work_host_folder.display_name, work_host_folder.kind) \
+                    IS DISTINCT FROM (EXCLUDED.display_name, EXCLUDED.kind)",
         )
         .bind(workspace_id)
         .bind(host_id)

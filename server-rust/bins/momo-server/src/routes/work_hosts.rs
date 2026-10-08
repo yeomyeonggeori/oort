@@ -338,10 +338,10 @@ pub(crate) fn validated_announced_folders(
         if !(1..=80).contains(&name_len)
             || name
                 .chars()
-                .any(|c| c == '/' || c == '\\' || c.is_control())
+                .any(momo_wire::folder_name::is_forbidden_name_char)
         {
             return Err(ApiError::bad_request(
-                "folder displayName must be 1...80 characters without a path separator",
+                "folder displayName must be 1...80 characters without a path separator or invisible character",
             ));
         }
         match folder.kind.as_str() {

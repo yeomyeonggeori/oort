@@ -17,6 +17,7 @@
 //!   signing payloads and `record_provenance`, the **only** `action_signature`
 //!   writer in the workspace (migration 060).
 
+pub mod folder_name;
 pub mod human_control;
 pub mod payload;
 pub mod permission_preview;

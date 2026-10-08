@@ -12,20 +12,31 @@
 -- host); `project` is a folder the owner allowed on the desktop.
 -- =============================================================================
 
+-- The composite FK below needs a target: a folder row cannot name a host of
+-- another workspace even if RLS were ever bypassed.
+ALTER TABLE work_host
+  ADD CONSTRAINT work_host_id_workspace_uq UNIQUE (id, workspace_id);
+
 CREATE TABLE work_host_folder (
   workspace_id  uuid NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-  host_id       uuid NOT NULL REFERENCES work_host(id) ON DELETE CASCADE,
+  host_id       uuid NOT NULL,
   folder_id     text NOT NULL,
   display_name  text NOT NULL,
   kind          text NOT NULL,
   updated_at    timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (host_id, folder_id),
+  CONSTRAINT work_host_folder_host_fk
+    FOREIGN KEY (host_id, workspace_id)
+    REFERENCES work_host (id, workspace_id) ON DELETE CASCADE,
   CONSTRAINT work_host_folder_id_ck
     CHECK (folder_id ~ '^[A-Za-z0-9_-]{1,64}$'),
   CONSTRAINT work_host_folder_name_ck
     CHECK (
       length(btrim(display_name)) BETWEEN 1 AND 80
-      AND display_name !~ '[/\\]'
+      -- Same set as momo_wire::folder_name::FORBIDDEN_NAME_RANGES (a test feeds
+      -- every range to this constraint): path separators and look-alikes,
+      -- control characters, and format characters that reorder or hide text.
+      AND display_name !~ '[/\\\u00AD\u0600-\u0605\u061C\u06DD\u070F\u08E2\u180E\u200B-\u200F\u202A-\u202E\u2044\u2060-\u2064\u2066-\u206F\u2215\u2216\u29F5\u29F8\uFEFF\uFF0F\uFF3C\uFFF9-\uFFFB\U000E0001\U000E0020-\U000E007F]'
       AND display_name !~ '[[:cntrl:]]'
     ),
   CONSTRAINT work_host_folder_kind_ck

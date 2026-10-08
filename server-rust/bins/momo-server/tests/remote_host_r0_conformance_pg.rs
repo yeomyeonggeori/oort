@@ -4518,3 +4518,146 @@ async fn r3590_2_a_host_announces_names_never_paths_and_the_default_rule_holds()
     assert_eq!(ok.status(), 200);
     assert_eq!(folder_rows(&su, laptop).await, 0);
 }
+
+/// #3590 security review: the revoke, rewrite-only-on-change, look-alike name,
+/// cross-workspace and FORCE-RLS properties of the folder table.
+/// Sabotage: drop the DELETE in `mark_work_host_revoked` (M1), the `WHERE ...
+/// IS DISTINCT FROM` in `replace_work_host_folders` (M2), the Cf/look-alike
+/// ranges in `momo_wire::folder_name` or the migration's class (L1), the
+/// composite FK (L2), or FORCE RLS (L4), and the matching assertion fails.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn r3590_3_review_findings_revoke_unchanged_rewrites_lookalikes_and_tenancy() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let other = seed_tenant(&su, &app_pool).await;
+    let (laptop, seed) = seed_laptop(&su, &tenant).await;
+    let (other_laptop, _) = seed_laptop(&su, &other).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+
+    // ---- L4: FORCE RLS is on, as the bootstrap roles rely on ---------------
+    let (rls, forced): (bool, bool) = sqlx::query_as(
+        "SELECT relrowsecurity, relforcerowsecurity FROM pg_class \
+          WHERE relname = 'work_host_folder' AND relkind = 'r'",
+    )
+    .fetch_one(&su)
+    .await
+    .expect("pg_class");
+    assert!(rls && forced, "work_host_folder must be ENABLE + FORCE RLS");
+
+    // ---- L4: a heartbeat sent down another workspace's path is refused ------
+    let crossed = SignedRequest::new(
+        reqwest::Method::POST,
+        &heartbeat_path(other.workspace, laptop),
+        other.workspace,
+        laptop,
+        &seed,
+        serde_json::to_vec(&two_folders()).unwrap(),
+    )
+    .send(&http, &base)
+    .await;
+    assert_eq!(
+        crossed.status(),
+        401,
+        "a host's key signs nothing elsewhere"
+    );
+    assert_eq!(folder_rows(&su, laptop).await, 0);
+    assert_eq!(folder_rows(&su, other_laptop).await, 0);
+
+    // ---- L2: a folder row cannot name a host of another workspace ----------
+    let crossed_row = sqlx::query(
+        "INSERT INTO work_host_folder (workspace_id, host_id, folder_id, display_name, kind) \
+         VALUES ($1, $2, 'x', 'x', 'project')",
+    )
+    .bind(other.workspace)
+    .bind(laptop)
+    .execute(&su)
+    .await;
+    assert!(crossed_row.is_err(), "the composite FK must refuse it");
+
+    // ---- M2: an unchanged announcement rewrites nothing --------------------
+    let ok = announce_folders(&http, &base, &tenant, laptop, &seed, two_folders()).await;
+    assert_eq!(ok.status(), 200);
+    let snapshot = |su: PgPool| async move {
+        sqlx::query_as::<_, (String, String, String)>(
+            "SELECT folder_id, xmin::text, updated_at::text FROM work_host_folder \
+              WHERE host_id = $1 ORDER BY folder_id",
+        )
+        .bind(laptop)
+        .fetch_all(&su)
+        .await
+        .expect("snapshot")
+    };
+    let first = snapshot(su.clone()).await;
+    assert_eq!(first.len(), 2);
+    for _ in 0..2 {
+        let again = announce_folders(&http, &base, &tenant, laptop, &seed, two_folders()).await;
+        assert_eq!(again.status(), 200);
+    }
+    assert_eq!(
+        snapshot(su.clone()).await,
+        first,
+        "identical beats rewrote rows"
+    );
+    let renamed = json!({"folders": [
+        {"id": "fld_repo", "displayName": "momo 2", "kind": "project"},
+        {"id": "fld_ask", "displayName": "질문용 폴더", "kind": "question"}]});
+    let ok = announce_folders(&http, &base, &tenant, laptop, &seed, renamed).await;
+    assert_eq!(ok.status(), 200);
+    let after = snapshot(su.clone()).await;
+    assert_ne!(after[1], first[1], "a changed name is written");
+    assert_eq!(after[0], first[0], "the untouched row is not");
+
+    // ---- L1: look-alike separators and invisible/reordering characters -----
+    for name in [
+        "a\u{2215}b",
+        "a\u{FF0F}b",
+        "a\u{2044}b",
+        "a\u{202E}b",
+        "a\u{200B}b",
+        "a\u{FEFF}",
+        "a\u{2066}b",
+    ] {
+        let body = json!({"folders": [{"id": "l1", "displayName": name, "kind": "project"}]});
+        let response = announce_folders(&http, &base, &tenant, laptop, &seed, body).await;
+        assert_eq!(
+            response.status(),
+            400,
+            "{name:?} was accepted by the server"
+        );
+    }
+    // The table agrees with the shared rule on every range's two ends.
+    for &(lo, hi) in momo_wire::folder_name::FORBIDDEN_NAME_RANGES {
+        for cp in [lo, hi] {
+            let name = format!("a{}b", char::from_u32(cp).expect("scalar"));
+            let inserted = sqlx::query(
+                "INSERT INTO work_host_folder (workspace_id, host_id, folder_id, display_name, kind) \
+                 VALUES ($1, $2, 'rng', $3, 'project')",
+            )
+            .bind(tenant.workspace)
+            .bind(laptop)
+            .bind(&name)
+            .execute(&su)
+            .await;
+            assert!(inserted.is_err(), "the table accepted U+{cp:04X}");
+        }
+    }
+
+    // ---- M1: a revoked host keeps no folders --------------------------------
+    assert_eq!(folder_rows(&su, laptop).await, 2);
+    let token = login(&http, &base, tenant.workspace, &tenant.owner_email).await;
+    let revoked = http
+        .delete(format!(
+            "{base}/v1/workspaces/{}/work-hosts/{laptop}",
+            tenant.workspace
+        ))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("revoke");
+    assert_eq!(revoked.status(), 200);
+    assert_eq!(folder_rows(&su, laptop).await, 0, "revoke left folder rows");
+}

@@ -318,7 +318,7 @@ impl WorkdConfig {
             if !(1..=80).contains(&length)
                 || name
                     .chars()
-                    .any(|c| c == '/' || c == '\\' || c.is_control())
+                    .any(momo_wire::folder_name::is_forbidden_name_char)
             {
                 return invalid(
                     "working_directory_name must be 1...80 characters without a path separator"

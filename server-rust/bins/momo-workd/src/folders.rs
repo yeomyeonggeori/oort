@@ -84,7 +84,7 @@ pub fn presentable_name(raw: &str) -> Option<String> {
     let cleaned: String = raw
         .chars()
         .map(|c| {
-            if c == '/' || c == '\\' || c.is_control() {
+            if momo_wire::folder_name::is_forbidden_name_char(c) {
                 ' '
             } else {
                 c
@@ -259,6 +259,12 @@ mod tests {
     fn names_are_made_presentable_or_replaced() {
         assert_eq!(presentable_name("a/b\\c\nd").as_deref(), Some("a b c d"));
         assert_eq!(presentable_name("   "), None);
+        // Look-alike separators and invisible/reordering characters (L1).
+        assert_eq!(
+            presentable_name("a\u{2215}b\u{FF0F}c\u{2044}d\u{202E}e\u{200B}f").as_deref(),
+            Some("a b c d e f")
+        );
+        assert_eq!(presentable_name("\u{202E}\u{200B}"), None);
         assert_eq!(
             presentable_name(&"가".repeat(200)).unwrap().chars().count(),
             80

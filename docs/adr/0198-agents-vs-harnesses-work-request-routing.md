@@ -277,7 +277,7 @@ D7의 소유자 호출은 본문 D2가 이미 정한 「member host 레인은 D1
 
 **전송과 저장.**
 - host는 서명된 v2 heartbeat 본문 `{folders:[{id, displayName, kind}]}`로 알린다(본문 digest가 서명에 들어 있고 새 서명 경로가 없다). `folders`가 없거나 본문이 비면 저장분을 그대로 두고 `[]`면 비운다. 최대 32개, `question`은 호스트당 하나.
-- 새 테넌트 테이블 `work_host_folder`(migration 121, RLS FORCE). `folder_id`는 `[A-Za-z0-9_-]{1,64}`, `display_name`은 1…80자에 경로 구분자·제어문자 금지를 **DB CHECK로도** 둔다. 경로를 이름·id·`path` 필드로 보내면 400이고 값을 되돌려 말하지 않는다.
+- 새 테넌트 테이블 `work_host_folder`(migration 121, RLS FORCE). `folder_id`는 `[A-Za-z0-9_-]{1,64}`, `display_name`은 1…80자에 경로 구분자·제어문자 금지를 **DB CHECK로도** 둔다. 경로를 이름·id·`path` 필드로 보내면 400이고 값을 되돌려 말하지 않는다. 이름은 슬래시 모양 문자(U+2044·2215·FF0F 등)와 보이지 않거나 방향을 바꾸는 서식 문자(Cf: U+202E·제로폭 등)도 거부하고, 이 집합은 `momo_wire::folder_name` 한 곳에서 server·workd·DB CHECK가 같이 쓴다(시험이 모든 범위를 DB에 먹인다). 폴더 행은 `(host_id, workspace_id)` 복합 FK로 같은 워크스페이스의 호스트만 가리키고, 호스트가 해지되면 같은 트랜잭션에서 지운다.
 - host는 id를 처음 볼 때 무작위로 발급해 상태 폴더 `folders.json`(0600)에 경로와 함께 기억한다. 경로는 이 Mac 밖으로 나가지 않는다.
 
 **읽기 가림.** `GET …/work-hosts`·revoke 응답의 `folders`·`defaultFolderId`는 **그 호스트의 소유자 본인에게, 해지되지 않은 호스트에서만** 나간다. 남의 개인 맥은 §8.8의 같은 함수(`dto_for_viewer`)에서 None으로 지워져 관리자도 받지 못하고, 팀 호스트(`scope=workspace`)도 소유자 외에는 받지 못한다(spawn 대상은 어차피 소유자의 member host다). 남의 호스트의 폴더는 조회조차 하지 않는다.
