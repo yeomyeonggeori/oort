@@ -70,6 +70,9 @@ pub const CODE_SUSPENDED: &str = "personal_agent_suspended";
 /// The alias is taken by a member (human, agent or switched off) of this workspace.
 pub const CODE_ALIAS_TAKEN: &str = "personal_agent_alias_taken";
 pub const CODE_NOT_FOUND: &str = "personal_agent_not_found";
+/// A hosted connection or live credential is still attached to the agent being
+/// converted; revoking them is #3567's step.
+pub const CODE_CONNECTIONS_REMAIN: &str = "personal_agent_connections_remain";
 
 fn summary(row: &PersonalAgentRow, owner_display_name: &str) -> PersonalAgentSummaryDto {
     PersonalAgentSummaryDto {
@@ -223,7 +226,7 @@ pub async fn enable(
 
                 // In-place conversion of the caller's own subscription agent.
                 if let Some(agent_id) = convert {
-                    if !momo_agent::mark_personal_agent_in_tx(
+                    match momo_agent::mark_personal_agent_in_tx(
                         conn,
                         workspace_id,
                         actor,
@@ -232,13 +235,24 @@ pub async fn enable(
                     )
                     .await?
                     {
-                        // Someone else's, another harness, a personal-key agent,
-                        // already personal, dead or not an agent: one answer.
-                        return Ok(Err(ApiError::coded(
-                            StatusCode::NOT_FOUND,
-                            CODE_NOT_FOUND,
-                            "no convertible agent of yours with that id",
-                        )));
+                        momo_agent::MarkOutcome::Marked => {}
+                        momo_agent::MarkOutcome::ConnectionsRemain => {
+                            return Ok(Err(ApiError::coded(
+                                StatusCode::CONFLICT,
+                                CODE_CONNECTIONS_REMAIN,
+                                "disconnect this agent's hosted connection before converting it",
+                            )));
+                        }
+                        momo_agent::MarkOutcome::NotConvertible => {
+                            // Someone else's, a team-callable (workspace-scope)
+                            // agent, another harness, a personal-key agent,
+                            // already personal, dead or not an agent: one answer.
+                            return Ok(Err(ApiError::coded(
+                                StatusCode::NOT_FOUND,
+                                CODE_NOT_FOUND,
+                                "no convertible agent of yours with that id",
+                            )));
+                        }
                     }
                     let Some(row) = momo_agent::find_owned_personal_agent_in_tx(
                         conn,
@@ -308,14 +322,17 @@ pub async fn enable(
                         return Ok(Err(ApiError::forbidden("active human owner required")))
                     }
                 };
-                if !momo_agent::mark_personal_agent_in_tx(
-                    conn,
-                    workspace_id,
-                    actor,
-                    member.id,
-                    harness,
-                )
-                .await?
+                if !momo_agent::mark_agent_owner_only_in_tx(conn, workspace_id, member.id, harness)
+                    .await?
+                    || momo_agent::mark_personal_agent_in_tx(
+                        conn,
+                        workspace_id,
+                        actor,
+                        member.id,
+                        harness,
+                    )
+                    .await?
+                        != momo_agent::MarkOutcome::Marked
                 {
                     return Err(momo_db::DbError::from(momo_db::sqlx::Error::RowNotFound));
                 }

@@ -2920,7 +2920,9 @@ paths:
         back on when the owner had switched it off; a different alias is 409 `personal_agent_exists`.
         `agentMemberId` converts the caller's own existing `owner_only` subscription agent of the
         same harness IN PLACE (same member id, handle and history; #3567); `alias` must then be
-        omitted. Not governed by MOMO_SUBSCRIPTION_AGENTS_ENABLED or
+        omitted. Only a live `owner_only` agent converts: a workspace-scope agent is 404, and one
+        that still has a hosted connection or live credential is 409 `personal_agent_connections_remain`
+        (revoking is #3567's). Not governed by MOMO_SUBSCRIPTION_AGENTS_ENABLED or
         MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED.
       security: [{bearerAuth: []}]
       parameters: [{$ref: "#/components/parameters/WorkspaceId"}]

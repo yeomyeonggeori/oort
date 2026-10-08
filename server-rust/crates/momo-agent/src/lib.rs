@@ -250,7 +250,7 @@ pub use owner_key::{agent_owner_only_brain_in_tx, mark_agent_owner_key_in_tx, Ow
 pub use personal::{
     find_owned_personal_agent_in_tx, find_owner_personal_agent_in_tx,
     list_owner_personal_agents_in_tx, lock_personal_agent_in_tx, mark_personal_agent_in_tx,
-    personal_agent_label, set_personal_agent_enabled_in_tx, PersonalAgentRow,
+    personal_agent_label, set_personal_agent_enabled_in_tx, MarkOutcome, PersonalAgentRow,
 };
 pub use provisioning::{
     agent_owner_in_tx, create_agent_identity_in_tx, default_enabled_tools,

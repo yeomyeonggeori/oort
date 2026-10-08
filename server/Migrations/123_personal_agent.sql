@@ -51,3 +51,36 @@ COMMENT ON COLUMN agent.personal_agent IS
   '#3591 ADR-0198 증보 1 D7: owner_only 구독 하네스를 소유자가 별칭으로 켠 개인 에이전트. 호스티드 연결 없음, 실행은 소유자 member host(서명 spawn). (workspace, owner, harness)당 하나.';
 COMMENT ON COLUMN agent.personal_disabled_at IS
   '#3591: 소유자가 끈 시각. member.status = suspended와 함께 쓴다. 관리자 정지(이 열 NULL)는 소유자가 다시 켤 수 없다.';
+
+-- 삭제·정지와의 상호작용 (독립 보안 검수 M2·M3)
+--
+-- M2: 부분 유니크 인덱스는 `member.deleted_at`을 모른다. 멤버가 삭제되면(deleted_at 또는
+--     status 'deleted') 같은 (소유자, 하네스)로 새로 켜려는 호출이 유니크 위반(500)이 되지 않도록
+--     삭제 시점에 이 행의 개인 에이전트 표지를 해제한다. 행과 핸들은 남는다(과거 메시지 author).
+-- M3: `personal_disabled_at`은 「소유자가 껐다」의 증거다. 소유자 경로(세션 로컬 GUC
+--     `momo.personal_owner_toggle = on`을 켠 문장)가 아닌 곳에서 member.status가 쓰이면(관리자
+--     정지·복구 등) 그 증거를 지운다. 그러면 소유자 `enable`이 관리자 정지를 풀 수 없고, 소유자가
+--     먼저 끈 뒤 관리자가 정지해도 마찬가지다.
+CREATE FUNCTION personal_agent_member_guard()
+RETURNS trigger LANGUAGE plpgsql
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  IF NEW.kind = 'agent' THEN
+    IF NEW.deleted_at IS NOT NULL OR NEW.status = 'deleted' THEN
+      UPDATE public.agent
+         SET personal_agent = false, personal_disabled_at = NULL
+       WHERE workspace_id = NEW.workspace_id AND member_id = NEW.id AND personal_agent;
+    ELSIF COALESCE(current_setting('momo.personal_owner_toggle', true), '') <> 'on' THEN
+      UPDATE public.agent
+         SET personal_disabled_at = NULL
+       WHERE workspace_id = NEW.workspace_id AND member_id = NEW.id
+         AND personal_disabled_at IS NOT NULL;
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER personal_agent_member_guard
+AFTER UPDATE OF status, deleted_at ON member
+FOR EACH ROW EXECUTE FUNCTION personal_agent_member_guard();

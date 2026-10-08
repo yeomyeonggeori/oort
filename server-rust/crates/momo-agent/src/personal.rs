@@ -98,7 +98,7 @@ pub async fn find_owner_personal_agent_in_tx(
            JOIN member m ON m.id = a.member_id AND m.workspace_id = a.workspace_id \
           WHERE a.workspace_id = $1 AND a.owner_human_id = $2 \
             AND a.personal_agent AND a.subscription_harness = $3 \
-            AND m.deleted_at IS NULL \
+            AND m.deleted_at IS NULL AND m.status::text <> 'deleted' \
           FOR UPDATE OF a"
     ))
     .bind(workspace_id)
@@ -153,37 +153,75 @@ pub async fn find_owned_personal_agent_in_tx(
     Ok(row.and_then(row_from))
 }
 
-/// Mark `agent_member_id` — the caller's own, not yet personal, live subscription
-/// agent or a fresh workspace-scope identity — as a personal agent of `harness`.
-/// This is the single transition (#3567's conversion uses the same statement):
-/// the member id, handle and every past message stay. `false` when no row
-/// matched (someone else's agent, another harness, a personal-key agent, an
-/// already personal one, a dead member).
+/// Why [`mark_personal_agent_in_tx`] did not mark.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkOutcome {
+    Marked,
+    /// Someone else's, a workspace-scope (team-callable hosted or external-card)
+    /// agent, another harness, a personal-key agent, already personal, dead or
+    /// not an agent: one answer.
+    NotConvertible,
+    /// A hosted connection or a live credential is still attached. Revoking
+    /// them is #3567's step, not this call's.
+    ConnectionsRemain,
+}
+
+/// Mark the caller's own, live, not yet personal `owner_only` agent of `harness`
+/// as a personal agent. The caller creates a fresh identity first with
+/// [`crate::mark_agent_owner_only_in_tx`]; a `workspace`-scope agent is never
+/// converted here (it is team-callable, and may be a hosted or external-card
+/// runtime). The member id, handle and every past message stay.
 pub async fn mark_personal_agent_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     owner_member_id: Uuid,
     agent_member_id: Uuid,
     harness: SubscriptionHarness,
-) -> Result<bool, DbError> {
-    let updated = sqlx::query(
-        "UPDATE agent a SET invocation_scope = 'owner_only', subscription_harness = $4, \
-                personal_agent = true, personal_disabled_at = NULL, updated_at = now() \
+) -> Result<MarkOutcome, DbError> {
+    let eligible: Option<i32> = sqlx::query_scalar(
+        "SELECT 1 FROM agent a \
           WHERE a.workspace_id = $1 AND a.member_id = $2 AND a.owner_human_id = $3 \
             AND NOT a.personal_agent AND NOT a.uses_owner_key \
-            AND (a.invocation_scope = 'workspace' \
-                 OR (a.invocation_scope = 'owner_only' AND a.subscription_harness = $4)) \
+            AND a.invocation_scope = 'owner_only' AND a.subscription_harness = $4 \
             AND EXISTS (SELECT 1 FROM member m \
                          WHERE m.workspace_id = a.workspace_id AND m.id = a.member_id \
-                           AND m.kind = 'agent' AND m.status = 'active' AND m.deleted_at IS NULL)",
+                           AND m.kind = 'agent' AND m.status = 'active' AND m.deleted_at IS NULL) \
+            FOR UPDATE OF a",
     )
     .bind(workspace_id)
     .bind(agent_member_id)
     .bind(owner_member_id)
     .bind(harness.as_str())
+    .fetch_optional(&mut *conn)
+    .await?;
+    if eligible.is_none() {
+        return Ok(MarkOutcome::NotConvertible);
+    }
+    let attached: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM hosted_agent_connection hc \
+                         WHERE hc.workspace_id = $1 AND hc.agent_member_id = $2 \
+                           AND hc.status NOT IN ('expired', 'disconnected')) \
+             OR EXISTS (SELECT 1 FROM token t \
+                         WHERE t.workspace_id = $1 AND t.actor_member_id = $2 \
+                           AND t.revoked_at IS NULL \
+                           AND (t.expires_at IS NULL OR t.expires_at > now()))",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    if attached {
+        return Ok(MarkOutcome::ConnectionsRemain);
+    }
+    sqlx::query(
+        "UPDATE agent SET personal_agent = true, personal_disabled_at = NULL, updated_at = now() \
+          WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
     .execute(&mut *conn)
     .await?;
-    Ok(updated.rows_affected() == 1)
+    Ok(MarkOutcome::Marked)
 }
 
 /// Switch a personal agent on or off. Off: `member.status = 'suspended'` and
@@ -217,12 +255,20 @@ pub async fn set_personal_agent_enabled_in_tx(
               WHERE workspace_id = $1 AND member_id = $2 AND personal_agent",
         )
     };
+    // The member trigger (migration 123) clears `personal_disabled_at` for any
+    // status write that is not this owner toggle.
+    sqlx::query("SELECT set_config('momo.personal_owner_toggle', 'on', true)")
+        .execute(&mut *conn)
+        .await?;
     let changed = sqlx::query(member_sql)
         .bind(workspace_id)
         .bind(agent_member_id)
         .execute(&mut *conn)
         .await?
         .rows_affected();
+    sqlx::query("SELECT set_config('momo.personal_owner_toggle', 'off', true)")
+        .execute(&mut *conn)
+        .await?;
     if changed != 1 {
         return Ok(false);
     }

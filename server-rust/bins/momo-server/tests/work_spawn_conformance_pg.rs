@@ -18,6 +18,8 @@
 //! | `an_alias_is_unique_and_nobody_touches_another_persons_personal_agent` (#3591) | drop the `owner_human_id` predicate of `find_owned_personal_agent_in_tx` / `mark_personal_agent_in_tx`, the `DuplicateHandle` arm, `require_human` or the one-per-harness lookup |
 //! | `a_switched_off_personal_agent_cannot_be_called_and_keeps_its_history` (#3591) | drop `status = 'suspended'` from the off switch, or the `personal_disabled_at` guard of turning back on |
 //! | `the_roster_reads_a_personal_agent_per_viewer` (#3591) | drop the owner comparison of `apply_personal_facts` |
+//! | `conversion_is_for_owner_only_agents_with_nothing_attached` (#3591 M1) | drop the `owner_only` / attached-connection checks of `mark_personal_agent_in_tx` |
+//! | `a_deleted_personal_agent_does_not_block_turning_on_again` (#3591 M2) | drop the delete branch of `personal_agent_member_guard` (migration 123) |
 //! | `a_full_pool_is_refused_before_the_nonce_is_spent` | drop `acquire_slot_in_tx` |
 //! | `shell_and_unregistered_tools_are_refused` | drop `remote_host_refuses_tool_in_tx` or `work_tool_is_enabled_in_tx` |
 //!
@@ -2283,7 +2285,32 @@ async fn an_alias_is_unique_and_nobody_touches_another_persons_personal_agent() 
             json!({ "harness": "codex", "alias": unique_alias("bot") }),
         )
         .await;
-    assert!(status == 403 || status == 401, "agent bearer: {status}");
+    assert_eq!(status, 403, "agent bearer");
+    let (status, _) = s.turn_off(&token, agent).await;
+    assert_eq!(status, 403, "agent bearer cannot switch off either");
+
+    // 3b. A guest is not a member who may own one.
+    let (guest, guest_email) = seed_human(&s.su, s.workspace, "guest").await;
+    let _ = guest;
+    let guest_access = login(&s.http, &s.base, s.workspace, &guest_email).await;
+    let (status, body) = s
+        .turn_on(
+            &guest_access,
+            json!({ "harness": "codex", "alias": unique_alias("g") }),
+        )
+        .await;
+    assert_eq!(status, 403, "{body}");
+    let (status, _) = s.turn_off(&guest_access, agent).await;
+    assert_eq!(status, 403);
+    let (status, _) = s
+        .call(
+            reqwest::Method::GET,
+            &s.personal_path(),
+            &guest_access,
+            None,
+        )
+        .await;
+    assert_eq!(status, 403);
 
     // 4. One personal agent per harness: a second alias is refused, the same
     // alias is the same agent.
@@ -2314,7 +2341,7 @@ async fn an_alias_is_unique_and_nobody_touches_another_persons_personal_agent() 
         json!({ "harness": "claude_code", "alias": "x-y", "agentMemberId": agent }),
     ] {
         let (status, body) = s.turn_on(&s.other_access, bad.clone()).await;
-        assert!(status == 400 || status == 409, "{bad}: {status} {body}");
+        assert_eq!(status, 400, "{bad}: {body}");
     }
 
     // Only the one legitimate extra member (the owner's `bot`/`codex` fixtures
@@ -2327,8 +2354,8 @@ async fn an_alias_is_unique_and_nobody_touches_another_persons_personal_agent() 
             .unwrap();
     assert_eq!(
         members_after,
-        members_before + 2,
-        "owners_other and bot only"
+        members_before + 3,
+        "the guest, owners_other and bot only"
     );
 }
 
@@ -2423,14 +2450,10 @@ async fn a_switched_off_personal_agent_cannot_be_called_and_keeps_its_history() 
     let (status, body, _) = s.spawn(&req).await;
     assert_eq!(status, 201, "{body}");
 
-    // An administrator's suspension is not the owner's to undo.
+    // An administrator's suspension is not the owner's to undo (M3): a plain
+    // status write, as the membership lifecycle makes it.
     sqlx::query("UPDATE member SET status = 'suspended' WHERE workspace_id = $1 AND id = $2")
         .bind(s.workspace)
-        .bind(agent)
-        .execute(&s.su)
-        .await
-        .unwrap();
-    sqlx::query("UPDATE agent SET personal_disabled_at = NULL WHERE member_id = $1")
         .bind(agent)
         .execute(&s.su)
         .await
@@ -2442,6 +2465,32 @@ async fn a_switched_off_personal_agent_cannot_be_called_and_keeps_its_history() 
         )
         .await;
     assert_eq!(status, 409, "{body}");
+    assert_eq!(code(&body), Some("personal_agent_suspended"));
+    assert_eq!(s.member_status(agent).await, "suspended");
+
+    // … and so is the other order: the owner switched it off first, then an
+    // administrator suspended the already-suspended member.
+    sqlx::query("UPDATE member SET status = 'active' WHERE workspace_id = $1 AND id = $2")
+        .bind(s.workspace)
+        .bind(agent)
+        .execute(&s.su)
+        .await
+        .unwrap();
+    let (status, _) = s.turn_off(&s.access, agent).await;
+    assert_eq!(status, 200);
+    sqlx::query("UPDATE member SET status = 'suspended' WHERE workspace_id = $1 AND id = $2")
+        .bind(s.workspace)
+        .bind(agent)
+        .execute(&s.su)
+        .await
+        .unwrap();
+    let (status, body) = s
+        .turn_on(
+            &s.access,
+            json!({ "harness": "claude_code", "alias": alias }),
+        )
+        .await;
+    assert_eq!(status, 409, "owner-off then admin-suspend: {body}");
     assert_eq!(code(&body), Some("personal_agent_suspended"));
     assert_eq!(s.member_status(agent).await, "suspended");
 }
@@ -2556,4 +2605,131 @@ async fn an_existing_subscription_agent_becomes_personal_in_place() {
         .await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["reused"], json!(true));
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn conversion_is_for_owner_only_agents_with_nothing_attached() {
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+
+    // M1: a workspace-scope (team-callable) agent is never converted.
+    let team = s.agent(s.person, None).await;
+    let (status, body) = s
+        .turn_on(
+            &s.access,
+            json!({ "harness": "claude_code", "agentMemberId": team }),
+        )
+        .await;
+    assert_eq!(status, 404, "{body}");
+    let (scope, personal): (String, bool) =
+        sqlx::query_as("SELECT invocation_scope, personal_agent FROM agent WHERE member_id = $1")
+            .bind(team)
+            .fetch_one(&s.su)
+            .await
+            .unwrap();
+    assert_eq!((scope.as_str(), personal), ("workspace", false));
+
+    // An owner_only agent that still has a hosted connection is refused, by name.
+    let hosted = s.agent(s.person, Some("claude_code")).await;
+    sqlx::query(
+        "UPDATE agent SET model = 'hosted-agent', base_url = 'https://hosted-agent.invalid/disabled', \
+                config = '{\"execution_mode\":\"hosted_dial_in\"}'::jsonb WHERE member_id = $1",
+    )
+    .bind(hosted)
+    .execute(&s.su)
+    .await
+    .unwrap();
+    let connection: Uuid = sqlx::query_scalar(
+        "INSERT INTO hosted_agent_connection (workspace_id, agent_member_id, status, \
+                pairing_challenge_hash, pairing_expires_at, created_by) \
+         VALUES ($1, $2, 'pairing_pending', digest('x', 'sha256'), now() + interval '1 hour', $3) \
+         RETURNING id",
+    )
+    .bind(s.workspace)
+    .bind(hosted)
+    .bind(s.person)
+    .fetch_one(&s.su)
+    .await
+    .expect("hosted connection");
+    let (status, body) = s
+        .turn_on(
+            &s.access,
+            json!({ "harness": "claude_code", "agentMemberId": hosted }),
+        )
+        .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(code(&body), Some("personal_agent_connections_remain"));
+
+    // A live credential alone is refused too.
+    sqlx::query("DELETE FROM hosted_agent_connection WHERE id = $1")
+        .bind(connection)
+        .execute(&s.su)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO token (workspace_id, kind, actor_member_id, subject_member_id, \
+                            token_hash, scopes, label) \
+         VALUES ($1, 'agent_bearer', $2, NULL, digest($3::text, 'sha256'), \
+                 ARRAY['messages:write'], 'p2-leftover')",
+    )
+    .bind(s.workspace)
+    .bind(hosted)
+    .bind(Uuid::new_v4().to_string())
+    .execute(&s.su)
+    .await
+    .unwrap();
+    let (status, body) = s
+        .turn_on(
+            &s.access,
+            json!({ "harness": "claude_code", "agentMemberId": hosted }),
+        )
+        .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(code(&body), Some("personal_agent_connections_remain"));
+
+    // Revoked (what #3567 does first), it converts.
+    sqlx::query("UPDATE token SET revoked_at = now() WHERE actor_member_id = $1")
+        .bind(hosted)
+        .execute(&s.su)
+        .await
+        .unwrap();
+    let (status, body) = s
+        .turn_on(
+            &s.access,
+            json!({ "harness": "claude_code", "agentMemberId": hosted }),
+        )
+        .await;
+    assert_eq!(status, 201, "{body}");
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_deleted_personal_agent_does_not_block_turning_on_again() {
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    let first = s.on(&s.access, "claude_code", &unique_alias("old")).await;
+    sqlx::query("UPDATE member SET deleted_at = now() WHERE workspace_id = $1 AND id = $2")
+        .bind(s.workspace)
+        .bind(first)
+        .execute(&s.su)
+        .await
+        .unwrap();
+    let still: bool = sqlx::query_scalar("SELECT personal_agent FROM agent WHERE member_id = $1")
+        .bind(first)
+        .fetch_one(&s.su)
+        .await
+        .unwrap();
+    assert!(
+        !still,
+        "deleting the member releases the personal-agent slot"
+    );
+    let (status, body) = s
+        .turn_on(
+            &s.access,
+            json!({ "harness": "claude_code", "alias": unique_alias("new") }),
+        )
+        .await;
+    assert_eq!(status, 201, "{body}");
+    assert_ne!(body["agent"]["id"], json!(first.to_string()));
 }
