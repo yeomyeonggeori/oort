@@ -11,6 +11,27 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.20] - 2026-10-10
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.20>. Tag target: `main=442049fd`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Five database migrations since 0.1.19 (121-125): 121 adds `work_host_folder` (host-issued opaque folder ids and display names, never paths; FORCE row-level security); 122 extends `work_control` for the signed new-work spawn (`momo.human.control.v4`); 123 adds the personal-agent marker columns on `agent`; 124 adds `work_session.persona_member_id` (the personal agent a session was called as); 125 adds `agent.subscription_retired_at` and a trigger that refuses to revive the hosted connection of a converted or retired subscription agent. No data is dropped. Rollback: whether a 0.1.19 app runs unchanged on schema 125 (it does not read the new columns or tables) is to be confirmed by the deploy worker. Deploy order: push relay first, then notifier and server (migrations 121-125), then the phone app. Desktop 0.1.18 and older receive 404 from the removed `/v1/provider/work-host-engine`; update the desktop app.
+
+### Added
+- Server: personal agents (ADR-0198 amendment 1). An owner can turn a connected harness (Claude Code, Codex) into an alias member and switch it on or off (#3591); mentions and DMs route to it and its replies are authored by the alias (#3592); a signed new-work spawn (`momo.human.control.v4`) derives host and folder server-side (#3570); "my Mac is online" is one server-side rule (#3569); work-hosts reads expose the host-issued folder id and display name (#3590); the owner can stop a Mac session with `POST /work-sessions/{id}/kill` (#3628).
+- Server: a tool to convert the subscription agent `kwak-claude` into a personal agent and to retire old subscription agents without deleting past messages (#3567).
+- Core: `createAgentWorkRun` for sending a work request to an agent (#3587).
+- Web and desktop: settings overhaul S1-S5c (icon list shell, profile and account on one page, appearance with color mode and accent, devices and run hosts, notifications and shortcuts, workspace, members and memory, usage and AI links) (#3578), the AI hub with two tabs and "my tools" harness cards (#3568), and a quieter sidebar profile row (#3574). The desktop DMG installer window has a background and Applications placement (#3642).
+- Phone: "Hand off work" sheet (#3588), "Send to my Mac" with harness choice, ask and work request (#3597), live work detail updates (#3594) and a chat mode (#3595), stop work with one confirmation (#3596), the "AI" sheet in the + menu (#3598), board refresh on app return and push tap (#3589), and tab bar centering, haptics, tab motion and liquid glass (#3580).
+
+### Changed
+- Web and desktop: settings and dialog copy rewritten in plain polite Korean; the internal terms "root" and "command device" are gone (#3573, #3622).
+
+### Fixed
+- Server: another member's personal Mac is visible in the host list only as existing and online (#3583).
+- Web: the command-device list re-reads while open, so a phone's late key registration shows up (#3577).
+
+### Removed
+- Server, web and desktop: the legacy execution engine settings API and UI for opencode, goose and codex-local (#3584, #3611). The route `/v1/provider/work-host-engine` is gone.
+
 ## [0.1.19] - 2026-10-06
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.19>. Tag target: `main=6558910e`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. **v0.1.18 was published but never deployed**: its `momo-notifier` had no privilege on `hosted_agent_connection`, so push judgment and the migration 120 trigger would fail with `permission denied` (#3553, caught in the pre-deploy check). 0.1.19 contains everything in 0.1.18 plus the fix. There is no new migration for the fix: the api pre-deploy re-applies `bootstrap_runtime_roles.sql`.
