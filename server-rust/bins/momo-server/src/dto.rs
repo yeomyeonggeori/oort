@@ -2672,6 +2672,12 @@ pub struct RosterMemberDto {
     /// whether `@` autocomplete may offer it (the owner only, and only while on).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub personal_agent: Option<PersonalAgentDto>,
+    /// #3567 (ADR-0198 증보 1 D2): `true` only on a 「이전 구독 에이전트」 — an
+    /// entry the retirement tool switched off. The member is suspended and keeps
+    /// every past message; a client draws the marker instead of hiding the
+    /// author. Absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subscription_retired: Option<bool>,
     /// `agent_profile.paused` — goal SRV-R2, the one key here Swift's DTO does
     /// not have.
     ///
@@ -4232,6 +4238,7 @@ impl RosterMemberDto {
             display_name: name.clone(),
         });
         self.host_online = facts.host_online;
+        self.subscription_retired = facts.subscription_retired.then_some(true);
     }
 }
 
@@ -4252,6 +4259,7 @@ impl HostedAgentConnectionDto {
             display_name: name.clone(),
         });
         self.host_online = facts.host_online;
+        self.subscription_retired = facts.subscription_retired.then_some(true);
     }
 }
 
@@ -4406,6 +4414,12 @@ pub struct HostedAgentConnectionDto {
     /// status; it blocks nothing by itself.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub brain_unavailable_reason: Option<String>,
+    /// #3567 (ADR-0198 증보 1 D2): `true` only on a 「이전 구독 에이전트」 — an
+    /// entry the retirement tool switched off. The member is suspended and keeps
+    /// every past message; a client draws the marker instead of hiding the
+    /// author. Absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subscription_retired: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

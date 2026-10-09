@@ -105,6 +105,7 @@ fn roster_dto(member: &RosterMember) -> RosterMemberDto {
         host_online: None,
         brain_unavailable_reason: None,
         personal_agent: None,
+        subscription_retired: None,
     }
 }
 

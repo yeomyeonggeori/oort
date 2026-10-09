@@ -78,6 +78,8 @@ const APP_COMMANDS: &[&str] = &[
     "agent_port_connect",
     "agent_port_replace_credential",
     "agent_port_disconnect",
+    // One-time cleanup of what the old app registered (#3567, ADR-0198 증보 1 D2 4).
+    "agent_port_retire_legacy",
     // Account profile folders (ADR-0191 D1, ADR-0190 D3-f, #2878). Granted
     // only by capabilities/harness-profile.json.
     "harness_profile_list",

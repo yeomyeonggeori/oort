@@ -579,19 +579,22 @@ mod tests {
     ///
     /// 124 is #3592's session persona (ADR-0198 증보 1 D7): `work_session.persona_member_id`,
     /// the personal agent a called session's card, progress and answer are authored as.
+    ///
+    /// 125 is #3567's subscription-agent retirement (ADR-0198 증보 1 D2): `agent.subscription_retired_at`
+    /// and the guard that keeps a converted or retired agent's hosted connection closed.
     #[test]
-    fn discovers_contiguous_migrations_001_to_124() {
+    fn discovers_contiguous_migrations_001_to_125() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            124,
-            "expected 124 migrations under {}",
+            125,
+            "expected 125 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 124);
+        assert_eq!(migrations.last().unwrap().version, 125);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

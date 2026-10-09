@@ -921,6 +921,29 @@ export async function agentPortDisconnect(agentId: string): Promise<boolean> {
   }
 }
 
+/**
+ * #3567 (ADR-0198 증보 1 D2 4): the one-time cleanup of what the old app registered —
+ * `claude mcp remove --scope user oort`, only on a Mac whose store holds an entry the app
+ * added, then never again (a marker file). Fire-and-forget: a browser tab, a refusal or a
+ * thrown error reads as `null` and the next launch tries again.
+ */
+export type AgentPortRetireOutcome = {
+  outcome: "already_done" | "cleaned" | "pending" | "gave_up";
+  removedMcp: boolean;
+};
+
+export async function agentPortRetireLegacy(): Promise<AgentPortRetireOutcome | null> {
+  if (!IS_TAURI) return null;
+  try {
+    const raw = await invoke<{ outcome?: unknown; removedMcp?: unknown }>("agent_port_retire_legacy");
+    const known = ["already_done", "cleaned", "pending", "gave_up"] as const;
+    const outcome = known.find((value) => value === raw?.outcome);
+    return outcome ? { outcome, removedMcp: raw?.removedMcp === true } : null;
+  } catch {
+    return null;
+  }
+}
+
 // ---- native notifications ---------------------------------------------------
 
 /** Same vocabulary as the browser Notification API, minus the prompt variants. */

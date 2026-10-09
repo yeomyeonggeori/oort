@@ -160,6 +160,7 @@ pub mod routing;
 pub mod run;
 pub mod status;
 pub mod subscription;
+pub mod subscription_transition;
 pub mod tools;
 pub mod usage;
 pub mod welcome;

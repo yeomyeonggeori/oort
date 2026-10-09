@@ -604,6 +604,10 @@ pub struct AgentReadFacts {
     pub subscription_harness: Option<SubscriptionHarness>,
     /// #3591 (ADR-0198 증보 1 D7): set for a personal agent.
     pub personal: Option<PersonalAgentFacts>,
+    /// #3567 (ADR-0198 증보 1 D2): the 「이전 구독 에이전트」 marker. Set by the
+    /// retirement tool (`agent.subscription_retired_at`); the member is
+    /// suspended and keeps every past message.
+    pub subscription_retired: bool,
 }
 
 /// What the roster says about a personal agent (#3591).
@@ -645,6 +649,7 @@ pub async fn load_agent_read_facts_in_tx(
         "SELECT m.id AS agent_id, a.invocation_scope, a.subscription_harness, a.model_source, \
                 a.owner_human_id, a.uses_owner_key, \
                 a.personal_agent, (m.status = 'active') AS member_active, \
+                (a.subscription_retired_at IS NOT NULL) AS subscription_retired, \
                 COALESCE(a.config->>'execution_mode', '') = 'hosted_dial_in' AS config_hosted, \
                 EXISTS (SELECT 1 FROM hosted_agent_connection hc \
                          WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
@@ -674,7 +679,11 @@ pub async fn load_agent_read_facts_in_tx(
         let has_connection: bool = row.try_get("has_connection")?;
         let config_hosted: bool = row.try_get("config_hosted")?;
         let is_card: bool = row.try_get("is_card")?;
-        let hosted = has_connection || config_hosted;
+        // #3567: a converted agent keeps its (expired) connection row, but it is
+        // not a hosted runtime any more — its brain is the owner's harness on the
+        // owner's member host, never an Agent Port dial-in.
+        let personal_row: bool = row.try_get("personal_agent")?;
+        let hosted = !personal_row && (has_connection || config_hosted);
         let owner_id: Option<Uuid> = row.try_get("owner_human_id")?;
         let owner_name: Option<String> = row.try_get("owner_display_name")?;
         let owner_only = scope == INVOCATION_SCOPE_OWNER_ONLY;
@@ -712,6 +721,7 @@ pub async fn load_agent_read_facts_in_tx(
             } else {
                 None
             },
+            subscription_retired: row.try_get("subscription_retired")?,
         });
     }
     Ok(facts)
@@ -1190,6 +1200,7 @@ mod tests {
             host_online: None,
             subscription_harness: harness,
             personal: None,
+            subscription_retired: false,
         };
         let claude = facts(Some(SubscriptionHarness::ClaudeCode));
         assert_eq!(
