@@ -1,0 +1,127 @@
+{
+  "_comment": "#3592 (P1) \u2014 momo.human.control.v4(\uc0c8 \uc791\uc5c5 spawn \uc804\uc6a9, ADR-0198 \uc99d\ubcf4 1 T5 \ud655\uc815 1)\uc758 \uacf5\uc720 \ud14c\uc2a4\ud2b8 \ubca1\ud130. v1~v3\uc640 \uac19\uc740 13\uc904 \ud2c0\uc774\uace0 \uccab \uc904\ub9cc v4\uc774\uba70 spawn \ubcf8\ubb38\uc740 8\uc904\uc774\ub2e4(\uc5d0\uc774\uc804\ud2b8|-, \ud3f4\ub354 id, \ub3c4\uad6c, \ubc29, \uc2a4\ub808\ub4dc \ub8e8\ud2b8|-, \uc6d0\ubcf8 \uba54\uc2dc\uc9c0|-, \uc81c\ubaa9(NFC), \ud504\ub86c\ud504\ud2b8(NFC)). \uc11c\uba85\uc740 \ub2f4\uc9c0 \uc54a\ub294\ub2e4: \uc11c\uba85\uc740 \uc2a4\ud0a4\ub9c8\uc640 \ubb34\uad00\ud55c \uac19\uc740 ECDSA P-256 over payload\uc774\uace0 v1~v3 \ubca1\ud130\uac00 \uc138 \uc11c\uba85\uc790\ub85c \uc774\ubbf8 \uace0\uc815\ud55c\ub2e4. \uc774 \ud30c\uc77c\uc740 \uc785\ub825(schema\u00b7fields\u00b7content)\uacfc \ud30c\uc0dd\uac12(content_canonical\u00b7content_sha256\u00b7payload\u00b7payload_sha256)\ub9cc \uace0\uc815\ud558\uba70, Rust(momo-wire tests/human_control_v4_vectors.rs)\u00b7\uacf5\uc720 \ucf54\uc5b4(TS)\u00b7\ud3f0(TS)\u00b7\ub370\uc2a4\ud06c\ud0d1(Rust)\uc774 \uac19\uc740 \uc785\ub825\uc5d0\uc11c \uac19\uc740 \ubc14\uc774\ud2b8\ub97c \ub2e4\uc2dc \ub9cc\ub4e0\ub2e4. \ube44ASCII\ub294 \\u \uc774\uc2a4\ucf00\uc774\ud504\ub85c \uc801\uc5b4 \ud3b8\uc9d1\uae30\uc758 NFC \uc815\uaddc\ud654\uac00 \ubd84\ud574\ud615 \uc2dc\ud5d8 \ubb38\uc790\uc5f4\uc744 \ub9dd\uac00\ub728\ub9ac\uc9c0 \ubabb\ud558\uac8c \ud55c\ub2e4. \uc7ac\uc0dd\uc131: python3 server-rust/crates/momo-wire/tests/human_control_vectors/generate_v4.py > docs/api/human-control-signing-v4.vectors.json",
+  "format": "momo.human.signing.vectors/v1",
+  "algorithm": "payload bytes only (no signatures in this file)",
+  "cases": [
+    {
+      "name": "control_v4_spawn_personal_agent_in_thread",
+      "schema": "momo.human.control.v4",
+      "fields": {
+        "instance_id": "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
+        "workspace_id": "00000000-0000-7000-8000-000000000001",
+        "member_id": "00000000-0000-7000-8000-000000000101",
+        "device_key_id": "00000000-0000-7000-8000-00000000d003",
+        "host_id": "00000000-0000-7000-8000-00000000f001",
+        "session_id": null,
+        "nonce": "0193a5b8-7c1e-7d2a-9f00-000000000041",
+        "issued_at_ms": 1790550011000,
+        "expires_at_ms": 1790550611000
+      },
+      "content": {
+        "kind": "spawn_task",
+        "agent_member_id": "00000000-0000-7000-8000-000000000a02",
+        "folder_id": "fld_0123456789abcdef0123",
+        "tool": "claude",
+        "channel_id": "00000000-0000-7000-8000-00000000cc01",
+        "thread_root_id": "00000000-0000-7000-8000-00000000e001",
+        "origin_message_id": "00000000-0000-7000-8000-00000000e002",
+        "label": "\ube4c\ub4dc \ud655\uc778",
+        "prompt": "@kwak-claude \ube4c\ub4dc\uac00 \uc65c \uae68\uc9c0\ub294\uc9c0 \ubd10 \uc918\n\uccab\uc9f8, \ub85c\uadf8\ubd80\ud130\uc694. caf\u00e9"
+      },
+      "content_canonical": "00000000-0000-7000-8000-000000000a02\nfld_0123456789abcdef0123\nclaude\n00000000-0000-7000-8000-00000000cc01\n00000000-0000-7000-8000-00000000e001\n00000000-0000-7000-8000-00000000e002\n\ube4c\ub4dc \ud655\uc778\n@kwak-claude \ube4c\ub4dc\uac00 \uc65c \uae68\uc9c0\ub294\uc9c0 \ubd10 \uc918\n\uccab\uc9f8, \ub85c\uadf8\ubd80\ud130\uc694. caf\u00e9",
+      "content_sha256": "ae0871fe81267077ac38709779d70e09c1ff4cc490171278b1d856d7fd9722e9",
+      "payload": "momo.human.control.v4\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d003\n00000000-0000-7000-8000-00000000f001\n-\nspawn\n-\n0193a5b8-7c1e-7d2a-9f00-000000000041\n1790550011000\n1790550611000\nae0871fe81267077ac38709779d70e09c1ff4cc490171278b1d856d7fd9722e9",
+      "payload_sha256": "ddbdbd50ea5531749340e795bf3b974b235f1447ebceab5b41e66247221c3126"
+    },
+    {
+      "name": "control_v4_spawn_personal_agent_main_line",
+      "schema": "momo.human.control.v4",
+      "fields": {
+        "instance_id": "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
+        "workspace_id": "00000000-0000-7000-8000-000000000001",
+        "member_id": "00000000-0000-7000-8000-000000000101",
+        "device_key_id": "00000000-0000-7000-8000-00000000d003",
+        "host_id": "00000000-0000-7000-8000-00000000f001",
+        "session_id": null,
+        "nonce": "0193a5b8-7c1e-7d2a-9f00-000000000042",
+        "issued_at_ms": 1790550012000,
+        "expires_at_ms": 1790550612000
+      },
+      "content": {
+        "kind": "spawn_task",
+        "agent_member_id": "00000000-0000-7000-8000-000000000a02",
+        "folder_id": "fld_0123456789abcdef0123",
+        "tool": "codex",
+        "channel_id": "00000000-0000-7000-8000-00000000cc01",
+        "thread_root_id": null,
+        "origin_message_id": "00000000-0000-7000-8000-00000000e002",
+        "label": "\ub9ac\uc11c\uce58",
+        "prompt": "@kwak-codex \uc774 \ub77c\uc774\ube0c\ub7ec\ub9ac \ub77c\uc774\uc120\uc2a4 \uc54c\uc544\ubd10 \uc918"
+      },
+      "content_canonical": "00000000-0000-7000-8000-000000000a02\nfld_0123456789abcdef0123\ncodex\n00000000-0000-7000-8000-00000000cc01\n-\n00000000-0000-7000-8000-00000000e002\n\ub9ac\uc11c\uce58\n@kwak-codex \uc774 \ub77c\uc774\ube0c\ub7ec\ub9ac \ub77c\uc774\uc120\uc2a4 \uc54c\uc544\ubd10 \uc918",
+      "content_sha256": "2616e42e7319e584eca6652812204e4009e93fea561c3f02acf4c6091d435c03",
+      "payload": "momo.human.control.v4\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d003\n00000000-0000-7000-8000-00000000f001\n-\nspawn\n-\n0193a5b8-7c1e-7d2a-9f00-000000000042\n1790550012000\n1790550612000\n2616e42e7319e584eca6652812204e4009e93fea561c3f02acf4c6091d435c03",
+      "payload_sha256": "79c3bce945c1bc229e6c968061bff54aaeae00863aed6bdf5659eb6e3d77e085"
+    },
+    {
+      "name": "control_v4_spawn_harness_without_agent",
+      "schema": "momo.human.control.v4",
+      "fields": {
+        "instance_id": "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
+        "workspace_id": "00000000-0000-7000-8000-000000000001",
+        "member_id": "00000000-0000-7000-8000-000000000101",
+        "device_key_id": "00000000-0000-7000-8000-00000000d003",
+        "host_id": "00000000-0000-7000-8000-00000000f001",
+        "session_id": null,
+        "nonce": "0193a5b8-7c1e-7d2a-9f00-000000000043",
+        "issued_at_ms": 1790550013000,
+        "expires_at_ms": 1790550613000
+      },
+      "content": {
+        "kind": "spawn_task",
+        "agent_member_id": null,
+        "folder_id": "fld_aaaaaaaaaaaaaaaaaaaa",
+        "tool": "claude",
+        "channel_id": "00000000-0000-7000-8000-00000000cc01",
+        "thread_root_id": null,
+        "origin_message_id": null,
+        "label": "\uc9c8\ubb38",
+        "prompt": "\ud3f4\ub354 \uad6c\uc870\ub97c \uc124\uba85\ud574 \uc918"
+      },
+      "content_canonical": "-\nfld_aaaaaaaaaaaaaaaaaaaa\nclaude\n00000000-0000-7000-8000-00000000cc01\n-\n-\n\uc9c8\ubb38\n\ud3f4\ub354 \uad6c\uc870\ub97c \uc124\uba85\ud574 \uc918",
+      "content_sha256": "153c447eb7ed2d111b1bbab95e649d08a5d06d59ab4190008b92d7abac91e03c",
+      "payload": "momo.human.control.v4\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d003\n00000000-0000-7000-8000-00000000f001\n-\nspawn\n-\n0193a5b8-7c1e-7d2a-9f00-000000000043\n1790550013000\n1790550613000\n153c447eb7ed2d111b1bbab95e649d08a5d06d59ab4190008b92d7abac91e03c",
+      "payload_sha256": "5e3058800ce84b2f61baa3dac102720cbdf7c313e6d4176a0f50783caed17832"
+    },
+    {
+      "name": "control_v4_spawn_nfd_text_signs_as_nfc",
+      "schema": "momo.human.control.v4",
+      "fields": {
+        "instance_id": "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
+        "workspace_id": "00000000-0000-7000-8000-000000000001",
+        "member_id": "00000000-0000-7000-8000-000000000101",
+        "device_key_id": "00000000-0000-7000-8000-00000000d003",
+        "host_id": "00000000-0000-7000-8000-00000000f001",
+        "session_id": null,
+        "nonce": "0193a5b8-7c1e-7d2a-9f00-000000000044",
+        "issued_at_ms": 1790550014000,
+        "expires_at_ms": 1790550614000
+      },
+      "content": {
+        "kind": "spawn_task",
+        "agent_member_id": "00000000-0000-7000-8000-000000000a02",
+        "folder_id": "fld_0123456789abcdef0123",
+        "tool": "claude",
+        "channel_id": "00000000-0000-7000-8000-00000000cc01",
+        "thread_root_id": null,
+        "origin_message_id": "00000000-0000-7000-8000-00000000e002",
+        "label": "re\u0301sume\u0301",
+        "prompt": "cafe\u0301 \u1112\u1161\u11ab\u1100\u1173\u11af \ud655\uc778"
+      },
+      "content_canonical": "00000000-0000-7000-8000-000000000a02\nfld_0123456789abcdef0123\nclaude\n00000000-0000-7000-8000-00000000cc01\n-\n00000000-0000-7000-8000-00000000e002\nr\u00e9sum\u00e9\ncaf\u00e9 \ud55c\uae00 \ud655\uc778",
+      "content_sha256": "86a2fc65ab31bb8e3c449da45929d5691666cc4613c5f28dcc1181e38b19a288",
+      "payload": "momo.human.control.v4\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d003\n00000000-0000-7000-8000-00000000f001\n-\nspawn\n-\n0193a5b8-7c1e-7d2a-9f00-000000000044\n1790550014000\n1790550614000\n86a2fc65ab31bb8e3c449da45929d5691666cc4613c5f28dcc1181e38b19a288",
+      "payload_sha256": "fa7ca5db7814b34bcb97b7da61d4c043ade8ba248041e7c5877cc5090edd337d"
+    }
+  ]
+}

@@ -1244,6 +1244,68 @@ async fn work_complete_pushes_the_session_starter_for_a_long_turn() {
     );
 }
 
+/// A personal agent member (migration 123/124): not a member of the room.
+async fn seed_alias(su: &PgPool, fixture: &Fixture) -> Uuid {
+    let alias = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, 'agent', '개인 에이전트', $3)",
+    )
+    .bind(alias)
+    .bind(fixture.workspace_id)
+    .bind(format!("alias-{}", alias.simple()))
+    .execute(su)
+    .await
+    .expect("seed alias member");
+    alias
+}
+
+/// #3592 (P1): a session the owner called through a personal agent speaks as
+/// the alias, so its idle line is authored by the alias — and the owner is
+/// still told the turn finished. The forgery guard (the author must be the
+/// owner **or this session's own persona**) stays closed to anyone else.
+/// Red when the persona arm of the `work_session_idle` guard is dropped.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn work_complete_pushes_the_owner_when_the_session_speaks_as_its_alias() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let (fixture, work) = work_fixture(&su).await;
+    let owner = fixture.recipient_id;
+    let alias = seed_alias(&su, &fixture).await;
+    sqlx::query("UPDATE work_session SET persona_member_id = $2 WHERE id = $1")
+        .bind(work.session_id)
+        .bind(alias)
+        .execute(&su)
+        .await
+        .expect("this session speaks as the alias");
+
+    let card = idle_card(&su, &fixture, &work, 2, alias, owner, LONG_TURN_MS, TURN_A).await;
+    let sent = dispatched_for(&su, &fixture, card).await;
+    assert_eq!(sent.len(), 1, "the owner's one device: {sent:?}");
+    assert_eq!(sent[0].reason, "work_session_idle");
+
+    // The same line authored by a member that is NOT this session's persona is
+    // a forgery and tells nobody.
+    let stranger = seed_alias(&su, &fixture).await;
+    let forged = idle_card(
+        &su,
+        &fixture,
+        &work,
+        3,
+        stranger,
+        owner,
+        LONG_TURN_MS,
+        TURN_A + 1,
+    )
+    .await;
+    assert!(
+        dispatched_for(&su, &fixture, forged).await.is_empty(),
+        "an idle line by someone who is neither the owner nor the session's persona pushes nothing"
+    );
+}
+
 /// 「1분 이상」: a 59.999 s turn is silent, and silent means NO reason — it must
 /// not fall through to the DM arm and push the card's text to the peer.
 #[tokio::test]

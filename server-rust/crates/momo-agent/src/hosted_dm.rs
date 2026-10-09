@@ -109,6 +109,16 @@ pub fn hosted_dm_delivery(
             _ => HostedDmDelivery::SubscriptionDisabled,
         };
     }
+    // ADR-0198 증보 1 D7: a personal agent is never hosted. The owner's DM with
+    // it is answered by the owner's own Mac through a signed spawn, so there is
+    // no hosted connection to be missing (a teammate was refused above).
+    if agent
+        .owner_only
+        .as_ref()
+        .is_some_and(|scope| scope.personal_agent)
+    {
+        return HostedDmDelivery::NotHosted;
+    }
     if !agent.hosted_delivery_disabled {
         return HostedDmDelivery::NotHosted;
     }

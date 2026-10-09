@@ -576,19 +576,22 @@ mod tests {
     ///
     /// 123 is #3591's personal agent (ADR-0198 증보 1 D7): `agent.personal_agent`,
     /// `agent.personal_disabled_at` and the one-per-(owner, harness) partial index.
+    ///
+    /// 124 is #3592's session persona (ADR-0198 증보 1 D7): `work_session.persona_member_id`,
+    /// the personal agent a called session's card, progress and answer are authored as.
     #[test]
-    fn discovers_contiguous_migrations_001_to_123() {
+    fn discovers_contiguous_migrations_001_to_124() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            123,
-            "expected 123 migrations under {}",
+            124,
+            "expected 124 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 123);
+        assert_eq!(migrations.last().unwrap().version, 124);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

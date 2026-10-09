@@ -1780,6 +1780,67 @@ pub async fn dispatched_spawn_owner_in_tx(
     Ok(owner)
 }
 
+/// Where the owner called a new task from, and as whom its session speaks
+/// (ADR-0198 증보 1 「T5 확정」 6, #3592 P1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpawnCall {
+    /// The personal agent (alias member) the signed statement named, **only**
+    /// when that member is the session owner's own live-or-switched-off
+    /// personal agent. The session's card, progress and answer are authored as
+    /// it. `None`: a harness spawn (「내 도구」) or an agent that is not a
+    /// personal agent, which keep speaking as the owner.
+    pub persona_member_id: Option<Uuid>,
+    /// The thread the owner called from (signed).
+    pub thread_root_id: Option<Uuid>,
+    /// The owner's own message the call came from (signed).
+    pub origin_message_id: Option<Uuid>,
+}
+
+/// The signed place and persona of the **owner's own new-work spawn** that
+/// `control_id` is. Everything is read from the control row the owner signed;
+/// nothing a host sent picks the author, so a host cannot speak as someone's
+/// alias (T5 확정 6). `None` when the control is not a signed new-work spawn of
+/// `owner_member_id` (an agent-requested spawn, a resume).
+///
+/// The alias need not be a member of the channel (결재 2026-10-08, 「소유자면
+/// 어디서나」), so no membership is read. A switched-off alias still speaks for
+/// a session the owner started before switching it off.
+pub async fn spawn_call_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    control_id: Uuid,
+    owner_member_id: Uuid,
+) -> Result<Option<SpawnCall>, T3Error> {
+    /// agent, thread root, origin message, and whether the agent is a personal agent.
+    type CallRow = (Option<Uuid>, Option<Uuid>, Option<Uuid>, bool);
+    let row: Option<CallRow> = sqlx::query_as(
+        "SELECT wc.human_spawn_agent_member_id, wc.human_spawn_thread_root_id, \
+                wc.human_spawn_origin_message_id, \
+                EXISTS (SELECT 1 FROM agent a \
+                          JOIN member m ON m.id = a.member_id AND m.workspace_id = a.workspace_id \
+                         WHERE a.workspace_id = wc.workspace_id \
+                           AND a.member_id = wc.human_spawn_agent_member_id \
+                           AND a.owner_human_id = wc.requester_member_id \
+                           AND a.invocation_scope = 'owner_only' AND a.personal_agent \
+                           AND m.kind = 'agent' AND m.deleted_at IS NULL \
+                           AND m.status::text <> 'deleted') AS is_personal \
+           FROM work_control wc \
+          WHERE wc.workspace_id = $1 AND wc.id = $2 AND wc.kind = 'spawn' \
+            AND wc.requester_member_id = $3 \
+            AND wc.human_signature IS NOT NULL AND wc.payload ? 'prompt'",
+    )
+    .bind(workspace_id)
+    .bind(control_id)
+    .bind(owner_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(row.map(|(agent, thread, origin, is_personal)| SpawnCall {
+        persona_member_id: agent.filter(|_| is_personal),
+        thread_root_id: thread,
+        origin_message_id: origin,
+    }))
+}
+
 // ---------------------------------------------------------------------------
 // auto-approve (ADR-0114 D5)
 // ---------------------------------------------------------------------------

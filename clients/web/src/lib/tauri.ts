@@ -664,6 +664,19 @@ export interface DesktopControlRequest {
         firstPrompt: string;
       }
     | {
+        /** #3592 (control v4): a NEW task. The shell signs the NFC title and
+         * prompt, shows both in its dialog, and refuses what the server would. */
+        kind: "spawn_task";
+        agentMemberId: string | null;
+        folderId: string;
+        tool: string;
+        channelId: string;
+        threadRootId: string | null;
+        originMessageId: string | null;
+        label: string;
+        prompt: string;
+      }
+    | {
         kind: "permission";
         requestEventId: string;
         optionId: string;

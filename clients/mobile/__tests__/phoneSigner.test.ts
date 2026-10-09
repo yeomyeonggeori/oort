@@ -7,7 +7,7 @@ jest.mock('expo-modules-core', () => ({
 
 import {SignerRefusal, type ControlToSign} from '@momo/core/features/auth/signedControl';
 
-import {humanControlPayload, type SignHumanControlInput} from '../src/deviceKey/humanControl';
+import {humanControlPayload, signHumanControl as humanSign, type SignHumanControlInput} from '../src/deviceKey/humanControl';
 import {DeviceKeyError} from '../src/deviceKey/native';
 import {phoneSigner, phoneSignerRefusal, phoneSignInput} from '../src/deviceKey/signer';
 
@@ -119,6 +119,44 @@ describe('phone ↔ desktop: one intent, one statement', () => {
       expect(Buffer.from(bytes).toString('utf8')).toBe(e.payload);
     },
   );
+});
+
+describe('spawn_task (#3592)', () => {
+  const identity = {workspaceId: 'w', memberId: 'm', deviceKeyId: 'k'};
+  const task: ControlToSign = {
+    hostId: 'h',
+    sessionId: null,
+    nonce: 'n',
+    content: {
+      kind: 'spawn_task',
+      agentMemberId: 'a',
+      folderId: 'fld_x',
+      tool: 'claude',
+      channelId: 'c',
+      threadRootId: null,
+      originMessageId: 'o',
+      label: '제목',
+      prompt: '내용',
+    },
+  };
+
+  it('signs as v4 and carries the content through unchanged', () => {
+    const input = phoneSignInput(identity, task, context('i', 0), 0);
+    expect(input.schema).toBe('momo.human.control.v4');
+    expect(input.content).toEqual(task.content);
+  });
+
+  it('a bad statement is a 해요체 refusal, not a thrown builder error', async () => {
+    const signer = phoneSigner(identity, {
+      context: async () => context('i', 0),
+      sign: humanSign,
+      now: () => 0,
+    });
+    const bad = {...task, content: {...task.content, prompt: '/clear'}} as ControlToSign;
+    const error = (await signer.sign(bad).catch((x: unknown) => x)) as SignerRefusal;
+    expect(error).toBeInstanceOf(SignerRefusal);
+    expect(error.message).toMatch(/요\.$/);
+  });
 });
 
 describe('phoneSigner', () => {

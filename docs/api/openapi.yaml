@@ -7390,6 +7390,19 @@ paths:
         an accepted spawn answers 200 with the same control before anything that
         could have changed since. Every refusal is before the nonce is spent
         except the signature's own.
+
+
+        **Calling a personal agent (#3592, ADR-0198 증보 1 D7 · 「P1 확정」).**
+        The server never turns an `@alias` mention or a DM with the alias into a
+        spawn. The owner's client sends the message by the ordinary send path
+        first, then calls this route naming that message as `originMessageId`
+        (the owner's own plain message in `channelId`, in `threadRootId` when it
+        is a thread reply). A teammate's mention of someone else's alias is
+        answered by the existing owner-only sentence and starts nothing. The
+        session this spawn opens speaks as the named alias: its card, progress
+        and answer are authored by the personal agent member (derived from the
+        signed `agentMemberId`, never from the host) and the card quotes the
+        origin message. The alias need not be a member of the room.
       security:
         - bearerAuth: []
       parameters:
