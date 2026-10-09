@@ -351,6 +351,22 @@ D7의 소유자 호출은 본문 D2가 이미 정한 「member host 레인은 D1
 
 **미검증(`runtime-unverified`).** 실기기·실제 ACP 왕복(host 상태 폴더 안의 질문용 폴더에서 에이전트가 도는 것), v4 클라이언트 서명자(폰·데스크탑), 별칭 멤버 표시, 스레드 답글 위치. 서명 요구 플래그가 꺼져 있는 동안 새 작업 경로는 닫혀 있다.
 
+### N4 확정 (#3628, N4a) — 소유자의 작업 멈추기
+증보 1 구현 계획 표의 「신규 N4 폰 멈추기: 사람 `kill` 서명 요구 여부 확인 후 버튼」의 서버 쪽 확인과 길이다. 새 결정이 아니며 근거는 ADR-0188 D3(host 소유자 본인만)·ADR-0146 D-8(「꺼짐 쪽은 서명이 필요 없다」)이다. 폰 버튼은 #3596이다.
+
+**1. 서명 요구는 없다.** `momo-workd`의 `human_trust::requires_signature`는 `kill`에 서명을 요구하지 않고(기기를 잃어도 멈출 수 있어야 한다), DB도 `kill`·`read`는 서명 행을 가질 수 없게 둔다(migration 095). `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`와도 무관하다.
+
+**2. 길: `POST /v1/workspaces/{ws}/work-sessions/{id}/kill`** (본문 없음, 사람 bearer 전용). 세션 소유자 본인이 자기 `scope=member` host에서 `running`·`idle`(유휴 세션도 에이전트 프로세스가 살아 있다)인 세션을 멈춘다. 같은 tx에서 세션 행을 잠그고 `kill` 컨트롤을 `dispatched`로 쓰며 감사 행(`work.kill.requested`)을 남긴다. 메시지 경로(`channel_seq`·message·outbox)는 건드리지 않는다(host는 `pending-controls` 폴링으로 받고, 방에 가는 `ended` 알림은 host가 실제로 멈춘 뒤 세션 종료 보고가 만든다). 거부: 없는 세션 404, 남의 세션·남의 host 403 `kill_owner_only`, 공용 host 403 `kill_member_host_only`, 공유 로컬 창 403 `local_session_no_control`(소유자 검사 뒤, `PATCH` 규약과 같게), 폐기된 host·`orphaned` 409. 존재 여부는 `PATCH …/work-sessions/{id}`의 기존 규약(없음 404 / 남의 것 403)과 같다. 에이전트 bearer는 `required_agent_scope`에 없어 인증 계층이 닫고 핸들러도 다시 거부한다(에이전트의 끄기는 기존 `POST /work-controls`).
+- **멱등.** 소유자 본인이 낸 `kill` 중 Mac이 아직 답하지 않은 것이 있으면 새 행 없이 그것을 200(`replayed`)으로 돌려주고, 동시 요청은 세션 행 잠금이 직렬화해 컨트롤은 1건이다. 이미 `ended`인 세션은 아무것도 쓰지 않고 200이다.
+- **꺼진 Mac은 거절하지 않는다.** 컨트롤은 기다렸다가 Mac이 다시 폴링하면 실행된다. 응답 `hostOnline`이 그 차이를 알려 준다(지시 route의 409 `work_host_offline`과 다른 점: 멈추기는 늦게 실행돼도 소유자가 원한 결과다).
+- **컨트롤 창.** 사람이 세션 화면을 쥐고 있는 동안 host 폴링은 그 세션의 컨트롤을 보류한다(증보 3 D3). **요청자 = 세션 소유자 = `scope=member` host 소유자**인 `kill`만 이 보류에서 뺀다(SQL이 세 조건을 모두 확인한다. 자기 키보드 때문에 멈추기가 늦으면 안 된다). 같은 host의 다른 사람 `kill`, 남의 세션을 향한 host 소유자의 `kill`, 공용(workspace) host의 `kill`, 에이전트의 `kill`은 그대로 보류한다.
+
+**3. `PATCH …/work-sessions/{id} {status:"ended"}`는 맥 세션을 멈추지 않는다(코드로 확정).** 원장(세션 행·카드·과금·대기 중 권한 요청)만 정리하고 `work_control`을 만들지 않으며 host에 알리지 않는다. `momo-workd`가 알게 되는 것은 부작용뿐이다: 종료된 세션에 대한 이벤트 중계(`record_acp_event`)와 idle 보고는 서버가 409를 주는데(`session.status != running`·상태 전이 불일치), workd는 이를 로그만 남기고 버리며(`End::Gone`은 401·403·404에서만), 다음에 idle→running 전이(409, 일시 오류가 아님)를 시도할 때에야 `End::Gone`으로 멈춘다. 진행 중인 턴은 계속 돈다. 따라서 「멈추기」는 `PATCH ended`가 아니라 이 route이고, `PATCH ended`는 원장 정리용으로 남는다.
+
+**4. workd 쪽은 바꾸지 않는다.** `controls.rs`의 `kill` 팔은 서명도 소유자 확인도 없이 `SessionTable::kill`을 부르고(트리 전체 종료는 inv_15가 고정), 서버가 만든 사람 `kill`은 inv_15의 `control(.., "kill", owner, Some(session), {})`와 같은 모양(요청자 = 소유자, payload `{}`, 서명 열 없음)이다. 시험은 서버가 만든 컨트롤이 host의 폴링에 그 모양으로 나오는지를 본다.
+
+**미검증(`runtime-unverified`).** 실제 Mac 위 프로세스 종료(workd 불변식은 stub 에이전트), 폰 버튼(#3596), 오프라인 Mac이 돌아온 뒤의 지연 실행.
+
 ### P2 확정 (#3591) — 개인 에이전트 멤버 생성·별칭 API
 증보 1 안의 구현 사실이며 새 결정이 아니다. 근거는 D7(별칭은 소유자가 정하고 워크스페이스 안에서 유일, 부르는 사람은 소유자뿐, `NonOwner` 문장), 결재 2(팀원에게 「<소유자 이름>의 개인 에이전트」로 보이고 `@` 자동완성은 소유자에게만), 위 「ADR-0193 D18」 표(스위치 두 개는 D7을 켜고 끄는 값이 아니다), 「T5 확정」 3(에이전트를 이름으로 받는 조건)이다.
 
