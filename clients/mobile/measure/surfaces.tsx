@@ -4100,6 +4100,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'shell-ask-off':
     case 'shell-ask-signing':
     case 'shell-ask-waiting':
+    case 'shell-ask-first':
       return (
         <View style={styles.fill}>
           <Shell />
@@ -5068,6 +5069,9 @@ function askPreview(name: string): AskMacPreview {
       folderId: 'fld-oort-app',
       prompt: '로그인 버그를 찾아서 고치고 PR을 올려 줘.',
     };
+  }
+  if (name === 'shell-ask-first') {
+    return {signing: 'ready', prompt: '이 에러가 무슨 뜻이야?'};
   }
   if (name === 'shell-ask-signing') return {...base, signing: 'flag_off'};
   if (name === 'shell-ask-waiting') return {...base, waiting: true};

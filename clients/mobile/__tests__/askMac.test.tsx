@@ -521,6 +521,26 @@ describe('⑦ 서명 요구가 꺼진 서버에서는 Face ID 전에 막고 정�
   });
 });
 
+describe('포트가 던져도 사람에게 말한다', () => {
+  it('spawn이 throw하면 배너로 알리고 버튼은 다시 눌린다', async () => {
+    installFetch({});
+    const port: SpawnPort = {
+      wired: true,
+      spawn: jest.fn(async () => {
+        throw new Error('boom');
+      }),
+    };
+    mount(port);
+    await screen.findByTestId('ask-mac-form');
+    await pickChannelAndType();
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('ask-mac-send'));
+    });
+    expect(await screen.findByTestId('ask-mac-banner')).toBeTruthy();
+    expect(screen.getByTestId('ask-mac-send')).toBeEnabled();
+  });
+});
+
 describe('⑧ 전송 직전에 맥이 꺼지면 조용히 다른 곳으로 보내지 않는다', () => {
   it('mac_off는 안내만 하고 시트는 에이전트로 넘어가지 않는다', async () => {
     installFetch({});

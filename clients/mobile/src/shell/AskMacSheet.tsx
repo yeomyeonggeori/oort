@@ -50,6 +50,7 @@ import {
   KEY_NOT_READY_HEADLINE,
   NEED_CHANNEL_HINT,
   NEED_FOLDER_HINT,
+  UNKNOWN_FAILURE_SENTENCE,
   WAITING_NOTE,
   labelFromPrompt,
   MAC_NONE_DETAIL,
@@ -66,7 +67,7 @@ import {
   type HarnessKey,
 } from '../features/work/ask/model';
 import {readAskLast, writeAskLast} from '../features/work/ask/session';
-import {spawnPort, type SpawnPort} from '../features/work/ask/spawnPort';
+import {spawnPort, type SpawnOutcome, type SpawnPort} from '../features/work/ask/spawnPort';
 import {useChannels} from '../features/workspace/queries';
 import {haptics} from '../lib/haptics';
 import {useSession} from '../session/useSession';
@@ -346,7 +347,7 @@ function SheetBody({
     const before = new Set((sessionsQuery.data ?? []).map(session => session.id));
     setPending(true);
     haptics.light();
-    let outcome;
+    let outcome: SpawnOutcome;
     try {
       outcome = await sender.spawn({
         workspaceId,
@@ -357,6 +358,9 @@ function SheetBody({
         label,
         prompt: text,
       });
+    } catch {
+      // 포트는 실패를 결과로 돌려주기로 했지만, 던져도 사람은 왜 아무 일도 없었는지 알아야 한다.
+      outcome = {kind: 'refused', sentence: UNKNOWN_FAILURE_SENTENCE};
     } finally {
       setPending(false);
     }
@@ -418,7 +422,11 @@ function SheetBody({
       ? null
       : channelOptions.find(channel => uuidEq(channel.id, channelId))?.name ?? null;
   const placeLine = [
-    folderName !== null ? `폴더 ${folderName}` : null,
+    folderName !== null
+      ? folderName.endsWith('폴더')
+        ? folderName
+        : `폴더 ${folderName}`
+      : null,
     channelName !== null ? `#${channelName}` : null,
   ]
     .filter((part): part is string => part !== null)

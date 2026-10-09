@@ -287,6 +287,8 @@ export const KEY_NOT_READY_DETAIL =
   '내 맥으로 보내려면 Face ID 서명 키가 준비돼 있어야 해요. 프로필 › 지시 기기에서 등록해 주세요.';
 export const NEED_FOLDER_HINT = '폴더를 골라야 보낼 수 있어요.';
 export const NEED_CHANNEL_HINT = '어느 채널에 남길지 골라야 보낼 수 있어요.';
+export const UNKNOWN_FAILURE_SENTENCE =
+  '보내지 못했어요. 아무것도 보내지 않았으니 잠시 뒤에 다시 보내 주세요.';
 export const WAITING_NOTE = '받으면 작업 목록에서도 볼 수 있어요.';
 export const NOT_WIRED_SENTENCE =
   '이 앱 버전에서는 아직 내 맥으로 보낼 수 없어요. 앱을 업데이트한 뒤에 다시 시도해 주세요.';
