@@ -355,6 +355,17 @@ describe("연결 끊기", () => {
     expect(document.activeElement).not.toBe(document.body);
   });
 
+  it("끊기가 끝나면 사라진 「끊는 중」 줄 대신 「로그인」으로 초점이 간다", async () => {
+    const { cli } = await connectedCard();
+    click(q("tool-card-claude-disconnect"));
+    click(q("tool-card-claude-disconnect-go"));
+    await until(() => cli.spawns.length === 1);
+    shell.probes = probes("needs_login");
+    act(() => cli.exit(0, 0));
+    await until(() => card("claude")?.getAttribute("data-login") === "disconnected");
+    await until(() => document.activeElement === q("tool-card-claude-login"));
+  });
+
   it("로그아웃이 0으로 끝나도 상태 명령이 로그인 아님을 알리기 전에는 「연결 안 됨」을 말하지 않는다", async () => {
     const { cli } = await connectedCard();
     click(q("tool-card-claude-disconnect"));

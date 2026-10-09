@@ -132,11 +132,24 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
   const loginPhase = loginState?.status.phase ?? null;
   const loginFailed = loginState?.status.phase === "failed" ? loginState.status : null;
 
+  // 끝나는 순간(끊기 완료·실패, 로그인 연결)에 초점이 있던 줄이 사라지면 다음 행동으로 옮긴다.
+  const lostFocus = () => document.activeElement === null || document.activeElement === document.body;
+  const previousDisconnect = useRef(disconnect.phase);
+  useEffect(() => {
+    const was = previousDisconnect.current;
+    previousDisconnect.current = disconnect.phase;
+    const wasBusy = was === "signing-out" || was === "verifying";
+    if (!wasBusy || !lostFocus()) return;
+    if (disconnect.phase === "failed") setFocusSlot("disconnecting");
+    else if (disconnect.phase === "done") setFocusSlot("login");
+  }, [disconnect.phase]);
+
   // 로그인이 끝나면 한 번 다시 묻고 보관소를 비운다(모달은 마지막 상태를 그대로 보인다).
   const handledConnected = useRef<LoginController | null>(null);
   useEffect(() => {
     if (loginPhase !== "connected" || !loginCtl || handledConnected.current === loginCtl) return;
     handledConnected.current = loginCtl;
+    if (lostFocus()) setFocusSlot("disconnect");
     onRecheck(harness);
     sessions.dismissLogin(harness);
   }, [loginPhase, loginCtl, harness, onRecheck, sessions]);
@@ -153,7 +166,6 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
     sessions.dismissDisconnect(harness);
     sessions.startLogin(harness);
     setDialogOpen(true);
-    setFocusSlot("login-open");
   };
   const cancelLogin = () => {
     setDialogOpen(false);
@@ -448,7 +460,11 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
           harness={dialogOpen && loginCtl ? harness : null}
           controller={loginCtl}
           onCancel={cancelLogin}
-          onClose={() => setDialogOpen(false)}
+          onClose={() => {
+            // 창이 닫히면 초점은 카드의 다음 행동으로(연 단추는 이미 사라졌다).
+            setDialogOpen(false);
+            setFocusSlot("login-open");
+          }}
           onConnected={() => undefined}
           onFallbackStarted={onRecheck}
         />

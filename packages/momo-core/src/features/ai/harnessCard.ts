@@ -223,7 +223,7 @@ export const PERSONAL_AGENT_COPY = {
   off: "꺼 둔 개인 에이전트",
   unavailable: "이 서버에서는 아직 개인 에이전트를 켤 수 없어요. 서버가 업데이트되면 열려요.",
   loadFailed: "개인 에이전트 상태를 읽지 못했어요.",
-  retry: "다시 불러오기",
+  retry: "다시 읽기",
 } as const;
 
 export function personalAgentErrorLine(code: string | null): string {
