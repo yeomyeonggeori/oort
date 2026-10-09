@@ -20,6 +20,7 @@ import {
   LOGIN_CODE_SUBMIT_LABEL,
   LOGIN_CODE_TOGGLE_LABEL,
   LOGIN_CONNECTED_LINE,
+  LOGIN_DETACH_LABEL,
   LOGIN_DEVICE_LABEL,
   LOGIN_DONE_LABEL,
   LOGIN_RETRY_LABEL,
@@ -98,9 +99,19 @@ export function HarnessLoginDialog({
   fixture,
   register = null,
   startAt = "login",
+  controller: external = null,
+  onCancel,
 }: {
   /** 로그인할 CLI. null이면 닫혀 있다. */
   harness: LocalHarnessId | null;
+  /**
+   * 밖에서 들고 있는 로그인 컨트롤러(「내 도구」 카드, ADR-0198 D3). 있으면 이 창은 컨트롤러를
+   * 만들지도 끝내지도 않는다: `onClose`는 창만 닫고 로그인은 카드에서 계속된다. 로그인을
+   * 정말 멈추는 것은 `onCancel`(취소 단추)뿐이다.
+   */
+  controller?: LoginController | null;
+  /** `controller`와 함께: 「취소」 단추의 행동. 없으면 `onClose`다. */
+  onCancel?: () => void;
   /**
    * 있으면 로그인이 끝난 뒤 같은 창이 「이 맥의 Claude Code를 @이름으로 부를 수 있게
    * 할까요?」로 이어진다(#3389). 기본 위치 로그인에만 준다(프로필·원격 작업 로그인은
@@ -164,6 +175,8 @@ export function HarnessLoginDialog({
           guardRef={guardRef}
           register={profile === null && !remote ? register : null}
           startAt={profile === null && !remote && register ? startAt : "login"}
+          external={external}
+          onCancel={onCancel}
         />
       )}
     </Dialog>
@@ -179,13 +192,16 @@ function useController(
   method: HarnessLoginMethod,
   fixture: HarnessLoginFixture | null,
   onLoginEnded: ((ended: boolean) => void) | undefined,
-  skipLogin: boolean
+  skipLogin: boolean,
+  external: LoginController | null
 ): LoginController | null {
   const endedRef = useRef(onLoginEnded);
   endedRef.current = onLoginEnded;
   const controller = useMemo(
     () =>
-      fixture || skipLogin
+      external
+        ? external
+        : fixture || skipLogin
         ? null
         : createLoginController(
             harness,
@@ -212,13 +228,15 @@ function useController(
     []
   );
   useEffect(() => {
-    if (!controller) return;
+    // 밖에서 받은 컨트롤러는 밖이 열고 밖이 끝낸다.
+    if (!controller || external) return;
     controller.open();
     return () => {
       controller.dispose();
       const report = endedRef.current;
       if (report) void controller.whenEnded().then(report);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controller]);
   return controller;
 }
@@ -237,7 +255,11 @@ function LoginDialogBody({
   register,
   startAt,
   guardRef,
+  external,
+  onCancel,
 }: {
+  external: LoginController | null;
+  onCancel: (() => void) | undefined;
   register: RegisterContext | null;
   startAt: "login" | "register";
   guardRef: { current: boolean };
@@ -260,7 +282,8 @@ function LoginDialogBody({
     method,
     fixture,
     onLoginEnded,
-    skipLogin
+    skipLogin,
+    external
   );
   // 로그인 뒤의 「에이전트로 만들기」 단계(#3389). 로그인을 막 마쳤는지(`fresh`)에 따라
   // 첫 줄의 「로그인됐어요」가 달라진다.
@@ -478,6 +501,18 @@ function LoginDialogBody({
             )}
           </>
         ) : (
+          <>
+            {onCancel && (
+              <Button
+                type="button"
+                variant="ghost"
+                className="mr-auto"
+                onClick={onClose}
+                data-testid="harness-login-detach"
+              >
+                {LOGIN_DETACH_LABEL}
+              </Button>
+            )}
           <Button
             ref={primaryRef}
             type="button"
@@ -487,12 +522,13 @@ function LoginDialogBody({
               // [다시 시도]를 두 번 누르면 둘째 누름이 같은 자리에 새로 선 [취소]에
               // 떨어진다(#2902 L1). 겹 누름의 둘째부터는 취소로 받지 않는다.
               if (event.detail > 1) return;
-              onClose();
+              (onCancel ?? onClose)();
             }}
             data-testid="harness-login-cancel"
           >
             {LOGIN_CANCEL_LABEL}
           </Button>
+          </>
         )}
       </div>
     </DialogContent>

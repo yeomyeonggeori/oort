@@ -362,8 +362,11 @@ export type PtyProgram =
    * 넘긴다: 폴더는 셸이 workd에게 묻고 자기가 계산한 경로와 같을 때만 믿는다.
    */
   | { kind: "remoteLogin"; id: "claude" | "codex"; method: "browser" | "device"; profile: string }
-  /** 공식 CLI 로그아웃(ADR-0190 D3-f A2·A5). 늘 oort 프로필이다. */
-  | { kind: "logout"; id: "claude" | "codex"; profile: string };
+  /**
+   * 공식 CLI 로그아웃(ADR-0190 D3-f A2·A5). `profile`이 있으면 그 oort 프로필 폴더의 것이고,
+   * 없으면 이 맥의 기본 위치다(「내 도구」 카드 연결 끊기, ADR-0198 D3).
+   */
+  | { kind: "logout"; id: "claude" | "codex"; profile?: string };
 
 export interface PtyExit {
   id: number;
