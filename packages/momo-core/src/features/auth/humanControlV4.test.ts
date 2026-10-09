@@ -123,6 +123,19 @@ describe("momo.human.control.v4 (#3592) — the shared vectors", () => {
     }
   });
 
+  it("refuses and accepts exactly the shared text table (rejects/accepts vectors)", () => {
+    const rules = (vectors as unknown as { text_rules: { rejects: Array<{ name: string; field: string; value: string }>; accepts: Array<{ name: string; field: string; value: string }> } }).text_rules;
+    const check = (field: string, value: string) =>
+      field === "prompt" ? spawnPromptText(value) : spawnLabelText(value);
+    expect(rules.rejects.length).toBeGreaterThanOrEqual(20);
+    for (const r of rules.rejects) {
+      expect(() => check(r.field, r.value), r.name).toThrow(SpawnTaskInputError);
+    }
+    for (const a of rules.accepts) {
+      expect(() => check(a.field, a.value), a.name).not.toThrow();
+    }
+  });
+
   it("refuses what the server would refuse, before anything is signed", () => {
     const tc = cases[0]!;
     const content = contentOf(tc);
@@ -137,6 +150,8 @@ describe("momo.human.control.v4 (#3592) — the shared vectors", () => {
       { prompt: "   " },
       { prompt: "/clear" },
       { prompt: "a\u0000b" },
+      { prompt: "a\r\nb" },
+      { prompt: "a\u202eb" },
       { prompt: "가".repeat(32_769) },
     ];
     for (const edit of bad) {

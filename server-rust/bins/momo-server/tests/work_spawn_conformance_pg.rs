@@ -1999,7 +1999,7 @@ async fn control_characters_are_refused_before_the_signature() {
     assert_eq!(s.spent_nonces().await, 0);
     // Tabs and line breaks in a prompt are text.
     let mut req = s.req();
-    req.prompt = "표:\n\t열1\t열2\r\n끝".to_string();
+    req.prompt = "표:\n\t열1\t열2\n끝".to_string();
     let (status, body, _) = s.spawn(&req).await;
     assert_eq!(status, 201, "{body}");
 }
@@ -3293,4 +3293,108 @@ async fn a_called_session_speaks_as_the_alias_where_it_was_called() {
     let ((author, _, _), replies) = s.card_and_thread(session).await;
     assert_eq!(author, agent);
     assert!(replies.iter().all(|a| *a == agent), "{replies:?}");
+}
+
+// | `the_same_message_calls_one_task_per_agent_and_harness` (review M1) | drop the origin lookup in `spawn_in_tx` (a fresh nonce on the same origin then makes a second control) |
+// | `invisible_and_carriage_return_text_is_refused_before_the_nonce_is_spent` (review M2·L2) | revert `spawn_prompt_problem` / `spawn_label_problem` to control-only |
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_same_message_calls_one_task_per_agent_and_harness() {
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    s.host_online(s.host, true).await;
+    let alias = unique_alias("kwak-claude");
+    let agent = s.on(&s.access, "claude_code", &alias).await;
+    let message = s
+        .say(&s.access, s.channel, None, &format!("@{alias} 빌드 봐 줘"))
+        .await;
+    let mut req = s.req();
+    req.agent = Some(agent);
+    req.origin = Some(message);
+
+    let (status, first, _) = s.spawn(&req).await;
+    assert_eq!(status, 201, "{first}");
+    // The same call again with a fresh nonce: the Mac must not run it twice.
+    let (status, second, _) = s.spawn(&req).await;
+    assert_eq!(
+        status, 200,
+        "a resend of the same call answers the same control: {second}"
+    );
+    assert_eq!(second["replayed"], true);
+    assert_eq!(second["workControl"]["id"], first["workControl"]["id"]);
+    assert_eq!(s.spawn_controls().await, 1, "one control, one task");
+    assert_eq!(
+        s.spent_nonces().await,
+        1,
+        "the second nonce was never spent"
+    );
+
+    // The same message may still call a DIFFERENT agent/harness combination:
+    // here the owner's plain tool from the same message.
+    let mut tool = s.req();
+    tool.origin = Some(message);
+    let (status, third, _) = s.spawn(&tool).await;
+    assert_eq!(status, 201, "{third}");
+    assert_eq!(s.spawn_controls().await, 2);
+
+    // After the first task failed, the owner can call again.
+    sqlx::query("UPDATE work_control SET status = 'failed' WHERE id = $1")
+        .bind(Uuid::parse_str(first["workControl"]["id"].as_str().unwrap()).unwrap())
+        .execute(&s.su)
+        .await
+        .expect("fail the first");
+    let (status, again, _) = s.spawn(&req).await;
+    assert_eq!(status, 201, "a failed call may be called again: {again}");
+    assert_eq!(s.spawn_controls().await, 3);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn invisible_and_carriage_return_text_is_refused_before_the_nonce_is_spent() {
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    s.host_online(s.host, true).await;
+    let doc: Value = serde_json::from_str(include_str!(
+        "../../../../docs/api/human-control-signing-v4.vectors.json"
+    ))
+    .unwrap();
+    for case in doc["text_rules"]["rejects"].as_array().unwrap() {
+        let (name, field, value) = (
+            case["name"].as_str().unwrap(),
+            case["field"].as_str().unwrap(),
+            case["value"].as_str().unwrap(),
+        );
+        // Not representable as the route's own typed request fields: a
+        // slash command has its own code, an empty/blank title is not a body.
+        // A title with a control character cannot even be signed by the test's
+        // own (momo-wire) signer; the route's check on it is the same function.
+        if value.is_empty()
+            || value.trim_start().starts_with('/')
+            || (field == "label" && value.chars().any(char::is_control))
+        {
+            continue;
+        }
+        let mut req = s.req();
+        if field == "prompt" {
+            req.prompt = value.to_string();
+        } else {
+            req.label = Box::leak(value.to_string().into_boxed_str());
+        }
+        let (status, body, _) = s.spawn(&req).await;
+        assert_eq!(status, 400, "{name}: {body}");
+        assert!(
+            matches!(
+                code(&body),
+                Some("spawn_prompt_invalid") | Some("spawn_label_invalid")
+            ),
+            "{name}: {body}"
+        );
+    }
+    assert_eq!(s.spawn_controls().await, 0);
+    assert_eq!(
+        s.spent_nonces().await,
+        0,
+        "refused before the signature spent a nonce"
+    );
 }

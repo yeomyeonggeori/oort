@@ -1446,3 +1446,35 @@ fn the_new_task_dialog_shows_the_title_and_the_whole_prompt() {
     let body = Statement::Control { signer, request }.summary(None).body;
     assert!(body.contains("에이전트 없음"), "{body}");
 }
+
+/// #3592 review M2 · L2: the shared text table. The desktop shell refuses every
+/// `rejects` entry and accepts every `accepts` entry of the v4 vectors — the
+/// same input the server (`momo-wire`) and the core (and so the phone) judge.
+#[test]
+fn the_text_table_of_the_v4_vectors_is_this_shells_table() {
+    let root: Value = serde_json::from_str(VECTORS_V4).unwrap();
+    let rules = &root["text_rules"];
+    let verdict = |field: &str, value: &str| match field {
+        "prompt" => spawn_prompt_ok(value),
+        "label" => spawn_label_ok(value),
+        other => panic!("field {other}"),
+    };
+    let rejects = rules["rejects"].as_array().unwrap();
+    assert!(rejects.len() >= 20);
+    for case in rejects {
+        let (name, field, value) = (
+            case["name"].as_str().unwrap(),
+            case["field"].as_str().unwrap(),
+            case["value"].as_str().unwrap(),
+        );
+        assert!(verdict(field, value).is_err(), "{name} must be refused");
+    }
+    for case in rules["accepts"].as_array().unwrap() {
+        let (name, field, value) = (
+            case["name"].as_str().unwrap(),
+            case["field"].as_str().unwrap(),
+            case["value"].as_str().unwrap(),
+        );
+        assert!(verdict(field, value).is_ok(), "{name} must be accepted");
+    }
+}

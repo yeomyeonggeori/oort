@@ -1289,6 +1289,31 @@ async fn work_complete_pushes_the_owner_when_the_session_speaks_as_its_alias() {
     // The same line authored by a member that is NOT this session's persona is
     // a forgery and tells nobody.
     let stranger = seed_alias(&su, &fixture).await;
+    // `stranger` is a real persona — of ANOTHER session (review: a persona of a
+    // different session must not vouch for this one).
+    let other_root: Uuid = sqlx::query_scalar(
+        "INSERT INTO message \
+           (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, props) \
+         VALUES ($1, $2, 90, 90, 0, $3, 'system', '{\"kind\":\"work.session\"}'::jsonb) RETURNING id",
+    )
+    .bind(fixture.workspace_id)
+    .bind(fixture.channel_id)
+    .bind(owner)
+    .fetch_one(&su)
+    .await
+    .expect("another session's card");
+    sqlx::query(
+        "INSERT INTO work_session \
+           (workspace_id, channel_id, member_id, host_id, root_message_id, tool, label, persona_member_id) \
+         SELECT workspace_id, channel_id, member_id, host_id, $2, tool, 'other', $3 \
+           FROM work_session WHERE id = $1",
+    )
+    .bind(work.session_id)
+    .bind(other_root)
+    .bind(stranger)
+    .execute(&su)
+    .await
+    .expect("another session spoken as the stranger");
     let forged = idle_card(
         &su,
         &fixture,

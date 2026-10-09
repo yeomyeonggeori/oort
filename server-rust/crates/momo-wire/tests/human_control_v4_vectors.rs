@@ -148,3 +148,39 @@ fn every_clients_copy_is_the_docs_file() {
         assert_eq!(copy, VECTORS_V4, "{path} must equal docs/api's v4 vectors");
     }
 }
+
+/// The shared text table (#3592 review M2 · L2): what the server stores and
+/// signs is what the core, the phone and the desktop shell sign.
+#[test]
+fn the_text_rules_refuse_and_accept_what_every_client_does() {
+    use momo_wire::human_control::{spawn_label_problem, spawn_prompt_problem};
+    let doc = doc();
+    let rules = &doc["text_rules"];
+    let problem = |field: &str, value: &str| match field {
+        "prompt" => spawn_prompt_problem(value),
+        "label" => {
+            // The caller's trimming: an untrimmed title is refused by comparing.
+            if value.trim() != value {
+                Some("not trimmed")
+            } else {
+                spawn_label_problem(value)
+            }
+        }
+        other => panic!("field {other}"),
+    };
+    let rejects = rules["rejects"].as_array().expect("rejects");
+    assert!(rejects.len() >= 20);
+    for case in rejects {
+        let (name, field, value) = (s(case, "name"), s(case, "field"), s(case, "value"));
+        let slash = field == "prompt" && value.trim_start().starts_with('/');
+        // The slash rule has its own code on the route (`spawn_slash_command`).
+        assert!(
+            problem(field, value).is_some() || slash,
+            "{name} must be refused"
+        );
+    }
+    for case in rules["accepts"].as_array().expect("accepts") {
+        let (name, field, value) = (s(case, "name"), s(case, "field"), s(case, "value"));
+        assert_eq!(problem(field, value), None, "{name} must be accepted");
+    }
+}

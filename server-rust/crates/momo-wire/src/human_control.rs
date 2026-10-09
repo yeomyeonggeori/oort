@@ -1186,6 +1186,88 @@ fn canonical_b64_of_len(
     Ok(bytes)
 }
 
+// ---------------------------------------------------------------------------
+// What a new-work spawn's text may contain (#3592 review M2 · L2)
+// ---------------------------------------------------------------------------
+
+/// A character that renders as nothing or reorders the text around it:
+/// zero-width and bidirectional controls, variation selectors, soft hyphen,
+/// Hangul fillers, the braille blank, private use and tag characters.
+///
+/// **One table, four implementations.** The server (`validated_spawn`), the
+/// shared core (`humanControlV4.ts`, which the phone reuses) and the desktop
+/// shell (`device_key/payload.rs`) reject the same characters, and
+/// `docs/api/human-control-signing-v4.vectors.json` (`rejects`) pins it: a prompt
+/// the signer would show differently than the host reads is not signed.
+pub fn is_hidden_char(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x00AD
+            | 0x034F
+            | 0x115F..=0x1160
+            | 0x180B..=0x180D
+            | 0x2800
+            | 0x3164
+            | 0xFE00..=0xFE0E
+            | 0xFFA0
+            | 0xE0100..=0xE01EF
+            | 0x0600..=0x0605
+            | 0x061C
+            | 0x06DD
+            | 0x070F
+            | 0x0890..=0x0891
+            | 0x08E2
+            | 0x180E
+            | 0x200B..=0x200C
+            | 0x200E..=0x200F
+            | 0x2028..=0x202E
+            | 0x2060..=0x2064
+            | 0x2066..=0x206F
+            | 0xFEFF
+            | 0xFFF9..=0xFFFB
+            | 0x110BD
+            | 0x110CD
+            | 0x13430..=0x1343F
+            | 0x1BCA0..=0x1BCA3
+            | 0x1D173..=0x1D17A
+            | 0xE000..=0xF8FF
+            | 0xE0000..=0xE007F
+            | 0xF0000..=0x10FFFF
+    )
+}
+
+/// Why `prompt` may not be signed or stored as a new task's first prompt, or
+/// `None`. Text, not a command: line feeds and tabs are the only control
+/// characters (a carriage return is refused — clients send `\n`), nothing
+/// hidden, 1...32768 characters, not blank, not an adapter command (`/…`).
+pub fn spawn_prompt_problem(prompt: &str) -> Option<&'static str> {
+    let chars = prompt.chars().count();
+    if chars == 0 || chars > 32_768 || prompt.trim().is_empty() {
+        return Some("prompt must contain 1...32768 characters");
+    }
+    if prompt
+        .chars()
+        .any(|c| (c.is_control() && c != '\n' && c != '\t') || is_hidden_char(c))
+    {
+        return Some("prompt may contain only line feeds and tabs as control characters and nothing invisible");
+    }
+    None
+}
+
+/// Why `label` may not be a new task's card title, or `None`: one line,
+/// 1...120 characters, no control or hidden character. (Trimming and NFC are
+/// the caller's, which compares the stored form with what was sent.)
+pub fn spawn_label_problem(label: &str) -> Option<&'static str> {
+    let chars = label.trim().chars().count();
+    if !(1..=120).contains(&chars) {
+        return Some("title must contain 1...120 characters");
+    }
+    if label.chars().any(|c| c.is_control() || is_hidden_char(c)) {
+        return Some("title may not contain control or invisible characters");
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

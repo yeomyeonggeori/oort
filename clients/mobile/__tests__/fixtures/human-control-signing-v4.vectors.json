@@ -123,5 +123,147 @@
       "payload": "momo.human.control.v4\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d003\n00000000-0000-7000-8000-00000000f001\n-\nspawn\n-\n0193a5b8-7c1e-7d2a-9f00-000000000044\n1790550014000\n1790550614000\n86a2fc65ab31bb8e3c449da45929d5691666cc4613c5f28dcc1181e38b19a288",
       "payload_sha256": "fa7ca5db7814b34bcb97b7da61d4c043ade8ba248041e7c5877cc5090edd337d"
     }
-  ]
+  ],
+  "text_rules": {
+    "_comment": "#3592 \ub9ac\ubdf0 M2\u00b7L2 \u2014 \uc0c8 \uc791\uc5c5 spawn\uc758 prompt\u00b7label\uc774 \ubc1b\uc544\ub4e4\uc774\ub294 \uae00\uc790\uc758 \uacf5\uc720 \ud45c. rejects\ub294 \uc11c\ubc84(momo-wire spawn_prompt_problem\u00b7spawn_label_problem)\u00b7\uacf5\uc720 \ucf54\uc5b4(spawnPromptText\u00b7spawnLabelText, \ud3f0\uc774 \uc7ac\uc0ac\uc6a9)\u00b7\ub370\uc2a4\ud06c\ud0d1 \uc178(spawn_prompt_ok\u00b7spawn_label_ok)\uc774 \ubaa8\ub450 \uac70\uc808\ud574\uc57c \ud558\uace0, accepts\ub294 \ubaa8\ub450 \ubc1b\uc544\uc57c \ud55c\ub2e4. \uc11c\uba85\uc790\uac00 \uc0ac\ub78c\uc5d0\uac8c \ubcf4\uc774\ub294 \uac83\uacfc host\uac00 \uc77d\ub294 \uac83\uc774 \ub2ec\ub77c\uc9c0\ub294 \uae00\uc790(\uc81c\ub85c\ud3ed\u00b7\ubc29\ud5a5 \uc81c\uc5b4\u00b7\ubcc0\ud615 \uc120\ud0dd\uc790\u00b7\uc8fc \uc81c\uc5b4\ubb38\uc790)\ub97c \uc11c\uba85\ud558\uc9c0 \uc54a\uae30 \uc704\ud574\uc11c\ub2e4.",
+    "rejects": [
+      {
+        "name": "prompt_zero_width_space",
+        "field": "prompt",
+        "value": "\ube4c\ub4dc\u200b\ud655\uc778"
+      },
+      {
+        "name": "prompt_right_to_left_override",
+        "field": "prompt",
+        "value": "\ud30c\uc77c \u202etxt.exe"
+      },
+      {
+        "name": "prompt_bidi_isolate",
+        "field": "prompt",
+        "value": "a\u2066b\u2069"
+      },
+      {
+        "name": "prompt_variation_selector_supplement",
+        "field": "prompt",
+        "value": "x\udb40\udd00"
+      },
+      {
+        "name": "prompt_soft_hyphen",
+        "field": "prompt",
+        "value": "soft\u00adhyphen"
+      },
+      {
+        "name": "prompt_braille_blank",
+        "field": "prompt",
+        "value": "\u2800"
+      },
+      {
+        "name": "prompt_hangul_filler",
+        "field": "prompt",
+        "value": "\uc774\ub984\u3164"
+      },
+      {
+        "name": "prompt_private_use",
+        "field": "prompt",
+        "value": "x\ue000"
+      },
+      {
+        "name": "prompt_tag_character",
+        "field": "prompt",
+        "value": "x\udb40\udc41"
+      },
+      {
+        "name": "prompt_byte_order_mark",
+        "field": "prompt",
+        "value": "\ufeffhello"
+      },
+      {
+        "name": "prompt_carriage_return",
+        "field": "prompt",
+        "value": "\uccab \uc904\r\n\ub458\uc9f8 \uc904"
+      },
+      {
+        "name": "prompt_nul",
+        "field": "prompt",
+        "value": "a\u0000b"
+      },
+      {
+        "name": "prompt_escape",
+        "field": "prompt",
+        "value": "a\u001b[31mb"
+      },
+      {
+        "name": "prompt_c1_control",
+        "field": "prompt",
+        "value": "a\u0085b"
+      },
+      {
+        "name": "prompt_blank",
+        "field": "prompt",
+        "value": " \n\t "
+      },
+      {
+        "name": "prompt_adapter_command",
+        "field": "prompt",
+        "value": "/clear"
+      },
+      {
+        "name": "label_line_feed",
+        "field": "label",
+        "value": "\ub450\n\uc904"
+      },
+      {
+        "name": "label_tab",
+        "field": "label",
+        "value": "\ud0ed\t\uc81c\ubaa9"
+      },
+      {
+        "name": "label_zero_width_joiner_break",
+        "field": "label",
+        "value": "\uc81c\u200b\ubaa9"
+      },
+      {
+        "name": "label_right_to_left_override",
+        "field": "label",
+        "value": "\u202e\uc81c\ubaa9"
+      },
+      {
+        "name": "label_untrimmed",
+        "field": "label",
+        "value": " \uc81c\ubaa9"
+      },
+      {
+        "name": "label_empty",
+        "field": "label",
+        "value": ""
+      }
+    ],
+    "accepts": [
+      {
+        "name": "prompt_line_feed_and_tab",
+        "field": "prompt",
+        "value": "\uccab \uc904\n\t\ub458\uc9f8 \uc904"
+      },
+      {
+        "name": "prompt_emoji_presentation_selector",
+        "field": "prompt",
+        "value": "\u2764\ufe0f \uace0\ub9c8\uc6cc"
+      },
+      {
+        "name": "prompt_korean_and_ascii",
+        "field": "prompt",
+        "value": "Fix the flaky test. \uc774\uc288 #3021\ub3c4 \ubd10 \uc918."
+      },
+      {
+        "name": "label_plain",
+        "field": "label",
+        "value": "\ube4c\ub4dc \ud655\uc778"
+      },
+      {
+        "name": "label_emoji_presentation_selector",
+        "field": "label",
+        "value": "\u2764\ufe0f \ud655\uc778"
+      }
+    ]
+  }
 }

@@ -76,6 +76,32 @@ export class SpawnTaskInputError extends Error {
   }
 }
 
+/**
+ * A character that renders as nothing or reorders the text around it. The same
+ * table as `momo_wire::human_control::is_hidden_char` (server) and the desktop
+ * shell's `is_hidden_char`; `human-control-signing-v4.vectors.json`
+ * (`text_rules.rejects`) pins all three (#3592 review M2).
+ */
+const HIDDEN_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x00ad, 0x00ad], [0x034f, 0x034f], [0x115f, 0x1160], [0x180b, 0x180d],
+  [0x2800, 0x2800], [0x3164, 0x3164], [0xfe00, 0xfe0e], [0xffa0, 0xffa0],
+  [0xe0100, 0xe01ef], [0x0600, 0x0605], [0x061c, 0x061c], [0x06dd, 0x06dd],
+  [0x070f, 0x070f], [0x0890, 0x0891], [0x08e2, 0x08e2], [0x180e, 0x180e],
+  [0x200b, 0x200c], [0x200e, 0x200f], [0x2028, 0x202e], [0x2060, 0x2064],
+  [0x2066, 0x206f], [0xfeff, 0xfeff], [0xfff9, 0xfffb], [0x110bd, 0x110bd],
+  [0x110cd, 0x110cd], [0x13430, 0x1343f], [0x1bca0, 0x1bca3], [0x1d173, 0x1d17a],
+  [0xe000, 0xf8ff], [0xe0000, 0xe007f], [0xf0000, 0x10ffff],
+];
+
+export function isHiddenCodePoint(cp: number): boolean {
+  return HIDDEN_RANGES.some(([lo, hi]) => cp >= lo && cp <= hi);
+}
+
+function hasHidden(text: string): boolean {
+  for (const ch of text) if (isHiddenCodePoint(ch.codePointAt(0)!)) return true;
+  return false;
+}
+
 // eslint-disable-next-line no-control-regex -- the point is to find them.
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
 
@@ -106,8 +132,10 @@ function ms(name: string, value: number): string {
  */
 export function spawnLabelText(label: string): string {
   const nfc = label.normalize("NFC");
-  if (nfc !== nfc.trim() || CONTROL.test(nfc)) {
-    throw new SpawnTaskInputError("label must be one trimmed line with no control character");
+  if (nfc !== nfc.trim() || CONTROL.test(nfc) || hasHidden(nfc)) {
+    throw new SpawnTaskInputError(
+      "label must be one trimmed line with no control or invisible character"
+    );
   }
   const length = Array.from(nfc).length;
   if (length < 1 || length > SPAWN_LABEL_MAX_CHARS) {
@@ -118,8 +146,8 @@ export function spawnLabelText(label: string): string {
 
 /**
  * The prompt the server stores and the statement signs: NFC text of
- * 1…32768 characters, line breaks and tabs allowed, no other control
- * character, and not an adapter command (`/…`, which the host refuses).
+ * 1…32768 characters, line feeds and tabs allowed, no other control or
+ * invisible character, and not an adapter command (`/…`, which the host refuses).
  */
 export function spawnPromptText(prompt: string): string {
   const nfc = prompt.normalize("NFC");
@@ -127,9 +155,14 @@ export function spawnPromptText(prompt: string): string {
   if (length < 1 || length > SPAWN_PROMPT_MAX_CHARS || nfc.trim() === "") {
     throw new SpawnTaskInputError(`prompt must contain 1...${SPAWN_PROMPT_MAX_CHARS} characters`);
   }
-  // eslint-disable-next-line no-control-regex -- line breaks and tabs are text.
-  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/.test(nfc)) {
-    throw new SpawnTaskInputError("prompt has a control character other than a line break or tab");
+  // Line feeds and tabs are the only control characters (a carriage return is
+  // refused: the call path sends `\n`), and nothing hidden — the desktop shell's
+  // rule, the server's, and the vectors' (#3592 review M2 · L2).
+  // eslint-disable-next-line no-control-regex -- the point is to find them.
+  if (/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/.test(nfc) || hasHidden(nfc)) {
+    throw new SpawnTaskInputError(
+      "prompt has a control or invisible character other than a line feed or tab"
+    );
   }
   if (nfc.trimStart().startsWith("/")) {
     throw new SpawnTaskInputError("a prompt cannot start with /");
