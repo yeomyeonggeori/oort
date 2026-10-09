@@ -587,6 +587,9 @@ mod tests {
                 "/v1/workspaces/{ws}/work-sessions/{}/instructions",
                 Uuid::from_u128(6)
             ),
+            // #3570: the owner's signed new-work spawn. A host signing here
+            // would start work on itself as its owner.
+            format!("/v1/workspaces/{ws}/work-spawns"),
         ] {
             for method in [Method::GET, Method::POST, Method::PUT, Method::PATCH] {
                 assert!(

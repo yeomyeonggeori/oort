@@ -7,7 +7,7 @@ jest.mock('expo-modules-core', () => ({
 
 import {SignerRefusal, type ControlToSign} from '@momo/core/features/auth/signedControl';
 
-import {humanControlPayload, type SignHumanControlInput} from '../src/deviceKey/humanControl';
+import {humanControlPayload, signHumanControl as humanSign, type SignHumanControlInput} from '../src/deviceKey/humanControl';
 import {DeviceKeyError} from '../src/deviceKey/native';
 import {phoneSigner, phoneSignerRefusal, phoneSignInput} from '../src/deviceKey/signer';
 
@@ -73,7 +73,7 @@ const context = (instanceId: string, serverTimeMs: number) => ({
 });
 
 describe('phone ↔ desktop: one intent, one statement', () => {
-  it('reads all five app requests', () => {
+  it('reads all nine app requests', () => {
     expect(entries.map(e => e.name).sort()).toEqual(
       [
         'control_v2_input_interrupt',
@@ -81,6 +81,10 @@ describe('phone ↔ desktop: one intent, one statement', () => {
         'control_v3_permission_once',
         'control_v2_spawn',
         'control_v2_spawn_resume',
+        'control_v4_spawn_harness_without_agent',
+        'control_v4_spawn_nfd_text_signs_as_nfc',
+        'control_v4_spawn_personal_agent_in_thread',
+        'control_v4_spawn_personal_agent_main_line',
       ].sort(),
     );
   });
@@ -95,11 +99,14 @@ describe('phone ↔ desktop: one intent, one statement', () => {
         context(e.request.instanceId, e.request.issuedAtMs),
         0,
       );
-      // #3128: an allow is v3 (it binds the preview hash), the rest v2.
+      // #3128: an allow is v3 (it binds the preview hash); #3592: a new task is
+      // v4; the rest v2.
       expect(input.schema).toBe(
         control.content.kind === 'permission'
           ? 'momo.human.control.v3'
-          : 'momo.human.control.v2',
+          : control.content.kind === 'spawn_task'
+            ? 'momo.human.control.v4'
+            : 'momo.human.control.v2',
       );
       const bytes = humanControlPayload(
         input.schema,
@@ -119,6 +126,44 @@ describe('phone ↔ desktop: one intent, one statement', () => {
       expect(Buffer.from(bytes).toString('utf8')).toBe(e.payload);
     },
   );
+});
+
+describe('spawn_task (#3592)', () => {
+  const identity = {workspaceId: 'w', memberId: 'm', deviceKeyId: 'k'};
+  const task: ControlToSign = {
+    hostId: 'h',
+    sessionId: null,
+    nonce: 'n',
+    content: {
+      kind: 'spawn_task',
+      agentMemberId: 'a',
+      folderId: 'fld_x',
+      tool: 'claude',
+      channelId: 'c',
+      threadRootId: null,
+      originMessageId: 'o',
+      label: '제목',
+      prompt: '내용',
+    },
+  };
+
+  it('signs as v4 and carries the content through unchanged', () => {
+    const input = phoneSignInput(identity, task, context('i', 0), 0);
+    expect(input.schema).toBe('momo.human.control.v4');
+    expect(input.content).toEqual(task.content);
+  });
+
+  it('a bad statement is a 해요체 refusal, not a thrown builder error', async () => {
+    const signer = phoneSigner(identity, {
+      context: async () => context('i', 0),
+      sign: humanSign,
+      now: () => 0,
+    });
+    const bad = {...task, content: {...task.content, prompt: '/clear'}} as ControlToSign;
+    const error = (await signer.sign(bad).catch((x: unknown) => x)) as SignerRefusal;
+    expect(error).toBeInstanceOf(SignerRefusal);
+    expect(error.message).toMatch(/요\.$/);
+  });
 });
 
 describe('phoneSigner', () => {

@@ -13,7 +13,7 @@
 //! | 3 | AI 연결 | `GET·PUT·DELETE /v1/provider/link` | `settings/api.ts:132-147` |
 //! | 4 | AI 연결 (체인) | `GET·PUT·DELETE /v1/provider/link/chain` | `settings/api.ts:238-255` |
 //! | 5 | AI 연결 (확인) | `POST /v1/provider/link/test` | `settings/api.ts:149` |
-//! | 6 | 코드 실행 호스트 | `GET·PUT /v1/provider/work-host-engine` | `settings/api.ts:268-277` |
+//! | 6 | (삭제) 코드 실행 호스트 | `/v1/provider/work-host-engine` — #3584, ADR-0198 | — |
 //! | 7 | 추론 강도 | `GET /v1/provider/effort-table` | `lib/api.ts:1953` |
 //! | 8 | 구독 잔여량 | `GET /v1/provider/quota-snapshots` | `settings/api.ts:504` |
 //! | 9 | 티어 정책 | `GET·PUT …/work-tier-policy[/me]` | `settings/api.ts:312-336` |
@@ -520,19 +520,31 @@ async fn the_settings_panels_read_and_write_round_trip() {
     );
     assert_eq!(probe["entries"][1]["disposition"], "skipped");
 
-    // -- 6. 코드 실행 호스트 -------------------------------------------------
-    let engine: Value = auth(http.get(format!("{base}/v1/provider/work-host-engine")))
-        .send()
-        .await
-        .expect("engine read")
-        .json()
-        .await
-        .expect("engine body");
-    assert_eq!(engine["engine"], "opencode");
-    assert_eq!(
-        engine["source"], "default",
-        "an absent row reports the boot default WITHOUT writing one: {engine}"
-    );
+    // -- 6. 코드 실행 호스트 — removed (#3584, ADR-0198 D1·D4) -----------------
+    // The route is gone, not merely empty: a route that is absent answers 404/405
+    // for every verb. Both are asserted so that re-adding only one verb fails.
+    for (verb, request) in [
+        (
+            "GET",
+            auth(http.get(format!("{base}/v1/provider/work-host-engine"))),
+        ),
+        (
+            "PUT",
+            auth(http.put(format!("{base}/v1/provider/work-host-engine")))
+                .json(&json!({"engine": "goose"})),
+        ),
+        (
+            "POST",
+            auth(http.post(format!("{base}/v1/provider/work-host-engine")))
+                .json(&json!({"engine": "goose"})),
+        ),
+    ] {
+        let status = request.send().await.expect("removed engine route").status();
+        assert!(
+            matches!(status.as_u16(), 404 | 405),
+            "{verb} /v1/provider/work-host-engine must be gone, got {status}"
+        );
+    }
     let engine_rows: i64 =
         sqlx::query("SELECT count(*)::bigint FROM work_host_engine WHERE workspace_id = $1")
             .bind(fixture.workspace)
@@ -540,29 +552,10 @@ async fn the_settings_panels_read_and_write_round_trip() {
             .await
             .expect("engine rows")
             .get(0);
-    assert_eq!(engine_rows, 0, "a read must not create a row");
-
-    let bad = auth(http.put(format!("{base}/v1/provider/work-host-engine")))
-        .json(&json!({"engine": "claude-code"}))
-        .send()
-        .await
-        .expect("unknown engine");
     assert_eq!(
-        bad.status().as_u16(),
-        400,
-        "an unknown label is a 400 here, never a 500 from the CHECK constraint"
+        engine_rows, 0,
+        "nothing may write the legacy table any more"
     );
-
-    let engine: Value = auth(http.put(format!("{base}/v1/provider/work-host-engine")))
-        .json(&json!({"engine": "goose"}))
-        .send()
-        .await
-        .expect("engine write")
-        .json()
-        .await
-        .expect("engine write body");
-    assert_eq!(engine["engine"], "goose");
-    assert_eq!(engine["source"], "database");
 
     // -- 7. 추론 강도 --------------------------------------------------------
     let effort: Value = auth(http.get(format!("{base}/v1/provider/effort-table")))
@@ -763,7 +756,6 @@ async fn the_settings_panels_read_and_write_round_trip() {
     for action in [
         "provider_link.updated",
         "provider_link_chain.updated",
-        "work_host_engine.updated",
         "work.tier_policy.changed",
         "invite.created",
     ] {
@@ -842,7 +834,6 @@ async fn a_foreign_tenants_settings_rows_are_zero_under_the_callers_guc() {
         let workspace = owner.workspace;
         move |conn| {
             Box::pin(async move {
-                momo_settings::upsert_work_host_engine(conn, workspace, "goose", member).await?;
                 momo_settings::upsert_tier_policy(
                     conn,
                     workspace,
@@ -865,12 +856,6 @@ async fn a_foreign_tenants_settings_rows_are_zero_under_the_callers_guc() {
         let owner_member = owner.member;
         move |conn| {
             Box::pin(async move {
-                assert!(
-                    momo_settings::read_work_host_engine(conn, owner_workspace)
-                        .await?
-                        .is_none(),
-                    "work_host_engine crossed a tenant boundary"
-                );
                 let policy = momo_settings::load_tier_policy(
                     conn,
                     owner_workspace,
@@ -900,12 +885,6 @@ async fn a_foreign_tenants_settings_rows_are_zero_under_the_callers_guc() {
         let member = owner.member;
         move |conn| {
             Box::pin(async move {
-                assert_eq!(
-                    momo_settings::read_work_host_engine(conn, workspace)
-                        .await?
-                        .map(|row| row.engine),
-                    Some("goose".to_string())
-                );
                 let policy = momo_settings::load_tier_policy(
                     conn,
                     workspace,

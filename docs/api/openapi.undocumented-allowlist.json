@@ -43,10 +43,6 @@
     },
     {
       "method": "get",
-      "path": "/v1/provider/work-host-engine"
-    },
-    {
-      "method": "get",
       "path": "/v1/workspaces/{}/agent-runs/{}"
     },
     {
@@ -116,10 +112,6 @@
     {
       "method": "put",
       "path": "/v1/provider/link"
-    },
-    {
-      "method": "put",
-      "path": "/v1/provider/work-host-engine"
     }
   ]
 }

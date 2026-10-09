@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import vectors from "../../../../../docs/api/human-control-signing-v2.vectors.json";
 import vectorsV3 from "../../../../../docs/api/human-control-signing-v3.vectors.json";
+import vectorsV4 from "../../../../../docs/api/human-control-signing-v4.vectors.json";
 import type { PermissionPreview } from "@momo/core/features/workbench/permissionPreview";
 import instructionGolden from "../../../../../docs/api/work-instruction.golden.json";
 import { SignerRefusal, type ControlToSign } from "@momo/core/features/auth/signedControl";
@@ -49,7 +50,19 @@ function controlOf(c: VectorCase): ControlToSign {
             scope: k.scope as "once" | "session",
             previewSha256: k.preview_sha256!,
           }
-        : {
+        : k.kind === "spawn_task"
+          ? {
+              kind: "spawn_task",
+              agentMemberId: k.agent_member_id ?? null,
+              folderId: k.folder_id!,
+              tool: k.tool!,
+              channelId: k.channel_id!,
+              threadRootId: k.thread_root_id ?? null,
+              originMessageId: k.origin_message_id ?? null,
+              label: k.label!,
+              prompt: k.prompt!,
+            }
+          : {
             kind: "spawn",
             agentMemberId: k.agent_member_id!,
             folderId: k.folder_id!,
@@ -76,6 +89,8 @@ const APP_CASES: VectorCase[] = [
     (c) => c.schema === "momo.human.control.v2" && ["input", "spawn"].includes((c.content as Content).kind!)
   ),
   ...(vectorsV3.cases as VectorCase[]).filter((c) => c.name === "control_v3_permission_once"),
+  // #3592: a new task is v4 (the four shared vectors, two without an agent or a thread).
+  ...(vectorsV4.cases as VectorCase[]),
 ];
 
 function requests() {
@@ -105,6 +120,10 @@ describe("desktop sign requests ↔ v2/v3 vectors (cross test with the Rust shel
         "control_v3_permission_once",
         "control_v2_spawn",
         "control_v2_spawn_resume",
+        "control_v4_spawn_personal_agent_in_thread",
+        "control_v4_spawn_personal_agent_main_line",
+        "control_v4_spawn_harness_without_agent",
+        "control_v4_spawn_nfd_text_signs_as_nfc",
       ].sort()
     );
   });
@@ -218,5 +237,14 @@ describe("desktopSigner", () => {
     expect(Object.keys(envelopeFromShell(spawn, { deviceKeyId: "k", signature: "s" }, 1, 2)).sort()).toEqual(
       ["agentMemberId", "deviceKeyId", "expiresAtMs", "folderId", "issuedAtMs", "nonce", "signature"].sort()
     );
+    // #3592: a new task names its agent only when a personal agent was called.
+    const withAgent = controlOf(APP_CASES.find((c) => c.name === "control_v4_spawn_personal_agent_in_thread")!);
+    const bare = controlOf(APP_CASES.find((c) => c.name === "control_v4_spawn_harness_without_agent")!);
+    const sig = { deviceKeyId: "k", signature: "s" };
+    expect(envelopeFromShell(withAgent, sig, 1, 2).agentMemberId).toBe(
+      (withAgent.content as { agentMemberId: string }).agentMemberId
+    );
+    expect(Object.keys(envelopeFromShell(bare, sig, 1, 2))).not.toContain("agentMemberId");
+    expect(envelopeFromShell(bare, sig, 1, 2).folderId).toBe("fld_aaaaaaaaaaaaaaaaaaaa");
   });
 });

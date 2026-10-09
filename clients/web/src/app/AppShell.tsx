@@ -45,6 +45,7 @@ import { DesktopNotifications } from "@/features/notifications/DesktopNotificati
 import { DockBadge } from "@/features/notifications/DockBadge";
 import { TabTitleCount } from "@/features/notifications/TabTitleCount";
 import { WorkHostNotices } from "@/features/notifications/WorkHostNotices";
+import { LegacyAgentPortCleanup } from "@/features/welcome/harnessLogin/LegacyAgentPortCleanup";
 import { ReminderDueWatcher } from "@/features/reminders/ReminderDueWatcher";
 import { AgentWorkingRail } from "@/features/agents/AgentWorkingRail";
 import { AgentWorkPanel } from "@/features/agents/AgentWorkPanel";
@@ -487,6 +488,7 @@ export function AppShell({
           {!stress && <DockBadge />}
           {!stress && <TabTitleCount />}
           {!stress && <WorkHostNotices />}
+          {!stress && <LegacyAgentPortCleanup />}
           {!stress && <ReminderDueWatcher />}
           {/* Renders nothing; watches every agent's progress channel so the
            * sidebar badge and the composer line describe the same turn

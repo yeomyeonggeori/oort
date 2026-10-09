@@ -10,6 +10,12 @@ import type { DesktopDeviceKeyStatus } from "@/lib/tauri";
 import { DevicesSection } from "./DevicesSection";
 import { resetAutoRebindForTests } from "./deviceKeysShared";
 
+// The real poll is 5 s; a test waits for it, so make it short (#3577).
+vi.mock("./deviceKeysShared", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./deviceKeysShared")>()),
+  DEVICE_KEYS_POLL_MS: 40,
+}));
+
 const WS = "00000000-0000-7000-8000-000000000001";
 const ME = "00000000-0000-7000-8000-000000000101";
 const ROOT_ID = "00000000-0000-7000-8000-00000000d001";
@@ -213,6 +219,17 @@ async function click(el: HTMLElement | null, label: string) {
 }
 
 describe("설정 › 기기 › 지시 서명 (#3025)", () => {
+  it("#3577 폰이 링크 뒤에 키를 등록해도 패널을 다시 열지 않고 승인 줄이 뜬다", async () => {
+    // The Mac refetched once when the QR link was redeemed — before the phone
+    // had registered — and the empty answer used to stay.
+    core.listDeviceKeys.mockResolvedValue([rootRow]);
+    const host = mount();
+    await waitFor(() => q(host, "device-keys-no-phone") !== null, "no phone yet");
+    core.listDeviceKeys.mockResolvedValue([rootRow, key()]);
+    await waitFor(() => q(host, "device-key-endorse-start") !== null, "phone row appears");
+    expect(q(host, "device-keys-no-phone")).toBeNull();
+  });
+
   it("브라우저 탭에서는 그리지 않는다 (서명 키는 데스크탑 셸에만 있다)", async () => {
     desktop.isDesktop.mockReturnValue(false);
     const host = mount();

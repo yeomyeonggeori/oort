@@ -64,6 +64,8 @@ serde.workspace = true
 # bootstrap roles, with the in-process mock substrate as the provider so a death
 # can be staged honestly. `axum` plays the push relay on a loopback port so the
 # signed request the notifier really sends can be inspected.
+# #3591: the migration-123 member trigger is exercised through the real lifecycle API.
+momo-settings = { path = "../../crates/momo-settings" }
 axum.workspace = true
 chrono.workspace = true
 ed25519-dalek.workspace = true

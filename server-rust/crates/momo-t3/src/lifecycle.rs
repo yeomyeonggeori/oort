@@ -1056,6 +1056,47 @@ pub async fn set_work_session_observation_in_tx(
     load_listed_work_session_detail_in_tx(conn, workspace_id, session_id).await
 }
 
+/// Record which personal agent a session speaks as (migration 124). Written once,
+/// at creation, from [`crate::work_control::spawn_call_in_tx`] — never from
+/// anything a host sent.
+pub async fn set_session_persona_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    persona_member_id: Uuid,
+) -> Result<(), T3Error> {
+    sqlx::query(
+        "UPDATE work_session SET persona_member_id = $3 \
+          WHERE workspace_id = $1 AND id = $2",
+    )
+    .bind(workspace_id)
+    .bind(session_id)
+    .bind(persona_member_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+/// Who a session's messages are authored as: the personal agent that was called
+/// ([`set_session_persona_in_tx`]), else the session owner (ADR-0198 증보 1
+/// 「T5 확정」 6). The owner stays `work_session.member_id` for slots,
+/// instructions, permissions and ending; this is only the speaker.
+pub async fn session_author_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    owner_member_id: Uuid,
+) -> Result<Uuid, T3Error> {
+    let persona: Option<Option<Uuid>> = sqlx::query_scalar(
+        "SELECT persona_member_id FROM work_session WHERE workspace_id = $1 AND id = $2",
+    )
+    .bind(workspace_id)
+    .bind(session_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(persona.flatten().unwrap_or(owner_member_id))
+}
+
 /// The successor row of a resume (`WorkSessionRoutes.resume` :1884-1903): same
 /// thread, same tool/label, new host, `resumed_from_session_id` set.
 ///
@@ -1076,8 +1117,10 @@ pub async fn create_resumed_work_session_in_tx(
     let sql = format!(
         "INSERT INTO work_session \
            (id, workspace_id, channel_id, member_id, host_id, root_message_id, \
-            tool, label, status, observation, resumed_from_session_id) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'running', $9, $10) \
+            tool, label, status, observation, resumed_from_session_id, persona_member_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'running', $9, $10, \
+                 (SELECT persona_member_id FROM work_session \
+                   WHERE workspace_id = $2 AND id = $10)) \
          RETURNING {returning}"
     );
     let row = sqlx::query(&sql)

@@ -27,6 +27,7 @@ import {
   type WorkSession,
 } from "../../lib/api";
 import { humanSignatureRefusal } from "./humanSignature";
+import type { SpawnTaskContent } from "./humanControlV4";
 import type { PermissionPreview } from "../workbench/permissionPreview";
 
 export type PermissionScope = "once" | "session";
@@ -56,7 +57,16 @@ export type ControlContentToSign =
       tool: string;
       channelId: string;
       firstPrompt: string;
-    };
+    }
+  | ({
+      /**
+       * #3592 (`momo.human.control.v4`): a NEW task on the owner's own Mac —
+       * the whole prompt, title, harness, folder id, room, thread and origin
+       * message are signed, and the agent member only when a personal agent
+       * (ADR-0198 D7) was called. `humanControlV4.ts` is the one recipe.
+       */
+      kind: "spawn_task";
+    } & SpawnTaskContent);
 
 export interface ControlToSign {
   /** The session's host (the server rebuilds it from the session). */
