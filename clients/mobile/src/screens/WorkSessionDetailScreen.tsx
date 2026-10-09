@@ -326,7 +326,8 @@ export default function WorkSessionDetailScreen({
         />
         <ModeSwitch mode={mode} onChange={changeMode} />
         <Animated.View style={[styles.modeBody, {opacity: fade}]}>
-          {mode === 'chat' ? (
+          {/* 두 보기를 함께 마운트해 둔다: 전환해도 쓰던 지시 초안·전송 중 말풍선·스크롤 위치가 남는다. */}
+          <View style={mode === 'chat' ? styles.modeBody : styles.modeHidden}>
             <WorkConversation
               workspaceId={workspaceId}
               memberId={member.id}
@@ -338,7 +339,8 @@ export default function WorkSessionDetailScreen({
               nameOf={nameOf}
               refreshControl={refreshControl}
             />
-          ) : (
+          </View>
+          <View style={mode === 'detail' ? styles.modeBody : styles.modeHidden}>
             <ScrollView
               contentContainerStyle={[
                 styles.scrollBody,
@@ -551,7 +553,7 @@ export default function WorkSessionDetailScreen({
                 </View>
               )}
             </ScrollView>
-          )}
+          </View>
         </Animated.View>
       </Screen>
     </View>
@@ -650,6 +652,7 @@ const buildStyles = (color: Palette) =>
   StyleSheet.create({
     modalRoot: {flex: 1, backgroundColor: color.bg},
     modeBody: {flex: 1},
+    modeHidden: {display: 'none'},
     scrollBody: {paddingBottom: space.lg},
     detailHeading: {
       paddingHorizontal: SAFE_GUTTER,

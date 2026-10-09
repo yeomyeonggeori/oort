@@ -285,7 +285,8 @@ const agentItem = (id: string, text: string): ChatItem => ({
   streaming: false,
 });
 
-function scroll(offsetY: number, viewport: number, content: number) {
+function scroll(offsetY: number, viewport: number, content: number, drag = false) {
+  if (drag) fireEvent(screen.getByTestId('work-chat-scroll'), 'scrollBeginDrag');
   fireEvent.scroll(screen.getByTestId('work-chat-scroll'), {
     nativeEvent: {
       contentOffset: {x: 0, y: offsetY},
@@ -324,7 +325,7 @@ describe('자동 스크롤', () => {
     const harness = view([agentItem('a', '하나')], {kind: 'none', notice: ENDED_NOTICE});
     grow(600);
     spy.mockClear();
-    scroll(0, 400, 600); // 맨 위로 올림
+    scroll(0, 400, 600, true); // 손으로 맨 위로 올림
     harness.update([agentItem('a', '하나'), agentItem('b', '둘')]);
     grow(700);
     expect(spy).not.toHaveBeenCalled();
@@ -332,6 +333,17 @@ describe('자동 스크롤', () => {
 
     // 표지를 누르면 맨 아래로 가고 표지가 사라진다.
     fireEvent.press(screen.getByTestId('work-chat-unseen'));
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('work-chat-unseen')).toBeNull();
+  });
+
+  it('우리가 일으킨 스크롤 도중의 오프셋은 따라가기를 끄지 못한다', () => {
+    const harness = view([agentItem('a', '하나')], {kind: 'none', notice: ENDED_NOTICE});
+    grow(600);
+    spy.mockClear();
+    scroll(100, 400, 600); // 손 없이: 애니메이션이 아직 아래에 못 닿은 중간 오프셋
+    harness.update([agentItem('a', '하나'), agentItem('b', '둘')]);
+    grow(700);
     expect(spy).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('work-chat-unseen')).toBeNull();
   });
@@ -344,7 +356,7 @@ describe('자동 스크롤', () => {
       () => new Promise<SendOutcome>(done => (resolve = done)),
     );
     grow(600);
-    scroll(0, 400, 600);
+    scroll(0, 400, 600, true);
     spy.mockClear();
     fireEvent.changeText(screen.getByTestId('work-chat-input'), '내 지시');
     act(() => {

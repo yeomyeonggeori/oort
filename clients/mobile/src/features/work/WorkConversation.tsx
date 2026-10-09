@@ -198,6 +198,9 @@ export function WorkConversationView({
   const reduce = useReduceMotionRef();
   const following = useRef(true);
   const mineJustSent = useRef(false);
+  // 따라가기를 끄는 것은 사용자의 손뿐이다: 우리가 일으킨 스크롤 애니메이션 도중의 오프셋이
+  // 「아직 아래에 안 닿음」으로 읽혀 따라가기가 스스로 꺼지지 않게 한다.
+  const userScrolling = useRef(false);
   const firstLayout = useRef(true);
   const lastHeight = useRef(0);
   const [unseen, setUnseen] = useState(false);
@@ -210,8 +213,12 @@ export function WorkConversationView({
         layoutMeasurement.height,
         contentSize.height,
       );
-      following.current = near;
-      if (near) setUnseen(false);
+      if (near) {
+        following.current = true;
+        setUnseen(false);
+      } else if (userScrolling.current) {
+        following.current = false;
+      }
     },
     [],
   );
@@ -258,6 +265,18 @@ export function WorkConversationView({
             ref={scrollRef}
             contentContainerStyle={styles.listBody}
             onScroll={onScroll}
+            onScrollBeginDrag={() => {
+              userScrolling.current = true;
+            }}
+            onScrollEndDrag={() => {
+              userScrolling.current = false;
+            }}
+            onMomentumScrollBegin={() => {
+              userScrolling.current = true;
+            }}
+            onMomentumScrollEnd={() => {
+              userScrolling.current = false;
+            }}
             scrollEventThrottle={16}
             onContentSizeChange={onContentSizeChange}
             refreshControl={refreshControl}
@@ -295,6 +314,9 @@ export function WorkConversationView({
       composer={
         <ChatComposer
           gate={gate}
+          onFailed={() => {
+            mineJustSent.current = false;
+          }}
           onSend={send}
           seed={seed ?? null}
           initialText={initialText}
@@ -415,7 +437,9 @@ function ChatComposer({
   seed,
   initialText,
   autoFocus,
+  onFailed,
 }: {
+  onFailed?: () => void;
   gate: ComposerGate;
   onSend: (text: string, mode: 'queue' | 'interrupt') => Promise<SendOutcome>;
   seed: {text: string} | null;
@@ -461,6 +485,7 @@ function ChatComposer({
       if (!alive.current) return;
       setSending(false);
       if (outcome.ok) return;
+      onFailed?.();
       // 보낸 글을 잃지 않는다. 그 사이에 쓴 글이 있으면 그 앞에 되돌린다.
       setText(current =>
         current.trim() === '' ? body : `${body}\n${current.trimStart()}`,
@@ -709,7 +734,7 @@ const buildStyles = (color: Palette) =>
     },
     segment: {
       flex: 1,
-      minHeight: TOUCH_TARGET - space.sm,
+      minHeight: TOUCH_TARGET,
       alignItems: 'center',
       justifyContent: 'center',
       borderRadius: ds2Radius.row - space.xs / 2,
@@ -834,7 +859,7 @@ const buildStyles = (color: Palette) =>
       color: color.textMuted,
     },
     chip: {
-      minHeight: CONV.composerSend - space.sm,
+      minHeight: TOUCH_TARGET,
       justifyContent: 'center',
       paddingHorizontal: space.md,
       borderRadius: ds2Radius.pill,
