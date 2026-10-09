@@ -103,9 +103,9 @@ use momo_agent::{
 use momo_agent::{
     lock_and_find_recent_notice_in_tx, notice_root, notice_thread_key, owner_only_gate,
     subscription_notice_body, subscription_notice_props, SubscriptionNoticeKind,
-    CLAUDE_SUBSCRIPTION_AGENT_PAUSED, SKIP_OWNER_ONLY_NON_OWNER, SKIP_SUBSCRIPTION_AGENTS_DISABLED,
-    SUBSCRIPTION_NOTICE_AUDIT_SCHEMA, SUBSCRIPTION_NOTICE_POSTED_ACTION,
-    SUBSCRIPTION_NOTICE_THROTTLED_ACTION,
+    CLAUDE_SUBSCRIPTION_AGENT_PAUSED, SKIP_OWNER_ONLY_NON_OWNER, SKIP_PERSONAL_AGENT_CLIENT_SIGNS,
+    SKIP_SUBSCRIPTION_AGENTS_DISABLED, SUBSCRIPTION_NOTICE_AUDIT_SCHEMA,
+    SUBSCRIPTION_NOTICE_POSTED_ACTION, SUBSCRIPTION_NOTICE_THROTTLED_ACTION,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{DbError, PgConnection};
@@ -258,6 +258,61 @@ pub(crate) async fn route_agent_mentions_in_tx(
                 "a2a_source_run_unavailable",
             )
             .await?;
+            continue;
+        }
+        // ---------------------------------------------------------------
+        // ADR-0198 증보 1 D7 (#3592) — a personal agent is the owner's own
+        // harness on the owner's own Mac. The server never starts it from a
+        // message: the owner's client sends this message and then a signed
+        // spawn (`POST /work-spawns`, T5), so there is no run, no job and no
+        // outbox row here, whoever called.
+        //
+        // This arm sits BEFORE the channel-membership check on purpose. The
+        // owner calls the alias from any room they are in without inviting it
+        // (결재 2026-10-08, 「소유자면 어디서나」), so the alias is usually not a
+        // member — and a teammate's `@alias` in such a room must still be told
+        // whose agent this is, instead of dying as `agent_not_channel_member`.
+        //
+        //   * a teammate → the existing `NonOwner` sentence, nothing started;
+        //   * the owner  → an audited no-op (`personal_agent_client_signs`);
+        //     `owner_only_gate` returns `None` for the owner of a personal
+        //     agent, so neither instance switch (#3626 L2) can refuse it here.
+        // ---------------------------------------------------------------
+        if agent
+            .owner_only
+            .as_ref()
+            .is_some_and(|scope| scope.personal_agent)
+        {
+            match owner_only_gate(
+                agent.owner_only.as_ref(),
+                send.author_member_id,
+                send.subscription_agents_enabled,
+                send.claude_subscription_agents_enabled,
+            ) {
+                Some(kind) => {
+                    skip(
+                        &mut *conn,
+                        &send,
+                        &trigger,
+                        agent,
+                        *addressing,
+                        SKIP_OWNER_ONLY_NON_OWNER,
+                    )
+                    .await?;
+                    subscription_notice(&mut *conn, &send, agent, kind).await?;
+                }
+                None => {
+                    skip(
+                        &mut *conn,
+                        &send,
+                        &trigger,
+                        agent,
+                        *addressing,
+                        SKIP_PERSONAL_AGENT_CLIENT_SIGNS,
+                    )
+                    .await?;
+                }
+            }
             continue;
         }
         if !agent.is_channel_member {

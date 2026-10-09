@@ -207,8 +207,9 @@ pub use work_host_request::{
     REQUEST_REPLAY_RETENTION_MINUTES,
 };
 pub use work_host_store::{
-    insert_work_host, insert_work_host_with_id, list_work_hosts, load_work_host,
-    lock_work_host_ownership, mark_work_host_revoked, touch_work_host_last_seen, NewWorkHost,
+    insert_work_host, insert_work_host_with_id, list_work_host_folders, list_work_hosts,
+    load_work_host, lock_work_host_ownership, mark_work_host_revoked, member_display_names,
+    replace_work_host_folders, touch_work_host_last_seen, NewWorkHost, WorkHostFolderRecord,
     WorkHostOwnership, WorkHostRecord, ONLINE_WINDOW_SECONDS,
 };
 pub use workhost::{

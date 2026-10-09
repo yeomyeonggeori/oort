@@ -1,4 +1,10 @@
 import type {SigningContext} from '@momo/core/features/auth/deviceKeys';
+import {
+  spawnTaskContentText,
+  spawnTaskPayloadText,
+  SpawnTaskInputError,
+  type SpawnTaskContent,
+} from '@momo/core/features/auth/humanControlV4';
 
 import {bytesToBase64} from './base64';
 import {signWithDeviceKey} from './native';
@@ -29,6 +35,13 @@ import {hex, sha256, utf8} from './sha256';
 // instructions on a host that has not updated yet. `docs/api/
 // human-control-signing-v3.vectors.json` pins the bytes.
 //
+// #3592 (P1) added `v4`: a NEW task on the owner's own Mac (`spawn_task`, ADR-0198
+// 증보 1 「T5 확정」 1). v4 exists for that one body and nothing else uses it.
+// The bytes are NOT written a second time here: the core's `spawnTaskPayloadText`
+// (`@momo/core/features/auth/humanControlV4`) is the one recipe, pinned to
+// `__tests__/fixtures/human-control-signing-v4.vectors.json` — and this file's
+// own sha256/utf8 must agree with the core's on those cases (humanControl.test).
+//
 // Only what a phone signs is here: `input`, `spawn`, `permission`.
 // `host_register` and `bundle_manifest` are the root Mac's (D-6 ①, ADR-0192 D3).
 // Nothing on this path sends anything; E8 carries the result to the route.
@@ -37,6 +50,7 @@ import {hex, sha256, utf8} from './sha256';
 export const HUMAN_CONTROL_SCHEMAS = [
   'momo.human.control.v2',
   'momo.human.control.v3',
+  'momo.human.control.v4',
 ] as const;
 export type HumanControlSchema = (typeof HUMAN_CONTROL_SCHEMAS)[number];
 
@@ -47,12 +61,14 @@ export const PHONE_SIGNING_SCHEMA: HumanControlSchema = 'momo.human.control.v2';
 export function phoneSigningSchema(
   kind: HumanControlContent['kind'],
 ): HumanControlSchema {
+  if (kind === 'spawn_task') return 'momo.human.control.v4';
   return kind === 'permission' ? 'momo.human.control.v3' : PHONE_SIGNING_SCHEMA;
 }
 
 const ABSENT = '-';
 
 export type HumanControlContent =
+  | ({kind: 'spawn_task'} & SpawnTaskContent)
   | {kind: 'input'; mode: 'queue' | 'interrupt'; text: string}
   | {
       kind: 'spawn';
@@ -97,6 +113,14 @@ export class HumanControlInputError extends Error {
   }
 }
 
+const V4 = 'momo.human.control.v4';
+
+function asInputError(error: unknown): unknown {
+  return error instanceof SpawnTaskInputError
+    ? new HumanControlInputError(error.message)
+    : error;
+}
+
 function isSchema(value: string): value is HumanControlSchema {
   return (HUMAN_CONTROL_SCHEMAS as readonly string[]).includes(value);
 }
@@ -127,7 +151,23 @@ export function humanControlContentBytes(
   if (!isSchema(schema)) {
     throw new HumanControlInputError(`no recipe for schema ${schema}`);
   }
+  // v4 is the new-work spawn's schema and has no other body; that body has no
+  // other schema (a v2/v3 signature must never stand for a new task).
+  if ((schema === V4) !== (content.kind === 'spawn_task')) {
+    throw new HumanControlInputError(
+      'v4 is the new-work spawn schema, and only its',
+    );
+  }
   switch (content.kind) {
+    case 'spawn_task': {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const {kind: _kind, ...task} = content;
+      try {
+        return utf8(spawnTaskContentText(task));
+      } catch (error) {
+        throw asInputError(error);
+      }
+    }
     case 'input':
       return utf8(content.text.normalize('NFC'));
     case 'spawn':
@@ -172,6 +212,31 @@ export function humanControlPayload(
   fields: HumanControlFields,
   content: HumanControlContent,
 ): Uint8Array {
+  if (content.kind === 'spawn_task') {
+    // The core builds the whole 13-line frame; the phone only guards the schema.
+    humanControlContentBytes(schema, content);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const {kind: _kind, ...task} = content;
+    try {
+      return utf8(
+        spawnTaskPayloadText(
+          {
+            instanceId: fields.instanceId,
+            workspaceId: fields.workspaceId,
+            memberId: fields.memberId,
+            deviceKeyId: fields.deviceKeyId,
+            hostId: fields.hostId,
+            nonce: fields.nonce,
+            issuedAtMs: fields.issuedAtMs,
+            expiresAtMs: fields.expiresAtMs,
+          },
+          task,
+        ),
+      );
+    } catch (error) {
+      throw asInputError(error);
+    }
+  }
   const contentSha256 = hex(sha256(humanControlContentBytes(schema, content)));
   if (fields.expiresAtMs <= fields.issuedAtMs) {
     throw new HumanControlInputError('expiresAtMs must be after issuedAtMs');
@@ -201,6 +266,7 @@ export const SIGN_REASONS: Readonly<Record<HumanControlContent['kind'], string>>
   input: '에이전트에게 보낼 지시를 확인해요',
   spawn: '에이전트에게 새 작업을 맡기는 것을 확인해요',
   permission: '에이전트의 권한 요청을 허용하는 것을 확인해요',
+  spawn_task: '내 맥에서 새 작업을 시작하는 것을 확인해요',
 };
 
 /** How long a signed statement lives by default. The server caps it at
@@ -302,6 +368,15 @@ export async function signHumanControl(
     ...(content.kind === 'permission' ? {scope: content.scope} : {}),
     ...(content.kind === 'spawn'
       ? {agentMemberId: content.agentMemberId, folderId: content.folderId}
+      : {}),
+    // v4: the agent only when a personal agent was called (a harness has none).
+    ...(content.kind === 'spawn_task'
+      ? {
+          folderId: content.folderId,
+          ...(content.agentMemberId !== null
+            ? {agentMemberId: content.agentMemberId}
+            : {}),
+        }
       : {}),
   };
 }

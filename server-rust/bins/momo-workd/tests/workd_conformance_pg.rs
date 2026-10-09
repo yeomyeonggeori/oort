@@ -1422,6 +1422,32 @@ async fn wdc_1_owner_resume_round_trip_and_no_seed_on_the_wire() {
     assert!(row["lastSeenAtMs"].as_i64().is_some());
     eprintln!("wdc_1: host online via v2 heartbeat");
 
+    // ---- #3590: the folders the real host issued, and not one path ----------
+    // `repo` (the configured working directory, shown by its own name) and the
+    // host-made 「질문용 폴더」, which is the default. The owner's list carries
+    // ids and names; no answer carries any part of `workd.dir`.
+    let folders = row["folders"]
+        .as_array()
+        .expect("the real workd announced its folders in the heartbeat");
+    assert_eq!(folders.len(), 2, "{row}");
+    assert!(
+        folders
+            .iter()
+            .any(|f| f["kind"] == "project" && f["displayName"] == "repo"),
+        "{row}"
+    );
+    let question = folders
+        .iter()
+        .find(|f| f["kind"] == "question")
+        .expect("the question folder");
+    assert_eq!(question["displayName"], "질문용 폴더");
+    assert_eq!(row["defaultFolderId"], question["id"], "{row}");
+    let dir_text = workd.dir.to_string_lossy().into_owned();
+    assert!(
+        !row.to_string().contains(&dir_text),
+        "a host path reached the work-hosts answer: {row}"
+    );
+
     assert_eq!(workd.stop().await, Some(0), "SIGTERM is a clean stop");
 
     // ---- #2602 M-5: what crossed the wire, register to the last ack -------

@@ -2,10 +2,24 @@ import { useMemo } from "react";
 import { agentPortEndpoint } from "@momo/core/features/hostedAgents/presets";
 import { registerSubscriptionAgent } from "@momo/core/features/hostedAgents/api";
 import { useSession } from "@/app/session";
+import { SUBSCRIPTION_REGISTER_BUILD_FLAG } from "@/lib/env";
 import { absoluteApiBase } from "@/lib/serverBase";
 import { agentPortConnect, agentPortDevice } from "@/lib/tauri";
 import { useSubscriptionEntryState } from "../SubscriptionAgentEntry";
 import type { RegisterContext } from "./RegisterStepBody";
+import type { SubscriptionEntryState } from "../SubscriptionAgentEntry";
+
+/**
+ * 로그인 뒤 등록 단계를 세울 수 있는가(#3567). 빌드 플래그가 꺼져 있으면(기본) 입구 상태와
+ * 무관하게 아니다: D15 `register`도 CLI `add-json`도 이 경로에서만 불리므로, 맥락이 null이면
+ * 두 호출 모두 일어나지 않는다.
+ */
+export function registerSurfaceEligible(
+  buildFlagOn: boolean,
+  entry: SubscriptionEntryState
+): boolean {
+  return buildFlagOn && (entry === "rows" || entry === "server-off");
+}
 
 /**
  * 「로그인 뒤 에이전트로 만들기」를 낼 수 있는 자리에서만 맥락을 돌려준다(#3389).
@@ -17,7 +31,7 @@ import type { RegisterContext } from "./RegisterStepBody";
 export function useRegisterContext(): RegisterContext | null {
   const { workspaceId, session } = useSession();
   const entry = useSubscriptionEntryState();
-  const eligible = entry === "rows" || entry === "server-off";
+  const eligible = registerSurfaceEligible(SUBSCRIPTION_REGISTER_BUILD_FLAG, entry);
   const handle = session.member.handle;
   return useMemo(
     () =>

@@ -275,6 +275,8 @@ pub struct HostClient {
     host_id: Uuid,
     key: Arc<HostKey>,
     revocations: std::sync::Mutex<Vec<Value>>,
+    /// The folder announcement sent as the heartbeat body (#3590), if any.
+    folder_announcement: Option<Value>,
     /// 0 = no answer yet, 1 = false, 2 = true.
     server_requires_signatures: std::sync::atomic::AtomicU8,
 }
@@ -365,8 +367,17 @@ impl HostClient {
             host_id,
             key,
             revocations: std::sync::Mutex::new(Vec::new()),
+            folder_announcement: None,
             server_requires_signatures: std::sync::atomic::AtomicU8::new(0),
         })
+    }
+
+    /// Send `announcement` (ids, display names and kinds — never paths) as the
+    /// body of every heartbeat (#3590, ADR-0188 D6). The digest of that body is
+    /// part of what each beat signs.
+    pub fn with_folder_announcement(mut self, announcement: Value) -> Self {
+        self.folder_announcement = Some(announcement);
+        self
     }
 
     /// The four signed headers for one request.
@@ -437,12 +448,15 @@ impl HostApi for HostClient {
     }
 
     /// v2 heartbeat (ADR-0188 D7, served by #2570): the same signed-request
-    /// format as every other host call — request id consumed once — with an
-    /// empty body, since the server reads nothing from it (the digest still
-    /// covers it). The v1 body (`{sentAtMs, signature}`) is never produced.
+    /// format as every other host call — request id consumed once. The body is
+    /// the folder announcement when this host has one (#3590), else empty; the
+    /// digest covers it either way. The v1 body (`{sentAtMs, signature}`) is
+    /// never produced.
     async fn heartbeat(&self) -> Result<(), ClientError> {
         let path = self.workspace_path(&format!("work-hosts/{}/heartbeat", self.host_id));
-        self.signed(Method::POST, &path, None).await.map(|_| ())
+        self.signed(Method::POST, &path, self.folder_announcement.as_ref())
+            .await
+            .map(|_| ())
     }
 
     async fn pending_controls(&self) -> Result<Vec<WorkControl>, ClientError> {

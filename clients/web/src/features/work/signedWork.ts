@@ -188,6 +188,19 @@ function shellContent(control: ControlToSign): DesktopControlRequest["content"] 
         preview: control.permissionPreview,
         previewSha256: content.previewSha256,
       };
+    case "spawn_task":
+      // #3592: every field the statement signs, as the page holds it.
+      return {
+        kind: "spawn_task",
+        agentMemberId: content.agentMemberId,
+        folderId: content.folderId,
+        tool: content.tool,
+        channelId: content.channelId,
+        threadRootId: content.threadRootId,
+        originMessageId: content.originMessageId,
+        label: content.label,
+        prompt: content.prompt,
+      };
     case "spawn":
       return {
         kind: "spawn",
@@ -250,6 +263,10 @@ export function envelopeFromShell(
   if (content.kind === "permission") envelope.scope = content.scope;
   if (content.kind === "spawn") {
     envelope.agentMemberId = content.agentMemberId;
+    envelope.folderId = content.folderId;
+  }
+  if (content.kind === "spawn_task") {
+    if (content.agentMemberId !== null) envelope.agentMemberId = content.agentMemberId;
     envelope.folderId = content.folderId;
   }
   return envelope;
