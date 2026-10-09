@@ -13,8 +13,8 @@ import {
   stopRequestedLine,
 } from '@momo/core/features/work/stopWork';
 import {useQueryClient} from '@tanstack/react-query';
-import React, {useState} from 'react';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
+import React, {useEffect, useState} from 'react';
+import {AccessibilityInfo, Pressable, StyleSheet, Text, View} from 'react-native';
 
 import {SectionLabel, Sentence} from '../../design/atoms';
 import {useStyles} from '../../design/theme';
@@ -74,6 +74,19 @@ export function StopWorkControl({
   // 내가 멈춘 세션만 「멈춤」을 말한다. 다른 이유로 끝난 세션에는 아무것도 그리지 않는다.
   const effective: StopStage =
     stage === 'requested' && ended ? 'stopped' : stage;
+
+  // 눌린 버튼이 사라지는 자리라 포커스가 잃는다: 상태가 바뀌면 말로 알린다(스크린리더).
+  const announce =
+    effective === 'confirm'
+      ? STOP_CONFIRM_ASK
+      : effective === 'requested'
+        ? (note?.text ?? '')
+        : effective === 'stopped'
+          ? STOP_STOPPED_LINE
+          : '';
+  useEffect(() => {
+    if (announce !== '') AccessibilityInfo.announceForAccessibility(announce);
+  }, [announce]);
 
   if (!stoppable && effective !== 'requested' && effective !== 'stopped') {
     return null;
@@ -165,7 +178,7 @@ export function StopWorkControlView({
             <Sentence style={styles.hint}>{STOP_CONFIRM_DETAIL}</Sentence>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={busy ? '멈추는 중' : '이 작업 멈추기'}
+              accessibilityLabel={busy ? STOP_BUSY_LINE : '이 작업 멈추기'}
               accessibilityState={{disabled: busy, busy}}
               disabled={busy}
               onPress={onConfirm}

@@ -16,7 +16,7 @@ export function canStopSession(
 
 export const STOP_CONFIRM_ASK = "이 작업을 멈출까요?";
 export const STOP_CONFIRM_DETAIL =
-  "맥에서 돌고 있는 작업이 바로 끝나요. 지금까지의 진행 내역은 남지만 이어서 돌릴 수는 없어요.";
+  "맥에서 돌고 있는 작업을 끝내요. 지금까지의 진행 내역은 남아요.";
 export const STOP_BUSY_LINE = "멈추기를 요청하고 있어요.";
 export const STOP_STOPPED_LINE = "멈췄어요.";
 
