@@ -8,7 +8,7 @@ import type { WorkHost } from "@momo/core/features/settings/api";
 import type { LocalWorkHostStatus } from "@momo/core/features/settings/thisMacHost";
 
 // =============================================================================
-// #2778 설정 › 코드 실행 호스트 › 이 맥.
+// #2778 설정 › 기기 › 이 맥의 작업 호스트 (#3578 S4가 코드 실행 호스트에서 옮겼다).
 //
 // 사보타주로 붉어지는 규율:
 //   ① 「등록됐지만 오프라인」과 「아직 없음」이 같은 화면이 되면
@@ -127,7 +127,7 @@ describe("이 맥 — 네 상태가 서로 다른 문장과 행동을 갖는다"
   it("아직 없음: 등록 양식, 찾은 도구와 작업 폴더를 보인다", async () => {
     await render(local({ registered: null }), []);
     expect(state()).toBe("not_registered");
-    expect(container.textContent).toContain("이 맥은 아직 작업 호스트가 아닙니다.");
+    expect(container.textContent).toContain("이 맥은 아직 작업 호스트가 아니에요.");
     expect(container.textContent).toContain("claude");
     expect(container.textContent).not.toContain("codex,");
     expect(container.textContent).toContain("/Users/sj/oort-work");
@@ -138,7 +138,7 @@ describe("이 맥 — 네 상태가 서로 다른 문장과 행동을 갖는다"
     await render(local({ running: false, heartbeat: null }), [row({ online: false })]);
     expect(state()).toBe("offline");
     expect(container.textContent).toContain("등록됨, 꺼져 있음");
-    expect(container.textContent).not.toContain("아직 작업 호스트가 아닙니다");
+    expect(container.textContent).not.toContain("아직 작업 호스트가 아니에요");
     expect(byTestId("this-mac-start")?.textContent).toBe("작업 호스트 켜기");
     bridge.start.mockResolvedValue(local());
     await click(byTestId("this-mac-start"));
@@ -151,7 +151,7 @@ describe("이 맥 — 네 상태가 서로 다른 문장과 행동을 갖는다"
       [row({ online: false })]
     );
     expect(container.textContent).toContain("등록됨, 오프라인");
-    expect(byTestId("this-mac-sentence")?.textContent).toContain("서버에 닿지 못하고 있습니다. 마지막 연결 5분 전.");
+    expect(byTestId("this-mac-sentence")?.textContent).toContain("서버에 닿지 못하고 있어요. 마지막 연결 5분 전.");
     expect(byTestId("this-mac-restart")).not.toBeNull();
   });
 
@@ -196,7 +196,7 @@ describe("등록과 해제의 순서", () => {
     await render(local({ registered: null }), []);
     bridge.register.mockRejectedValue("no_acp_adapter");
     await click(byTestId("this-mac-register-submit"));
-    expect(byTestId("this-mac-register-error")?.textContent).toContain("ACP 어댑터를 찾지 못했습니다");
+    expect(byTestId("this-mac-register-error")?.textContent).toContain("ACP 어댑터를 찾지 못했어요");
   });
 
   it("해제는 서버 해지가 먼저, 그다음 로컬 삭제", async () => {

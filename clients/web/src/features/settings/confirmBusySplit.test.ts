@@ -45,6 +45,7 @@ const FILES = {
   "EventSubscriptionSection.tsx": source("./EventSubscriptionSection.tsx"),
   "AiLinkSection.tsx": source("./AiLinkSection.tsx"),
   "WorkspaceSection.tsx": source("./WorkspaceSection.tsx"),
+  "LeaveWorkspaceRow.tsx": source("./LeaveWorkspaceRow.tsx"),
   "HostedConnectionSection.tsx": source(
     "../hostedAgents/HostedConnectionSection.tsx"
   ),
@@ -135,7 +136,7 @@ const SITES = [
     lockVia: "const unregisterLocked = blocked || (ownBusy && !unregistering);",
   },
   {
-    file: "WorkspaceSection.tsx",
+    file: "LeaveWorkspaceRow.tsx",
     testId: "workspace-leave",
     busy: "leave.isPending",
     label: "나가는 중",
@@ -243,7 +244,7 @@ describe("RED PROOF ④ 진행은 노드를 갈아 끼우지 않는다", () => {
   it("나가기의 형제 상태 줄이 트리거로 합쳐졌다", () => {
     // 회색 버튼 옆에 진행을 대신 말해 주던 줄이 있었다. 낱말이 트리거로 온
     // 지금 그 줄을 남기면 100px 안에 같은 말이 둘 선다.
-    const file = FILES["WorkspaceSection.tsx"];
+    const file = FILES["LeaveWorkspaceRow.tsx"];
     expect(file).not.toContain("workspace-leave-pending");
     expect(file.split("나가는 중").length - 1).toBe(1);
   });

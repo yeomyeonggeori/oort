@@ -18,7 +18,7 @@ describe("memberAvatarPickError", () => {
   it("5MiB 정확히는 통과, 1바이트 넘으면 거절, 0바이트도 거절", () => {
     expect(memberAvatarPickError({ type: "image/png", size: 5 * MIB })).toBeNull();
     expect(memberAvatarPickError({ type: "image/png", size: 5 * MIB + 1 })).toBe(
-      "프로필 사진은 5MB까지 올릴 수 있습니다."
+      "프로필 사진은 5MB까지 올릴 수 있어요."
     );
     expect(memberAvatarPickError({ type: "image/png", size: 0 })).toMatch(/비어 있는/);
   });
@@ -34,9 +34,9 @@ describe("memberAvatarUploadError", () => {
     expect(messages[1]).toMatch(/4096px/);
     expect(messages[2]).toMatch(/다시 골라/);
     expect(messages[3]).toMatch(/너무 자주/);
-    for (const m of messages) expect(m).toMatch(/(습니다|주세요)\.$/);
+    for (const m of messages) expect(m).toMatch(/(어요|주세요)\.$/);
   });
   it("ApiError 가 아니면 일반 문구", () => {
-    expect(memberAvatarUploadError(new Error("boom"))).toMatch(/올리지 못했습니다/);
+    expect(memberAvatarUploadError(new Error("boom"))).toMatch(/올리지 못했어요/);
   });
 });

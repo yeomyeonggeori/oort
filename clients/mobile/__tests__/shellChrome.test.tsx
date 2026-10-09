@@ -10,13 +10,14 @@ import {
   waitFor,
 } from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo, StyleSheet} from 'react-native';
+import {AccessibilityInfo, Animated, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {DS2_COMBOS} from '../src/design/ds2Tokens';
-import {resetBlurSupportForTests} from '../src/design/glass';
+import {EASE_OUT, TAB_FADE_MS} from '../src/design/motion';
+import {GlassSurface, LiquidGlassAllowed, resetBlurSupportForTests, resetLiquidGlassSupportForTests} from '../src/design/glass';
 import {SHEET_RADIUS, SHEET_TOP} from '../src/design/PageSheet';
 import {
   darkPalette,
@@ -30,9 +31,11 @@ import AppShell from '../src/shell/AppShell';
 import {PLUS_MENU} from '../src/shell/PlusMenu';
 import {
   barWidthFor,
+  CAPSULE_SPRING,
   PLUS_ICON,
   PLUS_LABEL,
   SHELL,
+  shellGeometry,
   tabWidthFor,
 } from '../src/shell/ShellChrome';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
@@ -200,6 +203,9 @@ async function renderReady() {
   await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
 }
 
+/** `jest.setup.js` 의 expo-haptics 대역이 기록한 요청들(#3580). */
+const hapticCalls = (jest.requireMock('expo-haptics') as {__calls: string[]}).__calls;
+
 const mmkvStore = (
   jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}
 ).__store;
@@ -216,6 +222,8 @@ beforeEach(() => {
     member: SELF,
   });
   resetBlurSupportForTests();
+  resetLiquidGlassSupportForTests();
+  hapticCalls.length = 0;
 });
 
 /**
@@ -238,6 +246,7 @@ afterEach(() => {
   queryClient?.clear();
   queryClient = null;
   resetBlurSupportForTests();
+  resetLiquidGlassSupportForTests();
 });
 
 const flat = (testID: string) =>
@@ -341,7 +350,7 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(screen.queryByTestId('plus-menu-work')).toBeNull();
   });
 
-  it('메뉴의 행은 새 DM · 새 채널 · 에이전트 부르기 순서이고, 모두 메뉴 항목이다', async () => {
+  it('메뉴의 행은 새 DM · 새 채널 · 에이전트 부르기 · 작업 맡기기 순서이고, 모두 메뉴 항목이다', async () => {
     installFetch();
     await renderReady();
     openMenu();
@@ -356,7 +365,12 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
       .filter((id: string | undefined, i: number, all: Array<string | undefined>) =>
         all.indexOf(id) === i,
       );
-    expect(rows).toEqual(['plus-menu-dm', 'plus-menu-channel', 'plus-menu-agents']);
+    expect(rows).toEqual([
+      'plus-menu-dm',
+      'plus-menu-channel',
+      'plus-menu-agents',
+      'plus-menu-delegate',
+    ]);
     expect(screen.getByTestId('plus-menu-dm')).toHaveProp('accessibilityLabel', '새 DM');
     expect(screen.getByTestId('plus-menu-channel')).toHaveProp(
       'accessibilityLabel',
@@ -527,7 +541,7 @@ describe('+ 메뉴는 가벼운 팝오버다 (#2750)', () => {
 // ---- 기하 — 시안 A 의 숫자 그대로 --------------------------------------------
 
 describe('기하가 사양 표와 같다 — Buzz 크기, 시안 A 재질 (#2750)', () => {
-  it('탭바와 + 는 창 가운데 한 묶음이다: 하 30 · 가운데 정렬 · 띠는 누름을 받지 않는다', async () => {
+  it('띠는 창 전폭이고 알약만 흐름 안에서 가운데에 선다: 하 30 · 띠는 누름을 받지 않는다 (#3580)', async () => {
     installFetch();
     await renderReady();
     const band = screen.getByTestId('shell-bottom');
@@ -539,8 +553,10 @@ describe('기하가 사양 표와 같다 — Buzz 크기, 시안 A 재질 (#2750
       bottom: 30,
       flexDirection: 'row',
       justifyContent: 'center',
-      gap: 8,
+      alignItems: 'center',
     });
+    // 틈(`gap`)이 있으면 + 가 흐름 안에 있다는 뜻이고, 그러면 알약이 31pt 왼쪽으로 간다.
+    expect(StyleSheet.flatten(band.props.style).gap).toBeUndefined();
   });
 
   it('탭바: 높이 54 · 반경 27 · 1px 유리 선 · 폭 212 (Buzz ≈211×53)', async () => {
@@ -578,48 +594,67 @@ describe('기하가 사양 표와 같다 — Buzz 크기, 시안 A 재질 (#2750
     expect(plus).toMatchObject({width: 54, height: 54, borderRadius: 27});
     expect(plus.width).toBe(SHELL.barHeight);
     expect(plus.width).toBeGreaterThanOrEqual(TOUCH_TARGET);
-    // 오른쪽 구석에 붙는 옛 FAB 이 아니다.
-    expect([plus.position, plus.right, plus.bottom]).toEqual([undefined, undefined, undefined]);
+    // 알약의 흐름 밖, 창 오른쪽 가장자리 20 에 앵커한다(Buzz `rightInset`). 아래 구석에
+    // 떠 있던 옛 FAB(`bottom` 이 있다)이 아니라 알약과 같은 선에 선다.
+    expect([plus.position, plus.right, plus.top, plus.bottom]).toEqual([
+      'absolute',
+      SHELL.plusInset,
+      0,
+      undefined,
+    ]);
     expect([lightPalette.primary, darkPalette.primary]).toContain(plus.backgroundColor);
     const icon = flat('shell-plus-icon');
     expect([icon.width, icon.height]).toEqual([PLUS_ICON, PLUS_ICON]);
     expect(screen.queryByTestId('shell-fab')).toBeNull();
   });
 
-  it('하단 크롬이 이전(전폭 · 64 높이)보다 가볍다 — 폭 274 · 높이 54', () => {
-    const total = barWidthFor(SHELL.tabWidth) + SHELL.plusGap + SHELL.plus;
-    expect(total).toBe(274);
+  it('하단 크롬이 이전(전폭 · 64 높이)보다 가볍다 — 높이 54', () => {
     expect(SHELL.barHeight).toBeLessThan(64);
   });
 
-  it.each([320, 350, 375, 390, 402])(
-    '%ipt 창에서 크롬이 가장자리 16 안에 들고, 탭은 44 를 넘는다',
+  // ---- 가운데·오른쪽 산수 (#3580) — 렌더 트리가 쓰는 식과 같은 식을 잰다 --------
+
+  it.each([320, 360, 375, 390, 393, 402, 430])(
+    '%ipt 창: 알약 중심 = 창 중심, + 오른쪽 여백 = 20, 둘은 8 이상 떨어진다',
     width => {
-      const tab = tabWidthFor(width);
-      expect(tab).toBeGreaterThanOrEqual(TOUCH_TARGET);
-      const total = barWidthFor(tab) + SHELL.plusGap + SHELL.plus;
-      expect(SHELL.minInset * 2 + total).toBeLessThanOrEqual(width);
+      const g = shellGeometry(width);
+      // 알약이 정중앙 — 왼쪽 여백과 오른쪽 여백이 같다(반올림 오차 없이 정확히).
+      expect(g.barLeft).toBe(width - g.barRight);
+      expect((g.barLeft + g.barRight) / 2).toBe(width / 2);
+      // + 는 오른쪽 가장자리에서 plusInset.
+      expect(width - g.plusRight).toBe(SHELL.plusInset);
+      expect(g.plusRight - g.plusLeft).toBe(SHELL.plus);
+      // 겹치지 않고 틈이 최소를 지킨다.
+      expect(g.gap).toBeGreaterThanOrEqual(SHELL.plusGap);
+      // 알약 왼쪽 여백이 오른쪽 + 의 자리만큼은 있다(대칭 비움).
+      expect(g.barLeft).toBeGreaterThanOrEqual(SHELL.plusInset + SHELL.plus + SHELL.plusGap);
+      expect(g.tabWidth).toBeGreaterThanOrEqual(TOUCH_TARGET);
     },
   );
 
-  it('폰의 모든 폭(320 이상)에서 사양 66 그대로다 — 좁은 창에서만 줄어든다', () => {
-    for (const width of [320, 375, 390, 402, 430]) {
-      expect([width, tabWidthFor(width)]).toEqual([width, 66]);
-    }
-    // 306 이 사양 그대로 드는 가장 좁은 창이다: 16 + 212 + 8 + 54 + 16.
-    expect(tabWidthFor(306)).toBe(66);
-    expect(tabWidthFor(290)).toBeLessThan(66);
+  it('이전 판의 결함을 재현하면 이 시험이 잡는다: 알약+ 묶음을 가운데에 두면 알약이 31pt 왼쪽이다', () => {
+    const width = 393;
+    const oldBarLeft = (width - (barWidthFor(66) + 8 + 54)) / 2;
+    expect(shellGeometry(width).barLeft - oldBarLeft).toBe(31);
+  });
+
+  it('393 은 사양 66·알약 212, 375 는 65 로 1pt 준다, 그 아래는 44 까지', () => {
+    expect(shellGeometry(393)).toMatchObject({tabWidth: 66, barWidth: 212, barLeft: 90.5});
+    expect(shellGeometry(402).tabWidth).toBe(66);
+    expect(tabWidthFor(376)).toBe(66);
+    expect(tabWidthFor(375)).toBe(65);
+    expect(tabWidthFor(320)).toBeLessThan(65);
     expect(tabWidthFor(200)).toBe(TOUCH_TARGET);
   });
 
-  it('320pt 창에서 렌더된 탭이 66 을 든다', async () => {
+  it('320pt 창에서 렌더된 탭이 식과 같은 폭을 든다', async () => {
     const rn = jest.requireActual('react-native') as typeof import('react-native');
     const spy = jest
       .spyOn(rn, 'useWindowDimensions')
       .mockReturnValue({width: 320, height: 568, scale: 2, fontScale: 1});
     installFetch();
     await renderReady();
-    expect(flat('tab-home').width).toBe(66);
+    expect(flat('tab-home').width).toBe(tabWidthFor(320));
     spy.mockRestore();
   });
 
@@ -754,18 +789,20 @@ describe('유리 재료 (ADR-0189 D7)', () => {
   });
 
   it('설정이 앱이 떠 있는 동안 바뀌어도 따라간다', async () => {
-    let emit: ((value: boolean) => void) | null = null;
+    // 탭바와 유리 면이 각자 구독한다(탭바는 재료에 따라 테두리를 가른다 — #3580). 실제
+    // 시스템 이벤트는 구독자 전부에게 가므로 시험도 전부에게 보낸다.
+    const handlers: Array<(value: boolean) => void> = [];
     a11y.addEventListener.mockImplementation(
       (event: string, handler: (value: boolean) => void) => {
-        if (event === 'reduceTransparencyChanged') emit = handler;
+        if (event === 'reduceTransparencyChanged') handlers.push(handler);
         return {remove: () => {}};
       },
     );
     installFetch();
     await renderReady();
     expect(screen.getByTestId('shell-tabbar-fallback')).toBeTruthy();
-    expect(emit).not.toBeNull();
-    act(() => emit!(true));
+    expect(handlers.length).toBeGreaterThan(0);
+    act(() => handlers.forEach(emit => emit(true)));
     expect(screen.getByTestId('shell-tabbar-opaque')).toBeTruthy();
   });
 });
@@ -859,5 +896,255 @@ describe.each(DS2_COMBOS)('%s %s — 탭바·+·메뉴 대비', (theme, mode) =>
       const bg = over(`${p.onPrimary}${alpha}`, p.primary);
       expect([state, contrast(p.onPrimary, bg) >= 4.5]).toEqual([state, true]);
     }
+  });
+});
+
+// ---- 4. 햅틱 · 탭 전환 · 리퀴드 글래스 (#3580) ----------------------------------
+
+const motionInfo = AccessibilityInfo as unknown as {
+  isReduceMotionEnabled: jest.Mock;
+};
+
+function setReduceMotion(value: boolean) {
+  motionInfo.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(value));
+}
+
+afterEach(() => {
+  setReduceMotion(false);
+});
+
+describe('햅틱 — 사용자가 만든 순간에 한 번 (#3580)', () => {
+  it('탭이 **바뀔 때** selection 한 번이고, 같은 탭을 다시 누르면 0번이다', async () => {
+    installFetch();
+    await renderReady();
+    expect(hapticCalls).toEqual([]);
+    fireEvent.press(screen.getByTestId('tab-inbox'));
+    expect(hapticCalls).toEqual(['selection']);
+    fireEvent.press(screen.getByTestId('tab-inbox'));
+    expect(hapticCalls).toEqual(['selection']);
+    fireEvent.press(screen.getByTestId('tab-search'));
+    expect(hapticCalls).toEqual(['selection', 'selection']);
+  });
+
+  it('탭 화면이 렌더되는 것만으로는 햅틱이 나지 않는다 — 입력 없이는 0번', async () => {
+    installFetch();
+    await renderReady();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(hapticCalls).toEqual([]);
+  });
+
+  it('+ 를 누르면 light 한 번 — 메뉴가 열리는 그 누름에', async () => {
+    installFetch();
+    await renderReady();
+    fireEvent.press(screen.getByTestId('shell-plus'));
+    expect(hapticCalls).toEqual(['impact:light']);
+    // 닫는 누름에는 없다(메뉴가 모달이라 + 는 보조기술 조회에서 숨는다).
+    fireEvent.press(screen.getByTestId('shell-plus', {includeHiddenElements: true}));
+    expect(hapticCalls).toEqual(['impact:light']);
+  });
+
+  it('프로필 아바타는 light 한 번, 시트는 같은 누름에 열린다', async () => {
+    installFetch();
+    await renderReady();
+    fireEvent.press(screen.getByTestId('profile-avatar'));
+    expect(hapticCalls).toEqual(['impact:light']);
+    await waitFor(() => expect(screen.getByTestId('profile-sheet')).toBeTruthy());
+  });
+
+  it('사이드바 섹션 접기·펴기는 누를 때마다 selection 한 번', async () => {
+    installFetch();
+    await renderReady();
+    const toggle = screen.getAllByTestId(/^home-section-toggle-/)[0];
+    fireEvent.press(toggle);
+    fireEvent.press(toggle);
+    expect(hapticCalls).toEqual(['selection', 'selection']);
+  });
+
+  it('네이티브 햅틱 모듈이 던져도 탭 전환은 그대로 된다 — 햅틱이 기능을 깨지 않는다', async () => {
+    const mod = jest.requireMock('expo-haptics') as {selectionAsync: () => Promise<void>};
+    const original = mod.selectionAsync;
+    mod.selectionAsync = () => {
+      throw new Error('햅틱 엔진 없음');
+    };
+    try {
+      installFetch();
+      await renderReady();
+      fireEvent.press(screen.getByTestId('tab-inbox'));
+      expect(screen.getByTestId('tab-inbox')).toHaveProp('accessibilityState', {selected: true});
+    } finally {
+      mod.selectionAsync = original;
+    }
+  });
+});
+
+describe('탭 전환 모션 — 캡슐과 페이드 (#3580)', () => {
+  // 캡슐은 보조기술에서 숨겨져 있으므로(장식) 조회도 숨김을 포함한다.
+  const capsule = () => screen.getByTestId('tab-capsule', {includeHiddenElements: true});
+  const capsuleStyle = () => StyleSheet.flatten(capsule().props.style);
+  const capsuleX = () =>
+    (capsuleStyle().transform as Array<{translateX: number}>)[0].translateX;
+  const paneOpacity = () => flat('tab-pane-active').opacity as number;
+
+  it('처음 그림은 움직이지 않는다: 캡슐은 홈 자리(0), 활성 칸은 불투명 1', async () => {
+    installFetch();
+    await renderReady();
+    expect(capsuleX()).toBe(0);
+    expect(paneOpacity()).toBe(1);
+    expect(capsuleStyle().width).toBe(66);
+    // 장식이라 보조기술에 없고 누름도 받지 않는다.
+    expect(capsule()).toHaveProp('pointerEvents', 'none');
+    expect(capsule()).toHaveProp('accessibilityElementsHidden', true);
+  });
+
+  it('동작 줄이기: 캡슐은 즉시 자리를 옮기고 칸은 페이드 없이 1 이다', async () => {
+    setReduceMotion(true);
+    installFetch();
+    await renderReady();
+    fireEvent.press(screen.getByTestId('tab-inbox'));
+    // 한 틱도 기다리지 않는다 — 스프링·페이드가 돌았다면 아직 도중이다.
+    expect(capsuleX()).toBe(66 + SHELL.barGap);
+    expect(paneOpacity()).toBe(1);
+  });
+
+  // Jest 에서 `useNativeDriver: true` 애니메이션은 JS 값을 진행시키지 않는다(네이티브가 돈다).
+  // 그래서 「끝에 1 이 된다」는 이 자리에서 잴 수 없고, **무엇을 요청했는가**(대상 값·길이·곡선·
+  // 네이티브 구동)와 **출발점**을 잰다. 실제 매끄러움은 시뮬레이터 영상·실기기의 몫이다.
+  it('동작 줄이기가 꺼져 있으면: 새 칸이 0 에서 출발하고, 요청은 150ms ease-out·스프링(임계감쇠)·네이티브 구동이다', async () => {
+    const timing = jest.spyOn(Animated, 'timing');
+    const spring = jest.spyOn(Animated, 'spring');
+    installFetch();
+    await renderReady();
+    timing.mockClear();
+    spring.mockClear();
+    fireEvent.press(screen.getByTestId('tab-inbox'));
+    // 막 눌린 그림: 칸은 0(깜빡임 없이 그리기 전에 세웠다), 캡슐은 아직 출발점 — 즉시 점프가 아니다.
+    expect(paneOpacity()).toBe(0);
+    expect(capsuleX()).toBe(0);
+    expect(timing).toHaveBeenCalledTimes(1);
+    expect(timing.mock.calls[0][1]).toMatchObject({
+      toValue: 1,
+      duration: TAB_FADE_MS,
+      easing: EASE_OUT,
+      useNativeDriver: true,
+    });
+    expect(spring).toHaveBeenCalledTimes(1);
+    expect(spring.mock.calls[0][1]).toMatchObject({
+      toValue: 66 + SHELL.barGap,
+      ...CAPSULE_SPRING,
+      useNativeDriver: true,
+    });
+    // 감쇠비 1 — 오버슈트가 없다: damping = 2·√(stiffness·mass).
+    const {stiffness, damping, mass} = CAPSULE_SPRING;
+    expect(damping / (2 * Math.sqrt(stiffness * mass))).toBeGreaterThanOrEqual(0.99);
+    timing.mockRestore();
+    spring.mockRestore();
+  });
+
+  it('150ms · 곡선은 ease-in 이 아니다 · 탭 화면에는 이동·확대가 없다(불투명도만)', async () => {
+    expect(TAB_FADE_MS).toBeLessThanOrEqual(150);
+    // `Easing.bezier(0.23, 1, 0.32, 1)` — 처음 3분의 1 안에 대부분 간다(ease-out).
+    expect(EASE_OUT(0.2)).toBeGreaterThan(0.5);
+    installFetch();
+    await renderReady();
+    fireEvent.press(screen.getByTestId('tab-inbox'));
+    expect(flat('tab-pane-active').transform).toBeUndefined();
+  });
+
+  it('연타해도 입력이 잠기지 않는다: 도중에 다른 탭을 눌러도 마지막 탭에 서고 목표는 마지막 자리다', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    installFetch();
+    await renderReady();
+    spring.mockClear();
+    fireEvent.press(screen.getByTestId('tab-inbox'));
+    fireEvent.press(screen.getByTestId('tab-search'));
+    expect(screen.getByTestId('tab-search')).toHaveProp('accessibilityState', {selected: true});
+    expect(spring.mock.calls.map(call => call[1].toValue)).toEqual([
+      66 + SHELL.barGap,
+      (66 + SHELL.barGap) * 2,
+    ]);
+    expect(hapticCalls).toEqual(['selection', 'selection']);
+    spring.mockRestore();
+  });
+
+  it('선택은 모션과 상관없이 VoiceOver 상태로 선다 — 캡슐이 유일한 표시가 아니다', async () => {
+    installFetch();
+    await renderReady();
+    fireEvent.press(screen.getByTestId('tab-inbox'));
+    expect(screen.getByTestId('tab-inbox')).toHaveProp('accessibilityState', {selected: true});
+    expect(screen.getByTestId('tab-home')).toHaveProp('accessibilityState', {selected: false});
+  });
+});
+
+describe('리퀴드 글래스 (#3580)', () => {
+  it('iOS 26 갈래: GlassView 가 서고 블러·94% 는 없다. 앱 테마를 명시하고 유리 선은 투명이다', async () => {
+    resetLiquidGlassSupportForTests(true);
+    resetBlurSupportForTests(true);
+    installFetch();
+    await renderReady();
+    const glass = screen.getByTestId('shell-tabbar-liquid');
+    expect(glass).toHaveProp('glassEffectStyle', 'regular');
+    expect(['light', 'dark']).toContain(glass.props.colorScheme);
+    expect(screen.queryByTestId('blur-view')).toBeNull();
+    expect(screen.queryByTestId('shell-tabbar-fallback')).toBeNull();
+    // 이중선 방지 — 두께는 남겨 안쪽 46 의 산수를 지킨다.
+    expect(flat('shell-tabbar')).toMatchObject({borderWidth: 1, borderColor: 'transparent', height: 54});
+  });
+
+  it('페이드되는 조상 안의 유리는 리퀴드가 아니라 blur 다(조상 알파가 낮으면 UIKit 이 효과를 버린다)', () => {
+    resetLiquidGlassSupportForTests(true);
+    resetBlurSupportForTests(true);
+    const {Text} = jest.requireActual('react-native') as typeof import('react-native');
+    const {ThemeProvider} = jest.requireActual('../src/design/theme') as typeof import('../src/design/theme');
+    const Probe = ({allowed}: {allowed: boolean}) => (
+      <ThemeProvider>
+        <LiquidGlassAllowed.Provider value={allowed}>
+          <GlassSurface radius={10} testID="probe">
+            <Text>x</Text>
+          </GlassSurface>
+        </LiquidGlassAllowed.Provider>
+      </ThemeProvider>
+    );
+    const view = render(<Probe allowed />);
+    expect(screen.getByTestId('probe-liquid')).toBeTruthy();
+    view.rerender(<Probe allowed={false} />);
+    expect(screen.queryByTestId('probe-liquid')).toBeNull();
+    expect(screen.getByTestId('probe-blur')).toBeTruthy();
+  });
+
+  it('탭 칸(페이드)이 정말 그 문맥을 닫는다: 홈 칸 안에서는 리퀴드가 허용되지 않는다', () => {
+    const src = require('fs').readFileSync(
+      require('path').join(__dirname, '../src/shell/AppShell.tsx'),
+      'utf8',
+    ) as string;
+    expect(src).toMatch(/<LiquidGlassAllowed\.Provider value=\{false\}>\{children\}/);
+  });
+
+  it('투명도 줄이기가 켜지면 리퀴드 글래스도 불투명이다 — 접근성이 먼저다', async () => {
+    resetLiquidGlassSupportForTests(true);
+    a11y.isReduceTransparencyEnabled.mockImplementation(() => Promise.resolve(true));
+    installFetch();
+    await renderReady();
+    await waitFor(() => expect(screen.getByTestId('shell-tabbar-opaque')).toBeTruthy());
+    expect(screen.queryByTestId('shell-tabbar-liquid')).toBeNull();
+    expect(flat('shell-tabbar').borderColor).not.toBe('transparent');
+  });
+
+  it('iOS 26 아래(리퀴드 없음)는 지금까지의 갈래 그대로다: 블러 → BlurView, 없으면 94%', async () => {
+    resetLiquidGlassSupportForTests(false);
+    resetBlurSupportForTests(true);
+    installFetch();
+    await renderReady();
+    expect(screen.getByTestId('blur-view')).toBeTruthy();
+    expect(screen.queryByTestId('shell-tabbar-liquid')).toBeNull();
+    expect(flat('shell-tabbar').borderColor).not.toBe('transparent');
+  });
+
+  it('Jest(네이티브 모듈 없음)의 기본 답은 false 다 — 모듈이 없는 빌드는 던지지 않고 폴백한다', async () => {
+    installFetch();
+    await renderReady();
+    expect(screen.queryByTestId('shell-tabbar-liquid')).toBeNull();
+    expect(screen.getByTestId('shell-tabbar-fallback')).toBeTruthy();
   });
 });

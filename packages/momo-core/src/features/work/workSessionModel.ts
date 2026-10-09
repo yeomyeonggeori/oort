@@ -329,6 +329,41 @@ export function parseWorkSessionEvent(message: Message): WorkSessionEvent | null
   };
 }
 
+/**
+ * A person's reply in the session thread (N3 #3595): the signed instruction the
+ * server writes there (`props["momo.instruction"]`, always a human `text` reply
+ * under the session root) and anything a teammate said under the session. They are
+ * not ACP events, so `parseWorkSessionEvent` drops them; the phone's 대화 mode
+ * needs them to put 내 지시 and the agent's answers in one order.
+ */
+export interface SessionThreadReply {
+  id: string;
+  authorMemberId: string;
+  text: string;
+  atMs: number;
+  /** Channel seq, the same ordering authority the ACP events carry. */
+  seq: number;
+  /** Set only for a signed instruction (`queue` = next turn, `interrupt` = now). */
+  mode?: "queue" | "interrupt";
+}
+
+/** A person's plain text under the session; null for anything else in the thread. */
+export function parseSessionThreadReply(message: Message): SessionThreadReply | null {
+  if (message.type !== "text" || message.state === "deleted") return null;
+  const text = message.body?.trim() ?? "";
+  if (text === "") return null;
+  const instruction = asRecord(message.props?.["momo.instruction"]);
+  const mode = instruction?.mode;
+  return {
+    id: message.id,
+    authorMemberId: message.authorMemberId,
+    text,
+    atMs: message.createdAtMs,
+    seq: message.seq,
+    ...(mode === "queue" || mode === "interrupt" ? { mode } : {}),
+  };
+}
+
 /** The same record out of a live publication. */
 export function eventFromFrame(frame: WorkSessionACPFrame): WorkSessionEvent {
   return {

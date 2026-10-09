@@ -227,21 +227,20 @@ async function settingsScenes(browser, origin, scheme, viewport) {
   scenario.operator = true;
   const { context, page } = await open(browser, origin, scheme, viewport);
   try {
+    // #3578 S1: 설정 목록은 12행이고 옮긴 네 구획의 행은 없다. 「AI 허브」 행은 허브로 가는
+    // 링크이고, 옛 `?section=ai` 주소는 옛 AI 연결 화면과 안내 한 줄을 그대로 연다.
     await page.goto(`${origin}/#/settings?section=profile`);
-    await page.getByTestId("settings-nav-events").waitFor();
-    await page.getByTestId("settings-nav-ai").click();
+    await page.getByTestId("settings-nav-ai").waitFor();
+    await page.goto(`${origin}/#/settings?section=ai`);
     await page.getByTestId("ai-hub-moved-link").waitFor();
     await page.waitForTimeout(500);
     await page.screenshot({ path: resolve(OUT_DIR, `settings-one-liner-${tag}.png`), fullPage: true });
     check(`${tag} 설정 › AI 연결: 안내 한 줄 링크`, (await page.getByTestId("ai-hub-moved-link").locator("a").getAttribute("href")).endsWith("/ai/accounts"));
-    // 옮긴 네 구획은 사이드바에서 눌러도 그 줄 상세로 간다.
-    for (const [nav, target] of [["events", "outgoing"], ["webhooks", "incoming"], ["plugins", "apps"], ["agents", "agents"]]) {
-      await page.goto(`${origin}/#/settings?section=profile`);
-      await page.getByTestId(`settings-nav-${nav}`).click();
-      await page.getByTestId(`ai-external-detail-${target === "agents" ? "externalAgents" : target}`).waitFor();
-      check(`${tag} 설정 사이드바 ${nav} 클릭 → /ai/external/${target}`, page.url().endsWith(`#/ai/external/${target}`), page.url());
-      check(`${tag} 상세 진입 시 포커스가 제목에 있다(${target})`, await page.evaluate(() => document.activeElement?.tagName === "H2"));
-    }
+    await page.goto(`${origin}/#/settings?section=profile`);
+    await page.getByTestId("settings-nav-ai").click();
+    await page.waitForFunction(() => location.hash === "#/ai/accounts", null, { timeout: 5000 }).catch(() => {});
+    check(`${tag} 설정 사이드바 AI 허브 행 클릭 → /ai/accounts`, page.url().endsWith("#/ai/accounts"), page.url());
+    // 옮긴 네 구획의 옛 딥링크는 아래에서 그 줄 상세로 바뀐다(목록에는 행이 없다).
     for (const [section, target] of [["webhooks", "incoming"], ["plugins", "apps"], ["agents", "agents"], ["events", "outgoing"]]) {
       await page.goto(`${origin}/#/settings?section=${section}`);
       await page.getByTestId(`ai-hub-pane-external`).waitFor({ state: "detached", timeout: 100 }).catch(() => {});

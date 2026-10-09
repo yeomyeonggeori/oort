@@ -105,27 +105,27 @@ export function thisMacErrorMessage(code: string): string {
   const head = code.split(":")[0]?.trim() ?? code;
   switch (head) {
     case "no_acp_adapter":
-      return "ACP 어댑터를 찾지 못했습니다. claude-agent-acp나 codex-acp를 설치한 뒤 다시 확인하세요.";
+      return "ACP 어댑터를 찾지 못했어요. claude-agent-acp나 codex-acp를 설치한 뒤 다시 확인하세요.";
     case "already_registered":
-      return "이 맥은 이미 호스트로 등록돼 있습니다. 목록을 다시 불러오세요.";
+      return "이 맥은 이미 호스트로 등록돼 있어요. 목록을 다시 불러오세요.";
     case "not_signed_in":
-      return "로그인이 만료되었습니다. 다시 로그인한 뒤 등록하세요.";
+      return "로그인이 만료됐어요. 다시 로그인한 뒤 등록하세요.";
     case "server_url_invalid":
-      return "이 서버 주소로는 호스트를 등록할 수 없습니다. https 주소인지 확인하세요.";
+      return "이 서버 주소로는 호스트를 등록할 수 없어요. https 주소인지 확인하세요.";
     case "display_name_invalid":
       return "호스트 이름은 1자 이상 80자 이하로 적어 주세요.";
     case "sidecar_missing":
-      return "이 빌드에는 작업 호스트 프로그램이 들어 있지 않습니다.";
+      return "이 빌드에는 작업 호스트 프로그램이 없어요.";
     case "timeout":
-      return "등록이 90초 안에 끝나지 않았습니다. 네트워크를 확인하고 다시 시도하세요.";
+      return "등록이 90초 안에 끝나지 않았어요. 네트워크를 확인하고 다시 시도하세요.";
     case "register_failed":
-      return "서버가 등록을 받지 않았습니다. 네트워크와 로그인 상태를 확인하고 다시 시도하세요.";
+      return "서버가 등록을 받지 않았어요. 네트워크와 로그인 상태를 확인하고 다시 시도하세요.";
     case "forget_failed":
-      return "이 맥의 등록 정보를 지우지 못했습니다. 앱을 다시 연 뒤 시도하세요.";
+      return "이 맥의 등록 정보를 지우지 못했어요. 앱을 다시 연 뒤 시도하세요.";
     case "unsupported_platform":
-      return "작업 호스트는 macOS 앱에서만 켤 수 있습니다.";
+      return "작업 호스트는 macOS 앱에서만 켤 수 있어요.";
     default:
-      return "작업 호스트를 바꾸지 못했습니다. 잠시 뒤 다시 시도하세요.";
+      return "작업 호스트를 바꾸지 못했어요. 잠시 뒤 다시 시도하세요.";
   }
 }
 
@@ -170,14 +170,14 @@ export function workHostNoticeText(
   const byMe = sameId(notice.actorMemberId, selfMemberId);
   if (notice.type === "work_host.registered") {
     return {
-      title: "작업 호스트가 등록되었습니다",
+      title: "작업 호스트가 등록됐어요",
       body: `${notice.displayName}. 직접 등록하지 않았다면 설정의 코드 실행 호스트에서 해지하세요.`,
     };
   }
   return {
-    title: "작업 호스트 등록이 해지되었습니다",
+    title: "작업 호스트 등록이 해지됐어요",
     body: byMe
-      ? `${notice.displayName}. 이 호스트로는 더 이상 작업이 가지 않습니다.`
-      : `${notice.displayName}. 관리자가 해지했습니다. 이 호스트로는 더 이상 작업이 가지 않습니다.`,
+      ? `${notice.displayName}. 이 호스트로는 더 이상 작업이 가지 않아요.`
+      : `${notice.displayName}. 관리자가 해지했어요. 이 호스트로는 더 이상 작업이 가지 않아요.`,
   };
 }

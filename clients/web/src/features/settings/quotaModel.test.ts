@@ -460,7 +460,7 @@ describe("quotaErrorCopy", () => {
   it("explains a 404 as a server that predates the route", () => {
     // The live case: momowebqa answers exactly this until the ADR-0135 engine
     // layer lands on it.
-    expect(quotaErrorCopy(404, "HTTP 404")).toContain("아직 구독 잔여량을 제공하지 않습니다");
+    expect(quotaErrorCopy(404, "HTTP 404")).toContain("아직 구독 잔여량을 제공하지 않아요");
   });
 
   it("explains a 403 as a membership answer, not a network one", () => {
@@ -576,7 +576,7 @@ describe("quotaView", () => {
     // would ever take the bars off the screen.
     expect(input({ paused: true })).toEqual({
       kind: "error",
-      message: "연결이 끊겼습니다. 다시 연결되면 잔여량을 불러옵니다.",
+      message: "연결이 끊겼어요. 다시 연결되면 잔여량을 불러와요.",
     });
   });
 
@@ -588,7 +588,7 @@ describe("quotaView", () => {
     });
     expect(view.kind).toBe("last-known");
     if (view.kind !== "last-known") throw new Error("expected last-known");
-    expect(view.notice).toContain("연결이 끊겼습니다.");
+    expect(view.notice).toContain("연결이 끊겼어요.");
     expect(view.providers).toHaveLength(2);
   });
 
@@ -636,7 +636,7 @@ describe("quotaView", () => {
 describe("quotaAnnouncement", () => {
   it("announces the wait", () => {
     expect(quotaAnnouncement({ kind: "loading" }, NOW)).toBe(
-      "구독 잔여량을 불러오는 중입니다."
+      "구독 잔여량을 불러오고 있어요."
     );
   });
 
@@ -652,7 +652,7 @@ describe("quotaAnnouncement", () => {
     // 단기 takes 가 and 주간 takes 이 (koreanParticle.ts): a live region that
     // reads "단기이(가)" is a machine refusing to decide out loud.
     expect(quotaAnnouncement(view, NOW)).toBe(
-      "구독 잔여량을 불러왔습니다. anthropic 단기가 4%로 가장 적게 남았습니다."
+      "구독 잔여량을 불러왔어요. anthropic 단기가 4%로 가장 적게 남았어요."
     );
   });
 
@@ -680,7 +680,7 @@ describe("quotaAnnouncement", () => {
       lastKnown: null,
       nowMs: NOW,
     });
-    expect(quotaAnnouncement(view, NOW)).toBe("보고된 구독 잔여량이 없습니다.");
+    expect(quotaAnnouncement(view, NOW)).toBe("보고된 구독 잔여량이 없어요.");
   });
 
   it("says every reading is unusable without claiming they are all old", () => {
@@ -696,7 +696,7 @@ describe("quotaAnnouncement", () => {
       nowMs: NOW,
     });
     expect(quotaAnnouncement(view, NOW)).toBe(
-      "구독 잔여량을 불러왔습니다. 모두 지금 잔여율과 다를 수 있는 값입니다."
+      "구독 잔여량을 불러왔어요. 모두 지금 잔여율과 다를 수 있는 값이에요."
     );
   });
 

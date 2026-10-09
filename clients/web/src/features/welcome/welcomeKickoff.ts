@@ -34,7 +34,7 @@ export const WELCOME_BACKSTOP_HREF = AGENTS_NAV.to;
 
 export const WELCOME_PROMPT_MAX_CHARS = 2000;
 
-export const WELCOME_PROMPT_LIMIT_SENTENCE = `${WELCOME_PROMPT_MAX_CHARS}자까지 쓸 수 있습니다.`;
+export const WELCOME_PROMPT_LIMIT_SENTENCE = `${WELCOME_PROMPT_MAX_CHARS}자까지 쓸 수 있어요.`;
 
 export type WelcomeKickoffPhase = "hidden" | "stage" | "exiting" | "backstop";
 

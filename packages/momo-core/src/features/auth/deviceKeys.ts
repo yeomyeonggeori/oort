@@ -421,49 +421,49 @@ export function deviceKeyErrorMessage(code: unknown): string {
   const key = raw.split(":")[0]!.trim();
   switch (key) {
     case "device_key_declined":
-      return "서명을 취소했습니다.";
+      return "서명을 취소했어요.";
     case "device_key_cancelled":
-      return "Touch ID나 암호 확인을 취소했습니다.";
+      return "Touch ID나 암호 확인을 취소했어요.";
     case "device_key_auth_failed":
-      return "본인 확인에 실패했습니다. 다시 시도하세요.";
+      return "본인 확인에 실패했어요. 다시 시도해 주세요.";
     case "device_key_unsigned_build":
-      return "이 빌드는 서명되지 않아 Secure Enclave 키를 쓸 수 없습니다. 팀 배포 앱에서 하세요.";
+      return "이 빌드는 서명되지 않아서 Secure Enclave 키를 쓸 수 없어요. 팀 배포 앱에서 해 주세요.";
     case "device_key_entitlement_missing":
-      return "이 빌드에는 서명 키를 보관할 권한이 없습니다. 팀 배포 앱에서 하세요.";
+      return "이 빌드에는 서명 키를 보관할 권한이 없어요. 팀 배포 앱에서 해 주세요.";
     case "device_key_unsupported":
     case "unsupported_platform":
-      return "이 기기에서는 지시 서명 키를 만들 수 없습니다.";
+      return "이 기기에서는 지시 서명 키를 만들 수 없어요.";
     case "device_key_absent":
     case "device_key_changed":
-      return "이 맥의 서명 키가 바뀌었습니다. 이 맥을 다시 뿌리로 등록하세요.";
+      return "이 맥의 서명 키가 바뀌었어요. 이 맥을 서명 기기로 다시 등록해 주세요.";
     case "device_key_not_root_here":
-      return "이 맥이 이 워크스페이스의 뿌리로 등록돼 있지 않습니다.";
+      return "이 맥이 이 워크스페이스의 서명 기기로 등록돼 있지 않아요.";
     case "device_key_payload_rejected":
-      return "서명할 내용에 보이지 않는 문자나 올바르지 않은 값이 있어 서명하지 않았습니다.";
+      return "서명할 내용에 보이지 않는 문자나 올바르지 않은 값이 있어서 서명하지 않았어요.";
     case "device_key_host_pinned_other":
-      return "이 맥의 작업 호스트가 이미 다른 키를 뿌리로 고정했습니다. 작업 호스트를 다시 등록해야 합니다.";
+      return "이 맥의 작업 호스트에 이미 다른 키가 서명 기기로 등록돼 있어요. 작업 호스트를 다시 등록해 주세요.";
     case "device_key_pin_refused":
-      return "이 맥의 작업 호스트가 이 키를 뿌리로 받지 않았습니다. 작업 호스트 상태를 확인하세요.";
+      return "이 맥의 작업 호스트가 이 키를 서명 기기로 받지 않았어요. 작업 호스트 상태를 확인해 주세요.";
     case "device_key_kind_not_enabled":
-      return "이 종류의 서명은 아직 이 앱에서 할 수 없습니다.";
+      return "이 종류의 서명은 아직 이 앱에서 할 수 없어요.";
     case "device_key_no_letter":
-      return "이 맥에서 서명한 해제 기록이 없어 다시 보낼 수 없습니다.";
+      return "이 맥에서 서명한 해제 기록이 없어서 다시 보낼 수 없어요.";
     case "device_key_not_endorsed_here":
-      return "이 맥에 이 키를 승인한 기록이 없어 해제에 서명할 수 없습니다. 그 기기의 연결을 끊으면 서버에서는 키가 해제되지만, 이 맥의 작업 호스트에는 알려지지 않습니다.";
+      return "이 맥에 이 키를 승인한 기록이 없어서 해제에 서명할 수 없어요. 그 기기의 연결을 끊으면 서버에서는 키가 해제되지만, 이 맥의 작업 호스트에는 알려지지 않아요.";
     case "device_key_rebind_not_current":
-      return "서버가 이 키를 이 로그인으로 옮기지 않았습니다. 목록을 다시 불러와 다시 시도하세요.";
+      return "서버가 이 키를 이 로그인으로 옮기지 않았어요. 목록을 다시 불러와서 다시 시도해 주세요.";
     case "device_key_no_session":
-      return "이 로그인은 키를 옮길 수 없습니다. 로그아웃한 뒤 다시 로그인하세요.";
+      return "이 로그인은 키를 옮길 수 없어요. 로그아웃한 뒤 다시 로그인해 주세요.";
     case "work_host_not_running":
-      return "이 맥의 작업 호스트가 켜져 있지 않습니다. 작업 호스트를 켠 뒤 다시 시도하세요.";
+      return "이 맥의 작업 호스트가 켜져 있지 않아요. 작업 호스트를 켠 뒤 다시 시도해 주세요.";
     case "work_host_other_workspace":
-      return "이 맥의 작업 호스트는 다른 워크스페이스 것이라 여기서 바꿀 수 없습니다.";
+      return "이 맥의 작업 호스트는 다른 워크스페이스 것이라 여기서 바꿀 수 없어요.";
     case "workd_refused":
-      return "이 맥의 작업 호스트가 요청을 받지 않았습니다. 다시 시도하세요.";
+      return "이 맥의 작업 호스트가 요청을 받지 않았어요. 다시 시도해 주세요.";
     case "device_key_endorse_conflict":
-      return "이 맥이 이미 다른 키를 이 이름으로 승인했거나 같은 키를 다른 이름으로 승인했습니다. 목록을 다시 불러와 확인하세요.";
+      return "이 맥이 이미 다른 키를 이 이름으로 승인했거나 같은 키를 다른 이름으로 승인했어요. 목록을 다시 불러와서 확인해 주세요.";
     default:
-      return "서명하지 못했습니다. 다시 시도하세요.";
+      return "서명하지 못했어요. 다시 시도해 주세요.";
   }
 }
 
@@ -471,23 +471,23 @@ export function deviceKeyErrorMessage(code: unknown): string {
 export function deviceKeyServerMessage(code: string | undefined, fallback: string): string {
   switch (code) {
     case DEVICE_KEY_REFUSAL.rootPasswordRequired:
-      return "비밀번호가 맞지 않습니다. 이 계정의 현재 비밀번호를 적어 주세요.";
+      return "비밀번호가 맞지 않아요. 이 계정의 현재 비밀번호를 적어 주세요.";
     case DEVICE_KEY_REFUSAL.rootLinkedSession:
-      return "QR로 연결한 기기는 뿌리가 될 수 없습니다. 이 맥에서 비밀번호로 로그인한 뒤 등록하세요.";
+      return "QR로 연결한 기기는 서명 기기가 될 수 없어요. 이 맥에서 비밀번호로 로그인한 뒤 등록해 주세요.";
     case DEVICE_KEY_REFUSAL.alreadyRegistered:
-      return "이 키는 이미 등록돼 있습니다. 목록을 다시 불러오세요.";
+      return "이 키는 이미 등록돼 있어요. 목록을 다시 불러오세요.";
     case DEVICE_KEY_REFUSAL.lineageEnded:
-      return "이 로그인은 더 이상 키를 등록할 수 없습니다. 다시 로그인하세요.";
+      return "이 로그인은 더 이상 키를 등록할 수 없어요. 다시 로그인해 주세요.";
     case DEVICE_KEY_REFUSAL.rebindRequired:
-      return "이 키는 끝난 로그인에 묶여 있습니다. 다시 연결하세요.";
+      return "이 키는 끝난 로그인에 묶여 있어요. 다시 연결해 주세요.";
     case DEVICE_KEY_REFUSAL.notFound:
-      return "서버에 이 키가 더 이상 없습니다. 목록을 다시 불러와 새로 등록하세요.";
+      return "서버에 이 키가 더 이상 없어요. 목록을 다시 불러와서 새로 등록해 주세요.";
     case DEVICE_KEY_REFUSAL.signatureInvalid:
-      return "서버가 이 기기의 서명을 받지 않았습니다. 기기 시계가 맞는지 확인하고 다시 시도하세요.";
+      return "서버가 이 기기의 서명을 받지 않았어요. 기기 시계가 맞는지 확인하고 다시 시도해 주세요.";
     case DEVICE_KEY_REFUSAL.requiresLinkedSession:
-      return "이 폰은 QR로 연결되지 않아 지시 기기가 될 수 없습니다. 맥에서 QR로 한 번 연결하세요.";
+      return "이 폰은 QR로 연결되지 않아서 지시를 보낼 수 없어요. 맥에서 QR로 한 번 연결해 주세요.";
     case DEVICE_KEY_REFUSAL.linkNotFromMac:
-      return "이 폰은 맥이 아닌 곳에서 띄운 QR로 연결됐습니다. 맥에서 QR로 다시 연결하세요.";
+      return "이 폰은 맥이 아닌 곳에서 띄운 QR로 연결됐어요. 맥에서 QR로 다시 연결해 주세요.";
     default:
       return fallback;
   }

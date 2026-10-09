@@ -2078,15 +2078,6 @@ async function installMocks(context) {
   // 설정 > 코드 실행 호스트 (MOMO-617). The workspace default sits in 자동 재개
   // so the 재개 대상 control is on screen, and the member override inherits it,
   // which is the pair the panel has to keep apart.
-  await context.route("**/v1/provider/work-host-engine", (route) =>
-    json(route, {
-      engine: "opencode",
-      source: "database",
-      updatedBy: "곽성재",
-      updatedAtMs: FIXTURE_NOW - 2 * 86_400_000,
-      schema: "momo.work_host_engine.v0",
-    })
-  );
   await context.route("**/v1/workspaces/*/work-hosts", (route) =>
     json(route, { workHosts: WORK_HOSTS })
   );
@@ -7015,7 +7006,7 @@ async function captureMobile(browser, scheme) {
   await page.waitForTimeout(200);
   await page.evaluate('location.hash = "/settings?section=appearance"');
   await page.getByTestId("settings-route").waitFor({ state: "visible" });
-  await page.getByRole("heading", { name: "테마", exact: true }).waitFor({
+  await page.getByRole("heading", { name: "모양", exact: true }).first().waitFor({
     state: "visible",
   });
   await page.getByTestId("accent-swatch-dawn").waitFor({ state: "visible" });
@@ -8447,9 +8438,9 @@ async function captureScheme(browser, scheme) {
   await assertReminderKeyboardDelete(remindersPage, scheme);
   await remindersPage.close();
 
-  // 3g. 설정 > 코드 실행 호스트 (MOMO-617): the three blocks that decide where an
-  //     agent runs. Shot at the top of the panel, where the engine card, the
-  //     registry rows and the policy selects all land in one frame.
+  // 3g. 설정 > 실행 호스트 (MOMO-617, #3578 S4): the registry rows and the workspace
+  //     default resume policy. (The 실행 엔진 card is gone; this Mac and the member
+  //     policy live under 기기.) Shot at the top of the panel.
   const settings = await context.newPage();
   await settings.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(settings);
@@ -8460,8 +8451,8 @@ async function captureScheme(browser, scheme) {
   await settings.screenshot({ path: workHostShot });
   shots.push(workHostShot);
 
-  // …and the same panel scrolled to its foot, where the three status chips and
-  // the two policy scopes sit together. A section this tall is reviewed twice
+  // …and the same panel scrolled to its foot, where the workspace default policy
+  // sits. A section this tall is reviewed twice
   // or the half nobody sees is the half that regresses.
   await settings
     .getByTestId("work-tier-policy")
@@ -8660,8 +8651,7 @@ async function captureScheme(browser, scheme) {
     // 다크 각각에서 성립하는지가 리뷰 증거로 남는다. 고르는 값은 localStorage이고
     // signIn()이 매번 그것을 비우므로, 찍히는 것은 언제나 기본값(시스템)의 화면이다.
     // 고른 뒤의 화면은 gates/gate-theme.mjs가 실행마다 다시 찍는다.
-    ["appearance", "테마", "appearance"],
-    ["link-previews", "링크 미리보기", "link-previews"],
+    ["appearance", "모양", "appearance"],
     // notifications is owned by the parked-pointer scene above (H6-1).
     // Listing it here overwrote that file with an unguarded hover fill.
     ["workspace", "워크스페이스", "workspace"],
@@ -14097,7 +14087,7 @@ function parseCssRgb(css) {
 async function assertNotificationsDndRest(page, scheme) {
   const row = page
     .getByTestId("notification-rules-dnd")
-    .locator("xpath=ancestor::label[1]");
+    .locator("xpath=ancestor::div[contains(@class, 'settings-row')][1]");
   await row.waitFor({ state: "visible" });
   const { bg, hover, surface } = await row.evaluate((el) => {
     const probe = document.createElement("div");

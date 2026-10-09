@@ -181,6 +181,14 @@ async function signIn(page) {
   await page.waitForSelector("nav[aria-label='워크스페이스 탐색']");
 }
 
+/** 색 모드 세그먼트의 칸(라벨)을 누른다. 라디오 입력은 화면에서 숨겨져 있다. */
+async function choose(page, mode) {
+  await page.locator(`label:has([data-testid="theme-choice-${mode}"])`).click();
+  if (!(await page.getByTestId(`theme-choice-${mode}`).isChecked())) {
+    fail(`「${mode}」 칸을 눌렀는데 라디오가 선택되지 않았다`);
+  }
+}
+
 async function openThemePanel(page) {
   await page.evaluate('location.hash = "/settings?section=appearance"');
   await page.waitForSelector('[data-testid="theme-choice"]');
@@ -239,7 +247,7 @@ async function main() {
       await page.screenshot({ path: systemShot });
 
       // ---- ① 고른 스킴이 OS를 이긴다 ---------------------------------------
-      await page.locator("#theme-light").check();
+      await choose(page, "light");
       await page.waitForFunction(
         () => document.documentElement.getAttribute("data-theme") === "light",
         undefined,
@@ -296,7 +304,7 @@ async function main() {
         fail("새로고침 뒤 배경이 고른 스킴과 다르다");
       }
       const restored = await page
-        .locator("#theme-light")
+        .getByTestId("theme-choice-light")
         .isChecked();
       if (!restored) {
         fail(
@@ -402,7 +410,7 @@ async function main() {
       await openThemePanel(page);
 
       // ---- ⑤ 시스템으로 되돌아온다 ------------------------------------------
-      await page.locator("#theme-system").check();
+      await choose(page, "system");
       await page.waitForFunction(
         () => !document.documentElement.hasAttribute("data-theme"),
         undefined,

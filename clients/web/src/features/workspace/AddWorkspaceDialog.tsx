@@ -159,7 +159,7 @@ function AddWorkspacePanel({
     slugIssue !== null && (attempted || slug.trim() !== "") ? slugIssue : null;
   const slugFieldError =
     localSlugError ??
-    (slugConflict ? "이미 쓰이는 슬러그입니다. 다른 값을 고르세요." : null);
+    (slugConflict ? "이미 쓰이는 슬러그예요. 다른 값을 고르세요." : null);
 
   const operatorDenied = create.isError && isOperatorDenied(create.error);
   const formError =
@@ -213,7 +213,7 @@ function AddWorkspacePanel({
       <div className="flex flex-col gap-1 border-b border-line p-4">
         <DialogTitle>워크스페이스 추가</DialogTitle>
         <DialogDescription>
-          새 워크스페이스를 만들거나, 초대를 받았다면 초대 링크로 참여합니다.
+          새 워크스페이스를 만들거나, 초대를 받았다면 초대 링크로 참여해요.
         </DialogDescription>
       </div>
 
@@ -225,11 +225,11 @@ function AddWorkspacePanel({
             data-testid="add-workspace-created"
           >
             <p className="text-body text-ink">
-              {created.name} 워크스페이스를 만들었습니다.
+              {created.name} 워크스페이스를 만들었어요.
             </p>
             <p className="text-meta text-ink-muted">
               슬러그 {created.slug}. 새 워크스페이스로는 그 슬러그로 다시
-              로그인해서 들어갑니다.
+              로그인해서 들어가요.
             </p>
           </div>
           <div className="flex items-center justify-end gap-2">
@@ -246,8 +246,8 @@ function AddWorkspacePanel({
       ) : operatorDenied ? (
         <div className="flex flex-col gap-3 p-4">
           <OperatorNotice
-            who="새 워크스페이스는 이 서버의 운영자만 만들 수 있습니다."
-            contact="초대를 받았다면 받은 초대 링크로 참여할 수 있습니다. 없다면 이 서버를 운영하는 사람에게 문의하세요."
+            who="새 워크스페이스는 이 서버의 운영자만 만들 수 있어요."
+            contact="초대를 받았다면 받은 초대 링크로 참여할 수 있어요. 없다면 이 서버를 운영하는 사람에게 문의하세요."
           />
           <div className="flex items-center justify-end gap-2">
             <Button
@@ -269,7 +269,7 @@ function AddWorkspacePanel({
           {offline && (
             <InlineBanner
               tone="neutral"
-              message="연결이 끊겼습니다. 워크스페이스 만들기는 다시 연결된 뒤에 할 수 있습니다."
+              message="연결이 끊겼어요. 워크스페이스 만들기는 다시 연결된 뒤에 할 수 있어요."
               testId="add-workspace-offline"
             />
           )}
@@ -283,7 +283,7 @@ function AddWorkspacePanel({
             <WorkspaceDialogField
               label="이름"
               htmlFor="add-workspace-name"
-              hint="사람이 읽는 이름입니다. 80자까지 쓸 수 있습니다."
+              hint="사람이 읽는 이름이에요. 80자까지 쓸 수 있어요."
               error={nameError}
             >
               <Input
@@ -307,7 +307,7 @@ function AddWorkspacePanel({
             <WorkspaceDialogField
               label="슬러그"
               htmlFor="add-workspace-slug"
-              hint="영문 소문자, 숫자, 하이픈만. 서버 전체에서 하나뿐이어야 합니다."
+              hint="영문 소문자, 숫자, 하이픈만. 서버 전체에서 하나뿐이어야 해요."
               error={slugFieldError}
             >
               <Input

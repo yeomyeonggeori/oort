@@ -95,6 +95,13 @@ export function SettingsToggleRow({
  */
 export const SectionHeadingContext = createContext(true);
 
+/**
+ * 설정 셸이 페이지 머리(h1)로 제목을 이미 그릴 때 true. `SectionHeadingContext`가 제목과
+ * 설명을 **같이** 접는 것과 달리, 이것은 제목(h2)만 접고 설명 줄은 남긴다: 옛 섹션의
+ * 설명 줄에는 저장 위치·권한 같은 사실이 있어서 S1에서 잃으면 안 된다(#3578).
+ */
+export const SectionTitleHiddenContext = createContext(false);
+
 /** Section title plus the one or two lines that explain what it governs. */
 export function SectionShell({
   title,
@@ -109,6 +116,7 @@ export function SectionShell({
   wide?: boolean;
 }) {
   const showHeading = useContext(SectionHeadingContext);
+  const titleHidden = useContext(SectionTitleHiddenContext);
   // A settings form is read line by line, so the panel keeps a measure instead
   // of stretching a slug field across a 1280px window.
   return (
@@ -119,7 +127,7 @@ export function SectionShell({
           갖는다. word-break는 상속되므로 한 번의 선언으로 두 줄 다 덮인다. */}
       {showHeading && (
         <div className="flex break-keep flex-col gap-1">
-          <h2 className="text-title font-semibold text-ink">{title}</h2>
+          {!titleHidden && <h2 className="text-title font-semibold text-ink">{title}</h2>}
           {lines.map((line) => (
             <p key={line} className="text-body text-ink-muted">
               {line}
@@ -329,14 +337,20 @@ export function KeyValueRows({ rows }: { rows: KeyValue[] }) {
 export function OperatorNotice({
   who,
   contact,
+  bare = false,
 }: {
   /** Full sentence: Korean particles depend on the noun, so callers write it. */
   who: string;
   contact: string;
+  /** 이미 카드 안에 있다: 상자를 한 겹 더 두르지 않는다(#3578). */
+  bare?: boolean;
 }) {
   return (
     <div
-      className="flex flex-col gap-2 rounded-md border border-line bg-surface-raised p-4"
+      className={cn(
+        "flex flex-col gap-2",
+        !bare && "rounded-md border border-line bg-surface-raised p-4"
+      )}
       data-testid="operator-notice"
       role="status"
     >

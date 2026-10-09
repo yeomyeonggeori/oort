@@ -113,7 +113,7 @@ export function SectionNameDialog({
               {mode === "create" ? SECTION_CREATE_TITLE : SECTION_RENAME_TITLE}
             </DialogTitle>
             <DialogDescription>
-              사이드바에서 이 이름으로 채널을 묶습니다.
+              사이드바에서 이 이름으로 채널을 묶어요.
             </DialogDescription>
           </div>
           <form
@@ -155,7 +155,7 @@ export function SectionNameDialog({
               </p>
             ) : (
               <p className="text-meta text-ink-muted">
-                {SIDEBAR_SECTION_NAME_MAX}자까지 쓸 수 있습니다.
+                {SIDEBAR_SECTION_NAME_MAX}자까지 쓸 수 있어요.
               </p>
             )}
             <div className="flex items-center justify-end gap-2 pt-2">

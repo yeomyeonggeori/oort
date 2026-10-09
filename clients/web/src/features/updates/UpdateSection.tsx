@@ -1,10 +1,9 @@
 import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
-import {
-  KeyValueRows,
-  SectionShell,
-  StatusChip,
-} from "@/features/settings/SettingsFields";
+import { StatusChip } from "@/features/settings/SettingsFields";
+import { SettingsRow } from "@/features/settings/shell/SettingsRow";
+import { SettingsSection } from "@/features/settings/shell/SettingsSection";
+import { CardBody } from "@/features/settings/workTierPolicy";
 import {
   formatPublishedAt,
   progressLabel,
@@ -53,83 +52,135 @@ function StateChip({ state }: { state: UpdateState }) {
   }
 }
 
+/** 상태 칩 옆에 붙는 한 문장. 칩은 낱말이라 지금 무엇을 기다리는지는 이 줄이 말한다. */
+function stateSentence(state: UpdateState): string {
+  switch (state.kind) {
+    case "checking":
+      return "새 버전이 있는지 확인하고 있어요.";
+    case "current":
+      return "지금 쓰는 버전이 가장 최신이에요.";
+    case "available":
+      return "받을 수 있는 새 버전이 있어요.";
+    case "installing":
+      return "새 버전을 받고 있어요. 앱은 그대로 쓸 수 있어요.";
+    case "installed":
+      return "설치를 마쳤어요. 재시작하면 새 버전으로 열려요.";
+    case "failed":
+      return "확인하지 못했어요. 아래 안내를 따라 다시 시도하세요.";
+    default:
+      return "아직 확인하지 않았어요.";
+  }
+}
+
 export function UpdateSection() {
   const state = useUpdateState();
   const version = useAppVersion();
 
-  const rows = [{ key: "지금 버전", value: version ?? "확인 중", numeric: true }];
-  if (state.kind === "available" || state.kind === "installing" || state.kind === "installed") {
-    rows.push({ key: "새 버전", value: state.update.version, numeric: true });
-    const published = formatPublishedAt(state.update.publishedAt);
-    if (published) rows.push({ key: "공개일", value: published, numeric: false });
-  }
-
+  const hasUpdate =
+    state.kind === "available" || state.kind === "installing" || state.kind === "installed";
+  const published = hasUpdate ? formatPublishedAt(state.update.publishedAt) : null;
   const busy = state.kind === "checking" || state.kind === "installing";
 
   return (
-    <SectionShell
-      title="업데이트"
-      lines={[
-        "앱이 스스로 새 버전으로 바꿉니다. 내려받은 파일은 서명을 검증한 뒤에만 설치됩니다.",
-        "설치는 지금 하고 재시작은 나중에 해도 됩니다. 쓰던 화면은 그대로 있습니다.",
-      ]}
-    >
-      <div className="flex items-center gap-2" data-testid="update-status">
-        <StateChip state={state} />
-      </div>
-
-      <KeyValueRows rows={rows} />
-
-      {state.kind === "failed" && (
-        <div className="flex flex-col gap-1">
-          <InlineBanner
-            message={state.message}
-            actionLabel="다시 시도"
-            onAction={() => void checkForUpdate()}
-            testId="update-error"
-          />
-          {state.detail && (
-            <p className="break-all text-meta text-ink-muted">{state.detail}</p>
-          )}
-        </div>
-      )}
-
-      {state.kind === "available" && state.update.notes && (
-        <p className="whitespace-pre-line text-body text-ink-muted" data-testid="update-notes">
-          {state.update.notes}
-        </p>
-      )}
-
-      {state.kind === "installing" && <InstallProgress state={state} />}
-
-      {state.kind === "installed" && (
-        <p className="text-body text-ink" data-testid="update-installed">
-          새 버전이 설치됐습니다. 재시작하면 {state.update.version} 으로 열립니다.
-        </p>
-      )}
-
-      <div className="flex flex-wrap items-center gap-2">
-        {state.kind === "available" && (
-          <Button size="sm" onClick={() => void installUpdate()} data-testid="update-install">
-            지금 업데이트
-          </Button>
+    <div className="flex min-w-0 flex-col gap-8" data-testid="updates-page">
+      <SettingsSection
+        title="앱 업데이트"
+        description="앱이 스스로 새 버전으로 바꿔요. 내려받은 파일은 서명을 검증한 뒤에만 설치해요. 설치는 지금 하고 재시작은 나중에 해도 돼요. 쓰던 화면은 그대로 있어요."
+      >
+        <SettingsRow label="지금 버전">
+          <span className="font-mono text-body text-ink" data-numeric>
+            {version ?? "확인 중"}
+          </span>
+        </SettingsRow>
+        {hasUpdate && (
+          <SettingsRow label="새 버전">
+            <span className="font-mono text-body text-ink" data-numeric>
+              {state.update.version}
+            </span>
+          </SettingsRow>
         )}
+        {published && (
+          <SettingsRow label="공개일">
+            <span className="text-body text-ink">{published}</span>
+          </SettingsRow>
+        )}
+        <SettingsRow label="상태" description={stateSentence(state)} keep>
+          <div className="flex items-center gap-2" data-testid="update-status">
+            <StateChip state={state} />
+          </div>
+        </SettingsRow>
+
+        {state.kind === "failed" && (
+          <CardBody>
+            <InlineBanner
+              message={state.message}
+              actionLabel="다시 시도"
+              onAction={() => void checkForUpdate()}
+              separator={false}
+              className="px-0"
+              testId="update-error"
+            />
+            {state.detail && (
+              <p className="break-all text-meta text-ink-muted">{state.detail}</p>
+            )}
+          </CardBody>
+        )}
+
+        {state.kind === "available" && state.update.notes && (
+          <SettingsRow label="변경 내용" stack>
+            <p className="whitespace-pre-line text-body text-ink-muted" data-testid="update-notes">
+              {state.update.notes}
+            </p>
+          </SettingsRow>
+        )}
+
+        {state.kind === "installing" && (
+          <CardBody>
+            <InstallProgress state={state} />
+          </CardBody>
+        )}
+
         {state.kind === "installed" && (
-          <Button size="sm" onClick={() => void relaunchIntoUpdate()} data-testid="update-relaunch">
-            지금 재시작
-          </Button>
+          <CardBody>
+            <p className="text-body text-ink" data-testid="update-installed">
+              새 버전이 설치됐어요. 재시작하면 {state.update.version}(으)로 열려요.
+            </p>
+          </CardBody>
         )}
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={busy}
-          onClick={() => void checkForUpdate()}
-          data-testid="update-check"
-        >
-          {state.kind === "checking" ? "확인 중" : "업데이트 확인"}
-        </Button>
-      </div>
-    </SectionShell>
+
+        {(state.kind === "available" || state.kind === "installed") && (
+          <SettingsRow
+            label={state.kind === "available" ? "새 버전 설치" : "재시작"}
+            description={
+              state.kind === "available"
+                ? "설치는 지금 하고 재시작은 나중에 해도 돼요."
+                : "지금 재시작하거나, 쓰던 일을 마친 뒤에 열어도 돼요."
+            }
+          >
+            {state.kind === "available" ? (
+              <Button size="sm" onClick={() => void installUpdate()} data-testid="update-install">
+                지금 업데이트
+              </Button>
+            ) : (
+              <Button size="sm" onClick={() => void relaunchIntoUpdate()} data-testid="update-relaunch">
+                지금 재시작
+              </Button>
+            )}
+          </SettingsRow>
+        )}
+        <SettingsRow label="직접 확인" description="새 버전이 나왔는지 바로 물어봐요.">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            onClick={() => void checkForUpdate()}
+            data-testid="update-check"
+          >
+            {state.kind === "checking" ? "확인 중" : "업데이트 확인"}
+          </Button>
+        </SettingsRow>
+      </SettingsSection>
+    </div>
   );
 }
 

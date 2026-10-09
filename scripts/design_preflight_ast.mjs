@@ -150,11 +150,12 @@ export function makeLegacyTermCategory(terms) {
     key: "legacy_term",
     rule:
       "옛 용어 (AI 허브 용어집 §2, #3445): 「AI 연결」→「AI」, 「오너」→「소유자」, 「합류」·「구독 붙이기」·「호스티드 에이전트」 등은 " +
-      "화면에서 쓰지 않는다. 목록 정본 = core LEGACY_TERM_MAP(grepGate). 호스티드 화면(HOSTED_SURFACE_RE)은 합쇼체(「-습니까」「-습니다」)와 " +
+      "화면에서 쓰지 않는다. 목록 정본 = core LEGACY_TERM_MAP(grepGate). 설정 화면(SETTINGS_SURFACE_RE, #3573)은 합쇼체·「지시 기기」도 잰다. 호스티드 화면(HOSTED_SURFACE_RE)은 합쇼체(「-습니까」「-습니다」)와 " +
       "한글 문장 속 영문 「provider」도 같은 분류로 잰다(#3479). 예외는 design-preflight-allow 마커 + PR 근거",
     hit: (text, fileName = "") =>
       terms.some((term) => text.includes(term) && (!isIdentifier(term) || /[가-힣]/.test(text))) ||
-      (HOSTED_SURFACE_RE.test(fileName.split("\\").join("/")) && hostedToneHit(text)),
+      (HOSTED_SURFACE_RE.test(fileName.split("\\").join("/")) && hostedToneHit(text)) ||
+      (SETTINGS_SURFACE_RE.test(fileName.split("\\").join("/")) && settingsToneHit(text)),
   };
 }
 
@@ -167,15 +168,47 @@ export const HOSTED_SURFACE_RE =
   /(?:^|\/)(?:hostedAgents|agentHub)\/|\/Hosted[A-Za-z]*(?:Screen|Section|Wizard)\.tsx?$/;
 
 /**
+ * 설정 화면의 파일 경로 (#3573). 웹 `features/settings/`, 코어 `features/settings/`, 그리고 설정 › 기기가
+ * 렌더하는 코어 문장 파일(deviceKeys.ts). 폰 온보딩이 쓰는 deviceLinkModel.ts 는 ADR-0193 D11 (폼 라벨·오류는 합니다체)이라 뺀다. 합쇼체와 내부 용어(「지시 기기」)를 같은 분류로 잰다. 영문 provider 는
+ * 설정에서 아직 화면 용어라(체인 편집) 이 표면에서는 재지 않는다.
+ */
+export const SETTINGS_SURFACE_RE =
+  /(?:^|\/)features\/settings\/|(?:^|\/)features\/auth\/deviceKeys\.ts$/;
+
+/**
+ * 합쇼체 종결 「-습니다/-습니까」와 받침 ㅂ 뒤의 「-ㅂ니다/-ㅂ니까」(보냅니다·합니다·됩니다 …).
+ * 뒤가 한글이면 낱말의 일부(「니다행」 같은 것)라 제외한다. 받침 ㅂ 판정은 음절 코드로 한다.
+ */
+function hasHapshoche(text) {
+  for (const m of text.matchAll(/([가-힣])니[다까](?![가-힣])/g)) {
+    if (m[1] === "습") return true;
+    if ((m[1].charCodeAt(0) - 0xac00) % 28 === 17) return true;
+  }
+  return false;
+}
+
+/**
  * 호스티드 화면 문장의 어투·용어 (#3479). 한글이 함께 든 문자열만 본다(맨 기계 값 제외):
  *  · 합쇼체 종결 「-습니까」「-ㅂ니까」「-습니다」「-ㅂ니다」 (뒤가 한글이면 낱말의 일부라 제외)
  *  · 영문 「provider」 낱말 (하이픈·밑줄·숫자가 붙은 식별자 꼴 「provider-link」는 제외) 과 「프로바이더」
  */
 function hostedToneHit(text) {
   if (!/[가-힣]/.test(text)) return false;
-  if (/(?:습|[합입됩옵갑납십])니[다까](?![가-힣])/.test(text)) return true;
+  if (hasHapshoche(text)) return true;
   if (/(?<![A-Za-z0-9_-])[Pp]rovider(?![A-Za-z0-9_-])/.test(text)) return true;
   return /프로바이더/.test(text);
+}
+
+/**
+ * 설정 화면 문장의 어투·용어 (#3573). 한글이 함께 든 문자열만 본다:
+ *  · 합쇼체 종결 (호스티드와 같은 판정)
+ *  · 내부 용어 「지시 기기」(→ 「지시를 보낼 수 있는 폰」): 폰 앱이 아직 이 말을 화면 이름으로 쓰므로
+ *    전역 LEGACY_TERM_MAP 이 아니라 설정 표면에서만 막는다.
+ */
+function settingsToneHit(text) {
+  if (!/[가-힣]/.test(text)) return false;
+  if (hasHapshoche(text)) return true;
+  return /지시 기기/.test(text);
 }
 
 /** core 의 LEGACY_TERM_MAP 에서 grepGate 항목의 `old` 를 읽는다. 못 읽으면 던진다(조용한 초록 금지). */

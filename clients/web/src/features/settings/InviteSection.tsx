@@ -21,13 +21,9 @@ import { inviteIssueErrorCopy } from "./inviteIssueError";
 import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
 import { INVITE_CREATE_LABEL } from "./inviteLabels";
 import { IssuedInviteCard } from "./IssuedInviteCard";
-import {
-  ChoiceRadios,
-  Field,
-  OperatorNotice,
-  SectionShell,
-  StatusChip,
-} from "./SettingsFields";
+import { ChoiceRadios, Field, OperatorNotice, StatusChip } from "./SettingsFields";
+import { SettingsSection } from "./shell/SettingsSection";
+import { CardBody } from "./workTierPolicy";
 import { useIssueInvite } from "./useIssueInvite";
 
 // =============================================================================
@@ -39,6 +35,10 @@ import { useIssueInvite } from "./useIssueInvite";
 // beside its test. The raw code comes back exactly once (the server keeps only
 // a hash), which is why the panel shows it as a one-time block with the paste
 // card and a mail draft, not as a row that can be re-read later.
+//
+// 설정 > 멤버와 초대 (#3578 S5b): 카드 둘. 「발급한 초대 링크」(목록 또는 빈 상태)와 「새 초대
+// 링크」(폼). 목록을 읽는 것부터 서버가 소유자·관리자에게만 열어 두므로(invites.rs `list`),
+// 403은 카드 안 `OperatorNotice`다. 발급 직후 코드는 세 번째 카드로 한 번만 보인다.
 // =============================================================================
 
 const DAY_MS = 86_400_000;
@@ -109,36 +109,45 @@ export function InviteSection({
 
   const roles = inviteRoles(workspace.data?.roleLabels);
 
-  const lines = [
-    "초대 링크를 발급해 사람을 이 워크스페이스로 불러요.",
-    "코드는 발급 직후 한 번만 보여요. 서버는 해시만 보관해요.",
-  ];
+  const description =
+    "초대 링크를 발급해 사람을 이 워크스페이스로 불러요. 코드는 발급 직후 한 번만 보여요. 서버는 해시만 보관해요.";
 
   if (invites.isPending) {
     return (
-      <SectionShell title="멤버와 초대" lines={lines}>
-        <Skeleton ready={false} rows={4} />
-      </SectionShell>
+      <div className="flex min-w-0 flex-col gap-8" data-testid="members-page">
+        <SettingsSection title="발급한 초대 링크" description={description}>
+          <CardBody>
+            <Skeleton ready={false} rows={4} />
+          </CardBody>
+        </SettingsSection>
+      </div>
     );
   }
 
   if (invites.isError) {
     return (
-      <SectionShell title="멤버와 초대" lines={lines}>
-        {isOperatorDenied(invites.error) ? (
-          <OperatorNotice
-            who="초대 링크는 워크스페이스 소유자나 관리자만 발급할 수 있어요."
-            contact="초대가 필요하면 워크스페이스 관리자에게 문의하세요."
-          />
-        ) : (
-          <InlineBanner
-            message={errorMessage(invites.error)}
-            actionLabel="다시 시도"
-            onAction={() => void invites.refetch()}
-            testId="invite-error"
-          />
-        )}
-      </SectionShell>
+      <div className="flex min-w-0 flex-col gap-8" data-testid="members-page">
+        <SettingsSection title="발급한 초대 링크" description={description}>
+          <CardBody>
+            {isOperatorDenied(invites.error) ? (
+              <OperatorNotice
+                bare
+                who="초대 링크는 워크스페이스 소유자나 관리자만 발급할 수 있어요."
+                contact="초대가 필요하면 워크스페이스 관리자에게 문의하세요."
+              />
+            ) : (
+              <InlineBanner
+                message={errorMessage(invites.error)}
+                actionLabel="다시 시도"
+                onAction={() => void invites.refetch()}
+                separator={false}
+                className="px-0"
+                testId="invite-error"
+              />
+            )}
+          </CardBody>
+        </SettingsSection>
+      </div>
     );
   }
 
@@ -146,154 +155,172 @@ export function InviteSection({
   const createError = create.isError ? inviteIssueErrorCopy(create.error) : null;
 
   return (
-    <SectionShell title="멤버와 초대" lines={lines}>
-      {rows.length === 0 ? (
-        <EmptyInvite
-          headline="아직 발급한 초대 링크가 없어요."
-          detail="아래에서 역할과 사용 횟수를 정하고 링크를 만드세요."
-          testId="invite-empty"
-        />
-      ) : (
-        <ul
-          className="flex flex-col rounded-md border border-line"
-          data-testid="invite-list"
-        >
-          {rows.map((invite) => {
-            const status = inviteStatus(invite);
-            return (
-              <li
-                key={invite.id}
-                className="flex flex-wrap items-center gap-2 border-b border-line p-3 last:border-b-0"
-              >
-                <span className="font-mono text-body text-ink" data-numeric>
-                  {invite.codePreview}
-                </span>
-                <StatusChip tone={status.tone}>{status.label}</StatusChip>
-                <span className="text-meta text-ink-muted">
-                  {choiceLabel(roles, invite.role)}
-                </span>
-                <span className="text-meta text-ink-muted" data-numeric>
-                  {invite.usedCount}/{invite.maxUses}명 사용
-                </span>
-                <span className="text-meta text-ink-muted" data-numeric>
-                  {formatDay(invite.expiresAtMs)}까지
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      <form
-        className="flex flex-col gap-3"
-        onSubmit={submit}
-        data-testid="invite-create-form"
+    <div className="flex min-w-0 flex-col gap-8" data-testid="members-page">
+      <SettingsSection
+        title="발급한 초대 링크"
+        description="이 워크스페이스에 만든 링크예요. 코드는 앞부분만 보여요."
+        testId="invite-list-card"
       >
-        {/* 날고 있는 발급은 `busy` 로 말한다 — `disabled` 가 아니다 (#1559 회전 1).
-            `ChoiceRadios.busy` 의 독스트링이 그 용도로 그 prop 이 있는 이유를 적어
-            두었다: `disabled` 는 `<fieldset disabled>` 가 되고, 초점을 쥔 라디오가
-            그렇게 꺼지면 초점이 <body> 로 떨어져 발급 한 번에 패널 꼭대기로
-            튕긴다. 형제 셋(`WebhookSection` 의 수신 방식, `WorkHostSection` 의
-            엔진·티어)이 이미 그렇게 한다. */}
-        <ChoiceRadios
-          name="invite-role"
-          legend="역할"
-          choices={roles}
-          value={role}
-          onChange={setRole}
-          busy={create.isPending}
-        />
-
-        <Field
-          label="사용 횟수"
-          htmlFor="invite-max-uses"
-          hint="이 링크로 참여할 수 있는 사람 수예요."
-        >
-          {/* A count is not a URL: it gets the named narrow pane, not the
-              full form width. max-w rather than a flat width so a window
-              narrower than the pane shrinks the field instead of pushing a
-              sideways scroll into the settings body (MOMO-610). */}
-          <Input
-            id="invite-max-uses"
-            name="maxUses"
-            type="number"
-            min={1}
-            max={10000}
-            value={maxUses}
-            onChange={(e) => setMaxUses(e.target.value)}
-            className="w-full max-w-pane"
+        {rows.length === 0 ? (
+          <EmptyInvite
+            headline="아직 발급한 초대 링크가 없어요."
+            detail="아래에서 역할과 사용 횟수를 정하고 링크를 만드세요."
+            testId="invite-empty"
           />
-        </Field>
-
-        <ChoiceRadios
-          name="invite-expiry"
-          legend="유효 기간"
-          choices={INVITE_EXPIRY_DAYS.map((d) => ({
-            id: String(d),
-            label: `${d}일`,
-            detail: `${formatDay(Date.now() + d * DAY_MS)}까지 쓸 수 있어요.`,
-          }))}
-          value={days}
-          onChange={setDays}
-          busy={create.isPending}
-        />
-
-        {formError && (
-          <p className="text-meta text-danger" role="alert">
-            {formError}
-          </p>
+        ) : (
+          <ul className="flex flex-col divide-y divide-line" data-testid="invite-list">
+            {rows.map((invite) => {
+              const status = inviteStatus(invite);
+              return (
+                <li
+                  key={invite.id}
+                  className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3"
+                >
+                  <span className="font-mono text-body text-ink" data-numeric>
+                    {invite.codePreview}
+                  </span>
+                  <StatusChip tone={status.tone}>{status.label}</StatusChip>
+                  <span className="text-meta text-ink-muted">
+                    {choiceLabel(roles, invite.role)}
+                  </span>
+                  <span className="text-meta text-ink-muted" data-numeric>
+                    {invite.usedCount}/{invite.maxUses}명 사용
+                  </span>
+                  <span className="text-meta text-ink-muted" data-numeric>
+                    {formatDay(invite.expiresAtMs)}까지
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
         )}
-        {createError && (
-          <p
-            className="text-meta text-danger"
-            role="alert"
-            title={createError.detail}
-          >
-            {createError.message}
-          </p>
-        )}
+      </SettingsSection>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {/* 진행과 잠금은 다른 축이다 (#1486 회전 · #1541 · #1559). 이 자리는
-              그 문법의 어느 쪽도 갖고 있지 않았다: 낱말은 바뀌는데 `aria-busy` 가
-              없어 낭독은 「초대 링크 만들기」에 머물렀고, native `disabled` 가
-              진행 프레임에서까지 버튼을 흐리고 tab order 에서 뺐다.
-              잠그는 사실은 오프라인 하나이고, 진행은 낱말과 `aria-busy` 가 진다.
-              가드는 폼이 진다(위 `submit`). */}
-          <Button
-            type="submit"
-            size="sm"
-            aria-disabled={offline || undefined}
-            aria-busy={create.isPending || undefined}
-            aria-describedby={offline ? OFFLINE_NOTE_ID : undefined}
-            className={cn(offline && "opacity-50")}
-            data-testid="invite-create"
-          >
-            {create.isPending ? "만드는 중" : INVITE_CREATE_LABEL}
-          </Button>
-          {/* 잠긴 컨트롤은 사유를 든다 (#1542 · design-review #1557 M). 회색이
-              혼자 서면 「당신에게는 권한이 없다」로 읽히는데, 이 사람은 발급할 수
-              있고 지금 rail 이 내려가 있을 뿐이다. 문장이 무엇을 약속하고 무엇을
-              약속하지 않는지는 위 `OFFLINE_CREATE_REASON` 독스트링이 진다. */}
-          {offline && (
-            <span
-              id={OFFLINE_NOTE_ID}
-              className="break-keep text-meta text-ink-muted"
-              data-testid="invite-create-offline"
+      <SettingsSection
+        title="새 초대 링크"
+        description={description}
+        testId="invite-create-card"
+      >
+        <form
+          className="flex min-w-0 flex-col divide-y divide-line"
+          onSubmit={submit}
+          data-testid="invite-create-form"
+        >
+          {/* 날고 있는 발급은 `busy` 로 말한다 — `disabled` 가 아니다 (#1559 회전 1).
+              `ChoiceRadios.busy` 의 독스트링이 그 용도로 그 prop 이 있는 이유를 적어
+              두었다: `disabled` 는 `<fieldset disabled>` 가 되고, 초점을 쥔 라디오가
+              그렇게 꺼지면 초점이 <body> 로 떨어져 발급 한 번에 패널 꼭대기로
+              튕긴다. 형제 셋(`WebhookSection` 의 수신 방식, `WorkHostSection` 의
+              엔진·티어)이 이미 그렇게 한다. */}
+          <div className="p-4">
+            <ChoiceRadios
+              name="invite-role"
+              legend="역할"
+              choices={roles}
+              value={role}
+              onChange={setRole}
+              busy={create.isPending}
+            />
+          </div>
+
+          <div className="px-4 py-3">
+            <Field
+              label="사용 횟수"
+              htmlFor="invite-max-uses"
+              hint="이 링크로 참여할 수 있는 사람 수예요."
             >
-              {OFFLINE_CREATE_REASON}
-            </span>
+              {/* A count is not a URL: it gets the named narrow pane, not the
+                  full form width. max-w rather than a flat width so a window
+                  narrower than the pane shrinks the field instead of pushing a
+                  sideways scroll into the settings body (MOMO-610). */}
+              <Input
+                id="invite-max-uses"
+                name="maxUses"
+                type="number"
+                min={1}
+                max={10000}
+                value={maxUses}
+                onChange={(e) => setMaxUses(e.target.value)}
+                className="w-full max-w-pane"
+              />
+            </Field>
+          </div>
+
+          <div className="p-4">
+            <ChoiceRadios
+              name="invite-expiry"
+              legend="유효 기간"
+              choices={INVITE_EXPIRY_DAYS.map((d) => ({
+                id: String(d),
+                label: `${d}일`,
+                detail: `${formatDay(Date.now() + d * DAY_MS)}까지 쓸 수 있어요.`,
+              }))}
+              value={days}
+              onChange={setDays}
+              busy={create.isPending}
+            />
+          </div>
+
+          {(formError || createError) && (
+            <div className="flex flex-col gap-1 px-4 py-3">
+              {formError && (
+                <p className="text-meta text-danger" role="alert">
+                  {formError}
+                </p>
+              )}
+              {createError && (
+                <p className="text-meta text-danger" role="alert" title={createError.detail}>
+                  {createError.message}
+                </p>
+              )}
+            </div>
           )}
-        </div>
-      </form>
+
+          <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2 px-4 py-3">
+            {/* 잠긴 컨트롤은 사유를 든다 (#1542 · design-review #1557 M). 회색이
+                혼자 서면 「당신에게는 권한이 없다」로 읽히는데, 이 사람은 발급할 수
+                있고 지금 rail 이 내려가 있을 뿐이다. 문장이 무엇을 약속하고 무엇을
+                약속하지 않는지는 위 `OFFLINE_CREATE_REASON` 독스트링이 진다. */}
+            {offline && (
+              <span
+                id={OFFLINE_NOTE_ID}
+                className="min-w-0 flex-1 break-keep text-meta text-ink-muted"
+                data-testid="invite-create-offline"
+              >
+                {OFFLINE_CREATE_REASON}
+              </span>
+            )}
+            {/* 진행과 잠금은 다른 축이다 (#1486 회전 · #1541 · #1559). 이 자리는
+                그 문법의 어느 쪽도 갖고 있지 않았다: 낱말은 바뀌는데 `aria-busy` 가
+                없어 낭독은 「초대 링크 만들기」에 머물렀고, native `disabled` 가
+                진행 프레임에서까지 버튼을 흐리고 tab order 에서 뺐다.
+                잠그는 사실은 오프라인 하나이고, 진행은 낱말과 `aria-busy` 가 진다.
+                가드는 폼이 진다(위 `submit`). */}
+            <Button
+              type="submit"
+              size="sm"
+              aria-disabled={offline || undefined}
+              aria-busy={create.isPending || undefined}
+              aria-describedby={offline ? OFFLINE_NOTE_ID : undefined}
+              className={cn(offline && "opacity-50")}
+              data-testid="invite-create"
+            >
+              {create.isPending ? "만드는 중" : INVITE_CREATE_LABEL}
+            </Button>
+          </div>
+        </form>
+      </SettingsSection>
 
       {issued && (
-        <IssuedInviteCard
-          issued={issued}
-          workspaceName={workspace.data?.name ?? "oort"}
-          issuedRef={issuedRef}
-        />
+        <SettingsSection title="방금 만든 초대 링크" testId="invite-issued-card">
+          <IssuedInviteCard
+            bare
+            issued={issued}
+            workspaceName={workspace.data?.name ?? "oort"}
+            issuedRef={issuedRef}
+          />
+        </SettingsSection>
       )}
-    </SectionShell>
+    </div>
   );
 }

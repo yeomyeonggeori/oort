@@ -578,8 +578,11 @@ describe("영속 결과 카드 (ADR-0186 부록 B)", () => {
     expect(reachable).not.toContain("updates");
     expect(reachable).not.toContain("code");
     expect(reachable).toContain("members");
-    expect(reachable).toContain("webhooks");
     for (const id of reachable) {
+      expect(isReachableHref(`/settings?section=${id}`)).toBe(true);
+    }
+    // 합친 옛 구획(별칭)과 AI 허브로 옮겨 간 옛 구획은 목록에는 없지만 문이 닿는다 (#3578 S1).
+    for (const id of ["account", "link-previews", "terminal", "webhooks", "agents", "ai"]) {
       expect(isReachableHref(`/settings?section=${id}`)).toBe(true);
     }
     for (const id of ["updates", "code", "invites"]) {

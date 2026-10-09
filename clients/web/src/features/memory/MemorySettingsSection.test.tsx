@@ -8,6 +8,7 @@ import {
   MEMORY_PAUSE_DETAIL_ON,
   MEMORY_PAUSE_LABEL,
   MEMORY_PAUSE_WORKSPACE_OFF,
+  MEMORY_SETTINGS_FORBIDDEN,
   WORKSPACE_SWITCH_ADMIN_ONLY_REASON,
   memoryWriteErrorMessage,
 } from "@momo/core/features/memory/presentation";
@@ -45,8 +46,10 @@ async function render(role: "owner" | "admin" | "member", offline = false) {
   return view;
 }
 
+// 스위치는 네이티브 `button role="switch"`다(#3578 S5b): 값은 `aria-checked`, 잠금은 `disabled`.
 const input = (host: HTMLElement, id: string) =>
-  byTestId<HTMLInputElement>(host, id) as HTMLInputElement;
+  byTestId<HTMLButtonElement>(host, id) as HTMLButtonElement;
+const isOn = (host: HTMLElement, id: string) => input(host, id).getAttribute("aria-checked");
 
 describe("설정 › 기억: 권한", () => {
   it("관리자는 팀 스위치를 바꾸고 서버에 그 값만 보낸다", async () => {
@@ -119,9 +122,11 @@ describe("설정 › 기억: 상태", () => {
       })
     );
     const { host } = await render("admin");
-    expect(input(host, "memory-workspace-enabled").checked).toBe(true);
-    expect(input(host, "memory-workspace-paused").checked).toBe(true);
-    expect(input(host, "memory-me-paused").checked).toBe(true);
+    for (const id of ["memory-workspace-enabled", "memory-workspace-paused", "memory-me-paused"]) {
+      expect(input(host, id).getAttribute("role"), id).toBe("switch");
+      expect(isOn(host, id), id).toBe("true");
+    }
+    expect(host.querySelector("input[type=checkbox]")).toBeNull();
   });
 
   it("팀 기억이 꺼져 있으면 일시정지는 잠긴다", async () => {
@@ -168,6 +173,38 @@ describe("설정 › 기억: 상태", () => {
     getMemorySettings.mockRejectedValue(new ApiError(500, "boom"));
     const { host } = await render("admin");
     expect(byTestId(host, "memory-settings-load")?.textContent).toContain("다시 시도");
+  });
+
+  it("꺼진 값은 aria-checked=false로 읽힌다 (켜진 값과 구분)", async () => {
+    getMemorySettings.mockResolvedValue(
+      settings({
+        workspace: { enabled: true, paused: false, resetEpoch: 0 },
+        me: { paused: false },
+      })
+    );
+    const { host } = await render("admin");
+    expect(isOn(host, "memory-workspace-enabled")).toBe("true");
+    expect(isOn(host, "memory-workspace-paused")).toBe("false");
+    expect(isOn(host, "memory-me-paused")).toBe("false");
+  });
+
+  it("403은 운영자 문의가 아니라 사람 멤버 사실을 말하고 다시 시도 단추가 없다", async () => {
+    getMemorySettings.mockRejectedValue(new ApiError(403, "forbidden"));
+    const { host } = await render("admin");
+    const note = byTestId(host, "memory-settings-forbidden");
+    expect(note?.textContent).toBe(MEMORY_SETTINGS_FORBIDDEN);
+    expect(note?.getAttribute("role")).toBe("status");
+    expect(host.querySelector("button")).toBeNull();
+    expect(host.textContent).not.toContain("운영자에게 문의");
+    expect(byTestId(host, "memory-settings-load")).toBeNull();
+    expect(byTestId(host, "operator-notice")).toBeNull();
+  });
+
+  it("읽는 동안은 스켈레톤이고 스위치가 아직 없다", async () => {
+    getMemorySettings.mockReturnValue(new Promise(() => undefined));
+    const { host } = await render("admin");
+    expect(host.querySelector('[data-testid="skeleton"][data-ready="false"]')).not.toBeNull();
+    expect(byTestId(host, "memory-workspace-enabled")).toBeNull();
   });
 
   it("서버가 기억을 모르면(404) 미제공 사유를 말하고 다시 시도는 없다", async () => {

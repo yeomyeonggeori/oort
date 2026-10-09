@@ -11,6 +11,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import {useCallback, useEffect, useMemo, useRef} from 'react';
+import {AppState} from 'react-native';
 import {useRealtime} from '../../../realtime/RealtimeProvider';
 import {useChannels} from '../../workspace/queries';
 
@@ -61,6 +62,29 @@ export function useTeamBoardList(workspaceId: string, enabled: boolean) {
     [query.data],
   );
   return {...query, items};
+}
+
+/**
+ * 앱이 앞으로 돌아오면 보드를 다시 읽는다. 단계(`include=runs`)에는 realtime이 없고(ADR-0162
+ * 증보 3 D11), 포커스 재조회는 알림 배너 하나로도 포커스가 돌아서 꺼 두었으므로(queryClient)
+ * 이 화면만 따로 걸어 둔다. 가려진 층(`active=false`)이면 걸지 않는다 - 다시 보일 때 낡은
+ * 쿼리가 스스로 읽는다. 「즉시」를 약속하지 않는다: 돌아온 뒤의 읽기 한 번이다.
+ */
+export function useBoardForegroundRefresh(
+  workspaceId: string,
+  active: boolean,
+) {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!active || workspaceId === '') return;
+    const sub = AppState.addEventListener('change', status => {
+      if (status !== 'active') return;
+      void queryClient.invalidateQueries({
+        queryKey: teamBoardKey(workspaceId),
+      });
+    });
+    return () => sub.remove();
+  }, [active, queryClient, workspaceId]);
 }
 
 /**
