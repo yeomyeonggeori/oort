@@ -102,17 +102,13 @@ export function agentTableRows(
   });
 }
 
-// ---- 만들기 3종 ---------------------------------------------------------------
+// ---- 만들기 2종 (구독 에이전트 만들기는 ADR-0198로 걷었다. 구독은 「내 도구」) ----
 
-export type CreateKindId = "team" | "mySubscription" | "external";
-
-/** 입구 상태 (`useSubscriptionEntryState` 와 같은 갈래). */
-export type SubscriptionEntry = "pending" | "denied" | "hidden" | "rows" | "desktop-only" | "server-off";
+export type CreateKindId = "team" | "external";
 
 export interface CreateKindInput {
   /** 소유자·관리자인가 (`canCreateAgentNow`: 서버 `routes::agents::create` 의 관문). */
   mayCreate: boolean;
-  subscription: SubscriptionEntry;
   /** 외부 에이전트 초대(`hostedAgentPairing`)가 이 빌드·서버에 있는가. */
   externalProvided: boolean;
 }
@@ -121,7 +117,7 @@ export interface CreateKindOption {
   id: CreateKindId;
   title: string;
   description: string;
-  /** 누가·어디서 하나: 운영자 / 데스크탑 / 소유자·관리자. */
+  /** 누가 하나: 소유자·관리자. */
   audience: string;
   /** `available` 만 누를 수 있다. 나머지는 사유를 들고 잠긴다. */
   state: "available" | "locked";
@@ -133,24 +129,6 @@ export interface CreateKindOption {
 export function createKindOptions(input: CreateKindInput): CreateKindOption[] {
   const kinds = AI_HUB_COPY.createKinds;
   const deniedReason = input.mayCreate ? null : COPY.create.denied;
-
-  const subscription: Pick<CreateKindOption, "state" | "reason" | "desktopHint"> = (() => {
-    if (!input.mayCreate || input.subscription === "denied") {
-      return { state: "locked", reason: COPY.create.denied, desktopHint: false };
-    }
-    switch (input.subscription) {
-      case "rows":
-        return { state: "available", reason: null, desktopHint: false };
-      case "desktop-only":
-        return { state: "locked", reason: COPY.create.webReason, desktopHint: true };
-      case "pending":
-        return { state: "locked", reason: COPY.create.pending, desktopHint: false };
-      case "server-off":
-        return { state: "locked", reason: COPY.create.serverOff, desktopHint: false };
-      case "hidden":
-        return { state: "locked", reason: COPY.create.unavailable, desktopHint: false };
-    }
-  })();
 
   const external: Pick<CreateKindOption, "state" | "reason" | "desktopHint"> =
     deniedReason !== null
@@ -167,7 +145,6 @@ export function createKindOptions(input: CreateKindInput): CreateKindOption[] {
       reason: deniedReason,
       desktopHint: false,
     },
-    { id: "mySubscription", ...kinds.mySubscription, ...subscription },
     { id: "external", ...kinds.external, ...external },
   ];
 }

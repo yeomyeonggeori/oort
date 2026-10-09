@@ -12716,7 +12716,6 @@ async function captureAiReentryScenes(browser, scheme) {
     { name: "settings-rows", hash: "/settings?section=ai&aiEntry=rows", ready: "subscription-entry-open" },
     { name: "settings-web", hash: "/settings?section=ai&aiEntry=desktop-only", ready: "subscription-entry" },
     { name: "settings-server-off", hash: "/settings?section=ai&aiEntry=server-off", ready: "subscription-entry" },
-    { name: "hub-rows", hash: "/agents?aiEntry=rows", ready: "agent-hub-subscription-entry" },
     { name: "stage-sub-ready", hash: "/ai-connect?from=settings&firstAgent=sub-ready", ready: "ai-connect-reentry-back" },
     { name: "stage-server-off", hash: "/ai-connect?from=agents&firstAgent=server-off", ready: "first-agent-server-off" },
     { name: "stage-sub-connect", hash: "/ai-connect?from=agents&firstAgent=sub-connect", ready: "first-agent-connect-command" },

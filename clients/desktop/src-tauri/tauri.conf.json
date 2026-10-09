@@ -55,6 +55,12 @@
       "entitlements": "Entitlements.plist",
       "files": {
         "Helpers/momo-workd.app": "binaries/momo-workd.app"
+      },
+      "dmg": {
+        "background": "dmg/background.tiff",
+        "windowSize": { "width": 660, "height": 432 },
+        "appPosition": { "x": 180, "y": 185 },
+        "applicationFolderPosition": { "x": 480, "y": 185 }
       }
     },
     "icon": [

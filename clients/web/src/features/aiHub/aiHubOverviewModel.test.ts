@@ -34,7 +34,7 @@ describe("내 AI 계정 카드", () => {
         { id: "codex" as const, installed: true, auth: "needs_login" as const },
       ],
     };
-    expect(texts(accountsCard(input))).toEqual(["Claude Code 준비됨", "Codex 로그인 필요"]);
+    expect(texts(accountsCard(input))).toEqual(["Claude Code 연결됨", "Codex 다시 인증"]);
     expect(loginNudge(input)).toBe(true);
   });
 

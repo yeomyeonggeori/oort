@@ -445,3 +445,54 @@ describe("로그인 명령은 로그인 모달만 띄운다", () => {
     expect(SOURCES["./loginController.ts"]).toMatch(/kind:\s*"login"/);
   });
 });
+
+// ---- 「내 도구」 카드(#3568)가 컨트롤러를 들고 있어도 같은 규율이다 ---------------------
+
+const TOOLS_SOURCES = import.meta.glob(
+  ["../../aiHub/tools/*.ts", "../../aiHub/tools/*.tsx", "!../../aiHub/tools/*.test.ts", "!../../aiHub/tools/*.test.tsx"],
+  { query: "?raw", import: "default", eager: true }
+) as Record<string, string>;
+
+describe("내 도구 카드·보관소는 PTY 출력에 닿지 않고 새 PTY 입구를 만들지 않는다", () => {
+  const find = (suffix: string) => Object.entries(TOOLS_SOURCES).find(([name]) => name.endsWith(suffix))?.[1];
+
+  it("covers the session store and the card", () => {
+    expect(find("/harnessSessionStore.ts")).toBeDefined();
+    expect(find("/HarnessCard.tsx")).toBeDefined();
+    expect(find("/MyToolsPane.tsx")).toBeDefined();
+  });
+
+  it("no decoder, storage, console, network or credential name in the card and the store", () => {
+    for (const suffix of ["/harnessSessionStore.ts", "/HarnessCard.tsx", "/MyToolsPane.tsx"]) {
+      const code = (find(suffix) ?? "").replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+      for (const needle of [
+        "TextDecoder",
+        "fromCharCode",
+        "localStorage",
+        "sessionStorage",
+        "indexedDB",
+        "console.",
+        "XMLHttpRequest",
+        "sendBeacon",
+        "loadScrollback",
+        ".credentials.json",
+        "auth.json",
+        "Claude Code-credentials",
+      ]) {
+        expect(code.includes(needle), `${suffix} uses ${needle}`).toBe(false);
+      }
+      // `refetch(`(질의 다시 읽기)는 네트워크 호출이 아니다: 낱말 경계로 센다.
+      expect(/(^|[^A-Za-z])fetch\(/.test(code), `${suffix} calls fetch(`).toBe(false);
+    }
+  });
+
+  it("the store opens PTYs only through the two controllers and builds no program itself", () => {
+    for (const [name, src] of Object.entries(TOOLS_SOURCES)) {
+      expect(/createLocalSessions\(/.test(src), `${name} makes its own session manager`).toBe(false);
+      expect(/kind:\s*"(login|logout|remoteLogin)"/.test(src), `${name} builds a login/logout program`).toBe(false);
+    }
+    const store = find("/harnessSessionStore.ts") ?? "";
+    expect(store).toContain("createLoginController(");
+    expect(store).toContain("createUnlinkController(");
+  });
+});

@@ -17,7 +17,8 @@
 // 펼칠 때만 그 화면에 보인다.
 // =============================================================================
 
-import type { LocalHarnessId } from "@momo/core/features/hostedAgents/detect";
+import type { LocalHarnessId, LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
+import { disconnectVerdict } from "@momo/core/features/ai/harnessCard";
 import {
   HARNESS_LOGOUT_TIMEOUT_MS,
   unlinkAfterExit,
@@ -33,11 +34,23 @@ import {
   type PtyPort,
 } from "@/features/workbench/local/localSessions";
 
+/**
+ * 로그아웃 대상. `label`이 null이면 이 맥의 기본 로그인이다(「내 도구」 카드의 연결 끊기,
+ * ADR-0198 D3): 같은 공식 로그아웃 행을 기본 위치에서 돌리고, 폴더를 지우는 대신
+ * `verify`(셸 상태 명령)로 **로그인 아님**을 확인해야 끝난다.
+ */
+export interface UnlinkTarget {
+  harness: LocalHarnessId;
+  label: string | null;
+}
+
 export interface UnlinkControllerDeps {
   pty: PtyPort;
   loadMirror: () => Promise<MirrorFactory>;
-  /** 셸 `harness_profile_remove`. 셸이 상태를 다시 묻고 지울지 정한다. */
+  /** 셸 `harness_profile_remove`. 셸이 상태를 다시 묻고 지울지 정한다(프로필 대상). */
   remove: (profile: HarnessProfileRef) => Promise<ProfileRemoveOutcome>;
+  /** 셸 상태 명령(`detect_local_harnesses`). 기본 로그인 대상의 로그아웃 확인에 쓴다. */
+  verify?: () => Promise<LocalHarnessProbe[]>;
   setTimer?: (run: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
 }
@@ -52,7 +65,8 @@ export interface UnlinkControllerState {
 const HIDDEN_COLS = 80;
 const HIDDEN_ROWS = 24;
 
-export function createUnlinkController(profile: HarnessProfileRef, deps: UnlinkControllerDeps) {
+export function createUnlinkController(target: UnlinkTarget, deps: UnlinkControllerDeps) {
+  const profile = target.label === null ? null : { harness: target.harness, label: target.label };
   const setTimer = deps.setTimer ?? ((run, ms) => setTimeout(run, ms));
   const clearTimer =
     deps.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
@@ -66,7 +80,7 @@ export function createUnlinkController(profile: HarnessProfileRef, deps: UnlinkC
 
   let attempt = 0;
   let state: UnlinkControllerState = {
-    harness: profile.harness,
+    harness: target.harness,
     paneId: "",
     status: { phase: "confirm" },
   };
@@ -113,6 +127,18 @@ export function createUnlinkController(profile: HarnessProfileRef, deps: UnlinkC
           settle(next);
           return;
         }
+        if (profile === null) {
+          // 기본 로그인: 로그아웃이 0으로 끝난 것만으로는 끊겼다고 하지 않는다.
+          // 상태 명령이 로그인 아님을 알린 뒤에만 끝난다(`disconnectVerdict`).
+          stopTimer();
+          set({ status: next });
+          const exit = view.exit;
+          void (deps.verify ? deps.verify() : Promise.reject(new Error("no verify"))).then(
+            (probes) => settle(fromVerdict(disconnectVerdict(target.harness, exit, probes))),
+            () => settle({ phase: "failed", reason: "unknown" })
+          );
+          return;
+        }
         // 로그아웃이 끝났다. 시간 제한은 여기서 멈춘다(셸의 삭제는 상태 명령
         // 한도 안에서 끝난다).
         stopTimer();
@@ -132,11 +158,12 @@ export function createUnlinkController(profile: HarnessProfileRef, deps: UnlinkC
       if (id !== null) void deps.pty.kill(id).catch(() => undefined);
     }, HARNESS_LOGOUT_TIMEOUT_MS);
 
-    sessions.setPendingProgram(paneId, {
-      kind: "logout",
-      id: profile.harness,
-      profile: profile.label,
-    });
+    sessions.setPendingProgram(
+      paneId,
+      profile === null
+        ? { kind: "logout", id: target.harness }
+        : { kind: "logout", id: profile.harness, profile: profile.label }
+    );
     void sessions.ensure(paneId, HIDDEN_COLS, HIDDEN_ROWS).catch(() => {
       settle({ phase: "failed", reason: "spawn" });
     });
@@ -159,7 +186,7 @@ export function createUnlinkController(profile: HarnessProfileRef, deps: UnlinkC
       if (phase !== "confirm" && phase !== "failed") return;
       // 로그아웃은 이미 됐고 폴더 정리만 실패했다: 로그아웃을 다시 돌리지 않고
       // 정리만 다시 묻는다(셸이 여전히 상태를 확인한 뒤에만 지운다).
-      if (current.phase === "failed" && current.reason === "remove-failed") {
+      if (profile !== null && current.phase === "failed" && current.reason === "remove-failed") {
         const mine = ++attempt;
         set({ status: { phase: "removing" } });
         void deps.remove(profile).then(
@@ -187,6 +214,20 @@ export function createUnlinkController(profile: HarnessProfileRef, deps: UnlinkC
       listeners.clear();
     },
   };
+}
+
+function fromVerdict(verdict: ReturnType<typeof disconnectVerdict>): UnlinkPhase {
+  if (verdict.phase === "done") return { phase: "done" };
+  if (verdict.phase !== "failed") return { phase: "failed", reason: "unknown" };
+  switch (verdict.reason) {
+    case "still-logged-in":
+      return { phase: "failed", reason: "still-signed-in" };
+    case "logout-failed":
+    case "spawn":
+    case "timeout":
+    case "unknown":
+      return { phase: "failed", reason: verdict.reason };
+  }
 }
 
 export type UnlinkController = ReturnType<typeof createUnlinkController>;
