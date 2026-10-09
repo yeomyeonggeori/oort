@@ -212,7 +212,7 @@ export const PERSONAL_AGENT_COPY = {
   off: "꺼 둔 개인 에이전트",
   unavailable: "이 서버에서는 아직 개인 에이전트를 켤 수 없어요. 서버가 업데이트되면 열려요.",
   loadFailed: "개인 에이전트 상태를 읽지 못했어요.",
-  needsLogin: "먼저 이 도구를 연결해야 켤 수 있어요.",
+  retry: "다시 불러오기",
 } as const;
 
 export function personalAgentErrorLine(code: string | null): string {
@@ -229,3 +229,28 @@ export function personalAgentErrorLine(code: string | null): string {
       return "개인 에이전트를 바꾸지 못했어요. 잠시 뒤 다시 시도해 주세요.";
   }
 }
+
+// ---- 카드 문장 --------------------------------------------------------------------
+
+export const TOOLS_COPY = {
+  title: "내 도구",
+  cardMeaning: "내 맥에 로그인한 Claude Code·Codex 구독과 내 API 키. 나만 써요.",
+  desktopSubtitle: "내 맥에 로그인한 구독 CLI예요. 나만 쓰고, 로그인은 각 회사의 공식 CLI가 해요.",
+  webSubtitle: "내 맥의 호스트 상태와 개인 에이전트를 볼 수 있어요. 로그인은 데스크탑 앱에서 해요.",
+  webLoginNote: "로그인 상태는 내 맥에서 확인해요.",
+  login: "로그인",
+  reconnect: "다시 인증",
+  open: "로그인 창 열기",
+  cancel: "로그인 취소",
+  disconnect: "연결 끊기",
+  disconnectConfirm: "연결 끊기",
+  disconnectKeep: "그대로 두기",
+  disconnectWarn: "이 맥의 공식 CLI에서 로그아웃해요. 터미널에서 쓰던 로그인도 같이 풀려요.",
+  retry: "다시 시도",
+  dismiss: "닫기",
+  registerHost: "설정에서 이 맥 등록하기",
+  notInstalled: "이 맥에서 설치를 찾지 못했어요. 설치한 뒤 다시 열어 주세요.",
+  checkFailed: "공식 CLI가 답하지 않아 로그인 상태를 모르겠어요.",
+  loginNotStored: "oort는 로그인 정보를 보지 않아요. 상태 명령의 종료 코드만 읽어요.",
+  hostHead: "작업 호스트",
+} as const;

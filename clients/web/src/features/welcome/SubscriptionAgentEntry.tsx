@@ -1,13 +1,10 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchWorkspace } from "@momo/core/features/settings/api";
 import {
-  SUBSCRIPTION_ENTRY_ACTION,
   subscriptionSurface,
   type SubscriptionSurface,
 } from "@momo/core/features/onboarding/aiConnect";
 import { useSession } from "@/app/session";
-import { Button } from "@/design/ui/button";
 import { IS_TAURI, SUBSCRIPTION_AGENTS_BUILD_FLAG } from "@/lib/env";
 import { canCreateAgentNow } from "@/features/agentHub/createModel";
 import {
@@ -15,8 +12,6 @@ import {
   useDirectory,
   workspaceIdentityKey,
 } from "@/features/workspace/useWorkspace";
-import { SubscriptionAgentStart } from "./harnessLogin/SubscriptionAgentStart";
-import type { AiConnectReentryFrom } from "./aiConnectReentry";
 
 // =============================================================================
 // 구독 줄 재진입 입구 (#2870, RCA 1-b·1-c).
@@ -89,26 +84,4 @@ export function useSubscriptionEntryState(): SubscriptionEntryState {
     buildFlag: SUBSCRIPTION_AGENTS_BUILD_FLAG,
     serverEnabled: workspace.data ? workspace.data.subscriptionAgentsEnabled : null,
   });
-}
-
-/** 에이전트 화면 머리 버튼. 구독 줄이 설 때만 선다(이유 문장은 설정이 진다). */
-export function SubscriptionAgentEntryButton({ from }: { from: AiConnectReentryFrom }) {
-  const [open, setOpen] = useState(false);
-  if (useSubscriptionEntryState() !== "rows") return null;
-  return (
-    <>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="tap-target"
-        onClick={() => setOpen(true)}
-        data-from={from}
-        data-testid="agent-hub-subscription-entry"
-      >
-        {SUBSCRIPTION_ENTRY_ACTION}
-      </Button>
-      {open && <SubscriptionAgentStart open onClose={() => setOpen(false)} />}
-    </>
-  );
 }

@@ -12,6 +12,7 @@ import {
   type AiGlossaryId,
   type AiHubSectionId,
 } from "@momo/core/features/ai/aiHubModel";
+import { TOOLS_COPY } from "@momo/core/features/ai/harnessCard";
 
 // =============================================================================
 // 허브 개요 카드의 상태 문장 (AIH-3, #3393).
@@ -70,6 +71,8 @@ const HARNESS_BY_PROBE = { claude: "claude_code", codex: "codex" } as const;
 export function accountsCard(input: AccountsInput): HubCardView {
   const base = {
     ...head("accounts", "myAiAccount"),
+    title: TOOLS_COPY.title,
+    meaning: TOOLS_COPY.cardMeaning,
     badge: COPY.cardBadge.accounts,
     linkLabel: COPY.openLink.accounts,
   };
