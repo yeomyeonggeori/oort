@@ -427,6 +427,10 @@ export async function putWorkTierPolicy(
  * host's signing identity, not something an operator acts on, and a settings
  * row is not a key dump. Revoked rows stay in the list (the server does not
  * filter them), which is why the panel has a 해지됨 state.
+ *
+ * Someone else's personal host (`scope=member`, owner is not the viewer) is
+ * presence only (ADR-0188 증보, #3583): `displayName` is a generic "<owner>의 맥",
+ * and `publicKey`/`capabilities` are absent. Nothing reads them off such a row.
  */
 export interface WorkHost {
   id: string;
@@ -435,8 +439,10 @@ export interface WorkHost {
   ownerMemberId: string;
   type: string;
   displayName: string;
-  publicKey: string;
-  capabilities: Record<string, boolean>;
+  /** 남의 개인 호스트(`scope=member`, 주인이 내가 아님) 행에는 없다(ADR-0188 증보, #3583). */
+  publicKey?: string;
+  /** `publicKey`와 같다. 남의 개인 호스트 행에는 없다. */
+  capabilities?: Record<string, boolean>;
   lastSeenAtMs?: number;
   revokedAtMs?: number;
   createdAtMs: number;

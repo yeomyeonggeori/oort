@@ -166,6 +166,11 @@ pub struct HumanSignatureColumns {
     pub spawn_agent_member_id: Option<Uuid>,
     /// `spawn` only.
     pub spawn_folder_id: Option<String>,
+    /// New-work `spawn` only (#3570, migration 122): the thread the owner
+    /// called from.
+    pub spawn_thread_root_id: Option<Uuid>,
+    /// New-work `spawn` only: the message the owner called from.
+    pub spawn_origin_message_id: Option<Uuid>,
     /// Canonical low-s raw `r‖s`, base64.
     pub signature: String,
 }
@@ -218,6 +223,8 @@ const CONTROL_COLUMNS: &str = "id, \
      human_scope, \
      human_spawn_agent_member_id, \
      human_spawn_folder_id, \
+     human_spawn_thread_root_id, \
+     human_spawn_origin_message_id, \
      human_signature";
 
 fn decode_control(row: &sqlx::postgres::PgRow) -> Result<WorkControlRow, sqlx::Error> {
@@ -254,6 +261,8 @@ fn decode_human(row: &sqlx::postgres::PgRow) -> Result<Option<HumanSignatureColu
         scope: row.try_get("human_scope")?,
         spawn_agent_member_id: row.try_get("human_spawn_agent_member_id")?,
         spawn_folder_id: row.try_get("human_spawn_folder_id")?,
+        spawn_thread_root_id: row.try_get("human_spawn_thread_root_id")?,
+        spawn_origin_message_id: row.try_get("human_spawn_origin_message_id")?,
         signature,
     }))
 }
@@ -424,9 +433,11 @@ pub async fn insert_work_control_in_tx(
             session_id, kind, payload, status, \
             device_key_id, human_instance_id, human_nonce, human_issued_at_ms, \
             human_expires_at_ms, human_mode, human_scope, \
-            human_spawn_agent_member_id, human_spawn_folder_id, human_signature) \
+            human_spawn_agent_member_id, human_spawn_folder_id, \
+            human_spawn_thread_root_id, human_spawn_origin_message_id, \
+            human_signature) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, \
-                 $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) \
+                 $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) \
          RETURNING {CONTROL_COLUMNS}"
     );
     let human = new.human.as_ref();
@@ -448,6 +459,8 @@ pub async fn insert_work_control_in_tx(
         .bind(human.and_then(|h| h.scope.as_deref()))
         .bind(human.and_then(|h| h.spawn_agent_member_id))
         .bind(human.and_then(|h| h.spawn_folder_id.as_deref()))
+        .bind(human.and_then(|h| h.spawn_thread_root_id))
+        .bind(human.and_then(|h| h.spawn_origin_message_id))
         .bind(human.map(|h| h.signature.as_str()))
         .fetch_one(&mut *conn)
         .await?;
@@ -514,6 +527,12 @@ pub async fn fetch_work_control_in_tx(
 /// `session_id` is NULL for a spawn, so a spawn is never withheld: it names no
 /// session yet, and the one it will create is not the one anybody is typing
 /// into.
+///
+/// One exception (#3628, ADR-0198 N4): a `kill` asked for by the **session's owner
+/// who is also the member host's owner** (requester = session owner = host owner)
+/// is never withheld. The window is the owner's own keyboard on the owner's own
+/// screen, and 「즉시 멈추기」 must not wait for the lease to lapse; an agent's
+/// `kill` (a different requester) stays withheld as before (증보 3 D3).
 ///
 /// ## ADR-0188 R0.1 (#2582) — what a remote host may be handed at all
 ///
@@ -583,12 +602,26 @@ pub async fn pending_controls_for_host_in_tx(
                  AND h.workspace_id = work_control.workspace_id \
                  AND h.revoked_at IS NULL \
             ) \
-            AND NOT EXISTS ( \
-              SELECT 1 FROM display_control_window w \
-               WHERE w.workspace_id = work_control.workspace_id \
-                 AND w.work_session_id = work_control.session_id \
-                 AND w.ended_at IS NULL \
-                 AND w.lease_expires_at > clock_timestamp() \
+            AND ( \
+              (work_control.kind = '{KIND_KILL}' AND EXISTS ( \
+                 SELECT 1 FROM work_host h \
+                  WHERE h.id = work_control.target_host_id \
+                    AND h.workspace_id = work_control.workspace_id \
+                    AND h.scope = '{HOST_SCOPE_MEMBER}' \
+                    AND h.owner_member_id = work_control.requester_member_id \
+              ) AND EXISTS ( \
+                 SELECT 1 FROM work_session s \
+                  WHERE s.id = work_control.session_id \
+                    AND s.workspace_id = work_control.workspace_id \
+                    AND s.member_id = work_control.requester_member_id \
+              )) \
+              OR NOT EXISTS ( \
+                SELECT 1 FROM display_control_window w \
+                 WHERE w.workspace_id = work_control.workspace_id \
+                   AND w.work_session_id = work_control.session_id \
+                   AND w.ended_at IS NULL \
+                   AND w.lease_expires_at > clock_timestamp() \
+              ) \
             ) \
             AND NOT EXISTS ( \
               SELECT 1 FROM work_host h \
@@ -1006,18 +1039,19 @@ pub async fn target_work_host_in_tx(
     host_id: Uuid,
 ) -> Result<Option<TargetWorkHost>, T3Error> {
     use sqlx::Row as _;
-    let row = sqlx::query(
+    let sql = format!(
         "SELECT scope, owner_member_id, type AS host_type, display_name, \
-                COALESCE(last_seen_at >= clock_timestamp() - make_interval(secs => 90), false) \
-                  AS online \
+                {online} AS online \
            FROM work_host \
           WHERE id = $2 AND workspace_id = $1 AND revoked_at IS NULL \
           FOR SHARE",
-    )
-    .bind(workspace_id)
-    .bind(host_id)
-    .fetch_optional(&mut *conn)
-    .await?;
+        online = momo_wire::work_host_online_sql("")
+    );
+    let row = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(host_id)
+        .fetch_optional(&mut *conn)
+        .await?;
     let Some(row) = row else { return Ok(None) };
     Ok(Some(TargetWorkHost {
         scope: row.try_get("scope")?,
@@ -1342,6 +1376,28 @@ fn claude_launch_commands() -> Vec<String> {
         .collect()
 }
 
+/// #3570 (T5): is `tool` Claude Code in this workspace — the seeded key or a
+/// profile whose launch command is one (the same test the shared-host pause
+/// uses, so a renamed key cannot dodge a personal agent's harness check).
+pub async fn tool_is_claude_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    tool: &str,
+) -> Result<bool, T3Error> {
+    let sql = format!(
+        "SELECT {claude}",
+        claude = claude_tool_sql("$1", "$2", "$3", "$4"),
+    );
+    let claude: bool = sqlx::query_scalar(&sql)
+        .bind(workspace_id)
+        .bind(tool)
+        .bind(claude_launch_commands())
+        .bind(claude_launchers())
+        .fetch_one(&mut *conn)
+        .await?;
+    Ok(claude)
+}
+
 /// #3431 — is `tool` Claude Code **and** `host_id` a shared host (any scope but
 /// `member`: the admin-registered workspace host and every cloud host)?
 ///
@@ -1593,7 +1649,8 @@ pub async fn session_control_lineage_status_in_tx(
 
 /// Swift `requireSpawnAckSession` (:1066-1107): a successful spawn ack must bind
 /// a **running** session on the same channel and host, owned by the requesting
-/// agent's human owner (or, for a human-requested resume, by the requester).
+/// agent's human owner (or, for a human-requested resume or a signed new-work
+/// spawn, by the requester).
 pub async fn spawn_ack_session_matches_in_tx(
     conn: &mut PgConnection,
     control: &WorkControlRow,
@@ -1622,7 +1679,7 @@ pub async fn spawn_ack_session_matches_in_tx(
               OR ( \
                 requester.kind = 'human' \
                 AND ws.member_id = requester.id \
-                AND ws.resumed_from_session_id IS NOT NULL \
+                AND (ws.resumed_from_session_id IS NOT NULL OR $7::boolean) \
               ) \
             ) \
           LIMIT 1",
@@ -1633,6 +1690,9 @@ pub async fn spawn_ack_session_matches_in_tx(
     .bind(control.target_host_id)
     .bind(control.requester_member_id)
     .bind(control.session_id)
+    // #3570: the owner's signed new-work spawn creates its session fresh (not
+    // a resume); the marker is the control's own prompt and signature.
+    .bind(control.human.is_some() && control.payload.get("prompt").is_some())
     .fetch_optional(&mut *conn)
     .await?;
     Ok(found.is_some())
@@ -1691,7 +1751,114 @@ pub async fn dispatched_spawn_owner_in_tx(
     .bind(label)
     .fetch_optional(&mut *conn)
     .await?;
+    if owner.is_some() {
+        return Ok(owner);
+    }
+    // #3570 (T5): the owner's own signed new-work spawn. The requester is a
+    // human, not an agent, so the arm above cannot see it. The session's
+    // owner is that human — and only when everything that makes the control
+    // theirs holds on the rows this transaction reads: it carries their
+    // device signature and a prompt (the v4 marker, migration 122), and the
+    // host it is addressed to is their own live member host. Nothing a host
+    // sends picks the owner.
+    let owner: Option<Uuid> = sqlx::query_scalar(
+        "SELECT requester.id \
+           FROM work_control wc \
+           JOIN member requester \
+             ON requester.id = wc.requester_member_id \
+            AND requester.workspace_id = wc.workspace_id \
+            AND requester.kind = 'human' \
+            AND requester.status = 'active' \
+            AND requester.deleted_at IS NULL \
+           JOIN work_host h \
+             ON h.id = wc.target_host_id \
+            AND h.workspace_id = wc.workspace_id \
+            AND h.scope = 'member' \
+            AND h.owner_member_id = wc.requester_member_id \
+            AND h.revoked_at IS NULL \
+          WHERE wc.id = $1 \
+            AND wc.workspace_id = $2 \
+            AND wc.channel_id = $3 \
+            AND wc.target_host_id = $4 \
+            AND wc.kind = 'spawn' \
+            AND wc.status = 'dispatched' \
+            AND wc.session_id IS NULL \
+            AND wc.human_signature IS NOT NULL \
+            AND wc.payload ? 'prompt' \
+            AND wc.payload->>'tool' = $5 \
+            AND wc.payload->>'label' = $6 \
+          FOR SHARE OF wc",
+    )
+    .bind(control_id)
+    .bind(workspace_id)
+    .bind(channel_id)
+    .bind(host_id)
+    .bind(tool)
+    .bind(label)
+    .fetch_optional(&mut *conn)
+    .await?;
     Ok(owner)
+}
+
+/// Where the owner called a new task from, and as whom its session speaks
+/// (ADR-0198 증보 1 「T5 확정」 6, #3592 P1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpawnCall {
+    /// The personal agent (alias member) the signed statement named, **only**
+    /// when that member is the session owner's own live-or-switched-off
+    /// personal agent. The session's card, progress and answer are authored as
+    /// it. `None`: a harness spawn (「내 도구」) or an agent that is not a
+    /// personal agent, which keep speaking as the owner.
+    pub persona_member_id: Option<Uuid>,
+    /// The thread the owner called from (signed).
+    pub thread_root_id: Option<Uuid>,
+    /// The owner's own message the call came from (signed).
+    pub origin_message_id: Option<Uuid>,
+}
+
+/// The signed place and persona of the **owner's own new-work spawn** that
+/// `control_id` is. Everything is read from the control row the owner signed;
+/// nothing a host sent picks the author, so a host cannot speak as someone's
+/// alias (T5 확정 6). `None` when the control is not a signed new-work spawn of
+/// `owner_member_id` (an agent-requested spawn, a resume).
+///
+/// The alias need not be a member of the channel (결재 2026-10-08, 「소유자면
+/// 어디서나」), so no membership is read. A switched-off alias still speaks for
+/// a session the owner started before switching it off.
+pub async fn spawn_call_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    control_id: Uuid,
+    owner_member_id: Uuid,
+) -> Result<Option<SpawnCall>, T3Error> {
+    /// agent, thread root, origin message, and whether the agent is a personal agent.
+    type CallRow = (Option<Uuid>, Option<Uuid>, Option<Uuid>, bool);
+    let row: Option<CallRow> = sqlx::query_as(
+        "SELECT wc.human_spawn_agent_member_id, wc.human_spawn_thread_root_id, \
+                wc.human_spawn_origin_message_id, \
+                EXISTS (SELECT 1 FROM agent a \
+                          JOIN member m ON m.id = a.member_id AND m.workspace_id = a.workspace_id \
+                         WHERE a.workspace_id = wc.workspace_id \
+                           AND a.member_id = wc.human_spawn_agent_member_id \
+                           AND a.owner_human_id = wc.requester_member_id \
+                           AND a.invocation_scope = 'owner_only' AND a.personal_agent \
+                           AND m.kind = 'agent' AND m.deleted_at IS NULL \
+                           AND m.status::text <> 'deleted') AS is_personal \
+           FROM work_control wc \
+          WHERE wc.workspace_id = $1 AND wc.id = $2 AND wc.kind = 'spawn' \
+            AND wc.requester_member_id = $3 \
+            AND wc.human_signature IS NOT NULL AND wc.payload ? 'prompt'",
+    )
+    .bind(workspace_id)
+    .bind(control_id)
+    .bind(owner_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(row.map(|(agent, thread, origin, is_personal)| SpawnCall {
+        persona_member_id: agent.filter(|_| is_personal),
+        thread_root_id: thread,
+        origin_message_id: origin,
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -1874,22 +2041,22 @@ pub async fn spawn_host_candidates_in_tx(
     session_owner_member_id: Uuid,
 ) -> Result<Vec<SpawnHostCandidate>, T3Error> {
     use sqlx::Row as _;
-    let rows = sqlx::query(
+    let sql = format!(
         "SELECT id, display_name, type AS host_type, scope, owner_member_id, \
                 revoked_at IS NOT NULL AS revoked, \
-                (revoked_at IS NULL \
-                 AND COALESCE(last_seen_at >= clock_timestamp() \
-                                - make_interval(secs => 90), false)) AS online \
+                {online} AS online \
            FROM work_host \
           WHERE workspace_id = $1 \
             AND revoked_at IS NULL \
             AND (scope = 'workspace' OR owner_member_id = $2) \
           ORDER BY display_name, id",
-    )
-    .bind(workspace_id)
-    .bind(session_owner_member_id)
-    .fetch_all(&mut *conn)
-    .await?;
+        online = momo_wire::work_host_online_sql("")
+    );
+    let rows = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(session_owner_member_id)
+        .fetch_all(&mut *conn)
+        .await?;
 
     let mut candidates = Vec::with_capacity(rows.len());
     for row in &rows {
@@ -2124,7 +2291,14 @@ pub fn control_event_payload(
         },
     );
     body.insert("kind".into(), json!(control.kind));
-    body.insert("payload".into(), control.payload.clone());
+    // The room hears that a task started, never the owner's whole prompt
+    // (#3570): the prompt is for the host that runs it. The title (`label`) and
+    // the harness stay.
+    let mut room_payload = control.payload.clone();
+    if let Some(object) = room_payload.as_object_mut() {
+        object.remove("prompt");
+    }
+    body.insert("payload".into(), room_payload);
     if let Some(ok) = ok {
         body.insert("ok".into(), json!(ok));
         body.insert("status".into(), json!(control.status));

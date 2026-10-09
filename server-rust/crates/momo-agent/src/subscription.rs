@@ -69,6 +69,10 @@ pub const SUBSCRIPTION_NOTICE_AUDIT_SCHEMA: &str = "momo.agent.subscription_noti
 /// The mention skip reasons this ADR adds (`agent.mention.skipped`).
 pub const SKIP_OWNER_ONLY_NON_OWNER: &str = "owner_only_non_owner";
 pub const SKIP_SUBSCRIPTION_AGENTS_DISABLED: &str = "subscription_agents_disabled";
+/// ADR-0198 증보 1 D7 (#3592): the owner mentioned (or DM'd) their own personal
+/// agent. The server starts nothing — the owner's client sends a signed spawn
+/// for the owner's own Mac — so this is an audited no-op, not a delivery.
+pub const SKIP_PERSONAL_AGENT_CLIENT_SIGNS: &str = "personal_agent_client_signs";
 
 /// Which official CLI the owner runs (`agent.subscription_harness`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,6 +125,12 @@ pub struct OwnerOnlyScope {
     /// subscription kill switch (`subscription_agents_enabled`) does not apply
     /// to it — it governs subscription CLIs, and a personal key is neither.
     pub uses_owner_key: bool,
+    /// ADR-0198 증보 1 D7 (#3591): this agent is a **personal agent** — the
+    /// owner's connected harness under an alias. It never takes a hosted job:
+    /// the owner's client signs a spawn for the owner's own Mac, and the
+    /// instance switches below govern hosted subscription agents, not it
+    /// ([`owner_only_gate`]).
+    pub personal_agent: bool,
 }
 
 /// The three sentences (ADR-0193 D4·D5·D6).
@@ -201,6 +211,14 @@ pub fn owner_only_gate(
     let scope = scope?;
     if author_member_id != scope.owner_member_id {
         return Some(SubscriptionNoticeKind::NonOwner);
+    }
+    // ADR-0198 증보 1 「ADR-0193 D18」 table, row ①: a personal agent is not
+    // delivered to by the hosted path at all, so the two instance switches
+    // (`MOMO_SUBSCRIPTION_AGENTS_ENABLED`, `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`)
+    // do not apply — D7's own checks (signed spawn, member host, online) stand
+    // in for them. A teammate was refused above, first (#3626 L2).
+    if scope.personal_agent {
+        return None;
     }
     if !subscription_agents_enabled && !scope.uses_owner_key {
         return Some(SubscriptionNoticeKind::Disabled);
@@ -581,8 +599,23 @@ pub struct AgentReadFacts {
     pub owner: Option<(Uuid, String)>,
     /// `Some` only for an agent that dials in; see [`HOSTED_RECENTLY_SEEN_SQL`].
     pub host_online: Option<bool>,
-    /// Which official CLI a subscription agent runs; `None` for every other agent.
+    /// Which official CLI a subscription agent runs; `None` for every other agent
+    /// and for a personal agent (#3591: the Claude opt-in does not govern D7).
     pub subscription_harness: Option<SubscriptionHarness>,
+    /// #3591 (ADR-0198 증보 1 D7): set for a personal agent.
+    pub personal: Option<PersonalAgentFacts>,
+    /// #3567 (ADR-0198 증보 1 D2): the 「이전 구독 에이전트」 marker. Set by the
+    /// retirement tool (`agent.subscription_retired_at`); the member is
+    /// suspended and keeps every past message.
+    pub subscription_retired: bool,
+}
+
+/// What the roster says about a personal agent (#3591).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PersonalAgentFacts {
+    pub harness: SubscriptionHarness,
+    /// `member.status = 'active'`: not switched off, not suspended.
+    pub enabled: bool,
 }
 
 /// `brainUnavailableReason` for a Claude subscription agent on an instance that
@@ -615,6 +648,8 @@ pub async fn load_agent_read_facts_in_tx(
     let sql = format!(
         "SELECT m.id AS agent_id, a.invocation_scope, a.subscription_harness, a.model_source, \
                 a.owner_human_id, a.uses_owner_key, \
+                a.personal_agent, (m.status = 'active') AS member_active, \
+                (a.subscription_retired_at IS NOT NULL) AS subscription_retired, \
                 COALESCE(a.config->>'execution_mode', '') = 'hosted_dial_in' AS config_hosted, \
                 EXISTS (SELECT 1 FROM hosted_agent_connection hc \
                          WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
@@ -644,14 +679,27 @@ pub async fn load_agent_read_facts_in_tx(
         let has_connection: bool = row.try_get("has_connection")?;
         let config_hosted: bool = row.try_get("config_hosted")?;
         let is_card: bool = row.try_get("is_card")?;
-        let hosted = has_connection || config_hosted;
+        // #3567: a converted agent keeps its (expired) connection row, but it is
+        // not a hosted runtime any more — its brain is the owner's harness on the
+        // owner's member host, never an Agent Port dial-in.
+        let personal_row: bool = row.try_get("personal_agent")?;
+        let hosted = !personal_row && (has_connection || config_hosted);
         let owner_id: Option<Uuid> = row.try_get("owner_human_id")?;
         let owner_name: Option<String> = row.try_get("owner_display_name")?;
         let owner_only = scope == INVOCATION_SCOPE_OWNER_ONLY;
         let uses_owner_key: bool = row.try_get("uses_owner_key")?;
         // A subscription agent dials in from the owner's machine; a personal-key
         // agent is served by the server worker and has no host to be online.
-        let subscription = owner_only && !uses_owner_key;
+        let personal: bool = row.try_get("personal_agent")?;
+        let member_active: bool = row.try_get("member_active")?;
+        // #3591: a personal agent runs on the owner's member host (signed spawn),
+        // never through the Agent Port, so the hosted liveness heuristic and the
+        // Claude opt-in say nothing about it.
+        let subscription = owner_only && !uses_owner_key && !personal;
+        let harness = row
+            .try_get::<Option<String>, _>("subscription_harness")?
+            .as_deref()
+            .and_then(SubscriptionHarness::parse);
         facts.push(AgentReadFacts {
             agent_member_id: row.try_get("agent_id")?,
             brain: derive_brain(&scope, hosted, is_card, &model_source, uses_owner_key),
@@ -660,18 +708,20 @@ pub async fn load_agent_read_facts_in_tx(
                 (true, Some(id), Some(name)) => Some((id, name)),
                 _ => None,
             },
-            subscription_harness: if subscription {
-                row.try_get::<Option<String>, _>("subscription_harness")?
-                    .as_deref()
-                    .and_then(SubscriptionHarness::parse)
-            } else {
-                None
+            subscription_harness: if subscription { harness } else { None },
+            personal: match (personal, harness) {
+                (true, Some(harness)) => Some(PersonalAgentFacts {
+                    harness,
+                    enabled: member_active,
+                }),
+                _ => None,
             },
-            host_online: if hosted || subscription {
+            host_online: if !personal && (hosted || subscription) {
                 Some(row.try_get("host_online")?)
             } else {
                 None
             },
+            subscription_retired: row.try_get("subscription_retired")?,
         });
     }
     Ok(facts)
@@ -899,6 +949,7 @@ mod tests {
             recently_seen: true,
             reconnectable: false,
             uses_owner_key: false,
+            personal_agent: false,
         }
     }
 
@@ -925,6 +976,37 @@ mod tests {
         assert_eq!(owner_only_gate(Some(&s), owner, true, true), None);
         assert_eq!(
             owner_only_gate(Some(&s), owner, false, true),
+            Some(SubscriptionNoticeKind::Disabled)
+        );
+    }
+
+    /// ADR-0198 증보 1 「D18 표」 ① (#3626 L2): a personal agent is not decided by
+    /// the two instance switches, but a teammate is still refused first.
+    /// Fails if the personal arm is dropped or moved above the owner check.
+    #[test]
+    fn the_gate_leaves_a_personal_agent_to_d7_and_still_refuses_a_teammate_first() {
+        let owner = Uuid::from_u128(1);
+        let other = Uuid::from_u128(2);
+        let personal = OwnerOnlyScope {
+            personal_agent: true,
+            ..scope(owner)
+        };
+        for (subscription, claude) in [(false, false), (true, false), (false, true), (true, true)] {
+            assert_eq!(
+                owner_only_gate(Some(&personal), owner, subscription, claude),
+                None,
+                "the owner of a personal agent is never refused by an instance switch \
+                 ({subscription}, {claude})"
+            );
+            assert_eq!(
+                owner_only_gate(Some(&personal), other, subscription, claude),
+                Some(SubscriptionNoticeKind::NonOwner),
+                "a teammate hears whose agent this is ({subscription}, {claude})"
+            );
+        }
+        // The hosted subscription agent next to it is unchanged.
+        assert_eq!(
+            owner_only_gate(Some(&scope(owner)), owner, false, false),
             Some(SubscriptionNoticeKind::Disabled)
         );
     }
@@ -1117,6 +1199,8 @@ mod tests {
             owner: None,
             host_online: None,
             subscription_harness: harness,
+            personal: None,
+            subscription_retired: false,
         };
         let claude = facts(Some(SubscriptionHarness::ClaudeCode));
         assert_eq!(

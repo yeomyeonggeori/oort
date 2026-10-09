@@ -1244,6 +1244,93 @@ async fn work_complete_pushes_the_session_starter_for_a_long_turn() {
     );
 }
 
+/// A personal agent member (migration 123/124): not a member of the room.
+async fn seed_alias(su: &PgPool, fixture: &Fixture) -> Uuid {
+    let alias = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, 'agent', '개인 에이전트', $3)",
+    )
+    .bind(alias)
+    .bind(fixture.workspace_id)
+    .bind(format!("alias-{}", alias.simple()))
+    .execute(su)
+    .await
+    .expect("seed alias member");
+    alias
+}
+
+/// #3592 (P1): a session the owner called through a personal agent speaks as
+/// the alias, so its idle line is authored by the alias — and the owner is
+/// still told the turn finished. The forgery guard (the author must be the
+/// owner **or this session's own persona**) stays closed to anyone else.
+/// Red when the persona arm of the `work_session_idle` guard is dropped.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn work_complete_pushes_the_owner_when_the_session_speaks_as_its_alias() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let (fixture, work) = work_fixture(&su).await;
+    let owner = fixture.recipient_id;
+    let alias = seed_alias(&su, &fixture).await;
+    sqlx::query("UPDATE work_session SET persona_member_id = $2 WHERE id = $1")
+        .bind(work.session_id)
+        .bind(alias)
+        .execute(&su)
+        .await
+        .expect("this session speaks as the alias");
+
+    let card = idle_card(&su, &fixture, &work, 2, alias, owner, LONG_TURN_MS, TURN_A).await;
+    let sent = dispatched_for(&su, &fixture, card).await;
+    assert_eq!(sent.len(), 1, "the owner's one device: {sent:?}");
+    assert_eq!(sent[0].reason, "work_session_idle");
+
+    // The same line authored by a member that is NOT this session's persona is
+    // a forgery and tells nobody.
+    let stranger = seed_alias(&su, &fixture).await;
+    // `stranger` is a real persona — of ANOTHER session (review: a persona of a
+    // different session must not vouch for this one).
+    let other_root: Uuid = sqlx::query_scalar(
+        "INSERT INTO message \
+           (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, props) \
+         VALUES ($1, $2, 90, 90, 0, $3, 'system', '{\"kind\":\"work.session\"}'::jsonb) RETURNING id",
+    )
+    .bind(fixture.workspace_id)
+    .bind(fixture.channel_id)
+    .bind(owner)
+    .fetch_one(&su)
+    .await
+    .expect("another session's card");
+    sqlx::query(
+        "INSERT INTO work_session \
+           (workspace_id, channel_id, member_id, host_id, root_message_id, tool, label, persona_member_id) \
+         SELECT workspace_id, channel_id, member_id, host_id, $2, tool, 'other', $3 \
+           FROM work_session WHERE id = $1",
+    )
+    .bind(work.session_id)
+    .bind(other_root)
+    .bind(stranger)
+    .execute(&su)
+    .await
+    .expect("another session spoken as the stranger");
+    let forged = idle_card(
+        &su,
+        &fixture,
+        &work,
+        3,
+        stranger,
+        owner,
+        LONG_TURN_MS,
+        TURN_A + 1,
+    )
+    .await;
+    assert!(
+        dispatched_for(&su, &fixture, forged).await.is_empty(),
+        "an idle line by someone who is neither the owner nor the session's persona pushes nothing"
+    );
+}
+
 /// 「1분 이상」: a 59.999 s turn is silent, and silent means NO reason — it must
 /// not fall through to the DM arm and push the card's text to the peer.
 #[tokio::test]

@@ -67,6 +67,7 @@ pub(crate) fn dto(connection: HostedConnection) -> HostedAgentConnectionDto {
         owner: None,
         host_online: None,
         brain_unavailable_reason: None,
+        subscription_retired: None,
     }
 }
 

@@ -48,7 +48,7 @@ import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 // 이 파일이 재는 것은 수용기준 다섯이다:
 //
 //   1. 탭 셋 + 「+」, 그리고 옛 FAB 시트의 기능(에이전트 부르기, 작업 콘솔, 사람 골라
-//      DM)이 + 메뉴에서 손실 없이 닿는다. 새 채널은 소유자·관리자에게만 선다.
+//      DM)이 + 메뉴(에이전트 부르기는 AI 시트 안)에서 손실 없이 닿는다. 새 채널은 소유자·관리자에게만 선다.
 //   2. + 메뉴는 팝오버다: 바깥·escape·탭 전환으로 닫히고, 무거운 일만 시트로 넘긴다.
 //   3. 유리가 투명도 줄이기에 반응한다(불투명), 블러가 없으면 94% 로 대체한다.
 //   4. 탭바·+·메뉴의 대비가 바닥 **정지점 전부**에서 선다. 터치 44pt, VoiceOver 라벨.
@@ -321,7 +321,7 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     });
   });
 
-  it('+ → 「에이전트 부르기」가 에이전트 목록을 연다 (사라진 에이전트 탭의 문)', async () => {
+  it('+ → 「AI」가 AI 시트를 열고, 시트의 「에이전트 부르기」가 에이전트 목록을 연다 (사라진 에이전트 탭의 문)', async () => {
     installFetch();
     await renderReady();
     openMenu();
@@ -329,10 +329,13 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
       screen.getByTestId('shell-plus', {includeHiddenElements: true}).props
         .accessibilityState,
     ).toEqual({expanded: true});
-    fireEvent.press(screen.getByTestId('plus-menu-agents'));
-    // 메뉴가 곧바로 목록을 연다 — 가운데 시트가 없다.
+    fireEvent.press(screen.getByTestId('plus-menu-ai'));
+    // 메뉴가 접히고 AI 시트가 선다. 목록은 아직 열리지 않았다.
     expect(screen.queryByTestId('plus-menu')).toBeNull();
-    expect(screen.queryByTestId('page-sheet')).toBeNull();
+    expect(screen.getByTestId('ai-sheet')).toBeTruthy();
+    expect(screen.queryByTestId('agent-list-pane')).toBeNull();
+    fireEvent.press(screen.getByTestId('ai-row-agents'));
+    expect(screen.queryByTestId('ai-sheet')).toBeNull();
     await waitFor(() => expect(screen.getByTestId('agent-list-pane')).toBeTruthy());
     await waitFor(() => expect(screen.getByTestId('agents-title')).toBeTruthy());
     // 층의 나가는 길이 있다.
@@ -350,7 +353,7 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(screen.queryByTestId('plus-menu-work')).toBeNull();
   });
 
-  it('메뉴의 행은 새 DM · 새 채널 · 에이전트 부르기 · 작업 맡기기 순서이고, 모두 메뉴 항목이다', async () => {
+  it('메뉴의 행은 새 DM · 새 채널 · AI 순서이고, 모두 메뉴 항목이다 — 옛 AI 행들은 없다', async () => {
     installFetch();
     await renderReady();
     openMenu();
@@ -368,9 +371,13 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(rows).toEqual([
       'plus-menu-dm',
       'plus-menu-channel',
-      'plus-menu-agents',
-      'plus-menu-delegate',
+      'plus-menu-ai',
     ]);
+    // 옛 세 행은 AI 시트 안으로 들어갔다. 메뉴에 남아 있으면 같은 문이 두 곳에 서는 것이다.
+    for (const gone of ['agents', 'delegate', 'ask-mac']) {
+      expect([gone, screen.queryByTestId(`plus-menu-${gone}`) !== null]).toEqual([gone, false]);
+    }
+    expect(screen.getByTestId('plus-menu-ai')).toHaveProp('accessibilityLabel', 'AI');
     expect(screen.getByTestId('plus-menu-dm')).toHaveProp('accessibilityLabel', '새 DM');
     expect(screen.getByTestId('plus-menu-channel')).toHaveProp(
       'accessibilityLabel',
@@ -673,7 +680,7 @@ describe('기하가 사양 표와 같다 — Buzz 크기, 시안 A 재질 (#2750
       borderRadius: 20,
     });
     expect([lightPalette.primary, darkPalette.primary]).toContain(menu.backgroundColor);
-    for (const key of ['dm', 'agents']) {
+    for (const key of ['dm', 'ai']) {
       const row = flat(`plus-menu-${key}`);
       expect([key, row.minHeight]).toEqual([key, PLUS_MENU.rowHeight]);
       expect(row.minHeight).toBeGreaterThanOrEqual(TOUCH_TARGET);

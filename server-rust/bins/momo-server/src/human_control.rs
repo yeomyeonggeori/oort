@@ -148,6 +148,8 @@ pub fn signature_columns(verified: &VerifiedHumanControl) -> HumanSignatureColum
         scope: verified.scope.map(str::to_string),
         spawn_agent_member_id: verified.agent_member_id,
         spawn_folder_id: verified.folder_id.clone(),
+        spawn_thread_root_id: verified.spawn_thread_root_id,
+        spawn_origin_message_id: verified.spawn_origin_message_id,
         signature: verified.signature_b64.clone(),
     }
 }
@@ -245,6 +247,13 @@ pub fn envelope(columns: &HumanSignatureColumns, key: &DeviceKeyRecord) -> Value
     }
     if let Some(folder) = &columns.spawn_folder_id {
         body.insert("folderId".into(), json!(folder));
+    } // A new-work spawn (#3570): the position the owner called from, as the v4
+      // statement named it. The host rebuilds the statement from these.
+    if let Some(thread) = columns.spawn_thread_root_id {
+        body.insert("threadRootId".into(), json!(thread.to_string()));
+    }
+    if let Some(origin) = columns.spawn_origin_message_id {
+        body.insert("originMessageId".into(), json!(origin.to_string()));
     }
     body.insert("signature".into(), json!(columns.signature));
     Value::Object(body)
@@ -315,6 +324,8 @@ mod tests {
             scope: Some("once".into()),
             spawn_agent_member_id: None,
             spawn_folder_id: None,
+            spawn_thread_root_id: None,
+            spawn_origin_message_id: None,
             signature: "sig".into(),
         }
     }

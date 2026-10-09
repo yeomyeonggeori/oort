@@ -66,9 +66,9 @@ check(
 check(
   MomoDeviceKeyStore.signingSchemas == [
     "momo.human.control.v2": 13, "momo.human.control.v3": 13,
-    "momo.human.device_rebind.v1": 7,
+    "momo.human.control.v4": 13, "momo.human.device_rebind.v1": 7,
   ],
-  "the phone allows only momo.human.control.v2/v3 (13 lines) and its own device_rebind.v1 (7 lines)")
+  "the phone allows only momo.human.control.v2/v3/v4 (13 lines) and its own device_rebind.v1 (7 lines)")
 
 // ---- #3103: the rebind letter momo-wire printed (argv[2]) --------------------
 guard CommandLine.arguments.count > 2,
