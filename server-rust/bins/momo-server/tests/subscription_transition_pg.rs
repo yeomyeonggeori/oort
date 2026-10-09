@@ -209,8 +209,8 @@ async fn seed_human(su: &PgPool, workspace: Uuid, handle: &str, role: &str) -> U
     .bind(workspace)
     .bind(id)
     .execute(su)
-        .await
-        .expect("human membership");
+    .await
+    .expect("human membership");
     id
 }
 
@@ -249,64 +249,73 @@ async fn seed(db: &ProdDb) -> Fx {
     let owner = seed_human(su, workspace, "kwak", "owner").await;
 
     // The real provisioning functions, as `momo_app` in a tenant transaction.
-    let (kwak_claude, kwak_connection, claude_code) = with_tenant_tx(&db.app, workspace, move |conn| {
-        Box::pin(async move {
-            let mut ids = Vec::new();
-            for (handle, harness) in [
-                ("kwak-claude", Some(SubscriptionHarness::ClaudeCode)),
-                ("claude-code", None),
-            ] {
-                let AgentCreation::Created(member) = momo_agent::create_agent_identity_in_tx(
-                    conn,
-                    workspace,
-                    &NewAgentMember {
-                        display_name: handle.to_string(),
-                        handle: handle.to_string(),
-                        model: momo_auth::HOSTED_AGENT_MODEL.to_string(),
-                        model_source: ModelSource::Agent,
-                        base_url: momo_auth::HOSTED_AGENT_INERT_BASE_URL.to_string(),
-                        system_prompt: None,
-                        config: json!({"execution_mode": "hosted_dial_in"}),
-                        owner_human_id: owner,
-                    },
-                )
-                .await?
-                else {
-                    panic!("agent {handle} was not created");
-                };
-                momo_agent::set_agent_paused_in_tx(conn, workspace, member.id, owner, true)
+    let (kwak_claude, kwak_connection, claude_code) =
+        with_tenant_tx(&db.app, workspace, move |conn| {
+            Box::pin(async move {
+                let mut ids = Vec::new();
+                for (handle, harness) in [
+                    ("kwak-claude", Some(SubscriptionHarness::ClaudeCode)),
+                    ("claude-code", None),
+                ] {
+                    let AgentCreation::Created(member) = momo_agent::create_agent_identity_in_tx(
+                        conn,
+                        workspace,
+                        &NewAgentMember {
+                            display_name: handle.to_string(),
+                            handle: handle.to_string(),
+                            model: momo_auth::HOSTED_AGENT_MODEL.to_string(),
+                            model_source: ModelSource::Agent,
+                            base_url: momo_auth::HOSTED_AGENT_INERT_BASE_URL.to_string(),
+                            system_prompt: None,
+                            config: json!({"execution_mode": "hosted_dial_in"}),
+                            owner_human_id: owner,
+                        },
+                    )
                     .await?
-                    .expect("paused profile");
-                if let Some(harness) = harness {
-                    assert!(
-                        momo_agent::mark_agent_owner_only_in_tx(conn, workspace, member.id, harness)
-                            .await?
-                    );
-                    assert!(
-                        momo_agent::set_subscription_device_in_tx(
-                            conn, workspace, member.id, "device-0001"
-                        )
+                    else {
+                        panic!("agent {handle} was not created");
+                    };
+                    momo_agent::set_agent_paused_in_tx(conn, workspace, member.id, owner, true)
                         .await?
-                    );
+                        .expect("paused profile");
+                    if let Some(harness) = harness {
+                        assert!(
+                            momo_agent::mark_agent_owner_only_in_tx(
+                                conn, workspace, member.id, harness
+                            )
+                            .await?
+                        );
+                        assert!(
+                            momo_agent::set_subscription_device_in_tx(
+                                conn,
+                                workspace,
+                                member.id,
+                                "device-0001"
+                            )
+                            .await?
+                        );
+                    }
+                    let issuance = momo_auth::create_hosted_connection_in_tx(
+                        conn, workspace, member.id, owner,
+                    )
+                    .await?;
+                    ids.push((member.id, issuance.connection.id));
                 }
-                let issuance =
-                    momo_auth::create_hosted_connection_in_tx(conn, workspace, member.id, owner)
-                        .await?;
-                ids.push((member.id, issuance.connection.id));
-            }
-            Ok((ids[0].0, ids[0].1, ids[1].0))
+                Ok((ids[0].0, ids[0].1, ids[1].0))
+            })
         })
-    })
-    .await
-    .expect("seed agents");
+        .await
+        .expect("seed agents");
 
     let channel = Uuid::new_v4();
-    sqlx::query("INSERT INTO channel (id, workspace_id, kind, name) VALUES ($1, $2, 'public', 'general')")
-        .bind(channel)
-        .bind(workspace)
-        .execute(su)
-        .await
-        .expect("channel");
+    sqlx::query(
+        "INSERT INTO channel (id, workspace_id, kind, name) VALUES ($1, $2, 'public', 'general')",
+    )
+    .bind(channel)
+    .bind(workspace)
+    .execute(su)
+    .await
+    .expect("channel");
     sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
         .bind(channel)
         .bind(workspace)
@@ -339,7 +348,10 @@ async fn seed_live_token(su: &PgPool, workspace: Uuid, agent: Uuid) -> Uuid {
     .bind(id)
     .bind(workspace)
     .bind(agent)
-    .bind(format!("momo_agent_v1.{workspace}.{}", Uuid::new_v4().simple()))
+    .bind(format!(
+        "momo_agent_v1.{workspace}.{}",
+        Uuid::new_v4().simple()
+    ))
     .execute(su)
     .await
     .expect("token");
@@ -377,11 +389,13 @@ async fn audit_rows(su: &PgPool, workspace: Uuid, action: &str) -> Vec<serde_jso
 }
 
 async fn authors(su: &PgPool, workspace: Uuid) -> Vec<(String, Uuid)> {
-    sqlx::query_as("SELECT body, author_member_id FROM message WHERE workspace_id = $1 ORDER BY seq")
-        .bind(workspace)
-        .fetch_all(su)
-        .await
-        .expect("authors")
+    sqlx::query_as(
+        "SELECT body, author_member_id FROM message WHERE workspace_id = $1 ORDER BY seq",
+    )
+    .bind(workspace)
+    .fetch_all(su)
+    .await
+    .expect("authors")
 }
 
 async fn run(
@@ -426,7 +440,10 @@ async fn a_dry_run_writes_nothing_and_says_what_it_would_do() {
     assert!(plan.contains("DRY-RUN"), "{plan}");
     assert!(plan.contains("connections_to_close=1"), "{plan}");
     assert!(plan.contains("tokens_to_revoke=1"), "{plan}");
-    assert!(plan.contains("messages_authored(그대로 남아요): 1"), "{plan}");
+    assert!(
+        plan.contains("messages_authored(그대로 남아요): 1"),
+        "{plan}"
+    );
     assert_eq!(
         before,
         snapshot(&db.su, fx.workspace).await,
@@ -447,7 +464,12 @@ async fn convert_keeps_the_member_and_every_message_and_closes_every_door() {
     assert_eq!(report.verdict, Verdict::Proceed, "{}", report.render());
     let c = &report.changes;
     assert_eq!(
-        (c.connections_closed, c.tokens_revoked, c.marked, c.device_slot_released),
+        (
+            c.connections_closed,
+            c.tokens_revoked,
+            c.marked,
+            c.device_slot_released
+        ),
         (1, 1, true, true),
         "{}",
         report.render()
@@ -485,8 +507,20 @@ async fn convert_keeps_the_member_and_every_message_and_closes_every_door() {
     .await
     .unwrap();
     assert_eq!(
-        (personal, disabled, scope.as_str(), harness.as_deref(), owner),
-        (true, false, "owner_only", Some("claude_code"), Some(fx.owner))
+        (
+            personal,
+            disabled,
+            scope.as_str(),
+            harness.as_deref(),
+            owner
+        ),
+        (
+            true,
+            false,
+            "owner_only",
+            Some("claude_code"),
+            Some(fx.owner)
+        )
     );
     assert_eq!(mode, "member_host", "no longer a hosted dial-in sentinel");
     assert_eq!(device, None, "the device slot is released");
@@ -513,11 +547,12 @@ async fn convert_keeps_the_member_and_every_message_and_closes_every_door() {
     .await
     .unwrap();
     assert_eq!(live, 0);
-    let revoked: bool = sqlx::query_scalar("SELECT revoked_at IS NOT NULL FROM token WHERE id = $1")
-        .bind(token)
-        .fetch_one(&db.su)
-        .await
-        .unwrap();
+    let revoked: bool =
+        sqlx::query_scalar("SELECT revoked_at IS NOT NULL FROM token WHERE id = $1")
+            .bind(token)
+            .fetch_one(&db.su)
+            .await
+            .unwrap();
     assert!(revoked);
 
     // One audit row, attributable and carrying the approval citation.
@@ -554,10 +589,16 @@ async fn convert_keeps_the_member_and_every_message_and_closes_every_door() {
     .await
     .unwrap();
     let found = found.expect("the owner's personal agent");
-    assert_eq!((found.id, found.handle.as_str(), found.enabled), (fx.kwak_claude, "kwak-claude", true));
+    assert_eq!(
+        (found.id, found.handle.as_str(), found.enabled),
+        (fx.kwak_claude, "kwak-claude", true)
+    );
     let facts = &facts[0];
     assert!(facts.personal.is_some(), "{facts:?}");
-    assert_eq!(facts.host_online, None, "a personal agent has no Agent Port liveness");
+    assert_eq!(
+        facts.host_online, None,
+        "a personal agent has no Agent Port liveness"
+    );
     assert_eq!(facts.subscription_harness, None);
     assert!(!facts.subscription_retired);
     db.finish().await;
@@ -569,14 +610,16 @@ async fn the_old_lane_stays_shut_after_a_conversion_or_a_retirement() {
     let db = ProdDb::create().await;
     let fx = seed(&db).await;
     let connections: Vec<(Uuid, Uuid)> = {
-        let claude_code_connection: Uuid = sqlx::query_scalar(
-            "SELECT id FROM hosted_agent_connection WHERE agent_member_id = $1",
-        )
-        .bind(fx.claude_code)
-        .fetch_one(&db.su)
-        .await
-        .unwrap();
-        vec![(fx.kwak_claude, fx.kwak_connection), (fx.claude_code, claude_code_connection)]
+        let claude_code_connection: Uuid =
+            sqlx::query_scalar("SELECT id FROM hosted_agent_connection WHERE agent_member_id = $1")
+                .bind(fx.claude_code)
+                .fetch_one(&db.su)
+                .await
+                .unwrap();
+        vec![
+            (fx.kwak_claude, fx.kwak_connection),
+            (fx.claude_code, claude_code_connection),
+        ]
     };
     run(&db, &fx, Transition::Convert, "kwak-claude", true).await;
     run(&db, &fx, Transition::Retire, "claude-code", true).await;
@@ -602,7 +645,9 @@ async fn the_old_lane_stays_shut_after_a_conversion_or_a_retirement() {
             .await
             .expect_err(&format!("{agent}: regenerate must be refused"));
         assert!(
-            error.to_string().contains("cannot hold a live hosted connection"),
+            error
+                .to_string()
+                .contains("cannot hold a live hosted connection"),
             "{error}"
         );
         let status: String =
@@ -641,9 +686,21 @@ async fn a_second_run_is_a_noop_with_no_second_audit_row() {
         let again = run(&db, &fx, Transition::Retire, "claude-code", execute).await;
         assert_eq!(again.verdict, Verdict::AlreadyDone, "{}", again.render());
     }
-    assert_eq!(after_first, snapshot(&db.su, fx.workspace).await, "a re-run wrote");
-    assert_eq!(audit_rows(&db.su, fx.workspace, AUDIT_CONVERTED).await.len(), 1);
-    assert_eq!(audit_rows(&db.su, fx.workspace, AUDIT_RETIRED).await.len(), 1);
+    assert_eq!(
+        after_first,
+        snapshot(&db.su, fx.workspace).await,
+        "a re-run wrote"
+    );
+    assert_eq!(
+        audit_rows(&db.su, fx.workspace, AUDIT_CONVERTED)
+            .await
+            .len(),
+        1
+    );
+    assert_eq!(
+        audit_rows(&db.su, fx.workspace, AUDIT_RETIRED).await.len(),
+        1
+    );
     db.finish().await;
 }
 
@@ -684,7 +741,10 @@ async fn retire_suspends_marks_and_keeps_the_author_and_nobody_can_mention_it() 
     .fetch_one(&db.su)
     .await
     .unwrap();
-    assert_eq!((status.as_str(), deleted, kind.as_str()), ("suspended", false, "agent"));
+    assert_eq!(
+        (status.as_str(), deleted, kind.as_str()),
+        ("suspended", false, "agent")
+    );
     let (retired, personal, paused): (bool, bool, bool) = sqlx::query_as(
         "SELECT a.subscription_retired_at IS NOT NULL, a.personal_agent, p.paused \
            FROM agent a JOIN agent_profile p ON p.agent_member_id = a.member_id \
@@ -695,12 +755,17 @@ async fn retire_suspends_marks_and_keeps_the_author_and_nobody_can_mention_it() 
     .await
     .unwrap();
     assert_eq!((retired, personal, paused), (true, false, true));
-    assert_eq!(messages_before, authors(&db.su, fx.workspace).await, "an author changed");
-    let revoked: bool = sqlx::query_scalar("SELECT revoked_at IS NOT NULL FROM token WHERE id = $1")
-        .bind(token)
-        .fetch_one(&db.su)
-        .await
-        .unwrap();
+    assert_eq!(
+        messages_before,
+        authors(&db.su, fx.workspace).await,
+        "an author changed"
+    );
+    let revoked: bool =
+        sqlx::query_scalar("SELECT revoked_at IS NOT NULL FROM token WHERE id = $1")
+            .bind(token)
+            .fetch_one(&db.su)
+            .await
+            .unwrap();
     assert!(revoked);
     let rows = audit_rows(&db.su, fx.workspace, AUDIT_RETIRED).await;
     assert_eq!(rows.len(), 1);
@@ -714,7 +779,9 @@ async fn retire_suspends_marks_and_keeps_the_author_and_nobody_can_mention_it() 
     // The read contract carries the 「이전 구독 에이전트」 marker.
     let facts = with_tenant_tx(&db.app, fx.workspace, move |conn| {
         let (workspace, agent) = (fx.workspace, fx.claude_code);
-        Box::pin(async move { momo_agent::load_agent_read_facts_in_tx(conn, workspace, &[agent]).await })
+        Box::pin(
+            async move { momo_agent::load_agent_read_facts_in_tx(conn, workspace, &[agent]).await },
+        )
     })
     .await
     .unwrap();
@@ -732,25 +799,51 @@ async fn the_tool_refuses_what_it_must_not_fake_and_writes_nothing() {
     // Wrong tool for the shape.
     let wrong = run(&db, &fx, Transition::Convert, "claude-code", true).await;
     assert!(
-        matches!(wrong.verdict, Verdict::Refused { code: "not_a_subscription_agent", .. }),
+        matches!(
+            wrong.verdict,
+            Verdict::Refused {
+                code: "not_a_subscription_agent",
+                ..
+            }
+        ),
         "{}",
         wrong.render()
     );
     let wrong = run(&db, &fx, Transition::Retire, "kwak-claude", true).await;
     assert!(
-        matches!(wrong.verdict, Verdict::Refused { code: "not_a_hosted_workspace_agent", .. }),
+        matches!(
+            wrong.verdict,
+            Verdict::Refused {
+                code: "not_a_hosted_workspace_agent",
+                ..
+            }
+        ),
         "{}",
         wrong.render()
     );
     // A human's handle is "no agent", not a conversion target.
-    let none = run_transition(&db.app, fx.workspace, Transition::Convert, "kwak", true, "x")
-        .await
-        .unwrap();
+    let none = run_transition(
+        &db.app,
+        fx.workspace,
+        Transition::Convert,
+        "kwak",
+        true,
+        "x",
+    )
+    .await
+    .unwrap();
     assert!(none.is_none());
     // Another tenant cannot see the row at all (RLS under the tenant transaction).
-    let elsewhere = run_transition(&db.app, Uuid::new_v4(), Transition::Convert, "kwak-claude", true, "x")
-        .await
-        .unwrap();
+    let elsewhere = run_transition(
+        &db.app,
+        Uuid::new_v4(),
+        Transition::Convert,
+        "kwak-claude",
+        true,
+        "x",
+    )
+    .await
+    .unwrap();
     assert!(elsewhere.is_none());
 
     // A credentialed connection needs the administrator's provider-side cleanup first.
@@ -766,11 +859,21 @@ async fn the_tool_refuses_what_it_must_not_fake_and_writes_nothing() {
     let mid_snapshot = snapshot(&db.su, fx.workspace).await;
     let blocked = run(&db, &fx, Transition::Convert, "kwak-claude", true).await;
     assert!(
-        matches!(blocked.verdict, Verdict::Refused { code: "connection_needs_admin_disconnect", .. }),
+        matches!(
+            blocked.verdict,
+            Verdict::Refused {
+                code: "connection_needs_admin_disconnect",
+                ..
+            }
+        ),
         "{}",
         blocked.render()
     );
-    assert_eq!(mid_snapshot, snapshot(&db.su, fx.workspace).await, "a refused run wrote");
+    assert_eq!(
+        mid_snapshot,
+        snapshot(&db.su, fx.workspace).await,
+        "a refused run wrote"
+    );
     assert_ne!(before, mid_snapshot);
 
     // An administrator-suspended agent is not this tool's to switch back on.
@@ -786,11 +889,19 @@ async fn the_tool_refuses_what_it_must_not_fake_and_writes_nothing() {
         .unwrap();
     let suspended = run(&db, &fx, Transition::Convert, "kwak-claude", true).await;
     assert!(
-        matches!(suspended.verdict, Verdict::Refused { code: "member_not_active", .. }),
+        matches!(
+            suspended.verdict,
+            Verdict::Refused {
+                code: "member_not_active",
+                ..
+            }
+        ),
         "{}",
         suspended.render()
     );
-    assert!(audit_rows(&db.su, fx.workspace, AUDIT_CONVERTED).await.is_empty());
+    assert!(audit_rows(&db.su, fx.workspace, AUDIT_CONVERTED)
+        .await
+        .is_empty());
     db.finish().await;
 }
 
@@ -822,13 +933,23 @@ async fn the_binary_runs_only_as_the_application_role_and_executes_only_with_a_n
         &app_url,
     );
     assert_eq!(code, 0, "{out}\n{err}");
-    assert!(out.contains("DRY-RUN") && out.contains("verdict: PROCEED"), "{out}");
+    assert!(
+        out.contains("DRY-RUN") && out.contains("verdict: PROCEED"),
+        "{out}"
+    );
     assert!(err.contains("role: momo_app"), "{err}");
     assert_eq!(before, snapshot(&db.su, fx.workspace).await);
 
     // `--execute` without a note is a usage error, before any connection.
     let (code, _, err) = run_bin(
-        &["convert", "--workspace", &ws, "--handle", "kwak-claude", "--execute"],
+        &[
+            "convert",
+            "--workspace",
+            &ws,
+            "--handle",
+            "kwak-claude",
+            "--execute",
+        ],
         &app_url,
     );
     assert_eq!(code, 2, "{err}");
@@ -849,7 +970,13 @@ async fn the_binary_runs_only_as_the_application_role_and_executes_only_with_a_n
         };
         let (code, _, err) = run_bin(
             &[
-                "convert", "--workspace", &ws, "--handle", "kwak-claude", "--execute", "--note",
+                "convert",
+                "--workspace",
+                &ws,
+                "--handle",
+                "kwak-claude",
+                "--execute",
+                "--note",
                 "승인",
             ],
             &url,
@@ -857,12 +984,22 @@ async fn the_binary_runs_only_as_the_application_role_and_executes_only_with_a_n
         assert_eq!(code, 3, "{role}: {err}");
         assert!(err.contains("refusing to run as role"), "{role}: {err}");
     }
-    assert_eq!(before, snapshot(&db.su, fx.workspace).await, "a refused role wrote");
+    assert_eq!(
+        before,
+        snapshot(&db.su, fx.workspace).await,
+        "a refused role wrote"
+    );
 
     // Executed as momo_app against the production grants: no `permission denied`.
     let (code, out, err) = run_bin(
         &[
-            "convert", "--workspace", &ws, "--handle", "kwak-claude", "--execute", "--note",
+            "convert",
+            "--workspace",
+            &ws,
+            "--handle",
+            "kwak-claude",
+            "--execute",
+            "--note",
             "성재 승인 2026-10-10",
         ],
         &app_url,
@@ -871,23 +1008,51 @@ async fn the_binary_runs_only_as_the_application_role_and_executes_only_with_a_n
     assert!(!err.contains("permission denied"), "{err}");
     let (code, out, err) = run_bin(
         &[
-            "retire", "--workspace", &ws, "--handle", "claude-code", "--execute", "--note",
+            "retire",
+            "--workspace",
+            &ws,
+            "--handle",
+            "claude-code",
+            "--execute",
+            "--note",
             "성재 승인 2026-10-10",
         ],
         &app_url,
     );
     assert_eq!(code, 0, "{out}\n{err}");
-    assert_eq!(audit_rows(&db.su, fx.workspace, AUDIT_CONVERTED).await.len(), 1);
-    assert_eq!(audit_rows(&db.su, fx.workspace, AUDIT_RETIRED).await.len(), 1);
+    assert_eq!(
+        audit_rows(&db.su, fx.workspace, AUDIT_CONVERTED)
+            .await
+            .len(),
+        1
+    );
+    assert_eq!(
+        audit_rows(&db.su, fx.workspace, AUDIT_RETIRED).await.len(),
+        1
+    );
 
     // A re-run through the binary is a no-op that still exits 0.
     let (code, out, _) = run_bin(
-        &["convert", "--workspace", &ws, "--handle", "kwak-claude", "--execute", "--note", "again"],
+        &[
+            "convert",
+            "--workspace",
+            &ws,
+            "--handle",
+            "kwak-claude",
+            "--execute",
+            "--note",
+            "again",
+        ],
         &app_url,
     );
     assert_eq!(code, 0);
     assert!(out.contains("ALREADY_DONE"), "{out}");
-    assert_eq!(audit_rows(&db.su, fx.workspace, AUDIT_CONVERTED).await.len(), 1);
+    assert_eq!(
+        audit_rows(&db.su, fx.workspace, AUDIT_CONVERTED)
+            .await
+            .len(),
+        1
+    );
 
     // A refusal exits 3 and names the code.
     let (code, out, _) = run_bin(

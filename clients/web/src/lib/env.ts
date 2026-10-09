@@ -84,3 +84,19 @@ export function subscriptionAgentsBuildFlagOn(raw: string | undefined): boolean 
 export const SUBSCRIPTION_AGENTS_BUILD_FLAG = subscriptionAgentsBuildFlagOn(
   env.VITE_MOMO_SUBSCRIPTION_AGENTS
 );
+
+/**
+ * 로그인 뒤 「에이전트로 만들기」(D15 `subscription-agents/register` + 공식 CLI의
+ * `claude mcp add-json …oort`) 빌드 플래그. BUILD-TIME, **기본 끔**(#3567, ADR-0198 증보 1
+ * D2 4). 구독은 이제 서버에 에이전트로 등록하지 않고 「내 도구」·개인 에이전트(D7)로 부른다.
+ * 그래서 로그인 모달은 「연결됐어요」에서 닫히고 서버도 셸도 부르지 않는다. 켬 값은 `1`·`true`
+ * 뿐이고 그 밖의 값(오타 포함)은 모두 끈 채로 둔다. 이행이 끝나고 D15가 닫힐 때(T7) 코드째 걷는다.
+ */
+export function subscriptionRegisterBuildFlagOn(raw: string | undefined): boolean {
+  const value = raw?.trim() ?? "";
+  return value === "1" || value === "true";
+}
+
+export const SUBSCRIPTION_REGISTER_BUILD_FLAG = subscriptionRegisterBuildFlagOn(
+  env.VITE_MOMO_SUBSCRIPTION_REGISTER
+);

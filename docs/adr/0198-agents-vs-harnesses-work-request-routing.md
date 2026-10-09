@@ -413,6 +413,21 @@ D7의 소유자 호출은 본문 D2가 이미 정한 「member host 레인은 D1
 
 **미검증(`runtime-unverified`).** 폰의 Face ID 서명(Swift 허용목록과 `sim-check`)과 데스크탑의 Touch ID 확인 창 실기기 왕복, 실제 ACP 세션에서 별칭 작성자가 클라이언트 화면에 그려지는 모양.
 
+### T2 확정 (#3567) — kwak-claude 전환·@claude-code 은퇴 도구
+증보 1 안의 구현 사실이며 새 결정이 아니다(바뀌는 DB는 migration 125 열 하나와 트리거 하나이고 그 내용은 2·3). 근거는 D2 변경(전환은 같은 멤버 id·핸들, 은퇴는 삭제 없음)과 「P2 확정」 전환(M1)의 「revoke는 #3567 몫」이다.
+
+**1. 도구.** `momo-subscription-migrate {convert|retire} --workspace <uuid> --handle <핸들> [--execute --note <승인 인용>]`(`server-rust/bins/momo-server/src/bin/`, 로직은 `momo-agent::subscription_transition`). 기본은 **dry-run**이고 읽기 전용 트랜잭션이라 DB가 쓰기를 거절한다. `--execute`는 `--note`(소유자 승인 인용, 감사 행에 남는다)가 있어야 한다. `momo_app`(NOBYPASSRLS)으로 접속하고 슈퍼유저·BYPASSRLS 역할은 거절한다. 모든 문장이 테넌트 트랜잭션 안에서 돈다. 멱등: 이미 끝난 대상은 `ALREADY_DONE`이고 쓰기도 감사 행도 없다. 한 번의 실행은 한 트랜잭션이고 감사 행(`subscription_agent.converted` / `subscription_agent.retired`)은 하나다.
+
+**2. 연결을 닫는 방법 — `expired`.** `disconnected`는 migration 072가 `cleanup_pending`에서 해결된 제공자 쪽 매니페스트가 있을 때만 허용한다. 연결된 적 없는(`pairing_pending`·`detected`, 자격 발급 전) 연결에는 풀 매니페스트가 없으므로 도구는 `expired`로 닫고 pairing 값(`pairing_challenge_hash`·`pairing_expires_at`)을 비운다. **자격이 한 번이라도 발급된 연결(`active`·`cleanup_pending`·확인된 적 있음)은 도구가 닫지 않는다**: 관리자 연결 끊기와 매니페스트 해결(HAP-E6)을 먼저 하라는 `connection_needs_admin_disconnect`로 거절하고 아무것도 쓰지 않는다. 살아 있는 토큰은 모두 폐기하고, 기기 슬롯(`subscription_device_id`)은 비워 D15 register가 이 행을 다시 붙잡지 못하게 한다. 전환은 `config.execution_mode`를 `hosted_dial_in`에서 `member_host`로 바꾼 뒤 P2의 `mark_personal_agent_in_tx`로 표시한다(P2가 만든 개인 에이전트와 같은 모양).
+
+**3. 닫힌 레인이 다시 열리지 않게.** `regenerate_pairing_in_tx`는 `expired`를 `pairing_pending`으로 되살릴 수 있다. migration 125의 `hosted_agent_connection_closed_guard`는 개인 에이전트이거나 은퇴한 에이전트의 연결이 `pairing_pending`·`detected`·`active`가 되거나 그 상태로 만들어지는 것을 거절한다. 은퇴 표식은 `agent.subscription_retired_at`(타입 있는 컬럼: 이 트리거가 거르는 값이다). 은퇴한 멤버는 `member.status = 'suspended'`(`deleted` 아님)이고 과거 메시지의 작성자는 그대로다. 전환한 행과 은퇴한 행은 배타적이다(CHECK).
+
+**4. 읽기 값.** 로스터·호스티드 연결 목록의 에이전트 행에 `subscriptionRetired: true`(은퇴한 행에만, 없으면 생략)가 붙어 클라이언트가 숨김 대신 「이전 구독 에이전트」 표식을 그릴 수 있다. 전환한 행은 `personalAgent`를 갖고 `hostOnline`·`brainUnavailableReason`·`brain=external`을 갖지 않는다(`has_connection`이 만료된 연결 행을 호스티드로 읽던 것을 개인 에이전트에는 적용하지 않는다).
+
+**5. 데스크탑.** 로그인 뒤 「에이전트로 만들기」(D15 `register` + `claude mcp add-json …oort`)는 빌드 플래그 `VITE_MOMO_SUBSCRIPTION_REGISTER`가 켜진 빌드에서만 선다(**기본 꺼짐**, `1`·`true`만 켬). 꺼지면 로그인 모달은 「연결됐어요」에서 닫히고 서버도 셸도 부르지 않는다. 앱 시작에 한 번 셸의 `agent_port_retire_legacy`가 돈다: 앱이 `add-json`을 성공시킨 표식(`added`)이 있고 그 에이전트가 `oort` 슬롯 소유자일 때만 `claude mcp remove --scope user oort`를 부르고, 표식 파일(`legacy-retired-v1`)로 다시는 하지 않는다. 실패는 세 번까지 다음 실행에 다시 하고, 그 뒤에는 저장소 항목만 지우고 끝낸다.
+
+**운영 실행은 이 변경이 하지 않는다.** 도구와 시험까지가 이 변경이고 oort-team 실행은 소유자 승인 뒤 통합자가 한다(런북은 #3567 PR 본문). `kwak-claude` 전환은 멘션 라우팅(#3592)이 선 뒤다.
+
 ## 증보 2 (2026-10-08) — 워크스페이스 단위 「실행 엔진」 설정 API 제거 (#3584)
 
 D1(하네스 = 내 도구)과 D4(작업은 내 맥 우선, 호스트 소유자 == 요청자)가 확정한 결과로, 워크스페이스가 하나의 실행 엔진(opencode·goose·codex-local)을 골라 모두에게 적용하는 모델은 폐기한다. 성재 지시(#3578 S0, 2026-10-07): 「opencode goose codex-local 이런건 어찌보면 조금 옛날 레거시의 잔재 같은데 그 부분도 해소해줘.」.

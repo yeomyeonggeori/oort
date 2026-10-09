@@ -172,7 +172,9 @@ pub fn decide(transition: Transition, i: &Inspection) -> Verdict {
     let credentialed: Vec<&ConnectionFact> = i
         .connections
         .iter()
-        .filter(|c| c.ever_credentialed || matches!(c.status.as_str(), "active" | "cleanup_pending"))
+        .filter(|c| {
+            c.ever_credentialed || matches!(c.status.as_str(), "active" | "cleanup_pending")
+        })
         .collect();
     match transition {
         Transition::Convert => {
@@ -293,7 +295,11 @@ impl TransitionReport {
     /// The operator-facing text (stable `key: value` lines, Korean sentences).
     pub fn render(&self) -> String {
         let i = &self.inspection;
-        let mode = if self.execute { "EXECUTE" } else { "DRY-RUN (아무것도 쓰지 않았어요)" };
+        let mode = if self.execute {
+            "EXECUTE"
+        } else {
+            "DRY-RUN (아무것도 쓰지 않았어요)"
+        };
         let mut out = vec![
             format!("transition: {}", self.transition.as_str()),
             format!("mode: {mode}"),
@@ -330,7 +336,11 @@ impl TransitionReport {
         }
         match &self.verdict {
             Verdict::Proceed => {
-                let verb = if self.execute { "적용했어요" } else { "적용할 거예요" };
+                let verb = if self.execute {
+                    "적용했어요"
+                } else {
+                    "적용할 거예요"
+                };
                 out.push(format!("verdict: PROCEED ({verb})"));
                 let c = &self.changes;
                 if self.execute {
@@ -347,7 +357,11 @@ impl TransitionReport {
                         c.audit_id.map(|id| id.to_string()).unwrap_or_else(|| "-".into()),
                     ));
                 } else {
-                    let closable = i.connections.iter().filter(|c| c.closable_by_tool()).count();
+                    let closable = i
+                        .connections
+                        .iter()
+                        .filter(|c| c.closable_by_tool())
+                        .count();
                     let doorbells = i
                         .connections
                         .iter()
@@ -360,7 +374,9 @@ impl TransitionReport {
                     ));
                 }
             }
-            Verdict::AlreadyDone => out.push("verdict: ALREADY_DONE (바꿀 게 없어요, 감사 행도 더하지 않아요)".into()),
+            Verdict::AlreadyDone => {
+                out.push("verdict: ALREADY_DONE (바꿀 게 없어요, 감사 행도 더하지 않아요)".into())
+            }
             Verdict::Refused { code, reason } => {
                 out.push(format!("verdict: REFUSED {code}: {reason}"));
             }
@@ -616,7 +632,8 @@ async fn apply_in_tx(
     changes.connections_closed = closed;
     changes.doorbells_cleared = doorbells;
     changes.tokens_revoked = revoked;
-    changes.device_slot_released = release_device_slot_in_tx(conn, workspace_id, i.agent_member_id).await?;
+    changes.device_slot_released =
+        release_device_slot_in_tx(conn, workspace_id, i.agent_member_id).await?;
 
     match transition {
         Transition::Convert => {
@@ -642,8 +659,14 @@ async fn apply_in_tx(
             .await?
             .rows_affected()
                 == 1;
-            match mark_personal_agent_in_tx(conn, workspace_id, *owner_id, i.agent_member_id, harness)
-                .await?
+            match mark_personal_agent_in_tx(
+                conn,
+                workspace_id,
+                *owner_id,
+                i.agent_member_id,
+                harness,
+            )
+            .await?
             {
                 MarkOutcome::Marked => changes.marked = true,
                 MarkOutcome::ConnectionsRemain => {
@@ -652,7 +675,9 @@ async fn apply_in_tx(
                     ))
                 }
                 MarkOutcome::NotConvertible => {
-                    return Err(protocol("agent stopped being convertible mid-run; rolled back"))
+                    return Err(protocol(
+                        "agent stopped being convertible mid-run; rolled back",
+                    ))
                 }
             }
         }
@@ -769,9 +794,9 @@ pub async fn run_transition(
     let handle = handle.to_string();
     let note = note.to_string();
     with_tenant_tx(pool, workspace_id, move |conn| {
-        Box::pin(async move {
-            run_in_tx(conn, workspace_id, transition, &handle, execute, &note).await
-        })
+        Box::pin(
+            async move { run_in_tx(conn, workspace_id, transition, &handle, execute, &note).await },
+        )
     })
     .await
 }
@@ -850,27 +875,54 @@ mod tests {
         };
         assert_eq!(code(hosted_entry()), "not_a_subscription_agent");
         assert_eq!(
-            code(Inspection { uses_owner_key: true, ..base() }),
+            code(Inspection {
+                uses_owner_key: true,
+                ..base()
+            }),
             "not_a_subscription_agent"
         );
-        assert_eq!(code(Inspection { owner: None, ..base() }), "no_owner");
         assert_eq!(
-            code(Inspection { member_status: "suspended".into(), ..base() }),
+            code(Inspection {
+                owner: None,
+                ..base()
+            }),
+            "no_owner"
+        );
+        assert_eq!(
+            code(Inspection {
+                member_status: "suspended".into(),
+                ..base()
+            }),
             "member_not_active"
         );
         assert_eq!(
-            code(Inspection { member_deleted: true, ..base() }),
+            code(Inspection {
+                member_deleted: true,
+                ..base()
+            }),
             "member_deleted"
         );
         assert_eq!(
-            code(Inspection { retired: true, ..base() }),
+            code(Inspection {
+                retired: true,
+                ..base()
+            }),
             "already_retired"
         );
         assert_eq!(
-            code(Inspection { owner_has_other_personal: true, ..base() }),
+            code(Inspection {
+                owner_has_other_personal: true,
+                ..base()
+            }),
             "personal_agent_exists"
         );
-        assert_eq!(code(Inspection { live_runs: 1, ..base() }), "live_runs");
+        assert_eq!(
+            code(Inspection {
+                live_runs: 1,
+                ..base()
+            }),
+            "live_runs"
+        );
     }
 
     #[test]
@@ -879,7 +931,13 @@ mod tests {
             let mut i = base();
             i.connections[0].status = status.into();
             assert!(
-                matches!(decide(Transition::Convert, &i), Verdict::Refused { code: "connection_needs_admin_disconnect", .. }),
+                matches!(
+                    decide(Transition::Convert, &i),
+                    Verdict::Refused {
+                        code: "connection_needs_admin_disconnect",
+                        ..
+                    }
+                ),
                 "{status}"
             );
         }
@@ -888,7 +946,10 @@ mod tests {
         confirmed.connections[0].ever_credentialed = true;
         assert!(matches!(
             decide(Transition::Convert, &confirmed),
-            Verdict::Refused { code: "connection_needs_admin_disconnect", .. }
+            Verdict::Refused {
+                code: "connection_needs_admin_disconnect",
+                ..
+            }
         ));
     }
 
@@ -912,13 +973,19 @@ mod tests {
         done.live_tokens = 1;
         assert!(matches!(
             decide(Transition::Convert, &done),
-            Verdict::Refused { code: "personal_agent_has_live_attachments", .. }
+            Verdict::Refused {
+                code: "personal_agent_has_live_attachments",
+                ..
+            }
         ));
     }
 
     #[test]
     fn retire_takes_only_a_hosted_workspace_entry() {
-        assert_eq!(decide(Transition::Retire, &hosted_entry()), Verdict::Proceed);
+        assert_eq!(
+            decide(Transition::Retire, &hosted_entry()),
+            Verdict::Proceed
+        );
         let code = |i: Inspection| match decide(Transition::Retire, &i) {
             Verdict::Refused { code, .. } => code,
             other => panic!("expected a refusal, got {other:?}"),
@@ -926,11 +993,17 @@ mod tests {
         // kwak-claude is converted, never retired.
         assert_eq!(code(base()), "not_a_hosted_workspace_agent");
         assert_eq!(
-            code(Inspection { execution_mode: "member_host".into(), ..hosted_entry() }),
+            code(Inspection {
+                execution_mode: "member_host".into(),
+                ..hosted_entry()
+            }),
             "not_a_hosted_dial_in_agent"
         );
         assert_eq!(
-            code(Inspection { personal_agent: true, ..hosted_entry() }),
+            code(Inspection {
+                personal_agent: true,
+                ..hosted_entry()
+            }),
             "is_personal_agent"
         );
     }
@@ -949,7 +1022,10 @@ mod tests {
         assert!(validate_note("  ").is_err());
         assert!(validate_note("a\nb").is_err());
         assert!(validate_note(&"x".repeat(501)).is_err());
-        assert_eq!(validate_note(" 성재 승인 2026-10-10 ").unwrap(), "성재 승인 2026-10-10");
+        assert_eq!(
+            validate_note(" 성재 승인 2026-10-10 ").unwrap(),
+            "성재 승인 2026-10-10"
+        );
     }
 
     #[test]

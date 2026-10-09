@@ -1437,7 +1437,10 @@ mod tests {
             assert_eq!(last.outcome, RetireState::GaveUp);
             assert!(!last.removed_mcp);
             assert!(sandbox.store().entry_ids().is_empty());
-            assert_eq!(retire_legacy(&sandbox.machine()).outcome, RetireState::AlreadyDone);
+            assert_eq!(
+                retire_legacy(&sandbox.machine()).outcome,
+                RetireState::AlreadyDone
+            );
         }
 
         #[test]
@@ -1504,6 +1507,8 @@ mod tests {
         // `connect` (add), `disconnect` (remove) and the one-time `retire_legacy`
         // (remove, #3567). Every call site names an allowlist row by id.
         assert_eq!(production.matches("run_exit_only(&program").count(), 3);
-        assert!(production.contains("run_exit_only(&program, command_row(\"remove\"), None, machine)"));
+        assert!(
+            production.contains("run_exit_only(&program, command_row(\"remove\"), None, machine)")
+        );
     }
 }
