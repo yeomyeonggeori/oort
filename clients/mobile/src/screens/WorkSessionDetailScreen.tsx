@@ -10,9 +10,11 @@ import {
   type WorkEventRow,
   type WorkPlanItem,
 } from '@momo/core/features/work/workSessionModel';
-import React, {useCallback, useEffect, useMemo, useRef} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
+  Animated,
+  Easing,
   findNodeHandle,
   InteractionManager,
   Pressable,
@@ -67,6 +69,13 @@ import {
   WorkLocationBadge,
   WorkStatusBadge,
 } from '../features/work/WorkSessionParts';
+import {
+  ModeSwitch,
+  WorkConversation,
+  type ConversationMode,
+} from '../features/work/WorkConversation';
+import {useReduceMotion} from '../lib/useReduceMotion';
+import {memberNameParts} from '@momo/core/features/workspace/directory';
 import {useChannels, useDirectory} from '../features/workspace/queries';
 import {useSession} from '../session/useSession';
 import {queryFailureDetail} from './SidebarScreen';
@@ -77,6 +86,7 @@ export default function WorkSessionDetailScreen({
   onBack,
   onOpenConversation,
   stopInitial,
+  initialMode,
 }: {
   /** True only while this pushed surface is the top accessibility layer. */
   active: boolean;
@@ -85,9 +95,14 @@ export default function WorkSessionDetailScreen({
   onOpenConversation: (channelId: string, title: string) => void;
   /** 캡처 하네스 전용 시작 상태. 제품은 넘기지 않는다. */
   stopInitial?: StopWorkInitial;
+  /** 캡처 하네스 전용 시작 보기. 제품은 넘기지 않는다(상세로 열린다). */
+  initialMode?: ConversationMode;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
+  const [mode, setMode] = useState<ConversationMode>(initialMode ?? 'detail');
+  const reduceMotion = useReduceMotion();
+  const fade = useRef(new Animated.Value(1)).current;
   const {workspaceId, member} = useSession();
   const online = useOnline();
   const sessionsQuery = useWorkSessions(workspaceId, true);
@@ -191,6 +206,30 @@ export default function WorkSessionDetailScreen({
     return () => task.cancel();
   }, [active, focusSessionId]);
 
+  // 보기 전환: 짧은 페이드 인. 「동작 줄이기」에서는 움직임 없이 바로 바뀐다.
+  const changeMode = useCallback(
+    (next: ConversationMode) => {
+      setMode(next);
+      if (reduceMotion) {
+        fade.setValue(1);
+        return;
+      }
+      fade.setValue(0);
+      Animated.timing(fade, {
+        toValue: 1,
+        duration: 180,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+    },
+    [fade, reduceMotion],
+  );
+  const directory = directoryQuery.directory;
+  const nameOf = useCallback(
+    (memberId: string) => memberNameParts(directory, memberId, '팀원').name,
+    [directory],
+  );
+
   const noSessionData = sessionsQuery.data === undefined;
   const coldDependencyPending =
     online &&
@@ -285,218 +324,235 @@ export default function WorkSessionDetailScreen({
           backLabel="작업 목록으로"
           titleTestID="work-detail-title"
         />
-        <ScrollView
-          contentContainerStyle={[
-            styles.scrollBody,
-            {paddingBottom: Math.max(insets.bottom, space.lg)},
-          ]}
-          refreshControl={refreshControl}
-          testID="work-detail-scroll">
-          <View
-            ref={focusRef}
-            accessible
-            accessibilityRole="header"
-            accessibilityLabel={`${presentation.label} 작업 상세`}
-            style={styles.detailHeading}
-            testID="work-detail-focus">
-            <Text style={styles.detailTitle}>{presentation.label}</Text>
-            <View style={styles.badgeLine}>
-              <WorkStatusBadge status={status} testID="work-detail-status" />
-              <WorkLocationBadge
-                location={presentation.location}
-                testID="work-detail-location"
-              />
-            </View>
-          </View>
-
-          {!online ? (
-            <NoticeBlock
-              headline="오프라인입니다."
-              detail="마지막으로 불러온 상세와 진행 내역을 유지합니다."
-              testID="work-detail-offline-cached"
-            />
-          ) : sessionsQuery.isError ? (
-            <View style={styles.bannerWrap}>
-              <FailureBanner
-                message="최신 작업 상태를 불러오지 못했습니다. 마지막으로 불러온 상태를 유지합니다."
-                onRetry={() => void sessionsQuery.refetch()}
-                testID="work-detail-session-stale"
-              />
-            </View>
-          ) : null}
-
-          {isOwner ? (
-            <SignedWorkControls
+        <ModeSwitch mode={mode} onChange={changeMode} />
+        <Animated.View style={[styles.modeBody, {opacity: fade}]}>
+          {mode === 'chat' ? (
+            <WorkConversation
               workspaceId={workspaceId}
               memberId={member.id}
               session={session}
               events={sessionEvents}
+              page={eventsQuery.data}
               online={online}
+              agentName={presentation.tool}
+              nameOf={nameOf}
+              refreshControl={refreshControl}
             />
-          ) : null}
-
-          {isOwner ? (
-            <StopWorkControl
-              workspaceId={workspaceId}
-              memberId={member.id}
-              session={session}
-              initial={stopInitial}
-            />
-          ) : null}
-
-          <View style={styles.originWrap}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`${presentation.channelName} 발원 대화로 이동`}
-              onPress={() =>
-                onOpenConversation(session.channelId, presentation.channelName)
-              }
-              style={({pressed}) => [
-                styles.originButton,
-                pressed && styles.pressed,
-              ]}
-              testID="work-detail-origin">
-              <Text style={styles.originLabel}>발원 대화로 이동</Text>
-              <Text accessibilityElementsHidden style={styles.originArrow}>
-                ›
-              </Text>
-            </Pressable>
-          </View>
-
-          <SectionLabel label="작업 정보" />
-          <View style={styles.metaBlock} testID="work-detail-meta">
-            <MetaRow label="실행 위치" value={presentation.location.label} />
-            <MetaRow
-              label="호스트"
-              value={`${presentation.hostName} · ${presentation.hostState}`}
-            />
-            <MetaRow label="대화" value={presentation.channelName} />
-            <MetaRow label="담당자" value={presentation.ownerName} />
-            <MetaRow label="도구" value={presentation.tool} />
-            <MetaRow label="시작" value={explicitTimeLabel(session.startedAtMs)} numeric />
-            <MetaRow
-              label="종료"
-              value={
-                session.endedAtMs === undefined
-                  ? '종료 시각 없음'
-                  : explicitTimeLabel(session.endedAtMs)
-              }
-              numeric={session.endedAtMs !== undefined}
-            />
-          </View>
-
-          <NoticeBlock
-            headline={
-              isOwner && signing
-                ? canStop
-                  ? '허락, 지시, 멈추기만 이 화면에서 할 수 있어요.'
-                  : '허락과 지시만 이 화면에서 보낼 수 있습니다.'
-                : canStop
-                  ? '멈추기만 이 화면에서 할 수 있어요.'
-                  : '읽기 전용으로 확인할 수 있습니다.'
-            }
-            detail={
-              isOwner && signing
-                ? '권한 요청의 미리보기와 보낸 지시는 이 세션 스레드에 남습니다. 터미널 화면, 실행 경로와 환경 정보는 표시하거나 기기에 저장하지 않습니다.'
-                : canStop
-                  ? '작업 상태와 진행 요약은 읽기만 해요. 터미널 화면이나 입력 내용, 실행 경로와 환경 정보는 표시하거나 기기에 저장하지 않아요.'
-                  : '이 화면은 작업 상태와 진행 요약만 보여 줍니다. 터미널 화면이나 입력 내용, 실행 경로와 환경 정보는 표시하거나 기기에 저장하지 않습니다.'
-            }
-            testID="work-detail-readonly"
-          />
-
-          {trust !== 'local' ? (
-            <NoticeBlock
-              headline="진행 내역 중계를 확인하지 못했습니다."
-              detail={
-                trust === 'remote'
-                  ? `원격 호스트에서 ${
-                      session.status === 'running'
-                        ? '실행 중인'
-                        : session.status === 'idle'
-                          ? '대기 중인'
-                          : '실행된'
-                    } 세션입니다. 진행 내역 중계는 아직 검증되지 않았으므로, 아래 단계 목록에는 세션 원장에 남은 것만 나옵니다.`
-                  : '이 세션의 호스트를 확인하지 못했습니다. 아래 진행 내역이 모두 도착했는지 보장할 수 없습니다.'
-              }
-              testID="work-detail-host-unverified"
-            />
-          ) : null}
-
-          {folded.plan.length > 0 ? (
-            <PlanBlock plan={folded.plan} />
-          ) : null}
-
-          <SectionLabel label="진행 내역" />
-          {eventsQuery.data?.truncated ? (
-            <NoticeBlock
-              headline="진행 내역이 길어 최대 1,000개 이벤트만 표시합니다."
-              detail="이후 단계는 이 화면에 표시되지 않을 수 있습니다."
-              testID="work-detail-truncated"
-            />
-          ) : null}
-          {!online && hasCachedEvents ? null : eventsQuery.isError && hasCachedEvents ? (
-            <View style={styles.bannerWrap}>
-              <FailureBanner
-                message="최신 진행 내역을 불러오지 못했습니다. 마지막으로 불러온 내역을 유지합니다."
-                onRetry={() => void eventsQuery.refetch()}
-                testID="work-detail-events-stale"
-              />
-            </View>
-          ) : eventsQuery.isFetching && hasCachedEvents && !streaming ? (
-            <NoticeBlock
-              headline="진행 내역을 새로 확인하는 중입니다."
-              detail="불러온 내역은 그대로 유지합니다."
-              testID="work-detail-events-refetching"
-            />
-          ) : null}
-
-          {!online && !hasCachedEvents ? (
-            <ErrorState
-              headline="오프라인이라 진행 내역을 불러올 수 없습니다."
-              detail="작업 정보는 유지됩니다. 온라인이 되면 당겨서 새로고침하세요."
-              testID="work-detail-events-offline"
-            />
-          ) : eventsQuery.isPending && !hasCachedEvents ? (
-            <LoadingState
-              label="진행 내역을 불러오는 중입니다."
-              testID="work-detail-events-loading"
-            />
-          ) : eventsQuery.isError && !hasCachedEvents ? (
-            <ErrorState
-              headline="진행 내역을 불러오지 못했습니다."
-              detail={
-                queryFailureDetail(eventsQuery.error) ??
-                '작업 정보는 유지됩니다. 다시 시도하세요.'
-              }
-              onRetry={() => void eventsQuery.refetch()}
-              testID="work-detail-events-error"
-            />
-          ) : folded.rows.length === 0 ? (
-            trust === 'local' ? (
-              <View style={styles.emptySteps} testID="work-detail-events-empty">
-                <Text style={styles.emptyHeadline}>아직 진행 내역이 없습니다.</Text>
-                <Text style={styles.emptyDetail}>
-                  {emptyStepsDetail(session, hostsQuery.data)}
-                </Text>
-              </View>
-            ) : null
           ) : (
-            <View style={styles.eventList} testID="work-detail-event-list">
-              {folded.rows.map((row, index) => (
-                <EventRow
-                  key={row.id}
-                  row={row}
-                  writing={
-                    streaming &&
-                    row.kind === 'message' &&
-                    index === folded.rows.length - 1
-                  }
+            <ScrollView
+              contentContainerStyle={[
+                styles.scrollBody,
+                {paddingBottom: Math.max(insets.bottom, space.lg)},
+              ]}
+              refreshControl={refreshControl}
+              testID="work-detail-scroll">
+              <View
+                ref={focusRef}
+                accessible
+                accessibilityRole="header"
+                accessibilityLabel={`${presentation.label} 작업 상세`}
+                style={styles.detailHeading}
+                testID="work-detail-focus">
+                <Text style={styles.detailTitle}>{presentation.label}</Text>
+                <View style={styles.badgeLine}>
+                  <WorkStatusBadge status={status} testID="work-detail-status" />
+                  <WorkLocationBadge
+                    location={presentation.location}
+                    testID="work-detail-location"
+                  />
+                </View>
+              </View>
+
+              {!online ? (
+                <NoticeBlock
+                  headline="오프라인입니다."
+                  detail="마지막으로 불러온 상세와 진행 내역을 유지합니다."
+                  testID="work-detail-offline-cached"
                 />
-              ))}
-            </View>
+              ) : sessionsQuery.isError ? (
+                <View style={styles.bannerWrap}>
+                  <FailureBanner
+                    message="최신 작업 상태를 불러오지 못했습니다. 마지막으로 불러온 상태를 유지합니다."
+                    onRetry={() => void sessionsQuery.refetch()}
+                    testID="work-detail-session-stale"
+                  />
+                </View>
+              ) : null}
+
+              {isOwner ? (
+                <SignedWorkControls
+                  workspaceId={workspaceId}
+                  memberId={member.id}
+                  session={session}
+                  events={sessionEvents}
+                  online={online}
+                />
+              ) : null}
+
+              {isOwner ? (
+                <StopWorkControl
+                  workspaceId={workspaceId}
+                  memberId={member.id}
+                  session={session}
+                  initial={stopInitial}
+                />
+              ) : null}
+
+              <View style={styles.originWrap}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${presentation.channelName} 발원 대화로 이동`}
+                  onPress={() =>
+                    onOpenConversation(session.channelId, presentation.channelName)
+                  }
+                  style={({pressed}) => [
+                    styles.originButton,
+                    pressed && styles.pressed,
+                  ]}
+                  testID="work-detail-origin">
+                  <Text style={styles.originLabel}>발원 대화로 이동</Text>
+                  <Text accessibilityElementsHidden style={styles.originArrow}>
+                    ›
+                  </Text>
+                </Pressable>
+              </View>
+
+              <SectionLabel label="작업 정보" />
+              <View style={styles.metaBlock} testID="work-detail-meta">
+                <MetaRow label="실행 위치" value={presentation.location.label} />
+                <MetaRow
+                  label="호스트"
+                  value={`${presentation.hostName} · ${presentation.hostState}`}
+                />
+                <MetaRow label="대화" value={presentation.channelName} />
+                <MetaRow label="담당자" value={presentation.ownerName} />
+                <MetaRow label="도구" value={presentation.tool} />
+                <MetaRow label="시작" value={explicitTimeLabel(session.startedAtMs)} numeric />
+                <MetaRow
+                  label="종료"
+                  value={
+                    session.endedAtMs === undefined
+                      ? '종료 시각 없음'
+                      : explicitTimeLabel(session.endedAtMs)
+                  }
+                  numeric={session.endedAtMs !== undefined}
+                />
+              </View>
+
+              <NoticeBlock
+                headline={
+                  isOwner && signing
+                    ? canStop
+                      ? '허락, 지시, 멈추기만 이 화면에서 할 수 있어요.'
+                      : '허락과 지시만 이 화면에서 보낼 수 있습니다.'
+                    : canStop
+                      ? '멈추기만 이 화면에서 할 수 있어요.'
+                      : '읽기 전용으로 확인할 수 있습니다.'
+                }
+                detail={
+                  isOwner && signing
+                    ? '권한 요청의 미리보기와 보낸 지시는 이 세션 스레드에 남습니다. 터미널 화면, 실행 경로와 환경 정보는 표시하거나 기기에 저장하지 않습니다.'
+                    : canStop
+                      ? '작업 상태와 진행 요약은 읽기만 해요. 터미널 화면이나 입력 내용, 실행 경로와 환경 정보는 표시하거나 기기에 저장하지 않아요.'
+                      : '이 화면은 작업 상태와 진행 요약만 보여 줍니다. 터미널 화면이나 입력 내용, 실행 경로와 환경 정보는 표시하거나 기기에 저장하지 않습니다.'
+                }
+                testID="work-detail-readonly"
+              />
+
+              {trust !== 'local' ? (
+                <NoticeBlock
+                  headline="진행 내역 중계를 확인하지 못했습니다."
+                  detail={
+                    trust === 'remote'
+                      ? `원격 호스트에서 ${
+                          session.status === 'running'
+                            ? '실행 중인'
+                            : session.status === 'idle'
+                              ? '대기 중인'
+                              : '실행된'
+                        } 세션입니다. 진행 내역 중계는 아직 검증되지 않았으므로, 아래 단계 목록에는 세션 원장에 남은 것만 나옵니다.`
+                      : '이 세션의 호스트를 확인하지 못했습니다. 아래 진행 내역이 모두 도착했는지 보장할 수 없습니다.'
+                  }
+                  testID="work-detail-host-unverified"
+                />
+              ) : null}
+
+              {folded.plan.length > 0 ? (
+                <PlanBlock plan={folded.plan} />
+              ) : null}
+
+              <SectionLabel label="진행 내역" />
+              {eventsQuery.data?.truncated ? (
+                <NoticeBlock
+                  headline="진행 내역이 길어 최대 1,000개 이벤트만 표시합니다."
+                  detail="이후 단계는 이 화면에 표시되지 않을 수 있습니다."
+                  testID="work-detail-truncated"
+                />
+              ) : null}
+              {!online && hasCachedEvents ? null : eventsQuery.isError && hasCachedEvents ? (
+                <View style={styles.bannerWrap}>
+                  <FailureBanner
+                    message="최신 진행 내역을 불러오지 못했습니다. 마지막으로 불러온 내역을 유지합니다."
+                    onRetry={() => void eventsQuery.refetch()}
+                    testID="work-detail-events-stale"
+                  />
+                </View>
+              ) : eventsQuery.isFetching && hasCachedEvents && !streaming ? (
+                <NoticeBlock
+                  headline="진행 내역을 새로 확인하는 중입니다."
+                  detail="불러온 내역은 그대로 유지합니다."
+                  testID="work-detail-events-refetching"
+                />
+              ) : null}
+
+              {!online && !hasCachedEvents ? (
+                <ErrorState
+                  headline="오프라인이라 진행 내역을 불러올 수 없습니다."
+                  detail="작업 정보는 유지됩니다. 온라인이 되면 당겨서 새로고침하세요."
+                  testID="work-detail-events-offline"
+                />
+              ) : eventsQuery.isPending && !hasCachedEvents ? (
+                <LoadingState
+                  label="진행 내역을 불러오는 중입니다."
+                  testID="work-detail-events-loading"
+                />
+              ) : eventsQuery.isError && !hasCachedEvents ? (
+                <ErrorState
+                  headline="진행 내역을 불러오지 못했습니다."
+                  detail={
+                    queryFailureDetail(eventsQuery.error) ??
+                    '작업 정보는 유지됩니다. 다시 시도하세요.'
+                  }
+                  onRetry={() => void eventsQuery.refetch()}
+                  testID="work-detail-events-error"
+                />
+              ) : folded.rows.length === 0 ? (
+                trust === 'local' ? (
+                  <View style={styles.emptySteps} testID="work-detail-events-empty">
+                    <Text style={styles.emptyHeadline}>아직 진행 내역이 없습니다.</Text>
+                    <Text style={styles.emptyDetail}>
+                      {emptyStepsDetail(session, hostsQuery.data)}
+                    </Text>
+                  </View>
+                ) : null
+              ) : (
+                <View style={styles.eventList} testID="work-detail-event-list">
+                  {folded.rows.map((row, index) => (
+                    <EventRow
+                      key={row.id}
+                      row={row}
+                      writing={
+                        streaming &&
+                        row.kind === 'message' &&
+                        index === folded.rows.length - 1
+                      }
+                    />
+                  ))}
+                </View>
+              )}
+            </ScrollView>
           )}
-        </ScrollView>
+        </Animated.View>
       </Screen>
     </View>
   );
@@ -593,6 +649,7 @@ function EventRow({
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
     modalRoot: {flex: 1, backgroundColor: color.bg},
+    modeBody: {flex: 1},
     scrollBody: {paddingBottom: space.lg},
     detailHeading: {
       paddingHorizontal: SAFE_GUTTER,
