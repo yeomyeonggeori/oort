@@ -14,6 +14,8 @@
 //! | `a_dead_or_foreign_target_is_refused_by_name` | drop the revoked-host or session-state refusals (the handler's `local_pty` check is a pre-write fast path: without it trigger 113 `work_control_refuse_local_session` refuses the insert with the same code, so that one line stays green by design) |
 //! | `an_offline_mac_keeps_the_kill_and_says_so` | refuse an offline host, or lie in `hostOnline` |
 //! | `the_owners_kill_is_not_held_back_by_their_own_control_window` | drop the owner-kill exemption in `pending_controls_for_host_in_tx` (or widen it to an agent's kill) |
+//! | `a_kill_needs_no_signature_even_with_the_signature_flag_on` | make the route require the R2 flag or a signature |
+//! | `only_the_session_owners_own_kill_passes_a_control_window` | drop the `work_session.member_id = requester` join or the member-scope test of the window exemption in `pending_controls_for_host_in_tx` |
 //! | `patch_ended_does_not_reach_the_mac` | make `PATCH ended` write a control (then this route would be redundant) |
 //!
 //! `#[ignore]` — needs a real Postgres plus the runtime roles:
@@ -230,12 +232,18 @@ struct Stage {
     workspace: Uuid,
     person: Uuid,
     access: String,
+    other: Uuid,
     other_access: String,
     channel: Uuid,
     host: Uuid,
 }
 
 async fn stage() -> Stage {
+    stage_with(false).await
+}
+
+/// `signature_required`: the R2 flag (`MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`).
+async fn stage_with(signature_required: bool) -> Stage {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let app = momo_app_pool().await;
@@ -247,7 +255,7 @@ async fn stage() -> Stage {
         .await
         .expect("seed workspace");
     let (person, person_email) = seed_human(&su, workspace, "member").await;
-    let (_other, other_email) = seed_human(&su, workspace, "member").await;
+    let (other, other_email) = seed_human(&su, workspace, "member").await;
     let channel = create_channel(
         &app,
         workspace,
@@ -274,8 +282,8 @@ async fn stage() -> Stage {
     .await
     .expect("seed work tool profile");
 
-    // The flag stays OFF: a kill needs no signature, so it must not need R2.
-    let base = start_server(settings(false)).await;
+    // A kill needs no signature, so it works with R2 off and on.
+    let base = start_server(settings(signature_required)).await;
     let http = reqwest::Client::new();
     let access = login(&http, &base, workspace, &person_email).await;
     let other_access = login(&http, &base, workspace, &other_email).await;
@@ -286,6 +294,7 @@ async fn stage() -> Stage {
         workspace,
         person,
         access,
+        other,
         other_access,
         channel,
         host: Uuid::nil(),
@@ -649,8 +658,8 @@ async fn an_agent_bearer_kills_through_this_route_nothing() {
     .unwrap();
     let (status, body) = s.kill(&token, session).await;
     assert!(
-        status == 403 || status == 401,
-        "an agent bearer is refused: {status} {body}"
+        status == 403 && body["error"]["message"] == "agent bearer is not allowed for this route",
+        "the auth layer closes the route to an agent bearer: {status} {body}"
     );
     assert_eq!(s.kill_controls().await, 0);
 }
@@ -736,6 +745,14 @@ async fn a_dead_or_foreign_target_is_refused_by_name() {
         .await;
     assert_eq!(status, 201, "the owner shares their own pane: {body}");
     let local = Uuid::parse_str(body["workSession"]["id"].as_str().unwrap()).unwrap();
+    // Answered after the owner check, as `PATCH` does: a teammate learns nothing
+    // about the pane's kind.
+    let (status, body) = s.kill(&s.other_access, local).await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(
+        body["code"].as_str().or(body["error"]["code"].as_str()),
+        Some("kill_owner_only")
+    );
     let (status, body) = s.kill(&s.access, local).await;
     assert_eq!(status, 403, "{body}");
     assert_eq!(
@@ -880,4 +897,167 @@ async fn patch_ended_does_not_reach_the_mac() {
         0
     );
     assert!(s.poll().await.is_empty());
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_kill_needs_no_signature_even_with_the_signature_flag_on() {
+    let _lock = test_lock().await;
+    let s = stage_with(true).await;
+    let session = s.session().await;
+    let (status, body) = s.kill(&s.access, session).await;
+    assert_eq!(status, 201, "{body}");
+    assert_eq!(body["workControl"]["kind"], "kill");
+    assert_eq!(s.kill_controls().await, 1);
+    let polled = s.poll().await;
+    assert!(polled.iter().any(|c| c["id"] == body["workControl"]["id"]));
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn only_the_session_owners_own_kill_passes_a_control_window() {
+    let _lock = test_lock().await;
+    let s = stage().await;
+    let session = s.session().await;
+    let capability: Uuid = sqlx::query_scalar(
+        "INSERT INTO terminal_attach_capability \
+           (workspace_id, work_session_id, host_id, owner_member_id, token_hash, \
+            expires_at, mode, kind) \
+         VALUES ($1, $2, $3, $4, digest($5::text, 'sha256'), \
+                 clock_timestamp() + interval '60 seconds', 'controller', 'display') \
+         RETURNING id",
+    )
+    .bind(s.workspace)
+    .bind(session)
+    .bind(s.host)
+    .bind(s.person)
+    .bind(Uuid::new_v4().to_string())
+    .fetch_one(&s.su)
+    .await
+    .expect("seed capability");
+    sqlx::query(
+        "INSERT INTO display_control_window \
+           (workspace_id, work_session_id, grantee_member_id, capability_id, lease_expires_at) \
+         VALUES ($1, $2, $3, $4, clock_timestamp() + interval '90 seconds')",
+    )
+    .bind(s.workspace)
+    .bind(session)
+    .bind(s.person)
+    .bind(capability)
+    .execute(&s.su)
+    .await
+    .expect("seed window");
+
+    let seed_kill = |requester: Uuid| {
+        let su = s.su.clone();
+        let (workspace, channel, host) = (s.workspace, s.channel, s.host);
+        async move {
+            sqlx::query_scalar::<_, Uuid>(
+                "INSERT INTO work_control \
+                   (workspace_id, channel_id, requester_member_id, target_host_id, session_id, \
+                    kind, payload, status) \
+                 VALUES ($1, $2, $3, $4, $5, 'kill', '{}'::jsonb, 'dispatched') RETURNING id",
+            )
+            .bind(workspace)
+            .bind(channel)
+            .bind(requester)
+            .bind(host)
+            .bind(session)
+            .fetch_one(&su)
+            .await
+            .expect("seed kill")
+        }
+    };
+    let ids = |polled: &[Value]| -> Vec<String> {
+        polled
+            .iter()
+            .filter_map(|c| c["id"].as_str().map(str::to_string))
+            .collect()
+    };
+
+    // 1. A teammate's kill on the same host: withheld.
+    let teammate = seed_kill(s.other).await;
+    // 2. The host owner's kill of a session that is somebody else's: withheld.
+    let theirs = s.session().await;
+    sqlx::query("UPDATE work_session SET member_id = $2 WHERE id = $1")
+        .bind(theirs)
+        .bind(s.other)
+        .execute(&s.su)
+        .await
+        .expect("hand the session to the teammate");
+    let not_my_session: Uuid = sqlx::query_scalar(
+        "INSERT INTO work_control \
+           (workspace_id, channel_id, requester_member_id, target_host_id, session_id, \
+            kind, payload, status) \
+         VALUES ($1, $2, $3, $4, $5, 'kill', '{}'::jsonb, 'dispatched') RETURNING id",
+    )
+    .bind(s.workspace)
+    .bind(s.channel)
+    .bind(s.person)
+    .bind(s.host)
+    .bind(theirs)
+    .fetch_one(&s.su)
+    .await
+    .expect("seed kill of a teammate's session");
+    // The teammate's session needs its own window for rule 2 to be about the
+    // window: give it one on the same capability shape.
+    let cap2: Uuid = sqlx::query_scalar(
+        "INSERT INTO terminal_attach_capability \
+           (workspace_id, work_session_id, host_id, owner_member_id, token_hash, \
+            expires_at, mode, kind) \
+         VALUES ($1, $2, $3, $4, digest($5::text, 'sha256'), \
+                 clock_timestamp() + interval '60 seconds', 'controller', 'display') \
+         RETURNING id",
+    )
+    .bind(s.workspace)
+    .bind(theirs)
+    .bind(s.host)
+    .bind(s.other)
+    .bind(Uuid::new_v4().to_string())
+    .fetch_one(&s.su)
+    .await
+    .expect("seed capability 2");
+    sqlx::query(
+        "INSERT INTO display_control_window \
+           (workspace_id, work_session_id, grantee_member_id, capability_id, lease_expires_at) \
+         VALUES ($1, $2, $3, $4, clock_timestamp() + interval '90 seconds')",
+    )
+    .bind(s.workspace)
+    .bind(theirs)
+    .bind(s.other)
+    .bind(cap2)
+    .execute(&s.su)
+    .await
+    .expect("seed window 2");
+
+    let polled = ids(&s.poll().await);
+    assert!(
+        !polled.contains(&teammate.to_string()),
+        "a teammate's kill is withheld"
+    );
+    assert!(
+        !polled.contains(&not_my_session.to_string()),
+        "the host owner's kill of somebody else's session is withheld"
+    );
+
+    // 3. The session owner's own kill passes (control).
+    let (status, body) = s.kill(&s.access, session).await;
+    assert_eq!(status, 201, "{body}");
+    let polled = ids(&s.poll().await);
+    assert!(
+        polled.contains(&body["workControl"]["id"].as_str().unwrap().to_string()),
+        "the session owner's own kill passes their window"
+    );
+
+    // 4. On a workspace-scoped host even the owner's kill stays withheld.
+    sqlx::query("UPDATE work_host SET scope = 'workspace' WHERE id = $1")
+        .bind(s.host)
+        .execute(&s.su)
+        .await
+        .unwrap();
+    let polled = ids(&s.poll().await);
+    assert!(
+        !polled.contains(&body["workControl"]["id"].as_str().unwrap().to_string()),
+        "a shared host's kill is held back by the window like every control"
+    );
 }

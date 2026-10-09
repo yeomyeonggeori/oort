@@ -42,8 +42,9 @@
 //! * **Offline Mac.** Not refused: the row waits dispatched and runs when the
 //!   Mac polls again; `hostOnline` tells the client which it is.
 //! * **The control window does not hold it back.** The poll withholds
-//!   controls while a person holds the session's screen; a kill from the
-//!   host's own owner is exempt (`pending_controls_for_host_in_tx`).
+//!   controls while a person holds the session's screen; a kill whose
+//!   requester is the session's owner and the member host's owner is exempt
+//!   (`pending_controls_for_host_in_tx` checks all three in SQL).
 //!
 //! ## PATCH ended — what it does to a Mac session
 //!
@@ -173,9 +174,6 @@ async fn kill_in_tx(
     else {
         return Ok(Err(ApiError::not_found("work session not found")));
     };
-    if session.origin == "local_pty" {
-        return Ok(Err(local_session_control_refusal()));
-    }
     // ADR-0188 D3: the session's owner, and nobody else.
     if session.member_id != member_id {
         return Ok(Err(ApiError::coded(
@@ -183,6 +181,11 @@ async fn kill_in_tx(
             CODE_OWNER_ONLY,
             "only the session owner can stop it",
         )));
+    }
+    // A shared local pane takes no control from anyone (ADR-0190 D4), answered
+    // after the owner check as `PATCH …/work-sessions/{id}` does.
+    if session.origin == "local_pty" {
+        return Ok(Err(local_session_control_refusal()));
     }
     // Already over: nothing to stop and nothing to write.
     if session.status == "ended" {

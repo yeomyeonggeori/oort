@@ -528,7 +528,8 @@ pub async fn fetch_work_control_in_tx(
 /// session yet, and the one it will create is not the one anybody is typing
 /// into.
 ///
-/// One exception (#3628, ADR-0198 N4): a `kill` its own **host owner** asked for
+/// One exception (#3628, ADR-0198 N4): a `kill` asked for by the **session's owner
+/// who is also the member host's owner** (requester = session owner = host owner)
 /// is never withheld. The window is the owner's own keyboard on the owner's own
 /// screen, and 「즉시 멈추기」 must not wait for the lease to lapse; an agent's
 /// `kill` (a different requester) stays withheld as before (증보 3 D3).
@@ -608,6 +609,11 @@ pub async fn pending_controls_for_host_in_tx(
                     AND h.workspace_id = work_control.workspace_id \
                     AND h.scope = '{HOST_SCOPE_MEMBER}' \
                     AND h.owner_member_id = work_control.requester_member_id \
+              ) AND EXISTS ( \
+                 SELECT 1 FROM work_session s \
+                  WHERE s.id = work_control.session_id \
+                    AND s.workspace_id = work_control.workspace_id \
+                    AND s.member_id = work_control.requester_member_id \
               )) \
               OR NOT EXISTS ( \
                 SELECT 1 FROM display_control_window w \
