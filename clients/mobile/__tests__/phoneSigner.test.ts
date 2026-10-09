@@ -73,7 +73,7 @@ const context = (instanceId: string, serverTimeMs: number) => ({
 });
 
 describe('phone ↔ desktop: one intent, one statement', () => {
-  it('reads all five app requests', () => {
+  it('reads all nine app requests', () => {
     expect(entries.map(e => e.name).sort()).toEqual(
       [
         'control_v2_input_interrupt',
@@ -81,6 +81,10 @@ describe('phone ↔ desktop: one intent, one statement', () => {
         'control_v3_permission_once',
         'control_v2_spawn',
         'control_v2_spawn_resume',
+        'control_v4_spawn_harness_without_agent',
+        'control_v4_spawn_nfd_text_signs_as_nfc',
+        'control_v4_spawn_personal_agent_in_thread',
+        'control_v4_spawn_personal_agent_main_line',
       ].sort(),
     );
   });
@@ -95,11 +99,14 @@ describe('phone ↔ desktop: one intent, one statement', () => {
         context(e.request.instanceId, e.request.issuedAtMs),
         0,
       );
-      // #3128: an allow is v3 (it binds the preview hash), the rest v2.
+      // #3128: an allow is v3 (it binds the preview hash); #3592: a new task is
+      // v4; the rest v2.
       expect(input.schema).toBe(
         control.content.kind === 'permission'
           ? 'momo.human.control.v3'
-          : 'momo.human.control.v2',
+          : control.content.kind === 'spawn_task'
+            ? 'momo.human.control.v4'
+            : 'momo.human.control.v2',
       );
       const bytes = humanControlPayload(
         input.schema,
