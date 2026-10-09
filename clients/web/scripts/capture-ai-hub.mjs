@@ -2,8 +2,7 @@
 // =============================================================================
 // 「AI」 허브 입구 캡처 (AIH-3, #3393): 사이드바 AI 행, 허브 개요(웹·데스크탑), 네 구획 머리,
 // 옛 입구(설정 › AI 연결·에이전트 화면)의 「AI 허브로 옮겼어요」 한 줄.
-// AIH-4(#3399): 내 AI 계정 구획 — 데스크탑 세 상태(Claude 준비됨·Codex 로그인 필요+Claude 에이전트 /
-// 에이전트 없음 / 둘 다 준비됨+에이전트 둘)와 웹 두 상태(에이전트 있음 / 없음).
+// AIH-4(#3399) → #3568: 「내 도구」 구획 — 하네스 카드(데스크탑 두 상태, 웹 한 상태).
 //
 //   npm run build && OUT_DIR=~/.cache/momo-scratch/3393/captures node scripts/capture-ai-hub.mjs
 //
@@ -236,14 +235,21 @@ async function scenes(browser, origin, scheme, viewport) {
     check(`${tag} ${kind} 개요: 가로 넘침 0`, (await overflowX(page)) === 0);
     check(`${tag} ${kind} 개요: 사이드바 AI 행이 현재`, (await page.getByTestId("nav-ai").getAttribute("aria-current")) === "page");
     if (desktop) {
-      for (const [id, testId, label] of [["accounts", "ai-hub-pane-accounts", "내 AI 계정"], ["team-keys", "ai-hub-pane-teamKeys", "팀 AI 키"], ["agents", "ai-hub-pane-agents", "에이전트"], ["external", "ai-hub-pane-external", "외부 연결"]]) {
+      for (const [id, testId, label] of [["accounts", "ai-hub-pane-accounts", "내 도구"], ["team-keys", "ai-hub-pane-teamKeys", "팀 AI 키"], ["agents", "ai-hub-pane-agents", "에이전트"], ["external", "ai-hub-pane-external", "외부 연결"]]) {
         await page.goto(`${origin}/#/ai/${id}`);
         await page.getByTestId(testId).waitFor();
         await page.waitForTimeout(500);
         await shot(`route-${id}`);
         const h2 = await page.getByTestId(testId).locator("h2").first().textContent();
         check(`${tag} /ai/${id}: 머리 = ${label}`, h2 === label, String(h2));
-        check(`${tag} /ai/${id}: 탭 현재`, (await page.locator("[data-testid='ai-hub-tabs'] [aria-current='page']").textContent()) === label);
+        // 위 탭: 내 도구 구획이면 「내 도구」, 나머지는 「에이전트」 탭 안의 작은 탭이 구획을 말한다(ADR-0198 D3).
+        check(
+          `${tag} /ai/${id}: 탭 현재`,
+          id === "accounts"
+            ? (await page.locator("[data-testid='ai-hub-top-tabs'] [aria-current='page']").textContent()) === "내 도구"
+            : (await page.locator("[data-testid='ai-hub-top-tabs'] [aria-current='page']").textContent()) === "에이전트" &&
+                (await page.locator("[data-testid='ai-hub-tabs'] [aria-current='page']").textContent()) === label
+        );
         check(`${tag} /ai/${id}: 가로 넘침 0`, (await overflowX(page)) === 0);
       }
       // 옛 입구: 설정 › AI 연결 위의 한 줄, 누르면 허브.
@@ -253,7 +259,7 @@ async function scenes(browser, origin, scheme, viewport) {
       await shot("old-settings-ai");
       await page.getByTestId("ai-hub-moved-link").locator("a").click();
       await page.getByTestId("ai-hub-pane-accounts").waitFor();
-      check(`${tag} 설정 › AI 연결 → 허브 내 AI 계정`, page.url().endsWith("#/ai/accounts"), page.url());
+      check(`${tag} 설정 › AI 연결 → 허브 내 도구`, page.url().endsWith("#/ai/accounts"), page.url());
       await page.goto(`${origin}/#/settings?section=webhooks`);
       await page.getByTestId("ai-hub-moved-link").waitFor();
       await shot("old-settings-webhooks");
@@ -291,10 +297,10 @@ async function accountsScene(browser, origin, scheme, viewport, name, desktop, o
     }
     await page.goto(`${origin}/#/ai/accounts`);
     await page.getByTestId("ai-hub-pane-accounts").waitFor();
-    await page.getByTestId(desktop ? "ai-accounts-desktop" : "ai-accounts-web").waitFor();
-    // 에이전트 줄이 읽힐 때까지(데스크탑) / 목록이 설 때까지(웹).
+    await page.getByTestId("tool-cards").waitFor();
+    // 개인 에이전트 목록이 답한 뒤(스위치가 풀린 뒤)에 찍는다.
     await page.waitForFunction(
-      () => !document.querySelector("[data-testid='ai-accounts-my-agents']")?.textContent?.includes("불러오는 중") && !document.querySelector("[data-testid='ai-accounts-desktop'] [role='status']"),
+      () => document.querySelector("[data-testid='tool-card-claude-personal']")?.getAttribute("data-read") !== "loading",
       null,
       { timeout: 8000 },
     );
@@ -302,40 +308,26 @@ async function accountsScene(browser, origin, scheme, viewport, name, desktop, o
     await page.screenshot({ path: resolve(OUT_DIR, `accounts-${name}-${tag}.png`) });
     await assertions(page, `${tag} ${name}`);
     check(`${tag} ${name}: 가로 넘침 0`, (await overflowX(page)) === 0);
+    check(`${tag} ${name}: 「문의 중」이 없다`, !(await page.locator("body").innerText()).includes("문의 중"));
   } finally {
     await context.close();
   }
 }
 
+// 내 도구 카드 (#3568, ADR-0198 D3). 에이전트 줄 대신 하네스 카드가 로그인 × 호스트를 말한다.
 async function accountScenes(browser, origin, scheme, viewport) {
-  const mineCodex = conn(4, ids.team, { invocationScope: "owner_only", subscriptionHarness: "codex" });
   await accountsScene(browser, origin, scheme, viewport, "desktop-claude-ready", true, {}, async (page, label) => {
-    check(`${label}: Claude 로그인 준비됨`, (await text(page, "my-account-claude-state")).includes("준비됨"));
-    check(`${label}: Claude 에이전트 줄은 @성재-claude + 문의 중`, (await text(page, "my-account-claude-agent-text")) === "에이전트 @성재-claude" && (await text(page, "my-account-claude-agent-chip")) === "문의 중");
-    const claudeLine = await text(page, "my-account-claude-agent");
-    check(`${label}: Claude 줄에 연결됨·부를 수 있어요·나만 부름이 없다`, !/연결됨|부를 수 있|나만 부름/.test(claudeLine), claudeLine);
-    check(`${label}: Codex 로그인 필요 + 로그인 버튼 + 아직 에이전트 없음`, (await text(page, "my-account-codex-state")).includes("로그인 필요") && (await page.getByTestId("my-account-codex-login").isVisible()) && (await text(page, "my-account-codex-agent-text")) === "아직 에이전트 없음");
+    check(`${label}: Claude 연결됨`, (await text(page, "tool-card-claude-login-pill")).includes("연결됨"));
+    check(`${label}: Codex 다시 인증 + 로그인 버튼`, (await text(page, "tool-card-codex-login-pill")).includes("다시 인증") && (await page.getByTestId("tool-card-codex-login").isVisible()));
+    check(`${label}: 구독 에이전트 줄이 없다`, (await page.getByTestId("my-account-claude-agent").count()) === 0);
   });
-  await accountsScene(browser, origin, scheme, viewport, "desktop-no-agents", true, { connections: [] }, async (page, label) => {
-    check(`${label}: 두 줄 모두 아직 에이전트 없음`, (await text(page, "my-account-claude-agent-text")) === "아직 에이전트 없음" && (await text(page, "my-account-codex-agent-text")) === "아직 에이전트 없음");
-    check(`${label}: Claude 줄에도 문의 중 이유가 남는다(칩은 없다)`, (await page.getByTestId("my-account-claude-agent-chip").count()) === 0 && (await text(page, "my-account-claude-agent-detail")).includes("대신 구동하지 않아요"));
+  await accountsScene(browser, origin, scheme, viewport, "desktop-both-ready", true, { probes: BOTH_READY }, async (page, label) => {
+    check(`${label}: 두 카드 연결됨`, (await text(page, "tool-card-claude-login-pill")).includes("연결됨") && (await text(page, "tool-card-codex-login-pill")).includes("연결됨"));
   });
-  await accountsScene(browser, origin, scheme, viewport, "desktop-both-agents", true, { probes: BOTH_READY, connections: [...connections, mineCodex] }, async (page, label) => {
-    check(`${label}: Codex는 나만 부름(보수 모드와 무관)`, (await text(page, "my-account-codex-agent-chip")) === "나만 부름" && (await text(page, "my-account-codex-agent-text")).startsWith("에이전트 @"));
-    check(`${label}: Claude는 여전히 문의 중`, (await text(page, "my-account-claude-agent-chip")) === "문의 중");
+  await accountsScene(browser, origin, scheme, viewport, "web", false, {}, async (page, label) => {
+    check(`${label}: 로그인 상태를 말하지 않고 맥에서 확인한다고 한다`, (await page.getByTestId("tool-card-claude-login-pill").count()) === 0 && (await text(page, "tool-card-claude-web-note")).includes("내 맥에서 확인해요"));
+    check(`${label}: 앱 받기·열기 길`, (await page.getByTestId("ai-accounts-get-app").isVisible()) && (await page.getByTestId("ai-accounts-open-app").isVisible()));
   });
-  for (const [name, opts] of [["web-agents", {}], ["web-no-agents", { connections: [] }]]) {
-    await accountsScene(browser, origin, scheme, viewport, name, false, opts, async (page, label) => {
-      check(`${label}: 데스크탑에서 로그인한다는 말 + 앱 받기·열기 길`, (await text(page, "ai-accounts-web-notice")).includes("로그인은 데스크탑 앱에서 해요") && (await page.getByTestId("ai-accounts-get-app").isVisible()) && (await page.getByTestId("ai-accounts-open-app").isVisible()));
-      check(`${label}: 옛 막다른 길 줄이 없다`, (await page.getByTestId("subscription-entry-detail").count()) === 0);
-      if (name === "web-agents") {
-        check(`${label}: 내 Claude 에이전트는 문의 중(켜짐·부를 수 있어요 아님)`, (await text(page, "ai-accounts-agent-claude_code-chip")) === "문의 중" && !/연결됨|부를 수 있|나만 부름|켜짐/.test(await text(page, "ai-accounts-agent-claude_code")));
-        check(`${label}: 남의 에이전트는 없다`, !(await text(page, "ai-accounts-my-agents")).includes("서연-codex"));
-      } else {
-        check(`${label}: 에이전트가 없으면 빈 줄`, (await page.getByTestId("ai-accounts-my-agents-empty").isVisible()));
-      }
-    });
-  }
 }
 
 // =============================================================================

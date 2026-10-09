@@ -57,13 +57,13 @@ function useUnlinkState(ctl: UnlinkController | null): UnlinkControllerState | n
 }
 
 /** 컨트롤러의 로그인 진행 → 카드 판정 입력. 끝난 로그인(연결됨·실패)은 진행이 아니다. */
-export function loginProgressOf(state: LoginControllerState | null): LoginProgress {
+function loginProgressOf(state: LoginControllerState | null): LoginProgress {
   if (!state) return null;
   return state.status.phase === "waiting" || state.status.phase === "checking" ? state.status.phase : null;
 }
 
 /** 해제 컨트롤러의 상태 → 카드 판정 입력. */
-export function disconnectProgressOf(state: UnlinkControllerState | null): DisconnectProgress {
+function disconnectProgressOf(state: UnlinkControllerState | null): DisconnectProgress {
   if (!state) return { phase: "idle" };
   const status = state.status;
   switch (status.phase) {
@@ -250,7 +250,7 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
         <div className="flex min-w-0 flex-wrap items-center gap-2" data-testid={`tool-card-${harness}-actions`}>
           {needsLogin && loginFailed === null && (
             <Button type="button" size="sm" className="tap-target" onClick={startLogin} data-testid={`tool-card-${harness}-login`}>
-              {view === "reauth" ? TOOLS_COPY.reconnect : TOOLS_COPY.login}
+              {TOOLS_COPY.login}
             </Button>
           )}
           {loginFailed !== null && (

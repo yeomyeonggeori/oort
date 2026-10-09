@@ -206,10 +206,9 @@ async function scenes(browser, origin, scheme, viewport) {
     await page.getByTestId("create-agent-chooser").waitFor();
     await page.waitForTimeout(500);
     await page.screenshot({ path: resolve(OUT_DIR, `agents-create-chooser-${tag}.png`) });
-    check(`${tag} 만들기: 팀 · 내 구독(잠김, 데스크탑에서) · 외부`,
+    check(`${tag} 만들기: 팀 · 외부 둘뿐(구독은 내 도구, ADR-0198)`,
       (await page.getByTestId("create-kind-team").getAttribute("data-state")) === "available" &&
-      (await page.getByTestId("create-kind-mySubscription").getAttribute("data-state")) === "locked" &&
-      (await page.getByTestId("create-kind-mySubscription-audience").textContent()) === "데스크탑에서 해요" &&
+      (await page.getByTestId("create-kind-mySubscription").count()) === 0 &&
       (await page.getByTestId("create-kind-external").getAttribute("data-state")) === "available");
     check(`${tag} 만들기 창 가로 넘침 0`, (await overflowX(page)) === 0);
     await page.keyboard.press("Escape");
@@ -337,12 +336,12 @@ async function stateScenes(browser, origin, scheme) {
     await page.getByTestId("ai-agents-table").waitFor();
     await page.getByTestId("ai-agents-create").click();
     await page.getByTestId("create-agent-chooser").waitFor();
-    await page.waitForFunction(() => document.querySelector("[data-testid='create-kind-mySubscription']")?.getAttribute("data-state") === "available", null, { timeout: 8000 });
+    await page.waitForFunction(() => document.querySelector("[data-testid='create-kind-external']")?.getAttribute("data-state") === "available", null, { timeout: 8000 });
     await page.mouse.move(5, 5);
     await page.waitForTimeout(400);
     await page.screenshot({ path: resolve(OUT_DIR, `v2-chooser-all-unlocked-${tag}.png`) });
-    check(`${tag} 데스크탑: 셋 다 열림`, (await page.locator("[data-testid^='create-kind-'][data-state]").evaluateAll((els) => els.map((e) => e.getAttribute("data-state")))).join() === "available,available,available");
-    check(`${tag} 대상 칩: 소유자·관리자 / 데스크탑 / 소유자·관리자`, [await page.getByTestId("create-kind-team-audience").textContent(), await page.getByTestId("create-kind-mySubscription-audience").textContent(), await page.getByTestId("create-kind-external-audience").textContent()].join() === "소유자·관리자,데스크탑,소유자·관리자");
+    check(`${tag} 데스크탑: 둘 다 열림`, (await page.locator("[data-testid^='create-kind-'][data-state]").evaluateAll((els) => els.map((e) => e.getAttribute("data-state")))).join() === "available,available");
+    check(`${tag} 대상 칩: 소유자·관리자 / 소유자·관리자`, [await page.getByTestId("create-kind-team-audience").textContent(), await page.getByTestId("create-kind-external-audience").textContent()].join() === "소유자·관리자,소유자·관리자");
   }, true);
 }
 

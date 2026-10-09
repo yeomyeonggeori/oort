@@ -67,7 +67,7 @@ export const HARNESS_LOGIN_VIEW_LABEL: Record<HarnessLoginView, string> = {
   disconnected: "연결 안 됨",
   "logging-in": "로그인 중",
   disconnecting: "연결 끊는 중",
-  checking: "확인하는 중",
+  checking: "확인 중",
   unknown: "확인 못 했어요",
   "not-installed": "설치 안 됨",
 };
@@ -239,7 +239,6 @@ export const TOOLS_COPY = {
   webSubtitle: "내 맥의 호스트 상태와 개인 에이전트를 볼 수 있어요. 로그인은 데스크탑 앱에서 해요.",
   webLoginNote: "로그인 상태는 내 맥에서 확인해요.",
   login: "로그인",
-  reconnect: "다시 인증",
   open: "로그인 창 열기",
   cancel: "로그인 취소",
   disconnect: "연결 끊기",
