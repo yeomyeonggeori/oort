@@ -69,6 +69,7 @@ fn facts(brain: AgentBrain) -> AgentReadFacts {
         subscription_harness: (brain == AgentBrain::Subscription)
             .then_some(SubscriptionHarness::ClaudeCode),
         personal: None,
+        subscription_retired: false,
     }
 }
 
@@ -95,6 +96,7 @@ fn connection() -> HostedAgentConnectionDto {
         owner: None,
         host_online: None,
         brain_unavailable_reason: None,
+        subscription_retired: None,
     }
 }
 
@@ -109,6 +111,7 @@ fn the_four_read_fields_are_in_both_schemas_and_on_the_wire() {
             "owner",
             "hostOnline",
             "brainUnavailableReason",
+            "subscriptionRetired",
         ] {
             assert!(names.contains(&field.to_string()), "{schema} lacks {field}");
         }
@@ -135,6 +138,16 @@ fn the_four_read_fields_are_in_both_schemas_and_on_the_wire() {
         .unwrap()
         .get("brainUnavailableReason")
         .is_none());
+    // #3567: the 「이전 구독 에이전트」 marker is `true` or absent, never `false`.
+    assert!(wire.get("subscriptionRetired").is_none(), "{wire}");
+    let mut retired_facts = facts(AgentBrain::External);
+    retired_facts.subscription_retired = true;
+    let mut retired = connection();
+    retired.apply_read_facts(&retired_facts, false);
+    assert_eq!(
+        serde_json::to_value(&retired).unwrap()["subscriptionRetired"],
+        true
+    );
     // A row with no facts (human, or an older code path) carries none of them.
     let bare = serde_json::to_value(connection()).unwrap();
     for field in ["brain", "callableBy", "owner", "hostOnline"] {

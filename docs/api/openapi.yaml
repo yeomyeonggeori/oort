@@ -12667,6 +12667,15 @@ components:
             harness: {type: string, enum: [claude_code, codex]}
             enabled: {type: boolean}
             mentionable: {type: boolean}
+        subscriptionRetired:
+          type: boolean
+          enum: [true]
+          description: >
+            #3567 (ADR-0198 amendment 1 D2). Present, and `true`, only on a former subscription agent
+            the retirement tool switched off (the 「이전 구독 에이전트」 marker). The member is
+            suspended, never deleted, so every past message keeps its author: a client draws the
+            marker instead of hiding the author, and offers no `@` candidate for it. Absent
+            otherwise (a converted personal agent carries `personalAgent`, not this).
         hostOnline:
           type: boolean
           description: >
@@ -13606,6 +13615,15 @@ components:
             used on this server. `claude_subscription_agent_paused` = a Claude subscription agent
             on an instance that has not opted in (MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED, off by
             default while Anthropic's reply is pending). Status only; it blocks nothing by itself.
+        subscriptionRetired:
+          type: boolean
+          enum: [true]
+          description: >
+            #3567 (ADR-0198 amendment 1 D2). Present, and `true`, only on a former subscription agent
+            the retirement tool switched off (the 「이전 구독 에이전트」 marker). The member is
+            suspended, never deleted, so every past message keeps its author: a client draws the
+            marker instead of hiding the author, and offers no `@` candidate for it. Absent
+            otherwise (a converted personal agent carries `personalAgent`, not this).
         hostOnline:
           type: boolean
           description: >
