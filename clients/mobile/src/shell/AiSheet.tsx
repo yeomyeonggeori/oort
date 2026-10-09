@@ -13,7 +13,7 @@ import {
   personalAgentRows,
 } from '../features/ai/aiSheetModel';
 import {useWorkHosts} from '../features/agents/queries';
-import {macState, ownMacs} from '../features/work/ask/model';
+import {macState, ownMacs, type HarnessKey} from '../features/work/ask/model';
 import {useDirectory} from '../features/workspace/queries';
 import {haptics} from '../lib/haptics';
 import {useSession} from '../session/useSession';
@@ -61,7 +61,7 @@ export function AiSheet({
   /** 「에이전트 부르기」 — 에이전트 목록으로. */
   onOpenAgentList: () => void;
   /** 「내 맥에 물어보기」 — T6b 시트로. */
-  onAskMac: () => void;
+  onAskMac: (harness?: HarnessKey) => void;
   /** 시험·캡처가 게이트를 강제한다. 앱은 넘기지 않는다. */
   gateOpen?: boolean;
 }): React.JSX.Element {
@@ -88,7 +88,7 @@ function SheetBody({
   onClose: () => void;
   onDelegate: () => void;
   onOpenAgentList: () => void;
-  onAskMac: () => void;
+  onAskMac: (harness?: HarnessKey) => void;
   gateOpen?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -152,7 +152,7 @@ function SheetBody({
                 title="내 맥에 물어보기"
                 detail="내 맥의 Claude Code 같은 도구에 물어보거나 일을 시켜요."
                 chevron
-                onPress={choose(onAskMac)}
+                onPress={choose(() => onAskMac())}
                 accessibilityHint="내 맥에 보내는 시트를 엽니다."
                 trailing={
                   chip === null ? undefined : (
@@ -174,7 +174,9 @@ function SheetBody({
                   title={agent.label}
                   detail={`${agent.harnessLabel} · 나만 쓸 수 있어요.`}
                   separated={index > 0}
-                  onPress={choose(onAskMac)}
+                  chevron
+                  // 고른 에이전트의 하네스를 시트가 미리 고른다 — 행을 고른 뜻이 시트까지 간다.
+                  onPress={choose(() => onAskMac(agent.harness ?? undefined))}
                   accessibilityHint="내 맥에 보내는 시트를 엽니다."
                   trailing={
                     <View style={styles.marks}>
@@ -238,22 +240,22 @@ const buildStyles = (color: Palette) =>
       backgroundColor: color.agentSurface,
       borderRadius: 999,
       paddingHorizontal: space.sm,
-      paddingVertical: 2,
+      paddingVertical: space.xs,
       overflow: 'hidden',
     },
     chip: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 6,
+      gap: space.xs,
       borderRadius: 999,
       paddingHorizontal: space.sm,
-      paddingVertical: 2,
+      paddingVertical: space.xs,
       marginHorizontal: 0,
       borderWidth: StyleSheet.hairlineWidth,
     },
     chipOn: {backgroundColor: color.okSurface, borderColor: color.okBorder},
     chipOff: {backgroundColor: 'transparent', borderColor: color.border},
-    dot: {width: 6, height: 6, borderRadius: 3},
+    dot: {width: 6, height: 6, borderRadius: 999},
     dotOn: {backgroundColor: color.ok},
     dotOff: {backgroundColor: color.textFaint},
     chipLabel: {fontSize: ds2Type.caption, fontWeight: '600'},

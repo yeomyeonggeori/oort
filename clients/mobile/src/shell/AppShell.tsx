@@ -47,6 +47,7 @@ import {SessionProvider, useSession} from '../session/useSession';
 import {AiSheet} from './AiSheet';
 import {AskMacSheet} from './AskMacSheet';
 import {haptics} from '../lib/haptics';
+import type {HarnessKey} from '../features/work/ask/model';
 import {DelegateWorkSheet, type DelegatePrefill} from './DelegateWorkSheet';
 import {NewChannelSheet} from './NewChannelSheet';
 import {NewMessageSheet} from './NewMessageSheet';
@@ -151,6 +152,8 @@ export function Shell({
   const closeDelegate = useCallback(() => setDelegate(null), []);
   // 「내 맥에 보내기」 시트(#3597). 맥이 꺼져 있을 때 사람이 누르면 N8 시트로 넘어간다.
   const [askMac, setAskMac] = useState(false);
+  // 「개인 에이전트」 줄이 고른 하네스. 일반 입구로 열면 없다.
+  const [askHarness, setAskHarness] = useState<HarnessKey | undefined>(undefined);
   // 「AI」 시트(N10 #3598). + 메뉴의 AI 줄이 연다. 줄을 고르면 닫히고 그 줄의 시트·목록이 선다.
   const [ai, setAi] = useState(false);
   const closeAi = useCallback(() => setAi(false), []);
@@ -506,14 +509,16 @@ export function Shell({
             setAi(false);
             onOpenAgentList();
           }}
-          onAskMac={() => {
+          onAskMac={harness => {
             setAi(false);
+            setAskHarness(harness);
             setAskMac(true);
           }}
         />
       ) : null}
       {askMac ? (
         <AskMacSheet
+          initialHarness={askHarness}
           onClose={closeAskMac}
           onUseAgent={() => {
             setAskMac(false);

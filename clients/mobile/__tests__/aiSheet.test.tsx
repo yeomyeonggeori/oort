@@ -78,7 +78,7 @@ function rosterMember(fields: Record<string, unknown>) {
 
 function personalAgent(
   id: string,
-  over: {ownerId?: string; enabled?: boolean; retired?: boolean; label?: string} = {},
+  over: {ownerId?: string; enabled?: boolean; retired?: boolean; label?: string; harness?: string} = {},
 ) {
   return rosterMember({
     id,
@@ -90,7 +90,7 @@ function personalAgent(
       label: over.label ?? '내 Claude Code',
       ownerId: over.ownerId ?? SELF_ID,
       ownerDisplayName: '곽성재',
-      harness: 'claude',
+      harness: over.harness ?? 'claude',
       enabled: over.enabled ?? true,
       mentionable: true,
     },
@@ -427,9 +427,10 @@ describe('행 선택', () => {
     expect(screen.queryByTestId('delegate-sheet') !== null).toBe(false);
   });
 
-  it('개인 에이전트 줄도 T6b 시트로 이어진다', async () => {
+  it('개인 에이전트 줄은 T6b 시트를 열고, 그 에이전트의 하네스를 미리 고른다', async () => {
     wirePort();
-    rosterWire = [...HUMANS, personalAgent(MINE)];
+    rosterWire = [...HUMANS, personalAgent(MINE, {harness: 'codex'})];
+    hostsWire = [host(true, {folders: [{id: 'fq', displayName: '질문용 폴더', kind: 'question'}], defaultFolderId: 'fq'})];
     installFetch();
     await renderReady();
     await waitFor(() => expect(queryClient?.getQueryData(['roster', WS])).toBeTruthy());
@@ -437,6 +438,8 @@ describe('행 선택', () => {
     await waitFor(() => expect(screen.getByTestId(`ai-row-personal-${MINE}`)).toBeTruthy());
     fireEvent.press(screen.getByTestId(`ai-row-personal-${MINE}`));
     expect(screen.getByTestId('ask-mac-sheet')).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('ask-mac-destination-line')).toBeTruthy());
+    expect(screen.getByTestId('ask-mac-destination-line').props.children as string).toContain('Codex');
   });
 
   it('「에이전트 부르기」는 에이전트 목록을 연다', async () => {

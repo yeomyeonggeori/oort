@@ -36,12 +36,14 @@ export interface PersonalAgentRow {
   label: string;
   /** 하네스 이름 — 아는 키는 사람 말로, 모르는 키는 그대로. */
   harnessLabel: string;
+  /** 아는 하네스 키면 그 키(「내 맥에 보내기」가 미리 고른다), 모르면 `null`. */
+  harness: HarnessKey | null;
 }
 
-function harnessLabelOf(harness: string): string {
+function knownHarness(harness: string): HarnessKey | null {
   return Object.prototype.hasOwnProperty.call(HARNESS_LABEL, harness)
-    ? HARNESS_LABEL[harness as HarnessKey]
-    : harness;
+    ? (harness as HarnessKey)
+    : null;
 }
 
 /**
@@ -75,10 +77,12 @@ export function personalAgentRows(
       continue;
     }
     if (!uuidEq(value.ownerId, selfId)) continue;
+    const known = knownHarness(value.harness);
     rows.push({
       id: member.id,
       label: value.label.trim(),
-      harnessLabel: harnessLabelOf(value.harness),
+      harnessLabel: known === null ? value.harness : HARNESS_LABEL[known],
+      harness: known,
     });
   }
   return rows;
