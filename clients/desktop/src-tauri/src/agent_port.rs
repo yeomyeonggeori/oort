@@ -11,6 +11,13 @@
 //   agent_port_connect               -> { outcome: "connected" } | { outcome: "manual", reason }
 //   agent_port_replace_credential    -> boolean   (the ADR-0193 D16 swap, no CLI call)
 //   agent_port_disconnect            -> boolean
+//   agent_port_retire_legacy         -> { outcome, removedMcp }   (#3567, once per Mac)
+//
+// #3567 (ADR-0198 증보 1 D2): the app no longer registers subscription agents.
+// Sign-in stops at "connected" (the web build flag, `SUBSCRIPTION_REGISTER_BUILD_FLAG`),
+// so `agent_port_connect` has no caller. A Mac the old app registered still holds
+// an `oort` entry in the CLI and a store entry marked `added`; `retire_legacy`
+// removes both exactly once (see its docs). Nothing else here changed.
 //
 // The boundary (ADR-0190 D3-h, D3-i):
 //
@@ -383,7 +390,38 @@ impl Store {
     fn remove_entry(&self, agent_id: &str) -> bool {
         std::fs::remove_file(self.entry_path(agent_id)).is_ok()
     }
+
+    /// Agent ids that have a store entry (`<uuid>.entry`), sorted.
+    fn entry_ids(&self) -> Vec<String> {
+        let Ok(read) = std::fs::read_dir(&self.dir) else {
+            return Vec::new();
+        };
+        let mut ids: Vec<String> = read
+            .filter_map(|item| item.ok())
+            .filter_map(|item| item.file_name().into_string().ok())
+            .filter_map(|name| name.strip_suffix(".entry").map(str::to_string))
+            .filter(|id| is_agent_id(id))
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    fn retired_marker_path(&self) -> PathBuf {
+        self.dir.join(RETIRED_MARKER)
+    }
+
+    fn retire_attempts_path(&self) -> PathBuf {
+        self.dir.join(RETIRE_ATTEMPTS)
+    }
 }
+
+/// Written once the legacy registration is cleaned: the one-time cleanup never runs again.
+const RETIRED_MARKER: &str = "legacy-retired-v1";
+/// How many times a failing `mcp remove` is retried (one per launch) before the
+/// store entries are dropped anyway. A person who removed the `oort` entry by hand
+/// would otherwise be retried for ever.
+const RETIRE_ATTEMPTS: &str = "legacy-retire-attempts";
+pub const RETIRE_MAX_ATTEMPTS: u32 = 3;
 
 // ---------------------------------------------------------------------------
 // The helper the CLI runs (`<app> <agent id>`)
@@ -605,6 +643,101 @@ pub fn disconnect(agent_id: &str, machine: &Machine<'_>) -> Result<bool, String>
     Ok(removed || !entry.added)
 }
 
+/// What the one-time cleanup of the old registration did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RetireState {
+    /// The marker file exists: it ran before, nothing happens now.
+    AlreadyDone,
+    /// Cleaned in this call (store entries gone, marker written).
+    Cleaned,
+    /// `mcp remove` failed; the entries stay so the next launch tries again.
+    Pending,
+    /// `mcp remove` failed `RETIRE_MAX_ATTEMPTS` times; the entries were dropped anyway.
+    GaveUp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetireOutcome {
+    pub outcome: RetireState,
+    /// `claude mcp remove --scope user oort` ran and exited 0 in this call.
+    pub removed_mcp: bool,
+}
+
+/// #3567 (ADR-0198 증보 1 D2 4): retire what the old app registered, **once**.
+///
+/// * The marker file (`legacy-retired-v1`) makes it once per Mac: a later call
+///   returns [`RetireState::AlreadyDone`] and runs nothing.
+/// * `claude mcp remove --scope user oort` runs only when a store entry is marked
+///   `added` (the app's own `add-json` succeeded) **and** that agent owns the
+///   `oort` slot (`oort-owner`) — the same two conditions as [`disconnect`], so
+///   an `oort` entry the person added by hand is never removed. A Mac the old app
+///   never registered has no such entry: no CLI command runs at all.
+/// * On success every store entry (they hold connection values the server has
+///   revoked anyway) and the owner file go, then the marker is written.
+/// * On failure the entries stay, so the next launch tries again, up to
+///   [`RETIRE_MAX_ATTEMPTS`] launches; after that the entries are dropped and the
+///   marker written, so a hand-removed `oort` entry cannot cost a command per launch.
+pub fn retire_legacy(machine: &Machine<'_>) -> RetireOutcome {
+    let store = Store::under_home(machine.home);
+    if store.retired_marker_path().exists() {
+        return RetireOutcome {
+            outcome: RetireState::AlreadyDone,
+            removed_mcp: false,
+        };
+    }
+    let owner = store.owner();
+    let ids = store.entry_ids();
+    let owns_marked_slot = ids.iter().any(|id| {
+        owner.as_deref() == Some(id.as_str())
+            && store.read_entry(id).is_some_and(|entry| entry.added)
+    });
+    let mut removed_mcp = false;
+    if owns_marked_slot {
+        removed_mcp = harness_path::find_on_path("claude", machine.search_path)
+            .and_then(|program| run_exit_only(&program, command_row("remove"), None, machine))
+            .is_some_and(|status| status.success());
+        if !removed_mcp {
+            let attempts = std::fs::read_to_string(store.retire_attempts_path())
+                .ok()
+                .and_then(|text| text.trim().parse::<u32>().ok())
+                .unwrap_or(0)
+                + 1;
+            if attempts < RETIRE_MAX_ATTEMPTS {
+                let _ = store.ensure_dir();
+                let _ = std::fs::write(store.retire_attempts_path(), attempts.to_string());
+                return RetireOutcome {
+                    outcome: RetireState::Pending,
+                    removed_mcp: false,
+                };
+            }
+        }
+    }
+    for id in &ids {
+        store.remove_entry(id);
+    }
+    let _ = std::fs::remove_file(store.owner_path());
+    let _ = std::fs::remove_file(store.retire_attempts_path());
+    let gave_up = owns_marked_slot && !removed_mcp;
+    // No marker means the next launch would retry; a store that cannot be written
+    // (read-only home) is reported as pending rather than silently "done".
+    if store.ensure_dir().is_err() || std::fs::write(store.retired_marker_path(), "done").is_err() {
+        return RetireOutcome {
+            outcome: RetireState::Pending,
+            removed_mcp,
+        };
+    }
+    RetireOutcome {
+        outcome: if gave_up {
+            RetireState::GaveUp
+        } else {
+            RetireState::Cleaned
+        },
+        removed_mcp,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // This install (idempotency key for the server)
 // ---------------------------------------------------------------------------
@@ -726,6 +859,11 @@ pub async fn agent_port_replace_credential(request: ReplaceRequest) -> Result<bo
 #[tauri::command]
 pub async fn agent_port_disconnect(request: DisconnectRequest) -> Result<bool, String> {
     blocking(move || with_machine(|machine| disconnect(&request.agent_id, machine))?).await
+}
+
+#[tauri::command]
+pub async fn agent_port_retire_legacy() -> Result<RetireOutcome, String> {
+    blocking(move || with_machine(retire_legacy)).await
 }
 
 #[cfg(test)]
@@ -1216,6 +1354,102 @@ mod tests {
             );
         }
 
+        fn marked_entry(sandbox: &Sandbox, id: &str, added: bool) {
+            sandbox
+                .store()
+                .write_entry(
+                    id,
+                    &Entry {
+                        endpoint: ENDPOINT.into(),
+                        credential: VALUE.into(),
+                        added,
+                    },
+                )
+                .unwrap();
+        }
+
+        #[test]
+        fn the_legacy_cleanup_removes_the_cli_entry_once_and_never_again() {
+            let sandbox = Sandbox::new("retire-once", 0, true);
+            connect(&sandbox.request(), &sandbox.machine()).unwrap();
+            std::fs::remove_file(&sandbox.argv).unwrap();
+
+            let first = retire_legacy(&sandbox.machine());
+            assert_eq!(
+                first,
+                RetireOutcome {
+                    outcome: RetireState::Cleaned,
+                    removed_mcp: true
+                }
+            );
+            assert_eq!(
+                sandbox.recorded_argv(),
+                ["mcp", "remove", "--scope", "user", "oort"]
+            );
+            assert!(sandbox.store().entry_ids().is_empty(), "entries stayed");
+            assert!(sandbox.store().owner().is_none());
+
+            // A device the old app registers again later (or a repeat launch): no command.
+            std::fs::remove_file(&sandbox.argv).unwrap();
+            marked_entry(&sandbox, AGENT, true);
+            sandbox.store().write_owner(AGENT).unwrap();
+            let second = retire_legacy(&sandbox.machine());
+            assert_eq!(second.outcome, RetireState::AlreadyDone);
+            assert!(!sandbox.argv.exists(), "the cleanup ran twice");
+        }
+
+        #[test]
+        fn the_legacy_cleanup_never_touches_an_oort_entry_the_app_did_not_add() {
+            let sandbox = Sandbox::new("retire-foreign", 0, true);
+            // No store at all: a Mac the old app never registered.
+            let none = retire_legacy(&sandbox.machine());
+            assert_eq!(none.outcome, RetireState::Cleaned);
+            assert!(!none.removed_mcp);
+            assert!(!sandbox.argv.exists(), "mcp remove ran on a clean Mac");
+
+            // An entry whose `add-json` never succeeded, and one marked `added`
+            // that does not own the slot: neither may reach `mcp remove`.
+            let sandbox = Sandbox::new("retire-foreign-2", 0, true);
+            marked_entry(&sandbox, AGENT, false);
+            sandbox.store().write_owner(AGENT).unwrap();
+            marked_entry(&sandbox, OTHER_AGENT, true);
+            let outcome = retire_legacy(&sandbox.machine());
+            assert_eq!(outcome.outcome, RetireState::Cleaned);
+            assert!(!sandbox.argv.exists(), "mcp remove ran for a foreign entry");
+            assert!(sandbox.store().entry_ids().is_empty());
+        }
+
+        #[test]
+        fn a_failing_remove_is_retried_a_few_launches_then_given_up() {
+            let sandbox = Sandbox::new("retire-retry", 1, true);
+            // The fake CLI exits 1, but an added entry needs to exist.
+            marked_entry(&sandbox, AGENT, true);
+            sandbox.store().write_owner(AGENT).unwrap();
+            for attempt in 1..RETIRE_MAX_ATTEMPTS {
+                let outcome = retire_legacy(&sandbox.machine());
+                assert_eq!(outcome.outcome, RetireState::Pending, "attempt {attempt}");
+                assert!(
+                    sandbox.store().read_entry(AGENT).is_some(),
+                    "the marker entry must stay while the removal is pending"
+                );
+            }
+            let last = retire_legacy(&sandbox.machine());
+            assert_eq!(last.outcome, RetireState::GaveUp);
+            assert!(!last.removed_mcp);
+            assert!(sandbox.store().entry_ids().is_empty());
+            assert_eq!(retire_legacy(&sandbox.machine()).outcome, RetireState::AlreadyDone);
+        }
+
+        #[test]
+        fn a_missing_cli_with_a_marked_entry_is_pending_not_done() {
+            let sandbox = Sandbox::new("retire-nocli", 0, false);
+            marked_entry(&sandbox, AGENT, true);
+            sandbox.store().write_owner(AGENT).unwrap();
+            let outcome = retire_legacy(&sandbox.machine());
+            assert_eq!(outcome.outcome, RetireState::Pending);
+            assert!(sandbox.store().read_entry(AGENT).is_some());
+        }
+
         #[test]
         fn the_install_id_is_stable_and_server_valid() {
             let sandbox = Sandbox::new("device", 0, false);
@@ -1267,6 +1501,9 @@ mod tests {
         }
         // One place builds a `Command`, and only the allowlist rows reach it.
         assert_eq!(production.matches("Command::new(").count(), 1);
-        assert_eq!(production.matches("run_exit_only(&program").count(), 2);
+        // `connect` (add), `disconnect` (remove) and the one-time `retire_legacy`
+        // (remove, #3567). Every call site names an allowlist row by id.
+        assert_eq!(production.matches("run_exit_only(&program").count(), 3);
+        assert!(production.contains("run_exit_only(&program, command_row(\"remove\"), None, machine)"));
     }
 }
