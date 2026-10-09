@@ -134,9 +134,16 @@ pub enum Program {
         profile: String,
     },
     /// The official CLI's sign-out: one row of `harness_profile::LOGOUT_COMMANDS`
-    /// (ADR-0190 D3-f A2·A5). Always a profile folder — there is no sign-out
-    /// of this Mac's default sign-in here.
-    Logout { id: String, profile: String },
+    /// (ADR-0190 D3-f A2·A5). With a `profile` label it signs out of that
+    /// checked profile folder. Without one it is the same fixed row run in the
+    /// CLI's own default location: the 「내 도구」 card's 「연결 끊기」
+    /// (ADR-0198 D3, #3568). The argv is the same allowlisted row either way;
+    /// the webview still names a harness id and a label, never a path or args.
+    Logout {
+        id: String,
+        #[serde(default)]
+        profile: Option<String>,
+    },
 }
 
 /// How the CLI finishes its sign-in. `Browser` = the CLI opens the system
@@ -308,7 +315,12 @@ pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan,
                 .iter()
                 .find(|row| row.id == id.as_str())
                 .ok_or_else(|| format!("refused: no sign-out for {id:?}"))?;
-            let profile = profile_env(host, row.id, profile)?;
+            // Checked before PATH: a missing or tampered profile folder is
+            // refused, never quietly replaced by the default sign-out.
+            let profile = match profile {
+                Some(label) => Some(profile_env(host, row.id, label)?),
+                None => None,
+            };
             let program = harness_path::find_on_path(row.id, &host.path)
                 .ok_or_else(|| format!("refused: {id} is not installed on this machine"))?;
             Ok(SpawnPlan {
@@ -318,7 +330,7 @@ pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan,
                 size,
                 path: Some(host.path.clone()),
                 hooks: false,
-                profile: Some(profile),
+                profile,
             })
         }
         Program::Harness { id, profile } => {
@@ -2142,7 +2154,7 @@ mod tests {
         SpawnRequest {
             program: Program::Logout {
                 id: id.into(),
-                profile: profile.into(),
+                profile: Some(profile.into()),
             },
             cwd: None,
             cols: 80,
@@ -2270,10 +2282,18 @@ mod tests {
             ok.program,
             profile_login_request("codex", LoginMethod::Browser, "개인").program
         );
-        for bad in [
-            // No sign-out of the default location: the profile is required.
+        // The default location (ADR-0198 D3): no label, or an explicit null.
+        for default in [
             r#"{"program":{"kind":"logout","id":"claude"},"cols":80,"rows":24}"#,
-            r#"{"program":{"kind":"logout","id":"claude","profile":null},"cols":80,"rows":24}"#,
+            r#"{"program":{"kind":"logout","id":"codex","profile":null},"cols":80,"rows":24}"#,
+        ] {
+            let parsed: SpawnRequest = serde_json::from_str(default).unwrap();
+            assert!(matches!(
+                parsed.program,
+                Program::Logout { profile: None, .. }
+            ));
+        }
+        for bad in [
             r#"{"program":{"kind":"logout","id":"claude","profile":"a","path":"/tmp"},"cols":80,"rows":24}"#,
             r#"{"program":{"kind":"logout","id":"claude","profile":"a","args":["--all"]},"cols":80,"rows":24}"#,
         ] {
@@ -2282,6 +2302,55 @@ mod tests {
                 "accepted {bad}"
             );
         }
+    }
+
+    /// ADR-0198 D3 (#3568): the 「연결 끊기」 of this Mac's default sign-in runs
+    /// the same allowlisted row with no folder variable, so the CLI signs out of
+    /// its own default location. Still refuses a cwd, an unknown harness and a
+    /// harness that is not installed.
+    #[test]
+    fn the_default_sign_out_is_the_fixed_row_without_a_folder_variable() {
+        let bin = login_bin("default-logout");
+        let host = profile_host("default-logout", &bin);
+        for (id, args) in [
+            ("claude", vec!["auth", "logout"]),
+            ("codex", vec!["logout"]),
+        ] {
+            let plan = plan_spawn(
+                &SpawnRequest {
+                    program: Program::Logout {
+                        id: id.into(),
+                        profile: None,
+                    },
+                    cwd: None,
+                    cols: 80,
+                    rows: 24,
+                },
+                &host,
+            )
+            .unwrap();
+            assert_eq!(plan.args, args);
+            assert_eq!(plan.profile, None);
+            assert_eq!(plan.program, bin.join(id));
+        }
+        for (id, cwd) in [("grok", None), ("sh", None), ("claude", Some("/tmp"))] {
+            let err = plan_spawn(
+                &SpawnRequest {
+                    program: Program::Logout {
+                        id: id.into(),
+                        profile: None,
+                    },
+                    cwd: cwd.map(String::from),
+                    cols: 80,
+                    rows: 24,
+                },
+                &host,
+            )
+            .unwrap_err();
+            assert!(err.starts_with("refused"), "{id}: {err}");
+        }
+        std::fs::remove_dir_all(&host.home).ok();
+        std::fs::remove_dir_all(bin).ok();
     }
 
     #[test]

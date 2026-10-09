@@ -284,17 +284,12 @@ export const AI_HUB_COPY = {
     "기능마다 먼저 쓸 AI를 골라요. 고르지 않으면 팀 AI 키로 답해요. 내 구독은 내 줄에서만 고를 수 있고, 팀 에이전트는 내 구독을 쓰지 않아요.",
   agentsPageTagline: "@로 부르는 AI 멤버예요.",
   subscriptionHostOfflineDetail: "켜지면 답해요. 팀 키로 대신하지 않아요.",
-  /** 에이전트 만들기 3종 (시안 5번 패널). */
+  /** 에이전트 만들기 2종. 내 구독은 에이전트가 아니라 「내 도구」다(ADR-0198 D1). */
   createKinds: {
     team: {
       title: "팀 에이전트",
       description: "팀 AI 키로 답해요. 누구나 부르고, 비용은 팀 몫이에요.",
       audience: "소유자·관리자",
-    },
-    mySubscription: {
-      title: "내 Claude Code·Codex",
-      description: "내 구독으로 답해요. 나만 부르고, 비용은 내 구독이에요.",
-      audience: "데스크탑",
     },
     external: {
       title: "다른 곳에서 도는 에이전트",
@@ -1018,6 +1013,11 @@ export const AI_HUB_NAV_COPY = {
   agentsPageLine: "설정·권한·비용은 AI 화면에서",
   openAiAction: "AI에서 열기",
   tabsLabel: "AI 구획",
+  /** 허브의 두 탭 (ADR-0198 D3). 에이전트(동료)와 내 도구(내 구독 CLI). */
+  topTabsLabel: "AI 허브",
+  agentsTab: "에이전트",
+  toolsTab: "내 도구",
+  agentsSubTabsLabel: "에이전트 구획",
   overviewTab: "개요",
   paneNote: "이 화면은 지금 있는 설정을 그대로 보여줘요. 곧 이 자리에 맞게 다시 짜요.",
 } as const;
@@ -1029,7 +1029,7 @@ export const AI_HUB_OVERVIEW_COPY = {
     teamKeys: "팀이 같이 써요",
   },
   openLink: {
-    accounts: "내 AI 계정 열기",
+    accounts: "내 도구 열기",
     teamKeys: "팀 AI 키 열기",
     agents: "에이전트 열기",
     external: "외부 연결 열기",
@@ -1055,8 +1055,8 @@ export const AI_HUB_OVERVIEW_COPY = {
     openai: "OpenAI",
   },
   nextAction: {
-    loginNeeded: "Claude Code 구독을 채널에서 @로 부르려면 먼저 「내 AI 계정」에서 로그인하세요. 로그인하면 바로 이어서 에이전트로 만들 수 있어요.",
-    goAccounts: "내 AI 계정으로 가기",
+    loginNeeded: "Claude Code나 Codex 구독을 쓰려면 먼저 「내 도구」에서 로그인하세요.",
+    goAccounts: "내 도구로 가기",
   },
   webNote: "웹에서도 같은 화면이 열려요. 로그인이 필요한 줄만 「데스크탑 앱에서 해요」로 바뀌어요.",
   createAgent: "에이전트 만들기",
