@@ -150,7 +150,10 @@ fn validated_spawn(
     }
     .canonical_bytes()
     .is_ok_and(|bytes| bytes == label.as_bytes());
-    if label != request.label || !label_nfc || label.chars().any(char::is_control) {
+    if label != request.label
+        || !label_nfc
+        || momo_wire::human_control::spawn_label_problem(&label).is_some()
+    {
         return Err(ApiError::coded(
             StatusCode::BAD_REQUEST,
             CODE_LABEL_INVALID,
@@ -183,14 +186,13 @@ fn validated_spawn(
     }
     // A prompt is text: line breaks and tabs, no other control character
     // (U+0000 would be a 500 from the database, T5 review L-2).
-    if prompt
-        .chars()
-        .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
-    {
+    // The same table the shared core and the desktop shell refuse (review M2 ·
+    // L2): hidden and direction-control characters, and a carriage return.
+    if let Some(problem) = momo_wire::human_control::spawn_prompt_problem(prompt) {
         return Err(ApiError::coded(
             StatusCode::BAD_REQUEST,
             CODE_PROMPT_INVALID,
-            "prompt may not contain control characters other than line breaks and tabs",
+            problem,
         ));
     }
     // The host refuses an adapter command as a prompt (#2602 L-7).
@@ -488,6 +490,40 @@ async fn spawn_in_tx(
         Err(refusal) => return Ok(Err(refusal)),
         Ok(Some(control)) => return Ok(Ok((control, true))),
         Ok(None) => {}
+    }
+    // One message calls one task per (agent, harness): the same origin sent
+    // again with a fresh nonce (a lost response, a double tap, a replayed
+    // statement) answers the control it already made instead of running the
+    // work a second time on the owner's Mac (review M1, #3592). A failed or
+    // denied control does not count, so the owner can call again after one.
+    if let Some(origin) = request.origin_message_id {
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1::text))")
+            .bind(format!("work_spawn_origin:{workspace_id}:{origin}"))
+            .execute(&mut *conn)
+            .await
+            .map_err(momo_db::DbError::from)?;
+        let existing: Option<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM work_control \
+              WHERE workspace_id = $1 AND kind = 'spawn' AND requester_member_id = $2 \
+                AND human_spawn_origin_message_id = $3 \
+                AND human_spawn_agent_member_id IS NOT DISTINCT FROM $4 \
+                AND payload->>'tool' = $5 \
+                AND status NOT IN ('failed', 'denied') \
+              ORDER BY created_at, id LIMIT 1",
+        )
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(origin)
+        .bind(signature.agent_member_id)
+        .bind(&task.tool)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(momo_db::DbError::from)?;
+        if let Some(control_id) = existing {
+            if let Some(control) = lock_work_control_in_tx(conn, workspace_id, control_id).await? {
+                return Ok(Ok((control, true)));
+            }
+        }
     }
     if !work_tool_is_enabled_in_tx(conn, workspace_id, &task.tool).await? {
         return Ok(Err(ApiError::coded(

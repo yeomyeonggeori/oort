@@ -54,6 +54,9 @@ pub const HUMAN_CONTROL_SCHEMA_V1: &str = "momo.human.control.v1";
 pub const HUMAN_CONTROL_SCHEMA_V2: &str = "momo.human.control.v2";
 /// #3128: what a permission allow is signed as (the preview hash line).
 pub const HUMAN_CONTROL_SCHEMA_V3: &str = "momo.human.control.v3";
+/// #3592 (P1, momo-wire `HUMAN_CONTROL_SCHEMA_V4`): a NEW-work spawn. The
+/// 13-line frame again; its body is the eight lines of [`ControlContent::SpawnTask`].
+pub const HUMAN_CONTROL_SCHEMA_V4: &str = "momo.human.control.v4";
 pub const DEVICE_ENDORSE_SCHEMA_V1: &str = "momo.human.device_endorse.v1";
 /// Kept for the E1 vectors only (tests); never signed (#3028).
 #[cfg_attr(not(test), allow(dead_code))]
@@ -69,9 +72,10 @@ pub const DEVICE_REBIND_SCHEMA_V1: &str = "momo.human.device_rebind.v1";
 /// v1 control and v1 revocations are NOT here (#3028): the server and workd
 /// refuse a v1 spawn, and a v1 revocation leaves the revoked key unsigned.
 /// control v3 (#3128) is here for permission; v2 for the other kinds.
-pub const SIGNING_SCHEMAS: [(&str, usize); 5] = [
+pub const SIGNING_SCHEMAS: [(&str, usize); 6] = [
     (HUMAN_CONTROL_SCHEMA_V2, 13),
     (HUMAN_CONTROL_SCHEMA_V3, 13),
+    (HUMAN_CONTROL_SCHEMA_V4, 13),
     (DEVICE_ENDORSE_SCHEMA_V1, 7),
     (DEVICE_REVOKE_SCHEMA_V2, 7),
     (DEVICE_REBIND_SCHEMA_V1, 7),
@@ -88,6 +92,8 @@ pub enum ControlSchema {
     V1,
     V2,
     V3,
+    /// #3592: the new-work spawn only (`SpawnTask`), and `SpawnTask` only here.
+    V4,
 }
 
 impl ControlSchema {
@@ -96,6 +102,7 @@ impl ControlSchema {
             ControlSchema::V1 => HUMAN_CONTROL_SCHEMA_V1,
             ControlSchema::V2 => HUMAN_CONTROL_SCHEMA_V2,
             ControlSchema::V3 => HUMAN_CONTROL_SCHEMA_V3,
+            ControlSchema::V4 => HUMAN_CONTROL_SCHEMA_V4,
         }
     }
 }
@@ -199,6 +206,23 @@ pub enum ControlContent {
         channel_id: Uuid,
         first_prompt: String,
     },
+    /// #3592 (`momo.human.control.v4`): a NEW task on this Mac, called from a
+    /// message (ADR-0198 D7). The whole prompt and the title are signed, so
+    /// the dialog shows both; the personal agent is optional (`-` for a plain
+    /// harness spawn).
+    SpawnTask {
+        #[serde(default)]
+        agent_member_id: Option<Uuid>,
+        folder_id: String,
+        tool: String,
+        channel_id: Uuid,
+        #[serde(default)]
+        thread_root_id: Option<Uuid>,
+        #[serde(default)]
+        origin_message_id: Option<Uuid>,
+        label: String,
+        prompt: String,
+    },
     Permission {
         request_event_id: Uuid,
         option_id: String,
@@ -228,7 +252,7 @@ impl ControlContent {
     pub fn kind(&self) -> &'static str {
         match self {
             ControlContent::Input { .. } => "input",
-            ControlContent::Spawn { .. } => "spawn",
+            ControlContent::Spawn { .. } | ControlContent::SpawnTask { .. } => "spawn",
             ControlContent::Permission { .. } => "permission",
             ControlContent::BundleManifest { .. } => "bundle_manifest",
             ControlContent::HostRegister { .. } => "host_register",
@@ -261,12 +285,45 @@ impl ControlContent {
     pub fn signing_schema(&self) -> ControlSchema {
         match self {
             ControlContent::Permission { .. } => ControlSchema::V3,
+            ControlContent::SpawnTask { .. } => ControlSchema::V4,
             _ => ControlSchema::V2,
         }
     }
 
     pub fn canonical_bytes_for(&self, schema: ControlSchema) -> Result<Vec<u8>, PayloadError> {
+        // v4 is the new-work spawn's schema and has no other body; that body
+        // has no other schema. A v2/v3 signature can never stand for a new
+        // task, nor a v4 one for a resume, an input or an allow.
+        if (schema == ControlSchema::V4) != matches!(self, ControlContent::SpawnTask { .. }) {
+            return Err(PayloadError::Schema(
+                "v4 is the new-work spawn's, and only its",
+            ));
+        }
         let text = match self {
+            ControlContent::SpawnTask {
+                agent_member_id,
+                folder_id,
+                tool,
+                channel_id,
+                thread_root_id,
+                origin_message_id,
+                label,
+                prompt,
+            } => {
+                token("folder_id", folder_id)?;
+                token("tool", tool)?;
+                spawn_label_ok(label)?;
+                spawn_prompt_ok(prompt)?;
+                let id = |v: &Option<Uuid>| v.map_or_else(|| ABSENT.to_string(), |v| v.to_string());
+                format!(
+                    "{}\n{folder_id}\n{tool}\n{channel_id}\n{}\n{}\n{}\n{}",
+                    id(agent_member_id),
+                    id(thread_root_id),
+                    id(origin_message_id),
+                    nfc(label),
+                    nfc(prompt)
+                )
+            }
             ControlContent::Input { text, .. } => {
                 readable_text("text", text)?;
                 nfc(text)
@@ -284,6 +341,7 @@ impl ControlContent {
                     ControlSchema::V1 => {
                         format!("{agent_member_id}\n{folder_id}\n{}", nfc(first_prompt))
                     }
+                    ControlSchema::V4 => unreachable!("guarded above"),
                     ControlSchema::V2 | ControlSchema::V3 => {
                         token("tool", tool)?;
                         format!(
@@ -1038,6 +1096,45 @@ impl Statement {
                             ],
                             Some(nfc(first_prompt)),
                         ),
+                        ControlContent::SpawnTask {
+                            agent_member_id,
+                            folder_id,
+                            tool,
+                            channel_id,
+                            thread_root_id,
+                            origin_message_id,
+                            label,
+                            prompt,
+                        } => (
+                            "새 작업 맡기기",
+                            vec![
+                                format!(
+                                    "에이전트 {}, 도구 {}, 폴더 {}",
+                                    agent_member_id
+                                        .map_or_else(|| "없음 (내 도구)".to_string(), short_id),
+                                    first_line(tool),
+                                    first_line(folder_id)
+                                ),
+                                // The room, thread and message are signed.
+                                format!(
+                                    "채널 {}, {}, {}",
+                                    short_id(*channel_id),
+                                    thread_root_id
+                                        .map_or_else(|| "스레드 없음".to_string(), |id| format!("스레드 {}", short_id(id))),
+                                    origin_message_id
+                                        .map_or_else(|| "원본 메시지 없음".to_string(), |id| format!("메시지 {}", short_id(id))),
+                                ),
+                                // The title is a line of its own: the server
+                                // shows it on the card, so it is signed.
+                                format!("제목: 「{}」", first_line(label)),
+                                format!(
+                                    "프롬프트: {} ({})",
+                                    first_line(prompt),
+                                    text_size(prompt)
+                                ),
+                            ],
+                            Some(nfc(prompt)),
+                        ),
                         ControlContent::Permission {
                             request_event_id,
                             option_id,
@@ -1283,6 +1380,38 @@ fn readable_text(field: &'static str, value: &str) -> Result<(), PayloadError> {
         .any(|c| (c.is_control() && c != '\n' && c != '\t') || is_hidden_char(c))
     {
         return Err(PayloadError::Field(field, "invisible or control character"));
+    }
+    Ok(())
+}
+
+/// The title of a new task (#3592): one trimmed NFC line of 1...120 characters
+/// (the server's `validated_label`), nothing hidden. Signed as the server stores it.
+fn spawn_label_ok(value: &str) -> Result<(), PayloadError> {
+    // The statement signs the NFC form (the page may hand over decomposed text).
+    let value = nfc(value);
+    label_ok(&value)?;
+    if value.trim() != value {
+        return Err(PayloadError::Field("label", "not trimmed"));
+    }
+    let chars = value.chars().count();
+    if !(1..=120).contains(&chars) {
+        return Err(PayloadError::Field("label", "1...120 characters"));
+    }
+    Ok(())
+}
+
+/// The prompt of a new task: text of 1...32768 characters, line breaks and
+/// tabs allowed (as in `readable_text`), not blank, not an adapter command.
+fn spawn_prompt_ok(value: &str) -> Result<(), PayloadError> {
+    let value = nfc(value);
+    let value = value.as_str();
+    readable_text("prompt", value)?;
+    let chars = value.chars().count();
+    if chars == 0 || chars > 32_768 || value.trim().is_empty() {
+        return Err(PayloadError::Field("prompt", "1...32768 characters"));
+    }
+    if value.trim_start().starts_with('/') {
+        return Err(PayloadError::Field("prompt", "starts with /"));
     }
     Ok(())
 }

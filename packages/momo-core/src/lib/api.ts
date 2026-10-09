@@ -3898,6 +3898,64 @@ export async function sendWorkInstruction(
   );
 }
 
+// ---- Signed new-work spawn (#3570 T5 → #3592 P1) -----------------------------
+// POST /v1/workspaces/{ws}/work-spawns
+//
+// The owner's `momo.human.control.v4` over a NEW task on their own Mac: a
+// harness (「내 도구」) or a personal agent called by its alias (ADR-0198 D7).
+// It is not a chat message — the message is sent first by the ordinary send
+// path and this call names it (`originMessageId`). Closed while the server
+// does not require signed controls (403 `signed_spawn_disabled`); a retry of
+// the same signed spawn answers 200 with `replayed: true`.
+
+export interface WorkSpawnBody {
+  /** The harness key the host launches (`claude`, `codex`, …): signed. */
+  tool: string;
+  /** The card title: one trimmed NFC line, signed. */
+  label: string;
+  /** The whole first prompt, NFC: signed. */
+  prompt: string;
+  channelId: string;
+  /** The thread the owner called from, when it was said in one: signed. */
+  threadRootId?: string;
+  /** The owner's own message the call came from: signed. */
+  originMessageId?: string;
+  /** Narrows which of the owner's Macs; the server derives the host. */
+  targetHostId?: string;
+  /** `folderId` required; `agentMemberId` only for a personal agent. */
+  humanSignature: HumanSignatureRequest;
+}
+
+export interface WorkSpawnResult {
+  workControl: { id: string; status: string };
+  replayed: boolean;
+}
+
+/** The request body, key by key: the server's body is closed-world. */
+export function workSpawnBody(body: WorkSpawnBody): WorkSpawnBody {
+  const out: WorkSpawnBody = {
+    tool: body.tool,
+    label: body.label,
+    prompt: body.prompt,
+    channelId: body.channelId,
+    humanSignature: humanSignatureRequestBody(body.humanSignature),
+  };
+  if (body.threadRootId !== undefined) out.threadRootId = body.threadRootId;
+  if (body.originMessageId !== undefined) out.originMessageId = body.originMessageId;
+  if (body.targetHostId !== undefined) out.targetHostId = body.targetHostId;
+  return out;
+}
+
+export async function postWorkSpawn(
+  workspaceId: string,
+  body: WorkSpawnBody
+): Promise<WorkSpawnResult> {
+  return request<WorkSpawnResult>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/work-spawns`,
+    { method: "POST", body: JSON.stringify(workSpawnBody(body)) }
+  );
+}
+
 // ---- Terminal attach capability (ADR-0126 D1 / ADR-0125 D10) ----------------
 // POST /v1/workspaces/{ws}/work-sessions/{session}/terminal-attach
 //

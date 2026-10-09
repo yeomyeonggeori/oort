@@ -196,6 +196,7 @@ describe('MomoDeviceKeyStore — hardening before stage 2', () => {
     expect(fromSwift).toEqual({
       'momo.human.control.v2': 13,
       'momo.human.control.v3': 13,
+      'momo.human.control.v4': 13,
       'momo.human.device_rebind.v1': 7,
     });
     // #3103: the letter momo-wire printed is exactly that many lines.
@@ -227,6 +228,13 @@ describe('MomoDeviceKeyStore — hardening before stage 2', () => {
     expect(v3.cases.length).toBe(7);
     expect([...new Set(v3.cases.map(c => c.payload.split('\n').length))]).toEqual([13]);
     expect([...new Set(v3.cases.map(c => c.schema))]).toEqual(['momo.human.control.v3']);
+    // #3592: and the v4 new-work spawn vectors (the phone's fixture copy).
+    const v4 = JSON.parse(
+      readFileSync(join(__dirname, 'fixtures/human-control-signing-v4.vectors.json'), 'utf8'),
+    ) as {cases: {schema: string; payload: string}[]};
+    expect(v4.cases.length).toBe(4);
+    expect([...new Set(v4.cases.map(c => c.payload.split('\n').length))]).toEqual([13]);
+    expect([...new Set(v4.cases.map(c => c.schema))]).toEqual(['momo.human.control.v4']);
   });
 
   it('keeps the vector fixture identical to the E1 original once both are here', () => {

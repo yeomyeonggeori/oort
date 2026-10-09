@@ -69,6 +69,10 @@ pub const SUBSCRIPTION_NOTICE_AUDIT_SCHEMA: &str = "momo.agent.subscription_noti
 /// The mention skip reasons this ADR adds (`agent.mention.skipped`).
 pub const SKIP_OWNER_ONLY_NON_OWNER: &str = "owner_only_non_owner";
 pub const SKIP_SUBSCRIPTION_AGENTS_DISABLED: &str = "subscription_agents_disabled";
+/// ADR-0198 증보 1 D7 (#3592): the owner mentioned (or DM'd) their own personal
+/// agent. The server starts nothing — the owner's client sends a signed spawn
+/// for the owner's own Mac — so this is an audited no-op, not a delivery.
+pub const SKIP_PERSONAL_AGENT_CLIENT_SIGNS: &str = "personal_agent_client_signs";
 
 /// Which official CLI the owner runs (`agent.subscription_harness`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,6 +125,12 @@ pub struct OwnerOnlyScope {
     /// subscription kill switch (`subscription_agents_enabled`) does not apply
     /// to it — it governs subscription CLIs, and a personal key is neither.
     pub uses_owner_key: bool,
+    /// ADR-0198 증보 1 D7 (#3591): this agent is a **personal agent** — the
+    /// owner's connected harness under an alias. It never takes a hosted job:
+    /// the owner's client signs a spawn for the owner's own Mac, and the
+    /// instance switches below govern hosted subscription agents, not it
+    /// ([`owner_only_gate`]).
+    pub personal_agent: bool,
 }
 
 /// The three sentences (ADR-0193 D4·D5·D6).
@@ -201,6 +211,14 @@ pub fn owner_only_gate(
     let scope = scope?;
     if author_member_id != scope.owner_member_id {
         return Some(SubscriptionNoticeKind::NonOwner);
+    }
+    // ADR-0198 증보 1 「ADR-0193 D18」 table, row ①: a personal agent is not
+    // delivered to by the hosted path at all, so the two instance switches
+    // (`MOMO_SUBSCRIPTION_AGENTS_ENABLED`, `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`)
+    // do not apply — D7's own checks (signed spawn, member host, online) stand
+    // in for them. A teammate was refused above, first (#3626 L2).
+    if scope.personal_agent {
+        return None;
     }
     if !subscription_agents_enabled && !scope.uses_owner_key {
         return Some(SubscriptionNoticeKind::Disabled);
@@ -921,6 +939,7 @@ mod tests {
             recently_seen: true,
             reconnectable: false,
             uses_owner_key: false,
+            personal_agent: false,
         }
     }
 
@@ -947,6 +966,37 @@ mod tests {
         assert_eq!(owner_only_gate(Some(&s), owner, true, true), None);
         assert_eq!(
             owner_only_gate(Some(&s), owner, false, true),
+            Some(SubscriptionNoticeKind::Disabled)
+        );
+    }
+
+    /// ADR-0198 증보 1 「D18 표」 ① (#3626 L2): a personal agent is not decided by
+    /// the two instance switches, but a teammate is still refused first.
+    /// Fails if the personal arm is dropped or moved above the owner check.
+    #[test]
+    fn the_gate_leaves_a_personal_agent_to_d7_and_still_refuses_a_teammate_first() {
+        let owner = Uuid::from_u128(1);
+        let other = Uuid::from_u128(2);
+        let personal = OwnerOnlyScope {
+            personal_agent: true,
+            ..scope(owner)
+        };
+        for (subscription, claude) in [(false, false), (true, false), (false, true), (true, true)] {
+            assert_eq!(
+                owner_only_gate(Some(&personal), owner, subscription, claude),
+                None,
+                "the owner of a personal agent is never refused by an instance switch \
+                 ({subscription}, {claude})"
+            );
+            assert_eq!(
+                owner_only_gate(Some(&personal), other, subscription, claude),
+                Some(SubscriptionNoticeKind::NonOwner),
+                "a teammate hears whose agent this is ({subscription}, {claude})"
+            );
+        }
+        // The hosted subscription agent next to it is unchanged.
+        assert_eq!(
+            owner_only_gate(Some(&scope(owner)), owner, false, false),
             Some(SubscriptionNoticeKind::Disabled)
         );
     }

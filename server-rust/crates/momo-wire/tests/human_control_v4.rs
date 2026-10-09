@@ -3,9 +3,10 @@
 //! body's bytes, show that nothing crosses schemas, and that every field the
 //! owner signs is bound: change any one and the signature stops verifying.
 //!
-//! No shared JS/Swift vector file is written for v4 yet (the phone and the
-//! desktop sign v2/v3 only until T6); the golden string below is the contract
-//! those signers will be written against.
+//! The golden string below is the hand-written contract. P1 (#3592) added the
+//! shared vector file the phone, the desktop shell and the shared core rebuild
+//! from (`docs/api/human-control-signing-v4.vectors.json`, checked against this
+//! crate by `tests/human_control_v4_vectors.rs`).
 
 use momo_wire::human_control::{
     ControlContent, ControlSchema, HumanControl, HumanSigningError, InputMode, PermissionScope,

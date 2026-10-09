@@ -790,7 +790,8 @@ impl Stage {
         self.announce(host, &project, &question).await;
         self.host_online(host, true).await;
         sqlx::query(
-            "INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)",
+            "INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3) \
+             ON CONFLICT DO NOTHING",
         )
         .bind(self.workspace)
         .bind(self.channel)
@@ -1998,7 +1999,7 @@ async fn control_characters_are_refused_before_the_signature() {
     assert_eq!(s.spent_nonces().await, 0);
     // Tabs and line breaks in a prompt are text.
     let mut req = s.req();
-    req.prompt = "표:\n\t열1\t열2\r\n끝".to_string();
+    req.prompt = "표:\n\t열1\t열2\n끝".to_string();
     let (status, body, _) = s.spawn(&req).await;
     assert_eq!(status, 201, "{body}");
 }
@@ -2732,4 +2733,668 @@ async fn a_deleted_personal_agent_does_not_block_turning_on_again() {
         .await;
     assert_eq!(status, 201, "{body}");
     assert_ne!(body["agent"]["id"], json!(first.to_string()));
+}
+
+// ---------------------------------------------------------------------------
+// #3592 (P1) — calling a personal agent by mention or DM (ADR-0198 증보 1 D7)
+// ---------------------------------------------------------------------------
+//
+// | test | revert that makes it red |
+// |---|---|
+// | `a_teammates_call_of_a_personal_agent_is_refused_and_starts_nothing` | move the personal-agent arm of `route_agent_mentions_in_tx` after the `agent_not_channel_member` skip (the teammate then hears nothing), or drop the `NonOwner` arm of `owner_only_gate` |
+// | `the_owners_mention_and_dm_start_nothing_by_themselves` | drop the personal-agent arm (the hosted selector then posts a "connection unavailable" notice) or let it create a run/job; let the two instance switches decide a personal agent (#3626 L2) |
+// | `an_agent_bearer_mention_of_a_personal_agent_starts_nothing` | move the personal arm above the `author_is_agent` skip |
+// | `a_switched_off_alias_is_not_called_at_all` | drop `m.status = 'active'` from `load_mention_candidates_in_tx` / the live check of `personal_agent_ok_in_tx` |
+// | `a_called_session_speaks_as_the_alias_where_it_was_called` | author the card/event/idle line as the session owner again, drop `persona_member_id`, or let the host choose it |
+
+impl Stage {
+    async fn join(&self, channel: Uuid, member: Uuid) {
+        sqlx::query(
+            "INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3) \
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(self.workspace)
+        .bind(channel)
+        .bind(member)
+        .execute(&self.su)
+        .await
+        .expect("join the room");
+    }
+
+    /// The reason the latest mention of `message` was skipped for `agent`.
+    async fn skip_reason(&self, message: Uuid, agent: Uuid) -> Option<String> {
+        sqlx::query_scalar(
+            "SELECT detail->>'reason' FROM audit_log WHERE workspace_id = $1 \
+               AND action = 'agent.mention.skipped' AND target_id = $2 AND subject_member_id = $3 \
+             ORDER BY created_at DESC, id DESC LIMIT 1",
+        )
+        .bind(self.workspace)
+        .bind(message)
+        .bind(agent)
+        .fetch_optional(&self.su)
+        .await
+        .expect("read the skip diagnostic")
+    }
+
+    /// What the server said in the alias's name (the ADR-0193 notices).
+    async fn spoken_by(&self, agent: Uuid) -> Vec<String> {
+        sqlx::query_scalar(
+            "SELECT body FROM message WHERE workspace_id = $1 AND author_member_id = $2 \
+               AND type = 'text' ORDER BY seq",
+        )
+        .bind(self.workspace)
+        .bind(agent)
+        .fetch_all(&self.su)
+        .await
+        .expect("read what the alias said")
+    }
+
+    async fn runs_and_jobs(&self) -> (i64, i64) {
+        (
+            self.count("SELECT count(*) FROM agent_run WHERE workspace_id = $1")
+                .await,
+            self.count(
+                "SELECT count(*) FROM outbox WHERE workspace_id = $1 AND kind = 'agent_job'",
+            )
+            .await,
+        )
+    }
+
+    async fn open_dm(&self, bearer: &str, with: Uuid) -> Uuid {
+        let (status, body) = self
+            .post(
+                &format!("/v1/workspaces/{}/dms", self.workspace),
+                bearer,
+                json!({ "memberId": with }),
+            )
+            .await;
+        assert!(status == 200 || status == 201, "open a DM: {status} {body}");
+        Uuid::parse_str(body["channel"]["id"].as_str().unwrap()).unwrap()
+    }
+
+    /// The host opens the session `control` describes and acks it.
+    async fn host_runs(&self, control: Uuid, channel: Uuid, req: &Req) -> Uuid {
+        let (status, created) = self
+            .host_request(
+                "POST",
+                &format!("/v1/workspaces/{}/work-sessions", self.workspace),
+                Some(
+                    json!({ "channelId": channel, "hostId": self.host, "tool": req.tool,
+                              "label": req.label, "controlId": control }),
+                ),
+            )
+            .await;
+        assert_eq!(status, 201, "the host opens the session: {created}");
+        let session = Uuid::parse_str(created["workSession"]["id"].as_str().unwrap()).unwrap();
+        let (status, acked) = self
+            .host_request(
+                "POST",
+                &format!(
+                    "/v1/workspaces/{}/work-controls/{control}/ack",
+                    self.workspace
+                ),
+                Some(json!({ "ok": true, "sessionId": session })),
+            )
+            .await;
+        assert_eq!(status, 200, "{acked}");
+        session
+    }
+
+    fn session_path(&self, session: Uuid) -> String {
+        format!("/v1/workspaces/{}/work-sessions/{session}", self.workspace)
+    }
+
+    /// One host-signed ACP event and one idle report on `session`.
+    async fn host_reports(&self, session: Uuid, channel: Uuid) {
+        let (status, body) = self
+            .host_request(
+                "PATCH",
+                &self.session_path(session),
+                Some(json!({ "event": {
+                    "event_id": Uuid::new_v4(), "type": "agent.status", "v": 1,
+                    "ts": 1_784_678_400_000i64,
+                    "payload": { "run_id": session, "work_session_id": session,
+                                 "channel_id": channel, "phase": "thinking",
+                                 "run_status": "running", "detail": "읽는 중", "has_plan": false }
+                }})),
+            )
+            .await;
+        assert_eq!(status, 200, "a host-signed event lands: {body}");
+        let (status, body) = self
+            .host_request(
+                "PATCH",
+                &self.session_path(session),
+                Some(json!({ "status": "idle", "exitCode": 0 })),
+            )
+            .await;
+        assert_eq!(status, 200, "the host reports idle: {body}");
+    }
+
+    /// `(author, reply_to_id, root_id)` of the card, and the authors of every
+    /// reply under it.
+    async fn card_and_thread(
+        &self,
+        session: Uuid,
+    ) -> ((Uuid, Option<Uuid>, Option<Uuid>), Vec<Uuid>) {
+        let root: Uuid =
+            sqlx::query_scalar("SELECT root_message_id FROM work_session WHERE id = $1")
+                .bind(session)
+                .fetch_one(&self.su)
+                .await
+                .unwrap();
+        let card: (Uuid, Option<Uuid>, Option<Uuid>) = sqlx::query_as(
+            "SELECT author_member_id, reply_to_id, root_id FROM message WHERE id = $1",
+        )
+        .bind(root)
+        .fetch_one(&self.su)
+        .await
+        .unwrap();
+        let replies: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT author_member_id FROM message WHERE root_id = $1 ORDER BY seq",
+        )
+        .bind(root)
+        .fetch_all(&self.su)
+        .await
+        .unwrap();
+        (card, replies)
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_teammates_call_of_a_personal_agent_is_refused_and_starts_nothing() {
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    s.host_online(s.host, true).await;
+    s.join(s.channel, s.teammate).await;
+    let alias = unique_alias("kwak-claude");
+    let agent = s.on(&s.access, "claude_code", &alias).await;
+    let owner_name = s.display_name(s.person).await;
+    assert!(
+        s.spoken_by(agent).await.is_empty(),
+        "the alias is not a member of the room and has said nothing"
+    );
+    let before = s.spawn_controls().await;
+
+    // The teammate mentions someone else's personal agent in a room the alias
+    // never joined. The owner-only sentence answers; nothing starts.
+    let called = s
+        .say(
+            &s.other_access,
+            s.channel,
+            None,
+            &format!("@{alias} 빌드 봐 줘"),
+        )
+        .await;
+    assert_eq!(
+        s.skip_reason(called, agent).await.as_deref(),
+        Some("owner_only_non_owner"),
+        "a teammate hears whose agent this is, even though the alias is not in the room"
+    );
+    let said = s.spoken_by(agent).await;
+    assert_eq!(said.len(), 1, "one sentence in the alias's name: {said:?}");
+    assert!(
+        said[0].contains(&format!("{owner_name}의 개인 에이전트")),
+        "the existing NonOwner sentence names the owner: {}",
+        said[0]
+    );
+    assert_eq!(s.spawn_controls().await, before, "no work for a teammate");
+    assert_eq!(s.runs_and_jobs().await, (0, 0), "no run and no job either");
+
+    // A DM with the alias is the same refusal.
+    let dm = s.open_dm(&s.other_access, agent).await;
+    let in_dm = s.say(&s.other_access, dm, None, "안녕, 이거 해 줘").await;
+    assert_eq!(
+        s.skip_reason(in_dm, agent).await.as_deref(),
+        Some("owner_only_non_owner")
+    );
+    assert_eq!(s.spawn_controls().await, before);
+    assert_eq!(s.runs_and_jobs().await, (0, 0));
+
+    // And the spawn route, with the teammate's own valid Mac and key, names
+    // the alias in vain.
+    let world = s.teammate_world().await;
+    let mut req = s.req();
+    req.agent = Some(agent);
+    req.folder = world.question.clone();
+    let signer = Signer {
+        key: &world.key,
+        key_id: world.key_id,
+        member: s.teammate,
+    };
+    let (status, body, _) = s.spawn_as(&signer, &s.other_access, world.host, &req).await;
+    assert!(
+        status == 403 || status == 404,
+        "a teammate cannot name another person's alias: {status} {body}"
+    );
+    assert_eq!(s.spawn_controls().await, before);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_owners_mention_and_dm_start_nothing_by_themselves() {
+    let _lock = test_lock().await;
+    // Both ADR-0193 instance switches are off (the default): they do not decide
+    // a personal agent (#3626 L2), and the owner is told nothing by the server.
+    let s = stage(true).await;
+    s.host_online(s.host, true).await;
+    let alias = unique_alias("kwak-claude");
+    let agent = s.on(&s.access, "claude_code", &alias).await;
+    let before_path = s.message_path().await;
+
+    // The room's main line, the alias not invited.
+    let mention = s
+        .say(&s.access, s.channel, None, &format!("@{alias} 빌드 봐 줘"))
+        .await;
+    assert_eq!(
+        s.skip_reason(mention, agent).await.as_deref(),
+        Some("personal_agent_client_signs"),
+        "the owner's mention is an audited no-op: the owner's client signs the spawn"
+    );
+
+    // Invited to the room, the alias is still not delivered to by the hosted path.
+    s.join(s.channel, agent).await;
+    let invited = s
+        .say(&s.access, s.channel, None, &format!("@{alias} 다시 봐 줘"))
+        .await;
+    assert_eq!(
+        s.skip_reason(invited, agent).await.as_deref(),
+        Some("personal_agent_client_signs")
+    );
+
+    // A DM with the alias needs no `@`.
+    let dm = s.open_dm(&s.access, agent).await;
+    let plain = s.say(&s.access, dm, None, "이 폴더 설명해 줘").await;
+    assert_eq!(
+        s.skip_reason(plain, agent).await.as_deref(),
+        Some("personal_agent_client_signs"),
+        "the 1:1 DM rule addresses the alias"
+    );
+
+    // Nothing started and nothing was said: no run, no job, no sentence, no
+    // control. The message path wrote exactly the three messages.
+    assert_eq!(s.runs_and_jobs().await, (0, 0));
+    assert!(
+        s.spoken_by(agent).await.is_empty(),
+        "the server says nothing to the owner"
+    );
+    assert_eq!(s.spawn_controls().await, 0, "a mention is not a spawn");
+    let after_path = s.message_path().await;
+    assert_eq!(
+        after_path.1 - before_path.1,
+        3,
+        "the three messages are the only rows the message path added"
+    );
+    let hosted_notices = s
+        .count(
+            "SELECT count(*) FROM message WHERE workspace_id = $1 \
+               AND props->>'source' LIKE 'server.%notice%'",
+        )
+        .await;
+    assert_eq!(hosted_notices, 0, "no hosted-delivery notice either");
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn an_agent_bearer_mention_of_a_personal_agent_starts_nothing() {
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    s.host_online(s.host, true).await;
+    let alias = unique_alias("kwak-claude");
+    let alias_id = s.on(&s.access, "claude_code", &alias).await;
+    let other = s.agent(s.person, None).await;
+    s.join(s.channel, other).await;
+    sqlx::query(
+        "INSERT INTO workspace_membership (workspace_id, member_id, role) \
+         VALUES ($1, $2, 'member')",
+    )
+    .bind(s.workspace)
+    .bind(other)
+    .execute(&s.su)
+    .await
+    .expect("the agent is a workspace member");
+    let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let token = format!("momo_agent_v1.{}.{secret}", s.workspace);
+    sqlx::query(
+        "INSERT INTO token (workspace_id, kind, actor_member_id, subject_member_id, \
+                            token_hash, scopes, label) \
+         VALUES ($1, 'agent_bearer', $2, NULL, digest($3::text, 'sha256'), \
+                 ARRAY['messages:write'], 'p1-conformance')",
+    )
+    .bind(s.workspace)
+    .bind(other)
+    .bind(&token)
+    .execute(&s.su)
+    .await
+    .expect("seed agent bearer");
+
+    // Another agent mentions the owner's alias. Agents cannot call a personal
+    // agent (ADR-0188 D3): no job, no spawn, no sentence.
+    let (status, body) = s
+        .post(
+            &format!(
+                "/v1/workspaces/{}/channels/{}/messages",
+                s.workspace, s.channel
+            ),
+            &token,
+            json!({ "clientMsgId": Uuid::new_v4(), "body": format!("@{alias} 부탁해") }),
+        )
+        .await;
+    assert_eq!(status, 201, "{body}");
+    let said = Uuid::parse_str(
+        body["message"]["id"]
+            .as_str()
+            .or(body["id"].as_str())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        s.skip_reason(said, alias_id).await.as_deref(),
+        Some("a2a_source_run_unavailable")
+    );
+    assert_eq!(s.spawn_controls().await, 0);
+    assert_eq!(s.runs_and_jobs().await, (0, 0));
+    assert!(s.spoken_by(alias_id).await.is_empty());
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_switched_off_alias_is_not_called_at_all() {
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    s.host_online(s.host, true).await;
+    let alias = unique_alias("kwak-claude");
+    let agent = s.on(&s.access, "claude_code", &alias).await;
+    let (status, body) = s.turn_off(&s.access, agent).await;
+    assert_eq!(status, 200, "{body}");
+
+    // A mention of a switched-off alias addresses nobody: no diagnostic, no job.
+    let mention = s
+        .say(&s.access, s.channel, None, &format!("@{alias} 빌드 봐 줘"))
+        .await;
+    assert_eq!(s.skip_reason(mention, agent).await, None);
+    assert_eq!(s.runs_and_jobs().await, (0, 0));
+
+    // And the owner's signed spawn that names it is refused by name, before
+    // the nonce is spent.
+    let mut req = s.req();
+    req.agent = Some(agent);
+    req.origin = Some(mention);
+    let (status, body, _) = s.spawn(&req).await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(code(&body), Some("spawn_agent_not_allowed"));
+    assert_eq!(s.spawn_controls().await, 0);
+    assert_eq!(s.spent_nonces().await, 0);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_called_session_speaks_as_the_alias_where_it_was_called() {
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    s.host_online(s.host, true).await;
+    s.join(s.channel, s.teammate).await;
+    let alias = unique_alias("kwak-claude");
+    let agent = s.on(&s.access, "claude_code", &alias).await;
+
+    // 1. Called from the room's main line; the alias is not a member of the
+    //    room (결재: 소유자면 어디서나). Step one is the ordinary message...
+    let message = s
+        .say(&s.access, s.channel, None, &format!("@{alias} 빌드 봐 줘"))
+        .await;
+    let path_after_message = s.message_path().await;
+    // ...step two is the signed spawn naming it; it adds nothing to the message path.
+    let mut req = s.req();
+    req.agent = Some(agent);
+    req.origin = Some(message);
+    let (status, body, _) = s.spawn(&req).await;
+    assert_eq!(status, 201, "{body}");
+    assert_eq!(
+        s.message_path().await,
+        path_after_message,
+        "the spawn leaves channel_seq, message and outbox alone"
+    );
+    let control = Uuid::parse_str(body["workControl"]["id"].as_str().unwrap()).unwrap();
+    let session = s.host_runs(control, s.channel, &req).await;
+    s.host_reports(session, s.channel).await;
+
+    let owner: Uuid = sqlx::query_scalar("SELECT member_id FROM work_session WHERE id = $1")
+        .bind(session)
+        .fetch_one(&s.su)
+        .await
+        .unwrap();
+    assert_eq!(owner, s.person, "the owner still owns the session");
+    let ((card_author, quotes, card_root), reply_authors) = s.card_and_thread(session).await;
+    assert_eq!(card_author, agent, "the card speaks as the alias");
+    assert_eq!(
+        quotes,
+        Some(message),
+        "the card quotes the message it answers"
+    );
+    assert_eq!(
+        card_root, None,
+        "the card is a top-level line whose thread is the session's"
+    );
+    assert!(
+        !reply_authors.is_empty() && reply_authors.iter().all(|a| *a == agent),
+        "every progress line and the idle line speak as the alias: {reply_authors:?}"
+    );
+    let alias_in_room: i64 = s
+        .count(&format!(
+            "SELECT count(*) FROM membership WHERE channel_id = '{}' AND member_id = '{agent}' \
+               AND left_at IS NULL AND workspace_id = $1",
+            s.channel
+        ))
+        .await;
+    assert_eq!(alias_in_room, 0, "the alias never had to join the room");
+
+    // A teammate in the room reads the alias's card and progress (read only).
+    let root: Uuid = sqlx::query_scalar("SELECT root_message_id FROM work_session WHERE id = $1")
+        .bind(session)
+        .fetch_one(&s.su)
+        .await
+        .unwrap();
+    let (status, replies) = s
+        .call(
+            reqwest::Method::GET,
+            &format!(
+                "/v1/workspaces/{}/channels/{}/messages/{root}/replies",
+                s.workspace, s.channel
+            ),
+            &s.other_access,
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "{replies}");
+    let authors: Vec<&str> = replies["messages"]
+        .as_array()
+        .expect("replies")
+        .iter()
+        .filter_map(|m| m["authorMemberId"].as_str())
+        .collect();
+    assert!(
+        !authors.is_empty() && authors.iter().all(|a| *a == agent.to_string()),
+        "the room reads the progress as the alias: {authors:?}"
+    );
+
+    // 2. Called inside a thread, in a DM, and with no alias at all.
+    let root = s.say(&s.access, s.channel, None, "스레드 시작").await;
+    let in_thread = s
+        .say(
+            &s.access,
+            s.channel,
+            Some(root),
+            &format!("@{alias} 이어서"),
+        )
+        .await;
+    let mut threaded = s.req();
+    threaded.agent = Some(agent);
+    threaded.thread = Some(root);
+    threaded.origin = Some(in_thread);
+    let (status, body, _) = s.spawn(&threaded).await;
+    assert_eq!(status, 201, "{body}");
+    let control = Uuid::parse_str(body["workControl"]["id"].as_str().unwrap()).unwrap();
+    let session = s.host_runs(control, s.channel, &threaded).await;
+    let ((author, quotes, _), _) = s.card_and_thread(session).await;
+    assert_eq!((author, quotes), (agent, Some(in_thread)));
+
+    let dm = s.open_dm(&s.access, agent).await;
+    let in_dm = s.say(&s.access, dm, None, "이 폴더 설명해 줘").await;
+    let mut dm_req = s.req();
+    dm_req.agent = Some(agent);
+    dm_req.channel = dm;
+    dm_req.origin = Some(in_dm);
+    let (status, body, _) = s.spawn(&dm_req).await;
+    assert_eq!(
+        status, 201,
+        "a DM with the alias is a room the owner is in: {body}"
+    );
+    let control = Uuid::parse_str(body["workControl"]["id"].as_str().unwrap()).unwrap();
+    let session = s.host_runs(control, dm, &dm_req).await;
+    let ((author, quotes, _), _) = s.card_and_thread(session).await;
+    assert_eq!((author, quotes), (agent, Some(in_dm)));
+
+    let plain = s.say(&s.access, s.channel, None, "도구로 직접").await;
+    let mut tool = s.req();
+    tool.origin = Some(plain);
+    let (status, body, _) = s.spawn(&tool).await;
+    assert_eq!(status, 201, "{body}");
+    let control = Uuid::parse_str(body["workControl"]["id"].as_str().unwrap()).unwrap();
+    let session = s.host_runs(control, s.channel, &tool).await;
+    let ((author, quotes, _), _) = s.card_and_thread(session).await;
+    assert_eq!(
+        (author, quotes),
+        (s.person, Some(plain)),
+        "a harness spawn (no alias) keeps speaking as the owner, and still quotes its origin"
+    );
+    let persona: Option<Uuid> =
+        sqlx::query_scalar("SELECT persona_member_id FROM work_session WHERE id = $1")
+            .bind(session)
+            .fetch_one(&s.su)
+            .await
+            .unwrap();
+    assert_eq!(persona, None);
+
+    // 3. Switching the alias off later does not rewrite who spoke: a session
+    //    already running keeps its speaker.
+    let later = s
+        .say(&s.access, s.channel, None, &format!("@{alias} 한 번 더"))
+        .await;
+    let mut again = s.req();
+    again.agent = Some(agent);
+    again.origin = Some(later);
+    let (status, body, _) = s.spawn(&again).await;
+    assert_eq!(status, 201, "{body}");
+    let control = Uuid::parse_str(body["workControl"]["id"].as_str().unwrap()).unwrap();
+    let session = s.host_runs(control, s.channel, &again).await;
+    let (status, body) = s.turn_off(&s.access, agent).await;
+    assert_eq!(status, 200, "{body}");
+    s.host_reports(session, s.channel).await;
+    let ((author, _, _), replies) = s.card_and_thread(session).await;
+    assert_eq!(author, agent);
+    assert!(replies.iter().all(|a| *a == agent), "{replies:?}");
+}
+
+// | `the_same_message_calls_one_task_per_agent_and_harness` (review M1) | drop the origin lookup in `spawn_in_tx` (a fresh nonce on the same origin then makes a second control) |
+// | `invisible_and_carriage_return_text_is_refused_before_the_nonce_is_spent` (review M2·L2) | revert `spawn_prompt_problem` / `spawn_label_problem` to control-only |
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_same_message_calls_one_task_per_agent_and_harness() {
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    s.host_online(s.host, true).await;
+    let alias = unique_alias("kwak-claude");
+    let agent = s.on(&s.access, "claude_code", &alias).await;
+    let message = s
+        .say(&s.access, s.channel, None, &format!("@{alias} 빌드 봐 줘"))
+        .await;
+    let mut req = s.req();
+    req.agent = Some(agent);
+    req.origin = Some(message);
+
+    let (status, first, _) = s.spawn(&req).await;
+    assert_eq!(status, 201, "{first}");
+    // The same call again with a fresh nonce: the Mac must not run it twice.
+    let (status, second, _) = s.spawn(&req).await;
+    assert_eq!(
+        status, 200,
+        "a resend of the same call answers the same control: {second}"
+    );
+    assert_eq!(second["replayed"], true);
+    assert_eq!(second["workControl"]["id"], first["workControl"]["id"]);
+    assert_eq!(s.spawn_controls().await, 1, "one control, one task");
+    assert_eq!(
+        s.spent_nonces().await,
+        1,
+        "the second nonce was never spent"
+    );
+
+    // The same message may still call a DIFFERENT agent/harness combination:
+    // here the owner's plain tool from the same message.
+    let mut tool = s.req();
+    tool.origin = Some(message);
+    let (status, third, _) = s.spawn(&tool).await;
+    assert_eq!(status, 201, "{third}");
+    assert_eq!(s.spawn_controls().await, 2);
+
+    // After the first task failed, the owner can call again.
+    sqlx::query("UPDATE work_control SET status = 'failed' WHERE id = $1")
+        .bind(Uuid::parse_str(first["workControl"]["id"].as_str().unwrap()).unwrap())
+        .execute(&s.su)
+        .await
+        .expect("fail the first");
+    let (status, again, _) = s.spawn(&req).await;
+    assert_eq!(status, 201, "a failed call may be called again: {again}");
+    assert_eq!(s.spawn_controls().await, 3);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn invisible_and_carriage_return_text_is_refused_before_the_nonce_is_spent() {
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    s.host_online(s.host, true).await;
+    let doc: Value = serde_json::from_str(include_str!(
+        "../../../../docs/api/human-control-signing-v4.vectors.json"
+    ))
+    .unwrap();
+    for case in doc["text_rules"]["rejects"].as_array().unwrap() {
+        let (name, field, value) = (
+            case["name"].as_str().unwrap(),
+            case["field"].as_str().unwrap(),
+            case["value"].as_str().unwrap(),
+        );
+        // Not representable as the route's own typed request fields: a
+        // slash command has its own code, an empty/blank title is not a body.
+        // A title with a control character cannot even be signed by the test's
+        // own (momo-wire) signer; the route's check on it is the same function.
+        if value.is_empty()
+            || value.trim_start().starts_with('/')
+            || (field == "label" && value.chars().any(char::is_control))
+        {
+            continue;
+        }
+        let mut req = s.req();
+        if field == "prompt" {
+            req.prompt = value.to_string();
+        } else {
+            req.label = Box::leak(value.to_string().into_boxed_str());
+        }
+        let (status, body, _) = s.spawn(&req).await;
+        assert_eq!(status, 400, "{name}: {body}");
+        assert!(
+            matches!(
+                code(&body),
+                Some("spawn_prompt_invalid") | Some("spawn_label_invalid")
+            ),
+            "{name}: {body}"
+        );
+    }
+    assert_eq!(s.spawn_controls().await, 0);
+    assert_eq!(
+        s.spent_nonces().await,
+        0,
+        "refused before the signature spent a nonce"
+    );
 }

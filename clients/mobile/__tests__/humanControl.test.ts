@@ -214,10 +214,11 @@ describe('momo.human.control.v1 — retired on the phone (#3096)', () => {
     ).toThrow(HumanControlInputError);
   });
 
-  it('knows v2 and v3 only, and refuses a schema it has no recipe for', () => {
+  it('knows v2, v3 and v4 only, and refuses a schema it has no recipe for', () => {
     expect(HUMAN_CONTROL_SCHEMAS).toEqual([
       'momo.human.control.v2',
       'momo.human.control.v3',
+      'momo.human.control.v4',
     ]);
     const c = v2Cases.find(x => x.content.kind === 'input')!;
     expect(() =>
@@ -447,5 +448,133 @@ describe('signHumanControl — the call path', () => {
     for (const reason of Object.values(SIGN_REASONS)) {
       expect(reason).toMatch(/요$/);
     }
+  });
+});
+
+// =============================================================================
+// #3592 (P1) — `momo.human.control.v4`, the new-work spawn. Every case of the
+// shared v4 vectors is rebuilt from its inputs; the recipe is the core's, so
+// this also proves the phone's own sha256/utf8 agree with the core's.
+// =============================================================================
+
+interface V4Case {
+  name: string;
+  schema: string;
+  fields: Record<string, string | number | null>;
+  content: Record<string, string | null>;
+  content_sha256: string;
+  payload: string;
+}
+
+const vectorsV4 = JSON.parse(
+  readFileSync(join(__dirname, 'fixtures/human-control-signing-v4.vectors.json'), 'utf8'),
+) as {cases: V4Case[]};
+
+function v4Content(c: V4Case): HumanControlContent {
+  const x = c.content;
+  return {
+    kind: 'spawn_task',
+    agentMemberId: x.agent_member_id,
+    folderId: x.folder_id as string,
+    tool: x.tool as string,
+    channelId: x.channel_id as string,
+    threadRootId: x.thread_root_id,
+    originMessageId: x.origin_message_id,
+    label: x.label as string,
+    prompt: x.prompt as string,
+  };
+}
+
+function v4Fields(c: V4Case): HumanControlFields {
+  return toFields(c as unknown as VectorCase);
+}
+
+describe('momo.human.control.v4 — the new-work spawn (#3592)', () => {
+  it('has the four shared cases and the fixture equals docs/api', () => {
+    expect(vectorsV4.cases).toHaveLength(4);
+    expect(
+      readFileSync(join(__dirname, 'fixtures/human-control-signing-v4.vectors.json'), 'utf8'),
+    ).toBe(
+      readFileSync(
+        join(__dirname, '../../../docs/api/human-control-signing-v4.vectors.json'),
+        'utf8',
+      ),
+    );
+  });
+
+  it.each(vectorsV4.cases.map(c => [c.name, c] as const))(
+    '%s: the phone rebuilds the payload byte for byte',
+    (_name, c) => {
+      expect(HUMAN_CONTROL_SCHEMAS).toContain(c.schema);
+      expect(phoneSigningSchema('spawn_task')).toBe(c.schema);
+      const bytes = humanControlPayload(c.schema, v4Fields(c), v4Content(c));
+      expect(Buffer.from(bytes).toString('utf8')).toBe(c.payload);
+      expect(hex(sha256(humanControlContentBytes(c.schema, v4Content(c))))).toBe(
+        c.content_sha256,
+      );
+    },
+  );
+
+  it('v4 is the new-work spawn only, in both directions', () => {
+    const c = vectorsV4.cases[0]!;
+    const input = v2Cases.find(x => x.content.kind === 'input')!;
+    expect(() => humanControlPayload('momo.human.control.v4', toFields(input), toContent(input))).toThrow(
+      HumanControlInputError,
+    );
+    for (const schema of ['momo.human.control.v2', 'momo.human.control.v3']) {
+      expect(() => humanControlPayload(schema, v4Fields(c), v4Content(c))).toThrow(HumanControlInputError);
+      expect(() => humanControlContentBytes(schema, v4Content(c))).toThrow(HumanControlInputError);
+    }
+  });
+
+  it('refuses an empty id, a control character and a bad window before Face ID', () => {
+    const c = vectorsV4.cases[0]!;
+    const content = v4Content(c) as HumanControlContent & {kind: 'spawn_task'};
+    for (const bad of [
+      {...content, folderId: ''},
+      {...content, tool: 'cl\naude'},
+      {...content, label: 'a\nb'},
+      {...content, prompt: '/clear'},
+    ]) {
+      expect(() => humanControlPayload(c.schema, v4Fields(c), bad)).toThrow(HumanControlInputError);
+    }
+    expect(() =>
+      humanControlPayload(c.schema, {...v4Fields(c), expiresAtMs: v4Fields(c).issuedAtMs}, content),
+    ).toThrow(HumanControlInputError);
+  });
+
+  it('signs a spawn_task as v4 with the agent only when one was named', async () => {
+    mockNative = {
+      secureEnclaveAvailable: true,
+      status: jest.fn(),
+      create: jest.fn(),
+      publicKey: jest.fn(),
+      sign: jest.fn(async () => bytesToBase64(new Uint8Array(64).fill(9))),
+      remove: jest.fn(),
+    };
+    const run = async (c: V4Case) =>
+      signHumanControl({
+        schema: c.schema,
+        context: {instanceId: String(c.fields.instance_id), serverTimeMs: 1, maxLifetimeMs: 600_000} as never,
+        contextReadAtMs: 1,
+        workspaceId: String(c.fields.workspace_id),
+        memberId: String(c.fields.member_id),
+        deviceKeyId: String(c.fields.device_key_id),
+        hostId: String(c.fields.host_id),
+        sessionId: null,
+        nonce: String(c.fields.nonce),
+        content: v4Content(c),
+        now: () => 1,
+      });
+    const withAgent = await run(vectorsV4.cases[0]!);
+    expect(withAgent).toMatchObject({
+      schema: 'momo.human.control.v4',
+      agentMemberId: vectorsV4.cases[0]!.content.agent_member_id,
+      folderId: 'fld_0123456789abcdef0123',
+    });
+    const bare = await run(vectorsV4.cases[2]!);
+    expect(bare.agentMemberId).toBeUndefined();
+    expect(bare.folderId).toBe('fld_aaaaaaaaaaaaaaaaaaaa');
+    expect(SIGN_REASONS.spawn_task).toMatch(/요$/);
   });
 });
