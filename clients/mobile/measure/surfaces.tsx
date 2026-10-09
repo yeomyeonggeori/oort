@@ -84,6 +84,7 @@ import {
 } from '../src/features/conversation/Timeline';
 import {Screen, ScreenHeader} from '../src/design/atoms';
 import {
+  PermissionCard,
   SignedWorkControlsView,
   type SignedWorkActions,
   type SignedWorkInitial,
@@ -154,6 +155,13 @@ import {FixedScheme, useStyles, type ColorScheme} from '../src/design/theme';
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
 import {TeamBoardDetailSheet} from '../src/features/work/teamBoard/TeamBoardDetailSheet';
 import WorkSessionDetailScreen from '../src/screens/WorkSessionDetailScreen';
+import {buildConversation} from '../src/features/work/conversation';
+import {
+  composerGate,
+  ModeSwitch,
+  WorkConversationView,
+} from '../src/features/work/WorkConversation';
+import type {WorkSessionEvent} from '@momo/core/features/work/workSessionModel';
 import {SessionRow} from '../src/screens/AgentDetailScreen';
 import {WorkStatusBadge} from '../src/features/work/WorkSessionParts';
 import {
@@ -2025,6 +2033,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   }
   if (name.startsWith('signed-work-')) {
     return <SignedWorkSurface which={name.slice('signed-work-'.length)} />;
+  }
+  // N3 (#3595): 작업 상세의 「대화」 모드. 배송되는 말풍선·입력창을 고정 데이터로 세운다.
+  if (name.startsWith('work-chat')) {
+    return <WorkChatSurface which={name.slice('work-chat'.length).replace(/^-/, '')} />;
   }
 
   switch (name) {
@@ -4395,6 +4407,120 @@ function SignedWorkSurface({which}: {which: string}): React.JSX.Element {
             initial={initial}
           />
         </ScrollView>
+      </Screen>
+    </View>
+  );
+}
+
+// ---- N3 (#3595) 작업 상세 「대화」 모드 -------------------------------------------
+const WC_SELF = 'wc-self';
+const WC_SESSION = 'wc-session';
+function wcEvent(
+  id: string,
+  seq: number,
+  type: WorkSessionEvent['type'],
+  payload: Record<string, unknown> = {},
+): WorkSessionEvent {
+  return {
+    eventId: id,
+    type,
+    sessionId: WC_SESSION,
+    atMs: NOW + seq * 20_000,
+    seq,
+    payload: {work_session_id: WC_SESSION, ...payload},
+  };
+}
+function WorkChatSurface({which}: {which: string}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const done = which === 'done';
+  const keyboard = which === 'keyboard';
+  const asking = which === 'permission';
+  const off = which === 'off';
+  const events: WorkSessionEvent[] = [
+    wcEvent('e1', 1, 'agent.status', {terminal_event: 'created'}),
+    wcEvent('p1', 3, 'agent.partial', {
+      text_delta:
+        '네, onboarding/copy.ts의 1단계 문구부터 살펴볼게요. 해요체로 통일하려면 세 곳을 고쳐야 해요.',
+    }),
+    wcEvent('t1', 4, 'agent.status', {tool_call_name: 'read_file'}),
+    wcEvent('p2', 7, 'agent.partial', {
+      text_delta: '알겠어요. 테스트 문구는 그대로 두고 화면 문구 세 곳만 바꿀게요.',
+    }),
+    ...(asking
+      ? [wcEvent('a1', 8, 'approval.requested', {action: 'edit', action_type: 'edit'})]
+      : []),
+    ...(done
+      ? [
+          wcEvent('p3', 9, 'agent.partial', {
+            text_delta: '세 곳 모두 바꿨어요. 테스트는 건드리지 않았고 린트도 통과했어요.',
+          }),
+          wcEvent('e2', 10, 'agent.status', {terminal_event: 'ended'}),
+        ]
+      : []),
+  ];
+  const replies = [
+    {
+      id: 'r1',
+      authorMemberId: WC_SELF,
+      text: '온보딩 1단계 문구에서 「만듭니다」를 「만들어요」로 바꿔 줘',
+      atMs: NOW + 2 * 20_000,
+      seq: 2,
+      mode: 'queue' as const,
+    },
+    {
+      id: 'r2',
+      authorMemberId: WC_SELF,
+      text: '지금 바로 시작하고, 테스트 문구는 건드리지 마',
+      atMs: NOW + 6 * 20_000,
+      seq: 6,
+      mode: 'interrupt' as const,
+    },
+  ];
+  const items = buildConversation({
+    events,
+    session: {status: done ? 'ended' : 'running'},
+    truncated: false,
+    replies,
+    selfMemberId: WC_SELF,
+    pending: [],
+    permissionRequestId: asking ? 'a1' : null,
+  });
+  const gate = done
+    ? composerGate({owner: true, ended: true, flag: 'required', block: null, online: true, hasActions: true})
+    : off
+      ? composerGate({owner: true, ended: false, flag: 'off', block: null, online: true, hasActions: false})
+      : composerGate({owner: true, ended: false, flag: 'required', block: null, online: true, hasActions: true});
+  return (
+    <View style={styles.fill}>
+      <Screen>
+        <ScreenHeader
+          title="온보딩 1단계 문구 다듬기"
+          subtitle={done ? '종료됨' : '실행 중'}
+          onBack={() => {}}
+          backLabel="작업 목록으로"
+        />
+        <ModeSwitch mode="chat" onChange={() => {}} />
+        <WorkConversationView
+          items={items}
+          agentName="Claude Code"
+          nameOf={() => '팀원'}
+          gate={gate}
+          onSend={async () => ({ok: true})}
+          renderPermission={() => (
+            <PermissionCard
+              permission={SW_PERMISSION}
+              preview={swGate('ready')}
+              online
+              block={null}
+              actions={SW_ACTIONS}
+              fallbackReject={null}
+              lapsed={false}
+              onUndelivered={() => {}}
+            />
+          )}
+          initialText={keyboard ? '마지막에 린트도 돌려 줘' : undefined}
+          autoFocus={keyboard}
+        />
       </Screen>
     </View>
   );
