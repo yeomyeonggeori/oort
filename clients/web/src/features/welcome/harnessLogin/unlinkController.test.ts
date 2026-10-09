@@ -253,6 +253,83 @@ describe("unlinkController (가짜 CLI)", () => {
   });
 });
 
+describe("unlinkController: 이 맥의 기본 로그인 (ADR-0198 D3, 「내 도구」 연결 끊기)", () => {
+  const DEFAULT = { harness: "claude" as const, label: null };
+  function withVerify(auth: "logged_in" | "needs_login" | "unknown", cli = fakeCli()) {
+    const verify = vi.fn(async () => [{ id: "claude" as const, installed: true, auth }]);
+    return { cli, verify, deps: { ...cli.deps, verify } };
+  }
+
+  it("프로필 없는 로그아웃 줄 하나를 연다(경로·인자 없음)", async () => {
+    const { cli, deps } = withVerify("needs_login");
+    const unlink = createUnlinkController(DEFAULT, deps);
+    unlink.confirm();
+    await flush();
+    expect(cli.spawns).toEqual([
+      { program: { kind: "logout", id: "claude" }, cols: 80, rows: 24 },
+    ]);
+    unlink.dispose();
+  });
+
+  it("종료 0 뒤 상태 명령이 로그인 아님일 때만 done이고, 폴더 삭제(remove)는 부르지 않는다", async () => {
+    const { cli, deps, verify } = withVerify("needs_login");
+    const unlink = createUnlinkController(DEFAULT, deps);
+    unlink.confirm();
+    await flush();
+    cli.exit(0);
+    await flush();
+    await flush();
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(unlink.getState().status).toEqual({ phase: "done" });
+    expect(cli.remove).not.toHaveBeenCalled();
+    unlink.dispose();
+  });
+
+  it("종료 0이어도 아직 로그인이면 still-signed-in, 상태를 모르면 unknown", async () => {
+    for (const [auth, reason] of [
+      ["logged_in", "still-signed-in"],
+      ["unknown", "unknown"],
+    ] as const) {
+      const { cli, deps } = withVerify(auth);
+      const unlink = createUnlinkController(DEFAULT, deps);
+      unlink.confirm();
+      await flush();
+      cli.exit(0);
+      await flush();
+      await flush();
+      expect(unlink.getState().status).toEqual({ phase: "failed", reason });
+      unlink.dispose();
+    }
+  });
+
+  it("종료가 0이 아니면 상태 명령을 묻지도 않고 실패다", async () => {
+    const { cli, deps, verify } = withVerify("needs_login");
+    const unlink = createUnlinkController(DEFAULT, deps);
+    unlink.confirm();
+    await flush();
+    cli.exit(1);
+    await flush();
+    expect(unlink.getState().status).toEqual({ phase: "failed", reason: "logout-failed" });
+    expect(verify).not.toHaveBeenCalled();
+    unlink.dispose();
+  });
+
+  it("상태 명령 자체가 실패하면 끊겼다고 하지 않는다", async () => {
+    const cli = fakeCli();
+    const verify = vi.fn(async () => {
+      throw new Error("shell down");
+    });
+    const unlink = createUnlinkController(DEFAULT, { ...cli.deps, verify });
+    unlink.confirm();
+    await flush();
+    cli.exit(0);
+    await flush();
+    await flush();
+    expect(unlink.getState().status).toEqual({ phase: "failed", reason: "unknown" });
+    unlink.dispose();
+  });
+});
+
 const SOURCES = import.meta.glob(
   ["../../**/*.ts", "../../**/*.tsx", "!../../**/*.test.ts", "!../../**/*.test.tsx"],
   { query: "?raw", import: "default", eager: true }

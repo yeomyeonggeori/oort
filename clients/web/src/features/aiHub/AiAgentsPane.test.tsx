@@ -11,9 +11,8 @@ import { listHostedConnections } from "@momo/core/features/hostedAgents/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { AiAgentsPane } from "./AiAgentsPane";
 
-// AIH-7 (#3428): 에이전트 표와 만들기 3종.
+// AIH-7 (#3428): 에이전트 표와 만들기 2종(팀·외부. 구독은 「내 도구」, ADR-0198).
 // - 칸의 문장은 서버 값 → core 라벨. 개인 키는 「개인 키 · 나만」, Claude 구독 대행이 꺼진 에이전트는 회색 「문의 중」.
-// - 웹에서 내 구독 만들기는 숨지 않고 「데스크탑에서」 사유로 잠긴다.
 
 const envSlot = vi.hoisted(() => ({ tauri: false }));
 vi.mock("@/lib/env", async (importOriginal) => {
@@ -250,7 +249,7 @@ describe("네 가지 상태", () => {
   });
 });
 
-describe("에이전트 만들기 3종", () => {
+describe("에이전트 만들기 2종", () => {
   it("일반 멤버에게는 만들기 단추가 없다", async () => {
     vi.mocked(fetchRoster).mockResolvedValue(ROSTER("member"));
     mount();
@@ -258,38 +257,18 @@ describe("에이전트 만들기 3종", () => {
     expect(q("ai-agents-create")).toBeNull();
   });
 
-  it("웹: 팀·내 구독·외부 셋을 보이고, 내 구독은 「데스크탑에서 해요」로 잠겨 사유를 든다", async () => {
+  it("팀·외부 둘만 보이고 구독 종류는 없다", async () => {
     mount();
     await until("ai-agents-table");
     act(() => fireEvent.click(q("ai-agents-create") as HTMLElement));
     await until("create-agent-chooser");
-    expect(["team", "mySubscription", "external"].map((k) => q(`create-kind-${k}`)?.getAttribute("data-state"))).toEqual([
-      "available", "locked", "available",
+    expect(["team", "external"].map((k) => q(`create-kind-${k}`)?.getAttribute("data-state"))).toEqual([
+      "available", "available",
     ]);
+    expect(q("create-kind-mySubscription")).toBeNull();
     expect(q("create-kind-team")?.textContent).toContain("팀 AI 키로 답해요");
     expect(q("create-kind-team-audience")?.textContent).toBe("소유자·관리자");
     expect(q("create-kind-external-audience")?.textContent).toBe("소유자·관리자");
-    expect(q("create-kind-mySubscription-audience")?.textContent).toBe("데스크탑에서 해요");
-    const sub = q("create-kind-mySubscription") as HTMLElement;
-    expect(sub.getAttribute("aria-disabled")).toBe("true");
-    expect(sub.hasAttribute("disabled")).toBe(false); // 포커스를 받아 사유를 읽어야 한다
-    expect(q("create-kind-mySubscription-reason")?.id).toBe(sub.getAttribute("aria-describedby"));
-    expect(q("create-kind-mySubscription-reason")?.textContent).toContain("데스크탑 앱에서");
-    // 잠긴 줄을 눌러도 아무 창도 열리지 않는다.
-    act(() => fireEvent.click(sub));
-    expect(q("create-agent-chooser")).not.toBeNull();
-  });
-
-  it("데스크탑: 내 구독도 열리고, 누르면 로그인 → 에이전트로 만들기 첫 창이 뜬다", async () => {
-    envSlot.tauri = true;
-    mount();
-    await until("ai-agents-table");
-    act(() => fireEvent.click(q("ai-agents-create") as HTMLElement));
-    await until("create-agent-chooser");
-    await waitFor(() => expect(q("create-kind-mySubscription")?.getAttribute("data-state")).toBe("available"));
-    act(() => fireEvent.click(q("create-kind-mySubscription") as HTMLElement));
-    await until("subscription-start-dialog");
-    expect(q("create-agent-chooser")).toBeNull();
   });
 
   it("팀 에이전트를 고르면 기존 만들기 창이 열린다", async () => {
