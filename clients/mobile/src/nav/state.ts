@@ -326,8 +326,11 @@ export function navReducer(state: NavState, action: NavAction): NavState {
         hosted: null,
       };
     case 'openWorkList':
+      // 열려 있던 대화도 걷는다: 「작업 맡기기」가 DM 머리에서 접수되면(#3588) 보드가 그 대화
+      // 밑에 깔려 안 보인다. + 메뉴는 층이 덮은 동안 열리지 않으므로 기존 길은 그대로다.
       return {
         ...state,
+        conversation: null,
         agentList: false,
         agent: null,
         workList: true,

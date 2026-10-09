@@ -17,13 +17,13 @@ export const DEVICE_KEYS_POLL_MS = 5_000;
 export function hostDeliveryCopy(host: DesktopHostDelivery): string {
   switch (host.state) {
     case "delivered":
-      return "이 맥의 작업 호스트에도 바로 알렸습니다.";
+      return "이 맥의 작업 호스트에도 바로 알렸어요.";
     case "notRunning":
-      return "이 맥의 작업 호스트가 꺼져 있어 서버를 거쳐 전달됩니다.";
+      return "이 맥의 작업 호스트가 꺼져 있어서 서버를 거쳐 전달돼요.";
     case "otherHost":
-      return "이 맥의 작업 호스트는 다른 워크스페이스 것이라 서버를 거쳐 전달됩니다.";
+      return "이 맥의 작업 호스트는 다른 워크스페이스 것이라 서버를 거쳐 전달돼요.";
     case "refused":
-      return "이 맥의 작업 호스트가 받지 않았습니다. 서버를 거쳐 전달됩니다.";
+      return "이 맥의 작업 호스트가 받지 않았어요. 서버를 거쳐 전달돼요.";
   }
 }
 
@@ -78,15 +78,15 @@ export function phoneNameOrigin(
 }
 
 export const PHONE_NAME_ORIGIN_COPY: Record<PhoneNameOrigin, string> = {
-  matchesLink: "이 이름은 QR로 연결할 때 폰이 알린 이름과 같습니다.",
+  matchesLink: "이 이름은 QR로 연결할 때 폰이 알린 이름과 같아요.",
   notInLinks:
-    "이 이름은 연결된 기기 목록에 없습니다. 방금 내가 연결한 폰이 아니라면 승인하지 않아야 합니다.",
-  unknown: "연결된 기기 목록을 불러오지 못해 이름을 대조하지 못했습니다.",
+    "이 이름은 연결된 기기 목록에 없어요. 방금 내가 연결한 폰이 아니라면 승인하지 마세요.",
+  unknown: "연결된 기기 목록을 불러오지 못해서 이름을 맞춰 보지 못했어요.",
 };
 
 /** Always said: the name is not something the Mac or the server verified. */
 export const PHONE_NAME_UNVERIFIED =
-  "이름은 폰이 스스로 정한 값이라 확인된 것이 아닙니다. 믿을 것은 지문입니다.";
+  "이름은 폰이 스스로 정한 값이라 확인된 게 아니에요. 믿을 수 있는 건 지문이에요.";
 
 function decodeBase64(value: string): Uint8Array<ArrayBuffer> {
   const binary = atob(value);

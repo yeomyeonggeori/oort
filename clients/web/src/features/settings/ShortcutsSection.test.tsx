@@ -86,23 +86,23 @@ describe("설정 › 단축키 (#3281)", () => {
     const row = web.querySelector('[data-shortcut-row="terminal:jump-palette"]');
     expect(row?.textContent).toContain("데스크탑 전용");
     expect(row?.textContent).not.toContain("앱이 받는");
-    expect(web.textContent).toContain("이 브라우저에서는 동작하지 않습니다");
+    expect(web.textContent).toContain("이 브라우저에서는 동작하지 않아요");
     expect(web.querySelector('[data-shortcut-row="toggle-sidebar"]')?.textContent).not.toContain("터미널");
   });
 
   it("데스크탑에서는 터미널 묶음 머리말이 통과 규칙을 한 번 말하고, 줄마다 되풀이하지 않는다", () => {
     const desktop = render(true);
     const heading = desktop.textContent ?? "";
-    expect(heading).toContain("터미널에 포커스가 있어도 앱이 받는 키입니다");
-    expect(heading.split("터미널에 포커스가 있어도 앱이 받는 키입니다").length - 1).toBe(1);
+    expect(heading).toContain("터미널에 포커스가 있어도 앱이 받는 키예요");
+    expect(heading.split("터미널에 포커스가 있어도 앱이 받는 키예요").length - 1).toBe(1);
     expect(desktop.querySelector('[data-shortcut-row="open-inbox"]')?.textContent).not.toContain("터미널");
   });
 
   it("데스크탑에서 ⌘B 줄은 터미널 동작을 고정으로 안내한다", () => {
     const desktop = render(true);
     const text = desktop.querySelector('[data-shortcut-row="toggle-sidebar"]')?.textContent ?? "";
-    expect(text).toContain("터미널 안에서도 ⌘B로 접힙니다");
-    expect(text).toContain("Ctrl+B는 터미널이 받습니다");
+    expect(text).toContain("터미널 안에서도 ⌘B로 접혀요");
+    expect(text).toContain("Ctrl+B는 터미널이 받아요");
   });
 
   it("바꿀 수 있는 줄은 다섯 개이고 나머지는 고정이다", () => {
@@ -128,6 +128,16 @@ describe("설정 › 단축키 (#3281)", () => {
     expect(host.querySelector('[data-testid="shortcut-empty"]')).not.toBeNull();
   });
 
+  it("검색 중에는 걸러지지 않는 터미널 키 목록을 숨기고 비우면 되돌린다 (#3615)", () => {
+    const host = render(true);
+    const terminalRows = () => host.querySelectorAll('[data-testid="terminal-shortcut-row"]').length;
+    expect(terminalRows()).toBeGreaterThan(0);
+    setQuery(host, "zzzz");
+    expect(terminalRows()).toBe(0);
+    setQuery(host, "");
+    expect(terminalRows()).toBeGreaterThan(0);
+  });
+
   it("macOS 밖에서는 키캡을 Ctrl 표기로 적는다", () => {
     const host = render(false, "other");
     expect(host.querySelector('[data-shortcut-row="open-inbox"]')?.textContent).toContain("Ctrl+Shift+A");
@@ -141,7 +151,7 @@ describe("설정 › 단축키 (#3281)", () => {
     expect(ev.defaultPrevented).toBe(true);
     expect(OPEN_INBOX_SHORTCUT.keycaps).toEqual(["⌘⇧G"]);
     expect(host.querySelector('[data-testid="shortcut-capture"]')).toBeNull();
-    expect(live(host)).toContain("바꿨습니다");
+    expect(live(host)).toContain("바꿨어요");
     expect(host.querySelector('[data-shortcut-row="open-inbox"]')?.textContent).toContain("변경됨");
 
     click(host.querySelector('[data-testid="shortcut-reset-open-inbox"]'));

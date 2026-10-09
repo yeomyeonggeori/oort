@@ -1,25 +1,34 @@
 /* Accent swatch chrome (ADR-0174 D2). Color comes from [data-accent-swatch]
- * rebinding the signal four (ADR-0189 D3) on the control itself; no inline style. */
+ * rebinding the signal four (ADR-0189 D3) on the control itself; no inline style.
+ * 설정 > 모양(#3578 S3a): 40px 원 + 라벨. 고른 원은 잉크 고리와 체크를 든다. */
 .accent-swatch {
   min-block-size: var(--tap-target);
   min-inline-size: var(--tap-target);
 }
 
 .accent-swatch-chip {
-  width: var(--spacing-6);
-  height: var(--spacing-6);
+  inline-size: var(--spacing-control-lg);
+  block-size: var(--spacing-control-lg);
   background-color: var(--signal);
+  color: var(--on-signal);
 }
 
-.accent-swatch:has(:checked) {
-  border-color: var(--ink);
-  background-color: var(--surface-hover);
+.accent-swatch-check {
+  opacity: 0;
+}
+
+.accent-swatch:has(:checked) .accent-swatch-chip {
   box-shadow:
     0 0 0 2px var(--surface),
-    0 0 0 3px var(--ink);
+    0 0 0 4px var(--ink);
+}
+
+.accent-swatch:has(:checked) .accent-swatch-check {
+  opacity: 1;
 }
 
 .accent-swatch:has(:focus-visible) {
   outline: 2px solid var(--focus-ring-ink, var(--accent));
-  outline-offset: -2px;
+  outline-offset: 2px;
+  border-radius: var(--radius-lg);
 }

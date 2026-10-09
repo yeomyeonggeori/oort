@@ -80,7 +80,6 @@ async function installRoutes(context, keys, linked) {
     if (path.endsWith("/device-keys")) return json(route, { deviceKeys: keys });
     if (path === "/v1/auth/devices") return json(route, { devices: linked });
     if (path.endsWith("/work-hosts")) return json(route, { workHosts: [] });
-    if (path.endsWith("/work-host-engine")) return json(route, { engine: "opencode", source: "default" });
     if (path.includes("/work-tier-policy")) return json(route, { workTierPolicy: { mode: "ask", source: "default" } });
     if (path.endsWith("/work-sessions")) return json(route, { workSessions: [] });
     if (path.endsWith(`/workspaces/${workspaceId}`)) return json(route, { workspace: { id: workspaceId, name: "여명거리" } });

@@ -354,6 +354,13 @@ export function memoryWriteErrorMessage(
   return "저장하지 못했어요. 연결을 확인하고 다시 시도해 주세요.";
 }
 
+/**
+ * 403 on the settings read: the server answers only an active human member, so this is "you are an
+ * agent account or not a member", never "ask an operator" (and a retry returns the same answer).
+ */
+export const MEMORY_SETTINGS_FORBIDDEN =
+  "사람 멤버만 기억 설정을 볼 수 있어요. 에이전트 계정이거나 이 워크스페이스의 멤버가 아니면 쓸 수 없어요. 멤버라면 워크스페이스에 다시 참여한 뒤 열어 보세요.";
+
 export const MEMORY_SETTINGS_LOAD_ERROR =
   "기억 설정을 불러오지 못했어요. 잠시 뒤에 다시 시도해 주세요.";
 

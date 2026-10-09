@@ -164,15 +164,31 @@ export function signedWorkActions(
   };
 }
 
-/** The server's flag (D-11): `true` only when it says signatures are required. */
-export function useSigningRequired(workspaceId: string, enabled: boolean): boolean {
+/**
+ * The server's flag (D-11), as a state so a surface can tell 「아직 모름」 from
+ * 「꺼져 있음」 (N3 #3595: the chat says honestly which one it is, and never
+ * calls an unknown flag 「꺼짐」).
+ */
+export type SigningFlag = 'loading' | 'required' | 'off' | 'unknown';
+
+export function useSigningFlag(workspaceId: string, enabled: boolean): SigningFlag {
   const flag = useQuery({
     queryKey: SIGNING_REQUIRED_QUERY_KEY(workspaceId),
     queryFn: () => fetchHumanControlSignatureRequired(workspaceId),
     enabled,
     staleTime: 5 * 60_000,
   });
-  return flag.data === true;
+  if (flag.data === true) return 'required';
+  if (flag.data === false) return 'off';
+  if (!enabled) return 'off';
+  // The read answers null when it could not ask: that is unknown, not off.
+  if (flag.data === null) return 'unknown';
+  return flag.isError ? 'unknown' : 'loading';
+}
+
+/** The server's flag (D-11): `true` only when it says signatures are required. */
+export function useSigningRequired(workspaceId: string, enabled: boolean): boolean {
+  return useSigningFlag(workspaceId, enabled) === 'required';
 }
 
 /**
@@ -207,22 +223,34 @@ export function usePermissionPreviewGate(
   );
 }
 
-/** Product container: the flag, this phone's key, the signer. */
-export function SignedWorkControls({
-  workspaceId,
-  memberId,
-  session,
-  events,
-  online,
-}: {
-  workspaceId: string;
-  memberId: string;
-  session: WorkSession;
-  events: readonly WorkSessionEvent[];
-  online: boolean;
-}): React.JSX.Element | null {
+/** Why this phone cannot sign right now, from the registered key's state. */
+function signBlockFor(view: ReturnType<typeof useDeviceKey>['view']): SignBlock {
+  return view.kind === 'approved'
+    ? view.biometryOff
+      ? 'Face ID가 꺼져 있어 허락과 지시에 서명할 수 없어요. 설정에서 oort의 Face ID를 켜 주세요.'
+      : null
+    : view.kind === 'loading'
+      ? '이 폰의 지시 서명 키를 확인하는 중이에요.'
+      : view.kind === 'reconnect'
+        ? '로그인이 끝나 이 폰의 지시 키를 다시 연결해야 해요. 프로필 › 지시 기기에서 다시 연결해 주세요.'
+        : '이 폰은 아직 지시 기기가 아니에요. 프로필 › 지시 기기에서 등록하고 맥의 승인을 받아 주세요.';
+}
+
+/**
+ * Everything the owner's controls need, in one place: the flag, this phone's key,
+ * the signer. The detail's cards (`SignedWorkControls`) and the chat mode's input
+ * and inline permission card (`WorkConversation`, N3 #3595) both read it, so the
+ * block sentences cannot drift apart.
+ */
+export function useSignedWorkSurface(
+  workspaceId: string,
+  memberId: string,
+  session: WorkSession,
+  events: readonly WorkSessionEvent[],
+) {
   const owner = session.memberId.toLowerCase() === memberId.toLowerCase();
-  const required = useSigningRequired(workspaceId, owner);
+  const flag = useSigningFlag(workspaceId, owner);
+  const required = flag === 'required';
   const key = useDeviceKey(workspaceId, {poll: false});
   const deviceKeyId =
     key.view.kind === 'approved' ? key.view.row.id : null;
@@ -244,37 +272,49 @@ export function SignedWorkControls({
     permission,
     owner && required,
   );
+  const block: SignBlock = signBlockFor(key.view);
+  const fallbackReject = useMemo(
+    () =>
+      actions === null
+        ? async (open: PendingPermission) => {
+            await decideWorkPermission(workspaceId, session.id, {
+              requestEventId: open.requestEventId,
+              optionId: open.reject!.optionId,
+              kind: 'reject_once',
+            });
+          }
+        : null,
+    [actions, workspaceId, session.id],
+  );
+  return {owner, flag, required, block, actions, permission, preview, fallbackReject};
+}
+
+/** Product container: the flag, this phone's key, the signer. */
+export function SignedWorkControls({
+  workspaceId,
+  memberId,
+  session,
+  events,
+  online,
+}: {
+  workspaceId: string;
+  memberId: string;
+  session: WorkSession;
+  events: readonly WorkSessionEvent[];
+  online: boolean;
+}): React.JSX.Element | null {
+  const surface = useSignedWorkSurface(workspaceId, memberId, session, events);
   // D-11: nothing changes unless the server says signatures are required.
-  if (!owner || !required) return null;
-  const block: SignBlock =
-    key.view.kind === 'approved'
-      ? key.view.biometryOff
-        ? 'Face ID가 꺼져 있어 허락과 지시에 서명할 수 없어요. 설정에서 oort의 Face ID를 켜 주세요.'
-        : null
-      : key.view.kind === 'loading'
-        ? '이 폰의 지시 서명 키를 확인하는 중이에요.'
-        : key.view.kind === 'reconnect'
-          ? '로그인이 끝나 이 폰의 지시 키를 다시 연결해야 해요. 프로필 › 지시 기기에서 다시 연결해 주세요.'
-          : '이 폰은 아직 지시 기기가 아니에요. 프로필 › 지시 기기에서 등록하고 맥의 승인을 받아 주세요.';
+  if (!surface.owner || !surface.required) return null;
   return (
     <SignedWorkControlsView
-      permission={permission}
-      preview={preview}
+      permission={surface.permission}
+      preview={surface.preview}
       ended={session.status !== 'running' && session.status !== 'idle'}
       online={online}
-      block={block}
-      actions={actions}
-      fallbackReject={
-        actions === null
-          ? async open => {
-              await decideWorkPermission(workspaceId, session.id, {
-                requestEventId: open.requestEventId,
-                optionId: open.reject!.optionId,
-                kind: 'reject_once',
-              });
-            }
-          : null
-      }
+      block={surface.block}
+      actions={surface.actions}
+      fallbackReject={surface.fallbackReject}
     />
   );
 }
@@ -357,7 +397,7 @@ export function SignedWorkControlsView({
 
 export type CardOutcome = {tone: 'sent' | 'closed' | 'partial'; text: string} | null;
 
-function PermissionCard({
+export function PermissionCard({
   permission,
   preview,
   online,

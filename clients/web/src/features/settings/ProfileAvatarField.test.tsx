@@ -117,7 +117,7 @@ describe("ProfileAvatarField", () => {
     expect(err(h)).toMatch(/PNG, JPG, GIF, WebP/);
     const big = new File([new Uint8Array(5 * 1024 * 1024 + 1)], "b.png", { type: "image/png" });
     await pick(h, big);
-    expect(err(h)).toBe("프로필 사진은 5MB까지 올릴 수 있습니다.");
+    expect(err(h)).toBe("프로필 사진은 5MB까지 올릴 수 있어요.");
     expect(upload).not.toHaveBeenCalled();
   });
 
@@ -151,7 +151,7 @@ describe("ProfileAvatarField", () => {
     removeMyAvatar.mockRejectedValue(new ApiError(500, "x"));
     const h = await mount(me("/v1/workspaces/w/members/u/avatar/content?v=m"));
     await confirmRemove(h);
-    expect(err(h)).toMatch(/지우지 못했습니다/);
+    expect(err(h)).toMatch(/지우지 못했어요/);
   });
 
   it("오프라인이면 파일 창도 지우기도 열지 않는다", async () => {
@@ -203,7 +203,7 @@ describe("ProfileAvatarField", () => {
     });
     const status = h.querySelector('[data-testid="profile-avatar-status"]')!;
     expect(status.getAttribute("aria-live")).toBe("polite");
-    expect(status.textContent).toBe("프로필 사진을 바꿨습니다.");
+    expect(status.textContent).toBe("프로필 사진을 바꿨어요.");
   });
 
   it("처음 올리면 「올렸습니다」, 지우기 단추가 없으니 진행 문장에 지우기 꼬리가 없다", async () => {
@@ -225,14 +225,14 @@ describe("ProfileAvatarField", () => {
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
     });
-    expect(status()).toBe("프로필 사진을 올렸습니다.");
+    expect(status()).toBe("프로필 사진을 올렸어요.");
   });
 
   it("지우기 확인 질문이 열리면 앞의 완료 문장을 지운다", async () => {
     const h = await mount(me("/v1/workspaces/w/members/u/avatar/content?v=m"));
     await pick(h, png());
     const status = () => h.querySelector('[data-testid="profile-avatar-status"]')!.textContent;
-    expect(status()).toBe("프로필 사진을 바꿨습니다.");
+    expect(status()).toBe("프로필 사진을 바꿨어요.");
     await act(async () => {
       h.querySelector<HTMLButtonElement>('[data-testid="profile-avatar-remove"]')!.click();
     });

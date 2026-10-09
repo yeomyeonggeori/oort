@@ -340,7 +340,9 @@ async function scene(browser, origin, scheme, viewport, report, preCollapsed = f
   for (const key of ["inbox", "mine", "team", "chatAgain"]) {
     const o = out[key];
     check(`${tag} ${key}: 레일 상자(x·y·w·h)가 대화 탭과 같고 폭이 56이다`, same(o.rail, out.chat.rail) && o.rail.w === 56, JSON.stringify([o.rail, out.chat.rail]));
-    check(`${tag} ${key}: 워크스페이스 타일·「+」·프로필 자리가 같다`, same(o.tile, out.chat.tile) && same(o.plus, out.chat.plus) && same(o.profile, out.chat.profile));
+    check(`${tag} ${key}: 워크스페이스 타일·「+」·프로필 자리가 같다`, same(o.tile, out.chat.tile) && same(o.plus, out.chat.plus) && (mineAutoCollapsed && key === "mine" ? true : same(o.profile, out.chat.profile)));
+    // #3574: 프로필은 펼친 동안 목록 끝 줄, 접힘(자동 접힘 포함)에서는 레일 아바타다.
+    if (key === "mine" && mineAutoCollapsed) check(`${tag} mine(목록 열 자동 접힘): 프로필 아바타가 레일 안(x 0~56)에 선다`, o.profile !== null && o.profile.x >= 0 && o.profile.x + o.profile.w <= 56, JSON.stringify(o.profile));
     if (key === "mine" && mineAutoCollapsed) {
       check(`${tag} mine(목록 열 자동 접힘): 레일에 목적지 다섯이 선다`, o.railDivider === true && o.railDestinations.every((b) => b !== null), JSON.stringify(o.railDestinations));
     } else check(`${tag} ${key}: 검색과 이동·목적지 줄·머리 상자 자리가 같다`, same(o.searchBox, out.chat.searchBox) && same(o.headRows, out.chat.headRows) && same(o.headBox, out.chat.headBox), JSON.stringify([o.headRows, out.chat.headRows]));

@@ -32,12 +32,12 @@ const TERMINAL_GROUP_TITLE = "작업 공간과 터미널";
 export function groupDescription(groupId: string, desktop: boolean): string | null {
   if (groupId !== TERMINAL_GROUP_ID) return null;
   return desktop
-    ? "터미널에 포커스가 있어도 앱이 받는 키입니다. 바꿀 수 없고, 같은 키를 다른 항목에 지정할 수도 없습니다."
-    : "데스크탑 앱의 작업 공간과 터미널에서 쓰는 키입니다. 이 브라우저에서는 동작하지 않습니다.";
+    ? "터미널에 포커스가 있어도 앱이 받는 키예요. 바꿀 수 없고, 같은 키를 다른 항목에 지정할 수도 없어요."
+    : "데스크탑 앱의 작업 공간과 터미널에서 쓰는 키예요. 이 브라우저에서는 동작하지 않아요.";
 }
 
 const SIDEBAR_TERMINAL_NOTE =
-  "macOS에서는 터미널 안에서도 ⌘B로 접힙니다. 이 키를 바꿔도 터미널 안의 동작은 그대로입니다. 다른 플랫폼의 Ctrl+B는 터미널이 받습니다.";
+  "macOS에서는 터미널 안에서도 ⌘B로 접혀요. 이 키를 바꿔도 터미널 안의 동작은 그대로예요. 다른 플랫폼의 Ctrl+B는 터미널이 받아요.";
 
 export function buildShortcutRows(desktop: boolean): ShortcutRow[] {
   const rows: ShortcutRow[] = [];

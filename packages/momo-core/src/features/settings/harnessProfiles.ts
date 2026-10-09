@@ -188,9 +188,9 @@ export function unlinkDialogTitle(row: Pick<MyAccountRow, "harness" | "profile">
 export function unlinkDialogBody(row: Pick<MyAccountRow, "harness" | "profile">): string {
   const bin = HARNESS_BIN_NAME[row.harness];
   if (row.profile === null) {
-    return `이 목록에서만 뺍니다. 로그아웃하지 않아요. 터미널에서 쓰던 ${bin} 로그인은 그대로예요.`;
+    return `이 목록에서만 빼요. 로그아웃하지 않아요. 터미널에서 쓰던 ${bin} 로그인은 그대로예요.`;
   }
-  return `이 계정 전용 폴더의 로그인을 ${HARNESS_CLI_NAME[row.harness]}로 로그아웃하고 목록에서 뺍니다. 터미널에서 쓰던 ${bin} 로그인은 그대로예요.`;
+  return `이 계정 전용 폴더의 로그인을 ${HARNESS_CLI_NAME[row.harness]}로 로그아웃하고 목록에서 빼요. 터미널에서 쓰던 ${bin} 로그인은 그대로예요.`;
 }
 
 // ---- 해제 진행(숨은 PTY) --------------------------------------------------------------
@@ -277,7 +277,7 @@ export function unlinkFailedDetail(harness: LocalHarnessId, reason: UnlinkFailur
     case "timeout":
       return "1분 안에 끝나지 않아 멈췄어요. 계정 폴더는 그대로 두었어요.";
     case "remove-failed":
-      return "목록에는 「로그인 필요」로 남아요. 다시 시도하면 로그아웃은 건너뛰고 폴더만 지웁니다.";
+      return "목록에는 「로그인 필요」로 남아요. 다시 시도하면 로그아웃은 건너뛰고 폴더만 지워요.";
   }
 }
 
@@ -288,15 +288,15 @@ export const UNLINK_DONE_STATUS = "연결을 해제했어요.";
 export const ADD_ACCOUNT_TITLE = "어떤 계정을 추가할까요?";
 export const ADD_KIND_SUBSCRIPTION = "구독 · 이 맥의 공식 CLI";
 export const ADD_SUBSCRIPTION_LEAD =
-  "Claude Pro·Max, ChatGPT Plus·Pro. 브라우저에서 각 회사의 공식 CLI로 로그인합니다. 나만 씁니다.";
+  "Claude Pro·Max, ChatGPT Plus·Pro. 브라우저에서 각 회사의 공식 CLI로 로그인해요. 나만 써요.";
 export const ADD_KIND_API_KEY = "API 키 · 팀이 함께";
 export const ADD_API_KEY_LEAD =
-  "OpenAI, Anthropic, xAI, OpenRouter. 서버에 봉인해 팀 에이전트가 씁니다. 운영자만 추가할 수 있습니다.";
+  "OpenAI, Anthropic, xAI, OpenRouter. 서버에 봉인해 팀 에이전트가 써요. 운영자만 추가할 수 있어요.";
 export const ADD_API_KEY_NEXT = "다음";
 export const ADD_SUBSCRIPTION_CLI_LABEL = "어느 CLI인가요?";
 export const ADD_SUBSCRIPTION_LABEL_LABEL = "라벨";
 export const ADD_SUBSCRIPTION_LABEL_HINT =
-  "같은 CLI에 계정을 여러 개 둘 수 있어요. 목록에서 이 이름으로 구분합니다.";
+  "같은 CLI에 계정을 여러 개 둘 수 있어요. 목록에서 이 이름으로 구분해요.";
 export const ADD_SUBSCRIPTION_CHIP: Record<LocalHarnessId, string> = {
   claude: "Claude Code",
   codex: "Codex (ChatGPT)",
@@ -329,5 +329,5 @@ export const PROFILE_LOGIN_SPAWN_DETAIL =
 
 /** 로그인 모달이 어느 계정 폴더에 로그인하는지(design-review #2878 M-6). */
 export function profileLoginLine(harness: LocalHarnessId, profile: string): string {
-  return `${myAccountRowTitle({ harness, profile })} 계정에 로그인합니다. 브라우저에서 이 계정으로 로그인하세요.`;
+  return `${myAccountRowTitle({ harness, profile })} 계정에 로그인해요. 브라우저에서 이 계정으로 로그인하세요.`;
 }

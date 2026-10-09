@@ -375,14 +375,14 @@ describe("PhoneLinkChannelCard", () => {
     }
   });
 
-  it("발급이 도는 동안 띠 안 문장은 「QR을 만들고 있습니다.」다", async () => {
+  it("발급이 도는 동안 띠 안 문장은 「QR을 만들고 있어요.」다", async () => {
     markPhoneLinkCardPending(WS);
     issueDeviceLink.mockReturnValue(new Promise(() => undefined));
     mount();
     click("phone-link-card-create");
     await flush();
     const body = q("phone-link-card-body")?.textContent ?? "";
-    expect(body).toContain("QR을 만들고 있습니다.");
+    expect(body).toContain("QR을 만들고 있어요.");
     expect(body).not.toContain("QR을 만드세요");
   });
 
@@ -409,7 +409,7 @@ describe("PhoneLinkChannelCard", () => {
     await flush();
     const body = q("phone-link-card-body")?.textContent ?? "";
     expect(body).not.toContain("QR을 만드세요");
-    expect(body).toContain("다시 연결되면 QR을 만듭니다.");
+    expect(body).toContain("다시 연결되면 QR을 만들어요.");
   });
 
   it("살아 있는 연결이 있으면 [QR 만들기]가 새로 발급하지 않고 복원한다", async () => {

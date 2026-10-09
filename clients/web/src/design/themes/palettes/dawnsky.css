@@ -1,7 +1,7 @@
 /* GENERATED from packages/momo-core/src/design (ADR-0189 D5). Do not edit by hand.
  * Regenerate: npm --prefix clients/web run gen:palettes
  * Drift test: clients/web/src/design/themes/palettes/palettes.drift.test.ts */
-:root[data-palette="dawnsky"] {
+:root[data-palette="dawnsky"], [data-palette-preview="dawnsky"] {
   --canvas-top: light-dark(#f7eadb, #231d1b);
   --canvas-mid: light-dark(#efedea, #171a20);
   --canvas-bottom: light-dark(#e2e9f3, #0f141c);

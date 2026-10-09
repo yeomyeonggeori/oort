@@ -55,8 +55,8 @@ describe("채널 범위의 행위는 「추가」다 (#1573 예약 · #1584)", (
     );
     expect(details, "채널 종류는 공개·비공개 둘이고 각각 한 줄을 갖는다").toHaveLength(2);
     for (const detail of details) expect(detail).not.toContain("초대");
-    expect(details[0]).toBe("워크스페이스의 누구나 찾아서 들어올 수 있습니다.");
-    expect(details[1]).toBe("추가된 멤버에게만 보입니다.");
+    expect(details[0]).toBe("워크스페이스의 누구나 찾아서 들어올 수 있어요.");
+    expect(details[1]).toBe("추가된 멤버에게만 보여요.");
   });
 
   it("`features/channels/` 의 사용자 문장 속 「초대」는 워크스페이스로 나가는 문뿐이다", () => {

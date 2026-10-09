@@ -150,7 +150,7 @@ export function MemoryResetPanel({
         </div>
       ) : (
         <form
-          className="flex min-w-0 flex-col gap-3 rounded-md border border-danger p-3"
+          className="flex min-w-0 flex-col gap-3"
           aria-label="기억 초기화 확인"
           onSubmit={(event) => {
             event.preventDefault();

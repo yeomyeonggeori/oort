@@ -97,7 +97,7 @@ export async function checkForUpdate(): Promise<void> {
   } catch (error) {
     set({
       kind: "failed",
-      message: "업데이트 서버에 닿지 못했습니다. 네트워크를 확인하고 다시 시도하세요.",
+      message: "업데이트 서버에 닿지 못했어요. 네트워크를 확인하고 다시 시도하세요.",
       detail: messageOf(error),
       update: null,
     });
@@ -134,7 +134,7 @@ export async function installUpdate(): Promise<void> {
   } catch (error) {
     set({
       kind: "failed",
-      message: "업데이트를 설치하지 못했습니다. 지금 쓰던 버전은 그대로입니다.",
+      message: "업데이트를 설치하지 못했어요. 지금 쓰던 버전은 그대로예요.",
       detail: messageOf(error),
       // Deliberately dropped: the shell consumed its pending update, so a retry
       // has to check again rather than reuse a handle that is already spent.

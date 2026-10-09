@@ -101,7 +101,7 @@ function expectedFor(theme: (typeof THEME_IDS)[number]): Declared {
   for (const r of DERIVED_ROLES) main.set(r, [norm(light.derived[r]), norm(dark.derived[r])]);
   main.set("glass", [light.glass, dark.glass]);
   main.set("scrim", [light.scrim, dark.scrim]);
-  const out: Declared = new Map([[`:root[data-palette="${theme}"]`, main]]);
+  const out: Declared = new Map([[`:root[data-palette="${theme}"], [data-palette-preview="${theme}"]`, main]]);
   for (const preset of SIGNAL_PRESET_IDS) {
     const l = resolvePreset(preset, theme, "light");
     const d = resolvePreset(preset, theme, "dark");

@@ -854,7 +854,7 @@ describe("D1′ 초대 수락 한 화면 (#2810 OB2-4)", () => {
     mount();
     fill("onboarding-profile-name", "가".repeat(101));
     expect(q("onboarding-profile-name-error")?.textContent).toBe(
-      "표시 이름은 100자까지 쓸 수 있습니다."
+      "표시 이름은 100자까지 쓸 수 있어요."
     );
     expect((q("login-submit") as HTMLButtonElement).disabled).toBe(true);
     expect(joinWithInvite).not.toHaveBeenCalled();

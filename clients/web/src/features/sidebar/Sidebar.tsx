@@ -256,6 +256,21 @@ export function Sidebar({
   const selfMember = memberFor(directoryQuery.directory, session.member.id);
   const selfName = selfMember?.displayName ?? session.member.displayName;
 
+  // 프로필(#3574): 펼친 동안은 목록 끝의 한 줄, ⌘B 접힘에서만 레일의 아바타. 같은 컴포넌트가
+  // 한 번에 한 곳에만 선다(둘이 함께 마운트되면 메뉴·다이얼로그가 둘이 된다).
+  const railCollapsed = channelPaneCollapsed && !asDrawer;
+  const profileCard = (compact: boolean) => (
+    <ProfileCard
+      compact={compact}
+      workspaceId={workspaceId}
+      selfMemberId={session.member.id}
+      selfMember={selfMember}
+      selfName={selfName}
+      workspaceName={wsTile.loading ? undefined : wsTile.label}
+      connected={connStatus === "connected"}
+    />
+  );
+
   // No clock in the sidebar at all: the pill is a word, so nothing here ticks.
   // Staleness is still checked, from the render's own clock, and the rail's 15s
   // sweep re-publishes the store, which is what re-renders this list.
@@ -606,7 +621,7 @@ export function Sidebar({
           workspaceId={workspaceId}
           avatarUrl={workspaceQuery.data?.avatarUrl}
           active={railActive}
-          collapsed={channelPaneCollapsed && !asDrawer}
+          collapsed={railCollapsed}
           marks={railMarks}
           footer={
             <div className="safe-area-bottom flex flex-col items-center gap-2">
@@ -627,14 +642,8 @@ export function Sidebar({
                   )}
                 />
               )}
-              <ProfileCard
-                compact
-                workspaceId={workspaceId}
-                selfMemberId={session.member.id}
-                selfMember={selfMember}
-                selfName={selfName}
-                connected={connStatus === "connected"}
-              />
+              {/* 접힘(⌘B)에서만 프로필이 레일에 아바타로 선다. 펼친 동안은 목록 끝의 한 줄이다(#3574). */}
+              {railCollapsed && profileCard(true)}
             </div>
           }
         />
@@ -1157,20 +1166,23 @@ export function Sidebar({
               Renders nothing at all unless there is something to act on. */}
           <UpdateBadge />
 
-          {/* #3280: the identity row ("who I am") and the connection bar moved to the
-              rail footer, so this row now holds only the shortcut help. What follows is
-              the rationale they were built under. The identity row is "who I am". Two DIFFERENT facts can appear here and
-              ADR-0160 keeps them apart (guard 6) — 6b design-review H1 is what made
-              the separation real rather than asserted:
-              • the presence badge (③) is on the avatar: the declared status
-                (auto/away/dnd) as a ROUND badge, the universally read presence
-                spot. It is the only thing on this row that is ever green.
-              • the connection indicator (①, moved here in 6a) is a BAR next to
-                the card, and only when the rail is unhealthy.
-              UX-D4 (#1756) made the whole row the profile-card trigger: status
-              radios, the rail's 워크스페이스 추가, and settings live in that
-              card. The collapse control lives on the titlebar (#1864). */}
-          <div className="safe-area-bottom flex items-center justify-end gap-2 pt-2">
+          {/* The identity row ("who I am"). Two DIFFERENT facts appear around it and
+              ADR-0160 keeps them apart (guard 6, 6b design-review H1):
+              • the presence badge (③) on the avatar: the declared status
+                (auto/away/dnd) as a ROUND badge, the universally read presence spot;
+              • the connection indicator (①) is a BAR, only when the rail is unhealthy,
+                and it lives in the rail footer (#3280), not on this row.
+              UX-D4 (#1756) made the whole row the profile-card trigger: status radios,
+              the rail's 워크스페이스 추가, and settings live in that card. The collapse
+              control lives on the titlebar (#1864). */}
+          {/* #3574: 목록 끝에 이어지는 한 줄. 띠도 구분선도 없이 목록 행과 같은 안쪽 여백으로
+              서고, 도움말은 같은 줄 끝의 조용한 아이콘이다. 접힘(⌘B)에서는 이 줄 대신 레일의
+              아바타가 같은 메뉴를 연다(위 footer). */}
+          <div
+            className="safe-area-bottom flex items-center gap-1 pt-2"
+            data-testid="sidebar-profile-foot"
+          >
+            {!railCollapsed && profileCard(false)}
             <ShortcutHelpDialog />
           </div>
         </div>

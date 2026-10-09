@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { removeMyAvatar } from "@momo/core/lib/api";
@@ -30,14 +30,25 @@ export function ProfileAvatarField({
   workspaceId,
   me,
   offline,
+  changeRef: externalChangeRef,
+  onBusyChange,
 }: {
   workspaceId: string;
   me: RosterMember | null;
   offline: boolean;
+  /**
+   * 히어로의 카메라 손잡이가 「사진 바꾸기」 단추를 대신 누를 수 있게 밖에서 쥔 ref (#3603).
+   * 손잡이가 파일 입력을 직접 열면 업로드·지우는 중의 잠금을 건너뛰므로, 잠금을 지는
+   * 진짜 단추 하나로 길을 모은다.
+   */
+  changeRef?: RefObject<HTMLButtonElement>;
+  /** 올리는 중·지우는 중을 히어로가 알아 카메라 손잡이를 같이 잠글 수 있게 한다. */
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const client = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
-  const changeRef = useRef<HTMLButtonElement>(null);
+  const ownChangeRef = useRef<HTMLButtonElement>(null);
+  const changeRef = externalChangeRef ?? ownChangeRef;
   const hintId = useId();
   const statusId = useId();
   const [progress, setProgress] = useState(0);
@@ -56,7 +67,7 @@ export function ProfileAvatarField({
     },
     onSuccess: async () => {
       await refreshRoster();
-      setDone(hadAvatarRef.current ? "프로필 사진을 바꿨습니다." : "프로필 사진을 올렸습니다.");
+      setDone(hadAvatarRef.current ? "프로필 사진을 바꿨어요." : "프로필 사진을 올렸어요.");
     },
     onError: (failure) => setError(memberAvatarUploadError(failure)),
   });
@@ -65,7 +76,7 @@ export function ProfileAvatarField({
     mutationFn: () => removeMyAvatar(workspaceId),
     onSuccess: async () => {
       await refreshRoster();
-      setDone("프로필 사진을 지웠습니다.");
+      setDone("프로필 사진을 지웠어요.");
       // 지운 단추는 사라졌다. 초점이 거기(또는 <body>)에 있으면 남는 단추로 옮긴다.
       const active = document.activeElement;
       if (
@@ -82,6 +93,9 @@ export function ProfileAvatarField({
   const uploading = upload.isPending;
   const removing = remove.isPending;
   const busy = uploading || removing;
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
   const hasAvatar = Boolean(me?.avatarUrl);
 
   function onPick(event: React.ChangeEvent<HTMLInputElement>) {
@@ -102,9 +116,9 @@ export function ProfileAvatarField({
   // 한 칸에 하나만 선다: 오류 > 진행 > 형제 잠금 사유 > 완료. 칸의 높이는 늘 예약해
   // 두므로(min-h-6) 문장이 나타나도 아래 폼이 밀리지 않는다.
   const status = uploading
-    ? `올리는 중 ${Math.round(progress * 100)}%.${hasAvatar ? " 끝나면 지울 수 있습니다." : ""}`
+    ? `올리는 중 ${Math.round(progress * 100)}%.${hasAvatar ? " 끝나면 지울 수 있어요." : ""}`
     : removing
-      ? "지우는 중입니다. 끝나면 다시 바꿀 수 있습니다."
+      ? "지우는 중이에요. 끝나면 다시 바꿀 수 있어요."
       : done;
   const changeLocked = offline || removing;
   const describedBy =
@@ -114,7 +128,7 @@ export function ProfileAvatarField({
 
   return (
     <div className="flex flex-col gap-2" data-testid="profile-avatar-field">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center justify-center gap-2 @sm:justify-start">
         <Button
           ref={changeRef}
           type="button"
@@ -130,7 +144,7 @@ export function ProfileAvatarField({
           aria-describedby={describedBy}
           aria-disabled={changeLocked || undefined}
           aria-busy={uploading || undefined}
-          className={cn("min-w-avatar-action", changeLocked && "opacity-50")}
+          className={cn("tap-target min-w-avatar-action", changeLocked && "opacity-50")}
           onClick={() => {
             if (changeLocked || busy) return;
             inputRef.current?.click();
@@ -144,7 +158,7 @@ export function ProfileAvatarField({
           <ConfirmButton
             label="사진 지우기"
             ariaLabel="프로필 사진 지우기"
-            question="프로필 사진을 지우면 이름의 첫 글자로 돌아갑니다."
+            question="프로필 사진을 지우면 이름의 첫 글자로 돌아가요."
             confirmLabel="지우기"
             disabled={offline || uploading}
             describedBy={
@@ -162,7 +176,7 @@ export function ProfileAvatarField({
               setDone(null);
               remove.mutate();
             }}
-            triggerClassName="min-w-avatar-action"
+            triggerClassName="tap-target min-w-avatar-action"
             testId="profile-avatar-remove"
           />
         ) : null}
@@ -178,7 +192,7 @@ export function ProfileAvatarField({
         />
       </div>
       <p id={hintId} className="text-meta text-ink-muted">
-        PNG, JPG, GIF, WebP. 5MB까지 올릴 수 있습니다.
+        PNG, JPG, GIF, WebP. 5MB까지 올릴 수 있어요.
       </p>
       <div className="min-h-6">
         <p

@@ -378,7 +378,7 @@ describe('알림 일시 중지 (#2848)', () => {
     const sheet = await openSheet();
     await waitFor(() =>
       expect(within(sheet).getByTestId('profile-pause-row')).toHaveTextContent(
-        /알림 설정을 불러오지 못했습니다/,
+        /알림 설정을 불러오지 못했어요/,
       ),
     );
     fireEvent.press(within(sheet).getByTestId('profile-pause-row'));

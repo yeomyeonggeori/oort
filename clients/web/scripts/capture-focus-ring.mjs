@@ -157,10 +157,10 @@ async function run(browserType, engine) {
   await page.getByTestId("settings-route").waitFor({ state: "visible" });
   await step("pointer-settings-enter", false, true);
 
-  // ② 절 목록에서 AI 연결을 마우스로. WebKit은 버튼 대신 가장 가까운 포커스
+  // ② 절 목록에서 기기를 마우스로. WebKit은 버튼 대신 가장 가까운 포커스
   //    가능한 조상(라우트 상자, tabindex=-1)에 캐럿을 준다.
-  await page.getByTestId("settings-nav-ai").click();
-  await step("pointer-settings-nav-ai", false, true);
+  await page.getByTestId("settings-nav-devices").click();
+  await step("pointer-settings-nav-devices", false, true);
 
   // ③ 마우스로 쓰던 사람이 Esc로 설정을 닫는다 → 캐럿 복귀.
   await page.keyboard.press("Escape");
@@ -174,14 +174,14 @@ async function run(browserType, engine) {
   await step("pointer-then-shortcut-settings-enter", false, true);
 
   // ⑤ 마우스로 절을 누른 뒤 아무 키(여기서는 Shift)를 누른다.
-  await page.getByTestId("settings-nav-ai").click();
+  await page.getByTestId("settings-nav-devices").click();
   await page.keyboard.press("Shift");
   await step("pointer-then-modifier-key", false, true);
 
   // ⑤b 마우스로 절을 누른 뒤 화살표. WebKit은 캐럿이 라우트 상자(tabindex=-1,
   //     착지점)에 있어 UA 기본 링(outline: auto)이 판 전체를 둘렀다. Chromium은
   //     캐럿이 절 버튼에 있어 화살표가 다음 절로 옮기고 링이 선다(키보드 탐색).
-  await page.getByTestId("settings-nav-ai").click();
+  await page.getByTestId("settings-nav-devices").click();
   await page.keyboard.press("ArrowDown");
   await step("pointer-then-arrow", engine !== "webkit", true);
 
@@ -218,11 +218,11 @@ async function run(browserType, engine) {
   await step("keyboard-arrow-in-settings-nav", true, true);
 
   // ⑩ 마우스를 누르면 링이 걷힌다.
-  await page.getByTestId("settings-nav-ai").click();
+  await page.getByTestId("settings-nav-devices").click();
   await step("keyboard-then-pointer", false);
 
   // ⑪ 다시 화살표 → 링.
-  await page.getByTestId("settings-nav-ai").focus();
+  await page.getByTestId("settings-nav-devices").focus();
   await page.keyboard.press("ArrowUp");
   await step("keyboard-arrow-after-pointer", true, true);
 

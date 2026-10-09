@@ -55,7 +55,7 @@ const KINDS = [
   {
     id: "public" as const,
     label: "공개",
-    detail: "워크스페이스의 누구나 찾아서 들어올 수 있습니다.",
+    detail: "워크스페이스의 누구나 찾아서 들어올 수 있어요.",
     icon: <Hash className="size-4" />,
   },
   {
@@ -69,7 +69,7 @@ const KINDS = [
     // 형제 줄과 짝이 되는 자리이기도 하다: 공개는 스스로 **들어오고**, 비공개는
     // 누군가 **추가해야** 들어온다. 두 줄이 같은 동사 가족을 쓰면 그 대비가
     // 문장 하나로 읽힌다.
-    detail: "추가된 멤버에게만 보입니다.",
+    detail: "추가된 멤버에게만 보여요.",
     icon: <Lock className="size-4" />,
   },
 ];
@@ -245,7 +245,7 @@ function CreateChannelPanel({
       <div className="flex flex-col gap-1 border-b border-line p-4">
         <DialogTitle>채널 만들기</DialogTitle>
         <DialogDescription>
-          공개 범위와 이름을 정하면 바로 그 채널로 들어갑니다.
+          공개 범위와 이름을 정하면 바로 그 채널로 들어가요.
         </DialogDescription>
       </div>
 
@@ -256,7 +256,7 @@ function CreateChannelPanel({
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼습니다. 채널 만들기는 다시 연결된 뒤에 할 수 있습니다."
+          message="연결이 끊겼어요. 채널 만들기는 다시 연결된 뒤에 할 수 있어요."
           testId="create-channel-offline"
         />
       )}
@@ -274,7 +274,7 @@ function CreateChannelPanel({
         <DialogField
           label="채널 이름"
           htmlFor="create-channel-name"
-          hint="영문, 숫자, 하이픈, 밑줄로 80자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장됩니다."
+          hint="영문, 숫자, 하이픈, 밑줄로 80자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장돼요."
           error={nameError}
         >
           <Input
@@ -298,7 +298,7 @@ function CreateChannelPanel({
         <DialogField
           label="주제"
           htmlFor="create-channel-topic"
-          hint="선택 사항이며 280자까지 쓸 수 있습니다."
+          hint="선택 사항이에요. 280자까지 쓸 수 있어요."
           error={topicError}
         >
           <Input

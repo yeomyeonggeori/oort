@@ -270,7 +270,13 @@ describe("반경 축", () => {
  * 붙였기 때문**이다. 어느 파일이 컨트롤 프리미티브인지를 한 자리에 적으면, 남는 것은
  * 문법 질문이 된다. 아래 두 목록이 그 이름이다.
  */
-const CONTROL_PRIMITIVES = ["button.tsx", "input.tsx", "select.tsx"] as const;
+const CONTROL_PRIMITIVES = [
+  "button.tsx",
+  "input.tsx",
+  "segmented-control.tsx",
+  "select.tsx",
+  "switch.tsx",
+] as const;
 
 /**
  * 컨테이너 프리미티브 — 담는 상자. 경계는 나누는 선이므로 `--line` 이 옳다.
