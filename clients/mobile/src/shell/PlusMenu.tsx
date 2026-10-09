@@ -42,7 +42,7 @@ import {PLUS_LABEL, SHELL} from './ShellChrome';
 // =============================================================================
 
 export interface PlusMenuItem {
-  key: 'dm' | 'channel' | 'agents' | 'delegate' | 'work';
+  key: 'dm' | 'channel' | 'agents' | 'ask-mac' | 'delegate' | 'work';
   icon: MenuIconName;
   label: string;
   hint: string;

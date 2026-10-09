@@ -110,6 +110,7 @@ import {
   type DelegatePreview,
   type DelegatePrefill,
 } from '../src/shell/DelegateWorkSheet';
+import {AskMacSheet, type AskMacPreview} from '../src/shell/AskMacSheet';
 import {workRunFailure} from '@momo/core/features/agents/workRunRequest';
 import {INITIAL_NAV, navReducer} from '../src/nav/state';
 import {ProfilePage, ProfileSheet} from '../src/features/profile/ProfileSheet';
@@ -4093,6 +4094,26 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           />
         </View>
       );
+    // #3597 T6b: 「내 맥에 보내기」 시트의 판. 보내기 포트는 하네스에서 가짜다(Face ID 없음).
+    case 'shell-ask-on':
+    case 'shell-ask-work':
+    case 'shell-ask-off':
+    case 'shell-ask-signing':
+    case 'shell-ask-waiting':
+    case 'shell-ask-first':
+      return (
+        <View style={styles.fill}>
+          <Shell />
+          <AskMacSheet
+            onClose={() => {}}
+            onUseAgent={() => {}}
+            onOpenSession={() => {}}
+            onOpenWorkList={() => {}}
+            waitTimeoutMs={3_600_000}
+            preview={askPreview(name)}
+          />
+        </View>
+      );
     case 'shell-profile-sheet':
       return (
         <View style={styles.fill}>
@@ -5034,6 +5055,54 @@ function delegatePreview(name: string): DelegatePreview {
   return {};
 }
 
+function askPreview(name: string): AskMacPreview {
+  const base: AskMacPreview = {
+    channelId: 'ch-agent-lab',
+    prompt: '이 에러 메시지가 무슨 뜻인지 알려 줘. TypeError: undefined is not a function',
+    signing: 'ready',
+  };
+  if (name === 'shell-ask-work') {
+    return {
+      ...base,
+      mode: 'work',
+      harness: 'codex',
+      folderId: 'fld-oort-app',
+      prompt: '로그인 버그를 찾아서 고치고 PR을 올려 줘.',
+    };
+  }
+  if (name === 'shell-ask-first') {
+    return {signing: 'ready', prompt: '이 에러가 무슨 뜻이야?'};
+  }
+  if (name === 'shell-ask-signing') return {...base, signing: 'flag_off'};
+  if (name === 'shell-ask-waiting') return {...base, waiting: true};
+  return base;
+}
+
+function seedAsk(surface: string): void {
+  const online = surface !== 'shell-ask-off';
+  harnessClient.setQueryData(['work-hosts', ADE_WS], [
+    {
+      id: 'measure-mac',
+      workspaceId: ADE_WS,
+      scope: 'member',
+      ownerMemberId: SELF,
+      type: 'workd',
+      displayName: '성재의 MacBook Pro',
+      capabilities: {},
+      createdAtMs: 0,
+      lastSeenAtMs: Date.now(),
+      online,
+      folders: [
+        {id: 'fld-question', displayName: '질문용 폴더', kind: 'question'},
+        {id: 'fld-oort-app', displayName: 'oort-app', kind: 'project'},
+        {id: 'fld-oort-docs', displayName: 'oort-docs', kind: 'project'},
+      ],
+      defaultFolderId: 'fld-question',
+    },
+  ]);
+  harnessClient.setQueryData(['work-sessions', ADE_WS], []);
+}
+
 function seedDelegate(surface: string): void {
   harnessClient.setQueryData(['roster', ADE_WS], [
     ...SHELL_ROSTER.filter(member => member.kind !== 'agent'),
@@ -5637,4 +5706,5 @@ if (
 ) {
   seedShell(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-delegate-')) seedDelegate(LAUNCHED.name);
+  if (LAUNCHED.name.startsWith('shell-ask-')) seedAsk(LAUNCHED.name);
 }

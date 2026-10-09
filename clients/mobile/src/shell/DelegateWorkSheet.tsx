@@ -895,7 +895,7 @@ function SheetBody({
   );
 }
 
-function TrailingAction({
+export function TrailingAction({
   label,
   disabled,
   onPress,
@@ -927,7 +927,7 @@ function TrailingAction({
   );
 }
 
-function Check({on}: {on: boolean}): React.JSX.Element | null {
+export function Check({on}: {on: boolean}): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
   return on ? (
     <Text style={styles.check} importantForAccessibility="no">
@@ -936,7 +936,7 @@ function Check({on}: {on: boolean}): React.JSX.Element | null {
   ) : null;
 }
 
-function FieldLabel({
+export function FieldLabel({
   label,
   note,
 }: {
