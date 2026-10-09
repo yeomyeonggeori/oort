@@ -2899,7 +2899,10 @@ paths:
             error.code `subscription_agents_disabled` (the operator turned the path off; show
             "this server has it off", do not hide the option), `claude_subscription_agent_paused`
             (harness claude_code on an instance that has not opted in; the default; Codex is not affected), `subscription_agent_limit` (5 per
-            CLI), `subscription_agent_cleanup_pending` (finish disconnecting first), or an explicit
+            CLI), `subscription_agent_cleanup_pending` (finish disconnecting first),
+            `subscription_lane_closed` (#3567: the caller already has a personal agent or a retired
+            subscription agent for this CLI, so the hosted lane is closed for good; no agent is
+            created and no device slot is taken; checked right after the admin gate), or an explicit
             handle that already exists (no code).
           content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
 

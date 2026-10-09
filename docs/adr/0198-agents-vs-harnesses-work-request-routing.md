@@ -426,6 +426,8 @@ D7의 소유자 호출은 본문 D2가 이미 정한 「member host 레인은 D1
 
 **5. 데스크탑.** 로그인 뒤 「에이전트로 만들기」(D15 `register` + `claude mcp add-json …oort`)는 빌드 플래그 `VITE_MOMO_SUBSCRIPTION_REGISTER`가 켜진 빌드에서만 선다(**기본 꺼짐**, `1`·`true`만 켬). 꺼지면 로그인 모달은 「연결됐어요」에서 닫히고 서버도 셸도 부르지 않는다. 앱 시작에 한 번 셸의 `agent_port_retire_legacy`가 돈다: 앱이 `add-json`을 성공시킨 표식(`added`)이 있고 그 에이전트가 `oort` 슬롯 소유자일 때만 `claude mcp remove --scope user oort`를 부르고, 표식 파일(`legacy-retired-v1`)로 다시는 하지 않는다. 실패는 세 번까지 다음 실행에 다시 하고, 그 뒤에는 저장소 항목만 지우고 끝낸다.
 
+**6. 서버 쪽에서도 닫는다(보안 검수 M1·M2).** 옛 데스크탑(0.1.18)은 로그인마다 `register`를 부르므로 클라이언트 플래그만으로는 닫히지 않는다. `POST …/subscription-agents/register`는 관리자 확인 직후, 호출자가 같은 하네스의 개인 에이전트나 은퇴한 구독 에이전트를 이미 가졌으면 409 `subscription_lane_closed`로 거절하고 아무것도 만들지 않는다(다른 하네스·다른 소유자는 그대로). `regenerate_pairing_in_tx`는 전환·은퇴한 행이면 폐기·전이 전에 `WrongState`로 답한다(트리거는 마지막 방어선).
+
 **운영 실행은 이 변경이 하지 않는다.** 도구와 시험까지가 이 변경이고 oort-team 실행은 소유자 승인 뒤 통합자가 한다(런북은 #3567 PR 본문). `kwak-claude` 전환은 멘션 라우팅(#3592)이 선 뒤다.
 
 ## 증보 2 (2026-10-08) — 워크스페이스 단위 「실행 엔진」 설정 API 제거 (#3584)
