@@ -68,9 +68,11 @@ function readFolders(host: WorkHost): {
       }
     }
   }
-  const defaultFolderId =
-    typeof raw.defaultFolderId === 'string' ? raw.defaultFolderId : null;
-  return {folders, defaultFolderId};
+  return {
+    folders,
+    defaultFolderId:
+      typeof raw.defaultFolderId === 'string' ? raw.defaultFolderId : null,
+  };
 }
 
 /**

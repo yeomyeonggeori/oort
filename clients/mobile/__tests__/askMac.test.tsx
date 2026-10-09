@@ -207,14 +207,14 @@ function mount(port: SpawnPort, extra: {waitTimeoutMs?: number} = {}) {
     onOpenSession: jest.fn(),
     onOpenWorkList: jest.fn(),
   };
-  render(
+  const view = render(
     <QueryClientProvider client={client}>
       <SessionProvider member={SELF}>
         <AskMacSheet port={port} {...handlers} {...extra} />
       </SessionProvider>
     </QueryClientProvider>,
   );
-  return handlers;
+  return {...handlers, unmount: () => view.unmount()};
 }
 
 async function pickChannelAndType(text = '이 에러가 무슨 뜻이야?') {
@@ -302,7 +302,7 @@ describe('③ 하네스는 마지막에 쓴 것이 기본이다', () => {
   it('Codex로 보낸 뒤 다시 열면 Codex가 미리 서 있다', async () => {
     installFetch({});
     const {port, requests} = fakePort();
-    mount(port, {waitTimeoutMs: 60_000});
+    const first = mount(port, {waitTimeoutMs: 60_000});
     await screen.findByTestId('ask-mac-form');
     fireEvent.press(screen.getByTestId('ask-mac-harness-codex'));
     await pickChannelAndType();
@@ -312,7 +312,7 @@ describe('③ 하네스는 마지막에 쓴 것이 기본이다', () => {
     await waitFor(() => expect(requests).toHaveLength(1));
     expect(requests[0]!.tool).toBe('codex');
 
-    cleanup();
+    first.unmount();
     installFetch({});
     mount(fakePort().port);
     await screen.findByTestId('ask-mac-form');
@@ -327,11 +327,11 @@ describe('③ 하네스는 마지막에 쓴 것이 기본이다', () => {
 
   it('OpenCode는 맥이 감지했다고 알릴 때만 나온다', async () => {
     installFetch({});
-    mount(fakePort().port);
+    const first = mount(fakePort().port);
     await screen.findByTestId('ask-mac-form');
     expect(screen.queryByTestId('ask-mac-harness-opencode')).toBeNull();
 
-    cleanup();
+    first.unmount();
     installFetch({hosts: [hostWire({capabilities: {opencode: true}})]});
     mount(fakePort().port);
     expect(await screen.findByTestId('ask-mac-harness-opencode')).toBeTruthy();
@@ -450,7 +450,7 @@ describe('⑥ 과금을 단정하지 않는다(#3566 미측정)', () => {
   it('켜짐·꺼짐·막힘·거절 어느 판에도 그런 문장이 없다', async () => {
     const seen: string[] = [];
     installFetch({});
-    mount(fakePort({kind: 'refused', sentence: '서버가 받지 않았어요.'}).port);
+    const a = mount(fakePort({kind: 'refused', sentence: '서버가 받지 않았어요.'}).port);
     await screen.findByTestId('ask-mac-form');
     seen.push(JSON.stringify(screen.toJSON()));
     await pickChannelAndType();
@@ -459,13 +459,13 @@ describe('⑥ 과금을 단정하지 않는다(#3566 미측정)', () => {
     });
     await screen.findByTestId('ask-mac-banner');
     seen.push(JSON.stringify(screen.toJSON()));
-    cleanup();
+    a.unmount();
 
     installFetch({hosts: [hostWire({online: false})]});
-    mount(fakePort().port);
+    const b = mount(fakePort().port);
     await screen.findByTestId('ask-mac-off');
     seen.push(JSON.stringify(screen.toJSON()));
-    cleanup();
+    b.unmount();
 
     installFetch({signatureRequired: false});
     mount(fakePort().port);
