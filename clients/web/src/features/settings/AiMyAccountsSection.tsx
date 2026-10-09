@@ -39,8 +39,7 @@ import {
   harnessProfileStatus,
 } from "@/lib/tauri";
 import { AI_CONNECT_REENTRY_PATH } from "@/features/welcome/aiConnectReentry";
-import { SubscriptionAgentStart } from "@/features/welcome/harnessLogin/SubscriptionAgentStart";
-import { RegisterAwareLoginDialog } from "@/features/welcome/harnessLogin/RegisterAwareLoginDialog";
+import { HarnessLoginDialog } from "@/features/welcome/harnessLogin/HarnessLoginDialog";
 import { HarnessUnlinkDialog } from "@/features/welcome/harnessLogin/HarnessUnlinkDialog";
 import { useSubscriptionEntryState } from "@/features/welcome/SubscriptionAgentEntry";
 import { useLocalHarnessWatch } from "@/features/welcome/useLocalHarnessWatch";
@@ -67,7 +66,6 @@ import {
   AiSection,
   AiSectionHead,
   AiSource,
-  type AiPillTone,
 } from "./aiAccountsParts";
 import {
   MY_ACCOUNTS_BROWSER_LINE,
@@ -112,29 +110,15 @@ const OWN_ACCOUNT_FOOT =
 
 const PROFILES_KEY = ["local", "harness-profiles"] as const;
 
-/**
- * 구독 줄 밑에 붙는 「연결된 에이전트」 한 줄(AIH-4, #3399). 내용은 코어 `aiHubModel`이
- * 정한 문장이고 이 파일은 그리기만 한다. 기본 로그인 줄(프로필 없음)에만 붙는다.
- */
-export interface AccountAgentLine {
-  text: string;
-  chip: { text: string; tone: AiPillTone } | null;
-  detail: string | null;
-}
-
-export type AccountAgentLineFor = (harness: LocalHarnessId) => AccountAgentLine | null;
-
 export function AiMyAccountsSection({
   onAddApiKey,
   title = "내 AI 계정",
   scope = "이 맥",
-  agentLineFor,
 }: {
   /** 운영자면 팀 AI 키 절의 키 폼을 연다. 없으면 추가 창의 API 키 선택이 잠긴다. */
   onAddApiKey?: () => void;
   title?: string;
   scope?: string;
-  agentLineFor?: AccountAgentLineFor;
 }) {
   const state = useSubscriptionEntryState();
   const browserTab = myAccountsBrowserTab(state, IS_TAURI);
@@ -156,7 +140,7 @@ export function AiMyAccountsSection({
           </span>
         </AiLineRow>
       ) : state === "rows" ? (
-        <MyAccountRows onAddApiKey={onAddApiKey} agentLineFor={agentLineFor} />
+        <MyAccountRows onAddApiKey={onAddApiKey} />
       ) : (
         <AiLineRow testId="subscription-entry" surface={state} last>
           <span>{MY_ACCOUNTS_EMPTY_LINE}</span>
@@ -223,13 +207,7 @@ function profileKey(profile: HarnessProfileRef): string {
   return `${profile.harness}/${profile.label}`;
 }
 
-function MyAccountRows({
-  onAddApiKey,
-  agentLineFor,
-}: {
-  onAddApiKey?: () => void;
-  agentLineFor?: AccountAgentLineFor;
-}) {
+function MyAccountRows({ onAddApiKey }: { onAddApiKey?: () => void }) {
   const client = useQueryClient();
   const probeFixture = readProbeFixture();
   const profilesFixture = readProfilesFixture();
@@ -269,7 +247,7 @@ function MyAccountRows({
 
   const [hidden, setHidden] = useState<LocalHarnessId[]>(readHiddenDefaults);
   const [login, setLogin] = useState<LoginTarget | null>(null);
-  const [startOpen, setStartOpen] = useState(false);
+  const [noCli, setNoCli] = useState(false);
   const loginConnected = useRef(false);
   const pendingDiscard = useRef<AddSubscriptionDraft | null>(null);
   const [adding, setAdding] = useState<{
@@ -357,11 +335,12 @@ function MyAccountRows({
   } as const;
 
   const openAdd = () => {
-    // 설치된 CLI가 없으면 추가할 곳이 없다: 설치 안내가 있는 AI 연결 화면으로.
+    // 설치된 CLI가 없으면 추가할 곳이 없다: 이유 한 줄만 말한다.
     if (installed.length === 0) {
-      setStartOpen(true);
+      setNoCli(true);
       return;
     }
+    setNoCli(false);
     setAddError(null);
     setAdding({ draft: null });
   };
@@ -459,7 +438,6 @@ function MyAccountRows({
                   row={row}
                   pill={pill}
                   moreTestId={moreId(row)}
-                  agentLine={row.profile === null ? (agentLineFor?.(row.harness) ?? null) : null}
                   onLogin={() => {
                     loginConnected.current = false;
                     setLogin({
@@ -504,6 +482,11 @@ function MyAccountRows({
           {restoreHiddenLine(hiddenInstalled.length)}
         </button>
       )}
+      {noCli && (
+        <p className="break-keep pt-2 text-meta text-ink-muted" role="status" data-testid="my-account-no-cli">
+          이 맥에서 Claude Code나 Codex 설치를 찾지 못했어요. 설치한 뒤 다시 열어 주세요.
+        </p>
+      )}
       <AiFoot>{OWN_ACCOUNT_FOOT}</AiFoot>
 
       <AddSubscriptionDialog
@@ -526,8 +509,7 @@ function MyAccountRows({
         }
       />
 
-      {startOpen && <SubscriptionAgentStart open onClose={() => setStartOpen(false)} />}
-      <RegisterAwareLoginDialog
+      <HarnessLoginDialog
         harness={login?.harness ?? null}
         profile={login?.profile ?? null}
         onClose={closeLogin}
@@ -603,14 +585,12 @@ function MyAccountRowView({
   row,
   pill,
   moreTestId,
-  agentLine,
   onLogin,
   onDestructive,
 }: {
   row: MyAccountRow;
   pill: HarnessPill;
   moreTestId: string;
-  agentLine: AccountAgentLine | null;
   onLogin: () => void;
   onDestructive: (opener: HTMLElement | null) => void;
 }) {
@@ -642,26 +622,6 @@ function MyAccountRowView({
             <AiSource>구독</AiSource>
             {myAccountRowDetail(row)}
           </span>
-          {agentLine && (
-            <span
-              className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pt-1 text-meta text-ink-muted"
-              data-testid={`${testId}-agent`}
-            >
-              <span className="break-keep [overflow-wrap:anywhere]" data-testid={`${testId}-agent-text`}>
-                {agentLine.text}
-              </span>
-              {agentLine.chip && (
-                <span data-testid={`${testId}-agent-chip`}>
-                  <AiPill tone={agentLine.chip.tone}>{agentLine.chip.text}</AiPill>
-                </span>
-              )}
-              {agentLine.detail && (
-                <span className="basis-full break-keep" data-testid={`${testId}-agent-detail`}>
-                  {agentLine.detail}
-                </span>
-              )}
-            </span>
-          )}
         </div>
       </div>
       <div className="ms-auto flex shrink-0 items-center gap-3">

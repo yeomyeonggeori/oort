@@ -124,6 +124,7 @@ export function AskMacSheet({
   onOpenWorkList,
   port,
   preview,
+  initialHarness,
   waitTimeoutMs = WAIT_TIMEOUT_MS,
 }: {
   onClose: () => void;
@@ -135,6 +136,8 @@ export function AskMacSheet({
   onOpenWorkList: () => void;
   port?: SpawnPort;
   preview?: AskMacPreview;
+  /** 「개인 에이전트」 줄이 넘기는 처음 하네스. 이 맥이 못 고르는 키면 평소 기본값이 이긴다. */
+  initialHarness?: HarnessKey;
   waitTimeoutMs?: number;
 }): React.JSX.Element {
   return (
@@ -150,6 +153,7 @@ export function AskMacSheet({
         onOpenWorkList={onOpenWorkList}
         port={port}
         preview={preview}
+        initialHarness={initialHarness}
         waitTimeoutMs={waitTimeoutMs}
       />
     </PageSheet>
@@ -163,6 +167,7 @@ function SheetBody({
   onOpenWorkList,
   port,
   preview,
+  initialHarness,
   waitTimeoutMs,
 }: {
   onClose: () => void;
@@ -171,6 +176,7 @@ function SheetBody({
   onOpenWorkList: () => void;
   port?: SpawnPort;
   preview?: AskMacPreview;
+  initialHarness?: HarnessKey;
   waitTimeoutMs: number;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -215,7 +221,7 @@ function SheetBody({
   const [macId, setMacId] = useState<string | null>(null);
   const [mode, setMode] = useState<AskMode>(preview?.mode ?? 'ask');
   const [harnessPick, setHarnessPick] = useState<HarnessKey | null>(
-    preview?.harness ?? null,
+    preview?.harness ?? initialHarness ?? null,
   );
   const [folderPick, setFolderPick] = useState<string | null>(
     preview?.folderId ?? null,

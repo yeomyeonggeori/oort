@@ -91,17 +91,33 @@ describe("AI 허브 라우트 (AIH-3)", () => {
   it("/ai 는 개요: 용어집 이름의 카드 넷과 구획으로 가는 링크", async () => {
     const el = await mountAt("/ai");
     const cards = [...el.querySelectorAll('[data-testid^="ai-hub-card-"]')].map((n) => n.querySelector("h2")?.textContent);
-    expect(cards).toEqual(["내 AI 계정", "팀 AI 키", "에이전트", "외부 연결"]);
+    expect(cards).toEqual(["내 도구", "팀 AI 키", "에이전트", "외부 연결"]);
     const hrefs = [...el.querySelectorAll('a[data-testid^="ai-hub-open-"]')].map((a) => a.getAttribute("href"));
     expect(hrefs).toEqual(["/ai/accounts", "/ai/team-keys", "/ai/agents", "/ai/external"]);
     expect(el.querySelector('[data-testid="ai-hub-create-agent"]')?.getAttribute("href")).toBe("/ai/agents?create=1");
   });
 
-  it("탭은 개요와 네 구획이고 현재 자리가 aria-current다", async () => {
+  it("위 탭은 에이전트·내 도구 둘이고, 에이전트 탭 안에서만 작은 탭(개요·팀 AI 키·에이전트·외부 연결)이 선다", async () => {
     const el = await mountAt("/ai/external");
+    const top = [...el.querySelectorAll('[data-testid="ai-hub-top-tabs"] a')].map((a) => a.textContent);
+    expect(top).toEqual(["에이전트", "내 도구"]);
+    const currentTop = [...el.querySelectorAll('[data-testid="ai-hub-top-tabs"] [aria-current="page"]')].map((a) => a.textContent);
+    expect(currentTop).toEqual(["에이전트"]);
     const current = [...el.querySelectorAll('[data-testid="ai-hub-tabs"] [aria-current="page"]')].map((a) => a.textContent);
     expect(current).toEqual(["외부 연결"]);
-    expect(el.querySelectorAll('[data-testid="ai-hub-tabs"] a')).toHaveLength(5);
+    expect([...el.querySelectorAll('[data-testid="ai-hub-tabs"] a')].map((a) => a.textContent)).toEqual([
+      "개요",
+      "팀 AI 키",
+      "에이전트",
+      "외부 연결",
+    ]);
+  });
+
+  it("내 도구 탭이 현재 자리면 작은 탭은 없다", async () => {
+    const el = await mountAt("/ai/accounts");
+    const currentTop = [...el.querySelectorAll('[data-testid="ai-hub-top-tabs"] [aria-current="page"]')].map((a) => a.textContent);
+    expect(currentTop).toEqual(["내 도구"]);
+    expect(el.querySelector('[data-testid="ai-hub-tabs"]')).toBeNull();
   });
 
   it("제목은 AI, 부제는 모델 문구", async () => {

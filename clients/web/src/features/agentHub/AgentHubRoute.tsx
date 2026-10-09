@@ -95,7 +95,6 @@ import { HostedAgentWizard } from "@/features/hostedAgents/HostedAgentWizard";
 import { HostedConnectionSection } from "@/features/hostedAgents/HostedConnectionSection";
 import type { HostedWizardLaunch } from "@/features/hostedAgents/hostedWizardLaunch";
 import { HOSTED_WIZARD_TITLE } from "@momo/core/features/hostedAgents/wizard";
-import { SubscriptionAgentEntryButton } from "@/features/welcome/SubscriptionAgentEntry";
 import {
   isSurfaceProvided,
   type SurfaceId,
@@ -392,7 +391,6 @@ export function AgentHubRoute() {
                 {agents.length}명
               </span>
             )}
-            {mayCreate && <SubscriptionAgentEntryButton from="agents" />}
             {mayCreate && hostedPairingProvided && (
               <Button
                 type="button"

@@ -128,6 +128,8 @@ export function loginFailedDetail(harness: LocalHarnessId, reason: HarnessLoginF
 }
 
 export const LOGIN_CANCEL_LABEL = "취소";
+/** 「내 도구」 카드에서 연 모달: 창만 닫고 로그인은 카드에서 계속된다. */
+export const LOGIN_DETACH_LABEL = "닫고 계속하기";
 export const LOGIN_RETRY_LABEL = "다시 시도";
 export const LOGIN_CLOSE_LABEL = "닫기";
 export const LOGIN_DONE_LABEL = "완료";

@@ -367,7 +367,8 @@ async function openAgentsTab() {
   await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
   // 탭이던 것이 + 메뉴의 행이 되었다 (ADR-0189 D1, #2714 → #2750).
   fireEvent.press(screen.getByTestId('shell-plus'));
-  fireEvent.press(screen.getByTestId('plus-menu-agents'));
+  fireEvent.press(screen.getByTestId('plus-menu-ai'));
+  fireEvent.press(screen.getByTestId('ai-row-agents'));
   await waitFor(() => expect(screen.getByTestId('agents-list')).toBeTruthy());
   await waitFor(() => expect(agentSub()).toBeTruthy());
 }

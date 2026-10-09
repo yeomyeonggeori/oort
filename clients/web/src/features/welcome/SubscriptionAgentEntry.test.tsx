@@ -12,7 +12,6 @@ import { HARNESS_PILL_LABEL } from "@momo/core/features/onboarding/aiConnect";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { AiLinkSection } from "@/features/settings/AiLinkSection";
 import { AiMyAccountsSection } from "@/features/settings/AiMyAccountsSection";
-import { SubscriptionAgentEntryButton } from "./SubscriptionAgentEntry";
 
 // #2870: AI과 에이전트 화면의 구독 줄 입구.
 // #2877: 설정 쪽 입구는 「내 계정 · 이 맥」 절의 빈 줄 행동([구독 추가])이 되었다.
@@ -157,7 +156,7 @@ afterEach(() => {
 });
 
 describe("AI 입구 (#2870)", () => {
-  it("owner + 데스크탑 + 서버 켬: 버튼이 온보딩 화면이 아니라 구독으로 쓰는 에이전트 창을 연다 (#3389)", async () => {
+  it("owner + 데스크탑 + 서버 켬: 설치된 CLI가 없으면 에이전트 만들기 창이 아니라 이유 한 줄이다 (ADR-0198)", async () => {
     mount(createElement(AiMyAccountsSection));
     await rtlWaitFor(() => {
       if (!q("subscription-entry-open")) throw new Error("entry");
@@ -166,8 +165,9 @@ describe("AI 입구 (#2870)", () => {
     act(() => q("subscription-entry-open")?.click());
     expect(window.location.hash).not.toBe("#/ai-connect?from=settings");
     await rtlWaitFor(() => {
-      if (!document.querySelector('[data-testid="subscription-start-dialog"]')) throw new Error("start");
+      if (!q("my-account-no-cli")) throw new Error("note");
     });
+    expect(document.querySelector('[data-testid="subscription-start-dialog"]')).toBeNull();
   });
 
   it("AI 연결 화면이 「준비됨」으로 읽는 CLI를 내 계정 절도 같은 판정으로 싣는다 (#2938 ①)", async () => {
@@ -241,16 +241,6 @@ describe("AI 입구 (#2870)", () => {
     expect(q("subscription-entry-open")).toBeNull();
   });
 
-  it("명부 조회가 실패하면 에이전트 화면 머리 버튼도 없다(#2893)", async () => {
-    vi.mocked(fetchRoster).mockRejectedValue(new ApiError(500, "roster down"));
-    mount(createElement(SubscriptionAgentEntryButton, { from: "agents" }));
-    await settle();
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    expect(q("agent-hub-subscription-entry")).toBeNull();
-  });
-
   it("데스크탑 앱이 아니면 버튼 대신 이유 한 줄", async () => {
     envSlot.tauri = false;
     mount(createElement(AiMyAccountsSection));
@@ -289,29 +279,5 @@ describe("AI 입구 (#2870)", () => {
     expect(q("subscription-entry")?.getAttribute("data-surface")).toBe("hidden");
     expect(q("subscription-entry-open")).toBeNull();
     expect(q("subscription-entry-detail")).toBeNull();
-  });
-});
-
-describe("에이전트 화면 입구 (#2870)", () => {
-  it("구독 줄이 설 때만 머리 버튼이 서고, 누르면 온보딩이 아니라 구독으로 쓰는 에이전트 창이 선다 (#3389)", async () => {
-    mount(createElement(SubscriptionAgentEntryButton, { from: "agents" }));
-    await rtlWaitFor(() => {
-      if (!q("agent-hub-subscription-entry")) throw new Error("entry");
-    });
-    act(() => q("agent-hub-subscription-entry")?.click());
-    expect(window.location.hash).not.toContain("ai-connect");
-    await rtlWaitFor(() => {
-      if (!document.querySelector('[data-testid="subscription-start-dialog"]')) throw new Error("start");
-    });
-  });
-
-  it("서버 킬 스위치가 꺼지면 머리 버튼은 없다", async () => {
-    vi.mocked(fetchWorkspace).mockResolvedValue(workspace(false));
-    mount(createElement(SubscriptionAgentEntryButton, { from: "agents" }));
-    await settle();
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    expect(q("agent-hub-subscription-entry")).toBeNull();
   });
 });
