@@ -946,6 +946,8 @@ export const LEGACY_TERM_MAP: readonly LegacyTermEntry[] = [
   { old: "오너", next: "소유자", grepGate: true, note: "워크스페이스 역할 이름은 화면에서 「소유자」로 써요" },
   { old: "구독 붙이기", next: "에이전트 만들기", grepGate: true },
   { old: "owner·admin", next: "소유자·관리자", grepGate: true, note: "한글 문장 안의 영문 역할 이름" },
+  { old: "뿌리", next: "서명 기기", grepGate: true, note: "서명을 맡는 맥은 「서명 기기」로 써요(#3573)" },
+  { old: "붙인 세션", next: "QR로 연결한 로그인", grepGate: true },
   { old: "내 계정", next: "내 AI 계정", grepGate: false, note: "프로필 화면의 「내 계정」과 겹쳐요" },
   { old: "이 맥", next: "내 AI 계정", grepGate: false, note: "「이 맥의 Claude Code」 같은 정상 문장이 있어요" },
   { old: "구독", next: "내 AI 계정 · 내 구독", grepGate: false, note: "새 문구도 「내 구독」을 써요" },

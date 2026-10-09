@@ -485,7 +485,10 @@ export function FailureBanner({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
-    <View style={styles.failure} testID={testID}>
+    <View
+      accessibilityLiveRegion="polite"
+      style={styles.failure}
+      testID={testID}>
       <Text style={styles.failureText}>{message}</Text>
       {onRetry ? (
         <Pressable

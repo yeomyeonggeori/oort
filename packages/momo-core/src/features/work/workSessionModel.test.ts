@@ -14,6 +14,7 @@ import {
   isSlowStep,
   lastLine,
   mergeEvents,
+  parseSessionThreadReply,
   parseWorkSessionEvent,
   peekRows,
   scopeSessions,
@@ -838,5 +839,46 @@ describe("composeExcerpt", () => {
         "재시작 루프는 outbox_drain 타임아웃이었습니다.",
       ].join("\n")
     );
+  });
+});
+
+describe("parseSessionThreadReply (N3 #3595)", () => {
+  const base = {
+    id: "m1",
+    channelId: "c1",
+    seq: 7,
+    hlcTs: 1,
+    hlcCount: 0,
+    authorMemberId: "u1",
+    type: "text",
+    body: "  테스트부터 봐 줘 ",
+    state: "sent",
+    createdAtMs: 123,
+  } as unknown as Message;
+
+  it("keeps a person's text, with the signed instruction's mode when the server wrote one", () => {
+    expect(parseSessionThreadReply(base)).toEqual({
+      id: "m1",
+      authorMemberId: "u1",
+      text: "테스트부터 봐 줘",
+      atMs: 123,
+      seq: 7,
+    });
+    expect(
+      parseSessionThreadReply({
+        ...base,
+        props: { "momo.instruction": { mode: "interrupt", control_id: "c" } },
+      })
+    ).toMatchObject({ mode: "interrupt" });
+    // An unknown mode is not invented into one.
+    expect(
+      parseSessionThreadReply({ ...base, props: { "momo.instruction": { mode: "later" } } })
+    ).not.toHaveProperty("mode");
+  });
+
+  it("drops deleted, empty and non-text messages", () => {
+    expect(parseSessionThreadReply({ ...base, state: "deleted" })).toBeNull();
+    expect(parseSessionThreadReply({ ...base, body: "   " })).toBeNull();
+    expect(parseSessionThreadReply({ ...base, type: "system" })).toBeNull();
   });
 });

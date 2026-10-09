@@ -9,6 +9,7 @@ import {
   normalizeHandle,
 } from "@momo/core/features/settings/model";
 import { useSession } from "@/app/session";
+import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { InlineBanner } from "@/features/common/States";
 import { HandleField } from "@/features/profile/shared/HandleField";
@@ -17,13 +18,19 @@ import {
   isHandleTaken,
 } from "@/features/profile/shared/identityCopy";
 import { recordOwnerOnboardingSettingsSave } from "@/features/profile/shared/onboardingSettingsSave";
-import { Avatar } from "@/features/timeline/MessageRow";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
-import { ProfileAvatarField } from "./ProfileAvatarField";
-import { Field, SaveButton, SectionShell } from "./SettingsFields";
+import { LeaveWorkspaceRow } from "./LeaveWorkspaceRow";
+import { Field, SaveButton } from "./SettingsFields";
+import { ProfileHero } from "./shell/ProfileHero";
+import { SettingsRow } from "./shell/SettingsRow";
+import { SettingsSection } from "./shell/SettingsSection";
 
 // Design Read: settings / Profile for internal team users on web+Tauri,
 // density 7/10, motion 2/10.
+//
+// 프로필과 계정은 한 페이지다(#3578 S2, 성재 결재 2026-10-07): 히어로(얼굴·이름·사진),
+// 프로필 폼 카드, 계정 정보 카드, 로그인 카드, 맨 아래 워크스페이스 나가기 위험 행.
+// 옛 「계정」 페이지(`?section=account`)는 이 페이지의 별칭이다(`settingsNav`).
 //
 // 표시 이름과 핸들(E2)을 S1과 같이 한 폼·한 PATCH로 저장한다. 아바타는
 // 사진은 별도 저장 단추 없이 고르는 즉시 올리고(ProfileAvatarField, #3277),
@@ -31,7 +38,7 @@ import { Field, SaveButton, SectionShell } from "./SettingsFields";
 // 성공 시에만 roster와 세션을 갱신한다 (낙관 갱신 없음).
 
 export function ProfileSection({ offline }: { offline: boolean }) {
-  const { session, workspaceId, replaceSessionMember } = useSession();
+  const { session, workspaceId, replaceSessionMember, logout } = useSession();
   const { directory } = useDirectory(workspaceId);
   const client = useQueryClient();
   const me = memberFor(directory, session.member.id);
@@ -45,6 +52,8 @@ export function ProfileSection({ offline }: { offline: boolean }) {
   const [handleError, setHandleError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const saveStarted = useRef(false);
+  // 서버가 거절한 핸들(정규화 값). 값이 그대로인 동안 blur의 로컬 검사가 서버 오류를 덮지 않는다.
+  const serverRejectedHandle = useRef<string | null>(null);
   const displayInputRef = useRef<HTMLInputElement>(null);
   const handleInputRef = useRef<HTMLInputElement>(null);
   const bannerRef = useRef<HTMLDivElement>(null);
@@ -80,6 +89,9 @@ export function ProfileSection({ offline }: { offline: boolean }) {
     if (!handleDirty) return;
     const next = event.relatedTarget;
     if (next instanceof HTMLElement && next.closest('[data-testid="profile-save"]')) {
+      return;
+    }
+    if (handleError && serverRejectedHandle.current === normalizeHandle(handleDraft)) {
       return;
     }
     setHandleError(handleFieldError(handleDraft));
@@ -124,6 +136,7 @@ export function ProfileSection({ offline }: { offline: boolean }) {
         isHandleTaken(failure) ||
         (isField400(failure) && failure.message.toLowerCase().includes("handle"))
       ) {
+        serverRejectedHandle.current = normalizeHandle(handleDraft);
         setHandleError(handleSaveMessage(failure));
         handleInputRef.current?.focus({ preventScroll: true });
         return;
@@ -149,21 +162,18 @@ export function ProfileSection({ offline }: { offline: boolean }) {
   };
 
   return (
-    <SectionShell
-      title="프로필"
-      lines={["이 워크스페이스에서 다른 멤버에게 보이는 이름, 핸들, 프로필 사진입니다."]}
-    >
-      <div className="flex items-center gap-3">
-        <Avatar member={me ?? null} />
-        <p className="min-w-0 truncate text-body font-semibold text-ink">
-          {shownName}
-        </p>
-      </div>
-      <ProfileAvatarField workspaceId={workspaceId} me={me ?? null} offline={offline} />
+    <>
+      <ProfileHero
+        workspaceId={workspaceId}
+        me={me ?? null}
+        name={shownName}
+        handle={savedHandle}
+        offline={offline}
+      />
       {offline ? (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겨 지금은 표시 이름, 핸들, 프로필 사진을 바꿀 수 없습니다."
+          message="연결이 끊겨 지금은 표시 이름, 핸들, 프로필 사진을 바꿀 수 없어요."
           messageId="profile-offline-reason"
           testId="profile-offline-banner"
         />
@@ -181,71 +191,116 @@ export function ProfileSection({ offline }: { offline: boolean }) {
           />
         </div>
       ) : null}
-      <form className="flex min-w-0 flex-col gap-4" onSubmit={handleSubmit}>
-        <Field
-          label="표시 이름"
-          htmlFor="profile-display-name"
-          error={displayError}
-          reserveError
-        >
-          <Input
-            ref={displayInputRef}
-            id="profile-display-name"
-            name="displayName"
-            value={draft}
-            autoComplete="nickname"
-            disabled={offline}
-            aria-invalid={displayError ? true : undefined}
-            aria-describedby={
-              [
-                offline ? "profile-offline-reason" : null,
-                displayError ? "profile-display-name-error" : null,
-              ]
-                .filter(Boolean)
-                .join(" ") || undefined
-            }
-            data-testid="profile-display-name"
-            onChange={(event) => {
-              setDraft(event.currentTarget.value);
-              setDisplayError(null);
-              setFormError(null);
-            }}
-            onBlur={handleDisplayBlur}
-          />
-        </Field>
-        <HandleField
-          id="profile-handle"
-          value={handleDraft}
-          onChange={(value) => {
-            setHandleDraft(value);
-            setHandleError(null);
-            setFormError(null);
-          }}
-          onBlur={handleHandleBlur}
-          error={handleError}
-          errorId="profile-handle-error"
-          describedBy={offline ? "profile-offline-reason" : undefined}
-          testId="profile-handle"
-          errorTestId="profile-handle-error"
-          previewTestId="profile-handle-preview"
-          offline={offline}
-          inputRef={handleInputRef}
-          reserveErrorSlot
-          label={<span className="text-meta text-ink-muted">핸들</span>}
-        />
-        <div className="flex flex-wrap items-center gap-2">
-          <SaveButton
-            label="프로필 저장"
-            canSave={canSave}
-            busy={busy}
-            size="default"
-            onSave={() => {
-              void save();
-            }}
-            testId="profile-save"
-          />
-        </div>
-      </form>
-    </SectionShell>
+      <SettingsSection
+        title="프로필"
+        description="이 워크스페이스에서 다른 멤버에게 보이는 이름, 핸들, 프로필 사진이에요."
+        testId="profile-card"
+      >
+        <form className="flex min-w-0 flex-col divide-y divide-line" onSubmit={handleSubmit}>
+          <div className="px-4 py-3">
+            <Field
+              label="표시 이름"
+              htmlFor="profile-display-name"
+              error={displayError}
+              reserveError
+            >
+              <Input
+                ref={displayInputRef}
+                id="profile-display-name"
+                name="displayName"
+                value={draft}
+                autoComplete="nickname"
+                disabled={offline}
+                aria-invalid={displayError ? true : undefined}
+                aria-describedby={
+                  [
+                    offline ? "profile-offline-reason" : null,
+                    displayError ? "profile-display-name-error" : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" ") || undefined
+                }
+                data-testid="profile-display-name"
+                onChange={(event) => {
+                  setDraft(event.currentTarget.value);
+                  setDisplayError(null);
+                  setFormError(null);
+                }}
+                onBlur={handleDisplayBlur}
+              />
+            </Field>
+          </div>
+          <div className="px-4 py-3">
+            <HandleField
+              id="profile-handle"
+              value={handleDraft}
+              onChange={(value) => {
+                setHandleDraft(value);
+                setHandleError(null);
+                setFormError(null);
+              }}
+              onBlur={handleHandleBlur}
+              error={handleError}
+              errorId="profile-handle-error"
+              describedBy={offline ? "profile-offline-reason" : undefined}
+              testId="profile-handle"
+              errorTestId="profile-handle-error"
+              previewTestId="profile-handle-preview"
+              offline={offline}
+              inputRef={handleInputRef}
+              reserveErrorSlot
+              label={<span className="text-meta text-ink-muted">핸들</span>}
+            />
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-2 px-4 py-3">
+            <SaveButton
+              label="프로필 저장"
+              canSave={canSave}
+              busy={busy}
+              size="default"
+              onSave={() => {
+                void save();
+              }}
+              testId="profile-save"
+            />
+          </div>
+        </form>
+      </SettingsSection>
+
+      <SettingsSection
+        title="계정 정보"
+        description="이 서버에서 나를 가리키는 번호예요. 문의할 때 알려 주면 찾기 쉬워요."
+        testId="profile-account-card"
+      >
+        <SettingsRow label="워크스페이스 ID" stack>
+          <p className="min-w-0 break-all font-mono text-meta text-ink-muted" data-numeric="">
+            {workspaceId}
+          </p>
+        </SettingsRow>
+        <SettingsRow label="멤버 ID" stack>
+          <p className="min-w-0 break-all font-mono text-meta text-ink-muted" data-numeric="">
+            {session.member.id}
+          </p>
+        </SettingsRow>
+      </SettingsSection>
+
+      <SettingsSection title="로그인" testId="profile-login-card">
+        <SettingsRow label="로그아웃" description="이 기기에서 로그아웃해요. 다시 로그인하면 돌아와요.">
+          <Button
+            variant="outline"
+            size="sm"
+            className="tap-target"
+            onClick={logout}
+            data-testid="logout"
+          >
+            로그아웃
+          </Button>
+        </SettingsRow>
+      </SettingsSection>
+
+      <SettingsSection title="나가기" testId="profile-danger-card">
+        <LeaveWorkspaceRow workspaceId={workspaceId} offline={offline} />
+      </SettingsSection>
+    </>
   );
 }

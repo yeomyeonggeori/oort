@@ -115,7 +115,8 @@ function sessionValue(logout: () => void): SessionContextValue {
 
 function mountCard(
   logout: () => void = () => undefined,
-  selfMember: RosterMember = rosterMember()
+  selfMember: RosterMember = rosterMember(),
+  extra: { workspaceName?: string; compact?: boolean; selfName?: string } = {}
 ): HTMLElement {
   const client = new QueryClient({
     defaultOptions: {
@@ -143,8 +144,10 @@ function mountCard(
             workspaceId: WS,
             selfMemberId: MEMBER_ID,
             selfMember,
-            selfName: "곽성재",
+            selfName: extra.selfName ?? "곽성재",
             connected: true,
+            workspaceName: extra.workspaceName,
+            compact: extra.compact,
           })
         )
       )
@@ -322,8 +325,89 @@ describe("ProfileCard 로그아웃 (#1858)", () => {
   });
 });
 
+describe("ProfileCard 목록 끝 한 줄 (#3574)", () => {
+  it("아바타·굵은 이름·둘째 줄(워크스페이스)이 한 단추 안에 선다", () => {
+    mountCard(() => undefined, rosterMember(), { workspaceName: "여명거리" });
+    const trigger = document.querySelector('[data-testid="profile-card"]');
+    const name = trigger?.querySelector('[data-testid="self-name"]');
+    expect(name?.textContent).toBe("곽성재");
+    expect(name?.className).toContain("font-semibold");
+    expect(trigger?.querySelector('[data-testid="presence-control"]')).not.toBeNull();
+    expect(
+      trigger?.querySelector('[data-testid="self-subline"]')?.textContent
+    ).toBe("여명거리");
+    expect(trigger?.querySelector('[data-testid="custom-status"]')).toBeNull();
+  });
+
+  it("상태 메시지가 있으면 워크스페이스 이름 대신 상태가 둘째 줄이다", () => {
+    mountCard(
+      () => undefined,
+      rosterMember({ statusEmoji: "🏝️", statusText: "휴가 중" }),
+      { workspaceName: "여명거리" }
+    );
+    const trigger = document.querySelector('[data-testid="profile-card"]');
+    expect(trigger?.querySelector('[data-testid="custom-status-text"]')?.textContent).toBe(
+      "휴가 중"
+    );
+    expect(trigger?.querySelector('[data-testid="self-subline"]')).toBeNull();
+  });
+
+  it("워크스페이스 이름이 아직 없으면 둘째 줄을 그리지 않는다", () => {
+    mountCard(() => undefined, rosterMember());
+    expect(document.querySelector('[data-testid="self-subline"]')).toBeNull();
+  });
+
+  it("긴 이름과 상태는 말줄임이고 단추 안에서 넘치지 않는다", () => {
+    mountCard(
+      () => undefined,
+      rosterMember({ statusText: "아주 긴 상태 메시지 ".repeat(8) }),
+      { selfName: "Alexandria Montgomery-Wellington", workspaceName: "여명거리" }
+    );
+    const trigger = document.querySelector('[data-testid="profile-card"]');
+    expect(trigger?.className).toContain("min-w-0");
+    expect(trigger?.querySelector('[data-testid="self-name"]')?.className).toContain(
+      "truncate"
+    );
+    expect(
+      trigger?.querySelector('[data-testid="custom-status-text"]')?.className
+    ).toContain("truncate");
+  });
+
+  it("클릭하면 프로필·상태 메뉴가 열린다", async () => {
+    mountCard(() => undefined, rosterMember(), { workspaceName: "여명거리" });
+    const menu = await openMenu();
+    expect(menu.querySelector('[data-testid="presence-option-dnd"]')).not.toBeNull();
+    expect(menu.querySelector('[data-testid="profile-set-status"]')).not.toBeNull();
+  });
+
+  it("접힘(compact)은 아바타만 서고 이름·둘째 줄은 보이지 않는다", () => {
+    mountCard(
+      () => undefined,
+      rosterMember({ statusEmoji: "🏝️", statusText: "휴가 중" }),
+      { workspaceName: "여명거리", compact: true }
+    );
+    const trigger = document.querySelector('[data-testid="profile-card"]');
+    expect(trigger?.querySelector('[data-testid="presence-control"]')).not.toBeNull();
+    const textWrap = trigger?.querySelector('[data-testid="self-name"]')?.parentElement;
+    expect(textWrap?.className).toContain("hidden");
+    expect(trigger?.getAttribute("aria-label")).toContain("곽성재");
+    expect(trigger?.getAttribute("aria-label")).toContain("휴가 중");
+  });
+
+  it("DND는 점으로 말한다(둘째 줄이 아니라 아바타 배지)", () => {
+    mountCard(() => undefined, rosterMember({ presenceStatus: "dnd" }), {
+      workspaceName: "여명거리",
+    });
+    expect(
+      document
+        .querySelector('[data-testid="presence-control"]')
+        ?.getAttribute("data-effective")
+    ).toBe("dnd");
+  });
+});
+
 describe("ProfileCard 커스텀 상태 (#1889)", () => {
-  it("shows the emoji on the card and the text on title plus menu head", async () => {
+  it("shows the emoji and the text on the card's second line, plus title and menu head", async () => {
     mountCard(
       () => undefined,
       rosterMember({
@@ -341,7 +425,9 @@ describe("ProfileCard 커스텀 상태 (#1889)", () => {
     expect(document.querySelector('[data-testid="custom-status-emoji"]')?.textContent).toBe(
       "📅"
     );
-    expect(document.querySelector('[data-testid="custom-status-text"]')).toBeNull();
+    expect(document.querySelector('[data-testid="custom-status-text"]')?.textContent).toBe(
+      "회의 중"
+    );
     const trigger = document.querySelector('[data-testid="profile-card"]');
     expect(trigger?.getAttribute("aria-label")).toContain("자리 비움");
     expect(trigger?.getAttribute("aria-label")).toContain("회의 중");
@@ -367,7 +453,7 @@ describe("ProfileCard 커스텀 상태 (#1889)", () => {
     expect(trigger?.getAttribute("aria-label")).toContain("🤒");
   });
 
-  it("keeps a quiet mark on the card when the status is text-only (#1889 R2-M2)", async () => {
+  it("shows a text-only status as the second line (#1889 R2-M2, #3574)", async () => {
     mountCard(
       () => undefined,
       rosterMember({
@@ -376,9 +462,10 @@ describe("ProfileCard 커스텀 상태 (#1889)", () => {
       })
     );
     const trigger = document.querySelector('[data-testid="profile-card"]');
-    expect(document.querySelector('[data-testid="custom-status-glyph"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="custom-status-emoji"]')).toBeNull();
-    expect(document.querySelector('[data-testid="custom-status-text"]')).toBeNull();
+    expect(document.querySelector('[data-testid="custom-status-text"]')?.textContent).toBe(
+      "고객사 미팅"
+    );
     expect(trigger?.getAttribute("aria-label")).toContain("고객사 미팅");
     const menu = await openMenu();
     expect(

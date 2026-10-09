@@ -7,6 +7,7 @@ import { ApiError } from "@momo/core/lib/api";
 import { fetchProviderQuotaSnapshots } from "@momo/core/features/settings/api";
 import { errorMessage } from "@momo/core/features/settings/model";
 import { StatusChip, type ChipTone } from "./SettingsFields";
+import { SettingsSection } from "./shell/SettingsSection";
 import {
   QUOTA_TICK_MS,
   parseQuotaSnapshots,
@@ -31,13 +32,13 @@ import {
 // Reading this as: a settings panel for internal team users on web+Tauri,
 // density 7/10, motion 0/10.
 //
-// This is the RATE frame and it sits above the currency frame with a rule
-// between them, because 레퍼런스 서베이 §5 found the two get confused wherever a
+// This is the RATE frame and it sits above the currency frame in a card of its
+// own, because 레퍼런스 서베이 §5 found the two get confused wherever a
 // product puts them in one column: a subscription is spent as a ratio of a
 // window the provider owns, a bill is spent in dollars over a window you pick,
 // and one number cannot be read as the other. So nothing in this block is
 // denominated in money, the 기간/단위 controls belong to the block below it and
-// deliberately sit under the rule, and the two frames are separated in the
+// deliberately sit in the ledger card below, and the two frames are separated in the
 // prose as well as in the layout.
 //
 // The shape is the pair every surveyed product converged on (§5): a short
@@ -48,10 +49,9 @@ import {
 // (or one whose window has already reset) keeps rendering with its state colour
 // removed, because an hour-old 3% may have been 100% for the last 55 minutes.
 //
-// All four states are drawn INSIDE one bordered frame (R1 M2). The frame rule
-// under this block is the boundary between the two frames, and a banner that
-// draws its own full-bleed rule 16px above it puts the louder of two parallel
-// lines where no boundary is. One box, one rule.
+// All four states are drawn INSIDE one card (R1 M2, #3578 S5c). The card is the
+// frame and the boundary between the two frames is the gap between cards; a
+// banner or a gauge list never draws a second box inside it.
 // =============================================================================
 
 /**
@@ -124,34 +124,22 @@ export function ProviderQuotaBlock({ workspaceId }: { workspaceId: string }) {
   });
 
   return (
-    <section
-      className="flex min-w-0 flex-col gap-3"
-      aria-busy={query.isFetching}
-      data-testid="usage-quota"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-col gap-px">
-          <h3 className="text-body font-medium text-ink">구독 잔여량</h3>
-          {/* The frame statement. It says whose numbers these are (the server's
-              provider subscriptions, not this workspace's ledger), which
-              direction they fill (what is LEFT), and that they are not the money
-              below, which is the one misread §5 found across the field. */}
-          <p className="text-meta text-ink-muted">
-            이 서버가 연결한 AI 구독에 지금 남은 비율입니다. 아래 비용 집계와는
-            다른 값입니다.
-          </p>
-        </div>
-        {/* The block's ONE refresh, in all four states (R1 M6). It used to share
-            the job with a 다시 시도 in the error banner, a second 다시 시도 in the
-            last-known banner and a 다시 불러오기 in the empty state, so one
-            action carried three names and two of them were on screen at once.
-
-            Stays ENABLED while fetching and reports the wait through aria-busy,
-            because disabling it moves focus to <body> and never gives it back
-            (the 616 lesson, SKILL §6). Being the only one, it also never
-            unmounts, so a retry can no longer drop the keyboard. */}
+    <SettingsSection
+      title="구독 잔여량"
+      // The frame statement. It says whose numbers these are (the server's
+      // provider subscriptions, not this workspace's ledger), which direction
+      // they fill (what is LEFT), and that they are not the money below, which
+      // is the one misread §5 found across the field.
+      description="이 서버가 연결한 AI 구독에 지금 남은 비율이에요. 아래 비용 집계와는 다른 값이에요."
+      testId="usage-quota"
+      // The block's ONE refresh, in all four states (R1 M6). Stays ENABLED while
+      // fetching and reports the wait through aria-busy, because disabling it
+      // moves focus to <body> and never gives it back (the 616 lesson, SKILL
+      // §6). Being the only one, it also never unmounts, so a retry can no
+      // longer drop the keyboard.
+      action={
         <Button
-          variant="secondary"
+          variant="outline"
           size="sm"
           onClick={() => {
             if (!query.isFetching) void query.refetch();
@@ -161,22 +149,23 @@ export function ProviderQuotaBlock({ workspaceId }: { workspaceId: string }) {
         >
           {query.isFetching ? "확인 중" : "다시 확인"}
         </Button>
-      </div>
-
-      {/* The skeleton bars are aria-hidden, so without this the wait and the
-          arrival are both silent. Error and 마지막 확인값 stay out of it: their
-          own banners are live regions. */}
-      <p className="sr-only" role="status" data-testid="usage-quota-status">
-        {quotaAnnouncement(view, nowMs)}
-      </p>
-
-      {/* One frame for every state, so the block is a box on the page rather
-          than a stack of loose rules, and so the settled answer arrives inside
-          the same boundary the wait was drawn in. */}
+      }
+    >
+      {/* One frame for every state, so the settled answer arrives inside the
+          same card the wait was drawn in. The card is the frame: nothing in here
+          draws a second border around it. */}
       <div
-        className="flex min-w-0 flex-col overflow-hidden rounded-md border border-line"
+        className="flex min-w-0 flex-col"
+        aria-busy={query.isFetching}
         data-testid="usage-quota-frame"
       >
+        {/* The skeleton bars are aria-hidden, so without this the wait and the
+            arrival are both silent. Error and 마지막 확인값 stay out of it:
+            their own banners are live regions. */}
+        <p className="sr-only" role="status" data-testid="usage-quota-status">
+          {quotaAnnouncement(view, nowMs)}
+        </p>
+
         {view.kind === "loading" && <QuotaSkeleton />}
 
         {view.kind === "error" && (
@@ -217,7 +206,7 @@ export function ProviderQuotaBlock({ workspaceId }: { workspaceId: string }) {
           />
         )}
       </div>
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -242,7 +231,7 @@ export function ProviderQuotaBlock({ workspaceId }: { workspaceId: string }) {
 function QuotaSkeleton() {
   return (
     <div
-      className="flex min-w-0 flex-col gap-3 px-3 py-3"
+      className="flex min-w-0 flex-col gap-3 px-4 py-3"
       aria-hidden="true"
       data-testid="usage-quota-skeleton"
     >
@@ -284,28 +273,28 @@ function QuotaBody({
     // it a differently named button of its own was the R1 M6 finding.
     return (
       <EmptyInvite
-        headline="아직 보고된 구독 잔여량이 없습니다."
-        detail="이 서버가 AI 제공자에게서 잔여량을 받아오면 제공자별로 단기와 주간 남은 비율이 여기에 표시됩니다."
+        headline="아직 보고된 구독 잔여량이 없어요."
+        detail="이 서버가 AI 제공자에게서 잔여량을 받아오면 제공자별로 단기와 주간 남은 비율이 여기에 보여요."
         testId="usage-quota-empty"
       />
     );
   }
 
   return (
-    <ul className="flex min-w-0 flex-col">
+    <ul className="flex min-w-0 flex-col divide-y divide-line">
       {providers.map((provider) => (
         <li
           key={provider.providerRef}
-          className="flex min-w-0 flex-col gap-3 border-b border-line px-3 py-3 last:border-b-0"
+          className="flex min-w-0 flex-col gap-3 px-4 py-3"
           data-testid="usage-quota-provider"
           data-provider-ref={provider.providerRef}
         >
-          {/* h4 under the block's h3: the section is 사용량 (h2), this block is
-              구독 잔여량 (h3), and a provider is a thing inside it. Heading
+          {/* h3 under the card's h2: the page is 사용량 (h1), this card is 구독
+              잔여량 (h2), and a provider is a thing inside it. Heading
               navigation lands on all three (SKILL §6). */}
-          <h4 className="min-w-0 truncate text-body font-medium text-ink">
+          <h3 className="min-w-0 truncate text-body font-semibold text-ink">
             {providerLabel(provider.providerRef)}
-          </h4>
+          </h3>
           <Gauge
             windowKind="short"
             snapshot={provider.short}
@@ -383,7 +372,7 @@ function Gauge({
       >
         <span className="text-meta text-ink-muted">{windowLabel(windowKind)}</span>
         <span className="text-meta text-ink-muted">
-          아직 보고되지 않았습니다
+          아직 보고되지 않았어요
         </span>
       </div>
     );
@@ -466,12 +455,12 @@ function Gauge({
           statement. */}
       {gauge.reset?.passed && (
         <p className="text-timestamp text-warn" data-testid="usage-quota-reset-passed">
-          리셋 시각이 지나 지금 잔여율은 이 값과 다릅니다.
+          리셋 시각이 지나 지금 잔여율은 이 값과 달라요.
         </p>
       )}
       {gauge.age.stale && !gauge.reset?.passed && (
         <p className="text-timestamp text-warn" data-testid="usage-quota-outdated">
-          확인한 지 오래된 값이라 지금 잔여율과 다를 수 있습니다.
+          확인한 지 오래된 값이라 지금 잔여율과 다를 수 있어요.
         </p>
       )}
     </div>

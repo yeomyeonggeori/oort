@@ -88,11 +88,14 @@ export function PresenceBadge({
   selfName,
   effective,
   avatarUrl,
+  size = "sm",
 }: {
   selfName: string;
   effective: EffectivePresence;
   /** roster 가 준 내 `avatarUrl`. 없거나 못 받으면 이니셜이다. */
   avatarUrl?: string;
+  /** `sm` 24px(접힘 레일), `md` 32px(목록 끝 프로필 줄, #3574). 점은 아바타와 함께 자란다. */
+  size?: "sm" | "md";
 }) {
   const direct = renderableAvatarUrl(
     avatarUrl,
@@ -108,7 +111,8 @@ export function PresenceBadge({
       // 테마에서 바닥과 같은 색이 됐다. 흰 면 + rest로 어느 바닥 위에서도 선다.
       // 띠(노을띠) 위에서도 흰 면이라 원래 글자 역할을 쓴다.
       className={cn(
-        "band-surface relative flex size-6 shrink-0 items-center justify-center rounded-full bg-surface text-meta font-semibold text-ink shadow-sm",
+        "band-surface relative flex shrink-0 items-center justify-center rounded-full bg-surface font-semibold text-ink shadow-sm",
+        size === "md" ? "size-8 text-body" : "size-6 text-meta",
         // 이 배지는 늘 나(사람)다: 원(AVATAR_SHAPE.human). 사진을 지워 이니셜로
         // 돌아가도 모양이 바뀌지 않는다.
       )}
@@ -134,7 +138,8 @@ export function PresenceBadge({
           avatar (presence 6b H2). */}
       <span
         className={cn(
-          "absolute bottom-0 right-0 size-2 rounded-full border",
+          "absolute bottom-0 right-0 rounded-full border",
+          size === "md" ? "size-3" : "size-2",
           effectiveBadgeClass(effective)
         )}
       />

@@ -250,7 +250,7 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
     );
     const host = mount();
     await waitFor(() => q(host, "device-key-root-unsupported") !== null, "unsupported");
-    expect(host.textContent).toContain("서명되지 않아 Secure Enclave 키를 쓸 수 없습니다");
+    expect(host.textContent).toContain("서명되지 않아서 Secure Enclave 키를 쓸 수 없어요");
     expect(q(host, "device-key-root-start")).toBeNull();
     expect(q(host, "device-keys")?.dataset.deviceKeyBound).toBe("false");
     expect(q(host, "device-key-endorse-start")?.getAttribute("aria-disabled")).toBe("true");
@@ -311,7 +311,7 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await click(q(host, "device-key-root-submit"), "submit");
-    await waitFor(() => host.textContent?.includes("비밀번호가 맞지 않습니다") ?? false, "error");
+    await waitFor(() => host.textContent?.includes("비밀번호가 맞지 않아요") ?? false, "error");
     expect(desktop.bindRoot).not.toHaveBeenCalled();
   });
 
@@ -322,7 +322,7 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
     core.listDeviceKeys.mockResolvedValue([key(), { ...rootRow, state: "revoked" }]);
     const host = mount();
     await waitFor(() => q(host, "device-key-root-unbound") !== null, "unbound");
-    expect(host.textContent).toContain("이 맥의 키 등록이 해제됐습니다");
+    expect(host.textContent).toContain("이 맥의 키 등록이 풀렸어요");
     expect(q(host, "device-keys")?.dataset.deviceKeyBound).toBe("false");
     expect(q(host, "device-key-endorse-start")?.getAttribute("aria-disabled")).toBe("true");
   });
@@ -393,8 +393,8 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
         "matches"
       );
       const text = q(host, "device-key-endorse-origin")!.textContent!;
-      expect(text).toContain("QR로 연결할 때 폰이 알린 이름과 같습니다");
-      expect(text).toContain("믿을 것은 지문입니다");
+      expect(text).toContain("QR로 연결할 때 폰이 알린 이름과 같아요");
+      expect(text).toContain("믿을 수 있는 건 지문이에요");
       expect(text).toContain(PHONE_LABEL);
       expect(q(host, "device-key-endorse-name-warning")).toBeNull();
     });
@@ -409,11 +409,11 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
         "not in links"
       );
       expect(q(host, "device-key-endorse-origin")!.textContent).toContain(
-        "연결된 기기 목록에 없습니다"
+        "연결된 기기 목록에 없어요"
       );
       // #3154 M2: the mismatch is a warning block, not a grey aside; the match is not.
       const warning = q(host, "device-key-endorse-name-warning")!;
-      expect(warning.textContent).toContain("승인하지 않아야 합니다");
+      expect(warning.textContent).toContain("승인하지 마세요");
       expect(warning.className).toContain("text-danger");
       expect(warning.className).toContain("font-medium");
     });
@@ -426,8 +426,8 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
         "unknown"
       );
       const text = q(host, "device-key-endorse-origin")!.textContent!;
-      expect(text).toContain("대조하지 못했습니다");
-      expect(text).not.toContain("알린 이름과 같습니다");
+      expect(text).toContain("맞춰 보지 못했어요");
+      expect(text).not.toContain("알린 이름과 같아요");
     });
   });
 
@@ -451,7 +451,7 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
     await waitFor(() => q(host, "device-key-endorse-start") !== null, "phone row");
     await click(q(host, "device-key-endorse-start"), "start");
     await click(q(host, "device-key-endorse-submit"), "submit");
-    await waitFor(() => host.textContent?.includes("서명을 취소했습니다.") ?? false, "declined");
+    await waitFor(() => host.textContent?.includes("서명을 취소했어요.") ?? false, "declined");
     expect(core.submitEndorsement).not.toHaveBeenCalled();
   });
 
@@ -481,7 +481,7 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
       signature: "cmV2",
     });
     await waitFor(
-      () => host.textContent?.includes("이 맥의 작업 호스트에도 바로 알렸습니다.") ?? false,
+      () => host.textContent?.includes("이 맥의 작업 호스트에도 바로 알렸어요.") ?? false,
       "delivery note"
     );
   });
@@ -503,7 +503,7 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
     await click(q(host, "device-key-revoke"), "ask");
     await click(q(host, "device-key-revoke-confirm"), "confirm");
     await waitFor(
-      () => host.textContent?.includes("작업 호스트에는 알렸지만 서버에는 알리지 못했습니다") ?? false,
+      () => host.textContent?.includes("작업 호스트에는 알렸지만 서버에는 알리지 못했어요") ?? false,
       "honest partial"
     );
     await click(q(host, "device-key-revoke"), "ask again");
@@ -558,7 +558,7 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
     await waitFor(() => order.length === 3, "all three");
     expect(order).toEqual(["sign", "letter", "unlink"]);
     await waitFor(() => q(host, "linked-devices-unlink-note") !== null, "note");
-    expect(q(host, "linked-devices-unlink-note")?.textContent).toContain("지시 권한도 끊었습니다");
+    expect(q(host, "linked-devices-unlink-note")?.textContent).toContain("지시 권한도 끊었어요");
   });
 });
 
@@ -609,7 +609,7 @@ describe("다시 연결 — 계보만 끝난 뿌리 키 (#3103, ADR-0146 D-7 증
       rebind: { signedAtMs: letter.signedAtMs, signature: "c2ln" },
     });
     expect(desktop.bindRoot).not.toHaveBeenCalled();
-    expect(host.textContent).toContain("이 맥의 서명 키를 이 로그인에 다시 연결했습니다.");
+    expect(host.textContent).toContain("이 맥의 서명 키를 이 로그인에 다시 연결했어요.");
   });
 
   it("옮기지 못하면 정직하게 말하고, 다시 묻는 일은 버튼으로만 한다 (확인 창 폭주 없음)", async () => {
@@ -622,7 +622,7 @@ describe("다시 연결 — 계보만 끝난 뿌리 키 (#3103, ADR-0146 D-7 증
     const host = mount();
     await waitFor(() => q(host, "device-key-relink-error") !== null, "error");
     expect(q(host, "device-key-relink-error")?.textContent).toBe(
-      "서버가 이 키를 이 로그인으로 옮기지 않았습니다. 목록을 다시 불러와 다시 시도하세요."
+      "서버가 이 키를 이 로그인으로 옮기지 않았어요. 목록을 다시 불러와서 다시 시도해 주세요."
     );
     expect(host.textContent).toContain("다시 연결 필요");
     // Settling refetched the list; the automatic attempt does not repeat.
@@ -634,7 +634,7 @@ describe("다시 연결 — 계보만 끝난 뿌리 키 (#3103, ADR-0146 D-7 증
     await click(q(host, "device-key-relink"), "retry");
     await waitFor(() => desktop.signRebind.mock.calls.length === 2, "manual");
     await waitFor(
-      () => q(host, "device-key-relink-error")?.textContent === "서명을 취소했습니다.",
+      () => q(host, "device-key-relink-error")?.textContent === "서명을 취소했어요.",
       "declined"
     );
   });
@@ -705,10 +705,10 @@ describe("#3129 — QR 아님 · 승인 불가 · 작업 호스트 서명 검증
     const host = mount();
     await waitFor(() => q(host, `device-key-phone-${PHONE_ID}`) !== null, "phone");
     const row = q(host, `device-key-phone-${PHONE_ID}`)!;
-    expect(row.textContent).toContain("지시 기기");
+    expect(row.textContent).toContain("지시 가능");
     expect(row.textContent).toContain("QR 아님");
     expect(q(row, "device-key-phone-link-note")?.textContent).toBe(
-      "QR 연결 전 규칙으로 등록된 폰입니다. 지시 권한을 끊고 다시 연결하는 것을 권합니다. 아래 「폰 연결」에서 QR을 만들고, 폰에서 로그아웃한 뒤 첫 화면의 「QR 찍기」로 찍으세요."
+      "QR 연결이 생기기 전에 등록된 폰이에요. 지시 권한을 끊고 다시 연결하는 게 좋아요. 아래 「폰 연결」에서 QR을 만들고, 폰에서 로그아웃한 뒤 첫 화면의 「QR 찍기」로 찍으세요."
     );
     // The recommended next step is the button already on the row.
     expect(q(row, "device-key-revoke")).not.toBeNull();
@@ -739,7 +739,7 @@ describe("#3129 — QR 아님 · 승인 불가 · 작업 호스트 서명 검증
     // The phone's word for the same state (design-review M1).
     expect(address.textContent).toContain("QR 연결 필요");
     expect(address.textContent).toContain("폰에서 로그아웃한 뒤 첫 화면의 「QR 찍기」");
-    expect(address.textContent).toContain("QR로 연결하지 않은 로그인에서 등록된 폰이라 승인할 수 없습니다.");
+    expect(address.textContent).toContain("QR로 연결하지 않은 로그인에서 등록된 폰이라 승인할 수 없어요.");
     expect(q(address, "device-key-endorse-start")).toBeNull();
     const selfQr = q(host, `device-key-unapprovable-${OTHER_ID}`)!;
     expect(selfQr.textContent).toContain("맥이 아닌 곳에서 띄운 QR");
@@ -777,7 +777,7 @@ describe("#3129 — QR 아님 · 승인 불가 · 작업 호스트 서명 검증
     const line = q(host, "device-key-host-signatures")!;
     expect(line.dataset.signatureEnforcement).toBe("server_only");
     expect(line.textContent).toContain("서버만 켜짐");
-    expect(line.textContent).toContain("이 맥을 뿌리로 등록하면 작업 호스트가 검증을 켭니다");
+    expect(line.textContent).toContain("이 맥을 서명 기기로 등록하면 작업 호스트가 검증을 켜요");
     expect(q(line, "device-key-host-signatures-reset")).toBeNull();
   });
 
@@ -793,7 +793,7 @@ describe("#3129 — QR 아님 · 승인 불가 · 작업 호스트 서명 검증
     await waitFor(() => q(host, "device-key-host-signatures") !== null, "host line");
     const line = q(host, "device-key-host-signatures")!;
     expect(line.textContent).toContain("켜짐");
-    expect(line.textContent).toContain("서버가 서명을 요구하는 동안에는 끌 수 없습니다.");
+    expect(line.textContent).toContain("서버가 서명을 요구하는 동안에는 끌 수 없어요.");
     expect(q(line, "device-key-host-signatures-reset")).toBeNull();
   });
 
@@ -807,7 +807,7 @@ describe("#3129 — QR 아님 · 승인 불가 · 작업 호스트 서명 검증
     );
     const host = mount();
     await waitFor(() => q(host, "device-key-host-signatures") !== null, "host line");
-    expect(q(host, "device-key-host-signatures")!.textContent).toContain("작업 호스트 설정이 켜 두었습니다");
+    expect(q(host, "device-key-host-signatures")!.textContent).toContain("작업 호스트 설정에서 켜 두었어요");
     expect(q(host, "device-key-host-signatures-reset")).toBeNull();
   });
 
@@ -824,7 +824,7 @@ describe("#3129 — QR 아님 · 승인 불가 · 작업 호스트 서명 검증
     await waitFor(() => q(host, "device-key-host-signatures-reset") !== null, "reset");
     const reads = desktop.status.mock.calls.length;
     await click(q(host, "device-key-host-signatures-reset"), "reset");
-    await waitFor(() => host.textContent?.includes("검증을 껐습니다") ?? false, "notice");
+    await waitFor(() => host.textContent?.includes("검증을 껐어요") ?? false, "notice");
     expect(desktop.resetSignatureRequirement).toHaveBeenCalledTimes(1);
     expect(desktop.resetSignatureRequirement).toHaveBeenCalledWith(WS);
     await waitFor(() => desktop.status.mock.calls.length > reads, "re-read");
@@ -843,10 +843,10 @@ describe("#3129 — QR 아님 · 승인 불가 · 작업 호스트 서명 검증
     const host = mount();
     await waitFor(() => q(host, "device-key-host-signatures-reset") !== null, "reset");
     await click(q(host, "device-key-host-signatures-reset"), "reset");
-    await waitFor(() => host.textContent?.includes("검증을 끄지 않았습니다.") ?? false, "declined");
+    await waitFor(() => host.textContent?.includes("검증을 끄지 않았어요.") ?? false, "declined");
     await click(q(host, "device-key-host-signatures-reset"), "reset again");
     await waitFor(
-      () => host.textContent?.includes("작업 호스트 설정이 검증을 켜 두어 꺼지지 않았습니다.") ?? false,
+      () => host.textContent?.includes("작업 호스트 설정에서 검증을 켜 둬서 꺼지지 않았어요.") ?? false,
       "still on"
     );
   });

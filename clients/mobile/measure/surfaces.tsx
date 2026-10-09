@@ -74,6 +74,7 @@ import {AdeControlPanel} from '../src/features/ade/AdeControlPanel';
 import {AdeSummaryLine} from '../src/features/ade/AdeSummaryLine';
 import {AgentActivityBar} from '../src/features/agents/turnSurfaces';
 import {markAgentWorking, resetAgentWorking} from '../src/features/agents/workingSignal';
+import type {ChannelRail} from '../src/realtime/channelRail';
 import {RealtimeContext} from '../src/realtime/RealtimeProvider';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
 import {
@@ -83,6 +84,7 @@ import {
 } from '../src/features/conversation/Timeline';
 import {Screen, ScreenHeader} from '../src/design/atoms';
 import {
+  PermissionCard,
   SignedWorkControlsView,
   type SignedWorkActions,
   type SignedWorkInitial,
@@ -103,6 +105,13 @@ import {ThemeControl} from '../src/design/ThemeControl';
 import {parseExecutionPlan} from '@momo/core/lib/executionPlan';
 import {measureMode} from './root';
 import {Shell} from '../src/shell/AppShell';
+import {
+  DelegateWorkSheet,
+  type DelegatePreview,
+  type DelegatePrefill,
+} from '../src/shell/DelegateWorkSheet';
+import {AskMacSheet, type AskMacPreview} from '../src/shell/AskMacSheet';
+import {workRunFailure} from '@momo/core/features/agents/workRunRequest';
 import {INITIAL_NAV, navReducer} from '../src/nav/state';
 import {ProfilePage, ProfileSheet} from '../src/features/profile/ProfileSheet';
 import {PageSheet} from '../src/design/PageSheet';
@@ -147,6 +156,13 @@ import {FixedScheme, useStyles, type ColorScheme} from '../src/design/theme';
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
 import {TeamBoardDetailSheet} from '../src/features/work/teamBoard/TeamBoardDetailSheet';
 import WorkSessionDetailScreen from '../src/screens/WorkSessionDetailScreen';
+import {buildConversation} from '../src/features/work/conversation';
+import {
+  composerGate,
+  ModeSwitch,
+  WorkConversationView,
+} from '../src/features/work/WorkConversation';
+import type {WorkSessionEvent} from '@momo/core/features/work/workSessionModel';
 import {SessionRow} from '../src/screens/AgentDetailScreen';
 import {WorkStatusBadge} from '../src/features/work/WorkSessionParts';
 import {
@@ -2019,6 +2035,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name.startsWith('signed-work-')) {
     return <SignedWorkSurface which={name.slice('signed-work-'.length)} />;
   }
+  // N3 (#3595): 작업 상세의 「대화」 모드. 배송되는 말풍선·입력창을 고정 데이터로 세운다.
+  if (name.startsWith('work-chat')) {
+    return <WorkChatSurface which={name.slice('work-chat'.length).replace(/^-/, '')} />;
+  }
 
   switch (name) {
     case 'quote-ready': {
@@ -3816,6 +3836,43 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           onOpenConversation={() => {}}
         />
       );
+    // N2 (#3594): 돌고 있는 작업에 답 조각이 이어 붙는 모습. 하네스에는 소켓이 없어 가짜
+    // 레일이 프레임을 ~1.5초 뒤 두 조각, ~6초 뒤 한 조각 흘린다(실제 구독 경로를 그대로 탄다).
+    case 'work-detail-streaming':
+      return <WorkStreamingSurface />;
+    // N4 (#3596): 돌고 있는 작업의 「멈추기」 - 평소 / 확인 단계 / 멈춤. 위쪽을 끌어내려 찍는다.
+    case 'work-detail-stop':
+    case 'work-detail-stop-confirm':
+    case 'work-detail-stopped':
+      return (
+        <WorkSessionDetailScreen
+          active
+          sessionId="measure-work-t1"
+          onBack={() => {}}
+          onOpenConversation={() => {}}
+          stopInitial={
+            name === 'work-detail-stop-confirm'
+              ? {stage: 'confirm'}
+              : name === 'work-detail-stopped'
+                ? {stage: 'stopped'}
+                : undefined
+          }
+        />
+      );
+    // 같은 작업이 끝난 모습: 조각들이 영속돼 한 줄로 합쳐지고 「작성 중」이 사라진다.
+    case 'work-detail-done':
+      return (
+        <View style={{flex: 1, overflow: 'hidden'}}>
+          <View style={{flex: 1, marginTop: -940, height: 3000}}>
+            <WorkSessionDetailScreen
+              active
+              sessionId="measure-work-t1"
+              onBack={() => {}}
+              onOpenConversation={() => {}}
+            />
+          </View>
+        </View>
+      );
     // #3152: 같은 화면을 진행 내역까지 끌어올려 찍는다(시뮬레이터는 스크롤할 수 없다).
     case 'work-detail-events':
       return (
@@ -4019,6 +4076,43 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             conversation: {channelId: 'ch-agent-lab', title: '#agent-lab'},
           }}
         />
+      );
+    // #3588 N8: 「작업 맡기기」 시트의 네 판. 시트는 셸 위에 뜬다(실제 앱과 같은 층).
+    case 'shell-delegate-a':
+    case 'shell-delegate-b':
+    case 'shell-delegate-error':
+    case 'shell-delegate-empty':
+      return (
+        <View style={styles.fill}>
+          <Shell />
+          <DelegateWorkSheet
+            prefill={delegatePrefill(name)}
+            preview={delegatePreview(name)}
+            boardAvailable
+            onClose={() => {}}
+            onSubmitted={() => {}}
+          />
+        </View>
+      );
+    // #3597 T6b: 「내 맥에 보내기」 시트의 판. 보내기 포트는 하네스에서 가짜다(Face ID 없음).
+    case 'shell-ask-on':
+    case 'shell-ask-work':
+    case 'shell-ask-off':
+    case 'shell-ask-signing':
+    case 'shell-ask-waiting':
+    case 'shell-ask-first':
+      return (
+        <View style={styles.fill}>
+          <Shell />
+          <AskMacSheet
+            onClose={() => {}}
+            onUseAgent={() => {}}
+            onOpenSession={() => {}}
+            onOpenWorkList={() => {}}
+            waitTimeoutMs={3_600_000}
+            preview={askPreview(name)}
+          />
+        </View>
       );
     case 'shell-profile-sheet':
       return (
@@ -4334,6 +4428,120 @@ function SignedWorkSurface({which}: {which: string}): React.JSX.Element {
             initial={initial}
           />
         </ScrollView>
+      </Screen>
+    </View>
+  );
+}
+
+// ---- N3 (#3595) 작업 상세 「대화」 모드 -------------------------------------------
+const WC_SELF = 'wc-self';
+const WC_SESSION = 'wc-session';
+function wcEvent(
+  id: string,
+  seq: number,
+  type: WorkSessionEvent['type'],
+  payload: Record<string, unknown> = {},
+): WorkSessionEvent {
+  return {
+    eventId: id,
+    type,
+    sessionId: WC_SESSION,
+    atMs: NOW + seq * 20_000,
+    seq,
+    payload: {work_session_id: WC_SESSION, ...payload},
+  };
+}
+function WorkChatSurface({which}: {which: string}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const done = which === 'done';
+  const keyboard = which === 'keyboard';
+  const asking = which === 'permission';
+  const off = which === 'off';
+  const events: WorkSessionEvent[] = [
+    wcEvent('e1', 1, 'agent.status', {terminal_event: 'created'}),
+    wcEvent('p1', 3, 'agent.partial', {
+      text_delta:
+        '네, onboarding/copy.ts의 1단계 문구부터 살펴볼게요. 해요체로 통일하려면 세 곳을 고쳐야 해요.',
+    }),
+    wcEvent('t1', 4, 'agent.status', {tool_call_name: 'read_file'}),
+    wcEvent('p2', 7, 'agent.partial', {
+      text_delta: '알겠어요. 테스트 문구는 그대로 두고 화면 문구 세 곳만 바꿀게요.',
+    }),
+    ...(asking
+      ? [wcEvent('a1', 8, 'approval.requested', {action: 'edit', action_type: 'edit'})]
+      : []),
+    ...(done
+      ? [
+          wcEvent('p3', 9, 'agent.partial', {
+            text_delta: '세 곳 모두 바꿨어요. 테스트는 건드리지 않았고 린트도 통과했어요.',
+          }),
+          wcEvent('e2', 10, 'agent.status', {terminal_event: 'ended'}),
+        ]
+      : []),
+  ];
+  const replies = [
+    {
+      id: 'r1',
+      authorMemberId: WC_SELF,
+      text: '온보딩 1단계 문구에서 「만듭니다」를 「만들어요」로 바꿔 줘',
+      atMs: NOW + 2 * 20_000,
+      seq: 2,
+      mode: 'queue' as const,
+    },
+    {
+      id: 'r2',
+      authorMemberId: WC_SELF,
+      text: '지금 바로 시작하고, 테스트 문구는 건드리지 마',
+      atMs: NOW + 6 * 20_000,
+      seq: 6,
+      mode: 'interrupt' as const,
+    },
+  ];
+  const items = buildConversation({
+    events,
+    session: {status: done ? 'ended' : 'running'},
+    truncated: false,
+    replies,
+    selfMemberId: WC_SELF,
+    pending: [],
+    permissionRequestId: asking ? 'a1' : null,
+  });
+  const gate = done
+    ? composerGate({owner: true, ended: true, flag: 'required', block: null, online: true, hasActions: true})
+    : off
+      ? composerGate({owner: true, ended: false, flag: 'off', block: null, online: true, hasActions: false})
+      : composerGate({owner: true, ended: false, flag: 'required', block: null, online: true, hasActions: true});
+  return (
+    <View style={styles.fill}>
+      <Screen>
+        <ScreenHeader
+          title="온보딩 1단계 문구 다듬기"
+          subtitle={done ? '종료됨' : '실행 중'}
+          onBack={() => {}}
+          backLabel="작업 목록으로"
+        />
+        <ModeSwitch mode="chat" onChange={() => {}} />
+        <WorkConversationView
+          items={items}
+          agentName="Claude Code"
+          nameOf={() => '팀원'}
+          gate={gate}
+          onSend={async () => ({ok: true})}
+          renderPermission={() => (
+            <PermissionCard
+              permission={SW_PERMISSION}
+              preview={swGate('ready')}
+              online
+              block={null}
+              actions={SW_ACTIONS}
+              fallbackReject={null}
+              lapsed={false}
+              onUndelivered={() => {}}
+            />
+          )}
+          initialText={keyboard ? '마지막에 린트도 돌려 줘' : undefined}
+          autoFocus={keyboard}
+        />
       </Screen>
     </View>
   );
@@ -4782,6 +4990,142 @@ const SHELL_ROSTER = [
   })),
 ];
 
+// ---- #3588 N8: 작업 맡기기 시트의 판 -------------------------------------------
+// 에이전트 셋: 그록봇(호스티드, 승인 채널 둘), 김인턴(쉬는 중), Hermes(호스티드 아님).
+const DELEGATE_TEMPLATE = SHELL_ROSTER.find(member => member.kind === 'agent') ?? SHELL_ROSTER[0];
+const DELEGATE_GROK = 'measure-agent-grokbot';
+const DELEGATE_AGENTS = [
+  {
+    ...DELEGATE_TEMPLATE,
+    id: DELEGATE_GROK,
+    displayName: '그록봇',
+    handle: 'grokbot',
+    channelIds: ['ch-agent-lab', 'ch-release', 'ch-general'],
+    paused: false,
+  },
+  {
+    ...DELEGATE_TEMPLATE,
+    id: 'measure-agent-intern',
+    displayName: '김인턴',
+    handle: 'kim-intern',
+    channelIds: ['ch-agent-lab'],
+    paused: true,
+  },
+  {
+    ...DELEGATE_TEMPLATE,
+    id: 'measure-agent-hermes',
+    displayName: 'Hermes',
+    handle: 'hermes',
+    channelIds: ['ch-general'],
+    paused: false,
+  },
+];
+
+function delegatePrefill(name: string): DelegatePrefill {
+  if (name === 'shell-delegate-a') return {};
+  return {agentMemberId: DELEGATE_GROK};
+}
+
+function delegatePreview(name: string): DelegatePreview {
+  const pick = {agentMemberId: DELEGATE_GROK, channelId: 'ch-agent-lab'};
+  const draft = {
+    title: '로그인 버그 고치기',
+    brief: '재현 순서는 이슈 #812에 있어요. 원인을 찾고 고친 PR을 올려 주세요.',
+  };
+  if (name === 'shell-delegate-a') return {pick};
+  if (name === 'shell-delegate-b') return {step: 'B', pick, draft};
+  if (name === 'shell-delegate-error') {
+    return {
+      step: 'B',
+      pick,
+      draft,
+      refusal: {
+        failure: workRunFailure(
+          new ApiError(
+            409,
+            'this channel is not approved for the hosted agent',
+            'hosted_channel_not_approved',
+          ),
+        ),
+        agentId: DELEGATE_GROK,
+        channelId: 'ch-agent-lab',
+      },
+    };
+  }
+  return {};
+}
+
+function askPreview(name: string): AskMacPreview {
+  const base: AskMacPreview = {
+    channelId: 'ch-agent-lab',
+    prompt: '이 에러 메시지가 무슨 뜻인지 알려 줘. TypeError: undefined is not a function',
+    signing: 'ready',
+  };
+  if (name === 'shell-ask-work') {
+    return {
+      ...base,
+      mode: 'work',
+      harness: 'codex',
+      folderId: 'fld-oort-app',
+      prompt: '로그인 버그를 찾아서 고치고 PR을 올려 줘.',
+    };
+  }
+  if (name === 'shell-ask-first') {
+    return {signing: 'ready', prompt: '이 에러가 무슨 뜻이야?'};
+  }
+  if (name === 'shell-ask-signing') return {...base, signing: 'flag_off'};
+  if (name === 'shell-ask-waiting') return {...base, waiting: true};
+  return base;
+}
+
+function seedAsk(surface: string): void {
+  const online = surface !== 'shell-ask-off';
+  harnessClient.setQueryData(['work-hosts', ADE_WS], [
+    {
+      id: 'measure-mac',
+      workspaceId: ADE_WS,
+      scope: 'member',
+      ownerMemberId: SELF,
+      type: 'workd',
+      displayName: '성재의 MacBook Pro',
+      capabilities: {},
+      createdAtMs: 0,
+      lastSeenAtMs: Date.now(),
+      online,
+      folders: [
+        {id: 'fld-question', displayName: '질문용 폴더', kind: 'question'},
+        {id: 'fld-oort-app', displayName: 'oort-app', kind: 'project'},
+        {id: 'fld-oort-docs', displayName: 'oort-docs', kind: 'project'},
+      ],
+      defaultFolderId: 'fld-question',
+    },
+  ]);
+  harnessClient.setQueryData(['work-sessions', ADE_WS], []);
+}
+
+function seedDelegate(surface: string): void {
+  harnessClient.setQueryData(['roster', ADE_WS], [
+    ...SHELL_ROSTER.filter(member => member.kind !== 'agent'),
+    ...DELEGATE_AGENTS,
+  ]);
+  const connection = (approved: string[]) => ({
+    id: 'measure-hosted-connection',
+    agentMemberId: DELEGATE_GROK,
+    status: 'active' as const,
+    authMode: 'static_bearer',
+    audience: '/v1/mcp/agent-port',
+    approvedChannelIds: approved,
+    approvedScopes: [],
+    createdAtMs: 0,
+    updatedAtMs: 0,
+  });
+  // 빈 판(승인 채널 0개)만 승인 목록이 비어 있다.
+  harnessClient.setQueryData(
+    ['hosted-agents', 'connections', ADE_WS],
+    [connection(surface === 'shell-delegate-empty' ? [] : ['ch-agent-lab', 'ch-release'])],
+  );
+}
+
 function seedShell(surface: string): void {
   // 셸은 명시적으로 켜진 질의(인박스·에이전트 레일)도 세운다. 서버가 없는 하네스에서
   // 그 요청이 실패하면 세션 만료로 읽혀 캐시가 통째로 지워지고(`useSession` 의
@@ -5096,6 +5440,125 @@ function seedWorkConsole(): void {
   );
 }
 
+/** N2 (#3594): t1 의 답 조각. 영속된 것(`done`)과 라이브로 올 것을 같은 문장에서 자른다. */
+const STREAM_SENTENCES = [
+  '배포 구성을 확인했습니다. 롤백 순서는 문서와 일치합니다. ',
+  '장애가 반복되면 먼저 릴레이를 재시작하고, 그래도 같으면 ',
+  '담당자에게 알린 뒤 이전 버전으로 되돌리는 순서로 진행하면 됩니다.',
+];
+
+function streamEvent(index: number, text: string, atMs: number) {
+  return {
+    eventId: `measure-event-partial-${index}`,
+    type: 'agent.partial' as const,
+    sessionId: 'measure-work-t1',
+    atMs,
+    seq: 110 + index,
+    payload: {
+      work_session_id: 'measure-work-t1',
+      event_id: `measure-event-partial-${index}`,
+      text_delta: text,
+    },
+  };
+}
+
+function seedWorkStream(done: boolean): void {
+  const sessionsKey = ['work-sessions', ADE_WS];
+  const eventsKey = [
+    'work-session-events',
+    ADE_WS,
+    'ch-deploy',
+    'measure-work-root',
+  ];
+  const events = harnessClient.getQueryData(eventsKey) as
+    | {events: unknown[]; truncated: boolean}
+    | undefined;
+  const base = (events?.events ?? []) as unknown[];
+  // 라이브 판은 첫 문장만 이미 읽혀 있고 나머지는 프레임으로 온다.
+  const persisted = done ? STREAM_SENTENCES : STREAM_SENTENCES.slice(0, 1);
+  harnessClient.setQueryData(eventsKey, {
+    truncated: false,
+    events: [
+      ...base,
+      ...persisted.map((text, index) =>
+        streamEvent(index, text, Date.now() - 60_000 + index * 2_000),
+      ),
+    ],
+  });
+  if (done) {
+    const sessions = harnessClient.getQueryData(sessionsKey) as
+      | Record<string, unknown>[]
+      | undefined;
+    harnessClient.setQueryData(
+      sessionsKey,
+      (sessions ?? []).map(session =>
+        session.id === 'measure-work-t1'
+          ? {...session, status: 'ended', endedAtMs: Date.now() - 20_000}
+          : session,
+      ),
+    );
+  }
+}
+
+function WorkStreamingSurface(): React.JSX.Element {
+  const handlers = React.useRef<Pick<
+    Parameters<ChannelRail['subscribeWorkSession']>[2],
+    'onAcpEvent'
+  > | null>(null);
+  const value = React.useMemo(
+    () => ({
+      ...CONNECTED_RAIL,
+      rail: {
+        subscribeWorkSession: (_ws: string, _channel: string, h: never) => {
+          handlers.current = h;
+          return () => {
+            handlers.current = null;
+          };
+        },
+      } as never,
+    }),
+    [],
+  );
+  React.useEffect(() => {
+    const frame = (index: number, text: string) => ({
+      type: 'agent.partial' as const,
+      v: 1,
+      ts: Date.now(),
+      seq: 110 + index,
+      payload: {
+        event_id: `measure-event-partial-${index}`,
+        work_session_id: 'measure-work-t1',
+        run_id: 'measure-run',
+        channel_id: 'ch-deploy',
+        message_id: `measure-event-partial-${index}`,
+        root_message_id: 'measure-work-root',
+        text_delta: text,
+      },
+    });
+    const send = (index: number) => () =>
+      handlers.current?.onAcpEvent(frame(index, STREAM_SENTENCES[index]));
+    const timers = [
+      setTimeout(send(1), 1_500),
+      setTimeout(send(2), 6_000),
+    ];
+    return () => timers.forEach(clearTimeout);
+  }, []);
+  return (
+    <RealtimeContext.Provider value={value}>
+      <View style={{flex: 1, overflow: 'hidden'}}>
+        <View style={{flex: 1, marginTop: -940, height: 3000}}>
+          <WorkSessionDetailScreen
+            active
+            sessionId="measure-work-t1"
+            onBack={() => {}}
+            onOpenConversation={() => {}}
+          />
+        </View>
+      </View>
+    </RealtimeContext.Provider>
+  );
+}
+
 const buildStyles = (color: Palette) => StyleSheet.create({
     lockedFrame: {paddingHorizontal: 16, paddingTop: 8},
     // 하네스 자신의 라벨. 제품이 아니라 **사진의 캡션**이라 토큰을 든다: 라이트
@@ -5195,9 +5658,32 @@ if (
 if (
   LAUNCHED !== null &&
   LAUNCHED.kind === 'surface' &&
-  (LAUNCHED.name === 'work-detail' || LAUNCHED.name === 'work-detail-events')
+  (LAUNCHED.name === 'work-detail' ||
+    LAUNCHED.name === 'work-detail-events' ||
+    LAUNCHED.name === 'work-detail-streaming' ||
+    LAUNCHED.name === 'work-detail-stop' ||
+    LAUNCHED.name === 'work-detail-stop-confirm' ||
+    LAUNCHED.name === 'work-detail-stopped' ||
+    LAUNCHED.name === 'work-detail-done')
 ) {
   seedWorkConsole();
+  if (LAUNCHED.name === 'work-detail-stopped') seedWorkStream(true);
+  // N4: 「멈추기」는 내 세션에만 있다. 이 표면들은 t1 을 하네스의 나(HARNESS_MEMBER)의 작업으로 둔다.
+  if (LAUNCHED.name.startsWith('work-detail-stop')) {
+    const sessions = harnessClient.getQueryData(['work-sessions', ADE_WS]) as
+      | Record<string, unknown>[]
+      | undefined;
+    harnessClient.setQueryData(
+      ['work-sessions', ADE_WS],
+      (sessions ?? []).map(session =>
+        session.id === 'measure-work-t1'
+          ? {...session, memberId: HARNESS_MEMBER.id}
+          : session,
+      ),
+    );
+  }
+  if (LAUNCHED.name === 'work-detail-streaming') seedWorkStream(false);
+  if (LAUNCHED.name === 'work-detail-done') seedWorkStream(true);
 }
 if (
   LAUNCHED !== null &&
@@ -5219,4 +5705,6 @@ if (
   LAUNCHED.name.startsWith('shell-')
 ) {
   seedShell(LAUNCHED.name);
+  if (LAUNCHED.name.startsWith('shell-delegate-')) seedDelegate(LAUNCHED.name);
+  if (LAUNCHED.name.startsWith('shell-ask-')) seedAsk(LAUNCHED.name);
 }

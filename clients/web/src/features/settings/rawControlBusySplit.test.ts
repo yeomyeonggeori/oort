@@ -952,16 +952,17 @@ describe("#1559 회전 1 · in-flight 는 fieldset 을 끄지 않는다 (#1595 H
         ).toBe(false);
       }
     }
-    // 하나도 안 잡히면 이 단정은 공허하게 초록이다. 오늘의 실측은 여섯이다.
-    expect(seen).toBeGreaterThanOrEqual(6);
+    // 하나도 안 잡히면 이 단정은 공허하게 초록이다. 오늘의 실측은 다섯이다(#3578 S5a가 터미널 색을 세그먼트로 옮긴 뒤; S4 뒤 여섯, 그 전에는 일곱).
+    expect(seen).toBeGreaterThanOrEqual(5);
   });
 });
 
 describe("#1559 회전 1 · 되돌리기가 사유 없이 침묵하지 않는다 (#1595 M5)", () => {
-  const file = source("./WorkHostSection.tsx");
+  const file = source("./workTierPolicy.tsx");
 
-  it("두 자리 다 잠금을 그리고 낭독한다", () => {
-    for (const testId of ["work-host-revert", "work-tier-revert-${scope}"]) {
+  it("되돌리기는 잠금을 그리고 낭독한다", () => {
+    // 실행 엔진 블록(`work-host-revert`)은 #3578 S4가 걷었다. 남은 자리는 재개 정책 하나다.
+    for (const testId of ["work-tier-revert-${scope}"]) {
       const marker = testId.includes("$")
         ? `data-testid={\`${testId}\`}`
         : `data-testid="${testId}"`;
@@ -986,9 +987,7 @@ describe("#1559 회전 1 · 되돌리기가 사유 없이 침묵하지 않는다
     expect(source("./SettingsFields.tsx")).toContain(
       "const hintId = hint ? choiceRadiosHintId(name) : undefined;"
     );
-    expect(file).toContain('const engineRadiosName = "work-host-engine";');
     expect(file).toContain("const modeRadiosName = `work-tier-mode-${scope}`;");
-    expect(file).toContain("엔진을 저장하는 중이에요.");
     expect(file).toContain("정책을 저장하는 중이에요.");
   });
 });

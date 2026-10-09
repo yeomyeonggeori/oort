@@ -138,14 +138,14 @@ describe("owner notices (ADR-0188 D2)", () => {
       { type: "work_host.registered", hostId: HOST, workspaceId: WS, displayName: "누군가의 박스", actorMemberId: "m1" },
       "m1"
     );
-    expect(text.title).toBe("작업 호스트가 등록되었습니다");
+    expect(text.title).toBe("작업 호스트가 등록됐어요");
     expect(text.body).toContain("누군가의 박스");
     expect(text.body).toContain("해지하세요");
     const revoked = workHostNoticeText(
       { type: "work_host.revoked", hostId: HOST, workspaceId: WS, displayName: "박스", actorMemberId: "admin" },
       "m1"
     );
-    expect(revoked.body).toContain("관리자가 해지했습니다");
+    expect(revoked.body).toContain("관리자가 해지했어요");
   });
 
   it("every shell error code has its own sentence", () => {

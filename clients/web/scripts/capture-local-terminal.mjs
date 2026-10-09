@@ -201,7 +201,7 @@ async function palette(browser, origin) {
   const steps = [];
   for (const [label, want] of [
     ["밝게", TERM_EXPECT.light],
-    ["어둡게 (기본)", TERM_EXPECT.dark],
+    ["어둡게", TERM_EXPECT.dark],
     ["앱 테마 따르기", TERM_EXPECT.light],
   ]) {
     await page.getByTestId("terminal-theme-choice").getByText(label, { exact: true }).click();

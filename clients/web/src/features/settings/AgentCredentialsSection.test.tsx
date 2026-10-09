@@ -17,7 +17,7 @@ import {
   regenerateHostedPairing,
 } from "@momo/core/features/hostedAgents/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
-import { SETTINGS_SECTIONS } from "./settingsNav";
+import { SETTINGS_SECTIONS, resolveSettingsSection } from "./settingsNav";
 import {
   AgentCredentialsSection,
   hostedRowByConnectionId,
@@ -327,11 +327,12 @@ async function waitFor(
 }
 
 describe("진입점", () => {
-  it("설정 내비에 「외부 에이전트 연결」이 하나다", () => {
-    const agents = SETTINGS_SECTIONS.filter((item) => item.id === "agents");
-    expect(agents).toHaveLength(1);
-    expect(agents[0]?.label).toBe("외부 에이전트 연결");
-    expect(agents[0]?.group).toBe("연결");
+  it("설정 내비에는 「외부 에이전트 연결」 행이 없고 옛 주소는 AI 허브 줄로 간다 (#3578 S1)", () => {
+    expect(SETTINGS_SECTIONS.some((item) => (item.id as string) === "agents")).toBe(false);
+    expect(resolveSettingsSection("agents")).toEqual({
+      kind: "ai-hub",
+      path: "/ai/external/agents",
+    });
   });
 
   it("⌘K 가 같은 이름으로 연다", () => {
@@ -349,7 +350,7 @@ describe("진입점", () => {
       agents: [],
       canOpenLocalCard: () => false,
     }).find((entry) => entry.testId === "switcher-settings-agents");
-    expect(command?.title).toBe(SETTINGS_SECTIONS.find((item) => item.id === "agents")?.label);
+    expect(command?.title).toBe("외부 에이전트 연결");
   });
 });
 

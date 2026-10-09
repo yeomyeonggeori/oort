@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Smartphone } from "lucide-react";
 import { ApiError } from "@momo/core/lib/api";
 import { NetworkError } from "@momo/core/lib/http";
 import { encodeQr, qrModulePath } from "@momo/core/lib/qr";
@@ -30,19 +29,19 @@ function failureCopy(error: unknown): string {
   if (error instanceof NetworkError) return error.message;
   if (error instanceof ApiError) {
     if (error.status === 409) {
-      return "아직 폰이 이 코드를 쓰지 않았거나, 이 연결은 확인이 필요 없습니다. 폰에서 먼저 찍은 뒤 다시 시도하세요.";
+      return "아직 폰이 이 코드를 쓰지 않았거나, 이 연결은 확인이 필요 없어요. 폰에서 먼저 찍은 뒤 다시 시도해 주세요.";
     }
     if (error.status === 400) {
-      return "서버가 확인 요청을 거절했습니다. 다시 시도하세요.";
+      return "서버가 확인 요청을 거절했어요. 다시 시도해 주세요.";
     }
     if (error.status === 403) {
-      return "사람 계정만 폰을 연결할 수 있습니다.";
+      return "사람 계정만 폰을 연결할 수 있어요.";
     }
     if (error.status === 429) {
-      return "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.";
+      return "요청이 너무 잦아요. 잠시 뒤에 다시 시도해 주세요.";
     }
   }
-  return "서버가 연결을 만들지 못했습니다. 다시 시도하세요.";
+  return "서버가 연결을 만들지 못했어요. 다시 시도해 주세요.";
 }
 
 function announceBand(remaining: number): number {
@@ -342,29 +341,29 @@ export function DeviceLinkCard({
       : phase === "awaitingConfirm"
         ? device
           ? `코드를 쓴 기기: ${device.name}. 폰에 같은 숫자가 보이면 확인하세요.`
-          : "폰이 코드를 썼습니다. 폰에 같은 숫자가 보이면 확인하세요."
+          : "폰이 코드를 썼어요. 폰에 같은 숫자가 보이면 확인하세요."
         : phase === "expired"
-          ? "이 코드는 만료됐습니다. 다시 만들면 새 QR이 나옵니다."
+          ? "이 코드는 만료됐어요. 다시 만들면 새 QR이 나와요."
           : phase === "pending"
-            ? "이 QR은 지금 살아 있습니다. 폰 카메라로 찍으세요."
+            ? "이 QR은 지금 쓸 수 있어요. 폰 카메라로 찍으세요."
             : embedded && !banner
               ? // 띠의 [QR 만들기]가 이미 발급을 걸었다. 여기서 버튼을 약속하지 않는다.
                 offline
-                ? "다시 연결되면 QR을 만듭니다."
-                : "QR을 만들고 있습니다."
+                ? "다시 연결되면 QR을 만들어요."
+                : "QR을 만들고 있어요."
               : "이 계정을 폰에서도 쓰려면 QR을 만드세요.";
 
   return (
     <div
-      className="flex min-w-0 flex-col items-start gap-3 rounded-md border border-line bg-surface-raised p-4 shadow-sm"
+      className={
+        // 설정 > 기기에서는 이미 「폰 연결」 카드 안이다(#3578): 상자를 한 겹 더 두르지 않는다.
+        // 채널 카드 안(`embedded`)은 자기 상자가 이 상자다.
+        embedded
+          ? "flex min-w-0 flex-col items-start gap-3 rounded-md border border-line bg-surface-raised p-4 shadow-sm"
+          : "flex min-w-0 flex-col items-start gap-3 p-4"
+      }
       data-testid="device-link-card"
     >
-      {!embedded && (
-        <div className="flex items-center gap-2">
-          <Smartphone className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
-          <h3 className="text-body font-semibold text-ink">폰 연결</h3>
-        </div>
-      )}
       <p
         className="break-keep text-body text-ink-muted"
         data-testid={
@@ -385,7 +384,7 @@ export function DeviceLinkCard({
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼습니다. 다시 연결된 뒤에 QR을 만들 수 있습니다."
+          message="연결이 끊겼어요. 다시 연결되면 QR을 만들 수 있어요."
           messageId={OFFLINE_REASON_ID}
           testId="device-link-offline"
           separator={false}

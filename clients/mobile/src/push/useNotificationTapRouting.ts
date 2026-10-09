@@ -1,9 +1,11 @@
 import {channelLabel} from '@momo/core/features/workspace/directory';
 import {fetchWorkSessions} from '@momo/core/lib/api';
+import {useQueryClient} from '@tanstack/react-query';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {AccessibilityInfo} from 'react-native';
 
 import {useInvalidateApprovals} from '../features/inbox/useInbox';
+import {teamBoardKey} from '../features/work/teamBoard/useTeamBoard';
 import {CHANNEL_LIST_FAILED} from '../features/sidebar/rows';
 import {useChannels, useDirectory} from '../features/workspace/queries';
 import type {NavAction, OpenConversation, Tab} from '../nav/state';
@@ -99,6 +101,7 @@ export function useNotificationTapRouting(
   const channels = useChannels(workspaceId);
   const roster = useDirectory(workspaceId);
   const invalidateApprovals = useInvalidateApprovals();
+  const queryClient = useQueryClient();
   const [notice, setNotice] = useState<string | null>(null);
   // 세션 조회가 끝났음을 효과에 알리는 박동. 값은 읽지 않고, 바뀐다는 사실이 전부다.
   const [resolveTick, setResolveTick] = useState(0);
@@ -145,6 +148,16 @@ export function useNotificationTapRouting(
       }
       // 앞선 탭의 영수증은 이 탭에 대한 말이 아니다.
       setNotice(null);
+      // 「작업 끝남」 탭은 팀 보드의 단계가 바뀌었다는 뜻이다. 단계에는 realtime이 없으므로
+      // (ADR-0162 증보 3 D11) 탭이 보드를 다시 읽게 한다. 화면은 대화/세션으로 가도 같다.
+      if (
+        arrival.target.reason === 'work_run_done' ||
+        arrival.target.reason === 'work_session_idle'
+      ) {
+        void queryClient.invalidateQueries({
+          queryKey: teamBoardKey(workspaceId),
+        });
+      }
       pendingRef.current = {
         token,
         target: arrival.target,
@@ -268,6 +281,7 @@ export function useNotificationTapRouting(
     refetchChannels,
     fail,
     invalidateApprovals,
+    queryClient,
     dispatch,
     member.id,
     workspaceId,

@@ -115,17 +115,17 @@ describe("DesktopNotificationGroup in a browser tab (#3340)", () => {
     const host = await mountGroup();
     expect(state(host)).toBe("unsupported");
     expect(host.textContent).toContain(BROWSER_NOTIFICATION_UNSUPPORTED_MESSAGE);
-    const mention = host.querySelector('[data-testid="desktop-notification-kind-mention"]') as HTMLInputElement;
+    const mention = host.querySelector('[data-testid="desktop-notification-kind-mention"]') as HTMLButtonElement;
     expect(mention.disabled).toBe(true);
   });
 
   it("same defaults as the desktop (DM off); no dock column; desktop-only kinds are labelled", async () => {
     FakeNotification.permission = "granted";
     const host = await mountGroup();
-    const box = (id: string) => host.querySelector(`[data-testid="${id}"]`) as HTMLInputElement;
-    expect(box("desktop-notification-kind-mention").checked).toBe(true);
-    expect(box("desktop-notification-kind-approval").checked).toBe(true);
-    expect(box("desktop-notification-kind-dm").checked).toBe(false);
+    const box = (id: string) => host.querySelector(`[data-testid="${id}"]`) as HTMLButtonElement;
+    expect(box("desktop-notification-kind-mention").getAttribute("aria-checked")).toBe("true");
+    expect(box("desktop-notification-kind-approval").getAttribute("aria-checked")).toBe("true");
+    expect(box("desktop-notification-kind-dm").getAttribute("aria-checked")).toBe("false");
     expect(box("desktop-notification-kind-dm").disabled).toBe(false);
     expect(host.querySelector('[data-testid="desktop-notification-dock-badge"]')).toBeNull();
     expect(host.querySelector('[data-testid="desktop-notification-dock-dm"]')).toBeNull();

@@ -261,16 +261,16 @@ describe("DesktopNotificationGroup", () => {
     expect(reason?.id).toBeTruthy();
     const mention = host.querySelector(
       '[data-testid="desktop-notification-kind-mention"]'
-    ) as HTMLInputElement;
+    ) as HTMLButtonElement;
     const approval = host.querySelector(
       '[data-testid="desktop-notification-kind-approval"]'
-    ) as HTMLInputElement;
+    ) as HTMLButtonElement;
     expect(mention.disabled).toBe(true);
     expect(approval.disabled).toBe(true);
     expect(mention.getAttribute("aria-describedby")).toContain(reason!.id);
     expect(approval.getAttribute("aria-describedby")).toContain(reason!.id);
     act(() => mention.click());
-    expect(mention.checked).toBe(true);
+    expect(mention.getAttribute("aria-checked")).toBe("true");
   });
 
   it("writes a kind toggle to this-device storage", async () => {
@@ -280,11 +280,11 @@ describe("DesktopNotificationGroup", () => {
     });
     const mention = host.querySelector(
       '[data-testid="desktop-notification-kind-mention"]'
-    ) as HTMLInputElement;
-    expect(mention.checked).toBe(true);
+    ) as HTMLButtonElement;
+    expect(mention.getAttribute("aria-checked")).toBe("true");
     expect(mention.disabled).toBe(false);
     act(() => mention.click());
-    expect(mention.checked).toBe(false);
+    expect(mention.getAttribute("aria-checked")).toBe("false");
     expect(
       host.querySelector('[data-testid="desktop-notification-kind-approval"]')
     ).not.toBeNull();
@@ -297,21 +297,25 @@ describe("DesktopNotificationGroup", () => {
       await Promise.resolve();
     });
     const box = (id: string) =>
-      host.querySelector(`[data-testid="${id}"]`) as HTMLInputElement;
+      host.querySelector(`[data-testid="${id}"]`) as HTMLButtonElement;
     for (const id of ["approval", "pane-waiting", "mention", "work-mine-done"]) {
-      expect(box(`desktop-notification-kind-${id}`).checked).toBe(true);
+      expect(box(`desktop-notification-kind-${id}`).getAttribute("aria-checked")).toBe("true");
     }
-    expect(box("desktop-notification-kind-dm").checked).toBe(false);
-    expect(box("desktop-notification-dock-dm").checked).toBe(false);
-    expect(box("desktop-notification-dock-badge").checked).toBe(true);
+    expect(box("desktop-notification-kind-dm").getAttribute("aria-checked")).toBe("false");
+    expect(box("desktop-notification-dock-dm").getAttribute("aria-checked")).toBe("false");
+    expect(box("desktop-notification-dock-badge").getAttribute("aria-checked")).toBe("true");
     // 폰 푸시 열에는 입력이 없다(폰 설정은 폰 앱에서).
     const rows = host.querySelectorAll("tbody tr");
     expect(rows).toHaveLength(7);
     for (const row of rows) {
-      expect(row.querySelectorAll("td:last-child input")).toHaveLength(0);
+      expect(row.querySelectorAll('td:last-child input, td:last-child [role="switch"]')).toHaveLength(0);
     }
+    // OS 알림 열의 스위치는 스위치를 가진 여섯 종류(팀 작업 끝남은 「연결 전」)와 같다.
+    expect(
+      host.querySelectorAll('[data-testid="desktop-notification-kinds"] tbody td:nth-child(2) [role="switch"]')
+    ).toHaveLength(6);
     expect(host.textContent).toContain("팀 작업 끝남");
     act(() => box("desktop-notification-kind-dm").click());
-    expect(box("desktop-notification-kind-dm").checked).toBe(true);
+    expect(box("desktop-notification-kind-dm").getAttribute("aria-checked")).toBe("true");
   });
 });

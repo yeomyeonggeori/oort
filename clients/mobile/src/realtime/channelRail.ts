@@ -5,7 +5,10 @@ import {
   asPinFrame,
   asReactionFrame,
   asTypingFrame,
+  asWorkSessionACPFrame,
+  asWorkSessionControlFrame,
   asWorkSessionLifecycleFrame,
+  asWorkSessionObserverFrame,
   asWorkRunUpdatedFrame,
   asWorkSessionShareChangedFrame,
   asWorkSessionToolTransitionFrame,
@@ -100,7 +103,11 @@ export type TypingHandlers = Parameters<
  */
 export type ChannelRail = Pick<
   RealtimeHandle,
-  'subscribeChannel' | 'subscribeAgent' | 'subscribeTyping'
+  | 'subscribeChannel'
+  | 'subscribeAgent'
+  | 'subscribeTyping'
+  // N2 (#3594): 작업 상세의 답 조각. 이 한 방법만 늘렸다.
+  | 'subscribeWorkSession'
 > & {
   /**
    * 팀 작업 보드의 **신호**(#2864, ADR-0194 D8). 한 채널의 공유 변화·세션 수명주기·도구
@@ -206,6 +213,65 @@ export function createChannelRail(getClient: () => Centrifuge): ChannelRail {
             // about which message a frame is about.
             const pin: PinEvent | null = asPinFrame(ctx.data);
             if (pin) handlers.onPin?.(pin);
+          };
+          sub.on('subscribed', onSubscribed);
+          sub.on('publication', onPublication);
+          return () => {
+            sub.off('subscribed', onSubscribed);
+            sub.off('publication', onPublication);
+          };
+        },
+      );
+    },
+
+    // N2 (#3594). 작업 상세가 열려 있는 동안 ACP 프레임(`agent.partial` 등)을 듣는다.
+    // 웹 `subscribeWorkSession` 과 같은 분류·같은 구독·같은 옵션이다(`ch:` 채널은 메시지
+    // 레일과 한 구독을 나눠 쓴다). 되쏘기(replay)는 접어 넣지 않고 버린 뒤 `onResync` 로
+    // 읽기에서 다시 맞춘다: 끝난 턴의 프레임이 달리는 시계로 되살아나는 것이 MOMO-789다.
+    subscribeWorkSession(workspaceId, channelId, handlers) {
+      return attach(
+        centrifugoChannelName(workspaceId, channelId),
+        {recoverable: true, positioned: true},
+        sub => {
+          const gate = createReplayGate();
+          const onSubscribed = (ctx: SubscribedRecoveryContext) => {
+            gate.onSubscribed(ctx);
+            handlers.onResync();
+          };
+          const onPublication = (ctx: {data?: unknown}) => {
+            if (gate.isReplaying()) return;
+            const lifecycle = asWorkSessionLifecycleFrame(ctx.data);
+            if (lifecycle) {
+              handlers.onLifecycle(lifecycle);
+              return;
+            }
+            const transition = asWorkSessionToolTransitionFrame(ctx.data);
+            if (transition) {
+              handlers.onToolTransition(transition);
+              return;
+            }
+            const observer = asWorkSessionObserverFrame(ctx.data);
+            if (observer) {
+              handlers.onObserver(observer);
+              return;
+            }
+            const control = asWorkSessionControlFrame(ctx.data);
+            if (control) {
+              handlers.onControl?.(control);
+              return;
+            }
+            const shareChanged = asWorkSessionShareChangedFrame(ctx.data);
+            if (shareChanged) {
+              handlers.onShareChanged?.(shareChanged);
+              return;
+            }
+            const runUpdated = asWorkRunUpdatedFrame(ctx.data);
+            if (runUpdated) {
+              handlers.onRunUpdated?.(runUpdated);
+              return;
+            }
+            const acp = asWorkSessionACPFrame(ctx.data);
+            if (acp) handlers.onAcpEvent(acp);
           };
           sub.on('subscribed', onSubscribed);
           sub.on('publication', onPublication);

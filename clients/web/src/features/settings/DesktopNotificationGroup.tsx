@@ -15,7 +15,10 @@ import {
   useDesktopNotificationKinds,
   type DesktopNotifyKind,
 } from "@/features/notifications/preference";
-import { SettingsToggleRow, Subsection } from "./SettingsFields";
+import { Switch } from "@/design/ui/switch";
+import { SettingsRow } from "./shell/SettingsRow";
+import { SettingsSection } from "./shell/SettingsSection";
+import { CardBody } from "./workTierPolicy";
 
 // Design Read: settings for internal team users on web+Tauri, density 6/10,
 // motion 2/10.
@@ -29,23 +32,23 @@ export const DESKTOP_NOTIFICATION_ENABLE_LABEL = "알림 켜기";
 export const DESKTOP_NOTIFICATION_REQUESTING_LABEL = "요청 중";
 export const DESKTOP_NOTIFICATION_GRANTED_LABEL = "켜짐";
 export const DESKTOP_NOTIFICATION_GRANTED_DETAIL =
-  "이 기기에서 데스크톱 알림을 보낼 수 있습니다.";
+  "이 기기에서 데스크톱 알림을 보낼 수 있어요.";
 export const DESKTOP_NOTIFICATION_DEFAULT_DETAIL =
   "이 앱이 앞에 없을 때 알려 주려면 알림을 켜세요.";
 export const DESKTOP_NOTIFICATION_DENIED_MESSAGE =
-  "이 앱의 알림이 macOS에서 막혀 있습니다. 시스템 설정 › 알림에서 oort를 허용하세요.";
+  "이 앱의 알림이 macOS에서 막혀 있어요. 시스템 설정 › 알림에서 oort를 허용하세요.";
 export const DESKTOP_NOTIFICATION_UNSUPPORTED_MESSAGE =
-  "이 화면에서는 데스크톱 알림을 쓸 수 없습니다. 데스크톱 앱을 쓰면 알림이 옵니다.";
+  "이 화면에서는 데스크톱 알림을 쓸 수 없어요. 데스크톱 앱을 쓰면 알림이 와요.";
 
 // 브라우저 탭 문장(#3340). 권한은 이 단추를 누른 뒤에만 묻는다.
 export const BROWSER_NOTIFICATION_GRANTED_DETAIL =
-  "이 브라우저에서 알림을 보낼 수 있습니다. 탭이 가려져 있을 때 알려요.";
+  "이 브라우저에서 알림을 보낼 수 있어요. 탭이 가려져 있을 때 알려요.";
 export const BROWSER_NOTIFICATION_DEFAULT_DETAIL =
   "탭이 가려져 있을 때 알려 주려면 알림을 켜세요. 누르면 브라우저가 허용 여부를 물어요.";
 export const BROWSER_NOTIFICATION_DENIED_MESSAGE =
-  "이 브라우저에서 oort의 알림이 막혀 있습니다. 주소창 왼쪽의 사이트 설정(자물쇠)에서 알림을 허용한 뒤 이 페이지를 새로 고치세요.";
+  "이 브라우저에서 oort의 알림이 막혀 있어요. 주소창 왼쪽의 사이트 설정(자물쇠)에서 알림을 허용한 뒤 이 페이지를 새로 고치세요.";
 export const BROWSER_NOTIFICATION_UNSUPPORTED_MESSAGE =
-  "이 브라우저는 알림을 지원하지 않습니다. 데스크탑 앱이나 최신 브라우저를 쓰세요.";
+  "이 브라우저는 알림을 지원하지 않아요. 데스크탑 앱이나 최신 브라우저를 쓰세요.";
 
 /** 로컬 칸·기한 확인은 데스크탑 앱만 신호를 갖는다. 브라우저 탭에서는 스위치가 아니라 안내다. */
 const DESKTOP_ONLY_KINDS: ReadonlySet<string> = new Set(["pane-waiting", "work-mine-done", "reminder"]);
@@ -113,19 +116,17 @@ export function DesktopNotificationPermissionPanel({
 
   if (permission === "loading") {
     return (
-      <div data-testid="desktop-notifications-permission" data-state="loading">
-        <Skeleton ready={false} rows={1} className="p-0" />
-      </div>
+      <CardBody>
+        <div data-testid="desktop-notifications-permission" data-state="loading">
+          <Skeleton ready={false} rows={1} className="p-0" />
+        </div>
+      </CardBody>
     );
   }
 
   if (permission === "denied") {
     return (
-      <div
-        className="overflow-hidden rounded-md border border-line"
-        data-testid="desktop-notifications-permission"
-        data-state="denied"
-      >
+      <div data-testid="desktop-notifications-permission" data-state="denied">
         <InlineBanner
           separator={false}
           message={
@@ -141,21 +142,19 @@ export function DesktopNotificationPermissionPanel({
 
   if (permission === "unsupported") {
     return (
-      <div
-        className="overflow-hidden rounded-md border border-line p-3"
-        data-testid="desktop-notifications-permission"
-        data-state="unsupported"
-      >
-        <p
-          id={unsupportedReasonId}
-          className="break-keep text-meta text-ink-muted"
-          data-testid="desktop-notifications-unsupported"
-        >
-          {surface === "browser"
-            ? BROWSER_NOTIFICATION_UNSUPPORTED_MESSAGE
-            : DESKTOP_NOTIFICATION_UNSUPPORTED_MESSAGE}
-        </p>
-      </div>
+      <CardBody>
+        <div data-testid="desktop-notifications-permission" data-state="unsupported">
+          <p
+            id={unsupportedReasonId}
+            className="break-keep text-meta text-ink-muted"
+            data-testid="desktop-notifications-unsupported"
+          >
+            {surface === "browser"
+              ? BROWSER_NOTIFICATION_UNSUPPORTED_MESSAGE
+              : DESKTOP_NOTIFICATION_UNSUPPORTED_MESSAGE}
+          </p>
+        </div>
+      </CardBody>
     );
   }
 
@@ -164,38 +163,41 @@ export function DesktopNotificationPermissionPanel({
     : DESKTOP_NOTIFICATION_ENABLE_LABEL;
 
   return (
-    <div
-      className="flex min-w-0 flex-col gap-3 overflow-hidden rounded-md border border-line p-3"
-      data-testid="desktop-notifications-permission"
-      data-state={permission}
-    >
+    <div data-testid="desktop-notifications-permission" data-state={permission}>
       {permission === "granted" ? (
-        <div
-          ref={grantedRef}
-          tabIndex={-1}
-          role="status"
-          className="flex min-w-0 items-start gap-2 rounded-sm focus-visible:focus-ring"
-          data-testid="desktop-notifications-granted"
-        >
-          <span
-            className={cn(CHIP_CLASS, "bg-ok-soft text-ok")}
-            data-testid="desktop-notifications-granted-chip"
-          >
-            {DESKTOP_NOTIFICATION_GRANTED_LABEL}
-          </span>
-          <p className="min-w-0 break-keep text-meta text-ink-muted">
-            {surface === "browser"
+        <SettingsRow
+          label="알림 권한"
+          description={
+            surface === "browser"
               ? BROWSER_NOTIFICATION_GRANTED_DETAIL
-              : DESKTOP_NOTIFICATION_GRANTED_DETAIL}
-          </p>
-        </div>
+              : DESKTOP_NOTIFICATION_GRANTED_DETAIL
+          }
+          keep
+        >
+          <div
+            ref={grantedRef}
+            tabIndex={-1}
+            role="status"
+            className="rounded-sm focus-visible:focus-ring"
+            data-testid="desktop-notifications-granted"
+          >
+            <span
+              className={cn(CHIP_CLASS, "bg-ok-soft text-ok")}
+              data-testid="desktop-notifications-granted-chip"
+            >
+              {DESKTOP_NOTIFICATION_GRANTED_LABEL}
+            </span>
+          </div>
+        </SettingsRow>
       ) : (
-        <>
-          <p className="break-keep text-meta text-ink-muted">
-            {surface === "browser"
+        <SettingsRow
+          label="알림 권한"
+          description={
+            surface === "browser"
               ? BROWSER_NOTIFICATION_DEFAULT_DETAIL
-              : DESKTOP_NOTIFICATION_DEFAULT_DETAIL}
-          </p>
+              : DESKTOP_NOTIFICATION_DEFAULT_DETAIL
+          }
+        >
           {/* InviteSection.tsx:287: 행 안 고유폭 버튼. flex-col stretch 는
               전폭 amber 바가 된다 (taste §8). */}
           <div className="flex flex-wrap items-center gap-2">
@@ -212,7 +214,7 @@ export function DesktopNotificationPermissionPanel({
               {enableLabel}
             </Button>
           </div>
-        </>
+        </SettingsRow>
       )}
     </div>
   );
@@ -230,6 +232,10 @@ export function DesktopNotificationGroup() {
   const kinds = useDesktopNotificationKinds();
   const unsupportedReasonId = useId();
   const dockOffReasonId = useId();
+  const dockLabelId = useId();
+  const dockDescId = useId();
+  const dockDmLabelId = useId();
+  const dockDmDescId = useId();
   const kindsLocked = permission === "unsupported";
   const browser = surface === "browser";
 
@@ -269,15 +275,30 @@ export function DesktopNotificationGroup() {
     }
   }
 
+  const lockedDescribedBy = kindsLocked ? unsupportedReasonId : undefined;
+  const dockCellText = (row: DesktopNotificationKindRow): string => {
+    if (!kinds.dockBadge) return "꺼짐";
+    if (row.dock === "counted") return "수에 포함";
+    if (row.dock === "dm") return kinds.dockDm ? "수에 포함" : "세지 않아요";
+    return "세지 않아요";
+  };
+  // 좁은 카드에서 접힌 열의 내용을 이름 아래 한 줄로 말한다.
+  const extraLine = (row: DesktopNotificationKindRow): string => {
+    const parts = browser ? [] : [`독 배지 ${dockCellText(row)}`];
+    parts.push(`폰 푸시 ${PHONE_CELL_TEXT[row.phone]}`);
+    return parts.join(" · ");
+  };
+
   return (
     <>
-      <Subsection
+      <SettingsSection
         title="이 기기 알림"
-        lines={[
+        description={
           browser
-            ? "탭이 앞에 있고 그 대상이 화면에 보이면 알리지 않아요. 같은 종류가 연달아 오면 한 묶음으로 보내요. 이 탭이 열려 있을 때만 와요. 탭 제목의 (숫자)는 알림 설정과 상관없이 항상 켜 있어요."
-            : "창이 앞에 있고 그 대상이 화면에 보이면 알리지 않아요. 같은 종류가 연달아 오면 한 묶음으로 보내요. 나중에 알림은 기한이 되면 앱이 앞에 있어도 알려요.",
-        ]}
+            ? "탭이 앞에 있고 그 대상이 화면에 보이면 알리지 않아요. 같은 종류가 연달아 오면 한 묶음으로 보내요. 이 탭이 열려 있을 때만 와요. 탭 제목의 (숫자)는 알림 설정과 상관없이 항상 켜 있어요. OS 알림을 종류별로 끄는 선택은 이 기기에만 저장돼요."
+            : "창이 앞에 있고 그 대상이 화면에 보이면 알리지 않아요. 같은 종류가 연달아 오면 한 묶음으로 보내요. 나중에 알림은 기한이 되면 앱이 앞에 있어도 알려요. OS 알림을 종류별로 끄는 선택은 이 기기에만 저장돼요."
+        }
+        testId="device-notifications-section"
       >
         <div data-testid="desktop-notifications-permission-host">
           <DesktopNotificationPermissionPanel
@@ -288,18 +309,18 @@ export function DesktopNotificationGroup() {
             surface={surface}
           />
         </div>
-      </Subsection>
+      </SettingsSection>
 
-      <Subsection
-        title="종류별"
-        lines={[
+      <SettingsSection
+        title="종류별 알림"
+        description={
           browser
             ? "앱 안의 배지와 줄 표시는 항상 켜 있어요. 아래는 이 브라우저의 OS 알림만 정해요."
-            : "앱 안의 배지와 줄 표시는 항상 켜 있어요. 아래는 OS 알림과 독 배지만 정해요.",
-        ]}
+            : "앱 안의 배지와 줄 표시는 항상 켜 있어요. 아래는 OS 알림과 독 배지만 정해요."
+        }
       >
         <div
-          className="min-w-0 overflow-x-auto rounded-md border border-line focus-visible:focus-ring"
+          className="min-w-0 overflow-x-auto focus-visible:focus-ring"
           data-testid="desktop-notification-kinds"
           role="region"
           aria-label="알림 종류별 설정 표"
@@ -310,13 +331,13 @@ export function DesktopNotificationGroup() {
               {browser ? "알림 종류별 OS 알림, 폰 푸시" : "알림 종류별 OS 알림, 독 배지, 폰 푸시"}
             </caption>
             <thead>
-              <tr className="border-b border-line bg-surface-sunken text-meta text-ink-muted">
-                <th scope="col" className="p-3 font-normal">종류</th>
-                <th scope="col" className="whitespace-nowrap p-3 text-center font-normal">OS 알림</th>
+              <tr className="border-b border-line text-meta text-ink-muted">
+                <th scope="col" className="min-w-pane-sm px-4 py-3 font-normal">종류</th>
+                <th scope="col" className="whitespace-nowrap px-4 py-3 text-center font-normal">OS 알림</th>
                 {!browser && (
-                  <th scope="col" className="whitespace-nowrap p-3 text-center font-normal">독 배지</th>
+                  <th scope="col" className="kinds-extra-col whitespace-nowrap px-4 py-3 text-center font-normal">독 배지</th>
                 )}
-                <th scope="col" className="whitespace-nowrap p-3 text-center font-normal">폰 푸시</th>
+                <th scope="col" className="kinds-extra-col whitespace-nowrap px-4 py-3 text-center font-normal">폰 푸시</th>
               </tr>
             </thead>
             <tbody>
@@ -324,57 +345,39 @@ export function DesktopNotificationGroup() {
                 const rowKey = row.id ?? "team-work-done";
                 return (
                   <tr key={rowKey} className="border-b border-line last:border-b-0">
-                    <th scope="row" className="min-w-0 p-3 align-top font-normal">
-                      <span className="block text-body text-ink">{row.name}</span>
+                    <th scope="row" className="min-w-0 px-4 py-3 align-top font-normal">
+                      <span className="block text-body font-semibold text-ink">{row.name}</span>
                       <span className="block break-keep text-meta text-ink-muted">
                         {row.description}
                       </span>
+                      <span className="kinds-extra-line block break-keep pt-1 text-meta text-ink-muted">
+                        {extraLine(row)}
+                      </span>
                     </th>
-                    <td className="whitespace-nowrap p-3 text-center align-top">
+                    <td className="whitespace-nowrap px-4 py-3 text-center align-top">
                       {row.id === null ? (
                         <span className="text-meta text-ink-muted">연결 전</span>
                       ) : browser && DESKTOP_ONLY_KINDS.has(row.id) ? (
                         <span className="text-meta text-ink-muted">데스크탑 전용</span>
                       ) : (
-                        <input
-                          type="checkbox"
+                        <Switch
                           aria-label={`${row.name} OS 알림`}
                           checked={kinds[row.id]}
                           disabled={kindsLocked}
-                          aria-describedby={kindsLocked ? unsupportedReasonId : undefined}
-                          onChange={(event) =>
-                            setDesktopNotificationKind(row.id as DesktopNotifyKind, event.target.checked)
+                          describedBy={lockedDescribedBy}
+                          onCheckedChange={(next) =>
+                            setDesktopNotificationKind(row.id as DesktopNotifyKind, next)
                           }
-                          className="mt-1 accent-accent press focus-visible:focus-ring"
-                          data-testid={`desktop-notification-kind-${row.id}`}
+                          testId={`desktop-notification-kind-${row.id}`}
                         />
                       )}
                     </td>
                     {!browser && (
-                    <td className="whitespace-nowrap p-3 text-center align-top text-meta text-ink-muted">
-                      {row.dock === "dm" ? (
-                        <input
-                          type="checkbox"
-                          aria-label={`${row.name} 독 배지`}
-                          checked={kinds.dockDm}
-                          disabled={kindsLocked || !kinds.dockBadge}
-                          aria-describedby={
-                            kindsLocked ? unsupportedReasonId : !kinds.dockBadge ? dockOffReasonId : undefined
-                          }
-                          onChange={(event) => setDesktopNotificationKind("dockDm", event.target.checked)}
-                          className="mt-1 accent-accent press focus-visible:focus-ring"
-                          data-testid="desktop-notification-dock-dm"
-                        />
-                      ) : !kinds.dockBadge ? (
-                        "꺼짐"
-                      ) : row.dock === "counted" ? (
-                        "수에 포함"
-                      ) : (
-                        "세지 않아요"
-                      )}
-                    </td>
+                      <td className="kinds-extra-col whitespace-nowrap px-4 py-3 text-center align-top text-meta text-ink-muted">
+                        {dockCellText(row)}
+                      </td>
                     )}
-                    <td className="whitespace-nowrap p-3 text-center align-top text-meta text-ink-muted">
+                    <td className="kinds-extra-col whitespace-nowrap px-4 py-3 text-center align-top text-meta text-ink-muted">
                       {PHONE_CELL_TEXT[row.phone]}
                     </td>
                   </tr>
@@ -383,25 +386,57 @@ export function DesktopNotificationGroup() {
             </tbody>
           </table>
         </div>
-        {!browser && (
-        <div className="flex min-w-0 flex-col overflow-hidden rounded-md border border-line">
-          <SettingsToggleRow
-            testId="desktop-notification-dock-badge"
-            name="독 배지"
+      </SettingsSection>
+
+      {!browser && (
+        <SettingsSection title="독 배지">
+          <SettingsRow
+            label="독 배지"
             description="나에게 필요한 일(승인, 응답 필요, 안 읽은 멘션)의 수를 독 아이콘에 그려요."
-            checked={kinds.dockBadge}
-            disabled={kindsLocked}
-            describedBy={kindsLocked ? unsupportedReasonId : undefined}
-            onToggle={(enabled) => setDesktopNotificationKind("dockBadge", enabled)}
-          />
+            labelId={dockLabelId}
+            descriptionId={dockDescId}
+            keep
+          >
+            <Switch
+              testId="desktop-notification-dock-badge"
+              checked={kinds.dockBadge}
+              disabled={kindsLocked}
+              labelledBy={dockLabelId}
+              describedBy={kindsLocked ? `${dockDescId} ${unsupportedReasonId}` : dockDescId}
+              onCheckedChange={(enabled) => setDesktopNotificationKind("dockBadge", enabled)}
+            />
+          </SettingsRow>
+          <SettingsRow
+            label="새 DM도 독 배지에 세기"
+            description="1:1 대화의 새 글을 독 배지 수에 더해요. 기본은 꺼짐이에요."
+            labelId={dockDmLabelId}
+            descriptionId={dockDmDescId}
+            keep
+          >
+            <Switch
+              testId="desktop-notification-dock-dm"
+              checked={kinds.dockDm}
+              disabled={kindsLocked || !kinds.dockBadge}
+              labelledBy={dockDmLabelId}
+              describedBy={
+                kindsLocked
+                  ? `${dockDmDescId} ${unsupportedReasonId}`
+                  : !kinds.dockBadge
+                    ? `${dockDmDescId} ${dockOffReasonId}`
+                    : dockDmDescId
+              }
+              onCheckedChange={(next) => setDesktopNotificationKind("dockDm", next)}
+            />
+          </SettingsRow>
           {!kinds.dockBadge && (
-            <p id={dockOffReasonId} className="border-t border-line p-3 text-meta text-ink-muted">
-              독 배지가 꺼져 있어서 표의 독 배지 열은 모두 쉬어요.
-            </p>
+            <CardBody>
+              <p id={dockOffReasonId} className="break-keep text-meta text-ink-muted">
+                독 배지가 꺼져 있어서 종류별 독 배지 표시도 모두 쉬어요.
+              </p>
+            </CardBody>
           )}
-        </div>
-        )}
-      </Subsection>
+        </SettingsSection>
+      )}
     </>
   );
 }

@@ -4,12 +4,16 @@ import {memberFor} from '@momo/core/features/workspace/directory';
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
   useState,
 } from 'react';
-import {StyleSheet, View} from 'react-native';
+import {Animated, StyleSheet, View} from 'react-native';
+import {LiquidGlassAllowed} from '../design/glass';
+import {EASE_OUT, TAB_FADE_MS} from '../design/motion';
+import {useReduceMotionRef} from '../lib/useReduceMotion';
 import type {Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
 import {AgentWorkingRail} from '../features/agents/AgentWorkingRail';
@@ -40,6 +44,9 @@ import SidebarScreen from '../screens/SidebarScreen';
 import TeamBoardScreen from '../screens/TeamBoardScreen';
 import WorkSessionDetailScreen from '../screens/WorkSessionDetailScreen';
 import {SessionProvider, useSession} from '../session/useSession';
+import {AskMacSheet} from './AskMacSheet';
+import {DelegateWorkSheet, type DelegatePrefill} from './DelegateWorkSheet';
+import {spawnPort} from '../features/work/ask/spawnPort';
 import {NewChannelSheet} from './NewChannelSheet';
 import {NewMessageSheet} from './NewMessageSheet';
 import {PlusMenu, type PlusMenuItem} from './PlusMenu';
@@ -137,6 +144,17 @@ export function Shell({
   // + 가 여는 것: 메뉴, 또는 메뉴에서 고른 무거운 시트 하나. 한 번에 하나만 선다.
   const [create, setCreate] = useState<CreateStep>(initialCreate);
   const closeCreate = useCallback(() => setCreate(null), []);
+  // 「작업 맡기기」 시트(#3588). `create` 와 따로 둔다: 진입점이 에이전트·채널을 미리
+  // 정해 넘기고, `CreateStep` 은 캡처 하네스의 시작값으로도 쓰이는 닫힌 집합이다.
+  const [delegate, setDelegate] = useState<DelegatePrefill | null>(null);
+  const closeDelegate = useCallback(() => setDelegate(null), []);
+  // 「내 맥에 보내기」 시트(#3597). 맥이 꺼져 있을 때 사람이 누르면 N8 시트로 넘어간다.
+  const [askMac, setAskMac] = useState(false);
+  const closeAskMac = useCallback(() => setAskMac(false), []);
+  const onDelegateWork = useCallback(
+    (prefill: DelegatePrefill) => setDelegate(prefill),
+    [],
+  );
   const {member, workspaceId} = useSession();
   const directoryQuery = useDirectory(workspaceId);
   // 채널 만들기는 소유자·관리자만(ADR-0128). 명단이 오기 전에는 행을 세우지 않는다 —
@@ -238,6 +256,23 @@ export function Shell({
       hint: '에이전트 목록을 엽니다.',
       onPress: onOpenAgentList,
     });
+    // 내 맥으로 보내는 길이 이 빌드에 연결돼 있을 때만 입구를 세운다(`spawnPort`의 머리 설명).
+    if (spawnPort().wired) {
+      items.push({
+        key: 'ask-mac',
+        icon: 'work',
+        label: '내 맥에 물어보기',
+        hint: '내 맥의 Claude Code 같은 도구에 물어보거나 일을 시키는 시트를 엽니다.',
+        onPress: () => setAskMac(true),
+      });
+    }
+    items.push({
+      key: 'delegate',
+      icon: 'work',
+      label: '작업 맡기기',
+      hint: '에이전트에게 맡길 작업을 쓰는 시트를 엽니다.',
+      onPress: () => setDelegate({}),
+    });
     if (workConsole) {
       items.push({
         key: 'work',
@@ -277,7 +312,7 @@ export function Shell({
           140 만큼 비운다(`useTabBarClearance`). */}
       <TabBarClearanceProvider>
         <View style={styles.tabBody}>
-          <View style={nav.tab === 'home' ? styles.visible : styles.hidden}>
+          <TabPane active={nav.tab === 'home'}>
             <SidebarScreen
               openChannelId={nav.conversation?.channelId ?? null}
               onOpenConversation={onOpenConversation}
@@ -286,8 +321,8 @@ export function Shell({
               notificationNotice={tapRouting.notice}
               onDismissNotificationNotice={tapRouting.dismissNotice}
             />
-          </View>
-          <View style={nav.tab === 'inbox' ? styles.visible : styles.hidden}>
+          </TabPane>
+          <TabPane active={nav.tab === 'inbox'}>
             {/* 숨김은 언마운트가 아니다 (goal RN-B4d / #1020). 탭을 여는 것이 마운트가
                 아니므로 react-query 에는 재조회를 걸 계기가 없고, 그래서 승인이
                 도착해도 인박스는 「지금 결정할 일이 없습니다」를 유지했다. 보이게 된
@@ -296,9 +331,9 @@ export function Shell({
               active={nav.tab === 'inbox'}
               onOpenConversation={onOpenConversation}
             />
-          </View>
+          </TabPane>
           {visited.current.has('search') ? (
-            <View style={nav.tab === 'search' ? styles.visible : styles.hidden}>
+            <TabPane active={nav.tab === 'search'} fadeOnMount>
               {/* 씨앗이 바뀌면 새로 세운다: 검색 화면은 자기 입력을 들고 있어서,
                   사이드바가 넘긴 새 검색어는 새 화면으로만 들어간다. */}
               <SearchScreen
@@ -306,7 +341,7 @@ export function Shell({
                 initialQuery={nav.searchSeed?.initialQuery ?? ''}
                 onOpenResult={onOpenConversation}
               />
-            </View>
+            </TabPane>
           ) : null}
         </View>
       </TabBarClearanceProvider>
@@ -372,6 +407,7 @@ export function Shell({
             agent={nav.agent}
             onBack={onBack}
             onOpenConversation={onOpenConversation}
+            onDelegateWork={onDelegateWork}
           />
         </EdgeSwipeBack>
       ) : null}
@@ -449,6 +485,7 @@ export function Shell({
             // 같은 액션이라 뒤로가기는 여전히 한 겹씩 벗겨진다.
             onOpenConversation={onOpenConversation}
             onOpenAgent={onOpenAgent}
+            onDelegateWork={onDelegateWork}
           />
         </EdgeSwipeBack>
       ) : null}
@@ -465,7 +502,92 @@ export function Shell({
           onClose={closeCreate}
         />
       ) : null}
+      {askMac ? (
+        <AskMacSheet
+          onClose={closeAskMac}
+          onUseAgent={() => {
+            setAskMac(false);
+            setDelegate({});
+          }}
+          onOpenSession={sessionId => {
+            if (workConsole) dispatch({type: 'openWorkSession', workSession: {sessionId}});
+          }}
+          onOpenWorkList={() => {
+            if (workConsole) dispatch({type: 'openWorkList'});
+          }}
+        />
+      ) : null}
+      {delegate !== null ? (
+        <DelegateWorkSheet
+          prefill={delegate}
+          boardAvailable={workConsole}
+          onClose={closeDelegate}
+          // 접수되면 작업 보드로 간다. 보드는 닫혀 있던 사람에게도 한 번에 보이도록 층을
+          // 새로 연다(`openWorkList`는 열린 대화·에이전트 층을 걷는다).
+          onSubmitted={() => dispatch({type: 'openWorkList'})}
+        />
+      ) : null}
     </Canvas>
+  );
+}
+
+/**
+ * 탭 화면 하나의 칸. 보이는 칸은 `flex: 1`, 숨은 칸은 `display: none` — 언마운트가 아니다
+ * (스크롤 자리 보존, 위 머리 주석).
+ *
+ * ## 탭이 바뀔 때의 움직임 (#3580)
+ *
+ * 새로 보이는 칸은 **불투명도만** 0 → 1 로 150ms(`EASE_OUT`) 드러난다. 이동·확대 없음:
+ * 탭은 위계가 아니라 나란한 곳이고, 하루 수백 번 보는 전환에 깊이를 암시하는 슬라이드는
+ * 값을 치른다(emil `animate-expo` §1). 선택이 어디로 옮겨갔는지는 탭바의 캡슐이 말한다.
+ * 나가는 칸은 즉시 사라진다 — 둘을 동시에 그리면 비용과 겹침이 생긴다.
+ *
+ * - 첫 그림은 움직이지 않는다(앱 시작에 홈이 페이드인하지 않게). 처음 열릴 때 마운트되는
+ *   검색 칸만 `fadeOnMount` 로 같은 페이드를 탄다.
+ * - 도중에 다른 탭을 눌러도 입력을 잠그지 않는다: 값은 다시 열릴 때 0 에서 출발한다.
+ * - 동작 줄이기: 페이드 없이 바로 1.
+ * - 불투명도를 층 안쪽이 아니라 **칸**에 건다. 탭바의 `GlassView` 는 조상에 알파가 낮으면
+ *   효과를 못 그리므로(`glass.tsx`), 이 칸은 탭바의 조상이 아니라 형제다.
+ *
+ * `useLayoutEffect` 인 이유: `display` 가 바뀐 그 그림이 불투명도 1 로 한 번 그려지고
+ * 나서 0 으로 내려가면 깜빡임이 된다. 그리기 전에 0 을 세운다.
+ */
+export function TabPane({
+  active,
+  fadeOnMount = false,
+  children,
+}: {
+  active: boolean;
+  fadeOnMount?: boolean;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const reduceMotion = useReduceMotionRef();
+  const opacity = useRef(new Animated.Value(1)).current;
+  const wasActive = useRef(fadeOnMount ? false : active);
+  useLayoutEffect(() => {
+    const opened = active && !wasActive.current;
+    wasActive.current = active;
+    if (!opened) return;
+    if (reduceMotion.current) {
+      opacity.setValue(1);
+      return;
+    }
+    opacity.setValue(0);
+    Animated.timing(opacity, {
+      toValue: 1,
+      duration: TAB_FADE_MS,
+      easing: EASE_OUT,
+      useNativeDriver: true,
+    }).start();
+  }, [active, opacity, reduceMotion]);
+  return (
+    <Animated.View
+      style={[active ? styles.visible : styles.hidden, {opacity}]}
+      testID={active ? 'tab-pane-active' : undefined}>
+      {/* 페이드되는 조상 안의 유리는 리퀴드가 될 수 없다(`LiquidGlassAllowed`). */}
+      <LiquidGlassAllowed.Provider value={false}>{children}</LiquidGlassAllowed.Provider>
+    </Animated.View>
   );
 }
 

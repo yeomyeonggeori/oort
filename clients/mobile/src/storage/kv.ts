@@ -92,6 +92,18 @@ export const NON_SECRET_KEYS = {
    * 화면 배치에 대한 사람의 선택일 뿐이고, 잃으면 섹션이 다시 펼쳐져 있을 뿐이다.
    */
   homeCollapsedSections: 'momo.mobile.home.collapsed.v1',
+  /**
+   * 「작업 맡기기」 시트가 마지막에 쓴 에이전트·채널 (#3588). 워크스페이스 id → {에이전트 id,
+   * 채널 id}의 JSON — **id 둘뿐**이다. 제목·설명 같은 글은 여기에 쓰지 않는다(그 글은 같은
+   * 앱 실행 안의 메모리에서만 산다). 잃으면 처음처럼 아무것도 미리 고르지 않을 뿐이다.
+   */
+  delegateLastTarget: 'momo.mobile.delegate.last-target.v1',
+  /**
+   * 「내 맥에 보내기」 시트(#3597 T6b)가 마지막에 쓴 선택: 워크스페이스 id → {하네스 키,
+   * 폴더 id, 폴더별 채널 id}. 전부 **선택(id)** 이고 글이 아니다. 잃으면 처음처럼 미리 고른 것이
+   * 없을 뿐이다(ADR-0198 N5 3·집 채널 규칙: 서버는 대응을 저장하지 않고 기기에만 기억한다).
+   */
+  askMacLast: 'momo.mobile.ask-mac.last.v1',
 } as const;
 
 export type NonSecretKey = (typeof NON_SECRET_KEYS)[keyof typeof NON_SECRET_KEYS];
