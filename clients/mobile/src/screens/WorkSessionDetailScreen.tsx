@@ -48,7 +48,12 @@ import {
   explicitTimeLabel,
   workSessionPresentation,
 } from '../features/work/model';
+import {canStopSession} from '@momo/core/features/work/stopWork';
 import {useWorkSessionEvents} from '../features/work/queries';
+import {
+  StopWorkControl,
+  type StopWorkInitial,
+} from '../features/work/StopWorkControl';
 import {useWorkSessionLive} from '../features/work/useWorkSessionLive';
 import {
   computeStreamTiming,
@@ -71,12 +76,15 @@ export default function WorkSessionDetailScreen({
   sessionId,
   onBack,
   onOpenConversation,
+  stopInitial,
 }: {
   /** True only while this pushed surface is the top accessibility layer. */
   active: boolean;
   sessionId: string;
   onBack: () => void;
   onOpenConversation: (channelId: string, title: string) => void;
+  /** 캡처 하네스 전용 시작 상태. 제품은 넘기지 않는다. */
+  stopInitial?: StopWorkInitial;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
@@ -94,6 +102,7 @@ export default function WorkSessionDetailScreen({
   // R2-E8 (#3028): the owner may allow and instruct from here once the server
   // requires device signatures (D-11). Otherwise this stays read-only.
   const signing = useSigningRequired(workspaceId, isOwner);
+  const canStop = session !== null && canStopSession(session, member.id);
 
   const channels = useMemo(
     () => [...channelsQuery.groups.channels, ...channelsQuery.groups.dms],
@@ -326,6 +335,15 @@ export default function WorkSessionDetailScreen({
             />
           ) : null}
 
+          {isOwner ? (
+            <StopWorkControl
+              workspaceId={workspaceId}
+              memberId={member.id}
+              session={session}
+              initial={stopInitial}
+            />
+          ) : null}
+
           <View style={styles.originWrap}>
             <Pressable
               accessibilityRole="button"
@@ -370,13 +388,19 @@ export default function WorkSessionDetailScreen({
           <NoticeBlock
             headline={
               isOwner && signing
-                ? '허락과 지시만 이 화면에서 보낼 수 있습니다.'
-                : '읽기 전용으로 확인할 수 있습니다.'
+                ? canStop
+                  ? '허락, 지시, 멈추기만 이 화면에서 할 수 있어요.'
+                  : '허락과 지시만 이 화면에서 보낼 수 있습니다.'
+                : canStop
+                  ? '멈추기만 이 화면에서 할 수 있어요.'
+                  : '읽기 전용으로 확인할 수 있습니다.'
             }
             detail={
               isOwner && signing
                 ? '권한 요청의 미리보기와 보낸 지시는 이 세션 스레드에 남습니다. 터미널 화면, 실행 경로와 환경 정보는 표시하거나 기기에 저장하지 않습니다.'
-                : '이 화면은 작업 상태와 진행 요약만 보여 줍니다. 터미널 화면이나 입력 내용, 실행 경로와 환경 정보는 표시하거나 기기에 저장하지 않습니다.'
+                : canStop
+                  ? '작업 상태와 진행 요약은 읽기만 해요. 터미널 화면이나 입력 내용, 실행 경로와 환경 정보는 표시하거나 기기에 저장하지 않아요.'
+                  : '이 화면은 작업 상태와 진행 요약만 보여 줍니다. 터미널 화면이나 입력 내용, 실행 경로와 환경 정보는 표시하거나 기기에 저장하지 않습니다.'
             }
             testID="work-detail-readonly"
           />

@@ -3827,6 +3827,25 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // 레일이 프레임을 ~1.5초 뒤 두 조각, ~6초 뒤 한 조각 흘린다(실제 구독 경로를 그대로 탄다).
     case 'work-detail-streaming':
       return <WorkStreamingSurface />;
+    // N4 (#3596): 돌고 있는 작업의 「멈추기」 - 평소 / 확인 단계 / 멈춤. 위쪽을 끌어내려 찍는다.
+    case 'work-detail-stop':
+    case 'work-detail-stop-confirm':
+    case 'work-detail-stopped':
+      return (
+        <WorkSessionDetailScreen
+          active
+          sessionId="measure-work-t1"
+          onBack={() => {}}
+          onOpenConversation={() => {}}
+          stopInitial={
+            name === 'work-detail-stop-confirm'
+              ? {stage: 'confirm'}
+              : name === 'work-detail-stopped'
+                ? {stage: 'stopped'}
+                : undefined
+          }
+        />
+      );
     // 같은 작업이 끝난 모습: 조각들이 영속돼 한 줄로 합쳐지고 「작성 중」이 사라진다.
     case 'work-detail-done':
       return (
@@ -5447,9 +5466,27 @@ if (
   (LAUNCHED.name === 'work-detail' ||
     LAUNCHED.name === 'work-detail-events' ||
     LAUNCHED.name === 'work-detail-streaming' ||
+    LAUNCHED.name === 'work-detail-stop' ||
+    LAUNCHED.name === 'work-detail-stop-confirm' ||
+    LAUNCHED.name === 'work-detail-stopped' ||
     LAUNCHED.name === 'work-detail-done')
 ) {
   seedWorkConsole();
+  if (LAUNCHED.name === 'work-detail-stopped') seedWorkStream(true);
+  // N4: 「멈추기」는 내 세션에만 있다. 이 표면들은 t1 을 하네스의 나(HARNESS_MEMBER)의 작업으로 둔다.
+  if (LAUNCHED.name.startsWith('work-detail-stop')) {
+    const sessions = harnessClient.getQueryData(['work-sessions', ADE_WS]) as
+      | Record<string, unknown>[]
+      | undefined;
+    harnessClient.setQueryData(
+      ['work-sessions', ADE_WS],
+      (sessions ?? []).map(session =>
+        session.id === 'measure-work-t1'
+          ? {...session, memberId: HARNESS_MEMBER.id}
+          : session,
+      ),
+    );
+  }
   if (LAUNCHED.name === 'work-detail-streaming') seedWorkStream(false);
   if (LAUNCHED.name === 'work-detail-done') seedWorkStream(true);
 }
