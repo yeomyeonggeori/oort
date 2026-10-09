@@ -66,6 +66,9 @@ pub const CODE_DISABLED: &str = "subscription_agents_disabled";
 pub const CODE_CLAUDE_PAUSED: &str = momo_agent::CLAUDE_SUBSCRIPTION_AGENT_PAUSED;
 pub const CODE_LIMIT: &str = "subscription_agent_limit";
 pub const CODE_CLEANUP_PENDING: &str = "subscription_agent_cleanup_pending";
+/// #3567 (ADR-0198 증보 1 D2): the owner already has a personal (or retired) agent for this
+/// CLI, so the hosted lane is closed. Permanent, not a switch.
+pub const CODE_LANE_CLOSED: &str = "subscription_lane_closed";
 
 struct Registered {
     agent: momo_agent::AgentMember,
@@ -116,6 +119,23 @@ pub async fn register(
                 // the switch says, exactly as `hosted-agent-connections` does.
                 if let Err(error) = require_admin(conn, workspace_id, actor).await? {
                     return Ok(Err(error));
+                }
+                // #3567: an owner who already has a personal (or retired) agent for this
+                // CLI gets no new hosted agent. After the admin gate, before the
+                // switches: this closure is permanent and says so by name.
+                if momo_agent::subscription_transition::subscription_lane_closed_in_tx(
+                    conn,
+                    workspace_id,
+                    actor,
+                    harness,
+                )
+                .await?
+                {
+                    return Ok(Err(ApiError::coded(
+                        StatusCode::CONFLICT,
+                        CODE_LANE_CLOSED,
+                        "this CLI is a personal agent now; subscription agents are no longer registered",
+                    )));
                 }
                 if !subscription_agents_enabled {
                     return Ok(Err(ApiError::coded(

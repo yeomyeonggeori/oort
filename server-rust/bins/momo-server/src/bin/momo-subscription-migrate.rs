@@ -88,6 +88,24 @@ fn parse(args: &[String]) -> Result<Args, String> {
     })
 }
 
+/// The operator's machine, for the audit row (`hostname`, else `$HOSTNAME`, else `unknown`).
+fn operator_host() -> String {
+    let named = std::process::Command::new("hostname")
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .filter(|name| !name.is_empty());
+    named
+        .or_else(|| {
+            std::env::var("HOSTNAME")
+                .ok()
+                .filter(|name| !name.is_empty())
+        })
+        .map(|name| name.chars().filter(|c| !c.is_control()).take(100).collect())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -128,6 +146,7 @@ async fn main() -> ExitCode {
         &args.handle,
         args.execute,
         note,
+        &operator_host(),
     )
     .await
     {

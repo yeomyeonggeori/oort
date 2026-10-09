@@ -15,8 +15,10 @@
 //! | test | revert that makes it red |
 //! |---|---|
 //! | `a_dry_run_writes_nothing_and_says_what_it_would_do` | let the dry run reach `apply_in_tx`, or drop `SET LOCAL transaction_read_only` and write anywhere before the verdict |
+//! | `a_dry_run_is_read_only_in_its_own_transaction_and_an_execute_is_not` (M3) | delete `SET LOCAL transaction_read_only = on` (the dry run then reports `off` and accepts a write) |
+//! | `another_workspace_with_the_same_handles_is_never_touched` (L5) | drop a `workspace_id` predicate in `inspect`/`apply_in_tx` (B's snapshot changes) |
 //! | `convert_keeps_the_member_and_every_message_and_closes_every_door` | skip the connection close or the token revoke (P2's mark then answers `ConnectionsRemain` and the run rolls back), set `status = 'deleted'`, or forget the audit row |
-//! | `the_old_lane_stays_shut_after_a_conversion_or_a_retirement` | drop migration 125's `hosted_agent_connection_closed_guard` (the in-test DROP proves the assertion can fail: regenerate then revives the connection) |
+//! | `the_old_lane_stays_shut_after_a_conversion_or_a_retirement` | drop the closed-agent check in `regenerate_pairing_in_tx` (M2: answers `Applied`, not `WrongState`), or drop migration 125's `hosted_agent_connection_closed_guard` (L6: the in-test DROP shows a new connection INSERT and a `detected` transition then succeed) |
 //! | `a_second_run_is_a_noop_with_no_second_audit_row` | drop the `AlreadyDone` arm of `decide`, or write the audit row outside the `Proceed` branch |
 //! | `retire_suspends_marks_and_keeps_the_author_and_nobody_can_mention_it` | `status = 'deleted'` instead of `suspended`, drop `subscription_retired_at`, or widen the mention candidate query past `member.status = 'active'` |
 //! | `the_tool_refuses_what_it_must_not_fake_and_writes_nothing` | let `decide` accept a credentialed (`cleanup_pending`) connection, or let `retire` take an `owner_only` agent / `convert` a workspace one |
@@ -26,7 +28,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use momo_agent::subscription_transition::{
-    run_transition, Transition, Verdict, AUDIT_CONVERTED, AUDIT_RETIRED,
+    run_in_tx, run_transition, Transition, Verdict, AUDIT_CONVERTED, AUDIT_RETIRED,
 };
 use momo_agent::{AgentCreation, ModelSource, NewAgentMember, SubscriptionHarness};
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
@@ -412,6 +414,7 @@ async fn run(
         handle,
         execute,
         "성재 승인 2026-10-10 (#3567 시험)",
+        "test-host",
     )
     .await
     .expect("transition ran")
@@ -449,6 +452,96 @@ async fn a_dry_run_writes_nothing_and_says_what_it_would_do() {
         snapshot(&db.su, fx.workspace).await,
         "a dry run changed a row or the audit log"
     );
+    db.finish().await;
+}
+
+#[tokio::test]
+#[ignore = "needs a disposable PostgreSQL 18 superuser URL in DATABASE_URL"]
+async fn a_dry_run_is_read_only_in_its_own_transaction_and_an_execute_is_not() {
+    let db = ProdDb::create().await;
+    let fx = seed(&db).await;
+    let ws = fx.workspace;
+    for execute in [false, true] {
+        let (read_only, write_refused) = with_tenant_tx(&db.app, ws, move |conn| {
+            Box::pin(async move {
+                let report = run_in_tx(
+                    conn,
+                    ws,
+                    Transition::Retire,
+                    "claude-code",
+                    execute,
+                    "m3 test",
+                    "test-host",
+                )
+                .await?
+                .expect("the agent");
+                assert_eq!(report.verdict, Verdict::Proceed);
+                let read_only: String = sqlx::query_scalar("SHOW transaction_read_only")
+                    .fetch_one(&mut *conn)
+                    .await?;
+                // After the run, in the same transaction, an ordinary write.
+                let write =
+                    sqlx::query("UPDATE agent SET updated_at = now() WHERE workspace_id = $1")
+                        .bind(ws)
+                        .execute(&mut *conn)
+                        .await;
+                Ok((read_only, write.is_err()))
+            })
+        })
+        .await
+        .expect("transaction");
+        if execute {
+            assert_eq!((read_only.as_str(), write_refused), ("off", false));
+        } else {
+            assert_eq!(
+                (read_only.as_str(), write_refused),
+                ("on", true),
+                "the dry run's transaction must be read-only"
+            );
+        }
+    }
+    db.finish().await;
+}
+
+#[tokio::test]
+#[ignore = "needs a disposable PostgreSQL 18 superuser URL in DATABASE_URL"]
+async fn another_workspace_with_the_same_handles_is_never_touched() {
+    let db = ProdDb::create().await;
+    let a = seed(&db).await;
+    let b = seed(&db).await; // same handles: kwak-claude, claude-code, kwak
+    assert_ne!(a.workspace, b.workspace);
+    let b_before = snapshot(&db.su, b.workspace).await;
+
+    let convert = run(&db, &a, Transition::Convert, "kwak-claude", true).await;
+    let retire = run(&db, &a, Transition::Retire, "claude-code", true).await;
+    assert_eq!(convert.verdict, Verdict::Proceed);
+    assert_eq!(retire.verdict, Verdict::Proceed);
+    assert_eq!(
+        b_before,
+        snapshot(&db.su, b.workspace).await,
+        "workspace B changed"
+    );
+    assert!(audit_rows(&db.su, b.workspace, AUDIT_CONVERTED)
+        .await
+        .is_empty());
+
+    // B still has the full pre-conversion shape and converts on its own.
+    let b_dry = run(&db, &b, Transition::Convert, "kwak-claude", false).await;
+    assert_eq!(b_dry.verdict, Verdict::Proceed, "{}", b_dry.render());
+    // A tenant transaction for A cannot see B's agent by B's member id either.
+    let cross = with_tenant_tx(&db.app, a.workspace, move |conn| {
+        let b_agent = b.kwak_claude;
+        Box::pin(async move {
+            let n: i64 = sqlx::query_scalar("SELECT count(*) FROM agent WHERE member_id = $1")
+                .bind(b_agent)
+                .fetch_one(&mut *conn)
+                .await?;
+            Ok(n)
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(cross, 0);
     db.finish().await;
 }
 
@@ -561,6 +654,13 @@ async fn convert_keeps_the_member_and_every_message_and_closes_every_door() {
     assert_eq!(rows[0]["note"], "성재 승인 2026-10-10 (#3567 시험)");
     assert_eq!(rows[0]["handle"], "kwak-claude");
     assert_eq!(rows[0]["messages_kept"], 1);
+    // L2: who ran it, from where.
+    assert_eq!(rows[0]["db_user"], "momo_app");
+    assert_eq!(rows[0]["operator_host"], "test-host");
+    // L9: the dry-run/execute text names the owner to confirm.
+    let text = report.render();
+    assert!(text.contains("owner: kwak ("), "{text}");
+    assert!(text.contains("이 소유자가 맞는지 확인하세요"), "{text}");
     let target: Uuid = sqlx::query_scalar(
         "SELECT target_id FROM audit_log WHERE workspace_id = $1 AND action = $2",
     )
@@ -624,31 +724,29 @@ async fn the_old_lane_stays_shut_after_a_conversion_or_a_retirement() {
     run(&db, &fx, Transition::Convert, "kwak-claude", true).await;
     run(&db, &fx, Transition::Retire, "claude-code", true).await;
 
+    // An administrator's 「다시 연결」: `expired` -> `pairing_pending` (M2: refused up front).
     let regenerate = |connection: Uuid| {
         let workspace = fx.workspace;
         let app = db.app.clone();
         async move {
             with_tenant_tx(&app, workspace, move |conn| {
                 Box::pin(async move {
-                    // An administrator's 「다시 연결」: `expired` -> `pairing_pending`.
                     momo_auth::regenerate_pairing_in_tx(conn, workspace, connection)
                         .await
-                        .map(|_| ())
                         .map_err(momo_db::DbError::from)
                 })
             })
             .await
+            .expect("regenerate ran")
         }
     };
     for (agent, connection) in &connections {
-        let error = regenerate(*connection)
-            .await
-            .expect_err(&format!("{agent}: regenerate must be refused"));
         assert!(
-            error
-                .to_string()
-                .contains("cannot hold a live hosted connection"),
-            "{error}"
+            matches!(
+                regenerate(*connection).await,
+                momo_auth::HostedMutation::WrongState
+            ),
+            "{agent}: regenerate must answer WrongState before it touches anything"
         );
         let status: String =
             sqlx::query_scalar("SELECT status::text FROM hosted_agent_connection WHERE id = $1")
@@ -659,14 +757,65 @@ async fn the_old_lane_stays_shut_after_a_conversion_or_a_retirement() {
         assert_eq!(status, "expired");
     }
 
-    // The assertion above can fail: with the guard gone the same call revives the lane.
+    // L6: the trigger itself refuses a NEW connection for a personal agent and a
+    // `detected` transition for a retired one, whatever code path writes them.
+    let new_connection = |agent: Uuid| {
+        let (workspace, owner, app) = (fx.workspace, fx.owner, db.app.clone());
+        async move {
+            with_tenant_tx(&app, workspace, move |conn| {
+                Box::pin(async move {
+                    momo_auth::create_hosted_connection_in_tx(conn, workspace, agent, owner)
+                        .await
+                        .map(|_| ())
+                        .map_err(momo_db::DbError::from)
+                })
+            })
+            .await
+        }
+    };
+    let detect = |connection: Uuid| {
+        let (su, owner) = (db.su.clone(), fx.owner);
+        async move {
+            sqlx::query(
+                "UPDATE hosted_agent_connection SET status = 'detected', \
+                        pairing_consumed_at = now(), detected_at = now(), detected_by = $2 \
+                  WHERE id = $1",
+            )
+            .bind(connection)
+            .bind(owner)
+            .execute(&su)
+            .await
+        }
+    };
+    let guard_text = "cannot hold a live hosted connection";
+    // (kwak-claude is also guarded by the sentinel trigger once `config` leaves
+    // `hosted_dial_in`; the retired `claude-code` keeps its config, so it is the
+    // row only migration 125's trigger protects.)
+    let error = new_connection(fx.claude_code)
+        .await
+        .expect_err("a retired agent gets no new connection");
+    assert!(error.to_string().contains(guard_text), "{error}");
+    let error = detect(fx.kwak_connection)
+        .await
+        .expect_err("a personal agent's connection cannot become detected");
+    assert!(error.to_string().contains(guard_text), "{error}");
+
+    // The assertions above can fail: with the trigger gone both writes succeed, while
+    // the up-front WrongState (M2) does not depend on the trigger at all.
     sqlx::query("DROP TRIGGER hosted_agent_connection_closed_guard ON hosted_agent_connection")
         .execute(&db.su)
         .await
         .unwrap();
-    regenerate(fx.kwak_connection)
+    assert!(matches!(
+        regenerate(fx.kwak_connection).await,
+        momo_auth::HostedMutation::WrongState
+    ));
+    new_connection(fx.claude_code)
         .await
-        .expect("without migration 125's guard an administrator can re-arm the lane");
+        .expect("without migration 125's trigger a new connection can be armed");
+    detect(fx.kwak_connection)
+        .await
+        .expect("without migration 125's trigger a converted agent's connection can be revived");
     db.finish().await;
 }
 
@@ -829,6 +978,7 @@ async fn the_tool_refuses_what_it_must_not_fake_and_writes_nothing() {
         "kwak",
         true,
         "x",
+        "h",
     )
     .await
     .unwrap();
@@ -841,6 +991,7 @@ async fn the_tool_refuses_what_it_must_not_fake_and_writes_nothing() {
         "kwak-claude",
         true,
         "x",
+        "h",
     )
     .await
     .unwrap();

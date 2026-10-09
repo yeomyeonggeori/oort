@@ -306,7 +306,7 @@ impl TransitionReport {
             format!("agent: @{} ({})", i.handle, i.agent_member_id),
             format!("display_name: {}", i.display_name),
             format!(
-                "owner: {}",
+                "owner: {}  <- 이 소유자가 맞는지 확인하세요 (owner_member_id가 감사 행에 남아요)",
                 i.owner
                     .as_ref()
                     .map(|(id, name)| format!("{name} ({id})"))
@@ -398,6 +398,34 @@ pub fn validate_note(note: &str) -> Result<&str, &'static str> {
         return Err("note must be one line without control characters");
     }
     Ok(trimmed)
+}
+
+/// Is the owner's subscription lane for `harness` closed (#3567 M1)?
+///
+/// True when the owner already has a live personal agent for that harness, or
+/// one the retirement tool marked retired: the register-after-login endpoint
+/// (D15) must then not mint a new `owner_only` hosted agent for the same owner
+/// and CLI. An old desktop build that still calls `register` on every sign-in
+/// is stopped here, on the server, because the client flag alone cannot close it.
+pub async fn subscription_lane_closed_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    owner_member_id: Uuid,
+    harness: SubscriptionHarness,
+) -> Result<bool, DbError> {
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM agent a \
+                          JOIN member m ON m.workspace_id = a.workspace_id AND m.id = a.member_id \
+                         WHERE a.workspace_id = $1 AND a.owner_human_id = $2 \
+                           AND a.subscription_harness = $3 \
+                           AND (a.personal_agent OR a.subscription_retired_at IS NOT NULL) \
+                           AND m.deleted_at IS NULL AND m.status::text <> 'deleted')",
+    )
+    .bind(workspace_id)
+    .bind(owner_member_id)
+    .bind(harness.as_str())
+    .fetch_one(&mut *conn)
+    .await?)
 }
 
 fn protocol(message: &str) -> DbError {
@@ -625,8 +653,13 @@ async fn apply_in_tx(
     transition: Transition,
     i: &Inspection,
     note: &str,
+    operator_host: &str,
 ) -> Result<Changes, DbError> {
     let mut changes = Changes::default();
+    // Who ran it: the database role and the operator's machine (L2).
+    let db_user: String = sqlx::query_scalar("SELECT current_user::text")
+        .fetch_one(&mut *conn)
+        .await?;
     let (closed, doorbells, revoked) =
         close_connections_and_revoke_in_tx(conn, workspace_id, i).await?;
     changes.connections_closed = closed;
@@ -736,6 +769,8 @@ async fn apply_in_tx(
                     "tokens_revoked": changes.tokens_revoked,
                     "messages_kept": i.messages_authored,
                     "note": note,
+                    "db_user": db_user,
+                    "operator_host": operator_host,
                 }),
             ),
     )
@@ -756,6 +791,7 @@ pub async fn run_in_tx(
     handle: &str,
     execute: bool,
     note: &str,
+    operator_host: &str,
 ) -> Result<Option<TransitionReport>, DbError> {
     if !execute {
         sqlx::query("SET LOCAL transaction_read_only = on")
@@ -767,7 +803,15 @@ pub async fn run_in_tx(
     };
     let verdict = decide(transition, &inspection);
     let changes = if execute && verdict == Verdict::Proceed {
-        apply_in_tx(conn, workspace_id, transition, &inspection, note).await?
+        apply_in_tx(
+            conn,
+            workspace_id,
+            transition,
+            &inspection,
+            note,
+            operator_host,
+        )
+        .await?
     } else {
         Changes::default()
     };
@@ -790,13 +834,24 @@ pub async fn run_transition(
     handle: &str,
     execute: bool,
     note: &str,
+    operator_host: &str,
 ) -> Result<Option<TransitionReport>, DbError> {
     let handle = handle.to_string();
     let note = note.to_string();
+    let operator_host = operator_host.to_string();
     with_tenant_tx(pool, workspace_id, move |conn| {
-        Box::pin(
-            async move { run_in_tx(conn, workspace_id, transition, &handle, execute, &note).await },
-        )
+        Box::pin(async move {
+            run_in_tx(
+                conn,
+                workspace_id,
+                transition,
+                &handle,
+                execute,
+                &note,
+                &operator_host,
+            )
+            .await
+        })
     })
     .await
 }
