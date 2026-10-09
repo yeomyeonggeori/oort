@@ -17,11 +17,13 @@
 //!   signing payloads and `record_provenance`, the **only** `action_signature`
 //!   writer in the workspace (migration 060).
 
+pub mod folder_name;
 pub mod human_control;
 pub mod payload;
 pub mod permission_preview;
 pub mod provenance;
 pub mod signing;
+pub mod work_host_online;
 
 pub use provenance::{
     record_human_provenance, record_provenance, EntityRef, MessageContent, Provenance,
@@ -33,3 +35,4 @@ pub use signing::{
     heartbeat_payload, request_payload, sha256_hex, sign, sign_base64, verify, verify_base64,
     verify_work_host_request, SigningError,
 };
+pub use work_host_online::{work_host_online_sql, ONLINE_WINDOW_SECONDS};

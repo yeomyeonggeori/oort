@@ -157,7 +157,14 @@ pub async fn judge_targets(
                       THEN 'resume_offer' \
                     WHEN (SELECT props_kind FROM msg) = 'work_session_idle' THEN \
                       CASE WHEN lower(mem.id::text) = lower((SELECT owner_member_id FROM msg)) \
-                            AND mem.id = (SELECT author_member_id FROM msg) \
+                            AND ( mem.id = (SELECT author_member_id FROM msg) \
+                                  OR EXISTS ( \
+                                    SELECT 1 FROM work_session pws \
+                                     WHERE pws.workspace_id = $1 \
+                                       AND lower(pws.id::text) = lower((SELECT session_id FROM msg)) \
+                                       AND pws.member_id = mem.id \
+                                       AND pws.persona_member_id = (SELECT author_member_id FROM msg) \
+                                  ) ) \
                             AND (SELECT message_type FROM msg) = 'system' \
                             AND COALESCE((SELECT ran_ms FROM msg), 0) >= $3::bigint \
                             AND EXISTS ( \

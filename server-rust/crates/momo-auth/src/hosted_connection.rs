@@ -291,18 +291,34 @@ pub async fn regenerate_pairing_in_tx(
 ) -> Result<HostedMutation<HostedPairingIssuance>, sqlx::Error> {
     let raw =
         mint_pairing(workspace_id).map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
-    let locked_status: Option<String> = sqlx::query_scalar(
-        "SELECT status::text FROM hosted_agent_connection \
+    let locked_status: Option<(String, Uuid)> = sqlx::query_as(
+        "SELECT status::text, agent_member_id FROM hosted_agent_connection \
           WHERE workspace_id = $1 AND id = $2 FOR UPDATE",
     )
     .bind(workspace_id)
     .bind(connection_id)
     .fetch_optional(&mut *conn)
     .await?;
-    match locked_status.as_deref() {
-        None => return Ok(HostedMutation::NotFound),
-        Some("pairing_pending" | "detected" | "expired") => {}
-        Some(_) => return Ok(HostedMutation::WrongState),
+    let Some((status, agent_member_id)) = locked_status else {
+        return Ok(HostedMutation::NotFound);
+    };
+    if !matches!(status.as_str(), "pairing_pending" | "detected" | "expired") {
+        return Ok(HostedMutation::WrongState);
+    }
+    // #3567 (ADR-0198 증보 1 D2): a converted (personal) or retired agent's lane is
+    // closed for good. Answer WrongState here, before the revoke and the
+    // transition, instead of letting migration 125's trigger abort the statement.
+    let closed: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM agent \
+                         WHERE workspace_id = $1 AND member_id = $2 \
+                           AND (personal_agent OR subscription_retired_at IS NOT NULL))",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    if closed {
+        return Ok(HostedMutation::WrongState);
     }
     // This must be a statement after the connection lock. A data-modifying CTE
     // would retain the snapshot from before a concurrent confirm finished and

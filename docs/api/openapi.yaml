@@ -2899,9 +2899,100 @@ paths:
             error.code `subscription_agents_disabled` (the operator turned the path off; show
             "this server has it off", do not hide the option), `claude_subscription_agent_paused`
             (harness claude_code on an instance that has not opted in; the default; Codex is not affected), `subscription_agent_limit` (5 per
-            CLI), `subscription_agent_cleanup_pending` (finish disconnecting first), or an explicit
+            CLI), `subscription_agent_cleanup_pending` (finish disconnecting first),
+            `subscription_lane_closed` (#3567: the caller already has a personal agent or a retired
+            subscription agent for this CLI, so the hosted lane is closed for good; no agent is
+            created and no device slot is taken; checked right after the admin gate), or an explicit
             handle that already exists (no code).
           content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+
+  /v1/workspaces/{workspaceId}/personal-agents:
+    post:
+      tags: [agents]
+      operationId: enablePersonalAgent
+      summary: Turn the caller's connected harness on as a personal agent under an alias (ADR-0198 amendment 1 D7, #3591).
+      description: >
+        Any active non-guest human member, for their OWN harness: the owner is the caller, never
+        a request field, so a teammate has no way to name an alias for someone else's harness. An
+        agent bearer is refused. Creates a `member.kind=agent` identity (alias = handle, unique
+        across humans, agents and switched-off agents) whose row is `invocation_scope owner_only`
+        with the harness, so T5's signed spawn (`POST …/work-spawns`) accepts it for the owner and
+        refuses everyone else. No hosted connection, token, pairing value, profile or channel
+        membership is created; how the alias joins a channel is P1's. One personal agent per
+        (owner, harness): a repeat with the same alias returns it (200, `reused` true) and turns it
+        back on when the owner had switched it off; a different alias is 409 `personal_agent_exists`.
+        `agentMemberId` converts the caller's own existing `owner_only` subscription agent of the
+        same harness IN PLACE (same member id, handle and history; #3567); `alias` must then be
+        omitted. Only a live `owner_only` agent converts: a workspace-scope agent is 404, and one
+        that still has a hosted connection or live credential is 409 `personal_agent_connections_remain`
+        (revoking is #3567's). Not governed by MOMO_SUBSCRIPTION_AGENTS_ENABLED or
+        MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED.
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/EnablePersonalAgentRequest"}}}
+      responses:
+        "200":
+          description: The caller's personal agent for this harness already existed (on, or switched back on by this call).
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/EnablePersonalAgentResponse"}}}
+        "201":
+          description: A personal agent was created, or an existing subscription agent converted.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/EnablePersonalAgentResponse"}}}
+        "400": {description: Invalid harness or alias, alias missing, or alias with agentMemberId, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Not a human workspace member (agent bearer, guest) or banned handle, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: "error.code `personal_agent_not_found`: agentMemberId is not a convertible agent of the caller's (someone else's, another harness, personal-key, already personal, not an agent: one non-disclosing answer)", content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409":
+          description: >
+            error.code `personal_agent_alias_taken` (the alias is a member handle in this workspace),
+            `personal_agent_exists` (the caller already has one for this harness under another
+            alias or id), or `personal_agent_suspended` (an administrator suspended it; the owner
+            cannot undo that).
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+    get:
+      tags: [agents]
+      operationId: listPersonalAgents
+      summary: The caller's own personal agents, switched-off ones included.
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
+      responses:
+        "200":
+          description: Only the caller's own; a teammate's are never listed.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/PersonalAgentListResponse"}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Not a human workspace member, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/personal-agents/{agentMemberId}/disable:
+    post:
+      tags: [agents]
+      operationId: disablePersonalAgent
+      summary: Switch a personal agent off (ADR-0198 amendment 1 D7, #3591).
+      description: >
+        Owner only. The member is suspended, not deleted: every past message keeps its author, the
+        alias stays reserved, and turning it back on (`POST …/personal-agents` with the same alias)
+        brings back the same member. A switched-off agent cannot be called (T5's signed spawn
+        requires a live agent) and leaves the roster. Idempotent. Someone else's agent, a
+        non-personal agent and an unknown id are one 404.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: agentMemberId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The agent, switched off.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/DisablePersonalAgentResponse"}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Not a human workspace member, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: "error.code `personal_agent_not_found`", content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
 
   /v1/workspaces/{workspaceId}/hosted-agent-connections:
     post:
@@ -6206,9 +6297,14 @@ paths:
         workspace UUID>\n<lowercase host UUID>\n<sentAtMs>\n<SHA-256(raw body),
         lowercase hex>\n<lowercase request UUID>` with its registered Ed25519
         key; the request UUID is consumed atomically once, so a re-sent
-        heartbeat is refused rather than re-stamping liveness. The body is not
-        read — an empty body is the normal case, and any bytes sent are covered
-        by the digest. The retired v1 heartbeat (`momo.work_host.heartbeat.v1`
+        heartbeat is refused rather than re-stamping liveness. The body is
+        either empty (nothing to say) or a folder announcement `{folders:
+        [{id, displayName, kind}]}` (#3590, ADR-0188 D6; at most 32, one
+        `question`): absent `folders` leaves the stored set alone, `[]` clears
+        it. The announcement is read only after the signature verified (the
+        digest covers it). A path as id or name, a `path` field, a duplicate
+        id or a second question folder is a 400 that stores nothing and does
+        not echo the value. The retired v1 heartbeat (`momo.work_host.heartbeat.v1`
         in a `{sentAtMs, signature}` body, no request id) is not accepted. A
         query string, a timestamp outside the five-minute clock-skew window, a
         forged or replayed signature, an unknown or revoked host, and a host
@@ -6228,6 +6324,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorkHostResponse"
+        "400":
+          description: >
+            The folder announcement is refused (a path, a `path` field, a bad
+            id, a duplicate id, more than 32, or a second `question` folder).
+            Nothing is stored and liveness is not refreshed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "429":
@@ -7258,6 +7363,192 @@ paths:
         "503":
           description: >
             `error.code` instance_id_unconfigured — no `MOMO_INSTANCE_ID`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/work-spawns:
+    post:
+      tags: [work-controls]
+      operationId: spawnWork
+      summary: The owner's signed new task on their own Mac (T5, #3570).
+      description: >
+        ADR-0198 D4 · 증보 1 D7 and the 「T5 확정」 section, ADR-0146, ADR-0188
+        D3 · D6. Closed (403 signed_spawn_disabled) unless the instance sets
+        `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`. Human bearer only (agent
+        bearers, signed hosts, webhooks and door bells never reach it). The host
+        is derived, not named: the requester's own `scope=member` host, unrevoked
+        and online (90 s), that announced the signed `folderId`; someone else's
+        host or folder is one non-disclosing 404 and a teammate has no path to
+        another person's Mac. `humanSignature` is the owner's
+        `momo.human.control.v4` statement over the host, the room, the thread and
+        message it was called from, the harness, the folder id, the agent (or
+        none — 「내 도구」) and the whole prompt; changing any of them breaks the
+        signature. The route writes one dispatched `spawn` work control, the
+        nonce, the `action_signature` row and an audit row (never the prompt) in
+        one tenant transaction and **nothing on the message path** — no
+        `channel_seq` bump, no message, no outbox event; the host reads its
+        ledger by polling `pending-controls`. Slot admission applies. A retry of
+        an accepted spawn answers 200 with the same control before anything that
+        could have changed since. Every refusal is before the nonce is spent
+        except the signature's own.
+
+
+        **Calling a personal agent (#3592, ADR-0198 증보 1 D7 · 「P1 확정」).**
+        The server never turns an `@alias` mention or a DM with the alias into a
+        spawn. The owner's client sends the message by the ordinary send path
+        first, then calls this route naming that message as `originMessageId`
+        (the owner's own plain message in `channelId`, in `threadRootId` when it
+        is a thread reply). A teammate's mention of someone else's alias is
+        answered by the existing owner-only sentence and starts nothing. The
+        session this spawn opens speaks as the named alias: its card, progress
+        and answer are authored by the personal agent member (derived from the
+        signed `agentMemberId`, never from the host) and the card quotes the
+        origin message. The alias need not be a member of the room.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkSpawnRequest"
+      responses:
+        "201":
+          description: The spawn was accepted and dispatched to the owner's Mac.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkSpawnResponse"
+        "200":
+          description: A retry of a spawn already accepted (`replayed` true).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkSpawnResponse"
+        "400":
+          description: >
+            `error.code` spawn_prompt_invalid (empty, over 32768 characters or
+            not NFC), spawn_slash_command, spawn_label_invalid,
+            spawn_tool_invalid (not a registered, enabled, lower-case key),
+            spawn_folder_required, or spawn_origin_invalid (the thread or message
+            is not the owner's own, in this room).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            `error.code` signed_spawn_disabled (the flag is off), spawn_not_human,
+            spawn_channel_member_only, spawn_agent_not_allowed (not the owner's
+            live personal agent, or its harness does not match the tool),
+            remote_host_shell_refused, or a device-signature refusal:
+            device_signature_invalid, device_key_revoked, device_key_not_endorsed,
+            device_signature_expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: >
+            `error.code` spawn_host_not_found (the requester has no live member
+            host) or spawn_folder_not_found (no host of the requester's announced
+            that folder id — also for someone else's folder).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            `error.code` work_host_offline (no heartbeat in 90 s — not delivered;
+            resend the same signed statement later), spawn_host_ambiguous,
+            spawn_nonce_reused, device_nonce_replayed, pool_exhausted or
+            member_limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: >
+            `error.code` instance_id_unconfigured — no `MOMO_INSTANCE_ID`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/kill:
+    post:
+      tags: [work-controls]
+      operationId: killWorkSession
+      summary: The owner stops their own running work session (N4a, #3628).
+      description: >
+        ADR-0198 D4 · 표 N4 and the 「N4 확정」 section, ADR-0188 D3, ADR-0146
+        D-8. No request body. Human bearer only (an agent bearer, a signed host,
+        a webhook or a door bell never reaches it; an agent's own off switch stays
+        `POST …/work-controls`). **Unsigned**: `kill` is the one control that
+        only takes work away, so a lost device can still stop things — it works
+        with `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED` off. Allowed for the session's
+        owner, on a `scope=member` work host the same person owns, while the
+        session is `running` or `idle`. The route writes one dispatched `kill`
+        work control and an audit row (`work.kill.requested`) in one tenant
+        transaction and **nothing on the message path** — no `channel_seq` bump,
+        no message, no outbox event. `momo-workd` reads it by polling
+        `pending-controls`, ends the whole process tree and reports the session
+        `ended`. Idempotent: a kill the Mac has not yet answered is returned again
+        (200, `replayed` true) and concurrent taps make one control; an already
+        ended session answers 200 with the last kill this person asked for (or
+        `null`) and writes nothing. An offline Mac is not refused — the control
+        waits and `hostOnline` says so. The owner's kill is delivered even while
+        the owner holds the session's screen (a control window); an agent's is
+        still withheld. `PATCH …/work-sessions/{id}` with `status: ended` is a
+        ledger change only and does **not** stop the process on the Mac.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkSessionId"
+      responses:
+        "201":
+          description: A kill was written for the owner's Mac.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkKillResponse"
+        "200":
+          description: >
+            Nothing new was written (`replayed` true): a kill is already waiting
+            for the Mac, or the session has already ended.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkKillResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            `error.code` kill_not_human, kill_owner_only (a teammate's session,
+            or a host that is not the caller's), kill_member_host_only (the
+            session's host is shared, not a member's own Mac) or
+            local_session_no_control (a shared local pane takes no control).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The work session does not exist in this workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            `error.code` work_session_not_running (e.g. orphaned) or
+            work_host_revoked.
           content:
             application/json:
               schema:
@@ -12359,6 +12650,35 @@ components:
             used on this server. `claude_subscription_agent_paused` = a Claude subscription agent
             on an instance that has not opted in (MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED, off by
             default while Anthropic's reply is pending). Status only; it blocks nothing by itself.
+        personalAgent:
+          type: object
+          description: >
+            #3591 (ADR-0198 amendment 1 D7). Present only on a personal agent: the owner's
+            connected harness turned on under an alias. `label` is the line teammates read
+            (the owner's display name + "의 개인 에이전트", decision 2). `mentionable` is
+            computed for the VIEWER: true only for the owner and only while on, so `@`
+            autocomplete offers it to the owner alone and never to a teammate. A personal
+            agent has no `hostOnline` or `brainUnavailableReason` (it runs on the owner's
+            member host through a signed spawn, not the Agent Port). A switched-off agent is
+            not on the roster (the roster lists active members); the owner reads it from
+            `GET …/personal-agents`.
+          required: [label, ownerId, ownerDisplayName, harness, enabled, mentionable]
+          properties:
+            label: {type: string}
+            ownerId: {type: string, format: uuid}
+            ownerDisplayName: {type: string}
+            harness: {type: string, enum: [claude_code, codex]}
+            enabled: {type: boolean}
+            mentionable: {type: boolean}
+        subscriptionRetired:
+          type: boolean
+          enum: [true]
+          description: >
+            #3567 (ADR-0198 amendment 1 D2). Present, and `true`, only on a former subscription agent
+            the retirement tool switched off (the 「이전 구독 에이전트」 marker). The member is
+            suspended, never deleted, so every past message keeps its author: a client draws the
+            marker instead of hiding the author, and offers no `@` candidate for it. Absent
+            otherwise (a converted personal agent carries `personalAgent`, not this).
         hostOnline:
           type: boolean
           description: >
@@ -13298,6 +13618,15 @@ components:
             used on this server. `claude_subscription_agent_paused` = a Claude subscription agent
             on an instance that has not opted in (MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED, off by
             default while Anthropic's reply is pending). Status only; it blocks nothing by itself.
+        subscriptionRetired:
+          type: boolean
+          enum: [true]
+          description: >
+            #3567 (ADR-0198 amendment 1 D2). Present, and `true`, only on a former subscription agent
+            the retirement tool switched off (the 「이전 구독 에이전트」 marker). The member is
+            suspended, never deleted, so every past message keeps its author: a client draws the
+            marker instead of hiding the author, and offers no `@` candidate for it. Absent
+            otherwise (a converted personal agent carries `personalAgent`, not this).
         hostOnline:
           type: boolean
           description: >
@@ -13305,6 +13634,48 @@ components:
             used within the last 10 minutes (`token.last_used_at`); an idle but open CLI session
             that has not called the port reads false. Present only for agents that dial in
             (brain subscription or external). Others see "offline" and nothing more (ADR-0193 D5).
+
+    EnablePersonalAgentRequest:
+      type: object
+      additionalProperties: false
+      required: [harness]
+      properties:
+        harness: {type: string, enum: [claude_code, codex]}
+        alias: {type: string, description: "The member handle (2-32 of a-z, 0-9, '_', '-'); lower-cased. Required unless agentMemberId is given or the agent already exists."}
+        displayName: {type: string, maxLength: 100, description: Defaults to the alias.}
+        agentMemberId: {type: string, format: uuid, description: "Convert the caller's own existing owner_only subscription agent of this harness in place (#3567). alias must be omitted."}
+
+    PersonalAgentSummary:
+      type: object
+      required: [id, handle, displayName, harness, enabled, label]
+      properties:
+        id: {type: string, format: uuid}
+        handle: {type: string}
+        displayName: {type: string}
+        harness: {type: string, enum: [claude_code, codex]}
+        enabled: {type: boolean}
+        label: {type: string, description: "The owner's display name + \"의 개인 에이전트\"."}
+
+    EnablePersonalAgentResponse:
+      type: object
+      required: [agent, reused]
+      properties:
+        agent: {$ref: "#/components/schemas/PersonalAgentSummary"}
+        reused: {type: boolean}
+
+    DisablePersonalAgentResponse:
+      type: object
+      required: [agent]
+      properties:
+        agent: {$ref: "#/components/schemas/PersonalAgentSummary"}
+
+    PersonalAgentListResponse:
+      type: object
+      required: [agents]
+      properties:
+        agents:
+          type: array
+          items: {$ref: "#/components/schemas/PersonalAgentSummary"}
 
     RegisterSubscriptionAgentRequest:
       type: object
@@ -14994,6 +15365,14 @@ components:
           format: uuid
         folderId:
           type: string
+        threadRootId:
+          type: string
+          format: uuid
+          description: New-work spawn only (v4, #3570) — the thread the owner called from.
+        originMessageId:
+          type: string
+          format: uuid
+          description: New-work spawn only (v4, #3570) — the message the owner called from.
         signature:
           type: string
           description: canonical low-s raw r‖s, base64.
@@ -15206,6 +15585,37 @@ components:
           format: int64
         online:
           type: boolean
+        folders:
+          type: array
+          description: >
+            The folders this host issued (ADR-0188 D6, #3590): an opaque id and
+            the name to show, never a path. Present only on the viewer's own
+            live host in the list and revoke answers; absent on anybody else's
+            row (ADR-0188 §8.8, an admin included) and on a revoked host.
+          items:
+            $ref: "#/components/schemas/WorkHostFolder"
+        defaultFolderId:
+          type: string
+          description: >
+            The `question` folder's id (ADR-0198 증보 1 D7); absent when the
+            host has none — never a project folder. Present only where
+            `folders` is.
+
+    WorkHostFolder:
+      type: object
+      required: [id, displayName, kind]
+      properties:
+        id:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{1,64}$"
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: No path separator or control character.
+        kind:
+          type: string
+          enum: [project, question]
 
     WorkHostResponse:
       type: object
@@ -16377,7 +16787,9 @@ components:
 
     WorkControlPayload:
       description: >
-        Closed field union selected by kind: spawn requires exactly tool+label,
+        Closed field union selected by kind: spawn requires exactly tool+label
+        (plus the owner's whole `prompt` on a signed new-work spawn, #3570 — the
+        host receives it; the room's `work.control.*` events never carry it),
         input exactly text, read accepts only optional tail_lines, kill is
         empty, and permission (server-created, #3000) is exactly
         request_event_id+option_id+kind. No path, cwd, environment, process
@@ -16391,6 +16803,13 @@ components:
           type: string
           minLength: 1
           maxLength: 120
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 32768
+          description: >
+            spawn only, only on a signed new-work spawn (`POST …/work-spawns`).
+            NFC. The first prompt the host sends; bound by `momo.human.control.v4`.
         text:
           type: string
           minLength: 1
@@ -16457,6 +16876,89 @@ components:
           description: The thread message's idempotency key; must equal humanSignature.nonce.
         humanSignature:
           $ref: "#/components/schemas/HumanSignatureRequest"
+
+    WorkSpawnRequest:
+      type: object
+      required: [tool, label, prompt, channelId, humanSignature]
+      additionalProperties: false
+      properties:
+        tool:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9._-]{1,63}$'
+          description: The harness to launch, as the host allowlists it (signed).
+        label:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: The session card's title — one trimmed NFC line, no control character (signed, v4).
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 32768
+          description: >
+            The whole first prompt, NFC, not starting with `/` (signed).
+        channelId:
+          type: string
+          format: uuid
+          description: The room the session belongs to; the owner must be an active member (signed).
+        threadRootId:
+          type: string
+          format: uuid
+          nullable: true
+          description: The thread the owner called from; must be the thread the origin message is in (signed).
+        originMessageId:
+          type: string
+          format: uuid
+          nullable: true
+          description: The owner's own plain message in this room they called from (signed).
+        targetHostId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >
+            A hint that can only narrow the owner's own Macs. The host is derived
+            from the signed folder id; this never redirects.
+        humanSignature:
+          $ref: "#/components/schemas/HumanSignatureRequest"
+          description: >
+            `momo.human.control.v4`. `folderId` is required (the opaque id one of
+            the owner's own hosts announced); `agentMemberId` only when the owner
+            names a personal agent (a harness spawn has none).
+
+    WorkSpawnResponse:
+      type: object
+      required: [workControl, replayed]
+      properties:
+        workControl:
+          $ref: "#/components/schemas/WorkControl"
+        replayed:
+          type: boolean
+          description: true when this answered a retry of a spawn already accepted.
+
+    WorkKillResponse:
+      type: object
+      required: [workControl, sessionStatus, hostOnline, replayed]
+      properties:
+        workControl:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/WorkControl"
+          description: >
+            The kill this answer is about: the one just made, the one still
+            waiting for the Mac, or — for an ended session — the last one the
+            caller asked for (null when none was).
+        sessionStatus:
+          type: string
+          description: The session's status as the server holds it.
+        hostOnline:
+          type: boolean
+          description: >
+            Whether the session's Mac had a heartbeat within 90 s (always false
+            for an already ended session, which is not looked up). A kill for an
+            offline Mac is kept and runs when the Mac returns.
+        replayed:
+          type: boolean
+          description: true when nothing new was written.
 
     WorkInstructionMessage:
       type: object

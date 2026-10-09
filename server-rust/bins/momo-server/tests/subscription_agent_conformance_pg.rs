@@ -22,6 +22,7 @@
 //! | `the_subscription_join_records_owner_only_and_refuses_bad_shapes` | create path | `requested_owner_only` / `mark_agent_owner_only_in_tx` |
 //! | `an_owner_call_to_a_subscription_agent_with_no_connection_row_is_never_a_worker_job` (#2924) | the owner's mention, work request and welcome of a row-less subscription agent → 0 jobs, the 「연결 안 됨」 line | `OR a.invocation_scope = 'owner_only'` in the three hosted predicates (`mention.rs`, `run.rs`, `welcome.rs`) |
 //! | `the_roster_reports_brain_callable_by_owner_and_host_online` (#3392) | roster/hosted-list read contract; humans carry none; other tenant sees nothing | `derive_brain`, `load_agent_read_facts_in_tx`, `HOSTED_RECENTLY_SEEN_SQL` |
+//! | `register_is_closed_for_an_owner_whose_cli_is_personal_or_retired` (#3567 M1) | after a conversion or a retirement `register` → 409 `subscription_lane_closed`, 0 new members; other harness / other owner unchanged | `subscription_lane_closed_in_tx` in `register` |
 //! | `register_creates_names_and_reuses_per_device` (#3392) | default names, `-2`, device suffix, codex, repeat → same agent, active → no value | `default_name_candidates`, `find_subscription_agent_by_device_in_tx`, `reuse_in_tx` |
 //! | `register_is_gated_validated_and_capped` (#3392) | member 403, bad input 400, explicit duplicate 409, cap 409 | `require_admin`, validators, `SUBSCRIPTION_AGENTS_PER_HARNESS_LIMIT` |
 //! | `register_answers_a_code_when_the_switch_is_off_and_writes_nothing` (#3392) | 409 `subscription_agents_disabled`, 0 rows; non-admin still 403 | kill-switch arm after admin gate |
@@ -2249,6 +2250,145 @@ async fn register_creates_names_and_reuses_per_device() {
         pending["error"]["code"],
         "subscription_agent_cleanup_pending"
     );
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (3392-*)"]
+async fn register_is_closed_for_an_owner_whose_cli_is_personal_or_retired() {
+    use momo_agent::subscription_transition::{run_transition, Transition, Verdict};
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su).await;
+    let app = momo_app_pool().await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+    let members = |su: PgPool, workspace: Uuid| async move {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM member WHERE workspace_id=$1")
+            .bind(workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap()
+    };
+
+    // An owner registers a Claude agent, which the tool then converts in place.
+    let (owner, jwt) = insert_human(&su, f.workspace, "성재", "owner").await;
+    let (status, first, _) = register(
+        &client,
+        &base,
+        f.workspace,
+        &jwt,
+        json!({"harness": "claude_code", "deviceId": "mac-closed-01"}),
+    )
+    .await;
+    assert_eq!(status, 201, "{first}");
+    let handle = first["agent"]["handle"].as_str().unwrap().to_string();
+    let report = run_transition(
+        &app,
+        f.workspace,
+        Transition::Convert,
+        &handle,
+        true,
+        "m1 test",
+        "test-host",
+    )
+    .await
+    .unwrap()
+    .expect("the registered agent");
+    assert_eq!(report.verdict, Verdict::Proceed, "{}", report.render());
+
+    // An old desktop calls register on every sign-in (same device, then a new one):
+    // 409 with a name, and no new member.
+    let before = members(su.clone(), f.workspace).await;
+    for device in ["mac-closed-01", "mac-closed-02"] {
+        let (status, value, _) = register(
+            &client,
+            &base,
+            f.workspace,
+            &jwt,
+            json!({"harness": "claude_code", "deviceId": device}),
+        )
+        .await;
+        assert_eq!(status, 409, "{value}");
+        assert_eq!(
+            value["error"]["code"], "subscription_lane_closed",
+            "{value}"
+        );
+    }
+    assert_eq!(
+        before,
+        members(su.clone(), f.workspace).await,
+        "a member was minted"
+    );
+    assert_eq!(
+        agent_rows_of(&su, &f, owner).await,
+        0,
+        "the device slot came back"
+    );
+
+    // Not applicable: the same owner's other CLI, and another owner's Claude.
+    let (status, value, _) = register(
+        &client,
+        &base,
+        f.workspace,
+        &jwt,
+        json!({"harness": "codex", "deviceId": "mac-closed-01"}),
+    )
+    .await;
+    assert_eq!(status, 201, "{value}");
+    let (_, other_jwt) = insert_human(&su, f.workspace, "지수", "owner").await;
+    let (status, value, _) = register(
+        &client,
+        &base,
+        f.workspace,
+        &other_jwt,
+        json!({"harness": "claude_code", "deviceId": "mac-closed-03"}),
+    )
+    .await;
+    assert_eq!(status, 201, "{value}");
+
+    // A retired agent closes its CLI the same way (marked the way the tool marks it).
+    let codex_id: Uuid = sqlx::query_scalar(
+        "SELECT member_id FROM agent WHERE workspace_id=$1 AND owner_human_id=$2 \
+           AND subscription_harness='codex'",
+    )
+    .bind(f.workspace)
+    .bind(owner)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET status='expired', pairing_challenge_hash=NULL, \
+                pairing_expires_at=NULL WHERE agent_member_id=$1",
+    )
+    .bind(codex_id)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE agent SET subscription_retired_at=now() WHERE member_id=$1")
+        .bind(codex_id)
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE member SET status='suspended' WHERE id=$1")
+        .bind(codex_id)
+        .execute(&su)
+        .await
+        .unwrap();
+    let before = members(su.clone(), f.workspace).await;
+    let (status, value, _) = register(
+        &client,
+        &base,
+        f.workspace,
+        &jwt,
+        json!({"harness": "codex", "deviceId": "mac-closed-04"}),
+    )
+    .await;
+    assert_eq!(status, 409, "{value}");
+    assert_eq!(
+        value["error"]["code"], "subscription_lane_closed",
+        "{value}"
+    );
+    assert_eq!(before, members(su.clone(), f.workspace).await);
 }
 
 #[tokio::test]

@@ -567,19 +567,34 @@ mod tests {
     ///
     /// 120 is #3517's work-run board event (ADR-0162 증보 3 D13): the `agent_run` triggers that put
     /// `work.run.updated` on the outbox for a hosted work run's board-state transitions.
+    ///
+    /// 121 is #3590's work-host folders (ADR-0188 D6, ADR-0198 증보 1): the RLS-FORCE table
+    /// `work_host_folder` (opaque folder id + display name a host announces, never a path).
+    ///
+    /// 122 is #3570's signed new-work spawn (ADR-0198 D4, 증보 1 D7): `work_control.payload.prompt`,
+    /// the thread/origin-message columns, and the signature CHECK that lets only a new task name no agent.
+    ///
+    /// 123 is #3591's personal agent (ADR-0198 증보 1 D7): `agent.personal_agent`,
+    /// `agent.personal_disabled_at` and the one-per-(owner, harness) partial index.
+    ///
+    /// 124 is #3592's session persona (ADR-0198 증보 1 D7): `work_session.persona_member_id`,
+    /// the personal agent a called session's card, progress and answer are authored as.
+    ///
+    /// 125 is #3567's subscription-agent retirement (ADR-0198 증보 1 D2): `agent.subscription_retired_at`
+    /// and the guard that keeps a converted or retired agent's hosted connection closed.
     #[test]
-    fn discovers_contiguous_migrations_001_to_120() {
+    fn discovers_contiguous_migrations_001_to_125() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            120,
-            "expected 120 migrations under {}",
+            125,
+            "expected 125 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 120);
+        assert_eq!(migrations.last().unwrap().version, 125);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {
