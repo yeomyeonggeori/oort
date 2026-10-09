@@ -30,6 +30,7 @@ import {
   font,
   line,
   SAFE_GUTTER,
+  slopTo,
   space,
   TOUCH_TARGET,
   type Palette,
@@ -158,6 +159,9 @@ const TIME = new Intl.DateTimeFormat('ko-KR', {hour: 'numeric', minute: '2-digit
 /** 입력창이 자라는 상한(줄 수). */
 const COMPOSER_MAX_ROWS = 5;
 
+/** 38pt 원을 44pt 눌림 영역까지 키우는 여백(손으로 적은 숫자가 아니라 도출). */
+const SEND_SLOP = slopTo(CONV.composerSend);
+
 // ---- 표시 -----------------------------------------------------------------------
 
 export interface WorkConversationViewProps {
@@ -177,9 +181,18 @@ export interface WorkConversationViewProps {
   autoFocus?: boolean;
 }
 
-export function WorkConversationView(
-  props: WorkConversationViewProps,
-): React.JSX.Element {
+export function WorkConversationView({
+  items,
+  agentName,
+  nameOf,
+  gate,
+  onSend: onSendProp,
+  renderPermission,
+  seed,
+  refreshControl,
+  initialText,
+  autoFocus,
+}: WorkConversationViewProps): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const scrollRef = useRef<ScrollView>(null);
   const reduce = useReduceMotionRef();
@@ -229,7 +242,6 @@ export function WorkConversationView(
     scrollRef.current?.scrollToEnd({animated: !reduce.current});
   }, [reduce]);
 
-  const onSendProp = props.onSend;
   const send = useCallback(
     (text: string, mode: 'queue' | 'interrupt') => {
       mineJustSent.current = true;
@@ -248,23 +260,23 @@ export function WorkConversationView(
             onScroll={onScroll}
             scrollEventThrottle={16}
             onContentSizeChange={onContentSizeChange}
-            refreshControl={props.refreshControl}
+            refreshControl={refreshControl}
             keyboardDismissMode="interactive"
             keyboardShouldPersistTaps="handled"
             testID="work-chat-scroll">
-            {props.items.length === 0 ? (
+            {items.length === 0 ? (
               <Sentence style={styles.empty} testID="work-chat-empty">
                 아직 주고받은 말이 없어요.
               </Sentence>
             ) : null}
-            {props.items.map((item, index) => (
+            {items.map((item, index) => (
               <ChatRow
                 key={item.id}
                 item={item}
-                previous={index > 0 ? props.items[index - 1] : null}
-                agentName={props.agentName}
-                nameOf={props.nameOf}
-                renderPermission={props.renderPermission}
+                previous={index > 0 ? items[index - 1] : null}
+                agentName={agentName}
+                nameOf={nameOf}
+                renderPermission={renderPermission}
               />
             ))}
           </ScrollView>
@@ -282,11 +294,11 @@ export function WorkConversationView(
       }
       composer={
         <ChatComposer
-          gate={props.gate}
+          gate={gate}
           onSend={send}
-          seed={props.seed ?? null}
-          initialText={props.initialText}
-          autoFocus={props.autoFocus}
+          seed={seed ?? null}
+          initialText={initialText}
+          autoFocus={autoFocus}
         />
       }
     />
@@ -487,7 +499,7 @@ function ChatComposer({
             accessibilityLabel="지금 끼어들기"
             accessibilityState={{checked: interrupt, disabled: sending}}
             disabled={sending}
-            hitSlop={(TOUCH_TARGET - CONV.composerSend) / 2}
+            hitSlop={SEND_SLOP}
             onPress={() => setInterrupt(value => !value)}
             style={[styles.chip, interrupt && styles.chipOn]}
             testID="work-chat-interrupt">
@@ -529,7 +541,7 @@ function ChatComposer({
           accessibilityLabel={sending ? 'Face ID 확인 중' : '지시 보내기'}
           accessibilityState={{disabled: !canSend}}
           disabled={!canSend}
-          hitSlop={(TOUCH_TARGET - CONV.composerSend) / 2}
+          hitSlop={SEND_SLOP}
           onPress={submit}
           style={({pressed}) => [
             styles.send,

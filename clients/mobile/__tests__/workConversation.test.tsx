@@ -1,4 +1,7 @@
-import type {WorkSessionEvent} from '@momo/core/features/work/workSessionModel';
+import type {
+  SessionThreadReply,
+  WorkSessionEvent,
+} from '@momo/core/features/work/workSessionModel';
 import {
   act,
   cleanup,
@@ -18,7 +21,6 @@ import {
   type ChatItem,
   type PendingSend,
 } from '../src/features/work/conversation';
-import type {ThreadReply} from '../src/features/work/queries';
 import {
   composerGate,
   ENDED_NOTICE,
@@ -81,7 +83,7 @@ function reply(
   text: string,
   author = SELF,
   mode?: 'queue' | 'interrupt',
-): ThreadReply {
+): SessionThreadReply {
   return {id, authorMemberId: author, text, atMs: 1_000 * seq, seq, ...(mode ? {mode} : {})};
 }
 
@@ -116,7 +118,8 @@ describe('대화 순서 (buildConversation)', () => {
       ],
       replies: [
         reply('R-OTHER', 2, '팀원 한마디', OTHER),
-        reply('R-MINE', 5, '테스트부터 봐 줘', SELF, 'queue'),
+        // 폰 시계가 느려도 순서는 seq가 정한다(atMs만 보면 맨 앞으로 간다).
+        {...reply('R-MINE', 5, '테스트부터 봐 줘', SELF, 'queue'), atMs: 10},
         reply('R-LATE', 8, '급하면 지금 끼어들어', SELF, 'interrupt'),
       ],
       permissionRequestId: 'A1',

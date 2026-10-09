@@ -2,10 +2,10 @@ import type {WorkSession} from '@momo/core/lib/api';
 import {
   foldSessionEvents,
   mergeEvents,
+  type SessionThreadReply,
   type WorkRowState,
   type WorkSessionEvent,
 } from '@momo/core/features/work/workSessionModel';
-import type {ThreadReply} from './queries';
 
 // =============================================================================
 // 대화 모드의 순서 (N3 #3595). 순수 함수 하나가 말풍선 목록을 만든다.
@@ -92,7 +92,7 @@ export function buildConversation(input: {
   events: readonly WorkSessionEvent[];
   session: Pick<WorkSession, 'status'>;
   truncated: boolean;
-  replies: readonly ThreadReply[];
+  replies: readonly SessionThreadReply[];
   selfMemberId: string;
   pending: readonly PendingSend[];
   permissionRequestId: string | null;
@@ -136,7 +136,7 @@ export function buildConversation(input: {
     }
   }
 
-  const durableMine: ThreadReply[] = [];
+  const durableMine: SessionThreadReply[] = [];
   for (const reply of input.replies) {
     if (reply.authorMemberId.toLowerCase() === self) {
       durableMine.push(reply);
