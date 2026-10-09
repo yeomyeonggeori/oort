@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 400" width="660" height="400">
+  <!-- oort DMG 설치 창 배경(#3642). 정본 SVG: scripts/desktop/render_dmg_background.sh 가 @1x/@2x PNG와 멀티 해상도 TIFF를 만든다. 손으로 고치지 않고 PNG/TIFF는 이 파일에서 다시 만든다.
+       Finder 아이콘 라벨 색은 시스템이 정한다(라이트=검정, 다크=흰색). 그래서 두 아이콘은 라벨까지 감싸는 중간 톤 판(#6f7c93, 검정 4.98:1 · 흰색 4.22:1) 위에 둔다.
+       배경 그라데이션은 새벽하늘 canvas-top/bottom(#f7eadb → #e2e9f3), 글자는 ink(#16171b), 화살표는 signal(#c2410c). -->
+  <defs>
+    <linearGradient id="dawn" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7eadb"/>
+      <stop offset="1" stop-color="#e2e9f3"/>
+    </linearGradient>
+  </defs>
+  <rect width="660" height="400" fill="url(#dawn)"/>
+  <!-- 마크 C2-04 Bubble (docs/brand/mark/oort-mark-black.svg 의 path) -->
+  <g transform="translate(314 22) scale(0.5)" fill="#16171b" fill-rule="evenodd">
+    <path d="M49.19 24.69A20 20 0 0 1 21.24 50.46A1.5 1.5 0 0 0 20.08 50.33L13.64 52.22A1.5 1.5 0 0 1 11.78 50.36L13.67 43.92A1.5 1.5 0 0 0 13.54 42.76A20 20 0 0 1 39.31 14.81A8 8 0 0 0 49.19 24.69ZM43 33A12 12 0 1 0 19 33A12 12 0 1 0 43 33Z"/>
+    <path d="M53 17A6 6 0 1 1 41 17A6 6 0 1 1 53 17Z"/>
+  </g>
+  <!-- 아이콘 판: 앱(180,185)·Applications(480,185) 중심, 라벨 영역 포함 -->
+  <rect x="100" y="95" width="160" height="200" rx="24" fill="#6f7c93"/>
+  <rect x="400" y="95" width="160" height="200" rx="24" fill="#6f7c93"/>
+  <!-- 화살표 -->
+  <g stroke="#c2410c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M286 185 H374"/>
+    <path d="M356 167 L376 185 L356 203"/>
+  </g>
+  <text x="330" y="348" text-anchor="middle" font-family="Apple SD Gothic Neo, AppleSDGothicNeo, sans-serif" font-size="17" font-weight="600" fill="#16171b">Applications 폴더로 끌어 놓아 설치해요</text>
+</svg>
