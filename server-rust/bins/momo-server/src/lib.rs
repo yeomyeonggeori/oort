@@ -1164,6 +1164,13 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/work-sessions/{session}/instructions",
             post(routes::work_instructions::send),
         )
+        // ADR-0198 N4 (#3628): the owner's stop. Human bearer only, unsigned
+        // (`kill` never is), absent from `momo_auth::required_agent_scope` and
+        // from the signed-host allow-list. Writes a `kill` work_control.
+        .route(
+            "/v1/workspaces/{ws}/work-sessions/{session}/kill",
+            post(routes::work_kill::kill),
+        )
         // ADR-0198 D4 (#3570, T5): the owner's signed NEW-work spawn onto their
         // own Mac. Human bearer only — never signable by a host, absent from
         // `momo_auth::required_agent_scope`. Writes a work_control, not a message.
