@@ -538,7 +538,7 @@ describe("구독 추가: 폴더 → 모달(그 프로필) → 취소면 폴더 �
     expect(tauri.harnessProfileCreate).not.toHaveBeenCalled();
   });
 
-  it("설치된 CLI가 없으면 설치 안내가 있는 구독으로 쓰는 에이전트 창이 선다 (#3389)", async () => {
+  it("설치된 CLI가 없으면 추가 창 대신 이유 한 줄이 선다 (ADR-0198: 구독 에이전트 만들기 창 없음)", async () => {
     shell.probes = [
       { id: "claude", installed: false, auth: "unknown" },
       { id: "codex", installed: false, auth: "unknown" },
@@ -548,7 +548,8 @@ describe("구독 추가: 폴더 → 모달(그 프로필) → 취소면 폴더 �
       const el = await until("subscription-entry-open");
       await act(async () => el.click());
     }
-    await until("subscription-start-dialog");
+    expect((await until("my-account-no-cli")).textContent).toContain("설치를 찾지 못했어요");
+    expect(q("subscription-start-dialog")).toBeNull();
     expect(window.location.hash).not.toContain("ai-connect");
     expect(q("add-subscription-dialog")).toBeNull();
   });

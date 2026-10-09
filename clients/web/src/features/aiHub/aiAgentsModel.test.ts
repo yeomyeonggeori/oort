@@ -102,37 +102,30 @@ describe("에이전트 표 행: 서버 값 → core 라벨", () => {
   });
 });
 
-describe("만들기 3종 권한", () => {
+describe("만들기 2종 권한", () => {
   const ids = (o: ReturnType<typeof createKindOptions>) => o.map((x) => `${x.id}:${x.state}`);
 
-  it("데스크탑 소유자·관리자는 셋 다 열린다", () => {
-    expect(ids(createKindOptions({ mayCreate: true, subscription: "rows", externalProvided: true }))).toEqual([
-      "team:available", "mySubscription:available", "external:available",
+  it("소유자·관리자는 팀과 외부가 열리고, 구독 종류는 없다(구독은 내 도구, ADR-0198)", () => {
+    expect(ids(createKindOptions({ mayCreate: true, externalProvided: true }))).toEqual([
+      "team:available", "external:available",
     ]);
   });
 
-  it("웹에서 내 구독은 숨기지 않고 「데스크탑에서」 힌트로 잠근다", () => {
-    const [, sub] = createKindOptions({ mayCreate: true, subscription: "desktop-only", externalProvided: true });
-    expect(sub).toMatchObject({ state: "locked", desktopHint: true });
-    expect(sub?.reason).toContain("데스크탑 앱에서");
-  });
-
   it("대상 칩은 실제 관문과 같은 말이다: 팀·외부는 소유자·관리자, 거절 문장도 같은 낱말", () => {
-    const opts = createKindOptions({ mayCreate: false, subscription: "denied", externalProvided: true });
+    const opts = createKindOptions({ mayCreate: false, externalProvided: true });
     expect(opts[0]?.audience).toBe("소유자·관리자");
-    expect(opts[2]?.audience).toBe("소유자·관리자");
+    expect(opts[1]?.audience).toBe("소유자·관리자");
     expect(opts[0]?.reason).toContain("소유자·관리자");
   });
 
-  it("권한이 없으면 셋 다 사유와 함께 잠긴다", () => {
-    const opts = createKindOptions({ mayCreate: false, subscription: "denied", externalProvided: true });
+  it("권한이 없으면 둘 다 사유와 함께 잠긴다", () => {
+    const opts = createKindOptions({ mayCreate: false, externalProvided: true });
     expect(opts.every((o) => o.state === "locked" && o.reason !== null)).toBe(true);
   });
 
-  it("서버가 구독으로 쓰는 에이전트를 꺼 두면 사유를 말하고, 외부 초대가 없는 빌드는 외부만 잠긴다", () => {
-    const off = createKindOptions({ mayCreate: true, subscription: "server-off", externalProvided: false });
-    expect(off[1]?.reason).toContain("꺼져 있어요");
-    expect(off[2]).toMatchObject({ state: "locked" });
+  it("외부 초대가 없는 빌드는 외부만 잠긴다", () => {
+    const off = createKindOptions({ mayCreate: true, externalProvided: false });
+    expect(off[1]).toMatchObject({ state: "locked" });
     expect(off[0]?.state).toBe("available");
   });
 });
