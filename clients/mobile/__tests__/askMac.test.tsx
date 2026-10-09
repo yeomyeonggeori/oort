@@ -408,6 +408,8 @@ describe('⑤ 전송 뒤에는 내 요청이 만든 세션의 N3 화면으로 �
       fireEvent.press(screen.getByTestId('ask-mac-send'));
     });
     await screen.findByTestId('ask-mac-waiting');
+    // 기다리는 동안에도 도착지가 보인다.
+    expect(destinationText()).toBe('내 맥 · 성재의 MacBook · Claude Code');
     await waitFor(() => expect(handlers.onOpenSession).toHaveBeenCalledWith('sess-new'), {
       timeout: 6000,
     });
@@ -484,9 +486,9 @@ describe('⑦ 서명 요구가 꺼진 서버에서는 Face ID 전에 막고 정�
     mount(port);
     await screen.findByTestId('ask-mac-signing');
     expect(screen.getByText(/아직 내 맥으로 보내는 요청을 받지 않아요/)).toBeTruthy();
-    await pickChannelAndType();
-    expect(screen.getByTestId('ask-mac-send')).toBeDisabled();
-    fireEvent.press(screen.getByTestId('ask-mac-send'));
+    // Face ID까지 갈 길이 없다: 폼도 보내기도 서지 않는다.
+    expect(screen.queryByTestId('ask-mac-send')).toBeNull();
+    expect(screen.queryByTestId('ask-mac-prompt')).toBeNull();
     expect(port.spawn).not.toHaveBeenCalled();
   });
 
@@ -496,9 +498,8 @@ describe('⑦ 서명 요구가 꺼진 서버에서는 Face ID 전에 막고 정�
     const {port} = fakePort();
     mount(port);
     await screen.findByTestId('ask-mac-signing');
-    expect(screen.getByText(/지시 서명 키가 아직 준비되지 않았어요/)).toBeTruthy();
-    await pickChannelAndType();
-    expect(screen.getByTestId('ask-mac-send')).toBeDisabled();
+    expect(screen.getByText(/프로필 › 지시 기기에서 등록해 주세요/)).toBeTruthy();
+    expect(screen.queryByTestId('ask-mac-send')).toBeNull();
   });
 
   it('플래그를 읽지 못하면(null) 막지 않고 보내 본다', () => {
@@ -516,7 +517,7 @@ describe('⑦ 서명 요구가 꺼진 서버에서는 Face ID 전에 막고 정�
       fireEvent.press(screen.getByTestId('ask-mac-send'));
     });
     await screen.findByTestId('ask-mac-signing');
-    expect(screen.getByTestId('ask-mac-send')).toBeDisabled();
+    expect(screen.queryByTestId('ask-mac-send')).toBeNull();
   });
 });
 
@@ -546,12 +547,30 @@ describe('보낼 글과 집 채널', () => {
     expect(screen.queryByTestId(`ask-mac-channel-${CH_DM}`)).toBeNull();
   });
 
-  it('채널을 고르기 전에는 보낼 수 없다', async () => {
+  it('채널을 고르기 전에는 보낼 수 없고, 왜 그런지 한 문장이 선다', async () => {
     installFetch({});
     mount(fakePort().port);
     await screen.findByTestId('ask-mac-form');
     fireEvent.changeText(screen.getByTestId('ask-mac-prompt'), '질문');
     expect(screen.getByTestId('ask-mac-send')).toBeDisabled();
+    expect(screen.getByTestId('ask-mac-hint')).toHaveTextContent(
+      '어느 채널에 남길지 골라야 보낼 수 있어요.',
+    );
+    fireEvent.press(screen.getByTestId('ask-mac-channel-개발'));
+    expect(screen.queryByTestId('ask-mac-hint')).toBeNull();
+    expect(screen.getByTestId('ask-mac-send')).toBeEnabled();
+  });
+
+  it('Face ID를 취소하면 오류 배너 없이 폼으로 돌아온다', async () => {
+    installFetch({});
+    mount(fakePort({kind: 'cancelled', sentence: 'x'}).port);
+    await screen.findByTestId('ask-mac-form');
+    await pickChannelAndType();
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('ask-mac-send'));
+    });
+    expect(screen.queryByTestId('ask-mac-banner')).toBeNull();
+    expect(screen.getByTestId('ask-mac-send')).toBeEnabled();
   });
 
   it('「/」로 시작하는 글은 보내기 전에 막힌다', async () => {

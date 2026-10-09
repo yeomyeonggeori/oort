@@ -276,13 +276,18 @@ export const MAC_OFF_DETAIL =
 export const MAC_NONE_DETAIL =
   '연결된 맥이 아직 없어요. 데스크탑 앱에서 내 맥을 연결하면 여기서 쓸 수 있어요.';
 export const AGENT_SUGGEST_SENTENCE =
-  '지금 맡기려면 에이전트에게 맡길 수 있어요. 에이전트는 다른 서버에서 일하고, 눌러야만 보내요.';
+  '지금 꼭 필요하면 에이전트에게 맡길 수 있어요. 내 맥이 아닌 곳에서 일하니, 맡길지는 직접 골라 주세요.';
 export const AGENT_SUGGEST_LABEL = '에이전트에게 맡기기';
 
-export const FLAG_OFF_SENTENCE =
-  '이 서버는 아직 내 맥으로 보내는 요청을 받지 않아요. 서버에서 서명 확인을 켜면 쓸 수 있어요.';
-export const KEY_NOT_READY_SENTENCE =
-  '이 폰의 지시 서명 키가 아직 준비되지 않았어요. 프로필 › 지시 기기에서 등록한 뒤에 보낼 수 있어요.';
+export const FLAG_OFF_HEADLINE = '이 서버에서는 아직 쓸 수 없어요';
+export const FLAG_OFF_DETAIL =
+  '이 서버는 아직 내 맥으로 보내는 요청을 받지 않아요. 서버 관리자가 서명 확인을 켜면 보낼 수 있어요.';
+export const KEY_NOT_READY_HEADLINE = '이 폰의 서명 키가 필요해요';
+export const KEY_NOT_READY_DETAIL =
+  '내 맥으로 보내려면 Face ID 서명 키가 준비돼 있어야 해요. 프로필 › 지시 기기에서 등록해 주세요.';
+export const NEED_FOLDER_HINT = '폴더를 골라야 보낼 수 있어요.';
+export const NEED_CHANNEL_HINT = '어느 채널에 남길지 골라야 보낼 수 있어요.';
+export const WAITING_NOTE = '받으면 작업 목록에서도 볼 수 있어요.';
 export const NOT_WIRED_SENTENCE =
   '이 앱 버전에서는 아직 내 맥으로 보낼 수 없어요. 앱을 업데이트한 뒤에 다시 시도해 주세요.';
 export const FACE_ID_NOTE = '보낼 때 Face ID로 한 번 확인해요.';

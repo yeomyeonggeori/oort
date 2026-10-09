@@ -27,7 +27,6 @@ import {
   font,
   SAFE_GUTTER,
   space,
-  TOUCH_TARGET,
   type Palette,
 } from '../design/tokens';
 import {useWorkHosts, useWorkSessions} from '../features/agents/queries';
@@ -41,12 +40,17 @@ import {
   destinationLine,
   FACE_ID_NOTE,
   findSpawnedSession,
-  FLAG_OFF_SENTENCE,
+  FLAG_OFF_DETAIL,
+  FLAG_OFF_HEADLINE,
   foldersToPick,
   harnessChoices,
   HARNESS_LABEL,
   homeChannels,
-  KEY_NOT_READY_SENTENCE,
+  KEY_NOT_READY_DETAIL,
+  KEY_NOT_READY_HEADLINE,
+  NEED_CHANNEL_HINT,
+  NEED_FOLDER_HINT,
+  WAITING_NOTE,
   labelFromPrompt,
   MAC_NONE_DETAIL,
   MAC_OFF_DETAIL,
@@ -57,7 +61,6 @@ import {
   ownMacs,
   projectFolders,
   promptIssue,
-  questionFolder,
   signingBlock,
   type AskMode,
   type HarnessKey,
@@ -224,6 +227,7 @@ function SheetBody({
   const [banner, setBanner] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [flagClosedByServer, setFlagClosedByServer] = useState(false);
+  const openedRef = useRef(false);
   const sentRef = useRef<{
     before: Set<string>;
     hostId: string;
@@ -262,7 +266,10 @@ function SheetBody({
   const rememberedChannel =
     folderId === null ? undefined : last.channelByFolder[folderId];
   const channelId: string | null = (() => {
-    const wanted = channelPick ?? rememberedChannel ?? null;
+    const wanted =
+      channelPick ??
+      rememberedChannel ??
+      (channelOptions.length === 1 ? (channelOptions[0] as Channel).id : null);
     if (wanted === null) return null;
     return channelOptions.some(channel => uuidEq(channel.id, wanted)) ? wanted : null;
   })();
@@ -277,9 +284,9 @@ function SheetBody({
   );
   const signingSentence =
     signing === 'flag_off'
-      ? FLAG_OFF_SENTENCE
+      ? FLAG_OFF_DETAIL
       : signing === 'key'
-      ? KEY_NOT_READY_SENTENCE
+      ? KEY_NOT_READY_DETAIL
       : null;
 
   useEffect(() => {
@@ -300,7 +307,8 @@ function SheetBody({
       channelId: sent.channelId,
       label: sent.label,
     });
-    if (found !== null) {
+    if (found !== null && !openedRef.current) {
+      openedRef.current = true;
       onOpenSession(found);
       slideClose();
     }
@@ -374,6 +382,8 @@ function SheetBody({
         setFlagClosedByServer(true);
         return;
       case 'cancelled':
+        // 사람이 Face ID를 스스로 접었다. 오류가 아니다: 조용히 폼으로 돌아간다.
+        return;
       case 'refused':
       case 'not_wired':
         haptics.error();
@@ -392,15 +402,53 @@ function SheetBody({
     />
   );
 
+  const destinationValue =
+    activeMac !== null && harness !== null
+      ? destinationLine(activeMac, harness)
+      : state.kind === 'off'
+      ? `내 맥 · ${state.mac.displayName} · 꺼져 있음`
+      : '내 맥 · 연결 안 됨';
+
+  const folderName =
+    activeMac === null || folderId === null
+      ? null
+      : activeMac.folders.find(folder => folder.id === folderId)?.displayName ?? null;
+  const channelName =
+    channelId === null
+      ? null
+      : channelOptions.find(channel => uuidEq(channel.id, channelId))?.name ?? null;
+  const placeLine = [
+    folderName !== null ? `폴더 ${folderName}` : null,
+    channelName !== null ? `#${channelName}` : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(' · ');
+
+  const destination = (
+    <View style={styles.destination} testID="ask-mac-destination">
+      <Text style={styles.destinationLabel}>보낼 곳</Text>
+      <Sentence style={styles.destinationValue} testID="ask-mac-destination-line">
+        {destinationValue}
+      </Sentence>
+      {state.kind === 'on' && placeLine !== '' ? (
+        <Sentence style={styles.destinationPlace} testID="ask-mac-folder-line">
+          {placeLine}
+        </Sentence>
+      ) : null}
+    </View>
+  );
+
   if (waiting) {
     return (
       <View>
         {header()}
+        {destination}
         <View style={styles.gap}>
           <LoadingState
             label="내 맥이 받는 중이에요. 받으면 대화 화면으로 가요."
             testID="ask-mac-waiting"
           />
+          <Sentence style={styles.waitNote}>{WAITING_NOTE}</Sentence>
           <View style={styles.waitAction}>
             <OutlineButton
               label="작업 목록 보기"
@@ -424,22 +472,6 @@ function SheetBody({
       </View>
     );
   }
-
-  const destinationValue =
-    activeMac !== null && harness !== null
-      ? destinationLine(activeMac, harness)
-      : state.kind === 'off'
-      ? `내 맥 · ${state.mac.displayName} · 꺼져 있음`
-      : '내 맥 · 연결 안 됨';
-
-  const destination = (
-    <View style={styles.destination} testID="ask-mac-destination">
-      <Text style={styles.destinationLabel}>보낼 곳</Text>
-      <Sentence style={styles.destinationValue} testID="ask-mac-destination-line">
-        {destinationValue}
-      </Sentence>
-    </View>
-  );
 
   if (state.kind !== 'on') {
     return (
@@ -472,6 +504,26 @@ function SheetBody({
     );
   }
 
+  if (signing !== null) {
+    return (
+      <View style={styles.fill}>
+        {header()}
+        <ScrollView contentContainerStyle={styles.list} testID="ask-mac-blocked">
+          {destination}
+          <View style={styles.gap}>
+            <NoticeBlock
+              headline={
+                signing === 'flag_off' ? FLAG_OFF_HEADLINE : KEY_NOT_READY_HEADLINE
+              }
+              detail={signingSentence ?? undefined}
+              testID="ask-mac-signing"
+            />
+          </View>
+        </ScrollView>
+      </View>
+    );
+  }
+
   const sendLabel = pending ? '보내는 중' : '보내기';
 
   return (
@@ -495,16 +547,38 @@ function SheetBody({
       >
         {destination}
 
-        {signingSentence !== null ? (
-          <View style={styles.bannerWrap}>
-            <FailureBanner message={signingSentence} testID="ask-mac-signing" />
-          </View>
-        ) : null}
         {banner !== null ? (
           <View style={styles.bannerWrap}>
             <FailureBanner message={banner} testID="ask-mac-banner" />
           </View>
         ) : null}
+
+        <View style={styles.gap}>
+          <GroupSection label="어떻게 보낼까요" testID="ask-mac-modes">
+            {(['ask', 'work'] as const).map((value, index) => (
+              <GroupRow
+                key={value}
+                title={MODE_LABEL[value]}
+                detail={
+                  value === 'ask'
+                    ? '빈 질문용 폴더에서 물어봐요.'
+                    : '프로젝트 폴더에서 일을 시켜요.'
+                }
+                separated={index > 0}
+                accessibilityRole="radio"
+                accessibilityState={{selected: mode === value}}
+                onPress={() => {
+                  haptics.selection();
+                  setMode(value);
+                  setFolderPick(null);
+                  setIssue(null);
+                }}
+                trailing={<Check on={mode === value} />}
+                testID={`ask-mac-mode-${value}`}
+              />
+            ))}
+          </GroupSection>
+        </View>
 
         <FieldLabel label={mode === 'ask' ? '물어볼 것' : '시킬 일'} note={null} />
         <TextInput
@@ -536,6 +610,15 @@ function SheetBody({
             {issue}
           </Text>
         ) : null}
+        {!pending && folderId === null ? (
+          <Text style={styles.hint} testID="ask-mac-hint">
+            {NEED_FOLDER_HINT}
+          </Text>
+        ) : !pending && channelId === null ? (
+          <Text style={styles.hint} testID="ask-mac-hint">
+            {NEED_CHANNEL_HINT}
+          </Text>
+        ) : null}
         <Text style={styles.rule}>{FACE_ID_NOTE}</Text>
 
         {state.macs.length > 1 ? (
@@ -563,33 +646,6 @@ function SheetBody({
             </GroupSection>
           </View>
         ) : null}
-
-        <View style={styles.gap}>
-          <GroupSection label="어떻게 보낼까요" testID="ask-mac-modes">
-            {(['ask', 'work'] as const).map((value, index) => (
-              <GroupRow
-                key={value}
-                title={MODE_LABEL[value]}
-                detail={
-                  value === 'ask'
-                    ? '빈 질문용 폴더에서 물어봐요.'
-                    : '프로젝트 폴더에서 일을 시켜요.'
-                }
-                separated={index > 0}
-                accessibilityRole="radio"
-                accessibilityState={{selected: mode === value}}
-                onPress={() => {
-                  haptics.selection();
-                  setMode(value);
-                  setFolderPick(null);
-                  setIssue(null);
-                }}
-                trailing={<Check on={mode === value} />}
-                testID={`ask-mac-mode-${value}`}
-              />
-            ))}
-          </GroupSection>
-        </View>
 
         <View style={styles.gap}>
           <GroupSection label="도구" testID="ask-mac-harnesses">
@@ -648,16 +704,7 @@ function SheetBody({
               testID="ask-mac-no-folder"
             />
           </View>
-        ) : (
-          <Sentence style={styles.folderLine} testID="ask-mac-folder-line">
-            폴더 ·{' '}
-            {mode === 'ask'
-              ? questionFolder(activeMac as NonNullable<typeof activeMac>)
-                  ?.displayName ?? '질문용 폴더'
-              : (activeMac?.folders.find(folder => folder.id === folderId)
-                  ?.displayName ?? '')}
-          </Sentence>
-        )}
+        ) : null}
 
         <View style={styles.gap}>
           <GroupSection label="어느 채널에 남길까요" testID="ask-mac-channels">
@@ -732,11 +779,18 @@ const buildStyles = (color: Palette) =>
       marginHorizontal: SAFE_GUTTER,
       alignSelf: 'flex-start',
     },
-    folderLine: {
-      marginTop: space.lg,
+    destinationPlace: {fontSize: font.label, color: color.textMuted},
+    waitNote: {
+      marginTop: space.md,
       marginHorizontal: SAFE_GUTTER,
       fontSize: font.label,
       color: color.textMuted,
+    },
+    hint: {
+      marginTop: space.sm,
+      marginHorizontal: SAFE_GUTTER,
+      fontSize: font.label,
+      color: color.warn,
     },
     input: {
       minHeight: 132,
@@ -765,4 +819,3 @@ const buildStyles = (color: Palette) =>
     },
   });
 
-void TOUCH_TARGET;
