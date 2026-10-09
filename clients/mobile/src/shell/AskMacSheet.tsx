@@ -506,6 +506,38 @@ function SheetBody({
           </View>
         ) : null}
 
+        <FieldLabel label={mode === 'ask' ? '물어볼 것' : '시킬 일'} note={null} />
+        <TextInput
+          style={[styles.input, issue !== null && styles.inputError]}
+          value={prompt}
+          onChangeText={value => {
+            setPrompt(value);
+            setIssue(null);
+          }}
+          placeholder={
+            mode === 'ask'
+              ? '예: 이 에러 메시지가 무슨 뜻이야?'
+              : '예: 로그인 버그를 찾아서 고쳐 줘.'
+          }
+          placeholderTextColor={palette.textFaint}
+          multiline
+          lineBreakStrategyIOS="hangul-word"
+          textAlignVertical="top"
+          editable={!pending}
+          accessibilityLabel={mode === 'ask' ? '물어볼 것' : '시킬 일'}
+          testID="ask-mac-prompt"
+        />
+        {issue !== null ? (
+          <Text
+            accessibilityLiveRegion="polite"
+            style={styles.issue}
+            testID="ask-mac-issue"
+          >
+            {issue}
+          </Text>
+        ) : null}
+        <Text style={styles.rule}>{FACE_ID_NOTE}</Text>
+
         {state.macs.length > 1 ? (
           <View style={styles.gap}>
             <GroupSection label="어느 맥으로" testID="ask-mac-macs">
@@ -655,37 +687,6 @@ function SheetBody({
           </GroupSection>
         </View>
 
-        <FieldLabel label={mode === 'ask' ? '물어볼 것' : '시킬 일'} note={null} />
-        <TextInput
-          style={[styles.input, issue !== null && styles.inputError]}
-          value={prompt}
-          onChangeText={value => {
-            setPrompt(value);
-            setIssue(null);
-          }}
-          placeholder={
-            mode === 'ask'
-              ? '예: 이 에러 메시지가 무슨 뜻이야?'
-              : '예: 로그인 버그를 찾아서 고쳐 줘.'
-          }
-          placeholderTextColor={palette.textFaint}
-          multiline
-          lineBreakStrategyIOS="hangul-word"
-          textAlignVertical="top"
-          editable={!pending}
-          accessibilityLabel={mode === 'ask' ? '물어볼 것' : '시킬 일'}
-          testID="ask-mac-prompt"
-        />
-        {issue !== null ? (
-          <Text
-            accessibilityLiveRegion="polite"
-            style={styles.issue}
-            testID="ask-mac-issue"
-          >
-            {issue}
-          </Text>
-        ) : null}
-        <Text style={styles.rule}>{FACE_ID_NOTE}</Text>
       </ScrollView>
     </View>
   );
