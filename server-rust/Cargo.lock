@@ -1838,6 +1838,7 @@ dependencies = [
  "momo-outbox",
  "momo-provider",
  "momo-push",
+ "momo-settings",
  "momo-t3",
  "momo-wire",
  "reqwest",

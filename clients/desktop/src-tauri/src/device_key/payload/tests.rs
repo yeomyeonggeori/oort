@@ -16,6 +16,16 @@ const VECTORS_V2: &str =
 const VECTORS_V3: &str =
     include_str!("../../../../../../docs/api/human-control-signing-v3.vectors.json");
 
+/// #3592 v4 vectors (a new-work spawn); the phone's fixture is a byte copy of
+/// `docs/api/human-control-signing-v4.vectors.json`.
+const VECTORS_V4: &str =
+    include_str!("../../../../../mobile/__tests__/fixtures/human-control-signing-v4.vectors.json");
+
+fn cases_v4() -> Vec<Value> {
+    let root: Value = serde_json::from_str(VECTORS_V4).unwrap();
+    root["cases"].as_array().unwrap().clone()
+}
+
 fn cases_v3() -> Vec<Value> {
     let root: Value = serde_json::from_str(VECTORS_V3).unwrap();
     root["cases"].as_array().unwrap().clone()
@@ -97,12 +107,13 @@ fn control_request(fields: &Value, content: &Value) -> ControlRequest {
 fn statement_of(case: &Value) -> Statement {
     let fields = &case["fields"];
     match case["schema"].as_str().unwrap() {
-        HUMAN_CONTROL_SCHEMA_V1 | HUMAN_CONTROL_SCHEMA_V2 | HUMAN_CONTROL_SCHEMA_V3 => {
-            Statement::Control {
-                signer: signer_of(fields, "device_key_id"),
-                request: control_request(fields, &case["content"]),
-            }
-        }
+        HUMAN_CONTROL_SCHEMA_V1
+        | HUMAN_CONTROL_SCHEMA_V2
+        | HUMAN_CONTROL_SCHEMA_V3
+        | HUMAN_CONTROL_SCHEMA_V4 => Statement::Control {
+            signer: signer_of(fields, "device_key_id"),
+            request: control_request(fields, &case["content"]),
+        },
         DEVICE_ENDORSE_SCHEMA_V1 => Statement::Endorse {
             signer: signer_of(fields, "root_key_id"),
             request: EndorseRequest {
@@ -453,12 +464,13 @@ fn the_rebind_letter_is_momo_wires_bytes_and_its_signature_verifies() {
 }
 
 #[test]
-fn only_the_five_schemas_with_their_exact_line_counts_are_signable() {
+fn only_the_six_schemas_with_their_exact_line_counts_are_signable() {
     let (_, rebind, _) = rebind_vector();
     let rebind_case = serde_json::json!({ "payload": rebind });
     for case in cases_v2()
         .into_iter()
         .chain(cases_v3())
+        .chain(cases_v4())
         .chain(
             cases()
                 .into_iter()
@@ -480,7 +492,8 @@ fn only_the_five_schemas_with_their_exact_line_counts_are_signable() {
     for foreign in [
         "momo.human.control.v2\na",
         "momo.human.control.v3\na",
-        "momo.human.control.v4\na\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl",
+        "momo.human.control.v4\na\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk",
+        "momo.human.control.v5\na\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl",
         "momo.work.host.v1\na\nb",
         "hello",
         "",
@@ -772,6 +785,7 @@ fn no_dialog_text_carries_a_dash() {
         .into_iter()
         .chain(cases_v2())
         .chain(cases_v3())
+        .chain(cases_v4())
         .map(|case| (case["name"].to_string(), statement_of(&case).summary(None)))
         .chain([("rebind".to_string(), rebind_vector().0.summary(None))]);
     for (name, summary) in summaries {
@@ -801,7 +815,11 @@ const APP_REQUESTS: &str =
 #[test]
 fn the_webviews_requests_build_the_v2_and_v3_vector_bytes() {
     let entries: Vec<Value> = serde_json::from_str(APP_REQUESTS).unwrap();
-    assert_eq!(entries.len(), 5, "input ×2, permission (v3), spawn, resume");
+    assert_eq!(
+        entries.len(),
+        9,
+        "input x2, permission (v3), spawn, resume, v4 x4"
+    );
     for entry in entries {
         let name = entry["name"].as_str().unwrap();
         let signer = Signer {
@@ -1219,4 +1237,244 @@ fn the_spawn_dialog_names_the_channel_the_signature_binds() {
     .body;
     assert!(other_body.contains("채널 00000077"), "{other_body}");
     assert_ne!(body, other_body);
+}
+
+// ---- #3592: control v4 — the owner's NEW-work spawn --------------------------
+
+fn v4_control(case: &Value) -> (Signer, ControlRequest) {
+    let Statement::Control { signer, request } = statement_of(case) else {
+        unreachable!()
+    };
+    (signer, request)
+}
+
+#[test]
+fn every_v4_vector_rebuilds_byte_for_byte() {
+    let cases = cases_v4();
+    assert_eq!(cases.len(), 4);
+    for case in cases {
+        let name = case["name"].as_str().unwrap();
+        let (signer, request) = v4_control(&case);
+        assert_eq!(
+            request.content.signing_schema(),
+            ControlSchema::V4,
+            "{name}"
+        );
+        assert_eq!(
+            hex::encode(Sha256::digest(
+                request
+                    .content
+                    .canonical_bytes_for(ControlSchema::V4)
+                    .unwrap()
+            )),
+            case["content_sha256"].as_str().unwrap(),
+            "{name}: content_sha256"
+        );
+        assert_eq!(
+            std::str::from_utf8(
+                &request
+                    .content
+                    .canonical_bytes_for(ControlSchema::V4)
+                    .unwrap()
+            )
+            .unwrap(),
+            case["content_canonical"].as_str().unwrap(),
+            "{name}: content_canonical"
+        );
+        let statement = Statement::Control { signer, request };
+        let bytes = statement.signed_bytes(now_for(&case)).unwrap();
+        assert_eq!(
+            std::str::from_utf8(&bytes).unwrap(),
+            case["payload"].as_str().unwrap(),
+            "{name}"
+        );
+        // The dialog holds the whole prompt the hash covers.
+        let summary = statement.summary(None);
+        assert!(summary.full_text.is_some(), "{name}");
+    }
+}
+
+#[test]
+fn v4_is_the_new_work_spawns_schema_and_only_its() {
+    let case = cases_v4().remove(0);
+    let (signer, request) = v4_control(&case);
+    // SpawnTask under v2 / v3 is refused ...
+    for schema in [ControlSchema::V2, ControlSchema::V3] {
+        assert!(request.content.canonical_bytes_for(schema).is_err());
+        assert!(control_bytes_for(schema, &signer, &request).is_err());
+    }
+    // ... and no other kind is built under v4.
+    let input = input_case().1;
+    assert!(input
+        .content
+        .canonical_bytes_for(ControlSchema::V4)
+        .is_err());
+    assert!(control_bytes_for(
+        ControlSchema::V4,
+        &signer,
+        &ControlRequest {
+            content: input.content,
+            ..input_case().1
+        }
+    )
+    .is_err());
+    let resume = cases_v2()
+        .into_iter()
+        .find(|c| c["name"] == "control_v2_spawn_resume")
+        .unwrap();
+    let (_, resume_request) = v4_control(&resume);
+    assert!(resume_request
+        .content
+        .canonical_bytes_for(ControlSchema::V4)
+        .is_err());
+    // A new task has no session line (a resume's successor id is v2's).
+    let mut with_session = request.clone();
+    with_session.session_id = Some(Uuid::from_u128(9));
+    assert_eq!(
+        control_bytes_for(ControlSchema::V4, &signer, &with_session),
+        Err(PayloadError::SessionForbidden)
+    );
+}
+
+#[test]
+fn a_new_task_is_never_signed_with_text_the_server_would_refuse() {
+    let case = cases_v4().remove(0);
+    let (_, request) = v4_control(&case);
+    let build = |edit: &dyn Fn(&mut ControlContent)| {
+        let mut content = request.content.clone();
+        edit(&mut content);
+        content.canonical_bytes_for(ControlSchema::V4)
+    };
+    let set_prompt = |p: &str| {
+        let p = p.to_string();
+        move |c: &mut ControlContent| {
+            if let ControlContent::SpawnTask { prompt, .. } = c {
+                *prompt = p.clone();
+            }
+        }
+    };
+    let set_label = |l: &str| {
+        let l = l.to_string();
+        move |c: &mut ControlContent| {
+            if let ControlContent::SpawnTask { label, .. } = c {
+                *label = l.clone();
+            }
+        }
+    };
+    assert!(build(&|_| {}).is_ok());
+    for bad in [
+        "",
+        "   ",
+        "/clear",
+        "  /clear",
+        "a\u{0}b",
+        "a\u{7}b",
+        "a\u{202e}b",
+    ] {
+        assert!(build(&set_prompt(bad)).is_err(), "prompt {bad:?}");
+    }
+    assert!(build(&set_prompt(&"가".repeat(32_769))).is_err());
+    assert!(build(&set_prompt(&"가".repeat(32_768))).is_ok());
+    assert!(build(&set_prompt("줄 하나\n줄 둘\t탭")).is_ok());
+    for bad in ["", " 앞 ", "두\n줄", "탭\t", "\u{200b}숨김"] {
+        assert!(build(&set_label(bad)).is_err(), "label {bad:?}");
+    }
+    assert!(build(&set_label(&"가".repeat(121))).is_err());
+    assert!(build(&set_label(&"가".repeat(120))).is_ok());
+    // A folder or tool with a line break would move every later line.
+    assert!(build(&|c| {
+        if let ControlContent::SpawnTask { folder_id, .. } = c {
+            *folder_id = "fld\nx".into();
+        }
+    })
+    .is_err());
+}
+
+/// The payload is thirteen lines whatever the prompt: a 32,768-character
+/// prompt and a 120-character title are hashed, never put in the bytes the
+/// enclave signs, so the 2048-byte ceiling cannot refuse a long task.
+#[test]
+fn a_long_prompt_does_not_grow_the_signed_payload() {
+    let case = cases_v4().remove(0);
+    let (signer, mut request) = v4_control(&case);
+    if let ControlContent::SpawnTask { prompt, label, .. } = &mut request.content {
+        *prompt = "가".repeat(32_768);
+        *label = "나".repeat(120);
+    }
+    let bytes = Statement::Control { signer, request }
+        .signed_bytes(now_for(&case))
+        .unwrap();
+    assert!(bytes.len() <= MAX_SIGNING_PAYLOAD_BYTES);
+    assert_eq!(bytes.iter().filter(|b| **b == b'\n').count(), 12);
+}
+
+/// The dialog shows the title, the prompt's first line and size, the agent,
+/// folder and room: what the person approves is what is signed.
+#[test]
+fn the_new_task_dialog_shows_the_title_and_the_whole_prompt() {
+    let case = cases_v4().remove(0);
+    let (signer, request) = v4_control(&case);
+    let ControlContent::SpawnTask {
+        label,
+        prompt,
+        channel_id,
+        ..
+    } = request.content.clone()
+    else {
+        unreachable!()
+    };
+    let summary = Statement::Control { signer, request }.summary(None);
+    assert!(
+        summary.body.contains(&format!("「{label}」")),
+        "{}",
+        summary.body
+    );
+    assert!(summary.body.contains("프롬프트: "), "{}", summary.body);
+    assert!(
+        summary.body.contains(&text_size(&prompt)),
+        "{}",
+        summary.body
+    );
+    let tail = channel_id.simple().to_string();
+    assert!(summary
+        .body
+        .contains(&format!("채널 {}", &tail[tail.len() - 8..])));
+    assert_eq!(summary.full_text.as_deref(), Some(prompt.as_str()));
+    // A plain harness spawn says there is no agent.
+    let bare = cases_v4().remove(2);
+    let (signer, request) = v4_control(&bare);
+    let body = Statement::Control { signer, request }.summary(None).body;
+    assert!(body.contains("에이전트 없음"), "{body}");
+}
+
+/// #3592 review M2 · L2: the shared text table. The desktop shell refuses every
+/// `rejects` entry and accepts every `accepts` entry of the v4 vectors — the
+/// same input the server (`momo-wire`) and the core (and so the phone) judge.
+#[test]
+fn the_text_table_of_the_v4_vectors_is_this_shells_table() {
+    let root: Value = serde_json::from_str(VECTORS_V4).unwrap();
+    let rules = &root["text_rules"];
+    let verdict = |field: &str, value: &str| match field {
+        "prompt" => spawn_prompt_ok(value),
+        "label" => spawn_label_ok(value),
+        other => panic!("field {other}"),
+    };
+    let rejects = rules["rejects"].as_array().unwrap();
+    assert!(rejects.len() >= 20);
+    for case in rejects {
+        let (name, field, value) = (
+            case["name"].as_str().unwrap(),
+            case["field"].as_str().unwrap(),
+            case["value"].as_str().unwrap(),
+        );
+        assert!(verdict(field, value).is_err(), "{name} must be refused");
+    }
+    for case in rules["accepts"].as_array().unwrap() {
+        let (name, field, value) = (
+            case["name"].as_str().unwrap(),
+            case["field"].as_str().unwrap(),
+            case["value"].as_str().unwrap(),
+        );
+        assert!(verdict(field, value).is_ok(), "{name} must be accepted");
+    }
 }

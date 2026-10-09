@@ -797,7 +797,7 @@ pub fn build_app(state: AppState) -> Router {
         //     INSTANCE-GLOBAL: one row (or one new tenant) that every workspace
         //     on this instance shares, so they take the MOMO-583 gate
         //     (`platform:read` or a listed instance operator).
-        //   * `work-host-engine`, `work-tier-policy` and the invite pair are
+        //   * `work-tier-policy` and the invite pair are
         //     PER-WORKSPACE rows under the uniform RLS policy, so a workspace
         //     owner/admin is the right authority.
         //   * `effort-table` and `quota-snapshots` are reads with no tenant row
@@ -822,11 +822,6 @@ pub fn build_app(state: AppState) -> Router {
             get(routes::provider_link::get_chain)
                 .put(routes::provider_link::put_chain)
                 .delete(routes::provider_link::delete_chain),
-        )
-        .route(
-            "/v1/provider/work-host-engine",
-            get(routes::provider_settings::get_work_host_engine)
-                .put(routes::provider_settings::put_work_host_engine),
         )
         .route(
             "/v1/provider/effort-table",
@@ -1169,6 +1164,20 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/work-sessions/{session}/instructions",
             post(routes::work_instructions::send),
         )
+        // ADR-0198 N4 (#3628): the owner's stop. Human bearer only, unsigned
+        // (`kill` never is), absent from `momo_auth::required_agent_scope` and
+        // from the signed-host allow-list. Writes a `kill` work_control.
+        .route(
+            "/v1/workspaces/{ws}/work-sessions/{session}/kill",
+            post(routes::work_kill::kill),
+        )
+        // ADR-0198 D4 (#3570, T5): the owner's signed NEW-work spawn onto their
+        // own Mac. Human bearer only — never signable by a host, absent from
+        // `momo_auth::required_agent_scope`. Writes a work_control, not a message.
+        .route(
+            "/v1/workspaces/{ws}/work-spawns",
+            post(routes::work_spawns::spawn),
+        )
         // work controls — the host-control ledger (#1114, ADR-0114 D4/D5)
         .route(
             "/v1/workspaces/{ws}/work-controls",
@@ -1342,6 +1351,16 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/subscription-agents/register",
             post(routes::subscription_agents::register),
+        )
+        // #3591 P2 (ADR-0198 증보 1 D7) — 개인 에이전트 켜기·끄기. 호출자 본인의
+        // 하네스만(소유자 id는 요청 필드가 아니다), 서버는 토큰을 갖지 않는다.
+        .route(
+            "/v1/workspaces/{ws}/personal-agents",
+            post(routes::personal_agents::enable).get(routes::personal_agents::list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/personal-agents/{agent}/disable",
+            post(routes::personal_agents::disable),
         )
         .route(
             "/v1/workspaces/{ws}/hosted-agent-connections",

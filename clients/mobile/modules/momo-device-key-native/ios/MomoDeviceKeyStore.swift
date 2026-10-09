@@ -206,9 +206,14 @@ public struct MomoDeviceKeyStore {
   /// `control.v3` (#3118 → #3128) is
   /// what an allow is signed as: the same 13-line frame, its permission body
   /// binding the hash of the host's preview the card checked and showed.
+  /// `control.v4` (#3592) is what a NEW task on the owner's own Mac is signed
+  /// as: the same 13-line frame, its spawn body the eight lines of ADR-0198
+  /// 증보 1 「T5 확정」 1 (the allow-list reads the schema line and the line
+  /// count, never the content, so it needs no other change).
   public static let signingSchemas: [String: Int] = [
     "momo.human.control.v2": 13,
     "momo.human.control.v3": 13,
+    "momo.human.control.v4": 13,
     "momo.human.device_rebind.v1": 7,
   ]
   /// #3103 (momo-wire `DEVICE_REBIND_SCHEMA_V1`): the key moves itself onto

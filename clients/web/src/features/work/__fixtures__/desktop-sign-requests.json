@@ -130,5 +130,121 @@
       }
     },
     "payload": "momo.human.control.v3\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d002\n00000000-0000-7000-8000-00000000f001\n00000000-0000-7000-8000-00000000c001\npermission\n-\n0b5e8c4d-2f1a-4c3b-9d8e-7f6a5b4cf003\n1790550003000\n1790550063000\n460339f76b79fd6e87576c0c6e50f4bae00286c29d2d9a22a81ef1a5ad964e94"
+  },
+  {
+    "name": "control_v4_spawn_personal_agent_in_thread",
+    "signer": {
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "memberId": "00000000-0000-7000-8000-000000000101",
+      "keyId": "00000000-0000-7000-8000-00000000d003"
+    },
+    "request": {
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "instanceId": "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
+      "hostId": "00000000-0000-7000-8000-00000000f001",
+      "sessionId": null,
+      "nonce": "0193a5b8-7c1e-7d2a-9f00-000000000041",
+      "issuedAtMs": 1790550011000,
+      "expiresAtMs": 1790550611000,
+      "content": {
+        "kind": "spawn_task",
+        "agentMemberId": "00000000-0000-7000-8000-000000000a02",
+        "folderId": "fld_0123456789abcdef0123",
+        "tool": "claude",
+        "channelId": "00000000-0000-7000-8000-00000000cc01",
+        "threadRootId": "00000000-0000-7000-8000-00000000e001",
+        "originMessageId": "00000000-0000-7000-8000-00000000e002",
+        "label": "빌드 확인",
+        "prompt": "@kwak-claude 빌드가 왜 깨지는지 봐 줘\n첫째, 로그부터요. café"
+      }
+    },
+    "payload": "momo.human.control.v4\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d003\n00000000-0000-7000-8000-00000000f001\n-\nspawn\n-\n0193a5b8-7c1e-7d2a-9f00-000000000041\n1790550011000\n1790550611000\nae0871fe81267077ac38709779d70e09c1ff4cc490171278b1d856d7fd9722e9"
+  },
+  {
+    "name": "control_v4_spawn_personal_agent_main_line",
+    "signer": {
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "memberId": "00000000-0000-7000-8000-000000000101",
+      "keyId": "00000000-0000-7000-8000-00000000d003"
+    },
+    "request": {
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "instanceId": "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
+      "hostId": "00000000-0000-7000-8000-00000000f001",
+      "sessionId": null,
+      "nonce": "0193a5b8-7c1e-7d2a-9f00-000000000042",
+      "issuedAtMs": 1790550012000,
+      "expiresAtMs": 1790550612000,
+      "content": {
+        "kind": "spawn_task",
+        "agentMemberId": "00000000-0000-7000-8000-000000000a02",
+        "folderId": "fld_0123456789abcdef0123",
+        "tool": "codex",
+        "channelId": "00000000-0000-7000-8000-00000000cc01",
+        "threadRootId": null,
+        "originMessageId": "00000000-0000-7000-8000-00000000e002",
+        "label": "리서치",
+        "prompt": "@kwak-codex 이 라이브러리 라이선스 알아봐 줘"
+      }
+    },
+    "payload": "momo.human.control.v4\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d003\n00000000-0000-7000-8000-00000000f001\n-\nspawn\n-\n0193a5b8-7c1e-7d2a-9f00-000000000042\n1790550012000\n1790550612000\n2616e42e7319e584eca6652812204e4009e93fea561c3f02acf4c6091d435c03"
+  },
+  {
+    "name": "control_v4_spawn_harness_without_agent",
+    "signer": {
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "memberId": "00000000-0000-7000-8000-000000000101",
+      "keyId": "00000000-0000-7000-8000-00000000d003"
+    },
+    "request": {
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "instanceId": "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
+      "hostId": "00000000-0000-7000-8000-00000000f001",
+      "sessionId": null,
+      "nonce": "0193a5b8-7c1e-7d2a-9f00-000000000043",
+      "issuedAtMs": 1790550013000,
+      "expiresAtMs": 1790550613000,
+      "content": {
+        "kind": "spawn_task",
+        "agentMemberId": null,
+        "folderId": "fld_aaaaaaaaaaaaaaaaaaaa",
+        "tool": "claude",
+        "channelId": "00000000-0000-7000-8000-00000000cc01",
+        "threadRootId": null,
+        "originMessageId": null,
+        "label": "질문",
+        "prompt": "폴더 구조를 설명해 줘"
+      }
+    },
+    "payload": "momo.human.control.v4\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d003\n00000000-0000-7000-8000-00000000f001\n-\nspawn\n-\n0193a5b8-7c1e-7d2a-9f00-000000000043\n1790550013000\n1790550613000\n153c447eb7ed2d111b1bbab95e649d08a5d06d59ab4190008b92d7abac91e03c"
+  },
+  {
+    "name": "control_v4_spawn_nfd_text_signs_as_nfc",
+    "signer": {
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "memberId": "00000000-0000-7000-8000-000000000101",
+      "keyId": "00000000-0000-7000-8000-00000000d003"
+    },
+    "request": {
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "instanceId": "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
+      "hostId": "00000000-0000-7000-8000-00000000f001",
+      "sessionId": null,
+      "nonce": "0193a5b8-7c1e-7d2a-9f00-000000000044",
+      "issuedAtMs": 1790550014000,
+      "expiresAtMs": 1790550614000,
+      "content": {
+        "kind": "spawn_task",
+        "agentMemberId": "00000000-0000-7000-8000-000000000a02",
+        "folderId": "fld_0123456789abcdef0123",
+        "tool": "claude",
+        "channelId": "00000000-0000-7000-8000-00000000cc01",
+        "threadRootId": null,
+        "originMessageId": "00000000-0000-7000-8000-00000000e002",
+        "label": "résumé",
+        "prompt": "café 한글 확인"
+      }
+    },
+    "payload": "momo.human.control.v4\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d003\n00000000-0000-7000-8000-00000000f001\n-\nspawn\n-\n0193a5b8-7c1e-7d2a-9f00-000000000044\n1790550014000\n1790550614000\n86a2fc65ab31bb8e3c449da45929d5691666cc4613c5f28dcc1181e38b19a288"
   }
 ]

@@ -224,6 +224,12 @@ struct Envelope {
     agent_member_id: Option<Uuid>,
     #[serde(default)]
     folder_id: Option<String>,
+    /// New-work spawn (v4, #3570): the thread and message the owner called
+    /// from. Absent for a spawn called from neither.
+    #[serde(default)]
+    thread_root_id: Option<Uuid>,
+    #[serde(default)]
+    origin_message_id: Option<Uuid>,
     signature: String,
 }
 
@@ -609,6 +615,37 @@ impl HumanTrust {
                 require_nfc(text)?;
                 (ControlContent::Input { mode, text }, control.session_id)
             }
+            // T5 (#3570): a NEW-work spawn, recognised by its `prompt` — the
+            // whole first prompt, which only the signed route writes. The
+            // statement is v4: the prompt, the harness, the folder id, the
+            // room, the thread and message it was called from, and the agent
+            // only when one was named. A fresh task has no session yet.
+            "spawn" if control.payload.get("prompt").is_some() => {
+                let Some(folder_id) = envelope.folder_id.as_deref() else {
+                    return Err(Refusal::DeviceSignatureInvalid);
+                };
+                if control.session_id.is_some() {
+                    return Err(Refusal::InvalidControl);
+                }
+                let prompt = payload("prompt").ok_or(Refusal::InvalidControl)?;
+                let tool = payload("tool").ok_or(Refusal::InvalidControl)?;
+                let label = payload("label").ok_or(Refusal::InvalidControl)?;
+                require_nfc(prompt)?;
+                require_nfc(label)?;
+                (
+                    ControlContent::SpawnTask {
+                        agent_member_id: envelope.agent_member_id,
+                        folder_id,
+                        tool,
+                        channel_id: control.channel_id,
+                        thread_root_id: envelope.thread_root_id,
+                        origin_message_id: envelope.origin_message_id,
+                        label,
+                        prompt,
+                    },
+                    None,
+                )
+            }
             "spawn" => {
                 let (Some(agent_member_id), Some(folder_id)) =
                     (envelope.agent_member_id, envelope.folder_id.as_deref())
@@ -802,6 +839,28 @@ fn require_nfc(text: &str) -> Result<(), Refusal> {
     } else {
         Err(Refusal::DeviceSignatureInvalid)
     }
+}
+
+/// A **new-work** spawn (T5, #3570): a spawn that carries the owner's whole
+/// prompt. Only the signed route writes one, so a host acts on it only when it
+/// verified the owner's signature itself — whether or not R2 is switched on
+/// here — and reads the folder id from nowhere else.
+pub fn is_new_work_spawn(control: &WorkControl) -> bool {
+    // The KEY decides, not its type: a `prompt` that is not a string is a
+    // malformed new-work spawn to refuse, not a resume to fall back to.
+    control.kind == "spawn" && control.payload.get("prompt").is_some()
+}
+
+/// The folder id a **verified** new-work spawn names (its envelope's
+/// `folderId`, which the v4 statement binds). Call it only after
+/// [`HumanTrust::check_control`] passed for this same control.
+pub fn verified_folder_id(control: &WorkControl) -> Option<String> {
+    control
+        .human_signature
+        .as_ref()
+        .and_then(|envelope| envelope.get("folderId"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
 }
 
 /// Which controls need a device signature when R2 is on (ADR-0146 D-8): a

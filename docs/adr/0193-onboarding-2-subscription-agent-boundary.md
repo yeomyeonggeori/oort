@@ -1,5 +1,7 @@
 # ADR-0193: 온보딩 2.0 — 한 화면 한 질문·코메토 안내, 구독은 소유자 1인의 개인 에이전트로
 
+> 증보/대체 (2026-10-07): D2·D4·D14~D18의 「구독 에이전트」 개념(하네스를 `member.kind='agent'` 멤버로 두는 것)은 [ADR-0198](0198-agents-vs-harnesses-work-request-routing.md) D1/D2가 대체한다. 이 문서의 본문은 고치지 않는다.
+
 - Status: **Accepted** (2026-09-26 성재 결재. 근거는 아래 인용)
 - Date: 2026-09-26
 - Deciders: 성재
