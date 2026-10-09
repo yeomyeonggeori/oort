@@ -104,6 +104,7 @@ fn roster_dto(member: &RosterMember) -> RosterMemberDto {
         owner: None,
         host_online: None,
         brain_unavailable_reason: None,
+        personal_agent: None,
     }
 }
 
@@ -120,6 +121,7 @@ pub async fn roster(
     let kind_filter = parse_roster_kind_filter(query.kind_raw())
         .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?;
     let limit = query.limit();
+    let viewer = principal.member_id;
 
     let outcome: DbRejectable<(Vec<RosterMember>, Vec<momo_agent::AgentReadFacts>, bool)> =
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
@@ -170,6 +172,7 @@ pub async fn roster(
                 let mut dto = roster_dto(member);
                 if let Some(facts) = facts.iter().find(|f| f.agent_member_id == member.id) {
                     dto.apply_read_facts(facts, claude_enabled);
+                    dto.apply_personal_facts(facts, viewer);
                     // Security review F2: a guest sees only what it shares. The
                     // owner's id and name are shown only when the owner is itself on
                     // the guest's roster, and liveness is not shown to guests at all.
@@ -180,6 +183,7 @@ pub async fn roster(
                         });
                         if !owner_visible {
                             dto.owner = None;
+                            dto.personal_agent = None;
                         }
                     }
                 }

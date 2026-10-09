@@ -2666,6 +2666,12 @@ pub struct RosterMemberDto {
     /// status; it blocks nothing by itself.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub brain_unavailable_reason: Option<String>,
+    /// #3591 (ADR-0198 증보 1 D7, 결재 2): present only on a personal agent. The
+    /// label teammates read (「<소유자 이름>의 개인 에이전트」), the owner, the
+    /// harness, whether it is switched on, and — computed for **this viewer** —
+    /// whether `@` autocomplete may offer it (the owner only, and only while on).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub personal_agent: Option<PersonalAgentDto>,
     /// `agent_profile.paused` — goal SRV-R2, the one key here Swift's DTO does
     /// not have.
     ///
@@ -4113,6 +4119,77 @@ pub struct RegisterSubscriptionAgentResponse {
     pub pairing_expires_at_ms: Option<i64>,
 }
 
+/// The roster's read value for a personal agent (#3591, ADR-0198 증보 1 D7).
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonalAgentDto {
+    /// 「<소유자 이름>의 개인 에이전트」 — ready to draw next to the member.
+    pub label: String,
+    pub owner_id: String,
+    pub owner_display_name: String,
+    /// `claude_code` | `codex`.
+    pub harness: String,
+    /// Switched on (`member.status = active`). Off keeps the member and every
+    /// past message; it cannot be called.
+    pub enabled: bool,
+    /// Whether `@` autocomplete offers it to the viewer: the owner, while on.
+    /// A teammate sees `false` and never gets it as a candidate (결재 2).
+    pub mentionable: bool,
+}
+
+/// `POST /v1/workspaces/{ws}/personal-agents` (#3591): turn the caller's
+/// connected harness on as a personal agent.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EnablePersonalAgentRequest {
+    /// `"claude_code"` or `"codex"`.
+    pub harness: String,
+    /// The alias (= the member handle), unique in the workspace. Optional only
+    /// when `agentMemberId` converts an existing agent (it keeps its handle) or
+    /// when turning an agent the caller switched off back on.
+    #[serde(default)]
+    pub alias: Option<String>,
+    /// Optional display name; defaults to the alias.
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// #3567: convert the caller's own existing `owner_only` subscription agent
+    /// of the same harness in place (same member id, handle and history).
+    #[serde(default)]
+    pub agent_member_id: Option<Uuid>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonalAgentSummaryDto {
+    pub id: String,
+    pub handle: String,
+    pub display_name: String,
+    pub harness: String,
+    pub enabled: bool,
+    pub label: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnablePersonalAgentResponse {
+    pub agent: PersonalAgentSummaryDto,
+    /// `true` when the call changed nothing (already on) or switched an existing
+    /// agent back on; `false` when a member was created or converted.
+    pub reused: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisablePersonalAgentResponse {
+    pub agent: PersonalAgentSummaryDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonalAgentListResponse {
+    pub agents: Vec<PersonalAgentSummaryDto>,
+}
+
 /// The owner of a subscription agent (#3392). Name and id only.
 #[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -4122,6 +4199,23 @@ pub struct AgentOwnerDto {
 }
 
 impl RosterMemberDto {
+    /// #3591: the personal-agent read value for `viewer`. Only the owner gets
+    /// `mentionable`, and only while the agent is on (결재 2: a teammate sees the
+    /// agent and its label, but autocomplete never offers it to them).
+    pub fn apply_personal_facts(&mut self, facts: &momo_agent::AgentReadFacts, viewer: Uuid) {
+        let (Some(personal), Some((owner_id, owner_name))) = (&facts.personal, &facts.owner) else {
+            return;
+        };
+        self.personal_agent = Some(PersonalAgentDto {
+            label: momo_agent::personal_agent_label(owner_name),
+            owner_id: owner_id.to_string(),
+            owner_display_name: owner_name.clone(),
+            harness: personal.harness.as_str().to_string(),
+            enabled: personal.enabled,
+            mentionable: personal.enabled && *owner_id == viewer,
+        });
+    }
+
     /// Stamp the AIH-2 read contract onto an agent row.
     pub fn apply_read_facts(
         &mut self,

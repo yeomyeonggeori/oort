@@ -1352,6 +1352,16 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/subscription-agents/register",
             post(routes::subscription_agents::register),
         )
+        // #3591 P2 (ADR-0198 증보 1 D7) — 개인 에이전트 켜기·끄기. 호출자 본인의
+        // 하네스만(소유자 id는 요청 필드가 아니다), 서버는 토큰을 갖지 않는다.
+        .route(
+            "/v1/workspaces/{ws}/personal-agents",
+            post(routes::personal_agents::enable).get(routes::personal_agents::list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/personal-agents/{agent}/disable",
+            post(routes::personal_agents::disable),
+        )
         .route(
             "/v1/workspaces/{ws}/hosted-agent-connections",
             post(routes::hosted_agent_connections::create)
