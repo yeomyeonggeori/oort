@@ -44,7 +44,9 @@ import SidebarScreen from '../screens/SidebarScreen';
 import TeamBoardScreen from '../screens/TeamBoardScreen';
 import WorkSessionDetailScreen from '../screens/WorkSessionDetailScreen';
 import {SessionProvider, useSession} from '../session/useSession';
+import {AskMacSheet} from './AskMacSheet';
 import {DelegateWorkSheet, type DelegatePrefill} from './DelegateWorkSheet';
+import {spawnPort} from '../features/work/ask/spawnPort';
 import {NewChannelSheet} from './NewChannelSheet';
 import {NewMessageSheet} from './NewMessageSheet';
 import {PlusMenu, type PlusMenuItem} from './PlusMenu';
@@ -146,6 +148,9 @@ export function Shell({
   // 정해 넘기고, `CreateStep` 은 캡처 하네스의 시작값으로도 쓰이는 닫힌 집합이다.
   const [delegate, setDelegate] = useState<DelegatePrefill | null>(null);
   const closeDelegate = useCallback(() => setDelegate(null), []);
+  // 「내 맥에 보내기」 시트(#3597). 맥이 꺼져 있을 때 사람이 누르면 N8 시트로 넘어간다.
+  const [askMac, setAskMac] = useState(false);
+  const closeAskMac = useCallback(() => setAskMac(false), []);
   const onDelegateWork = useCallback(
     (prefill: DelegatePrefill) => setDelegate(prefill),
     [],
@@ -251,6 +256,16 @@ export function Shell({
       hint: '에이전트 목록을 엽니다.',
       onPress: onOpenAgentList,
     });
+    // 내 맥으로 보내는 길이 이 빌드에 연결돼 있을 때만 입구를 세운다(`spawnPort`의 머리 설명).
+    if (spawnPort().wired) {
+      items.push({
+        key: 'ask-mac',
+        icon: 'work',
+        label: '내 맥에 물어보기',
+        hint: '내 맥의 Claude Code 같은 도구에 물어보거나 일을 시키는 시트를 엽니다.',
+        onPress: () => setAskMac(true),
+      });
+    }
     items.push({
       key: 'delegate',
       icon: 'work',
@@ -485,6 +500,21 @@ export function Shell({
         <NewChannelSheet
           onOpenConversation={onOpenConversation}
           onClose={closeCreate}
+        />
+      ) : null}
+      {askMac ? (
+        <AskMacSheet
+          onClose={closeAskMac}
+          onUseAgent={() => {
+            setAskMac(false);
+            setDelegate({});
+          }}
+          onOpenSession={sessionId => {
+            if (workConsole) dispatch({type: 'openWorkSession', workSession: {sessionId}});
+          }}
+          onOpenWorkList={() => {
+            if (workConsole) dispatch({type: 'openWorkList'});
+          }}
         />
       ) : null}
       {delegate !== null ? (
