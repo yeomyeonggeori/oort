@@ -8,6 +8,7 @@ import {
   personalAliasValid,
   type PersonalAgentSummary,
 } from "@momo/core/features/ai/harnessCard";
+import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { Switch } from "@/design/ui/switch";
@@ -38,6 +39,9 @@ export function PersonalAgentRow({ harness, read, agent, port, onChanged, offlin
   const labelId = useId();
   const hintId = useId();
   const aliasId = useId();
+  const switchId = useId();
+  // 폼의 단추가 사라질 때 초점이 body로 떨어지지 않게 스위치로 돌려 준다.
+  const refocusSwitch = () => window.setTimeout(() => document.getElementById(switchId)?.focus(), 0);
   const [composing, setComposing] = useState(false);
   const [alias, setAlias] = useState("");
   const [busy, setBusy] = useState(false);
@@ -65,6 +69,7 @@ export function PersonalAgentRow({ harness, read, agent, port, onChanged, offlin
       setComposing(false);
       setAlias("");
       onChanged();
+      refocusSwitch();
     } catch (caught) {
       fail(caught);
     } finally {
@@ -90,7 +95,10 @@ export function PersonalAgentRow({ harness, read, agent, port, onChanged, offlin
     <div className="flex min-w-0 flex-col gap-2 border-t border-line pt-3" data-testid={`${testId}-personal`} data-read={read}>
       <div className="flex min-w-0 items-center gap-3">
         <div className="flex min-w-0 flex-1 flex-col">
-          <span id={labelId} className="break-keep text-body text-ink">
+          <span
+            id={labelId}
+            className={cn("break-keep text-body", read === "unavailable" ? "text-ink-muted" : "text-ink")}
+          >
             {COPY.toggleLabel}
           </span>
           <span id={hintId} className="break-keep text-meta text-ink-muted">
@@ -98,17 +106,20 @@ export function PersonalAgentRow({ harness, read, agent, port, onChanged, offlin
               ? COPY.unavailable
               : read === "error"
                 ? COPY.loadFailed
-                : on
-                  ? `${agent?.label ?? COPY.badgeHint}`
-                  : agent
-                    ? COPY.off
-                    : COPY.toggleHint}
+                : offline
+                  ? COPY.offlineHint
+                  : on
+                    ? `${agent?.label ?? ""} ${COPY.badgeHint}`.trim()
+                    : agent
+                      ? COPY.off
+                      : COPY.toggleHint}
           </span>
         </div>
         {read === "ok" || read === "loading" ? (
           <Switch
             checked={on || composing}
             disabled={read === "loading" || busy || offline}
+            id={switchId}
             labelledBy={labelId}
             describedBy={hintId}
             testId={`${testId}-personal-switch`}
@@ -166,7 +177,7 @@ export function PersonalAgentRow({ harness, read, agent, port, onChanged, offlin
               autoCorrect="off"
               spellCheck={false}
               aria-invalid={error !== null}
-              aria-describedby={error ? `${aliasId}-error` : `${aliasId}-hint`}
+              aria-describedby={error ? `${aliasId}-hint ${aliasId}-error` : `${aliasId}-hint`}
               autoFocus
               className="min-w-0 flex-1 font-mono sm:max-w-xs"
               data-testid={`${testId}-alias-input`}
@@ -174,6 +185,7 @@ export function PersonalAgentRow({ harness, read, agent, port, onChanged, offlin
             <Button
               type="submit"
               size="sm"
+              variant="secondary"
               className="tap-target"
               disabled={busy || alias.trim() === ""}
               data-testid={`${testId}-alias-submit`}
@@ -189,6 +201,7 @@ export function PersonalAgentRow({ harness, read, agent, port, onChanged, offlin
               onClick={() => {
                 setComposing(false);
                 setError(null);
+                refocusSwitch();
               }}
               data-testid={`${testId}-alias-cancel`}
             >

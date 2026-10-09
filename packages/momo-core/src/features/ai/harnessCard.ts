@@ -130,13 +130,23 @@ export const HOST_VIEW_LABEL: Record<HostView, string> = {
   unknown: "내 맥 확인 못 했어요",
 };
 
-export const HOST_VIEW_DETAIL: Record<HostView, string> = {
-  on: "작업을 이 맥으로 바로 시킬 수 있어요.",
-  off: "맥이 켜질 때까지 이 맥으로는 작업을 시킬 수 없어요.",
-  unregistered: "이 맥을 작업 호스트로 등록하면 폰에서도 시킬 수 있어요.",
-  checking: "",
-  unknown: "서버에서 호스트 목록을 읽지 못했어요.",
-};
+/** 호스트 상태 밑의 한 줄. 웹 탭은 그 맥 앞에 있지 않아서 「이 맥」이라 말하지 않는다. */
+export function hostDetail(view: HostView, desktop: boolean): string {
+  switch (view) {
+    case "on":
+      return desktop ? "작업을 이 맥으로 바로 시킬 수 있어요." : "내 맥이 켜져 있어서 작업을 시킬 수 있어요.";
+    case "off":
+      return desktop ? "맥이 켜질 때까지 이 맥으로는 작업을 시킬 수 없어요." : "맥이 켜질 때까지 작업을 시킬 수 없어요.";
+    case "unregistered":
+      return desktop
+        ? "이 맥을 작업 호스트로 등록하면 폰에서도 시킬 수 있어요."
+        : "데스크탑 앱에서 맥을 작업 호스트로 등록하면 작업을 시킬 수 있어요.";
+    case "unknown":
+      return "서버에서 호스트 목록을 읽지 못했어요.";
+    case "checking":
+      return "";
+  }
+}
 
 export function hostTone(view: HostView): "ok" | "mute" | "run" {
   return view === "on" ? "ok" : view === "checking" ? "run" : "mute";
@@ -209,6 +219,7 @@ export const PERSONAL_AGENT_COPY = {
   cancel: "취소",
   badge: "개인",
   badgeHint: "나만 부를 수 있어요",
+  offlineHint: "오프라인이라 지금은 바꿀 수 없어요.",
   off: "꺼 둔 개인 에이전트",
   unavailable: "이 서버에서는 아직 개인 에이전트를 켤 수 없어요. 서버가 업데이트되면 열려요.",
   loadFailed: "개인 에이전트 상태를 읽지 못했어요.",
@@ -250,6 +261,7 @@ export const TOOLS_COPY = {
   registerHost: "설정에서 이 맥 등록하기",
   notInstalled: "이 맥에서 설치를 찾지 못했어요. 설치한 뒤 다시 열어 주세요.",
   checkFailed: "공식 CLI가 답하지 않아 로그인 상태를 모르겠어요.",
-  loginNotStored: "oort는 로그인 정보를 보지 않아요. 상태 명령의 종료 코드만 읽어요.",
+  loginNotStored: "oort는 로그인 정보를 보지 않아요.",
+  hostRetry: "다시 읽기",
   hostHead: "작업 호스트",
 } as const;

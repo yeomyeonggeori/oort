@@ -12,7 +12,7 @@ import {
   type AiGlossaryId,
   type AiHubSectionId,
 } from "@momo/core/features/ai/aiHubModel";
-import { TOOLS_COPY } from "@momo/core/features/ai/harnessCard";
+import { HARNESS_LOGIN_VIEW_LABEL, TOOLS_COPY } from "@momo/core/features/ai/harnessCard";
 
 // =============================================================================
 // 허브 개요 카드의 상태 문장 (AIH-3, #3393).
@@ -85,8 +85,8 @@ export function accountsCard(input: AccountsInput): HubCardView {
   const chips = input.probes.map((probe): HubChip => {
     const name = HARNESS_LABEL[HARNESS_BY_PROBE[probe.id]];
     if (!probe.installed) return { text: `${name} ${COPY.chip.notInstalled}`, tone: "neutral" };
-    if (probe.auth === "logged_in") return { text: `${name} ${COPY.chip.ready}`, tone: "ok" };
-    if (probe.auth === "needs_login") return { text: `${name} ${COPY.chip.loginNeeded}`, tone: "warn" };
+    if (probe.auth === "logged_in") return { text: `${name} ${HARNESS_LOGIN_VIEW_LABEL.connected}`, tone: "ok" };
+    if (probe.auth === "needs_login") return { text: `${name} ${HARNESS_LOGIN_VIEW_LABEL.reauth}`, tone: "warn" };
     return { text: `${name} ${COPY.chip.unknown}`, tone: "neutral" };
   });
   return { ...base, chips, note: null };

@@ -6,11 +6,11 @@ import { loginFailedLine, loginWaitingLine } from "@momo/core/features/onboardin
 import {
   DISCONNECT_FAILED_LINE,
   HARNESS_LOGIN_VIEW_LABEL,
-  HOST_VIEW_DETAIL,
   HOST_VIEW_LABEL,
   TOOLS_COPY,
   harnessLoginTone,
   harnessLoginView,
+  hostDetail,
   hostTone,
   type DisconnectProgress,
   type HostView,
@@ -18,7 +18,7 @@ import {
 } from "@momo/core/features/ai/harnessCard";
 import { Card } from "@/design/ui/card";
 import { Button } from "@/design/ui/button";
-import { AiLogo, AiPill } from "@/features/settings/aiAccountsParts";
+import { AiLogo, AiPill, AiSource } from "@/features/settings/aiAccountsParts";
 import { HarnessLoginDialog } from "@/features/welcome/harnessLogin/HarnessLoginDialog";
 import type { LoginController, LoginControllerState } from "@/features/welcome/harnessLogin/loginController";
 import type { UnlinkController, UnlinkControllerState } from "@/features/welcome/harnessLogin/unlinkController";
@@ -97,10 +97,12 @@ export interface HarnessCardProps {
   sessions: HarnessSessionStore;
   sessionsVersion: number;
   onRecheck: (id: LocalHarnessId) => void;
+  /** 호스트 목록을 다시 읽는다(읽기 실패 줄의 「다시 읽기」). */
+  onRetryHost: () => void;
   personal: Omit<PersonalAgentRowProps, "harness" | "title">;
 }
 
-export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVersion, onRecheck, personal }: HarnessCardProps) {
+export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVersion, onRecheck, onRetryHost, personal }: HarnessCardProps) {
   void sessionsVersion; // 보관소가 바뀌면 이 카드가 다시 그려진다.
   const loginCtl = sessions.getSnapshot().login(harness);
   const unlinkCtl = sessions.getSnapshot().unlink(harness);
@@ -108,6 +110,19 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
   const unlinkState = useUnlinkState(unlinkCtl);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // 누른 단추가 사라지는 자리(확인 상자·로그인 중 줄)에서 초점이 body로 떨어지지 않게,
+  // 다음 그림 뒤에 옮길 곳의 이름을 들고 있다(design-review High: 키보드 초점 유실).
+  const [focusSlot, setFocusSlot] = useState<string | null>(null);
+  useEffect(() => {
+    if (focusSlot === null) return;
+    const target = document.querySelector<HTMLElement>(
+      `[data-testid="tool-card-${harness}"] [data-focus-slot="${focusSlot}"]`
+    );
+    if (target) {
+      target.focus();
+      setFocusSlot(null);
+    }
+  }, [focusSlot, harness, loginState, unlinkState, confirming]);
   const name = HARNESS_LABEL[harness];
   const titleId = useId();
 
@@ -138,14 +153,16 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
     sessions.dismissDisconnect(harness);
     sessions.startLogin(harness);
     setDialogOpen(true);
+    setFocusSlot("login-open");
   };
   const cancelLogin = () => {
     setDialogOpen(false);
     sessions.dismissLogin(harness);
+    setFocusSlot("login");
   };
 
   const needsLogin = view === "reauth" || view === "disconnected" || view === "unknown";
-  const hostTexts = HOST_VIEW_DETAIL[host];
+  const hostTexts = hostDetail(host, desktop);
   const personalOn = personal.agent?.enabled === true;
 
   return (
@@ -167,12 +184,8 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
                 {name}
               </span>
               {personalOn && (
-                <span
-                  className="inline-flex shrink-0 items-center rounded-sm bg-agent-soft px-1 py-px text-timestamp font-semibold text-agent"
-                  data-testid={`tool-card-${harness}-personal-badge`}
-                  title="나만 부를 수 있어요"
-                >
-                  개인
+                <span data-testid={`tool-card-${harness}-personal-badge`}>
+                  <AiSource>개인</AiSource>
                 </span>
               )}
               {personalOn && personal.agent && (
@@ -203,7 +216,7 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
               {" "}
               <Link
                 to="/settings?section=devices"
-                className="underline underline-offset-2 focus-visible:focus-ring"
+                className="press underline underline-offset-2 focus-visible:focus-ring"
                 data-testid={`tool-card-${harness}-register-host`}
               >
                 {TOOLS_COPY.registerHost}
@@ -211,6 +224,21 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
             </>
           )}
         </p>
+      )}
+
+      {host === "unknown" && (
+        <div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="tap-target"
+            onClick={onRetryHost}
+            data-testid={`tool-card-${harness}-host-retry`}
+          >
+            {TOOLS_COPY.hostRetry}
+          </Button>
+        </div>
       )}
 
       {!desktop && (
@@ -225,17 +253,35 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
         </p>
       )}
       {desktop && loginFailed && (
-        <p className="break-keep text-meta text-ink" role="alert" data-testid={`tool-card-${harness}-login-failed`}>
+        <p
+          className="break-keep text-meta text-ink"
+          role="alert"
+          tabIndex={-1}
+          data-focus-slot="login-open"
+          data-testid={`tool-card-${harness}-login-failed`}
+        >
           {loginFailedLine(loginFailed.reason)}
         </p>
       )}
       {desktop && disconnect.phase === "failed" && (
-        <p className="break-keep text-meta text-ink" role="alert" data-testid={`tool-card-${harness}-disconnect-failed`}>
+        <p
+          className="break-keep text-meta text-ink"
+          role="alert"
+          tabIndex={-1}
+          data-focus-slot="disconnecting"
+          data-testid={`tool-card-${harness}-disconnect-failed`}
+        >
           {DISCONNECT_FAILED_LINE[disconnect.reason]}
         </p>
       )}
       {desktop && view === "disconnecting" && (
-        <p className="break-keep text-meta text-ink" role="status" data-testid={`tool-card-${harness}-disconnecting`}>
+        <p
+          className="break-keep text-meta text-ink"
+          role="status"
+          tabIndex={-1}
+          data-focus-slot="disconnecting"
+          data-testid={`tool-card-${harness}-disconnecting`}
+        >
           {disconnect.phase === "verifying" ? "로그인이 풀렸는지 확인하고 있어요." : "로그아웃하고 있어요."}
         </p>
       )}
@@ -249,7 +295,14 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
       {desktop && (
         <div className="flex min-w-0 flex-wrap items-center gap-2" data-testid={`tool-card-${harness}-actions`}>
           {needsLogin && loginFailed === null && (
-            <Button type="button" size="sm" className="tap-target" onClick={startLogin} data-testid={`tool-card-${harness}-login`}>
+            <Button
+              type="button"
+              size="sm"
+              className="tap-target"
+              onClick={startLogin}
+              data-focus-slot="login"
+              data-testid={`tool-card-${harness}-login`}
+            >
               {TOOLS_COPY.login}
             </Button>
           )}
@@ -287,6 +340,7 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
                 variant="outline"
                 className="tap-target"
                 onClick={() => setDialogOpen(true)}
+                data-focus-slot="login-open"
                 data-testid={`tool-card-${harness}-open`}
               >
                 {TOOLS_COPY.open}
@@ -309,7 +363,11 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
               size="sm"
               variant="outline"
               className="tap-target"
-              onClick={() => setConfirming(true)}
+              onClick={() => {
+                setConfirming(true);
+                setFocusSlot("disconnect-keep");
+              }}
+              data-focus-slot="disconnect"
               data-testid={`tool-card-${harness}-disconnect`}
             >
               {TOOLS_COPY.disconnect}
@@ -359,6 +417,7 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
               onClick={() => {
                 setConfirming(false);
                 sessions.startDisconnect(harness);
+                setFocusSlot("disconnecting");
               }}
               data-testid={`tool-card-${harness}-disconnect-go`}
             >
@@ -369,7 +428,11 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
               size="sm"
               variant="ghost"
               className="tap-target"
-              onClick={() => setConfirming(false)}
+              onClick={() => {
+                setConfirming(false);
+                setFocusSlot("disconnect");
+              }}
+              data-focus-slot="disconnect-keep"
               data-testid={`tool-card-${harness}-disconnect-keep`}
             >
               {TOOLS_COPY.disconnectKeep}

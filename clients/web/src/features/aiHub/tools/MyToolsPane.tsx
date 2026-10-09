@@ -105,6 +105,7 @@ export function MyToolsPane({
                 sessions={sessions}
                 sessionsVersion={snapshot.version}
                 onRecheck={watch.recheck}
+                onRetryHost={() => void hosts.refetch()}
                 personal={{ read: personalRead(), agent, port, onChanged: reload, offline }}
               />
             </li>

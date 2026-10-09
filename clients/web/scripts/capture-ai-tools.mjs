@@ -84,9 +84,13 @@ async function installRoutes(context, scene) {
     if (path.endsWith("/roster")) return json(route, { members: roster });
     if (path.endsWith("/read-state")) return json(route, { read_states: [] });
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
-    if (path.endsWith("/work-hosts")) return json(route, { workHosts: scene.hosts ?? [] });
+    if (path.endsWith("/work-hosts")) {
+      if (scene.hostsError) return json(route, { error: { code: "internal", message: "down" } }, 500);
+      return json(route, { workHosts: scene.hosts ?? [] });
+    }
     if (path.endsWith("/personal-agents")) {
       if (scene.personal === "unavailable") return json(route, { error: { code: "not_found", message: "not found" } }, 404);
+      if (scene.personal === "error") return json(route, { error: { code: "internal", message: "down" } }, 500);
       return json(route, { agents: scene.personal ?? [] });
     }
     if (path.endsWith("/hosted-agent-connections")) return json(route, { connections: [] });
@@ -120,8 +124,8 @@ async function installRealtime(page) {
   });
 }
 
-async function installDesktop(page, probes) {
-  await page.addInitScript((probes) => {
+async function installDesktop(page, probes, spawnFail) {
+  await page.addInitScript(({ probes, spawnFail }) => {
     const callbacks = new Map();
     let nextCallback = 1;
     window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
@@ -135,7 +139,11 @@ async function installDesktop(page, probes) {
         if (cmd === "keychain_refresh_token_handle") return window.__h ?? null;
         if (cmd === "detect_local_harnesses") return probes;
         if (cmd === "harness_profile_list") return [];
-        if (cmd === "pty_spawn") return 1;
+        if (cmd === "pty_spawn") {
+          // 셸이 PTY를 거부하는 장면(로그인·로그아웃 시작 실패)
+          if (spawnFail) throw "refused: capture";
+          return 1;
+        }
         if (cmd === "pty_kill" || cmd === "pty_resize" || cmd === "pty_ack") return null;
         if (cmd === "work_host_status") return null;
         if (cmd === "device_key_status") return null;
@@ -149,7 +157,7 @@ async function installDesktop(page, probes) {
         return null;
       },
     };
-  }, probes);
+  }, { probes, spawnFail });
 }
 
 async function signIn(page, origin) {
@@ -177,7 +185,7 @@ async function open(browser, origin, { scheme, viewport, scene, hash }) {
     page.on("pageerror", (e) => console.log("pageerror", String(e).slice(0, 300)));
   }
   await installRealtime(page);
-  await installDesktop(page, scene.probes);
+  await installDesktop(page, scene.probes, scene.spawnFail === true);
   await page.addInitScript((server) => {
     try { localStorage.setItem("momo.web.server.v1", server); } catch { /* 저장소 없는 캡처 */ }
   }, origin);
@@ -201,6 +209,11 @@ const SCENES = [
   { name: "personal-on", probes: probe("logged_in"), hosts: [hostRow()], personal: [personalClaude], expect: { login: "connected", host: "on", personal: "on" } },
   { name: "personal-form", probes: probe("logged_in"), hosts: [hostRow()], personal: [], expect: { login: "connected", host: "on", personal: "off" }, flow: "personal-form" },
   { name: "personal-unavailable", probes: probe("logged_in"), hosts: [hostRow()], personal: "unavailable", expect: { login: "connected", host: "on", personal: "off" }, flow: "unavailable" },
+  { name: "host-unknown", probes: probe("logged_in"), hostsError: true, expect: { login: "connected", host: "unknown", personal: "off" } },
+  { name: "personal-error", probes: probe("logged_in"), hosts: [hostRow()], personal: "error", expect: { login: "connected", host: "on", personal: "off" }, flow: "personal-error" },
+  { name: "login-failed", probes: probe("needs_login"), hosts: [hostRow()], spawnFail: true, expect: { login: "reauth", host: "on", personal: "off" }, flow: "login-failed" },
+  { name: "disconnect-failed", probes: probe("logged_in"), hosts: [hostRow()], spawnFail: true, expect: { login: "connected", host: "on", personal: "off" }, flow: "disconnect-failed" },
+  { name: "offline", probes: probe("logged_in"), hosts: [hostRow()], expect: { login: "connected", host: "on", personal: "off" }, flow: "offline" },
   { name: "disconnect-confirm", probes: probe("logged_in"), hosts: [hostRow()], expect: { login: "connected", host: "on", personal: "off" }, flow: "disconnect-confirm" },
 ];
 
@@ -234,6 +247,30 @@ async function toolsScene(browser, origin, scene, { scheme, viewport }) {
     }
     if (scene.flow === "unavailable") {
       await page.locator("[data-testid='tool-card-claude-personal'][data-read='unavailable']").waitFor({ timeout: 5_000 });
+    }
+    if (scene.flow === "personal-error") {
+      await page.locator("[data-testid='tool-card-claude-personal'][data-read='error']").waitFor({ timeout: 5_000 });
+      await page.getByTestId("tool-card-claude-personal-retry").waitFor({ timeout: 5_000 });
+    }
+    if (scene.flow === "login-failed") {
+      await page.getByTestId("tool-card-claude-login").click();
+      await page.getByTestId("harness-login-dialog").waitFor({ timeout: 10_000 });
+      await page.getByTestId("harness-login-close").click();
+      await page.getByTestId("tool-card-claude-login-failed").waitFor({ timeout: 10_000 });
+    }
+    if (scene.flow === "disconnect-failed") {
+      await page.getByTestId("tool-card-claude-disconnect").click();
+      await page.getByTestId("tool-card-claude-disconnect-go").click();
+      await page.getByTestId("tool-card-claude-disconnect-failed").waitFor({ timeout: 10_000 });
+    }
+    if (scene.flow === "offline") {
+      await page.context().setOffline(true);
+      await page.evaluate(() => window.dispatchEvent(new Event("offline")));
+      await page.waitForFunction(
+        () => document.querySelector("[data-testid='tool-card-claude-personal-switch']")?.hasAttribute("disabled"),
+        null,
+        { timeout: 5_000 }
+      );
     }
     if (scene.flow === "disconnect-confirm") {
       await page.getByTestId("tool-card-claude-disconnect").click();

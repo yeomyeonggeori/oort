@@ -225,7 +225,7 @@ async function scenes(browser, origin, scheme, viewport) {
     const cards = await page.locator("[data-testid^='ai-hub-card-']").evaluateAll((els) => els.map((e) => e.textContent));
     check(`${tag} ${kind} 개요: 카드 넷`, cards.length === 4);
     if (desktop) {
-      check(`${tag} 데스크탑 개요: 감지 결과 그대로(Claude Code 준비됨 · Codex 로그인 필요)`, cards[0].includes("Claude Code 준비됨") && cards[0].includes("Codex 로그인 필요"), cards[0]);
+      check(`${tag} 데스크탑 개요: 감지 결과 그대로(Claude Code 연결됨 · Codex 다시 인증)`, cards[0].includes("Claude Code 연결됨") && cards[0].includes("Codex 다시 인증"), cards[0]);
       check(`${tag} 개요: 팀 키는 서버 값(Anthropic 연결됨)`, cards[1].includes("Anthropic 연결됨"), cards[1]);
       check(`${tag} 개요: 에이전트 4명 · 나만 부름 2 · 모두 부름 2`, cards[2].includes("4명") && cards[2].includes("나만 부름 2") && cards[2].includes("모두 부름 2") && !cards[2].includes("맥 꺼짐"), cards[2]);
       check(`${tag} 개요: 외부 연결 수는 목록 길이`, cards[3].includes("앱 2") && cards[3].includes("채널로 들어오는 주소 1") && cards[3].includes("밖으로 보내는 알림 2") && cards[3].includes("외부 에이전트 연결 1") && cards[3].includes("6개"), cards[3]);

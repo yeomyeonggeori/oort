@@ -258,6 +258,19 @@ describe("로그인 × 호스트 상태", () => {
     expect(q("tool-card-claude-host-pill")?.textContent).toBe("내 맥 확인 못 했어요");
   });
 
+  it("호스트 목록을 못 읽으면 「다시 읽기」가 있고 누르면 다시 읽는다", async () => {
+    vi.mocked(listWorkHosts).mockRejectedValue(new Error("boom"));
+    const { store, server } = setup();
+    mount({ store, port: server.port });
+    await until(() => q("tool-card-claude-host-retry"));
+    const calls = vi.mocked(listWorkHosts).mock.calls.length;
+    vi.mocked(listWorkHosts).mockResolvedValue([host({})]);
+    click(q("tool-card-claude-host-retry"));
+    await until(() => card("claude")?.getAttribute("data-host") === "on");
+    expect(vi.mocked(listWorkHosts).mock.calls.length).toBeGreaterThan(calls);
+    expect(q("tool-card-claude-host-retry")).toBeNull();
+  });
+
   it("「문의 중」은 어디에도 없다(Claude 개인 에이전트가 켜져 있어도)", async () => {
     const { store, server } = setup([
       { id: "a1", handle: "my-claude", displayName: "my-claude", harness: "claude_code", enabled: true, label: "곽성재의 개인 에이전트" },
@@ -329,6 +342,17 @@ describe("연결 끊기", () => {
     click(q("tool-card-claude-disconnect-go"));
     await until(() => cli.spawns.length === 1);
     expect(cli.spawns[0]?.program).toEqual({ kind: "logout", id: "claude" });
+  });
+
+  it("키보드 초점: 누른 단추가 사라져도 body로 떨어지지 않고, 그대로 두면 처음 단추로 돌아온다", async () => {
+    await connectedCard();
+    const disconnect = q("tool-card-claude-disconnect");
+    act(() => disconnect?.focus());
+    click(disconnect);
+    await until(() => document.activeElement === q("tool-card-claude-disconnect-keep"));
+    click(q("tool-card-claude-disconnect-keep"));
+    await until(() => document.activeElement === q("tool-card-claude-disconnect"));
+    expect(document.activeElement).not.toBe(document.body);
   });
 
   it("로그아웃이 0으로 끝나도 상태 명령이 로그인 아님을 알리기 전에는 「연결 안 됨」을 말하지 않는다", async () => {
