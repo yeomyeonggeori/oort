@@ -3656,6 +3656,43 @@ export async function endWorkSession(
 }
 
 /**
+ * 작업 멈추기 응답 (N4a #3628, `WorkKillResponse`). `hostOnline`이 false면 컨트롤은 지워지지
+ * 않고 맥이 다시 켜질 때 실행된다 - 화면은 「멈췄다」가 아니라 「켜지면 멈춘다」를 말해야 한다.
+ */
+export interface WorkKillResult {
+  sessionStatus: string;
+  hostOnline: boolean;
+  /** 새로 쓴 것이 없다(대기 중인 kill이 이미 있거나 세션이 이미 끝났다). */
+  replayed: boolean;
+}
+
+/**
+ * 소유자가 자기 맥의 작업을 멈춘다 (`POST …/work-sessions/{id}/kill`, ADR-0198 「N4 확정」).
+ * 본문 없음, **서명 없음**(끄는 쪽은 서명이 필요 없다 - 기기를 잃어도 멈출 수 있어야 한다).
+ * `endWorkSession`(PATCH ended)은 원장 정리일 뿐 맥 프로세스를 멈추지 않는다.
+ * 거절은 `ApiError.code`: kill_owner_only · kill_member_host_only · local_session_no_control ·
+ * work_session_not_running · work_host_revoked.
+ */
+export async function killWorkSession(
+  workspaceId: string,
+  sessionId: string
+): Promise<WorkKillResult> {
+  const res = await request<Record<string, unknown>>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/work-sessions/${encodeURIComponent(sessionId)}/kill`,
+    { method: "POST" }
+  );
+  const sessionStatus = str(res, "sessionStatus");
+  const hostOnline = bool(res, "hostOnline");
+  const replayed = bool(res, "replayed");
+  if (sessionStatus === undefined || hostOnline === undefined || replayed === undefined) {
+    throw new WireShapeError();
+  }
+  return { sessionStatus, hostOnline, replayed };
+}
+
+/**
  * Continue an orphaned git lineage on an explicitly chosen eligible host.
  *
  * `signed` (#3027 → #3028): the successor session id the owner chose and the

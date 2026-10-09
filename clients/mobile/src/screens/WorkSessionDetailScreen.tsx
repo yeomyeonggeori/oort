@@ -49,6 +49,10 @@ import {
   workSessionPresentation,
 } from '../features/work/model';
 import {useWorkSessionEvents} from '../features/work/queries';
+import {
+  StopWorkControl,
+  type StopWorkInitial,
+} from '../features/work/StopWorkControl';
 import {useWorkSessionLive} from '../features/work/useWorkSessionLive';
 import {
   computeStreamTiming,
@@ -71,12 +75,15 @@ export default function WorkSessionDetailScreen({
   sessionId,
   onBack,
   onOpenConversation,
+  stopInitial,
 }: {
   /** True only while this pushed surface is the top accessibility layer. */
   active: boolean;
   sessionId: string;
   onBack: () => void;
   onOpenConversation: (channelId: string, title: string) => void;
+  /** 캡처 하네스 전용 시작 상태. 제품은 넘기지 않는다. */
+  stopInitial?: StopWorkInitial;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
@@ -323,6 +330,15 @@ export default function WorkSessionDetailScreen({
               session={session}
               events={sessionEvents}
               online={online}
+            />
+          ) : null}
+
+          {isOwner ? (
+            <StopWorkControl
+              workspaceId={workspaceId}
+              memberId={member.id}
+              session={session}
+              initial={stopInitial}
             />
           ) : null}
 

@@ -54,6 +54,10 @@ export const haptics = {
   success(): void {
     fire(h => h.notificationAsync(h.NotificationFeedbackType.Success));
   },
+  /** 되돌릴 수 없는 일을 확인하고 나갈 때 - 멈추기(N4 #3596). 탭 한 번에 한 번. */
+  warning(): void {
+    fire(h => h.notificationAsync(h.NotificationFeedbackType.Warning));
+  },
   /** 작업이 실패했다(S2: 전송 실패). */
   error(): void {
     fire(h => h.notificationAsync(h.NotificationFeedbackType.Error));
