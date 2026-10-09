@@ -44,9 +44,10 @@ import SidebarScreen from '../screens/SidebarScreen';
 import TeamBoardScreen from '../screens/TeamBoardScreen';
 import WorkSessionDetailScreen from '../screens/WorkSessionDetailScreen';
 import {SessionProvider, useSession} from '../session/useSession';
+import {AiSheet} from './AiSheet';
 import {AskMacSheet} from './AskMacSheet';
+import {haptics} from '../lib/haptics';
 import {DelegateWorkSheet, type DelegatePrefill} from './DelegateWorkSheet';
-import {spawnPort} from '../features/work/ask/spawnPort';
 import {NewChannelSheet} from './NewChannelSheet';
 import {NewMessageSheet} from './NewMessageSheet';
 import {PlusMenu, type PlusMenuItem} from './PlusMenu';
@@ -150,6 +151,9 @@ export function Shell({
   const closeDelegate = useCallback(() => setDelegate(null), []);
   // 「내 맥에 보내기」 시트(#3597). 맥이 꺼져 있을 때 사람이 누르면 N8 시트로 넘어간다.
   const [askMac, setAskMac] = useState(false);
+  // 「AI」 시트(N10 #3598). + 메뉴의 AI 줄이 연다. 줄을 고르면 닫히고 그 줄의 시트·목록이 선다.
+  const [ai, setAi] = useState(false);
+  const closeAi = useCallback(() => setAi(false), []);
   const closeAskMac = useCallback(() => setAskMac(false), []);
   const onDelegateWork = useCallback(
     (prefill: DelegatePrefill) => setDelegate(prefill),
@@ -249,29 +253,18 @@ export function Shell({
         onPress: () => setCreate('channel'),
       });
     }
+    // 에이전트 부르기 · 작업 맡기기 · 내 맥에 물어보기는 「AI」 시트 하나로 모였다(N10 #3598).
+    // 4번째 탭은 없다(ADR-0189 D1) — 이 한 줄이 시트를 연다. 시트가 열리는 누름 한 번에
+    // 햅틱 한 번(`lib/haptics.ts`).
     items.push({
-      key: 'agents',
+      key: 'ai',
       icon: 'agent',
-      label: '에이전트 부르기',
-      hint: '에이전트 목록을 엽니다.',
-      onPress: onOpenAgentList,
-    });
-    // 내 맥으로 보내는 길이 이 빌드에 연결돼 있을 때만 입구를 세운다(`spawnPort`의 머리 설명).
-    if (spawnPort().wired) {
-      items.push({
-        key: 'ask-mac',
-        icon: 'work',
-        label: '내 맥에 물어보기',
-        hint: '내 맥의 Claude Code 같은 도구에 물어보거나 일을 시키는 시트를 엽니다.',
-        onPress: () => setAskMac(true),
-      });
-    }
-    items.push({
-      key: 'delegate',
-      icon: 'work',
-      label: '작업 맡기기',
-      hint: '에이전트에게 맡길 작업을 쓰는 시트를 엽니다.',
-      onPress: () => setDelegate({}),
+      label: 'AI',
+      hint: '에이전트와 내 도구를 고르는 시트를 엽니다.',
+      onPress: () => {
+        haptics.light();
+        setAi(true);
+      },
     });
     if (workConsole) {
       items.push({
@@ -283,7 +276,7 @@ export function Shell({
       });
     }
     return items;
-  }, [canCreateChannel, onOpenAgentList, workConsole]);
+  }, [canCreateChannel, workConsole]);
   // 셸 위에 층이 하나라도 서 있는가. 크롬은 그 밑에 그려지고(트리 순서), 보조기술
   // 에서도 숨는다(`ShellChrome` 의 `coveredProps`).
   const covered =
@@ -500,6 +493,23 @@ export function Shell({
         <NewChannelSheet
           onOpenConversation={onOpenConversation}
           onClose={closeCreate}
+        />
+      ) : null}
+      {ai ? (
+        <AiSheet
+          onClose={closeAi}
+          onDelegate={() => {
+            setAi(false);
+            setDelegate({});
+          }}
+          onOpenAgentList={() => {
+            setAi(false);
+            onOpenAgentList();
+          }}
+          onAskMac={() => {
+            setAi(false);
+            setAskMac(true);
+          }}
         />
       ) : null}
       {askMac ? (
