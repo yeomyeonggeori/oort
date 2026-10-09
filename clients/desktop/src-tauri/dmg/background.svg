@@ -7,6 +7,9 @@
       <stop offset="0" stop-color="#f7eadb"/>
       <stop offset="1" stop-color="#e2e9f3"/>
     </linearGradient>
+    <filter id="lift" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="6" stdDeviation="9" flood-color="#2f5b8a" flood-opacity="0.22"/>
+    </filter>
   </defs>
   <rect width="660" height="400" fill="url(#dawn)"/>
   <!-- 마크 C2-04 Bubble (docs/brand/mark/oort-mark-black.svg 의 path) -->
@@ -15,8 +18,8 @@
     <path d="M53 17A6 6 0 1 1 41 17A6 6 0 1 1 53 17Z"/>
   </g>
   <!-- 아이콘 판: 앱(180,185)·Applications(480,185) 중심, 라벨 영역 포함 -->
-  <rect x="100" y="95" width="160" height="200" rx="24" fill="#6f7c93"/>
-  <rect x="400" y="95" width="160" height="200" rx="24" fill="#6f7c93"/>
+  <rect x="100" y="95" width="160" height="200" rx="24" fill="#6f7c93" stroke="#ffffff" stroke-opacity="0.45" stroke-width="1.5" filter="url(#lift)"/>
+  <rect x="400" y="95" width="160" height="200" rx="24" fill="#6f7c93" stroke="#ffffff" stroke-opacity="0.45" stroke-width="1.5" filter="url(#lift)"/>
   <!-- 화살표 -->
   <g stroke="#c2410c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none">
     <path d="M286 185 H374"/>

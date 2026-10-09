@@ -252,9 +252,8 @@ DMG_STAGE0="$WORK/dmgroot0"
 mkdir -p "$DMG_STAGE0"
 cp -R "$APP_PATH" "$DMG_STAGE0/"
 ln -s /Applications "$DMG_STAGE0/Applications"
-hdiutil create -volname oort -srcfolder "$DMG_STAGE0" -ov -format UDZO \
-  "$DMG_PATH" >>"$WORK/codesign.log" 2>&1 || {
-    echo "[next-publish] hdiutil create dmg (re-signed app) failed" >&2
+scripts/desktop/build_styled_dmg.sh "$DMG_STAGE0" "$DMG_PATH" >>"$WORK/codesign.log" 2>&1 || {
+    echo "[next-publish] styled dmg (re-signed app) failed" >&2
     exit 1; }
 codesign --verify --strict --deep "$APP_PATH" 2>>"$WORK/codesign.log" || {
   tail -20 "$WORK/codesign.log" >&2
@@ -313,9 +312,8 @@ if [ "$PUBLIC" = "1" ]; then
   mkdir -p "$DMG_STAGE"
   cp -R "$APP_PATH" "$DMG_STAGE/"
   rm -f "$STABLE_DMG"
-  hdiutil create -volname oort -srcfolder "$DMG_STAGE" -ov -format UDZO \
-    "$STABLE_DMG" >> "$WORK/notary.log" 2>&1 || {
-      echo "[next-publish] hdiutil create dmg failed" >&2
+  scripts/desktop/build_styled_dmg.sh "$DMG_STAGE" "$STABLE_DMG" >> "$WORK/notary.log" 2>&1 || {
+      echo "[next-publish] styled dmg failed" >&2
       exit 1
     }
   codesign --force --sign "$SIGN_IDENTITY" --timestamp "$STABLE_DMG" \
