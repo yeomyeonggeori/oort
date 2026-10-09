@@ -30,7 +30,7 @@ import {PLUS_LABEL, SHELL} from './ShellChrome';
 // 어두운 카드이고, 다크에서는 primary 가 밝은 잉크라 밝은 카드가 된다 — FAB 이
 // 다크에서 밝은 원이었던 것과 같은 문법이다.
 //
-// 행 높이를 60 에서 54 로 줄인 것은 행이 Buzz 의 셋보다 많기 때문이다(최대 넷).
+// 행 높이를 60 에서 54 로 줄인 것은 행이 Buzz 의 셋보다 많기 때문이다(최대 넷: 새 DM · 새 채널 · AI · 작업).
 // 54 는 터치 44 를 넉넉히 넘는다.
 //
 // ## 닫힘
@@ -42,7 +42,7 @@ import {PLUS_LABEL, SHELL} from './ShellChrome';
 // =============================================================================
 
 export interface PlusMenuItem {
-  key: 'dm' | 'channel' | 'agents' | 'delegate' | 'work';
+  key: 'dm' | 'channel' | 'ai' | 'work';
   icon: MenuIconName;
   label: string;
   hint: string;

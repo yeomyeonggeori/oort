@@ -62,8 +62,8 @@ use momo_messaging::{cent_channel, send_message_in_tx, MessageType, NewMessage};
 use momo_outbox::{emit_outbox, OutboxKind};
 use momo_t3::work_control::{
     control_event_payload, dispatched_spawn_owner_in_tx, insert_work_control_in_tx,
-    record_host_last_used_in_tx, resume_target_rejection_in_tx, target_work_host_in_tx,
-    NewWorkControl, ResumeTargetRejection, KIND_SPAWN, STATUS_DISPATCHED,
+    record_host_last_used_in_tx, resume_target_rejection_in_tx, spawn_call_in_tx,
+    target_work_host_in_tx, NewWorkControl, ResumeTargetRejection, KIND_SPAWN, STATUS_DISPATCHED,
 };
 use momo_t3::work_permission::{
     bridgeable_options, cancel_pending_for_session_in_tx, insert_permission_request_in_tx,
@@ -76,12 +76,12 @@ use momo_t3::{
     create_work_session_with_id_in_tx, end_work_session_in_tx, is_active_channel_member_in_tx,
     lifecycle_payload, list_work_session_details_in_tx, lock_work_session_detail_in_tx,
     mark_work_session_resumed_in_tx, parse_remote_pty_binding, pause_usage_in_tx,
-    remote_pty_host_status_in_tx, resolve_cloud_host_id, set_work_session_observation_in_tx,
-    start_usage_in_tx, terminate_in_tx, tool_lifecycle_payload, transition_tool_lifecycle_in_tx,
-    turn_timing_in_tx, update_session_card_props_in_tx, work_session_scope_in_tx,
-    work_tool_is_enabled_in_tx, write_remote_pty_binding_in_tx, ControlWindowEndReason,
-    NewWorkSession, RemotePtyBinding, RemotePtyHostStatus, T3Error, T3LockLadder,
-    TerminationReason, WorkSessionDetail,
+    remote_pty_host_status_in_tx, resolve_cloud_host_id, session_author_in_tx,
+    set_session_persona_in_tx, set_work_session_observation_in_tx, start_usage_in_tx,
+    terminate_in_tx, tool_lifecycle_payload, transition_tool_lifecycle_in_tx, turn_timing_in_tx,
+    update_session_card_props_in_tx, work_session_scope_in_tx, work_tool_is_enabled_in_tx,
+    write_remote_pty_binding_in_tx, ControlWindowEndReason, NewWorkSession, RemotePtyBinding,
+    RemotePtyHostStatus, T3Error, T3LockLadder, TerminationReason, WorkSessionDetail,
 };
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
@@ -627,6 +627,18 @@ async fn create_in_tx(
     }
 
     // ---- writes ------------------------------------------------------------
+    // ADR-0198 증보 1 「T5 확정」 6 (#3592): a session the owner called with a
+    // signed spawn speaks as the personal agent that was named, and its card
+    // quotes the owner's message it was called from. Both come from the control
+    // row the owner signed — the host sends neither.
+    let call = match control_id {
+        Some(control_id) => {
+            spawn_call_in_tx(conn, workspace_id, control_id, session_owner_member_id).await?
+        }
+        None => None,
+    };
+    let persona_member_id = call.and_then(|call| call.persona_member_id);
+    let card_author_member_id = persona_member_id.unwrap_or(session_owner_member_id);
     let session_id = allocate_uuid_v7(conn).await?;
     let props = card_props(session_id, tool, label, "running", None, None, None, None);
 
@@ -639,12 +651,14 @@ async fn create_in_tx(
         workspace_id,
         NewMessage {
             channel_id,
-            author_member_id: session_owner_member_id,
+            author_member_id: card_author_member_id,
             message_type: MessageType::System,
             body: None,
             props: props.clone(),
             root_id: None,
-            reply_to_id: None,
+            // The quote is ADR-0148's: a persistent pointer at the message the
+            // owner called from, so the card reads as the answer to it.
+            reply_to_id: call.and_then(|call| call.origin_message_id),
             client_msg_id: Some(session_id),
             run_id: None,
             hlc_ts: None,
@@ -668,6 +682,10 @@ async fn create_in_tx(
         },
     )
     .await?;
+
+    if let Some(persona_member_id) = persona_member_id {
+        set_session_persona_in_tx(conn, workspace_id, session.id, persona_member_id).await?;
+    }
 
     if let Some(binding) = remote_pty.as_ref() {
         if !write_remote_pty_binding_in_tx(conn, workspace_id, session.id, binding).await? {
@@ -1410,12 +1428,16 @@ pub(crate) async fn publish_session_event_in_tx(
     event: &WorkSessionAcpEvent,
     normalized: &ValidatedAcpEvent,
 ) -> Result<bool, T3Error> {
+    // The progress and the answer speak as the personal agent that was called
+    // (T5 확정 6); the owner stays the session's owner everywhere else.
+    let author_member_id =
+        session_author_in_tx(conn, workspace_id, existing.id, existing.member_id).await?;
     let sent = send_message_in_tx(
         conn,
         workspace_id,
         NewMessage {
             channel_id: existing.channel_id,
-            author_member_id: existing.member_id,
+            author_member_id,
             message_type: MessageType::System,
             body: Some(normalized.body.clone()),
             props: normalized.props.clone(),
@@ -2002,12 +2024,14 @@ async fn transition_lifecycle_in_tx(
         // just ended, measured here. Judgment reads these two numbers and nothing
         // else about timing — it never looks at the session row again.
         let (turn_started_ms, ran_ms) = turn_timing_in_tx(conn, workspace_id, session_id).await?;
+        let idle_author_member_id =
+            session_author_in_tx(conn, workspace_id, updated.id, updated.member_id).await?;
         let idle_card = send_message_in_tx(
             conn,
             workspace_id,
             NewMessage {
                 channel_id: updated.channel_id,
-                author_member_id: updated.member_id,
+                author_member_id: idle_author_member_id,
                 message_type: MessageType::System,
                 body: Some("작업 완료 — idle 대기".into()),
                 props: json!({

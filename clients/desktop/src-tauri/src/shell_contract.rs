@@ -790,17 +790,19 @@ fn tauri_grants_the_device_key_commands_to_the_local_main_webview_only() {
     }
 }
 
-const AGENT_PORT_COMMANDS: [&str; 4] = [
+const AGENT_PORT_COMMANDS: [&str; 5] = [
     "agent_port_device",
     "agent_port_connect",
     "agent_port_replace_credential",
     "agent_port_disconnect",
+    "agent_port_retire_legacy",
 ];
-const AGENT_PORT_PERMISSIONS: [&str; 4] = [
+const AGENT_PORT_PERMISSIONS: [&str; 5] = [
     "allow-agent-port-device",
     "allow-agent-port-connect",
     "allow-agent-port-replace-credential",
     "allow-agent-port-disconnect",
+    "allow-agent-port-retire-legacy",
 ];
 
 /// Tauri's resolver: the sign-in -> agent registration commands (#3389)

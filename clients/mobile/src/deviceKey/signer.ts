@@ -10,6 +10,8 @@ import {
 } from '@momo/core/features/auth/signedControl';
 import {humanSignatureRequestBody} from '@momo/core/lib/api';
 
+import {SpawnTaskInputError} from '@momo/core/features/auth/humanControlV4';
+
 import {
   HumanControlInputError,
   phoneSigningSchema,
@@ -46,6 +48,11 @@ export function phoneContent(content: ControlToSign['content']): HumanControlCon
           ? {previewSha256: content.previewSha256}
           : {}),
       };
+    case 'spawn_task': {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const {kind: _kind, ...task} = content;
+      return {kind: 'spawn_task', ...task};
+    }
     case 'spawn':
       return {
         kind: 'spawn',
@@ -89,6 +96,11 @@ export function phoneSignInput(
 /** The enclave's and the builder's refusals, as the sentence the card shows. */
 export function phoneSignerRefusal(error: unknown): SignerRefusal {
   if (error instanceof SignerRefusal) return error;
+  if (error instanceof SpawnTaskInputError) {
+    return new SignerRefusal(
+      '보낼 내용이 올바르지 않아 서명하지 않았어요. 내용을 고친 뒤 다시 보내 주세요.',
+    );
+  }
   if (error instanceof HumanControlInputError && /preview/.test(error.message)) {
     return new SignerRefusal(ALLOW_NEEDS_PREVIEW_LINE);
   }

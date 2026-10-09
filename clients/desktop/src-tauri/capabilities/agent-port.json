@@ -14,6 +14,7 @@
     "allow-agent-port-device",
     "allow-agent-port-connect",
     "allow-agent-port-replace-credential",
-    "allow-agent-port-disconnect"
+    "allow-agent-port-disconnect",
+    "allow-agent-port-retire-legacy"
   ]
 }

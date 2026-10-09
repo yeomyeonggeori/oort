@@ -110,6 +110,8 @@ import {
   type DelegatePreview,
   type DelegatePrefill,
 } from '../src/shell/DelegateWorkSheet';
+import {AiSheet} from '../src/shell/AiSheet';
+import {AskMacSheet, type AskMacPreview} from '../src/shell/AskMacSheet';
 import {workRunFailure} from '@momo/core/features/agents/workRunRequest';
 import {INITIAL_NAV, navReducer} from '../src/nav/state';
 import {ProfilePage, ProfileSheet} from '../src/features/profile/ProfileSheet';
@@ -4093,6 +4095,44 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           />
         </View>
       );
+    // #3597 T6b: 「내 맥에 보내기」 시트의 판. 보내기 포트는 하네스에서 가짜다(Face ID 없음).
+    case 'shell-ask-on':
+    case 'shell-ask-work':
+    case 'shell-ask-off':
+    case 'shell-ask-signing':
+    case 'shell-ask-waiting':
+    case 'shell-ask-first':
+      return (
+        <View style={styles.fill}>
+          <Shell />
+          <AskMacSheet
+            onClose={() => {}}
+            onUseAgent={() => {}}
+            onOpenSession={() => {}}
+            onOpenWorkList={() => {}}
+            waitTimeoutMs={3_600_000}
+            preview={askPreview(name)}
+          />
+        </View>
+      );
+    // #3598 N10: + 메뉴의 「AI」 시트. off = 지금 사용자가 보는 모습(내 맥으로 보내는 길이 아직
+    // 안 꽂혀 에이전트 구획만), on = 승격 뒤 모습(내 도구 · 개인 에이전트 + 맥 켜짐 칩),
+    // mac-off = 같은 판에서 맥이 꺼진 칩. 게이트는 시트의 `gateOpen` 으로 강제한다.
+    case 'shell-ai-off':
+    case 'shell-ai-on':
+    case 'shell-ai-mac-off':
+      return (
+        <View style={styles.fill}>
+          <Shell />
+          <AiSheet
+            onClose={() => {}}
+            onDelegate={() => {}}
+            onOpenAgentList={() => {}}
+            onAskMac={() => {}}
+            gateOpen={name !== 'shell-ai-off'}
+          />
+        </View>
+      );
     case 'shell-profile-sheet':
       return (
         <View style={styles.fill}>
@@ -5034,6 +5074,91 @@ function delegatePreview(name: string): DelegatePreview {
   return {};
 }
 
+function askPreview(name: string): AskMacPreview {
+  const base: AskMacPreview = {
+    channelId: 'ch-agent-lab',
+    prompt: '이 에러 메시지가 무슨 뜻인지 알려 줘. TypeError: undefined is not a function',
+    signing: 'ready',
+  };
+  if (name === 'shell-ask-work') {
+    return {
+      ...base,
+      mode: 'work',
+      harness: 'codex',
+      folderId: 'fld-oort-app',
+      prompt: '로그인 버그를 찾아서 고치고 PR을 올려 줘.',
+    };
+  }
+  if (name === 'shell-ask-first') {
+    return {signing: 'ready', prompt: '이 에러가 무슨 뜻이야?'};
+  }
+  if (name === 'shell-ask-signing') return {...base, signing: 'flag_off'};
+  if (name === 'shell-ask-waiting') return {...base, waiting: true};
+  return base;
+}
+
+function seedAsk(surface: string): void {
+  const online = surface !== 'shell-ask-off';
+  harnessClient.setQueryData(['work-hosts', ADE_WS], [
+    {
+      id: 'measure-mac',
+      workspaceId: ADE_WS,
+      scope: 'member',
+      ownerMemberId: SELF,
+      type: 'workd',
+      displayName: '성재의 MacBook Pro',
+      capabilities: {},
+      createdAtMs: 0,
+      lastSeenAtMs: Date.now(),
+      online,
+      folders: [
+        {id: 'fld-question', displayName: '질문용 폴더', kind: 'question'},
+        {id: 'fld-oort-app', displayName: 'oort-app', kind: 'project'},
+        {id: 'fld-oort-docs', displayName: 'oort-docs', kind: 'project'},
+      ],
+      defaultFolderId: 'fld-question',
+    },
+  ]);
+  harnessClient.setQueryData(['work-sessions', ADE_WS], []);
+}
+
+function seedAi(surface: string): void {
+  // 개인 에이전트는 off 판에도 로스터에 있다 — 게이트가 닫혀 있으면 안 보인다는 것이 그 판의 요점이다.
+  harnessClient.setQueryData(['roster', ADE_WS], [
+    ...SHELL_ROSTER.filter(member => member.kind !== 'agent'),
+    {
+      ...(SHELL_ROSTER.find(member => member.kind === 'agent') ?? SHELL_ROSTER[0]),
+      id: 'measure-personal-claude',
+      displayName: '내 Claude Code',
+      handle: 'my-claude',
+      personalAgent: {
+        label: '내 Claude Code',
+        ownerId: SELF,
+        ownerDisplayName: '곽성재',
+        harness: 'claude',
+        enabled: true,
+        mentionable: true,
+      },
+    },
+  ]);
+  harnessClient.setQueryData(['work-hosts', ADE_WS], [
+    {
+      id: 'measure-mac',
+      workspaceId: ADE_WS,
+      scope: 'member',
+      ownerMemberId: SELF,
+      type: 'workd',
+      displayName: '성재의 MacBook Pro',
+      capabilities: {},
+      createdAtMs: 0,
+      lastSeenAtMs: Date.now(),
+      online: surface !== 'shell-ai-mac-off',
+      folders: [],
+      defaultFolderId: null,
+    },
+  ]);
+}
+
 function seedDelegate(surface: string): void {
   harnessClient.setQueryData(['roster', ADE_WS], [
     ...SHELL_ROSTER.filter(member => member.kind !== 'agent'),
@@ -5637,4 +5762,6 @@ if (
 ) {
   seedShell(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-delegate-')) seedDelegate(LAUNCHED.name);
+  if (LAUNCHED.name.startsWith('shell-ask-')) seedAsk(LAUNCHED.name);
+  if (LAUNCHED.name.startsWith('shell-ai-')) seedAi(LAUNCHED.name);
 }

@@ -57,7 +57,9 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use crate::client::{ClientError, ControlAck, HostApi, SessionStatus, WorkControl};
-use crate::human_trust::{requires_signature, HumanTrust, RevocationSource};
+use crate::human_trust::{
+    is_new_work_spawn, requires_signature, verified_folder_id, HumanTrust, RevocationSource,
+};
 use crate::policy::Refusal;
 use crate::session::SessionManager;
 use crate::signature_requirement::SignatureRequirement;
@@ -292,8 +294,15 @@ impl ControlLoop {
         };
         match control.kind.as_str() {
             "spawn" => {
-                let spawned = match authorized(self) {
-                    Ok(()) => self.sessions.spawn(control).await,
+                // A new-work spawn is verified once, inside `spawn_verified`
+                // (the nonce is spent there); it only needs its owner first.
+                let allowed = if is_new_work_spawn(control) {
+                    self.require_owner(control)
+                } else {
+                    authorized(self)
+                };
+                let spawned = match allowed {
+                    Ok(()) => self.spawn_verified(control).await,
                     Err(refusal) => Err(refusal),
                 };
                 match spawned {
@@ -346,6 +355,26 @@ impl ControlLoop {
             }
             _ => refused(Refusal::UnsupportedControl),
         }
+    }
+
+    /// T5 (#3570): open the session for a spawn that passed `authorized`.
+    /// A **new-work** spawn (it carries the owner's whole prompt) is always
+    /// verified here — R2 on or off — because its folder id is read only from a
+    /// signature this host verified; an old-style spawn keeps `check_signature`'s
+    /// rules (a resume, or the host's own configured folder).
+    async fn spawn_verified(&mut self, control: &WorkControl) -> Result<Uuid, Refusal> {
+        if !is_new_work_spawn(control) {
+            return self.sessions.spawn(control, None).await;
+        }
+        let Some(trust) = &self.human else {
+            return Err(Refusal::DeviceSignatureRequired);
+        };
+        trust
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .check_control_with_preview(control, None, now_ms())?;
+        let folder_id = verified_folder_id(control).ok_or(Refusal::DeviceSignatureInvalid)?;
+        self.sessions.spawn(control, Some(&folder_id)).await
     }
 
     /// ADR-0188 D3 on the host: a spawn or an input is its owner's or nothing.

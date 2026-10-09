@@ -208,6 +208,7 @@ pub fn run() {
             agent_port::agent_port_connect,
             agent_port::agent_port_replace_credential,
             agent_port::agent_port_disconnect,
+            agent_port::agent_port_retire_legacy,
             harness_profile::harness_profile_list,
             harness_profile::harness_profile_create,
             harness_profile::harness_profile_status,

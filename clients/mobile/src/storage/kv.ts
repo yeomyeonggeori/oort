@@ -98,6 +98,12 @@ export const NON_SECRET_KEYS = {
    * 앱 실행 안의 메모리에서만 산다). 잃으면 처음처럼 아무것도 미리 고르지 않을 뿐이다.
    */
   delegateLastTarget: 'momo.mobile.delegate.last-target.v1',
+  /**
+   * 「내 맥에 보내기」 시트(#3597 T6b)가 마지막에 쓴 선택: 워크스페이스 id → {하네스 키,
+   * 폴더 id, 폴더별 채널 id}. 전부 **선택(id)** 이고 글이 아니다. 잃으면 처음처럼 미리 고른 것이
+   * 없을 뿐이다(ADR-0198 N5 3·집 채널 규칙: 서버는 대응을 저장하지 않고 기기에만 기억한다).
+   */
+  askMacLast: 'momo.mobile.ask-mac.last.v1',
 } as const;
 
 export type NonSecretKey = (typeof NON_SECRET_KEYS)[keyof typeof NON_SECRET_KEYS];

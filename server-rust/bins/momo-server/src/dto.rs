@@ -1056,9 +1056,40 @@ pub struct HumanSignatureRequest {
     pub folder_id: Option<String>,
 }
 
-// `POST …/work-hosts/{host}/heartbeat` has no request DTO since ADR-0188 D7:
-// the v1 body (`sentAtMs` + a v1 signature) is gone, the v2 proof travels in the
-// `MomoHost` headers, and the server reads nothing from the (signed) body.
+// `POST …/work-hosts/{host}/heartbeat`: since ADR-0188 D7 the v2 proof travels
+// in the `MomoHost` headers (the v1 `sentAtMs` + signature body is gone). The
+// only thing the server reads from the (signed) body is the folder announcement
+// below (#3590); an empty body is the normal case and changes nothing.
+
+/// The heartbeat body (#3590): the folders this host issues, by opaque id and
+/// display name. `folders` absent = unchanged; `[]` = none. Unknown top-level
+/// keys are ignored so a newer host can add fields.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeartbeatBody {
+    #[serde(default)]
+    pub folders: Option<Vec<AnnouncedFolder>>,
+}
+
+/// One announced folder. `deny_unknown_fields`: a host that sends a `path` (or
+/// anything else) is refused, never quietly stored or dropped (ADR-0188 D6).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AnnouncedFolder {
+    pub id: String,
+    pub display_name: String,
+    pub kind: String,
+}
+
+/// A folder as the owner reads it: an id and a name, never a path.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkHostFolderDto {
+    pub id: String,
+    pub display_name: String,
+    /// `project` or `question` (the host-issued empty 「질문용 폴더」).
+    pub kind: String,
+}
 
 /// Swift `WorkHostDTO` (:20-33). `lastSeenAtMs`/`revokedAtMs` are `Int64?` in a
 /// synthesized `Encodable`, so a null is **omitted**, not emitted.
@@ -1072,15 +1103,29 @@ pub struct WorkHostDto {
     #[serde(rename = "type")]
     pub host_type: String,
     pub display_name: String,
-    pub public_key: String,
+    /// Absent on the list row of someone else's member-scoped host (#3583).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub public_key: Option<String>,
     /// Boolean availability flags only — never paths, credentials or state.
-    pub capabilities: Value,
+    /// Absent together with `public_key` (#3583).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_seen_at_ms: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub revoked_at_ms: Option<i64>,
     pub created_at_ms: i64,
     pub online: bool,
+    /// The folders this host issued (#3590). Present only for the host's own
+    /// owner, on a live host, in the list and revoke answers; absent on
+    /// somebody else's row (ADR-0188 §8.8: presence only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub folders: Option<Vec<WorkHostFolderDto>>,
+    /// The folder a request with no explicit choice uses: the host's
+    /// `question` folder (ADR-0198 증보 1 D7), or absent when it has none —
+    /// never silently a project folder. Present exactly when `folders` is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_folder_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2621,6 +2666,18 @@ pub struct RosterMemberDto {
     /// status; it blocks nothing by itself.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub brain_unavailable_reason: Option<String>,
+    /// #3591 (ADR-0198 증보 1 D7, 결재 2): present only on a personal agent. The
+    /// label teammates read (「<소유자 이름>의 개인 에이전트」), the owner, the
+    /// harness, whether it is switched on, and — computed for **this viewer** —
+    /// whether `@` autocomplete may offer it (the owner only, and only while on).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub personal_agent: Option<PersonalAgentDto>,
+    /// #3567 (ADR-0198 증보 1 D2): `true` only on a 「이전 구독 에이전트」 — an
+    /// entry the retirement tool switched off. The member is suspended and keeps
+    /// every past message; a client draws the marker instead of hiding the
+    /// author. Absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subscription_retired: Option<bool>,
     /// `agent_profile.paused` — goal SRV-R2, the one key here Swift's DTO does
     /// not have.
     ///
@@ -3672,31 +3729,6 @@ pub struct ProviderLinkTestResponse {
     pub entries: Vec<ProviderChainProbeDto>,
 }
 
-/// `GET|PUT /v1/provider/work-host-engine` response (Swift
-/// `WorkHostEngineResponse`, `WorkHostEngineRoutes.swift:189-195`).
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkHostEngineResponse {
-    pub engine: String,
-    /// `database` once a workspace has chosen; `default` means no row exists and
-    /// the boot default applies **without any write**.
-    pub source: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_by: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_at_ms: Option<i64>,
-    pub schema: &'static str,
-}
-
-/// Closed-world `PUT /v1/provider/work-host-engine` body (Swift
-/// `PutWorkHostEngineRequest` :200-221) — engine label only, so no credential or
-/// host-local path can be smuggled through (ADR-0004).
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct PutWorkHostEngineRequest {
-    pub engine: String,
-}
-
 /// `GET /v1/provider/effort-table` (Swift `ProviderEffortTableResponse`,
 /// `ProviderEffortTableRoutes.swift:192-197`).
 #[derive(Debug, Serialize)]
@@ -4093,6 +4125,77 @@ pub struct RegisterSubscriptionAgentResponse {
     pub pairing_expires_at_ms: Option<i64>,
 }
 
+/// The roster's read value for a personal agent (#3591, ADR-0198 증보 1 D7).
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonalAgentDto {
+    /// 「<소유자 이름>의 개인 에이전트」 — ready to draw next to the member.
+    pub label: String,
+    pub owner_id: String,
+    pub owner_display_name: String,
+    /// `claude_code` | `codex`.
+    pub harness: String,
+    /// Switched on (`member.status = active`). Off keeps the member and every
+    /// past message; it cannot be called.
+    pub enabled: bool,
+    /// Whether `@` autocomplete offers it to the viewer: the owner, while on.
+    /// A teammate sees `false` and never gets it as a candidate (결재 2).
+    pub mentionable: bool,
+}
+
+/// `POST /v1/workspaces/{ws}/personal-agents` (#3591): turn the caller's
+/// connected harness on as a personal agent.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EnablePersonalAgentRequest {
+    /// `"claude_code"` or `"codex"`.
+    pub harness: String,
+    /// The alias (= the member handle), unique in the workspace. Optional only
+    /// when `agentMemberId` converts an existing agent (it keeps its handle) or
+    /// when turning an agent the caller switched off back on.
+    #[serde(default)]
+    pub alias: Option<String>,
+    /// Optional display name; defaults to the alias.
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// #3567: convert the caller's own existing `owner_only` subscription agent
+    /// of the same harness in place (same member id, handle and history).
+    #[serde(default)]
+    pub agent_member_id: Option<Uuid>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonalAgentSummaryDto {
+    pub id: String,
+    pub handle: String,
+    pub display_name: String,
+    pub harness: String,
+    pub enabled: bool,
+    pub label: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnablePersonalAgentResponse {
+    pub agent: PersonalAgentSummaryDto,
+    /// `true` when the call changed nothing (already on) or switched an existing
+    /// agent back on; `false` when a member was created or converted.
+    pub reused: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisablePersonalAgentResponse {
+    pub agent: PersonalAgentSummaryDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonalAgentListResponse {
+    pub agents: Vec<PersonalAgentSummaryDto>,
+}
+
 /// The owner of a subscription agent (#3392). Name and id only.
 #[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -4102,6 +4205,23 @@ pub struct AgentOwnerDto {
 }
 
 impl RosterMemberDto {
+    /// #3591: the personal-agent read value for `viewer`. Only the owner gets
+    /// `mentionable`, and only while the agent is on (결재 2: a teammate sees the
+    /// agent and its label, but autocomplete never offers it to them).
+    pub fn apply_personal_facts(&mut self, facts: &momo_agent::AgentReadFacts, viewer: Uuid) {
+        let (Some(personal), Some((owner_id, owner_name))) = (&facts.personal, &facts.owner) else {
+            return;
+        };
+        self.personal_agent = Some(PersonalAgentDto {
+            label: momo_agent::personal_agent_label(owner_name),
+            owner_id: owner_id.to_string(),
+            owner_display_name: owner_name.clone(),
+            harness: personal.harness.as_str().to_string(),
+            enabled: personal.enabled,
+            mentionable: personal.enabled && *owner_id == viewer,
+        });
+    }
+
     /// Stamp the AIH-2 read contract onto an agent row.
     pub fn apply_read_facts(
         &mut self,
@@ -4118,6 +4238,7 @@ impl RosterMemberDto {
             display_name: name.clone(),
         });
         self.host_online = facts.host_online;
+        self.subscription_retired = facts.subscription_retired.then_some(true);
     }
 }
 
@@ -4138,6 +4259,7 @@ impl HostedAgentConnectionDto {
             display_name: name.clone(),
         });
         self.host_online = facts.host_online;
+        self.subscription_retired = facts.subscription_retired.then_some(true);
     }
 }
 
@@ -4292,6 +4414,12 @@ pub struct HostedAgentConnectionDto {
     /// status; it blocks nothing by itself.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub brain_unavailable_reason: Option<String>,
+    /// #3567 (ADR-0198 증보 1 D2): `true` only on a 「이전 구독 에이전트」 — an
+    /// entry the retirement tool switched off. The member is suspended and keeps
+    /// every past message; a client draws the marker instead of hiding the
+    /// author. Absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subscription_retired: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -4865,6 +4993,65 @@ pub struct WorkInstructionResponse {
     pub work_control: WorkControlDto,
     pub message: WorkInstructionMessageDto,
     /// `true` when this answered a retry of an instruction already accepted.
+    pub replayed: bool,
+}
+
+/// `POST /v1/workspaces/{ws}/work-spawns` (#3570, T5, ADR-0198 D4 · 증보 1 D7):
+/// the owner's signed instruction to start a **new** task on their own Mac.
+/// Not a chat message and not an agent run: the server turns it into one
+/// `work_control` row addressed to the host it derives from the signed folder
+/// id, and writes nothing to the message path.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkSpawnRequest {
+    /// The harness to launch (`payload.tool`): signed.
+    pub tool: String,
+    /// The short card title of the session (display text; not signed).
+    pub label: String,
+    /// The whole first prompt, NFC, 1...32768 characters: signed.
+    pub prompt: String,
+    /// The room the session belongs to (a "home channel", ADR-0198 N5): signed.
+    pub channel_id: Uuid,
+    /// The thread the owner called from, when it was said in one: signed.
+    #[serde(default)]
+    pub thread_root_id: Option<Uuid>,
+    /// The message the owner called from (a mention or DM), when there is
+    /// one: signed.
+    #[serde(default)]
+    pub origin_message_id: Option<Uuid>,
+    /// A hint for which of the owner's own Macs. The server derives the host
+    /// from the signed folder id; this can only narrow, never redirect.
+    #[serde(default)]
+    pub target_host_id: Option<Uuid>,
+    /// `momo.human.control.v4`. `folderId` is required; `agentMemberId` only
+    /// when the owner named a personal agent (a harness spawn has none).
+    pub human_signature: HumanSignatureRequest,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkSpawnResponse {
+    pub work_control: WorkControlDto,
+    /// `true` when this answered a retry of a spawn already accepted.
+    pub replayed: bool,
+}
+
+/// `POST …/work-sessions/{id}/kill` (#3628, ADR-0198 N4).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkKillResponse {
+    /// The `kill` control this answer is about: the one just made, the one
+    /// still waiting for the Mac (`replayed`), or — for a session that already
+    /// ended — the last one asked for, `null` when none ever was.
+    pub work_control: Option<WorkControlDto>,
+    /// The session's status as the server holds it (`running`/`idle` while the
+    /// Mac has not yet stopped it, `ended` once it has).
+    pub session_status: String,
+    /// Whether the session's Mac was heartbeating when this was answered (false
+    /// for an already ended session, which is not looked up). A kill for an
+    /// offline Mac is kept and runs when the Mac returns.
+    pub host_online: bool,
+    /// `true` when nothing new was written (a retry, or an already ended session).
     pub replayed: bool,
 }
 
@@ -5476,14 +5663,18 @@ mod tests {
             owner_member_id: "m".into(),
             host_type: "cloud".into(),
             display_name: "box".into(),
-            public_key: "k".into(),
-            capabilities: serde_json::json!({"terminal_attach": true}),
+            public_key: Some("k".into()),
+            capabilities: Some(serde_json::json!({"terminal_attach": true})),
             last_seen_at_ms: None,
             revoked_at_ms: None,
             created_at_ms: 7,
             online: false,
+            folders: None,
+            default_folder_id: None,
         };
         let json = serde_json::to_value(&dto).expect("serialize");
+        assert!(json.get("folders").is_none());
+        assert!(json.get("defaultFolderId").is_none());
         assert_eq!(json["ownerMemberId"], "m");
         assert_eq!(json["type"], "cloud", "`type` is not renamed to hostType");
         assert_eq!(json["capabilities"]["terminal_attach"], true);

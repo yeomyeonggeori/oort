@@ -287,6 +287,38 @@ mod tests {
         );
     }
 
+    /// ADR-0198 N4 (#3628): the owner's stop is not a door an agent bearer has.
+    #[test]
+    fn the_owners_kill_route_is_closed_to_agents() {
+        for method in ["POST", "GET", "PUT", "PATCH", "DELETE"] {
+            let path = format!("/v1/workspaces/{WS}/work-sessions/{RUN}/kill");
+            assert_eq!(
+                required_agent_scope(method, &path),
+                None,
+                "{method} {path} must stay closed to agents"
+            );
+        }
+    }
+
+    /// ADR-0198 D4 (#3570): the owner's signed new-work spawn is not a door an
+    /// agent bearer has — no verb, no spelling of the path is in the table.
+    #[test]
+    fn no_agent_scope_opens_the_signed_spawn_route() {
+        for method in ["POST", "GET", "PUT", "PATCH", "DELETE"] {
+            for path in [
+                format!("/v1/workspaces/{WS}/work-spawns"),
+                format!("/v1/workspaces/{WS}/work-spawns/{RUN}"),
+                format!("/v1/workspaces/{WS}/work-controls/spawn"),
+            ] {
+                assert_eq!(
+                    required_agent_scope(method, &path),
+                    None,
+                    "{method} {path} must stay closed to agents"
+                );
+            }
+        }
+    }
+
     #[test]
     fn agent_port_is_one_post_only_scope() {
         assert_eq!(

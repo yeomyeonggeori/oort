@@ -217,6 +217,7 @@ pub async fn load_mention_candidates_in_tx(
                      AND acr.status = 'confirmed' \
                 ) AS is_external_runtime, \
                 a.invocation_scope, a.subscription_harness, a.owner_human_id, a.uses_owner_key, \
+                a.personal_agent, \
                 (SELECT o.display_name FROM member o \
                   WHERE o.workspace_id = m.workspace_id AND o.id = a.owner_human_id) \
                   AS owner_display_name, \
@@ -373,6 +374,7 @@ fn owner_only_scope(
         recently_seen: row.try_get("hosted_recently_seen").map_err(DbError::from)?,
         reconnectable: row.try_get("hosted_reconnectable").map_err(DbError::from)?,
         uses_owner_key: row.try_get("uses_owner_key").map_err(DbError::from)?,
+        personal_agent: row.try_get("personal_agent").map_err(DbError::from)?,
     }))
 }
 
@@ -1590,6 +1592,7 @@ mod tests {
                 recently_seen: true,
                 reconnectable: true,
                 uses_owner_key: false,
+                personal_agent: false,
             }),
             ..candidate()
         };

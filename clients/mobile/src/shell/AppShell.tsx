@@ -44,6 +44,10 @@ import SidebarScreen from '../screens/SidebarScreen';
 import TeamBoardScreen from '../screens/TeamBoardScreen';
 import WorkSessionDetailScreen from '../screens/WorkSessionDetailScreen';
 import {SessionProvider, useSession} from '../session/useSession';
+import {AiSheet} from './AiSheet';
+import {AskMacSheet} from './AskMacSheet';
+import {haptics} from '../lib/haptics';
+import type {HarnessKey} from '../features/work/ask/model';
 import {DelegateWorkSheet, type DelegatePrefill} from './DelegateWorkSheet';
 import {NewChannelSheet} from './NewChannelSheet';
 import {NewMessageSheet} from './NewMessageSheet';
@@ -146,6 +150,14 @@ export function Shell({
   // 정해 넘기고, `CreateStep` 은 캡처 하네스의 시작값으로도 쓰이는 닫힌 집합이다.
   const [delegate, setDelegate] = useState<DelegatePrefill | null>(null);
   const closeDelegate = useCallback(() => setDelegate(null), []);
+  // 「내 맥에 보내기」 시트(#3597). 맥이 꺼져 있을 때 사람이 누르면 N8 시트로 넘어간다.
+  const [askMac, setAskMac] = useState(false);
+  // 「개인 에이전트」 줄이 고른 하네스. 일반 입구로 열면 없다.
+  const [askHarness, setAskHarness] = useState<HarnessKey | undefined>(undefined);
+  // 「AI」 시트(N10 #3598). + 메뉴의 AI 줄이 연다. 줄을 고르면 닫히고 그 줄의 시트·목록이 선다.
+  const [ai, setAi] = useState(false);
+  const closeAi = useCallback(() => setAi(false), []);
+  const closeAskMac = useCallback(() => setAskMac(false), []);
   const onDelegateWork = useCallback(
     (prefill: DelegatePrefill) => setDelegate(prefill),
     [],
@@ -244,19 +256,18 @@ export function Shell({
         onPress: () => setCreate('channel'),
       });
     }
+    // 에이전트 부르기 · 작업 맡기기 · 내 맥에 물어보기는 「AI」 시트 하나로 모였다(N10 #3598).
+    // 4번째 탭은 없다(ADR-0189 D1) — 이 한 줄이 시트를 연다. 시트가 열리는 누름 한 번에
+    // 햅틱 한 번(`lib/haptics.ts`).
     items.push({
-      key: 'agents',
+      key: 'ai',
       icon: 'agent',
-      label: '에이전트 부르기',
-      hint: '에이전트 목록을 엽니다.',
-      onPress: onOpenAgentList,
-    });
-    items.push({
-      key: 'delegate',
-      icon: 'work',
-      label: '작업 맡기기',
-      hint: '에이전트에게 맡길 작업을 쓰는 시트를 엽니다.',
-      onPress: () => setDelegate({}),
+      label: 'AI',
+      hint: '에이전트와 내 도구를 고르는 시트를 엽니다.',
+      onPress: () => {
+        haptics.light();
+        setAi(true);
+      },
     });
     if (workConsole) {
       items.push({
@@ -268,7 +279,7 @@ export function Shell({
       });
     }
     return items;
-  }, [canCreateChannel, onOpenAgentList, workConsole]);
+  }, [canCreateChannel, workConsole]);
   // 셸 위에 층이 하나라도 서 있는가. 크롬은 그 밑에 그려지고(트리 순서), 보조기술
   // 에서도 숨는다(`ShellChrome` 의 `coveredProps`).
   const covered =
@@ -485,6 +496,40 @@ export function Shell({
         <NewChannelSheet
           onOpenConversation={onOpenConversation}
           onClose={closeCreate}
+        />
+      ) : null}
+      {ai ? (
+        <AiSheet
+          onClose={closeAi}
+          onDelegate={() => {
+            setAi(false);
+            setDelegate({});
+          }}
+          onOpenAgentList={() => {
+            setAi(false);
+            onOpenAgentList();
+          }}
+          onAskMac={harness => {
+            setAi(false);
+            setAskHarness(harness);
+            setAskMac(true);
+          }}
+        />
+      ) : null}
+      {askMac ? (
+        <AskMacSheet
+          initialHarness={askHarness}
+          onClose={closeAskMac}
+          onUseAgent={() => {
+            setAskMac(false);
+            setDelegate({});
+          }}
+          onOpenSession={sessionId => {
+            if (workConsole) dispatch({type: 'openWorkSession', workSession: {sessionId}});
+          }}
+          onOpenWorkList={() => {
+            if (workConsole) dispatch({type: 'openWorkList'});
+          }}
         />
       ) : null}
       {delegate !== null ? (
