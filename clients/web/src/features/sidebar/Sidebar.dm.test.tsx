@@ -356,7 +356,7 @@ describe("사이드바 DM 구획 (#3662)", () => {
     expect(dmRow(host, DM_ID(1)).querySelector('[data-testid="dm-peer-dot"]')).toBeNull();
   });
 
-  it("정체불명 「다이렉트 메시지」 행은 없다: 나 혼자의 DM은 「이름 (나)」, 명부에 없는 상대는 「알 수 없는 멤버」", async () => {
+  it("정체불명 「다이렉트 메시지」 행은 없다: 나 혼자의 DM은 「이름 (나)」, 명부에 없는 상대는 「나간 멤버」", async () => {
     const host = await mount();
     const labels = [...host.querySelectorAll('[data-testid="channel-item"]')].map((el) =>
       el.textContent?.trim()
@@ -366,7 +366,7 @@ describe("사이드바 DM 구획 (#3662)", () => {
     expect(selfRow.textContent).toContain("곽성재 (나)");
     expect(selfRow.querySelector('[data-testid="dm-avatar"]')?.textContent).toBe("곽");
     const ghostRow = dmRow(host, DM_ID(6));
-    expect(ghostRow.textContent).toContain("알 수 없는 멤버");
+    expect(ghostRow.textContent).toContain("나간 멤버");
     expect(ghostRow.querySelector('[data-testid="dm-avatar"]')?.getAttribute("data-avatar-kind")).toBe("unknown");
   });
 });

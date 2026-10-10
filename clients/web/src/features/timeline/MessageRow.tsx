@@ -1,3 +1,4 @@
+import { missingMemberLabel } from "@momo/core/features/workspace/directory";
 import { useContext, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   threadRollup,
@@ -421,7 +422,7 @@ export function MessageRow({
   const openMemberProfile = useOpenMemberProfile();
   const author = memberFor(directory, message.authorMemberId);
   const isAgent = author?.kind === "agent";
-  const name = author?.displayName ?? message.authorMemberId.slice(0, 8);
+  const name = author?.displayName ?? missingMemberLabel(directory);
   const owner = isAgent ? memberFor(directory, author?.ownerHumanId) : null;
   const deleted = message.state === "deleted";
   const receiptRunId = receiptRunIdFor({
