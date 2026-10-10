@@ -6,6 +6,7 @@ import React from 'react';
 import {
   LogBox,
   ScrollView,
+  Settings,
   StyleSheet,
   Text,
   TextInput,
@@ -112,6 +113,7 @@ import {
 } from '../src/shell/DelegateWorkSheet';
 import {AiSheet} from '../src/shell/AiSheet';
 import {AskMacSheet, type AskMacPreview} from '../src/shell/AskMacSheet';
+import NetInfo from '@react-native-community/netinfo';
 import {bootSpawnPort} from '../src/boot/spawnPort';
 import {workRunFailure} from '@momo/core/features/agents/workRunRequest';
 import {INITIAL_NAV, navReducer} from '../src/nav/state';
@@ -5188,6 +5190,13 @@ function seedAi(surface: string): void {
 // 로 답하므로 「서명 키가 필요해요」가 **실제로** 뜬다. `flag-off` 판은 서버가 서명 요구를 꺼
 // 둔 모습이라 Face ID 전에 「이 서버는 아직…」이 뜬다.
 function seedCall(surface: string): void {
+  // 시뮬레이터의 NetInfo는 바깥 도달성 검사에 실패해 오프라인으로 읽힌다(컴포저가 잠긴다).
+  // 하네스에서만 검사 대상을 이 기기가 늘 닿는 곳(Metro)으로 돌린다.
+  NetInfo.configure({
+    reachabilityUrl: `http://${String(Settings.get('RCT_jsLocation') ?? '127.0.0.1:8081')}/status`,
+    reachabilityTest: async () => true,
+    reachabilityShouldRun: () => true,
+  });
   seedAi('shell-call-on');
   bootSpawnPort();
   const hosts = [
@@ -5217,6 +5226,8 @@ function seedCall(surface: string): void {
     init?: {method?: string; body?: string},
   ) => {
     const url = String(input);
+    // NetInfo의 도달성 검사도 이 fetch를 지난다 — 닿는다고 답한다.
+    if (url.endsWith('/status')) return json({});
     if (url.includes('/work-hosts')) return json({workHosts: hosts});
     if (url.includes('/work-sessions')) return json({workSessions: []});
     if (url.includes('/signing-context')) {

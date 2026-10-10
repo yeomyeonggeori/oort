@@ -15,7 +15,7 @@ name: 98-personal-agent-call-capture
     visible:
       id: "sidebar-row-channel:ch-general"
     timeout: 60000
-- runFlow: subflows/dismiss-dev-logbox.yaml
+# (여기서 dismiss-dev-logbox를 부르지 않는다: 목록 화면에서는 그 좌표가 + 버튼이다.)
 - tapOn:
     id: "sidebar-row-channel:ch-general"
 - extendedWaitUntil:
@@ -32,6 +32,7 @@ name: 98-personal-agent-call-capture
 - runFlow: subflows/dismiss-dev-logbox.yaml
 - tapOn:
     id: "composer-input"
+- eraseText: 200
 - inputText: "@my-claude 로그인 버그 봐줘"
 - tapOn:
     id: "composer-send"
