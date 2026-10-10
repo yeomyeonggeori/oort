@@ -242,6 +242,18 @@ SCAN_SCOPE = [
         ),
     },
     {
+        "path": "server-rust/crates/momo-messaging/src/inbox.rs",
+        "mode": "symbols",
+        "symbols": ["workspaces_with_expired_inbox_items"],
+        "why": (
+            "notifier inbox_retention_sweep.rs: the cross-tenant candidate READ on the "
+            "notifier pool (#3681, ADR-0199 D4). delete_read_inbox_items_in_tx is the "
+            "momo_app write pool's DELETE and must stay out of scope; the SELECT itself "
+            "is already granted (table-level, for the inbox trigger the notifier's "
+            "message INSERT fires)."
+        ),
+    },
+    {
         "path": "server-rust/crates/momo-messaging/src/huddle_sweep.rs",
         "mode": "symbols",
         "symbols": ["active_huddles_for_sweep"],
