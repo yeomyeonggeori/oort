@@ -342,3 +342,28 @@ describe('search', () => {
     expect(rowCount(buildSidebarSections(input()))).toBe(5);
   });
 });
+
+// #3675 / #3676: 서버 명부는 활성 멤버만 싣는다. 은퇴·정지된 에이전트와의 DM은 상대가
+// 명부에서 빠져, 예전에는 섹션 제목과 같은 낱말 「다이렉트 메시지」가 행 이름이 됐다.
+describe('a DM whose peer left the roster', () => {
+  const GONE_ID = 'ffffffff-1111-4111-8111-ffffffffffff';
+  const DM_GONE = channel({
+    id: 'ch-dm-gone',
+    kind: 'dm',
+    memberIds: [SELF_ID, GONE_ID],
+  });
+
+  it('is named 「나간 멤버」, never the section title', () => {
+    const sections = buildSidebarSections(
+      input({
+        directory: makeDirectory([SELF]),
+        agents: [],
+        groups: {channels: [], dms: [DM_GONE]},
+      }),
+    );
+    const row = section(sections, 'dms')?.data[0];
+    expect(row?.title).toBe('나간 멤버');
+    expect(row?.title).not.toBe('다이렉트 메시지');
+    expect(row?.isAgent).toBe(false);
+  });
+});

@@ -58,21 +58,3 @@ export const PEER_DOT_LABEL: Record<PeerDot, string> = {
   away: "자리 비움",
   dnd: "방해 금지",
 };
-
-/**
- * 상대를 명부에서 못 찾은 DM 행의 이름. 예전에는 코어의 대체 이름 「다이렉트 메시지」가 그대로
- * 나와, 섹션 제목과 같은 낱말의 정체불명 행이 됐다(#3662). 원인은 둘이다:
- *   · 나 혼자뿐인 DM(`memberIds`에서 나를 빼면 비어 있다) → 「이름 (나)」, 아바타도 내 것.
- *   · 상대가 명부에 없다(명부를 받는 중이거나, 명부에 없는 멤버) → 받는 중이면 「불러오는 중」,
- *     끝났는데도 없으면 「알 수 없는 멤버」. 사람 이름을 지어내지 않는다.
- */
-export function unresolvedDmLabel(
-  channel: Channel,
-  selfMemberId: string,
-  selfName: string,
-  rosterReady: boolean
-): { text: string; isSelf: boolean } {
-  const others = (channel.memberIds ?? []).filter((id) => !uuidEq(id, selfMemberId));
-  if (others.length === 0) return { text: `${selfName} (나)`, isSelf: true };
-  return { text: rosterReady ? "알 수 없는 멤버" : "불러오는 중", isSelf: false };
-}

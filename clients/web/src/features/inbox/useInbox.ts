@@ -1,3 +1,4 @@
+import { GONE_MEMBER_LABEL } from "@momo/core/features/workspace/directory";
 import { useCallback, useMemo } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -111,7 +112,7 @@ export function useFeedContext(): FeedContext {
   const actorFor = useCallback(
     (memberId: string): ActorNames => {
       const member = memberFor(directory, memberId);
-      if (!member) return { name: memberId.slice(0, 8), isAgent: false };
+      if (!member) return { name: GONE_MEMBER_LABEL, isAgent: false };
       const owner =
         member.kind === "agent"
           ? memberFor(directory, member.ownerHumanId)

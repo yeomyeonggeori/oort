@@ -1,3 +1,4 @@
+import { GONE_MEMBER_LABEL } from "@momo/core/features/workspace/directory";
 import { X } from "lucide-react";
 import {
   QUOTE_CANCEL_LABEL,
@@ -75,7 +76,7 @@ function QuoteAuthor({
   directory: Directory;
 }) {
   const member = memberId === null ? null : memberFor(directory, memberId);
-  const name = member?.displayName ?? (memberId === null ? "" : memberId.slice(0, 8));
+  const name = member?.displayName ?? (memberId === null ? "" : GONE_MEMBER_LABEL);
   if (name === "") return null;
   return (
     <span

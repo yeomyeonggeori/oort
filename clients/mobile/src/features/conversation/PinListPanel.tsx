@@ -1,3 +1,4 @@
+import {GONE_MEMBER_LABEL} from '@momo/core/features/workspace/directory';
 import {
   PIN_EMPTY_BODY_TEXT,
   PIN_LIST_EMPTY_DETAIL,
@@ -169,7 +170,7 @@ export function PinListPanel({
             const name = memberNameParts(
               directory,
               item.authorMemberId,
-              '알 수 없는 멤버',
+              GONE_MEMBER_LABEL,
             ).name;
             const excerpt = excerptLine(item.body);
             return (

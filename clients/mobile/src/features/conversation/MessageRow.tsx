@@ -1,3 +1,4 @@
+import {GONE_MEMBER_LABEL} from '@momo/core/features/workspace/directory';
 import {threadRollup, type Message, type ThreadRollup} from '@momo/core/lib/api';
 import {
   dayDividerLabel,
@@ -194,7 +195,7 @@ import {MemoryReceiptChip} from '../memory/MemoryReceiptChip';
 // aim at and be refused by.
 // =============================================================================
 
-const UNKNOWN_MEMBER = '알 수 없는 멤버';
+const UNKNOWN_MEMBER = GONE_MEMBER_LABEL;
 
 /**
  * 시각이 서는 자리는 **묶음 머리 한 곳**이다 (#3386 — owner 2026-10-03, Buzz 기준).

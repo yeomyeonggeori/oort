@@ -110,7 +110,6 @@ import { useOpenNewDm } from "@/features/directory/useNewDm";
 import {
   PEER_DOT_LABEL,
   peerDot,
-  unresolvedDmLabel,
 } from "@/features/directory/newDmModel";
 import { DmAvatar } from "./DmAvatar";
 
@@ -530,26 +529,19 @@ export function Sidebar({
     const counts = unreadCountFor(channel);
     // A DM row is named after a person, and this workspace holds two members
     // called 김인턴, so the row carries the handle whenever the name alone does
-    // not decide which one it is (channelLabelParts).
-    // 상대를 못 찾은 DM은 코어의 대체 이름 「다이렉트 메시지」(섹션 제목과 같은 낱말) 대신
-    // 이유가 읽히는 이름을 쓴다(#3662, `unresolvedDmLabel`).
+    // not decide which one it is. 이름은 어느 표면에서나 같은 한 함수(channelLabelParts)가
+    // 정한다 - 상대를 못 찾아도 「다이렉트 메시지」가 아니라 「나간 멤버」 등이다(#3675).
+    const label = channelLabelParts(
+      channel,
+      directoryQuery.directory,
+      session.member.id,
+      { rosterReady: !directoryQuery.isPending, selfName }
+    );
     const peer =
       channel.kind === "dm"
         ? dmPeer(channel, directoryQuery.directory, session.member.id)
         : null;
-    const unresolved =
-      channel.kind === "dm" && peer === null
-        ? unresolvedDmLabel(
-            channel,
-            session.member.id,
-            selfName,
-            !directoryQuery.isPending
-          )
-        : null;
-    const dmPeerMember = unresolved?.isSelf ? (selfMember ?? null) : peer;
-    const label = unresolved
-      ? { text: unresolved.text, handle: null, isAgent: false }
-      : channelLabelParts(channel, directoryQuery.directory, session.member.id);
+    const dmPeerMember = label.kind === "self" ? (selfMember ?? null) : peer;
     const dot = channel.kind === "dm" ? peerDot(dmPeerMember, nowMs) : null;
     const currentSectionId = sidebarPrefs.sectionIdFor(channel.id);
     const canDragRow =

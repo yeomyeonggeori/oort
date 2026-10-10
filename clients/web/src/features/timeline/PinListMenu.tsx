@@ -1,3 +1,4 @@
+import { GONE_MEMBER_LABEL } from "@momo/core/features/workspace/directory";
 import { Pin } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
@@ -196,7 +197,7 @@ export function PinListMenu({
           entries.map((entry) => {
             const author = memberFor(directory, entry.authorMemberId);
             const name =
-              author?.displayName ?? entry.authorMemberId.slice(0, 8);
+              author?.displayName ?? GONE_MEMBER_LABEL;
             const excerpt = pinExcerpt(entry.body, EXCERPT_MAX_CHARS);
             return (
               <DropdownMenuItem

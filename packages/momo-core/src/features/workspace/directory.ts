@@ -154,6 +154,14 @@ export function dmAutoReplyAgent(
   return peer;
 }
 
+/** 어떤 이름이 어떻게 정해졌나. 아바타·점·조사처럼 이름 말고 형태를 가르는 곳이 읽는다. */
+export type ChannelLabelKind =
+  | "channel"
+  | "peer"
+  | "self"
+  | "pending"
+  | "gone";
+
 export interface ChannelLabelParts {
   /** The name to render. */
   text: string;
@@ -165,32 +173,87 @@ export interface ChannelLabelParts {
   handle: string | null;
   /** The DM peer is an agent, so the name carries the --agent token (§9). */
   isAgent: boolean;
+  /** 이름이 어디서 왔나: 채널 이름 / 상대 / 나 혼자 / 명부 대기 / 명부에 없음. */
+  kind: ChannelLabelKind;
+}
+
+/** 명부에 없는 멤버(은퇴·정지·나감)의 이름. DM 상대뿐 아니라 그 멤버가 쓴 글의 글쓴이에도 같은 이름을 쓴다. 사람 이름도 id도 지어내지 않는다. */
+export const GONE_MEMBER_LABEL = "나간 멤버";
+/** 명부를 아직 받는 중일 때의 이름. */
+export const PENDING_MEMBER_LABEL = "불러오는 중";
+
+export interface ChannelLabelOptions {
+  /**
+   * 명부를 다 받았나. 생략하면 명부에 멤버가 한 명이라도 있으면 받은 것으로 본다(나 자신은
+   * 언제나 명부에 있으므로 빈 명부는 아직 못 받았다는 뜻이다).
+   */
+  rosterReady?: boolean;
+  /** 명부에서 나를 못 찾을 때 「이름 (나)」에 쓸 내 이름(세션이 안다). */
+  selfName?: string;
 }
 
 /**
  * Channel label, structured. DM channels carry no name, so the label is the
- * other participant resolved through the directory (falling back to the
- * handle-less "다이렉트 메시지" only when the roster has not loaded).
+ * other participant resolved through the directory. **모든 표면이 이 한 함수로 DM 이름을
+ * 정한다**(#3675): 상대 이름 / 「이름 (나)」(나 혼자뿐인 DM) / 「불러오는 중」(명부 대기) /
+ * 「나간 멤버」(명부에 없음 - 은퇴·정지 포함). 섹션 제목과 같은 낱말 「다이렉트 메시지」는
+ * 대화 이름이 아니므로 어느 경로에서도 나오지 않는다.
  */
 export function channelLabelParts(
   channel: Channel,
   directory: Directory,
-  selfMemberId: string
+  selfMemberId: string,
+  options: ChannelLabelOptions = {}
 ): ChannelLabelParts {
   if (channel.kind !== "dm") {
     return {
       text: channel.name ?? "이름 없는 채널",
       handle: null,
       isAgent: false,
+      kind: "channel",
     };
   }
   const member = dmPeer(channel, directory, selfMemberId);
-  if (!member) return { text: "다이렉트 메시지", handle: null, isAgent: false };
+  if (member) {
+    return {
+      text: member.displayName,
+      handle: isAmbiguousName(directory, member) ? `@${member.handle}` : null,
+      isAgent: member.kind === "agent",
+      kind: "peer",
+    };
+  }
+  const others = (channel.memberIds ?? []).filter(
+    (id) => idKey(id) !== idKey(selfMemberId)
+  );
+  if (others.length === 0) {
+    const selfName =
+      memberFor(directory, selfMemberId)?.displayName ?? options.selfName;
+    return {
+      text: selfName ? `${selfName} (나)` : "나",
+      handle: null,
+      isAgent: false,
+      kind: "self",
+    };
+  }
+  const ready = options.rosterReady ?? directory.members.length > 0;
   return {
-    text: member.displayName,
-    handle: isAmbiguousName(directory, member) ? `@${member.handle}` : null,
-    isAgent: member.kind === "agent",
+    text: ready ? GONE_MEMBER_LABEL : PENDING_MEMBER_LABEL,
+    handle: null,
+    isAgent: false,
+    kind: ready ? "gone" : "pending",
   };
+}
+
+/**
+ * 조사를 정하는 사실: 이름이 사람(상대·나·나간 멤버)이면 「에게」, 방이거나 명부를 받는 중이면
+ * 「에」다. 컴포저 문구가 이 한 판정을 따른다(#1384, #3675).
+ */
+export function labelRecipientKind(
+  parts: Pick<ChannelLabelParts, "kind">
+): "person" | "place" {
+  return parts.kind === "peer" || parts.kind === "gone" || parts.kind === "self"
+    ? "person"
+    : "place";
 }
 
 /**
@@ -202,8 +265,9 @@ export function channelLabelParts(
 export function channelLabel(
   channel: Channel,
   directory: Directory,
-  selfMemberId: string
+  selfMemberId: string,
+  options: ChannelLabelOptions = {}
 ): string {
-  const parts = channelLabelParts(channel, directory, selfMemberId);
+  const parts = channelLabelParts(channel, directory, selfMemberId, options);
   return parts.handle ? `${parts.text} ${parts.handle}` : parts.text;
 }

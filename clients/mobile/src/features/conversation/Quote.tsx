@@ -1,3 +1,4 @@
+import {GONE_MEMBER_LABEL} from '@momo/core/features/workspace/directory';
 import {
   QUOTE_CANCEL_LABEL,
   QUOTE_DELETED_TEXT,
@@ -58,7 +59,7 @@ import {appNote} from './appVoice';
 // 화면에 있는 행, 둘 다 없으면 `unresolved`.
 // =============================================================================
 
-const UNKNOWN_MEMBER = '알 수 없는 멤버';
+const UNKNOWN_MEMBER = GONE_MEMBER_LABEL;
 
 /**
  * 발췌가 비었을 때 할 말.

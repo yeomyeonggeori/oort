@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Message, ReadState } from "../../lib/api";
+import type { Channel, Message, ReadState, RosterMember } from "../../lib/api";
 import {
   composeMailbox,
   dmEntry,
@@ -13,6 +13,7 @@ import {
   type MailboxEntry,
 } from "./mailbox";
 import type { ActorNames, FeedItem } from "./model";
+import { channelLabel, makeDirectory } from "../workspace/directory";
 
 const NOW = 1_800_000_000_000;
 const SELF = "00000000-0000-7000-8000-000000000101";
@@ -239,5 +240,51 @@ describe("entryAriaLabel", () => {
     } as MailboxEntry;
     expect(entryAriaLabel(e)).toBe("안 읽음 3개, DM · 서연, 서연, 방금, 안녕");
     expect(entryAriaLabel({ ...e, unread: false })).toBe("DM · 서연, 서연, 방금, 안녕");
+  });
+});
+
+// #3675 / #3676: 은퇴·정지된 에이전트와의 DM. 명부(활성 멤버만)에서 상대가 빠져도 인박스는
+// 대화 이름을 지어내지 않고, 마지막 말이 내 것이면 「나」가 보낸 사람일 뿐 대화 이름이 되지 않는다.
+describe("dmEntry · 명부에서 빠진 상대", () => {
+  const GONE = "00000000-0000-7000-8000-0000000009ff";
+  const dmChannel = {
+    id: DM,
+    workspaceId: "w",
+    kind: "dm",
+    muted: false,
+    memberIds: [SELF, GONE],
+  } as Channel;
+  const roster = (id: string, name: string) =>
+    ({
+      id,
+      workspaceId: "w",
+      kind: "human",
+      status: "active",
+      displayName: name,
+      handle: name,
+      channelCount: 0,
+      channelIds: [],
+      capabilities: [],
+      createdAtMs: 0,
+      updatedAtMs: 0,
+    }) as RosterMember;
+
+  it("부제는 「DM · 나간 멤버」이고 「다이렉트 메시지」가 아니다", () => {
+    const directory = makeDirectory([roster(SELF, "곽성재")]);
+    const e = dmEntry({
+      channelId: DM,
+      channelLabel: channelLabel(dmChannel, directory, SELF),
+      readState: rs(),
+      messages: [msg({ seq: 3, authorMemberId: SELF, body: "ㅎㅇ" })],
+      selfMemberId: SELF,
+      actorFor,
+      nowMs: NOW,
+    });
+    expect(e?.typeLabel).toBe("DM · 나간 멤버");
+    expect(e?.channelLabel).toBe("나간 멤버");
+    expect(e?.typeLabel).not.toContain("다이렉트 메시지");
+    // 「나」는 마지막 말을 한 사람이다. 대화 이름이 자기 자신으로 떨어진 것이 아니다.
+    expect(e?.actor).toBe("나");
+    expect(e?.channelLabel).not.toContain("곽성재");
   });
 });

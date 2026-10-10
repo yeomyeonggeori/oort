@@ -131,9 +131,9 @@ describe("컴포저 카피가 한 벌이다 (#1384)", () => {
 
   it("조사를 정하는 사실은 셸이 넘긴다 — 컴포저가 추측하지 않는다", () => {
     // `recipient` 에 기본값이 없는 것이 이 단정의 전제다: 셸이 안 넘기면
-    // 타입이 붉고, 넘기면 그 판정은 `peer` 하나에서 나온다.
+    // 타입이 붉고, 넘기면 그 판정은 코어의 한 함수에서 나온다.
     const shell = codeOf("./ChatShell.tsx");
-    expect(shell).toContain('recipient={peer ? "person" : "place"}');
+    expect(shell).toContain("labelRecipientKind(labelParts)");
   });
 
   it("스레드 컴포저의 문장도 폰과 한 벌이다", () => {

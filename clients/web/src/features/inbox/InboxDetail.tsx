@@ -1,3 +1,4 @@
+import { GONE_MEMBER_LABEL } from "@momo/core/features/workspace/directory";
 import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -64,7 +65,7 @@ function ContextRow({
   highlighted: boolean;
 }) {
   const member = memberFor(directory, message.authorMemberId) ?? null;
-  const name = member?.displayName ?? message.authorMemberId.slice(0, 8);
+  const name = member?.displayName ?? GONE_MEMBER_LABEL;
   const isAgent = member?.kind === "agent";
   const body =
     message.state === "deleted" ? "삭제된 메시지입니다." : (message.body ?? "");

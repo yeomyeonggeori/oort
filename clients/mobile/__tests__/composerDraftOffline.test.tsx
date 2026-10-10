@@ -1333,7 +1333,8 @@ describe('컴포저 카피가 한 벌이다 (#1384)', () => {
         'utf8',
       ),
     );
-    expect(screen).toContain("recipient={peer ? 'person' : 'place'}");
+    expect(screen).toContain('recipient={recipientKind}');
+    expect(screen).toContain('labelRecipientKind(channelLabelParts(');
   });
 });
 

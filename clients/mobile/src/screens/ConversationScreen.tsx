@@ -16,6 +16,8 @@ import {
 } from '@momo/core/features/chat/typing';
 import {
   channelLabel,
+  channelLabelParts,
+  labelRecipientKind,
   memberFor,
   memberNameParts,
 } from '@momo/core/features/workspace/directory';
@@ -142,7 +144,7 @@ const NO_RECEIPTS: ReadonlyMap<string, ApprovalReceipt> = new Map();
 // batch to keep — `channelId` plus an already-resolved `title` — is kept
 // exactly: the title is still the caller's, resolved through the core's
 // directory at the moment the row was tapped, so this header cannot flicker
-// from "다이렉트 메시지" to a name when the roster refetches.
+// from a placeholder to a name when the roster refetches.
 //
 // ## The unread divider is frozen at open, the cursor is not
 //
@@ -391,6 +393,11 @@ export default function ConversationScreen({
     () => (channel ? dmPeer(channel, directory, member.id) : null),
     [channel, directory, member.id],
   );
+
+  const recipientKind = useMemo<'person' | 'place'>(() => {
+    if (!channel) return 'place';
+    return labelRecipientKind(channelLabelParts(channel, directory, member.id));
+  }, [channel, directory, member.id]);
 
   const dmAgent = useMemo(
     () => (channel ? dmAutoReplyAgent(channel, directory, member.id) : null),
@@ -1838,10 +1845,10 @@ export default function ConversationScreen({
             <Composer
               channelLabel={title}
               // 조사를 정하는 사실 (#1384): DM 의 title 은 방 이름이 아니라 상대
-              // 이름이라 「hermes에」가 아니라 「hermes에게」여야 한다. `peer` 로
-              // 묻는 이유는 로스터가 아직 안 온 DM 의 label 이 사람 이름이 아니라
-              // "다이렉트 메시지"이고(`channelLabelParts`), 그때는 에가 맞아서다.
-              recipient={peer ? 'person' : 'place'}
+              // 이름이라 「hermes에」가 아니라 「hermes에게」여야 한다. 상대가 명부에 없어
+              // 「나간 멤버」여도 사람이다. 명부를 받는 중의 「불러오는 중」만 사람 이름이
+              // 아니라서 에가 맞다(`channelLabelParts.kind`).
+              recipient={recipientKind}
               directory={directory}
               viewerHumanId={member.id}
               dmAgent={dmAgent}

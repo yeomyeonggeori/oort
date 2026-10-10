@@ -1,3 +1,4 @@
+import { GONE_MEMBER_LABEL } from "@momo/core/features/workspace/directory";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Search } from "lucide-react";
@@ -224,7 +225,7 @@ export function SearchRoute() {
 
   function authorFor(memberId: string): { name: string; isAgent: boolean } {
     const member = memberFor(directoryQuery.directory, memberId);
-    if (!member) return { name: memberId.slice(0, 8), isAgent: false };
+    if (!member) return { name: GONE_MEMBER_LABEL, isAgent: false };
     return { name: member.displayName, isAgent: member.kind === "agent" };
   }
 
