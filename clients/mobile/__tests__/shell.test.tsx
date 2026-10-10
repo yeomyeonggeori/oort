@@ -482,23 +482,31 @@ describe('the 인박스 tab', () => {
   // goal SRV-T1이 서버에 승인 3라우트를 올렸고 판정이 뒤집혔다. 그러므로 이제
   // 참인 것은 정반대다: 세 탭이 서고, 첫 탭(결정 대기)에 착지하며,
   // `approvals-absent`는 그릴 이유가 없다. 멘션을 보려면 **탭을 눌러야 한다**.
-  it('offers the three tabs now that this server carries the approvals ledger', async () => {
+  it('offers the mailbox views and the three ledger tabs, landing on 전체', async () => {
     installFetch();
     renderShell();
     fireEvent.press(screen.getByTestId('tab-inbox'));
 
-    // 승인 원장이 있으므로 그 위에 선 두 탭이 함께 산다
-    // (`availableInboxFilters`: 에이전트 탭도 이 원장 하나로 열린다).
-    expect(screen.getByTestId('inbox-tab-needs-action')).toBeTruthy();
-    expect(screen.getByTestId('inbox-tab-mentions')).toBeTruthy();
-    expect(screen.getByTestId('inbox-tab-agents')).toBeTruthy();
+    // 메일함 보기 넷(전체·안 읽음·DM·스레드, #3663)과 원장 보기 셋. 승인 원장이
+    // 있으므로 그 위에 선 두 탭(결정 대기·에이전트)도 함께 산다
+    // (`availableInboxFilters`).
+    for (const id of ['all', 'unread', 'dm', 'thread', 'needs-action', 'mentions', 'agents']) {
+      expect(screen.getByTestId(`inbox-tab-${id}`)).toBeTruthy();
+    }
     // 미제공 안내는 사라진다. 없는 기능을 없다고 말하는 것이 그 안내의 일이었고,
     // 이제 그 문장은 참이 아니다.
     expect(screen.queryByTestId('approvals-absent')).toBeNull();
-    // 그리고 착지하는 곳은 첫 탭, 즉 결정 대기다.
+    // 착지하는 곳은 「전체」다: 나와 관련된 것의 목록. 비어 있으면 조용한 게 정상이다.
     await waitFor(() => expect(screen.getByTestId('inbox-empty')).toBeTruthy());
     expect(screen.getByTestId('inbox-empty')).toHaveTextContent(
-      /지금 결정할 일이 없습니다\. 조용한 게 정상입니다\./,
+      /인박스가 비어 있습니다\. 조용한 게 정상입니다\./,
+    );
+    // 결정 대기 보기는 한 번 눌러서 간다.
+    fireEvent.press(screen.getByTestId('inbox-tab-needs-action'));
+    await waitFor(() =>
+      expect(screen.getByTestId('inbox-empty')).toHaveTextContent(
+        /지금 결정할 일이 없습니다\. 조용한 게 정상입니다\./,
+      ),
     );
   });
 
