@@ -55,7 +55,7 @@ import {
 } from "@/features/routing/MentionRoutingBar";
 import { composerRoutingSlot } from "@/features/chat/composerRoutingSlot";
 import { useMentionRouting } from "@/features/routing/useMentionRouting";
-import { mentionRoutingTarget } from "@momo/core/features/routing/mentionTargets";
+import { mentionRoutingTarget, type MentionRoutingTarget } from "@momo/core/features/routing/mentionTargets";
 import { routingPayload } from "@momo/core/features/routing/routingModel";
 import { calledAgents } from "@momo/core/features/routing/mentionTargets";
 import { agentWillNotAnswer, answeringMentionTarget, composerAgentNotice } from "@momo/core/features/ai/aiMention";
@@ -387,6 +387,14 @@ function ActivityText({
   );
 }
 
+function withoutAgent(target: MentionRoutingTarget, memberId: string | undefined): MentionRoutingTarget {
+  if (memberId === undefined || target.kind === "none") return target;
+  const agents = (target.kind === "one" ? [target.agent] : target.agents).filter((agent) => agent.id !== memberId);
+  if (agents.length === 0) return { kind: "none" };
+  if (agents.length === 1) return { kind: "one", agent: agents[0]! };
+  return { kind: "many", agents };
+}
+
 export function Composer({
   workspaceId,
   channelId,
@@ -610,9 +618,15 @@ export function Composer({
   // 1회 오버라이드는 지금 이 글이 부르는 에이전트에 붙는다(ADR-0134 D1). 대상은
   // 확정된 멘션이 아니라 **텍스트에 남아 있는 멘션**에서 다시 계산한다: 사람이
   // 고른 뒤 그 핸들을 지웠다면 붙일 요청 자체가 없어졌기 때문이다.
+  const callPlan = useMemo(
+    () => (personalCall ? personalCall.planFor(text) : null),
+    [personalCall, text]
+  );
+  // 내 개인 에이전트는 서버의 응답 라우팅(모델·강도 「이번만 바꾸기」)이 아니라 내 맥의 하네스가
+  // 일한다. 그 줄을 세우면 이 글에 적용되지 않는 값을 고르게 하는 거짓 약속이라 대상에서 뺀다.
   const routingTarget = useMemo(
-    () => mentionRoutingTarget(text, directory.members),
-    [text, directory.members]
+    () => withoutAgent(mentionRoutingTarget(text, directory.members), callPlan?.agent.memberId),
+    [text, directory.members, callPlan]
   );
   // 라우팅 줄·「이번만 바꾸기」 범위는 **답할 에이전트만** 센다(#3444). 답하지 않는 에이전트는
   // 아래 한 줄이 말한다: 같은 에이전트가 두 줄에 서로 다른 말로 서 있으면 모순이다.
@@ -624,10 +638,6 @@ export function Composer({
   // 못 부르는(남의 구독·개인 키) 또는 쉬는(Claude 문의 중) 에이전트를 부르는 글이면 한 줄 (AIH-9).
   const calledNow = calledAgents(routingTarget);
   const agentNotice = composerAgentNotice(calledNow, session.member.id);
-  const callPlan = useMemo(
-    () => (personalCall ? personalCall.planFor(text) : null),
-    [personalCall, text]
-  );
   // 부른 에이전트가 전부 답하지 않으면 「이번만 바꾸기」 줄은 거짓 약속이다: 한 줄이 그 자리를 대신한다.
   const noneAnswer =
     calledNow.length > 0 && calledNow.every((agent) => agentWillNotAnswer(agent, session.member.id));

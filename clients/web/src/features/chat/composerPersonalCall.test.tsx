@@ -187,6 +187,13 @@ describe("composer: calling my personal agent (#3653)", () => {
     expect(sends[0]!.personalCall).toMatchObject({ agent: { handle: "my-claude", harness: "claude" } });
   });
 
+  it("my personal agent gets no 「이번만 바꾸기」 routing row: those values would not apply to a Mac harness", async () => {
+    const root = await mount(createElement(Harness));
+    await type(root, "@my-claude 빌드를 봐 줘");
+    expect(root.querySelector("[data-testid='composer-routing']")).toBeNull();
+    expect(root.querySelector("[data-testid='composer-routing-reserved']")).toBeNull();
+  });
+
   it("a teammate's personal agent is just a message: no line, no call on send", async () => {
     const root = await mount(createElement(Harness));
     await type(root, "@their-claude 빌드를 봐 줘");
