@@ -2086,7 +2086,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     // 그리고 글자를 칠 때마다 후보 수가 바뀔 때마다 도크가 자라고 줄어서 「따라가는 목록」의
     // 보이는 창이 그만큼 줄었다 늘었다 한다 — 목록은 그때마다 `onLayout` 으로 바닥에 다시
     // 붙는다. 시트는 입력창 바로 위에 목록을 **덮고** 서므로 목록은 아무것도 모른다.
-    // `bottom: '100%'` 는 도크 윗 여백(`root.paddingTop`) 위에 서므로 알약과 그 여백만큼 뜬다.
+    // `bottom: '100%'` 는 루트 윗면(`root.paddingTop` 위)에 서므로 알약에 거의 붙어(캡처로 ~4px) 선다.
     position: 'absolute',
     left: 0,
     right: 0,
