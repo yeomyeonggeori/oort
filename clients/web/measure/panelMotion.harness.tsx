@@ -7,6 +7,7 @@ import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { CreateChannelProvider } from "@/features/channels/CreateChannelDialog";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
 import { AddChannelMemberProvider } from "@/features/channels/AddChannelMemberDialog";
+import { NewDmProvider } from "@/features/directory/NewDmDialog";
 import { AddWorkspaceProvider } from "@/features/workspace/AddWorkspaceDialog";
 import { AgentProfileProvider } from "@/features/routing/AgentProfileDialog";
 import { MemberProfileProvider } from "@/features/directory/MemberProfileDialog";
@@ -252,6 +253,7 @@ export function Harness() {
           <CreateChannelProvider>
           <AddWorkspaceProvider>
           <AddChannelMemberProvider>
+          <NewDmProvider>
           <AgentProfileProvider>
           <MemberProfileProvider>
             <DrawerProbe
@@ -263,6 +265,7 @@ export function Harness() {
             <CreateChannelClickProbe />
           </MemberProfileProvider>
           </AgentProfileProvider>
+          </NewDmProvider>
           </AddChannelMemberProvider>
           </AddWorkspaceProvider>
           </CreateChannelProvider>
