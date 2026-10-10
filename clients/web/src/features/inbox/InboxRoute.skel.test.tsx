@@ -303,6 +303,21 @@ describe("InboxRoute mailbox", () => {
     expect(host.querySelector('[data-testid="inbox-detail"]')?.getAttribute("data-key")).toBe("mention:m1");
   });
 
+  it("필터를 바꾸면 고른 줄을 놓는다 (DM 필터에 멘션 줄이 남지 않는다)", async () => {
+    const host = await mount();
+    await act(async () => {
+      (rows(host)[1] as HTMLElement).click();
+      await Promise.resolve();
+    });
+    expect(host.querySelector('[data-testid="inbox-detail"]')).not.toBeNull();
+    await act(async () => {
+      (host.querySelector('[data-testid="inbox-tab-dm"]') as HTMLElement).click();
+      await Promise.resolve();
+    });
+    expect(host.querySelector('[data-testid="inbox-detail"]')).toBeNull();
+    expect(rows(host).map((r) => r.getAttribute("data-kind"))).toEqual(["dm", "dm"]);
+  });
+
   it("목록이 비면 비어 있다고 말한다 (실패가 아니라)", async () => {
     state.entries = [];
     const host = await mount();

@@ -64,10 +64,6 @@ export interface Mailbox {
   refetch: () => void;
 }
 
-function recencyOf(state: ReadState | undefined): number {
-  return state?.latestSeq ?? 0;
-}
-
 export function useMailbox(): Mailbox {
   const { session, workspaceId } = useSession();
   const selfId = session.member.id;
@@ -84,16 +80,12 @@ export function useMailbox(): Mailbox {
     [readStates.byChannel]
   );
 
-  // ---- DM: 가장 최근에 움직인 대화부터 상한까지 --------------------------------
+  // ---- DM: 서버가 준 순서대로 상한까지 ----------------------------------------
+  // 채널 사이에는 비교할 수 있는 최근성이 없다(`latestSeq`는 채널별 카운터라 서로
+  // 견줄 수 없다). 순서를 지어내지 않고 서버의 순서를 그대로 쓴다.
   const dmChannels = useMemo(
-    () =>
-      [...channelsQuery.groups.dms]
-        .sort(
-          (a, b) =>
-            recencyOf(stateOf(b.id)) - recencyOf(stateOf(a.id))
-        )
-        .slice(0, DM_CHANNEL_CAP),
-    [channelsQuery.groups.dms, stateOf]
+    () => channelsQuery.groups.dms.slice(0, DM_CHANNEL_CAP),
+    [channelsQuery.groups.dms]
   );
   const dmResults = useQueries({
     queries: dmChannels.map((channel) => ({
@@ -116,15 +108,17 @@ export function useMailbox(): Mailbox {
   });
 
   // ---- 스레드: 안 읽은 채널의 최근 페이지에서 내 글 -------------------------
-  const unreadChannels = useMemo(
+  const unreadChannelsAll = useMemo(
     () =>
-      channelsQuery.groups.channels
-        .filter((channel) => {
-          const state = stateOf(channel.id);
-          return state !== undefined && isUnreadSeq(state, state.latestSeq);
-        })
-        .slice(0, THREAD_CHANNEL_CAP),
+      channelsQuery.groups.channels.filter((channel) => {
+        const state = stateOf(channel.id);
+        return state !== undefined && isUnreadSeq(state, state.latestSeq);
+      }),
     [channelsQuery.groups.channels, stateOf]
+  );
+  const unreadChannels = useMemo(
+    () => unreadChannelsAll.slice(0, THREAD_CHANNEL_CAP),
+    [unreadChannelsAll]
   );
   const channelResults = useQueries({
     queries: unreadChannels.map((channel) => ({
@@ -266,10 +260,7 @@ export function useMailbox(): Mailbox {
 
   const capped =
     channelsQuery.groups.dms.length > DM_CHANNEL_CAP ||
-    channelsQuery.groups.channels.filter((c) => {
-      const s = stateOf(c.id);
-      return s !== undefined && isUnreadSeq(s, s.latestSeq);
-    }).length > THREAD_CHANNEL_CAP;
+    unreadChannelsAll.length > THREAD_CHANNEL_CAP;
 
   const refetch = useCallback(() => {
     void readStates.refetch();

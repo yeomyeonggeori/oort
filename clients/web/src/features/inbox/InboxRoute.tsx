@@ -267,7 +267,12 @@ export function InboxRoute() {
         <FilterTabs
           spec={mailboxTabsSpec(tabs)}
           value={filter}
-          onChange={(next) => setParams({ filter: next }, { replace: true })}
+          onChange={(next) => {
+            // 필터를 바꾸면 고른 줄을 놓는다: 다른 종류의 줄이 새 필터의 목록과 패널에
+            // 남아 있으면 「DM만」이 DM만이 아니게 된다.
+            setSelected(null);
+            setParams({ filter: next }, { replace: true });
+          }}
           counts={tabCounts}
         />
       </header>
@@ -365,8 +370,7 @@ export function InboxRoute() {
                           className="px-4 py-3 text-meta text-ink-muted"
                           data-testid="inbox-capped"
                         >
-                          채널이 많아 최근에 움직인 일부만 불러왔습니다. 나머지는
-                          채널에서 확인하세요.
+                          채널이 많아 일부만 불러왔습니다. 나머지는 채널에서 확인하세요.
                         </p>
                       )}
                     </>
@@ -386,7 +390,7 @@ export function InboxRoute() {
               onDecided={onDecided}
               readBusy={readBusy}
             />
-          ) : !isMobile ? (
+          ) : !isMobile && state === "list" ? (
             <div
               className="flex min-w-0 flex-1 items-center justify-center px-6"
               data-testid="inbox-detail-empty"
