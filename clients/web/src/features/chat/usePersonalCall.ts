@@ -97,6 +97,11 @@ export function usePersonalCall(input: {
     const signed = call.signed;
     setNotice({ ...current, retrying: true });
     void resendPersonalAgentCall(workspaceId, signed).then((next) => {
+      // 다시 보내는 사이 방을 옮겼으면 그 방의 줄로 되살리지 않는다.
+      if (channelRef.current !== current.channelId) {
+        setNotice((now) => (now !== null && now.channelId === current.channelId ? null : now));
+        return;
+      }
       setNotice({ channelId: current.channelId, call: next, retrying: false });
     });
   }, [workspaceId]);

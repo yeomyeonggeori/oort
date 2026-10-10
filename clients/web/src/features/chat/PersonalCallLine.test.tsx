@@ -62,6 +62,7 @@ describe("the line after a call", () => {
       retrying: false,
       call: { state: "message_only", reason: "no_signer", text: "데스크탑·폰에서 불러 주세요" },
     });
+    expect(host.querySelector("[data-testid='composer-call-label']")?.textContent).toBe("메시지만 보냈어요");
     expect(host.querySelector("[data-testid='composer-call-text']")?.textContent).toBe("데스크탑·폰에서 불러 주세요");
     expect(host.querySelector("[data-testid='composer-call-retry']")).toBeNull();
   });

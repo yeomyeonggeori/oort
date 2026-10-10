@@ -100,6 +100,7 @@ function session(): SessionContextValue {
   } as unknown as SessionContextValue;
 }
 
+let controller: ReturnType<typeof usePersonalCall> | null = null;
 const sends: Array<{ body: string; personalCall: unknown }> = [];
 
 function Harness() {
@@ -112,6 +113,7 @@ function Harness() {
     selfId: ME,
     dmAgent: null,
   });
+  controller = personalCall;
   return createElement(Composer, {
     workspaceId: "w",
     channelId: "c",
@@ -201,6 +203,20 @@ describe("composer: calling my personal agent (#3653)", () => {
     await submit(root);
     expect(sends).toHaveLength(1);
     expect(sends[0]!.personalCall).toBeUndefined();
+  });
+
+  it("a result that lands after the person changed rooms is not shown in the new room", async () => {
+    const root = await mount(createElement(Harness));
+    const call = { state: "message_only", reason: "no_signer", text: "데스크탑·폰에서 불러 주세요" } as const;
+    const spec = controller!.planFor("@my-claude 빌드")!;
+    await act(async () => {
+      spec.onResult({ message: { channelId: "other-room" } as never, call });
+    });
+    expect(root.querySelector("[data-testid='composer-call-notice']")).toBeNull();
+    await act(async () => {
+      spec.onResult({ message: { channelId: "c" } as never, call });
+    });
+    expect(root.querySelector("[data-testid='composer-call-notice']")).not.toBeNull();
   });
 
   it("a plain message calls nothing", async () => {

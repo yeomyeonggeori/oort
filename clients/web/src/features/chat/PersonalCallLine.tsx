@@ -10,6 +10,7 @@ import type { CallNotice } from "@/features/chat/usePersonalCall";
 
 export const CALL_SENT_LINE = "내 맥에 보냈어요. 시작하면 이 대화에 작업 카드가 떠요.";
 export const CALL_REPLAYED_LINE = "이미 보낸 호출이에요. 작업 카드를 확인해 주세요.";
+export const CALL_MESSAGE_ONLY = "메시지만 보냈어요";
 export const CALL_RETRYING_LINE = "같은 요청을 다시 보내는 중이에요.";
 
 const ROW = "flex min-h-8 flex-wrap items-center gap-x-2 px-4 py-1 text-meta";
@@ -70,6 +71,11 @@ export function PersonalCallNotice({
       data-testid="composer-call-notice"
       data-state={notice.retrying ? "retrying" : call.state}
     >
+      {call.state === "message_only" && (
+        <span className="font-medium" data-testid="composer-call-label">
+          {CALL_MESSAGE_ONLY}
+        </span>
+      )}
       {call.state === "not_delivered" && !notice.retrying && (
         <span className="font-medium" data-testid="composer-call-label">
           {CALL_NOT_DELIVERED}
@@ -92,6 +98,7 @@ export function PersonalCallNotice({
           type="button"
           variant="ghost"
           size="sm"
+          className="font-normal text-ink-muted"
           onClick={onDismiss}
           aria-label="안내 닫기"
           data-testid="composer-call-dismiss"

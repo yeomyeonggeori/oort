@@ -978,7 +978,8 @@ export function Composer({
       {callPlan !== null ? (
         <PersonalCallPreview spec={callPlan} />
       ) : (
-        personalCall?.notice != null && (
+        personalCall?.notice != null &&
+        personalCall.notice.channelId === channelId && (
           <PersonalCallNotice
             notice={personalCall.notice}
             onRetry={personalCall.retry}
