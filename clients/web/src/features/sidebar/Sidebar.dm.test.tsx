@@ -14,7 +14,6 @@ import { Sidebar } from "./Sidebar";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
-const CH_ENGINE = "00000000-0000-7000-8000-000000000201";
 const CH_GENERAL = "00000000-0000-7000-8000-000000000202";
 
 vi.mock("@/features/workspace/useAddWorkspace", () => ({

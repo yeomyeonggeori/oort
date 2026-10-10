@@ -299,7 +299,6 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
         />
       </div>
 
-      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- 방향키 위임만 한다 */}
       <div
         ref={listRef}
         className="min-h-0 flex-1 overflow-y-auto"
