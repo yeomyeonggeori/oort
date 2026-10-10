@@ -9,13 +9,12 @@ import {spawnPort} from '../work/ask/spawnPort';
 // 시트는 이 파일의 답을 그리기만 한다. 구획이 서는 조건을 화면에 흩어 두면 승격 뒤에
 // 한 곳은 켜지고 한 곳은 안 켜진다.
 //
-// ## 게이트는 하나다 — engine 승격 전에는 닫혀 있다
+// ## 게이트는 하나다 — 부팅이 진짜 포트를 꽂으면 열린다
 //
 // 「내 도구」와 「개인 에이전트」는 둘 다 **내 맥으로 보내는 길**(`spawnPort().wired`)이
-// 이 빌드에 꽂혀 있어야 선다. 그 길의 재료는 track/engine에만 있다(`spawnPort.ts` 머리).
-// + 메뉴의 옛 「내 맥에 물어보기」 입구가 쓰던 바로 그 판정이고, 여기서는 그 이름을
-// 하나로 모았다. #3638에서 승격되어 `registerSpawnPort`가 진짜 포트를 꽂으면 코드 변경
-// 없이 두 구획이 함께 켜진다.
+// 이 빌드에 꽂혀 있어야 선다. #3638에서 부팅(`boot/spawnPort.ts`)이 진짜 포트
+// (`phoneSpawnPort.ts`)를 꽂아 두 구획이 함께 켜졌다. 시험·캡처 하네스는 포트를 직접
+// 꽂거나 비운다(`__resetSpawnPort`).
 //
 // ## 개인 에이전트의 값은 로스터에서 온다 — 모르는 모양은 없는 것과 같다
 //
@@ -32,6 +31,10 @@ export function myToolsGateOpen(): boolean {
 
 export interface PersonalAgentRow {
   id: string;
+  /** 로스터의 핸들(`@별칭`의 별칭). 컴포저가 멘션·DM을 이 별칭으로 알아본다. */
+  handle: string;
+  /** 서버가 준 하네스 키 그대로(`claude`·`codex`…). 호출 서명의 `tool`이다. */
+  harnessKey: string;
   /** 로스터가 준 이름(예: 「내 Claude Code」). */
   label: string;
   /** 하네스 이름 — 아는 키는 사람 말로, 모르는 키는 그대로. */
@@ -80,6 +83,8 @@ export function personalAgentRows(
     const known = knownHarness(value.harness);
     rows.push({
       id: member.id,
+      handle: member.handle,
+      harnessKey: value.harness,
       label: value.label.trim(),
       harnessLabel: known === null ? value.harness : HARNESS_LABEL[known],
       harness: known,
