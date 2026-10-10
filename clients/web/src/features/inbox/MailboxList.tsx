@@ -98,10 +98,8 @@ export function MailboxList({
               title={entry.reason}
               onClick={() => onSelect(entry)}
               className={cn(
-                "press flex w-full items-start gap-3 px-4 py-3 text-left focus-visible:focus-ring",
-                selected
-                  ? "bg-surface-pressed"
-                  : "hover:bg-surface-hover active:bg-surface-pressed"
+                "flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring",
+                selected && "bg-surface-pressed"
               )}
             >
               <span className="shrink-0 pt-0.5">
