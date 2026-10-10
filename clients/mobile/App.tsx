@@ -2,6 +2,7 @@ import {QueryClientProvider} from '@tanstack/react-query';
 import React, {useEffect, useMemo, useState} from 'react';
 import {ActivityIndicator, StatusBar, StyleSheet, Text, View} from 'react-native';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
+import {bootSpawnPort} from './src/boot/spawnPort';
 import {PrimaryButton} from './src/design/atoms';
 import {font, SAFE_GUTTER, space, type Palette} from './src/design/tokens';
 import {ThemeProvider, usePalette, useStyles, useTheme} from './src/design/theme';
@@ -59,6 +60,7 @@ function AppChrome(): React.JSX.Element {
 
   useEffect(() => {
     const teardown = installReactQueryBridges();
+    bootSpawnPort();
     let cancelled = false;
     initSessionStore().finally(() => {
       if (!cancelled) {
