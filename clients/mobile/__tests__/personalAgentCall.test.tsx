@@ -575,4 +575,14 @@ describe('usePersonalAgentCall — 컴포저에서', () => {
     expect(messagePosts()[0]?.path).toContain(CH);
     expect(messagePosts()[0]?.body).toMatchObject({clientMsgId: 'client-msg-1'});
   });
+
+  it('안내는 방을 옮기면 걷힌다 (이전 방의 실패 문장이 다른 방에 남지 않는다)', async () => {
+    const h = mountHook({hosts: [mac({online: false})]});
+    act(() => {
+      h.probe.current?.tryCall('@my-claude 봐줘');
+    });
+    await waitFor(() => expect(h.probe.current?.notice).not.toBeNull());
+    act(() => h.moveTo({...CHANNEL, id: 'other-room', name: 'other'}));
+    expect(h.probe.current?.notice).toBeNull();
+  });
 });

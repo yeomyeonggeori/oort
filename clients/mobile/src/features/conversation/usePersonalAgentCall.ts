@@ -90,6 +90,13 @@ export function usePersonalAgentCall(input: {
   latest.current = input;
   const openedRef = useRef(false);
 
+  // 안내는 부른 방의 것이다. 다른 방으로 옮기면 걷는다(디자인 검수 M1: 이전 방의 실패 문장이
+  // 다른 방 컴포저 위에 남지 않게).
+  const roomId = input.channel?.id ?? null;
+  useEffect(() => {
+    setNotice(null);
+  }, [roomId]);
+
   useEffect(() => {
     if (wait === null) return;
     const found = findSpawnedSession(sessions.data ?? [], wait.before, {
