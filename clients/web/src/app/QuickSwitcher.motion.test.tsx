@@ -194,3 +194,10 @@ describe("QuickSwitcher rows do not carry item motion (#1997 M-1)", () => {
     }
   });
 });
+
+// #3662: 새 DM 모달의 문은 셸(NewDmProvider)이 내리는 동사다. 이 시험은 셸 없이 그리므로
+// 문만 막아 둔다(모달 자체는 NewDmDialog.test가 잰다).
+vi.mock("@/features/directory/useNewDm", () => ({
+  useOpenNewDm: () => () => undefined,
+  useNewDmOpen: () => false,
+}));
