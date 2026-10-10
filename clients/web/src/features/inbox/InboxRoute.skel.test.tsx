@@ -72,8 +72,8 @@ const state = {
   isLoading: false,
   error: false,
 };
-const markRead = vi.fn(() => Promise.resolve());
-const markUnread = vi.fn(() => Promise.resolve());
+const markRead = vi.fn((_entry: MailboxEntry) => Promise.resolve());
+const markUnread = vi.fn((_entry: MailboxEntry) => Promise.resolve());
 const mentionCount = { value: 0 };
 const approvalItems = { value: [ITEM] as FeedItem[] };
 
