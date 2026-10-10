@@ -4,6 +4,7 @@ import {
   channelLabel,
   channelLabelParts,
   makeDirectory,
+  missingMemberLabel,
 } from "./directory";
 
 // #3675 / #3676: 한 DM은 어느 표면에서도 같은 이름이어야 하고, 그 이름이 섹션 제목 「다이렉트 메시지」일
@@ -79,5 +80,12 @@ describe("channelLabelParts · DM 이름 해석", () => {
         }
       }
     }
+  });
+});
+
+describe("missingMemberLabel · 글쓴이 이름", () => {
+  it("명부를 받은 뒤 없는 멤버는 「나간 멤버」, 받기 전에는 「불러오는 중」이며 id 조각이 아니다", () => {
+    expect(missingMemberLabel(makeDirectory([self]))).toBe("나간 멤버");
+    expect(missingMemberLabel(makeDirectory([]))).toBe("불러오는 중");
   });
 });

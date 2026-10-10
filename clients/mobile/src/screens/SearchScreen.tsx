@@ -1,4 +1,4 @@
-import {GONE_MEMBER_LABEL} from '@momo/core/features/workspace/directory';
+import {missingMemberLabel} from '@momo/core/features/workspace/directory';
 import type {MessageSearchHit} from '@momo/core/lib/api';
 import {
   leadsWithEllipsis,
@@ -128,7 +128,7 @@ export default function SearchScreen({
         query={search.settledQuery}
         channelTitle={titleFor(item.channelId)}
         authorName={
-          memberNameParts(directory, item.authorMemberId, GONE_MEMBER_LABEL).name
+          memberNameParts(directory, item.authorMemberId, missingMemberLabel(directory)).name
         }
         onPress={() =>
           onOpenResult(item.channelId, titleFor(item.channelId), {

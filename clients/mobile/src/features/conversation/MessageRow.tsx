@@ -1,4 +1,4 @@
-import {GONE_MEMBER_LABEL} from '@momo/core/features/workspace/directory';
+import {missingMemberLabel} from '@momo/core/features/workspace/directory';
 import {threadRollup, type Message, type ThreadRollup} from '@momo/core/lib/api';
 import {
   dayDividerLabel,
@@ -195,7 +195,6 @@ import {MemoryReceiptChip} from '../memory/MemoryReceiptChip';
 // aim at and be refused by.
 // =============================================================================
 
-const UNKNOWN_MEMBER = GONE_MEMBER_LABEL;
 
 /**
  * 시각이 서는 자리는 **묶음 머리 한 곳**이다 (#3386 — owner 2026-10-03, Buzz 기준).
@@ -554,7 +553,7 @@ function Author({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const member = memberFor(directory, memberId);
-  const parts = memberNameParts(directory, memberId, UNKNOWN_MEMBER);
+  const parts = memberNameParts(directory, memberId, missingMemberLabel(directory));
   const isAgent = member?.kind === 'agent';
   const owner =
     isAgent && member?.ownerHumanId
@@ -723,7 +722,7 @@ function ReplyMarker({
         // is a reply and stops short of naming a message it cannot see.
         '↳ 답글'
       : `↳ ${
-          memberNameParts(directory, parent.authorMemberId, UNKNOWN_MEMBER).name
+          memberNameParts(directory, parent.authorMemberId, missingMemberLabel(directory)).name
         }님에게 답글`;
   if (!onOpen) {
     return (
@@ -2459,7 +2458,7 @@ function MessageRowInner({
   const authorLabel = memberNameParts(
     directory,
     message.authorMemberId,
-    UNKNOWN_MEMBER,
+    missingMemberLabel(directory),
   ).name;
 
   // 접힌 묘비의 문장. 접히지 않았으면 한 낱말이다 — 「삭제된 메시지 1개」라고
@@ -2524,7 +2523,7 @@ function MessageRowInner({
                   memberNameParts(
                     directory,
                     replyParent.authorMemberId,
-                    UNKNOWN_MEMBER,
+                    missingMemberLabel(directory),
                   ).name
                 }님에게 답글`
             : null,
@@ -3290,7 +3289,7 @@ export function WorkingRow({
   directory: Directory;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const parts = memberNameParts(directory, memberId, UNKNOWN_MEMBER);
+  const parts = memberNameParts(directory, memberId, missingMemberLabel(directory));
   const member = memberFor(directory, memberId);
   const owner = member?.ownerHumanId
     ? memberFor(directory, member.ownerHumanId)

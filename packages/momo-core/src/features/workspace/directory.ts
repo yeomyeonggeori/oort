@@ -182,6 +182,17 @@ export const GONE_MEMBER_LABEL = "나간 멤버";
 /** 명부를 아직 받는 중일 때의 이름. */
 export const PENDING_MEMBER_LABEL = "불러오는 중";
 
+/**
+ * 명부에서 못 찾은 멤버(글쓴이·인용 원문 작성자 등)의 이름. 명부를 아직 못 받았으면(나 자신조차
+ * 없는 빈 명부) 「불러오는 중」, 받은 뒤에도 없으면 「나간 멤버」다. 멀쩡한 멤버를 명부 도착
+ * 전에 「나간 멤버」라고 부르지 않고, id 조각도 이름으로 내지 않는다.
+ */
+export function missingMemberLabel(directory: Directory): string {
+  return directory.members.length > 0
+    ? GONE_MEMBER_LABEL
+    : PENDING_MEMBER_LABEL;
+}
+
 export interface ChannelLabelOptions {
   /**
    * 명부를 다 받았나. 생략하면 명부에 멤버가 한 명이라도 있으면 받은 것으로 본다(나 자신은
