@@ -55,7 +55,7 @@ import {
 } from "@/features/routing/MentionRoutingBar";
 import { composerRoutingSlot } from "@/features/chat/composerRoutingSlot";
 import { useMentionRouting } from "@/features/routing/useMentionRouting";
-import { mentionRoutingTarget } from "@momo/core/features/routing/mentionTargets";
+import { mentionRoutingTarget, type MentionRoutingTarget } from "@momo/core/features/routing/mentionTargets";
 import { routingPayload } from "@momo/core/features/routing/routingModel";
 import { calledAgents } from "@momo/core/features/routing/mentionTargets";
 import { agentWillNotAnswer, answeringMentionTarget, composerAgentNotice } from "@momo/core/features/ai/aiMention";
@@ -114,6 +114,9 @@ import {
 } from "@momo/core/features/commands/slash";
 import { containsSecretKey } from "@momo/core/features/chat/secretKey";
 import { SecretKeyBlockNotice } from "@/features/chat/SecretKeyBlockNotice";
+import { PersonalCallNotice, PersonalCallPreview } from "@/features/chat/PersonalCallLine";
+import type { PersonalCallController } from "@/features/chat/usePersonalCall";
+import type { PersonalCallSpec } from "@/features/work/personalAgentCalling";
 import { useComposerEmoji } from "@/features/chat/useComposerEmoji";
 import { useComposerFormat } from "@/features/chat/useComposerFormat";
 import { ComposerFormatTray } from "@/features/chat/ComposerFormatTray";
@@ -384,6 +387,14 @@ function ActivityText({
   );
 }
 
+function withoutAgent(target: MentionRoutingTarget, memberId: string | undefined): MentionRoutingTarget {
+  if (memberId === undefined || target.kind === "none") return target;
+  const agents = (target.kind === "one" ? [target.agent] : target.agents).filter((agent) => agent.id !== memberId);
+  if (agents.length === 0) return { kind: "none" };
+  if (agents.length === 1) return { kind: "one", agent: agents[0]! };
+  return { kind: "many", agents };
+}
+
 export function Composer({
   workspaceId,
   channelId,
@@ -395,6 +406,7 @@ export function Composer({
   quote,
   onCancelQuote,
   onSend,
+  personalCall,
 }: {
   /** ADR-0149 - 「작성 중」 발행은 워크스페이스로 스코프된 라우트다. */
   workspaceId: string;
@@ -439,8 +451,15 @@ export function Composer({
       routing?: RequestRouting;
       replyToId?: string;
       attachments?: MessageAttachment[];
+      /** 내 개인 에이전트를 불렀다(#3653): 메시지를 보낸 뒤 서명해 내 맥을 부른다. */
+      personalCall?: PersonalCallSpec;
     }
   ) => Promise<void> | void;
+  /**
+   * 소유자가 `@<내 개인 에이전트>`를 부르면(또는 별칭 DM이면) 도착지 한 줄을 보이고 전송에 호출을
+   * 싣는다. 없으면 이 컴포저는 예전 그대로 메시지만 보낸다. 판정은 안내용이고 문은 서버다.
+   */
+  personalCall?: PersonalCallController;
 }) {
   // 초안은 이 채널의 것이다. 첫 렌더에서 바로 읽는 이유는 한 프레임의 빈 입력창이
   // 「초안이 없다」로 읽히기 때문이다 — 그 프레임에 사람이 타이핑을 시작하면 복원이
@@ -599,9 +618,15 @@ export function Composer({
   // 1회 오버라이드는 지금 이 글이 부르는 에이전트에 붙는다(ADR-0134 D1). 대상은
   // 확정된 멘션이 아니라 **텍스트에 남아 있는 멘션**에서 다시 계산한다: 사람이
   // 고른 뒤 그 핸들을 지웠다면 붙일 요청 자체가 없어졌기 때문이다.
+  const callPlan = useMemo(
+    () => (personalCall ? personalCall.planFor(text) : null),
+    [personalCall, text]
+  );
+  // 내 개인 에이전트는 서버의 응답 라우팅(모델·강도 「이번만 바꾸기」)이 아니라 내 맥의 하네스가
+  // 일한다. 그 줄을 세우면 이 글에 적용되지 않는 값을 고르게 하는 거짓 약속이라 대상에서 뺀다.
   const routingTarget = useMemo(
-    () => mentionRoutingTarget(text, directory.members),
-    [text, directory.members]
+    () => withoutAgent(mentionRoutingTarget(text, directory.members), callPlan?.agent.memberId),
+    [text, directory.members, callPlan]
   );
   // 라우팅 줄·「이번만 바꾸기」 범위는 **답할 에이전트만** 센다(#3444). 답하지 않는 에이전트는
   // 아래 한 줄이 말한다: 같은 에이전트가 두 줄에 서로 다른 말로 서 있으면 모순이다.
@@ -719,7 +744,10 @@ export function Composer({
     // 함수인 이유는 그 사이에 렌더가 끼면 이미 보낸 파일이 한 프레임 동안 트레이에
     // 남고, 그 프레임에 전송을 한 번 더 누를 수 있기 때문이다.
     const sent = takeSent(trayKey);
+    const callSpec = personalCall ? personalCall.planFor(body) : null;
+    if (callSpec) personalCall?.clear();
     void onSend(body, {
+      ...(callSpec ? { personalCall: callSpec } : {}),
       ...(payload ? { routing: payload } : {}),
       ...(replyToId === undefined ? {} : { replyToId }),
       ...(sent.attachments.length === 0
@@ -945,6 +973,19 @@ export function Composer({
         >
           {agentNotice}
         </p>
+      )}
+
+      {callPlan !== null ? (
+        <PersonalCallPreview spec={callPlan} />
+      ) : (
+        personalCall?.notice != null &&
+        personalCall.notice.channelId === channelId && (
+          <PersonalCallNotice
+            notice={personalCall.notice}
+            onRetry={personalCall.retry}
+            onDismiss={personalCall.dismiss}
+          />
+        )
       )}
 
       {/* 상태 행은 그릇 위에 선다. 힌트·작성 중 교대 슬롯은 액션 행 안으로 내려가

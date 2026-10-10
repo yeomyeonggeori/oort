@@ -27,6 +27,17 @@ const virtuoso = vi.hoisted(() => ({
   data: [] as { kind: string; key: string }[],
 }));
 
+// #3653: 개인 에이전트 부르기는 QueryClient가 필요하다. 이 시험이 보는 것이 아니다.
+vi.mock("@/features/chat/usePersonalCall", () => ({
+  usePersonalCall: () => ({
+    planFor: () => null,
+    notice: null,
+    retry: () => undefined,
+    dismiss: () => undefined,
+    clear: () => undefined,
+  }),
+}));
+
 vi.mock("react-virtuoso", () => ({
   Virtuoso: forwardRef(function MockVirtuoso(
     props: {

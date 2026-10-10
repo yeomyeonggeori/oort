@@ -357,6 +357,7 @@ function SheetBody({
     try {
       outcome = await sender.spawn({
         workspaceId,
+        memberId: member.id,
         hostId: activeMac.id,
         folderId,
         tool: harness,
