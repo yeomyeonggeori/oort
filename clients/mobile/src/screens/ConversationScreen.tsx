@@ -2,6 +2,7 @@ import {
   openDirectMessage,
   uuidEq,
   type Message,
+  type RosterMember,
 } from '@momo/core/lib/api';
 import {
   quoteDraftFor,
@@ -105,6 +106,7 @@ import {ThreadPanel} from '../features/conversation/ThreadPanel';
 import {PinListPanel} from '../features/conversation/PinListPanel';
 import {pinListHeaderLabel} from '@momo/core/features/timeline/pins';
 import {Timeline} from '../features/conversation/Timeline';
+import {usePersonalAgentCall} from '../features/conversation/usePersonalAgentCall';
 import {useTimeline} from '../features/conversation/useTimeline';
 import {useMarkRead} from '../features/inbox/useInbox';
 import {visitFlushReason} from '../features/readState/advertise';
@@ -238,6 +240,8 @@ export function conversationSubtitle(
  * 사람이 알아채지 못할 만큼 짧고(채널을 열고 배지가 사라지기까지), 한 턴 동안
  * 쏟아지는 프레임을 한 번의 PUT + 한 번의 무효화로 접을 만큼은 길다.
  */
+const NO_MEMBERS: readonly RosterMember[] = [];
+
 const READ_CURSOR_COALESCE_MS = 600;
 
 /**
@@ -269,6 +273,8 @@ export default function ConversationScreen({
   onOpenConversation,
   onOpenAgent,
   onDelegateWork,
+  onOpenWorkSession,
+  onOpenWorkList,
 }: {
   channelId: string;
   title: string;
@@ -304,6 +310,12 @@ export default function ConversationScreen({
    * 않는다) 문은 서 있고, 호스티드 에이전트의 DM이 승인 전이면 409 문장으로 답한다.
    */
   onDelegateWork?: (prefill: {agentMemberId: string; channelId: string}) => void;
+  /**
+   * 내 개인 에이전트를 부른 호출이 맥에 닿으면 만들어진 세션의 N3 대화로 간다 (#3638).
+   * 못 찾으면 작업 목록으로 간다. 둘 다 셸의 같은 액션이다.
+   */
+  onOpenWorkSession?: (sessionId: string) => void;
+  onOpenWorkList?: () => void;
   /** 에이전트 프로필의 기존 상세 표면. 사람은 이 콜백을 쓰지 않는다. */
   onOpenAgent?: (agent: {
     memberId: string;
@@ -316,7 +328,7 @@ export default function ConversationScreen({
   const {rail, status: railStatus} = useRealtime();
   const nowMs = useNow();
 
-  const {directory} = useDirectory(workspaceId);
+  const {directory, data: rosterMembers} = useDirectory(workspaceId);
   const {groups} = useChannels(workspaceId);
   const readStates = useReadStates(workspaceId);
   const roleLabels = useRoleLabels(workspaceId);
@@ -384,6 +396,18 @@ export default function ConversationScreen({
     () => (channel ? dmAutoReplyAgent(channel, directory, member.id) : null),
     [channel, directory, member.id],
   );
+  // #3638 — 내 개인 에이전트를 부르는 글(`@별칭`·별칭 DM)은 코어 `callPersonalAgent`가 보낸다.
+  const personalCall = usePersonalAgentCall({
+    workspaceId,
+    selfId: member.id,
+    channel,
+    directory,
+    members: rosterMembers ?? NO_MEMBERS,
+    sendPlain: body => void timeline.send(body),
+    ingest: timeline.ingest,
+    onOpenWorkSession,
+    onOpenWorkList,
+  });
   // #2891 — the DM hint follows the server's delivery state for this DM.
   const dmHint = useDmDeliveryHint({workspaceId, channelId, directory, dmAgent});
 
@@ -1212,6 +1236,7 @@ export default function ConversationScreen({
   // optimistic echo is already on screen and that is when it has to be visible.
   const [selfSendToken, setSelfSendToken] = useState(0);
   const {send} = timeline;
+  const tryPersonalCall = personalCall.tryCall;
   // 거울. `onSend` 가 `quote` 를 **의존성으로** 들면 인용을 걸고 무를 때마다 이
   // 핸들러의 동일성이 바뀌고, 그것은 `Timeline` 의 `renderItem` 을 타고 내려가
   // 「붙어 있는 모든 행을 다시 그려라」가 된다(goal RN-P2a 가 산 것). 사람의
@@ -1227,9 +1252,18 @@ export default function ConversationScreen({
       // 자기 글을 먼저 비우는 것과 같은 규율이다.
       const replyToId = quoteRef.current?.targetId;
       setQuote(null);
+      // 인용·첨부가 없는 글만 호출로 간다 — 코어 호출 경로는 둘을 싣지 않는다. 그 밖의
+      // `@별칭`은 평범한 메시지다(서버도 거기서 작업을 만들지 않는다).
+      if (
+        replyToId === undefined &&
+        (options?.attachments?.length ?? 0) === 0 &&
+        tryPersonalCall(body)
+      ) {
+        return;
+      }
       void send(body, replyToId, options?.attachments);
     },
-    [send],
+    [send, tryPersonalCall],
   );
 
   // ---- 리스트에 내려가는 핸들러는 전부 고정된 동일성이어야 한다 (goal RN-P2a) --
@@ -1786,6 +1820,17 @@ export default function ConversationScreen({
                 ]}
                 testID={`turn-stop-outcome-${stopOutcome.outcome.kind}`}>
                 {stopOutcome.outcome.sentence}
+              </Text>
+            ) : null}
+            {personalCall.notice ? (
+              <Text
+                style={[
+                  styles.stopOutcome,
+                  personalCall.notice.tone === 'error' && styles.stopOutcomeError,
+                ]}
+                accessibilityLiveRegion="polite"
+                testID={`personal-call-notice-${personalCall.notice.tone}`}>
+                {personalCall.notice.text}
               </Text>
             ) : null}
             <LongPressHint visible={hint.visible} onDismiss={hint.dismiss} />

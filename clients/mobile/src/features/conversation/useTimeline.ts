@@ -9,6 +9,7 @@ import {
   sendThreadReply,
   setPin,
   setReaction,
+  uuidEq,
   type Message,
   type MessageAttachment,
 } from '@momo/core/lib/api';
@@ -173,6 +174,12 @@ export interface UseTimelineResult {
     replyToId?: string,
     attachments?: MessageAttachment[],
   ) => Promise<void>;
+  /**
+   * A message the caller already sent through another path (#3638: 개인 에이전트 호출은
+   * 코어 `callPersonalAgent`가 보낸다). 서버가 확정한 줄이라 실시간 프레임과 같은 합류로
+   * 들어가고, 다른 방으로 옮겨 간 뒤에 도착한 것은 버린다. 두 번 보내지 않는다.
+   */
+  ingest: (message: Message) => void;
   /** Re-run a failed echo with the SAME idempotency key. */
   resend: (clientMsgId: string) => Promise<void>;
   /**
@@ -378,6 +385,15 @@ export function useTimeline(
       await post(row);
     },
     [channelId, authorMemberId, post, updatePending],
+  );
+
+  const ingest = useCallback(
+    (message: Message) => {
+      if (uuidEq(channelRef.current ?? undefined, message.channelId)) {
+        applyBatch([message]);
+      }
+    },
+    [applyBatch],
   );
 
   const resend = useCallback(
@@ -875,6 +891,7 @@ export function useTimeline(
     recoveryMarkers,
     pending: channelPending,
     send,
+    ingest,
     resend,
     toggleReaction,
     editBody,

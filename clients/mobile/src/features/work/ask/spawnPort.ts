@@ -3,18 +3,12 @@ import {NOT_WIRED_SENTENCE} from './model';
 // =============================================================================
 // 내 맥으로 보내는 한 번의 동작: 서명(Face ID) → `POST /work-spawns` (#3597 T6b).
 //
-// ## 이 파일이 얇은 문인 이유 — engine 승격 후 연결
+// ## 이 파일은 계약이고, 진짜 포트는 `phoneSpawnPort.ts`다 (#3638)
 //
-// 그 동작의 재료는 전부 track/engine에만 있다.
-//   - `momo.human.control.v4` 바이트 규격 — core `humanControlV4.ts`(#3592 P1)
-//   - `postWorkSpawn` / `WorkSpawnBody` — core `lib/api.ts`(#3570 T5)
-//   - 거절 코드 → 문장 — core `personalAgentCall.ts`의 `callFailureLine`
-//   - 폰 쪽: v4를 서명하는 `deviceKey/humanControl.ts` 사례와 네이티브 허용 목록
-//     (`MomoDeviceKeyStore.checkSigningPayload`는 지금 v2/v3 13줄만 서명한다)
-// 이 트리에 없는 코드를 복사하면 승격 때 같은 코드가 두 곳에 생겨 충돌한다. 그래서 시트는
-// 이 **포트** 하나만 부르고, 지금의 기본 포트는 「연결 안 됨」을 정직하게 답한다.
-// 승격 뒤에는 `registerSpawnPort`로 진짜 포트를 꽂는 한 곳(부팅)만 바뀐다. 시트·모델·시험은
-// 그대로다.
+// 시트는 이 **포트** 하나만 부른다. 기본 포트는 「연결 안 됨」을 정직하게 답하고(시험·캡처·
+// 로그인 전), 부팅(`boot/spawnPort.ts`)이 `registerSpawnPort`로 진짜 포트를 꽂는다. 진짜
+// 포트는 코어의 v4 바이트 규격·`postWorkSpawn`·`callFailureLine`과 폰 서명자
+// (`deviceKey/signer.ts`, Face ID)로 만든다.
 //
 // 포트가 지키는 약속(시트가 의존한다):
 //   - 서명은 Face ID 한 번. 취소하면 `cancelled`, 아무것도 보내지 않는다.
