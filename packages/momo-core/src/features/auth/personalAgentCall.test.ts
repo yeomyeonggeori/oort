@@ -224,3 +224,28 @@ describe("what is signed from what was typed", () => {
     }
   });
 });
+
+describe("a client with its own send path (#3653)", () => {
+  it("uses `deliver` instead of the plain REST send and signs the message it returned", async () => {
+    const { signer, signed } = recordingSigner();
+    const deliver = vi.fn(async () => sent({ id: "00000000-0000-7000-8000-00000000e777" }));
+    await callPersonalAgent(input({ signer, deliver }));
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(api.sendMessage).not.toHaveBeenCalled();
+    expect(api.sendThreadReply).not.toHaveBeenCalled();
+    expect(signed).toHaveLength(1);
+    expect((signed[0]!.content as { originMessageId: string }).originMessageId).toBe(
+      "00000000-0000-7000-8000-00000000e777"
+    );
+  });
+
+  it("throws, signing nothing, when `deliver` cannot send", async () => {
+    const { signer, signed } = recordingSigner();
+    await expect(
+      callPersonalAgent(input({ signer, deliver: async () => Promise.reject(new ApiError(500, "down")) }))
+    ).rejects.toBeInstanceOf(ApiError);
+    expect(signed).toHaveLength(0);
+    expect(api.postWorkSpawn).not.toHaveBeenCalled();
+  });
+});
+

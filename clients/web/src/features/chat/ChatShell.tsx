@@ -69,6 +69,7 @@ import { TerminalDock } from "@/features/work/TerminalDock";
 import { toggleDock, useDockState } from "@/features/workbench/local/dockState";
 import { isDesktop } from "@/lib/tauri";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
+import { usePersonalCall } from "@/features/chat/usePersonalCall";
 import { useWorkPanelTarget } from "@/features/agents/workLogStore";
 import type { WorkScope } from "@momo/core/features/work/workSessionModel";
 import { useTimeline } from "@/features/timeline/useTimeline";
@@ -230,6 +231,14 @@ export function ChatShell() {
     stressCount > 0 ? null : channelId,
     session.member.id
   );
+  const personalCall = usePersonalCall({
+    workspaceId,
+    channelId: stressCount > 0 ? null : channelId,
+    channelKind: channel?.kind,
+    members: directory.members,
+    selfId: session.member.id,
+    dmAgent,
+  });
   const messages = stressCount > 0 ? stressMessages : timeline.state.messages;
   const welcome = useWelcomeKickoff({
     workspaceId,
@@ -1480,6 +1489,7 @@ export function ChatShell() {
             quote={quote}
             onCancelQuote={() => setQuote(null)}
             onSend={timeline.send}
+            personalCall={personalCall}
           />
         )}
       </div>
