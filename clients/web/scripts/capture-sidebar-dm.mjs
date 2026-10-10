@@ -149,6 +149,7 @@ async function main() {
       await empty.page.keyboard.press("Meta+Shift+K");
       await empty.page.getByTestId("new-dm-dialog").waitFor({ timeout: 5_000 });
       await empty.page.getByTestId("new-dm-offline").waitFor({ timeout: 5_000 });
+      await empty.page.waitForFunction(() => getComputedStyle(document.querySelector('[data-testid="new-dm-dialog"]')).opacity === "1", null, { timeout: 5_000 });
       await empty.page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}-new-dm-modal-offline-${scheme}.png`) });
       await empty.context.close();
       console.log("shots", scheme);
