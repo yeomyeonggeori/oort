@@ -82,8 +82,18 @@ function mount(entry = "/work?view=team"): ReactNode {
 }
 
 const globals = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+// 자정 직후(00:00~00:10)에는 `Date.now() - 10분` 이 어제가 되어 「오늘 끝난」 줄이 사라진다 — 제품의
+// `startOfLocalDay` 는 옳고 시험의 시계가 흔들렸다. 시계는 흐르게 두되 오늘의 로컬 정오로 옮긴다.
+const realNow = Date.now.bind(Date);
+function noonShiftedNow(): () => number {
+  const noon = new Date(realNow());
+  noon.setHours(12, 0, 0, 0);
+  const shift = noon.getTime() - realNow();
+  return () => realNow() + shift;
+}
 beforeEach(() => {
   globals.IS_REACT_ACT_ENVIRONMENT = true;
+  vi.spyOn(Date, "now").mockImplementation(noonShiftedNow());
   subscriptions.length = 0;
   tauri.desktop = false;
   tauri.open.mockClear();
@@ -91,6 +101,7 @@ beforeEach(() => {
   api.fetchSharedWorkSession.mockRejectedValue(new ApiError(404, "nope"));
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
   cleanup();
   resetEscapeLayers();

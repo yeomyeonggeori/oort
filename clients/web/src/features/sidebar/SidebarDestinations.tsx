@@ -1,4 +1,4 @@
-import { Activity, Bot, Inbox, MessageSquare, Milestone, ServerCog, Sparkles, SquareKanban, SquareTerminal, Users } from "lucide-react";
+import { Activity, Bot, Inbox, Milestone, ServerCog, Sparkles, SquareKanban, SquareTerminal, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { NeedsMe } from "@momo/core/features/inbox/needsMe";
@@ -27,7 +27,8 @@ import {
 // =============================================================================
 // 목록 열의 머리(#3334): 「검색과 이동」 바로 아래의 목적지 두 구획.
 //
-//   구획 A  대화 · 인박스 · 멤버(초안이 있으면 초안)
+//   구획 A  인박스 · 멤버(초안이 있으면 초안) — 「대화」 줄은 #3662로 없앴다: 채널·DM 목록이
+//           바로 아래에 서 있어 `/`로 가는 두 번째 문은 쓸모가 없었다(성재 2026-10-10)
 //   구획 B  「에이전트·작업」 — AI(허브, AIH-3) · 에이전트 · 내 작업 · 팀 작업 · 활동(+ 서버가 싣는 작업
 //           콘솔·작업 흐름) · 지금 도는 세션 줄
 //
@@ -53,7 +54,7 @@ export function SidebarDestinations({
   active: SidebarDestinationActive;
   needsMe: NeedsMe;
   /**
-   * 안 읽은 채널 수. 펼친 줄에는 안 그린다(아래 채널·DM 줄이 수를 말한다). 접힌 레일의 대화 점과
+   * 안 읽은 채널 수. 펼친 목록에는 줄이 없다(아래 채널·DM 줄이 수를 말한다). 접힌 레일의 대화 점과
    * 같은 입력이라 여기서도 같은 `destinationMarks`로 한 번에 푼다.
    */
   unreadChannels?: number;
@@ -79,7 +80,6 @@ export function SidebarDestinations({
     <div data-testid="sidebar-destinations" className="flex min-w-0 flex-col">
       <nav aria-label="워크스페이스 탐색">
         <ul className="sidebar-stack">
-          <SidebarRow to="/" icon={<MessageSquare className="size-4" />} label="대화" testId="nav-chat" isActive={active.chat} />
           <SidebarRow
             to="/inbox"
             icon={<Inbox className="size-4" />}
