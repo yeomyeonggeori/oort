@@ -403,7 +403,8 @@ export default function ConversationScreen({
     channel,
     directory,
     members: rosterMembers ?? NO_MEMBERS,
-    sendPlain: body => void timeline.send(body),
+    sendPlain: (body, clientMsgId) =>
+      void timeline.send(body, undefined, undefined, clientMsgId),
     ingest: timeline.ingest,
     onOpenWorkSession,
     onOpenWorkList,

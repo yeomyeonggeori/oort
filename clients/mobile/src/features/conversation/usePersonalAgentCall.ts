@@ -4,6 +4,8 @@ import type {Directory} from '@momo/core/features/workspace/directory';
 import {
   fetchWorkHosts,
   fetchWorkSessions,
+  sendMessage,
+  uuidEq,
   type Channel,
   type Message,
   type RosterMember,
@@ -63,8 +65,8 @@ export function usePersonalAgentCall(input: {
   channel: Channel | null;
   directory: Directory;
   members: readonly RosterMember[];
-  /** 평범한 메시지로 보낸다(`timeline.send`). */
-  sendPlain: (body: string) => void;
+  /** 평범한 메시지로 보낸다(`timeline.send`). 같은 키로 — 호출 경로가 이미 한 번 시도했을 수 있다. */
+  sendPlain: (body: string, clientMsgId: string) => void;
   /** 서버가 확정한 호출 메시지를 타임라인에 합친다(`timeline.ingest`). */
   ingest: (message: Message) => void;
   onOpenWorkSession?: (sessionId: string) => void;
@@ -141,15 +143,23 @@ export function usePersonalAgentCall(input: {
           signer: lazyPhoneSigner({workspaceId, memberId: current.selfId}),
         },
         current.deps ?? DEFAULT_DEPS,
-      ).catch(() => ({kind: 'unsent'}) as const);
+      ).catch(
+        () => ({kind: 'unsent', clientMsgId: crypto.randomUUID()}) as const,
+      );
       const live = latest.current;
-      if (run.kind === 'plain') {
-        live.sendPlain(body);
-        setNotice({text: run.sentence, tone: 'info'});
-        return;
-      }
-      if (run.kind === 'unsent') {
-        live.sendPlain(body);
+      if (run.kind === 'plain' || run.kind === 'unsent') {
+        // 그 사이 사람이 다른 방으로 옮겨 갔을 수 있다(화면은 방마다 새로 마운트되지 않는다).
+        // 타임라인의 `send`는 지금 방으로 가므로 쓰지 않고, 쓰던 방으로 직접 보낸다(보안 검수 H1).
+        if (live.channel !== null && uuidEq(live.channel.id, channelId)) {
+          live.sendPlain(body, run.clientMsgId);
+        } else {
+          void sendMessage(workspaceId, channelId, run.clientMsgId, body).catch(
+            () => undefined,
+          );
+        }
+        if (run.kind === 'plain') {
+          setNotice({text: run.sentence, tone: 'info'});
+        }
         return;
       }
       live.ingest(run.message);

@@ -173,6 +173,8 @@ export interface UseTimelineResult {
     body: string,
     replyToId?: string,
     attachments?: MessageAttachment[],
+    /** 호출 경로가 이미 한 번 시도한 글의 키(#3638) — 같은 키라야 서버가 중복을 접는다. */
+    clientMsgId?: string,
   ) => Promise<void>;
   /**
    * A message the caller already sent through another path (#3638: 개인 에이전트 호출은
@@ -357,6 +359,7 @@ export function useTimeline(
       body: string,
       replyToId?: string,
       attachments?: MessageAttachment[],
+      reuseClientMsgId?: string,
     ) => {
       const channel = channelId;
       if (channel === null || (body === '' && (attachments?.length ?? 0) === 0)) {
@@ -367,7 +370,7 @@ export function useTimeline(
         // this call lands on the polyfill installed by `src/boot/polyfills.ts`
         // (RFC 4122 v4 over the platform CSPRNG). Without that import first,
         // every send would throw `ReferenceError` here.
-        clientMsgId: crypto.randomUUID(),
+        clientMsgId: reuseClientMsgId ?? crypto.randomUUID(),
         channelId: channel,
         authorMemberId,
         body,

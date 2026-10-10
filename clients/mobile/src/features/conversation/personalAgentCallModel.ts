@@ -57,7 +57,7 @@ export interface CallTarget {
 /**
  * 이 글이 부르는 **내** 개인 에이전트. 둘 중 하나다.
  *   - 1:1 DM의 상대가 내 개인 에이전트(멘션 없이도).
- *   - 글에 적힌 `@별칭`이 내 개인 에이전트의 핸들(등장 순서의 첫 번째).
+ *   - 글머리의 `@별칭`이 내 개인 에이전트의 핸들.
  * 아무도 아니면 `null` — 평범한 메시지다.
  */
 export function personalAgentCallTarget(input: {
@@ -81,8 +81,11 @@ export function personalAgentCallTarget(input: {
       if (row !== undefined) return asTarget(row);
     }
   }
-  for (const handle of mentionedHandles(input.body)) {
-    const row = rows.find(candidate => candidate.handle.toLowerCase() === handle);
+  // 글머리의 `@별칭`만 부름이다 — 코어가 프롬프트에서 떼는 것도 맨 앞 멘션뿐이고,
+  // 「저는 @별칭 쓰는 중」 같은 문장 속 언급이 Face ID를 올리면 안 된다(보안 검수 L2).
+  const lead = mentionedHandles(input.body)[0];
+  if (lead !== undefined && /^\s*(?:<@|@)/.test(input.body)) {
+    const row = rows.find(candidate => candidate.handle.toLowerCase() === lead);
     if (row !== undefined) return asTarget(row);
   }
   return null;
@@ -129,9 +132,12 @@ export interface CallDeps {
 
 export type CallRun =
   /** 부르지 않았다 — 호출하는 쪽이 평범한 메시지로 보내고 `sentence`를 말한다. */
-  | {kind: 'plain'; sentence: string}
-  /** 메시지 전송 자체가 실패했다 — 호출하는 쪽이 평범한 전송(실패 줄·재시도)으로 맡는다. */
-  | {kind: 'unsent'}
+  | {kind: 'plain'; sentence: string; clientMsgId: string}
+  /**
+   * 메시지 전송 자체가 실패했다 — 호출하는 쪽이 평범한 전송(실패 줄·재시도)으로 맡는다.
+   * 응답이 유실됐을 수 있으니 **같은 `clientMsgId`**로 보내야 서버가 중복을 접는다.
+   */
+  | {kind: 'unsent'; clientMsgId: string}
   | {
       kind: 'sent';
       message: Message;
@@ -160,14 +166,21 @@ export async function runPersonalAgentCall(
   },
   deps: CallDeps,
 ): Promise<CallRun> {
+  const clientMsgId = deps.newClientMsgId();
   let hosts: WorkHost[];
   try {
     hosts = await deps.fetchHosts(input.workspaceId);
   } catch {
-    return {kind: 'plain', sentence: callFailureLine(undefined)};
+    return {
+      kind: 'plain',
+      sentence: callFailureLine(undefined),
+      clientMsgId,
+    };
   }
   const pick = pickDestination(hosts, input.selfId, input.target.harness);
-  if (pick.kind === 'none') return {kind: 'plain', sentence: pick.sentence};
+  if (pick.kind === 'none') {
+    return {kind: 'plain', sentence: pick.sentence, clientMsgId};
+  }
 
   let before: Set<string>;
   try {
@@ -182,14 +195,14 @@ export async function runPersonalAgentCall(
     result = await deps.call({
       workspaceId: input.workspaceId,
       channelId: input.channelId,
-      clientMsgId: deps.newClientMsgId(),
+      clientMsgId,
       text: input.body,
       agent: {memberId: input.target.memberId, handle: input.target.handle},
       destination: pick.destination,
       signer: input.signer,
     });
   } catch {
-    return {kind: 'unsent'};
+    return {kind: 'unsent', clientMsgId};
   }
 
   let wait: Extract<CallRun, {kind: 'sent'}>['wait'] = null;

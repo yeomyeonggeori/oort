@@ -147,7 +147,8 @@ describe('대상 — 내 개인 에이전트만', () => {
       handle: 'my-claude',
       harness: 'claude',
     });
-    expect(target('이거 @my-claude 가 봐줘')?.memberId).toBe(MY_AGENT);
+    // 문장 속 언급은 부름이 아니다(Face ID를 올리지 않는다).
+    expect(target('이거 @my-claude 가 봐줘')).toBeNull();
   });
 
   it('팀원의 별칭·일반 에이전트·사람 멘션은 대상이 아니다 — 평범한 메시지다', () => {
@@ -349,7 +350,11 @@ describe('runPersonalAgentCall — 메시지 → 서명 → /work-spawns', () =>
   it('맥이 꺼져 있으면 Face ID도 메시지 전송도 하지 않고 plain으로 돌려준다', async () => {
     const signer = fakeSigner();
     const run = await runWith(signer, deps({}, [mac({online: false})]));
-    expect(run).toEqual({kind: 'plain', sentence: '내 맥이 꺼져 있어요. 맥을 켠 뒤 다시 불러 주세요.'});
+    expect(run).toEqual({
+      kind: 'plain',
+      sentence: '내 맥이 꺼져 있어요. 맥을 켠 뒤 다시 불러 주세요.',
+      clientMsgId: 'client-msg-1',
+    });
     expect(signer.seen).toEqual([]);
     expect(wire).toEqual([]);
   });
@@ -398,7 +403,7 @@ describe('runPersonalAgentCall — 메시지 → 서명 → /work-spawns', () =>
       fakeSigner(),
       deps({call: async () => Promise.reject(new Error('network'))}),
     );
-    expect(run).toEqual({kind: 'unsent'});
+    expect(run).toEqual({kind: 'unsent', clientMsgId: 'client-msg-1'});
   });
 });
 
@@ -422,11 +427,12 @@ function mountHook(opts: {
   const onOpenWorkList = jest.fn();
   const probe: {current: HookProbe | null} = {current: null};
   const members = opts.members ?? MEMBERS;
+  const room = {current: opts.channel ?? CHANNEL};
   function Probe() {
     const result = usePersonalAgentCall({
       workspaceId: WS,
       selfId: ME,
-      channel: opts.channel ?? CHANNEL,
+      channel: room.current,
       directory: makeDirectory(members),
       members,
       sendPlain,
@@ -440,12 +446,17 @@ function mountHook(opts: {
     return null;
   }
   const client = new QueryClient({defaultOptions: {queries: {retry: false, gcTime: 0}}});
-  render(
+  const tree = () => (
     <QueryClientProvider client={client}>
       <Probe />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
-  return {probe, sendPlain, ingest, onOpenWorkSession, onOpenWorkList};
+  const view = render(tree());
+  const moveTo = (channel: Channel) => {
+    room.current = channel;
+    view.rerender(tree());
+  };
+  return {probe, sendPlain, ingest, onOpenWorkSession, onOpenWorkList, moveTo};
 }
 
 function wirePort(): void {
@@ -517,7 +528,9 @@ describe('usePersonalAgentCall — 컴포저에서', () => {
     act(() => {
       h.probe.current?.tryCall('@my-claude 봐줘');
     });
-    await waitFor(() => expect(h.sendPlain).toHaveBeenCalledWith('@my-claude 봐줘'));
+    await waitFor(() =>
+      expect(h.sendPlain).toHaveBeenCalledWith('@my-claude 봐줘', 'client-msg-1'),
+    );
     expect(h.probe.current?.notice).toEqual({
       text: '내 맥이 꺼져 있어요. 맥을 켠 뒤 다시 불러 주세요.',
       tone: 'info',
@@ -549,5 +562,17 @@ describe('usePersonalAgentCall — 컴포저에서', () => {
     });
     expect(took).toBe(true);
     await waitFor(() => expect(spawnPosts()).toHaveLength(1));
+  });
+
+  it('호출이 끝나기 전에 다른 방으로 옮겨 가면, 폴백 전송은 쓰던 방으로 같은 키로 간다 (타임라인 send는 부르지 않는다)', async () => {
+    const h = mountHook({hosts: [mac({online: false})]});
+    act(() => {
+      h.probe.current?.tryCall('@my-claude 봐줘');
+      h.moveTo({...CHANNEL, id: 'other-room', name: 'other'});
+    });
+    await waitFor(() => expect(messagePosts()).toHaveLength(1));
+    expect(h.sendPlain).not.toHaveBeenCalled();
+    expect(messagePosts()[0]?.path).toContain(CH);
+    expect(messagePosts()[0]?.body).toMatchObject({clientMsgId: 'client-msg-1'});
   });
 });
