@@ -328,6 +328,19 @@ export function InboxDetail({
               {entry.channelLabel}
               {entry.timeLabel ? ` · ${entry.timeLabel}` : ""}
             </p>
+            {entry.task?.detail && (
+              <p className="text-body text-ink-muted">{entry.task.detail}</p>
+            )}
+            {entry.task?.note && (
+              <p className="text-meta text-warn" data-testid="inbox-task-note">
+                {entry.task.note}
+              </p>
+            )}
+            {entry.task?.managedBy && (
+              <p className="text-meta text-ink-muted">
+                {entry.task.managedBy} 님이 관리하는 에이전트예요.
+              </p>
+            )}
             {control?.kind === "decide" && entry.task && (
               <InboxApprovalActions
                 approvalId={control.approvalId}
