@@ -1,4 +1,4 @@
-import type {Channel, WorkHost} from '@momo/core/lib/api';
+import type {Channel, WorkHost, WorkHostFolder} from '@momo/core/lib/api';
 import {uuidEq} from '@momo/core/lib/api';
 
 // =============================================================================
@@ -8,11 +8,10 @@ import {uuidEq} from '@momo/core/lib/api';
 // 그리고 보내도 되는 글인가. 다섯 모두 **서버로 나가는 값**이거나 **서명에 들어가는 값**이라
 // 화면에서 떼어 둔다.
 //
-// ## 엔진 쪽이 아직 합쳐지지 않은 것
+// ## 폴더는 코어 타입이 준다
 //
-// `WorkHost.folders`·`defaultFolderId`(N5)는 track/engine의 타입이다. 서버 응답에는 이미
-// 실려 오지만 이 트리의 타입에는 없어서, 이 파일이 **좁은 눈**(`readFolders`)으로 읽는다.
-// 승격 뒤에는 코어 타입이 같은 모양이라 이 읽기만 지우면 된다. 코어 코드를 복사하지 않는다.
+// `WorkHost.folders`·`defaultFolderId`(N5)는 코어 타입이다(#3638: 승격 전 임시 읽기를 걷었다).
+// 폰은 폴더 id를 **불투명 값**으로만 다룬다 — 경로가 아니다(ADR-0188 D6).
 // =============================================================================
 
 export type HarnessKey = 'claude' | 'codex' | 'opencode';
@@ -30,11 +29,7 @@ export const MODE_LABEL: Readonly<Record<AskMode, string>> = {
   work: '작업 요청',
 };
 
-export interface MacFolder {
-  id: string;
-  displayName: string;
-  kind: 'project' | 'question';
-}
+export type MacFolder = WorkHostFolder;
 
 /** 내 맥 한 대: 서버의 `work-hosts` 읽기에서 내 것만, 폰이 쓰는 모양으로. */
 export interface OwnMac {
@@ -47,32 +42,6 @@ export interface OwnMac {
   /** 「질문용 폴더」 id. 호스트가 알리지 않았으면 없음 — 프로젝트 폴더로 대신하지 않는다. */
   defaultFolderId: string | null;
   capabilities: Record<string, boolean>;
-}
-
-function readFolders(host: WorkHost): {
-  folders: MacFolder[];
-  defaultFolderId: string | null;
-} {
-  const raw = host as unknown as {folders?: unknown; defaultFolderId?: unknown};
-  const folders: MacFolder[] = [];
-  if (Array.isArray(raw.folders)) {
-    for (const entry of raw.folders as unknown[]) {
-      if (typeof entry !== 'object' || entry === null) continue;
-      const {id, displayName, kind} = entry as Record<string, unknown>;
-      if (
-        typeof id === 'string' &&
-        typeof displayName === 'string' &&
-        (kind === 'project' || kind === 'question')
-      ) {
-        folders.push({id, displayName, kind});
-      }
-    }
-  }
-  return {
-    folders,
-    defaultFolderId:
-      typeof raw.defaultFolderId === 'string' ? raw.defaultFolderId : null,
-  };
 }
 
 /**
@@ -97,7 +66,8 @@ export function ownMacs(
       online: host.online,
       lastSeenAtMs: host.lastSeenAtMs ?? 0,
       capabilities: host.capabilities ?? {},
-      ...readFolders(host),
+      folders: host.folders ?? [],
+      defaultFolderId: host.defaultFolderId ?? null,
     }))
     .sort((a, b) => b.lastSeenAtMs - a.lastSeenAtMs);
 }

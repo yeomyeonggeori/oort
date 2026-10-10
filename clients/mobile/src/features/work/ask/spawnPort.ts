@@ -25,6 +25,8 @@ import {NOT_WIRED_SENTENCE} from './model';
 
 export interface SpawnRequest {
   workspaceId: string;
+  /** 보내는 사람(서명의 멤버 줄). 시트는 세션의 멤버를 넘긴다. */
+  memberId: string;
   /** 서명의 호스트 줄이자 서버의 좁히기 힌트. */
   hostId: string;
   folderId: string;
