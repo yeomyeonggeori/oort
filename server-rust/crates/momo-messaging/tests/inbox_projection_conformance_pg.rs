@@ -19,8 +19,11 @@
 //! | `e1_6_nobody_who_should_not_be_told_is_told` | drop the self / agent / left-member / membership / cross-channel checks |
 //! | `e1_7_cursor_reads_one_way_and_never_unreads` | read items from the item side, make the trigger un-read, or ignore `seq <= cursor` |
 //! | `e1_8_a_late_mention_below_the_cursor_is_born_read` | drop the `read_state` born-read check |
-//! | `e1_9_rls_force_isolates_workspaces` | drop FORCE / the policy / WITH CHECK |
+//! | `e1_9_rls_force_isolates_workspaces` | drop FORCE or the `ws_isolation` policy (the WITH CHECK half is e1_12) |
 //! | `e1_10_machinery_rows_make_no_items` | drop the message-type filter |
+//! | `e1_11_the_integrity_guards_hold_what_the_fks_cannot` | drop `inbox_item_guard_insert_trg` / `inbox_item_guard_update_trg` |
+//! | `e1_12_the_policy_itself_refuses_a_cross_tenant_write` | loosen the policy to `WITH CHECK (true)` (the guard trigger is switched off inside the test so only the policy can refuse) |
+//! | `e1_13_inactive_and_cross_channel_recipients_are_not_told` | drop `m.status = 'active'` / `m.deleted_at IS NULL` / the thread scans' `channel_id` |
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -916,21 +919,6 @@ async fn e1_9_rls_force_isolates_workspaces() {
     .unwrap();
     assert_eq!(seen_a, 1);
 
-    // WITH CHECK: B's context cannot write a row stamped with A's workspace
-    let forged = with_tenant_tx(&app, ws_b, move |conn| {
-        Box::pin(async move {
-            sqlx::query(
-                "INSERT INTO inbox_item (workspace_id, member_id, kind, reasons, channel_id, message_id, seq, actor_member_id, created_at) \
-                 VALUES ($1, $2, 'dm', ARRAY['dm'], $3, $4, 1, $5, now())",
-            )
-            .bind(ws_a).bind(alice).bind(ch).bind(m.message.id).bind(bob)
-            .execute(&mut *conn).await?;
-            Ok::<_, DbError>(())
-        })
-    })
-    .await;
-    assert!(forged.is_err(), "WITH CHECK refuses a cross-tenant insert");
-
     // B's context cannot flip A's read_at (UPDATE matches no visible row)
     let flipped = with_tenant_tx(&app, ws_b, move |conn| {
         Box::pin(async move {
@@ -985,4 +973,244 @@ async fn e1_10_machinery_rows_make_no_items() {
             "{ty:?} is machinery"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// E1-11 — integrity guards (security review M1)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn e1_11_the_integrity_guards_hold_what_the_fks_cannot() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let ws_a = seed_workspace(&su).await;
+    let ws_b = seed_workspace(&su).await;
+    let alice = seed_member(&su, ws_a, "alice", "human").await;
+    let bob = seed_member(&su, ws_a, "bob", "human").await;
+    let zed = seed_member(&su, ws_b, "zed", "human").await;
+    let ch_a = channel(&app, &su, ws_a, "general", &[alice, bob]).await;
+    let ch_b = channel(&app, &su, ws_b, "general", &[zed]).await;
+    let theirs = send(&app, ws_b, NewMessage::text(ch_b, zed, "남의 글")).await;
+    let ours = send(&app, ws_a, NewMessage::text(ch_a, alice, "내 글")).await;
+    let reply = send(&app, ws_a, quote(ch_a, bob, "답", ours.message.id)).await;
+    let own_item = item_for(&su, reply.message.id, alice).await.expect("item");
+    assert_eq!(own_item.kind, "reply_to_me");
+
+    // (a) a row in workspace A that points at workspace B's channel/message is refused,
+    // and a made-up message id is refused with the SAME error (no existence oracle).
+    let attempt = |msg: Uuid, ch: Uuid| {
+        let app = app.clone();
+        async move {
+            with_tenant_tx(&app, ws_a, move |conn| {
+                Box::pin(async move {
+                    sqlx::query(
+                        "INSERT INTO inbox_item (workspace_id, member_id, kind, reasons, channel_id, \
+                         message_id, seq, actor_member_id, created_at) \
+                         VALUES ($1, $2, 'dm', ARRAY['dm'], $3, $4, 1, $5, now())",
+                    )
+                    .bind(ws_a).bind(alice).bind(ch).bind(msg).bind(bob)
+                    .execute(&mut *conn).await?;
+                    Ok::<_, DbError>(())
+                })
+            })
+            .await
+        }
+    };
+    let foreign = attempt(theirs.message.id, ch_b)
+        .await
+        .expect_err("foreign refused");
+    let made_up = attempt(Uuid::new_v4(), ch_a)
+        .await
+        .expect_err("made-up refused");
+    let code = |e: &DbError| match e {
+        DbError::Sqlx(sqlx::Error::Database(d)) => d.code().map(|c| c.to_string()),
+        _ => None,
+    };
+    assert_eq!(code(&foreign), Some("23514".into()), "{foreign:?}");
+    assert_eq!(
+        code(&foreign),
+        code(&made_up),
+        "foreign and made-up ids look the same"
+    );
+
+    // (b) a direct UPDATE may only fill read_at; it cannot retarget or rewrite a row.
+    for set in [
+        "kind = 'dm'",
+        "member_id = actor_member_id",
+        "message_id = (SELECT id FROM message WHERE id <> inbox_item.message_id LIMIT 1)",
+        "reasons = ARRAY['dm']",
+        "seq = seq + 1",
+    ] {
+        let item_id = {
+            let r = sqlx::query_scalar::<_, Uuid>(
+                "SELECT id FROM inbox_item WHERE message_id = $1 AND member_id = $2",
+            )
+            .bind(reply.message.id)
+            .bind(alice)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+            r
+        };
+        let res = with_tenant_tx(&app, ws_a, move |conn| {
+            let sql = format!("UPDATE inbox_item SET {set} WHERE id = $1");
+            Box::pin(async move {
+                sqlx::query(&sql).bind(item_id).execute(&mut *conn).await?;
+                Ok::<_, DbError>(())
+            })
+        })
+        .await;
+        assert!(res.is_err(), "direct UPDATE of `{set}` must be refused");
+    }
+    // read_at: NULL -> ts is fine, ts -> NULL / another ts is not.
+    let item_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM inbox_item WHERE message_id = $1 AND member_id = $2")
+            .bind(reply.message.id)
+            .bind(alice)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    with_tenant_tx(&app, ws_a, move |conn| {
+        Box::pin(async move {
+            sqlx::query("UPDATE inbox_item SET read_at = now() WHERE id = $1")
+                .bind(item_id)
+                .execute(&mut *conn)
+                .await?;
+            Ok::<_, DbError>(())
+        })
+    })
+    .await
+    .expect("NULL -> timestamp is the one legal direct update");
+    for sql in [
+        "UPDATE inbox_item SET read_at = NULL WHERE id = $1",
+        "UPDATE inbox_item SET read_at = now() + interval '1 day' WHERE id = $1",
+    ] {
+        let res = with_tenant_tx(&app, ws_a, move |conn| {
+            Box::pin(async move {
+                sqlx::query(sql).bind(item_id).execute(&mut *conn).await?;
+                Ok::<_, DbError>(())
+            })
+        })
+        .await;
+        assert!(res.is_err(), "read_at is monotone: `{sql}`");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// E1-12 — the policy's WITH CHECK, on its own
+// ---------------------------------------------------------------------------
+
+/// e1_9 cannot prove WITH CHECK because the guard trigger refuses first. Here the
+/// guard is switched off for one superuser transaction (rolled back) and the
+/// insert is made as `momo_app` with another tenant's GUC: only the policy is left.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn e1_12_the_policy_itself_refuses_a_cross_tenant_write() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let ws_a = seed_workspace(&su).await;
+    let ws_b = seed_workspace(&su).await;
+    let alice = seed_member(&su, ws_a, "alice", "human").await;
+    let bob = seed_member(&su, ws_a, "bob", "human").await;
+    let ch = channel(&app, &su, ws_a, "general", &[alice, bob]).await;
+    let m = send(&app, ws_a, NewMessage::text(ch, bob, "x")).await;
+
+    let mut tx = su.begin().await.unwrap();
+    sqlx::query("ALTER TABLE inbox_item DISABLE TRIGGER inbox_item_guard_insert_trg")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("SET LOCAL ROLE momo_app")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(ws_b.to_string())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    // stamped with A while the session says B: WITH CHECK is the only thing left
+    let res = sqlx::query(
+        "INSERT INTO inbox_item (workspace_id, member_id, kind, reasons, channel_id, message_id, seq, actor_member_id, created_at) \
+         VALUES ($1, $2, 'dm', ARRAY['dm'], $3, $4, 1, $5, now())",
+    )
+    .bind(ws_a).bind(alice).bind(ch).bind(m.message.id).bind(bob)
+    .execute(&mut *tx).await;
+    let err = res.expect_err("WITH CHECK refuses");
+    let state = match &err {
+        sqlx::Error::Database(d) => d.code().map(|c| c.to_string()),
+        _ => None,
+    };
+    assert_eq!(
+        state.as_deref(),
+        Some("42501"),
+        "RLS violation, not a constraint: {err:?}"
+    );
+    tx.rollback().await.unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// E1-13 — recipients that must not be told (security review L1/L2)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn e1_13_inactive_and_cross_channel_recipients_are_not_told() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let ws = seed_workspace(&su).await;
+    let alice = seed_member(&su, ws, "alice", "human").await;
+    let bob = seed_member(&su, ws, "bob", "human").await;
+    let sleepy = seed_member(&su, ws, "sleepy", "human").await;
+    let removed = seed_member(&su, ws, "removed", "human").await;
+    let ch = channel(&app, &su, ws, "general", &[alice, bob, sleepy, removed]).await;
+    let other = channel(&app, &su, ws, "other", &[alice, bob]).await;
+
+    // quoted authors who are suspended / soft-deleted are not told
+    let s_msg = send(&app, ws, NewMessage::text(ch, sleepy, "자는 사람 글")).await;
+    let r_msg = send(&app, ws, NewMessage::text(ch, removed, "지워질 사람 글")).await;
+    sqlx::query("UPDATE member SET status = 'suspended'::member_status WHERE id = $1")
+        .bind(sleepy)
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE member SET deleted_at = now() WHERE id = $1")
+        .bind(removed)
+        .execute(&su)
+        .await
+        .unwrap();
+    let q1 = send(
+        &app,
+        ws,
+        quote(ch, alice, "정지된 사람에게", s_msg.message.id),
+    )
+    .await;
+    let q2 = send(
+        &app,
+        ws,
+        quote(ch, alice, "삭제된 사람에게", r_msg.message.id),
+    )
+    .await;
+    assert!(
+        items(&su, q1.message.id).await.is_empty(),
+        "suspended member is not told"
+    );
+    assert!(
+        items(&su, q2.message.id).await.is_empty(),
+        "soft-deleted member is not told"
+    );
+
+    // a thread root in ANOTHER channel pulls nobody in (root_id stays in the channel)
+    let foreign_root = send(&app, ws, NewMessage::text(other, bob, "다른 채널 루트")).await;
+    let mut crossing = NewMessage::text(ch, alice, "채널 넘는 스레드 답");
+    crossing.root_id = Some(foreign_root.message.id);
+    let crossing = send_skip(&app, ws, crossing).await;
+    assert!(
+        items(&su, crossing.message.id).await.is_empty(),
+        "root_id from another channel names nobody"
+    );
 }

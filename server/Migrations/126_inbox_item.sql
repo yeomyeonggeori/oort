@@ -93,6 +93,67 @@ BEGIN
 END $$;
 
 -- -----------------------------------------------------------------------------
+-- Integrity guards (#3682 security review M1).
+--
+-- The single-column FKs above do not tie a row to ONE workspace, and an FK check
+-- reads the referenced table past RLS. These BEFORE triggers close both:
+--   * INSERT: the message, its channel and both members must belong to the row's
+--     workspace and the message to the row's channel. The lookup runs under the
+--     caller's RLS, so a foreign tenant's ids are simply "not found" and the
+--     refusal is the same for "foreign" and "made up" (no existence oracle; the
+--     BEFORE trigger fires before the FK check).
+--   * UPDATE issued directly by a statement (trigger depth 1): only `read_at` may
+--     change, and only NULL -> a timestamp. The projection's own merge and the
+--     cursor auto-read run from inside other triggers (depth >= 2) and are
+--     unaffected.
+-- -----------------------------------------------------------------------------
+CREATE FUNCTION inbox_item_guard_insert() RETURNS trigger AS $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+      FROM message m
+      JOIN channel c ON c.id = m.channel_id AND c.workspace_id = NEW.workspace_id
+      JOIN member rcpt ON rcpt.id = NEW.member_id AND rcpt.workspace_id = NEW.workspace_id
+      JOIN member actor ON actor.id = NEW.actor_member_id AND actor.workspace_id = NEW.workspace_id
+     WHERE m.id = NEW.message_id
+       AND m.workspace_id = NEW.workspace_id
+       AND m.channel_id = NEW.channel_id
+  ) THEN
+    RAISE EXCEPTION 'inbox_item references must belong to its workspace'
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SET search_path = public, pg_temp;
+
+CREATE FUNCTION inbox_item_guard_update() RETURNS trigger AS $$
+BEGIN
+  IF pg_trigger_depth() = 1 THEN
+    IF (NEW.id, NEW.workspace_id, NEW.member_id, NEW.kind, NEW.reasons, NEW.channel_id,
+        NEW.message_id, NEW.seq, NEW.actor_member_id, NEW.created_at)
+       IS DISTINCT FROM
+       (OLD.id, OLD.workspace_id, OLD.member_id, OLD.kind, OLD.reasons, OLD.channel_id,
+        OLD.message_id, OLD.seq, OLD.actor_member_id, OLD.created_at)
+       OR (OLD.read_at IS NOT NULL AND NEW.read_at IS DISTINCT FROM OLD.read_at) THEN
+      RAISE EXCEPTION 'inbox_item: only read_at (NULL -> timestamp) may be updated directly'
+        USING ERRCODE = '23514';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SET search_path = public, pg_temp;
+
+REVOKE ALL ON FUNCTION inbox_item_guard_insert() FROM PUBLIC;
+REVOKE ALL ON FUNCTION inbox_item_guard_update() FROM PUBLIC;
+
+CREATE TRIGGER inbox_item_guard_insert_trg
+  BEFORE INSERT ON inbox_item
+  FOR EACH ROW EXECUTE FUNCTION inbox_item_guard_insert();
+CREATE TRIGGER inbox_item_guard_update_trg
+  BEFORE UPDATE ON inbox_item
+  FOR EACH ROW EXECUTE FUNCTION inbox_item_guard_update();
+
+-- -----------------------------------------------------------------------------
 -- reason priority (ADR-0199 D2): reply_to_me > mention > thread_reply > dm
 -- -----------------------------------------------------------------------------
 CREATE FUNCTION inbox_reason_prio(p_reason text) RETURNS int AS $$
@@ -103,7 +164,7 @@ CREATE FUNCTION inbox_reason_prio(p_reason text) RETURNS int AS $$
     WHEN 'dm'           THEN 4
     ELSE 99
   END;
-$$ LANGUAGE sql IMMUTABLE PARALLEL SAFE;
+$$ LANGUAGE sql IMMUTABLE PARALLEL SAFE SET search_path = public, pg_temp;
 
 -- -----------------------------------------------------------------------------
 -- message -> inbox_item
@@ -152,7 +213,7 @@ BEGIN
     SELECT t.member_id, 'mention'
       FROM (SELECT CASE WHEN x.v ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
                         THEN x.v::uuid END AS member_id
-              FROM jsonb_array_elements_text(v_mentions) AS x(v)) t
+              FROM (SELECT v FROM jsonb_array_elements_text(v_mentions) AS e(v) LIMIT 200) x) t
      WHERE t.member_id IS NOT NULL
        AND t.member_id IS DISTINCT FROM v_quoted_author
     UNION ALL
@@ -160,9 +221,11 @@ BEGIN
     SELECT p.member_id, 'thread_reply'
       FROM (SELECT r.author_member_id AS member_id FROM message r
              WHERE v_insert AND NEW.root_id IS NOT NULL AND r.id = NEW.root_id
+                   AND r.channel_id = NEW.channel_id
             UNION
             SELECT r.author_member_id FROM message r
-             WHERE v_insert AND NEW.root_id IS NOT NULL AND r.root_id = NEW.root_id) p
+             WHERE v_insert AND NEW.root_id IS NOT NULL AND r.root_id = NEW.root_id
+                   AND r.channel_id = NEW.channel_id) p
     UNION ALL
     -- dm: everyone else in a DM channel
     SELECT ms.member_id, 'dm'
@@ -213,7 +276,7 @@ BEGIN
 
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = public, pg_temp;
 
 REVOKE ALL ON FUNCTION inbox_item_project_message() FROM PUBLIC;
 
@@ -245,7 +308,7 @@ BEGIN
      AND read_at IS NULL;
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = public, pg_temp;
 
 REVOKE ALL ON FUNCTION inbox_item_read_by_cursor() FROM PUBLIC;
 
