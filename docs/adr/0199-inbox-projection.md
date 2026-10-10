@@ -1,6 +1,6 @@
 # ADR-0199: 인박스 서버 투영 — 나와 관련된 것을 서버가 기억한다
 
-- Status: **Proposed** (owner 결재 대기 — 공개 API·DB 계약 추가라 ADR-0100에 따라 Accepted 전에는 구현을 머지하지 않는다)
+- Status: **Accepted** (2026-10-11 성재 결재 — 아래 「결재 기록」. 공개 API·DB 계약 추가라 ADR-0100에 따라 이 Accepted가 구현 머지 조건이다)
 - Date: 2026-10-11
 - Deciders: 성재
 - 기안: Opus 5.5 (#3664, #3663 후속)
@@ -28,7 +28,13 @@
 - **개인 채널 전파는 있다.** ADR-0109 D3: read-state 변경은 outbox → relay → 같은 멤버의 다른 디바이스 개인 채널.
 - 마이그레이션 최신 번호는 `125_subscription_retire.sql`이다. 다음은 126.
 
-## 결정 (제안)
+## 결재 기록 (2026-10-11, 성재 AskUserQuestion)
+- 정본 방식: 「저장해 두기 (Recommended)」 — 쓰기 시 투영 테이블 `inbox_item` (D1).
+- 읽음 의미: 「채널→인박스 한 방향 (Recommended)」 (D3).
+- 보존: 「읽은 뒤 30일」 — 추천안 90일을 성재가 30일로 바꿨다. 안 읽은 항목은 무기한, 원본 메시지는 지우지 않는다 (D4).
+- 항목 범위: 「멘션·답·DM·스레드 (Recommended)」 — 대기 승인은 조회 때 합치고, 배정 작업과 반응은 후속 (D2).
+
+## 결정
 
 ### D1. 정본 = 쓰기 시 투영 테이블 `inbox_item`
 message INSERT와 같은 tx에서 수신자별 행을 쓴다. **AFTER INSERT 트리거**(`push_candidate` 선례)로 하고, 앱 코드의 생산자별 호출에 의존하지 않는다 — 에이전트·게이트웨이·work-session·REST 어느 경로로 만든 메시지든 같은 규칙으로 걸린다(위 Skip 구멍을 닫는 이유).
@@ -56,7 +62,7 @@ message INSERT와 같은 tx에서 수신자별 행을 쓴다. **AFTER INSERT 트
 - 전체 읽음: `POST …/inbox/read-all`(필터 인자 가능).
 
 ### D4. 보존
-- 안 읽은 항목은 보존 기한 없음. 읽은 항목은 `read_at` 기준 **90일** 뒤 삭제(주기 정리 작업). 삭제는 투영만 지우고 `message`는 건드리지 않는다.
+- 안 읽은 항목은 보존 기한 없음. 읽은 항목은 `read_at` 기준 **30일** 뒤 삭제(주기 정리 작업). 삭제는 투영만 지우고 `message`는 건드리지 않는다.
 - 원본 메시지 삭제(tombstone, ADR-0148)·채널 비공개 전환·멤버 퇴장: 항목은 조회 시 `message`/`membership`을 join해 **가시성을 다시 판정**한다(삭제 메시지는 「삭제된 메시지」 자리표시, 접근 상실 채널은 숨김). 투영에 본문 스냅샷을 두지 않는다(ADR-0148 규칙 3과 같은 이유).
 - 알림 mute(ADR-0124)는 항목 **생성**에 영향 주지 않는다. `mute`된 채널의 항목은 목록에서 필터 `muted=hide|show`(기본 hide, 멘션은 `mention_overrides_mute`를 따른다)로 가른다.
 
@@ -78,7 +84,7 @@ message INSERT와 같은 tx에서 수신자별 행을 쓴다. **AFTER INSERT 트
 항목을 만든 같은 tx가 수신자 개인 채널용 outbox 행 `inbox_item.created`(`{itemId, kind, channelId, createdAt}` id 위주 페이로드, 본문 없음)와 읽음 전이용 `inbox_item.read`/`inbox.read_all`을 쓴다. relay → Centrifugo 개인 채널은 ADR-0109 D3의 read-state 전파와 **같은 경로**다. 클라는 이벤트로 배지를 즉시 올리고, 목록은 `GET`으로 보강한다(이벤트 유실은 다음 `GET`이 복구 — 정본은 PG). push 판정은 기존 `push_candidate`가 그대로 하고 인박스는 간섭하지 않는다.
 
 ### D8. 이행(backfill)과 호환
-- 마이그레이션은 테이블+트리거+정책(126). backfill은 **별도 idempotent 작업**으로 최근 90일 `message`를 훑어 `ON CONFLICT DO NOTHING`으로 채운다. 이것이 「오늘 이미 있는 읽은 멘션·인용 답이 인박스에 처음부터 보인다」는 성재 요구의 충족이고, 투영이 파생물이라는 증명이다. backfill 행의 `read_at`은 그 시점 채널 커서로 정한다.
+- 마이그레이션은 테이블+트리거+정책(126). backfill은 **별도 idempotent 작업**으로 최근 30일(읽은 항목 보존 기한과 같다) `message`를 훑어 `ON CONFLICT DO NOTHING`으로 채운다. 이것이 「오늘 이미 있는 읽은 멘션·인용 답이 인박스에 처음부터 보인다」는 성재 요구의 충족이고, 투영이 파생물이라는 증명이다. backfill 행의 `read_at`은 그 시점 채널 커서로 정한다.
 - 클라(`mailbox.ts`)는 서버 응답이 있으면 그것을 원천으로 쓰고, 없으면(구 서버) 현행 조합으로 후퇴한다(`runtime-unverified`, 후퇴 경로 시험은 E3).
 
 ## 대안과 기각
@@ -111,7 +117,7 @@ message INSERT와 같은 tx에서 수신자별 행을 쓴다. **AFTER INSERT 트
 | 슬라이스 | 트랙 | 내용 | 선행 |
 |---|---|---|---|
 | E1 | 엔진 | `126_inbox_item.sql`(테이블·인덱스·RLS FORCE·message AFTER INSERT 트리거·커서→항목 자동 읽음), 사유 우선순위·제외 규칙 함수, 실DB 적합성 시험(수용기준 1·2·4·6), Skip 경로 인용 답 red proof | ADR Accepted |
-| E2 | 엔진 | `GET /inbox`·`PUT /inbox/{id}/read`·`POST /inbox/read-all`, 키셋 페이지네이션, 접근 상실·삭제 가시성, outbox `inbox_item.*` 이벤트(수용기준 3·5·8), 90일 정리 작업 | E1 |
+| E2 | 엔진 | `GET /inbox`·`PUT /inbox/{id}/read`·`POST /inbox/read-all`, 키셋 페이지네이션, 접근 상실·삭제 가시성, outbox `inbox_item.*` 이벤트(수용기준 3·5·8), 30일 정리 작업 | E1 |
 | E3 | UXUI | `mailbox.ts` 원천을 서버 응답으로 교체(현행 조합은 구 서버 후퇴 경로), 항목 읽음 UI(채널 커서 비연동 문구 정리), 개인 채널 이벤트 구독 | E2 |
-| E4 | 엔진 | 90일 backfill 작업(멱등), 라이브 oort-team 스모크(`runtime-unverified` 해소) | E1 |
+| E4 | 엔진 | 30일 backfill 작업(멱등), 라이브 oort-team 스모크(`runtime-unverified` 해소) | E1 |
 | 후속 | — | 배정 작업(task)·승인 영속화·안 읽음 되돌림·반응 항목 | 별 이슈 |
