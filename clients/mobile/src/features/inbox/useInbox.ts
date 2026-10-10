@@ -120,14 +120,14 @@ function retryUnlessAbsent(failureCount: number, error: unknown): boolean {
 
 // ---- shared resolution ----------------------------------------------------
 
-interface FeedContext {
+export interface FeedContext {
   directory: Directory;
   labelFor: (channelId: string) => string;
   actorFor: (memberId: string) => ActorNames;
   isLoading: boolean;
 }
 
-function useFeedContext(): FeedContext {
+export function useFeedContext(): FeedContext {
   const {member, workspaceId} = useSession();
   const channelsQuery = useChannels(workspaceId);
   const directoryQuery = useDirectory(workspaceId);
@@ -251,11 +251,13 @@ export function useNeedsAction(enabled: boolean): Feed {
 
 // ---- 멘션 ------------------------------------------------------------------
 
-export function useMentions(enabled: boolean): Feed {
+/**
+ * 서버가 멘션이라고 센 채널의 메시지 행들. `useMentions`(피드)와 전체 목록이 같은
+ * 쿼리 키를 공유하므로 두 번 가져오지 않는다.
+ */
+export function useMentionMessages(enabled: boolean) {
   const {member, workspaceId} = useSession();
-  const context = useFeedContext();
   const readStates = useReadStates(workspaceId);
-  const client = useQueryClient();
   const selfId = member.id;
 
   // P7: the SERVER says which channels hold unread mentions. This client only
@@ -296,6 +298,14 @@ export function useMentions(enabled: boolean): Feed {
       ),
     }),
   });
+  return {results, readStates};
+}
+
+export function useMentions(enabled: boolean): Feed {
+  const {workspaceId} = useSession();
+  const context = useFeedContext();
+  const client = useQueryClient();
+  const {results, readStates} = useMentionMessages(enabled);
 
   const nowMs = useNow();
   const items = useMemo(() => {

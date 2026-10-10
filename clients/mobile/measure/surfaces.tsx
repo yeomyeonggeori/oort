@@ -3721,6 +3721,38 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </Screen>
       );
     }
+    // ---- #3661: 긴 기록이 있는 방에서 `@` 를 치면 대화가 흔들리는가 --------------
+    case 'mention-sheet-live': {
+      // 시트·도크·목록이 **한 트리**에 있어야 흔들림이 보인다: 시트가 열리면 도크가 자라고,
+      // 따라가는 목록의 보이는 창이 줄어든다. 목록은 한 화면을 넘는 기록을 든다.
+      return (
+        <Screen>
+          <ScreenHeader title="배포" onBack={() => {}} titleTestID="measure-title" />
+          <ConversationLayout
+            list={
+              <Timeline
+                messages={JUMP_PILL_HISTORY}
+                directory={AI_DIRECTORY}
+                status="ready"
+                channelKind="public"
+                myMemberId={SELF}
+                nowMs={NOW + 3_600_000}
+              />
+            }
+            composer={
+              <Composer
+                recipient="place"
+                channelLabel="배포"
+                directory={AI_DIRECTORY}
+                viewerHumanId={SELF}
+                draftKey="measure:mention-sheet-live"
+                onSend={() => {}}
+              />
+            }
+          />
+        </Screen>
+      );
+    }
     case 'ade-summary-empty': {
       // **줄이 없는 판.** 「살아 있는 작업이 없으면 줄 자체가 없다」는 코어의 판정
       // 이고(`adeSummarySegments`), 그것이 참인지는 줄이 **있는** 사진 옆에서만

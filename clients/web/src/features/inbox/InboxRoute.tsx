@@ -1,14 +1,8 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
-import { useSession } from "@/app/session";
 import { ChevronRight } from "lucide-react";
+import { useSession } from "@/app/session";
+import { useIsMobileShell } from "@/app/shellNav";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import {
   EmptyInvite,
@@ -21,376 +15,240 @@ import { FilterTabs } from "@/features/common/FilterTabs";
 import { reminderIsOverdue } from "@momo/core/features/reminders/model";
 import { RemindersPanel } from "@/features/reminders/RemindersPanel";
 import { useReminders } from "@/features/reminders/useReminders";
-import {
-  parseWebInboxFilter,
-  webInboxFilterTabs,
-  webInboxPanelId,
-  webInboxTabId,
-  withRemindersTab,
-} from "@/features/reminders/inboxTab";
-import { FeedList } from "./FeedRow";
 import { LocalPaneInbox } from "./LocalPaneInbox";
 import { isDesktop } from "@/lib/tauri";
-import {
-  ApprovalActions,
-  type Armed,
-} from "@/features/timeline/ApprovalActions";
 import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecision";
-import type { SpawnExecutionPlan } from "@momo/core/lib/executionPlan";
-import {
-  isSurfaceProvided,
-  type SurfaceId,
-} from "@momo/core/features/capabilities/serverSurfaces";
 import { SurfaceUnavailableSection } from "@/features/capabilities/SurfaceUnavailable";
+import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
+import { decisionNote, type DecisionNote } from "./approvalsPanel";
 import {
-  approvalRowControl,
-  approvalsPanelState,
-  decisionNote,
-  type DecisionNote,
-} from "./approvalsPanel";
-import {
-  availableInboxFilters,
-  relativeLabel,
-  type FeedItem,
-  type InboxFilter,
-} from "@momo/core/features/inbox/model";
-import {
-  useInvalidateApprovals,
-  useMarkRead,
-  useMentionCount,
-  useMentions,
-  useNeedsAction,
-  useUnreadMentionChannels,
-  type Feed,
-} from "./useInbox";
+  filterMailbox,
+  mailboxCounts,
+  type MailboxEntry,
+  type MailboxFilter,
+} from "@momo/core/features/inbox/mailbox";
+import { relativeLabel } from "@momo/core/features/inbox/model";
+import { useFeedContext, useInvalidateApprovals, useMentionCount, useUnreadMentionChannels, useMarkRead } from "./useInbox";
+import { useMailbox, useMailboxReadActions } from "./useMailbox";
 import { useNeedsMe } from "./useNeedsMe";
+import { MailboxList } from "./MailboxList";
+import { InboxDetail } from "./InboxDetail";
+import {
+  mailboxTabs,
+  mailboxTabsSpec,
+  parseWebMailboxFilter,
+  webMailboxPanelId,
+  webMailboxTabId,
+} from "./mailboxTab";
 
 // =============================================================================
-// 인박스 (R-1 §2). Zero is the default: notifications are not something you
-// switch off here, they were never sent. This surface is the safety net that
-// makes that radical reduction safe, so an empty inbox is framed as the design
-// working, never as a failure.
+// 인박스 (#3663). 메일함·알림함처럼 **나와 관련된 것의 목록**과 오른쪽의 **맥락 패널**.
 //
-// Every row comes from a server projection that already exists (approval
-// ledger, read-state mention decision, work-run projection). Nothing on this
-// surface is counted or inferred client-side.
+// 한 줄은 「누가 · 어디서 · 무슨 일로 나를 찾았는가」다: DM, 나를 부른 멘션, 내 글에
+// 달린 답글, 내가 허락해야 하는 일. 줄을 고르면 오른쪽에 그 대화와 답장 입력(처리할
+// 일이면 결정 버튼)이 열린다. 목록의 원천과 한계는 core `mailbox.ts`와
+// `useMailbox.ts` 머리말에 있다 — 서버에 인박스 라우트는 아직 없고, 여기 모든 줄은
+// 이미 있는 읽기 계약에서 온다. 클라이언트가 세거나 지어낸 것은 없다.
 //
-// ## 이 표면이 곧 승인함이다 (goal W-AP1)
+// 「조용한 게 정상」은 그대로다: 알림은 꺼 두는 것이 아니라 애초에 보내지 않는다.
+// 이 표면은 그 급진적 감축을 안전하게 만드는 그물이다.
 //
-// 승인 결정을 위한 네 번째 라우트를 파지 않았다. 「결정 대기」 탭이 이미
-// `GET …/approvals?status=pending` 하나를 통째로 읽고 있고, 결정 컨트롤은
-// 타임라인 카드와 공유하는 `ApprovalActions` 한 벌이다. 세 번째 표면을 세우면
-// 세 번째 멱등 정책과 세 번째 409 문구가 생기고, 보고 있지 않은 쪽이 흘러간다.
+// ## 승인함이기도 하다 (goal W-AP1)
 //
-// 정작 없던 것은 화면이 아니라 **판정**이었다: `approvals.provided`가 false인
-// 동안 `availableInboxFilters`는 이 탭 자체를 세우지 않았으므로, 코드로 존재하는
-// 결정 UI에 도달할 경로가 0이었다. 그 줄이 뒤집힌 지금 이 파일이 할 일은 셋이다 —
-// 목록의 다섯 상태를 한 판정으로 모으고(approvalsPanel.ts), 배포되지 않은 서버의
-// 404를 장애가 아니라 미제공으로 접고, 결정의 답을 색까지 판정으로 말하는 것.
+// 결정 컨트롤은 타임라인 카드와 공유하는 `ApprovalActions` 한 벌이다. 세 번째
+// 표면을 세우면 세 번째 멱등 정책과 세 번째 409 문구가 생긴다. 이 파일은 그
+// 컨트롤을 패널 안에 놓고, 결정의 답(영수증)을 한 줄로 말하는 일만 한다.
 // =============================================================================
 
-const EMPTY_COPY: Record<InboxFilter, { headline: string; detail: string }> = {
-  "needs-action": {
-    headline: "지금 결정할 일이 없습니다. 조용한 게 정상입니다.",
-    detail: "에이전트가 사람의 허가를 기다릴 때만 여기 쌓입니다.",
+const EMPTY_COPY: Record<MailboxFilter, { headline: string; detail: string }> = {
+  all: {
+    headline: "인박스가 비어 있습니다. 조용한 게 정상입니다.",
+    detail:
+      "DM, 나를 부른 멘션, 내 글의 새 답글, 허락이 필요한 일이 생기면 여기 모입니다.",
   },
-  mentions: {
+  unread: {
+    headline: "안 읽은 항목이 없습니다. 조용한 게 정상입니다.",
+    detail: "읽은 DM은 「전체」에서 계속 볼 수 있습니다.",
+  },
+  mention: {
     headline: "읽지 않은 멘션이 없습니다. 조용한 게 정상입니다.",
-    detail: "누군가 회원님을 부르면 중요한 것만 여기 모입니다.",
+    detail: "누군가 회원님을 부르면 여기 모입니다. 읽은 멘션은 목록에 남지 않습니다.",
   },
-  agents: {
-    headline: "에이전트가 남긴 결과가 없습니다. 조용한 게 정상입니다.",
-    detail: "회원님이 담당하는 에이전트가 무언가를 끝내면 여기 남습니다.",
+  dm: {
+    headline: "주고받은 DM이 없습니다.",
+    detail: "사람이나 에이전트와 DM을 시작하면 여기 대화가 쌓입니다.",
+  },
+  thread: {
+    headline: "새 답글이 달린 내 글이 없습니다.",
+    detail: "내가 쓴 글에 답글이 달리면 여기 모입니다.",
+  },
+  task: {
+    headline: "지금 처리할 일이 없습니다. 조용한 게 정상입니다.",
+    detail: "에이전트가 사람의 허가를 기다릴 때만 여기 쌓입니다.",
   },
 };
 
 /**
  * 결정 대기가 비었는데 이 기기의 칸이 회원님을 기다릴 때(#2776, design-review H1).
- * 「결정할 일이 없습니다」는 위의 「응답 필요」 줄과 모순이다. 비어 있는 것은
- * 서버 원장의 승인뿐이라고 좁혀 말한다.
+ * 「처리할 일이 없습니다」는 위의 「응답 필요」 줄과 모순이다.
  */
 const EMPTY_WITH_LOCAL_WAITING = {
   headline: "에이전트 승인 요청은 없습니다.",
   detail: "위의 「이 기기의 칸」이 회원님을 기다립니다. 누르면 그 칸으로 갑니다.",
 };
 
-/**
- * 결정 대기 한 행의 승인/거부 (goal B5.3b D-5).
- *
- * 이 목록은 `GET …/approvals?status=pending`을 이미 읽고 있었지만, 결정하려면
- * 채널로 들어가 타임라인의 카드를 찾아야 했다. 결정에 필요한 사실(누가, 무엇을,
- * 언제까지, 되돌릴 수 있는지)은 전부 이 행에 이미 있으므로, 결정도 여기서 한다.
- * 컨트롤은 카드와 같은 것을 쓴다 — 두 번째 구현이 아니라 두 번째 호출자다.
- */
-function InboxApprovalActions({
-  approvalId,
-  onSettled,
-  reversible,
-  execution,
-}: {
-  approvalId: string;
-  onSettled: (outcome: DecisionOutcome) => void;
-  reversible?: boolean;
-  /**
-   * 스폰 승인의 호스트 후보 (ADR-0125 D6-A, 이슈 1114).
-   *
-   * 목록 행에도 픽커가 서는 이유는 위 주석이 결정 컨트롤에 대해 이미 말한 것과
-   * 같다: 결정에 필요한 사실이 이 행에 다 있으므로 결정도 여기서 한다. 「어디서
-   * 실행하나」는 스폰 승인에서 결정에 필요한 사실이고, 그것만 채널로 들어가
-   * 고르게 하면 이 행은 다시 반쪽이 된다.
-   */
-  execution?: SpawnExecutionPlan;
-}) {
-  const [armed, setArmed] = useState<Armed>(null);
-  return (
-    <ApprovalActions
-      approvalId={approvalId}
-      armed={armed}
-      setArmed={setArmed}
-      onSettled={onSettled}
-      lead="실행 전에 회원님의 허가가 필요합니다."
-      className="px-4 pb-2"
-      testIdPrefix="inbox-approval"
-      reversible={reversible}
-      execution={execution ?? null}
-    />
-  );
-}
-
-/**
- * 이 탭이 미제공일 때 이름을 댈 표면.
- *
- * 「결정 대기」는 승인 원장 하나 위에 서 있고, 「에이전트」는 그 원장에 작업 실행
- * 기록을 얹는다 — 활동 라우트가 이미 그 둘이 함께 없을 때 작업 기록 쪽 문구를
- * 쓰므로(ActivityRoute), 같은 사실에 같은 이름을 댄다. 멘션은 어느 세대의
- * 서버에나 있는 경로 위에 있어 미제공이 될 수 없다.
- */
-const PANEL_SURFACE: Record<InboxFilter, SurfaceId | null> = {
-  "needs-action": "approvals",
-  mentions: null,
-  agents: "agentRunHistory",
-};
-
-function FeedPanel({
-  filter,
-  feed,
-  onMarkRead,
-  renderActions,
-  listRef,
-  localWaiting = 0,
-}: {
-  filter: InboxFilter;
-  feed: Feed;
-  /** 이 기기에서 「응답 필요」인 칸 수(#2776). 결정 대기의 빈 문구를 좁힌다. */
-  localWaiting?: number;
-  onMarkRead?: (item: FeedItem) => void;
-  renderActions?: (item: FeedItem) => ReactNode;
-  listRef?: React.RefObject<HTMLUListElement>;
-}) {
-  const surface = PANEL_SURFACE[filter];
-  const state = approvalsPanelState({
-    isLoading: feed.isLoading,
-    // 이름 댈 표면이 없는 탭은 미제공이 될 수 없다: 접을 곳이 없으면 접지 않는다.
-    absent: feed.absent && surface !== null,
-    error: feed.error,
-    count: feed.items.length,
-  });
-
-  if (state === "unavailable" && surface !== null) {
-    return (
-      <SurfaceUnavailableSection
-        surface={surface}
-        testId="inbox-unavailable"
-      />
-    );
-  }
-  if (state === "error") {
-    return (
-      <InlineBanner
-        message="인박스를 불러오지 못했습니다."
-        actionLabel="다시 시도"
-        onAction={feed.refetch}
-        testId="inbox-error"
-      />
-    );
-  }
-  const copy =
-    filter === "needs-action" && localWaiting > 0 ? EMPTY_WITH_LOCAL_WAITING : EMPTY_COPY[filter];
-  return (
-    <Skeleton ready={state !== "loading"} rows={3} className="p-4">
-      {state === "loading" ? null : state === "empty" ? (
-        <EmptyInvite
-          headline={copy.headline}
-          detail={copy.detail}
-          testId="inbox-empty"
-        />
-      ) : (
-        <FeedList
-          items={feed.items}
-          onMarkRead={onMarkRead}
-          renderActions={renderActions}
-          testId="inbox-list"
-          listRef={listRef}
-        />
-      )}
-    </Skeleton>
-  );
-}
-
 export function InboxRoute() {
   const { session } = useSession();
-  // 「나에게 필요한 일」 수의 단일 출처(#3337): 레일 배지와 같은 값을 읽는다.
   const needs = useNeedsMe();
   const localWaiting = needs.panes;
   const [params, setParams] = useSearchParams();
-  // 이 서버가 답할 수 있는 탭만 (goal B12). 승인 원장이 없는 서버에서는 결정
-  // 대기가 사라지고 멘션 하나만 남는다. 「에이전트」 탭은 웹에서 없앴다(#3337): 활동의
-  // 부분집합이었다. 인박스 = 나에게 필요한 것, 활동 = 일어난 일 기록. core의
-  // `InboxFilter`는 폰이 아직 쓰므로 그대로 두고 웹이 걸러 낸다.
-  const availableFilters = useMemo(
-    () =>
-      availableInboxFilters((surface) => isSurfaceProvided(surface)).filter(
-        (f) => f !== "agents"
-      ),
-    []
-  );
-  const webFilters = useMemo(
-    () => withRemindersTab(availableFilters),
-    [availableFilters]
-  );
-  const filter = parseWebInboxFilter(params.get("filter"), availableFilters);
-  const approvalsProvided = isSurfaceProvided("approvals");
+  const isMobile = useIsMobileShell();
+  const tasksProvided = isSurfaceProvided("approvals");
+  const tabs = useMemo(() => mailboxTabs(tasksProvided), [tasksProvided]);
+  const filter = parseWebMailboxFilter(params.get("filter"), tabs);
 
-  // 결정 대기 stays loaded on every tab: it is the count that decides whether a
-  // person needs to come here at all. The mention count is free (read-state is
-  // already in cache for the sidebar), and 에이전트 has no cheap count, so it
-  // shows none rather than a guess.
-  //
-  // 승인 원장이 없는 서버에서는 이 요청을 아예 만들지 않는다. 404를 받아 놓고
-  // 0으로 세는 것은 "결정할 것이 없다"를 지어내는 일이고, 그 숫자가 탭 배지에
-  // 올라간다 (goal B12).
-  const needsAction = useNeedsAction(approvalsProvided);
-  const mentions = useMentions(filter === "mentions");
+  const mailbox = useMailbox();
+  const context = useFeedContext();
   const mentionCount = useMentionCount();
   const reminders = useReminders(session.member.workspaceId);
   const reminderDueCount = (reminders.data?.reminders ?? []).filter((row) =>
     reminderIsOverdue(row, Date.now())
   ).length;
 
-  const markRead = useMarkRead();
+  const markMentionsRead = useMarkRead();
   const unreadChannels = useUnreadMentionChannels();
   const invalidateApprovals = useInvalidateApprovals();
-  // 위에서 선언한다: 아래 결정 컨트롤이 이 값을 읽는다.
-  // useOffline: connStatus==="disconnected"는 실절단에도 connecting에 머물러
-  // false가 된다(useOffline.ts 주석) — 파괴적 결정의 게이트는 허브와 같은 판정 하나로.
+  const { markRead, markUnread } = useMailboxReadActions();
   const offline = useOffline();
   const [confirmingAll, setConfirmingAll] = useState(false);
   const [note, setNote] = useState<DecisionNote | null>(null);
-  // 2R N-D: 착지점은 **핸들러를 가진 엘리먼트**여야 한다. 앞 판은 바깥 상자
-  // (tabpanel div)로 보냈는데, ↑/↓는 그 안의 `ul`에 걸려 있어서(FeedRow.tsx)
-  // 주석이 약속한 "바로 다음 행으로"가 성립하지 않았다. 키가 핸들러에 닿지
-  // 않으면 캐럿이 목록 근처에 있다는 사실만 남고 아무것도 이어지지 않는다.
-  const listRef = useRef<HTMLUListElement>(null);
-  /**
-   * 결정이 하나 닫힐 때마다 오른다. 초점을 옮기는 신호가 **이것**이지
-   * `feed.items`가 아닌 이유는 순서 때문이다: 원장 재조회는 왕복 하나 뒤에
-   * 도착하고, 그 사이에 결정된 행은 이미 언마운트돼 초점이 body로 떨어져 있다.
-   * 그때 옮기면 이미 잃은 캐럿을 나중에 줍는 셈이라, 그 사이의 키 입력은 갈 곳이
-   * 없다. 결정이 닫힌 바로 다음 렌더에서 옮긴다.
-   */
-  const [decisionTick, setDecisionTick] = useState(0);
+  const [readError, setReadError] = useState<string | null>(null);
+  const [readBusy, setReadBusy] = useState(false);
 
-  const feed: Feed | null =
-    filter === "reminders"
-      ? null
-      : filter === "needs-action"
-        ? needsAction
-        : mentions;
+  // 고른 항목은 읽음 처리로 서버 투영에서 사라질 수 있다(읽은 멘션). 그래도 패널과
+  // 목록의 그 줄은 사용자가 다른 줄을 고를 때까지 남는다 — 메일함이 읽은 편지를
+  // 손 밑에서 치우지 않는 것과 같다. 스냅샷은 사라진 줄만 대신한다.
+  const [selected, setSelected] = useState<MailboxEntry | null>(null);
 
-  // 2R L1: 결정 영수증은 **그 목록에 대한 답**이다. 탭을 옮기면 그 답이 가리키던
-  // 행은 화면에 없는데 줄만 남아, 멘션 목록 위에 "승인을 기록했습니다"가 떠 있는
-  // 상태가 된다. 무엇에 대한 말인지 알 수 없는 문장은 정보가 아니라 잔해다.
+  const live = useMemo(
+    () =>
+      selected === null
+        ? null
+        : (mailbox.entries.find((entry) => entry.key === selected.key) ?? null),
+    [mailbox.entries, selected]
+  );
+  const active: MailboxEntry | null = live ?? selected;
+
+  const counts = useMemo(() => mailboxCounts(mailbox.entries), [mailbox.entries]);
+
+  const shown = useMemo(() => {
+    if (filter === "reminders") return [];
+    const filtered = filterMailbox(mailbox.entries, filter);
+    if (selected === null || filtered.some((e) => e.key === selected.key)) {
+      return filtered;
+    }
+    // 고른 줄이 필터 밖으로 빠졌다(읽음으로 바뀐 줄이 「안 읽음」에서 빠지는 식).
+    // 사용자가 보고 있는 줄이므로 그 자리에 남긴다.
+    return [...filtered, active ?? selected].sort((a, b) =>
+      a.kind === "task" && b.kind !== "task"
+        ? -1
+        : b.kind === "task" && a.kind !== "task"
+          ? 1
+          : b.atMs - a.atMs
+    );
+  }, [mailbox.entries, filter, selected, active]);
+
   useEffect(() => {
     setNote(null);
   }, [filter]);
 
-  // 2R M6/N-D의 착지점. `ul`은 행이 사라져도 남아 있으므로 캐럿이 여기 앉으면
-  // 재조회를 건너서 유지되고, ↑/↓가 곧바로 다음 행으로 이어진다. 마지막 행을
-  // 결정해 목록이 통째로 비면 착지할 곳이 없다 — 그때는 조용히 흘려보낸다.
-  useEffect(() => {
-    if (decisionTick === 0) return;
-    listRef.current?.focus();
-  }, [decisionTick]);
-
-  const onMarkRead = useCallback(
-    (item: FeedItem) => {
-      if (item.seq === undefined) return;
-      void markRead(item.channelId, item.seq);
+  const select = useCallback(
+    (entry: MailboxEntry) => {
+      setReadError(null);
+      setSelected(entry);
+      // 열어서 읽는 것이 읽음이다. 처리할 일은 결정이 닫는다.
+      if (entry.unread && entry.kind !== "task" && !offline) {
+        setSelected({ ...entry, unread: false, unreadCount: 0 });
+        void markRead(entry).catch(() => {
+          // 서버가 거절하면 되돌려 사실대로 안 읽음으로 둔다.
+          setSelected(entry);
+          setReadError("읽음으로 표시하지 못했습니다. 잠시 뒤에 다시 시도하세요.");
+        });
+      }
     },
-    [markRead]
+    [markRead, offline]
   );
 
-  // 결정이 기록되면 그 행은 대기 목록에서 사라진다. 사라지는 것만으로는 무엇이
-  // 됐는지 알 수 없으므로, 원장이 답한 그대로 한 줄을 남기고 목록을 다시 읽는다.
-  // 무슨 말을 어떤 색으로 할지는 `decisionNote`가 정한다: 이미 다른 곳에서
-  // 결정된 요청(superseded)은 정상적인 상태 전이이지 사고가 아니므로, 그 갈래가
-  // 조용히 --danger로 흘러가지 않도록 판정을 컴포넌트 밖에 못 박아 둔다.
+  const toggleRead = useCallback(
+    async (entry: MailboxEntry) => {
+      setReadBusy(true);
+      setReadError(null);
+      try {
+        if (entry.unread) {
+          await markRead(entry);
+          setSelected({ ...entry, unread: false, unreadCount: 0 });
+        } else {
+          await markUnread(entry);
+          setSelected({ ...entry, unread: true });
+        }
+      } catch {
+        setReadError("읽음 상태를 바꾸지 못했습니다. 잠시 뒤에 다시 시도하세요.");
+      } finally {
+        setReadBusy(false);
+      }
+    },
+    [markRead, markUnread]
+  );
+
   const onDecided = useCallback(
     (outcome: DecisionOutcome) => {
       setNote(decisionNote(outcome));
       invalidateApprovals();
-      // 2R M6: 결정한 행은 원장을 다시 읽는 순간 사라진다. 그 행 안에 있던
-      // 초점도 함께 사라져 body로 떨어지므로, 키보드 사용자는 방금 일한 자리를
-      // 잃고 문서 맨 위에서 다시 Tab을 시작한다. 캐럿을 목록 자체에 돌려주면
-      // ↑/↓가 바로 다음 행으로 이어진다(2R N-D: 그 핸들러를 가진 것이 `ul`이다).
-      setDecisionTick((tick) => tick + 1);
     },
     [invalidateApprovals]
-  );
-
-  const renderApprovalActions = useCallback(
-    (item: FeedItem) => {
-      const control = approvalRowControl(item, { offline });
-      if (control.kind === "none") return null;
-      // 끊긴 채로 버튼을 그대로 두면 15초 뒤 실패로 반박당하고, 말없이 치우면
-      // 무엇이 사라졌는지 알 수 없다. 자리는 지키고 이유를 말한다.
-      if (control.kind === "offline") {
-        return (
-          <p
-            className="px-4 pb-2 text-meta text-ink-muted"
-            data-testid="inbox-approval-offline"
-          >
-            연결이 끊겨 지금은 결정할 수 없습니다. 다시 연결되면 여기서 승인하거나
-            거부할 수 있습니다.
-          </p>
-        );
-      }
-      return (
-        <InboxApprovalActions
-          approvalId={control.approvalId}
-          onSettled={onDecided}
-          reversible={item.reversible}
-          execution={item.execution}
-        />
-      );
-    },
-    [offline, onDecided]
   );
 
   const markAllRead = useCallback(() => {
     setConfirmingAll(false);
     for (const channel of unreadChannels) {
-      void markRead(channel.channelId, channel.seq);
+      void markMentionsRead(channel.channelId, channel.seq);
     }
-  }, [unreadChannels, markRead]);
+  }, [unreadChannels, markMentionsRead]);
 
   // 옛 「에이전트」 탭 딥링크는 활동으로 보낸다(#3337).
   if (params.get("filter") === "agents") {
     return <Navigate to="/activity" replace />;
   }
 
+  const tabCounts: Partial<Record<(typeof tabs)[number], number>> = {
+    all: counts.all,
+    unread: counts.unread,
+    mention: counts.mention,
+    dm: counts.dm,
+    thread: counts.thread,
+    task: needs.approvals + needs.panes,
+    reminders: reminderDueCount,
+  };
+
+  const showDetail = active !== null && filter !== "reminders";
+  const listHidden = isMobile && showDetail;
+
+  const state =
+    mailbox.isLoading && mailbox.entries.length === 0
+      ? "loading"
+      : mailbox.error && mailbox.entries.length === 0
+        ? "error"
+        : shown.length === 0
+          ? "empty"
+          : "list";
+
+  const emptyCopy =
+    filter === "task" && localWaiting > 0
+      ? EMPTY_WITH_LOCAL_WAITING
+      : EMPTY_COPY[filter === "reminders" ? "all" : filter];
+
   return (
-    <div className="flex min-w-0 flex-1 flex-col" data-testid="inbox-route">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="inbox-route">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <SidebarDrawerToggle />
@@ -406,43 +264,21 @@ export function InboxRoute() {
             </span>
           )}
         </div>
-        {/* 탭이 하나뿐이면 탭 줄을 세우지 않는다 (goal B12). 고를 것이 없는
-            고르개는 컨트롤이 아니라 장식이고, 남은 하나에 이미 있는 이름을
-            한 번 더 적을 뿐이다.
-            이 클라는 나중에 탭을 항상 붙이므로 보이는 탭은 최소 멘션+나중
-            둘이다. 가드는 보이는 탭(webFilters)을 본다: 서버 탭이 멘션 하나뿐
-            이어도 나중에와 고를 것이 있으므로 줄을 세운다. 서버 탭 수로
-            되돌리면 나중에로 가는 길이 사라진다. */}
-        {webFilters.length > 1 && (
-          <FilterTabs
-            spec={webInboxFilterTabs(webFilters)}
-            value={filter}
-            onChange={(next) => setParams({ filter: next }, { replace: true })}
-            // 2R M3: 행 수가 아니라 **결정할 수 있는 행 수**. 배지는 "지금
-            // 당신이 해야 할 일이 몇 개인가"를 말하는 자리이고, 결정할 수 없는
-            // 행이 그 수에 들어가면 사람은 인박스를 열고 셀 것을 찾지 못한다.
-            counts={{
-              // 이 기기의 칸이 회원님을 기다리는 수도 센다(#2776): 배지는 「지금 해야
-              // 할 일의 수」다.
-              "needs-action": needs.approvals + needs.panes,
-              mentions: mentionCount,
-              reminders: reminderDueCount,
-            }}
-          />
-        )}
+        <FilterTabs
+          spec={mailboxTabsSpec(tabs)}
+          value={filter}
+          onChange={(next) => {
+            // 필터를 바꾸면 고른 줄을 놓는다: 다른 종류의 줄이 새 필터의 목록과 패널에
+            // 남아 있으면 「DM만」이 DM만이 아니게 된다.
+            setSelected(null);
+            setParams({ filter: next }, { replace: true });
+          }}
+          counts={tabCounts}
+        />
       </header>
 
-      {/* 이 기기의 칸(#2776): 로컬 칸의 「응답 필요」·「끝남」. 데스크탑에만 있다. */}
       {isDesktop() ? <LocalPaneInbox /> : null}
 
-      {/* tone이 판정에서 온다. `InlineBanner`는 error면 role="alert"+--danger,
-          neutral이면 role="status"를 그리므로, 게이트는 그 role 하나로
-          "이미 결정됨이 오류로 그려지지 않았다"를 단언할 수 있다.
-
-          `unavailable`은 배너에서 neutral과 같은 모양이다(2R M1). 이 배너가 가진
-          색은 둘뿐이고, 미제공이 속할 곳은 조용한 쪽이다 — 목록이 같은 404를
-          이미 조용히 접고 있으므로. 판정으로는 갈라져 있어서 테스트가 그 사실을
-          못으로 박을 수 있고, 화면에서는 같은 조용함으로 만난다. */}
       {note && (
         <InlineBanner
           tone={note.tone === "error" ? "error" : "neutral"}
@@ -453,13 +289,23 @@ export function InboxRoute() {
         />
       )}
 
+      {readError && (
+        <InlineBanner
+          tone="error"
+          message={readError}
+          actionLabel="닫기"
+          onAction={() => setReadError(null)}
+          testId="inbox-read-error"
+        />
+      )}
+
       {offline && (
         <InlineBanner
           tone="neutral"
           message={
-            (feed?.updatedAtMs ?? reminders.dataUpdatedAt) > 0
+            (filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs) > 0
               ? `오프라인, 마지막 동기화 ${relativeLabel(
-                  feed?.updatedAtMs ?? reminders.dataUpdatedAt,
+                  filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs,
                   Date.now()
                 )}. 아래는 그때의 상태입니다.`
               : "오프라인. 아직 이 목록을 한 번도 받지 못했습니다."
@@ -468,42 +314,101 @@ export function InboxRoute() {
         />
       )}
 
-      {/* 탭 줄이 없으면 이 상자는 tabpanel이 아니다. 역할만 남겨 두면
-          `aria-labelledby`가 존재하지 않는 탭을 가리키고, 보조기술은 이름 없는
-          패널을 읽는다. 탭이 하나뿐일 때 이 표면은 그냥 목록이다. */}
-      <div
-        {...(webFilters.length > 1
-          ? {
-              role: "tabpanel",
-              id: webInboxPanelId(filter),
-              "aria-labelledby": webInboxTabId(filter),
-            }
-          : {})}
-        className="min-h-0 flex-1 overflow-y-auto"
-      >
-        {filter !== "reminders" && feed !== null ? (
-          <FeedPanel
-            filter={filter}
-            feed={feed}
-            localWaiting={localWaiting}
-            onMarkRead={filter === "mentions" ? onMarkRead : undefined}
-            // 결정 컨트롤은 결정 대기 탭에만. 에이전트 탭의 승인 행은 이미 끝난
-            // 결정의 기록이고, 멘션 행은 승인이 아니다.
-            renderActions={
-              filter === "needs-action" ? renderApprovalActions : undefined
-            }
-            listRef={listRef}
-          />
-        ) : (
+      {filter === "reminders" ? (
+        <div
+          role="tabpanel"
+          id={webMailboxPanelId(filter)}
+          aria-labelledby={webMailboxTabId(filter)}
+          className="min-h-0 flex-1 overflow-y-auto"
+        >
           <RemindersPanel />
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1">
+          {!listHidden && (
+            <div
+              role="tabpanel"
+              id={webMailboxPanelId(filter)}
+              aria-labelledby={webMailboxTabId(filter)}
+              data-testid="inbox-list-pane"
+              className={
+                isMobile
+                  ? "min-h-0 flex-1 overflow-y-auto"
+                  : "min-h-0 w-[22rem] shrink-0 overflow-y-auto border-r border-line"
+              }
+            >
+              {state === "error" ? (
+                <InlineBanner
+                  message="인박스를 불러오지 못했습니다."
+                  actionLabel="다시 시도"
+                  onAction={mailbox.refetch}
+                  testId="inbox-error"
+                />
+              ) : filter === "task" && mailbox.tasksAbsent ? (
+                <SurfaceUnavailableSection
+                  surface="approvals"
+                  testId="inbox-unavailable"
+                />
+              ) : (
+                <Skeleton ready={state !== "loading"} rows={4} className="p-4">
+                  {state === "empty" ? (
+                    <EmptyInvite
+                      headline={emptyCopy.headline}
+                      detail={emptyCopy.detail}
+                      testId="inbox-empty"
+                    />
+                  ) : (
+                    <>
+                      <MailboxList
+                        entries={shown}
+                        selectedKey={active?.key ?? null}
+                        onSelect={select}
+                        directory={context.directory}
+                      />
+                      {mailbox.capped && (
+                        <p
+                          className="px-4 py-3 text-meta text-ink-muted"
+                          data-testid="inbox-capped"
+                        >
+                          채널이 많아 일부만 불러왔습니다. 나머지는 채널에서 확인하세요.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </Skeleton>
+              )}
+            </div>
+          )}
+          {showDetail && active ? (
+            <InboxDetail
+              key={active.key}
+              entry={active}
+              directory={context.directory}
+              offline={offline}
+              onBack={isMobile ? () => setSelected(null) : undefined}
+              onToggleRead={(entry) => void toggleRead(entry)}
+              onDecided={onDecided}
+              readBusy={readBusy}
+            />
+          ) : !isMobile && state === "list" ? (
+            <div
+              className="flex min-w-0 flex-1 items-center justify-center px-6"
+              data-testid="inbox-detail-empty"
+            >
+              <p className="max-w-sm break-keep text-center text-body text-ink-muted">
+                왼쪽에서 항목을 고르면 그 대화와 답장 입력이 여기에 열립니다.
+                읽음 표시는 같은 채널의 앞선 메시지까지 함께 읽음으로 바꿉니다.
+              </p>
+            </div>
+          ) : null}
+        </div>
+      )}
 
       {/* 에이전트가 한 일 전체는 활동에서 본다(#3337). 인박스는 나에게 필요한 것만 담는다. */}
       <Link
         to="/activity"
         data-testid="inbox-activity-link"
-        className="press mx-4 mb-2 flex h-control items-center justify-between rounded-lg bg-surface-hover px-3 text-body text-ink-muted hover:bg-surface-pressed hover:text-ink focus-visible:focus-ring"
+        className="press mx-4 mb-2 mt-2 flex h-control items-center justify-between rounded-lg bg-surface-hover px-3 text-body text-ink-muted hover:bg-surface-pressed hover:text-ink focus-visible:focus-ring"
       >
         <span>에이전트가 한 일 전체는 활동에서 봐요</span>
         <span className="flex items-center gap-1 text-ink">
@@ -512,8 +417,6 @@ export function InboxRoute() {
         </span>
       </Link>
 
-      {/* 컴포저와 같은 이유의 안전 영역 (goal B6): 이것도 셸의 마지막 줄이고,
-          폰에서는 그 아래가 홈 인디케이터다. */}
       <footer className="safe-area-bottom flex flex-wrap items-center gap-3 border-t border-line px-4 py-2">
         {confirmingAll ? (
           <>
@@ -539,7 +442,7 @@ export function InboxRoute() {
             onClick={() => setConfirmingAll(true)}
             data-testid="mark-all-read"
           >
-            모두 읽음 처리
+            멘션 모두 읽음 처리
           </Button>
         )}
         {/* Land on the 알림 규칙 panel, not the settings root: SettingsRoute reads

@@ -2082,6 +2082,19 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 그것이 무엇을 틀렸는지는 위 「시트의 상한」 절에 있다.
    */
   mentions: {
+    // **도크 밖으로 뜬다 — 흐름에 들지 않는다** (#3661). 시트가 흐름에 있으면 열고 닫을 때마다,
+    // 그리고 글자를 칠 때마다 후보 수가 바뀔 때마다 도크가 자라고 줄어서 「따라가는 목록」의
+    // 보이는 창이 그만큼 줄었다 늘었다 한다 — 목록은 그때마다 `onLayout` 으로 바닥에 다시
+    // 붙는다. 시트는 입력창 바로 위에 목록을 **덮고** 서므로 목록은 아무것도 모른다.
+    // `bottom: '100%'` 는 루트 윗면(`root.paddingTop` 위)에 서므로 알약에 거의 붙어(캡처로 ~4px) 선다.
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: '100%',
+    zIndex: 1,
+    backgroundColor: color.surface,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: color.border,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: color.border,
   },

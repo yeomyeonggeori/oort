@@ -53,6 +53,7 @@ import {
   useOpenAgentProfile,
 } from "@/features/routing/useAgentProfile";
 import { useAddWorkspaceOpen } from "@/features/workspace/useAddWorkspace";
+import { useNewDmOpen, useOpenNewDm } from "@/features/directory/useNewDm";
 import { useDraftsPanel } from "@/features/drafts/useDraftsPanel";
 import { InlineBanner } from "@/features/common/States";
 import { useSurfaceProvidedPredicate } from "@/features/capabilities/useSurfaceProvided";
@@ -493,8 +494,14 @@ export function QuickSwitcher({
   const addMemberOpen = useAddChannelMemberOpen();
   const agentProfileOpen = useAgentProfileOpen();
   const addWorkspaceOpen = useAddWorkspaceOpen();
+  const newDmOpen = useNewDmOpen();
+  const openNewDm = useOpenNewDm();
   const formDialogOpen =
-    createChannelOpen || addMemberOpen || agentProfileOpen || addWorkspaceOpen;
+    createChannelOpen ||
+    addMemberOpen ||
+    agentProfileOpen ||
+    addWorkspaceOpen ||
+    newDmOpen;
 
   // 에이전트 라우팅도 팔레트에 자리가 있다 (R1 M7). 같은 규칙이 채널 만들기를
   // 여기에 앉혔고(SKILL §6 "모든 액션에 키보드 경로"), 이 액션은 그것보다 더
@@ -575,16 +582,17 @@ export function QuickSwitcher({
       // 다른 채널로 이동했다. ⌘⇧K와 ⌘,도 같은 이유로 같은 사고를 낸다.
       // 폼을 닫는 키는 Esc 하나면 충분하다 (R2 M4).
       if (formDialogOpen) return;
-      // ⌘⇧K = 새 다이렉트 메시지 (R-1 §1 키보드 경로). It lands on the member
-      // directory, which is where a DM starts, and the directory puts the caret
-      // in its search field on arrival (DirectoryRoute), so this shortcut ends
-      // where its name promises: at a box you can type a name into. Checked
-      // BEFORE ⌘K, because the shifted key still reports as "k" and would
-      // otherwise toggle the palette.
+      // ⌘⇧K = 새 다이렉트 메시지 (R-1 §1 키보드 경로). #3662부터 멤버 목록으로 보내지 않고
+      // 사이드바 DM 머리의 +와 같은 「새 다이렉트 메시지」 모달을 연다(받는 사람 검색 칸에
+      // 캐럿이 선다). Checked BEFORE ⌘K, because the shifted key still reports as "k" and
+      // would otherwise toggle the palette.
       if (OPEN_NEW_DM_SHORTCUT.matches(event)) {
         event.preventDefault();
         onOpenChange(false);
-        navigate("/directory");
+        openNewDm(
+          restoreRef.current ??
+            (document.activeElement instanceof HTMLElement ? document.activeElement : null)
+        );
         return;
       }
       if (OPEN_QUICK_SWITCHER_SHORTCUT.matches(event)) {
@@ -609,7 +617,7 @@ export function QuickSwitcher({
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, onOpenChange, navigate, formDialogOpen, location.pathname]);
+  }, [open, onOpenChange, navigate, formDialogOpen, location.pathname, openNewDm]);
 
   const searchProvided = isSurfaceProvided("messageSearch");
   // #2780: 작업 콘솔 줄은 온라인 호스트가 있을 때만 선다(정적 표가 아니다).

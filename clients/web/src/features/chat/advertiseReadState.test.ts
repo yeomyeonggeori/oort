@@ -105,6 +105,7 @@ describe("광고 호출 자리는 헬퍼 한 곳이다", () => {
         "features/chat/advertiseReadState.ts",
         "features/chat/channelActions.tsx",
         "features/inbox/useInbox.ts",
+        "features/inbox/useMailbox.ts",
         "features/timeline/useMarkUnread.ts",
       ].sort()
     );

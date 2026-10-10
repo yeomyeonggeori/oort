@@ -328,6 +328,10 @@ async function openInbox() {
   await waitForSettled(() =>
     expect(screen.getByTestId('header-title')).toBeTruthy(),
   );
+  // 인박스는 「전체」(메일함)로 열린다(#3663). 이 파일은 결정 대기 원장 보기를 잰다.
+  // 서버가 승인을 싣지 않는 빌드에서는 그 칩 자체가 없다(fail-closed).
+  const chip = screen.queryByTestId('inbox-tab-needs-action');
+  if (chip) fireEvent.press(chip);
 }
 
 /** 대기 행이 목록에 그려질 때까지. */
