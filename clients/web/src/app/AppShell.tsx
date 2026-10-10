@@ -38,6 +38,7 @@ import { Sidebar } from "@/features/sidebar/Sidebar";
 import { CreateChannelProvider } from "@/features/channels/CreateChannelDialog";
 import { AddWorkspaceProvider } from "@/features/workspace/AddWorkspaceDialog";
 import { AddChannelMemberProvider } from "@/features/channels/AddChannelMemberDialog";
+import { NewDmProvider } from "@/features/directory/NewDmDialog";
 import { AgentProfileProvider } from "@/features/routing/AgentProfileDialog";
 import { MemberProfileProvider } from "@/features/directory/MemberProfileDialog";
 import { InboxHotkeys } from "@/features/inbox/InboxHotkeys";
@@ -360,6 +361,7 @@ export function AppShell({
          * 않는다. (낱말은 #1573 예약 · #1584 — 이 주석을 인용하는 짝은
          * `packages/momo-core/src/features/timeline/model.ts` 머리말이다.) */}
         <AddChannelMemberProvider>
+        <NewDmProvider>
         <AgentProfileProvider>
         <MemberProfileProvider>
           <div
@@ -513,6 +515,7 @@ export function AppShell({
           />
         </MemberProfileProvider>
         </AgentProfileProvider>
+        </NewDmProvider>
         </AddChannelMemberProvider>
       </AddWorkspaceProvider>
       </CreateChannelProvider>

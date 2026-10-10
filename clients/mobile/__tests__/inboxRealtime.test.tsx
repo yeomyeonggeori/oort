@@ -263,6 +263,7 @@ async function readingAChannel() {
   // 인박스를 한 번 열어 피드에 답을 쥐여 준다(= 15초 창이 열린다). 그러지 않으면
   // 「낡은 답을 들고 있었다」가 아니라 「아직 아무것도 못 받았다」를 재게 된다.
   fireEvent.press(screen.getByTestId('tab-inbox'));
+  fireEvent.press(screen.getByTestId('inbox-tab-needs-action'));
   await waitFor(() => expect(screen.getByTestId('inbox-empty')).toBeTruthy());
   fireEvent.press(screen.getByTestId('tab-home'));
   await waitFor(() => expect(agentSub()).toBeTruthy());
@@ -289,6 +290,7 @@ describe('앱을 쓰는 중에 도착한 승인', () => {
 
     // 탭을 여는 것은 그 다음이다. 무효화가 먼저 일어났으므로 목록에는 이미 행이 있다.
     fireEvent.press(screen.getByTestId('tab-inbox'));
+    fireEvent.press(screen.getByTestId('inbox-tab-needs-action'));
     await waitFor(() =>
       expect(screen.getByTestId(`feed-row-approval:${APPROVAL}`)).toBeTruthy(),
     );

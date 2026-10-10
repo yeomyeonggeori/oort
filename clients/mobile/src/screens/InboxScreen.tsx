@@ -4,6 +4,14 @@ import {
   type SurfaceId,
 } from '@momo/core/features/capabilities/serverSurfaces';
 import {
+  entryAriaLabel,
+  filterMailbox,
+  mailboxCounts,
+  mailboxFilterLabel,
+  type MailboxEntry,
+  type MailboxFilter,
+} from '@momo/core/features/inbox/mailbox';
+import {
   agentsFeedPartial,
   availableInboxFilters,
   filterLabel,
@@ -19,6 +27,7 @@ import {
   AccessibilityInfo,
   FlatList,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -32,7 +41,7 @@ import {
   ScreenHeader,
 } from '../design/atoms';
 import {useRefreshControl} from '../design/refresh';
-import {ds2Radius, ds2Type, font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
+import {ds2Radius, ds2Type, font, line, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
 import {
   ApprovalDecision,
@@ -40,6 +49,7 @@ import {
 } from '../features/inbox/ApprovalDecision';
 import {APPROVAL_OFFLINE_COPY, useOnline} from '../features/inbox/useOnline';
 import {usePhoneNeedsMe} from '../features/inbox/useNeedsMe';
+import {useMailbox} from '../features/inbox/useMailbox';
 import {
   useAgentFeed,
   useInvalidateApprovals,
@@ -133,6 +143,44 @@ const EMPTY_COPY: Record<InboxFilter, {headline: string; detail: string}> = {
   },
 };
 
+/**
+ * 폰의 칩 = 메일함 보기 셋(전체·안 읽음·DM·스레드, 웹과 같은 core 모델) + 지금까지의
+ * 원장 보기(결정 대기·멘션·에이전트). 폰 1차는 「목록 + 이동」이라, 메일함 보기의
+ * 줄은 눌러서 그 대화로 간다(대화를 여는 것이 읽음 광고다). 결정 컨트롤과 멘션
+ * 읽음 처리는 원장 보기에 그대로 있다 — 두 번째 구현을 만들지 않는다.
+ */
+type MailboxView = Extract<MailboxFilter, 'all' | 'unread' | 'dm' | 'thread'>;
+const MAILBOX_VIEWS: readonly MailboxView[] = ['all', 'unread', 'dm', 'thread'];
+type Tab = MailboxView | InboxFilter;
+
+function isMailboxView(tab: Tab): tab is MailboxView {
+  return (MAILBOX_VIEWS as readonly string[]).includes(tab);
+}
+
+function tabLabel(tab: Tab): string {
+  return isMailboxView(tab) ? mailboxFilterLabel(tab) : filterLabel(tab);
+}
+
+const MAILBOX_EMPTY: Record<MailboxView, {headline: string; detail: string}> = {
+  all: {
+    headline: '인박스가 비어 있습니다. 조용한 게 정상입니다.',
+    detail:
+      'DM, 나를 부른 멘션, 내 글의 새 답글, 허락이 필요한 일이 생기면 여기 모입니다.',
+  },
+  unread: {
+    headline: '안 읽은 항목이 없습니다. 조용한 게 정상입니다.',
+    detail: '읽은 DM은 「전체」에서 계속 볼 수 있습니다.',
+  },
+  dm: {
+    headline: '주고받은 DM이 없습니다.',
+    detail: '사람이나 에이전트와 DM을 시작하면 여기 대화가 쌓입니다.',
+  },
+  thread: {
+    headline: '새 답글이 달린 내 글이 없습니다.',
+    detail: '내가 쓴 글에 답글이 달리면 여기 모입니다.',
+  },
+};
+
 export default function InboxScreen({
   active = true,
   onOpenConversation,
@@ -165,9 +213,16 @@ export default function InboxScreen({
     () => availableInboxFilters(surface => isSurfaceProvided(surface)),
     [],
   );
-  const [filter, setFilter] = useState<InboxFilter>(() =>
-    parseFilter(null, availableFilters),
+  const tabs = useMemo<Tab[]>(
+    () => [...MAILBOX_VIEWS, ...availableFilters],
+    [availableFilters],
   );
+  const [tab, setTab] = useState<Tab>('all');
+  const mailboxActive = isMailboxView(tab);
+  // 원장 보기에서만 쓰는 값. 메일함 보기일 때는 첫 원장 탭으로 둔다(훅 호출은 항상 같다).
+  const filter: InboxFilter = isMailboxView(tab)
+    ? parseFilter(null, availableFilters)
+    : tab;
   const approvals = serverSurface('approvals');
   const approvalsProvided = isSurfaceProvided('approvals');
   // 반쪽 원장 고지 (3R N-B). 판정은 core의 한 벌이고 웹이 같은 것을 쓴다.
@@ -183,15 +238,32 @@ export default function InboxScreen({
   // 필터 칩의 수는 탭 알약과 **같은 합**의 두 몫이다(#3342): 결정 대기 + 멘션 = 알약.
   // 칩이 자기 수를 따로 세면 알약은 3, 칩 둘은 2와 2를 말하게 된다.
   const needsMe = usePhoneNeedsMe();
-  const chipCount = (value: InboxFilter): number =>
-    value === 'needs-action' ? needsMe.approvals : value === 'mentions' ? needsMe.mentions : 0;
+  const chipCount = (value: Tab): number =>
+    isMailboxView(value)
+      ? mailboxCount[value]
+      : value === 'needs-action'
+        ? needsMe.approvals
+        : value === 'mentions'
+          ? needsMe.mentions
+          : 0;
 
   // All three are mounted; `enabled` decides which ones actually fetch. Same
   // shape as the web route, so a tab switch is instant on a warm cache instead
   // of remounting a hook tree.
-  const needsAction = useNeedsAction(approvalsProvided && filter === 'needs-action');
-  const mentions = useMentions(filter === 'mentions');
-  const agentFeed = useAgentFeed(filter === 'agents', member.id);
+  // 결정 대기 원장은 항상 읽는다: 「전체」 목록의 처리할 일과 이 탭이 같은 쿼리를 쓰고,
+  // 탭을 옮길 때마다 관찰자가 켜졌다 꺼지면 없는 경로(404)를 다시 묻게 된다.
+  const needsAction = useNeedsAction(approvalsProvided);
+  const mentions = useMentions(!mailboxActive && filter === 'mentions');
+  const agentFeed = useAgentFeed(!mailboxActive && filter === 'agents', member.id);
+  const mailbox = useMailbox(mailboxActive);
+  const mailboxCount = useMemo(
+    () => mailboxCounts(mailbox.entries),
+    [mailbox.entries],
+  );
+  const mailboxShown = useMemo(
+    () => (mailboxActive ? filterMailbox(mailbox.entries, tab) : []),
+    [mailbox.entries, mailboxActive, tab],
+  );
 
   const feed: Feed =
     filter === 'needs-action' ? needsAction : filter === 'agents' ? agentFeed : mentions;
@@ -200,7 +272,10 @@ export default function InboxScreen({
   // 당겨서 새로고침 (goal RN-B4b / #1026). 각 탭은 이미 자기를 다시 읽는 법을
   // 알고 있으므로(`feed.refetch` = 무효화), 당김은 그것을 부르는 새 입구일 뿐이다 —
   // 탭을 바꾸면 대상도 함께 바뀐다.
-  const refreshControl = useRefreshControl(feed.refetch, 'inbox-refresh');
+  const refreshControl = useRefreshControl(
+    mailboxActive ? mailbox.refetch : feed.refetch,
+    'inbox-refresh',
+  );
 
   // 탭이 열리는 순간 원장을 다시 읽는다 (#1020). `active` 가 거짓→참으로 바뀔 때만
   // 돈다: 참인 채로 다시 그려지는 것(필터 전환, 결정 한 번)은 여는 것이 아니다.
@@ -345,52 +420,53 @@ export default function InboxScreen({
     <Screen onCanvas={clearance > 0}>
       <ScreenHeader title="인박스" />
 
-      {availableFilters.length > 1 ? (
-        <View
-          accessibilityRole="tablist"
-          accessibilityLabel="인박스 필터"
-          style={styles.tabs}>
-          {availableFilters.map(value => (
-            <Pressable
-              key={value}
-              accessibilityRole="tab"
-              accessibilityState={{selected: value === filter}}
-              accessibilityLabel={
-                chipCount(value) > 0
-                  ? `${filterLabel(value)}, ${chipCount(value)}개`
-                  : filterLabel(value)
-              }
-              onPress={() => {
-                // 이미 고른 칩을 다시 누르는 것은 값이 넘어가는 것이 아니다.
-                if (value !== filter) haptics.selection();
-                setFilter(value);
-              }}
-              style={({pressed}) => [
-                styles.tab,
-                value === filter && styles.tabActive,
-                pressed && styles.pressed,
-              ]}
-              testID={`inbox-tab-${value}`}>
-              <View style={styles.tabInner}>
-                <Text
-                  style={[styles.tabLabel, value === filter && styles.tabLabelActive]}>
-                  {filterLabel(value)}
-                </Text>
-                {chipCount(value) > 0 ? (
-                  <View style={styles.tabCount} testID={`inbox-tab-count-${value}`}>
-                    <Text
-                      style={styles.tabCountLabel}
-                      importantForAccessibility="no"
-                      accessibilityElementsHidden>
-                      {chipCount(value) > 99 ? '99+' : String(chipCount(value))}
-                    </Text>
-                  </View>
-                ) : null}
-              </View>
-            </Pressable>
-          ))}
-        </View>
-      ) : null}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        accessibilityRole="tablist"
+        accessibilityLabel="인박스 필터"
+        style={styles.tabsScroll}
+        contentContainerStyle={styles.tabs}>
+        {tabs.map(value => (
+          <Pressable
+            key={value}
+            accessibilityRole="tab"
+            accessibilityState={{selected: value === tab}}
+            accessibilityLabel={
+              chipCount(value) > 0
+                ? `${tabLabel(value)}, ${chipCount(value)}개`
+                : tabLabel(value)
+            }
+            onPress={() => {
+              // 이미 고른 칩을 다시 누르는 것은 값이 넘어가는 것이 아니다.
+              if (value !== tab) haptics.selection();
+              setTab(value);
+            }}
+            style={({pressed}) => [
+              styles.tab,
+              value === tab && styles.tabActive,
+              pressed && styles.pressed,
+            ]}
+            testID={`inbox-tab-${value}`}>
+            <View style={styles.tabInner}>
+              <Text
+                style={[styles.tabLabel, value === tab && styles.tabLabelActive]}>
+                {tabLabel(value)}
+              </Text>
+              {chipCount(value) > 0 ? (
+                <View style={styles.tabCount} testID={`inbox-tab-count-${value}`}>
+                  <Text
+                    style={styles.tabCountLabel}
+                    importantForAccessibility="no"
+                    accessibilityElementsHidden>
+                    {chipCount(value) > 99 ? '99+' : String(chipCount(value))}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          </Pressable>
+        ))}
+      </ScrollView>
 
       {!approvalsProvided ? (
         <NoticeBlock
@@ -412,8 +488,11 @@ export default function InboxScreen({
       {!online ? (
         <NoticeBlock
           headline={
-            feed.updatedAtMs > 0
-              ? `오프라인, 마지막 동기화 ${relativeLabel(feed.updatedAtMs, Date.now())}. 아래는 그때의 상태입니다.`
+            (mailboxActive ? mailbox.updatedAtMs : feed.updatedAtMs) > 0
+              ? `오프라인, 마지막 동기화 ${relativeLabel(
+                  mailboxActive ? mailbox.updatedAtMs : feed.updatedAtMs,
+                  Date.now(),
+                )}. 아래는 그때의 상태입니다.`
               : '오프라인. 아직 이 목록을 한 번도 받지 못했습니다.'
           }
           testID="inbox-offline"
@@ -422,7 +501,7 @@ export default function InboxScreen({
 
       {/* 반쪽인 채로 조용한 것과 조용한 것은 다르다 (3R N-B). 목록은 그대로 둔다 —
           있는 절반을 감추는 것은 반대 방향의 같은 거짓말이다. */}
-      {filter === 'agents' && runHistoryMissing ? (
+      {!mailboxActive && filter === 'agents' && runHistoryMissing ? (
         <NoticeBlock
           headline={runHistory.absentReason}
           detail="아래 목록은 승인 기록만 담고 있습니다."
@@ -430,7 +509,45 @@ export default function InboxScreen({
         />
       ) : null}
 
-      {feed.isLoading && feed.items.length === 0 ? (
+      {mailboxActive ? (
+        mailbox.isLoading && mailbox.entries.length === 0 ? (
+          <LoadingState label="인박스를 불러오는 중입니다." testID="inbox-loading" />
+        ) : mailbox.error && mailbox.entries.length === 0 ? (
+          <ErrorState
+            headline="인박스를 불러오지 못했습니다."
+            onRetry={mailbox.refetch}
+            testID="inbox-error"
+          />
+        ) : mailboxShown.length === 0 ? (
+          <EmptyState
+            headline={MAILBOX_EMPTY[tab as MailboxView].headline}
+            detail={MAILBOX_EMPTY[tab as MailboxView].detail}
+            refreshControl={refreshControl}
+            testID="inbox-empty"
+          />
+        ) : (
+          <FlatList
+            data={mailboxShown}
+            keyExtractor={entry => entry.key}
+            renderItem={({item}) => (
+              <MailboxRow
+                entry={item}
+                onPress={() => onOpenConversation(item.channelId, item.channelLabel)}
+              />
+            )}
+            ListFooterComponent={
+              mailbox.capped ? (
+                <Text style={styles.capped} testID="inbox-capped">
+                  채널이 많아 일부만 불러왔습니다. 나머지는 채널에서 확인하세요.
+                </Text>
+              ) : null
+            }
+            contentContainerStyle={[styles.listContent, {paddingBottom: space.lg + clearance}]}
+            refreshControl={refreshControl}
+            testID="inbox-list"
+          />
+        )
+      ) : feed.isLoading && feed.items.length === 0 ? (
         <LoadingState label="인박스를 불러오는 중입니다." testID="inbox-loading" />
       ) : panelSurface !== null && feed.absent && feed.items.length === 0 ? (
         // 서버가 "그런 경로 없다"고 **직접 답한** 경우다 (3R N-A). 오류가 아니므로
@@ -482,6 +599,56 @@ export default function InboxScreen({
         />
       )}
     </Screen>
+  );
+}
+
+/**
+ * 메일함의 한 줄 (#3663): 보낸 이 · 종류와 장소 · 시각 · 미리보기 · 안 읽음 점.
+ * 문장은 core가 지었다 — 이 컴포넌트는 그리기만 한다. 안 읽음은 점만이 아니라
+ * 굵은 보낸 이와 접근성 레이블의 「안 읽음」으로도 말한다.
+ */
+function MailboxRow({
+  entry,
+  onPress,
+}: {
+  entry: MailboxEntry;
+  onPress: () => void;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <View style={styles.rowShell} testID={`mailbox-row-${entry.key}`}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={entryAriaLabel(entry)}
+        onPress={onPress}
+        style={({pressed}) => [styles.mailRow, pressed && styles.pressed]}>
+        <View style={styles.rowHead}>
+          <Text
+            style={[
+              entry.actorIsAgent ? styles.actorAgent : styles.actor,
+              styles.mailActor,
+              entry.unread && styles.mailUnreadActor,
+            ]}
+            numberOfLines={1}>
+            {entry.actor}
+          </Text>
+          <Text style={styles.time}>{entry.timeLabel}</Text>
+        </View>
+        <Text style={styles.channel} numberOfLines={1}>
+          {entry.typeLabel}
+        </Text>
+        <View style={styles.mailPreviewLine}>
+          <Text
+            style={[styles.mailPreview, entry.unread && styles.mailPreviewUnread]}
+            numberOfLines={2}>
+            {entry.preview}
+          </Text>
+          {entry.unread ? (
+            <View style={styles.unreadDot} testID={`mailbox-unread-${entry.key}`} />
+          ) : null}
+        </View>
+      </Pressable>
+    </View>
   );
 }
 
@@ -593,11 +760,30 @@ function outcomeStyle(
 }
 
 const buildStyles = (color: Palette) => StyleSheet.create({
+  tabsScroll: {flexGrow: 0},
   tabs: {
     flexDirection: 'row',
     gap: space.sm,
     paddingHorizontal: SAFE_GUTTER,
     paddingVertical: space.sm,
+  },
+  mailRow: {
+    minHeight: TOUCH_TARGET,
+    paddingHorizontal: SAFE_GUTTER,
+    paddingVertical: space.md,
+    gap: space.xs,
+  },
+  mailActor: {flex: 1, fontSize: font.label},
+  mailUnreadActor: {fontWeight: '700'},
+  mailPreviewLine: {flexDirection: 'row', alignItems: 'center', gap: space.sm},
+  mailPreview: {flex: 1, fontSize: font.label, color: color.textMuted, lineHeight: line.label},
+  mailPreviewUnread: {color: color.text},
+  unreadDot: {width: 8, height: 8, borderRadius: ds2Radius.pill, backgroundColor: color.accent},
+  capped: {
+    fontSize: font.meta,
+    color: color.textFaint,
+    paddingHorizontal: SAFE_GUTTER,
+    paddingVertical: space.md,
   },
   tab: {
     minHeight: TOUCH_TARGET,
