@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, usePresence, useReducedMotion } from "motion/react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Hash,
   Lock,
-  MessageSquare,
   FolderPlus,
   Plus,
   Search,
-  SquarePen,
   X,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -31,6 +29,7 @@ import { agentCoverage } from "@momo/core/features/agents/agentRail";
 import { agentTurnFixtureMode } from "@/features/agents/turnFixture";
 import {
   channelLabelParts,
+  dmPeer,
   memberFor,
   memberNameParts,
   unreadFor,
@@ -107,6 +106,13 @@ import { DRAWER_SCRIM_MOTION } from "@/design/motion";
 import { MOVE_UNREAD_CHANNEL_SHORTCUT } from "@/app/keyboardShortcuts";
 import { ShortcutHelpDialog } from "@/app/ShortcutHelpDialog";
 import { useSurfaceProvided } from "@/features/capabilities/useSurfaceProvided";
+import { useOpenNewDm } from "@/features/directory/useNewDm";
+import {
+  PEER_DOT_LABEL,
+  peerDot,
+  unresolvedDmLabel,
+} from "@/features/directory/newDmModel";
+import { DmAvatar } from "./DmAvatar";
 
 // =============================================================================
 // Sidebar (R-1 §1): workspace header, the two global surfaces (인박스 / 활동),
@@ -115,9 +121,10 @@ import { useSurfaceProvided } from "@/features/capabilities/useSurfaceProvided";
 // projection (P7), never from a local count, so they match on every device.
 //
 // 멤버 sits with the global surfaces rather than above the channel list: it is a
-// place you go, not a thing you are subscribed to, and it is the only entry
-// point to starting a DM. The + on the 다이렉트 메시지 header is the second door
-// to the same surface, next to the DMs a person already has (parity G-3/G-4).
+// place you go, not a thing you are subscribed to. Starting a DM has its own door
+// next to the DMs a person already has (#3662): the + on the 다이렉트 메시지
+// header (and ⌘⇧K) opens the 새 다이렉트 메시지 picker, which goes to the
+// existing DM or creates one (parity G-3/G-4).
 // =============================================================================
 
 /**
@@ -298,6 +305,7 @@ export function Sidebar({
   // 명부가 도착하기 전에는 아직 아무것도 내밀지 않는다 (R2 M5); 그동안 헤더의
   // 액션 자리는 아래에서 같은 크기의 빈 칸이 지킨다.
   const openCreateChannel = useOpenCreateChannel();
+  const openNewDm = useOpenNewDm();
   const createChannelOpen = useCreateChannelOpen();
   const newChannelRef = useRef<HTMLButtonElement>(null);
   const rosterSettled = !directoryQuery.isPending;
@@ -523,11 +531,26 @@ export function Sidebar({
     // A DM row is named after a person, and this workspace holds two members
     // called 김인턴, so the row carries the handle whenever the name alone does
     // not decide which one it is (channelLabelParts).
-    const label = channelLabelParts(
-      channel,
-      directoryQuery.directory,
-      session.member.id
-    );
+    // 상대를 못 찾은 DM은 코어의 대체 이름 「다이렉트 메시지」(섹션 제목과 같은 낱말) 대신
+    // 이유가 읽히는 이름을 쓴다(#3662, `unresolvedDmLabel`).
+    const peer =
+      channel.kind === "dm"
+        ? dmPeer(channel, directoryQuery.directory, session.member.id)
+        : null;
+    const unresolved =
+      channel.kind === "dm" && peer === null
+        ? unresolvedDmLabel(
+            channel,
+            session.member.id,
+            selfName,
+            !directoryQuery.isPending
+          )
+        : null;
+    const dmPeerMember = unresolved?.isSelf ? (selfMember ?? null) : peer;
+    const label = unresolved
+      ? { text: unresolved.text, handle: null, isAgent: false }
+      : channelLabelParts(channel, directoryQuery.directory, session.member.id);
+    const dot = channel.kind === "dm" ? peerDot(dmPeerMember, nowMs) : null;
     const currentSectionId = sidebarPrefs.sectionIdFor(channel.id);
     const canDragRow =
       canEditSections &&
@@ -548,7 +571,7 @@ export function Sidebar({
         }
         icon={
           channel.kind === "dm" ? (
-            <MessageSquare className="size-4" />
+            <DmAvatar member={dmPeerMember} nowMs={nowMs} />
           ) : channel.kind === "private" ? (
             <Lock className="size-4" />
           ) : (
@@ -561,11 +584,14 @@ export function Sidebar({
         unreadCount={counts.unreadCount}
         mentionCount={counts.mentionCount}
         trailing={
-          <AgentTurnBadge
-            turns={agentTurnsInChannel(turnSignals, channel.id, nowMs)}
-            directory={directoryQuery.directory}
-            live={railLive}
-          />
+          <>
+            {dot ? <span className="sr-only">{PEER_DOT_LABEL[dot]}</span> : null}
+            <AgentTurnBadge
+              turns={agentTurnsInChannel(turnSignals, channel.id, nowMs)}
+              directory={directoryQuery.directory}
+              live={railLive}
+            />
+          </>
         }
         testId="channel-item"
         dataAttrs={{ "data-channel-id": channel.id }}
@@ -1110,34 +1136,44 @@ export function Sidebar({
                 </SidebarSection>
               ))}
 
-              {/* DM 0개면 섹션 자체를 접는다 (R-1 §1 빈 상태). 그때의 시작 경로는
-                  위의 멤버 행과 ⌘⇧K다. */}
-              {dmSection.channels.length > 0 && (
-                <SidebarSection
-                  title={dmSection.title}
-                  sectionId={dmSection.id}
-                  collapsed={collapsedSections[dmSection.id] === true}
-                  onCollapsedChange={(next) =>
-                    setSidebarSectionCollapsed(dmSection.id, next)
-                  }
-                  unreadCount={sectionUnread(dmSection.id).unreadCount}
-                  mentionCount={sectionUnread(dmSection.id).mentionCount}
-                  action={
-                    <Link
-                      to="/directory"
-                      aria-label="새 다이렉트 메시지 시작"
-                      title="새 다이렉트 메시지 (⌘⇧K)"
-                      data-testid="new-dm"
-                      data-section-action=""
-                      className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+              {/* DM 구획은 DM이 0개여도 선다(#3662): 머리의 +가 새 DM의 문이고, 문이 없는 빈
+                  워크스페이스에서 DM을 시작할 길이 ⌘⇧K뿐이면 안 된다. 로딩 중에는 스켈레톤이
+                  이미 위에서 한 번 말했으므로 빈 안내는 목록이 도착한 뒤에만 선다. */}
+              <SidebarSection
+                title={dmSection.title}
+                sectionId={dmSection.id}
+                collapsed={collapsedSections[dmSection.id] === true}
+                onCollapsedChange={(next) =>
+                  setSidebarSectionCollapsed(dmSection.id, next)
+                }
+                unreadCount={sectionUnread(dmSection.id).unreadCount}
+                mentionCount={sectionUnread(dmSection.id).mentionCount}
+                action={
+                  <button
+                    type="button"
+                    aria-label="새 다이렉트 메시지 시작"
+                    title="새 다이렉트 메시지 (⌘⇧K)"
+                    data-testid="new-dm"
+                    data-section-action=""
+                    onClick={(event) => openNewDm(event.currentTarget)}
+                    className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+                  >
+                    <Plus className="size-4" aria-hidden="true" />
+                  </button>
+                }
+              >
+                {dmSection.channels.map((channel) => rowFor(channel))}
+                {dmSection.channels.length === 0 &&
+                  !channelsQuery.isLoading &&
+                  !channelsQuery.error && (
+                    <li
+                      className="px-2 py-1 text-meta text-ink-muted"
+                      data-testid="dm-section-empty"
                     >
-                      <SquarePen className="size-4" aria-hidden="true" />
-                    </Link>
-                  }
-                >
-                  {dmSection.channels.map((channel) => rowFor(channel))}
-                </SidebarSection>
-              )}
+                      아직 대화가 없습니다. ⌘⇧K로 시작하세요.
+                    </li>
+                  )}
+              </SidebarSection>
 
               {/* The turn pill covers a bounded number of (channel, agent) pairs.
                   Past that bound a row's empty trailing cell means "not watched",

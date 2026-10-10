@@ -843,8 +843,9 @@ describe("펼침: 레일은 워크스페이스 전용, 목적지는 목록 열�
     // 문서 순서: 검색 → 머리 → 채널 목록.
     expect(search.compareDocumentPosition(head) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(head.compareDocumentPosition(channels) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // #3662: 「대화」 줄은 없다 — 구획 A는 인박스부터 시작한다.
+    expect(host.querySelector('[data-testid="nav-chat"]')).toBeNull();
     expect(labelsIn(head as HTMLElement, '[data-testid="sidebar-destinations"] nav')).toEqual([
-      "대화",
       "인박스",
       "멤버",
     ]);
@@ -902,8 +903,6 @@ describe("펼침: 레일은 워크스페이스 전용, 목적지는 목록 열�
   });
 
   it.each([
-    ["/", "nav-chat"],
-    ["/c/" + CH, "nav-chat"],
     ["/inbox", "nav-inbox"],
     ["/agents", "nav-agents"],
     ["/ai", "nav-ai"],
@@ -920,6 +919,18 @@ describe("펼침: 레일은 워크스페이스 전용, 목적지는 목록 열�
     ].map((a) => a.getAttribute("data-testid"));
     expect(current).toEqual([testId]);
   });
+
+  it.each(["/", "/c/" + CH])(
+    "%s 에서는 머리의 어느 줄도 aria-current가 아니고 「대화」 줄(nav-chat)은 없다 (#3662)",
+    async (entry) => {
+      shell.desktop = true;
+      const host = await mount({ entry, switcherOpen: false });
+      expect(host.querySelector('[data-testid="nav-chat"]')).toBeNull();
+      expect(
+        host.querySelectorAll('[data-testid="sidebar-list-head"] [aria-current="page"]').length
+      ).toBe(0);
+    }
+  );
 
   it("「AI」 행은 「에이전트·작업」 맨 위에 서고 /ai 로 간다. 「에이전트」 행도 그대로다 (AIH-3)", async () => {
     const host = await mount({ switcherOpen: false });
@@ -1064,11 +1075,11 @@ describe("레일과 목록 열 머리는 탭마다 바뀌지 않는다 (#3280, #
   const click = (host: HTMLElement, testId: string) =>
     act(() => host.querySelector<HTMLElement>(`[data-testid="${testId}"]`)!.click());
 
-  it("대화 → 인박스 → 팀 작업 → 내 작업 → 대화: 머리와 그 안의 모든 줄이 같은 DOM 노드다", async () => {
+  it("인박스 → 팀 작업 → 내 작업 → 채널: 머리와 그 안의 모든 줄이 같은 DOM 노드다", async () => {
     shell.desktop = true;
     const host = await mount({ switcherOpen: false });
     const q = (id: string) => host.querySelector<HTMLElement>(`[data-testid="${id}"]`);
-    const ROWS = ["nav-chat", "nav-inbox", "nav-directory", "nav-ai", "nav-agents", "nav-mine", "nav-team", "nav-activity"];
+    const ROWS = ["nav-inbox", "nav-directory", "nav-ai", "nav-agents", "nav-mine", "nav-team", "nav-activity"];
     const head = q("sidebar-list-head")!;
     const destinations = q("sidebar-destinations")!;
     const rows = ROWS.map((id) => q(id)!);
@@ -1097,8 +1108,9 @@ describe("레일과 목록 열 머리는 탭마다 바뀌지 않는다 (#3280, #
     expect(q("sidebar-body-slot")?.hidden).toBe(false);
     expect(q("channel-list")?.hidden).toBe(true);
     act(() => rerenderRail(false));
-    click(host, "nav-chat");
-    expectSame("대화");
+    // 「대화」 줄은 없다(#3662): 채널 행을 눌러 돌아온다.
+    act(() => host.querySelector<HTMLElement>('[data-testid="channel-item"]')!.click());
+    expectSame("채널");
     expect(q("channel-list")?.hidden).toBe(false);
     expect(q("sidebar-team-sessions")).toBeNull();
   });
@@ -1137,3 +1149,10 @@ describe("레일과 목록 열 머리는 탭마다 바뀌지 않는다 (#3280, #
     expect(pane.hasAttribute("inert")).toBe(true);
   });
 });
+
+// #3662: 새 DM 모달의 문은 셸(NewDmProvider)이 내리는 동사다. 이 시험은 셸 없이 그리므로
+// 문만 막아 둔다(모달 자체는 NewDmDialog.test가 잰다).
+vi.mock("@/features/directory/useNewDm", () => ({
+  useOpenNewDm: () => () => undefined,
+  useNewDmOpen: () => false,
+}));
