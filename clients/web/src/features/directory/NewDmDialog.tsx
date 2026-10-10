@@ -72,8 +72,8 @@ function PickRow({
         aria-busy={pending || undefined}
         disabled={disabled}
         aria-label={`${member.displayName} @${member.handle}${
-          hasDm ? ", 대화 이어가기" : ", 새 대화 시작"
-        }`}
+          dot ? `, ${PEER_DOT_LABEL[dot]}` : ""
+        }${hasDm ? ", 대화 이어가기" : ", 새 대화 시작"}`}
         onClick={() => onPick(member)}
         className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring disabled:opacity-60"
       >
@@ -269,14 +269,14 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
       <div className="flex flex-col gap-1 border-b border-line p-4">
         <DialogTitle>새 다이렉트 메시지</DialogTitle>
         <DialogDescription>
-          대화할 멤버나 에이전트를 고르세요. 이미 대화 중이면 그 대화로 이동해요.
+          대화할 멤버나 에이전트를 고르세요. 이미 대화 중이면 그 대화로 이동합니다.
         </DialogDescription>
       </div>
 
       {offline ? (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼습니다. 이미 대화 중인 사람에게는 갈 수 있어요."
+          message="연결이 끊겼습니다. 이미 대화 중인 사람에게는 이동할 수 있습니다."
           testId="new-dm-offline"
         />
       ) : null}
@@ -288,7 +288,7 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
         <Input
           id="new-dm-to"
           ref={searchRef}
-          type="search"
+          type="text"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={onSearchKeyDown}

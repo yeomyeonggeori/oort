@@ -1170,7 +1170,7 @@ export function Sidebar({
                       className="px-2 py-1 text-meta text-ink-muted"
                       data-testid="dm-section-empty"
                     >
-                      아직 대화가 없어요. 머리의 +나 ⌘⇧K로 시작해요.
+                      아직 대화가 없습니다. 위 제목 옆의 +나 ⌘⇧K로 시작하세요.
                     </li>
                   )}
               </SidebarSection>

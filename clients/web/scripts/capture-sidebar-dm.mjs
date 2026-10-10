@@ -46,7 +46,9 @@ const roster = [
 const dm = (n, others) => ({ id: ids(n), workspaceId, kind: "dm", muted: false, memberIds: [P("01"), ...others] });
 const dms = [dm(1, [P("11")]), dm(2, [P("12")]), dm(3, [P("13")]), dm(4, [P("14")]), dm(5, [P("15")])];
 
-async function open(browser, origin, scheme, viewport) {
+async function open(browser, origin, scheme, viewport, scene = {}) {
+  const sceneRoster = scene.roster ?? roster;
+  const sceneDms = scene.dms ?? dms;
   const auth = {
     accessToken: "capture-only-not-a-credential", refreshToken: "capture-only-not-a-credential",
     member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
@@ -58,8 +60,8 @@ async function open(browser, origin, scheme, viewport) {
     if (path === "/v1/auth/login") return json(route, auth);
     if (path === "/v1/auth/refresh") return json(route, { accessToken: auth.accessToken, refreshToken: auth.refreshToken });
     if (path === "/v1/auth/realtime-token") return json(route, { token: "capture", tokenType: "Bearer", expiresAtMs: Date.now() + 600_000, ttlSeconds: 60, workspaceId, memberId });
-    if (path.endsWith("/channels")) return json(route, { channels: [...channels, ...dms] });
-    if (path.endsWith("/roster")) return json(route, { members: roster });
+    if (path.endsWith("/channels")) return json(route, { channels: [...channels, ...sceneDms] });
+    if (path.endsWith("/roster")) return json(route, { members: sceneRoster });
     if (path.endsWith("/read-state")) return json(route, { read_states: [] });
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     if (path.endsWith(`/workspaces/${workspaceId}`)) return json(route, { workspace: { id: workspaceId, name: "여명거리" } });
@@ -91,7 +93,7 @@ async function open(browser, origin, scheme, viewport) {
   await page.getByTestId("login-password").fill("not-a-secret");
   await page.getByTestId("login-submit").click();
   await page.getByTestId("channel-item").first().waitFor({ timeout: 20_000 });
-  await page.getByTestId("dm-avatar").first().waitFor({ timeout: 20_000 });
+  await page.getByTestId(scene.ready ?? "dm-avatar").first().waitFor({ timeout: 20_000 });
   return { context, page };
 }
 
@@ -129,8 +131,27 @@ async function main() {
       await page.waitForURL(new RegExp(`/c/${ids(1)}$`), { timeout: 5_000 });
       await page.getByTestId("new-dm-dialog").waitFor({ state: "detached", timeout: 5_000 });
       await page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}-sidebar-after-pick-${scheme}.png`), clip: side });
-      console.log("shots", scheme);
       await context.close();
+      // 6) 빈 DM 구획(문은 +) · 긴 이름 · 오프라인 모달.
+      const long = person("17", "알렉산드리아 몽고메리웰링턴 수석 프로덕트 디자이너", "alexandria-montgomery-wellington-long-handle", { presenceStatus: "dnd" });
+      const empty = await open(browser, preview.origin, scheme, { width: 1440, height: 900 }, { dms: [], roster: [...roster, long], ready: "dm-section-empty" });
+      await empty.page.getByTestId("dm-section-empty").waitFor({ timeout: 5_000 });
+      await empty.page.getByTestId("sidebar-section-dms-header").hover();
+      await empty.page.getByTestId("new-dm").waitFor({ timeout: 5_000 });
+      await empty.page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}-sidebar-empty-dm-${scheme}.png`), clip: side });
+      await empty.page.getByTestId("new-dm").click();
+      await empty.page.getByTestId("new-dm-dialog").waitFor({ timeout: 5_000 });
+      await empty.page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}-new-dm-modal-long-name-${scheme}.png`) });
+      await empty.page.keyboard.press("Escape");
+      await empty.page.getByTestId("new-dm-dialog").waitFor({ state: "detached", timeout: 5_000 });
+      await empty.context.setOffline(true);
+      await empty.page.evaluate(() => window.dispatchEvent(new Event("offline")));
+      await empty.page.keyboard.press("Meta+Shift+K");
+      await empty.page.getByTestId("new-dm-dialog").waitFor({ timeout: 5_000 });
+      await empty.page.getByTestId("new-dm-offline").waitFor({ timeout: 5_000 });
+      await empty.page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}-new-dm-modal-offline-${scheme}.png`) });
+      await empty.context.close();
+      console.log("shots", scheme);
     }
   } finally {
     await browser.close();
