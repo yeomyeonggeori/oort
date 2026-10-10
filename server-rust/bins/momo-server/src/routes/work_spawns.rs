@@ -222,6 +222,15 @@ fn validated_spawn(
     })
 }
 
+/// One line per refused spawn: the stable code and status, never the prompt,
+/// title, folder id or any secret (#3660: a phone call was refused with a
+/// sentence that covers five codes and the server logged none of them).
+fn log_refusal(error: &ApiError) {
+    if let Some(code) = error.code {
+        tracing::info!(code, status = error.status.as_u16(), "work spawn refused");
+    }
+}
+
 /// `POST /v1/workspaces/{ws}/work-spawns` → 201, or 200 for a retry of an
 /// accepted spawn.
 pub async fn spawn(
@@ -231,7 +240,7 @@ pub async fn spawn(
     Json(request): Json<WorkSpawnRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let settings = state.device_keys.clone();
-    let task = validated_spawn(&principal, &settings, request)?;
+    let task = validated_spawn(&principal, &settings, request).inspect_err(log_refusal)?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let member_id = principal.member_id;
     let via_token_id = audit_via_token_id(&principal);
@@ -252,7 +261,8 @@ pub async fn spawn(
             })
         })
         .await,
-    )?;
+    )
+    .inspect_err(log_refusal)?;
     let status = if replayed {
         StatusCode::OK
     } else {

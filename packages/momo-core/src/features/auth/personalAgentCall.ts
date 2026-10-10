@@ -118,8 +118,22 @@ export interface PersonalAgentTarget {
 export interface CallDestination {
   hostId: string;
   folderId: string;
-  /** The harness key the host launches (`claude`, `codex`). */
+  /** The harness the agent runs (roster `personalAgent.harness`: `claude_code`,
+   * `codex`) or already a tool key (`claude`). `callPersonalAgent` signs
+   * {@link toolKeyForHarness} of it. */
   tool: string;
+}
+
+/**
+ * The work tool key the server allowlists for a roster harness name (#3660).
+ * The roster says `claude_code` (`agent.subscription_harness`); the
+ * `work_tool_profile` key is `claude`. Signing the harness name was refused as
+ * `spawn_tool_invalid` on every call. The server accepts only the lower-case
+ * key, so anything unknown passes through unchanged.
+ */
+export function toolKeyForHarness(harness: string): string {
+  const key = harness.trim().toLowerCase();
+  return key === "claude_code" ? "claude" : key;
 }
 
 /**
@@ -217,6 +231,7 @@ export async function callPersonalAgent(
     };
   }
 
+  const tool = toolKeyForHarness(input.destination.tool);
   let prompt: string;
   let label: string;
   try {
@@ -243,7 +258,7 @@ export async function callPersonalAgent(
         kind: "spawn_task",
         agentMemberId: input.agent.memberId,
         folderId: input.destination.folderId,
-        tool: input.destination.tool,
+        tool,
         channelId: input.channelId,
         threadRootId: message.rootId ?? null,
         originMessageId: message.id,
@@ -256,7 +271,7 @@ export async function callPersonalAgent(
   }
 
   const body: WorkSpawnBody = {
-    tool: input.destination.tool,
+    tool,
     label,
     prompt,
     channelId: input.channelId,
