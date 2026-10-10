@@ -19,6 +19,7 @@ import {
   callFailureLine,
   callPersonalAgent,
   labelFromPrompt,
+  toolKeyForHarness,
   promptFromMessage,
   resendPersonalAgentCall,
   type CallPersonalAgentInput,
@@ -111,6 +112,21 @@ describe("calling a personal agent (#3592)", () => {
     const body = api.postWorkSpawn.mock.calls[0]![1];
     expect(body).toMatchObject({ tool: "claude", channelId: CH, originMessageId: MSG, targetHostId: HOST });
     expect(body.threadRootId).toBeUndefined();
+  });
+
+  it("signs the tool KEY the host allowlists, not the roster's harness name (#3660)", async () => {
+    // The roster says `claude_code` (agent.subscription_harness); the server's
+    // work_tool_profile key is `claude`. Sending the harness name was refused
+    // with spawn_tool_invalid on every phone call.
+    const { signer, signed } = recordingSigner();
+    await callPersonalAgent(
+      input({ signer, destination: { hostId: HOST, folderId: "fld_0123456789abcdef0123", tool: "claude_code" } })
+    );
+    expect((signed[0]!.content as { tool: string }).tool).toBe("claude");
+    expect(api.postWorkSpawn.mock.calls[0]![1].tool).toBe("claude");
+    expect(toolKeyForHarness("claude_code")).toBe("claude");
+    expect(toolKeyForHarness("codex")).toBe("codex");
+    expect(toolKeyForHarness("opencode")).toBe("opencode");
   });
 
   it("in a thread it signs the thread root the server returned", async () => {
