@@ -79,14 +79,14 @@ export interface Feed {
 
 // ---- shared resolution -------------------------------------------------
 
-interface FeedContext {
+export interface FeedContext {
   directory: Directory;
   labelFor: (channelId: string) => string;
   actorFor: (memberId: string) => ActorNames;
   isLoading: boolean;
 }
 
-function useFeedContext(): FeedContext {
+export function useFeedContext(): FeedContext {
   const { session, workspaceId } = useSession();
   const channelsQuery = useChannels(workspaceId);
   const directoryQuery = useDirectory(workspaceId);
@@ -242,11 +242,13 @@ async function fetchMentionsAfter(
   return found;
 }
 
-export function useMentions(enabled: boolean): Feed {
+/**
+ * 서버가 멘션이라고 센 채널의 메시지 행들. `useMentions`(피드)와 새 인박스 목록이
+ * 같은 쿼리 키를 공유하므로 두 번 가져오지 않는다.
+ */
+export function useMentionMessages(enabled: boolean) {
   const { session, workspaceId } = useSession();
-  const context = useFeedContext();
   const readStates = useReadStates(workspaceId);
-  const client = useQueryClient();
   const selfId = session.member.id;
 
   // P7: the SERVER says which channels hold unread mentions. The client only
@@ -288,6 +290,14 @@ export function useMentions(enabled: boolean): Feed {
       ),
     }),
   });
+  return { results, readStates };
+}
+
+export function useMentions(enabled: boolean): Feed {
+  const { workspaceId } = useSession();
+  const context = useFeedContext();
+  const client = useQueryClient();
+  const { results, readStates } = useMentionMessages(enabled);
 
   const items = useMemo(() => {
     const nowMs = Date.now();

@@ -57,10 +57,21 @@ const LOGIN_BODY = {
   member: SELF,
 };
 
+// 자정 직후(00:00~00:10)에는 `Date.now() - 10분` 이 어제가 되어 「오늘 끝난」 줄이 사라진다 — 제품의
+// `startOfLocalDay` 는 옳고 시험의 시계가 흔들렸다. 시계는 흐르게 두되 오늘의 로컬 정오로 옮긴다.
+// 모듈 로드 때 만드는 픽스처도 같은 시계를 써야 한다 — 실제 시각이 정오 뒤(UTC CI)면 픽스처가 미래가 된다.
+const realNow = Date.now.bind(Date);
+const NOON_SHIFT = (() => {
+  const noon = new Date(realNow());
+  noon.setHours(12, 0, 0, 0);
+  return noon.getTime() - realNow();
+})();
+const testNow = (): number => realNow() + NOON_SHIFT;
+
 function row(
   over: Partial<SharedWorkSession> & {sessionId: string},
 ): SharedWorkSession {
-  const now = Date.now();
+  const now = testNow();
   return {
     origin: 'local_pty',
     label: '작업',
@@ -103,7 +114,7 @@ const ROWS: SharedWorkSession[] = [
     diff: {added: 128, deleted: 40, files: 9, ahead: 2, behind: 0, uncommitted: 1},
     prUrl: 'https://github.com/yeomyeonggeori/oort/pull/2851',
   }),
-  row({sessionId: 'S-DONE', label: '오늘 끝난 세션', state: 'done', status: 'ended', endedAtMs: Date.now() - 600_000}),
+  row({sessionId: 'S-DONE', label: '오늘 끝난 세션', state: 'done', status: 'ended', endedAtMs: testNow() - 600_000}),
 ];
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -237,6 +248,7 @@ const mmkvStore = (
 ).__store;
 
 beforeEach(() => {
+  jest.spyOn(Date, 'now').mockImplementation(testNow);
   mmkvStore.clear();
   __resetSessionStore();
   __resetServerBaseCache();
@@ -245,6 +257,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  jest.restoreAllMocks();
   cleanup();
   queryClient?.clear();
   queryClient = null;

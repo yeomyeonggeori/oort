@@ -358,3 +358,10 @@ describe("채널 줄이 질의와 범위를 함께 인계한다", () => {
     expect(params.get("channel")).toBeNull();
   });
 });
+
+// #3662: 새 DM 모달의 문은 셸(NewDmProvider)이 내리는 동사다. 이 시험은 셸 없이 그리므로
+// 문만 막아 둔다(모달 자체는 NewDmDialog.test가 잰다).
+vi.mock("@/features/directory/useNewDm", () => ({
+  useOpenNewDm: () => () => undefined,
+  useNewDmOpen: () => false,
+}));
