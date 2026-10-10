@@ -1,3 +1,4 @@
+import {toolKeyForHarness} from '@momo/core/features/auth/personalAgentCall';
 import {uuidEq, type RosterMember} from '@momo/core/lib/api';
 
 import {HARNESS_LABEL, type HarnessKey, type MacState} from '../work/ask/model';
@@ -44,8 +45,10 @@ export interface PersonalAgentRow {
 }
 
 function knownHarness(harness: string): HarnessKey | null {
-  return Object.prototype.hasOwnProperty.call(HARNESS_LABEL, harness)
-    ? (harness as HarnessKey)
+  // 로스터는 `claude_code`, 도구 키는 `claude`다(#3660).
+  const key = toolKeyForHarness(harness);
+  return Object.prototype.hasOwnProperty.call(HARNESS_LABEL, key)
+    ? (key as HarnessKey)
     : null;
 }
 
