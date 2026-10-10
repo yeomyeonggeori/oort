@@ -1,0 +1,42 @@
+appId: app.momo.ios
+name: 98-personal-agent-call-capture
+---
+# 98-personal-agent-call-capture — 컴포저에서 `@<내 개인 에이전트>` 호출 (#3638).
+#
+# 표면 `-momoMeasure SHELL-CALL-KEY`(또는 `SHELL-CALL-FLAG-OFF`)는 진짜 셸·컴포저·포트를 세우고
+# 서버만 하네스의 가짜 `fetch`다. 이 흐름은 #general을 열어 내 별칭을 멘션하는 글을 보낸다.
+#   - KEY: 시뮬레이터엔 Secure Enclave가 없어 「이 폰의 서명 키가 필요해요」가 실제로 뜬다.
+#   - FLAG-OFF: 서버가 서명 요구를 꺼 둔 모습 — Face ID 전에 「이 서버는 아직…」이 뜬다.
+#
+#   xcrun simctl launch booted app.momo.ios --args \
+#     -momoMeasure SHELL-CALL-KEY -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro test clients/mobile/maestro/98-personal-agent-call-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: "sidebar-row-channel:ch-general"
+    timeout: 60000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- tapOn:
+    id: "sidebar-row-channel:ch-general"
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+- runFlow:
+    when:
+      visible:
+        id: "long-press-hint"
+    commands:
+      - tapOn:
+          id: "long-press-hint-dismiss"
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- tapOn:
+    id: "composer-input"
+- inputText: "@my-claude 로그인 버그 봐줘"
+- tapOn:
+    id: "composer-send"
+- extendedWaitUntil:
+    visible:
+      id: "personal-call-notice-error"
+    timeout: 30000
+- takeScreenshot: personal-agent-call-notice

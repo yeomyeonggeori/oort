@@ -112,6 +112,7 @@ import {
 } from '../src/shell/DelegateWorkSheet';
 import {AiSheet} from '../src/shell/AiSheet';
 import {AskMacSheet, type AskMacPreview} from '../src/shell/AskMacSheet';
+import {bootSpawnPort} from '../src/boot/spawnPort';
 import {workRunFailure} from '@momo/core/features/agents/workRunRequest';
 import {INITIAL_NAV, navReducer} from '../src/nav/state';
 import {ProfilePage, ProfileSheet} from '../src/features/profile/ProfileSheet';
@@ -4133,6 +4134,29 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           />
         </View>
       );
+    // #3638: 부팅이 꽂는 **진짜** 포트(`bootSpawnPort`)로 게이트가 열린 AI 시트. `gateOpen`을
+    // 강제하지 않는다 — 내 도구·개인 에이전트 구획이 포트의 `wired`만으로 선다.
+    case 'shell-ai-wired':
+      return (
+        <View style={styles.fill}>
+          <Shell />
+          <AiSheet
+            onClose={() => {}}
+            onDelegate={() => {}}
+            onOpenAgentList={() => {}}
+            onAskMac={() => {}}
+          />
+        </View>
+      );
+    // #3638: 폰 컴포저의 `@<내 개인 에이전트>` 호출. 진짜 셸·진짜 컴포저·진짜 포트이고, 서버만
+    // 하네스의 가짜 `fetch`다(`seedCall`). Maestro가 채널을 열고 글을 쳐서 보낸다.
+    case 'shell-call-key':
+    case 'shell-call-flag-off':
+      return (
+        <RealtimeContext.Provider value={CONNECTED_RAIL}>
+          <Shell />
+        </RealtimeContext.Provider>
+      );
     case 'shell-profile-sheet':
       return (
         <View style={styles.fill}>
@@ -5159,6 +5183,72 @@ function seedAi(surface: string): void {
   ]);
 }
 
+// #3638: 컴포저 호출 판의 서버. 호출 흐름(대상 판정 → 맥 읽기 → 서명 키 확인 → 메시지 전송)은
+// 진짜이고, 서버만 이 가짜다. 시뮬레이터에는 Secure Enclave가 없어 키 저장소가 `unsupported`
+// 로 답하므로 「서명 키가 필요해요」가 **실제로** 뜬다. `flag-off` 판은 서버가 서명 요구를 꺼
+// 둔 모습이라 Face ID 전에 「이 서버는 아직…」이 뜬다.
+function seedCall(surface: string): void {
+  seedAi('shell-call-on');
+  bootSpawnPort();
+  const hosts = [
+    {
+      id: 'measure-mac',
+      workspaceId: ADE_WS,
+      scope: 'member',
+      ownerMemberId: SELF,
+      type: 'workd',
+      displayName: '성재의 MacBook Pro',
+      capabilities: {},
+      createdAtMs: 0,
+      lastSeenAtMs: Date.now(),
+      online: true,
+      folders: [{id: 'fld-question', displayName: '질문용 폴더', kind: 'question'}],
+      defaultFolderId: 'fld-question',
+    },
+  ];
+  const json = (body: unknown): Response =>
+    ({
+      status: 200,
+      ok: true,
+      text: async () => JSON.stringify(body),
+    }) as unknown as Response;
+  globalThis.fetch = (async (
+    input: unknown,
+    init?: {method?: string; body?: string},
+  ) => {
+    const url = String(input);
+    if (url.includes('/work-hosts')) return json({workHosts: hosts});
+    if (url.includes('/work-sessions')) return json({workSessions: []});
+    if (url.includes('/signing-context')) {
+      return json({
+        instanceId: 'measure-instance',
+        serverTimeMs: Date.now(),
+        maxLifetimeMs: 600_000,
+        maxClockSkewMs: 300_000,
+        humanControlSignatureRequired: surface !== 'shell-call-flag-off',
+        hostRegisterSignatureRequired: false,
+      });
+    }
+    if (url.endsWith('/messages') && init?.method === 'POST') {
+      const sent = JSON.parse(init.body ?? '{}') as {body?: string};
+      return json({
+        id: '00000000-0000-7000-8000-00000000c001',
+        workspaceId: ADE_WS,
+        channelId: 'ch-general',
+        seq: 1,
+        hlcTs: 1,
+        hlcCount: 0,
+        authorMemberId: SELF,
+        type: 'text',
+        body: sent.body ?? '',
+        createdAtMs: Date.now(),
+      });
+    }
+    if (url.includes('/messages')) return json({messages: []});
+    return new Promise<Response>(() => {});
+  }) as typeof fetch;
+}
+
 function seedDelegate(surface: string): void {
   harnessClient.setQueryData(['roster', ADE_WS], [
     ...SHELL_ROSTER.filter(member => member.kind !== 'agent'),
@@ -5764,4 +5854,6 @@ if (
   if (LAUNCHED.name.startsWith('shell-delegate-')) seedDelegate(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-ask-')) seedAsk(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-ai-')) seedAi(LAUNCHED.name);
+  if (LAUNCHED.name === 'shell-ai-wired') bootSpawnPort();
+  if (LAUNCHED.name.startsWith('shell-call-')) seedCall(LAUNCHED.name);
 }
