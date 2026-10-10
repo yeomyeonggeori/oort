@@ -188,6 +188,13 @@ export interface CallPersonalAgentInput {
   destination: CallDestination;
   /** `null` where the client holds no signing key (an ordinary browser). */
   signer: HumanControlSigner | null;
+  /**
+   * How the message is sent, when the client has its own send path (the web
+   * timeline's optimistic echo, attachments, quote). It must return the
+   * committed message and throw when it could not be sent. Absent: the plain
+   * REST send below.
+   */
+  deliver?: () => Promise<Message>;
 }
 
 /**
@@ -197,7 +204,9 @@ export interface CallPersonalAgentInput {
 export async function callPersonalAgent(
   input: CallPersonalAgentInput
 ): Promise<PersonalAgentCallResult> {
-  const message = await (input.threadRootId !== undefined
+  const message = await (input.deliver !== undefined
+    ? input.deliver()
+    : input.threadRootId !== undefined
     ? sendThreadReply(input.workspaceId, input.channelId, input.threadRootId, input.clientMsgId, input.text)
     : sendMessage(input.workspaceId, input.channelId, input.clientMsgId, input.text));
 

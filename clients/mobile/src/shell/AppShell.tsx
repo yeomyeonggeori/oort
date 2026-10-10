@@ -213,6 +213,10 @@ export function Shell({
       dispatch({type: 'openWorkSession', workSession: {sessionId}}),
     [],
   );
+  const onOpenWorkList = useCallback(
+    () => dispatch({type: 'openWorkList'}),
+    [],
+  );
   const onOpenHostedList = useCallback(
     () => dispatch({type: 'openHostedList'}),
     [],
@@ -482,6 +486,8 @@ export function Shell({
             onOpenConversation={onOpenConversation}
             onOpenAgent={onOpenAgent}
             onDelegateWork={onDelegateWork}
+            onOpenWorkSession={workConsole ? onOpenWorkSession : undefined}
+            onOpenWorkList={workConsole ? onOpenWorkList : undefined}
           />
         </EdgeSwipeBack>
       ) : null}
