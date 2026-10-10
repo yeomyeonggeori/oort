@@ -42,6 +42,10 @@ import {
   type MessageArrivalProvenance,
 } from "@momo/core/features/timeline/arrival";
 import { createReplayGate } from "@momo/core/lib/realtimeEvents";
+import {
+  runPersonalAgentCall,
+  type PersonalCallSpec,
+} from "@/features/work/personalAgentCalling";
 import { prefersReducedMotion } from "@/app/sidebarPane";
 import {
   applyReactionDelta,
@@ -99,6 +103,11 @@ export interface ResumeInfo {
 export interface TimelineSendOptions
   extends Omit<SendMessageOptions, "attachmentIds"> {
   attachments?: MessageAttachment[];
+  /**
+   * 소유자가 자기 개인 에이전트를 불렀다(#3653). 같은 낙관적 echo로 메시지를 보낸 뒤,
+   * 커밋된 메시지 id를 서명해 내 맥을 부른다. 재시도(`resend`)도 같은 갈래로 들어온다.
+   */
+  personalCall?: PersonalCallSpec;
 }
 
 export interface UseTimelineResult {
@@ -397,10 +406,15 @@ export function useTimeline(
     [workspaceId, applyUnfurls]
   );
 
+  // 개인 에이전트를 부른 전송의 계획. 코어 `PendingMessage`는 폰과 나눠 쓰므로 건드리지
+  // 않고 이 훅 안에 clientMsgId로 둔다. 메시지가 확정되면(= 호출까지 끝나면) 지운다.
+  const callSpecsRef = useRef(new Map<string, PersonalCallSpec>());
+
   const post = useCallback(
     async (row: PendingMessage) => {
       try {
-        const confirmed = await sendMessage(
+        const deliver = () =>
+          sendMessage(
           workspaceId,
           row.channelId,
           row.clientMsgId,
@@ -420,11 +434,32 @@ export function useTimeline(
               : { attachmentIds: row.attachments.map((a) => a.id) }),
           }
         );
+        const spec = callSpecsRef.current.get(row.clientMsgId);
+        let confirmed: Message;
+        let callResult: Awaited<ReturnType<typeof runPersonalAgentCall>> | null = null;
+        if (spec) {
+          callResult = await runPersonalAgentCall({
+            workspaceId,
+            channelId: row.channelId,
+            clientMsgId: row.clientMsgId,
+            text: row.body,
+            spec,
+            deliver,
+          });
+          confirmed = callResult.message;
+        } else {
+          confirmed = await deliver();
+        }
         // The response IS the committed server echo (seq-authoritative), so
         // merging it is not optimistic rendering: it is the same reconcile the
         // realtime frame gets, and whichever arrives second dedupes by seq.
         if (channelRef.current === row.channelId) applyBatch([confirmed]);
         updatePending((list) => removePending(list, row.clientMsgId));
+        if (spec && callResult) {
+          // 메시지는 확정됐다. 이후의 재시도는 메시지가 아니라 호출 쪽의 것이다.
+          callSpecsRef.current.delete(row.clientMsgId);
+          spec.onResult(callResult);
+        }
       } catch {
         // The row stays where it is and states 전송 실패 with a retry (R-1 §3),
         // which is the same inline failure path a server-stored `failed`
@@ -462,6 +497,9 @@ export function useTimeline(
         sinceSeq: newestSeqRef.current,
         status: "sending",
       };
+      if (options?.personalCall) {
+        callSpecsRef.current.set(row.clientMsgId, options.personalCall);
+      }
       updatePending((list) => addPending(list, row));
       await post(row);
     },
