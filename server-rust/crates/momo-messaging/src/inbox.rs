@@ -46,6 +46,9 @@ pub const INBOX_DEFAULT_LIMIT: i64 = 30;
 pub const INBOX_MAX_LIMIT: i64 = 100;
 /// Read items are kept this long after `read_at` (ADR-0199 D4, owner 2026-10-11).
 pub const INBOX_READ_RETENTION_DAYS: i32 = 30;
+/// `unreadCount` is capped here (a client shows "1000+"): the count runs on every
+/// page, so it must not grow with an unbounded unread backlog.
+pub const INBOX_UNREAD_COUNT_CAP: i64 = 1000;
 /// Longest preview, in characters.
 pub const INBOX_PREVIEW_CHARS: usize = 140;
 
@@ -129,8 +132,13 @@ impl InboxCursor {
         let bytes = URL_SAFE_NO_PAD.decode(token.as_bytes()).ok()?;
         let text = String::from_utf8(bytes).ok()?;
         let (micros, id) = text.split_once(':')?;
+        let created_at = DateTime::from_timestamp_micros(micros.parse().ok()?)?;
+        // inside PG timestamptz and sane: anything else is a 400, not a bind error
+        if !(0..=4_102_444_800).contains(&created_at.timestamp()) {
+            return None;
+        }
         Some(InboxCursor {
-            created_at: DateTime::from_timestamp_micros(micros.parse().ok()?)?,
+            created_at,
             id: Uuid::parse_str(id).ok()?,
         })
     }
@@ -337,14 +345,17 @@ pub async fn inbox_unread_count_in_tx(
     member_id: Uuid,
     show_muted: bool,
 ) -> Result<i64, DbError> {
-    let sql = format!("SELECT count(*) {VISIBLE_FROM_WHERE} AND i.read_at IS NULL");
+    let sql = format!(
+        "SELECT count(*) FROM (SELECT 1 {VISIBLE_FROM_WHERE} AND i.read_at IS NULL LIMIT {cap}) capped",
+        cap = INBOX_UNREAD_COUNT_CAP + 1
+    );
     let count: i64 = sqlx::query_scalar(&sql)
         .bind(workspace_id)
         .bind(member_id)
         .bind(show_muted)
         .fetch_one(&mut *conn)
         .await?;
-    Ok(count)
+    Ok(count.min(INBOX_UNREAD_COUNT_CAP))
 }
 
 /// What a single-item read did.
@@ -374,7 +385,7 @@ pub async fn mark_inbox_item_read_in_tx(
             WHERE id = $1 AND workspace_id = $2 AND member_id = $3 \
               FOR UPDATE) \
          UPDATE inbox_item i \
-            SET read_at = COALESCE(i.read_at, now()) \
+            SET read_at = COALESCE(i.read_at, GREATEST(now(), i.created_at)) \
            FROM cur \
           WHERE i.id = cur.id \
          RETURNING i.read_at AS read_at, (cur.was IS NULL) AS changed",
@@ -434,7 +445,7 @@ pub async fn mark_inbox_read_all_in_tx(
     show_muted: bool,
 ) -> Result<InboxReadAllOutcome, DbError> {
     let sql = format!(
-        "UPDATE inbox_item t SET read_at = now() \
+        "UPDATE inbox_item t SET read_at = GREATEST(now(), t.created_at) \
           WHERE t.id IN (SELECT i.id {VISIBLE_FROM_WHERE} \
                            AND i.read_at IS NULL AND {filter_sql}) \
             AND t.workspace_id = $1 AND t.member_id = $2 AND t.read_at IS NULL",

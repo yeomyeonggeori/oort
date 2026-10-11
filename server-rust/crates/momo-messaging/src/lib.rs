@@ -120,7 +120,7 @@ pub use inbox::{
     mark_inbox_read_all_in_tx, workspaces_with_expired_inbox_items, InboxChannel, InboxCursor,
     InboxFilter, InboxItemReadOutcome, InboxItemView, InboxMessage, InboxPage, InboxQuoted,
     InboxReadAllOutcome, INBOX_DEFAULT_LIMIT, INBOX_MAX_LIMIT, INBOX_PREVIEW_CHARS,
-    INBOX_READ_RETENTION_DAYS,
+    INBOX_READ_RETENTION_DAYS, INBOX_UNREAD_COUNT_CAP,
 };
 pub use interaction::{
     build_message_deleted_payload, build_message_edited_payload, build_pin_payload,

@@ -274,6 +274,11 @@ pub async fn read_item(
     let outcome: DbRejectable<InboxItemReadDto> =
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
+                if !is_active_human_member_in_tx(conn, member_id).await? {
+                    return Ok(Err(ApiError::forbidden(
+                        "not an active human workspace member",
+                    )));
+                }
                 let Some(read) =
                     mark_inbox_item_read_in_tx(conn, workspace_id, member_id, item_id).await?
                 else {

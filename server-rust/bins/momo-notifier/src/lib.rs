@@ -765,7 +765,15 @@ impl Notifier {
                                         shares.config.claim_batch_size,
                                     )
                                     .await;
-                                    shared.map(|_| ()).and(inbox.map(|_| ()))
+                                    match (shared, inbox) {
+                                        (Err(error), Err(inbox_error)) => {
+                                            tracing::error!(error = %inbox_error, "inbox retention sweep failed");
+                                            Err(error)
+                                        }
+                                        (Err(error), Ok(_)) => Err(error),
+                                        (Ok(_), Err(error)) => Err(error),
+                                        (Ok(_), Ok(_)) => Ok(()),
+                                    }
                                 },
                             )
                             .await;
