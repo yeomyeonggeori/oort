@@ -6934,3 +6934,177 @@ async fn a_paused_agent_treats_an_expired_lease_like_a_live_one_3530() {
     .0;
     assert_eq!(live, expired, "pause must not be a lease-expiry side door");
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 2026-10-11 S0 (#3705) — the pending ceiling (V1-e)
+// ---------------------------------------------------------------------------
+
+/// Mention, claim and propose once, returning the HTTP status and body instead
+/// of asserting success — the shape the ceiling test needs for its 4th call.
+async fn try_propose_invite_3705(
+    client: &reqwest::Client,
+    base: &str,
+    su: &PgPool,
+    fixture: &Fixture,
+) -> (u16, Value) {
+    let handle_name = hosted_handle(su, fixture.hosted_agent).await;
+    let trigger: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{handle_name} 초대 링크 또 만들어줘")
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+    let (status, claimed) = call(
+        client,
+        base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("a lease handle")
+        .to_string();
+    call(
+        client,
+        base,
+        &fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({"handle": handle, "actionId": "invite.create", "args": {"role": "member"}}),
+    )
+    .await
+}
+
+async fn pending_workspace_actions_3705(pool: &PgPool, fixture: &Fixture) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM approval WHERE workspace_id=$1 AND requested_by=$2 \
+           AND action_type='workspace_action' AND status='pending'",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .fetch_one(pool)
+    .await
+    .expect("count pending workspace actions")
+}
+
+/// **ADR-0186 증보 V1-e — an agent may have three pending proposals, no more.**
+///
+/// Sequential runs, because a run parks on each proposal: the 4th proposal is
+/// `Conflict` with no card, no approval row and no parked run; deciding one of
+/// the three frees the slot (the ceiling counts `pending`, not history).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_fourth_pending_workspace_action_is_refused_and_a_decision_frees_a_slot() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    let mut approvals = Vec::new();
+    for _ in 0..momo_agent::MAX_PENDING_WORKSPACE_ACTIONS {
+        let (status, proposed) = try_propose_invite_3705(&client, &base, &su, &fixture).await;
+        assert_eq!(status, 200, "{proposed}");
+        approvals.push(
+            Uuid::parse_str(structured(&proposed)["approvalId"].as_str().expect("id"))
+                .expect("uuid"),
+        );
+    }
+    assert_eq!(pending_workspace_actions_3705(&su, &fixture).await, 3);
+
+    let cards_before = channel_message_count(&su, fixture.workspace, fixture.channel).await;
+    let (status, refused) = try_propose_invite_3705(&client, &base, &su, &fixture).await;
+    assert_eq!(
+        status, 409,
+        "the 4th pending proposal is a conflict: {refused}"
+    );
+    assert_eq!(
+        pending_workspace_actions_3705(&su, &fixture).await,
+        3,
+        "no 4th approval row"
+    );
+    // The 4th mention posted one human message; no card or approval followed.
+    assert_eq!(
+        channel_message_count(&su, fixture.workspace, fixture.channel).await,
+        cards_before + 1,
+        "the refused proposal wrote no card"
+    );
+    let parked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2 \
+           AND status::text='awaiting_approval'",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(parked, 3, "the refused run was not parked");
+
+    // Rejecting one frees a slot: the ceiling is about what is waiting.
+    assert_eq!(
+        decide(&client, &base, &fixture, approvals[0], false).await,
+        200
+    );
+    assert_eq!(pending_workspace_actions_3705(&su, &fixture).await, 2);
+    let (status, accepted) = try_propose_invite_3705(&client, &base, &su, &fixture).await;
+    assert_eq!(status, 200, "{accepted}");
+    assert_eq!(pending_workspace_actions_3705(&su, &fixture).await, 3);
+}
+
+/// **The ceiling's lock is real.** Two proposals of one agent must not both read
+/// the count before either writes: the second `lock_agent_and_count…` blocks
+/// until the first transaction ends. Without the `FOR NO KEY UPDATE` the second
+/// call returns immediately — the exact interleaving that lets four proposals
+/// through a ceiling of three.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_pending_count_serialises_proposals_of_one_agent() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su).await;
+
+    let mut first = su.begin().await.expect("first transaction");
+    let seen = momo_agent::lock_agent_and_count_pending_workspace_actions_in_tx(
+        &mut first,
+        fixture.workspace,
+        fixture.hosted_agent,
+    )
+    .await
+    .expect("first count");
+    assert_eq!(seen, 0);
+
+    let pool = su.clone();
+    let (workspace, agent) = (fixture.workspace, fixture.hosted_agent);
+    let mut second = tokio::spawn(async move {
+        let mut tx = pool.begin().await.expect("second transaction");
+        let seen = momo_agent::lock_agent_and_count_pending_workspace_actions_in_tx(
+            &mut tx, workspace, agent,
+        )
+        .await
+        .expect("second count");
+        tx.commit().await.expect("second commit");
+        seen
+    });
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(600), &mut second)
+            .await
+            .is_err(),
+        "the second proposal read the count while the first still held the agent"
+    );
+    first.commit().await.expect("first commit");
+    assert_eq!(second.await.expect("second task"), 0);
+}

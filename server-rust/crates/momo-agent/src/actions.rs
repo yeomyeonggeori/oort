@@ -85,13 +85,25 @@ impl Risk {
 /// card can say 「관리자가 승인해야 합니다」 before anyone taps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequiredRole {
+    /// A workspace owner/admin (`routes::invites::require_admin`).
     Admin,
+    /// The **target agent's** owner, or a workspace admin — the same judgement
+    /// `PUT …/agents/{agent}/profile` applies (`require_profile_editor_in_tx`).
+    /// Unlike every other role this one is judged against a *subject* the
+    /// decision route resolves from the proposal (ADR-0186 증보 V1-c / V4-M), so
+    /// it cannot be checked before the arguments are re-proved.
+    AgentEditor,
+    /// `routes::shared::require_workspace_operator`'s set: a workspace
+    /// owner/admin, or a principal carrying the platform operator scope.
+    WorkspaceOperator,
 }
 
 impl RequiredRole {
     pub fn as_wire(self) -> &'static str {
         match self {
             RequiredRole::Admin => "admin",
+            RequiredRole::AgentEditor => "agent_editor",
+            RequiredRole::WorkspaceOperator => "workspace_operator",
         }
     }
 
@@ -99,10 +111,25 @@ impl RequiredRole {
     /// wire value and the Korean noun cannot drift into different roles.
     pub fn korean(self) -> &'static str {
         match self {
-            RequiredRole::Admin => "관리자",
+            RequiredRole::Admin | RequiredRole::WorkspaceOperator => "관리자",
+            RequiredRole::AgentEditor => "대상 에이전트의 소유자 또는 관리자",
         }
     }
+
+    /// Every variant, so a test can measure the wire vocabulary against the
+    /// OpenAPI enum without a hand-copied list that could omit a new role.
+    pub const ALL: [RequiredRole; 3] = [
+        RequiredRole::Admin,
+        RequiredRole::AgentEditor,
+        RequiredRole::WorkspaceOperator,
+    ];
 }
+
+/// How many `workspace_action` approvals one agent may have `pending` at once
+/// (ADR-0186 증보 V1-e). A run parks on each proposal, so ordinary use never
+/// reaches it; it exists so a misbehaving agent cannot stack cards by re-calling
+/// `oort_action_propose` from several runs.
+pub const MAX_PENDING_WORKSPACE_ACTIONS: i64 = 3;
 
 /// One action this server can be asked to take.
 #[derive(Debug, Clone, Copy)]
@@ -529,7 +556,25 @@ pub struct ActionResult<'a> {
     /// decider once. It is a flag, never the value — the card is durable and the
     /// value is not.
     pub secret_shown_once: bool,
+    /// Where the durable half of this action can be found later, or `None` when
+    /// no settings section shows it. Only `invite.create` has one today
+    /// ([`ACTION_RESULT_NEXT_HREF`]); a wrong link on another action's card would
+    /// be worse than none (see the 정오표 on that constant).
+    pub next: Option<ActionResultNext>,
 }
+
+/// 부록 B `next` — a fixed in-app path and its label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActionResultNext {
+    pub label: &'static str,
+    pub href: &'static str,
+}
+
+/// The invite card's `next`: the members settings section.
+pub const INVITE_RESULT_NEXT: ActionResultNext = ActionResultNext {
+    label: ACTION_RESULT_NEXT_LABEL,
+    href: ACTION_RESULT_NEXT_HREF,
+};
 
 /// `message.props` for the `tool_result` row of an executed workspace action.
 ///
@@ -541,19 +586,23 @@ pub struct ActionResult<'a> {
 /// `secret_shown_once` is a boolean and `next.href` is a fixed in-app path
 /// ([`ACTION_RESULT_NEXT_HREF`]).
 pub fn action_result_props(result: &ActionResult<'_>) -> Value {
-    json!({
-        ACTION_RESULT_PROPS_KEY: {
-            "v": ACTION_RESULT_VERSION,
-            "action_id": result.action_id,
-            "status": result.status,
-            "approval_id": result.approval_id.to_string(),
-            "decided_by": result.decided_by.to_string(),
-            "ref": {"type": result.ref_type, "id": result.ref_id.to_string()},
-            "rows": result.rows,
-            "secret_shown_once": result.secret_shown_once,
-            "next": {"label": ACTION_RESULT_NEXT_LABEL, "href": ACTION_RESULT_NEXT_HREF},
-        }
-    })
+    let mut card = json!({
+        "v": ACTION_RESULT_VERSION,
+        "action_id": result.action_id,
+        "status": result.status,
+        "approval_id": result.approval_id.to_string(),
+        "decided_by": result.decided_by.to_string(),
+        "ref": {"type": result.ref_type, "id": result.ref_id.to_string()},
+        "rows": result.rows,
+        "secret_shown_once": result.secret_shown_once,
+    });
+    if let (Some(next), Some(object)) = (result.next, card.as_object_mut()) {
+        object.insert(
+            "next".into(),
+            json!({"label": next.label, "href": next.href}),
+        );
+    }
+    json!({ ACTION_RESULT_PROPS_KEY: card })
 }
 
 /// The `ref` object of 부록 B and 부록 C — one shape, two carriers.
@@ -815,6 +864,7 @@ mod tests {
             ref_id: Uuid::from_u128(13),
             rows: invite_result_rows("member", "2026-09-29"),
             secret_shown_once: true,
+            next: Some(INVITE_RESULT_NEXT),
         })
     }
 
@@ -984,12 +1034,50 @@ mod tests {
                 "{} publishes a role the gate does not read",
                 action.id
             );
-            // v1's whole vocabulary is one word. A second variant must reach
-            // the decision route's `match` (routes::approvals) before it
-            // reaches this registry — the match is exhaustive so that adding
-            // one here fails to compile there.
-            assert_eq!(action.required_role, RequiredRole::Admin, "{}", action.id);
-            assert_eq!(action.required_role.as_wire(), "admin");
+            // A role must reach the decision route's `match`
+            // (routes::approvals) before it reaches a registry entry — the
+            // match is exhaustive so adding a variant fails to compile there.
+            assert!(
+                RequiredRole::ALL.contains(&action.required_role),
+                "{}",
+                action.id
+            );
         }
+    }
+
+    /// The wire vocabulary and the Korean noun of every role: distinct wire
+    /// words (a duplicate would make two gates indistinguishable on the card),
+    /// snake_case, and a non-empty noun for the summary sentence.
+    #[test]
+    fn every_required_role_has_a_distinct_wire_word_and_a_noun() {
+        let mut wire: Vec<&str> = RequiredRole::ALL.iter().map(|r| r.as_wire()).collect();
+        assert_eq!(wire, vec!["admin", "agent_editor", "workspace_operator"]);
+        wire.sort_unstable();
+        wire.dedup();
+        assert_eq!(wire.len(), RequiredRole::ALL.len());
+        for role in RequiredRole::ALL {
+            assert!(!role.korean().trim().is_empty(), "{role:?}");
+        }
+        // The agent-scoped role must say whose owner, or a card would read as
+        // 「관리자 권한」 for an action the target's owner can approve.
+        assert!(RequiredRole::AgentEditor.korean().contains("소유자"));
+    }
+
+    /// A result with no `next` carries no `next` key at all (not a null): a
+    /// client reading `"next" in card` must not find a dead link.
+    #[test]
+    fn a_result_without_a_next_step_omits_the_key() {
+        let props = action_result_props(&ActionResult {
+            action_id: ACTION_INVITE_CREATE,
+            status: ACTION_RESULT_EXECUTED,
+            approval_id: Uuid::from_u128(1),
+            decided_by: Uuid::from_u128(2),
+            ref_type: REF_TYPE_INVITE,
+            ref_id: Uuid::from_u128(3),
+            rows: vec![],
+            secret_shown_once: false,
+            next: None,
+        });
+        assert!(props[ACTION_RESULT_PROPS_KEY].get("next").is_none());
     }
 }

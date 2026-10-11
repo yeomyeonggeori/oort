@@ -327,6 +327,47 @@ const WORKSPACE_ACTION_ROLES: [&str; 2] = ["member", "admin"];
 const WORKSPACE_ACTION_MAX_USES_CEILING: i64 = 100;
 const WORKSPACE_ACTION_EXPIRES_IN_DAYS_CEILING: i64 = 30;
 
+/// One `oneOf` branch of `oort_action_propose`'s `args`: the closed object
+/// action `action_id` accepts.
+///
+/// The branch's **`title` is the action id** — that is the only key a reader (the
+/// drift test, an LLM runtime listing the tool) has to match a branch to its
+/// action, because `args` is validated without sight of its sibling `actionId`.
+/// Every branch is closed (`additionalProperties: false`), so an object of one
+/// action's keys cannot satisfy another action's branch, and an action whose
+/// arguments are all optional is the only branch `{}` can satisfy.
+fn action_args_branch(action_id: &str, required: &[&str], properties: Value) -> Value {
+    let mut branch = json!({
+        "title": action_id,
+        "type": "object",
+        "additionalProperties": false,
+        "properties": properties,
+    });
+    if !required.is_empty() {
+        branch["required"] = json!(required);
+    }
+    branch
+}
+
+/// The per-action `args` branches, in registry order.
+///
+/// `invite.create` is the all-optional branch. The domain normaliser
+/// (`routes::actions::validated_action_args`, keyed on `actionId`) stays the
+/// authority — this schema is the first fence and the thing a runtime shows its
+/// model, and `the_propose_tool_accepts_exactly_what_the_catalog_advertises`
+/// measures each branch against the registry's own schema for that action.
+fn action_args_branches() -> Vec<Value> {
+    vec![action_args_branch(
+        "invite.create",
+        &[],
+        json!({
+            "role": nullable(json!({"type": "string", "enum": WORKSPACE_ACTION_ROLES})),
+            "maxUses": nullable(integer(1, WORKSPACE_ACTION_MAX_USES_CEILING)),
+            "expiresInDays": nullable(integer(1, WORKSPACE_ACTION_EXPIRES_IN_DAYS_CEILING))
+        }),
+    )]
+}
+
 /// `oort_action_propose` — ADR-0186 D2.
 ///
 /// `handle` rather than `leaseHandle`: ADR-0186 D2 names the field, and the E2E
@@ -334,10 +375,11 @@ const WORKSPACE_ACTION_EXPIRES_IN_DAYS_CEILING: i64 = 30;
 /// value is the very same sealed `oort_jobs_claim` handle the lease verbs take,
 /// and the adapter proves it with the same `bound_handle` check.
 ///
-/// `args` is required and **closed**: every action's own schema lives in the
-/// registry, and this one is the union those schemas are narrowed from. A v1
-/// with one action makes them identical; the closed shape is what keeps a typo
-/// (`maxUse`) from reaching the domain as an ignored key.
+/// `args` is required and a **`oneOf` of closed per-action objects** (증보 V2):
+/// the keys differ per action, so a single flat object would have to be the
+/// union of every action's keys and could no longer tell a model which keys go
+/// with which action. The closed branches are what keep a typo (`maxUse`) from
+/// reaching the domain as an ignored key.
 fn action_propose_schema() -> Value {
     json!({
         "type": "object",
@@ -348,12 +390,8 @@ fn action_propose_schema() -> Value {
             "actionId": {"type": "string", "enum": WORKSPACE_ACTION_IDS},
             "args": {
                 "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                    "role": nullable(json!({"type": "string", "enum": WORKSPACE_ACTION_ROLES})),
-                    "maxUses": nullable(integer(1, WORKSPACE_ACTION_MAX_USES_CEILING)),
-                    "expiresInDays": nullable(integer(1, WORKSPACE_ACTION_EXPIRES_IN_DAYS_CEILING))
-                }
+                "description": "The arguments of the action named by actionId; each oneOf branch is titled with its action id.",
+                "oneOf": action_args_branches()
             },
             "rationale": nullable(text(280))
         }
@@ -644,6 +682,21 @@ fn validate_against(schema: &Value, value: &Value) -> Result<(), ToolFailure> {
     match concrete.first().filter(|_| concrete.len() == 1).copied() {
         Some("object") => {
             let object = value.as_object().ok_or(invalid)?;
+            // `oneOf` of closed branches: the value must satisfy at least one.
+            // (The branches are mutually exclusive by construction — closed,
+            // with `required` keys that differ — so "at least one" and "exactly
+            // one" coincide on every value the catalog admits; the per-action
+            // domain normaliser, which sees `actionId`, is the final judge.)
+            if let Some(branches) = schema.get("oneOf").and_then(Value::as_array) {
+                return if branches
+                    .iter()
+                    .any(|branch| validate_against(branch, value).is_ok())
+                {
+                    Ok(())
+                } else {
+                    Err(invalid)
+                };
+            }
             let properties = schema
                 .get("properties")
                 .and_then(Value::as_object)
@@ -717,6 +770,25 @@ fn validate_against(schema: &Value, value: &Value) -> Result<(), ToolFailure> {
                 if number > max {
                     return Err(invalid);
                 }
+            }
+            Ok(())
+        }
+        Some("array") => {
+            let items = value.as_array().ok_or(invalid)?;
+            let length = items.len() as u64;
+            if let Some(min) = schema.get("minItems").and_then(Value::as_u64) {
+                if length < min {
+                    return Err(invalid);
+                }
+            }
+            if let Some(max) = schema.get("maxItems").and_then(Value::as_u64) {
+                if length > max {
+                    return Err(invalid);
+                }
+            }
+            let element = schema.get("items").ok_or(invalid)?;
+            for item in items {
+                validate_against(element, item)?;
             }
             Ok(())
         }
@@ -1008,6 +1080,15 @@ mod tests {
     #[test]
     fn the_nullability_contract_holds_for_every_tool() {
         fn walk(name: &str, schema: &Value) {
+            // A `oneOf` object has no properties of its own: its closed
+            // branches carry them, and each is held to the same contract.
+            if let Some(branches) = schema.get("oneOf").and_then(Value::as_array) {
+                for branch in branches {
+                    let title = branch["title"].as_str().expect("a branch is titled");
+                    walk(&format!("{name}[{title}]"), branch);
+                }
+                return;
+            }
             let required: Vec<&str> = schema
                 .get("required")
                 .and_then(Value::as_array)
@@ -1104,6 +1185,99 @@ mod tests {
                 complete,
                 &json!({"leaseHandle": "x", "status": Value::Null})
             ),
+            Err(ToolFailure::InvalidArguments)
+        );
+    }
+
+    /// **`args` is a `oneOf` of closed branches, and the validator enforces it.**
+    ///
+    /// Without the `oneOf` arm the validator reads an object that has no
+    /// `properties` as unvalidatable and refuses everything (fail-closed), which
+    /// would break every proposal; with a lax arm it would admit unknown keys.
+    /// This pins both halves against the real propose schema.
+    #[test]
+    fn a_one_of_args_object_admits_only_what_a_closed_branch_admits() {
+        let propose = TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == TOOL_ACTION_PROPOSE)
+            .expect("catalog");
+        let with = |args: Value| {
+            validate_arguments(
+                propose,
+                &json!({"handle": "h", "actionId": "invite.create", "args": args}),
+            )
+        };
+        for accepted in [
+            json!({}),
+            json!({"role": "member"}),
+            json!({"role": "admin", "maxUses": 100, "expiresInDays": 30}),
+            json!({"role": Value::Null, "maxUses": Value::Null}),
+        ] {
+            assert!(with(accepted.clone()).is_ok(), "{accepted}");
+        }
+        for refused in [
+            json!({"maxUse": 1}),
+            json!({"role": "guest"}),
+            json!({"maxUses": 101}),
+            json!({"maxUses": 0}),
+            json!({"expiresInDays": 31}),
+            json!("member"),
+            json!([]),
+            Value::Null,
+        ] {
+            assert_eq!(
+                with(refused.clone()),
+                Err(ToolFailure::InvalidArguments),
+                "{refused}"
+            );
+        }
+        // Every branch is titled with a registered action id, so a reader can
+        // match a branch to an action without sight of the sibling `actionId`.
+        let branches = action_propose_schema()["properties"]["args"]["oneOf"]
+            .as_array()
+            .expect("oneOf")
+            .clone();
+        let titles: Vec<&str> = branches
+            .iter()
+            .map(|branch| branch["title"].as_str().expect("title"))
+            .collect();
+        assert_eq!(titles, WORKSPACE_ACTION_IDS.to_vec());
+        for branch in &branches {
+            assert_eq!(branch["additionalProperties"], json!(false));
+        }
+    }
+
+    /// Arrays are bounded in length and every element is held to `items`.
+    #[test]
+    fn arrays_are_bounded_and_their_items_are_validated() {
+        let schema = json!({
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "items": required_text(8)
+        });
+        assert!(validate_against(&schema, &json!(["a"])).is_ok());
+        assert!(validate_against(&schema, &json!(["a", "b"])).is_ok());
+        for refused in [
+            json!([]),
+            json!(["a", "b", "c"]),
+            json!([""]),
+            json!(["123456789"]),
+            json!([1]),
+            json!([Value::Null]),
+            json!("a"),
+            json!({"0": "a"}),
+        ] {
+            assert_eq!(
+                validate_against(&schema, &refused),
+                Err(ToolFailure::InvalidArguments),
+                "{refused}"
+            );
+        }
+        // An array schema with no `items` is unvalidatable, so it refuses
+        // rather than waving every element through.
+        assert_eq!(
+            validate_against(&json!({"type": "array"}), &json!(["a"])),
             Err(ToolFailure::InvalidArguments)
         );
     }

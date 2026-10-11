@@ -13539,10 +13539,26 @@ components:
         title: {type: string}
         summary: {type: string}
         risk: {type: string, enum: [none, approval], description: "`approval` for every workspace action; `none` belongs to client commands, which this catalog does not serve."}
-        requiredRole: {type: string, enum: [admin], description: The workspace role a decider must hold. Absent while executable is false.}
+        requiredRole:
+          allOf:
+            - $ref: "#/components/schemas/WorkspaceActionRequiredRole"
+          description: Who must approve this action. Absent while executable is false.
         argsSchema: {type: object, description: JSON Schema for the action's args object. Absent while executable is false.}
         executable: {type: boolean}
         unavailableReason: {type: string, nullable: true, description: Null when executable; a sentence when not. Never absent.}
+
+    WorkspaceActionRequiredRole:
+      type: string
+      description: >
+        Who may approve a workspace action (ADR-0186 D2 and the 2026-10-11
+        증보). `admin` is a workspace owner/admin. `agent_editor` is the
+        **target agent's** owner or a workspace admin — the same judgement as
+        editing that agent's profile, made against the agent the proposal
+        names rather than against the proposer. `workspace_operator` is a
+        workspace owner/admin or a platform operator. The canonical list is
+        `momo_agent::actions::RequiredRole`; held equal by
+        `routes::actions::the_required_roles_are_one_list_in_two_places`.
+      enum: ["admin", "agent_editor", "workspace_operator"]
 
     ListWorkspaceActionsResponse:
       type: object
