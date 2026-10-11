@@ -26,6 +26,7 @@ import {
   AI_CONNECT_SERVER_OFF_NOTE,
   AI_CONNECT_SKIPPED_LINE,
   JOIN_CAP_LINE,
+  JOIN_CLAUDE_PAUSED_LINE,
   JOIN_OFF_LINE,
   LOGIN_POLL_WINDOW_MS,
 } from "@momo/core/features/onboarding/aiConnect";
@@ -870,6 +871,41 @@ describe("구독 합류: 연결 명령 → 감지 대기 → 합류 (같은 화�
     expect(q(host, "first-agent-heading")?.textContent).toBe(JOIN_OFF_LINE);
     expect(q(host, "kometto-guide")?.getAttribute("data-expression")).toBe("flustered");
     expect(host.textContent).not.toContain("subscription agents are disabled");
+  });
+
+  it("Claude 409(코드 claude_subscription_agent_paused)는 핸들 안내가 아니라 줄을 비활성으로 돌린다 (#3695)", async () => {
+    subscriptionOn();
+    vi.mocked(createHostedConnection).mockRejectedValue(
+      new ApiError(
+        409,
+        "claude subscription agents are paused on this server",
+        "claude_subscription_agent_paused"
+      )
+    );
+    const host = mountStage();
+    await waitFor(
+      () => host.querySelector<HTMLInputElement>("#ai-connect-claude")?.checked === true,
+      "preselected"
+    );
+    click(q(host, "first-agent-continue"));
+    await waitFor(
+      () => q(host, "ai-connect-pill-claude")?.getAttribute("data-pill") === "server-closed",
+      "closed"
+    );
+    expect(q(host, "ai-connect-pill-claude")?.textContent).toBe("꺼짐");
+    expect(host.querySelector("#ai-connect-claude-detail")?.textContent).toBe(
+      "이 서버에서 꺼져 있어요"
+    );
+    expect(host.querySelector<HTMLInputElement>("#ai-connect-claude")?.disabled).toBe(true);
+    expect(q(host, "first-agent-heading")?.textContent).toBe(JOIN_CLAUDE_PAUSED_LINE);
+    expect(host.textContent).not.toContain("핸들");
+    expect(host.textContent).not.toContain("이미 있어요");
+    // 같은 요청을 다시 보내지 않는다(다시 시도 반복 없음).
+    expect(vi.mocked(createHostedConnection)).toHaveBeenCalledTimes(1);
+    expect(q(host, "first-agent-connect-error")).toBeNull();
+    // 닫힌 줄을 눌러도 요청이 가지 않는다.
+    click(q(host, "first-agent-continue"));
+    expect(vi.mocked(createHostedConnection)).toHaveBeenCalledTimes(1);
   });
 
   it("핸들 409 는 다음 핸들로 한 번 다시 요청한다", async () => {
