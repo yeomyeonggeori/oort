@@ -1,3 +1,6 @@
+import { readDurable, removeDurable, writeDurable } from "@/features/onboarding/durableSlot";
+
+// 계정·서버 단위 영속 슬롯(#3696): 앱을 껐다 켜도 킥오프 대기가 이어진다.
 // Seam between onboarding (UX-R2a #2001 writes) and the welcome kickoff stage
 // (UX-R2b #2002 reads). Both tickets add this file with identical bytes so the
 // two branches merge cleanly. Do not edit it in either ticket; if a formatter
@@ -19,14 +22,6 @@ export interface FreshSignup {
   memberId: string;
 }
 
-function storage(): Storage | null {
-  try {
-    return globalThis.sessionStorage ?? null;
-  } catch {
-    return null;
-  }
-}
-
 function isFreshSignup(value: unknown): value is FreshSignup {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Record<string, unknown>;
@@ -40,16 +35,12 @@ function isFreshSignup(value: unknown): value is FreshSignup {
 
 /** Written once, right before the onboarding hands the session to the app. */
 export function markFreshSignup(value: FreshSignup): void {
-  try {
-    storage()?.setItem(SLOT, JSON.stringify(value));
-  } catch {
-    // Quota or a read-only store: the stage never shows, the opener still lands.
-  }
+  writeDurable(SLOT, JSON.stringify(value));
 }
 
 /** Read without consuming; a corrupt marker is dropped and read as absent. */
 export function peekFreshSignup(): FreshSignup | null {
-  const raw = storage()?.getItem(SLOT);
+  const raw = readDurable(SLOT);
   if (!raw) return null;
   let parsed: unknown;
   try {
@@ -63,9 +54,5 @@ export function peekFreshSignup(): FreshSignup | null {
 }
 
 export function clearFreshSignup(): void {
-  try {
-    storage()?.removeItem(SLOT);
-  } catch {
-    // Nothing to clear if the store is gone.
-  }
+  removeDurable(SLOT);
 }

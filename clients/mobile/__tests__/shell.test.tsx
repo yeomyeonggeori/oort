@@ -554,7 +554,7 @@ describe('the 인박스 tab', () => {
     await waitFor(() => expect(screen.getByTestId('inbox-list')).toBeTruthy());
     // The sentence is the core's: actor, then predicate, then the quoted body.
     expect(screen.getByText('@kim-intern')).toBeTruthy();
-    expect(screen.getByText(' 회원님을 불렀어요')).toBeTruthy();
+    expect(screen.getByText(' 나를 불렀어요')).toBeTruthy();
     expect(screen.getByText('이거 확인 부탁드립니다')).toBeTruthy();
   });
 

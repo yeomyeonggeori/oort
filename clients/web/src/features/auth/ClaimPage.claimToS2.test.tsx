@@ -9,8 +9,10 @@ import type { WorkspaceIdentity } from "@momo/core/features/settings/api";
 import { applyLogin, clearSession, getPersistedSession } from "@/lib/session";
 import { resetKickoffHoldForTests } from "@/features/welcome/firstRunGate";
 import { peekFreshSignup } from "@/features/welcome/freshSignup";
+import { clearDurableForCurrentAccount, readDurable } from "@/features/onboarding/durableSlot";
 import {
   clearOwnerOnboardingPending,
+  hasAcceptedSeedWorkspace,
   hasOwnerOnboardingFlag,
   ownerOnboardingIsPending,
   OWNER_ONBOARDING_KEY,
@@ -294,6 +296,23 @@ async function submitS1() {
   });
 }
 
+/**
+ * claim 직후 서버는 아직 시드 이름이다(S1이 이름을 저장하기 전). 재시작 시험은 그 사실을
+ * 서버 값으로 세운다: 서버 이름이 이미 시드가 아니면 이전 실행의 S1 표지는 낡은 것으로
+ * 걷힌다(#3714, 성재 결정 2026-10-11).
+ */
+function serverStillHasSeedName() {
+  fetchWorkspace.mockResolvedValue({
+    id: session.member.workspaceId,
+    slug: "dawn",
+    name: "momo Demo Workspace",
+    updatedAtMs: 1,
+    roleLabels: {},
+    welcomeAgentMemberId: null,
+    welcomePrompt: "",
+  });
+}
+
 function unmountApp() {
   act(() => {
     mountedRoot?.unmount();
@@ -388,7 +407,7 @@ describe("claim → S1 submit → S2", () => {
       host.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
     ).toBe("4단계 중 3단계");
     expect(host.querySelector('[data-testid="onboarding-progress"]')).toBeNull();
-    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe(
+    expect(readDurable(OWNER_ONBOARDING_KEY)).toBe(
       JSON.stringify({ invite: true })
     );
     expect(peekFreshSignup()).toEqual({
@@ -400,10 +419,14 @@ describe("claim → S1 submit → S2", () => {
 
 describe("reload during S1 re-enters S1", () => {
   it("reload during S1 re-enters S1; after S1 a reload re-enters S2", async () => {
+    serverStillHasSeedName();
     const host = await mountApp();
     await submitClaimFrom(host);
     expect(hasOwnerOnboardingFlag("workspace-profile")).toBe(true);
+    // 첫 질문(claim 직후)에는 「이대로 쓸게요」가 없다: 이름을 정하는 것이 이 화면의 일이다(#3714).
+    expect(host.querySelector('[data-testid="onboarding-s1-accept-default"]')).toBeNull();
 
+    serverStillHasSeedName();
     unmountApp();
 
     const reloaded = await mountApp();
@@ -413,6 +436,10 @@ describe("reload during S1 re-enters S1", () => {
     expect(reloaded.querySelector('[data-testid="onboarding-s1"]')).not.toBeNull();
     expect(reloaded.querySelector('[data-testid="onboarding-s2"]')).toBeNull();
     expect(reloaded.querySelector('[data-testid="app-shell"]')).toBeNull();
+    // 재질문(앱을 껐다 켠 뒤)에는 「이대로 쓸게요」가 선다(#3714).
+    expect(
+      reloaded.querySelector('[data-testid="onboarding-s1-accept-default"]')?.textContent
+    ).toBe("이대로 쓸게요");
 
     await waitForUi(() => {
       expect(fetchWorkspace).toHaveBeenCalled();
@@ -423,7 +450,7 @@ describe("reload during S1 re-enters S1", () => {
     });
     await submitS1();
     expect(reloaded.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
-    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe(
+    expect(readDurable(OWNER_ONBOARDING_KEY)).toBe(
       JSON.stringify({ invite: true })
     );
 
@@ -447,6 +474,49 @@ describe("reload during S1 re-enters S1", () => {
     );
     expect(getPersistedSession()?.member.displayName).toBe("성재");
     expect(getPersistedSession()?.member.handle).toBe("seongjae");
+  });
+});
+
+describe("재질문 S1의 「이대로 쓸게요」 (#3714)", () => {
+  it("누르면 셸로 가고, 이 계정·서버에서 다시 묻지 않는다(재시작 뒤에도, 로그아웃해도)", async () => {
+    serverStillHasSeedName();
+    const host = await mountApp();
+    await submitClaimFrom(host);
+    serverStillHasSeedName();
+    unmountApp();
+    const reloaded = await mountApp();
+    await waitForUi(() => {
+      expect(reloaded.querySelector('[data-testid="onboarding-s1-accept-default"]')).not.toBeNull();
+    });
+    // 무엇이 그대로 남는지를 이름으로 말한다(H1).
+    await waitForUi(() => {
+      expect(
+        reloaded.querySelector('[data-testid="onboarding-s1-accept"]')?.textContent
+      ).toContain("「momo Demo Workspace」 그대로예요");
+    });
+    // 이름 칸에 글을 쓰기 시작하면 「이대로」가 그 글을 뜻하는 것처럼 읽히므로 숨긴다.
+    fill("onboarding-s1-workspace-name", "새벽팀");
+    await waitForUi(() => {
+      expect(reloaded.querySelector('[data-testid="onboarding-s1-accept-default"]')).toBeNull();
+    });
+    fill("onboarding-s1-workspace-name", "");
+    await waitForUi(() => {
+      expect(reloaded.querySelector('[data-testid="onboarding-s1-accept-default"]')).not.toBeNull();
+    });
+    click("onboarding-s1-accept-default");
+    // S2(초대)는 아직 남아 있다: 이름만 이대로 두고 다음 단계로 간다.
+    await waitForUi(() => {
+      expect(reloaded.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
+    });
+    click("onboarding-s2-skip");
+    await waitForUi(() => {
+      expect(reloaded.querySelector('[data-testid="app-shell"]')).not.toBeNull();
+    });
+    expect(hasOwnerOnboardingFlag("workspace-profile")).toBe(false);
+    expect(hasAcceptedSeedWorkspace()).toBe(true);
+    // 로그아웃 정리도 이 선택은 지우지 않는다.
+    clearDurableForCurrentAccount();
+    expect(hasAcceptedSeedWorkspace()).toBe(true);
   });
 });
 
@@ -518,6 +588,7 @@ describe("S1 pending survives S2 skip (H-R2-1)", () => {
     expect(hasOwnerOnboardingFlag("workspace-profile")).toBe(true);
     expect(hasOwnerOnboardingFlag("invite")).toBe(false);
 
+    serverStillHasSeedName();
     unmountApp();
     const reloaded = await mountApp();
     await waitForUi(() => {
