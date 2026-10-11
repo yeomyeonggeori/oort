@@ -9761,3 +9761,320 @@ async fn a_stale_channel_grant_changes_nothing() {
     );
     assert_eq!(approved_of_3709(&su, fixture.hosted_agent).await, before);
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 2026-10-11 S5 (#3710) — workspace.settings.update
+// ---------------------------------------------------------------------------
+
+async fn settings_bag_3710(pool: &PgPool, workspace: Uuid) -> Value {
+    sqlx::query_scalar("SELECT settings FROM workspace WHERE id=$1")
+        .bind(workspace)
+        .fetch_one(pool)
+        .await
+        .expect("settings bag")
+}
+
+/// **workspace.settings.update (증보 V7, V11).**
+///
+/// Two keys only, operator-gated, replaced whole for `role_labels`, cleared by
+/// `null`; every other key of the bag is byte-identical before and after; the
+/// audit row names the keys and carries no value; a stale card (the old value
+/// moved) is refused with the approval still pending.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_approved_settings_update_changes_only_the_two_keys() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (_plain, plain_jwt) = seed_human_3708(&su, &fixture, "plain", "member").await;
+    let start = json!({
+        "allowed_agent_models": ["hermes-agent"],
+        "role_labels": {"member": "팀원"},
+        "welcome_prompt": "예전 문구"
+    });
+    sqlx::query("UPDATE workspace SET settings=$2 WHERE id=$1")
+        .bind(fixture.workspace)
+        .bind(&start)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // ---- keys this action does not own: refused before any card ------------
+    let approvals_before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM approval WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    for args in [
+        json!({"allowedAgentModels": ["anything"]}),
+        json!({"welcomeAgentMemberId": fixture.hosted_agent}),
+        json!({"welcomePrompt": "ok", "allowedAgentModels": []}),
+        json!({"welcomePrompt": "가".repeat(501)}),
+        json!({}),
+    ] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "workspace.settings.update",
+            args.clone(),
+        )
+        .await;
+        assert_eq!(status, 400, "{args}: {refused}");
+    }
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM approval WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap(),
+        approvals_before
+    );
+
+    // ---- a good proposal ----------------------------------------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "workspace.settings.update",
+        json!({"welcomePrompt": "새 환영 문구", "roleLabels": {"owner": "대표"}}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap())
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(card["action"]["required_role"], json!("workspace_operator"));
+    let rows = card["action"]["rows"].as_array().unwrap().clone();
+    let row = |label: &str| {
+        rows.iter().find(|r| r["label"] == label).unwrap()["value"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(row("환영 문구"), "예전 문구 → 새 환영 문구");
+    assert_eq!(row("역할 이름"), "member=팀원 → owner=대표");
+    assert_eq!(settings_bag_3710(&su, fixture.workspace).await, start);
+
+    // ---- a non-operator and an agent cannot approve ------------------------
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &plain_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    let agent_try = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/approvals/{approval}/decision",
+            fixture.workspace
+        ))
+        .bearer_auth(&fixture.hosted_bearer)
+        .json(&json!({"approvalId": approval, "approve": true,
+                      "clientDecisionId": Uuid::new_v4()}))
+        .send()
+        .await
+        .unwrap();
+    assert!(matches!(agent_try.status().as_u16(), 401 | 403));
+    assert_eq!(settings_bag_3710(&su, fixture.workspace).await, start);
+
+    // ---- the admin approves ------------------------------------------------
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        approved["result"]["actionId"],
+        json!("workspace.settings.update")
+    );
+    assert_eq!(
+        approved["result"]["ref"],
+        json!({"type": "workspace_settings", "id": fixture.workspace.to_string()})
+    );
+    assert!(approved["result"].get("secretOnce").is_none());
+    assert_eq!(
+        settings_bag_3710(&su, fixture.workspace).await,
+        json!({
+            "allowed_agent_models": ["hermes-agent"],
+            "role_labels": {"owner": "대표"},
+            "welcome_prompt": "새 환영 문구"
+        }),
+        "role_labels is replaced whole; every other key is untouched"
+    );
+
+    // ---- audit names the keys and carries no value --------------------------
+    let detail: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='workspace_setting.updated'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(detail["keys"], json!(["welcome_prompt", "role_labels"]));
+    assert_eq!(detail["via_agent"], json!(fixture.hosted_agent.to_string()));
+    assert_eq!(detail["approval_id"], json!(approval.to_string()));
+    let rendered = detail.to_string();
+    assert!(
+        !rendered.contains("새 환영 문구")
+            && !rendered.contains("대표")
+            && !rendered.contains("예전"),
+        "the audit row must not carry the values: {rendered}"
+    );
+    assert_eq!(
+        audit_count_3706(&su, fixture.workspace, "action.approved").await,
+        1
+    );
+    let line: String = sqlx::query_scalar(
+        "SELECT body FROM message WHERE workspace_id=$1 AND channel_id=$2 \
+           AND props ? 'momo.action_result' ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(line, "설정을 바꿨어요: 환영 문구, 역할 이름");
+
+    // ---- `null` clears one key and leaves the other -------------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "workspace.settings.update",
+        json!({"welcomePrompt": Value::Null}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let (status, _h, cleared) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{cleared}");
+    assert_eq!(
+        settings_bag_3710(&su, fixture.workspace).await,
+        json!({"allowed_agent_models": ["hermes-agent"], "role_labels": {"owner": "대표"}})
+    );
+
+    // ---- a card whose old value moved is stale ------------------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "workspace.settings.update",
+        json!({"roleLabels": {"admin": "관리자"}}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let stale_approval = proposed_approval_3706(&proposed);
+    sqlx::query(
+        "UPDATE workspace SET settings = jsonb_set(settings, '{role_labels}', '{\"guest\":\"손님\"}') \
+          WHERE id=$1",
+    )
+    .bind(fixture.workspace)
+    .execute(&su)
+    .await
+    .unwrap();
+    let moved = settings_bag_3710(&su, fixture.workspace).await;
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        stale_approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(stale["status"], "action_args_invalid");
+    assert_eq!(settings_bag_3710(&su, fixture.workspace).await, moved);
+    assert_eq!(approval_status_3708(&su, stale_approval).await, "pending");
+}
+
+/// The operator gate is `require_workspace_operator`'s set: a workspace admin OR a
+/// principal carrying the platform operator scope — and a plain member with
+/// neither is refused (covered above). Here: a non-admin member whose session
+/// carries `platform:read` may approve.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_platform_operator_who_is_not_an_admin_may_approve_a_settings_update() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (operator, _plain_jwt) = seed_human_3708(&su, &fixture, "operator", "member").await;
+    let jwt = momo_auth::sign_access(
+        operator,
+        fixture.workspace,
+        &["platform:read".to_string()],
+        TEST_JWT_SECRET,
+    )
+    .expect("sign an operator JWT")
+    .token;
+    sqlx::query(
+        "INSERT INTO token(workspace_id, kind, actor_member_id, token_hash, scopes, label) \
+         VALUES($1,'session',$2,digest($3::text,'sha256'),ARRAY['platform:read']::text[],'operator')",
+    )
+    .bind(fixture.workspace)
+    .bind(operator)
+    .bind(&jwt)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "workspace.settings.update",
+        json!({"roleLabels": {"guest": "손님"}}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        settings_bag_3710(&su, fixture.workspace).await["role_labels"],
+        json!({"guest": "손님"})
+    );
+}

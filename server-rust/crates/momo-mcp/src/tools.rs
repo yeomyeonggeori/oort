@@ -311,12 +311,13 @@ fn artifacts_schema() -> Value {
 /// `docs/api/openapi.yaml`'s `WorkspaceActionId` against each other. Adding an
 /// action means editing three lines; forgetting one of them is a red test, not a
 /// production surprise.
-const WORKSPACE_ACTION_IDS: [&str; 5] = [
+const WORKSPACE_ACTION_IDS: [&str; 6] = [
     "invite.create",
     "channel.create",
     "channel.member.add",
     "agent.rename",
     "hosted.channels.grant",
+    "workspace.settings.update",
 ];
 
 // The argument vocabulary the registry publishes, restated here for the same
@@ -341,6 +342,9 @@ const WORKSPACE_CHANNEL_TOPIC_MAX_BYTES: u64 = 1_120;
 const WORKSPACE_CHANNEL_REF_MAX_BYTES: u64 = 81;
 const WORKSPACE_AGENT_NAME_MAX_BYTES: u64 = 256;
 const WORKSPACE_GRANT_CHANNELS_MAX: u64 = 5;
+const WORKSPACE_WELCOME_PROMPT_MAX_BYTES: u64 = 2_000;
+const WORKSPACE_ROLE_LABEL_KEYS: [&str; 4] = ["owner", "admin", "member", "guest"];
+const WORKSPACE_ROLE_LABEL_MAX_BYTES: u64 = 48;
 const WORKSPACE_MEMBER_HANDLES_MAX: u64 = 10;
 const WORKSPACE_MEMBER_HANDLE_MAX_BYTES: u64 = 33;
 
@@ -424,7 +428,41 @@ fn action_args_branches() -> Vec<Value> {
                 }
             }),
         ),
+        workspace_settings_branch(),
     ]
+}
+
+/// `workspace.settings.update`: exactly the two keys, and at least one
+/// (`minProperties`). `null` clears a key — so the nullability contract's reading
+/// of `null` as "omitted" does NOT apply to this branch's two properties; the
+/// description says so, and the card shows the approver what a clear does.
+fn workspace_settings_branch() -> Value {
+    let role_labels: serde_json::Map<String, Value> = WORKSPACE_ROLE_LABEL_KEYS
+        .iter()
+        .map(|role| {
+            (
+                (*role).to_string(),
+                nullable(required_text(WORKSPACE_ROLE_LABEL_MAX_BYTES)),
+            )
+        })
+        .collect();
+    let mut branch = action_args_branch(
+        "workspace.settings.update",
+        &[],
+        json!({
+            "welcomePrompt": nullable(text(WORKSPACE_WELCOME_PROMPT_MAX_BYTES)),
+            "roleLabels": nullable(json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": role_labels
+            }))
+        }),
+    );
+    branch["minProperties"] = json!(1);
+    branch["description"] = json!(
+        "At least one key. Omit a key to leave it as it is; send null to clear it back to the default."
+    );
+    branch
 }
 
 fn invite_create_branch() -> Value {
@@ -771,6 +809,11 @@ fn validate_against(schema: &Value, value: &Value) -> Result<(), ToolFailure> {
                 } else {
                     Err(invalid)
                 };
+            }
+            if let Some(minimum) = schema.get("minProperties").and_then(Value::as_u64) {
+                if (object.len() as u64) < minimum {
+                    return Err(invalid);
+                }
             }
             let properties = schema
                 .get("properties")
@@ -1323,6 +1366,44 @@ mod tests {
         assert_eq!(titles, WORKSPACE_ACTION_IDS.to_vec());
         for branch in &branches {
             assert_eq!(branch["additionalProperties"], json!(false));
+        }
+    }
+
+    /// `minProperties` is enforced: `{}` satisfies the all-optional `invite.create`
+    /// branch but not `workspace.settings.update`'s, which is what keeps that
+    /// branch from also accepting an empty `args`.
+    #[test]
+    fn min_properties_is_enforced() {
+        let schema = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "properties": {"a": nullable(text(8))}
+        });
+        assert!(validate_against(&schema, &json!({"a": "x"})).is_ok());
+        assert_eq!(
+            validate_against(&schema, &json!({})),
+            Err(ToolFailure::InvalidArguments)
+        );
+        let settings = action_propose_schema()["properties"]["args"]["oneOf"]
+            .as_array()
+            .expect("oneOf")
+            .iter()
+            .find(|branch| branch["title"] == "workspace.settings.update")
+            .expect("the settings branch")
+            .clone();
+        assert!(validate_against(&settings, &json!({})).is_err());
+        assert!(validate_against(&settings, &json!({"welcomePrompt": "hi"})).is_ok());
+        assert!(validate_against(&settings, &json!({"welcomePrompt": Value::Null})).is_ok());
+        assert!(validate_against(&settings, &json!({"roleLabels": {"owner": "대표"}})).is_ok());
+        for refused in [
+            json!({"allowedAgentModels": []}),
+            json!({"welcomeAgentMemberId": "x"}),
+            json!({"roleLabels": {"agent": "봇"}}),
+            json!({"roleLabels": {"owner": ""}}),
+            json!({"welcomePrompt": 5}),
+        ] {
+            assert!(validate_against(&settings, &refused).is_err(), "{refused}");
         }
     }
 

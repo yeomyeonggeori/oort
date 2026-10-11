@@ -53,7 +53,8 @@ use momo_messaging::{
     normalize_channel_name, normalize_channel_topic,
 };
 use momo_settings::{
-    is_valid_handle, normalized_invite_role, validated_expires_at_ms, validated_max_uses,
+    is_valid_handle, merge_workspace_settings, normalized_invite_role, read_workspace_settings,
+    validated_expires_at_ms, validated_max_uses,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -213,6 +214,13 @@ pub enum ActionArgs {
     /// `channel.member.add` (증보 V2). `channel` and `members` are empty after the
     /// pure stage and filled by [`resolve_action_in_tx`]; `new_members` is the
     /// subset not already live in the channel.
+    /// `workspace.settings.update` (증보 V7): two keys only. `before` is filled by
+    /// [`resolve_action_in_tx`] and is what the card's 「옛 값」 and the pins hold.
+    WorkspaceSettingsUpdate {
+        welcome_prompt: SettingPatch,
+        role_labels: SettingPatch,
+        before: SettingsBefore,
+    },
     /// `hosted.channels.grant` (증보 V5). `connection` and `channels` are filled by
     /// [`resolve_action_in_tx`]; `channels` is the subset not yet approved.
     HostedChannelsGrant {
@@ -234,6 +242,39 @@ pub enum ActionArgs {
         members: Vec<ResolvedMember>,
         already_in: Vec<Uuid>,
     },
+}
+
+/// What a proposal does to one settings key (ADR-0186 증보 V7).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettingPatch {
+    /// The key is not in the proposal: leave it as it is.
+    Unchanged,
+    /// `null`: remove the key, back to the default.
+    Clear,
+    Set(Value),
+}
+
+impl SettingPatch {
+    pub fn is_touched(&self) -> bool {
+        !matches!(self, SettingPatch::Unchanged)
+    }
+
+    /// The value as the merge sees it: absent, `null` (delete) or the new value.
+    fn as_merge_value(&self) -> Option<Value> {
+        match self {
+            SettingPatch::Unchanged => None,
+            SettingPatch::Clear => Some(Value::Null),
+            SettingPatch::Set(value) => Some(value.clone()),
+        }
+    }
+}
+
+/// The values the touched keys held when the proposal was resolved — what the
+/// card shows as 「옛 값」. `None` = the key is not set.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SettingsBefore {
+    pub welcome_prompt: Option<Value>,
+    pub role_labels: Option<Value>,
 }
 
 /// The proposer's own live hosted connection, as the server found it.
@@ -304,6 +345,7 @@ pub fn validated_action_args(
         actions::ACTION_CHANNEL_MEMBER_ADD => channel_member_add_args(args),
         actions::ACTION_AGENT_RENAME => agent_rename_args(args),
         actions::ACTION_HOSTED_CHANNELS_GRANT => hosted_channels_grant_args(args),
+        actions::ACTION_WORKSPACE_SETTINGS_UPDATE => workspace_settings_update_args(args),
         // Fail closed. A registry entry with no normaliser must be an error and
         // not an unvalidated passthrough — `every_action_has_a_normaliser` is
         // what makes this arm unreachable rather than merely unlikely.
@@ -526,6 +568,115 @@ fn channel_member_add_args(args: &Value) -> Result<ValidatedActionArgs, ApiError
             already_in: Vec::new(),
         },
     })
+}
+
+/// The settings keys as the bag spells them, in the order the card lists them.
+const SETTINGS_KEYS: [(&str, &str, &str); 2] = [
+    ("welcomePrompt", "welcome_prompt", "환영 문구"),
+    ("roleLabels", "role_labels", "역할 이름"),
+];
+
+fn setting_patch(
+    object: &serde_json::Map<String, Value>,
+    wire_key: &str,
+) -> Result<SettingPatch, ApiError> {
+    match object.get(wire_key) {
+        None => Ok(SettingPatch::Unchanged),
+        Some(Value::Null) => Ok(SettingPatch::Clear),
+        Some(value) => Ok(SettingPatch::Set(value.clone())),
+    }
+}
+
+fn workspace_settings_update_args(args: &Value) -> Result<ValidatedActionArgs, ApiError> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| ApiError::bad_request("action args must be an object"))?;
+    // The two keys, by name. `allowedAgentModels`, `welcomeAgentMemberId` and every
+    // other key are refused here AND by the settings allow-list below.
+    closed_keys(object, &["welcomePrompt", "roleLabels"])?;
+    let welcome_prompt = setting_patch(object, "welcomePrompt")?;
+    let role_labels = setting_patch(object, "roleLabels")?;
+    if !welcome_prompt.is_touched() && !role_labels.is_touched() {
+        return Err(ApiError::bad_request("at least one setting is required"));
+    }
+    if let SettingPatch::Set(value) = &welcome_prompt {
+        // 500 characters for a proposal (REST: 2000), and not blank — clearing is
+        // `null`, never an empty string.
+        let Some(text) = value.as_str() else {
+            return Err(ApiError::bad_request("welcomePrompt must be a string"));
+        };
+        if text.trim().is_empty()
+            || text.chars().count() > actions::WELCOME_PROMPT_PROPOSAL_MAX_CHARS
+        {
+            return Err(ApiError::bad_request("welcomePrompt is out of range"));
+        }
+    }
+    if let SettingPatch::Set(value) = &role_labels {
+        // A non-empty object: `{}` would silently wipe every label, and `null` is
+        // the way to say that.
+        if value.as_object().is_none_or(|map| map.is_empty()) {
+            return Err(ApiError::bad_request(
+                "roleLabels must be a non-empty object",
+            ));
+        }
+    }
+    // The REST validators, reused as they are: shape, role keys, label bytes and
+    // the settings allow-list. (Run on an empty bag — only validation matters.)
+    let mut probe = serde_json::Map::new();
+    for (wire, stored, _) in SETTINGS_KEYS {
+        let patch = if wire == "welcomePrompt" {
+            &welcome_prompt
+        } else {
+            &role_labels
+        };
+        if let Some(value) = patch.as_merge_value() {
+            probe.insert(stored.to_string(), value);
+        }
+    }
+    merge_workspace_settings(&json!({}), &Value::Object(probe))
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
+    let mut normalized = serde_json::Map::new();
+    for (wire, _, _) in SETTINGS_KEYS {
+        let patch = if wire == "welcomePrompt" {
+            &welcome_prompt
+        } else {
+            &role_labels
+        };
+        if let Some(value) = patch.as_merge_value() {
+            normalized.insert(wire.to_string(), value);
+        }
+    }
+    Ok(ValidatedActionArgs {
+        summary: None,
+        normalized: Value::Object(normalized),
+        rows: Vec::new(),
+        args: ActionArgs::WorkspaceSettingsUpdate {
+            welcome_prompt,
+            role_labels,
+            before: SettingsBefore::default(),
+        },
+    })
+}
+
+/// How a settings value reads on a card: a string as itself, a role-label object
+/// as `owner=대표 · admin=…` in the fixed role order. Plain text.
+pub fn settings_display(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::String(text) => Some(text.clone()),
+        Value::Object(map) => Some(
+            actions::ROLE_LABEL_PROPOSAL_KEYS
+                .iter()
+                .filter_map(|role| {
+                    map.get(*role)
+                        .and_then(Value::as_str)
+                        .map(|label| format!("{role}={label}"))
+                })
+                .collect::<Vec<_>>()
+                .join(" · "),
+        ),
+        other => Some(other.to_string()),
+    }
 }
 
 fn hosted_channels_grant_args(args: &Value) -> Result<ValidatedActionArgs, ApiError> {
@@ -874,6 +1025,55 @@ pub async fn resolve_action_in_tx(
                 actions::channel_create_rows(name, kind, topic.as_deref(), *add_proposer, &names);
             GateSubject::Workspace
         }
+        ActionArgs::WorkspaceSettingsUpdate {
+            welcome_prompt,
+            role_labels,
+            before,
+        } => {
+            if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
+                return Ok(Err(ApiError::bad_request(
+                    "proposer is not an active agent",
+                )));
+            }
+            let Some(bag) = read_workspace_settings(conn, workspace_id).await? else {
+                return Ok(Err(ApiError::bad_request("workspace settings unavailable")));
+            };
+            // What the touched keys hold NOW: the card's 「옛 값」 and the pins.
+            before.welcome_prompt = welcome_prompt
+                .is_touched()
+                .then(|| bag.get("welcome_prompt").cloned())
+                .flatten();
+            before.role_labels = role_labels
+                .is_touched()
+                .then(|| bag.get("role_labels").cloned())
+                .flatten();
+            let mut rows = Vec::new();
+            let mut changed = false;
+            for (patch, was, (_, _, label)) in [
+                (&*welcome_prompt, &before.welcome_prompt, SETTINGS_KEYS[0]),
+                (&*role_labels, &before.role_labels, SETTINGS_KEYS[1]),
+            ] {
+                let after = match patch {
+                    SettingPatch::Unchanged => continue,
+                    SettingPatch::Clear => None,
+                    SettingPatch::Set(value) => Some(value),
+                };
+                // A proposal that changes nothing is not a proposal.
+                if after != was.as_ref() {
+                    changed = true;
+                }
+                rows.push(actions::settings_change_row(
+                    label,
+                    settings_display(was.as_ref()).as_deref(),
+                    settings_display(after).as_deref(),
+                ));
+            }
+            if !changed {
+                return Ok(Err(ApiError::bad_request("nothing to change")));
+            }
+            validated.rows = rows;
+            GateSubject::Workspace
+        }
         ActionArgs::HostedChannelsGrant {
             channel_refs,
             connection,
@@ -1049,6 +1249,10 @@ pub async fn resolve_action_in_tx(
         }
     };
     let pins = match &validated.args {
+        ActionArgs::WorkspaceSettingsUpdate { before, .. } => json!({
+            "welcome_prompt": before.welcome_prompt,
+            "role_labels": before.role_labels,
+        }),
         ActionArgs::HostedChannelsGrant {
             connection,
             channels,
@@ -1340,6 +1544,12 @@ mod tests {
                     })
                     .unwrap_or_default()
             };
+            assert_eq!(
+                branch.get("minProperties"),
+                registry_args.get("minProperties"),
+                "{}: minProperties differs between the tool and the catalog",
+                action.id
+            );
             let required = required_of(&registry_args);
             assert_eq!(
                 required_of(branch),
@@ -1365,6 +1575,41 @@ mod tests {
                         "{}: args.{name}.{key} disagrees between oort_action_propose and GET /actions",
                         action.id
                     );
+                }
+                // A nested object (roleLabels): same child names, same bounds.
+                if let Some(registry_children) = registry_property
+                    .get("properties")
+                    .and_then(Value::as_object)
+                {
+                    let tool_children = tool_property["properties"]
+                        .as_object()
+                        .expect("a nested object keeps its properties in the tool");
+                    assert_eq!(
+                        tool_children
+                            .keys()
+                            .collect::<std::collections::BTreeSet<_>>(),
+                        registry_children
+                            .keys()
+                            .collect::<std::collections::BTreeSet<_>>(),
+                        "{}: args.{name} children differ",
+                        action.id
+                    );
+                    assert_eq!(
+                        tool_property.get("additionalProperties"),
+                        registry_property.get("additionalProperties"),
+                        "{}: args.{name} closedness differs",
+                        action.id
+                    );
+                    for (child, registry_child) in registry_children {
+                        for key in ["enum", "minLength", "maxLength"] {
+                            assert_eq!(
+                                tool_children[child].get(key),
+                                registry_child.get(key),
+                                "{}: args.{name}.{child}.{key} differs",
+                                action.id
+                            );
+                        }
+                    }
                 }
                 // `items` is compared without `description`: the tool's strings
                 // carry the byte-unit note (`BYTE_BOUND_NOTE`), the registry's do
@@ -1876,6 +2121,86 @@ mod tests {
                 .expect_err(&format!("{refused} must be refused"));
             assert_eq!(error.status, StatusCode::BAD_REQUEST, "{refused}");
         }
+    }
+
+    fn settings() -> &'static WorkspaceAction {
+        actions::action_by_id(actions::ACTION_WORKSPACE_SETTINGS_UPDATE).expect("registered")
+    }
+
+    /// The two keys, and only those (증보 V7); `null` clears; the REST validators
+    /// run unchanged; the proposal cap on the prompt is 500, not REST's 2000.
+    #[test]
+    fn a_settings_proposal_is_two_keys_and_the_rest_validators() {
+        let ok = validated_action_args(
+            settings(),
+            &json!({"welcomePrompt": "환영해요", "roleLabels": {"owner": "대표", "member": "팀원"}}),
+            NOW_MS,
+        )
+        .expect("legal");
+        assert_eq!(
+            ok.normalized,
+            json!({"welcomePrompt": "환영해요", "roleLabels": {"owner": "대표", "member": "팀원"}})
+        );
+        // `null` is kept (it means "clear"), an omitted key is not invented.
+        let cleared = validated_action_args(settings(), &json!({"welcomePrompt": null}), NOW_MS)
+            .expect("clear");
+        assert_eq!(cleared.normalized, json!({"welcomePrompt": Value::Null}));
+        // Exactly 500 characters pass, 501 do not (REST would take 2000).
+        assert!(validated_action_args(
+            settings(),
+            &json!({"welcomePrompt": "가".repeat(500)}),
+            NOW_MS
+        )
+        .is_ok());
+        for refused in [
+            json!({}),
+            json!({"welcomePrompt": "가".repeat(501)}),
+            json!({"welcomePrompt": ""}),
+            json!({"welcomePrompt": "   "}),
+            json!({"welcomePrompt": 5}),
+            json!({"roleLabels": {}}),
+            json!({"roleLabels": []}),
+            json!({"roleLabels": "owner"}),
+            json!({"roleLabels": {"agent": "봇"}}),
+            json!({"roleLabels": {"owner": ""}}),
+            json!({"roleLabels": {"owner": 5}}),
+            json!({"roleLabels": {"owner": "가".repeat(17)}}), // 51 bytes
+            // The keys this action does NOT own, in both spellings.
+            json!({"allowedAgentModels": ["x"]}),
+            json!({"allowed_agent_models": ["x"]}),
+            json!({"welcomeAgentMemberId": Uuid::new_v4()}),
+            json!({"welcome_agent_member_id": Uuid::new_v4()}),
+            json!({"welcome_prompt": "snake"}),
+            json!({"welcomePrompt": "ok", "allowedAgentModels": ["x"]}),
+            json!([]),
+        ] {
+            let error = validated_action_args(settings(), &refused, NOW_MS)
+                .expect_err(&format!("{refused} must be refused"));
+            assert_eq!(error.status, StatusCode::BAD_REQUEST, "{refused}");
+        }
+    }
+
+    #[test]
+    fn the_role_label_vocabulary_is_the_settings_crates() {
+        assert_eq!(
+            actions::ROLE_LABEL_PROPOSAL_KEYS.to_vec(),
+            momo_settings::ROLE_LABEL_KEYS.to_vec()
+        );
+        assert_eq!(
+            actions::ROLE_LABEL_MAX_BYTES as usize,
+            momo_settings::MAX_ROLE_LABEL_BYTES
+        );
+        // The proposal cap is a quarter of the REST one, never wider.
+        const {
+            assert!(
+                actions::WELCOME_PROMPT_PROPOSAL_MAX_CHARS
+                    < momo_settings::MAX_WELCOME_PROMPT_CHARS
+            );
+        }
+        assert_eq!(
+            actions::WELCOME_PROMPT_PROPOSAL_MAX_BYTES as usize,
+            actions::WELCOME_PROMPT_PROPOSAL_MAX_CHARS * 4
+        );
     }
 
     /// 부록 E, row by row. The `unavailableReason` key is what a client reads
