@@ -279,6 +279,8 @@ export type FirstAgentCapturePose =
   | "sub-waiting"
   | "sub-cap"
   | "sub-joined"
+  // 서버가 Claude 구독만 닫아 둔 목록(#3695).
+  | "sub-paused"
   | "skipped"
   // 로그인 모달 세 상태 (#2816).
   | "login-waiting"
@@ -305,6 +307,7 @@ export const FIRST_AGENT_CAPTURE_POSES: readonly FirstAgentCapturePose[] = [
   "sub-waiting",
   "sub-cap",
   "sub-joined",
+  "sub-paused",
   "skipped",
   "login-waiting",
   "login-connected",

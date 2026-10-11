@@ -52,7 +52,7 @@ const OUT_DIR = process.env.OUT_DIR
   : resolve(WEB_ROOT, "artifacts/design");
 const PORT = Number(process.env.CAPTURE_PORT || 5178);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
-const VIEWPORT = { width: 1280, height: 800 };
+const VIEWPORT = { width: Number(process.env.CAPTURE_WIDTH || 1280), height: 800 };
 
 /**
  * Frozen wall clock for every capture fixture timestamp AND the page clock.
@@ -12474,6 +12474,7 @@ async function captureFirstAgentScenes(browser, scheme) {
     "sub-waiting": "first-agent-detecting",
     "sub-cap": "first-agent-cap-exceeded",
     "sub-joined": "first-agent-mention",
+    "sub-paused": "ai-connect-list",
     "one-time": "hosted-pairing-card",
     detecting: "first-agent-detecting",
     "cap-exceeded": "first-agent-cap-exceeded",
