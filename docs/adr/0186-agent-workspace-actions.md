@@ -296,3 +296,169 @@ v1의 모든 워크스페이스 행동은 `approval`이다. 「관리자 위임�
 - (+) 새 스코프·새 테이블·새 outbox 생산자 없이 기존 send tx 위에 얹힌다. AX-5 테마 카드도 이 길을 쓴다.
 - (−) hosted 에이전트 지시문과 worker 시스템 프롬프트가 「연결 요청이면 카드 제안」을 배워야 한다(GC-8).
 - (−) 제안 메시지는 채널에 남으므로 오래된 제안도 **지금 상태**로 그려진다(이미 연결했으면 「준비됨」). 제안 당시 상태를 보존하지 않는 것은 의도다.
+
+## 증보 2026-10-11 — 관리 액션 v2: `channel.create`·`channel.member.add`·`agent.rename`·`hosted.channels.grant` (#3699)
+
+- Status: **Accepted** (2026-10-11 성재 결재 — V9 결재 기록. 기안 같은 날 Opus 5.5 worker. 2번 `agent.rename`의 신뢰 모델 세부 기본값은 「owner 위임: 오케스트레이터가 보수적으로 확정」. 구현은 슬라이스(V10)별 PR로 착수 가능)
+- 발제: 성재 2026-10-11 「에이전트 하나만 잘 초대하면 에이전트를 통해서 설정을 바꾸거나 테마를 바꾸거나, 팀원을 초대하거나 그런걸 가능하게 하는 AI native 메신저」, 「그록봇 하나만 초대하면 걔가 그룹을 꾸리고 이름을 바꾸거나 다른 그록봇을 만들어서 초대」
+- 기안: Opus 5.5 worker(#3699)
+- Consumes: ADR-0162(채널 승인 권한 주체 = 관리자의 confirm, 증보 2 DM 규칙) · ADR-0128(채널 생성·멤버 추가는 워크스페이스 owner/admin) · ADR-0131(에이전트 프로필 편집 = 소유자 또는 관리자) · ADR-0118(이름 변경 경계) · ADR-0101(에이전트=1급 멤버, 분기 금지) · ADR-0198(에이전트 vs 하네스) · ADR-0174(외양은 기기 localStorage)
+- 이 증보는 D2(제안 → 승인 → 실행)·D3(위험 등급)·D4(1회 시크릿)·D7(새 테이블 0)을 **바꾸지 않는다.** D1의 레지스트리에 행동 다섯을 더하고, 그 다섯이 처음으로 부딪히는 문제(V2: 한 run은 한 번만 제안한다 / V3: 승인 채널이 사람의 경계다 / V4: 표시 이름이 신뢰 표면이다)에 답한다.
+
+### V0. 코드로 확인한 사실(2026-10-11, main `8fba66541`)
+- 그록봇(hosted) 도구 중 워크스페이스를 바꾸는 길은 `oort_action_propose` 하나이고 `ACTIONS`는 `invite.create` 하나다(`momo-agent/src/actions.rs`). `DECLARED_NOT_EXECUTABLE` = `webhook.create`·`channel.create`·`member.role.set`.
+- **채널 생성·멤버 추가 REST는 있다.** `routes/channels.rs` `create`(`create_channel_detailed_in_tx`)·`add_member`(`add_channel_member_in_tx`), 둘 다 owner/admin. 승인자 명의로 부를 수 있는 도메인 함수가 이미 있다. 다만 두 함수 모두 **audit 행도 outbox도 쓰지 않는다**(`channels.rs`에서 audit은 `notification_pref.updated` 하나뿐).
+- **에이전트 표시 이름을 바꾸는 라우트는 없다.** `PATCH …/members/me`(`self_profile::rename_self`)는 `require_human`으로 에이전트를 거절하고(`AGENTS_USE_THE_PROFILE_PATH`), 프로필 경로 `PUT …/agents/{agent}/profile`의 `AgentProfileInput`에는 `display_name`이 없다. `POST …/agents`가 이름을 받는 유일한 길이다. 이름 검증 `normalized_join_display_name`은 trim + 1~100자뿐이다.
+- 표시 이름은 **멘션 대상**이다. `@Display Name`·`<@Display Name>`은 대소문자 구분으로 멘션이 되고(`momo-messaging/src/read_state.rs:679`), `member`의 유일성은 `handle`에만 있다(`member_handle_uniq`). 이름에는 유일 제약이 없다.
+- `hosted_agent_connection.approved_channel_ids`는 **confirm(static)·consent(OAuth)에서만 쓰인다**(`momo-auth/src/hosted_connection.rs`·`hosted_oauth.rs`의 한 CTE. 같은 CTE가 에이전트의 `membership`을 넣고 `kind<>'dm'`·미보관만 받는다). confirm 뒤에 이 배열을 넓히는 라우트는 없다. 「이 connection이 덮는 방」의 유일한 정의는 SQL 함수 `hosted_connection_channel_ids`(091)이고, inbox·gateway claim·Agent Port identity가 전부 이것을 쓴다. 에이전트는 `approved_channel_ids`에 있고 **동시에** `membership`이 살아 있어야 그 방을 읽고 쓴다(`hosted_inbox.rs`의 `visible`).
+- `oort_message_post`는 `channelId`를 인자로 받는다. 승인 채널이 아니면 실패한다. 그래서 에이전트가 만든 채널에서 말하려면 membership과 승인 채널 둘 다 필요하다.
+- 한 hosted run은 **제안을 한 번만** 한다. 제안이 run을 park하고 승인되면 run은 `succeeded`다(D2). 한 run에서 「채널 만들기 → 나 넣기 → 사람 넣기」를 이어서 제안할 수 없다.
+- 승인 결과는 지금 에이전트 명의 `action_result` 메시지(부록 B)로 채널에 남고, 1회 값은 결정 HTTP 응답에만 있다(D4).
+
+### V1. 결정 요약
+| 행동 | 위험 | 승인자(`requiredRole`) | 실행 | 대상을 정하는 것 |
+|---|---|---|---|---|
+| `channel.create` | `approval` | `admin`(기존) | 승인자 명의로 채널 생성(승인자 = `created_by`·채널 owner). `addProposer`이면 제안 에이전트를 넣고 승인 채널에 올린다(V3) | 이름·공개 범위·주제·(선택) 멤버 핸들 |
+| `channel.member.add` | `approval` | `admin` | 승인자 명의로 membership 추가(역할은 `member` 고정) | 제안 에이전트가 **볼 수 있는** 채널 + 멤버 핸들 |
+| `agent.rename` | `approval` | **`agent_editor`**(신규: **대상** 에이전트의 소유자 또는 워크스페이스 admin — `require_profile_editor_in_tx`와 같은 판정) | 대상 에이전트의 표시 이름. 대상은 제안자 자신 또는 **같은 소유자의 다른 에이전트**(V4-M) | 새 이름 + (선택) 대상 핸들 |
+| `hosted.channels.grant` | `approval` | `admin`(ADR-0162: 채널 승인 권한 주체는 관리자) | **제안한 에이전트의 connection**의 승인 채널에 채널 추가 + membership | 채널 이름들 |
+| `workspace.settings.update` | `approval` | **`workspace_operator`**(신규: `require_workspace_operator`와 같은 판정 — owner/admin, 플랫폼 운영 스코프 포함) | 승인자 명의로 설정 bag의 **`welcome_prompt`·`role_labels` 두 키만** 병합 저장 | 두 키의 새 값(V7) |
+| `member.role.set` | — | — | 계속 `DECLARED_NOT_EXECUTABLE`(#3699 범위 밖) | — |
+
+공통 규칙(V1-a~e):
+- **a. 에이전트는 id를 모른다.** 인자는 채널 **이름**·멤버 **핸들**·새 **표시 이름**이다. uuid를 받지 않는다. 서버가 propose 때와 decide 때 두 번 해석하고, 카드 행에는 해석된 **서버 쪽 값**(현재 채널 이름·공개 범위·인원 수, 멤버 표시 이름)을 쓴다. 에이전트가 쓴 문자열이 곧 카드의 대상 표시가 되는 길은 없다.
+- **b. 대상은 제안자의 시야 안이다.** `channel.member.add`의 채널과 `hosted.channels.grant`의 채널은 (공개 채널) ∪ (제안 에이전트가 지금 live membership을 가진 채널)이어야 한다. 그 밖(남의 비공개 채널, 존재하지 않는 이름, DM, 보관됨)은 모두 같은 `InvalidArguments`다. 에이전트가 제안 실패로 비공개 채널의 존재를 더듬을 수 없다. v1처럼 어떤 규칙에 걸렸는지는 알려 주지 않는다.
+- **c. 승인자 판정은 레지스트리의 `required_role`이고 `match`는 계속 exhaustive다.** `RequiredRole::AgentEditor`·`WorkspaceOperator`를 더하면 `execute_workspace_action`의 게이트 `match`가 컴파일 오류로 새 갈래를 요구한다. `agent_editor`의 판정 대상은 `agent.rename`의 **대상 에이전트**(V4-M, 결정 때 다시 해석한 값)이고, `workspace_operator`는 `routes::shared::require_workspace_operator`의 판정을 호출한다(복사하지 않는다).
+- **d. 결정 때 재증명한다**(D2의 「저장값을 신뢰하지 않는다」 그대로). 이름·핸들·채널을 다시 해석하고 규칙(V1-b, V4, V3의 상한)을 다시 건다. 어긋나면 새 영수증 어휘를 만들지 않고 기존 `action_args_invalid`(409, 승인 소모 없음)로 답한다. 클라이언트의 `receiptStatuses`·카드 문구를 늘리지 않으려는 선택이고, 카드는 「제안 내용이 더 이상 맞지 않아요. 거절하고 다시 요청해 주세요」로 남는다.
+- **e. 제안 폭주 상한.** 한 에이전트의 `pending` 상태 `workspace_action` 승인은 3개까지다. 넘으면 `Conflict`. run이 제안마다 park되므로 평상시에는 닿지 않는 상한이고, 재호출로 카드를 쌓는 오작동을 막는다.
+
+### V2. 인자 스키마(와이어는 camelCase, 전부 `additionalProperties:false`)
+- `channel.create`: `{name: string, kind?: "public"|"private", topic?: string, addProposer?: boolean, memberHandles?: string[]}`. `name` 필수. 이름·주제 규칙은 REST와 **같은 함수**(`normalize_channel_name`: 소문자·숫자·`-`·`_`, 1~80자 / `normalize_channel_topic`: ≤280자)로 맞춘다. `kind` 기본값은 **`private`**(에이전트가 공개 채널을 만들려면 `public`을 말해야 하고, 카드 행에 그대로 보인다). `addProposer` 기본값은 `true`(V3). `memberHandles` ≤10, 활성 멤버(사람·에이전트).
+- `channel.member.add`: `{channel: string, memberHandles: string[1..10]}`. 둘 다 필수. 역할 인자는 없다(`member` 고정, `add_channel_member_in_tx`가 이미 `owner`를 거절).
+- `agent.rename`: `{displayName: string, targetHandle?: string}`. `displayName` 필수. `targetHandle`이 없으면 제안자 자신이다. 있으면 V4-M의 「관리하는 에이전트」여야 한다. uuid는 받지 않는다.
+- `workspace.settings.update`: `{welcomePrompt?: string|null, roleLabels?: object|null}`. 한 키 이상 필수, `null`은 그 키를 지워 기본값으로 되돌린다. 검증은 `momo_settings::merge_workspace_settings`의 두 키 검증기(`validate_welcome_prompt`·`validate_role_labels`)를 **그대로 재사용**하고, 제안 상한은 `welcomePrompt` ≤500자(REST는 2000자), `roleLabels`의 키는 `ROLE_LABEL_KEYS`·값은 ≤48바이트(REST와 같음). 이 두 키 밖의 키는 스키마가 거절한다(V7).
+- `hosted.channels.grant`: `{channels: string[1..5]}`. 필수. 대상 connection은 **handle이 가리키는 제안자의 connection**이고 인자로 받지 않는다. 한 connection의 승인 채널은 합쳐서 50개를 넘지 못한다(기존 confirm에는 상한이 없었으므로 새 함수에서만 건다).
+
+`oort_action_propose`의 `args`는 지금 invite 세 키만 가진 평평한 객체(`additionalProperties:false`)다. 행동마다 키가 다르므로 이 증보가 **스키마 구조를 바꾼다**: 도구의 `args`는 `oneOf`(행동별 스키마)로 쓰고 선택은 `actionId`가 한다(JSON Schema `if/then`이 클라이언트 호환 위험이 크면 `args`를 느슨한 `object`로 두고 도메인 normaliser를 유일한 울타리로 삼는 대안은 S0 PR이 비교해 고른다. 어느 쪽이든 「도구 enum = 레지스트리 = OpenAPI」 드리프트 시험은 유지하고, 지금의 `ACTIONS.len()==1` 단정은 행동별 비교로 바뀐다).
+
+### V3. 에이전트가 만든 채널에 에이전트를 넣을지 — 합성 행동 한 개
+**결정**: `channel.create`가 **한 승인 안에서** (1) 채널 생성, (2) `addProposer`이면 제안 에이전트의 membership, (3) 그 에이전트가 hosted connection이면 새 채널을 그 connection의 `approved_channel_ids`에 추가, (4) `memberHandles`의 membership을 한 트랜잭션으로 실행한다. 둘 중 하나라도 실패하면 전체 롤백이다.
+
+이유:
+- 승인 한 번이 run 하나를 닫는다(V0). 「만들기 / 나를 넣기 / 승인 채널에 올리기」를 세 카드로 쪼개면 같은 일에 세 run·세 승인이 필요하고, 중간 상태(채널은 있는데 에이전트는 못 봄)가 사람에게 보인다.
+- 그러나 (3)은 보통의 REST 채널 생성보다 **더 많은 일을 한다**: 채널을 만드는 승인이 에이전트의 접근 범위를 넓힌다. 그래서 이 행은 카드에 **별도 행으로 늘 보인다**(`{label:"이 에이전트도 참여", value:"예 — 이 에이전트가 이 채널을 읽고 쓸 수 있게 돼요"}`). `addProposer:false`면 「아니요」 행이 보이고 (2)(3)은 일어나지 않는다. 승인자가 읽은 것과 실행된 것이 같아야 한다.
+- (3)은 **새로 만든 이 채널 하나**에만 적용된다. 이미 있는 채널을 넓히는 것은 `hosted.channels.grant`(V5)의 별도 승인이다.
+- 새 채널은 정의상 `kind<>'dm'`·미보관이라 confirm의 두 조건을 이미 만족한다. `confirmed_by`·`active_token_id`·`approved_scopes`는 건드리지 않는다. 그래서 ADR-0162 증보 2 B6의 DM 소유자 규칙에 영향이 없다.
+- 기각한 대안(V8-2)이 말하듯 「멤버십이 곧 승인 채널」로 묶지 않는다. `channel.member.add`로 에이전트를 넣어도 그 에이전트의 `approved_channel_ids`는 그대로다.
+
+### V4. `agent.rename` — 이름은 신뢰 표면이다(대상: 자기 자신 또는 관리하는 에이전트, V4-M)
+이름은 모든 메시지 옆·멘션 목록·서버 음성 안내 줄(`bins/momo-server/tests/agent_port_tools_conformance_pg.rs:1819-1825`: 「[보안 재인증](https://evil.example)」 이름으로 링크를 심으려는 시도)에 그려진다. 그리고 `@Display Name`이 멘션이 되므로 **다른 멤버의 이름을 가진 에이전트는 그 멤버의 멘션을 가로챈다.** 에이전트 제안 경로는 `normalized_join_display_name`(trim·1~100자)을 쓰지 않고 **더 엄격한 한 함수**를 거친다.
+
+`validated_agent_proposed_display_name(raw, roster, target)` — 제안자 자신이든 관리 대상이든 **같은 검증기**를 거친다(5번의 「자기 자신의 현재 이름」은 대상 에이전트의 현재 이름):
+1. NFKC 정규화 → 앞뒤 공백 제거 → 내부 공백열은 한 칸으로.
+2. 길이 1~32자(문자 수).
+3. **허용목록**: 글자(`L*`)·숫자(`N*`)·결합 표지(`M*`)·공백·`-`·`_`·이모지(Extended_Pictographic, 최대 2개). 이 밖의 모든 문자는 거절한다. 따라서 `@ < > [ ] ( ) : / \ . # & ` ` 따옴표 등 멘션·마크다운·URL을 이루는 문자가 이름에 들어올 수 없다.
+4. 제어·서식 문자(`Cc`·`Cf`: 영폭 공백, 방향 제어 포함)·줄바꿈·`Zl`/`Zp` 거절. (3)의 허용목록이 이미 포함하지만 단정을 따로 둔다.
+5. **충돌 검사**: 골격(skeleton = NFKC → casefold → 공백·`-`·`_` 제거 → 흔한 키릴·그리스 유사 문자 매핑)이 **같은 워크스페이스의 다른 비삭제 멤버의 `display_name` 또는 `handle` 골격**과 같으면 거절한다(대소문자 구분으로 멘션이 되는 현재 규칙의 모든 우회를 닫는다). 자기 자신의 현재 이름과 같으면 오류가 아니라 no-op이다.
+6. **예약어**: `oort`·`오르트`·`admin`·`administrator`·`system`·`시스템`·`관리자`·`운영자`·`보안`·`security`·`support`·`everyone`·`channel`·`here`·`all`·`모두`·`전체`(골격 비교, 목록은 코드 상수 + 시험).
+
+카드: 「대상 에이전트」(서버가 해석한 현재 표시 이름·핸들) · 「현재 이름 → 새 이름」 행. 대상이 제안자와 다르면 요약문이 「다른 에이전트의 이름을 바꿉니다」로 달라진다. 행 값은 **평문**이다(링크·멘션을 자동으로 해석하지 않는다는 렌더 규칙을 부록 A에 못박는다). 승인자는 `agent_editor`: **대상** 에이전트의 소유자 또는 admin(구독·개인 에이전트의 소유자는 admin이 아니어도 자기 에이전트 이름을 승인할 수 있다). 
+
+실행: 새 도메인 함수 `rename_agent_display_name_in_tx(conn, ws, target_agent, new_name)`(`momo-messaging/src/member_rename.rs`, 사람용 `rename_own_display_name_in_tx`의 쌍. `member` 행을 `FOR UPDATE`, `kind='agent'`, 같은 `member.renamed` 브로드캐스트를 co-member 채널마다 outbox로). 이 함수 하나를 **에이전트 제안 경로(자기·관리 대상)와 사람용 라우트가 같이 쓴다.** handle은 바꾸지 않는다(멘션 주소·connection 바인딩이라 별도 결정).
+
+**사람용 라우트(신규)**: `PATCH /v1/workspaces/{ws}/agents/{agent}` body `{displayName}`. `require_human` + `require_profile_editor_in_tx`(소유자 또는 admin). 검증은 사람의 책임 아래 `normalized_join_display_name`(생성 경로와 같음)에 **충돌 검사(V4-5)만** 더한다. 에이전트 제안 쪽만 허용목록·예약어를 건다 — 사람이 정한 「김 인턴 (비서)」는 막지 않고, 카드를 읽는 사람이 속을 수 있는 입력만 좁힌다. 감사 `member.renamed`는 사람용 자기 변경과 같은 `momo.member.renamed.v1`이고 `kind:"agent"`를 더한다. 웹·데스크탑·폰 UI는 이 증보의 범위 밖(UXUI 후속 티켓).
+
+### V4-M. 에이전트가 에이전트를 관리한다는 것 — 신뢰 모델(owner 위임: 오케스트레이터가 보수적으로 확정)
+성재가 「다른 에이전트도」를 골랐다(V9). 이름을 바꿀 수 있는 대상이 제안자 밖으로 나가는 순간 아래가 새로 생긴다. 보수적 기본값을 박고, 넓히는 것은 별도 증보로 둔다.
+
+1. **「관리한다」의 정의 = 같은 소유자.** 제안자 `A`와 대상 `B`가 모두 활성 에이전트이고, `agent.owner_human_id`가 **같고 NULL이 아니며** 그 사람이 지금 활성 사람 멤버이면 `A`는 `B`를 관리한다. 이 관계는 **새로 저장하지 않는다**(D7: 새 테이블·컬럼 0). 소유자가 없는(NULL) 에이전트는 자기 자신만 바꿀 수 있고 누구의 관리 대상도 아니다. 사람이 명시적으로 지정하는 관리 관계(별도 테이블·migration)는 이 증보가 열지 않는다 — 필요해지면 별도 증보다(PR 본문의 후속 결정).
+2. **승인자 = 대상 `B`의 소유자 또는 워크스페이스 admin**(`agent_editor`). 같은 소유자 규칙 때문에 소유자는 `A`의 소유자이기도 하지만, 승인자 판정은 `A`가 아니라 **`B`**를 기준으로 한다. 제안자의 소유자라는 사실만으로는 승인 권한이 생기지 않는다(소유자가 바뀐 `B`의 새 소유자나 admin이 아니면 승인할 수 없다). 에이전트 자신은 어떤 경우에도 승인자가 아니다(D2: 결정자는 `member.kind='human'`).
+3. **결정 때 관계를 다시 증명한다**(V1-d). 제안 뒤 `B`의 소유자가 바뀌었거나 `B`가 사라졌거나 일시 중지·삭제되었으면 `action_args_invalid`이고 승인은 소모되지 않는다.
+4. **대상 해석은 구분 불가 오류**: 핸들이 없는 에이전트, 사람 핸들, 소유자가 다른 에이전트, 소유자 NULL 에이전트 등 관리 조건을 만족하지 못하는 모든 경우는 같은 `InvalidArguments`다(V1-b와 같은 규칙). 제안자가 남의 에이전트 존재를 더듬을 수 없다.
+5. **반경**: 이 행동은 **표시 이름 하나**만 바꾼다. 사람 멤버는 대상이 될 수 없고, handle·프로필·스코프·승인 채널·역할은 건드리지 않는다. `hosted.channels.grant`는 계속 자기 connection만이다(V5) — 이름을 바꿀 수 있다고 접근 범위를 넓힐 수 있게 되지 않는다.
+6. **사칭·멘션 가로채기**: 검증기는 V4의 것 그대로이고 관리 대상에게도 예외가 없다. 충돌 검사는 `B` 자신의 현재 이름을 제외한 모든 비삭제 멤버(제안자 `A` 포함)와 한다. `A`가 `B`를 `A`와 같은 이름으로 만드는 것도 거절된다.
+7. **위임 불가 등급 유지**: `agent.rename`은 신원을 바꾸므로 (V7) 어떤 미래 「무승인 위임」에서도 제외한다. 관리 관계가 생겼다고 승인이 줄지 않는다.
+8. **관리 관계를 만들거나 지우는 일은 에이전트가 할 수 없다.** 관계는 `owner_human_id`에서 파생되므로, 에이전트가 소유자를 바꾸거나 에이전트를 만들고 소유자를 배정하는 길은 이 증보가 열지 않는다. 소유자 변경·에이전트 생성은 지금처럼 사람의 REST다(그록봇 등 새 에이전트 생성은 V7 범위 밖). 명시적 관리 관계가 생기는 후속 증보에서도 만들기·지우기는 사람 전용이어야 한다.
+9. **상한**: 제안자당 `pending workspace_action` 3개(V1-e)에 더해, 같은 대상에 대한 `agent.rename`이 pending이면 두 번째 제안은 `Conflict`다(카드 스팸·이름 번복 경쟁 방지).
+
+### V5. `hosted.channels.grant` — 에이전트가 자기 접근 범위를 넓혀 달라고 청하는 유일한 길
+가장 위험한 행동이라 가장 좁다.
+- 대상 connection = handle이 가리키는 제안자의 활성 connection **하나**. 다른 에이전트의 범위는 제안할 수 없다(권한 상승의 반경을 자기 자신으로 가둔다).
+- 채널은 V1-b(공개 ∪ 이미 live membership)이고 `kind<>'dm'`·미보관이다. 남의 비공개 채널에 들어가고 싶다는 제안은 존재 자체가 거절된다.
+- 승인자는 admin(ADR-0162의 「채널 승인 권한 주체는 관리자」를 그대로 지킨다). 카드는 채널 이름·공개 범위·**인원 수**·현재 승인 채널 수를 행으로 보인다.
+- 실행: `momo-auth`의 새 도메인 함수 `grant_hosted_channels_in_tx(conn, ws, connection, channels, actor)`. connection 행을 `FOR UPDATE`로 잠그고(`status='active' AND proved_at IS NOT NULL`), confirm과 같은 모양으로 배열 합집합 + `membership`(`ON CONFLICT … left_at=NULL`)을 쓴다. `confirmed_by`·`confirmed_at`·`active_token_id`·`approved_scopes`·`approved_dm_channel_ids`는 **쓰지 않는다**(DM 규칙 불변). 합계 50개 상한.
+- 이 함수가 생기는 순간 「confirm에서만 쓰이는」 배열에 쓰기 경로가 하나 늘어난다. 정본 정의가 SQL 함수이므로 읽는 쪽 변경은 없고, 시험이 「쓰기 경로 = confirm·consent·grant 셋」을 고정한다.
+
+### V6. 감사와 결과
+감사는 행동마다 **`action.approved` 1행(기존)과 도메인 행 1행 이상**이다. 이름은 이 증보가 정한다:
+| 행동 | 도메인 감사 `action` | `detail`(비밀 없음) |
+|---|---|---|
+| `channel.create` | `channel.created` | `{name, kind, add_proposer, member_count, via_agent, approval_id}` |
+| `channel.create`(승인 채널 추가가 있을 때) | `hosted_connection.channels_granted` | `{connection_id, channel_ids, via_agent, approval_id}` |
+| `channel.member.add` | 멤버마다 `channel.member_added` | `{channel_id, role:"member", via_agent, approval_id}` |
+| `agent.rename` | `member.renamed`(대상 멤버 기준) | `{old, new, kind:"agent", via_agent, approval_id, managed}` — `managed`는 대상이 제안자와 다를 때 true이고 그때 `target_agent`(대상 멤버 id)·`owner_member_id`를 더한다 |
+| `workspace.settings.update` | `workspace_setting.updated`(기존 이름) | `{keys, via_agent, approval_id}` — 키 이름만, **값은 싣지 않는다**(`welcome_prompt`는 긴 사용자 문구). 값의 옛/새는 카드 영속 props에만 있다 |
+| `hosted.channels.grant` | `hosted_connection.channels_granted` | 위와 같음 |
+`actor`는 승인자(`.by`), 제안자는 `.about`(기존 `action.approved`와 같은 모양). 기존 REST 두 경로(`channels.create`·`add_member`)는 audit이 없었다. **이 증보는 그 REST에 audit을 소급하지 않는다**(무관한 변경은 별도 이슈). 새 audit은 에이전트 경유 경로에서만 쓴다.
+
+**제안한 에이전트에게 결과를 돌려주는가**: 돌려주되 **비밀이 아닌 것만, 기존 통로로** 돌려준다. 새 통로를 만들지 않는다.
+- 비밀이 아닌 결과(생성된 채널의 id·이름, 추가된 멤버, 바뀐 이름)는 승인 때 이미 채널에 남는 에이전트 명의 `action_result` 메시지(부록 B)의 `ref`·`rows`에 있다. 에이전트는 다음 턴에 `oort_conversation_read`로 그것을 읽는다. 채널 생성 뒤 새 채널에 말하려면 `oort_message_post`의 `channelId`가 필요하므로 `ref.id`가 읽혀야 한다 — S1이 `oort_conversation_read`가 `action_result`의 `ref`를 에이전트에게 내보내는지 확인하고, 아니라면 결과 줄 본문에 채널 이름과 id를 평문으로 싣는다(비밀이 아니다).
+- **초대 링크(D4의 1회 시크릿)는 돌려주지 않는다.** 에이전트에게 링크가 가면 (a) 채널 전체가 읽는 메시지가 되거나 (b) 에이전트의 외부 런타임·로그에 남는다. 「승인자에게만 1회 보인다」는 D4의 성질 자체가 이 행동의 보안 모양이다. 대신 결과 줄은 「링크는 승인한 분만 볼 수 있어요. 필요하면 승인한 분이 전달해요」로 사람에게 다음 행동을 알려 준다. 승인자가 링크를 에이전트와 공유하고 싶다면 사람이 자기 손으로 붙여 넣는다.
+- 이 증보의 다섯 행동은 1회 시크릿이 **없다**(`secretOnce` 부재). 결정 응답의 `result`는 `{actionId, ref}`만 갖는다.
+
+### V7. 범위 밖과 이유
+- **테마·외양**: 기기 localStorage(ADR-0174)라 서버가 못 바꾼다. D6의 `command_suggest`·`settings_preview`(#2511 AX-5)로 간다.
+- **다른 그록봇을 자동으로 만들어 초대**: 그록 쪽 API가 공개 문서에서 확인되지 않았고 약관 위험이 있다. 그리고 oort 쪽에서도 hosted 연결의 **confirm은 구조상 사람의 행동**이다(ADR-0162: 승인 없이 capability 0, 사람의 confirm + 별도 active proof + unpause). 이 증보가 에이전트에게 연결을 만들거나 confirm할 길을 주지 않는다. 사람이 새 에이전트를 연결하는 경로는 변하지 않는다.
+- **`workspace.settings.update`의 나머지 키**: 성재 결재로 **`welcome_prompt`·`role_labels` 두 키만** 연다(V9). `allowed_agent_models`(모델·비용 정책)와 `welcome_agent_member_id`(에이전트가 자기를 환영 에이전트로 지명)는 인자 스키마에 없고 `additionalProperties:false`와 도메인 허용목록 둘 다에서 거절한다. 앞으로 허용 키가 늘어날 때마다 이 증보를 개정한다 — 「설정 bag의 임의 키」를 여는 일반 행동은 없다.
+  - 승인자는 새 `workspace_operator`(owner/admin + 플랫폼 운영 스코프, `require_workspace_operator`와 같은 판정). `require_admin`보다 넓은 집합이 아니라 같은 집합 위에 운영 스코프를 얹은 판정이라 별도 변형으로 둔다.
+  - `welcome_prompt`는 환영 에이전트의 턴에 들어가는 문구다. 에이전트가 다른 에이전트의 지시문을 쓰는 길이므로 제안 상한을 REST(2000자)보다 낮은 500자로 두고, 카드가 **전문을 평문으로** 보인다(옛 값 → 새 값). `role_labels`는 역할 키(`ROLE_LABEL_KEYS`)별 ≤48바이트 평문이다.
+- **`member.role.set`·`webhook.create`**: 이번 범위가 아니다(각각 declared 그대로, `webhook.create`는 ADR-0004 증보 4 / AX-8 #2514).
+- **handle 변경, 사람 멤버 이름 변경, 소유자가 다른 에이전트의 이름 변경**: 이 증보에 없다. 관리 대상은 같은 소유자의 에이전트로 한정된다(V4-M).
+- **「관리자 위임으로 무승인 허용」**: **이번에도 미룬다.** D3의 이유(스코프 원장·설정 표면 추가가 필요)가 그대로이고, 이 증보의 행동 중 둘(`hosted.channels.grant`, `agent.rename`)은 접근 범위와 신원을 바꾸므로 위임 대상이 **될 수 없는 등급**으로 못박는다 — 나중의 위임 ADR은 이 둘을 위임 가능 목록에서 제외하는 것을 전제로 쓴다.
+- 사람용 rename UI, 카드 렌더러의 행 종류 추가(`ref.type` 확장 등) 화면 작업은 UXUI 후속이다.
+
+### V8. 기각한 대안과 업계 비교
+1. **에이전트에게 `channels:manage` 같은 스코프를 주고 직접 실행**: Slack(`channels:manage`)·Discord(`MANAGE_CHANNELS`) 봇 모델이다. 설치 때 한 번 동의하면 이후 호출마다 사람의 확인이 없다. oort는 에이전트 토큰 유출 = 워크스페이스 장악을 막으려고 D2에서 기각했고, 여기서도 같다. Slack Workflow Builder류의 「사람이 승인 단계를 누르는 흐름」에 가깝다. **행동마다 사람 승인 + 승인자 권한 실행**이 oort의 위치다.
+2. **membership = 승인 채널**: `channel.member.add`가 에이전트를 넣으면 자동으로 읽고 쓰게 하는 단순한 모양. ADR-0162가 사람의 경계로 만든 `approved_channel_ids`를 이름 모를 admin 한 명의 멤버 추가가 조용히 넓히게 된다. 기각.
+3. **세 장 카드로 쪼개기(만들기 → 나 넣기 → 승인 채널 올리기)**: 한 run은 한 번만 제안하므로 세 run이 필요하고 중간 상태가 사람에게 보인다. V3의 합성이 대신한다.
+4. **에이전트가 uuid를 인자로**: 에이전트가 id를 알려면 roster·채널 목록 읽기가 필요한데 hosted 토큰에는 그런 스코프가 없다. 이름·핸들을 서버가 해석한다(V1-a).
+5. **에이전트 rename에 기존 `normalized_join_display_name` 사용**: 링크 주입(1819)·멘션 가로채기를 막지 못한다. V4.
+6. **초대 링크를 에이전트에게 돌려주기**: V6.
+7. **관리 관계를 별도 테이블로 두고 사람이 지정**: 가장 명시적이지만 migration·RLS·관리 UI가 필요하고 이 증보의 「새 테이블 0」(D7)을 깬다. 소유자에서 파생하는 쪽이 이미 사람이 정한 사실(소유자 배정)을 재사용한다. 후속 증보로 남긴다.
+8. **제안자의 소유자만으로 승인 허용**: 승인 권한이 관리 대상이 아니라 제안자에게서 나온다. 대상의 소유자가 바뀐 경우를 막지 못한다. V4-M-2.
+
+### V9. 결재 기록 (2026-10-11)
+성재가 2026-10-11 AskUserQuestion으로 결재했다(질문 문구와 함께 인용).
+1. 채널 만들기: 「**한 승인에 묶기 (Recommended)**」 — `addProposer` 기본값 true, 채널 생성·membership·승인 채널 추가를 한 트랜잭션으로(V3).
+2. 이름 바꾸기: 「**다른 에이전트도**」(추천안 「자기 자신만」이 아님). 선택지 설명: 「관리하는 다른 에이전트의 이름도 바꿀 수 있게 해요. 에이전트가 에이전트를 관리하는 신뢰 모델을 새로 설계해야 해요.」 → V4-M. 신뢰 모델의 세부 기본값(같은 소유자·승인자 판정 기준·위임 불가·관계 변경은 사람 전용)은 **「owner 위임: 오케스트레이터가 보수적으로 확정」**.
+3. 설정 바꾸기: 「**문구 2개만 열기**」(추천안 「열지 않음」이 아님) — `welcome_prompt`·`role_labels` 두 키뿐, operator(`require_workspace_operator`) 게이트. `allowed_agent_models`·`welcome_agent_member_id` 같은 나머지 키는 계속 막는다(V7).
+4. 채널 권한 단독 제안: 「**제한해서 허용 (Recommended)**」 — `hosted.channels.grant`(V5).
+
+이의가 없으면 확정으로 둔 기본안(결재 대상이 아니었다): 초대 링크는 에이전트에게 돌려주지 않는다(V6), 무승인 위임은 미룬다(V7), 사람용 `PATCH …/agents/{agent}` 라우트를 범위에 넣는다(V4).
+
+**남은 갈림길(구현 전 확인, 오케스트레이터 기본값으로 진행 가능)**: ① 「관리한다」를 소유자 파생(기본)으로 둘지, 사람이 지정하는 명시적 관계(테이블 필요)로 갈지 ② `welcome_prompt` 제안 상한 500자.
+
+### V10. 구현 슬라이스
+| ID | 내용 | 선행 |
+|---|---|---|
+| S0 | 레지스트리 기반: `RequiredRole::AgentEditor`, `ActionArgs` 변형, `validated_action_args`를 순수 모양 검증 + 트랜잭션 안 해석(이름·핸들)으로 분리, 도구 `args` 스키마 구조(`oneOf`) 재작성, 드리프트 시험 재작성, 보류 승인 3개 상한, `GET actions`·OpenAPI 갱신, 동의 화면 문구 | **ADR Accepted** |
+| S1 | `channel.create`(+합성 V3) + 감사 + 결과 줄 | S0 |
+| S2 | `channel.member.add` | S0 |
+| S3 | `agent.rename`(자기·관리 대상, V4-M의 대상 해석·같은 소유자 규칙·`agent_editor` 판정) + 사람용 `PATCH …/agents/{agent}` + 공유 도메인 함수 + 엄격 검증기 + 1819 방식 red 시험 | S0 |
+| S4 | `hosted.channels.grant`(`momo-auth` 도메인 함수 + 행동) | S0 |
+| S5 | `workspace.settings.update`(두 키): `RequiredRole::WorkspaceOperator`, 두 키 전용 인자 스키마·REST 검증기 재사용·`welcomePrompt` ≤500자, 카드 옛→새 평문 행, `workspace_setting.updated` 감사(`via_agent`, 값 제외), `DECLARED_NOT_EXECUTABLE` 항목 추가·삭제 정리 | S0 |
+| S6 | 에이전트 지시문·문서: hosted 루틴이 새 행동과 「제안 뒤 turn 종료」를 배운다 | S1~S5 |
+행동 하나당 손대는 곳은 다섯이다: `momo-agent/src/actions.rs`(`ACTIONS`·카드 행·`effect` 문장) · `routes/actions.rs`(`validated_action_args`) · `routes/approvals.rs`(`execute_workspace_action`) · `momo-mcp/src/tools.rs`(`WORKSPACE_ACTION_IDS`·`action_propose_schema`) · `docs/api/openapi.yaml`(`WorkspaceActionId`·스키마).
+
+### V11. 수용 기준(구현 슬라이스가 인용할 red proof)
+각 시험은 해당 분기를 지우면 실패해야 하고 그 RED를 PR 본문에 남긴다.
+- `ACTIONS` id 집합 = 도구 `actionId` enum = OpenAPI enum, 그리고 행동별 `args` 스키마가 도구와 카탈로그에서 같다(시험이 행동마다 잰다).
+- 인자에 uuid·알 수 없는 키가 있으면 `InvalidArguments`. 남의 비공개 채널·DM·존재하지 않는 채널·보관된 채널은 **같은** 오류(구분 불가)다.
+- `channel.create`: 비-admin 결정자는 403 `role_required`이고 채널 0개·승인 pending. 승인 시 채널·승인자 owner membership·(`addProposer`이면) 에이전트 membership·`approved_channel_ids`가 **한 tx**이고, 중간 실패 시 전부 없다. `addProposer:false`면 에이전트 membership·승인 채널 0.
+- `hosted.channels.grant`: 다른 에이전트의 connection은 건드리지 못한다(인자 표면에 없음을 시험). `confirmed_by`·`active_token_id`·`approved_scopes`·`approved_dm_channel_ids` 불변. 51번째 채널은 거절.
+- `agent.rename`(관리 대상): 소유자가 다른 에이전트·소유자 NULL 에이전트·사람 핸들·없는 핸들은 같은 `InvalidArguments`. 결정 전에 대상의 소유자가 바뀌면 `action_args_invalid`·승인 pending. 제안자의 소유자이지만 대상의 소유자도 admin도 아닌 사람은 403 `role_required`. 같은 대상에 pending `agent.rename`이 있으면 두 번째 제안은 `Conflict`. 에이전트가 제안자와 같은 이름으로 대상을 바꾸려는 것도 거절.
+- `agent.rename`: 1819의 링크 이름·`@다른멤버`·`<@다른멤버>`·영폭 공백이 섞인 이름·다른 멤버 이름의 대소문자·전각 변형·예약어가 전부 `InvalidArguments`. 승인자가 소유자(비-admin)여도 승인된다. 제3자 비-admin은 403 `role_required`.
+- `workspace.settings.update`: 두 키 밖의 키(`allowedAgentModels`·`welcomeAgentMemberId` 포함)는 `InvalidArguments`. admin이 아닌 결정자는 403 `role_required`·설정 불변. `welcomePrompt` 501자는 거절. 승인 시 `welcome_prompt`·`role_labels` 외의 설정 키가 바뀌지 않는다(저장 전후 bag 비교). 감사 행에 값이 없다.
+- 사람용 `PATCH …/agents/{agent}`: 소유자·admin만 성공, 제3자 403, 에이전트 bearer 403, 충돌 이름 409.
+- 감사: 행동마다 `action.approved` + V6의 도메인 행. 어느 행에도 이름 외 비밀이 없다(1회 시크릿이 없는 행동들이지만 grep 시험은 유지).
+- 결정 때 재증명: 제안 뒤 채널 이름이 선점되거나 에이전트가 방에서 빠지면 `action_args_invalid`, 승인 pending 유지.
