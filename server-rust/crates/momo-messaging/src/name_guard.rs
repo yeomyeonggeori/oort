@@ -244,7 +244,7 @@ fn is_greek(c: char) -> bool {
 fn is_shape_script(c: char) -> bool {
     matches!(c as u32,
         0x1100..=0x11FF | 0x3130..=0x318F | 0xA960..=0xA97F | 0xD7B0..=0xD7FF
-        | 0x3040..=0x30FF | 0x31F0..=0x31FF | 0x4E00..=0x9FFF | 0x3400..=0x4DBF)
+        | 0x3007 | 0x3040..=0x30FF | 0x31F0..=0x31FF | 0x4E00..=0x9FFF | 0x3400..=0x4DBF)
 }
 
 /// Whether one word carries letters of more than one of Latin, Cyrillic, Greek
@@ -323,7 +323,9 @@ pub fn skeleton(raw: &str) -> String {
     let folded: String = raw
         .nfkd()
         .flat_map(char::to_lowercase)
-        .filter(|c| !(c.is_whitespace() || *c == '-' || *c == '_' || is_combining_mark(*c)))
+        .filter(|c| {
+            !(c.is_whitespace() || matches!(*c, '-' | '_' | '\u{30FB}') || is_combining_mark(*c))
+        })
         .map(confusable)
         .map(ascii_confusable)
         .collect();
@@ -347,7 +349,9 @@ fn ascii_confusable(c: char) -> char {
 fn light_skeleton(raw: &str) -> String {
     raw.nfkd()
         .flat_map(char::to_lowercase)
-        .filter(|c| !(c.is_whitespace() || *c == '-' || *c == '_' || is_combining_mark(*c)))
+        .filter(|c| {
+            !(c.is_whitespace() || matches!(*c, '-' | '_' | '\u{30FB}') || is_combining_mark(*c))
+        })
         .map(confusable)
         .collect()
 }
@@ -793,7 +797,9 @@ mod tests {
     /// Japanese names.
     #[test]
     fn latin_cannot_borrow_shapes_from_jamo_kana_or_han_but_names_stay_usable() {
-        for hostile in ["Aㅣice", "Admㅣn", "ㅇㅇrt", "Aliceー", "Bロt", "Aエ"] {
+        for hostile in [
+            "Aㅣice", "Admㅣn", "ㅇㅇrt", "Aliceー", "Bロt", "Aエ", "〇〇rt",
+        ] {
             assert!(
                 validated_agent_proposed_display_name(hostile).is_err(),
                 "{hostile}"
@@ -813,6 +819,12 @@ mod tests {
             );
         }
         assert_eq!(skeleton("Aㅣice"), skeleton("Alice"));
+        // The katakana middle dot is a separator like `-`: it cannot split a word
+        // to dodge the reserved list or a collision.
+        assert_eq!(skeleton("Ad・min"), skeleton("admin"));
+        assert_eq!(skeleton("Ad･min"), skeleton("admin"));
+        // …and inside a Latin word it is a mixed-script word, refused outright.
+        assert!(validated_agent_proposed_display_name("Ad・min").is_err());
     }
 
     /// Review N2: `Ali` is a name, not the word `all`.
