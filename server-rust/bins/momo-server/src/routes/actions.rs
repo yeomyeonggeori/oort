@@ -611,6 +611,12 @@ pub struct ResolvedAction {
     /// resolution found, not from the strings the agent typed.
     pub validated: ValidatedActionArgs,
     pub subject: GateSubject,
+    /// The **ids** the names resolved to (`Value::Null` when the action names
+    /// nothing). Stored beside the args at proposal time and compared at
+    /// decision time: a handle can be changed and a channel can be renamed, so
+    /// "the same name resolves again" is not "the same thing the approver read".
+    /// A different id at decision time is `action_args_invalid`.
+    pub pins: Value,
 }
 
 /// Shape-validate `args`, then resolve whatever they name against the workspace,
@@ -713,6 +719,10 @@ pub async fn resolve_action_in_tx(
                 .filter(|member| !already_in.contains(&member.id))
                 .map(ResolvedMember::card_label)
                 .collect();
+            if new_names.is_empty() {
+                // Everyone named is already in: nothing to approve.
+                return Ok(Err(ApiError::bad_request("no member to add")));
+            }
             validated.rows = actions::channel_member_add_rows(
                 &found.name,
                 &found.kind,
@@ -725,7 +735,23 @@ pub async fn resolve_action_in_tx(
             GateSubject::Workspace
         }
     };
-    Ok(Ok(ResolvedAction { validated, subject }))
+    let pins = match &validated.args {
+        ActionArgs::InviteCreate { .. } => Value::Null,
+        ActionArgs::ChannelCreate { members, .. } => {
+            json!({"members": members.iter().map(|m| m.id.to_string()).collect::<Vec<_>>()})
+        }
+        ActionArgs::ChannelMemberAdd {
+            channel, members, ..
+        } => json!({
+            "channel": channel.as_ref().map(|c| c.id.to_string()),
+            "members": members.iter().map(|m| m.id.to_string()).collect::<Vec<_>>(),
+        }),
+    };
+    Ok(Ok(ResolvedAction {
+        validated,
+        subject,
+        pins,
+    }))
 }
 
 /// One optional integer argument, inside the ceilings the registry publishes.

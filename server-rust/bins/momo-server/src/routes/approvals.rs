@@ -1171,6 +1171,18 @@ async fn execute_workspace_action(
         }
     }
 
+    // The ids this card was drawn from must be the ids the names resolve to now.
+    // (After the subject gate above, so a decider who is not eligible learns
+    // nothing about whether the target moved.)
+    let stored_pins = approval
+        .payload
+        .get("action")
+        .and_then(|action| action.get("pins"))
+        .unwrap_or(&Value::Null);
+    if stored_pins != &resolved.pins {
+        return Ok(Ok(args_invalid_refusal(approval, input, now)));
+    }
+
     // ---- 3. the action's own executor --------------------------------------
     let executed = match &resolved.validated.args {
         ActionArgs::ChannelMemberAdd {
@@ -1492,7 +1504,9 @@ async fn execute_channel_create(
     }
     let mut added = 0usize;
     let mut added_ids: Vec<String> = Vec::new();
-    for member in members {
+    let mut ordered: Vec<&ResolvedMember> = members.iter().collect();
+    ordered.sort_by_key(|member| member.id);
+    for member in ordered {
         // The approver already owns the channel, and the agent is handled above:
         // re-adding either would be a no-op at best and, for the approver, a
         // downgrade from `owner` (the upsert rewrites the role).
@@ -1576,7 +1590,11 @@ async fn execute_channel_member_add(
 ) -> Result<Execution, momo_db::DbError> {
     let mut audits = Vec::new();
     let mut added = 0usize;
-    for member in members {
+    // Inserted in id order: two approvals that share members must take their
+    // row locks in the same order or they can deadlock.
+    let mut ordered: Vec<&ResolvedMember> = members.iter().collect();
+    ordered.sort_by_key(|member| member.id);
+    for member in ordered {
         if already_in.contains(&member.id) {
             continue;
         }

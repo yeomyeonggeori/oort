@@ -8221,3 +8221,279 @@ async fn an_approved_member_add_seats_members_in_a_channel_the_agent_can_see() {
         .unwrap();
     assert_eq!(state, "pending");
 }
+
+/// **What the approver read is what runs (증보 V1-d, pins).**
+///
+/// A handle can be changed and a channel can be renamed after the card is drawn,
+/// so "the same name resolves again" is not enough: the ids the names resolved to
+/// are pinned in the payload and a different id at the tap is `action_args_invalid`
+/// with nothing written. Also: an agent target is marked on the card, a proposal
+/// with nobody new to add is refused, and unseen channels (DM, left room,
+/// archived twin) look exactly like a missing one without writing a card or an
+/// audit row.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_member_add_card_is_pinned_to_the_ids_it_was_drawn_from() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (x2, x2_handle) = seed_extra_member_3706(&su, &fixture, "pin").await;
+    let (x3, _x3_handle) = seed_extra_member_3706(&su, &fixture, "swap").await;
+    let (p, p_name) = seed_channel_3707(
+        &su,
+        &fixture,
+        "private",
+        &[(fixture.hosted_agent, "member")],
+    )
+    .await;
+
+    // ---- a handle moved to somebody else after the card was drawn ----------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.member.add",
+        json!({"channel": p_name, "memberHandles": [x2_handle]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    sqlx::query("UPDATE member SET handle=$2 WHERE id=$1")
+        .bind(x2)
+        .bind(format!("moved-{}", &x2.simple().to_string()[..8]))
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE member SET handle=$2 WHERE id=$1")
+        .bind(x3)
+        .bind(&x2_handle)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(stale["status"], "action_args_invalid");
+    assert_eq!(
+        membership_role_3707(&su, p, x3).await,
+        None,
+        "the swapped-in member"
+    );
+    assert_eq!(membership_role_3707(&su, p, x2).await, None);
+
+    // ---- a channel renamed away and its name reused ------------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.member.add",
+        json!({"channel": p_name, "memberHandles": [x2_handle]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let (decoy, _) = seed_channel_3707(
+        &su,
+        &fixture,
+        "private",
+        &[(fixture.hosted_agent, "member")],
+    )
+    .await;
+    sqlx::query("UPDATE channel SET name=$2 WHERE id=$1")
+        .bind(p)
+        .bind(format!("renamed-{}", &p.simple().to_string()[..8]))
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE channel SET name=$2 WHERE id=$1")
+        .bind(decoy)
+        .bind(&p_name)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(stale["status"], "action_args_invalid");
+    assert_eq!(membership_role_3707(&su, decoy, x3).await, None);
+
+    // ---- an agent as the member to add is marked on the card ---------------
+    let agent_handle = format!("bot-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    sqlx::query("UPDATE member SET handle=$2 WHERE id=$1")
+        .bind(fixture.managed_agent)
+        .bind(&agent_handle)
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO workspace_membership(workspace_id, member_id, role) VALUES($1,$2,'member') \
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.managed_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.member.add",
+        json!({"channel": p_name, "memberHandles": [agent_handle]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap())
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    let shown = card["action"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["label"] == "추가할 멤버")
+        .unwrap()["value"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        shown.contains("에이전트") && shown.contains(&agent_handle),
+        "{shown}"
+    );
+
+    // ---- unseen channels write nothing and look like a missing one ---------
+    let dm = Uuid::new_v4();
+    let dm_name = format!("dm-{}", &dm.simple().to_string()[..10]);
+    sqlx::query(
+        "INSERT INTO channel(id, workspace_id, kind, name, dm_key, created_by) \
+         VALUES($1,$2,'dm',$3,$4,$5)",
+    )
+    .bind(dm)
+    .bind(fixture.workspace)
+    .bind(&dm_name)
+    .bind(format!("{dm}"))
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .expect("seed dm");
+    sqlx::query("INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)")
+        .bind(fixture.workspace)
+        .bind(dm)
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (left_room, left_name) = seed_channel_3707(
+        &su,
+        &fixture,
+        "private",
+        &[(fixture.hosted_agent, "member")],
+    )
+    .await;
+    sqlx::query("UPDATE membership SET left_at=now() WHERE channel_id=$1 AND member_id=$2")
+        .bind(left_room)
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let twin = format!("twin-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    for archived in [true, false] {
+        let id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO channel(id, workspace_id, kind, name, created_by, archived_at) \
+             VALUES($1,$2,'private',$3,$4, CASE WHEN $5 THEN now() END)",
+        )
+        .bind(id)
+        .bind(fixture.workspace)
+        .bind(&twin)
+        .bind(fixture.human)
+        .bind(archived)
+        .execute(&su)
+        .await
+        .unwrap();
+        if !archived {
+            // The live twin is private and the agent is not in it.
+            continue;
+        }
+    }
+    let count_state = |su: PgPool, ws: Uuid| async move {
+        let rows: (i64, i64, i64) = sqlx::query_as(
+            "SELECT (SELECT count(*) FROM approval WHERE workspace_id=$1), \
+                    (SELECT count(*) FROM message WHERE workspace_id=$1 AND type::text='approval_request'), \
+                    (SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action IN \
+                       ('action.approved','channel.member_added','channel.created',\
+                        'hosted_connection.channels_granted'))",
+        )
+        .bind(ws)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        rows
+    };
+    let before = count_state(su.clone(), fixture.workspace).await;
+    let mut answers = Vec::new();
+    for channel in [dm_name, left_name, twin, "no-such-room-at-all".to_string()] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "channel.member.add",
+            json!({"channel": channel, "memberHandles": [x2_handle]}),
+        )
+        .await;
+        answers.push((status, refused["error"].clone()));
+    }
+    assert!(
+        answers.iter().all(|a| a.0 == 400 && a.1 == answers[0].1),
+        "{answers:?}"
+    );
+    assert_eq!(count_state(su.clone(), fixture.workspace).await, before);
+
+    // ---- nobody new to add is not a proposal -------------------------------
+    sqlx::query("INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)")
+        .bind(fixture.workspace)
+        .bind(decoy)
+        .bind(x3)
+        .execute(&su)
+        .await
+        .unwrap();
+    let x3_handle: String = sqlx::query_scalar("SELECT handle FROM member WHERE id=$1")
+        .bind(x3)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.member.add",
+        json!({"channel": p_name, "memberHandles": [x3_handle]}),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+}
