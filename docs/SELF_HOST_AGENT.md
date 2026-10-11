@@ -1116,8 +1116,11 @@ scopes; both halves are required, and narrowing either one closes the tool
 again:
 
 ```json
-{"approvedScopes": ["agent:port:connect", "agent:inbox:read", "messages:write", "workspace:propose"]}
+{"approvedScopes": ["agent:port:connect", "agent:inbox:read", "messages:read", "messages:write", "workspace:propose"]}
 ```
+
+(`messages:read` is there on purpose: the outcome of a proposal is a line in the
+channel, and `oort_conversation_read` needs that scope to show it to you.)
 
 **The rule the runtime has to learn: propose, then end the turn.**
 
@@ -1148,8 +1151,11 @@ If the VM wakes after it expired and nobody re-claimed the job, the same
 `oort_job_release` on an expired lease answers 409. If you call
 `oort_jobs_claim` first you get a new handle and the old one answers 409.
 
-The decision arrives as new inbox work, not as a return value from this call.
-An unanswered proposal expires on its own (one hour) and releases the run.
+The decision is **not** returned from this call, and it does not wake you: an
+approved action runs inside the person's tap, closes the run as succeeded, and
+leaves its outcome as a line in the channel (see "Reading the result" below). You
+see that line the next time you are called and read the channel. An unanswered
+proposal expires on its own (one hour) and releases the run.
 
 `actionId` is a closed set — read it from the server rather than hard-coding it,
 because a build that does not serve an action refuses it:
@@ -1162,9 +1168,15 @@ curl -fsS -H "authorization: Bearer ${ACCESS}" \
 Rows carry `executable`; a `false` row carries `unavailableReason` and cannot be
 proposed. Each row's `argsSchema` is the contract, and the tool's `args` is a
 `oneOf` with one closed branch per action (the branch `title` is the `actionId`).
-**You never send an id.** Channels are named by their name (`#plans` or `plans`),
-members and agents by their handle; the server finds them and the card shows what
-it found, so what the approver reads is what runs.
+**You never send an id.** Channels are named by their name, members and agents by
+their handle; the server finds them and the card shows what it found, so what the
+approver reads is what runs. A channel *name* is lowercase letters, digits, `-`
+and `_` (1..80 characters, starting and ending with a letter or digit);
+`channel.create`'s `name` is exactly that, while the `channel` of
+`channel.member.add` and the entries of `hosted.channels.grant` may also carry a
+leading `#`. A handle is 2..32 characters of `a-z`, `0-9`, `-`, `_` (a leading `@`
+is accepted). Anything else is refused with the single `InvalidArguments` below,
+so check your arguments against these rules rather than retrying.
 
 | `actionId` | `args` | Who approves (`requiredRole`) |
 |---|---|---|
@@ -1182,25 +1194,31 @@ What each one does, and what to expect:
   adds it to the channels your connection may read and write — the card says so on
   its own row (「이 에이전트도 참여」). Set `addProposer: false` to create a channel
   you do not join. The new channel's id is in the outcome line below; you need it
-  for `oort_message_post`.
+  for `oort_message_post`. A channel name that is already taken does not refuse
+  the *proposal* — the approver's tap finds out (see "Limits you can hit").
 - **`channel.member.add`** seats members with the `member` role; someone already
-  in the channel is skipped, never demoted. It does **not** widen your own reach.
+  in the channel is skipped, never demoted (if *everyone* you name is already in,
+  the proposal is refused). It does **not** widen your own reach.
 - **`agent.rename`** changes a display name, never a handle. The name is checked
   strictly because it is a trust surface (it is drawn beside every message and is
-  a mention target): letters, digits, `-`, `_`, spaces and at most two emoji, up
-  to 32 characters — no `@ < > [ ] ( ) : / \ . # &`, no links, no invisible or
-  direction-control characters, nothing that looks like another member's name or
-  handle, and no reserved word (`admin`, `system`, `oort`, `support`, …). A name
-  that would also *read as a mention of* another member (it is a whole-word prefix
-  of their name or handle, or the reverse) is refused too. Any refusal is the same
-  `InvalidArguments`; the server does not say which rule you hit.
-- **`hosted.channels.grant`** is the only way to ask for more reach, and it is
-  deliberately the narrowest: your own connection, channels you can already see,
-  at most 50 approved channels in total. Anything else — somebody else's private
-  channel, a DM, a channel that does not exist — is the same refusal.
+  a mention target): letters, digits, `-`, `_`, spaces and at most 2 emoji, up to
+  32 characters (at most 2 emoji) — no `@ < > [ ] ( ) : / \ . # &`, no links, no
+  invisible or direction-control characters, only Latin, Hangul, Han or kana
+  letters (Cyrillic or Greek only on their own, never mixed into a word), nothing
+  that looks like another member's name or handle, and no reserved word (`admin`,
+  `system`, `oort`, `support`, …). A name that would also *read as a mention of*
+  another member (it is a whole-word prefix of their name or handle, or the
+  reverse) is refused too. Any refusal of the name or of who it applies to is the
+  same `InvalidArguments`; the server does not say which rule you hit.
+- **`hosted.channels.grant`** is the only way to widen your reach into channels
+  that **already exist**, and it is deliberately the narrowest: your own
+  connection, channels you can already see, at most 50 approved channels in total.
+  It also **makes you a member** of each channel (a public one is joined, not just
+  allowed). Anything else — somebody else's private channel, a DM, a channel that
+  does not exist, channels that are all already approved — is the same refusal.
 - **`workspace.settings.update`** changes `welcome_prompt` (the text the welcome
   agent is given — so it is capped at 500 characters and shown to the approver in
-  full) and `role_labels` (display names for the roles; it replaces the whole
+  full; no hidden or control characters, line breaks are fine) and `role_labels` (display names for the roles; it replaces the whole
   object and changes no permission). `allowedAgentModels`,
   `welcomeAgentMemberId` and every other setting are not accepted.
 
@@ -1211,13 +1229,17 @@ channel — read it with `oort_conversation_read` on your next turn. For
 plain text; for `agent.rename` it carries the old and new name; the settings line
 names the keys and never the values. A rejection or an expired card is also a line
 and the run ends. **An invite link is never returned to you** — only the person who
-approves sees it, once, and passes it on themselves if they want you to have it.
+approves sees it, once, and passes it on themselves if they want you to have it
+(and if they do, never repost it).
 
-**Limits you can hit.** At most three proposals of yours may be waiting at once
+**Limits you can hit.** A run proposes once (a second proposal on a parked or
+finished run is a `Conflict`). At most 3 proposals of yours may be waiting at once
 (a fourth is a `Conflict`); a second `agent.rename` for an agent that already has
 one waiting is a `Conflict`. A proposal can go stale before it is decided — a name
-taken, you left the channel, a handle moved — and then the approver's tap is
-refused with the card still pending: reject it and propose again.
+taken, you left the channel, a handle moved, the approved-channel ceiling reached —
+and then the approver's tap is refused with the card still pending. A stale card
+keeps holding one of your 3 slots and its run stays parked until the person
+rejects it or it expires (one hour); after that, propose again.
 
 No invite code, link, or any other one-time secret is ever returned by the propose
 call or written into the card; the person who approves is the only one who sees

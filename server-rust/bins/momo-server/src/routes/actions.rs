@@ -2304,8 +2304,44 @@ mod tests {
             );
         }
         // The two rules a runtime must not have to guess.
-        assert!(section.contains("never returned to you"));
-        assert!(section.contains("end the turn") || section.contains("End the turn"));
+        assert!(section.contains("An invite link is never returned to you"));
+        assert!(
+            section.contains("**The rule the runtime has to learn: propose, then end the turn.**")
+        );
+        // The numbers the runbook states are the constants the server enforces:
+        // a limit changed in code without the runbook is a red test, not a lie.
+        for stated in [
+            format!(
+                "capped at {} characters",
+                actions::WELCOME_PROMPT_PROPOSAL_MAX_CHARS
+            ),
+            format!("{{channels: 1..{}}}", actions::GRANT_CHANNELS_MAX),
+            format!("memberHandles?: ≤{}", actions::ACTION_MEMBER_HANDLES_MAX),
+            format!("memberHandles: 1..{}", actions::ACTION_MEMBER_HANDLES_MAX),
+            format!(
+                "at most {} approved channels in total",
+                momo_auth::MAX_HOSTED_APPROVED_CHANNELS
+            ),
+            format!(
+                "At most {} proposals of yours may be waiting",
+                actions::MAX_PENDING_WORKSPACE_ACTIONS
+            ),
+            format!(
+                "up to\n  {} characters (at most {} emoji)",
+                momo_messaging::name_guard::AGENT_NAME_MAX_CHARS,
+                momo_messaging::name_guard::AGENT_NAME_MAX_EMOJI
+            ),
+            format!("maxUses: 1..{}", actions::INVITE_MAX_USES_CEILING),
+            format!(
+                "expiresInDays: 1..{}",
+                actions::INVITE_EXPIRES_IN_DAYS_CEILING
+            ),
+        ] {
+            assert!(
+                section.contains(&stated),
+                "the runbook no longer states {stated:?}"
+            );
+        }
     }
 
     /// 부록 E, row by row. The `unavailableReason` key is what a client reads
