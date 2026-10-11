@@ -71,7 +71,14 @@ const state = {
   entries: [] as MailboxEntry[],
   isLoading: false,
   error: false,
+  source: "composed" as "composed" | "server" | "probing",
+  serverUnreadCount: null as number | null,
+  hasMore: false,
 };
+const fetchMore = vi.fn();
+const markAllRead = vi.fn((_filter: string) =>
+  Promise.resolve({ marked: 2, unreadCount: 0 })
+);
 const markRead = vi.fn((_entry: MailboxEntry) => Promise.resolve());
 const markUnread = vi.fn((_entry: MailboxEntry) => Promise.resolve());
 const mentionCount = { value: 0 };
@@ -79,6 +86,11 @@ const approvalItems = { value: [ITEM] as FeedItem[] };
 
 vi.mock("./useMailbox", () => ({
   useMailbox: () => ({
+    source: state.source,
+    serverUnreadCount: state.serverUnreadCount,
+    hasMore: state.hasMore,
+    isFetchingMore: false,
+    fetchMore,
     entries: state.entries,
     isLoading: state.isLoading,
     error: state.error,
@@ -87,7 +99,7 @@ vi.mock("./useMailbox", () => ({
     updatedAtMs: NOW,
     refetch: () => undefined,
   }),
-  useMailboxReadActions: () => ({ markRead, markUnread }),
+  useMailboxReadActions: () => ({ markRead, markUnread, markAllRead }),
 }));
 
 vi.mock("./useInbox", () => ({
@@ -181,6 +193,11 @@ beforeEach(() => {
   ];
   state.isLoading = false;
   state.error = false;
+  state.source = "composed";
+  state.serverUnreadCount = null;
+  state.hasMore = false;
+  fetchMore.mockClear();
+  markAllRead.mockClear();
   approvalItems.value = [ITEM];
   mentionCount.value = 0;
   markRead.mockClear();
@@ -330,5 +347,87 @@ describe("InboxRoute mailbox", () => {
     state.error = true;
     const host = await mount();
     expect(host.querySelector('[data-testid="inbox-error"]')).not.toBeNull();
+  });
+
+  it("구 서버 경로: 답글 탭이 없고, 앞선 메시지까지 읽음이 된다고 말하며, 멘션만 모두 읽음", async () => {
+    const host = await mount();
+    expect(host.querySelector('[data-testid="inbox-tab-reply"]')).toBeNull();
+    expect(host.textContent).toContain("같은 채널의 앞선 메시지까지 함께 읽음으로 바꿔요");
+    expect(host.querySelector('[data-testid="mark-all-read"]')?.textContent).toBe(
+      "멘션 모두 읽음 처리"
+    );
+    expect(host.querySelector('[data-testid="inbox-load-more"]')).toBeNull();
+  });
+});
+
+describe("InboxRoute mailbox: 서버 투영 경로", () => {
+  const rows = (host: HTMLElement) =>
+    Array.from(host.querySelectorAll('[data-testid="mailbox-row"]'));
+
+  beforeEach(() => {
+    state.source = "server";
+    state.serverUnreadCount = 7;
+    state.hasMore = true;
+    state.entries = [
+      entry({
+        key: "inbox:1",
+        itemId: "i-1",
+        kind: "reply",
+        typeLabel: "답글 · #agent-lab",
+        actor: "@grokbot",
+      }),
+      entry({
+        key: "inbox:2",
+        itemId: "i-2",
+        kind: "mention",
+        typeLabel: "멘션 · #workbench",
+        unread: false,
+        unreadCount: 0,
+      }),
+    ];
+  });
+
+  it("답글 탭이 서고, 배지는 서버가 센 전체 안 읽음만 쓴다(종류별 수를 지어내지 않는다)", async () => {
+    const host = await mount();
+    expect(host.querySelector('[data-testid="inbox-tab-reply"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="inbox-tab-all"]')?.textContent).toContain("7");
+    expect(host.querySelector('[data-testid="inbox-tab-unread"]')?.textContent).toContain("7");
+    expect(host.querySelector('[data-testid="inbox-tab-mention"]')?.textContent).not.toMatch(/\d/);
+  });
+
+  it("읽은 항목이 목록에 남는다", async () => {
+    const host = await mount();
+    expect(rows(host).map((r) => r.getAttribute("data-unread"))).toEqual(["true", "false"]);
+  });
+
+  it("앞선 메시지까지 읽음이라는 문장이 없고 채널 위치는 그대로라고 말한다", async () => {
+    const host = await mount();
+    expect(host.textContent).not.toContain("앞선 메시지까지");
+    expect(host.textContent).toContain("채널의 읽음 위치는 그대로예요");
+  });
+
+  it("더 보기가 다음 쪽을 부른다", async () => {
+    const host = await mount();
+    await act(async () => {
+      (host.querySelector('[data-testid="inbox-load-more"]') as HTMLElement).click();
+      await Promise.resolve();
+    });
+    expect(fetchMore).toHaveBeenCalledTimes(1);
+  });
+
+  it("모두 읽음은 확인 문구에서 채널 위치가 바뀌지 않는다고 말하고 read-all을 현재 탭 필터로 보낸다", async () => {
+    const host = await mount();
+    await act(async () => {
+      (host.querySelector('[data-testid="mark-all-read"]') as HTMLElement).click();
+      await Promise.resolve();
+    });
+    expect(host.querySelector('[data-testid="mark-all-text"]')?.textContent).toContain(
+      "채널의 읽음 위치는 바뀌지 않아요"
+    );
+    await act(async () => {
+      (host.querySelector('[data-testid="mark-all-confirm"]') as HTMLElement).click();
+      await Promise.resolve();
+    });
+    expect(markAllRead).toHaveBeenCalledWith("all");
   });
 });

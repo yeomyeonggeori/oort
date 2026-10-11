@@ -24,6 +24,8 @@ import { decisionNote, type DecisionNote } from "./approvalsPanel";
 import {
   filterMailbox,
   mailboxCounts,
+  mailboxFilterLabel,
+  parseMailboxFilter,
   type MailboxEntry,
   type MailboxFilter,
 } from "@momo/core/features/inbox/mailbox";
@@ -47,8 +49,8 @@ import {
 // 한 줄은 「누가 · 어디서 · 무슨 일로 나를 찾았는가」다: DM, 나를 부른 멘션, 내 글에
 // 달린 답글, 내가 허락해야 하는 일. 줄을 고르면 오른쪽에 그 대화와 답장 입력(처리할
 // 일이면 결정 버튼)이 열린다. 목록의 원천과 한계는 core `mailbox.ts`와
-// `useMailbox.ts` 머리말에 있다 — 서버에 인박스 라우트는 아직 없고, 여기 모든 줄은
-// 이미 있는 읽기 계약에서 온다. 클라이언트가 세거나 지어낸 것은 없다.
+// `useMailbox.ts` 머리말에 있다 — 서버 인박스 투영(ADR-0199)이 정본이고, 투영이 없는
+// 구 서버에서는 이미 있는 읽기 계약을 모아 보여 준다. 클라이언트가 세거나 지어낸 것은 없다.
 //
 // 「조용한 게 정상」은 그대로다: 알림은 꺼 두는 것이 아니라 애초에 보내지 않는다.
 // 이 표면은 그 급진적 감축을 안전하게 만드는 그물이다.
@@ -60,41 +62,70 @@ import {
 // 컨트롤을 패널 안에 놓고, 결정의 답(영수증)을 한 줄로 말하는 일만 한다.
 // =============================================================================
 
-const EMPTY_COPY: Record<MailboxFilter, { headline: string; detail: string }> = {
-  all: {
-    headline: "인박스가 비어 있습니다. 조용한 게 정상입니다.",
-    detail:
-      "DM, 나를 부른 멘션, 내 글의 새 답글, 허락이 필요한 일이 생기면 여기 모입니다.",
-  },
-  unread: {
-    headline: "안 읽은 항목이 없습니다. 조용한 게 정상입니다.",
-    detail: "읽은 DM은 「전체」에서 계속 볼 수 있습니다.",
-  },
-  mention: {
-    headline: "읽지 않은 멘션이 없습니다. 조용한 게 정상입니다.",
-    detail: "누군가 회원님을 부르면 여기 모입니다. 읽은 멘션은 목록에 남지 않습니다.",
-  },
-  dm: {
-    headline: "주고받은 DM이 없습니다.",
-    detail: "사람이나 에이전트와 DM을 시작하면 여기 대화가 쌓입니다.",
-  },
-  thread: {
-    headline: "새 답글이 달린 내 글이 없습니다.",
-    detail: "내가 쓴 글에 답글이 달리면 여기 모입니다.",
-  },
-  task: {
-    headline: "지금 처리할 일이 없습니다. 조용한 게 정상입니다.",
-    detail: "에이전트가 사람의 허가를 기다릴 때만 여기 쌓입니다.",
-  },
-};
+type EmptyCopy = { headline: string; detail: string };
+
+/** 서버 투영은 읽은 것을 30일 남기고, 구 서버는 남기지 않는다. 빈 화면이 그 사실을 말한다. */
+function emptyCopyFor(
+  filter: MailboxFilter,
+  source: "server" | "composed" | "probing"
+): EmptyCopy {
+  const server = source === "server";
+  switch (filter) {
+    case "all":
+      return {
+        headline: "인박스가 비어 있어요. 조용한 게 정상이에요.",
+        detail:
+          "DM, 나를 부른 멘션, 내 글에 단 답글, 허락이 필요한 일이 생기면 여기 모여요.",
+      };
+    case "unread":
+      return {
+        headline: "안 읽은 항목이 없어요. 조용한 게 정상이에요.",
+        detail: server
+          ? "읽은 항목은 30일 동안 「전체」에서 볼 수 있어요."
+          : "읽은 DM은 「전체」에서 계속 볼 수 있어요.",
+      };
+    case "mention":
+      return server
+        ? {
+            headline: "멘션이 없어요. 조용한 게 정상이에요.",
+            detail: "누군가 회원님을 부르면 여기 모여요. 읽은 멘션도 30일 동안 남아요.",
+          }
+        : {
+            headline: "읽지 않은 멘션이 없어요. 조용한 게 정상이에요.",
+            detail:
+              "누군가 회원님을 부르면 여기 모여요. 이 서버는 읽은 멘션을 목록에 남기지 않아요.",
+          };
+    case "reply":
+      return {
+        headline: "내 글에 달린 답글이 없어요.",
+        detail:
+          "누군가 회원님의 글에 답하거나 인용하면 여기 모여요. 읽은 답글도 30일 동안 남아요.",
+      };
+    case "dm":
+      return {
+        headline: "주고받은 DM이 없어요.",
+        detail: "사람이나 에이전트와 DM을 시작하면 여기 대화가 쌓여요.",
+      };
+    case "thread":
+      return {
+        headline: "새 답글이 달린 스레드가 없어요.",
+        detail: "내가 참여한 스레드에 답글이 달리면 여기 모여요.",
+      };
+    case "task":
+      return {
+        headline: "지금 처리할 일이 없어요. 조용한 게 정상이에요.",
+        detail: "에이전트가 사람의 허가를 기다릴 때만 여기 쌓여요.",
+      };
+  }
+}
 
 /**
  * 결정 대기가 비었는데 이 기기의 칸이 회원님을 기다릴 때(#2776, design-review H1).
  * 「처리할 일이 없습니다」는 위의 「응답 필요」 줄과 모순이다.
  */
 const EMPTY_WITH_LOCAL_WAITING = {
-  headline: "에이전트 승인 요청은 없습니다.",
-  detail: "위의 「이 기기의 칸」이 회원님을 기다립니다. 누르면 그 칸으로 갑니다.",
+  headline: "에이전트 승인 요청은 없어요.",
+  detail: "위의 「이 기기의 칸」이 회원님을 기다려요. 누르면 그 칸으로 가요.",
 };
 
 export function InboxRoute() {
@@ -104,10 +135,17 @@ export function InboxRoute() {
   const [params, setParams] = useSearchParams();
   const isMobile = useIsMobileShell();
   const tasksProvided = isSurfaceProvided("approvals");
-  const tabs = useMemo(() => mailboxTabs(tasksProvided), [tasksProvided]);
-  const filter = parseWebMailboxFilter(params.get("filter"), tabs);
-
-  const mailbox = useMailbox();
+  // 「답글」은 서버 투영에만 있는 종류다. 구 서버에서는 항상 빈 탭이 되므로 세우지 않는다.
+  const rawFilter = params.get("filter");
+  const mailbox = useMailbox(
+    rawFilter === "reminders" ? "reminders" : parseMailboxFilter(rawFilter)
+  );
+  const isServer = mailbox.source === "server";
+  const tabs = useMemo(
+    () => mailboxTabs(tasksProvided, isServer),
+    [tasksProvided, isServer]
+  );
+  const filter = parseWebMailboxFilter(rawFilter, tabs);
   const context = useFeedContext();
   const mentionCount = useMentionCount();
   const reminders = useReminders(session.member.workspaceId);
@@ -118,7 +156,8 @@ export function InboxRoute() {
   const markMentionsRead = useMarkRead();
   const unreadChannels = useUnreadMentionChannels();
   const invalidateApprovals = useInvalidateApprovals();
-  const { markRead, markUnread } = useMailboxReadActions();
+  const { markRead, markUnread, markAllRead: markAllServerRead } =
+    useMailboxReadActions();
   const offline = useOffline();
   const [confirmingAll, setConfirmingAll] = useState(false);
   const [note, setNote] = useState<DecisionNote | null>(null);
@@ -172,7 +211,7 @@ export function InboxRoute() {
         void markRead(entry).catch(() => {
           // 서버가 거절하면 되돌려 사실대로 안 읽음으로 둔다.
           setSelected(entry);
-          setReadError("읽음으로 표시하지 못했습니다. 잠시 뒤에 다시 시도하세요.");
+          setReadError("읽음으로 표시하지 못했어요. 잠시 뒤에 다시 시도하세요.");
         });
       }
     },
@@ -192,7 +231,7 @@ export function InboxRoute() {
           setSelected({ ...entry, unread: true });
         }
       } catch {
-        setReadError("읽음 상태를 바꾸지 못했습니다. 잠시 뒤에 다시 시도하세요.");
+        setReadError("읽음 상태를 바꾸지 못했어요. 잠시 뒤에 다시 시도하세요.");
       } finally {
         setReadBusy(false);
       }
@@ -210,25 +249,42 @@ export function InboxRoute() {
 
   const markAllRead = useCallback(() => {
     setConfirmingAll(false);
+    if (isServer) {
+      // 항목만 읽음이 된다. 채널의 읽음 위치는 움직이지 않는다.
+      setReadError(null);
+      void markAllServerRead(filter).catch(() => {
+        setReadError("모두 읽음으로 표시하지 못했어요. 잠시 뒤에 다시 시도하세요.");
+      });
+      return;
+    }
     for (const channel of unreadChannels) {
       void markMentionsRead(channel.channelId, channel.seq);
     }
-  }, [unreadChannels, markMentionsRead]);
+  }, [isServer, filter, markAllServerRead, unreadChannels, markMentionsRead]);
 
   // 옛 「에이전트」 탭 딥링크는 활동으로 보낸다(#3337).
   if (params.get("filter") === "agents") {
     return <Navigate to="/activity" replace />;
   }
 
-  const tabCounts: Partial<Record<(typeof tabs)[number], number>> = {
-    all: counts.all,
-    unread: counts.unread,
-    mention: counts.mention,
-    dm: counts.dm,
-    thread: counts.thread,
-    task: needs.approvals + needs.panes,
-    reminders: reminderDueCount,
-  };
+  // 서버 경로는 읽어 온 쪽만 알 수 있어서 종류별 수를 지어내지 않는다. 서버가 센
+  // 전체 안 읽음 수만 「전체」·「안 읽음」에 쓴다.
+  const tabCounts: Partial<Record<(typeof tabs)[number], number>> = isServer
+    ? {
+        all: mailbox.serverUnreadCount ?? undefined,
+        unread: mailbox.serverUnreadCount ?? undefined,
+        task: needs.approvals + needs.panes,
+        reminders: reminderDueCount,
+      }
+    : {
+        all: counts.all,
+        unread: counts.unread,
+        mention: counts.mention,
+        dm: counts.dm,
+        thread: counts.thread,
+        task: needs.approvals + needs.panes,
+        reminders: reminderDueCount,
+      };
 
   const showDetail = active !== null && filter !== "reminders";
   const listHidden = isMobile && showDetail;
@@ -245,7 +301,15 @@ export function InboxRoute() {
   const emptyCopy =
     filter === "task" && localWaiting > 0
       ? EMPTY_WITH_LOCAL_WAITING
-      : EMPTY_COPY[filter === "reminders" ? "all" : filter];
+      : emptyCopyFor(filter === "reminders" ? "all" : filter, mailbox.source);
+  const scopeLabel = mailboxFilterLabel(filter === "reminders" ? "all" : filter);
+  const serverUnreadHere = shown.some((e) => e.itemId !== undefined && e.unread);
+  const canMarkAllServer =
+    filter !== "task" &&
+    filter !== "reminders" &&
+    (serverUnreadHere ||
+      ((filter === "all" || filter === "unread") &&
+        (mailbox.serverUnreadCount ?? 0) > 0));
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="inbox-route">
@@ -307,8 +371,8 @@ export function InboxRoute() {
               ? `오프라인, 마지막 동기화 ${relativeLabel(
                   filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs,
                   Date.now()
-                )}. 아래는 그때의 상태입니다.`
-              : "오프라인. 아직 이 목록을 한 번도 받지 못했습니다."
+                )}. 아래는 그때의 상태예요.`
+              : "오프라인이에요. 아직 이 목록을 한 번도 받지 못했어요."
           }
           testId="inbox-offline"
         />
@@ -339,7 +403,7 @@ export function InboxRoute() {
             >
               {state === "error" ? (
                 <InlineBanner
-                  message="인박스를 불러오지 못했습니다."
+                  message="인박스를 불러오지 못했어요."
                   actionLabel="다시 시도"
                   onAction={mailbox.refetch}
                   testId="inbox-error"
@@ -370,8 +434,22 @@ export function InboxRoute() {
                           className="px-4 py-3 text-meta text-ink-muted"
                           data-testid="inbox-capped"
                         >
-                          채널이 많아 일부만 불러왔습니다. 나머지는 채널에서 확인하세요.
+                          채널이 많아 일부만 불러왔어요. 나머지는 채널에서 확인하세요.
                         </p>
+                      )}
+                      {isServer && mailbox.hasMore && filter !== "task" && (
+                        <div className="px-4 py-3">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={mailbox.fetchMore}
+                            disabled={mailbox.isFetchingMore}
+                            aria-busy={mailbox.isFetchingMore}
+                            data-testid="inbox-load-more"
+                          >
+                            더 보기
+                          </Button>
+                        </div>
                       )}
                     </>
                   )}
@@ -396,8 +474,9 @@ export function InboxRoute() {
               data-testid="inbox-detail-empty"
             >
               <p className="max-w-sm break-keep text-center text-body text-ink-muted">
-                왼쪽에서 항목을 고르면 그 대화와 답장 입력이 여기에 열립니다.
-                읽음 표시는 같은 채널의 앞선 메시지까지 함께 읽음으로 바꿉니다.
+                {isServer
+                  ? "왼쪽에서 항목을 고르면 그 대화와 답장 입력이 여기에 열려요. 항목을 열면 그 항목만 읽음이 되고, 채널의 읽음 위치는 그대로예요."
+                  : "왼쪽에서 항목을 고르면 그 대화와 답장 입력이 여기에 열려요. 읽음 표시는 같은 채널의 앞선 메시지까지 함께 읽음으로 바꿔요."}
               </p>
             </div>
           ) : null}
@@ -418,10 +497,38 @@ export function InboxRoute() {
       </Link>
 
       <footer className="safe-area-bottom flex flex-wrap items-center gap-3 border-t border-line px-4 py-2">
-        {confirmingAll ? (
+        {isServer ? (
+          confirmingAll ? (
+            <>
+              <span className="text-meta text-ink" data-testid="mark-all-text">
+                {scopeLabel}의 안 읽은 항목을 모두 읽음으로 표시해요. 채널의 읽음 위치는 바뀌지 않아요.
+              </span>
+              <Button size="sm" onClick={markAllRead} data-testid="mark-all-confirm">
+                읽음으로 표시
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setConfirmingAll(false)}
+              >
+                취소
+              </Button>
+            </>
+          ) : filter === "task" || filter === "reminders" ? null : (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!canMarkAllServer}
+              onClick={() => setConfirmingAll(true)}
+              data-testid="mark-all-read"
+            >
+              모두 읽음 처리
+            </Button>
+          )
+        ) : confirmingAll ? (
           <>
             <span className="text-meta text-ink">
-              멘션 {mentionCount}개를 읽음으로 표시합니다. 해당 채널의 다른 안 읽은 메시지도 함께 읽음 처리되며, 되돌릴 수 없습니다.
+              멘션 {mentionCount}개를 읽음으로 표시해요. 해당 채널의 다른 안 읽은 메시지도 함께 읽음 처리되며, 되돌릴 수 없어요.
             </span>
             <Button size="sm" onClick={markAllRead} data-testid="mark-all-confirm">
               읽음으로 표시

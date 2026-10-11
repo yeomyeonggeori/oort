@@ -34,6 +34,7 @@ import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecis
 //
 //   DM       그 대화의 최근 메시지 + 답장 입력
 //   멘션     나를 부른 메시지와 그 앞뒤 + 답장 입력(그 메시지를 인용 답장)
+//   답글     내 글에 답·인용한 메시지와 그 앞뒤, 인용된 내 글 + 답장 입력
 //   스레드   내 글과 그 스레드의 답글 + 스레드 답장(`ThreadComposer`)
 //   처리할 일 무엇을 허락해 달라는지 + 결정 버튼(타임라인 카드와 같은 컨트롤)
 //
@@ -43,6 +44,11 @@ import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecis
 // =============================================================================
 
 const CONTEXT_PAGE = 20;
+
+/** 멘션·답글은 그 메시지를 인용해 답한다(ADR-0148): 어느 말에 대한 답인지 남는다. */
+function quotesTarget(entry: MailboxEntry): boolean {
+  return entry.kind === "mention" || entry.kind === "reply";
+}
 
 function timeText(ms: number): string {
   return new Intl.DateTimeFormat("ko-KR", {
@@ -68,7 +74,7 @@ function ContextRow({
   const name = member?.displayName ?? missingMemberLabel(directory);
   const isAgent = member?.kind === "agent";
   const body =
-    message.state === "deleted" ? "삭제된 메시지입니다." : (message.body ?? "");
+    message.state === "deleted" ? "삭제된 메시지예요." : (message.body ?? "");
   return (
     <li
       data-testid="inbox-context-row"
@@ -132,7 +138,7 @@ function useContextMessages(entry: MailboxEntry) {
       // 멘션은 그 메시지가 목록에 들어오도록 `before`를 seq 뒤로 조금 민다.
       const page = await fetchMessages(workspaceId, entry.channelId, {
         limit: CONTEXT_PAGE,
-        ...(entry.kind === "mention" && entry.seq !== undefined
+        ...(quotesTarget(entry) && entry.seq !== undefined
           ? { before: entry.seq + 3 }
           : {}),
       });
@@ -165,7 +171,7 @@ function ReplyBox({
         crypto.randomUUID(),
         body,
         // 멘션은 그 메시지를 인용해 답한다(ADR-0148): 어느 말에 대한 답인지 남는다.
-        entry.kind === "mention" && entry.messageId !== undefined
+        quotesTarget(entry) && entry.messageId !== undefined
           ? { replyToId: entry.messageId }
           : undefined
       );
@@ -194,12 +200,10 @@ function ReplyBox({
             void send();
           }}
           rows={2}
-          aria-label={
-            entry.kind === "mention" ? "이 메시지에 답장" : "메시지 입력"
-          }
+          aria-label={quotesTarget(entry) ? "이 메시지에 답장" : "메시지 입력"}
           placeholder={
-            entry.kind === "mention"
-              ? "이 메시지에 답장합니다"
+            quotesTarget(entry)
+              ? "이 메시지에 답장해요"
               : `${entry.channelLabel}에게 메시지 보내기`
           }
           data-testid="inbox-reply-input"
@@ -289,16 +293,18 @@ export function InboxDetail({
           </h2>
           <p className="truncate text-meta text-ink-muted">{entry.reason}</p>
         </div>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => onToggleRead(entry)}
-          disabled={readBusy || entry.seq === undefined || entry.kind === "task"}
-          data-testid="inbox-toggle-read"
-          hidden={entry.kind === "task"}
-        >
-          {entry.unread ? "읽음으로 표시" : "안 읽음으로 표시"}
-        </Button>
+        {/* 서버 투영에는 안 읽음으로 되돌리는 길이 없다(v1): 읽은 항목에는 버튼이 없다. */}
+        {entry.kind !== "task" && !(entry.itemId !== undefined && !entry.unread) && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => onToggleRead(entry)}
+            disabled={readBusy || entry.seq === undefined}
+            data-testid="inbox-toggle-read"
+          >
+            {entry.unread ? "읽음으로 표시" : "안 읽음으로 표시"}
+          </Button>
+        )}
         <Link
           to={channelPath(entry.channelId, entry.seq)}
           onClick={() => {
@@ -355,13 +361,29 @@ export function InboxDetail({
                 className="text-meta text-ink-muted"
                 data-testid="inbox-approval-offline"
               >
-                연결이 끊겨 지금은 결정할 수 없습니다. 다시 연결되면 여기서
-                승인하거나 거부할 수 있습니다.
+                연결이 끊겨 지금은 결정할 수 없어요. 다시 연결되면 여기서
+                승인하거나 거부할 수 있어요.
               </p>
             )}
           </div>
         ) : (
           <>
+            {entry.kind === "reply" && entry.quotedPreview && (
+              <div
+                className="mx-2 mb-2 rounded-md border border-line px-3 py-2"
+                data-testid="inbox-quoted"
+              >
+                <p className="text-meta text-ink-muted">내가 쓴 글</p>
+                <p
+                  className={cn(
+                    "text-body",
+                    entry.quotedDeleted ? "text-ink-muted" : "text-ink"
+                  )}
+                >
+                  {entry.quotedPreview}
+                </p>
+              </div>
+            )}
             {entry.kind === "thread" && entry.rootPreview && (
               <div
                 className="mx-2 mb-2 rounded-md border border-line px-3 py-2"
@@ -374,14 +396,14 @@ export function InboxDetail({
             <Skeleton ready={!context.isLoading} rows={3} className="p-2">
               {context.isError ? (
                 <InlineBanner
-                  message="대화를 불러오지 못했습니다."
+                  message="대화를 불러오지 못했어요."
                   actionLabel="다시 시도"
                   onAction={() => void context.refetch()}
                   testId="inbox-context-error"
                 />
               ) : messages.length === 0 ? (
                 <p className="px-3 text-body text-ink-muted">
-                  보여 줄 메시지가 없습니다.
+                  보여 줄 메시지가 없어요.
                 </p>
               ) : (
                 <ul className="flex flex-col" data-testid="inbox-context">
@@ -392,8 +414,7 @@ export function InboxDetail({
                       directory={directory}
                       selfMemberId={session.member.id}
                       highlighted={
-                        entry.kind === "mention" &&
-                        entry.messageId === message.id
+                        quotesTarget(entry) && entry.messageId === message.id
                       }
                     />
                   ))}
@@ -420,7 +441,7 @@ export function InboxDetail({
           className="border-t border-line px-4 py-3 text-meta text-ink-muted"
           data-testid="inbox-reply-offline"
         >
-          오프라인이라 답장을 보낼 수 없습니다. 연결되면 여기서 답할 수 있습니다.
+          오프라인이라 답장을 보낼 수 없어요. 연결되면 여기서 답할 수 있어요.
         </p>
       ) : (
         <ReplyBox entry={entry} onSent={refresh} />

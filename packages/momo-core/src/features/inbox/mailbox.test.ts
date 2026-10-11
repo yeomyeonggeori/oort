@@ -163,7 +163,7 @@ describe("taskEntry", () => {
     tone: "warn",
     actor: "@kim-intern",
     actorIsAgent: true,
-    predicate: "세션 종료 허가를 요청했습니다",
+    predicate: "세션 종료 허가를 요청했어요",
     outcome: null,
     outcomeTone: "muted",
     channelId: CH,

@@ -277,7 +277,7 @@ export function mentionItem(
     tone: "accent",
     actor: actorToken(actor),
     actorIsAgent: actor.isAgent,
-    predicate: "회원님을 불렀습니다",
+    predicate: "회원님을 불렀어요",
     detail: body.length > 0 ? body : undefined,
     outcome: null,
     outcomeTone: "muted",
@@ -287,7 +287,7 @@ export function mentionItem(
     timeLabel: relativeLabel(message.createdAtMs, nowMs),
     sortAtMs: message.createdAtMs,
     pending: false,
-    reason: "메시지에 회원님이 포함되어 서버가 멘션으로 기록했습니다.",
+    reason: "메시지에서 회원님을 불러 서버가 멘션으로 기록했어요.",
     managedBy: actor.isAgent ? actor.ownerName : undefined,
   };
 }
@@ -343,7 +343,7 @@ export function approvalItem(
     predicate: `${approvalActionLabel(
       approval.actionType,
       approval.toolName
-    )} 허가를 요청했습니다`,
+    )} 허가를 요청했어요`,
     detail: approval.decisionReason ?? undefined,
     outcome: outcome.label,
     outcomeTone: outcome.tone,

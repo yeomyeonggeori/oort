@@ -49,7 +49,7 @@ import {
 } from '../features/inbox/ApprovalDecision';
 import {APPROVAL_OFFLINE_COPY, useOnline} from '../features/inbox/useOnline';
 import {usePhoneNeedsMe} from '../features/inbox/useNeedsMe';
-import {useMailbox} from '../features/inbox/useMailbox';
+import {useMailbox, useMarkInboxItemRead} from '../features/inbox/useMailbox';
 import {
   useAgentFeed,
   useInvalidateApprovals,
@@ -130,16 +130,16 @@ const PANEL_SURFACE: Record<InboxFilter, SurfaceId | null> = {
 
 const EMPTY_COPY: Record<InboxFilter, {headline: string; detail: string}> = {
   'needs-action': {
-    headline: '지금 결정할 일이 없습니다. 조용한 게 정상입니다.',
-    detail: '에이전트가 사람의 허가를 기다릴 때만 여기 쌓입니다.',
+    headline: '지금 결정할 일이 없어요. 조용한 게 정상이에요.',
+    detail: '에이전트가 사람의 허가를 기다릴 때만 여기 쌓여요.',
   },
   mentions: {
-    headline: '읽지 않은 멘션이 없습니다. 조용한 게 정상입니다.',
-    detail: '누군가 회원님을 부르면 중요한 것만 여기 모입니다.',
+    headline: '읽지 않은 멘션이 없어요. 조용한 게 정상이에요.',
+    detail: '누군가 회원님을 부르면 중요한 것만 여기 모여요.',
   },
   agents: {
-    headline: '에이전트가 남긴 결과가 없습니다. 조용한 게 정상입니다.',
-    detail: '회원님이 담당하는 에이전트가 무언가를 끝내면 여기 남습니다.',
+    headline: '에이전트가 남긴 결과가 없어요. 조용한 게 정상이에요.',
+    detail: '회원님이 담당하는 에이전트가 무언가를 끝내면 여기 남아요.',
   },
 };
 
@@ -149,8 +149,23 @@ const EMPTY_COPY: Record<InboxFilter, {headline: string; detail: string}> = {
  * 줄은 눌러서 그 대화로 간다(대화를 여는 것이 읽음 광고다). 결정 컨트롤과 멘션
  * 읽음 처리는 원장 보기에 그대로 있다 — 두 번째 구현을 만들지 않는다.
  */
-type MailboxView = Extract<MailboxFilter, 'all' | 'unread' | 'dm' | 'thread'>;
-const MAILBOX_VIEWS: readonly MailboxView[] = ['all', 'unread', 'dm', 'thread'];
+type MailboxView = Extract<
+  MailboxFilter,
+  'all' | 'unread' | 'reply' | 'dm' | 'thread'
+>;
+const MAILBOX_VIEWS: readonly MailboxView[] = [
+  'all',
+  'unread',
+  'reply',
+  'dm',
+  'thread',
+];
+/** 「답글」은 서버 투영에만 있는 종류다. 구 서버에서는 언제나 빈 칩이라 세우지 않는다. */
+function mailboxViewsFor(source: string): readonly MailboxView[] {
+  return source === 'server'
+    ? MAILBOX_VIEWS
+    : MAILBOX_VIEWS.filter(view => view !== 'reply');
+}
 type Tab = MailboxView | InboxFilter;
 
 function isMailboxView(tab: Tab): tab is MailboxView {
@@ -161,25 +176,43 @@ function tabLabel(tab: Tab): string {
   return isMailboxView(tab) ? mailboxFilterLabel(tab) : filterLabel(tab);
 }
 
-const MAILBOX_EMPTY: Record<MailboxView, {headline: string; detail: string}> = {
-  all: {
-    headline: '인박스가 비어 있습니다. 조용한 게 정상입니다.',
-    detail:
-      'DM, 나를 부른 멘션, 내 글의 새 답글, 허락이 필요한 일이 생기면 여기 모입니다.',
-  },
-  unread: {
-    headline: '안 읽은 항목이 없습니다. 조용한 게 정상입니다.',
-    detail: '읽은 DM은 「전체」에서 계속 볼 수 있습니다.',
-  },
-  dm: {
-    headline: '주고받은 DM이 없습니다.',
-    detail: '사람이나 에이전트와 DM을 시작하면 여기 대화가 쌓입니다.',
-  },
-  thread: {
-    headline: '새 답글이 달린 내 글이 없습니다.',
-    detail: '내가 쓴 글에 답글이 달리면 여기 모입니다.',
-  },
-};
+function mailboxEmpty(
+  view: MailboxView,
+  source: string,
+): {headline: string; detail: string} {
+  switch (view) {
+    case 'all':
+      return {
+        headline: '인박스가 비어 있어요. 조용한 게 정상이에요.',
+        detail:
+          'DM, 나를 부른 멘션, 내 글에 단 답글, 허락이 필요한 일이 생기면 여기 모여요.',
+      };
+    case 'unread':
+      return {
+        headline: '안 읽은 항목이 없어요. 조용한 게 정상이에요.',
+        detail:
+          source === 'server'
+            ? '읽은 항목은 30일 동안 「전체」에서 볼 수 있어요.'
+            : '읽은 DM은 「전체」에서 계속 볼 수 있어요.',
+      };
+    case 'reply':
+      return {
+        headline: '내 글에 달린 답글이 없어요.',
+        detail:
+          '누군가 회원님의 글에 답하거나 인용하면 여기 모여요. 읽은 답글도 30일 동안 남아요.',
+      };
+    case 'dm':
+      return {
+        headline: '주고받은 DM이 없어요.',
+        detail: '사람이나 에이전트와 DM을 시작하면 여기 대화가 쌓여요.',
+      };
+    case 'thread':
+      return {
+        headline: '새 답글이 달린 스레드가 없어요.',
+        detail: '내가 참여한 스레드에 답글이 달리면 여기 모여요.',
+      };
+  }
+}
 
 export default function InboxScreen({
   active = true,
@@ -213,10 +246,6 @@ export default function InboxScreen({
     () => availableInboxFilters(surface => isSurfaceProvided(surface)),
     [],
   );
-  const tabs = useMemo<Tab[]>(
-    () => [...MAILBOX_VIEWS, ...availableFilters],
-    [availableFilters],
-  );
   const [tab, setTab] = useState<Tab>('all');
   const mailboxActive = isMailboxView(tab);
   // 원장 보기에서만 쓰는 값. 메일함 보기일 때는 첫 원장 탭으로 둔다(훅 호출은 항상 같다).
@@ -238,9 +267,12 @@ export default function InboxScreen({
   // 필터 칩의 수는 탭 알약과 **같은 합**의 두 몫이다(#3342): 결정 대기 + 멘션 = 알약.
   // 칩이 자기 수를 따로 세면 알약은 3, 칩 둘은 2와 2를 말하게 된다.
   const needsMe = usePhoneNeedsMe();
+  // 서버 경로는 읽어 온 쪽만 알 수 있어 종류별 수를 지어내지 않는다.
   const chipCount = (value: Tab): number =>
     isMailboxView(value)
-      ? mailboxCount[value]
+      ? mailbox.source === 'server'
+        ? 0
+        : mailboxCount[value]
       : value === 'needs-action'
         ? needsMe.approvals
         : value === 'mentions'
@@ -255,7 +287,12 @@ export default function InboxScreen({
   const needsAction = useNeedsAction(approvalsProvided);
   const mentions = useMentions(!mailboxActive && filter === 'mentions');
   const agentFeed = useAgentFeed(!mailboxActive && filter === 'agents', member.id);
-  const mailbox = useMailbox(mailboxActive);
+  const mailbox = useMailbox(mailboxActive, isMailboxView(tab) ? tab : 'all');
+  const tabs = useMemo<Tab[]>(
+    () => [...mailboxViewsFor(mailbox.source), ...availableFilters],
+    [mailbox.source, availableFilters],
+  );
+  const markItemRead = useMarkInboxItemRead();
   const mailboxCount = useMemo(
     () => mailboxCounts(mailbox.entries),
     [mailbox.entries],
@@ -371,7 +408,7 @@ export default function InboxScreen({
       if (!approvalsProvided) {
         return (
           <Text style={styles.managed} testID={`decision-elsewhere-${item.key}`}>
-            결정은 데스크톱 앱에서 할 수 있습니다.
+            결정은 데스크톱 앱에서 할 수 있어요.
           </Text>
         );
       }
@@ -381,7 +418,7 @@ export default function InboxScreen({
       if (filter !== 'needs-action') {
         return (
           <Text style={styles.managed} testID={`decision-elsewhere-${item.key}`}>
-            결정 대기 탭에서 승인하거나 거부할 수 있습니다.
+            결정 대기 탭에서 승인하거나 거부할 수 있어요.
           </Text>
         );
       }
@@ -492,8 +529,8 @@ export default function InboxScreen({
               ? `오프라인, 마지막 동기화 ${relativeLabel(
                   mailboxActive ? mailbox.updatedAtMs : feed.updatedAtMs,
                   Date.now(),
-                )}. 아래는 그때의 상태입니다.`
-              : '오프라인. 아직 이 목록을 한 번도 받지 못했습니다.'
+                )}. 아래는 그때의 상태예요.`
+              : '오프라인이에요. 아직 이 목록을 한 번도 받지 못했어요.'
           }
           testID="inbox-offline"
         />
@@ -504,24 +541,24 @@ export default function InboxScreen({
       {!mailboxActive && filter === 'agents' && runHistoryMissing ? (
         <NoticeBlock
           headline={runHistory.absentReason}
-          detail="아래 목록은 승인 기록만 담고 있습니다."
+          detail="아래 목록은 승인 기록만 담고 있어요."
           testID="inbox-agents-partial"
         />
       ) : null}
 
       {mailboxActive ? (
         mailbox.isLoading && mailbox.entries.length === 0 ? (
-          <LoadingState label="인박스를 불러오는 중입니다." testID="inbox-loading" />
+          <LoadingState label="인박스를 불러오고 있어요." testID="inbox-loading" />
         ) : mailbox.error && mailbox.entries.length === 0 ? (
           <ErrorState
-            headline="인박스를 불러오지 못했습니다."
+            headline="인박스를 불러오지 못했어요."
             onRetry={mailbox.refetch}
             testID="inbox-error"
           />
         ) : mailboxShown.length === 0 ? (
           <EmptyState
-            headline={MAILBOX_EMPTY[tab as MailboxView].headline}
-            detail={MAILBOX_EMPTY[tab as MailboxView].detail}
+            headline={mailboxEmpty(tab as MailboxView, mailbox.source).headline}
+            detail={mailboxEmpty(tab as MailboxView, mailbox.source).detail}
             refreshControl={refreshControl}
             testID="inbox-empty"
           />
@@ -532,15 +569,34 @@ export default function InboxScreen({
             renderItem={({item}) => (
               <MailboxRow
                 entry={item}
-                onPress={() => onOpenConversation(item.channelId, item.channelLabel)}
+                onPress={() => {
+                  markItemRead(item);
+                  onOpenConversation(item.channelId, item.channelLabel);
+                }}
               />
             )}
+            onEndReached={mailbox.hasMore ? mailbox.fetchMore : undefined}
+            onEndReachedThreshold={0.5}
             ListFooterComponent={
-              mailbox.capped ? (
-                <Text style={styles.capped} testID="inbox-capped">
-                  채널이 많아 일부만 불러왔습니다. 나머지는 채널에서 확인하세요.
-                </Text>
-              ) : null
+              <>
+                {mailbox.capped ? (
+                  <Text style={styles.capped} testID="inbox-capped">
+                    채널이 많아 일부만 불러왔어요. 나머지는 채널에서 확인하세요.
+                  </Text>
+                ) : null}
+                {mailbox.hasMore ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="인박스 더 보기"
+                    accessibilityState={{busy: mailbox.isFetchingMore}}
+                    disabled={mailbox.isFetchingMore}
+                    onPress={mailbox.fetchMore}
+                    style={({pressed}) => [styles.loadMore, pressed && styles.pressed]}
+                    testID="inbox-load-more">
+                    <Text style={styles.loadMoreLabel}>더 보기</Text>
+                  </Pressable>
+                ) : null}
+              </>
             }
             contentContainerStyle={[styles.listContent, {paddingBottom: space.lg + clearance}]}
             refreshControl={refreshControl}
@@ -548,7 +604,7 @@ export default function InboxScreen({
           />
         )
       ) : feed.isLoading && feed.items.length === 0 ? (
-        <LoadingState label="인박스를 불러오는 중입니다." testID="inbox-loading" />
+        <LoadingState label="인박스를 불러오고 있어요." testID="inbox-loading" />
       ) : panelSurface !== null && feed.absent && feed.items.length === 0 ? (
         // 서버가 "그런 경로 없다"고 **직접 답한** 경우다 (3R N-A). 오류가 아니므로
         // 붉게 그리지 않고, 다시 시도할 것이 없으므로 재시도를 주지 않는다 —
@@ -560,7 +616,7 @@ export default function InboxScreen({
         />
       ) : feed.error && feed.items.length === 0 ? (
         <ErrorState
-          headline="인박스를 불러오지 못했습니다."
+          headline="인박스를 불러오지 못했어요."
           onRetry={feed.refetch}
           testID="inbox-error"
         />
@@ -627,7 +683,7 @@ function MailboxRow({
             style={[
               entry.actorIsAgent ? styles.actorAgent : styles.actor,
               styles.mailActor,
-              entry.unread && styles.mailUnreadActor,
+              entry.unread ? styles.mailUnreadActor : styles.mailReadActor,
             ]}
             numberOfLines={1}>
             {entry.actor}
@@ -775,6 +831,14 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   mailActor: {flex: 1, fontSize: font.label},
   mailUnreadActor: {fontWeight: '700'},
+  // 읽은 항목은 목록에 남되 한 단계 물러선다(점 없음 + 굵기 + 접근성 문장으로도 말한다).
+  mailReadActor: {color: color.textMuted},
+  loadMore: {
+    minHeight: TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadMoreLabel: {fontSize: font.label, color: color.textMuted},
   mailPreviewLine: {flexDirection: 'row', alignItems: 'center', gap: space.sm},
   mailPreview: {flex: 1, fontSize: font.label, color: color.textMuted, lineHeight: line.label},
   mailPreviewUnread: {color: color.text},
