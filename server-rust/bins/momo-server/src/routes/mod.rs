@@ -39,6 +39,7 @@ pub mod hosted_agent_doorbell;
 pub mod hosted_dm_approvals;
 /// ADR-0122 / HD-1 — voice huddle lifecycle and LiveKit room grants.
 pub mod huddles;
+pub mod inbox;
 pub mod invites;
 pub mod join;
 /// ADR-0161 증보 (#3277) — the member avatar media surface (self-only write,

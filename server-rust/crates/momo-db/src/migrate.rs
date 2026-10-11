@@ -582,19 +582,26 @@ mod tests {
     ///
     /// 125 is #3567's subscription-agent retirement (ADR-0198 증보 1 D2): `agent.subscription_retired_at`
     /// and the guard that keeps a converted or retired agent's hosted connection closed.
+    ///
+    /// 126 is #3680's inbox projection (ADR-0199 E1): the RLS-FORCE table `inbox_item` (per-recipient
+    /// mention / reply_to_me / thread_reply / dm rows derived from `message`) and the triggers that
+    /// fill it and its cursor-driven `read_at`.
+    ///
+    /// 127 is #3681's inbox realtime event (ADR-0199 E2 D7): the `inbox_item` AFTER INSERT trigger that
+    /// puts `inbox_item.created` on the recipient's personal channel through the outbox.
     #[test]
-    fn discovers_contiguous_migrations_001_to_125() {
+    fn discovers_contiguous_migrations_001_to_127() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            125,
-            "expected 125 migrations under {}",
+            127,
+            "expected 127 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 125);
+        assert_eq!(migrations.last().unwrap().version, 127);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {
