@@ -1141,7 +1141,18 @@ async fn execute_workspace_action(
             Ok(()) => {}
             // The target vanished between resolution and the gate (the same
             // transaction, but the row is unlocked here): the proposal is stale.
+            //
+            // But only an admin may be told so: `require_profile_editor_in_tx`
+            // answers 404 before it looks at the decider's authority, so for
+            // anyone else a 404-vs-403 difference would be an oracle for whether
+            // that member id is a live agent. They get `role_required` either way.
             Err(error) if error.status == StatusCode::NOT_FOUND => {
+                if require_admin(conn, input.workspace_id, input.member_id)
+                    .await?
+                    .is_err()
+                {
+                    return role_required_refusal(conn, approval, input, now, required_role).await;
+                }
                 return Ok(Ok(args_invalid_refusal(approval, input, now)));
             }
             Err(_) => {

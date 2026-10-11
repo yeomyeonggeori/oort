@@ -688,6 +688,10 @@ fn validate_against(schema: &Value, value: &Value) -> Result<(), ToolFailure> {
             // one" coincide on every value the catalog admits; the per-action
             // domain normaliser, which sees `actionId`, is the final judge.)
             if let Some(branches) = schema.get("oneOf").and_then(Value::as_array) {
+                // `oneOf` beside sibling `properties` would silently skip them.
+                if schema.get("properties").is_some() {
+                    return Err(invalid);
+                }
                 return if branches
                     .iter()
                     .any(|branch| validate_against(branch, value).is_ok())
@@ -781,10 +785,13 @@ fn validate_against(schema: &Value, value: &Value) -> Result<(), ToolFailure> {
                     return Err(invalid);
                 }
             }
-            if let Some(max) = schema.get("maxItems").and_then(Value::as_u64) {
-                if length > max {
-                    return Err(invalid);
-                }
+            // An unbounded array is unvalidatable: a missing `maxItems` refuses.
+            let max = schema
+                .get("maxItems")
+                .and_then(Value::as_u64)
+                .ok_or(invalid)?;
+            if length > max {
+                return Err(invalid);
             }
             let element = schema.get("items").ok_or(invalid)?;
             for item in items {
@@ -1274,10 +1281,22 @@ mod tests {
                 "{refused}"
             );
         }
-        // An array schema with no `items` is unvalidatable, so it refuses
-        // rather than waving every element through.
+        // An array schema with no `items`, or no `maxItems`, is unvalidatable,
+        // so it refuses rather than waving every element through.
+        for unbounded in [
+            json!({"type": "array", "maxItems": 2}),
+            json!({"type": "array", "items": required_text(8)}),
+        ] {
+            assert_eq!(
+                validate_against(&unbounded, &json!(["a"])),
+                Err(ToolFailure::InvalidArguments),
+                "{unbounded}"
+            );
+        }
+        // `oneOf` with sibling `properties` is ambiguous and refuses.
+        let mixed = json!({"type": "object", "properties": {}, "oneOf": [{"type":"object","properties":{},"additionalProperties":false}]});
         assert_eq!(
-            validate_against(&json!({"type": "array"}), &json!(["a"])),
+            validate_against(&mixed, &json!({})),
             Err(ToolFailure::InvalidArguments)
         );
     }

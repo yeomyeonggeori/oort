@@ -1255,7 +1255,10 @@ async fn action_propose(
             .await?
             {
                 Ok(resolved) => resolved,
-                Err(error) => return Ok(Err(failure_of(&error))),
+                // Every resolution failure is the one `InvalidArguments`, whatever
+                // status the resolver chose: mapping the status through
+                // `failure_of` would let a 404 vs a 409 say which name failed.
+                Err(_) => return Ok(Err(ToolFailure::InvalidArguments)),
             };
             // **The pending ceiling** (증보 V1-e). The agent's `member` row is
             // locked first so concurrent runs of one agent cannot each read
