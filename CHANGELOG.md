@@ -11,6 +11,24 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.21] - 2026-10-11
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.21>. Tag target: `main=8fba6654`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Two database migrations since 0.1.20 (126-127): 126 adds `inbox_item` (a per-recipient projection of mentions, quote-replies, thread replies and DMs, filled by triggers in the same transaction as the `message` insert; FORCE row-level security; ids and the member's own `read_at` only, no body copy); 127 adds the trigger that announces a fresh item on the recipient's personal realtime channel through the outbox. No data is dropped and there is no backfill of past messages: the inbox fills from new messages after the deploy. The runtime role `momo_notifier` gains `SELECT, INSERT, UPDATE` on `inbox_item` (its own message inserts fire the projection trigger). Rollback: whether a 0.1.20 app runs unchanged on schema 127 is to be confirmed by the deploy worker. Deploy order: push relay first, then notifier and server (migrations 126-127), then the desktop and phone apps.
+
+### Added
+- Server: the inbox projection `inbox_item` and its triggers (ADR-0199, #3682); the inbox API `GET /inbox`, `PUT /inbox/{id}/read`, `POST /inbox/read-all` with keyset pagination, the `inbox_item.created` outbox event, and a 30-day sweep of read items (#3683).
+- Web, desktop and phone: the inbox reads the server projection and falls back to client-side assembly against an older server (#3685); the inbox is redesigned as a mailbox-style list of what relates to me with a context panel on the right (#3668).
+
+### Changed
+- Web and desktop: the sidebar drops "Conversations" and groups DMs in the Buzz style, with a new-DM modal and profile avatars (#3666).
+
+### Fixed
+- Phone: calling `@kwak-claude` is signed with the tool key (#3665); the @mention sheet floats outside the composer flow so the conversation no longer jumps (#3667).
+- All clients: the "Direct message" fallback name is gone and DM names resolve in one function (#3678); a DM whose counterpart cannot be resolved still reads its history instead of staying on a skeleton (#3679).
+
+### Not in this release
+- Backfill of past messages into the inbox.
+
 ## [0.1.20] - 2026-10-10
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.20>. Tag target: `main=442049fd`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Five database migrations since 0.1.19 (121-125): 121 adds `work_host_folder` (host-issued opaque folder ids and display names, never paths; FORCE row-level security); 122 extends `work_control` for the signed new-work spawn (`momo.human.control.v4`); 123 adds the personal-agent marker columns on `agent`; 124 adds `work_session.persona_member_id` (the personal agent a session was called as); 125 adds `agent.subscription_retired_at` and a trigger that refuses to revive the hosted connection of a converted or retired subscription agent. No data is dropped. Rollback: whether a 0.1.19 app runs unchanged on schema 125 (it does not read the new columns or tables) is to be confirmed by the deploy worker. Deploy order: push relay first, then notifier and server (migrations 121-125), then the phone app. Desktop 0.1.18 and older receive 404 from the removed `/v1/provider/work-host-engine`; update the desktop app.
