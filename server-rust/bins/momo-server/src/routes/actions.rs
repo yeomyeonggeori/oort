@@ -42,7 +42,8 @@ use momo_agent::actions::{
 use momo_auth::{active_workspace_role, Principal};
 use momo_db::PgConnection;
 use momo_messaging::name_guard::{
-    conflicts_with_roster, validated_agent_proposed_display_name, RosterName,
+    conflicts_with_roster, mention_overlaps_roster, validated_agent_proposed_display_name,
+    RosterName,
 };
 use momo_messaging::{
     load_roster_names_in_tx, lock_display_name_namespace_in_tx, normalize_channel_kind,
@@ -849,7 +850,9 @@ pub async fn resolve_action_in_tx(
                     handle,
                 })
                 .collect();
-            if conflicts_with_roster(display_name, found.id, &names) {
+            if conflicts_with_roster(display_name, found.id, &names)
+                || mention_overlaps_roster(display_name, found.id, &names)
+            {
                 return Ok(Err(ApiError::bad_request("display name is not allowed")));
             }
             validated.rows = actions::agent_rename_rows(

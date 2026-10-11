@@ -62,7 +62,9 @@ use momo_agent::{
 use momo_auth::{is_hosted_agent_activated_in_tx, Principal, HOSTED_CONNECTION_MANAGED_CODE};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
-use momo_messaging::name_guard::{conflicts_with_roster, RosterName};
+use momo_messaging::name_guard::{
+    conflicts_with_roster, has_invisible_or_control_characters, RosterName,
+};
 use momo_messaging::{
     active_workspace_role, load_roster_names_in_tx, lock_display_name_namespace_in_tx,
     rename_agent_display_name_in_tx,
@@ -387,6 +389,15 @@ pub async fn rename(
     let agent_member_id = path_uuid(&agent, "invalid agent id")?;
     let display_name = normalized_join_display_name(&request.display_name)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    // A person's choice may use any characters the join rule allows — except the
+    // ones that hide, reorder or break lines: this name is read by other people on
+    // cards and in voice lines, and a hidden character is the one thing they
+    // cannot see to object to.
+    if has_invisible_or_control_characters(&display_name) {
+        return Err(ApiError::bad_request(
+            "displayName must not contain invisible or control characters",
+        ));
+    }
     let actor_member_id = principal.member_id;
     let via_token = audit_via_token_id(&principal);
 
@@ -401,6 +412,20 @@ pub async fn rename(
                 )
                 .await?
                 {
+                    // `require_profile_editor_in_tx` answers 404 before it looks
+                    // at the caller's authority. Only an admin may be told an id
+                    // is not a live agent; anyone else gets the same 403 whether
+                    // the id is an agent, a human or nothing.
+                    if rejection.status == StatusCode::NOT_FOUND {
+                        let is_admin = active_workspace_role(conn, workspace_id, actor_member_id)
+                            .await?
+                            .is_some_and(|role| role.is_admin());
+                        if !is_admin {
+                            return Ok(Err(ApiError::forbidden(
+                                "agent owner or workspace admin required",
+                            )));
+                        }
+                    }
                     return Ok(Err(rejection));
                 }
                 lock_display_name_namespace_in_tx(conn, workspace_id).await?;

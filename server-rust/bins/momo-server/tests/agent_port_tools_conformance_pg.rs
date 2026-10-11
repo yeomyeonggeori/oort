@@ -8647,6 +8647,14 @@ async fn an_agent_renames_itself_after_its_owner_approves() {
         "Pеrson owner".to_string(), // Cyrillic е
         before_other.clone(),
         before_other.to_uppercase(),
+        // Reserved words anywhere, ASCII look-alikes, and a whole-word prefix of
+        // another member's name (`@Tools Human` would also mention "Tools").
+        "Admin 2".to_string(),
+        "Adm1n".to_string(),
+        "Oort Support".to_string(),
+        "Tools".to_string(),
+        "Tools Human Bot".to_string(),
+        "T00ls Human".to_string(),
     ] {
         let (status, refused) = try_propose_action_3706(
             &client,
@@ -9119,7 +9127,30 @@ async fn the_human_rename_route_is_for_the_owner_or_an_admin_only() {
             .unwrap();
         assert_eq!(response.status().as_u16(), 409, "{taken}");
     }
-    // Empty and unknown keys are 400/422, a human id is 404.
+    // Invisible, reordering and line-breaking characters are refused even though
+    // a person chose them.
+    for hidden in ["Zero\u{200B}Width", "Flip\u{202E}ped", "two\nlines", "ㅤ"] {
+        let response = patch(&owner_jwt, json!({"displayName": hidden}))
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 400, "{hidden:?}");
+    }
+    // A non-admin cannot tell a human id or an unknown id from a real agent:
+    // 403 for all three (the 404 is only for someone allowed to know).
+    for target in [Uuid::new_v4(), fixture.human, fixture.managed_agent] {
+        let response = client
+            .patch(format!(
+                "{base}/v1/workspaces/{}/agents/{target}",
+                fixture.workspace
+            ))
+            .bearer_auth(&third_jwt)
+            .json(&json!({"displayName": "Nope"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 403, "{target}");
+    }
+    // Empty and unknown keys are 400/422, a human id is 404 for an admin.
     let response = patch(&owner_jwt, json!({"displayName": "   "}))
         .await
         .unwrap();
