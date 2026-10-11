@@ -6,7 +6,8 @@
 // during S1 must re-enter S1; after S1 it must re-enter S2 rather than the
 // first-run ladder. S2 complete/skip clears ONLY `invite`. `workspace-profile`
 // is cleared by S1 completion (both saves OK) or by both settings doors
-// succeeding later. sessionStorage survives a same-tab reload; a JS-heap
+// succeeding later. The doc is durable per account+server (durableSlot.ts,
+// #3696) so quitting the desktop app mid-S1 still re-offers S1; a JS-heap
 // dismiss covers "this load, go to the shell" without dropping S1's re-offer.
 // =============================================================================
 
@@ -14,6 +15,7 @@ import {
   isOwnerOnboardingStage,
   type OwnerOnboardingStage,
 } from "@/features/auth/onboardingFlow";
+import { readDurable, removeDurable, writeDurable } from "./durableSlot";
 import { clearS1Draft, clearS1DraftFields } from "./s1Draft";
 
 const listeners = new Set<() => void>();
@@ -29,14 +31,6 @@ type PendingDoc = {
 
 let dismissedThisLoad = false;
 
-function sessionStore(): Storage | null {
-  try {
-    return globalThis.sessionStorage ?? null;
-  } catch {
-    return null;
-  }
-}
-
 function notify(): void {
   for (const listener of listeners) listener();
 }
@@ -50,7 +44,7 @@ export function subscribeOwnerOnboarding(onChange: () => void): () => void {
 
 function readDoc(): PendingDoc {
   try {
-    const raw = sessionStore()?.getItem(OWNER_ONBOARDING_KEY);
+    const raw = readDurable(OWNER_ONBOARDING_KEY);
     if (!raw) return {};
     if (isOwnerOnboardingStage(raw)) return { [raw]: true };
     const parsed: unknown = JSON.parse(raw);
@@ -73,15 +67,8 @@ function writeDoc(doc: PendingDoc): void {
   if (doc.invite) next.invite = true;
   if (doc["settings-workspace"]) next["settings-workspace"] = true;
   if (doc["settings-profile"]) next["settings-profile"] = true;
-  try {
-    if (Object.keys(next).length === 0) {
-      sessionStore()?.removeItem(OWNER_ONBOARDING_KEY);
-    } else {
-      sessionStore()?.setItem(OWNER_ONBOARDING_KEY, JSON.stringify(next));
-    }
-  } catch {
-    // Private mode can refuse sessionStorage; the stage then cannot resume.
-  }
+  if (Object.keys(next).length === 0) removeDurable(OWNER_ONBOARDING_KEY);
+  else writeDurable(OWNER_ONBOARDING_KEY, JSON.stringify(next));
   notify();
 }
 
@@ -177,11 +164,7 @@ export function recordOwnerOnboardingSettingsSave(
 
 export function clearOwnerOnboardingPending(): void {
   dismissedThisLoad = false;
-  try {
-    sessionStore()?.removeItem(OWNER_ONBOARDING_KEY);
-  } catch {
-    // same as mark
-  }
+  removeDurable(OWNER_ONBOARDING_KEY);
   clearS1Draft();
   notify();
 }

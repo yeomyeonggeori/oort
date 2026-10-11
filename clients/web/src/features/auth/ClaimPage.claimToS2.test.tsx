@@ -9,6 +9,7 @@ import type { WorkspaceIdentity } from "@momo/core/features/settings/api";
 import { applyLogin, clearSession, getPersistedSession } from "@/lib/session";
 import { resetKickoffHoldForTests } from "@/features/welcome/firstRunGate";
 import { peekFreshSignup } from "@/features/welcome/freshSignup";
+import { readDurable } from "@/features/onboarding/durableSlot";
 import {
   clearOwnerOnboardingPending,
   hasOwnerOnboardingFlag,
@@ -388,7 +389,7 @@ describe("claim → S1 submit → S2", () => {
       host.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
     ).toBe("4단계 중 3단계");
     expect(host.querySelector('[data-testid="onboarding-progress"]')).toBeNull();
-    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe(
+    expect(readDurable(OWNER_ONBOARDING_KEY)).toBe(
       JSON.stringify({ invite: true })
     );
     expect(peekFreshSignup()).toEqual({
@@ -423,7 +424,7 @@ describe("reload during S1 re-enters S1", () => {
     });
     await submitS1();
     expect(reloaded.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
-    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe(
+    expect(readDurable(OWNER_ONBOARDING_KEY)).toBe(
       JSON.stringify({ invite: true })
     );
 

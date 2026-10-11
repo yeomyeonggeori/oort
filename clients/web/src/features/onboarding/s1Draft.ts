@@ -1,9 +1,11 @@
-// S1 typed draft. sessionStorage so a same-tab reload keeps the three
-// fields (N-6). Private mode / quota: the form starts empty.
+// S1 typed draft. Durable per account+server (durableSlot.ts, #3696) so a
+// reload or an app restart keeps the three fields (N-6). Private mode / quota:
+// the form starts empty.
 //
 // Re-offer (H-R3-1): seed from the current member/workspace. Prefer the draft
 // only for fields that have not been saved in settings.
 
+import { readDurable, removeDurable, writeDurable } from "./durableSlot";
 import {
   defaultWorkspaceName,
   suggestedHandle,
@@ -18,14 +20,6 @@ export type S1Draft = {
   handle: string;
 };
 
-function store(): Storage | null {
-  try {
-    return globalThis.sessionStorage ?? null;
-  } catch {
-    return null;
-  }
-}
-
 function isDraft(value: unknown): value is S1Draft {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Record<string, unknown>;
@@ -37,7 +31,7 @@ function isDraft(value: unknown): value is S1Draft {
 }
 
 export function readS1Draft(): S1Draft | null {
-  const raw = store()?.getItem(SLOT);
+  const raw = readDurable(SLOT);
   if (!raw) return null;
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -48,19 +42,11 @@ export function readS1Draft(): S1Draft | null {
 }
 
 export function writeS1Draft(draft: S1Draft): void {
-  try {
-    store()?.setItem(SLOT, JSON.stringify(draft));
-  } catch {
-    // Quota or a read-only store: a reload starts empty.
-  }
+  writeDurable(SLOT, JSON.stringify(draft));
 }
 
 export function clearS1Draft(): void {
-  try {
-    store()?.removeItem(SLOT);
-  } catch {
-    // same as write
-  }
+  removeDurable(SLOT);
 }
 
 export function clearS1DraftFields(keys: (keyof S1Draft)[]): void {
