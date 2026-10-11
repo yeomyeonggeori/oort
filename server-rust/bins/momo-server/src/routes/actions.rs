@@ -45,8 +45,8 @@ use momo_auth::{
 };
 use momo_db::PgConnection;
 use momo_messaging::name_guard::{
-    conflicts_with_roster, mention_overlaps_roster, validated_agent_proposed_display_name,
-    RosterName,
+    conflicts_with_roster, has_hidden_characters, mention_overlaps_roster,
+    validated_agent_proposed_display_name, RosterName,
 };
 use momo_messaging::{
     load_roster_names_in_tx, lock_display_name_namespace_in_tx, normalize_channel_kind,
@@ -620,6 +620,23 @@ fn workspace_settings_update_args(args: &Value) -> Result<ValidatedActionArgs, A
             ));
         }
     }
+    // Nothing hidden in text an agent writes for an approver to read: no control,
+    // zero-width or direction-control characters (a prompt may keep `\n`), and no
+    // line break inside a role label.
+    if let SettingPatch::Set(Value::String(text)) = &welcome_prompt {
+        if has_hidden_characters(text, true) {
+            return Err(ApiError::bad_request("welcomePrompt has hidden characters"));
+        }
+    }
+    if let SettingPatch::Set(Value::Object(labels)) = &role_labels {
+        if labels
+            .values()
+            .filter_map(Value::as_str)
+            .any(|label| has_hidden_characters(label, false))
+        {
+            return Err(ApiError::bad_request("a role label has hidden characters"));
+        }
+    }
     // The REST validators, reused as they are: shape, role keys, label bytes and
     // the settings allow-list. (Run on an empty bag — only validation matters.)
     let mut probe = serde_json::Map::new();
@@ -663,14 +680,17 @@ fn workspace_settings_update_args(args: &Value) -> Result<ValidatedActionArgs, A
 /// as `owner=대표 · admin=…` in the fixed role order. Plain text.
 pub fn settings_display(value: Option<&Value>) -> Option<String> {
     match value? {
-        Value::String(text) => Some(text.clone()),
+        Value::String(text) => Some(serde_json::to_string(text).unwrap_or_default()),
         Value::Object(map) => Some(
             actions::ROLE_LABEL_PROPOSAL_KEYS
                 .iter()
                 .filter_map(|role| {
-                    map.get(*role)
-                        .and_then(Value::as_str)
-                        .map(|label| format!("{role}={label}"))
+                    map.get(*role).and_then(Value::as_str).map(|label| {
+                        format!(
+                            "{role}={}",
+                            serde_json::to_string(label).unwrap_or_default()
+                        )
+                    })
                 })
                 .collect::<Vec<_>>()
                 .join(" · "),
@@ -2164,6 +2184,13 @@ mod tests {
             json!({"roleLabels": {"agent": "봇"}}),
             json!({"roleLabels": {"owner": ""}}),
             json!({"roleLabels": {"owner": 5}}),
+            // Nothing that hides or fakes structure in what an approver reads.
+            json!({"welcomePrompt": "정상\u{200B}문구"}),
+            json!({"welcomePrompt": "정상\u{202E}문구"}),
+            json!({"welcomePrompt": "bell\u{0007}"}),
+            json!({"welcomePrompt": "carriage\rreturn"}),
+            json!({"roleLabels": {"owner": "줄\n바꿈"}}),
+            json!({"roleLabels": {"owner": "\u{200B}"}}),
             json!({"roleLabels": {"owner": "가".repeat(17)}}), // 51 bytes
             // The keys this action does NOT own, in both spellings.
             json!({"allowedAgentModels": ["x"]}),
@@ -2178,6 +2205,39 @@ mod tests {
                 .expect_err(&format!("{refused} must be refused"));
             assert_eq!(error.status, StatusCode::BAD_REQUEST, "{refused}");
         }
+    }
+
+    /// A multi-line prompt is fine, and a value cannot dress itself as structure on
+    /// the card: it is shown quoted, with the arrow and the separators inside it.
+    #[test]
+    fn a_value_cannot_pose_as_the_arrow_or_another_row_on_the_card() {
+        assert!(validated_action_args(
+            settings(),
+            &json!({"welcomePrompt": "첫 줄\n둘째 줄"}),
+            NOW_MS
+        )
+        .is_ok());
+        let row = actions::settings_change_row(
+            "환영 문구",
+            settings_display(Some(&json!("옛 → \"가짜\""))).as_deref(),
+            settings_display(Some(&json!("새\n값 · admin=\"관리자\""))).as_deref(),
+        );
+        let value = row["value"].as_str().expect("value");
+        assert!(!value.contains('\n'), "{value}");
+        assert_eq!(
+            value,
+            "\"옛 → \\\"가짜\\\"\" → \"새\\n값 · admin=\\\"관리자\\\"\""
+        );
+        let labels =
+            settings_display(Some(&json!({"owner": "대표 · admin=\"관리자\""}))).expect("labels");
+        assert_eq!(labels, "owner=\"대표 · admin=\\\"관리자\\\"\"");
+        // A clear is named as one in the row's label.
+        let cleared = actions::settings_change_row(
+            "환영 문구",
+            settings_display(Some(&json!("옛 문구"))).as_deref(),
+            None,
+        );
+        assert_eq!(cleared["label"], json!("환영 문구 — 지움"));
     }
 
     #[test]

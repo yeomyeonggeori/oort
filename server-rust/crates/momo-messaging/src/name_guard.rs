@@ -436,6 +436,21 @@ pub fn mention_overlaps_roster(candidate: &str, target: Uuid, roster: &[RosterNa
         })
 }
 
+/// Whether free text carries characters that hide, reorder or fake structure:
+/// control and format characters (zero-width, bidi, BOM, tags), the invisible
+/// Hangul fillers, line and paragraph separators — except `\n` when
+/// `allow_newlines` (a welcome prompt is multi-line prose). Used on text an agent
+/// *proposes* for another surface (`workspace.settings.update`), where the
+/// approver reads it on a card.
+pub fn has_hidden_characters(raw: &str, allow_newlines: bool) -> bool {
+    let without_allowed: String = if allow_newlines {
+        raw.replace('\n', " ")
+    } else {
+        raw.to_string()
+    };
+    has_invisible_or_control_characters(&without_allowed)
+}
+
 /// Whether a name a **person** typed carries something invisible, reordering or
 /// line-breaking — the part of the agent allow-list that is also right for a
 /// human rename of an agent, because the name is read by other people on cards
@@ -856,6 +871,22 @@ mod tests {
             &roster
         ));
         assert!(!mention_overlaps_roster("Bot", Uuid::from_u128(9), &roster));
+    }
+
+    #[test]
+    fn free_text_may_keep_newlines_but_not_hide_anything() {
+        assert!(!has_hidden_characters("환영해요\n처음이시죠", true));
+        assert!(has_hidden_characters("환영해요\n처음이시죠", false));
+        for hostile in [
+            "a\u{200B}b",
+            "a\u{202E}b",
+            "a\u{FEFF}b",
+            "a\rb",
+            "a\u{2028}b",
+            "a\u{0007}b",
+        ] {
+            assert!(has_hidden_characters(hostile, true), "{hostile:?}");
+        }
     }
 
     #[test]

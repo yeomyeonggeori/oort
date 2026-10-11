@@ -9861,8 +9861,8 @@ async fn an_approved_settings_update_changes_only_the_two_keys() {
             .unwrap()
             .to_string()
     };
-    assert_eq!(row("환영 문구"), "예전 문구 → 새 환영 문구");
-    assert_eq!(row("역할 이름"), "member=팀원 → owner=대표");
+    assert_eq!(row("환영 문구"), "\"예전 문구\" → \"새 환영 문구\"");
+    assert_eq!(row("역할 이름"), "member=\"팀원\" → owner=\"대표\"");
     assert_eq!(settings_bag_3710(&su, fixture.workspace).await, start);
 
     // ---- a non-operator and an agent cannot approve ------------------------

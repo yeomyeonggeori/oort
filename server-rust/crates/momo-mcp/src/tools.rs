@@ -460,7 +460,10 @@ fn workspace_settings_branch() -> Value {
     );
     branch["minProperties"] = json!(1);
     branch["description"] = json!(
-        "At least one key. Omit a key to leave it as it is; send null to clear it back to the default."
+        "At least one key. UNLIKE the other actions, null here CLEARS the key back to its \
+         default, so do NOT send null for a key you are not changing: omit it. roleLabels \
+         REPLACES the whole object (send every role you want to keep). Text must not \
+         contain hidden or control characters."
     );
     branch
 }

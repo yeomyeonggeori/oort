@@ -680,14 +680,19 @@ pub const REF_TYPE_WORKSPACE_SETTINGS: &str = "workspace_settings";
 /// How one settings key reads on the card: `before → after`, plain text.
 /// `None` is 「(기본값)」 — the key is not set.
 pub fn settings_change_row(label: &str, before: Option<&str>, after: Option<&str>) -> Value {
-    action_row(
-        label,
-        format!(
-            "{} → {}",
-            before.unwrap_or("(기본값)"),
-            after.unwrap_or("(기본값으로 되돌림)")
+    // `before` and `after` arrive already rendered by the server's own display
+    // function (`routes::actions::settings_display`), which quotes every
+    // agent-supplied string (JSON string syntax) so that no value can pass itself
+    // off as the arrow, a second setting or a second row.
+    match after {
+        Some(after) => action_row(label, format!("{} → {after}", before.unwrap_or("(기본값)"))),
+        // A clear is labelled as one, in the row's name, so it cannot be read as
+        // just another edit.
+        None => action_row(
+            &format!("{label} — 지움"),
+            format!("{} → (기본값으로 되돌림)", before.unwrap_or("(기본값)")),
         ),
-    )
+    }
 }
 
 /// The outcome line of `workspace.settings.update`: **key names only** — the
