@@ -23,6 +23,7 @@
 //! | `e1_10_machinery_rows_make_no_items` | drop the message-type filter |
 //! | `e1_11_the_integrity_guards_hold_what_the_fks_cannot` | drop `inbox_item_guard_insert_trg` / `inbox_item_guard_update_trg` |
 //! | `e1_12_the_policy_itself_refuses_a_cross_tenant_write` | loosen the policy to `WITH CHECK (true)` (the guard trigger is switched off inside the test so only the policy can refuse) |
+//! | `e1_14_a_lower_case_mention_token_still_sends_and_projects` | make the guard's mention check case-sensitive again (the send then fails) |
 //! | `e1_13_inactive_and_cross_channel_recipients_are_not_told` | drop `m.status = 'active'` / `m.deleted_at IS NULL` / the thread scans' `channel_id` |
 
 use std::path::PathBuf;
@@ -1366,5 +1367,35 @@ async fn e1_13_inactive_and_cross_channel_recipients_are_not_told() {
     assert!(
         items(&su, crossing.message.id).await.is_empty(),
         "root_id from another channel names nobody"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// E1-14 — the guard is no stricter than the projection (security review, 4th pass)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn e1_14_a_lower_case_mention_token_still_sends_and_projects() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let ws = seed_workspace(&su).await;
+    let alice = seed_member(&su, ws, "alice", "human").await;
+    let bob = seed_member(&su, ws, "bob", "human").await;
+    let ch = channel(&app, &su, ws, "general", &[alice, bob]).await;
+    // the projection accepts any-case uuid tokens; the guard must agree, or a
+    // producer that writes lower case would lose the whole message send
+    let mut m = NewMessage::text(ch, bob, "소문자 토큰");
+    m.props = json!({ "mention_member_ids": [alice.to_string().to_lowercase()] });
+    let sent = send_skip(&app, ws, m).await;
+    assert_eq!(
+        items(&su, sent.message.id).await,
+        vec![Item {
+            member: alice,
+            kind: "mention".into(),
+            reasons: s(&["mention"]),
+            read: false
+        }]
     );
 }

@@ -147,8 +147,11 @@ CREATE FUNCTION inbox_item_reasons_consistent(
                   AND q.author_member_id = p_member)
              WHEN 'thread_reply' THEN m.root_id IS NOT NULL
              WHEN 'mention' THEN
+               -- case-insensitive, like the projection that accepts the token
                jsonb_typeof(m.props -> 'mention_member_ids') = 'array'
-               AND jsonb_exists(m.props -> 'mention_member_ids', upper(p_member::text))
+               AND EXISTS (SELECT 1
+                             FROM jsonb_array_elements_text(m.props -> 'mention_member_ids') AS e(v)
+                            WHERE lower(e.v) = p_member::text)
              ELSE false
            END), false)
     FROM message m, unnest(p_reasons) AS r
