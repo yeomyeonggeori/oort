@@ -376,3 +376,39 @@ describe("ChatShell add-member offer follows the roster", () => {
     expect(add?.textContent).toContain(EMPTY_ADD_MEMBER_ACTION_LABEL);
   });
 });
+
+describe("빈 채널의 「에이전트 연결」 (#3697)", () => {
+  const connect = (root: HTMLElement) =>
+    root.querySelector("[data-testid='timeline-empty-connect-agent']");
+
+  it("에이전트가 한 명도 없는 워크스페이스의 소유자에게만 선다", () => {
+    directoryState.isPending = false;
+    directoryState.isFetching = false;
+    directoryState.directory = makeDirectory([member({ role: "owner" })]);
+    const root = mountShell();
+    expect(connect(root)?.textContent).toContain("에이전트 연결");
+  });
+
+  it("로스터가 정착하기 전에는 세우지 않는다", () => {
+    directoryState.isPending = true;
+    directoryState.directory = makeDirectory([member({ role: "owner" })]);
+    expect(connect(mountShell())).toBeNull();
+  });
+
+  it("관리자가 아니면 세우지 않는다", () => {
+    directoryState.isPending = false;
+    directoryState.isFetching = false;
+    directoryState.directory = makeDirectory([member({ role: "member" })]);
+    expect(connect(mountShell())).toBeNull();
+  });
+
+  it("활성 에이전트가 있으면 세우지 않는다", () => {
+    directoryState.isPending = false;
+    directoryState.isFetching = false;
+    directoryState.directory = makeDirectory([
+      member({ role: "owner" }),
+      member({ id: "agent-1", kind: "agent", handle: "kim-intern", displayName: "김인턴" }),
+    ]);
+    expect(connect(mountShell())).toBeNull();
+  });
+});

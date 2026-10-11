@@ -22,6 +22,7 @@ import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect"
 import {
   AI_CONNECT_BOUNDARY_NOTE,
   AI_CONNECT_DESKTOP_ONLY_NOTE,
+  AI_CONNECT_NON_ADMIN_LINE,
   AI_CONNECT_QUESTION,
   AI_CONNECT_SERVER_OFF_NOTE,
   AI_CONNECT_SKIPPED_LINE,
@@ -46,6 +47,7 @@ import {
   applyFirstAgentFocus,
   clearAllFirstAgentMarkers,
   readFirstAgentMarker,
+  takeFirstAgentResumeHash,
 } from "./firstAgentStore";
 import { FirstAgentStage } from "./FirstAgentStage";
 import { openAiConnectReentry } from "./aiConnectReentry";
@@ -504,11 +506,15 @@ describe("구독 줄 노출 (ADR-0193 D6, #2814)", () => {
     expect(q(host, "first-agent-heading")?.textContent).toBe(AI_CONNECT_QUESTION);
   });
 
-  it("데스크탑 + 플래그 + 서버 켬이면 구독 두 줄이 맨 위다", async () => {
+  it("데스크탑 + 플래그 + 서버 켬이면 에이전트 줄 아래에 내 도구 두 줄이 선다", async () => {
     subscriptionOn();
     const host = mountStage();
     await waitFor(() => rowIds(host).length === 4, "four rows");
-    expect(rowIds(host)).toEqual(["claude", "codex", "api-key", "grok"]);
+    expect(rowIds(host)).toEqual(["api-key", "grok", "claude", "codex"]);
+    // ADR-0198: 에이전트가 먼저, 구독 CLI는 「내 도구」 묶음 (#3697).
+    expect(q(host, "ai-connect-group-agents")?.textContent).toBe("에이전트");
+    expect(q(host, "ai-connect-group-tools")?.textContent).toBe("내 도구");
+    expect(host.querySelector("#ai-connect-claude-detail")?.closest("[data-testid=ai-connect-row]")?.textContent).toContain("Claude Code · 내 도구");
     expect(host.textContent).toContain(AI_CONNECT_BOUNDARY_NOTE);
   });
 
@@ -562,7 +568,7 @@ describe("알약과 선택", () => {
     expect(q(host, "ai-connect-pill-codex")?.textContent).toBe("로그인 필요");
     expect(host.querySelector<HTMLInputElement>("#ai-connect-claude")?.checked).toBe(true);
     expect(host.querySelector<HTMLInputElement>("#ai-connect-codex")?.disabled).toBe(true);
-    expect(q(host, "first-agent-continue")?.textContent).toBe("Claude Code를 내 에이전트로");
+    expect(q(host, "first-agent-continue")?.textContent).toBe("Claude Code를 개인 에이전트로");
     expect(q(host, "first-agent-heading")?.textContent).toBe("이 맥에서 Claude Code를 찾았어요.");
     expect(q(host, "kometto-guide")?.getAttribute("data-expression")).toBe("happy");
   });
@@ -1109,12 +1115,46 @@ describe("[지금은 건너뛰기] → 코메토 졸림 + 재진입 위치", () 
     click(q(host, "first-agent-skipped-continue"));
     expect(readFirstAgentMarker(WS)).toBe("skipped");
     expect(continued).toBe(1);
+    // 건너뛰면 AI 허브가 아니라 첫 대화 채널(#general)로 내린다 (#3697).
+    expect(takeFirstAgentResumeHash()).toBe(`#/c/${GENERAL_ID}`);
   });
 
   it("재진입 문장이 목록 아래에 있다", async () => {
     const host = mountStage();
     await waitFor(() => q(host, "first-agent-reentry-line") !== null, "reentry");
     expect(q(host, "first-agent-reentry-line")?.textContent).toContain("AI");
+  });
+});
+
+describe("관리자가 아닌 멤버 (#3697)", () => {
+  it("명부에서 역할이 멤버면 잠긴 오류 없이 요청 안내만 세운다", async () => {
+    vi.mocked(fetchRoster).mockReset();
+    vi.mocked(fetchRoster).mockResolvedValue([{ ...human, role: "member" }]);
+    const host = mountStage();
+    await waitFor(() => q(host, "first-agent-non-admin") !== null, "non-admin");
+    expect(q(host, "first-agent-heading")?.textContent).toBe(AI_CONNECT_NON_ADMIN_LINE);
+    expect(q(host, "ai-connect-list")).toBeNull();
+    expect(q(host, "first-agent-error")).toBeNull();
+    click(q(host, "first-agent-non-admin-continue"));
+    expect(readFirstAgentMarker(WS)).toBe("skipped");
+    expect(continued).toBe(1);
+    expect(takeFirstAgentResumeHash()).toBe(`#/c/${GENERAL_ID}`);
+  });
+
+  it("명부보다 403이 먼저 와도 잠긴 오류가 아니라 같은 안내다", async () => {
+    vi.mocked(fetchRoster).mockReset();
+    vi.mocked(fetchRoster).mockImplementation(() => new Promise(() => undefined));
+    vi.mocked(listHostedConnections).mockRejectedValue(new ApiError(403, "forbidden"));
+    const host = mountStage();
+    await waitFor(() => q(host, "first-agent-non-admin") !== null, "non-admin");
+    expect(q(host, "first-agent-error")).toBeNull();
+    expect(q(host, "first-agent-heading")?.textContent).toBe(AI_CONNECT_NON_ADMIN_LINE);
+  });
+
+  it("관리자는 그대로 목록이 선다", async () => {
+    const host = mountStage();
+    await waitFor(() => q(host, "ai-connect-list") !== null, "list");
+    expect(q(host, "first-agent-non-admin")).toBeNull();
   });
 });
 
@@ -1165,7 +1205,7 @@ describe("재진입 (#2870, RCA 1-b): 설정·에이전트 화면에서 다시 �
     await waitFor(() => rowIds(host).length > 0, "rows");
     await flush();
     expect(continued).toBe(0);
-    expect(rowIds(host).slice(0, 2)).toEqual(["claude", "codex"]);
+    expect(rowIds(host)).toEqual(["api-key", "grok", "claude", "codex"]);
     expect(readFirstAgentMarker(WS)).toBeNull();
     expect(q(host, "first-agent-loading")).toBeNull();
   });

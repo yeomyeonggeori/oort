@@ -244,6 +244,8 @@ export function Timeline({
   onResend,
   onResendPending,
   onAddMember,
+  canConnectAgent = false,
+  onConnectAgent,
   onStartWriting,
   isPlayEntrance,
   onEntranceConsumed,
@@ -318,6 +320,12 @@ export function Timeline({
    * 여는 것은 「멤버 추가」 다이얼로그이고, 초대는 워크스페이스의 낱말이다.
    */
   onAddMember?: () => void;
+  /**
+   * 에이전트가 한 명도 없는 워크스페이스의 관리자에게만 true(#3697). 빈 채널에
+   * 「에이전트 연결」을 세운다. 누르면 AI 연결 화면(재진입)이 열린다.
+   */
+  canConnectAgent?: boolean;
+  onConnectAgent?: () => void;
   /**
    * Put the caret in the composer. 빈 채널·빈 DM 양쪽의 **첫** 행동이다 —
    * 두 표면이 다른 이유로 비어 있어도 다음에 하는 일은 같다 (#1536).
@@ -403,9 +411,10 @@ export function Timeline({
         topic: channelTopic,
         peer: peer ?? null,
         canAddMember: Boolean(canAddMember) && channelKind !== "dm",
+        canConnectAgent: Boolean(canConnectAgent) && channelKind !== "dm",
         empty,
       }),
-    [channelKind, channelName, channelTopic, peer, canAddMember, empty]
+    [channelKind, channelName, channelTopic, peer, canAddMember, canConnectAgent, empty]
   );
 
   const items = useMemo(() => {
@@ -802,6 +811,7 @@ export function Timeline({
                 hideWriteAction={showWelcome || welcomeHoldWriteAction}
                 onWrite={onStartWriting}
                 onAddMember={onAddMember}
+                onConnectAgent={onConnectAgent}
               />
             );
           }

@@ -25,6 +25,8 @@ import {
   AI_CONNECT_OFFLINE_LINE,
   GROK_LABEL,
   AI_CONNECT_PROBING_LINE,
+  AI_CONNECT_NON_ADMIN_DETAIL,
+  AI_CONNECT_NON_ADMIN_LINE,
   AI_CONNECT_QUESTION,
   AI_CONNECT_QUESTION_DETAIL,
   AI_CONNECT_REENTRY,
@@ -343,23 +345,33 @@ export function FirstAgentStage({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const prevStepRef = useRef(step);
 
+  const { directory } = useDirectory(workspaceId);
+  // 관리자가 아닌 멤버는 연결 목록(403)을 못 읽는다(#3697). 명부에서 역할이 보이면
+  // 목록을 아예 묻지 않고 요청 안내만 세운다.
+  const selfRole = memberFor(directory, session.member.id)?.role;
+  const knownNonAdmin =
+    pose === null && selfRole !== undefined && selfRole !== "owner" && selfRole !== "admin";
   const list = useQuery({
     ...hostedListQuery(workspaceId),
-    enabled: pose === null,
+    enabled: pose === null && !knownNonAdmin,
   });
   const providerLink = useQuery({
     queryKey: ["settings", "provider-link"],
     queryFn: fetchProviderLink,
     retry: false,
-    enabled: pose === null,
+    enabled: pose === null && !knownNonAdmin,
   });
+  // 명부보다 403이 먼저 온 경우도 같은 안내다.
+  const nonAdmin =
+    pose === "non-admin" ||
+    knownNonAdmin ||
+    (pose === null && list.error instanceof ApiError && list.error.status === 403);
   const workspace = useQuery({
     queryKey: workspaceIdentityKey(workspaceId),
     queryFn: () => fetchWorkspace(workspaceId),
     retry: false,
     enabled: pose === null && SUBSCRIPTION_AGENTS_BUILD_FLAG,
   });
-  const { directory } = useDirectory(workspaceId);
   const { groups } = useChannels(workspaceId);
   const grokProbe = useHostedAgentProbe();
 
@@ -436,7 +448,7 @@ export function FirstAgentStage({
   }, [selected, surface, rows, harness, claudePaused]);
 
   useEffect(() => {
-    if (pose !== null || autoPassedRef.current) return;
+    if (pose !== null || autoPassedRef.current || nonAdmin) return;
     if (list.isPending || providerLink.isPending) return;
     if (list.isError) {
       setListError(FIRST_AGENT_LIST_ERROR);
@@ -453,6 +465,7 @@ export function FirstAgentStage({
     }
   }, [
     pose,
+    nonAdmin,
     list.isPending,
     list.isError,
     list.data,
@@ -718,6 +731,7 @@ export function FirstAgentStage({
 
   const autoPassing =
     !reentry &&
+    !nonAdmin &&
     pose === null &&
     !list.isPending &&
     !providerLink.isPending &&
@@ -725,9 +739,11 @@ export function FirstAgentStage({
     shouldAutoPass(list.data ?? [], providerLink.data?.configured === true);
   const showLoading =
     pose === "loading" ||
-    (pose === null && (list.isPending || providerLink.isPending || autoPassing));
+    (pose === null &&
+      !nonAdmin &&
+      (list.isPending || providerLink.isPending || autoPassing));
   const showOffline = pose === "offline" || offline;
-  const showError = pose === "error" || Boolean(listError);
+  const showError = pose === "error" || (Boolean(listError) && !nonAdmin);
   const listLocked = showOffline || showError;
 
   const grokPill =
@@ -768,6 +784,13 @@ export function FirstAgentStage({
           detail: join ? JOIN_JOINED_DETAIL : undefined,
         };
       default: {
+        if (nonAdmin) {
+          return {
+            state: "awaiting",
+            line: AI_CONNECT_NON_ADMIN_LINE,
+            detail: AI_CONNECT_NON_ADMIN_DETAIL,
+          };
+        }
         if (joinFailure) return { state: "trouble", line: joinFailure };
         if (showError) return { state: "trouble", line: AI_CONNECT_LIST_ERROR_LINE };
         if (showOffline) return { state: "trouble", line: AI_CONNECT_OFFLINE_LINE };
@@ -817,7 +840,9 @@ export function FirstAgentStage({
             type="button"
             className={ONBOARDING_ACTION_CLASS}
             onClick={() => {
-              setFirstAgentResumeHash(`#${FIRST_AGENT_AI_HREF}`);
+              // 건너뛰면 AI 허브가 아니라 첫 대화 채널(#general)에 내린다(#3697).
+              // 빈 채널 소개의 「에이전트 연결」이 이어 가는 길이다.
+              setFirstAgentResumeHash(`#${channelHref(welcomeChannelId)}`);
               finish("skipped");
             }}
             data-testid="first-agent-skipped-continue"
@@ -994,6 +1019,28 @@ export function FirstAgentStage({
             data-href={`#${actionHref}`}
           >
             {AI_CONNECT_CONTINUE_LABEL}
+          </Button>
+        </div>
+      );
+    }
+
+    if (nonAdmin) {
+      return (
+        <div className="flex w-full min-w-0 flex-col items-stretch gap-3" data-testid="first-agent-non-admin">
+          <Button
+            type="button"
+            className={ONBOARDING_ACTION_CLASS}
+            onClick={() => {
+              if (reentry) {
+                handleSkip();
+                return;
+              }
+              setFirstAgentResumeHash(`#${channelHref(welcomeChannelId)}`);
+              finish("skipped");
+            }}
+            data-testid="first-agent-non-admin-continue"
+          >
+            {reentry ? AI_CONNECT_CLOSE_LABEL : AI_CONNECT_CONTINUE_LABEL}
           </Button>
         </div>
       );
