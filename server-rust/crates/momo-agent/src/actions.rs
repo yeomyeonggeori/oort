@@ -60,6 +60,10 @@ pub const ACTION_INVITE_CREATE: &str = "invite.create";
 /// transaction, bring the proposing agent into it (ADR-0186 증보 V3).
 pub const ACTION_CHANNEL_CREATE: &str = "channel.create";
 
+/// `channel.member.add` — put named members into a channel the proposing agent
+/// can see (ADR-0186 증보 V1-b).
+pub const ACTION_CHANNEL_MEMBER_ADD: &str = "channel.member.add";
+
 /// What a person is consenting to when they approve (ADR-0186 D3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Risk {
@@ -243,6 +247,28 @@ fn channel_create_args_schema() -> Value {
     })
 }
 
+/// `channel.member.add` arguments (증보 V2): the channel by **name**, members by
+/// handle, no role (always `member`).
+fn channel_member_add_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["channel", "memberHandles"],
+        "properties": {
+            "channel": {"type": "string", "minLength": 1, "maxLength": CHANNEL_REF_MAX_BYTES},
+            "memberHandles": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": ACTION_MEMBER_HANDLES_MAX,
+                "items": {"type": "string", "minLength": 1, "maxLength": MEMBER_HANDLE_MAX_BYTES}
+            }
+        }
+    })
+}
+
+/// A channel reference: `#` + the 80-character name.
+pub const CHANNEL_REF_MAX_BYTES: u64 = 81;
+
 /// The complete registry. Order is the catalog's order.
 pub const ACTIONS: &[WorkspaceAction] = &[
     WorkspaceAction {
@@ -262,6 +288,15 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         required_role: RequiredRole::Admin,
         effect: "채널을 만들고, 표시된 대로 이 에이전트와 멤버를 그 채널에 넣습니다",
         args_schema: channel_create_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_CHANNEL_MEMBER_ADD,
+        title: "채널에 멤버 추가",
+        summary: "이 에이전트가 볼 수 있는 채널에 멤버를 넣습니다. 역할은 멤버로 고정됩니다.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::Admin,
+        effect: "표시된 멤버를 그 채널에 넣습니다",
+        args_schema: channel_member_add_args_schema,
     },
 ];
 
@@ -467,6 +502,52 @@ pub fn member_card_label(display_name: &str, handle: &str, is_agent: bool) -> St
         format!("{display_name} (@{handle}, 에이전트)")
     } else {
         format!("{display_name} (@{handle})")
+    }
+}
+
+/// The `channel.member.add` card rows, from what the server found: the
+/// channel's **current** name, kind and live head-count, and the members that
+/// would actually be added (those already in the channel are not listed).
+pub fn channel_member_add_rows(
+    channel_name: &str,
+    kind: &str,
+    member_count: i64,
+    new_member_names: &[String],
+    already_in: usize,
+) -> Vec<Value> {
+    let mut rows = vec![
+        action_row("채널", format!("#{channel_name}")),
+        action_row(
+            "공개 범위",
+            if kind == "public" {
+                "공개"
+            } else {
+                "비공개"
+            },
+        ),
+        action_row("현재 인원", format!("{member_count}명")),
+        action_row("추가할 멤버", new_member_names.join(", ")),
+    ];
+    if already_in > 0 {
+        rows.push(action_row("이미 있는 멤버", format!("{already_in}명")));
+    }
+    rows
+}
+
+/// `audit_log.action` for each member a `channel.member.add` seated (V6).
+pub const AUDIT_CHANNEL_MEMBER_ADDED: &str = "channel.member_added";
+pub const AUDIT_CHANNEL_MEMBER_ADDED_SCHEMA: &str = "momo.channel.member_added.v1";
+
+/// The outcome line of `channel.member.add`.
+pub fn channel_member_add_result_body(
+    channel_name: &str,
+    added: usize,
+    already_in: usize,
+) -> String {
+    if already_in > 0 {
+        format!("#{channel_name}에 멤버 {added}명을 넣었어요(이미 있던 {already_in}명)")
+    } else {
+        format!("#{channel_name}에 멤버 {added}명을 넣었어요")
     }
 }
 
@@ -799,7 +880,10 @@ mod tests {
 
     #[test]
     fn the_executable_and_declared_lists_are_what_the_batch_opened() {
-        assert_eq!(action_ids(), vec!["invite.create", "channel.create"]);
+        assert_eq!(
+            action_ids(),
+            vec!["invite.create", "channel.create", "channel.member.add"]
+        );
         assert_eq!(
             DECLARED_NOT_EXECUTABLE
                 .iter()

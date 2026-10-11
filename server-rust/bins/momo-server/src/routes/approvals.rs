@@ -65,11 +65,12 @@ use axum::{Extension, Json};
 use chrono::Utc;
 use momo_agent::actions::{
     action_by_id, action_ref, action_result_props, channel_create_result_body,
-    channel_create_result_rows, invite_result_body, invite_result_rows, last_attempt_patch,
-    result_client_msg_id, ActionResult, ActionResultNext, RequiredRole,
-    ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED, ACTION_TYPE_WORKSPACE_ACTION,
-    AUDIT_ACTION_APPROVED, AUDIT_CHANNELS_GRANTED, AUDIT_CHANNELS_GRANTED_SCHEMA,
-    AUDIT_CHANNEL_CREATED, AUDIT_CHANNEL_CREATED_SCHEMA, DEFAULT_INVITE_EXPIRES_IN_DAYS,
+    channel_create_result_rows, channel_member_add_result_body, channel_member_add_rows,
+    invite_result_body, invite_result_rows, last_attempt_patch, result_client_msg_id, ActionResult,
+    ActionResultNext, RequiredRole, ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED,
+    ACTION_TYPE_WORKSPACE_ACTION, AUDIT_ACTION_APPROVED, AUDIT_CHANNELS_GRANTED,
+    AUDIT_CHANNELS_GRANTED_SCHEMA, AUDIT_CHANNEL_CREATED, AUDIT_CHANNEL_CREATED_SCHEMA,
+    AUDIT_CHANNEL_MEMBER_ADDED, AUDIT_CHANNEL_MEMBER_ADDED_SCHEMA, DEFAULT_INVITE_EXPIRES_IN_DAYS,
     INVITE_RESULT_NEXT, LAST_ATTEMPT_PROPS_KEY, REF_TYPE_CHANNEL, REF_TYPE_INVITE, ROLE_REQUIRED,
     SECRET_ONCE_INVITE_LINK,
 };
@@ -109,7 +110,9 @@ use crate::dto::{
 };
 use crate::error::ApiError;
 use crate::realtime_advert::derive_same_origin_http_base;
-use crate::routes::actions::{resolve_action_in_tx, ActionArgs, GateSubject, ResolvedMember};
+use crate::routes::actions::{
+    resolve_action_in_tx, ActionArgs, GateSubject, ResolvedChannel, ResolvedMember,
+};
 use crate::routes::agents::require_profile_editor_in_tx;
 use crate::routes::invites::require_admin;
 use crate::routes::shared::{
@@ -1170,6 +1173,26 @@ async fn execute_workspace_action(
 
     // ---- 3. the action's own executor --------------------------------------
     let executed = match &resolved.validated.args {
+        ActionArgs::ChannelMemberAdd {
+            channel: Some(channel),
+            members,
+            already_in,
+            ..
+        } => {
+            match execute_channel_member_add(conn, approval, input, channel, members, already_in)
+                .await?
+            {
+                Execution::Ran(executed) => executed,
+                Execution::Refused(decision) => return Ok(Ok(decision)),
+            }
+        }
+        // The resolver always fills `channel`; an action that reached the executor
+        // without one has nothing to act on, and rolling back is the safe answer.
+        ActionArgs::ChannelMemberAdd { channel: None, .. } => {
+            return Err(protocol_error(
+                "channel.member.add resolved without a channel",
+            ));
+        }
         ActionArgs::ChannelCreate {
             name,
             kind,
@@ -1534,6 +1557,68 @@ async fn execute_channel_create(
         ref_id: channel_id,
         result_body: channel_create_result_body(name, kind, channel_id),
         result_rows: channel_create_result_rows(name, kind, add_proposer, added),
+        secret_once: None,
+        next: None,
+    }))
+}
+
+/// `channel.member.add` (증보 V1/V6): seat each resolved member as `member`, as
+/// the approver. A member who is already live in the channel is **skipped, not
+/// re-added**: the upsert rewrites the role, so re-adding would quietly demote a
+/// channel admin or owner to `member`.
+async fn execute_channel_member_add(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    channel: &ResolvedChannel,
+    members: &[ResolvedMember],
+    already_in: &[Uuid],
+) -> Result<Execution, momo_db::DbError> {
+    let mut audits = Vec::new();
+    let mut added = 0usize;
+    for member in members {
+        if already_in.contains(&member.id) {
+            continue;
+        }
+        add_channel_member_in_tx(conn, input.workspace_id, channel.id, member.id, "member")
+            .await?
+            .ok_or_else(|| protocol_error("a resolved member could not be added"))?;
+        added += 1;
+        audits.push(
+            AuditEntry::new(input.workspace_id, AUDIT_CHANNEL_MEMBER_ADDED)
+                .by(input.member_id)
+                .about(member.id)
+                .target("channel", channel.id)
+                .via_token(input.via_token_id)
+                .run(approval.run_id)
+                .with_schema(
+                    AUDIT_CHANNEL_MEMBER_ADDED_SCHEMA,
+                    json!({
+                        "channel_id": channel.id.to_string(),
+                        "role": "member",
+                        "via_agent": approval.requested_by.to_string(),
+                        "approval_id": approval.id.to_string(),
+                    }),
+                ),
+        );
+    }
+    let skipped = members.len() - added;
+    Ok(Execution::Ran(Executed {
+        audits,
+        ref_type: REF_TYPE_CHANNEL,
+        ref_id: channel.id,
+        result_body: channel_member_add_result_body(&channel.name, added, skipped),
+        result_rows: channel_member_add_rows(
+            &channel.name,
+            &channel.kind,
+            channel.member_count + added as i64,
+            &members
+                .iter()
+                .filter(|member| !already_in.contains(&member.id))
+                .map(ResolvedMember::card_label)
+                .collect::<Vec<_>>(),
+            skipped,
+        ),
         secret_once: None,
         next: None,
     }))

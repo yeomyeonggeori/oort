@@ -197,6 +197,26 @@ pub enum ActionArgs {
         handles: Vec<String>,
         members: Vec<ResolvedMember>,
     },
+    /// `channel.member.add` (증보 V2). `channel` and `members` are empty after the
+    /// pure stage and filled by [`resolve_action_in_tx`]; `new_members` is the
+    /// subset not already live in the channel.
+    ChannelMemberAdd {
+        channel_ref: String,
+        handles: Vec<String>,
+        channel: Option<ResolvedChannel>,
+        members: Vec<ResolvedMember>,
+        already_in: Vec<Uuid>,
+    },
+}
+
+/// A channel a proposal named, as the server found it. Every field is the
+/// server's value; the agent's string is only the lookup key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedChannel {
+    pub id: Uuid,
+    pub name: String,
+    pub kind: String,
+    pub member_count: i64,
 }
 
 /// A workspace member a proposal named by handle, as the server found them.
@@ -235,6 +255,7 @@ pub fn validated_action_args(
     match action.id {
         actions::ACTION_INVITE_CREATE => invite_create_args(args, now_ms),
         actions::ACTION_CHANNEL_CREATE => channel_create_args(args),
+        actions::ACTION_CHANNEL_MEMBER_ADD => channel_member_add_args(args),
         // Fail closed. A registry entry with no normaliser must be an error and
         // not an unvalidated passthrough — `every_action_has_a_normaliser` is
         // what makes this arm unreachable rather than merely unlikely.
@@ -426,6 +447,77 @@ fn channel_create_args(args: &Value) -> Result<ValidatedActionArgs, ApiError> {
     })
 }
 
+fn channel_member_add_args(args: &Value) -> Result<ValidatedActionArgs, ApiError> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| ApiError::bad_request("action args must be an object"))?;
+    closed_keys(object, &["channel", "memberHandles"])?;
+    let raw = optional_string(object, "channel")?
+        .ok_or_else(|| ApiError::bad_request("channel is required"))?;
+    // One leading `#` is tolerated (that is how a card and a mention spell it);
+    // the rest is the REST normaliser's, so a name that could never exist is
+    // refused here rather than looked up.
+    let trimmed = raw.trim();
+    let channel_ref = normalize_channel_name(trimmed.strip_prefix('#').unwrap_or(trimmed))
+        .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?;
+    let handles = member_handles_arg(object, "memberHandles", 1)?;
+    if object.get("memberHandles").is_none_or(Value::is_null) {
+        return Err(ApiError::bad_request("memberHandles is required"));
+    }
+    Ok(ValidatedActionArgs {
+        normalized: json!({"channel": channel_ref, "memberHandles": handles}),
+        rows: actions::channel_member_add_rows(&channel_ref, "private", 0, &handles, 0),
+        args: ActionArgs::ChannelMemberAdd {
+            channel_ref,
+            handles,
+            channel: None,
+            members: Vec::new(),
+            already_in: Vec::new(),
+        },
+    })
+}
+
+/// Find the channel a name points at **from the proposer's point of view**
+/// (증보 V1-b): a live, non-DM channel that is public, or one the proposing agent
+/// is a live member of. Everything else — somebody else's private channel, a DM,
+/// an archived one, a name that does not exist — is `None`, so a refusal cannot
+/// be used to learn that a private channel exists.
+///
+/// The channel row is locked `FOR SHARE` so it cannot be archived between this
+/// read and the writes that follow.
+async fn resolve_visible_channel_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    proposer_member_id: Uuid,
+    name: &str,
+) -> Result<Option<ResolvedChannel>, momo_db::DbError> {
+    let row: Option<(Uuid, String, String, i64)> = momo_db::sqlx::query_as(
+        "SELECT c.id, c.name, c.kind::text, \
+                (SELECT count(*) FROM membership x \
+                  WHERE x.workspace_id = c.workspace_id AND x.channel_id = c.id \
+                    AND x.left_at IS NULL) \
+           FROM channel c \
+          WHERE c.workspace_id = $1 AND lower(c.name) = lower($2) \
+            AND c.kind IN ('public', 'private') AND c.archived_at IS NULL \
+            AND (c.kind = 'public' OR EXISTS ( \
+                  SELECT 1 FROM membership p \
+                   WHERE p.workspace_id = c.workspace_id AND p.channel_id = c.id \
+                     AND p.member_id = $3 AND p.left_at IS NULL)) \
+          FOR SHARE OF c",
+    )
+    .bind(workspace_id)
+    .bind(name)
+    .bind(proposer_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(row.map(|(id, name, kind, member_count)| ResolvedChannel {
+        id,
+        name,
+        kind,
+        member_count,
+    }))
+}
+
 /// Look `handles` up among the workspace's active members.
 /// Every handle must resolve: one that does not is the whole call's
 /// `InvalidArguments`, with no hint which one.
@@ -578,6 +670,58 @@ pub async fn resolve_action_in_tx(
             let names: Vec<String> = members.iter().map(ResolvedMember::card_label).collect();
             validated.rows =
                 actions::channel_create_rows(name, kind, topic.as_deref(), *add_proposer, &names);
+            GateSubject::Workspace
+        }
+        ActionArgs::ChannelMemberAdd {
+            channel_ref,
+            handles,
+            channel,
+            members,
+            already_in,
+        } => {
+            if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
+                return Ok(Err(ApiError::bad_request(
+                    "proposer is not an active agent",
+                )));
+            }
+            // One answer for "no such channel", "somebody's private channel", "a
+            // DM" and "archived" (and for an unresolvable handle below).
+            let Some(found) =
+                resolve_visible_channel_in_tx(conn, workspace_id, proposer_member_id, channel_ref)
+                    .await?
+            else {
+                return Ok(Err(ApiError::bad_request("channel did not resolve")));
+            };
+            let Some(found_members) =
+                resolve_member_handles_in_tx(conn, workspace_id, handles).await?
+            else {
+                return Ok(Err(ApiError::bad_request("member handle did not resolve")));
+            };
+            let ids: Vec<Uuid> = found_members.iter().map(|member| member.id).collect();
+            *already_in = momo_db::sqlx::query_scalar(
+                "SELECT member_id FROM membership \
+                  WHERE workspace_id = $1 AND channel_id = $2 AND left_at IS NULL \
+                    AND member_id = ANY($3)",
+            )
+            .bind(workspace_id)
+            .bind(found.id)
+            .bind(&ids)
+            .fetch_all(&mut *conn)
+            .await?;
+            let new_names: Vec<String> = found_members
+                .iter()
+                .filter(|member| !already_in.contains(&member.id))
+                .map(ResolvedMember::card_label)
+                .collect();
+            validated.rows = actions::channel_member_add_rows(
+                &found.name,
+                &found.kind,
+                found.member_count,
+                &new_names,
+                already_in.len(),
+            );
+            *channel = Some(found);
+            *members = found_members;
             GateSubject::Workspace
         }
     };
@@ -1269,6 +1413,41 @@ mod tests {
             validated.normalized["memberHandles"],
             json!(["bob", "alice"])
         );
+    }
+
+    fn member_add() -> &'static WorkspaceAction {
+        actions::action_by_id(actions::ACTION_CHANNEL_MEMBER_ADD).expect("registered")
+    }
+
+    #[test]
+    fn a_member_add_proposal_names_a_channel_and_handles_and_nothing_else() {
+        let validated = validated_action_args(
+            member_add(),
+            &json!({"channel": "#Plans", "memberHandles": ["@Bob"]}),
+            NOW_MS,
+        )
+        .expect("legal");
+        assert_eq!(
+            validated.normalized,
+            json!({"channel": "plans", "memberHandles": ["bob"]})
+        );
+        for refused in [
+            json!({}),
+            json!({"channel": "plans"}),
+            json!({"memberHandles": ["bob"]}),
+            json!({"channel": "plans", "memberHandles": []}),
+            json!({"channel": "plans", "memberHandles": null}),
+            json!({"channel": "plans", "memberHandles": ["a"]}),
+            json!({"channel": "Has Space", "memberHandles": ["bob"]}),
+            json!({"channel": "", "memberHandles": ["bob"]}),
+            // The role is fixed; ids are never accepted.
+            json!({"channel": "plans", "memberHandles": ["bob"], "role": "admin"}),
+            json!({"channel": "plans", "memberHandles": ["bob"], "channelId": Uuid::new_v4()}),
+        ] {
+            let error = validated_action_args(member_add(), &refused, NOW_MS)
+                .expect_err(&format!("{refused} must be refused"));
+            assert_eq!(error.status, StatusCode::BAD_REQUEST, "{refused}");
+        }
     }
 
     /// 부록 E, row by row. The `unavailableReason` key is what a client reads
