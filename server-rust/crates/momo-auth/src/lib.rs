@@ -128,8 +128,8 @@ pub use ephemeral_grant::{
 pub use hosted_connection::{
     active_hosted_connection_in_tx, append_approved_channels_in_tx,
     confirm_hosted_connection_in_tx, create_hosted_connection_in_tx, detect_pairing_in_tx,
-    get_hosted_connection_in_tx, is_hosted_agent_activated_in_tx, is_hosted_agent_in_tx,
-    latest_hosted_connection_for_agent_in_tx, list_hosted_connections_in_tx,
+    get_hosted_connection_in_tx, grant_hosted_channels_in_tx, is_hosted_agent_activated_in_tx,
+    is_hosted_agent_in_tx, latest_hosted_connection_for_agent_in_tx, list_hosted_connections_in_tx,
     lock_active_hosted_connection_in_tx, pairing_workspace_id, prove_hosted_binding_in_tx,
     regenerate_pairing_in_tx, resolve_hosted_tool_identity_in_tx, resolve_pairing_in_tx,
     validate_channel_ids, validate_hosted_scopes, HostedActivationIssuance, HostedConnection,

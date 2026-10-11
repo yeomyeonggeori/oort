@@ -73,7 +73,8 @@ use momo_agent::actions::{
     AUDIT_CHANNEL_CREATED, AUDIT_CHANNEL_CREATED_SCHEMA, AUDIT_CHANNEL_MEMBER_ADDED,
     AUDIT_CHANNEL_MEMBER_ADDED_SCHEMA, AUDIT_MEMBER_RENAMED, AUDIT_MEMBER_RENAMED_SCHEMA,
     DEFAULT_INVITE_EXPIRES_IN_DAYS, INVITE_RESULT_NEXT, LAST_ATTEMPT_PROPS_KEY, REF_TYPE_AGENT,
-    REF_TYPE_CHANNEL, REF_TYPE_INVITE, ROLE_REQUIRED, SECRET_ONCE_INVITE_LINK,
+    REF_TYPE_CHANNEL, REF_TYPE_HOSTED_CONNECTION, REF_TYPE_INVITE, ROLE_REQUIRED,
+    SECRET_ONCE_INVITE_LINK,
 };
 use momo_agent::approval::{
     decided_props_patch, decision_broadcast_payload, decision_event_payload, decision_receipt,
@@ -88,8 +89,8 @@ use momo_agent::{
     end_parked_run_in_tx, requeue_run_from_approval_in_tx, succeed_parked_run_in_tx, RunStatus,
 };
 use momo_auth::{
-    append_approved_channels_in_tx, lock_active_hosted_connection_in_tx, Principal, PrincipalKind,
-    MAX_HOSTED_APPROVED_CHANNELS,
+    append_approved_channels_in_tx, grant_hosted_channels_in_tx,
+    lock_active_hosted_connection_in_tx, Principal, PrincipalKind, MAX_HOSTED_APPROVED_CHANNELS,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
@@ -113,7 +114,7 @@ use crate::error::ApiError;
 use crate::realtime_advert::derive_same_origin_http_base;
 use crate::routes::actions::{
     resolve_action_in_tx, ActionArgs, GateSubject, ResolvedAgentTarget, ResolvedChannel,
-    ResolvedMember,
+    ResolvedConnection, ResolvedMember,
 };
 use crate::routes::agents::require_profile_editor_in_tx;
 use crate::routes::invites::require_admin;
@@ -1187,6 +1188,25 @@ async fn execute_workspace_action(
 
     // ---- 3. the action's own executor --------------------------------------
     let executed = match &resolved.validated.args {
+        ActionArgs::HostedChannelsGrant {
+            connection: Some(connection),
+            channels,
+            ..
+        } => {
+            match execute_hosted_channels_grant(conn, approval, input, now, connection, channels)
+                .await?
+            {
+                Execution::Ran(executed) => executed,
+                Execution::Refused(decision) => return Ok(Ok(decision)),
+            }
+        }
+        ActionArgs::HostedChannelsGrant {
+            connection: None, ..
+        } => {
+            return Err(protocol_error(
+                "hosted.channels.grant resolved without a connection",
+            ));
+        }
         ActionArgs::AgentRename {
             display_name,
             target: Some(target),
@@ -1584,6 +1604,72 @@ async fn execute_channel_create(
         ref_id: channel_id,
         result_body: channel_create_result_body(name, kind, channel_id),
         result_rows: channel_create_result_rows(name, kind, add_proposer, added),
+        secret_once: None,
+        next: None,
+    }))
+}
+
+/// `hosted.channels.grant` (증보 V5): widen the **proposer's own** connection by
+/// the resolved channels and seat the agent in them, as one step. The connection
+/// is the one pinned and re-found by the resolver; the grant itself re-checks
+/// that it is still live, bound to this agent, under the ceiling.
+async fn execute_hosted_channels_grant(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    connection: &ResolvedConnection,
+    channels: &[ResolvedChannel],
+) -> Result<Execution, momo_db::DbError> {
+    let ids: Vec<Uuid> = channels.iter().map(|channel| channel.id).collect();
+    let Some(approved) = grant_hosted_channels_in_tx(
+        conn,
+        input.workspace_id,
+        connection.id,
+        approval.requested_by,
+        &ids,
+    )
+    .await
+    .map_err(momo_db::DbError::from)?
+    else {
+        // The connection went away, a channel stopped qualifying, or the ceiling
+        // was reached since the resolver looked: stale, nothing written.
+        return Ok(Execution::Refused(args_invalid_refusal(
+            approval, input, now,
+        )));
+    };
+    let audit = AuditEntry::new(input.workspace_id, AUDIT_CHANNELS_GRANTED)
+        .by(input.member_id)
+        .about(approval.requested_by)
+        .target("hosted_connection", connection.id)
+        .via_token(input.via_token_id)
+        .run(approval.run_id)
+        .with_schema(
+            AUDIT_CHANNELS_GRANTED_SCHEMA,
+            json!({
+                "connection_id": connection.id.to_string(),
+                "channel_ids": ids.iter().map(Uuid::to_string).collect::<Vec<_>>(),
+                "via_agent": approval.requested_by.to_string(),
+                "approval_id": approval.id.to_string(),
+            }),
+        );
+    let named: Vec<(String, Uuid)> = channels
+        .iter()
+        .map(|channel| (channel.name.clone(), channel.id))
+        .collect();
+    Ok(Execution::Ran(Executed {
+        audits: vec![audit],
+        ref_type: REF_TYPE_HOSTED_CONNECTION,
+        ref_id: connection.id,
+        result_body: momo_agent::actions::hosted_channels_grant_result_body(&named, approved.len()),
+        result_rows: momo_agent::actions::hosted_channels_grant_rows(
+            &channels
+                .iter()
+                .map(|c| (c.name.clone(), c.kind.clone(), c.member_count))
+                .collect::<Vec<_>>(),
+            connection.approved_before,
+            approved.len(),
+        ),
         secret_once: None,
         next: None,
     }))

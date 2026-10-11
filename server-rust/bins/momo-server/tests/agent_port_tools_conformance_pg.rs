@@ -9213,3 +9213,421 @@ async fn the_human_rename_route_is_for_the_owner_or_an_admin_only() {
     assert_eq!(detail["kind"], json!("agent"));
     assert_eq!(detail["new"], json!("김 인턴 (비서)"));
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 2026-10-11 S4 (#3709) — hosted.channels.grant
+// ---------------------------------------------------------------------------
+
+async fn approved_of_3709(pool: &PgPool, agent: Uuid) -> Vec<Uuid> {
+    sqlx::query_scalar(
+        "SELECT approved_channel_ids FROM hosted_agent_connection WHERE agent_member_id=$1",
+    )
+    .bind(agent)
+    .fetch_one(pool)
+    .await
+    .expect("approved channels")
+}
+
+/// **hosted.channels.grant (증보 V5, V11).**
+///
+/// The only way an agent asks for more reach, and the narrowest one: its OWN
+/// connection, channels it can already see (public, or private with it inside),
+/// admin approval, a 50-channel ceiling, one indistinguishable refusal for
+/// everything else. The confirm columns and every other agent's connection are
+/// untouched; the grant also seats the agent, so it can actually post.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_channel_grant_widens_only_the_proposers_own_connection() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+
+    // Q: public, the agent is not in it. R: private, the agent IS in it.
+    // S: private, the agent is not in it. D: a DM the agent is in.
+    let (q, q_name) = seed_channel_3707(&su, &fixture, "public", &[]).await;
+    let (r, r_name) = seed_channel_3707(
+        &su,
+        &fixture,
+        "private",
+        &[(fixture.hosted_agent, "member")],
+    )
+    .await;
+    let (_s, s_name) = seed_channel_3707(&su, &fixture, "private", &[]).await;
+    let dm = Uuid::new_v4();
+    let dm_name = format!("dm-{}", &dm.simple().to_string()[..10]);
+    sqlx::query(
+        "INSERT INTO channel(id, workspace_id, kind, name, dm_key, created_by) \
+         VALUES($1,$2,'dm',$3,$4,$5)",
+    )
+    .bind(dm)
+    .bind(fixture.workspace)
+    .bind(&dm_name)
+    .bind(dm.to_string())
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)")
+        .bind(fixture.workspace)
+        .bind(dm)
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    let own_before = approved_of_3709(&su, fixture.hosted_agent).await;
+    let other_before = approved_of_3709(&su, fixture.connect_only_agent).await;
+    let confirm_before = hosted_confirm_columns_3706(&su, &fixture).await;
+
+    // ---- unseen / ineligible channels: one refusal, nothing written --------
+    let approvals_before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM approval WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    let mut answers = Vec::new();
+    for channels in [
+        json!([s_name]),
+        json!([dm_name]),
+        json!(["no-such-room"]),
+        json!([q_name, s_name]), // one bad name poisons the whole call
+        json!([fixture_channel_name(&su, fixture.channel).await]), // already approved
+    ] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "hosted.channels.grant",
+            json!({"channels": channels}),
+        )
+        .await;
+        answers.push((status, refused["error"].clone()));
+    }
+    assert!(
+        answers.iter().all(|a| a.0 == 400 && a.1 == answers[0].1),
+        "{answers:?}"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM approval WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap(),
+        approvals_before
+    );
+    // No key can point at another agent's connection.
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "hosted.channels.grant",
+        json!({"channels": [q_name], "connectionId": Uuid::new_v4()}),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+
+    // ---- a good proposal: Q (public) and R (private, member) ----------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "hosted.channels.grant",
+        json!({"channels": [format!("#{q_name}"), r_name]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap())
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(card["action"]["required_role"], json!("admin"));
+    let rows = card["action"]["rows"].as_array().unwrap().clone();
+    assert!(rows.iter().any(|r| r["label"] == "채널"
+        && r["value"]
+            .as_str()
+            .unwrap()
+            .starts_with(&format!("#{q_name} · 공개 · "))));
+    assert!(rows.iter().any(|r| r["label"] == "채널"
+        && r["value"]
+            .as_str()
+            .unwrap()
+            .starts_with(&format!("#{r_name} · 비공개 · "))));
+    assert!(rows.iter().any(|r| r["label"] == "승인 채널 수"
+        && r["value"] == format!("{}개 → {}개", own_before.len(), own_before.len() + 2)));
+    assert_eq!(
+        approved_of_3709(&su, fixture.hosted_agent).await,
+        own_before
+    );
+
+    // ---- a non-admin cannot widen the agent's reach ------------------------
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &plain_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert_eq!(
+        approved_of_3709(&su, fixture.hosted_agent).await,
+        own_before
+    );
+    assert_eq!(
+        membership_role_3707(&su, q, fixture.hosted_agent).await,
+        None
+    );
+
+    // ---- the admin approves ------------------------------------------------
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        approved["result"]["actionId"],
+        json!("hosted.channels.grant")
+    );
+    assert_eq!(
+        approved["result"]["ref"],
+        json!({"type": "hosted_connection", "id": fixture.hosted_connection.to_string()})
+    );
+    assert!(approved["result"].get("secretOnce").is_none());
+    let own_after = approved_of_3709(&su, fixture.hosted_agent).await;
+    assert_eq!(own_after.len(), own_before.len() + 2);
+    assert!(own_after.contains(&q) && own_after.contains(&r));
+    assert_eq!(
+        membership_role_3707(&su, q, fixture.hosted_agent)
+            .await
+            .as_deref(),
+        Some("member"),
+        "the grant seats the agent: approved AND a member"
+    );
+    assert_eq!(
+        membership_role_3707(&su, r, fixture.hosted_agent)
+            .await
+            .as_deref(),
+        Some("member")
+    );
+    // The confirm columns and the DM approvals never move; nor does any other
+    // agent's connection.
+    assert_eq!(
+        hosted_confirm_columns_3706(&su, &fixture).await,
+        confirm_before
+    );
+    assert_eq!(
+        approved_of_3709(&su, fixture.connect_only_agent).await,
+        other_before
+    );
+    let covered: Vec<Uuid> =
+        sqlx::query_scalar("SELECT unnest(hosted_connection_channel_ids($1,$2))")
+            .bind(fixture.workspace)
+            .bind(fixture.hosted_connection)
+            .fetch_all(&su)
+            .await
+            .unwrap();
+    assert!(covered.contains(&q) && covered.contains(&r));
+
+    let detail: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 \
+           AND action='hosted_connection.channels_granted'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        detail["connection_id"],
+        json!(fixture.hosted_connection.to_string())
+    );
+    assert_eq!(detail["via_agent"], json!(fixture.hosted_agent.to_string()));
+    let mut granted: Vec<String> = detail["channel_ids"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    granted.sort();
+    let mut expected = vec![q.to_string(), r.to_string()];
+    expected.sort();
+    assert_eq!(granted, expected);
+
+    // The agent reads the ids from its outcome line and can post in Q.
+    let (status, posted) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_message_post",
+        json!({"channelId": q, "clientMsgId": Uuid::new_v4(), "body": "안녕하세요"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{posted}");
+    let line: String = sqlx::query_scalar(
+        "SELECT body FROM message WHERE workspace_id=$1 AND channel_id=$2 \
+           AND props ? 'momo.action_result' ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(
+        line.contains(&q.to_string()) && line.contains(&r.to_string()),
+        "{line}"
+    );
+}
+
+async fn fixture_channel_name(pool: &PgPool, channel: Uuid) -> String {
+    sqlx::query_scalar("SELECT name FROM channel WHERE id=$1")
+        .bind(channel)
+        .fetch_one(pool)
+        .await
+        .expect("channel name")
+}
+
+/// The 50-channel ceiling holds at proposal time AND at the tap, and a refused
+/// grant writes neither the array nor the membership.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_channel_grant_cannot_pass_fifty_approved_channels() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (c1, n1) = seed_channel_3707(&su, &fixture, "public", &[]).await;
+    let (_c2, n2) = seed_channel_3707(&su, &fixture, "public", &[]).await;
+    let (c3, n3) = seed_channel_3707(&su, &fixture, "public", &[]).await;
+    let set_to = |count: usize| {
+        let su = su.clone();
+        let connection = fixture.hosted_connection;
+        let base_channel = fixture.channel;
+        async move {
+            sqlx::query(
+                // The channel the agent is mentioned in stays approved (or no job
+                // would reach it); the rest are filler ids up to `count`.
+                "UPDATE hosted_agent_connection SET approved_channel_ids = \
+                   ARRAY[$3::uuid] || ARRAY(SELECT gen_random_uuid() \
+                                              FROM generate_series(1,$2::int - 1)) \
+                 WHERE id=$1",
+            )
+            .bind(connection)
+            .bind(count as i32)
+            .bind(base_channel)
+            .execute(&su)
+            .await
+            .unwrap();
+        }
+    };
+
+    // 49 + 2 > 50: refused when proposed.
+    set_to(49).await;
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "hosted.channels.grant",
+        json!({"channels": [n1.clone(), n2]}),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+    // 49 + 1 = 50: allowed.
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "hosted.channels.grant",
+        json!({"channels": [n1]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    // …but the set grew to 50 before the tap: stale, nothing written.
+    set_to(50).await;
+    let (status, _h, capped) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{capped}");
+    assert_eq!(capped["status"], "action_args_invalid");
+    assert_eq!(approved_of_3709(&su, fixture.hosted_agent).await.len(), 50);
+    assert_eq!(
+        membership_role_3707(&su, c1, fixture.hosted_agent).await,
+        None
+    );
+
+    // The same at the database function itself: the 51st is refused and the
+    // membership is not written (the array is checked first).
+    let mut tx = su.begin().await.unwrap();
+    let outcome = momo_auth::grant_hosted_channels_in_tx(
+        &mut tx,
+        fixture.workspace,
+        fixture.hosted_connection,
+        fixture.hosted_agent,
+        &[c3],
+    )
+    .await
+    .unwrap();
+    assert!(outcome.is_none(), "the 51st channel must be refused");
+    tx.commit().await.unwrap();
+    assert_eq!(
+        membership_role_3707(&su, c3, fixture.hosted_agent).await,
+        None
+    );
+    let _ = n3;
+
+    // The function also refuses another agent's connection id.
+    let other_connection: Uuid =
+        sqlx::query_scalar("SELECT id FROM hosted_agent_connection WHERE agent_member_id=$1")
+            .bind(fixture.connect_only_agent)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    set_to(1).await;
+    let mut tx = su.begin().await.unwrap();
+    let outcome = momo_auth::grant_hosted_channels_in_tx(
+        &mut tx,
+        fixture.workspace,
+        other_connection,
+        fixture.hosted_agent, // the proposer is NOT this connection's agent
+        &[c3],
+    )
+    .await
+    .unwrap();
+    assert!(
+        outcome.is_none(),
+        "a connection of another agent is not grantable"
+    );
+    tx.commit().await.unwrap();
+    assert_eq!(
+        membership_role_3707(&su, c3, fixture.hosted_agent).await,
+        None
+    );
+}

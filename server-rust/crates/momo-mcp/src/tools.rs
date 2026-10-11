@@ -311,11 +311,12 @@ fn artifacts_schema() -> Value {
 /// `docs/api/openapi.yaml`'s `WorkspaceActionId` against each other. Adding an
 /// action means editing three lines; forgetting one of them is a red test, not a
 /// production surprise.
-const WORKSPACE_ACTION_IDS: [&str; 4] = [
+const WORKSPACE_ACTION_IDS: [&str; 5] = [
     "invite.create",
     "channel.create",
     "channel.member.add",
     "agent.rename",
+    "hosted.channels.grant",
 ];
 
 // The argument vocabulary the registry publishes, restated here for the same
@@ -339,6 +340,7 @@ const WORKSPACE_CHANNEL_NAME_MAX_BYTES: u64 = 80;
 const WORKSPACE_CHANNEL_TOPIC_MAX_BYTES: u64 = 1_120;
 const WORKSPACE_CHANNEL_REF_MAX_BYTES: u64 = 81;
 const WORKSPACE_AGENT_NAME_MAX_BYTES: u64 = 256;
+const WORKSPACE_GRANT_CHANNELS_MAX: u64 = 5;
 const WORKSPACE_MEMBER_HANDLES_MAX: u64 = 10;
 const WORKSPACE_MEMBER_HANDLE_MAX_BYTES: u64 = 33;
 
@@ -408,6 +410,18 @@ fn action_args_branches() -> Vec<Value> {
             json!({
                 "displayName": required_text(WORKSPACE_AGENT_NAME_MAX_BYTES),
                 "targetHandle": nullable(required_text(WORKSPACE_MEMBER_HANDLE_MAX_BYTES))
+            }),
+        ),
+        action_args_branch(
+            "hosted.channels.grant",
+            &["channels"],
+            json!({
+                "channels": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": WORKSPACE_GRANT_CHANNELS_MAX,
+                    "items": required_text(WORKSPACE_CHANNEL_REF_MAX_BYTES)
+                }
             }),
         ),
     ]

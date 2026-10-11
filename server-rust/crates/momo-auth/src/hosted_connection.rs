@@ -1050,6 +1050,81 @@ pub async fn lock_active_hosted_connection_in_tx(
     Ok(count.map(|count| (connection_id, usize::try_from(count).unwrap_or(usize::MAX))))
 }
 
+/// Widen a **live** hosted connection's approved channels by `channel_ids` and
+/// seat its agent in each (ADR-0186 증보 V5: `hosted.channels.grant`).
+///
+/// One function, one transaction, in the hosted canon's lock order: the
+/// connection row `FOR UPDATE` first (and only an `active`, proved connection
+/// bound to `agent_member_id` qualifies), then the array, then the agent's
+/// `membership` rows. Every channel must be a live, non-DM channel of this workspace.
+/// Returns the new approved set, or `None` when the connection is not live, a
+/// channel does not qualify, or the result would pass
+/// [`MAX_HOSTED_APPROVED_CHANNELS`] — and nothing is written then.
+///
+/// What it does **not** touch: `confirmed_by`, `confirmed_at`, `active_token_id`,
+/// `approved_scopes`, `approved_dm_channel_ids` (the DM rule of ADR-0162 증보 2
+/// B6 reads them). With [`confirm_hosted_connection_in_tx`] and the OAuth consent
+/// this is one of the **three** writers of `approved_channel_ids`; the SQL
+/// function `hosted_connection_channel_ids` stays the one definition of what a
+/// connection covers, so no reader changes.
+pub async fn grant_hosted_channels_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    connection_id: Uuid,
+    agent_member_id: Uuid,
+    channel_ids: &[Uuid],
+) -> Result<Option<Vec<Uuid>>, sqlx::Error> {
+    let locked: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM hosted_agent_connection \
+          WHERE workspace_id=$1 AND id=$2 AND agent_member_id=$3 \
+            AND status='active' AND proved_at IS NOT NULL FOR UPDATE",
+    )
+    .bind(workspace_id)
+    .bind(connection_id)
+    .bind(agent_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if locked.is_none() || channel_ids.is_empty() {
+        return Ok(None);
+    }
+    let qualifying: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM channel c WHERE c.workspace_id=$1 AND c.id = ANY($2) \
+            AND c.archived_at IS NULL AND c.kind <> 'dm'",
+    )
+    .bind(workspace_id)
+    .bind(channel_ids)
+    .fetch_one(&mut *conn)
+    .await?;
+    let mut distinct = channel_ids.to_vec();
+    distinct.sort_unstable();
+    distinct.dedup();
+    if qualifying != distinct.len() as i64 {
+        return Ok(None);
+    }
+    // The array first: its UPDATE is the step that can refuse (the ceiling), and a
+    // refusal must have written nothing.
+    let Some(approved) =
+        append_approved_channels_in_tx(conn, workspace_id, connection_id, &distinct).await?
+    else {
+        return Ok(None);
+    };
+    // The agent reads a room only when it is BOTH approved and a member
+    // (`hosted_inbox.rs`), so the membership is part of the grant. `left_at` is
+    // cleared; an existing role is kept.
+    sqlx::query(
+        "INSERT INTO membership (workspace_id, channel_id, member_id, role) \
+         SELECT $1, c, $3, 'member'::membership_role FROM unnest($2::uuid[]) c \
+         ON CONFLICT (channel_id, member_id) DO UPDATE SET left_at = NULL \
+           WHERE membership.workspace_id = EXCLUDED.workspace_id",
+    )
+    .bind(workspace_id)
+    .bind(&distinct)
+    .bind(agent_member_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(Some(approved))
+}
+
 /// Add `channel_ids` to a connection's `approved_channel_ids` (set union, order
 /// kept), refusing when the result would pass [`MAX_HOSTED_APPROVED_CHANNELS`].
 /// Returns the new array, or `None` when the connection is not live or the cap

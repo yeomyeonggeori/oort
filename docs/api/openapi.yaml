@@ -13577,7 +13577,7 @@ components:
         `actionId` enum of the Agent Port tool `oort_action_propose`, and that
         registry are held equal by one test
         (`routes::actions::the_action_ids_are_one_list_in_three_places`).
-      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename"]
+      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant"]
 
     SuggestableCommandId:
       type: string
@@ -19624,7 +19624,7 @@ components:
       properties:
         type:
           type: string
-          enum: [invite, channel, agent]
+          enum: [invite, channel, agent, hosted_connection]
         id:
           type: string
           format: uuid
