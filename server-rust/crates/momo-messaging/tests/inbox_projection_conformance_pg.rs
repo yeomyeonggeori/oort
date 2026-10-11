@@ -745,6 +745,37 @@ async fn e1_7_cursor_reads_one_way_and_never_unreads() {
     );
     assert!(item_for(&su, q2.message.id, alice).await.unwrap().read);
 
+    // a message committed with a created_at later than this transaction's now()
+    // (another transaction started after ours) must not make the cursor trigger fail
+    let skewed = send(&app, ws, quote(ch, bob, "시계가 앞선 답", mine.message.id)).await;
+    let skewed_seq = skewed.message.seq;
+    let skewed_id = skewed.message.id;
+    {
+        let mut tx = su.begin().await.unwrap();
+        sqlx::query("SET LOCAL session_replication_role = replica")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE message SET created_at = now() + interval '2 seconds' WHERE id = $1")
+            .bind(skewed_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE inbox_item SET created_at = now() + interval '2 seconds' WHERE message_id = $1",
+        )
+        .bind(skewed_id)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+    }
+    advance(skewed_seq).await;
+    assert!(
+        item_for(&su, skewed_id, alice).await.unwrap().read,
+        "read_at = GREATEST(now(), created_at) satisfies the floor"
+    );
+
     // mark-unread (ADR-0178) lowers nothing: items stay read
     with_tenant_tx(&app, ws, move |conn| {
         Box::pin(async move {
@@ -1161,6 +1192,64 @@ async fn e1_11_the_integrity_guards_hold_what_the_fks_cannot() {
         "a made-up actor"
     );
     assert!(forged(alice, bob, 999).await.is_err(), "a made-up seq");
+    // The legit shape except for its claims, on a message alice has no row for yet:
+    // 'dm' in a public channel, a kind that is not the best reason, a 1970 stamp.
+    let fresh = send(&app, ws_a, NewMessage::text(ch_a, bob, "아무 관련 없는 글")).await;
+    let claim_fresh = |reasons: &'static str, kind: &'static str, read_at: &'static str| {
+        let app = app.clone();
+        let mid = fresh.message.id;
+        async move {
+            with_tenant_tx(&app, ws_a, move |conn| {
+                Box::pin(async move {
+                    sqlx::query(&format!(
+                        "INSERT INTO inbox_item (workspace_id, member_id, kind, reasons, channel_id, \\
+                         message_id, seq, actor_member_id, created_at, read_at) \\
+                         SELECT $1, $2, '{kind}', {reasons}, channel_id, id, seq, author_member_id, created_at, {read_at} \\
+                           FROM message WHERE id = $3"
+                    ))
+                    .bind(ws_a).bind(alice).bind(mid)
+                    .execute(&mut *conn).await?;
+                    Ok::<_, DbError>(())
+                })
+            })
+            .await
+        }
+    };
+    for (reasons, kind, read_at, why) in [
+        ("ARRAY['dm']", "dm", "NULL", "'dm' in a public channel"),
+        (
+            "ARRAY['mention']",
+            "mention",
+            "NULL",
+            "a mention the message never recorded",
+        ),
+        (
+            "ARRAY['reply_to_me']",
+            "reply_to_me",
+            "NULL",
+            "a quote that quotes nobody of hers",
+        ),
+        (
+            "ARRAY['thread_reply']",
+            "thread_reply",
+            "NULL",
+            "a thread reply that is not in a thread",
+        ),
+        (
+            "ARRAY['thread_reply','dm']",
+            "dm",
+            "NULL",
+            "a kind that is not the best reason",
+        ),
+        (
+            "ARRAY['dm']",
+            "dm",
+            "'1970-01-01'::timestamptz",
+            "a pre-read stamp from 1970",
+        ),
+    ] {
+        assert!(claim_fresh(reasons, kind, read_at).await.is_err(), "{why}");
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -320,7 +320,7 @@ INSERT_RE = re.compile(
 )
 INSERT_UPSERT_RE = re.compile(
     r'(?i)\bINSERT\s+INTO\s+(?:ONLY\s+)?(?:public\.)?([a-z][a-z0-9_]*)\b'
-    r'[\s\S]{0,800}?\bON\s+CONFLICT\b[\s\S]{0,400}?\bDO\s+UPDATE\b'
+    r'[\s\S]{0,3000}?\bON\s+CONFLICT\b[\s\S]{0,400}?\bDO\s+UPDATE\b'
 )
 UPDATE_RE = re.compile(
     r'(?i)\bUPDATE\s+(?:ONLY\s+)?(?:public\.)?([a-z][a-z0-9_]*)\b'

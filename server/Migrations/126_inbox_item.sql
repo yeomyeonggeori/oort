@@ -93,6 +93,19 @@ BEGIN
 END $$;
 
 -- -----------------------------------------------------------------------------
+-- reason priority (ADR-0199 D2): reply_to_me > mention > thread_reply > dm
+-- -----------------------------------------------------------------------------
+CREATE FUNCTION inbox_reason_prio(p_reason text) RETURNS int AS $$
+  SELECT CASE p_reason
+    WHEN 'reply_to_me'  THEN 1
+    WHEN 'mention'      THEN 2
+    WHEN 'thread_reply' THEN 3
+    WHEN 'dm'           THEN 4
+    ELSE 99
+  END;
+$$ LANGUAGE sql IMMUTABLE PARALLEL SAFE SET search_path = public, pg_temp;
+
+-- -----------------------------------------------------------------------------
 -- Integrity guards (#3682 security review M1 and the 2nd pass).
 --
 -- The single-column FKs above do not tie a row to ONE workspace, and an FK check
@@ -106,15 +119,42 @@ END $$;
 --     the same for "foreign" and "made up" (no existence oracle; BEFORE fires
 --     before the FK check). Consequence, by design (fail-closed): a message
 --     INSERT whose projection would be inconsistent fails with 23514 rather than
---     writing a row that points across a tenant.
+--     writing a row that points across a tenant. The row's kind must be its
+--     highest-priority reason, every claimed reason must be true of the message,
+--     and a born-read row's read_at must sit in [created_at, now + 1 min].
 --   * UPDATE: every identity column is immutable; `reasons` may only grow (the
---     projection's merge); `read_at` may only go NULL -> a timestamp between the
+--     projection's merge) and stay true of the message, `kind` stays the best reason; `read_at` may only go NULL -> a timestamp between the
 --     message's time and now (a stranger cannot back-date an item into the
 --     retention sweep).
 -- Residual (documented, ADR-0199 D5): the member boundary inside a workspace is
 -- a query predicate, so SQL running with the tenant GUC could still read_at-flip
 -- or delete another member's row; E2's statements bind the bearer's member id.
 -- -----------------------------------------------------------------------------
+CREATE FUNCTION inbox_item_reasons_consistent(
+  p_workspace uuid, p_member uuid, p_message uuid, p_reasons text[]
+) RETURNS boolean AS $$
+  -- Every claimed reason must be true of the message it points at (read under the
+  -- caller's RLS): a forged row cannot claim a DM in a public channel, a quote
+  -- that quotes nobody of the recipient's, a thread it is not in, or a mention
+  -- the message never recorded.
+  SELECT COALESCE(bool_and(
+           CASE r
+             WHEN 'dm' THEN
+               (SELECT c.kind FROM channel c WHERE c.id = m.channel_id) = 'dm'::channel_kind
+             WHEN 'reply_to_me' THEN EXISTS (
+               SELECT 1 FROM message q
+                WHERE q.id = m.reply_to_id AND q.channel_id = m.channel_id
+                  AND q.author_member_id = p_member)
+             WHEN 'thread_reply' THEN m.root_id IS NOT NULL
+             WHEN 'mention' THEN
+               jsonb_typeof(m.props -> 'mention_member_ids') = 'array'
+               AND jsonb_exists(m.props -> 'mention_member_ids', upper(p_member::text))
+             ELSE false
+           END), false)
+    FROM message m, unnest(p_reasons) AS r
+   WHERE m.id = p_message AND m.workspace_id = p_workspace;
+$$ LANGUAGE sql STABLE SET search_path = public, pg_temp;
+
 CREATE FUNCTION inbox_item_guard_insert() RETURNS trigger AS $$
 BEGIN
   IF NOT EXISTS (
@@ -131,7 +171,11 @@ BEGIN
        AND m.seq = NEW.seq
        AND m.author_member_id = NEW.actor_member_id
        AND m.created_at = NEW.created_at
-  ) THEN
+  ) OR NEW.kind IS DISTINCT FROM (
+         SELECT r FROM unnest(NEW.reasons) AS r ORDER BY inbox_reason_prio(r) LIMIT 1)
+    OR NOT inbox_item_reasons_consistent(NEW.workspace_id, NEW.member_id, NEW.message_id, NEW.reasons)
+    OR (NEW.read_at IS NOT NULL
+        AND (NEW.read_at < NEW.created_at OR NEW.read_at > now() + interval '1 minute')) THEN
     RAISE EXCEPTION 'inbox_item references must belong to its workspace'
       USING ERRCODE = '23514';
   END IF;
@@ -147,6 +191,11 @@ BEGIN
      (OLD.id, OLD.workspace_id, OLD.member_id, OLD.channel_id, OLD.message_id,
       OLD.seq, OLD.actor_member_id, OLD.created_at)
      OR NOT (OLD.reasons <@ NEW.reasons)
+     OR NEW.kind IS DISTINCT FROM (
+          SELECT r FROM unnest(NEW.reasons) AS r ORDER BY inbox_reason_prio(r) LIMIT 1)
+     OR (NEW.reasons IS DISTINCT FROM OLD.reasons
+         AND NOT inbox_item_reasons_consistent(NEW.workspace_id, NEW.member_id,
+                                               NEW.message_id, NEW.reasons))
      OR (OLD.read_at IS NOT NULL AND NEW.read_at IS DISTINCT FROM OLD.read_at)
      OR (NEW.read_at IS NOT NULL
          AND (NEW.read_at < NEW.created_at OR NEW.read_at > now() + interval '1 minute')) THEN
@@ -166,19 +215,6 @@ CREATE TRIGGER inbox_item_guard_insert_trg
 CREATE TRIGGER inbox_item_guard_update_trg
   BEFORE UPDATE ON inbox_item
   FOR EACH ROW EXECUTE FUNCTION inbox_item_guard_update();
-
--- -----------------------------------------------------------------------------
--- reason priority (ADR-0199 D2): reply_to_me > mention > thread_reply > dm
--- -----------------------------------------------------------------------------
-CREATE FUNCTION inbox_reason_prio(p_reason text) RETURNS int AS $$
-  SELECT CASE p_reason
-    WHEN 'reply_to_me'  THEN 1
-    WHEN 'mention'      THEN 2
-    WHEN 'thread_reply' THEN 3
-    WHEN 'dm'           THEN 4
-    ELSE 99
-  END;
-$$ LANGUAGE sql IMMUTABLE PARALLEL SAFE SET search_path = public, pg_temp;
 
 -- -----------------------------------------------------------------------------
 -- message -> inbox_item
@@ -266,7 +302,7 @@ BEGIN
                  WHERE rs.channel_id = NEW.channel_id
                    AND rs.member_id = a.member_id
                    AND rs.last_read_seq >= NEW.seq)
-              THEN now() END
+              THEN GREATEST(now(), NEW.created_at) END
     FROM agg a
     -- recipients must be an active human who is still in the channel; the author
     -- never notifies themselves (ADR-0199 D2). Agents have their own inbox
@@ -313,8 +349,11 @@ CREATE TRIGGER inbox_item_project_mentions_trg
 -- -----------------------------------------------------------------------------
 CREATE FUNCTION inbox_item_read_by_cursor() RETURNS trigger AS $$
 BEGIN
+  -- GREATEST: now() is the transaction start; a message committed by another
+  -- transaction after it can carry a later created_at, and read_at may never
+  -- precede the message (the UPDATE guard enforces the same floor).
   UPDATE inbox_item
-     SET read_at = now()
+     SET read_at = GREATEST(now(), created_at)
    WHERE workspace_id = NEW.workspace_id
      AND member_id = NEW.member_id
      AND channel_id = NEW.channel_id
