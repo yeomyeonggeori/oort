@@ -294,6 +294,14 @@ BEGIN
   IF to_regclass('public.message') IS NOT NULL THEN
     GRANT SELECT, INSERT, UPDATE ON TABLE message TO momo_notifier;
   END IF;
+  -- ADR-0199 / #3680: the message INSERT above fires the inbox projection trigger
+  -- (migration 126, SECURITY INVOKER), which upserts inbox_item as the writer.
+  -- Without this the notifier's own message writes would die with
+  -- `permission denied for table inbox_item`. No DELETE: retention runs on the
+  -- RLS-bound momo_app pool.
+  IF to_regclass('public.inbox_item') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON TABLE inbox_item TO momo_notifier;
+  END IF;
   IF to_regclass('public.channel') IS NOT NULL THEN
     GRANT SELECT ON TABLE channel TO momo_notifier;
   END IF;
