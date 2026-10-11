@@ -137,6 +137,10 @@ function installFetch(overrides: RouteOverrides = {}): jest.Mock {
     if (url.includes('/reactions')) {
       return jsonResponse(200, {});
     }
+    // 이 픽스처 서버는 인박스 투영(ADR-0199)이 없는 구 서버다: 404 → 클라이언트 조합.
+    if (/\/inbox(\/|$)/.test(new URL(url).pathname)) {
+      return jsonResponse(404, {error: {code: 'not_found', message: 'not found'}});
+    }
     if (url.includes('/channels') && !url.includes('/messages')) {
       return overrides.channels
         ? overrides.channels()
@@ -499,13 +503,13 @@ describe('the 인박스 tab', () => {
     // 착지하는 곳은 「전체」다: 나와 관련된 것의 목록. 비어 있으면 조용한 게 정상이다.
     await waitFor(() => expect(screen.getByTestId('inbox-empty')).toBeTruthy());
     expect(screen.getByTestId('inbox-empty')).toHaveTextContent(
-      /인박스가 비어 있습니다\. 조용한 게 정상입니다\./,
+      /인박스가 비어 있어요\. 조용한 게 정상이에요\./,
     );
     // 결정 대기 보기는 한 번 눌러서 간다.
     fireEvent.press(screen.getByTestId('inbox-tab-needs-action'));
     await waitFor(() =>
       expect(screen.getByTestId('inbox-empty')).toHaveTextContent(
-        /지금 결정할 일이 없습니다\. 조용한 게 정상입니다\./,
+        /지금 결정할 일이 없어요\. 조용한 게 정상이에요\./,
       ),
     );
   });
@@ -518,7 +522,7 @@ describe('the 인박스 tab', () => {
     fireEvent.press(screen.getByTestId('inbox-tab-mentions'));
     await waitFor(() => expect(screen.getByTestId('inbox-empty')).toBeTruthy());
     expect(screen.getByTestId('inbox-empty')).toHaveTextContent(
-      /읽지 않은 멘션이 없습니다\. 조용한 게 정상입니다\./,
+      /읽지 않은 멘션이 없어요\. 조용한 게 정상이에요\./,
     );
   });
 
@@ -550,7 +554,7 @@ describe('the 인박스 tab', () => {
     await waitFor(() => expect(screen.getByTestId('inbox-list')).toBeTruthy());
     // The sentence is the core's: actor, then predicate, then the quoted body.
     expect(screen.getByText('@kim-intern')).toBeTruthy();
-    expect(screen.getByText(' 회원님을 불렀습니다')).toBeTruthy();
+    expect(screen.getByText(' 회원님을 불렀어요')).toBeTruthy();
     expect(screen.getByText('이거 확인 부탁드립니다')).toBeTruthy();
   });
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // =============================================================================
-// #3663 인박스 메일함 캡처: 종류가 섞인 목록(DM·멘션·스레드·처리할 일) + 오른쪽 맥락
+// #3663 인박스 메일함 캡처(#3684: 인박스 투영이 없는 구 서버 후퇴 경로): 종류가 섞인 목록(DM·멘션·스레드·처리할 일) + 오른쪽 맥락
 // 패널, 필터, 빈 상태. 라이트·다크 × 1440×900.
 //
 //   npm run build && OUT_DIR=<dir> node scripts/capture-inbox-mailbox.mjs
@@ -114,6 +114,7 @@ function readStates(empty, cursors) {
   });
 }
 
+let inboxProbes = 0;
 async function installRoutes(context, empty) {
   const cursors = {};
   await context.route("**/v1/**", async (route) => {
@@ -124,6 +125,11 @@ async function installRoutes(context, empty) {
     if (path === "/v1/auth/refresh") return json(route, { accessToken: auth.accessToken, refreshToken: auth.refreshToken });
     if (path === "/v1/auth/realtime-token") {
       return json(route, { token: "capture", tokenType: "Bearer", expiresAtMs: Date.now() + 600_000, ttlSeconds: 60, workspaceId, memberId });
+    }
+    // 이 캡처의 서버는 인박스 투영(ADR-0199)이 없는 구 서버다: 404 -> 클라이언트 조합(#3684).
+    if (/\/inbox(\/|$)/.test(path)) {
+      inboxProbes += 1;
+      return json(route, { error: { code: "not_found", message: "not found" } }, 404);
     }
     if (path.endsWith("/channels")) return json(route, { channels });
     if (path.endsWith("/roster")) return json(route, { members: roster });
@@ -209,6 +215,7 @@ async function open(browser, origin, scheme, viewport, empty) {
 async function scenes(browser, origin, scheme) {
   const viewport = { width: 1440, height: 900 };
   const tag = `${viewport.width}-${scheme}`;
+  inboxProbes = 0;
   const { context, page } = await open(browser, origin, scheme, viewport, false);
   const shot = (name) => page.screenshot({ path: resolve(OUT_DIR, `${name}-${tag}.png`) });
   await page.getByTestId("mailbox-row").first().waitFor({ timeout: 15_000 });
@@ -255,7 +262,10 @@ async function scenes(browser, origin, scheme) {
   await page.waitForTimeout(300);
   await shot("filter-unread");
   check(`${tag} 가로 넘침 0 (패널 열린 상태)`, (await overflowX(page)) === 0);
+  check(`${tag} 구 서버: 탭을 오가도 /inbox 판별은 한 번`, inboxProbes === 1, String(inboxProbes));
+  check(`${tag} 구 서버: 답글 탭이 없다`, (await page.getByTestId("inbox-tab-reply").count()) === 0);
   await context.close();
+  inboxProbes = 0;
 
   const empty = await open(browser, origin, scheme, viewport, true);
   await empty.page.getByTestId("inbox-empty").waitFor({ timeout: 15_000 });

@@ -1,5 +1,11 @@
 import { useCallback, useRef } from "react";
-import { AtSign, MessageSquareReply, ShieldAlert } from "lucide-react";
+import {
+  AtSign,
+  MessageSquare,
+  MessageSquareReply,
+  Reply,
+  ShieldAlert,
+} from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import {
   entryAriaLabel,
@@ -21,6 +27,9 @@ function KindGlyph({ kind }: { kind: MailboxEntry["kind"] }) {
   const className = "size-4";
   if (kind === "task") return <ShieldAlert className={cn(className, "text-warn")} />;
   if (kind === "mention") return <AtSign className={cn(className, "text-signal-text")} />;
+  // 답글(내 글에 답·인용)과 스레드(내가 낀 스레드의 새 글)는 모양으로도 갈린다.
+  if (kind === "reply") return <Reply className={cn(className, "text-ink-muted")} />;
+  if (kind === "dm") return <MessageSquare className={cn(className, "text-ink-muted")} />;
   return <MessageSquareReply className={cn(className, "text-ink-muted")} />;
 }
 
@@ -110,8 +119,12 @@ export function MailboxList({
                   <span
                     className={cn(
                       "min-w-0 truncate text-body",
-                      entry.unread ? "font-semibold text-ink" : "text-ink",
-                      entry.actorIsAgent && "text-agent"
+                      // 읽은 항목은 목록에 남되 한 단계 물러선다(색 하나로만 말하지 않는다:
+                      // 점 없음 + 굵기 + 스크린리더 문장).
+                      entry.unread ? "font-semibold text-ink" : "text-ink-muted",
+                      // 에이전트 색은 안 읽은 줄에만: 읽은 줄은 사람과 같이 한 단계 물러선다
+                      // (에이전트임은 아바타 모양과 @ 접두가 계속 말한다).
+                      entry.actorIsAgent && entry.unread && "text-agent"
                     )}
                   >
                     {entry.actor}

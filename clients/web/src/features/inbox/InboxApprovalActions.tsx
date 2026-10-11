@@ -40,7 +40,7 @@ export function InboxApprovalActions({
       armed={armed}
       setArmed={setArmed}
       onSettled={onSettled}
-      lead="실행 전에 회원님의 허가가 필요합니다."
+      lead="실행 전에 회원님의 허가가 필요해요."
       className="pb-2"
       testIdPrefix="inbox-approval"
       reversible={reversible}
