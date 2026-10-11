@@ -1056,7 +1056,10 @@ pub async fn lock_active_hosted_connection_in_tx(
 /// One function, one transaction, in the hosted canon's lock order: the
 /// connection row `FOR UPDATE` first (and only an `active`, proved connection
 /// bound to `agent_member_id` qualifies), then the array, then the agent's
-/// `membership` rows. Every channel must be a live, non-DM channel of this workspace.
+/// `membership` rows. Every channel must be a live, non-DM channel of this workspace that is
+/// **public or one the agent is already a live member of** — the caller's
+/// visibility rule, enforced here too so no future caller can seat an agent in a
+/// private room it cannot see.
 /// Returns the new approved set, or `None` when the connection is not live, a
 /// channel does not qualify, or the result would pass
 /// [`MAX_HOSTED_APPROVED_CHANNELS`] — and nothing is written then.
@@ -1089,10 +1092,15 @@ pub async fn grant_hosted_channels_in_tx(
     }
     let qualifying: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM channel c WHERE c.workspace_id=$1 AND c.id = ANY($2) \
-            AND c.archived_at IS NULL AND c.kind <> 'dm'",
+            AND c.archived_at IS NULL AND c.kind IN ('public', 'private') \
+            AND (c.kind = 'public' OR EXISTS ( \
+                  SELECT 1 FROM membership m \
+                   WHERE m.workspace_id = c.workspace_id AND m.channel_id = c.id \
+                     AND m.member_id = $3 AND m.left_at IS NULL))",
     )
     .bind(workspace_id)
     .bind(channel_ids)
+    .bind(agent_member_id)
     .fetch_one(&mut *conn)
     .await?;
     let mut distinct = channel_ids.to_vec();

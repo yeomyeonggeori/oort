@@ -9631,3 +9631,133 @@ async fn a_channel_grant_cannot_pass_fifty_approved_channels() {
         None
     );
 }
+
+/// A grant gone stale, or reached by the wrong caller, writes nothing: the
+/// connection stopped being live, the agent left the private room, an agent tries
+/// to decide, and the database function itself refuses a private room the agent is
+/// not in (the visibility rule is enforced there too, not only by the resolver).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_stale_channel_grant_changes_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (q, q_name) = seed_channel_3707(&su, &fixture, "public", &[]).await;
+    let (r, r_name) = seed_channel_3707(
+        &su,
+        &fixture,
+        "private",
+        &[(fixture.hosted_agent, "member")],
+    )
+    .await;
+    let (hidden, _) = seed_channel_3707(&su, &fixture, "private", &[]).await;
+    let before = approved_of_3709(&su, fixture.hosted_agent).await;
+
+    // The connection stops being live before the tap.
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "hosted.channels.grant",
+        json!({"channels": [q_name]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let first = proposed_approval_3706(&proposed);
+    // An agent bearer cannot decide it.
+    let agent_try = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/approvals/{first}/decision",
+            fixture.workspace
+        ))
+        .bearer_auth(&fixture.hosted_bearer)
+        .json(&json!({"approvalId": first, "approve": true, "clientDecisionId": Uuid::new_v4()}))
+        .send()
+        .await
+        .unwrap();
+    assert!(matches!(agent_try.status().as_u16(), 401 | 403));
+    assert_eq!(approved_of_3709(&su, fixture.hosted_agent).await, before);
+
+    // (`proved_at` cannot be cleared on an active connection — the shape check
+    // forbids it — so the credential is revoked instead.)
+    sqlx::query("UPDATE token SET revoked_at = now() WHERE id=$1")
+        .bind(fixture.hosted_token)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        first,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(stale["status"], "action_args_invalid");
+    assert_eq!(approved_of_3709(&su, fixture.hosted_agent).await, before);
+    assert_eq!(
+        membership_role_3707(&su, q, fixture.hosted_agent).await,
+        None
+    );
+    sqlx::query("UPDATE token SET revoked_at = NULL WHERE id=$1")
+        .bind(fixture.hosted_token)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // The agent leaves the private room before the tap.
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "hosted.channels.grant",
+        json!({"channels": [r_name]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    sqlx::query("UPDATE membership SET left_at = now() WHERE channel_id=$1 AND member_id=$2")
+        .bind(r)
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(approved_of_3709(&su, fixture.hosted_agent).await, before);
+
+    // The function refuses a private room the agent is not in, on its own.
+    let mut tx = su.begin().await.unwrap();
+    let outcome = momo_auth::grant_hosted_channels_in_tx(
+        &mut tx,
+        fixture.workspace,
+        fixture.hosted_connection,
+        fixture.hosted_agent,
+        &[hidden],
+    )
+    .await
+    .unwrap();
+    assert!(outcome.is_none(), "a private room the agent cannot see");
+    tx.commit().await.unwrap();
+    assert_eq!(
+        membership_role_3707(&su, hidden, fixture.hosted_agent).await,
+        None
+    );
+    assert_eq!(approved_of_3709(&su, fixture.hosted_agent).await, before);
+}
