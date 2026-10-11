@@ -121,3 +121,14 @@ message INSERT와 같은 tx에서 수신자별 행을 쓴다. **AFTER INSERT 트
 | E3 | UXUI | `mailbox.ts` 원천을 서버 응답으로 교체(현행 조합은 구 서버 후퇴 경로), 항목 읽음 UI(채널 커서 비연동 문구 정리), 개인 채널 이벤트 구독 | E2 |
 | E4 | 엔진 | 30일 backfill 작업(멱등), 라이브 oort-team 스모크(`runtime-unverified` 해소) | E1 |
 | 후속 | — | 배정 작업(task)·승인 영속화·안 읽음 되돌림·반응 항목 | 별 이슈 |
+
+## 구현 메모 (E1 #3680 · E2 #3681, 2026-10-11)
+설계를 바꾸지 않고 구현에서 확정한 세부다. 클라(E3)가 알아야 하는 것만 적는다.
+- **항목 종류와 메시지 종류**: `text`·`artifact` 메시지만 항목을 만든다(도구·system·승인 카드 제외). 승인은 `approvalsPending`(첫 페이지만, 최대 20)으로 합친다.
+- **사유**: `reasons[]`는 우선순위 순서이고 `kind = reasons[0]`. 인용된 글의 작성자는 `reply_to_me`만 받는다(ADR-0148 규칙 5의 멘션 id는 별도 `mention`으로 세지 않는다).
+- **무결성(보안 검수 반영)**: `inbox_item`의 BEFORE INSERT/UPDATE 가드가 행 내용만 보고(트리거 깊이 등 호출자가 만들 수 있는 신호에 기대지 않는다) 외래·위조 행과 식별 컬럼 변경을 거절한다. 모든 트리거 함수는 SECURITY INVOKER이고 `momo_notifier`에는 `inbox_item` SELECT/INSERT/UPDATE만 부여했다(DELETE 없음, 정리는 RLS-bound `momo_app` 풀).
+- **뮤트**: `muted=hide`(기본)에서 뮤트된 방의 항목은 숨기되 `mention_overrides_mute`가 켜져 있으면 `mention`·`reply_to_me`(인용 답 = 멘션, 규칙 5)는 통과한다. 숨겨진 항목은 `unreadCount`에 안 세고 `read-all`이 소비하지도 않는다.
+- **읽음**: `PUT …/read`는 멱등(최초 `read_at` 유지)이고 응답에 갱신된 `unreadCount`가 있다. 채널 커서에 의한 자동 읽음은 추가 이벤트가 없다(read-state 이벤트가 이미 간다).
+- **실시간**: 개인 채널(`user:read-state#<MEMBER>`)에 `inbox_item.created` / `inbox_item.read` / `inbox.read_all`. 페이로드는 id·시각만(snake_case). 생성 이벤트는 읽지 않은 라이브 항목(원본 메시지 5분 이내)에만 나가고 backfill·늦은 멘션은 조용하다.
+- **정리**: 알림 노티파이어가 읽은 뒤 30일 지난 항목을 워크스페이스별 배치로 지운다(멱등, `message` 불변).
+

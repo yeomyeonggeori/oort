@@ -45,6 +45,7 @@ use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::PgPool;
 use momo_drive::StubDriveArchive;
 use momo_notifier::avatar_reclaim::AvatarReclaimer;
+use momo_notifier::inbox_retention_sweep::sweep_read_inbox_items;
 use momo_notifier::push::PushDrain;
 use momo_notifier::share_retention_sweep::sweep_expired_shares;
 use momo_notifier::{
@@ -421,6 +422,12 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
         "share retention sweep",
         "momo_notifier",
         sweep_expired_shares(&notifier, &app, 32).await,
+    );
+    // loop 2c'' — inbox retention (#3681): candidate read (notifier) + delete (app).
+    report.check(
+        "inbox retention sweep",
+        "momo_notifier + momo_app",
+        sweep_read_inbox_items(&notifier, &app, 32).await,
     );
     // loop 2d — huddle ghost sweep: the candidate read on the notifier pool.
     report.check(

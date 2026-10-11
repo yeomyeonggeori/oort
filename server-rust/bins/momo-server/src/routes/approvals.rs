@@ -193,7 +193,7 @@ pub async fn list(
     }))
 }
 
-fn approval_dto(row: &ApprovalListRow) -> ApprovalDto {
+pub(crate) fn approval_dto(row: &ApprovalListRow) -> ApprovalDto {
     ApprovalDto {
         id: row.id.to_string(),
         workspace_id: row.workspace_id.to_string(),
