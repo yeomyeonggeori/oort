@@ -74,10 +74,12 @@ export function emptyTimeline(): TimelineState {
 /** 빈 대화가 내놓는 첫 행동의 이름. 정본은 이 두 상수다. */
 export const EMPTY_WRITE_ACTION_LABEL = "첫 메시지 쓰기";
 export const EMPTY_ADD_MEMBER_ACTION_LABEL = "멤버 추가하기";
+/** 에이전트가 한 명도 없는 빈 채널의 세 번째 손잡이(#3697). 관리자에게만 선다. */
+export const EMPTY_CONNECT_AGENT_ACTION_LABEL = "에이전트 연결";
 
 export interface EmptyChannelAction {
   /** 무엇을 하는 손잡이인가. 표면은 이 값으로 자기 핸들러를 고른다. */
-  kind: "write" | "add-member";
+  kind: "write" | "add-member" | "connect-agent";
   label: string;
 }
 

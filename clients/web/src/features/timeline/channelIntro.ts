@@ -3,6 +3,7 @@ import { normalizeChannelTopic } from "@momo/core/features/channels/model";
 import {
   emptyChannelCopy,
   EMPTY_ADD_MEMBER_ACTION_LABEL,
+  EMPTY_CONNECT_AGENT_ACTION_LABEL,
   EMPTY_WRITE_ACTION_LABEL,
 } from "@momo/core/features/timeline/model";
 
@@ -30,7 +31,7 @@ export const DM_INTRO_STARTED = "이 대화의 시작입니다.";
 export type ChannelIntroIcon = "hash" | "lock" | "dm";
 
 export interface ChannelIntroActionView {
-  kind: "write" | "add-member";
+  kind: "write" | "add-member" | "connect-agent";
   label: string;
 }
 
@@ -81,6 +82,11 @@ export function buildChannelIntro(input: {
   topic?: string;
   peer: Pick<RosterMember, "displayName" | "kind"> | null;
   canAddMember: boolean;
+  /**
+   * 에이전트가 한 명도 없는 워크스페이스의 관리자(#3697). 빈 채널에 「에이전트 연결」을
+   * 세 번째 손잡이로 세운다. 에이전트가 있거나 관리자가 아니면 false.
+   */
+  canConnectAgent?: boolean;
   /** Message count is 0. Actions and "첫…" copy only then. */
   empty: boolean;
 }): ChannelIntroView {
@@ -116,6 +122,12 @@ export function buildChannelIntro(input: {
       actions.push({
         kind: "add-member",
         label: EMPTY_ADD_MEMBER_ACTION_LABEL,
+      });
+    }
+    if (input.canConnectAgent) {
+      actions.push({
+        kind: "connect-agent",
+        label: EMPTY_CONNECT_AGENT_ACTION_LABEL,
       });
     }
   }

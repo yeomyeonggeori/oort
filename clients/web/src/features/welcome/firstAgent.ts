@@ -281,6 +281,10 @@ export type FirstAgentCapturePose =
   | "sub-joined"
   // 서버가 Claude 구독만 닫아 둔 목록(#3695).
   | "sub-paused"
+  // 관리자가 아닌 멤버의 AI 연결 안내(#3697).
+  | "non-admin"
+  // 서버에 개인 에이전트 라우트가 없을 때의 목록(#3713).
+  | "sub-unavailable"
   | "skipped"
   // 로그인 모달 세 상태 (#2816).
   | "login-waiting"
@@ -308,6 +312,8 @@ export const FIRST_AGENT_CAPTURE_POSES: readonly FirstAgentCapturePose[] = [
   "sub-cap",
   "sub-joined",
   "sub-paused",
+  "non-admin",
+  "sub-unavailable",
   "skipped",
   "login-waiting",
   "login-connected",

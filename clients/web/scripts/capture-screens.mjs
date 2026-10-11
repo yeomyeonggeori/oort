@@ -12475,6 +12475,7 @@ async function captureFirstAgentScenes(browser, scheme) {
     "sub-cap": "first-agent-cap-exceeded",
     "sub-joined": "first-agent-mention",
     "sub-paused": "ai-connect-list",
+    "sub-unavailable": "ai-connect-list",
     "one-time": "hosted-pairing-card",
     detecting: "first-agent-detecting",
     "cap-exceeded": "first-agent-cap-exceeded",

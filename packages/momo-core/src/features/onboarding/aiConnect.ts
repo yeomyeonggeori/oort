@@ -76,11 +76,26 @@ export function subscriptionSurface(input: {
   return "rows";
 }
 
-/** 줄 순서. 구독 줄이 서면 맨 위, 아니면 API 키 줄이 맨 위다(D6). */
+/**
+ * 줄 순서와 묶음 (ADR-0198 D1·D3·D7, #3697). 에이전트(그록봇·API 키 팀 에이전트)가 먼저,
+ * 구독으로 로그인한 CLI는 「내 도구」 묶음으로 그 아래에 선다. 구독 줄이 에이전트
+ * 1순위로 보이던 ADR-0193 D6의 순서를 ADR-0198이 대체했다.
+ */
 export function aiConnectRows(surface: SubscriptionSurface): readonly AiConnectRowId[] {
-  if (surface === "rows") return ["claude", "codex", "api-key", "grok"];
+  if (surface === "rows") return ["api-key", "grok", "claude", "codex"];
   return ["api-key", "grok"];
 }
+
+export type AiConnectRowGroup = "agents" | "tools";
+
+export function aiConnectRowGroup(id: AiConnectRowId): AiConnectRowGroup {
+  return isSubscriptionRow(id) ? "tools" : "agents";
+}
+
+export const AI_CONNECT_GROUP_LABEL: Record<AiConnectRowGroup, string> = {
+  agents: "에이전트",
+  tools: "내 도구",
+};
 
 // ---- 알약 ---------------------------------------------------------------------
 
@@ -282,12 +297,12 @@ export interface AiConnectRowCopy {
 
 export const AI_CONNECT_ROW_COPY: Record<AiConnectRowId, AiConnectRowCopy> = {
   claude: {
-    title: "Claude Code · 내 구독",
+    title: "Claude Code · 내 도구",
     detail: "이 맥의 공식 CLI · 나만 부르는 개인 에이전트",
     mark: "C",
   },
   codex: {
-    title: "Codex · 내 구독",
+    title: "Codex · 내 도구",
     detail: "이 맥의 공식 CLI · 나만 부르는 개인 에이전트",
     mark: "X",
   },
@@ -309,7 +324,7 @@ export const API_KEY_PILL_LABEL = "설정";
 export const GROK_NOT_INSTALLED_PILL_LABEL = "설치 안 됨";
 
 export const AI_CONNECT_BOUNDARY_NOTE =
-  "상태는 CLI가 스스로 알려 준 값이에요. oort는 로그인 정보를 읽거나 옮기지 않아요. 구독으로 도는 에이전트는 나만 부를 수 있고, 팀 모두가 부를 에이전트는 API 키로 붙여요.";
+  "상태는 CLI가 스스로 알려 준 값이에요. oort는 로그인 정보를 읽거나 옮기지 않아요. 내 도구는 나만 쓸 수 있고, 팀 모두가 부를 에이전트는 그록봇이나 API 키로 붙여요.";
 
 export const AI_CONNECT_DESKTOP_ONLY_NOTE =
   "데스크탑 앱에서 이 맥의 Claude Code·Codex를 붙일 수 있어요.";
@@ -333,9 +348,9 @@ export const TERMINAL_OPEN_FAILED =
 export function primaryActionLabel(id: AiConnectRowId | null): string {
   switch (id) {
     case "claude":
-      return "Claude Code를 내 에이전트로";
+      return "Claude Code를 개인 에이전트로";
     case "codex":
-      return "Codex를 내 에이전트로";
+      return "Codex를 개인 에이전트로";
     case "api-key":
       return "API 키로 연결하기";
     case "grok":
@@ -348,6 +363,11 @@ export function primaryActionLabel(id: AiConnectRowId | null): string {
 export const AI_CONNECT_SKIP_LABEL = "지금은 건너뛰기";
 export const AI_CONNECT_REENTRY = "나중에 AI 화면에서 이어갈 수 있어요.";
 export const AI_CONNECT_SKIPPED_LINE = "AI 화면에서 언제든 이어서 할 수 있어요.";
+
+/** 관리자가 아닌 멤버(#3697): 연결 목록이 403이라 목록을 세우지 않고 요청 안내만 한다. */
+export const AI_CONNECT_NON_ADMIN_LINE = "에이전트 연결은 관리자가 해요.";
+export const AI_CONNECT_NON_ADMIN_DETAIL =
+  "에이전트가 필요하면 워크스페이스 관리자에게 부탁해 주세요. 그동안 대화는 바로 시작할 수 있어요.";
 export const AI_CONNECT_CONTINUE_LABEL = "계속";
 
 // ---- 재진입 (#2870, RCA 1-b·1-c) -------------------------------------------
@@ -416,6 +436,19 @@ export function joinJoinedLine(agentDisplayName: string): string {
 }
 
 export const JOIN_JOINED_DETAIL = "나만 부를 수 있는 개인 에이전트예요.";
+
+// ---- 개인 에이전트 켜기 (ADR-0198 증보 1 D7·T3, #3713) ------------------------------
+//
+// 「내 도구」 줄의 주 행동은 호스티드 구독 에이전트 생성(Agent Port)이 아니라 P2 개인
+// 에이전트 켜기다. 로그인은 공식 CLI가 이미 끝냈고(`준비됨` 줄만 고를 수 있다), 서버는
+// 하네스 로그인을 모른다. 별칭이 곧 핸들이고, 부르는 것은 나만, 답은 내 맥이 켜져
+// 있을 때만이다.
+export const PERSONAL_ENABLING_LINE = "개인 에이전트를 켜고 있어요.";
+export const PERSONAL_JOINED_HINT = "내 맥이 켜져 있을 때만 답해요.";
+/** 서버에 개인 에이전트 라우트가 없을 때(404/405): 줄을 고를 수 없게 하고 이유를 말한다. */
+export const PERSONAL_UNAVAILABLE_LINE =
+  "이 서버에서는 아직 개인 에이전트를 켤 수 없어요. 서버가 업데이트되면 열려요.";
+export const PERSONAL_UNAVAILABLE_DETAIL = "이 서버에서는 아직 켤 수 없어요";
 
 export const CONNECT_ENDPOINT_LABEL = "주소";
 export const CONNECT_CREDENTIAL_LABEL = "연결 값";

@@ -3,13 +3,15 @@ import { toHostedConnection } from "../hostedAgents/model";
 import * as harnessLogin from "./harnessLogin";
 import {
   AI_CONNECT_BOUNDARY_NOTE,
-  AI_CONNECT_ROW_COPY,
   HARNESS_LOGIN_COMMAND,
   HARNESS_PILL_LABEL,
   LOGIN_POLL_INTERVAL_MS,
   LOGIN_POLL_WINDOW_MS,
   SUBSCRIPTION_HARNESS_WIRE,
   aiConnectFoundLine,
+  AI_CONNECT_GROUP_LABEL,
+  AI_CONNECT_ROW_COPY,
+  aiConnectRowGroup,
   aiConnectRows,
   classifyJoinConflict,
   harnessPill,
@@ -56,7 +58,7 @@ describe("구독 줄 노출은 세 게이트 AND (ADR-0193 D6, #2814)", () => {
   });
 
   it("puts the API key row first whenever the subscription rows are not shown", () => {
-    expect(aiConnectRows("rows")).toEqual(["claude", "codex", "api-key", "grok"]);
+    expect(aiConnectRows("rows")).toEqual(["api-key", "grok", "claude", "codex"]);
     for (const surface of ["desktop-only", "server-off", "hidden"] as const) {
       expect(aiConnectRows(surface)[0]).toBe("api-key");
       expect(aiConnectRows(surface)).not.toContain("claude");
@@ -293,9 +295,29 @@ describe("서버 필드 계약 (openapi HostedAgentConnection, #2815)", () => {
 
 describe("줄 문구", () => {
   it("matches the mockup rows and primary labels", () => {
-    expect(AI_CONNECT_ROW_COPY.claude.title).toBe("Claude Code · 내 구독");
+    expect(AI_CONNECT_ROW_COPY.claude.title).toBe("Claude Code · 내 도구");
     expect(AI_CONNECT_ROW_COPY["api-key"].title).toBe("API 키 · 팀 에이전트");
-    expect(primaryActionLabel("claude")).toBe("Claude Code를 내 에이전트로");
+    expect(primaryActionLabel("claude")).toBe("Claude Code를 개인 에이전트로");
     expect(primaryActionLabel(null)).toBe("계속");
+  });
+});
+
+describe("ADR-0198 정합: 에이전트가 먼저, 구독 CLI는 내 도구 (#3697)", () => {
+  it("에이전트 줄(그록봇·API 키)이 먼저고 구독 줄은 내 도구 묶음이다", () => {
+    expect(aiConnectRowGroup("api-key")).toBe("agents");
+    expect(aiConnectRowGroup("grok")).toBe("agents");
+    expect(aiConnectRowGroup("claude")).toBe("tools");
+    expect(aiConnectRowGroup("codex")).toBe("tools");
+    const rows = aiConnectRows("rows");
+    expect(rows.findIndex((id) => aiConnectRowGroup(id) === "tools")).toBeGreaterThan(
+      rows.map((id) => aiConnectRowGroup(id)).lastIndexOf("agents")
+    );
+    expect(AI_CONNECT_GROUP_LABEL).toEqual({ agents: "에이전트", tools: "내 도구" });
+  });
+
+  it("구독 줄 이름은 「내 도구」이고 에이전트 1순위를 말하지 않는다", () => {
+    expect(AI_CONNECT_ROW_COPY.claude.title).toBe("Claude Code · 내 도구");
+    expect(AI_CONNECT_ROW_COPY.codex.title).toBe("Codex · 내 도구");
+    expect(AI_CONNECT_ROW_COPY.claude.title).not.toContain("구독");
   });
 });

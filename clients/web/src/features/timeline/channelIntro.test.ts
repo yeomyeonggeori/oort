@@ -87,6 +87,22 @@ describe("buildChannelIntro", () => {
     expect(intro.body).not.toMatch(/[—–]/);
   });
 
+  it("adds the connect-agent action last, only on an empty channel and only when asked (#3697)", () => {
+    const base = { kind: "public" as const, name: "general", peer: null, canAddMember: true };
+    const on = buildChannelIntro({ ...base, canConnectAgent: true, empty: true });
+    expect(on.actions.map((a) => a.kind)).toEqual(["write", "add-member", "connect-agent"]);
+    expect(on.actions[2]?.label).toBe("에이전트 연결");
+    expect(
+      buildChannelIntro({ ...base, empty: true }).actions.map((a) => a.kind)
+    ).toEqual(["write", "add-member"]);
+    expect(
+      buildChannelIntro({ ...base, canConnectAgent: true, empty: false }).actions
+    ).toEqual([]);
+    expect(
+      buildChannelIntro({ ...base, kind: undefined, canConnectAgent: true, empty: true }).actions.length
+    ).toBeGreaterThan(0);
+  });
+
   it("hides the add-member card when the role cannot add", () => {
     const intro = buildChannelIntro({
       kind: "public",
