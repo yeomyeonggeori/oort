@@ -85,7 +85,7 @@ const labLong = Array.from({ length: 24 }, (_, i) => {
     ? "말씀하신 로그는 19:07에 올려 뒀어요. 인용해서 답해요."
     : seq === 21
       ? "어제 배포 로그 어디 있어?"
-      : `기록 ${seq}번: 채널 초반 대화예요. 시안 검토와 배포 일정 이야기가 이어졌어요.`;
+      : `기록 ${seq}번: 채널 초반 대화예요. 시안 검토와 배포 일정 이야기가 이어졌어요. 컬러 토큰과 간격 규칙, 로그 위치, 릴리스 노트 초안까지 한꺼번에 정리해 두자는 이야기가 길게 오갔어요.`;
   return msg(LAB, seq, author, body, (24 - seq) * (8 * DAY / MIN / 24) + 5, target ? { replyToId: mid(LAB, 21) } : {});
 });
 const wireItem = (id, kind, channel, seq, author, preview, agoMin, readAgoMin, extra = {}) => ({
@@ -284,6 +284,8 @@ async function scenes(browser, origin, scheme) {
     return r.top >= box.top && r.bottom <= box.bottom;
   });
   check(`${tag} 항목 메시지가 패널 안에 보인다`, visible);
+  const scrolled = await page.getByTestId("inbox-detail-scroll").evaluate((el) => ({ top: el.scrollTop, over: el.scrollHeight - el.clientHeight }));
+  check(`${tag} 패널이 실제로 넘치고 항목 줄로 스크롤됐다`, scrolled.over > 0 && scrolled.top > 0, JSON.stringify(scrolled));
   await page.waitForTimeout(1_900);
   check(`${tag} 물듦은 잠깐 뒤 사라진다`, (await panel.locator("[data-highlighted='true']").count()) === 0);
   await shot("context-reply-settled");

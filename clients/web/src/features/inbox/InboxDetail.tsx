@@ -94,6 +94,7 @@ function ContextRow({
       ref={isTarget ? targetRef : undefined}
       data-testid="inbox-context-row"
       data-target={isTarget ? "true" : undefined}
+      aria-current={isTarget ? "true" : undefined}
       data-highlighted={highlighted ? "true" : undefined}
       className={cn(
         "flex gap-3 rounded-md px-3 py-2",
