@@ -41,7 +41,10 @@ use momo_agent::actions::{
 };
 use momo_auth::{active_workspace_role, Principal};
 use momo_db::PgConnection;
-use momo_settings::{normalized_invite_role, validated_expires_at_ms, validated_max_uses};
+use momo_messaging::{normalize_channel_kind, normalize_channel_name, normalize_channel_topic};
+use momo_settings::{
+    is_valid_handle, normalized_invite_role, validated_expires_at_ms, validated_max_uses,
+};
 use serde::Serialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -184,6 +187,25 @@ pub enum ActionArgs {
         /// card's 만료 row already showed.
         expires_in_days: Option<i64>,
     },
+    /// `channel.create` (증보 V2/V3). `members` is empty after the pure stage and
+    /// filled by [`resolve_action_in_tx`] from `handles`.
+    ChannelCreate {
+        name: String,
+        kind: &'static str,
+        topic: Option<String>,
+        add_proposer: bool,
+        handles: Vec<String>,
+        members: Vec<ResolvedMember>,
+    },
+}
+
+/// A workspace member a proposal named by handle, as the server found them.
+/// `display_name` is the server's value and is what the card shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedMember {
+    pub id: Uuid,
+    pub handle: String,
+    pub display_name: String,
 }
 
 /// Normalise `args` for `action`, refusing anything the registry's published
@@ -200,6 +222,7 @@ pub fn validated_action_args(
 ) -> Result<ValidatedActionArgs, ApiError> {
     match action.id {
         actions::ACTION_INVITE_CREATE => invite_create_args(args, now_ms),
+        actions::ACTION_CHANNEL_CREATE => channel_create_args(args),
         // Fail closed. A registry entry with no normaliser must be an error and
         // not an unvalidated passthrough — `every_action_has_a_normaliser` is
         // what makes this arm unreachable rather than merely unlikely.
@@ -269,6 +292,189 @@ fn invite_create_args(args: &Value, now_ms: i64) -> Result<ValidatedActionArgs, 
     })
 }
 
+/// The keys `channel.create` accepts — the registry's schema, as a list the
+/// normaliser can close the object with.
+const CHANNEL_CREATE_KEYS: [&str; 5] = ["name", "kind", "topic", "addProposer", "memberHandles"];
+
+/// Reject any key outside `allowed` — the closed object the schema publishes.
+fn closed_keys(object: &serde_json::Map<String, Value>, allowed: &[&str]) -> Result<(), ApiError> {
+    for key in object.keys() {
+        if !allowed.contains(&key.as_str()) {
+            return Err(ApiError::bad_request("unknown action argument"));
+        }
+    }
+    Ok(())
+}
+
+/// One optional string argument; `null` is an omitted value (the tool's
+/// nullability contract).
+fn optional_string<'a>(
+    object: &'a serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Option<&'a str>, ApiError> {
+    match object.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) => Ok(Some(value.as_str())),
+        Some(_) => Err(ApiError::bad_request("argument must be a string")),
+    }
+}
+
+/// A member handle as a proposal may spell it: one leading `@` tolerated, then
+/// the workspace's own handle rule (2..=32 of `[a-z0-9_-]`, lower case).
+fn normalized_member_handle(raw: &str) -> Result<String, ApiError> {
+    let trimmed = raw.trim();
+    let handle = trimmed.strip_prefix('@').unwrap_or(trimmed).to_lowercase();
+    if is_valid_handle(&handle) {
+        Ok(handle)
+    } else {
+        Err(ApiError::bad_request("invalid member handle"))
+    }
+}
+
+/// `memberHandles`: at most the registry's ceiling, normalised, de-duplicated in
+/// first-seen order.
+fn member_handles_arg(
+    object: &serde_json::Map<String, Value>,
+    key: &str,
+    minimum: usize,
+) -> Result<Vec<String>, ApiError> {
+    let items = match object.get(key) {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(items)) => items.clone(),
+        Some(_) => return Err(ApiError::bad_request("argument must be an array")),
+    };
+    if items.len() > actions::ACTION_MEMBER_HANDLES_MAX as usize || items.len() < minimum {
+        return Err(ApiError::bad_request("argument is out of range"));
+    }
+    let mut handles = Vec::new();
+    for item in &items {
+        let Value::String(raw) = item else {
+            return Err(ApiError::bad_request("argument must be a string"));
+        };
+        let handle = normalized_member_handle(raw)?;
+        if !handles.contains(&handle) {
+            handles.push(handle);
+        }
+    }
+    Ok(handles)
+}
+
+fn channel_create_args(args: &Value) -> Result<ValidatedActionArgs, ApiError> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| ApiError::bad_request("action args must be an object"))?;
+    closed_keys(object, &CHANNEL_CREATE_KEYS)?;
+
+    let raw_name = optional_string(object, "name")?
+        .ok_or_else(|| ApiError::bad_request("name is required"))?;
+    let name = normalize_channel_name(raw_name)
+        .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?;
+    // Private unless the proposal says otherwise, and `dm` is not a kind here.
+    let kind_raw = optional_string(object, "kind")?;
+    if let Some(kind) = kind_raw {
+        if !actions::CHANNEL_CREATE_KINDS.contains(&kind) {
+            return Err(ApiError::bad_request("channel kind is not proposable"));
+        }
+    }
+    let kind: &'static str =
+        match normalize_channel_kind(kind_raw.unwrap_or(actions::CHANNEL_CREATE_DEFAULT_KIND))
+            .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?
+        {
+            momo_messaging::ChannelKind::Public => "public",
+            _ => "private",
+        };
+    let topic = normalize_channel_topic(optional_string(object, "topic")?)
+        .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?;
+    let add_proposer = match object.get("addProposer") {
+        None | Some(Value::Null) => true,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => return Err(ApiError::bad_request("addProposer must be a boolean")),
+    };
+    let handles = member_handles_arg(object, "memberHandles", 0)?;
+
+    Ok(ValidatedActionArgs {
+        normalized: json!({
+            "name": name,
+            "kind": kind,
+            "topic": topic,
+            "addProposer": add_proposer,
+            "memberHandles": handles,
+        }),
+        // Placeholder rows: the names are the server's, so the real rows are
+        // built by `resolve_action_in_tx` once the handles are looked up.
+        rows: actions::channel_create_rows(&name, kind, topic.as_deref(), add_proposer, &handles),
+        args: ActionArgs::ChannelCreate {
+            name,
+            kind,
+            topic,
+            add_proposer,
+            handles,
+            members: Vec::new(),
+        },
+    })
+}
+
+/// Look `handles` up among the workspace's active members, locking the rows
+/// `FOR SHARE` so none can be deactivated between resolution and the write.
+/// Every handle must resolve: one that does not is the whole call's
+/// `InvalidArguments`, with no hint which one.
+async fn resolve_member_handles_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    handles: &[String],
+) -> Result<Option<Vec<ResolvedMember>>, momo_db::DbError> {
+    if handles.is_empty() {
+        return Ok(Some(Vec::new()));
+    }
+    let rows: Vec<(Uuid, String, String)> = momo_db::sqlx::query_as(
+        "SELECT m.id, m.handle, m.display_name FROM member m \
+           JOIN workspace_membership wm \
+             ON wm.workspace_id = m.workspace_id AND wm.member_id = m.id \
+          WHERE m.workspace_id = $1 AND m.handle = ANY($2) \
+            AND m.status = 'active' AND m.deleted_at IS NULL \
+          ORDER BY m.id FOR SHARE OF m",
+    )
+    .bind(workspace_id)
+    .bind(handles)
+    .fetch_all(&mut *conn)
+    .await?;
+    if rows.len() != handles.len() {
+        return Ok(None);
+    }
+    // Re-order to the proposal's order so the card lists them as written.
+    let mut members = Vec::with_capacity(rows.len());
+    for handle in handles {
+        let Some((id, handle, display_name)) = rows.iter().find(|row| &row.1 == handle) else {
+            return Ok(None);
+        };
+        members.push(ResolvedMember {
+            id: *id,
+            handle: handle.clone(),
+            display_name: display_name.clone(),
+        });
+    }
+    Ok(Some(members))
+}
+
+/// The proposer must be an active agent member of this workspace *now*.
+async fn proposer_is_live_agent_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    proposer_member_id: Uuid,
+) -> Result<bool, momo_db::DbError> {
+    Ok(momo_db::sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM member m \
+           JOIN workspace_membership wm \
+             ON wm.workspace_id = m.workspace_id AND wm.member_id = m.id \
+          WHERE m.workspace_id = $1 AND m.id = $2 AND m.kind = 'agent' \
+            AND m.status = 'active' AND m.deleted_at IS NULL)",
+    )
+    .bind(workspace_id)
+    .bind(proposer_member_id)
+    .fetch_one(&mut *conn)
+    .await?)
+}
+
 /// What the role gate of a [`actions::RequiredRole`] is judged against.
 ///
 /// Most roles are about the workspace as a whole and need no subject. The
@@ -307,21 +513,47 @@ pub struct ResolvedAction {
 /// Called with the stored payload at decision time too, so a card is re-proved
 /// against the workspace as it is now (D2: 「저장값을 신뢰하지 않는다」).
 pub async fn resolve_action_in_tx(
-    _conn: &mut PgConnection,
-    _workspace_id: Uuid,
-    _proposer_member_id: Uuid,
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    proposer_member_id: Uuid,
     action: &WorkspaceAction,
     args: &Value,
     now_ms: i64,
 ) -> DbRejectable<ResolvedAction> {
-    let validated = match validated_action_args(action, args, now_ms) {
+    let mut validated = match validated_action_args(action, args, now_ms) {
         Ok(validated) => validated,
         Err(error) => return Ok(Err(error)),
     };
     // Exhaustive on purpose: a new `ActionArgs` variant must say here whether it
     // resolves anything and whom its role gate is about.
-    let subject = match &validated.args {
+    let subject = match &mut validated.args {
         ActionArgs::InviteCreate { .. } => GateSubject::Workspace,
+        ActionArgs::ChannelCreate {
+            name,
+            kind,
+            topic,
+            add_proposer,
+            handles,
+            members,
+        } => {
+            if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
+                return Ok(Err(ApiError::bad_request(
+                    "proposer is not an active agent",
+                )));
+            }
+            let Some(found) = resolve_member_handles_in_tx(conn, workspace_id, handles).await?
+            else {
+                return Ok(Err(ApiError::bad_request("member handle did not resolve")));
+            };
+            *members = found;
+            let names: Vec<String> = members
+                .iter()
+                .map(|member| member.display_name.clone())
+                .collect();
+            validated.rows =
+                actions::channel_create_rows(name, kind, topic.as_deref(), *add_proposer, &names);
+            GateSubject::Workspace
+        }
     };
     Ok(Ok(ResolvedAction { validated, subject }))
 }
@@ -606,7 +838,6 @@ mod tests {
                     "maxLength",
                     "minItems",
                     "maxItems",
-                    "items",
                 ] {
                     assert_eq!(
                         tool_property.get(key),
@@ -615,6 +846,23 @@ mod tests {
                         action.id
                     );
                 }
+                // `items` is compared without `description`: the tool's strings
+                // carry the byte-unit note (`BYTE_BOUND_NOTE`), the registry's do
+                // not know it. Every other key of an element must match.
+                let without_description = |items: Option<&Value>| {
+                    items.cloned().map(|mut items| {
+                        if let Some(object) = items.as_object_mut() {
+                            object.remove("description");
+                        }
+                        items
+                    })
+                };
+                assert_eq!(
+                    without_description(tool_property.get("items")),
+                    without_description(registry_property.get("items")),
+                    "{}: args.{name}.items disagrees between oort_action_propose and GET /actions",
+                    action.id
+                );
                 // The tool wraps every OPTIONAL property in the nullability
                 // contract (`["integer","null"]`) and leaves a required one
                 // bare; the catalog publishes the bare type for both.
@@ -912,6 +1160,91 @@ mod tests {
         }
     }
 
+    fn channel_create() -> &'static WorkspaceAction {
+        actions::action_by_id(actions::ACTION_CHANNEL_CREATE).expect("registered")
+    }
+
+    /// `channel.create`'s defaults are the safe ones: private, the proposer joins
+    /// (증보 V2/V3), and the name is the REST normaliser's.
+    #[test]
+    fn a_channel_proposal_defaults_to_private_with_the_proposer_joining() {
+        let validated =
+            validated_action_args(channel_create(), &json!({"name": " Plans-2026 "}), NOW_MS)
+                .expect("a legal proposal");
+        assert_eq!(
+            validated.normalized,
+            json!({
+                "name": "plans-2026",
+                "kind": "private",
+                "topic": Value::Null,
+                "addProposer": true,
+                "memberHandles": []
+            })
+        );
+        let labels: Vec<&str> = validated
+            .rows
+            .iter()
+            .map(|row| row["label"].as_str().expect("label"))
+            .collect();
+        assert!(labels.contains(&"이 에이전트도 참여"), "{labels:?}");
+        // `null` is an omitted value for every optional field.
+        let nulls = validated_action_args(
+            channel_create(),
+            &json!({"name": "a1", "kind": null, "topic": null, "addProposer": null,
+                    "memberHandles": null}),
+            NOW_MS,
+        )
+        .expect("nulls are omissions");
+        assert_eq!(nulls.normalized["kind"], json!("private"));
+        assert_eq!(nulls.normalized["addProposer"], json!(true));
+    }
+
+    #[test]
+    fn a_channel_proposal_refuses_what_the_rest_surface_or_the_schema_refuses() {
+        let eleven: Vec<String> = (0..11).map(|n| format!("user-{n}")).collect();
+        for refused in [
+            json!({}),
+            json!({"name": ""}),
+            json!({"name": "Has Space"}),
+            json!({"name": "-leading"}),
+            json!({"name": "a".repeat(81)}),
+            json!({"name": 7}),
+            json!({"name": "ok", "kind": "dm"}),
+            json!({"name": "ok", "kind": "Public"}),
+            json!({"name": "ok", "kind": 1}),
+            json!({"name": "ok", "topic": "x".repeat(281)}),
+            json!({"name": "ok", "addProposer": "yes"}),
+            json!({"name": "ok", "memberHandles": "bob"}),
+            json!({"name": "ok", "memberHandles": [1]}),
+            json!({"name": "ok", "memberHandles": ["a"]}),
+            json!({"name": "ok", "memberHandles": ["Bad Handle"]}),
+            json!({"name": "ok", "memberHandles": eleven}),
+            // Ids are never accepted: a uuid is simply an unknown key.
+            json!({"name": "ok", "channelId": Uuid::new_v4()}),
+            json!({"name": "ok", "createdBy": Uuid::new_v4()}),
+            json!({"name": "ok", "memberIds": [Uuid::new_v4()]}),
+            json!([]),
+        ] {
+            let error = validated_action_args(channel_create(), &refused, NOW_MS)
+                .expect_err(&format!("{refused} must be refused"));
+            assert_eq!(error.status, StatusCode::BAD_REQUEST, "{refused}");
+        }
+    }
+
+    #[test]
+    fn member_handles_are_normalised_and_de_duplicated() {
+        let validated = validated_action_args(
+            channel_create(),
+            &json!({"name": "ok", "memberHandles": ["@Bob", "bob", " alice "]}),
+            NOW_MS,
+        )
+        .expect("legal");
+        assert_eq!(
+            validated.normalized["memberHandles"],
+            json!(["bob", "alice"])
+        );
+    }
+
     /// 부록 E, row by row. The `unavailableReason` key is what a client reads
     /// when `executable` is false, and it is never blank.
     #[test]
@@ -952,7 +1285,13 @@ mod tests {
             .as_object()
             .expect("row")
             .contains_key("unavailableReason"));
-        assert!(!rendered["actions"][1]
+        let first_declared = rendered["actions"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .find(|row| row["executable"] == json!(false))
+            .expect("at least one declared row");
+        assert!(!first_declared
             .as_object()
             .expect("row")
             .contains_key("argsSchema"));

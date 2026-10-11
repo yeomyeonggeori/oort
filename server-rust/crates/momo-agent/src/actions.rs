@@ -56,6 +56,10 @@ pub const ACTION_TYPE_WORKSPACE_ACTION: &str = "workspace_action";
 /// 「@hermes 초대 링크 하나 만들어줘」 has no path today (ADR-0186 §1.1).
 pub const ACTION_INVITE_CREATE: &str = "invite.create";
 
+/// `channel.create` — create a channel as the approver and, in the same
+/// transaction, bring the proposing agent into it (ADR-0186 증보 V3).
+pub const ACTION_CHANNEL_CREATE: &str = "channel.create";
+
 /// What a person is consenting to when they approve (ADR-0186 D3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Risk {
@@ -203,16 +207,63 @@ fn invite_create_args_schema() -> Value {
     })
 }
 
+/// The channel kinds a proposal may ask for. `dm` is never creatable here.
+pub const CHANNEL_CREATE_KINDS: [&str; 2] = ["public", "private"];
+/// What `kind` means when a proposal names none: **private**. An agent that wants
+/// a public channel has to say so, and the card shows it.
+pub const CHANNEL_CREATE_DEFAULT_KIND: &str = "private";
+/// `name` bound in UTF-8 bytes (the domain's 80 is characters, but the accepted
+/// alphabet is ASCII, so the two coincide for every legal name).
+pub const CHANNEL_NAME_MAX_BYTES: u64 = 80;
+/// `topic` bound in UTF-8 bytes: the domain's 280 characters at the 4-byte
+/// worst case. The domain normaliser still enforces the 280 characters.
+pub const CHANNEL_TOPIC_MAX_BYTES: u64 = 1_120;
+/// A proposal names at most this many members to add alongside.
+pub const ACTION_MEMBER_HANDLES_MAX: u64 = 10;
+/// A handle is 2..=32 characters; one leading `@` is tolerated, hence 33.
+pub const MEMBER_HANDLE_MAX_BYTES: u64 = 33;
+
+/// `channel.create` arguments (증보 V2).
+fn channel_create_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+            "name": {"type": "string", "minLength": 1, "maxLength": CHANNEL_NAME_MAX_BYTES},
+            "kind": {"type": "string", "enum": CHANNEL_CREATE_KINDS},
+            "topic": {"type": "string", "maxLength": CHANNEL_TOPIC_MAX_BYTES},
+            "addProposer": {"type": "boolean"},
+            "memberHandles": {
+                "type": "array",
+                "maxItems": ACTION_MEMBER_HANDLES_MAX,
+                "items": {"type": "string", "minLength": 1, "maxLength": MEMBER_HANDLE_MAX_BYTES}
+            }
+        }
+    })
+}
+
 /// The complete registry. Order is the catalog's order.
-pub const ACTIONS: &[WorkspaceAction] = &[WorkspaceAction {
-    id: ACTION_INVITE_CREATE,
-    title: "팀원 초대 링크 만들기",
-    summary: "역할과 사용 횟수, 만료를 정해 초대 링크를 하나 만듭니다.",
-    risk: Risk::Approval,
-    required_role: RequiredRole::Admin,
-    effect: "초대 링크를 만듭니다",
-    args_schema: invite_create_args_schema,
-}];
+pub const ACTIONS: &[WorkspaceAction] = &[
+    WorkspaceAction {
+        id: ACTION_INVITE_CREATE,
+        title: "팀원 초대 링크 만들기",
+        summary: "역할과 사용 횟수, 만료를 정해 초대 링크를 하나 만듭니다.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::Admin,
+        effect: "초대 링크를 만듭니다",
+        args_schema: invite_create_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_CHANNEL_CREATE,
+        title: "채널 만들기",
+        summary: "이름과 공개 범위를 정해 채널을 하나 만들고, 이 에이전트와 정한 멤버를 넣습니다.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::Admin,
+        effect: "채널을 만들고, 표시된 대로 이 에이전트와 멤버를 그 채널에 넣습니다",
+        args_schema: channel_create_args_schema,
+    },
+];
 
 /// An action the product already performs over REST that is **not** proposable
 /// yet, and the sentence that says why.
@@ -239,12 +290,6 @@ pub const DECLARED_NOT_EXECUTABLE: &[DeclaredAction] = &[
         title: "채널 웹훅 발급",
         summary: "채널로 들어오는 웹훅 자격을 하나 발급합니다.",
         unavailable_reason: "웹훅 마스터키 분리(ADR-0004 증보 4)가 랜딩한 뒤에 열립니다.",
-    },
-    DeclaredAction {
-        id: "channel.create",
-        title: "채널 만들기",
-        summary: "이름과 공개 범위를 정해 채널을 하나 만듭니다.",
-        unavailable_reason: "다음 배치에서 열립니다.",
     },
     DeclaredAction {
         id: "member.role.set",
@@ -365,6 +410,96 @@ pub fn invite_create_rows(role: &str, max_uses: i32, expires_in_days: Option<i64
                 expires_in_days.unwrap_or(DEFAULT_INVITE_EXPIRES_IN_DAYS)
             ),
         ),
+    ]
+}
+
+/// The `channel.create` card rows, from the **normalised** arguments and the
+/// members the server resolved (display names are the server's, never the
+/// agent's strings). The 「이 에이전트도 참여」 row is always present and says in
+/// words what `true` widens (증보 V3: approving a channel can widen an agent's
+/// reach, so the person must read it).
+pub fn channel_create_rows(
+    name: &str,
+    kind: &str,
+    topic: Option<&str>,
+    add_proposer: bool,
+    member_names: &[String],
+) -> Vec<Value> {
+    let mut rows = vec![
+        action_row("채널", format!("#{name}")),
+        action_row(
+            "공개 범위",
+            if kind == "public" {
+                "공개"
+            } else {
+                "비공개"
+            },
+        ),
+    ];
+    if let Some(topic) = topic {
+        rows.push(action_row("주제", topic));
+    }
+    rows.push(action_row(
+        "이 에이전트도 참여",
+        if add_proposer {
+            "예 — 이 에이전트가 이 채널을 읽고 쓸 수 있게 돼요"
+        } else {
+            "아니요"
+        },
+    ));
+    if !member_names.is_empty() {
+        rows.push(action_row("함께 넣을 멤버", member_names.join(", ")));
+    }
+    rows
+}
+
+/// `audit_log.action` rows the 증보 actions write beside `action.approved`
+/// (V6), each with its `detail.schema`.
+pub const AUDIT_CHANNEL_CREATED: &str = "channel.created";
+pub const AUDIT_CHANNEL_CREATED_SCHEMA: &str = "momo.channel.created.v1";
+pub const AUDIT_CHANNELS_GRANTED: &str = "hosted_connection.channels_granted";
+pub const AUDIT_CHANNELS_GRANTED_SCHEMA: &str = "momo.hosted_connection.channels_granted.v1";
+
+/// `ref.type` for a created channel.
+pub const REF_TYPE_CHANNEL: &str = "channel";
+
+/// The outcome line of `channel.create`. **The id is in the body on purpose**:
+/// the agent reads this line on its next turn and needs the channel id to post
+/// there (`oort_message_post` takes a `channelId`), and a channel id is not a
+/// secret (증보 V6).
+pub fn channel_create_result_body(name: &str, kind: &str, channel_id: Uuid) -> String {
+    format!(
+        "채널을 만들었어요: #{name} ({}) · id {channel_id}",
+        if kind == "public" {
+            "공개"
+        } else {
+            "비공개"
+        }
+    )
+}
+
+/// The `channel.create` result rows.
+pub fn channel_create_result_rows(
+    name: &str,
+    kind: &str,
+    proposer_joined: bool,
+    member_count: usize,
+) -> Vec<Value> {
+    vec![
+        action_row("채널", format!("#{name}")),
+        action_row(
+            "공개 범위",
+            if kind == "public" {
+                "공개"
+            } else {
+                "비공개"
+            },
+        ),
+        action_row(
+            "이 에이전트도 참여",
+            if proposer_joined { "예" } else { "아니요" },
+        ),
+        action_row("함께 넣은 멤버", format!("{member_count}명")),
     ]
 }
 
@@ -653,14 +788,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn v1_is_exactly_one_executable_action_and_three_declared_ones() {
-        assert_eq!(action_ids(), vec!["invite.create"]);
+    fn the_executable_and_declared_lists_are_what_the_batch_opened() {
+        assert_eq!(action_ids(), vec!["invite.create", "channel.create"]);
         assert_eq!(
             DECLARED_NOT_EXECUTABLE
                 .iter()
                 .map(|declared| declared.id)
                 .collect::<Vec<_>>(),
-            vec!["webhook.create", "channel.create", "member.role.set"]
+            vec!["webhook.create", "member.role.set"]
         );
     }
 
@@ -841,6 +976,37 @@ mod tests {
         for absent in ["call_id", "tool_name", "arguments"] {
             assert!(props.get(absent).is_none(), "{absent}");
         }
+    }
+
+    #[test]
+    fn the_channel_card_always_says_whether_the_agent_joins() {
+        let rows = channel_create_rows("계획", "private", None, true, &[]);
+        assert_eq!(rows[0], json!({"label": "채널", "value": "#계획"}));
+        assert_eq!(rows[1], json!({"label": "공개 범위", "value": "비공개"}));
+        let joins = rows
+            .iter()
+            .find(|row| row["label"] == "이 에이전트도 참여")
+            .expect("the row is always present");
+        assert!(joins["value"].as_str().expect("value").starts_with("예"));
+        let rows = channel_create_rows("계획", "public", Some("주제"), false, &["김 인턴".into()]);
+        let joins = rows
+            .iter()
+            .find(|row| row["label"] == "이 에이전트도 참여")
+            .expect("the row is present for `false` too");
+        assert_eq!(joins["value"], json!("아니요"));
+        assert_eq!(rows[1]["value"], json!("공개"));
+        assert!(rows.iter().any(|row| row["label"] == "주제"));
+        assert!(rows
+            .iter()
+            .any(|row| row["label"] == "함께 넣을 멤버" && row["value"] == "김 인턴"));
+    }
+
+    #[test]
+    fn the_channel_result_line_carries_the_id_and_no_link() {
+        let id = Uuid::from_u128(0xabc);
+        let body = channel_create_result_body("계획", "private", id);
+        assert!(body.contains(&id.to_string()), "{body}");
+        assert!(!body.contains("http"));
     }
 
     #[test]

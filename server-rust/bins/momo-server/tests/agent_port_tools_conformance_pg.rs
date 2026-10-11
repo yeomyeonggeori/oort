@@ -7108,3 +7108,739 @@ async fn the_pending_count_serialises_proposals_of_one_agent() {
     first.commit().await.expect("first commit");
     assert_eq!(second.await.expect("second task"), 0);
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 2026-10-11 S1 (#3706) — channel.create (V3 합성)
+// ---------------------------------------------------------------------------
+
+/// Mention, claim and propose `action_id`, returning the raw tool answer.
+async fn try_propose_action_3706(
+    client: &reqwest::Client,
+    base: &str,
+    su: &PgPool,
+    fixture: &Fixture,
+    action_id: &str,
+    args: Value,
+) -> (u16, Value) {
+    let handle_name = hosted_handle(su, fixture.hosted_agent).await;
+    let trigger: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{handle_name} {action_id} 부탁해")
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+    let (status, claimed) = call(
+        client,
+        base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("a lease handle")
+        .to_string();
+    call(
+        client,
+        base,
+        &fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({"handle": handle, "actionId": action_id, "args": args}),
+    )
+    .await
+}
+
+fn proposed_approval_3706(answer: &Value) -> Uuid {
+    Uuid::parse_str(
+        structured(answer)["approvalId"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no approvalId in {answer}")),
+    )
+    .expect("uuid")
+}
+
+/// An active human in the fixture workspace that is a workspace member but not
+/// (yet) in any channel. Returns `(member id, handle)`.
+async fn seed_extra_member_3706(pool: &PgPool, fixture: &Fixture, tag: &str) -> (Uuid, String) {
+    let member = Uuid::new_v4();
+    let handle = format!("{tag}-{}", &member.simple().to_string()[..8]);
+    sqlx::query(
+        "INSERT INTO member(id, workspace_id, kind, display_name, handle) \
+         VALUES($1,$2,'human',$3,$4)",
+    )
+    .bind(member)
+    .bind(fixture.workspace)
+    .bind(format!("Extra {tag}"))
+    .bind(&handle)
+    .execute(pool)
+    .await
+    .expect("seed extra member");
+    sqlx::query(
+        "INSERT INTO human(member_id, workspace_id, email, email_verified) VALUES($1,$2,$3,true)",
+    )
+    .bind(member)
+    .bind(fixture.workspace)
+    .bind(format!("{member}@tools.test"))
+    .execute(pool)
+    .await
+    .expect("seed extra identity");
+    sqlx::query(
+        "INSERT INTO workspace_membership(workspace_id, member_id, role) VALUES($1,$2,'member')",
+    )
+    .bind(fixture.workspace)
+    .bind(member)
+    .execute(pool)
+    .await
+    .expect("seed extra workspace membership");
+    (member, handle)
+}
+
+async fn hosted_approved_3706(pool: &PgPool, fixture: &Fixture) -> Vec<Uuid> {
+    sqlx::query_scalar("SELECT approved_channel_ids FROM hosted_agent_connection WHERE id=$1")
+        .bind(fixture.hosted_connection)
+        .fetch_one(pool)
+        .await
+        .expect("approved channels")
+}
+
+/// The columns of the hosted connection that ADR-0162 增보 2 hangs the DM rule
+/// on: a channel grant must not touch any of them.
+async fn hosted_confirm_columns_3706(pool: &PgPool, fixture: &Fixture) -> String {
+    sqlx::query_scalar(
+        "SELECT concat_ws('|', confirmed_by, confirmed_at, active_token_id, \
+                array_to_string(approved_scopes, ','), \
+                array_to_string(approved_dm_channel_ids, ',')) \
+           FROM hosted_agent_connection WHERE id=$1",
+    )
+    .bind(fixture.hosted_connection)
+    .fetch_one(pool)
+    .await
+    .expect("confirm columns")
+}
+
+async fn channel_row_3706(
+    pool: &PgPool,
+    workspace: Uuid,
+    name: &str,
+) -> Option<(Uuid, String, Uuid)> {
+    sqlx::query_as(
+        "SELECT id, kind::text, created_by FROM channel \
+          WHERE workspace_id=$1 AND name=$2 AND archived_at IS NULL",
+    )
+    .bind(workspace)
+    .bind(name)
+    .fetch_optional(pool)
+    .await
+    .expect("channel row")
+}
+
+async fn audit_count_3706(pool: &PgPool, workspace: Uuid, action: &str) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action=$2")
+        .bind(workspace)
+        .bind(action)
+        .fetch_one(pool)
+        .await
+        .expect("audit count")
+}
+
+/// **channel.create, end to end (증보 V3, V6, V11).**
+///
+/// One approval creates the channel as the approver, seats the proposing agent
+/// and the named member, and puts the channel in the agent's approved set — and
+/// nothing about the connection's confirm columns moves. A non-admin is refused
+/// with the approval intact; the agent reads the new channel's id from its own
+/// outcome line and can then post there.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_approved_channel_create_is_one_step_for_channel_membership_and_grant() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+    let (extra, extra_handle) = seed_extra_member_3706(&su, &fixture, "guest").await;
+    // The fixture's generated handle is longer than the 32 a real workspace
+    // allows; give the approver a legal one so it can be named in the proposal.
+    let approver_handle = format!("boss-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    sqlx::query("UPDATE member SET handle=$2 WHERE id=$1")
+        .bind(fixture.human)
+        .bind(&approver_handle)
+        .execute(&su)
+        .await
+        .unwrap();
+    let name = format!("plan-{}", &Uuid::new_v4().simple().to_string()[..8]);
+
+    // The approver's own handle is in the list on purpose: the approver already
+    // owns the channel, and re-adding them must not downgrade `owner`.
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": name, "memberHandles": [extra_handle, approver_handle]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval_id = proposed_approval_3706(&proposed);
+    let card_message_id =
+        Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap();
+
+    // The card shows the server's names and the widening row, not the handles.
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(card_message_id)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    let rows = card["action"]["rows"].as_array().expect("rows").clone();
+    let row = |label: &str| {
+        rows.iter()
+            .find(|row| row["label"] == label)
+            .unwrap_or_else(|| panic!("no {label} row in {rows:?}"))["value"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(row("채널"), format!("#{name}"));
+    assert_eq!(row("공개 범위"), "비공개", "the default kind is private");
+    assert!(row("이 에이전트도 참여").starts_with("예"));
+    assert!(row("함께 넣을 멤버").contains("Extra guest"));
+    assert_eq!(card["action"]["required_role"], json!("admin"));
+    assert!(channel_row_3706(&su, fixture.workspace, &name)
+        .await
+        .is_none());
+
+    let approved_before = hosted_approved_3706(&su, &fixture).await;
+    let confirm_before = hosted_confirm_columns_3706(&su, &fixture).await;
+    let jobs_before = agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await;
+
+    // ---- a non-admin is refused; nothing happens ---------------------------
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &plain_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert!(channel_row_3706(&su, fixture.workspace, &name)
+        .await
+        .is_none());
+    assert_eq!(hosted_approved_3706(&su, &fixture).await, approved_before);
+    let pending: String = sqlx::query_scalar("SELECT status::text FROM approval WHERE id=$1")
+        .bind(approval_id)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(pending, "pending");
+
+    // ---- an agent cannot decide -------------------------------------------
+    let agent_try = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/approvals/{approval_id}/decision",
+            fixture.workspace
+        ))
+        .bearer_auth(&fixture.hosted_bearer)
+        .json(&json!({"approvalId": approval_id, "approve": true,
+                      "clientDecisionId": Uuid::new_v4()}))
+        .send()
+        .await
+        .expect("agent decision responds");
+    assert!(
+        matches!(agent_try.status().as_u16(), 401 | 403),
+        "an agent bearer must not decide: {}",
+        agent_try.status()
+    );
+    assert!(channel_row_3706(&su, fixture.workspace, &name)
+        .await
+        .is_none());
+
+    // ---- the admin approves ------------------------------------------------
+    let (status, headers, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        headers.get("cache-control").and_then(|v| v.to_str().ok()),
+        Some("no-store")
+    );
+    assert_eq!(approved["result"]["actionId"], json!("channel.create"));
+    assert_eq!(approved["result"]["ref"]["type"], json!("channel"));
+    assert!(
+        approved["result"].get("secretOnce").is_none(),
+        "channel.create mints no one-time value: {approved}"
+    );
+    let (channel_id, kind, created_by) = channel_row_3706(&su, fixture.workspace, &name)
+        .await
+        .expect("the channel exists");
+    assert_eq!(
+        approved["result"]["ref"]["id"],
+        json!(channel_id.to_string())
+    );
+    assert_eq!(kind, "private");
+    assert_eq!(created_by, fixture.human, "the APPROVER created it");
+
+    let roles: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT member_id, role::text FROM membership \
+          WHERE workspace_id=$1 AND channel_id=$2 AND left_at IS NULL",
+    )
+    .bind(fixture.workspace)
+    .bind(channel_id)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    let role_of = |member: Uuid| {
+        roles
+            .iter()
+            .find(|(id, _)| *id == member)
+            .map(|(_, role)| role.as_str())
+    };
+    assert_eq!(role_of(fixture.human), Some("owner"), "{roles:?}");
+    assert_eq!(role_of(fixture.hosted_agent), Some("member"), "{roles:?}");
+    assert_eq!(role_of(extra), Some("member"), "{roles:?}");
+    assert_eq!(roles.len(), 3, "{roles:?}");
+
+    let approved_after = hosted_approved_3706(&su, &fixture).await;
+    assert!(approved_after.contains(&channel_id));
+    assert_eq!(approved_after.len(), approved_before.len() + 1);
+    assert_eq!(
+        hosted_confirm_columns_3706(&su, &fixture).await,
+        confirm_before,
+        "a grant never touches the confirm columns"
+    );
+    let covered: Vec<Uuid> =
+        sqlx::query_scalar("SELECT unnest(hosted_connection_channel_ids($1,$2))")
+            .bind(fixture.workspace)
+            .bind(fixture.hosted_connection)
+            .fetch_all(&su)
+            .await
+            .unwrap();
+    assert!(covered.contains(&channel_id));
+
+    // ---- audit -------------------------------------------------------------
+    assert_eq!(
+        audit_count_3706(&su, fixture.workspace, "channel.created").await,
+        1
+    );
+    assert_eq!(
+        audit_count_3706(&su, fixture.workspace, "hosted_connection.channels_granted").await,
+        1
+    );
+    let detail: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='channel.created'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(detail["name"], json!(name));
+    assert_eq!(detail["add_proposer"], json!(true));
+    assert_eq!(detail["via_agent"], json!(fixture.hosted_agent.to_string()));
+    assert_eq!(detail["approval_id"], json!(approval_id.to_string()));
+
+    // ---- the run ended, with no job behind it ------------------------------
+    assert_eq!(
+        agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await,
+        jobs_before
+    );
+
+    // ---- the agent can read the id and then speak in the new channel -------
+    let line: (String, Value) = sqlx::query_as(
+        "SELECT body, props FROM message WHERE workspace_id=$1 AND channel_id=$2 \
+           AND props ? 'momo.action_result' ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(line.0.contains(&channel_id.to_string()), "{}", line.0);
+    assert!(
+        line.1["momo.action_result"].get("next").is_none(),
+        "no dead settings link on a channel result"
+    );
+    let (status, read) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_conversation_read",
+        json!({"channelId": fixture.channel, "limit": 20}),
+    )
+    .await;
+    assert_eq!(status, 200, "{read}");
+    assert!(
+        structured(&read)
+            .to_string()
+            .contains(&channel_id.to_string()),
+        "the agent must be able to read the new channel's id: {read}"
+    );
+    let (status, posted) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_message_post",
+        json!({"channelId": channel_id, "clientMsgId": Uuid::new_v4(), "body": "첫 인사"}),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "the agent is a member AND approved there: {posted}"
+    );
+}
+
+/// `addProposer: false` seats and grants nothing for the agent.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_channel_create_without_the_proposer_widens_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let name = format!("solo-{}", &Uuid::new_v4().simple().to_string()[..8]);
+
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": name, "kind": "public", "addProposer": false}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let card_message_id =
+        Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap();
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(card_message_id)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert!(card["action"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|row| row["label"] == "이 에이전트도 참여" && row["value"] == "아니요"));
+
+    let approved_before = hosted_approved_3706(&su, &fixture).await;
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    let (channel_id, kind, _) = channel_row_3706(&su, fixture.workspace, &name)
+        .await
+        .expect("channel");
+    assert_eq!(kind, "public");
+    let agent_in: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM membership WHERE channel_id=$1 AND member_id=$2")
+            .bind(channel_id)
+            .bind(fixture.hosted_agent)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(agent_in, 0, "the agent was not seated");
+    assert_eq!(hosted_approved_3706(&su, &fixture).await, approved_before);
+    assert_eq!(
+        audit_count_3706(&su, fixture.workspace, "hosted_connection.channels_granted").await,
+        0
+    );
+    assert_eq!(
+        audit_count_3706(&su, fixture.workspace, "channel.created").await,
+        1
+    );
+}
+
+/// A failure after the channel row exists rolls back **everything**, leaves the
+/// approval pending, and a retry after the fault is cleared succeeds. The fault
+/// is injected as a trigger that refuses the extra member's `membership` insert,
+/// i.e. it fires after the channel, the creator's membership and the agent's
+/// membership were already written in the same transaction.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_channel_create_that_fails_midway_leaves_no_trace_and_can_be_retried() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (extra, extra_handle) = seed_extra_member_3706(&su, &fixture, "late").await;
+    let name = format!("atomic-{}", &Uuid::new_v4().simple().to_string()[..8]);
+
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": name, "memberHandles": [extra_handle]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval_id = proposed_approval_3706(&proposed);
+    let approved_before = hosted_approved_3706(&su, &fixture).await;
+
+    sqlx::query(&format!(
+        "CREATE OR REPLACE FUNCTION fail_membership_3706() RETURNS trigger LANGUAGE plpgsql AS \
+         $$ BEGIN IF NEW.member_id = '{extra}' THEN RAISE EXCEPTION 'injected failure'; END IF; \
+         RETURN NEW; END $$"
+    ))
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "CREATE TRIGGER fail_membership_3706 BEFORE INSERT ON membership \
+           FOR EACH ROW EXECUTE FUNCTION fail_membership_3706()",
+    )
+    .execute(&su)
+    .await
+    .unwrap();
+
+    let (status, _h, failed) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert!(
+        status >= 500,
+        "an injected fault is a server error: {status} {failed}"
+    );
+    assert!(
+        channel_row_3706(&su, fixture.workspace, &name)
+            .await
+            .is_none(),
+        "the channel row was rolled back"
+    );
+    assert_eq!(hosted_approved_3706(&su, &fixture).await, approved_before);
+    for action in [
+        "channel.created",
+        "action.approved",
+        "hosted_connection.channels_granted",
+    ] {
+        assert_eq!(
+            audit_count_3706(&su, fixture.workspace, action).await,
+            0,
+            "{action}"
+        );
+    }
+    let (state, run_state): (String, String) = sqlx::query_as(
+        "SELECT a.status::text, r.status::text FROM approval a \
+           JOIN agent_run r ON r.id = a.run_id WHERE a.id=$1",
+    )
+    .bind(approval_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        (state.as_str(), run_state.as_str()),
+        ("pending", "awaiting_approval")
+    );
+
+    // The fault is cleared; the very same approval can now be decided.
+    sqlx::query("DROP TRIGGER fail_membership_3706 ON membership")
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, _h, retried) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{retried}");
+    assert!(channel_row_3706(&su, fixture.workspace, &name)
+        .await
+        .is_some());
+}
+
+/// Stale or unsound proposals: unresolvable handles are the one
+/// `InvalidArguments`; a name taken before the tap, and a connection already at
+/// its ceiling, leave the approval pending with `action_args_invalid`.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_stale_or_unsound_channel_proposal_changes_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let approvals_before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM approval WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+
+    // An unknown handle, a malformed one, a deactivated member and an id all
+    // fail the same way, and no approval row is written.
+    let (gone, gone_handle) = seed_extra_member_3706(&su, &fixture, "gone").await;
+    sqlx::query("UPDATE member SET status='suspended' WHERE id=$1")
+        .bind(gone)
+        .execute(&su)
+        .await
+        .unwrap_or_else(|_| panic!("deactivate"));
+    let mut codes = Vec::new();
+    for args in [
+        json!({"name": "ok-name", "memberHandles": ["nobody-here"]}),
+        json!({"name": "ok-name", "memberHandles": ["Not A Handle"]}),
+        json!({"name": "ok-name", "memberHandles": [gone_handle]}),
+        json!({"name": "ok-name", "memberHandles": [Uuid::new_v4().to_string()]}),
+        json!({"name": "UPPER CASE"}),
+    ] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "channel.create",
+            args.clone(),
+        )
+        .await;
+        codes.push((status, error_code(&refused)));
+        assert_eq!(status, 400, "{args}: {refused}");
+    }
+    assert!(codes.windows(2).all(|pair| pair[0] == pair[1]), "{codes:?}");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM approval WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap(),
+        approvals_before
+    );
+
+    // A name that already exists (even a private channel the agent cannot see)
+    // does NOT fail the proposal — that would be an existence oracle — but the
+    // tap is refused as stale and the approval stays pending.
+    let taken = format!("taken-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    let existing = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO channel(id, workspace_id, kind, name, created_by) \
+         VALUES($1,$2,'private',$3,$4)",
+    )
+    .bind(existing)
+    .bind(fixture.workspace)
+    .bind(&taken)
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": taken}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval_id = proposed_approval_3706(&proposed);
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(stale["status"], "action_args_invalid");
+    let count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM channel WHERE workspace_id=$1 AND lower(name)=$2")
+            .bind(fixture.workspace)
+            .bind(&taken)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(count, 1, "no second channel");
+    let state: String = sqlx::query_scalar("SELECT status::text FROM approval WHERE id=$1")
+        .bind(approval_id)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(state, "pending");
+
+    // A connection already at the 50-channel ceiling cannot take one more.
+    let name = format!("fifty-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": name}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_channel_ids = \
+            ARRAY(SELECT gen_random_uuid() FROM generate_series(1,50)) WHERE id=$1",
+    )
+    .bind(fixture.hosted_connection)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, _h, capped) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{capped}");
+    assert_eq!(capped["status"], "action_args_invalid");
+    assert!(channel_row_3706(&su, fixture.workspace, &name)
+        .await
+        .is_none());
+    assert_eq!(hosted_approved_3706(&su, &fixture).await.len(), 50);
+}

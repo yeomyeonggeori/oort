@@ -64,11 +64,14 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use chrono::Utc;
 use momo_agent::actions::{
-    action_by_id, action_ref, action_result_props, invite_result_body, invite_result_rows,
-    last_attempt_patch, result_client_msg_id, ActionResult, ActionResultNext, RequiredRole,
+    action_by_id, action_ref, action_result_props, channel_create_result_body,
+    channel_create_result_rows, invite_result_body, invite_result_rows, last_attempt_patch,
+    result_client_msg_id, ActionResult, ActionResultNext, RequiredRole,
     ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED, ACTION_TYPE_WORKSPACE_ACTION,
-    AUDIT_ACTION_APPROVED, DEFAULT_INVITE_EXPIRES_IN_DAYS, INVITE_RESULT_NEXT,
-    LAST_ATTEMPT_PROPS_KEY, REF_TYPE_INVITE, ROLE_REQUIRED, SECRET_ONCE_INVITE_LINK,
+    AUDIT_ACTION_APPROVED, AUDIT_CHANNELS_GRANTED, AUDIT_CHANNELS_GRANTED_SCHEMA,
+    AUDIT_CHANNEL_CREATED, AUDIT_CHANNEL_CREATED_SCHEMA, DEFAULT_INVITE_EXPIRES_IN_DAYS,
+    INVITE_RESULT_NEXT, LAST_ATTEMPT_PROPS_KEY, REF_TYPE_CHANNEL, REF_TYPE_INVITE, ROLE_REQUIRED,
+    SECRET_ONCE_INVITE_LINK,
 };
 use momo_agent::approval::{
     decided_props_patch, decision_broadcast_payload, decision_event_payload, decision_receipt,
@@ -82,12 +85,16 @@ use momo_agent::tools::{ToolResult, TOOL_AUDIT_SCHEMA};
 use momo_agent::{
     end_parked_run_in_tx, requeue_run_from_approval_in_tx, succeed_parked_run_in_tx, RunStatus,
 };
-use momo_auth::{Principal, PrincipalKind};
+use momo_auth::{
+    append_approved_channels_in_tx, lock_active_hosted_connection_in_tx, Principal, PrincipalKind,
+    MAX_HOSTED_APPROVED_CHANNELS,
+};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
 use momo_messaging::{
-    cent_channel, patch_and_prune_message_props_in_tx, patch_message_props_in_tx,
-    send_message_in_tx, MessageType, NewMessage,
+    add_channel_member_in_tx, cent_channel, create_channel_detailed_in_tx, normalize_channel_kind,
+    patch_and_prune_message_props_in_tx, patch_message_props_in_tx, send_message_in_tx,
+    MessageType, NewChannel, NewMessage,
 };
 use momo_outbox::{emit_outbox, OutboxKind, RESUME_APPROVAL_JOB_METHOD};
 use momo_settings::{create_invite, INVITE_CREATED_AUDIT_ACTION, INVITE_CREATED_AUDIT_SCHEMA};
@@ -102,7 +109,7 @@ use crate::dto::{
 };
 use crate::error::ApiError;
 use crate::realtime_advert::derive_same_origin_http_base;
-use crate::routes::actions::{resolve_action_in_tx, ActionArgs, GateSubject};
+use crate::routes::actions::{resolve_action_in_tx, ActionArgs, GateSubject, ResolvedMember};
 use crate::routes::agents::require_profile_editor_in_tx;
 use crate::routes::invites::require_admin;
 use crate::routes::shared::{
@@ -1163,6 +1170,31 @@ async fn execute_workspace_action(
 
     // ---- 3. the action's own executor --------------------------------------
     let executed = match &resolved.validated.args {
+        ActionArgs::ChannelCreate {
+            name,
+            kind,
+            topic,
+            add_proposer,
+            members,
+            ..
+        } => {
+            match execute_channel_create(
+                conn,
+                approval,
+                input,
+                now,
+                name,
+                kind,
+                topic.as_deref(),
+                *add_proposer,
+                members,
+            )
+            .await?
+            {
+                Execution::Ran(executed) => executed,
+                Execution::Refused(decision) => return Ok(Ok(decision)),
+            }
+        }
         ActionArgs::InviteCreate {
             role,
             max_uses,
@@ -1364,6 +1396,141 @@ async fn execute_workspace_action(
         receipt,
         status: StatusCode::OK,
         secret_once: executed.secret_once,
+    }))
+}
+
+/// `channel.create` (증보 V3): one transaction, three effects — the channel (the
+/// **approver** is `created_by` and owner), the proposing agent's membership, and
+/// that channel in the agent's hosted connection's approved set. All or nothing;
+/// the card's 「이 에이전트도 참여」 row is the thing the approver read.
+#[allow(clippy::too_many_arguments)]
+async fn execute_channel_create(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    name: &str,
+    kind: &'static str,
+    topic: Option<&str>,
+    add_proposer: bool,
+    members: &[ResolvedMember],
+) -> Result<Execution, momo_db::DbError> {
+    // The connection is the FIRST lock of the hosted canon, so it is taken before
+    // the channel and membership rows this transaction is about to write.
+    let connection = if add_proposer {
+        lock_active_hosted_connection_in_tx(conn, input.workspace_id, approval.requested_by)
+            .await
+            .map_err(momo_db::DbError::from)?
+    } else {
+        None
+    };
+    // A connection already at its ceiling cannot take one more: refuse before
+    // any write, so the card stays pending and nothing half-happened.
+    if connection.is_some_and(|(_, count)| count + 1 > MAX_HOSTED_APPROVED_CHANNELS) {
+        return Ok(Execution::Refused(args_invalid_refusal(
+            approval, input, now,
+        )));
+    }
+
+    let kind_label = normalize_channel_kind(kind)
+        .map_err(|_| protocol_error("channel.create resolved an unknown kind"))?;
+    let Some(created) = create_channel_detailed_in_tx(
+        conn,
+        input.workspace_id,
+        &NewChannel {
+            kind: kind_label,
+            name: name.to_string(),
+            topic: topic.map(str::to_string),
+            // **The approver's name on the row** and the owner membership: the
+            // agent never holds this channel's ownership.
+            created_by: input.member_id,
+        },
+    )
+    .await?
+    else {
+        // The name was taken between the proposal and this tap (증보 V11): the
+        // proposal is stale, the approval is not consumed.
+        return Ok(Execution::Refused(args_invalid_refusal(
+            approval, input, now,
+        )));
+    };
+    let channel_id = created.channel.id;
+
+    if add_proposer {
+        add_channel_member_in_tx(
+            conn,
+            input.workspace_id,
+            channel_id,
+            approval.requested_by,
+            "member",
+        )
+        .await?
+        .ok_or_else(|| protocol_error("the proposing agent could not be added to its channel"))?;
+    }
+    let mut added = 0usize;
+    for member in members {
+        // The approver already owns the channel, and the agent is handled above:
+        // re-adding either would be a no-op at best and, for the approver, a
+        // downgrade from `owner` (the upsert rewrites the role).
+        if member.id == input.member_id || (add_proposer && member.id == approval.requested_by) {
+            continue;
+        }
+        add_channel_member_in_tx(conn, input.workspace_id, channel_id, member.id, "member")
+            .await?
+            .ok_or_else(|| protocol_error("a resolved member could not be added"))?;
+        added += 1;
+    }
+
+    let mut audits = vec![AuditEntry::new(input.workspace_id, AUDIT_CHANNEL_CREATED)
+        .by(input.member_id)
+        .about(approval.requested_by)
+        .target("channel", channel_id)
+        .via_token(input.via_token_id)
+        .run(approval.run_id)
+        .with_schema(
+            AUDIT_CHANNEL_CREATED_SCHEMA,
+            json!({
+                "name": name,
+                "kind": kind,
+                "add_proposer": add_proposer,
+                "member_count": members.len(),
+                "via_agent": approval.requested_by.to_string(),
+                "approval_id": approval.id.to_string(),
+            }),
+        )];
+
+    if let Some((connection_id, _)) = connection {
+        append_approved_channels_in_tx(conn, input.workspace_id, connection_id, &[channel_id])
+            .await
+            .map_err(momo_db::DbError::from)?
+            .ok_or_else(|| protocol_error("the approved set could not take the new channel"))?;
+        audits.push(
+            AuditEntry::new(input.workspace_id, AUDIT_CHANNELS_GRANTED)
+                .by(input.member_id)
+                .about(approval.requested_by)
+                .target("hosted_connection", connection_id)
+                .via_token(input.via_token_id)
+                .run(approval.run_id)
+                .with_schema(
+                    AUDIT_CHANNELS_GRANTED_SCHEMA,
+                    json!({
+                        "connection_id": connection_id.to_string(),
+                        "channel_ids": [channel_id.to_string()],
+                        "via_agent": approval.requested_by.to_string(),
+                        "approval_id": approval.id.to_string(),
+                    }),
+                ),
+        );
+    }
+
+    Ok(Execution::Ran(Executed {
+        audits,
+        ref_type: REF_TYPE_CHANNEL,
+        ref_id: channel_id,
+        result_body: channel_create_result_body(name, kind, channel_id),
+        result_rows: channel_create_result_rows(name, kind, add_proposer, added),
+        secret_once: None,
+        next: None,
     }))
 }
 
