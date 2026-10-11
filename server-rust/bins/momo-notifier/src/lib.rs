@@ -63,6 +63,7 @@ pub mod backoff;
 pub mod config;
 pub mod control_window_sweep;
 pub mod huddle_sweep;
+pub mod inbox_retention_sweep;
 pub mod provider;
 pub mod push;
 pub mod push_relay;
@@ -747,12 +748,32 @@ impl Notifier {
                             backoff::supervise(
                                 "share retention sweep",
                                 shares.config.share_retention_interval,
-                                || {
-                                    share_retention_sweep::sweep_expired_shares(
+                                || async {
+                                    // Two independent retentions on one tick and one
+                                    // RLS-bound pool. The inbox sweep (#3681,
+                                    // ADR-0199 D4) runs even when the share sweep
+                                    // fails, and its failure is reported too.
+                                    let shared = share_retention_sweep::sweep_expired_shares(
                                         &shares.pool,
                                         &write_pool,
                                         shares.config.claim_batch_size,
                                     )
+                                    .await;
+                                    let inbox = inbox_retention_sweep::sweep_read_inbox_items(
+                                        &shares.pool,
+                                        &write_pool,
+                                        shares.config.claim_batch_size,
+                                    )
+                                    .await;
+                                    match (shared, inbox) {
+                                        (Err(error), Err(inbox_error)) => {
+                                            tracing::error!(error = %inbox_error, "inbox retention sweep failed");
+                                            Err(error)
+                                        }
+                                        (Err(error), Ok(_)) => Err(error),
+                                        (Ok(_), Err(error)) => Err(error),
+                                        (Ok(_), Ok(_)) => Ok(()),
+                                    }
                                 },
                             )
                             .await;
