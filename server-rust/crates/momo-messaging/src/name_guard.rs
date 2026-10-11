@@ -150,7 +150,7 @@ pub fn validated_agent_proposed_display_name(raw: &str) -> Result<String, NameRe
         if c.is_control() || is_invisible_letter(c) {
             return Err(NameRejected::Disallowed);
         }
-        if c == ' ' || c == '-' || c == '_' || is_combining_mark(c) {
+        if c == ' ' || c == '-' || c == '_' || c == '\u{30FB}' || is_combining_mark(c) {
             continue;
         }
         if is_emoji(c) {
@@ -220,6 +220,7 @@ fn is_allowed_script(c: char) -> bool {
         || is_greek(c)
         || matches!(c as u32,
             0xAC00..=0xD7AF | 0x1100..=0x11FF | 0x3130..=0x318F | 0xA960..=0xA97F | 0xD7B0..=0xD7FF
+            | 0x3005..=0x3007
             | 0x4E00..=0x9FFF | 0x3400..=0x4DBF | 0x3040..=0x30FF | 0x31F0..=0x31FF)
 }
 
@@ -236,12 +237,24 @@ fn is_greek(c: char) -> bool {
     matches!(c as u32, 0x0370..=0x03FF | 0x1F00..=0x1FFF)
 }
 
-/// Whether one word carries letters of more than one of Latin/Cyrillic/Greek.
+/// Hangul jamo, kana and Han ideographs — **not** Hangul syllables. Some of them
+/// are drawn like a Latin letter (`ㅣ`≈l, `ㅇ`≈o, `ー`≈-, `口`≈o, `エ`≈I), which is
+/// why a word may not mix them with Latin; a Hangul *syllable* beside Latin
+/// (`김A`, `Bot봇`) is ordinary and stays allowed.
+fn is_shape_script(c: char) -> bool {
+    matches!(c as u32,
+        0x1100..=0x11FF | 0x3130..=0x318F | 0xA960..=0xA97F | 0xD7B0..=0xD7FF
+        | 0x3040..=0x30FF | 0x31F0..=0x31FF | 0x4E00..=0x9FFF | 0x3400..=0x4DBF)
+}
+
+/// Whether one word carries letters of more than one of Latin, Cyrillic, Greek
+/// and the shape scripts ([`is_shape_script`]).
 fn mixes_confusable_scripts(word: &str) -> bool {
     let latin = word.chars().any(is_latin);
     let cyrillic = word.chars().any(is_cyrillic);
     let greek = word.chars().any(is_greek);
-    [latin, cyrillic, greek]
+    let shape = word.chars().any(is_shape_script);
+    [latin, cyrillic, greek, shape]
         .into_iter()
         .filter(|present| *present)
         .count()
@@ -281,6 +294,10 @@ fn confusable(c: char) -> char {
         'υ' => 'u',
         'χ' => 'x',
         'ω' => 'w',
+        // Hangul jamo drawn like a Latin letter.
+        // (NFKD turns the compatibility jamo into the conjoining ones.)
+        'ㅣ' | '\u{1175}' => 'i',
+        'ㅇ' | '\u{110B}' => 'o',
         'η' => 'n',
         'ӏ' => 'l',
         'ԛ' => 'q',
@@ -770,6 +787,32 @@ mod tests {
                 "{fine}"
             );
         }
+    }
+
+    /// Review N8/N11: shape-alike jamo/kana/Han beside Latin, and ordinary
+    /// Japanese names.
+    #[test]
+    fn latin_cannot_borrow_shapes_from_jamo_kana_or_han_but_names_stay_usable() {
+        for hostile in ["Aㅣice", "Admㅣn", "ㅇㅇrt", "Aliceー", "Bロt", "Aエ"] {
+            assert!(
+                validated_agent_proposed_display_name(hostile).is_err(),
+                "{hostile}"
+            );
+        }
+        for fine in [
+            "김A",
+            "Bot봇",
+            "佐々木",
+            "ジョン・スミス",
+            "ㅋㅋ",
+            "山田 Bot",
+        ] {
+            assert!(
+                validated_agent_proposed_display_name(fine).is_ok(),
+                "{fine}"
+            );
+        }
+        assert_eq!(skeleton("Aㅣice"), skeleton("Alice"));
     }
 
     /// Review N2: `Ali` is a name, not the word `all`.
