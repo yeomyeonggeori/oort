@@ -157,7 +157,7 @@ pub fn validated_agent_proposed_display_name(raw: &str) -> Result<String, NameRe
             emoji += 1;
             continue;
         }
-        if c.is_alphabetic() || c.is_numeric() {
+        if c.is_ascii_digit() || (c.is_alphabetic() && is_allowed_script(c)) {
             has_letter_or_digit = true;
             continue;
         }
@@ -199,12 +199,28 @@ pub fn validated_agent_proposed_display_name(raw: &str) -> Result<String, NameRe
         || collapsed.split(' ').any(|word| {
             RESERVED_WHOLE_WORDS
                 .iter()
-                .any(|reserved| skeleton(word) == skeleton(reserved))
+                .any(|reserved| light_skeleton(word) == light_skeleton(reserved))
         });
     if reserved_hit {
         return Err(NameRejected::Reserved);
     }
     Ok(collapsed)
+}
+
+/// The scripts an **agent proposal** may spell a name in: Latin (with its
+/// extensions), Hangul, Han, Kana, and — never mixed with Latin in one word —
+/// Cyrillic and Greek. Everything else that is merely `Alphabetic` (Armenian,
+/// Cherokee, the IPA and Latin-small-capital blocks, …) is refused: those are
+/// where look-alikes of Latin letters live, and a block-by-block block-list would
+/// always be one block behind. A name outside these scripts can still be given by
+/// a person (`PATCH …/agents/{agent}`).
+fn is_allowed_script(c: char) -> bool {
+    is_latin(c)
+        || is_cyrillic(c)
+        || is_greek(c)
+        || matches!(c as u32,
+            0xAC00..=0xD7AF | 0x1100..=0x11FF | 0x3130..=0x318F | 0xA960..=0xA97F | 0xD7B0..=0xD7FF
+            | 0x4E00..=0x9FFF | 0x3400..=0x4DBF | 0x3040..=0x30FF | 0x31F0..=0x31FF)
 }
 
 fn is_latin(c: char) -> bool {
@@ -308,6 +324,17 @@ fn ascii_confusable(c: char) -> char {
     }
 }
 
+/// [`skeleton`] without the ASCII look-alike folding (`i`/`l`/`1`, `0`/`o`,
+/// `rn`/`m`): used where the question is "is this *the word* `all`", so that
+/// the ordinary name `Ali` is not read as `all`.
+fn light_skeleton(raw: &str) -> String {
+    raw.nfkd()
+        .flat_map(char::to_lowercase)
+        .filter(|c| !(c.is_whitespace() || *c == '-' || *c == '_' || is_combining_mark(*c)))
+        .map(confusable)
+        .collect()
+}
+
 /// Whether `candidate` collides with any other member's display name or handle
 /// (step 5). `target` is the member being renamed: its own current name is not a
 /// conflict, so renaming to the same name is a no-op rather than an error.
@@ -341,6 +368,18 @@ fn mention_words(raw: &str) -> Vec<String> {
         .collect()
 }
 
+/// The same fold as [`mention_words`] but split on whitespace only.
+fn spaced_words(raw: &str) -> Vec<String> {
+    let folded: String = raw
+        .nfkd()
+        .flat_map(char::to_lowercase)
+        .filter(|c| !is_combining_mark(*c))
+        .map(confusable)
+        .map(ascii_confusable)
+        .collect();
+    folded.split_whitespace().map(str::to_string).collect()
+}
+
 /// Whether writing `@candidate` would also be read as a mention of another
 /// member, or `@that member` as a mention of the candidate (ADR-0186 증보 V4).
 ///
@@ -356,6 +395,7 @@ pub fn mention_overlaps_roster(candidate: &str, target: Uuid, roster: &[RosterNa
     if wanted.is_empty() {
         return true;
     }
+    let wanted_spaced = spaced_words(candidate);
     let prefix_of = |short: &[String], long: &[String]| long.starts_with(short);
     roster
         .iter()
@@ -363,7 +403,14 @@ pub fn mention_overlaps_roster(candidate: &str, target: Uuid, roster: &[RosterNa
         .any(|other| {
             [other.display_name, other.handle].into_iter().any(|name| {
                 let theirs = mention_words(name);
-                !theirs.is_empty() && (prefix_of(&wanted, &theirs) || prefix_of(&theirs, &wanted))
+                let theirs_spaced = spaced_words(name);
+                // Two views: by mention boundary, and by plain spaces — the
+                // second catches a member whose name has NO alphanumeric word
+                // (`🤖`), which the first would skip.
+                (!theirs.is_empty() && (prefix_of(&wanted, &theirs) || prefix_of(&theirs, &wanted)))
+                    || (!theirs_spaced.is_empty()
+                        && (prefix_of(&wanted_spaced, &theirs_spaced)
+                            || prefix_of(&theirs_spaced, &wanted_spaced)))
             })
         })
 }
@@ -380,7 +427,8 @@ pub fn has_invisible_or_control_characters(raw: &str) -> bool {
             || is_invisible_letter(c)
             || matches!(c as u32,
                 0x00AD | 0x034F | 0x061C | 0x180E | 0x200B..=0x200F | 0x202A..=0x202E
-                | 0x2060..=0x206F | 0x2800 | 0xFEFF | 0xE0000..=0xE007F)
+                | 0x2060..=0x206F | 0x2800 | 0xFEFF | 0xE0000..=0xE007F | 0xE0100..=0xE01EF
+                | 0x17B4..=0x17B5 | 0xFFF9..=0xFFFB | 0x1D173..=0x1D17A | 0x180B..=0x180F)
     })
 }
 
@@ -691,6 +739,70 @@ mod tests {
         assert!(validated_agent_proposed_display_name("bot \u{2764}\u{FE0F}").is_ok());
     }
 
+    /// Review N1: only Latin/Hangul/Han/Kana (and un-mixed Cyrillic/Greek) letters.
+    #[test]
+    fn letters_outside_the_allowed_scripts_are_refused() {
+        for hostile in [
+            "ᴀᴅᴍɪɴ", // Latin small capitals
+            "admiո", // Armenian
+            "օrt",   // Armenian
+            "Ꭺdmin", // Cherokee
+            "ɑdmin", // IPA
+            "สวัสดี",  // Thai (a person may choose it; an agent proposal may not)
+            "١٢٣",   // Arabic-Indic digits
+        ] {
+            assert!(
+                validated_agent_proposed_display_name(hostile).is_err(),
+                "{hostile}"
+            );
+        }
+        for fine in [
+            "김 인턴",
+            "山田 ボット",
+            "ヘルメス",
+            "Hermes",
+            "Привет",
+            "Αλφα",
+            "Zoë 3",
+        ] {
+            assert!(
+                validated_agent_proposed_display_name(fine).is_ok(),
+                "{fine}"
+            );
+        }
+    }
+
+    /// Review N2: `Ali` is a name, not the word `all`.
+    #[test]
+    fn ordinary_names_that_fold_onto_a_short_reserved_word_pass() {
+        for fine in ["Ali", "Ail", "Ali Baba"] {
+            assert!(
+                validated_agent_proposed_display_name(fine).is_ok(),
+                "{fine}"
+            );
+        }
+        assert_eq!(
+            validated_agent_proposed_display_name("All"),
+            Err(NameRejected::Reserved)
+        );
+    }
+
+    /// Review N5: a member whose name has no word at all is still mentioned.
+    #[test]
+    fn a_symbol_only_name_still_overlaps_by_plain_words() {
+        let roster = vec![RosterName {
+            member_id: Uuid::from_u128(5),
+            display_name: "🤖",
+            handle: "robot-fan",
+        }];
+        assert!(mention_overlaps_roster(
+            "🤖 Bot",
+            Uuid::from_u128(9),
+            &roster
+        ));
+        assert!(!mention_overlaps_roster("Bot", Uuid::from_u128(9), &roster));
+    }
+
     #[test]
     fn a_persons_name_may_not_hide_or_break_lines() {
         for hostile in [
@@ -702,6 +814,8 @@ mod tests {
             "tab\there",
             "a\u{2800}b",
             "a\u{E0041}b",
+            "a\u{E0100}b",
+            "a\u{17B4}b",
         ] {
             assert!(has_invisible_or_control_characters(hostile), "{hostile:?}");
         }
