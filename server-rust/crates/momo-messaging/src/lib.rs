@@ -56,6 +56,7 @@ pub mod hosted_inbox;
 pub mod huddle;
 pub mod huddle_sweep;
 pub mod identity;
+pub mod inbox;
 pub mod interaction;
 pub mod member_avatar;
 pub mod member_rename;
@@ -112,6 +113,14 @@ pub use identity::{
     read_workspace_for_active_member, resolve_member_signing_key, verify_password_login, Member,
     MemberKind, PasswordLogin, RosterKindFilterInvalid, RosterMember, Workspace, WorkspaceIdentity,
     WorkspaceRead, WorkspaceRole, ROSTER_LIMIT_DEFAULT, ROSTER_LIMIT_MAX,
+};
+pub use inbox::{
+    clamp_inbox_limit, delete_read_inbox_items_in_tx, inbox_event_payload,
+    inbox_unread_count_in_tx, list_inbox_in_tx, make_preview, mark_inbox_item_read_in_tx,
+    mark_inbox_read_all_in_tx, workspaces_with_expired_inbox_items, InboxChannel, InboxCursor,
+    InboxFilter, InboxItemReadOutcome, InboxItemView, InboxMessage, InboxPage, InboxQuoted,
+    InboxReadAllOutcome, INBOX_DEFAULT_LIMIT, INBOX_MAX_LIMIT, INBOX_PREVIEW_CHARS,
+    INBOX_READ_RETENTION_DAYS, INBOX_UNREAD_COUNT_CAP,
 };
 pub use interaction::{
     build_message_deleted_payload, build_message_edited_payload, build_pin_payload,

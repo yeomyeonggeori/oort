@@ -567,6 +567,20 @@ mod tests {
         }
     }
 
+    /// **ADR-0199 — the inbox is a human surface.** No agent scope opens it: an
+    /// agent's inbox is the hosted inbox (ADR-0162), and a generic agent bearer
+    /// must not read or mark a person's "to me" list.
+    #[test]
+    fn no_agent_scope_opens_the_human_inbox() {
+        for (method, path) in [
+            ("GET", format!("/v1/workspaces/{WS}/inbox")),
+            ("PUT", format!("/v1/workspaces/{WS}/inbox/{AGENT}/read")),
+            ("POST", format!("/v1/workspaces/{WS}/inbox/read-all")),
+        ] {
+            assert_eq!(required_agent_scope(method, &path), None, "{method} {path}");
+        }
+    }
+
     /// **ADR-0186 D2 — `workspace:propose` opens zero REST.**
     ///
     /// The table is the closed list of what an agent bearer may reach, so the

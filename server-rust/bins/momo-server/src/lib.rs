@@ -1045,6 +1045,17 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/read-state",
             put(routes::read_state::update),
         )
+        // inbox (ADR-0199, #3681): the member's own "to me" list. Humans only;
+        // the member is the bearer, never a request field.
+        .route("/v1/workspaces/{ws}/inbox", get(routes::inbox::list))
+        .route(
+            "/v1/workspaces/{ws}/inbox/read-all",
+            post(routes::inbox::read_all),
+        )
+        .route(
+            "/v1/workspaces/{ws}/inbox/{item}/read",
+            put(routes::inbox::read_item),
+        )
         .route(
             "/v1/workspaces/{ws}/search/messages",
             get(routes::search::messages),
