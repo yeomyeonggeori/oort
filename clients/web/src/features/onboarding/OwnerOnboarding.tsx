@@ -15,8 +15,10 @@ import { OnboardingColumn, OnboardingFrame } from "./guide/OnboardingFrame";
 import { InviteStage } from "./InviteStage";
 import {
   clearOwnerOnboardingFlag,
+  acceptSeedWorkspace,
   hasOwnerOnboardingFlag,
   markOwnerOnboardingStage,
+  ownerOnboardingS1IsReoffer,
   readOwnerOnboardingStage,
   subscribeOwnerOnboarding,
 } from "./ownerOnboardingStore";
@@ -50,6 +52,8 @@ export function OwnerOnboarding({
     readOwnerOnboardingStage
   );
   const [s1Escaped, setS1Escaped] = useState(false);
+  // 이 화면이 첫 질문(claim 직후)이 아니라 재질문이면 「이대로 쓸게요」를 준다(#3714).
+  const [s1Reoffer] = useState(() => ownerOnboardingS1IsReoffer());
   const resolved = resolveOwnerOnboardingStage(pending);
   const stage = s1Escaped ? "invite" : resolved;
   const dots = onboardingDots(
@@ -85,6 +89,11 @@ export function OwnerOnboarding({
     setS1Escaped(true);
   }
 
+  function handleAcceptDefault() {
+    acceptSeedWorkspace();
+    finishStage();
+  }
+
   const body =
     stage === "workspace-profile" ? (
       <WorkspaceProfileStage
@@ -96,6 +105,7 @@ export function OwnerOnboarding({
         replaceSessionMember={replaceSessionMember}
         onComplete={finishStage}
         onSkip={handleSkipS1}
+        onAcceptDefault={s1Reoffer ? handleAcceptDefault : undefined}
         headingRef={headingRef}
       />
     ) : (

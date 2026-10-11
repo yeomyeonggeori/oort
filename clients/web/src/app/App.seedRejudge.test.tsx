@@ -179,7 +179,8 @@ describe("App: 시드 이름 그대로인 소유자는 저장소가 비어도 S1
     fetchWorkspace.mockResolvedValue({ name: "새벽팀" });
     fetchRoster.mockResolvedValue([{ id: session.member.id, role: "owner" }]);
     const host = await mountApp();
-    await vi.waitFor(() => expect(fetchRoster).toHaveBeenCalled());
+    await vi.waitFor(() => expect(fetchWorkspace).toHaveBeenCalled());
+    expect(fetchRoster).not.toHaveBeenCalled();
     await act(async () => {
       await Promise.resolve();
     });

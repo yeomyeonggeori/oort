@@ -18,8 +18,11 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
 });
 
 import {
+  acceptSeedWorkspace,
   clearOwnerOnboardingPending,
+  markOwnerOnboardingPending,
   readOwnerOnboardingStage,
+  resetOwnerOnboardingLoadState,
 } from "./ownerOnboardingStore";
 import { isSeedWorkspaceUntouched, useSeedWorkspaceRejudge } from "./seedWorkspace";
 
@@ -107,6 +110,41 @@ describe("시드 이름 재판정 (#3696)", () => {
   it("서버에 닿지 않으면 조용히 넘어간다", async () => {
     fetchWorkspace.mockRejectedValue(new Error("offline"));
     fetchRoster.mockRejectedValue(new Error("offline"));
+    await mount(member());
+    expect(readOwnerOnboardingStage()).toBeNull();
+  });
+
+  it("다른 기기에서 이미 정했으면 이전 실행의 영속 표지를 걷는다 (#3714)", async () => {
+    markOwnerOnboardingPending();
+    resetOwnerOnboardingLoadState(); // 앱을 껐다 켠 것과 같다.
+    expect(readOwnerOnboardingStage()).toBe("workspace-profile");
+    fetchWorkspace.mockResolvedValue({ name: "새벽팀" });
+    await mount(member({ handle: "seongjae" }));
+    expect(fetchWorkspace).toHaveBeenCalled();
+    expect(fetchRoster).not.toHaveBeenCalled();
+    expect(readOwnerOnboardingStage()).toBeNull();
+  });
+
+  it("이번 실행의 claim이 막 찍은 표지는 서버 이름이 시드가 아니어도 걷지 않는다", async () => {
+    markOwnerOnboardingPending();
+    fetchWorkspace.mockResolvedValue({ name: "새벽팀" });
+    await mount(member({ handle: "seongjae" }));
+    expect(readOwnerOnboardingStage()).toBe("workspace-profile");
+  });
+
+  it("서버도 아직 시드면 이전 실행의 표지를 그대로 둔다", async () => {
+    markOwnerOnboardingPending();
+    resetOwnerOnboardingLoadState();
+    fetchWorkspace.mockResolvedValue({ name: "momo Demo Workspace" });
+    fetchRoster.mockResolvedValue([{ id: ME, role: "owner" }]);
+    await mount(member({ handle: "seongjae" }));
+    expect(readOwnerOnboardingStage()).toBe("workspace-profile");
+  });
+
+  it("「이대로 쓸게요」를 누른 계정·서버에는 시드 이름이어도 다시 띄우지 않는다", async () => {
+    acceptSeedWorkspace();
+    fetchWorkspace.mockResolvedValue({ name: "momo Demo Workspace" });
+    fetchRoster.mockResolvedValue([{ id: ME, role: "owner" }]);
     await mount(member());
     expect(readOwnerOnboardingStage()).toBeNull();
   });

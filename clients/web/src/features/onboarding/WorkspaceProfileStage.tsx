@@ -58,6 +58,8 @@ import {
   S1_PRIMARY_RETRY,
   S1_REENTRY,
   S1_SKIP_LABEL,
+  S1_ACCEPT_DEFAULT_LABEL,
+  S1_ACCEPT_DEFAULT_NOTE,
   S1_STALE_LINE,
   S1_STALE_MESSAGE_ID,
   S1_TITLE,
@@ -87,6 +89,7 @@ export function WorkspaceProfileStage({
   replaceSessionMember,
   onComplete,
   onSkip,
+  onAcceptDefault,
   headingRef,
 }: {
   workspaceId: string;
@@ -98,6 +101,10 @@ export function WorkspaceProfileStage({
   replaceSessionMember: (member: Member) => void;
   onComplete: () => void;
   onSkip?: () => void;
+  /**
+   * 시드 이름이 남아 다시 뜬 S1에서만 준다(#3714). 누르면 이 계정·서버에서 다시 묻지 않는다.
+   */
+  onAcceptDefault?: () => void;
   /** 단계 착지 포커스(OwnerOnboarding). 코메토의 문장이 받는다. */
   headingRef?: Ref<HTMLHeadingElement>;
 }) {
@@ -511,6 +518,23 @@ export function WorkspaceProfileStage({
             {busy ? S1_PRIMARY_BUSY : formError ? S1_PRIMARY_RETRY : S1_PRIMARY_LABEL}
           </Button>
         )}
+
+        {onAcceptDefault && !staleName ? (
+          <div className="flex flex-col items-center gap-1" data-testid="onboarding-s1-accept">
+            <Button
+              type="button"
+              variant="ghost"
+              className="onboarding-skip"
+              onClick={onAcceptDefault}
+              data-testid="onboarding-s1-accept-default"
+            >
+              {S1_ACCEPT_DEFAULT_LABEL}
+            </Button>
+            <p className="break-keep text-center text-meta text-ink-muted">
+              {S1_ACCEPT_DEFAULT_NOTE}
+            </p>
+          </div>
+        ) : null}
 
         <p className="onboarding-reentry" data-testid="onboarding-s1-reentry">
           {formError && onSkip ? (
