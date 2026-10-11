@@ -10,6 +10,15 @@ export const S1_PRIMARY_LABEL = "이름 저장";
 export const S1_PRIMARY_BUSY = "저장 중";
 export const S1_PRIMARY_RETRY = "다시 시도";
 export const S1_SKIP_LABEL = "지금은 건너뛰기";
+/** 시드 이름이 남아 다시 뜬 S1(#3714)에만. 누르면 이 계정·서버에서 다시 묻지 않는다. */
+export const S1_ACCEPT_DEFAULT_LABEL = "이대로 쓸게요";
+/** 영속 선택이라 무엇이 그대로 남는지를 이름으로 말한다(#3714 design-review H1). */
+export function s1AcceptDefaultNote(currentName: string | undefined): string {
+  const name = currentName?.trim() ?? "";
+  return name === ""
+    ? "이름은 그대로 두고 다시 묻지 않아요. 설정에서 언제든 바꿀 수 있어요."
+    : `이대로 쓰면 이름은 「${name}」 그대로예요. 다시 묻지 않고, 설정에서 언제든 바꿀 수 있어요.`;
+}
 export const S1_REENTRY =
   "나중에 설정 › 워크스페이스 / 프로필에서 바꿀 수 있습니다.";
 export const S1_FAILURE =

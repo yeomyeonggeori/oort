@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { Channel, Message, ReadState, RosterMember } from "../../lib/api";
 import {
   composeMailbox,
+  contextWindow,
+  CONTEXT_AFTER,
+  CONTEXT_BEFORE,
   dmEntry,
   filterMailbox,
   isUnreadSeq,
@@ -12,7 +15,7 @@ import {
   threadEntry,
   type MailboxEntry,
 } from "./mailbox";
-import type { ActorNames, FeedItem } from "./model";
+import { actorToken, resolveActorNames, type ActorNames, type FeedItem } from "./model";
 import { channelLabel, makeDirectory } from "../workspace/directory";
 
 const NOW = 1_800_000_000_000;
@@ -286,5 +289,52 @@ describe("dmEntry · 명부에서 빠진 상대", () => {
     // 「나」는 마지막 말을 한 사람이다. 대화 이름이 자기 자신으로 떨어진 것이 아니다.
     expect(e?.actor).toBe("나");
     expect(e?.channelLabel).not.toContain("곽성재");
+  });
+});
+
+describe("contextWindow: 패널은 항목 메시지를 중심으로 연다(#3694)", () => {
+  const rows = Array.from({ length: 30 }, (_, i) => ({ id: `m${i + 1}`, seq: i + 1 }));
+
+  it("긴 기록에서도 항목 메시지 앞 몇 개·뒤 몇 개만 남기고 위치를 알려 준다", () => {
+    const view = contextWindow(rows, { messageId: "m20", seq: 20 }, { window: true });
+    expect(view.rows.map((r) => r.seq)).toEqual([16, 17, 18, 19, 20, 21, 22]);
+    expect(view.rows).toHaveLength(CONTEXT_BEFORE + 1 + CONTEXT_AFTER);
+    expect(view.rows[view.targetIndex]?.id).toBe("m20");
+  });
+
+  it("기록 끝·처음에 붙은 항목은 있는 만큼만 남긴다", () => {
+    expect(contextWindow(rows, { messageId: "m30" }, { window: true }).rows.map((r) => r.seq))
+      .toEqual([26, 27, 28, 29, 30]);
+    expect(contextWindow(rows, { messageId: "m1" }, { window: true }).rows).toHaveLength(1 + CONTEXT_AFTER);
+  });
+
+  it("페이지에 항목이 없으면 자르지 않고 위치를 모른다고 말한다", () => {
+    const view = contextWindow(rows, { messageId: "gone", seq: 99 }, { window: true });
+    expect(view.targetIndex).toBe(-1);
+    expect(view.rows).toHaveLength(30);
+  });
+
+  it("window:false(DM·스레드)는 자르지 않고 seq로도 위치를 찾는다", () => {
+    const view = contextWindow(rows, { seq: 12 }, { window: false });
+    expect(view.rows).toHaveLength(30);
+    expect(view.targetIndex).toBe(11);
+  });
+});
+
+describe("resolveActorNames: 목록과 패널이 쓰는 글쓴이 해석 한 곳(#3694)", () => {
+  it("에이전트는 연결 이름이 아니라 @핸들로 부른다", () => {
+    const actor = resolveActorNames(
+      { kind: "agent", displayName: "grok", handle: "grokbot" },
+      "알 수 없음"
+    );
+    expect(actorToken(actor)).toBe("@grokbot");
+    expect(actor.isAgent).toBe(true);
+  });
+
+  it("사람은 이름이고, 명부에 없으면 받은 대체 문구다", () => {
+    expect(
+      actorToken(resolveActorNames({ kind: "human", displayName: "서연", handle: "seo" }, "x"))
+    ).toBe("서연");
+    expect(actorToken(resolveActorNames(null, "나간 멤버"))).toBe("나간 멤버");
   });
 });

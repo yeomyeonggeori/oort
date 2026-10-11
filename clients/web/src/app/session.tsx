@@ -1,3 +1,4 @@
+import { clearDurableForCurrentAccount } from "@/features/onboarding/durableSlot";
 import {
   createContext,
   useCallback,
@@ -194,6 +195,7 @@ export function useRestoredSession(): SessionLifecycle {
     // Fire and forget on purpose: the local wipe inside logout() is synchronous
     // and unconditional, so the user is out of the session before the network
     // call resolves, and a failed revoke cannot pin them inside the app.
+    clearDurableForCurrentAccount(); // 세션이 지워지기 전에: 계정 꼬리가 필요하다(#3696).
     void logout();
     // 초안도 함께 지운다 (U4-f). 로그아웃은 「이 기기에서 내 흔적을 지운다」이고,
     // 쓰다 만 글은 보낸 메시지보다 사적이다 — 세션 기록과 같은 저장소에 사는 이상
