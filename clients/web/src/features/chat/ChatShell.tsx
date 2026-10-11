@@ -105,6 +105,8 @@ import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { FirstMentionOnboarding } from "@/features/hostedAgents/FirstMentionOnboarding";
 import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
+import { openAiConnectReentry } from "@/features/welcome/aiConnectReentry";
+import { countActiveAgents } from "@/features/welcome/welcomeKickoff";
 import { useWelcomeKickoff } from "@/features/welcome/useWelcomeKickoff";
 import { WelcomeKickoffStage } from "@/features/welcome/WelcomeKickoffStage";
 import { PhoneLinkChannelCard } from "@/features/welcome/PhoneLinkChannelCard";
@@ -1411,6 +1413,16 @@ export function ChatShell() {
                 if (channelId && channel)
                   openAddMember({ id: channelId, name: channel.name ?? label });
               }}
+              // 에이전트가 한 명도 없는 워크스페이스의 관리자에게만(#3697). 로스터가
+              // 정착하기 전에는 모르므로 세우지 않는다.
+              canConnectAgent={
+                canAddChannelMemberNow(
+                  !directoryQuery.isPending,
+                  memberFor(directory, session.member.id)?.role,
+                  channel?.kind
+                ) && countActiveAgents(directory.members) === 0
+              }
+              onConnectAgent={() => openAiConnectReentry("agents")}
               onStartWriting={focusComposer}
               isPlayEntrance={timeline.isPlayEntrance}
               onEntranceConsumed={timeline.consumeEntrance}

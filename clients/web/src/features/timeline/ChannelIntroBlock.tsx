@@ -1,4 +1,4 @@
-import { Hash, Lock, SquarePen, UserPlus } from "lucide-react";
+import { Bot, Hash, Lock, SquarePen, UserPlus } from "lucide-react";
 import type { RosterMember } from "@momo/core/lib/api";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
@@ -48,6 +48,7 @@ export function ChannelIntroBlock({
   hideWriteAction = false,
   onWrite,
   onAddMember,
+  onConnectAgent,
 }: {
   intro: ChannelIntroView;
   /** Message count is 0: keep the empty-channel test ids the gates already use. */
@@ -57,9 +58,13 @@ export function ChannelIntroBlock({
   hideWriteAction?: boolean;
   onWrite?: () => void;
   onAddMember?: () => void;
+  onConnectAgent?: () => void;
 }) {
-  const run = (kind: "write" | "add-member") =>
-    kind === "write" ? onWrite?.() : onAddMember?.();
+  const run = (kind: "write" | "add-member" | "connect-agent") => {
+    if (kind === "write") onWrite?.();
+    else if (kind === "add-member") onAddMember?.();
+    else onConnectAgent?.();
+  };
   const actions = empty
     ? intro.actions.filter((action) => !(hideWriteAction && action.kind === "write"))
     : [];
@@ -89,7 +94,8 @@ export function ChannelIntroBlock({
       {actions.length > 0 ? (
         <div className="flex max-w-pane-md flex-wrap items-stretch gap-2">
           {actions.map((action) => {
-            const ActionIcon = action.kind === "write" ? SquarePen : UserPlus;
+            const ActionIcon =
+              action.kind === "write" ? SquarePen : action.kind === "connect-agent" ? Bot : UserPlus;
             const isWrite = action.kind === "write";
             return (
               <Button
@@ -99,7 +105,11 @@ export function ChannelIntroBlock({
                 variant={isWrite ? "default" : "outline"}
                 onClick={() => run(action.kind)}
                 data-testid={
-                  isWrite ? "timeline-empty-primary" : "timeline-empty-secondary"
+                  isWrite
+                    ? "timeline-empty-primary"
+                    : action.kind === "connect-agent"
+                      ? "timeline-empty-connect-agent"
+                      : "timeline-empty-secondary"
                 }
                 data-action-kind={action.kind}
                 // 폰 폭(<600)에서 빈 채널의 1급 CTA라 tap-target(44)을 단다.
