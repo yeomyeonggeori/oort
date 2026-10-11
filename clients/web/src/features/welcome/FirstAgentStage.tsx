@@ -725,7 +725,8 @@ export function FirstAgentStage({
         }
       }
       setPersonalPending(null);
-      if (status === 404 || status === 405) {
+      // 코드 없는 404/405만 「라우트 없음」이다(앱이 이름 붙인 404는 다른 이야기).
+      if ((status === 404 || status === 405) && code === null) {
         setPersonalUnavailable(true);
         setSelected(null);
         setJoinFailure(PERSONAL_UNAVAILABLE_LINE);
@@ -738,6 +739,8 @@ export function FirstAgentStage({
   const handlePick = (id: AiConnectRowId) => {
     if (offline || listError) return;
     setSelected(id);
+    // 다른 길(팀 에이전트)로 갈라지면 방금 켠 개인 에이전트의 표지를 남기지 않는다.
+    if (!isSubscriptionRow(id)) setPersonalDone(null);
     if (isSubscriptionRow(id)) {
       if (!rowReady(id) || personalPending !== null) return;
       void startPersonalAgent(id);
@@ -783,6 +786,7 @@ export function FirstAgentStage({
   };
 
   const handleBackToList = () => {
+    setPersonalDone(null);
     setJoin(null);
     setConnectionId(null);
     setJoinFailure(null);

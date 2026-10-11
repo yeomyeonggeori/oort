@@ -841,6 +841,19 @@ describe("내 도구 → 개인 에이전트 켜기 (ADR-0198 D7, #3713)", () =>
     expect(personalPort.enable).toHaveBeenCalledTimes(1);
   });
 
+  it("앱이 이름 붙인 404는 라우트 없음이 아니다: 줄을 닫지 않고 다시 시도할 수 있다", async () => {
+    subscriptionOn();
+    personalPort.enable.mockRejectedValue(new PersonalAgentError(404, "personal_agent_not_found"));
+    const host = mountStage();
+    await pickClaude(host);
+    await waitFor(
+      () => q(host, "first-agent-heading")?.textContent?.includes("찾지 못했어요") === true,
+      "named 404"
+    );
+    expect(q(host, "ai-connect-pill-claude")?.getAttribute("data-pill")).not.toBe("server-closed");
+    expect(host.querySelector<HTMLInputElement>("#ai-connect-claude")?.disabled).toBe(false);
+  });
+
   it("관리자가 정지한 개인 에이전트는 서버 문장이 아니라 안내로 말한다", async () => {
     subscriptionOn();
     personalPort.enable.mockRejectedValue(new PersonalAgentError(409, "personal_agent_suspended"));
