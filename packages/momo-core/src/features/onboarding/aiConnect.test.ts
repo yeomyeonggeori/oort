@@ -3,7 +3,6 @@ import { toHostedConnection } from "../hostedAgents/model";
 import * as harnessLogin from "./harnessLogin";
 import {
   AI_CONNECT_BOUNDARY_NOTE,
-  AI_CONNECT_ROW_COPY,
   HARNESS_LOGIN_COMMAND,
   HARNESS_PILL_LABEL,
   LOGIN_POLL_INTERVAL_MS,
