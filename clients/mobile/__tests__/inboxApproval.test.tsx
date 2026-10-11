@@ -404,7 +404,7 @@ describe('결정 대기 목록의 네 가지 상태', () => {
     await openInbox();
     await waitForSettled(() => expect(screen.getByTestId('inbox-empty')).toBeTruthy());
     expect(screen.getByTestId('inbox-empty')).toHaveTextContent(
-      /지금 결정할 일이 없습니다/,
+      /지금 결정할 일이 없어요/,
     );
   });
 
@@ -631,7 +631,7 @@ describe('RED PROOF ④: 내부 식별자가 사람 문장에 새지 않는다',
     // `payload.tool_call.name`에 있다.
     installFetch();
     const row = await openPendingRow();
-    expect(row).toHaveTextContent(/작업 세션 종료 허가를 요청했습니다/);
+    expect(row).toHaveTextContent(/작업 세션 종료 허가를 요청했어요/);
     expect(row).not.toHaveTextContent(/tool_call/);
     // 화면 어디에도 없어야 한다 — 행 밖으로 새는 경로(접근성 라벨 포함)까지.
     expect(screen.queryByText(/tool_call/)).toBeNull();
@@ -670,7 +670,7 @@ describe('RED PROOF ④: 내부 식별자가 사람 문장에 새지 않는다',
         }),
     });
     const row = await openPendingRow();
-    expect(row).toHaveTextContent(/에이전트 도구 실행 허가를 요청했습니다/);
+    expect(row).toHaveTextContent(/에이전트 도구 실행 허가를 요청했어요/);
     expect(row).not.toHaveTextContent(/tool_call/);
   });
 });
@@ -688,7 +688,7 @@ describe('두 서버의 표기를 모두 읽는다', () => {
         }),
     });
     const row = await openPendingRow();
-    expect(row).toHaveTextContent(/작업 세션 종료 허가를 요청했습니다/);
+    expect(row).toHaveTextContent(/작업 세션 종료 허가를 요청했어요/);
     expect(row).toHaveTextContent(/되돌릴 수 없음/);
     expect(within(row).getByLabelText('승인, 확인 필요')).toBeTruthy();
   });
@@ -1003,7 +1003,7 @@ describe('RED PROOF ②: pending 아닌 항목에는 결정 컨트롤이 없다'
     await waitForSettled(() =>
       expect(
         screen.getByTestId(`decision-elsewhere-approval:${PENDING}`),
-      ).toHaveTextContent(/결정 대기 탭에서 승인하거나 거부할 수 있습니다\./),
+      ).toHaveTextContent(/결정 대기 탭에서 승인하거나 거부할 수 있어요\./),
     );
     const row = screen.getByTestId(`feed-row-approval:${PENDING}`);
     expect(within(row).queryByLabelText(/^승인/)).toBeNull();

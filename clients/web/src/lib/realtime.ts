@@ -41,6 +41,11 @@ import {
 } from "@momo/core/lib/realtimeEvents";
 import { isTerminalProgressFrame } from "@momo/core/features/agents/agentRail";
 import { workHostNoticeChannelName } from "@momo/core/features/settings/thisMacHost";
+import {
+  asInboxEvent,
+  readStateRailChannelName,
+  type InboxEvent,
+} from "@momo/core/features/inbox/serverInbox";
 import { apiBase } from "./serverBase";
 
 // =============================================================================
@@ -525,7 +530,33 @@ export function createRealtime(
     );
   }
 
+  // ADR-0199 D7 (#3684): the member's inbox signals ride the personal read-state
+  // channel. Frames hold ids and times only; the caller re-reads the inbox.
+  function subscribeInbox(
+    memberId: string,
+    handlers: { onEvent: (event: InboxEvent) => void; onResync: () => void }
+  ): () => void {
+    return attach(
+      readStateRailChannelName(memberId),
+      { recoverable: true, positioned: true },
+      (sub) => {
+        const onSubscribed = () => handlers.onResync();
+        const onPublication = (ctx: { data?: unknown }) => {
+          const event = asInboxEvent(ctx.data);
+          if (event) handlers.onEvent(event);
+        };
+        sub.on("subscribed", onSubscribed);
+        sub.on("publication", onPublication);
+        return () => {
+          sub.off("subscribed", onSubscribed);
+          sub.off("publication", onPublication);
+        };
+      }
+    );
+  }
+
   return {
+    subscribeInbox,
     subscribeWorkHostNotices,
     subscribeChannel,
     subscribeAgent,

@@ -237,16 +237,16 @@ describe("decisionNote", () => {
   // 방향을 삼키는 것은 결정을 삼키는 것과 같은 크기의 거짓말이다.
   it("이미 결정된 요청은 원장에 적힌 방향을 말한다", () => {
     expect(decisionNote(supersededOutcome("approved")).text).toBe(
-      "이미 승인으로 기록되어 있었습니다."
+      "이미 승인으로 기록되어 있었어요."
     );
     expect(decisionNote(supersededOutcome("rejected")).text).toBe(
-      "이미 거부로 기록되어 있었습니다."
+      "이미 거부로 기록되어 있었어요."
     );
     expect(decisionNote(supersededOutcome("expired")).text).toBe(
-      "결정 전에 만료되어 만료로 기록되었습니다."
+      "결정 전에 만료되어 만료로 기록되었어요."
     );
     expect(decisionNote(supersededOutcome("cancelled")).text).toBe(
-      "이 요청은 취소되어 있었습니다."
+      "이 요청은 취소되어 있었어요."
     );
   });
 
@@ -273,7 +273,7 @@ describe("decisionNote", () => {
   it("note 없는 superseded도 오류 색을 받지 않는다", () => {
     const note = decisionNote({ kind: "superseded" });
     expect(note.tone).toBe("neutral");
-    expect(note.text).toBe("이 요청은 이미 결정되어 있었습니다.");
+    expect(note.text).toBe("이 요청은 이미 결정되어 있었어요.");
   });
 
   it("기록된 결정은 그 결정이 무엇이었는지 말한다", () => {
@@ -342,7 +342,7 @@ describe("decisionNote", () => {
       { kind: "committed" },
       { kind: "superseded" },
       supersededOutcome("expired"),
-      { kind: "error", errorCopy: "결정을 처리하지 못했습니다." },
+      { kind: "error", errorCopy: "결정을 처리하지 못했어요." },
     ];
     for (const outcome of outcomes) {
       const { text } = decisionNote(outcome);
@@ -445,8 +445,8 @@ describe("확정 문장", () => {
     // 앞 판의 거부 영수증은 "…이 실행은 이어지지 않습니다."였다. 참이긴 하지만
     // **앞을 내다보는 절**이고, 영수증이 말할 수 있는 것은 원장에 적힌 것뿐이라는
     // 이 한 벌의 규칙을 스스로 어기고 있었다. 그 사실은 확정 문장이 말한다.
-    expect(REJECTED_RECEIPT).toBe("거부를 기록했습니다.");
-    expect(APPROVED_RECEIPT).toBe("승인을 기록했습니다.");
+    expect(REJECTED_RECEIPT).toBe("거부를 기록했어요.");
+    expect(APPROVED_RECEIPT).toBe("승인을 기록했어요.");
     for (const copy of [APPROVED_RECEIPT, REJECTED_RECEIPT]) {
       expect(copy).not.toMatch(/이어지지|취소되었습니다|실행합니다/);
     }
