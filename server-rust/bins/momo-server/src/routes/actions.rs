@@ -2263,6 +2263,51 @@ mod tests {
         );
     }
 
+    /// **The runbook cannot drift from the registry (ADR-0186 증보 S6).**
+    ///
+    /// `docs/SELF_HOST_AGENT.md` §3.3.16b is what a hosted runtime's author reads to
+    /// learn what may be proposed and who approves it. Every served action must
+    /// have its row there, with the approver the registry publishes, and an action
+    /// that is only *declared* must not be presented as served.
+    #[test]
+    fn the_agent_runbook_names_every_served_action_and_its_approver() {
+        let doc = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../docs/SELF_HOST_AGENT.md"
+        ))
+        .expect("docs/SELF_HOST_AGENT.md is readable from the server crate");
+        let start = doc
+            .find("#### 3.3.16b")
+            .expect("the runbook has a 3.3.16b section");
+        let end = doc[start..]
+            .find("#### 3.3.16c")
+            .map(|offset| start + offset)
+            .expect("3.3.16b ends at 3.3.16c");
+        let section = &doc[start..end];
+        for action in actions::ACTIONS {
+            let row = section
+                .lines()
+                .find(|line| line.starts_with(&format!("| `{}`", action.id)))
+                .unwrap_or_else(|| panic!("the runbook has no table row for {}", action.id));
+            assert!(
+                row.contains(&format!("`{}`", action.required_role.as_wire())),
+                "the runbook row for {} must name its approver `{}`: {row}",
+                action.id,
+                action.required_role.as_wire()
+            );
+        }
+        for declared in actions::DECLARED_NOT_EXECUTABLE {
+            assert!(
+                !section.contains(&format!("| `{}`", declared.id)),
+                "{} is declared, not served, and must not have a runbook row",
+                declared.id
+            );
+        }
+        // The two rules a runtime must not have to guess.
+        assert!(section.contains("never returned to you"));
+        assert!(section.contains("end the turn") || section.contains("End the turn"));
+    }
+
     /// 부록 E, row by row. The `unavailableReason` key is what a client reads
     /// when `executable` is false, and it is never blank.
     #[test]
