@@ -7319,7 +7319,14 @@ async fn an_approved_channel_create_is_one_step_for_channel_membership_and_grant
     assert_eq!(row("채널"), format!("#{name}"));
     assert_eq!(row("공개 범위"), "비공개", "the default kind is private");
     assert!(row("이 에이전트도 참여").starts_with("예"));
+    // Display names are not unique, handles are: the card names both, so the
+    // approver reads exactly who is being seated.
     assert!(row("함께 넣을 멤버").contains("Extra guest"));
+    assert!(
+        row("함께 넣을 멤버").contains(&format!("(@{extra_handle})")),
+        "{}",
+        row("함께 넣을 멤버")
+    );
     assert_eq!(card["action"]["required_role"], json!("admin"));
     assert!(channel_row_3706(&su, fixture.workspace, &name)
         .await
@@ -7460,6 +7467,16 @@ async fn an_approved_channel_create_is_one_step_for_channel_membership_and_grant
     .await
     .unwrap();
     assert_eq!(detail["name"], json!(name));
+    assert_eq!(
+        detail["member_count"],
+        json!(1),
+        "only the one actually seated"
+    );
+    assert_eq!(
+        detail["member_ids"],
+        json!([extra.to_string()]),
+        "the audit row names who got in; the approver and the agent are not 'added'"
+    );
     assert_eq!(detail["add_proposer"], json!(true));
     assert_eq!(detail["via_agent"], json!(fixture.hosted_agent.to_string()));
     assert_eq!(detail["approval_id"], json!(approval_id.to_string()));
@@ -7752,6 +7769,26 @@ async fn a_stale_or_unsound_channel_proposal_changes_nothing() {
             .unwrap(),
         approvals_before
     );
+
+    // `addProposer: false` while listing the proposer itself would make the card
+    // contradict itself: refused like any other unresolvable proposal.
+    let agent_handle = format!("agent-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    sqlx::query("UPDATE member SET handle=$2 WHERE id=$1")
+        .bind(fixture.hosted_agent)
+        .bind(&agent_handle)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": "self-ref", "addProposer": false, "memberHandles": [agent_handle]}),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
 
     // A name that already exists (even a private channel the agent cannot see)
     // does NOT fail the proposal — that would be an existence oracle — but the

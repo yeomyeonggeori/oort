@@ -206,6 +206,18 @@ pub struct ResolvedMember {
     pub id: Uuid,
     pub handle: String,
     pub display_name: String,
+    /// `member.kind`: `human` or `agent`. An agent seated in a channel reads it,
+    /// so the card must say which kind it is putting there.
+    pub kind: String,
+}
+
+impl ResolvedMember {
+    /// What the card shows for this member: the display name (not unique), the
+    /// handle (unique) and, for an agent, the word 에이전트 — the approver reads
+    /// exactly who is being seated.
+    pub fn card_label(&self) -> String {
+        actions::member_card_label(&self.display_name, &self.handle, self.kind == "agent")
+    }
 }
 
 /// Normalise `args` for `action`, refusing anything the registry's published
@@ -414,8 +426,7 @@ fn channel_create_args(args: &Value) -> Result<ValidatedActionArgs, ApiError> {
     })
 }
 
-/// Look `handles` up among the workspace's active members, locking the rows
-/// `FOR SHARE` so none can be deactivated between resolution and the write.
+/// Look `handles` up among the workspace's active members.
 /// Every handle must resolve: one that does not is the whole call's
 /// `InvalidArguments`, with no hint which one.
 async fn resolve_member_handles_in_tx(
@@ -426,13 +437,17 @@ async fn resolve_member_handles_in_tx(
     if handles.is_empty() {
         return Ok(Some(Vec::new()));
     }
-    let rows: Vec<(Uuid, String, String)> = momo_db::sqlx::query_as(
-        "SELECT m.id, m.handle, m.display_name FROM member m \
+    // No row lock: `add_channel_member_in_tx` re-checks `active` and
+    // `deleted_at` in its own statement, and a `member` lock taken here would
+    // sit before the hosted connection lock the executor takes next, against the
+    // canon's order (connection first).
+    let rows: Vec<(Uuid, String, String, String)> = momo_db::sqlx::query_as(
+        "SELECT m.id, m.handle, m.display_name, m.kind::text FROM member m \
            JOIN workspace_membership wm \
              ON wm.workspace_id = m.workspace_id AND wm.member_id = m.id \
           WHERE m.workspace_id = $1 AND m.handle = ANY($2) \
             AND m.status = 'active' AND m.deleted_at IS NULL \
-          ORDER BY m.id FOR SHARE OF m",
+          ORDER BY m.id",
     )
     .bind(workspace_id)
     .bind(handles)
@@ -444,19 +459,22 @@ async fn resolve_member_handles_in_tx(
     // Re-order to the proposal's order so the card lists them as written.
     let mut members = Vec::with_capacity(rows.len());
     for handle in handles {
-        let Some((id, handle, display_name)) = rows.iter().find(|row| &row.1 == handle) else {
+        let Some((id, handle, display_name, kind)) = rows.iter().find(|row| &row.1 == handle)
+        else {
             return Ok(None);
         };
         members.push(ResolvedMember {
             id: *id,
             handle: handle.clone(),
             display_name: display_name.clone(),
+            kind: kind.clone(),
         });
     }
     Ok(Some(members))
 }
 
-/// The proposer must be an active agent member of this workspace *now*.
+/// The proposer must be an active, unpaused agent member of this workspace *now*
+/// (the hosted identity check requires `paused = false` too).
 async fn proposer_is_live_agent_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -467,7 +485,10 @@ async fn proposer_is_live_agent_in_tx(
            JOIN workspace_membership wm \
              ON wm.workspace_id = m.workspace_id AND wm.member_id = m.id \
           WHERE m.workspace_id = $1 AND m.id = $2 AND m.kind = 'agent' \
-            AND m.status = 'active' AND m.deleted_at IS NULL)",
+            AND m.status = 'active' AND m.deleted_at IS NULL \
+            AND NOT EXISTS (SELECT 1 FROM agent_profile ap \
+                             WHERE ap.workspace_id = m.workspace_id \
+                               AND ap.agent_member_id = m.id AND ap.paused))",
     )
     .bind(workspace_id)
     .bind(proposer_member_id)
@@ -545,11 +566,16 @@ pub async fn resolve_action_in_tx(
             else {
                 return Ok(Err(ApiError::bad_request("member handle did not resolve")));
             };
+            // `addProposer: false` with the proposer's own handle in the list
+            // would make the card contradict itself (「참여: 아니요」 beside the
+            // agent in the member list) and seat the agent anyway.
+            if !*add_proposer && found.iter().any(|member| member.id == proposer_member_id) {
+                return Ok(Err(ApiError::bad_request(
+                    "the proposer cannot be a listed member when addProposer is false",
+                )));
+            }
             *members = found;
-            let names: Vec<String> = members
-                .iter()
-                .map(|member| member.display_name.clone())
-                .collect();
+            let names: Vec<String> = members.iter().map(ResolvedMember::card_label).collect();
             validated.rows =
                 actions::channel_create_rows(name, kind, topic.as_deref(), *add_proposer, &names);
             GateSubject::Workspace

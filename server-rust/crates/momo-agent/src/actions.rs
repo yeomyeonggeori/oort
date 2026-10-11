@@ -460,6 +460,16 @@ pub const AUDIT_CHANNEL_CREATED_SCHEMA: &str = "momo.channel.created.v1";
 pub const AUDIT_CHANNELS_GRANTED: &str = "hosted_connection.channels_granted";
 pub const AUDIT_CHANNELS_GRANTED_SCHEMA: &str = "momo.hosted_connection.channels_granted.v1";
 
+/// How a member is named on a card: `Display (@handle)`, plus 에이전트 for an
+/// agent. A display name is not unique in a workspace; the handle is.
+pub fn member_card_label(display_name: &str, handle: &str, is_agent: bool) -> String {
+    if is_agent {
+        format!("{display_name} (@{handle}, 에이전트)")
+    } else {
+        format!("{display_name} (@{handle})")
+    }
+}
+
 /// `ref.type` for a created channel.
 pub const REF_TYPE_CHANNEL: &str = "channel";
 
@@ -999,6 +1009,18 @@ mod tests {
         assert!(rows
             .iter()
             .any(|row| row["label"] == "함께 넣을 멤버" && row["value"] == "김 인턴"));
+    }
+
+    #[test]
+    fn a_member_is_named_by_display_name_handle_and_kind() {
+        assert_eq!(
+            member_card_label("김 인턴", "intern", false),
+            "김 인턴 (@intern)"
+        );
+        assert_eq!(
+            member_card_label("김 인턴", "intern2", true),
+            "김 인턴 (@intern2, 에이전트)"
+        );
     }
 
     #[test]

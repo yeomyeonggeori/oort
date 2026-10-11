@@ -1468,6 +1468,7 @@ async fn execute_channel_create(
         .ok_or_else(|| protocol_error("the proposing agent could not be added to its channel"))?;
     }
     let mut added = 0usize;
+    let mut added_ids: Vec<String> = Vec::new();
     for member in members {
         // The approver already owns the channel, and the agent is handled above:
         // re-adding either would be a no-op at best and, for the approver, a
@@ -1479,6 +1480,7 @@ async fn execute_channel_create(
             .await?
             .ok_or_else(|| protocol_error("a resolved member could not be added"))?;
         added += 1;
+        added_ids.push(member.id.to_string());
     }
 
     let mut audits = vec![AuditEntry::new(input.workspace_id, AUDIT_CHANNEL_CREATED)
@@ -1493,7 +1495,10 @@ async fn execute_channel_create(
                 "name": name,
                 "kind": kind,
                 "add_proposer": add_proposer,
-                "member_count": members.len(),
+                // Who was actually seated (not the requested list): this row is
+                // the only durable record of who got into a private room.
+                "member_count": added,
+                "member_ids": added_ids,
                 "via_agent": approval.requested_by.to_string(),
                 "approval_id": approval.id.to_string(),
             }),
