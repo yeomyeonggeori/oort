@@ -268,6 +268,8 @@ export function useTimeline(
   // Authoritative newest-seq cursor, updated at merge time rather than at
   // render time, so a resubscribe firing between renders still reads truth.
   const newestSeqRef = useRef<number | null>(null);
+  // 레일 없이 기록만 읽은 채널. 레일이 뒤늦게 와서 효과가 다시 돌 때 화면의 기록을 지우지 않는다.
+  const restOnlyChannelRef = useRef<string | null>(null);
   const firstSubscribeRef = useRef(true);
   const markerCounterRef = useRef(0);
   const heldIdsRef = useRef(new Set<string>());
@@ -556,8 +558,13 @@ export function useTimeline(
   }, [state.messages, updatePending]);
 
   useEffect(() => {
-    if (!channelId || !realtime) return;
+    if (!channelId) return;
     let cancelled = false;
+    // #3676: 기록(REST 머리)은 실시간 레일과 무관하게 읽을 수 있다. 레일이 아직 없거나 끝내 안 와도
+    // 타임라인이 스켈레톤에 머물지 않고 ready/error 로 끝나야 한다. 레일이 나중에 오면 이 효과가
+    // 다시 돌며 구독을 붙이는데, 그때 이미 화면에 있는 기록을 스켈레톤으로 되돌리지 않는다.
+    const keepLoaded = restOnlyChannelRef.current === channelId;
+    restOnlyChannelRef.current = realtime ? null : channelId;
     firstSubscribeRef.current = true;
     newestSeqRef.current = null;
     markerCounterRef.current = 0;
@@ -565,9 +572,11 @@ export function useTimeline(
     consumedArrivalIdsRef.current = new Set();
     playOnMountRef.current = new Set();
     updatePending(() => []);
-    setState(emptyTimeline());
-    setStatus("loading");
-    setReachedStart(false);
+    if (!keepLoaded) {
+      setState(emptyTimeline());
+      setStatus("loading");
+      setReachedStart(false);
+    }
     setRecoveryMarkers([]);
     setResume({ lastRecovered: null, lastBackfillCount: 0, resubscribeCount: 0 });
     reactionsRef.current = emptyReactions();
@@ -614,6 +623,11 @@ export function useTimeline(
     loadPins(channelId);
 
     // 2) Realtime rail with resume healing.
+    if (!realtime) {
+      return () => {
+        cancelled = true;
+      };
+    }
     const replayGate = createReplayGate();
     const unsub = realtime.subscribeChannel(workspaceId, channelId, {
       onSubscribed: (ctx) => {

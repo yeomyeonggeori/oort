@@ -132,7 +132,7 @@ export interface DecisionNote {
  * (`interpretReceipt`가 그것을 `superseded`로 읽는다), 그것은 실패가 아니라
  * "당신이 원하던 일은 이미 되어 있다"는 답이다.
  */
-const SUPERSEDED_FALLBACK = "이 요청은 이미 결정되어 있었습니다.";
+const SUPERSEDED_FALLBACK = "이 요청은 이미 결정되어 있었어요.";
 
 /**
  * 승인/거부 영수증의 정본 문장 — **모바일과 같은 한 벌** (2R M2 + N1).
@@ -153,8 +153,8 @@ const SUPERSEDED_FALLBACK = "이 요청은 이미 결정되어 있었습니다."
  * (`ApprovalActions.REJECT_CONFIRM` = "거부하면 대기 중인 실행이 취소됩니다.")이
  * 말한다 — 누르기 전의 규칙이라 한정어로 조건을 그릴 수 있는 자리다.
  */
-export const APPROVED_RECEIPT = "승인을 기록했습니다.";
-export const REJECTED_RECEIPT = "거부를 기록했습니다.";
+export const APPROVED_RECEIPT = "승인을 기록했어요.";
+export const REJECTED_RECEIPT = "거부를 기록했어요.";
 
 /**
  * 이미 결정돼 있던 요청에는 **원장에 적힌 방향**을 말한다 (2R M2).
@@ -169,12 +169,12 @@ export const REJECTED_RECEIPT = "거부를 기록했습니다.";
  * 먼저 쓴다.
  */
 function supersededCopy(outcome: DecisionOutcome): string {
-  if (outcome.status === "approved") return "이미 승인으로 기록되어 있었습니다.";
-  if (outcome.status === "rejected") return "이미 거부로 기록되어 있었습니다.";
+  if (outcome.status === "approved") return "이미 승인으로 기록되어 있었어요.";
+  if (outcome.status === "rejected") return "이미 거부로 기록되어 있었어요.";
   if (outcome.status === "expired") {
-    return "결정 전에 만료되어 만료로 기록되었습니다.";
+    return "결정 전에 만료되어 만료로 기록되었어요.";
   }
-  if (outcome.status === "cancelled") return "이 요청은 취소되어 있었습니다.";
+  if (outcome.status === "cancelled") return "이 요청은 취소되어 있었어요.";
   return outcome.note ?? SUPERSEDED_FALLBACK;
 }
 
@@ -187,7 +187,7 @@ export function decisionNote(outcome: DecisionOutcome): DecisionNote {
     // 같은 사실을 두 색으로 말한다.
     return {
       tone: outcome.errorCode === "surface_absent" ? "unavailable" : "error",
-      text: outcome.errorCopy ?? "결정을 처리하지 못했습니다.",
+      text: outcome.errorCopy ?? "결정을 처리하지 못했어요.",
     };
   }
   if (outcome.status === "approved") {
@@ -200,7 +200,7 @@ export function decisionNote(outcome: DecisionOutcome): DecisionNote {
   // 우리가 모르므로, 안다고 말하지 않는다.
   return {
     tone: "neutral",
-    text: "결정을 보냈습니다. 기록된 상태는 목록에서 확인하세요.",
+    text: "결정을 보냈어요. 기록된 상태는 목록에서 확인하세요.",
   };
 }
 

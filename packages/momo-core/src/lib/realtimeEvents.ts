@@ -1,3 +1,4 @@
+import type { InboxEvent } from "../features/inbox/serverInbox";
 import type { Message, MessageAttachment, PinnedMessageWire } from "./api";
 import {
   messageUnfurlFromWire,
@@ -1160,6 +1161,20 @@ export interface RealtimeHandle {
   subscribeWorkHostNotices?: (
     memberId: string,
     handlers: { onNotice: (data: unknown) => void }
+  ) => () => void;
+  /**
+   * The signed-in member's inbox signals (ADR-0199 D7, #3684): `inbox_item.created`,
+   * `inbox_item.read`, `inbox.read_all` on the personal channel
+   * (`user:read-state#<MEMBER>`). The frames carry ids and times only, so a signal
+   * means "read the inbox again". `onResync` fires on (re)subscribe: whatever was
+   * missed while the socket was down is recovered by the next read.
+   *
+   * Optional like `subscribeWorkHostNotices`: a runtime that has not wired it (the
+   * phone, for now) refreshes on focus and on pull-to-refresh instead.
+   */
+  subscribeInbox?: (
+    memberId: string,
+    handlers: { onEvent: (event: InboxEvent) => void; onResync: () => void }
   ) => () => void;
   /**
    * Re-dial now, on a person's request (goal B8 B2).
