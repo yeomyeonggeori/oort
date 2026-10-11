@@ -103,3 +103,25 @@ export function removeDurable(slot: string): void {
     // same as write
   }
 }
+
+/**
+ * 로그아웃은 「이 기기에서 내 흔적을 지운다」다(`signOut`의 초안 정리와 같은 약속).
+ * 지금 계정의 영속 슬롯을 모두 지운다. 만료로 세션이 끊긴 경우(`clearSession`)는
+ * 이어가야 하므로 부르지 않는다. 세션이 지워지기 **전에** 불러야 꼬리를 안다.
+ */
+export function clearDurableForCurrentAccount(): void {
+  try {
+    const scope = durableScope();
+    const store = local();
+    if (scope === null || store === null) return;
+    const suffix = `@${scope}`;
+    const keys: string[] = [];
+    for (let i = 0; i < store.length; i += 1) {
+      const key = store.key(i);
+      if (key !== null && key.endsWith(suffix)) keys.push(key);
+    }
+    for (const key of keys) store.removeItem(key);
+  } catch {
+    // same as write
+  }
+}

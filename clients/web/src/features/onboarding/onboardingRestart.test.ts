@@ -10,6 +10,7 @@ import {
 import { markFreshSignup, peekFreshSignup } from "@/features/welcome/freshSignup";
 import {
   DURABLE_SLOT_TTL_MS,
+  clearDurableForCurrentAccount,
   readDurable,
   removeDurable,
   writeDurable,
@@ -119,5 +120,18 @@ describe("온보딩 진행 상태는 앱 재시작을 넘어 이어진다 (#3696
     expect(slotKeys().length).toBe(2);
     clearOwnerOnboardingPending();
     expect(slotKeys()).toEqual([]);
+  });
+
+  it("로그아웃은 이 계정의 영속 슬롯을 지우되 다른 계정 것은 남긴다", () => {
+    login(OTHER);
+    markOwnerOnboardingPending();
+    clearSession();
+    login(ME);
+    markOwnerOnboardingPending();
+    writeS1Draft({ workspaceName: "a", displayName: "b", handle: "cc" });
+    clearDurableForCurrentAccount();
+    expect(readOwnerOnboardingStage()).toBeNull();
+    expect(readS1Draft()).toBeNull();
+    expect(slotKeys().length).toBe(1);
   });
 });
