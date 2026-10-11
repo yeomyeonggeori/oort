@@ -59,7 +59,7 @@ import {
   S1_REENTRY,
   S1_SKIP_LABEL,
   S1_ACCEPT_DEFAULT_LABEL,
-  S1_ACCEPT_DEFAULT_NOTE,
+  s1AcceptDefaultNote,
   S1_STALE_LINE,
   S1_STALE_MESSAGE_ID,
   S1_TITLE,
@@ -341,6 +341,9 @@ export function WorkspaceProfileStage({
     onSkip?.();
   };
 
+  const showAcceptDefault =
+    Boolean(onAcceptDefault) && !staleName && workspaceDraft.trim() === "";
+
   const guideState: GuideState =
     offline || formError || staleName ? "trouble" : "awaiting";
   const guideLine = offline
@@ -519,7 +522,8 @@ export function WorkspaceProfileStage({
           </Button>
         )}
 
-        {onAcceptDefault && !staleName ? (
+        {/* 이름 칸에 쓰던 글이 있으면 「이대로」가 그 글을 뜻하는 것처럼 읽힌다: 숨긴다(H1). */}
+        {showAcceptDefault ? (
           <div className="flex flex-col items-center gap-1" data-testid="onboarding-s1-accept">
             <Button
               type="button"
@@ -531,7 +535,7 @@ export function WorkspaceProfileStage({
               {S1_ACCEPT_DEFAULT_LABEL}
             </Button>
             <p className="break-keep text-center text-meta text-ink-muted">
-              {S1_ACCEPT_DEFAULT_NOTE}
+              {s1AcceptDefaultNote(workspaceName)}
             </p>
           </div>
         ) : null}
@@ -551,7 +555,7 @@ export function WorkspaceProfileStage({
               <span className="onboarding-reentry-sep" aria-hidden="true"> · </span>
             </>
           ) : null}
-          {S1_REENTRY}
+          {showAcceptDefault ? null : S1_REENTRY}
         </p>
       </form>
 

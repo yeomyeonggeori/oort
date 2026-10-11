@@ -419,6 +419,7 @@ describe("claim → S1 submit → S2", () => {
 
 describe("reload during S1 re-enters S1", () => {
   it("reload during S1 re-enters S1; after S1 a reload re-enters S2", async () => {
+    serverStillHasSeedName();
     const host = await mountApp();
     await submitClaimFrom(host);
     expect(hasOwnerOnboardingFlag("workspace-profile")).toBe(true);
@@ -478,11 +479,27 @@ describe("reload during S1 re-enters S1", () => {
 
 describe("재질문 S1의 「이대로 쓸게요」 (#3714)", () => {
   it("누르면 셸로 가고, 이 계정·서버에서 다시 묻지 않는다(재시작 뒤에도, 로그아웃해도)", async () => {
+    serverStillHasSeedName();
     const host = await mountApp();
     await submitClaimFrom(host);
     serverStillHasSeedName();
     unmountApp();
     const reloaded = await mountApp();
+    await waitForUi(() => {
+      expect(reloaded.querySelector('[data-testid="onboarding-s1-accept-default"]')).not.toBeNull();
+    });
+    // 무엇이 그대로 남는지를 이름으로 말한다(H1).
+    await waitForUi(() => {
+      expect(
+        reloaded.querySelector('[data-testid="onboarding-s1-accept"]')?.textContent
+      ).toContain("「momo Demo Workspace」 그대로예요");
+    });
+    // 이름 칸에 글을 쓰기 시작하면 「이대로」가 그 글을 뜻하는 것처럼 읽히므로 숨긴다.
+    fill("onboarding-s1-workspace-name", "새벽팀");
+    await waitForUi(() => {
+      expect(reloaded.querySelector('[data-testid="onboarding-s1-accept-default"]')).toBeNull();
+    });
+    fill("onboarding-s1-workspace-name", "");
     await waitForUi(() => {
       expect(reloaded.querySelector('[data-testid="onboarding-s1-accept-default"]')).not.toBeNull();
     });
