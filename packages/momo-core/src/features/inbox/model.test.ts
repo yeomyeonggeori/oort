@@ -290,7 +290,7 @@ describe("mention rows", () => {
     expect(item.channelLabel).toBe("general");
     expect(item.actor).toBe("곽성재");
     expect(item.actorIsAgent).toBe(false);
-    expect(item.predicate).toBe("회원님을 불렀어요");
+    expect(item.predicate).toBe("나를 불렀어요");
     expect(item.detail).toBe("이 건 김인턴한테 시켜볼까요?");
     expect(item.timeLabel).toBe("1시간 전");
   });

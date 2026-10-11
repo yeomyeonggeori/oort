@@ -264,6 +264,29 @@ export function actorToken(actor: ActorNames): string {
   return actor.isAgent && actor.handle ? `@${actor.handle}` : actor.name;
 }
 
+/**
+ * 글쓴이 한 명을 이름 표기로 푸는 **한 곳**(#3694). 목록(`useInbox.actorFor`)과 오른쪽
+ * 패널(`InboxDetail`)이 같은 함수를 거치므로 같은 사람이 `@grokbot`과 `grok`처럼 두
+ * 이름으로 갈라지지 않는다. 명부에 없으면 `missingName`(명부 상태를 아는 쪽이 준다).
+ */
+export function resolveActorNames(
+  member:
+    | { kind: string; displayName: string; handle?: string | null }
+    | null
+    | undefined,
+  missingName: string,
+  ownerName?: string
+): ActorNames {
+  if (!member) return { name: missingName, isAgent: false };
+  const isAgent = member.kind === "agent";
+  return {
+    name: member.displayName,
+    handle: isAgent ? (member.handle ?? undefined) : undefined,
+    isAgent,
+    ownerName,
+  };
+}
+
 export function mentionItem(
   message: Message,
   actor: ActorNames,
@@ -277,7 +300,7 @@ export function mentionItem(
     tone: "accent",
     actor: actorToken(actor),
     actorIsAgent: actor.isAgent,
-    predicate: "회원님을 불렀어요",
+    predicate: "나를 불렀어요",
     detail: body.length > 0 ? body : undefined,
     outcome: null,
     outcomeTone: "muted",
@@ -287,7 +310,7 @@ export function mentionItem(
     timeLabel: relativeLabel(message.createdAtMs, nowMs),
     sortAtMs: message.createdAtMs,
     pending: false,
-    reason: "메시지에서 회원님을 불러 서버가 멘션으로 기록했어요.",
+    reason: "메시지에서 나를 불러 서버가 멘션으로 기록했어요.",
     managedBy: actor.isAgent ? actor.ownerName : undefined,
   };
 }
@@ -356,7 +379,7 @@ export function approvalItem(
     sortAtMs: approval.decidedAtMs ?? approval.expiresAtMs ?? 0,
     pending,
     reason: pending
-      ? "에이전트가 실행 전에 사람의 허가를 요청했고, 회원님이 이 채널의 멤버입니다."
+      ? "에이전트가 실행 전에 사람의 허가를 요청했고, 내가 이 채널의 멤버입니다."
       : "승인 원장에 기록된 결정입니다.",
     managedBy: actor.ownerName,
   };
