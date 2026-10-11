@@ -20,6 +20,7 @@ const api = vi.hoisted(() => ({
   fetchMessages: vi.fn(),
   fetchThreadReplies: vi.fn(),
   sendMessage: vi.fn(),
+  members: new Map<string, unknown>(),
 }));
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => ({
@@ -29,7 +30,7 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => ({
   sendMessage: api.sendMessage,
 }));
 vi.mock("@/features/workspace/useWorkspace", () => ({
-  memberFor: () => undefined,
+  memberFor: (_d: unknown, id: string) => api.members.get(id) ?? null,
   useChannels: () => ({ groups: { channels: [], dms: [] } }),
 }));
 vi.mock("@/features/timeline/MessageRow", () => ({ Avatar: () => null }));
@@ -46,6 +47,7 @@ vi.mock("./InboxApprovalActions", () => ({
 }));
 
 const directory = { members: [], byId: new Map() } as never;
+const BOT = "00000000-0000-7000-8000-000000000301";
 
 function msg(seq: number, body: string, extra: Partial<Message> = {}): Message {
   return {
@@ -116,6 +118,7 @@ beforeEach(() => {
   api.fetchMessages.mockResolvedValue({ messages: [msg(6, "둘째"), msg(5, "첫째")] });
   api.fetchThreadReplies.mockResolvedValue({ messages: [msg(9, "답글 하나")] });
   api.sendMessage.mockResolvedValue(msg(10, "ok"));
+  api.members.clear();
   vi.stubGlobal("matchMedia", (q: string) => ({
     matches: false, media: q, addEventListener: () => undefined, removeEventListener: () => undefined,
     addListener: () => undefined, removeListener: () => undefined, dispatchEvent: () => false,
@@ -241,5 +244,54 @@ describe("InboxDetail", () => {
     });
     expect(h.querySelector('[data-testid="inbox-reply-error"]')).not.toBeNull();
     expect(input.value).toBe("안녕");
+  });
+
+  it("긴 채널 기록에서 인용 답은 그 메시지 앞뒤 몇 개만 열고, 그 줄로 스크롤하며 잠깐 물들인다(#3694)", async () => {
+    api.fetchMessages.mockResolvedValue({
+      messages: Array.from({ length: 20 }, (_, i) => msg(i + 1, `기록 ${i + 1}`)),
+    });
+    const offset = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetTop");
+    const client = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+    Object.defineProperty(HTMLElement.prototype, "offsetTop", {
+      configurable: true,
+      get() { return (this as HTMLElement).dataset.target === "true" ? 900 : 0; },
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get() { return (this as HTMLElement).dataset.testid === "inbox-detail-scroll" ? 400 : 40; },
+    });
+    try {
+      const h = await mount(
+        entry({ key: "inbox:r1", itemId: "r1", kind: "reply", messageId: "m15", seq: 15, typeLabel: "답글 · #agent-lab" })
+      );
+      const rows = Array.from(h.querySelectorAll('[data-testid="inbox-context-row"]'));
+      // 20개를 다 깔면 맨 처음(기록 1)부터 보인다 — 항목 앞 4·뒤 2만 남아야 한다.
+      expect(rows.map((r) => r.textContent?.match(/기록 \d+/)?.[0])).toEqual([
+        "기록 11", "기록 12", "기록 13", "기록 14", "기록 15", "기록 16", "기록 17",
+      ]);
+      expect(h.querySelector('[data-target="true"]')?.textContent).toContain("기록 15");
+      // 목표 줄이 패널 한가운데 오도록: offsetTop - (패널 높이 - 줄 높이) / 2.
+      expect(h.querySelector<HTMLElement>('[data-testid="inbox-detail-scroll"]')!.scrollTop).toBe(900 - (400 - 40) / 2);
+      expect(h.querySelector('[data-highlighted="true"]')?.textContent).toContain("기록 15");
+      await act(async () => { await new Promise((r) => setTimeout(r, 1_700)); });
+      expect(h.querySelector('[data-highlighted="true"]')).toBeNull();
+      expect(h.querySelector('[data-target="true"]')).not.toBeNull();
+    } finally {
+      if (offset) Object.defineProperty(HTMLElement.prototype, "offsetTop", offset);
+      else delete (HTMLElement.prototype as { offsetTop?: number }).offsetTop;
+      if (client) Object.defineProperty(HTMLElement.prototype, "clientHeight", client);
+      else delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
+    }
+  });
+
+  it("에이전트 글쓴이는 패널에서도 목록처럼 @핸들이다(연결 이름 grok이 아니다)(#3694)", async () => {
+    api.members.set(BOT, { id: BOT, kind: "agent", displayName: "grok", handle: "grokbot", ownerHumanId: ME });
+    api.fetchMessages.mockResolvedValue({ messages: [msg(5, "배포 로그 확인했어요", { authorMemberId: BOT })] });
+    const h = await mount(
+      entry({ key: "inbox:r1", itemId: "r1", kind: "reply", messageId: "m5", seq: 5, actor: "@grokbot" })
+    );
+    const row = h.querySelector('[data-testid="inbox-context-row"]')!;
+    expect(row.textContent).toContain("@grokbot");
+    expect(row.textContent).not.toContain("grok배포");
   });
 });
