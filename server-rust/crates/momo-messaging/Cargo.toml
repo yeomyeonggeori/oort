@@ -27,6 +27,8 @@ base64.workspace = true
 sha2.workspace = true
 aes-gcm = "0.10"
 getrandom = "0.2"
+# ADR-0186 증보 V4: NFKC for the agent display-name guard (already a workspace dep).
+unicode-normalization.workspace = true
 
 [dev-dependencies]
 # DB-backed conformance harness (tests/conformance_pg.rs, #[ignore]) — the D2 red

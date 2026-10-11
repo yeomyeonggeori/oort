@@ -41,7 +41,13 @@ use momo_agent::actions::{
 };
 use momo_auth::{active_workspace_role, Principal};
 use momo_db::PgConnection;
-use momo_messaging::{normalize_channel_kind, normalize_channel_name, normalize_channel_topic};
+use momo_messaging::name_guard::{
+    conflicts_with_roster, validated_agent_proposed_display_name, RosterName,
+};
+use momo_messaging::{
+    load_roster_names_in_tx, lock_display_name_namespace_in_tx, normalize_channel_kind,
+    normalize_channel_name, normalize_channel_topic,
+};
 use momo_settings::{
     is_valid_handle, normalized_invite_role, validated_expires_at_ms, validated_max_uses,
 };
@@ -168,6 +174,9 @@ pub struct ValidatedActionArgs {
     /// executor from re-deriving, and re-deciding, anything: the parse happened
     /// here, once, and its result is the only thing the executor can act on.
     pub args: ActionArgs,
+    /// A full replacement for the card's summary sentence, when the generic one
+    /// would mislead (a rename of *another* agent). `None` = the registry's.
+    pub summary: Option<String>,
 }
 
 /// One action's arguments, after the domain has agreed to them.
@@ -200,6 +209,13 @@ pub enum ActionArgs {
     /// `channel.member.add` (증보 V2). `channel` and `members` are empty after the
     /// pure stage and filled by [`resolve_action_in_tx`]; `new_members` is the
     /// subset not already live in the channel.
+    /// `agent.rename` (증보 V4/V4-M). `target` is filled by
+    /// [`resolve_action_in_tx`]; `None` target handle = the proposer itself.
+    AgentRename {
+        display_name: String,
+        target_handle: Option<String>,
+        target: Option<ResolvedAgentTarget>,
+    },
     ChannelMemberAdd {
         channel_ref: String,
         handles: Vec<String>,
@@ -207,6 +223,18 @@ pub enum ActionArgs {
         members: Vec<ResolvedMember>,
         already_in: Vec<Uuid>,
     },
+}
+
+/// The agent a rename points at, as the server found it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedAgentTarget {
+    pub id: Uuid,
+    pub handle: String,
+    pub current_display_name: String,
+    /// `agent.owner_human_id` of the target (`None` for an ownerless agent).
+    pub owner_member_id: Option<Uuid>,
+    /// The target is not the proposer (V4-M).
+    pub managed: bool,
 }
 
 /// A channel a proposal named, as the server found it. Every field is the
@@ -256,6 +284,7 @@ pub fn validated_action_args(
         actions::ACTION_INVITE_CREATE => invite_create_args(args, now_ms),
         actions::ACTION_CHANNEL_CREATE => channel_create_args(args),
         actions::ACTION_CHANNEL_MEMBER_ADD => channel_member_add_args(args),
+        actions::ACTION_AGENT_RENAME => agent_rename_args(args),
         // Fail closed. A registry entry with no normaliser must be an error and
         // not an unvalidated passthrough — `every_action_has_a_normaliser` is
         // what makes this arm unreachable rather than merely unlikely.
@@ -311,6 +340,7 @@ fn invite_create_args(args: &Value, now_ms: i64) -> Result<ValidatedActionArgs, 
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
     Ok(ValidatedActionArgs {
+        summary: None,
         normalized: json!({
             "role": role,
             "maxUses": max_uses,
@@ -426,6 +456,7 @@ fn channel_create_args(args: &Value) -> Result<ValidatedActionArgs, ApiError> {
     let handles = member_handles_arg(object, "memberHandles", 0)?;
 
     Ok(ValidatedActionArgs {
+        summary: None,
         normalized: json!({
             "name": name,
             "kind": kind,
@@ -465,6 +496,7 @@ fn channel_member_add_args(args: &Value) -> Result<ValidatedActionArgs, ApiError
         return Err(ApiError::bad_request("memberHandles is required"));
     }
     Ok(ValidatedActionArgs {
+        summary: None,
         normalized: json!({"channel": channel_ref, "memberHandles": handles}),
         rows: actions::channel_member_add_rows(&channel_ref, "private", 0, &handles, 0),
         args: ActionArgs::ChannelMemberAdd {
@@ -475,6 +507,113 @@ fn channel_member_add_args(args: &Value) -> Result<ValidatedActionArgs, ApiError
             already_in: Vec::new(),
         },
     })
+}
+
+fn agent_rename_args(args: &Value) -> Result<ValidatedActionArgs, ApiError> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| ApiError::bad_request("action args must be an object"))?;
+    closed_keys(object, &["displayName", "targetHandle"])?;
+    let raw = optional_string(object, "displayName")?
+        .ok_or_else(|| ApiError::bad_request("displayName is required"))?;
+    // The strict agent-proposal guard, not the join rule: this is the path that
+    // must be unable to carry a link, a mention or an invisible character.
+    // Which rule failed is not said.
+    let display_name = validated_agent_proposed_display_name(raw)
+        .map_err(|_| ApiError::bad_request("display name is not allowed"))?;
+    let target_handle = optional_string(object, "targetHandle")?
+        .map(normalized_member_handle)
+        .transpose()?;
+    Ok(ValidatedActionArgs {
+        summary: None,
+        normalized: json!({"displayName": display_name, "targetHandle": target_handle}),
+        rows: actions::agent_rename_rows("", target_handle.as_deref().unwrap_or(""), &display_name),
+        args: ActionArgs::AgentRename {
+            display_name,
+            target_handle,
+            target: None,
+        },
+    })
+}
+
+/// Resolve which agent a rename is about, under the V4-M trust model, or `None`.
+///
+/// * no `targetHandle` → the proposer itself;
+/// * a handle that is the proposer's own → the proposer itself;
+/// * any other handle → an **active agent whose `owner_human_id` equals the
+///   proposer's, is not NULL, and is a currently active human member**.
+///
+/// Every other case — a human's handle, a missing handle, an agent of another
+/// owner, an ownerless agent, a suspended agent — is the same `None`, so the
+/// proposer cannot probe for agents it does not manage. The relationship is read
+/// from `agent.owner_human_id`; it is never stored, and nothing an agent can do
+/// creates or removes it.
+async fn resolve_agent_rename_target_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    proposer_member_id: Uuid,
+    target_handle: Option<&str>,
+) -> Result<Option<ResolvedAgentTarget>, momo_db::DbError> {
+    let row: Option<(Uuid, String, String, Option<Uuid>)> = momo_db::sqlx::query_as(
+        "SELECT m.id, m.handle, m.display_name, a.owner_human_id FROM member m \
+           JOIN agent a ON a.workspace_id = m.workspace_id AND a.member_id = m.id \
+          WHERE m.workspace_id = $1 AND m.kind = 'agent' AND m.status = 'active' \
+            AND m.deleted_at IS NULL \
+            AND (CASE WHEN $3::text IS NULL THEN m.id = $2 \
+                      ELSE m.handle = $3 END)",
+    )
+    .bind(workspace_id)
+    .bind(proposer_member_id)
+    .bind(target_handle)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some((id, handle, current_display_name, owner)) = row else {
+        return Ok(None);
+    };
+    if id == proposer_member_id {
+        return Ok(Some(ResolvedAgentTarget {
+            id,
+            handle,
+            current_display_name,
+            owner_member_id: owner,
+            managed: false,
+        }));
+    }
+    // Managed: the same, non-NULL, currently active human owner on both sides.
+    let proposer_owner: Option<Option<Uuid>> = momo_db::sqlx::query_scalar(
+        "SELECT owner_human_id FROM agent WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(proposer_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let (Some(Some(proposer_owner)), Some(target_owner)) = (proposer_owner, owner) else {
+        return Ok(None);
+    };
+    if proposer_owner != target_owner {
+        return Ok(None);
+    }
+    let owner_active: bool = momo_db::sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM member o \
+           JOIN workspace_membership wm \
+             ON wm.workspace_id = o.workspace_id AND wm.member_id = o.id \
+          WHERE o.workspace_id = $1 AND o.id = $2 AND o.kind = 'human' \
+            AND o.status = 'active' AND o.deleted_at IS NULL)",
+    )
+    .bind(workspace_id)
+    .bind(target_owner)
+    .fetch_one(&mut *conn)
+    .await?;
+    if !owner_active {
+        return Ok(None);
+    }
+    Ok(Some(ResolvedAgentTarget {
+        id,
+        handle,
+        current_display_name,
+        owner_member_id: Some(target_owner),
+        managed: true,
+    }))
 }
 
 /// Find the channel a name points at **from the proposer's point of view**
@@ -678,6 +817,53 @@ pub async fn resolve_action_in_tx(
                 actions::channel_create_rows(name, kind, topic.as_deref(), *add_proposer, &names);
             GateSubject::Workspace
         }
+        ActionArgs::AgentRename {
+            display_name,
+            target_handle,
+            target,
+        } => {
+            if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
+                return Ok(Err(ApiError::bad_request(
+                    "proposer is not an active agent",
+                )));
+            }
+            let Some(found) = resolve_agent_rename_target_in_tx(
+                conn,
+                workspace_id,
+                proposer_member_id,
+                target_handle.as_deref(),
+            )
+            .await?
+            else {
+                return Ok(Err(ApiError::bad_request("rename target did not resolve")));
+            };
+            // The collision check and the write must see the same roster:
+            // serialise renames of this workspace for the rest of the transaction.
+            lock_display_name_namespace_in_tx(conn, workspace_id).await?;
+            let roster = load_roster_names_in_tx(conn, workspace_id, found.id).await?;
+            let names: Vec<RosterName<'_>> = roster
+                .iter()
+                .map(|(member_id, display_name, handle)| RosterName {
+                    member_id: *member_id,
+                    display_name,
+                    handle,
+                })
+                .collect();
+            if conflicts_with_roster(display_name, found.id, &names) {
+                return Ok(Err(ApiError::bad_request("display name is not allowed")));
+            }
+            validated.rows = actions::agent_rename_rows(
+                &found.current_display_name,
+                &found.handle,
+                display_name,
+            );
+            if found.managed {
+                validated.summary = Some(actions::AGENT_RENAME_MANAGED_SUMMARY.to_string());
+            }
+            let subject = GateSubject::Agent(found.id);
+            *target = Some(found);
+            subject
+        }
         ActionArgs::ChannelMemberAdd {
             channel_ref,
             handles,
@@ -736,6 +922,9 @@ pub async fn resolve_action_in_tx(
         }
     };
     let pins = match &validated.args {
+        ActionArgs::AgentRename { target, .. } => json!({
+            "target": target.as_ref().map(|target| target.id.to_string()),
+        }),
         ActionArgs::InviteCreate { .. } => Value::Null,
         ActionArgs::ChannelCreate { members, .. } => {
             json!({"members": members.iter().map(|m| m.id.to_string()).collect::<Vec<_>>()})
@@ -1471,6 +1660,48 @@ mod tests {
             json!({"channel": "plans", "memberHandles": ["bob"], "channelId": Uuid::new_v4()}),
         ] {
             let error = validated_action_args(member_add(), &refused, NOW_MS)
+                .expect_err(&format!("{refused} must be refused"));
+            assert_eq!(error.status, StatusCode::BAD_REQUEST, "{refused}");
+        }
+    }
+
+    fn rename() -> &'static WorkspaceAction {
+        actions::action_by_id(actions::ACTION_AGENT_RENAME).expect("registered")
+    }
+
+    /// The agent-proposal path uses the strict guard, not the join rule: every
+    /// shape ADR-0186 V4 names is a plain `InvalidArguments`.
+    #[test]
+    fn a_rename_proposal_goes_through_the_strict_name_guard() {
+        let ok = validated_action_args(
+            rename(),
+            &json!({"displayName": " 새  이름 ", "targetHandle": "@Intern"}),
+            NOW_MS,
+        )
+        .expect("legal");
+        assert_eq!(
+            ok.normalized,
+            json!({"displayName": "새 이름", "targetHandle": "intern"})
+        );
+        let own = validated_action_args(rename(), &json!({"displayName": "Solo"}), NOW_MS)
+            .expect("self rename");
+        assert_eq!(own.normalized["targetHandle"], Value::Null);
+        for refused in [
+            json!({}),
+            json!({"displayName": ""}),
+            json!({"displayName": "[보안 재인증](https://evil.example)"}),
+            json!({"displayName": "@Alice"}),
+            json!({"displayName": "<@Alice>"}),
+            json!({"displayName": "Al\u{200B}ice"}),
+            json!({"displayName": "admin"}),
+            json!({"displayName": "x".repeat(33)}),
+            json!({"displayName": 5}),
+            json!({"displayName": "ok", "targetHandle": "Not A Handle"}),
+            json!({"displayName": "ok", "targetMemberId": Uuid::new_v4()}),
+            json!({"displayName": "ok", "handle": "newhandle"}),
+            json!([]),
+        ] {
+            let error = validated_action_args(rename(), &refused, NOW_MS)
                 .expect_err(&format!("{refused} must be refused"));
             assert_eq!(error.status, StatusCode::BAD_REQUEST, "{refused}");
         }

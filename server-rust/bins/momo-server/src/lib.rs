@@ -1435,6 +1435,12 @@ pub fn build_app(state: AppState) -> Router {
         // fixed at birth and the only way to stop one was to remove it from
         // every channel. `allowed-models` is the picker's vocabulary and the
         // only agent read a plain member may make.
+        // ADR-0186 증보 V4 — rename an agent. Human only (owner or admin); absent
+        // from the agent-route allow-list, so an agent bearer cannot reach it.
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}",
+            patch(routes::agents::rename),
+        )
         .route(
             "/v1/workspaces/{ws}/agents/{agent}/profile",
             get(routes::agents::get_profile).put(routes::agents::put_profile),

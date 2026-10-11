@@ -12,9 +12,13 @@
 //! `channel_id`, nothing past the roster boundary. This module reuses that
 //! envelope and that channel set rather than minting a workspace-level rail.
 //!
-//! Agents are out of scope here. Their display name lives on the agent profile
-//! path; the route's `require_human` plus `kind = 'human'` on the UPDATE keep
-//! this surface from becoming a second write for them.
+//! [`rename_own_display_name_in_tx`] is human-only: the route's `require_human`
+//! plus `kind = 'human'` on the UPDATE keep `PATCH …/members/me` from becoming a
+//! second write for agents. An **agent's** display name is renamed by its owner or
+//! an admin (`PATCH …/agents/{agent}`) or, after a person approves it, by the
+//! agent itself or an agent of the same owner (`agent.rename`, ADR-0186 증보 V4):
+//! both go through [`rename_agent_display_name_in_tx`], this module's one agent
+//! write, so the roster broadcast cannot differ between them.
 
 use chrono::Utc;
 use momo_db::DbError;
@@ -179,6 +183,109 @@ pub async fn rename_own_display_name_in_tx(
     )
     .await?;
 
+    Ok(Some(DisplayNameRename {
+        member,
+        previous_display_name,
+        broadcast_outbox_ids,
+    }))
+}
+
+/// Serialise display-name changes within a workspace for the length of the
+/// transaction, so two renames that each pass the collision check cannot both
+/// commit a colliding pair. (`member` is unique only on `handle`; the name
+/// collision rule of ADR-0186 증보 V4 is enforced here, not by an index.)
+pub async fn lock_display_name_namespace_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+) -> Result<(), DbError> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('display-name:' || $1::text, 0))")
+        .bind(workspace_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
+/// Every non-deleted member of the workspace except `except`, as
+/// `(member id, display name, handle)` — the roster
+/// [`crate::name_guard::conflicts_with_roster`] compares against. Suspended
+/// members count: their name comes back with them.
+pub async fn load_roster_names_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    except: Uuid,
+) -> Result<Vec<(Uuid, String, String)>, DbError> {
+    Ok(sqlx::query_as(
+        "SELECT id, display_name, handle FROM member \
+          WHERE workspace_id = $1 AND deleted_at IS NULL AND id <> $2",
+    )
+    .bind(workspace_id)
+    .bind(except)
+    .fetch_all(&mut *conn)
+    .await?)
+}
+
+/// Set an **agent's** display name and broadcast it, in the caller's transaction.
+///
+/// The one agent write shared by the human route and the approved `agent.rename`
+/// action. It judges nothing about *who* may rename (the callers do) — only that
+/// `target` is a live agent of this workspace. `handle`, role, avatar and every
+/// profile field stay put. `Ok(None)` = no such live agent, returned before any
+/// broadcast.
+pub async fn rename_agent_display_name_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    target_agent: Uuid,
+    display_name: &str,
+) -> Result<Option<DisplayNameRename>, DbError> {
+    let previous = sqlx::query(
+        "SELECT display_name FROM member \
+          WHERE id = $1 AND workspace_id = $2 AND kind = 'agent' \
+            AND status = 'active' AND deleted_at IS NULL \
+          FOR UPDATE",
+    )
+    .bind(target_agent)
+    .bind(workspace_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(previous) = previous else {
+        return Ok(None);
+    };
+    let previous_display_name: String = previous.try_get("display_name")?;
+
+    let row = sqlx::query(
+        "UPDATE member SET display_name = $1, updated_at = now() \
+          WHERE id = $2 AND workspace_id = $3 AND kind = 'agent' \
+            AND status = 'active' AND deleted_at IS NULL \
+        RETURNING id, workspace_id, kind::text AS kind, status::text AS status, \
+                  display_name, handle",
+    )
+    .bind(display_name)
+    .bind(target_agent)
+    .bind(workspace_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let kind_label: String = row.try_get("kind")?;
+    let kind = MemberKind::from_db_label(&kind_label)
+        .ok_or_else(|| sqlx::Error::Decode(format!("unknown member_kind '{kind_label}'").into()))?;
+    let member = Member {
+        id: row.try_get("id")?,
+        workspace_id: row.try_get("workspace_id")?,
+        kind,
+        status: row.try_get("status")?,
+        display_name: row.try_get("display_name")?,
+        handle: row.try_get("handle")?,
+    };
+    let broadcast_outbox_ids = enqueue_member_renamed(
+        conn,
+        workspace_id,
+        target_agent,
+        &member.display_name,
+        &member.handle,
+    )
+    .await?;
     Ok(Some(DisplayNameRename {
         member,
         previous_display_name,

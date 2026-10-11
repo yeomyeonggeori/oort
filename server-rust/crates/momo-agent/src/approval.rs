@@ -242,6 +242,39 @@ pub async fn lock_agent_and_count_pending_workspace_actions_in_tx(
     Ok(pending)
 }
 
+/// Whether a `workspace_action` of `action_id` is already `pending` against
+/// `target_member_id` (the id pinned in `payload.action.pins.target`) — after
+/// taking a row lock on the target's `member` row (ADR-0186 증보 V4-M-9). A second
+/// rename of the same agent while one waits is a card spam / name-flip race, so
+/// the second proposal is refused; the lock is what makes two simultaneous
+/// proposals unable to both see "none".
+pub async fn lock_target_and_find_pending_action_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    action_id: &str,
+    target_member_id: Uuid,
+) -> Result<bool, DbError> {
+    sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM member WHERE workspace_id = $1 AND id = $2 FOR NO KEY UPDATE",
+    )
+    .bind(workspace_id)
+    .bind(target_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM approval \
+          WHERE workspace_id = $1 AND action_type = 'workspace_action' \
+            AND status = 'pending' AND (expires_at IS NULL OR expires_at > now()) \
+            AND payload #>> '{action,id}' = $2 \
+            AND payload #>> '{action,pins,target}' = $3)",
+    )
+    .bind(workspace_id)
+    .bind(action_id)
+    .bind(target_member_id.to_string())
+    .fetch_one(&mut *conn)
+    .await?)
+}
+
 /// Join the approval to the message that renders it (Swift :1673-1680).
 pub async fn attach_request_message_in_tx(
     conn: &mut PgConnection,

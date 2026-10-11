@@ -62,7 +62,11 @@ use momo_agent::{
 use momo_auth::{is_hosted_agent_activated_in_tx, Principal, HOSTED_CONNECTION_MANAGED_CODE};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
-use momo_messaging::active_workspace_role;
+use momo_messaging::name_guard::{conflicts_with_roster, RosterName};
+use momo_messaging::{
+    active_workspace_role, load_roster_names_in_tx, lock_display_name_namespace_in_tx,
+    rename_agent_display_name_in_tx,
+};
 use momo_settings::{
     is_handle_banned_in_tx, normalized_join_display_name, normalized_requested_handle,
     validated_base_url,
@@ -72,11 +76,13 @@ use uuid::Uuid;
 
 use crate::dto::{
     AgentMemberDto, AgentPauseInput, AgentProfileDto, AgentProfileInput, AgentProfileResponse,
-    AllowedAgentModelsResponse, CreateAgentRequest, CreateAgentResponse,
+    AllowedAgentModelsResponse, CreateAgentRequest, CreateAgentResponse, MemberDto,
+    RenameAgentRequest, SelfMemberResponse,
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
     agent_tenant_tx, audit_via_token_id, path_uuid, require_human, settle_db, workspace_scope,
+    DbRejectable,
 };
 use crate::AppState;
 
@@ -353,6 +359,106 @@ pub(crate) async fn require_profile_editor_in_tx(
         )));
     }
     Ok(Ok(()))
+}
+
+/// `PATCH /v1/workspaces/{ws}/agents/{agent}` — rename an agent (ADR-0186 증보 V4).
+///
+/// The agent's **owner or a workspace admin** (`require_profile_editor_in_tx`, the
+/// judgement the profile routes use); an agent bearer is refused by
+/// `require_human` and by the middleware, which does not list this route.
+///
+/// The person's choice is judged by the **join rule** (`normalized_join_display_name`)
+/// — 「김 인턴 (비서)」 is allowed — plus the one rule that protects everybody
+/// else: the name's skeleton may not equal another non-deleted member's display
+/// name or handle (a name is a mention target). The strict agent-proposal
+/// alphabet is deliberately *not* applied here: it exists because nobody typed
+/// that name with a keyboard they own.
+///
+/// Goes through `rename_agent_display_name_in_tx`, the same write the approved
+/// `agent.rename` action uses.
+pub async fn rename(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, agent)): Path<(String, String)>,
+    Json(request): Json<RenameAgentRequest>,
+) -> Result<Json<SelfMemberResponse>, ApiError> {
+    require_human(&principal, "human agent owner or workspace admin required")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let agent_member_id = path_uuid(&agent, "invalid agent id")?;
+    let display_name = normalized_join_display_name(&request.display_name)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    let actor_member_id = principal.member_id;
+    let via_token = audit_via_token_id(&principal);
+
+    let outcome: DbRejectable<SelfMemberResponse> =
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                if let Err(rejection) = require_profile_editor_in_tx(
+                    conn,
+                    workspace_id,
+                    agent_member_id,
+                    actor_member_id,
+                )
+                .await?
+                {
+                    return Ok(Err(rejection));
+                }
+                lock_display_name_namespace_in_tx(conn, workspace_id).await?;
+                let roster = load_roster_names_in_tx(conn, workspace_id, agent_member_id).await?;
+                let names: Vec<RosterName<'_>> = roster
+                    .iter()
+                    .map(|(member_id, display_name, handle)| RosterName {
+                        member_id: *member_id,
+                        display_name,
+                        handle,
+                    })
+                    .collect();
+                if conflicts_with_roster(&display_name, agent_member_id, &names) {
+                    return Ok(Err(ApiError::new(
+                        StatusCode::CONFLICT,
+                        "display name is already in use",
+                    )));
+                }
+                let Some(applied) = rename_agent_display_name_in_tx(
+                    conn,
+                    workspace_id,
+                    agent_member_id,
+                    &display_name,
+                )
+                .await?
+                else {
+                    return Ok(Err(ApiError::not_found("active agent not found")));
+                };
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, "member.renamed")
+                        .by(actor_member_id)
+                        .about(agent_member_id)
+                        .target("member", agent_member_id)
+                        .via_token(via_token)
+                        .with_schema(
+                            "momo.member.renamed.v1",
+                            json!({
+                                "old": applied.previous_display_name,
+                                "new": applied.member.display_name,
+                                "kind": "agent",
+                            }),
+                        ),
+                )
+                .await?;
+                Ok(Ok(SelfMemberResponse {
+                    member: MemberDto {
+                        id: applied.member.id.to_string(),
+                        workspace_id: applied.member.workspace_id.to_string(),
+                        kind: applied.member.kind.as_db_label().to_string(),
+                        display_name: applied.member.display_name,
+                        handle: applied.member.handle,
+                    },
+                }))
+            })
+        })
+        .await;
+    Ok(Json(settle_db("agents.rename", outcome)?))
 }
 
 /// `GET /v1/workspaces/{ws}/agents/{agent}/profile`.

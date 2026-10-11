@@ -8497,3 +8497,688 @@ async fn a_member_add_card_is_pinned_to_the_ids_it_was_drawn_from() {
     .await;
     assert_eq!(status, 400, "{refused}");
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 2026-10-11 S3 (#3708) — agent.rename + PATCH …/agents/{agent}
+// ---------------------------------------------------------------------------
+
+/// A human with a session token, a workspace role and a seat in the fixture's
+/// approved channel (so it can decide approvals raised there).
+async fn seed_human_3708(
+    pool: &PgPool,
+    fixture: &Fixture,
+    tag: &str,
+    role: &str,
+) -> (Uuid, String) {
+    let member = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member(id, workspace_id, kind, display_name, handle) \
+         VALUES($1,$2,'human',$3,$4)",
+    )
+    .bind(member)
+    .bind(fixture.workspace)
+    .bind(format!("Person {tag}"))
+    .bind(format!("{tag}-{}", &member.simple().to_string()[..8]))
+    .execute(pool)
+    .await
+    .expect("seed person");
+    sqlx::query(
+        "INSERT INTO human(member_id, workspace_id, email, email_verified) VALUES($1,$2,$3,true)",
+    )
+    .bind(member)
+    .bind(fixture.workspace)
+    .bind(format!("{member}@tools.test"))
+    .execute(pool)
+    .await
+    .expect("seed person identity");
+    sqlx::query(
+        "INSERT INTO workspace_membership(workspace_id, member_id, role) \
+         VALUES($1,$2,$3::membership_role)",
+    )
+    .bind(fixture.workspace)
+    .bind(member)
+    .bind(role)
+    .execute(pool)
+    .await
+    .expect("seed person role");
+    sqlx::query("INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)")
+        .bind(fixture.workspace)
+        .bind(fixture.channel)
+        .bind(member)
+        .execute(pool)
+        .await
+        .expect("seed person seat");
+    let jwt = momo_auth::sign_access(member, fixture.workspace, &[], TEST_JWT_SECRET)
+        .expect("sign person JWT")
+        .token;
+    sqlx::query(
+        "INSERT INTO token(workspace_id, kind, actor_member_id, token_hash, scopes, label) \
+         VALUES($1,'session',$2,digest($3::text,'sha256'),ARRAY[]::text[],'tools-conformance')",
+    )
+    .bind(fixture.workspace)
+    .bind(member)
+    .bind(&jwt)
+    .execute(pool)
+    .await
+    .expect("record person token");
+    (member, jwt)
+}
+
+async fn set_agent_owner_3708(pool: &PgPool, agent: Uuid, owner: Option<Uuid>) {
+    sqlx::query("UPDATE agent SET owner_human_id=$2 WHERE member_id=$1")
+        .bind(agent)
+        .bind(owner)
+        .execute(pool)
+        .await
+        .expect("set owner");
+}
+
+/// Give an agent a legal short handle and display name (the fixture's are the
+/// long generated ones) and return the handle.
+async fn tidy_agent_3708(pool: &PgPool, agent: Uuid, display: &str) -> String {
+    let handle = format!("bot-{}", &agent.simple().to_string()[..8]);
+    sqlx::query("UPDATE member SET handle=$2, display_name=$3 WHERE id=$1")
+        .bind(agent)
+        .bind(&handle)
+        .bind(display)
+        .execute(pool)
+        .await
+        .expect("tidy agent");
+    handle
+}
+
+async fn display_name_3708(pool: &PgPool, member: Uuid) -> String {
+    sqlx::query_scalar("SELECT display_name FROM member WHERE id=$1")
+        .bind(member)
+        .fetch_one(pool)
+        .await
+        .expect("display name")
+}
+
+async fn approval_status_3708(pool: &PgPool, approval: Uuid) -> String {
+    sqlx::query_scalar("SELECT status::text FROM approval WHERE id=$1")
+        .bind(approval)
+        .fetch_one(pool)
+        .await
+        .expect("approval status")
+}
+
+/// **agent.rename for oneself (증보 V4).** The approver is the agent's *owner*
+/// (not an admin) and the approval executes; a third party who is neither the
+/// owner nor an admin is `role_required`; the strict guard refuses every hostile
+/// spelling; handle and every other member's name stay put; the broadcast and
+/// audit rows are written; the name collision rule covers display names AND
+/// handles under disguise.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_agent_renames_itself_after_its_owner_approves() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (owner, owner_jwt) = seed_human_3708(&su, &fixture, "owner", "member").await;
+    let (_third, third_jwt) = seed_human_3708(&su, &fixture, "third", "member").await;
+    set_agent_owner_3708(&su, fixture.hosted_agent, Some(owner)).await;
+    let _agent_handle = tidy_agent_3708(&su, fixture.hosted_agent, "Hermes").await;
+    let before_other = display_name_3708(&su, fixture.managed_agent).await;
+    let handle_before: String = sqlx::query_scalar("SELECT handle FROM member WHERE id=$1")
+        .bind(fixture.hosted_agent)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+
+    // ---- the hostile spellings, all one refusal ----------------------------
+    let human_name = display_name_3708(&su, fixture.human).await;
+    let mut answers = Vec::new();
+    for hostile in [
+        "[보안 재인증](https://evil.example)".to_string(),
+        "@Person owner".to_string(),
+        "<@Person owner>".to_string(),
+        "Zero\u{200B}Width".to_string(),
+        "admin".to_string(),
+        "oort".to_string(),
+        "x".repeat(40),
+        // Someone else's name, handle, case, width and look-alike variants.
+        human_name.to_lowercase(),
+        human_name.to_uppercase(),
+        "Ｐｅｒｓｏｎ ｏｗｎｅｒ".to_string(),
+        "Pеrson owner".to_string(), // Cyrillic е
+        before_other.clone(),
+        before_other.to_uppercase(),
+    ] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "agent.rename",
+            json!({"displayName": hostile}),
+        )
+        .await;
+        answers.push((status, refused["error"].clone()));
+        assert_eq!(status, 400, "{hostile:?} must be refused: {refused}");
+    }
+    assert!(answers.iter().all(|a| a.1 == answers[0].1), "{answers:?}");
+    assert_eq!(display_name_3708(&su, fixture.hosted_agent).await, "Hermes");
+
+    // ---- a good proposal ---------------------------------------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.rename",
+        json!({"displayName": "Navigator 🧭"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap())
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(card["action"]["required_role"], json!("agent_editor"));
+    let rows = card["action"]["rows"].as_array().unwrap().clone();
+    let row = |label: &str| {
+        rows.iter().find(|r| r["label"] == label).unwrap()["value"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert!(row("대상 에이전트").contains("Hermes") && row("대상 에이전트").contains("에이전트"));
+    assert_eq!(row("이름 변경"), "Hermes → Navigator 🧭");
+    assert!(
+        !card["summary"].as_str().unwrap().contains("다른 에이전트"),
+        "a self-rename does not claim to rename another agent"
+    );
+
+    // ---- a third party who is neither the owner nor an admin ---------------
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &third_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert_eq!(display_name_3708(&su, fixture.hosted_agent).await, "Hermes");
+    assert_eq!(approval_status_3708(&su, approval).await, "pending");
+
+    // ---- the agent cannot approve its own rename ---------------------------
+    let agent_try = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/approvals/{approval}/decision",
+            fixture.workspace
+        ))
+        .bearer_auth(&fixture.hosted_bearer)
+        .json(&json!({"approvalId": approval, "approve": true,
+                      "clientDecisionId": Uuid::new_v4()}))
+        .send()
+        .await
+        .expect("agent decision responds");
+    assert!(matches!(agent_try.status().as_u16(), 401 | 403));
+    assert_eq!(display_name_3708(&su, fixture.hosted_agent).await, "Hermes");
+
+    // ---- the OWNER (not an admin) approves ---------------------------------
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &owner_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(approved["result"]["actionId"], json!("agent.rename"));
+    assert_eq!(
+        approved["result"]["ref"],
+        json!({"type": "agent", "id": fixture.hosted_agent.to_string()})
+    );
+    assert!(approved["result"].get("secretOnce").is_none());
+    assert_eq!(
+        display_name_3708(&su, fixture.hosted_agent).await,
+        "Navigator 🧭"
+    );
+    let handle_after: String = sqlx::query_scalar("SELECT handle FROM member WHERE id=$1")
+        .bind(fixture.hosted_agent)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(handle_after, handle_before, "the handle is never renamed");
+    assert_eq!(
+        display_name_3708(&su, fixture.managed_agent).await,
+        before_other
+    );
+
+    let detail: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='member.renamed'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(detail["old"], json!("Hermes"));
+    assert_eq!(detail["new"], json!("Navigator 🧭"));
+    assert_eq!(detail["kind"], json!("agent"));
+    assert_eq!(detail["managed"], json!(false));
+    assert_eq!(detail["via_agent"], json!(fixture.hosted_agent.to_string()));
+    assert_eq!(detail["approval_id"], json!(approval.to_string()));
+    assert_eq!(
+        audit_count_3706(&su, fixture.workspace, "action.approved").await,
+        1
+    );
+
+    let broadcasts: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 \
+           AND payload->'data'->>'type' = 'member.renamed' \
+           AND payload->'data'->'payload'->>'member_id' = upper($2)",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent.to_string())
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let channels: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM membership WHERE member_id=$1 AND left_at IS NULL",
+    )
+    .bind(fixture.hosted_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        broadcasts, channels,
+        "one roster broadcast per channel the agent is in"
+    );
+    assert!(broadcasts > 0);
+
+    // ---- the same name again is a no-op, not an error (own current name) ---
+    let (status, again) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.rename",
+        json!({"displayName": "navigator 🧭"}),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "an agent may propose its own current name: {again}"
+    );
+}
+
+/// **Managing another agent (증보 V4-M).** Only an active agent with the same,
+/// non-NULL, active human owner is a target; everything else is one refusal. The
+/// approver is judged against the TARGET: a person who owns only the proposer is
+/// `role_required`. A target whose owner changed after the card was drawn is
+/// stale. A second pending rename of the same target is a conflict, and
+/// concurrent renames are serialised by the workspace display-name lock.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_agent_can_rename_only_agents_with_the_same_owner() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+    let (owner, owner_jwt) = seed_human_3708(&su, &fixture, "owner", "member").await;
+    let (other, other_jwt) = seed_human_3708(&su, &fixture, "other", "member").await;
+    let _a = tidy_agent_3708(&su, fixture.hosted_agent, "Alpha").await;
+    let b_handle = tidy_agent_3708(&su, fixture.managed_agent, "Beta").await;
+    let c_handle = tidy_agent_3708(&su, fixture.connect_only_agent, "Gamma").await;
+    set_agent_owner_3708(&su, fixture.hosted_agent, Some(owner)).await;
+    set_agent_owner_3708(&su, fixture.managed_agent, Some(owner)).await;
+    set_agent_owner_3708(&su, fixture.connect_only_agent, Some(other)).await;
+    let human_handle: String = sqlx::query_scalar("SELECT handle FROM member WHERE id=$1")
+        .bind(fixture.human)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+
+    // ---- targets that are not managed all look the same --------------------
+    let mut answers = Vec::new();
+    for target in [
+        c_handle.clone(),     // another owner
+        human_handle.clone(), // a human
+        "no-such-handle".to_string(),
+        "Not A Handle".to_string(),
+    ] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "agent.rename",
+            json!({"displayName": "Renamed", "targetHandle": target}),
+        )
+        .await;
+        assert_eq!(status, 400, "{target}: {refused}");
+        answers.push(refused["error"].clone());
+    }
+    // An ownerless target is not managed either.
+    set_agent_owner_3708(&su, fixture.managed_agent, None).await;
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.rename",
+        json!({"displayName": "Renamed", "targetHandle": b_handle}),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+    answers.push(refused["error"].clone());
+    set_agent_owner_3708(&su, fixture.managed_agent, Some(owner)).await;
+    // The proposer cannot take its own name onto the target.
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.rename",
+        json!({"displayName": "alpha", "targetHandle": b_handle}),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+    answers.push(refused["error"].clone());
+    assert!(answers.iter().all(|a| *a == answers[0]), "{answers:?}");
+
+    // ---- a managed target ---------------------------------------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.rename",
+        json!({"displayName": "Beta Prime", "targetHandle": b_handle}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap())
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert!(
+        card["summary"].as_str().unwrap().contains("다른 에이전트"),
+        "the card says it renames ANOTHER agent: {card}"
+    );
+    let rows = card["action"]["rows"].as_array().unwrap();
+    assert!(rows
+        .iter()
+        .any(|r| r["label"] == "이름 변경" && r["value"] == "Beta → Beta Prime"));
+
+    // A second pending rename of the same target is a conflict.
+    let (status, dup) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.rename",
+        json!({"displayName": "Beta Again", "targetHandle": b_handle}),
+    )
+    .await;
+    assert_eq!(status, 409, "{dup}");
+
+    // The owner of the PROPOSER only is not an approver once the target moved:
+    // the target changes hands, `other` (neither owner nor admin) tries, then
+    // the real new owner is judged against the target and the card is stale.
+    set_agent_owner_3708(&su, fixture.managed_agent, Some(other)).await;
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &owner_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "owns the proposer, not the target: {refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert_eq!(display_name_3708(&su, fixture.managed_agent).await, "Beta");
+    // The target's new owner is eligible, but the relationship the card was
+    // drawn from no longer holds: stale, nothing spent.
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &other_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    // A non-admin is told only `role_required` while the card is unresolvable.
+    assert_eq!(status, 403, "{stale}");
+    assert_eq!(stale["status"], "role_required");
+    // An admin sees the truth: the proposal is stale.
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(stale["status"], "action_args_invalid");
+    assert_eq!(approval_status_3708(&su, approval).await, "pending");
+    assert_eq!(display_name_3708(&su, fixture.managed_agent).await, "Beta");
+
+    // ---- restore the relationship: the target's owner approves -------------
+    set_agent_owner_3708(&su, fixture.managed_agent, Some(owner)).await;
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &owner_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        display_name_3708(&su, fixture.managed_agent).await,
+        "Beta Prime"
+    );
+    assert_eq!(display_name_3708(&su, fixture.hosted_agent).await, "Alpha");
+    let detail: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='member.renamed'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(detail["managed"], json!(true));
+    assert_eq!(
+        detail["target_agent"],
+        json!(fixture.managed_agent.to_string())
+    );
+    assert_eq!(detail["owner_member_id"], json!(owner.to_string()));
+    assert_eq!(detail["via_agent"], json!(fixture.hosted_agent.to_string()));
+}
+
+/// The workspace display-name lock is real: while another transaction holds it,
+/// an approved rename waits instead of racing the collision check.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn renames_are_serialised_by_the_workspace_display_name_lock() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let _a = tidy_agent_3708(&su, fixture.hosted_agent, "Alpha").await;
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.rename",
+        json!({"displayName": "Zeta"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+
+    let mut holder = su.begin().await.expect("holder transaction");
+    momo_messaging::lock_display_name_namespace_in_tx(&mut holder, fixture.workspace)
+        .await
+        .expect("take the namespace lock");
+    let (base2, jwt, workspace) = (base.clone(), fixture.human_jwt.clone(), fixture.workspace);
+    let mut decision = tokio::spawn(async move {
+        let client = reqwest::Client::new();
+        decide_as(
+            &client,
+            &base2,
+            workspace,
+            &jwt,
+            approval,
+            true,
+            Uuid::new_v4(),
+        )
+        .await
+    });
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(900), &mut decision)
+            .await
+            .is_err(),
+        "the rename ran while another transaction held the display-name lock"
+    );
+    assert_eq!(display_name_3708(&su, fixture.hosted_agent).await, "Alpha");
+    holder.commit().await.expect("release the lock");
+    let (status, _h, body) = decision.await.expect("decision task");
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(display_name_3708(&su, fixture.hosted_agent).await, "Zeta");
+}
+
+/// **The human route (증보 V4).** Owner or admin only; the person's own choice
+/// follows the join rule (parentheses allowed) but may not collide with another
+/// member's name or handle; an agent bearer cannot use it; only agents can be
+/// renamed through it.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_human_rename_route_is_for_the_owner_or_an_admin_only() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (owner, owner_jwt) = seed_human_3708(&su, &fixture, "owner", "member").await;
+    let (_third, third_jwt) = seed_human_3708(&su, &fixture, "third", "member").await;
+    set_agent_owner_3708(&su, fixture.hosted_agent, Some(owner)).await;
+    let _ = tidy_agent_3708(&su, fixture.hosted_agent, "Hermes").await;
+    let other_name = tidy_agent_3708(&su, fixture.managed_agent, "Managed One").await;
+    let url = format!(
+        "{base}/v1/workspaces/{}/agents/{}",
+        fixture.workspace, fixture.hosted_agent
+    );
+    let patch = |jwt: &str, body: Value| client.patch(&url).bearer_auth(jwt).json(&body).send();
+
+    // A third party: 403. An agent bearer: refused. Nothing changed.
+    let response = patch(&third_jwt, json!({"displayName": "Hijack"}))
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 403);
+    let response = patch(&fixture.hosted_bearer, json!({"displayName": "Self"}))
+        .await
+        .unwrap();
+    assert!(
+        matches!(response.status().as_u16(), 401 | 403),
+        "{}",
+        response.status()
+    );
+    assert_eq!(display_name_3708(&su, fixture.hosted_agent).await, "Hermes");
+
+    // A collision (another member's handle, name, disguise) is 409.
+    for taken in [
+        other_name.clone(),
+        "managed one".to_string(),
+        "ＭＡＮＡＧＥＤ ＯＮＥ".to_string(),
+        "Mаnaged One".to_string(), // Cyrillic а
+    ] {
+        let response = patch(&owner_jwt, json!({"displayName": taken}))
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 409, "{taken}");
+    }
+    // Empty and unknown keys are 400/422, a human id is 404.
+    let response = patch(&owner_jwt, json!({"displayName": "   "}))
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 400);
+    let response = patch(
+        &owner_jwt,
+        json!({"displayName": "Ok", "handle": "newhandle"}),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(response.status().as_u16(), 400 | 422));
+    let human_url = format!(
+        "{base}/v1/workspaces/{}/agents/{}",
+        fixture.workspace, fixture.human
+    );
+    let response = client
+        .patch(&human_url)
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"displayName": "Not An Agent"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status().as_u16(),
+        404,
+        "a human is not renamable here"
+    );
+    assert_eq!(display_name_3708(&su, fixture.hosted_agent).await, "Hermes");
+
+    // The owner (not an admin) renames it — the person's choice, parentheses and all.
+    let response = patch(&owner_jwt, json!({"displayName": "  김 인턴 (비서)  "}))
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["member"]["displayName"], json!("김 인턴 (비서)"));
+    assert_eq!(body["member"]["kind"], json!("agent"));
+    assert_eq!(
+        display_name_3708(&su, fixture.hosted_agent).await,
+        "김 인턴 (비서)"
+    );
+    // An admin may too; renaming to its own current name is allowed.
+    let response = client
+        .patch(&url)
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"displayName": "김 인턴 (비서)"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+
+    let detail: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='member.renamed' \
+          ORDER BY created_at LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(detail["kind"], json!("agent"));
+    assert_eq!(detail["new"], json!("김 인턴 (비서)"));
+}
