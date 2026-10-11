@@ -21,6 +21,8 @@ export const DURABLE_SLOT_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 interface Stored {
   v: string;
   at: number;
+  /** 사람이 「다시 묻지 않기」로 남긴 값(#3714): TTL이 없고 로그아웃도 지우지 않는다. */
+  p?: true;
 }
 
 function local(): Storage | null {
@@ -55,9 +57,9 @@ function parse(raw: string | null): Stored | null {
   try {
     const value: unknown = JSON.parse(raw);
     if (typeof value !== "object" || value === null) return null;
-    const { v, at } = value as Record<string, unknown>;
+    const { v, at, p } = value as Record<string, unknown>;
     if (typeof v !== "string" || typeof at !== "number" || !Number.isFinite(at)) return null;
-    return { v, at };
+    return { v, at, ...(p === true ? { p: true as const } : {}) };
   } catch {
     return null;
   }
@@ -71,7 +73,7 @@ export function readDurable(slot: string, nowMs: number = Date.now()): string | 
     const key = scopedKey(slot, scope);
     const stored = parse(store?.getItem(key) ?? null);
     if (stored === null) return null;
-    if (nowMs - stored.at > DURABLE_SLOT_TTL_MS) {
+    if (stored.p !== true && nowMs - stored.at > DURABLE_SLOT_TTL_MS) {
       store?.removeItem(key);
       return null;
     }
@@ -81,14 +83,22 @@ export function readDurable(slot: string, nowMs: number = Date.now()): string | 
   }
 }
 
-export function writeDurable(slot: string, value: string, nowMs: number = Date.now()): void {
+export function writeDurable(
+  slot: string,
+  value: string,
+  nowMs: number = Date.now(),
+  options: { permanent?: boolean } = {}
+): void {
   try {
     const scope = durableScope();
     if (scope === null) {
       session()?.setItem(slot, value);
       return;
     }
-    local()?.setItem(scopedKey(slot, scope), JSON.stringify({ v: value, at: nowMs } satisfies Stored));
+    local()?.setItem(
+      scopedKey(slot, scope),
+      JSON.stringify({ v: value, at: nowMs, ...(options.permanent ? { p: true } : {}) } satisfies Stored)
+    );
   } catch {
     // 막힌 저장소: 다시 열면 이어지지 않을 뿐 표면은 동작한다.
   }
@@ -120,7 +130,11 @@ export function clearDurableForCurrentAccount(): void {
       const key = store.key(i);
       if (key !== null && key.endsWith(suffix)) keys.push(key);
     }
-    for (const key of keys) store.removeItem(key);
+    for (const key of keys) {
+      // 사람이 남긴 「다시 묻지 않기」는 로그아웃으로 지우지 않는다(#3714).
+      if (parse(store.getItem(key))?.p === true) continue;
+      store.removeItem(key);
+    }
   } catch {
     // same as write
   }

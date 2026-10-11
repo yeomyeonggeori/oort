@@ -10,7 +10,11 @@ import type { Member } from "@momo/core/lib/api";
 import { fetchRoster } from "@momo/core/lib/api";
 import { fetchWorkspace } from "@momo/core/features/settings/api";
 import {
+  clearOwnerOnboardingPending,
+  hasAcceptedSeedWorkspace,
+  hasOwnerOnboardingFlag,
   markOwnerOnboardingStage,
+  ownerOnboardingFlagIsFromEarlierLoad,
   ownerOnboardingIsPending,
 } from "./ownerOnboardingStore";
 import { SEED_HANDLE, SEED_WORKSPACE_NAME } from "./s1Copy";
@@ -28,9 +32,16 @@ export function isSeedWorkspaceUntouched(input: {
 }
 
 /**
- * 로그인 직후 한 번: 시드 이름·핸들 그대로인 소유자의 S1을 다시 세운다. 핸들이
- * @demo가 아닌 사람은 질문 자체를 만들지 않는다(요청 0건). 쿼리 캐시 밖의 일회성
- * 판정이라 QueryClient 없이 서버를 직접 읽는다(실패는 조용히 넘긴다: 힌트일 뿐).
+ * 로그인 직후 한 번, 서버 사실로 S1 표지를 맞춘다(양방향, #3714).
+ *
+ * - 시드 이름·@demo 그대로인 소유자 → S1을 다시 세운다. 단 이 계정·서버에서 「이대로
+ *   쓸게요」를 누른 적이 있으면 다시 묻지 않는다.
+ * - **이전 실행에서 남은** 영속 표지인데 서버 이름이 시드가 아니다(다른 기기에서 이미 정했다)
+ *   → 표지를 걷는다. 이번 실행의 claim이 막 찍은 표지는 건드리지 않는다.
+ *
+ * 핸들이 @demo도 아니고 남은 표지도 없는 사람은 질문 자체를 만들지 않는다(요청 0건).
+ * 쿼리 캐시 밖의 일회성 판정이라 QueryClient 없이 서버를 직접 읽는다(실패는 조용히
+ * 넘긴다: 힌트일 뿐).
  */
 export function useSeedWorkspaceRejudge(member: Member | null): void {
   const judgedRef = useRef<string | null>(null);
@@ -40,19 +51,32 @@ export function useSeedWorkspaceRejudge(member: Member | null): void {
   const kind = member?.kind ?? "agent";
 
   useEffect(() => {
-    if (memberId === null || workspaceId === null) return;
-    if (kind !== "human" || handle.trim().toLowerCase() !== SEED_HANDLE) return;
+    if (memberId === null || workspaceId === null || kind !== "human") return;
+    const seedHandle = handle.trim().toLowerCase() === SEED_HANDLE;
+    const staleFlag =
+      ownerOnboardingFlagIsFromEarlierLoad() && hasOwnerOnboardingFlag("workspace-profile");
+    if (!seedHandle && !staleFlag) return;
     if (judgedRef.current === memberId) return;
     let cancelled = false;
     void (async () => {
       try {
-        const [workspace, roster] = await Promise.all([
-          fetchWorkspace(workspaceId),
-          fetchRoster(workspaceId),
-        ]);
+        const workspace = await fetchWorkspace(workspaceId);
+        const seedName = isSeedName(workspace.name);
+        if (cancelled) return;
+        if (!seedName && ownerOnboardingFlagIsFromEarlierLoad() && hasOwnerOnboardingFlag("workspace-profile")) {
+          judgedRef.current = memberId;
+          // 이 기기의 온보딩 표지(S1·S2)는 통째로 낡았다: 서버가 이미 이름을 안다.
+          clearOwnerOnboardingPending();
+          return;
+        }
+        if (!seedHandle || !seedName) {
+          judgedRef.current = memberId;
+          return;
+        }
+        const roster = await fetchRoster(workspaceId);
         if (cancelled) return;
         judgedRef.current = memberId;
-        if (ownerOnboardingIsPending()) return;
+        if (ownerOnboardingIsPending() || hasAcceptedSeedWorkspace()) return;
         const self = roster.find((row) => row.id.toLowerCase() === memberId.toLowerCase());
         if (
           isSeedWorkspaceUntouched({
@@ -71,4 +95,8 @@ export function useSeedWorkspaceRejudge(member: Member | null): void {
       cancelled = true;
     };
   }, [memberId, workspaceId, handle, kind]);
+}
+
+function isSeedName(name: string | undefined): boolean {
+  return (name ?? "").trim().toLowerCase() === SEED_WORKSPACE_NAME.toLowerCase();
 }
