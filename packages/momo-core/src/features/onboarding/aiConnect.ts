@@ -234,15 +234,32 @@ export function subscriptionAgentIdentity(
 }
 
 /**
- * 합류 요청의 409는 둘이다(서버 `hosted_agent_connections.rs`): 킬 스위치가
- * 꺼짐, 또는 핸들이 이미 있음. 서버 영어 문장은 화면에 그리지 않고 **분류**에만
- * 쓴다(model.ts 규율 3).
+ * 합류 요청의 409는 셋이다(서버 `hosted_agent_connections.rs`): 킬 스위치가
+ * 꺼짐, Claude 구독 에이전트가 멈춰 있음(기본 꺼짐, ADR-0193 D17), 핸들이 이미 있음.
+ * 서버가 이름 붙인 거절은 **코드**(`error.code`)로 가른다: 문장은 바뀔 수 있다.
+ * 코드 없는 409만 서버 영어 문장으로 분류한다(model.ts 규율 3). 문장은 화면에
+ * 그리지 않는다.
  */
-export type SubscriptionJoinRefusal = "subscription-off" | "handle-taken" | "other";
+export type SubscriptionJoinRefusal =
+  | "subscription-off"
+  | "claude-paused"
+  | "handle-taken"
+  | "other";
 
-export function classifyJoinConflict(message: string): SubscriptionJoinRefusal {
-  if (/subscription agents are disabled/i.test(message)) return "subscription-off";
-  if (/handle already exists/i.test(message)) return "handle-taken";
+/** 서버가 Claude 구독 에이전트를 닫아 둘 때의 `error.code`(ADR-0193 D17). */
+export const CLAUDE_PAUSED_ERROR_CODE = "claude_subscription_agent_paused";
+
+export function classifyJoinConflict(error: {
+  message: string;
+  code?: string | undefined;
+}): SubscriptionJoinRefusal {
+  if (error.code === CLAUDE_PAUSED_ERROR_CODE) return "claude-paused";
+  if (error.code !== undefined) {
+    // 이름 붙은 다른 거절은 핸들 충돌이 아니다. 모르는 코드는 다시 시도하지 않는다.
+    return /subscription agents are disabled/i.test(error.message) ? "subscription-off" : "other";
+  }
+  if (/subscription agents are disabled/i.test(error.message)) return "subscription-off";
+  if (/handle already exists/i.test(error.message)) return "handle-taken";
   return "other";
 }
 
@@ -384,6 +401,12 @@ export const JOIN_CAP_LINE = "5분 동안 들어오지 않았어요.";
 export const JOIN_CAP_DETAIL = "명령을 실행했는지 확인하고 다시 확인을 눌러 주세요.";
 export const JOIN_ERROR_LINE = "연결을 만들지 못했어요.";
 export const JOIN_OFF_LINE = "지금은 이 서버에서 구독으로 쓰는 에이전트를 쓸 수 없어요.";
+/** Claude 줄만 닫혀 있을 때(ADR-0193 D17). 오류가 아니라 서버 쪽 결정이다. */
+export const JOIN_CLAUDE_PAUSED_LINE =
+  "이 서버에서는 Claude Code로 에이전트를 만들 수 없어요. Codex나 API 키로는 이어갈 수 있어요.";
+/** 줄 알약(짧게: 좁은 폭에서 제목이 쪼개지지 않는다)과 줄 설명. 서버가 닫아 둔 줄은 고를 수 없다. */
+export const CLAUDE_PAUSED_PILL_LABEL = "꺼짐";
+export const CLAUDE_PAUSED_DETAIL = "이 서버에서 꺼져 있어요";
 export const JOIN_RECHECK_LABEL = "다시 확인";
 export const JOIN_RETRY_LABEL = "다시 시도";
 export const JOIN_BACK_LABEL = "다른 AI 고르기";

@@ -35,6 +35,7 @@ import {
   HARNESS_LABEL,
   JOIN_BACK_LABEL,
   JOIN_CAP_DETAIL,
+  JOIN_CLAUDE_PAUSED_LINE,
   JOIN_CAP_LINE,
   JOIN_CREATING_LINE,
   JOIN_ERROR_LINE,
@@ -45,6 +46,7 @@ import {
   SUBSCRIPTION_HARNESS_WIRE,
   aiConnectFoundLine,
   aiConnectRows,
+  CLAUDE_PAUSED_DETAIL,
   classifyJoinConflict,
   isSubscriptionRow,
   joinConnectDetail,
@@ -243,6 +245,7 @@ function captureHarness(pose: FirstAgentCapturePose | null): {
     case "sub-waiting":
     case "sub-cap":
     case "sub-joined":
+    case "sub-paused":
       return { surface: "rows", probes: [ready, codexLogin] };
     default:
       return { surface: "hidden", probes: [] };
@@ -325,9 +328,13 @@ export function FirstAgentStage({
       plan: subscriptionConnectPlan("claude", fixture.endpoint, fixture.credential),
     };
   });
-  const [joinFailure, setJoinFailure] = useState<string | null>(null);
+  const [joinFailure, setJoinFailure] = useState<string | null>(
+    pose === "sub-paused" ? JOIN_CLAUDE_PAUSED_LINE : null
+  );
   const [joinPending, setJoinPending] = useState(false);
   const [serverRefused, setServerRefused] = useState(false);
+  // 서버가 Claude 구독 에이전트만 닫아 뒀다는 것을 409 코드로 알았다(#3695, D17).
+  const [claudePaused, setClaudePaused] = useState(pose === "sub-paused");
   const autoPassedRef = useRef(false);
   // CLI마다 이 화면에서 만든 연결. 다른 CLI를 거쳐 돌아와도 새 에이전트를 만들지 않는다.
   const lastJoinRef = useRef<
@@ -370,6 +377,11 @@ export function FirstAgentStage({
     fixture: capture ? { probes: capture.probes, watch: capture.watch } : null,
   });
   const rows = aiConnectRows(surface);
+  const pausedRows: Partial<Record<AiConnectRowId, string>> = claudePaused
+    ? { claude: CLAUDE_PAUSED_DETAIL }
+    : {};
+  const rowReady = (id: AiConnectRowId) =>
+    isSubscriptionRow(id) && pausedRows[id] === undefined && subscriptionRowSelectable(harness.pill(id));
   const loginFixture = captureLogin(pose);
   const [loginFor, setLoginFor] = useState<LocalHarnessId | null>(() =>
     loginFixture ? "claude" : null
@@ -418,10 +430,10 @@ export function FirstAgentStage({
   useEffect(() => {
     if (selected !== null || surface !== "rows") return;
     const first = rows.find(
-      (id) => isSubscriptionRow(id) && subscriptionRowSelectable(harness.pill(id))
+      (id) => isSubscriptionRow(id) && !(claudePaused && id === "claude") && subscriptionRowSelectable(harness.pill(id))
     );
     if (first) setSelected(first);
-  }, [selected, surface, rows, harness]);
+  }, [selected, surface, rows, harness, claudePaused]);
 
   useEffect(() => {
     if (pose !== null || autoPassedRef.current) return;
@@ -593,7 +605,17 @@ export function FirstAgentStage({
     } catch (error) {
       setJoinPending(false);
       if (error instanceof ApiError && error.status === 409) {
-        const refusal = classifyJoinConflict(error.message);
+        const refusal = classifyJoinConflict(error);
+        if (refusal === "claude-paused") {
+          // 서버가 Claude 구독 에이전트만 닫아 뒀다(D17, 기본 꺼짐). 같은 요청을 다시
+          // 보내지 않는다: 줄을 「이 서버에서 꺼져 있어요」로 돌리고 목록으로 돌아간다.
+          setClaudePaused(true);
+          setJoin(null);
+          setSelected(null);
+          setStep("cards");
+          setJoinFailure(JOIN_CLAUDE_PAUSED_LINE);
+          return;
+        }
         if (refusal === "subscription-off") {
           // 서버가 방금 킬 스위치를 내렸다(D6). 구독 줄을 걷고 목록으로 돌아간다.
           setServerRefused(true);
@@ -618,7 +640,7 @@ export function FirstAgentStage({
     if (offline || listError) return;
     setSelected(id);
     if (isSubscriptionRow(id)) {
-      if (!subscriptionRowSelectable(harness.pill(id))) return;
+      if (!rowReady(id)) return;
       void startSubscriptionJoin(id);
       return;
     }
@@ -753,9 +775,7 @@ export function FirstAgentStage({
           if (harness.probes === null) {
             return { state: "checking", line: AI_CONNECT_PROBING_LINE };
           }
-          const ready = rows.find(
-            (id) => isSubscriptionRow(id) && subscriptionRowSelectable(harness.pill(id))
-          );
+          const ready = rows.find((id) => rowReady(id));
           if (ready && isSubscriptionRow(ready)) {
             return {
               state: "success",
@@ -1028,6 +1048,7 @@ export function FirstAgentStage({
               selected={selected}
               onSelect={setSelected}
               pill={harness.pill}
+              disabledRows={pausedRows}
               onLoginOpen={setLoginFor}
               onRecheck={harness.recheck}
               grokPill={grokPill}

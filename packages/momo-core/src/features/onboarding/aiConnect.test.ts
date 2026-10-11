@@ -225,13 +225,30 @@ describe("구독으로 쓰는 에이전트 정체성", () => {
   });
 });
 
-describe("409 분류 (서버 문장은 그리지 않고 분류만)", () => {
-  it("tells the kill switch from a taken handle", () => {
-    expect(classifyJoinConflict("subscription agents are disabled on this server")).toBe(
-      "subscription-off"
-    );
-    expect(classifyJoinConflict("agent handle already exists")).toBe("handle-taken");
-    expect(classifyJoinConflict("HTTP 409")).toBe("other");
+describe("409 분류 (코드 우선, 문장은 코드 없는 409만)", () => {
+  it("tells the kill switch from a taken handle by message when no code", () => {
+    expect(
+      classifyJoinConflict({ message: "subscription agents are disabled on this server" })
+    ).toBe("subscription-off");
+    expect(classifyJoinConflict({ message: "agent handle already exists" })).toBe("handle-taken");
+    expect(classifyJoinConflict({ message: "HTTP 409" })).toBe("other");
+  });
+
+  it("classifies the Claude opt-in refusal by error.code, never as a taken handle (#3695)", () => {
+    expect(
+      classifyJoinConflict({
+        message: "claude subscription agents are paused on this server",
+        code: "claude_subscription_agent_paused",
+      })
+    ).toBe("claude-paused");
+    // 문장이 바뀌어도 코드가 가른다.
+    expect(
+      classifyJoinConflict({ message: "reworded", code: "claude_subscription_agent_paused" })
+    ).toBe("claude-paused");
+    // 이름 붙은 다른 거절은 핸들 충돌로 읽지 않는다(다시 시도 반복 방지).
+    expect(
+      classifyJoinConflict({ message: "agent handle already exists", code: "something_else" })
+    ).toBe("other");
   });
 });
 
