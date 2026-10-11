@@ -38,6 +38,10 @@ import {
   JOIN_BACK_LABEL,
   JOIN_CAP_DETAIL,
   JOIN_CLAUDE_PAUSED_LINE,
+  PERSONAL_ENABLING_LINE,
+  PERSONAL_JOINED_HINT,
+  PERSONAL_UNAVAILABLE_DETAIL,
+  PERSONAL_UNAVAILABLE_LINE,
   JOIN_CAP_LINE,
   JOIN_CREATING_LINE,
   JOIN_ERROR_LINE,
@@ -66,6 +70,8 @@ import {
 } from "@momo/core/features/onboarding/aiConnect";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
+import { createPersonalAgentPort, PersonalAgentError } from "@/features/aiHub/tools/personalAgentPort";
+import { PERSONAL_HARNESS_WIRE, personalAgentErrorLine } from "@momo/core/features/ai/harnessCard";
 import { Button } from "@/design/ui/button";
 import { InlineBanner, Skeleton } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
@@ -248,6 +254,7 @@ function captureHarness(pose: FirstAgentCapturePose | null): {
     case "sub-cap":
     case "sub-joined":
     case "sub-paused":
+    case "sub-unavailable":
       return { surface: "rows", probes: [ready, codexLogin] };
     default:
       return { surface: "hidden", probes: [] };
@@ -331,12 +338,32 @@ export function FirstAgentStage({
     };
   });
   const [joinFailure, setJoinFailure] = useState<string | null>(
-    pose === "sub-paused" ? JOIN_CLAUDE_PAUSED_LINE : null
+    pose === "sub-paused"
+      ? JOIN_CLAUDE_PAUSED_LINE
+      : pose === "sub-unavailable"
+        ? PERSONAL_UNAVAILABLE_LINE
+        : null
   );
   const [joinPending, setJoinPending] = useState(false);
   const [serverRefused, setServerRefused] = useState(false);
   // 서버가 Claude 구독 에이전트만 닫아 뒀다는 것을 409 코드로 알았다(#3695, D17).
   const [claudePaused, setClaudePaused] = useState(pose === "sub-paused");
+  // 개인 에이전트 켜기(#3713): 진행 중인 줄, 켜진 에이전트, 서버에 라우트가 없음.
+  const [personalPending, setPersonalPending] = useState<LocalHarnessId | null>(null);
+  const [personalDone, setPersonalDone] = useState<{
+    id: string;
+    handle: string;
+    displayName: string;
+  } | null>(() =>
+    pose === "sub-joined"
+      ? {
+          id: firstAgentCaptureAgent().agentMemberId,
+          handle: firstAgentCaptureSubscription().agentHandle,
+          displayName: firstAgentCaptureSubscription().agentDisplayName,
+        }
+      : null
+  );
+  const [personalUnavailable, setPersonalUnavailable] = useState(pose === "sub-unavailable");
   const autoPassedRef = useRef(false);
   // CLI마다 이 화면에서 만든 연결. 다른 CLI를 거쳐 돌아와도 새 에이전트를 만들지 않는다.
   const lastJoinRef = useRef<
@@ -389,9 +416,11 @@ export function FirstAgentStage({
     fixture: capture ? { probes: capture.probes, watch: capture.watch } : null,
   });
   const rows = aiConnectRows(surface);
-  const pausedRows: Partial<Record<AiConnectRowId, string>> = claudePaused
-    ? { claude: CLAUDE_PAUSED_DETAIL }
-    : {};
+  const pausedRows: Partial<Record<AiConnectRowId, string>> = personalUnavailable
+    ? { claude: PERSONAL_UNAVAILABLE_DETAIL, codex: PERSONAL_UNAVAILABLE_DETAIL }
+    : claudePaused
+      ? { claude: CLAUDE_PAUSED_DETAIL }
+      : {};
   const rowReady = (id: AiConnectRowId) =>
     isSubscriptionRow(id) && pausedRows[id] === undefined && subscriptionRowSelectable(harness.pill(id));
   const loginFixture = captureLogin(pose);
@@ -442,10 +471,10 @@ export function FirstAgentStage({
   useEffect(() => {
     if (selected !== null || surface !== "rows") return;
     const first = rows.find(
-      (id) => isSubscriptionRow(id) && !(claudePaused && id === "claude") && subscriptionRowSelectable(harness.pill(id))
+      (id) => isSubscriptionRow(id) && pausedRows[id] === undefined && subscriptionRowSelectable(harness.pill(id))
     );
     if (first) setSelected(first);
-  }, [selected, surface, rows, harness, claudePaused]);
+  }, [selected, surface, rows, harness, claudePaused, personalUnavailable]);
 
   useEffect(() => {
     if (pose !== null || autoPassedRef.current || nonAdmin) return;
@@ -649,12 +678,69 @@ export function FirstAgentStage({
     }
   };
 
+  /**
+   * 「내 도구」 줄의 주 행동(#3713): 공식 CLI 로그인이 확인된 줄에서 별칭으로 개인
+   * 에이전트를 켠다(P2 API). 별칭 겹침은 한 번 다음 핸들로 다시, 이미 있으면 그 에이전트를
+   * 그대로 쓰고, 라우트가 없으면 줄을 닫고 이유를 말한다.
+   */
+  const startPersonalAgent = async (id: LocalHarnessId, extraTaken: string[] = []) => {
+    setJoinFailure(null);
+    setPersonalPending(id);
+    const taken = new Set([
+      ...directory.members.map((member) => member.handle.toLowerCase()),
+      ...extraTaken,
+    ]);
+    const identity = subscriptionAgentIdentity(id, session.member, taken);
+    const port = createPersonalAgentPort(workspaceId);
+    const enabled = (agent: { id: string; handle: string; displayName: string }) => {
+      const displayName = agent.displayName || identity.displayName;
+      setPersonalDone({ id: agent.id, handle: agent.handle, displayName });
+      setJoin({ harness: id, agentDisplayName: displayName, plan: null });
+      refreshRoster();
+      setPersonalPending(null);
+      setStep("mention");
+    };
+    try {
+      enabled(await port.enable(PERSONAL_HARNESS_WIRE[id], identity.handle));
+    } catch (error) {
+      const code = error instanceof PersonalAgentError ? error.code : null;
+      const status = error instanceof PersonalAgentError ? error.status : 0;
+      if (code === "personal_agent_alias_taken" && extraTaken.length === 0) {
+        setPersonalPending(null);
+        void startPersonalAgent(id, [identity.handle]);
+        return;
+      }
+      if (code === "personal_agent_exists") {
+        // 이 도구에는 이미 내 개인 에이전트가 있다: 그것을 그대로 쓴다.
+        const listed = await port.list();
+        const existing =
+          listed.state === "ok"
+            ? listed.agents.find(
+                (agent) => agent.harness === PERSONAL_HARNESS_WIRE[id] && agent.enabled
+              )
+            : undefined;
+        if (existing) {
+          enabled(existing);
+          return;
+        }
+      }
+      setPersonalPending(null);
+      if (status === 404 || status === 405) {
+        setPersonalUnavailable(true);
+        setSelected(null);
+        setJoinFailure(PERSONAL_UNAVAILABLE_LINE);
+        return;
+      }
+      setJoinFailure(personalAgentErrorLine(code));
+    }
+  };
+
   const handlePick = (id: AiConnectRowId) => {
     if (offline || listError) return;
     setSelected(id);
     if (isSubscriptionRow(id)) {
-      if (!rowReady(id)) return;
-      void startSubscriptionJoin(id);
+      if (!rowReady(id) || personalPending !== null) return;
+      void startPersonalAgent(id);
       return;
     }
     if (id === "api-key") {
@@ -704,11 +790,12 @@ export function FirstAgentStage({
   };
 
   const hintedAgentMemberId =
+    personalDone?.id ??
     detected?.agentMemberId ??
     (pose === "done" || pose === "sub-joined" ? firstAgentCaptureAgent().agentMemberId : null);
 
   const handleMentionHandoff = () => {
-    const agent = previewHintedAgent(directory.members, hintedAgentMemberId);
+    const agent = mentionAgent;
     if (welcomeChannelId !== "" && agent && agent.handle !== "") {
       seedComposerText(workspaceId, welcomeChannelId, firstMentionDraft(agent.handle));
     }
@@ -718,9 +805,20 @@ export function FirstAgentStage({
     window.location.hash = href;
     finish("done");
   };
-  const mentionAgent = previewHintedAgent(directory.members, hintedAgentMemberId);
+  const mentionAgent =
+    previewHintedAgent(directory.members, hintedAgentMemberId) ??
+    (personalDone
+      ? {
+          connectionId: "",
+          agentMemberId: personalDone.id,
+          displayName: personalDone.displayName,
+          handle: personalDone.handle,
+        }
+      : null);
+  // 개인 에이전트는 채널 승인이 필요 없다(호스티드 연결이 없다).
   const mentionApproved =
-    detected !== null && connectionAllowsChannel(detected, welcomeChannelId);
+    personalDone !== null ||
+    (detected !== null && connectionAllowsChannel(detected, welcomeChannelId));
   const rosterMember =
     mentionAgent === null ? null : (memberFor(directory, mentionAgent.agentMemberId) ?? null);
   // 캡처 `sub-joined`만: 픽스처 명부의 이름 대신 합류한 이름을 아바타에도 쓴다.
@@ -781,9 +879,16 @@ export function FirstAgentStage({
         return {
           state: "success",
           line: joinJoinedLine(joinedName),
-          detail: join ? JOIN_JOINED_DETAIL : undefined,
+          detail: personalDone
+            ? `${JOIN_JOINED_DETAIL} ${PERSONAL_JOINED_HINT}`
+            : join
+              ? JOIN_JOINED_DETAIL
+              : undefined,
         };
       default: {
+        if (personalPending !== null) {
+          return { state: "checking", line: PERSONAL_ENABLING_LINE };
+        }
         if (nonAdmin) {
           return {
             state: "awaiting",
@@ -1046,7 +1151,7 @@ export function FirstAgentStage({
       );
     }
 
-    const primaryLocked = selected === null || listLocked;
+    const primaryLocked = selected === null || listLocked || personalPending !== null;
     return (
       <div className="flex w-full min-w-0 flex-col items-stretch gap-3" data-testid="first-agent-cards">
         {showOffline && (

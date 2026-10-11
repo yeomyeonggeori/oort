@@ -16,19 +16,16 @@ import {
   createHostedConnection,
   getHostedConnection,
   listHostedConnections,
-  regenerateHostedPairing,
 } from "@momo/core/features/hostedAgents/api";
 import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
 import {
   AI_CONNECT_BOUNDARY_NOTE,
   AI_CONNECT_DESKTOP_ONLY_NOTE,
   AI_CONNECT_NON_ADMIN_LINE,
+  PERSONAL_UNAVAILABLE_LINE,
   AI_CONNECT_QUESTION,
   AI_CONNECT_SERVER_OFF_NOTE,
   AI_CONNECT_SKIPPED_LINE,
-  JOIN_CAP_LINE,
-  JOIN_CLAUDE_PAUSED_LINE,
-  JOIN_OFF_LINE,
   LOGIN_POLL_WINDOW_MS,
 } from "@momo/core/features/onboarding/aiConnect";
 import { LOGIN_ACTION_LABEL } from "@momo/core/features/onboarding/harnessLogin";
@@ -38,7 +35,6 @@ import { detectLocalHarnesses, openTerminalApp } from "@/lib/tauri";
 import {
   DETECT_CAP_MS,
   FIRST_AGENT_CHANNEL_PENDING,
-  FIRST_AGENT_CONNECTED_CLAIM,
   FIRST_AGENT_RECHECKING,
   FIRST_AGENT_RETRY_LABEL,
   FIRST_AGENT_CAPTURE_POSES,
@@ -50,6 +46,8 @@ import {
   takeFirstAgentResumeHash,
 } from "./firstAgentStore";
 import { FirstAgentStage } from "./FirstAgentStage";
+import { PersonalAgentError } from "@/features/aiHub/tools/personalAgentPort";
+import type { PersonalAgentSummary } from "@momo/core/features/ai/harnessCard";
 import { openAiConnectReentry } from "./aiConnectReentry";
 
 const poseSlot = vi.hoisted(() => ({ current: null as string | null }));
@@ -112,6 +110,17 @@ vi.mock("@momo/core/features/hostedAgents/api", () => ({
   registerHostedDoorbell: vi.fn(),
   unregisterHostedDoorbell: vi.fn(),
 }));
+
+const personalPort = vi.hoisted(() => ({
+  list: vi.fn(),
+  enable: vi.fn(),
+  disable: vi.fn(),
+}));
+
+vi.mock("@/features/aiHub/tools/personalAgentPort", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/features/aiHub/tools/personalAgentPort")>();
+  return { ...actual, createPersonalAgentPort: () => personalPort };
+});
 
 const offlineSlot = vi.hoisted(() => ({ current: false }));
 
@@ -418,6 +427,9 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  personalPort.list.mockReset();
+  personalPort.enable.mockReset();
+  personalPort.disable.mockReset();
   poseSlot.current = null;
   offlineSlot.current = false;
   envSlot.tauri = false;
@@ -718,226 +730,150 @@ describe("로그인 모달 → PTY 없음 → Phase 1 폴백 → 2초 재확인 
 
 // ---- 구독 합류 세 상태 ------------------------------------------------------
 
-describe("구독 합류: 연결 명령 → 감지 대기 → 합류 (같은 화면)", () => {
-  it("합류 요청은 owner_only + claude_code 를 싣고 이름은 「{나}의 Claude」다", async () => {
-    subscriptionOn();
-    const host = mountStage();
+const agentSummary = (over: Partial<PersonalAgentSummary> = {}): PersonalAgentSummary => ({
+  id: "019f9a01-0000-7000-8000-000000000777",
+  handle: "seongjae-claude",
+  displayName: "seongjae-claude",
+  harness: "claude_code",
+  enabled: true,
+  label: "개인",
+  ...over,
+});
+
+describe("내 도구 → 개인 에이전트 켜기 (ADR-0198 D7, #3713)", () => {
+  async function pickClaude(host: HTMLElement) {
     await waitFor(
       () => host.querySelector<HTMLInputElement>("#ai-connect-claude")?.checked === true,
       "preselected"
     );
     click(q(host, "first-agent-continue"));
-    await waitFor(() => q(host, "first-agent-connect-command") !== null, "command");
-    expect(vi.mocked(createHostedConnection)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(createHostedConnection).mock.calls[0]).toEqual([
-      WS,
-      {
-        displayName: "곽성재의 Claude",
-        handle: "seongjae-claude",
-        authMode: "static_bearer",
-        invocationScope: "owner_only",
-        subscriptionHarness: "claude_code",
-      },
+  }
+
+  it("주 행동은 호스티드 연결이 아니라 P2 개인 에이전트 켜기이고, 별칭은 「<내 핸들>-claude」다", async () => {
+    subscriptionOn();
+    personalPort.enable.mockResolvedValue(agentSummary());
+    const host = mountStage();
+    await pickClaude(host);
+    await waitFor(() => q(host, "first-agent-mention") !== null, "mention");
+    expect(personalPort.enable).toHaveBeenCalledTimes(1);
+    expect(personalPort.enable).toHaveBeenCalledWith("claude_code", "seongjae-claude");
+    expect(vi.mocked(createHostedConnection)).not.toHaveBeenCalled();
+    expect(q(host, "first-agent-connect")).toBeNull();
+    expect(q(host, "first-agent-heading")?.textContent).toBe("seongjae-claude가 들어왔어요.");
+    expect(host.textContent).toContain("나만 부를 수 있는 개인 에이전트예요. 내 맥이 켜져 있을 때만 답해요.");
+    // 채널 승인 대기 문장은 개인 에이전트에 해당하지 않는다.
+    expect(q(host, "first-agent-channel-pending")).toBeNull();
+    expect(q(host, "first-agent-stage")?.getAttribute("data-step")).toBe("mention");
+  });
+
+  it("[계속]은 첫 대화 채널로 가고 초안에 @별칭을 심는다", async () => {
+    subscriptionOn();
+    personalPort.enable.mockResolvedValue(agentSummary());
+    const host = mountStage();
+    await pickClaude(host);
+    await waitFor(() => q(host, "first-agent-mention-action") !== null, "mention");
+    click(q(host, "first-agent-mention-action"));
+    expect(readDraft(WS, GENERAL_ID)).toBe(firstMentionDraft("seongjae-claude"));
+    expect(readFirstAgentMarker(WS)).toBe("done");
+  });
+
+  it("Codex 줄도 같은 API를 codex 로 부른다", async () => {
+    subscriptionOn();
+    vi.mocked(detectLocalHarnesses).mockResolvedValue([
+      { id: "claude", installed: true, auth: "needs_login" },
+      { id: "codex", installed: true, auth: "logged_in" },
     ]);
-    const command = q(host, "first-agent-connect-command-text")?.textContent ?? "";
-    expect(command).toContain("claude mcp add --scope user --transport http oort");
-    expect(command).toContain("/v1/mcp/agent-port");
-    expect(command).toContain(`Authorization: Bearer ${PRODUCT_SECRET}`);
-    expect(countNeedle(document.body.textContent ?? "", PRODUCT_SECRET)).toBe(1);
-    expect(q(host, "first-agent-heading")?.textContent).toBe(
-      "터미널에서 이 명령을 한 번 실행해 주세요."
+    personalPort.enable.mockResolvedValue(
+      agentSummary({ harness: "codex", handle: "seongjae-codex", displayName: "seongjae-codex" })
     );
-    expect(q(host, "kometto-guide")?.getAttribute("data-expression")).toBe("idle");
-    expect(q(host, "first-agent-stage")?.getAttribute("data-step")).toBe("connect");
-  });
-
-  it("터미널에서 열기 → 복사 + 인자 없는 터미널 열기 → 감지 대기(생각) → 합류(기쁨)", async () => {
-    subscriptionOn();
-    let status = "pairing_pending";
-    vi.mocked(getHostedConnection).mockImplementation(async () => ({
-      connection: wireConnection({ status }),
-      cleanupArtifacts: [],
-    }));
     const host = mountStage();
     await waitFor(
-      () => host.querySelector<HTMLInputElement>("#ai-connect-claude")?.checked === true,
-      "preselected"
+      () => host.querySelector<HTMLInputElement>("#ai-connect-codex")?.checked === true,
+      "codex preselected"
     );
     click(q(host, "first-agent-continue"));
-    await waitFor(() => q(host, "first-agent-connect-open") !== null, "open button");
-    vi.useFakeTimers();
-    vi.setSystemTime(1_000_000);
-    click(q(host, "first-agent-connect-open"));
-    await flush();
-    await flush();
-    expect(clipboard.some((text) => text.includes(PRODUCT_SECRET))).toBe(true);
-    expect(vi.mocked(openTerminalApp).mock.calls).toEqual([[]]);
-    await waitFor(() => q(host, "first-agent-detecting") !== null, "waiting");
-    expect(q(host, "first-agent-heading")?.textContent).toBe(
-      "Claude Code가 oort에 들어오기를 기다리고 있어요."
-    );
-    expect(q(host, "kometto-guide")?.getAttribute("data-expression")).toBe("thinking");
-    expect(host.textContent).not.toContain(FIRST_AGENT_CONNECTED_CLAIM);
-    status = "detected";
-    await act(async () => {
-      vi.setSystemTime(1_000_000 + 10_000);
-      await vi.advanceTimersByTimeAsync(4_000);
-    });
-    await waitFor(() => q(host, "first-agent-mention") !== null, "joined");
-    expect(q(host, "first-agent-heading")?.textContent).toBe("곽성재의 Claude가 들어왔어요.");
-    expect(q(host, "kometto-guide")?.getAttribute("data-expression")).toBe("happy");
-    expect(q(host, "first-agent-mention-action")?.textContent).toBe("계속");
+    await waitFor(() => personalPort.enable.mock.calls.length === 1, "enable");
+    expect(personalPort.enable).toHaveBeenCalledWith("codex", "seongjae-codex");
   });
 
-  it("터미널을 열지 못하면 그 문장이 감지 대기 화면에 남는다", async () => {
+  it("별칭이 겹치면 다음 핸들로 한 번 다시 요청한다", async () => {
     subscriptionOn();
-    vi.mocked(openTerminalApp).mockResolvedValueOnce(false);
+    personalPort.enable
+      .mockRejectedValueOnce(new PersonalAgentError(409, "personal_agent_alias_taken"))
+      .mockResolvedValueOnce(agentSummary({ handle: "seongjae-claude-2" }));
     const host = mountStage();
-    await waitFor(
-      () => host.querySelector<HTMLInputElement>("#ai-connect-claude")?.checked === true,
-      "preselected"
-    );
-    click(q(host, "first-agent-continue"));
-    await waitFor(() => q(host, "first-agent-connect-open") !== null, "open");
-    const open = q(host, "first-agent-connect-open");
-    open?.focus();
-    click(open);
-    await waitFor(() => q(host, "first-agent-detecting") !== null, "waiting");
-    await waitFor(
-      () => q(host, "first-agent-connect-status")?.textContent === "터미널을 열지 못했어요. 명령을 복사해 직접 여세요.",
-      "failure sentence"
-    );
-    expect(q(host, "first-agent-connect-status")?.getAttribute("role")).toBe("status");
-    // 누른 버튼이 같은 자리에 남아 포커스를 쥔다(body 로 떨어지지 않는다).
-    expect(document.activeElement).toBe(q(host, "first-agent-connect-open"));
+    await pickClaude(host);
+    await waitFor(() => q(host, "first-agent-mention") !== null, "mention");
+    expect(personalPort.enable.mock.calls.map((call) => call[1])).toEqual([
+      "seongjae-claude",
+      "seongjae-claude-2",
+    ]);
   });
 
-  it("[다른 AI 고르기] 뒤 같은 CLI를 다시 고르면 새 에이전트 대신 값만 다시 받는다", async () => {
+  it("이미 이 도구의 개인 에이전트가 있으면 그것을 그대로 쓴다", async () => {
     subscriptionOn();
-    vi.mocked(regenerateHostedPairing).mockResolvedValue({
-      connection: wireConnection(),
-      pairingCredential: "momo_pair_v1.regenerated-value",
-      pairingExpiresAtMs: Date.now() + 600_000,
+    personalPort.enable.mockRejectedValue(new PersonalAgentError(409, "personal_agent_exists"));
+    personalPort.list.mockResolvedValue({
+      state: "ok",
+      agents: [agentSummary({ handle: "kwak-claude", displayName: "kwak-claude" })],
     });
     const host = mountStage();
-    await waitFor(
-      () => host.querySelector<HTMLInputElement>("#ai-connect-claude")?.checked === true,
-      "preselected"
-    );
-    click(q(host, "first-agent-continue"));
-    await waitFor(() => q(host, "first-agent-back") !== null, "back");
-    click(q(host, "first-agent-back"));
-    await waitFor(() => rowIds(host).length === 4, "list again");
-    click(host.querySelector("#ai-connect-claude"));
-    click(q(host, "first-agent-continue"));
-    await waitFor(
-      () => (q(host, "first-agent-connect-command-text")?.textContent ?? "").includes("regenerated-value"),
-      "regenerated"
-    );
-    expect(vi.mocked(createHostedConnection)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(regenerateHostedPairing)).toHaveBeenCalledWith(WS, CONNECTION_ID);
+    await pickClaude(host);
+    await waitFor(() => q(host, "first-agent-mention") !== null, "mention");
+    expect(q(host, "first-agent-mention-handle")?.textContent).toBe("@kwak-claude");
   });
 
-  it("5분 상한이면 당황 + 다시 확인", async () => {
+  it("서버에 라우트가 없으면(404) 두 줄을 「이 서버에서는 아직 켤 수 없어요」로 닫고 다시 보내지 않는다", async () => {
     subscriptionOn();
+    personalPort.enable.mockRejectedValue(new PersonalAgentError(404, null));
     const host = mountStage();
-    await waitFor(
-      () => host.querySelector<HTMLInputElement>("#ai-connect-claude")?.checked === true,
-      "preselected"
-    );
-    vi.useFakeTimers();
-    vi.setSystemTime(1_000_000);
-    click(q(host, "first-agent-continue"));
-    await waitFor(() => q(host, "first-agent-connect-copy") !== null, "copy");
-    click(q(host, "first-agent-connect-copy"));
-    await waitFor(() => q(host, "first-agent-detecting") !== null, "waiting");
-    await act(async () => {
-      vi.setSystemTime(1_000_000 + DETECT_CAP_MS);
-      await vi.advanceTimersByTimeAsync(2_000);
-    });
-    await waitFor(() => q(host, "first-agent-cap-exceeded") !== null, "cap");
-    expect(q(host, "first-agent-heading")?.textContent).toBe(JOIN_CAP_LINE);
-    expect(q(host, "kometto-guide")?.getAttribute("data-expression")).toBe("flustered");
-    expect(q(host, "first-agent-recheck")?.textContent).toBe("다시 확인");
-  });
-
-  it("서버가 409(킬 스위치)로 거절하면 구독 줄을 걷고 API 키 줄이 맨 위다", async () => {
-    subscriptionOn();
-    vi.mocked(createHostedConnection).mockRejectedValue(
-      new ApiError(409, "subscription agents are disabled on this server")
-    );
-    const host = mountStage();
-    await waitFor(
-      () => host.querySelector<HTMLInputElement>("#ai-connect-claude")?.checked === true,
-      "preselected"
-    );
-    click(q(host, "first-agent-continue"));
-    await waitFor(() => q(host, "first-agent-server-off") !== null, "off");
-    expect(rowIds(host)).toEqual(["api-key", "grok"]);
-    expect(q(host, "first-agent-heading")?.textContent).toBe(JOIN_OFF_LINE);
-    expect(q(host, "kometto-guide")?.getAttribute("data-expression")).toBe("flustered");
-    expect(host.textContent).not.toContain("subscription agents are disabled");
-  });
-
-  it("Claude 409(코드 claude_subscription_agent_paused)는 핸들 안내가 아니라 줄을 비활성으로 돌린다 (#3695)", async () => {
-    subscriptionOn();
-    vi.mocked(createHostedConnection).mockRejectedValue(
-      new ApiError(
-        409,
-        "claude subscription agents are paused on this server",
-        "claude_subscription_agent_paused"
-      )
-    );
-    const host = mountStage();
-    await waitFor(
-      () => host.querySelector<HTMLInputElement>("#ai-connect-claude")?.checked === true,
-      "preselected"
-    );
-    click(q(host, "first-agent-continue"));
+    await pickClaude(host);
     await waitFor(
       () => q(host, "ai-connect-pill-claude")?.getAttribute("data-pill") === "server-closed",
       "closed"
     );
-    expect(q(host, "ai-connect-pill-claude")?.textContent).toBe("꺼짐");
+    expect(q(host, "first-agent-heading")?.textContent).toBe(PERSONAL_UNAVAILABLE_LINE);
     expect(host.querySelector("#ai-connect-claude-detail")?.textContent).toBe(
-      "이 서버에서 꺼져 있어요"
+      "이 서버에서는 아직 켤 수 없어요"
     );
-    expect(host.querySelector<HTMLInputElement>("#ai-connect-claude")?.disabled).toBe(true);
-    expect(q(host, "first-agent-heading")?.textContent).toBe(JOIN_CLAUDE_PAUSED_LINE);
-    expect(host.textContent).not.toContain("핸들");
-    expect(host.textContent).not.toContain("이미 있어요");
-    // 같은 요청을 다시 보내지 않는다(다시 시도 반복 없음).
-    expect(vi.mocked(createHostedConnection)).toHaveBeenCalledTimes(1);
-    expect(q(host, "first-agent-connect-error")).toBeNull();
-    // 닫힌 줄을 눌러도 요청이 가지 않는다.
+    expect(host.querySelector<HTMLInputElement>("#ai-connect-codex")?.disabled).toBe(true);
     click(q(host, "first-agent-continue"));
-    expect(vi.mocked(createHostedConnection)).toHaveBeenCalledTimes(1);
+    expect(personalPort.enable).toHaveBeenCalledTimes(1);
   });
 
-  it("핸들 409 는 다음 핸들로 한 번 다시 요청한다", async () => {
+  it("관리자가 정지한 개인 에이전트는 서버 문장이 아니라 안내로 말한다", async () => {
     subscriptionOn();
-    vi.mocked(createHostedConnection)
-      .mockRejectedValueOnce(new ApiError(409, "agent handle already exists"))
-      .mockResolvedValueOnce({
-        connection: wireConnection(),
-        pairingCredential: PRODUCT_SECRET,
-        pairingExpiresAtMs: Date.now() + 600_000,
-      });
+    personalPort.enable.mockRejectedValue(new PersonalAgentError(409, "personal_agent_suspended"));
     const host = mountStage();
+    await pickClaude(host);
     await waitFor(
-      () => host.querySelector<HTMLInputElement>("#ai-connect-claude")?.checked === true,
-      "preselected"
+      () => q(host, "first-agent-heading")?.textContent?.includes("정지했어요") === true,
+      "suspended"
+    );
+    expect(q(host, "first-agent-mention")).toBeNull();
+  });
+
+  it("켜는 동안 주 행동은 잠기고 같은 요청을 두 번 보내지 않는다", async () => {
+    subscriptionOn();
+    let release: (value: PersonalAgentSummary) => void = () => undefined;
+    personalPort.enable.mockImplementation(
+      () => new Promise<PersonalAgentSummary>((resolve) => (release = resolve))
+    );
+    const host = mountStage();
+    await pickClaude(host);
+    await waitFor(
+      () => q(host, "first-agent-heading")?.textContent === "개인 에이전트를 켜고 있어요.",
+      "enabling"
     );
     click(q(host, "first-agent-continue"));
-    await waitFor(() => q(host, "first-agent-connect-command") !== null, "command");
-    const handles = vi
-      .mocked(createHostedConnection)
-      .mock.calls.map((call) => (call[1] as { handle: string }).handle);
-    expect(handles).toEqual(["seongjae-claude", "seongjae-claude-2"]);
+    expect(personalPort.enable).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      release(agentSummary());
+      await Promise.resolve();
+    });
+    await waitFor(() => q(host, "first-agent-mention") !== null, "mention");
   });
 });
-
-// ---- 팀 에이전트·그록봇 -----------------------------------------------------
 
 describe("API 키 줄은 AI 허브로 (보류 마커)", () => {
   it("설정으로 넘기기 전에 deferred 를 쓰고 done 은 쓰지 않는다", async () => {
@@ -1264,27 +1200,15 @@ describe("재진입 (#2870, RCA 1-b): 설정·에이전트 화면에서 다시 �
     expect(continued).toBe(1);
   });
 
-  it("합류 중간 단계의 [뒤로]는 화면을 닫지 않고 목록으로 돌아간다", async () => {
+  it("개인 에이전트 켜기는 온보딩과 같은 요청을 보낸다", async () => {
     subscriptionOn();
+    personalPort.enable.mockResolvedValue(agentSummary());
     const host = mountStage({ mode: "reentry" });
     await waitFor(() => rowIds(host).includes("claude"), "rows");
     pick(host, "claude");
-    await waitFor(() => q(host, "first-agent-connect") !== null, "connect");
-    click(q(host, "ai-connect-reentry-back"));
-    await waitFor(() => rowIds(host).length > 0, "back to rows");
-    expect(continued).toBe(0);
-  });
-
-  it("구독 합류는 온보딩과 같은 요청(owner_only + claude_code)을 보낸다", async () => {
-    subscriptionOn();
-    const host = mountStage({ mode: "reentry" });
-    await waitFor(() => rowIds(host).includes("claude"), "rows");
-    pick(host, "claude");
-    await waitFor(() => vi.mocked(createHostedConnection).mock.calls.length === 1, "create");
-    expect(vi.mocked(createHostedConnection).mock.calls[0]?.[1]).toMatchObject({
-      invocationScope: "owner_only",
-      subscriptionHarness: "claude_code",
-    });
+    await waitFor(() => personalPort.enable.mock.calls.length === 1, "enable");
+    expect(personalPort.enable).toHaveBeenCalledWith("claude_code", "seongjae-claude");
+    expect(vi.mocked(createHostedConnection)).not.toHaveBeenCalled();
   });
 });
 

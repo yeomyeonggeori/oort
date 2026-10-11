@@ -437,5 +437,18 @@ export function joinJoinedLine(agentDisplayName: string): string {
 
 export const JOIN_JOINED_DETAIL = "나만 부를 수 있는 개인 에이전트예요.";
 
+// ---- 개인 에이전트 켜기 (ADR-0198 증보 1 D7·T3, #3713) ------------------------------
+//
+// 「내 도구」 줄의 주 행동은 호스티드 구독 에이전트 생성(Agent Port)이 아니라 P2 개인
+// 에이전트 켜기다. 로그인은 공식 CLI가 이미 끝냈고(`준비됨` 줄만 고를 수 있다), 서버는
+// 하네스 로그인을 모른다. 별칭이 곧 핸들이고, 부르는 것은 나만, 답은 내 맥이 켜져
+// 있을 때만이다.
+export const PERSONAL_ENABLING_LINE = "개인 에이전트를 켜고 있어요.";
+export const PERSONAL_JOINED_HINT = "내 맥이 켜져 있을 때만 답해요.";
+/** 서버에 개인 에이전트 라우트가 없을 때(404/405): 줄을 고를 수 없게 하고 이유를 말한다. */
+export const PERSONAL_UNAVAILABLE_LINE =
+  "이 서버에서는 아직 개인 에이전트를 켤 수 없어요. 서버가 업데이트되면 열려요.";
+export const PERSONAL_UNAVAILABLE_DETAIL = "이 서버에서는 아직 켤 수 없어요";
+
 export const CONNECT_ENDPOINT_LABEL = "주소";
 export const CONNECT_CREDENTIAL_LABEL = "연결 값";
