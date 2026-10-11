@@ -93,19 +93,27 @@ BEGIN
 END $$;
 
 -- -----------------------------------------------------------------------------
--- Integrity guards (#3682 security review M1).
+-- Integrity guards (#3682 security review M1 and the 2nd pass).
 --
 -- The single-column FKs above do not tie a row to ONE workspace, and an FK check
--- reads the referenced table past RLS. These BEFORE triggers close both:
---   * INSERT: the message, its channel and both members must belong to the row's
---     workspace and the message to the row's channel. The lookup runs under the
---     caller's RLS, so a foreign tenant's ids are simply "not found" and the
---     refusal is the same for "foreign" and "made up" (no existence oracle; the
---     BEFORE trigger fires before the FK check).
---   * UPDATE issued directly by a statement (trigger depth 1): only `read_at` may
---     change, and only NULL -> a timestamp. The projection's own merge and the
---     cursor auto-read run from inside other triggers (depth >= 2) and are
---     unaffected.
+-- reads the referenced table past RLS. These BEFORE triggers close both. They
+-- decide on the ROW alone, never on trigger depth or any other signal a caller
+-- can shape (a caller may create a TEMP trigger and update from inside it):
+--   * INSERT: the message, its channel, the recipient (still in the channel) and
+--     the actor must belong to the row's workspace; the row's seq, actor and
+--     created_at must be the message's own. The lookup runs under the caller's
+--     RLS, so a foreign tenant's ids are simply "not found" and the refusal is
+--     the same for "foreign" and "made up" (no existence oracle; BEFORE fires
+--     before the FK check). Consequence, by design (fail-closed): a message
+--     INSERT whose projection would be inconsistent fails with 23514 rather than
+--     writing a row that points across a tenant.
+--   * UPDATE: every identity column is immutable; `reasons` may only grow (the
+--     projection's merge); `read_at` may only go NULL -> a timestamp between the
+--     message's time and now (a stranger cannot back-date an item into the
+--     retention sweep).
+-- Residual (documented, ADR-0199 D5): the member boundary inside a workspace is
+-- a query predicate, so SQL running with the tenant GUC could still read_at-flip
+-- or delete another member's row; E2's statements bind the bearer's member id.
 -- -----------------------------------------------------------------------------
 CREATE FUNCTION inbox_item_guard_insert() RETURNS trigger AS $$
 BEGIN
@@ -114,10 +122,15 @@ BEGIN
       FROM message m
       JOIN channel c ON c.id = m.channel_id AND c.workspace_id = NEW.workspace_id
       JOIN member rcpt ON rcpt.id = NEW.member_id AND rcpt.workspace_id = NEW.workspace_id
+      JOIN membership ms ON ms.channel_id = m.channel_id AND ms.member_id = NEW.member_id
+                        AND ms.left_at IS NULL
       JOIN member actor ON actor.id = NEW.actor_member_id AND actor.workspace_id = NEW.workspace_id
      WHERE m.id = NEW.message_id
        AND m.workspace_id = NEW.workspace_id
        AND m.channel_id = NEW.channel_id
+       AND m.seq = NEW.seq
+       AND m.author_member_id = NEW.actor_member_id
+       AND m.created_at = NEW.created_at
   ) THEN
     RAISE EXCEPTION 'inbox_item references must belong to its workspace'
       USING ERRCODE = '23514';
@@ -128,16 +141,17 @@ $$ LANGUAGE plpgsql SET search_path = public, pg_temp;
 
 CREATE FUNCTION inbox_item_guard_update() RETURNS trigger AS $$
 BEGIN
-  IF pg_trigger_depth() = 1 THEN
-    IF (NEW.id, NEW.workspace_id, NEW.member_id, NEW.kind, NEW.reasons, NEW.channel_id,
-        NEW.message_id, NEW.seq, NEW.actor_member_id, NEW.created_at)
-       IS DISTINCT FROM
-       (OLD.id, OLD.workspace_id, OLD.member_id, OLD.kind, OLD.reasons, OLD.channel_id,
-        OLD.message_id, OLD.seq, OLD.actor_member_id, OLD.created_at)
-       OR (OLD.read_at IS NOT NULL AND NEW.read_at IS DISTINCT FROM OLD.read_at) THEN
-      RAISE EXCEPTION 'inbox_item: only read_at (NULL -> timestamp) may be updated directly'
-        USING ERRCODE = '23514';
-    END IF;
+  IF (NEW.id, NEW.workspace_id, NEW.member_id, NEW.channel_id, NEW.message_id,
+      NEW.seq, NEW.actor_member_id, NEW.created_at)
+     IS DISTINCT FROM
+     (OLD.id, OLD.workspace_id, OLD.member_id, OLD.channel_id, OLD.message_id,
+      OLD.seq, OLD.actor_member_id, OLD.created_at)
+     OR NOT (OLD.reasons <@ NEW.reasons)
+     OR (OLD.read_at IS NOT NULL AND NEW.read_at IS DISTINCT FROM OLD.read_at)
+     OR (NEW.read_at IS NOT NULL
+         AND (NEW.read_at < NEW.created_at OR NEW.read_at > now() + interval '1 minute')) THEN
+    RAISE EXCEPTION 'inbox_item: only reasons (grow) and read_at (NULL -> timestamp) may change'
+      USING ERRCODE = '23514';
   END IF;
   RETURN NEW;
 END;

@@ -1037,10 +1037,12 @@ async fn e1_11_the_integrity_guards_hold_what_the_fks_cannot() {
 
     // (b) a direct UPDATE may only fill read_at; it cannot retarget or rewrite a row.
     for set in [
-        "kind = 'dm'",
         "member_id = actor_member_id",
-        "message_id = (SELECT id FROM message WHERE id <> inbox_item.message_id LIMIT 1)",
+        "channel_id = (SELECT id FROM channel WHERE id <> inbox_item.channel_id LIMIT 1)",
+        "actor_member_id = member_id",
+        "created_at = created_at - interval '1 day'",
         "reasons = ARRAY['dm']",
+        "message_id = (SELECT id FROM message WHERE id <> inbox_item.message_id LIMIT 1)",
         "seq = seq + 1",
     ] {
         let item_id = {
@@ -1096,6 +1098,69 @@ async fn e1_11_the_integrity_guards_hold_what_the_fks_cannot() {
         .await;
         assert!(res.is_err(), "read_at is monotone: `{sql}`");
     }
+
+    // (c) the guard decides on the row, not on how deep the trigger stack is: a
+    // caller-made TEMP trigger that rewrites a row from inside must fail too.
+    let other_msg = theirs.message.id;
+    let item_id2: Uuid =
+        sqlx::query_scalar("SELECT id FROM inbox_item WHERE message_id = $1 AND member_id = $2")
+            .bind(reply.message.id)
+            .bind(alice)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    let evil = with_tenant_tx(&app, ws_a, move |conn| {
+        Box::pin(async move {
+            sqlx::query("CREATE TEMP TABLE kick (x int) ON COMMIT DROP").execute(&mut *conn).await?;
+            sqlx::query(&format!(
+                "CREATE FUNCTION pg_temp.evil() RETURNS trigger AS $f$ BEGIN \
+                   UPDATE inbox_item SET message_id = '{other_msg}', channel_id = '{ch_b}' WHERE id = '{item_id2}'; \
+                   RETURN NEW; END $f$ LANGUAGE plpgsql"
+            ))
+            .execute(&mut *conn).await?;
+            sqlx::query("CREATE TRIGGER evil AFTER INSERT ON kick FOR EACH ROW EXECUTE FUNCTION pg_temp.evil()")
+                .execute(&mut *conn).await?;
+            sqlx::query("INSERT INTO kick VALUES (1)").execute(&mut *conn).await?;
+            Ok::<_, DbError>(())
+        })
+    })
+    .await;
+    assert!(
+        evil.is_err(),
+        "a TEMP-trigger UPDATE must not retarget a row across tenants"
+    );
+
+    // (d) a direct INSERT cannot invent the content of a row either.
+    let carol = seed_member(&su, ws_a, "carol", "human").await; // not in the channel
+    let forged = |member: Uuid, actor: Uuid, seq: i64| {
+        let app = app.clone();
+        let mid = reply.message.id;
+        async move {
+            with_tenant_tx(&app, ws_a, move |conn| {
+                Box::pin(async move {
+                    sqlx::query(
+                        "INSERT INTO inbox_item (workspace_id, member_id, kind, reasons, channel_id, \
+                         message_id, seq, actor_member_id, created_at) \
+                         SELECT $1, $2, 'dm', ARRAY['dm'], channel_id, id, $4, $3, created_at \
+                           FROM message WHERE id = $5",
+                    )
+                    .bind(ws_a).bind(member).bind(actor).bind(seq).bind(mid)
+                    .execute(&mut *conn).await?;
+                    Ok::<_, DbError>(())
+                })
+            })
+            .await
+        }
+    };
+    assert!(
+        forged(carol, bob, reply.message.seq).await.is_err(),
+        "a non-member recipient"
+    );
+    assert!(
+        forged(alice, alice, reply.message.seq).await.is_err(),
+        "a made-up actor"
+    );
+    assert!(forged(alice, bob, 999).await.is_err(), "a made-up seq");
 }
 
 // ---------------------------------------------------------------------------
