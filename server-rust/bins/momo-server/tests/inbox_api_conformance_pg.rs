@@ -20,7 +20,9 @@
 //! | `a_quote_reply_publishes_one_created_event_in_the_senders_transaction` | drop `inbox_item_publish_created_trg` |
 //! | `pending_approvals_are_merged_on_the_first_page_only` | store/merge approvals on later pages |
 //! | `retention_deletes_only_old_read_items_and_is_idempotent` | delete unread rows, touch `message`, or use the wrong clock |
-//! | `a_bad_filter_cursor_or_muted_value_is_a_400` | loosen the parsers |
+//! | `a_bad_filter_cursor_or_muted_value_is_a_400` | loosen the parsers or drop the cursor range check |
+//! | `an_item_born_in_the_future_reads_with_a_200_and_never_before_its_message` | revert `GREATEST(now(), created_at)` in the single / read-all UPDATE |
+//! | `the_unread_count_stops_at_one_thousand` | drop the `LIMIT` / `.min(INBOX_UNREAD_COUNT_CAP)` |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -700,7 +702,8 @@ async fn deleted_and_lost_and_muted_items_are_re_judged_at_read_time() {
 
     // a deleted message keeps its row but loses its words
     sqlx::query(
-        "UPDATE message SET deleted_at = now(), state = 'deleted', body = NULL WHERE id = $1",
+        // body deliberately KEPT: only the deleted branch may hide the text
+        "UPDATE message SET deleted_at = now(), state = 'deleted' WHERE id = $1",
     )
     .bind(reply)
     .execute(&w.su)
@@ -714,7 +717,25 @@ async fn deleted_and_lost_and_muted_items_are_re_judged_at_read_time() {
         .find(|i| i["message"]["id"] == reply.to_string())
         .unwrap();
     assert_eq!(deleted["message"]["deleted"], true);
-    assert_eq!(deleted["message"]["preview"], "");
+    assert_eq!(
+        deleted["message"]["preview"], "",
+        "a deleted message's words never leave, even though its body is still in the row"
+    );
+    // a deleted QUOTED message is hidden the same way (its body is also kept)
+    sqlx::query("UPDATE message SET deleted_at = now(), state = 'deleted' WHERE id = $1")
+        .bind(mine)
+        .execute(&w.su)
+        .await
+        .unwrap();
+    let page = w.inbox(&alice, "?muted=show").await;
+    let with_quote = page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["message"]["id"] == reply.to_string())
+        .unwrap();
+    assert_eq!(with_quote["quotedMessage"]["deleted"], true);
+    assert_eq!(with_quote["quotedMessage"]["preview"], "");
 
     // losing a private room removes its items from view and from the count
     sqlx::query("UPDATE membership SET left_at = now() WHERE channel_id = $1 AND member_id = $2")
@@ -963,6 +984,16 @@ async fn a_bad_filter_cursor_or_muted_value_is_a_400() {
         let (status, body) = w.get(&alice, &format!("inbox{q}")).await;
         assert_eq!(status, 400, "{q}: {body}");
     }
+    // out-of-range micros in an otherwise well-formed cursor: 400, never a 500
+    {
+        use base64::Engine as _;
+        for micros in [i64::MAX, i64::MIN, -1_000_000i64, i64::MIN / 2] {
+            let cursor = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(format!("{micros}:{}", Uuid::new_v4()));
+            let (status, body) = w.get(&alice, &format!("inbox?cursor={cursor}")).await;
+            assert_eq!(status, 400, "micros {micros}: {body}");
+        }
+    }
     let (status, _) = w.post(&alice, "inbox/read-all?filter=bogus").await;
     assert_eq!(status, 400);
     let (status, _) = w.put(&alice, "inbox/not-a-uuid/read").await;
@@ -970,4 +1001,91 @@ async fn a_bad_filter_cursor_or_muted_value_is_a_400() {
     // a junk limit falls back to the default rather than failing
     let (status, _) = w.get(&alice, "inbox?limit=abc").await;
     assert_eq!(status, 200);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn an_item_born_in_the_future_reads_with_a_200_and_never_before_its_message() {
+    let _guard = test_lock().await;
+    let w = world().await;
+    let alice = w.human("alice").await;
+    let bob = w.human("bob").await;
+    let ch = w.channel("general", "public", &[alice.id, bob.id]).await;
+    let (mine, _) = w.say(ch, alice.id, "원문", None, None, None).await;
+    // created a couple of seconds ahead of this server's clock: the case where the
+    // reader's now() (transaction start) is earlier than the item's created_at
+    let ahead: String = sqlx::query_scalar(
+        "SELECT to_char(clock_timestamp() + interval '3 seconds', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')",
+    )
+    .fetch_one(&w.su).await.unwrap();
+    let ahead2: String = sqlx::query_scalar(
+        "SELECT to_char(clock_timestamp() + interval '4 seconds', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')",
+    )
+    .fetch_one(&w.su).await.unwrap();
+    let (a, _) = w
+        .say(
+            ch,
+            bob.id,
+            "앞선 시계 1",
+            Some(mine),
+            None,
+            Some(ahead.as_str()),
+        )
+        .await;
+    let (b, _) = w
+        .say(
+            ch,
+            bob.id,
+            "앞선 시계 2",
+            Some(mine),
+            None,
+            Some(ahead2.as_str()),
+        )
+        .await;
+    // the projection copies message.created_at, so both are "in the future"
+    let item_a: Uuid = sqlx::query_scalar("SELECT id FROM inbox_item WHERE message_id = $1")
+        .bind(a)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    let (status, body) = w.put(&alice, &format!("inbox/{item_a}/read")).await;
+    assert_eq!(status, 200, "single read of a future-dated item: {body}");
+    let (status, body) = w.post(&alice, "inbox/read-all").await;
+    assert_eq!(status, 200, "read-all with a future-dated item: {body}");
+    assert_eq!(body["marked"], 1);
+    for m in [a, b] {
+        let ok: bool = sqlx::query_scalar("SELECT read_at IS NOT NULL AND read_at >= created_at FROM inbox_item WHERE message_id = $1")
+            .bind(m).fetch_one(&w.su).await.unwrap();
+        assert!(ok, "read_at must not precede the message");
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn the_unread_count_stops_at_one_thousand() {
+    let _guard = test_lock().await;
+    let w = world().await;
+    let alice = w.human("alice").await;
+    let bob = w.human("bob").await;
+    let ch = w.channel("general", "public", &[alice.id, bob.id]).await;
+    let (mine, _) = w.say(ch, alice.id, "원문", None, None, None).await;
+    sqlx::query(
+        "WITH bump AS (UPDATE channel_seq SET last_seq = last_seq + 1005 WHERE channel_id = $1 RETURNING last_seq) \
+         INSERT INTO message (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, reply_to_id) \
+         SELECT $2, $1, bump.last_seq - 1005 + n, 0, 0, $3, 'text', 'r' || n, $4 \
+           FROM bump, generate_series(1, 1005) AS n",
+    )
+    .bind(ch).bind(w.ws).bind(bob.id).bind(mine)
+    .execute(&w.su).await.unwrap();
+    let rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM inbox_item WHERE member_id = $1 AND read_at IS NULL",
+    )
+    .bind(alice.id)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(rows, 1005, "fixture: more unread rows than the cap");
+    let page = w.inbox(&alice, "?limit=1").await;
+    assert_eq!(page["unreadCount"], 1000, "capped, not 1005");
+    assert_eq!(page["items"].as_array().unwrap().len(), 1);
 }
