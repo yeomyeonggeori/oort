@@ -493,7 +493,7 @@ export function readTargetSeq(entry: MailboxEntry): number | null {
   return entry.seq === undefined ? null : entry.seq;
 }
 
-/** 스크린리더가 한 줄로 읽는 문장: 안 읽음 · 종류 · 보낸 이 · 시각 · 미리보기. */
+/** 스크린리더가 한 줄로 읽는 문장: (안 읽음일 때만 「안 읽음」) 종류 · 보낸 이 · 시각 · 미리보기. */
 export function entryAriaLabel(entry: MailboxEntry): string {
   const unread = entry.unread
     ? entry.unreadCount > 1

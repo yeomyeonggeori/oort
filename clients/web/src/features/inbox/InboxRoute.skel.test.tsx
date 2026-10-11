@@ -90,6 +90,7 @@ vi.mock("./useMailbox", () => ({
     serverUnreadCount: state.serverUnreadCount,
     hasMore: state.hasMore,
     isFetchingMore: false,
+    moreError: false,
     fetchMore,
     entries: state.entries,
     isLoading: state.isLoading,

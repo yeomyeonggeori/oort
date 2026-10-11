@@ -87,6 +87,8 @@ export interface Mailbox {
   /** 서버 경로: 다음 쪽이 있는가. */
   hasMore: boolean;
   isFetchingMore: boolean;
+  /** 다음 쪽만 실패했다: 이미 받은 목록은 그대로다. */
+  moreError: boolean;
   fetchMore: () => void;
   isLoading: boolean;
   /** 모든 원천이 실패했을 때만. 일부만 실패하면 있는 만큼 그린다. */
@@ -232,6 +234,7 @@ export function useMailbox(filter: MailboxFilter | "reminders" = "all"): Mailbox
     serverUnreadCount: query.data?.pages[0]?.unreadCount ?? null,
     hasMore: query.hasNextPage,
     isFetchingMore: query.isFetchingNextPage,
+    moreError: query.isFetchNextPageError,
     fetchMore: () => void query.fetchNextPage(),
     isLoading: surface.isPending || (serverOn && query.isLoading),
     error: surface.isError || (serverOn && query.isError),
@@ -464,6 +467,7 @@ function useComposedMailbox(
     serverUnreadCount: null,
     hasMore: false,
     isFetchingMore: false,
+    moreError: false,
     fetchMore: () => undefined,
     entries,
     isLoading:

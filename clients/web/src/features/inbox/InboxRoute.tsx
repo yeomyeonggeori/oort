@@ -107,10 +107,17 @@ function emptyCopyFor(
         detail: "사람이나 에이전트와 DM을 시작하면 여기 대화가 쌓여요.",
       };
     case "thread":
-      return {
-        headline: "새 답글이 달린 스레드가 없어요.",
-        detail: "내가 참여한 스레드에 답글이 달리면 여기 모여요.",
-      };
+      // 두 원천의 「스레드」는 약속이 다르다: 서버는 내가 참여한 스레드의 새 글, 구 서버는
+      // 내가 쓴 글에 달린 새 답글만 안다. 빈 화면은 그 원천이 말할 수 있는 것만 말한다.
+      return server
+        ? {
+            headline: "새 답글이 달린 스레드가 없어요.",
+            detail: "내가 참여한 스레드에 답글이 달리면 여기 모여요.",
+          }
+        : {
+            headline: "새 답글이 달린 내 글이 없어요.",
+            detail: "내가 쓴 글에 답글이 달리면 여기 모여요.",
+          };
     case "task":
       return {
         headline: "지금 처리할 일이 없어요. 조용한 게 정상이에요.",
@@ -447,8 +454,17 @@ export function InboxRoute() {
                             aria-busy={mailbox.isFetchingMore}
                             data-testid="inbox-load-more"
                           >
-                            더 보기
+                            {mailbox.moreError ? "다시 시도" : "더 보기"}
                           </Button>
+                          {mailbox.moreError && (
+                            <p
+                              className="pt-2 text-meta text-ink-muted"
+                              role="status"
+                              data-testid="inbox-more-error"
+                            >
+                              다음 항목을 불러오지 못했어요. 이미 받은 항목은 그대로예요.
+                            </p>
+                          )}
                         </div>
                       )}
                     </>
@@ -500,10 +516,16 @@ export function InboxRoute() {
         {isServer ? (
           confirmingAll ? (
             <>
-              <span className="text-meta text-ink" data-testid="mark-all-text">
-                {scopeLabel}의 안 읽은 항목을 모두 읽음으로 표시해요. 채널의 읽음 위치는 바뀌지 않아요.
+              <span className="text-meta text-ink" role="status" data-testid="mark-all-text">
+                「{scopeLabel}」 탭의 안 읽은 항목을 모두 읽음으로 표시해요. 채널의 읽음 위치는 바뀌지 않아요.
               </span>
-              <Button size="sm" onClick={markAllRead} data-testid="mark-all-confirm">
+              {/* 누른 버튼이 확인 줄로 바뀌므로 포커스를 확인 버튼으로 옮긴다. */}
+              <Button
+                size="sm"
+                onClick={markAllRead}
+                autoFocus
+                data-testid="mark-all-confirm"
+              >
                 읽음으로 표시
               </Button>
               <Button
