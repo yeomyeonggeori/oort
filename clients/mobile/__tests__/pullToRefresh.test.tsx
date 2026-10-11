@@ -104,6 +104,10 @@ interface Overrides {
 function installFetch(overrides: Overrides = {}): jest.Mock {
   const mock = jest.fn(async (url: string) => {
     if (url.includes('/reactions')) return jsonResponse(200, {});
+    // 인박스 투영이 없는 구 서버(ADR-0199): 404 -> 클라이언트 조합이 원장을 다시 읽는다.
+    if (/\/inbox(\/|$)/.test(new URL(url).pathname)) {
+      return jsonResponse(404, {error: {code: 'not_found', message: 'not found'}});
+    }
     if (url.includes('/work-sessions')) return jsonResponse(200, {sessions: []});
     if (url.includes('/work-hosts')) return jsonResponse(200, {hosts: []});
     if (url.includes('/channels') && !url.includes('/messages')) {

@@ -12,11 +12,17 @@ import { REMINDER_TAB_LABEL } from "@momo/core/features/reminders/model";
 /** 웹 인박스의 탭: 메일함 필터 여섯 + 맨 끝의 「나중에」(리마인더). */
 export type WebMailboxFilter = MailboxFilter | "reminders";
 
-export function mailboxTabs(tasksAvailable: boolean): WebMailboxFilter[] {
+/** 「답글」은 서버 투영에만 있는 종류다: 구 서버에서는 언제나 빈 탭이라 세우지 않는다. */
+export function mailboxTabs(
+  tasksAvailable: boolean,
+  replyAvailable = false
+): WebMailboxFilter[] {
   // 승인 원장이 없는 서버에서는 「처리할 일」 탭이 언제나 빈 목록이 된다. 빈
   // 목록은 「처리할 일이 없다」로 읽히는데 우리가 모르는 사실이므로 탭을 세우지 않는다.
   return [
-    ...MAILBOX_FILTERS.filter((f) => f !== "task" || tasksAvailable),
+    ...MAILBOX_FILTERS.filter(
+      (f) => (f !== "task" || tasksAvailable) && (f !== "reply" || replyAvailable)
+    ),
     "reminders",
   ];
 }

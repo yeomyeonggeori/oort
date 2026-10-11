@@ -69,6 +69,8 @@ interface World {
   afterMessages: Record<string, unknown[]>;
   failMessages?: boolean;
   failApprovals?: boolean;
+  /** 없으면 구 서버: `GET /inbox`가 404다. */
+  inbox?: {pages: Record<string, unknown>; failStatus?: number};
 }
 
 function fullWorld(): World {
@@ -101,9 +103,20 @@ const json = (status: number, body: unknown): Response =>
   ({status, ok: status >= 200 && status < 300, text: async () => JSON.stringify(body)}) as unknown as Response;
 
 function installFetch(world: World) {
-  const mock = jest.fn(async (url: string) => {
+  const mock = jest.fn(async (url: string, _init?: {method?: string}) => {
     const target = String(url);
     const parsed = new URL(target);
+    if (/\/inbox(\/|$)/.test(parsed.pathname)) {
+      if (!world.inbox) return json(404, {error: {code: 'not_found', message: 'not found'}});
+      if (world.inbox.failStatus) return json(world.inbox.failStatus, {error: {code: 'internal', message: 'x'}});
+      if (parsed.pathname.endsWith('/read')) {
+        return json(200, {id: parsed.pathname.split('/').slice(-2)[0], readAt: '2026-10-11T04:10:00.000001Z', unreadCount: 1});
+      }
+      const probe = parsed.searchParams.get('limit') === '1';
+      return json(200, probe
+        ? {items: [], nextCursor: null, unreadCount: 0}
+        : (world.inbox.pages[parsed.searchParams.get('cursor') ?? ''] ?? {items: [], nextCursor: null, unreadCount: 0}));
+    }
     if (target.includes('/approvals')) {
       if (world.failApprovals) return json(500, {error: {code: 'internal', message: 'x'}});
       return json(200, {approvals: parsed.searchParams.get('status') === 'pending' ? world.approvals : []});
@@ -206,7 +219,7 @@ describe('인박스 「전체」 (#3663)', () => {
     installFetch(world);
     await openInbox();
     await waitFor(() => expect(screen.getByTestId('inbox-empty')).toBeTruthy(), {timeout: 10_000});
-    expect(screen.getByTestId('inbox-empty')).toHaveTextContent(/조용한 게 정상입니다/);
+    expect(screen.getByTestId('inbox-empty')).toHaveTextContent(/조용한 게 정상이에요/);
   });
 
   it('시도한 원천이 모두 실패하면 오류와 다시 시도 (하나라도 답하면 있는 만큼 그린다)', async () => {
@@ -225,5 +238,94 @@ describe('인박스 「전체」 (#3663)', () => {
     await openInbox();
     await waitFor(() => expect(rowKeys()).toEqual(['approval:ap-1']), {timeout: 10_000});
     expect(screen.queryByTestId('inbox-error')).toBeNull();
+  });
+});
+
+// ---- 서버 투영 (ADR-0199, #3684) ---------------------------------------------
+
+const wireItem = (id: string, over: Record<string, unknown> = {}) => ({
+  id, kind: 'reply_to_me', reasons: ['reply_to_me'],
+  channel: {id: GENERAL, name: 'general', kind: 'public'},
+  message: {id: `m-${id}`, seq: 8, authorMemberId: BOT, preview: '배포 로그 확인했어요', deleted: false},
+  quotedMessage: {id: 'q1', authorMemberId: ME, preview: '배포 어떻게 됐어?', deleted: false},
+  actorMemberId: BOT, createdAt: '2026-10-11T04:07:12.123456Z', readAt: null, ...over,
+});
+
+function serverWorld(): World {
+  const world = fullWorld();
+  world.inbox = {
+    pages: {
+      '': {
+        items: [
+          wireItem('A1'),
+          wireItem('A2', {kind: 'mention', reasons: ['mention'], quotedMessage: undefined, readAt: '2026-10-11T04:09:00.000001Z'}),
+        ],
+        nextCursor: 'cur-2',
+        unreadCount: 1,
+      },
+      'cur-2': {items: [wireItem('B1', {kind: 'dm', reasons: ['dm'], quotedMessage: undefined})], nextCursor: null, unreadCount: 1},
+    },
+  };
+  return world;
+}
+
+const inboxCalls = (mock: jest.Mock) =>
+  mock.mock.calls.map(c => new URL(String(c[0]))).filter(u => /\/inbox(\/|$)/.test(u.pathname));
+
+describe('인박스 서버 투영 (#3684)', () => {
+  it('서버 항목을 그리고, 읽은 항목은 남되 점이 없고, 답글 칩이 선다. 구 서버 조합은 돌지 않는다', async () => {
+    const mock = installFetch(serverWorld());
+    await openInbox();
+    await waitFor(() => expect(rowKeys()).toContain('inbox:a1'), {timeout: 10_000});
+    expect(rowKeys().filter(k => k.startsWith('inbox:'))).toEqual(['inbox:a1', 'inbox:a2']);
+    expect(screen.queryByTestId('mailbox-unread-inbox:a1')).toBeTruthy();
+    expect(screen.queryByTestId('mailbox-unread-inbox:a2')).toBeNull();
+    expect(screen.getByTestId('inbox-tab-reply')).toBeTruthy();
+    // 조합 경로의 읽기(DM 최근 페이지)는 한 건도 나가지 않는다.
+    expect(mock.mock.calls.some(c => String(c[0]).includes(`/channels/${DM_SEO}/messages`))).toBe(false);
+  });
+
+  it('더 보기가 서버 커서로 다음 쪽을 이어 붙인다', async () => {
+    const mock = installFetch(serverWorld());
+    await openInbox();
+    await waitFor(() => expect(screen.getByTestId('inbox-load-more')).toBeTruthy(), {timeout: 10_000});
+    fireEvent.press(screen.getByTestId('inbox-load-more'));
+    await waitFor(() => expect(rowKeys()).toContain('inbox:b1'), {timeout: 10_000});
+    expect(inboxCalls(mock).some(u => u.searchParams.get('cursor') === 'cur-2')).toBe(true);
+  });
+
+  it('안 읽은 항목을 누르면 그 항목만 PUT read로 읽음 처리하고 대화로 간다', async () => {
+    const mock = installFetch(serverWorld());
+    await openInbox();
+    await waitFor(() => expect(rowKeys()).toContain('inbox:a1'), {timeout: 10_000});
+    fireEvent.press(within(screen.getByTestId('mailbox-row-inbox:a1')).getByRole('button'));
+    await waitFor(() => expect(screen.getByTestId('header-back')).toBeTruthy(), {timeout: 10_000});
+    await waitFor(() => {
+      const put = mock.mock.calls.find(c => String(c[0]).endsWith('/inbox/A1/read'));
+      expect(put?.[1]?.method).toBe('PUT');
+    });
+  });
+
+  it('5xx는 구 서버가 아니라 장애다: 후퇴하지 않고 오류를 말한다', async () => {
+    const world = serverWorld();
+    world.inbox = {pages: {}, failStatus: 500};
+    const mock = installFetch(world);
+    await openInbox();
+    await waitFor(() => expect(screen.getByTestId('inbox-error')).toBeTruthy(), {timeout: 10_000});
+    expect(mock.mock.calls.some(c => String(c[0]).includes('/messages'))).toBe(false);
+  });
+});
+
+describe('인박스 구 서버 후퇴 (#3684)', () => {
+  it('판별은 한 번만: 칩을 오가도 /inbox는 한 번 묻고, 답글 칩 없이 클라이언트 조합이 돈다', async () => {
+    const mock = installFetch(fullWorld());
+    await openInbox();
+    await waitFor(() => expect(rowKeys().length).toBe(5), {timeout: 10_000});
+    fireEvent.press(screen.getByTestId('inbox-tab-dm'));
+    await waitFor(() => expect(rowKeys()).toHaveLength(2));
+    fireEvent.press(screen.getByTestId('inbox-tab-all'));
+    await waitFor(() => expect(rowKeys().length).toBe(5));
+    expect(inboxCalls(mock)).toHaveLength(1);
+    expect(screen.queryByTestId('inbox-tab-reply')).toBeNull();
   });
 });

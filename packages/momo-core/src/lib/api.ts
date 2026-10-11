@@ -39,6 +39,17 @@ import {
 } from "../features/presence/customStatus";
 // PresenceSnapshot / PresenceWrite are the GET/PUT shapes of the same surface.
 import {
+  inboxQueryString,
+  isInboxAbsentStatus,
+  parseInboxItemRead,
+  parseInboxPage,
+  parseInboxReadAll,
+  type InboxItemReadResult,
+  type InboxQuery,
+  type InboxReadAllResult,
+  type ServerInboxPage,
+} from "../features/inbox/serverInbox";
+import {
   arrayField,
   bool,
   num,
@@ -5222,4 +5233,55 @@ export async function probeSendRouting(
       }),
     }
   );
+}
+
+// ---- Inbox projection (ADR-0199 D6, E3 #3684) -------------------------------
+// GET  /v1/workspaces/{ws}/inbox?filter=&cursor=&limit=&muted=
+// PUT  /v1/workspaces/{ws}/inbox/{id}/read
+// POST /v1/workspaces/{ws}/inbox/read-all?filter=&muted=
+//
+// A server older than E2 answers 404 to the GET. Callers tell that apart from an
+// outage with `isInboxAbsent` and fall back to the composed mailbox.
+
+export async function fetchInbox(
+  workspaceId: string,
+  query: InboxQuery = {}
+): Promise<ServerInboxPage> {
+  const res = await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/inbox${inboxQueryString(query)}`
+  );
+  const page = parseInboxPage(res);
+  if (page === null) throw new WireShapeError();
+  return page;
+}
+
+export async function markInboxItemRead(
+  workspaceId: string,
+  itemId: string
+): Promise<InboxItemReadResult> {
+  const res = await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/inbox/${encodeURIComponent(itemId)}/read`,
+    { method: "PUT" }
+  );
+  const done = parseInboxItemRead(res);
+  if (done === null) throw new WireShapeError();
+  return done;
+}
+
+export async function markInboxReadAll(
+  workspaceId: string,
+  query: Pick<InboxQuery, "filter" | "muted"> = {}
+): Promise<InboxReadAllResult> {
+  const res = await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/inbox/read-all${inboxQueryString(query)}`,
+    { method: "POST" }
+  );
+  const done = parseInboxReadAll(res);
+  if (done === null) throw new WireShapeError();
+  return done;
+}
+
+/** True when the server has no inbox projection (404), false for any other failure. */
+export function isInboxAbsent(error: unknown): boolean {
+  return error instanceof ApiError && isInboxAbsentStatus(error.status);
 }

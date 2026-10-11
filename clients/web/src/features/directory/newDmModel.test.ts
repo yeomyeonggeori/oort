@@ -4,7 +4,6 @@ import {
   existingDmChannelId,
   newDmCandidates,
   peerDot,
-  unresolvedDmLabel,
 } from "./newDmModel";
 
 const ME = "00000000-0000-7000-8000-00000000000A";
@@ -79,25 +78,5 @@ describe("peerDot", () => {
   });
   it("상대를 모르면 null이다", () => {
     expect(peerDot(null, now)).toBeNull();
-  });
-});
-
-describe("unresolvedDmLabel", () => {
-  it("나 혼자의 DM은 「이름 (나)」다", () => {
-    expect(unresolvedDmLabel(dm("c", [ME]), ME, "곽성재", true)).toEqual({
-      text: "곽성재 (나)",
-      isSelf: true,
-    });
-  });
-  it("상대가 명부에 없으면 받는 중에는 「불러오는 중」, 끝난 뒤에는 「알 수 없는 멤버」다", () => {
-    expect(unresolvedDmLabel(dm("c", [ME, OTHER]), ME, "곽성재", false).text).toBe("불러오는 중");
-    expect(unresolvedDmLabel(dm("c", [ME, OTHER]), ME, "곽성재", true).text).toBe("알 수 없는 멤버");
-  });
-  it("어느 경우에도 「다이렉트 메시지」가 아니다", () => {
-    for (const ids of [[ME], [ME, OTHER]]) {
-      for (const ready of [true, false]) {
-        expect(unresolvedDmLabel(dm("c", ids), ME, "나", ready).text).not.toBe("다이렉트 메시지");
-      }
-    }
   });
 });

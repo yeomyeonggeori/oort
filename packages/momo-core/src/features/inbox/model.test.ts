@@ -142,7 +142,7 @@ describe("approval rows", () => {
     expect(item.actor).toBe("@kim-intern");
     expect(item.actorIsAgent).toBe(true);
     // 3R M4: 와이어 액션 타입은 사용자 어휘로 번역된다(actionTypeLabel).
-    expect(item.predicate).toBe("작업 실행 허가를 요청했습니다");
+    expect(item.predicate).toBe("작업 실행 허가를 요청했어요");
     // The projection carries no created_at, so a pending row shows the deadline.
     expect(item.timeLabel).toBe("5분 후 만료");
     expect(item.managedBy).toBe("곽성재");
@@ -235,7 +235,7 @@ describe("approval rows", () => {
       "엔진",
       NOW
     );
-    expect(known.predicate).toBe("작업 세션 종료 허가를 요청했습니다");
+    expect(known.predicate).toBe("작업 세션 종료 허가를 요청했어요");
 
     // 모르는 툴: 지어내지 않고 원문 이름을 쓴다.
     expect(
@@ -245,7 +245,7 @@ describe("approval rows", () => {
         "엔진",
         NOW
       ).predicate
-    ).toBe("repo.branch.delete 허가를 요청했습니다");
+    ).toBe("repo.branch.delete 허가를 요청했어요");
 
     // 이름조차 없으면 갈래를 우리말로. 어느 경우에도 `tool_call`은 안 나온다.
     const nameless = approvalItem(
@@ -254,7 +254,7 @@ describe("approval rows", () => {
       "엔진",
       NOW
     );
-    expect(nameless.predicate).toBe("에이전트 도구 실행 허가를 요청했습니다");
+    expect(nameless.predicate).toBe("에이전트 도구 실행 허가를 요청했어요");
     for (const item of [known, nameless]) {
       expect(item.predicate).not.toContain("tool_call");
     }
@@ -290,7 +290,7 @@ describe("mention rows", () => {
     expect(item.channelLabel).toBe("general");
     expect(item.actor).toBe("곽성재");
     expect(item.actorIsAgent).toBe(false);
-    expect(item.predicate).toBe("회원님을 불렀습니다");
+    expect(item.predicate).toBe("회원님을 불렀어요");
     expect(item.detail).toBe("이 건 김인턴한테 시켜볼까요?");
     expect(item.timeLabel).toBe("1시간 전");
   });

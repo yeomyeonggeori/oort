@@ -166,11 +166,13 @@ describe("channelLabelParts", () => {
       text: "김인턴",
       handle: "@intern-kim",
       isAgent: false,
+      kind: "peer",
     });
     expect(channelLabelParts(dm(INTERN_AGENT.id), DIRECTORY, DEMO.id)).toEqual({
       text: "김인턴",
       handle: "@kim-intern",
       isAgent: true,
+      kind: "peer",
     });
   });
 
@@ -179,15 +181,17 @@ describe("channelLabelParts", () => {
       text: "곽성재",
       handle: null,
       isAgent: false,
+      kind: "peer",
     });
   });
 
   it("falls back without inventing a name when the roster has not loaded", () => {
     const empty = makeDirectory([]);
     expect(channelLabelParts(dm(SEONGJAE.id), empty, DEMO.id)).toEqual({
-      text: "다이렉트 메시지",
+      text: "불러오는 중",
       handle: null,
       isAgent: false,
+      kind: "pending",
     });
   });
 
@@ -203,6 +207,7 @@ describe("channelLabelParts", () => {
       text: "general",
       handle: null,
       isAgent: false,
+      kind: "channel",
     });
   });
 });

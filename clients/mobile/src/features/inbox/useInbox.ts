@@ -1,3 +1,4 @@
+import {missingMemberLabel} from '@momo/core/features/workspace/directory';
 import {
   fetchAgentRuns,
   fetchApprovals,
@@ -152,7 +153,7 @@ export function useFeedContext(): FeedContext {
   const actorFor = useCallback(
     (memberId: string): ActorNames => {
       const found = memberFor(directory, memberId);
-      if (!found) return {name: memberId.slice(0, 8), isAgent: false};
+      if (!found) return {name: missingMemberLabel(directory), isAgent: false};
       const owner =
         found.kind === 'agent' ? memberFor(directory, found.ownerHumanId) : null;
       return {

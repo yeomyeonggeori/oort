@@ -64,7 +64,7 @@ function entry(over: Partial<MailboxEntry>): MailboxEntry {
 
 const task: FeedItem = {
   key: "approval:a1", kind: "approval", tone: "warn", actor: "@kim-intern", actorIsAgent: true,
-  predicate: "세션 종료 허가를 요청했습니다", outcome: null, outcomeTone: "muted", channelId: CH,
+  predicate: "세션 종료 허가를 요청했어요", outcome: null, outcomeTone: "muted", channelId: CH,
   channelLabel: "#workbench", timeLabel: "5분 후 만료", sortAtMs: NOW, pending: true, reason: "r",
   approvalId: "a1", expiresAtMs: undefined,
 } as FeedItem;
@@ -155,6 +155,43 @@ describe("InboxDetail", () => {
     expect(api.sendMessage).toHaveBeenCalledWith(WS, CH, expect.any(String), "확인했어요", { replyToId: "m5" });
   });
 
+  it("답글: 인용된 내 글을 보이고, 그 메시지를 강조하며, 인용(replyToId)해 답한다", async () => {
+    const h = await mount(
+      entry({
+        key: "inbox:r1", itemId: "r1", kind: "reply", messageId: "m5",
+        typeLabel: "답글 · #agent-lab", quotedPreview: "배포 어떻게 됐어?",
+      })
+    );
+    expect(h.querySelector('[data-testid="inbox-quoted"]')?.textContent).toContain("배포 어떻게 됐어?");
+    expect(h.querySelector('[data-highlighted="true"]')?.textContent).toContain("첫째");
+    expect(api.fetchMessages).toHaveBeenCalledWith(WS, CH, { limit: 20, before: 8 });
+    const input = h.querySelector<HTMLTextAreaElement>('[data-testid="inbox-reply-input"]')!;
+    await act(async () => {
+      const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      set.call(input, "고마워요");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      h.querySelector<HTMLButtonElement>('[data-testid="inbox-reply-send"]')!.click();
+      await Promise.resolve();
+    });
+    expect(api.sendMessage).toHaveBeenCalledWith(WS, CH, expect.any(String), "고마워요", { replyToId: "m5" });
+  });
+
+  it("서버 투영: 읽은 항목에는 「안 읽음으로 표시」가 없다(되돌리는 길이 없다), 안 읽은 항목에는 읽음 버튼이 있다", async () => {
+    const read = await mount(entry({ key: "inbox:1", itemId: "i1", kind: "mention", unread: false }));
+    expect(read.querySelector('[data-testid="inbox-toggle-read"]')).toBeNull();
+    if (root) act(() => root?.unmount());
+    root = null; host?.remove(); host = null;
+    const unread = await mount(entry({ key: "inbox:2", itemId: "i2", kind: "mention", unread: true }));
+    expect(unread.querySelector('[data-testid="inbox-toggle-read"]')?.textContent).toBe("읽음으로 표시");
+  });
+
+  it("구 서버 항목은 읽은 뒤에도 안 읽음으로 되돌릴 수 있다", async () => {
+    const h = await mount(entry({ unread: false }));
+    expect(h.querySelector('[data-testid="inbox-toggle-read"]')?.textContent).toBe("안 읽음으로 표시");
+  });
+
   it("스레드: 내 글과 답글을 보이고 스레드 입력을 쓴다 (채널 입력이 아니다)", async () => {
     const h = await mount(entry({ key: "thread:r1", kind: "thread", rootId: "r1", rootPreview: "배포 언제?" }));
     expect(h.querySelector('[data-testid="inbox-thread-root"]')?.textContent).toContain("배포 언제?");
@@ -169,7 +206,7 @@ describe("InboxDetail", () => {
     expect(h.querySelector('[data-testid="approval-actions"]')?.getAttribute("data-id")).toBe("a1");
     expect(api.fetchMessages).not.toHaveBeenCalled();
     expect(h.querySelector('[data-testid="inbox-reply-input"]')).toBeNull();
-    expect(h.querySelector('[data-testid="inbox-toggle-read"]')?.hasAttribute("hidden")).toBe(true);
+    expect(h.querySelector('[data-testid="inbox-toggle-read"]')).toBeNull();
   });
 
   it("처리할 일 + 오프라인이면 버튼 대신 이유를 말한다", async () => {

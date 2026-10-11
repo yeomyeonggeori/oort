@@ -1,3 +1,4 @@
+import { missingMemberLabel } from "@momo/core/features/workspace/directory";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useSession } from "@/app/session";
@@ -123,7 +124,7 @@ export function DesktopNotifications() {
       isAnnounced: (messageId) => announcedRef.current.includes(messageId),
       actorFor: (memberId) => {
         const member = memberFor(current.directory, memberId);
-        if (!member) return memberId.slice(0, 8);
+        if (!member) return missingMemberLabel(current.directory);
         return actorToken({
           name: member.displayName,
           handle: member.kind === "agent" ? member.handle : undefined,

@@ -2,6 +2,7 @@ import type { Message, ReadState } from "../../lib/api";
 import { threadRollup, uuidEq } from "../../lib/api";
 import { effectiveUnreadStartSeq } from "../readState/model";
 import type { FilterTabsSpec } from "../common/filterTabs";
+import type { InboxWireKind, ServerInboxItem } from "./serverInbox";
 import {
   actorToken,
   relativeLabel,
@@ -10,37 +11,46 @@ import {
 } from "./model";
 
 // =============================================================================
-// 인박스 = 나와 관련된 것의 목록 (#3663). 메일함·알림함처럼 한 줄 한 줄이
-// 「누가, 어디서, 무슨 일로 나를 찾았는가」를 말하고, 오른쪽 패널이 그 맥락을 연다.
+// 인박스 = 나와 관련된 것의 목록 (#3663, 원천 교체 #3684/ADR-0199). 메일함·알림함처럼
+// 한 줄 한 줄이 「누가, 어디서, 무슨 일로 나를 찾았는가」를 말하고, 오른쪽 패널이 그
+// 맥락을 연다.
 //
-// 이 파일은 순수 판정이다. 서버에 「인박스」 라우트는 없다 — 항목의 원천은 이미 있는
-// 네 가지 읽기 계약이고, 여기서는 그 결과를 한 모양(MailboxEntry)으로 모으기만 한다.
+// 이 파일은 순수 판정이다. 항목의 원천은 둘이고, 화면은 어느 쪽이든 같은 모양
+// (MailboxEntry)만 본다.
+//
+// ## 서버 투영 (정본, `serverEntry`)
+//
+// 서버가 `GET /inbox`로 「나와 관련된 것」을 기억해서 준다(ADR-0199). 종류는
+// 답글(reply: 내 글에 답·인용), 멘션, 스레드, DM이고, 읽은 항목도 30일 동안 목록에
+// 남는다. 읽음은 **항목마다** 서버가 가진다: 항목을 읽어도 채널 읽음 위치는 움직이지
+// 않고, 채널에서 읽으면 그 안의 항목이 함께 읽음이 된다(한 방향).
+//
+// ## 구 서버 후퇴 (`dmEntry`·`mentionEntry`·`threadEntry`·`composeMailbox`)
+//
+// 인박스 투영이 없는 서버(v0.1.20 이하)는 `GET /inbox`가 404다. 그때만 이미 있는 네 가지
+// 읽기 계약을 클라이언트에서 모은다.
 //
 //   DM       DM 채널의 최근 메시지 페이지 + 채널 read-state(읽음/안 읽음 둘 다 보인다)
 //   멘션     read-state.mention_count 뒤의 메시지 중 서버가 기록한 멘션(안 읽은 것만)
 //   스레드   내가 쓴 글의 `thread` 롤업(last_reply_seq)이 읽음 기준 뒤에 있는 것
 //   처리할 일 대기 중 승인(`GET …/approvals?status=pending`)
 //
-// ## 읽음 기준은 하나다 (ADR-0178 D3)
+// 후퇴 경로의 읽음 기준은 채널 커서 하나다(ADR-0178 D3). 안 읽음은 언제나
+// `effectiveUnreadStartSeq(readState)` 이후인가로만 판정하고, 한 항목을 읽음으로
+// 표시하면 같은 채널의 그 앞 메시지도 함께 읽음이 된다.
 //
-// 서버의 읽음은 채널당 커서 하나다. 항목마다 읽음을 따로 갖지 않는다. 그래서 「안
-// 읽음」은 언제나 `effectiveUnreadStartSeq(readState)` 이후인가로만 판정하고(손으로
-// `seq > lastReadSeq`를 쓰지 않는다), 한 항목을 읽음으로 표시하면 같은 채널의 그
-// 앞 메시지도 함께 읽음이 된다. 화면 문구가 그 사실을 말한다.
-//
-// ## 없는 것을 지어내지 않는다
-//
-// 읽은 멘션·내가 답만 한 스레드·내게 배정된 작업은 서버가 기억하는 사실이 아니다.
-// 클라이언트가 채널을 훑어 역사를 만들지 않는다(P7). 그 부분은 서버 인박스 투영
-// 후속 이슈의 몫이다 — 이 모델은 있는 사실만 담고 비어 있으면 비어 있다고 말한다.
+// 어느 경로든 처리할 일(승인)은 서버 투영에 저장되지 않는 상태 사실이라 따로 합친다.
+// 클라이언트가 채널을 훑어 역사를 만들지 않는다(P7): 후퇴 경로가 읽은 멘션과 내가 답만
+// 한 스레드를 못 보여 주는 것은 알려진 한계이고, 서버 경로가 그것을 채운다.
 // =============================================================================
 
-export type MailboxKind = "dm" | "mention" | "thread" | "task";
+export type MailboxKind = "dm" | "mention" | "reply" | "thread" | "task";
 
 export type MailboxFilter =
   | "all"
   | "unread"
   | "mention"
+  | "reply"
   | "dm"
   | "thread"
   | "task";
@@ -49,6 +59,7 @@ export const MAILBOX_FILTERS: readonly MailboxFilter[] = [
   "all",
   "unread",
   "mention",
+  "reply",
   "dm",
   "thread",
   "task",
@@ -58,6 +69,7 @@ const FILTER_LABEL: Record<MailboxFilter, string> = {
   all: "전체",
   unread: "안 읽음",
   mention: "멘션",
+  reply: "답글",
   dm: "DM",
   thread: "스레드",
   task: "처리할 일",
@@ -121,6 +133,16 @@ export interface MailboxEntry {
   task?: FeedItem;
   /** 「왜 이게 여기 왔는지」. */
   reason: string;
+  /**
+   * 서버 투영 항목의 id. 있으면 읽음은 `PUT …/inbox/{id}/read`이고 채널 읽음 위치는
+   * 움직이지 않는다. 없으면(후퇴 경로) 채널 커서가 읽음 기준이다.
+   */
+  itemId?: string;
+  /** 서버가 붙인 사유 전부(우선순위 순). 필터는 종류가 아니라 이 사유로 건다. */
+  reasons?: readonly MailboxKind[];
+  /** 답글 항목: 내가 쓴 글(인용된 글)의 본문 한 줄. */
+  quotedPreview?: string;
+  quotedDeleted?: boolean;
 }
 
 // ---- 읽음 -------------------------------------------------------------
@@ -143,11 +165,11 @@ function unreadCountOf(readState: ReadState | undefined): number {
 // ---- 빌더 -------------------------------------------------------------
 
 function bodyLine(message: Message): string {
-  if (message.state === "deleted") return "삭제된 메시지입니다.";
+  if (message.state === "deleted") return "삭제된 메시지예요.";
   const body = (message.body ?? "").trim().replace(/\s+/g, " ");
   if (body.length > 0) return body;
-  if ((message.attachments?.length ?? 0) > 0) return "첨부 파일을 보냈습니다.";
-  return "내용 없는 메시지입니다.";
+  if ((message.attachments?.length ?? 0) > 0) return "첨부 파일을 보냈어요.";
+  return "내용 없는 메시지예요.";
 }
 
 function isConversational(message: Message): boolean {
@@ -194,8 +216,8 @@ export function dmEntry(input: {
     seq: latest.seq,
     messageId: latest.id,
     reason: mine
-      ? "회원님이 보낸 마지막 말이 있는 DM 대화입니다."
-      : "DM으로 회원님에게 온 메시지입니다.",
+      ? "회원님이 보낸 마지막 말이 있는 DM이에요."
+      : "DM으로 온 메시지예요.",
   };
 }
 
@@ -223,7 +245,7 @@ export function mentionEntry(
     seq: message.seq,
     messageId: message.id,
     ...(message.rootId === undefined ? {} : { rootId: message.rootId }),
-    reason: "메시지에 회원님이 포함되어 서버가 멘션으로 기록했습니다.",
+    reason: "메시지에서 회원님을 불러 서버가 멘션으로 기록했어요.",
   };
 }
 
@@ -269,7 +291,7 @@ export function threadEntry(input: {
     messageId: input.root.id,
     rootId: input.root.id,
     rootPreview: bodyLine(input.root),
-    reason: "회원님이 쓴 글에 새 답글이 달렸습니다.",
+    reason: "회원님이 쓴 글에 새 답글이 달렸어요.",
   };
 }
 
@@ -292,6 +314,83 @@ export function taskEntry(item: FeedItem, nowMs: number): MailboxEntry | null {
     ...(item.seq === undefined ? {} : { seq: item.seq }),
     task: item,
     reason: item.reason,
+  };
+}
+
+// ---- 서버 투영 항목 -----------------------------------------------------
+
+const SERVER_KIND: Record<InboxWireKind, Exclude<MailboxKind, "task">> = {
+  reply_to_me: "reply",
+  mention: "mention",
+  thread_reply: "thread",
+  dm: "dm",
+};
+
+const SERVER_TYPE_LABEL: Record<Exclude<MailboxKind, "task">, string> = {
+  reply: "답글",
+  mention: "멘션",
+  thread: "스레드",
+  dm: "DM",
+};
+
+const SERVER_REASON: Record<Exclude<MailboxKind, "task">, string> = {
+  reply: "회원님의 글에 답하거나 인용했어요.",
+  mention: "메시지에서 회원님을 불렀어요.",
+  thread: "회원님이 참여한 스레드에 새 답글이 달렸어요.",
+  dm: "DM으로 온 메시지예요.",
+};
+
+function previewLine(preview: string, deleted: boolean): string {
+  if (deleted) return "삭제된 메시지예요.";
+  const text = preview.trim().replace(/\s+/g, " ");
+  return text.length > 0 ? text : "내용 없는 메시지예요.";
+}
+
+/** 서버 와이어 종류(`reply_to_me`…)를 화면 종류로. */
+export function mailboxKindOfWire(kind: InboxWireKind): MailboxKind {
+  return SERVER_KIND[kind];
+}
+
+/**
+ * 서버 투영 한 건. 안 읽음은 `readAt`이 비었는지로만 판정한다(손으로 seq를 비교하지
+ * 않는다). 읽은 항목도 그대로 항목이다 — 목록에서 사라지지 않는다.
+ */
+export function serverEntry(
+  item: ServerInboxItem,
+  input: {
+    channelLabel: string;
+    actor: ActorNames;
+    nowMs: number;
+  }
+): MailboxEntry {
+  const kind = SERVER_KIND[item.kind];
+  const quoted = item.quotedMessage;
+  return {
+    key: `inbox:${item.id.toLowerCase()}`,
+    itemId: item.id,
+    kind,
+    reasons: item.reasons.map((reason) => SERVER_KIND[reason]),
+    channelId: item.channel.id,
+    channelLabel: input.channelLabel,
+    typeLabel: `${SERVER_TYPE_LABEL[kind]} · ${input.channelLabel}`,
+    actor: actorToken(input.actor),
+    actorMemberId: item.actorMemberId,
+    actorIsAgent: input.actor.isAgent,
+    preview: previewLine(item.message.preview, item.message.deleted),
+    atMs: item.createdAtMs,
+    timeLabel: relativeLabel(item.createdAtMs, input.nowMs),
+    unread: item.readAtMs === null,
+    unreadCount: 0,
+    seq: item.message.seq,
+    messageId: item.message.id,
+    ...(item.rootId === undefined ? {} : { rootId: item.rootId }),
+    ...(quoted === undefined
+      ? {}
+      : {
+          quotedPreview: previewLine(quoted.preview, quoted.deleted),
+          quotedDeleted: quoted.deleted,
+        }),
+    reason: SERVER_REASON[kind],
   };
 }
 
@@ -342,7 +441,8 @@ export function matchesMailboxFilter(
 ): boolean {
   if (filter === "all") return true;
   if (filter === "unread") return entry.unread;
-  return entry.kind === filter;
+  // 서버 항목은 사유가 여럿일 수 있다(멘션이면서 인용 답). 서버 필터와 같은 기준이다.
+  return (entry.reasons ?? [entry.kind]).includes(filter);
 }
 
 export function filterMailbox(
@@ -352,7 +452,10 @@ export function filterMailbox(
   return entries.filter((entry) => matchesMailboxFilter(entry, filter));
 }
 
-/** 탭 배지: 그 필터 안의 「안 읽음」 수. 전체·종류 탭 모두 같은 규칙이다. */
+/**
+ * 탭 배지: 그 필터 안의 「안 읽음」 수. 전체·종류 탭 모두 같은 규칙이다. 서버 경로에서는
+ * 읽어 온 쪽만 센 수라 전체 수로 쓰지 않는다(서버의 `unreadCount`가 전체 수다).
+ */
 export function mailboxCounts(
   entries: readonly MailboxEntry[]
 ): Record<MailboxFilter, number> {
@@ -360,6 +463,7 @@ export function mailboxCounts(
     all: 0,
     unread: 0,
     mention: 0,
+    reply: 0,
     dm: 0,
     thread: 0,
     task: 0,
@@ -368,7 +472,9 @@ export function mailboxCounts(
     if (!entry.unread) continue;
     counts.all += 1;
     counts.unread += 1;
-    counts[entry.kind] += 1;
+    for (const kind of new Set(entry.reasons ?? [entry.kind])) {
+      counts[kind] += 1;
+    }
   }
   return counts;
 }
@@ -387,7 +493,7 @@ export function readTargetSeq(entry: MailboxEntry): number | null {
   return entry.seq === undefined ? null : entry.seq;
 }
 
-/** 스크린리더가 한 줄로 읽는 문장: 안 읽음 · 종류 · 보낸 이 · 시각 · 미리보기. */
+/** 스크린리더가 한 줄로 읽는 문장: (안 읽음일 때만 「안 읽음」) 종류 · 보낸 이 · 시각 · 미리보기. */
 export function entryAriaLabel(entry: MailboxEntry): string {
   const unread = entry.unread
     ? entry.unreadCount > 1
