@@ -67,14 +67,15 @@ use momo_agent::actions::{
     action_by_id, action_ref, action_result_props, agent_rename_result_body,
     channel_create_result_body, channel_create_result_rows, channel_member_add_result_body,
     channel_member_add_rows, invite_result_body, invite_result_rows, last_attempt_patch,
-    result_client_msg_id, ActionResult, ActionResultNext, RequiredRole,
-    ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED, ACTION_TYPE_WORKSPACE_ACTION,
-    AUDIT_ACTION_APPROVED, AUDIT_CHANNELS_GRANTED, AUDIT_CHANNELS_GRANTED_SCHEMA,
-    AUDIT_CHANNEL_CREATED, AUDIT_CHANNEL_CREATED_SCHEMA, AUDIT_CHANNEL_MEMBER_ADDED,
-    AUDIT_CHANNEL_MEMBER_ADDED_SCHEMA, AUDIT_MEMBER_RENAMED, AUDIT_MEMBER_RENAMED_SCHEMA,
-    DEFAULT_INVITE_EXPIRES_IN_DAYS, INVITE_RESULT_NEXT, LAST_ATTEMPT_PROPS_KEY, REF_TYPE_AGENT,
-    REF_TYPE_CHANNEL, REF_TYPE_HOSTED_CONNECTION, REF_TYPE_INVITE, ROLE_REQUIRED,
-    SECRET_ONCE_INVITE_LINK,
+    result_client_msg_id, workspace_settings_result_body, ActionResult, ActionResultNext,
+    RequiredRole, ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED,
+    ACTION_TYPE_WORKSPACE_ACTION, AUDIT_ACTION_APPROVED, AUDIT_CHANNELS_GRANTED,
+    AUDIT_CHANNELS_GRANTED_SCHEMA, AUDIT_CHANNEL_CREATED, AUDIT_CHANNEL_CREATED_SCHEMA,
+    AUDIT_CHANNEL_MEMBER_ADDED, AUDIT_CHANNEL_MEMBER_ADDED_SCHEMA, AUDIT_MEMBER_RENAMED,
+    AUDIT_MEMBER_RENAMED_SCHEMA, AUDIT_WORKSPACE_SETTING_UPDATED,
+    AUDIT_WORKSPACE_SETTING_UPDATED_SCHEMA, DEFAULT_INVITE_EXPIRES_IN_DAYS, INVITE_RESULT_NEXT,
+    LAST_ATTEMPT_PROPS_KEY, REF_TYPE_AGENT, REF_TYPE_CHANNEL, REF_TYPE_HOSTED_CONNECTION,
+    REF_TYPE_INVITE, REF_TYPE_WORKSPACE_SETTINGS, ROLE_REQUIRED, SECRET_ONCE_INVITE_LINK,
 };
 use momo_agent::approval::{
     decided_props_patch, decision_broadcast_payload, decision_event_payload, decision_receipt,
@@ -100,7 +101,10 @@ use momo_messaging::{
     rename_agent_display_name_in_tx, send_message_in_tx, MessageType, NewChannel, NewMessage,
 };
 use momo_outbox::{emit_outbox, OutboxKind, RESUME_APPROVAL_JOB_METHOD};
-use momo_settings::{create_invite, INVITE_CREATED_AUDIT_ACTION, INVITE_CREATED_AUDIT_SCHEMA};
+use momo_settings::{
+    create_invite, merge_workspace_settings, read_workspace_settings_for_update,
+    write_workspace_settings, INVITE_CREATED_AUDIT_ACTION, INVITE_CREATED_AUDIT_SCHEMA,
+};
 use momo_t3::work_control::{spawn_host_ineligible_reason_in_tx, work_control_id};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -114,7 +118,7 @@ use crate::error::ApiError;
 use crate::realtime_advert::derive_same_origin_http_base;
 use crate::routes::actions::{
     resolve_action_in_tx, ActionArgs, GateSubject, ResolvedAgentTarget, ResolvedChannel,
-    ResolvedConnection, ResolvedMember,
+    ResolvedConnection, ResolvedMember, SettingPatch, SettingsBefore,
 };
 use crate::routes::agents::require_profile_editor_in_tx;
 use crate::routes::invites::require_admin;
@@ -1188,6 +1192,26 @@ async fn execute_workspace_action(
 
     // ---- 3. the action's own executor --------------------------------------
     let executed = match &resolved.validated.args {
+        ActionArgs::WorkspaceSettingsUpdate {
+            welcome_prompt,
+            role_labels,
+            before,
+        } => {
+            match execute_workspace_settings_update(
+                conn,
+                approval,
+                input,
+                now,
+                welcome_prompt,
+                role_labels,
+                before,
+            )
+            .await?
+            {
+                Execution::Ran(executed) => executed,
+                Execution::Refused(decision) => return Ok(Ok(decision)),
+            }
+        }
         ActionArgs::HostedChannelsGrant {
             connection: Some(connection),
             channels,
@@ -1604,6 +1628,130 @@ async fn execute_channel_create(
         ref_id: channel_id,
         result_body: channel_create_result_body(name, kind, channel_id),
         result_rows: channel_create_result_rows(name, kind, add_proposer, added),
+        secret_once: None,
+        next: None,
+    }))
+}
+
+/// `workspace.settings.update` (증보 V7): merge the two keys into the settings bag
+/// as the approver, under the row lock.
+///
+/// Re-reads the bag `FOR UPDATE` and refuses (nothing written, approval pending)
+/// if a touched key no longer holds what the card showed as its old value — the
+/// resolver read it unlocked. The merge is `merge_workspace_settings`, the REST
+/// route's own, so the allow-list and every validator are the same; and the result
+/// is compared with the old bag so that **only the two keys can have changed**.
+async fn execute_workspace_settings_update(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    welcome_prompt: &SettingPatch,
+    role_labels: &SettingPatch,
+    before: &SettingsBefore,
+) -> Result<Execution, momo_db::DbError> {
+    let Some(existing) = read_workspace_settings_for_update(conn, input.workspace_id).await? else {
+        return Err(protocol_error("workspace settings row is not visible"));
+    };
+    let mut patch = serde_json::Map::new();
+    let mut touched: Vec<(&'static str, &'static str)> = Vec::new();
+    for (stored, label, setting, was) in [
+        (
+            "welcome_prompt",
+            "환영 문구",
+            welcome_prompt,
+            &before.welcome_prompt,
+        ),
+        ("role_labels", "역할 이름", role_labels, &before.role_labels),
+    ] {
+        let Some(value) = (match setting {
+            SettingPatch::Unchanged => None,
+            SettingPatch::Clear => Some(Value::Null),
+            SettingPatch::Set(value) => Some(value.clone()),
+        }) else {
+            continue;
+        };
+        // The old value the approver read must still be the current one.
+        if existing.get(stored) != was.as_ref() {
+            return Ok(Execution::Refused(args_invalid_refusal(
+                approval, input, now,
+            )));
+        }
+        patch.insert(stored.to_string(), value);
+        touched.push((stored, label));
+    }
+    let Ok(merged) = merge_workspace_settings(&existing, &Value::Object(patch)) else {
+        return Ok(Execution::Refused(args_invalid_refusal(
+            approval, input, now,
+        )));
+    };
+    // Belt and braces: whatever the merge did, no key outside the two moved.
+    for key in ["allowed_agent_models", "welcome_agent_member_id"] {
+        if existing.get(key) != merged.get(key) {
+            return Err(protocol_error(
+                "workspace.settings.update changed a key it does not own",
+            ));
+        }
+    }
+    let Some(object) = merged.as_object() else {
+        return Err(protocol_error("settings bag is not an object"));
+    };
+    let foreign_changed = existing
+        .as_object()
+        .into_iter()
+        .flatten()
+        .chain(object.iter())
+        .any(|(key, _)| {
+            key != "welcome_prompt" && key != "role_labels" && existing.get(key) != merged.get(key)
+        });
+    if foreign_changed {
+        return Err(protocol_error(
+            "workspace.settings.update changed a key it does not own",
+        ));
+    }
+    write_workspace_settings(conn, input.workspace_id, &merged)
+        .await?
+        .ok_or_else(|| protocol_error("workspace row vanished during a settings write"))?;
+
+    let audit = AuditEntry::new(input.workspace_id, AUDIT_WORKSPACE_SETTING_UPDATED)
+        .by(input.member_id)
+        .about(approval.requested_by)
+        .target("workspace", input.workspace_id)
+        .via_token(input.via_token_id)
+        .run(approval.run_id)
+        .with_schema(
+            AUDIT_WORKSPACE_SETTING_UPDATED_SCHEMA,
+            // Key NAMES only. The welcome prompt is long user text; its old and
+            // new values live on the card the approver read, not in the audit log.
+            json!({
+                "keys": touched.iter().map(|(stored, _)| *stored).collect::<Vec<_>>(),
+                "via_agent": approval.requested_by.to_string(),
+                "approval_id": approval.id.to_string(),
+            }),
+        );
+    let labels: Vec<&str> = touched.iter().map(|(_, label)| *label).collect();
+    let mut rows = Vec::new();
+    for (patch_value, was, label) in [
+        (welcome_prompt, &before.welcome_prompt, "환영 문구"),
+        (role_labels, &before.role_labels, "역할 이름"),
+    ] {
+        let after_value = match patch_value {
+            SettingPatch::Unchanged => continue,
+            SettingPatch::Clear => None,
+            SettingPatch::Set(value) => Some(value),
+        };
+        rows.push(momo_agent::actions::settings_change_row(
+            label,
+            crate::routes::actions::settings_display(was.as_ref()).as_deref(),
+            crate::routes::actions::settings_display(after_value).as_deref(),
+        ));
+    }
+    Ok(Execution::Ran(Executed {
+        audits: vec![audit],
+        ref_type: REF_TYPE_WORKSPACE_SETTINGS,
+        ref_id: input.workspace_id,
+        result_body: workspace_settings_result_body(&labels),
+        result_rows: rows,
         secret_once: None,
         next: None,
     }))

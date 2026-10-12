@@ -73,6 +73,11 @@ pub const ACTION_AGENT_RENAME: &str = "agent.rename";
 /// by which an agent asks for more reach; it is deliberately the narrowest.
 pub const ACTION_HOSTED_CHANNELS_GRANT: &str = "hosted.channels.grant";
 
+/// `workspace.settings.update` — change **two** keys of the workspace settings
+/// bag, `welcome_prompt` and `role_labels`, and nothing else (ADR-0186 증보 V7).
+/// There is no general "set a setting" action; a third key is a new amendment.
+pub const ACTION_WORKSPACE_SETTINGS_UPDATE: &str = "workspace.settings.update";
+
 /// What a person is consenting to when they approve (ADR-0186 D3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Risk {
@@ -295,6 +300,42 @@ fn agent_rename_args_schema() -> Value {
     })
 }
 
+/// The proposal ceiling on `welcomePrompt`, in characters. The REST surface allows
+/// 2000: this text is read by a *different agent* (the welcome agent), so a
+/// proposal — an agent writing another agent's instructions — gets a quarter.
+pub const WELCOME_PROMPT_PROPOSAL_MAX_CHARS: usize = 500;
+/// The same, as the bytes the tool schema counts (500 characters at the UTF-8
+/// worst case). The domain normaliser enforces the 500 characters.
+pub const WELCOME_PROMPT_PROPOSAL_MAX_BYTES: u64 = 2_000;
+/// Human roles that may carry a display label (`momo_settings::ROLE_LABEL_KEYS`).
+pub const ROLE_LABEL_PROPOSAL_KEYS: [&str; 4] = ["owner", "admin", "member", "guest"];
+/// One role label, in UTF-8 bytes (`momo_settings::MAX_ROLE_LABEL_BYTES`).
+pub const ROLE_LABEL_MAX_BYTES: u64 = 48;
+
+/// `workspace.settings.update` arguments (증보 V2/V7): exactly the two keys, and
+/// at least one. `null` clears a key back to its default; an omitted key is left
+/// alone.
+fn workspace_settings_update_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+            "welcomePrompt": {"type": "string", "maxLength": WELCOME_PROMPT_PROPOSAL_MAX_BYTES},
+            "roleLabels": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "owner": {"type": "string", "minLength": 1, "maxLength": ROLE_LABEL_MAX_BYTES},
+                    "admin": {"type": "string", "minLength": 1, "maxLength": ROLE_LABEL_MAX_BYTES},
+                    "member": {"type": "string", "minLength": 1, "maxLength": ROLE_LABEL_MAX_BYTES},
+                    "guest": {"type": "string", "minLength": 1, "maxLength": ROLE_LABEL_MAX_BYTES}
+                }
+            }
+        }
+    })
+}
+
 /// A proposal names at most this many channels.
 pub const GRANT_CHANNELS_MAX: u64 = 5;
 
@@ -365,6 +406,15 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         required_role: RequiredRole::Admin,
         effect: "이 에이전트의 연결이 표시된 채널을 읽고 쓸 수 있게 합니다",
         args_schema: hosted_channels_grant_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_WORKSPACE_SETTINGS_UPDATE,
+        title: "워크스페이스 문구 설정 바꾸기",
+        summary: "환영 문구와 역할 이름, 이 두 가지만 바꿉니다. 지우려면 null을 보냅니다.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::WorkspaceOperator,
+        effect: "표시된 설정(환영 문구·역할 이름)을 바꿉니다",
+        args_schema: workspace_settings_update_args_schema,
     },
 ];
 
@@ -623,6 +673,38 @@ pub fn channel_member_add_result_body(
 /// self-rename (`PATCH …/members/me`) uses, with `kind:"agent"` in the detail.
 pub const AUDIT_MEMBER_RENAMED: &str = "member.renamed";
 pub const AUDIT_MEMBER_RENAMED_SCHEMA: &str = "momo.member.renamed.v1";
+
+/// `ref.type` for the workspace whose settings changed (the workspace's id).
+pub const REF_TYPE_WORKSPACE_SETTINGS: &str = "workspace_settings";
+
+/// How one settings key reads on the card: `before → after`, plain text.
+/// `None` is 「(기본값)」 — the key is not set.
+pub fn settings_change_row(label: &str, before: Option<&str>, after: Option<&str>) -> Value {
+    // `before` and `after` arrive already rendered by the server's own display
+    // function (`routes::actions::settings_display`), which quotes every
+    // agent-supplied string (JSON string syntax) so that no value can pass itself
+    // off as the arrow, a second setting or a second row.
+    match after {
+        Some(after) => action_row(label, format!("{} → {after}", before.unwrap_or("(기본값)"))),
+        // A clear is labelled as one, in the row's name, so it cannot be read as
+        // just another edit.
+        None => action_row(
+            &format!("{label} — 지움"),
+            format!("{} → (기본값으로 되돌림)", before.unwrap_or("(기본값)")),
+        ),
+    }
+}
+
+/// The outcome line of `workspace.settings.update`: **key names only** — the
+/// welcome prompt is long user text and this body is as durable as the audit row
+/// (the old and new values are on the card the approver read).
+pub fn workspace_settings_result_body(labels: &[&str]) -> String {
+    format!("설정을 바꿨어요: {}", labels.join(", "))
+}
+
+/// `audit_log.action` of a settings write — the REST route's own name.
+pub const AUDIT_WORKSPACE_SETTING_UPDATED: &str = "workspace_setting.updated";
+pub const AUDIT_WORKSPACE_SETTING_UPDATED_SCHEMA: &str = "momo.workspace_setting.updated.v1";
 
 /// `ref.type` for a widened hosted connection (the connection's id).
 pub const REF_TYPE_HOSTED_CONNECTION: &str = "hosted_connection";
@@ -1043,7 +1125,8 @@ mod tests {
                 "channel.create",
                 "channel.member.add",
                 "agent.rename",
-                "hosted.channels.grant"
+                "hosted.channels.grant",
+                "workspace.settings.update"
             ]
         );
         assert_eq!(
