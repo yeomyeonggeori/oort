@@ -135,11 +135,11 @@ const EMPTY_COPY: Record<InboxFilter, {headline: string; detail: string}> = {
   },
   mentions: {
     headline: '읽지 않은 멘션이 없어요. 조용한 게 정상이에요.',
-    detail: '누군가 회원님을 부르면 중요한 것만 여기 모여요.',
+    detail: '누군가 나를 부르면 중요한 것만 여기 모여요.',
   },
   agents: {
     headline: '에이전트가 남긴 결과가 없어요. 조용한 게 정상이에요.',
-    detail: '회원님이 담당하는 에이전트가 무언가를 끝내면 여기 남아요.',
+    detail: '내가 담당하는 에이전트가 무언가를 끝내면 여기 남아요.',
   },
 };
 
@@ -199,7 +199,7 @@ function mailboxEmpty(
       return {
         headline: '내 글에 달린 답글이 없어요.',
         detail:
-          '누군가 회원님의 글에 답하거나 인용하면 여기 모여요. 읽은 답글도 30일 동안 남아요.',
+          '누군가 내 글에 답하거나 인용하면 여기 모여요. 읽은 답글도 30일 동안 남아요.',
       };
     case 'dm':
       return {

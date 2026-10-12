@@ -1,7 +1,7 @@
 import { ApiError } from "../../lib/api";
 import { attachParticle, hasFinalConsonant } from "../../lib/koreanParticle";
 import type { LocalHarnessId } from "../hostedAgents/detect";
-import { HARNESS_LABEL, SUBSCRIPTION_HARNESS_WIRE } from "./aiConnect";
+import { CLAUDE_PAUSED_ERROR_CODE, HARNESS_LABEL, SUBSCRIPTION_HARNESS_WIRE } from "./aiConnect";
 
 // =============================================================================
 // 로그인 → 에이전트로 만들기, 한 모달 (#3389 AIH-5, ADR-0190 D3-h, ADR-0193
@@ -25,7 +25,7 @@ import { HARNESS_LABEL, SUBSCRIPTION_HARNESS_WIRE } from "./aiConnect";
 
 /** 서버가 이름 붙인 거절(ADR-0193 D15·D17). 문장이 아니라 코드다. */
 export const CODE_SUBSCRIPTION_DISABLED = "subscription_agents_disabled";
-export const CODE_CLAUDE_PAUSED = "claude_subscription_agent_paused";
+export const CODE_CLAUDE_PAUSED = CLAUDE_PAUSED_ERROR_CODE;
 export const CODE_AGENT_LIMIT = "subscription_agent_limit";
 export const CODE_CLEANUP_PENDING = "subscription_agent_cleanup_pending";
 

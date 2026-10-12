@@ -1,4 +1,3 @@
-import { missingMemberLabel } from "@momo/core/features/workspace/directory";
 import { useCallback, useMemo } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -13,13 +12,13 @@ import { advertiseReadState } from "@/features/chat/advertiseReadState";
 import { useSession } from "@/app/session";
 import {
   channelLabel,
-  memberFor,
   useChannels,
   useDirectory,
   useInvalidateReadStates,
   useReadStates,
   type Directory,
 } from "@/features/workspace/useWorkspace";
+import { actorNamesIn } from "./actorNames";
 import {
   approvalItem,
   mentionItem,
@@ -110,20 +109,7 @@ export function useFeedContext(): FeedContext {
   );
 
   const actorFor = useCallback(
-    (memberId: string): ActorNames => {
-      const member = memberFor(directory, memberId);
-      if (!member) return { name: missingMemberLabel(directory), isAgent: false };
-      const owner =
-        member.kind === "agent"
-          ? memberFor(directory, member.ownerHumanId)
-          : null;
-      return {
-        name: member.displayName,
-        handle: member.kind === "agent" ? member.handle : undefined,
-        isAgent: member.kind === "agent",
-        ownerName: owner?.displayName,
-      };
-    },
+    (memberId: string): ActorNames => actorNamesIn(directory, memberId),
     [directory]
   );
 
