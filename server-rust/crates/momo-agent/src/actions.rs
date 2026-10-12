@@ -68,6 +68,11 @@ pub const ACTION_CHANNEL_MEMBER_ADD: &str = "channel.member.add";
 /// of another agent of the same owner (ADR-0186 증보 V4 / V4-M).
 pub const ACTION_AGENT_RENAME: &str = "agent.rename";
 
+/// `hosted.channels.grant` — widen the **proposing agent's own** hosted
+/// connection by channels it can already see (ADR-0186 증보 V5). The one action
+/// by which an agent asks for more reach; it is deliberately the narrowest.
+pub const ACTION_HOSTED_CHANNELS_GRANT: &str = "hosted.channels.grant";
+
 /// What a person is consenting to when they approve (ADR-0186 D3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Risk {
@@ -290,6 +295,27 @@ fn agent_rename_args_schema() -> Value {
     })
 }
 
+/// A proposal names at most this many channels.
+pub const GRANT_CHANNELS_MAX: u64 = 5;
+
+/// `hosted.channels.grant` arguments (증보 V2): channel **names** only. There is
+/// no connection argument — the target is the proposer's own live connection.
+fn hosted_channels_grant_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["channels"],
+        "properties": {
+            "channels": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": GRANT_CHANNELS_MAX,
+                "items": {"type": "string", "minLength": 1, "maxLength": CHANNEL_REF_MAX_BYTES}
+            }
+        }
+    })
+}
+
 /// A channel reference: `#` + the 80-character name.
 pub const CHANNEL_REF_MAX_BYTES: u64 = 81;
 
@@ -330,6 +356,15 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         required_role: RequiredRole::AgentEditor,
         effect: "대상 에이전트의 표시 이름을 바꿉니다",
         args_schema: agent_rename_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_HOSTED_CHANNELS_GRANT,
+        title: "에이전트가 읽고 쓸 채널 늘리기",
+        summary: "이 에이전트의 연결이 읽고 쓸 수 있는 채널을 늘립니다. 이 에이전트 자신의 연결만 대상입니다.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::Admin,
+        effect: "이 에이전트의 연결이 표시된 채널을 읽고 쓸 수 있게 합니다",
+        args_schema: hosted_channels_grant_args_schema,
     },
 ];
 
@@ -588,6 +623,56 @@ pub fn channel_member_add_result_body(
 /// self-rename (`PATCH …/members/me`) uses, with `kind:"agent"` in the detail.
 pub const AUDIT_MEMBER_RENAMED: &str = "member.renamed";
 pub const AUDIT_MEMBER_RENAMED_SCHEMA: &str = "momo.member.renamed.v1";
+
+/// `ref.type` for a widened hosted connection (the connection's id).
+pub const REF_TYPE_HOSTED_CONNECTION: &str = "hosted_connection";
+
+/// One card row per channel being granted: the server's name, kind and live
+/// head-count — what the approver is letting the agent read.
+pub fn grant_channel_row(name: &str, kind: &str, member_count: i64) -> Value {
+    action_row(
+        "채널",
+        format!(
+            "#{name} · {} · {member_count}명",
+            if kind == "public" {
+                "공개"
+            } else {
+                "비공개"
+            }
+        ),
+    )
+}
+
+/// The `hosted.channels.grant` card: the channels, then 「현재 승인 채널」
+/// `before개 → after개`.
+pub fn hosted_channels_grant_rows(
+    channels: &[(String, String, i64)],
+    approved_before: usize,
+    approved_after: usize,
+) -> Vec<Value> {
+    let mut rows: Vec<Value> = channels
+        .iter()
+        .map(|(name, kind, count)| grant_channel_row(name, kind, *count))
+        .collect();
+    rows.push(action_row(
+        "승인 채널 수",
+        format!("{approved_before}개 → {approved_after}개"),
+    ));
+    rows
+}
+
+/// The outcome line of `hosted.channels.grant`. **Channel ids are in the body**
+/// so the agent can post there on its next turn; they are not secrets.
+pub fn hosted_channels_grant_result_body(channels: &[(String, Uuid)], total: usize) -> String {
+    let listed: Vec<String> = channels
+        .iter()
+        .map(|(name, id)| format!("#{name} (id {id})"))
+        .collect();
+    format!(
+        "읽고 쓸 채널을 늘렸어요: {} · 총 {total}개",
+        listed.join(", ")
+    )
+}
 
 /// `ref.type` for a renamed agent (the agent's member id).
 pub const REF_TYPE_AGENT: &str = "agent";
@@ -957,7 +1042,8 @@ mod tests {
                 "invite.create",
                 "channel.create",
                 "channel.member.add",
-                "agent.rename"
+                "agent.rename",
+                "hosted.channels.grant"
             ]
         );
         assert_eq!(

@@ -39,7 +39,10 @@ use momo_agent::actions::{
     self, WorkspaceAction, INVITE_EXPIRES_IN_DAYS_CEILING, INVITE_MAX_USES_CEILING,
     INVITE_PROPOSABLE_ROLES,
 };
-use momo_auth::{active_workspace_role, Principal};
+use momo_auth::{
+    active_workspace_role, lock_active_hosted_connection_in_tx, Principal,
+    MAX_HOSTED_APPROVED_CHANNELS,
+};
 use momo_db::PgConnection;
 use momo_messaging::name_guard::{
     conflicts_with_roster, mention_overlaps_roster, validated_agent_proposed_display_name,
@@ -210,6 +213,13 @@ pub enum ActionArgs {
     /// `channel.member.add` (증보 V2). `channel` and `members` are empty after the
     /// pure stage and filled by [`resolve_action_in_tx`]; `new_members` is the
     /// subset not already live in the channel.
+    /// `hosted.channels.grant` (증보 V5). `connection` and `channels` are filled by
+    /// [`resolve_action_in_tx`]; `channels` is the subset not yet approved.
+    HostedChannelsGrant {
+        channel_refs: Vec<String>,
+        connection: Option<ResolvedConnection>,
+        channels: Vec<ResolvedChannel>,
+    },
     /// `agent.rename` (증보 V4/V4-M). `target` is filled by
     /// [`resolve_action_in_tx`]; `None` target handle = the proposer itself.
     AgentRename {
@@ -224,6 +234,13 @@ pub enum ActionArgs {
         members: Vec<ResolvedMember>,
         already_in: Vec<Uuid>,
     },
+}
+
+/// The proposer's own live hosted connection, as the server found it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedConnection {
+    pub id: Uuid,
+    pub approved_before: usize,
 }
 
 /// The agent a rename points at, as the server found it.
@@ -286,6 +303,7 @@ pub fn validated_action_args(
         actions::ACTION_CHANNEL_CREATE => channel_create_args(args),
         actions::ACTION_CHANNEL_MEMBER_ADD => channel_member_add_args(args),
         actions::ACTION_AGENT_RENAME => agent_rename_args(args),
+        actions::ACTION_HOSTED_CHANNELS_GRANT => hosted_channels_grant_args(args),
         // Fail closed. A registry entry with no normaliser must be an error and
         // not an unvalidated passthrough — `every_action_has_a_normaliser` is
         // what makes this arm unreachable rather than merely unlikely.
@@ -506,6 +524,44 @@ fn channel_member_add_args(args: &Value) -> Result<ValidatedActionArgs, ApiError
             channel: None,
             members: Vec::new(),
             already_in: Vec::new(),
+        },
+    })
+}
+
+fn hosted_channels_grant_args(args: &Value) -> Result<ValidatedActionArgs, ApiError> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| ApiError::bad_request("action args must be an object"))?;
+    // `channels` only: there is no connection, agent or id key to smuggle a
+    // target through. The connection is the proposer's own, found server-side.
+    closed_keys(object, &["channels"])?;
+    let items = match object.get("channels") {
+        Some(Value::Array(items)) => items,
+        _ => return Err(ApiError::bad_request("channels is required")),
+    };
+    if items.is_empty() || items.len() > actions::GRANT_CHANNELS_MAX as usize {
+        return Err(ApiError::bad_request("argument is out of range"));
+    }
+    let mut channel_refs: Vec<String> = Vec::new();
+    for item in items {
+        let Value::String(raw) = item else {
+            return Err(ApiError::bad_request("argument must be a string"));
+        };
+        let trimmed = raw.trim();
+        let name = normalize_channel_name(trimmed.strip_prefix('#').unwrap_or(trimmed))
+            .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?;
+        if !channel_refs.contains(&name) {
+            channel_refs.push(name);
+        }
+    }
+    Ok(ValidatedActionArgs {
+        summary: None,
+        normalized: json!({"channels": channel_refs}),
+        rows: Vec::new(),
+        args: ActionArgs::HostedChannelsGrant {
+            channel_refs,
+            connection: None,
+            channels: Vec::new(),
         },
     })
 }
@@ -818,6 +874,74 @@ pub async fn resolve_action_in_tx(
                 actions::channel_create_rows(name, kind, topic.as_deref(), *add_proposer, &names);
             GateSubject::Workspace
         }
+        ActionArgs::HostedChannelsGrant {
+            channel_refs,
+            connection,
+            channels,
+        } => {
+            if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
+                return Ok(Err(ApiError::bad_request(
+                    "proposer is not an active agent",
+                )));
+            }
+            // The connection row is locked FIRST (the hosted canon's order:
+            // connection before channel and membership rows). Only the
+            // proposer's OWN live connection can be found; no argument names
+            // another agent's.
+            let Some((connection_id, approved_before)) =
+                lock_active_hosted_connection_in_tx(conn, workspace_id, proposer_member_id).await?
+            else {
+                return Ok(Err(ApiError::bad_request("no live hosted connection")));
+            };
+            let approved: Vec<Uuid> = momo_db::sqlx::query_scalar(
+                "SELECT unnest(approved_channel_ids) FROM hosted_agent_connection \
+                  WHERE workspace_id = $1 AND id = $2",
+            )
+            .bind(workspace_id)
+            .bind(connection_id)
+            .fetch_all(&mut *conn)
+            .await?;
+            let mut new_channels: Vec<ResolvedChannel> = Vec::new();
+            for channel_ref in channel_refs.iter() {
+                // The same single answer as every unseen channel: somebody
+                // else's private room, a DM, an archived or missing one.
+                let Some(found) = resolve_visible_channel_in_tx(
+                    conn,
+                    workspace_id,
+                    proposer_member_id,
+                    channel_ref,
+                )
+                .await?
+                else {
+                    return Ok(Err(ApiError::bad_request("channel did not resolve")));
+                };
+                if !approved.contains(&found.id)
+                    && !new_channels.iter().any(|known| known.id == found.id)
+                {
+                    new_channels.push(found);
+                }
+            }
+            if new_channels.is_empty()
+                || approved_before + new_channels.len() > MAX_HOSTED_APPROVED_CHANNELS
+            {
+                // Nothing to widen, or past the ceiling (증보 V5: 50).
+                return Ok(Err(ApiError::bad_request("channels cannot be granted")));
+            }
+            validated.rows = actions::hosted_channels_grant_rows(
+                &new_channels
+                    .iter()
+                    .map(|c| (c.name.clone(), c.kind.clone(), c.member_count))
+                    .collect::<Vec<_>>(),
+                approved_before,
+                approved_before + new_channels.len(),
+            );
+            *connection = Some(ResolvedConnection {
+                id: connection_id,
+                approved_before,
+            });
+            *channels = new_channels;
+            GateSubject::Workspace
+        }
         ActionArgs::AgentRename {
             display_name,
             target_handle,
@@ -925,6 +1049,14 @@ pub async fn resolve_action_in_tx(
         }
     };
     let pins = match &validated.args {
+        ActionArgs::HostedChannelsGrant {
+            connection,
+            channels,
+            ..
+        } => json!({
+            "connection": connection.as_ref().map(|c| c.id.to_string()),
+            "channels": channels.iter().map(|c| c.id.to_string()).collect::<Vec<_>>(),
+        }),
         ActionArgs::AgentRename { target, .. } => json!({
             "target": target.as_ref().map(|target| target.id.to_string()),
         }),
@@ -1705,6 +1837,42 @@ mod tests {
             json!([]),
         ] {
             let error = validated_action_args(rename(), &refused, NOW_MS)
+                .expect_err(&format!("{refused} must be refused"));
+            assert_eq!(error.status, StatusCode::BAD_REQUEST, "{refused}");
+        }
+    }
+
+    fn grant() -> &'static WorkspaceAction {
+        actions::action_by_id(actions::ACTION_HOSTED_CHANNELS_GRANT).expect("registered")
+    }
+
+    /// The grant names channels and nothing else: there is no key through which a
+    /// proposal could point at another agent's connection (증보 V5).
+    #[test]
+    fn a_grant_proposal_has_no_way_to_name_a_connection_or_an_agent() {
+        let ok = validated_action_args(
+            grant(),
+            &json!({"channels": ["#Plans", "plans", "ops"]}),
+            NOW_MS,
+        )
+        .expect("legal");
+        assert_eq!(ok.normalized, json!({"channels": ["plans", "ops"]}));
+        for refused in [
+            json!({}),
+            json!({"channels": []}),
+            json!({"channels": null}),
+            json!({"channels": "plans"}),
+            json!({"channels": [1]}),
+            json!({"channels": ["Has Space"]}),
+            json!({"channels": ["a", "b", "c", "d", "e", "f"]}),
+            json!({"channels": ["ok"], "connectionId": Uuid::new_v4()}),
+            json!({"channels": ["ok"], "connection": Uuid::new_v4().to_string()}),
+            json!({"channels": ["ok"], "agent": "someone"}),
+            json!({"channels": ["ok"], "agentMemberId": Uuid::new_v4()}),
+            json!({"channels": ["ok"], "approvedChannelIds": []}),
+            json!([]),
+        ] {
+            let error = validated_action_args(grant(), &refused, NOW_MS)
                 .expect_err(&format!("{refused} must be refused"));
             assert_eq!(error.status, StatusCode::BAD_REQUEST, "{refused}");
         }
