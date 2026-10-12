@@ -13,6 +13,7 @@ import { ConnectPage } from "@/features/auth/ConnectPage";
 import { ClaimPage } from "@/features/auth/ClaimPage";
 import { isClaimPath } from "@/features/auth/claimPath";
 import { OwnerOnboarding } from "@/features/onboarding/OwnerOnboarding";
+import { useSeedWorkspaceRejudge } from "@/features/onboarding/seedWorkspace";
 import {
   finishOwnerOnboardingInvite,
   ownerOnboardingShouldMount,
@@ -164,6 +165,8 @@ export function App() {
   );
 
   const capturePose = readFirstAgentCapturePoseFromLocation();
+  // 시드 이름·@demo 그대로인 소유자는 S1을 다시 받는다(#3696).
+  useSeedWorkspaceRejudge(session?.member ?? null);
   const firstRun = session
     ? decideFirstRunForSession({
         workspaceId: session.member.workspaceId,

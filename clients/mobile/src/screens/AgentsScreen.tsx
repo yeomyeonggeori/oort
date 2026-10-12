@@ -228,7 +228,7 @@ export default function AgentsScreen({
       ) : rows.length === 0 ? (
         <EmptyState
           headline="아직 에이전트가 없습니다."
-          detail="에이전트를 만드는 것은 데스크톱에서 할 수 있습니다."
+          detail="에이전트를 만드는 것은 데스크톱에서 할 수 있어요."
           refreshControl={refreshControl}
           testID="agents-empty"
         />
