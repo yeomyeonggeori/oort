@@ -58,6 +58,8 @@ import {
   S1_PRIMARY_RETRY,
   S1_REENTRY,
   S1_SKIP_LABEL,
+  S1_ACCEPT_DEFAULT_LABEL,
+  s1AcceptDefaultNote,
   S1_STALE_LINE,
   S1_STALE_MESSAGE_ID,
   S1_TITLE,
@@ -87,6 +89,7 @@ export function WorkspaceProfileStage({
   replaceSessionMember,
   onComplete,
   onSkip,
+  onAcceptDefault,
   headingRef,
 }: {
   workspaceId: string;
@@ -98,6 +101,10 @@ export function WorkspaceProfileStage({
   replaceSessionMember: (member: Member) => void;
   onComplete: () => void;
   onSkip?: () => void;
+  /**
+   * 시드 이름이 남아 다시 뜬 S1에서만 준다(#3714). 누르면 이 계정·서버에서 다시 묻지 않는다.
+   */
+  onAcceptDefault?: () => void;
   /** 단계 착지 포커스(OwnerOnboarding). 코메토의 문장이 받는다. */
   headingRef?: Ref<HTMLHeadingElement>;
 }) {
@@ -334,6 +341,9 @@ export function WorkspaceProfileStage({
     onSkip?.();
   };
 
+  const showAcceptDefault =
+    Boolean(onAcceptDefault) && !staleName && workspaceDraft.trim() === "";
+
   const guideState: GuideState =
     offline || formError || staleName ? "trouble" : "awaiting";
   const guideLine = offline
@@ -512,6 +522,24 @@ export function WorkspaceProfileStage({
           </Button>
         )}
 
+        {/* 이름 칸에 쓰던 글이 있으면 「이대로」가 그 글을 뜻하는 것처럼 읽힌다: 숨긴다(H1). */}
+        {showAcceptDefault ? (
+          <div className="flex flex-col items-center gap-1" data-testid="onboarding-s1-accept">
+            <Button
+              type="button"
+              variant="ghost"
+              className="onboarding-skip"
+              onClick={onAcceptDefault}
+              data-testid="onboarding-s1-accept-default"
+            >
+              {S1_ACCEPT_DEFAULT_LABEL}
+            </Button>
+            <p className="break-keep text-center text-meta text-ink-muted">
+              {s1AcceptDefaultNote(workspaceName)}
+            </p>
+          </div>
+        ) : null}
+
         <p className="onboarding-reentry" data-testid="onboarding-s1-reentry">
           {formError && onSkip ? (
             <>
@@ -527,7 +555,7 @@ export function WorkspaceProfileStage({
               <span className="onboarding-reentry-sep" aria-hidden="true"> · </span>
             </>
           ) : null}
-          {S1_REENTRY}
+          {showAcceptDefault ? null : S1_REENTRY}
         </p>
       </form>
 

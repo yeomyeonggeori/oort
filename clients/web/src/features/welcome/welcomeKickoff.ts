@@ -51,8 +51,12 @@ export type WelcomeKickoffPhase = "hidden" | "stage" | "exiting" | "backstop";
  */
 export const WELCOME_BAND_JOY_HOLD_MS = 1_200;
 
-/** 구독으로 쓰는 에이전트의 CLI 세션을 기다릴 때(#2814 착수 전 확인 결과). */
-export const WELCOME_BAND_SLEEPY_COPY = "터미널에서 Claude Code를 열어 두면 인사해요.";
+/**
+ * 에이전트가 아직 깨어나지 않았을 때(구독으로 쓰는 에이전트의 세션 대기). 특정 CLI를
+ * 열라고 약속하지 않는다: Claude 구독 에이전트는 서버가 기본으로 닫아 두므로(ADR-0193
+ * D18, ADR-0198 D2) 「Claude Code를 열어 두면」은 지켜지지 않는 약속이 된다(#3697).
+ */
+export const WELCOME_BAND_SLEEPY_COPY = "에이전트가 깨어나면 바로 인사해요.";
 
 /** 오프너가 도착한 순간(시안 D5 `.kband`의 굵은 문장). */
 export const WELCOME_BAND_JOY_COPY = "첫 대화가 시작됐어요.";

@@ -1,5 +1,5 @@
-import { missingMemberLabel } from "@momo/core/features/workspace/directory";
-import { useCallback, useMemo, useState } from "react";
+import { actorToken } from "@momo/core/features/inbox/model";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
@@ -9,7 +9,10 @@ import {
   sendMessage,
   type Message,
 } from "@momo/core/lib/api";
-import type { MailboxEntry } from "@momo/core/features/inbox/mailbox";
+import {
+  contextWindow,
+  type MailboxEntry,
+} from "@momo/core/features/inbox/mailbox";
 import { isComposingEvent } from "@momo/core/features/chat/composerKeys";
 import { replyFailureMessage } from "@momo/core/features/timeline/actionCopy";
 import { Button } from "@/design/ui/button";
@@ -24,6 +27,7 @@ import {
   useChannels,
   type Directory,
 } from "@/features/workspace/useWorkspace";
+import { actorNamesIn } from "./actorNames";
 import { channelPath, watchForMessage } from "./anchor";
 import { InboxApprovalActions } from "./InboxApprovalActions";
 import { approvalRowControl } from "./approvalsPanel";
@@ -45,6 +49,9 @@ import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecis
 
 const CONTEXT_PAGE = 20;
 
+/** 착지한 줄이 물드는 시간. 머무는 표식이 아니라 「여기예요」 한 번의 신호다. */
+const FLASH_MS = 1_600;
+
 /** 멘션·답글은 그 메시지를 인용해 답한다(ADR-0148): 어느 말에 대한 답인지 남는다. */
 function quotesTarget(entry: MailboxEntry): boolean {
   return entry.kind === "mention" || entry.kind === "reply";
@@ -64,20 +71,30 @@ function ContextRow({
   directory,
   selfMemberId,
   highlighted,
+  isTarget,
+  targetRef,
 }: {
   message: Message;
   directory: Directory;
   selfMemberId: string;
   highlighted: boolean;
+  /** 이 항목이 가리키는 메시지. 패널이 열릴 때 여기로 스크롤한다. */
+  isTarget: boolean;
+  targetRef: React.MutableRefObject<HTMLLIElement | null>;
 }) {
-  const member = memberFor(directory, message.authorMemberId) ?? null;
-  const name = member?.displayName ?? missingMemberLabel(directory);
-  const isAgent = member?.kind === "agent";
+  // 목록 줄과 같은 해석(`actorNamesIn`): 에이전트는 타임라인처럼 `@핸들`이다.
+  const actor = actorNamesIn(directory, message.authorMemberId);
+  const member = memberFor(directory, message.authorMemberId);
+  const name = actorToken(actor);
+  const isAgent = actor.isAgent;
   const body =
     message.state === "deleted" ? "삭제된 메시지예요." : (message.body ?? "");
   return (
     <li
+      ref={isTarget ? targetRef : undefined}
       data-testid="inbox-context-row"
+      data-target={isTarget ? "true" : undefined}
+      aria-current={isTarget ? "true" : undefined}
       data-highlighted={highlighted ? "true" : undefined}
       className={cn(
         "flex gap-3 rounded-md px-3 py-2",
@@ -249,13 +266,55 @@ export function InboxDetail({
     [channelsQuery.groups]
   );
 
-  const messages = useMemo(
-    () =>
-      (context.data ?? [])
-        .filter((m) => m.type === "text" || m.type === "system")
-        .sort((a, b) => a.seq - b.seq),
-    [context.data]
-  );
+  // 패널은 항목 메시지를 중심으로 연다(#3694): 멘션·답글은 앞 몇 개·뒤 몇 개만,
+  // DM·스레드는 받은 대화 전체를 보이되 항목 메시지(없으면 끝)로 스크롤한다.
+  const view = useMemo(() => {
+    const sorted = (context.data ?? [])
+      .filter((m) => m.type === "text" || m.type === "system")
+      .sort((a, b) => a.seq - b.seq);
+    return contextWindow(
+      sorted,
+      entry.kind === "thread"
+        ? { seq: entry.seq }
+        : { messageId: entry.messageId, seq: entry.seq },
+      { window: quotesTarget(entry) }
+    );
+  }, [context.data, entry]);
+  const messages = view.rows;
+  const targetId =
+    view.targetIndex >= 0 ? messages[view.targetIndex]?.id : undefined;
+
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const targetRef = useRef<HTMLLIElement | null>(null);
+  const [flashKey, setFlashKey] = useState<string | null>(null);
+  const landedFor = useRef<string | null>(null);
+
+  // 항목이 바뀌면 그 메시지로 스크롤하고 잠깐 물들인다. 같은 항목의 새로고침(답장 뒤
+  // 재조회)은 다시 튀지 않는다: 항목 키 + 목표 id가 같으면 한 번만.
+  useEffect(() => {
+    if (context.isLoading) return;
+    const box = scrollRef.current;
+    const landing = `${entry.key}|${targetId ?? "end"}`;
+    if (!box || landedFor.current === landing) return;
+    const row = targetRef.current;
+    if (row && targetId !== undefined) {
+      box.scrollTop = Math.max(
+        0,
+        row.offsetTop - (box.clientHeight - row.clientHeight) / 2
+      );
+      // DM의 마지막 말은 늘 그 자리이므로 물들이지 않는다. 멘션·답글·스레드만.
+      if (entry.kind !== "dm") setFlashKey(landing);
+    } else {
+      box.scrollTop = box.scrollHeight;
+    }
+    landedFor.current = landing;
+  }, [context.isLoading, entry.key, entry.kind, targetId, messages.length]);
+
+  useEffect(() => {
+    if (flashKey === null) return;
+    const timer = window.setTimeout(() => setFlashKey(null), FLASH_MS);
+    return () => window.clearTimeout(timer);
+  }, [flashKey]);
 
   const refresh = useCallback(() => {
     void client.invalidateQueries({
@@ -317,7 +376,11 @@ export function InboxDetail({
         </Link>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
+      <div
+        ref={scrollRef}
+        data-testid="inbox-detail-scroll"
+        className="relative min-h-0 flex-1 overflow-y-auto px-2 py-3"
+      >
         {entry.kind === "task" ? (
           <div className="flex flex-col gap-3 px-2" data-testid="inbox-task">
             <p className="text-body text-ink">
@@ -413,8 +476,11 @@ export function InboxDetail({
                       message={message}
                       directory={directory}
                       selfMemberId={session.member.id}
+                      isTarget={message.id === targetId}
+                      targetRef={targetRef}
                       highlighted={
-                        quotesTarget(entry) && entry.messageId === message.id
+                        message.id === targetId &&
+                        flashKey === `${entry.key}|${targetId}`
                       }
                     />
                   ))}
