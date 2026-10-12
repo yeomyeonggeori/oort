@@ -1272,6 +1272,21 @@ async fn action_propose(
             if pending >= momo_agent::MAX_PENDING_WORKSPACE_ACTIONS {
                 return Ok(Err(ToolFailure::Conflict));
             }
+            // A second rename of the same agent while one waits is refused
+            // (증보 V4-M-9): the target's row is locked first so two simultaneous
+            // proposals cannot both see "none".
+            if let crate::routes::actions::GateSubject::Agent(target) = resolved.subject {
+                if momo_agent::lock_target_and_find_pending_action_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    action.id,
+                    target,
+                )
+                .await?
+                {
+                    return Ok(Err(ToolFailure::Conflict));
+                }
+            }
             // `queued → running`, idempotent and non-regressive. A hosted run is
             // still `queued` until its first progress event, and an adapter that
             // claims a job and proposes without reporting progress first is
@@ -1325,18 +1340,28 @@ async fn action_propose(
                     author_member_id: caller.agent_member_id,
                     message_type: MessageType::ApprovalRequest,
                     body: Some(momo_agent::workspace_action_request_body(action)),
-                    props: momo_agent::workspace_action_request_props(
-                        approval_id,
-                        handle.run_id,
-                        run.channel_id,
-                        action,
-                        momo_agent::action_block(
+                    props: {
+                        let mut props = momo_agent::workspace_action_request_props(
+                            approval_id,
+                            handle.run_id,
+                            run.channel_id,
                             action,
-                            resolved.validated.rows.clone(),
-                            rationale.as_deref(),
-                        ),
-                        expires_at,
-                    ),
+                            momo_agent::action_block(
+                                action,
+                                resolved.validated.rows.clone(),
+                                rationale.as_deref(),
+                            ),
+                            expires_at,
+                        );
+                        // A rename of ANOTHER agent says so in the sentence the
+                        // approver reads first (증보 V4).
+                        if let (Some(summary), Some(object)) =
+                            (&resolved.validated.summary, props.as_object_mut())
+                        {
+                            object.insert("summary".into(), Value::String(summary.clone()));
+                        }
+                        props
+                    },
                     root_id: None,
                     reply_to_id: None,
                     // A key **derived from** the approval id, not the approval

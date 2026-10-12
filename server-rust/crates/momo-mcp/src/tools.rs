@@ -311,7 +311,12 @@ fn artifacts_schema() -> Value {
 /// `docs/api/openapi.yaml`'s `WorkspaceActionId` against each other. Adding an
 /// action means editing three lines; forgetting one of them is a red test, not a
 /// production surprise.
-const WORKSPACE_ACTION_IDS: [&str; 3] = ["invite.create", "channel.create", "channel.member.add"];
+const WORKSPACE_ACTION_IDS: [&str; 4] = [
+    "invite.create",
+    "channel.create",
+    "channel.member.add",
+    "agent.rename",
+];
 
 // The argument vocabulary the registry publishes, restated here for the same
 // reason the ids are: `momo-mcp` may not depend on `momo-agent`, and
@@ -333,6 +338,7 @@ const WORKSPACE_CHANNEL_KINDS: [&str; 2] = ["public", "private"];
 const WORKSPACE_CHANNEL_NAME_MAX_BYTES: u64 = 80;
 const WORKSPACE_CHANNEL_TOPIC_MAX_BYTES: u64 = 1_120;
 const WORKSPACE_CHANNEL_REF_MAX_BYTES: u64 = 81;
+const WORKSPACE_AGENT_NAME_MAX_BYTES: u64 = 256;
 const WORKSPACE_MEMBER_HANDLES_MAX: u64 = 10;
 const WORKSPACE_MEMBER_HANDLE_MAX_BYTES: u64 = 33;
 
@@ -394,6 +400,14 @@ fn action_args_branches() -> Vec<Value> {
                     "maxItems": WORKSPACE_MEMBER_HANDLES_MAX,
                     "items": required_text(WORKSPACE_MEMBER_HANDLE_MAX_BYTES)
                 }
+            }),
+        ),
+        action_args_branch(
+            "agent.rename",
+            &["displayName"],
+            json!({
+                "displayName": required_text(WORKSPACE_AGENT_NAME_MAX_BYTES),
+                "targetHandle": nullable(required_text(WORKSPACE_MEMBER_HANDLE_MAX_BYTES))
             }),
         ),
     ]

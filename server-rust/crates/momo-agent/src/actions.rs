@@ -64,6 +64,10 @@ pub const ACTION_CHANNEL_CREATE: &str = "channel.create";
 /// can see (ADR-0186 증보 V1-b).
 pub const ACTION_CHANNEL_MEMBER_ADD: &str = "channel.member.add";
 
+/// `agent.rename` — change an agent's display name: the proposer's own, or that
+/// of another agent of the same owner (ADR-0186 증보 V4 / V4-M).
+pub const ACTION_AGENT_RENAME: &str = "agent.rename";
+
 /// What a person is consenting to when they approve (ADR-0186 D3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Risk {
@@ -266,6 +270,26 @@ fn channel_member_add_args_schema() -> Value {
     })
 }
 
+/// The raw `displayName` an agent may send, in UTF-8 bytes. The real bound is
+/// 32 characters **after** normalisation (`momo_messaging::name_guard`); this is
+/// the first fence and leaves room for a compatibility form that normalises
+/// shorter.
+pub const AGENT_RENAME_NAME_MAX_BYTES: u64 = 256;
+
+/// `agent.rename` arguments (증보 V2): the new name, and optionally which of the
+/// proposer's managed agents (by handle) — absent means the proposer itself.
+fn agent_rename_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["displayName"],
+        "properties": {
+            "displayName": {"type": "string", "minLength": 1, "maxLength": AGENT_RENAME_NAME_MAX_BYTES},
+            "targetHandle": {"type": "string", "minLength": 1, "maxLength": MEMBER_HANDLE_MAX_BYTES}
+        }
+    })
+}
+
 /// A channel reference: `#` + the 80-character name.
 pub const CHANNEL_REF_MAX_BYTES: u64 = 81;
 
@@ -297,6 +321,15 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         required_role: RequiredRole::Admin,
         effect: "표시된 멤버를 그 채널에 넣습니다",
         args_schema: channel_member_add_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_AGENT_RENAME,
+        title: "에이전트 이름 바꾸기",
+        summary: "에이전트 한 명의 표시 이름을 바꿉니다. 자기 자신이나 같은 소유자의 에이전트만 대상이 됩니다.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::AgentEditor,
+        effect: "대상 에이전트의 표시 이름을 바꿉니다",
+        args_schema: agent_rename_args_schema,
     },
 ];
 
@@ -549,6 +582,44 @@ pub fn channel_member_add_result_body(
     } else {
         format!("#{channel_name}에 멤버 {added}명을 넣었어요")
     }
+}
+
+/// The audit row a rename writes — the same name and schema the human
+/// self-rename (`PATCH …/members/me`) uses, with `kind:"agent"` in the detail.
+pub const AUDIT_MEMBER_RENAMED: &str = "member.renamed";
+pub const AUDIT_MEMBER_RENAMED_SCHEMA: &str = "momo.member.renamed.v1";
+
+/// `ref.type` for a renamed agent (the agent's member id).
+pub const REF_TYPE_AGENT: &str = "agent";
+
+/// The summary line when the target is **another** agent. 부록 A's generic line
+/// would say the same thing for a self-rename and for renaming a teammate; the
+/// approver must be told which one this is.
+pub const AGENT_RENAME_MANAGED_SUMMARY: &str = "에이전트가 제안했어요. 승인하면 대상 에이전트의 소유자 또는 관리자 권한으로 다른 에이전트의 이름을 바꿉니다.";
+
+/// The `agent.rename` card rows from the **server's** values: who is being
+/// renamed (name, handle, 에이전트) and 「현재 이름 → 새 이름」. Plain text — a
+/// client must not auto-link or auto-mention either name (부록 A).
+pub fn agent_rename_rows(
+    target_display_name: &str,
+    target_handle: &str,
+    new_display_name: &str,
+) -> Vec<Value> {
+    vec![
+        action_row(
+            "대상 에이전트",
+            member_card_label(target_display_name, target_handle, true),
+        ),
+        action_row(
+            "이름 변경",
+            format!("{target_display_name} → {new_display_name}"),
+        ),
+    ]
+}
+
+/// The outcome line of `agent.rename`.
+pub fn agent_rename_result_body(old: &str, new: &str) -> String {
+    format!("이름을 바꿨어요: {old} → {new}")
 }
 
 /// `ref.type` for a created channel.
@@ -882,7 +953,12 @@ mod tests {
     fn the_executable_and_declared_lists_are_what_the_batch_opened() {
         assert_eq!(
             action_ids(),
-            vec!["invite.create", "channel.create", "channel.member.add"]
+            vec![
+                "invite.create",
+                "channel.create",
+                "channel.member.add",
+                "agent.rename"
+            ]
         );
         assert_eq!(
             DECLARED_NOT_EXECUTABLE

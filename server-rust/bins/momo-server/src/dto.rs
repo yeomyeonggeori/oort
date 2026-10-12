@@ -90,6 +90,15 @@ pub struct RenameSelfMemberRequest {
     pub handle: Option<String>,
 }
 
+/// `PATCH /v1/workspaces/{ws}/agents/{agent}` (ADR-0186 증보 V4). The display
+/// name only: handle, profile, scopes and role are not accepted here, so this
+/// surface cannot become a second write for them.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RenameAgentRequest {
+    pub display_name: String,
+}
+
 /// Envelope for the updated member summary — login/join `Member` shape.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -64,15 +64,16 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use chrono::Utc;
 use momo_agent::actions::{
-    action_by_id, action_ref, action_result_props, channel_create_result_body,
-    channel_create_result_rows, channel_member_add_result_body, channel_member_add_rows,
-    invite_result_body, invite_result_rows, last_attempt_patch, result_client_msg_id, ActionResult,
-    ActionResultNext, RequiredRole, ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED,
-    ACTION_TYPE_WORKSPACE_ACTION, AUDIT_ACTION_APPROVED, AUDIT_CHANNELS_GRANTED,
-    AUDIT_CHANNELS_GRANTED_SCHEMA, AUDIT_CHANNEL_CREATED, AUDIT_CHANNEL_CREATED_SCHEMA,
-    AUDIT_CHANNEL_MEMBER_ADDED, AUDIT_CHANNEL_MEMBER_ADDED_SCHEMA, DEFAULT_INVITE_EXPIRES_IN_DAYS,
-    INVITE_RESULT_NEXT, LAST_ATTEMPT_PROPS_KEY, REF_TYPE_CHANNEL, REF_TYPE_INVITE, ROLE_REQUIRED,
-    SECRET_ONCE_INVITE_LINK,
+    action_by_id, action_ref, action_result_props, agent_rename_result_body,
+    channel_create_result_body, channel_create_result_rows, channel_member_add_result_body,
+    channel_member_add_rows, invite_result_body, invite_result_rows, last_attempt_patch,
+    result_client_msg_id, ActionResult, ActionResultNext, RequiredRole,
+    ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED, ACTION_TYPE_WORKSPACE_ACTION,
+    AUDIT_ACTION_APPROVED, AUDIT_CHANNELS_GRANTED, AUDIT_CHANNELS_GRANTED_SCHEMA,
+    AUDIT_CHANNEL_CREATED, AUDIT_CHANNEL_CREATED_SCHEMA, AUDIT_CHANNEL_MEMBER_ADDED,
+    AUDIT_CHANNEL_MEMBER_ADDED_SCHEMA, AUDIT_MEMBER_RENAMED, AUDIT_MEMBER_RENAMED_SCHEMA,
+    DEFAULT_INVITE_EXPIRES_IN_DAYS, INVITE_RESULT_NEXT, LAST_ATTEMPT_PROPS_KEY, REF_TYPE_AGENT,
+    REF_TYPE_CHANNEL, REF_TYPE_INVITE, ROLE_REQUIRED, SECRET_ONCE_INVITE_LINK,
 };
 use momo_agent::approval::{
     decided_props_patch, decision_broadcast_payload, decision_event_payload, decision_receipt,
@@ -94,8 +95,8 @@ use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
 use momo_messaging::{
     add_channel_member_in_tx, cent_channel, create_channel_detailed_in_tx, normalize_channel_kind,
-    patch_and_prune_message_props_in_tx, patch_message_props_in_tx, send_message_in_tx,
-    MessageType, NewChannel, NewMessage,
+    patch_and_prune_message_props_in_tx, patch_message_props_in_tx,
+    rename_agent_display_name_in_tx, send_message_in_tx, MessageType, NewChannel, NewMessage,
 };
 use momo_outbox::{emit_outbox, OutboxKind, RESUME_APPROVAL_JOB_METHOD};
 use momo_settings::{create_invite, INVITE_CREATED_AUDIT_ACTION, INVITE_CREATED_AUDIT_SCHEMA};
@@ -111,7 +112,8 @@ use crate::dto::{
 use crate::error::ApiError;
 use crate::realtime_advert::derive_same_origin_http_base;
 use crate::routes::actions::{
-    resolve_action_in_tx, ActionArgs, GateSubject, ResolvedChannel, ResolvedMember,
+    resolve_action_in_tx, ActionArgs, GateSubject, ResolvedAgentTarget, ResolvedChannel,
+    ResolvedMember,
 };
 use crate::routes::agents::require_profile_editor_in_tx;
 use crate::routes::invites::require_admin;
@@ -1185,6 +1187,17 @@ async fn execute_workspace_action(
 
     // ---- 3. the action's own executor --------------------------------------
     let executed = match &resolved.validated.args {
+        ActionArgs::AgentRename {
+            display_name,
+            target: Some(target),
+            ..
+        } => match execute_agent_rename(conn, approval, input, display_name, target).await? {
+            Execution::Ran(executed) => executed,
+            Execution::Refused(decision) => return Ok(Ok(decision)),
+        },
+        ActionArgs::AgentRename { target: None, .. } => {
+            return Err(protocol_error("agent.rename resolved without a target"));
+        }
         ActionArgs::ChannelMemberAdd {
             channel: Some(channel),
             members,
@@ -1571,6 +1584,65 @@ async fn execute_channel_create(
         ref_id: channel_id,
         result_body: channel_create_result_body(name, kind, channel_id),
         result_rows: channel_create_result_rows(name, kind, add_proposer, added),
+        secret_once: None,
+        next: None,
+    }))
+}
+
+/// `agent.rename` (증보 V4): set the target agent's display name as the approver.
+/// The collision check ran in `resolve_action_in_tx` under the workspace's
+/// display-name lock, which this transaction still holds, so the write sees the
+/// roster that was checked.
+async fn execute_agent_rename(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    display_name: &str,
+    target: &ResolvedAgentTarget,
+) -> Result<Execution, momo_db::DbError> {
+    let applied =
+        rename_agent_display_name_in_tx(conn, input.workspace_id, target.id, display_name)
+            .await?
+            .ok_or_else(|| protocol_error("the rename target is no longer a live agent"))?;
+
+    let mut detail = json!({
+        "old": applied.previous_display_name,
+        "new": applied.member.display_name,
+        "kind": "agent",
+        "via_agent": approval.requested_by.to_string(),
+        "approval_id": approval.id.to_string(),
+        "managed": target.managed,
+    });
+    if target.managed {
+        if let Some(object) = detail.as_object_mut() {
+            object.insert("target_agent".into(), json!(target.id.to_string()));
+            object.insert(
+                "owner_member_id".into(),
+                json!(target.owner_member_id.map(|owner| owner.to_string())),
+            );
+        }
+    }
+    let audit = AuditEntry::new(input.workspace_id, AUDIT_MEMBER_RENAMED)
+        .by(input.member_id)
+        .about(target.id)
+        .target("member", target.id)
+        .via_token(input.via_token_id)
+        .run(approval.run_id)
+        .with_schema(AUDIT_MEMBER_RENAMED_SCHEMA, detail);
+
+    Ok(Execution::Ran(Executed {
+        audits: vec![audit],
+        ref_type: REF_TYPE_AGENT,
+        ref_id: target.id,
+        result_body: agent_rename_result_body(
+            &applied.previous_display_name,
+            &applied.member.display_name,
+        ),
+        result_rows: momo_agent::actions::agent_rename_rows(
+            &applied.previous_display_name,
+            &target.handle,
+            &applied.member.display_name,
+        ),
         secret_once: None,
         next: None,
     }))
