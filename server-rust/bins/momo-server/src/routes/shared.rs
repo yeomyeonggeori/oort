@@ -339,6 +339,19 @@ pub(crate) fn settle_db<T>(context: &str, outcome: DbRejectable<T>) -> Result<T,
 /// Swift's cross-tenant read scope (`platform:read`).
 const PLATFORM_READ_SCOPE: &str = "platform:read";
 
+/// Whether this principal carries the platform operator scope.
+///
+/// One function for [`require_workspace_operator`] and for the approval decision
+/// route (ADR-0186 증보 `workspace_operator`): the executor judges an approver
+/// with the same set of operators the REST settings route admits, and a second
+/// copy of the scope string would be a second answer to "who is an operator".
+pub(crate) fn has_platform_read_scope(principal: &Principal) -> bool {
+    principal
+        .scopes
+        .iter()
+        .any(|scope| scope == PLATFORM_READ_SCOPE)
+}
+
 /// Instance-global gate (Swift `ProviderLinkRoutes.requireOperator` :328-377):
 /// a human that either carries `platform:read` or is an owner/admin of its own
 /// workspace **and** whose verified email is listed in `PLATFORM_ADMIN_EMAILS`.
@@ -435,11 +448,7 @@ pub(crate) async fn require_workspace_operator(
     workspace_id: Uuid,
 ) -> Result<(), ApiError> {
     require_human(principal, "human operator required")?;
-    if principal
-        .scopes
-        .iter()
-        .any(|scope| scope == PLATFORM_READ_SCOPE)
-    {
+    if has_platform_read_scope(principal) {
         return Ok(());
     }
     let member_id = principal.member_id;

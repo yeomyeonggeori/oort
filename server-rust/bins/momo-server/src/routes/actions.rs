@@ -13,6 +13,16 @@
 //!
 //! ## Why the argument normaliser lives here and not in the registry
 //!
+//! ## Two stages: shape, then the database
+//!
+//! [`validated_action_args`] is the **pure** half — it proves the arguments are
+//! well-formed and inside the ceilings, and needs no connection. Actions whose
+//! arguments name things in the workspace (a channel by name, a member by
+//! handle) cannot be judged by shape alone: ADR-0186 증보 V1-a/b/d say the server
+//! resolves them *inside a transaction*, at propose time and again at decision
+//! time, and builds the card rows from what it found. That second half is
+//! [`resolve_action_in_tx`], and it is the only function either caller invokes.
+//!
 //! `momo-agent` deliberately does not depend on `momo-settings`, and the invite
 //! spec's validators are the settings crate's
 //! (`normalized_invite_role`/`validated_max_uses`/`validated_expires_at_ms` —
@@ -30,9 +40,11 @@ use momo_agent::actions::{
     INVITE_PROPOSABLE_ROLES,
 };
 use momo_auth::{active_workspace_role, Principal};
+use momo_db::PgConnection;
 use momo_settings::{normalized_invite_role, validated_expires_at_ms, validated_max_uses};
 use serde::Serialize;
 use serde_json::{json, Value};
+use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::routes::shared::{
@@ -257,6 +269,63 @@ fn invite_create_args(args: &Value, now_ms: i64) -> Result<ValidatedActionArgs, 
     })
 }
 
+/// What the role gate of a [`actions::RequiredRole`] is judged against.
+///
+/// Most roles are about the workspace as a whole and need no subject. The
+/// agent-scoped one (`AgentEditor`) is about **one agent**, which is only known
+/// after the arguments are resolved — so the subject travels with the resolved
+/// action, and the decision route judges the role against it rather than against
+/// anything the card or the proposer asserted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GateSubject {
+    Workspace,
+    /// The target agent's `member.id` (ADR-0186 증보 V4-M: the target, never the
+    /// proposer).
+    Agent(Uuid),
+}
+
+/// A proposal after the database has agreed to it (ADR-0186 증보 V1-a/d).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedAction {
+    /// `normalized` is stored in the payload, `rows` is drawn on the card and
+    /// `args` is what the executor acts on — all three built from the values the
+    /// resolution found, not from the strings the agent typed.
+    pub validated: ValidatedActionArgs,
+    pub subject: GateSubject,
+}
+
+/// Shape-validate `args`, then resolve whatever they name against the workspace,
+/// inside the caller's tenant transaction.
+///
+/// `proposer_member_id` is the agent that raised the proposal: it is whose view
+/// "visible channel" is measured from, and the actor a resolution rule such as
+/// "same owner" starts from. The outer `Result` is the database; the inner one
+/// is the verdict, and every inner `Err` is a 400 that
+/// `agent_port_tools::failure_of` turns into the one `InvalidArguments` — a
+/// resolution failure never says *which* name did not resolve.
+///
+/// Called with the stored payload at decision time too, so a card is re-proved
+/// against the workspace as it is now (D2: 「저장값을 신뢰하지 않는다」).
+pub async fn resolve_action_in_tx(
+    _conn: &mut PgConnection,
+    _workspace_id: Uuid,
+    _proposer_member_id: Uuid,
+    action: &WorkspaceAction,
+    args: &Value,
+    now_ms: i64,
+) -> DbRejectable<ResolvedAction> {
+    let validated = match validated_action_args(action, args, now_ms) {
+        Ok(validated) => validated,
+        Err(error) => return Ok(Err(error)),
+    };
+    // Exhaustive on purpose: a new `ActionArgs` variant must say here whether it
+    // resolves anything and whom its role gate is about.
+    let subject = match &validated.args {
+        ActionArgs::InviteCreate { .. } => GateSubject::Workspace,
+    };
+    Ok(Ok(ResolvedAction { validated, subject }))
+}
+
 /// One optional integer argument, inside the ceilings the registry publishes.
 ///
 /// `as_i64` also refuses a fractional or float-shaped number, which `integer`
@@ -324,6 +393,26 @@ mod tests {
 
         let spec_enum = openapi_enum("WorkspaceActionId");
         assert_eq!(spec_enum, registry, "openapi WorkspaceActionId vs ACTIONS");
+    }
+
+    /// **ADR-0186 증보 — the approver roles are one list in two places.**
+    ///
+    /// `RequiredRole` is the definition (the decision route's `match` is
+    /// exhaustive over it); `WorkspaceActionRequiredRole` is what `GET …/actions`
+    /// publishes and what a client branches its 「…가 승인해야 합니다」 copy on.
+    /// A role added to the enum alone would be a card that names a role the
+    /// published contract never mentioned.
+    #[test]
+    fn the_required_roles_are_one_list_in_two_places() {
+        let registry: Vec<String> = actions::RequiredRole::ALL
+            .iter()
+            .map(|role| role.as_wire().to_string())
+            .collect();
+        assert_eq!(
+            openapi_enum("WorkspaceActionRequiredRole"),
+            registry,
+            "openapi WorkspaceActionRequiredRole vs RequiredRole"
+        );
     }
 
     /// **ADR-0186 증보 G2 — the suggestable ids are one list in four places.**
@@ -421,14 +510,17 @@ mod tests {
         assert!(!published.to_string().contains("grok"));
     }
 
-    /// **The propose tool must accept exactly what the catalog advertises.**
+    /// **The propose tool must accept exactly what the catalog advertises —
+    /// action by action.**
     ///
     /// `momo-mcp` cannot depend on `momo-agent`
     /// (`the_protocol_crate_cannot_reach_transport_database_or_product_crates`
-    /// enforces it), so the tool's `args` bounds are a fourth copy of the
-    /// registry's. Comparing the whole published object rather than the three
-    /// ceilings means a property added, removed or renamed on one side only is
-    /// caught as well — which a constant-by-constant check would miss.
+    /// enforces it), so the tool's `args` bounds are a copy of the registry's:
+    /// one closed `oneOf` branch per action, titled with the action id. This
+    /// compares **every registry action against its own branch**, key by key —
+    /// the property names, which of them are required, each bound, and the
+    /// array shape — so a property added, removed or renamed on one side only is
+    /// caught, as is an action with no branch or a branch with no action.
     ///
     /// Drift here is fail-closed (the narrower of the two wins) but it is still
     /// a lie: `GET …/actions` would advertise a value the tool then refuses,
@@ -442,47 +534,102 @@ mod tests {
         let published = propose.input_schema();
         let tool_args = &published["properties"]["args"];
         assert_eq!(tool_args["type"], json!("object"));
-        assert_eq!(tool_args["additionalProperties"], json!(false));
+        let branches = tool_args["oneOf"]
+            .as_array()
+            .expect("args is a oneOf of per-action branches");
 
-        // v1 has one action, so the tool's `args` is that action's schema. With
-        // a second action it becomes their union, and this is the assertion that
-        // will say so rather than drifting quietly.
+        let titles: Vec<&str> = branches
+            .iter()
+            .map(|branch| branch["title"].as_str().expect("a branch is titled"))
+            .collect();
         assert_eq!(
-            actions::ACTIONS.len(),
-            1,
-            "v1 is one action; widen this test with the second"
+            titles,
+            actions::action_ids(),
+            "one branch per registry action, in registry order"
         );
-        let registry_args = actions::ACTIONS[0].args_schema();
 
-        let tool_properties = tool_args["properties"]
-            .as_object()
-            .expect("tool args properties");
-        let registry_properties = registry_args["properties"]
-            .as_object()
-            .expect("registry args properties");
-        assert_eq!(
-            tool_properties.keys().collect::<Vec<_>>(),
-            registry_properties.keys().collect::<Vec<_>>(),
-            "the tool and the catalog must bound the same argument names"
-        );
-        for (name, registry_property) in registry_properties {
-            let tool_property = &tool_properties[name];
-            // The tool wraps every optional property in the nullability
-            // contract (`["integer","null"]`); the catalog publishes the bare
-            // type. Everything else must match key for key.
-            for key in ["enum", "minimum", "maximum", "minLength", "maxLength"] {
+        for action in actions::ACTIONS {
+            let branch = branches
+                .iter()
+                .find(|branch| branch["title"] == json!(action.id))
+                .unwrap_or_else(|| panic!("{} has no args branch in the tool", action.id));
+            let registry_args = action.args_schema();
+            assert_eq!(branch["type"], json!("object"), "{}", action.id);
+            assert_eq!(
+                branch["additionalProperties"],
+                json!(false),
+                "{}",
+                action.id
+            );
+
+            let tool_properties = branch["properties"].as_object().expect("branch properties");
+            let registry_properties = registry_args["properties"]
+                .as_object()
+                .expect("registry args properties");
+            assert_eq!(
+                tool_properties
+                    .keys()
+                    .collect::<std::collections::BTreeSet<_>>(),
+                registry_properties
+                    .keys()
+                    .collect::<std::collections::BTreeSet<_>>(),
+                "{}: the tool and the catalog must bound the same argument names",
+                action.id
+            );
+            let required_of = |schema: &Value| -> std::collections::BTreeSet<String> {
+                schema
+                    .get("required")
+                    .and_then(Value::as_array)
+                    .map(|names| {
+                        names
+                            .iter()
+                            .map(|name| name.as_str().expect("a name").to_string())
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+            let required = required_of(&registry_args);
+            assert_eq!(
+                required_of(branch),
+                required,
+                "{}: required keys differ between the tool and the catalog",
+                action.id
+            );
+
+            for (name, registry_property) in registry_properties {
+                let tool_property = &tool_properties[name];
+                for key in [
+                    "enum",
+                    "minimum",
+                    "maximum",
+                    "minLength",
+                    "maxLength",
+                    "minItems",
+                    "maxItems",
+                    "items",
+                ] {
+                    assert_eq!(
+                        tool_property.get(key),
+                        registry_property.get(key),
+                        "{}: args.{name}.{key} disagrees between oort_action_propose and GET /actions",
+                        action.id
+                    );
+                }
+                // The tool wraps every OPTIONAL property in the nullability
+                // contract (`["integer","null"]`) and leaves a required one
+                // bare; the catalog publishes the bare type for both.
+                let declared = registry_property["type"].as_str().expect("a declared type");
+                let expected = if required.contains(name) {
+                    json!(declared)
+                } else {
+                    json!([declared, "null"])
+                };
                 assert_eq!(
-                    tool_property.get(key),
-                    registry_property.get(key),
-                    "args.{name}.{key} disagrees between oort_action_propose and GET /actions"
+                    tool_property["type"], expected,
+                    "{}: args.{name} must keep the catalog's type under the nullability contract",
+                    action.id
                 );
             }
-            let declared = registry_property["type"].as_str().expect("a declared type");
-            assert_eq!(
-                tool_property["type"],
-                json!([declared, "null"]),
-                "args.{name} must keep the catalog's type under the nullability contract"
-            );
         }
     }
 

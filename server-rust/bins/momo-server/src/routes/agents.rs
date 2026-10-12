@@ -335,7 +335,7 @@ pub async fn create(
 ///
 /// Runs inside the caller's transaction so the authorization and the write it
 /// guards share one commit boundary.
-async fn require_profile_editor_in_tx(
+pub(crate) async fn require_profile_editor_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     agent_member_id: Uuid,

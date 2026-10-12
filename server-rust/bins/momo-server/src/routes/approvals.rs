@@ -65,10 +65,10 @@ use axum::{Extension, Json};
 use chrono::Utc;
 use momo_agent::actions::{
     action_by_id, action_ref, action_result_props, invite_result_body, invite_result_rows,
-    last_attempt_patch, result_client_msg_id, ActionResult, RequiredRole,
+    last_attempt_patch, result_client_msg_id, ActionResult, ActionResultNext, RequiredRole,
     ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED, ACTION_TYPE_WORKSPACE_ACTION,
-    AUDIT_ACTION_APPROVED, DEFAULT_INVITE_EXPIRES_IN_DAYS, LAST_ATTEMPT_PROPS_KEY, REF_TYPE_INVITE,
-    ROLE_REQUIRED, SECRET_ONCE_INVITE_LINK,
+    AUDIT_ACTION_APPROVED, DEFAULT_INVITE_EXPIRES_IN_DAYS, INVITE_RESULT_NEXT,
+    LAST_ATTEMPT_PROPS_KEY, REF_TYPE_INVITE, ROLE_REQUIRED, SECRET_ONCE_INVITE_LINK,
 };
 use momo_agent::approval::{
     decided_props_patch, decision_broadcast_payload, decision_event_payload, decision_receipt,
@@ -102,11 +102,12 @@ use crate::dto::{
 };
 use crate::error::ApiError;
 use crate::realtime_advert::derive_same_origin_http_base;
-use crate::routes::actions::{validated_action_args, ActionArgs};
+use crate::routes::actions::{resolve_action_in_tx, ActionArgs, GateSubject};
+use crate::routes::agents::require_profile_editor_in_tx;
 use crate::routes::invites::require_admin;
 use crate::routes::shared::{
-    agent_tenant_tx, audit_via_token_id, emit_terminal_agent_status, epoch_ms, path_uuid,
-    settle_db, workspace_scope, DbRejectable,
+    agent_tenant_tx, audit_via_token_id, emit_terminal_agent_status, epoch_ms,
+    has_platform_read_scope, path_uuid, settle_db, workspace_scope, DbRejectable,
 };
 use crate::routes::webhooks::no_store;
 use crate::AppState;
@@ -346,6 +347,7 @@ async fn decide(
     let public_origin = invite_link_origin(&state.t3, headers);
     let claude_subscription_agents_enabled =
         state.agent_port.config.claude_subscription_agents_enabled;
+    let operator_scope = has_platform_read_scope(&principal);
 
     let outcome: DbRejectable<Decision> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
@@ -363,6 +365,7 @@ async fn decide(
                     selected_host_id,
                     public_origin: public_origin.as_deref(),
                     claude_subscription_agents_enabled,
+                    operator_scope,
                 },
             )
             .await
@@ -435,6 +438,10 @@ struct DecisionInput<'a> {
     public_origin: Option<&'a str>,
     /// `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED` (#3431, ADR-0193 D18).
     claude_subscription_agents_enabled: bool,
+    /// The decider's principal carries the platform operator scope — one of the
+    /// two ways to satisfy `RequiredRole::WorkspaceOperator`
+    /// (`routes::shared::has_platform_read_scope`).
+    operator_scope: bool,
 }
 
 async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRejectable<Decision> {
@@ -894,7 +901,7 @@ async fn approve_run(
 }
 
 // ---------------------------------------------------------------------------
-// ADR-0186 D2/D4 — the workspace-action executor (#2509)
+// ADR-0186 D2/D4 — the workspace-action executor (#2509, generalised by 증보 S0)
 //
 // Everything below happens inside the decision transaction that locked the
 // approval `FOR UPDATE`, with the **approver's** authority. The agent that
@@ -904,13 +911,120 @@ async fn approve_run(
 //
 // The order is the ADR's, and each step's placement is load-bearing:
 //
-//   1. the role gate            — before the first write except the card patch
-//   2. the arguments, re-proved — from the stored payload, never trusted as-is
-//   3. the link's origin        — before the first write, so a link this server
-//                                 cannot address refuses instead of minting a
-//                                 code nobody will ever see
-//   4. execute · audit · settle · post · finish · broadcast
+//   1. the role gate            — before the first write except the card patch;
+//                                 a role judged against a *subject* (AgentEditor)
+//                                 waits for step 2 because the subject is only
+//                                 known once the arguments are resolved
+//   2. the arguments, re-proved — from the stored payload, never trusted as-is,
+//                                 and resolved against the workspace as it is now
+//   3. the action's own executor — which may refuse before ITS first write
+//                                 (an invite needs a link origin)
+//   4. audit · settle · post · finish · broadcast — one tail for every action
 // ---------------------------------------------------------------------------
+
+/// What one action's executor hands back to the shared tail.
+///
+/// An executor writes its domain rows (and may add to `audits`) and describes
+/// the outcome; it never touches the approval, the card, the result line or the
+/// run. Those are the tail's, because they are the same for every action and a
+/// copy per action is how one of them would forget to prune `last_attempt`.
+struct Executed {
+    /// Domain audit rows (`invite.created`, `channel.created`, …), written
+    /// **before** `action.approved`. Built by the executor because only it knows
+    /// the target and the detail; carries no secret.
+    audits: Vec<AuditEntry>,
+    ref_type: &'static str,
+    ref_id: Uuid,
+    /// The outcome line's body. As durable as the props beside it.
+    result_body: String,
+    result_rows: Vec<Value>,
+    /// The 1회 value (D4), grafted onto the response by [`decide`] and written
+    /// nowhere else. `None` for every action but `invite.create`.
+    secret_once: Option<SecretOnceDto>,
+    next: Option<ActionResultNext>,
+}
+
+/// An executor either ran, or refused **before its first write**.
+enum Execution {
+    Ran(Executed),
+    Refused(Decision),
+}
+
+/// How a role is judged — the one `match` over [`RequiredRole`] (exhaustive, so a
+/// new variant must choose its gate here). `None` (a card whose action this
+/// build no longer carries) takes the strictest rule, admin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GatePlan {
+    Admin,
+    Operator,
+    TargetAgent,
+}
+
+fn gate_plan(role: Option<RequiredRole>) -> GatePlan {
+    match role {
+        Some(RequiredRole::AgentEditor) => GatePlan::TargetAgent,
+        Some(RequiredRole::WorkspaceOperator) => GatePlan::Operator,
+        Some(RequiredRole::Admin) | None => GatePlan::Admin,
+    }
+}
+
+/// The `role_required` refusal: the approval is **not consumed** (ADR-0186 D2) —
+/// no ledger row, no status change, the run stays parked. What changes is the
+/// card, so a person who tapped and was refused sees why on the surface they
+/// tapped, and an admin scrolling past sees that somebody already tried.
+async fn role_required_refusal(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    role: Option<RequiredRole>,
+) -> DbRejectable<Decision> {
+    if let Some(message_id) = approval.request_message_id {
+        patch_message_props_in_tx(
+            conn,
+            input.workspace_id,
+            message_id,
+            &last_attempt_patch(ROLE_REQUIRED),
+        )
+        .await?;
+    }
+    Ok(Ok(refusal(
+        approval.id,
+        input.member_id,
+        ROLE_REQUIRED,
+        match role {
+            Some(RequiredRole::AgentEditor) => {
+                "this workspace action must be approved by the target agent's owner or a workspace admin"
+            }
+            Some(RequiredRole::WorkspaceOperator) => {
+                "this workspace action must be approved by a workspace operator"
+            }
+            Some(RequiredRole::Admin) | None => {
+                "this workspace action must be approved by a workspace admin"
+            }
+        },
+        StatusCode::FORBIDDEN,
+        now,
+    )))
+}
+
+/// A proposal that no longer holds: the approval stays pending and nothing is
+/// spent (ADR-0186 증보 V1-d — one word for every way a card can go stale, so
+/// the client vocabulary does not grow).
+fn args_invalid_refusal(
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+) -> Decision {
+    refusal(
+        approval.id,
+        input.member_id,
+        "action_args_invalid",
+        "this proposal's arguments are no longer valid",
+        StatusCode::CONFLICT,
+        now,
+    )
+}
 
 /// Approve a `workspace_action`: run it here, now, as the person who said yes.
 async fn execute_workspace_action(
@@ -919,48 +1033,31 @@ async fn execute_workspace_action(
     input: &DecisionInput<'_>,
     now: chrono::DateTime<Utc>,
 ) -> DbRejectable<Decision> {
-    // ---- 1. the gate is the invite surface's own ---------------------------
+    // ---- 1. the gate is the existing surface's own -------------------------
     //
-    // `require_admin` is `routes::invites`'s function, called rather than
-    // copied: ADR-0186 D2 says the judgement is 「기존 `require_admin`과 같은
-    // 판정」, and two implementations of one rule drift the day either is
-    // widened. It is also the same authority the REST route would have applied
-    // had this person minted the invite by hand — which is exactly what they
-    // are doing, one card removed.
+    // Each arm CALLS the function the REST route applies (`require_admin`,
+    // `has_platform_read_scope`, `require_profile_editor_in_tx`) rather than
+    // copying it: ADR-0186 D2 says the judgement is 「기존 … 와 같은 판정」, and
+    // two implementations of one rule drift the day either is widened.
     //
     // The `match` is exhaustive on purpose: the registry publishes a
     // `required_role` per action, and calling `require_admin` unconditionally
     // would make a second action with a different gate silently admin-gated.
-    // Adding a `RequiredRole` variant now fails to compile here, which is where
-    // the decision about its gate belongs.
-    let gate = match action_required_role(&approval.payload) {
-        Some(RequiredRole::Admin) | None => {
+    // Adding a `RequiredRole` variant fails to compile here, which is where the
+    // decision about its gate belongs.
+    let required_role = action_required_role(&approval.payload);
+    let subject_free_gate = match gate_plan(required_role) {
+        // Judged against the target agent, which step 2 resolves.
+        GatePlan::TargetAgent => None,
+        GatePlan::Operator => Some(if input.operator_scope {
+            Ok(())
+        } else {
             require_admin(conn, input.workspace_id, input.member_id).await?
-        }
+        }),
+        GatePlan::Admin => Some(require_admin(conn, input.workspace_id, input.member_id).await?),
     };
-    if gate.is_err() {
-        // The approval is **not consumed** (ADR-0186 D2): no ledger row, no
-        // status change, the run stays parked. What does change is the card — a
-        // person who tapped and was refused must be able to see why on the
-        // surface they tapped, and an admin scrolling past must see that
-        // somebody already tried.
-        if let Some(message_id) = approval.request_message_id {
-            patch_message_props_in_tx(
-                conn,
-                input.workspace_id,
-                message_id,
-                &last_attempt_patch(ROLE_REQUIRED),
-            )
-            .await?;
-        }
-        return Ok(Ok(refusal(
-            approval.id,
-            input.member_id,
-            ROLE_REQUIRED,
-            "this workspace action must be approved by a workspace admin",
-            StatusCode::FORBIDDEN,
-            now,
-        )));
+    if subject_free_gate.is_some_and(|gate| gate.is_err()) {
+        return role_required_refusal(conn, approval, input, now, required_role).await;
     }
 
     // ---- 2. what was proposed, re-proved -----------------------------------
@@ -989,100 +1086,116 @@ async fn execute_workspace_action(
         )));
     };
 
-    // The stored `args` are re-run through the **same** normaliser the proposal
-    // passed (`routes::actions::validated_action_args`), for the reason ADR-0186
+    // The stored `args` are re-run through the **same** resolver the proposal
+    // passed (`routes::actions::resolve_action_in_tx`), for the reason ADR-0186
     // D2 gives: 「저장값을 신뢰하지 않는다」. The card may be an hour old, the
-    // ceilings may have narrowed since, and the row is writable by anything that
-    // can write `approval.payload`. Re-proving costs one function call and is
-    // the difference between "a person approved these numbers" and "a person
-    // approved a row".
+    // ceilings may have narrowed, a channel name may have been taken or an agent
+    // may have left a room since, and the row is writable by anything that can
+    // write `approval.payload`. Re-proving is the difference between "a person
+    // approved these values" and "a person approved a row".
     let now_ms = now.timestamp_millis();
-    let Ok(validated) = validated_action_args(action, proposed_args(&approval.payload), now_ms)
-    else {
-        return Ok(Ok(refusal(
-            approval.id,
-            input.member_id,
-            "action_args_invalid",
-            "this proposal's arguments are no longer valid",
-            StatusCode::CONFLICT,
-            now,
-        )));
-    };
-
-    // ---- 3. can this server address its own link? --------------------------
-    //
-    // Judged before the mint, not after. A code exists exactly once, in the
-    // response that carries it (D4), so minting one we cannot put in a link
-    // would burn an invite nobody could ever use and leave a row in
-    // `invite_code` that no person asked for.
-    let Some(origin) = input.public_origin else {
-        return Ok(Ok(refusal(
-            approval.id,
-            input.member_id,
-            "public_origin_unavailable",
-            "this instance cannot address its own invite links",
-            StatusCode::CONFLICT,
-            now,
-        )));
-    };
-
-    // ---- 4. execute --------------------------------------------------------
-    let ActionArgs::InviteCreate {
-        role,
-        max_uses,
-        expires_in_days,
-    } = validated.args;
-    let expires_at_ms = expires_in_days.map(|days| now_ms + days * 86_400_000);
-    let created = create_invite(
+    let resolved = match resolve_action_in_tx(
         conn,
         input.workspace_id,
-        role,
-        max_uses,
-        expires_at_ms,
-        // **The approver's name on the row**, not the agent's. `invite_code.
-        // created_by` is who is accountable for this link existing.
-        input.member_id,
+        approval.requested_by,
+        action,
+        proposed_args(&approval.payload),
+        now_ms,
     )
-    .await?;
+    .await?
+    {
+        Ok(resolved) => resolved,
+        Err(_) => {
+            // An unresolvable *target* must not teach a non-eligible decider
+            // anything about the workspace. For the subject-judged role the gate
+            // has not run, so a decider who is not at least an admin gets the
+            // generic `role_required` — only an authorised decider sees that the
+            // card went stale.
+            if required_role == Some(RequiredRole::AgentEditor)
+                && require_admin(conn, input.workspace_id, input.member_id)
+                    .await?
+                    .is_err()
+            {
+                return role_required_refusal(conn, approval, input, now, required_role).await;
+            }
+            return Ok(Ok(args_invalid_refusal(approval, input, now)));
+        }
+    };
 
-    // base64url by construction (`momo_generate_invite_code`, 003). Checked
-    // rather than escaped: an unsafe code means the generator changed, and
-    // quietly percent-encoding it would hide that while producing a link whose
-    // text no longer matches the code a person may type by hand.
-    if !created.code.bytes().all(is_url_safe_code_byte) {
-        return Err(protocol_error("minted invite code is not url-safe"));
+    if required_role == Some(RequiredRole::AgentEditor) {
+        // Fail closed: an `AgentEditor` action whose resolver named no agent has
+        // nobody to judge the decider against.
+        let GateSubject::Agent(agent_member_id) = resolved.subject else {
+            return Err(protocol_error(
+                "agent_editor action resolved without a target agent",
+            ));
+        };
+        match require_profile_editor_in_tx(
+            conn,
+            input.workspace_id,
+            agent_member_id,
+            input.member_id,
+        )
+        .await?
+        {
+            Ok(()) => {}
+            // The target vanished between resolution and the gate (the same
+            // transaction, but the row is unlocked here): the proposal is stale.
+            //
+            // But only an admin may be told so: `require_profile_editor_in_tx`
+            // answers 404 before it looks at the decider's authority, so for
+            // anyone else a 404-vs-403 difference would be an oracle for whether
+            // that member id is a live agent. They get `role_required` either way.
+            Err(error) if error.status == StatusCode::NOT_FOUND => {
+                if require_admin(conn, input.workspace_id, input.member_id)
+                    .await?
+                    .is_err()
+                {
+                    return role_required_refusal(conn, approval, input, now, required_role).await;
+                }
+                return Ok(Ok(args_invalid_refusal(approval, input, now)));
+            }
+            Err(_) => {
+                return role_required_refusal(conn, approval, input, now, required_role).await;
+            }
+        }
     }
-    let join_url = format!("{origin}/join?code={}", created.code);
-    let action_ref_value = action_ref(REF_TYPE_INVITE, created.invite.id);
 
-    // ---- audit: two rows, and the generic `approval.approved` is not one ----
+    // ---- 3. the action's own executor --------------------------------------
+    let executed = match &resolved.validated.args {
+        ActionArgs::InviteCreate {
+            role,
+            max_uses,
+            expires_in_days,
+        } => {
+            match execute_invite_create(
+                conn,
+                approval,
+                input,
+                now,
+                role,
+                *max_uses,
+                *expires_in_days,
+            )
+            .await?
+            {
+                Execution::Ran(executed) => executed,
+                Execution::Refused(decision) => return Ok(Ok(decision)),
+            }
+        }
+    };
+
+    // ---- 4. the shared tail ------------------------------------------------
     //
-    // ADR-0186 §5 names exactly two: `action.approved` and `invite.created`.
-    // This arm returns before the generic write block, so the tool-call path's
-    // `approval.{status}` row is not written — an executed action is recorded as
-    // what it did, once, rather than as a decision plus a coincidence.
-    write_audit(
-        conn,
-        &AuditEntry::new(input.workspace_id, INVITE_CREATED_AUDIT_ACTION)
-            .by(input.member_id)
-            .target("invite_code", created.invite.id)
-            .via_token(input.via_token_id)
-            .run(approval.run_id)
-            .with_schema(
-                INVITE_CREATED_AUDIT_SCHEMA,
-                // The REST route's two fields plus this path's provenance.
-                // Role and reach only — never the code, never its hash, never
-                // the preview (`routes::invites::create`'s discipline, and an
-                // audit row is read by more people than a response is).
-                json!({
-                    "role": role,
-                    "max_uses": max_uses,
-                    "via_agent": approval.requested_by.to_string(),
-                    "approval_id": approval.id.to_string(),
-                }),
-            ),
-    )
-    .await?;
+    // ADR-0186 §5 names two audit rows per action: `action.approved` and the
+    // domain one. This arm returns before the generic write block, so the
+    // tool-call path's `approval.{status}` row is not written — an executed
+    // action is recorded as what it did, once, rather than as a decision plus a
+    // coincidence.
+    let action_ref_value = action_ref(executed.ref_type, executed.ref_id);
+    for entry in &executed.audits {
+        write_audit(conn, entry).await?;
+    }
     write_audit(
         conn,
         &AuditEntry::new(input.workspace_id, AUDIT_ACTION_APPROVED)
@@ -1175,13 +1288,6 @@ async fn execute_workspace_action(
     // Same authorship rule as the rejection's (`reject_run`): the proposal was
     // the agent's utterance, so its outcome belongs to the same speaker. Who
     // decided is in the props, not in the authorship.
-    // UTC, like every other date this server renders. A client that wants the
-    // reader's own calendar day formats it from the invite row; the card's row
-    // is the server's statement about the instant it wrote.
-    let expires_on = chrono::DateTime::from_timestamp_millis(created.invite.expires_at_ms)
-        .ok_or_else(|| protocol_error("minted invite has an unrepresentable expiry"))?
-        .format("%Y-%m-%d")
-        .to_string();
     send_message_in_tx(
         conn,
         input.workspace_id,
@@ -1189,20 +1295,17 @@ async fn execute_workspace_action(
             channel_id: approval.channel_id,
             author_member_id: approval.requested_by,
             message_type: MessageType::ToolResult,
-            body: Some(invite_result_body(
-                role,
-                max_uses,
-                expires_in_days.unwrap_or(DEFAULT_INVITE_EXPIRES_IN_DAYS),
-            )),
+            body: Some(executed.result_body),
             props: action_result_props(&ActionResult {
                 action_id: action.id,
                 status: ACTION_RESULT_EXECUTED,
                 approval_id: approval.id,
                 decided_by: input.member_id,
-                ref_type: REF_TYPE_INVITE,
-                ref_id: created.invite.id,
-                rows: invite_result_rows(role, &expires_on),
-                secret_shown_once: true,
+                ref_type: executed.ref_type,
+                ref_id: executed.ref_id,
+                rows: executed.result_rows,
+                secret_shown_once: executed.secret_once.is_some(),
+                next: executed.next,
             }),
             root_id: None,
             reply_to_id: None,
@@ -1226,7 +1329,7 @@ async fn execute_workspace_action(
     {
         // The guard lost: this run is no longer parked (a human stop, or an
         // expiry that raced us). Unlike `approve_run`'s identical-looking check
-        // this cannot be swallowed — an invite has already been minted in this
+        // this cannot be swallowed — the action has already executed in this
         // transaction, and `Err` is the only channel that rolls it back.
         return Err(protocol_error(RUN_NOT_PARKED_SENTINEL));
     }
@@ -1260,11 +1363,104 @@ async fn execute_workspace_action(
     Ok(Ok(Decision {
         receipt,
         status: StatusCode::OK,
+        secret_once: executed.secret_once,
+    }))
+}
+
+/// `invite.create`: mint the code as the approver and show the link once.
+async fn execute_invite_create(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    role: &'static str,
+    max_uses: i32,
+    expires_in_days: Option<i64>,
+) -> Result<Execution, momo_db::DbError> {
+    // ---- can this server address its own link? -----------------------------
+    //
+    // Judged before the mint, not after. A code exists exactly once, in the
+    // response that carries it (D4), so minting one we cannot put in a link
+    // would burn an invite nobody could ever use and leave a row in
+    // `invite_code` that no person asked for. Specific to this action: the
+    // other actions mint nothing a link could carry.
+    let Some(origin) = input.public_origin else {
+        return Ok(Execution::Refused(refusal(
+            approval.id,
+            input.member_id,
+            "public_origin_unavailable",
+            "this instance cannot address its own invite links",
+            StatusCode::CONFLICT,
+            now,
+        )));
+    };
+
+    let now_ms = now.timestamp_millis();
+    let expires_at_ms = expires_in_days.map(|days| now_ms + days * 86_400_000);
+    let created = create_invite(
+        conn,
+        input.workspace_id,
+        role,
+        max_uses,
+        expires_at_ms,
+        // **The approver's name on the row**, not the agent's. `invite_code.
+        // created_by` is who is accountable for this link existing.
+        input.member_id,
+    )
+    .await?;
+
+    // base64url by construction (`momo_generate_invite_code`, 003). Checked
+    // rather than escaped: an unsafe code means the generator changed, and
+    // quietly percent-encoding it would hide that while producing a link whose
+    // text no longer matches the code a person may type by hand.
+    if !created.code.bytes().all(is_url_safe_code_byte) {
+        return Err(protocol_error("minted invite code is not url-safe"));
+    }
+    let join_url = format!("{origin}/join?code={}", created.code);
+
+    // UTC, like every other date this server renders. A client that wants the
+    // reader's own calendar day formats it from the invite row; the card's row
+    // is the server's statement about the instant it wrote.
+    let expires_on = chrono::DateTime::from_timestamp_millis(created.invite.expires_at_ms)
+        .ok_or_else(|| protocol_error("minted invite has an unrepresentable expiry"))?
+        .format("%Y-%m-%d")
+        .to_string();
+
+    let audit = AuditEntry::new(input.workspace_id, INVITE_CREATED_AUDIT_ACTION)
+        .by(input.member_id)
+        .target("invite_code", created.invite.id)
+        .via_token(input.via_token_id)
+        .run(approval.run_id)
+        .with_schema(
+            INVITE_CREATED_AUDIT_SCHEMA,
+            // The REST route's two fields plus this path's provenance. Role and
+            // reach only — never the code, never its hash, never the preview
+            // (`routes::invites::create`'s discipline, and an audit row is read
+            // by more people than a response is).
+            json!({
+                "role": role,
+                "max_uses": max_uses,
+                "via_agent": approval.requested_by.to_string(),
+                "approval_id": approval.id.to_string(),
+            }),
+        );
+
+    Ok(Execution::Ran(Executed {
+        audits: vec![audit],
+        ref_type: REF_TYPE_INVITE,
+        ref_id: created.invite.id,
+        result_body: invite_result_body(
+            role,
+            max_uses,
+            expires_in_days.unwrap_or(DEFAULT_INVITE_EXPIRES_IN_DAYS),
+        ),
+        result_rows: invite_result_rows(role, &expires_on),
         secret_once: Some(SecretOnceDto {
             kind: SECRET_ONCE_INVITE_LINK.to_string(),
             value: join_url,
             expires_at_ms: created.invite.expires_at_ms,
         }),
+        next: Some(INVITE_RESULT_NEXT),
     }))
 }
 
@@ -1931,7 +2127,7 @@ mod tests {
         assert_eq!(proposed_args(&json!({})), &Value::Null);
         assert_eq!(proposed_args(&json!({"action": {"id": "x"}})), &Value::Null);
         assert!(
-            validated_action_args(
+            crate::routes::actions::validated_action_args(
                 action_by_id(momo_agent::actions::ACTION_INVITE_CREATE).expect("v1"),
                 proposed_args(&json!({})),
                 0,
@@ -2007,6 +2203,7 @@ mod tests {
             selected_host_id: pick,
             public_origin: None,
             claude_subscription_agents_enabled: false,
+            operator_scope: false,
         }
     }
 
@@ -2089,6 +2286,23 @@ mod tests {
         assert_eq!(
             decision_reference_host(&plain, &decision(false, Some(vps)), &nothing_runs),
             None
+        );
+    }
+
+    /// Each role maps to its own gate, and an unknown action takes the strictest
+    /// one: collapsing `AgentEditor` or `WorkspaceOperator` into `Admin` would
+    /// silently change who may approve.
+    #[test]
+    fn each_required_role_has_its_own_gate_and_unknown_is_admin() {
+        assert_eq!(gate_plan(Some(RequiredRole::Admin)), GatePlan::Admin);
+        assert_eq!(gate_plan(None), GatePlan::Admin);
+        assert_eq!(
+            gate_plan(Some(RequiredRole::WorkspaceOperator)),
+            GatePlan::Operator
+        );
+        assert_eq!(
+            gate_plan(Some(RequiredRole::AgentEditor)),
+            GatePlan::TargetAgent
         );
     }
 
