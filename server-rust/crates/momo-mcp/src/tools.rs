@@ -311,7 +311,7 @@ fn artifacts_schema() -> Value {
 /// `docs/api/openapi.yaml`'s `WorkspaceActionId` against each other. Adding an
 /// action means editing three lines; forgetting one of them is a red test, not a
 /// production surprise.
-const WORKSPACE_ACTION_IDS: [&str; 1] = ["invite.create"];
+const WORKSPACE_ACTION_IDS: [&str; 2] = ["invite.create", "channel.create"];
 
 // The argument vocabulary the registry publishes, restated here for the same
 // reason the ids are: `momo-mcp` may not depend on `momo-agent`, and
@@ -326,6 +326,14 @@ const WORKSPACE_ACTION_IDS: [&str; 1] = ["invite.create"];
 const WORKSPACE_ACTION_ROLES: [&str; 2] = ["member", "admin"];
 const WORKSPACE_ACTION_MAX_USES_CEILING: i64 = 100;
 const WORKSPACE_ACTION_EXPIRES_IN_DAYS_CEILING: i64 = 30;
+// `channel.create`'s vocabulary, restated for the same reason (measured against
+// `momo_agent::actions`' `CHANNEL_*` / `ACTION_MEMBER_HANDLES_MAX` /
+// `MEMBER_HANDLE_MAX_BYTES` by the same drift test).
+const WORKSPACE_CHANNEL_KINDS: [&str; 2] = ["public", "private"];
+const WORKSPACE_CHANNEL_NAME_MAX_BYTES: u64 = 80;
+const WORKSPACE_CHANNEL_TOPIC_MAX_BYTES: u64 = 1_120;
+const WORKSPACE_MEMBER_HANDLES_MAX: u64 = 10;
+const WORKSPACE_MEMBER_HANDLE_MAX_BYTES: u64 = 33;
 
 /// One `oneOf` branch of `oort_action_propose`'s `args`: the closed object
 /// action `action_id` accepts.
@@ -357,7 +365,28 @@ fn action_args_branch(action_id: &str, required: &[&str], properties: Value) -> 
 /// model, and `the_propose_tool_accepts_exactly_what_the_catalog_advertises`
 /// measures each branch against the registry's own schema for that action.
 fn action_args_branches() -> Vec<Value> {
-    vec![action_args_branch(
+    vec![
+        invite_create_branch(),
+        action_args_branch(
+            "channel.create",
+            &["name"],
+            json!({
+                "name": required_text(WORKSPACE_CHANNEL_NAME_MAX_BYTES),
+                "kind": nullable(json!({"type": "string", "enum": WORKSPACE_CHANNEL_KINDS})),
+                "topic": nullable(text(WORKSPACE_CHANNEL_TOPIC_MAX_BYTES)),
+                "addProposer": nullable(json!({"type": "boolean"})),
+                "memberHandles": nullable(json!({
+                    "type": "array",
+                    "maxItems": WORKSPACE_MEMBER_HANDLES_MAX,
+                    "items": required_text(WORKSPACE_MEMBER_HANDLE_MAX_BYTES)
+                }))
+            }),
+        ),
+    ]
+}
+
+fn invite_create_branch() -> Value {
+    action_args_branch(
         "invite.create",
         &[],
         json!({
@@ -365,7 +394,7 @@ fn action_args_branches() -> Vec<Value> {
             "maxUses": nullable(integer(1, WORKSPACE_ACTION_MAX_USES_CEILING)),
             "expiresInDays": nullable(integer(1, WORKSPACE_ACTION_EXPIRES_IN_DAYS_CEILING))
         }),
-    )]
+    )
 }
 
 /// `oort_action_propose` — ADR-0186 D2.
@@ -777,6 +806,7 @@ fn validate_against(schema: &Value, value: &Value) -> Result<(), ToolFailure> {
             }
             Ok(())
         }
+        Some("boolean") => value.is_boolean().then_some(()).ok_or(invalid),
         Some("array") => {
             let items = value.as_array().ok_or(invalid)?;
             let length = items.len() as u64;

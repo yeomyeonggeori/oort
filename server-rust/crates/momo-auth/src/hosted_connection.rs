@@ -1013,6 +1013,83 @@ pub async fn active_hosted_connection_in_tx(
     .await
 }
 
+/// One hosted connection may name at most this many approved channels
+/// (ADR-0186 증보 V5). `confirm`/`consent` never had a ceiling; the grant paths
+/// that widen a connection *after* the human's confirm do, so a connection's
+/// reach cannot be grown without bound one approval at a time.
+pub const MAX_HOSTED_APPROVED_CHANNELS: usize = 50;
+
+/// Lock the agent's live hosted connection `FOR UPDATE` and say how many
+/// channels it already covers. `None` = the agent has no live hosted connection
+/// (a managed or subscription agent — nothing to widen).
+///
+/// **Lock order.** A connection is the *first* lock of the hosted canon
+/// (`connection → token → member → workspace_membership → agent_profile →
+/// membership`, see `prove_hosted_binding_in_tx`), so a caller that is also going
+/// to write `membership` rows takes this lock *before* them, never after.
+pub async fn lock_active_hosted_connection_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<Option<(Uuid, usize)>, sqlx::Error> {
+    let Some(connection_id) =
+        active_hosted_connection_in_tx(conn, workspace_id, agent_member_id).await?
+    else {
+        return Ok(None);
+    };
+    let count: Option<i32> = sqlx::query_scalar(
+        "SELECT cardinality(approved_channel_ids) FROM hosted_agent_connection \
+          WHERE workspace_id=$1 AND id=$2 AND agent_member_id=$3 \
+            AND status='active' AND proved_at IS NOT NULL FOR UPDATE",
+    )
+    .bind(workspace_id)
+    .bind(connection_id)
+    .bind(agent_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(count.map(|count| (connection_id, usize::try_from(count).unwrap_or(usize::MAX))))
+}
+
+/// Add `channel_ids` to a connection's `approved_channel_ids` (set union, order
+/// kept), refusing when the result would pass [`MAX_HOSTED_APPROVED_CHANNELS`].
+/// Returns the new array, or `None` when the connection is not live or the cap
+/// would be passed (nothing is written either way).
+///
+/// This is a **write path to the array** besides `confirm` and `consent`
+/// (ADR-0186 증보 V5: 「쓰기 경로 = confirm·consent·grant 셋」), and it
+/// deliberately leaves `confirmed_by`, `confirmed_at`, `active_token_id`,
+/// `approved_scopes` and `approved_dm_channel_ids` alone — the DM rule of ADR-0162
+/// 증보 2 B6 hangs on them. The caller is responsible for the channels being
+/// non-DM and unarchived (it already resolved them) and for the agent's own
+/// `membership`: an agent reads a room only when it is *both* approved and a
+/// member (`hosted_inbox.rs`).
+pub async fn append_approved_channels_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    connection_id: Uuid,
+    channel_ids: &[Uuid],
+) -> Result<Option<Vec<Uuid>>, sqlx::Error> {
+    sqlx::query_scalar(
+        "UPDATE hosted_agent_connection hc SET \
+                approved_channel_ids = hc.approved_channel_ids || ARRAY( \
+                    SELECT DISTINCT c FROM unnest($3::uuid[]) c \
+                     WHERE c <> ALL(hc.approved_channel_ids)), \
+                updated_at = now() \
+          WHERE hc.workspace_id=$1 AND hc.id=$2 \
+            AND hc.status='active' AND hc.proved_at IS NOT NULL \
+            AND cardinality(hc.approved_channel_ids || ARRAY( \
+                    SELECT DISTINCT c FROM unnest($3::uuid[]) c \
+                     WHERE c <> ALL(hc.approved_channel_ids))) <= $4 \
+        RETURNING hc.approved_channel_ids",
+    )
+    .bind(workspace_id)
+    .bind(connection_id)
+    .bind(channel_ids)
+    .bind(MAX_HOSTED_APPROVED_CHANNELS as i32)
+    .fetch_optional(&mut *conn)
+    .await
+}
+
 pub async fn is_hosted_agent_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
