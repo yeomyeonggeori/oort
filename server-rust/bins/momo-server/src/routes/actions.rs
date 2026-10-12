@@ -2263,6 +2263,87 @@ mod tests {
         );
     }
 
+    /// **The runbook cannot drift from the registry (ADR-0186 증보 S6).**
+    ///
+    /// `docs/SELF_HOST_AGENT.md` §3.3.16b is what a hosted runtime's author reads to
+    /// learn what may be proposed and who approves it. Every served action must
+    /// have its row there, with the approver the registry publishes, and an action
+    /// that is only *declared* must not be presented as served.
+    #[test]
+    fn the_agent_runbook_names_every_served_action_and_its_approver() {
+        let doc = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../docs/SELF_HOST_AGENT.md"
+        ))
+        .expect("docs/SELF_HOST_AGENT.md is readable from the server crate");
+        let start = doc
+            .find("#### 3.3.16b")
+            .expect("the runbook has a 3.3.16b section");
+        let end = doc[start..]
+            .find("#### 3.3.16c")
+            .map(|offset| start + offset)
+            .expect("3.3.16b ends at 3.3.16c");
+        let section = &doc[start..end];
+        for action in actions::ACTIONS {
+            let row = section
+                .lines()
+                .find(|line| line.starts_with(&format!("| `{}`", action.id)))
+                .unwrap_or_else(|| panic!("the runbook has no table row for {}", action.id));
+            assert!(
+                row.contains(&format!("`{}`", action.required_role.as_wire())),
+                "the runbook row for {} must name its approver `{}`: {row}",
+                action.id,
+                action.required_role.as_wire()
+            );
+        }
+        for declared in actions::DECLARED_NOT_EXECUTABLE {
+            assert!(
+                !section.contains(&format!("| `{}`", declared.id)),
+                "{} is declared, not served, and must not have a runbook row",
+                declared.id
+            );
+        }
+        // The two rules a runtime must not have to guess.
+        assert!(section.contains("An invite link is never returned to you"));
+        assert!(
+            section.contains("**The rule the runtime has to learn: propose, then end the turn.**")
+        );
+        // The numbers the runbook states are the constants the server enforces:
+        // a limit changed in code without the runbook is a red test, not a lie.
+        for stated in [
+            format!(
+                "capped at {} characters",
+                actions::WELCOME_PROMPT_PROPOSAL_MAX_CHARS
+            ),
+            format!("{{channels: 1..{}}}", actions::GRANT_CHANNELS_MAX),
+            format!("memberHandles?: ≤{}", actions::ACTION_MEMBER_HANDLES_MAX),
+            format!("memberHandles: 1..{}", actions::ACTION_MEMBER_HANDLES_MAX),
+            format!(
+                "at most {} approved channels in total",
+                momo_auth::MAX_HOSTED_APPROVED_CHANNELS
+            ),
+            format!(
+                "At most {} proposals of yours may be waiting",
+                actions::MAX_PENDING_WORKSPACE_ACTIONS
+            ),
+            format!(
+                "up to\n  {} characters (at most {} emoji)",
+                momo_messaging::name_guard::AGENT_NAME_MAX_CHARS,
+                momo_messaging::name_guard::AGENT_NAME_MAX_EMOJI
+            ),
+            format!("maxUses: 1..{}", actions::INVITE_MAX_USES_CEILING),
+            format!(
+                "expiresInDays: 1..{}",
+                actions::INVITE_EXPIRES_IN_DAYS_CEILING
+            ),
+        ] {
+            assert!(
+                section.contains(&stated),
+                "the runbook no longer states {stated:?}"
+            );
+        }
+    }
+
     /// 부록 E, row by row. The `unavailableReason` key is what a client reads
     /// when `executable` is false, and it is never blank.
     #[test]
