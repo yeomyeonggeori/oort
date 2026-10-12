@@ -1290,12 +1290,16 @@ async fn action_propose(
                 return Ok(Err(ToolFailure::Conflict));
             }
 
-            let payload = momo_agent::workspace_action_payload(
+            let mut payload = momo_agent::workspace_action_payload(
                 action.id,
                 &resolved.validated.normalized,
                 rationale.as_deref(),
                 caller.agent_member_id,
             );
+            if let Some(action_block) = payload.get_mut("action").and_then(Value::as_object_mut) {
+                // The ids the names resolved to, for the decision to compare.
+                action_block.insert("pins".into(), resolved.pins.clone());
+            }
             let approval_id = momo_agent::create_pending_approval_in_tx(
                 conn,
                 caller.workspace_id,
