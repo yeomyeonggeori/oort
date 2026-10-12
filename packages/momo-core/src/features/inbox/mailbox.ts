@@ -216,7 +216,7 @@ export function dmEntry(input: {
     seq: latest.seq,
     messageId: latest.id,
     reason: mine
-      ? "회원님이 보낸 마지막 말이 있는 DM이에요."
+      ? "내가 보낸 마지막 말이 있는 DM이에요."
       : "DM으로 온 메시지예요.",
   };
 }
@@ -245,7 +245,7 @@ export function mentionEntry(
     seq: message.seq,
     messageId: message.id,
     ...(message.rootId === undefined ? {} : { rootId: message.rootId }),
-    reason: "메시지에서 회원님을 불러 서버가 멘션으로 기록했어요.",
+    reason: "메시지에서 나를 불러 서버가 멘션으로 기록했어요.",
   };
 }
 
@@ -291,7 +291,7 @@ export function threadEntry(input: {
     messageId: input.root.id,
     rootId: input.root.id,
     rootPreview: bodyLine(input.root),
-    reason: "회원님이 쓴 글에 새 답글이 달렸어요.",
+    reason: "내가 쓴 글에 새 답글이 달렸어요.",
   };
 }
 
@@ -334,9 +334,9 @@ const SERVER_TYPE_LABEL: Record<Exclude<MailboxKind, "task">, string> = {
 };
 
 const SERVER_REASON: Record<Exclude<MailboxKind, "task">, string> = {
-  reply: "회원님의 글에 답하거나 인용했어요.",
-  mention: "메시지에서 회원님을 불렀어요.",
-  thread: "회원님이 참여한 스레드에 새 답글이 달렸어요.",
+  reply: "내 글에 답하거나 인용했어요.",
+  mention: "메시지에서 나를 불렀어요.",
+  thread: "내가 참여한 스레드에 새 답글이 달렸어요.",
   dm: "DM으로 온 메시지예요.",
 };
 
@@ -392,6 +392,42 @@ export function serverEntry(
         }),
     reason: SERVER_REASON[kind],
   };
+}
+
+// ---- 오른쪽 패널 맥락 창 (#3694) ----------------------------------------
+
+/** 항목 메시지 앞뒤로 보여 줄 개수. 긴 채널이어도 패널은 몇 개만 연다. */
+export const CONTEXT_BEFORE = 4;
+export const CONTEXT_AFTER = 2;
+
+/**
+ * 패널에 보일 메시지와 항목 메시지(`targetIndex`)를 정한다. `messages`는 seq 오름차순.
+ *
+ * `window: true`면 항목 메시지를 가운데 두고 앞 `CONTEXT_BEFORE`·뒤 `CONTEXT_AFTER`개만
+ * 남긴다. 페이지에 항목 메시지가 없으면(삭제·범위 밖) 자르지 않고 `targetIndex`는 -1이다 —
+ * 없는 위치를 아는 척 스크롤하지 않는다. `window: false`는 DM·스레드처럼 받은 대화를
+ * 통째로 보일 때다(자르지 않고 위치만 알려 준다).
+ */
+export function contextWindow<T extends { id: string; seq: number }>(
+  messages: readonly T[],
+  target: { messageId?: string; seq?: number },
+  options: { window: boolean }
+): { rows: T[]; targetIndex: number } {
+  const byId =
+    target.messageId === undefined
+      ? -1
+      : messages.findIndex((m) => uuidEq(m.id, target.messageId as string));
+  const index =
+    byId >= 0
+      ? byId
+      : target.seq === undefined
+        ? -1
+        : messages.findIndex((m) => m.seq === target.seq);
+  if (index < 0) return { rows: [...messages], targetIndex: -1 };
+  if (!options.window) return { rows: [...messages], targetIndex: index };
+  const from = Math.max(0, index - CONTEXT_BEFORE);
+  const to = Math.min(messages.length, index + CONTEXT_AFTER + 1);
+  return { rows: messages.slice(from, to), targetIndex: index - from };
 }
 
 // ---- 모으기·거르기·세기 ---------------------------------------------------
