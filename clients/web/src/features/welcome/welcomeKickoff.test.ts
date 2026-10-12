@@ -308,7 +308,8 @@ describe("copy and constants", () => {
     expect(welcomeBandWorkingCopy("hermes")).toBe("hermes가 인사하러 오고 있어요.");
     expect(welcomeBandWorkingCopy("김인턴")).toBe("김인턴이 인사하러 오고 있어요.");
     expect(welcomeBandWorkingCopy(null)).toBe("에이전트가 인사하러 오고 있어요.");
-    expect(WELCOME_BAND_SLEEPY_COPY).toBe("터미널에서 Claude Code를 열어 두면 인사해요.");
+    expect(WELCOME_BAND_SLEEPY_COPY).toBe("에이전트가 깨어나면 바로 인사해요.");
+    expect(WELCOME_BAND_SLEEPY_COPY).not.toMatch(/Claude|터미널/);
   });
 
   it("backstop sentence has no failure wording and names the agents nav", () => {

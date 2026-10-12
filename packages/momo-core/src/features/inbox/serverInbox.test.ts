@@ -38,6 +38,22 @@ const WIRE_ITEM = {
   readAt: null,
 };
 
+describe("부제: 제품 말투(#3694)", () => {
+  it("모든 종류의 이유 문장이 「회원님」 없이 해요체다", () => {
+    const kinds = ["reply_to_me", "mention", "thread_reply", "dm"] as const;
+    const reasons = kinds.map(
+      (kind) =>
+        serverEntry(parseInboxItem({ ...WIRE_ITEM, kind })!, {
+          channelLabel: "#agent-lab",
+          actor: { name: "그록봇", isAgent: false },
+          nowMs: 0,
+        }).reason
+    );
+    expect(reasons[0]).toBe("내 글에 답하거나 인용했어요.");
+    for (const reason of reasons) expect(reason).not.toContain("회원님");
+  });
+});
+
 describe("시각: 마이크로초를 밀리초로 자른 뒤 읽는다", () => {
   it("6자리 소수부를 밀리초까지만 쓴다", () => {
     expect(parseInboxTimeMs("2026-10-11T04:07:12.123456Z")).toBe(

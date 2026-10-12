@@ -6,7 +6,8 @@
 // during S1 must re-enter S1; after S1 it must re-enter S2 rather than the
 // first-run ladder. S2 complete/skip clears ONLY `invite`. `workspace-profile`
 // is cleared by S1 completion (both saves OK) or by both settings doors
-// succeeding later. sessionStorage survives a same-tab reload; a JS-heap
+// succeeding later. The doc is durable per account+server (durableSlot.ts,
+// #3696) so quitting the desktop app mid-S1 still re-offers S1; a JS-heap
 // dismiss covers "this load, go to the shell" without dropping S1's re-offer.
 // =============================================================================
 
@@ -14,6 +15,7 @@ import {
   isOwnerOnboardingStage,
   type OwnerOnboardingStage,
 } from "@/features/auth/onboardingFlow";
+import { readDurable, removeDurable, writeDurable } from "./durableSlot";
 import { clearS1Draft, clearS1DraftFields } from "./s1Draft";
 
 const listeners = new Set<() => void>();
@@ -28,14 +30,12 @@ type PendingDoc = {
 };
 
 let dismissedThisLoad = false;
+// 이번 앱 실행에서 claim으로 표지를 찍었는가(#3714). 찍었다면 S1은 첫 질문이고, 아니면
+// 이전 실행에서 남았거나 서버 값으로 다시 세운 재질문이다.
+let claimedThisLoad = false;
 
-function sessionStore(): Storage | null {
-  try {
-    return globalThis.sessionStorage ?? null;
-  } catch {
-    return null;
-  }
-}
+/** 「이대로 쓸게요」를 누른 계정·서버. 영속이고 TTL·로그아웃이 지우지 않는다. */
+const DEFAULT_ACCEPTED_SLOT = "oort.onboarding.s1.accepted.v1";
 
 function notify(): void {
   for (const listener of listeners) listener();
@@ -50,7 +50,7 @@ export function subscribeOwnerOnboarding(onChange: () => void): () => void {
 
 function readDoc(): PendingDoc {
   try {
-    const raw = sessionStore()?.getItem(OWNER_ONBOARDING_KEY);
+    const raw = readDurable(OWNER_ONBOARDING_KEY);
     if (!raw) return {};
     if (isOwnerOnboardingStage(raw)) return { [raw]: true };
     const parsed: unknown = JSON.parse(raw);
@@ -73,20 +73,14 @@ function writeDoc(doc: PendingDoc): void {
   if (doc.invite) next.invite = true;
   if (doc["settings-workspace"]) next["settings-workspace"] = true;
   if (doc["settings-profile"]) next["settings-profile"] = true;
-  try {
-    if (Object.keys(next).length === 0) {
-      sessionStore()?.removeItem(OWNER_ONBOARDING_KEY);
-    } else {
-      sessionStore()?.setItem(OWNER_ONBOARDING_KEY, JSON.stringify(next));
-    }
-  } catch {
-    // Private mode can refuse sessionStorage; the stage then cannot resume.
-  }
+  if (Object.keys(next).length === 0) removeDurable(OWNER_ONBOARDING_KEY);
+  else writeDurable(OWNER_ONBOARDING_KEY, JSON.stringify(next));
   notify();
 }
 
 export function markOwnerOnboardingPending(): void {
   dismissedThisLoad = false;
+  claimedThisLoad = true;
   writeDoc({
     "workspace-profile": true,
     invite: true,
@@ -177,16 +171,33 @@ export function recordOwnerOnboardingSettingsSave(
 
 export function clearOwnerOnboardingPending(): void {
   dismissedThisLoad = false;
-  try {
-    sessionStore()?.removeItem(OWNER_ONBOARDING_KEY);
-  } catch {
-    // same as mark
-  }
+  claimedThisLoad = false;
+  removeDurable(OWNER_ONBOARDING_KEY);
   clearS1Draft();
   notify();
 }
 
+/** S1이 첫 질문이 아니라 재질문인가: 이전 실행에서 남았거나 서버 이름으로 다시 세웠다. */
+export function ownerOnboardingS1IsReoffer(): boolean {
+  return !claimedThisLoad && hasOwnerOnboardingFlag("workspace-profile");
+}
+
+/** 이전 실행에서 남은 표지인가(이번 실행의 claim이 찍은 것이 아니다). */
+export function ownerOnboardingFlagIsFromEarlierLoad(): boolean {
+  return !claimedThisLoad && ownerOnboardingIsPending();
+}
+
+export function hasAcceptedSeedWorkspace(): boolean {
+  return readDurable(DEFAULT_ACCEPTED_SLOT) === "1";
+}
+
+/** 「이대로 쓸게요」: 이 계정·서버에서 시드 이름을 다시 묻지 않는다. */
+export function acceptSeedWorkspace(): void {
+  writeDurable(DEFAULT_ACCEPTED_SLOT, "1", Date.now(), { permanent: true });
+}
+
 export function resetOwnerOnboardingLoadState(): void {
   dismissedThisLoad = false;
+  claimedThisLoad = false;
   notify();
 }

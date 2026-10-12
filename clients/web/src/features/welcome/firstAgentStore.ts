@@ -1,4 +1,5 @@
 import { uuidEq } from "@momo/core/lib/api";
+import { readDurable, removeDurable, writeDurable } from "@/features/onboarding/durableSlot";
 
 // =============================================================================
 // 첫 에이전트 퍼널의 건너뛰기/완료 마커 (#2216).
@@ -86,11 +87,8 @@ export function writeFirstAgentMarker(
 export function markFirstAgentPending(workspaceId: string): void {
   const marker = readFirstAgentMarker(workspaceId);
   if (marker === "done" || marker === "skipped") return;
-  try {
-    sessionStore()?.setItem(PENDING_SLOT, workspaceId);
-  } catch {
-    // Private mode: the stage then does not appear.
-  }
+  // 계정·서버 단위 영속(#3696): 앱을 껐다 켜도 첫 에이전트 화면이 이어진다.
+  writeDurable(PENDING_SLOT, workspaceId);
 }
 
 export function dismissFirstAgentDeferred(): void {
@@ -114,20 +112,12 @@ export function firstAgentIsPending(workspaceId: string): boolean {
   if (marker === "done" || marker === "skipped") return false;
   if (firstAgentDeferDismissed()) return false;
   if (marker === "deferred") return true;
-  try {
-    const pending = sessionStore()?.getItem(PENDING_SLOT);
-    return typeof pending === "string" && uuidEq(pending, workspaceId);
-  } catch {
-    return false;
-  }
+  const pending = readDurable(PENDING_SLOT);
+  return typeof pending === "string" && uuidEq(pending, workspaceId);
 }
 
 export function clearFirstAgentPending(): void {
-  try {
-    sessionStore()?.removeItem(PENDING_SLOT);
-  } catch {
-    // same as mark
-  }
+  removeDurable(PENDING_SLOT);
 }
 
 export function setFirstAgentResumeHash(hash: string): void {
