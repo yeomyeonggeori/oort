@@ -1,10 +1,13 @@
 import type { LocalHarnessId } from "@momo/core/features/hostedAgents/detect";
 import {
+  AI_CONNECT_GROUP_LABEL,
   AI_CONNECT_ROW_COPY,
+  CLAUDE_PAUSED_PILL_LABEL,
   API_KEY_PILL_LABEL,
   HARNESS_INSTALL_URL,
   HARNESS_LABEL,
   HARNESS_PILL_LABEL,
+  aiConnectRowGroup,
   isSubscriptionRow,
   subscriptionRowSelectable,
   type AiConnectRowId,
@@ -32,6 +35,7 @@ export function AiConnectList({
   selected,
   onSelect,
   pill,
+  disabledRows,
   onLoginOpen,
   onRecheck,
   grokPill,
@@ -43,6 +47,8 @@ export function AiConnectList({
   selected: AiConnectRowId | null;
   onSelect: (id: AiConnectRowId) => void;
   pill: (id: LocalHarnessId) => HarnessPill;
+  /** 서버가 닫아 둔 줄(#3695): 설명을 이 값으로 바꾸고 알약은 「꺼짐」, 고를 수 없다. */
+  disabledRows?: Partial<Record<AiConnectRowId, string>>;
   /** 로그인 모달을 연다(#2816). */
   onLoginOpen: (id: LocalHarnessId) => void;
   onRecheck: (id: LocalHarnessId) => void;
@@ -58,6 +64,9 @@ export function AiConnectList({
   probed: boolean;
   describedBy?: string;
 }) {
+  const grouped =
+    rows.some((id) => aiConnectRowGroup(id) === "tools") &&
+    rows.some((id) => aiConnectRowGroup(id) === "agents");
   return (
     <div
       role="radiogroup"
@@ -67,21 +76,39 @@ export function AiConnectList({
       className="flex min-w-0 flex-col gap-3"
       data-testid="ai-connect-list"
     >
-      {rows.map((id) => {
+      {rows.map((id, index) => {
         const copy = AI_CONNECT_ROW_COPY[id];
+        // 에이전트 / 내 도구 두 묶음이 함께 설 때만 머리글을 단다(ADR-0198 D3, #3697).
+        const group = aiConnectRowGroup(id);
+        const groupHeading =
+          grouped && (index === 0 || aiConnectRowGroup(rows[index - 1]) !== group)
+            ? AI_CONNECT_GROUP_LABEL[group]
+            : null;
         const harnessPill = isSubscriptionRow(id) ? pill(id) : null;
+        const serverClosed = disabledRows?.[id];
         const selectable =
-          !locked && (harnessPill === null || subscriptionRowSelectable(harnessPill));
+          !locked &&
+          serverClosed === undefined &&
+          (harnessPill === null || subscriptionRowSelectable(harnessPill));
         const on = selected === id;
         const inputId = `ai-connect-${id}`;
         const detailId = `${inputId}-detail`;
         const pillId = `${inputId}-pill`;
         const needsLogin =
           isSubscriptionRow(id) &&
+          serverClosed === undefined &&
           probed &&
           (harnessPill === "login" || harnessPill === "checking" || harnessPill === "recheck");
         return (
           <div key={id} className="flex min-w-0 flex-col gap-2">
+            {groupHeading !== null && (
+              <p
+                className="mt-1 break-keep text-meta font-medium text-ink-muted"
+                data-testid={`ai-connect-group-${group}`}
+              >
+                {groupHeading}
+              </p>
+            )}
             <div
               className="ai-connect-opt"
               data-selected={on ? "true" : undefined}
@@ -110,11 +137,21 @@ export function AiConnectList({
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="ai-connect-title">{copy.title}</span>
                   <span id={detailId} className="ai-connect-detail">
-                    {copy.detail}
+                    {serverClosed ?? copy.detail}
                   </span>
                 </span>
               </label>
-              {isSubscriptionRow(id) && harnessPill !== null ? (
+              {serverClosed !== undefined ? (
+                <span
+                  className="ai-connect-pill"
+                  data-tone="mute"
+                  id={pillId}
+                  data-testid={`ai-connect-pill-${id}`}
+                  data-pill="server-closed"
+                >
+                  {CLAUDE_PAUSED_PILL_LABEL}
+                </span>
+              ) : isSubscriptionRow(id) && harnessPill !== null ? (
                 <HarnessPillControl
                   id={id}
                   pill={harnessPill}
