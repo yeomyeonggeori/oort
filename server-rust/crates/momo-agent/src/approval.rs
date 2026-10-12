@@ -205,6 +205,76 @@ pub async fn create_pending_approval_in_tx(
     Ok(id)
 }
 
+/// How many `workspace_action` approvals this agent has `pending` and not yet
+/// expired — after taking a row lock on the agent's `member` row.
+///
+/// The lock is the point (ADR-0186 증보 V1-e). A bare `count(*)` followed by an
+/// `INSERT` would let several runs of one agent each read "2" and each insert a
+/// third, so the ceiling would hold on a quiet system and fail under exactly the
+/// concurrent re-calling it exists to stop. `FOR NO KEY UPDATE` serialises
+/// proposals of one agent without blocking the `FOR KEY SHARE` a message or
+/// approval insert takes on the same `member` row through its foreign key.
+///
+/// An expired-but-unswept card is not counted: the sweep may lag, and a card
+/// nobody can still decide must not lock an agent out of proposing.
+pub async fn lock_agent_and_count_pending_workspace_actions_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<i64, DbError> {
+    sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM member WHERE workspace_id = $1 AND id = $2 FOR NO KEY UPDATE",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let pending: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM approval \
+          WHERE workspace_id = $1 AND requested_by = $2 \
+            AND action_type = 'workspace_action' AND status = 'pending' \
+            AND (expires_at IS NULL OR expires_at > now())",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(pending)
+}
+
+/// Whether a `workspace_action` of `action_id` is already `pending` against
+/// `target_member_id` (the id pinned in `payload.action.pins.target`) — after
+/// taking a row lock on the target's `member` row (ADR-0186 증보 V4-M-9). A second
+/// rename of the same agent while one waits is a card spam / name-flip race, so
+/// the second proposal is refused; the lock is what makes two simultaneous
+/// proposals unable to both see "none".
+pub async fn lock_target_and_find_pending_action_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    action_id: &str,
+    target_member_id: Uuid,
+) -> Result<bool, DbError> {
+    sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM member WHERE workspace_id = $1 AND id = $2 FOR NO KEY UPDATE",
+    )
+    .bind(workspace_id)
+    .bind(target_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM approval \
+          WHERE workspace_id = $1 AND action_type = 'workspace_action' \
+            AND status = 'pending' AND (expires_at IS NULL OR expires_at > now()) \
+            AND payload #>> '{action,id}' = $2 \
+            AND payload #>> '{action,pins,target}' = $3)",
+    )
+    .bind(workspace_id)
+    .bind(action_id)
+    .bind(target_member_id.to_string())
+    .fetch_one(&mut *conn)
+    .await?)
+}
+
 /// Join the approval to the message that renders it (Swift :1673-1680).
 pub async fn attach_request_message_in_tx(
     conn: &mut PgConnection,
