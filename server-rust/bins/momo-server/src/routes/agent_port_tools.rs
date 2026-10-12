@@ -1157,12 +1157,12 @@ async fn action_propose(
         momo_agent::actions::action_by_id(action_id).ok_or(ToolFailure::InvalidArguments)?;
     let rationale = optional_str(args, "rationale", 280)?.map(str::to_string);
     let raw_args = args.get("args").cloned().unwrap_or_else(|| json!({}));
-    let validated = crate::routes::actions::validated_action_args(
-        action,
-        &raw_args,
-        chrono::Utc::now().timestamp_millis(),
-    )
-    .map_err(|error| failure_of(&error))?;
+    // The pure half of the normaliser runs here, **before** a transaction opens,
+    // so a malformed proposal never costs one. Resolution against the workspace
+    // (ADR-0186 증보 V1-a/b) needs the connection and happens inside, below.
+    let proposed_at_ms = chrono::Utc::now().timestamp_millis();
+    crate::routes::actions::validated_action_args(action, &raw_args, proposed_at_ms)
+        .map_err(|error| failure_of(&error))?;
 
     let secret = state.agent_port.envelope_secret().to_string();
     let now = chrono::Utc::now();
@@ -1239,6 +1239,54 @@ async fn action_propose(
             if run.status.is_approval_held() || run.status.is_terminal() {
                 return Ok(Err(ToolFailure::Conflict));
             }
+            // **Resolved inside the transaction** (ADR-0186 증보 V1-a/b): names are
+            // looked up against the workspace as it is now, and the card rows are
+            // built from what was found, never from the agent's strings. A
+            // resolution failure is the same `InvalidArguments` as a malformed
+            // argument — it never says which name failed.
+            let resolved = match crate::routes::actions::resolve_action_in_tx(
+                conn,
+                caller.workspace_id,
+                caller.agent_member_id,
+                action,
+                &raw_args,
+                proposed_at_ms,
+            )
+            .await?
+            {
+                Ok(resolved) => resolved,
+                // Every resolution failure is the one `InvalidArguments`, whatever
+                // status the resolver chose: mapping the status through
+                // `failure_of` would let a 404 vs a 409 say which name failed.
+                Err(_) => return Ok(Err(ToolFailure::InvalidArguments)),
+            };
+            // **The pending ceiling** (증보 V1-e). The agent's `member` row is
+            // locked first so concurrent runs of one agent cannot each read
+            // "2 pending" and each add a third.
+            let pending = momo_agent::lock_agent_and_count_pending_workspace_actions_in_tx(
+                conn,
+                caller.workspace_id,
+                caller.agent_member_id,
+            )
+            .await?;
+            if pending >= momo_agent::MAX_PENDING_WORKSPACE_ACTIONS {
+                return Ok(Err(ToolFailure::Conflict));
+            }
+            // A second rename of the same agent while one waits is refused
+            // (증보 V4-M-9): the target's row is locked first so two simultaneous
+            // proposals cannot both see "none".
+            if let crate::routes::actions::GateSubject::Agent(target) = resolved.subject {
+                if momo_agent::lock_target_and_find_pending_action_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    action.id,
+                    target,
+                )
+                .await?
+                {
+                    return Ok(Err(ToolFailure::Conflict));
+                }
+            }
             // `queued → running`, idempotent and non-regressive. A hosted run is
             // still `queued` until its first progress event, and an adapter that
             // claims a job and proposes without reporting progress first is
@@ -1257,12 +1305,16 @@ async fn action_propose(
                 return Ok(Err(ToolFailure::Conflict));
             }
 
-            let payload = momo_agent::workspace_action_payload(
+            let mut payload = momo_agent::workspace_action_payload(
                 action.id,
-                &validated.normalized,
+                &resolved.validated.normalized,
                 rationale.as_deref(),
                 caller.agent_member_id,
             );
+            if let Some(action_block) = payload.get_mut("action").and_then(Value::as_object_mut) {
+                // The ids the names resolved to, for the decision to compare.
+                action_block.insert("pins".into(), resolved.pins.clone());
+            }
             let approval_id = momo_agent::create_pending_approval_in_tx(
                 conn,
                 caller.workspace_id,
@@ -1288,18 +1340,28 @@ async fn action_propose(
                     author_member_id: caller.agent_member_id,
                     message_type: MessageType::ApprovalRequest,
                     body: Some(momo_agent::workspace_action_request_body(action)),
-                    props: momo_agent::workspace_action_request_props(
-                        approval_id,
-                        handle.run_id,
-                        run.channel_id,
-                        action,
-                        momo_agent::action_block(
+                    props: {
+                        let mut props = momo_agent::workspace_action_request_props(
+                            approval_id,
+                            handle.run_id,
+                            run.channel_id,
                             action,
-                            validated.rows.clone(),
-                            rationale.as_deref(),
-                        ),
-                        expires_at,
-                    ),
+                            momo_agent::action_block(
+                                action,
+                                resolved.validated.rows.clone(),
+                                rationale.as_deref(),
+                            ),
+                            expires_at,
+                        );
+                        // A rename of ANOTHER agent says so in the sentence the
+                        // approver reads first (증보 V4).
+                        if let (Some(summary), Some(object)) =
+                            (&resolved.validated.summary, props.as_object_mut())
+                        {
+                            object.insert("summary".into(), Value::String(summary.clone()));
+                        }
+                        props
+                    },
                     root_id: None,
                     reply_to_id: None,
                     // A key **derived from** the approval id, not the approval
