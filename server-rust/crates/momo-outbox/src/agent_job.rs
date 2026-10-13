@@ -389,7 +389,8 @@ pub const RUN_STALLED_JOB_LAST_ERROR: &str = "run ended by the stall sweep";
 /// [`retire_pending_agent_jobs_for_run_in_tx`] with the reason the operator reads on the
 /// row. Same statement and rule (→ done), only the `last_error` differs — and it also
 /// retires a `processing` job: the stall sweep ends the run for good, so no consumer may
-/// keep a claim on it.
+/// keep a claim on it. **For the stall sweep only** (it ends the run in the same
+/// transaction); anything else retiring a `processing` job would overwrite a live claim.
 pub async fn retire_pending_agent_jobs_for_run_with_reason_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,

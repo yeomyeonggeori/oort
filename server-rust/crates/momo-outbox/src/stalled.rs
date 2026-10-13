@@ -171,8 +171,9 @@ pub async fn pending_job_has_live_lease_in_tx(
     let rows = sqlx::query(
         "SELECT (o.lease_owner IS NOT NULL AND o.lease_expires_at > now()) AS live \
            FROM outbox o \
-          WHERE o.workspace_id = $1 AND o.kind = 'agent_job' AND o.method = 'gateway' \
-            AND o.status = 'pending' AND lower(o.payload->>'run_id') = lower($2::text) \
+          WHERE o.workspace_id = $1 AND o.kind = 'agent_job' \
+            AND o.status IN ('pending', 'processing') \
+            AND lower(o.payload->>'run_id') = lower($2::text) \
           ORDER BY o.id \
             FOR UPDATE OF o",
     )
