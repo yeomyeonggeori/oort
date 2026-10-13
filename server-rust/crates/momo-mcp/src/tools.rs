@@ -624,7 +624,12 @@ pub const TOOL_CATALOG: [ToolDescriptor; 11] = [
     ToolDescriptor {
         name: TOOL_RUN_EVENT,
         title: "Report run progress",
-        description: "Record a progress event for the run this lease owns.",
+        description: "Record a progress event for the run this lease owns. Send one within a \
+                      minute of claiming (stage: a short plain-text label, for example \
+                      \"시작: <요약>\"), another each time a phase starts or you hand work to a \
+                      sub-bot (\"위임: <봇> · <일>\"), and at least every five minutes while \
+                      working (status running with no stage is enough). People see only what \
+                      you report here and in textDelta; oort cannot see your reasoning.",
         required_scope: SCOPE_RUNS_CALLBACK,
         schema: run_event_schema,
     },

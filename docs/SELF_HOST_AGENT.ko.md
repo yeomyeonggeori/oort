@@ -1295,6 +1295,10 @@ id·할 일을 body에서 꺼내지 마라.
 할 일의 실체는 oort Agent Port pull 뿐이다. 합류 때 받은 active
 credential로, 터널이 아니라 VM 루프백에 POST한다.
 
+0) 먼저 oort_ping {state:"idle"} 을 한 번 부른다. 이 런타임이 떠 있다는 것만
+   oort 에 알린다(30초에 한 번만 기록되고, 더 불러도 해가 없다). 일을
+   가져갔다는 뜻이 아니므로 바로 1)로 간다.
+
 1) oort_inbox_read 를 호출한다. 이전에 저장한 opaque nextCursor가 있으면
    그대로 넘긴다. 없으면 cursor 없이 읽는다. 응답의 nextCursor는 항상
    있다(빈 페이지 포함). /workspace/oort-inbox.cursor 에 덮어 쓴다
@@ -1312,10 +1316,19 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
       /workspace/oort-run.handle 에 저장하고(권한 600) 회신에 쓰지 않는다.
       jobs 가 비었는데 그 파일이 있으면 이미 내 job 이다. 저장한 handle 을 쓴다.
    b) work.channelId 로 oort_conversation_read 해서 요청을 읽는다.
-   c) 단계가 시작될 때마다 oort_run_event {leaseHandle, stage:"<짧은 이름>",
-      eventId:<새 UUID>} 를 부른다. stage 는 일반 텍스트 1~80자(앞뒤 공백 제거), "/"·"\"·제어
-      문자 불가. 바로 앞 stage 와 같으면 합쳐지지만 단계 수는 1 오른다. 예: "코드 읽는 중", "수정 작성", "테스트 실행", "PR 열림".
-      비밀·파일 경로·커밋 제목·코드를 stage 에 넣지 마라. 최근 12개만 남는다.
+   c) 사람이 진행을 볼 수 있게 보고한다. claim 한 뒤 60초 안에
+      oort_run_event {leaseHandle, status:"running", stage:"시작: <곧 할 일 한
+      줄>", eventId:<새 UUID>} 를 부른다. 그 뒤로는 단계가 시작될 때마다, 그리고
+      일하는 동안 최소 5분마다 부른다(새 단계가 없으면 status:"running" 만
+      보내도 살아 있다는 신호가 된다). stage 는 일반 텍스트 1~80자(앞뒤 공백
+      제거, 40자 안팎으로), "/"·"\"·제어 문자 불가. 바로 앞 stage 와 같으면
+      합쳐지지만 단계 수는 1 오른다. 예: "코드 읽는 중", "수정 작성", "테스트
+      실행", "PR 열림". 일부를 다른 봇에게 맡기면 맡기기 전에 단계로 알리고
+      ("위임: <봇> · <일>"), 결과가 돌아오면 다시 알린다("위임 결과 수신:
+      <봇>") — oort 는 그 봇 안을 볼 수 없다. 비밀·파일 경로·커밋 제목·코드를
+      stage 에 넣지 마라. run 카드에는 최근 12개만 남고, oort 작업 패널은 더
+      오래 보관한다. 사람이 보는 것은 여기서(그리고 textDelta 로) 보고한 것뿐이다.
+      oort 는 너의 추론을 볼 수 없으니 보일 거라고 기대하지 마라.
    d) 끝나면 oort_run_complete {leaseHandle, status:"succeeded",
       body:"<회신, 8000바이트 이하>", artifacts:{prUrl, branch, added,
       deleted, commits}} 를 부른다. 실제로 가진 값만 넣는다. prUrl 은
@@ -1329,13 +1342,16 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
    e) 작업이 leaseExpiresAtMs 를 넘길 수 있으면 그 전에 oort_job_renew
       {leaseHandle} 을 부른다(응답에 새 leaseExpiresAtMs). lease 가 만료된 뒤에는
       oort_job_release 를 부르지 않는다.
-   f) 오류는 고정된 답이다. HTTP 400 / -32602: 호출이 잘못됐다(잘못된 stage 나
+   f) 긴 작업을 하는 동안은 최소 5분마다 oort_ping {state:"working"}(또는 위의
+      oort_run_event)을 부른다. 어떤 호출이든 Unavailable 이 오면 이번 wake 를
+      멈추고 다음 도어벨·스윕이 다시 시작하게 한다. 루프로 재시도하지 않는다.
+   g) 오류는 고정된 답이다. HTTP 400 / -32602: 호출이 잘못됐다(잘못된 stage 나
       artifacts 키는 호출 전체를 거절하고 lease 는 그대로다). 고쳐서
       같은 handle 로 다시 보낸다. HTTP 409 / -32005: lease 를 잃었거나 run 이
       이미 끝났거나 취소됐다. 멈추고 재시도하지 않는다. HTTP 409 / -32004:
       에이전트가 일시정지·연결 해제됐거나 대상이 보이지 않는다. 멈춘다.
       HTTP 403 / -32003: scope 나 채널 승인이 없다. 멈추고 연결 확인을 안내한다.
-   g) 오래 잠들었다 깨어났고 저장한 handle 이 있으면 그 handle 로 먼저
+   h) 오래 잠들었다 깨어났고 저장한 handle 이 있으면 그 handle 로 먼저
       보고한다(oort_run_event 또는 oort_run_complete). oort_jobs_claim 을 먼저
       부르면 새 handle 을 받고 옛 handle 은 409 가 된다.
    사람이 AI 연결·AI 구독 로그인(Claude, Codex)·팀 API 키 연결을 부탁하면
@@ -1413,8 +1429,11 @@ run), 500 `-32603` 서버 오류.
 이름·PR 링크·브랜치·숫자가 든 카드로 나온다. 단계 이름·브랜치·요청 제목은
 **일반 텍스트**다(마크다운·자동 링크·멘션 없음). 링크로 그려지는 것은 검증된
 `prUrl` 하나뿐이다. 모두 에이전트가 **보고한** 값이다. oort는 PR이 있는지, 숫자가
-맞는지 확인하지 않고 GitHub 토큰도 없다. 단계 갱신은 실시간 이벤트를 만들지
-않아 다음 보드 조회 때 보인다. 상태 전환(대기→진행, 끝남)은 이름·숫자 없는
+맞는지 확인하지 않고 GitHub 토큰도 없다. 팀 보드는 단계마다 실시간 이벤트를 받지 않아 다음 조회 때
+보인다. 채널의 작업 패널은 받는다: 원장의 모든 행(대기·수령·시작·각 단계·승인·종료)이
+채널에 얇은 `agent.run.event` 힌트 하나를 보내고(단계 문구 없음, 단계 힌트는 2초에 최대
+하나), 패널은 그때 서버에서 그 run 의 원장을 읽는다. 패널을 닫아도 기록은 사라지지
+않는다. 상태 전환(대기→진행, 끝남)은 이름·숫자 없는
 갱신 신호를 보낸다. run이 끝나면 60초 이상 걸렸고 요청자가 작업 완료 알림을
 켜 두었을 때 요청자에게 푸시 한 번이 간다. 스레드의 답은 `oort_run_complete`의
 `body`다.
@@ -1439,6 +1458,43 @@ run), 500 `-32603` 서버 오류.
   VM이 lease보다 오래 자도 그 사이 다른 wake가 job을 claim하지 않았다면 완료할
   수 있다. 연달아 깨는 두 루틴이 handle을 잃는 흔한 경로라서 (a) 단계가
   `/workspace/oort-run.handle`에 handle을 저장한다.
+
+**살아 있나, 기다리나, 끝났나 (ADR-0200, #3736·#3737).** 연결의 `status: active`는
+credential이 한 번 증명됐다는 뜻일 뿐이다. 사람에게 보이는 것은 앱의 추측이 아니라
+서버가 가진 사실에서 나온다.
+
+| 표시(`liveness.state`) | 서버가 본 것 |
+|---|---|
+| `responsive` | 20분 안에 **일** 신호: inbox 읽기, job을 가져간 claim, run 이벤트 |
+| `alive_idle` | 20분 안에 `oort_ping`은 있으나 일 신호는 없음: 런타임은 떠 있고 일은 안 가져감 |
+| `woken_not_collected` | 도어벨이 2xx로 울렸고 5분이 지났고, 수령 가능한 일이 기다리는데 울린 뒤로 inbox 읽기·claim이 없음 |
+| `work_waiting` | 수령 가능한 일이 20분 넘게 기다렸고 큐에 들어간 뒤 claim이 없음(폴링·ping을 해도 마찬가지) |
+| `quiet` / `unresponsive` | 60분 안에 어떤 신호가 있음 / 없음(또는 한 번도 없음) |
+| `error` | 가장 최근 사실이 거절된 호출(`unavailable`, `not_authorized`). 다음에 받아들여진 호출이 있으면 풀림 |
+| `inactive` | 연결이 `active`가 아님 |
+
+`woken_not_collected`를 본 사람은 다시 울릴 수 있다: `POST
+/v1/workspaces/{ws}/hosted-agent-connections/{id}/doorbell/ring`(admin, 연결 생성자,
+또는 에이전트 소유자. 연결당 분당 1회·시간당 5회. 도어벨을 다시 무장할 뿐이고 같은
+내용 없는 신호가 다음 drain에 나간다).
+
+run도 같은 정직함으로 보인다. 아무도 안 가져간 run은 `queued`(에이전트 큐 안 순번과
+함께), 이어서 `claimed`(언제·어느 연결), `running`(최근 단계), `awaiting_approval`,
+끝으로 닫힌 사유가 붙은 `succeeded` / `failed` / `timed_out` / `cancelled`. 에이전트가
+조용해지면 서버가 직접 run 을 끝낸다: lease가 만료됐고 run이 2시간 동안 이벤트가 없으면
+(또는 연결 해제로 전달 job이 정리되고 run이 그만큼 조용하면) `lease_abandoned`, 24시간
+아무도 안 가져가면 `unclaimed_expired`. 재배정·재시도는 없고 다시 요청하면 새 run이다.
+끝난 run에 뒤늦게 보고하면 409다.
+
+운영 설정(모두 선택): api의 `MOMO_AGENT_PORT_LIVENESS_RESPONSIVE_MINUTES`(20, 1~240),
+`MOMO_AGENT_PORT_LIVENESS_QUIET_MINUTES`(60, 앞의 값 미만 불가),
+`MOMO_AGENT_PORT_LIVENESS_WOKEN_GRACE_MINUTES`(5, 1~60), notifier의
+`MOMO_RUN_LEASE_ABANDON_HOURS`(2, 1~168), `MOMO_RUN_UNCLAIMED_EXPIRE_HOURS`(24,
+1~720). run 원장은 run이 끝난 뒤 30일 보관한다.
+
+oort가 보여 줄 수 있는 것은 에이전트가 **보낸** 것뿐이다: 단계, `oort_ping`, 스트리밍한
+`textDelta`(저장되지 않음). 에이전트의 속 추론은 단계로 보고하지 않는 한 절대 보이지
+않으니, 단계는 동료가 따라가고 싶은 순서대로 쓴다.
 
 각 단계를 서버에서 증명하는 기존 적합성 시험(이 문서를 위해 읽었고 실행하지는
 않았다. 격리 PostgreSQL 18이 필요하다).
@@ -1484,6 +1540,12 @@ bearer·초대 값을 어디에도 붙여 넣지 않는다.
    빼고 다시 보내면 정상 완료.
 8. 결과(3~7에서 일어난 일, 시각, 비밀 없음)를 이슈 #3519 에 적는다. 이것이
    없으면 PR 은 `runtime-unverified` 로 남는다.
+9. 생존·정직성 (ADR-0200, 실행 전까지 `runtime-unverified`): 루틴에 `oort_ping` 단계를
+   넣은 뒤 루틴 주기 하나를 기다리고 연결을 읽는다(`GET
+   /v1/workspaces/{ws}/hosted-agent-connections/{id}`). 기대: `liveness.state`가
+   `responsive`(읽을 게 없었다면 `alive_idle`). 그다음 요청 하나를 대기시킨 채 VM을
+   25분 멈춘다. 기대: `responsive`가 아니라 `work_waiting` 또는 `woken_not_collected`.
+   API로 다시 울리고 도어벨의 `lastStatus`를 적는다. 시각을 #3736 / #3737 에 기록한다.
 
 ##### 3.3.17.5 15분 스윕 폴백
 
