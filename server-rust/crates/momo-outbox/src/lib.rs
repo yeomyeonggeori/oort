@@ -43,28 +43,35 @@ pub mod emit;
 pub mod gateway;
 pub mod push;
 pub mod relay;
+pub mod stalled;
 pub mod webhook;
 
 pub use agent_job::{
-    claim_agent_job_batch, retire_pending_agent_jobs_for_run_in_tx, ClaimedAgentJob,
+    claim_agent_job_batch, retire_pending_agent_jobs_for_run_in_tx,
+    retire_pending_agent_jobs_for_run_with_reason_in_tx, ClaimedAgentJob,
     DEFAULT_WORKER_LEASE_SECONDS, RESUME_APPROVAL_JOB_METHOD, RUN_CANCELLED_JOB_LAST_ERROR,
-    WORKER_JOB_METHOD, WORKER_JOB_METHODS,
+    RUN_STALLED_JOB_LAST_ERROR, WORKER_JOB_METHOD, WORKER_JOB_METHODS,
 };
 pub use emit::{emit_outbox, OutboxKind};
 pub use gateway::{
     claim_gateway_jobs_in_tx, claim_hosted_gateway_jobs_in_tx, clamp_claim_limit,
     clamp_hosted_lease_seconds, gateway_lease_authorized, gateway_lease_authorized_hosted,
-    lock_gateway_lease_in_tx, release_gateway_lease_in_tx, renew_gateway_lease_in_tx,
-    renew_hosted_gateway_lease_in_tx, settle_gateway_job_in_tx, suppress_hosted_agent_jobs_in_tx,
+    list_claimable_hosted_jobs_in_tx, lock_gateway_lease_in_tx, pending_job_facts_for_runs_in_tx,
+    release_gateway_lease_in_tx, renew_gateway_lease_in_tx, renew_hosted_gateway_lease_in_tx,
+    settle_gateway_job_in_tx, suppress_hosted_agent_jobs_in_tx, ClaimableGatewayJob,
     ClaimedGatewayJob, GatewayJobStatus, GatewayLeaseBinding, GatewayLeaseSnapshot,
-    HostedWorkSuppression, CLAIM_LIMIT_DEFAULT, CLAIM_LIMIT_MAX, GATEWAY_LEASE_SECONDS,
-    HOSTED_DISCONNECT_JOB_LAST_ERROR, HOSTED_LEASE_SECONDS_DEFAULT, HOSTED_LEASE_SECONDS_MAX,
-    HOSTED_LEASE_SECONDS_MIN,
+    HostedWorkSuppression, RunJobFacts, CLAIM_LIMIT_DEFAULT, CLAIM_LIMIT_MAX,
+    GATEWAY_LEASE_SECONDS, HOSTED_DISCONNECT_JOB_LAST_ERROR, HOSTED_LEASE_SECONDS_DEFAULT,
+    HOSTED_LEASE_SECONDS_MAX, HOSTED_LEASE_SECONDS_MIN,
 };
 pub use push::{claim_push_candidate_batch, reclaim_stuck_push_candidates, ClaimedPushCandidate};
 pub use relay::{
     backoff_seconds, claim_batch, claim_broadcast_batch, mark_done, mark_failed, requeue,
     ClaimedRow, NOTIFY_CHANNEL,
+};
+pub use stalled::{
+    lock_stalled_hosted_runs_in_tx, pending_job_has_live_lease_in_tx,
+    workspaces_with_stalled_hosted_runs, StallKind, StallPolicy, StalledRun,
 };
 pub use webhook::{
     claim_webhook_delivery_batch, mark_done_in_tx, mark_failed_in_tx, requeue_in_tx,

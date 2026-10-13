@@ -650,6 +650,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
             "oort_run_complete",
             "oort_action_propose",
             "oort_card_suggest",
+            "oort_ping",
         ]
     );
 
@@ -682,7 +683,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
     .unwrap();
     assert_eq!(
         list_tools(&client, &base, &fixture.hosted_bearer).await,
-        vec!["oort_inbox_read"]
+        vec!["oort_inbox_read", "oort_ping"]
     );
 
     // Narrowing the token alone does the same from the other side.
@@ -736,7 +737,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
         list_tools(&client, &base, &fixture.hosted_bearer)
             .await
             .len(),
-        10,
+        11,
         "a foundation request proves the binding and re-activates it"
     );
     let reactivated: String = sqlx::query_scalar(
@@ -817,7 +818,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
         list_tools(&client, &base, &fixture.hosted_bearer)
             .await
             .len(),
-        10,
+        11,
         "restoring the connection restores the catalog"
     );
 
@@ -10077,4 +10078,2407 @@ async fn a_platform_operator_who_is_not_an_admin_may_approve_a_settings_update()
         settings_bag_3710(&su, fixture.workspace).await["role_labels"],
         json!({"guest": "손님"})
     );
+}
+
+// ---------------------------------------------------------------------------
+// (#3740 S1, ADR-0200 D2) the run event ledger
+// ---------------------------------------------------------------------------
+
+type LedgerRow = (i64, String, Option<String>, Option<String>, Option<Uuid>);
+
+async fn ledger_3740(pool: &PgPool, workspace: Uuid, run: Uuid) -> Vec<LedgerRow> {
+    sqlx::query_as(
+        "SELECT seq, kind, stage, code, actor_member_id FROM agent_run_event \
+          WHERE workspace_id=$1 AND run_id=$2 ORDER BY seq",
+    )
+    .bind(workspace)
+    .bind(run)
+    .fetch_all(pool)
+    .await
+    .expect("ledger rows")
+}
+
+fn kinds_3740(rows: &[LedgerRow]) -> Vec<&str> {
+    rows.iter().map(|row| row.1.as_str()).collect()
+}
+
+async fn mention_3740(
+    client: &reqwest::Client,
+    base: &str,
+    su: &PgPool,
+    fixture: &Fixture,
+    agent: Uuid,
+) {
+    let sent: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{} please answer", hosted_handle(su, agent).await)
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(sent["id"].is_string(), "{sent}");
+}
+
+/// RED PROOF (ADR-0200 D2, S1). A hosted mention run leaves exactly the rows the
+/// panel needs after it was closed — queued, claimed (with WHO), started, the
+/// stage markers (folded when repeated), the terminal — in one gapless per-run
+/// order. A managed agent's run in the same workspace writes nothing.
+///
+/// Tamper table (each edit must turn this test red):
+///   * drop the `claimed` append in `jobs_claim`             -> kinds lack `claimed`
+///   * drop the `Stage` append in `record_gateway_event_in_tx` -> kinds lack `stage`
+///   * drop the `hosted_lease` guard around that append        -> (managed run test below) ledger rows for a managed run
+///   * drop the fold in `agent_run_event_append`               -> the repeated stage adds a row
+///   * drop the hosted predicate in `agent_run_event_on_run`   -> the managed run writes `queued`
+///   * drop the AFTER INSERT/UPDATE agent_run triggers         -> no `queued`/`started`/`succeeded`
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_run_event_ledger_records_a_hosted_run_in_order() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    mention_3740(&client, &base, &su, &fixture, fixture.hosted_agent).await;
+    let run: Uuid =
+        sqlx::query_scalar("SELECT id FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2")
+            .bind(fixture.workspace)
+            .bind(fixture.hosted_agent)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(
+        kinds_3740(&ledger_3740(&su, fixture.workspace, run).await),
+        ["queued"],
+        "the run row is the first ledger row, written by the trigger"
+    );
+
+    let (status, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("handle")
+        .to_string();
+    let rows = ledger_3740(&su, fixture.workspace, run).await;
+    assert_eq!(kinds_3740(&rows), ["queued", "claimed"]);
+    assert_eq!(
+        rows[1].4,
+        Some(fixture.hosted_agent),
+        "`claimed` records WHICH agent took it"
+    );
+    let status_after_claim: String =
+        sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id=$1")
+            .bind(run)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(
+        status_after_claim, "queued",
+        "claim does not move agent_run.status — the ledger is where 'claimed' lives"
+    );
+
+    // A stage report starts the run and adds a marker; the same marker again
+    // (a different eventId) folds; a stage-less event adds nothing.
+    for (stage, expect_new) in [
+        (Some("채널 이름 확인"), true),
+        (Some("채널 이름 확인"), false),
+        (None, false),
+        (Some("승인 카드 제안"), true),
+    ] {
+        let mut arguments = json!({
+            "leaseHandle": handle,
+            "status": "running",
+            "eventId": Uuid::new_v4(),
+        });
+        if let Some(stage) = stage {
+            arguments["stage"] = json!(stage);
+        }
+        let before = ledger_3740(&su, fixture.workspace, run).await.len();
+        let first_event = before == 2; // queued + claimed so far: this event also starts the run
+        let (status, event) = call(
+            &client,
+            &base,
+            &fixture.hosted_bearer,
+            "oort_run_event",
+            arguments,
+        )
+        .await;
+        assert_eq!(status, 200, "{event}");
+        let after = ledger_3740(&su, fixture.workspace, run).await.len();
+        assert_eq!(
+            after - before,
+            usize::from(expect_new) + usize::from(first_event),
+            "stage {stage:?}: a new marker adds one row, a repeat or a stage-less event none, \
+             and the first event also adds `started`"
+        );
+    }
+
+    // A rejected marker writes nothing at all.
+    let before = ledger_3740(&su, fixture.workspace, run).await.len();
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_event",
+        json!({"leaseHandle": handle, "status": "running", "stage": "a/b"}),
+    )
+    .await;
+    assert_eq!(status, 400);
+    assert_eq!(ledger_3740(&su, fixture.workspace, run).await.len(), before);
+
+    let (status, done) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_complete",
+        json!({"leaseHandle": handle, "status": "succeeded", "body": "done"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{done}");
+
+    let rows = ledger_3740(&su, fixture.workspace, run).await;
+    assert_eq!(
+        kinds_3740(&rows),
+        [
+            "queued",
+            "claimed",
+            "started",
+            "stage",
+            "stage",
+            "succeeded"
+        ]
+    );
+    assert!(
+        rows.windows(2).all(|pair| pair[0].0 < pair[1].0),
+        "seq strictly increases in write order: {rows:?}"
+    );
+    assert_eq!(rows[3].2.as_deref(), Some("채널 이름 확인"));
+    assert_eq!(rows[4].2.as_deref(), Some("승인 카드 제안"));
+    assert!(rows
+        .iter()
+        .filter(|row| row.1 != "stage")
+        .all(|row| row.2.is_none()));
+
+    // The managed agent's run in the same workspace writes no ledger row.
+    mention_3740(&client, &base, &su, &fixture, fixture.managed_agent).await;
+    let managed_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM agent_run_event e JOIN agent_run r \
+           ON r.workspace_id=e.workspace_id AND r.id=e.run_id \
+          WHERE r.workspace_id=$1 AND r.agent_member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.managed_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let managed_runs: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.managed_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(managed_runs >= 1, "the managed mention produced a run");
+    assert_eq!(managed_rows, 0, "ADR-0200 D6: hosted agents only");
+}
+
+/// RED PROOF (ADR-0200 D2, S1). The approval and sweep paths are covered by the
+/// triggers, not by their callers: the notifier's own UPDATE (the approval
+/// expiry sweep's role) writes the rows; the stage cap never evicts a lifecycle
+/// row; and the table's own CHECKs refuse what the route validator would.
+///
+/// Tamper table:
+///   * drop `agent_run_event_approval_*` triggers   -> no approval_requested/approval_decided
+///   * drop the `code` extraction                   -> the timed_out row loses `approval_expired`
+///   * drop the notifier GRANT (bootstrap_runtime_roles.sql) -> the notifier UPDATE dies with permission denied
+///   * make the cap delete any kind (agent_run_event_trim) -> lifecycle rows vanish at 200
+///   * relax `agent_run_event_stage_ck`             -> the `a/b` insert succeeds
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_ledger_triggers_cover_the_sweep_and_the_cap_keeps_lifecycle_rows() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let notifier = momo_notifier_pool().await;
+    let fixture = seed(&su).await;
+
+    let run: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+         VALUES ($1,$2,$3,'queued') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let approval: Uuid = sqlx::query_scalar(
+        "INSERT INTO approval (workspace_id, run_id, channel_id, requested_by, action_type) \
+         VALUES ($1,$2,$3,$4,'workspace_action') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(run)
+    .bind(fixture.channel)
+    .bind(fixture.hosted_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE agent_run SET status='awaiting_approval' WHERE id=$1")
+        .bind(run)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // The expiry sweep runs as momo_notifier (BYPASSRLS, table-scoped grants):
+    // its UPDATEs fire the triggers, which must be able to append as that role.
+    let mut tx = notifier.begin().await.expect("notifier tx");
+    sqlx::query("UPDATE approval SET status='expired' WHERE id=$1")
+        .bind(approval)
+        .execute(&mut *tx)
+        .await
+        .expect("notifier may expire an approval and fire the ledger trigger");
+    sqlx::query("UPDATE agent_run SET status='timed_out', error=$2 WHERE id=$1")
+        .bind(run)
+        .bind(json!({"code": "approval_expired", "approval_id": approval.to_string()}))
+        .execute(&mut *tx)
+        .await
+        .expect("notifier may end the run and fire the ledger trigger");
+    tx.commit().await.unwrap();
+
+    let rows = ledger_3740(&su, fixture.workspace, run).await;
+    assert_eq!(
+        kinds_3740(&rows),
+        [
+            "queued",
+            "approval_requested",
+            "approval_decided",
+            "timed_out"
+        ]
+    );
+    assert_eq!(rows[2].3.as_deref(), Some("expired"));
+    assert_eq!(rows[3].3.as_deref(), Some("approval_expired"));
+    assert_eq!(rows[1].4, Some(fixture.hosted_agent), "who asked");
+
+    // The cap: 250 stages, 200 rows kept, every lifecycle row still there.
+    for n in 0..250 {
+        sqlx::query("SELECT agent_run_event_append($1,$2,'stage',$3,NULL,NULL,$4)")
+            .bind(fixture.workspace)
+            .bind(run)
+            .bind(format!("단계 {n}"))
+            .bind(fixture.hosted_agent)
+            .execute(&su)
+            .await
+            .unwrap();
+        sqlx::query("SELECT agent_run_event_trim($1,$2)")
+            .bind(fixture.workspace)
+            .bind(run)
+            .execute(&su)
+            .await
+            .unwrap();
+    }
+    let rows = ledger_3740(&su, fixture.workspace, run).await;
+    assert_eq!(rows.len(), 200);
+    assert_eq!(
+        rows.iter().filter(|row| row.1 != "stage").count(),
+        4,
+        "the cap evicts old stage rows only"
+    );
+    assert_eq!(
+        rows.last().unwrap().2.as_deref(),
+        Some("단계 249"),
+        "the newest marker is the one kept"
+    );
+
+    // The table refuses what the route validator would (defence in depth).
+    for (stage, code) in [
+        (Some("a/b"), None),
+        (Some("x"), Some("Bad Code")),
+        (None, None),
+    ] {
+        let result = sqlx::query(
+            "INSERT INTO agent_run_event (workspace_id, run_id, seq, kind, stage, code) \
+             VALUES ($1,$2,9999,$3,$4,$5)",
+        )
+        .bind(fixture.workspace)
+        .bind(run)
+        .bind("stage")
+        .bind(stage)
+        .bind(code)
+        .execute(&su)
+        .await;
+        let error = result.expect_err("a malformed row must be refused");
+        let constraint = error
+            .as_database_error()
+            .and_then(|db| db.constraint())
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            constraint == "agent_run_event_stage_ck" || constraint == "agent_run_event_code_ck",
+            "{stage:?} {code:?} refused by the table's own CHECK, not by something else: {constraint:?} / {error}"
+        );
+    }
+}
+
+/// RED PROOF (ADR-0200 D2, S1). The ledger is tenant-isolated by RLS FORCE on
+/// the NOBYPASSRLS app role: no setting sees nothing, another tenant sees
+/// nothing, and a write for a workspace other than the bound one is refused.
+///
+/// Tamper table:
+///   * drop `FORCE ROW LEVEL SECURITY` or the policy -> another tenant reads rows
+///   * drop WITH CHECK                               -> the cross-tenant INSERT succeeds
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_run_event_ledger_is_tenant_isolated() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let other = seed(&su).await;
+    let run: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+         VALUES ($1,$2,$3,'queued') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+
+    let count_as = |ws: Uuid| {
+        let app = app.clone();
+        async move {
+            let mut tx = app.begin().await.unwrap();
+            sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+                .bind(ws.to_string())
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            let n: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_run_event")
+                .fetch_one(&mut *tx)
+                .await
+                .unwrap();
+            n
+        }
+    };
+    assert_eq!(count_as(fixture.workspace).await, 1);
+    assert_eq!(
+        count_as(other.workspace).await,
+        0,
+        "another tenant sees none"
+    );
+
+    let mut tx = app.begin().await.unwrap();
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(other.workspace.to_string())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    // Through the function: the run is invisible to the bound tenant (RLS on agent_run),
+    // so the append is a NULL — it neither writes nor tells whether the run exists.
+    let forged: Option<i64> =
+        sqlx::query_scalar("SELECT agent_run_event_append($1,$2,'stage','x',NULL,NULL,NULL)")
+            .bind(fixture.workspace)
+            .bind(run)
+            .fetch_one(&mut *tx)
+            .await
+            .expect("a foreign run is NULL, the same answer as a missing one");
+    assert_eq!(forged, None);
+    // Around the function: the table's own WITH CHECK refuses another tenant's row.
+    sqlx::query("SAVEPOINT raw_insert")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let raw = sqlx::query(
+        "INSERT INTO agent_run_event (workspace_id, run_id, kind) VALUES ($1,$2,'queued')",
+    )
+    .bind(fixture.workspace)
+    .bind(run)
+    .execute(&mut *tx)
+    .await;
+    assert!(
+        raw.is_err(),
+        "an INSERT for a workspace other than the bound one is refused by RLS"
+    );
+    drop(tx);
+    assert_eq!(
+        ledger_3740(&su, fixture.workspace, run).await.len(),
+        1,
+        "the foreign attempts wrote nothing"
+    );
+}
+
+/// RED PROOF (ADR-0200 D2, S1; security review H1/M1/M3). The append takes no lock, so
+/// it cannot close a cycle with the claim/approve/cancel paths; a missing run is a NULL,
+/// not an error that would poison a claim; and history cannot be rewritten.
+///
+/// Tamper table:
+///   * re-add `pg_advisory_xact_lock` to `agent_run_event_append`  -> the second transaction
+///     blocks behind the open first one and the timeout below fires
+///   * drop the `EXISTS (SELECT 1 FROM agent_run ...)` guard        -> the missing-run append raises 23503
+///   * drop `agent_run_event_immutable_trg`                         -> the UPDATE succeeds
+///   * drop the trim call in `append_run_event_in_tx`               -> a re-claim-only run grows past 200
+///   * drop `agent_run_event_del_trg`                               -> the deleted run's ledger survives
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_ledger_append_takes_no_lock_and_history_is_immutable() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su).await;
+    let run: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+         VALUES ($1,$2,$3,'queued') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let approval: Uuid = sqlx::query_scalar(
+        "INSERT INTO approval (workspace_id, run_id, channel_id, requested_by, action_type) \
+         VALUES ($1,$2,$3,$4,'workspace_action') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(run)
+    .bind(fixture.channel)
+    .bind(fixture.hosted_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+
+    // Transaction A is a "cancel": it moves the run (the trigger appends) and stays OPEN.
+    let mut a = su.begin().await.unwrap();
+    sqlx::query("UPDATE agent_run SET status='cancelled' WHERE id=$1")
+        .bind(run)
+        .execute(&mut *a)
+        .await
+        .unwrap();
+
+    // Transaction B is the opposite order: it holds the approval row, then appends a
+    // `claimed` row for the same run and decides the approval (the trigger appends).
+    // With any per-run lock in the append, B would wait for A here; A would then wait
+    // for B's approval row — the deadlock the review found. It must finish while A is open.
+    let b = async {
+        let mut tx = su.begin().await.unwrap();
+        sqlx::query("SELECT id FROM approval WHERE id=$1 FOR UPDATE")
+            .bind(approval)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("SELECT agent_run_event_append($1,$2,'claimed',NULL,NULL,NULL,$3)")
+            .bind(fixture.workspace)
+            .bind(run)
+            .bind(fixture.hosted_agent)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE approval SET status='cancelled' WHERE id=$1")
+            .bind(approval)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(5), b)
+        .await
+        .expect("an append never waits for another transaction's lock");
+    a.commit().await.unwrap();
+
+    let rows = ledger_3740(&su, fixture.workspace, run).await;
+    assert_eq!(rows.len(), 5, "{rows:?}");
+    let mut kinds = kinds_3740(&rows);
+    kinds.sort_unstable();
+    assert_eq!(
+        kinds,
+        [
+            "approval_decided",
+            "approval_requested",
+            "cancelled",
+            "claimed",
+            "queued"
+        ]
+    );
+
+    // A job pointing at a run that does not exist appends nothing and does not raise.
+    let missing: Option<i64> =
+        sqlx::query_scalar("SELECT agent_run_event_append($1,$2,'claimed',NULL,NULL,NULL,$3)")
+            .bind(fixture.workspace)
+            .bind(Uuid::new_v4())
+            .bind(fixture.hosted_agent)
+            .fetch_one(&su)
+            .await
+            .expect("a missing run is NULL, not an error");
+    assert_eq!(missing, None);
+
+    // History is immutable — even for the superuser's UPDATE.
+    let update = sqlx::query("UPDATE agent_run_event SET kind='failed' WHERE run_id=$1")
+        .bind(run)
+        .execute(&su)
+        .await;
+    let update = update.expect_err("agent_run_event rows must not be updatable");
+    assert_eq!(
+        update
+            .as_database_error()
+            .and_then(|db| db.code())
+            .as_deref(),
+        Some("23001"),
+        "refused by the immutability trigger itself: {update}"
+    );
+
+    // The cap, through the PRODUCTION helper (the claim path calls it, not a test): old
+    // `claimed` rows are shed, the newest stays, nothing else goes.
+    {
+        let mut conn = su.acquire().await.unwrap();
+        for _ in 0..260 {
+            let seq = momo_agent::append_run_event_in_tx(
+                &mut conn,
+                fixture.workspace,
+                run,
+                momo_agent::AppendedRunEvent::Claimed,
+                fixture.hosted_agent,
+            )
+            .await
+            .unwrap();
+            assert!(seq.is_some());
+        }
+    }
+    let rows = ledger_3740(&su, fixture.workspace, run).await;
+    assert_eq!(
+        rows.len(),
+        200,
+        "a hard bound even without a single stage row"
+    );
+    assert!(
+        rows.iter().any(|row| row.1 == "queued") && rows.iter().any(|row| row.1 == "cancelled"),
+        "only `claimed` rows were shed"
+    );
+
+    // No FK means the delete trigger is what removes a deleted run's ledger.
+    sqlx::query("DELETE FROM approval WHERE run_id=$1")
+        .bind(run)
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM agent_run WHERE id=$1")
+        .bind(run)
+        .execute(&su)
+        .await
+        .unwrap();
+    assert!(
+        ledger_3740(&su, fixture.workspace, run).await.is_empty(),
+        "a deleted run takes its ledger with it"
+    );
+
+    // …and under the production API role + RLS (momo_app, bound tenant), not only for the
+    // superuser: the trigger's DELETE runs as the invoker.
+    let app = momo_app_pool().await;
+    let run2: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+         VALUES ($1,$2,$3,'queued') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(ledger_3740(&su, fixture.workspace, run2).await.len(), 1);
+    let mut tx = app.begin().await.unwrap();
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(fixture.workspace.to_string())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM agent_run WHERE id=$1")
+        .bind(run2)
+        .execute(&mut *tx)
+        .await
+        .expect("momo_app may delete a run and fire the ledger delete trigger");
+    tx.commit().await.unwrap();
+    assert!(
+        ledger_3740(&su, fixture.workspace, run2).await.is_empty(),
+        "…as momo_app under RLS too"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// (#3741 S2, ADR-0200 D1/D2/D3) the honest read side
+// ---------------------------------------------------------------------------
+
+async fn progress_3741(
+    client: &reqwest::Client,
+    base: &str,
+    jwt: &str,
+    fixture: &Fixture,
+    channel: Uuid,
+    query: &str,
+) -> (u16, Value) {
+    let response = client
+        .get(format!(
+            "{base}/v1/workspaces/{}/channels/{channel}/agent-runs/progress{query}",
+            fixture.workspace
+        ))
+        .bearer_auth(jwt)
+        .send()
+        .await
+        .expect("progress responds");
+    let status = response.status().as_u16();
+    (status, response.json().await.unwrap_or(Value::Null))
+}
+
+async fn events_3741(
+    client: &reqwest::Client,
+    base: &str,
+    jwt: &str,
+    fixture: &Fixture,
+    run: &str,
+) -> (u16, Value) {
+    let response = client
+        .get(format!(
+            "{base}/v1/workspaces/{}/agent-runs/{run}/events",
+            fixture.workspace
+        ))
+        .bearer_auth(jwt)
+        .send()
+        .await
+        .expect("events responds");
+    let status = response.status().as_u16();
+    (status, response.json().await.unwrap_or(Value::Null))
+}
+
+fn only_run_3741(body: &Value) -> &Value {
+    let runs = body["runs"].as_array().expect("runs array");
+    assert_eq!(runs.len(), 1, "{body}");
+    &runs[0]
+}
+
+/// RED PROOF (ADR-0200 D1/D2, S2). The progress read tells the truth at every
+/// step of one hosted run — queued (position 1) → claimed (when, lease live) →
+/// running (latest stage) → lease stale (expired, not re-claimed) → succeeded —
+/// and the ledger endpoint returns the same story with an ordinal and no raw
+/// sequence. This is the 2026-10-13 incident reduced to a test: a run nobody has
+/// taken is `queued`, never "working" and never "signal lost".
+///
+/// Tamper table:
+///   * derive `claimed` from the run status instead of the job lease -> claimed step shows `queued`
+///   * compute lease_state without the expiry compare               -> the expired lease shows `live`
+///   * add `seq` to the event DTO                                   -> the no-seq assertion fails
+///   * drop the channel-membership check in the events query         -> the outsider gets 200
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_progress_read_tells_the_truth_at_every_step_of_a_hosted_run() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    // nothing yet
+    let (status, empty) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "",
+    )
+    .await;
+    assert_eq!(status, 200, "{empty}");
+    assert_eq!(empty["runs"], json!([]));
+
+    mention_3740(&client, &base, &su, &fixture, fixture.hosted_agent).await;
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "?state=active",
+    )
+    .await;
+    let run = only_run_3741(&body);
+    assert_eq!(run["phase"], json!("queued"), "{body}");
+    assert_eq!(run["leaseState"], json!("none"));
+    assert_eq!(run["queuePosition"], json!(1));
+    assert_eq!(run["aheadTotal"], json!(0));
+    assert!(run.get("claimedAtMs").is_none());
+    let run_id = run["id"].as_str().unwrap().to_string();
+
+    // claimed: the lease is the fact, run.status is still `queued`
+    let (_, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "",
+    )
+    .await;
+    let run = only_run_3741(&body);
+    assert_eq!(run["status"], json!("queued"));
+    assert_eq!(run["phase"], json!("claimed"), "{body}");
+    assert_eq!(run["leaseState"], json!("live"));
+    assert!(run["claimedAtMs"].as_i64().unwrap() > 0);
+    assert!(run.get("queuePosition").is_none(), "no position once taken");
+
+    // taken but silent past the lease: still `claimed` (the run has not started), and the
+    // lease is `stale` — "not renewed", with no queue position (it is not in the queue)
+    sqlx::query(
+        "UPDATE outbox SET lease_acquired_at = now() - interval '35 minutes', \
+                lease_expires_at = now() - interval '5 minutes' \
+          WHERE workspace_id=$1 AND kind='agent_job' AND partition_key=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "",
+    )
+    .await;
+    let run = only_run_3741(&body);
+    assert_eq!(run["phase"], json!("claimed"), "{body}");
+    assert_eq!(run["leaseState"], json!("stale"));
+    assert!(run.get("queuePosition").is_none());
+
+    // the agent comes back and renews the expired-but-unreclaimed handle (ADR-0162 A3):
+    // the lease lives again, same job, same handle
+    let (status, renewed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_job_renew",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    assert_eq!(status, 200, "{renewed}");
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "",
+    )
+    .await;
+    assert_eq!(only_run_3741(&body)["leaseState"], json!("live"), "{body}");
+
+    // running with a stage
+    let (status, event) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_event",
+        json!({"leaseHandle": handle, "status": "running", "stage": "채널 이름 확인",
+               "eventId": Uuid::new_v4()}),
+    )
+    .await;
+    assert_eq!(status, 200, "{event}");
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "",
+    )
+    .await;
+    let run = only_run_3741(&body);
+    assert_eq!(run["phase"], json!("running"));
+    assert_eq!(run["latestStage"], json!("채널 이름 확인"));
+    assert_eq!(run["leaseState"], json!("live"));
+
+    // the lease expires and nobody re-claims: stale, and still `running` — a server
+    // fact ("lease not renewed"), never the client's "signal lost"
+    sqlx::query(
+        "UPDATE outbox SET lease_acquired_at = now() - interval '35 minutes', \
+                lease_expires_at = now() - interval '5 minutes' \
+          WHERE workspace_id=$1 AND kind='agent_job' AND partition_key=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "",
+    )
+    .await;
+    let run = only_run_3741(&body);
+    assert_eq!(run["phase"], json!("running"));
+    assert_eq!(run["leaseState"], json!("stale"), "{body}");
+
+    // finished
+    let (status, done) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_complete",
+        json!({"leaseHandle": handle, "status": "succeeded", "body": "done"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{done}");
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "?state=active",
+    )
+    .await;
+    assert_eq!(body["runs"], json!([]), "a finished run is not active");
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "?state=all",
+    )
+    .await;
+    let run = only_run_3741(&body);
+    assert_eq!(run["phase"], json!("succeeded"));
+    assert!(run["finishedAtMs"].as_i64().unwrap() > 0);
+
+    // the ledger: same story, ordinals, no raw sequence
+    let (status, ledger) = events_3741(&client, &base, &fixture.human_jwt, &fixture, &run_id).await;
+    assert_eq!(status, 200, "{ledger}");
+    let events = ledger["events"].as_array().unwrap();
+    let kinds: Vec<&str> = events.iter().map(|e| e["kind"].as_str().unwrap()).collect();
+    assert_eq!(
+        kinds,
+        ["queued", "claimed", "started", "stage", "succeeded"]
+    );
+    assert_eq!(
+        events
+            .iter()
+            .map(|e| e["ordinal"].as_i64().unwrap())
+            .collect::<Vec<_>>(),
+        [1, 2, 3, 4, 5]
+    );
+    assert_eq!(events[3]["stage"], json!("채널 이름 확인"));
+    let rendered = serde_json::to_string(&ledger).unwrap();
+    assert!(
+        !rendered.contains("\"seq\""),
+        "the global sequence never leaves: {rendered}"
+    );
+
+    // a stranger to the channel and an unknown run are the same 404; a bad id is a 400
+    let outsider = seed_outsider_3741(&su, &fixture).await;
+    let (status, _) = events_3741(&client, &base, &outsider, &fixture, &run_id).await;
+    assert_eq!(status, 404);
+    let (status, _) = events_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        &Uuid::new_v4().to_string(),
+    )
+    .await;
+    assert_eq!(status, 404);
+    let (status, _) = events_3741(&client, &base, &fixture.human_jwt, &fixture, "nope").await;
+    assert_eq!(status, 400);
+    let (status, _) = progress_3741(&client, &base, &outsider, &fixture, fixture.channel, "").await;
+    assert_eq!(status, 403, "progress is for channel members");
+    let (status, _) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "?state=bogus",
+    )
+    .await;
+    assert_eq!(status, 400);
+}
+
+/// A workspace member who is in NO channel with the agent.
+async fn seed_outsider_3741(pool: &PgPool, fixture: &Fixture) -> String {
+    let jwt = seed_plain_member(pool, fixture).await;
+    // seed_plain_member joins `channel`; this outsider leaves it again
+    sqlx::query(
+        "UPDATE membership SET left_at = now() \
+          WHERE workspace_id=$1 AND channel_id=$2 AND member_id <> $3 \
+            AND member_id NOT IN (SELECT id FROM member WHERE kind='agent') \
+            AND member_id <> $4",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .bind(fixture.human)
+    .bind(fixture.human)
+    .execute(pool)
+    .await
+    .unwrap();
+    jwt
+}
+
+/// RED PROOF (ADR-0200 D3, S2). Two members ask the same agent for work in two
+/// different channels. The queue is the agent's real claim order; the second run
+/// is position 2 for everyone; but a member of only the second channel is never
+/// told WHICH run is ahead — a count, never a name — while a member of both is.
+///
+/// Tamper table:
+///   * order the queue by anything other than `outbox.id`            -> positions swap
+///   * return `ahead` without the viewer's membership filter          -> the outsider sees the other channel's run id
+///   * count only the viewer's visible runs for `aheadTotal`          -> the outsider is told position 1 / total 0
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_queue_shows_the_claim_order_and_names_only_runs_the_viewer_can_see() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    // both channels are approved for the hosted agent
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_channel_ids = $3 \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_connection)
+    .bind(vec![fixture.channel, fixture.private_channel])
+    .execute(&su)
+    .await
+    .unwrap();
+    let plain_jwt = seed_plain_member(&su, &fixture).await; // member of `channel` only
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let handle = hosted_handle(&su, fixture.hosted_agent).await;
+
+    for channel in [fixture.private_channel, fixture.channel] {
+        let sent: Value = client
+            .post(format!(
+                "{base}/v1/workspaces/{}/channels/{channel}/messages",
+                fixture.workspace
+            ))
+            .bearer_auth(&fixture.human_jwt)
+            .json(&json!({"clientMsgId": Uuid::new_v4(), "body": format!("@{handle} go")}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(sent["id"].is_string(), "{sent}");
+    }
+    // The queue is the CLAIM order (outbox.id), not creation time: make the second run
+    // look OLDER than the first, so ordering by created_at would swap the positions.
+    sqlx::query(
+        "UPDATE agent_run SET created_at = created_at - interval '2 hours' \
+          WHERE workspace_id=$1 AND channel_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .execute(&su)
+    .await
+    .unwrap();
+    let private_run: String = sqlx::query_scalar(
+        "SELECT id::text FROM agent_run WHERE workspace_id=$1 AND channel_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.private_channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+
+    // the plain member sees position 2 and ONE run ahead — as a count only
+    let (status, body) =
+        progress_3741(&client, &base, &plain_jwt, &fixture, fixture.channel, "").await;
+    assert_eq!(status, 200, "{body}");
+    let run = only_run_3741(&body);
+    assert_eq!(run["queuePosition"], json!(2), "{body}");
+    assert_eq!(run["aheadTotal"], json!(1));
+    assert!(
+        run.get("ahead").is_none(),
+        "the other channel's run is not named: {body}"
+    );
+    assert!(
+        !serde_json::to_string(&body).unwrap().contains(&private_run),
+        "the other channel's run id never reaches a non-member"
+    );
+
+    // the human is in both channels: the same run, now named
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "",
+    )
+    .await;
+    let run = only_run_3741(&body);
+    assert_eq!(run["queuePosition"], json!(2));
+    assert_eq!(run["ahead"].as_array().unwrap().len(), 1, "{body}");
+    assert_eq!(
+        run["ahead"][0]["runId"].as_str().unwrap().to_lowercase(),
+        private_run.to_lowercase()
+    );
+
+    // once the agent takes the first job the second moves up
+    let (_, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 1}),
+    )
+    .await;
+    assert_eq!(structured(&claimed)["jobs"].as_array().unwrap().len(), 1);
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "",
+    )
+    .await;
+    let run = only_run_3741(&body);
+    assert_eq!(run["phase"], json!("queued"));
+    assert_eq!(run["queuePosition"], json!(1), "{body}");
+    assert_eq!(run["aheadTotal"], json!(0));
+
+    // A job the agent could NOT claim (its token was revoked) is waiting but has no honest
+    // position: none is given, instead of a confident "1st" for work nobody can take.
+    sqlx::query("UPDATE token SET revoked_at = now() WHERE id=$1")
+        .bind(fixture.hosted_token)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "",
+    )
+    .await;
+    let run = only_run_3741(&body);
+    assert_eq!(run["phase"], json!("queued"), "{body}");
+    assert!(
+        run.get("queuePosition").is_none(),
+        "unclaimable => no position: {body}"
+    );
+}
+
+/// RED PROOF (ADR-0200 D1/D2, S2). A finished run's `endReason` is the closed machine
+/// code the server wrote and nothing else (a malformed or non-string code is dropped,
+/// not echoed); `limit` bounds the page; and another tenant's channel and runs are
+/// invisible — 403 for the channel, 404 for the ledger.
+///
+/// Tamper table:
+///   * drop the `end_reason` regex                           -> the malformed code is echoed
+///   * select `end_reason` for non-terminal runs too          -> the running run shows a reason
+///   * drop the `LIMIT $4`                                    -> `limit=1` returns two runs
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_end_reason_is_a_closed_code_and_other_tenants_are_invisible() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let other = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    for (status, error) in [
+        ("timed_out", Some(json!({"code": "approval_expired"}))),
+        ("failed", Some(json!({"code": "Bad Code!"}))),
+        ("failed", Some(json!({"code": 5}))),
+        ("succeeded", None),
+        ("running", Some(json!({"code": "ignored_while_running"}))),
+    ] {
+        sqlx::query(
+            "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, error) \
+             VALUES ($1,$2,$3,$4::run_status,$5)",
+        )
+        .bind(fixture.workspace)
+        .bind(fixture.hosted_agent)
+        .bind(fixture.channel)
+        .bind(status)
+        .bind(error)
+        .execute(&su)
+        .await
+        .unwrap();
+    }
+    let (status, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "?limit=200",
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let mut reasons: Vec<Option<String>> = body["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|run| run["endReason"].as_str().map(str::to_string))
+        .collect();
+    reasons.sort();
+    assert_eq!(
+        reasons,
+        [None, None, None, None, Some("approval_expired".to_string())],
+        "only the well-formed code of a FINISHED run is shown: {body}"
+    );
+    let (_, one) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "?limit=1",
+    )
+    .await;
+    assert_eq!(one["runs"].as_array().unwrap().len(), 1);
+
+    // another tenant's channel is not mine; its run's ledger is a 404, same as nothing
+    let foreign_run: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+         VALUES ($1,$2,$3,'queued') RETURNING id",
+    )
+    .bind(other.workspace)
+    .bind(other.hosted_agent)
+    .bind(other.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let (status, _) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        other.channel,
+        "",
+    )
+    .await;
+    assert_eq!(status, 403);
+    let (status, _) = events_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        &foreign_run.to_string(),
+    )
+    .await;
+    assert_eq!(status, 404);
+}
+
+// ---------------------------------------------------------------------------
+// (#3742 S3, ADR-0200 D4) liveness and oort_ping
+// ---------------------------------------------------------------------------
+
+async fn connection_liveness_3742(
+    client: &reqwest::Client,
+    base: &str,
+    fixture: &Fixture,
+) -> Value {
+    let response: Value = client
+        .get(format!(
+            "{base}/v1/workspaces/{}/hosted-agent-connections/{}",
+            fixture.workspace, fixture.hosted_connection
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .expect("connection get")
+        .json()
+        .await
+        .expect("connection body");
+    response["connection"]["liveness"].clone()
+}
+
+async fn liveness_row_3742(
+    pool: &PgPool,
+    fixture: &Fixture,
+) -> Option<(
+    Option<chrono::DateTime<chrono::Utc>>,
+    Option<chrono::DateTime<chrono::Utc>>,
+    Option<chrono::DateTime<chrono::Utc>>,
+    Option<chrono::DateTime<chrono::Utc>>,
+    Option<String>,
+)> {
+    sqlx::query_as(
+        "SELECT last_inbox_read_at, last_claim_at, last_ping_at, last_tool_error_at, \
+                last_tool_error_code \
+           FROM hosted_agent_liveness WHERE workspace_id=$1 AND connection_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_connection)
+    .fetch_optional(pool)
+    .await
+    .expect("liveness row")
+}
+
+/// RED PROOF (ADR-0200 D4-5, S3; 성재 결재 「생존 신호도 추가」). `oort_ping` proves a
+/// runtime is up and nothing more: on its own it is `alive_idle` — "alive, takes no
+/// work" — never `responsive`; a second ping inside 30 s is a harmless `recorded:false`
+/// that moves nothing; and the work signals (inbox read, a claim that took a job)
+/// are what make it `responsive`. Connect-only credentials cannot ping at all.
+///
+/// Tamper table:
+///   * let a ping set a work column / count as work in `derive_liveness` -> ping alone shows `responsive`
+///   * drop the 30 s throttle in `record_ping_in_tx`                      -> the second ping is `recorded:true`
+///   * record a claim even when the claim returned no job                 -> `last_claim_at` set on an empty claim
+///   * require no scope for the tool (drop `SCOPE_INBOX_READ`)            -> the connect-only credential pings
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_ping_proves_alive_not_working_and_the_work_signals_are_throttled() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    // never heard from: not "connected", not "alive"
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_eq!(liveness["state"], json!("unresponsive"), "{liveness}");
+    assert_eq!(liveness["workWaiting"], json!(false));
+    assert!(liveness_row_3742(&su, &fixture).await.is_none());
+
+    // the tool is advertised to a credential with the inbox scope, and to nobody else
+    assert!(list_tools(&client, &base, &fixture.hosted_bearer)
+        .await
+        .contains(&"oort_ping".to_string()));
+    let (status, refused) = call(
+        &client,
+        &base,
+        &fixture.connect_only_bearer,
+        "oort_ping",
+        json!({}),
+    )
+    .await;
+    assert!(
+        status >= 400,
+        "a connect-only credential cannot ping: {refused}"
+    );
+    assert!(liveness_row_3742(&su, &fixture).await.is_none());
+
+    // a ping: recorded, alive but idle
+    let (status, pinged) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_ping",
+        json!({"state": "idle"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{pinged}");
+    assert_eq!(structured(&pinged)["recorded"], json!(true));
+    assert_eq!(structured(&pinged)["minIntervalSeconds"], json!(30));
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_eq!(liveness["state"], json!("alive_idle"), "{liveness}");
+    assert_eq!(liveness["lastPingState"], json!("idle"));
+    assert!(
+        liveness.get("lastWorkSignalAtMs").is_none(),
+        "a ping is not work: {liveness}"
+    );
+    let first = liveness_row_3742(&su, &fixture).await.expect("row").2;
+
+    // a second ping inside the window: success, recorded:false, nothing moves
+    let (status, again) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_ping",
+        json!({"state": "working"}),
+    )
+    .await;
+    assert_eq!(status, 200, "a throttled ping is not an error: {again}");
+    assert_eq!(structured(&again)["recorded"], json!(false));
+    assert_eq!(liveness_row_3742(&su, &fixture).await.unwrap().2, first);
+    let stored_state: Option<String> = sqlx::query_scalar(
+        "SELECT last_ping_state FROM hosted_agent_liveness WHERE workspace_id=$1 AND connection_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_connection)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        stored_state.as_deref(),
+        Some("idle"),
+        "the throttled call changed nothing"
+    );
+
+    // closed arguments
+    for bad in [
+        json!({"state": "sleeping"}),
+        json!({"state": 3}),
+        json!({"extra": true}),
+    ] {
+        let (status, _) = call(&client, &base, &fixture.hosted_bearer, "oort_ping", bad).await;
+        assert_eq!(status, 400);
+    }
+
+    // an empty claim is not a claim
+    let (_, empty) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({}),
+    )
+    .await;
+    assert_eq!(structured(&empty)["jobs"], json!([]));
+    assert!(liveness_row_3742(&su, &fixture).await.unwrap().1.is_none());
+
+    // the inbox read is work: responsive, and throttled
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_inbox_read",
+        json!({"limit": 5}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let read = liveness_row_3742(&su, &fixture).await.unwrap().0;
+    assert!(read.is_some());
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_eq!(liveness["state"], json!("responsive"), "{liveness}");
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_inbox_read",
+        json!({"limit": 5}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        liveness_row_3742(&su, &fixture).await.unwrap().0,
+        read,
+        "a poll inside 30 s writes nothing"
+    );
+
+    // a claim that took a job is work, and a queued job is "work waiting" before it
+    mention_3740(&client, &base, &su, &fixture, fixture.hosted_agent).await;
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_eq!(liveness["workWaiting"], json!(true), "{liveness}");
+    // a fresh job is just a polling agent's normal queue; one that has waited past the
+    // responsive window while the agent keeps reading its inbox is NOT "responsive"
+    assert_eq!(liveness["state"], json!("responsive"), "{liveness}");
+    sqlx::query(
+        "UPDATE outbox SET created_at = now() - interval '30 minutes' \
+          WHERE workspace_id=$1 AND kind='agent_job' AND partition_key=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_eq!(liveness["state"], json!("work_waiting"), "{liveness}");
+    assert!(liveness["oldestWaitingAtMs"].as_i64().unwrap() > 0);
+    let (_, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({}),
+    )
+    .await;
+    assert_eq!(structured(&claimed)["jobs"].as_array().unwrap().len(), 1);
+    assert!(liveness_row_3742(&su, &fixture).await.unwrap().1.is_some());
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_eq!(liveness["workWaiting"], json!(false));
+}
+
+/// RED PROOF (ADR-0200 D4, S3). The refusal that explains "Agent Port unavailable" is
+/// kept as a closed code on the caller's own connection, turns the state to `error`
+/// while it is the newest fact, and ends with the next accepted call of any kind — the
+/// throttle on the work columns must not keep a recovered agent red. A lost lease or a
+/// bad argument is the agent's own flow and is not an `error`. Members see the label
+/// only; a stranger and a non-hosted agent are the same 404.
+///
+/// Tamper table:
+///   * record every failure kind                          -> the bad-argument call turns the state to `error`
+///   * compare the refusal only to the throttled work columns -> the recovery stays `error`
+///   * return `lastToolErrorCode` to the member route      -> the member body carries the code
+///   * answer 403 for the non-hosted agent                 -> existence of hosting is probeable
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_refusal_is_a_closed_code_that_recovers_and_members_see_the_label_only() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    // an accepted call first
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_inbox_read",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    // a bad argument is the agent's flow, not a connection fault
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_inbox_read",
+        json!({"limit": 0}),
+    )
+    .await;
+    assert_eq!(status, 400);
+    assert!(liveness_row_3742(&su, &fixture).await.unwrap().3.is_none());
+
+    // …and so is a lost lease: renewing a handle the agent itself released answers 409
+    // `Conflict` from INSIDE the tool (the case a record-every-failure bug would catch;
+    // the schema 400 above never reaches the tool at all)
+    mention_3740(&client, &base, &su, &fixture, fixture.hosted_agent).await;
+    let (_, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({}),
+    )
+    .await;
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_job_release",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let (status, lost) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_job_renew",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    assert_eq!(status, 409, "{lost}");
+    assert!(
+        liveness_row_3742(&su, &fixture).await.unwrap().3.is_none(),
+        "a lost lease is the agent's own flow, not a connection error"
+    );
+
+    // a refusal about the connection: an unapproved channel is "unavailable"
+    let (status, refused) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_conversation_read",
+        json!({"channelId": fixture.private_channel}),
+    )
+    .await;
+    assert!(status >= 400, "{refused}");
+    let (_, _, _, errored, code) = liveness_row_3742(&su, &fixture).await.unwrap();
+    assert!(errored.is_some());
+    assert!(
+        matches!(
+            code.as_deref(),
+            Some("unavailable") | Some("not_authorized")
+        ),
+        "a closed code: {code:?}"
+    );
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_eq!(liveness["state"], json!("error"), "{liveness}");
+    assert_eq!(liveness["lastToolErrorCode"], json!(code.clone().unwrap()));
+
+    // any accepted call ends it — even one the 30 s work-column throttle would swallow
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_inbox_read",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_ne!(liveness["state"], json!("error"), "recovered: {liveness}");
+
+    // the SAME refusal again, seconds later: a new fact, not swallowed by the 30 s
+    // throttle (a flapping "unavailable" must not read as fine)
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_conversation_read",
+        json!({"channelId": fixture.private_channel}),
+    )
+    .await;
+    assert!(status >= 400);
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_eq!(
+        liveness["state"],
+        json!("error"),
+        "flapping stays visible: {liveness}"
+    );
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_inbox_read",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    // the member-facing label
+    let plain_jwt = seed_plain_member(&su, &fixture).await; // shares `channel` with the agent
+    let url = format!(
+        "{base}/v1/workspaces/{}/agents/{}/liveness",
+        fixture.workspace, fixture.hosted_agent
+    );
+    let member: Value = client
+        .get(&url)
+        .bearer_auth(&plain_jwt)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        member["agentMemberId"].as_str().unwrap().to_lowercase(),
+        fixture.hosted_agent.to_string()
+    );
+    assert!(member["state"].is_string());
+    let rendered = serde_json::to_string(&member).unwrap();
+    for hidden in ["lastToolError", "lastPing", "doorbell", "workWaiting"] {
+        assert!(
+            !rendered.contains(hidden),
+            "members see the label only: {rendered}"
+        );
+    }
+
+    // a managed agent (no hosted connection) and a stranger: the same 404
+    let managed = client
+        .get(format!(
+            "{base}/v1/workspaces/{}/agents/{}/liveness",
+            fixture.workspace, fixture.managed_agent
+        ))
+        .bearer_auth(&plain_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(managed.status().as_u16(), 404);
+    let stranger = seed_outsider_3741(&su, &fixture).await;
+    let outsider = client
+        .get(&url)
+        .bearer_auth(&stranger)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(outsider.status().as_u16(), 404);
+}
+
+// ---------------------------------------------------------------------------
+// (#3744 S5, ADR-0200 D1-4 / D2) stall sweep, realtime frame, retention
+// ---------------------------------------------------------------------------
+
+/// Age a hosted run as if its agent went quiet `hours` ago: the lease expired then and the
+/// run saw its last event then.
+async fn age_run_3744(pool: &PgPool, fixture: &Fixture, run: Uuid, hours: i64) {
+    sqlx::query(
+        "UPDATE outbox SET lease_acquired_at = now() - make_interval(hours => $3 + 1), \
+                lease_expires_at = now() - make_interval(hours => $3) \
+          WHERE workspace_id=$1 AND kind='agent_job' AND lower(payload->>'run_id') = lower($2::text) \
+            AND lease_owner IS NOT NULL",
+    )
+    .bind(fixture.workspace)
+    .bind(run)
+    .bind(hours as i32)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE agent_run SET updated_at = now() - make_interval(hours => $2) WHERE id=$1")
+        .bind(run)
+        .bind(hours as i32)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+async fn run_status_3744(pool: &PgPool, run: Uuid) -> (String, Option<String>) {
+    sqlx::query_as("SELECT status::text, error->>'code' FROM agent_run WHERE id=$1")
+        .bind(run)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn frames_3744(pool: &PgPool, fixture: &Fixture, run: Uuid) -> Vec<Value> {
+    sqlx::query_scalar::<_, Value>(
+        "SELECT payload->'data' FROM outbox \
+          WHERE workspace_id=$1 AND kind='broadcast' \
+            AND payload->'data'->>'type' = 'agent.run.event' \
+            AND lower(payload->'data'->'payload'->>'run_id') = lower($2::text) \
+          ORDER BY id",
+    )
+    .bind(fixture.workspace)
+    .bind(run)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+/// RED PROOF (ADR-0200 D1-4, S5). A hosted run whose agent went quiet is ended by the
+/// SERVER with a closed fact — and only then. Fresh work, a revived lease, an
+/// approval-parked run, a managed agent's run and a run inside either grace period are all
+/// left alone; the ended run's job is retired so a late agent finds a settled run, not a
+/// resurrected one; the channel gets one line and the audit log one row.
+///
+/// Tamper table (each applied and seen red):
+///   * drop the `r.updated_at` staleness condition        -> the run with a recent report is ended
+///   * drop the `lease_expires_at < now() - grace` term   -> the run whose lease expired 1 h ago
+///     but that has been silent 3 h is ended
+///   * drop the job-less branch (`j.id IS NULL`)          -> the disconnect-orphaned run and the
+///     ten-day-old ghost are not ended
+///   * let `awaiting_approval` through BOTH the candidate filter and `end_stalled_run_in_tx`
+///     (either alone is caught by the other: two guards on purpose)
+///                                                         -> the parked run (given a dead job) is ended
+///   * do not retire the job                              -> a pending job survives the ended run
+///   * drop the unclaimed term                            -> the 25-hour queued run stays queued
+///   * key the notice by the run id                       -> the notice looks like the run's answer
+/// Not covered here (deterministic only with an injected pause): the sweep-vs-reclaim race;
+/// its second line of defence is `pending_job_has_live_lease_in_tx`, asserted above.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_run_whose_agent_went_quiet_is_ended_with_a_closed_code_and_nothing_else_is() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let notifier = momo_notifier_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let policy = momo_outbox::StallPolicy::default();
+    // The sweep is cross-tenant by design and this database outlives a test run: settle the
+    // ghosts earlier runs left in OTHER workspaces so the counts below are this test's own.
+    sqlx::query(
+        "UPDATE agent_run SET status='cancelled', finished_at=now() \
+          WHERE status IN ('queued','running') AND workspace_id <> $1",
+    )
+    .bind(fixture.workspace)
+    .execute(&su)
+    .await
+    .unwrap();
+
+    // --- the run that goes quiet -----------------------------------------
+    mention_3740(&client, &base, &su, &fixture, fixture.hosted_agent).await;
+    let (_, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({}),
+    )
+    .await;
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_event",
+        json!({"leaseHandle": handle, "status": "running", "stage": "작업 시작", "eventId": Uuid::new_v4()}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let quiet: Uuid =
+        sqlx::query_scalar("SELECT id FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2")
+            .bind(fixture.workspace)
+            .bind(fixture.hosted_agent)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+
+    // fresh: nothing to do
+    let stats = momo_notifier::run_stall_sweep::sweep_stalled_runs(&notifier, policy, 50)
+        .await
+        .unwrap();
+    assert_eq!(
+        stats.lease_abandoned + stats.unclaimed_expired,
+        0,
+        "{stats:?}"
+    );
+
+    // the re-check the sweep makes under the run lock: a LIVE lease is seen as live…
+    {
+        let mut connection = su.acquire().await.unwrap();
+        assert!(
+            momo_outbox::pending_job_has_live_lease_in_tx(
+                &mut connection,
+                fixture.workspace,
+                quiet
+            )
+            .await
+            .unwrap(),
+            "a freshly claimed job holds a live lease"
+        );
+    }
+
+    // stale for 1 hour only: inside the 2-hour grace
+    age_run_3744(&su, &fixture, quiet, 1).await;
+    momo_notifier::run_stall_sweep::sweep_stalled_runs(&notifier, policy, 50)
+        .await
+        .unwrap();
+    assert_eq!(
+        run_status_3744(&su, quiet).await.0,
+        "running",
+        "1 h is inside the grace"
+    );
+
+    // the lease expired 3 hours ago but the agent reported 10 minutes ago: alive
+    age_run_3744(&su, &fixture, quiet, 3).await;
+    sqlx::query("UPDATE agent_run SET updated_at = now() - interval '10 minutes' WHERE id=$1")
+        .bind(quiet)
+        .execute(&su)
+        .await
+        .unwrap();
+    momo_notifier::run_stall_sweep::sweep_stalled_runs(&notifier, policy, 50)
+        .await
+        .unwrap();
+    assert_eq!(
+        run_status_3744(&su, quiet).await.0,
+        "running",
+        "a recent report keeps it alive"
+    );
+
+    // the lease expired only an hour ago although the run has been silent for three: the LEASE
+    // grace is separate from the run's own silence, so this one is still inside it
+    sqlx::query(
+        "UPDATE outbox SET lease_expires_at = now() - interval '1 hour' \
+          WHERE workspace_id=$1 AND kind='agent_job' AND lower(payload->>'run_id') = lower($2::text)",
+    )
+    .bind(fixture.workspace)
+    .bind(quiet)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE agent_run SET updated_at = now() - interval '3 hours' WHERE id=$1")
+        .bind(quiet)
+        .execute(&su)
+        .await
+        .unwrap();
+    momo_notifier::run_stall_sweep::sweep_stalled_runs(&notifier, policy, 50)
+        .await
+        .unwrap();
+    assert_eq!(
+        run_status_3744(&su, quiet).await.0,
+        "running",
+        "a lease that expired inside the grace keeps the run, whatever its own silence"
+    );
+
+    // --- decoys that must survive the sweep that ends the quiet run ---------
+    // an approval-parked run with an ancient lease
+    let parked: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, updated_at) \
+         VALUES ($1,$2,$3,'awaiting_approval', now() - interval '9 hours') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    // …and it holds a job whose lease is long dead, so that ONLY the status filter protects it
+    sqlx::query(
+        "INSERT INTO outbox(workspace_id,kind,status,method,payload,partition_key, \
+                            lease_owner, lease_acquired_at, lease_expires_at) \
+         VALUES ($1,'agent_job','pending','gateway',$2,$3, uuidv7(), \
+                 now() - interval '10 hours', now() - interval '9 hours')",
+    )
+    .bind(fixture.workspace)
+    .bind(json!({
+        "agent_member_id": fixture.hosted_agent.to_string(),
+        "run_id": parked.to_string(),
+        "channel_id": fixture.channel.to_string(),
+    }))
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    // a queued run nobody took, 23 hours (inside) and another 25 hours (past) old
+    let mut queued = Vec::new();
+    for hours in [23, 25] {
+        let id: Uuid = sqlx::query_scalar(
+            "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, created_at, updated_at) \
+             VALUES ($1,$2,$3,'queued', now() - make_interval(hours => $4), now() - make_interval(hours => $4)) \
+             RETURNING id",
+        )
+        .bind(fixture.workspace)
+        .bind(fixture.hosted_agent)
+        .bind(fixture.channel)
+        .bind(hours)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO outbox(workspace_id,kind,status,method,payload,partition_key) \
+             VALUES ($1,'agent_job','pending','gateway',$2,$3)",
+        )
+        .bind(fixture.workspace)
+        .bind(json!({
+            "agent_member_id": fixture.hosted_agent.to_string(),
+            "run_id": id.to_string(),
+            "channel_id": fixture.channel.to_string(),
+        }))
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+        queued.push(id);
+    }
+    // a managed agent's ancient queued run: not hosted, never this sweep's
+    let managed: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, created_at, updated_at) \
+         VALUES ($1,$2,$3,'queued', now() - interval '30 hours', now() - interval '30 hours') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.managed_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO outbox(workspace_id,kind,status,method,payload,partition_key) \
+         VALUES ($1,'agent_job','pending','gateway',$2,$3)",
+    )
+    .bind(fixture.workspace)
+    .bind(json!({
+        "agent_member_id": fixture.managed_agent.to_string(),
+        "run_id": managed.to_string(),
+        "channel_id": fixture.channel.to_string(),
+    }))
+    .bind(fixture.managed_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+
+    // runs whose delivery job was settled by a disconnect (the commonest ghost): no pending
+    // job means no agent can ever report on them. Fresh one survives, silent one is ended.
+    let mut suppressed = Vec::new();
+    for hours_silent in [0_i32, 3] {
+        let id: Uuid = sqlx::query_scalar(
+            "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, updated_at) \
+             VALUES ($1,$2,$3,'running', now() - make_interval(hours => $4)) RETURNING id",
+        )
+        .bind(fixture.workspace)
+        .bind(fixture.hosted_agent)
+        .bind(fixture.channel)
+        .bind(hours_silent)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO outbox(workspace_id,kind,status,method,payload,partition_key,processed_at) \
+             VALUES ($1,'agent_job','done','gateway',$2,$3, now())",
+        )
+        .bind(fixture.workspace)
+        .bind(json!({
+            "agent_member_id": fixture.hosted_agent.to_string(),
+            "run_id": id.to_string(),
+            "channel_id": fixture.channel.to_string(),
+        }))
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+        suppressed.push(id);
+    }
+    // a run whose only delivery path is a non-`gateway` job (a resume job): some consumer
+    // still has a job to take, so it is NOT the job-less orphan the sweep ends
+    let resumed: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, created_at, updated_at) \
+         VALUES ($1,$2,$3,'queued', now() - interval '3 hours', now() - interval '3 hours') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO outbox(workspace_id,kind,status,method,payload,partition_key) \
+         VALUES ($1,'agent_job','pending','resume_approval',$2,$3)",
+    )
+    .bind(fixture.workspace)
+    .bind(json!({
+        "agent_member_id": fixture.hosted_agent.to_string(),
+        "run_id": resumed.to_string(),
+        "channel_id": fixture.channel.to_string(),
+    }))
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    // a run silent for ten days: ended, but without a channel line (the first sweep after a
+    // deploy must not light up old channels with weeks-old notices)
+    let ancient: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, created_at, updated_at) \
+         VALUES ($1,$2,$3,'running', now() - interval '12 days', now() - interval '10 days') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+
+    // --- now the quiet run really goes quiet --------------------------------
+    age_run_3744(&su, &fixture, quiet, 3).await;
+    {
+        let mut connection = su.acquire().await.unwrap();
+        assert!(
+            !momo_outbox::pending_job_has_live_lease_in_tx(
+                &mut connection,
+                fixture.workspace,
+                quiet
+            )
+            .await
+            .unwrap(),
+            "…and an expired one is not"
+        );
+    }
+    let stats = momo_notifier::run_stall_sweep::sweep_stalled_runs(&notifier, policy, 50)
+        .await
+        .unwrap();
+    assert_eq!(
+        stats.lease_abandoned, 3,
+        "the quiet run, the silent run with no delivery job, the ten-day-old one: {stats:?}"
+    );
+    assert_eq!(stats.unclaimed_expired, 1, "{stats:?}");
+    assert_eq!(
+        run_status_3744(&su, suppressed[1]).await,
+        ("timed_out".to_string(), Some("lease_abandoned".to_string())),
+        "a run whose job a disconnect settled is ended when it has been silent"
+    );
+    assert_eq!(
+        run_status_3744(&su, suppressed[0]).await.0,
+        "running",
+        "…but not while it is fresh"
+    );
+    assert_eq!(run_status_3744(&su, ancient).await.0, "timed_out");
+    assert_eq!(
+        run_status_3744(&su, resumed).await.0,
+        "queued",
+        "a run with a pending resume job still has a delivery path"
+    );
+    let ancient_lines: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE workspace_id=$1 AND run_id=$2 AND type='system'",
+    )
+    .bind(fixture.workspace)
+    .bind(ancient)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(ancient_lines, 0, "an ancient ghost is ended quietly");
+
+    assert_eq!(
+        run_status_3744(&su, quiet).await,
+        ("timed_out".to_string(), Some("lease_abandoned".to_string()))
+    );
+    assert_eq!(
+        run_status_3744(&su, queued[1]).await,
+        (
+            "timed_out".to_string(),
+            Some("unclaimed_expired".to_string())
+        )
+    );
+    for (survivor, why) in [
+        (parked, "an approval-parked run is the approval sweep's"),
+        (queued[0], "23 hours is inside the 24-hour window"),
+        (managed, "a managed agent's run is not a hosted run"),
+    ] {
+        let (status, code) = run_status_3744(&su, survivor).await;
+        assert!(code.is_none() && status != "timed_out", "{why}: {status}");
+    }
+
+    // the ledger says it, the channel says it once, the audit log says why (actor: the clock)
+    let ledger = ledger_3740(&su, fixture.workspace, quiet).await;
+    let last = ledger.last().unwrap();
+    assert_eq!(
+        (last.1.as_str(), last.3.as_deref()),
+        ("timed_out", Some("lease_abandoned"))
+    );
+    let lines: Vec<(String, Value)> = sqlx::query_as(
+        "SELECT body, props FROM message WHERE workspace_id=$1 AND run_id=$2 AND type='system'",
+    )
+    .bind(fixture.workspace)
+    .bind(quiet)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(lines[0].1["code"], json!("lease_abandoned"));
+    let keyed_by_run: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE workspace_id=$1 AND client_msg_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(quiet)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        keyed_by_run, 0,
+        "the notice must not look like the run's ANSWER (client_msg_id = run id) to the push judgment"
+    );
+    let audits: Vec<(Option<Uuid>, Value)> = sqlx::query_as(
+        "SELECT actor_member_id, detail FROM audit_log WHERE workspace_id=$1 AND action='agent.run.stalled' \
+          AND target_id = $2",
+    )
+    .bind(fixture.workspace)
+    .bind(quiet)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(audits.len(), 1);
+    assert!(audits[0].0.is_none(), "the clock ended it, not a member");
+
+    // the delivery job is settled: a late agent on the old handle finds a finished run
+    let pending_jobs: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='agent_job' AND status='pending' \
+           AND lower(payload->>'run_id') = lower($2::text)",
+    )
+    .bind(fixture.workspace)
+    .bind(quiet)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(pending_jobs, 0);
+    let (status, late) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_event",
+        json!({"leaseHandle": handle, "status": "running", "eventId": Uuid::new_v4()}),
+    )
+    .await;
+    assert!(
+        status >= 400,
+        "a late agent does not revive an ended run: {late}"
+    );
+    assert_eq!(run_status_3744(&su, quiet).await.0, "timed_out");
+
+    // idempotent
+    let again = momo_notifier::run_stall_sweep::sweep_stalled_runs(&notifier, policy, 50)
+        .await
+        .unwrap();
+    assert_eq!(again.lease_abandoned + again.unclaimed_expired, 0);
+
+    // realtime: the lifecycle rows produced thin frames — no stage text, no sequence
+    let frames = frames_3744(&su, &fixture, quiet).await;
+    assert!(!frames.is_empty());
+    let rendered = serde_json::to_string(&frames).unwrap();
+    assert!(
+        !rendered.contains("작업 시작"),
+        "no stage text on the wire: {rendered}"
+    );
+    assert!(
+        !rendered.contains("\"seq\""),
+        "no raw sequence on the wire: {rendered}"
+    );
+    let kinds: Vec<&str> = frames
+        .iter()
+        .map(|frame| frame["payload"]["kind"].as_str().unwrap())
+        .collect();
+    assert!(kinds.contains(&"timed_out"), "{kinds:?}");
+}
+
+/// RED PROOF (ADR-0200 D2, S5). The ledger announces itself with ONE thin frame per
+/// lifecycle row, and consecutive `stage` rows inside two seconds collapse to a single
+/// frame (the row is still written; a refetch carries it). The frame is addressed to the
+/// run's channel topic.
+///
+/// Tamper table:
+///   * drop the 2-second coalescing                    -> every stage row emits a frame
+///   * put `stage`/`seq` in the frame                  -> the no-text / no-seq assertions fail
+///   * address the frame to a different topic          -> the topic assertion fails
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_ledger_row_emits_one_thin_frame_and_a_stage_burst_is_coalesced() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su).await;
+    let run: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+         VALUES ($1,$2,$3,'queued') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    // one transaction: all three stage rows share a timestamp, so they are "within 2 s"
+    let mut tx = su.begin().await.unwrap();
+    for stage in ["하나", "둘", "셋"] {
+        sqlx::query("SELECT agent_run_event_append($1,$2,'stage',$3,NULL,NULL,$4)")
+            .bind(fixture.workspace)
+            .bind(run)
+            .bind(stage)
+            .bind(fixture.hosted_agent)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+    }
+    tx.commit().await.unwrap();
+    let frames = frames_3744(&su, &fixture, run).await;
+    let kinds: Vec<&str> = frames
+        .iter()
+        .map(|frame| frame["payload"]["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        kinds,
+        ["queued", "stage"],
+        "three stage rows, one frame: {frames:?}"
+    );
+    let topic: String = sqlx::query_scalar(
+        "SELECT payload->>'channel' FROM outbox WHERE workspace_id=$1 AND kind='broadcast' \
+           AND payload->'data'->>'type'='agent.run.event' ORDER BY id LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        topic,
+        format!(
+            "ch:ws{}.{}",
+            fixture.workspace.to_string().to_uppercase(),
+            fixture.channel.to_string().to_uppercase()
+        )
+    );
+    let rendered = serde_json::to_string(&frames).unwrap();
+    for hidden in ["하나", "둘", "셋", "\"seq\"", "stage\":"] {
+        assert!(!rendered.contains(hidden), "{hidden}: {rendered}");
+    }
+    assert_eq!(
+        ledger_3740(&su, fixture.workspace, run).await.len(),
+        4,
+        "all rows are still written"
+    );
+}
+
+/// RED PROOF (ADR-0200 D2, S5). A FINISHED run's ledger is deleted 30 days after it
+/// finished — and only that: a run finished 29 days ago, a run still in progress however
+/// old, and the run rows themselves are untouched. Until the sweep deletes, a read past
+/// retention answers an empty ledger. The delete runs on the RLS-bound pool; the read
+/// half is the notifier's.
+///
+/// Tamper table:
+///   * measure from `created_at` instead of `finished_at`  -> the ancient running run loses its ledger
+///   * 30 -> 3 days                                        -> the 29-day-old ledger is deleted
+///   * drop the read-time expiry in `list_run_events_in_tx` -> the expired-but-undeleted ledger is returned
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_finished_runs_ledger_is_kept_thirty_days_and_a_running_one_never_expires() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let notifier = momo_notifier_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+
+    let mut runs = Vec::new();
+    for (status, finished_days_ago, created_days_ago) in [
+        ("succeeded", Some(31), 40),
+        ("succeeded", Some(29), 40),
+        ("running", None, 90),
+    ] {
+        let run: Uuid = sqlx::query_scalar(
+            "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, created_at, finished_at) \
+             VALUES ($1,$2,$3,$4::run_status, now() - make_interval(days => $5), \
+                     CASE WHEN $6::int IS NULL THEN NULL ELSE now() - make_interval(days => $6) END) \
+             RETURNING id",
+        )
+        .bind(fixture.workspace)
+        .bind(fixture.hosted_agent)
+        .bind(fixture.channel)
+        .bind(status)
+        .bind(created_days_ago)
+        .bind(finished_days_ago)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        runs.push(run);
+    }
+    let [expired, young, ancient_running] = [runs[0], runs[1], runs[2]];
+    for run in [expired, young, ancient_running] {
+        assert!(!ledger_3740(&su, fixture.workspace, run).await.is_empty());
+    }
+
+    // read-time expiry: the sweep has not run, the ledger already reads empty
+    let (status, body) = events_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        &expired.to_string(),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        body["events"],
+        json!([]),
+        "past retention reads empty: {body}"
+    );
+    let (_, body) = events_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        &young.to_string(),
+    )
+    .await;
+    assert!(
+        !body["events"].as_array().unwrap().is_empty(),
+        "29 days is kept: {body}"
+    );
+
+    let stats =
+        momo_notifier::run_event_retention_sweep::sweep_expired_run_events(&notifier, &app, 50)
+            .await
+            .unwrap();
+    assert!(stats.deleted >= 1, "{stats:?}");
+    assert!(ledger_3740(&su, fixture.workspace, expired)
+        .await
+        .is_empty());
+    assert!(!ledger_3740(&su, fixture.workspace, young).await.is_empty());
+    assert!(
+        !ledger_3740(&su, fixture.workspace, ancient_running)
+            .await
+            .is_empty(),
+        "a run still in progress never expires, however old"
+    );
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_run WHERE id = ANY($1)")
+        .bind(&runs)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(rows, 3, "the run rows themselves are never touched");
+
+    // idempotent
+    let again =
+        momo_notifier::run_event_retention_sweep::sweep_expired_run_events(&notifier, &app, 50)
+            .await
+            .unwrap();
+    assert_eq!(again.deleted, 0);
+}
+
+/// RED PROOF (S5 review M-1). A steady stage stream keeps framing every two seconds — the
+/// rate limit is against the last FRAMED stage row, not the last stage row, so it does not
+/// fall silent after the first frame.
+///
+/// Tamper table:
+///   * compare against the last stage row instead of the last framed one -> the third row
+///     (2.2 s after the first) is not framed
+///   * drop the rate limit                                                -> the second row is framed
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_steady_stage_stream_keeps_framing_every_two_seconds() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su).await;
+    let run: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+         VALUES ($1,$2,$3,'queued') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    for (n, pause_ms) in [(1, 0_u64), (2, 1100), (3, 1100)] {
+        tokio::time::sleep(std::time::Duration::from_millis(pause_ms)).await;
+        sqlx::query("SELECT agent_run_event_append($1,$2,'stage',$3,NULL,NULL,$4)")
+            .bind(fixture.workspace)
+            .bind(run)
+            .bind(format!("단계 {n}"))
+            .bind(fixture.hosted_agent)
+            .execute(&su)
+            .await
+            .unwrap();
+    }
+    let framed: Vec<bool> = sqlx::query_scalar(
+        "SELECT framed FROM agent_run_event WHERE workspace_id=$1 AND run_id=$2 AND kind='stage' ORDER BY seq",
+    )
+    .bind(fixture.workspace)
+    .bind(run)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        framed,
+        [true, false, true],
+        "1st framed; 2nd (1.1 s later) not; 3rd (2.2 s after the 1st) framed"
+    );
+    let frame_kinds: Vec<Value> = frames_3744(&su, &fixture, run).await;
+    let stage_frames = frame_kinds
+        .iter()
+        .filter(|frame| frame["payload"]["kind"] == json!("stage"))
+        .count();
+    assert_eq!(stage_frames, 2);
 }

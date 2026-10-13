@@ -480,11 +480,13 @@ pub fn validated_run_limit(raw: Option<&str>) -> i64 {
 /// that uses it joins `membership` — and `channel_id` is a column of both tables,
 /// so a bare list is an ambiguous-reference error at runtime rather than a
 /// compile-time one.
-const SUMMARY_COLS: &str = "r.id, r.channel_id, r.trigger_message_id, \
+pub(crate) const SUMMARY_COLS: &str = "r.id, r.channel_id, r.trigger_message_id, \
      r.status::text AS status_label, r.input, r.started_at, r.finished_at, \
      r.created_at, r.updated_at";
 
-fn decode_run_summary(row: &sqlx::postgres::PgRow) -> Result<AgentRunSummaryRow, sqlx::Error> {
+pub(crate) fn decode_run_summary(
+    row: &sqlx::postgres::PgRow,
+) -> Result<AgentRunSummaryRow, sqlx::Error> {
     let label: String = row.try_get("status_label")?;
     let status = RunStatus::from_db_label(&label)
         .ok_or_else(|| sqlx::Error::Decode(format!("unknown run_status '{label}'").into()))?;
@@ -1426,6 +1428,32 @@ pub async fn end_parked_run_in_tx(
     .bind(run_id)
     .bind(status.as_db_label())
     .bind(error)
+    .execute(&mut *conn)
+    .await?;
+    Ok(updated.rows_affected() > 0)
+}
+
+/// End a run the stall sweep found abandoned (ADR-0200 D1-4): `timed_out` with a closed
+/// code (`lease_abandoned` / `unclaimed_expired`). Guarded on `queued`/`running` so it can
+/// only end a run that is actually live and not parked on a human (an `awaiting_approval`
+/// run is the approval sweep's, with its own deadline). Returns whether it ended one.
+pub async fn end_stalled_run_in_tx(
+    conn: &mut PgConnection,
+    run_id: Uuid,
+    code: &str,
+) -> Result<bool, DbError> {
+    let updated = sqlx::query(
+        "UPDATE agent_run \
+            SET status = 'timed_out'::run_status, \
+                error = jsonb_build_object('code', $2::text), \
+                deadline_at = NULL, \
+                updated_at = now(), \
+                finished_at = now() \
+          WHERE id = $1 \
+            AND status IN ('queued', 'running')",
+    )
+    .bind(run_id)
+    .bind(code)
     .execute(&mut *conn)
     .await?;
     Ok(updated.rows_affected() > 0)

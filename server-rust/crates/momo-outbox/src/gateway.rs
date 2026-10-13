@@ -282,22 +282,13 @@ pub async fn claim_hosted_gateway_jobs_in_tx(
     .await
 }
 
-async fn claim_gateway_jobs(
-    conn: &mut PgConnection,
-    workspace_id: Uuid,
-    agent_member_id: Uuid,
-    limit: i64,
-    hosted_connection_id: Option<Uuid>,
-    lease_seconds: i64,
-) -> Result<Vec<ClaimedGatewayJob>, sqlx::Error> {
-    // `$5 IS NULL` selects the managed branch, so both callers execute one
-    // prepared statement whose only difference is which hosted predicate is
-    // live. Two SQL literals would be two things to keep in step.
-    let rows = sqlx::query(
-        "WITH candidate AS ( \
-           SELECT o.id \
-             FROM outbox o \
-            WHERE o.workspace_id = $1 \
+/// The ONE definition of "this pending gateway job can be claimed right now" — the
+/// claim statement and the queue-position read (`list_claimable_hosted_jobs_in_tx`,
+/// ADR-0200 D3) both embed it, so a position can never be given to a run the claim
+/// would refuse (security review #3741 M1). Binds: `$1` workspace, `$2` agent,
+/// `$3` hosted connection id (NULL selects the managed branch). Alias `o` = outbox.
+const CLAIMABLE_JOB_PREDICATE: &str = "\
+o.workspace_id = $1 \
               AND o.kind = 'agent_job' \
               AND o.method = 'gateway' \
               AND o.status = 'pending' \
@@ -318,21 +309,21 @@ async fn claim_gateway_jobs(
                    AND m.deleted_at IS NULL \
               ) \
               AND ( \
-                $5::uuid IS NULL \
+                $3::uuid IS NULL \
                 OR o.payload->>'run_id' ~* \
                    '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' \
               ) \
               AND ( \
-                ($5::uuid IS NULL AND NOT EXISTS ( \
+                ($3::uuid IS NULL AND NOT EXISTS ( \
                   SELECT 1 FROM hosted_agent_connection hc \
                    WHERE hc.workspace_id = $1 AND hc.agent_member_id = $2 \
                 )) \
-                OR ($5::uuid IS NOT NULL AND EXISTS ( \
+                OR ($3::uuid IS NOT NULL AND EXISTS ( \
                   SELECT 1 FROM hosted_agent_connection hc \
                     JOIN token t ON t.workspace_id = hc.workspace_id \
                                 AND t.id = hc.active_token_id \
                    WHERE hc.workspace_id = $1 AND hc.agent_member_id = $2 \
-                     AND hc.id = $5 AND hc.status = 'active' \
+                     AND hc.id = $3 AND hc.status = 'active' \
                      AND hc.proved_at IS NOT NULL \
                      AND 'agent:jobs:read' = ANY(hc.approved_scopes) \
                      AND t.kind = 'agent_bearer' \
@@ -349,30 +340,48 @@ async fn claim_gateway_jobs(
                               = lower(o.payload->>'channel_id') \
                      ) \
                 )) \
-              ) \
+              )";
+
+async fn claim_gateway_jobs(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    limit: i64,
+    hosted_connection_id: Option<Uuid>,
+    lease_seconds: i64,
+) -> Result<Vec<ClaimedGatewayJob>, sqlx::Error> {
+    // `$3 IS NULL` selects the managed branch, so both callers execute one
+    // prepared statement whose only difference is which hosted predicate is
+    // live. Two SQL literals would be two things to keep in step.
+    let sql = format!(
+        "WITH candidate AS ( \
+           SELECT o.id \
+             FROM outbox o \
+            WHERE {CLAIMABLE_JOB_PREDICATE} \
             ORDER BY o.id ASC \
             FOR UPDATE OF o SKIP LOCKED \
-            LIMIT $3 \
+            LIMIT $4 \
          ), claimed AS ( \
            UPDATE outbox o \
               SET lease_owner = uuidv7(), \
                   lease_acquired_at = now(), \
-                  lease_expires_at = now() + make_interval(secs => $4) \
+                  lease_expires_at = now() + make_interval(secs => $5) \
              FROM candidate c \
             WHERE o.id = c.id \
            RETURNING o.id, o.payload, o.created_at, o.lease_owner, o.lease_expires_at \
          ) \
          SELECT id, payload, created_at, lease_owner, lease_expires_at \
            FROM claimed \
-          ORDER BY id ASC",
-    )
-    .bind(workspace_id)
-    .bind(agent_member_id)
-    .bind(limit)
-    .bind(lease_seconds as f64)
-    .bind(hosted_connection_id)
-    .fetch_all(&mut *conn)
-    .await?;
+          ORDER BY id ASC"
+    );
+    let rows = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(agent_member_id)
+        .bind(hosted_connection_id)
+        .bind(limit)
+        .bind(lease_seconds as f64)
+        .fetch_all(&mut *conn)
+        .await?;
 
     rows.iter()
         .map(|row| {
@@ -385,6 +394,118 @@ async fn claim_gateway_jobs(
             })
         })
         .collect()
+}
+
+/// One claimable job, as the queue-position read needs it: nothing leased, nothing
+/// secret — the row id (claim order) and the payload the caller reads two ids from.
+#[derive(Debug, Clone)]
+pub struct ClaimableGatewayJob {
+    pub id: i64,
+    pub payload: serde_json::Value,
+    /// When the job was queued — how long the work has been waiting.
+    pub created_at: DateTime<Utc>,
+}
+
+/// The pending hosted jobs of one agent that `oort_jobs_claim` would take, in claim
+/// order (`outbox.id ASC`), bounded by `limit`; empty when the agent has no active
+/// hosted connection. Same predicate as the claim itself ([`CLAIMABLE_JOB_PREDICATE`]);
+/// read-only, no lock, no lease.
+pub async fn list_claimable_hosted_jobs_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    limit: i64,
+) -> Result<Vec<ClaimableGatewayJob>, sqlx::Error> {
+    let connection_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM hosted_agent_connection \
+          WHERE workspace_id = $1 AND agent_member_id = $2 AND status = 'active' \
+          LIMIT 1",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(connection_id) = connection_id else {
+        return Ok(Vec::new());
+    };
+    let sql = format!(
+        "SELECT o.id, o.payload, o.created_at FROM outbox o WHERE {CLAIMABLE_JOB_PREDICATE} \
+          ORDER BY o.id ASC LIMIT $4"
+    );
+    let rows = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(agent_member_id)
+        .bind(Some(connection_id))
+        .bind(limit)
+        .fetch_all(&mut *conn)
+        .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(ClaimableGatewayJob {
+                id: row.try_get("id")?,
+                payload: row.try_get("payload")?,
+                created_at: row.try_get("created_at")?,
+            })
+        })
+        .collect()
+}
+
+/// The delivery job behind one run, as a read model: has an agent leased it, and is
+/// that lease still alive. Facts only — nothing here can renew, release or settle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunJobFacts {
+    pub run_id: Uuid,
+    pub job_id: i64,
+    pub leased: bool,
+    pub lease_live: bool,
+}
+
+/// The newest pending gateway job of each given run (`runs` = `(run_id, agent)`
+/// pairs), keyed by run id. A run with no pending job is simply absent.
+pub async fn pending_job_facts_for_runs_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    runs: &[(Uuid, Uuid)],
+) -> Result<Vec<RunJobFacts>, sqlx::Error> {
+    if runs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let run_ids: Vec<String> = runs
+        .iter()
+        .map(|(run, _)| run.to_string().to_lowercase())
+        .collect();
+    let agents: Vec<Uuid> = runs.iter().map(|(_, agent)| *agent).collect();
+    let rows = sqlx::query(
+        "SELECT DISTINCT ON (lower(o.payload->>'run_id')) \
+                lower(o.payload->>'run_id') AS run_text, o.id AS job_id, \
+                (o.lease_owner IS NOT NULL) AS leased, \
+                COALESCE(o.lease_expires_at > now(), false) AS lease_live \
+           FROM outbox o \
+          WHERE o.workspace_id = $1 \
+            AND o.kind = 'agent_job' AND o.method = 'gateway' AND o.status = 'pending' \
+            AND o.partition_key = ANY($2) \
+            AND lower(o.payload->>'run_id') = ANY($3) \
+          ORDER BY lower(o.payload->>'run_id'), o.id DESC",
+    )
+    .bind(workspace_id)
+    .bind(&agents)
+    .bind(&run_ids)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut facts = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let run_text: String = row.try_get("run_text")?;
+        let Ok(run_id) = Uuid::parse_str(&run_text) else {
+            continue;
+        };
+        facts.push(RunJobFacts {
+            run_id,
+            job_id: row.try_get("job_id")?,
+            leased: row.try_get("leased")?,
+            lease_live: row.try_get("lease_live")?,
+        });
+    }
+    Ok(facts)
 }
 
 /// What a suppressed hosted job's `last_error` says, so an operator reading the

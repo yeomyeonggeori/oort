@@ -493,3 +493,81 @@ async fn flag_off_dispatch_is_a_noop() {
         "AC6 red: drain without the gate would POST"
     );
 }
+
+/// ADR-0200 D4 「다시 깨우기」 (#3743): a manual ring rings the SAME doorbell the same
+/// way — one content-free signal through the sender's ordinary drain, nothing new on
+/// the wire — even with no inbox event at all, even inside the cooldown window of a
+/// ring that just happened; and it fires once, not on every later drain.
+///
+/// Tamper table:
+///   * the ring does not clear `window_started_at`          -> the second ring (inside a fresh window) never fires
+///   * the ring does not set `pending_trailing`             -> nothing fires
+///   * the sender consumed nothing (no `consume_for_fire`)  -> every later drain fires again
+///   * a ring that carried an identifier                    -> the body assertion fails
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn a_manual_ring_fires_the_same_content_free_signal_once_without_an_inbox_event() {
+    ensure_schema();
+    let pool = superuser_pool().await;
+    let hosted = seed_hosted(&pool).await;
+    register_doorbell(&pool, &hosted).await;
+    let transport = RecordingTransport::new();
+    let worker = worker(pool.clone(), transport.clone(), true);
+
+    // a real ring just happened: the cooldown window is open
+    append_human_message(&pool, &hosted).await;
+    assert_eq!(worker.drain_once().await.expect("drain").fired, 1);
+    assert_eq!(transport.rings.load(Ordering::SeqCst), 1);
+
+    let ring = |hosted: &Hosted| {
+        let (workspace, connection, human) = (hosted.workspace, hosted.connection, hosted.human);
+        let pool = pool.clone();
+        async move {
+            with_tenant_tx(&pool, workspace, move |conn| {
+                Box::pin(async move {
+                    momo_webhook::request_manual_ring_in_tx(
+                        conn, workspace, connection, human, true,
+                    )
+                    .await
+                })
+            })
+            .await
+            .expect("ring tx")
+        }
+    };
+    assert!(matches!(
+        ring(&hosted).await,
+        momo_webhook::RingOutcome::Requested { .. }
+    ));
+    let stats = worker.drain_once().await.expect("drain after ring");
+    assert_eq!(
+        stats.fired, 1,
+        "the ring fires inside the open window: {stats:?}"
+    );
+    assert_eq!(transport.rings.load(Ordering::SeqCst), 2);
+    let bodies = transport.bodies.lock().unwrap().clone();
+    assert_eq!(
+        bodies[1], br#"{"kind":"oort.doorbell.v1"}"#,
+        "same body, no identifier"
+    );
+
+    // consumed: later drains do not ring again
+    let again = worker.drain_once().await.expect("drain again");
+    assert_eq!(again.fired, 0);
+    assert_eq!(transport.rings.load(Ordering::SeqCst), 2);
+
+    // and the result is recorded where every ring's is
+    let (status, fired_at): (Option<String>, Option<chrono::DateTime<chrono::Utc>>) =
+        sqlx::query_as(
+            "SELECT last_status, last_fired_at FROM hosted_agent_doorbell WHERE connection_id=$1",
+        )
+        .bind(hosted.connection)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(
+        status.as_deref().is_some_and(|s| s.starts_with("ok_")),
+        "{status:?}"
+    );
+    assert!(fired_at.is_some());
+}

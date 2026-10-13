@@ -55,8 +55,9 @@ pub use doorbell::{
     claim_doorbell_batch, coalesce_action, consume_for_fire_in_tx, doorbell_body,
     list_doorbell_projections_in_tx, load_doorbell_projection_in_tx, mark_trailing_in_tx,
     open_claimed_secret, record_doorbell_fire_in_tx, register_doorbell_in_tx,
-    unguarded_fire_every_new_event, unregister_doorbell_in_tx, CoalesceAction, DoorbellClaim,
-    DoorbellProjection, DoorbellRegisterError, DOORBELL_BODY, DOORBELL_KIND,
+    request_manual_ring_in_tx, unguarded_fire_every_new_event, unregister_doorbell_in_tx,
+    CoalesceAction, DoorbellClaim, DoorbellProjection, DoorbellRegisterError, RingOutcome,
+    DOORBELL_BODY, DOORBELL_KIND, RING_COOLDOWN_SECONDS, RING_HOURLY_LIMIT,
 };
 pub use ingress::{
     attach_receipt_message, insert_receipt, load_native_ingress, load_native_receipt,
