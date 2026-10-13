@@ -5,6 +5,8 @@ import {
   ApprovalActions,
   type Armed,
 } from "@/features/timeline/ApprovalActions";
+import { rememberSettledApproval } from "@/features/timeline/settledApprovals";
+import { parseApprovalStatus } from "@momo/core/features/timeline/agentCardModel";
 
 /**
  * 결정 대기 한 행의 승인/거부 (goal B5.3b D-5).
@@ -39,7 +41,22 @@ export function InboxApprovalActions({
       approvalId={approvalId}
       armed={armed}
       setArmed={setArmed}
-      onSettled={onSettled}
+      onSettled={(outcome) => {
+        // 같은 승인을 그리는 타임라인 카드가 낡은 대기로 남지 않게 한다 (#3771).
+        const status = parseApprovalStatus(outcome.status ?? null);
+        if (status !== null) {
+          rememberSettledApproval(approvalId, {
+            status,
+            ...(outcome.decidedAtMs !== undefined
+              ? { decidedAtMs: outcome.decidedAtMs }
+              : {}),
+            ...(outcome.decidedByMemberId !== undefined
+              ? { decidedByMemberId: outcome.decidedByMemberId }
+              : {}),
+          });
+        }
+        onSettled(outcome);
+      }}
       lead="실행 전에 내 허가가 필요해요."
       className="pb-2"
       testIdPrefix="inbox-approval"

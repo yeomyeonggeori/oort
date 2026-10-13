@@ -17,6 +17,7 @@ import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { agentCardModel } from "@momo/core/features/timeline/agentCardModel";
 import type { Message } from "@momo/core/lib/api";
 import { AgentCard } from "./AgentCard";
+import { resetSettledApprovalsForTest } from "./settledApprovals";
 import { isInternalHref, isReachableHref } from "./ActionResultCard";
 import { reachableSettingsSections } from "@/features/settings/settingsNav";
 import { actionDestination } from "@momo/core/features/commands/serverActions";
@@ -170,6 +171,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  resetSettledApprovalsForTest();
   localStorage.clear();
   sessionStorage.clear();
   // R1 S4/M8: 앞 시험이 남긴 hash 가 다음 시험의 「불변」 기준선을 오염시켰다.
@@ -264,7 +266,7 @@ describe("행동 승인 카드 (ADR-0186 부록 A)", () => {
       "새 팀원 온보딩 요청"
     );
     expect(byTestId(host, "approval-action-role")[0]?.textContent).toContain(
-      "관리자만 승인할 수 있습니다."
+      "관리자만 승인할 수 있어요."
     );
   });
 
@@ -402,11 +404,11 @@ describe("1회 링크는 결정 응답에서만 그려지고 새로고침을 견
     expect(host.textContent ?? "").not.toContain(SECRET);
   });
 
-  it("403 은 「관리자가 승인해야 합니다」와 다음 행동을 카드 안에 세운다", async () => {
+  it("403 은 「관리자가 승인해야 해요」와 다음 행동을 카드 안에 세운다", async () => {
     const host = mountCard(approvalProps());
     await decide(host, jsonResponse({ status: "pending" }, 403));
     const error = byTestId(host, "approval-error")[0];
-    expect(error?.textContent).toContain("관리자가 승인해야 합니다.");
+    expect(error?.textContent).toContain("관리자가 승인해야 해요.");
     expect(error?.textContent).toContain("아직 대기 중");
     // 사고가 아니다: 붉은 alert 이 아니라 조용한 안내로 선다.
     expect(error?.getAttribute("role")).toBe("status");
@@ -421,7 +423,7 @@ describe("1회 링크는 결정 응답에서만 그려지고 새로고침을 견
       jsonResponse({ approval_id: APPROVAL_ID, status: "role_required" }, 403)
     );
     const error = byTestId(host, "approval-error")[0];
-    expect(error?.textContent).toContain("관리자가 승인해야 합니다.");
+    expect(error?.textContent).toContain("관리자가 승인해야 해요.");
     expect(error?.dataset.tone).toBe("unavailable");
     expect(error?.getAttribute("role")).toBe("status");
     // 무장 해제·초점 착지도 같은 갈래를 탄다.
@@ -517,10 +519,10 @@ describe("영속 결과 카드 (ADR-0186 부록 B)", () => {
     const host = mountResult();
     expect(byTestId(host, "action-result-row")).toHaveLength(2);
     expect(byTestId(host, "action-result-note")[0]?.textContent).toBe(
-      "실행을 마쳤습니다."
+      "실행을 마쳤어요."
     );
     expect(byTestId(host, "action-result-secret-once")[0]?.textContent).toContain(
-      "1회 표시됐습니다"
+      "1회 표시됐어요"
     );
   });
 
@@ -531,7 +533,7 @@ describe("영속 결과 카드 (ADR-0186 부록 B)", () => {
     expect(byTestId(host, "action-result-next")).toHaveLength(0);
     // 카드는 말을 잃지 않는다.
     expect(byTestId(host, "action-result-note")[0]?.textContent).toBe(
-      "실행을 마쳤습니다."
+      "실행을 마쳤어요."
     );
     expect(byTestId(host, "action-result-secret-once")).toHaveLength(1);
   });
@@ -615,10 +617,10 @@ describe("영속 결과 카드 (ADR-0186 부록 B)", () => {
   it("네 상태가 각자 다른 칩과 문장을 세운다", () => {
     const seen = new Set<string>();
     for (const [status, label, note] of [
-      ["executed", "실행됨", "실행을 마쳤습니다."],
-      ["rejected", "거부됨", "승인하지 않아 실행하지 않았습니다."],
-      ["expired", "만료됨", "기한이 지나 실행하지 않았습니다."],
-      ["role_required", "권한 필요", "관리자가 승인해야 합니다."],
+      ["executed", "실행됨", "실행을 마쳤어요."],
+      ["rejected", "거부됨", "승인하지 않아 실행하지 않았어요."],
+      ["expired", "만료됨", "기한이 지나 실행하지 않았어요."],
+      ["role_required", "권한 필요", "관리자가 승인해야 해요."],
     ] as const) {
       const host = mountResult({ status });
       expect(byTestId(host, "agent-status-chip")[0]?.textContent).toBe(label);
@@ -646,5 +648,52 @@ describe("영속 결과 카드 (ADR-0186 부록 B)", () => {
       body: "초대 링크를 만들었습니다.",
     });
     expect(byTestId(host, "agent-card")[0]?.dataset.cardKind).toBe("tool");
+  });
+});
+
+// =============================================================================
+// #3771: 승인 직후 카드가 다시 버튼을 그렸다.
+//
+// 서버는 결정 때 메시지 props를 고치지만 방송하지 않는다. 그래서 클라이언트가 든 메시지는
+// 계속 `status: pending`이고, 결정 결과는 카드의 useState 하나에만 있었다. 가상 리스트가
+// 행을 내렸다 올려 카드가 새로 마운트되면 그 state가 사라져 버튼이 되살아났다(운영 실측).
+// 아래 시험은 **같은 낡은 pending 스냅샷으로 재마운트**해 그 순간을 그대로 만든다.
+// =============================================================================
+describe("승인 직후 재마운트해도 카드는 결정 상태다 (#3771)", () => {
+  it("승인 → 같은 낡은 pending 스냅샷으로 재마운트 → 버튼이 없고 영수증 줄이 있다", async () => {
+    const props = approvalProps();
+    const host = mountCard(props);
+    expect(byTestId(host, "approval-approve")).toHaveLength(1);
+    await decide(host, jsonResponse({ ...APPENDIX_C_BODY, result: undefined }));
+    expect(byTestId(host, "approval-approve")).toHaveLength(0);
+
+    // 메시지는 서버가 방송하지 않아 여전히 pending이다 — 그 스냅샷 그대로 새로 마운트.
+    unmount();
+    const remounted = mountCard(props);
+    expect(byTestId(remounted, "approval-approve")).toHaveLength(0);
+    expect(byTestId(remounted, "approval-reject")).toHaveLength(0);
+    expect(remounted.textContent ?? "").toContain("승인");
+  });
+
+  it("재마운트 뒤에도 1회 값은 새로 생기지 않는다 (D4는 그대로)", async () => {
+    const props = approvalProps();
+    const host = mountCard(props);
+    await decide(host, jsonResponse(APPENDIX_C_BODY));
+    expect(host.textContent ?? "").toContain(SECRET);
+    unmount();
+    const remounted = mountCard(props);
+    expect(remounted.textContent ?? "").not.toContain(SECRET);
+    expect(byTestId(remounted, "approval-approve")).toHaveLength(0);
+  });
+
+  it("다른 승인 카드는 영향받지 않는다", async () => {
+    const host = mountCard(approvalProps());
+    await decide(host, jsonResponse({ ...APPENDIX_C_BODY, result: undefined }));
+    unmount();
+    const other = mountCard({
+      ...approvalProps(),
+      approval_id: "0199aa11-2222-7000-8000-0000000000a2",
+    });
+    expect(byTestId(other, "approval-approve")).toHaveLength(1);
   });
 });
