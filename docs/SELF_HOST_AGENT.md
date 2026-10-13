@@ -1478,6 +1478,10 @@ take channel id, message id, or the task from the body.
 The work itself is only oort Agent Port pull. POST to VM loopback, not the
 tunnel, with the active credential from join.
 
+0) First call oort_ping {state:"idle"} once. It only tells oort this runtime
+   is up (at most one call per 30 seconds is recorded; an extra call is
+   harmless). It does not mean you took work, so keep going with step 1.
+
 1) Call oort_inbox_read. Pass a previously stored opaque nextCursor if you
    have one; otherwise read without a cursor. The response always has
    nextCursor (including empty pages). Overwrite /workspace/oort-inbox.cursor
@@ -1498,14 +1502,23 @@ tunnel, with the active credential from join.
       jobs is empty and that file exists, the job is already yours: use the
       stored handle.
    b) Read the request with oort_conversation_read on work.channelId.
-   c) Each time a phase starts, call oort_run_event {leaseHandle,
-      stage:"<short label>", eventId:<new UUID>}. stage is plain text, 1 to
-      80 characters (trimmed), no "/" or "\", no control characters. A stage
-      equal to your previous one is folded into it but still costs a step.
-      Examples:
-      "reading code", "fix written", "tests running", "PR opened". Never put
-      a secret, a file path, a commit title or code in a stage. Only the
-      latest 12 are kept.
+   c) Report progress so people can see it. Within 60 seconds of the claim,
+      call oort_run_event {leaseHandle, status:"running", stage:"시작: 코드
+      읽기" (a short step name like that, not a summary of the request), eventId:<new UUID>}. After that call it
+      each time a phase starts, and at least every 5 minutes while you work
+      (with no new stage, send status:"running" alone: it still tells oort you
+      are alive). stage is plain text, 1 to 80 characters (trimmed, keep it
+      under 40), no "/" or "\", no control characters, and never a copy of
+      the request text: name the step, do not quote the person. A stage equal to your
+      previous one is folded into it but still costs a step.
+      Examples: "reading code", "fix written", "tests running", "PR opened".
+      If you hand part of the work to another bot, say so as a stage before
+      you hand it over ("위임: <bot> · <task>") and again when its result is
+      back ("위임 결과 수신: <bot>"); oort cannot see inside that bot. Never
+      put a secret, a file path, a commit title or code in a stage. Only the
+      latest 12 are kept in the run's card; oort's run panel keeps more.
+      People see what you report here (and in textDelta) and nothing else:
+      oort cannot see your reasoning, so do not expect it to be shown.
    d) When finished, call oort_run_complete {leaseHandle, status:"succeeded",
       body:"<your reply, at most 8000 bytes>", artifacts:{prUrl, branch,
       added, deleted, commits}}. Include only what you really have: prUrl
@@ -1520,14 +1533,23 @@ tunnel, with the active credential from join.
    e) If work may outlast leaseExpiresAtMs, call oort_job_renew {leaseHandle}
       before it (the reply has the new leaseExpiresAtMs). Do not call
       oort_job_release after the lease expired.
-   f) Errors are fixed answers. HTTP 400 / -32602: the call was malformed
+   f) Inside a tracked run, oort_run_event {leaseHandle, status:"running"}
+      (c above) is how you stay alive: send it at least every 5 minutes; oort_ping does NOT keep a run alive
+      (oort shows a runtime that only pings as "alive, takes no work", and a
+      run with no event for 2 hours after its lease expired is ended by the
+      server). If you are busy but have no leaseHandle (an untracked reply),
+      call oort_ping {state:"working"} at least every 5 minutes instead.
+      If a call answers Unavailable (HTTP 409 / -32004), 429, 5xx or times
+      out, stop this wake and let the next doorbell or sweep start again; do
+      not retry in a loop.
+   g) Errors are fixed answers. HTTP 400 / -32602: the call was malformed
       (a bad stage or artifacts key rejects the whole call; the lease is
       untouched); fix it and send again with the same handle. HTTP 409 /
       -32005: the lease is gone or the run is settled or cancelled; stop,
       do not retry. HTTP 409 / -32004: this agent is paused, disconnected or
       the target is not visible; stop. HTTP 403 / -32003: scope or channel
       approval is missing; stop and tell the user to review the connection.
-   g) Woke up after a long sleep with a stored handle: report with that
+   h) Woke up after a long sleep with a stored handle: report with that
       handle first (oort_run_event or oort_run_complete). Calling
       oort_jobs_claim first gives you a new handle and the old one answers
       409.
@@ -1582,6 +1604,7 @@ to D16 and 부록 A):
 | 2. Progress | `oort_run_event` (scope `agent:runs:callback`) | `leaseHandle` (512), `stage` (1 to 80 characters, at most 320 bytes, no `/` `\` control or bidi characters), `status` (`running` `thinking` `streaming` `cancelled`), `detail` (2048, audit only), `textDelta` (8192), `eventId` (UUID, makes a retry count once) | `{status:"accepted"}` |
 | 3. Finish | `oort_run_complete` (scope `agent:runs:callback`) | `leaseHandle`, `status` (`succeeded` / `failed`), `body` (8000), `error` (4000), `usage`, `artifacts` | `{status, messageId, seq}` |
 | renew | `oort_job_renew` | `leaseHandle` | `{status:"renewed", leaseExpiresAtMs}` |
+| alive | `oort_ping` (scope `agent:inbox:read`, no new scope) | `state` (`idle` or `working`, optional) | `{status:"ok", recorded, serverTimeMs, minIntervalSeconds:30}`; a call inside the 30-second window is not an error, it answers `recorded:false` and changes nothing |
 
 `artifacts` is closed (`additionalProperties:false`) and every key is optional:
 `prUrl` (300; `https`, host `github.com` or an operator-listed GitHub
@@ -1617,8 +1640,13 @@ the request title, the status (`waiting` / `running` / `done` / `failed` /
 labels, the branch and the request title are **plain text**: no Markdown, no
 auto-links, no mentions. Only a validated `prUrl` is drawn as a link. All of
 it is what the agent **reported**; oort does not check that the PR exists or
-that the numbers are right, and it holds no GitHub token. Stage updates do
-not push a realtime event; they show on the next load of the board. A state
+that the numbers are right, and it holds no GitHub token. The team board
+does not get a realtime event per stage; it shows on the next load. The run
+panel in the channel gets a hint (`runtime-unverified`: the trigger is proved
+by the conformance suite, not yet by a real VM): every ledger row (queued, claimed, started, each
+stage, approval, finished) puts one thin `agent.run.event` hint on the channel
+(no stage text), at most one stage hint per 2 seconds, and the panel then
+reads the run's ledger from the server, so closing the panel loses nothing. A state
 change (queued to running, or finished) does send a refresh signal with no
 names or numbers. When a run ends, the person who asked gets one push if it
 took at least 60 seconds and they have the work-complete notification on;
@@ -1646,6 +1674,49 @@ length. Sleeping past it is not fatal:
   completes if no other wake claimed the job in between. Two routines
   waking in a row is the usual way to lose the handle, which is why step (a)
   stores it in `/workspace/oort-run.handle`.
+
+**Alive, waiting, ended (ADR-0200, #3736 and #3737).** `status: active` on a
+connection only says a credential was proved once. What oort shows people
+comes from facts the server keeps, not from guesses in the app:
+
+| Label (`liveness.state`) | What the server saw |
+|---|---|
+| `responsive` | a **work** signal within 20 minutes: an inbox read, a claim that took a job, or a run event |
+| `alive_idle` | an `oort_ping` within 20 minutes but no work signal: the runtime is up and takes no work |
+| `woken_not_collected` | the doorbell answered 2xx, 5 minutes passed, claimable work is waiting and nothing was inbox-read or claimed since the ring |
+| `work_waiting` | claimable work has waited past 20 minutes and nothing was claimed since it was queued, even if the agent keeps polling or pinging |
+| `quiet` / `unresponsive` | some signal within 60 minutes / none (or never) |
+| `error` | the newest fact is a refused call (`unavailable`, `not_authorized`); the next accepted call of any kind ends it |
+| `inactive` | the connection is not `active` |
+
+A person who sees `woken_not_collected` can ring again: `POST
+/v1/workspaces/{ws}/hosted-agent-connections/{id}/doorbell/ring` (admin, the
+connection's creator, or the agent's owner; one per minute and five per hour
+per connection; it only re-arms the doorbell, the same content-free signal
+goes out on the next drain).
+
+Runs show the same honesty. A run nobody has taken is `queued` (with its place
+in the agent's queue), then `claimed` (when and by which connection), then
+`running` (your latest stage), `awaiting_approval`, and finally
+`succeeded` / `failed` / `timed_out` / `cancelled` with a closed reason. The
+server ends a run itself when its agent has gone quiet: `lease_abandoned`
+when the lease expired and the run had no event for 2 hours (or the delivery
+job was settled by a disconnect and the run is that silent), and
+`unclaimed_expired` when nobody took it for 24 hours. Nothing is reassigned or
+retried; ask again to start a new run. If a late agent reports on an ended run
+it gets 409.
+
+Operator settings (all optional): `MOMO_AGENT_PORT_LIVENESS_RESPONSIVE_MINUTES`
+(20, 1..240), `MOMO_AGENT_PORT_LIVENESS_QUIET_MINUTES` (60, never below the
+first), `MOMO_AGENT_PORT_LIVENESS_WOKEN_GRACE_MINUTES` (5, 1..60) on the api;
+`MOMO_RUN_LEASE_ABANDON_HOURS` (2, 1..168) and `MOMO_RUN_UNCLAIMED_EXPIRE_HOURS`
+(24, 1..720) on the notifier. The run ledger is kept for 30 days after a run
+finishes.
+
+What oort can show is what the agent **sends**: the stages, `oort_ping`, and any
+`textDelta` it streams (which is not stored). The agent's inner reasoning is
+never visible unless it reports it as a stage, so write stages as the steps a
+colleague would want to follow.
 
 What proves each step on the server (existing conformance tests, read for
 this page and not run for it; they need an isolated PostgreSQL 18):
@@ -1695,6 +1766,13 @@ account and VM).** Do not paste handles, bearers or invite values anywhere.
    HTTP 400, then a clean completion without it.
 8. Write the result (what happened at 3 to 7, with times, no secrets) in
    issue #3519. Without it the PR stays `runtime-unverified`.
+9. Liveness and honesty (ADR-0200, `runtime-unverified` until you run it):
+   with the routines carrying the `oort_ping` step, wait one routine cycle and
+   read the connection (`GET /v1/workspaces/{ws}/hosted-agent-connections/{id}`).
+   Expect `liveness.state` `responsive` (or `alive_idle` if there was nothing to
+   read). Then stop the VM for 25 minutes with a request waiting: expect
+   `work_waiting` or `woken_not_collected`, not `responsive`. Ring again from the
+   API and note the doorbell's `lastStatus`. Record the times in #3736 / #3737.
 
 ##### 3.3.17.5 15-minute sweep fallback
 
