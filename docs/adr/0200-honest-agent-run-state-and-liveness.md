@@ -1,6 +1,6 @@
 # ADR-0200: 외부 에이전트 작업 상태를 사실대로 — run 상태 어휘·이벤트 원장·대기열·생존 신호
 
-- Status: **Proposed** (2026-10-13 기안. 공개 API·DB 계약 변경이라 ADR-0100에 따라 owner의 Accepted 전환이 구현 머지 조건이다. 이 ADR은 설계 문서이고 서버·클라이언트 코드와 마이그레이션을 바꾸지 않았다.)
+- Status: **Accepted** (2026-10-13 성재 결재 — 아래 「결재 기록」. 공개 API·DB 계약 변경이라 ADR-0100에 따라 이 Accepted가 구현 머지 조건이다.) 초안은 같은 날 Proposed였고 결재로 D4-5(`oort_ping`)가 추천안과 달라졌다.
 - Date: 2026-10-13
 - Deciders: 성재
 - 기안: Opus 5.5 (#3736 + #3737 묶음)
@@ -86,7 +86,7 @@ DB 열거형(`run_status`)은 바꾸지 않는다. 읽기 응답에 **파생 필
 - `claimed_at`은 새 사실이다. 수령 시각을 **원장 행(D2, `kind='claimed'`)** 으로 같은 tx에서 남긴다(전달 job 행에 열을 더하지 않는다: `outbox`는 범용·핫 테이블이다).
 - **lease_state**는 `phase`와 직교하는 서버 사실이다: `live`(`lease_expires_at > now()`) / `stale`(만료, 재claim 없음) / `none`. `stale`의 문구는 **「lease 미갱신 n분」** 이다. 부록 A3 때문에 만료 lease의 에이전트는 **돌아올 수 있다** — 만료는 「끊김」이 아니라 「n분째 소식 없음, 돌아올 수 있음」이다. 그래서 「끊김」 문구는 쓰지 않는다.
 - **「신호 소실」을 없앤다.** 클라이언트 TTL(90s/120s)로 상태를 정하는 일을 hosted run에서 멈춘다. 대신 서버 사실만 말한다: 수령 전이면 「대기 중(미수령 n분)」, 수령 뒤면 「마지막 보고 n분 전 · lease 미갱신 n분」.
-- **D1-4. 영원히 `running`인 run 방지.** 하드 종결은 클라 TTL이 아니라 서버 스위프의 명시적 사실로 한다(owner 결정 ②). 추천: notifier 스위프가 `running/claimed`이고 `lease_state=stale`이며 `last_event_at`(없으면 `claimed_at`)이 **lease 만료 후 2시간 이상** 지난 run을 `timed_out{code:"lease_abandoned"}`로 종결하고(승인 스위프와 같은 `end_parked_run_in_tx` 경로·종결 프레임), 수령되지 않은 `queued` run은 **24시간** 뒤 `timed_out{code:"unclaimed_expired"}`로 종결한다. 재claim으로 되살아난 run은 위 조건이 깨지므로 건드리지 않는다. 전달 job을 다른 에이전트로 옮기는 재배정은 하지 않는다. 숫자는 구현 티켓이 환경변수로 봉인한다.
+- **D1-4. 영원히 `running`인 run 방지.** 하드 종결은 클라 TTL이 아니라 서버 스위프의 명시적 사실로 한다(결재 2). notifier 스위프가 `running/claimed`이고 `lease_state=stale`이며 `last_event_at`(없으면 `claimed_at`)이 **lease 만료 후 2시간 이상** 지난 run을 `timed_out{code:"lease_abandoned"}`로 종결하고(승인 스위프와 같은 `end_parked_run_in_tx` 경로·종결 프레임), 수령되지 않은 `queued` run은 **24시간** 뒤 `timed_out{code:"unclaimed_expired"}`로 종결한다. 재claim으로 되살아난 run은 위 조건이 깨지므로 건드리지 않는다. 전달 job을 다른 에이전트로 옮기는 재배정은 하지 않는다. 숫자는 구현 티켓이 환경변수로 봉인한다.
 - `awaiting_approval`은 절대 「작업 중」이 아니다(`workingSignal.ts` 머리말과 같은 규칙, 유지).
 
 ### D2. run 이벤트 원장 — 서버가 기억하고, 닫아도 남는다
@@ -132,6 +132,8 @@ created_at    timestamptz NOT NULL DEFAULT now()
 last_inbox_read_at   timestamptz   -- oort_inbox_read 성공
 last_claim_at        timestamptz   -- oort_jobs_claim이 job을 실제로 가져감
 last_run_event_at    timestamptz   -- oort_run_event/oort_run_complete/oort_action_propose
+last_ping_at         timestamptz   -- oort_ping (D4-5), 30초 스로틀
+last_ping_state      text          -- 'idle' | 'working'
 last_tool_call_at    timestamptz   -- 인증된 어떤 Agent Port 도구 호출이든
 last_tool_error_at   timestamptz   -- Unavailable/NotAuthorized 등 거절
 last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
@@ -143,21 +145,29 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 
 | 상태 | 판정 | 표시 |
 |---|---|---|
-| `responsive` | 마지막 신호(`max(last_inbox_read_at, last_claim_at, last_run_event_at)`)가 `≤ 20분` 전 | 「응답함 · n분 전」 |
+| `responsive` | 일 신호(`max(last_inbox_read_at, last_claim_at, last_run_event_at)`)가 `≤ 20분` 전 | 「응답함 · n분 전」 |
+| `alive_idle` | 일 신호는 없거나 20분 초과인데 `last_ping_at`이 `≤ 20분` 전 | 「살아 있음 · 일은 안 가져감」 |
 | `woken_not_collected` | 도어벨 `ok_2xx` 이후 `≥ 5분`이 지났는데 그 사이 `last_claim_at`·`last_inbox_read_at`이 도어벨 이후로 갱신되지 않았고, 수령 가능한 `queued` run이 있음 | 「깨웠지만 아직 안 가져감 · n분」(+ 다시 깨우기) |
-| `quiet` | 마지막 신호가 20~60분 전 | 「조용함 · 마지막 응답 n분 전」 |
-| `unresponsive` | 마지막 신호가 `> 60분` 전이거나 신호가 없음(`never`) | 「응답 없음 · n분」 |
+| `quiet` | 마지막 신호(ping 포함)가 20~60분 전 | 「조용함 · 마지막 응답 n분 전」 |
+| `unresponsive` | 마지막 신호(ping 포함)가 `> 60분` 전이거나 신호가 없음(`never`) | 「응답 없음 · n분」 |
 | `error` | `last_tool_error_at`이 마지막 성공 신호보다 새롭다 | 「호출이 거절됨 · <닫힌 사유>」 |
 
   20분은 15분 루틴 + 여유, 60분은 lease 기본(30분)의 2배다. 숫자는 구현 티켓이 봉인한다. `connection.status='active'`는 표시에서 「연결됨(토큰 증명)」으로 이름을 바꿔 **「살아 있음」과 분리**한다(#3737의 지적).
 - **어디에 보이나.** 멤버 목록의 에이전트 행, 에이전트 헤더, 작업 패널 머리. 읽기: `GET …/hosted-agent-connections`(기존 목록)와 `GET …/agents/{agent}`에 `liveness{state, last_signal_at, last_doorbell{at,status}, …}`를 더한다. 가시성은 기존 connection 읽기 권한(워크스페이스 admin·에이전트 소유자) + 채널 멤버에게는 **상태 라벨과 `last_signal_at`만**(오류 코드·도어벨 URL 등은 admin·소유자 전용).
 - **「다시 깨우기」** — 둔다. `POST …/hosted-agent-connections/{id}/doorbell/ring`: 사람 JWT, 권한은 **그 에이전트의 소유자 또는 워크스페이스 admin**(채널 멤버 일반에게는 열지 않는다: 남용 시 소유자의 벤더 usage를 태운다, 증보 3 D16). 한도: connection당 **60초 쿨다운 + 시간당 5회**, 넘으면 429와 다음 가능 시각. 페이로드는 ADR-0171 D2 그대로 **내용 없는 신호**이고 기존 송신기 경로(코얼레싱·SSRF 정책 포함)를 재사용한다. `MOMO_DOORBELL_ENABLED`가 꺼져 있거나 도어벨 미등록이면 409. 결과(`ok_200`/실패)는 원장 `kind='doorbell'`로 남는다.
-- **`oort_ping`(에이전트 쪽 heartbeat 도구)은 넣지 않는다.** 이유: ① `inbox_read`·`jobs_claim`·`run_event`가 이미 에이전트의 능동 호출이라 D4의 서버 기록만으로 「마지막 응답」이 정해진다 — 별도 ping은 같은 사실에 두 번째 경로를 더할 뿐이다. ② 도구를 하나 더하면 ADR-0162 D3 6-scope/도구 목록과 D17 비목표, 벤더 루틴 지시문, 컨트랙트 시험이 모두 움직인다. ③ ping은 「살아 있다」가 아니라 「ping을 부르라고 배웠다」를 증명한다(에이전트가 ping만 부르고 일감을 안 가져가는 상태를 가린다) — #3737이 막으려는 바로 그 거짓 신호다. 일감 수령 여부는 `last_claim_at`이 직접 말한다. 필요가 드러나면(예: 일감이 전혀 없는 에이전트의 생존) 그때 별도 ADR.
+- **`oort_ping`(에이전트 쪽 heartbeat 도구)을 넣는다** (성재 결재: 추천안 「넣지 않음」이 아니라 「생존 신호도 추가」). 초안은 ping이 「부르라고 배웠다」만 증명한다는 이유로 반대했고, 그 우려는 **ping을 일 수령 신호와 분리해서 판정**하는 것으로 처리한다(아래). 확정 계약(보수적 기본값):
+  - **스키마.** 이름 `oort_ping`, 입력 `{ "state"?: "idle" | "working" }`(기본 `idle`, `additionalProperties:false`, 그 밖의 자유 텍스트 없음), 출력 `{ "status":"ok", "recorded": bool, "serverTimeMs": int, "minIntervalSeconds": 30 }`.
+  - **권한.** 새 scope를 만들지 않는다(D3의 6-scope 상한 유지). 기존 `agent:inbox:read`를 요구하고, hosted 자격(`HostedCaller`)이어야 하며, **호출한 자격의 connection 한 행만** 쓴다(인자로 connection/agent를 받지 않는다). 비활성·해제된 connection, 다른 인증 경로는 기존 `authorize_in_tx`가 같은 `Unavailable`/`NotAuthorized`로 거절한다.
+  - **남용 상한.** 서버 스로틀: connection당 **최소 30초**. 간격 안의 호출은 오류가 아니라 `recorded:false`로 성공 응답한다(에이전트 루틴이 재시도 루프에 빠지지 않게, 그리고 상한의 존재를 오류 신호로 쓰지 않게). 스로틀은 `UPDATE … WHERE last_ping_at IS NULL OR last_ping_at < now() - interval '30 seconds'` 한 문장이다.
+  - **저장·감사.** `hosted_agent_liveness`에 `last_ping_at`, `last_ping_state` 두 열(닫힌 값). 호출마다 `audit_log` 행은 쓰지 않는다(잡음; 이 행이 기록이다). 오류 거절만 기존처럼 `last_tool_error_*`에 남는다.
+  - **생존 판정에서의 위치.** ping은 **「살아 있음」만** 증명하고 「일을 가져감」은 증명하지 않는다. 일 신호(`last_inbox_read_at`·`last_claim_at`·`last_run_event_at`)가 ≤20분이면 `responsive`다. ping만 ≤20분이고 일 신호가 없거나 오래됐으면 새 상태 **`alive_idle`(「살아 있지만 일은 안 가져감」)** 이다. 수령 가능한 `queued` run이 있고 도어벨 이후 5분이 지났는데 일 신호가 없으면 ping이 있어도 `woken_not_collected`가 우선한다(살아 있어도 일을 안 가져간다는 것이 핵심 정보). `quiet`/`unresponsive`의 「마지막 신호」에는 ping도 포함한다.
+  - **지시문 주기(D5).** 루틴 실행마다 시작 시 1회, 장기 작업 중에는 5분마다(작업 중이면 `run_event`가 같은 신호를 주므로 ping은 필수가 아니다).
 
 ### D5. 에이전트 지시문 보강과 보이는 것의 한계
 
 `docs/SELF_HOST_AGENT.md` §3.3.17.4의 생산 루틴 문구와 도구 설명(`momo-mcp/src/tools.rs`)을 고친다. 규약:
 
+0. **루틴 실행마다 시작 시 `oort_ping`을 1회**(`state:"idle"`), 장기 작업 중에는 5분마다 `state:"working"`로 보낸다(작업 중 `run_event`를 보냈다면 생략 가능). 30초 안 재호출은 `recorded:false`로 무시된다.
 1. **수령 직후 60초 안에 `oort_run_event`를 한 번** 보낸다: `stage="시작: <한 줄 요약>"`.
 2. **단계가 바뀔 때마다** `stage`를 보낸다. 형식: 한국어 동사구 **≤40자**(서버 상한은 80자), 비밀·URL 쿼리·토큰·경로 전체를 쓰지 않는다. 예: 「채널 이름 확인」「승인 카드 제안」「grokbot-lab 생성 대기」.
 3. **작업 중에는 최소 5분마다** 보고한다. 보낼 단계가 없으면 `stage` 없이 `status="running"`만 보낸다(원장 행은 안 만들지만 `last_run_event_at`이 갱신된다 — 「살아 있음」 신호).
@@ -173,7 +183,7 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 - 서버 쪽 재배정(다른 에이전트로 job 이전)·자동 재시도. 스위프는 종결만 한다.
 - 관리형(momo-agent worker)·BYOA gateway run의 클라이언트 휴리스틱 폐기. 이번 범위는 **hosted 에이전트**이고, 다른 종류는 기존 90초 규칙을 두되 문구만 「신호 소실」 대신 「조용함」으로 낮추는 것은 UXUI 슬라이스가 같이 한다(서버 사실이 없는 곳에서 단정하지 않는다).
 - 워크스페이스 전체 큐/대시보드, 푸시 알림 신규 reason(「응답 없음」 푸시는 후속).
-- 새 scope·새 MCP 도구·새 인증 경로.
+- 새 scope·새 인증 경로. 새 MCP 도구는 `oort_ping` 하나뿐이다.
 
 ## 대안과 기각
 
@@ -182,7 +192,7 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 | A. 클라이언트 TTL만 늘림(90s→15분) | 라벨이 여전히 추정이다. 15분 루틴이 늦으면 또 틀리고, 기록이 휘발한다는 문제는 그대로. |
 | B. `audit_log`를 원장으로 | 관리자 감사 표면, 채널 멤버 읽기 경로·run별 순서·보존 정책이 없고 `detail`이 감사 전용(D11). 읽기 권한을 넓히면 감사 로그의 경계가 흐려진다. |
 | C. `output.stages` 상한(12)만 올림 | 시각·수령·대기·승인 사실이 없고, 이벤트마다 run 행 jsonb를 잠금 아래 다시 쓴다. 「닫아도 남는 기록」은 해결해도 「몇 번째·언제 가져갔나」는 못 푼다. |
-| D. `oort_ping` 도구 | D4-5. 같은 사실에 두 번째 경로, 거짓 양성, 도구·scope 표면 확대. |
+| D. `oort_ping`을 일 신호와 **합쳐서** 「응답함」으로 판정 | 거짓 양성(ping만 부르고 일을 안 가져가도 정상으로 보임). 결재로 ping 자체는 도입하되 판정을 `alive_idle`로 분리(D4-5). |
 | E. 서버가 에이전트에 능동 프로브(도어벨로 상태 질의) | 도어벨은 내용 0 신호(ADR-0171 D2)이고 응답을 받는 채널이 없다. 수령 사실(`last_claim_at`)이 더 직접적이다. |
 | F. 큐 전체를 모든 멤버에게 공개 | 다른 채널의 제목·요청자 누출. D3은 집계 숫자까지만. |
 | G. lease 만료 즉시 run 실패 처리 | 부록 A3(암묵 갱신)을 깨고, 늦게 깨어난 정상 에이전트의 작업을 버린다. 대신 표시는 즉시, 종결은 유예(D1-4). |
@@ -196,7 +206,7 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 - (+) 패널을 닫아도 기록이 남고 다른 기기에서도 같은 기록을 본다.
 - (+) 「연결됨」과 「살아 있음」이 분리된다.
 - (−) 새 테이블 2개와 hot path(`inbox_read`)의 스로틀된 쓰기. 쓰기 폭증 지표를 구현 PR이 측정한다.
-- (−) 스위프가 run을 종결시키는 새 상태 변경(`lease_abandoned`, `unclaimed_expired`). 임계값 오설정 시 정상 느린 에이전트의 run이 종결될 수 있다(2시간 유예·환경변수로 완화, owner 결정 ②).
+- (−) 스위프가 run을 종결시키는 새 상태 변경(`lease_abandoned`, `unclaimed_expired`). 임계값 오설정 시 정상 느린 에이전트의 run이 종결될 수 있다(2시간 유예·환경변수로 완화).
 - (−) 지시문은 규약이라 에이전트가 따르지 않으면 단계가 비어 보인다 — 그래서 「마지막 보고 n분 전」을 항상 같이 보인다.
 
 ## 불변식 대조
@@ -207,21 +217,21 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 - `schema_v0.sql` 불변, 신규 migration으로 확장. sqlx 런타임 쿼리.
 - 공개 API 변경 → 이 Accepted가 머지 조건(ADR-0100).
 
-## owner 결정 요청
+## 결재 기록 (2026-10-13, 성재 AskUserQuestion)
 
-1. **원장을 새 테이블로 둘까요** (ADR-0162 D9 「새 저장소 없음」 일부 대체). 추천: 예. 대안은 `output.stages` 상한만 올리기(대안 C)인데 수령 시각·대기 순번·닫은 뒤 기록이 안 풀린다.
-2. **죽은 run을 서버가 종결할까요**. 추천: 예 — lease 만료 후 2시간 무소식이면 `lease_abandoned`, 미수령 24시간이면 `unclaimed_expired`로 timed_out, 재배정·재시도는 없음. 아니면 run이 영원히 「진행 중」이라 목록이 쌓인다.
-3. **`oort_ping`을 넣을까요 + 「다시 깨우기」 권한**. 추천: ping은 넣지 않고(D4-5), 다시 깨우기는 소유자·admin만, 60초 쿨다운·시간당 5회.
-4. **대기열을 어디까지 보일까요**. 추천: 내가 멤버인 채널의 앞선 run은 상세, 다른 채널은 「앞에 N건」 숫자만. 더 엄격한 대안은 내 채널 run만 세는 것(순번이 실제보다 작아 거짓이 됨).
+1. 진행 기록 → 「새 기록 테이블 (Recommended)」 — `agent_run_event` (D2).
+2. 죽은 작업 → 「서버가 끝내기 (Recommended)」 — lease 만료 후 2시간 무소식 `lease_abandoned`, 24시간 미수령 `unclaimed_expired` (D1-4).
+3. 생존 판단 → **「생존 신호도 추가」**(추천안과 다름). 선택지 설명 인용: 「에이전트가 주기적으로 「살아 있음」을 보내는 도구(oort_ping)도 넣어요. 그록봇 지시문에 주기를 넣어야 해요.」 활동 기록 기반 파생 상태와 「다시 깨우기」(소유자·admin, 60초 쿨다운, 시간당 5회)는 유지하고 `oort_ping`을 더한다 (D4-5, 보수적 기본값은 planner 확정).
+4. 대기열 공개 → 「내 채널만 자세히 (Recommended)」 — 내가 멤버인 채널의 앞선 run은 상세, 다른 채널은 「앞에 N건」 숫자만 (D3).
 
 ## 구현 슬라이스 (Accepted 후)
 
 의존: S1 → S2·S3 → S5. U1은 S2 계약이 고정되면 mock으로 병행 가능. 각 슬라이스는 한 이슈·한 PR이고 서버는 engine, 화면은 UXUI 트랙.
 
-**서버 (engine)**
+**서버 (engine)** — 구현 순서 S1→S6, 각각 별도 이슈·PR을 앞 슬라이스 위에 쌓는다. `oort_ping`은 S3에 포함.
 - **S1 스키마·원장 쓰기.** 마이그레이션 `agent_run_event`·`hosted_agent_liveness` + RLS/GRANT, `append_run_event_in_tx` 헬퍼, 전이 지점 연결(생성·claim·run_event·park·승인 결정/만료·complete·취소·도어벨 결과). red proof: ① claim이 `claimed` 행을 남기지 않으면 실패 ② 승인 만료 스위프가 `timed_out`+`approval_expired` 행을 남기지 않으면 실패 ③ 타 테넌트가 행을 못 읽음(RLS) ④ run당 201번째 `stage`가 수명주기 행을 지우지 않음 ⑤ 같은 `eventId` 재시도가 행을 두 번 만들지 않음.
 - **S2 읽기 API.** `…/agent-runs/{run}/events`, 채널·에이전트 run 목록 확장(`phase/lease_state/queue_position/ahead/latest_stage`, `?state=active`). red proof: queued 두 건 중 나중 것이 `queue_position=2`; 수령 후 `null`; 다른 채널 run은 `ahead_total`에만 반영되고 id·제목이 응답에 없음; 멤버 아님은 404; mention run 포함.
-- **S3 생존 신호.** 스로틀 UPSERT(인증된 도구 호출 5곳), 파생 상태 계산(임계값 환경변수), connection·agent 읽기에 `liveness`, `last_tool_error_*`. red proof: 30초 안 두 번째 `inbox_read`는 쓰지 않음; `Unavailable` 거절이 `last_tool_error_code`로 남음; 도어벨 이후 미수령 5분 경과 시 `woken_not_collected`; 신호 없음은 `unresponsive`(never) — 「active」여도.
+- **S3 생존 신호 + `oort_ping`.** 스로틀 UPSERT(인증된 도구 호출 5곳), `oort_ping` 도구(D4-5), 파생 상태 계산(임계값 환경변수), connection·agent 읽기에 `liveness`, `last_tool_error_*`. red proof: 30초 안 두 번째 `inbox_read`는 쓰지 않음; `Unavailable` 거절이 `last_tool_error_code`로 남음; 도어벨 이후 미수령 5분 경과 시 `woken_not_collected`; 신호 없음은 `unresponsive`(never) — 「active」여도; ping만 있고 일 신호가 없으면 `alive_idle`; 30초 안 재ping은 `recorded:false`이고 열이 안 움직임; 다른 connection의 liveness 행을 쓰지 못함.
 - **S4 다시 깨우기.** ring 엔드포인트+송신기 소비, 소유자/admin 권한, 60초·시간당 5회 한도. red proof: 권한 없음 403, 쿨다운 429, 도어벨 꺼짐 409, 페이로드에 내용 없음(ADR-0171 D2 시험 재사용).
 - **S5 실시간·보존·스위프.** `agent.run.event` 프레임(stage 합치기 2초, 프레임에 stage 문자열 없음), 보존 정리, 결정 ② 승인 시 `lease_abandoned`/`unclaimed_expired` 스위프. red proof: 프레임 JSON에 stage가 없음; 재claim으로 되살아난 run은 스위프가 건드리지 않음; 임계 직전은 종결하지 않음.
 - **S6 지시문.** `SELF_HOST_AGENT.md` §3.3.17.4와 도구 설명을 D5 규약으로 갱신(`runtime-unverified` 표기, 실계정 `[manual]` 증거는 별도). docs 게이트.
