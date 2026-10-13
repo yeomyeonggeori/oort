@@ -5393,3 +5393,15 @@ progress[data-upload-progress]:indeterminate::-webkit-progress-bar {
   /* 브랜치 이름 최대 폭(시안 `.wt .br`). */
   --session-branch-max: 132px;
 }
+
+/* 사용자 글꼴 (#3774). 기본은 시스템 서체이고, 설정 > 모양에서 이름을 적은 사람만 이 두
+ * 규칙을 탄다. `--font-user-*`는 CSSOM이 `"이름", var(--font-sans|mono)`로 채우므로
+ * 이름이 이 기기에 없어도 CSS만으로 시스템 서체로 돌아간다. `--font-sans`/`--font-mono`
+ * 정의는 위 @theme 그대로다. 속성이 없으면 이 규칙은 매칭되지 않는다. */
+:root[data-font-sans] body {
+  font-family: var(--font-user-sans);
+}
+
+:root[data-font-mono] :is(.font-mono, code, pre, kbd, samp) {
+  font-family: var(--font-user-mono);
+}

@@ -17,6 +17,7 @@ import {
   useLinkPreviewPreference,
   type LinkPreviewPreference,
 } from "@/features/timeline/linkPreviewPreference";
+import { FontFamilyRows } from "./FontFamilyRows";
 import { ConversationPreview } from "./shell/ConversationPreview";
 import { SettingsRow } from "./shell/SettingsRow";
 import { SettingsSection } from "./shell/SettingsSection";
@@ -32,6 +33,8 @@ import { ThemePreviewCard } from "./shell/ThemePreviewCard";
 // 확인 절차를 하나 더 두면 사람이 이미 본 것을 다시 승인하게 된다. 되돌리는 길은
 // 같은 자리에 그대로 있다. 저장은 전부 이 기기(`localStorage`)이고 페이지 머리의
 // 범위 칩이 그것을 말한다.
+//
+// 글꼴(#3774)은 시스템 서체가 기본이고 설치된 글꼴 이름을 적는 방식이다(FontFamilyRows).
 //
 // 이 슬라이스가 **열지 않는 것**: 팔레트(흑연·노을띠) 선택, 밀도, 글자 크기, 유리,
 // hex 직접 입력은 앱이 실제로 따르는 S3b에서 함께 열린다. 눌러도 안 바뀌는 컨트롤을
@@ -131,6 +134,13 @@ export function AppearanceSection() {
         <SettingsRow label="미리보기" description="고른 색 모드와 강조색으로 앱이 이렇게 보여요." stack>
           <ThemePreviewCard mode={choice} accent={accent} palette={DEFAULT_THEME_ID} />
         </SettingsRow>
+      </SettingsSection>
+
+      <SettingsSection
+        title="글꼴"
+        description="이 기기에 설치된 글꼴 이름을 적으면 앱이 그 글꼴로 보여요. 앱은 글꼴을 내려받지 않고, 이름이 이 기기에 없으면 시스템 서체로 보여요."
+      >
+        <FontFamilyRows />
       </SettingsSection>
 
       <SettingsSection

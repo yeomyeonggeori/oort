@@ -200,6 +200,16 @@ letter-spacing 리터럴이 6종(-0.045 / -0.03 / -0.02 / -0.01 / -0.005 / +0.02
 - 일본어는 `keep-all`이 어절 정보가 없어 한 줄이 넘칠 수 있다. `:lang(ja)`에서는 `word-break: normal; line-break: strict`를 쓴다.
 - 입력창은 모바일 웹에서 16px 바닥(`--field-text-floor`)을 유지한다(Safari 줌 방지, 웹 한정).
 
+**사용자 글꼴 설정 (설정 > 모양 > 글꼴, 웹·데스크탑, #3774)**
+
+owner 결정: 기본은 시스템 서체, 사용자가 자기 기기에 설치한 글꼴을 이름으로 넣거나 고를 수 있게 한다(VS Code의 font family 설정과 같은 모양).
+
+- 번들 0, 새 의존 0. 칸은 **본문, 코드 두 개**까지다. 저장은 기기 단위 `momo.web.appearance.v1`의 `fontSans`·`fontMono`(없으면 시스템 서체). 모르는 값·깨진 값은 읽을 때 버린다.
+- 이름은 허용 목록(글자·숫자·공백·`. _ + & -`)만 받고 64자 상한이다. `; { } ( ) ' " \ / < >`, 쉼표, 개행은 **거절**하며 조용히 깎아 쓰지 않는다.
+- 적용은 CSSOM으로 `--font-user-sans`/`--font-user-mono`를 `"이름", var(--font-sans|--font-mono)`로 채우는 것이다. 그래서 이름이 이 기기에 없거나 깨져도 **CSS만으로** 시스템 서체로 돌아간다. 읽는 규칙은 `tokens.css` 끝의 `:root[data-font-sans] body`와 `:root[data-font-mono] :is(.font-mono, code, pre, kbd, samp)` 두 곳뿐이고, `--font-sans`/`--font-mono` 정의는 그대로다. `public/theme-boot.js`가 첫 페인트 전에 같은 값을 적용한다.
+- 목록: `window.queryLocalFonts`(Chromium, 보안 컨텍스트, 사용자 제스처)가 있으면 「설치된 글꼴 불러오기」로 입력 칸의 후보를 붙인다. 없거나(WKWebView) 거부·오류면 문장으로 말하고 입력만 남긴다. Tauri에서 앱이 직접 글꼴을 세는 일은 네이티브 의존이 필요해 후속이다.
+- 폰은 제외한다. RN 폰트는 빌드 시점에 링크되고 런타임 열거·등록은 네이티브 모듈 없이는 안 되며, 폰은 Dynamic Type으로 글자 크기 요구를 이미 다룬다.
+
 ### 3.5 적용 계획과 진행 (단계 2)
 
 1. 토큰: `tokens.css`의 `--text-*`에 `heading`·`label`·`code`·`body-strong`을 넣고 `timestamp`를 `caption`으로 이름을 바꾼다. 하드코딩된 13.5·12.5·11.5·17·18·15를 역할 이름으로 교체한다. `designSystem.test.ts`의 「롤마다 줄 높이·크기 중복 금지」 시험을 새 표로 갱신한다.
