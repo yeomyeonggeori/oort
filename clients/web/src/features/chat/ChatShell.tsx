@@ -72,6 +72,7 @@ import { isDesktop } from "@/lib/tauri";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { usePersonalCall } from "@/features/chat/usePersonalCall";
 import { useWorkPanelTarget } from "@/features/agents/workLogStore";
+import { AgentLivenessLabel } from "@/features/agents/AgentLivenessLabel";
 import type { WorkScope } from "@momo/core/features/work/workSessionModel";
 import { useTimeline } from "@/features/timeline/useTimeline";
 import { useTypingReceive } from "@/features/chat/useTyping";
@@ -1093,6 +1094,10 @@ export function ChatShell() {
             >
               {labelParts.handle}
             </span>
+          )}
+          {/* 에이전트와의 DM 머리: 지금 살아 있는가(ADR-0200 D4). */}
+          {stressCount === 0 && channel?.kind === "dm" && peer?.kind === "agent" && (
+            <AgentLivenessLabel agentId={peer.id} className="wide-only" />
           )}
           <span className="sr-only" data-testid="message-count">
             메시지 {messages.length}개

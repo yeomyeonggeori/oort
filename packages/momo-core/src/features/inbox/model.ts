@@ -171,6 +171,12 @@ export interface FeedItem {
   note?: string;
   channelId: string;
   channelLabel: string;
+  /**
+   * 승인 카드 메시지의 id. 승인 행에만 있고, 있을 때 「대화에서 보기」는 채널
+   * 맨 아래가 아니라 **그 카드**로 간다 (#3738: 놓친 카드를 찾느라 채널을 뒤지지
+   * 않게).
+   */
+  messageId?: string;
   /** Timeline anchor. Only present when the projection carries a seq. */
   seq?: number;
   /** Resolved clock label; empty when the projection carries no timestamp. */
@@ -365,7 +371,8 @@ export function approvalItem(
     actorIsAgent: actor.isAgent,
     predicate: `${approvalActionLabel(
       approval.actionType,
-      approval.toolName
+      approval.toolName,
+      approval.workspaceActionId
     )} 허가를 요청했어요`,
     detail: approval.decisionReason ?? undefined,
     outcome: outcome.label,
@@ -374,6 +381,9 @@ export function approvalItem(
     reversible,
     ...(deadlinePassed ? { deadlinePassed: true } : {}),
     channelId: approval.channelId,
+    ...(approval.requestMessageId !== undefined
+      ? { messageId: approval.requestMessageId }
+      : {}),
     channelLabel,
     timeLabel,
     sortAtMs: approval.decidedAtMs ?? approval.expiresAtMs ?? 0,
@@ -494,6 +504,33 @@ export function actionTypeLabel(actionType: string): string {
   return known[actionType] ?? actionType;
 }
 
+/** 워크스페이스 행동 승인의 `action_type` (ADR-0186 부록 A). */
+const WORKSPACE_ACTION_TYPE = "workspace_action";
+
+/**
+ * 레지스트리 행동 id → 인박스 행의 한마디 (#3729 · #3738).
+ *
+ * 이 표가 없으면 처리할 일 줄이 「workspace_action 허가를 요청했어요」라고 말한다 —
+ * 원장 내부 식별자가 화면에 닿는 것은 언제나 결함이다. 모르는 id는 지어내지 않고
+ * 갈래의 우리말(「워크스페이스 변경」)로 떨어진다: 서버가 내일 행동을 하나 더
+ * 열어도 줄이 거짓을 말하지 않는다.
+ */
+const WORKSPACE_ACTION_LABELS: Record<string, string> = {
+  "invite.create": "초대 링크 만들기",
+  "channel.create": "채널 만들기",
+  "channel.member.add": "채널에 멤버 추가",
+  "agent.rename": "에이전트 이름 바꾸기",
+  "hosted.channels.grant": "승인 채널 늘리기",
+  "workspace.settings.update": "워크스페이스 설정 바꾸기",
+};
+
+export function workspaceActionLabel(actionId?: string): string {
+  if (actionId === undefined) return "워크스페이스 변경";
+  return Object.prototype.hasOwnProperty.call(WORKSPACE_ACTION_LABELS, actionId)
+    ? WORKSPACE_ACTION_LABELS[actionId]
+    : "워크스페이스 변경";
+}
+
 /**
  * `action_type` = `tool_call`인 승인의 갈래 이름. 사람에게 할 말이 아니다.
  *
@@ -527,8 +564,12 @@ const TOOL_LABELS: Record<string, string> = {
  */
 export function approvalActionLabel(
   actionType: string,
-  toolName?: string
+  toolName?: string,
+  workspaceActionId?: string
 ): string {
+  if (actionType === WORKSPACE_ACTION_TYPE) {
+    return workspaceActionLabel(workspaceActionId);
+  }
   if (actionType === TOOL_CALL_ACTION) {
     if (toolName === undefined) return "에이전트 도구 실행";
     return TOOL_LABELS[toolName] ?? toolName;

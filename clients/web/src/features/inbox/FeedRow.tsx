@@ -2,7 +2,7 @@ import { useCallback, useRef, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { AtSign, Bot, ShieldAlert } from "lucide-react";
 import { cn } from "@/design/lib/cn";
-import { channelPath, watchForMessage } from "./anchor";
+import { inboxTargetPath, watchForMessage } from "./anchor";
 import type { FeedItem, FeedTone, OutcomeTone } from "@momo/core/features/inbox/model";
 
 // =============================================================================
@@ -63,7 +63,7 @@ export function FeedRow({
   return (
     <li className={actions ? "border-b border-line" : undefined}>
       <Link
-        to={channelPath(item.channelId, item.seq)}
+        to={inboxTargetPath(item)}
         onClick={() => {
           if (item.seq !== undefined) watchForMessage(item.seq);
         }}

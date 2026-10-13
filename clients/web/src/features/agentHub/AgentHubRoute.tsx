@@ -30,6 +30,8 @@ import {
   useTickingNow,
 } from "@/features/agents/agentWorkingSignal";
 import { AgentTurnBadge } from "@/features/agents/AgentTurnBadge";
+import { AgentLivenessBar, AgentLivenessLabel } from "@/features/agents/AgentLivenessLabel";
+import { turnHubSentence, turnWord } from "@/features/agents/turnCopy";
 import { openWorkPanel } from "@/features/agents/workLogStore";
 import type { AgentWorkingSignal } from "@momo/core/features/agents/workingSignal";
 import {
@@ -243,16 +245,15 @@ function AgentListRow({
             </StatusChip>
           </span>
           <span className="truncate text-meta text-ink-muted">@{agent.handle}</span>
+          {/* 「활성」은 증명이 한 번 성공했다는 뜻이다. 지금 응답하는지는 이 라벨이 따로
+              말한다(ADR-0200 D4): 목록에서 두 낱말이 한 행에 나란히 서야 혼동되지 않는다. */}
+          <AgentLivenessLabel agentId={agent.id} />
           {current && (
             <span className="flex items-center gap-1">
               <AgentTurnBadge
                 state={current.state}
-                text={current.state === "working" ? "작업 중" : "승인 대기"}
-                label={
-                  current.state === "working"
-                    ? `${agent.displayName} 에이전트가 작업 중이에요.`
-                    : `${agent.displayName} 에이전트가 승인을 기다려요.`
-                }
+                text={turnWord(current.state, current.server)}
+                label={turnHubSentence(agent.displayName, current.state, current.server)}
                 live={live}
                 testId="agent-hub-current-work"
               />
@@ -531,6 +532,13 @@ export function AgentHubRoute() {
                     <p className="truncate text-meta text-ink-muted">
                       @{selected.handle}
                     </p>
+                    {/* 지금 살아 있는가(ADR-0200 D4)와 다시 깨우기. 「활성」 같은 연결
+                        상태와 다른 사실이다. */}
+                    <AgentLivenessBar
+                      key={normalizedId(selected.id)}
+                      agentId={selected.id}
+                      className="pt-1"
+                    />
                   </div>
                   <nav
                     className="shrink-0"
@@ -1075,12 +1083,8 @@ function CurrentWorkValue({
   const badge = (
     <AgentTurnBadge
       state={work.state}
-      text={work.state === "working" ? "작업 중" : "승인 대기"}
-      label={
-        work.state === "working"
-          ? `${agentName} 에이전트가 작업 중이에요.`
-          : `${agentName} 에이전트가 승인을 기다려요.`
-      }
+      text={turnWord(work.state, work.server)}
+      label={turnHubSentence(agentName, work.state, work.server)}
       live={live}
     />
   );

@@ -10,6 +10,7 @@
 // =============================================================================
 
 export {
+  activityDetail,
   activityLines,
   activitySuffix,
   activityText,
@@ -18,7 +19,9 @@ export {
   agentTurnBadgeCopy,
   MAX_ACTIVITY_LINES,
   TURN_STALE_SENTENCE,
+  turnHubSentence,
   turnSummary,
+  turnWord,
   UNKNOWN_AGENT_NAME,
   type AgentActivityLine,
   type AgentActivityList,

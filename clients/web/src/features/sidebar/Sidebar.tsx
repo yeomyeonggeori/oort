@@ -15,12 +15,15 @@ import { fetchWorkspace } from "@momo/core/features/settings/api";
 import { useSession } from "@/app/session";
 import { isSidebarTreeInert } from "@/app/sidebarPane";
 import { useInertWhile, useShellNav } from "@/app/shellNav";
+import { useApprovalWaits } from "@/features/inbox/useInbox";
 import {
   agentTurnsInChannel,
+  applyApprovalWaits,
   useAgentWorkingSignals,
   type AgentWorkingSignal,
 } from "@/features/agents/agentWorkingSignal";
 import { AgentTurnBadge as AgentTurnStatusBadge } from "@/features/agents/AgentTurnBadge";
+import { AgentLivenessLabel } from "@/features/agents/AgentLivenessLabel";
 import {
   agentTurnBadgeCopy,
   UNKNOWN_AGENT_NAME,
@@ -281,6 +284,8 @@ export function Sidebar({
   // Staleness is still checked, from the render's own clock, and the rail's 15s
   // sweep re-publishes the store, which is what re-renders this list.
   const turnSignals = useAgentWorkingSignals();
+  // 승인 원장이 레일보다 이긴다(#3738): 사람을 기다리는 카드가 있으면 「작업 중」이 아니라 「승인 대기」.
+  const approvalWaits = useApprovalWaits();
   const railLive = connStatus === "connected";
   const nowMs = Date.now();
 
@@ -543,6 +548,12 @@ export function Sidebar({
         : null;
     const dmPeerMember = label.kind === "self" ? (selfMember ?? null) : peer;
     const dot = channel.kind === "dm" ? peerDot(dmPeerMember, nowMs) : null;
+    const rowTurns = applyApprovalWaits(
+      agentTurnsInChannel(turnSignals, channel.id, nowMs),
+      channel.id,
+      approvalWaits,
+      nowMs
+    );
     const currentSectionId = sidebarPrefs.sectionIdFor(channel.id);
     const canDragRow =
       canEditSections &&
@@ -579,10 +590,15 @@ export function Sidebar({
           <>
             {dot ? <span className="sr-only">{PEER_DOT_LABEL[dot]}</span> : null}
             <AgentTurnBadge
-              turns={agentTurnsInChannel(turnSignals, channel.id, nowMs)}
+              turns={rowTurns}
               directory={directoryQuery.directory}
               live={railLive}
             />
+            {/* 에이전트와의 DM 행: 열린 턴이 없을 때만 지금 살아 있는가를 한두 낱말로
+                (ADR-0200 D4). 턴이 열려 있으면 그 알약이 이 자리의 말이다. */}
+            {rowTurns.length === 0 && peer?.kind === "agent" && (
+              <AgentLivenessLabel agentId={peer.id} variant="compact" />
+            )}
           </>
         }
         testId="channel-item"

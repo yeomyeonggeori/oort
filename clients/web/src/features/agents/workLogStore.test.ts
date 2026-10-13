@@ -5,6 +5,7 @@ import {
   openWorkPanel,
   recordAgentProgress,
   resetWorkLogs,
+  switchWorkPanelRun,
   watchWorkLog,
   workLogSnapshot,
   workPanelSnapshot,
@@ -173,5 +174,45 @@ describe("workLogStore: 무엇을 열어 두었는가", () => {
     expect(workPanelSnapshot()).toBeNull();
     closeWorkPanel();
     expect(workPanelSnapshot()).toBeNull();
+  });
+});
+
+describe("패널 안에서 run을 갈아 끼운다 (ADR-0200 U2)", () => {
+  const OTHER = "9F1C8B2A-0000-7000-8000-00000000RUN2";
+
+  it("새로 연 것이 아니다: 연 횟수가 그대로이고 이전 run의 시작 시각은 버린다", () => {
+    resetWorkLogs();
+    openWorkPanel({ ...target(), origin: "activity", startedAtMs: T0 });
+    const opened = workPanelSnapshot();
+    expect(opened?.session).toBeGreaterThan(0);
+
+    switchWorkPanelRun(OTHER, MEMBER);
+    const switched = workPanelSnapshot();
+    expect(switched?.runId).toBe(OTHER);
+    // 캐럿·돌려줄 자리는 「패널이 새로 열렸다」에 묶여 있다. 목록에서 run을 고르는 것은
+    // 새로 여는 것이 아니다.
+    expect(switched?.session).toBe(opened?.session);
+    expect(switched?.origin).toBe("activity");
+    // 다른 run에 이전 run의 시계를 붙이면 시계가 거짓이 된다.
+    expect(switched?.startedAtMs).toBeUndefined();
+  });
+
+  it("같은 run을 고르면 아무 일도 없고, 열려 있지 않으면 열지 않는다", () => {
+    resetWorkLogs();
+    switchWorkPanelRun(OTHER, MEMBER);
+    expect(workPanelSnapshot()).toBeNull();
+    openWorkPanel({ ...target(), origin: "hub" });
+    const before = workPanelSnapshot();
+    switchWorkPanelRun(RUN.toLowerCase(), MEMBER);
+    expect(workPanelSnapshot()).toBe(before);
+  });
+
+  it("다시 열면 연 횟수가 오른다 (새로 연 것이므로 캐럿이 움직인다)", () => {
+    resetWorkLogs();
+    openWorkPanel({ ...target(), origin: "activity" });
+    const first = workPanelSnapshot()?.session ?? 0;
+    closeWorkPanel();
+    openWorkPanel({ ...target(), origin: "activity" });
+    expect(workPanelSnapshot()?.session).toBeGreaterThan(first);
   });
 });

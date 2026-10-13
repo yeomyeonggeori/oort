@@ -4,6 +4,7 @@ import {
   type AgentWorkingSignal,
 } from '@momo/core/features/agents/workingSignal';
 import {
+  activityDetail,
   activityLines,
   activitySuffix,
   activityText,
@@ -267,6 +268,7 @@ function ActivityRow({
   const styles = useStyles(buildStyles);
   const showClock =
     live && line.state === 'working' && line.startedAtMs !== undefined;
+  const detail = activityDetail(line, nowMs);
   return (
     <View style={styles.activityRow} testID={testID}>
       <Text
@@ -285,6 +287,14 @@ function ActivityRow({
         ) : null}
         {activitySuffix(line)}
       </Text>
+      {detail !== undefined ? (
+        // 서버가 아는 run의 근거 한 줄(n분째 기다려요 · 앞에 m건 / 가져간 뒤 n분째 소식이
+        // 없어요 / 마지막 보고 n분 전). 사실만 적고 판정은 하지 않는다 — 「끊김」은 서버가
+        // 알릴 때만 나온다.
+        <Text style={styles.activityDetail} testID="activity-detail">
+          {detail}
+        </Text>
+      ) : null}
       {showClock ? (
         <Text style={styles.activityClock}>
           {elapsedLabel(line.startedAtMs as number, nowMs)}
@@ -335,6 +345,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   activityTextFlex: {flexShrink: 1},
   activityName: {color: color.agent},
   activityClock: {fontSize: font.meta, color: color.textFaint},
+  // 근거 줄은 사람이 판단하는 근거라 시계(장식)와 위계가 다르다: 본문 AA를 노리는
+  // `textMuted`이고, 줄이 모자라면 이름이 아니라 이 줄이 줄어든다(design-review U4).
+  activityDetail: {fontSize: font.meta, color: color.textMuted, flexShrink: 1},
   staleText: {fontSize: font.meta, color: color.warn},
   staleNotice: {
     paddingHorizontal: SAFE_GUTTER,

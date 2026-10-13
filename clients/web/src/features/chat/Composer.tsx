@@ -31,8 +31,10 @@ import {
   composerFieldLabel,
 } from "@momo/core/features/chat/composerCopy";
 import { useFittedComposerPlaceholder } from "@/features/chat/placeholderFit";
+import { useApprovalWaits } from "@/features/inbox/useInbox";
 import {
   agentTurnsInChannel,
+  applyApprovalWaits,
   elapsedLabel,
   hasChannelTurn,
   useAgentWorkingSignals,
@@ -41,6 +43,7 @@ import {
 } from "@/features/agents/agentWorkingSignal";
 import {
   activityLines,
+  activityDetail,
   activitySuffix,
   activityText,
   TURN_STALE_SENTENCE,
@@ -300,6 +303,17 @@ function AgentActivityBar({
         const body = (
           <>
             <ActivityText line={line} live={live} />
+            {/* 서버가 아는 run의 근거 한 줄(n분째 기다려요 · 앞에 m건 / 가져간 뒤
+                n분째 소식이 없어요 / 마지막 보고 n분 전). 사실만 적고 판정은
+                하지 않는다 — 「끊김」은 서버가 알릴 때만 나온다. */}
+            {activityDetail(line, nowMs) !== undefined && (
+              <span
+                className="min-w-0 truncate text-timestamp"
+                data-testid="composer-working-detail"
+              >
+                {activityDetail(line, nowMs)}
+              </span>
+            )}
             {live && line.state === "working" && line.startedAtMs !== undefined && (
               <span className="shrink-0 text-timestamp" data-numeric>
                 {elapsedLabel(line.startedAtMs, nowMs)}
@@ -575,7 +589,14 @@ export function Composer({
   });
   const typingThreshold = useTypingThreshold();
   const nowMs = useTickingNow(hasChannelTurn(signals, channelId) && railLive);
-  const turns = agentTurnsInChannel(signals, channelId, nowMs);
+  const approvalWaits = useApprovalWaits();
+  // 승인 원장이 레일보다 이긴다(#3738): 이 채널에서 사람을 기다리는 카드가 있으면 그 에이전트는 승인 대기다.
+  const turns = applyApprovalWaits(
+    agentTurnsInChannel(signals, channelId, nowMs),
+    channelId,
+    approvalWaits,
+    nowMs
+  );
 
   /**
    * 작성 중이 아닐 때 공유 액션 슬롯을 힌트가 차지하는가 (U-8 · #1749).

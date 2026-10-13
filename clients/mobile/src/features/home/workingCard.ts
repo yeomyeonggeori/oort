@@ -5,6 +5,7 @@ import {
   type AgentWorkingSignal,
 } from '@momo/core/features/agents/workingSignal';
 import {
+  activityDetail,
   agentLabel,
   agentTurnBadgeCopy,
   TURN_STALE_SENTENCE,
@@ -45,10 +46,12 @@ import {
 // 순간이 이 턴에서 폰이 볼 수 있는 가장 먼 단계라서 그 칸이 끝에 있다.
 // =============================================================================
 
-export type WorkingStep = 1 | 2 | 3;
+export type WorkingStep = 0 | 1 | 2 | 3;
 
 /** 세 칸 각각의 이름. 보조기술이 막대 대신 이것을 읽는다. */
 export const WORKING_STEP_LABELS: Readonly<Record<WorkingStep, string>> = {
+  // 아무도 시작하지 않은 run(ADR-0200): 막대는 한 칸도 켜지 않는다. 「시작함」은 거짓이다.
+  0: '아직 시작 전',
   1: '시작함',
   2: '답을 쓰는 중',
   3: '결정을 기다림',
@@ -68,8 +71,10 @@ export interface WorkingCardModel {
   conversationTitle: string;
   /** 에이전트가 낸 마지막 한 줄. 아직 없으면 null — 지어내지 않는다. */
   headline: string | null;
-  /** 오른쪽 낱말: 「작업 중」 또는 「승인 대기」. 코어 문자열. */
+  /** 오른쪽 낱말: 「작업 중」·「승인 대기」, 서버가 알린 대기 순번·「가져감」. 코어 문자열. */
   liveText: string;
+  /** 서버가 아는 run의 근거 한 줄(「11분째 기다려요 · 에이전트 앞에 2건」). 없으면 null. */
+  detail: string | null;
   state: AgentWorkingSignal['state'];
   step: WorkingStep;
   /** 이 카드가 보이지 않는 나머지 열린 턴 수. */
@@ -82,6 +87,7 @@ export interface WorkingCardModel {
 
 /** 관찰한 사실에서 단계를 고른다(파일 머리 주석). */
 export function workingStep(turn: AgentWorkingSignal): WorkingStep {
+  if (turn.state === 'queued') return 0;
   if (turn.state === 'awaiting_approval') return 3;
   return turn.headlines.length > 0 ? 2 : 1;
 }
@@ -134,6 +140,19 @@ export function buildWorkingCard({
   }
 
   const headline = turn.headlines[0] ?? null;
+  const detail =
+    turn.server === undefined || turn.state === 'awaiting_approval'
+      ? null
+      : (activityDetail(
+          {
+            key: turn.memberId,
+            memberId: turn.memberId,
+            name: parts,
+            state: turn.state,
+            server: turn.server,
+          },
+          nowMs,
+        ) ?? null);
   const step = workingStep(turn);
   const others = open.length - 1;
 
@@ -142,7 +161,10 @@ export function buildWorkingCard({
     liveText,
     place,
     headline,
-    `진행 ${step}/3, ${WORKING_STEP_LABELS[step]}`,
+    detail,
+    step === 0
+      ? WORKING_STEP_LABELS[0]
+      : `진행 ${step}/3, ${WORKING_STEP_LABELS[step]}`,
     others > 0 ? `그 밖에 열린 작업 ${others}건` : null,
     live ? null : TURN_STALE_SENTENCE,
   ]
@@ -158,6 +180,7 @@ export function buildWorkingCard({
     conversationTitle,
     headline,
     liveText,
+    detail,
     state: turn.state,
     step,
     others,

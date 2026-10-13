@@ -718,3 +718,28 @@ describe("승인 카드의 행동 블록 (ADR-0186 부록 A)", () => {
     });
   });
 });
+
+describe("승인 카드의 기한·요청자 (#3738)", () => {
+  it("props.expires_at_ms 와 작성자·채널을 카드에 싣는다", () => {
+    const card = agentCardModel(
+      msg({
+        type: "approval_request",
+        props: approvalProps({ expires_at_ms: 1_753_403_600_000 }),
+      })
+    );
+    expect(card?.kind).toBe("approval");
+    if (card?.kind !== "approval") return;
+    expect(card.expiresAtMs).toBe(1_753_403_600_000);
+    expect(card.requestedByMemberId).toBe("00000000-0000-7000-8000-000000000101");
+    expect(card.channelId).toBe("00000000-0000-7000-8000-000000000201");
+  });
+
+  it("기한이 없으면 칸 자체가 없다", () => {
+    const card = agentCardModel(
+      msg({ type: "approval_request", props: approvalProps() })
+    );
+    if (card?.kind !== "approval") throw new Error("approval card expected");
+    expect(card.expiresAtMs).toBeUndefined();
+  });
+});
+

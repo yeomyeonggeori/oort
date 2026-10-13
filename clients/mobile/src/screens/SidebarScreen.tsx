@@ -915,7 +915,9 @@ export function WorkingCard({
     ? palette.textMuted
     : card.state === 'awaiting_approval'
       ? palette.accentText
-      : palette.agent;
+      : card.state === 'queued'
+        ? palette.textMuted
+        : palette.agent;
   const pulse = card.live && card.state === 'working' && !reduceMotion;
   return (
     <Pressable
@@ -961,6 +963,8 @@ export function WorkingCard({
           {card.place ? <Text style={styles.cardPlace}>{card.place}</Text> : null}
           {card.place && card.headline ? ' · ' : null}
           {card.headline ?? (card.place ? null : '대화')}
+          {/* 앞에는 언제나 무엇인가 선다(장소·한 줄, 둘 다 없으면 「대화」). */}
+          {card.detail ? ` · ${card.detail}` : null}
           {card.others > 0 ? ` · 그 밖에 ${card.others}건` : null}
         </Sentence>
         {card.live ? null : (

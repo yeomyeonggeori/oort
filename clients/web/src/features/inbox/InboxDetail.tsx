@@ -28,7 +28,7 @@ import {
   type Directory,
 } from "@/features/workspace/useWorkspace";
 import { actorNamesIn } from "./actorNames";
-import { channelPath, watchForMessage } from "./anchor";
+import { inboxTargetPath, watchForMessage } from "./anchor";
 import { InboxApprovalActions } from "./InboxApprovalActions";
 import { approvalRowControl } from "./approvalsPanel";
 import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecision";
@@ -365,7 +365,12 @@ export function InboxDetail({
           </Button>
         )}
         <Link
-          to={channelPath(entry.channelId, entry.seq)}
+          to={inboxTargetPath(
+            // 카드로 직접 가는 것은 처리할 일뿐이다. 멘션·답글의 착지는 seq 그대로다.
+            entry.kind === "task"
+              ? entry
+              : { channelId: entry.channelId, seq: entry.seq }
+          )}
           onClick={() => {
             if (entry.seq !== undefined) watchForMessage(entry.seq);
           }}

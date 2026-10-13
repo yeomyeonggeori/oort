@@ -174,7 +174,10 @@ export type ApprovalNoteKind =
   | "offline"
   | "elsewhere"
   | "unsupported"
-  | "resume-offer";
+  | "resume-offer"
+  // #3738: 기한이 가까운(`blocked` 톤 — 때의 문제) 줄과, 기한이 지난 줄.
+  | "expiry-soon"
+  | "expired";
 
 export interface ApprovalCardNote {
   kind: ApprovalNoteKind;
