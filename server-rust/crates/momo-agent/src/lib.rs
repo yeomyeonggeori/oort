@@ -290,8 +290,9 @@ pub use run::{
 };
 pub use run_event::{append_run_event_in_tx, AppendedRunEvent};
 pub use run_progress::{
-    list_channel_run_progress_in_tx, list_run_events_in_tx, AheadRun, LeaseState, RunEventRow,
-    RunPhase, RunProgressRow,
+    assemble_run_progress, list_channel_run_progress_base_in_tx, list_run_events_in_tx,
+    visible_channels_in_tx, AheadRun, JobFacts, LeaseState, QueueEntry, RunEventRow, RunPhase,
+    RunProgressBase, RunProgressRow,
 };
 pub use status::{
     agent_partial_payload, agent_partial_tool_call_payload, agent_status_channel,

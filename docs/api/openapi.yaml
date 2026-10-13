@@ -13559,7 +13559,9 @@ components:
         approvalExpiresAtMs: {type: integer, format: int64}
         endReason:
           type: string
-          description: Closed machine code for a finished run, for example `approval_expired`.
+          description: >
+            Machine code the server wrote for a finished run (a lowercase token such
+            as `approval_expired`); never agent-supplied text. Absent otherwise.
         queuePosition:
           type: integer
           minimum: 1
@@ -13597,7 +13599,12 @@ components:
       additionalProperties: false
       required: [ordinal, kind, createdAtMs]
       properties:
-        ordinal: {type: integer, minimum: 1, description: "Position in this run's ledger only."}
+        ordinal:
+          type: integer
+          minimum: 1
+          description: >
+            Position in this run's ledger at read time. Not a stable identifier: the
+            200-row cap can drop old stage rows, so never use it as a key.
         kind:
           type: string
           enum: [queued, claimed, started, stage, paused, resumed, approval_requested, approval_decided, succeeded, failed, timed_out, cancelled]
@@ -13607,7 +13614,7 @@ components:
           description: Agent-reported marker, present only on `stage`. Untrusted plain text.
         code:
           type: string
-          description: Closed machine code (`approval_expired`, `approved`, …).
+          description: Machine code written by the server (`approval_expired`, `approved`, …).
         approvalId: {type: string, format: uuid}
         actorMemberId: {type: string, format: uuid}
         createdAtMs: {type: integer, format: int64}

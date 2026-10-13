@@ -71,12 +71,14 @@ use axum::http::StatusCode;
 use axum::{Extension, Json};
 use momo_agent::approval::is_active_channel_member_in_tx;
 use momo_agent::{
-    agent_run_cursor_is_visible_in_tx, cancel_pending_approvals_for_run_in_tx, cancel_run_in_tx,
-    create_agent_run_in_tx, is_active_agent_in_tx, is_active_human_channel_member_in_tx,
-    linked_work_session_ids_in_tx, list_agent_run_summaries_in_tx, list_channel_run_progress_in_tx,
+    agent_run_cursor_is_visible_in_tx, assemble_run_progress,
+    cancel_pending_approvals_for_run_in_tx, cancel_run_in_tx, create_agent_run_in_tx,
+    is_active_agent_in_tx, is_active_human_channel_member_in_tx, linked_work_session_ids_in_tx,
+    list_agent_run_summaries_in_tx, list_channel_run_progress_base_in_tx,
     list_channel_work_runs_in_tx, list_run_events_in_tx, load_agent_run_in_tx,
     load_agent_run_with_visibility_in_tx, load_eligible_agent_in_tx, lock_run_for_cancel_in_tx,
-    validated_run_limit, AgentRunSummaryRow, NewAgentRun, RequestedRouting, RunStatus, RunTrigger,
+    validated_run_limit, visible_channels_in_tx, AgentRunSummaryRow, JobFacts, NewAgentRun,
+    QueueEntry, RequestedRouting, RunStatus, RunTrigger,
 };
 use momo_auth::{Principal, PrincipalKind};
 use momo_db::audit::{write_audit, AuditEntry};
@@ -103,6 +105,10 @@ use crate::AppState;
 /// Swift `WorkRunInput.allowedKeys` (`AgentRunRoutes.swift:1127`). Closed world:
 /// an unknown key is a 400, so a client that invents `priority` learns it was
 /// ignored instead of assuming it was honoured.
+/// How many claimable jobs of one agent the queue read looks at. A run whose job is
+/// beyond it gets no position (never a wrong one).
+const PROGRESS_QUEUE_LIMIT: i64 = 500;
+
 const WORK_INPUT_KEYS: [&str; 6] = ["type", "title", "brief", "repo", "branch", "routing"];
 
 const TITLE_LIMIT: usize = 200;
@@ -751,15 +757,76 @@ pub async fn progress(
                 if !is_active_channel_member_in_tx(conn, channel_id, member_id).await? {
                     return Ok(Err(ApiError::forbidden("not an active channel member")));
                 }
-                Ok(Ok(list_channel_run_progress_in_tx(
+                let base = list_channel_run_progress_base_in_tx(
                     conn,
                     workspace_id,
                     channel_id,
-                    member_id,
                     active_only,
                     limit,
                 )
-                .await?))
+                .await?;
+
+                // The delivery job's lease and the agent's claimable queue come from
+                // momo-outbox — the claim's own predicate — and are handed to the pure
+                // assembly as plain facts (momo-agent owns no outbox SQL).
+                let wanting_job: Vec<(Uuid, Uuid)> = base
+                    .iter()
+                    .filter(|run| {
+                        matches!(run.summary.status, RunStatus::Queued | RunStatus::Running)
+                    })
+                    .map(|run| (run.summary.id, run.agent_member_id))
+                    .collect();
+                let jobs: std::collections::HashMap<Uuid, JobFacts> =
+                    momo_outbox::pending_job_facts_for_runs_in_tx(conn, workspace_id, &wanting_job)
+                        .await
+                        .map_err(momo_db::DbError::from)?
+                        .into_iter()
+                        .map(|fact| {
+                            (
+                                fact.run_id,
+                                JobFacts {
+                                    job_id: fact.job_id,
+                                    leased: fact.leased,
+                                    lease_live: fact.lease_live,
+                                },
+                            )
+                        })
+                        .collect();
+
+                let waiting_agents: std::collections::HashSet<Uuid> = base
+                    .iter()
+                    .filter(|run| {
+                        run.summary.status == RunStatus::Queued
+                            && jobs.get(&run.summary.id).is_some_and(|job| !job.leased)
+                    })
+                    .map(|run| run.agent_member_id)
+                    .collect();
+                let mut queue: Vec<QueueEntry> = Vec::new();
+                for agent in waiting_agents {
+                    let claimable = momo_outbox::list_claimable_hosted_jobs_in_tx(
+                        conn,
+                        workspace_id,
+                        agent,
+                        PROGRESS_QUEUE_LIMIT,
+                    )
+                    .await
+                    .map_err(momo_db::DbError::from)?;
+                    queue.extend(
+                        claimable.iter().filter_map(|job| {
+                            QueueEntry::from_payload(job.id, agent, &job.payload)
+                        }),
+                    );
+                }
+                let queue_channels: Vec<Uuid> = queue
+                    .iter()
+                    .map(|entry| entry.channel_id)
+                    .collect::<std::collections::HashSet<_>>()
+                    .into_iter()
+                    .collect();
+                let visible =
+                    visible_channels_in_tx(conn, workspace_id, member_id, &queue_channels).await?;
+
+                Ok(Ok(assemble_run_progress(base, &jobs, &queue, &visible)))
             })
         })
         .await,

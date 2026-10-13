@@ -14,11 +14,18 @@
 //!   did not report as a stage marker.
 //! * It names no run, requester, channel or title the viewer cannot see: the
 //!   queue answer for a channel the viewer is not in is a **count** only.
+//!
+//! ## Why the delivery job is an input, not a query
+//!
+//! This crate owns no `outbox` SQL (see Cargo.toml). The route layer reads the job
+//! lease and the claimable queue from `momo-outbox` — the claim's own predicate —
+//! and hands plain facts to [`assemble_run_progress`], which is pure.
 
 use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Utc};
 use momo_db::DbError;
+use serde_json::Value;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
@@ -105,43 +112,74 @@ pub struct RunProgressRow {
     pub ahead: Vec<AheadRun>,
 }
 
-struct RawProgress {
-    summary: AgentRunSummaryRow,
-    agent_member_id: Uuid,
-    step_count: i32,
-    end_reason: Option<String>,
-    job_id: Option<i64>,
-    job_leased: bool,
-    lease_live: bool,
-    claimed_at: Option<DateTime<Utc>>,
-    latest_stage: Option<String>,
-    last_event_at: Option<DateTime<Utc>>,
-    approval_id: Option<Uuid>,
-    approval_expires_at: Option<DateTime<Utc>>,
+/// The run-side half of a progress row: everything that lives in `agent_run`,
+/// `agent_run_event` and `approval`. The delivery job's lease is not here.
+#[derive(Debug, Clone)]
+pub struct RunProgressBase {
+    pub summary: AgentRunSummaryRow,
+    pub agent_member_id: Uuid,
+    pub step_count: i32,
+    pub end_reason: Option<String>,
+    pub claimed_at: Option<DateTime<Utc>>,
+    pub latest_stage: Option<String>,
+    pub last_event_at: Option<DateTime<Utc>>,
+    pub approval_id: Option<Uuid>,
+    pub approval_expires_at: Option<DateTime<Utc>>,
 }
 
-/// Hosted-agent runs of one channel with their derived progress, newest first.
-///
-/// The caller has already proven the viewer is an active member of `channel_id`.
-/// Only runs whose agent has a hosted connection are listed (the ledger exists for
-/// no other kind, ADR-0200 D6) — mention runs and work runs alike.
-pub async fn list_channel_run_progress_in_tx(
+/// The delivery job behind a run, as plain facts (read from `momo-outbox`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JobFacts {
+    pub job_id: i64,
+    pub leased: bool,
+    pub lease_live: bool,
+}
+
+/// One entry of an agent's claimable queue, in claim order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueEntry {
+    pub job_id: i64,
+    pub agent_member_id: Uuid,
+    pub run_id: Uuid,
+    pub channel_id: Uuid,
+}
+
+impl QueueEntry {
+    /// `None` when the payload does not carry two uuids (the claim refuses such a
+    /// job too, so it is not in the queue either).
+    pub fn from_payload(job_id: i64, agent_member_id: Uuid, payload: &Value) -> Option<QueueEntry> {
+        let uuid_of = |key: &str| {
+            payload
+                .get(key)
+                .and_then(Value::as_str)
+                .and_then(|raw| Uuid::parse_str(raw).ok())
+        };
+        Some(QueueEntry {
+            job_id,
+            agent_member_id,
+            run_id: uuid_of("run_id")?,
+            channel_id: uuid_of("channel_id")?,
+        })
+    }
+}
+
+/// Hosted-agent runs of one channel (mention runs and work runs alike), newest
+/// first, WITHOUT their delivery-job facts. The caller has already proven the
+/// viewer is an active member of `channel_id`. Only runs whose agent has a hosted
+/// connection are listed (the ledger exists for no other kind, ADR-0200 D6).
+pub async fn list_channel_run_progress_base_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     channel_id: Uuid,
-    viewer_member_id: Uuid,
     active_only: bool,
     limit: i64,
-) -> Result<Vec<RunProgressRow>, DbError> {
+) -> Result<Vec<RunProgressBase>, DbError> {
     let sql = format!(
         "SELECT {SUMMARY_COLS}, r.agent_member_id, r.step_count, \
                 CASE WHEN r.status IN ('succeeded','failed','timed_out','cancelled') \
                       AND jsonb_typeof(r.error -> 'code') = 'string' \
                       AND (r.error ->> 'code') ~ '^[a-z0-9_]{{1,64}}$' \
                      THEN r.error ->> 'code' END AS end_reason, \
-                j.id AS job_id, \
-                (j.lease_owner IS NOT NULL) AS job_leased, \
-                COALESCE(j.lease_expires_at > now(), false) AS lease_live, \
                 (SELECT max(e.created_at) FROM agent_run_event e \
                   WHERE e.workspace_id = r.workspace_id AND e.run_id = r.id \
                     AND e.kind = 'claimed') AS claimed_at, \
@@ -153,21 +191,12 @@ pub async fn list_channel_run_progress_in_tx(
                 ap.id AS approval_id, ap.expires_at AS approval_expires_at \
            FROM agent_run r \
            LEFT JOIN LATERAL ( \
-                SELECT o.id, o.lease_owner, o.lease_expires_at \
-                  FROM outbox o \
-                 WHERE o.workspace_id = r.workspace_id \
-                   AND o.kind = 'agent_job' AND o.method = 'gateway' \
-                   AND o.status = 'pending' \
-                   AND o.partition_key = r.agent_member_id \
-                   AND lower(o.payload ->> 'run_id') = lower(r.id::text) \
-                 ORDER BY o.id DESC LIMIT 1 \
-           ) j ON r.status IN ('queued', 'running') \
-           LEFT JOIN LATERAL ( \
                 SELECT a.id, a.expires_at FROM approval a \
-                 WHERE a.workspace_id = r.workspace_id AND a.run_id = r.id \
+                 WHERE r.status = 'awaiting_approval' \
+                   AND a.workspace_id = r.workspace_id AND a.run_id = r.id \
                    AND a.status = 'pending' \
                  ORDER BY a.created_at DESC LIMIT 1 \
-           ) ap ON r.status = 'awaiting_approval' \
+           ) ap ON true \
           WHERE r.workspace_id = $1 AND r.channel_id = $2 \
             AND agent_run_event_is_hosted(r.workspace_id, r.agent_member_id) \
             AND ($3::boolean = false OR r.status IN ('queued','running','awaiting_approval','paused')) \
@@ -181,16 +210,13 @@ pub async fn list_channel_run_progress_in_tx(
         .bind(limit)
         .fetch_all(&mut *conn)
         .await?;
-    let mut raw = Vec::with_capacity(rows.len());
+    let mut base = Vec::with_capacity(rows.len());
     for row in &rows {
-        raw.push(RawProgress {
+        base.push(RunProgressBase {
             summary: decode_run_summary(row).map_err(DbError::from)?,
             agent_member_id: row.try_get("agent_member_id")?,
             step_count: row.try_get("step_count")?,
             end_reason: row.try_get("end_reason")?,
-            job_id: row.try_get("job_id")?,
-            job_leased: row.try_get("job_leased")?,
-            lease_live: row.try_get("lease_live")?,
             claimed_at: row.try_get("claimed_at")?,
             latest_stage: row.try_get("latest_stage")?,
             last_event_at: row.try_get("last_event_at")?,
@@ -198,57 +224,79 @@ pub async fn list_channel_run_progress_in_tx(
             approval_expires_at: row.try_get("approval_expires_at")?,
         });
     }
+    Ok(base)
+}
 
-    // The queue: only needed when some run is waiting to be taken.
-    let waiting_agents: Vec<Uuid> = raw
-        .iter()
-        .filter(|run| is_unclaimed(run))
-        .map(|run| run.agent_member_id)
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-    let queue = if waiting_agents.is_empty() {
-        Vec::new()
-    } else {
-        claimable_queue_in_tx(conn, workspace_id, &waiting_agents).await?
-    };
-    let queue_channels: Vec<Uuid> = queue
-        .iter()
-        .map(|job| job.channel_id)
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-    let visible: HashSet<Uuid> = if queue_channels.is_empty() {
-        HashSet::new()
-    } else {
-        sqlx::query_scalar::<_, Uuid>(
-            "SELECT channel_id FROM membership \
-              WHERE workspace_id = $1 AND member_id = $2 AND left_at IS NULL \
-                AND channel_id = ANY($3)",
-        )
-        .bind(workspace_id)
-        .bind(viewer_member_id)
-        .bind(&queue_channels)
-        .fetch_all(&mut *conn)
-        .await?
-        .into_iter()
-        .collect()
-    };
-
-    let mut by_agent: HashMap<Uuid, Vec<&QueuedJob>> = HashMap::new();
-    for job in &queue {
-        by_agent.entry(job.agent_member_id).or_default().push(job);
+/// Which of `channels` the viewer is an active member of.
+pub async fn visible_channels_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    viewer_member_id: Uuid,
+    channels: &[Uuid],
+) -> Result<HashSet<Uuid>, DbError> {
+    if channels.is_empty() {
+        return Ok(HashSet::new());
     }
+    Ok(sqlx::query_scalar::<_, Uuid>(
+        "SELECT channel_id FROM membership \
+          WHERE workspace_id = $1 AND member_id = $2 AND left_at IS NULL \
+            AND channel_id = ANY($3)",
+    )
+    .bind(workspace_id)
+    .bind(viewer_member_id)
+    .bind(channels)
+    .fetch_all(&mut *conn)
+    .await?
+    .into_iter()
+    .collect())
+}
 
-    Ok(raw
-        .into_iter()
+/// Join the run-side facts with the delivery-job facts and the claimable queue.
+/// Pure: no SQL, so the honesty rules below are testable without a database.
+///
+/// * `jobs` is keyed by run id; a run with no pending job simply has no entry.
+/// * `queue` is every agent's claimable queue in claim order.
+/// * `visible` is the set of channels the viewer may name runs from.
+pub fn assemble_run_progress(
+    base: Vec<RunProgressBase>,
+    jobs: &HashMap<Uuid, JobFacts>,
+    queue: &[QueueEntry],
+    visible: &HashSet<Uuid>,
+) -> Vec<RunProgressRow> {
+    use crate::run::RunStatus;
+    let mut by_agent: HashMap<Uuid, Vec<&QueueEntry>> = HashMap::new();
+    for entry in queue {
+        by_agent
+            .entry(entry.agent_member_id)
+            .or_default()
+            .push(entry);
+    }
+    base.into_iter()
         .map(|run| {
-            let phase = phase_of(&run);
-            let lease_state = lease_state_of(&run);
-            let (queue_position, ahead_total, ahead) = if is_unclaimed(&run) {
-                position_in_queue(&run, by_agent.get(&run.agent_member_id), &visible)
-            } else {
-                (None, 0, Vec::new())
+            let job = jobs.get(&run.summary.id).copied();
+            let status = run.summary.status;
+            let leased = job.is_some_and(|job| job.leased);
+            let phase = match status {
+                RunStatus::Queued if leased => RunPhase::Claimed,
+                RunStatus::Queued => RunPhase::Queued,
+                RunStatus::Running => RunPhase::Running,
+                RunStatus::AwaitingApproval => RunPhase::AwaitingApproval,
+                RunStatus::Paused => RunPhase::Paused,
+                RunStatus::Succeeded => RunPhase::Succeeded,
+                RunStatus::Failed => RunPhase::Failed,
+                RunStatus::TimedOut => RunPhase::TimedOut,
+                RunStatus::Cancelled => RunPhase::Cancelled,
+            };
+            let lease_state = match job {
+                Some(job) if job.leased && job.lease_live => LeaseState::Live,
+                Some(job) if job.leased => LeaseState::Stale,
+                _ => LeaseState::None,
+            };
+            let (queue_position, ahead_total, ahead) = match job {
+                Some(job) if status == RunStatus::Queued && !job.leased => {
+                    position_in_queue(job.job_id, by_agent.get(&run.agent_member_id), visible)
+                }
+                _ => (None, 0, Vec::new()),
             };
             RunProgressRow {
                 phase,
@@ -267,116 +315,29 @@ pub async fn list_channel_run_progress_in_tx(
                 summary: run.summary,
             }
         })
-        .collect())
-}
-
-fn is_unclaimed(run: &RawProgress) -> bool {
-    use crate::run::RunStatus;
-    run.summary.status == RunStatus::Queued && run.job_id.is_some() && !run.job_leased
-}
-
-fn phase_of(run: &RawProgress) -> RunPhase {
-    use crate::run::RunStatus;
-    match run.summary.status {
-        RunStatus::Queued if run.job_leased => RunPhase::Claimed,
-        RunStatus::Queued => RunPhase::Queued,
-        RunStatus::Running => RunPhase::Running,
-        RunStatus::AwaitingApproval => RunPhase::AwaitingApproval,
-        RunStatus::Paused => RunPhase::Paused,
-        RunStatus::Succeeded => RunPhase::Succeeded,
-        RunStatus::Failed => RunPhase::Failed,
-        RunStatus::TimedOut => RunPhase::TimedOut,
-        RunStatus::Cancelled => RunPhase::Cancelled,
-    }
-}
-
-fn lease_state_of(run: &RawProgress) -> LeaseState {
-    if run.job_id.is_none() || !run.job_leased {
-        LeaseState::None
-    } else if run.lease_live {
-        LeaseState::Live
-    } else {
-        LeaseState::Stale
-    }
-}
-
-struct QueuedJob {
-    job_id: i64,
-    agent_member_id: Uuid,
-    run_id: Uuid,
-    channel_id: Uuid,
-}
-
-/// Unclaimed delivery jobs of the given agents that the agent could claim right
-/// now, in claim order (`outbox.id ASC`, the order `oort_jobs_claim` takes them).
-/// The predicate mirrors the hosted claim's candidate set: pending, no live lease,
-/// the connection active, the channel one the human approved for it.
-async fn claimable_queue_in_tx(
-    conn: &mut PgConnection,
-    workspace_id: Uuid,
-    agents: &[Uuid],
-) -> Result<Vec<QueuedJob>, DbError> {
-    let rows = sqlx::query(
-        "SELECT o.id AS job_id, o.partition_key AS agent_member_id, \
-                o.payload ->> 'run_id' AS run_id, o.payload ->> 'channel_id' AS channel_id \
-           FROM outbox o \
-           JOIN hosted_agent_connection hc \
-             ON hc.workspace_id = o.workspace_id \
-            AND hc.agent_member_id = o.partition_key AND hc.status = 'active' \
-          WHERE o.workspace_id = $1 \
-            AND o.kind = 'agent_job' AND o.method = 'gateway' AND o.status = 'pending' \
-            AND o.partition_key = ANY($2) \
-            AND (o.lease_owner IS NULL OR o.lease_expires_at <= now()) \
-            AND EXISTS ( \
-                  SELECT 1 FROM unnest(hosted_connection_channel_ids(hc.workspace_id, hc.id)) \
-                         AS approved(channel_id) \
-                   WHERE lower(approved.channel_id::text) = lower(o.payload ->> 'channel_id')) \
-          ORDER BY o.id ASC \
-          LIMIT 2000",
-    )
-    .bind(workspace_id)
-    .bind(agents)
-    .fetch_all(&mut *conn)
-    .await?;
-    let mut jobs = Vec::with_capacity(rows.len());
-    for row in &rows {
-        let run_id: Option<String> = row.try_get("run_id")?;
-        let channel_id: Option<String> = row.try_get("channel_id")?;
-        let (Some(run_id), Some(channel_id)) = (
-            run_id.and_then(|raw| Uuid::parse_str(&raw).ok()),
-            channel_id.and_then(|raw| Uuid::parse_str(&raw).ok()),
-        ) else {
-            continue;
-        };
-        jobs.push(QueuedJob {
-            job_id: row.try_get("job_id")?,
-            agent_member_id: row.try_get("agent_member_id")?,
-            run_id,
-            channel_id,
-        });
-    }
-    Ok(jobs)
+        .collect()
 }
 
 fn position_in_queue(
-    run: &RawProgress,
-    queue: Option<&Vec<&QueuedJob>>,
+    job_id: i64,
+    queue: Option<&Vec<&QueueEntry>>,
     visible: &HashSet<Uuid>,
 ) -> (Option<i64>, i64, Vec<AheadRun>) {
-    let (Some(queue), Some(job_id)) = (queue, run.job_id) else {
+    let Some(queue) = queue else {
         return (None, 0, Vec::new());
     };
-    // The run's own job is not claimable (connection not active / channel not
-    // approved): there is no honest position, so none is given.
-    let Some(index) = queue.iter().position(|job| job.job_id == job_id) else {
+    // The run's own job is not claimable (connection not active, token revoked,
+    // channel not approved, not yet available): there is no honest position, so
+    // none is given.
+    let Some(index) = queue.iter().position(|entry| entry.job_id == job_id) else {
         return (None, 0, Vec::new());
     };
     let ahead: Vec<AheadRun> = queue[..index]
         .iter()
-        .filter(|job| visible.contains(&job.channel_id))
-        .map(|job| AheadRun {
-            run_id: job.run_id,
-            channel_id: job.channel_id,
+        .filter(|entry| visible.contains(&entry.channel_id))
+        .map(|entry| AheadRun {
+            run_id: entry.run_id,
+            channel_id: entry.channel_id,
         })
         .collect();
     (Some(index as i64 + 1), index as i64, ahead)
