@@ -3,6 +3,9 @@
 // ADR-0200 UXUI 캡처 (#3747 U1 · #3748 U2 · #3749 U3): 외부 에이전트 작업 상태를
 // 사실대로.
 //
+//   SLICE=u2  서버 원장 기록(닫아도 남는다) · 여러 run(진행 중 병렬·대기열 순서·끝난 일) ·
+//             대기열 앞(내 채널은 자세히, 아니면 「앞에 N건」) · 승인 카드 링크 ·
+//             보이는 것의 한계 한 줄 · 서버가 모르는 run(이 화면에만 있는 기록).
 //   SLICE=u1  대기 2번째 → 가져감(소식 없음 포함) → 진행 단계 → 승인 대기 → 끝(사유),
 //             여러 run 병렬. 사이드바 알약·컴포저 활동 줄·작업 패널 머리.
 //
@@ -35,7 +38,11 @@ const otherAgentId = "00000000-0000-7000-8000-000000000302";
 const CH = "00000000-0000-7000-8000-000000000201";
 const GENERAL = "00000000-0000-7000-8000-000000000202";
 const RUN_A = "0199aa11-2222-7000-8000-0000000000a1";
+const RUN_B = "0199aa11-2222-7000-8000-0000000000a2";
 const RUN_C = "0199aa11-2222-7000-8000-0000000000a3";
+const RUN_D = "0199aa11-2222-7000-8000-0000000000a4";
+const RUN_E = "0199aa11-2222-7000-8000-0000000000a5";
+const RUN_F = "0199aa11-2222-7000-8000-0000000000a6";
 
 const person = (id, kind, displayName, handle, extra = {}) => ({
   id, workspaceId, kind, status: "active", displayName, handle, channelCount: 2,
@@ -77,7 +84,7 @@ function progress(now, extra) {
 
 /** 장면 상태. 페이지가 읽을 때마다 현재 값을 돌려준다. */
 function newScene() {
-  return { runs: [], progressCalls: 0 };
+  return { runs: [], progressCalls: 0, ledgers: {}, ledgerCalls: 0, approvals: [] };
 }
 
 async function installRoutes(context, scene) {
@@ -105,12 +112,20 @@ async function installRoutes(context, scene) {
       const channel = path.split("/channels/")[1]?.split("/")[0];
       return json(route, { runs: scene.runs.filter((r) => r.channelId === channel) });
     }
+    const ledgerMatch = path.match(/\/agent-runs\/([^/]+)\/events$/);
+    if (ledgerMatch) {
+      scene.ledgerCalls += 1;
+      const runId = ledgerMatch[1].toLowerCase();
+      return json(route, { runId, events: scene.ledgers[runId] ?? [] });
+    }
     if (path.endsWith("/channels")) return json(route, { channels });
     if (path.endsWith("/roster")) return json(route, { members: roster });
     if (path.endsWith("/read-state") && method === "GET") {
       return json(route, { read_states: channels.map((c) => ({ channel_id: c.id, last_read_seq: 99, latest_seq: 99, unread_count: 0, mention_count: 0, marked_unread_before_seq: null })) });
     }
-    if (path.endsWith("/approvals")) return json(route, { approvals: [] });
+    if (path.endsWith("/approvals")) {
+      return json(route, { approvals: url.searchParams.get("status") === "pending" ? scene.approvals : [] });
+    }
     if (path.endsWith("/agent-runs")) return json(route, { runs: [] });
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     if (path.endsWith("/work-hosts")) return json(route, { workHosts: [] });
@@ -307,6 +322,140 @@ async function u1(browser, origin, scheme) {
   await second.context.close();
 }
 
+
+const ledger = (now, rows) =>
+  rows.map(([kind, minAgo, extra = {}], i) => ({ ordinal: i + 1, kind, createdAtMs: now - minAgo * MIN, ...extra }));
+
+async function open2(browser, origin, scheme, scene) {
+  const opened = await open(browser, origin, scheme, scene, `/c/${CH}`);
+  return opened;
+}
+
+async function openPanelFor(page, who) {
+  await page.getByTestId("composer-working-open").filter({ hasText: who }).first().click();
+  await page.getByTestId("agent-work-panel").waitFor();
+}
+
+async function u2(browser, origin, scheme) {
+  const tag = `1440-${scheme}`;
+  const shot = (name) => resolve(OUT_DIR, `${name}-${tag}.png`);
+  const now = Date.now();
+  const APPROVAL = "0199aa11-2222-7000-8000-0000000000d1";
+  const CARD_MSG = "00000000-0000-7000-8000-0000000b0001";
+  const scene = newScene();
+  scene.runs = [
+    progress(now, { id: RUN_A, phase: "awaiting_approval", status: "awaiting_approval", leaseState: "live", claimedAtMs: now - 9 * MIN, startedAtMs: now - 9 * MIN, lastEventAtMs: now - 3 * MIN, approvalId: APPROVAL, approvalExpiresAtMs: now + 50 * MIN, triggerSummary: "grokbot-lab 채널 만들기", createdAtMs: now - 12 * MIN }),
+    progress(now, { id: RUN_C, phase: "running", status: "running", leaseState: "live", claimedAtMs: now - 5 * MIN, startedAtMs: now - 4 * MIN, lastEventAtMs: now - 20_000, latestStage: "릴리스 노트 초안 정리", triggerSummary: "릴리스 노트 정리", createdAtMs: now - 6 * MIN }),
+    progress(now, { id: RUN_D, queuePosition: 1, aheadTotal: 0, triggerSummary: "회의록 요약", createdAtMs: now - 3 * MIN }),
+    progress(now, { id: RUN_E, queuePosition: 2, aheadTotal: 3, ahead: [{ runId: RUN_D, channelId: CH }], triggerSummary: "일정 정리", createdAtMs: now - 2 * MIN }),
+    progress(now, { id: RUN_F, phase: "timed_out", status: "timed_out", leaseState: "live", claimedAtMs: now - 80 * MIN, finishedAtMs: now - 20 * MIN, endReason: "approval_expired", triggerSummary: "설정 바꾸기", createdAtMs: now - 85 * MIN }),
+  ];
+  scene.ledgers[RUN_A] = ledger(now, [
+    ["queued", 12], ["claimed", 9], ["started", 9],
+    ["stage", 8, { stage: "시작: 채널 이름 확인" }],
+    ["stage", 6, { stage: "grokbot-lab 이름 점검" }],
+    ["stage", 4, { stage: "승인 카드 제안 준비" }],
+    ["approval_requested", 3, { approvalId: APPROVAL }],
+  ]);
+  scene.ledgers[RUN_C] = ledger(now, [["queued", 6], ["claimed", 5], ["started", 4], ["stage", 1, { stage: "릴리스 노트 초안 정리" }]]);
+  scene.ledgers[RUN_F] = ledger(now, [
+    ["queued", 85], ["claimed", 80], ["started", 80],
+    ["approval_requested", 79, { approvalId: "0199aa11-2222-7000-8000-0000000000d9" }],
+    ["approval_decided", 20, { code: "expired", approvalId: "0199aa11-2222-7000-8000-0000000000d9" }],
+    ["timed_out", 20, { code: "approval_expired" }],
+  ]);
+  scene.approvals = [{
+    id: APPROVAL, workspaceId, runId: RUN_A, channelId: CH, requestMessageId: CARD_MSG, requestedBy: agentId,
+    actionType: "workspace_action",
+    payload: { action: { id: "channel.create", args: {}, rationale: null }, proposed_by: agentId, resume_model: null },
+    status: "pending", expiresAtMs: now + 50 * MIN, createdAtMs: now - 3 * MIN,
+  }];
+
+  const { context, page } = await open2(browser, origin, scheme, scene);
+  await serverMoves(page, scene, scene.runs, "approval_requested");
+  await page.getByTestId("composer-working-open").first().waitFor({ timeout: 15_000 });
+  await openPanelFor(page, "그록봇");
+  // 컴포저 줄은 에이전트당 하나라 가장 강한 상태(작업 중)의 run으로 열린다. 승인
+  // 대기 run은 목록에서 고른다.
+  await page.locator(`[data-run-id="${RUN_A}"]`).click();
+
+  // ① 서버 원장이 기록이다 + 승인 카드 링크 + 한계 한 줄
+  await page.getByTestId("agent-work-panel-ledger").waitFor();
+  const rowsText = (await page.getByTestId("agent-work-panel-ledger-row").allTextContents()).join(" | ");
+  check(`${tag} ledger: 요청→가져감→시작→단계 3개→승인 요청이 시각과 함께 선다`,
+    ["요청이 들어왔어요", "에이전트가 일을 가져갔어요", "작업을 시작했어요", "시작: 채널 이름 확인", "grokbot-lab 이름 점검", "승인 카드 제안 준비", "승인을 요청했어요"].every((t) => rowsText.includes(t)) &&
+    (await page.getByTestId("agent-work-panel-ledger-time").first().textContent())?.match(/^\d\d:\d\d$/) !== null, rowsText);
+  const bodyText = (await page.getByTestId("agent-work-panel").textContent()) ?? "";
+  check(`${tag} ledger: 거짓 문구 「패널을 닫으면 이 기록은 사라집니다」가 없다`, !bodyText.includes("이 기록은 사라집니다") && !bodyText.includes("이 기록은 사라져요"));
+  check(`${tag} ledger: 「패널을 닫아도 남아요」`, bodyText.includes("패널을 닫아도"));
+  const limit = ((await page.getByTestId("agent-work-panel-limit").textContent()) ?? "").trim();
+  check(`${tag} ledger: 보이는 것의 한계 한 줄`, limit === "에이전트가 보고한 단계만 보여요. 보내지 않은 생각은 oort도 알 수 없어요.", limit);
+  check(`${tag} ledger: 「실시간」을 약속하지 않는다`, !bodyText.includes("실시간"));
+  const link = page.getByTestId("agent-work-panel-approval-link");
+  check(`${tag} approval: 카드로 가는 링크`, ((await link.getAttribute("href")) ?? "").includes(`msg=${CARD_MSG}`), String(await link.getAttribute("href")));
+  await page.screenshot({ path: shot("1-ledger-approval") });
+
+  // ② 여러 run: 진행 중(병렬) · 대기열(순서) · 끝난 일
+  const sections = await page.locator('[data-testid="agent-work-panel-runs-section"]').evaluateAll((els) => els.map((el) => el.getAttribute("data-section")));
+  check(`${tag} runs: 진행 중 → 대기열 → 끝난 일 순서`, sections.join(",") === "active,queue,done", sections.join(","));
+  const activeRows = await page.locator('[data-section="active"] [data-testid="agent-work-panel-run"]').allTextContents();
+  check(`${tag} runs: 진행 중 둘이 나란히 (작업 중 + 승인 대기)`, activeRows.length === 2 && activeRows.join("|").includes("승인 대기") && activeRows.join("|").includes("작업 중"), activeRows.join("|"));
+  const queueRows = await page.locator('[data-section="queue"] [data-testid="agent-work-panel-run"]').allTextContents();
+  check(`${tag} runs: 대기열은 서버 순번대로`, queueRows[0]?.includes("대기 1번째") && queueRows[1]?.includes("대기 2번째"), queueRows.join("|"));
+  const doneRows = await page.locator('[data-section="done"] [data-testid="agent-work-panel-run"]').allTextContents();
+  check(`${tag} runs: 끝난 일은 사유와 함께`, doneRows[0]?.includes("시간 초과") && doneRows[0]?.includes("승인이 만료됐어요"), doneRows.join("|"));
+
+  // ③ 대기열 2번째를 고른다: 내 채널의 앞선 일은 자세히, 나머지는 건수만
+  await page.locator(`[data-run-id="${RUN_E}"]`).click();
+  await page.getByTestId("agent-work-panel-ahead").waitFor();
+  const aheadRows = await page.getByTestId("agent-work-panel-ahead-row").allTextContents();
+  check(`${tag} queue: 내 채널의 앞선 일은 제목이 있다`, aheadRows.length === 1 && aheadRows[0].includes("회의록 요약") && aheadRows[0].includes("#계획"), aheadRows.join("|"));
+  const hidden = ((await page.getByTestId("agent-work-panel-ahead-hidden").textContent()) ?? "").trim();
+  check(`${tag} queue: 그 밖은 「앞에 N건」만`, hidden.startsWith("앞에 2건이 더 있어요") && !hidden.includes("#"), hidden);
+  const emptyHeadline = ((await page.getByTestId("agent-work-panel-empty").textContent()) ?? "");
+  check(`${tag} queue: 수령 전 빈 기록 안내`, emptyHeadline.includes("아직 아무도 일을 가져가지 않았어요"), emptyHeadline);
+  await page.screenshot({ path: shot("2-queue-ahead") });
+
+  // ④ 끝난 일을 고른다
+  await page.locator(`[data-run-id="${RUN_F}"]`).click();
+  await page.getByTestId("agent-work-panel-ledger").waitFor();
+  const endText = (await page.getByTestId("agent-work-panel-ledger-reason").allTextContents()).join("|");
+  check(`${tag} done: 끝난 줄에 사유`, endText.includes("승인이 만료됐어요"), endText);
+  check(`${tag} done: 결정된 승인에는 카드 링크가 없다`, (await page.getByTestId("agent-work-panel-ledger-card-link").count()) === 0 && (await page.getByTestId("agent-work-panel-approval-link").count()) === 0);
+  await page.screenshot({ path: shot("3-done-reason") });
+
+  // ⑤ 닫아도 남는다: 닫고 다시 열면 같은 기록이 서버에서 온다
+  await page.getByTestId("agent-work-panel-close").click();
+  await page.getByTestId("agent-work-panel").waitFor({ state: "detached" });
+  const before = scene.ledgerCalls;
+  await openPanelFor(page, "그록봇");
+  await page.getByTestId("agent-work-panel-ledger").waitFor();
+  const again = (await page.getByTestId("agent-work-panel-ledger-row").allTextContents()).join(" | ");
+  check(`${tag} kept: 닫았다 다시 열어도 같은 기록 (서버를 다시 읽는다)`, again.includes("릴리스 노트 초안 정리") && scene.ledgerCalls > before, `${before} -> ${scene.ledgerCalls}`);
+  await page.locator(`[data-run-id="${RUN_A}"]`).click();
+  await page.getByTestId("agent-work-panel-approval-link").waitFor();
+  const kept = (await page.getByTestId("agent-work-panel-ledger-row").allTextContents()).join(" | ");
+  check(`${tag} kept: 승인 대기 run의 기록도 그대로`, kept.includes("grokbot-lab 이름 점검") && kept.includes("승인을 요청했어요"), kept);
+  await context.close();
+
+  // ⑥ 서버가 모르는 run: 이 화면에만 있는 기록
+  const legacy = newScene();
+  const second = await open2(browser, origin, scheme, legacy);
+  await second.page.waitForTimeout(1200);
+  await second.page.evaluate(
+    ([agentChannel, run, agent, channel]) => window.__push(agentChannel, { type: "agent.status", v: 1, ts: Date.now(), payload: { run_id: run, agent_member_id: agent, channel_id: channel, phase: "streaming", run_status: "running" } }),
+    [`agent:ws${workspaceId.toUpperCase()}.${CH.toUpperCase()}.${agentId.toUpperCase()}`, RUN_B, agentId, CH]
+  );
+  await second.page.getByTestId("composer-working-open").first().waitFor({ timeout: 10_000 });
+  await second.page.getByTestId("composer-working-open").first().click();
+  await second.page.getByTestId("agent-work-panel").waitFor();
+  const local = ((await second.page.getByTestId("agent-work-panel-limit").textContent()) ?? "").trim();
+  check(`${tag} local: 서버가 모르는 run은 「이 화면에만 있어요」`, local === "이 기록은 이 화면에만 있어요. 패널을 닫으면 사라져요.", local);
+  check(`${tag} local: 서버 원장 영역이 없다`, (await second.page.getByTestId("agent-work-panel-ledger").count()) === 0 && (await second.page.getByTestId("agent-work-panel-runs").count()) === 0);
+  await second.page.screenshot({ path: shot("4-local-only") });
+  await second.context.close();
+}
+
 async function main() {
   if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) throw new Error("dist/ is missing. Run npm run build first.");
   mkdirSync(OUT_DIR, { recursive: true });
@@ -315,6 +464,7 @@ async function main() {
   try {
     for (const scheme of ["light", "dark"]) {
       if (SLICE === "u1") await u1(browser, preview.origin, scheme);
+      if (SLICE === "u2") await u2(browser, preview.origin, scheme);
     }
   } finally {
     await browser.close();

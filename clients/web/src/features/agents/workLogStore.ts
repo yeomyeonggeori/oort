@@ -168,9 +168,16 @@ export interface WorkPanelTarget extends WorkLogTarget {
    * 시작했는지를 아는 척하는 것이다(workingSignal의 같은 규칙).
    */
   startedAtMs?: number;
+  /**
+   * 패널을 **연 횟수**. 스토어가 매기고 연 쪽은 모른다. 패널 안에서 run을 갈아
+   * 끼워도(`switchWorkPanelRun`) 같은 값이 남으므로, 「패널이 새로 열렸다」는
+   * 사실(캐럿 이동·돌려줄 자리 기억)은 run id가 아니라 이 값이 말한다.
+   */
+  session?: number;
 }
 
 let panelTarget: WorkPanelTarget | null = null;
+let panelSession = 0;
 const panelListeners = new Set<() => void>();
 
 function emitPanel(next: WorkPanelTarget | null): void {
@@ -199,7 +206,20 @@ export function openWorkPanel(
     panelTarget.origin === target.origin;
   if (same) return;
   pendingOpener = opener ?? null;
-  emitPanel(target);
+  panelSession += 1;
+  emitPanel({ ...target, session: panelSession });
+}
+
+/**
+ * 열린 패널 안에서 다른 run을 본다(여러 run 목록에서 고를 때, ADR-0200 U2).
+ * 새로 연 것이 아니므로 캐럿을 옮기지도 돌려줄 자리를 바꾸지도 않는다. 시작 시각은
+ * 이전 run의 것이라 버린다: 다른 run에 붙이면 시계가 거짓이 된다.
+ */
+export function switchWorkPanelRun(runId: string, memberId: string): void {
+  if (panelTarget === null) return;
+  if (keyOf(panelTarget.runId) === keyOf(runId)) return;
+  const { startedAtMs: _dropped, ...rest } = panelTarget;
+  emitPanel({ ...rest, runId, memberId });
 }
 
 /** 패널이 마운트하면서 한 번 가져간다. 두 번째 호출은 null을 받는다. */

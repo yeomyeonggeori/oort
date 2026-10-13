@@ -19,6 +19,7 @@ import {
   type Directory,
 } from "@/features/workspace/useWorkspace";
 import { actorNamesIn } from "./actorNames";
+import { messageAnchorPath } from "./anchor";
 import {
   approvalItem,
   mentionItem,
@@ -165,6 +166,25 @@ function useApprovalPage(status: ApprovalStatus, enabled: boolean) {
         ? PENDING_APPROVALS_POLL_MS
         : false,
   });
+}
+
+/**
+ * 이 승인 카드로 가는 길(작업 패널의 「승인 카드 보기」, ADR-0200 U2).
+ *
+ * 사람을 기다리는 승인에만 길이 있다: 결정된 카드는 이미 사람이 본 것이고, 길을
+ * 내주면 눌러도 할 일이 없는 링크가 된다. 같은 쿼리 키를 `useApprovalWaits`가
+ * 읽으므로 두 번 가져오지 않는다.
+ */
+export function useApprovalCardPath(approvalId: string | undefined): string | null {
+  const query = useApprovalPage("pending", isSurfaceProvided("approvals"));
+  return useMemo(() => {
+    if (approvalId === undefined) return null;
+    const hit = (query.data ?? []).find(
+      (approval) => approval.id.toLowerCase() === approvalId.toLowerCase()
+    );
+    if (hit === undefined || hit.requestMessageId === undefined) return null;
+    return messageAnchorPath(hit.channelId, hit.requestMessageId);
+  }, [query.data, approvalId]);
 }
 
 /**

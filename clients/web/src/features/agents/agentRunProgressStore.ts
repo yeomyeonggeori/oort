@@ -112,6 +112,26 @@ export function useRunFacts(runId: string | null): ServerRunFacts | null {
   return null;
 }
 
+/** 한 채널의 진행 목록(끝난 최근 run 포함). 서버가 모르는 채널이면 빈 배열. */
+export function useChannelRuns(channelId: string | null): readonly AgentRunProgress[] {
+  const all = useSyncExternalStore(subscribe, runProgressSnapshot, runProgressSnapshot);
+  return channelId === null ? EMPTY_ROWS : (all.get(channelId.toLowerCase()) ?? EMPTY_ROWS);
+}
+
+/** run id로 한 줄을 찾는다(다른 채널의 앞선 일의 제목을 읽을 때). */
+export function useRunRow(runId: string | null): AgentRunProgress | null {
+  const all = useSyncExternalStore(subscribe, runProgressSnapshot, runProgressSnapshot);
+  if (runId === null) return null;
+  const key = runId.toLowerCase();
+  for (const list of all.values()) {
+    const hit = list.find((row) => row.id === key);
+    if (hit !== undefined) return hit;
+  }
+  return null;
+}
+
+const EMPTY_ROWS: readonly AgentRunProgress[] = [];
+
 function sameRows(
   a: readonly AgentRunProgress[] | undefined,
   b: readonly AgentRunProgress[]

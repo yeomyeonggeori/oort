@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, X } from "lucide-react";
 import {
   toolEntryState,
@@ -6,11 +6,12 @@ import {
   WORK_LOG_ARGS_NAMES_HIDDEN_SENTENCE,
   WORK_LOG_ARGS_OPAQUE_SENTENCE,
   WORK_LOG_ARGS_TRUNCATED_SENTENCE,
+  WORK_LOG_CLIPPED_SENTENCE,
+  WORK_LOG_DROPPED_SENTENCE,
   WORK_LOG_EMPTY_DETAIL,
   WORK_LOG_EMPTY_HEADLINE,
   WORK_LOG_QUIET_SENTENCE,
   WORK_LOG_TRUNCATED_HEAD_SENTENCE,
-  WORK_LOG_VOLATILE_SENTENCE,
   workLogLiveness,
   workLogStateLabel,
   workLogTurnState,
@@ -36,9 +37,24 @@ import {
   TURN_STALE_SENTENCE,
   UNKNOWN_AGENT_NAME,
 } from "@momo/core/features/agents/turnCopy";
+import {
+  RUN_LEDGER_KEPT_SENTENCE,
+  RUN_LEDGER_LIMIT_SENTENCE,
+  RUN_LOCAL_ONLY_SENTENCE,
+  RUN_STREAM_SENTENCE,
+  runEmptyState,
+  runList,
+} from "@momo/core/features/agents/runLedger";
+import type { AgentRunProgress, Channel } from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
 import { useInertRefWhile } from "@/app/inert";
-import { memberNameParts, useDirectory } from "@/features/workspace/useWorkspace";
+import {
+  memberNameParts,
+  useChannels,
+  useDirectory,
+  type Directory,
+} from "@/features/workspace/useWorkspace";
+import { useApprovalCardPath } from "@/features/inbox/useInbox";
 import { EmptyInvite, Skeleton } from "@/features/common/States";
 import { useAdeDrawerOpen } from "@/features/ade/adeDrawerStore";
 import {
@@ -48,9 +64,21 @@ import {
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { cn } from "@/design/lib/cn";
 import { useTickingNow } from "./agentWorkingSignal";
-import { useRunFacts } from "./agentRunProgressStore";
+import {
+  useChannelRuns,
+  useRunFacts,
+  useRunRow,
+} from "./agentRunProgressStore";
+import {
+  ApprovalLink,
+  LedgerView,
+  QueueAheadView,
+  RunListView,
+} from "./AgentRunLedgerView";
+import { useRunLedger, type RunLedgerView } from "./useRunLedger";
 import {
   closeWorkPanel,
+  switchWorkPanelRun,
   takeWorkPanelOpener,
   useWorkLog,
   useWorkPanelTarget,
@@ -60,9 +88,16 @@ import {
 // 「작업 패널」 (goal WEB-WP1, 결정 정본 docs/planning/2026-08-04-work-panel-design.md).
 //
 // 성재: "결과만 전달하는 게 아니라 에이전트가 사고하는 과정 같은 것도 노출해서
-// 내가 트래킹 가능하게 하는 그런 작업 패널." run 하나 = 패널 하나. `agent.status`의
-// phase 전이, `agent.partial`의 부분 텍스트와 도구 단계, 비용 스냅샷이 도착한
-// 순서대로 쌓인다.
+// 내가 트래킹 가능하게 하는 그런 작업 패널." run 하나 = 패널 하나.
+//
+// 기록의 출처가 둘이다 (ADR-0200 U2).
+//   - 서버가 아는 run(외부 hosted 에이전트): **서버 원장**이 기록이다. 가져감·단계·
+//     승인·끝이 서버에 남으므로 패널을 닫아도, 다른 기기에서 열어도 같다. 같은
+//     에이전트의 여러 run은 진행 중(병렬)·대기열(순서)·끝난 일로 나란히 선다.
+//   - 서버가 모르는 run(관리형·BYOA·옛 서버): `agent.status`·`agent.partial`을
+//     도착한 순서대로 접은 **이 화면만의 기록**이다. 패널을 닫으면 사라진다.
+// 두 경우 모두, 에이전트가 보낸 글과 도구 호출은 저장하지 않으니 연 뒤에 도착한
+// 것만 보인다.
 //
 // 터미널이 아니라 **구조화된 진행 스트림**이다(설계 문서 §2). 그래서 320px 열에
 // 들어가고, 나중에 폰 시트가 같은 core 모듈을 소비할 수 있다.
@@ -94,8 +129,25 @@ export function AgentWorkPanel() {
   // 서버가 이 run에 대해 답한 것(ADR-0200). 없으면 이 로그가 프레임에서 접은 것으로
   // 말한다.
   const server = useRunFacts(target?.runId ?? null);
-  const { workspaceId, connStatus } = useSession();
+  const { session, workspaceId, connStatus } = useSession();
   const { directory } = useDirectory(workspaceId);
+  const channelsQuery = useChannels(workspaceId);
+  const allChannels = useMemo(
+    () => [...channelsQuery.groups.channels, ...channelsQuery.groups.dms],
+    [channelsQuery.groups.channels, channelsQuery.groups.dms]
+  );
+  // 같은 채널·같은 에이전트의 run들. 서버가 모르는 채널이면 비어 있다.
+  const channelRuns = useChannelRuns(target?.channelId ?? null);
+  const runEntries = useMemo(
+    () => (target === null ? [] : runList(channelRuns, target.memberId)),
+    [channelRuns, target]
+  );
+  const progress = useRunRow(target?.runId ?? null);
+  const ledger = useRunLedger(target?.runId ?? null, server);
+  const cardHref = useApprovalCardPath(server?.approvalId);
+  const selectRun = useCallback((row: AgentRunProgress) => {
+    switchWorkPanelRun(row.id, row.agentMemberId);
+  }, []);
 
   const railLive = connStatus === "connected";
   // 시계는 이 패널이 실제로 살아 있는 run을 그리는 동안에만 돈다. 죽은 소켓 위에서
@@ -107,11 +159,13 @@ export function AgentWorkPanel() {
 
   const asideRef = useRef<HTMLElement>(null);
   const openerRef = useRef<DialogFocusTarget | null>(null);
-  // `origin`까지 키에 넣는다. 같은 run을 컴포저에서 열었다가 허브에서 다시 열면
-  // 그것은 새로 연 것이고(openWorkPanel이 그렇게 판정한다), 키가 그대로면 이
-  // 효과가 다시 돌지 않아 이미 사라진 컴포저 버튼을 가리킨 채로 남는다.
+  // 연 횟수(`session`)와 `origin`을 키에 넣는다. 같은 run을 컴포저에서 열었다가
+  // 허브에서 다시 열면 그것은 새로 연 것이고(openWorkPanel이 그렇게 판정한다),
+  // 키가 그대로면 이 효과가 다시 돌지 않아 이미 사라진 컴포저 버튼을 가리킨 채로
+  // 남는다. 반대로 패널 안에서 run만 갈아 끼우면(`switchWorkPanelRun`) 같은 패널
+  // 이므로 키가 그대로여야 한다 — 캐럿이 목록 버튼으로 돌아가는 일이 없도록.
   const openKey =
-    target === null ? null : `${target.runId.toLowerCase()}|${target.origin}`;
+    target === null ? null : `${target.session ?? 0}|${target.origin}`;
 
   // 연 쪽으로 캐럿을 돌려준다(design/ui/dialog.tsx의 집 규칙). 진입점이 실제
   // 엘리먼트를 넘겨 주고, `document.activeElement` 추정은 폴백이다: WebKit은
@@ -188,8 +242,22 @@ export function AgentWorkPanel() {
         server={server}
         onClose={close}
       />
-      <PanelBody log={log} nowMs={nowMs} railLive={railLive} server={server} />
-      <PanelFooter />
+      <PanelBody
+        log={log}
+        nowMs={nowMs}
+        railLive={railLive}
+        server={server}
+        progress={progress}
+        ledger={ledger}
+        runEntries={runEntries}
+        selectedRunId={target.runId}
+        onSelectRun={selectRun}
+        cardHref={cardHref}
+        channels={allChannels}
+        directory={directory}
+        selfMemberId={session.member.id}
+      />
+      <PanelFooter server={server !== null} />
     </aside>
   );
 }
@@ -316,11 +384,29 @@ function PanelBody({
   nowMs,
   railLive,
   server,
+  progress,
+  ledger,
+  runEntries,
+  selectedRunId,
+  onSelectRun,
+  cardHref,
+  channels,
+  directory,
+  selfMemberId,
 }: {
   log: WorkLog | null;
   nowMs: number;
   railLive: boolean;
   server: ServerRunFacts | null;
+  progress: AgentRunProgress | null;
+  ledger: RunLedgerView;
+  runEntries: ReturnType<typeof runList>;
+  selectedRunId: string;
+  onSelectRun: (row: AgentRunProgress) => void;
+  cardHref: string | null;
+  channels: readonly Channel[];
+  directory: Directory;
+  selfMemberId: string;
 }) {
   if (log === null) {
     // 스토어가 구독을 걸기 전의 한 프레임. 높이를 지키는 중립 막대이고 shimmer는
@@ -333,6 +419,11 @@ function PanelBody({
     );
   }
   const liveness = workLogLiveness(log, nowMs, undefined, server);
+  // 서버가 아는 run은 서버 원장이 기록이다. 이 화면이 프레임에서 접은 phase 줄은
+  // 같은 사실을 두 번 말하게 되므로 뺀다. 글과 도구 호출만 남는다(서버는 저장하지
+  // 않는다).
+  const streamEntries =
+    server === null ? log.entries : log.entries.filter((e) => e.kind !== "phase");
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -348,46 +439,114 @@ function PanelBody({
           {TURN_STALE_SENTENCE}
         </p>
       )}
-      {log.truncatedHead && (
-        <p
-          className="break-keep border-b border-line px-4 py-2 text-meta text-ink-muted"
-          data-testid="agent-work-panel-truncated"
-        >
-          {WORK_LOG_TRUNCATED_HEAD_SENTENCE}
-        </p>
+
+      {server !== null && runEntries.length > 1 && (
+        <RunListView
+          entries={runEntries}
+          selectedRunId={selectedRunId}
+          nowMs={nowMs}
+          onSelect={onSelectRun}
+        />
       )}
+      {server !== null && server.phase === "awaiting_approval" && cardHref !== null && (
+        <ApprovalLink href={cardHref} />
+      )}
+      {server !== null && server.phase === "queued" && progress !== null && (
+        <QueueAheadView
+          progress={progress}
+          channels={channels}
+          directory={directory}
+          selfMemberId={selfMemberId}
+        />
+      )}
+
+      {server !== null ? (
+        <section data-testid="agent-work-panel-record">
+          <h3 className="px-4 pt-2 text-timestamp text-ink-muted">기록</h3>
+          <p
+            className="break-keep px-4 pb-1 text-timestamp text-ink-muted"
+            data-testid="agent-work-panel-kept"
+          >
+            {RUN_LEDGER_KEPT_SENTENCE}
+          </p>
+          {ledger.isLoading ? (
+            <Skeleton ready={false} rows={3} className="p-4" />
+          ) : ledger.rows.length === 0 ? (
+            <EmptyInvite
+              {...runEmptyState(progress)}
+              testId="agent-work-panel-empty"
+            />
+          ) : (
+            <LedgerView rows={ledger.rows} />
+          )}
+          {ledger.isError && (
+            <p
+              className="break-keep px-4 py-2 text-meta text-warn"
+              data-testid="agent-work-panel-ledger-error"
+            >
+              기록을 읽지 못했어요. 잠시 뒤에 다시 읽어요.
+            </p>
+          )}
+        </section>
+      ) : (
+        <>
+          {log.truncatedHead && (
+            <p
+              className="break-keep border-b border-line px-4 py-2 text-meta text-ink-muted"
+              data-testid="agent-work-panel-truncated"
+            >
+              {WORK_LOG_TRUNCATED_HEAD_SENTENCE}
+            </p>
+          )}
+          {log.entries.length === 0 && (
+            <EmptyInvite
+              headline={WORK_LOG_EMPTY_HEADLINE}
+              detail={WORK_LOG_EMPTY_DETAIL}
+              testId="agent-work-panel-empty"
+            />
+          )}
+        </>
+      )}
+
       {log.droppedEntries > 0 && (
         <p
           className="break-keep px-4 pt-2 text-meta text-ink-muted"
           data-testid="agent-work-panel-dropped"
         >
-          앞의 <span data-numeric>{log.droppedEntries}</span>개 항목은 자리에서
-          밀려났습니다.
+          앞의 <span data-numeric>{log.droppedEntries}</span>
+          {WORK_LOG_DROPPED_SENTENCE}
         </p>
       )}
 
-      {log.entries.length === 0 ? (
-        <EmptyInvite
-          headline={WORK_LOG_EMPTY_HEADLINE}
-          detail={WORK_LOG_EMPTY_DETAIL}
-          testId="agent-work-panel-empty"
-        />
-      ) : (
-        <ol className="flex flex-col" data-testid="agent-work-panel-entries">
-          {log.entries.map((entry) => (
-            <EntryRow
-              key={entry.seq}
-              log={log}
-              entry={entry}
-              liveness={liveness}
-            />
-          ))}
-        </ol>
+      {streamEntries.length > 0 && (
+        <section data-testid="agent-work-panel-stream">
+          {server !== null && (
+            <>
+              <h3 className="px-4 pt-3 text-timestamp text-ink-muted">보낸 글과 도구 호출</h3>
+              <p
+                className="break-keep px-4 pb-1 text-timestamp text-ink-muted"
+                data-testid="agent-work-panel-stream-limit"
+              >
+                {RUN_STREAM_SENTENCE}
+              </p>
+            </>
+          )}
+          <ol className="flex flex-col" data-testid="agent-work-panel-entries">
+            {streamEntries.map((entry) => (
+              <EntryRow
+                key={entry.seq}
+                log={log}
+                entry={entry}
+                liveness={liveness}
+              />
+            ))}
+          </ol>
+        </section>
       )}
 
       {liveness === "quiet" && (
         <p
-          className="break-keep px-4 py-2 text-meta text-warn"
+          className="break-keep px-4 py-2 text-meta text-ink-muted"
           data-testid="agent-work-panel-quiet"
         >
           {WORK_LOG_QUIET_SENTENCE}
@@ -398,17 +557,22 @@ function PanelBody({
 }
 
 /**
- * 이 패널이 아무것도 보관하지 않는다는 사실은 크롬이다. 스크롤 영역 안에 두면
- * 마지막 진행 항목처럼 읽히고, 스크롤을 내려야만 보이는 자리에 "이건 저장되지
- * 않습니다"를 두는 것은 사실상 숨기는 것이다.
+ * 이 패널이 보여 주는 것의 한계는 크롬이다. 스크롤 영역 안에 두면 마지막 기록
+ * 항목처럼 읽히고, 스크롤을 내려야만 보이는 자리에 한계를 두는 것은 사실상
+ * 숨기는 것이다.
+ *
+ * 서버가 아는 run은 「에이전트가 보고한 만큼만」이 한계이고(기록은 서버에 남는다),
+ * 서버가 모르는 run은 「이 화면에만 있다」가 한계다. 두 문장이 서로의 자리에
+ * 서면 거짓이 된다: 서버에 남는 기록에 「닫으면 사라져요」를 붙이던 것이
+ * 이 화면의 옛 결함이었다.
  */
-function PanelFooter() {
+function PanelFooter({ server }: { server: boolean }) {
   return (
     <p
       className="break-keep border-t border-line px-4 py-2 text-timestamp text-ink-muted"
-      data-testid="agent-work-panel-volatile"
+      data-testid="agent-work-panel-limit"
     >
-      {WORK_LOG_VOLATILE_SENTENCE}
+      {server ? RUN_LEDGER_LIMIT_SENTENCE : RUN_LOCAL_ONLY_SENTENCE}
     </p>
   );
 }
@@ -463,7 +627,7 @@ function TextRow({
     <div>
       {entry.clipped && (
         <p className="text-timestamp text-ink-muted">
-          앞부분이 길어 잘렸습니다. 최근 내용만 남아 있습니다.
+          {WORK_LOG_CLIPPED_SENTENCE}
         </p>
       )}
       {/* `break-keep`만으로는 부족하다(tokens.md §4): keep-all은 한국어 어절을
