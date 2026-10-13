@@ -52,6 +52,26 @@ import {usePalette, useStyles} from './theme';
  */
 export const BAR_CONTROL_MAX_SCALE = 1.6;
 
+// -----------------------------------------------------------------------------
+// Dynamic Type 상한 — 이 파일이 `maxFontSizeMultiplier` 의 유일한 출처다 (#3774).
+//
+// 정책: 크롬(탭바·헤더·버튼·한 줄 고정폭 라벨)만 상한을 갖는다. 메시지 본문·목록·
+// 입력 텍스트(`TextInput`)에는 상한을 붙이지 않는다 — 읽는 글자는 끝까지 자란다.
+// 아래 값은 전부 「한 줄·고정 폭에 서는 표식」용이고, 화면에 새 상한이 필요하면 여기에
+// 이름과 이유를 적는다(`designSystem.test.ts` 가 다른 파일의 상수 정의를 막는다).
+// -----------------------------------------------------------------------------
+
+/** AI 계정 카드 머리·「나에게만」 줄. 입력창 위에 자판과 서므로 바 컨트롤(1.6)보다 낮다(R5-H1). */
+export const HEAD_MAX_SCALE = 1.3;
+/** 접힌 줄 — 제 줄에 혼자 서므로 바 컨트롤과 같은 값(#2988, R6 M1). */
+export const FOLDED_MAX_SCALE = BAR_CONTROL_MAX_SCALE;
+/** 이 배수부터 AI 카드의 알약이 이름 아래로 내려간다(상한이 아니라 줄바꿈 문턱). */
+export const STACK_PILL_SCALE = 1.5;
+/** SAS 숫자는 이미 크다(40). 큰 글씨에서 네 칸이 375 폭을 넘지 않게 멈춘다. */
+export const SAS_MAX_SCALE = 1.35;
+/** 아바타 이니셜 — 32 상자에 13pt 한 글자가 여백을 지키는 끝. */
+export const AVATAR_INITIAL_MAX_SCALE = 1.3;
+
 /** Every tappable thing in this app is at least this tall. */
 const hitStyle = {minHeight: TOUCH_TARGET, justifyContent: 'center'} as const;
 

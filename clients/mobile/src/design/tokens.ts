@@ -480,38 +480,38 @@ export const ds2Radius = {
 } as const;
 
 /**
- * 디자인 시스템 2.0 폰 타입 (ADR-0189 D6, themes-2.0 §5 「타입」).
+ * 폰 타입 크기 — 역할 표 하나 (#3774, `docs/design-system/typography-proposal.md` §3.3).
  *
- * `badge`만 표 밖이다: 시안 A `.a-tab .dot{font-size:10.5px}` — 탭바 점 안의 수.
- * 글자라기보다 도형에 가까운 자리라 아바타 이니셜(`MessageRow` 10·11)과 같은 부류다.
- */
-export const ds2Type = {
-  largeTitle: 30,
-  title: 24,
-  headline: 17,
-  body: 16,
-  callout: 15,
-  subhead: 13.5,
-  caption: 12,
-  badge: 10.5,
-} as const;
-
-/**
- * Type scale. Body is 16 because that is the size iOS stops zooming text fields
- * at, and a login form that zooms on focus is the first thing a person meets.
+ * 예전에는 `font`(여명 6단)와 `ds2Type`(DS2 8단)이 따로 살며 17·18, 24·26, 12·12.5 처럼
+ * 한 뜻에 두 값이 있었다. 이제 이 객체가 유일한 크기 표다. `body-strong` 은 크기 키가
+ * 아니다 — `font.body` 에 `fontWeight: '600'` 을 얹는다. `code` 도 `font.meta` +
+ * `fontFamily: 'Menlo'` + `line.code` 다.
+ *
+ * 본문 16 은 iOS Body(17)보다 한 단 작은 **메신저 밀도**로 고른 값이다(카카오톡·
+ * Telegram 계열 본문 크기에 맞춤). 「iOS 입력창이 줌을 멈추는 크기」라는 예전 근거는
+ * Safari/WebView 규칙이라 RN `TextInput` 에는 적용되지 않는다.
+ *
+ * 굵기는 600/700 만 쓴다(800 폐지). 상한 정책: 크롬(탭바·헤더·버튼)만
+ * `maxFontSizeMultiplier` 를 갖고, 본문·메시지·입력은 상한이 없다(`atoms.tsx`).
  */
 export const font = {
   /**
-   * SAS 4자리처럼 두 화면 사이에서 비교하는 숫자 — 표면을 지배해야 한다.
-   * One clear step above `title` (26). Not paired with web `--text-display`
-   * (20px): that role is a page heading, this one is a number to match aloud.
+   * SAS 4자리처럼 두 화면 사이에서 비교하는 숫자 — 표면을 지배해야 한다. 홈 큰 제목.
+   * 700, 자간 −0.02em.
    */
-  display: 32,
-  title: 26,
-  heading: 18,
+  display: 30,
+  /** 화면·시트 제목. 700, 자간 −0.02em. */
+  title: 22,
+  /** 섹션 머리·행 제목. 600. */
+  heading: 17,
+  /** 본문·입력. 400(강조는 600). */
   body: 16,
+  /** 라벨·보조 문장. 500~600. */
   label: 13,
+  /** 시각·핸들·주석. 400. */
   meta: 12,
+  /** 배지·태그·알약 안 글자. 500, 자간 +0.02em. */
+  caption: 11,
 } as const;
 
 /**
@@ -535,8 +535,7 @@ export const font = {
  * 작성자 줄과 어긋났던 것이 정확히 이것을 안 지켰기 때문이고, 이제 두 쪽이 같은
  * 이름을 든다(`MessageRow` 의 `rowTime` 주석에 실측이 있다).
  *
- * 값은 발명이 아니라 **이 표면이 이미 쓰던 것**이다: 묘비가 18, 카드 주석과 코드가
- * 17, 본문 문단과 목록이 22.
+ * 값은 #3774 역할 표(§3.3)다. 본문 문단·목록은 23, 카드 주석은 16, 코드는 17.
  */
 export const line = {
   /**
@@ -555,10 +554,20 @@ export const line = {
    * 치른 거래(절대 배치된 시각·32pt 칩·24pt 코드 복사)를 생각하면 그쪽이 비싸다.
    */
   head: 15,
-  /** `font.meta`(12) 한 줄. 카드 주석·행 오류·코드·누를 것의 라벨. */
-  meta: 17,
+  /** `font.meta`(12) 한 줄. 카드 주석·행 오류·누를 것의 라벨. 코드는 `code`. */
+  meta: 16,
   /** `font.label`(13) 한 줄 **문장**. 묘비. */
   label: 18,
-  /** `font.body`(16) 한 줄. 본문 문단·목록·「작업 중」. */
-  body: 22,
+  /** `font.body`(16) 한 줄. 본문 문단·목록·「작업 중」. 22 → 23 (#3774, 1.44). */
+  body: 23,
+  /** `font.caption`(11) 한 줄. */
+  caption: 14,
+  /** `font.heading`(17) 한 줄. */
+  heading: 22,
+  /** `font.title`(22) 한 줄. */
+  title: 28,
+  /** `font.display`(30) 한 줄. */
+  display: 36,
+  /** Menlo 12 코드 — `meta`(16)와 뜻이 다르다: 고정폭이라 한 단 더 숨 쉰다. */
+  code: 17,
 } as const;

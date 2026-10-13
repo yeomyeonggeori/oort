@@ -213,7 +213,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 - 웹은 rem으로 브라우저 줌을 타고, 폰은 pt로 iOS 동적 타입을 탄다.
 - 줄 높이의 뜻 자체가 다르다 — 웹 관용은 **무단위 비율**(1.5), RN은 **절대 포인트 수**. 한 토큰이 둘을 못 섬긴다.
-- 폰 본문 16은 **iOS 입력창이 줌을 멈추는 크기**다(`tokens.ts`의 `font` 주석). 웹 본문 14에 "맞추면" 로그인 폼이 포커스에서 줌한다.
+- 폰 본문 16은 iOS Body(17)보다 한 단 작은 **메신저 밀도**로 고른 값이다(`tokens.ts`의 `font` 주석, #3774). 「iOS 입력창이 줌을 멈추는 크기」라는 예전 근거는 Safari/WebView 규칙이라 RN `TextInput`에는 적용되지 않는다. 폰 크기·줄 높이는 `font`·`line` 한 표(`display 30/36 · title 22/28 · heading 17/22 · body 16/23 · label 13/18 · meta 12/16 · caption 11/14 · code 12/17`)이고, `ds2Type`은 없어졌다.
 - 웹 `--text-title`(16px)과 폰 `font.body`(16)는 값이 같지만 **우연이다.** 짝으로 적으면 웹이 제목 크기를 바꾸는 날 폰 본문이 함께 끌려간다.
 
 > **Proposed (#3774, 미승인).** 역할 토큰 재정의(display/title/heading/body/body-strong/label/meta/caption/code), 폰 스케일 통합, ko/en/ja 서체·줄바꿈·Dynamic Type 정책 제안은 [typography-proposal.md](typography-proposal.md)에 있다. owner 결정 전까지 위 표가 현행이다.

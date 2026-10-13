@@ -774,7 +774,7 @@ describe('#3386 — 연속 행에는 시각이 없다 (Buzz, owner 2026-10-03 �
     const author = flatten(view.getByText('김인턴').props.style);
     expect(author.lineHeight).toBe(CONV.whoLine);
     expect(timeStyle.lineHeight).toBe(author.lineHeight);
-    expect(author.fontSize).toBe(CONV.whoSize);
+    expect(author.fontSize).toBe(font.body);
     expect(author.fontWeight).toBe('700');
     expect(timeStyle.fontSize).toBe(font.meta);
   });

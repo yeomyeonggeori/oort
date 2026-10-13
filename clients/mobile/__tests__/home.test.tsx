@@ -405,12 +405,12 @@ function flat(style: unknown): Record<string, unknown> {
 }
 
 describe('홈 — 머리', () => {
-  it('큰 제목은 워크스페이스 이름이고 30/800 이다', async () => {
+  it('큰 제목은 워크스페이스 이름이고 30/700 이다', async () => {
     await mountHome();
     await waitFor(() => expect(screen.getByTestId('home-title')).toHaveTextContent('여명거리'));
     const title = flat(screen.getByTestId('home-title').props.style);
     expect(title.fontSize).toBe(30);
-    expect(title.fontWeight).toBe('800');
+    expect(title.fontWeight).toBe('700');
     // 로고는 보조기술에서 숨는다(옆의 제목이 이름을 말한다) — 그래서 숨은 원소까지 찾는다.
     expect(
       screen.getByTestId('home-logo-brand', {includeHiddenElements: true}),
