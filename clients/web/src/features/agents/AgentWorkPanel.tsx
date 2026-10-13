@@ -56,6 +56,7 @@ import {
   type Directory,
 } from "@/features/workspace/useWorkspace";
 import { useApprovalCardPath } from "@/features/inbox/useInbox";
+import { AgentLivenessBar } from "./AgentLivenessLabel";
 import { EmptyInvite, Skeleton } from "@/features/common/States";
 import { useAdeDrawerOpen } from "@/features/ade/adeDrawerStore";
 import {
@@ -234,6 +235,7 @@ export function AgentWorkPanel() {
     >
       <PanelHeader
         name={name}
+        agentId={target.memberId}
         log={log}
         // 시계는 **연 쪽이 알고 있던 시작 시각**으로 그린다. 패널이 붙는 시점에
         // 여는 프레임은 이미 지나갔으므로(그것이 잘림 고지의 근거다) 로그 자신은
@@ -267,6 +269,7 @@ export function AgentWorkPanel() {
 
 function PanelHeader({
   name,
+  agentId,
   log,
   startedAtMs,
   nowMs,
@@ -276,6 +279,7 @@ function PanelHeader({
   onClose,
 }: {
   name: string;
+  agentId: string;
   log: WorkLog | null;
   startedAtMs?: number;
   nowMs: number;
@@ -387,6 +391,9 @@ function PanelHeader({
           </span>
         )}
       </div>
+      {/* 지금 살아 있는가(ADR-0200 D4)와 다시 깨우기: 이 일을 맡은 에이전트가 응답하는지.
+          한 일의 상태(대기·가져감·작업 중)와 다른 사실이다. */}
+      <AgentLivenessBar agentId={agentId} />
     </header>
   );
 }

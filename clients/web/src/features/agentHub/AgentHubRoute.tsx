@@ -30,6 +30,7 @@ import {
   useTickingNow,
 } from "@/features/agents/agentWorkingSignal";
 import { AgentTurnBadge } from "@/features/agents/AgentTurnBadge";
+import { AgentLivenessBar } from "@/features/agents/AgentLivenessLabel";
 import { turnHubSentence, turnWord } from "@/features/agents/turnCopy";
 import { openWorkPanel } from "@/features/agents/workLogStore";
 import type { AgentWorkingSignal } from "@momo/core/features/agents/workingSignal";
@@ -528,6 +529,13 @@ export function AgentHubRoute() {
                     <p className="truncate text-meta text-ink-muted">
                       @{selected.handle}
                     </p>
+                    {/* 지금 살아 있는가(ADR-0200 D4)와 다시 깨우기. 「활성」 같은 연결
+                        상태와 다른 사실이다. */}
+                    <AgentLivenessBar
+                      key={normalizedId(selected.id)}
+                      agentId={selected.id}
+                      className="pt-1"
+                    />
                   </div>
                   <nav
                     className="shrink-0"

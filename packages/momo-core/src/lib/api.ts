@@ -5125,6 +5125,78 @@ export async function fetchAgentRunEvents(
   );
 }
 
+// ---- Hosted agent liveness (ADR-0200 D4, #3742) -----------------------------
+// GET /v1/workspaces/{ws}/agents/{agent}/liveness
+//
+// 「토큰이 연결돼 있다고 연결이 아니라, 지금 살아있는지가 궁금한거야」(성재). 연결
+// 상태(`status: active`)는 자격증명이 한 번 증명됐다는 뜻이고 시간이 지나도 변하지
+// 않는다. 이 라벨은 서버가 자기 사실(수령·읽기·run 이벤트·ping)로 **지금** 파생한다.
+
+export type AgentLivenessState =
+  | "inactive"
+  | "error"
+  | "woken_not_collected"
+  | "work_waiting"
+  | "responsive"
+  | "alive_idle"
+  | "quiet"
+  | "unresponsive";
+
+const AGENT_LIVENESS_STATES = new Set<AgentLivenessState>([
+  "inactive",
+  "error",
+  "woken_not_collected",
+  "work_waiting",
+  "responsive",
+  "alive_idle",
+  "quiet",
+  "unresponsive",
+]);
+
+/** 채널을 공유하는 멤버가 보는 것: 라벨과 마지막으로 말한 때뿐이다. */
+export interface AgentLiveness {
+  agentMemberId: string;
+  state: AgentLivenessState;
+  lastSignalAtMs?: number;
+}
+
+export function agentLivenessFromWire(value: unknown): AgentLiveness {
+  const source = responseRecord(value);
+  const agentMemberId = str(source, "agentMemberId");
+  const state = str(source, "state");
+  if (
+    agentMemberId === undefined ||
+    state === undefined ||
+    !AGENT_LIVENESS_STATES.has(state as AgentLivenessState)
+  ) {
+    throw new WireShapeError();
+  }
+  const lastSignalAtMs = optionalFiniteNumber(source, "lastSignalAtMs");
+  return {
+    agentMemberId: agentMemberId.toLowerCase(),
+    state: state as AgentLivenessState,
+    ...(lastSignalAtMs === undefined ? {} : { lastSignalAtMs }),
+  };
+}
+
+/**
+ * 이 hosted 에이전트가 지금 살아 있는가. hosted가 아닌 에이전트와 채널을 공유하지
+ * 않는 에이전트는 같은 404다(이 경로는 「hosted인가」를 알아내는 탐침이 아니다):
+ * 호출자는 404를 「라벨 없음」으로 접는다.
+ */
+export async function fetchAgentLiveness(
+  workspaceId: string,
+  agentMemberId: string
+): Promise<AgentLiveness> {
+  return agentLivenessFromWire(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(
+        workspaceId.toLowerCase()
+      )}/agents/${encodeURIComponent(agentMemberId.toLowerCase())}/liveness`
+    )
+  );
+}
+
 /**
  * What `POST …/agent-runs/{run}/cancel` answers (openapi
  * `AgentRunCancelResponse`, server-rust `dto.rs`).

@@ -3,6 +3,9 @@
 // ADR-0200 UXUI 캡처 (#3747 U1 · #3748 U2 · #3749 U3): 외부 에이전트 작업 상태를
 // 사실대로.
 //
+//   SLICE=u3  생존 라벨 5종(응답함 n분 전 · 살아 있음 · 대기 중 · 일이 기다리는 중 · 깨웠지만 아직
+//             안 가져감 · 응답 없음 n분)을 멤버 목록·에이전트 헤더·사이드바 DM 행·작업 패널에,
+//             owner/admin에게만 보이는 「다시 깨우기」와 쿨다운.
 //   SLICE=u2  서버 원장 기록(닫아도 남는다) · 여러 run(진행 중 병렬·대기열 순서·끝난 일) ·
 //             대기열 앞(내 채널은 자세히, 아니면 「앞에 N건」) · 승인 카드 링크 ·
 //             보이는 것의 한계 한 줄 · 서버가 모르는 run(이 화면에만 있는 기록).
@@ -84,7 +87,7 @@ function progress(now, extra) {
 
 /** 장면 상태. 페이지가 읽을 때마다 현재 값을 돌려준다. */
 function newScene() {
-  return { runs: [], progressCalls: 0, ledgers: {}, ledgerCalls: 0, approvals: [] };
+  return { runs: [], progressCalls: 0, ledgers: {}, ledgerCalls: 0, approvals: [], liveness: {}, ringCalls: 0, ringMode: "ok", role: "owner", dmChannels: [] };
 }
 
 async function installRoutes(context, scene) {
@@ -112,14 +115,39 @@ async function installRoutes(context, scene) {
       const channel = path.split("/channels/")[1]?.split("/")[0];
       return json(route, { runs: scene.runs.filter((r) => r.channelId === channel) });
     }
+    const livenessMatch = path.match(/\/agents\/([^/]+)\/liveness$/);
+    if (livenessMatch) {
+      const hit = scene.liveness[livenessMatch[1].toLowerCase()];
+      return hit ? json(route, { agentMemberId: livenessMatch[1].toLowerCase(), ...hit }) : json(route, { error: { code: "not_found", message: "not found" } }, 404);
+    }
+    if (path.endsWith("/doorbell/ring") && method === "POST") {
+      scene.ringCalls += 1;
+      if (scene.ringMode === "limited") return json(route, { error: "rate limited", retryAfterSeconds: 2700 }, 429);
+      const requestedAtMs = Date.now();
+      return json(route, { requestedAtMs, nextAllowedAtMs: requestedAtMs + 60_000 }, 202);
+    }
+    if (path.endsWith("/hosted-agent-connections") && method === "GET") {
+      if (scene.role === "member") return json(route, { error: { code: "forbidden", message: "forbidden" } }, 403);
+      return json(route, { connections: Object.keys(scene.liveness).map((agent, i) => ({
+        id: `00000000-0000-7000-8000-00000000050${i}`, agentMemberId: agent, status: "active", authMode: "static_bearer",
+        audience: "https://oort.example.test", approvedChannelIds: [CH], approvedScopes: [], createdAtMs: 1 + i, updatedAtMs: 1 + i,
+      })) });
+    }
+    if (path.endsWith("/profile") && method === "GET" && path.includes("/agents/")) {
+      const id = path.split("/").at(-2);
+      return json(route, { profile: { agentMemberId: id, workspaceId, instructions: "채널 정리와 일정 요약을 맡아요.", enabledTools: [], triggers: { mention: true }, paused: false, version: 1, updatedBy: memberId, updatedAtMs: Date.now() - 86_400_000 } });
+    }
+    if (path.endsWith("/allowed-models")) return json(route, { allowedAgentModels: [] });
     const ledgerMatch = path.match(/\/agent-runs\/([^/]+)\/events$/);
     if (ledgerMatch) {
       scene.ledgerCalls += 1;
       const runId = ledgerMatch[1].toLowerCase();
       return json(route, { runId, events: scene.ledgers[runId] ?? [] });
     }
-    if (path.endsWith("/channels")) return json(route, { channels });
-    if (path.endsWith("/roster")) return json(route, { members: roster });
+    if (path.endsWith("/channels")) return json(route, { channels: [...channels, ...(scene.dmChannels ?? [])] });
+    if (path.endsWith("/roster")) {
+      return json(route, { members: scene.roster ?? roster.map((m) => (m.id === memberId ? { ...m, role: scene.role } : m)) });
+    }
     if (path.endsWith("/read-state") && method === "GET") {
       return json(route, { read_states: channels.map((c) => ({ channel_id: c.id, last_read_seq: 99, latest_seq: 99, unread_count: 0, mention_count: 0, marked_unread_before_seq: null })) });
     }
@@ -459,6 +487,122 @@ async function u2(browser, origin, scheme) {
   await second.context.close();
 }
 
+async function u3(browser, origin, scheme) {
+  const tag = `1440-${scheme}`;
+  const shot = (name) => resolve(OUT_DIR, `${name}-${tag}.png`);
+  const now = Date.now();
+  const A = {
+    grok: agentId,
+    kim: otherAgentId,
+    dots: "00000000-0000-7000-8000-000000000303",
+    plan: "00000000-0000-7000-8000-000000000304",
+    desk: "00000000-0000-7000-8000-000000000305",
+  };
+  const agents = [
+    person(A.grok, "agent", "그록봇", "grokbot", { ownerHumanId: memberId }),
+    person(A.kim, "agent", "김인턴", "kim-intern", { ownerHumanId: memberId }),
+    person(A.dots, "agent", "닷츠", "dots", { ownerHumanId: memberId }),
+    person(A.plan, "agent", "플래너", "planner", { ownerHumanId: memberId }),
+    person(A.desk, "agent", "데스크", "desk", { ownerHumanId: memberId }),
+  ];
+  const build = (role) => {
+    const scene = newScene();
+    scene.role = role;
+    scene.roster = [person(memberId, "human", "곽성재", "seongjae", { role }), ...agents];
+    scene.liveness = {
+      [A.kim]: { state: "responsive", lastSignalAtMs: now - 3 * MIN },
+      [A.dots]: { state: "alive_idle", lastSignalAtMs: now - 2 * MIN },
+      [A.desk]: { state: "work_waiting", lastSignalAtMs: now - 25 * MIN },
+      [A.grok]: { state: "woken_not_collected", lastSignalAtMs: now - 40 * MIN },
+      [A.plan]: { state: "unresponsive", lastSignalAtMs: now - 12 * MIN },
+    };
+    scene.dmChannels = agents.map((a, i) => ({ id: `00000000-0000-7000-8000-00000000062${i}`, workspaceId, kind: "dm", muted: false, memberIds: [memberId, a.id] }));
+    return scene;
+  };
+
+  // ① 멤버 목록: 다섯 라벨. (「연결됨」이 아니라 「지금 살아 있는가」)
+  const admin = build("owner");
+  const { context, page } = await open(browser, origin, scheme, admin, "/directory");
+  await page.getByTestId("directory-row").first().waitFor({ timeout: 15_000 });
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="agent-liveness"]').length >= 5, null, { timeout: 15_000 });
+  const rowLabel = async (agent) => ((await page.locator(`[data-testid="directory-row"][data-member-id="${agent}"] [data-testid="agent-liveness"]`).first().textContent()) ?? "").replace(/\s+/g, " ").trim();
+  check(`${tag} members: 응답함 n분 전`, (await rowLabel(A.kim)).startsWith("응답함 3분 전"), await rowLabel(A.kim));
+  check(`${tag} members: 살아 있음 · 대기 중`, (await rowLabel(A.dots)).startsWith("살아 있음 · 대기 중"), await rowLabel(A.dots));
+  check(`${tag} members: 일이 기다리는 중`, (await rowLabel(A.desk)).startsWith("일이 기다리는 중"), await rowLabel(A.desk));
+  check(`${tag} members: 깨웠지만 아직 안 가져감`, (await rowLabel(A.grok)).startsWith("깨웠지만 아직 안 가져감"), await rowLabel(A.grok));
+  check(`${tag} members: 응답 없음 n분`, (await rowLabel(A.plan)).startsWith("응답 없음 12분"), await rowLabel(A.plan));
+  const humanLabels = await page.locator(`[data-testid="directory-row"][data-member-kind="human"] [data-testid="agent-liveness"]`).count();
+  check(`${tag} members: 사람 행에는 라벨이 없다`, humanLabels === 0);
+  check(`${tag} members: 「연결됨」을 말하지 않는다`, !((await page.getByTestId("directory-row").allTextContents()).join(" ").includes("연결됨")));
+  await page.screenshot({ path: shot("1-members") });
+
+  // ② 에이전트 헤더 + 다시 깨우기(owner)
+  await page.evaluate((id) => { location.hash = `/agents?agent=${id}`; }, A.grok);
+  await page.getByTestId("agent-liveness-bar").waitFor({ timeout: 15_000 });
+  await page.getByTestId("wake-agent-button").waitFor({ timeout: 15_000 });
+  const headerLabel = ((await page.getByTestId("agent-liveness-bar").getByTestId("agent-liveness").textContent()) ?? "");
+  check(`${tag} header: 깨웠지만 아직 안 가져감 + 다시 깨우기`, headerLabel.includes("깨웠지만 아직 안 가져감") && (await page.getByTestId("wake-agent-button").isEnabled()), headerLabel);
+  await page.screenshot({ path: shot("2-header-wake") });
+  await page.getByTestId("wake-agent-button").click();
+  await page.waitForFunction(() => /뒤에 다시 깨울 수 있어요/.test(document.querySelector('[data-testid="wake-agent-status"]')?.textContent ?? ""), null, { timeout: 5_000 });
+  check(`${tag} wake: 눌렀더니 접수되고(1회) 버튼이 잠긴다`, admin.ringCalls === 1 && (await page.getByTestId("wake-agent-button").isDisabled()));
+  const cool = ((await page.getByTestId("wake-agent-status").textContent()) ?? "").trim();
+  check(`${tag} wake: 쿨다운 표시`, /^(\d+초|1분) 뒤에 다시 깨울 수 있어요$/.test(cool), cool);
+  await page.screenshot({ path: shot("3-wake-cooldown") });
+
+  // ③ 작업 패널 머리
+  admin.runs = [progress(now, { id: RUN_A, agentMemberId: A.desk, phase: "queued", status: "queued", queuePosition: 1, createdAtMs: now - 25 * MIN, triggerSummary: "일정 정리" })];
+  await serverMoves(page, admin, admin.runs, "queued");
+  // desk 에이전트의 DM이 아니라 #계획 채널의 run이므로 계획 채널로 간다.
+  await page.evaluate((id) => { location.hash = `/c/${id}`; }, CH);
+  await page.getByTestId("composer-working-open").first().waitFor({ timeout: 15_000 });
+  await page.getByTestId("composer-working-open").first().click();
+  await page.getByTestId("agent-work-panel").waitFor();
+  await page.getByTestId("agent-work-panel").getByTestId("agent-liveness").waitFor({ timeout: 10_000 });
+  const panelLabel = ((await page.getByTestId("agent-work-panel").getByTestId("agent-liveness").textContent()) ?? "");
+  check(`${tag} panel: 머리에 「일이 기다리는 중」`, panelLabel.includes("일이 기다리는 중"), panelLabel);
+  check(`${tag} panel: 머리에도 다시 깨우기`, (await page.getByTestId("agent-work-panel").getByTestId("wake-agent-button").count()) === 1);
+  await page.screenshot({ path: shot("5-panel") });
+  // ④ 사이드바 DM 행: 한두 낱말
+  await page.evaluate((id) => { location.hash = `/c/${id}`; }, admin.dmChannels[0].id);
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="channel-item"] [data-testid="agent-liveness"]').length >= 5, null, { timeout: 15_000 });
+  const rowWords = await page.locator('[data-testid="channel-item"] [data-testid="agent-liveness"] .truncate').allTextContents();
+  check(`${tag} sidebar: DM 행마다 한두 낱말`, ["응답함", "살아 있음", "일 대기", "안 가져감", "응답 없음"].every((w) => rowWords.includes(w)), rowWords.join(","));
+  const widest = await page.locator('[data-testid="channel-item"] [data-testid="agent-liveness"]').evaluateAll((els) => Math.max(...els.map((el) => el.getBoundingClientRect().width)));
+  check(`${tag} sidebar: 행 안에서 넘치지 않는다`, widest <= 110, String(widest));
+  const dmHeader = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-testid="agent-liveness"]')]
+      .filter((el) => !el.closest('[data-testid="sidebar"]') && !el.closest('[data-testid="agent-work-panel"]'))
+      .map((el) => el.textContent ?? "").join("|")
+  );
+  check(`${tag} dm-header: 채널 머리에도 라벨`, dmHeader.includes("깨웠지만 아직 안 가져감"), dmHeader);
+  await page.screenshot({ path: shot("4-sidebar-dm") });
+
+  await context.close();
+
+  // ⑤ 일반 멤버: 라벨만, 버튼은 없다
+  const member = build("member");
+  const second = await open(browser, origin, scheme, member, `/agents?agent=${A.grok}`);
+  await second.page.getByTestId("agent-liveness-bar").waitFor({ timeout: 15_000 });
+  await second.page.waitForTimeout(800);
+  const memberLabel = ((await second.page.getByTestId("agent-liveness-bar").getByTestId("agent-liveness").textContent()) ?? "");
+  check(`${tag} member: 라벨은 보인다`, memberLabel.includes("깨웠지만 아직 안 가져감"), memberLabel);
+  check(`${tag} member: 다시 깨우기는 없다 (연결 목록이 403이다)`, (await second.page.getByTestId("wake-agent-button").count()) === 0);
+  await second.page.screenshot({ path: shot("6-member-no-wake") });
+  await second.context.close();
+
+  // ⑥ 429: 시간당 한도 — 오류 문구가 아니라 서버가 준 쿨다운
+  const limited = build("admin");
+  limited.ringMode = "limited";
+  const third = await open(browser, origin, scheme, limited, `/agents?agent=${A.grok}`);
+  await third.page.getByTestId("wake-agent-button").waitFor({ timeout: 15_000 });
+  await third.page.getByTestId("wake-agent-button").click();
+  await third.page.waitForFunction(() => /45분 뒤에 다시 깨울 수 있어요/.test(document.querySelector('[data-testid="wake-agent-status"]')?.textContent ?? ""), null, { timeout: 5_000 });
+  check(`${tag} limited: 429는 「45분 뒤에 다시 깨울 수 있어요」`, !((await third.page.getByTestId("wake-agent-status").textContent()) ?? "").includes("못했어요"));
+  await third.page.screenshot({ path: shot("7-wake-limited") });
+  await third.context.close();
+}
+
 async function main() {
   if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) throw new Error("dist/ is missing. Run npm run build first.");
   mkdirSync(OUT_DIR, { recursive: true });
@@ -468,6 +612,7 @@ async function main() {
     for (const scheme of ["light", "dark"]) {
       if (SLICE === "u1") await u1(browser, preview.origin, scheme);
       if (SLICE === "u2") await u2(browser, preview.origin, scheme);
+      if (SLICE === "u3") await u3(browser, preview.origin, scheme);
     }
   } finally {
     await browser.close();
