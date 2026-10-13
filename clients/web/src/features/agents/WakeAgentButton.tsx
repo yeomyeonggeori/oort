@@ -101,11 +101,17 @@ export function WakeAgentButton({
     : (failed ?? (ring.isSuccess ? WAKE_REQUESTED_SENTENCE : ""));
   // 눈이 읽는 한 줄: 왜 지금 못 누르는가(쿨다운)나 왜 못 깨웠는가. 버튼 옆에 한 줄로
   // 서서 문구가 나타나도 머리의 높이가 변하지 않는다(design-review U3 M-4).
-  const lead = limited
-    ? wakeLimitedText(limited.retryAfterSeconds).replace(/\.$/, "")
-    : ring.isSuccess
-      ? "깨웠어요"
-      : undefined;
+  // 앞머리(「깨웠어요」「시간당 깨우기 한도에 닿았어요」)는 **쿨다운이 진행 중일 때만** 말한다:
+  // 쿨다운이 끝난 뒤에도 남아 있으면 이미 지난 일이 현재형 안내처럼 읽힌다(design-review U3
+  // 재검수 M-1).
+  const lead =
+    cooldownText === undefined
+      ? undefined
+      : limited
+        ? wakeLimitedText(limited.retryAfterSeconds).replace(/\.$/, "")
+        : ring.isSuccess
+          ? "깨웠어요"
+          : undefined;
   const note =
     failed ?? ([lead, cooldownText].filter(Boolean).join(" · ") || undefined);
 
