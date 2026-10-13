@@ -381,6 +381,35 @@ pub async fn retire_pending_agent_jobs_for_run_in_tx(
     Ok(result.rows_affected())
 }
 
+/// Why a delivery job was retired because its run was ended by the stall sweep
+/// (ADR-0200 D1-4): a late agent that finds the job gone gets a settled run, not a
+/// resurrected one.
+pub const RUN_STALLED_JOB_LAST_ERROR: &str = "run ended by the stall sweep";
+
+/// [`retire_pending_agent_jobs_for_run_in_tx`] with the reason the operator reads on the
+/// row. Same statement, same rule (pending → done), only the `last_error` differs.
+pub async fn retire_pending_agent_jobs_for_run_with_reason_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    reason: &str,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE outbox \
+            SET status = 'done', processed_at = now(), last_error = $3 \
+          WHERE workspace_id = $1 \
+            AND kind = 'agent_job' \
+            AND status = 'pending' \
+            AND lower(payload->>'run_id') = $2",
+    )
+    .bind(workspace_id)
+    .bind(run_id.to_string().to_lowercase())
+    .bind(reason)
+    .execute(&mut *conn)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

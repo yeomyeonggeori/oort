@@ -164,6 +164,12 @@ pub struct NotifierConfig {
     /// payload that expires after 30 days does not need the 300 ms tier-sweep
     /// cadence the loop used to borrow.
     pub share_retention_interval: Duration,
+    /// ADR-0200 D1-4 (#3744): when the stall sweep ends a hosted run whose agent went quiet.
+    /// `MOMO_RUN_LEASE_ABANDON_HOURS` (2, clamped 1..=168): the lease expired this long ago, no
+    /// one re-claimed it and the run has had no event. `MOMO_RUN_UNCLAIMED_EXPIRE_HOURS` (24,
+    /// clamped 1..=720): a queued run nobody took. Both end the run as `timed_out` with a closed
+    /// code (`lease_abandoned` / `unclaimed_expired`); nothing is reassigned or retried.
+    pub run_stall: momo_outbox::StallPolicy,
 }
 
 fn env(key: &str) -> Option<String> {
@@ -239,6 +245,14 @@ impl NotifierConfig {
             share_retention_interval: Duration::from_millis(
                 env_number("MOMO_SHARE_RETENTION_INTERVAL_MS", 600_000u64)?.max(10_000),
             ),
+            run_stall: momo_outbox::StallPolicy {
+                lease_grace_seconds: env_number("MOMO_RUN_LEASE_ABANDON_HOURS", 2i64)?
+                    .clamp(1, 168)
+                    * 3600,
+                unclaimed_seconds: env_number("MOMO_RUN_UNCLAIMED_EXPIRE_HOURS", 24i64)?
+                    .clamp(1, 720)
+                    * 3600,
+            },
         })
     }
 
@@ -261,6 +275,7 @@ impl NotifierConfig {
             avatar_reclaim_database_url: None,
             share_retention_database_url: None,
             share_retention_interval: Duration::from_millis(300),
+            run_stall: momo_outbox::StallPolicy::default(),
         }
     }
 }

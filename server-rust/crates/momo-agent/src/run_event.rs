@@ -69,3 +69,61 @@ pub async fn append_run_event_in_tx(
     }
     Ok(seq)
 }
+
+/// How long a FINISHED run's ledger is kept (ADR-0200 D2). The same number as the
+/// shared-session payload retention (`momo_t3::work_share::SHARE_RETENTION_DAYS`, ADR-0162
+/// 증보 3 D13); a read past it answers an empty ledger without waiting for the sweep.
+pub const RUN_EVENT_RETENTION_DAYS: i32 = 30;
+
+/// Workspaces that hold at least one ledger row of a run finished past retention — the
+/// cross-tenant **read** half of the retention sweep (the caller connects as the
+/// BYPASSRLS notifier role, which holds SELECT only). Runs still in progress are never
+/// candidates.
+pub async fn workspaces_with_expired_run_events(
+    conn: &mut PgConnection,
+    limit: i64,
+) -> Result<Vec<Uuid>, DbError> {
+    Ok(sqlx::query_scalar(
+        "SELECT DISTINCT workspace_id FROM ( \
+           SELECT r.workspace_id FROM agent_run r \
+            WHERE r.finished_at IS NOT NULL \
+              AND r.finished_at < clock_timestamp() - make_interval(days => $1) \
+              AND EXISTS (SELECT 1 FROM agent_run_event e \
+                           WHERE e.workspace_id = r.workspace_id AND e.run_id = r.id) \
+            LIMIT $2) expired",
+    )
+    .bind(RUN_EVENT_RETENTION_DAYS)
+    .bind(limit)
+    .fetch_all(&mut *conn)
+    .await?)
+}
+
+/// Delete up to `batch` ledger rows of runs finished past retention in this workspace
+/// (the **write** half: the caller is the RLS-bound `momo_app` pool). Idempotent, bounded,
+/// and `SKIP LOCKED` so two sweeps never fight over a row.
+pub async fn delete_expired_run_events_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    batch: i64,
+) -> Result<u64, DbError> {
+    let deleted = sqlx::query(
+        "WITH doomed AS MATERIALIZED ( \
+           SELECT e.workspace_id, e.run_id, e.seq \
+             FROM agent_run_event e \
+             JOIN agent_run r ON r.workspace_id = e.workspace_id AND r.id = e.run_id \
+            WHERE e.workspace_id = $1 \
+              AND r.finished_at IS NOT NULL \
+              AND r.finished_at < clock_timestamp() - make_interval(days => $2) \
+            ORDER BY r.finished_at \
+            LIMIT $3 \
+              FOR UPDATE OF e SKIP LOCKED) \
+         DELETE FROM agent_run_event t USING doomed d \
+          WHERE t.workspace_id = d.workspace_id AND t.run_id = d.run_id AND t.seq = d.seq",
+    )
+    .bind(workspace_id)
+    .bind(RUN_EVENT_RETENTION_DAYS)
+    .bind(batch)
+    .execute(&mut *conn)
+    .await?;
+    Ok(deleted.rows_affected())
+}

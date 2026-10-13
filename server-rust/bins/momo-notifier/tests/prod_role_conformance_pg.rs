@@ -502,6 +502,8 @@ struct HostedRun {
     requester: Uuid,
     answer: Uuid,
     parked_run: Uuid,
+    agent: Uuid,
+    channel: Uuid,
 }
 
 async fn seed_hosted_work_run(su: &PgPool) -> HostedRun {
@@ -661,6 +663,8 @@ async fn seed_hosted_work_run(su: &PgPool) -> HostedRun {
         requester,
         answer,
         parked_run,
+        agent,
+        channel,
     }
 }
 
@@ -757,6 +761,136 @@ async fn a_hosted_work_run_push_and_run_status_trigger_run_as_the_notifier_role(
         board_events >= 1,
         "the migration-120 trigger wrote a work.run.updated outbox row"
     );
+}
+
+/// ADR-0200 D1-4 / D2 (#3744): the two new sweeps do REAL work as their production roles —
+/// the stall sweep ends a stalled hosted run as `momo_notifier` (its UPDATE of `agent_run`,
+/// the delivery job's retire, the ledger/realtime triggers, the system line, the audit row),
+/// and the ledger retention reads as `momo_notifier` and deletes as `momo_app`. The dev
+/// bootstrap would hand the notifier every table and pass anyway; this provisions the
+/// table-scoped production grants.
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn the_run_stall_and_ledger_retention_sweeps_do_real_work_as_their_production_roles() {
+    let db = ProdDb::create().await;
+    let seeded = seed_hosted_work_run(&db.su).await;
+    let notifier = db.role("momo_notifier", "momo_notifier_dev_pw").await;
+    let app = db.role("momo_app", "momo_app_dev_pw").await;
+
+    // a hosted run whose agent claimed it 5 hours ago and never came back
+    let stalled = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO agent_run (id, workspace_id, agent_member_id, channel_id, status, input, \
+                                idempotency_key, started_at, updated_at) \
+         VALUES ($1,$2,$3,$4,'running', '{}'::jsonb, $5, now() - interval '5 hours', \
+                 now() - interval '4 hours')",
+    )
+    .bind(stalled)
+    .bind(seeded.workspace)
+    .bind(seeded.agent)
+    .bind(seeded.channel)
+    .bind(format!("t:{stalled}"))
+    .execute(&db.su)
+    .await
+    .expect("stalled run");
+    sqlx::query(
+        "INSERT INTO outbox (workspace_id, kind, status, method, payload, partition_key, \
+                             lease_owner, lease_acquired_at, lease_expires_at) \
+         VALUES ($1,'agent_job','pending','gateway',$2,$3, uuidv7(), \
+                 now() - interval '5 hours', now() - interval '4 hours')",
+    )
+    .bind(seeded.workspace)
+    .bind(serde_json::json!({
+        "agent_member_id": seeded.agent.to_string(),
+        "run_id": stalled.to_string(),
+        "channel_id": seeded.channel.to_string(),
+    }))
+    .bind(seeded.agent)
+    .execute(&db.su)
+    .await
+    .expect("stalled job");
+
+    // the fixture wrote a message row by hand; bring the channel's counter up to it so the
+    // sweep's system line takes the next sequence like any real send
+    sqlx::query(
+        "UPDATE channel_seq SET last_seq = COALESCE((SELECT max(seq) FROM message WHERE channel_id = $1), 0) \
+          WHERE channel_id = $1",
+    )
+    .bind(seeded.channel)
+    .execute(&db.su)
+    .await
+    .expect("channel_seq catch-up");
+
+    let stats = momo_notifier::run_stall_sweep::sweep_stalled_runs(
+        &notifier,
+        momo_outbox::StallPolicy::default(),
+        32,
+    )
+    .await
+    .expect("the stall sweep runs as the notifier role without a permission error");
+    assert_eq!(stats.lease_abandoned, 1, "{stats:?}");
+    let (status, code): (String, Option<String>) =
+        sqlx::query_as("SELECT status::text, error->>'code' FROM agent_run WHERE id=$1")
+            .bind(stalled)
+            .fetch_one(&db.su)
+            .await
+            .unwrap();
+    assert_eq!(
+        (status.as_str(), code.as_deref()),
+        ("timed_out", Some("lease_abandoned"))
+    );
+    let ledger_last: String = sqlx::query_scalar(
+        "SELECT kind FROM agent_run_event WHERE run_id=$1 ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(stalled)
+    .fetch_one(&db.su)
+    .await
+    .unwrap();
+    assert_eq!(
+        ledger_last, "timed_out",
+        "the ledger trigger appended as the notifier role"
+    );
+    let frames: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='broadcast' \
+           AND payload->'data'->>'type'='agent.run.event' \
+           AND lower(payload->'data'->'payload'->>'run_id') = lower($2::text)",
+    )
+    .bind(seeded.workspace)
+    .bind(stalled)
+    .fetch_one(&db.su)
+    .await
+    .unwrap();
+    assert!(
+        frames >= 1,
+        "the realtime trigger emitted as the notifier role"
+    );
+
+    // retention: a finished run's ledger past 30 days
+    let old = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO agent_run (id, workspace_id, agent_member_id, channel_id, status, input, \
+                                idempotency_key, finished_at) \
+         VALUES ($1,$2,$3,$4,'succeeded','{}'::jsonb,$5, now() - interval '40 days')",
+    )
+    .bind(old)
+    .bind(seeded.workspace)
+    .bind(seeded.agent)
+    .bind(seeded.channel)
+    .bind(format!("t:{old}"))
+    .execute(&db.su)
+    .await
+    .expect("old finished run");
+    let retained =
+        momo_notifier::run_event_retention_sweep::sweep_expired_run_events(&notifier, &app, 32)
+            .await
+            .expect("the retention sweep reads as the notifier and deletes as momo_app");
+    assert!(retained.deleted >= 1, "{retained:?}");
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_run_event WHERE run_id=$1")
+        .bind(old)
+        .fetch_one(&db.su)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
 }
 
 #[tokio::test]

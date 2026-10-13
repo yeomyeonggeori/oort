@@ -144,11 +144,13 @@ SCAN_SCOPE = [
         "symbols": [
             "RUN_DRIVES_SESSION",
             "end_parked_run_in_tx",
+            "end_stalled_run_in_tx",
             "lock_driver_runs_in_tx",
             "resume_runs_from_control_window_in_tx",
         ],
         "why": (
             "approval_sweep.rs:169 end_parked_run_in_tx; "
+            "run_stall_sweep.rs end_stalled_run_in_tx (ADR-0200 D1-4); "
             "control_window_sweep.rs:67 resume_runs_from_control_window_in_tx "
             "(audit_log ⋈ work_control SELECT)."
         ),
@@ -165,6 +167,34 @@ SCAN_SCOPE = [
         "path": "server-rust/crates/momo-push/src/dispatch_log.rs",
         "mode": "all",
         "why": "push.rs:200 claim_dispatch / :304 settle_dispatch",
+    },
+    {
+        "path": "server-rust/crates/momo-outbox/src/stalled.rs",
+        "mode": "all",
+        "why": (
+            "notifier run_stall_sweep.rs (#3744, ADR-0200 D1-4): the cross-tenant stalled-run "
+            "READ and the per-workspace row-locking candidate read (agent_run ⋈ outbox, "
+            "FOR UPDATE OF r on the run the sweep is about to end)."
+        ),
+    },
+    {
+        "path": "server-rust/crates/momo-outbox/src/agent_job.rs",
+        "mode": "symbols",
+        "symbols": ["retire_pending_agent_jobs_for_run_with_reason_in_tx"],
+        "why": (
+            "notifier run_stall_sweep.rs retires the ended run's pending delivery job "
+            "(outbox UPDATE, already granted for the push drain)."
+        ),
+    },
+    {
+        "path": "server-rust/crates/momo-agent/src/run_event.rs",
+        "mode": "symbols",
+        "symbols": ["workspaces_with_expired_run_events"],
+        "why": (
+            "notifier run_event_retention_sweep.rs (#3744, ADR-0200 D2): the cross-tenant "
+            "candidate READ on the notifier pool. delete_expired_run_events_in_tx is the "
+            "momo_app write pool's DELETE and must stay out of scope."
+        ),
     },
     {
         "path": "server-rust/crates/momo-outbox/src/emit.rs",
