@@ -174,6 +174,7 @@ async fn settle_stalled_run_in_tx(
 
     let now = chrono::Utc::now();
     let ancient = now - run.last_activity_at > chrono::Duration::days(QUIET_AFTER_DAYS);
+    // An ancient ghost has no badge on any screen, so no terminal frame either.
     if let Some(frame) = momo_agent::terminal_agent_status_payload(
         workspace_id,
         run.channel_id,
@@ -181,7 +182,9 @@ async fn settle_stalled_run_in_tx(
         run.run_id,
         RunStatus::TimedOut,
         now.timestamp_millis(),
-    ) {
+    )
+    .filter(|_| !ancient)
+    {
         emit_outbox(
             &mut *conn,
             workspace_id,

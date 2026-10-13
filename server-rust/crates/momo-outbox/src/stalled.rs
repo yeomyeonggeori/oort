@@ -75,7 +75,7 @@ const STALLED_FROM_WHERE: &str = "\
          SELECT o.id, o.lease_owner, o.lease_expires_at \
            FROM outbox o \
           WHERE o.workspace_id = r.workspace_id \
-            AND o.kind = 'agent_job' AND o.method = 'gateway' AND o.status = 'pending' \
+            AND o.kind = 'agent_job' AND o.status IN ('pending', 'processing') \
             AND o.partition_key = r.agent_member_id \
             AND lower(o.payload->>'run_id') = lower(r.id::text) \
           ORDER BY o.id DESC LIMIT 1 \
@@ -173,6 +173,7 @@ pub async fn pending_job_has_live_lease_in_tx(
            FROM outbox o \
           WHERE o.workspace_id = $1 AND o.kind = 'agent_job' AND o.method = 'gateway' \
             AND o.status = 'pending' AND lower(o.payload->>'run_id') = lower($2::text) \
+          ORDER BY o.id \
             FOR UPDATE OF o",
     )
     .bind(workspace_id)

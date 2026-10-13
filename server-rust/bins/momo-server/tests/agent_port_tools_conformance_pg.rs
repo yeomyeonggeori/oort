@@ -12046,6 +12046,32 @@ async fn a_run_whose_agent_went_quiet_is_ended_with_a_closed_code_and_nothing_el
         .unwrap();
         suppressed.push(id);
     }
+    // a run whose only delivery path is a non-`gateway` job (a resume job): some consumer
+    // still has a job to take, so it is NOT the job-less orphan the sweep ends
+    let resumed: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, created_at, updated_at) \
+         VALUES ($1,$2,$3,'queued', now() - interval '3 hours', now() - interval '3 hours') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO outbox(workspace_id,kind,status,method,payload,partition_key) \
+         VALUES ($1,'agent_job','pending','resume_approval',$2,$3)",
+    )
+    .bind(fixture.workspace)
+    .bind(json!({
+        "agent_member_id": fixture.hosted_agent.to_string(),
+        "run_id": resumed.to_string(),
+        "channel_id": fixture.channel.to_string(),
+    }))
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
     // a run silent for ten days: ended, but without a channel line (the first sweep after a
     // deploy must not light up old channels with weeks-old notices)
     let ancient: Uuid = sqlx::query_scalar(
@@ -12093,6 +12119,11 @@ async fn a_run_whose_agent_went_quiet_is_ended_with_a_closed_code_and_nothing_el
         "…but not while it is fresh"
     );
     assert_eq!(run_status_3744(&su, ancient).await.0, "timed_out");
+    assert_eq!(
+        run_status_3744(&su, resumed).await.0,
+        "queued",
+        "a run with a pending resume job still has a delivery path"
+    );
     let ancient_lines: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM message WHERE workspace_id=$1 AND run_id=$2 AND type='system'",
     )

@@ -387,7 +387,9 @@ pub async fn retire_pending_agent_jobs_for_run_in_tx(
 pub const RUN_STALLED_JOB_LAST_ERROR: &str = "run ended by the stall sweep";
 
 /// [`retire_pending_agent_jobs_for_run_in_tx`] with the reason the operator reads on the
-/// row. Same statement, same rule (pending → done), only the `last_error` differs.
+/// row. Same statement and rule (→ done), only the `last_error` differs — and it also
+/// retires a `processing` job: the stall sweep ends the run for good, so no consumer may
+/// keep a claim on it.
 pub async fn retire_pending_agent_jobs_for_run_with_reason_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -399,7 +401,7 @@ pub async fn retire_pending_agent_jobs_for_run_with_reason_in_tx(
             SET status = 'done', processed_at = now(), last_error = $3 \
           WHERE workspace_id = $1 \
             AND kind = 'agent_job' \
-            AND status = 'pending' \
+            AND status IN ('pending', 'processing') \
             AND lower(payload->>'run_id') = $2",
     )
     .bind(workspace_id)
