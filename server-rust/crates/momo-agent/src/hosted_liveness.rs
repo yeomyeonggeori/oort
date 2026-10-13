@@ -679,6 +679,35 @@ mod tests {
         assert_eq!(state, LivenessState::Unresponsive);
     }
 
+    /// The quiet-window edge, both sides (re-review Low-1).
+    #[test]
+    fn the_quiet_window_edge_decides_work_waiting_versus_unresponsive() {
+        let now = Utc::now();
+        let state_with_signal_minutes_ago = |minutes: i64| {
+            let row = LivenessRow {
+                last_inbox_read_at: Some(now - Duration::minutes(minutes)),
+                ..Default::default()
+            };
+            derive_liveness(
+                now,
+                true,
+                Some(&row),
+                &DoorbellFact::default(),
+                Some(now - Duration::minutes(90)),
+                &LivenessThresholds::default(),
+            )
+            .state
+        };
+        assert_eq!(
+            state_with_signal_minutes_ago(59),
+            LivenessState::WorkWaiting
+        );
+        assert_eq!(
+            state_with_signal_minutes_ago(61),
+            LivenessState::Unresponsive
+        );
+    }
+
     #[test]
     fn a_refusal_newer_than_the_last_success_is_an_error() {
         let row = LivenessRow {
