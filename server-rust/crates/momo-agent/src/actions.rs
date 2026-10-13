@@ -1860,4 +1860,89 @@ mod tests {
         // not grow a rate-limit field and the v2 pending cap stays 3.
         assert_eq!(MAX_PENDING_WORKSPACE_ACTIONS, 3);
     }
+
+    #[test]
+    fn a_claim_judgement_fails_closed_on_every_malformed_marker() {
+        // Pinned so a later `unwrap_or`/`as_f64` refactor cannot loosen it
+        // (security review of #3795).
+        let key = SECRET_CLAIM_PAYLOAD_KEY;
+        let state = |claim: serde_json::Value, now: i64| {
+            secret_claim_state(&serde_json::json!({ key: claim }), now)
+        };
+        // Wrong shapes of the whole marker.
+        assert_eq!(
+            state(serde_json::json!("yes"), 0),
+            SecretClaimState::NotGranted
+        );
+        assert_eq!(
+            state(serde_json::json!([]), 0),
+            SecretClaimState::NotGranted
+        );
+        assert_eq!(
+            secret_claim_state(&serde_json::json!("not an object"), 0),
+            SecretClaimState::NotGranted
+        );
+        // `allowed` must be the boolean true.
+        for allowed in [
+            serde_json::json!("true"),
+            serde_json::json!(1),
+            serde_json::json!(null),
+        ] {
+            assert_eq!(
+                state(
+                    serde_json::json!({"allowed": allowed, "deadlineMs": i64::MAX}),
+                    0
+                ),
+                SecretClaimState::NotGranted
+            );
+        }
+        // Deadline must be an i64: a float, a string, a u64 above i64::MAX and a
+        // missing one are all Expired, never Open.
+        for deadline in [
+            serde_json::json!(1.0e15),
+            serde_json::json!("9999999999999"),
+            serde_json::json!(u64::MAX),
+            serde_json::json!(null),
+        ] {
+            assert_eq!(
+                state(
+                    serde_json::json!({"allowed": true, "deadlineMs": deadline}),
+                    0
+                ),
+                SecretClaimState::Expired,
+                "{deadline}"
+            );
+        }
+        // A null `claimedAtMs` is not a claim; any other present value is, even a
+        // falsy one.
+        assert_eq!(
+            state(
+                serde_json::json!({"allowed": true, "deadlineMs": 10, "claimedAtMs": null}),
+                5
+            ),
+            SecretClaimState::Open
+        );
+        for claimed in [
+            serde_json::json!(0),
+            serde_json::json!(false),
+            serde_json::json!(""),
+        ] {
+            assert_eq!(
+                state(
+                    serde_json::json!({"allowed": true, "deadlineMs": 10, "claimedAtMs": claimed}),
+                    5
+                ),
+                SecretClaimState::AlreadyClaimed,
+                "{claimed}"
+            );
+        }
+        // Negative `now` is simply earlier than the deadline.
+        assert_eq!(
+            state(serde_json::json!({"allowed": true, "deadlineMs": 10}), -5),
+            SecretClaimState::Open
+        );
+        // The grant saturates instead of wrapping into the past.
+        let near_max = secret_claim_grant(i64::MAX - 1);
+        assert_eq!(near_max["deadlineMs"], serde_json::json!(i64::MAX));
+    }
 }

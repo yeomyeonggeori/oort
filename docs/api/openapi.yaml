@@ -19870,8 +19870,12 @@ components:
             it to the approver. Only honoured when the approved action's catalog
             row says `agentDelivery: opt_in`; `true` on anything else (another
             action, a rejection, a non-workspace approval) is a 400 receipt
-            `deliver_secret_not_supported` and the approval stays pending. Not
-            part of the idempotency key.
+            `deliver_secret_not_supported` and the approval stays pending (judged
+            right after the channel-membership gate, before the status and
+            expiry arms, so an overdue card is not settled by it). Not part of
+            the idempotency key: a replay of an already-executed decision
+            answers the original receipt even if it now carries `true`, and that
+            200 does not imply anything was delivered.
 
     ApprovalDecisionReceipt:
       type: object
