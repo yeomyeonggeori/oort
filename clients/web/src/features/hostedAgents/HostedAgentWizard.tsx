@@ -1788,7 +1788,7 @@ function WizardActions({
   if (holdingSecret) {
     return (
       <p className="text-meta text-ink-muted" data-testid="hosted-hold-note">
-        값을 옮겼다면 카드 맨 아래의 버튼을 눌러 이어가세요.
+        값을 옮긴 뒤 카드의 마지막 버튼을 눌러 이어가요.
       </p>
     );
   }

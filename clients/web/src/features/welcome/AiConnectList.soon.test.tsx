@@ -59,7 +59,9 @@ describe("온보딩 AI 연결 목록의 「곧」 줄 (#3773)", () => {
       expect(row.querySelector("input")).toBeNull();
       expect(row.querySelector("button")).toBeNull();
       // 고를 수 있어 보이는 라디오 원이 없다(눌러도 반응 없는 컨트롤을 만들지 않는다).
-      expect(row.querySelector(".ai-connect-radio")).toBeNull();
+      const spacer = row.querySelector(".ai-connect-radio");
+      expect(spacer?.getAttribute("aria-hidden")).toBe("true");
+      expect(spacer?.className).toContain("invisible");
       expect(row.textContent).toContain("곧");
     }
     expect(soon.find((row) => row.getAttribute("data-row-id") === "muse")?.textContent).toContain(
