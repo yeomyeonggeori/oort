@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSession } from "@/app/session";
 import { seedComposerText } from "@/features/chat/draftStore";
 import {
@@ -145,7 +145,7 @@ export function LabeledRow({
       data-testid={testId}
     >
       <dt className="shrink-0 text-meta text-ink-muted">{label}</dt>
-      <dd className="min-w-0 flex-1 break-words text-body text-ink">
+      <dd className="min-w-0 flex-1 break-keep break-words text-body text-ink">
         {children}
       </dd>
     </div>
@@ -437,6 +437,19 @@ function ApprovalBody({
   // 컨트롤 대신 「다시 제안」이 설 자리: 만료됐고, 결정할 대상이 있는 도구·행동 승인.
   const expired =
     status === "expired" && card.approvalId !== null && !card.isResumeOffer;
+  // 시계가 돌아 카드가 **보는 도중** 만료되면 포커스를 쥔 컨트롤이 사라진다. 초점이
+  // 문서 처음으로 떨어지지 않게 카드가 받는다(403 착지와 같은 자리, `onLandOnCard`).
+  // 이미 만료된 채 마운트된 카드는 초점을 훔치지 않는다 — 전이에서만 움직인다.
+  const wasExpired = useRef(expired);
+  useEffect(() => {
+    if (expired && !wasExpired.current) {
+      const active = document.activeElement;
+      if (active === document.body || cardRef.current?.contains(active)) {
+        cardRef.current?.focus();
+      }
+    }
+    wasExpired.current = expired;
+  }, [expired]);
   const decidedAtMs = local?.decidedAtMs ?? card.decidedAtMs;
   const decidedById = local?.decidedByMemberId ?? card.decidedByMemberId;
   const decidedBy = decidedById ? memberFor(directory, decidedById) : null;

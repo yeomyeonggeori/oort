@@ -205,6 +205,23 @@ describe("승인 카드 기한 (#3738)", () => {
     expect(q(el, "agent-card")?.dataset.status).toBe("expired");
   });
 
+  it("보는 도중 만료되면 초점이 문서 처음으로 떨어지지 않고 카드가 받는다", () => {
+    const el = mount(actionProps("channel.create", CHANNEL_CREATE_ROWS, "admin", T0 + 2 * MIN));
+    const approve = q(el, "approval-approve") as HTMLButtonElement;
+    act(() => approve.focus());
+    expect(document.activeElement).toBe(approve);
+    act(() => {
+      vi.advanceTimersByTime(2 * MIN + 1_000);
+    });
+    expect(q(el, "approval-approve")).toBeNull();
+    expect(document.activeElement).toBe(q(el, "agent-card"));
+  });
+
+  it("이미 만료된 채 열린 카드는 초점을 훔치지 않는다", () => {
+    const el = mount(actionProps("channel.create", CHANNEL_CREATE_ROWS, "admin", T0 - 1_000));
+    expect(document.activeElement).not.toBe(q(el, "agent-card"));
+  });
+
   it("기한이 지난 카드는 컨트롤이 없고 「다시 제안해 달라고 하기」가 선다", () => {
     const el = mount(actionProps("channel.create", CHANNEL_CREATE_ROWS, "admin", T0 - 1_000));
     expect(q(el, "approval-approve")).toBeNull();
