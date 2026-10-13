@@ -43,6 +43,7 @@ import {
 } from '../design/atoms';
 import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
+import {AgentLivenessLabel} from '../features/agents/AgentLivenessLabel';
 import {
   useAgentProfile,
   useAllowedAgentModels,
@@ -174,6 +175,13 @@ export default function AgentDetailScreen({
         contentContainerStyle={styles.body}
         keyboardShouldPersistTaps="handled"
         testID="agent-detail-scroll">
+        {/* ---- 지금 살아 있는가 (ADR-0200 D4) ------------------------------ */}
+        {/* 「활성」·「깨어 있음」 같은 설정 상태와 다른 사실이다: 서버가 수령·읽기·run
+            이벤트·ping으로 지금 파생한 것이고, hosted가 아닌 에이전트에는 서지 않는다. */}
+        <AgentLivenessLabel
+          agentId={agent.memberId}
+          testID="agent-detail-liveness"
+        />
         {/* ---- 재우기 / 깨우기 ------------------------------------------ */}
         <SectionLabel label="상태" />
         {read.kind === 'pending' ? (
