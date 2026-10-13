@@ -13735,6 +13735,30 @@ async fn an_agent_avatar_image_is_staged_pinned_applied_and_served() {
         404,
         "a staged image is never served"
     );
+    // Even a pointer forced at a staged row (a bug, a manual edit) serves nothing:
+    // the read itself requires `applied`.
+    sqlx::query("UPDATE member SET avatar_image_id = $1 WHERE id = $2")
+        .bind(image)
+        .bind(agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let forced = client
+        .get(&url)
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        forced.status().as_u16(),
+        404,
+        "a staged row behind the pointer is not served"
+    );
+    sqlx::query("UPDATE member SET avatar_image_id = NULL WHERE id = $1")
+        .bind(agent)
+        .execute(&su)
+        .await
+        .unwrap();
 
     // ---- apply ---------------------------------------------------------------
     let applied = tenant_3786(&app, ws, move |conn| {
