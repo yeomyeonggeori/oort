@@ -287,7 +287,7 @@ export function ApprovalActions({
   armed,
   setArmed,
   onSettled,
-  lead = "이 작업은 승인이 필요합니다.",
+  lead = "이 작업은 승인이 필요해요.",
   className,
   testIdPrefix = "approval",
   reversible = true,
@@ -465,7 +465,7 @@ export function ApprovalActions({
           setArmed(null);
           return;
         }
-        setErrorCopy(outcome.errorCopy ?? "결정을 처리하지 못했습니다.");
+        setErrorCopy(outcome.errorCopy ?? "결정을 처리하지 못했어요.");
         return;
       }
       // 2R M6: 확정에 성공하면 확정 버튼이 언마운트된다. 무장 때 고쳤던 것과
@@ -676,8 +676,8 @@ export function ApprovalActions({
           data-testid={`${testIdPrefix}-too-fast`}
           className="pt-2 text-meta text-ink-muted"
         >
-          방금 누른 것과 이어진 동작이라 보내지 않았습니다. 문장을 확인하고 다시
-          누르세요.
+          방금 누른 것과 이어진 동작이라 보내지 않았어요. 문장을 확인하고 다시
+          눌러 주세요.
         </p>
       )}
       {errorCopy !== null && (

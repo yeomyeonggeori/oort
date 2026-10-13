@@ -33,6 +33,7 @@ export interface SettledReceipt {
   note?: string;
 }
 
+const MAX_REMEMBERED = 200;
 const receipts = new Map<string, SettledReceipt>();
 const listeners = new Set<() => void>();
 
@@ -49,7 +50,16 @@ export function rememberSettledApproval(
   receipt: SettledReceipt
 ): void {
   if (!approvalId || receipt.status === "pending") return;
-  receipts.set(keyOf(approvalId), receipt);
+  const key = keyOf(approvalId);
+  receipts.delete(key);
+  receipts.set(key, receipt);
+  // 세션이 길어져도 자라지 않는다: 가장 오래된 것부터 버린다. 버려진 것은 서버의
+  // 메시지가 따라잡은 지 오래라 낡은 대기로 되돌아갈 일이 없다.
+  while (receipts.size > MAX_REMEMBERED) {
+    const oldest = receipts.keys().next();
+    if (oldest.done) break;
+    receipts.delete(oldest.value);
+  }
   for (const listener of [...listeners]) listener();
 }
 

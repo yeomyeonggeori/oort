@@ -113,7 +113,7 @@ const APPROVAL_PROPS = {
   channel_id: CHANNEL_ID,
   action_type: "workspace_action",
   status: "pending",
-  expires_at_ms: BASE_MS + 3_600_000,
+  expires_at_ms: Date.now() + 3_600_000,
   title: "팀원 초대 링크 만들기",
   summary:
     "hermes가 제안했어요. 승인하면 관리자 권한으로 초대 링크를 만들어요.",

@@ -588,8 +588,8 @@ function ApprovalBody({
               next.note = decisionNote(outcome).text;
               setLocal(next);
               // 1회 값은 저장소에 넘기지 않는다(ADR-0186 D4).
-              const { secretOnce: _once, ...settled } = next;
-              rememberSettledApproval(card.approvalId, settled);
+              const { secretOnce: _once, ...receiptOnly } = next;
+              rememberSettledApproval(card.approvalId, receiptOnly);
             }}
           />
           </>
