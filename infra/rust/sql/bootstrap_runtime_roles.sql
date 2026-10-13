@@ -337,6 +337,9 @@ BEGIN
   IF to_regclass('public.agent_run_event') IS NOT NULL THEN
     GRANT SELECT, INSERT ON TABLE agent_run_event TO momo_notifier;
   END IF;
+  IF to_regclass('public.agent_run_event_seq') IS NOT NULL THEN
+    GRANT USAGE, SELECT ON SEQUENCE agent_run_event_seq TO momo_notifier;
+  END IF;
   IF to_regclass('public.agent') IS NOT NULL THEN
     GRANT SELECT ON TABLE agent TO momo_notifier;
   END IF;

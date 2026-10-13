@@ -10141,7 +10141,7 @@ async fn mention_3740(
 ///   * drop the AFTER INSERT/UPDATE agent_run triggers         -> no `queued`/`started`/`succeeded`
 #[tokio::test]
 #[ignore = "needs verifier-owned isolated PostgreSQL 18"]
-async fn the_run_event_ledger_records_a_hosted_run_in_one_gapless_order() {
+async fn the_run_event_ledger_records_a_hosted_run_in_order() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let app = momo_app_pool().await;
@@ -10211,6 +10211,7 @@ async fn the_run_event_ledger_records_a_hosted_run_in_one_gapless_order() {
             arguments["stage"] = json!(stage);
         }
         let before = ledger_3740(&su, fixture.workspace, run).await.len();
+        let first_event = before == 2; // queued + claimed so far: this event also starts the run
         let (status, event) = call(
             &client,
             &base,
@@ -10221,12 +10222,11 @@ async fn the_run_event_ledger_records_a_hosted_run_in_one_gapless_order() {
         .await;
         assert_eq!(status, 200, "{event}");
         let after = ledger_3740(&su, fixture.workspace, run).await.len();
-        // the first event also writes `started` (a status transition)
-        let started = usize::from(before == 2);
         assert_eq!(
             after - before,
-            usize::from(expect_new) + started,
-            "stage {stage:?}"
+            usize::from(expect_new) + usize::from(first_event),
+            "stage {stage:?}: a new marker adds one row, a repeat or a stage-less event none, \
+             and the first event also adds `started`"
         );
     }
 
@@ -10265,10 +10265,9 @@ async fn the_run_event_ledger_records_a_hosted_run_in_one_gapless_order() {
             "succeeded"
         ]
     );
-    assert_eq!(
-        rows.iter().map(|row| row.0).collect::<Vec<_>>(),
-        (1..=6).collect::<Vec<i64>>(),
-        "seq is gapless and commit-ordered per run"
+    assert!(
+        rows.windows(2).all(|pair| pair[0].0 < pair[1].0),
+        "seq strictly increases in write order: {rows:?}"
     );
     assert_eq!(rows[3].2.as_deref(), Some("채널 이름 확인"));
     assert_eq!(rows[4].2.as_deref(), Some("승인 카드 제안"));
@@ -10424,7 +10423,16 @@ async fn the_ledger_triggers_cover_the_sweep_and_the_cap_keeps_lifecycle_rows() 
         .bind(code)
         .execute(&su)
         .await;
-        assert!(result.is_err(), "{stage:?} {code:?} must be refused");
+        let error = result.expect_err("a malformed row must be refused");
+        let constraint = error
+            .as_database_error()
+            .and_then(|db| db.constraint())
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            constraint == "agent_run_event_stage_ck" || constraint == "agent_run_event_code_ck",
+            "{stage:?} {code:?} refused by the table's own CHECK, not by something else: {constraint:?} / {error}"
+        );
     }
 }
 
@@ -10483,13 +10491,175 @@ async fn the_run_event_ledger_is_tenant_isolated() {
         .execute(&mut *tx)
         .await
         .unwrap();
-    let forged = sqlx::query("SELECT agent_run_event_append($1,$2,'stage','x',NULL,NULL,NULL)")
-        .bind(fixture.workspace)
-        .bind(run)
+    // Through the function: the run is invisible to the bound tenant (RLS on agent_run),
+    // so the append is a NULL — it neither writes nor tells whether the run exists.
+    let forged: Option<i64> =
+        sqlx::query_scalar("SELECT agent_run_event_append($1,$2,'stage','x',NULL,NULL,NULL)")
+            .bind(fixture.workspace)
+            .bind(run)
+            .fetch_one(&mut *tx)
+            .await
+            .expect("a foreign run is NULL, the same answer as a missing one");
+    assert_eq!(forged, None);
+    // Around the function: the table's own WITH CHECK refuses another tenant's row.
+    sqlx::query("SAVEPOINT raw_insert")
         .execute(&mut *tx)
+        .await
+        .unwrap();
+    let raw = sqlx::query(
+        "INSERT INTO agent_run_event (workspace_id, run_id, kind) VALUES ($1,$2,'queued')",
+    )
+    .bind(fixture.workspace)
+    .bind(run)
+    .execute(&mut *tx)
+    .await;
+    assert!(
+        raw.is_err(),
+        "an INSERT for a workspace other than the bound one is refused by RLS"
+    );
+    drop(tx);
+    assert_eq!(
+        ledger_3740(&su, fixture.workspace, run).await.len(),
+        1,
+        "the foreign attempts wrote nothing"
+    );
+}
+
+/// RED PROOF (ADR-0200 D2, S1; security review H1/M1/M3). The append takes no lock, so
+/// it cannot close a cycle with the claim/approve/cancel paths; a missing run is a NULL,
+/// not an error that would poison a claim; and history cannot be rewritten.
+///
+/// Tamper table:
+///   * re-add `pg_advisory_xact_lock` to `agent_run_event_append`  -> the second transaction
+///     blocks behind the open first one and the timeout below fires
+///   * drop the `EXISTS (SELECT 1 FROM agent_run ...)` guard        -> the missing-run append raises 23503
+///   * drop `agent_run_event_immutable_trg`                         -> the UPDATE succeeds
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_ledger_append_takes_no_lock_and_history_is_immutable() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su).await;
+    let run: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+         VALUES ($1,$2,$3,'queued') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let approval: Uuid = sqlx::query_scalar(
+        "INSERT INTO approval (workspace_id, run_id, channel_id, requested_by, action_type) \
+         VALUES ($1,$2,$3,$4,'workspace_action') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(run)
+    .bind(fixture.channel)
+    .bind(fixture.hosted_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+
+    // Transaction A is a "cancel": it moves the run (the trigger appends) and stays OPEN.
+    let mut a = su.begin().await.unwrap();
+    sqlx::query("UPDATE agent_run SET status='cancelled' WHERE id=$1")
+        .bind(run)
+        .execute(&mut *a)
+        .await
+        .unwrap();
+
+    // Transaction B is the opposite order: it holds the approval row, then appends a
+    // `claimed` row for the same run and decides the approval (the trigger appends).
+    // With any per-run lock in the append, B would wait for A here; A would then wait
+    // for B's approval row — the deadlock the review found. It must finish while A is open.
+    let b = async {
+        let mut tx = su.begin().await.unwrap();
+        sqlx::query("SELECT id FROM approval WHERE id=$1 FOR UPDATE")
+            .bind(approval)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("SELECT agent_run_event_append($1,$2,'claimed',NULL,NULL,NULL,$3)")
+            .bind(fixture.workspace)
+            .bind(run)
+            .bind(fixture.hosted_agent)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE approval SET status='cancelled' WHERE id=$1")
+            .bind(approval)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(5), b)
+        .await
+        .expect("an append never waits for another transaction's lock");
+    a.commit().await.unwrap();
+
+    let rows = ledger_3740(&su, fixture.workspace, run).await;
+    assert_eq!(rows.len(), 5, "{rows:?}");
+    let mut kinds = kinds_3740(&rows);
+    kinds.sort_unstable();
+    assert_eq!(
+        kinds,
+        [
+            "approval_decided",
+            "approval_requested",
+            "cancelled",
+            "claimed",
+            "queued"
+        ]
+    );
+
+    // A job pointing at a run that does not exist appends nothing and does not raise.
+    let missing: Option<i64> =
+        sqlx::query_scalar("SELECT agent_run_event_append($1,$2,'claimed',NULL,NULL,NULL,$3)")
+            .bind(fixture.workspace)
+            .bind(Uuid::new_v4())
+            .bind(fixture.hosted_agent)
+            .fetch_one(&su)
+            .await
+            .expect("a missing run is NULL, not an error");
+    assert_eq!(missing, None);
+
+    // History is immutable — even for the superuser's UPDATE.
+    let update = sqlx::query("UPDATE agent_run_event SET kind='failed' WHERE run_id=$1")
+        .bind(run)
+        .execute(&su)
         .await;
     assert!(
-        forged.is_err(),
-        "an append for a workspace other than the bound one is refused"
+        update.is_err(),
+        "agent_run_event rows must not be updatable"
+    );
+
+    // The cap sheds stage rows first and only then old `claimed` rows, never the newest.
+    for _ in 0..260 {
+        sqlx::query("SELECT agent_run_event_append($1,$2,'claimed',NULL,NULL,NULL,$3)")
+            .bind(fixture.workspace)
+            .bind(run)
+            .bind(fixture.hosted_agent)
+            .execute(&su)
+            .await
+            .unwrap();
+        sqlx::query("SELECT agent_run_event_trim($1,$2)")
+            .bind(fixture.workspace)
+            .bind(run)
+            .execute(&su)
+            .await
+            .unwrap();
+    }
+    let rows = ledger_3740(&su, fixture.workspace, run).await;
+    assert_eq!(
+        rows.len(),
+        200,
+        "a hard bound even without a single stage row"
+    );
+    assert!(
+        rows.iter().any(|row| row.1 == "queued") && rows.iter().any(|row| row.1 == "cancelled"),
+        "only `claimed` rows were shed"
     );
 }

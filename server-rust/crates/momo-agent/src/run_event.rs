@@ -7,8 +7,9 @@
 //! covered by one rule in the same transaction. The two rows a trigger cannot
 //! know — `claimed` (the lease lives on the outbox row) and `stage` (an agent
 //! report) — are written here, through the same SQL function
-//! `agent_run_event_append`, which owns the per-run ordering lock (the 200-row stage cap is
-//! `agent_run_event_trim`, called right after a stage append). There is no other INSERT into the table.
+//! `agent_run_event_append`, which takes no lock (a lock here closed deadlock cycles with the
+//! claim/approve/cancel paths — migration 128) and folds an immediate stage repeat; the
+//! 200-row cap is `agent_run_event_trim`, called right after a stage append. There is no other INSERT into the table.
 //!
 //! Only closed vocabulary and one validated ≤80 char stage marker are stored:
 //! never `detail`, never `textDelta` (ADR-0200 D2).
@@ -26,9 +27,10 @@ pub enum AppendedRunEvent<'a> {
     Stage(&'a str),
 }
 
-/// Append one ledger row for `run_id`; returns its `seq`. An immediate repeat of
-/// the same stage folds into the existing row (the same fold `output.stages`
-/// applies) and returns that row's seq.
+/// Append one ledger row for `run_id`; returns its `seq`, or `None` when the run
+/// does not exist (a job pointing at a missing run must not poison a claim). An
+/// immediate repeat of the same stage folds into the existing row (the same fold
+/// `output.stages` applies) and returns that row's seq. Takes no lock (migration 128).
 ///
 /// `actor` is the agent member that did it. The caller must already be inside the
 /// tenant transaction (`app.workspace_id` set); RLS rejects a foreign workspace.
@@ -38,7 +40,7 @@ pub async fn append_run_event_in_tx(
     run_id: Uuid,
     event: AppendedRunEvent<'_>,
     actor: Uuid,
-) -> Result<i64, DbError> {
+) -> Result<Option<i64>, DbError> {
     let (kind, stage) = match event {
         AppendedRunEvent::Claimed => ("claimed", None),
         AppendedRunEvent::Stage(stage) => ("stage", Some(stage)),
@@ -51,8 +53,8 @@ pub async fn append_run_event_in_tx(
         .bind(actor)
         .fetch_one(&mut *conn)
         .await?;
-    let seq: i64 = row.try_get("seq")?;
-    if kind == "stage" {
+    let seq: Option<i64> = row.try_get("seq")?;
+    if kind == "stage" && seq.is_some() {
         // The 200-row cap is its own SQL function so the append (fired by triggers
         // under DELETE-less roles) never contains a DELETE.
         sqlx::query("SELECT agent_run_event_trim($1, $2)")

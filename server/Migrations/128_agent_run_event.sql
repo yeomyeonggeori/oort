@@ -25,14 +25,25 @@
 -- agent), as migration 120 does; managed/BYOA runs write nothing (ADR-0200 D6).
 -- =============================================================================
 
+-- seq is an ORDERING key allocated from a sequence, not a per-run counter and never a
+-- count: it is unique and increasing in allocation order, with gaps, and across tenants.
+-- Why not `max(seq)+1` under a lock: the writers hold different locks in different orders
+-- (claim holds the outbox row, approval decide holds the approval row, cancel holds the
+-- run row), so any lock the append takes can close a cycle (#3740 security review H1).
+-- The append takes NO lock. The trade-off is that two transactions appending to the SAME
+-- run concurrently may commit out of seq order; the ledger is at most 200 rows, so readers
+-- re-read it whole instead of resuming from a cursor (ADR-0200 D2). The API must never
+-- hand the raw seq out as a count (cross-tenant volume side channel).
+CREATE SEQUENCE agent_run_event_seq AS bigint;
+
 CREATE TABLE agent_run_event (
   workspace_id    uuid NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
   run_id          uuid NOT NULL,
-  -- per-run monotonic, commit-ordered: allocated under a per-run advisory lock
-  seq             bigint NOT NULL CHECK (seq > 0),
+  seq             bigint NOT NULL DEFAULT nextval('agent_run_event_seq') CHECK (seq > 0),
   kind            text NOT NULL,
-  -- agent-reported marker: the SAME validator work_session_share uses (ADR-0162
-  -- 증보 3 D11 — one rule, not a copy)
+  -- agent-reported marker. The route's validator (momo-t3 work_share) runs first; this
+  -- CHECK reuses work_session_share's SQL marker rule as the backstop (ADR-0162 증보 3
+  -- D11). The Rust set is a superset of the SQL set, so the CHECK never fires first.
   stage           text,
   -- closed machine vocabulary (approval_expired, lease_abandoned, approved ...)
   code            text,
@@ -58,9 +69,11 @@ CREATE TABLE agent_run_event (
   )
 );
 
+ALTER SEQUENCE agent_run_event_seq OWNED BY agent_run_event.seq;
+
 COMMENT ON TABLE agent_run_event IS
-  'ADR-0200 D2: hosted-agent run event ledger (ids, closed codes, one stage marker). '
-  'Cap 200 rows/run enforced by agent_run_event_append (oldest stage rows go first; lifecycle rows never).';
+  'ADR-0200 D2: hosted-agent run event ledger (ids, closed codes, one stage marker). Append-only (no UPDATE). '
+  'Cap 200 rows/run enforced by agent_run_event_trim (oldest stage rows go first; lifecycle rows only as a last resort).';
 
 CREATE TABLE hosted_agent_liveness (
   workspace_id        uuid NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
@@ -109,8 +122,9 @@ BEGIN
 END $$;
 
 -- -----------------------------------------------------------------------------
--- The one writer. Returns the new seq (or the existing seq when an identical
--- stage repeats — an immediate repeat folds, exactly like output.stages).
+-- The one INSERT. Takes no lock. Returns the new seq, the existing seq when an immediate
+-- stage repeat folds (the same fold `output.stages` applies), or NULL when the run does
+-- not exist (a job pointing at a missing run must not poison a claim — review M1).
 -- -----------------------------------------------------------------------------
 CREATE FUNCTION agent_run_event_append(
   p_workspace_id uuid,
@@ -125,57 +139,61 @@ LANGUAGE plpgsql
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_seq   bigint;
-  v_last  record;
+  v_seq  bigint;
+  v_last record;
 BEGIN
-  -- A per-run advisory lock (not the run row lock): `claimed` is written by a
-  -- transaction that holds the outbox row, other paths hold the run row first, so
-  -- locking the run here would invert that order. This lock is a leaf.
-  PERFORM pg_advisory_xact_lock(hashtextextended('agent_run_event:' || p_run_id::text, 0));
-
-  SELECT seq, kind, stage INTO v_last
-    FROM agent_run_event
-   WHERE workspace_id = p_workspace_id AND run_id = p_run_id
-   ORDER BY seq DESC LIMIT 1;
-
-  IF p_kind = 'stage' AND v_last.kind = 'stage' AND v_last.stage IS NOT DISTINCT FROM p_stage THEN
-    RETURN v_last.seq;
+  IF NOT EXISTS (
+    SELECT 1 FROM agent_run WHERE workspace_id = p_workspace_id AND id = p_run_id
+  ) THEN
+    RETURN NULL;
   END IF;
 
-  v_seq := COALESCE(v_last.seq, 0) + 1;
-  INSERT INTO agent_run_event
-    (workspace_id, run_id, seq, kind, stage, code, approval_id, actor_member_id)
-  VALUES
-    (p_workspace_id, p_run_id, v_seq, p_kind, p_stage, p_code, p_approval_id, p_actor);
+  IF p_kind = 'stage' THEN
+    SELECT seq, kind, stage INTO v_last
+      FROM agent_run_event
+     WHERE workspace_id = p_workspace_id AND run_id = p_run_id
+     ORDER BY seq DESC LIMIT 1;
+    IF v_last.kind = 'stage' AND v_last.stage IS NOT DISTINCT FROM p_stage THEN
+      RETURN v_last.seq;
+    END IF;
+  END IF;
 
+  INSERT INTO agent_run_event
+    (workspace_id, run_id, kind, stage, code, approval_id, actor_member_id)
+  VALUES
+    (p_workspace_id, p_run_id, p_kind, p_stage, p_code, p_approval_id, p_actor)
+  RETURNING seq INTO v_seq;
   RETURN v_seq;
 END;
 $$;
 
 COMMENT ON FUNCTION agent_run_event_append(uuid, uuid, text, text, text, uuid, uuid) IS
-  'ADR-0200 D2: the only INSERT into agent_run_event. SECURITY INVOKER; per-run advisory lock; folds an immediate stage repeat.';
+  'ADR-0200 D2: the only INSERT into agent_run_event. SECURITY INVOKER; takes no lock; folds an immediate stage repeat; NULL for a missing run.';
 
 -- -----------------------------------------------------------------------------
 -- The 200-row cap, as its own function: the append above runs under roles that
 -- hold no DELETE (the notifier's approval-expiry sweep fires it through a
 -- trigger), so the only DELETE lives here and is called by the stage writer
--- (momo_app) alone. Oldest `stage` rows go first; lifecycle rows never.
+-- (momo_app) alone. Oldest `stage` rows go first; only a run with no stage rows left to
+-- shed (endless re-claims) loses its oldest `claimed` rows. Other lifecycle rows are
+-- bounded by max_steps and the approval caps and are never deleted.
 -- -----------------------------------------------------------------------------
 CREATE FUNCTION agent_run_event_trim(p_workspace_id uuid, p_run_id uuid) RETURNS integer
 LANGUAGE plpgsql
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_extra bigint;
-  v_deleted integer;
+  v_extra   bigint;
+  v_deleted integer := 0;
+  v_step    integer;
 BEGIN
-  PERFORM pg_advisory_xact_lock(hashtextextended('agent_run_event:' || p_run_id::text, 0));
   SELECT count(*) - 200 INTO v_extra
     FROM agent_run_event
    WHERE workspace_id = p_workspace_id AND run_id = p_run_id;
   IF v_extra <= 0 THEN
     RETURN 0;
   END IF;
+  -- 1) oldest stage rows first
   DELETE FROM agent_run_event e
    WHERE e.workspace_id = p_workspace_id AND e.run_id = p_run_id
      AND e.kind = 'stage'
@@ -184,13 +202,32 @@ BEGIN
         WHERE s.workspace_id = p_workspace_id AND s.run_id = p_run_id AND s.kind = 'stage'
         ORDER BY s.seq ASC LIMIT v_extra
      );
-  GET DIAGNOSTICS v_deleted = ROW_COUNT;
+  GET DIAGNOSTICS v_step = ROW_COUNT;
+  v_deleted := v_step;
+  v_extra := v_extra - v_step;
+  -- 2) a run re-claimed after endless lease expiries: oldest `claimed` rows, never the newest
+  IF v_extra > 0 THEN
+    DELETE FROM agent_run_event e
+     WHERE e.workspace_id = p_workspace_id AND e.run_id = p_run_id
+       AND e.kind = 'claimed'
+       AND e.seq IN (
+         SELECT s.seq FROM agent_run_event s
+          WHERE s.workspace_id = p_workspace_id AND s.run_id = p_run_id AND s.kind = 'claimed'
+          ORDER BY s.seq ASC LIMIT v_extra
+       )
+       AND e.seq <> (
+         SELECT max(s.seq) FROM agent_run_event s
+          WHERE s.workspace_id = p_workspace_id AND s.run_id = p_run_id AND s.kind = 'claimed'
+       );
+    GET DIAGNOSTICS v_step = ROW_COUNT;
+    v_deleted := v_deleted + v_step;
+  END IF;
   RETURN v_deleted;
 END;
 $$;
 
 COMMENT ON FUNCTION agent_run_event_trim(uuid, uuid) IS
-  'ADR-0200 D2: 200-row cap — deletes the oldest stage rows only. Called by the stage writer, never by a trigger.';
+  'ADR-0200 D2: 200-row cap — deletes the oldest stage rows (then oldest claimed rows). Called by the stage writer, never by a trigger.';
 
 -- hosted agents only (migration 120 predicate)
 CREATE FUNCTION agent_run_event_is_hosted(p_workspace_id uuid, p_agent_member_id uuid)
@@ -301,3 +338,20 @@ COMMENT ON FUNCTION agent_run_event_on_run() IS
   'ADR-0200 D2: hosted-agent run lifecycle transitions -> agent_run_event (same tx).';
 COMMENT ON FUNCTION agent_run_event_on_approval() IS
   'ADR-0200 D2: approval requested/decided -> agent_run_event (same tx).';
+
+-- -----------------------------------------------------------------------------
+-- Append-only (review M3): no role can rewrite history. DELETE stays — the stage cap,
+-- retention (S5) and the run's ON DELETE CASCADE need it — but UPDATE does not.
+-- -----------------------------------------------------------------------------
+CREATE FUNCTION agent_run_event_immutable() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  RAISE EXCEPTION 'agent_run_event rows are immutable' USING ERRCODE = 'restrict_violation';
+END;
+$$;
+
+CREATE TRIGGER agent_run_event_immutable_trg
+  BEFORE UPDATE ON agent_run_event
+  FOR EACH ROW EXECUTE FUNCTION agent_run_event_immutable();
