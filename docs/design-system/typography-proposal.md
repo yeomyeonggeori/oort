@@ -1,7 +1,7 @@
 # 타이포 체계 재정의 제안 (Proposed, #3774)
 
 > **상태: Accepted (2026-10-13, owner 성재).** 결정 4건이 아래와 같이 정해졌고, 단계 2(적용)는 PR #3776 위에 쌓인 PR들로 진행한다. 정본 절은 [README §2.5](README.md#25-타이포)이며 값은 이 문서 §3이 정본이다. 본문 기준이 14에서 **15**로 바뀌어 §3.1은 추천안(14)이 아니라 결정안으로 다시 맞췄다.
-> 전후 비교 캡처: [`typography-preview/`](typography-preview/) (정적 목업이며 실제 앱 캡처가 아니다. 실제 컴포넌트에 얹는 검증은 단계 2에서 한다).
+> 전후 비교 캡처: [`typography-preview/`](typography-preview/) (2026-10-13, 실제 앱 컴포넌트, Chromium 1440 라이트·다크. 왼쪽 `track/uxui` 기준, 오른쪽 #3774 토큰 적용. 인박스 픽스처의 항목 수는 캡처마다 시각 기준이 달라 다를 수 있다. 폰 RN 화면은 이 폴더에 없고 폰 PR이 jest로 증명한다). 재생성은 `scripts/capture-screens.mjs`(`CAPTURE_PROFILE=shell CAPTURE_WIDTH=1440`), `capture-inbox-mailbox.mjs`, `capture-settings-profile.mjs`, `capture-onboarding-o3.mjs`를 기준선과 변경 브랜치에서 각각 돌려 나란히 붙인다.
 
 ## 결정 기록 (2026-10-13, owner 성재, AskUserQuestion)
 
