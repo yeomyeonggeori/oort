@@ -216,6 +216,8 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 - 폰 본문 16은 **iOS 입력창이 줌을 멈추는 크기**다(`tokens.ts`의 `font` 주석). 웹 본문 14에 "맞추면" 로그인 폼이 포커스에서 줌한다.
 - 웹 `--text-title`(16px)과 폰 `font.body`(16)는 값이 같지만 **우연이다.** 짝으로 적으면 웹이 제목 크기를 바꾸는 날 폰 본문이 함께 끌려간다.
 
+> **Proposed (#3774, 미승인).** 역할 토큰 재정의(display/title/heading/body/body-strong/label/meta/caption/code), 폰 스케일 통합, ko/en/ja 서체·줄바꿈·Dynamic Type 정책 제안은 [typography-proposal.md](typography-proposal.md)에 있다. owner 결정 전까지 위 표가 현행이다.
+
 짝이 없으므로 폰 쪽은 **관계로** 잰다(#1163·#1186이 accent 파생과 상태 3가족에 쓴 방식): 줄 상자는 자기가 담는 글자보다 크고, 머리줄 상자(`head`)는 묘비 상자(`label`)보다 얇으며, 다섯 크기와 네 줄 상자는 겹치지 않고 한 방향으로 간다.
 
 ### 2.6 그림자·모션 — 두 축의 정의
@@ -569,3 +571,4 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | 6 | 폰 taste 스킬 방언 · design-review 계약 재조준 | ADR-0159 D4 — Swift 삭제 배치에 흡수 |
 | 7 | `light-dark()`의 실제 브라우저 하한선 | Tauri macOS는 WKWebView(OS 버전에 묶임). **미확인** |
 | 8 | 액센트 후보 세트 확정 | **결정됨** [ADR-0189](../adr/0189-design-system-2-dawn-sky-multi-theme.md) D2·D3: 테마 3종(새벽하늘·흑연·노을띠) × 모드, 신호 프리셋 4종과 커스텀 hex. 값은 [테마 토큰 표](themes-2.0.md)에 있다 |
+| 9 | 타이포 체계 재정의 (본문 기준 크기, 한글 서체, 폰 Dynamic Type, 굵기 800 폐지) | **Proposed** [typography-proposal.md](typography-proposal.md) (#3774). owner 결정 대기 |
