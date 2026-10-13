@@ -520,3 +520,35 @@ describe("windowIsFront (#3340)", () => {
     expect(windowIsFront(undefined, true)).toBe(false);
   });
 });
+
+describe("알림이 카드로 착지한다 (#3738)", () => {
+  const CARD = "019F96A4-E717-7F82-9750-58B2D7D28226";
+  const OTHER_CARD = "019F96A4-E717-7F82-9750-58B2D7D28299";
+
+  it("같은 카드를 가리키는 무장은 그 카드로 착지한다", () => {
+    const armed = armOpen(null, CHANNEL, NOW, undefined, CARD);
+    expect(openTarget(armed, NOW + 1_000)).toBe(
+      `/c/${encodeURIComponent(CHANNEL)}?msg=${CARD.toLowerCase()}`
+    );
+  });
+
+  it("같은 채널의 다른 카드가 끼면 채널로 돌아간다 — 어느 카드인지 추측하지 않는다", () => {
+    const armed = armOpen(
+      armOpen(null, CHANNEL, NOW, undefined, CARD),
+      CHANNEL,
+      NOW + 500,
+      undefined,
+      OTHER_CARD
+    );
+    expect(openTarget(armed, NOW + 600)).toBe(`/c/${CHANNEL}`);
+  });
+
+  it("카드를 모르는 알림(멘션)이 끼어도 채널이다", () => {
+    const armed = armOpen(
+      armOpen(null, CHANNEL, NOW, undefined, CARD),
+      CHANNEL,
+      NOW + 500
+    );
+    expect(openTarget(armed, NOW + 600)).toBe(`/c/${CHANNEL}`);
+  });
+});

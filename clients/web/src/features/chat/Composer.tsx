@@ -31,8 +31,10 @@ import {
   composerFieldLabel,
 } from "@momo/core/features/chat/composerCopy";
 import { useFittedComposerPlaceholder } from "@/features/chat/placeholderFit";
+import { useApprovalWaits } from "@/features/inbox/useInbox";
 import {
   agentTurnsInChannel,
+  applyApprovalWaits,
   elapsedLabel,
   hasChannelTurn,
   useAgentWorkingSignals,
@@ -575,7 +577,14 @@ export function Composer({
   });
   const typingThreshold = useTypingThreshold();
   const nowMs = useTickingNow(hasChannelTurn(signals, channelId) && railLive);
-  const turns = agentTurnsInChannel(signals, channelId, nowMs);
+  const approvalWaits = useApprovalWaits();
+  // 승인 원장이 레일보다 이긴다(#3738): 이 채널에서 사람을 기다리는 카드가 있으면 그 에이전트는 승인 대기다.
+  const turns = applyApprovalWaits(
+    agentTurnsInChannel(signals, channelId, nowMs),
+    channelId,
+    approvalWaits,
+    nowMs
+  );
 
   /**
    * 작성 중이 아닐 때 공유 액션 슬롯을 힌트가 차지하는가 (U-8 · #1749).

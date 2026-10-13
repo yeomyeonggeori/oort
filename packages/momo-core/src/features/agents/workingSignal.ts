@@ -283,6 +283,80 @@ export function byOldestTurn(
   return left - right;
 }
 
+// ---- 승인 기다림이 작업 중을 이긴다 (#3738) -------------------------------------
+//
+// 실측(2026-10-13): 에이전트가 `channel.create` 행동 승인을 올리고 turn 을 닫았다.
+// 그 턴은 레일 쪽에서 `awaiting_approval` 로 넘어가는 프레임을 내지 않았고(행동
+// 제안은 도구 호출 보류가 아니다), 채널은 「작업 중」으로 남았다가 TTL 을 넘기며
+// 「신호 소실」이 됐다. 사람은 **자기를 기다리는 카드가 있다**는 사실을 어느 낱말
+// 에서도 읽지 못했다.
+//
+// 승인 원장은 레일과 별개의 증거다: 이 채널에서 이 에이전트가 올린 대기 승인이
+// 있으면, 그 에이전트의 다음 수는 사람에게 있다. 그러니 레일이 뭐라 하든 그 턴은
+// 승인 대기이고, 레일이 턴을 잃었어도(신호 소실 직전·직후) 승인이 살아 있는 동안은
+// 「사람을 기다리는 턴」이 존재한다.
+//
+// 저장소(`markAgentWorking`)가 아니라 **읽는 쪽 덮어쓰기**인 이유: 저장소의 단일
+// 쓰기 주체는 `AgentWorkingRail` 이고, 두 번째 쓰기 주체는 서로의 키를 지우게 된다.
+// 이 함수는 이미 걸러진 목록을 받아 새 목록을 돌려줄 뿐 아무것도 쓰지 않는다.
+
+/** 원장의 대기 승인 한 건에서 이 덮어쓰기가 읽는 칸. */
+export interface ApprovalWait {
+  channelId: string;
+  /** 승인을 올린 에이전트 멤버. */
+  requestedBy: string;
+  runId?: string;
+  /** 서버 기한. 지났으면 기다림이 아니다. */
+  expiresAtMs?: number;
+}
+
+function sameId(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+/**
+ * 한 채널의 열린 턴에 대기 승인을 덮어쓴다.
+ *
+ * - 같은 에이전트의 `working` 턴 → `awaiting_approval`(헤드라인 없음).
+ * - 그 에이전트의 턴이 없음 → 승인을 근거로 한 `awaiting_approval` 턴을 세운다.
+ *   시계(`startedAtMs`)는 지어내지 않는다.
+ * - 기한이 지난 승인은 기다림이 아니다. 서버가 만료시키기 전의 몇 초도 사람을
+ *   기다리는 것으로 말하지 않는다.
+ */
+export function applyApprovalWaits(
+  turns: readonly AgentWorkingSignal[],
+  channelId: string,
+  waits: readonly ApprovalWait[],
+  nowMs: number
+): AgentWorkingSignal[] {
+  const live = waits.filter(
+    (wait) =>
+      sameId(wait.channelId, channelId) &&
+      (wait.expiresAtMs === undefined || wait.expiresAtMs > nowMs)
+  );
+  if (live.length === 0) return [...turns];
+
+  const out = turns.map((turn) =>
+    turn.state === "working" &&
+    live.some((wait) => sameId(wait.requestedBy, turn.memberId))
+      ? { ...turn, state: "awaiting_approval" as const, headlines: [] }
+      : turn
+  );
+  for (const wait of live) {
+    if (out.some((turn) => sameId(turn.memberId, wait.requestedBy))) continue;
+    out.push({
+      memberId: wait.requestedBy,
+      channelId,
+      state: "awaiting_approval",
+      source: "run",
+      ...(wait.runId !== undefined ? { runId: wait.runId } : {}),
+      headlines: [],
+      lastActivityAtMs: nowMs,
+    });
+  }
+  return out.sort(byOldestTurn);
+}
+
 // ---- elapsed readout --------------------------------------------------------
 
 function pad2(value: number): string {

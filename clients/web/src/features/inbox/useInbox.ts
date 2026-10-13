@@ -28,7 +28,11 @@ import {
   type ActorNames,
   type FeedItem,
 } from "@momo/core/features/inbox/model";
-import { serverSaysAbsent } from "@momo/core/features/capabilities/serverSurfaces";
+import {
+  isSurfaceProvided,
+  serverSaysAbsent,
+} from "@momo/core/features/capabilities/serverSurfaces";
+import type { ApprovalWait } from "@momo/core/features/agents/workingSignal";
 
 // =============================================================================
 // Inbox / activity reads. EXISTING REST only, no server change (MOMO-599):
@@ -54,6 +58,15 @@ const MENTION_MAX_PAGES = 4;
 /** How many channels the work-run fan-out is allowed to touch. */
 const RUN_CHANNEL_CAP = 12;
 const FEED_STALE_MS = 15_000;
+/**
+ * 대기 승인 목록의 폴링 주기 (#3738).
+ *
+ * 실시간 신호(`ApprovalsLiveSync`)가 1차이고 이것은 **그물**이다: 승인자가 카드가 선
+ * 채널의 멤버가 아니면 그 채널을 구독하지 않으므로 신호가 오지 않고, 서버의 목록은
+ * 멤버십이 있는 채널만 돌려준다. 어느 쪽이든 이 주기보다 오래 모르는 일은 없다.
+ * 창이 백그라운드이면 쉰다(react-query 기본) — 안 보는 화면을 위해 묻지 않는다.
+ */
+export const PENDING_APPROVALS_POLL_MS = 30_000;
 
 export interface Feed {
   items: FeedItem[];
@@ -145,7 +158,36 @@ function useApprovalPage(status: ApprovalStatus, enabled: boolean) {
     enabled,
     staleTime: FEED_STALE_MS,
     retry: retryUnlessAbsent,
+    // 결정 대기만 돈다. 끝난 쪽(에이전트 피드)은 사람이 기다리는 목록이 아니다.
+    // 없는 경로(`absent`)는 다시 묻지 않는다 — 같은 404를 30초마다 받을 이유가 없다.
+    refetchInterval: (q) =>
+      status === "pending" && !serverSaysAbsent(q.state.error)
+        ? PENDING_APPROVALS_POLL_MS
+        : false,
   });
+}
+
+/**
+ * 이 채널들에서 사람을 기다리는 승인 (읽는 쪽 덮어쓰기의 재료, #3738).
+ *
+ * 같은 쿼리 키를 `useNeedsAction`이 읽으므로 두 번 가져오지 않는다. 사이드바의 채널
+ * 알약과 컴포저 줄이 「작업 중」이 아니라 「승인 대기」라고 말하게 하는 근거다
+ * (`applyApprovalWaits`).
+ */
+export function useApprovalWaits(): ApprovalWait[] {
+  const query = useApprovalPage("pending", isSurfaceProvided("approvals"));
+  return useMemo(
+    () =>
+      (query.data ?? []).map((approval) => ({
+        channelId: approval.channelId,
+        requestedBy: approval.requestedBy,
+        runId: approval.runId,
+        ...(approval.expiresAtMs !== undefined
+          ? { expiresAtMs: approval.expiresAtMs }
+          : {}),
+      })),
+    [query.data]
+  );
 }
 
 /**

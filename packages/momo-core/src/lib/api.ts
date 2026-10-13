@@ -4573,6 +4573,13 @@ export interface Approval {
   decidedAtMs?: number;
   decisionReason?: string;
   expiresAtMs?: number;
+  /**
+   * 워크스페이스 행동 승인(`actionType === "workspace_action"`)의 레지스트리 id
+   * (`payload.action.id`, ADR-0186 부록 A). 이름 한 조각만 꺼낸다 — `args`에는
+   * 사람이 판단할 값이 들어 있지만 행 문장은 카드가 이미 갖고 있고, 인박스 행이
+   * 할 말은 「무엇을 허가하는가」 한마디다 (#3729).
+   */
+  workspaceActionId?: string;
 }
 
 /**
@@ -4607,6 +4614,12 @@ function toolNameFromPayload(payload: unknown): string | undefined {
   return name !== undefined && name !== "" ? name : undefined;
 }
 
+/** `payload.action.id` — 워크스페이스 행동 승인에만 있다. */
+function workspaceActionIdFromPayload(payload: unknown): string | undefined {
+  const id = str(record(payload)?.["action"], "id")?.trim();
+  return id !== undefined && id !== "" ? id : undefined;
+}
+
 function toApproval(value: unknown): Approval {
   const approval: Approval = {
     id: wireStr(value, "id", "id") as string,
@@ -4625,6 +4638,8 @@ function toApproval(value: unknown): Approval {
   if (toolName !== undefined) approval.toolName = toolName;
   const execution = parseExecutionPlan(record(value)?.["payload"]);
   if (execution !== null) approval.execution = execution;
+  const workspaceActionId = workspaceActionIdFromPayload(record(value)?.["payload"]);
+  if (workspaceActionId !== undefined) approval.workspaceActionId = workspaceActionId;
   const isReversible = wireBool(value, "is_reversible", "isReversible");
   if (isReversible !== undefined) approval.isReversible = isReversible;
   const decidedBy = wireStr(value, "decided_by", "decidedBy");

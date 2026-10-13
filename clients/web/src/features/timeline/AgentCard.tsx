@@ -1,4 +1,19 @@
 import { useRef, useState } from "react";
+import { useSession } from "@/app/session";
+import { seedComposerText } from "@/features/chat/draftStore";
+import {
+  EXPIRED_CARD_COPY,
+  REPROPOSE_LABEL,
+  expiryPhase,
+  expirySoonCopy,
+  reproposeDraft,
+} from "@momo/core/features/approvals/expiry";
+import {
+  ACCESS_WIDENING_NOTE,
+  isAccessWideningRow,
+} from "@momo/core/features/approvals/actionRows";
+import { attachParticle } from "@momo/core/lib/koreanParticle";
+import { useExpiryNow } from "./useExpiryNow";
 import {
   Check,
   ClipboardCheck,
@@ -298,6 +313,81 @@ function ApprovalNoteLine({
   );
 }
 
+/**
+ * 만료된 승인 카드가 컨트롤 대신 서는 자리 (#3738).
+ *
+ * 승인은 죽었고 사람이 할 수 있는 일은 하나다: 그 에이전트에게 다시 제안해 달라고
+ * 청하는 것. 버튼은 **입력창에 초안을 넣을 뿐 보내지 않는다** — 멘션 한 줄이라도
+ * 사람의 이름으로 나가는 메시지이고, 보내기 전에 한 줄을 덧붙일 수 있어야 한다.
+ * 입력창에 쓰던 글이 있으면 덮지 않고 그 사실을 말한다(`seedComposerText`).
+ *
+ * 올린 이가 에이전트로 풀리지 않으면(디렉터리에 없음) 버튼을 세우지 않는다. 누르면
+ * 아무 일도 없는 컨트롤은 고장 난 버튼으로 읽힌다.
+ */
+function ExpiredApprovalFooter({
+  card,
+  directory,
+}: {
+  card: AgentApprovalCard;
+  directory: Directory;
+}) {
+  const { workspaceId } = useSession();
+  const [result, setResult] = useState<"idle" | "seeded" | "busy">("idle");
+  const requester =
+    card.requestedByMemberId !== undefined
+      ? memberFor(directory, card.requestedByMemberId)
+      : null;
+  const agent = requester?.kind === "agent" ? requester : null;
+  const channelId = card.channelId;
+  return (
+    <div className="border-t border-line" data-testid="approval-expired">
+      <p className="px-3 py-2 text-meta text-ink-muted">{EXPIRED_CARD_COPY}</p>
+      {agent !== null && channelId !== undefined && (
+        <div className="flex flex-col gap-1 px-3 pb-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="tap-target self-start"
+            data-testid="approval-repropose"
+            onClick={() =>
+              setResult(
+                seedComposerText(
+                  workspaceId,
+                  channelId,
+                  reproposeDraft(agent.handle)
+                )
+                  ? "seeded"
+                  : "busy"
+              )
+            }
+          >
+            {REPROPOSE_LABEL}
+          </Button>
+          {result === "seeded" && (
+            <p
+              role="status"
+              className="text-meta text-ink-muted"
+              data-testid="approval-repropose-note"
+            >
+              입력창에 넣어 뒀어요. 보내면 {attachParticle(agent.displayName, "subject")} 다시 제안해요.
+            </p>
+          )}
+          {result === "busy" && (
+            <p
+              role="status"
+              className="text-meta text-ink-muted"
+              data-testid="approval-repropose-note"
+            >
+              입력창에 쓰던 글이 있어서 넣지 못했어요. 비우고 다시 눌러 주세요.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ApprovalBody({
   card,
   directory,
@@ -335,8 +425,18 @@ function ApprovalBody({
   // 폰의 `useOnline.ts` 가 같은 판단을 NetInfo로 한다.
   const offline = useOffline();
 
-  const status = resolveApprovalStatus(local?.status ?? null, card.status);
+  const resolvedStatus = resolveApprovalStatus(local?.status ?? null, card.status);
+  // 기한 (#3738). 카드 메시지는 스냅샷이라 서버가 승인을 만료시켜도 이 카드의
+  // status 는 저절로 바뀌지 않는다. 기한이 지난 대기 카드를 「만료」로 읽는 것은
+  // 이 시계의 일이다. 이미 끝난 카드·재개 제안은 시계를 돌리지 않는다.
+  const watchesExpiry = resolvedStatus === "pending" && !card.isResumeOffer;
+  const nowMs = useExpiryNow(card.expiresAtMs, watchesExpiry);
+  const phase = watchesExpiry ? expiryPhase(card.expiresAtMs, nowMs) : "none";
+  const status: ApprovalStatus = phase === "expired" ? "expired" : resolvedStatus;
   const settled = status !== "pending";
+  // 컨트롤 대신 「다시 제안」이 설 자리: 만료됐고, 결정할 대상이 있는 도구·행동 승인.
+  const expired =
+    status === "expired" && card.approvalId !== null && !card.isResumeOffer;
   const decidedAtMs = local?.decidedAtMs ?? card.decidedAtMs;
   const decidedById = local?.decidedByMemberId ?? card.decidedByMemberId;
   const decidedBy = decidedById ? memberFor(directory, decidedById) : null;
@@ -371,14 +471,17 @@ function ApprovalBody({
       kind="approval"
       // 오프라인에서는 y/n 단축키도 꺼진다. 켜 두면 키가 무장까지 하고 확정이
       // 나가지 않는, 화면이 설명하지 못하는 상태가 만들어진다.
-      keyboard={note === null}
+      keyboard={note === null && !expired}
       // 이슈 1114: `y`도 버튼과 같은 문을 지난다. 자격 있는 호스트가 없으면 승인은
       // 무장하지 않는다 — 단축키만 통과시키면 꺼진 버튼 옆에서 키보드로는 열리는,
       // 화면이 설명하지 못하는 두 번째 문이 생긴다. `n`은 그대로다.
       onApprove={() => {
+        if (expired) return;
         if (spawnHostGate(card.execution).canApprove) setArmed("approve");
       }}
-      onReject={() => setArmed("reject")}
+      onReject={() => {
+        if (!expired) setArmed("reject");
+      }}
       detail={card.detail}
       footer={
         note !== null ? (
@@ -394,7 +497,19 @@ function ApprovalBody({
               />
             )}
           </>
+        ) : expired ? (
+          <ExpiredApprovalFooter card={card} directory={directory} />
         ) : card.approvalId !== null ? (
+          <>
+            {phase === "soon" && card.expiresAtMs !== undefined && (
+              <ApprovalNoteLine
+                note={{
+                  kind: "expiry-soon",
+                  tone: "blocked",
+                  text: expirySoonCopy(card.expiresAtMs, nowMs),
+                }}
+              />
+            )}
           <ApprovalActions
             approvalId={card.approvalId}
             className="border-t border-line"
@@ -451,6 +566,7 @@ function ApprovalBody({
               setLocal(next);
             }}
           />
+          </>
         ) : null
       }
     >
@@ -465,7 +581,21 @@ function ApprovalBody({
           label={row.label}
           testId="approval-action-row"
         >
-          {row.value}
+          {isAccessWideningRow(card.action?.id ?? "", row) ? (
+            // 평문이다(부록 A: 링크·멘션 자동 변환 금지). 달라지는 것은 굵기와 아래의
+            // 한 줄뿐 — 이 행은 「무엇을 만드는가」가 아니라 「누가 더 보게 되는가」다.
+            <>
+              <span className="font-medium">{row.value}</span>
+              <span
+                className="mt-1 block text-meta text-warn"
+                data-testid="approval-access-widening"
+              >
+                {ACCESS_WIDENING_NOTE}
+              </span>
+            </>
+          ) : (
+            row.value
+          )}
         </LabeledRow>
       ))}
       {card.action !== null && card.action.omittedRows > 0 && (

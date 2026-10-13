@@ -34,7 +34,28 @@ function isRoleKey(value: string): value is RoleKey {
  * 그래서 모르는 값은 조사 없이, 원문임이 드러나는 자리에 둔다.
  */
 function isKnownRole(role: string): boolean {
-  return isRoleKey(role);
+  return isRoleKey(role) || isCompositeRole(role);
+}
+
+// -----------------------------------------------------------------------------
+// 합성 역할 (ADR-0186 증보 2026-10-11, #3729)
+//
+// `agent_editor`·`workspace_operator`는 멤버의 역할(`ROLE_KEYS`)이 아니라
+// **판정 이름**이다: 앞의 것은 「대상 에이전트의 소유자 또는 워크스페이스 admin」,
+// 뒤의 것은 「owner/admin(+플랫폼 운영 스코프)」. 그래서 디렉터리의 역할 표
+// (`DEFAULT_ROLE_LABELS`)에 넣지 않는다 — 넣으면 멤버 역할 선택기에 「운영자」가
+// 고를 수 있는 역할로 선다. 이 두 낱말은 이 파일 안에서만 산다.
+//
+// 문장은 서버 계약(부록 A)이 정한 그대로다. 둘 다 이미 명사구로 끝나므로 조사가
+// 맞게 붙는다(`attachParticle`이 「관리자」「(관리자)」의 끝소리를 읽는다).
+// -----------------------------------------------------------------------------
+const COMPOSITE_ROLE_NAMES: Readonly<Record<string, string>> = {
+  agent_editor: "대상 에이전트의 소유자 또는 관리자",
+  workspace_operator: "워크스페이스 운영자(관리자)",
+};
+
+function isCompositeRole(role: string): boolean {
+  return Object.prototype.hasOwnProperty.call(COMPOSITE_ROLE_NAMES, role);
 }
 
 /**
@@ -42,7 +63,9 @@ function isKnownRole(role: string): boolean {
  * 하나 더 만들어도 화면이 그것을 감추지 않는다(`TIER_LABEL` 과 같은 규율).
  */
 export function roleDisplayName(role: string): string {
-  return isRoleKey(role) ? DEFAULT_ROLE_LABELS[role] : role;
+  if (isRoleKey(role)) return DEFAULT_ROLE_LABELS[role];
+  if (isCompositeRole(role)) return COMPOSITE_ROLE_NAMES[role];
+  return role;
 }
 
 /**

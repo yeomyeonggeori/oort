@@ -115,3 +115,27 @@ describe("approval projection decoding", () => {
     expect(approvalsFromWire({})).toEqual([]);
   });
 });
+
+describe("워크스페이스 행동 승인의 행동 id (#3729)", () => {
+  const ACTION = {
+    ...CAMEL,
+    actionType: "workspace_action",
+    payload: {
+      action: { id: "channel.create", args: { name: "계획" }, rationale: null },
+      proposed_by: CAMEL.requestedBy,
+      resume_model: null,
+    },
+  };
+
+  it("payload.action.id 한 조각만 꺼낸다 (args 는 인박스 행이 할 말이 아니다)", () => {
+    const [approval] = approvalsFromWire({ approvals: [ACTION] });
+    expect(approval.workspaceActionId).toBe("channel.create");
+    expect(JSON.stringify(approval)).not.toContain("계획");
+  });
+
+  it("도구 호출 승인에는 칸 자체가 없다", () => {
+    const [approval] = approvalsFromWire({ approvals: [CAMEL] });
+    expect(approval.workspaceActionId).toBeUndefined();
+  });
+});
+
