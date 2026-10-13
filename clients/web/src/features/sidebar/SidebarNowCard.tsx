@@ -121,7 +121,9 @@ export function SidebarNowCard({
               ? "text-ink-muted"
               : lead.state === "working"
                 ? "text-agent"
-                : "text-warn"
+                : lead.state === "queued"
+                  ? "text-ink-muted"
+                  : "text-warn"
           )}
           data-testid="sidebar-now-state"
         >

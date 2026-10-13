@@ -1,0 +1,288 @@
+import { describe, expect, it } from "vitest";
+import type { AgentRunProgress } from "../../lib/api";
+import { agentRunProgressFromWire } from "../../lib/api";
+import { asAgentRunEventFrame } from "../../lib/realtimeEvents";
+import { WireShapeError } from "../../lib/wire";
+import { activityLines, agentTurnBadgeCopy } from "./turnCopy";
+import {
+  endReasonText,
+  isOpenRunPhase,
+  runPhaseDetail,
+  runPhaseLabel,
+  serverFactsOf,
+  signalFromProgress,
+} from "./runPhase";
+import {
+  IDLE_CUTOFF_MS,
+  isStaleSignal,
+  mergeAgentWorkingSignals,
+  resolveAgentWorkingSignals,
+} from "./workingSignal";
+import {
+  appendProgress,
+  openWorkLog,
+  workLogLiveness,
+  workLogStateLabel,
+} from "./workLog";
+
+const NOW = 1_800_000_000_000;
+const MIN = 60_000;
+const CH = "00000000-0000-7000-8000-000000000201";
+const AGENT = "00000000-0000-7000-8000-000000000301";
+const RUN = "0199aa11-2222-7000-8000-0000000000b2";
+
+function progress(extra: Partial<AgentRunProgress> = {}): AgentRunProgress {
+  return {
+    id: RUN,
+    channelId: CH,
+    agentMemberId: AGENT,
+    status: "queued",
+    phase: "queued",
+    leaseState: "none",
+    stepCount: 0,
+    ahead: [],
+    createdAtMs: NOW - 11 * MIN,
+    updatedAtMs: NOW - 11 * MIN,
+    ...extra,
+  };
+}
+
+const names = () => ({ name: "그록봇" });
+
+describe("서버 phase가 클라이언트 시계를 이긴다 (ADR-0200 D1)", () => {
+  // 2026-10-13 실측: 11분 뒤에 수령되는 정상 run이 55초에 「신호 소실」로 보였다.
+  // 이 시험을 되돌리면(isStaleSignal이 server를 무시하면) 첫 단정부터 실패한다.
+  it("11분 동안 수령되지 않은 정상 run은 90초가 지나도 소실이 아니라 대기 중이다", () => {
+    const signal = signalFromProgress(
+      progress({ queuePosition: 2, aheadTotal: 1 })
+    );
+    expect(signal).not.toBeNull();
+    if (signal === null) return;
+
+    expect(NOW - signal.lastActivityAtMs).toBeGreaterThan(IDLE_CUTOFF_MS);
+    expect(isStaleSignal(signal, NOW)).toBe(false);
+
+    const resolved = resolveAgentWorkingSignals([signal], NOW);
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0].state).toBe("queued");
+
+    const badge = agentTurnBadgeCopy(resolved, names);
+    expect(badge?.text).toBe("대기 2번째");
+    expect(badge?.text).not.toContain("작업 중");
+    expect(badge?.text).not.toContain("신호 소실");
+  });
+
+  it("같은 신호에서 server를 빼면 90초에 걸러진다 (관리형·옛 서버의 규칙은 그대로)", () => {
+    const signal = signalFromProgress(progress({ queuePosition: 1 }));
+    if (signal === null) throw new Error("signal");
+    const { server: _server, ...legacy } = signal;
+    expect(isStaleSignal(legacy, NOW)).toBe(true);
+    expect(resolveAgentWorkingSignals([legacy], NOW)).toEqual([]);
+  });
+
+  it("작업 패널도 서버가 열려 있다고 하면 시계로 소실을 말하지 않는다", () => {
+    const log = openWorkLog({ runId: RUN, memberId: AGENT, channelId: CH }, NOW - 11 * MIN);
+    const facts = serverFactsOf(progress({ queuePosition: 1 }));
+    expect(workLogLiveness(log, NOW)).toBe("quiet");
+    expect(workLogLiveness(log, NOW, IDLE_CUTOFF_MS, facts)).toBe("live");
+    expect(workLogStateLabel(log, "live", facts)).toBe("대기 1번째");
+  });
+
+  it("서버 판정이 있는 run은 프레임이 말하는 상태와 달라도 서버가 이긴다", () => {
+    // 프레임 접기는 queued 프레임 하나를 「작업 중」(옛 규칙)으로 읽었다.
+    const log = appendProgress(
+      openWorkLog({ runId: RUN, memberId: AGENT, channelId: CH }, NOW),
+      {
+        type: "agent.status",
+        v: 1,
+        ts: NOW,
+        payload: {
+          run_id: RUN,
+          agent_member_id: AGENT,
+          channel_id: CH,
+          phase: "queued",
+          run_status: "queued",
+        },
+      },
+      NOW
+    );
+    expect(log.state).toBe("queued");
+    expect(
+      workLogStateLabel(log, "live", serverFactsOf(progress({ phase: "claimed" })))
+    ).toBe("가져감");
+  });
+});
+
+describe("상태 어휘: 대기 n번째 / 가져감 / 진행 / 승인 대기 / 끝(사유)", () => {
+  it("phase마다 한 낱말", () => {
+    const label = (extra: Partial<AgentRunProgress>) =>
+      runPhaseLabel(serverFactsOf(progress(extra)));
+    expect(label({ phase: "queued", queuePosition: 2 })).toBe("대기 2번째");
+    expect(label({ phase: "queued" })).toBe("대기 중");
+    expect(label({ phase: "claimed", leaseState: "live" })).toBe("가져감");
+    expect(label({ phase: "running", leaseState: "live" })).toBe("작업 중");
+    expect(label({ phase: "awaiting_approval" })).toBe("승인 대기");
+    expect(label({ phase: "paused" })).toBe("일시 정지");
+    expect(label({ phase: "succeeded" })).toBe("완료");
+    expect(label({ phase: "failed" })).toBe("실패");
+    expect(label({ phase: "cancelled" })).toBe("취소됨");
+    expect(label({ phase: "timed_out", endReason: "approval_expired" })).toBe("시간 초과");
+  });
+
+  it("「신호 소실」은 서버가 lease_abandoned로 끝냈다고 알릴 때만 나온다", () => {
+    const lost = serverFactsOf(
+      progress({ phase: "timed_out", status: "timed_out", endReason: "lease_abandoned" })
+    );
+    expect(runPhaseLabel(lost)).toBe("신호 소실");
+    // 같은 timed_out이어도 사유가 다르면 그 낱말을 쓰지 않는다.
+    for (const endReason of ["approval_expired", "unclaimed_expired", undefined]) {
+      const other = serverFactsOf(
+        progress({ phase: "timed_out", status: "timed_out", ...(endReason ? { endReason } : {}) })
+      );
+      expect(runPhaseLabel(other)).not.toBe("신호 소실");
+    }
+    // 열려 있는 phase는 lease가 만료됐어도 소실이라 하지 않는다.
+    const stale = serverFactsOf(
+      progress({ phase: "claimed", status: "queued", leaseState: "stale", claimedAtMs: NOW - 30 * MIN })
+    );
+    expect(runPhaseLabel(stale)).toBe("가져감");
+    expect(runPhaseDetail(stale, NOW)).toBe("가져간 뒤 30분째 소식이 없어요");
+  });
+
+  it("근거 줄은 서버가 준 사실만 말한다", () => {
+    const queued = serverFactsOf(progress({ queuePosition: 3, aheadTotal: 2 }));
+    expect(runPhaseDetail(queued, NOW)).toBe("11분째 기다려요 · 에이전트 앞에 2건");
+    // 패널이 앞의 일을 따로 자세히 보일 때는 같은 건수를 두 번 말하지 않는다.
+    expect(runPhaseDetail(queued, NOW, { omitAhead: true })).toBe("11분째 기다려요");
+    const fresh = serverFactsOf(progress({ createdAtMs: NOW - 10_000, queuePosition: 1 }));
+    expect(runPhaseDetail(fresh, NOW)).toBeUndefined();
+    const running = serverFactsOf(
+      progress({ phase: "running", status: "running", leaseState: "live", lastEventAtMs: NOW - 4 * MIN })
+    );
+    expect(runPhaseDetail(running, NOW)).toBe("마지막 보고 4분 전");
+  });
+
+  it("종료 사유: 닫힌 코드만 문장이 되고 모르는 코드는 만들어 내지 않는다", () => {
+    expect(endReasonText("approval_expired")).toBe("승인이 만료됐어요");
+    expect(endReasonText("unclaimed_expired")).toBe("아무도 가져가지 않아 끝냈어요");
+    expect(endReasonText("cancelled_by_member")).toBe("멤버가 취소했어요");
+    expect(endReasonText("brand_new_code")).toBeUndefined();
+    expect(endReasonText(undefined)).toBeUndefined();
+  });
+
+  it("끝난 run은 열린 턴 신호를 세우지 않는다", () => {
+    for (const phase of ["succeeded", "failed", "timed_out", "cancelled"] as const) {
+      expect(isOpenRunPhase(phase)).toBe(false);
+      expect(signalFromProgress(progress({ phase }))).toBeNull();
+    }
+  });
+});
+
+describe("표면 낱말", () => {
+  it("대기·가져감·진행·승인 대기가 알약에서 서로 다른 낱말이다", () => {
+    const sig = (extra: Partial<AgentRunProgress>) => {
+      const s = signalFromProgress(progress(extra));
+      if (s === null) throw new Error("signal");
+      return s;
+    };
+    const word = (extra: Partial<AgentRunProgress>) =>
+      agentTurnBadgeCopy([sig(extra)], names)?.text;
+    expect(word({ phase: "queued", queuePosition: 2 })).toBe("대기 2번째");
+    expect(word({ phase: "claimed", leaseState: "live" })).toBe("가져감");
+    expect(word({ phase: "running", status: "running", leaseState: "live" })).toBe("작업 중");
+    expect(word({ phase: "awaiting_approval", status: "awaiting_approval" })).toBe("승인 대기");
+  });
+
+  it("컴포저 줄: 대기·가져감은 「작업 중」이 아니고, 진행 단계는 에이전트가 보고한 만큼이다", () => {
+    const queued = signalFromProgress(progress({ queuePosition: 2 }));
+    const running = signalFromProgress(
+      progress({
+        id: "0199aa11-2222-7000-8000-0000000000b3",
+        phase: "running",
+        status: "running",
+        leaseState: "live",
+        startedAtMs: NOW - 2 * MIN,
+        latestStage: "채널 이름 확인",
+      })
+    );
+    if (queued === null || running === null) throw new Error("signal");
+    const q = activityLines([queued], names).lines[0];
+    expect(q.state).toBe("queued");
+    expect(q.startedAtMs).toBeUndefined();
+    const r = activityLines([running], names).lines[0];
+    expect(r.headline).toBe("채널 이름 확인");
+    expect(r.startedAtMs).toBe(NOW - 2 * MIN);
+  });
+
+  it("한 에이전트의 여러 run은 working > 승인 대기 > 대기 순으로 접힌다", () => {
+    const mk = (extra: Partial<AgentRunProgress>) => {
+      const s = signalFromProgress(progress(extra));
+      if (s === null) throw new Error("signal");
+      return s;
+    };
+    const queued = mk({ id: "q", queuePosition: 1 });
+    const waiting = mk({ id: "a", phase: "awaiting_approval", status: "awaiting_approval" });
+    const working = mk({ id: "w", phase: "running", status: "running", leaseState: "live" });
+    expect(mergeAgentWorkingSignals([queued, waiting])?.state).toBe("awaiting_approval");
+    expect(mergeAgentWorkingSignals([queued, working])?.state).toBe("working");
+    expect(mergeAgentWorkingSignals([queued, mk({ id: "q2", queuePosition: 2 })])?.server?.queuePosition).toBe(1);
+  });
+});
+
+describe("서버 응답 파서", () => {
+  const wire = {
+    id: RUN.toUpperCase(),
+    channelId: CH,
+    agentMemberId: AGENT,
+    status: "queued",
+    phase: "queued",
+    leaseState: "none",
+    stepCount: 0,
+    queuePosition: 2,
+    aheadTotal: 3,
+    ahead: [{ runId: "0199AA11-2222-7000-8000-0000000000C1", channelId: CH }],
+    createdAtMs: NOW,
+    updatedAtMs: NOW,
+  };
+
+  it("id는 소문자로 접고 ahead는 내 채널 것만 이름이 있다", () => {
+    const parsed = agentRunProgressFromWire(wire);
+    expect(parsed.id).toBe(RUN);
+    expect(parsed.queuePosition).toBe(2);
+    expect(parsed.aheadTotal).toBe(3);
+    expect(parsed.ahead).toHaveLength(1);
+  });
+
+  it("모르는 phase나 깨진 모양은 조용히 통과시키지 않는다", () => {
+    expect(() => agentRunProgressFromWire({ ...wire, phase: "teleporting" })).toThrow(WireShapeError);
+    expect(() => agentRunProgressFromWire({ ...wire, leaseState: "dead" })).toThrow(WireShapeError);
+    expect(() => agentRunProgressFromWire({ ...wire, queuePosition: -1 })).toThrow(WireShapeError);
+    expect(() => agentRunProgressFromWire(null)).toThrow(WireShapeError);
+  });
+});
+
+describe("agent.run.event 프레임 (ADR-0200 D2)", () => {
+  const frame = {
+    type: "agent.run.event",
+    v: 1,
+    ts: NOW,
+    payload: { run_id: RUN, channel_id: CH, kind: "stage" },
+  };
+
+  it("run id·채널 id·종류가 있으면 읽고, 단계 문자열은 싣지 않는 신호로만 쓴다", () => {
+    expect(asAgentRunEventFrame(frame)?.payload.kind).toBe("stage");
+    // 프레임은 재조회 신호일 뿐이다: 단계 문자열을 실어 와도 모양이 그것을 약속하지 않는다.
+    expect(Object.keys(asAgentRunEventFrame(frame)?.payload ?? {}).sort()).toEqual([
+      "channel_id",
+      "kind",
+      "run_id",
+    ]);
+  });
+
+  it("다른 프레임·깨진 모양은 받지 않는다", () => {
+    expect(asAgentRunEventFrame({ ...frame, type: "work.run.updated" })).toBeNull();
+    expect(asAgentRunEventFrame({ ...frame, payload: { run_id: RUN } })).toBeNull();
+    expect(asAgentRunEventFrame(null)).toBeNull();
+    expect(asAgentRunEventFrame("agent.run.event")).toBeNull();
+  });
+});

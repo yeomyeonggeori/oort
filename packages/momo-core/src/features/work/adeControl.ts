@@ -4,6 +4,7 @@ import {
   UNKNOWN_AGENT_NAME,
   type AgentNameLookup,
 } from "../agents/turnCopy";
+import { runPhaseLabel } from "../agents/runPhase";
 import type { AgentWorkingSignal } from "../agents/workingSignal";
 import { sessionHandoffVerb, type HandoffVerb } from "./sessionHandoff";
 import { workSessionStatus } from "./workSessionModel";
@@ -392,7 +393,16 @@ export function adeItemsFromTurns(
       durability: "unknown",
       channelId: turn.channelId,
       title: parts.name.trim() === "" ? UNKNOWN_AGENT_NAME : agentLabel(parts),
-      detail: headline ?? (state === "blocked" ? "승인 대기" : "작업 중"),
+      detail:
+        headline ??
+        (state === "blocked"
+          ? "승인 대기"
+          : // 아직 시작하지 않은 run(ADR-0200)은 칩이 어떻든 「작업 중」이라고 쓰지 않는다.
+            turn.state === "queued"
+            ? turn.server === undefined
+              ? "대기 중"
+              : runPhaseLabel(turn.server)
+            : "작업 중"),
     };
     if (turn.startedAtMs !== undefined) item.startedAtMs = turn.startedAtMs;
     if (turn.runId !== undefined) item.runId = turn.runId;

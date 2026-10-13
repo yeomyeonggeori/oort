@@ -4573,6 +4573,13 @@ export interface Approval {
   decidedAtMs?: number;
   decisionReason?: string;
   expiresAtMs?: number;
+  /**
+   * 워크스페이스 행동 승인(`actionType === "workspace_action"`)의 레지스트리 id
+   * (`payload.action.id`, ADR-0186 부록 A). 이름 한 조각만 꺼낸다 — `args`에는
+   * 사람이 판단할 값이 들어 있지만 행 문장은 카드가 이미 갖고 있고, 인박스 행이
+   * 할 말은 「무엇을 허가하는가」 한마디다 (#3729).
+   */
+  workspaceActionId?: string;
 }
 
 /**
@@ -4607,6 +4614,12 @@ function toolNameFromPayload(payload: unknown): string | undefined {
   return name !== undefined && name !== "" ? name : undefined;
 }
 
+/** `payload.action.id` — 워크스페이스 행동 승인에만 있다. */
+function workspaceActionIdFromPayload(payload: unknown): string | undefined {
+  const id = str(record(payload)?.["action"], "id")?.trim();
+  return id !== undefined && id !== "" ? id : undefined;
+}
+
 function toApproval(value: unknown): Approval {
   const approval: Approval = {
     id: wireStr(value, "id", "id") as string,
@@ -4625,6 +4638,8 @@ function toApproval(value: unknown): Approval {
   if (toolName !== undefined) approval.toolName = toolName;
   const execution = parseExecutionPlan(record(value)?.["payload"]);
   if (execution !== null) approval.execution = execution;
+  const workspaceActionId = workspaceActionIdFromPayload(record(value)?.["payload"]);
+  if (workspaceActionId !== undefined) approval.workspaceActionId = workspaceActionId;
   const isReversible = wireBool(value, "is_reversible", "isReversible");
   if (isReversible !== undefined) approval.isReversible = isReversible;
   const decidedBy = wireStr(value, "decided_by", "decidedBy");
@@ -4813,6 +4828,373 @@ export function agentRunSummaryPageFromWire(value: unknown): AgentRunSummaryPage
     runs: runs.map(agentRunSummaryFromWire),
     ...(nextCursor === undefined ? {} : { nextCursor: nextCursor.toLowerCase() }),
   };
+}
+
+// ---- Agent runs: server-derived progress (ADR-0200 D1~D3) ------------------
+// GET /v1/workspaces/{ws}/channels/{ch}/agent-runs/progress
+// GET /v1/workspaces/{ws}/agent-runs/{run}/events
+//
+// 이 두 읽기는 클라이언트가 추정하던 것(「작업 중」·「신호 소실」)을 서버가 직접
+// 답하게 한다. `AgentRunPhase`는 realtime 프레임의 `AgentPhaseWire`
+// (thinking/streaming/done/error)와 **다른 어휘**다: 앞의 것은 서버가 DB 사실로
+// 파생한 run 상태이고, 뒤의 것은 워커가 스트림 도중 내보내는 단계다. 두 낱말이
+// 한 변수에 섞이면 「대기」를 「작업 중」으로 그리던 옛 버그가 돌아온다.
+
+/** 서버가 파생한 run 상태. 클라이언트는 이 값을 고르지 않고 그린다. */
+export type AgentRunPhase =
+  | "queued"
+  | "claimed"
+  | "running"
+  | "awaiting_approval"
+  | "paused"
+  | "succeeded"
+  | "failed"
+  | "timed_out"
+  | "cancelled";
+
+/**
+ * 전달 job의 lease. `stale`은 만료됐고 아무도 다시 가져가지 않았다는 뜻이다:
+ * 에이전트가 돌아올 수 있으므로 「끊김」이 아니다.
+ */
+export type AgentLeaseState = "live" | "stale" | "none";
+
+export interface AgentRunProgress {
+  id: string;
+  channelId: string;
+  agentMemberId: string;
+  triggerMessageId?: string;
+  triggerSummary?: string;
+  status: AgentRunStatus;
+  phase: AgentRunPhase;
+  leaseState: AgentLeaseState;
+  stepCount: number;
+  claimedAtMs?: number;
+  latestStage?: string;
+  lastEventAtMs?: number;
+  approvalId?: string;
+  approvalExpiresAtMs?: number;
+  /** 서버가 쓴 닫힌 코드(`approval_expired` …). 모르는 코드도 그대로 온다. */
+  endReason?: string;
+  /** 1 = 다음에 가져갈 순서. 아직 아무도 가져가지 않은 run에만 있다. */
+  queuePosition?: number;
+  /** 에이전트 큐에서 내 앞에 있는 가져가지 않은 run 수(모든 채널). */
+  aheadTotal?: number;
+  /** 그중 내가 멤버인 채널의 것. 다른 채널의 것은 숫자로만 센다. */
+  ahead: { runId: string; channelId: string }[];
+  startedAtMs?: number;
+  finishedAtMs?: number;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+const AGENT_RUN_PHASES = new Set<AgentRunPhase>([
+  "queued",
+  "claimed",
+  "running",
+  "awaiting_approval",
+  "paused",
+  "succeeded",
+  "failed",
+  "timed_out",
+  "cancelled",
+]);
+
+const AGENT_LEASE_STATES = new Set<AgentLeaseState>(["live", "stale", "none"]);
+
+function optionalPositiveInt(
+  source: Record<string, unknown>,
+  key: string
+): number | undefined {
+  const value = optionalFiniteNumber(source, key);
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || value < 0) throw new WireShapeError();
+  return value;
+}
+
+export function agentRunProgressFromWire(value: unknown): AgentRunProgress {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  const id = str(source, "id");
+  const channelId = str(source, "channelId");
+  const agentMemberId = str(source, "agentMemberId");
+  const status = str(source, "status");
+  const phase = str(source, "phase");
+  const leaseState = str(source, "leaseState");
+  const stepCount = num(source, "stepCount");
+  const createdAtMs = num(source, "createdAtMs");
+  const updatedAtMs = num(source, "updatedAtMs");
+  if (
+    id === undefined ||
+    channelId === undefined ||
+    agentMemberId === undefined ||
+    status === undefined ||
+    !AGENT_RUN_STATUSES.has(status as AgentRunStatus) ||
+    phase === undefined ||
+    !AGENT_RUN_PHASES.has(phase as AgentRunPhase) ||
+    leaseState === undefined ||
+    !AGENT_LEASE_STATES.has(leaseState as AgentLeaseState) ||
+    stepCount === undefined ||
+    createdAtMs === undefined ||
+    updatedAtMs === undefined
+  ) {
+    throw new WireShapeError();
+  }
+  const aheadRaw = source.ahead;
+  if (aheadRaw !== undefined && aheadRaw !== null && !Array.isArray(aheadRaw)) {
+    throw new WireShapeError();
+  }
+  const ahead = (aheadRaw ?? []).map((entry: unknown) => {
+    const row = record(entry);
+    const runId = row === null ? undefined : str(row, "runId");
+    const aheadChannel = row === null ? undefined : str(row, "channelId");
+    if (runId === undefined || aheadChannel === undefined) {
+      throw new WireShapeError();
+    }
+    return { runId: runId.toLowerCase(), channelId: aheadChannel.toLowerCase() };
+  });
+  const triggerMessageId = optionalString(source, "triggerMessageId");
+  const triggerSummary = optionalString(source, "triggerSummary");
+  const claimedAtMs = optionalFiniteNumber(source, "claimedAtMs");
+  const latestStage = optionalString(source, "latestStage");
+  const lastEventAtMs = optionalFiniteNumber(source, "lastEventAtMs");
+  const approvalId = optionalString(source, "approvalId");
+  const approvalExpiresAtMs = optionalFiniteNumber(source, "approvalExpiresAtMs");
+  const endReason = optionalString(source, "endReason");
+  const queuePosition = optionalPositiveInt(source, "queuePosition");
+  const aheadTotal = optionalPositiveInt(source, "aheadTotal");
+  const startedAtMs = optionalFiniteNumber(source, "startedAtMs");
+  const finishedAtMs = optionalFiniteNumber(source, "finishedAtMs");
+  return {
+    id: id.toLowerCase(),
+    channelId: channelId.toLowerCase(),
+    agentMemberId: agentMemberId.toLowerCase(),
+    status: status as AgentRunStatus,
+    phase: phase as AgentRunPhase,
+    leaseState: leaseState as AgentLeaseState,
+    stepCount,
+    ahead,
+    createdAtMs,
+    updatedAtMs,
+    ...(triggerMessageId === undefined
+      ? {}
+      : { triggerMessageId: triggerMessageId.toLowerCase() }),
+    ...(triggerSummary === undefined ? {} : { triggerSummary }),
+    ...(claimedAtMs === undefined ? {} : { claimedAtMs }),
+    ...(latestStage === undefined ? {} : { latestStage }),
+    ...(lastEventAtMs === undefined ? {} : { lastEventAtMs }),
+    ...(approvalId === undefined ? {} : { approvalId: approvalId.toLowerCase() }),
+    ...(approvalExpiresAtMs === undefined ? {} : { approvalExpiresAtMs }),
+    ...(endReason === undefined ? {} : { endReason }),
+    ...(queuePosition === undefined ? {} : { queuePosition }),
+    ...(aheadTotal === undefined ? {} : { aheadTotal }),
+    ...(startedAtMs === undefined ? {} : { startedAtMs }),
+    ...(finishedAtMs === undefined ? {} : { finishedAtMs }),
+  };
+}
+
+export function agentRunProgressPageFromWire(value: unknown): AgentRunProgress[] {
+  const source = responseRecord(value);
+  const runs = arrayField(source, "runs");
+  if (runs === null) throw new WireShapeError();
+  return runs.map(agentRunProgressFromWire);
+}
+
+/** 원장 행의 닫힌 어휘(openapi `AgentRunEvent.kind`). */
+export type AgentRunLedgerKind =
+  | "queued"
+  | "claimed"
+  | "started"
+  | "stage"
+  | "paused"
+  | "resumed"
+  | "approval_requested"
+  | "approval_decided"
+  | "succeeded"
+  | "failed"
+  | "timed_out"
+  | "cancelled";
+
+const AGENT_RUN_LEDGER_KINDS = new Set<AgentRunLedgerKind>([
+  "queued",
+  "claimed",
+  "started",
+  "stage",
+  "paused",
+  "resumed",
+  "approval_requested",
+  "approval_decided",
+  "succeeded",
+  "failed",
+  "timed_out",
+  "cancelled",
+]);
+
+export interface AgentRunLedgerEvent {
+  /** 읽는 순간의 1-기반 순번. 키로 쓰지 않는다(200행 상한이 오래된 stage를 지운다). */
+  ordinal: number;
+  kind: AgentRunLedgerKind;
+  /** 에이전트가 보고한 단계 표식(≤80자). 신뢰하지 않는 일반 텍스트. `stage`에만 있다. */
+  stage?: string;
+  /** 서버가 쓴 닫힌 코드(`approved`, `approval_expired` …). */
+  code?: string;
+  approvalId?: string;
+  actorMemberId?: string;
+  createdAtMs: number;
+}
+
+export interface AgentRunLedger {
+  runId: string;
+  events: AgentRunLedgerEvent[];
+}
+
+export function agentRunLedgerFromWire(value: unknown): AgentRunLedger {
+  const source = responseRecord(value);
+  const runId = str(source, "runId");
+  const events = arrayField(source, "events");
+  if (runId === undefined || events === null) throw new WireShapeError();
+  return {
+    runId: runId.toLowerCase(),
+    events: events.map((entry) => {
+      const row = record(entry);
+      if (row === null) throw new WireShapeError();
+      const ordinal = num(row, "ordinal");
+      const kind = str(row, "kind");
+      const createdAtMs = num(row, "createdAtMs");
+      if (
+        ordinal === undefined ||
+        kind === undefined ||
+        !AGENT_RUN_LEDGER_KINDS.has(kind as AgentRunLedgerKind) ||
+        createdAtMs === undefined
+      ) {
+        throw new WireShapeError();
+      }
+      const stage = optionalString(row, "stage");
+      const code = optionalString(row, "code");
+      const approvalId = optionalString(row, "approvalId");
+      const actorMemberId = optionalString(row, "actorMemberId");
+      return {
+        ordinal,
+        kind: kind as AgentRunLedgerKind,
+        createdAtMs,
+        ...(stage === undefined ? {} : { stage }),
+        ...(code === undefined ? {} : { code }),
+        ...(approvalId === undefined ? {} : { approvalId: approvalId.toLowerCase() }),
+        ...(actorMemberId === undefined
+          ? {}
+          : { actorMemberId: actorMemberId.toLowerCase() }),
+      };
+    }),
+  };
+}
+
+/**
+ * 이 채널의 hosted 에이전트 run들의 서버 판정(ADR-0200 D1·D3). 구 서버에는 이
+ * 경로가 없고 404/405/501로 답한다 — 호출자는 `serverSaysAbsent`로 접는다.
+ */
+export async function fetchAgentRunProgress(
+  workspaceId: string,
+  channelId: string,
+  options: { state?: "active" | "all"; limit?: number } = {}
+): Promise<AgentRunProgress[]> {
+  const query = new URLSearchParams({
+    state: options.state ?? "all",
+    limit: String(options.limit ?? 50),
+  });
+  return agentRunProgressPageFromWire(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(
+        workspaceId.toLowerCase()
+      )}/channels/${encodeURIComponent(
+        channelId.toLowerCase()
+      )}/agent-runs/progress?${query.toString()}`
+    )
+  );
+}
+
+/** run 하나의 원장 전체(≤200행). 커서가 없으니 매번 통째로 다시 읽는다. */
+export async function fetchAgentRunEvents(
+  workspaceId: string,
+  runId: string
+): Promise<AgentRunLedger> {
+  return agentRunLedgerFromWire(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(
+        workspaceId.toLowerCase()
+      )}/agent-runs/${encodeURIComponent(runId.toLowerCase())}/events`
+    )
+  );
+}
+
+// ---- Hosted agent liveness (ADR-0200 D4, #3742) -----------------------------
+// GET /v1/workspaces/{ws}/agents/{agent}/liveness
+//
+// 「토큰이 연결돼 있다고 연결이 아니라, 지금 살아있는지가 궁금한거야」(성재). 연결
+// 상태(`status: active`)는 자격증명이 한 번 증명됐다는 뜻이고 시간이 지나도 변하지
+// 않는다. 이 라벨은 서버가 자기 사실(수령·읽기·run 이벤트·ping)로 **지금** 파생한다.
+
+export type AgentLivenessState =
+  | "inactive"
+  | "error"
+  | "woken_not_collected"
+  | "work_waiting"
+  | "responsive"
+  | "alive_idle"
+  | "quiet"
+  | "unresponsive";
+
+const AGENT_LIVENESS_STATES = new Set<AgentLivenessState>([
+  "inactive",
+  "error",
+  "woken_not_collected",
+  "work_waiting",
+  "responsive",
+  "alive_idle",
+  "quiet",
+  "unresponsive",
+]);
+
+/** 채널을 공유하는 멤버가 보는 것: 라벨과 마지막으로 말한 때뿐이다. */
+export interface AgentLiveness {
+  agentMemberId: string;
+  state: AgentLivenessState;
+  lastSignalAtMs?: number;
+}
+
+export function agentLivenessFromWire(value: unknown): AgentLiveness {
+  const source = responseRecord(value);
+  const agentMemberId = str(source, "agentMemberId");
+  const state = str(source, "state");
+  if (
+    agentMemberId === undefined ||
+    state === undefined ||
+    !AGENT_LIVENESS_STATES.has(state as AgentLivenessState)
+  ) {
+    throw new WireShapeError();
+  }
+  const lastSignalAtMs = optionalFiniteNumber(source, "lastSignalAtMs");
+  return {
+    agentMemberId: agentMemberId.toLowerCase(),
+    state: state as AgentLivenessState,
+    ...(lastSignalAtMs === undefined ? {} : { lastSignalAtMs }),
+  };
+}
+
+/**
+ * 이 hosted 에이전트가 지금 살아 있는가. hosted가 아닌 에이전트와 채널을 공유하지
+ * 않는 에이전트는 같은 404다(이 경로는 「hosted인가」를 알아내는 탐침이 아니다):
+ * 호출자는 404를 「라벨 없음」으로 접는다.
+ */
+export async function fetchAgentLiveness(
+  workspaceId: string,
+  agentMemberId: string
+): Promise<AgentLiveness> {
+  return agentLivenessFromWire(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(
+        workspaceId.toLowerCase()
+      )}/agents/${encodeURIComponent(agentMemberId.toLowerCase())}/liveness`
+    )
+  );
 }
 
 /**

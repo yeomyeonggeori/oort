@@ -320,6 +320,12 @@ export const OPEN_ARM_TTL_MS = 20_000;
 export interface ArmedOpen {
   /** The channel every armed notification pointed at; null when they disagree. */
   channelId: string | null;
+  /**
+   * 무장된 알림이 **모두 같은 카드(메시지)** 를 가리킬 때만 있다 (#3738).
+   * 승인 알림이 채널 맨 아래가 아니라 그 카드로 착지하게 한다. 같은 채널의 다른
+   * 메시지가 끼면 사라지고, 그때는 채널로 간다 — 어느 카드를 뜻하는지 추측하지 않는다.
+   */
+  messageId?: string;
   armedAtMs: number;
 }
 
@@ -332,13 +338,25 @@ export function armOpen(
   current: ArmedOpen | null,
   channelId: string,
   nowMs: number,
-  ttlMs: number = OPEN_ARM_TTL_MS
+  ttlMs: number = OPEN_ARM_TTL_MS,
+  messageId?: string
 ): ArmedOpen {
   const live = current !== null && nowMs - current.armedAtMs <= ttlMs;
-  if (!live) return { channelId, armedAtMs: nowMs };
+  if (!live) {
+    return messageId === undefined
+      ? { channelId, armedAtMs: nowMs }
+      : { channelId, messageId, armedAtMs: nowMs };
+  }
   const same =
     current.channelId !== null && uuidEq(current.channelId, channelId);
-  return { channelId: same ? current.channelId : null, armedAtMs: nowMs };
+  const sameCard =
+    same &&
+    messageId !== undefined &&
+    current.messageId !== undefined &&
+    uuidEq(current.messageId, messageId);
+  return sameCard
+    ? { channelId: current.channelId, messageId, armedAtMs: nowMs }
+    : { channelId: same ? current.channelId : null, armedAtMs: nowMs };
 }
 
 /**
@@ -354,5 +372,12 @@ export function openTarget(
   if (armed === null) return null;
   if (nowMs - armed.armedAtMs > ttlMs) return null;
   if (armed.channelId === null) return "/inbox?filter=mentions";
+  if (armed.messageId !== undefined) {
+    // `inbox/anchor.messageAnchorPath`와 같은 주소다(`?msg=`, 소문자 id). 웹의 헬퍼를
+    // 코어가 부를 수 없어 모양만 같다 — 시험이 둘의 일치를 묶는다.
+    return `/c/${encodeURIComponent(armed.channelId)}?msg=${encodeURIComponent(
+      armed.messageId.toLowerCase()
+    )}`;
+  }
   return `/c/${armed.channelId}`;
 }

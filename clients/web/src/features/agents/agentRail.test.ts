@@ -244,7 +244,9 @@ describe("isRunOver", () => {
 describe("turnStateOf", () => {
   it("separates an agent that is running from one that stopped for a human", () => {
     expect(turnStateOf("running")).toBe("working");
-    expect(turnStateOf("queued")).toBe("working");
+    // ADR-0200: a run nobody has started is queued, not working. Reading it as
+    // 작업 중 is what drew an untaken run as running for eleven minutes.
+    expect(turnStateOf("queued")).toBe("queued");
     // momowebqa ends every @kim-intern turn here, and the run row stays open.
     expect(turnStateOf("awaiting_approval")).toBe("awaiting_approval");
     expect(turnStateOf("paused")).toBe("awaiting_approval");

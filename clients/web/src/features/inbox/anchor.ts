@@ -64,6 +64,24 @@ export function channelPath(channelId: string, seq?: number): string {
 }
 
 /**
+ * 인박스 행이 여는 자리. 승인 카드처럼 메시지 id를 아는 행은 **그 카드**로,
+ * seq만 아는 행은 seq로, 아무것도 모르면 채널로 간다 (#3738).
+ *
+ * 승인 행이 채널 맨 아래로 가면 사람은 카드를 찾으러 위로 스크롤하다가 놓친다.
+ * 알림 배너·인박스 행·카드 링크가 같은 문(`?msg=`)을 쓰는 이유다.
+ */
+export function inboxTargetPath(target: {
+  channelId: string;
+  messageId?: string;
+  seq?: number;
+}): string {
+  if (target.messageId !== undefined) {
+    return messageAnchorPath(target.channelId, target.messageId);
+  }
+  return channelPath(target.channelId, target.seq);
+}
+
+/**
  * Route for a search hit (goal B12 H5).
  *
  * 두 열쇠를 **함께** 싣는다. `msg`는 정확한 신원이라 찾는 데 쓰이고, `seq`는

@@ -32,6 +32,7 @@ import {
 // =============================================================================
 
 export {
+  applyApprovalWaits,
   byOldestTurn,
   elapsedLabel,
   headlineFrom,
@@ -40,8 +41,10 @@ export {
   mergeAgentWorkingSignals,
   resolveAgentWorkingSignals,
   type AgentTurnState,
+  type ServerRunFacts,
   type AgentWorkingSignal,
   type AgentWorkingSource,
+  type ApprovalWait,
 } from "@momo/core/features/agents/workingSignal";
 
 /**
@@ -82,6 +85,7 @@ function sameSignal(a: AgentWorkingSignal, b: AgentWorkingSignal): boolean {
     a.runId === b.runId &&
     a.startedAtMs === b.startedAtMs &&
     a.lastActivityAtMs === b.lastActivityAtMs &&
+    JSON.stringify(a.server) === JSON.stringify(b.server) &&
     a.headlines.length === b.headlines.length &&
     a.headlines.every((h, i) => h === b.headlines[i])
   );
@@ -121,6 +125,8 @@ export function sweepAgentWorking(nowMs: number): void {
   const next = new Map(signals);
   let removed = 0;
   for (const [key, signal] of signals) {
+    // 서버가 답한 run은 서버가 끝낸다(ADR-0200). 우리 시계로 지우지 않는다.
+    if (signal.server !== undefined) continue;
     if (nowMs - signal.lastActivityAtMs > ZOMBIE_CLEAR_MS) {
       next.delete(key);
       removed += 1;

@@ -8,6 +8,8 @@ import { SessionProvider, type SessionContextValue } from "@/app/session";
 import type { MessageNewEvent } from "@momo/core/lib/realtimeEvents";
 import type { RealtimeHandle } from "@/lib/realtime";
 import { DesktopNotifications } from "./DesktopNotifications";
+import { messageAnchorPath } from "@/features/inbox/anchor";
+import { armOpen, openTarget } from "@momo/core/features/notifications/model";
 import { osNotifier } from "./osNotifier";
 import {
   reloadDesktopNotificationKindsForTest,
@@ -270,5 +272,44 @@ describe("DesktopNotifications", () => {
       await Promise.resolve();
     });
     expect(showNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it("#3738: 행동 승인 카드(channel.create)도 「승인 필요」로 나가고 본문은 카드 제목이다", async () => {
+    mountRail();
+    const base = approvalEvent();
+    const actionApproval = {
+      ...base,
+      payload: {
+        ...base.payload,
+        props: {
+          approval_id: "019F8338-025E-7873-93A3-C1FBA9149185",
+          action_type: "workspace_action",
+          status: "pending",
+          title: "채널 만들기",
+          summary: "그록봇이 제안했습니다.",
+          action: {
+            id: "channel.create",
+            rows: [{ label: "채널", value: "#계획" }],
+            required_role: "admin",
+          },
+        },
+      },
+    } as MessageNewEvent;
+    await act(async () => {
+      onMessage?.(actionApproval);
+      osNotifier().flush();
+      await Promise.resolve();
+    });
+    expect(showNotification).toHaveBeenCalledTimes(1);
+    expect(String(showNotification.mock.calls[0]?.[0])).toContain("승인 필요");
+    expect(String(showNotification.mock.calls[0]?.[1])).toBe("채널 만들기");
+  });
+
+  it("#3738: 알림을 눌러 앞에 온 창은 채널이 아니라 그 카드로 간다", () => {
+    // 데스크탑은 무장한 목적지로 창이 앞에 오는 순간 이동한다. 승인 알림이면 그 목적지가
+    // 카드여야 하고, 주소는 인박스 행·카드 링크가 쓰는 `?msg=` 와 한 글자도 다르지 않다.
+    const card = "019F96A4-E717-7F82-9750-58B2D7D28226";
+    const armed = armOpen(null, IDS.channel, 1_000, undefined, card);
+    expect(openTarget(armed, 1_001)).toBe(messageAnchorPath(IDS.channel, card));
   });
 });

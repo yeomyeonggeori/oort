@@ -312,6 +312,7 @@ export function taskEntry(item: FeedItem, nowMs: number): MailboxEntry | null {
     unread: true,
     unreadCount: 0,
     ...(item.seq === undefined ? {} : { seq: item.seq }),
+    ...(item.messageId === undefined ? {} : { messageId: item.messageId }),
     task: item,
     reason: item.reason,
   };

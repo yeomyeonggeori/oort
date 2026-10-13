@@ -828,6 +828,36 @@ export function asWorkRunUpdatedFrame(data: unknown): WorkRunUpdatedFrame | null
   return frame as WorkRunUpdatedFrame;
 }
 
+/**
+ * hosted 에이전트 run의 원장에 행이 생김(ADR-0200 D2, `agent.run.event`, #3744).
+ * 채널 토픽으로 온다. 본문은 run id·채널 id·행 종류뿐이다: **단계 문자열도 순번도
+ * 싣지 않는다.** 읽을 수 있는 내용은 REST가 멤버십을 다시 확인해 내려주므로, 이
+ * 프레임은 「원장을 다시 읽어라」라는 신호일 뿐이다. stage 프레임은 run당 2초에
+ * 하나로 합쳐 오고, 한 묶음의 마지막 행은 프레임 없이 끝날 수 있다 — 그래서 받는
+ * 쪽은 run이 열려 있는 동안 타이머로도 다시 읽는다.
+ */
+export interface AgentRunEventFrame {
+  type: "agent.run.event";
+  v: number;
+  ts: number;
+  payload: {
+    run_id: string;
+    channel_id: string;
+    kind: string;
+  };
+}
+
+export function asAgentRunEventFrame(data: unknown): AgentRunEventFrame | null {
+  if (typeof data !== "object" || data === null) return null;
+  const frame = data as Partial<AgentRunEventFrame>;
+  if (frame.type !== "agent.run.event") return null;
+  const payload = frame.payload as Record<string, unknown> | undefined;
+  if (!payload || typeof payload.run_id !== "string") return null;
+  if (typeof payload.channel_id !== "string") return null;
+  if (typeof payload.kind !== "string") return null;
+  return frame as AgentRunEventFrame;
+}
+
 const WORK_ACP_TYPES: ReadonlySet<string> = new Set<WorkSessionACPType>([
   "agent.status",
   "agent.partial",
@@ -1127,6 +1157,23 @@ export interface RealtimeHandle {
     workspaceId: string,
     channelId: string,
     handlers: { onTyping: (frame: TypingFrame) => void }
+  ) => () => void;
+  /**
+   * Watch hosted-agent run ledger signals in one channel (`agent.run.event`,
+   * ADR-0200 D2). Shares the channel subscription with `subscribeChannel`. A
+   * frame means "read the run ledger / progress again"; `onResync` fires on a
+   * replayed or non-recovered (re)subscribe, where the caller re-reads too.
+   *
+   * Optional: a runtime that has not wired it (the phone, until U4) falls back to
+   * reading on focus and on a timer.
+   */
+  subscribeRunEvents?: (
+    workspaceId: string,
+    channelId: string,
+    handlers: {
+      onRunEvent: (frame: AgentRunEventFrame) => void;
+      onResync: () => void;
+    }
   ) => () => void;
   /**
    * Watch provider cascade transitions in one channel (ADR-0135 D1). Shares the
