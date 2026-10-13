@@ -2745,6 +2745,14 @@ pub struct RosterMemberDto {
     pub time_zone: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_model: Option<String>,
+    /// ADR-0186 증보 v3 V3-2 — an agent's one-line 소개 (plain text, never
+    /// auto-linked or mention-parsed by a client). Agents only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tagline: Option<String>,
+    /// ADR-0186 증보 v3 V3-2 — an agent's own role label (plain text). Distinct
+    /// from the workspace role labels. Agents only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_human_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -5371,6 +5379,19 @@ pub struct ApprovalDecisionRequest {
     /// move a session that already started.
     #[serde(default, rename = "host_id", alias = "hostId")]
     pub host_id: Option<Uuid>,
+    /// ADR-0186 증보 v3 V3-3a — 「에이전트에게 연결 코드 넘기기」. Default off.
+    ///
+    /// Judged against the **action's** `secret_delivery` (`OptIn` only), never
+    /// against the proposal: an agent cannot ask for it. `true` on anything else
+    /// — another action, a rejection, a non-workspace approval — is refused 400
+    /// and consumes nothing. Like `host_id` it is not part of the idempotency
+    /// key (a replay answers the original receipt).
+    #[serde(
+        default,
+        rename = "deliver_secret_to_agent",
+        alias = "deliverSecretToAgent"
+    )]
+    pub deliver_secret_to_agent: Option<bool>,
 }
 
 /// Swift `ApprovalDecisionReceiptDTO` — the body every decision outcome returns,

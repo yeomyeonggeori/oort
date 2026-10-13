@@ -78,6 +78,13 @@ pub const ACTION_HOSTED_CHANNELS_GRANT: &str = "hosted.channels.grant";
 /// There is no general "set a setting" action; a third key is a new amendment.
 pub const ACTION_WORKSPACE_SETTINGS_UPDATE: &str = "workspace.settings.update";
 
+/// `agent.profile.update` — change an agent's profile **card**: the proposer's
+/// own or that of an agent of the same owner (V4-M), limited to display name,
+/// tagline, status line and role label (ADR-0186 증보 2026-10-13 v3 V3-2).
+/// Avatar sources arrive with their own slice; `instructions` and everything
+/// that steers behaviour are not reachable from here.
+pub const ACTION_AGENT_PROFILE_UPDATE: &str = "agent.profile.update";
+
 /// What a person is consenting to when they approve (ADR-0186 D3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Risk {
@@ -153,6 +160,78 @@ impl RequiredRole {
 /// `oort_action_propose` from several runs.
 pub const MAX_PENDING_WORKSPACE_ACTIONS: i64 = 3;
 
+/// Whether an action's one-time secret may go to the **proposing agent** instead
+/// of (only) the approver (ADR-0186 증보 v3 V3-3a, V3-5).
+///
+/// This is a property of the action, never of the proposal: the agent cannot ask
+/// for it, and the decision request's `deliverSecretToAgent` is judged against
+/// this value (`OptIn` only) before anything executes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretDelivery {
+    /// The action has no value the agent may receive.
+    None,
+    /// The approver chooses at decision time (`deliverSecretToAgent`, default
+    /// off). `agent.invite`'s pairing value.
+    OptIn,
+    /// Always claimable by the proposer; the approver is not shown the value.
+    /// `invite.create`'s link (성재 결재 3).
+    Always,
+}
+
+impl SecretDelivery {
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            SecretDelivery::None => "none",
+            SecretDelivery::OptIn => "opt_in",
+            SecretDelivery::Always => "always",
+        }
+    }
+}
+
+/// How long after the approval the proposer may claim the value (V3-4 (4)).
+/// After this the value never leaves the server; the approver can still mint a
+/// fresh one over the existing regenerate routes.
+pub const SECRET_CLAIM_WINDOW_MS: i64 = 30 * 60 * 1000;
+
+/// The approval payload key that records a granted claim.
+pub const SECRET_CLAIM_PAYLOAD_KEY: &str = "secretClaim";
+
+/// `payload.secretClaim` for a claim granted at `decided_at_ms`:
+/// `{allowed:true, deadlineMs}`. `claimedAtMs` is added by the claim itself,
+/// under the approval row lock, and is what makes the claim single-use.
+pub fn secret_claim_grant(decided_at_ms: i64) -> Value {
+    json!({"allowed": true, "deadlineMs": decided_at_ms.saturating_add(SECRET_CLAIM_WINDOW_MS)})
+}
+
+/// What a claim attempt finds in `payload.secretClaim`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretClaimState {
+    /// No grant: the approval never allowed the proposer to claim.
+    NotGranted,
+    Open,
+    AlreadyClaimed,
+    Expired,
+}
+
+/// Judge a claim against the stored marker. Pure so the single-use and the
+/// deadline are measurable without a database; the claim route calls it under
+/// the approval's row lock.
+pub fn secret_claim_state(approval_payload: &Value, now_ms: i64) -> SecretClaimState {
+    let Some(claim) = approval_payload.get(SECRET_CLAIM_PAYLOAD_KEY) else {
+        return SecretClaimState::NotGranted;
+    };
+    if claim.get("allowed").and_then(Value::as_bool) != Some(true) {
+        return SecretClaimState::NotGranted;
+    }
+    if claim.get("claimedAtMs").is_some_and(|v| !v.is_null()) {
+        return SecretClaimState::AlreadyClaimed;
+    }
+    match claim.get("deadlineMs").and_then(Value::as_i64) {
+        Some(deadline) if now_ms <= deadline => SecretClaimState::Open,
+        _ => SecretClaimState::Expired,
+    }
+}
+
 /// One action this server can be asked to take.
 #[derive(Debug, Clone, Copy)]
 pub struct WorkspaceAction {
@@ -164,6 +243,10 @@ pub struct WorkspaceAction {
     pub summary: &'static str,
     pub risk: Risk,
     pub required_role: RequiredRole,
+    /// Whether the proposing agent may be handed this action's one-time value
+    /// (ADR-0186 증보 v3 V3-3a/V3-4). Everything is [`SecretDelivery::None`]
+    /// until the slice that implements the claim flips its own action.
+    pub secret_delivery: SecretDelivery,
     /// What approving this executes, as a verb phrase. Only used to build
     /// [`proposal_summary`]; it lives here so a new action cannot be added
     /// without writing the sentence a person reads before consenting.
@@ -300,6 +383,49 @@ fn agent_rename_args_schema() -> Value {
     })
 }
 
+/// `tagline` ceiling as the tool schema counts it: 140 characters at the UTF-8
+/// worst case. The domain validator enforces the 140 characters.
+pub const PROFILE_TAGLINE_MAX_BYTES: u64 = 560;
+/// `statusText`: 80 characters at the UTF-8 worst case.
+pub const PROFILE_STATUS_TEXT_MAX_BYTES: u64 = 320;
+/// `statusEmoji`: bytes, generously (four emoji with variation selectors).
+pub const PROFILE_STATUS_EMOJI_MAX_BYTES: u64 = 64;
+/// `roleLabel`: 24 characters at the UTF-8 worst case.
+pub const PROFILE_ROLE_LABEL_MAX_BYTES: u64 = 96;
+/// A status an agent sets ends on its own: hours, default and ceiling (V3-2).
+pub const PROFILE_STATUS_HOURS_DEFAULT: i64 = 24;
+pub const PROFILE_STATUS_HOURS_MAX: i64 = 168;
+/// The keys the card patch may carry, besides `targetHandle`.
+pub const PROFILE_UPDATE_FIELD_KEYS: [&str; 6] = [
+    "displayName",
+    "tagline",
+    "statusText",
+    "statusEmoji",
+    "statusExpiresInHours",
+    "roleLabel",
+];
+
+/// `agent.profile.update` arguments (증보 v3 V3-2). Every property is optional
+/// and at least one is required; **`null` clears** `tagline`, `roleLabel` and the
+/// status (so a proposer must omit what it is not changing, as for
+/// `workspace.settings.update`). `displayName` is never cleared.
+fn agent_profile_update_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+            "displayName": {"type": "string", "minLength": 1, "maxLength": AGENT_RENAME_NAME_MAX_BYTES},
+            "tagline": {"type": "string", "maxLength": PROFILE_TAGLINE_MAX_BYTES},
+            "statusText": {"type": "string", "maxLength": PROFILE_STATUS_TEXT_MAX_BYTES},
+            "statusEmoji": {"type": "string", "maxLength": PROFILE_STATUS_EMOJI_MAX_BYTES},
+            "statusExpiresInHours": {"type": "integer", "minimum": 1, "maximum": PROFILE_STATUS_HOURS_MAX},
+            "roleLabel": {"type": "string", "maxLength": PROFILE_ROLE_LABEL_MAX_BYTES},
+            "targetHandle": {"type": "string", "minLength": 1, "maxLength": MEMBER_HANDLE_MAX_BYTES}
+        }
+    })
+}
+
 /// The proposal ceiling on `welcomePrompt`, in characters. The REST surface allows
 /// 2000: this text is read by a *different agent* (the welcome agent), so a
 /// proposal — an agent writing another agent's instructions — gets a quarter.
@@ -368,6 +494,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         summary: "역할과 사용 횟수, 만료를 정해 초대 링크를 하나 만들어요.",
         risk: Risk::Approval,
         required_role: RequiredRole::Admin,
+        secret_delivery: SecretDelivery::None,
         effect: "초대 링크를 만들어요",
         args_schema: invite_create_args_schema,
     },
@@ -377,6 +504,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         summary: "이름과 공개 범위를 정해 채널을 하나 만들고, 이 에이전트와 정한 멤버를 넣어요.",
         risk: Risk::Approval,
         required_role: RequiredRole::Admin,
+        secret_delivery: SecretDelivery::None,
         effect: "채널을 만들고, 표시된 대로 이 에이전트와 멤버를 그 채널에 넣어요",
         args_schema: channel_create_args_schema,
     },
@@ -386,6 +514,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         summary: "이 에이전트가 볼 수 있는 채널에 멤버를 넣어요. 역할은 멤버로 고정돼요.",
         risk: Risk::Approval,
         required_role: RequiredRole::Admin,
+        secret_delivery: SecretDelivery::None,
         effect: "표시된 멤버를 그 채널에 넣어요",
         args_schema: channel_member_add_args_schema,
     },
@@ -395,6 +524,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         summary: "에이전트 한 명의 표시 이름을 바꿔요. 자기 자신이나 같은 소유자의 에이전트만 대상이 돼요.",
         risk: Risk::Approval,
         required_role: RequiredRole::AgentEditor,
+        secret_delivery: SecretDelivery::None,
         effect: "대상 에이전트의 표시 이름을 바꿔요",
         args_schema: agent_rename_args_schema,
     },
@@ -404,6 +534,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         summary: "이 에이전트의 연결이 읽고 쓸 수 있는 채널을 늘려요. 이 에이전트 자신의 연결만 대상이에요.",
         risk: Risk::Approval,
         required_role: RequiredRole::Admin,
+        secret_delivery: SecretDelivery::None,
         effect: "이 에이전트의 연결이 표시된 채널을 읽고 쓸 수 있게 해요",
         args_schema: hosted_channels_grant_args_schema,
     },
@@ -413,8 +544,19 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         summary: "환영 문구와 역할 이름, 이 두 가지만 바꿔요. 지우려면 null을 보내요.",
         risk: Risk::Approval,
         required_role: RequiredRole::WorkspaceOperator,
+        secret_delivery: SecretDelivery::None,
         effect: "표시된 설정(환영 문구·역할 이름)을 바꿔요",
         args_schema: workspace_settings_update_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_AGENT_PROFILE_UPDATE,
+        title: "에이전트 프로필 바꾸기",
+        summary: "에이전트 한 명의 이름·소개·상태 문구·역할 라벨을 바꿔요. 자기 자신이나 같은 소유자의 에이전트만 대상이에요.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::AgentEditor,
+        secret_delivery: SecretDelivery::None,
+        effect: "대상 에이전트의 프로필(표시된 항목)을 바꿔요",
+        args_schema: agent_profile_update_args_schema,
     },
 ];
 
@@ -789,6 +931,45 @@ pub fn agent_rename_result_body(old: &str, new: &str) -> String {
     format!("이름을 바꿨어요: {old} → {new}")
 }
 
+/// The summary line when `agent.profile.update` targets **another** agent.
+pub const AGENT_PROFILE_MANAGED_SUMMARY: &str = "에이전트가 제안했어요. 승인하면 대상 에이전트의 소유자 또는 관리자 권한으로 다른 에이전트의 프로필을 바꿔요.";
+
+/// `audit_log.action` / schema of an approved `agent.profile.update` (V3-2).
+pub const AUDIT_AGENT_PROFILE_UPDATED: &str = "agent.profile.updated";
+pub const AUDIT_AGENT_PROFILE_UPDATED_SCHEMA: &str = "momo.agent.profile.updated.v1";
+
+/// One 「현재 → 새 값」 row of the profile card. Both sides are the **server's**
+/// values (the current one read from the row, the new one normalised), plain
+/// text; an unset side reads 「없음」 and a clear reads 「지움」.
+pub fn agent_profile_change_row(label: &str, before: Option<&str>, after: Option<&str>) -> Value {
+    action_row(
+        label,
+        format!("{} → {}", before.unwrap_or("없음"), after.unwrap_or("지움")),
+    )
+}
+
+/// The `agent.profile.update` card rows: who, then one row per touched field.
+/// `changes` are `(label, before, after)` with `after = None` meaning a clear.
+pub fn agent_profile_update_rows(
+    target_display_name: &str,
+    target_handle: &str,
+    changes: &[(&str, Option<String>, Option<String>)],
+) -> Vec<Value> {
+    let mut rows = vec![action_row(
+        "대상 에이전트",
+        member_card_label(target_display_name, target_handle, true),
+    )];
+    rows.extend(changes.iter().map(|(label, before, after)| {
+        agent_profile_change_row(label, before.as_deref(), after.as_deref())
+    }));
+    rows
+}
+
+/// The outcome line of `agent.profile.update`: the labels that changed.
+pub fn agent_profile_update_result_body(labels: &[&str]) -> String {
+    format!("프로필을 바꿨어요: {}", labels.join("·"))
+}
+
 /// `ref.type` for a created channel.
 pub const REF_TYPE_CHANNEL: &str = "channel";
 
@@ -1126,7 +1307,8 @@ mod tests {
                 "channel.member.add",
                 "agent.rename",
                 "hosted.channels.grant",
-                "workspace.settings.update"
+                "workspace.settings.update",
+                "agent.profile.update"
             ]
         );
         assert_eq!(
@@ -1596,5 +1778,171 @@ mod tests {
             next: None,
         });
         assert!(props[ACTION_RESULT_PROPS_KEY].get("next").is_none());
+    }
+
+    // ---- ADR-0186 증보 v3 P0: secret delivery foundation -----------------------
+
+    #[test]
+    fn no_action_hands_its_secret_to_the_agent_before_its_own_slice_lands() {
+        // The slice that implements a claim flips its own action's value AND
+        // updates this list in the same commit; until then a decision request
+        // asking for delivery must be refused for every action.
+        let delivering: Vec<&str> = ACTIONS
+            .iter()
+            .filter(|action| action.secret_delivery != SecretDelivery::None)
+            .map(|action| action.id)
+            .collect();
+        assert!(delivering.is_empty(), "{delivering:?}");
+    }
+
+    #[test]
+    fn secret_delivery_wire_values_are_distinct() {
+        let mut wire = vec![
+            SecretDelivery::None.as_wire(),
+            SecretDelivery::OptIn.as_wire(),
+            SecretDelivery::Always.as_wire(),
+        ];
+        wire.sort_unstable();
+        wire.dedup();
+        assert_eq!(wire.len(), 3);
+    }
+
+    #[test]
+    fn a_claim_is_single_use_and_ends_at_the_deadline() {
+        let decided = 1_000_000;
+        let granted = serde_json::json!({ SECRET_CLAIM_PAYLOAD_KEY: secret_claim_grant(decided) });
+        assert_eq!(
+            secret_claim_state(&granted, decided),
+            SecretClaimState::Open
+        );
+        assert_eq!(
+            secret_claim_state(&granted, decided + SECRET_CLAIM_WINDOW_MS),
+            SecretClaimState::Open,
+            "the deadline itself is still inside the window"
+        );
+        assert_eq!(
+            secret_claim_state(&granted, decided + SECRET_CLAIM_WINDOW_MS + 1),
+            SecretClaimState::Expired
+        );
+        let mut claimed = granted.clone();
+        claimed[SECRET_CLAIM_PAYLOAD_KEY]["claimedAtMs"] = serde_json::json!(decided + 5);
+        assert_eq!(
+            secret_claim_state(&claimed, decided + 6),
+            SecretClaimState::AlreadyClaimed
+        );
+        // A consumed claim stays consumed after the deadline: the answer is not
+        // allowed to flip to `Expired`, which would let a client retry as if
+        // the value had never been given.
+        assert_eq!(
+            secret_claim_state(&claimed, decided + SECRET_CLAIM_WINDOW_MS + 99),
+            SecretClaimState::AlreadyClaimed
+        );
+    }
+
+    #[test]
+    fn an_approval_without_a_grant_cannot_be_claimed() {
+        assert_eq!(
+            secret_claim_state(&serde_json::json!({}), 0),
+            SecretClaimState::NotGranted
+        );
+        let denied = serde_json::json!({ SECRET_CLAIM_PAYLOAD_KEY: {"allowed": false, "deadlineMs": i64::MAX} });
+        assert_eq!(secret_claim_state(&denied, 0), SecretClaimState::NotGranted);
+        let no_deadline = serde_json::json!({ SECRET_CLAIM_PAYLOAD_KEY: {"allowed": true} });
+        assert_eq!(
+            secret_claim_state(&no_deadline, 0),
+            SecretClaimState::Expired
+        );
+    }
+
+    #[test]
+    fn the_pending_cap_is_the_only_flood_control_and_there_is_no_rate_limiter() {
+        // 성재 결재 4 (ADR-0186 증보 v3 V3-6): no hourly cap. The registry must
+        // not grow a rate-limit field and the v2 pending cap stays 3.
+        assert_eq!(MAX_PENDING_WORKSPACE_ACTIONS, 3);
+    }
+
+    #[test]
+    fn a_claim_judgement_fails_closed_on_every_malformed_marker() {
+        // Pinned so a later `unwrap_or`/`as_f64` refactor cannot loosen it
+        // (security review of #3795).
+        let key = SECRET_CLAIM_PAYLOAD_KEY;
+        let state = |claim: serde_json::Value, now: i64| {
+            secret_claim_state(&serde_json::json!({ key: claim }), now)
+        };
+        // Wrong shapes of the whole marker.
+        assert_eq!(
+            state(serde_json::json!("yes"), 0),
+            SecretClaimState::NotGranted
+        );
+        assert_eq!(
+            state(serde_json::json!([]), 0),
+            SecretClaimState::NotGranted
+        );
+        assert_eq!(
+            secret_claim_state(&serde_json::json!("not an object"), 0),
+            SecretClaimState::NotGranted
+        );
+        // `allowed` must be the boolean true.
+        for allowed in [
+            serde_json::json!("true"),
+            serde_json::json!(1),
+            serde_json::json!(null),
+        ] {
+            assert_eq!(
+                state(
+                    serde_json::json!({"allowed": allowed, "deadlineMs": i64::MAX}),
+                    0
+                ),
+                SecretClaimState::NotGranted
+            );
+        }
+        // Deadline must be an i64: a float, a string, a u64 above i64::MAX and a
+        // missing one are all Expired, never Open.
+        for deadline in [
+            serde_json::json!(1.0e15),
+            serde_json::json!("9999999999999"),
+            serde_json::json!(u64::MAX),
+            serde_json::json!(null),
+        ] {
+            assert_eq!(
+                state(
+                    serde_json::json!({"allowed": true, "deadlineMs": deadline}),
+                    0
+                ),
+                SecretClaimState::Expired,
+                "{deadline}"
+            );
+        }
+        // A null `claimedAtMs` is not a claim; any other present value is, even a
+        // falsy one.
+        assert_eq!(
+            state(
+                serde_json::json!({"allowed": true, "deadlineMs": 10, "claimedAtMs": null}),
+                5
+            ),
+            SecretClaimState::Open
+        );
+        for claimed in [
+            serde_json::json!(0),
+            serde_json::json!(false),
+            serde_json::json!(""),
+        ] {
+            assert_eq!(
+                state(
+                    serde_json::json!({"allowed": true, "deadlineMs": 10, "claimedAtMs": claimed}),
+                    5
+                ),
+                SecretClaimState::AlreadyClaimed,
+                "{claimed}"
+            );
+        }
+        // Negative `now` is simply earlier than the deadline.
+        assert_eq!(
+            state(serde_json::json!({"allowed": true, "deadlineMs": 10}), -5),
+            SecretClaimState::Open
+        );
+        // The grant saturates instead of wrapping into the past.
+        let near_max = secret_claim_grant(i64::MAX - 1);
+        assert_eq!(near_max["deadlineMs"], serde_json::json!(i64::MAX));
     }
 }

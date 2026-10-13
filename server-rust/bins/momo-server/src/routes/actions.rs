@@ -45,12 +45,13 @@ use momo_auth::{
 };
 use momo_db::PgConnection;
 use momo_messaging::name_guard::{
-    conflicts_with_roster, has_hidden_characters, mention_overlaps_roster,
-    validated_agent_proposed_display_name, RosterName,
+    conflicts_with_roster, has_hidden_characters, mention_overlaps_roster, role_label_collides,
+    text_repeats_roster_name, validated_agent_proposed_display_name, validated_agent_role_label,
+    validated_agent_status_emoji, validated_agent_status_text, validated_agent_tagline, RosterName,
 };
 use momo_messaging::{
     load_roster_names_in_tx, lock_display_name_namespace_in_tx, normalize_channel_kind,
-    normalize_channel_name, normalize_channel_topic,
+    normalize_channel_name, normalize_channel_topic, read_agent_card_in_tx, AgentCard, FieldPatch,
 };
 use momo_settings::{
     is_valid_handle, merge_workspace_settings, normalized_invite_role, read_workspace_settings,
@@ -81,6 +82,11 @@ pub struct WorkspaceActionDto {
     pub required_role: Option<&'static str>,
     #[serde(rename = "argsSchema", skip_serializing_if = "Option::is_none")]
     pub args_schema: Option<Value>,
+    /// ADR-0186 증보 v3: whether the one-time value may be handed to the
+    /// proposing agent (`none`|`opt_in`|`always`). A card shows the
+    /// 「에이전트에게 연결 코드 넘기기」 checkbox only for `opt_in`.
+    #[serde(rename = "agentDelivery", skip_serializing_if = "Option::is_none")]
+    pub secret_delivery: Option<&'static str>,
     pub executable: bool,
     /// `null` when executable, a sentence when not. Never absent — a client
     /// reading `executable: false` must always find the reason in the same key.
@@ -105,6 +111,7 @@ pub fn catalog() -> Vec<WorkspaceActionDto> {
             risk: action.risk.as_wire(),
             required_role: Some(action.required_role.as_wire()),
             args_schema: Some(action.args_schema()),
+            secret_delivery: Some(action.secret_delivery.as_wire()),
             executable: true,
             unavailable_reason: None,
         })
@@ -120,6 +127,7 @@ pub fn catalog() -> Vec<WorkspaceActionDto> {
             risk: actions::Risk::Approval.as_wire(),
             required_role: None,
             args_schema: None,
+            secret_delivery: None,
             executable: false,
             unavailable_reason: Some(declared.unavailable_reason),
         }
@@ -242,6 +250,32 @@ pub enum ActionArgs {
         members: Vec<ResolvedMember>,
         already_in: Vec<Uuid>,
     },
+    /// `agent.profile.update` (증보 v3 V3-2). `target` and `before` are filled by
+    /// [`resolve_action_in_tx`]; `None` target handle = the proposer itself.
+    AgentProfileUpdate {
+        display_name: Option<String>,
+        tagline: FieldPatch,
+        role_label: FieldPatch,
+        status: StatusIntent,
+        target_handle: Option<String>,
+        target: Option<ResolvedAgentTarget>,
+        before: Option<AgentCard>,
+    },
+}
+
+/// What a proposal does to the custom status. The expiry is **relative** (hours)
+/// and becomes an instant only when the executor runs, like an invite's
+/// `expiresInDays`: a status must not start ending while its card waits.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum StatusIntent {
+    #[default]
+    Unchanged,
+    Clear,
+    Set {
+        emoji: Option<String>,
+        text: Option<String>,
+        hours: i64,
+    },
 }
 
 /// What a proposal does to one settings key (ADR-0186 증보 V7).
@@ -346,6 +380,7 @@ pub fn validated_action_args(
         actions::ACTION_AGENT_RENAME => agent_rename_args(args),
         actions::ACTION_HOSTED_CHANNELS_GRANT => hosted_channels_grant_args(args),
         actions::ACTION_WORKSPACE_SETTINGS_UPDATE => workspace_settings_update_args(args),
+        actions::ACTION_AGENT_PROFILE_UPDATE => agent_profile_update_args(args),
         // Fail closed. A registry entry with no normaliser must be an error and
         // not an unvalidated passthrough — `every_action_has_a_normaliser` is
         // what makes this arm unreachable rather than merely unlikely.
@@ -764,6 +799,212 @@ fn agent_rename_args(args: &Value) -> Result<ValidatedActionArgs, ApiError> {
     })
 }
 
+/// One text field of the card: absent = untouched, `null` = clear, a string =
+/// the strict validator's normal form.
+fn card_text_patch(
+    object: &serde_json::Map<String, Value>,
+    key: &str,
+    validate: fn(&str) -> Result<String, momo_messaging::name_guard::NameRejected>,
+) -> Result<FieldPatch, ApiError> {
+    match object.get(key) {
+        None => Ok(FieldPatch::Unchanged),
+        Some(Value::Null) => Ok(FieldPatch::Clear),
+        Some(Value::String(raw)) => validate(raw)
+            .map(FieldPatch::Set)
+            // Which rule failed is not said (V1-a: no oracle for the proposer).
+            .map_err(|_| ApiError::bad_request("profile text is not allowed")),
+        Some(_) => Err(ApiError::bad_request("argument must be a string")),
+    }
+}
+
+fn agent_profile_update_args(args: &Value) -> Result<ValidatedActionArgs, ApiError> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| ApiError::bad_request("action args must be an object"))?;
+    let mut allowed: Vec<&str> = actions::PROFILE_UPDATE_FIELD_KEYS.to_vec();
+    allowed.push("targetHandle");
+    closed_keys(object, &allowed)?;
+
+    let display_name = optional_string(object, "displayName")?
+        .map(|raw| {
+            validated_agent_proposed_display_name(raw)
+                .map_err(|_| ApiError::bad_request("display name is not allowed"))
+        })
+        .transpose()?;
+    let tagline = card_text_patch(object, "tagline", validated_agent_tagline)?;
+    let role_label = card_text_patch(object, "roleLabel", validated_agent_role_label)?;
+    let target_handle = optional_string(object, "targetHandle")?
+        .map(normalized_member_handle)
+        .transpose()?;
+
+    // The status is replaced as a unit: any of its two keys present means the
+    // whole status is being decided, and a key that is null/absent is empty.
+    let status_keys = object.contains_key("statusText") || object.contains_key("statusEmoji");
+    let status = if status_keys {
+        let text = match card_text_patch(object, "statusText", validated_agent_status_text)? {
+            FieldPatch::Set(text) => Some(text),
+            _ => None,
+        };
+        let emoji = match card_text_patch(object, "statusEmoji", validated_agent_status_emoji)? {
+            FieldPatch::Set(emoji) => Some(emoji),
+            _ => None,
+        };
+        if text.is_none() && emoji.is_none() {
+            if !object
+                .get("statusExpiresInHours")
+                .is_none_or(Value::is_null)
+            {
+                return Err(ApiError::bad_request("a cleared status has no expiry"));
+            }
+            StatusIntent::Clear
+        } else {
+            let hours = bounded_integer(
+                object,
+                "statusExpiresInHours",
+                1,
+                actions::PROFILE_STATUS_HOURS_MAX,
+            )?
+            .unwrap_or(actions::PROFILE_STATUS_HOURS_DEFAULT);
+            StatusIntent::Set { emoji, text, hours }
+        }
+    } else {
+        if !object
+            .get("statusExpiresInHours")
+            .is_none_or(Value::is_null)
+        {
+            return Err(ApiError::bad_request("statusExpiresInHours needs a status"));
+        }
+        StatusIntent::Unchanged
+    };
+
+    if display_name.is_none()
+        && !tagline.is_touched()
+        && !role_label.is_touched()
+        && status == StatusIntent::Unchanged
+    {
+        return Err(ApiError::bad_request(
+            "at least one profile field is required",
+        ));
+    }
+
+    // `normalized` is stored as `approval.payload.action.args` and the decision
+    // route re-runs it through this very function, so it must be written in the
+    // **proposer's own spelling**: only the touched keys, `null` for a clear.
+    let mut normalized = serde_json::Map::new();
+    if let Some(name) = &display_name {
+        normalized.insert("displayName".into(), json!(name));
+    }
+    for (key, patch) in [("tagline", &tagline), ("roleLabel", &role_label)] {
+        match patch {
+            FieldPatch::Unchanged => {}
+            FieldPatch::Clear => {
+                normalized.insert(key.into(), Value::Null);
+            }
+            FieldPatch::Set(text) => {
+                normalized.insert(key.into(), json!(text));
+            }
+        }
+    }
+    match &status {
+        StatusIntent::Unchanged => {}
+        StatusIntent::Clear => {
+            normalized.insert("statusText".into(), Value::Null);
+            normalized.insert("statusEmoji".into(), Value::Null);
+        }
+        StatusIntent::Set { emoji, text, hours } => {
+            normalized.insert("statusText".into(), json!(text));
+            normalized.insert("statusEmoji".into(), json!(emoji));
+            normalized.insert("statusExpiresInHours".into(), json!(hours));
+        }
+    }
+    if let Some(handle) = &target_handle {
+        normalized.insert("targetHandle".into(), json!(handle));
+    }
+    let normalized = Value::Object(normalized);
+    Ok(ValidatedActionArgs {
+        summary: None,
+        normalized,
+        // Rows need the target and the current values: the resolver builds them.
+        rows: Vec::new(),
+        args: ActionArgs::AgentProfileUpdate {
+            display_name,
+            tagline,
+            role_label,
+            status,
+            target_handle,
+            target: None,
+            before: None,
+        },
+    })
+}
+
+/// How a status reads on a card: `🤖 집중 모드`, either half alone, or `None`.
+fn status_display(emoji: Option<&str>, text: Option<&str>) -> Option<String> {
+    let joined = [emoji, text]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!joined.is_empty()).then_some(joined)
+}
+
+/// The 「현재 → 새 값」 rows an `agent.profile.update` shows, one per field that
+/// **actually changes** — `(label, before, after)`, `after = None` being a clear.
+/// Used by the resolver (the card) and the executor (the result card), so the two
+/// cannot describe different changes.
+pub fn profile_changes(
+    current_display_name: &str,
+    card: &AgentCard,
+    display_name: &Option<String>,
+    tagline: &FieldPatch,
+    role_label: &FieldPatch,
+    status: &StatusIntent,
+) -> Vec<(&'static str, Option<String>, Option<String>)> {
+    let mut changes = Vec::new();
+    if let Some(name) = display_name {
+        if name != current_display_name {
+            changes.push((
+                "이름",
+                Some(current_display_name.to_string()),
+                Some(name.clone()),
+            ));
+        }
+    }
+    for (label, patch, current) in [
+        ("소개", tagline, &card.tagline),
+        ("역할 라벨", role_label, &card.role_label),
+    ] {
+        let after = match patch {
+            FieldPatch::Unchanged => continue,
+            FieldPatch::Clear => None,
+            FieldPatch::Set(text) => Some(text.clone()),
+        };
+        if &after != current {
+            changes.push((label, current.clone(), after));
+        }
+    }
+    let before_status = status_display(card.status_emoji.as_deref(), card.status_text.as_deref());
+    match status {
+        StatusIntent::Unchanged => {}
+        StatusIntent::Clear => {
+            if before_status.is_some() {
+                changes.push(("상태", before_status, None));
+            }
+        }
+        StatusIntent::Set { emoji, text, hours } => {
+            let after = status_display(emoji.as_deref(), text.as_deref());
+            if after != before_status {
+                changes.push((
+                    "상태",
+                    before_status,
+                    after.map(|shown| format!("{shown} ({hours}시간 동안)")),
+                ));
+            }
+        }
+    }
+    changes
+}
+
 /// Resolve which agent a rename is about, under the V4-M trust model, or `None`.
 ///
 /// * no `targetHandle` → the proposer itself;
@@ -842,6 +1083,41 @@ async fn resolve_agent_rename_target_in_tx(
         owner_member_id: Some(target_owner),
         managed: true,
     }))
+}
+
+/// The agent a proposal is **about** (an `agent.rename` / `agent.profile.update`
+/// target), found **without judging any text** — or `None` when the proposal is not
+/// about an agent, does not parse, or names someone the proposer does not manage.
+///
+/// The proposal path asks this *before* resolving, so the "someone else's proposal
+/// is already waiting" answer (409) cannot depend on whether the text passes the
+/// roster-name rules (which would turn 409-vs-400 into a roster oracle).
+pub async fn early_target_agent_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    proposer_member_id: Uuid,
+    action: &WorkspaceAction,
+    args: &Value,
+    now_ms: i64,
+) -> Result<Option<Uuid>, momo_db::DbError> {
+    let Ok(validated) = validated_action_args(action, args, now_ms) else {
+        return Ok(None);
+    };
+    let handle = match &validated.args {
+        ActionArgs::AgentRename { target_handle, .. }
+        | ActionArgs::AgentProfileUpdate { target_handle, .. } => target_handle,
+        _ => return Ok(None),
+    };
+    Ok(
+        resolve_agent_rename_target_in_tx(
+            conn,
+            workspace_id,
+            proposer_member_id,
+            handle.as_deref(),
+        )
+        .await?
+        .map(|target| target.id),
+    )
 }
 
 /// Find the channel a name points at **from the proposer's point of view**
@@ -1211,6 +1487,118 @@ pub async fn resolve_action_in_tx(
             *target = Some(found);
             subject
         }
+        ActionArgs::AgentProfileUpdate {
+            display_name,
+            tagline,
+            role_label,
+            status,
+            target_handle,
+            target,
+            before,
+        } => {
+            if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
+                return Ok(Err(ApiError::bad_request(
+                    "proposer is not an active agent",
+                )));
+            }
+            // The V4-M target rule, the one `agent.rename` uses; every miss is
+            // the same answer so nothing about other agents can be probed.
+            let Some(found) = resolve_agent_rename_target_in_tx(
+                conn,
+                workspace_id,
+                proposer_member_id,
+                target_handle.as_deref(),
+            )
+            .await?
+            else {
+                return Ok(Err(ApiError::bad_request("profile target did not resolve")));
+            };
+            let Some(card) = read_agent_card_in_tx(conn, workspace_id, found.id).await? else {
+                return Ok(Err(ApiError::bad_request("profile target did not resolve")));
+            };
+            // Names, taglines and labels are read next to other members' names:
+            // serialise with renames for the rest of the transaction.
+            lock_display_name_namespace_in_tx(conn, workspace_id).await?;
+            let roster = load_roster_names_in_tx(conn, workspace_id, found.id).await?;
+            let names: Vec<RosterName<'_>> = roster
+                .iter()
+                .map(|(member_id, display_name, handle)| RosterName {
+                    member_id: *member_id,
+                    display_name,
+                    handle,
+                })
+                .collect();
+            if let Some(name) = display_name.as_deref() {
+                if name != found.current_display_name
+                    && (conflicts_with_roster(name, found.id, &names)
+                        || mention_overlaps_roster(name, found.id, &names))
+                {
+                    return Ok(Err(ApiError::bad_request("display name is not allowed")));
+                }
+            }
+            // A line that repeats another member's name reads as something that
+            // member said or endorsed.
+            let mut texts: Vec<&str> = Vec::new();
+            if let FieldPatch::Set(text) = tagline {
+                texts.push(text);
+            }
+            if let FieldPatch::Set(text) = role_label {
+                texts.push(text);
+            }
+            if let StatusIntent::Set {
+                text: Some(text), ..
+            } = status
+            {
+                texts.push(text);
+            }
+            if texts
+                .iter()
+                .any(|text| text_repeats_roster_name(text, found.id, &names))
+            {
+                return Ok(Err(ApiError::bad_request("profile text is not allowed")));
+            }
+            // A role label may not equal a default role word (「멤버」·「게스트」…) or
+            // one the workspace itself defines, nor contain a defined one
+            // (「Captain Bot」 under a 「Captain」 override): that is a label with
+            // authority behind it.
+            if let FieldPatch::Set(label) = role_label {
+                let Some(bag) = read_workspace_settings(conn, workspace_id).await? else {
+                    return Ok(Err(ApiError::bad_request("workspace settings unavailable")));
+                };
+                let labels = momo_settings::project_role_labels(&bag);
+                let defined: Vec<&str> = labels
+                    .as_object()
+                    .map(|map| map.values().filter_map(Value::as_str).collect())
+                    .unwrap_or_default();
+                if role_label_collides(label, &defined) {
+                    return Ok(Err(ApiError::bad_request("profile text is not allowed")));
+                }
+            }
+            let changes = profile_changes(
+                &found.current_display_name,
+                &card,
+                display_name,
+                tagline,
+                role_label,
+                status,
+            );
+            // A proposal that changes nothing is not a proposal.
+            if changes.is_empty() {
+                return Ok(Err(ApiError::bad_request("nothing to change")));
+            }
+            validated.rows = actions::agent_profile_update_rows(
+                &found.current_display_name,
+                &found.handle,
+                &changes,
+            );
+            if found.managed {
+                validated.summary = Some(actions::AGENT_PROFILE_MANAGED_SUMMARY.to_string());
+            }
+            let subject = GateSubject::Agent(found.id);
+            *target = Some(found);
+            *before = Some(card);
+            subject
+        }
         ActionArgs::ChannelMemberAdd {
             channel_ref,
             handles,
@@ -1283,6 +1671,17 @@ pub async fn resolve_action_in_tx(
         }),
         ActionArgs::AgentRename { target, .. } => json!({
             "target": target.as_ref().map(|target| target.id.to_string()),
+        }),
+        ActionArgs::AgentProfileUpdate { target, before, .. } => json!({
+            "target": target.as_ref().map(|target| target.id.to_string()),
+            // What the card said 「현재」 was: a change in between re-asks.
+            "name": target.as_ref().map(|target| target.current_display_name.clone()),
+            "card": before.as_ref().map(|card| json!({
+                "tagline": card.tagline,
+                "roleLabel": card.role_label,
+                "statusEmoji": card.status_emoji,
+                "statusText": card.status_text,
+            })),
         }),
         ActionArgs::InviteCreate { .. } => Value::Null,
         ActionArgs::ChannelCreate { members, .. } => {
@@ -2331,6 +2730,23 @@ mod tests {
                 momo_messaging::name_guard::AGENT_NAME_MAX_CHARS,
                 momo_messaging::name_guard::AGENT_NAME_MAX_EMOJI
             ),
+            format!(
+                "(≤{} characters)",
+                momo_messaging::name_guard::AGENT_TAGLINE_MAX_CHARS
+            ),
+            format!(
+                "`statusText` ≤{} characters",
+                momo_messaging::name_guard::AGENT_STATUS_TEXT_MAX_CHARS
+            ),
+            format!(
+                "(default {}, at most {})",
+                actions::PROFILE_STATUS_HOURS_DEFAULT,
+                actions::PROFILE_STATUS_HOURS_MAX
+            ),
+            format!(
+                "(≤{} characters, under",
+                momo_messaging::name_guard::AGENT_ROLE_LABEL_MAX_CHARS
+            ),
             format!("maxUses: 1..{}", actions::INVITE_MAX_USES_CEILING),
             format!(
                 "expiresInDays: 1..{}",
@@ -2394,6 +2810,18 @@ mod tests {
             .as_object()
             .expect("row")
             .contains_key("argsSchema"));
+        // ADR-0186 v3: every executable row says whether its one-time value may
+        // go to the proposing agent. The key is named `agentDelivery` and not
+        // after the value, because the scan below is exactly the guard that
+        // keeps a secret out of this catalog.
+        for row in rendered["actions"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .filter(|row| row["executable"] == json!(true))
+        {
+            assert_eq!(row["agentDelivery"], json!("none"), "{row}");
+        }
         // No executor, no secret, no credential ever rides in the catalog.
         let text = rendered.to_string();
         for absent in ["code", "secret", "token", "credential"] {
@@ -2402,5 +2830,148 @@ mod tests {
                 "{absent} must not appear in the catalog"
             );
         }
+    }
+
+    // ---- ADR-0186 증보 v3 P1: agent.profile.update (pure stage) ---------------
+
+    fn profile() -> &'static WorkspaceAction {
+        actions::action_by_id(actions::ACTION_AGENT_PROFILE_UPDATE).expect("registered")
+    }
+
+    fn parse_profile(args: Value) -> Result<ValidatedActionArgs, ApiError> {
+        validated_action_args(profile(), &args, NOW_MS)
+    }
+
+    #[test]
+    fn a_profile_update_names_only_card_fields() {
+        for forbidden in [
+            "instructions",
+            "systemPrompt",
+            "enabledTools",
+            "triggers",
+            "paused",
+            "handle",
+            "avatar",
+            "avatarUrl",
+            "scopes",
+            "modelPref",
+        ] {
+            assert!(
+                parse_profile(json!({"tagline": "ok", forbidden: "x"})).is_err(),
+                "{forbidden} must not be a key of agent.profile.update"
+            );
+        }
+        assert!(parse_profile(json!({})).is_err(), "at least one field");
+        assert!(parse_profile(json!([])).is_err());
+        assert!(parse_profile(json!({"displayName": null})).is_err());
+        assert!(parse_profile(json!({"statusExpiresInHours": 2})).is_err());
+    }
+
+    #[test]
+    fn a_profile_update_refuses_links_mentions_and_hidden_text_in_every_text_field() {
+        for key in ["tagline", "roleLabel", "statusText"] {
+            for bad in ["[a](http://x.example)", "@someone", "a\nb", "z\u{200B}w"] {
+                assert!(
+                    parse_profile(json!({ key: bad })).is_err(),
+                    "{key}: {bad:?}"
+                );
+            }
+        }
+        assert!(parse_profile(json!({"statusEmoji": "ok"})).is_err());
+        assert!(parse_profile(json!({"roleLabel": "관리자"})).is_err());
+    }
+
+    #[test]
+    fn null_clears_and_absent_leaves_alone() {
+        let validated =
+            parse_profile(json!({"tagline": null, "statusText": null})).expect("a clear");
+        let ActionArgs::AgentProfileUpdate {
+            tagline,
+            role_label,
+            status,
+            display_name,
+            ..
+        } = validated.args
+        else {
+            panic!("wrong variant");
+        };
+        assert_eq!(tagline, FieldPatch::Clear);
+        assert_eq!(role_label, FieldPatch::Unchanged);
+        assert_eq!(status, StatusIntent::Clear);
+        assert_eq!(display_name, None);
+    }
+
+    #[test]
+    fn a_status_is_replaced_as_a_unit_with_a_default_expiry() {
+        let validated = parse_profile(json!({"statusText": "집중 모드"})).expect("status");
+        let ActionArgs::AgentProfileUpdate { status, .. } = validated.args else {
+            panic!("wrong variant");
+        };
+        assert_eq!(
+            status,
+            StatusIntent::Set {
+                emoji: None,
+                text: Some("집중 모드".into()),
+                hours: actions::PROFILE_STATUS_HOURS_DEFAULT
+            }
+        );
+        assert!(parse_profile(json!({"statusText": "a", "statusExpiresInHours": 0})).is_err());
+        assert!(parse_profile(json!({"statusText": "a", "statusExpiresInHours": 169})).is_err());
+        assert!(parse_profile(json!({"statusText": null, "statusExpiresInHours": 5})).is_err());
+    }
+
+    /// The decision route re-runs `normalized` through the same function, so what
+    /// was stored must parse back to the **same typed args** — for a set, a clear,
+    /// a status and a managed target alike.
+    #[test]
+    fn what_is_stored_parses_back_to_the_same_arguments() {
+        for args in [
+            json!({"tagline": "소개예요", "roleLabel": "영업 비서", "displayName": "Navigator"}),
+            json!({"tagline": null, "roleLabel": null}),
+            json!({"statusEmoji": "🤖", "statusText": "집중 모드", "statusExpiresInHours": 3}),
+            json!({"statusEmoji": null, "statusText": null}),
+            json!({"statusText": "집중", "targetHandle": "@Helper-1"}),
+        ] {
+            let first = parse_profile(args.clone()).expect("first parse");
+            let second = parse_profile(first.normalized.clone())
+                .unwrap_or_else(|e| panic!("{args}: the stored form does not re-parse: {e:?}"));
+            assert_eq!(first.args, second.args, "{args}");
+            assert_eq!(first.normalized, second.normalized, "{args}");
+        }
+    }
+
+    #[test]
+    fn the_changes_a_card_shows_are_only_the_ones_that_happen() {
+        let card = AgentCard {
+            tagline: Some("옛 소개".into()),
+            role_label: None,
+            status_emoji: None,
+            status_text: Some("자는 중".into()),
+        };
+        let changes = profile_changes(
+            "Hermes",
+            &card,
+            &Some("Hermes".into()),
+            &FieldPatch::Set("옛 소개".into()),
+            &FieldPatch::Set("영업 비서".into()),
+            &StatusIntent::Clear,
+        );
+        let labels: Vec<&str> = changes.iter().map(|(label, _, _)| *label).collect();
+        assert_eq!(
+            labels,
+            vec!["역할 라벨", "상태"],
+            "same name and tagline are not rows"
+        );
+        assert_eq!(changes[0].1, None);
+        assert_eq!(changes[1].2, None, "a clear shows 지움");
+        assert!(profile_changes(
+            "Hermes",
+            &card,
+            &None,
+            &FieldPatch::Unchanged,
+            &FieldPatch::Clear,
+            &StatusIntent::Unchanged
+        )
+        .is_empty());
     }
 }
