@@ -255,7 +255,7 @@ describe('타이포 축', () => {
       Object.keys(WEB_TEXT)
         .filter(role => !pairedWeb.has(role))
         .sort(),
-    ).toEqual(['body', 'display', 'timestamp', 'title']);
+    ).toEqual(['body', 'code', 'display', 'heading', 'label', 'timestamp', 'title']);
   });
 
   it('폰 본문이 16 아래로 내려가지 않는다', () => {

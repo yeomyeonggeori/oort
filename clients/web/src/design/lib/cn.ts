@@ -5,7 +5,7 @@ import { extendTailwindMerge } from "tailwind-merge";
 // shadcn/ui class-merge helper, taught the house typography scale.
 //
 // tokens.css clears Tailwind's stock text sizes (`--text-*: initial`) and
-// replaces them with semantic ROLES: text-timestamp / text-meta / text-body /
+// replaces them with semantic ROLES: text-timestamp / text-meta / text-code / text-label / text-body / text-heading /
 // text-title / text-display (SKILL §3). tailwind-merge ships with the stock
 // scale, so it does not recognise those names, falls back to its catch-all
 // `text-<anything>` rule, and files them under text-COLOR. A later color in the
@@ -22,7 +22,7 @@ import { extendTailwindMerge } from "tailwind-merge";
 // =============================================================================
 
 /** The semantic type roles from tokens.css `@theme { --text-* }`. */
-const TEXT_ROLES = ["timestamp", "meta", "body", "title", "display"] as const;
+const TEXT_ROLES = ["timestamp", "meta", "code", "label", "body", "heading", "title", "display"] as const;
 
 /**
  * The named measures from tokens.css `@theme { --spacing-* }` that are words,
