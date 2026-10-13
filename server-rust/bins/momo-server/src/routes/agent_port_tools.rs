@@ -1426,16 +1426,9 @@ async fn action_propose(
             // reads the text: the ceiling counts, and the same-target check resolves
             // only **who the proposal is about**.
             //
-            // **The two "already full" answers come first** (증보 v3, security review of
-            // #3797): `Conflict` must not depend on whether the proposal's *text* passes
-            // the roster-name rules, or an agent that already holds a pending proposal
-            // could tell 409 from 400 and so probe which names exist. Neither check
-            // reads the text: the ceiling counts, and the same-target check resolves
-            // only **who the proposal is about**.
-            //
-            // The pending ceiling (증보 V1-e): the agent's `member` row is locked
-            // first so concurrent runs of one agent cannot each read "2 pending" and
-            // each add a third.
+            // The pending ceiling (증보 V1-e): the agent's `member` row is locked first so
+            // concurrent runs of one agent cannot each read "2 pending" and each add a
+            // third.
             let pending = momo_agent::lock_agent_and_count_pending_workspace_actions_in_tx(
                 conn,
                 caller.workspace_id,
