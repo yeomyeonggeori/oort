@@ -12810,6 +12810,13 @@ components:
             ADR-0186 addendum 2026-10-13 (v3) V3-2. An agent's one-line intro,
             plain text: a client must not auto-link, mention-parse or render
             markdown in it. Agents only; omitted when unset.
+        avatarPreset:
+          type: string
+          description: >
+            ADR-0186 addendum 2026-10-13 (v3) V3-2a. The id of a server avatar
+            preset the agent wears instead of an uploaded image (a colour tile
+            or mascot the client draws). Agents only; omitted when unset. An
+            approved image avatar is `avatarUrl` instead and wins over a preset.
         roleLabel:
           type: string
           maxLength: 24

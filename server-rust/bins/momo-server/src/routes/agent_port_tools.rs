@@ -619,18 +619,30 @@ async fn conversation_read(
                 return Ok(Err(ToolFailure::Unavailable));
             }
             let page = list_channel_page(conn, channel_id, cursor, limit).await?;
-            Ok(Ok(page))
+            // The **image** files attached to these messages (ADR-0186 증보 v3
+            // V3-2a): an agent can only propose a workspace file as its avatar if
+            // it can name one, and the attachment id is that name. Only complete
+            // PNG/JPEG/WebP rows of messages in a channel this read already
+            // authorised; the Drive file id is never projected.
+            let message_ids: Vec<Uuid> = page.iter().map(|paged| paged.message.id).collect();
+            let images = momo_messaging::image_attachments_for_messages_in_tx(
+                conn,
+                caller.workspace_id,
+                &message_ids,
+            )
+            .await?;
+            Ok(Ok((page, images)))
         })
     })
     .await
     .map_err(|error| internal("agent_port.conversation_read", error))?;
 
-    let page = outcome?;
+    let (page, images) = outcome?;
     let messages: Vec<Value> = page
         .iter()
         .map(|paged| {
             let message = &paged.message;
-            json!({
+            let mut value = json!({
                 "id": message.id,
                 "seq": message.seq,
                 "channelId": message.channel_id,
@@ -641,7 +653,20 @@ async fn conversation_read(
                 "rootId": message.root_id,
                 "replyToId": message.reply_to_id,
                 "createdAtMs": crate::routes::shared::epoch_ms(message.created_at),
-            })
+            });
+            let attached: Vec<Value> = images
+                .iter()
+                .filter(|(message_id, ..)| *message_id == message.id)
+                .map(|(_, id, name, mime, size_bytes)| {
+                    json!({"id": id, "name": name, "mime": mime, "sizeBytes": size_bytes})
+                })
+                .collect();
+            if !attached.is_empty() && message.state != "deleted" {
+                if let Some(object) = value.as_object_mut() {
+                    object.insert("imageAttachments".into(), Value::Array(attached));
+                }
+            }
+            value
         })
         .collect();
     let next_before = page.iter().map(|paged| paged.message.seq).min();
@@ -1325,8 +1350,13 @@ async fn action_propose(
     // so a malformed proposal never costs one. Resolution against the workspace
     // (ADR-0186 증보 V1-a/b) needs the connection and happens inside, below.
     let proposed_at_ms = chrono::Utc::now().timestamp_millis();
-    crate::routes::actions::validated_action_args(action, &raw_args, proposed_at_ms)
+    let pure = crate::routes::actions::validated_action_args(action, &raw_args, proposed_at_ms)
         .map_err(|error| failure_of(&error))?;
+    // **An avatar image is turned into server-made bytes before anything else
+    // happens** (ADR-0186 증보 v3 V3-2a): decoded and re-encoded under a timeout, off
+    // the async threads, and — for a workspace file — fetched from Drive *outside*
+    // any database transaction. Nothing the agent sent survives this step.
+    let prepared_avatar = prepare_avatar(state, caller, &pure.args).await?;
 
     let secret = state.agent_port.envelope_secret().to_string();
     let now = chrono::Utc::now();
@@ -1467,7 +1497,7 @@ async fn action_propose(
             // built from what was found, never from the agent's strings. A
             // resolution failure is the same `InvalidArguments` as a malformed
             // argument — it never says which name failed.
-            let resolved = match crate::routes::actions::resolve_action_in_tx(
+            let mut resolved = match crate::routes::actions::resolve_action_in_tx(
                 conn,
                 caller.workspace_id,
                 caller.agent_member_id,
@@ -1502,6 +1532,62 @@ async fn action_propose(
             // still `queued` until its first progress event, and an adapter that
             // claims a job and proposes without reporting progress first is
             // normal — the park below requires `running`.
+            // **Stage the avatar image** (V3-2a): the server-re-encoded bytes become a
+            // `staged` row for the *target* agent, and the stored arguments, the pins
+            // and the card preview all name that row and its sha256 — never the
+            // agent's bytes, never an id it chose.
+            let mut avatar_preview: Option<Value> = None;
+            if let Some(prepared) = &prepared_avatar {
+                let crate::routes::actions::GateSubject::Agent(target) = resolved.subject else {
+                    return Ok(Err(ToolFailure::InvalidArguments));
+                };
+                momo_messaging::purge_stale_staged_avatar_images_in_tx(conn, caller.workspace_id)
+                    .await?;
+                let image_id = momo_messaging::stage_avatar_image_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    target,
+                    caller.agent_member_id,
+                    prepared.origin,
+                    &prepared.image,
+                )
+                .await?;
+                let sha256 = hex_lower(&prepared.image.sha256);
+                let staged = json!({
+                    "source": "staged",
+                    "imageId": image_id.to_string(),
+                    "sha256": sha256,
+                    "origin": prepared.origin,
+                });
+                if let Some(object) = resolved.validated.normalized.as_object_mut() {
+                    object.insert("avatar".into(), staged);
+                }
+                if let Some(object) = resolved.pins.as_object_mut() {
+                    object.insert(
+                        "avatar".into(),
+                        json!({"imageId": image_id.to_string(), "sha256": sha256}),
+                    );
+                }
+                // Everything here is the server's: ids, hash, measured size.
+                avatar_preview = Some(json!({
+                    "kind": "avatar_image",
+                    "imageId": image_id.to_string(),
+                    "sha256": sha256,
+                    "mime": prepared.image.mime,
+                    "width": prepared.image.width,
+                    "height": prepared.image.height,
+                    "sizeBytes": prepared.image.bytes.len(),
+                    "origin": prepared.origin,
+                }));
+            }
+            // Backstop for the invariant the handler promises: no raw avatar input
+            // (bytes, a file id the agent chose) reaches the stored arguments.
+            if let Some(avatar) = resolved.validated.normalized.get("avatar") {
+                let source = avatar.get("source").and_then(Value::as_str);
+                if matches!(source, Some("generated") | Some("attachment")) {
+                    return Ok(Err(ToolFailure::InvalidArguments));
+                }
+            }
             momo_agent::mark_run_started_in_tx(conn, handle.run_id).await?;
             // **The park happens before the approval, not after.**
             //
@@ -1557,11 +1643,19 @@ async fn action_propose(
                             handle.run_id,
                             run.channel_id,
                             action,
-                            momo_agent::action_block(
-                                action,
-                                resolved.validated.rows.clone(),
-                                rationale.as_deref(),
-                            ),
+                            {
+                                let mut block = momo_agent::action_block(
+                                    action,
+                                    resolved.validated.rows.clone(),
+                                    rationale.as_deref(),
+                                );
+                                if let (Some(preview), Some(object)) =
+                                    (&avatar_preview, block.as_object_mut())
+                                {
+                                    object.insert("preview".into(), preview.clone());
+                                }
+                                block
+                            },
                             expires_at,
                         );
                         // A rename of ANOTHER agent says so in the sentence the
@@ -1608,6 +1702,126 @@ async fn action_propose(
     .map_err(|error| internal("agent_port.action_propose", error))?;
 
     outcome
+}
+
+// ---------------------------------------------------------------------------
+// avatar images (ADR-0186 증보 2026-10-13 v3, V3-2a)
+// ---------------------------------------------------------------------------
+
+/// An avatar image the server has already re-encoded, ready to be staged.
+struct PreparedAvatar {
+    image: momo_messaging::ProcessedAvatar,
+    /// `attachment` or `generated` (`agent_avatar_source_ck`).
+    origin: &'static str,
+}
+
+/// The longest the decode-and-re-encode may run.
+const AVATAR_PROCESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+fn hex_lower(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// Run the (CPU- and memory-bound) image pass off the async threads and under a
+/// timeout. Every failure — a refused image, a join error, the timeout — is the
+/// one `InvalidArguments`: which rule the picture broke is not the agent's to learn.
+async fn process_avatar_bytes(
+    bytes: Vec<u8>,
+    max_input: usize,
+) -> Result<momo_messaging::ProcessedAvatar, ToolFailure> {
+    let task = tokio::task::spawn_blocking(move || {
+        momo_messaging::process_avatar_image(&bytes, max_input)
+    });
+    match tokio::time::timeout(AVATAR_PROCESS_TIMEOUT, task).await {
+        Ok(Ok(Ok(image))) => Ok(image),
+        _ => Err(ToolFailure::InvalidArguments),
+    }
+}
+
+/// Turn the proposal's avatar input, if it has any, into server-made bytes.
+///
+/// * `generated` — strict standard base64, decoded size capped well inside the Agent
+///   Port's 64 KiB body, then the image pass;
+/// * `attachment` — the file must be one **this agent could read** (complete, bound
+///   to a live message, in an approved non-DM channel it belongs to; a PNG/JPEG/WebP
+///   within 5 MiB). Its bytes come from Drive here, outside any transaction.
+///
+/// Anything else (no avatar, a preset, a clear) returns `None`.
+async fn prepare_avatar(
+    state: &AppState,
+    caller: HostedCaller,
+    args: &crate::routes::actions::ActionArgs,
+) -> Result<Option<PreparedAvatar>, ToolFailure> {
+    use base64::Engine as _;
+    let crate::routes::actions::ActionArgs::AgentProfileUpdate { avatar, .. } = args else {
+        return Ok(None);
+    };
+    match avatar {
+        crate::routes::actions::AvatarIntent::Generated(encoded) => {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(encoded.as_bytes())
+                .map_err(|_| ToolFailure::InvalidArguments)?;
+            if bytes.len() > momo_messaging::AGENT_AVATAR_IN_MAX_BYTES_GENERATED {
+                return Err(ToolFailure::InvalidArguments);
+            }
+            let image =
+                process_avatar_bytes(bytes, momo_messaging::AGENT_AVATAR_IN_MAX_BYTES_GENERATED)
+                    .await?;
+            Ok(Some(PreparedAvatar {
+                image,
+                origin: "generated",
+            }))
+        }
+        crate::routes::actions::AvatarIntent::Attachment(attachment_id) => {
+            let attachment_id = *attachment_id;
+            let max = momo_messaging::AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT;
+            let found = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+                Box::pin(async move {
+                    let identity =
+                        match authorize_in_tx(conn, caller, momo_auth::SCOPE_WORKSPACE_PROPOSE)
+                            .await?
+                        {
+                            Ok(identity) => identity,
+                            Err(_) => return Ok(None),
+                        };
+                    momo_messaging::find_visible_image_attachment_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        caller.agent_member_id,
+                        &identity.approved_channel_ids,
+                        attachment_id,
+                        max as i64,
+                    )
+                    .await
+                })
+            })
+            .await
+            .map_err(|error| internal("agent_port.avatar_attachment", error))?;
+            let Some(source) = found else {
+                return Err(ToolFailure::InvalidArguments);
+            };
+            let content = state
+                .drive
+                .file_content(&source.drive_file_id, source.size_bytes)
+                .await
+                .map_err(|_| ToolFailure::InvalidArguments)?;
+            // One byte more than the ceiling: a longer stream than the row claimed
+            // is refused, not truncated into something that decodes.
+            let bytes = content
+                .read_prefix(max + 1)
+                .await
+                .map_err(|_| ToolFailure::InvalidArguments)?;
+            if bytes.len() > max {
+                return Err(ToolFailure::InvalidArguments);
+            }
+            let image = process_avatar_bytes(bytes, max).await?;
+            Ok(Some(PreparedAvatar {
+                image,
+                origin: "attachment",
+            }))
+        }
+        _ => Ok(None),
+    }
 }
 
 // ---------------------------------------------------------------------------

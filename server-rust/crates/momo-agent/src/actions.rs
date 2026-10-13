@@ -396,14 +396,25 @@ pub const PROFILE_ROLE_LABEL_MAX_BYTES: u64 = 96;
 pub const PROFILE_STATUS_HOURS_DEFAULT: i64 = 24;
 pub const PROFILE_STATUS_HOURS_MAX: i64 = 168;
 /// The keys the card patch may carry, besides `targetHandle`.
-pub const PROFILE_UPDATE_FIELD_KEYS: [&str; 6] = [
+pub const PROFILE_UPDATE_FIELD_KEYS: [&str; 7] = [
     "displayName",
     "tagline",
     "statusText",
     "statusEmoji",
     "statusExpiresInHours",
     "roleLabel",
+    "avatar",
 ];
+
+/// The longest `avatar.dataBase64` the tool schema admits, in characters:
+/// base64 of [`momo_messaging::AGENT_AVATAR_IN_MAX_BYTES_GENERATED`] (44 000
+/// bytes) is 58 668 characters, and the whole call has to fit the Agent Port's
+/// 64 KiB body.
+pub const AVATAR_GENERATED_B64_MAX_CHARS: u64 = 58_700;
+/// An attachment id is a UUID in its hyphenated text form.
+pub const AVATAR_ID_TEXT_MAX_CHARS: u64 = 36;
+/// An avatar preset id, in characters (the presets are short ids).
+pub const AVATAR_PRESET_ID_MAX_CHARS: u64 = 24;
 
 /// `agent.profile.update` arguments (증보 v3 V3-2). Every property is optional
 /// and at least one is required; **`null` clears** `tagline`, `roleLabel` and the
@@ -421,6 +432,10 @@ fn agent_profile_update_args_schema() -> Value {
             "statusEmoji": {"type": "string", "maxLength": PROFILE_STATUS_EMOJI_MAX_BYTES},
             "statusExpiresInHours": {"type": "integer", "minimum": 1, "maximum": PROFILE_STATUS_HOURS_MAX},
             "roleLabel": {"type": "string", "maxLength": PROFILE_ROLE_LABEL_MAX_BYTES},
+            "avatar": {
+                "type": "object",
+                "description": "One of {source:'preset',presetId}, {source:'attachment',attachmentId} or {source:'generated',dataBase64}; null removes the avatar."
+            },
             "targetHandle": {"type": "string", "minLength": 1, "maxLength": MEMBER_HANDLE_MAX_BYTES}
         }
     })
@@ -937,6 +952,10 @@ pub const AGENT_PROFILE_MANAGED_SUMMARY: &str = "에이전트가 제안했어요
 /// `audit_log.action` / schema of an approved `agent.profile.update` (V3-2).
 pub const AUDIT_AGENT_PROFILE_UPDATED: &str = "agent.profile.updated";
 pub const AUDIT_AGENT_PROFILE_UPDATED_SCHEMA: &str = "momo.agent.profile.updated.v1";
+/// An approved image avatar (ADR-0186 증보 v3 V3-2a): ids, origin, measured size and
+/// a sha256 **prefix** — never the bytes.
+pub const AUDIT_AGENT_AVATAR_UPDATED: &str = "agent.avatar.updated";
+pub const AUDIT_AGENT_AVATAR_UPDATED_SCHEMA: &str = "momo.agent.avatar.updated.v1";
 
 /// One 「현재 → 새 값」 row of the profile card. Both sides are the **server's**
 /// values (the current one read from the row, the new one normalised), plain

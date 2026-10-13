@@ -1511,6 +1511,10 @@ pub fn build_app(state: AppState) -> Router {
             post(routes::approvals::decide_by_approval),
         )
         .route(
+            "/v1/workspaces/{ws}/approvals/{approval}/avatar-preview",
+            get(routes::approvals::avatar_preview),
+        )
+        .route(
             "/v1/agent-runs/{run}/approval-decisions",
             post(routes::approvals::decide_by_run),
         )
