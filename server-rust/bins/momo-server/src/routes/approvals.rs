@@ -473,9 +473,8 @@ struct DecisionInput<'a> {
 
 /// Whether the action a `workspace_action` payload names offers its one-time
 /// value to the proposing agent **at the approver's choice**
-/// (`SecretDelivery::OptIn`). An unknown or missing id is `false`: the early
-/// guard refuses, and `execute_workspace_action` keeps its own copy of the check
-/// for the same reason a gate is called, not copied.
+/// (`SecretDelivery::OptIn`). An unknown or missing id is `false`, so the early
+/// guard refuses.
 fn payload_offers_opt_in_delivery(payload: &Value) -> bool {
     payload
         .get("action")
