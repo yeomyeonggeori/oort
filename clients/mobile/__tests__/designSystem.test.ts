@@ -254,7 +254,7 @@ describe('타이포 축', () => {
       Object.keys(WEB_TEXT)
         .filter(role => !pairedWeb.has(role))
         .sort(),
-    ).toEqual(['body', 'display', 'timestamp', 'title']);
+    ).toEqual(['body', 'code', 'display', 'heading', 'label', 'timestamp', 'title']);
   });
 
   it('폰 본문이 iOS 입력창 줌 문턱 위에 있다', () => {
