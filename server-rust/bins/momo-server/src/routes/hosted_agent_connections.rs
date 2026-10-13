@@ -25,10 +25,11 @@ use momo_settings::{
     is_handle_banned_in_tx, normalized_join_display_name, normalized_requested_handle,
 };
 use serde_json::json;
+use uuid::Uuid;
 
 use crate::dto::{
     AcknowledgeHostedCleanupArtifactRequest, AcknowledgeHostedCleanupArtifactResponse,
-    CompleteHostedAgentDisconnectResponse, ConfirmHostedAgentConnectionRequest,
+    AgentLivenessDto, CompleteHostedAgentDisconnectResponse, ConfirmHostedAgentConnectionRequest,
     ConfirmHostedAgentConnectionResponse, CreateHostedAgentConnectionRequest,
     CreateHostedAgentConnectionResponse, DisconnectHostedAgentConnectionRequest,
     DisconnectHostedAgentConnectionResponse, HostedAgentConnectionDto,
@@ -68,6 +69,7 @@ pub(crate) fn dto(connection: HostedConnection) -> HostedAgentConnectionDto {
         host_online: None,
         brain_unavailable_reason: None,
         subscription_retired: None,
+        liveness: None,
     }
 }
 
@@ -137,6 +139,58 @@ fn requested_owner_only(
             "invocationScope must be workspace or owner_only",
         )),
     }
+}
+
+/// ADR-0200 D4 (#3742): stamp each connection's derived liveness onto its DTO.
+///
+/// One read of `hosted_agent_liveness` for the whole page; the doorbell fact is the one
+/// `attach_doorbell` already put on the DTO (call it first), and "work waiting" is the
+/// claim's own predicate asked for one job — the same definition the queue position uses.
+pub(crate) async fn attach_liveness(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    dtos: &mut [HostedAgentConnectionDto],
+    thresholds: &momo_agent::LivenessThresholds,
+) -> Result<(), momo_db::DbError> {
+    let ids: Vec<Uuid> = dtos
+        .iter()
+        .filter_map(|dto| Uuid::parse_str(&dto.id).ok())
+        .collect();
+    let rows = momo_agent::load_liveness_rows_in_tx(conn, workspace_id, &ids).await?;
+    let now = chrono::Utc::now();
+    for dto in dtos.iter_mut() {
+        let (Ok(id), Ok(agent)) = (
+            Uuid::parse_str(&dto.id),
+            Uuid::parse_str(&dto.agent_member_id),
+        ) else {
+            continue;
+        };
+        let active = dto.status == "active";
+        let waiting = active
+            && !momo_outbox::list_claimable_hosted_jobs_in_tx(conn, workspace_id, agent, 1)
+                .await
+                .map_err(momo_db::DbError::from)?
+                .is_empty();
+        let doorbell = momo_agent::DoorbellFact {
+            last_fired_at: dto
+                .doorbell_last_fired_at_ms
+                .and_then(chrono::DateTime::from_timestamp_millis),
+            last_status: dto.doorbell_last_status.clone(),
+        };
+        let liveness =
+            momo_agent::derive_liveness(now, active, rows.get(&id), &doorbell, waiting, thresholds);
+        dto.liveness = Some(crate::dto::HostedLivenessDto {
+            state: liveness.state.as_wire().to_string(),
+            last_signal_at_ms: liveness.last_signal_at.map(super::shared::epoch_ms),
+            last_work_signal_at_ms: liveness.last_work_signal_at.map(super::shared::epoch_ms),
+            last_ping_at_ms: liveness.last_ping_at.map(super::shared::epoch_ms),
+            last_ping_state: liveness.last_ping_state,
+            last_tool_error_at_ms: liveness.last_tool_error_at.map(super::shared::epoch_ms),
+            last_tool_error_code: liveness.last_tool_error_code,
+            work_waiting: waiting,
+        });
+    }
+    Ok(())
 }
 
 pub(crate) fn attach_doorbell(
@@ -410,6 +464,7 @@ pub async fn list(
     let actor = principal.member_id;
     let doorbell_enabled = state.webhook.doorbell_enabled;
     let claude_enabled = state.agent_port.config.claude_subscription_agents_enabled;
+    let liveness_thresholds = crate::config::liveness_thresholds();
     let dtos = settle_db(
         "hosted_agent_connections.list",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
@@ -434,6 +489,7 @@ pub async fn list(
                     })
                     .collect();
                 attach_invocation_scopes(conn, workspace_id, &mut dtos, claude_enabled).await?;
+                attach_liveness(conn, workspace_id, &mut dtos, &liveness_thresholds).await?;
                 Ok(Ok(dtos))
             })
         })
@@ -455,6 +511,7 @@ pub async fn get(
     let actor = principal.member_id;
     let doorbell_enabled = state.webhook.doorbell_enabled;
     let claude_enabled = state.agent_port.config.claude_subscription_agents_enabled;
+    let liveness_thresholds = crate::config::liveness_thresholds();
     let (connection, artifacts) = settle_db(
         "hosted_agent_connections.get",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
@@ -478,6 +535,7 @@ pub async fn get(
                 let mut projected = [attach_doorbell(dto(row), doorbell)];
                 attach_invocation_scopes(conn, workspace_id, &mut projected, claude_enabled)
                     .await?;
+                attach_liveness(conn, workspace_id, &mut projected, &liveness_thresholds).await?;
                 let [projected] = projected;
                 Ok(Ok((projected, artifacts)))
             })
@@ -488,6 +546,83 @@ pub async fn get(
         connection,
         cleanup_artifacts: artifact_dtos(artifacts),
     }))
+}
+
+/// `GET /v1/workspaces/{ws}/agents/{agent}/liveness` (ADR-0200 D4, #3742).
+///
+/// What a member's roster row and the agent header read to say "responded n minutes ago /
+/// woke but did not collect / no response", in place of "connected". Any active human
+/// member who shares a channel with the agent may ask; the answer is the label and when
+/// the agent last spoke — never the error code, the doorbell or the ping detail (those
+/// are the admin's, on the connection). An agent with no hosted connection and an agent
+/// the caller shares no channel with are the same 404, so the route is no probe for
+/// "is that agent hosted".
+pub async fn agent_liveness(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, agent)): Path<(String, String)>,
+) -> Result<Json<AgentLivenessDto>, ApiError> {
+    require_human(&principal, "human member required")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let agent_id = path_uuid(&agent, "invalid agent id")?;
+    let viewer = principal.member_id;
+    let doorbell_enabled = state.webhook.doorbell_enabled;
+    let thresholds = crate::config::liveness_thresholds();
+    let dto = settle_db(
+        "hosted_agent_connections.agent_liveness",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                let Some((connection_id, active)) = momo_agent::liveness_target_for_viewer_in_tx(
+                    conn,
+                    workspace_id,
+                    agent_id,
+                    viewer,
+                )
+                .await?
+                else {
+                    return Ok(Err(ApiError::not_found("agent not found")));
+                };
+                let rows =
+                    momo_agent::load_liveness_rows_in_tx(conn, workspace_id, &[connection_id])
+                        .await?;
+                let doorbell = if doorbell_enabled {
+                    momo_webhook::load_doorbell_projection_in_tx(conn, workspace_id, connection_id)
+                        .await?
+                } else {
+                    None
+                };
+                let waiting = active
+                    && !momo_outbox::list_claimable_hosted_jobs_in_tx(
+                        conn,
+                        workspace_id,
+                        agent_id,
+                        1,
+                    )
+                    .await
+                    .map_err(momo_db::DbError::from)?
+                    .is_empty();
+                let fact = momo_agent::DoorbellFact {
+                    last_fired_at: doorbell.as_ref().and_then(|bell| bell.last_fired_at),
+                    last_status: doorbell.and_then(|bell| bell.last_status),
+                };
+                let liveness = momo_agent::derive_liveness(
+                    chrono::Utc::now(),
+                    active,
+                    rows.get(&connection_id),
+                    &fact,
+                    waiting,
+                    &thresholds,
+                );
+                Ok(Ok(AgentLivenessDto {
+                    agent_member_id: agent_id.to_string(),
+                    state: liveness.state.as_wire().to_string(),
+                    last_signal_at_ms: liveness.last_signal_at.map(super::shared::epoch_ms),
+                }))
+            })
+        })
+        .await,
+    )?;
+    Ok(Json(dto))
 }
 
 /// `POST /v1/workspaces/{ws}/hosted-agent-connections/{connection}/disconnect`.

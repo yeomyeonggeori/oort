@@ -1279,6 +1279,10 @@ pub fn build_app(state: AppState) -> Router {
         // workspace-global history (MOMO-653 — bounded summaries, joined to the
         // reader's own channel membership) and one run in full.
         .route(
+            "/v1/workspaces/{ws}/agents/{agent}/liveness",
+            get(routes::hosted_agent_connections::agent_liveness),
+        )
+        .route(
             "/v1/workspaces/{ws}/agents/{agent}/runs",
             get(routes::agent_runs::list_by_agent),
         )

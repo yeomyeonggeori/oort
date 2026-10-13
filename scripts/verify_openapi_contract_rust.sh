@@ -2454,6 +2454,16 @@ sample hosted-agent-list get "/v1/workspaces/{workspaceId}/hosted-agent-connecti
   "/v1/workspaces/$WS/hosted-agent-connections" 200 "" "$ACCESS"
 sample hosted-agent-get get "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}" \
   "/v1/workspaces/$WS/hosted-agent-connections/$HOSTED_CONNECTION_ID" 200 "" "$ACCESS"
+guard_jq '(.connection.liveness.state | type) == "string" and .connection.liveness.workWaiting == false' \
+  "a hosted connection reports derived liveness from server facts (ADR-0200 D4)"
+# ADR-0200 D4 (#3742): the member-facing label. The hosted agent shares the general channel
+# with the gate's human, as it does once an admin invites it.
+run_sql -Atc "INSERT INTO membership(workspace_id, channel_id, member_id) \
+  VALUES ('$WS','$GENERAL_CHANNEL_ID','$HOSTED_AGENT_ID') ON CONFLICT DO NOTHING;" >/dev/null
+sample agent-liveness get "/v1/workspaces/{workspaceId}/agents/{agentId}/liveness" \
+  "/v1/workspaces/$WS/agents/$HOSTED_AGENT_ID/liveness" 200 "" "$ACCESS"
+guard_jq '(.state | type) == "string" and (has("lastToolErrorCode") | not)' \
+  "the member label never carries the admin-only fields"
 
 expect_agent_port hosted-agent-non-foundation-does-not-detect 401 \
   '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \

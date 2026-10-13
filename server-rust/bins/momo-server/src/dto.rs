@@ -4527,6 +4527,45 @@ pub struct HostedAgentConnectionDto {
     /// author. Absent otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subscription_retired: Option<bool>,
+    /// ADR-0200 D4 (#3742) — is the agent alive right now, from server facts. List and
+    /// get only. Unlike `status` (a token was proved once), this ages.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub liveness: Option<HostedLivenessDto>,
+}
+
+/// openapi `HostedAgentLiveness` — the admin's full view of one connection.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostedLivenessDto {
+    /// inactive, error, woken_not_collected, responsive, alive_idle, quiet, unresponsive.
+    pub state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_signal_at_ms: Option<i64>,
+    /// The newest inbox read, claim or run event: the agent took (or looked for) work.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_work_signal_at_ms: Option<i64>,
+    /// The newest `oort_ping`: a runtime is up. Says nothing about taking work.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_ping_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_ping_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_tool_error_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_tool_error_code: Option<String>,
+    /// At least one queued run the agent could claim right now.
+    pub work_waiting: bool,
+}
+
+/// openapi `AgentLiveness` — what any member who shares a channel with the agent may
+/// see: the label and when it last spoke. No error codes, no doorbell, no ping detail.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentLivenessDto {
+    pub agent_member_id: String,
+    pub state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_signal_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]

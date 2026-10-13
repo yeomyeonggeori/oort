@@ -245,12 +245,151 @@ pub(crate) async fn execute(
         momo_mcp::TOOL_RUN_COMPLETE => run_complete(state, caller, &call.arguments).await,
         momo_mcp::TOOL_ACTION_PROPOSE => action_propose(state, caller, &call.arguments).await,
         momo_mcp::TOOL_CARD_SUGGEST => card_suggest(state, caller, &call.arguments).await,
+        momo_mcp::TOOL_PING => ping(state, caller, &call.arguments).await,
         _ => Err(ToolFailure::InvalidArguments),
     };
+    record_liveness(state, caller, call.tool.name, &result).await;
     match result {
         Ok(structured) => momo_mcp::tool_success(&call, structured),
         Err(failure) => momo_mcp::tool_failure(&call, failure),
     }
+}
+
+// ---------------------------------------------------------------------------
+// liveness (ADR-0200 D4, #3742)
+// ---------------------------------------------------------------------------
+
+/// Record what this call proves about the runtime on the other end, in a SECOND small
+/// transaction after the tool's own has settled: a liveness write must never decide a
+/// tool's outcome, and a failed tool must still be able to say it was refused.
+///
+/// * a success refreshes `last_tool_call_at`, plus the work signal it earned — an
+///   inbox read, a claim that actually took a job, a run event/complete/propose;
+/// * a refusal that is about the CONNECTION (`unavailable`, `not_authorized`) is kept
+///   as a closed code so a person debugging "Agent Port unavailable" has something to
+///   read. A lost lease or a bad argument is the agent's own flow, not a connection
+///   fault, and does not flip the state to `error`.
+///
+/// Throttled to one write per column per 30 s inside the statement, so a polling
+/// agent is nearly free. Best effort: a failure is logged and never reaches the wire.
+async fn record_liveness(
+    state: &AppState,
+    caller: HostedCaller,
+    tool: &str,
+    outcome: &Result<Value, ToolFailure>,
+) {
+    use momo_agent::Touch;
+    let write = match outcome {
+        Ok(structured) => {
+            let touch = match tool {
+                momo_mcp::TOOL_INBOX_READ => Touch {
+                    inbox_read: true,
+                    ..Touch::default()
+                },
+                momo_mcp::TOOL_JOBS_CLAIM
+                    if structured["jobs"]
+                        .as_array()
+                        .is_some_and(|jobs| !jobs.is_empty()) =>
+                {
+                    Touch {
+                        claim: true,
+                        ..Touch::default()
+                    }
+                }
+                momo_mcp::TOOL_RUN_EVENT
+                | momo_mcp::TOOL_RUN_COMPLETE
+                | momo_mcp::TOOL_ACTION_PROPOSE => Touch {
+                    run_event: true,
+                    ..Touch::default()
+                },
+                _ => Touch::default(),
+            };
+            momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+                Box::pin(async move {
+                    momo_agent::record_tool_success_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        caller.agent_member_id,
+                        caller.token_id,
+                        touch,
+                    )
+                    .await
+                })
+            })
+            .await
+        }
+        Err(failure @ (ToolFailure::Unavailable | ToolFailure::NotAuthorized)) => {
+            let code = if *failure == ToolFailure::Unavailable {
+                "unavailable"
+            } else {
+                "not_authorized"
+            };
+            momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+                Box::pin(async move {
+                    momo_agent::record_tool_error_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        caller.agent_member_id,
+                        caller.token_id,
+                        code,
+                    )
+                    .await
+                })
+            })
+            .await
+        }
+        Err(_) => return,
+    };
+    if let Err(error) = write {
+        tracing::warn!(error = %error, tool, "agent port liveness write failed");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// oort_ping — "I am alive", and nothing else
+// ---------------------------------------------------------------------------
+
+/// ADR-0200 D4-5. Rides `agent:inbox:read`, takes no connection or agent from the
+/// arguments (it can only ever write the caller's own connection row), stores a closed
+/// two-value state, and answers `recorded: false` instead of an error inside the 30 s
+/// window so a retry loop is never taught that a limit exists by failing.
+async fn ping(
+    state: &AppState,
+    caller: HostedCaller,
+    arguments_value: &Value,
+) -> Result<Value, ToolFailure> {
+    let args = arguments(arguments_value)?;
+    let ping_state = match optional_str(args, "state", 16)? {
+        None => momo_agent::PingState::Idle,
+        Some(raw) => momo_agent::PingState::from_wire(raw).ok_or(ToolFailure::InvalidArguments)?,
+    };
+    let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+        Box::pin(async move {
+            let identity =
+                match authorize_in_tx(conn, caller, momo_auth::SCOPE_AGENT_INBOX_READ).await? {
+                    Ok(identity) => identity,
+                    Err(failure) => return Ok(Err(failure)),
+                };
+            let recorded = momo_agent::record_ping_in_tx(
+                conn,
+                caller.workspace_id,
+                identity.connection_id,
+                caller.agent_member_id,
+                ping_state,
+            )
+            .await?;
+            Ok(Ok(recorded))
+        })
+    })
+    .await
+    .map_err(|error| internal("agent_port.ping", error))?;
+    let recorded = outcome?;
+    Ok(json!({
+        "status": "ok",
+        "recorded": recorded,
+        "serverTimeMs": crate::routes::shared::epoch_ms(chrono::Utc::now()),
+        "minIntervalSeconds": 30,
+    }))
 }
 
 // ---------------------------------------------------------------------------

@@ -1807,11 +1807,17 @@ async fn a_disconnect_racing_a_claim_produces_one_serial_outcome() {
     //   * 403 — the transport admitted the still-live bearer, and the tool's
     //     own re-read found the connection already `cleanup_pending`;
     //   * 401 — the disconnect committed before the transport read the token.
+    //   * 400 `unknown tool` — the transport admitted the still-live bearer, the
+    //     disconnect then committed, and the tool VIEW (read after the transport, from
+    //     the connection's active state) was already empty. Same serialization as the 403
+    //     one, one step earlier; #3742's extra post-call liveness write moved the timing
+    //     of this race so that it is the usual outcome here, not a new behaviour.
     // No interleaving can produce a live lease, which is what the invariants
     // below assert exactly.
     assert!(
-        matches!(claim_status, 200 | 401 | 403),
-        "claim answered {claim_status}"
+        matches!(claim_status, 200 | 401 | 403)
+            || (claim_status == 400 && claimed["error"]["message"] == json!("unknown tool")),
+        "claim answered {claim_status}: {claimed}"
     );
     if claim_status == 200 {
         let jobs = structured(&claimed)["jobs"].as_array().expect("jobs array");
