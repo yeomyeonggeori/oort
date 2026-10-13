@@ -468,6 +468,146 @@ pub fn has_invisible_or_control_characters(raw: &str) -> bool {
     })
 }
 
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 v3 V3-2 — the profile card an agent may propose for an agent
+// ---------------------------------------------------------------------------
+
+/// The longest `tagline` (소개), in characters after normalisation.
+pub const AGENT_TAGLINE_MAX_CHARS: usize = 140;
+/// The longest status text — the same bound `member.status_text` carries.
+pub const AGENT_STATUS_TEXT_MAX_CHARS: usize = 80;
+/// The longest `roleLabel`.
+pub const AGENT_ROLE_LABEL_MAX_CHARS: usize = 24;
+/// At most this many emoji in a status emoji.
+pub const AGENT_STATUS_EMOJI_MAX: usize = 4;
+
+/// Characters that form a mention, markdown or a URL. A card line an agent wrote
+/// must carry none of them: it is rendered as plain text, and the approver reads
+/// it as such.
+fn is_link_or_mention_char(c: char) -> bool {
+    matches!(
+        c,
+        '@' | '<' | '>' | '[' | ']' | '(' | ')' | '`' | ':' | '/' | '\\' | '#' | '&'
+    )
+}
+
+/// `foo.com`, `a.b`, `x.io`: a dot with an alphanumeric on both sides is a
+/// domain-shaped token, the thing a link detector would pick up. A sentence's
+/// closing `.` (followed by a space or the end) is not.
+fn has_domain_shaped_dot(text: &str) -> bool {
+    let chars: Vec<char> = text.chars().collect();
+    chars
+        .windows(3)
+        .any(|w| w[1] == '.' && w[0].is_alphanumeric() && w[2].is_alphanumeric())
+}
+
+/// Free text an **agent proposes for another surface** (a tagline, a status
+/// line): NFKC, whitespace collapsed, no line breaks, no hidden or control
+/// characters, no mention / markdown / URL characters, no domain-shaped token,
+/// `1..=max_chars`. Which rule failed is not reported to the proposer.
+pub fn validated_agent_free_text(raw: &str, max_chars: usize) -> Result<String, NameRejected> {
+    let normalised: String = raw.nfkc().collect();
+    if normalised.chars().any(is_line_break) {
+        return Err(NameRejected::Disallowed);
+    }
+    let collapsed = normalised.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() {
+        return Err(NameRejected::Empty);
+    }
+    if collapsed.chars().count() > max_chars {
+        return Err(NameRejected::TooLong);
+    }
+    if has_invisible_or_control_characters(&collapsed)
+        || collapsed.chars().any(is_link_or_mention_char)
+        || has_domain_shaped_dot(&collapsed)
+        || collapsed.to_lowercase().contains("www.")
+    {
+        return Err(NameRejected::Disallowed);
+    }
+    // Combining marks: at most two in a row (zalgo), and never the combining
+    // grapheme joiner — the same limit a proposed name carries.
+    let mut run = 0usize;
+    for c in collapsed.chars() {
+        if is_combining_mark(c) {
+            run += 1;
+            if run > 2 || c == '\u{034F}' {
+                return Err(NameRejected::Disallowed);
+            }
+        } else {
+            run = 0;
+        }
+    }
+    Ok(collapsed)
+}
+
+/// A `tagline`: [`validated_agent_free_text`] at 140 characters.
+pub fn validated_agent_tagline(raw: &str) -> Result<String, NameRejected> {
+    validated_agent_free_text(raw, AGENT_TAGLINE_MAX_CHARS)
+}
+
+/// A status line: [`validated_agent_free_text`] at 80 characters.
+pub fn validated_agent_status_text(raw: &str) -> Result<String, NameRejected> {
+    validated_agent_free_text(raw, AGENT_STATUS_TEXT_MAX_CHARS)
+}
+
+/// A status emoji: only pictographs from the narrow [`is_emoji`] set plus the
+/// emoji variation selector, at most [`AGENT_STATUS_EMOJI_MAX`] — no zero-width
+/// joiner (a format character), no text.
+pub fn validated_agent_status_emoji(raw: &str) -> Result<String, NameRejected> {
+    let normalised: String = raw.nfkc().collect();
+    let trimmed: String = normalised.split_whitespace().collect::<Vec<_>>().join("");
+    if trimmed.is_empty() {
+        return Err(NameRejected::Empty);
+    }
+    let mut emoji = 0usize;
+    for c in trimmed.chars() {
+        if is_emoji(c) {
+            emoji += 1;
+        } else if c != '\u{FE0F}' {
+            return Err(NameRejected::Disallowed);
+        }
+    }
+    if emoji == 0 || emoji > AGENT_STATUS_EMOJI_MAX {
+        return Err(NameRejected::Disallowed);
+    }
+    Ok(trimmed)
+}
+
+/// A `roleLabel`: the proposed-name rules (allow-list, scripts, reserved words)
+/// at 24 characters. A label like 「관리자」 or 「Security」 wears authority the
+/// agent does not have, so the reserved list applies as it does to a name.
+pub fn validated_agent_role_label(raw: &str) -> Result<String, NameRejected> {
+    let label = validated_agent_proposed_display_name(raw)?;
+    if label.chars().count() > AGENT_ROLE_LABEL_MAX_CHARS {
+        return Err(NameRejected::TooLong);
+    }
+    Ok(label)
+}
+
+/// Whether `text` repeats another member's display name or handle **as whole
+/// words** (the mention fold), so a line cannot read as something that member
+/// said or endorsed. Names that fold to fewer than three characters are ignored
+/// (`AI`, `민`), which would refuse ordinary prose.
+pub fn text_repeats_roster_name(text: &str, target: Uuid, roster: &[RosterName<'_>]) -> bool {
+    let words = mention_words(text);
+    if words.is_empty() {
+        return false;
+    }
+    roster
+        .iter()
+        .filter(|other| other.member_id != target)
+        .any(|other| {
+            [other.display_name, other.handle].into_iter().any(|name| {
+                let theirs = mention_words(name);
+                !theirs.is_empty()
+                    && theirs.iter().map(|w| w.chars().count()).sum::<usize>() >= 3
+                    && words
+                        .windows(theirs.len())
+                        .any(|window| window == theirs.as_slice())
+            })
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -933,6 +1073,120 @@ mod tests {
             "- _ -",
             Uuid::from_u128(9),
             &roster()
+        ));
+    }
+
+    // ---- ADR-0186 증보 v3 V3-2 ------------------------------------------------
+
+    #[test]
+    fn a_tagline_cannot_carry_a_link_a_mention_or_markdown() {
+        for bad in [
+            "see [docs](http://evil.example)",
+            "ping @김인턴 now",
+            "<@김인턴> hi",
+            "visit https://evil.example",
+            "go to www.evil.example",
+            "mail me at a@b.co",
+            "docs at evil.example",
+            "line one\nline two",
+            "zero\u{200B}width",
+            "bidi \u{202E}flip",
+            "`code`",
+            "a\\b",
+        ] {
+            assert!(validated_agent_tagline(bad).is_err(), "{bad:?}");
+        }
+        assert_eq!(
+            validated_agent_tagline("  영업 보조.  요약을   정리해요 ").unwrap(),
+            "영업 보조. 요약을 정리해요"
+        );
+        assert!(validated_agent_tagline(&"가".repeat(141)).is_err());
+        assert!(validated_agent_tagline(&"가".repeat(140)).is_ok());
+        assert!(validated_agent_tagline("   ").is_err());
+    }
+
+    #[test]
+    fn a_status_text_has_the_same_text_rules_at_eighty() {
+        assert!(validated_agent_status_text(&"가".repeat(81)).is_err());
+        assert!(validated_agent_status_text("회의 중 [잠시]").is_err());
+        assert_eq!(
+            validated_agent_status_text("집중 모드").unwrap(),
+            "집중 모드"
+        );
+    }
+
+    #[test]
+    fn a_status_emoji_is_pictographs_only() {
+        assert_eq!(validated_agent_status_emoji("🤖").unwrap(), "🤖");
+        assert_eq!(validated_agent_status_emoji("🤖 🔥").unwrap(), "🤖🔥");
+        assert!(validated_agent_status_emoji("🤖🤖🤖🤖🤖").is_err());
+        assert!(validated_agent_status_emoji("ok").is_err());
+        assert!(validated_agent_status_emoji("🤖x").is_err());
+        assert!(
+            validated_agent_status_emoji("👨\u{200D}👩").is_err(),
+            "ZWJ is a format character"
+        );
+        assert!(validated_agent_status_emoji("").is_err());
+    }
+
+    #[test]
+    fn a_role_label_wears_no_authority_and_is_short() {
+        for bad in [
+            "관리자",
+            "Security",
+            "oort 공식",
+            "System",
+            "Owner team",
+            "보안 담당",
+        ] {
+            assert!(validated_agent_role_label(bad).is_err(), "{bad:?}");
+        }
+        assert!(validated_agent_role_label(&"a".repeat(25)).is_err());
+        assert_eq!(
+            validated_agent_role_label("영업 비서").unwrap(),
+            "영업 비서"
+        );
+    }
+
+    #[test]
+    fn text_that_repeats_another_members_name_is_caught_as_whole_words() {
+        let alice = Uuid::from_u128(1);
+        let roster = [
+            RosterName {
+                member_id: alice,
+                display_name: "Alice Kim",
+                handle: "alice",
+            },
+            RosterName {
+                member_id: Uuid::from_u128(2),
+                display_name: "AI",
+                handle: "ai",
+            },
+        ];
+        let me = Uuid::from_u128(9);
+        assert!(text_repeats_roster_name(
+            "Alice Kim approved this",
+            me,
+            &roster
+        ));
+        assert!(text_repeats_roster_name("approved by alice.", me, &roster));
+        // A short name folds under three characters and is ignored.
+        assert!(!text_repeats_roster_name(
+            "AI helps with sales",
+            me,
+            &roster
+        ));
+        // Not a whole word.
+        assert!(!text_repeats_roster_name(
+            "Alicex is unrelated",
+            me,
+            &roster
+        ));
+        // The target's own name is not a repeat of "another" member.
+        assert!(!text_repeats_roster_name(
+            "Alice Kim approved this",
+            alice,
+            &roster
         ));
     }
 }

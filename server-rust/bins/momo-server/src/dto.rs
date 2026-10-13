@@ -2745,6 +2745,14 @@ pub struct RosterMemberDto {
     pub time_zone: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_model: Option<String>,
+    /// ADR-0186 증보 v3 V3-2 — an agent's one-line 소개 (plain text, never
+    /// auto-linked or mention-parsed by a client). Agents only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tagline: Option<String>,
+    /// ADR-0186 증보 v3 V3-2 — an agent's own role label (plain text). Distinct
+    /// from the workspace role labels. Agents only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_human_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

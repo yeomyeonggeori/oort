@@ -64,12 +64,13 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use chrono::Utc;
 use momo_agent::actions::{
-    action_by_id, action_ref, action_result_props, agent_rename_result_body,
-    channel_create_result_body, channel_create_result_rows, channel_member_add_result_body,
-    channel_member_add_rows, invite_result_body, invite_result_rows, last_attempt_patch,
-    result_client_msg_id, workspace_settings_result_body, ActionResult, ActionResultNext,
-    RequiredRole, SecretDelivery, ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED,
-    ACTION_TYPE_WORKSPACE_ACTION, AUDIT_ACTION_APPROVED, AUDIT_CHANNELS_GRANTED,
+    action_by_id, action_ref, action_result_props, agent_profile_update_result_body,
+    agent_rename_result_body, channel_create_result_body, channel_create_result_rows,
+    channel_member_add_result_body, channel_member_add_rows, invite_result_body,
+    invite_result_rows, last_attempt_patch, result_client_msg_id, workspace_settings_result_body,
+    ActionResult, ActionResultNext, RequiredRole, SecretDelivery, ACTION_APPROVED_AUDIT_SCHEMA,
+    ACTION_RESULT_EXECUTED, ACTION_TYPE_WORKSPACE_ACTION, AUDIT_ACTION_APPROVED,
+    AUDIT_AGENT_PROFILE_UPDATED, AUDIT_AGENT_PROFILE_UPDATED_SCHEMA, AUDIT_CHANNELS_GRANTED,
     AUDIT_CHANNELS_GRANTED_SCHEMA, AUDIT_CHANNEL_CREATED, AUDIT_CHANNEL_CREATED_SCHEMA,
     AUDIT_CHANNEL_MEMBER_ADDED, AUDIT_CHANNEL_MEMBER_ADDED_SCHEMA, AUDIT_MEMBER_RENAMED,
     AUDIT_MEMBER_RENAMED_SCHEMA, AUDIT_WORKSPACE_SETTING_UPDATED,
@@ -96,10 +97,10 @@ use momo_auth::{
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
 use momo_messaging::{
-    add_channel_member_in_tx, cent_channel, create_channel_detailed_in_tx,
+    add_channel_member_in_tx, apply_agent_card_in_tx, cent_channel, create_channel_detailed_in_tx,
     emit_message_edited_in_tx, normalize_channel_kind, patch_and_prune_message_props_in_tx,
-    patch_message_props_in_tx, rename_agent_display_name_in_tx, send_message_in_tx, MessageType,
-    NewChannel, NewMessage,
+    patch_message_props_in_tx, rename_agent_display_name_in_tx, send_message_in_tx, AgentCard,
+    AgentCardPatch, CardStatusPatch, FieldPatch, MessageType, NewChannel, NewMessage,
 };
 use momo_outbox::{emit_outbox, OutboxKind, RESUME_APPROVAL_JOB_METHOD};
 use momo_settings::{
@@ -118,8 +119,9 @@ use crate::dto::{
 use crate::error::ApiError;
 use crate::realtime_advert::derive_same_origin_http_base;
 use crate::routes::actions::{
-    resolve_action_in_tx, ActionArgs, GateSubject, ResolvedAgentTarget, ResolvedChannel,
-    ResolvedConnection, ResolvedMember, SettingPatch, SettingsBefore,
+    profile_changes, resolve_action_in_tx, ActionArgs, GateSubject, ResolvedAgentTarget,
+    ResolvedChannel, ResolvedConnection, ResolvedMember, SettingPatch, SettingsBefore,
+    StatusIntent,
 };
 use crate::routes::agents::require_profile_editor_in_tx;
 use crate::routes::invites::require_admin;
@@ -1319,6 +1321,38 @@ async fn execute_workspace_action(
         ActionArgs::AgentRename { target: None, .. } => {
             return Err(protocol_error("agent.rename resolved without a target"));
         }
+        ActionArgs::AgentProfileUpdate {
+            display_name,
+            tagline,
+            role_label,
+            status,
+            target: Some(target),
+            before: Some(before),
+            ..
+        } => match execute_agent_profile_update(
+            conn,
+            approval,
+            input,
+            now,
+            AgentProfileChange {
+                display_name,
+                tagline,
+                role_label,
+                status,
+            },
+            target,
+            before,
+        )
+        .await?
+        {
+            Execution::Ran(executed) => executed,
+            Execution::Refused(decision) => return Ok(Ok(decision)),
+        },
+        ActionArgs::AgentProfileUpdate { .. } => {
+            return Err(protocol_error(
+                "agent.profile.update resolved without a target",
+            ));
+        }
         ActionArgs::ChannelMemberAdd {
             channel: Some(channel),
             members,
@@ -1954,6 +1988,144 @@ async fn execute_agent_rename(
             &applied.previous_display_name,
             &target.handle,
             &applied.member.display_name,
+        ),
+        secret_once: None,
+        next: None,
+    }))
+}
+
+/// The card fields one `agent.profile.update` carries, as the resolver typed them.
+struct AgentProfileChange<'a> {
+    display_name: &'a Option<String>,
+    tagline: &'a FieldPatch,
+    role_label: &'a FieldPatch,
+    status: &'a StatusIntent,
+}
+
+/// `agent.profile.update` (증보 v3 V3-2): the name through the one rename write,
+/// the rest through the card write, in one transaction and as the approver.
+async fn execute_agent_profile_update(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    change: AgentProfileChange<'_>,
+    target: &ResolvedAgentTarget,
+    before: &AgentCard,
+) -> Result<Execution, momo_db::DbError> {
+    // The very diff the card showed (the pins proved `before` is still current).
+    let changes = profile_changes(
+        &target.current_display_name,
+        before,
+        change.display_name,
+        change.tagline,
+        change.role_label,
+        change.status,
+    );
+    if changes.is_empty() {
+        return Err(protocol_error("agent.profile.update changes nothing"));
+    }
+    let via_agent = approval.requested_by.to_string();
+    let mut audits = Vec::new();
+    let mut new_name = target.current_display_name.clone();
+
+    if let Some(name) = change.display_name {
+        if name != &target.current_display_name {
+            let applied =
+                rename_agent_display_name_in_tx(conn, input.workspace_id, target.id, name)
+                    .await?
+                    .ok_or_else(|| {
+                        protocol_error("the profile target is no longer a live agent")
+                    })?;
+            new_name = applied.member.display_name.clone();
+            let mut detail = json!({
+                "old": applied.previous_display_name,
+                "new": applied.member.display_name,
+                "kind": "agent",
+                "via_agent": via_agent,
+                "approval_id": approval.id.to_string(),
+                "managed": target.managed,
+            });
+            if target.managed {
+                if let Some(object) = detail.as_object_mut() {
+                    object.insert("target_agent".into(), json!(target.id.to_string()));
+                }
+            }
+            audits.push(
+                AuditEntry::new(input.workspace_id, AUDIT_MEMBER_RENAMED)
+                    .by(input.member_id)
+                    .about(target.id)
+                    .target("member", target.id)
+                    .via_token(input.via_token_id)
+                    .run(approval.run_id)
+                    .with_schema(AUDIT_MEMBER_RENAMED_SCHEMA, detail),
+            );
+        }
+    }
+
+    let patch = AgentCardPatch {
+        tagline: change.tagline.clone(),
+        role_label: change.role_label.clone(),
+        status: match change.status {
+            StatusIntent::Unchanged => CardStatusPatch::Unchanged,
+            StatusIntent::Clear => CardStatusPatch::Clear,
+            StatusIntent::Set { emoji, text, hours } => CardStatusPatch::Set {
+                emoji: emoji.clone(),
+                text: text.clone(),
+                expires_at: now + chrono::Duration::hours(*hours),
+            },
+        },
+    };
+    apply_agent_card_in_tx(conn, input.workspace_id, target.id, &patch)
+        .await?
+        .ok_or_else(|| protocol_error("the profile target is no longer a live agent"))?;
+
+    // Field **names** only: tagline and status are user-facing prose and never
+    // belong in an audit row (the card keeps the old/new for the approver).
+    let labels: Vec<&str> = changes.iter().map(|(label, _, _)| *label).collect();
+    let keys: Vec<&str> = labels
+        .iter()
+        .map(|label| match *label {
+            "이름" => "displayName",
+            "소개" => "tagline",
+            "역할 라벨" => "roleLabel",
+            _ => "status",
+        })
+        .collect();
+    let mut detail = json!({
+        "fields": keys,
+        "via_agent": via_agent,
+        "approval_id": approval.id.to_string(),
+        "managed": target.managed,
+    });
+    if target.managed {
+        if let Some(object) = detail.as_object_mut() {
+            object.insert("target_agent".into(), json!(target.id.to_string()));
+            object.insert(
+                "owner_member_id".into(),
+                json!(target.owner_member_id.map(|owner| owner.to_string())),
+            );
+        }
+    }
+    audits.push(
+        AuditEntry::new(input.workspace_id, AUDIT_AGENT_PROFILE_UPDATED)
+            .by(input.member_id)
+            .about(target.id)
+            .target("member", target.id)
+            .via_token(input.via_token_id)
+            .run(approval.run_id)
+            .with_schema(AUDIT_AGENT_PROFILE_UPDATED_SCHEMA, detail),
+    );
+
+    Ok(Execution::Ran(Executed {
+        audits,
+        ref_type: REF_TYPE_AGENT,
+        ref_id: target.id,
+        result_body: agent_profile_update_result_body(&labels),
+        result_rows: momo_agent::actions::agent_profile_update_rows(
+            &new_name,
+            &target.handle,
+            &changes,
         ),
         secret_once: None,
         next: None,

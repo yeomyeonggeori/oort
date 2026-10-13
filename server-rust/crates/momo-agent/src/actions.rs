@@ -78,6 +78,13 @@ pub const ACTION_HOSTED_CHANNELS_GRANT: &str = "hosted.channels.grant";
 /// There is no general "set a setting" action; a third key is a new amendment.
 pub const ACTION_WORKSPACE_SETTINGS_UPDATE: &str = "workspace.settings.update";
 
+/// `agent.profile.update` — change an agent's profile **card**: the proposer's
+/// own or that of an agent of the same owner (V4-M), limited to display name,
+/// tagline, status line and role label (ADR-0186 증보 2026-10-13 v3 V3-2).
+/// Avatar sources arrive with their own slice; `instructions` and everything
+/// that steers behaviour are not reachable from here.
+pub const ACTION_AGENT_PROFILE_UPDATE: &str = "agent.profile.update";
+
 /// What a person is consenting to when they approve (ADR-0186 D3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Risk {
@@ -376,6 +383,49 @@ fn agent_rename_args_schema() -> Value {
     })
 }
 
+/// `tagline` ceiling as the tool schema counts it: 140 characters at the UTF-8
+/// worst case. The domain validator enforces the 140 characters.
+pub const PROFILE_TAGLINE_MAX_BYTES: u64 = 560;
+/// `statusText`: 80 characters at the UTF-8 worst case.
+pub const PROFILE_STATUS_TEXT_MAX_BYTES: u64 = 320;
+/// `statusEmoji`: bytes, generously (four emoji with variation selectors).
+pub const PROFILE_STATUS_EMOJI_MAX_BYTES: u64 = 64;
+/// `roleLabel`: 24 characters at the UTF-8 worst case.
+pub const PROFILE_ROLE_LABEL_MAX_BYTES: u64 = 96;
+/// A status an agent sets ends on its own: hours, default and ceiling (V3-2).
+pub const PROFILE_STATUS_HOURS_DEFAULT: i64 = 24;
+pub const PROFILE_STATUS_HOURS_MAX: i64 = 168;
+/// The keys the card patch may carry, besides `targetHandle`.
+pub const PROFILE_UPDATE_FIELD_KEYS: [&str; 6] = [
+    "displayName",
+    "tagline",
+    "statusText",
+    "statusEmoji",
+    "statusExpiresInHours",
+    "roleLabel",
+];
+
+/// `agent.profile.update` arguments (증보 v3 V3-2). Every property is optional
+/// and at least one is required; **`null` clears** `tagline`, `roleLabel` and the
+/// status (so a proposer must omit what it is not changing, as for
+/// `workspace.settings.update`). `displayName` is never cleared.
+fn agent_profile_update_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+            "displayName": {"type": "string", "minLength": 1, "maxLength": AGENT_RENAME_NAME_MAX_BYTES},
+            "tagline": {"type": "string", "maxLength": PROFILE_TAGLINE_MAX_BYTES},
+            "statusText": {"type": "string", "maxLength": PROFILE_STATUS_TEXT_MAX_BYTES},
+            "statusEmoji": {"type": "string", "maxLength": PROFILE_STATUS_EMOJI_MAX_BYTES},
+            "statusExpiresInHours": {"type": "integer", "minimum": 1, "maximum": PROFILE_STATUS_HOURS_MAX},
+            "roleLabel": {"type": "string", "maxLength": PROFILE_ROLE_LABEL_MAX_BYTES},
+            "targetHandle": {"type": "string", "minLength": 1, "maxLength": MEMBER_HANDLE_MAX_BYTES}
+        }
+    })
+}
+
 /// The proposal ceiling on `welcomePrompt`, in characters. The REST surface allows
 /// 2000: this text is read by a *different agent* (the welcome agent), so a
 /// proposal — an agent writing another agent's instructions — gets a quarter.
@@ -497,6 +547,16 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         secret_delivery: SecretDelivery::None,
         effect: "표시된 설정(환영 문구·역할 이름)을 바꿔요",
         args_schema: workspace_settings_update_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_AGENT_PROFILE_UPDATE,
+        title: "에이전트 프로필 바꾸기",
+        summary: "에이전트 한 명의 이름·소개·상태 문구·역할 라벨을 바꿔요. 자기 자신이나 같은 소유자의 에이전트만 대상이에요.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::AgentEditor,
+        secret_delivery: SecretDelivery::None,
+        effect: "대상 에이전트의 프로필(표시된 항목)을 바꿔요",
+        args_schema: agent_profile_update_args_schema,
     },
 ];
 
@@ -871,6 +931,45 @@ pub fn agent_rename_result_body(old: &str, new: &str) -> String {
     format!("이름을 바꿨어요: {old} → {new}")
 }
 
+/// The summary line when `agent.profile.update` targets **another** agent.
+pub const AGENT_PROFILE_MANAGED_SUMMARY: &str = "에이전트가 제안했어요. 승인하면 대상 에이전트의 소유자 또는 관리자 권한으로 다른 에이전트의 프로필을 바꿔요.";
+
+/// `audit_log.action` / schema of an approved `agent.profile.update` (V3-2).
+pub const AUDIT_AGENT_PROFILE_UPDATED: &str = "agent.profile.updated";
+pub const AUDIT_AGENT_PROFILE_UPDATED_SCHEMA: &str = "momo.agent.profile.updated.v1";
+
+/// One 「현재 → 새 값」 row of the profile card. Both sides are the **server's**
+/// values (the current one read from the row, the new one normalised), plain
+/// text; an unset side reads 「없음」 and a clear reads 「지움」.
+pub fn agent_profile_change_row(label: &str, before: Option<&str>, after: Option<&str>) -> Value {
+    action_row(
+        label,
+        format!("{} → {}", before.unwrap_or("없음"), after.unwrap_or("지움")),
+    )
+}
+
+/// The `agent.profile.update` card rows: who, then one row per touched field.
+/// `changes` are `(label, before, after)` with `after = None` meaning a clear.
+pub fn agent_profile_update_rows(
+    target_display_name: &str,
+    target_handle: &str,
+    changes: &[(&str, Option<String>, Option<String>)],
+) -> Vec<Value> {
+    let mut rows = vec![action_row(
+        "대상 에이전트",
+        member_card_label(target_display_name, target_handle, true),
+    )];
+    rows.extend(changes.iter().map(|(label, before, after)| {
+        agent_profile_change_row(label, before.as_deref(), after.as_deref())
+    }));
+    rows
+}
+
+/// The outcome line of `agent.profile.update`: the labels that changed.
+pub fn agent_profile_update_result_body(labels: &[&str]) -> String {
+    format!("프로필을 바꿨어요: {}", labels.join("·"))
+}
+
 /// `ref.type` for a created channel.
 pub const REF_TYPE_CHANNEL: &str = "channel";
 
@@ -1208,7 +1307,8 @@ mod tests {
                 "channel.member.add",
                 "agent.rename",
                 "hosted.channels.grant",
-                "workspace.settings.update"
+                "workspace.settings.update",
+                "agent.profile.update"
             ]
         );
         assert_eq!(

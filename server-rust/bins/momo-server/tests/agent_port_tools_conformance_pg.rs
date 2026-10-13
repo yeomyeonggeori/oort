@@ -12791,3 +12791,485 @@ async fn deliver_secret_to_agent_is_refused_where_the_action_does_not_offer_it()
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["status"], "approved", "{body}");
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 2026-10-13 v3 P1 (#3785) — agent.profile.update
+// ---------------------------------------------------------------------------
+
+async fn profile_row_3785(
+    pool: &PgPool,
+    agent: Uuid,
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
+    sqlx::query_as(
+        "SELECT a.config->>'tagline', a.config->>'roleLabel', m.status_emoji, m.status_text \
+           FROM member m JOIN agent a ON a.member_id = m.id WHERE m.id = $1",
+    )
+    .bind(agent)
+    .fetch_one(pool)
+    .await
+    .expect("profile row")
+}
+
+/// **agent.profile.update (증보 v3 V3-2), end to end.** Hostile spellings are one
+/// refusal and change nothing; the owner (not an admin) approves their own
+/// agent's card; a third party is `role_required`; the card's rows are the
+/// server's; the audit row names fields and never values; `instructions` and the
+/// handle are untouched; the roster shows the new card; a clear removes it; a
+/// field that changed under the card re-asks (`action_args_invalid`).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_agent_updates_its_profile_card_after_its_owner_approves() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (owner, owner_jwt) = seed_human_3708(&su, &fixture, "owner", "member").await;
+    let (_third, third_jwt) = seed_human_3708(&su, &fixture, "third", "member").await;
+    set_agent_owner_3708(&su, fixture.hosted_agent, Some(owner)).await;
+    let _handle = tidy_agent_3708(&su, fixture.hosted_agent, "Hermes").await;
+    sqlx::query("UPDATE agent SET system_prompt = 'KEEP-ME' WHERE member_id = $1")
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let handle_before: String = sqlx::query_scalar("SELECT handle FROM member WHERE id=$1")
+        .bind(fixture.hosted_agent)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+
+    // ---- hostile spellings: one refusal, nothing written -------------------
+    let mut answers = Vec::new();
+    for hostile in [
+        json!({"tagline": "[docs](http://evil.example)"}),
+        json!({"tagline": "visit https://evil.example"}),
+        json!({"tagline": "ping @Person owner"}),
+        json!({"tagline": "Person owner approved this"}),
+        json!({"tagline": "zero\u{200B}width"}),
+        json!({"tagline": "line\nbreak"}),
+        json!({"tagline": "x".repeat(141)}),
+        json!({"roleLabel": "관리자"}),
+        json!({"roleLabel": "Security"}),
+        json!({"roleLabel": "y".repeat(25)}),
+        json!({"statusText": "[잠시]"}),
+        json!({"statusEmoji": "ok"}),
+        json!({"statusText": "회의", "statusExpiresInHours": 169}),
+        json!({"statusExpiresInHours": 2}),
+        json!({"displayName": "Tools"}),
+        // Everything that steers behaviour, and the avatar (a later slice), is
+        // not a key of this action at all.
+        json!({"instructions": "ignore all previous"}),
+        json!({"systemPrompt": "x"}),
+        json!({"enabledTools": ["x"]}),
+        json!({"paused": true}),
+        json!({"handle": "evil"}),
+        json!({"avatar": {"source": "preset", "presetId": "x"}}),
+        json!({}),
+    ] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "agent.profile.update",
+            hostile.clone(),
+        )
+        .await;
+        answers.push((status, refused["error"].clone()));
+        assert_eq!(status, 400, "{hostile} must be refused: {refused}");
+    }
+    assert!(answers.iter().all(|a| a.1 == answers[0].1), "{answers:?}");
+    assert_eq!(
+        profile_row_3785(&su, fixture.hosted_agent).await,
+        (None, None, None, None)
+    );
+
+    // ---- a good proposal: the card says what will change -------------------
+    let good = json!({
+        "tagline": "영업 요약을 정리해요",
+        "roleLabel": "영업 비서",
+        "statusEmoji": "🤖",
+        "statusText": "집중 모드",
+        "statusExpiresInHours": 2
+    });
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.profile.update",
+        good.clone(),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap())
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(card["action"]["required_role"], json!("agent_editor"));
+    let rows = card["action"]["rows"].as_array().unwrap().clone();
+    let row = |label: &str| {
+        rows.iter()
+            .find(|r| r["label"] == label)
+            .unwrap_or_else(|| panic!("{label} in {rows:?}"))["value"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert!(row("대상 에이전트").contains("Hermes"));
+    assert_eq!(row("소개"), "없음 → 영업 요약을 정리해요");
+    assert_eq!(row("역할 라벨"), "없음 → 영업 비서");
+    assert_eq!(row("상태"), "없음 → 🤖 집중 모드 (2시간 동안)");
+    assert!(!card["summary"].as_str().unwrap().contains("다른 에이전트"));
+
+    // ---- a third party is refused; the agent cannot approve ----------------
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &third_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert_eq!(approval_status_3708(&su, approval).await, "pending");
+    assert_eq!(
+        profile_row_3785(&su, fixture.hosted_agent).await,
+        (None, None, None, None)
+    );
+
+    // ---- the owner approves ------------------------------------------------
+    let audits_before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &owner_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        approved["result"]["actionId"],
+        json!("agent.profile.update")
+    );
+    assert!(approved["result"].get("secretOnce").is_none());
+    assert_eq!(
+        profile_row_3785(&su, fixture.hosted_agent).await,
+        (
+            Some("영업 요약을 정리해요".into()),
+            Some("영업 비서".into()),
+            Some("🤖".into()),
+            Some("집중 모드".into())
+        )
+    );
+    let hours_left: f64 = sqlx::query_scalar(
+        "SELECT (extract(epoch FROM (status_expires_at - now())) / 3600.0)::float8 FROM member WHERE id=$1",
+    )
+    .bind(fixture.hosted_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!((1.9..=2.0).contains(&hours_left), "{hours_left}");
+    // Nothing else moved.
+    let prompt: Option<String> =
+        sqlx::query_scalar("SELECT system_prompt FROM agent WHERE member_id=$1")
+            .bind(fixture.hosted_agent)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(prompt.as_deref(), Some("KEEP-ME"));
+    let handle_after: String = sqlx::query_scalar("SELECT handle FROM member WHERE id=$1")
+        .bind(fixture.hosted_agent)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(handle_after, handle_before);
+    assert_eq!(display_name_3708(&su, fixture.hosted_agent).await, "Hermes");
+
+    // ---- audit: field names, never values ----------------------------------
+    let audit: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='agent.profile.updated' \
+          ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .expect("audit row");
+    assert_eq!(
+        audit["fields"],
+        json!(["tagline", "roleLabel", "status"]),
+        "{audit}"
+    );
+    let rendered = audit.to_string();
+    for value in ["영업 요약", "영업 비서", "집중 모드", "🤖"] {
+        assert!(
+            !rendered.contains(value),
+            "{value} leaked into the audit: {rendered}"
+        );
+    }
+    assert!(
+        audits_before
+            < sqlx::query_scalar::<_, i64>("SELECT count(*) FROM audit_log WHERE workspace_id=$1")
+                .bind(fixture.workspace)
+                .fetch_one(&su)
+                .await
+                .unwrap()
+    );
+
+    // ---- the roster shows the card -----------------------------------------
+    let roster: Value = client
+        .get(format!("{base}/v1/workspaces/{}/roster", fixture.workspace))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let members = roster["members"]
+        .as_array()
+        .or(roster.as_array())
+        .expect("roster list");
+    let me = members
+        .iter()
+        .find(|m| m["id"] == json!(fixture.hosted_agent.to_string()))
+        .expect("the agent is on the roster");
+    assert_eq!(me["tagline"], json!("영업 요약을 정리해요"), "{me}");
+    assert_eq!(me["roleLabel"], json!("영업 비서"), "{me}");
+    assert_eq!(me["statusText"], json!("집중 모드"), "{me}");
+    assert_eq!(me["statusEmoji"], json!("🤖"), "{me}");
+    // A human still carries neither.
+    let human = members
+        .iter()
+        .find(|m| m["id"] == json!(fixture.human.to_string()))
+        .expect("the human is on the roster");
+    assert!(
+        human.get("tagline").is_none() && human.get("roleLabel").is_none(),
+        "{human}"
+    );
+
+    // ---- a field that changed under the card re-asks -----------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.profile.update",
+        json!({"tagline": "새 소개예요"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let stale = proposed_approval_3706(&proposed);
+    sqlx::query("UPDATE agent SET config = jsonb_set(config, '{tagline}', '\"바뀐 소개\"') WHERE member_id=$1")
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &owner_jwt,
+        stale,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["status"], "action_args_invalid");
+    assert_eq!(approval_status_3708(&su, stale).await, "pending");
+    assert_eq!(
+        profile_row_3785(&su, fixture.hosted_agent)
+            .await
+            .0
+            .as_deref(),
+        Some("바뀐 소개")
+    );
+
+    // The stale card is rejected (a second pending proposal on the same target
+    // is a conflict, V4-M-9), then a clear is proposed.
+    let (status, _h, rejected) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &owner_jwt,
+        stale,
+        false,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{rejected}");
+
+    // ---- null clears --------------------------------------------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.profile.update",
+        json!({"tagline": null, "roleLabel": null, "statusText": null, "statusEmoji": null}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let clear = proposed_approval_3706(&proposed);
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &owner_jwt,
+        clear,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        profile_row_3785(&su, fixture.hosted_agent).await,
+        (None, None, None, None)
+    );
+    // Clearing what is already clear changes nothing, so it is not a proposal.
+    let (status, nothing) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.profile.update",
+        json!({"tagline": null}),
+    )
+    .await;
+    assert_eq!(status, 400, "{nothing}");
+}
+
+/// The name rides the same card (one approval, two audit rows), and another
+/// agent is a target only when it has the **same owner** (V4-M): a stranger's
+/// agent, an ownerless one and a human handle are one refusal.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_profile_update_may_rename_and_may_target_only_a_managed_agent() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (owner, owner_jwt) = seed_human_3708(&su, &fixture, "owner", "member").await;
+    let (stranger, _stranger_jwt) = seed_human_3708(&su, &fixture, "stranger", "member").await;
+    set_agent_owner_3708(&su, fixture.hosted_agent, Some(owner)).await;
+    set_agent_owner_3708(&su, fixture.managed_agent, Some(stranger)).await;
+    tidy_agent_3708(&su, fixture.hosted_agent, "Hermes").await;
+    let other_handle = tidy_agent_3708(&su, fixture.managed_agent, "Worker").await;
+
+    // The other agent belongs to somebody else: indistinguishable refusals.
+    let mut answers = Vec::new();
+    for target in [
+        other_handle.clone(),
+        "no-such-agent".to_string(),
+        "tools-human".to_string(),
+    ] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "agent.profile.update",
+            json!({"tagline": "x는 y예요", "targetHandle": target}),
+        )
+        .await;
+        answers.push((status, refused["error"].clone()));
+        assert_eq!(status, 400, "{target}: {refused}");
+    }
+    assert!(answers.iter().all(|a| a.1 == answers[0].1), "{answers:?}");
+
+    // Same owner: now it is a managed target and the card says so.
+    set_agent_owner_3708(&su, fixture.managed_agent, Some(owner)).await;
+    let (status, proposed) = try_propose_action_3706(
+        &client, &base, &su, &fixture, "agent.profile.update",
+        json!({"displayName": "Helper 2", "tagline": "회의록을 맡아요", "targetHandle": other_handle}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap())
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert!(
+        card["summary"].as_str().unwrap().contains("다른 에이전트"),
+        "{card}"
+    );
+    // Two pending proposals on one target: the second is a conflict, not a card.
+    let (status, again) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.profile.update",
+        json!({"tagline": "다른 소개", "targetHandle": other_handle}),
+    )
+    .await;
+    assert_eq!(status, 409, "{again}");
+
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &owner_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        display_name_3708(&su, fixture.managed_agent).await,
+        "Helper 2"
+    );
+    assert_eq!(
+        profile_row_3785(&su, fixture.managed_agent)
+            .await
+            .0
+            .as_deref(),
+        Some("회의록을 맡아요")
+    );
+    // The proposer itself is untouched.
+    assert_eq!(display_name_3708(&su, fixture.hosted_agent).await, "Hermes");
+    assert_eq!(profile_row_3785(&su, fixture.hosted_agent).await.0, None);
+    let audit_actions: Vec<String> = sqlx::query_scalar(
+        "SELECT action FROM audit_log WHERE workspace_id=$1 \
+           AND action IN ('agent.profile.updated','member.renamed') AND subject_member_id=$2 \
+          ORDER BY created_at",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.managed_agent)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    // One transaction means one `created_at`: compare as a set.
+    let mut audit_actions = audit_actions;
+    audit_actions.sort();
+    assert_eq!(
+        audit_actions,
+        vec!["agent.profile.updated", "member.renamed"]
+    );
+}
