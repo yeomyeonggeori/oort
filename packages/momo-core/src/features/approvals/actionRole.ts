@@ -29,7 +29,7 @@ function isRoleKey(value: string): value is RoleKey {
  *
  * 문장이 갈라지는 자리다(R1 N5). 아는 역할에는 한글 이름이 있으므로 조사를 붙인
  * 문장이 읽히고, 모르는 값은 서버의 원문 토큰이라 그 뒤에 조사를 붙이면
- * 「member가 승인해야 합니다」가 된다 — 조사는 맞는데(`attachParticle` 이
+ * 「member가 승인해야 해요」가 된다 — 조사는 맞는데(`attachParticle` 이
  * 라틴 끝도 옳게 읽는다) **낱말이 한국어 문장의 주어 자리에 설 수 없다**.
  * 그래서 모르는 값은 조사 없이, 원문임이 드러나는 자리에 둔다.
  */
@@ -75,7 +75,7 @@ export function roleDisplayName(role: string): string {
  * 그래서 이 한 줄만은 아는 역할과 모르는 역할이 같은 모양을 쓴다.
  */
 export function approvalRoleCopy(role: string): string {
-  return `${roleDisplayName(role)}만 승인할 수 있습니다.`;
+  return `${roleDisplayName(role)}만 승인할 수 있어요.`;
 }
 
 /**
@@ -94,13 +94,13 @@ export function approvalRoleCopy(role: string): string {
  */
 export function actionApproveConfirmCopy(requiredRole: string | null): string {
   if (requiredRole === null || !isKnownRole(requiredRole)) {
-    return "승인하면 서버가 이 행동을 실행합니다.";
+    return "승인하면 서버가 이 행동을 실행해요.";
   }
-  return `승인하면 서버가 ${roleDisplayName(requiredRole)} 권한으로 이 행동을 실행합니다.`;
+  return `승인하면 서버가 ${roleDisplayName(requiredRole)} 권한으로 이 행동을 실행해요.`;
 }
 
 /**
- * 403 뒤에 카드 안에 서는 문장 (이슈 #2510 수용기준의 「관리자가 승인해야 합니다」).
+ * 403 뒤에 카드 안에 서는 문장 (이슈 #2510 수용기준의 「관리자가 승인해야 해요」).
  *
  * 두 번째 문장이 **다음 행동**이다. 「권한이 없습니다」로 끝내면 사람은 자기가
  * 무엇을 하면 되는지 모른 채 남고, 그 자리에서 하는 일은 같은 버튼을 다시
@@ -113,7 +113,7 @@ export function roleRequiredCopy(role: string): string {
   if (!isKnownRole(role)) {
     // 원문 토큰은 주어가 되지 못한다(위 `isKnownRole` 참고). 조사를 붙이는 대신
     // 「역할」이라는 한국어 낱말에 조사를 달고, 서버가 보낸 값은 그 앞에 둔다.
-    return `승인하려면 ${role} 역할이 필요합니다. ${STILL_PENDING}`;
+    return `승인하려면 ${role} 역할이 필요해요. ${STILL_PENDING}`;
   }
-  return `${attachParticle(roleDisplayName(role), "subject")} 승인해야 합니다. ${STILL_PENDING}`;
+  return `${attachParticle(roleDisplayName(role), "subject")} 승인해야 해요. ${STILL_PENDING}`;
 }

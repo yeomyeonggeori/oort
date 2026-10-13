@@ -74,7 +74,7 @@ describe("action_result 카드 (ADR-0186 부록 B)", () => {
       expect(ACTION_RESULT_STATUS_NOTE[status]).not.toBe("");
     }
     expect(ACTION_RESULT_STATUS_NOTE.role_required).toBe(
-      "관리자가 승인해야 합니다."
+      "관리자가 승인해야 해요."
     );
   });
 
