@@ -3277,6 +3277,49 @@ paths:
         "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "404": {description: Gate closed, doorbell missing, or unknown path}
 
+  /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/doorbell/ring:
+    post:
+      tags: [agents]
+      operationId: ringHostedAgentDoorbell
+      summary: Ask the doorbell to ring now (ADR-0200 D4, 「다시 깨우기」).
+      description: >
+        A REQUEST, not a delivery: the existing doorbell registration is re-armed and the sender
+        fires the same content-free signal (ADR-0171 D2) through the same egress policy on its next
+        drain; the outcome lands in `lastFiredAtMs` / `lastStatus`. Allowed for a workspace
+        owner/admin, the person who created the connection, or the agent's recorded owner — a plain
+        channel member is not enough, since every ring spends the owner's vendor usage. Bounded per
+        connection at one per 60 seconds and five per hour (429 with `Retry-After`). Closed unless
+        `MOMO_DOORBELL_ENABLED` is the exact lowercase word `true` — otherwise an empty 404, like the
+        registration beside it. A connection the caller may not ring answers the same 404 as an
+        unknown one.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: connectionId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "202":
+          description: The ring was requested.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+            Pragma: {required: true, schema: {type: string, enum: [no-cache]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/HostedDoorbellRingResponse"}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {description: Gate closed, unknown connection, or not allowed to ring it}
+        "409": {description: Connection is not active, or no doorbell is registered, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "429":
+          description: Cooldown (60 s) or the hourly limit (5) was hit.
+          headers:
+            Retry-After: {required: true, schema: {type: integer, minimum: 1}, description: Seconds until a ring is allowed again.}
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [error, retryAfterSeconds]
+                properties:
+                  error: {type: string}
+                  retryAfterSeconds: {type: integer, minimum: 1}
+
   /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/dm-approvals:
     get:
       tags: [agents]
@@ -3683,6 +3726,100 @@ paths:
         "403": {description: Active human channel membership required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "404": {description: Agent run not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "409": {description: Run is already terminal in a non-cancelled state, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/agent-runs/progress:
+    get:
+      tags: [agents]
+      operationId: listChannelAgentRunProgress
+      summary: Server-derived progress of this channel's hosted-agent runs.
+      description: >
+        ADR-0200 D1/D3. For each run of a hosted agent in this channel (mention
+        runs and work runs alike), newest first, the server's own answer to
+        "what is this run doing" instead of a client-side guess: `phase`
+        (queued / claimed / running / awaiting_approval / paused / terminal),
+        the delivery job's `leaseState` (`stale` means expired and not
+        re-claimed — the agent may still return), `queuePosition` among the
+        agent's claimable queue (1 = next), the latest reported stage, and for a
+        finished run a closed `endReason`. Runs ahead in channels the caller is
+        not a member of are counted in `aheadTotal` and never named. Active human
+        members of this channel only. Managed and BYOA agents' runs are not listed.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - name: state
+          in: query
+          schema: {type: string, enum: [active, all], default: all}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+      responses:
+        "200":
+          description: Progress per run, newest first.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgentRunProgressPage"}
+        "400": {description: Malformed identifier or unknown state, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Active human channel membership required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/agent-runs/{runId}/events:
+    get:
+      tags: [agents]
+      operationId: listAgentRunEvents
+      summary: The run event ledger of one hosted-agent run.
+      description: >
+        ADR-0200 D2. The whole ledger (at most 200 rows, oldest first) of a
+        hosted agent's run: queued, claimed, started, stage markers, approval
+        requested/decided, and the terminal with its closed code. There is no
+        cursor and no raw sequence — each row carries a 1-based `ordinal` in this
+        run's ledger only. The only free text is the agent-reported `stage`
+        marker (at most 80 characters; render as plain text). A run outside this
+        workspace and a run in a channel the caller is not an active member of
+        are the same 404. Runs of managed or BYOA agents have an empty ledger.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: runId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The ledger.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgentRunEvents"}
+        "400": {description: Malformed identifier, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {description: No such run, or the caller is not a member of its channel, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/agents/{agentId}/liveness:
+    get:
+      tags: [agents]
+      operationId: getAgentLiveness
+      summary: Is this hosted agent alive right now? (label only)
+      description: >
+        ADR-0200 D4. Any active human workspace member who shares a channel with the agent receives
+        its derived liveness label and when it last spoke, in place of "connected". An agent without
+        a hosted connection and an agent the caller shares no channel with are the same 404, so the
+        route is no probe for whether an agent is hosted.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: agentId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The label.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgentLiveness"}
+        "400": {description: Malformed identifier, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {description: No such hosted agent visible to the caller, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
 
   /v1/workspaces/{workspaceId}/agents/from-card:
     post:
@@ -13459,6 +13596,110 @@ components:
           format: uuid
           description: Final run ID when another older page exists.
 
+    AgentRunProgress:
+      type: object
+      additionalProperties: false
+      required: [id, channelId, agentMemberId, status, phase, leaseState, stepCount, createdAtMs, updatedAtMs]
+      properties:
+        id: {type: string, format: uuid}
+        channelId: {type: string, format: uuid}
+        agentMemberId: {type: string, format: uuid}
+        triggerMessageId: {type: string, format: uuid}
+        triggerSummary: {type: string, maxLength: 200}
+        status:
+          type: string
+          enum: [queued, running, awaiting_approval, paused, succeeded, failed, cancelled, timed_out]
+        phase:
+          type: string
+          enum: [queued, claimed, running, awaiting_approval, paused, succeeded, failed, timed_out, cancelled]
+          description: >
+            Derived by the server. `queued` = nobody has taken the job; `claimed` =
+            an agent leased it and has not reported progress yet.
+        leaseState:
+          type: string
+          enum: [live, stale, none]
+          description: >
+            The delivery job's lease. `stale` = expired and not re-claimed (the
+            agent may still return); never "disconnected".
+        stepCount: {type: integer, minimum: 0}
+        claimedAtMs: {type: integer, format: int64}
+        latestStage: {type: string, maxLength: 80}
+        lastEventAtMs: {type: integer, format: int64}
+        approvalId: {type: string, format: uuid}
+        approvalExpiresAtMs: {type: integer, format: int64}
+        endReason:
+          type: string
+          description: >
+            Machine code the server wrote for a finished run (a lowercase token such
+            as `approval_expired`); never agent-supplied text. Absent otherwise.
+        queuePosition:
+          type: integer
+          minimum: 1
+          description: 1 = next to be claimed. Present only for an unclaimed, claimable run.
+        aheadTotal:
+          type: integer
+          minimum: 0
+          description: Unclaimed runs ahead in the agent's queue, in any channel.
+        ahead:
+          type: array
+          description: The subset of those in channels the caller is a member of.
+          items:
+            type: object
+            additionalProperties: false
+            required: [runId, channelId]
+            properties:
+              runId: {type: string, format: uuid}
+              channelId: {type: string, format: uuid}
+        startedAtMs: {type: integer, format: int64}
+        finishedAtMs: {type: integer, format: int64}
+        createdAtMs: {type: integer, format: int64}
+        updatedAtMs: {type: integer, format: int64}
+
+    AgentRunProgressPage:
+      type: object
+      additionalProperties: false
+      required: [runs]
+      properties:
+        runs:
+          type: array
+          items: {$ref: "#/components/schemas/AgentRunProgress"}
+
+    AgentRunEvent:
+      type: object
+      additionalProperties: false
+      required: [ordinal, kind, createdAtMs]
+      properties:
+        ordinal:
+          type: integer
+          minimum: 1
+          description: >
+            Position in this run's ledger at read time. Not a stable identifier: the
+            200-row cap can drop old stage rows, so never use it as a key.
+        kind:
+          type: string
+          enum: [queued, claimed, started, stage, paused, resumed, approval_requested, approval_decided, succeeded, failed, timed_out, cancelled]
+        stage:
+          type: string
+          maxLength: 80
+          description: Agent-reported marker, present only on `stage`. Untrusted plain text.
+        code:
+          type: string
+          description: Machine code written by the server (`approval_expired`, `approved`, …).
+        approvalId: {type: string, format: uuid}
+        actorMemberId: {type: string, format: uuid}
+        createdAtMs: {type: integer, format: int64}
+
+    AgentRunEvents:
+      type: object
+      additionalProperties: false
+      required: [runId, events]
+      properties:
+        runId: {type: string, format: uuid}
+        events:
+          type: array
+          maxItems: 200
+          items: {$ref: "#/components/schemas/AgentRunEvent"}
+
     AgentRunCancelResponse:
       type: object
       additionalProperties: false
@@ -13720,6 +13961,55 @@ components:
             used within the last 10 minutes (`token.last_used_at`); an idle but open CLI session
             that has not called the port reads false. Present only for agents that dial in
             (brain subscription or external). Others see "offline" and nothing more (ADR-0193 D5).
+        liveness:
+          $ref: "#/components/schemas/HostedAgentLiveness"
+
+    HostedAgentLiveness:
+      type: object
+      additionalProperties: false
+      required: [state, workWaiting]
+      description: >
+        ADR-0200 D4 (#3742). Is the agent alive RIGHT NOW, from server facts. Present on list and
+        get only. `status: active` only says a credential was proved once; this ages.
+      properties:
+        state:
+          type: string
+          enum: [inactive, error, woken_not_collected, work_waiting, responsive, alive_idle, quiet, unresponsive]
+          description: >
+            `responsive` = a work signal (inbox read, claim that took a job, run event) within the
+            responsive window (default 20 min). `alive_idle` = a recent `oort_ping` but no work
+            signal: alive, takes no work. `woken_not_collected` = the doorbell rang (2xx), the grace
+            passed, claimable work is waiting and nothing was taken. `work_waiting` = claimable work
+            has waited past the responsive window and nothing was claimed since it was queued, even
+            if the agent is polling or pinging. `quiet` = some signal inside the
+            quiet window (default 60 min). `unresponsive` = none, or never. `error` = the newest fact
+            is a refused call. `inactive` = the connection is not active.
+        lastSignalAtMs: {type: integer, format: int64}
+        lastWorkSignalAtMs: {type: integer, format: int64}
+        lastPingAtMs: {type: integer, format: int64}
+        lastPingState: {type: string, enum: [idle, working]}
+        lastToolErrorAtMs: {type: integer, format: int64}
+        lastToolErrorCode:
+          type: string
+          description: Closed code of the last refused call (`unavailable`, `not_authorized`).
+        workWaiting:
+          type: boolean
+          description: At least one queued run this agent could claim right now.
+        oldestWaitingAtMs: {type: integer, format: int64}
+
+    AgentLiveness:
+      type: object
+      additionalProperties: false
+      required: [agentMemberId, state]
+      description: >
+        ADR-0200 D4. What a member who shares a channel with a hosted agent may see: the label and
+        when it last spoke. No error code, no doorbell, no ping detail (those are the admin's).
+      properties:
+        agentMemberId: {type: string, format: uuid}
+        state:
+          type: string
+          enum: [inactive, error, woken_not_collected, work_waiting, responsive, alive_idle, quiet, unresponsive]
+        lastSignalAtMs: {type: integer, format: int64}
 
     EnablePersonalAgentRequest:
       type: object
@@ -13794,6 +14084,14 @@ components:
         reused: {type: boolean}
         pairingCredential: {type: string, description: Returned once. PostgreSQL stores only sha256. Absent when the connection is already active.}
         pairingExpiresAtMs: {type: integer, format: int64}
+
+    HostedDoorbellRingResponse:
+      type: object
+      additionalProperties: false
+      required: [requestedAtMs, nextAllowedAtMs]
+      properties:
+        requestedAtMs: {type: integer, format: int64}
+        nextAllowedAtMs: {type: integer, format: int64, description: When the 60-second cooldown ends.}
 
     RegisterHostedDoorbellRequest:
       type: object

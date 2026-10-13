@@ -67,6 +67,8 @@ pub mod inbox_retention_sweep;
 pub mod provider;
 pub mod push;
 pub mod push_relay;
+pub mod run_event_retention_sweep;
+pub mod run_stall_sweep;
 pub mod share_retention_sweep;
 
 use std::future::Future;
@@ -714,6 +716,31 @@ impl Notifier {
             .await;
         });
 
+        // ---- loop 2c'': the hosted-run stall sweep (ADR-0200 D1-4, #3744) ---------
+        //
+        // Its own task for the reason 2b and 2c are: a T3 provider timing out must not
+        // leave a hosted agent's ghost run holding its only concurrency slot. Runs
+        // regardless of `t3_enabled` — hosted runs are not a T3 feature. With no hosted
+        // runs the cross-tenant read matches nothing and the loop costs one poll.
+        let stalls = self.clone();
+        let run_stall_sweep_task = tokio::spawn(async move {
+            backoff::supervise(
+                "run stall sweep",
+                stalls
+                    .config
+                    .sweep_interval
+                    .max(std::time::Duration::from_secs(30)),
+                || {
+                    run_stall_sweep::sweep_stalled_runs(
+                        &stalls.pool,
+                        stalls.config.run_stall,
+                        stalls.config.claim_batch_size,
+                    )
+                },
+            )
+            .await;
+        });
+
         // ---- loop 2c': shared-session payload retention (#2862, #3377) ---------
         //
         // ADR-0190 D4-b: the S1 extension is deleted 30 days after the session
@@ -765,6 +792,18 @@ impl Notifier {
                                         shares.config.claim_batch_size,
                                     )
                                     .await;
+                                    // ADR-0200 D2 (#3744): the run event ledger, 30 days after
+                                    // the run finished. Same tick, same RLS-bound pool, and it
+                                    // also runs when the others fail.
+                                    let ledger = run_event_retention_sweep::sweep_expired_run_events(
+                                        &shares.pool,
+                                        &write_pool,
+                                        shares.config.claim_batch_size,
+                                    )
+                                    .await;
+                                    if let Err(error) = &ledger {
+                                        tracing::error!(error = %error, "run event retention sweep failed");
+                                    }
                                     match (shared, inbox) {
                                         (Err(error), Err(inbox_error)) => {
                                             tracing::error!(error = %inbox_error, "inbox retention sweep failed");
@@ -772,7 +811,7 @@ impl Notifier {
                                         }
                                         (Err(error), Ok(_)) => Err(error),
                                         (Ok(_), Err(error)) => Err(error),
-                                        (Ok(_), Ok(_)) => Ok(()),
+                                        (Ok(_), Ok(_)) => ledger.map(|_| ()),
                                     }
                                 },
                             )
@@ -957,6 +996,7 @@ impl Notifier {
         sweep_task.abort();
         lease_task.abort();
         approval_sweep_task.abort();
+        run_stall_sweep_task.abort();
         control_window_sweep_task.abort();
         if let Some(task) = share_retention_task {
             task.abort();
