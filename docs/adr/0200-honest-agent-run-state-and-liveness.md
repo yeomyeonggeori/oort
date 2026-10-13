@@ -27,7 +27,7 @@
 ### 확인한 코드 사실 [V] (main `2eb618e4a`)
 
 **run 상태와 lease**
-- `agent_run.status`는 `queued/running/awaiting_approval/paused/succeeded/failed/cancelled/timed_out`(`momo-agent/src/run.rs:35`). hosted 수령(`oort_jobs_claim`)은 **run.status를 바꾸지 않는다.** `queued → running`은 첫 `oort_run_event`(`running|thinking|streaming`)가 `mark_run_started_in_tx`(`run.rs:1233`)를 부를 때뿐이다. 즉 「수령됨」은 run 행에 없고, 전달 행(`outbox`, `kind='agent_job'`)의 `lease_owner/lease_expires_at`에만 있다. **수령 시각은 어디에도 저장되지 않는다.**
+- `agent_run.status`는 `queued/running/awaiting_approval/paused/succeeded/failed/cancelled/timed_out`(`momo-agent/src/run.rs:35`). hosted 수령(`oort_jobs_claim`)은 **run.status를 바꾸지 않는다.** `queued → running`은 첫 `oort_run_event`(`running|thinking|streaming`)가 `mark_run_started_in_tx`(`run.rs:1233`)를 부를 때뿐이다. 즉 「수령됨」은 run 행에 없고, 전달 행(`outbox`, `kind='agent_job'`)의 `lease_owner/lease_expires_at`에만 있다. **수령 시각은 job 행(`outbox.lease_acquired_at`)에만 있고, 재claim 때 덮어써지며 job이 끝나면 읽을 수 없다 — run의 이력으로는 남지 않는다.**
 - claim 순서는 `ORDER BY o.id ASC`(`momo-outbox/src/gateway.rs:353`, 에이전트별 `partition_key`)다. FIFO이고, hosted claim은 그 connection이 승인받은 채널의 job만 후보로 삼는다(`hosted_connection_channel_ids`).
 - lease는 기본 30분(5~120분, 부록 A1). **만료돼도 job을 되돌리는 reaper가 없고**(부록 A, 2026-10-06 실측) 아무도 재claim하지 않으면 같은 핸들이 계속 유효하다(A3 암묵 갱신). `agent_run.deadline_at`은 승인 경로(`run.rs:1339`)에서만 쓰인다. 따라서 **수령 뒤 사라진 에이전트의 run은 `running`으로 영원히 남는다**(G1 동시성 계산이 600초 넘은 `running`을 빼는 것은 계산일 뿐 상태를 바꾸지 않는다, `a2a.rs`).
 - 승인 만료는 notifier 스위프(`momo-notifier/src/approval_sweep.rs:172`)가 run을 `timed_out{code:"approval_expired", approval_id}`로 끝내고 종결 rail 프레임을 낸다. 위 12:35가 이 경로다.
@@ -83,7 +83,7 @@ DB 열거형(`run_status`)은 바꾸지 않는다. 읽기 응답에 **파생 필
 | `paused` | run `paused` | — | 「일시 정지」 |
 | `succeeded` / `failed` / `timed_out` / `cancelled` | run 종결 | `finished_at`, `end_reason`(닫힌 코드: `approval_expired`, `lease_abandoned`, `unclaimed_expired`, `agent_error`, `cancelled_by_member`, …) | 「시간 초과 · 승인이 만료됨」 |
 
-- `claimed_at`은 새 사실이다. 수령 시각을 **원장 행(D2, `kind='claimed'`)** 으로 같은 tx에서 남긴다(전달 job 행에 열을 더하지 않는다: `outbox`는 범용·핫 테이블이다).
+- 수령 이력은 job 행의 `lease_acquired_at`(현재 lease만)으로는 부족하다. 수령 시각을 **원장 행(D2, `kind='claimed'`)** 으로 같은 tx에서 남긴다(전달 job 행에 열을 더하지 않는다: `outbox`는 범용·핫 테이블이다).
 - **lease_state**는 `phase`와 직교하는 서버 사실이다: `live`(`lease_expires_at > now()`) / `stale`(만료, 재claim 없음) / `none`. `stale`의 문구는 **「lease 미갱신 n분」** 이다. 부록 A3 때문에 만료 lease의 에이전트는 **돌아올 수 있다** — 만료는 「끊김」이 아니라 「n분째 소식 없음, 돌아올 수 있음」이다. 그래서 「끊김」 문구는 쓰지 않는다.
 - **「신호 소실」을 없앤다.** 클라이언트 TTL(90s/120s)로 상태를 정하는 일을 hosted run에서 멈춘다. 대신 서버 사실만 말한다: 수령 전이면 「대기 중(미수령 n분)」, 수령 뒤면 「마지막 보고 n분 전 · lease 미갱신 n분」.
 - **D1-4. 영원히 `running`인 run 방지.** 하드 종결은 클라 TTL이 아니라 서버 스위프의 명시적 사실로 한다(결재 2). notifier 스위프가 `running/claimed`이고 `lease_state=stale`이며 `last_event_at`(없으면 `claimed_at`)이 **lease 만료 후 2시간 이상** 지난 run을 `timed_out{code:"lease_abandoned"}`로 종결하고(승인 스위프와 같은 `end_parked_run_in_tx` 경로·종결 프레임), 수령되지 않은 `queued` run은 **24시간** 뒤 `timed_out{code:"unclaimed_expired"}`로 종결한다. 재claim으로 되살아난 run은 위 조건이 깨지므로 건드리지 않는다. 전달 job을 다른 에이전트로 옮기는 재배정은 하지 않는다. 숫자는 구현 티켓이 환경변수로 봉인한다.
