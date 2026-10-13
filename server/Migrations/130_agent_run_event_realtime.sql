@@ -11,13 +11,42 @@
 -- counter that must not leave the database (migration 128). The client re-reads the
 -- whole ledger (<= 200 rows) on a frame.
 --
--- `stage` frames are coalesced: a stage row that follows another stage row of the
--- same run within 2 seconds emits nothing (the ledger row is still written, and the
--- next frame — or a refetch — carries it). Lifecycle rows always emit.
+-- `stage` frames are rate-limited to one per 2 seconds per run: a stage row that follows,
+-- within 2 seconds, another stage row THAT EMITTED A FRAME is itself unframed (the ledger
+-- row is still written). The rule is against the last FRAMED row, not the last row, so a
+-- steady stream still frames every 2 seconds instead of going silent after the first
+-- frame (S5 review M-1). The last row of a burst may stay unframed: a frame is a hint to
+-- refetch, lifecycle rows always frame, and a client keeps refetching on a timer while a
+-- run is active (the ledger is <= 200 rows).
 --
 -- SECURITY INVOKER: it runs as the writer (momo_app, momo_notifier) under that role's
 -- grants and RLS; the notifier already holds outbox INSERT and agent_run SELECT.
 -- =============================================================================
+
+ALTER TABLE agent_run_event ADD COLUMN framed boolean NOT NULL DEFAULT true;
+
+COMMENT ON COLUMN agent_run_event.framed IS
+  'ADR-0200 D2: whether this row put a realtime frame on the channel (stage rows within 2 s of a framed stage row do not). Set by the BEFORE INSERT trigger, never by a writer.';
+
+CREATE FUNCTION agent_run_event_set_framed() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  NEW.framed := NOT (
+    NEW.kind = 'stage' AND EXISTS (
+      SELECT 1 FROM agent_run_event p
+       WHERE p.workspace_id = NEW.workspace_id AND p.run_id = NEW.run_id
+         AND p.kind = 'stage' AND p.framed
+         AND p.created_at > NEW.created_at - interval '2 seconds')
+  );
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER agent_run_event_set_framed_trg
+  BEFORE INSERT ON agent_run_event
+  FOR EACH ROW EXECUTE FUNCTION agent_run_event_set_framed();
 
 CREATE FUNCTION agent_run_event_emit_frame() RETURNS trigger
 LANGUAGE plpgsql
@@ -27,11 +56,7 @@ DECLARE
   v_channel uuid;
   v_topic   text;
 BEGIN
-  IF NEW.kind = 'stage' AND EXISTS (
-       SELECT 1 FROM agent_run_event p
-        WHERE p.workspace_id = NEW.workspace_id AND p.run_id = NEW.run_id
-          AND p.kind = 'stage' AND p.seq < NEW.seq
-          AND p.created_at > NEW.created_at - interval '2 seconds') THEN
+  IF NOT NEW.framed THEN
     RETURN NEW;
   END IF;
 
@@ -74,7 +99,7 @@ CREATE TRIGGER agent_run_event_emit_frame_trg
   FOR EACH ROW EXECUTE FUNCTION agent_run_event_emit_frame();
 
 COMMENT ON FUNCTION agent_run_event_emit_frame() IS
-  'ADR-0200 D2 (#3744): one thin agent.run.event frame per ledger row (stage rows coalesced to 1 per 2 s per run), same tx, via the outbox. No stage text, no sequence.';
+  'ADR-0200 D2 (#3744): one thin agent.run.event frame per framed ledger row (stage rows rate-limited to 1 per 2 s per run against the last framed one), same tx, via the outbox. No stage text, no sequence.';
 
 -- retention scan: finished runs, oldest first
 CREATE INDEX agent_run_finished_at_idx

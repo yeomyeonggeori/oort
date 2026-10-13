@@ -70,8 +70,8 @@ pub use relay::{
     ClaimedRow, NOTIFY_CHANNEL,
 };
 pub use stalled::{
-    lock_stalled_hosted_runs_in_tx, workspaces_with_stalled_hosted_runs, StallKind, StallPolicy,
-    StalledRun,
+    lock_stalled_hosted_runs_in_tx, pending_job_has_live_lease_in_tx,
+    workspaces_with_stalled_hosted_runs, StallKind, StallPolicy, StalledRun,
 };
 pub use webhook::{
     claim_webhook_delivery_batch, mark_done_in_tx, mark_failed_in_tx, requeue_in_tx,

@@ -11785,14 +11785,20 @@ async fn frames_3744(pool: &PgPool, fixture: &Fixture, run: Uuid) -> Vec<Value> 
 /// left alone; the ended run's job is retired so a late agent finds a settled run, not a
 /// resurrected one; the channel gets one line and the audit log one row.
 ///
-/// Tamper table:
+/// Tamper table (each applied and seen red):
 ///   * drop the `r.updated_at` staleness condition        -> the run with a recent report is ended
-///   * drop the `lease_expires_at < now() - grace` term   -> the 1-hour-stale run is ended
-///   * drop `FOR UPDATE OF r SKIP LOCKED`                  -> (concurrency, covered by the lock-order test)
-///   * drop `agent_run_event_is_hosted`                    -> the managed agent's run is ended
-///   * allow `awaiting_approval` in `end_stalled_run_in_tx`-> the parked run is ended
-///   * do not retire the job                               -> the late renew/event on the old handle succeeds
-///   * drop the unclaimed term                             -> the 25-hour queued run stays queued
+///   * drop the `lease_expires_at < now() - grace` term   -> the run whose lease expired 1 h ago
+///     but that has been silent 3 h is ended
+///   * drop the job-less branch (`j.id IS NULL`)          -> the disconnect-orphaned run and the
+///     ten-day-old ghost are not ended
+///   * let `awaiting_approval` through BOTH the candidate filter and `end_stalled_run_in_tx`
+///     (either alone is caught by the other: two guards on purpose)
+///                                                         -> the parked run (given a dead job) is ended
+///   * do not retire the job                              -> a pending job survives the ended run
+///   * drop the unclaimed term                            -> the 25-hour queued run stays queued
+///   * key the notice by the run id                       -> the notice looks like the run's answer
+/// Not covered here (deterministic only with an injected pause): the sweep-vs-reclaim race;
+/// its second line of defence is `pending_job_has_live_lease_in_tx`, asserted above.
 #[tokio::test]
 #[ignore = "needs verifier-owned isolated PostgreSQL 18"]
 async fn a_run_whose_agent_went_quiet_is_ended_with_a_closed_code_and_nothing_else_is() {
@@ -11804,6 +11810,16 @@ async fn a_run_whose_agent_went_quiet_is_ended_with_a_closed_code_and_nothing_el
     let base = start_server(app, true).await;
     let client = reqwest::Client::new();
     let policy = momo_outbox::StallPolicy::default();
+    // The sweep is cross-tenant by design and this database outlives a test run: settle the
+    // ghosts earlier runs left in OTHER workspaces so the counts below are this test's own.
+    sqlx::query(
+        "UPDATE agent_run SET status='cancelled', finished_at=now() \
+          WHERE status IN ('queued','running') AND workspace_id <> $1",
+    )
+    .bind(fixture.workspace)
+    .execute(&su)
+    .await
+    .unwrap();
 
     // --- the run that goes quiet -----------------------------------------
     mention_3740(&client, &base, &su, &fixture, fixture.hosted_agent).await;
@@ -11845,6 +11861,21 @@ async fn a_run_whose_agent_went_quiet_is_ended_with_a_closed_code_and_nothing_el
         0,
         "{stats:?}"
     );
+
+    // the re-check the sweep makes under the run lock: a LIVE lease is seen as live…
+    {
+        let mut connection = su.acquire().await.unwrap();
+        assert!(
+            momo_outbox::pending_job_has_live_lease_in_tx(
+                &mut connection,
+                fixture.workspace,
+                quiet
+            )
+            .await
+            .unwrap(),
+            "a freshly claimed job holds a live lease"
+        );
+    }
 
     // stale for 1 hour only: inside the 2-hour grace
     age_run_3744(&su, &fixture, quiet, 1).await;
@@ -11984,13 +12015,93 @@ async fn a_run_whose_agent_went_quiet_is_ended_with_a_closed_code_and_nothing_el
     .await
     .unwrap();
 
+    // runs whose delivery job was settled by a disconnect (the commonest ghost): no pending
+    // job means no agent can ever report on them. Fresh one survives, silent one is ended.
+    let mut suppressed = Vec::new();
+    for hours_silent in [0_i32, 3] {
+        let id: Uuid = sqlx::query_scalar(
+            "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, updated_at) \
+             VALUES ($1,$2,$3,'running', now() - make_interval(hours => $4)) RETURNING id",
+        )
+        .bind(fixture.workspace)
+        .bind(fixture.hosted_agent)
+        .bind(fixture.channel)
+        .bind(hours_silent)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO outbox(workspace_id,kind,status,method,payload,partition_key,processed_at) \
+             VALUES ($1,'agent_job','done','gateway',$2,$3, now())",
+        )
+        .bind(fixture.workspace)
+        .bind(json!({
+            "agent_member_id": fixture.hosted_agent.to_string(),
+            "run_id": id.to_string(),
+            "channel_id": fixture.channel.to_string(),
+        }))
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+        suppressed.push(id);
+    }
+    // a run silent for ten days: ended, but without a channel line (the first sweep after a
+    // deploy must not light up old channels with weeks-old notices)
+    let ancient: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, created_at, updated_at) \
+         VALUES ($1,$2,$3,'running', now() - interval '12 days', now() - interval '10 days') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+
     // --- now the quiet run really goes quiet --------------------------------
     age_run_3744(&su, &fixture, quiet, 3).await;
+    {
+        let mut connection = su.acquire().await.unwrap();
+        assert!(
+            !momo_outbox::pending_job_has_live_lease_in_tx(
+                &mut connection,
+                fixture.workspace,
+                quiet
+            )
+            .await
+            .unwrap(),
+            "…and an expired one is not"
+        );
+    }
     let stats = momo_notifier::run_stall_sweep::sweep_stalled_runs(&notifier, policy, 50)
         .await
         .unwrap();
-    assert_eq!(stats.lease_abandoned, 1, "{stats:?}");
+    assert_eq!(
+        stats.lease_abandoned, 3,
+        "the quiet run, the silent run with no delivery job, the ten-day-old one: {stats:?}"
+    );
     assert_eq!(stats.unclaimed_expired, 1, "{stats:?}");
+    assert_eq!(
+        run_status_3744(&su, suppressed[1]).await,
+        ("timed_out".to_string(), Some("lease_abandoned".to_string())),
+        "a run whose job a disconnect settled is ended when it has been silent"
+    );
+    assert_eq!(
+        run_status_3744(&su, suppressed[0]).await.0,
+        "running",
+        "…but not while it is fresh"
+    );
+    assert_eq!(run_status_3744(&su, ancient).await.0, "timed_out");
+    let ancient_lines: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE workspace_id=$1 AND run_id=$2 AND type='system'",
+    )
+    .bind(fixture.workspace)
+    .bind(ancient)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(ancient_lines, 0, "an ancient ghost is ended quietly");
 
     assert_eq!(
         run_status_3744(&su, quiet).await,
@@ -12029,6 +12140,18 @@ async fn a_run_whose_agent_went_quiet_is_ended_with_a_closed_code_and_nothing_el
     .unwrap();
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert_eq!(lines[0].1["code"], json!("lease_abandoned"));
+    let keyed_by_run: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE workspace_id=$1 AND client_msg_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(quiet)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        keyed_by_run, 0,
+        "the notice must not look like the run's ANSWER (client_msg_id = run id) to the push judgment"
+    );
     let audits: Vec<(Option<Uuid>, Value)> = sqlx::query_as(
         "SELECT actor_member_id, detail FROM audit_log WHERE workspace_id=$1 AND action='agent.run.stalled' \
           AND target_id = $2",
@@ -12271,4 +12394,60 @@ async fn a_finished_runs_ledger_is_kept_thirty_days_and_a_running_one_never_expi
             .await
             .unwrap();
     assert_eq!(again.deleted, 0);
+}
+
+/// RED PROOF (S5 review M-1). A steady stage stream keeps framing every two seconds — the
+/// rate limit is against the last FRAMED stage row, not the last stage row, so it does not
+/// fall silent after the first frame.
+///
+/// Tamper table:
+///   * compare against the last stage row instead of the last framed one -> the third row
+///     (2.2 s after the first) is not framed
+///   * drop the rate limit                                                -> the second row is framed
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_steady_stage_stream_keeps_framing_every_two_seconds() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su).await;
+    let run: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+         VALUES ($1,$2,$3,'queued') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    for (n, pause_ms) in [(1, 0_u64), (2, 1100), (3, 1100)] {
+        tokio::time::sleep(std::time::Duration::from_millis(pause_ms)).await;
+        sqlx::query("SELECT agent_run_event_append($1,$2,'stage',$3,NULL,NULL,$4)")
+            .bind(fixture.workspace)
+            .bind(run)
+            .bind(format!("단계 {n}"))
+            .bind(fixture.hosted_agent)
+            .execute(&su)
+            .await
+            .unwrap();
+    }
+    let framed: Vec<bool> = sqlx::query_scalar(
+        "SELECT framed FROM agent_run_event WHERE workspace_id=$1 AND run_id=$2 AND kind='stage' ORDER BY seq",
+    )
+    .bind(fixture.workspace)
+    .bind(run)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        framed,
+        [true, false, true],
+        "1st framed; 2nd (1.1 s later) not; 3rd (2.2 s after the 1st) framed"
+    );
+    let frame_kinds: Vec<Value> = frames_3744(&su, &fixture, run).await;
+    let stage_frames = frame_kinds
+        .iter()
+        .filter(|frame| frame["payload"]["kind"] == json!("stage"))
+        .count();
+    assert_eq!(stage_frames, 2);
 }

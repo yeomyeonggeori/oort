@@ -33,9 +33,9 @@ use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError, PgConnection, PgPool};
 use momo_messaging::{send_message_in_tx, MessageType, NewMessage};
 use momo_outbox::{
-    emit_outbox, lock_stalled_hosted_runs_in_tx,
+    emit_outbox, lock_stalled_hosted_runs_in_tx, pending_job_has_live_lease_in_tx,
     retire_pending_agent_jobs_for_run_with_reason_in_tx, workspaces_with_stalled_hosted_runs,
-    OutboxKind, StallKind, StallPolicy, RUN_STALLED_JOB_LAST_ERROR,
+    OutboxKind, StallKind, StallPolicy, StalledRun, RUN_STALLED_JOB_LAST_ERROR,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -112,38 +112,88 @@ async fn sweep_workspace_in_tx(
         .map_err(DbError::from)?;
     let (mut abandoned, mut unclaimed) = (0usize, 0usize);
     for run in stalled {
-        if !end_stalled_run_in_tx(&mut *conn, run.run_id, run.kind.code()).await? {
-            continue;
+        // One SAVEPOINT per run: a run whose line or audit row cannot be written must not
+        // roll back (and, tick after tick, block) the others in this workspace.
+        let mut savepoint = momo_db::sqlx::Connection::begin(&mut *conn).await?;
+        match settle_stalled_run_in_tx(&mut savepoint, workspace_id, &run).await {
+            Ok(true) => {
+                savepoint.commit().await?;
+                match run.kind {
+                    StallKind::LeaseAbandoned => abandoned += 1,
+                    StallKind::UnclaimedExpired => unclaimed += 1,
+                }
+            }
+            Ok(false) => {
+                savepoint.rollback().await?;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    workspace_id = %workspace_id,
+                    run_id = %run.run_id,
+                    error = %error,
+                    "run stall sweep could not settle one run"
+                );
+                savepoint.rollback().await?;
+            }
         }
-        retire_pending_agent_jobs_for_run_with_reason_in_tx(
+    }
+    Ok((abandoned, unclaimed))
+}
+
+/// A run silent for longer than this is ended without the channel line: the first sweep
+/// after a deploy finds every ghost the system ever accumulated, and an old channel must
+/// not light up with weeks-old "the agent did not respond" notices.
+const QUIET_AFTER_DAYS: i64 = 7;
+
+/// End one stalled run. `Ok(false)` = the run turned out not to be stalled after all.
+async fn settle_stalled_run_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run: &StalledRun,
+) -> Result<bool, DbError> {
+    // The candidate read is a snapshot, and a claim locks the job row, never the run: an agent
+    // that re-claimed between the snapshot and our run lock holds a live lease now. Lock the
+    // job rows and look again before ending anything.
+    if pending_job_has_live_lease_in_tx(&mut *conn, workspace_id, run.run_id)
+        .await
+        .map_err(DbError::from)?
+    {
+        return Ok(false);
+    }
+    if !end_stalled_run_in_tx(&mut *conn, run.run_id, run.kind.code()).await? {
+        return Ok(false);
+    }
+    retire_pending_agent_jobs_for_run_with_reason_in_tx(
+        &mut *conn,
+        workspace_id,
+        run.run_id,
+        RUN_STALLED_JOB_LAST_ERROR,
+    )
+    .await
+    .map_err(DbError::from)?;
+
+    let now = chrono::Utc::now();
+    let ancient = now - run.last_activity_at > chrono::Duration::days(QUIET_AFTER_DAYS);
+    if let Some(frame) = momo_agent::terminal_agent_status_payload(
+        workspace_id,
+        run.channel_id,
+        run.agent_member_id,
+        run.run_id,
+        RunStatus::TimedOut,
+        now.timestamp_millis(),
+    ) {
+        emit_outbox(
             &mut *conn,
             workspace_id,
-            run.run_id,
-            RUN_STALLED_JOB_LAST_ERROR,
+            OutboxKind::Broadcast,
+            "publish",
+            &frame,
+            Some(run.channel_id),
         )
-        .await
-        .map_err(DbError::from)?;
+        .await?;
+    }
 
-        let now = chrono::Utc::now();
-        if let Some(frame) = momo_agent::terminal_agent_status_payload(
-            workspace_id,
-            run.channel_id,
-            run.agent_member_id,
-            run.run_id,
-            RunStatus::TimedOut,
-            now.timestamp_millis(),
-        ) {
-            emit_outbox(
-                &mut *conn,
-                workspace_id,
-                OutboxKind::Broadcast,
-                "publish",
-                &frame,
-                Some(run.channel_id),
-            )
-            .await?;
-        }
-
+    if !ancient {
         let line = match run.kind {
             StallKind::LeaseAbandoned => LINE_LEASE_ABANDONED,
             StallKind::UnclaimedExpired => LINE_UNCLAIMED_EXPIRED,
@@ -163,33 +213,30 @@ async fn sweep_workspace_in_tx(
                 }),
                 root_id: None,
                 reply_to_id: None,
-                // One line per run: the run ends exactly once.
-                client_msg_id: Some(run.run_id),
+                // One line per run (the run ends exactly once). NOT the run id itself:
+                // the push judgment recognises a hosted run's ANSWER by
+                // `client_msg_id = run id`, and this notice is not an answer.
+                client_msg_id: Some(Uuid::new_v5(&run.run_id, b"agent_run_timed_out")),
                 run_id: Some(run.run_id),
                 hlc_ts: None,
                 hlc_count: None,
             },
         )
         .await?;
-
-        write_audit(
-            &mut *conn,
-            // No `.by(..)`: the clock ended this run, not a member.
-            &AuditEntry::new(workspace_id, "agent.run.stalled")
-                .about(run.agent_member_id)
-                .target("agent_run", run.run_id)
-                .run(run.run_id)
-                .with_schema(
-                    "momo.agent.run.stalled.v1",
-                    json!({"code": run.kind.code()}),
-                ),
-        )
-        .await?;
-
-        match run.kind {
-            StallKind::LeaseAbandoned => abandoned += 1,
-            StallKind::UnclaimedExpired => unclaimed += 1,
-        }
     }
-    Ok((abandoned, unclaimed))
+
+    write_audit(
+        &mut *conn,
+        // No `.by(..)`: the clock ended this run, not a member.
+        &AuditEntry::new(workspace_id, "agent.run.stalled")
+            .about(run.agent_member_id)
+            .target("agent_run", run.run_id)
+            .run(run.run_id)
+            .with_schema(
+                "momo.agent.run.stalled.v1",
+                json!({"code": run.kind.code(), "quiet": ancient}),
+            ),
+    )
+    .await?;
+    Ok(true)
 }
