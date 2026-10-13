@@ -39,11 +39,6 @@ const roster = [
     createdAtMs: 0, updatedAtMs: 0,
   },
 ];
-const UPDATE = {
-  version: "0.1.20", currentVersion: "0.1.19",
-  notes: "인박스 필터가 새로고침 뒤에도 유지돼요.\n단축키 설정이 카드로 바뀌었어요.",
-  publishedAt: "2026-10-07T09:00:00Z",
-};
 
 const failures = [];
 const report = { scenes: [], checks: [] };
@@ -102,43 +97,6 @@ async function installRealtime(page) {
     }
     window.WebSocket = CaptureSocket;
   });
-}
-
-async function installDesktop(page, cfg) {
-  await page.addInitScript(({ cfg, update }) => {
-    const callbacks = new Map();
-    let nextCallback = 1;
-    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
-    window.__TAURI_INTERNALS__ = {
-      metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main", windowLabel: "main" } },
-      transformCallback(callback) { const id = nextCallback++; callbacks.set(id, callback); return id; },
-      unregisterCallback(id) { callbacks.delete(id); },
-      convertFileSrc: (p) => p,
-      async invoke(cmd) {
-        if (cmd === "keychain_store_refresh_token") { window.__h = "shell:" + "c".repeat(32); return null; }
-        if (cmd === "keychain_refresh_token_handle") return window.__h ?? null;
-        if (cmd === "harness_profile_list") return [];
-        if (cmd === "work_host_status") return null;
-        if (cmd === "detect_local_harnesses") return { harnesses: [] };
-        if (cmd === "detect_hosted_agents") return [];
-        if (cmd === "keychain_available") return false;
-        if (cmd === "deep_link_take_pending") return [];
-        if (cmd === "app_version") return "0.1.19";
-        if (cmd === "notification_permission") return cfg.perm;
-        if (cmd === "updater_check") {
-          if (cfg.updater === "hang") return new Promise(() => {});
-          if (cfg.updater === "fail") throw new Error("Network Error: updater manifest unreachable");
-          return cfg.updater === "current" ? null : update;
-        }
-        if (cmd === "updater_install") {
-          if (cfg.install === "hang") return new Promise(() => {});
-          return null;
-        }
-        if (cmd.startsWith("plugin:event|")) return 1;
-        return null;
-      },
-    };
-  }, { cfg, update: UPDATE });
 }
 
 async function signIn(page, origin) {

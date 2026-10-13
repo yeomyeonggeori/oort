@@ -120,7 +120,7 @@ export function FontFamilyRows() {
           <p className="break-keep text-body text-ink">
             오늘 배포는 Friday 오후로 미뤘어요. QA 끝나면 release notes를 채널에 올려 줄래요?
           </p>
-          <code className="font-mono break-all text-meta text-ink">
+          <code className="font-mono break-all text-code text-ink">
             git switch -c fix/3774-font-picker && npm test
           </code>
         </div>
@@ -218,6 +218,7 @@ function FontField({
           aria-labelledby={`font-${kind}-label`}
           aria-describedby={problem ? `font-${kind}-hint ${errorId}` : `font-${kind}-hint`}
           aria-invalid={problem ? true : undefined}
+          className={problem ? "border-danger" : undefined}
           data-testid={`${testId}-input`}
           onChange={(event) => {
             const value = event.target.value;
@@ -228,7 +229,7 @@ function FontField({
           }}
         />
         <Button type="submit" size="sm" disabled={unchanged} data-testid={`${testId}-apply`}>
-          글꼴 적용
+          글꼴 적용하기
         </Button>
       </div>
       {problem ? (
