@@ -64,12 +64,13 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use chrono::Utc;
 use momo_agent::actions::{
-    action_by_id, action_ref, action_result_props, agent_rename_result_body,
-    channel_create_result_body, channel_create_result_rows, channel_member_add_result_body,
-    channel_member_add_rows, invite_result_body, invite_result_rows, last_attempt_patch,
-    result_client_msg_id, workspace_settings_result_body, ActionResult, ActionResultNext,
-    RequiredRole, ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED,
-    ACTION_TYPE_WORKSPACE_ACTION, AUDIT_ACTION_APPROVED, AUDIT_CHANNELS_GRANTED,
+    action_by_id, action_ref, action_result_props, agent_profile_update_result_body,
+    agent_rename_result_body, channel_create_result_body, channel_create_result_rows,
+    channel_member_add_result_body, channel_member_add_rows, invite_result_body,
+    invite_result_rows, last_attempt_patch, result_client_msg_id, workspace_settings_result_body,
+    ActionResult, ActionResultNext, RequiredRole, SecretDelivery, ACTION_APPROVED_AUDIT_SCHEMA,
+    ACTION_RESULT_EXECUTED, ACTION_TYPE_WORKSPACE_ACTION, AUDIT_ACTION_APPROVED,
+    AUDIT_AGENT_PROFILE_UPDATED, AUDIT_AGENT_PROFILE_UPDATED_SCHEMA, AUDIT_CHANNELS_GRANTED,
     AUDIT_CHANNELS_GRANTED_SCHEMA, AUDIT_CHANNEL_CREATED, AUDIT_CHANNEL_CREATED_SCHEMA,
     AUDIT_CHANNEL_MEMBER_ADDED, AUDIT_CHANNEL_MEMBER_ADDED_SCHEMA, AUDIT_MEMBER_RENAMED,
     AUDIT_MEMBER_RENAMED_SCHEMA, AUDIT_WORKSPACE_SETTING_UPDATED,
@@ -96,10 +97,10 @@ use momo_auth::{
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
 use momo_messaging::{
-    add_channel_member_in_tx, cent_channel, create_channel_detailed_in_tx,
+    add_channel_member_in_tx, apply_agent_card_in_tx, cent_channel, create_channel_detailed_in_tx,
     emit_message_edited_in_tx, normalize_channel_kind, patch_and_prune_message_props_in_tx,
-    patch_message_props_in_tx, rename_agent_display_name_in_tx, send_message_in_tx, MessageType,
-    NewChannel, NewMessage,
+    patch_message_props_in_tx, rename_agent_display_name_in_tx, send_message_in_tx, AgentCard,
+    AgentCardPatch, CardStatusPatch, FieldPatch, MessageType, NewChannel, NewMessage,
 };
 use momo_outbox::{emit_outbox, OutboxKind, RESUME_APPROVAL_JOB_METHOD};
 use momo_settings::{
@@ -118,8 +119,9 @@ use crate::dto::{
 use crate::error::ApiError;
 use crate::realtime_advert::derive_same_origin_http_base;
 use crate::routes::actions::{
-    resolve_action_in_tx, ActionArgs, GateSubject, ResolvedAgentTarget, ResolvedChannel,
-    ResolvedConnection, ResolvedMember, SettingPatch, SettingsBefore,
+    profile_changes, resolve_action_in_tx, ActionArgs, GateSubject, ResolvedAgentTarget,
+    ResolvedChannel, ResolvedConnection, ResolvedMember, SettingPatch, SettingsBefore,
+    StatusIntent,
 };
 use crate::routes::agents::require_profile_editor_in_tx;
 use crate::routes::invites::require_admin;
@@ -153,6 +155,9 @@ const HUMAN_PRINCIPAL_REQUIRED: &str = "human_principal_required";
 /// back exactly as it must, and [`decide`] recognises the sentinel and answers
 /// the receipt-shaped 409 the clients already decode.
 const RUN_NOT_PARKED: &str = "run_not_parked";
+/// `deliverSecretToAgent: true` on a decision that cannot honour it (ADR-0186
+/// 증보 v3 V3-3a). 400, and the approval is not consumed.
+const DELIVER_SECRET_NOT_SUPPORTED: &str = "deliver_secret_not_supported";
 
 /// The sentinel itself. Namespaced and versioned so it cannot collide with a
 /// genuine `sqlx::Error::Protocol` message from the driver.
@@ -366,6 +371,7 @@ async fn decide(
     let claude_subscription_agents_enabled =
         state.agent_port.config.claude_subscription_agents_enabled;
     let operator_scope = has_platform_read_scope(&principal);
+    let deliver_secret_to_agent = request.deliver_secret_to_agent == Some(true);
 
     let outcome: DbRejectable<Decision> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
@@ -384,6 +390,7 @@ async fn decide(
                     public_origin: public_origin.as_deref(),
                     claude_subscription_agents_enabled,
                     operator_scope,
+                    deliver_secret_to_agent,
                 },
             )
             .await
@@ -460,6 +467,34 @@ struct DecisionInput<'a> {
     /// two ways to satisfy `RequiredRole::WorkspaceOperator`
     /// (`routes::shared::has_platform_read_scope`).
     operator_scope: bool,
+    /// `deliverSecretToAgent` as sent. Only `Some(true)` matters.
+    deliver_secret_to_agent: bool,
+}
+
+/// Whether the action a `workspace_action` payload names offers its one-time
+/// value to the proposing agent **at the approver's choice**
+/// (`SecretDelivery::OptIn`). An unknown or missing id is `false`, so the early
+/// guard refuses.
+fn payload_offers_opt_in_delivery(payload: &Value) -> bool {
+    payload
+        .get("action")
+        .and_then(|action| action.get("id"))
+        .and_then(Value::as_str)
+        .and_then(action_by_id)
+        .is_some_and(|action| action.secret_delivery == SecretDelivery::OptIn)
+}
+
+/// The early `deliverSecretToAgent` guard as a pure function (so its whole truth
+/// table is measurable, including the `OptIn` row no action occupies yet): a
+/// `true` is honoured only when **approving** a **workspace action** whose
+/// registry entry offers `OptIn` delivery (`offers_opt_in`).
+fn deliver_flag_refused(
+    deliver_requested: bool,
+    action_type: &str,
+    approve: bool,
+    offers_opt_in: bool,
+) -> bool {
+    deliver_requested && !(action_type == ACTION_TYPE_WORKSPACE_ACTION && approve && offers_opt_in)
 }
 
 async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRejectable<Decision> {
@@ -545,6 +580,28 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
             "forbidden",
             "not a member of this approval channel",
             StatusCode::FORBIDDEN,
+            now,
+        )));
+    }
+
+    // **`deliverSecretToAgent` is only meaningful on the approve half of a
+    // workspace action** (ADR-0186 증보 v3 V3-3a). Anywhere else it is a
+    // malformed request. Judged straight after the membership gate and *before*
+    // the status and expiry arms, so it can never be outranked by an expiry
+    // settlement (which writes) — a security review (#3795) caught the first
+    // draft placing it after that arm.
+    if deliver_flag_refused(
+        input.deliver_secret_to_agent,
+        &approval.action_type,
+        input.approve,
+        payload_offers_opt_in_delivery(&approval.payload),
+    ) {
+        return Ok(Ok(refusal(
+            approval.id,
+            input.member_id,
+            DELIVER_SECRET_NOT_SUPPORTED,
+            "deliverSecretToAgent applies only to approving a workspace action",
+            StatusCode::BAD_REQUEST,
             now,
         )));
     }
@@ -1143,6 +1200,12 @@ async fn execute_workspace_action(
         )));
     };
 
+    // `deliverSecretToAgent` was already judged against this very action by the
+    // early guard in `decide_in_tx` (`deliver_flag_refused`), which runs before the
+    // expiry arm; a second copy here could never disagree with it, so there is
+    // none. The slice that first gives an action `SecretDelivery::OptIn` adds the
+    // honoured path *here*, with its own test.
+
     // The stored `args` are re-run through the **same** resolver the proposal
     // passed (`routes::actions::resolve_action_in_tx`), for the reason ADR-0186
     // D2 gives: 「저장값을 신뢰하지 않는다」. The card may be an hour old, the
@@ -1281,6 +1344,38 @@ async fn execute_workspace_action(
         },
         ActionArgs::AgentRename { target: None, .. } => {
             return Err(protocol_error("agent.rename resolved without a target"));
+        }
+        ActionArgs::AgentProfileUpdate {
+            display_name,
+            tagline,
+            role_label,
+            status,
+            target: Some(target),
+            before: Some(before),
+            ..
+        } => match execute_agent_profile_update(
+            conn,
+            approval,
+            input,
+            now,
+            AgentProfileChange {
+                display_name,
+                tagline,
+                role_label,
+                status,
+            },
+            target,
+            before,
+        )
+        .await?
+        {
+            Execution::Ran(executed) => executed,
+            Execution::Refused(decision) => return Ok(Ok(decision)),
+        },
+        ActionArgs::AgentProfileUpdate { .. } => {
+            return Err(protocol_error(
+                "agent.profile.update resolved without a target",
+            ));
         }
         ActionArgs::ChannelMemberAdd {
             channel: Some(channel),
@@ -1917,6 +2012,144 @@ async fn execute_agent_rename(
             &applied.previous_display_name,
             &target.handle,
             &applied.member.display_name,
+        ),
+        secret_once: None,
+        next: None,
+    }))
+}
+
+/// The card fields one `agent.profile.update` carries, as the resolver typed them.
+struct AgentProfileChange<'a> {
+    display_name: &'a Option<String>,
+    tagline: &'a FieldPatch,
+    role_label: &'a FieldPatch,
+    status: &'a StatusIntent,
+}
+
+/// `agent.profile.update` (증보 v3 V3-2): the name through the one rename write,
+/// the rest through the card write, in one transaction and as the approver.
+async fn execute_agent_profile_update(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    change: AgentProfileChange<'_>,
+    target: &ResolvedAgentTarget,
+    before: &AgentCard,
+) -> Result<Execution, momo_db::DbError> {
+    // The very diff the card showed (the pins proved `before` is still current).
+    let changes = profile_changes(
+        &target.current_display_name,
+        before,
+        change.display_name,
+        change.tagline,
+        change.role_label,
+        change.status,
+    );
+    if changes.is_empty() {
+        return Err(protocol_error("agent.profile.update changes nothing"));
+    }
+    let via_agent = approval.requested_by.to_string();
+    let mut audits = Vec::new();
+    let mut new_name = target.current_display_name.clone();
+
+    if let Some(name) = change.display_name {
+        if name != &target.current_display_name {
+            let applied =
+                rename_agent_display_name_in_tx(conn, input.workspace_id, target.id, name)
+                    .await?
+                    .ok_or_else(|| {
+                        protocol_error("the profile target is no longer a live agent")
+                    })?;
+            new_name = applied.member.display_name.clone();
+            let mut detail = json!({
+                "old": applied.previous_display_name,
+                "new": applied.member.display_name,
+                "kind": "agent",
+                "via_agent": via_agent,
+                "approval_id": approval.id.to_string(),
+                "managed": target.managed,
+            });
+            if target.managed {
+                if let Some(object) = detail.as_object_mut() {
+                    object.insert("target_agent".into(), json!(target.id.to_string()));
+                }
+            }
+            audits.push(
+                AuditEntry::new(input.workspace_id, AUDIT_MEMBER_RENAMED)
+                    .by(input.member_id)
+                    .about(target.id)
+                    .target("member", target.id)
+                    .via_token(input.via_token_id)
+                    .run(approval.run_id)
+                    .with_schema(AUDIT_MEMBER_RENAMED_SCHEMA, detail),
+            );
+        }
+    }
+
+    let patch = AgentCardPatch {
+        tagline: change.tagline.clone(),
+        role_label: change.role_label.clone(),
+        status: match change.status {
+            StatusIntent::Unchanged => CardStatusPatch::Unchanged,
+            StatusIntent::Clear => CardStatusPatch::Clear,
+            StatusIntent::Set { emoji, text, hours } => CardStatusPatch::Set {
+                emoji: emoji.clone(),
+                text: text.clone(),
+                expires_at: now + chrono::Duration::hours(*hours),
+            },
+        },
+    };
+    apply_agent_card_in_tx(conn, input.workspace_id, target.id, &patch)
+        .await?
+        .ok_or_else(|| protocol_error("the profile target is no longer a live agent"))?;
+
+    // Field **names** only: tagline and status are user-facing prose and never
+    // belong in an audit row (the card keeps the old/new for the approver).
+    let labels: Vec<&str> = changes.iter().map(|(label, _, _)| *label).collect();
+    let keys: Vec<&str> = labels
+        .iter()
+        .map(|label| match *label {
+            "이름" => "displayName",
+            "소개" => "tagline",
+            "역할 라벨" => "roleLabel",
+            _ => "status",
+        })
+        .collect();
+    let mut detail = json!({
+        "fields": keys,
+        "via_agent": via_agent,
+        "approval_id": approval.id.to_string(),
+        "managed": target.managed,
+    });
+    if target.managed {
+        if let Some(object) = detail.as_object_mut() {
+            object.insert("target_agent".into(), json!(target.id.to_string()));
+            object.insert(
+                "owner_member_id".into(),
+                json!(target.owner_member_id.map(|owner| owner.to_string())),
+            );
+        }
+    }
+    audits.push(
+        AuditEntry::new(input.workspace_id, AUDIT_AGENT_PROFILE_UPDATED)
+            .by(input.member_id)
+            .about(target.id)
+            .target("member", target.id)
+            .via_token(input.via_token_id)
+            .run(approval.run_id)
+            .with_schema(AUDIT_AGENT_PROFILE_UPDATED_SCHEMA, detail),
+    );
+
+    Ok(Execution::Ran(Executed {
+        audits,
+        ref_type: REF_TYPE_AGENT,
+        ref_id: target.id,
+        result_body: agent_profile_update_result_body(&labels),
+        result_rows: momo_agent::actions::agent_profile_update_rows(
+            &new_name,
+            &target.handle,
+            &changes,
         ),
         secret_once: None,
         next: None,
@@ -2589,6 +2822,41 @@ fn refusal(
 mod tests {
     use super::*;
 
+    /// `deliverSecretToAgent` truth table (ADR-0186 증보 v3, security review of
+    /// #3795): honoured only when approving a workspace action that offers
+    /// opt-in delivery — every other cell is a refusal. The `offers_opt_in` row
+    /// is exercised here because no registry action occupies it yet.
+    #[test]
+    fn the_deliver_flag_is_honoured_in_exactly_one_cell() {
+        for action_type in [ACTION_TYPE_WORKSPACE_ACTION, "tool_call"] {
+            for approve in [true, false] {
+                for offers in [true, false] {
+                    let honoured = !deliver_flag_refused(true, action_type, approve, offers);
+                    assert_eq!(
+                        honoured,
+                        action_type == ACTION_TYPE_WORKSPACE_ACTION && approve && offers,
+                        "{action_type} approve={approve} offers={offers}"
+                    );
+                    // Not asking is never a refusal.
+                    assert!(!deliver_flag_refused(false, action_type, approve, offers));
+                }
+            }
+        }
+    }
+
+    /// No registry action opts in during P0, so the payload reader says no for
+    /// every real, unknown and absent id.
+    #[test]
+    fn nothing_offers_opt_in_delivery_in_p0() {
+        for payload in [
+            json!({"action": {"id": "invite.create"}}),
+            json!({"action": {"id": "no.such.action"}}),
+            json!({}),
+        ] {
+            assert!(!payload_offers_opt_in_delivery(&payload), "{payload}");
+        }
+    }
+
     /// The refusal body must decode as the receipt the client expects, or a 409
     /// would reach the phone as an unparseable success shape.
     #[test]
@@ -2826,6 +3094,7 @@ mod tests {
             public_origin: None,
             claude_subscription_agents_enabled: false,
             operator_scope: false,
+            deliver_secret_to_agent: false,
         }
     }
 
