@@ -256,12 +256,14 @@ function PanelHeader({
                 liveness === "live" &&
                 turnState === "queued" &&
                 "border border-line-strong text-ink-muted",
-              // 「신호 소실」은 서버가 알렸을 때만, 「조용함」은 서버가 모르는 run일
-              // 때만 경고색이다.
+              // 「신호 소실」(서버가 알렸을 때만)과 「조용함」(서버가 모르는 run일 때만)은
+              // 사람이 할 일이 아니라 끝난 일·모르는 일의 사실이다. 경고색은 「승인
+              // 대기」처럼 사람의 행동을 부르는 낱말의 색이라 쓰지 않는다
+              // (design-review U1 M-1).
               railLive &&
                 ((server !== null && isSignalLostByServer(server)) ||
                   liveness === "quiet") &&
-                "border border-warn text-warn"
+                "border border-line-strong text-ink-muted"
             )}
             data-testid="agent-work-panel-state"
             data-state={liveness === "live" ? (turnState ?? log.state) : liveness}

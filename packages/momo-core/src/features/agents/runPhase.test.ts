@@ -120,7 +120,7 @@ describe("상태 어휘: 대기 n번째 / 가져감 / 진행 / 승인 대기 / �
     expect(label({ phase: "queued", queuePosition: 2 })).toBe("대기 2번째");
     expect(label({ phase: "queued" })).toBe("대기 중");
     expect(label({ phase: "claimed", leaseState: "live" })).toBe("가져감");
-    expect(label({ phase: "running", leaseState: "live" })).toBe("진행 중");
+    expect(label({ phase: "running", leaseState: "live" })).toBe("작업 중");
     expect(label({ phase: "awaiting_approval" })).toBe("승인 대기");
     expect(label({ phase: "paused" })).toBe("일시 정지");
     expect(label({ phase: "succeeded" })).toBe("완료");

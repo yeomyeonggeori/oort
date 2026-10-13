@@ -147,7 +147,7 @@ export function isSignalLostByServer(facts: ServerRunFacts): boolean {
  *
  *   queued              대기 n번째 (순번이 없으면 대기 중)
  *   claimed             가져감
- *   running             진행 중
+ *   running             작업 중
  *   awaiting_approval   승인 대기
  *   paused              일시 정지
  *   끝                  완료 / 실패 / 취소됨 / 시간 초과, 서버가 소식 끊김으로
@@ -162,7 +162,10 @@ export function runPhaseLabel(facts: ServerRunFacts): string {
     case "claimed":
       return "가져감";
     case "running":
-      return "진행 중";
+      // 사이드바 알약·컴포저 줄이 이미 쓰는 「작업 중」과 같은 낱말이다. 같은
+      // 상태를 표면마다 다른 낱말로 부르면 사람이 둘을 다른 상태로 읽는다
+      // (design-review U1 M-3). 에이전트가 보고한 단계는 근거 줄이 말한다.
+      return "작업 중";
     case "awaiting_approval":
       return "승인 대기";
     case "paused":
