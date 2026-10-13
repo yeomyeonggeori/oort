@@ -13,6 +13,7 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {AgentLivenessLabel} from '../src/features/agents/AgentLivenessLabel';
+import {WorkingCard} from '../src/screens/SidebarScreen';
 import {AgentActivityBar} from '../src/features/agents/turnSurfaces';
 import {buildWorkingCard, workingStep} from '../src/features/home/workingCard';
 
@@ -197,6 +198,27 @@ describe('홈 카드: 서버가 말한 단계 그대로', () => {
     );
     expect(model?.detail).toBe('가져간 뒤 34분째 소식이 없어요');
     expect(model?.accessibilityLabel).not.toMatch(/신호 소실|끊/);
+  });
+});
+
+describe('홈 카드 본문', () => {
+  it('장소도 한 줄도 없을 때 「대화」 뒤에 근거 줄이 붙어 읽히지 않고 구분자가 선다', () => {
+    const model = buildWorkingCard({
+      signals: new Map([['x|y', signalOf({queuePosition: 2, aheadTotal: 1})]]),
+      nowMs: Date.now(),
+      directory: DIRECTORY,
+      channels: [],
+      selfMemberId: ME,
+      live: true,
+    });
+    expect(model?.place).toBeNull();
+    if (model === null) {
+      throw new Error('card');
+    }
+    render(<WorkingCard card={model} onPress={() => undefined} />);
+    expect(screen.getByTestId('home-working-line')).toHaveTextContent(
+      '대화 · 11분째 기다려요 · 에이전트 앞에 1건',
+    );
   });
 });
 

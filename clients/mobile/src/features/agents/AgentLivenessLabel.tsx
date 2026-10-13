@@ -56,7 +56,8 @@ export function AgentLivenessLabel({
         testID="agent-liveness-dot"
       />
       <Text
-        numberOfLines={1}
+        // 라벨은 낱말이 곧 사실이라 말줄임하면 뜻이 사라진다: 두 줄까지 연다.
+        numberOfLines={2}
         style={[styles.text, tone === 'warn' && styles.textWarn]}
         testID="agent-liveness-text">
         {view.text}
