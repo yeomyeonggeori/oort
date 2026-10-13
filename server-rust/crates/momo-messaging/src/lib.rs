@@ -47,6 +47,7 @@
 //! LiveKit receives only a short-lived room grant. The pgvector memory plane
 //! remains outside this crate.
 
+pub mod agent_avatar;
 pub mod agent_card;
 pub mod attachment;
 pub mod avatar_reclaim;
@@ -76,6 +77,15 @@ pub mod search;
 pub mod sidebar_prefs;
 pub mod workspace_avatar;
 
+pub use agent_avatar::{
+    apply_avatar_image_in_tx, clear_avatar_image_in_tx, delete_staged_avatar_image_in_tx,
+    process_avatar_image, purge_stale_staged_avatar_images_in_tx, read_avatar_image_bytes_in_tx,
+    read_avatar_image_in_tx, read_current_avatar_image_in_tx, stage_avatar_image_in_tx,
+    staged_image_matches_pin_in_tx, AgentAvatarBytes, AgentAvatarImage, AvatarImageRejected,
+    ProcessedAvatar, AGENT_AVATAR_DECODE_ALLOC_LIMIT, AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT,
+    AGENT_AVATAR_IN_MAX_BYTES_GENERATED, AGENT_AVATAR_OUT_MAX_BYTES, AGENT_AVATAR_OUT_MAX_DIM,
+    AGENT_AVATAR_SOURCES, AGENT_AVATAR_STAGED_TTL_HOURS,
+};
 pub use agent_card::{
     apply_agent_card_in_tx, read_agent_card_in_tx, AgentCard, AgentCardPatch, CardStatusPatch,
     FieldPatch,

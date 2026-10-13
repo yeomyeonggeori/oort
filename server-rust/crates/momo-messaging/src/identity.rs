@@ -610,7 +610,7 @@ pub async fn list_workspace_roster(
                 m.display_name, \
                 m.handle, \
                 m.avatar_url, \
-                m.avatar_media_id, \
+                COALESCE(m.avatar_media_id, m.avatar_image_id) AS avatar_media_id, \
                 wm.role::text AS role, \
                 COALESCE(cc.channel_count, 0) AS channel_count, \
                 COALESCE(ch.channel_ids, '{}'::uuid[]) AS channel_ids, \
