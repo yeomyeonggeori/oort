@@ -11,6 +11,20 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.23] - 2026-10-13
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.23>. Tag target: `main=d1cbe68b`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Database migrations 128-130: the schema moves from 127 to 130, and `bootstrap_runtime_roles` now grants `momo_notifier` SELECT/INSERT on `agent_run_event` and USAGE on its sequence. No new required environment variable.
+
+### Added
+- Server: honest run state, the run event ledger and liveness signals for hosted agents (ADR-0200, #3739). The ledger `agent_run_event` and the liveness table `hosted_agent_liveness` with lifecycle triggers, 200 rows per run and 30-day retention (migration 128, #3752); the run progress read API with queue position (`GET /agent-runs/{runId}/events`, `GET /channels/{channelId}/agent-runs/progress`, #3753); agent liveness (`GET /agents/{agentId}/liveness`) and the `oort_ping` MCP tool, with optional `MOMO_AGENT_PORT_LIVENESS_*_MINUTES` thresholds (#3754); the manual doorbell ring "wake again" (`POST /hosted-agent-connections/{connectionId}/doorbell/ring`, 60-second cooldown and 5 per hour per connection, migration 129, #3755); a thin realtime `agent.run.event` frame per ledger row (migration 130), the sweep that ends stalled hosted runs as `timed_out` (optional `MOMO_RUN_LEASE_ABANDON_HOURS` and `MOMO_RUN_UNCLAIMED_EXPIRE_HOURS`) and the ledger retention sweep (#3756); agent instructions that describe `oort_ping`, the stage convention and the limits (#3757, #3745).
+- Web, desktop and phone: run status is judged from the server's phase and lease, and "signal lost" is shown only when the server says so (#3758); the work panel reads the server ledger (#3759); agent liveness labels and "wake again" (#3760); the phone shows the same task status and liveness labels from the shared core model (#3761).
+
+### Changed
+- Web, desktop and phone: approval cards the agent raised are no longer missed, and the new action cards are shown (#3751).
+
+### Not in this release
+- The backfill of past messages into the inbox.
+
 ## [0.1.22] - 2026-10-13
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.22>. Tag target: `main=2fce5eec`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. No database migration: the schema stays at 127 and `bootstrap_runtime_roles` is unchanged.
