@@ -158,6 +158,7 @@ pub mod personal;
 pub mod provisioning;
 pub mod routing;
 pub mod run;
+pub mod run_event;
 pub mod status;
 pub mod subscription;
 pub mod subscription_transition;
@@ -286,6 +287,7 @@ pub use run::{
     CreatedRun, EligibleAgent, GatewayRunSnapshot, NewAgentRun, ParkedRun, RunBindingRejected,
     RunStatus, RunTrigger, WelcomeKind, TRIGGER_SUMMARY_LIMIT,
 };
+pub use run_event::{append_run_event_in_tx, AppendedRunEvent};
 pub use status::{
     agent_partial_payload, agent_partial_tool_call_payload, agent_status_channel,
     opening_agent_status_payload, progress_agent_status_payload, terminal_agent_status_payload,

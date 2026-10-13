@@ -10078,3 +10078,418 @@ async fn a_platform_operator_who_is_not_an_admin_may_approve_a_settings_update()
         json!({"guest": "손님"})
     );
 }
+
+// ---------------------------------------------------------------------------
+// (#3740 S1, ADR-0200 D2) the run event ledger
+// ---------------------------------------------------------------------------
+
+type LedgerRow = (i64, String, Option<String>, Option<String>, Option<Uuid>);
+
+async fn ledger_3740(pool: &PgPool, workspace: Uuid, run: Uuid) -> Vec<LedgerRow> {
+    sqlx::query_as(
+        "SELECT seq, kind, stage, code, actor_member_id FROM agent_run_event \
+          WHERE workspace_id=$1 AND run_id=$2 ORDER BY seq",
+    )
+    .bind(workspace)
+    .bind(run)
+    .fetch_all(pool)
+    .await
+    .expect("ledger rows")
+}
+
+fn kinds_3740(rows: &[LedgerRow]) -> Vec<&str> {
+    rows.iter().map(|row| row.1.as_str()).collect()
+}
+
+async fn mention_3740(
+    client: &reqwest::Client,
+    base: &str,
+    su: &PgPool,
+    fixture: &Fixture,
+    agent: Uuid,
+) {
+    let sent: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{} please answer", hosted_handle(su, agent).await)
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(sent["id"].is_string(), "{sent}");
+}
+
+/// RED PROOF (ADR-0200 D2, S1). A hosted mention run leaves exactly the rows the
+/// panel needs after it was closed — queued, claimed (with WHO), started, the
+/// stage markers (folded when repeated), the terminal — in one gapless per-run
+/// order. A managed agent's run in the same workspace writes nothing.
+///
+/// Tamper table (each edit must turn this test red):
+///   * drop the `claimed` append in `jobs_claim`             -> kinds lack `claimed`
+///   * drop the `Stage` append in `record_gateway_event_in_tx` -> kinds lack `stage`
+///   * drop the `hosted_lease` guard around that append        -> (managed run test below) ledger rows for a managed run
+///   * drop the fold in `agent_run_event_append`               -> the repeated stage adds a row
+///   * drop the hosted predicate in `agent_run_event_on_run`   -> the managed run writes `queued`
+///   * drop the AFTER INSERT/UPDATE agent_run triggers         -> no `queued`/`started`/`succeeded`
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_run_event_ledger_records_a_hosted_run_in_one_gapless_order() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    mention_3740(&client, &base, &su, &fixture, fixture.hosted_agent).await;
+    let run: Uuid =
+        sqlx::query_scalar("SELECT id FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2")
+            .bind(fixture.workspace)
+            .bind(fixture.hosted_agent)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(
+        kinds_3740(&ledger_3740(&su, fixture.workspace, run).await),
+        ["queued"],
+        "the run row is the first ledger row, written by the trigger"
+    );
+
+    let (status, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("handle")
+        .to_string();
+    let rows = ledger_3740(&su, fixture.workspace, run).await;
+    assert_eq!(kinds_3740(&rows), ["queued", "claimed"]);
+    assert_eq!(
+        rows[1].4,
+        Some(fixture.hosted_agent),
+        "`claimed` records WHICH agent took it"
+    );
+    let status_after_claim: String =
+        sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id=$1")
+            .bind(run)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(
+        status_after_claim, "queued",
+        "claim does not move agent_run.status — the ledger is where 'claimed' lives"
+    );
+
+    // A stage report starts the run and adds a marker; the same marker again
+    // (a different eventId) folds; a stage-less event adds nothing.
+    for (stage, expect_new) in [
+        (Some("채널 이름 확인"), true),
+        (Some("채널 이름 확인"), false),
+        (None, false),
+        (Some("승인 카드 제안"), true),
+    ] {
+        let mut arguments = json!({
+            "leaseHandle": handle,
+            "status": "running",
+            "eventId": Uuid::new_v4(),
+        });
+        if let Some(stage) = stage {
+            arguments["stage"] = json!(stage);
+        }
+        let before = ledger_3740(&su, fixture.workspace, run).await.len();
+        let (status, event) = call(
+            &client,
+            &base,
+            &fixture.hosted_bearer,
+            "oort_run_event",
+            arguments,
+        )
+        .await;
+        assert_eq!(status, 200, "{event}");
+        let after = ledger_3740(&su, fixture.workspace, run).await.len();
+        // the first event also writes `started` (a status transition)
+        let started = usize::from(before == 2);
+        assert_eq!(
+            after - before,
+            usize::from(expect_new) + started,
+            "stage {stage:?}"
+        );
+    }
+
+    // A rejected marker writes nothing at all.
+    let before = ledger_3740(&su, fixture.workspace, run).await.len();
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_event",
+        json!({"leaseHandle": handle, "status": "running", "stage": "a/b"}),
+    )
+    .await;
+    assert_eq!(status, 400);
+    assert_eq!(ledger_3740(&su, fixture.workspace, run).await.len(), before);
+
+    let (status, done) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_complete",
+        json!({"leaseHandle": handle, "status": "succeeded", "body": "done"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{done}");
+
+    let rows = ledger_3740(&su, fixture.workspace, run).await;
+    assert_eq!(
+        kinds_3740(&rows),
+        [
+            "queued",
+            "claimed",
+            "started",
+            "stage",
+            "stage",
+            "succeeded"
+        ]
+    );
+    assert_eq!(
+        rows.iter().map(|row| row.0).collect::<Vec<_>>(),
+        (1..=6).collect::<Vec<i64>>(),
+        "seq is gapless and commit-ordered per run"
+    );
+    assert_eq!(rows[3].2.as_deref(), Some("채널 이름 확인"));
+    assert_eq!(rows[4].2.as_deref(), Some("승인 카드 제안"));
+    assert!(rows
+        .iter()
+        .filter(|row| row.1 != "stage")
+        .all(|row| row.2.is_none()));
+
+    // The managed agent's run in the same workspace writes no ledger row.
+    mention_3740(&client, &base, &su, &fixture, fixture.managed_agent).await;
+    let managed_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM agent_run_event e JOIN agent_run r \
+           ON r.workspace_id=e.workspace_id AND r.id=e.run_id \
+          WHERE r.workspace_id=$1 AND r.agent_member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.managed_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let managed_runs: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.managed_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(managed_runs >= 1, "the managed mention produced a run");
+    assert_eq!(managed_rows, 0, "ADR-0200 D6: hosted agents only");
+}
+
+/// RED PROOF (ADR-0200 D2, S1). The approval and sweep paths are covered by the
+/// triggers, not by their callers: the notifier's own UPDATE (the approval
+/// expiry sweep's role) writes the rows; the stage cap never evicts a lifecycle
+/// row; and the table's own CHECKs refuse what the route validator would.
+///
+/// Tamper table:
+///   * drop `agent_run_event_approval_*` triggers   -> no approval_requested/approval_decided
+///   * drop the `code` extraction                   -> the timed_out row loses `approval_expired`
+///   * drop the notifier GRANT (bootstrap_runtime_roles.sql) -> the notifier UPDATE dies with permission denied
+///   * make the cap delete any kind (agent_run_event_trim) -> lifecycle rows vanish at 200
+///   * relax `agent_run_event_stage_ck`             -> the `a/b` insert succeeds
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_ledger_triggers_cover_the_sweep_and_the_cap_keeps_lifecycle_rows() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let notifier = momo_notifier_pool().await;
+    let fixture = seed(&su).await;
+
+    let run: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+         VALUES ($1,$2,$3,'queued') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let approval: Uuid = sqlx::query_scalar(
+        "INSERT INTO approval (workspace_id, run_id, channel_id, requested_by, action_type) \
+         VALUES ($1,$2,$3,$4,'workspace_action') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(run)
+    .bind(fixture.channel)
+    .bind(fixture.hosted_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE agent_run SET status='awaiting_approval' WHERE id=$1")
+        .bind(run)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // The expiry sweep runs as momo_notifier (BYPASSRLS, table-scoped grants):
+    // its UPDATEs fire the triggers, which must be able to append as that role.
+    let mut tx = notifier.begin().await.expect("notifier tx");
+    sqlx::query("UPDATE approval SET status='expired' WHERE id=$1")
+        .bind(approval)
+        .execute(&mut *tx)
+        .await
+        .expect("notifier may expire an approval and fire the ledger trigger");
+    sqlx::query("UPDATE agent_run SET status='timed_out', error=$2 WHERE id=$1")
+        .bind(run)
+        .bind(json!({"code": "approval_expired", "approval_id": approval.to_string()}))
+        .execute(&mut *tx)
+        .await
+        .expect("notifier may end the run and fire the ledger trigger");
+    tx.commit().await.unwrap();
+
+    let rows = ledger_3740(&su, fixture.workspace, run).await;
+    assert_eq!(
+        kinds_3740(&rows),
+        [
+            "queued",
+            "approval_requested",
+            "approval_decided",
+            "timed_out"
+        ]
+    );
+    assert_eq!(rows[2].3.as_deref(), Some("expired"));
+    assert_eq!(rows[3].3.as_deref(), Some("approval_expired"));
+    assert_eq!(rows[1].4, Some(fixture.hosted_agent), "who asked");
+
+    // The cap: 250 stages, 200 rows kept, every lifecycle row still there.
+    for n in 0..250 {
+        sqlx::query("SELECT agent_run_event_append($1,$2,'stage',$3,NULL,NULL,$4)")
+            .bind(fixture.workspace)
+            .bind(run)
+            .bind(format!("단계 {n}"))
+            .bind(fixture.hosted_agent)
+            .execute(&su)
+            .await
+            .unwrap();
+        sqlx::query("SELECT agent_run_event_trim($1,$2)")
+            .bind(fixture.workspace)
+            .bind(run)
+            .execute(&su)
+            .await
+            .unwrap();
+    }
+    let rows = ledger_3740(&su, fixture.workspace, run).await;
+    assert_eq!(rows.len(), 200);
+    assert_eq!(
+        rows.iter().filter(|row| row.1 != "stage").count(),
+        4,
+        "the cap evicts old stage rows only"
+    );
+    assert_eq!(
+        rows.last().unwrap().2.as_deref(),
+        Some("단계 249"),
+        "the newest marker is the one kept"
+    );
+
+    // The table refuses what the route validator would (defence in depth).
+    for (stage, code) in [
+        (Some("a/b"), None),
+        (Some("x"), Some("Bad Code")),
+        (None, None),
+    ] {
+        let result = sqlx::query(
+            "INSERT INTO agent_run_event (workspace_id, run_id, seq, kind, stage, code) \
+             VALUES ($1,$2,9999,$3,$4,$5)",
+        )
+        .bind(fixture.workspace)
+        .bind(run)
+        .bind("stage")
+        .bind(stage)
+        .bind(code)
+        .execute(&su)
+        .await;
+        assert!(result.is_err(), "{stage:?} {code:?} must be refused");
+    }
+}
+
+/// RED PROOF (ADR-0200 D2, S1). The ledger is tenant-isolated by RLS FORCE on
+/// the NOBYPASSRLS app role: no setting sees nothing, another tenant sees
+/// nothing, and a write for a workspace other than the bound one is refused.
+///
+/// Tamper table:
+///   * drop `FORCE ROW LEVEL SECURITY` or the policy -> another tenant reads rows
+///   * drop WITH CHECK                               -> the cross-tenant INSERT succeeds
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_run_event_ledger_is_tenant_isolated() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let other = seed(&su).await;
+    let run: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+         VALUES ($1,$2,$3,'queued') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+
+    let count_as = |ws: Uuid| {
+        let app = app.clone();
+        async move {
+            let mut tx = app.begin().await.unwrap();
+            sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+                .bind(ws.to_string())
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            let n: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_run_event")
+                .fetch_one(&mut *tx)
+                .await
+                .unwrap();
+            n
+        }
+    };
+    assert_eq!(count_as(fixture.workspace).await, 1);
+    assert_eq!(
+        count_as(other.workspace).await,
+        0,
+        "another tenant sees none"
+    );
+
+    let mut tx = app.begin().await.unwrap();
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(other.workspace.to_string())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let forged = sqlx::query("SELECT agent_run_event_append($1,$2,'stage','x',NULL,NULL,NULL)")
+        .bind(fixture.workspace)
+        .bind(run)
+        .execute(&mut *tx)
+        .await;
+    assert!(
+        forged.is_err(),
+        "an append for a workspace other than the bound one is refused"
+    );
+}

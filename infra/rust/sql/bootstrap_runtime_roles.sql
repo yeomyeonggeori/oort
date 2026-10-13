@@ -329,6 +329,14 @@ BEGIN
   IF to_regclass('public.agent_run') IS NOT NULL THEN
     GRANT SELECT, UPDATE ON TABLE agent_run TO momo_notifier;
   END IF;
+  -- ADR-0200 / #3740: the approval-expiry sweep's UPDATE of approval/agent_run fires
+  -- the run-event ledger triggers (migration 128, SECURITY INVOKER), which append to
+  -- agent_run_event as the writer. Without this the sweep would die with
+  -- `permission denied for table agent_run_event`. No UPDATE/DELETE: only the stage
+  -- cap (momo_app) deletes.
+  IF to_regclass('public.agent_run_event') IS NOT NULL THEN
+    GRANT SELECT, INSERT ON TABLE agent_run_event TO momo_notifier;
+  END IF;
   IF to_regclass('public.agent') IS NOT NULL THEN
     GRANT SELECT ON TABLE agent TO momo_notifier;
   END IF;

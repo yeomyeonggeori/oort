@@ -449,6 +449,19 @@ pub(crate) async fn record_gateway_event_in_tx(
     // must not move.
     if let Some(stage) = stage.as_deref().filter(|_| !run.status.is_terminal()) {
         record_stage_in_tx(conn, workspace_id, run_id, stage).await?;
+        // ADR-0200 D2: the same marker, with its time, in the run event ledger the
+        // panel reads after it was closed. Hosted (Agent Port) runs only — a managed
+        // or BYOA gateway keeps `output.stages` alone (ADR-0200 D6).
+        if hosted_lease {
+            momo_agent::append_run_event_in_tx(
+                conn,
+                workspace_id,
+                run_id,
+                momo_agent::AppendedRunEvent::Stage(stage),
+                run.agent_member_id,
+            )
+            .await?;
+        }
     }
 
     write_audit(
