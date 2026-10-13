@@ -184,7 +184,7 @@ export function runPhaseLabel(facts: ServerRunFacts): string {
 /**
  * 라벨 옆에 붙는 한 줄(근거). 서버가 알려 준 사실만 쓴다.
  *
- *   queued   「미수령 n분 · 에이전트 앞에 m건」
+ *   queued   「n분째 기다려요 · 에이전트 앞에 m건」
  *   claimed  「n분 전에 가져감」, lease가 만료됐으면 「가져간 뒤 n분째 소식이 없어요」
  *   running  「마지막 보고 n분 전」
  *   끝       종료 사유 문장
@@ -194,14 +194,19 @@ export function runPhaseLabel(facts: ServerRunFacts): string {
  */
 export function runPhaseDetail(
   facts: ServerRunFacts,
-  nowMs: number
+  nowMs: number,
+  options: { omitAhead?: boolean } = {}
 ): string | undefined {
   switch (facts.phase) {
     case "queued": {
       const parts: string[] = [];
       const waited = elapsedSpan(facts.queuedAtMs, nowMs);
-      if (waited !== undefined) parts.push(`미수령 ${waited}`);
-      if (facts.aheadTotal !== undefined && facts.aheadTotal > 0) {
+      if (waited !== undefined) parts.push(`${waited}째 기다려요`);
+      if (
+        options.omitAhead !== true &&
+        facts.aheadTotal !== undefined &&
+        facts.aheadTotal > 0
+      ) {
         parts.push(`에이전트 앞에 ${facts.aheadTotal}건`);
       }
       return parts.length === 0 ? undefined : parts.join(" · ");

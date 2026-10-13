@@ -566,7 +566,7 @@ export function toolEntryState(
  * 없는 제품 전체에 대한 주장이 된다. 이 화면에 없다는 것만 참이다.
  */
 export const WORK_LOG_TRUNCATED_HEAD_SENTENCE =
-  "이 지점부터 관전합니다. 앞부분은 이 화면에 없습니다.";
+  "이 지점부터 보고 있어요. 앞부분은 이 화면에 없어요.";
 
 /**
  * 서버가 모르는 run(관리형·BYOA)이 한동안 조용할 때. 「끊겼다」고도 「끝났다」고도
@@ -574,10 +574,6 @@ export const WORK_LOG_TRUNCATED_HEAD_SENTENCE =
  */
 export const WORK_LOG_QUIET_SENTENCE =
   "한동안 새 소식이 없어요. 끝났는지는 알 수 없어요.";
-
-/** 패널을 닫으면 기록이 사라진다는 사실(D1). 숨기지 않고 적는다. */
-export const WORK_LOG_VOLATILE_SENTENCE =
-  "패널을 닫으면 이 기록은 사라집니다. 다시 열면 그 시점부터 다시 쌓입니다.";
 
 /** 도구 인자는 접혀 있다는 사실. */
 export const WORK_LOG_ARGS_FOLDED_LABEL = "호출 인자 보기";
@@ -590,19 +586,26 @@ export const WORK_LOG_ARGS_FOLDED_LABEL = "호출 인자 보기";
  * 수 있었다. 이제 코드가 그런 키를 접고(`looksLikeHumanData`), 문장은 코드가
  * 실제로 보장하는 것만 말한다. 접힌 이름이 있으면 아래 문장이 뒤따른다.
  */
-export const WORK_LOG_ARGS_OPAQUE_SENTENCE = "인자 값은 표시하지 않습니다.";
+export const WORK_LOG_ARGS_OPAQUE_SENTENCE = "인자 값은 보여 주지 않아요.";
 
 /** 이름조차 접은 것이 있을 때만 뒤따르는 문장. */
 export const WORK_LOG_ARGS_NAMES_HIDDEN_SENTENCE =
-  "사람의 데이터로 보이는 이름은 함께 접었습니다.";
+  "사람의 데이터로 보이는 이름은 함께 접었어요.";
 
 /** 서버가 인자를 잘라 보냈다. */
-export const WORK_LOG_ARGS_TRUNCATED_SENTENCE = "서버가 인자를 잘라 보냈습니다.";
+export const WORK_LOG_ARGS_TRUNCATED_SENTENCE = "서버가 인자를 잘라 보냈어요.";
 
 /** 아직 아무 프레임도 못 받은 패널. `run`은 사람에게 쓰는 말이 아니다(§7). */
-export const WORK_LOG_EMPTY_HEADLINE = "아직 도착한 진행이 없습니다.";
+export const WORK_LOG_EMPTY_HEADLINE = "아직 받은 기록이 없어요.";
 export const WORK_LOG_EMPTY_DETAIL =
-  "이 턴에서 새 프레임이 오면 여기에 도착한 순서대로 쌓입니다.";
+  "이 화면을 연 뒤에 도착한 진행이 여기에 쌓여요.";
+
+/** 서버가 앞의 항목을 자리에서 밀어냈다는 사실. 숫자는 표면이 앞에 붙인다. */
+export const WORK_LOG_DROPPED_SENTENCE = "개 항목은 자리에서 밀려났어요.";
+
+/** 한 글 덩어리가 길어 앞을 잘랐다는 사실. */
+export const WORK_LOG_CLIPPED_SENTENCE =
+  "앞부분이 길어 잘렸어요. 최근 내용만 남아 있어요.";
 
 /**
  * 헤더에 적는 한 문장. 상태 어휘는 기존 경계를 그대로 쓴다(작업 중 = 열린 턴,

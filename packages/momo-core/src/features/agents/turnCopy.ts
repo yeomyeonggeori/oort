@@ -58,7 +58,7 @@ export const UNKNOWN_AGENT_NAME = "에이전트";
  * reading rather than wrong.
  */
 export const TURN_STALE_SENTENCE =
-  "연결이 끊겨 갱신이 멈췄습니다. 마지막으로 확인된 상태입니다.";
+  "연결이 끊겨 갱신이 멈췄어요. 마지막으로 확인된 상태예요.";
 
 /** Composer lines shown at once before the rest become a count. */
 export const MAX_ACTIVITY_LINES = 3;
@@ -120,7 +120,7 @@ export function activitySuffix(line: AgentActivityLine): string {
 }
 
 /**
- * 활동 줄 옆에 붙는 근거 한 줄(「미수령 11분 · 에이전트 앞에 2건」). 시간이 흐르면
+ * 활동 줄 옆에 붙는 근거 한 줄(「11분째 기다려요 · 에이전트 앞에 2건」). 시간이 흐르면
  * 숫자가 바뀌므로 접근성 이름이 아니라 보이는 보조 글에만 쓴다.
  */
 export function activityDetail(
