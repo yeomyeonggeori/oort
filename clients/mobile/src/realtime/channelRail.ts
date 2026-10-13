@@ -1,6 +1,7 @@
 import type {Centrifuge, Subscription} from 'centrifuge';
 import {isTerminalProgressFrame} from '@momo/core/features/agents/agentRail';
 import {
+  asAgentRunEventFrame,
   asMessageDeletedFrame,
   asPinFrame,
   asReactionFrame,
@@ -119,6 +120,17 @@ export type ChannelRail = Pick<
     workspaceId: string,
     channelId: string,
     handlers: {onSignal: () => void},
+  ) => () => void;
+  /**
+   * hosted 에이전트 run 원장의 **신호**(`agent.run.event`, ADR-0200 D2, U4 #3750).
+   * 프레임은 run id·채널 id·종류뿐이고 단계 문자열도 순번도 싣지 않는다: 받은 쪽은 그
+   * 채널의 진행 목록을 REST로 다시 읽고 그 답이 진실이다. 재구독(되쏘기 포함)도 같은
+   * 신호다. 메시지 레일과 같은 구독을 같은 refcount로 쓴다.
+   */
+  subscribeRunEvents: (
+    workspaceId: string,
+    channelId: string,
+    handlers: {onRunEvent: () => void; onResync: () => void},
   ) => () => void;
 };
 
@@ -272,6 +284,32 @@ export function createChannelRail(getClient: () => Centrifuge): ChannelRail {
             }
             const acp = asWorkSessionACPFrame(ctx.data);
             if (acp) handlers.onAcpEvent(acp);
+          };
+          sub.on('subscribed', onSubscribed);
+          sub.on('publication', onPublication);
+          return () => {
+            sub.off('subscribed', onSubscribed);
+            sub.off('publication', onPublication);
+          };
+        },
+      );
+    },
+
+    subscribeRunEvents(workspaceId, channelId, handlers) {
+      // 메시지 레일과 같은 옵션이어야 한다(`attach`는 먼저 온 호출의 구독을 나눠 쓴다).
+      return attach(
+        centrifugoChannelName(workspaceId, channelId),
+        {recoverable: true, positioned: true},
+        sub => {
+          const gate = createReplayGate();
+          const onSubscribed = (ctx: SubscribedRecoveryContext) => {
+            gate.onSubscribed(ctx);
+            // 끊긴 동안 놓친 프레임은 오지 않는다. 읽기로 고친다.
+            handlers.onResync();
+          };
+          const onPublication = (ctx: {data?: unknown}) => {
+            if (gate.isReplaying()) return;
+            if (asAgentRunEventFrame(ctx.data)) handlers.onRunEvent();
           };
           sub.on('subscribed', onSubscribed);
           sub.on('publication', onPublication);

@@ -12,6 +12,13 @@ import {
 import {resolveAgentWorkingSignals} from '@momo/core/features/agents/workingSignal';
 import type {AgentProgressEvent} from '@momo/core/lib/realtimeEvents';
 import {useCallback, useEffect, useMemo, useRef} from 'react';
+import {
+  knownRunIds,
+  resetRunProgress,
+  runProgressSignals,
+  startRunProgress,
+  subscribeRunProgress,
+} from './agentRunProgressStore';
 import {observeAgentProgress, resetEndedRuns} from './endedRuns';
 import {useInvalidateInboxLedgers} from '../inbox/useInbox';
 import {useRealtime} from '../../realtime/RealtimeProvider';
@@ -101,9 +108,29 @@ export function AgentWorkingRail(): null {
   /** Store keys this rail currently owns, so it can clear what it stops proving. */
   const ownedRef = useRef<Set<string>>(new Set());
 
+  // 서버가 진행을 답해 주는 채널들(에이전트가 있는 채널). 같은 이유로 배열이 아니라 키로
+  // 의존한다.
+  const progressChannelsKey = useMemo(
+    () =>
+      [...new Set(parseSubscriptionKey(pairsKey).map(pair => pair.channelId))]
+        .sort()
+        .join(','),
+    [pairsKey],
+  );
+
   const publish = useCallback((nowMs: number) => {
+    // 서버가 아는 run(끝난 것 포함)은 서버의 답이 이기고, 프레임 시계로 추정한 트랙은
+    // 버린다(ADR-0200 D1). 서버가 모르는 run(관리형·BYOA·옛 서버)만 트랙이 판정하고
+    // 90초 규칙을 그대로 받는다. 웹 레일과 같은 합성이다.
+    const known = knownRunIds();
+    const legacy: RunTracks =
+      known.size === 0
+        ? tracksRef.current
+        : new Map(
+            [...tracksRef.current].filter(([runId]) => !known.has(runId)),
+          );
     const resolved = resolveAgentWorkingSignals(
-      candidatesFrom(tracksRef.current),
+      [...candidatesFrom(legacy), ...runProgressSignals()],
       nowMs,
     );
     const owned = new Set<string>();
@@ -186,6 +213,25 @@ export function AgentWorkingRail(): null {
     };
   }, [rail, subscriptionsWanted, workspaceId, pairsKey, onEvent]);
 
+  // 서버 판정(ADR-0200): 프레임이 오거나 30초가 지나면 이 채널들의 진행을 다시 읽고,
+  // 읽은 결과가 바뀌면 신호를 다시 합친다. 소켓이 필요 없을 때(백그라운드)는 읽지 않는다:
+  // 돌아오면 재구독의 `onResync`가 한 번 읽는다.
+  useEffect(() => {
+    if (!subscriptionsWanted || progressChannelsKey === '') {
+      return;
+    }
+    return startRunProgress({
+      workspaceId,
+      channelIds: progressChannelsKey.split(','),
+      rail,
+    });
+  }, [rail, subscriptionsWanted, workspaceId, progressChannelsKey]);
+
+  useEffect(
+    () => subscribeRunProgress(() => publish(Date.now())),
+    [publish],
+  );
+
   // The two-part zombie guard, on one timer: drop runs whose last activity is
   // past the hard clear, then re-publish so a signal that lost its last live run
   // disappears from the surfaces in the same pass.
@@ -223,6 +269,7 @@ export function AgentWorkingRail(): null {
       runStatusRef.current = new Map();
       resetAgentWorking();
       resetEndedRuns();
+      resetRunProgress();
     };
   }, [workspaceId]);
 

@@ -1,6 +1,6 @@
 import { ApiError } from "../../lib/api";
 import { fetchWithDeadline } from "../../lib/http";
-import { responseRecord } from "../../lib/wire";
+import { num, responseRecord, WireShapeError } from "../../lib/wire";
 import { apiBase, coreSession } from "../../runtime/host";
 import type { HostedConfirmApproval } from "./approval";
 import type { HostedInvocationScope, SubscriptionHarnessWire } from "./model";
@@ -379,4 +379,66 @@ export function denyHostedOauthConsent(
     cache: "no-store",
     body: JSON.stringify(body),
   });
+}
+
+// ---- 다시 깨우기 (ADR-0200 D4 / S4 #3743) -----------------------------------
+
+/** 202. 깨우는 요청이 접수됐다(전달이 아니다). 다음에 깨울 수 있는 때가 함께 온다. */
+export interface HostedDoorbellRing {
+  requestedAtMs: number;
+  nextAllowedAtMs: number;
+}
+
+/**
+ * 429. 연결당 60초 쿨다운과 시간당 5회 한도에 걸렸다. `retryAfterSeconds`가 서버가
+ * 준 다음 가능 시각까지의 초다. 그 숫자를 클라이언트가 계산하지 않는다.
+ */
+export class DoorbellRingLimitedError extends ApiError {
+  readonly retryAfterSeconds: number;
+  constructor(retryAfterSeconds: number) {
+    super(429, "ring limited");
+    this.name = "DoorbellRingLimitedError";
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+/**
+ * 「다시 깨우기」: 도어벨 수동 ring **요청**. 권한은 워크스페이스 owner/admin·연결을 만든
+ * 사람·에이전트 소유자이고, 그 밖과 모르는 연결은 같은 404다. 게이트
+ * (`MOMO_DOORBELL_ENABLED`)가 닫혀도 본문 없는 404다. 409는 활성 연결이 아니거나 도어벨이
+ * 등록돼 있지 않다는 뜻이다.
+ */
+export async function ringHostedDoorbell(
+  workspaceId: string,
+  connectionId: string
+): Promise<HostedDoorbellRing> {
+  const headers = new Headers();
+  headers.set("Content-Type", "application/json");
+  headers.set("Accept", "application/json");
+  const token = coreSession().getAccessToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const res = await fetchWithDeadline(
+    `${apiBase()}${connection(workspaceId, connectionId)}/doorbell/ring`,
+    { method: "POST", headers }
+  );
+  if (res.status === 429) {
+    const body = res.jsonOrNull<{ retryAfterSeconds?: unknown }>();
+    const seconds =
+      typeof body?.retryAfterSeconds === "number" && body.retryAfterSeconds >= 1
+        ? Math.ceil(body.retryAfterSeconds)
+        : 60;
+    throw new DoorbellRingLimitedError(seconds);
+  }
+  if (!res.ok) {
+    const body = res.jsonOrNull<{ error?: { message?: string; code?: string } }>();
+    const code = typeof body?.error?.code === "string" ? body.error.code : undefined;
+    throw new ApiError(res.status, body?.error?.message ?? `HTTP ${res.status}`, code);
+  }
+  const body = responseRecord(res.json<unknown>());
+  const requestedAtMs = num(body, "requestedAtMs");
+  const nextAllowedAtMs = num(body, "nextAllowedAtMs");
+  if (requestedAtMs === undefined || nextAllowedAtMs === undefined) {
+    throw new WireShapeError();
+  }
+  return { requestedAtMs, nextAllowedAtMs };
 }

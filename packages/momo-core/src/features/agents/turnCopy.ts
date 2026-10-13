@@ -1,5 +1,10 @@
 import { particleFor } from "../../lib/koreanParticle";
-import type { AgentTurnState, AgentWorkingSignal } from "./workingSignal";
+import { runPhaseDetail, runPhaseLabel } from "./runPhase";
+import type {
+  AgentTurnState,
+  AgentWorkingSignal,
+  ServerRunFacts,
+} from "./workingSignal";
 
 // =============================================================================
 // Every user-visible string the agent-turn surfaces say (AX-5 / MOMO-613): the
@@ -53,7 +58,7 @@ export const UNKNOWN_AGENT_NAME = "에이전트";
  * reading rather than wrong.
  */
 export const TURN_STALE_SENTENCE =
-  "연결이 끊겨 갱신이 멈췄습니다. 마지막으로 확인된 상태입니다.";
+  "연결이 끊겨 갱신이 멈췄어요. 마지막으로 확인된 상태예요.";
 
 /** Composer lines shown at once before the rest become a count. */
 export const MAX_ACTIVITY_LINES = 3;
@@ -68,6 +73,8 @@ export interface AgentActivityLine {
   headline?: string;
   /** Turn clock, absent when the run's opening frame was never observed. */
   startedAtMs?: number;
+  /** The server's own answer for this run (ADR-0200), when it gave one. */
+  server?: ServerRunFacts;
 }
 
 export interface AgentActivityList {
@@ -100,9 +107,29 @@ export function activitySuffix(line: AgentActivityLine): string {
   if (line.state === "awaiting_approval") {
     return `${particleFor(line.name.name)} 승인을 기다립니다`;
   }
+  if (line.state === "queued") {
+    // 아직 시작하지 않은 run에는 「작업 중」이라는 낱말을 쓰지 않는다(ADR-0200).
+    // 서버가 말해 준 단계(대기 n번째·가져감)가 있으면 그대로, 없으면 대기 중이다.
+    return line.server === undefined
+      ? `${particleFor(line.name.name)} 대기 중`
+      : `: ${runPhaseLabel(line.server)}`;
+  }
   return line.headline === undefined
     ? `${particleFor(line.name.name)} 작업 중`
     : `: ${line.headline}`;
+}
+
+/**
+ * 활동 줄 옆에 붙는 근거 한 줄(「11분째 기다려요 · 에이전트 앞에 2건」). 시간이 흐르면
+ * 숫자가 바뀌므로 접근성 이름이 아니라 보이는 보조 글에만 쓴다.
+ */
+export function activityDetail(
+  line: AgentActivityLine,
+  nowMs: number
+): string | undefined {
+  if (line.server === undefined) return undefined;
+  if (line.state === "awaiting_approval") return undefined;
+  return runPhaseDetail(line.server, nowMs);
 }
 
 /** The whole line as one string (titles, tests, accessible names). */
@@ -129,6 +156,7 @@ function lineFor(
     ...(signal.startedAtMs !== undefined
       ? { startedAtMs: signal.startedAtMs }
       : {}),
+    ...(signal.server !== undefined ? { server: signal.server } : {}),
   };
 }
 
@@ -165,19 +193,33 @@ export function activityLines(
  * "nothing to do here". The other state is not dropped, it becomes the second
  * sentence of the accessible name and the second line of the composer list.
  */
+const STATE_ORDER: readonly AgentTurnState[] = [
+  "awaiting_approval",
+  "working",
+  "queued",
+];
+
 function primary(turns: readonly AgentWorkingSignal[]): {
   state: AgentTurnState;
   shown: AgentWorkingSignal[];
 } {
-  const waiting = turns.filter((t) => t.state === "awaiting_approval");
-  return waiting.length > 0
-    ? { state: "awaiting_approval", shown: waiting }
-    : { state: "working", shown: [...turns] };
+  for (const state of STATE_ORDER) {
+    const shown = turns.filter((t) => t.state === state);
+    if (shown.length > 0) return { state, shown };
+  }
+  return { state: "working", shown: [...turns] };
 }
 
 /** Third person plain, so it reads the same in a pill title and a sentence. */
 function verbFor(state: AgentTurnState): string {
-  return state === "working" ? "작업 중입니다" : "승인을 기다립니다";
+  switch (state) {
+    case "working":
+      return "작업 중입니다";
+    case "queued":
+      return "대기 중입니다";
+    case "awaiting_approval":
+      return "승인을 기다립니다";
+  }
 }
 
 /**
@@ -185,9 +227,9 @@ function verbFor(state: AgentTurnState): string {
  * this is an accessible name, and a name that changes once a second is re-read
  * once a second by some assistive tech.
  *
- * Both states are always stated. The lead sentence is whichever one the pill is
- * showing, so the word on screen and the first thing announced are the same
- * fact, and the remainder follows rather than disappearing.
+ * Every state present is always stated. The lead sentence is whichever one the
+ * pill is showing, so the word on screen and the first thing announced are the
+ * same fact, and the remainder follows rather than disappearing.
  */
 export function turnSummary(
   turns: readonly AgentWorkingSignal[],
@@ -199,11 +241,13 @@ export function turnSummary(
     shown.length === 1
       ? agentLabelAsSubject(nameFor(shown[0].memberId))
       : `에이전트 ${shown.length}명이`;
-  const rest = turns.length - shown.length;
-  const other: AgentTurnState =
-    state === "working" ? "awaiting_approval" : "working";
-  const tail = rest > 0 ? ` 에이전트 ${rest}명이 ${verbFor(other)}.` : "";
-  return `${head} ${verbFor(state)}.${tail}`;
+  const tails: string[] = [];
+  for (const other of STATE_ORDER) {
+    if (other === state) continue;
+    const count = turns.filter((t) => t.state === other).length;
+    if (count > 0) tails.push(`에이전트 ${count}명이 ${verbFor(other)}.`);
+  }
+  return [`${head} ${verbFor(state)}.`, ...tails].join(" ");
 }
 
 export interface AgentTurnBadgeCopy {
@@ -240,10 +284,63 @@ export function agentTurnBadgeCopy(
   nameFor: AgentNameLookup
 ): AgentTurnBadgeCopy | null {
   if (turns.length === 0) return null;
-  const { state } = primary(turns);
+  const { state, shown } = primary(turns);
   return {
-    text: state === "working" ? "작업 중" : "승인 대기",
+    text: badgeWord(state, shown),
     label: turnSummary(turns, nameFor),
     state,
   };
+}
+
+/**
+ * The pill's one word. A queued turn takes the server's own stage word when
+ * exactly one run leads (「대기 2번째」·「가져감」); several runs, or a server that
+ * did not say, read 「대기 중」.
+ */
+function badgeWord(
+  state: AgentTurnState,
+  shown: readonly AgentWorkingSignal[]
+): string {
+  switch (state) {
+    case "working":
+      return "작업 중";
+    case "awaiting_approval":
+      return "승인 대기";
+    case "queued":
+      return shown.length === 1 && shown[0].server !== undefined
+        ? runPhaseLabel(shown[0].server)
+        : "대기 중";
+  }
+}
+
+/**
+ * 한 턴의 한 낱말(허브 칩·사이드바 카드). 열린 턴 하나에 대해 알약과 같은 말을
+ * 한다: 서버가 대기 순번이나 「가져감」을 알렸으면 그 낱말을 쓴다.
+ */
+export function turnWord(
+  state: AgentTurnState,
+  server?: ServerRunFacts
+): string {
+  if (state === "queued") {
+    return server === undefined ? "대기 중" : runPhaseLabel(server);
+  }
+  return state === "working" ? "작업 중" : "승인 대기";
+}
+
+/** 허브 칩의 접근성 이름: 「<이름> 에이전트가 …요.」 */
+export function turnHubSentence(
+  agentName: string,
+  state: AgentTurnState,
+  server?: ServerRunFacts
+): string {
+  switch (state) {
+    case "working":
+      return `${agentName} 에이전트가 작업 중이에요.`;
+    case "awaiting_approval":
+      return `${agentName} 에이전트가 승인을 기다려요.`;
+    case "queued":
+      return server?.phase === "claimed"
+        ? `${agentName} 에이전트가 일을 가져갔어요. 아직 보고는 없어요.`
+        : `${agentName} 에이전트가 일을 아직 가져가지 않았어요.`;
+  }
 }

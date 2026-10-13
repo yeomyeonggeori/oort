@@ -43,6 +43,7 @@ import { AgentProfileProvider } from "@/features/routing/AgentProfileDialog";
 import { MemberProfileProvider } from "@/features/directory/MemberProfileDialog";
 import { InboxHotkeys } from "@/features/inbox/InboxHotkeys";
 import { DesktopNotifications } from "@/features/notifications/DesktopNotifications";
+import { ApprovalsLiveSync } from "@/features/inbox/ApprovalsLiveSync";
 import { DockBadge } from "@/features/notifications/DockBadge";
 import { TabTitleCount } from "@/features/notifications/TabTitleCount";
 import { WorkHostNotices } from "@/features/notifications/WorkHostNotices";
@@ -487,6 +488,8 @@ export function AppShell({
            * request reaches the OS while the window is in the background
            * (MOMO-607). */}
           {!stress && <DesktopNotifications />}
+          {/* 새 승인 카드가 올라오면 처리할 일 목록을 바로 다시 읽는다(#3738). */}
+          {!stress && <ApprovalsLiveSync />}
           {!stress && <DockBadge />}
           {!stress && <TabTitleCount />}
           {!stress && <WorkHostNotices />}

@@ -213,9 +213,12 @@ export function isTerminalProgressFrame(event: AgentProgressEvent): boolean {
  * tell apart on a sidebar row.
  */
 export function turnStateOf(runStatus: string): AgentTurnState {
-  return runStatus === "awaiting_approval" || runStatus === "paused"
-    ? "awaiting_approval"
-    : "working";
+  if (runStatus === "awaiting_approval" || runStatus === "paused") {
+    return "awaiting_approval";
+  }
+  // `queued` is its own fact (ADR-0200 D1): the run exists and nothing has begun
+  // it. Reading it as 작업 중 is the bug that drew an untaken run as running.
+  return runStatus === "queued" ? "queued" : "working";
 }
 
 /**

@@ -214,12 +214,12 @@ describe("workLog — 정직성", () => {
     expect(l.startedAtMs).toBeUndefined();
   });
 
-  it("종료를 못 본 조용한 run은 완료가 아니라 신호 소실이다", () => {
+  it("서버가 모르는 조용한 run은 완료도 신호 소실도 아니라 조용함이다 (ADR-0200 D6)", () => {
     let l = log();
     l = appendProgress(l, status("streaming", "running", T0), T0);
     const later = T0 + IDLE_CUTOFF_MS + 1;
-    expect(workLogLiveness(l, later)).toBe("signal_lost");
-    expect(workLogStateLabel(l, "signal_lost")).toBe("신호 소실");
+    expect(workLogLiveness(l, later)).toBe("quiet");
+    expect(workLogStateLabel(l, "quiet")).toBe("조용함");
     expect(l.closed).toBeUndefined();
   });
 
@@ -407,7 +407,7 @@ describe("workLog — 도구 단계", () => {
     const only = l.entries[0] as WorkToolEntry;
     // 뒤에 아무것도 오지 않았다. "다음 단계로"는 관측되지 않은 전이를 주장하는
     // 것이고, 결과도 모른다.
-    expect(toolEntryState(l, only, "signal_lost")).toBe("unknown");
+    expect(toolEntryState(l, only, "quiet")).toBe("unknown");
     expect(toolEntryState(l, only, "closed")).toBe("unknown");
   });
 });

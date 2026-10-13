@@ -24,6 +24,9 @@ import {
   buildAgentRows,
   type AgentRow,
 } from '../features/agents/rows';
+import {AgentLivenessLabel} from '../features/agents/AgentLivenessLabel';
+import {useAgentLiveness} from '../features/agents/useAgentLiveness';
+import {livenessView} from '@momo/core/features/agents/liveness';
 import {useWorkSessions} from '../features/agents/queries';
 import {
   AgentTurnBadge,
@@ -279,11 +282,21 @@ function Row({
   // is one accessibility element and nothing inside it is announced separately —
   // a badge that only labelled itself would be silent. Same reason the ledger's
   // 작업 세션 count already rides `agentRowMeta` rather than its own pill.
+  // 지금 살아 있는가(ADR-0200 D4)도 같은 이유로 행의 문장에 접는다: 행은 한 접근성
+  // 요소라 안쪽 라벨은 따로 낭독되지 않는다.
+  const {liveness, nowMs} = useAgentLiveness(row.memberId);
+  const aliveText =
+    liveness === null || liveness === undefined
+      ? null
+      : livenessView(liveness, nowMs).text;
+  const base = aliveText
+    ? `${row.accessibilityLabel}, ${aliveText}`
+    : row.accessibilityLabel;
   const label = turn
-    ? `${row.accessibilityLabel}, ${
+    ? `${base}, ${
         railLive ? turn.label : `${turn.label} ${TURN_STALE_SENTENCE}`
       }`
-    : row.accessibilityLabel;
+    : base;
   return (
     <TapRow
       accessibilityLabel={label}
@@ -305,6 +318,12 @@ function Row({
         <Text style={styles.rowMeta} numberOfLines={2}>
           {agentRowMeta(row)}
         </Text>
+        {/* 「활성」 같은 연결 상태가 아니라 지금 살아 있는가. 서버가 모르는 에이전트에는
+            아무것도 서지 않는다. */}
+        <AgentLivenessLabel
+          agentId={row.memberId}
+          testID={`agent-liveness-${row.memberId}`}
+        />
       </View>
       {/* Two pills, two facts, side by side and never merged.
 
