@@ -5371,6 +5371,19 @@ pub struct ApprovalDecisionRequest {
     /// move a session that already started.
     #[serde(default, rename = "host_id", alias = "hostId")]
     pub host_id: Option<Uuid>,
+    /// ADR-0186 증보 v3 V3-3a — 「에이전트에게 연결 코드 넘기기」. Default off.
+    ///
+    /// Judged against the **action's** `secret_delivery` (`OptIn` only), never
+    /// against the proposal: an agent cannot ask for it. `true` on anything else
+    /// — another action, a rejection, a non-workspace approval — is refused 400
+    /// and consumes nothing. Like `host_id` it is not part of the idempotency
+    /// key (a replay answers the original receipt).
+    #[serde(
+        default,
+        rename = "deliver_secret_to_agent",
+        alias = "deliverSecretToAgent"
+    )]
+    pub deliver_secret_to_agent: Option<bool>,
 }
 
 /// Swift `ApprovalDecisionReceiptDTO` — the body every decision outcome returns,

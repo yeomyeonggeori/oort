@@ -68,7 +68,7 @@ use momo_agent::actions::{
     channel_create_result_body, channel_create_result_rows, channel_member_add_result_body,
     channel_member_add_rows, invite_result_body, invite_result_rows, last_attempt_patch,
     result_client_msg_id, workspace_settings_result_body, ActionResult, ActionResultNext,
-    RequiredRole, ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED,
+    RequiredRole, SecretDelivery, ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED,
     ACTION_TYPE_WORKSPACE_ACTION, AUDIT_ACTION_APPROVED, AUDIT_CHANNELS_GRANTED,
     AUDIT_CHANNELS_GRANTED_SCHEMA, AUDIT_CHANNEL_CREATED, AUDIT_CHANNEL_CREATED_SCHEMA,
     AUDIT_CHANNEL_MEMBER_ADDED, AUDIT_CHANNEL_MEMBER_ADDED_SCHEMA, AUDIT_MEMBER_RENAMED,
@@ -153,6 +153,9 @@ const HUMAN_PRINCIPAL_REQUIRED: &str = "human_principal_required";
 /// back exactly as it must, and [`decide`] recognises the sentinel and answers
 /// the receipt-shaped 409 the clients already decode.
 const RUN_NOT_PARKED: &str = "run_not_parked";
+/// `deliverSecretToAgent: true` on a decision that cannot honour it (ADR-0186
+/// 증보 v3 V3-3a). 400, and the approval is not consumed.
+const DELIVER_SECRET_NOT_SUPPORTED: &str = "deliver_secret_not_supported";
 
 /// The sentinel itself. Namespaced and versioned so it cannot collide with a
 /// genuine `sqlx::Error::Protocol` message from the driver.
@@ -366,6 +369,7 @@ async fn decide(
     let claude_subscription_agents_enabled =
         state.agent_port.config.claude_subscription_agents_enabled;
     let operator_scope = has_platform_read_scope(&principal);
+    let deliver_secret_to_agent = request.deliver_secret_to_agent == Some(true);
 
     let outcome: DbRejectable<Decision> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
@@ -384,6 +388,7 @@ async fn decide(
                     public_origin: public_origin.as_deref(),
                     claude_subscription_agents_enabled,
                     operator_scope,
+                    deliver_secret_to_agent,
                 },
             )
             .await
@@ -460,6 +465,8 @@ struct DecisionInput<'a> {
     /// two ways to satisfy `RequiredRole::WorkspaceOperator`
     /// (`routes::shared::has_platform_read_scope`).
     operator_scope: bool,
+    /// `deliverSecretToAgent` as sent. Only `Some(true)` matters.
+    deliver_secret_to_agent: bool,
 }
 
 async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRejectable<Decision> {
@@ -767,6 +774,22 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
     // Placed **after** the expiry settlement above: an already-overdue card
     // still settles as `expired` on a tap rather than minting an invite past its
     // own deadline.
+    //
+    // **`deliverSecretToAgent` is only meaningful on the approve half of a
+    // workspace action** (ADR-0186 증보 v3 V3-3a). Anywhere else it is a
+    // malformed request, refused before any write so the approval stays pending.
+    if input.deliver_secret_to_agent
+        && !(approval.action_type == ACTION_TYPE_WORKSPACE_ACTION && input.approve)
+    {
+        return Ok(Ok(refusal(
+            approval.id,
+            input.member_id,
+            DELIVER_SECRET_NOT_SUPPORTED,
+            "deliverSecretToAgent applies only to approving a workspace action",
+            StatusCode::BAD_REQUEST,
+            now,
+        )));
+    }
     if approval.action_type == ACTION_TYPE_WORKSPACE_ACTION && input.approve {
         return execute_workspace_action(conn, &approval, &input, now).await;
     }
@@ -1142,6 +1165,20 @@ async fn execute_workspace_action(
             now,
         )));
     };
+
+    // ADR-0186 증보 v3 V3-3a: the opt-in is the **action's** property. Asking for
+    // delivery of a value this action does not offer is refused before the
+    // first write (the approval stays pending), exactly like a malformed arg.
+    if input.deliver_secret_to_agent && action.secret_delivery != SecretDelivery::OptIn {
+        return Ok(Ok(refusal(
+            approval.id,
+            input.member_id,
+            DELIVER_SECRET_NOT_SUPPORTED,
+            "this action does not offer its one-time value to the proposing agent",
+            StatusCode::BAD_REQUEST,
+            now,
+        )));
+    }
 
     // The stored `args` are re-run through the **same** resolver the proposal
     // passed (`routes::actions::resolve_action_in_tx`), for the reason ADR-0186
@@ -2826,6 +2863,7 @@ mod tests {
             public_origin: None,
             claude_subscription_agents_enabled: false,
             operator_scope: false,
+            deliver_secret_to_agent: false,
         }
     }
 
