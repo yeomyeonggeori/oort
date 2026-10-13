@@ -148,7 +148,7 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 | `responsive` | 일 신호(`max(last_inbox_read_at, last_claim_at, last_run_event_at)`)가 `≤ 20분` 전 | 「응답함 · n분 전」 |
 | `alive_idle` | 일 신호는 없거나 20분 초과인데 `last_ping_at`이 `≤ 20분` 전 | 「살아 있음 · 일은 안 가져감」 |
 | `woken_not_collected` | 도어벨 `ok_2xx` 이후 `≥ 5분`이 지났는데 그 사이 `last_claim_at`·`last_inbox_read_at`이 도어벨 이후로 갱신되지 않았고, 수령 가능한 `queued` run이 있음 | 「깨웠지만 아직 안 가져감 · n분」(+ 다시 깨우기) |
-| `work_waiting` | 수령 가능한 일감이 응답 창(20분) 넘게 기다렸는데 그 일감이 큐에 들어간 뒤 claim이 없음 — inbox를 읽거나 ping을 보내도 가리지 못함(도어벨 불필요, S3 보안 검수 M3) | 「일감이 기다리는데 가져가지 않음 · n분」 |
+| `work_waiting` | 수령 가능한 일감이 응답 창(20분) 넘게 기다렸는데 그 일감이 큐에 들어간 뒤 claim이 없음 — inbox를 읽거나 ping을 보내도 가리지 못함(도어벨 불필요, S3 보안 검수 M3). 단 quiet 창(60분) 안에 신호가 있는 에이전트에 한한다: 완전히 침묵한 에이전트는 `unresponsive`가 우선(재검수 M-A) | 「일감이 기다리는데 가져가지 않음 · n분」 |
 | `quiet` | 마지막 신호(ping 포함)가 20~60분 전 | 「조용함 · 마지막 응답 n분 전」 |
 | `unresponsive` | 마지막 신호(ping 포함)가 `> 60분` 전이거나 신호가 없음(`never`) | 「응답 없음 · n분」 |
 | `error` | `last_tool_error_at`이 마지막 성공 호출(어떤 도구든)보다 새롭다. 거절 기록은 `Unavailable`/`NotAuthorized` 두 종류만 | 「호출이 거절됨 · <닫힌 사유>」 |
