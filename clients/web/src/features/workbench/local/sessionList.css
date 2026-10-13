@@ -47,9 +47,9 @@
  * 이름(18/800)을 따라 구획 B의 「에이전트·작업」보다 크게 서서 위계가 거꾸로였다(#3358 검수 M). 이 줄은
  * 본문 목록의 이름표이지 화면 제목이 아니다 — 화면 제목은 본문의 「내 작업」(`h1`)이 진다. */
 .sl-hd h2 {
-  font-size: 0.78125rem;
-  line-height: 1rem;
-  font-weight: 700;
+  font-size: var(--text-meta);
+  line-height: var(--text-meta--line-height);
+  font-weight: 600;
   color: var(--ink-muted);
 }
 .sl-hd .sl-r {

@@ -308,7 +308,7 @@
    * 텍스트 역할이 아니라 플랫폼의 문턱이라 이름을 따로 갖고, `--text-*` 이름표를
    * 쓰지 않는다. 그 이름표는 닫힌 역할 척도이고(designSystem.test.ts가 그 안의
    * 값이 서로 달라야 한다고 잰다), 유틸리티를 만들지 않는 값이라 `@theme`에도
-   * 두지 않는다(`--font-onboarding-wordmark`와 같은 자리). 지금 `--text-title`과
+   * 두지 않는다(`--font-onboarding-wordmark`와 같은 자리). 지금 `--text-heading`과
    * 값이 같은 것은 우연이고, 제목 크기가 바뀌는 날 이 바닥이 함께 끌려가면 안
    * 된다(디자인 시스템 §2.5가 폰 본문 16을 같은 이유로 짝으로 적지 않는다).
    * 쓰는 자리는 `@layer base`의 입력 칸 규칙 하나다. */
@@ -679,7 +679,7 @@
    * unwrapped run).
    *
    * Chromium capture:design (1280, `--font-sans`) measured the sentence at
-   * text-body 14px / keep-all as 265×22 (one line). Hangul-em upper bound
+   * text-body 14px (now 15px) / keep-all as 265×22 (one line). Hangul-em upper bound
    * is ~307 (20×14 + 5 spaces + period). 360 = that bound + ~4em face
    * slack so a heavier KR face cannot re-wrap. Not a pane: this is the
    * width of this one sentence, not a column. */
@@ -740,16 +740,26 @@
 
   /* --- text roles, not size inflation ------------------------------------ */
   --text-*: initial;
-  --text-timestamp: 0.6875rem; /* 11px, seq / clock / counters */
+  /* #3774 (Accepted, docs/design-system/typography-proposal.md §3.1). 크기는 서로
+   * 달라야 하고(designSystem.test.ts), 굵기·자간은 롤이 아니라 사용처가 정한다.
+   * `caption`은 옛 이름 `timestamp`로 남는다(이름 바꾸기는 다른 워커의 열린 PR과
+   * 충돌하므로 후속). `body-strong`은 크기 토큰이 아니라 `text-body font-semibold`다. */
+  --text-timestamp: 0.6875rem; /* 11px caption: seq / clock / counters / kbd */
   --text-timestamp--line-height: 1rem;
   --text-meta: 0.75rem; /* 12px, secondary and meta rows */
   --text-meta--line-height: 1.125rem;
-  --text-body: 0.875rem; /* 14px, message body and controls */
+  --text-code: 0.8125rem; /* 13px, code and monospace runs */
+  --text-code--line-height: 1.25rem;
+  --text-label: 0.875rem; /* 14px, sidebar rows, menus, controls */
+  --text-label--line-height: 1.25rem;
+  --text-body: 0.9375rem; /* 15px, message body (owner 2026-10-13) */
   --text-body--line-height: 1.375rem;
-  --text-title: 1rem; /* 16px, surface titles */
+  --text-heading: 1rem; /* 16px, card and section headings, workspace name */
+  --text-heading--line-height: 1.375rem;
+  --text-title: 1.0625rem; /* 17px, surface titles */
   --text-title--line-height: 1.5rem;
-  --text-display: 1.25rem; /* 20px, at most one per surface */
-  --text-display--line-height: 1.75rem;
+  --text-display: 1.375rem; /* 22px, at most one per surface */
+  --text-display--line-height: 1.875rem;
 
   /* 링크 프리뷰 rich 히어로 비율 (#1903 design-review H-2).
    * Open Graph 권장 캔버스는 1.91:1 (1200×630). 카드 폭에 이 비율을 매고
@@ -1758,10 +1768,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 1.125rem;
-  line-height: 1.5rem;
-  font-weight: 800;
-  letter-spacing: -0.03em;
+  font-size: var(--text-heading);
+  line-height: var(--text-heading--line-height);
+  font-weight: 700;
+  letter-spacing: -0.01em;
   color: var(--ink);
 }
 
@@ -1776,8 +1786,8 @@
   border-radius: 12px;
   padding-inline: 10px;
   margin-block-end: 10px;
-  font-size: 0.84375rem;
-  line-height: 1.25rem;
+  font-size: var(--text-label);
+  line-height: var(--text-label--line-height);
   color: var(--ink-muted);
   box-shadow: var(--elevation-rest);
 }
@@ -1786,7 +1796,7 @@
   border-radius: var(--radius-sm);
   padding: 2px 6px;
   background-color: var(--surface-muted);
-  font-size: 0.71875rem;
+  font-size: var(--text-timestamp);
   line-height: 1rem;
   font-weight: 500;
   color: var(--ink-muted);
@@ -1805,7 +1815,7 @@
   border-radius: var(--radius-md);
   font-size: var(--text-body);
   line-height: var(--text-body--line-height);
-  letter-spacing: -0.005em;
+  letter-spacing: 0;
   color: var(--ink);
 
   & [data-row-icon] {
@@ -1921,9 +1931,9 @@
   gap: 6px;
   min-block-size: var(--spacing-control-sm);
   padding-inline: 10px;
-  font-size: 0.78125rem;
-  line-height: 1rem;
-  font-weight: 700;
+  font-size: var(--text-meta);
+  line-height: var(--text-meta--line-height);
+  font-weight: 600;
   color: var(--ink-muted);
 
   & svg {
@@ -1958,8 +1968,8 @@
   }
 }
 @utility sidebar-now-name {
-  font-size: 0.84375rem;
-  line-height: 1.25rem;
+  font-size: var(--text-label);
+  line-height: var(--text-label--line-height);
   font-weight: 700;
   letter-spacing: -0.01em;
 }
@@ -1968,7 +1978,7 @@
   align-items: center;
   gap: 6px;
   margin-inline-start: auto;
-  font-size: 0.78125rem;
+  font-size: var(--text-meta);
   line-height: 1rem;
   font-weight: 600;
 }
@@ -1980,8 +1990,8 @@
 }
 @utility sidebar-now-line {
   margin-block-start: 6px;
-  font-size: 0.78125rem;
-  line-height: 1.125rem;
+  font-size: var(--text-meta);
+  line-height: var(--text-meta--line-height);
   color: var(--ink-muted);
 }
 
@@ -2012,15 +2022,15 @@
 }
 
 @utility channel-head-title {
-  font-size: var(--text-body);
-  line-height: var(--text-body--line-height);
+  font-size: var(--text-heading);
+  line-height: var(--text-heading--line-height);
   font-weight: 600;
 
   @media (width >= 600px) {
-    font-size: 1.0625rem;
-    line-height: 1.5rem;
-    font-weight: 800;
-    letter-spacing: -0.02em;
+    font-size: var(--text-heading);
+    line-height: var(--text-heading--line-height);
+    font-weight: 700;
+    letter-spacing: -0.01em;
   }
 }
 @utility channel-head-topic {
@@ -2028,8 +2038,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.84375rem;
-  line-height: 1.25rem;
+  font-size: var(--text-label);
+  line-height: var(--text-label--line-height);
   color: var(--ink-muted);
 }
 
@@ -4436,8 +4446,8 @@
   inline-size: 40px;
   block-size: 40px;
   border-radius: var(--radius-md);
-  font-size: 15px;
-  font-weight: 800;
+  font-size: var(--text-body);
+  font-weight: 700;
 }
 
 /* 시안의 글자 타일 색. Claude는 시안 #F3E6DC/#9A4A1E, Codex는 #E2E6EC/#2B3440,
@@ -4466,16 +4476,16 @@
 .ai-connect-title {
   display: block;
   color: var(--ink);
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 1.4;
+  font-size: var(--text-heading);
+  font-weight: 600;
+  line-height: var(--text-heading--line-height);
   word-break: keep-all;
 }
 
 .ai-connect-detail {
   color: var(--ink-muted);
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: var(--text-label);
+  line-height: var(--text-label--line-height);
   word-break: keep-all;
 }
 
@@ -4540,8 +4550,8 @@
   border-radius: var(--radius-md);
   background-color: var(--agent-soft);
   color: var(--ink);
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: var(--text-meta);
+  line-height: var(--text-meta--line-height);
   word-break: keep-all;
 }
 
@@ -4565,8 +4575,8 @@
   background-color: var(--surface-muted);
   color: var(--ink);
   font-family: var(--font-mono);
-  font-size: 12.5px;
-  line-height: 1.5;
+  font-size: var(--text-code);
+  line-height: var(--text-code--line-height);
 }
 
 .ai-connect-term-action,
@@ -5127,9 +5137,9 @@
    * iPhone 프로필 실측). 성재가 owner claim을 폰으로 하다 만난 확대가 이것이다.
    *
    * 그래서 크기를 덮어쓰지 않고 **역할을 다시 묶는다**. 입력 칸 안에서는
-   * 바닥보다 작은 역할(timestamp·meta·body)이 바닥을 답한다. `text-body`는
+   * 바닥보다 작은 역할(timestamp·meta·code·label·body)이 바닥을 답한다. `text-body`는
    * 그대로 `var(--text-body)`를 읽고도 16px이 된다. 레이어 밖에서 덮어쓰는
-   * 길과 다른 점은 둘이다. 바닥보다 큰 역할(title·display)은 그대로 서고,
+   * 길과 다른 점은 둘이다. 바닥과 같거나 큰 역할(heading·title·display)은 그대로 서고,
    * 컴포저의 `leading-relaxed` 같은 행간 유틸리티도 그대로 이긴다. 클래스 없는
    * 칸은 마지막 두 줄이 받는다(Tailwind preflight의 `font: inherit`와 같은
    * 레이어이고, 그보다 뒤에 선다).
@@ -5154,6 +5164,10 @@
       --text-timestamp--line-height: var(--field-text-floor-leading);
       --text-meta: var(--field-text-floor);
       --text-meta--line-height: var(--field-text-floor-leading);
+      --text-code: var(--field-text-floor);
+      --text-code--line-height: var(--field-text-floor-leading);
+      --text-label: var(--field-text-floor);
+      --text-label--line-height: var(--field-text-floor-leading);
       --text-body: var(--field-text-floor);
       --text-body--line-height: var(--field-text-floor-leading);
       font-size: var(--field-text-floor);
@@ -5365,11 +5379,11 @@ progress[data-upload-progress]:indeterminate::-webkit-progress-bar {
   --session-radius-chip: 13px;
   --session-radius-badge: 9px;
   /* 글자: 목록 제목 17 · 줄 13 · worktree 12.5 · 하네스·부제 11.5 · 「기본」 10.5. */
-  --session-text-title: 17px;
-  --session-text-row: 13px;
-  --session-text-worktree: 12.5px;
-  --session-text-mono: 11.5px;
-  --session-text-badge: 10.5px;
+  --session-text-title: var(--text-heading);
+  --session-text-row: var(--text-label);
+  --session-text-worktree: var(--text-meta);
+  --session-text-mono: var(--text-timestamp);
+  --session-text-badge: var(--text-timestamp);
   /* 상태 표지 9 · 끝남·멈춤 10(시안 `.st i`). */
   --session-mark: 9px;
   --session-mark-glyph: 10px;

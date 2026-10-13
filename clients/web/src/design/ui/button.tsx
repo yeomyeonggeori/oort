@@ -21,7 +21,7 @@ import { cn } from "@/design/lib/cn";
 // (--on-primary), 파괴 채움은 focus-ring-on-fill(--on-accent, 값이 --on-danger-fill과
 // 같다). 신호색 링이 채움 가장자리에 붙어 사라지지 않게 한다(design-review High).
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-body font-bold press focus-visible:focus-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-label font-bold press focus-visible:focus-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {

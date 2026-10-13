@@ -23,7 +23,7 @@ export const Input = React.forwardRef<
       type={type}
       ref={ref}
       className={cn(
-        "tap-target flex h-field w-full rounded-lg border border-line-strong bg-transparent px-3 py-1 text-body text-ink transition-colors placeholder:text-ink-muted focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50",
+        "tap-target flex h-field w-full rounded-lg border border-line-strong bg-transparent px-3 py-1 text-label text-ink transition-colors placeholder:text-ink-muted focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50",
         className
       )}
       {...props}

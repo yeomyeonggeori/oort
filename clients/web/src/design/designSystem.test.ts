@@ -217,6 +217,74 @@ describe("타이포 축", () => {
 });
 
 // -----------------------------------------------------------------------------
+// 3b. 토큰 밖 글자 크기 금지 (#3774 회귀 가드)
+//
+// 드리프트는 `text-[..px]`(프리플라이트 `arbitrary_tw`가 막는다)가 아니라 CSS 안의
+// `font-size: 13.5px` 같은 리터럴에서 자랐다. 같은 역할이 표면마다 13·13.5·12.5로
+// 갈라졌고 이름이 없어 아무도 못 봤다. 그래서 `@theme` 밖 모든 `font-size` 선언은
+// `var(--text-*)`(또는 아래 허용 목록)만 읽는다.
+// -----------------------------------------------------------------------------
+
+/** 근거 없이 늘리지 않는다. 키는 선언을 잡는 정규식 조각(선택자 아닌 값 전체). */
+const FONT_SIZE_ALLOW: Array<{ decl: RegExp; why: string }> = [
+  { decl: /^font-size:\s*40px;/, why: "S0 환영 화면 워드마크(스케일 밖 의도된 예외, ADR-0193)" },
+  { decl: /^font-size:\s*calc\(var\(--spacing-avatar-hero\)/, why: "히어로 아바타 이니셜은 아바타 크기의 비율" },
+  { decl: /^font-size:\s*clamp\(/, why: "S0 워드마크 유동 크기(--font-onboarding-wordmark)" },
+  { decl: /^font-size:\s*var\(--field-text-floor\);/, why: "입력 칸 16px 바닥(플랫폼 문턱, 롤 아님)" },
+  { decl: /^font-size:\s*var\(--session-text-/, why: "세션 목록 지역 별칭, 값은 --text-*에 묶인다(아래 별도 시험)" },
+];
+
+function cssFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) out.push(...cssFiles(full));
+    else if (entry.name.endsWith(".css")) out.push(full);
+  }
+  return out;
+}
+
+/** 토큰 밖 `font-size:` 선언 중 `var(--text-*)`도 허용 목록도 아닌 것. */
+function strayFontSizes(css: string): string[] {
+  const stray: string[] = [];
+  for (const found of codeOnly(css).matchAll(/font-size:[^;]*;/g)) {
+    const decl = found[0];
+    if (/^font-size:\s*var\(--text-[a-z]+\);/.test(decl)) continue;
+    if (FONT_SIZE_ALLOW.some((rule) => rule.decl.test(decl))) continue;
+    stray.push(decl);
+  }
+  return stray;
+}
+
+describe("토큰 밖 글자 크기 금지", () => {
+  it("CSS의 모든 font-size는 --text-* 역할을 읽는다", () => {
+    const found = cssFiles(SRC_DIR).flatMap((file) =>
+      strayFontSizes(readFileSync(file, "utf8")).map(
+        (decl) => `${file.slice(SRC_DIR.length)}: ${decl}`
+      )
+    );
+    expect(found).toEqual([]);
+  });
+
+  it("가드가 실제로 리터럴을 잡는다(사보타주)", () => {
+    expect(strayFontSizes(".x { font-size: 13.5px; }")).toEqual(["font-size: 13.5px;"]);
+    expect(strayFontSizes(".x { font-size: 0.84375rem; }")).toHaveLength(1);
+    expect(strayFontSizes(".x { font-size: var(--text-body); }")).toEqual([]);
+  });
+
+  it("세션 목록 별칭은 --text-* 역할에 묶인다", () => {
+    for (const found of CSS.matchAll(/--session-text-[a-z]+:\s*([^;]+);/g)) {
+      expect(found[1]).toMatch(/^var\(--text-[a-z]+\)$/);
+    }
+  });
+
+  it("굵기 800은 CSS에 남지 않는다(S0 워드마크 한 곳만)", () => {
+    const heavy = [...codeOnly(CSS).matchAll(/font-weight:\s*(800|900);/g)];
+    expect(heavy).toHaveLength(1);
+  });
+});
+
+// -----------------------------------------------------------------------------
 // 4. 반경 축
 // -----------------------------------------------------------------------------
 
