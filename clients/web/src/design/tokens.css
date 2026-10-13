@@ -4485,8 +4485,8 @@
 
 .ai-connect-detail {
   color: var(--ink-muted);
-  font-size: var(--text-label);
-  line-height: var(--text-label--line-height);
+  font-size: var(--text-meta);
+  line-height: var(--text-meta--line-height);
   word-break: keep-all;
 }
 
