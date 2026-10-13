@@ -1003,10 +1003,12 @@ async fn manual_rings_are_serialized_follow_the_disconnect_lock_order_and_need_a
         .send()
         .await
         .unwrap();
-    assert!(
-        response.status() == 404 || response.status() == 403 || response.status() == 401,
-        "a member who left cannot ring: {}",
-        response.status()
+    println!("departed member answered {}", response.status());
+    assert_eq!(
+        response.status(),
+        404,
+        "a member who left cannot ring (the route's own active-membership check answers, \
+         not an earlier layer)"
     );
     assert_eq!(ring_rows_3743(&su, &fixture).await, 0);
 }

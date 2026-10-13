@@ -255,7 +255,7 @@ fn url_host(absolute: &str) -> String {
 ///
 /// A person asks the doorbell to ring now — the answer to 「깨웠지만 아직 안 가져감」 when
 /// waiting for the next event is not acceptable. Allowed for a workspace admin or the
-/// person who created the connection (the agent's owner); a channel member is not
+/// person who created the connection or the agent's recorded owner (each as a current, active workspace member); a channel member is not
 /// enough, because every ring spends the owner's vendor usage (ADR-0162 증보 3 D16).
 ///
 /// What it does is only **request**: the existing doorbell row is re-armed and the

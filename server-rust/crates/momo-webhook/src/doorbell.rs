@@ -196,7 +196,7 @@ pub enum RingOutcome {
         next_allowed_at: DateTime<Utc>,
     },
     NotFound,
-    /// Not an admin and not the person who created the connection.
+    /// Not an active member who is an admin, the connection's creator or the agent's owner.
     NotAllowed,
     NotActive,
     NotRegistered,
