@@ -762,16 +762,23 @@ async fn a_referenced_job_row_is_pinned_and_an_anti_joining_pruner_still_drains(
     // A second, unreferenced job of the same shape: the row a pruner is for.
     let spare_run = insert_run(&su, &f, f.agent, f.channel).await;
     let unreferenced = insert_job(&su, &f, f.agent, spare_run).await;
-    sqlx::query("UPDATE outbox SET status='done', processed_at=now() WHERE workspace_id=$1")
-        .bind(workspace)
-        .execute(&su)
-        .await
-        .unwrap();
+    // `kind = 'agent_job'`: the ledger trigger (migration 130) also puts thin broadcast frames
+    // on the outbox for every run row this fixture inserts — not the rows this contract is about.
+    sqlx::query(
+        "UPDATE outbox SET status='done', processed_at=now() \
+          WHERE workspace_id=$1 AND kind='agent_job'",
+    )
+    .bind(workspace)
+    .execute(&su)
+    .await
+    .unwrap();
 
     // (1) The naive pruner — age alone — is refused, and named by the FK that
     // refused it. This is the RESTRICT 073 keeps on purpose.
     let naive =
-        sqlx::query("DELETE FROM outbox WHERE workspace_id=$1 AND processed_at IS NOT NULL")
+        sqlx::query(
+            "DELETE FROM outbox WHERE workspace_id=$1 AND kind='agent_job' AND processed_at IS NOT NULL",
+        )
             .bind(workspace)
             .execute(&su)
             .await
@@ -789,7 +796,7 @@ async fn a_referenced_job_row_is_pinned_and_an_anti_joining_pruner_still_drains(
     // name, in one statement, and leaves the referenced row exactly where the
     // hosted agent will look for it.
     let pruned = sqlx::query(
-        "DELETE FROM outbox o WHERE o.workspace_id=$1 AND o.processed_at IS NOT NULL \
+        "DELETE FROM outbox o WHERE o.workspace_id=$1 AND o.kind='agent_job' AND o.processed_at IS NOT NULL \
            AND NOT EXISTS ( \
              SELECT 1 FROM hosted_agent_inbox_event e \
               WHERE e.workspace_id = o.workspace_id AND e.source_outbox_id = o.id \
@@ -801,11 +808,12 @@ async fn a_referenced_job_row_is_pinned_and_an_anti_joining_pruner_still_drains(
     .expect("an anti-joining pruner drains");
     assert_eq!(pruned.rows_affected(), 1, "exactly the unreferenced row");
 
-    let survivors: Vec<i64> = sqlx::query_scalar("SELECT id FROM outbox WHERE workspace_id=$1")
-        .bind(workspace)
-        .fetch_all(&su)
-        .await
-        .unwrap();
+    let survivors: Vec<i64> =
+        sqlx::query_scalar("SELECT id FROM outbox WHERE workspace_id=$1 AND kind='agent_job'")
+            .bind(workspace)
+            .fetch_all(&su)
+            .await
+            .unwrap();
     assert_eq!(survivors, vec![referenced]);
     assert!(!survivors.contains(&unreferenced));
 
