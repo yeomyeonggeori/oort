@@ -258,6 +258,20 @@ export const GROK_PAIRING_REVEAL_HEADLINE = "이 값을 그록봇에게 말로 �
 export const GROK_PAIRING_PURPOSE =
   "연결 값은 지금 한 번만 보여요. 그록봇에게 말로 전하는 것이 기본이고, 직접 붙여 넣는 것은 다른 방법이에요. 옮긴 뒤 이 화면에서 저장을 마치세요.";
 
+/**
+ * 그록봇 프롬프트 복사 길의 문장들 (#3773). 한 번 복사해 그록봇 대화에 붙여 넣으면
+ * 커넥터와 routine 을 그록봇이 만든다. 직접 붙여 넣는 순서는 접힌 보조 길이다.
+ */
+export const GROK_PROMPT_PURPOSE =
+  "아래 프롬프트를 복사해 그록봇 대화에 한 번 붙여 넣으세요. 커넥터와 routine을 그록봇이 만들어요. 연결 값은 지금 한 번만 보여요.";
+export const GROK_PROMPT_HEADLINE = "그록봇에게 붙여 넣을 프롬프트";
+export const GROK_PROMPT_HINT =
+  "연결 값은 가려 두었고, 복사하면 그대로 들어가요. 값은 커넥터에만 쓰이고 routine 지시에는 들어가지 않아요.";
+export const GROK_PROMPT_DONE_LABEL = "그록봇에 붙여 넣었어요";
+export const GROK_SWAP_HINT =
+  "이 프롬프트를 한 번 더 붙여 넣으면 그록봇이 커넥터의 값을 바꿔요.";
+export const GROK_SWAP_DONE_LABEL = "그록봇에 붙여 넣었어요";
+
 export const PAIRING_REVEAL_WARNING =
   "이 값은 지금 한 번만 보여요. 서버는 원문을 보관하지 않고, 이 화면을 벗어나면 다시 볼 수 없어요. 잃어버리면 값을 다시 발급하세요.";
 
