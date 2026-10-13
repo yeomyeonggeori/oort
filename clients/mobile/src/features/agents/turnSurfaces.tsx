@@ -4,6 +4,7 @@ import {
   type AgentWorkingSignal,
 } from '@momo/core/features/agents/workingSignal';
 import {
+  activityDetail,
   activityLines,
   activitySuffix,
   activityText,
@@ -267,6 +268,7 @@ function ActivityRow({
   const styles = useStyles(buildStyles);
   const showClock =
     live && line.state === 'working' && line.startedAtMs !== undefined;
+  const detail = activityDetail(line, nowMs);
   return (
     <View style={styles.activityRow} testID={testID}>
       <Text
@@ -285,6 +287,14 @@ function ActivityRow({
         ) : null}
         {activitySuffix(line)}
       </Text>
+      {detail !== undefined ? (
+        // 서버가 아는 run의 근거 한 줄(n분째 기다려요 · 앞에 m건 / 가져간 뒤 n분째 소식이
+        // 없어요 / 마지막 보고 n분 전). 사실만 적고 판정은 하지 않는다 — 「끊김」은 서버가
+        // 알릴 때만 나온다.
+        <Text style={styles.activityClock} testID="activity-detail">
+          {detail}
+        </Text>
+      ) : null}
       {showClock ? (
         <Text style={styles.activityClock}>
           {elapsedLabel(line.startedAtMs as number, nowMs)}

@@ -963,6 +963,7 @@ export function WorkingCard({
           {card.place ? <Text style={styles.cardPlace}>{card.place}</Text> : null}
           {card.place && card.headline ? ' · ' : null}
           {card.headline ?? (card.place ? null : '대화')}
+          {card.detail ? `${card.place || card.headline ? ' · ' : ''}${card.detail}` : null}
           {card.others > 0 ? ` · 그 밖에 ${card.others}건` : null}
         </Sentence>
         {card.live ? null : (
