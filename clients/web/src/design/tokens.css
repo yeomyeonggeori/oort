@@ -1813,8 +1813,9 @@
   min-block-size: 34px;
   padding-inline: 10px;
   border-radius: var(--radius-md);
-  font-size: var(--text-body);
-  line-height: var(--text-body--line-height);
+  font-size: var(--text-label);
+  line-height: var(--text-label--line-height);
+  font-weight: 500;
   letter-spacing: 0;
   color: var(--ink);
 
@@ -1828,7 +1829,7 @@
     block-size: 1.125rem;
   }
   &[data-unread] {
-    font-weight: 700;
+    font-weight: 600;
   }
   &[data-unread] [data-row-icon] {
     color: var(--ink);
