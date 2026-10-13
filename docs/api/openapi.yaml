@@ -3277,6 +3277,49 @@ paths:
         "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "404": {description: Gate closed, doorbell missing, or unknown path}
 
+  /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/doorbell/ring:
+    post:
+      tags: [agents]
+      operationId: ringHostedAgentDoorbell
+      summary: Ask the doorbell to ring now (ADR-0200 D4, 「다시 깨우기」).
+      description: >
+        A REQUEST, not a delivery: the existing doorbell registration is re-armed and the sender
+        fires the same content-free signal (ADR-0171 D2) through the same egress policy on its next
+        drain; the outcome lands in `lastFiredAtMs` / `lastStatus`. Allowed for a workspace
+        owner/admin, the person who created the connection, or the agent's recorded owner — a plain
+        channel member is not enough, since every ring spends the owner's vendor usage. Bounded per
+        connection at one per 60 seconds and five per hour (429 with `Retry-After`). Closed unless
+        `MOMO_DOORBELL_ENABLED` is the exact lowercase word `true` — otherwise an empty 404, like the
+        registration beside it. A connection the caller may not ring answers the same 404 as an
+        unknown one.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: connectionId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "202":
+          description: The ring was requested.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+            Pragma: {required: true, schema: {type: string, enum: [no-cache]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/HostedDoorbellRingResponse"}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {description: Gate closed, unknown connection, or not allowed to ring it}
+        "409": {description: Connection is not active, or no doorbell is registered, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "429":
+          description: Cooldown (60 s) or the hourly limit (5) was hit.
+          headers:
+            Retry-After: {required: true, schema: {type: integer, minimum: 1}, description: Seconds until a ring is allowed again.}
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [error, retryAfterSeconds]
+                properties:
+                  error: {type: string}
+                  retryAfterSeconds: {type: integer, minimum: 1}
+
   /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/dm-approvals:
     get:
       tags: [agents]
@@ -14041,6 +14084,14 @@ components:
         reused: {type: boolean}
         pairingCredential: {type: string, description: Returned once. PostgreSQL stores only sha256. Absent when the connection is already active.}
         pairingExpiresAtMs: {type: integer, format: int64}
+
+    HostedDoorbellRingResponse:
+      type: object
+      additionalProperties: false
+      required: [requestedAtMs, nextAllowedAtMs]
+      properties:
+        requestedAtMs: {type: integer, format: int64}
+        nextAllowedAtMs: {type: integer, format: int64, description: When the 60-second cooldown ends.}
 
     RegisterHostedDoorbellRequest:
       type: object

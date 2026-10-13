@@ -592,19 +592,22 @@ mod tests {
     ///
     /// 128 is #3740's run event ledger (ADR-0200 S1): the RLS-FORCE tables `agent_run_event` and
     /// `hosted_agent_liveness`, `agent_run_event_append`, and the `agent_run`/`approval` lifecycle triggers.
+    ///
+    /// 129 is #3743's manual doorbell ring ledger (ADR-0200 S4): the RLS-FORCE table
+    /// `hosted_agent_doorbell_ring` that bounds 「다시 깨우기」 (60 s cooldown, 5 per hour).
     #[test]
-    fn discovers_contiguous_migrations_001_to_128() {
+    fn discovers_contiguous_migrations_001_to_129() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            128,
-            "expected 128 migrations under {}",
+            129,
+            "expected 129 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 128);
+        assert_eq!(migrations.last().unwrap().version, 129);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

@@ -1445,6 +1445,11 @@ pub fn build_app(state: AppState) -> Router {
             put(routes::hosted_agent_doorbell::register)
                 .delete(routes::hosted_agent_doorbell::unregister),
         )
+        // ADR-0200 D4 (#3743): ring it now. Same gate as the registration beside it.
+        .route(
+            "/v1/workspaces/{ws}/hosted-agent-connections/{connection}/doorbell/ring",
+            post(routes::hosted_agent_doorbell::ring),
+        )
         // B5.3a completes the pair: B5.2 could read a profile and respect
         // `paused`, but nothing could write either — an agent's behaviour was
         // fixed at birth and the only way to stop one was to remove it from

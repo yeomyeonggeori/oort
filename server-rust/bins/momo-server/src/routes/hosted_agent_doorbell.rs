@@ -3,6 +3,7 @@
 //! ```text
 //! PUT    /v1/workspaces/{ws}/hosted-agent-connections/{id}/doorbell
 //! DELETE /v1/workspaces/{ws}/hosted-agent-connections/{id}/doorbell
+//! POST   /v1/workspaces/{ws}/hosted-agent-connections/{id}/doorbell/ring   (ADR-0200 D4)
 //! ```
 //!
 //! Off (`MOMO_DOORBELL_ENABLED` ≠ exact `true`) is an empty 404 — the same
@@ -15,13 +16,16 @@ use axum::{Extension, Json};
 use momo_auth::{active_workspace_role, Principal};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_webhook::{
-    register_doorbell_in_tx, unregister_doorbell_in_tx, DoorbellProjection, DoorbellRegisterError,
-    OutboundUrl, OutboundUrlError, SystemHostResolver, DOORBELL_SECRET_MAX_BYTES,
+    register_doorbell_in_tx, request_manual_ring_in_tx, unregister_doorbell_in_tx,
+    DoorbellProjection, DoorbellRegisterError, OutboundUrl, OutboundUrlError, RingOutcome,
+    SystemHostResolver, DOORBELL_SECRET_MAX_BYTES,
 };
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::dto::{HostedDoorbellResponse, RegisterHostedDoorbellRequest};
+use crate::dto::{
+    HostedDoorbellResponse, HostedDoorbellRingResponse, RegisterHostedDoorbellRequest,
+};
 use crate::error::ApiError;
 use crate::routes::shared::{
     agent_tenant_tx, audit_via_token_id, epoch_ms, path_uuid, require_human, settle_db,
@@ -244,4 +248,119 @@ fn url_host(absolute: &str) -> String {
     momo_webhook::parse_outbound_url(absolute, true)
         .map(|url| url.host)
         .unwrap_or_else(|_| "unknown".to_string())
+}
+
+/// `POST /v1/workspaces/{ws}/hosted-agent-connections/{connection}/doorbell/ring`
+/// (ADR-0200 D4 「다시 깨우기」, #3743).
+///
+/// A person asks the doorbell to ring now — the answer to 「깨웠지만 아직 안 가져감」 when
+/// waiting for the next event is not acceptable. Allowed for a workspace admin or the
+/// person who created the connection or the agent's recorded owner (each as a current, active workspace member); a channel member is not
+/// enough, because every ring spends the owner's vendor usage (ADR-0162 증보 3 D16).
+///
+/// What it does is only **request**: the existing doorbell row is re-armed and the
+/// sender fires the same content-free signal (ADR-0171 D2) through the same egress
+/// policy on its next drain, so the answer is `202`, not "delivered". The result of
+/// the ring lands where every ring's does: `lastFiredAtMs` / `lastStatus`.
+///
+/// Bounded at one per 60 seconds and five per hour per connection (`429` with
+/// `Retry-After`). Closed exactly like the rest of the doorbell surface: with
+/// `MOMO_DOORBELL_ENABLED` off this is an empty 404.
+pub async fn ring(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, connection)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    if !state.webhook.doorbell_enabled {
+        return Ok(not_found_empty());
+    }
+    require_human(&principal, "human member required")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let connection_id = path_uuid(&connection, "invalid hosted connection id")?;
+    let member_id = principal.member_id;
+    let via_token = audit_via_token_id(&principal);
+
+    let outcome = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            // Every path — admin, creator, owner — needs an ACTIVE workspace membership
+            // now, not just a token that was valid when it was issued.
+            let Some(role) = active_workspace_role(conn, workspace_id, member_id).await? else {
+                return Ok(Ok(RingOutcome::NotAllowed));
+            };
+            let is_admin = role.is_admin();
+            let outcome =
+                request_manual_ring_in_tx(conn, workspace_id, connection_id, member_id, is_admin)
+                    .await?;
+            if matches!(outcome, RingOutcome::Requested { .. }) {
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, "hosted_agent.doorbell.ring_requested")
+                        .by(member_id)
+                        .target("hosted_agent_connection", connection_id)
+                        .via_token(via_token)
+                        .with_schema(
+                            "momo.hosted_agent.doorbell.ring_requested.v1",
+                            json!({"as_admin": is_admin}),
+                        ),
+                )
+                .await?;
+            }
+            Ok(Ok(outcome))
+        })
+    })
+    .await;
+    let outcome = settle_db("hosted_agent_doorbell.ring", outcome)?;
+
+    match outcome {
+        RingOutcome::Requested {
+            requested_at,
+            next_allowed_at,
+        } => Ok(no_store(
+            StatusCode::ACCEPTED,
+            HostedDoorbellRingResponse {
+                requested_at_ms: epoch_ms(requested_at),
+                next_allowed_at_ms: epoch_ms(next_allowed_at),
+            },
+        )),
+        // An unknown connection and one the caller may not ring answer alike: a person
+        // who cannot ring it learns nothing about whether it exists.
+        RingOutcome::NotFound | RingOutcome::NotAllowed => {
+            Err(ApiError::not_found("hosted connection not found"))
+        }
+        RingOutcome::NotActive => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "doorbell requires an active hosted connection",
+        )),
+        RingOutcome::NotRegistered => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "no doorbell is registered for this connection",
+        )),
+        RingOutcome::Cooldown {
+            retry_after_seconds,
+        } => Ok(too_many_rings(
+            "the doorbell was rung a moment ago",
+            retry_after_seconds,
+        )),
+        RingOutcome::HourlyLimit {
+            retry_after_seconds,
+        } => Ok(too_many_rings(
+            "the hourly limit of manual rings was reached",
+            retry_after_seconds,
+        )),
+    }
+}
+
+fn too_many_rings(message: &str, retry_after_seconds: i64) -> Response {
+    let mut response = (
+        StatusCode::TOO_MANY_REQUESTS,
+        Json(json!({"error": message, "retryAfterSeconds": retry_after_seconds})),
+    )
+        .into_response();
+    if let Ok(value) = HeaderValue::from_str(&retry_after_seconds.to_string()) {
+        response.headers_mut().insert(header::RETRY_AFTER, value);
+    }
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }

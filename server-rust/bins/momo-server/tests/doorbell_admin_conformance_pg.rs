@@ -527,3 +527,488 @@ async fn register_and_unregister_each_write_one_audit_row() {
     assert_eq!(registered, 1);
     assert_eq!(unregistered, 1);
 }
+
+// ---------------------------------------------------------------------------
+// (#3743 S4, ADR-0200 D4) 「다시 깨우기」
+// ---------------------------------------------------------------------------
+
+fn ring_url(base: &str, fixture: &Fixture) -> String {
+    format!("{}/ring", doorbell_url(base, fixture))
+}
+
+/// A workspace member who is neither an admin nor the connection's creator.
+async fn plain_member_3743(pool: &PgPool, fixture: &Fixture) -> (Uuid, String) {
+    let member = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member(id, workspace_id, kind, display_name, handle) \
+         VALUES($1,$2,'human','Plain',$3)",
+    )
+    .bind(member)
+    .bind(fixture.workspace)
+    .bind(format!("plain-{}", member.simple()))
+    .execute(pool)
+    .await
+    .expect("plain member");
+    sqlx::query(
+        "INSERT INTO human(member_id, workspace_id, email, email_verified) VALUES($1,$2,$3,true)",
+    )
+    .bind(member)
+    .bind(fixture.workspace)
+    .bind(format!("{member}@doorbell.test"))
+    .execute(pool)
+    .await
+    .expect("plain identity");
+    sqlx::query(
+        "INSERT INTO workspace_membership(workspace_id, member_id, role) VALUES($1,$2,'member')",
+    )
+    .bind(fixture.workspace)
+    .bind(member)
+    .execute(pool)
+    .await
+    .expect("plain workspace membership");
+    let jwt = momo_auth::sign_access(member, fixture.workspace, &[], TEST_JWT_SECRET)
+        .expect("jwt")
+        .token;
+    sqlx::query(
+        "INSERT INTO token(workspace_id, kind, actor_member_id, token_hash, scopes, label) \
+         VALUES($1,'session',$2,digest($3::text,'sha256'),ARRAY[]::text[],'doorbell-ring')",
+    )
+    .bind(fixture.workspace)
+    .bind(member)
+    .bind(&jwt)
+    .execute(pool)
+    .await
+    .expect("plain session");
+    (member, jwt)
+}
+
+async fn register_3743(http: &reqwest::Client, base: &str, fixture: &Fixture) {
+    let put = http
+        .put(doorbell_url(base, fixture))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "url": "https://example.com/automations/webhook/test",
+            "secret": DOORBELL_SECRET,
+        }))
+        .send()
+        .await
+        .expect("register");
+    assert_eq!(put.status(), 200);
+}
+
+async fn ring_rows_3743(pool: &PgPool, fixture: &Fixture) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM hosted_agent_doorbell_ring WHERE workspace_id=$1 AND connection_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.connection)
+    .fetch_one(pool)
+    .await
+    .expect("ring rows")
+}
+
+/// RED PROOF (ADR-0200 D4, S4; 성재 결재 「소유자·admin, 60초, 시간당 5회」). A manual ring
+/// is a REQUEST: 202, the existing doorbell row re-armed (pending_trailing, window
+/// cleared), one ledger row and one audit row, nothing sent from the route. It is
+/// bounded per connection (one per 60 s, five per hour → 429 + Retry-After), closed to
+/// a plain member (404, writes nothing), open to the connection's creator, and answers
+/// 409 for an inactive connection or an unregistered doorbell.
+///
+/// Tamper table:
+///   * drop the cooldown check                         -> the immediate second ring is 202
+///   * drop the hourly count                           -> the sixth ring in the hour is 202
+///   * allow any workspace member                      -> the plain member gets 202
+///   * do not clear `window_started_at`                -> the re-arm assertion fails
+///   * write no audit row                              -> the audit count fails
+///   * ignore the doorbell flag                        -> the flag-off request is not an empty 404
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_manual_ring_is_a_bounded_request_for_admins_and_the_connections_owner() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(momo_app_pool().await, true).await;
+    let http = reqwest::Client::new();
+    let (plain, plain_jwt) = plain_member_3743(&su, &fixture).await;
+
+    // no doorbell registered yet: 409, and nothing was written
+    let response = http
+        .post(ring_url(&base, &fixture))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 409);
+    assert_eq!(ring_rows_3743(&su, &fixture).await, 0);
+
+    register_3743(&http, &base, &fixture).await;
+    // an open cooldown window from an earlier real ring, to prove the re-arm clears it
+    sqlx::query(
+        "UPDATE hosted_agent_doorbell SET window_started_at = now(), pending_trailing = false \
+          WHERE connection_id = $1",
+    )
+    .bind(fixture.connection)
+    .execute(&su)
+    .await
+    .unwrap();
+
+    // a plain member is not allowed: the same 404 an unknown connection gets, no row
+    let response = http
+        .post(ring_url(&base, &fixture))
+        .bearer_auth(&plain_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 404);
+    assert_eq!(ring_rows_3743(&su, &fixture).await, 0);
+
+    // the admin: 202, re-armed, one ledger row, one audit row
+    let response = http
+        .post(ring_url(&base, &fixture))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 202);
+    let body: Value = response.json().await.unwrap();
+    assert!(body["requestedAtMs"].as_i64().unwrap() > 0);
+    assert!(
+        body["nextAllowedAtMs"].as_i64().unwrap() - body["requestedAtMs"].as_i64().unwrap()
+            >= 59_000
+    );
+    let (pending, window): (bool, Option<chrono::DateTime<chrono::Utc>>) = sqlx::query_as(
+        "SELECT pending_trailing, window_started_at FROM hosted_agent_doorbell WHERE connection_id=$1",
+    )
+    .bind(fixture.connection)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(
+        pending && window.is_none(),
+        "the ring re-arms the existing row"
+    );
+    assert_eq!(ring_rows_3743(&su, &fixture).await, 1);
+    let audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action='hosted_agent.doorbell.ring_requested'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(audits, 1);
+
+    // immediately again: cooldown
+    let response = http
+        .post(ring_url(&base, &fixture))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 429);
+    let retry: i64 = response
+        .headers()
+        .get("retry-after")
+        .expect("Retry-After")
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!((1..=60).contains(&retry), "{retry}");
+    assert_eq!(
+        ring_rows_3743(&su, &fixture).await,
+        1,
+        "a refused ring writes nothing"
+    );
+
+    // the connection's creator who is not an admin may ring (the agent's owner)
+    sqlx::query(
+        "UPDATE hosted_agent_doorbell_ring SET requested_at = now() - interval '2 minutes'",
+    )
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE hosted_agent_connection SET created_by=$3 WHERE workspace_id=$1 AND id=$2")
+        .bind(fixture.workspace)
+        .bind(fixture.connection)
+        .bind(plain)
+        .execute(&su)
+        .await
+        .unwrap();
+    let response = http
+        .post(ring_url(&base, &fixture))
+        .bearer_auth(&plain_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 202, "the creator may ring");
+    sqlx::query("UPDATE hosted_agent_connection SET created_by=$3 WHERE workspace_id=$1 AND id=$2")
+        .bind(fixture.workspace)
+        .bind(fixture.connection)
+        .bind(
+            sqlx::query_scalar::<_, Uuid>(
+                "SELECT actor_member_id FROM token WHERE workspace_id=$1 AND label='doorbell-admin'",
+            )
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap(),
+        )
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // five in the last hour (spaced past the cooldown) -> the hourly limit
+    sqlx::query(
+        "UPDATE hosted_agent_doorbell_ring SET requested_at = now() - interval '2 minutes'",
+    )
+    .execute(&su)
+    .await
+    .unwrap();
+    for minutes in [10, 20, 30] {
+        sqlx::query(
+            "INSERT INTO hosted_agent_doorbell_ring (workspace_id, connection_id, requested_by, requested_at) \
+             VALUES ($1,$2,$3, now() - make_interval(mins => $4))",
+        )
+        .bind(fixture.workspace)
+        .bind(fixture.connection)
+        .bind(plain)
+        .bind(minutes)
+        .execute(&su)
+        .await
+        .unwrap();
+    }
+    // 2 rows so far (admin's + creator's, both backdated to 2 min) + 3 inserted = 5
+    assert_eq!(ring_rows_3743(&su, &fixture).await, 5);
+    let response = http
+        .post(ring_url(&base, &fixture))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 429);
+    let retry: i64 = response
+        .headers()
+        .get("retry-after")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(
+        retry > 60,
+        "the hourly wait is minutes, not the cooldown: {retry}"
+    );
+    assert_eq!(ring_rows_3743(&su, &fixture).await, 5);
+
+    // an inactive connection and an unknown one
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET status='expired' WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.connection)
+    .execute(&su)
+    .await
+    .unwrap();
+    let response = http
+        .post(ring_url(&base, &fixture))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 409);
+    let response = http
+        .post(format!(
+            "{base}/v1/workspaces/{}/hosted-agent-connections/{}/doorbell/ring",
+            fixture.workspace,
+            Uuid::new_v4()
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 404);
+
+    // the closed gate: an empty 404, the same as an unknown path, and no row
+    let closed_base = start_server(momo_app_pool().await, false).await;
+    let before = ring_rows_3743(&su, &fixture).await;
+    let response = http
+        .post(ring_url(&closed_base, &fixture))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 404);
+    assert!(response.bytes().await.unwrap().is_empty());
+    assert_eq!(ring_rows_3743(&su, &fixture).await, before);
+}
+
+/// RED PROOF (S4 security review M1 + the cap's own claim). (a) Six simultaneous rings
+/// on one connection: exactly ONE is accepted — the doorbell-row lock is what makes the
+/// 60-second cooldown a fact rather than a race. (b) The lock ORDER is the disconnect's
+/// (connection, then doorbell): a disconnect holding the connection while it removes the
+/// doorbell must never deadlock with a ring that arrives meanwhile; the ring sees a
+/// settled state and answers, it is never aborted with 40P01. (c) The agent's recorded
+/// owner may ring, and a member who has left the workspace may not.
+///
+/// Tamper table:
+///   * drop `FOR UPDATE` on the doorbell row                      -> (a) more than one 202
+///   * lock the doorbell before the connection (drop KEY SHARE)   -> (b) deadlock: the ring errors
+///   * drop the `owner_human_id` branch                            -> (c) the owner gets 404
+///   * skip the active-membership check                            -> (c) the departed member gets 202
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn manual_rings_are_serialized_follow_the_disconnect_lock_order_and_need_active_membership() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su).await;
+    let app = momo_app_pool().await;
+    let base = start_server(app.clone(), true).await;
+    let http = reqwest::Client::new();
+    register_3743(&http, &base, &fixture).await;
+
+    // (a) six at once
+    let mut handles = Vec::new();
+    for _ in 0..6 {
+        let http = http.clone();
+        let url = ring_url(&base, &fixture);
+        let jwt = fixture.human_jwt.clone();
+        handles.push(tokio::spawn(async move {
+            http.post(url)
+                .bearer_auth(jwt)
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .as_u16()
+        }));
+    }
+    let mut statuses = Vec::new();
+    for handle in handles {
+        statuses.push(handle.await.unwrap());
+    }
+    assert_eq!(
+        statuses.iter().filter(|status| **status == 202).count(),
+        1,
+        "exactly one ring is accepted: {statuses:?}"
+    );
+    assert!(
+        statuses.iter().all(|status| matches!(*status, 202 | 429)),
+        "{statuses:?}"
+    );
+    assert_eq!(ring_rows_3743(&su, &fixture).await, 1);
+
+    // (b) a disconnect-shaped transaction holds the connection, then removes the doorbell,
+    // while a ring starts in between
+    sqlx::query("DELETE FROM hosted_agent_doorbell_ring")
+        .execute(&su)
+        .await
+        .unwrap();
+    let mut disconnect = su.begin().await.unwrap();
+    sqlx::query(
+        "SELECT id FROM hosted_agent_connection WHERE workspace_id=$1 AND id=$2 FOR UPDATE",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.connection)
+    .execute(&mut *disconnect)
+    .await
+    .unwrap();
+    let ring = {
+        let app = app.clone();
+        let (workspace, connection, actor) = (
+            fixture.workspace,
+            fixture.connection,
+            sqlx::query_scalar::<_, Uuid>(
+                "SELECT actor_member_id FROM token WHERE workspace_id=$1 AND label='doorbell-admin'",
+            )
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap(),
+        );
+        tokio::spawn(async move {
+            momo_db::with_tenant_tx(&app, workspace, move |conn| {
+                Box::pin(async move {
+                    momo_webhook::request_manual_ring_in_tx(
+                        conn, workspace, connection, actor, true,
+                    )
+                    .await
+                })
+            })
+            .await
+        })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        sqlx::query("DELETE FROM hosted_agent_doorbell WHERE workspace_id=$1 AND connection_id=$2")
+            .bind(fixture.workspace)
+            .bind(fixture.connection)
+            .execute(&mut *disconnect),
+    )
+    .await
+    .expect("the disconnect is never blocked by a ring that arrived meanwhile")
+    .unwrap();
+    disconnect.commit().await.unwrap();
+    let outcome = ring
+        .await
+        .unwrap()
+        .expect("the ring is answered, not aborted by a deadlock");
+    assert_eq!(
+        outcome,
+        momo_webhook::RingOutcome::NotRegistered,
+        "it saw the settled state after the disconnect"
+    );
+
+    // (c) the agent's recorded owner, and a member who left
+    register_3743(&http, &base, &fixture).await;
+    let (member, jwt) = plain_member_3743(&su, &fixture).await;
+    sqlx::query(
+        "UPDATE agent SET owner_human_id=$2 WHERE workspace_id=$1 AND member_id IN \
+                 (SELECT agent_member_id FROM hosted_agent_connection WHERE id=$3)",
+    )
+    .bind(fixture.workspace)
+    .bind(member)
+    .bind(fixture.connection)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM hosted_agent_doorbell_ring")
+        .execute(&su)
+        .await
+        .unwrap();
+    let response = http
+        .post(ring_url(&base, &fixture))
+        .bearer_auth(&jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        202,
+        "the agent's recorded owner may ring"
+    );
+    sqlx::query("DELETE FROM hosted_agent_doorbell_ring")
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM workspace_membership WHERE workspace_id=$1 AND member_id=$2")
+        .bind(fixture.workspace)
+        .bind(member)
+        .execute(&su)
+        .await
+        .unwrap();
+    let response = http
+        .post(ring_url(&base, &fixture))
+        .bearer_auth(&jwt)
+        .send()
+        .await
+        .unwrap();
+    println!("departed member answered {}", response.status());
+    assert_eq!(
+        response.status(),
+        404,
+        "a member who left cannot ring (the route's own active-membership check answers, \
+         not an earlier layer)"
+    );
+    assert_eq!(ring_rows_3743(&su, &fixture).await, 0);
+}
