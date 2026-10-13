@@ -12597,7 +12597,7 @@ async fn a_decided_card_is_announced_and_a_late_click_names_the_real_decision() 
 
     // 3. a late click, with a fresh key (what a re-mounted card sends).
     let ledger_ms: i64 = sqlx::query_scalar(
-        "SELECT (extract(epoch FROM decided_at) * 1000)::bigint FROM approval \
+        "SELECT floor(extract(epoch FROM decided_at) * 1000)::bigint FROM approval \
           WHERE workspace_id=$1 AND id=$2",
     )
     .bind(fixture.workspace)
@@ -12631,4 +12631,38 @@ async fn a_decided_card_is_announced_and_a_late_click_names_the_real_decision() 
         2,
         "a refused late click rewrites nothing and announces nothing"
     );
+}
+
+/// The rejection arm rewrites the card too (#3771), so it announces it too.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_rejected_card_is_announced_as_rejected() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+    let (approval_id, card_message_id) = propose_invite(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        json!({"role": "member", "maxUses": 1, "expiresInDays": 7}),
+    )
+    .await;
+    let (status, _, rejected) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval_id,
+        false,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{rejected}");
+    let frames = edited_frames_for(&su, fixture.workspace, card_message_id).await;
+    assert_eq!(frames.len(), 1, "the rejection announces the card once");
+    assert_eq!(frames[0]["payload"]["props"]["status"], json!("rejected"));
 }

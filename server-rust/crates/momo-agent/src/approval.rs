@@ -400,12 +400,16 @@ pub async fn lock_approval_in_tx(
 /// (expiry, cancellation), which is preserved rather than invented.
 pub async fn decision_stamp_in_tx(
     conn: &mut PgConnection,
+    workspace_id: Uuid,
     approval_id: Uuid,
 ) -> Result<Option<(Option<Uuid>, Option<DateTime<Utc>>)>, DbError> {
-    let row = sqlx::query("SELECT decided_by, decided_at FROM approval WHERE id = $1")
-        .bind(approval_id)
-        .fetch_optional(&mut *conn)
-        .await?;
+    let row = sqlx::query(
+        "SELECT decided_by, decided_at FROM approval WHERE id = $1 AND workspace_id = $2",
+    )
+    .bind(approval_id)
+    .bind(workspace_id)
+    .fetch_optional(&mut *conn)
+    .await?;
     let Some(row) = row else { return Ok(None) };
     Ok(Some((
         row.try_get("decided_by").map_err(DbError::from)?,

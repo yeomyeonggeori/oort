@@ -557,7 +557,7 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
         // its `NULL` decider; a row that vanished mid-lock falls back to the old
         // shape (it cannot be reached under `FOR UPDATE`, but the receipt must
         // still decode).
-        let (decided_by, decided_at) = decision_stamp_in_tx(conn, approval.id)
+        let (decided_by, decided_at) = decision_stamp_in_tx(conn, input.workspace_id, approval.id)
             .await?
             .map(|(by, at)| (by, at.unwrap_or(now)))
             .unwrap_or((Some(input.member_id), now));
