@@ -11504,6 +11504,21 @@ async fn a_ping_proves_alive_not_working_and_the_work_signals_are_throttled() {
     mention_3740(&client, &base, &su, &fixture, fixture.hosted_agent).await;
     let liveness = connection_liveness_3742(&client, &base, &fixture).await;
     assert_eq!(liveness["workWaiting"], json!(true), "{liveness}");
+    // a fresh job is just a polling agent's normal queue; one that has waited past the
+    // responsive window while the agent keeps reading its inbox is NOT "responsive"
+    assert_eq!(liveness["state"], json!("responsive"), "{liveness}");
+    sqlx::query(
+        "UPDATE outbox SET created_at = now() - interval '30 minutes' \
+          WHERE workspace_id=$1 AND kind='agent_job' AND partition_key=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_eq!(liveness["state"], json!("work_waiting"), "{liveness}");
+    assert!(liveness["oldestWaitingAtMs"].as_i64().unwrap() > 0);
     let (_, claimed) = call(
         &client,
         &base,
@@ -11637,6 +11652,33 @@ async fn a_refusal_is_a_closed_code_that_recovers_and_members_see_the_label_only
     assert_eq!(status, 200);
     let liveness = connection_liveness_3742(&client, &base, &fixture).await;
     assert_ne!(liveness["state"], json!("error"), "recovered: {liveness}");
+
+    // the SAME refusal again, seconds later: a new fact, not swallowed by the 30 s
+    // throttle (a flapping "unavailable" must not read as fine)
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_conversation_read",
+        json!({"channelId": fixture.private_channel}),
+    )
+    .await;
+    assert!(status >= 400);
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_eq!(
+        liveness["state"],
+        json!("error"),
+        "flapping stays visible: {liveness}"
+    );
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_inbox_read",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, 200);
 
     // the member-facing label
     let plain_jwt = seed_plain_member(&su, &fixture).await; // shares `channel` with the agent

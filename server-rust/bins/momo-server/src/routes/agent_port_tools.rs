@@ -272,6 +272,10 @@ pub(crate) async fn execute(
 ///
 /// Throttled to one write per column per 30 s inside the statement, so a polling
 /// agent is nearly free. Best effort: a failure is logged and never reaches the wire.
+/// A liveness write that cannot finish in this long is dropped (and logged): the tool
+/// has already settled, and a slow database must not become a slow tool response.
+const LIVENESS_WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
 async fn record_liveness(
     state: &AppState,
     caller: HostedCaller,
@@ -304,18 +308,21 @@ async fn record_liveness(
                 },
                 _ => Touch::default(),
             };
-            momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
-                Box::pin(async move {
-                    momo_agent::record_tool_success_in_tx(
-                        conn,
-                        caller.workspace_id,
-                        caller.agent_member_id,
-                        caller.token_id,
-                        touch,
-                    )
-                    .await
-                })
-            })
+            tokio::time::timeout(
+                LIVENESS_WRITE_TIMEOUT,
+                momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+                    Box::pin(async move {
+                        momo_agent::record_tool_success_in_tx(
+                            conn,
+                            caller.workspace_id,
+                            caller.agent_member_id,
+                            caller.token_id,
+                            touch,
+                        )
+                        .await
+                    })
+                }),
+            )
             .await
         }
         Err(failure @ (ToolFailure::Unavailable | ToolFailure::NotAuthorized)) => {
@@ -324,24 +331,31 @@ async fn record_liveness(
             } else {
                 "not_authorized"
             };
-            momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
-                Box::pin(async move {
-                    momo_agent::record_tool_error_in_tx(
-                        conn,
-                        caller.workspace_id,
-                        caller.agent_member_id,
-                        caller.token_id,
-                        code,
-                    )
-                    .await
-                })
-            })
+            tokio::time::timeout(
+                LIVENESS_WRITE_TIMEOUT,
+                momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+                    Box::pin(async move {
+                        momo_agent::record_tool_error_in_tx(
+                            conn,
+                            caller.workspace_id,
+                            caller.agent_member_id,
+                            caller.token_id,
+                            code,
+                        )
+                        .await
+                    })
+                }),
+            )
             .await
         }
         Err(_) => return,
     };
-    if let Err(error) = write {
-        tracing::warn!(error = %error, tool, "agent port liveness write failed");
+    match write {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            tracing::warn!(error = %error, tool, "agent port liveness write failed");
+        }
+        Err(_) => tracing::warn!(tool, "agent port liveness write timed out"),
     }
 }
 

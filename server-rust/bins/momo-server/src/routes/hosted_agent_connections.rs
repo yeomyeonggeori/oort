@@ -166,19 +166,29 @@ pub(crate) async fn attach_liveness(
             continue;
         };
         let active = dto.status == "active";
-        let waiting = active
-            && !momo_outbox::list_claimable_hosted_jobs_in_tx(conn, workspace_id, agent, 1)
+        let waiting_since = if active {
+            momo_outbox::list_claimable_hosted_jobs_in_tx(conn, workspace_id, agent, 1)
                 .await
                 .map_err(momo_db::DbError::from)?
-                .is_empty();
+                .first()
+                .map(|job| job.created_at)
+        } else {
+            None
+        };
         let doorbell = momo_agent::DoorbellFact {
             last_fired_at: dto
                 .doorbell_last_fired_at_ms
                 .and_then(chrono::DateTime::from_timestamp_millis),
             last_status: dto.doorbell_last_status.clone(),
         };
-        let liveness =
-            momo_agent::derive_liveness(now, active, rows.get(&id), &doorbell, waiting, thresholds);
+        let liveness = momo_agent::derive_liveness(
+            now,
+            active,
+            rows.get(&id),
+            &doorbell,
+            waiting_since,
+            thresholds,
+        );
         dto.liveness = Some(crate::dto::HostedLivenessDto {
             state: liveness.state.as_wire().to_string(),
             last_signal_at_ms: liveness.last_signal_at.map(super::shared::epoch_ms),
@@ -187,7 +197,8 @@ pub(crate) async fn attach_liveness(
             last_ping_state: liveness.last_ping_state,
             last_tool_error_at_ms: liveness.last_tool_error_at.map(super::shared::epoch_ms),
             last_tool_error_code: liveness.last_tool_error_code,
-            work_waiting: waiting,
+            work_waiting: waiting_since.is_some(),
+            oldest_waiting_at_ms: waiting_since.map(super::shared::epoch_ms),
         });
     }
     Ok(())
@@ -591,16 +602,15 @@ pub async fn agent_liveness(
                 } else {
                     None
                 };
-                let waiting = active
-                    && !momo_outbox::list_claimable_hosted_jobs_in_tx(
-                        conn,
-                        workspace_id,
-                        agent_id,
-                        1,
-                    )
-                    .await
-                    .map_err(momo_db::DbError::from)?
-                    .is_empty();
+                let waiting_since = if active {
+                    momo_outbox::list_claimable_hosted_jobs_in_tx(conn, workspace_id, agent_id, 1)
+                        .await
+                        .map_err(momo_db::DbError::from)?
+                        .first()
+                        .map(|job| job.created_at)
+                } else {
+                    None
+                };
                 let fact = momo_agent::DoorbellFact {
                     last_fired_at: doorbell.as_ref().and_then(|bell| bell.last_fired_at),
                     last_status: doorbell.and_then(|bell| bell.last_status),
@@ -610,7 +620,7 @@ pub async fn agent_liveness(
                     active,
                     rows.get(&connection_id),
                     &fact,
-                    waiting,
+                    waiting_since,
                     &thresholds,
                 );
                 Ok(Ok(AgentLivenessDto {

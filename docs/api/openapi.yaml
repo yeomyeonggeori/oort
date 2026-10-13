@@ -13931,12 +13931,14 @@ components:
       properties:
         state:
           type: string
-          enum: [inactive, error, woken_not_collected, responsive, alive_idle, quiet, unresponsive]
+          enum: [inactive, error, woken_not_collected, work_waiting, responsive, alive_idle, quiet, unresponsive]
           description: >
             `responsive` = a work signal (inbox read, claim that took a job, run event) within the
             responsive window (default 20 min). `alive_idle` = a recent `oort_ping` but no work
             signal: alive, takes no work. `woken_not_collected` = the doorbell rang (2xx), the grace
-            passed, claimable work is waiting and nothing was taken. `quiet` = some signal inside the
+            passed, claimable work is waiting and nothing was taken. `work_waiting` = claimable work
+            has waited past the responsive window and nothing was claimed since it was queued, even
+            if the agent is polling or pinging. `quiet` = some signal inside the
             quiet window (default 60 min). `unresponsive` = none, or never. `error` = the newest fact
             is a refused call. `inactive` = the connection is not active.
         lastSignalAtMs: {type: integer, format: int64}
@@ -13950,6 +13952,7 @@ components:
         workWaiting:
           type: boolean
           description: At least one queued run this agent could claim right now.
+        oldestWaitingAtMs: {type: integer, format: int64}
 
     AgentLiveness:
       type: object
@@ -13962,7 +13965,7 @@ components:
         agentMemberId: {type: string, format: uuid}
         state:
           type: string
-          enum: [inactive, error, woken_not_collected, responsive, alive_idle, quiet, unresponsive]
+          enum: [inactive, error, woken_not_collected, work_waiting, responsive, alive_idle, quiet, unresponsive]
         lastSignalAtMs: {type: integer, format: int64}
 
     EnablePersonalAgentRequest:

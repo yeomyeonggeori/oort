@@ -4537,7 +4537,8 @@ pub struct HostedAgentConnectionDto {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostedLivenessDto {
-    /// inactive, error, woken_not_collected, responsive, alive_idle, quiet, unresponsive.
+    /// inactive, error, woken_not_collected, work_waiting, responsive, alive_idle, quiet,
+    /// unresponsive.
     pub state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_signal_at_ms: Option<i64>,
@@ -4555,6 +4556,9 @@ pub struct HostedLivenessDto {
     pub last_tool_error_code: Option<String>,
     /// At least one queued run the agent could claim right now.
     pub work_waiting: bool,
+    /// When the oldest such run was queued.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oldest_waiting_at_ms: Option<i64>,
 }
 
 /// openapi `AgentLiveness` — what any member who shares a channel with the agent may

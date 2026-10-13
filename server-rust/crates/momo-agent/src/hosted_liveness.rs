@@ -149,7 +149,9 @@ pub async fn record_ping_in_tx(
 }
 
 /// A refused tool call, by closed code (`unavailable`, `not_authorized`, …), on the
-/// caller's own active connection. Throttled like everything else here.
+/// caller's own active connection. Throttled like everything else here — EXCEPT that a
+/// refusal arriving after the previous one was already resolved by an accepted call is a
+/// new fact and is always written (otherwise a flapping "unavailable" would read as fine).
 pub async fn record_tool_error_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -168,7 +170,8 @@ pub async fn record_tool_error_in_tx(
             last_tool_error_at = now(), last_tool_error_code = $4, updated_at = now() \
           WHERE l.last_tool_error_at IS NULL \
              OR l.last_tool_error_at < now() - interval '30 seconds' \
-             OR l.last_tool_error_code IS DISTINCT FROM $4",
+             OR l.last_tool_error_code IS DISTINCT FROM $4 \
+             OR l.last_tool_error_at <= l.last_tool_call_at",
     )
     .bind(workspace_id)
     .bind(agent_member_id)
@@ -275,6 +278,10 @@ pub enum LivenessState {
     Error,
     /// The doorbell rang, the grace passed, work is waiting, and nothing was taken.
     WokenNotCollected,
+    /// Claimable work has waited longer than the responsive window and nothing has been
+    /// claimed since — whatever else the agent is doing (reading the inbox, pinging). The
+    /// doorbell is not required: an agent that polls but never takes the job is the case.
+    WorkWaiting,
     /// A work signal within the responsive window.
     Responsive,
     /// A ping within the window but no work signal: alive, takes no work.
@@ -291,6 +298,7 @@ impl LivenessState {
             LivenessState::Inactive => "inactive",
             LivenessState::Error => "error",
             LivenessState::WokenNotCollected => "woken_not_collected",
+            LivenessState::WorkWaiting => "work_waiting",
             LivenessState::Responsive => "responsive",
             LivenessState::AliveIdle => "alive_idle",
             LivenessState::Quiet => "quiet",
@@ -348,15 +356,17 @@ pub struct Liveness {
 }
 
 /// Decide the label. Order matters and is the ADR's:
-/// inactive, then error, then woken-not-collected (alive but not taking work is
-/// the headline even when a ping is fresh), then responsive, alive-idle, quiet,
-/// unresponsive.
+/// inactive, then error, then woken-not-collected and work-waiting (alive but not
+/// taking work is the headline even when a ping or an inbox read is fresh), then
+/// responsive, alive-idle, quiet, unresponsive.
+///
+/// `waiting_since` is when the oldest claimable job was queued (`None` = nothing waits).
 pub fn derive_liveness(
     now: DateTime<Utc>,
     connection_active: bool,
     row: Option<&LivenessRow>,
     doorbell: &DoorbellFact,
-    waiting_work: bool,
+    waiting_since: Option<DateTime<Utc>>,
     thresholds: &LivenessThresholds,
 ) -> Liveness {
     let empty = LivenessRow::default();
@@ -385,7 +395,7 @@ pub fn derive_liveness(
         .is_some_and(|errored| signal.is_none_or(|ok| errored > ok))
     {
         LivenessState::Error
-    } else if waiting_work
+    } else if waiting_since.is_some()
         && doorbell.rang_ok()
         && doorbell
             .last_fired_at
@@ -399,6 +409,11 @@ pub fn derive_liveness(
         })
     {
         LivenessState::WokenNotCollected
+    } else if waiting_since.is_some_and(|queued| {
+        now - queued >= thresholds.responsive
+            && row.last_claim_at.is_none_or(|claimed| claimed < queued)
+    }) {
+        LivenessState::WorkWaiting
     } else if within(work, thresholds.responsive) {
         LivenessState::Responsive
     } else if within(row.last_ping_at, thresholds.responsive) {
@@ -429,12 +444,14 @@ mod tests {
     }
 
     fn derive(row: &LivenessRow, doorbell: &DoorbellFact, waiting: bool) -> LivenessState {
+        // a job that has waited 11 minutes (inside the responsive window)
+        let waiting_since = waiting.then(|| Utc::now() - Duration::minutes(11));
         derive_liveness(
             Utc::now(),
             true,
             Some(row),
             doorbell,
-            waiting,
+            waiting_since,
             &LivenessThresholds::default(),
         )
         .state
@@ -447,7 +464,7 @@ mod tests {
             true,
             None,
             &DoorbellFact::default(),
-            false,
+            None,
             &LivenessThresholds::default(),
         )
         .state;
@@ -465,7 +482,7 @@ mod tests {
             false,
             Some(&row),
             &DoorbellFact::default(),
-            false,
+            None,
             &LivenessThresholds::default(),
         )
         .state;
@@ -592,6 +609,49 @@ mod tests {
             derive(&row, &DoorbellFact::default(), false),
             LivenessState::Quiet
         );
+    }
+
+    /// Review M3: an agent that polls (or pings) but never takes the job is not
+    /// "responsive" for long. Work that has waited past the responsive window and was not
+    /// claimed since it was queued is the headline — with no doorbell involved.
+    #[test]
+    fn claimable_work_that_waited_past_the_window_beats_a_fresh_poll_and_a_fresh_ping() {
+        let now = Utc::now();
+        let row = LivenessRow {
+            last_inbox_read_at: at(1),
+            last_ping_at: at(1),
+            last_claim_at: at(300),
+            ..Default::default()
+        };
+        let waited = |minutes: i64| {
+            derive_liveness(
+                now,
+                true,
+                Some(&row),
+                &DoorbellFact::default(),
+                Some(now - Duration::minutes(minutes)),
+                &LivenessThresholds::default(),
+            )
+            .state
+        };
+        assert_eq!(waited(25), LivenessState::WorkWaiting);
+        // inside the window it is still just a polling agent
+        assert_eq!(waited(10), LivenessState::Responsive);
+        // a claim AFTER the job was queued means it was taken, not ignored
+        let claimed = LivenessRow {
+            last_claim_at: at(2),
+            ..row.clone()
+        };
+        let state = derive_liveness(
+            now,
+            true,
+            Some(&claimed),
+            &DoorbellFact::default(),
+            Some(now - Duration::minutes(25)),
+            &LivenessThresholds::default(),
+        )
+        .state;
+        assert_eq!(state, LivenessState::Responsive);
     }
 
     #[test]
