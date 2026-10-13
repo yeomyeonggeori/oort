@@ -11,6 +11,9 @@
 //! claim/approve/cancel paths — migration 128) and folds an immediate stage repeat; the
 //! 200-row cap is `agent_run_event_trim`, called right after a stage append. There is no other INSERT into the table.
 //!
+//! `seq` is an ordering key from a global sequence (gaps, cross-tenant): callers must
+//! not hand it to a client as a count (migration 128).
+//!
 //! Only closed vocabulary and one validated ≤80 char stage marker are stored:
 //! never `detail`, never `textDelta` (ADR-0200 D2).
 
@@ -54,9 +57,10 @@ pub async fn append_run_event_in_tx(
         .fetch_one(&mut *conn)
         .await?;
     let seq: Option<i64> = row.try_get("seq")?;
-    if kind == "stage" && seq.is_some() {
+    if seq.is_some() {
         // The 200-row cap is its own SQL function so the append (fired by triggers
-        // under DELETE-less roles) never contains a DELETE.
+        // under DELETE-less roles) never contains a DELETE. Called after EVERY
+        // server-side append — a run that only ever re-claims (no stage) is bounded too.
         sqlx::query("SELECT agent_run_event_trim($1, $2)")
             .bind(workspace_id)
             .bind(run_id)

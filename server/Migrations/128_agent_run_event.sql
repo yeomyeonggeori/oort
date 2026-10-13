@@ -53,8 +53,11 @@ CREATE TABLE agent_run_event (
   actor_member_id uuid,
   created_at      timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (workspace_id, run_id, seq),
-  FOREIGN KEY (workspace_id, run_id)
-    REFERENCES agent_run (workspace_id, id) ON DELETE CASCADE,
+  -- NO foreign key to agent_run, on purpose (re-review M-A): the FK check takes KEY SHARE
+  -- on the run row, which conflicts with the gateway callbacks' `FOR UPDATE` on that row
+  -- while the claim path holds the outbox row — the same cycle the advisory lock closed.
+  -- Integrity is kept by agent_run_event_append (EXISTS under RLS), the WITH CHECK, and
+  -- the AFTER DELETE trigger on agent_run below that replaces ON DELETE CASCADE.
   CONSTRAINT agent_run_event_kind_ck CHECK (kind IN (
     'queued', 'claimed', 'started', 'stage', 'paused', 'resumed',
     'approval_requested', 'approval_decided',
@@ -115,10 +118,19 @@ BEGIN
 END $$;
 
 DO $$
+DECLARE r text;
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_app') THEN
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE agent_run_event, hosted_agent_liveness TO momo_app;
   END IF;
+  -- USAGE for the sequence that allocates `seq`, for every role that updates agent_run (and so
+  -- fires the trigger). No UPDATE: nobody needs setval(). Bootstrap re-grants ALL SEQUENCES
+  -- on managed installs; this line closes the self-host path that skips that (re-review L-D).
+  FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+      EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE agent_run_event_seq TO %I', r);
+    END IF;
+  END LOOP;
 END $$;
 
 -- -----------------------------------------------------------------------------
@@ -355,3 +367,21 @@ $$;
 CREATE TRIGGER agent_run_event_immutable_trg
   BEFORE UPDATE ON agent_run_event
   FOR EACH ROW EXECUTE FUNCTION agent_run_event_immutable();
+
+-- -----------------------------------------------------------------------------
+-- The replacement for `ON DELETE CASCADE` (no FK, see the table): a run that goes —
+-- directly, or through its channel or workspace — takes its ledger with it.
+-- -----------------------------------------------------------------------------
+CREATE FUNCTION agent_run_event_on_run_delete() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  DELETE FROM agent_run_event WHERE workspace_id = OLD.workspace_id AND run_id = OLD.id;
+  RETURN OLD;
+END;
+$$;
+
+CREATE TRIGGER agent_run_event_del_trg
+  AFTER DELETE ON agent_run
+  FOR EACH ROW EXECUTE FUNCTION agent_run_event_on_run_delete();

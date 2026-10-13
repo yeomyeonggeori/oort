@@ -10534,6 +10534,8 @@ async fn the_run_event_ledger_is_tenant_isolated() {
 ///     blocks behind the open first one and the timeout below fires
 ///   * drop the `EXISTS (SELECT 1 FROM agent_run ...)` guard        -> the missing-run append raises 23503
 ///   * drop `agent_run_event_immutable_trg`                         -> the UPDATE succeeds
+///   * drop the trim call in `append_run_event_in_tx`               -> a re-claim-only run grows past 200
+///   * drop `agent_run_event_del_trg`                               -> the deleted run's ledger survives
 #[tokio::test]
 #[ignore = "needs verifier-owned isolated PostgreSQL 18"]
 async fn the_ledger_append_takes_no_lock_and_history_is_immutable() {
@@ -10631,26 +10633,32 @@ async fn the_ledger_append_takes_no_lock_and_history_is_immutable() {
         .bind(run)
         .execute(&su)
         .await;
-    assert!(
-        update.is_err(),
-        "agent_run_event rows must not be updatable"
+    let update = update.expect_err("agent_run_event rows must not be updatable");
+    assert_eq!(
+        update
+            .as_database_error()
+            .and_then(|db| db.code())
+            .as_deref(),
+        Some("23001"),
+        "refused by the immutability trigger itself: {update}"
     );
 
-    // The cap sheds stage rows first and only then old `claimed` rows, never the newest.
-    for _ in 0..260 {
-        sqlx::query("SELECT agent_run_event_append($1,$2,'claimed',NULL,NULL,NULL,$3)")
-            .bind(fixture.workspace)
-            .bind(run)
-            .bind(fixture.hosted_agent)
-            .execute(&su)
+    // The cap, through the PRODUCTION helper (the claim path calls it, not a test): old
+    // `claimed` rows are shed, the newest stays, nothing else goes.
+    {
+        let mut conn = su.acquire().await.unwrap();
+        for _ in 0..260 {
+            let seq = momo_agent::append_run_event_in_tx(
+                &mut conn,
+                fixture.workspace,
+                run,
+                momo_agent::AppendedRunEvent::Claimed,
+                fixture.hosted_agent,
+            )
             .await
             .unwrap();
-        sqlx::query("SELECT agent_run_event_trim($1,$2)")
-            .bind(fixture.workspace)
-            .bind(run)
-            .execute(&su)
-            .await
-            .unwrap();
+            assert!(seq.is_some());
+        }
     }
     let rows = ledger_3740(&su, fixture.workspace, run).await;
     assert_eq!(
@@ -10661,5 +10669,21 @@ async fn the_ledger_append_takes_no_lock_and_history_is_immutable() {
     assert!(
         rows.iter().any(|row| row.1 == "queued") && rows.iter().any(|row| row.1 == "cancelled"),
         "only `claimed` rows were shed"
+    );
+
+    // No FK means the delete trigger is what removes a deleted run's ledger.
+    sqlx::query("DELETE FROM approval WHERE run_id=$1")
+        .bind(run)
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM agent_run WHERE id=$1")
+        .bind(run)
+        .execute(&su)
+        .await
+        .unwrap();
+    assert!(
+        ledger_3740(&su, fixture.workspace, run).await.is_empty(),
+        "a deleted run takes its ledger with it"
     );
 }
