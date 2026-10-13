@@ -5,6 +5,7 @@ import { useSession } from "@/app/session";
 import { memberFor, type Directory, useRoleLabels } from "@/features/workspace/useWorkspace";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { CustomStatusMark } from "@/features/sidebar/CustomStatusMark";
+import { AgentLivenessLabel } from "@/features/agents/AgentLivenessLabel";
 import { useCustomStatusView } from "@/features/sidebar/useCustomStatusView";
 import {
   memberRowLabel,
@@ -87,6 +88,9 @@ export function MemberRow({
           {owner.displayName} 님이 관리
         </span>
       )}
+      {/* 「연결됨」이 아니라 「지금 살아 있는가」(ADR-0200 D4). hosted가 아닌
+          에이전트에는 서버가 답하지 않아 아무것도 서지 않는다. */}
+      {isAgent && <AgentLivenessLabel agentId={member.id} />}
     </span>
   );
 

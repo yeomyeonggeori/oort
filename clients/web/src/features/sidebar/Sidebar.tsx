@@ -23,6 +23,7 @@ import {
   type AgentWorkingSignal,
 } from "@/features/agents/agentWorkingSignal";
 import { AgentTurnBadge as AgentTurnStatusBadge } from "@/features/agents/AgentTurnBadge";
+import { AgentLivenessLabel } from "@/features/agents/AgentLivenessLabel";
 import {
   agentTurnBadgeCopy,
   UNKNOWN_AGENT_NAME,
@@ -547,6 +548,12 @@ export function Sidebar({
         : null;
     const dmPeerMember = label.kind === "self" ? (selfMember ?? null) : peer;
     const dot = channel.kind === "dm" ? peerDot(dmPeerMember, nowMs) : null;
+    const rowTurns = applyApprovalWaits(
+      agentTurnsInChannel(turnSignals, channel.id, nowMs),
+      channel.id,
+      approvalWaits,
+      nowMs
+    );
     const currentSectionId = sidebarPrefs.sectionIdFor(channel.id);
     const canDragRow =
       canEditSections &&
@@ -583,15 +590,15 @@ export function Sidebar({
           <>
             {dot ? <span className="sr-only">{PEER_DOT_LABEL[dot]}</span> : null}
             <AgentTurnBadge
-              turns={applyApprovalWaits(
-                agentTurnsInChannel(turnSignals, channel.id, nowMs),
-                channel.id,
-                approvalWaits,
-                nowMs
-              )}
+              turns={rowTurns}
               directory={directoryQuery.directory}
               live={railLive}
             />
+            {/* 에이전트와의 DM 행: 열린 턴이 없을 때만 지금 살아 있는가를 한두 낱말로
+                (ADR-0200 D4). 턴이 열려 있으면 그 알약이 이 자리의 말이다. */}
+            {rowTurns.length === 0 && peer?.kind === "agent" && (
+              <AgentLivenessLabel agentId={peer.id} variant="compact" />
+            )}
           </>
         }
         testId="channel-item"
