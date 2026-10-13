@@ -650,6 +650,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
             "oort_run_complete",
             "oort_action_propose",
             "oort_card_suggest",
+            "oort_ping",
         ]
     );
 
@@ -682,7 +683,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
     .unwrap();
     assert_eq!(
         list_tools(&client, &base, &fixture.hosted_bearer).await,
-        vec!["oort_inbox_read"]
+        vec!["oort_inbox_read", "oort_ping"]
     );
 
     // Narrowing the token alone does the same from the other side.
@@ -736,7 +737,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
         list_tools(&client, &base, &fixture.hosted_bearer)
             .await
             .len(),
-        10,
+        11,
         "a foundation request proves the binding and re-activates it"
     );
     let reactivated: String = sqlx::query_scalar(
@@ -817,7 +818,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
         list_tools(&client, &base, &fixture.hosted_bearer)
             .await
             .len(),
-        10,
+        11,
         "restoring the connection restores the catalog"
     );
 
@@ -11308,4 +11309,422 @@ async fn the_end_reason_is_a_closed_code_and_other_tenants_are_invisible() {
     )
     .await;
     assert_eq!(status, 404);
+}
+
+// ---------------------------------------------------------------------------
+// (#3742 S3, ADR-0200 D4) liveness and oort_ping
+// ---------------------------------------------------------------------------
+
+async fn connection_liveness_3742(
+    client: &reqwest::Client,
+    base: &str,
+    fixture: &Fixture,
+) -> Value {
+    let response: Value = client
+        .get(format!(
+            "{base}/v1/workspaces/{}/hosted-agent-connections/{}",
+            fixture.workspace, fixture.hosted_connection
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .expect("connection get")
+        .json()
+        .await
+        .expect("connection body");
+    response["connection"]["liveness"].clone()
+}
+
+async fn liveness_row_3742(
+    pool: &PgPool,
+    fixture: &Fixture,
+) -> Option<(
+    Option<chrono::DateTime<chrono::Utc>>,
+    Option<chrono::DateTime<chrono::Utc>>,
+    Option<chrono::DateTime<chrono::Utc>>,
+    Option<chrono::DateTime<chrono::Utc>>,
+    Option<String>,
+)> {
+    sqlx::query_as(
+        "SELECT last_inbox_read_at, last_claim_at, last_ping_at, last_tool_error_at, \
+                last_tool_error_code \
+           FROM hosted_agent_liveness WHERE workspace_id=$1 AND connection_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_connection)
+    .fetch_optional(pool)
+    .await
+    .expect("liveness row")
+}
+
+/// RED PROOF (ADR-0200 D4-5, S3; 성재 결재 「생존 신호도 추가」). `oort_ping` proves a
+/// runtime is up and nothing more: on its own it is `alive_idle` — "alive, takes no
+/// work" — never `responsive`; a second ping inside 30 s is a harmless `recorded:false`
+/// that moves nothing; and the work signals (inbox read, a claim that took a job)
+/// are what make it `responsive`. Connect-only credentials cannot ping at all.
+///
+/// Tamper table:
+///   * let a ping set a work column / count as work in `derive_liveness` -> ping alone shows `responsive`
+///   * drop the 30 s throttle in `record_ping_in_tx`                      -> the second ping is `recorded:true`
+///   * record a claim even when the claim returned no job                 -> `last_claim_at` set on an empty claim
+///   * require no scope for the tool (drop `SCOPE_INBOX_READ`)            -> the connect-only credential pings
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_ping_proves_alive_not_working_and_the_work_signals_are_throttled() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    // never heard from: not "connected", not "alive"
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_eq!(liveness["state"], json!("unresponsive"), "{liveness}");
+    assert_eq!(liveness["workWaiting"], json!(false));
+    assert!(liveness_row_3742(&su, &fixture).await.is_none());
+
+    // the tool is advertised to a credential with the inbox scope, and to nobody else
+    assert!(list_tools(&client, &base, &fixture.hosted_bearer)
+        .await
+        .contains(&"oort_ping".to_string()));
+    let (status, refused) = call(
+        &client,
+        &base,
+        &fixture.connect_only_bearer,
+        "oort_ping",
+        json!({}),
+    )
+    .await;
+    assert!(
+        status >= 400,
+        "a connect-only credential cannot ping: {refused}"
+    );
+    assert!(liveness_row_3742(&su, &fixture).await.is_none());
+
+    // a ping: recorded, alive but idle
+    let (status, pinged) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_ping",
+        json!({"state": "idle"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{pinged}");
+    assert_eq!(structured(&pinged)["recorded"], json!(true));
+    assert_eq!(structured(&pinged)["minIntervalSeconds"], json!(30));
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_eq!(liveness["state"], json!("alive_idle"), "{liveness}");
+    assert_eq!(liveness["lastPingState"], json!("idle"));
+    assert!(
+        liveness.get("lastWorkSignalAtMs").is_none(),
+        "a ping is not work: {liveness}"
+    );
+    let first = liveness_row_3742(&su, &fixture).await.expect("row").2;
+
+    // a second ping inside the window: success, recorded:false, nothing moves
+    let (status, again) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_ping",
+        json!({"state": "working"}),
+    )
+    .await;
+    assert_eq!(status, 200, "a throttled ping is not an error: {again}");
+    assert_eq!(structured(&again)["recorded"], json!(false));
+    assert_eq!(liveness_row_3742(&su, &fixture).await.unwrap().2, first);
+    let stored_state: Option<String> = sqlx::query_scalar(
+        "SELECT last_ping_state FROM hosted_agent_liveness WHERE workspace_id=$1 AND connection_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_connection)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        stored_state.as_deref(),
+        Some("idle"),
+        "the throttled call changed nothing"
+    );
+
+    // closed arguments
+    for bad in [
+        json!({"state": "sleeping"}),
+        json!({"state": 3}),
+        json!({"extra": true}),
+    ] {
+        let (status, _) = call(&client, &base, &fixture.hosted_bearer, "oort_ping", bad).await;
+        assert_eq!(status, 400);
+    }
+
+    // an empty claim is not a claim
+    let (_, empty) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({}),
+    )
+    .await;
+    assert_eq!(structured(&empty)["jobs"], json!([]));
+    assert!(liveness_row_3742(&su, &fixture).await.unwrap().1.is_none());
+
+    // the inbox read is work: responsive, and throttled
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_inbox_read",
+        json!({"limit": 5}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let read = liveness_row_3742(&su, &fixture).await.unwrap().0;
+    assert!(read.is_some());
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_eq!(liveness["state"], json!("responsive"), "{liveness}");
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_inbox_read",
+        json!({"limit": 5}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        liveness_row_3742(&su, &fixture).await.unwrap().0,
+        read,
+        "a poll inside 30 s writes nothing"
+    );
+
+    // a claim that took a job is work, and a queued job is "work waiting" before it
+    mention_3740(&client, &base, &su, &fixture, fixture.hosted_agent).await;
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_eq!(liveness["workWaiting"], json!(true), "{liveness}");
+    // a fresh job is just a polling agent's normal queue; one that has waited past the
+    // responsive window while the agent keeps reading its inbox is NOT "responsive"
+    assert_eq!(liveness["state"], json!("responsive"), "{liveness}");
+    sqlx::query(
+        "UPDATE outbox SET created_at = now() - interval '30 minutes' \
+          WHERE workspace_id=$1 AND kind='agent_job' AND partition_key=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_eq!(liveness["state"], json!("work_waiting"), "{liveness}");
+    assert!(liveness["oldestWaitingAtMs"].as_i64().unwrap() > 0);
+    let (_, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({}),
+    )
+    .await;
+    assert_eq!(structured(&claimed)["jobs"].as_array().unwrap().len(), 1);
+    assert!(liveness_row_3742(&su, &fixture).await.unwrap().1.is_some());
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_eq!(liveness["workWaiting"], json!(false));
+}
+
+/// RED PROOF (ADR-0200 D4, S3). The refusal that explains "Agent Port unavailable" is
+/// kept as a closed code on the caller's own connection, turns the state to `error`
+/// while it is the newest fact, and ends with the next accepted call of any kind — the
+/// throttle on the work columns must not keep a recovered agent red. A lost lease or a
+/// bad argument is the agent's own flow and is not an `error`. Members see the label
+/// only; a stranger and a non-hosted agent are the same 404.
+///
+/// Tamper table:
+///   * record every failure kind                          -> the bad-argument call turns the state to `error`
+///   * compare the refusal only to the throttled work columns -> the recovery stays `error`
+///   * return `lastToolErrorCode` to the member route      -> the member body carries the code
+///   * answer 403 for the non-hosted agent                 -> existence of hosting is probeable
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_refusal_is_a_closed_code_that_recovers_and_members_see_the_label_only() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    // an accepted call first
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_inbox_read",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    // a bad argument is the agent's flow, not a connection fault
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_inbox_read",
+        json!({"limit": 0}),
+    )
+    .await;
+    assert_eq!(status, 400);
+    assert!(liveness_row_3742(&su, &fixture).await.unwrap().3.is_none());
+
+    // …and so is a lost lease: renewing a handle the agent itself released answers 409
+    // `Conflict` from INSIDE the tool (the case a record-every-failure bug would catch;
+    // the schema 400 above never reaches the tool at all)
+    mention_3740(&client, &base, &su, &fixture, fixture.hosted_agent).await;
+    let (_, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({}),
+    )
+    .await;
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_job_release",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let (status, lost) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_job_renew",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    assert_eq!(status, 409, "{lost}");
+    assert!(
+        liveness_row_3742(&su, &fixture).await.unwrap().3.is_none(),
+        "a lost lease is the agent's own flow, not a connection error"
+    );
+
+    // a refusal about the connection: an unapproved channel is "unavailable"
+    let (status, refused) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_conversation_read",
+        json!({"channelId": fixture.private_channel}),
+    )
+    .await;
+    assert!(status >= 400, "{refused}");
+    let (_, _, _, errored, code) = liveness_row_3742(&su, &fixture).await.unwrap();
+    assert!(errored.is_some());
+    assert!(
+        matches!(
+            code.as_deref(),
+            Some("unavailable") | Some("not_authorized")
+        ),
+        "a closed code: {code:?}"
+    );
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_eq!(liveness["state"], json!("error"), "{liveness}");
+    assert_eq!(liveness["lastToolErrorCode"], json!(code.clone().unwrap()));
+
+    // any accepted call ends it — even one the 30 s work-column throttle would swallow
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_inbox_read",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_ne!(liveness["state"], json!("error"), "recovered: {liveness}");
+
+    // the SAME refusal again, seconds later: a new fact, not swallowed by the 30 s
+    // throttle (a flapping "unavailable" must not read as fine)
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_conversation_read",
+        json!({"channelId": fixture.private_channel}),
+    )
+    .await;
+    assert!(status >= 400);
+    let liveness = connection_liveness_3742(&client, &base, &fixture).await;
+    assert_eq!(
+        liveness["state"],
+        json!("error"),
+        "flapping stays visible: {liveness}"
+    );
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_inbox_read",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    // the member-facing label
+    let plain_jwt = seed_plain_member(&su, &fixture).await; // shares `channel` with the agent
+    let url = format!(
+        "{base}/v1/workspaces/{}/agents/{}/liveness",
+        fixture.workspace, fixture.hosted_agent
+    );
+    let member: Value = client
+        .get(&url)
+        .bearer_auth(&plain_jwt)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        member["agentMemberId"].as_str().unwrap().to_lowercase(),
+        fixture.hosted_agent.to_string()
+    );
+    assert!(member["state"].is_string());
+    let rendered = serde_json::to_string(&member).unwrap();
+    for hidden in ["lastToolError", "lastPing", "doorbell", "workWaiting"] {
+        assert!(
+            !rendered.contains(hidden),
+            "members see the label only: {rendered}"
+        );
+    }
+
+    // a managed agent (no hosted connection) and a stranger: the same 404
+    let managed = client
+        .get(format!(
+            "{base}/v1/workspaces/{}/agents/{}/liveness",
+            fixture.workspace, fixture.managed_agent
+        ))
+        .bearer_auth(&plain_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(managed.status().as_u16(), 404);
+    let stranger = seed_outsider_3741(&su, &fixture).await;
+    let outsider = client
+        .get(&url)
+        .bearer_auth(&stranger)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(outsider.status().as_u16(), 404);
 }

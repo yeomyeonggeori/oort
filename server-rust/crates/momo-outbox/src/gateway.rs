@@ -402,6 +402,8 @@ async fn claim_gateway_jobs(
 pub struct ClaimableGatewayJob {
     pub id: i64,
     pub payload: serde_json::Value,
+    /// When the job was queued — how long the work has been waiting.
+    pub created_at: DateTime<Utc>,
 }
 
 /// The pending hosted jobs of one agent that `oort_jobs_claim` would take, in claim
@@ -427,7 +429,7 @@ pub async fn list_claimable_hosted_jobs_in_tx(
         return Ok(Vec::new());
     };
     let sql = format!(
-        "SELECT o.id, o.payload FROM outbox o WHERE {CLAIMABLE_JOB_PREDICATE} \
+        "SELECT o.id, o.payload, o.created_at FROM outbox o WHERE {CLAIMABLE_JOB_PREDICATE} \
           ORDER BY o.id ASC LIMIT $4"
     );
     let rows = sqlx::query(&sql)
@@ -442,6 +444,7 @@ pub async fn list_claimable_hosted_jobs_in_tx(
             Ok(ClaimableGatewayJob {
                 id: row.try_get("id")?,
                 payload: row.try_get("payload")?,
+                created_at: row.try_get("created_at")?,
             })
         })
         .collect()

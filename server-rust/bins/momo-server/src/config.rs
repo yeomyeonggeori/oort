@@ -785,6 +785,51 @@ fn hosted_lease_seconds_from_env() -> Result<i64, ConfigError> {
     Ok(clamped)
 }
 
+/// ADR-0200 D4 (#3742) — the windows behind `responsive` / `quiet` / `unresponsive` /
+/// `woken_not_collected`, read once from the environment:
+/// `MOMO_AGENT_PORT_LIVENESS_RESPONSIVE_MINUTES` (default 20, a 15-minute routine plus
+/// slack), `MOMO_AGENT_PORT_LIVENESS_QUIET_MINUTES` (60, never below the responsive
+/// window), `MOMO_AGENT_PORT_LIVENESS_WOKEN_GRACE_MINUTES` (5). Each is clamped so a typo
+/// cannot make every agent look permanently silent (or permanently fine); an unparsable
+/// value falls back to the default with a warning — a display threshold is not worth a
+/// failed boot. A process-wide read rather than an `AgentPortConfig` field so the fixtures
+/// that build that struct literally are untouched.
+pub fn liveness_thresholds() -> momo_agent::LivenessThresholds {
+    static THRESHOLDS: std::sync::OnceLock<momo_agent::LivenessThresholds> =
+        std::sync::OnceLock::new();
+    *THRESHOLDS.get_or_init(|| match liveness_thresholds_from_env() {
+        Ok(thresholds) => thresholds,
+        Err(error) => {
+            tracing::warn!(error = %error, "liveness thresholds unreadable; using the defaults");
+            momo_agent::LivenessThresholds::default()
+        }
+    })
+}
+
+fn liveness_thresholds_from_env() -> Result<momo_agent::LivenessThresholds, ConfigError> {
+    let defaults = momo_agent::LivenessThresholds::default();
+    let responsive = env_number::<i64>(
+        "MOMO_AGENT_PORT_LIVENESS_RESPONSIVE_MINUTES",
+        defaults.responsive.num_minutes(),
+    )?
+    .clamp(1, 240);
+    let quiet = env_number::<i64>(
+        "MOMO_AGENT_PORT_LIVENESS_QUIET_MINUTES",
+        defaults.quiet.num_minutes(),
+    )?
+    .clamp(responsive, 1440);
+    let grace = env_number::<i64>(
+        "MOMO_AGENT_PORT_LIVENESS_WOKEN_GRACE_MINUTES",
+        defaults.woken_grace.num_minutes(),
+    )?
+    .clamp(1, 60);
+    Ok(momo_agent::LivenessThresholds {
+        responsive: chrono::Duration::minutes(responsive),
+        quiet: chrono::Duration::minutes(quiet),
+        woken_grace: chrono::Duration::minutes(grace),
+    })
+}
+
 impl AgentPortConfig {
     pub fn from_env() -> Result<AgentPortConfig, ConfigError> {
         let defaults = AgentPortConfig::default();

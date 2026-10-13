@@ -3751,6 +3751,33 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {description: No such run, or the caller is not a member of its channel, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
 
+  /v1/workspaces/{workspaceId}/agents/{agentId}/liveness:
+    get:
+      tags: [agents]
+      operationId: getAgentLiveness
+      summary: Is this hosted agent alive right now? (label only)
+      description: >
+        ADR-0200 D4. Any active human workspace member who shares a channel with the agent receives
+        its derived liveness label and when it last spoke, in place of "connected". An agent without
+        a hosted connection and an agent the caller shares no channel with are the same 404, so the
+        route is no probe for whether an agent is hosted.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: agentId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The label.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgentLiveness"}
+        "400": {description: Malformed identifier, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {description: No such hosted agent visible to the caller, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
   /v1/workspaces/{workspaceId}/agents/from-card:
     post:
       tags: [agents]
@@ -13891,6 +13918,55 @@ components:
             used within the last 10 minutes (`token.last_used_at`); an idle but open CLI session
             that has not called the port reads false. Present only for agents that dial in
             (brain subscription or external). Others see "offline" and nothing more (ADR-0193 D5).
+        liveness:
+          $ref: "#/components/schemas/HostedAgentLiveness"
+
+    HostedAgentLiveness:
+      type: object
+      additionalProperties: false
+      required: [state, workWaiting]
+      description: >
+        ADR-0200 D4 (#3742). Is the agent alive RIGHT NOW, from server facts. Present on list and
+        get only. `status: active` only says a credential was proved once; this ages.
+      properties:
+        state:
+          type: string
+          enum: [inactive, error, woken_not_collected, work_waiting, responsive, alive_idle, quiet, unresponsive]
+          description: >
+            `responsive` = a work signal (inbox read, claim that took a job, run event) within the
+            responsive window (default 20 min). `alive_idle` = a recent `oort_ping` but no work
+            signal: alive, takes no work. `woken_not_collected` = the doorbell rang (2xx), the grace
+            passed, claimable work is waiting and nothing was taken. `work_waiting` = claimable work
+            has waited past the responsive window and nothing was claimed since it was queued, even
+            if the agent is polling or pinging. `quiet` = some signal inside the
+            quiet window (default 60 min). `unresponsive` = none, or never. `error` = the newest fact
+            is a refused call. `inactive` = the connection is not active.
+        lastSignalAtMs: {type: integer, format: int64}
+        lastWorkSignalAtMs: {type: integer, format: int64}
+        lastPingAtMs: {type: integer, format: int64}
+        lastPingState: {type: string, enum: [idle, working]}
+        lastToolErrorAtMs: {type: integer, format: int64}
+        lastToolErrorCode:
+          type: string
+          description: Closed code of the last refused call (`unavailable`, `not_authorized`).
+        workWaiting:
+          type: boolean
+          description: At least one queued run this agent could claim right now.
+        oldestWaitingAtMs: {type: integer, format: int64}
+
+    AgentLiveness:
+      type: object
+      additionalProperties: false
+      required: [agentMemberId, state]
+      description: >
+        ADR-0200 D4. What a member who shares a channel with a hosted agent may see: the label and
+        when it last spoke. No error code, no doorbell, no ping detail (those are the admin's).
+      properties:
+        agentMemberId: {type: string, format: uuid}
+        state:
+          type: string
+          enum: [inactive, error, woken_not_collected, work_waiting, responsive, alive_idle, quiet, unresponsive]
+        lastSignalAtMs: {type: integer, format: int64}
 
     EnablePersonalAgentRequest:
       type: object
