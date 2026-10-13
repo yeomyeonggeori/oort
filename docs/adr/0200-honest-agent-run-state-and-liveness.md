@@ -148,11 +148,12 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 | `responsive` | 일 신호(`max(last_inbox_read_at, last_claim_at, last_run_event_at)`)가 `≤ 20분` 전 | 「응답함 · n분 전」 |
 | `alive_idle` | 일 신호는 없거나 20분 초과인데 `last_ping_at`이 `≤ 20분` 전 | 「살아 있음 · 일은 안 가져감」 |
 | `woken_not_collected` | 도어벨 `ok_2xx` 이후 `≥ 5분`이 지났는데 그 사이 `last_claim_at`·`last_inbox_read_at`이 도어벨 이후로 갱신되지 않았고, 수령 가능한 `queued` run이 있음 | 「깨웠지만 아직 안 가져감 · n분」(+ 다시 깨우기) |
+| `work_waiting` | 수령 가능한 일감이 응답 창(20분) 넘게 기다렸는데 그 일감이 큐에 들어간 뒤 claim이 없음 — inbox를 읽거나 ping을 보내도 가리지 못함(도어벨 불필요, S3 보안 검수 M3) | 「일감이 기다리는데 가져가지 않음 · n분」 |
 | `quiet` | 마지막 신호(ping 포함)가 20~60분 전 | 「조용함 · 마지막 응답 n분 전」 |
 | `unresponsive` | 마지막 신호(ping 포함)가 `> 60분` 전이거나 신호가 없음(`never`) | 「응답 없음 · n분」 |
-| `error` | `last_tool_error_at`이 마지막 성공 신호보다 새롭다 | 「호출이 거절됨 · <닫힌 사유>」 |
+| `error` | `last_tool_error_at`이 마지막 성공 호출(어떤 도구든)보다 새롭다. 거절 기록은 `Unavailable`/`NotAuthorized` 두 종류만 | 「호출이 거절됨 · <닫힌 사유>」 |
 
-  20분은 15분 루틴 + 여유, 60분은 lease 기본(30분)의 2배다. 숫자는 구현 티켓이 봉인한다. `connection.status='active'`는 표시에서 「연결됨(토큰 증명)」으로 이름을 바꿔 **「살아 있음」과 분리**한다(#3737의 지적).
+  `error`는 「가장 최근 사실이 거절」일 때만 켜진다: 다른 도구의 성공이 끼면 라벨은 풀리지만 `last_tool_error_*`는 관리자 상세에 남는다(한 도구만 계속 거절되는 경우는 거기서 읽는다 — S3 보안 검수 M2). 20분은 15분 루틴 + 여유, 60분은 lease 기본(30분)의 2배다. 숫자는 구현 티켓이 봉인한다. `connection.status='active'`는 표시에서 「연결됨(토큰 증명)」으로 이름을 바꿔 **「살아 있음」과 분리**한다(#3737의 지적).
 - **어디에 보이나.** 멤버 목록의 에이전트 행, 에이전트 헤더, 작업 패널 머리. 읽기: `GET …/hosted-agent-connections`(기존 목록)와 `GET …/agents/{agent}`에 `liveness{state, last_signal_at, last_doorbell{at,status}, …}`를 더한다. 가시성은 기존 connection 읽기 권한(워크스페이스 admin·에이전트 소유자) + 채널 멤버에게는 **상태 라벨과 `last_signal_at`만**(오류 코드·도어벨 URL 등은 admin·소유자 전용).
 - **「다시 깨우기」** — 둔다. `POST …/hosted-agent-connections/{id}/doorbell/ring`: 사람 JWT, 권한은 **그 에이전트의 소유자 또는 워크스페이스 admin**(채널 멤버 일반에게는 열지 않는다: 남용 시 소유자의 벤더 usage를 태운다, 증보 3 D16). 한도: connection당 **60초 쿨다운 + 시간당 5회**, 넘으면 429와 다음 가능 시각. 페이로드는 ADR-0171 D2 그대로 **내용 없는 신호**이고 기존 송신기 경로(코얼레싱·SSRF 정책 포함)를 재사용한다. `MOMO_DOORBELL_ENABLED`가 꺼져 있거나 도어벨 미등록이면 409. 결과(`ok_200`/실패)는 원장 `kind='doorbell'`로 남는다.
 - **`oort_ping`(에이전트 쪽 heartbeat 도구)을 넣는다** (성재 결재: 추천안 「넣지 않음」이 아니라 「생존 신호도 추가」). 초안은 ping이 「부르라고 배웠다」만 증명한다는 이유로 반대했고, 그 우려는 **ping을 일 수령 신호와 분리해서 판정**하는 것으로 처리한다(아래). 확정 계약(보수적 기본값):
