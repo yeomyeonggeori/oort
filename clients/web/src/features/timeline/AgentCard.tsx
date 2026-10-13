@@ -97,6 +97,10 @@ import {
 } from "@momo/core/features/approvals/actionRole";
 import type { SecretOnce } from "@momo/core/features/approvals/secretOnce";
 import { APPROVAL_NOTE_TONE_CLASS } from "./approvalNoteTone";
+import {
+  rememberSettledApproval,
+  useSettledApproval,
+} from "./settledApprovals";
 import { FoldedValue } from "./FoldToggle";
 import {
   isSurfaceProvided,
@@ -406,7 +410,7 @@ function ApprovalBody({
      * **이 state 가 그 값이 사는 유일한 자리다.** `card` 에도 store 에도
      * localStorage 에도 URL 에도 쓰지 않는다. 이 컴포넌트가 언마운트되면
      * — 탭을 닫든 새로고침하든 채널을 옮기든 — 값은 그대로 사라지고,
-     * 남는 것은 영속 카드의 「1회 표시됐습니다」뿐이다(부록 B).
+     * 남는 것은 영속 카드의 「1회 표시됐어요」뿐이다(부록 B).
      *
      * 자리가 `ApprovalActions` 안이 아니라 **여기**인 이유: 결정이 확정되면
      * 아래 footer 가 컨트롤에서 영수증 줄로 바뀌면서 그 컴포넌트가 언마운트된다.
@@ -414,6 +418,12 @@ function ApprovalBody({
      */
     secretOnce?: SecretOnce;
   } | null>(null);
+  // 결정 영수증의 두 번째 자리 (#3771). `local`은 이 마운트의 것이고 1회 값을 든다.
+  // 마운트가 바뀌어도(가상 리스트가 행을 내렸다 올릴 때) 결정을 잃지 않게, 영수증은
+  // 승인 id로 키 잡은 저장소에도 둔다. 서버가 메시지 `props`를 방송하지 않으므로
+  // 낡은 `pending` 스냅샷이 방금 한 결정을 덮는 일을 여기서 막는다.
+  const remembered = useSettledApproval(card.approvalId);
+  const receipt = local ?? remembered;
   const [armed, setArmed] = useState<Armed>(null);
   // 403 뒤 초점이 내려앉을 자리 (R2 H-R2-1). 카드 자신이다 — 이름과 링을
   // 이미 가진 유일한 조상이고, 방금 생긴 안내 문장이 그 안에 있다.
@@ -425,7 +435,7 @@ function ApprovalBody({
   // 폰의 `useOnline.ts` 가 같은 판단을 NetInfo로 한다.
   const offline = useOffline();
 
-  const resolvedStatus = resolveApprovalStatus(local?.status ?? null, card.status);
+  const resolvedStatus = resolveApprovalStatus(receipt?.status ?? null, card.status);
   // 기한 (#3738). 카드 메시지는 스냅샷이라 서버가 승인을 만료시켜도 이 카드의
   // status 는 저절로 바뀌지 않는다. 기한이 지난 대기 카드를 「만료」로 읽는 것은
   // 이 시계의 일이다. 이미 끝난 카드·재개 제안은 시계를 돌리지 않는다.
@@ -450,8 +460,8 @@ function ApprovalBody({
     }
     wasExpired.current = expired;
   }, [expired]);
-  const decidedAtMs = local?.decidedAtMs ?? card.decidedAtMs;
-  const decidedById = local?.decidedByMemberId ?? card.decidedByMemberId;
+  const decidedAtMs = receipt?.decidedAtMs ?? card.decidedAtMs;
+  const decidedById = receipt?.decidedByMemberId ?? card.decidedByMemberId;
   const decidedBy = decidedById ? memberFor(directory, decidedById) : null;
 
   // 카드가 컨트롤 대신 말할 줄. 판정도 순서도 코어가 진다 (design-review M-3).
@@ -459,7 +469,7 @@ function ApprovalBody({
   // **웹에는 오프라인 갈래가 아예 없었다** — 끊긴 채로 버튼이 서 있고 누르면 실패
   // 행 하나가 남았다.
   const note = approvalCardNote({
-    receiptNote: local?.note ?? null,
+    receiptNote: receipt?.note ?? null,
     isResumeOffer: card.isResumeOffer,
     resumeOfferText: RESUME_OFFER_COPY,
     settled,
@@ -577,6 +587,9 @@ function ApprovalBody({
               }
               next.note = decisionNote(outcome).text;
               setLocal(next);
+              // 1회 값은 저장소에 넘기지 않는다(ADR-0186 D4).
+              const { secretOnce: _once, ...settled } = next;
+              rememberSettledApproval(card.approvalId, settled);
             }}
           />
           </>
@@ -614,7 +627,7 @@ function ApprovalBody({
       {card.action !== null && card.action.omittedRows > 0 && (
         <LabeledRow label="그 밖에" testId="approval-action-omitted">
           <span data-numeric>
-            {formatCount(card.action.omittedRows)}개를 표시하지 못했습니다.
+            {formatCount(card.action.omittedRows)}개를 표시하지 못했어요.
           </span>
         </LabeledRow>
       )}
@@ -635,8 +648,8 @@ function ApprovalBody({
       {card.isReversible !== undefined && (
         <LabeledRow label="영향" testId="approval-impact">
           {card.isReversible
-            ? "되돌릴 수 있습니다."
-            : "되돌릴 수 없습니다."}
+            ? "되돌릴 수 있어요."
+            : "되돌릴 수 없어요."}
         </LabeledRow>
       )}
       {card.estimatedMicroUsd !== undefined && (
@@ -696,17 +709,19 @@ function LoginHandoffBody({
     decidedByMemberId?: string;
     note?: string;
   } | null>(null);
+  const remembered = useSettledApproval(card.approvalId);
+  const receipt = local ?? remembered;
   const [armed, setArmed] = useState<Armed>(null);
   const approvalsProvided = isSurfaceProvided("approvals");
   const offline = useOffline();
 
   // 로컬 영수증이 스냅샷보다 새로울 수 있는 것은 승인 카드와 같다. 다만 국면은
   // 코어가 정했으므로, 여기서는 **아직 대기인가**만 로컬로 뒤집는다.
-  const settled = local !== null || card.phase !== "waiting";
+  const settled = receipt !== null || card.phase !== "waiting";
   const underControl =
     card.control !== null && card.control.endedAtMs === null;
-  const decidedById = local?.decidedByMemberId ?? card.decidedByMemberId;
-  const decidedAtMs = local?.decidedAtMs ?? card.decidedAtMs;
+  const decidedById = receipt?.decidedByMemberId ?? card.decidedByMemberId;
+  const decidedAtMs = receipt?.decidedAtMs ?? card.decidedAtMs;
   const decidedBy = decidedById ? memberFor(directory, decidedById) : null;
 
   // note 슬롯에 설 수 있는 두 조각. 이름을 붙여 두는 이유는 래퍼가 이 둘의 합을
@@ -716,7 +731,7 @@ function LoginHandoffBody({
     card.sessionId !== null && onOpenWorkSession !== undefined;
 
   const note = loginHandoffNote({
-    receiptNote: local?.note ?? null,
+    receiptNote: receipt?.note ?? null,
     hasTarget: card.approvalId !== null,
     settled,
     underControl,
@@ -822,6 +837,7 @@ function LoginHandoffBody({
               }
               next.note = decisionNote(outcome).text;
               setLocal(next);
+              rememberSettledApproval(card.approvalId, next);
             }}
           />
         ) : null

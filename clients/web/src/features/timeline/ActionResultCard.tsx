@@ -45,7 +45,7 @@ import { ActionResultChip } from "./StatusChip";
 // 행동 id 에 `null` 을 답한다). 한 클라이언트가 같은 질문 — 「이 목적지를 아는가」 —
 // 에 두 가지로 답하면 그중 하나는 반드시 틀린 쪽이다.
 //
-// 문이 서지 않아도 카드는 말을 잃지 않는다: 상태 문장과 「1회 표시됐습니다 ·
+// 문이 서지 않아도 카드는 말을 잃지 않는다: 상태 문장과 「1회 표시됐어요 ·
 // 다시 만드세요」가 그대로 남는다. 없는 방으로 가는 문을 그리지 않는다는 이
 // 저장소의 규율(`LoginHandoffBody` 의 어포던스 부재 원칙)과 같은 자리다.
 // =============================================================================
@@ -153,7 +153,7 @@ export function ActionResultBody({
       {card.omittedRows > 0 && (
         <LabeledRow label="그 밖에" testId="action-result-omitted">
           <span data-numeric>
-            {formatCount(card.omittedRows)}개를 표시하지 못했습니다.
+            {formatCount(card.omittedRows)}개를 표시하지 못했어요.
           </span>
         </LabeledRow>
       )}

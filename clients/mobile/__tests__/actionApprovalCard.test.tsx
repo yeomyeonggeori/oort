@@ -405,7 +405,7 @@ describe('#1084 — 타임라인 승인 카드에서 바로 결정한다', () =>
     const confirm = screen.getByTestId(`${PREFIX}-confirm`);
     expect(within(confirm).getByText(actionApproveConfirmCopy('admin'))).toBeTruthy();
     expect(actionApproveConfirmCopy('admin')).toBe(
-      '승인하면 서버가 관리자 권한으로 이 행동을 실행합니다.',
+      '승인하면 서버가 관리자 권한으로 이 행동을 실행해요.',
     );
     expect(renderedText()).not.toContain('에이전트가 이어서');
   });
@@ -471,7 +471,7 @@ describe('#1084 — 타임라인 승인 카드에서 바로 결정한다', () =>
 });
 
 // =============================================================================
-describe('#1084 — 403 은 「관리자가 승인해야 합니다」와 무장 해제다 (ADR-0186 §5)', () => {
+describe('#1084 — 403 은 「관리자가 승인해야 해요」와 무장 해제다 (ADR-0186 §5)', () => {
   const ROLE_COPY = roleRequiredCopy('admin');
 
   it('영수증이 role_required 라고 말하면 조용한 안내가 서고 무장이 풀린다', async () => {
@@ -483,7 +483,7 @@ describe('#1084 — 403 은 「관리자가 승인해야 합니다」와 무장 
     await armAndCommit('approve');
     const notice = await screen.findByTestId(`${PREFIX}-error`);
     expect(notice.props.children).toBe(ROLE_COPY);
-    expect(ROLE_COPY).toContain('관리자가 승인해야 합니다.');
+    expect(ROLE_COPY).toContain('관리자가 승인해야 해요.');
     expect(ROLE_COPY).toContain('아직 대기 중');
     // 사고가 아니다 — 붉지 않다. 웹의 `unavailable`(ink-muted)과 같은 자리.
     expect(flat(notice.props.style).color).toBe(color.textMuted);
@@ -546,7 +546,7 @@ describe('design-review H-1 — 카드가 누가 결정하는지를 한 가지�
   it('행동 승인 카드는 「회원님의 허가」 머리 문장을 세우지 않는다 — 결정 권한 행과 부딪친다', () => {
     renderRow({});
     const card = screen.getByTestId('agent-card');
-    expect(within(card).getByText('관리자만 승인할 수 있습니다.')).toBeTruthy();
+    expect(within(card).getByText('관리자만 승인할 수 있어요.')).toBeTruthy();
     expect(within(card).queryByText(DEFAULT_LEAD)).toBeNull();
     // 컨트롤은 그대로 선다.
     expect(within(card).getByTestId(`${PREFIX}-approve`)).toBeTruthy();
@@ -626,7 +626,7 @@ describe('#2513 — 행동 승인 카드의 행·사유·결정 권한 (부록 A
     ).toBeTruthy();
     expect(
       within(screen.getByTestId('approval-action-role')).getByText(
-        '관리자만 승인할 수 있습니다.',
+        '관리자만 승인할 수 있어요.',
       ),
     ).toBeTruthy();
   });
@@ -824,7 +824,7 @@ describe('#2513 — 영속 결과 카드 (부록 B)', () => {
       within(screen.getByTestId('action-result-decided-by')).getByText('곽성재'),
     ).toBeTruthy();
     expect(screen.getByTestId('action-result-note').props.children).toBe(
-      '실행을 마쳤습니다.',
+      '실행을 마쳤어요.',
     );
     expect(screen.getByTestId('action-result-secret-once').props.children).toBe(
       ACTION_RESULT_SECRET_ONCE_NOTE,
@@ -926,8 +926,8 @@ describe('모델 소비 단일점 — 폰은 코어가 읽어 준 모델만 그�
     expect(values).toEqual(['모델:member', '모델:1회', '모델:7일']);
     expect(screen.getByText('모델:사유')).toBeTruthy();
     // props 원문(`required_role: admin`)이 아니라 모델의 역할이 문장이 된다.
-    expect(screen.getByText('소유자만 승인할 수 있습니다.')).toBeTruthy();
-    expect(screen.queryByText('관리자만 승인할 수 있습니다.')).toBeNull();
+    expect(screen.getByText('소유자만 승인할 수 있어요.')).toBeTruthy();
+    expect(screen.queryByText('관리자만 승인할 수 있어요.')).toBeNull();
     // props 원문 그대로의 값은 어디에도 서지 않는다.
     expect(screen.queryByText('member')).toBeNull();
     expect(screen.queryByText('새 팀원 온보딩 요청')).toBeNull();
@@ -1191,7 +1191,7 @@ describe('D4 — 1회 링크는 폰 메모리에만 있고, 다시 열면 사라
     expect(renderedText()).not.toContain(SECRET);
     expect(screen.getByText('승인됨')).toBeTruthy();
     expect(screen.getByTestId('action-result-note').props.children).toBe(
-      '실행을 마쳤습니다.',
+      '실행을 마쳤어요.',
     );
 
     // ⑥ 새로고침: 앱을 통째로 내렸다 다시 띄운다(새 쿼리 클라이언트, 같은 디스크).

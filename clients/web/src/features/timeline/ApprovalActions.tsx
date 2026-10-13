@@ -125,7 +125,7 @@ export function spawnApproveConfirmCopy(
   const base = spawnApproveLead(hostName);
   // `undefined`는 "모른다"이고, 되돌릴 수 없는 액션 계열에서 모름은 경고 쪽에
   // 붙는다. 서버가 위험도를 싣지 않았다고 안전하다고 말할 수는 없다.
-  return reversible === true ? base : `${base} 되돌릴 수 없습니다.`;
+  return reversible === true ? base : `${base} 되돌릴 수 없어요.`;
 }
 
 /**
@@ -192,7 +192,7 @@ export const APPROVAL_VERBS: DecisionVerbs = {
  *
  * 그리고 그것이 전부다 — props 도 store 도 localStorage 도 URL 도 아니다.
  * 새로고침하면 호출자의 state 와 함께 사라지고, 그 뒤에 남는 것은 영속 카드의
- * 「1회 표시됐습니다 · 다시 만드세요」뿐이다(부록 B). 값을 살아남게 만드는
+ * 「1회 표시됐어요 · 다시 만드세요」뿐이다(부록 B). 값을 살아남게 만드는
  * 구현이 D4 가 이름으로 금지한 위반이다.
  *
  * 복사 컨트롤은 설정의 것을 그대로 든다(`CopyButton` → `useClipboardCopy` →
@@ -200,7 +200,7 @@ export const APPROVAL_VERBS: DecisionVerbs = {
  * 두 벌이 되고, ADR-0182 D5 의 1.6s 는 그중 한 벌에만 남는다.
  */
 export const LINK_ONCE_LEAD =
-  "이 링크는 이 화면에서만 볼 수 있습니다. 지금 전달하세요.";
+  "이 링크는 이 화면에서만 볼 수 있어요. 지금 전달하세요.";
 
 export function LinkOnce({
   secret,
@@ -225,7 +225,7 @@ export function LinkOnce({
   // 그래서 이 영역이 마운트되면 **자기 자신**으로 초점을 가져온다. 복사 버튼이
   // 아니라 컨테이너인 이유: 초점이 그룹에 앉으면 접근성 이름(`aria-labelledby`
   // → lead 문장)이 먼저 읽히고, 그다음 Tab 한 번이 복사 버튼이다. 버튼에 바로
-  // 앉히면 「이 화면에서만 볼 수 있습니다」를 듣기 전에 「복사」부터 듣는다.
+  // 앉히면 「이 화면에서만 볼 수 있어요」를 듣기 전에 「복사」부터 듣는다.
   useEffect(() => {
     regionRef.current?.focus();
   }, []);
@@ -434,7 +434,7 @@ export function ApprovalActions({
           // ## 성공할 수 없는 버튼을 세워 두지 않는다 (design-review R1 M1)
           //
           // 앞 판은 무장을 유지했다. 그 결과 화면에서 **가장 큰 컨트롤**(채움
-          // 「승인 확정」)이 「관리자가 승인해야 합니다」 바로 위에 서서, 다시
+          // 「승인 확정」)이 「관리자가 승인해야 해요」 바로 위에 서서, 다시
           // 눌러도 같은 403 을 받는 행동을 위계의 꼭대기에 두었다(§3).
           //
           // 무장만 푼다. 카드는 여전히 대기이므로 승인·거부 버튼은 그대로 있고
