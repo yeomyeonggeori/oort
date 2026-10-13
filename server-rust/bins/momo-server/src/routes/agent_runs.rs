@@ -102,13 +102,13 @@ use crate::routes::shared::{
 };
 use crate::AppState;
 
-/// Swift `WorkRunInput.allowedKeys` (`AgentRunRoutes.swift:1127`). Closed world:
-/// an unknown key is a 400, so a client that invents `priority` learns it was
-/// ignored instead of assuming it was honoured.
 /// How many claimable jobs of one agent the queue read looks at. A run whose job is
 /// beyond it gets no position (never a wrong one).
 const PROGRESS_QUEUE_LIMIT: i64 = 500;
 
+/// Swift `WorkRunInput.allowedKeys` (`AgentRunRoutes.swift:1127`). Closed world:
+/// an unknown key is a 400, so a client that invents `priority` learns it was
+/// ignored instead of assuming it was honoured.
 const WORK_INPUT_KEYS: [&str; 6] = ["type", "title", "brief", "repo", "branch", "routing"];
 
 const TITLE_LIMIT: usize = 200;
