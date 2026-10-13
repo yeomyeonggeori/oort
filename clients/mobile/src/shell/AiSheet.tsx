@@ -4,7 +4,7 @@ import {ScrollView, StyleSheet, Text, View} from 'react-native';
 import {GroupRow, GroupSection} from '../design/atoms';
 import {PageSheet, usePageSheetClose} from '../design/PageSheet';
 import {useStyles} from '../design/theme';
-import {ds2Type, space, type Palette} from '../design/tokens';
+import {space, type Palette, font} from '../design/tokens';
 import {
   aiSheetSections,
   macChip,
@@ -234,7 +234,7 @@ const buildStyles = (color: Palette) =>
     gap: {marginTop: space.lg},
     marks: {alignItems: 'flex-end', gap: space.xs},
     personal: {
-      fontSize: ds2Type.caption,
+      fontSize: font.meta,
       fontWeight: '700',
       color: color.agent,
       backgroundColor: color.agentSurface,
@@ -258,7 +258,7 @@ const buildStyles = (color: Palette) =>
     dot: {width: 6, height: 6, borderRadius: 999},
     dotOn: {backgroundColor: color.ok},
     dotOff: {backgroundColor: color.textFaint},
-    chipLabel: {fontSize: ds2Type.caption, fontWeight: '600'},
+    chipLabel: {fontSize: font.meta, fontWeight: '600'},
     chipLabelOn: {color: color.text},
     chipLabelOff: {color: color.textMuted},
   });

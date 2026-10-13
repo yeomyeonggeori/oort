@@ -8,6 +8,7 @@ import {
 import {memberFor, type Directory} from '@momo/core/features/workspace/directory';
 import React, {useMemo} from 'react';
 import {Image, StyleSheet, Text, View} from 'react-native';
+import {AVATAR_INITIAL_MAX_SCALE} from '../../design/atoms';
 import {font, radius, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {apiBase} from '../../storage/serverBase';
@@ -183,9 +184,6 @@ export function Avatar({
     </View>
   );
 }
-
-/** 이니셜의 Dynamic Type 배율 상한. 32 상자에 13pt 한 글자가 여백을 지키는 끝. */
-const AVATAR_INITIAL_MAX_SCALE = 1.3;
 
 const buildStyles = (color: Palette) => StyleSheet.create({
   box: {

@@ -20,7 +20,6 @@ import {PageSheet, usePageSheetClose} from '../design/PageSheet';
 import {usePalette, useStyles} from '../design/theme';
 import {
   ds2Radius,
-  ds2Type,
   font,
   SAFE_GUTTER,
   slopTo,
@@ -258,7 +257,7 @@ const buildStyles = (color: Palette) =>
     title: {
       flex: 1,
       textAlign: 'center',
-      fontSize: ds2Type.headline,
+      fontSize: font.heading,
       fontWeight: '700',
       color: color.text,
     },

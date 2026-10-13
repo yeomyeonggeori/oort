@@ -20,19 +20,13 @@ export const CONV = {
   headHeight: 62,
   /** `.a-hd{gap:10px}`. */
   headGap: 10,
-  /** `.a-hd .ttl b{font-size:17px;font-weight:700;letter-spacing:-.015em}`. */
-  titleSize: 17,
   titleTracking: -0.26,
-  /** `.a-hd .ttl span{font-size:12.5px}`. */
-  subtitleSize: 12.5,
   /** `.a-hd .ttl b svg.ic.s16` — 제목 앞 `#`. */
   titleGlyph: 16,
   /** `.a-stack .av{width:28px}` — DM 머리의 상대 얼굴. */
   titleFace: 28,
 
   // ---- 날짜 알약 (`.a-day`) -------------------------------------------------
-  /** `.a-day span{font-size:12px;font-weight:600}`. */
-  dayText: 12,
   /** `.a-day span{padding:3px 11px}`. */
   dayPadY: 3,
   dayPadX: 11,
@@ -48,8 +42,6 @@ export const CONV = {
   avatarGap: 10,
   /** `.a-m{margin-bottom:16px}` — 작성자가 바뀌는 자리의 틈. */
   groupGap: 16,
-  /** `.a-m .who{font-size:15px;font-weight:700;letter-spacing:-.01em;line-height:1.3}`. */
-  whoSize: 15,
   whoLine: 20,
   whoTracking: -0.15,
   /** `.a-m .who{gap:7px}` — 이름과 시각 사이. */
@@ -73,12 +65,8 @@ export const CONV = {
   /** `.a-file .tile{width:38px;height:38px;border-radius:11px}`. */
   fileTile: 38,
   fileTileRadius: 11,
-  /** `.a-file b{font-size:14px}`. */
-  fileName: 14,
 
   // ---- 반응 (`.a-react`) ----------------------------------------------------
-  /** `.a-react span{font-size:12.5px;padding:3px 9px}`, `.a-react{gap:6px;margin-top:8px}`. */
-  reactText: 12.5,
   reactPadX: 9,
   reactGap: 6,
 
@@ -87,8 +75,6 @@ export const CONV = {
   cardRadius: 20,
   cardPad: 14,
   cardBorder: 1.5,
-  /** `.a-card .sum{font-size:15px;line-height:1.5}`. */
-  cardSum: 15,
   cardSumLine: 22,
   /** `.a-steps{margin:12px 0;gap:9px;padding:11px 12px;border-radius:14px}`. */
   stepsGapY: 12,
@@ -96,13 +82,10 @@ export const CONV = {
   stepsPadY: 11,
   stepsPadX: 12,
   stepsRadius: 14,
-  /** `.a-step{gap:9px;font-size:13.5px}`, `.a-step .st{width:20px;height:20px}`. */
-  stepText: 13.5,
   stepMark: 20,
   /** `.a-pill{height:38px;border-radius:19px;padding:0 15px;font-size:14px;font-weight:700}`, `.a-acts{gap:8px}`. */
   pillHeight: 38,
   pillPadX: 15,
-  pillText: 14,
   pillGap: 8,
 
   // ---- 컴포저 (`.a-comp`) ---------------------------------------------------
