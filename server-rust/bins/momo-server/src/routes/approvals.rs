@@ -1199,19 +1199,11 @@ async fn execute_workspace_action(
         )));
     };
 
-    // ADR-0186 증보 v3 V3-3a: the opt-in is the **action's** property. Asking for
-    // delivery of a value this action does not offer is refused before the
-    // first write (the approval stays pending), exactly like a malformed arg.
-    if input.deliver_secret_to_agent && action.secret_delivery != SecretDelivery::OptIn {
-        return Ok(Ok(refusal(
-            approval.id,
-            input.member_id,
-            DELIVER_SECRET_NOT_SUPPORTED,
-            "this action does not offer its one-time value to the proposing agent",
-            StatusCode::BAD_REQUEST,
-            now,
-        )));
-    }
+    // `deliverSecretToAgent` was already judged against this very action by the
+    // early guard in `decide_in_tx` (`deliver_flag_refused`), which runs before the
+    // expiry arm; a second copy here could never disagree with it, so there is
+    // none. The slice that first gives an action `SecretDelivery::OptIn` adds the
+    // honoured path *here*, with its own test.
 
     // The stored `args` are re-run through the **same** resolver the proposal
     // passed (`routes::actions::resolve_action_in_tx`), for the reason ADR-0186

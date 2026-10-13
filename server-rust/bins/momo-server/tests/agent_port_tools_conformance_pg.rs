@@ -12805,6 +12805,51 @@ async fn deliver_secret_to_agent_is_refused_where_the_action_does_not_offer_it()
     assert!((400..500).contains(&status), "{status}");
     assert_eq!(counts(&su, fixture.workspace, approval_id).await, before);
 
+    // An approval that is not a workspace action at all (an ordinary tool-call
+    // card): a `true` is refused for it too, approve or reject, nothing written.
+    let plain_run: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+         VALUES ($1,$2,$3,'awaiting_approval') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let plain: Uuid = sqlx::query_scalar(
+        "INSERT INTO approval (workspace_id, run_id, channel_id, requested_by, action_type, payload) \
+         VALUES ($1,$2,$3,$4,'tool_call','{}'::jsonb) RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(plain_run)
+    .bind(fixture.channel)
+    .bind(fixture.hosted_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let plain_before = counts(&su, fixture.workspace, plain).await;
+    for approve in [true, false] {
+        let (status, body) = post_decision(
+            &client,
+            format!(
+                "{base}/v1/workspaces/{}/approvals/{plain}/decision",
+                fixture.workspace
+            ),
+            &fixture.human_jwt,
+            json!({"approvalId": plain, "approve": approve,
+                   "clientDecisionId": Uuid::new_v4(), "deliverSecretToAgent": true}),
+        )
+        .await;
+        assert_eq!(status, 400, "tool_call approve={approve}: {body}");
+        assert_eq!(body["status"], "deliver_secret_not_supported", "{body}");
+        assert_eq!(
+            counts(&su, fixture.workspace, plain).await,
+            plain_before,
+            "tool_call approve={approve}: nothing consumed, nothing written"
+        );
+    }
+
     // The deadline has passed: the refusal still wins over the expiry settlement.
     sqlx::query(
         "UPDATE approval SET expires_at = now() - interval '1 minute' \
