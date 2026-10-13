@@ -46,6 +46,7 @@ import {
   runList,
 } from "@momo/core/features/agents/runLedger";
 import type { AgentRunProgress, Channel } from "@momo/core/lib/api";
+import { isOpenRunPhase } from "@momo/core/features/agents/runPhase";
 import { useSession } from "@/app/session";
 import { useInertRefWhile } from "@/app/inert";
 import {
@@ -71,6 +72,7 @@ import {
 } from "./agentRunProgressStore";
 import {
   ApprovalLink,
+  ApprovalMissing,
   LedgerView,
   QueueAheadView,
   RunListView,
@@ -240,6 +242,7 @@ export function AgentWorkPanel() {
         nowMs={nowMs}
         railLive={railLive}
         server={server}
+        listShown={runEntries.length > 1}
         onClose={close}
       />
       <PanelBody
@@ -269,6 +272,7 @@ function PanelHeader({
   nowMs,
   railLive,
   server,
+  listShown,
   onClose,
 }: {
   name: string;
@@ -277,12 +281,20 @@ function PanelHeader({
   nowMs: number;
   railLive: boolean;
   server: ServerRunFacts | null;
+  /** 여러 run 목록이 같은 근거 줄을 이미 말하고 있다. */
+  listShown: boolean;
   onClose: () => void;
 }) {
   const liveness: WorkLogLiveness | null =
     log === null ? null : workLogLiveness(log, nowMs, undefined, server);
   const turnState = log === null ? null : workLogTurnState(log, server);
-  const detail = server === null ? undefined : runPhaseDetail(server, nowMs);
+  // 같은 일을 목록이 이미 한 줄로 말하고 있으면(여러 run) 머리는 낱말 칩만 둔다.
+  // 한 run뿐일 때만 근거 줄이 머리에 선다 — 같은 문장이 머리·목록·기록에 세 번
+  // 나오지 않게(design-review U2 L-2).
+  const detail =
+    server === null || listShown
+      ? undefined
+      : runPhaseDetail(server, nowMs, { omitAhead: server.phase === "queued" });
   return (
     <header className="flex flex-col gap-1 border-b border-line px-4 py-2">
       <div className="flex items-center justify-between gap-2">
@@ -339,7 +351,7 @@ function PanelHeader({
             {workLogStateLabel(log, liveness, server)}
           </span>
         )}
-        {/* 근거 한 줄: 서버가 준 사실(미수령 n분 · 앞에 m건 / 가져간 뒤 n분째 소식이
+        {/* 근거 한 줄: 서버가 준 사실(n분째 기다려요 · 앞에 m건 / 가져간 뒤 n분째 소식이
             없어요 / 마지막 보고 n분 전 / 끝난 사유). 판정이 아니라 사실이다. */}
         {detail !== undefined && (
           <span
@@ -448,9 +460,8 @@ function PanelBody({
           onSelect={onSelectRun}
         />
       )}
-      {server !== null && server.phase === "awaiting_approval" && cardHref !== null && (
-        <ApprovalLink href={cardHref} />
-      )}
+      {server !== null && server.phase === "awaiting_approval" &&
+        (cardHref !== null ? <ApprovalLink href={cardHref} /> : <ApprovalMissing />)}
       {server !== null && server.phase === "queued" && progress !== null && (
         <QueueAheadView
           progress={progress}
@@ -462,7 +473,7 @@ function PanelBody({
 
       {server !== null ? (
         <section data-testid="agent-work-panel-record">
-          <h3 className="px-4 pt-2 text-timestamp text-ink-muted">기록</h3>
+          <h3 className="px-4 pt-2 text-meta font-medium text-ink">기록</h3>
           <p
             className="break-keep px-4 pb-1 text-timestamp text-ink-muted"
             data-testid="agent-work-panel-kept"
@@ -477,14 +488,19 @@ function PanelBody({
               testId="agent-work-panel-empty"
             />
           ) : (
-            <LedgerView rows={ledger.rows} />
+            <LedgerView rows={ledger.rows} nowMs={nowMs} />
           )}
           {ledger.isError && (
             <p
-              className="break-keep px-4 py-2 text-meta text-warn"
+              className="break-keep px-4 py-2 text-meta text-ink-muted"
               data-testid="agent-work-panel-ledger-error"
             >
-              기록을 읽지 못했어요. 잠시 뒤에 다시 읽어요.
+              {/* 다시 읽겠다는 약속은 열린 run에서만 지킬 수 있다(끝난 run은 30초
+                  타이머가 없다). 끝난 run에는 지킬 수 있는 말만 한다. */}
+              기록을 읽지 못했어요.{" "}
+              {isOpenRunPhase(server.phase)
+                ? "잠시 뒤에 다시 읽어요."
+                : "패널을 다시 열면 다시 읽어요."}
             </p>
           )}
         </section>
@@ -522,7 +538,7 @@ function PanelBody({
         <section data-testid="agent-work-panel-stream">
           {server !== null && (
             <>
-              <h3 className="px-4 pt-3 text-timestamp text-ink-muted">보낸 글과 도구 호출</h3>
+              <h3 className="px-4 pt-3 text-meta font-medium text-ink">보낸 글과 도구 호출</h3>
               <p
                 className="break-keep px-4 pb-1 text-timestamp text-ink-muted"
                 data-testid="agent-work-panel-stream-limit"

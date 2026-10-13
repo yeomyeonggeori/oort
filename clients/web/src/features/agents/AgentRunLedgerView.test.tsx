@@ -9,6 +9,7 @@ import { ledgerRows, runList } from "@momo/core/features/agents/runLedger";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import {
   ApprovalLink,
+  ApprovalMissing,
   LedgerView,
   QueueAheadView,
   RunListView,
@@ -172,7 +173,7 @@ describe("기록 줄과 승인 링크", () => {
 
   it("에이전트가 쓴 단계는 마크업이 아니라 글자로 선다", () => {
     const el = render(
-      createElement(LedgerView, { rows: events })
+      createElement(LedgerView, { rows: events, nowMs: T })
     );
     expect(el.querySelector("img")).toBeNull();
     expect(el.textContent).toContain("<img src=x onerror=alert(1)>");
@@ -182,5 +183,13 @@ describe("기록 줄과 승인 링크", () => {
     const el = render(createElement(ApprovalLink, { href: "/c/ch?msg=m1" }));
     expect(el.querySelector('[data-testid="agent-work-panel-approval-link"]')?.getAttribute("href")).toBe("/c/ch?msg=m1");
     expect(el.textContent).toContain("승인을 기다리고 있어요");
+  });
+
+  it("승인 대기인데 카드를 찾지 못하면 침묵하지 않고 이유를 말한다", () => {
+    const el = render(createElement(ApprovalMissing));
+    expect(el.querySelector('[data-testid="agent-work-panel-approval-missing"]')?.textContent).toContain(
+      "이미 결정됐거나 만료됐을 수 있어요"
+    );
+    expect(el.querySelector("a")).toBeNull();
   });
 });

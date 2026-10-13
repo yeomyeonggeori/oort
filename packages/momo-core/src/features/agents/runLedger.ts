@@ -125,11 +125,20 @@ export function ledgerRows(
     });
 }
 
-/** 로컬 시각 「HH:MM」. 기록 줄 옆의 때. */
-export function clockLabel(ms: number): string {
+/**
+ * 로컬 시각 「HH:MM」. 기록 줄 옆의 때. 오늘이 아니면 날짜가 앞에 붙는다
+ * (「10/12 18:20」): 하루를 넘긴 run에서 시각만 보이면 어제와 오늘이 섞인다.
+ */
+export function clockLabel(ms: number, nowMs: number = ms): string {
   const d = new Date(ms);
+  const now = new Date(nowMs);
   const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const clock = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  return sameDay ? clock : `${d.getMonth() + 1}/${d.getDate()} ${clock}`;
 }
 
 // ---- 문장 --------------------------------------------------------------------
@@ -140,7 +149,7 @@ export function clockLabel(ms: number): string {
  * 보고가 없다」까지만 말할 수 있다.
  */
 export const RUN_LEDGER_LIMIT_SENTENCE =
-  "에이전트가 보고한 단계만 보여요. 보내지 않은 생각은 oort도 알 수 없어요.";
+  "에이전트가 보낸 만큼만 보여요. 보내지 않은 생각은 oort도 알 수 없어요.";
 
 /** 서버가 아는 run의 기록이 어디에 있는가. 닫아도 남는다는 사실. */
 export const RUN_LEDGER_KEPT_SENTENCE =

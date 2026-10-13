@@ -303,7 +303,7 @@ function AgentActivityBar({
         const body = (
           <>
             <ActivityText line={line} live={live} />
-            {/* 서버가 아는 run의 근거 한 줄(미수령 n분 · 앞에 m건 / 가져간 뒤
+            {/* 서버가 아는 run의 근거 한 줄(n분째 기다려요 · 앞에 m건 / 가져간 뒤
                 n분째 소식이 없어요 / 마지막 보고 n분 전). 사실만 적고 판정은
                 하지 않는다 — 「끊김」은 서버가 알릴 때만 나온다. */}
             {activityDetail(line, nowMs) !== undefined && (

@@ -233,7 +233,7 @@ async function u1(browser, origin, scheme) {
   const pillText = ((await pill(page).first().textContent()) ?? "").replace(/\s+/g, " ");
   check(`${tag} queued: 알약이 「작업 중」이 아니다`, !pillText.includes("작업 중"), pillText);
   const lineText = (await page.getByTestId("composer-working").textContent()) ?? "";
-  check(`${tag} queued: 활동 줄이 「대기 2번째」와 「미수령 11분」을 말한다`, lineText.includes("대기 2번째") && lineText.includes("미수령 11분"), lineText);
+  check(`${tag} queued: 활동 줄이 「대기 2번째」와 「11분째 기다려요」를 말한다`, lineText.includes("대기 2번째") && lineText.includes("11분째 기다려요"), lineText);
   check(`${tag} queued: 「신호 소실」이 없다 (11분이 지났는데도)`, !(await page.locator("body").textContent())?.includes("신호 소실"));
   await page.getByTestId("composer-working-open").filter({ hasText: "그록봇" }).first().click();
   await page.getByTestId("agent-work-panel").waitFor();
@@ -346,8 +346,8 @@ async function u2(browser, origin, scheme) {
   scene.runs = [
     progress(now, { id: RUN_A, phase: "awaiting_approval", status: "awaiting_approval", leaseState: "live", claimedAtMs: now - 9 * MIN, startedAtMs: now - 9 * MIN, lastEventAtMs: now - 3 * MIN, approvalId: APPROVAL, approvalExpiresAtMs: now + 50 * MIN, triggerSummary: "grokbot-lab 채널 만들기", createdAtMs: now - 12 * MIN }),
     progress(now, { id: RUN_C, phase: "running", status: "running", leaseState: "live", claimedAtMs: now - 5 * MIN, startedAtMs: now - 4 * MIN, lastEventAtMs: now - 20_000, latestStage: "릴리스 노트 초안 정리", triggerSummary: "릴리스 노트 정리", createdAtMs: now - 6 * MIN }),
-    progress(now, { id: RUN_D, queuePosition: 1, aheadTotal: 0, triggerSummary: "회의록 요약", createdAtMs: now - 3 * MIN }),
-    progress(now, { id: RUN_E, queuePosition: 2, aheadTotal: 3, ahead: [{ runId: RUN_D, channelId: CH }], triggerSummary: "일정 정리", createdAtMs: now - 2 * MIN }),
+    progress(now, { id: RUN_D, queuePosition: 3, aheadTotal: 2, triggerSummary: "회의록 요약", createdAtMs: now - 3 * MIN }),
+    progress(now, { id: RUN_E, queuePosition: 4, aheadTotal: 3, ahead: [{ runId: RUN_D, channelId: CH }], triggerSummary: "일정 정리", createdAtMs: now - 2 * MIN }),
     progress(now, { id: RUN_F, phase: "timed_out", status: "timed_out", leaseState: "live", claimedAtMs: now - 80 * MIN, finishedAtMs: now - 20 * MIN, endReason: "approval_expired", triggerSummary: "설정 바꾸기", createdAtMs: now - 85 * MIN }),
   ];
   scene.ledgers[RUN_A] = ledger(now, [
@@ -389,7 +389,7 @@ async function u2(browser, origin, scheme) {
   check(`${tag} ledger: 거짓 문구 「패널을 닫으면 이 기록은 사라집니다」가 없다`, !bodyText.includes("이 기록은 사라집니다") && !bodyText.includes("이 기록은 사라져요"));
   check(`${tag} ledger: 「패널을 닫아도 남아요」`, bodyText.includes("패널을 닫아도"));
   const limit = ((await page.getByTestId("agent-work-panel-limit").textContent()) ?? "").trim();
-  check(`${tag} ledger: 보이는 것의 한계 한 줄`, limit === "에이전트가 보고한 단계만 보여요. 보내지 않은 생각은 oort도 알 수 없어요.", limit);
+  check(`${tag} ledger: 보이는 것의 한계 한 줄`, limit === "에이전트가 보낸 만큼만 보여요. 보내지 않은 생각은 oort도 알 수 없어요.", limit);
   check(`${tag} ledger: 「실시간」을 약속하지 않는다`, !bodyText.includes("실시간"));
   const link = page.getByTestId("agent-work-panel-approval-link");
   check(`${tag} approval: 카드로 가는 링크`, ((await link.getAttribute("href")) ?? "").includes(`msg=${CARD_MSG}`), String(await link.getAttribute("href")));
@@ -401,7 +401,7 @@ async function u2(browser, origin, scheme) {
   const activeRows = await page.locator('[data-section="active"] [data-testid="agent-work-panel-run"]').allTextContents();
   check(`${tag} runs: 진행 중 둘이 나란히 (작업 중 + 승인 대기)`, activeRows.length === 2 && activeRows.join("|").includes("승인 대기") && activeRows.join("|").includes("작업 중"), activeRows.join("|"));
   const queueRows = await page.locator('[data-section="queue"] [data-testid="agent-work-panel-run"]').allTextContents();
-  check(`${tag} runs: 대기열은 서버 순번대로`, queueRows[0]?.includes("대기 1번째") && queueRows[1]?.includes("대기 2번째"), queueRows.join("|"));
+  check(`${tag} runs: 대기열은 서버 순번대로`, queueRows[0]?.includes("대기 3번째") && queueRows[1]?.includes("대기 4번째"), queueRows.join("|"));
   const doneRows = await page.locator('[data-section="done"] [data-testid="agent-work-panel-run"]').allTextContents();
   check(`${tag} runs: 끝난 일은 사유와 함께`, doneRows[0]?.includes("시간 초과") && doneRows[0]?.includes("승인이 만료됐어요"), doneRows.join("|"));
 
@@ -413,6 +413,9 @@ async function u2(browser, origin, scheme) {
   const hidden = ((await page.getByTestId("agent-work-panel-ahead-hidden").textContent()) ?? "").trim();
   check(`${tag} queue: 그 밖은 「앞에 N건」만`, hidden.startsWith("앞에 2건이 더 있어요") && !hidden.includes("#"), hidden);
   const emptyHeadline = ((await page.getByTestId("agent-work-panel-empty").textContent()) ?? "");
+  const headerDetail = await page.getByTestId("agent-work-panel-detail").count();
+  check(`${tag} queue: 목록이 있으면 머리에 같은 근거 줄을 되풀이하지 않는다`, headerDetail === 0, String(headerDetail));
+  check(`${tag} queue: 선택 행은 왼쪽 막대로 표시된다`, ((await page.locator(`[data-run-id="${RUN_E}"]`).getAttribute("class")) ?? "").includes("border-ink"));
   check(`${tag} queue: 수령 전 빈 기록 안내`, emptyHeadline.includes("아직 아무도 일을 가져가지 않았어요"), emptyHeadline);
   await page.screenshot({ path: shot("2-queue-ahead") });
 

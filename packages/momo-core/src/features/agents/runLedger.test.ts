@@ -99,8 +99,11 @@ describe("원장 → 기록 줄 (ADR-0200 D2)", () => {
     expect(text("something_new")).toBe("승인 결정이 기록됐어요");
   });
 
-  it("시각은 HH:MM", () => {
-    expect(clockLabel(new Date(2026, 9, 13, 9, 5).getTime())).toBe("09:05");
+  it("시각은 HH:MM, 오늘이 아니면 날짜가 붙는다", () => {
+    const at = new Date(2026, 9, 13, 9, 5).getTime();
+    expect(clockLabel(at)).toBe("09:05");
+    expect(clockLabel(at, new Date(2026, 9, 13, 23, 0).getTime())).toBe("09:05");
+    expect(clockLabel(at, new Date(2026, 9, 14, 9, 6).getTime())).toBe("10/13 09:05");
   });
 });
 
@@ -195,7 +198,7 @@ describe("문장: 해요체이고, 서버 기록에 거짓을 붙이지 않는�
 
   it("한계는 한 문장이다", () => {
     expect(RUN_LEDGER_LIMIT_SENTENCE.split(/(?<=[.])\s/)).toHaveLength(2);
-    expect(RUN_LEDGER_LIMIT_SENTENCE).toContain("에이전트가 보고한 단계만");
+    expect(RUN_LEDGER_LIMIT_SENTENCE).toContain("에이전트가 보낸 만큼만");
     expect(RUN_LEDGER_LIMIT_SENTENCE).not.toContain("실시간");
   });
 });

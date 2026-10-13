@@ -151,7 +151,9 @@ describe("상태 어휘: 대기 n번째 / 가져감 / 진행 / 승인 대기 / �
 
   it("근거 줄은 서버가 준 사실만 말한다", () => {
     const queued = serverFactsOf(progress({ queuePosition: 3, aheadTotal: 2 }));
-    expect(runPhaseDetail(queued, NOW)).toBe("미수령 11분 · 에이전트 앞에 2건");
+    expect(runPhaseDetail(queued, NOW)).toBe("11분째 기다려요 · 에이전트 앞에 2건");
+    // 패널이 앞의 일을 따로 자세히 보일 때는 같은 건수를 두 번 말하지 않는다.
+    expect(runPhaseDetail(queued, NOW, { omitAhead: true })).toBe("11분째 기다려요");
     const fresh = serverFactsOf(progress({ createdAtMs: NOW - 10_000, queuePosition: 1 }));
     expect(runPhaseDetail(fresh, NOW)).toBeUndefined();
     const running = serverFactsOf(

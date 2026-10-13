@@ -120,7 +120,7 @@ export function activitySuffix(line: AgentActivityLine): string {
 }
 
 /**
- * 활동 줄 옆에 붙는 근거 한 줄(「미수령 11분 · 에이전트 앞에 2건」). 시간이 흐르면
+ * 활동 줄 옆에 붙는 근거 한 줄(「11분째 기다려요 · 에이전트 앞에 2건」). 시간이 흐르면
  * 숫자가 바뀌므로 접근성 이름이 아니라 보이는 보조 글에만 쓴다.
  */
 export function activityDetail(

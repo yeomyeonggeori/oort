@@ -71,7 +71,7 @@ export function RunListView({
         if (rows.length === 0) return null;
         return (
           <section key={section} data-testid="agent-work-panel-runs-section" data-section={section}>
-            <h3 className="px-4 pt-2 text-timestamp text-ink-muted">
+            <h3 className="px-4 pt-2 text-timestamp font-medium text-ink-muted">
               {RUN_LIST_SECTION_LABEL[section]}
               {section === "active" && rows.length > 1 ? (
                 <span data-numeric> {rows.length}</span>
@@ -80,6 +80,8 @@ export function RunListView({
             <ul>
               {rows.map(({ runId, progress }) => {
                 const facts = serverFactsOf(progress);
+                // 대기열 줄의 「앞에 N건」은 이 줄이 서 있는 순번 옆의 사실이다. 다만 아래
+                // 「앞에 있는 일」이 같은 건수를 자세히 말하는 줄은 그 구역에 맡긴다.
                 const detail = runPhaseDetail(facts, nowMs);
                 const selected = uuidEq(runId, selectedRunId);
                 return (
@@ -93,8 +95,12 @@ export function RunListView({
                       data-selected={selected ? "" : undefined}
                       className={cn(
                         // 전폭 행은 눌림을 채움으로 말하고 크기는 바꾸지 않는다(B4-3).
-                        "flex w-full min-w-0 flex-col gap-1 px-4 py-2 text-left active:bg-surface-pressed focus-visible:focus-ring",
-                        selected ? "bg-surface-hover" : "hover:bg-surface-hover"
+                        // 선택은 채움이 아니라 왼쪽 막대로 말한다: 채움은 hover도 쓰므로
+                        // 포인터가 올라온 행과 고른 행이 같아 보인다.
+                        "flex w-full min-w-0 flex-col gap-1 border-l-2 py-2 pl-4 pr-4 text-left active:bg-surface-pressed focus-visible:focus-ring",
+                        selected
+                          ? "border-ink bg-surface-hover"
+                          : "border-transparent hover:bg-surface-hover"
                       )}
                     >
                       <span className="flex min-w-0 items-baseline gap-2">
@@ -179,7 +185,7 @@ export function QueueAheadView({
   if (ahead.visible.length === 0 && ahead.hiddenCount === 0) return null;
   return (
     <section className="border-b border-line py-2" data-testid="agent-work-panel-ahead">
-      <h3 className="px-4 text-timestamp text-ink-muted">앞에 있는 일</h3>
+      <h3 className="px-4 text-timestamp font-medium text-ink-muted">앞에 있는 일</h3>
       {ahead.visible.length > 0 && (
         <ul>
           {ahead.visible.map((entry) => (
@@ -208,6 +214,18 @@ export function QueueAheadView({
 }
 
 // ---- 승인 대기 → 카드 --------------------------------------------------------
+
+/** 승인 대기인데 갈 카드가 없다: 이미 결정됐거나 만료됐을 수 있다. 침묵하지 않는다. */
+export function ApprovalMissing() {
+  return (
+    <p
+      className="break-keep border-b border-line px-4 py-2 text-meta text-ink-muted"
+      data-testid="agent-work-panel-approval-missing"
+    >
+      승인 카드를 찾지 못했어요. 이미 결정됐거나 만료됐을 수 있어요.
+    </p>
+  );
+}
 
 export function ApprovalLink({ href }: { href: string }) {
   return (
@@ -238,7 +256,14 @@ const TONE_CLASS: Readonly<Record<RunLedgerRow["tone"], string>> = {
   end: "font-medium text-ink",
 };
 
-export function LedgerView({ rows }: { rows: readonly RunLedgerRow[] }) {
+export function LedgerView({
+  rows,
+  nowMs,
+}: {
+  rows: readonly RunLedgerRow[];
+  /** 오늘이 아닌 줄에 날짜를 붙이는 기준. */
+  nowMs: number;
+}) {
   return (
     <ol className="flex flex-col" data-testid="agent-work-panel-ledger">
       {rows.map((row) => (
@@ -254,7 +279,7 @@ export function LedgerView({ rows }: { rows: readonly RunLedgerRow[] }) {
               data-numeric
               data-testid="agent-work-panel-ledger-time"
             >
-              {clockLabel(row.atMs)}
+              {clockLabel(row.atMs, nowMs)}
             </span>
             {/* `stage` 문자열은 에이전트가 쓴 일반 텍스트다. 이스케이프된 텍스트
                 노드로만 그리고, 긴 한 덩어리는 열 안에서 꺾는다. */}
