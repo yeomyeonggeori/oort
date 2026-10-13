@@ -78,8 +78,15 @@ pub struct AgentCard {
     pub status_text: Option<String>,
 }
 
-const CARD_SELECT: &str = "SELECT a.config->>'tagline' AS tagline, \
-            a.config->>'roleLabel' AS role_label, \
+// `config` is also written at agent creation as a free bag, so the two card keys
+// are read only when they are strings within their bounds: anything else is "unset".
+const CARD_SELECT: &str = "SELECT \
+            CASE WHEN jsonb_typeof(a.config->'tagline') = 'string' \
+                  AND char_length(a.config->>'tagline') <= 140 \
+                 THEN a.config->>'tagline' END AS tagline, \
+            CASE WHEN jsonb_typeof(a.config->'roleLabel') = 'string' \
+                  AND char_length(a.config->>'roleLabel') <= 24 \
+                 THEN a.config->>'roleLabel' END AS role_label, \
             CASE WHEN m.status_expires_at IS NULL OR m.status_expires_at > now() \
                  THEN m.status_emoji END AS status_emoji, \
             CASE WHEN m.status_expires_at IS NULL OR m.status_expires_at > now() \
@@ -110,6 +117,34 @@ pub async fn read_agent_card_in_tx(
         .fetch_optional(&mut *conn)
         .await?;
     Ok(row.as_ref().map(decode).transpose()?)
+}
+
+/// Lock the agent's member row `FOR UPDATE` and read its display name and card
+/// **under that lock**, or `None` when it is not a live agent. The executor calls
+/// this before any write and compares the result with what the approval pinned,
+/// so a change made between the proposal's resolution and the write (a rename
+/// approved in the meantime, say) re-asks instead of being silently overwritten.
+pub async fn lock_agent_card_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent: Uuid,
+) -> Result<Option<(String, AgentCard)>, DbError> {
+    let locked = sqlx::query(
+        "SELECT display_name FROM member WHERE workspace_id = $1 AND id = $2 AND kind = 'agent' \
+            AND status = 'active' AND deleted_at IS NULL FOR UPDATE",
+    )
+    .bind(workspace_id)
+    .bind(agent)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(locked) = locked else {
+        return Ok(None);
+    };
+    let display_name: String = locked.try_get("display_name")?;
+    let Some(card) = read_agent_card_in_tx(conn, workspace_id, agent).await? else {
+        return Ok(None);
+    };
+    Ok(Some((display_name, card)))
 }
 
 /// Apply `patch` to `agent` and return the card **as it was**, or `None` when

@@ -45,7 +45,7 @@ use momo_auth::{
 };
 use momo_db::PgConnection;
 use momo_messaging::name_guard::{
-    conflicts_with_roster, has_hidden_characters, mention_overlaps_roster, skeleton,
+    conflicts_with_roster, has_hidden_characters, mention_overlaps_roster, role_label_collides,
     text_repeats_roster_name, validated_agent_proposed_display_name, validated_agent_role_label,
     validated_agent_status_emoji, validated_agent_status_text, validated_agent_tagline, RosterName,
 };
@@ -1085,6 +1085,41 @@ async fn resolve_agent_rename_target_in_tx(
     }))
 }
 
+/// The agent a proposal is **about** (an `agent.rename` / `agent.profile.update`
+/// target), found **without judging any text** — or `None` when the proposal is not
+/// about an agent, does not parse, or names someone the proposer does not manage.
+///
+/// The proposal path asks this *before* resolving, so the "someone else's proposal
+/// is already waiting" answer (409) cannot depend on whether the text passes the
+/// roster-name rules (which would turn 409-vs-400 into a roster oracle).
+pub async fn early_target_agent_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    proposer_member_id: Uuid,
+    action: &WorkspaceAction,
+    args: &Value,
+    now_ms: i64,
+) -> Result<Option<Uuid>, momo_db::DbError> {
+    let Ok(validated) = validated_action_args(action, args, now_ms) else {
+        return Ok(None);
+    };
+    let handle = match &validated.args {
+        ActionArgs::AgentRename { target_handle, .. }
+        | ActionArgs::AgentProfileUpdate { target_handle, .. } => target_handle,
+        _ => return Ok(None),
+    };
+    Ok(
+        resolve_agent_rename_target_in_tx(
+            conn,
+            workspace_id,
+            proposer_member_id,
+            handle.as_deref(),
+        )
+        .await?
+        .map(|target| target.id),
+    )
+}
+
 /// Find the channel a name points at **from the proposer's point of view**
 /// (증보 V1-b): a live, non-DM channel that is public, or one the proposing agent
 /// is a live member of. Everything else — somebody else's private channel, a DM,
@@ -1522,22 +1557,20 @@ pub async fn resolve_action_in_tx(
             {
                 return Ok(Err(ApiError::bad_request("profile text is not allowed")));
             }
-            // A role label may not equal one the workspace itself defines
-            // (「관리자」·「Owner」…): that is a label with authority behind it.
+            // A role label may not equal a default role word (「멤버」·「게스트」…) or
+            // one the workspace itself defines, nor contain a defined one
+            // (「Captain Bot」 under a 「Captain」 override): that is a label with
+            // authority behind it.
             if let FieldPatch::Set(label) = role_label {
                 let Some(bag) = read_workspace_settings(conn, workspace_id).await? else {
                     return Ok(Err(ApiError::bad_request("workspace settings unavailable")));
                 };
-                let wanted = skeleton(label);
-                let taken = momo_settings::project_role_labels(&bag)
+                let labels = momo_settings::project_role_labels(&bag);
+                let defined: Vec<&str> = labels
                     .as_object()
-                    .is_some_and(|labels| {
-                        labels
-                            .values()
-                            .filter_map(Value::as_str)
-                            .any(|defined| skeleton(defined) == wanted)
-                    });
-                if taken {
+                    .map(|map| map.values().filter_map(Value::as_str).collect())
+                    .unwrap_or_default();
+                if role_label_collides(label, &defined) {
                     return Ok(Err(ApiError::bad_request("profile text is not allowed")));
                 }
             }

@@ -491,14 +491,46 @@ fn is_link_or_mention_char(c: char) -> bool {
     )
 }
 
-/// `foo.com`, `a.b`, `x.io`: a dot with an alphanumeric on both sides is a
-/// domain-shaped token, the thing a link detector would pick up. A sentence's
-/// closing `.` (followed by a space or the end) is not.
+/// The full stops a link detector (or a person) reads as a dot: NFKC already
+/// folds U+FF0E / U+FE52 / U+2024 to `.`, but U+3002 and U+FF61 stay (they are
+/// the dot of a CJK domain) and are added here.
+fn is_dot_like(c: char) -> bool {
+    matches!(
+        c,
+        '.' | '\u{3002}' | '\u{FF61}' | '\u{2024}' | '\u{FE52}' | '\u{FF0E}'
+    )
+}
+
+/// `foo.com`, `a.b`, `x.io`, `evil。com`, `x🔥.com`: a dot with a non-space on its
+/// left and an alphanumeric on its right is a domain-shaped token, the thing a
+/// link detector would pick up. A sentence's closing `.` (followed by a space or
+/// the end) is not, and neither is a number like `1.5`.
 fn has_domain_shaped_dot(text: &str) -> bool {
     let chars: Vec<char> = text.chars().collect();
-    chars
-        .windows(3)
-        .any(|w| w[1] == '.' && w[0].is_alphanumeric() && w[2].is_alphanumeric())
+    chars.windows(3).any(|w| {
+        is_dot_like(w[1])
+            && !w[0].is_whitespace()
+            && !is_dot_like(w[0])
+            && w[2].is_alphanumeric()
+            && !(w[0].is_ascii_digit() && w[2].is_ascii_digit())
+    })
+}
+
+/// A combining/mark character by canonical combining class or by the explicit
+/// ranges — Arabic and Hebrew points carry a class and no block list covers them.
+fn is_mark_like(c: char) -> bool {
+    is_combining_mark(c) || unicode_normalization::char::canonical_combining_class(c) != 0
+}
+
+/// Format and invisible characters `has_invisible_or_control_characters` does not
+/// list: Arabic number signs, the object replacement character, Egyptian
+/// hieroglyph and shorthand format controls.
+fn has_extra_invisible_characters(text: &str) -> bool {
+    text.chars().any(|c| {
+        matches!(c as u32,
+            0x0600..=0x0605 | 0x06DD | 0x070F | 0x0890..=0x0891 | 0x08E2 | 0xFFFC
+            | 0x1BCA0..=0x1BCA3 | 0x13430..=0x1345F)
+    })
 }
 
 /// Free text an **agent proposes for another surface** (a tagline, a status
@@ -517,10 +549,14 @@ pub fn validated_agent_free_text(raw: &str, max_chars: usize) -> Result<String, 
     if collapsed.chars().count() > max_chars {
         return Err(NameRejected::TooLong);
     }
+    let without_spaces: String = collapsed.chars().filter(|c| !c.is_whitespace()).collect();
     if has_invisible_or_control_characters(&collapsed)
+        || has_extra_invisible_characters(&collapsed)
         || collapsed.chars().any(is_link_or_mention_char)
         || has_domain_shaped_dot(&collapsed)
-        || collapsed.to_lowercase().contains("www.")
+        // `www .evil com`: the spaces are not a way around the `www.` check.
+        || without_spaces.to_lowercase().contains("www.")
+        || without_spaces.chars().any(is_dot_like) && without_spaces.to_lowercase().contains("www")
     {
         return Err(NameRejected::Disallowed);
     }
@@ -528,7 +564,7 @@ pub fn validated_agent_free_text(raw: &str, max_chars: usize) -> Result<String, 
     // grapheme joiner — the same limit a proposed name carries.
     let mut run = 0usize;
     for c in collapsed.chars() {
-        if is_combining_mark(c) {
+        if is_mark_like(c) {
             run += 1;
             if run > 2 || c == '\u{034F}' {
                 return Err(NameRejected::Disallowed);
@@ -550,9 +586,13 @@ pub fn validated_agent_status_text(raw: &str) -> Result<String, NameRejected> {
     validated_agent_free_text(raw, AGENT_STATUS_TEXT_MAX_CHARS)
 }
 
-/// A status emoji: only pictographs from the narrow [`is_emoji`] set plus the
-/// emoji variation selector, at most [`AGENT_STATUS_EMOJI_MAX`] — no zero-width
-/// joiner (a format character), no text.
+/// A status emoji: only pictographs from the narrow [`is_emoji`] set, each
+/// optionally followed by **one** emoji variation selector — at most
+/// [`AGENT_STATUS_EMOJI_MAX`] pictographs, so at most twice that many scalars
+/// (8, far inside the `member.status_emoji` CHECK of 32) **by construction**: a
+/// selector may only follow a pictograph and each pictograph takes one. No
+/// zero-width joiner (a format character), no text, no leading or repeated
+/// selector.
 pub fn validated_agent_status_emoji(raw: &str) -> Result<String, NameRejected> {
     let normalised: String = raw.nfkc().collect();
     let trimmed: String = normalised.split_whitespace().collect::<Vec<_>>().join("");
@@ -560,10 +600,15 @@ pub fn validated_agent_status_emoji(raw: &str) -> Result<String, NameRejected> {
         return Err(NameRejected::Empty);
     }
     let mut emoji = 0usize;
+    let mut previous_emoji = false;
     for c in trimmed.chars() {
         if is_emoji(c) {
             emoji += 1;
-        } else if c != '\u{FE0F}' {
+            previous_emoji = true;
+        } else if c == '\u{FE0F}' && previous_emoji {
+            // One selector per pictograph: it consumes the "just saw an emoji" flag.
+            previous_emoji = false;
+        } else {
             return Err(NameRejected::Disallowed);
         }
     }
@@ -573,24 +618,92 @@ pub fn validated_agent_status_emoji(raw: &str) -> Result<String, NameRejected> {
     Ok(trimmed)
 }
 
+/// Authority words a role label may not **contain** (compared by [`skeleton`]), on
+/// top of the proposed-name reserved list: the Korean and English words a person
+/// reads as 「this one decides」 or 「this one is verified」. `관리` alone is
+/// deliberately absent (「일정 관리 비서」 is an honest label); `관리자` is
+/// already reserved.
+const ROLE_LABEL_AUTHORITY: [&str; 9] = [
+    "소유자",
+    "오너",
+    "어드민",
+    "운영진",
+    "인증",
+    "공식",
+    "verified",
+    "대표",
+    "팀장",
+];
+/// Short authority words refused only as a whole word of the label.
+const ROLE_LABEL_AUTHORITY_WHOLE: [&str; 3] = ["ceo", "hr", "cto"];
+
+/// The labels every workspace has before it overrides any (the client's
+/// defaults and their English roots). A role label equal to one is refused.
+pub const DEFAULT_ROLE_LABEL_WORDS: [&str; 8] = [
+    "소유자",
+    "관리자",
+    "멤버",
+    "게스트",
+    "owner",
+    "admin",
+    "member",
+    "guest",
+];
+
 /// A `roleLabel`: the proposed-name rules (allow-list, scripts, reserved words)
-/// at 24 characters. A label like 「관리자」 or 「Security」 wears authority the
-/// agent does not have, so the reserved list applies as it does to a name.
+/// at 24 characters, plus the authority words above. A label like 「관리자」 or
+/// 「Security」 wears authority the agent does not have.
 pub fn validated_agent_role_label(raw: &str) -> Result<String, NameRejected> {
     let label = validated_agent_proposed_display_name(raw)?;
     if label.chars().count() > AGENT_ROLE_LABEL_MAX_CHARS {
         return Err(NameRejected::TooLong);
     }
+    let label_skeleton = skeleton(&label);
+    let authority_hit = ROLE_LABEL_AUTHORITY
+        .iter()
+        .any(|word| label_skeleton.contains(&skeleton(word)))
+        || label.split(' ').any(|word| {
+            ROLE_LABEL_AUTHORITY_WHOLE
+                .iter()
+                .any(|reserved| light_skeleton(word) == light_skeleton(reserved))
+        });
+    if authority_hit {
+        return Err(NameRejected::Reserved);
+    }
     Ok(label)
 }
 
-/// Whether `text` repeats another member's display name or handle **as whole
-/// words** (the mention fold), so a line cannot read as something that member
-/// said or endorsed. Names that fold to fewer than three characters are ignored
-/// (`AI`, `민`), which would refuse ordinary prose.
+/// Whether `label` equals a default role word, or equals / contains a label the
+/// workspace defined (`defined`, from `settings.role_labels`). Containment only
+/// for defined labels of at least three skeleton characters, so a one-letter
+/// override cannot ban the alphabet.
+pub fn role_label_collides(label: &str, defined: &[&str]) -> bool {
+    let wanted = skeleton(label);
+    if wanted.is_empty() {
+        return true;
+    }
+    DEFAULT_ROLE_LABEL_WORDS
+        .iter()
+        .any(|word| skeleton(word) == wanted)
+        || defined.iter().any(|name| {
+            let theirs = skeleton(name);
+            !theirs.is_empty()
+                && (theirs == wanted || (theirs.chars().count() >= 3 && wanted.contains(&theirs)))
+        })
+}
+
+/// Whether `text` repeats another member's display name or handle, so a line
+/// cannot read as something that member said or endorsed.
+///
+/// Compared on the **skeleton** (case, width, look-alikes, spaces, `-` and `_`
+/// folded away) by containment, because Korean attaches particles directly to a
+/// name (`김인턴님이`) and Latin names can be glued or hyphenated (`AliceKim`,
+/// `Alice-Kim`). Names too short to be meaningful are ignored: fewer than three
+/// letters for a Latin name (`AI`), fewer than two for a Hangul or Han name
+/// (`김`), counted on the raw characters.
 pub fn text_repeats_roster_name(text: &str, target: Uuid, roster: &[RosterName<'_>]) -> bool {
-    let words = mention_words(text);
-    if words.is_empty() {
+    let haystack = skeleton(text);
+    if haystack.is_empty() {
         return false;
     }
     roster
@@ -598,14 +711,23 @@ pub fn text_repeats_roster_name(text: &str, target: Uuid, roster: &[RosterName<'
         .filter(|other| other.member_id != target)
         .any(|other| {
             [other.display_name, other.handle].into_iter().any(|name| {
-                let theirs = mention_words(name);
-                !theirs.is_empty()
-                    && theirs.iter().map(|w| w.chars().count()).sum::<usize>() >= 3
-                    && words
-                        .windows(theirs.len())
-                        .any(|window| window == theirs.as_slice())
+                let letters: Vec<char> = name.chars().filter(|c| c.is_alphanumeric()).collect();
+                let wide = letters.iter().any(|c| is_hangul_or_han(*c));
+                let long_enough = if wide {
+                    letters.len() >= 2
+                } else {
+                    letters.len() >= 3
+                };
+                let needle = skeleton(name);
+                long_enough && !needle.is_empty() && haystack.contains(&needle)
             })
         })
+}
+
+fn is_hangul_or_han(c: char) -> bool {
+    matches!(c as u32,
+        0xAC00..=0xD7AF | 0x1100..=0x11FF | 0x3130..=0x318F | 0x4E00..=0x9FFF | 0x3400..=0x4DBF
+        | 0x3040..=0x30FF)
 }
 
 #[cfg(test)]
@@ -1176,17 +1298,190 @@ mod tests {
             me,
             &roster
         ));
-        // Not a whole word.
-        assert!(!text_repeats_roster_name(
-            "Alicex is unrelated",
-            me,
-            &roster
-        ));
+        // Containment on the skeleton is deliberately conservative: a name inside a
+        // longer word is flagged too (the proposer rewrites the line).
+        assert!(text_repeats_roster_name("Alicex is unrelated", me, &roster));
+        assert!(!text_repeats_roster_name("Bob is unrelated", me, &roster));
         // The target's own name is not a repeat of "another" member.
         assert!(!text_repeats_roster_name(
             "Alice Kim approved this",
             alice,
             &roster
         ));
+    }
+
+    // ---- security review of #3797 (M1·M2·M3·L1·L2) ------------------------------
+
+    #[test]
+    fn a_status_emoji_cannot_be_padded_with_selectors() {
+        let padded = format!("🤖{}", "\u{FE0F}".repeat(40));
+        assert!(
+            validated_agent_status_emoji(&padded).is_err(),
+            "40 selectors"
+        );
+        assert!(
+            validated_agent_status_emoji("\u{FE0F}🤖").is_err(),
+            "a leading selector"
+        );
+        assert!(
+            validated_agent_status_emoji("🤖\u{FE0F}\u{FE0F}").is_err(),
+            "two selectors"
+        );
+        assert_eq!(
+            validated_agent_status_emoji("🤖\u{FE0F}").unwrap(),
+            "🤖\u{FE0F}",
+            "one selector after a pictograph is fine"
+        );
+        // The longest legal value is within the column's CHECK (32).
+        let longest = "🤖\u{FE0F}".repeat(AGENT_STATUS_EMOJI_MAX);
+        assert!(
+            validated_agent_status_emoji(&longest)
+                .unwrap()
+                .chars()
+                .count()
+                <= 32
+        );
+    }
+
+    #[test]
+    fn a_role_label_wears_no_authority_even_in_korean() {
+        for bad in [
+            "소유자",
+            "오너",
+            "어드민",
+            "운영진 비서",
+            "인증 담당",
+            "공식 봇",
+            "대표 비서",
+            "CEO",
+            "HR Bot",
+            "팀장",
+            "Verified Bot",
+        ] {
+            assert!(validated_agent_role_label(bad).is_err(), "{bad:?}");
+        }
+        assert_eq!(
+            validated_agent_role_label("일정 관리 비서").unwrap(),
+            "일정 관리 비서"
+        );
+        assert_eq!(validated_agent_role_label("Chef").unwrap(), "Chef");
+    }
+
+    #[test]
+    fn a_role_label_may_not_equal_a_default_or_contain_a_defined_label() {
+        for default in [
+            "멤버",
+            "게스트",
+            "소유자",
+            "관리자",
+            "Member",
+            "GUEST",
+            "Owner",
+            "admin",
+        ] {
+            assert!(role_label_collides(default, &[]), "{default:?}");
+        }
+        assert!(role_label_collides("Captain", &["Captain"]));
+        assert!(
+            role_label_collides("Captain Bot", &["Captain"]),
+            "contains the defined label"
+        );
+        assert!(!role_label_collides("Chef", &["Captain"]));
+        assert!(
+            !role_label_collides("Chef", &["X"]),
+            "a one-letter override bans nothing"
+        );
+        assert!(
+            !role_label_collides("Axe", &["X"]),
+            "and is not contained either"
+        );
+    }
+
+    #[test]
+    fn a_name_cannot_hide_inside_particles_hyphens_or_glue() {
+        let roster = [
+            RosterName {
+                member_id: Uuid::from_u128(1),
+                display_name: "Alice Kim",
+                handle: "alice",
+            },
+            RosterName {
+                member_id: Uuid::from_u128(2),
+                display_name: "김인턴",
+                handle: "intern",
+            },
+            RosterName {
+                member_id: Uuid::from_u128(3),
+                display_name: "김철",
+                handle: "cheol",
+            },
+            RosterName {
+                member_id: Uuid::from_u128(4),
+                display_name: "박",
+                handle: "park",
+            },
+        ];
+        let me = Uuid::from_u128(9);
+        for sneaky in [
+            "김인턴이 승인함",
+            "김인턴님이 승인",
+            "Alice-Kim approved",
+            "AliceKim approved",
+            "ALICE_KIM ok",
+            "김철이 확인",
+            "approved by alice,",
+            "ａｌｉｃｅ approved",
+        ] {
+            assert!(text_repeats_roster_name(sneaky, me, &roster), "{sneaky:?}");
+        }
+        // One Hangul syllable is ignored.
+        let park_only = [RosterName {
+            member_id: Uuid::from_u128(4),
+            display_name: "박",
+            handle: "p",
+        }];
+        assert!(!text_repeats_roster_name("박 대리와 함께", me, &park_only));
+        assert!(!text_repeats_roster_name(
+            "영업 요약을 정리해요",
+            me,
+            &roster
+        ));
+    }
+
+    #[test]
+    fn domain_shaped_text_is_caught_across_dots_and_spaces() {
+        for bad in [
+            "evil\u{3002}com",
+            "evil\u{FF61}com",
+            "x🔥.com",
+            "x\u{0302}.com",
+            "www .evil com",
+            "WWW。evil",
+            "see evil.example",
+        ] {
+            assert!(validated_agent_tagline(bad).is_err(), "{bad:?}");
+        }
+        assert!(
+            validated_agent_tagline("버전 1.5 지원해요").is_ok(),
+            "a number is not a domain"
+        );
+        assert!(
+            validated_agent_tagline("끝. 다음 문장").is_ok(),
+            "a sentence stop is not a domain"
+        );
+    }
+
+    #[test]
+    fn invisible_and_stacked_marks_are_refused_across_scripts() {
+        for bad in [
+            "a\u{0600}b",
+            "a\u{FFFC}b",
+            "a\u{1BCA0}b",
+            "a\u{13430}b",
+            &format!("ب{}", "\u{064E}".repeat(8)),
+            &format!("x{}", "\u{05B4}".repeat(5)),
+        ] {
+            assert!(validated_agent_tagline(bad).is_err(), "{bad:?}");
+        }
     }
 }

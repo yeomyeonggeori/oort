@@ -637,8 +637,12 @@ pub async fn list_workspace_roster(
                 h.email, \
                 h.tz AS time_zone, \
                 a.model AS agent_model, \
-                a.config->>'tagline' AS agent_tagline, \
-                a.config->>'roleLabel' AS agent_role_label, \
+                CASE WHEN jsonb_typeof(a.config->'tagline') = 'string' \
+                      AND char_length(a.config->>'tagline') <= 140 \
+                     THEN a.config->>'tagline' END AS agent_tagline, \
+                CASE WHEN jsonb_typeof(a.config->'roleLabel') = 'string' \
+                      AND char_length(a.config->>'roleLabel') <= 24 \
+                     THEN a.config->>'roleLabel' END AS agent_role_label, \
                 a.owner_human_id, \
                 a.max_concurrent_runs, \
                 a.max_run_steps, \

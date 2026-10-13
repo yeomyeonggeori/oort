@@ -77,8 +77,8 @@ pub mod sidebar_prefs;
 pub mod workspace_avatar;
 
 pub use agent_card::{
-    apply_agent_card_in_tx, read_agent_card_in_tx, AgentCard, AgentCardPatch, CardStatusPatch,
-    FieldPatch,
+    apply_agent_card_in_tx, lock_agent_card_in_tx, read_agent_card_in_tx, AgentCard,
+    AgentCardPatch, CardStatusPatch, FieldPatch,
 };
 pub use attachment::{
     create_pending_upload_in_tx, is_attachment_channel_member, link_attachments_in_tx,
