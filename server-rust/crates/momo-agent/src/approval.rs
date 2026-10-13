@@ -391,6 +391,28 @@ pub async fn lock_approval_in_tx(
     }))
 }
 
+/// Who settled an approval and when, as the ledger recorded it (#3771).
+///
+/// The 409 a late click receives must tell the truth about the **original**
+/// decision. It used to stamp the receipt with the second presser and the
+/// second press time, so a card approved at 22:52 rendered 「승인 · kwak ·
+/// 22:54」 (prod, 2026-10-13). `decided_by` is `NULL` for a system settlement
+/// (expiry, cancellation), which is preserved rather than invented.
+pub async fn decision_stamp_in_tx(
+    conn: &mut PgConnection,
+    approval_id: Uuid,
+) -> Result<Option<(Option<Uuid>, Option<DateTime<Utc>>)>, DbError> {
+    let row = sqlx::query("SELECT decided_by, decided_at FROM approval WHERE id = $1")
+        .bind(approval_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    let Some(row) = row else { return Ok(None) };
+    Ok(Some((
+        row.try_get("decided_by").map_err(DbError::from)?,
+        row.try_get("decided_at").map_err(DbError::from)?,
+    )))
+}
+
 /// The approval inbox (Swift `fetchApprovals` :503-589).
 ///
 /// The `JOIN membership` is the authorization, not a filter applied afterwards:
