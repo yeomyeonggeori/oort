@@ -11,6 +11,21 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.22] - 2026-10-13
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.22>. Tag target: `main=2fce5eec`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. No database migration: the schema stays at 127 and `bootstrap_runtime_roles` is unchanged.
+
+### Added
+- Server: agent management actions v2 (ADR-0186 amendment). An agent proposes and a human approves: the action registry foundation with per-action schemas, in-transaction resolution and a cap of three pending proposals (#3715); `channel.create` composed with the proposing agent's membership and approved channels in one transaction (#3724); `channel.member.add` in the approver's name with resolved ids pinned (#3725); `agent.rename` plus a human `PATCH /agents/{agent}` and a name validator (#3726); `hosted.channels.grant` to widen an agent's own connection to approved channels (#3727); `workspace.settings.update` limited to `welcome_prompt` and `role_labels` (#3728); agent instructions that describe the new actions and their limits (#3731).
+- Web, desktop and phone: onboarding keeps its progress per account and server and re-judges the seeded name on the server (#3704); the skip landing, connecting an agent to an empty channel and a note for non-admins (#3712); the main action on the "my tools" row turns on the personal agent (#3716); the re-ask gains "keep it as is" and clears stale markers (#3717).
+
+### Fixed
+- Web, desktop and phone: the inbox detail panel opens centered on the item's message and shows the author name and tone that match the list (#3703).
+- Onboarding: a Claude subscription 409 is no longer misreported during the AI connect step (#3701).
+
+### Not in this release
+- Database migrations and the backfill of past messages into the inbox.
+
 ## [0.1.21] - 2026-10-11
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.21>. Tag target: `main=8fba6654`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Two database migrations since 0.1.20 (126-127): 126 adds `inbox_item` (a per-recipient projection of mentions, quote-replies, thread replies and DMs, filled by triggers in the same transaction as the `message` insert; FORCE row-level security; ids and the member's own `read_at` only, no body copy); 127 adds the trigger that announces a fresh item on the recipient's personal realtime channel through the outbox. No data is dropped and there is no backfill of past messages: the inbox fills from new messages after the deploy. The runtime role `momo_notifier` gains `SELECT, INSERT, UPDATE` on `inbox_item` (its own message inserts fire the projection trigger). Rollback: whether a 0.1.20 app runs unchanged on schema 127 is to be confirmed by the deploy worker. Deploy order: push relay first, then notifier and server (migrations 126-127), then the desktop and phone apps.

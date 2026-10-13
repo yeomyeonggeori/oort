@@ -85,6 +85,12 @@ pub const TOOL_ACTION_PROPOSE: &str = "oort_action_propose";
 /// who asked. Opened by `messages:write`: it writes one message in the run's
 /// own channel and grants nothing more (G5).
 pub const TOOL_CARD_SUGGEST: &str = "oort_card_suggest";
+/// ADR-0200 D4-5 (#3742, 성재 결재 2026-10-13) — "I am alive", and nothing else.
+/// It rides the existing `agent:inbox:read` scope (no new scope) and writes one
+/// column pair on the caller's own connection, throttled to one write per 30 s.
+/// It proves the runtime is up, never that it takes work: the derived liveness
+/// keeps that apart (`alive_idle`).
+pub const TOOL_PING: &str = "oort_ping";
 
 pub const SCOPE_PORT_CONNECT: &str = "agent:port:connect";
 pub const SCOPE_INBOX_READ: &str = "agent:inbox:read";
@@ -210,6 +216,16 @@ fn jobs_claim_schema() -> Value {
         "additionalProperties": false,
         "properties": {
             "limit": nullable(integer(1, 100))
+        }
+    })
+}
+
+fn ping_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "state": nullable(json!({"type": "string", "enum": ["idle", "working"]}))
         }
     })
 }
@@ -561,7 +577,7 @@ fn card_suggest_schema() -> Value {
 
 /// The complete catalog. Order is the `tools/list` order and is stable so a
 /// client diffing two listings sees only real capability changes.
-pub const TOOL_CATALOG: [ToolDescriptor; 10] = [
+pub const TOOL_CATALOG: [ToolDescriptor; 11] = [
     ToolDescriptor {
         name: TOOL_INBOX_READ,
         title: "Read the hosted inbox",
@@ -608,7 +624,14 @@ pub const TOOL_CATALOG: [ToolDescriptor; 10] = [
     ToolDescriptor {
         name: TOOL_RUN_EVENT,
         title: "Report run progress",
-        description: "Record a progress event for the run this lease owns.",
+        description: "Record a progress event for the run this lease owns. Send one within a \
+                      minute of claiming (stage: a short plain-text step name, for \
+                      example \"시작: 코드 읽기\"), another each time a phase starts or you hand work to a \
+                      sub-bot (\"위임: <봇> · <일>\"), and at least every five minutes while \
+                      working (status running with no stage is enough). Never put a secret, a \
+                      file path, a commit title, code or a copy of the request in a stage: \
+                      name the step. People see only what you report here and in \
+                      textDelta; oort cannot see your reasoning.",
         required_scope: SCOPE_RUNS_CALLBACK,
         schema: run_event_schema,
     },
@@ -642,6 +665,18 @@ pub const TOOL_CATALOG: [ToolDescriptor; 10] = [
         required_scope: SCOPE_MESSAGES_WRITE,
         schema: card_suggest_schema,
     },
+    ToolDescriptor {
+        name: TOOL_PING,
+        title: "Say you are alive",
+        description: "Tell oort this runtime is up (state: idle or working). Call it once at \
+                      the start of every routine run, and every five minutes while busy \
+                      WITHOUT a tracked run (inside a run, oort_run_event is the heartbeat; \
+                      a ping does not keep a run alive). At most one call per 30 seconds is \
+                      recorded; extra calls are harmless. It proves you are alive, not that \
+                      you took work.",
+        required_scope: SCOPE_INBOX_READ,
+        schema: ping_schema,
+    },
 ];
 
 /// What this server build is able to serve, independent of any credential.
@@ -668,6 +703,7 @@ impl ToolCapability {
             TOOL_RUN_COMPLETE,
             TOOL_ACTION_PROPOSE,
             TOOL_CARD_SUGGEST,
+            TOOL_PING,
         ],
     };
 
@@ -991,7 +1027,7 @@ mod tests {
     }
 
     #[test]
-    fn the_catalog_is_exactly_the_ten_named_tools() {
+    fn the_catalog_is_exactly_the_eleven_named_tools() {
         assert_eq!(
             TOOL_CATALOG.iter().map(|t| t.name).collect::<Vec<_>>(),
             vec![
@@ -1005,6 +1041,7 @@ mod tests {
                 "oort_run_complete",
                 "oort_action_propose",
                 "oort_card_suggest",
+                "oort_ping",
             ]
         );
     }
@@ -1034,7 +1071,7 @@ mod tests {
             SCOPE_WORKSPACE_PROPOSE,
         ]);
         let view = ToolView::intersect(&all, &all, ToolCapability::FULL);
-        assert_eq!(view.names().len(), 10);
+        assert_eq!(view.names().len(), 11);
         for (name, scope) in [
             (TOOL_INBOX_READ, SCOPE_INBOX_READ),
             (TOOL_CONVERSATION_READ, SCOPE_MESSAGES_READ),
@@ -1046,6 +1083,7 @@ mod tests {
             (TOOL_RUN_COMPLETE, SCOPE_RUNS_CALLBACK),
             (TOOL_ACTION_PROPOSE, SCOPE_WORKSPACE_PROPOSE),
             (TOOL_CARD_SUGGEST, SCOPE_MESSAGES_WRITE),
+            (TOOL_PING, SCOPE_INBOX_READ),
         ] {
             assert_eq!(view.callable(name).expect(name).required_scope, scope);
         }

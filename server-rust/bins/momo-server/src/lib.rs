@@ -1264,9 +1264,24 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/agent-runs",
             post(routes::agent_runs::create).get(routes::agent_runs::list),
         )
+        // ADR-0200 D1/D2/D3 (#3741): the server's own answer to "what is this run
+        // doing" — derived phase, lease state, queue position — and the run event
+        // ledger. Beside, not instead of, the legacy list above.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/agent-runs/progress",
+            get(routes::agent_runs::progress),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agent-runs/{run}/events",
+            get(routes::agent_runs::events),
+        )
         // The other two reads of the same record (#1223): one agent's
         // workspace-global history (MOMO-653 — bounded summaries, joined to the
         // reader's own channel membership) and one run in full.
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/liveness",
+            get(routes::hosted_agent_connections::agent_liveness),
+        )
         .route(
             "/v1/workspaces/{ws}/agents/{agent}/runs",
             get(routes::agent_runs::list_by_agent),
@@ -1429,6 +1444,11 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/hosted-agent-connections/{connection}/doorbell",
             put(routes::hosted_agent_doorbell::register)
                 .delete(routes::hosted_agent_doorbell::unregister),
+        )
+        // ADR-0200 D4 (#3743): ring it now. Same gate as the registration beside it.
+        .route(
+            "/v1/workspaces/{ws}/hosted-agent-connections/{connection}/doorbell/ring",
+            post(routes::hosted_agent_doorbell::ring),
         )
         // B5.3a completes the pair: B5.2 could read a profile and respect
         // `paused`, but nothing could write either — an agent's behaviour was

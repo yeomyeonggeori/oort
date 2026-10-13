@@ -2454,6 +2454,16 @@ sample hosted-agent-list get "/v1/workspaces/{workspaceId}/hosted-agent-connecti
   "/v1/workspaces/$WS/hosted-agent-connections" 200 "" "$ACCESS"
 sample hosted-agent-get get "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}" \
   "/v1/workspaces/$WS/hosted-agent-connections/$HOSTED_CONNECTION_ID" 200 "" "$ACCESS"
+guard_jq '(.connection.liveness.state | type) == "string" and .connection.liveness.workWaiting == false' \
+  "a hosted connection reports derived liveness from server facts (ADR-0200 D4)"
+# ADR-0200 D4 (#3742): the member-facing label. The hosted agent shares the general channel
+# with the gate's human, as it does once an admin invites it.
+run_sql -Atc "INSERT INTO membership(workspace_id, channel_id, member_id) \
+  VALUES ('$WS','$GENERAL_CHANNEL_ID','$HOSTED_AGENT_ID') ON CONFLICT DO NOTHING;" >/dev/null
+sample agent-liveness get "/v1/workspaces/{workspaceId}/agents/{agentId}/liveness" \
+  "/v1/workspaces/$WS/agents/$HOSTED_AGENT_ID/liveness" 200 "" "$ACCESS"
+guard_jq '(.state | type) == "string" and (has("lastToolErrorCode") | not)' \
+  "the member label never carries the admin-only fields"
 
 expect_agent_port hosted-agent-non-foundation-does-not-detect 401 \
   '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \
@@ -4007,6 +4017,19 @@ sample agent-run-cancel post \
   "/v1/workspaces/{workspaceId}/agent-runs/{runId}/cancel" \
   "/v1/workspaces/$WS/agent-runs/$CANCEL_RUN_UUID/cancel" 200 "" "$ACCESS"
 guard_jq '.status == "cancelled"' "a person's stop ends the run"
+
+# ADR-0200 D1/D2 (#3741): the server-derived progress and the run event ledger. The gate's
+# agents are managed, so both answer an honest empty set; the populated shapes are proved in
+# the PG conformance suite against a hosted agent (agent_port_tools_conformance_pg).
+sample agent-run-events get \
+  "/v1/workspaces/{workspaceId}/agent-runs/{runId}/events" \
+  "/v1/workspaces/$WS/agent-runs/$CANCEL_RUN_UUID/events" 200 "" "$ACCESS"
+guard_jq '(.events | type) == "array" and (.events | length) == 0' \
+  "a managed agent's run has an empty ledger, not a guessed one"
+sample agent-run-progress get \
+  "/v1/workspaces/{workspaceId}/channels/{channelId}/agent-runs/progress" \
+  "/v1/workspaces/$WS/channels/$GENERAL_CHANNEL_ID/agent-runs/progress" 200 "" "$ACCESS"
+guard_jq '(.runs | type) == "array"' "progress answers a list"
 
 # #3396 (ADR-0147 증보 2026-10-03) — 개인 API 키. 운영자가 동료 한 사람에게 발급하고, 그 사람의
 # 본인 전용 에이전트가 쓴다. 키는 쓰기 전용이라 응답 어디에도 나오면 안 된다(비밀 needle 로 등록).

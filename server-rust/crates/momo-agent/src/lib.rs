@@ -146,6 +146,7 @@ pub mod dm;
 pub mod effort;
 pub mod error;
 pub mod hosted_dm;
+pub mod hosted_liveness;
 pub mod hosted_notice;
 pub mod korean;
 pub mod memory;
@@ -158,6 +159,8 @@ pub mod personal;
 pub mod provisioning;
 pub mod routing;
 pub mod run;
+pub mod run_event;
+pub mod run_progress;
 pub mod status;
 pub mod subscription;
 pub mod subscription_transition;
@@ -235,6 +238,11 @@ pub use hosted_dm::{
     HostedDmApprovalError, HostedDmApprovalState, HostedDmConnection, HostedDmDelivery,
     HostedDmRow,
 };
+pub use hosted_liveness::{
+    derive_liveness, liveness_target_for_viewer_in_tx, load_liveness_rows_in_tx, record_ping_in_tx,
+    record_tool_error_in_tx, record_tool_success_in_tx, DoorbellFact, Liveness, LivenessRow,
+    LivenessState, LivenessThresholds, PingState, Touch,
+};
 pub use hosted_notice::{
     hosted_skip_notice_body, hosted_skip_notice_body_with_owner, hosted_skip_notice_key,
     hosted_skip_notice_props, inert_display_name, HostedSkipReason, HOSTED_DELIVERY_GUIDE_URL,
@@ -274,17 +282,26 @@ pub use routing::{
 pub use run::{
     agent_run_cursor_is_visible_in_tx, authorize_run_binding_in_tx, cancel_run_in_tx,
     completion_status, consume_run_step_in_tx, create_agent_run_in_tx, end_parked_run_in_tx,
-    find_agent_run_by_trigger_in_tx, finish_run_in_tx, is_active_agent_in_tx,
-    is_active_human_channel_member_in_tx, is_guest_in_channel_in_tx, linked_work_session_ids_in_tx,
-    list_agent_run_summaries_in_tx, list_channel_work_runs_in_tx, live_run_count_in_tx,
-    load_agent_run_in_tx, load_agent_run_with_visibility_in_tx, load_eligible_agent_in_tx,
-    lock_gateway_run_in_tx, lock_run_for_cancel_in_tx, mark_run_started_in_tx,
-    park_run_for_approval_in_tx, park_runs_for_control_window_in_tx,
+    end_stalled_run_in_tx, find_agent_run_by_trigger_in_tx, finish_run_in_tx,
+    is_active_agent_in_tx, is_active_human_channel_member_in_tx, is_guest_in_channel_in_tx,
+    linked_work_session_ids_in_tx, list_agent_run_summaries_in_tx, list_channel_work_runs_in_tx,
+    live_run_count_in_tx, load_agent_run_in_tx, load_agent_run_with_visibility_in_tx,
+    load_eligible_agent_in_tx, lock_gateway_run_in_tx, lock_run_for_cancel_in_tx,
+    mark_run_started_in_tx, park_run_for_approval_in_tx, park_runs_for_control_window_in_tx,
     requeue_run_from_approval_in_tx, resume_runs_from_control_window_in_tx,
     succeed_parked_run_in_tx, terminal_run_ids_in_tx, trigger_summary, validated_run_limit,
     AgentRunRow, AgentRunSummaryPage, AgentRunSummaryRow, CancellableRun, CompletionStatusError,
     CreatedRun, EligibleAgent, GatewayRunSnapshot, NewAgentRun, ParkedRun, RunBindingRejected,
     RunStatus, RunTrigger, WelcomeKind, TRIGGER_SUMMARY_LIMIT,
+};
+pub use run_event::{
+    append_run_event_in_tx, delete_expired_run_events_in_tx, workspaces_with_expired_run_events,
+    AppendedRunEvent, RUN_EVENT_RETENTION_DAYS,
+};
+pub use run_progress::{
+    assemble_run_progress, list_channel_run_progress_base_in_tx, list_run_events_in_tx,
+    visible_channels_in_tx, AheadRun, JobFacts, LeaseState, QueueEntry, RunEventRow, RunPhase,
+    RunProgressBase, RunProgressRow,
 };
 pub use status::{
     agent_partial_payload, agent_partial_tool_call_payload, agent_status_channel,

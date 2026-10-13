@@ -97,6 +97,7 @@ fn connection() -> HostedAgentConnectionDto {
         host_online: None,
         brain_unavailable_reason: None,
         subscription_retired: None,
+        liveness: None,
     }
 }
 

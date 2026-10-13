@@ -589,19 +589,29 @@ mod tests {
     ///
     /// 127 is #3681's inbox realtime event (ADR-0199 E2 D7): the `inbox_item` AFTER INSERT trigger that
     /// puts `inbox_item.created` on the recipient's personal channel through the outbox.
+    ///
+    /// 128 is #3740's run event ledger (ADR-0200 S1): the RLS-FORCE tables `agent_run_event` and
+    /// `hosted_agent_liveness`, `agent_run_event_append`, and the `agent_run`/`approval` lifecycle triggers.
+    ///
+    /// 129 is #3743's manual doorbell ring ledger (ADR-0200 S4): the RLS-FORCE table
+    /// `hosted_agent_doorbell_ring` that bounds 「다시 깨우기」 (60 s cooldown, 5 per hour).
+    ///
+    /// 130 is #3744's run-event realtime frame (ADR-0200 S5): the `agent_run_event` AFTER INSERT trigger
+    /// that puts a thin `agent.run.event` frame on the channel topic through the outbox, and the
+    /// `agent_run.finished_at` index the retention sweep scans.
     #[test]
-    fn discovers_contiguous_migrations_001_to_127() {
+    fn discovers_contiguous_migrations_001_to_130() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            127,
-            "expected 127 migrations under {}",
+            130,
+            "expected 130 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 127);
+        assert_eq!(migrations.last().unwrap().version, 130);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {
