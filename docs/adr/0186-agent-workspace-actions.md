@@ -463,157 +463,158 @@ v1의 모든 워크스페이스 행동은 `approval`이다. 「관리자 위임�
 - 감사: 행동마다 `action.approved` + V6의 도메인 행. 어느 행에도 이름 외 비밀이 없다(1회 시크릿이 없는 행동들이지만 grep 시험은 유지).
 - 결정 때 재증명: 제안 뒤 채널 이름이 선점되거나 에이전트가 방에서 빠지면 `action_args_invalid`, 승인 pending 유지.
 
-## 증보 2026-10-13 — 관리 액션 v3: `agent.profile.update`·`agent.invite`와 초대 링크 전달 (#3772)
+## 증보 2026-10-13 — 관리 액션 v3: `agent.profile.update`·`agent.invite`와 초대 링크·연결 코드 회수 (#3772)
 
-- Status: **Proposed** (2026-10-13 기안 Opus 5.5 worker. owner 결재 전에는 코드를 구현하지 않는다. 결재 항목은 V3-9에 모았고, 결재되면 이 줄을 Accepted로 바꾸고 결재 기록(V3-10)을 채운다.)
+- Status: **Accepted** (2026-10-13 성재 결재 — V3-10 결재 기록. 초안은 같은 날 Proposed였고 결재로 네 결정 중 셋이 추천안과 달라졌다: 아바타 출처 확대, 초대 링크의 에이전트 회수, 시간당 상한 비도입. 구현은 슬라이스(V3-11)별 PR로 착수 가능)
 - 발제: 성재 2026-10-13 「그록봇이 그록봇이나 다른 뮤즈나 닷츠 같은걸 초대하거나 스스로 이름을 바꾸거나 프로필을 변경하는 그런 작업들도 잘 할수 있게 허용 범위를 늘려줘」
-- Consumes: ADR-0186 D2~D4·V1~V7(특히 V4-M·V6 「초대 링크는 돌려주지 않는다」·V7 「다른 그록봇 초대는 열지 않는다」) · ADR-0162 D6·D7(pairing handshake, 사람 confirm) · ADR-0131(프로필 편집 = 소유자 또는 관리자) · ADR-0161 증보 1 D-M2(아바타 쓰기는 본인·사람만) · ADR-0176(상태 문구) · ADR-0198·0200(에이전트 vs 하네스, run 상태) · ADR-0100(공개 API·보안 경계 = Accepted ADR이 머지 조건)
-- 접점 이슈: **#3773**(Aside식 연결 화면·온보딩 압축, UXUI 설계 중). V3-8에 접점을 적었다.
-- 이 증보는 D2(제안 → 승인 → 실행)·D3(위험 등급)·D4(1회 시크릿)·D7(새 테이블 0)을 **바꾸지 않는다.** 바꾸는 것은 **V7의 한 문장**(에이전트에게 연결을 만들 길을 주지 않는다)뿐이고, 어디까지 바꾸는지를 V3-3·V3-4가 정한다. 연결의 **confirm은 계속 사람의 행동**이다.
+- 기안: Opus 5.5 worker(#3772)
+- Consumes: ADR-0186 D2~D4·V1~V7 · ADR-0162 D6·D7·D16 · ADR-0131 · ADR-0161 증보 1(D-M2 아바타 쓰기는 본인·사람만) · ADR-0176 · ADR-0198·0200 · ADR-0100
+- 접점 이슈: **#3773**(Aside식 연결 화면·온보딩 압축, UXUI). V3-8.
+- 이 증보가 **의도적으로 바꾸는 경계 셋**(각각 근거와 완화를 아래에 적는다): ① ADR-0161 D-M2 「에이전트는 아바타를 바꿀 수 없다」 → 승인된 액션 경유로 허용(V3-2a) ② ADR-0186 D4·V6 「1회 시크릿은 승인자에게만」 → `invite.create`는 제안 에이전트에게, `agent.invite`의 연결 코드는 승인자가 고르면 제안 에이전트에게 돌려줌(V3-3a·V3-5) ③ D7 「새 테이블 0」 → 아바타 이미지 한 테이블(V3-2a). **바꾸지 않는 것**: D2(제안 → 승인 → 실행)·D3(위험 등급)·**연결 confirm은 계속 사람의 행동**·`instructions` 불가침.
 - 표기: [V] 코드 직접 확인 · [추정] 해석 · [확인 필요] 근거가 약해 구현 전 실측이 필요한 것.
 
 ### V3-0. 코드로 확인한 사실(2026-10-13, main `d1cbe68b1` 기준)
-- 레지스트리 `ACTIONS`는 여섯이다: `invite.create`·`channel.create`·`channel.member.add`·`agent.rename`·`hosted.channels.grant`·`workspace.settings.update`. `DECLARED_NOT_EXECUTABLE` = `webhook.create`·`member.role.set`. 도구 enum은 `WORKSPACE_ACTION_IDS: [&str; 6]`(`momo-mcp/src/tools.rs`)이고 같은 길이를 가정하는 드리프트 시험이 있다. [V]
-- 연결 생성은 `routes/hosted_agent_connections.rs::create`(사람 + `require_admin`, `auth_mode=static_bearer`만)이고, 실제 일은 `provision_hosted_agent_in_tx`다: 전용 `member`+`agent`(owner = **만드는 사람**), **paused** 프로필, `pairing_pending` connection, pairing credential, 감사 `hosted_agent.connection.created`를 한 tx에서 쓴다. 이 함수는 doc comment대로 「전용 hosted identity가 태어나는 유일한 곳」이고 구독 에이전트 등록(#3392)도 같은 함수를 쓴다. 승인 실행기에서 승인자 명의로 호출하는 데 필요한 모양이 이미 있다. [V]
-- 두 비밀은 **서로 다른 값**이다. 생성 응답의 `pairingCredential`(`momo_pair_v1`, TTL 15분, 해시 저장, 1회 소비, handshake로 `pairing_pending → detected`만 가능, 읽기·쓰기·claim 불가)과, `confirm` 응답의 `credential`(active bearer, 사람에게만 `no-store`로 돌려줌)이다. confirm은 `detected` 상태가 전제이고 `approvedChannelIds`·`approvedScopes`·`audience`를 사람이 정한다. 이어서 **provider가 active credential로 handshake해야** `detected → active`가 되고 그때 unpause된다. [V]
-- 따라서 「승인 한 번에 confirm까지」는 시간순으로 불가능하다. 승인 시점에는 아직 detected가 없다. 묶으려면 「미래의 confirm을 미리 허락」하는 모양이 되는데 V3-4가 이를 다룬다. [V + 추정]
-- `agent.rename`은 이미 있다(V4·V4-M). 에이전트 제안 경로는 엄격한 `validated_agent_proposed_display_name`, 사람 경로 `PATCH …/agents/{agent}`는 `normalized_join_display_name` + 충돌 검사다. 승인자 판정은 `agent_editor`(**대상** 에이전트의 소유자 또는 admin). [V]
-- **프로필 필드 현황.** `agent_profile`(ADR-0131)은 `instructions`·`model_pref`·`effort_pref`·`enabled_tools`·`triggers`·`paused`뿐이고 「소개」「역할 라벨」 필드는 없다. `instructions`는 **시스템 프롬프트**이지 공개 소개가 아니다. `PUT …/agents/{agent}/profile`은 소유자 또는 admin(`require_profile_editor_in_tx`)이다. `agent` 테이블에는 `config jsonb`가 있다. [V]
-- **아바타.** `member.avatar_url`은 001의 레거시 임의 문자열이고, 업로드 경로(`member_avatar_media`, migration 111)는 **`/members/me/…` + `require_human` + 에이전트 bearer 허용목록에 없음**이다. 미디어 행은 복합 FK로 업로더 본인만 가리킬 수 있다. ADR-0161 증보 1이 「에이전트 아바타 업로드」를 **범위 밖**으로 명시했다. 업로드 세션은 Drive resumable URL이라 에이전트(hosted bearer)가 쓸 수 있는 도구가 없다. [V]
-- **상태 문구.** `member.status_emoji/status_text/status_expires_at`(083, ≤80자, 지연 만료)가 있고 ADR-0176은 「Human-only on the wire」다. 에이전트의 상태 문구 쓰기 경로는 없다. [V]
-- 초대 링크(`invite.create`)의 raw code는 결정 응답의 `secretOnce`에만 있고 에이전트에게 돌아가지 않는다(V6). [V]
-- **시간당 상한은 어디에도 없다.** 초대 코드 생성·hosted connection 생성 어느 쪽에도 per-actor 한도기가 없고, 있는 것은 제안자당 pending `workspace_action` 3개(V1-e)와 아바타 업로드 시간당 20개뿐이다. [V]
-- 호스팅 에이전트가 쓰는 스코프는 `workspace:propose`(기본 페어링에는 요청하지 않음, 동의 화면에서 사람이 켠다)다. 새 행동은 새 스코프를 만들지 않는다. [V]
+- 레지스트리 `ACTIONS`는 여섯이고 도구 enum `WORKSPACE_ACTION_IDS: [&str; 6]`(`momo-mcp/src/tools.rs`)이 같은 길이를 가정하는 드리프트 시험이 있다. `DECLARED_NOT_EXECUTABLE` = `webhook.create`·`member.role.set`. [V]
+- 연결 생성의 유일한 출생지는 `routes/hosted_agent_connections.rs::provision_hosted_agent_in_tx`다(전용 member+agent, owner = 호출 사람, paused 프로필, `pairing_pending` connection, pairing credential, 감사). 승인자 명의로 부를 수 있는 모양이다. [V]
+- 비밀은 **서로 다른 두 값**이다: pairing(`momo_pair_v1`, 15분, 해시 저장, 1회 소비, detect만 가능, capability 0)과 confirm 응답의 active credential(사람에게만). confirm은 `detected` 이후라 승인 한 번에 묶을 수 없다. `POST …/pairing-challenge/regenerate`는 `pairing_pending|detected|expired`에서 새 pairing을 발급한다. [V]
+- 초대 코드는 해시만 저장하고(`momo_invite_code_hash()`), `create`·`regenerate`가 raw를 한 번 돌려준다(`routes/invites.rs`). 승인 실행기의 1회 값은 결정 응답 `secretOnce`에만 있다(D4). [V]
+- `agent_profile`에는 소개·역할 라벨이 없고 `instructions`는 시스템 프롬프트다. `agent.config jsonb`가 있다. `member.status_*`(083)는 사람 전용이다. [V]
+- 아바타: `member.avatar_url`은 임의 문자열 레거시이고, 업로드(`member_avatar_media`, migration 111)는 `/members/me/…` + `require_human` + 업로더 결속 복합 FK다. 에이전트 bearer 허용목록에 없다. 업로드 바이트는 Drive resumable로 우회하고 `momo-drive`의 `DriveArchive`에는 서버가 바이트를 쓰는 메서드가 없다(읽기·삭제·세션 생성뿐). `complete`는 첫 12바이트 매직과 헤더 치수(4096 상한)를 검사하지만 **재인코딩은 하지 않는다**. [V]
+- 첨부(`attachment`, ADR-0151)는 업로더만 완료·결속하고 `complete` 행만 읽힌다. 에이전트가 첨부를 보는 경로(`oort_conversation_read`가 첨부 id를 내는지)는 [확인 필요: 슬라이스 A1이 실측].
+- **시간당 상한은 어디에도 없다.** 있는 것은 제안자당 pending `workspace_action` 3개(V1-e)와 아바타 업로드 시간당 20개뿐이다. [V]
 
 ### V3-1. 결정 요약
-| 행동 | 위험 | 승인자(`requiredRole`) | 실행 | 위임(미래 무승인) | 1회 시크릿 |
-|---|---|---|---|---|---|
-| `agent.profile.update` | `approval` | `agent_editor`(대상 에이전트의 소유자 또는 admin) | 대상(자기 또는 V4-M의 관리 대상) 한 명의 **표시 필드**: 아바타 프리셋·소개·상태 문구·역할 라벨(+선택 `displayName`) | 아바타·소개·상태 문구는 **후보**, 역할 라벨·이름은 **불가** | 없음 |
-| `agent.invite` | `approval` | `admin`(ADR-0162: 연결 생성·confirm의 주체는 관리자) | 승인자 명의로 전용 hosted member + 연결 생성 + pairing 발급(`provision_hosted_agent_in_tx`) | **불가**(신원·접근) | 있음: pairing 값(`secretOnce`) |
-| `invite.create` (= 이슈의 `member.invite`) | `approval` | `admin`(기존) | 변경 없음. **전달 경로만** V3-5에서 다룬다 | **불가**(1회 시크릿) | 있음(기존) |
-
-공통:
-- a. 모든 행동은 D2의 한 run 한 제안이다. `agent.profile.update`는 필드 여럿을 **한 승인**에 싣는 합성이다(V3의 `channel.create`와 같은 이유: 제안마다 run이 park되므로 필드마다 카드를 쪼개면 사람이 같은 일에 여러 번 누른다).
-- b. V1-a~e(에이전트는 id를 모른다·시야 안·승인 때 재증명·상한)를 그대로 적용한다.
-- c. 에이전트는 어떤 경우에도 승인자가 아니다. `agent.invite`로 태어난 새 에이전트의 `owner_human_id`는 **승인한 사람**이다(제안한 에이전트가 아니다).
+| 행동 | 승인자(`requiredRole`) | 실행 | 에이전트에게 돌려주는 것 | 위임(미래 무승인 ADR의 전제) |
+|---|---|---|---|---|
+| `agent.profile.update` | `agent_editor`(대상 에이전트의 소유자 또는 admin) | 대상(자기 또는 V4-M 관리 대상) 한 명의 표시 필드: 아바타(프리셋·파일·생성)·소개·상태 문구·역할 라벨·(선택) 이름 | 없음 | 소개·상태 문구·프리셋 아바타만 **후보**. 이미지 아바타·역할 라벨·이름은 **불가** |
+| `agent.invite` | `admin` | 승인자 명의로 전용 hosted member + 연결 + pairing | 승인자가 결정 때 체크하면 **연결 코드**(일회성 회수, 기본 꺼짐) | **불가** |
+| `invite.create` | `admin`(기존) | 변경 없음(역할·maxUses·만료 상한 그대로) | **초대 링크**(일회성 회수, 항상) | **불가** |
+공통: (a) 한 run 한 제안(D2). (b) V1-a~e(id 없음·시야·결정 때 재증명·pending 3개 상한)를 그대로 적용한다. (c) 에이전트는 어떤 경우에도 승인자가 아니다. (d) `agent.invite`로 태어난 새 에이전트의 `owner_human_id`는 승인한 사람이다. (e) **남용 방어는 매번 사람 승인 + 제안자당 pending 3개(V1-e)** 이고 시간당 상한은 도입하지 않는다(V3-6).
 
 ### V3-2. `agent.profile.update` — 프로필은 신뢰 표면이다
-**인자**(와이어 camelCase, `additionalProperties:false`, 최소 한 키): `{displayName?, avatarPreset?, tagline?, statusText?, statusEmoji?, roleLabel?, targetHandle?}`. 대상 규칙은 `agent.rename`과 같다(V4-M 1~9를 그대로 인용: 같은 소유자·`agent_editor` 판정은 **대상** 기준·결정 때 재증명·구분 불가 오류·pending 중복 `Conflict`). 사람 멤버는 대상이 될 수 없다.
+**인자**(camelCase, `additionalProperties:false`, 최소 한 키): `{displayName?, avatar?, tagline?, statusText?, statusEmoji?, roleLabel?, targetHandle?}`. 대상 규칙은 `agent.rename`과 같다(V4-M 1~9 인용: 같은 소유자·`agent_editor`는 **대상** 기준·결정 때 재증명·구분 불가 오류·같은 대상 pending 중복 `Conflict`). 사람 멤버는 대상이 될 수 없다.
 
-필드별 규칙:
-| 필드 | 저장 | 검증 | 이유 |
-|---|---|---|---|
-| `displayName` | 기존 `rename_agent_display_name_in_tx` | V4의 `validated_agent_proposed_display_name` 그대로 | 이름은 멘션 대상이다. `agent.rename`과 같은 검증기·같은 감사. 별도 `agent.rename`은 그대로 둔다(하위호환) |
-| `avatarPreset` | `agent.config`의 한 키(새 컬럼·테이블 0, D7) | **서버가 가진 프리셋 id 허용목록**(색+이니셜·마스코트 세트). 목록은 코드 상수 + 시험. URL·바이트 거절 | V3-2a |
-| `tagline`(소개) | `agent.config` 한 키 | ≤140자, NFKC, 제어·서식 문자 거절, **`@ < > [ ] ( ) ` ` : / \` 거절**, `://`·`www.`·도메인형 토큰 거절, 평문 렌더 | 링크·멘션·마크다운 주입 차단. **`instructions`(시스템 프롬프트)는 이 행동의 대상이 아니다**(V3-2c) |
-| `statusText`·`statusEmoji` | 기존 `member.status_*`(083) | ≤80자·이모지 ≤32 스칼라(기존 `normalize_status_*`) + `tagline`과 같은 문자 거절 + **만료 필수**(기본 24시간, 최대 7일) | 지연 만료라 청소 잡이 없고, 영구 문구는 소개가 맡는다 |
-| `roleLabel` | `agent.config` 한 키 | ≤24자, V4의 허용 문자 집합, **예약어(V4-6)와 워크스페이스 `role_labels`의 값(골격 비교) 거절** | 「관리자」「보안」 같은 라벨은 권한을 가진 척하는 사칭 표면이다 |
+| 필드 | 저장 | 검증 |
+|---|---|---|
+| `displayName` | 기존 `rename_agent_display_name_in_tx` | V4의 `validated_agent_proposed_display_name` 그대로(`agent.rename`은 하위호환으로 둔다) |
+| `avatar` | V3-2a | 아래 세 출처 + 프리셋 |
+| `tagline`(소개) | `agent.config` 한 키 | ≤140자, NFKC, 제어·서식 문자 거절, `@ < > [ ] ( ) ` ` : / \` 거절, `://`·`www.`·도메인형 토큰 거절, 평문 렌더. 다른 멤버의 표시 이름·핸들을 그대로 포함하면 거절 |
+| `statusText`·`statusEmoji` | 기존 `member.status_*` | ≤80자·이모지 ≤32 스칼라(기존 `normalize_status_*`) + tagline과 같은 문자 거절 + **만료 필수**(기본 24시간, 최대 7일) |
+| `roleLabel` | `agent.config` 한 키 | ≤24자, V4의 허용 문자 집합, **예약어(V4-6)와 워크스페이스 `role_labels` 값(골격 비교) 거절** — 권한을 가진 척하는 사칭 표면 |
 
-**V3-2a. 아바타 이미지 출처 — URL 금지, 프리셋만(추천)**
-- **URL 거절.** 레거시 `avatar_url`이 임의 문자열이고 클라이언트가 `<img>`로 그리므로(ADR-0161 L-2), 에이전트가 쓴 URL은 (a) 모든 열람자의 IP·Referer를 제3자에게 흘리는 추적 픽셀이 되고 (b) 서버가 대신 가져오면 SSRF가 되며 (c) 승인 뒤 원격 이미지가 바뀌는 「승인한 것과 보이는 것이 다른」 문제가 생긴다. 승인 카드의 평문 행 원칙(V4)과도 어긋난다.
-- **바이트 업로드도 이번에는 열지 않는다.** ADR-0161 D-M2/범위 밖이 에이전트 아바타 업로드를 닫았고, 열려면 Agent Port에 **새 도구**(바이트 전달)·`member_avatar_media`의 업로더 결속(복합 FK) 완화·카드의 **이미지 미리보기**(승인자가 본 것 = 저장되는 것)가 필요하다. 보안 경계가 둘 바뀌므로 별도 증보다(V3-9 결정 2의 B안).
-- **프리셋**은 서버 상수 id이므로 승인자가 카드에서 **서버가 해석한 프리셋 이름·미리보기**를 보고, 저장되는 것도 id뿐이다. 원격 자원·바이트·파서가 없다. 사람은 언제나 기존 `PUT …/agents/{agent}/profile`·UI에서 직접 올릴 수 있다(에이전트가 못 하는 것은 사진 업로드뿐이다).
-- 읽는 쪽: roster DTO가 프리셋을 해석해 내려주는 변경이 필요하다. [확인 필요: roster DTO·클라이언트 렌더 변경 범위 — 슬라이스 P2가 실측]
+**V3-2a. 아바타 — 출처 넷, 저장은 서버 한 곳, 보이는 것 = 저장되는 것**
+`avatar`는 `oneOf`다:
+- **프리셋** `{source:"preset", presetId}`: 서버 상수 id(색+이니셜·마스코트 세트). 기본 선택지. 바이트 처리 없음.
+- **(a) 워크스페이스 파일** `{source:"attachment", attachmentId}`: 이미 `complete`이고 메시지에 결속된 이미지 첨부. 첨부가 달린 채널은 (공개) ∪ (제안 에이전트가 live membership + 승인 채널을 가진 채널)이어야 하고, 그 밖·삭제·비이미지·존재하지 않음은 **같은** `InvalidArguments`다(V1-b). 서버가 Drive에서 바이트를 읽어(`file_content`, 상한 아래) 처리한다.
+- **(b) 사람에게 업로드 요청**: 서버 액션이 아니라 **조합**이다. 에이전트가 채널에 「이 이미지로 바꿔 주세요」를 말하고(`oort_message_post`, 선택적으로 `oort_card_suggest` 허용 command `avatar.upload_request`), 사람이 평소 첨부 업로드로 올리면 에이전트가 (a)로 제안한다. 서버 신규 경계가 없고 카드(업로드 요청 카드)는 UXUI 이슈다.
+- **(c) 에이전트가 만든 이미지** `{source:"generated", mime, dataBase64}`: 에이전트가 이미지를 직접 만들어 propose 호출에 바이트를 싣는다. **ADR-0161 D-M2를 이 증보가 명시적으로 넓힌다.**
 
-**V3-2b. 승인자·사칭 방어**
-- 승인자 = `agent_editor`. 소유자가 비-admin이어도 자기 에이전트의 프로필은 승인한다(V4와 같음). 제3자는 403 `role_required`, 승인은 소모되지 않는다.
-- 카드는 「대상 에이전트(서버가 해석한 현재 이름·핸들)」와 필드마다 **「현재 → 새 값」 평문 행**을 보인다. 에이전트가 쓴 문자열이 카드의 대상 표시가 되는 길은 없다(V1-a).
-- 충돌 검사: `displayName`은 V4-5 골격 충돌. `tagline`·`roleLabel`은 다른 멤버의 표시 이름·핸들을 **그대로 포함**하면 거절(「김 인턴 승인함」 류로 남이 한 말처럼 보이게 하는 것을 막는다).
-- 결정 때 재증명(V1-d): 프리셋이 목록에서 빠졌거나 대상 소유자가 바뀌었으면 `action_args_invalid`(409, 승인 pending).
+**공통 처리(출처와 무관, 모두 필수)**: 서버가 propose tx 안에서 입력 바이트를 **디코드하고 새로 인코딩한 결과만** 저장한다. 원본 바이트·메타데이터는 어떤 경로로도 서빙하지 않는다.
+1. **mime 허용목록** PNG·JPEG·WebP(정지 이미지). **SVG·GIF·애니메이션 WebP·ICO·그 밖 전부 거절.** 선언 mime은 힌트일 뿐이고 매직 넘버로 판정한다(ADR-0161의 `sniff_image_mime` 재사용), 선언과 다르면 거절.
+2. **크기·해상도 상한**(디코드 전): (c) 입력 ≤1 MiB 바이트(base64 ≤1.4 MiB 문자열), (a) ≤5 MiB, **헤더 치수 가로·세로 ≤4096, 0 거절, 파싱 불가 거절**(ADR-0161 M-1의 헤더 파서 재사용 — 디코드 폭탄 방어), 디코더에 **메모리 할당 상한**(`image::Limits`)을 건다. 결과물은 **최대 512×512**(긴 변 기준 축소, 확대하지 않음), **≤512 KiB**(PNG가 넘으면 JPEG q80으로 알파를 흰색에 합성해 재인코딩, 그래도 넘으면 거절). 한 에이전트에 걸리는 보류 제안 3개 상한(V1-e)이 이 단계의 총량을 묶는다.
+3. **재인코딩 = 폴리글랏·페이로드 제거.** 새 PNG/JPEG는 디코드된 픽셀에서만 만든다. EXIF·ICC·XMP·주석·꼬리 바이트는 구조상 남지 않는다. 디코드 실패는 거절이고 부분 결과를 저장하지 않는다.
+4. **서버 저장소에만 보관, 외부 URL 금지.** 새 테이블 `agent_avatar_image`(migration, RLS FORCE + `ws_isolation`)가 재인코딩 바이트(`bytea`)·mime·`sha256`·가로·세로·`source`(`attachment|generated|preset` 중 이미지 둘)·`member_id`(대상)·`proposed_by`·`approval_id`·`status`(`staged|applied`)를 갖는다. Drive를 쓰지 않으므로(서버가 쓰는 API가 없다) 회수 잡이 필요 없다. `avatar_url`(임의 문자열)에는 쓰지 않는다. `member`에 현재 이미지 포인터를 더하고(복합 FK `(workspace_id, member_id, image_id)` → 이 테이블, 대상 본인의 행만 가리킬 수 있음), roster DTO의 해석된 `avatarUrl`은 기존 우선순위(업로드가 레거시 문자열을 이긴다)에 이 포인터를 같은 자리로 끼운다. 읽기는 기존 아바타 content 규율(워크스페이스 멤버만, `nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`, 저장 mime, `?v` 버전 토큰 검증)을 같은 모양으로 쓴다.
+5. **승인 카드에 실제 이미지 미리보기.** 보류 중인 `staged` 행은 그 승인의 결정 후보 누구나(`agent_editor`)와 제안 에이전트만 `GET …/approvals/{id}/avatar-preview?v=<sha256>`로 읽을 수 있다. 카드 행에는 **서버가 만든 `previewId`·`sha256`·가로×세로·출처 라벨**이 나가고 에이전트가 쓴 문자열은 나가지 않는다. 클라이언트 렌더는 UXUI 이슈.
+6. **승인 뒤 바꿔치기 방지(pins + content hash).** `staged` 행은 **불변**(INSERT 전용, 바이트·해시 UPDATE 경로 없음)이다. 승인 payload는 `{imageId, sha256}`를 핀으로 갖고, 결정 때 서버가 저장 바이트를 **다시 해시**해 핀과 같은지, 행이 같은 승인·같은 대상에 묶여 있는지 확인한다. 어긋나면 `action_args_invalid`(409, 승인 소모 없음). 원본 첨부가 이후 바뀌거나 지워져도 `staged` 행이 이미 서버 사본이므로 승인한 것과 적용되는 것이 같다.
+7. **적용·회수.** 승인되면 포인터를 옮기고 행을 `applied`로 바꾸며 **이전 이미지 행은 같은 tx에서 삭제**한다. 거절·만료·취소는 같은 arm이 `staged` 행을 삭제한다. 어느 arm도 놓친 `staged`가 쌓이지 않도록 다음 `avatar` 제안 때 24시간 넘은 `staged`를 같은 tx에서 정리한다(별도 sweep 없음).
+8. **감사**: `agent.avatar.staged`(승인·출처·크기·sha256 앞 12자, 바이트 없음)·`agent.avatar.updated`·`agent.avatar.rejected`(사유 코드). 로그·메시지 props·outbox에 바이트를 싣지 않는다.
+9. **디코더 의존**: Rust `image` 크레이트(MIT/Apache-2.0, feature는 `png`·`jpeg`·`webp` 디코드만 최소로)를 쓴다. 신규 의존이므로 NOTICE·`scripts/generate_ghcr_notice_bundle.py generate`와 라이선스 확인이 슬라이스 A0의 수용 기준이다. 디코드는 `spawn_blocking` 안에서 하고 요청 시간 상한을 건다. [확인 필요: 크레이트 버전의 최근 RUSTSEC 목록 — A0가 `cargo audit`/deny로 확인]
 
-**V3-2c. 이 행동이 하지 않는 것**: `instructions`·`model_pref`·`enabled_tools`·`triggers`·`paused`·스코프·핸들·승인 채널·역할. 특히 **`instructions`는 에이전트가 쓸 수 없다**(프롬프트 인젝션이 다른 에이전트의 행동을 갈아끼우는 길이고, ADR-0131 D2의 「프로필은 권한을 늘릴 수 없다」와도 어긋난다). 이 목록은 인자 스키마의 `additionalProperties:false`와 도메인 허용목록 둘 다에서 거절한다.
+**V3-2b. 승인자·사칭 방어**: 승인자는 `agent_editor`(소유자가 비-admin이어도 자기 에이전트의 프로필은 승인, 제3자는 403 `role_required`·승인 소모 없음). 카드는 「대상 에이전트(서버가 해석한 현재 이름·핸들)」와 필드마다 「현재 → 새 값」 평문 행을 보이고, 에이전트가 쓴 문자열이 대상 표시가 되는 길은 없다(V1-a). 결정 때 재증명(V1-d): 프리셋이 목록에서 빠졌거나 대상 소유자가 바뀌었거나 핀이 어긋나면 `action_args_invalid`.
 
-**실행·감사**: 새 도메인 함수 `update_agent_profile_card_in_tx(conn, ws, target, patch)`가 한 tx에서 `member`를 `FOR UPDATE`로 잠그고 필드별로 쓴다. 이름은 기존 함수를 부른다. 감사 `agent.profile.updated`(`momo.agent.profile.updated.v1`): `{fields:[…키 이름만], via_agent, approval_id, managed, target_agent?}` — **값은 싣지 않는다**(소개·상태는 사용자 문구). 값의 옛/새는 카드 영속 props에만 있다(V6의 `workspace_setting.updated`와 같은 규율). 이름이 바뀌면 기존 `member.renamed`도 쓴다.
+**V3-2c. 하지 않는 것**: `instructions`·`model_pref`·`enabled_tools`·`triggers`·`paused`·스코프·핸들·승인 채널·역할. **`instructions`는 에이전트에게 계속 닫는다**(다른 에이전트의 행동을 갈아끼우는 프롬프트 인젝션 길). 스키마의 `additionalProperties:false`와 도메인 허용목록 둘 다에서 거절한다.
+
+**실행·감사**: `update_agent_profile_card_in_tx(conn, ws, target, patch)`가 한 tx에서 `member`를 `FOR UPDATE`로 잠그고 필드별로 쓴다. 감사 `agent.profile.updated`(`momo.agent.profile.updated.v1`): `{fields:[키 이름만], via_agent, approval_id, managed, target_agent?}`, 값은 싣지 않는다. 이름이 바뀌면 기존 `member.renamed`도 쓴다.
 
 ### V3-3. `agent.invite` — 에이전트가 다른 외부 에이전트를 데려오는 흐름
-**인자**: `{platform: "grok_bot"|"dots"|"muse"|"other", displayName, handle, rationale?}`. `platform`은 **표시·안내용 프리셋 키**일 뿐 권한의 근거가 아니다(ADR-0162 D6: provider 메타데이터는 표시 힌트). 이름은 V4의 엄격 검증기(+충돌 검사), 핸들은 `normalized_requested_handle` + 밴 목록 확인(`create`와 같음). 에이전트는 id·스코프·채널을 인자로 줄 수 없다 — **채널·스코프는 연결 confirm 때 사람이 정한다.**
+**인자**: `{platform: "grok_bot"|"dots"|"muse"|"other", displayName, handle, rationale?}`. `platform`은 표시·안내용 프리셋 키일 뿐 권한의 근거가 아니다(ADR-0162 D6). 이름은 V4의 엄격 검증기(+충돌 검사), 핸들은 `normalized_requested_handle` + 밴 목록 확인. 에이전트는 id·스코프·채널을 주지 못한다 — **채널·스코프는 confirm 때 사람이 정한다.**
 
-**실행(승인 = 연결 생성 + pairing 발급)**: 승인자가 `admin`이면 같은 tx에서 `provision_hosted_agent_in_tx`를 **승인자 명의**로 호출한다(owner = 승인자, paused, `pairing_pending`). 결과:
-- pairing 값은 결정 응답의 `secretOnce`(`no-store`)에만 실린다(D4). approval payload·메시지 props·감사·로그·outbox에는 없다.
-- 감사: 기존 `hosted_agent.connection.created`에 `via_agent`·`approval_id`·`platform` 추가 + `action.approved`.
-- 카드 영속 props에는 connection id·상태·만료만 있고 「연결값은 승인한 분에게 1회 표시됨 · 재발급」을 보인다(`regenerate` 라우트 안내).
+**실행**: 승인자가 `admin`이면 같은 tx에서 `provision_hosted_agent_in_tx`를 **승인자 명의**로 부른다(owner = 승인자, paused, `pairing_pending`). 감사: 기존 `hosted_agent.connection.created`에 `via_agent`·`approval_id`·`platform` 추가 + `action.approved`.
 
-**V3-3a. pairing 값을 누구에게 주는가 — 승인자에게 1회만(추천), 에이전트 전달은 옵션으로 분리**
-- **A. 승인자에게만(추천·기본).** V6의 규율과 같다. 값이 사람 화면에서 사람 손으로 다음 장소(벤더 앱)에 붙는다.
-- **B. 제안한 에이전트에게 돌려줌.** 같은 플랫폼에서 새 봇을 만들어 붙이는 일이 자동화되지만 **시크릿 경계가 바뀐다.**
-  - 위험: (1) 값이 에이전트 외부 런타임·로그·벤더 서버에 남는다. (2) 채널 메시지로 나오면 채널 전체가 읽는다. (3) 침해되거나 인젝션당한 에이전트가 **자기가 통제하는 런타임**에 새 연결을 붙여 사람 confirm 화면에 「정상 봇 같은」 항목을 올릴 수 있다.
-  - 완화(모두 필수): (a) pairing 값은 **capability 0**이다. detect만 되고 읽기·쓰기·claim이 안 되며 15분 TTL·1회 소비라 유출의 상한이 낮다(V3-0). (b) **confirm은 사람이 한다**(V3-4). 값을 가진 쪽은 `detected`를 만들 뿐 접근을 못 얻는다. (c) 채널에 게시하지 않고 **새 일회성 회수 호출**로만 준다(결과 조회 도구 — 새 MCP 도구라 이 증보가 Accepted여야 한다). 한 번 읽으면 소비되고 값은 서버에 해시만 남는다. (d) **승인자가 결정 때 고른다**: 카드에 「이 연결값을 이 에이전트에게도 전달」 체크(기본 꺼짐), 체크하면 카드 행에 「전달함」이 늘 보인다(V3의 「이 에이전트도 참여」 행과 같은 규율). (e) 감사 `hosted_agent.pairing_delivered_to_agent`. (f) `owner_only`(구독) 연결·`platform:"other"`에는 B를 허용하지 않는다.
-  - 판단: A로 먼저 낸다. 사람 손이 한 번 들어가는 것이 제품의 승인 모델과 맞고, 그 한 번을 줄이는 일은 #3773의 「복사 한 번」 UX가 맡는다. B는 V3-9 결정 3에 두었다.
-- **상한(남용 방어)**: 제안자당 `agent.invite` pending 1개(V1-e의 3보다 낮춤), **워크스페이스당 미완료 연결(`pairing_pending`/`detected`) 5개**, 에이전트 경유 생성은 **제안 에이전트당 시간당 2개·워크스페이스당 시간당 5개·일 20개**. 넘으면 `Conflict`(카드 생성 전). 시간당 상한은 이 증보가 처음 도입하는 것이므로 구현 때 per-actor 한도기(아바타 업로드의 「member 행 잠금 + 최근 행 계수」 방식)를 재사용한다.
+**V3-3a. 연결 코드(pairing 값)는 승인 때 고른다(성재 결재 2)**
+- 승인 카드에 「에이전트에게 연결 코드 넘기기」 체크가 있고 **기본은 꺼짐**이다. 결정 요청은 `deliverSecretToAgent?: bool`을 받고, 이 필드는 레지스트리에서 `agent.invite`·`invite.create`만 쓸 수 있다(다른 행동에서는 `InvalidArguments`). 카드 행에 선택 결과(「에이전트가 받아요」/「승인한 분만 봐요」)가 **늘 보인다**(승인자가 읽은 것 = 실행된 것).
+- **꺼짐(기본)**: pairing 값은 결정 응답의 `secretOnce`에만(D4, `no-store`).
+- **켜짐**: 결정 응답에 값을 싣지 않는다. 대신 승인 payload에 회수 허가(`secretClaim:{allowed:true, deadline}`)만 기록하고, 제안 에이전트가 **일회성 회수 호출**(V3-4)로 받는다.
+- **위험과 완화**: (1) 값이 에이전트 런타임·로그·벤더 서버에 남을 수 있다 → pairing은 capability 0·15분·1회 소비라 유출의 상한이 낮고, 값은 **회수 시점에 새로 발급**되므로 서버 어디에도 평문이 저장되지 않는다. (2) 침해된 에이전트가 자기 통제 런타임을 새 연결로 붙인다 → 접근은 **confirm(사람)** 뒤에만 열리고, confirm 화면은 감지된 연결의 이름·dedicated member·채널·스코프를 사람이 확인한다. (3) 채널 노출 → 회수는 도구 응답으로만 가고 메시지·카드 props에는 없다. (4) `owner_only`(구독) 연결에는 허용하지 않는다.
+- **confirm은 유지한다.** 시간순으로 confirm은 `detected` 이후이고, 승인 때 채널·스코프를 미리 허락해 detect 때 자동 confirm하는 안은 pairing 값을 가진 누구든 즉시 접근을 얻게 되므로 열지 않는다. 한 번 탭으로 줄이는 것은 #3773(UXUI)의 미리 채운 confirm 화면이다.
+- 새 에이전트가 active가 된 뒤: owner는 승인자다. 승인자가 제안자의 소유자와 같은 사람이면 V4-M에 따라 제안자가 새 에이전트의 이름·프로필을 (별도 승인으로) 제안할 수 있다. 관계는 저장하지 않는다(D7).
+- **남용 방어**: 매번 사람 승인 + 제안자당 pending 3개(V1-e). 새 상한은 두지 않는다(V3-6).
 
-**V3-3b. 플랫폼별 차이 — 표시용 프리셋이고 연결 프로토콜은 하나다**
-연결 모델은 플랫폼과 무관하다: 사람이 만든 hosted member 하나 = connection 하나 = 벤더 쪽 루틴/커넥터 하나(ADR-0162 D6). `platform`이 바꾸는 것은 **카드의 다음 행동 안내 문구**뿐이다.
+**V3-3b. 플랫폼별 차이 — 표시용 프리셋이고 연결 프로토콜은 하나다.** 연결 모델은 플랫폼과 무관하다: hosted member 하나 = connection 하나 = 벤더 쪽 루틴/커넥터 하나(ADR-0162 D6). `platform`이 바꾸는 것은 카드의 다음 행동 안내 문구뿐이다.
 | 플랫폼 | 알려진 연동 방식 | 상태 |
 |---|---|---|
-| Grok Bot (SpaceXAI) | 벤더 VM의 **루틴**(webhook 트리거)과 **MCP 커넥터**로 oort Agent Port를 붙인다(ADR-0162 D8, `docs/SELF_HOST_AGENT.md` §3.3.16~17). 실측은 #1344·#3542에서 부분만 닫혔다. | [V] 문서·절차. 라이브 왕복은 `runtime-unverified` |
-| dots (OpenAI) | ChatGPT 계정의 플러그인/커스텀 MCP 앱을 쓴다는 **제3자 문서**가 있다(Developer mode → Plugins → Create MCP App). 레포의 `SELF_HOST_AGENT.md`는 「dots-specific claims를 하지 않는다」고 명시하고 CURRENT_STATE는 「MCP 방식 확인 뒤」로 둔다. | [확인 필요] 공식 문서·실계정 실측. 웹 검색 결과만 근거라 **단정하지 않는다** |
-| Muse (Meta) | Muse Connectors가 있고 「custom connector」로 MCP/API를 붙일 수 있다는 **언론·제3자 가이드**가 있다. 전용 개발자 포털 유무는 출처가 엇갈린다. | [확인 필요] 공식 문서·실측 |
-- 공통 위험(ADR-0162 D16 인용): 소유자 **본인 계정·본인 VM**에서만. oort는 벤더 API를 부르거나 계정을 만들거나 토큰을 풀링하지 않는다. **「에이전트가 같은 플랫폼에 새 봇 계정을 스스로 만든다」는 oort가 하는 일이 아니라 벤더 쪽에서 에이전트가 하는 일이고, 그 약관 허용 여부는 oort가 보증하지 않는다.** V7이 같은 이유로 막았던 문장이다. 이 증보는 oort 쪽의 「연결 생성 승인」만 열고 벤더 쪽 자동화에 대한 주장은 하지 않는다. [확인 필요: 각 벤더 약관]
-- `platform` 값은 새 연결 provider를 만들지 않는다(#3773의 프리셋 목록과 같은 키를 쓴다 — V3-8).
+| Grok Bot (SpaceXAI) | 벤더 VM의 **루틴**(webhook 트리거)과 **MCP 커넥터**로 Agent Port를 붙인다(ADR-0162 D8, `docs/SELF_HOST_AGENT.md` §3.3.16~17). | [V] 문서·절차. 라이브 왕복은 `runtime-unverified`(#3542) |
+| dots (OpenAI) | ChatGPT 계정의 플러그인/커스텀 MCP 앱이라는 **제3자 문서**가 있다. 레포 문서는 「dots-specific claims를 하지 않는다」고 명시한다. | [확인 필요] 공식 문서·실계정 |
+| Muse (Meta) | Muse Connectors와 custom connector(MCP/API)가 있다는 **언론·제3자 가이드**. 공식 개발자 포털 유무는 출처가 엇갈린다. | [확인 필요] 공식 문서·실계정 |
+공통 위험(ADR-0162 D16): 소유자 **본인 계정·본인 VM**에서만. oort는 벤더 API를 부르거나 계정을 만들거나 토큰을 풀링하지 않는다. 「에이전트가 같은 플랫폼에 새 봇을 만든다」는 벤더 쪽에서 에이전트가 하는 일이고 약관 허용 여부는 oort가 보증하지 않는다. 이 증보는 oort 쪽 「연결 생성 승인」만 열고 벤더 쪽 자동화를 주장하지 않는다. [확인 필요: 각 벤더 약관]
 
-### V3-4. ADR-0162의 사람 confirm — 유지한다(추천)
-- 승인 한 번이 confirm까지 묶이지 **않는다.** (1) 시간순으로 confirm은 `detected` 이후라 같은 승인에 들어갈 수 없다(V3-0). (2) confirm은 「**실제로 감지된** 연결의 이름·dedicated member·채널·스코프를 사람이 확인」하는 단계(ADR-0162 D6-4)이고, 승인은 「**만들어도 좋다**」의 의미다. 둘을 묶으려면 승인 시점에 채널·스코프를 미리 받아 detect 순간 자동 confirm해야 하는데, 그러면 pairing 값을 가진 누구든(유출 포함) detect만 하면 즉시 접근을 얻는다. capability 0이라는 pairing의 안전 근거가 사라진다.
-- 대신 **한 번의 이중 클릭을 한 번의 탭으로 줄인다.** confirm 화면을 승인 카드·연결 화면에서 **미리 채운 값**(제안 때 승인자가 본 이름, 기본 스코프, 후보 채널)으로 열어 한 번 탭하게 하는 것은 UXUI(#3773)의 몫이고, 서버 계약은 바뀌지 않는다.
-- 선택지(V3-9 결정 3의 C안, 추천하지 않음): 승인 때 채널·스코프를 **미리 허락**하고 detect 때 `ip`·시간 창·pairing 소지자 결속을 더한 자동 confirm. 위 (2)의 이유로 이번에는 열지 않는다.
-- 새 에이전트 연결이 active가 된 뒤 새 멤버를 **제안한 에이전트가 관리하는지**: 새 member의 owner는 승인자다. 승인자가 제안자의 소유자와 같은 사람이면 V4-M에 따라 제안자가 새 에이전트의 이름·프로필을 제안할 수 있다(별도 승인). 다른 사람이면 관리 대상이 아니다. 관계를 저장하지 않는다(D7).
+### V3-4. 일회성 회수 호출 — `oort_action_claim_secret`(새 Agent Port 도구)
+`agent.invite`(체크 켠 경우)와 `invite.create`의 비밀을 제안 에이전트가 받는 유일한 길이다. 새 스코프는 만들지 않고 `workspace:propose`를 쓴다(도구 카탈로그 11 → 12, 드리프트 시험 갱신).
+- **입력** `{handle, approvalId}`(`handle` = lease handle, `bound_handle` 검사 동일). **출력** `{actionId, kind:"pairing"|"invite", value, expiresAtMs}` 또는 실패 코드.
+- **회수 시 발급(mint-on-claim)**: 서버는 비밀을 저장하지 않는다. 회수 순간에 도메인 함수가 새 값을 만든다 — `agent.invite`는 `regenerate_pairing_in_tx`(해시 교체, 새 15분 TTL), `invite.create`는 초대 `regenerate`와 같은 도메인 함수로 코드를 교체하고 **저장된 `maxUses`·만료·역할을 그대로 유지**한다(새 상한을 만들지 않는다). 이전에 있던 값(결정 응답에 나갔을 수 있는 것)은 이 교체로 무효가 된다. 따라서 D4의 「approval payload·메시지 props·감사·로그·outbox에 비밀 0」이 그대로 지켜진다.
+- **회수 조건**(한 tx, 승인 행 `FOR UPDATE`): (1) 호출 credential의 에이전트 = 그 승인의 **제안자**(`requested_by`)이고 같은 connection·lease handle. 다른 에이전트의 회수는 **같은** `not_found`다. (2) 승인 상태 `approved`이고 행동이 `agent.invite`(체크 켠 경우)·`invite.create`다. (3) `secretClaim.claimedAt`이 비어 있다 → 회수와 함께 설정(**1회**, 두 번째는 `already_claimed`). (4) **회수 기한 30분**(승인 시각 기준, 지나면 `claim_expired`이고 값은 영영 나가지 않는다. 승인자는 기존 regenerate 경로로 직접 새 값을 받을 수 있다). (5) 대상 connection/초대가 아직 유효하다(승인자가 취소했으면 거절).
+- 응답은 `Cache-Control: no-store` 성격으로 도구 결과에만 실리고 에이전트 명의 메시지로 게시되지 않는다. 감사: `agent.secret.claimed`(제안자·`approval_id`·kind, **값 없음**). 실패 시도도 사유 코드만 감사한다.
+- 에이전트가 값을 받은 뒤 어디에 쓰는지는 oort 밖이다. 도구 설명문에 「채널에 붙이지 말고 해당 플랫폼에서만 쓴다」를 명시한다(S1).
 
-### V3-5. `invite.create`(= `member.invite`): 초대 링크를 요청자에게 전달하는 경로
-- 현재: raw code는 승인자에게만 1회(V6). 요청자(에이전트에게 「초대 링크 만들어줘」라고 말한 사람)가 승인자와 다르면 승인자가 직접 전해야 한다.
-- **에이전트에게는 계속 돌려주지 않는다(추천·유지).** 에이전트 외부 런타임·로그에 링크가 남는 문제와 채널 전체 노출(V6)이 그대로다. 코드는 가입 자격이므로 pairing 값(capability 0)보다 위험하다.
-- **요청자에게 여는 경로는 사람 손을 거친다**: 승인자의 카드에 「링크를 이 사람에게 DM으로 보내기」 버튼을 두고, **승인자 본인의 클라이언트가 승인자 명의 DM**으로 보낸다(서버가 secretOnce를 메시지로 영속하지 않고, 에이전트 명의 메시지가 아니다). 승인자가 누르지 않으면 아무 일도 없다. 서버 변경 없이 UXUI로 가능하며 D4의 「결정 응답에만」 규율을 지킨다. [추정: 클라이언트가 응답 메모리의 값으로 평범한 DM을 보내는 흐름. DM 본문은 일반 메시지로 영속되므로 **링크가 DM 기록에 남는다는 점**을 카드가 알려야 한다]
-- 대안(추천하지 않음): 서버가 요청자에게 직접 일회용 보기 카드(`secretOnce` 재발급)를 주는 경로. 요청자가 admin이 아니면 코드 열람 권한 경계가 바뀌고 `invite.create`의 `required_role`이 무의미해진다.
-- 상한: 에이전트 경유 초대 코드 생성도 **제안자당 시간당 3개·워크스페이스당 시간당 10개**(V3-3a의 한도기). 기존 `INVITE_MAX_USES_CEILING`·만료 상한은 그대로.
+### V3-5. `invite.create` — 초대 링크를 제안 에이전트에게 돌려준다(성재 결재 3, D4·V6 개정)
+- **바뀌는 것**: V6의 「초대 링크는 돌려주지 않는다」와 D4의 「1회 시크릿은 승인자에게만」을 `invite.create`에 한해 뒤집는다. 승인 결정 응답은 링크를 승인자에게 싣지 **않고**(`secretOnce` 부재), 카드는 「에이전트가 이 링크를 받아 전달해요」를 명시한다. 승인자는 언제든 기존 초대 목록·`regenerate`로 새 링크를 받을 수 있다.
+- **근거**: 성재의 의도는 「그록봇이 사람을 초대하러 다니게」다. 링크가 승인자 손을 거쳐야 하면 에이전트의 자율은 「링크를 만들어 달라고 조르는 것」에 그친다. 승인(역할·사용 횟수·만료를 카드에서 사람이 읽고 누름)이 위험 결정이고 링크 전달은 그 결정의 실행이다.
+- **위험**: 링크는 가입 자격이다 — 에이전트 런타임·로그·채널에 남으면 누구나 쓴다. **완화**: (1) 상한은 기존 그대로다 — `role`은 `member|admin`(`INVITE_PROPOSABLE_ROLES`)이고 **`admin` 초대는 카드에 빨간 행으로 늘 보이며** `maxUses ≤ 100`·`expiresInDays ≤ 30`, 카드가 이 값을 평문으로 보인다. (2) 회수는 1회·30분 기한·제안자 한정·mint-on-claim(V3-4)이라 서버가 평문을 들고 있지 않다. (3) 에이전트 도구 설명문이 「링크는 요청한 사람에게만 전달하고 채널에 게시하지 않는다」를 명시한다(S1) — 이것은 강제가 아니라 안내임을 정직하게 적는다. (4) 감사 `agent.secret.claimed` + 기존 `invite.created`(`via_agent`·`approval_id`)로 사후 추적한다. (5) 위험이 클수록 카드에서 사람이 `admin`·`maxUses`를 줄여 승인할 수는 없으므로(카드는 에이전트 제안 그대로 승인/거절) 에이전트가 과하게 요청하면 거절하고 다시 요청하게 한다.
+- 승인자 명의 DM 전달 UX(이전 초안의 대안)는 불필요해졌으므로 열지 않는다.
 
-### V3-6. 승인 등급·위임·감사 정리
-| 행동 | 승인자 | 위임 가능성(미래 무승인 ADR의 전제) | 감사(`action.approved` 외 도메인 행, 값은 싣지 않음) |
+### V3-6. 승인 등급·위임·감사·남용 방어(성재 결재 4: 시간당 상한 없음)
+| 행동 | 승인자 | 위임 가능성(전제일 뿐) | 도메인 감사(값 없음) |
 |---|---|---|---|
-| `agent.profile.update` | `agent_editor` | 아바타 프리셋·소개·상태 문구 필드만 **후보**. 역할 라벨·`displayName`은 **불가**(V4-M-7 인용) | `agent.profile.updated`(+이름이면 `member.renamed`) |
-| `agent.invite` | `admin` | **불가**(신원 생성·접근 범위의 출발점) | `hosted_agent.connection.created`(+`via_agent`·`platform`), 전달 옵션이 켜지면 `hosted_agent.pairing_delivered_to_agent` |
-| `invite.create` | `admin` | **불가**(1회 시크릿) | 기존 `invite.created`(+`via_agent`·`approval_id`). 변경 없음 |
-| 상한 위반 | — | — | 사유 코드만 담은 `agent.action.rate_limited`(제안자·행동 id, 값 없음) |
-위임 후보 표기는 **전제**일 뿐이다. 무승인 위임 자체는 이번에도 열지 않는다(V7).
+| `agent.profile.update` | `agent_editor` | 소개·상태 문구·프리셋만 후보. 이미지 아바타·역할 라벨·이름은 불가(V4-M-7 인용) | `agent.profile.updated`(+`member.renamed`, `agent.avatar.*`) |
+| `agent.invite` | `admin` | 불가 | `hosted_agent.connection.created`(+`via_agent`·`platform`), 회수 시 `agent.secret.claimed` |
+| `invite.create` | `admin` | 불가 | 기존 `invite.created` + `agent.secret.claimed` |
+무승인 위임 자체는 이번에도 열지 않는다(V7).
+
+**시간당 상한을 두지 않는 이유**(성재 인용: 온보딩·공채 이후 인사 시즌에는 많이도 가능한데 상한이 필요한가): 연결과 초대는 **매번 사람 승인**을 거치고, v2의 **제안자당 pending 승인 3개 상한**(V1-e)이 승인 전 폭주를, 사람의 거절·만료(TTL)가 그 뒤를 막는다. 이 두 가지가 폭주 방어의 전부이고 이 증보는 다른 상한(시간당·일일·미완료 연결 수)을 **새로 만들지 않는다.** 이미지 처리의 크기·해상도 상한(V3-2a)은 남용 속도 제한이 아니라 파서 안전의 일부다. **관측만 남긴다**: 위 감사 행이 `created_at`으로 시간당 집계 가능하고, 서버에 메트릭 레지스트리가 있으면 `workspace_action_proposed_total{action}`·`workspace_action_decided_total{action,outcome}`·`agent_secret_claimed_total{kind}` 세 카운터를 P0가 더한다(없으면 감사 쿼리만으로 둔다 — 새 메트릭 인프라는 만들지 않는다). [확인 필요: 기존 메트릭 레지스트리 유무]
 
 ### V3-7. 범위 밖과 이유
-- 에이전트가 **연결을 confirm**하거나 active credential을 받는 길. 새 에이전트의 active credential은 confirm 응답으로 사람에게만 간다.
-- **에이전트 아바타 바이트 업로드**·원격 이미지 URL(V3-2a).
-- `instructions`·`model_pref`·`enabled_tools`·스코프·핸들 변경, 사람 멤버의 프로필 변경(V3-2c).
+- 에이전트가 **연결을 confirm**하거나 active credential을 받는 길(confirm은 사람).
+- 원격 이미지 URL, 아바타 GIF·SVG·애니메이션, `instructions` 등 V3-2c 목록, 사람 멤버의 프로필 변경.
 - 벤더 API를 oort가 호출해 봇·루틴을 만드는 일(ADR-0162 D16).
 - 무승인 위임, `member.role.set`·`webhook.create`.
-- 웹·데스크탑·폰 화면(승인 카드 행 종류, 프리셋 선택기, 연결 안내): UXUI 후속(#3773 포함).
+- 승인 카드의 이미지 미리보기 렌더, 「에이전트에게 연결 코드 넘기기」 체크 UI, 업로드 요청 카드, 프리셋 선택기, 연결 안내: UXUI 이슈(#3773 포함).
 
 ### V3-8. #3773과의 접점
-- **한 목록, 두 입구.** #3773의 플랫폼 목록(Grok Bot·dots·Muse, 행당 한 번 행동)과 `agent.invite`의 `platform` 키는 **같은 프리셋 키**를 쓴다. 키의 정본은 #3773이 정하고(UXUI), 이 증보는 `grok_bot`·`dots`·`muse`·`other`를 **잠정 값**으로 둔다. 키 집합이 정해지면 `platform` enum을 맞추는 한 줄이 S0의 일이다.
-- **같은 서버 계약.** 사람이 연결 화면에서 만드는 길(`POST …/hosted-agent-connections` → pairing 복사 → detect → confirm)과 에이전트가 제안하는 길(`agent.invite` 승인 → pairing `secretOnce` → 같은 detect → 같은 confirm)은 `provision_hosted_agent_in_tx`에서 합쳐진다. #3773의 「페어링→감지→확인→채널 승인→도어벨 등록을 한 흐름으로」는 **confirm 뒤**의 압축이고 이 증보와 충돌하지 않는다. 승인 카드의 결과(pairing 값)는 **#3773의 「복사할 연결 프롬프트」 블록을 같은 컴포넌트로 그린다**(카드 in-place, ADR-0182 ①).
-- #3773이 서버 변경을 요구하면(예: detect 즉시 푸시, confirm 미리 채우기용 읽기 API) engine 이슈·ADR을 분리한다. 이 증보의 계약은 그 변경에 의존하지 않는다.
+- **한 목록, 두 입구.** #3773의 플랫폼 목록(Grok Bot·dots·Muse)과 `agent.invite`의 `platform` 키는 같은 프리셋 키를 쓴다. 키 정본은 #3773(UXUI)이 정하고 이 증보는 `grok_bot`·`dots`·`muse`·`other`를 잠정 값으로 둔다.
+- **같은 서버 계약.** 사람이 연결 화면에서 만드는 길과 에이전트가 제안하는 길은 `provision_hosted_agent_in_tx`에서 합쳐진다. #3773의 압축은 confirm 이후이거나 미리 채운 confirm이므로 충돌하지 않는다. 연결 코드는 #3773의 「복사할 연결 프롬프트」 컴포넌트로 같은 자리에 그린다(ADR-0182 ①).
+- #3773이 서버 변경을 요구하면 engine 이슈·ADR을 분리한다.
 
-### V3-9. owner 결정(추천안 포함)
-1. **프로필 행동의 범위.** (a) **추천**: 표시 필드(아바타 프리셋·소개·상태 문구·역할 라벨·이름)만, `instructions`는 에이전트에게 닫음. (b) `instructions`까지 → 다른 에이전트의 행동을 갈아끼우는 길이라 비추천.
-2. **아바타 출처.** (A) **추천**: 서버 프리셋만, URL·바이트 금지. (B) 에이전트가 이미지 바이트를 올림 → 새 MCP 도구 + 업로더 결속 완화 + 카드 미리보기가 필요한 별도 증보, 후속으로 보류. (C) URL 허용 → 추적·SSRF·바꿔치기로 비추천.
-3. **`agent.invite`의 pairing 값 전달과 confirm.** (A) **추천**: pairing 값은 승인자에게만 1회(`secretOnce`), confirm은 사람이 그대로 하되 미리 채운 한 번 탭(UXUI). (B) 승인자가 결정 때 체크하면 일회성 회수 호출로 제안 에이전트에게도 전달(기본 꺼짐, V3-3a의 완화 필수) → 2차 슬라이스로 분리. (C) 승인 때 채널·스코프를 미리 허락해 detect 때 자동 confirm → 비추천.
-4. **초대 링크 전달 + 남용 상한.** 추천: 링크는 에이전트에게 계속 돌려주지 않고, 승인자 카드의 「이 사람에게 DM으로 보내기」(승인자 명의)만 연다. 상한은 연결 생성 에이전트당 2/시간·워크스페이스 5/시간·미완료 5개, 초대 코드 제안자당 3/시간·워크스페이스 10/시간(V3-3a·V3-5). 숫자를 바꾸고 싶으면 이 항목에서.
+### V3-9. 보안 검수가 특히 볼 곳
+이미지 업로드 경계(파서 취약점·폴리글랏·크기 폭탄·EXIF·애니메이션·치수 위조·선언 mime 불일치, 서빙 헤더) · 시크릿 회수(1회성 경쟁 조건, 타 에이전트 회수 불가, 기한, mint-on-claim이 이전 값을 무효화하는지, 로그·감사에 값이 없는지) · 결정 때 재증명(핀·소유자 변경) · 승인 카드에 나가는 문자열이 서버 해석값인지.
 
-### V3-10. 결재 기록
-(결재 전. owner가 V3-9에 답하면 질문 문구와 함께 인용하고 Status를 Accepted로 바꾼다.)
+### V3-10. 결재 기록 (2026-10-13)
+성재가 2026-10-13 AskUserQuestion으로 결재했다(원문 인용). 네 항목 중 1·3·4번이 초안의 추천안과 달랐다.
+1. 아바타: 「기존에 업로드된 파일이나 에이전트가 사용자한테 업로드 요청해서 바꾸거나 뭐 이미지 생성이 가능한 놈이면 본인이 생성해와서 쓰거나 할 수 있게 해봐 재밌겠네 자율성을 많이 줘봐」 → 출처 셋(워크스페이스 파일·사람에게 업로드 요청·에이전트 생성 바이트)과 프리셋 기본(V3-2a). 초안의 「프리셋만」과 다름. 완화책(서버 재인코딩·크기·해상도 상한·서버 저장소·카드 미리보기·핀+해시·감사)은 요청에 따라 설계했고, `instructions`는 계속 닫는다.
+2. pairing 값: 「승인할 때 선택」 → 승인 카드의 「에이전트에게 연결 코드 넘기기」 체크(기본 꺼짐), 켜면 일회성 회수 호출(V3-3a·V3-4). 초안의 I2를 이번 범위에 포함. confirm은 계속 사람.
+3. 초대 링크: 「그록봇에게 돌려주기」 → 승인된 초대 링크를 제안 에이전트에게 일회성 회수로 돌려줌, 기존 상한(maxUses·만료) 유지, 카드에 「에이전트가 이 링크를 받아 전달해요」(V3-5). D4·V6 개정. 초안(승인자 DM)과 다름.
+4. 남용 상한: 「굳이 제한을 둬야할까 온보딩이나 공채 이후 등의 인사 시즌에는 많이도 가능한데 제한을 둬야할 필요가 있나 싶어」 → 시간당 상한을 도입하지 않고 매번 사람 승인 + 제안자당 pending 3개로 방어, 관측만 남김(V3-6). 초안의 상한 숫자와 다름.
 
-### V3-11. 구현 슬라이스(결재 뒤 착수. 각 슬라이스는 한 이슈·한 PR)
+### V3-11. 구현 슬라이스(한 슬라이스 = 한 이슈 = 한 브랜치·PR, base `track/engine`, 앞 슬라이스 위에 쌓는다)
 | ID | 내용 | 선행 |
 |---|---|---|
-| P0 | **레지스트리 기반**: `ACTIONS`에 `agent.profile.update`·`agent.invite` 등록(`WORKSPACE_ACTION_IDS` 6→8, 드리프트 시험·OpenAPI enum·`GET actions`), 행동별 args 스키마, **per-actor 시간당 한도기**(제안·연결·초대 코드), `agent.action.rate_limited` 감사, 동의 화면 문구 | **이 ADR Accepted** |
-| P1 | `agent.profile.update` 서버: 인자 검증기(문자 거절·예약어·이름 충돌), `update_agent_profile_card_in_tx`, `agent.config` 키·`member.status_*` 쓰기, 결정 때 재증명, 감사, 사람용 `PUT` 경로가 같은 검증을 쓰도록 정리 | P0 |
-| P2 | 프리셋 id 허용목록(서버 상수)·roster DTO의 프리셋 해석·카드 행(`현재→새 값`, 프리셋 미리보기 id). 클라이언트 렌더는 UXUI 후속 | P1 |
-| I1 | `agent.invite` 서버: 승인 실행기에서 `provision_hosted_agent_in_tx` 호출, `secretOnce`로 pairing 반환, 결정 응답 `Cache-Control: no-store`, 영속 카드 props에 비밀 0 시험, 미완료 연결 상한, 감사 | P0 |
-| I2 | (결정 3의 B 채택 시에만) 일회성 pairing 회수 도구(Agent Port 새 도구) + 승인자 체크 + 감사. 채택하지 않으면 건너뜀 | I1, **결정 3** |
-| M1 | 초대 링크 「이 사람에게 DM으로 보내기」: 서버 변경 없음, UXUI 이슈로 분리(카드·DM 기록 고지). 에이전트 경유 초대 코드 한도기 적용 | P0 |
-| S1 | 에이전트 지시문·문서(`SELF_HOST_AGENT.md`, hosted 루틴): 새 행동 두 개와 「제안 뒤 turn 종료」, 벤더별 [확인 필요] 문구 정리 | P1·I1 |
-| X1 | 플랫폼별 실측(그록봇 #3542 연장, dots·Muse 공식 문서·실계정): [확인 필요] 표를 `runtime-unverified`에서 사실로 바꾸는 증거 | I1 |
-행동 하나당 손대는 곳은 V10과 같은 다섯이다.
+| P0 | **레지스트리 기반**: `ACTIONS` 8개(`agent.profile.update`·`agent.invite` 등록), `WORKSPACE_ACTION_IDS` 6→8·드리프트 시험·OpenAPI enum·`GET actions`, 행동별 args `oneOf` 스키마, 결정 요청의 `deliverSecretToAgent`, 관측 카운터(레지스트리가 있을 때), 동의 화면 문구 | **이 ADR Accepted** |
+| P1 | `agent.profile.update` 서버(아바타 제외): 이름·소개·상태·역할 라벨 검증기, 결정 때 재증명, 감사, 사람용 `PUT` 경로가 같은 검증 | P0 |
+| A0 | 아바타 기반: `image` 의존·NOTICE, 이미지 처리 모듈(스니프·헤더 치수·디코드 한도·재인코딩·출력 상한), migration(`agent_avatar_image`+포인터+RLS), 서빙 라우트 | P0 |
+| A1 | 아바타 출처: 프리셋 + (a) 첨부 선택(+첨부 가시성 실측) + (c) 생성 바이트 + `staged` 핀·해시·승인 카드 미리보기 라우트·적용·회수 arm·감사. (b)는 지시문·`card_suggest` command 허용만 | P1·A0 |
+| I1 | `agent.invite` 서버: 승인 실행기에서 `provision_hosted_agent_in_tx`, `secretOnce`(체크 꺼짐), 감사 | P0 |
+| I2 | `oort_action_claim_secret` 도구 + `agent.invite`(체크 켜짐) 회수 + `invite.create` 회수(결정 응답에서 `secretOnce` 제거) + mint-on-claim + 감사 + 도구 카탈로그 12 | I1 |
+| S1 | 에이전트 지시문·문서(`SELF_HOST_AGENT.md`, hosted 루틴, 도구 설명문): 새 행동·「제안 뒤 turn 종료」·링크·코드 취급 안내·(b) 업로드 요청 문구 | A1·I2 |
+| UX | UXUI 이슈(코드 아님): 승인 카드 이미지 미리보기, 연결 코드 넘기기 체크, 업로드 요청 카드, 프리셋 선택기 | — |
+| X1 | 플랫폼별 실측(그록봇 #3542 연장, dots·Muse 공식 문서·실계정) | I1 |
 
-### V3-12. 수용 기준(구현 슬라이스가 인용할 red proof)
-각 시험은 해당 분기를 지우면 실패해야 한다.
-- `ACTIONS` id 집합 = 도구 enum = OpenAPI enum(8개), 행동별 args 스키마가 도구·카탈로그에서 같다.
-- `agent.profile.update`: URL·바이트·`instructions`·`enabledTools`·`paused`·`handle` 같은 키는 `InvalidArguments`. `tagline`에 `[x](http://…)`·`@멤버`·`<@멤버>`·`https://`·`www.`·도메인형·영폭 공백이 있으면 거절. 프리셋 목록 밖 id 거절. `statusText`는 만료 필수·81자 거절. `roleLabel`이 예약어 또는 워크스페이스 `role_labels` 값이면 거절. 소유자가 다른 에이전트·소유자 NULL·사람 핸들은 **같은** `InvalidArguments`. 소유자(비-admin)는 승인 가능, 제3자는 403 `role_required`. 승인 뒤 저장 전후 비교에서 `instructions` 등 다른 필드가 불변. 감사 행에 값이 없다.
-- `agent.invite`: 비-admin 결정자는 403 `role_required`·연결 0개·승인 pending. 승인 시 member·agent·paused 프로필·`pairing_pending` connection이 **한 tx**이고 중간 실패 시 전부 없다. 새 member의 `owner_human_id` = 승인자(제안 에이전트가 아님). pairing 값은 결정 응답에만 있고 `approval.payload`·메시지 props·감사·outbox·로그에 **0건**(grep 시험). 영수증 재생(같은 `clientDecisionId`)이 값을 다시 주지 않는다. 승인된 연결이 `detected` 이전에 어떤 도구로도 읽기·쓰기·claim이 안 된다. 에이전트가 confirm·regenerate를 부를 수 없다(경로가 hosted 허용목록에 없음). 한도(제안자당 시간당 2·워크스페이스당 5·미완료 5개) 초과는 `Conflict`이고 카드·connection이 안 생긴다.
-- 한도기 동시성: 병렬 제안 폭주가 한도를 넘지 못한다(member 행 잠금 아래 직렬화).
-- `invite.create` 결과가 에이전트의 어떤 도구 응답·메시지에도 코드를 싣지 않는다(기존 시험 유지).
-- (I2 채택 시) 회수 호출은 1회만 값을 주고 두 번째는 빈 응답, 다른 에이전트·만료 뒤는 거절, 체크하지 않은 승인에서는 항상 거절, 감사 행이 남는다.
-- 미검증 표시: 벤더(그록봇·dots·Muse)와의 실제 왕복은 이 슬라이스들의 시험 범위 밖이며 `runtime-unverified`다(X1이 닫는다).
+### V3-12. 수용 기준(구현 슬라이스가 인용할 red proof, 각 시험은 해당 분기를 지우면 실패해야 한다)
+- `ACTIONS` id 집합 = 도구 enum = OpenAPI enum(8개), 행동별 args 스키마 동일. 도구 카탈로그 12개와 `oort_action_claim_secret` 드리프트.
+- `agent.profile.update`: `instructions`·`enabledTools`·`paused`·`handle`·URL 키는 `InvalidArguments`. tagline의 마크다운 링크·`@멤버`·`<@멤버>`·`https://`·`www.`·영폭 공백 거절. `roleLabel` 예약어·`role_labels` 값 거절. `statusText` 만료 필수·81자 거절. 소유자가 다른·NULL·사람·없는 대상은 **같은** `InvalidArguments`. 소유자(비-admin) 승인 가능, 제3자 403. 승인 뒤 저장 전후 비교에서 다른 필드 불변. 감사에 값 없음.
+- 아바타 이미지: SVG·GIF·애니메이션 WebP·매직 불일치·치수 4096 초과·0·헤더 파싱 불가·1 MiB 초과(c)·5 MiB 초과(a)·디코드 실패는 모두 거절되고 `staged` 행이 **0개**. **폴리글랏**(PNG 뒤에 스크립트/ZIP 꼬리, JPEG 주석에 HTML)을 넣으면 저장·서빙되는 바이트에 그 꼬리가 **없다**(재인코딩 결과 바이트 비교). EXIF GPS가 든 JPEG를 넣으면 결과에 EXIF가 없다. 결과 ≤512×512·≤512 KiB. 서빙 응답 헤더 `nosniff`·CSP sandbox·저장 mime. 선언 mime이 달라도 매직이 판정한다.
+- 핀: `staged` 행의 바이트가 바뀐 상태(시험이 SQL로 변조)에서 결정하면 `action_args_invalid`·승인 pending·포인터 불변. 다른 승인·다른 대상의 `staged`를 가리키면 거절. 첨부가 이후 삭제돼도 승인된 이미지는 `staged` 사본으로 적용. 적용 시 이전 이미지 행 삭제, 거절·만료 시 `staged` 삭제.
+- 첨부 (a): 남의 비공개 채널 첨부·DM·없는 id·비이미지·`complete` 아님은 같은 오류.
+- `agent.invite`: 비-admin 결정자 403 `role_required`·연결 0·승인 pending. 승인 시 member·agent·paused 프로필·`pairing_pending` connection이 한 tx(중간 실패 시 전부 없음), owner = 승인자. 체크 꺼짐이면 pairing이 결정 응답에만 있고 payload·props·감사·outbox·로그에 **0건**(grep 시험). 체크 켜짐이면 결정 응답에 값이 **없다**. `detected` 이전에 어떤 도구로도 읽기·쓰기·claim 불가. 에이전트가 confirm·regenerate를 부를 수 없다.
+- 회수(`oort_action_claim_secret`): 첫 호출만 값을 주고 둘째는 `already_claimed`(동시 두 호출 중 정확히 하나만 성공). **다른 에이전트의 credential로는 같은 `not_found`**. 30분 기한 뒤 `claim_expired`. 체크 꺼짐 승인·거절/만료 승인·`agent.invite`/`invite.create` 외 행동은 거절. 회수가 이전 값을 무효화(이전 초대 코드로 redeem 실패, 이전 pairing으로 handshake 실패). 회수한 초대 코드의 `maxUses`·만료·역할이 승인 카드의 값과 같다. 감사에 값이 없다. 값이 어디에도(DB 덤프·로그) 평문으로 남지 않는다.
+- `invite.create`: 결정 응답에 `secretOnce`가 없고 카드 문구가 「에이전트가 받아 전달해요」. 기존 상한(역할·≤100·≤30일) 위반은 그대로 `InvalidArguments`.
+- 시간당 상한이 **없음**을 시험이 못박는다: 연속 제안·승인 N회(보류 3개 이하로 반복)가 상한 없이 통과, 4번째 pending만 `Conflict`.
+- 미검증 표시: 벤더(그록봇·dots·Muse)와의 실제 왕복은 시험 범위 밖이며 `runtime-unverified`(X1이 닫는다).
