@@ -1334,6 +1334,22 @@ async fn action_propose(
 
     let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
         Box::pin(async move {
+            // **Lock order** (second security review of #3797): the display-name
+            // advisory lock is the **first** thing this transaction takes — before
+            // `authorize_in_tx`, whose hosted-identity read holds the proposer's member
+            // row `FOR SHARE`. An approval and the human `PATCH …/agents/{agent}` take
+            // the advisory lock and *then* the target's member row `FOR UPDATE`;
+            // proposing in the opposite order (row first, lock second) deadlocks with a
+            // concurrent approval of the same agent. The lock is re-entrant, so the
+            // resolver's own acquisition later in this transaction is a no-op.
+            if matches!(
+                action.id,
+                momo_agent::actions::ACTION_AGENT_RENAME
+                    | momo_agent::actions::ACTION_AGENT_PROFILE_UPDATE
+            ) {
+                momo_messaging::lock_display_name_namespace_in_tx(conn, caller.workspace_id)
+                    .await?;
+            }
             let identity =
                 match authorize_in_tx(conn, caller, momo_auth::SCOPE_WORKSPACE_PROPOSE).await? {
                     Ok(identity) => identity,
@@ -1403,6 +1419,13 @@ async fn action_propose(
             if run.status.is_approval_held() || run.status.is_terminal() {
                 return Ok(Err(ToolFailure::Conflict));
             }
+            // **The two "already full" answers come first** (증보 v3, security review of
+            // #3797): `Conflict` must not depend on whether the proposal's *text* passes
+            // the roster-name rules, or an agent that already holds a pending proposal
+            // could tell 409 from 400 and so probe which names exist. Neither check
+            // reads the text: the ceiling counts, and the same-target check resolves
+            // only **who the proposal is about**.
+            //
             // **The two "already full" answers come first** (증보 v3, security review of
             // #3797): `Conflict` must not depend on whether the proposal's *text* passes
             // the roster-name rules, or an agent that already holds a pending proposal
