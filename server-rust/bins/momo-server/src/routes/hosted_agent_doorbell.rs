@@ -282,9 +282,12 @@ pub async fn ring(
 
     let outcome = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
-            let is_admin = active_workspace_role(conn, workspace_id, member_id)
-                .await?
-                .is_some_and(|role| role.is_admin());
+            // Every path — admin, creator, owner — needs an ACTIVE workspace membership
+            // now, not just a token that was valid when it was issued.
+            let Some(role) = active_workspace_role(conn, workspace_id, member_id).await? else {
+                return Ok(Ok(RingOutcome::NotAllowed));
+            };
+            let is_admin = role.is_admin();
             let outcome =
                 request_manual_ring_in_tx(conn, workspace_id, connection_id, member_id, is_admin)
                     .await?;

@@ -214,9 +214,10 @@ pub enum RingOutcome {
 ///
 /// Allowed for a workspace admin, the person who created the connection, or the
 /// agent's recorded owner — `actor_is_admin` is the caller's verdict on the first, this reads
-/// the second. The doorbell row is locked `FOR UPDATE` (not the connection: a claim
-/// holds `FOR SHARE` there), which also serializes concurrent rings so the cooldown
-/// cannot be raced. A ring re-arms the existing row (`pending_trailing = true`,
+/// the second. Locks are taken in the order the disconnect takes them (HAP-E6): the
+/// connection row `FOR KEY SHARE` first (compatible with a claim's `FOR SHARE`, conflicts
+/// with a disconnect's `FOR UPDATE`), the doorbell row `FOR UPDATE` second — which also
+/// serializes concurrent rings so the cooldown cannot be raced. A ring re-arms the existing row (`pending_trailing = true`,
 /// `window_started_at = NULL`); the sender then fires the same content-free signal
 /// through the same egress policy as any other ring. Nothing is sent from here.
 pub async fn request_manual_ring_in_tx(
@@ -231,7 +232,8 @@ pub async fn request_manual_ring_in_tx(
            FROM hosted_agent_connection hc \
            LEFT JOIN agent a \
              ON a.workspace_id = hc.workspace_id AND a.member_id = hc.agent_member_id \
-          WHERE hc.workspace_id = $1 AND hc.id = $2",
+          WHERE hc.workspace_id = $1 AND hc.id = $2 \
+          FOR KEY SHARE OF hc",
     )
     .bind(workspace_id)
     .bind(connection_id)
@@ -263,10 +265,10 @@ pub async fn request_manual_ring_in_tx(
 
     // The window is read after the lock, so two concurrent requests see each other.
     let window = sqlx::query(
-        "SELECT count(*) FILTER (WHERE requested_at > now() - interval '1 hour') AS hour_count, \
+        "SELECT count(*) FILTER (WHERE requested_at > clock_timestamp() - interval '1 hour') AS hour_count, \
                 max(requested_at) AS last_at, \
-                min(requested_at) FILTER (WHERE requested_at > now() - interval '1 hour') AS oldest_in_hour, \
-                now() AS db_now \
+                min(requested_at) FILTER (WHERE requested_at > clock_timestamp() - interval '1 hour') AS oldest_in_hour, \
+                clock_timestamp() AS db_now \
            FROM hosted_agent_doorbell_ring \
           WHERE workspace_id = $1 AND connection_id = $2",
     )
@@ -297,12 +299,13 @@ pub async fn request_manual_ring_in_tx(
     }
 
     sqlx::query(
-        "INSERT INTO hosted_agent_doorbell_ring (workspace_id, connection_id, requested_by) \
-         VALUES ($1, $2, $3)",
+        "INSERT INTO hosted_agent_doorbell_ring (workspace_id, connection_id, requested_by, requested_at) \
+         VALUES ($1, $2, $3, $4)",
     )
     .bind(workspace_id)
     .bind(connection_id)
     .bind(actor_member_id)
+    .bind(now)
     .execute(&mut *conn)
     .await?;
     // Old rows are only needed for the one-hour window.
