@@ -628,8 +628,10 @@ pub const TOOL_CATALOG: [ToolDescriptor; 11] = [
                       minute of claiming (stage: a short plain-text label, for example \
                       \"시작: <요약>\"), another each time a phase starts or you hand work to a \
                       sub-bot (\"위임: <봇> · <일>\"), and at least every five minutes while \
-                      working (status running with no stage is enough). People see only what \
-                      you report here and in textDelta; oort cannot see your reasoning.",
+                      working (status running with no stage is enough). Never put a secret, a \
+                      file path, a commit title, code or a copy of the request in a stage: \
+                      name the step. People see only what you report here and in \
+                      textDelta; oort cannot see your reasoning.",
         required_scope: SCOPE_RUNS_CALLBACK,
         schema: run_event_schema,
     },
@@ -667,9 +669,11 @@ pub const TOOL_CATALOG: [ToolDescriptor; 11] = [
         name: TOOL_PING,
         title: "Say you are alive",
         description: "Tell oort this runtime is up (state: idle or working). Call it once at \
-                      the start of every routine run and, during long work, every five \
-                      minutes. At most one call per 30 seconds is recorded; extra calls are \
-                      harmless. It proves you are alive, not that you took work.",
+                      the start of every routine run, and every five minutes while busy \
+                      WITHOUT a tracked run (inside a run, oort_run_event is the heartbeat; \
+                      a ping does not keep a run alive). At most one call per 30 seconds is \
+                      recorded; extra calls are harmless. It proves you are alive, not that \
+                      you took work.",
         required_scope: SCOPE_INBOX_READ,
         schema: ping_schema,
     },

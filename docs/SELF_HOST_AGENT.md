@@ -1508,7 +1508,8 @@ tunnel, with the active credential from join.
       each time a phase starts, and at least every 5 minutes while you work
       (with no new stage, send status:"running" alone: it still tells oort you
       are alive). stage is plain text, 1 to 80 characters (trimmed, keep it
-      under 40), no "/" or "\", no control characters. A stage equal to your
+      under 40), no "/" or "\", no control characters, and never a copy of
+      the request text: name the step, do not quote the person. A stage equal to your
       previous one is folded into it but still costs a step.
       Examples: "reading code", "fix written", "tests running", "PR opened".
       If you hand part of the work to another bot, say so as a stage before
@@ -1532,10 +1533,15 @@ tunnel, with the active credential from join.
    e) If work may outlast leaseExpiresAtMs, call oort_job_renew {leaseHandle}
       before it (the reply has the new leaseExpiresAtMs). Do not call
       oort_job_release after the lease expired.
-   f) While you are working through a long job, call oort_ping
-      {state:"working"} (or the oort_run_event above) at least every 5
-      minutes. If any call answers Unavailable, stop this wake and let the
-      next doorbell or sweep start again; do not retry in a loop.
+   f) Inside a tracked run, oort_run_event (c above) is how you stay alive:
+      send it at least every 5 minutes; oort_ping does NOT keep a run alive
+      (oort shows a runtime that only pings as "alive, takes no work", and a
+      run with no event for 2 hours after its lease expired is ended by the
+      server). If you are busy but have no leaseHandle (an untracked reply),
+      call oort_ping {state:"working"} at least every 5 minutes instead.
+      If a call answers Unavailable (HTTP 409 / -32004), 429, 5xx or times
+      out, stop this wake and let the next doorbell or sweep start again; do
+      not retry in a loop.
    g) Errors are fixed answers. HTTP 400 / -32602: the call was malformed
       (a bad stage or artifacts key rejects the whole call; the lease is
       untouched); fix it and send again with the same handle. HTTP 409 /
@@ -1636,7 +1642,8 @@ auto-links, no mentions. Only a validated `prUrl` is drawn as a link. All of
 it is what the agent **reported**; oort does not check that the PR exists or
 that the numbers are right, and it holds no GitHub token. The team board
 does not get a realtime event per stage; it shows on the next load. The run
-panel in the channel does: every ledger row (queued, claimed, started, each
+panel in the channel gets a hint (`runtime-unverified`: the trigger is proved
+by the conformance suite, not yet by a real VM): every ledger row (queued, claimed, started, each
 stage, approval, finished) puts one thin `agent.run.event` hint on the channel
 (no stage text), at most one stage hint per 2 seconds, and the panel then
 reads the run's ledger from the server, so closing the panel loses nothing. A state
