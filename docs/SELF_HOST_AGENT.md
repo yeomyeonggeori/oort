@@ -1503,8 +1503,8 @@ tunnel, with the active credential from join.
       stored handle.
    b) Read the request with oort_conversation_read on work.channelId.
    c) Report progress so people can see it. Within 60 seconds of the claim,
-      call oort_run_event {leaseHandle, status:"running", stage:"시작: <what
-      you are about to do, one line>", eventId:<new UUID>}. After that call it
+      call oort_run_event {leaseHandle, status:"running", stage:"시작: 코드
+      읽기" (a short step name like that, not a summary of the request), eventId:<new UUID>}. After that call it
       each time a phase starts, and at least every 5 minutes while you work
       (with no new stage, send status:"running" alone: it still tells oort you
       are alive). stage is plain text, 1 to 80 characters (trimmed, keep it
@@ -1533,8 +1533,8 @@ tunnel, with the active credential from join.
    e) If work may outlast leaseExpiresAtMs, call oort_job_renew {leaseHandle}
       before it (the reply has the new leaseExpiresAtMs). Do not call
       oort_job_release after the lease expired.
-   f) Inside a tracked run, oort_run_event (c above) is how you stay alive:
-      send it at least every 5 minutes; oort_ping does NOT keep a run alive
+   f) Inside a tracked run, oort_run_event {leaseHandle, status:"running"}
+      (c above) is how you stay alive: send it at least every 5 minutes; oort_ping does NOT keep a run alive
       (oort shows a runtime that only pings as "alive, takes no work", and a
       run with no event for 2 hours after its lease expired is ended by the
       server). If you are busy but have no leaseHandle (an untracked reply),

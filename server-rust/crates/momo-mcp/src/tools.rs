@@ -625,8 +625,8 @@ pub const TOOL_CATALOG: [ToolDescriptor; 11] = [
         name: TOOL_RUN_EVENT,
         title: "Report run progress",
         description: "Record a progress event for the run this lease owns. Send one within a \
-                      minute of claiming (stage: a short plain-text label, for example \
-                      \"시작: <요약>\"), another each time a phase starts or you hand work to a \
+                      minute of claiming (stage: a short plain-text step name, for \
+                      example \"시작: 코드 읽기\"), another each time a phase starts or you hand work to a \
                       sub-bot (\"위임: <봇> · <일>\"), and at least every five minutes while \
                       working (status running with no stage is enough). Never put a secret, a \
                       file path, a commit title, code or a copy of the request in a stage: \

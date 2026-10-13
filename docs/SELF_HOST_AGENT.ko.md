@@ -1317,8 +1317,8 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
       jobs 가 비었는데 그 파일이 있으면 이미 내 job 이다. 저장한 handle 을 쓴다.
    b) work.channelId 로 oort_conversation_read 해서 요청을 읽는다.
    c) 사람이 진행을 볼 수 있게 보고한다. claim 한 뒤 60초 안에
-      oort_run_event {leaseHandle, status:"running", stage:"시작: <곧 할 일 한
-      줄>", eventId:<새 UUID>} 를 부른다. 그 뒤로는 단계가 시작될 때마다, 그리고
+      oort_run_event {leaseHandle, status:"running", stage:"시작: 코드 읽기"
+      (이런 짧은 단계 이름. 요청 요약이 아니다), eventId:<새 UUID>} 를 부른다. 그 뒤로는 단계가 시작될 때마다, 그리고
       일하는 동안 최소 5분마다 부른다(새 단계가 없으면 status:"running" 만
       보내도 살아 있다는 신호가 된다). stage 는 일반 텍스트 1~80자(앞뒤 공백
       제거, 40자 안팎으로), "/"·"\"·제어 문자 불가, 요청 문구를 그대로 옮기지
@@ -1343,8 +1343,8 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
    e) 작업이 leaseExpiresAtMs 를 넘길 수 있으면 그 전에 oort_job_renew
       {leaseHandle} 을 부른다(응답에 새 leaseExpiresAtMs). lease 가 만료된 뒤에는
       oort_job_release 를 부르지 않는다.
-   f) 추적되는 run 안에서는 위 c)의 oort_run_event 가 살아 있음을 알리는 방법이다:
-      최소 5분마다 보낸다. oort_ping 은 run 을 살려 두지 못한다(ping 만 하는
+   f) 추적되는 run 안에서는 위 c)의 oort_run_event {leaseHandle,
+      status:"running"} 가 살아 있음을 알리는 방법이다: 최소 5분마다 보낸다. oort_ping 은 run 을 살려 두지 못한다(ping 만 하는
       런타임은 「살아 있지만 일은 안 가져감」으로 보이고, lease 가 만료된 뒤
       2시간 동안 이벤트가 없는 run 은 서버가 끝낸다). 바쁘지만 leaseHandle 이
       없는 경우(추적되지 않는 회신)에만 최소 5분마다 oort_ping {state:"working"}
