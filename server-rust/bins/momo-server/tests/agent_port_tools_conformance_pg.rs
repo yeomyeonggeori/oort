@@ -13575,6 +13575,74 @@ async fn a_change_that_lands_after_resolution_is_caught_under_the_lock() {
     );
 }
 
+/// **Security review of #3797 (F1) — lock order.** Proposing takes the
+/// display-name advisory lock *before* any member row, exactly as an approval and
+/// the human `PATCH …/agents/{agent}` do; the reverse order is a deadlock with a
+/// concurrent approval. A second session holds the advisory lock; the proposal
+/// parks on it; and while it is parked the agent's member row must still be free
+/// (`FOR UPDATE NOWAIT` succeeds) — a proposal that had already taken the row
+/// first would make that fail.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_proposal_takes_the_advisory_lock_before_any_member_row() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (owner, _jwt) = seed_human_3708(&su, &fixture, "owner", "member").await;
+    set_agent_owner_3708(&su, fixture.hosted_agent, Some(owner)).await;
+    tidy_agent_3708(&su, fixture.hosted_agent, "Hermes").await;
+
+    let mut blocker = su.begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('display-name:' || $1::text, 0))")
+        .bind(fixture.workspace.to_string())
+        .execute(&mut *blocker)
+        .await
+        .unwrap();
+
+    let propose = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.profile.update",
+        json!({"tagline": "새 소개예요"}),
+    );
+    let agent = fixture.hosted_agent;
+    let control = async {
+        let mut parked = false;
+        for _ in 0..200 {
+            let waiting: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM pg_stat_activity \
+                  WHERE wait_event_type = 'Lock' AND wait_event = 'advisory'",
+            )
+            .fetch_one(&su)
+            .await
+            .unwrap();
+            if waiting > 0 {
+                parked = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(parked, "the proposal never parked on the advisory lock");
+        // While it is parked, the proposer's row is not held by it.
+        let free = sqlx::query("SELECT id FROM member WHERE id = $1 FOR UPDATE NOWAIT")
+            .bind(agent)
+            .fetch_all(&su)
+            .await;
+        assert!(
+            free.is_ok(),
+            "the proposal took the member row before the advisory lock: {free:?}"
+        );
+        blocker.commit().await.unwrap();
+    };
+    let ((status, proposed), ()) = tokio::join!(propose, control);
+    assert_eq!(status, 200, "{proposed}");
+}
+
 // ---------------------------------------------------------------------------
 // ADR-0186 증보 2026-10-13 v3 A0 (#3786) — agent_avatar_image (migration 131)
 // ---------------------------------------------------------------------------
