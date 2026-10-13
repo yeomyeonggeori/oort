@@ -34,6 +34,20 @@ export interface SecretDetailRow {
   token?: boolean;
 }
 
+/**
+ * 프롬프트 한 덩어리 복사 (#3773). 있으면 이 카드의 주 행동은 비밀값 복사가 아니라
+ * 이 복사이고, 비밀값 복사는 보조로 물러난다. `preview` 는 비밀을 마스크로 가린 본이다:
+ * 화면에는 마스크본만 서고 클립보드에는 `value`(비밀 포함)가 간다.
+ */
+export interface SecretPromptCopy {
+  value: string;
+  preview: string;
+  label: string;
+  subject: string;
+  hint?: string;
+  testId?: string;
+}
+
 export function OneTimeSecretCard({
   headline,
   warning,
@@ -46,6 +60,7 @@ export function OneTimeSecretCard({
   onDone,
   doneLabel = REVEAL_DONE_LABEL,
   testId,
+  prompt,
 }: {
   headline: string;
   warning: string;
@@ -61,6 +76,7 @@ export function OneTimeSecretCard({
   onDone: () => void;
   doneLabel?: string;
   testId?: string;
+  prompt?: SecretPromptCopy;
 }) {
   const cardRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -98,8 +114,40 @@ export function OneTimeSecretCard({
         />
       )}
 
-      {/* 비밀값은 자기 이름표를 단 블록에 혼자 선다. */}
-      <KeyValueRows rows={[{ key: secretLabel, value: secret, numeric: true }]} />
+      {prompt && (
+        <div className="flex min-w-0 flex-col gap-2" data-testid="hosted-prompt-block">
+          {prompt.hint && (
+            <p className="break-keep text-meta text-ink-muted">{prompt.hint}</p>
+          )}
+          <pre
+            className="max-h-48 min-w-0 overflow-auto whitespace-pre-wrap break-all rounded-md bg-surface-hover p-3 font-mono text-meta text-ink"
+            aria-label="복사될 프롬프트 미리보기"
+            data-testid="hosted-prompt-preview"
+          >
+            {prompt.preview}
+          </pre>
+        </div>
+      )}
+
+      {/* 비밀값은 자기 이름표를 단 블록에 혼자 선다. 프롬프트 복사가 있으면 값 자체는
+          직접 붙여 넣는 사람을 위한 보조다. */}
+      {prompt ? (
+        <details className="flex min-w-0 flex-col gap-2" data-testid="hosted-secret-manual">
+          <summary className="flex min-h-11 cursor-pointer items-center rounded-sm text-meta font-medium text-ink focus-visible:focus-ring active:bg-surface-pressed">
+            값만 따로 붙여 넣을래요
+          </summary>
+          <KeyValueRows rows={[{ key: secretLabel, value: secret, numeric: true }]} />
+          <CopyButton
+            value={secret}
+            label={copyLabel}
+            subject={secretLabel}
+            testId="hosted-secret-copy"
+            className="self-start"
+          />
+        </details>
+      ) : (
+        <KeyValueRows rows={[{ key: secretLabel, value: secret, numeric: true }]} />
+      )}
 
       {expiryLabel && (
         <p className="text-meta text-ink-muted" data-numeric data-testid="hosted-secret-expiry">
@@ -108,13 +156,30 @@ export function OneTimeSecretCard({
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        <CopyButton
-          value={secret}
-          label={copyLabel}
-          subject={secretLabel}
-          testId="hosted-secret-copy"
-        />
-        <Button type="button" size="sm" onClick={onDone} data-testid="hosted-secret-done">
+        {prompt && (
+          <CopyButton
+            value={prompt.value}
+            label={prompt.label}
+            subject={prompt.subject}
+            variant="default"
+            testId={prompt.testId ?? "hosted-prompt-copy"}
+          />
+        )}
+        {!prompt && (
+          <CopyButton
+            value={secret}
+            label={copyLabel}
+            subject={secretLabel}
+            testId="hosted-secret-copy"
+          />
+        )}
+        <Button
+          type="button"
+          size="sm"
+          variant={prompt ? "outline" : "default"}
+          onClick={onDone}
+          data-testid="hosted-secret-done"
+        >
           {doneLabel}
         </Button>
       </div>
