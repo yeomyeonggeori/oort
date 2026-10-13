@@ -168,7 +168,7 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 
 `docs/SELF_HOST_AGENT.md` §3.3.17.4의 생산 루틴 문구와 도구 설명(`momo-mcp/src/tools.rs`)을 고친다. 규약:
 
-0. **루틴 실행마다 시작 시 `oort_ping`을 1회**(`state:"idle"`), 장기 작업 중에는 5분마다 `state:"working"`로 보낸다(작업 중 `run_event`를 보냈다면 생략 가능). 30초 안 재호출은 `recorded:false`로 무시된다.
+0. **루틴 실행마다 시작 시 `oort_ping`을 1회**(`state:"idle"`). 추적되는 run 안에서는 `oort_run_event`가 5분 하트비트다 — ping 은 run 을 살려 두지 못한다(ping 만 하는 런타임은 `alive_idle`, 서버 정지 스위프 대상). leaseHandle 없이 바쁜 동안(추적되지 않는 회신)에만 5분마다 `state:"working"`. 30초 안 재호출은 `recorded:false`로 무시된다. Unavailable·429·5xx·시간 초과면 이번 wake 를 멈추고 루프로 재시도하지 않는다(S6 검수 M-2, L-1).
 1. **수령 직후 60초 안에 `oort_run_event`를 한 번** 보낸다: `stage="시작: <한 줄 요약>"`.
 2. **단계가 바뀔 때마다** `stage`를 보낸다. 형식: 한국어 동사구 **≤40자**(서버 상한은 80자), 비밀·URL 쿼리·토큰·경로 전체를 쓰지 않는다. 예: 「채널 이름 확인」「승인 카드 제안」「grokbot-lab 생성 대기」.
 3. **작업 중에는 최소 5분마다** 보고한다. 보낼 단계가 없으면 `stage` 없이 `status="running"`만 보낸다(원장 행은 안 만들지만 `last_run_event_at`이 갱신된다 — 「살아 있음」 신호).
