@@ -3684,6 +3684,73 @@ paths:
         "404": {description: Agent run not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "409": {description: Run is already terminal in a non-cancelled state, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
 
+  /v1/workspaces/{workspaceId}/channels/{channelId}/agent-runs/progress:
+    get:
+      tags: [agents]
+      operationId: listChannelAgentRunProgress
+      summary: Server-derived progress of this channel's hosted-agent runs.
+      description: >
+        ADR-0200 D1/D3. For each run of a hosted agent in this channel (mention
+        runs and work runs alike), newest first, the server's own answer to
+        "what is this run doing" instead of a client-side guess: `phase`
+        (queued / claimed / running / awaiting_approval / paused / terminal),
+        the delivery job's `leaseState` (`stale` means expired and not
+        re-claimed — the agent may still return), `queuePosition` among the
+        agent's claimable queue (1 = next), the latest reported stage, and for a
+        finished run a closed `endReason`. Runs ahead in channels the caller is
+        not a member of are counted in `aheadTotal` and never named. Active human
+        members of this channel only. Managed and BYOA agents' runs are not listed.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - name: state
+          in: query
+          schema: {type: string, enum: [active, all], default: all}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+      responses:
+        "200":
+          description: Progress per run, newest first.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgentRunProgressPage"}
+        "400": {description: Malformed identifier or unknown state, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Active human channel membership required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/agent-runs/{runId}/events:
+    get:
+      tags: [agents]
+      operationId: listAgentRunEvents
+      summary: The run event ledger of one hosted-agent run.
+      description: >
+        ADR-0200 D2. The whole ledger (at most 200 rows, oldest first) of a
+        hosted agent's run: queued, claimed, started, stage markers, approval
+        requested/decided, and the terminal with its closed code. There is no
+        cursor and no raw sequence — each row carries a 1-based `ordinal` in this
+        run's ledger only. The only free text is the agent-reported `stage`
+        marker (at most 80 characters; render as plain text). A run outside this
+        workspace and a run in a channel the caller is not an active member of
+        are the same 404. Runs of managed or BYOA agents have an empty ledger.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: runId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The ledger.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgentRunEvents"}
+        "400": {description: Malformed identifier, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {description: No such run, or the caller is not a member of its channel, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
   /v1/workspaces/{workspaceId}/agents/from-card:
     post:
       tags: [agents]
@@ -13458,6 +13525,110 @@ components:
           type: string
           format: uuid
           description: Final run ID when another older page exists.
+
+    AgentRunProgress:
+      type: object
+      additionalProperties: false
+      required: [id, channelId, agentMemberId, status, phase, leaseState, stepCount, createdAtMs, updatedAtMs]
+      properties:
+        id: {type: string, format: uuid}
+        channelId: {type: string, format: uuid}
+        agentMemberId: {type: string, format: uuid}
+        triggerMessageId: {type: string, format: uuid}
+        triggerSummary: {type: string, maxLength: 200}
+        status:
+          type: string
+          enum: [queued, running, awaiting_approval, paused, succeeded, failed, cancelled, timed_out]
+        phase:
+          type: string
+          enum: [queued, claimed, running, awaiting_approval, paused, succeeded, failed, timed_out, cancelled]
+          description: >
+            Derived by the server. `queued` = nobody has taken the job; `claimed` =
+            an agent leased it and has not reported progress yet.
+        leaseState:
+          type: string
+          enum: [live, stale, none]
+          description: >
+            The delivery job's lease. `stale` = expired and not re-claimed (the
+            agent may still return); never "disconnected".
+        stepCount: {type: integer, minimum: 0}
+        claimedAtMs: {type: integer, format: int64}
+        latestStage: {type: string, maxLength: 80}
+        lastEventAtMs: {type: integer, format: int64}
+        approvalId: {type: string, format: uuid}
+        approvalExpiresAtMs: {type: integer, format: int64}
+        endReason:
+          type: string
+          description: >
+            Machine code the server wrote for a finished run (a lowercase token such
+            as `approval_expired`); never agent-supplied text. Absent otherwise.
+        queuePosition:
+          type: integer
+          minimum: 1
+          description: 1 = next to be claimed. Present only for an unclaimed, claimable run.
+        aheadTotal:
+          type: integer
+          minimum: 0
+          description: Unclaimed runs ahead in the agent's queue, in any channel.
+        ahead:
+          type: array
+          description: The subset of those in channels the caller is a member of.
+          items:
+            type: object
+            additionalProperties: false
+            required: [runId, channelId]
+            properties:
+              runId: {type: string, format: uuid}
+              channelId: {type: string, format: uuid}
+        startedAtMs: {type: integer, format: int64}
+        finishedAtMs: {type: integer, format: int64}
+        createdAtMs: {type: integer, format: int64}
+        updatedAtMs: {type: integer, format: int64}
+
+    AgentRunProgressPage:
+      type: object
+      additionalProperties: false
+      required: [runs]
+      properties:
+        runs:
+          type: array
+          items: {$ref: "#/components/schemas/AgentRunProgress"}
+
+    AgentRunEvent:
+      type: object
+      additionalProperties: false
+      required: [ordinal, kind, createdAtMs]
+      properties:
+        ordinal:
+          type: integer
+          minimum: 1
+          description: >
+            Position in this run's ledger at read time. Not a stable identifier: the
+            200-row cap can drop old stage rows, so never use it as a key.
+        kind:
+          type: string
+          enum: [queued, claimed, started, stage, paused, resumed, approval_requested, approval_decided, succeeded, failed, timed_out, cancelled]
+        stage:
+          type: string
+          maxLength: 80
+          description: Agent-reported marker, present only on `stage`. Untrusted plain text.
+        code:
+          type: string
+          description: Machine code written by the server (`approval_expired`, `approved`, …).
+        approvalId: {type: string, format: uuid}
+        actorMemberId: {type: string, format: uuid}
+        createdAtMs: {type: integer, format: int64}
+
+    AgentRunEvents:
+      type: object
+      additionalProperties: false
+      required: [runId, events]
+      properties:
+        runId: {type: string, format: uuid}
+        events:
+          type: array
+          maxItems: 200
+          items: {$ref: "#/components/schemas/AgentRunEvent"}
 
     AgentRunCancelResponse:
       type: object

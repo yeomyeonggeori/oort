@@ -2064,6 +2064,104 @@ pub struct AgentRunSummaryDto {
     pub updated_at_ms: i64,
 }
 
+/// `?state=&limit=` on the channel run progress read (ADR-0200 D1/D2).
+#[derive(Debug, Deserialize)]
+pub struct AgentRunProgressQuery {
+    /// `active` (not finished) or `all`; absent means `all`. Anything else is a 400.
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub limit: Option<String>,
+}
+
+/// A run ahead of this one that the viewer can see (a channel they are in).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AheadRunDto {
+    pub run_id: String,
+    pub channel_id: String,
+}
+
+/// openapi `AgentRunProgress` — the server's own answer to "what is this run
+/// doing", in place of what a client used to infer (ADR-0200 D1).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunProgressDto {
+    pub id: String,
+    pub channel_id: String,
+    pub agent_member_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_message_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_summary: Option<String>,
+    /// The raw `agent_run.status`.
+    pub status: String,
+    /// Derived: queued, claimed, running, awaiting_approval, paused, succeeded,
+    /// failed, timed_out, cancelled.
+    pub phase: String,
+    /// live, stale (expired and not re-claimed — "lease not renewed", not
+    /// "disconnected") or none.
+    pub lease_state: String,
+    pub step_count: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claimed_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_stage: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_event_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_expires_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_reason: Option<String>,
+    /// 1 = next to be claimed. Absent unless the run is unclaimed and claimable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_position: Option<i64>,
+    /// Unclaimed runs ahead of this one in the agent's queue, in any channel.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ahead_total: Option<i64>,
+    /// The subset of those in channels the caller is a member of.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ahead: Vec<AheadRunDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finished_at_ms: Option<i64>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AgentRunProgressPageResponse {
+    pub runs: Vec<AgentRunProgressDto>,
+}
+
+/// openapi `AgentRunEvent` — one ledger row. No raw sequence, no free text beyond
+/// the agent-reported `stage` marker.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunEventDto {
+    pub ordinal: i64,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actor_member_id: Option<String>,
+    pub created_at_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunEventsResponse {
+    pub run_id: String,
+    pub events: Vec<AgentRunEventDto>,
+}
+
 /// openapi `AgentRunSummaryPage` (Swift `AgentRunSummaryPageDTO`).
 ///
 /// `nextCursor` is omitted rather than serialized as `null` when the page is the

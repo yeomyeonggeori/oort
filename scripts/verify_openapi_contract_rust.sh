@@ -4008,6 +4008,19 @@ sample agent-run-cancel post \
   "/v1/workspaces/$WS/agent-runs/$CANCEL_RUN_UUID/cancel" 200 "" "$ACCESS"
 guard_jq '.status == "cancelled"' "a person's stop ends the run"
 
+# ADR-0200 D1/D2 (#3741): the server-derived progress and the run event ledger. The gate's
+# agents are managed, so both answer an honest empty set; the populated shapes are proved in
+# the PG conformance suite against a hosted agent (agent_port_tools_conformance_pg).
+sample agent-run-events get \
+  "/v1/workspaces/{workspaceId}/agent-runs/{runId}/events" \
+  "/v1/workspaces/$WS/agent-runs/$CANCEL_RUN_UUID/events" 200 "" "$ACCESS"
+guard_jq '(.events | type) == "array" and (.events | length) == 0' \
+  "a managed agent's run has an empty ledger, not a guessed one"
+sample agent-run-progress get \
+  "/v1/workspaces/{workspaceId}/channels/{channelId}/agent-runs/progress" \
+  "/v1/workspaces/$WS/channels/$GENERAL_CHANNEL_ID/agent-runs/progress" 200 "" "$ACCESS"
+guard_jq '(.runs | type) == "array"' "progress answers a list"
+
 # #3396 (ADR-0147 증보 2026-10-03) — 개인 API 키. 운영자가 동료 한 사람에게 발급하고, 그 사람의
 # 본인 전용 에이전트가 쓴다. 키는 쓰기 전용이라 응답 어디에도 나오면 안 된다(비밀 needle 로 등록).
 PERSONAL_KEY_SECRET="sk-openapi-gate-personal-$(rand_hex)"

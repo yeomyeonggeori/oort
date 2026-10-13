@@ -1264,6 +1264,17 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/agent-runs",
             post(routes::agent_runs::create).get(routes::agent_runs::list),
         )
+        // ADR-0200 D1/D2/D3 (#3741): the server's own answer to "what is this run
+        // doing" — derived phase, lease state, queue position — and the run event
+        // ledger. Beside, not instead of, the legacy list above.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/agent-runs/progress",
+            get(routes::agent_runs::progress),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agent-runs/{run}/events",
+            get(routes::agent_runs::events),
+        )
         // The other two reads of the same record (#1223): one agent's
         // workspace-global history (MOMO-653 — bounded summaries, joined to the
         // reader's own channel membership) and one run in full.

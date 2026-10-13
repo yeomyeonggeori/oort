@@ -10718,3 +10718,594 @@ async fn the_ledger_append_takes_no_lock_and_history_is_immutable() {
         "…as momo_app under RLS too"
     );
 }
+
+// ---------------------------------------------------------------------------
+// (#3741 S2, ADR-0200 D1/D2/D3) the honest read side
+// ---------------------------------------------------------------------------
+
+async fn progress_3741(
+    client: &reqwest::Client,
+    base: &str,
+    jwt: &str,
+    fixture: &Fixture,
+    channel: Uuid,
+    query: &str,
+) -> (u16, Value) {
+    let response = client
+        .get(format!(
+            "{base}/v1/workspaces/{}/channels/{channel}/agent-runs/progress{query}",
+            fixture.workspace
+        ))
+        .bearer_auth(jwt)
+        .send()
+        .await
+        .expect("progress responds");
+    let status = response.status().as_u16();
+    (status, response.json().await.unwrap_or(Value::Null))
+}
+
+async fn events_3741(
+    client: &reqwest::Client,
+    base: &str,
+    jwt: &str,
+    fixture: &Fixture,
+    run: &str,
+) -> (u16, Value) {
+    let response = client
+        .get(format!(
+            "{base}/v1/workspaces/{}/agent-runs/{run}/events",
+            fixture.workspace
+        ))
+        .bearer_auth(jwt)
+        .send()
+        .await
+        .expect("events responds");
+    let status = response.status().as_u16();
+    (status, response.json().await.unwrap_or(Value::Null))
+}
+
+fn only_run_3741(body: &Value) -> &Value {
+    let runs = body["runs"].as_array().expect("runs array");
+    assert_eq!(runs.len(), 1, "{body}");
+    &runs[0]
+}
+
+/// RED PROOF (ADR-0200 D1/D2, S2). The progress read tells the truth at every
+/// step of one hosted run — queued (position 1) → claimed (when, lease live) →
+/// running (latest stage) → lease stale (expired, not re-claimed) → succeeded —
+/// and the ledger endpoint returns the same story with an ordinal and no raw
+/// sequence. This is the 2026-10-13 incident reduced to a test: a run nobody has
+/// taken is `queued`, never "working" and never "signal lost".
+///
+/// Tamper table:
+///   * derive `claimed` from the run status instead of the job lease -> claimed step shows `queued`
+///   * compute lease_state without the expiry compare               -> the expired lease shows `live`
+///   * add `seq` to the event DTO                                   -> the no-seq assertion fails
+///   * drop the channel-membership check in the events query         -> the outsider gets 200
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_progress_read_tells_the_truth_at_every_step_of_a_hosted_run() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    // nothing yet
+    let (status, empty) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "",
+    )
+    .await;
+    assert_eq!(status, 200, "{empty}");
+    assert_eq!(empty["runs"], json!([]));
+
+    mention_3740(&client, &base, &su, &fixture, fixture.hosted_agent).await;
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "?state=active",
+    )
+    .await;
+    let run = only_run_3741(&body);
+    assert_eq!(run["phase"], json!("queued"), "{body}");
+    assert_eq!(run["leaseState"], json!("none"));
+    assert_eq!(run["queuePosition"], json!(1));
+    assert_eq!(run["aheadTotal"], json!(0));
+    assert!(run.get("claimedAtMs").is_none());
+    let run_id = run["id"].as_str().unwrap().to_string();
+
+    // claimed: the lease is the fact, run.status is still `queued`
+    let (_, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "",
+    )
+    .await;
+    let run = only_run_3741(&body);
+    assert_eq!(run["status"], json!("queued"));
+    assert_eq!(run["phase"], json!("claimed"), "{body}");
+    assert_eq!(run["leaseState"], json!("live"));
+    assert!(run["claimedAtMs"].as_i64().unwrap() > 0);
+    assert!(run.get("queuePosition").is_none(), "no position once taken");
+
+    // taken but silent past the lease: still `claimed` (the run has not started), and the
+    // lease is `stale` — "not renewed", with no queue position (it is not in the queue)
+    sqlx::query(
+        "UPDATE outbox SET lease_acquired_at = now() - interval '35 minutes', \
+                lease_expires_at = now() - interval '5 minutes' \
+          WHERE workspace_id=$1 AND kind='agent_job' AND partition_key=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "",
+    )
+    .await;
+    let run = only_run_3741(&body);
+    assert_eq!(run["phase"], json!("claimed"), "{body}");
+    assert_eq!(run["leaseState"], json!("stale"));
+    assert!(run.get("queuePosition").is_none());
+
+    // the agent comes back and renews the expired-but-unreclaimed handle (ADR-0162 A3):
+    // the lease lives again, same job, same handle
+    let (status, renewed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_job_renew",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    assert_eq!(status, 200, "{renewed}");
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "",
+    )
+    .await;
+    assert_eq!(only_run_3741(&body)["leaseState"], json!("live"), "{body}");
+
+    // running with a stage
+    let (status, event) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_event",
+        json!({"leaseHandle": handle, "status": "running", "stage": "채널 이름 확인",
+               "eventId": Uuid::new_v4()}),
+    )
+    .await;
+    assert_eq!(status, 200, "{event}");
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "",
+    )
+    .await;
+    let run = only_run_3741(&body);
+    assert_eq!(run["phase"], json!("running"));
+    assert_eq!(run["latestStage"], json!("채널 이름 확인"));
+    assert_eq!(run["leaseState"], json!("live"));
+
+    // the lease expires and nobody re-claims: stale, and still `running` — a server
+    // fact ("lease not renewed"), never the client's "signal lost"
+    sqlx::query(
+        "UPDATE outbox SET lease_acquired_at = now() - interval '35 minutes', \
+                lease_expires_at = now() - interval '5 minutes' \
+          WHERE workspace_id=$1 AND kind='agent_job' AND partition_key=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "",
+    )
+    .await;
+    let run = only_run_3741(&body);
+    assert_eq!(run["phase"], json!("running"));
+    assert_eq!(run["leaseState"], json!("stale"), "{body}");
+
+    // finished
+    let (status, done) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_complete",
+        json!({"leaseHandle": handle, "status": "succeeded", "body": "done"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{done}");
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "?state=active",
+    )
+    .await;
+    assert_eq!(body["runs"], json!([]), "a finished run is not active");
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "?state=all",
+    )
+    .await;
+    let run = only_run_3741(&body);
+    assert_eq!(run["phase"], json!("succeeded"));
+    assert!(run["finishedAtMs"].as_i64().unwrap() > 0);
+
+    // the ledger: same story, ordinals, no raw sequence
+    let (status, ledger) = events_3741(&client, &base, &fixture.human_jwt, &fixture, &run_id).await;
+    assert_eq!(status, 200, "{ledger}");
+    let events = ledger["events"].as_array().unwrap();
+    let kinds: Vec<&str> = events.iter().map(|e| e["kind"].as_str().unwrap()).collect();
+    assert_eq!(
+        kinds,
+        ["queued", "claimed", "started", "stage", "succeeded"]
+    );
+    assert_eq!(
+        events
+            .iter()
+            .map(|e| e["ordinal"].as_i64().unwrap())
+            .collect::<Vec<_>>(),
+        [1, 2, 3, 4, 5]
+    );
+    assert_eq!(events[3]["stage"], json!("채널 이름 확인"));
+    let rendered = serde_json::to_string(&ledger).unwrap();
+    assert!(
+        !rendered.contains("\"seq\""),
+        "the global sequence never leaves: {rendered}"
+    );
+
+    // a stranger to the channel and an unknown run are the same 404; a bad id is a 400
+    let outsider = seed_outsider_3741(&su, &fixture).await;
+    let (status, _) = events_3741(&client, &base, &outsider, &fixture, &run_id).await;
+    assert_eq!(status, 404);
+    let (status, _) = events_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        &Uuid::new_v4().to_string(),
+    )
+    .await;
+    assert_eq!(status, 404);
+    let (status, _) = events_3741(&client, &base, &fixture.human_jwt, &fixture, "nope").await;
+    assert_eq!(status, 400);
+    let (status, _) = progress_3741(&client, &base, &outsider, &fixture, fixture.channel, "").await;
+    assert_eq!(status, 403, "progress is for channel members");
+    let (status, _) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "?state=bogus",
+    )
+    .await;
+    assert_eq!(status, 400);
+}
+
+/// A workspace member who is in NO channel with the agent.
+async fn seed_outsider_3741(pool: &PgPool, fixture: &Fixture) -> String {
+    let jwt = seed_plain_member(pool, fixture).await;
+    // seed_plain_member joins `channel`; this outsider leaves it again
+    sqlx::query(
+        "UPDATE membership SET left_at = now() \
+          WHERE workspace_id=$1 AND channel_id=$2 AND member_id <> $3 \
+            AND member_id NOT IN (SELECT id FROM member WHERE kind='agent') \
+            AND member_id <> $4",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .bind(fixture.human)
+    .bind(fixture.human)
+    .execute(pool)
+    .await
+    .unwrap();
+    jwt
+}
+
+/// RED PROOF (ADR-0200 D3, S2). Two members ask the same agent for work in two
+/// different channels. The queue is the agent's real claim order; the second run
+/// is position 2 for everyone; but a member of only the second channel is never
+/// told WHICH run is ahead — a count, never a name — while a member of both is.
+///
+/// Tamper table:
+///   * order the queue by anything other than `outbox.id`            -> positions swap
+///   * return `ahead` without the viewer's membership filter          -> the outsider sees the other channel's run id
+///   * count only the viewer's visible runs for `aheadTotal`          -> the outsider is told position 1 / total 0
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_queue_shows_the_claim_order_and_names_only_runs_the_viewer_can_see() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    // both channels are approved for the hosted agent
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_channel_ids = $3 \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_connection)
+    .bind(vec![fixture.channel, fixture.private_channel])
+    .execute(&su)
+    .await
+    .unwrap();
+    let plain_jwt = seed_plain_member(&su, &fixture).await; // member of `channel` only
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let handle = hosted_handle(&su, fixture.hosted_agent).await;
+
+    for channel in [fixture.private_channel, fixture.channel] {
+        let sent: Value = client
+            .post(format!(
+                "{base}/v1/workspaces/{}/channels/{channel}/messages",
+                fixture.workspace
+            ))
+            .bearer_auth(&fixture.human_jwt)
+            .json(&json!({"clientMsgId": Uuid::new_v4(), "body": format!("@{handle} go")}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(sent["id"].is_string(), "{sent}");
+    }
+    // The queue is the CLAIM order (outbox.id), not creation time: make the second run
+    // look OLDER than the first, so ordering by created_at would swap the positions.
+    sqlx::query(
+        "UPDATE agent_run SET created_at = created_at - interval '2 hours' \
+          WHERE workspace_id=$1 AND channel_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .execute(&su)
+    .await
+    .unwrap();
+    let private_run: String = sqlx::query_scalar(
+        "SELECT id::text FROM agent_run WHERE workspace_id=$1 AND channel_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.private_channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+
+    // the plain member sees position 2 and ONE run ahead — as a count only
+    let (status, body) =
+        progress_3741(&client, &base, &plain_jwt, &fixture, fixture.channel, "").await;
+    assert_eq!(status, 200, "{body}");
+    let run = only_run_3741(&body);
+    assert_eq!(run["queuePosition"], json!(2), "{body}");
+    assert_eq!(run["aheadTotal"], json!(1));
+    assert!(
+        run.get("ahead").is_none(),
+        "the other channel's run is not named: {body}"
+    );
+    assert!(
+        !serde_json::to_string(&body).unwrap().contains(&private_run),
+        "the other channel's run id never reaches a non-member"
+    );
+
+    // the human is in both channels: the same run, now named
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "",
+    )
+    .await;
+    let run = only_run_3741(&body);
+    assert_eq!(run["queuePosition"], json!(2));
+    assert_eq!(run["ahead"].as_array().unwrap().len(), 1, "{body}");
+    assert_eq!(
+        run["ahead"][0]["runId"].as_str().unwrap().to_lowercase(),
+        private_run.to_lowercase()
+    );
+
+    // once the agent takes the first job the second moves up
+    let (_, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 1}),
+    )
+    .await;
+    assert_eq!(structured(&claimed)["jobs"].as_array().unwrap().len(), 1);
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "",
+    )
+    .await;
+    let run = only_run_3741(&body);
+    assert_eq!(run["phase"], json!("queued"));
+    assert_eq!(run["queuePosition"], json!(1), "{body}");
+    assert_eq!(run["aheadTotal"], json!(0));
+
+    // A job the agent could NOT claim (its token was revoked) is waiting but has no honest
+    // position: none is given, instead of a confident "1st" for work nobody can take.
+    sqlx::query("UPDATE token SET revoked_at = now() WHERE id=$1")
+        .bind(fixture.hosted_token)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (_, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "",
+    )
+    .await;
+    let run = only_run_3741(&body);
+    assert_eq!(run["phase"], json!("queued"), "{body}");
+    assert!(
+        run.get("queuePosition").is_none(),
+        "unclaimable => no position: {body}"
+    );
+}
+
+/// RED PROOF (ADR-0200 D1/D2, S2). A finished run's `endReason` is the closed machine
+/// code the server wrote and nothing else (a malformed or non-string code is dropped,
+/// not echoed); `limit` bounds the page; and another tenant's channel and runs are
+/// invisible — 403 for the channel, 404 for the ledger.
+///
+/// Tamper table:
+///   * drop the `end_reason` regex                           -> the malformed code is echoed
+///   * select `end_reason` for non-terminal runs too          -> the running run shows a reason
+///   * drop the `LIMIT $4`                                    -> `limit=1` returns two runs
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_end_reason_is_a_closed_code_and_other_tenants_are_invisible() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let other = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    for (status, error) in [
+        ("timed_out", Some(json!({"code": "approval_expired"}))),
+        ("failed", Some(json!({"code": "Bad Code!"}))),
+        ("failed", Some(json!({"code": 5}))),
+        ("succeeded", None),
+        ("running", Some(json!({"code": "ignored_while_running"}))),
+    ] {
+        sqlx::query(
+            "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, error) \
+             VALUES ($1,$2,$3,$4::run_status,$5)",
+        )
+        .bind(fixture.workspace)
+        .bind(fixture.hosted_agent)
+        .bind(fixture.channel)
+        .bind(status)
+        .bind(error)
+        .execute(&su)
+        .await
+        .unwrap();
+    }
+    let (status, body) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "?limit=200",
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let mut reasons: Vec<Option<String>> = body["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|run| run["endReason"].as_str().map(str::to_string))
+        .collect();
+    reasons.sort();
+    assert_eq!(
+        reasons,
+        [None, None, None, None, Some("approval_expired".to_string())],
+        "only the well-formed code of a FINISHED run is shown: {body}"
+    );
+    let (_, one) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        fixture.channel,
+        "?limit=1",
+    )
+    .await;
+    assert_eq!(one["runs"].as_array().unwrap().len(), 1);
+
+    // another tenant's channel is not mine; its run's ledger is a 404, same as nothing
+    let foreign_run: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+         VALUES ($1,$2,$3,'queued') RETURNING id",
+    )
+    .bind(other.workspace)
+    .bind(other.hosted_agent)
+    .bind(other.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let (status, _) = progress_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        other.channel,
+        "",
+    )
+    .await;
+    assert_eq!(status, 403);
+    let (status, _) = events_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        &foreign_run.to_string(),
+    )
+    .await;
+    assert_eq!(status, 404);
+}
