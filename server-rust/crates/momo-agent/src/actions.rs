@@ -365,55 +365,55 @@ pub const ACTIONS: &[WorkspaceAction] = &[
     WorkspaceAction {
         id: ACTION_INVITE_CREATE,
         title: "팀원 초대 링크 만들기",
-        summary: "역할과 사용 횟수, 만료를 정해 초대 링크를 하나 만듭니다.",
+        summary: "역할과 사용 횟수, 만료를 정해 초대 링크를 하나 만들어요.",
         risk: Risk::Approval,
         required_role: RequiredRole::Admin,
-        effect: "초대 링크를 만듭니다",
+        effect: "초대 링크를 만들어요",
         args_schema: invite_create_args_schema,
     },
     WorkspaceAction {
         id: ACTION_CHANNEL_CREATE,
         title: "채널 만들기",
-        summary: "이름과 공개 범위를 정해 채널을 하나 만들고, 이 에이전트와 정한 멤버를 넣습니다.",
+        summary: "이름과 공개 범위를 정해 채널을 하나 만들고, 이 에이전트와 정한 멤버를 넣어요.",
         risk: Risk::Approval,
         required_role: RequiredRole::Admin,
-        effect: "채널을 만들고, 표시된 대로 이 에이전트와 멤버를 그 채널에 넣습니다",
+        effect: "채널을 만들고, 표시된 대로 이 에이전트와 멤버를 그 채널에 넣어요",
         args_schema: channel_create_args_schema,
     },
     WorkspaceAction {
         id: ACTION_CHANNEL_MEMBER_ADD,
         title: "채널에 멤버 추가",
-        summary: "이 에이전트가 볼 수 있는 채널에 멤버를 넣습니다. 역할은 멤버로 고정됩니다.",
+        summary: "이 에이전트가 볼 수 있는 채널에 멤버를 넣어요. 역할은 멤버로 고정돼요.",
         risk: Risk::Approval,
         required_role: RequiredRole::Admin,
-        effect: "표시된 멤버를 그 채널에 넣습니다",
+        effect: "표시된 멤버를 그 채널에 넣어요",
         args_schema: channel_member_add_args_schema,
     },
     WorkspaceAction {
         id: ACTION_AGENT_RENAME,
         title: "에이전트 이름 바꾸기",
-        summary: "에이전트 한 명의 표시 이름을 바꿉니다. 자기 자신이나 같은 소유자의 에이전트만 대상이 됩니다.",
+        summary: "에이전트 한 명의 표시 이름을 바꿔요. 자기 자신이나 같은 소유자의 에이전트만 대상이 돼요.",
         risk: Risk::Approval,
         required_role: RequiredRole::AgentEditor,
-        effect: "대상 에이전트의 표시 이름을 바꿉니다",
+        effect: "대상 에이전트의 표시 이름을 바꿔요",
         args_schema: agent_rename_args_schema,
     },
     WorkspaceAction {
         id: ACTION_HOSTED_CHANNELS_GRANT,
         title: "에이전트가 읽고 쓸 채널 늘리기",
-        summary: "이 에이전트의 연결이 읽고 쓸 수 있는 채널을 늘립니다. 이 에이전트 자신의 연결만 대상입니다.",
+        summary: "이 에이전트의 연결이 읽고 쓸 수 있는 채널을 늘려요. 이 에이전트 자신의 연결만 대상이에요.",
         risk: Risk::Approval,
         required_role: RequiredRole::Admin,
-        effect: "이 에이전트의 연결이 표시된 채널을 읽고 쓸 수 있게 합니다",
+        effect: "이 에이전트의 연결이 표시된 채널을 읽고 쓸 수 있게 해요",
         args_schema: hosted_channels_grant_args_schema,
     },
     WorkspaceAction {
         id: ACTION_WORKSPACE_SETTINGS_UPDATE,
         title: "워크스페이스 문구 설정 바꾸기",
-        summary: "환영 문구와 역할 이름, 이 두 가지만 바꿉니다. 지우려면 null을 보냅니다.",
+        summary: "환영 문구와 역할 이름, 이 두 가지만 바꿔요. 지우려면 null을 보내요.",
         risk: Risk::Approval,
         required_role: RequiredRole::WorkspaceOperator,
-        effect: "표시된 설정(환영 문구·역할 이름)을 바꿉니다",
+        effect: "표시된 설정(환영 문구·역할 이름)을 바꿔요",
         args_schema: workspace_settings_update_args_schema,
     },
 ];
@@ -762,7 +762,7 @@ pub const REF_TYPE_AGENT: &str = "agent";
 /// The summary line when the target is **another** agent. 부록 A's generic line
 /// would say the same thing for a self-rename and for renaming a teammate; the
 /// approver must be told which one this is.
-pub const AGENT_RENAME_MANAGED_SUMMARY: &str = "에이전트가 제안했어요. 승인하면 대상 에이전트의 소유자 또는 관리자 권한으로 다른 에이전트의 이름을 바꿉니다.";
+pub const AGENT_RENAME_MANAGED_SUMMARY: &str = "에이전트가 제안했어요. 승인하면 대상 에이전트의 소유자 또는 관리자 권한으로 다른 에이전트의 이름을 바꿔요.";
 
 /// The `agent.rename` card rows from the **server's** values: who is being
 /// renamed (name, handle, 에이전트) and 「현재 이름 → 새 이름」. Plain text — a

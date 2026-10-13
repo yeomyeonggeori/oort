@@ -12482,3 +12482,187 @@ async fn a_steady_stage_stream_keeps_framing_every_two_seconds() {
         .count();
     assert_eq!(stage_frames, 2);
 }
+
+// ---------------------------------------------------------------------------
+// #3771 — a decided card is announced, and a late click names the real decider
+// ---------------------------------------------------------------------------
+
+/// The `message.edited` frames the outbox holds for one message.
+async fn edited_frames_for(pool: &PgPool, workspace: Uuid, message: Uuid) -> Vec<Value> {
+    sqlx::query_scalar(
+        "SELECT payload->'data' FROM outbox WHERE workspace_id=$1 AND kind='broadcast' \
+           AND payload->'data'->>'type' = 'message.edited' \
+           AND payload->'data'->'payload'->>'id' = $2 \
+         ORDER BY created_at, id",
+    )
+    .bind(workspace)
+    .bind(message.to_string())
+    .fetch_all(pool)
+    .await
+    .expect("read edited frames")
+}
+
+/// **The decision rewrites the card and says so (#3771).**
+///
+/// Measured on prod 2026-10-13: the decision patched `message.props` and
+/// published nothing, so the timeline kept `status: pending`, drew the buttons
+/// again, and a second click answered 「이미 승인으로 기록되어 있었어요」 — stamped
+/// with the *second* presser and the *second* press time (22:54 for a decision
+/// that the ledger holds at 22:52).
+///
+/// 1. the refused (role_required) attempt announces the card (`last_attempt`);
+/// 2. the approval announces it again with `status: approved` and no
+///    `last_attempt`;
+/// 3. a late click is a 409 whose receipt names the **ledger's** decider and
+///    time, not the person pressing.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_decided_card_is_announced_and_a_late_click_names_the_real_decision() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+
+    let (approval_id, card_message_id) = propose_invite(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        json!({"role": "member", "maxUses": 1, "expiresInDays": 7}),
+    )
+    .await;
+    assert!(
+        edited_frames_for(&su, fixture.workspace, card_message_id)
+            .await
+            .is_empty(),
+        "a freshly proposed card has been announced by its own message.new, not an edit"
+    );
+
+    // 1. the refusal rewrites the card, so it announces it.
+    let (status, _, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &plain_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    let after_refusal = edited_frames_for(&su, fixture.workspace, card_message_id).await;
+    assert_eq!(after_refusal.len(), 1, "one frame for the refusal");
+    assert_eq!(
+        after_refusal[0]["payload"]["props"]["last_attempt"],
+        json!("role_required")
+    );
+    assert_eq!(
+        after_refusal[0]["payload"]["props"]["status"],
+        json!("pending")
+    );
+
+    // 2. the approval announces the decided card.
+    let (status, _, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    let frames = edited_frames_for(&su, fixture.workspace, card_message_id).await;
+    assert_eq!(frames.len(), 2, "one more frame for the decision");
+    let decided = &frames[1]["payload"];
+    assert_eq!(decided["props"]["status"], json!("approved"));
+    assert_eq!(
+        decided["props"]["decided_by"],
+        json!(fixture.human.to_string())
+    );
+    assert!(
+        decided["props"].get("last_attempt").is_none(),
+        "the earlier refusal is pruned from the announced card too: {decided}"
+    );
+    assert_eq!(
+        decided["state"],
+        json!("sent"),
+        "a server rewrite is not a human edit: no 「수정됨」"
+    );
+    assert!(decided.get("edited_at_ms").is_none_or(Value::is_null));
+
+    // 3. a late click, with a fresh key (what a re-mounted card sends).
+    let ledger_ms: i64 = sqlx::query_scalar(
+        "SELECT floor(extract(epoch FROM decided_at) * 1000)::bigint FROM approval \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(approval_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
+    let (status, _, late) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{late}");
+    assert_eq!(late["status"], json!("approved"));
+    assert_eq!(late["decidedBy"], json!(fixture.human.to_string()));
+    assert_eq!(
+        late["decidedAtMs"].as_i64(),
+        Some(ledger_ms),
+        "the late click reports the ledger's decision time, not its own: {late}"
+    );
+    assert_eq!(
+        edited_frames_for(&su, fixture.workspace, card_message_id)
+            .await
+            .len(),
+        2,
+        "a refused late click rewrites nothing and announces nothing"
+    );
+}
+
+/// The rejection arm rewrites the card too (#3771), so it announces it too.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_rejected_card_is_announced_as_rejected() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+    let (approval_id, card_message_id) = propose_invite(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        json!({"role": "member", "maxUses": 1, "expiresInDays": 7}),
+    )
+    .await;
+    let (status, _, rejected) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval_id,
+        false,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{rejected}");
+    let frames = edited_frames_for(&su, fixture.workspace, card_message_id).await;
+    assert_eq!(frames.len(), 1, "the rejection announces the card once");
+    assert_eq!(frames[0]["payload"]["props"]["status"], json!("rejected"));
+}
