@@ -12986,6 +12986,15 @@ async fn an_agent_updates_its_profile_card_after_its_owner_approves() {
         json!({"statusEmoji": "ok"}),
         json!({"statusText": "회의", "statusExpiresInHours": 169}),
         json!({"statusExpiresInHours": 2}),
+        // Security review of #3797: padded emoji, Korean authority and default
+        // role words, particles glued to a member's name, dot look-alikes.
+        json!({"statusEmoji": format!("🤖{}", "\u{FE0F}".repeat(40))}),
+        json!({"roleLabel": "소유자"}),
+        json!({"roleLabel": "멤버"}),
+        json!({"roleLabel": "공식 봇"}),
+        json!({"tagline": "Personowner님이 승인했어요"}),
+        json!({"tagline": "Person-owner approved"}),
+        json!({"tagline": "evil\u{3002}com"}),
         json!({"displayName": "Tools"}),
         // Everything that steers behaviour, and the avatar (a later slice), is
         // not a key of this action at all.
@@ -13014,6 +13023,30 @@ async fn an_agent_updates_its_profile_card_after_its_owner_approves() {
         profile_row_3785(&su, fixture.hosted_agent).await,
         (None, None, None, None)
     );
+
+    // A label the workspace itself defines, or one that contains it, is refused.
+    sqlx::query("UPDATE workspace SET settings = jsonb_set(settings, '{role_labels}', '{\"admin\":\"Captain\"}') WHERE id=$1")
+        .bind(fixture.workspace)
+        .execute(&su)
+        .await
+        .unwrap();
+    for label in ["Captain", "Captain Bot"] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "agent.profile.update",
+            json!({"roleLabel": label}),
+        )
+        .await;
+        assert_eq!(status, 400, "{label}: {refused}");
+    }
+    sqlx::query("UPDATE workspace SET settings = settings - 'role_labels' WHERE id=$1")
+        .bind(fixture.workspace)
+        .execute(&su)
+        .await
+        .unwrap();
 
     // ---- a good proposal: the card says what will change -------------------
     let good = json!({
@@ -13192,6 +13225,47 @@ async fn an_agent_updates_its_profile_card_after_its_owner_approves() {
         "{human}"
     );
 
+    // `config` is also a free bag written at creation: a non-string or oversized
+    // value under a card key reads as unset, on the roster and in the card.
+    sqlx::query(
+        "UPDATE agent SET config = config || jsonb_build_object('roleLabel', 5, \
+            'tagline', repeat('x', 200)) WHERE member_id=$1",
+    )
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let roster: Value = client
+        .get(format!("{base}/v1/workspaces/{}/roster", fixture.workspace))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let members = roster["members"]
+        .as_array()
+        .or(roster.as_array())
+        .expect("roster list");
+    let me = members
+        .iter()
+        .find(|m| m["id"] == json!(fixture.hosted_agent.to_string()))
+        .unwrap();
+    assert!(
+        me.get("roleLabel").is_none() && me.get("tagline").is_none(),
+        "{me}"
+    );
+    // Put the good card back for the steps below.
+    sqlx::query(
+        "UPDATE agent SET config = config || jsonb_build_object('roleLabel', '영업 비서'::text, \
+            'tagline', '영업 요약을 정리해요'::text) WHERE member_id=$1",
+    )
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+
     // ---- a field that changed under the card re-asks -----------------------
     let (status, proposed) = try_propose_action_3706(
         &client,
@@ -13353,6 +13427,18 @@ async fn a_profile_update_may_rename_and_may_target_only_a_managed_agent() {
     )
     .await;
     assert_eq!(status, 409, "{again}");
+    // …and the 409 does not depend on the text: a line that repeats a member's
+    // name (a 400 on its own) is the same 409, so 409-vs-400 is not a roster oracle.
+    let (status, again) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.profile.update",
+        json!({"tagline": "Person owner approved this", "targetHandle": other_handle}),
+    )
+    .await;
+    assert_eq!(status, 409, "{again}");
 
     let (status, _h, approved) = decide_as(
         &client,
@@ -13395,6 +13481,97 @@ async fn a_profile_update_may_rename_and_may_target_only_a_managed_agent() {
     assert_eq!(
         audit_actions,
         vec!["agent.profile.updated", "member.renamed"]
+    );
+}
+
+/// **Security review of #3797 (L4).** Between the moment a proposal is resolved
+/// (unlocked reads) and the write, a concurrent change to the target must
+/// re-ask. A second session holds the agent's row lock with a rename pending
+/// commit; the decision passes the resolver (it reads the old name), blocks on
+/// the executor's `FOR UPDATE`, and — once the rename commits — must refuse
+/// `action_args_invalid` having written nothing. The test waits until the
+/// decision is *actually* blocked on the lock, so it is the executor's re-read
+/// under the lock that is being measured and not the pins.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_change_that_lands_after_resolution_is_caught_under_the_lock() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (owner, owner_jwt) = seed_human_3708(&su, &fixture, "owner", "member").await;
+    set_agent_owner_3708(&su, fixture.hosted_agent, Some(owner)).await;
+    tidy_agent_3708(&su, fixture.hosted_agent, "Hermes").await;
+
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.profile.update",
+        json!({"tagline": "새 소개예요"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+
+    // Hold the row lock and stage a rename that has not committed yet.
+    let mut blocker = su.begin().await.unwrap();
+    sqlx::query("SELECT id FROM member WHERE id=$1 FOR UPDATE")
+        .bind(fixture.hosted_agent)
+        .execute(&mut *blocker)
+        .await
+        .unwrap();
+
+    let decision = {
+        let (client, base, jwt, ws) = (
+            client.clone(),
+            base.clone(),
+            owner_jwt.clone(),
+            fixture.workspace,
+        );
+        tokio::spawn(async move {
+            decide_as(&client, &base, ws, &jwt, approval, true, Uuid::new_v4()).await
+        })
+    };
+    // Wait until the decision transaction is parked on a row lock.
+    let mut waited = false;
+    for _ in 0..200 {
+        let blocked: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity \
+              WHERE wait_event_type = 'Lock' AND state = 'active' AND query ILIKE '%FOR UPDATE%'",
+        )
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        if blocked > 0 {
+            waited = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(waited, "the decision never reached the executor's row lock");
+    sqlx::query("UPDATE member SET display_name = 'Renamed Meanwhile' WHERE id=$1")
+        .bind(fixture.hosted_agent)
+        .execute(&mut *blocker)
+        .await
+        .unwrap();
+    blocker.commit().await.unwrap();
+
+    let (status, _h, refused) = decision.await.unwrap();
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["status"], "action_args_invalid");
+    assert_eq!(approval_status_3708(&su, approval).await, "pending");
+    assert_eq!(
+        profile_row_3785(&su, fixture.hosted_agent).await.0,
+        None,
+        "nothing was written"
+    );
+    assert_eq!(
+        display_name_3708(&su, fixture.hosted_agent).await,
+        "Renamed Meanwhile"
     );
 }
 

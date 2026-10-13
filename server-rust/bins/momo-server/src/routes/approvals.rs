@@ -98,9 +98,10 @@ use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
 use momo_messaging::{
     add_channel_member_in_tx, apply_agent_card_in_tx, cent_channel, create_channel_detailed_in_tx,
-    emit_message_edited_in_tx, normalize_channel_kind, patch_and_prune_message_props_in_tx,
-    patch_message_props_in_tx, rename_agent_display_name_in_tx, send_message_in_tx, AgentCard,
-    AgentCardPatch, CardStatusPatch, FieldPatch, MessageType, NewChannel, NewMessage,
+    emit_message_edited_in_tx, lock_agent_card_in_tx, normalize_channel_kind,
+    patch_and_prune_message_props_in_tx, patch_message_props_in_tx,
+    rename_agent_display_name_in_tx, send_message_in_tx, AgentCard, AgentCardPatch,
+    CardStatusPatch, FieldPatch, MessageType, NewChannel, NewMessage,
 };
 use momo_outbox::{emit_outbox, OutboxKind, RESUME_APPROVAL_JOB_METHOD};
 use momo_settings::{
@@ -2048,6 +2049,22 @@ async fn execute_agent_profile_update(
     );
     if changes.is_empty() {
         return Err(protocol_error("agent.profile.update changes nothing"));
+    }
+    // The row is locked **before the first write** and read again: the card was
+    // resolved earlier in this transaction without the lock, so anything that
+    // moved since (a concurrent rename or profile change) re-asks. A refusal here
+    // has written nothing.
+    let Some((locked_name, locked_card)) =
+        lock_agent_card_in_tx(conn, input.workspace_id, target.id).await?
+    else {
+        return Err(protocol_error(
+            "the profile target is no longer a live agent",
+        ));
+    };
+    if locked_name != target.current_display_name || &locked_card != before {
+        return Ok(Execution::Refused(args_invalid_refusal(
+            approval, input, now,
+        )));
     }
     let via_agent = approval.requested_by.to_string();
     let mut audits = Vec::new();
