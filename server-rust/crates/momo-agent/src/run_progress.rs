@@ -366,8 +366,12 @@ pub async fn list_run_events_in_tx(
     run_id: Uuid,
     viewer_member_id: Uuid,
 ) -> Result<Option<Vec<RunEventRow>>, DbError> {
-    let visible: Option<i32> = sqlx::query_scalar(
-        "SELECT 1 FROM agent_run r \
+    // `expired`: the run finished past retention, so its ledger answers empty even before
+    // the sweep has deleted it (ADR-0200 D2). `None` = not in this workspace / not a member.
+    let visible: Option<bool> = sqlx::query_scalar(
+        "SELECT (r.finished_at IS NOT NULL \
+                 AND r.finished_at < clock_timestamp() - make_interval(days => $4)) AS expired \
+           FROM agent_run r \
            JOIN membership m \
              ON m.workspace_id = r.workspace_id AND m.channel_id = r.channel_id \
             AND m.member_id = $3 AND m.left_at IS NULL \
@@ -376,10 +380,13 @@ pub async fn list_run_events_in_tx(
     .bind(workspace_id)
     .bind(run_id)
     .bind(viewer_member_id)
+    .bind(crate::run_event::RUN_EVENT_RETENTION_DAYS)
     .fetch_optional(&mut *conn)
     .await?;
-    if visible.is_none() {
-        return Ok(None);
+    match visible {
+        None => return Ok(None),
+        Some(true) => return Ok(Some(Vec::new())),
+        Some(false) => {}
     }
     let rows = sqlx::query(
         "SELECT row_number() OVER (ORDER BY e.seq) AS ordinal, \

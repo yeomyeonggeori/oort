@@ -11728,3 +11728,757 @@ async fn a_refusal_is_a_closed_code_that_recovers_and_members_see_the_label_only
         .unwrap();
     assert_eq!(outsider.status().as_u16(), 404);
 }
+
+// ---------------------------------------------------------------------------
+// (#3744 S5, ADR-0200 D1-4 / D2) stall sweep, realtime frame, retention
+// ---------------------------------------------------------------------------
+
+/// Age a hosted run as if its agent went quiet `hours` ago: the lease expired then and the
+/// run saw its last event then.
+async fn age_run_3744(pool: &PgPool, fixture: &Fixture, run: Uuid, hours: i64) {
+    sqlx::query(
+        "UPDATE outbox SET lease_acquired_at = now() - make_interval(hours => $3 + 1), \
+                lease_expires_at = now() - make_interval(hours => $3) \
+          WHERE workspace_id=$1 AND kind='agent_job' AND lower(payload->>'run_id') = lower($2::text) \
+            AND lease_owner IS NOT NULL",
+    )
+    .bind(fixture.workspace)
+    .bind(run)
+    .bind(hours as i32)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE agent_run SET updated_at = now() - make_interval(hours => $2) WHERE id=$1")
+        .bind(run)
+        .bind(hours as i32)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+async fn run_status_3744(pool: &PgPool, run: Uuid) -> (String, Option<String>) {
+    sqlx::query_as("SELECT status::text, error->>'code' FROM agent_run WHERE id=$1")
+        .bind(run)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn frames_3744(pool: &PgPool, fixture: &Fixture, run: Uuid) -> Vec<Value> {
+    sqlx::query_scalar::<_, Value>(
+        "SELECT payload->'data' FROM outbox \
+          WHERE workspace_id=$1 AND kind='broadcast' \
+            AND payload->'data'->>'type' = 'agent.run.event' \
+            AND lower(payload->'data'->'payload'->>'run_id') = lower($2::text) \
+          ORDER BY id",
+    )
+    .bind(fixture.workspace)
+    .bind(run)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+/// RED PROOF (ADR-0200 D1-4, S5). A hosted run whose agent went quiet is ended by the
+/// SERVER with a closed fact — and only then. Fresh work, a revived lease, an
+/// approval-parked run, a managed agent's run and a run inside either grace period are all
+/// left alone; the ended run's job is retired so a late agent finds a settled run, not a
+/// resurrected one; the channel gets one line and the audit log one row.
+///
+/// Tamper table (each applied and seen red):
+///   * drop the `r.updated_at` staleness condition        -> the run with a recent report is ended
+///   * drop the `lease_expires_at < now() - grace` term   -> the run whose lease expired 1 h ago
+///     but that has been silent 3 h is ended
+///   * drop the job-less branch (`j.id IS NULL`)          -> the disconnect-orphaned run and the
+///     ten-day-old ghost are not ended
+///   * let `awaiting_approval` through BOTH the candidate filter and `end_stalled_run_in_tx`
+///     (either alone is caught by the other: two guards on purpose)
+///                                                         -> the parked run (given a dead job) is ended
+///   * do not retire the job                              -> a pending job survives the ended run
+///   * drop the unclaimed term                            -> the 25-hour queued run stays queued
+///   * key the notice by the run id                       -> the notice looks like the run's answer
+/// Not covered here (deterministic only with an injected pause): the sweep-vs-reclaim race;
+/// its second line of defence is `pending_job_has_live_lease_in_tx`, asserted above.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_run_whose_agent_went_quiet_is_ended_with_a_closed_code_and_nothing_else_is() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let notifier = momo_notifier_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let policy = momo_outbox::StallPolicy::default();
+    // The sweep is cross-tenant by design and this database outlives a test run: settle the
+    // ghosts earlier runs left in OTHER workspaces so the counts below are this test's own.
+    sqlx::query(
+        "UPDATE agent_run SET status='cancelled', finished_at=now() \
+          WHERE status IN ('queued','running') AND workspace_id <> $1",
+    )
+    .bind(fixture.workspace)
+    .execute(&su)
+    .await
+    .unwrap();
+
+    // --- the run that goes quiet -----------------------------------------
+    mention_3740(&client, &base, &su, &fixture, fixture.hosted_agent).await;
+    let (_, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({}),
+    )
+    .await;
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, _) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_event",
+        json!({"leaseHandle": handle, "status": "running", "stage": "작업 시작", "eventId": Uuid::new_v4()}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let quiet: Uuid =
+        sqlx::query_scalar("SELECT id FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2")
+            .bind(fixture.workspace)
+            .bind(fixture.hosted_agent)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+
+    // fresh: nothing to do
+    let stats = momo_notifier::run_stall_sweep::sweep_stalled_runs(&notifier, policy, 50)
+        .await
+        .unwrap();
+    assert_eq!(
+        stats.lease_abandoned + stats.unclaimed_expired,
+        0,
+        "{stats:?}"
+    );
+
+    // the re-check the sweep makes under the run lock: a LIVE lease is seen as live…
+    {
+        let mut connection = su.acquire().await.unwrap();
+        assert!(
+            momo_outbox::pending_job_has_live_lease_in_tx(
+                &mut connection,
+                fixture.workspace,
+                quiet
+            )
+            .await
+            .unwrap(),
+            "a freshly claimed job holds a live lease"
+        );
+    }
+
+    // stale for 1 hour only: inside the 2-hour grace
+    age_run_3744(&su, &fixture, quiet, 1).await;
+    momo_notifier::run_stall_sweep::sweep_stalled_runs(&notifier, policy, 50)
+        .await
+        .unwrap();
+    assert_eq!(
+        run_status_3744(&su, quiet).await.0,
+        "running",
+        "1 h is inside the grace"
+    );
+
+    // the lease expired 3 hours ago but the agent reported 10 minutes ago: alive
+    age_run_3744(&su, &fixture, quiet, 3).await;
+    sqlx::query("UPDATE agent_run SET updated_at = now() - interval '10 minutes' WHERE id=$1")
+        .bind(quiet)
+        .execute(&su)
+        .await
+        .unwrap();
+    momo_notifier::run_stall_sweep::sweep_stalled_runs(&notifier, policy, 50)
+        .await
+        .unwrap();
+    assert_eq!(
+        run_status_3744(&su, quiet).await.0,
+        "running",
+        "a recent report keeps it alive"
+    );
+
+    // the lease expired only an hour ago although the run has been silent for three: the LEASE
+    // grace is separate from the run's own silence, so this one is still inside it
+    sqlx::query(
+        "UPDATE outbox SET lease_expires_at = now() - interval '1 hour' \
+          WHERE workspace_id=$1 AND kind='agent_job' AND lower(payload->>'run_id') = lower($2::text)",
+    )
+    .bind(fixture.workspace)
+    .bind(quiet)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE agent_run SET updated_at = now() - interval '3 hours' WHERE id=$1")
+        .bind(quiet)
+        .execute(&su)
+        .await
+        .unwrap();
+    momo_notifier::run_stall_sweep::sweep_stalled_runs(&notifier, policy, 50)
+        .await
+        .unwrap();
+    assert_eq!(
+        run_status_3744(&su, quiet).await.0,
+        "running",
+        "a lease that expired inside the grace keeps the run, whatever its own silence"
+    );
+
+    // --- decoys that must survive the sweep that ends the quiet run ---------
+    // an approval-parked run with an ancient lease
+    let parked: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, updated_at) \
+         VALUES ($1,$2,$3,'awaiting_approval', now() - interval '9 hours') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    // …and it holds a job whose lease is long dead, so that ONLY the status filter protects it
+    sqlx::query(
+        "INSERT INTO outbox(workspace_id,kind,status,method,payload,partition_key, \
+                            lease_owner, lease_acquired_at, lease_expires_at) \
+         VALUES ($1,'agent_job','pending','gateway',$2,$3, uuidv7(), \
+                 now() - interval '10 hours', now() - interval '9 hours')",
+    )
+    .bind(fixture.workspace)
+    .bind(json!({
+        "agent_member_id": fixture.hosted_agent.to_string(),
+        "run_id": parked.to_string(),
+        "channel_id": fixture.channel.to_string(),
+    }))
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    // a queued run nobody took, 23 hours (inside) and another 25 hours (past) old
+    let mut queued = Vec::new();
+    for hours in [23, 25] {
+        let id: Uuid = sqlx::query_scalar(
+            "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, created_at, updated_at) \
+             VALUES ($1,$2,$3,'queued', now() - make_interval(hours => $4), now() - make_interval(hours => $4)) \
+             RETURNING id",
+        )
+        .bind(fixture.workspace)
+        .bind(fixture.hosted_agent)
+        .bind(fixture.channel)
+        .bind(hours)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO outbox(workspace_id,kind,status,method,payload,partition_key) \
+             VALUES ($1,'agent_job','pending','gateway',$2,$3)",
+        )
+        .bind(fixture.workspace)
+        .bind(json!({
+            "agent_member_id": fixture.hosted_agent.to_string(),
+            "run_id": id.to_string(),
+            "channel_id": fixture.channel.to_string(),
+        }))
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+        queued.push(id);
+    }
+    // a managed agent's ancient queued run: not hosted, never this sweep's
+    let managed: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, created_at, updated_at) \
+         VALUES ($1,$2,$3,'queued', now() - interval '30 hours', now() - interval '30 hours') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.managed_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO outbox(workspace_id,kind,status,method,payload,partition_key) \
+         VALUES ($1,'agent_job','pending','gateway',$2,$3)",
+    )
+    .bind(fixture.workspace)
+    .bind(json!({
+        "agent_member_id": fixture.managed_agent.to_string(),
+        "run_id": managed.to_string(),
+        "channel_id": fixture.channel.to_string(),
+    }))
+    .bind(fixture.managed_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+
+    // runs whose delivery job was settled by a disconnect (the commonest ghost): no pending
+    // job means no agent can ever report on them. Fresh one survives, silent one is ended.
+    let mut suppressed = Vec::new();
+    for hours_silent in [0_i32, 3] {
+        let id: Uuid = sqlx::query_scalar(
+            "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, updated_at) \
+             VALUES ($1,$2,$3,'running', now() - make_interval(hours => $4)) RETURNING id",
+        )
+        .bind(fixture.workspace)
+        .bind(fixture.hosted_agent)
+        .bind(fixture.channel)
+        .bind(hours_silent)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO outbox(workspace_id,kind,status,method,payload,partition_key,processed_at) \
+             VALUES ($1,'agent_job','done','gateway',$2,$3, now())",
+        )
+        .bind(fixture.workspace)
+        .bind(json!({
+            "agent_member_id": fixture.hosted_agent.to_string(),
+            "run_id": id.to_string(),
+            "channel_id": fixture.channel.to_string(),
+        }))
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+        suppressed.push(id);
+    }
+    // a run whose only delivery path is a non-`gateway` job (a resume job): some consumer
+    // still has a job to take, so it is NOT the job-less orphan the sweep ends
+    let resumed: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, created_at, updated_at) \
+         VALUES ($1,$2,$3,'queued', now() - interval '3 hours', now() - interval '3 hours') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO outbox(workspace_id,kind,status,method,payload,partition_key) \
+         VALUES ($1,'agent_job','pending','resume_approval',$2,$3)",
+    )
+    .bind(fixture.workspace)
+    .bind(json!({
+        "agent_member_id": fixture.hosted_agent.to_string(),
+        "run_id": resumed.to_string(),
+        "channel_id": fixture.channel.to_string(),
+    }))
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    // a run silent for ten days: ended, but without a channel line (the first sweep after a
+    // deploy must not light up old channels with weeks-old notices)
+    let ancient: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, created_at, updated_at) \
+         VALUES ($1,$2,$3,'running', now() - interval '12 days', now() - interval '10 days') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+
+    // --- now the quiet run really goes quiet --------------------------------
+    age_run_3744(&su, &fixture, quiet, 3).await;
+    {
+        let mut connection = su.acquire().await.unwrap();
+        assert!(
+            !momo_outbox::pending_job_has_live_lease_in_tx(
+                &mut connection,
+                fixture.workspace,
+                quiet
+            )
+            .await
+            .unwrap(),
+            "…and an expired one is not"
+        );
+    }
+    let stats = momo_notifier::run_stall_sweep::sweep_stalled_runs(&notifier, policy, 50)
+        .await
+        .unwrap();
+    assert_eq!(
+        stats.lease_abandoned, 3,
+        "the quiet run, the silent run with no delivery job, the ten-day-old one: {stats:?}"
+    );
+    assert_eq!(stats.unclaimed_expired, 1, "{stats:?}");
+    assert_eq!(
+        run_status_3744(&su, suppressed[1]).await,
+        ("timed_out".to_string(), Some("lease_abandoned".to_string())),
+        "a run whose job a disconnect settled is ended when it has been silent"
+    );
+    assert_eq!(
+        run_status_3744(&su, suppressed[0]).await.0,
+        "running",
+        "…but not while it is fresh"
+    );
+    assert_eq!(run_status_3744(&su, ancient).await.0, "timed_out");
+    assert_eq!(
+        run_status_3744(&su, resumed).await.0,
+        "queued",
+        "a run with a pending resume job still has a delivery path"
+    );
+    let ancient_lines: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE workspace_id=$1 AND run_id=$2 AND type='system'",
+    )
+    .bind(fixture.workspace)
+    .bind(ancient)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(ancient_lines, 0, "an ancient ghost is ended quietly");
+
+    assert_eq!(
+        run_status_3744(&su, quiet).await,
+        ("timed_out".to_string(), Some("lease_abandoned".to_string()))
+    );
+    assert_eq!(
+        run_status_3744(&su, queued[1]).await,
+        (
+            "timed_out".to_string(),
+            Some("unclaimed_expired".to_string())
+        )
+    );
+    for (survivor, why) in [
+        (parked, "an approval-parked run is the approval sweep's"),
+        (queued[0], "23 hours is inside the 24-hour window"),
+        (managed, "a managed agent's run is not a hosted run"),
+    ] {
+        let (status, code) = run_status_3744(&su, survivor).await;
+        assert!(code.is_none() && status != "timed_out", "{why}: {status}");
+    }
+
+    // the ledger says it, the channel says it once, the audit log says why (actor: the clock)
+    let ledger = ledger_3740(&su, fixture.workspace, quiet).await;
+    let last = ledger.last().unwrap();
+    assert_eq!(
+        (last.1.as_str(), last.3.as_deref()),
+        ("timed_out", Some("lease_abandoned"))
+    );
+    let lines: Vec<(String, Value)> = sqlx::query_as(
+        "SELECT body, props FROM message WHERE workspace_id=$1 AND run_id=$2 AND type='system'",
+    )
+    .bind(fixture.workspace)
+    .bind(quiet)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(lines[0].1["code"], json!("lease_abandoned"));
+    let keyed_by_run: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE workspace_id=$1 AND client_msg_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(quiet)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        keyed_by_run, 0,
+        "the notice must not look like the run's ANSWER (client_msg_id = run id) to the push judgment"
+    );
+    let audits: Vec<(Option<Uuid>, Value)> = sqlx::query_as(
+        "SELECT actor_member_id, detail FROM audit_log WHERE workspace_id=$1 AND action='agent.run.stalled' \
+          AND target_id = $2",
+    )
+    .bind(fixture.workspace)
+    .bind(quiet)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(audits.len(), 1);
+    assert!(audits[0].0.is_none(), "the clock ended it, not a member");
+
+    // the delivery job is settled: a late agent on the old handle finds a finished run
+    let pending_jobs: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='agent_job' AND status='pending' \
+           AND lower(payload->>'run_id') = lower($2::text)",
+    )
+    .bind(fixture.workspace)
+    .bind(quiet)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(pending_jobs, 0);
+    let (status, late) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_event",
+        json!({"leaseHandle": handle, "status": "running", "eventId": Uuid::new_v4()}),
+    )
+    .await;
+    assert!(
+        status >= 400,
+        "a late agent does not revive an ended run: {late}"
+    );
+    assert_eq!(run_status_3744(&su, quiet).await.0, "timed_out");
+
+    // idempotent
+    let again = momo_notifier::run_stall_sweep::sweep_stalled_runs(&notifier, policy, 50)
+        .await
+        .unwrap();
+    assert_eq!(again.lease_abandoned + again.unclaimed_expired, 0);
+
+    // realtime: the lifecycle rows produced thin frames — no stage text, no sequence
+    let frames = frames_3744(&su, &fixture, quiet).await;
+    assert!(!frames.is_empty());
+    let rendered = serde_json::to_string(&frames).unwrap();
+    assert!(
+        !rendered.contains("작업 시작"),
+        "no stage text on the wire: {rendered}"
+    );
+    assert!(
+        !rendered.contains("\"seq\""),
+        "no raw sequence on the wire: {rendered}"
+    );
+    let kinds: Vec<&str> = frames
+        .iter()
+        .map(|frame| frame["payload"]["kind"].as_str().unwrap())
+        .collect();
+    assert!(kinds.contains(&"timed_out"), "{kinds:?}");
+}
+
+/// RED PROOF (ADR-0200 D2, S5). The ledger announces itself with ONE thin frame per
+/// lifecycle row, and consecutive `stage` rows inside two seconds collapse to a single
+/// frame (the row is still written; a refetch carries it). The frame is addressed to the
+/// run's channel topic.
+///
+/// Tamper table:
+///   * drop the 2-second coalescing                    -> every stage row emits a frame
+///   * put `stage`/`seq` in the frame                  -> the no-text / no-seq assertions fail
+///   * address the frame to a different topic          -> the topic assertion fails
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_ledger_row_emits_one_thin_frame_and_a_stage_burst_is_coalesced() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su).await;
+    let run: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+         VALUES ($1,$2,$3,'queued') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    // one transaction: all three stage rows share a timestamp, so they are "within 2 s"
+    let mut tx = su.begin().await.unwrap();
+    for stage in ["하나", "둘", "셋"] {
+        sqlx::query("SELECT agent_run_event_append($1,$2,'stage',$3,NULL,NULL,$4)")
+            .bind(fixture.workspace)
+            .bind(run)
+            .bind(stage)
+            .bind(fixture.hosted_agent)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+    }
+    tx.commit().await.unwrap();
+    let frames = frames_3744(&su, &fixture, run).await;
+    let kinds: Vec<&str> = frames
+        .iter()
+        .map(|frame| frame["payload"]["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        kinds,
+        ["queued", "stage"],
+        "three stage rows, one frame: {frames:?}"
+    );
+    let topic: String = sqlx::query_scalar(
+        "SELECT payload->>'channel' FROM outbox WHERE workspace_id=$1 AND kind='broadcast' \
+           AND payload->'data'->>'type'='agent.run.event' ORDER BY id LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        topic,
+        format!(
+            "ch:ws{}.{}",
+            fixture.workspace.to_string().to_uppercase(),
+            fixture.channel.to_string().to_uppercase()
+        )
+    );
+    let rendered = serde_json::to_string(&frames).unwrap();
+    for hidden in ["하나", "둘", "셋", "\"seq\"", "stage\":"] {
+        assert!(!rendered.contains(hidden), "{hidden}: {rendered}");
+    }
+    assert_eq!(
+        ledger_3740(&su, fixture.workspace, run).await.len(),
+        4,
+        "all rows are still written"
+    );
+}
+
+/// RED PROOF (ADR-0200 D2, S5). A FINISHED run's ledger is deleted 30 days after it
+/// finished — and only that: a run finished 29 days ago, a run still in progress however
+/// old, and the run rows themselves are untouched. Until the sweep deletes, a read past
+/// retention answers an empty ledger. The delete runs on the RLS-bound pool; the read
+/// half is the notifier's.
+///
+/// Tamper table:
+///   * measure from `created_at` instead of `finished_at`  -> the ancient running run loses its ledger
+///   * 30 -> 3 days                                        -> the 29-day-old ledger is deleted
+///   * drop the read-time expiry in `list_run_events_in_tx` -> the expired-but-undeleted ledger is returned
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_finished_runs_ledger_is_kept_thirty_days_and_a_running_one_never_expires() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let notifier = momo_notifier_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+
+    let mut runs = Vec::new();
+    for (status, finished_days_ago, created_days_ago) in [
+        ("succeeded", Some(31), 40),
+        ("succeeded", Some(29), 40),
+        ("running", None, 90),
+    ] {
+        let run: Uuid = sqlx::query_scalar(
+            "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, created_at, finished_at) \
+             VALUES ($1,$2,$3,$4::run_status, now() - make_interval(days => $5), \
+                     CASE WHEN $6::int IS NULL THEN NULL ELSE now() - make_interval(days => $6) END) \
+             RETURNING id",
+        )
+        .bind(fixture.workspace)
+        .bind(fixture.hosted_agent)
+        .bind(fixture.channel)
+        .bind(status)
+        .bind(created_days_ago)
+        .bind(finished_days_ago)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        runs.push(run);
+    }
+    let [expired, young, ancient_running] = [runs[0], runs[1], runs[2]];
+    for run in [expired, young, ancient_running] {
+        assert!(!ledger_3740(&su, fixture.workspace, run).await.is_empty());
+    }
+
+    // read-time expiry: the sweep has not run, the ledger already reads empty
+    let (status, body) = events_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        &expired.to_string(),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        body["events"],
+        json!([]),
+        "past retention reads empty: {body}"
+    );
+    let (_, body) = events_3741(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &fixture,
+        &young.to_string(),
+    )
+    .await;
+    assert!(
+        !body["events"].as_array().unwrap().is_empty(),
+        "29 days is kept: {body}"
+    );
+
+    let stats =
+        momo_notifier::run_event_retention_sweep::sweep_expired_run_events(&notifier, &app, 50)
+            .await
+            .unwrap();
+    assert!(stats.deleted >= 1, "{stats:?}");
+    assert!(ledger_3740(&su, fixture.workspace, expired)
+        .await
+        .is_empty());
+    assert!(!ledger_3740(&su, fixture.workspace, young).await.is_empty());
+    assert!(
+        !ledger_3740(&su, fixture.workspace, ancient_running)
+            .await
+            .is_empty(),
+        "a run still in progress never expires, however old"
+    );
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_run WHERE id = ANY($1)")
+        .bind(&runs)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(rows, 3, "the run rows themselves are never touched");
+
+    // idempotent
+    let again =
+        momo_notifier::run_event_retention_sweep::sweep_expired_run_events(&notifier, &app, 50)
+            .await
+            .unwrap();
+    assert_eq!(again.deleted, 0);
+}
+
+/// RED PROOF (S5 review M-1). A steady stage stream keeps framing every two seconds — the
+/// rate limit is against the last FRAMED stage row, not the last stage row, so it does not
+/// fall silent after the first frame.
+///
+/// Tamper table:
+///   * compare against the last stage row instead of the last framed one -> the third row
+///     (2.2 s after the first) is not framed
+///   * drop the rate limit                                                -> the second row is framed
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_steady_stage_stream_keeps_framing_every_two_seconds() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su).await;
+    let run: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+         VALUES ($1,$2,$3,'queued') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    for (n, pause_ms) in [(1, 0_u64), (2, 1100), (3, 1100)] {
+        tokio::time::sleep(std::time::Duration::from_millis(pause_ms)).await;
+        sqlx::query("SELECT agent_run_event_append($1,$2,'stage',$3,NULL,NULL,$4)")
+            .bind(fixture.workspace)
+            .bind(run)
+            .bind(format!("단계 {n}"))
+            .bind(fixture.hosted_agent)
+            .execute(&su)
+            .await
+            .unwrap();
+    }
+    let framed: Vec<bool> = sqlx::query_scalar(
+        "SELECT framed FROM agent_run_event WHERE workspace_id=$1 AND run_id=$2 AND kind='stage' ORDER BY seq",
+    )
+    .bind(fixture.workspace)
+    .bind(run)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        framed,
+        [true, false, true],
+        "1st framed; 2nd (1.1 s later) not; 3rd (2.2 s after the 1st) framed"
+    );
+    let frame_kinds: Vec<Value> = frames_3744(&su, &fixture, run).await;
+    let stage_frames = frame_kinds
+        .iter()
+        .filter(|frame| frame["payload"]["kind"] == json!("stage"))
+        .count();
+    assert_eq!(stage_frames, 2);
+}

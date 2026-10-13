@@ -1433,6 +1433,32 @@ pub async fn end_parked_run_in_tx(
     Ok(updated.rows_affected() > 0)
 }
 
+/// End a run the stall sweep found abandoned (ADR-0200 D1-4): `timed_out` with a closed
+/// code (`lease_abandoned` / `unclaimed_expired`). Guarded on `queued`/`running` so it can
+/// only end a run that is actually live and not parked on a human (an `awaiting_approval`
+/// run is the approval sweep's, with its own deadline). Returns whether it ended one.
+pub async fn end_stalled_run_in_tx(
+    conn: &mut PgConnection,
+    run_id: Uuid,
+    code: &str,
+) -> Result<bool, DbError> {
+    let updated = sqlx::query(
+        "UPDATE agent_run \
+            SET status = 'timed_out'::run_status, \
+                error = jsonb_build_object('code', $2::text), \
+                deadline_at = NULL, \
+                updated_at = now(), \
+                finished_at = now() \
+          WHERE id = $1 \
+            AND status IN ('queued', 'running')",
+    )
+    .bind(run_id)
+    .bind(code)
+    .execute(&mut *conn)
+    .await?;
+    Ok(updated.rows_affected() > 0)
+}
+
 /// End a parked run **with** a completion — ADR-0186 D2's approve arm.
 ///
 /// The third member of the family, and it exists for the reason the other two
