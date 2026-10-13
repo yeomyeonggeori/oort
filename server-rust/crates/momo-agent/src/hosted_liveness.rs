@@ -281,6 +281,8 @@ pub enum LivenessState {
     /// Claimable work has waited longer than the responsive window and nothing has been
     /// claimed since — whatever else the agent is doing (reading the inbox, pinging). The
     /// doorbell is not required: an agent that polls but never takes the job is the case.
+    /// Only for an agent that has spoken inside the quiet window: one that has gone
+    /// silent altogether is `unresponsive`, which says more than "work is waiting".
     WorkWaiting,
     /// A work signal within the responsive window.
     Responsive,
@@ -409,10 +411,12 @@ pub fn derive_liveness(
         })
     {
         LivenessState::WokenNotCollected
-    } else if waiting_since.is_some_and(|queued| {
-        now - queued >= thresholds.responsive
-            && row.last_claim_at.is_none_or(|claimed| claimed < queued)
-    }) {
+    } else if within(signal, thresholds.quiet)
+        && waiting_since.is_some_and(|queued| {
+            now - queued >= thresholds.responsive
+                && row.last_claim_at.is_none_or(|claimed| claimed < queued)
+        })
+    {
         LivenessState::WorkWaiting
     } else if within(work, thresholds.responsive) {
         LivenessState::Responsive
@@ -652,6 +656,27 @@ mod tests {
         )
         .state;
         assert_eq!(state, LivenessState::Responsive);
+    }
+
+    /// Re-review M-A: silence outranks waiting work — a dead agent is "no response", not
+    /// "work is waiting".
+    #[test]
+    fn an_agent_silent_past_the_quiet_window_is_unresponsive_not_work_waiting() {
+        let now = Utc::now();
+        let row = LivenessRow {
+            last_inbox_read_at: at(120),
+            ..Default::default()
+        };
+        let state = derive_liveness(
+            now,
+            true,
+            Some(&row),
+            &DoorbellFact::default(),
+            Some(now - Duration::minutes(90)),
+            &LivenessThresholds::default(),
+        )
+        .state;
+        assert_eq!(state, LivenessState::Unresponsive);
     }
 
     #[test]
