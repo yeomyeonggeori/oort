@@ -32,6 +32,7 @@ import {
 // =============================================================================
 
 export {
+  applyApprovalWaits,
   byOldestTurn,
   elapsedLabel,
   headlineFrom,
@@ -42,6 +43,7 @@ export {
   type AgentTurnState,
   type AgentWorkingSignal,
   type AgentWorkingSource,
+  type ApprovalWait,
 } from "@momo/core/features/agents/workingSignal";
 
 /**

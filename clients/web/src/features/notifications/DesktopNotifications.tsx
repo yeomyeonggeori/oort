@@ -18,6 +18,7 @@ import {
   windowIsFront,
   type ArmedOpen,
 } from "@momo/core/features/notifications/model";
+import { messageAnchorPath } from "@/features/inbox/anchor";
 import { notifyThisDevice } from "./deviceNotify";
 import { osNotifier, type OsNotifyKind } from "./osNotifier";
 import { setBrowserOpenHandler, useBrowserPermission } from "./browserNotify";
@@ -137,7 +138,16 @@ export function DesktopNotifications() {
     const { messageId, channelId, title, body } = decision.notification;
     announcedRef.current = rememberAnnounced(announcedRef.current, messageId);
     // 데스크탑은 알림을 눌러 창이 앞에 오는 순간 이동한다(arm). 브라우저는 배너 클릭이 직접 간다.
-    if (isDesktop()) armedRef.current = armOpen(armedRef.current, channelId, nowMs);
+    if (isDesktop()) {
+      armedRef.current = armOpen(
+        armedRef.current,
+        channelId,
+        nowMs,
+        undefined,
+        // 승인 알림은 그 카드로 착지한다(#3738). 멘션·DM은 채널이다.
+        decision.notification.kind === "approval" ? messageId : undefined
+      );
+    }
     // 같은 종류는 한 묶음으로 쌓아 보낸다(osNotifier). 보내기는 fire and forget:
     // 브라우저나 거절된 권한은 false로 끝나는 정상 상태다.
     const kindMap: Record<typeof decision.notification.kind, OsNotifyKind> = {
@@ -150,7 +160,12 @@ export function DesktopNotifications() {
       title,
       ...(body === undefined ? {} : { body }),
       label: title.replace(/^승인 필요 · /, ""),
-      route: `/c/${channelId}`,
+      // 승인 알림은 채널 맨 아래가 아니라 **그 카드**로 연다(#3738): 놓친 카드를 찾느라
+      // 위로 스크롤하다 만료를 맞이하지 않게. 멘션·DM은 지금까지처럼 채널이다.
+      route:
+        decision.notification.kind === "approval"
+          ? messageAnchorPath(channelId, messageId)
+          : `/c/${channelId}`,
     });
   }, []);
 

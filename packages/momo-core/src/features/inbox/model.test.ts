@@ -436,3 +436,54 @@ describe("이 서버가 답할 수 있는 탭만", () => {
     expect(parseFilter("agents", all)).toBe("agents");
   });
 });
+
+describe("워크스페이스 행동 승인 행 (#3729 · #3738)", () => {
+  it("행동 id 를 우리말로 말한다 — 원장의 갈래 이름(workspace_action)이 화면에 닿지 않는다", () => {
+    for (const [id, label] of [
+      ["invite.create", "초대 링크 만들기"],
+      ["channel.create", "채널 만들기"],
+      ["channel.member.add", "채널에 멤버 추가"],
+      ["agent.rename", "에이전트 이름 바꾸기"],
+      ["hosted.channels.grant", "승인 채널 늘리기"],
+      ["workspace.settings.update", "워크스페이스 설정 바꾸기"],
+    ] as const) {
+      const item = approvalItem(
+        approval({ actionType: "workspace_action", workspaceActionId: id }),
+        agent,
+        "엔진",
+        NOW
+      );
+      expect(item.predicate).toBe(`${label} 허가를 요청했어요`);
+      expect(item.predicate).not.toContain("workspace_action");
+    }
+  });
+
+  it("모르는 행동 id 는 지어내지 않고 갈래의 우리말로 떨어진다", () => {
+    const item = approvalItem(
+      approval({ actionType: "workspace_action", workspaceActionId: "constructor" }),
+      agent,
+      "엔진",
+      NOW
+    );
+    expect(item.predicate).toBe("워크스페이스 변경 허가를 요청했어요");
+    const none = approvalItem(
+      approval({ actionType: "workspace_action" }),
+      agent,
+      "엔진",
+      NOW
+    );
+    expect(none.predicate).toBe("워크스페이스 변경 허가를 요청했어요");
+  });
+
+  it("카드 메시지 id 를 행에 싣는다 — 인박스 행이 그 카드로 간다", () => {
+    const item = approvalItem(
+      approval({ requestMessageId: "0199aa11-2222-7000-8000-0000000000d1" }),
+      agent,
+      "엔진",
+      NOW
+    );
+    expect(item.messageId).toBe("0199aa11-2222-7000-8000-0000000000d1");
+    expect(approvalItem(approval(), agent, "엔진", NOW).messageId).toBeUndefined();
+  });
+});
+

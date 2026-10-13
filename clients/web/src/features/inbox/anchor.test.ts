@@ -3,6 +3,7 @@ import {
   anchorMissKind,
   channelPath,
   channelShareUrl,
+  inboxTargetPath,
   messageAnchorPath,
   messageShareUrl,
   foldedStandInSelector,
@@ -566,3 +567,20 @@ describe("watchForMessageId: 두 자리를 이 순서로 본다", () => {
     expect(onExpire).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("인박스 행의 착지 (#3738)", () => {
+  const CH = "00000000-0000-7000-8000-000000000201";
+  const CARD = "0199AA11-2222-7000-8000-0000000000D1";
+
+  it("카드 메시지 id 를 아는 행은 그 카드로 간다", () => {
+    expect(inboxTargetPath({ channelId: CH, messageId: CARD, seq: 9 })).toBe(
+      messageAnchorPath(CH, CARD)
+    );
+  });
+
+  it("id 가 없으면 지금까지처럼 seq, 아무것도 없으면 채널이다", () => {
+    expect(inboxTargetPath({ channelId: CH, seq: 9 })).toBe(channelPath(CH, 9));
+    expect(inboxTargetPath({ channelId: CH })).toBe(channelPath(CH));
+  });
+});
+

@@ -15,8 +15,10 @@ import { fetchWorkspace } from "@momo/core/features/settings/api";
 import { useSession } from "@/app/session";
 import { isSidebarTreeInert } from "@/app/sidebarPane";
 import { useInertWhile, useShellNav } from "@/app/shellNav";
+import { useApprovalWaits } from "@/features/inbox/useInbox";
 import {
   agentTurnsInChannel,
+  applyApprovalWaits,
   useAgentWorkingSignals,
   type AgentWorkingSignal,
 } from "@/features/agents/agentWorkingSignal";
@@ -281,6 +283,8 @@ export function Sidebar({
   // Staleness is still checked, from the render's own clock, and the rail's 15s
   // sweep re-publishes the store, which is what re-renders this list.
   const turnSignals = useAgentWorkingSignals();
+  // 승인 원장이 레일보다 이긴다(#3738): 사람을 기다리는 카드가 있으면 「작업 중」이 아니라 「승인 대기」.
+  const approvalWaits = useApprovalWaits();
   const railLive = connStatus === "connected";
   const nowMs = Date.now();
 
@@ -579,7 +583,12 @@ export function Sidebar({
           <>
             {dot ? <span className="sr-only">{PEER_DOT_LABEL[dot]}</span> : null}
             <AgentTurnBadge
-              turns={agentTurnsInChannel(turnSignals, channel.id, nowMs)}
+              turns={applyApprovalWaits(
+                agentTurnsInChannel(turnSignals, channel.id, nowMs),
+                channel.id,
+                approvalWaits,
+                nowMs
+              )}
               directory={directoryQuery.directory}
               live={railLive}
             />

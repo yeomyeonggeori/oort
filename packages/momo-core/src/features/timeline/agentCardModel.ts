@@ -550,6 +550,15 @@ export interface AgentApprovalCard {
    * 도구 호출 승인이고 카드는 한 글자도 달라지지 않는다.
    */
   action: AgentApprovalAction | null;
+  /**
+   * 서버가 카드 props 에 박은 기한(epoch ms). 도구 호출 승인과 행동 승인이 같은
+   * 키(`expires_at_ms`)를 쓴다. 없으면 기한을 모른다 — 지어내지 않는다 (#3738).
+   */
+  expiresAtMs?: number;
+  /** 이 카드를 올린 멤버(대개 에이전트). 메시지의 작성자다. 「다시 제안」의 대상. */
+  requestedByMemberId?: string;
+  /** 이 카드가 선 채널. */
+  channelId?: string;
   detail: PayloadDetail;
 }
 
@@ -700,6 +709,14 @@ function approvalCard(
   if (decidedBy !== undefined) card.decidedByMemberId = decidedBy;
   const decidedAtMs = readNumber(props, "decided_at_ms");
   if (decidedAtMs !== undefined) card.decidedAtMs = decidedAtMs;
+  const expiresAtMs = readNumber(props, "expires_at_ms");
+  // 0 이하는 기한이 아니라 빈 칸이다(1970년에 만료되는 승인은 없다). 알 수 없는 기한을
+  // 「이미 만료」로 읽으면 살아 있는 카드의 컨트롤이 내려간다.
+  if (expiresAtMs !== undefined && expiresAtMs > 0) card.expiresAtMs = expiresAtMs;
+  if (message.authorMemberId !== "") {
+    card.requestedByMemberId = message.authorMemberId;
+  }
+  if (message.channelId !== "") card.channelId = message.channelId;
   return card;
 }
 
