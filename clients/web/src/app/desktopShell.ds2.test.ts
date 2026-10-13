@@ -102,13 +102,13 @@ describe("사이드바 (시안 `.a-side`)", () => {
     expect(SIDEBAR).toMatch(/className="[^"]*\bglass\b[^"]*\bsidebar-search\b[^"]*"/);
   });
 
-  it("행은 34 · 반경 10 · 아이콘 18이고, 안 읽음은 굵기 700이다", () => {
+  it("행은 34 · 반경 10 · 아이콘 18이고, 안 읽음은 굵기 600이다(#3774, 800·700 위계 정리)", () => {
     const row = utility("sidebar-row");
     expect(row).toMatch(/min-block-size: 34px;/);
     expect(row).toMatch(/border-radius: var\(--radius-md\);/);
     expect(TOKENS).toMatch(/--radius-md: 10px;/);
     expect(row).toMatch(/\[data-row-icon\] svg \{\s*inline-size: 1\.125rem;\s*block-size: 1\.125rem;/);
-    expect(row).toMatch(/&\[data-unread\] \{\s*font-weight: 700;/);
+    expect(row).toMatch(/&\[data-unread\] \{\s*font-weight: 600;/);
   });
 
   it("선택 행은 흰 면 + rest로 뜨고 호박색을 쓰지 않는다 (owner 결정 2026-09-26)", () => {
