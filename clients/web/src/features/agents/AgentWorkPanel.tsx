@@ -8,11 +8,12 @@ import {
   WORK_LOG_ARGS_TRUNCATED_SENTENCE,
   WORK_LOG_EMPTY_DETAIL,
   WORK_LOG_EMPTY_HEADLINE,
-  WORK_LOG_SIGNAL_LOST_SENTENCE,
+  WORK_LOG_QUIET_SENTENCE,
   WORK_LOG_TRUNCATED_HEAD_SENTENCE,
   WORK_LOG_VOLATILE_SENTENCE,
   workLogLiveness,
   workLogStateLabel,
+  workLogTurnState,
   workPhaseLabel,
   type WorkEntry,
   type WorkLog,
@@ -22,7 +23,14 @@ import {
   type WorkToolEntry,
 } from "@momo/core/features/agents/workLog";
 import { formatMicroUsd } from "@momo/core/features/timeline/agentCardModel";
-import { elapsedLabel } from "@momo/core/features/agents/workingSignal";
+import {
+  elapsedLabel,
+  type ServerRunFacts,
+} from "@momo/core/features/agents/workingSignal";
+import {
+  isSignalLostByServer,
+  runPhaseDetail,
+} from "@momo/core/features/agents/runPhase";
 import {
   agentLabel,
   TURN_STALE_SENTENCE,
@@ -40,6 +48,7 @@ import {
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { cn } from "@/design/lib/cn";
 import { useTickingNow } from "./agentWorkingSignal";
+import { useRunFacts } from "./agentRunProgressStore";
 import {
   closeWorkPanel,
   takeWorkPanelOpener,
@@ -71,7 +80,10 @@ import {
 // 이 표면이 절대 하지 않는 말 셋:
 //   1. 앞부분을 다 봤다 — 여는 프레임을 못 봤으면 "이 지점부터 관전"을 먼저 적는다.
 //   2. 승인 대기를 작업 중이라고 — 상태 어휘는 기존 경계 그대로다.
-//   3. 종료를 못 본 run을 완료라고 — TTL을 넘기면 "신호 소실"이지 "완료"가 아니다.
+//   3. 종료를 못 본 run을 완료라고 — 서버가 아는 run은 서버의 phase가 말하고(대기
+//      n번째 / 가져감 / 진행 중 / 승인 대기 / 끝), 서버가 모르는 run이 조용해지면
+//      「조용함」이지 「완료」도 「끊김」도 아니다. 「신호 소실」은 서버가
+//      lease_abandoned로 끝냈다고 알릴 때만 나온다.
 // =============================================================================
 
 const PANEL_TITLE = "작업 패널";
@@ -79,6 +91,9 @@ const PANEL_TITLE = "작업 패널";
 export function AgentWorkPanel() {
   const target = useWorkPanelTarget();
   const log = useWorkLog(target);
+  // 서버가 이 run에 대해 답한 것(ADR-0200). 없으면 이 로그가 프레임에서 접은 것으로
+  // 말한다.
+  const server = useRunFacts(target?.runId ?? null);
   const { workspaceId, connStatus } = useSession();
   const { directory } = useDirectory(workspaceId);
 
@@ -86,7 +101,8 @@ export function AgentWorkPanel() {
   // 시계는 이 패널이 실제로 살아 있는 run을 그리는 동안에만 돈다. 죽은 소켓 위에서
   // 계속 세는 시계는 에이전트의 턴이 아니라 우리의 낙관을 재는 것이다. 신호가
   // 끊긴 뒤에도 도는 1Hz 타이머는 바뀔 수 없는 화면을 초당 한 번 다시 그린다.
-  const liveness = log === null ? null : workLogLiveness(log, Date.now());
+  const liveness =
+    log === null ? null : workLogLiveness(log, Date.now(), undefined, server);
   const nowMs = useTickingNow(railLive && liveness === "live");
 
   const asideRef = useRef<HTMLElement>(null);
@@ -169,9 +185,10 @@ export function AgentWorkPanel() {
         startedAtMs={log?.startedAtMs ?? target.startedAtMs}
         nowMs={nowMs}
         railLive={railLive}
+        server={server}
         onClose={close}
       />
-      <PanelBody log={log} nowMs={nowMs} railLive={railLive} />
+      <PanelBody log={log} nowMs={nowMs} railLive={railLive} server={server} />
       <PanelFooter />
     </aside>
   );
@@ -183,6 +200,7 @@ function PanelHeader({
   startedAtMs,
   nowMs,
   railLive,
+  server,
   onClose,
 }: {
   name: string;
@@ -190,10 +208,13 @@ function PanelHeader({
   startedAtMs?: number;
   nowMs: number;
   railLive: boolean;
+  server: ServerRunFacts | null;
   onClose: () => void;
 }) {
   const liveness: WorkLogLiveness | null =
-    log === null ? null : workLogLiveness(log, nowMs);
+    log === null ? null : workLogLiveness(log, nowMs, undefined, server);
+  const turnState = log === null ? null : workLogTurnState(log, server);
+  const detail = server === null ? undefined : runPhaseDetail(server, nowMs);
   return (
     <header className="flex flex-col gap-1 border-b border-line px-4 py-2">
       <div className="flex items-center justify-between gap-2">
@@ -225,18 +246,39 @@ function PanelHeader({
             className={cn(
               "shrink-0 rounded-sm px-1 text-timestamp",
               !railLive && "text-ink-muted",
-              railLive && liveness === "live" && log.state === "working" &&
+              railLive && liveness === "live" && turnState === "working" &&
                 "bg-agent-soft text-agent",
               railLive &&
                 liveness === "live" &&
-                log.state === "awaiting_approval" &&
+                turnState === "awaiting_approval" &&
                 "border border-warn text-warn",
-              railLive && liveness === "signal_lost" && "border border-warn text-warn"
+              railLive &&
+                liveness === "live" &&
+                turnState === "queued" &&
+                "border border-line-strong text-ink-muted",
+              // 「신호 소실」(서버가 알렸을 때만)과 「조용함」(서버가 모르는 run일 때만)은
+              // 사람이 할 일이 아니라 끝난 일·모르는 일의 사실이다. 경고색은 「승인
+              // 대기」처럼 사람의 행동을 부르는 낱말의 색이라 쓰지 않는다
+              // (design-review U1 M-1).
+              railLive &&
+                ((server !== null && isSignalLostByServer(server)) ||
+                  liveness === "quiet") &&
+                "border border-line-strong text-ink-muted"
             )}
             data-testid="agent-work-panel-state"
-            data-state={liveness === "live" ? log.state : liveness}
+            data-state={liveness === "live" ? (turnState ?? log.state) : liveness}
           >
-            {workLogStateLabel(log, liveness)}
+            {workLogStateLabel(log, liveness, server)}
+          </span>
+        )}
+        {/* 근거 한 줄: 서버가 준 사실(미수령 n분 · 앞에 m건 / 가져간 뒤 n분째 소식이
+            없어요 / 마지막 보고 n분 전 / 끝난 사유). 판정이 아니라 사실이다. */}
+        {detail !== undefined && (
+          <span
+            className="min-w-0 break-keep text-timestamp"
+            data-testid="agent-work-panel-detail"
+          >
+            {detail}
           </span>
         )}
         {/* 시계는 **작업 중일 때만** 돈다. 승인 대기에 초를 붙이면 읽는 사람은
@@ -245,7 +287,7 @@ function PanelHeader({
             턴에 대해 다른 말을 하지 않는 이유가 그것이다. */}
         {startedAtMs !== undefined &&
           liveness === "live" &&
-          log?.state === "working" &&
+          turnState === "working" &&
           railLive && (
             <span
               className="shrink-0 text-timestamp"
@@ -273,10 +315,12 @@ function PanelBody({
   log,
   nowMs,
   railLive,
+  server,
 }: {
   log: WorkLog | null;
   nowMs: number;
   railLive: boolean;
+  server: ServerRunFacts | null;
 }) {
   if (log === null) {
     // 스토어가 구독을 걸기 전의 한 프레임. 높이를 지키는 중립 막대이고 shimmer는
@@ -288,7 +332,7 @@ function PanelBody({
       </div>
     );
   }
-  const liveness = workLogLiveness(log, nowMs);
+  const liveness = workLogLiveness(log, nowMs, undefined, server);
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -341,12 +385,12 @@ function PanelBody({
         </ol>
       )}
 
-      {liveness === "signal_lost" && (
+      {liveness === "quiet" && (
         <p
           className="break-keep px-4 py-2 text-meta text-warn"
-          data-testid="agent-work-panel-signal-lost"
+          data-testid="agent-work-panel-quiet"
         >
-          {WORK_LOG_SIGNAL_LOST_SENTENCE}
+          {WORK_LOG_QUIET_SENTENCE}
         </p>
       )}
     </div>

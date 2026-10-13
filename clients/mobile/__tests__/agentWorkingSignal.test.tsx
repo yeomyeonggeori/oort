@@ -484,8 +484,11 @@ describe('에이전트 탭 — 열린 턴을 말한다', () => {
     expect(row()).not.toHaveTextContent(/승인 대기/);
 
     // `queued`는 이미 열린 턴이다 — 그리고 시작 시각을 아는 유일한 프레임이다.
+    // 그러나 아직 아무도 시작하지 않았으므로 「작업 중」이 아니라 「대기 중」이다
+    // (ADR-0200 D1).
     await deliver(statusFrame(), 20);
-    await waitFor(() => expect(row()).toHaveTextContent(/작업 중/));
+    await waitFor(() => expect(row()).toHaveTextContent(/대기 중/));
+    expect(row()).not.toHaveTextContent(/작업 중/);
 
     // ↑ 이 중간 단정이 목 편차가 사는 자리다. 두 프레임이 한 flush에 들어왔다면
     // 프레임 사이의 상태는 애초에 관찰할 수 없고, 아래 단정은 두 번째 프레임이

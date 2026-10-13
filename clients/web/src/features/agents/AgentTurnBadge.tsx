@@ -34,7 +34,10 @@ export function AgentTurnBadge({
         live && state === "working" && "bg-agent-soft text-agent",
         live &&
           state === "awaiting_approval" &&
-          "border border-warn text-warn"
+          "border border-warn text-warn",
+        // 대기는 일이 시작되지 않았다는 사실이라 에이전트색(작업 중)도 경고색
+        // (사람이 할 일)도 쓰지 않는다.
+        live && state === "queued" && "border border-line-strong text-ink-muted"
       )}
       data-testid={testId}
       data-live={live ? "" : undefined}
