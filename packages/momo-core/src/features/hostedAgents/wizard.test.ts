@@ -466,3 +466,16 @@ describe("3단계 오지 않는 원인", () => {
     expect(causes[5]?.id).toBe("unverified");
   });
 });
+
+describe("압축 진행 표시 (#3773)", () => {
+  it("서버 단계 여섯 자리를 셋으로 묶고 승인은 홀로 선다", async () => {
+    const { HOSTED_COMPACT_STEPS, compactStepNumber } = await import("./wizard");
+    expect(HOSTED_COMPACT_STEPS.map((item) => item.number)).toEqual([1, 2, 3]);
+    expect(compactStepNumber("identity")).toBe(1);
+    expect(compactStepNumber("pairing")).toBe(1);
+    expect(compactStepNumber("detecting")).toBe(1);
+    expect(compactStepNumber("expired")).toBe(1);
+    expect(compactStepNumber("approval")).toBe(2);
+    expect(compactStepNumber("activation")).toBe(3);
+  });
+});
