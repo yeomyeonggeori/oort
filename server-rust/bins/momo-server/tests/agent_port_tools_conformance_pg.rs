@@ -6934,3 +6934,3147 @@ async fn a_paused_agent_treats_an_expired_lease_like_a_live_one_3530() {
     .0;
     assert_eq!(live, expired, "pause must not be a lease-expiry side door");
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 2026-10-11 S0 (#3705) — the pending ceiling (V1-e)
+// ---------------------------------------------------------------------------
+
+/// Mention, claim and propose once, returning the HTTP status and body instead
+/// of asserting success — the shape the ceiling test needs for its 4th call.
+async fn try_propose_invite_3705(
+    client: &reqwest::Client,
+    base: &str,
+    su: &PgPool,
+    fixture: &Fixture,
+) -> (u16, Value) {
+    let handle_name = hosted_handle(su, fixture.hosted_agent).await;
+    let trigger: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{handle_name} 초대 링크 또 만들어줘")
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+    let (status, claimed) = call(
+        client,
+        base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("a lease handle")
+        .to_string();
+    call(
+        client,
+        base,
+        &fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({"handle": handle, "actionId": "invite.create", "args": {"role": "member"}}),
+    )
+    .await
+}
+
+async fn pending_workspace_actions_3705(pool: &PgPool, fixture: &Fixture) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM approval WHERE workspace_id=$1 AND requested_by=$2 \
+           AND action_type='workspace_action' AND status='pending'",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .fetch_one(pool)
+    .await
+    .expect("count pending workspace actions")
+}
+
+/// **ADR-0186 증보 V1-e — an agent may have three pending proposals, no more.**
+///
+/// Sequential runs, because a run parks on each proposal: the 4th proposal is
+/// `Conflict` with no card, no approval row and no parked run; deciding one of
+/// the three frees the slot (the ceiling counts `pending`, not history).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_fourth_pending_workspace_action_is_refused_and_a_decision_frees_a_slot() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    let mut approvals = Vec::new();
+    for _ in 0..momo_agent::MAX_PENDING_WORKSPACE_ACTIONS {
+        let (status, proposed) = try_propose_invite_3705(&client, &base, &su, &fixture).await;
+        assert_eq!(status, 200, "{proposed}");
+        approvals.push(
+            Uuid::parse_str(structured(&proposed)["approvalId"].as_str().expect("id"))
+                .expect("uuid"),
+        );
+    }
+    assert_eq!(pending_workspace_actions_3705(&su, &fixture).await, 3);
+
+    let cards_before = channel_message_count(&su, fixture.workspace, fixture.channel).await;
+    let (status, refused) = try_propose_invite_3705(&client, &base, &su, &fixture).await;
+    assert_eq!(
+        status, 409,
+        "the 4th pending proposal is a conflict: {refused}"
+    );
+    assert_eq!(
+        pending_workspace_actions_3705(&su, &fixture).await,
+        3,
+        "no 4th approval row"
+    );
+    // The 4th mention posted one human message; no card or approval followed.
+    assert_eq!(
+        channel_message_count(&su, fixture.workspace, fixture.channel).await,
+        cards_before + 1,
+        "the refused proposal wrote no card"
+    );
+    let parked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2 \
+           AND status::text='awaiting_approval'",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(parked, 3, "the refused run was not parked");
+
+    // Rejecting one frees a slot: the ceiling is about what is waiting.
+    assert_eq!(
+        decide(&client, &base, &fixture, approvals[0], false).await,
+        200
+    );
+    assert_eq!(pending_workspace_actions_3705(&su, &fixture).await, 2);
+    let (status, accepted) = try_propose_invite_3705(&client, &base, &su, &fixture).await;
+    assert_eq!(status, 200, "{accepted}");
+    assert_eq!(pending_workspace_actions_3705(&su, &fixture).await, 3);
+}
+
+/// **The ceiling's lock is real.** Two proposals of one agent must not both read
+/// the count before either writes: the second `lock_agent_and_count…` blocks
+/// until the first transaction ends. Without the `FOR NO KEY UPDATE` the second
+/// call returns immediately — the exact interleaving that lets four proposals
+/// through a ceiling of three.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_pending_count_serialises_proposals_of_one_agent() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su).await;
+
+    let mut first = su.begin().await.expect("first transaction");
+    let seen = momo_agent::lock_agent_and_count_pending_workspace_actions_in_tx(
+        &mut first,
+        fixture.workspace,
+        fixture.hosted_agent,
+    )
+    .await
+    .expect("first count");
+    assert_eq!(seen, 0);
+
+    let pool = su.clone();
+    let (workspace, agent) = (fixture.workspace, fixture.hosted_agent);
+    let mut second = tokio::spawn(async move {
+        let mut tx = pool.begin().await.expect("second transaction");
+        let seen = momo_agent::lock_agent_and_count_pending_workspace_actions_in_tx(
+            &mut tx, workspace, agent,
+        )
+        .await
+        .expect("second count");
+        tx.commit().await.expect("second commit");
+        seen
+    });
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(600), &mut second)
+            .await
+            .is_err(),
+        "the second proposal read the count while the first still held the agent"
+    );
+    first.commit().await.expect("first commit");
+    assert_eq!(second.await.expect("second task"), 0);
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 2026-10-11 S1 (#3706) — channel.create (V3 합성)
+// ---------------------------------------------------------------------------
+
+/// Mention, claim and propose `action_id`, returning the raw tool answer.
+async fn try_propose_action_3706(
+    client: &reqwest::Client,
+    base: &str,
+    su: &PgPool,
+    fixture: &Fixture,
+    action_id: &str,
+    args: Value,
+) -> (u16, Value) {
+    let handle_name = hosted_handle(su, fixture.hosted_agent).await;
+    let trigger: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{handle_name} {action_id} 부탁해")
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+    let (status, claimed) = call(
+        client,
+        base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("a lease handle")
+        .to_string();
+    call(
+        client,
+        base,
+        &fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({"handle": handle, "actionId": action_id, "args": args}),
+    )
+    .await
+}
+
+fn proposed_approval_3706(answer: &Value) -> Uuid {
+    Uuid::parse_str(
+        structured(answer)["approvalId"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no approvalId in {answer}")),
+    )
+    .expect("uuid")
+}
+
+/// An active human in the fixture workspace that is a workspace member but not
+/// (yet) in any channel. Returns `(member id, handle)`.
+async fn seed_extra_member_3706(pool: &PgPool, fixture: &Fixture, tag: &str) -> (Uuid, String) {
+    let member = Uuid::new_v4();
+    let handle = format!("{tag}-{}", &member.simple().to_string()[..8]);
+    sqlx::query(
+        "INSERT INTO member(id, workspace_id, kind, display_name, handle) \
+         VALUES($1,$2,'human',$3,$4)",
+    )
+    .bind(member)
+    .bind(fixture.workspace)
+    .bind(format!("Extra {tag}"))
+    .bind(&handle)
+    .execute(pool)
+    .await
+    .expect("seed extra member");
+    sqlx::query(
+        "INSERT INTO human(member_id, workspace_id, email, email_verified) VALUES($1,$2,$3,true)",
+    )
+    .bind(member)
+    .bind(fixture.workspace)
+    .bind(format!("{member}@tools.test"))
+    .execute(pool)
+    .await
+    .expect("seed extra identity");
+    sqlx::query(
+        "INSERT INTO workspace_membership(workspace_id, member_id, role) VALUES($1,$2,'member')",
+    )
+    .bind(fixture.workspace)
+    .bind(member)
+    .execute(pool)
+    .await
+    .expect("seed extra workspace membership");
+    (member, handle)
+}
+
+async fn hosted_approved_3706(pool: &PgPool, fixture: &Fixture) -> Vec<Uuid> {
+    sqlx::query_scalar("SELECT approved_channel_ids FROM hosted_agent_connection WHERE id=$1")
+        .bind(fixture.hosted_connection)
+        .fetch_one(pool)
+        .await
+        .expect("approved channels")
+}
+
+/// The columns of the hosted connection that ADR-0162 增보 2 hangs the DM rule
+/// on: a channel grant must not touch any of them.
+async fn hosted_confirm_columns_3706(pool: &PgPool, fixture: &Fixture) -> String {
+    sqlx::query_scalar(
+        "SELECT concat_ws('|', confirmed_by, confirmed_at, active_token_id, \
+                array_to_string(approved_scopes, ','), \
+                array_to_string(approved_dm_channel_ids, ',')) \
+           FROM hosted_agent_connection WHERE id=$1",
+    )
+    .bind(fixture.hosted_connection)
+    .fetch_one(pool)
+    .await
+    .expect("confirm columns")
+}
+
+async fn channel_row_3706(
+    pool: &PgPool,
+    workspace: Uuid,
+    name: &str,
+) -> Option<(Uuid, String, Uuid)> {
+    sqlx::query_as(
+        "SELECT id, kind::text, created_by FROM channel \
+          WHERE workspace_id=$1 AND name=$2 AND archived_at IS NULL",
+    )
+    .bind(workspace)
+    .bind(name)
+    .fetch_optional(pool)
+    .await
+    .expect("channel row")
+}
+
+async fn audit_count_3706(pool: &PgPool, workspace: Uuid, action: &str) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action=$2")
+        .bind(workspace)
+        .bind(action)
+        .fetch_one(pool)
+        .await
+        .expect("audit count")
+}
+
+/// **channel.create, end to end (증보 V3, V6, V11).**
+///
+/// One approval creates the channel as the approver, seats the proposing agent
+/// and the named member, and puts the channel in the agent's approved set — and
+/// nothing about the connection's confirm columns moves. A non-admin is refused
+/// with the approval intact; the agent reads the new channel's id from its own
+/// outcome line and can then post there.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_approved_channel_create_is_one_step_for_channel_membership_and_grant() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+    let (extra, extra_handle) = seed_extra_member_3706(&su, &fixture, "guest").await;
+    // The fixture's generated handle is longer than the 32 a real workspace
+    // allows; give the approver a legal one so it can be named in the proposal.
+    let approver_handle = format!("boss-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    sqlx::query("UPDATE member SET handle=$2 WHERE id=$1")
+        .bind(fixture.human)
+        .bind(&approver_handle)
+        .execute(&su)
+        .await
+        .unwrap();
+    let name = format!("plan-{}", &Uuid::new_v4().simple().to_string()[..8]);
+
+    // The approver's own handle is in the list on purpose: the approver already
+    // owns the channel, and re-adding them must not downgrade `owner`.
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": name, "memberHandles": [extra_handle, approver_handle]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval_id = proposed_approval_3706(&proposed);
+    let card_message_id =
+        Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap();
+
+    // The card shows the server's names and the widening row, not the handles.
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(card_message_id)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    let rows = card["action"]["rows"].as_array().expect("rows").clone();
+    let row = |label: &str| {
+        rows.iter()
+            .find(|row| row["label"] == label)
+            .unwrap_or_else(|| panic!("no {label} row in {rows:?}"))["value"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(row("채널"), format!("#{name}"));
+    assert_eq!(row("공개 범위"), "비공개", "the default kind is private");
+    assert!(row("이 에이전트도 참여").starts_with("예"));
+    // Display names are not unique, handles are: the card names both, so the
+    // approver reads exactly who is being seated.
+    assert!(row("함께 넣을 멤버").contains("Extra guest"));
+    assert!(
+        row("함께 넣을 멤버").contains(&format!("(@{extra_handle})")),
+        "{}",
+        row("함께 넣을 멤버")
+    );
+    assert_eq!(card["action"]["required_role"], json!("admin"));
+    assert!(channel_row_3706(&su, fixture.workspace, &name)
+        .await
+        .is_none());
+
+    let approved_before = hosted_approved_3706(&su, &fixture).await;
+    let confirm_before = hosted_confirm_columns_3706(&su, &fixture).await;
+    let jobs_before = agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await;
+
+    // ---- a non-admin is refused; nothing happens ---------------------------
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &plain_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert!(channel_row_3706(&su, fixture.workspace, &name)
+        .await
+        .is_none());
+    assert_eq!(hosted_approved_3706(&su, &fixture).await, approved_before);
+    let pending: String = sqlx::query_scalar("SELECT status::text FROM approval WHERE id=$1")
+        .bind(approval_id)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(pending, "pending");
+
+    // ---- an agent cannot decide -------------------------------------------
+    let agent_try = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/approvals/{approval_id}/decision",
+            fixture.workspace
+        ))
+        .bearer_auth(&fixture.hosted_bearer)
+        .json(&json!({"approvalId": approval_id, "approve": true,
+                      "clientDecisionId": Uuid::new_v4()}))
+        .send()
+        .await
+        .expect("agent decision responds");
+    assert!(
+        matches!(agent_try.status().as_u16(), 401 | 403),
+        "an agent bearer must not decide: {}",
+        agent_try.status()
+    );
+    assert!(channel_row_3706(&su, fixture.workspace, &name)
+        .await
+        .is_none());
+
+    // ---- the admin approves ------------------------------------------------
+    let (status, headers, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        headers.get("cache-control").and_then(|v| v.to_str().ok()),
+        Some("no-store")
+    );
+    assert_eq!(approved["result"]["actionId"], json!("channel.create"));
+    assert_eq!(approved["result"]["ref"]["type"], json!("channel"));
+    assert!(
+        approved["result"].get("secretOnce").is_none(),
+        "channel.create mints no one-time value: {approved}"
+    );
+    let (channel_id, kind, created_by) = channel_row_3706(&su, fixture.workspace, &name)
+        .await
+        .expect("the channel exists");
+    assert_eq!(
+        approved["result"]["ref"]["id"],
+        json!(channel_id.to_string())
+    );
+    assert_eq!(kind, "private");
+    assert_eq!(created_by, fixture.human, "the APPROVER created it");
+
+    let roles: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT member_id, role::text FROM membership \
+          WHERE workspace_id=$1 AND channel_id=$2 AND left_at IS NULL",
+    )
+    .bind(fixture.workspace)
+    .bind(channel_id)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    let role_of = |member: Uuid| {
+        roles
+            .iter()
+            .find(|(id, _)| *id == member)
+            .map(|(_, role)| role.as_str())
+    };
+    assert_eq!(role_of(fixture.human), Some("owner"), "{roles:?}");
+    assert_eq!(role_of(fixture.hosted_agent), Some("member"), "{roles:?}");
+    assert_eq!(role_of(extra), Some("member"), "{roles:?}");
+    assert_eq!(roles.len(), 3, "{roles:?}");
+
+    let approved_after = hosted_approved_3706(&su, &fixture).await;
+    assert!(approved_after.contains(&channel_id));
+    assert_eq!(approved_after.len(), approved_before.len() + 1);
+    assert_eq!(
+        hosted_confirm_columns_3706(&su, &fixture).await,
+        confirm_before,
+        "a grant never touches the confirm columns"
+    );
+    let covered: Vec<Uuid> =
+        sqlx::query_scalar("SELECT unnest(hosted_connection_channel_ids($1,$2))")
+            .bind(fixture.workspace)
+            .bind(fixture.hosted_connection)
+            .fetch_all(&su)
+            .await
+            .unwrap();
+    assert!(covered.contains(&channel_id));
+
+    // ---- audit -------------------------------------------------------------
+    assert_eq!(
+        audit_count_3706(&su, fixture.workspace, "channel.created").await,
+        1
+    );
+    assert_eq!(
+        audit_count_3706(&su, fixture.workspace, "hosted_connection.channels_granted").await,
+        1
+    );
+    let detail: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='channel.created'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(detail["name"], json!(name));
+    assert_eq!(
+        detail["member_count"],
+        json!(1),
+        "only the one actually seated"
+    );
+    assert_eq!(
+        detail["member_ids"],
+        json!([extra.to_string()]),
+        "the audit row names who got in; the approver and the agent are not 'added'"
+    );
+    assert_eq!(detail["add_proposer"], json!(true));
+    assert_eq!(detail["via_agent"], json!(fixture.hosted_agent.to_string()));
+    assert_eq!(detail["approval_id"], json!(approval_id.to_string()));
+
+    // ---- the run ended, with no job behind it ------------------------------
+    assert_eq!(
+        agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await,
+        jobs_before
+    );
+
+    // ---- the agent can read the id and then speak in the new channel -------
+    let line: (String, Value) = sqlx::query_as(
+        "SELECT body, props FROM message WHERE workspace_id=$1 AND channel_id=$2 \
+           AND props ? 'momo.action_result' ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(line.0.contains(&channel_id.to_string()), "{}", line.0);
+    assert!(
+        line.1["momo.action_result"].get("next").is_none(),
+        "no dead settings link on a channel result"
+    );
+    let (status, read) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_conversation_read",
+        json!({"channelId": fixture.channel, "limit": 20}),
+    )
+    .await;
+    assert_eq!(status, 200, "{read}");
+    assert!(
+        structured(&read)
+            .to_string()
+            .contains(&channel_id.to_string()),
+        "the agent must be able to read the new channel's id: {read}"
+    );
+    let (status, posted) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_message_post",
+        json!({"channelId": channel_id, "clientMsgId": Uuid::new_v4(), "body": "첫 인사"}),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "the agent is a member AND approved there: {posted}"
+    );
+}
+
+/// `addProposer: false` seats and grants nothing for the agent.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_channel_create_without_the_proposer_widens_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let name = format!("solo-{}", &Uuid::new_v4().simple().to_string()[..8]);
+
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": name, "kind": "public", "addProposer": false}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let card_message_id =
+        Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap();
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(card_message_id)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert!(card["action"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|row| row["label"] == "이 에이전트도 참여" && row["value"] == "아니요"));
+
+    let approved_before = hosted_approved_3706(&su, &fixture).await;
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    let (channel_id, kind, _) = channel_row_3706(&su, fixture.workspace, &name)
+        .await
+        .expect("channel");
+    assert_eq!(kind, "public");
+    let agent_in: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM membership WHERE channel_id=$1 AND member_id=$2")
+            .bind(channel_id)
+            .bind(fixture.hosted_agent)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(agent_in, 0, "the agent was not seated");
+    assert_eq!(hosted_approved_3706(&su, &fixture).await, approved_before);
+    assert_eq!(
+        audit_count_3706(&su, fixture.workspace, "hosted_connection.channels_granted").await,
+        0
+    );
+    assert_eq!(
+        audit_count_3706(&su, fixture.workspace, "channel.created").await,
+        1
+    );
+}
+
+/// A failure after the channel row exists rolls back **everything**, leaves the
+/// approval pending, and a retry after the fault is cleared succeeds. The fault
+/// is injected as a trigger that refuses the extra member's `membership` insert,
+/// i.e. it fires after the channel, the creator's membership and the agent's
+/// membership were already written in the same transaction.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_channel_create_that_fails_midway_leaves_no_trace_and_can_be_retried() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (extra, extra_handle) = seed_extra_member_3706(&su, &fixture, "late").await;
+    let name = format!("atomic-{}", &Uuid::new_v4().simple().to_string()[..8]);
+
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": name, "memberHandles": [extra_handle]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval_id = proposed_approval_3706(&proposed);
+    let approved_before = hosted_approved_3706(&su, &fixture).await;
+
+    sqlx::query(&format!(
+        "CREATE OR REPLACE FUNCTION fail_membership_3706() RETURNS trigger LANGUAGE plpgsql AS \
+         $$ BEGIN IF NEW.member_id = '{extra}' THEN RAISE EXCEPTION 'injected failure'; END IF; \
+         RETURN NEW; END $$"
+    ))
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "CREATE TRIGGER fail_membership_3706 BEFORE INSERT ON membership \
+           FOR EACH ROW EXECUTE FUNCTION fail_membership_3706()",
+    )
+    .execute(&su)
+    .await
+    .unwrap();
+
+    let (status, _h, failed) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert!(
+        status >= 500,
+        "an injected fault is a server error: {status} {failed}"
+    );
+    assert!(
+        channel_row_3706(&su, fixture.workspace, &name)
+            .await
+            .is_none(),
+        "the channel row was rolled back"
+    );
+    assert_eq!(hosted_approved_3706(&su, &fixture).await, approved_before);
+    for action in [
+        "channel.created",
+        "action.approved",
+        "hosted_connection.channels_granted",
+    ] {
+        assert_eq!(
+            audit_count_3706(&su, fixture.workspace, action).await,
+            0,
+            "{action}"
+        );
+    }
+    let (state, run_state): (String, String) = sqlx::query_as(
+        "SELECT a.status::text, r.status::text FROM approval a \
+           JOIN agent_run r ON r.id = a.run_id WHERE a.id=$1",
+    )
+    .bind(approval_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        (state.as_str(), run_state.as_str()),
+        ("pending", "awaiting_approval")
+    );
+
+    // The fault is cleared; the very same approval can now be decided.
+    sqlx::query("DROP TRIGGER fail_membership_3706 ON membership")
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, _h, retried) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{retried}");
+    assert!(channel_row_3706(&su, fixture.workspace, &name)
+        .await
+        .is_some());
+}
+
+/// Stale or unsound proposals: unresolvable handles are the one
+/// `InvalidArguments`; a name taken before the tap, and a connection already at
+/// its ceiling, leave the approval pending with `action_args_invalid`.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_stale_or_unsound_channel_proposal_changes_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let approvals_before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM approval WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+
+    // An unknown handle, a malformed one, a deactivated member and an id all
+    // fail the same way, and no approval row is written.
+    let (gone, gone_handle) = seed_extra_member_3706(&su, &fixture, "gone").await;
+    sqlx::query("UPDATE member SET status='suspended' WHERE id=$1")
+        .bind(gone)
+        .execute(&su)
+        .await
+        .unwrap_or_else(|_| panic!("deactivate"));
+    let mut codes = Vec::new();
+    for args in [
+        json!({"name": "ok-name", "memberHandles": ["nobody-here"]}),
+        json!({"name": "ok-name", "memberHandles": ["Not A Handle"]}),
+        json!({"name": "ok-name", "memberHandles": [gone_handle]}),
+        json!({"name": "ok-name", "memberHandles": [Uuid::new_v4().to_string()]}),
+        json!({"name": "UPPER CASE"}),
+    ] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "channel.create",
+            args.clone(),
+        )
+        .await;
+        codes.push((status, error_code(&refused)));
+        assert_eq!(status, 400, "{args}: {refused}");
+    }
+    assert!(codes.windows(2).all(|pair| pair[0] == pair[1]), "{codes:?}");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM approval WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap(),
+        approvals_before
+    );
+
+    // `addProposer: false` while listing the proposer itself would make the card
+    // contradict itself: refused like any other unresolvable proposal.
+    let agent_handle = format!("agent-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    sqlx::query("UPDATE member SET handle=$2 WHERE id=$1")
+        .bind(fixture.hosted_agent)
+        .bind(&agent_handle)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": "self-ref", "addProposer": false, "memberHandles": [agent_handle]}),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+
+    // A name that already exists (even a private channel the agent cannot see)
+    // does NOT fail the proposal — that would be an existence oracle — but the
+    // tap is refused as stale and the approval stays pending.
+    let taken = format!("taken-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    let existing = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO channel(id, workspace_id, kind, name, created_by) \
+         VALUES($1,$2,'private',$3,$4)",
+    )
+    .bind(existing)
+    .bind(fixture.workspace)
+    .bind(&taken)
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": taken}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval_id = proposed_approval_3706(&proposed);
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(stale["status"], "action_args_invalid");
+    let count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM channel WHERE workspace_id=$1 AND lower(name)=$2")
+            .bind(fixture.workspace)
+            .bind(&taken)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(count, 1, "no second channel");
+    let state: String = sqlx::query_scalar("SELECT status::text FROM approval WHERE id=$1")
+        .bind(approval_id)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(state, "pending");
+
+    // A connection already at the 50-channel ceiling cannot take one more.
+    let name = format!("fifty-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": name}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_channel_ids = \
+            ARRAY(SELECT gen_random_uuid() FROM generate_series(1,50)) WHERE id=$1",
+    )
+    .bind(fixture.hosted_connection)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, _h, capped) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{capped}");
+    assert_eq!(capped["status"], "action_args_invalid");
+    assert!(channel_row_3706(&su, fixture.workspace, &name)
+        .await
+        .is_none());
+    assert_eq!(hosted_approved_3706(&su, &fixture).await.len(), 50);
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 2026-10-11 S2 (#3707) — channel.member.add
+// ---------------------------------------------------------------------------
+
+/// A channel made by the fixture's human, with `members` seated (role `member`
+/// unless named otherwise).
+async fn seed_channel_3707(
+    pool: &PgPool,
+    fixture: &Fixture,
+    kind: &str,
+    members: &[(Uuid, &str)],
+) -> (Uuid, String) {
+    let channel = Uuid::new_v4();
+    let name = format!("room-{}", &channel.simple().to_string()[..10]);
+    sqlx::query(
+        "INSERT INTO channel(id, workspace_id, kind, name, created_by) \
+         VALUES($1,$2,$3::channel_kind,$4,$5)",
+    )
+    .bind(channel)
+    .bind(fixture.workspace)
+    .bind(kind)
+    .bind(&name)
+    .bind(fixture.human)
+    .execute(pool)
+    .await
+    .expect("seed channel");
+    sqlx::query("INSERT INTO channel_seq(channel_id, workspace_id, last_seq) VALUES($1,$2,0)")
+        .bind(channel)
+        .bind(fixture.workspace)
+        .execute(pool)
+        .await
+        .expect("seed channel seq");
+    sqlx::query(
+        "INSERT INTO membership(workspace_id, channel_id, member_id, role) \
+         VALUES($1,$2,$3,'owner')",
+    )
+    .bind(fixture.workspace)
+    .bind(channel)
+    .bind(fixture.human)
+    .execute(pool)
+    .await
+    .expect("seed owner");
+    for (member, role) in members {
+        sqlx::query(
+            "INSERT INTO membership(workspace_id, channel_id, member_id, role) \
+             VALUES($1,$2,$3,$4::membership_role)",
+        )
+        .bind(fixture.workspace)
+        .bind(channel)
+        .bind(member)
+        .bind(role)
+        .execute(pool)
+        .await
+        .expect("seed member");
+    }
+    (channel, name)
+}
+
+async fn membership_role_3707(pool: &PgPool, channel: Uuid, member: Uuid) -> Option<String> {
+    sqlx::query_scalar(
+        "SELECT role::text FROM membership WHERE channel_id=$1 AND member_id=$2 AND left_at IS NULL",
+    )
+    .bind(channel)
+    .bind(member)
+    .fetch_optional(pool)
+    .await
+    .expect("membership role")
+}
+
+/// **channel.member.add (증보 V1-b, V6, V11).**
+///
+/// Visible = public, or private with the agent as a live member. Anything else
+/// is one indistinguishable `InvalidArguments`. Approving seats the new members
+/// as `member` only — an existing channel admin is skipped, never demoted — and
+/// a proposal gone stale (the agent left the room) is refused with the approval
+/// still pending.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_approved_member_add_seats_members_in_a_channel_the_agent_can_see() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+    let (x1, x1_handle) = seed_extra_member_3706(&su, &fixture, "one").await;
+    let (x2, x2_handle) = seed_extra_member_3706(&su, &fixture, "two").await;
+    let (y, y_handle) = seed_extra_member_3706(&su, &fixture, "adm").await;
+
+    // P: private, the agent is in it, `y` is already its channel admin.
+    let (p, p_name) = seed_channel_3707(
+        &su,
+        &fixture,
+        "private",
+        &[(fixture.hosted_agent, "member"), (y, "admin")],
+    )
+    .await;
+    // Q: public, the agent is not in it. R: private, the agent is not in it.
+    let (q, q_name) = seed_channel_3707(&su, &fixture, "public", &[]).await;
+    let (_r, r_name) = seed_channel_3707(&su, &fixture, "private", &[]).await;
+
+    // ---- P: card, gate, execution -----------------------------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.member.add",
+        json!({"channel": format!("#{}", p_name.to_uppercase()), "memberHandles": [x1_handle, y_handle]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval_p = proposed_approval_3706(&proposed);
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap())
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    let rows = card["action"]["rows"].as_array().unwrap().clone();
+    let row = |label: &str| {
+        rows.iter()
+            .find(|row| row["label"] == label)
+            .unwrap_or_else(|| panic!("no {label} row in {rows:?}"))["value"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(
+        row("채널"),
+        format!("#{p_name}"),
+        "the server's name, not the agent's spelling"
+    );
+    assert_eq!(row("공개 범위"), "비공개");
+    assert_eq!(row("현재 인원"), "3명");
+    assert_eq!(
+        row("추가할 멤버"),
+        format!("Extra one (@{x1_handle})"),
+        "only the new member is listed, by name and handle"
+    );
+    assert_eq!(row("이미 있는 멤버"), "1명");
+
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &plain_jwt,
+        approval_p,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert_eq!(membership_role_3707(&su, p, x1).await, None);
+
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval_p,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(approved["result"]["actionId"], json!("channel.member.add"));
+    assert_eq!(
+        approved["result"]["ref"],
+        json!({"type": "channel", "id": p.to_string()})
+    );
+    assert!(approved["result"].get("secretOnce").is_none());
+    assert_eq!(
+        membership_role_3707(&su, p, x1).await.as_deref(),
+        Some("member")
+    );
+    assert_eq!(
+        membership_role_3707(&su, p, y).await.as_deref(),
+        Some("admin"),
+        "an existing channel admin is skipped, never demoted"
+    );
+    assert_eq!(
+        audit_count_3706(&su, fixture.workspace, "channel.member_added").await,
+        1,
+        "one row per member actually seated"
+    );
+    let detail: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='channel.member_added'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(detail["role"], json!("member"));
+    assert_eq!(detail["via_agent"], json!(fixture.hosted_agent.to_string()));
+    assert_eq!(detail["approval_id"], json!(approval_p.to_string()));
+
+    // ---- Q: a public channel is visible without membership ----------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.member.add",
+        json!({"channel": q_name, "memberHandles": [x2_handle]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        membership_role_3707(&su, q, x2).await.as_deref(),
+        Some("member")
+    );
+    assert_eq!(
+        membership_role_3707(&su, q, fixture.hosted_agent).await,
+        None,
+        "adding someone else does not seat the agent, and does not widen its approved set"
+    );
+
+    // ---- invisible channels are all the same refusal ----------------------
+    let other_ws = Uuid::new_v4();
+    sqlx::query("INSERT INTO workspace(id, slug, name) VALUES($1,$2,$2)")
+        .bind(other_ws)
+        .bind(format!("other-{}", other_ws.simple()))
+        .execute(&su)
+        .await
+        .unwrap();
+    let foreign_name = format!("foreign-{}", &other_ws.simple().to_string()[..8]);
+    let foreign_owner = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member(id, workspace_id, kind, display_name, handle) \
+         VALUES($1,$2,'human','F','foreign-owner')",
+    )
+    .bind(foreign_owner)
+    .bind(other_ws)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO channel(workspace_id, kind, name, created_by) VALUES($1,'public',$2,$3)",
+    )
+    .bind(other_ws)
+    .bind(&foreign_name)
+    .bind(foreign_owner)
+    .execute(&su)
+    .await
+    .unwrap();
+    let archived = {
+        let (id, name) = seed_channel_3707(&su, &fixture, "public", &[]).await;
+        sqlx::query("UPDATE channel SET archived_at = now() WHERE id=$1")
+            .bind(id)
+            .execute(&su)
+            .await
+            .unwrap();
+        name
+    };
+    let approvals_before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM approval WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    let mut answers = Vec::new();
+    for channel in [r_name, "no-such-room".to_string(), foreign_name, archived] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "channel.member.add",
+            json!({"channel": channel, "memberHandles": [x1_handle]}),
+        )
+        .await;
+        answers.push((status, refused["error"].clone()));
+    }
+    assert!(
+        answers
+            .iter()
+            .all(|answer| answer.0 == 400 && answer.1 == answers[0].1),
+        "an unseen channel must look exactly like a missing one: {answers:?}"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM approval WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap(),
+        approvals_before
+    );
+
+    // ---- stale: the agent leaves the private room before the tap ----------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.member.add",
+        json!({"channel": p_name, "memberHandles": [x2_handle]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval_stale = proposed_approval_3706(&proposed);
+    sqlx::query("UPDATE membership SET left_at = now() WHERE channel_id=$1 AND member_id=$2")
+        .bind(p)
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval_stale,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(stale["status"], "action_args_invalid");
+    assert_eq!(membership_role_3707(&su, p, x2).await, None);
+    let state: String = sqlx::query_scalar("SELECT status::text FROM approval WHERE id=$1")
+        .bind(approval_stale)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(state, "pending");
+}
+
+/// **What the approver read is what runs (증보 V1-d, pins).**
+///
+/// A handle can be changed and a channel can be renamed after the card is drawn,
+/// so "the same name resolves again" is not enough: the ids the names resolved to
+/// are pinned in the payload and a different id at the tap is `action_args_invalid`
+/// with nothing written. Also: an agent target is marked on the card, a proposal
+/// with nobody new to add is refused, and unseen channels (DM, left room,
+/// archived twin) look exactly like a missing one without writing a card or an
+/// audit row.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_member_add_card_is_pinned_to_the_ids_it_was_drawn_from() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (x2, x2_handle) = seed_extra_member_3706(&su, &fixture, "pin").await;
+    let (x3, _x3_handle) = seed_extra_member_3706(&su, &fixture, "swap").await;
+    let (p, p_name) = seed_channel_3707(
+        &su,
+        &fixture,
+        "private",
+        &[(fixture.hosted_agent, "member")],
+    )
+    .await;
+
+    // ---- a handle moved to somebody else after the card was drawn ----------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.member.add",
+        json!({"channel": p_name, "memberHandles": [x2_handle]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    sqlx::query("UPDATE member SET handle=$2 WHERE id=$1")
+        .bind(x2)
+        .bind(format!("moved-{}", &x2.simple().to_string()[..8]))
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE member SET handle=$2 WHERE id=$1")
+        .bind(x3)
+        .bind(&x2_handle)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(stale["status"], "action_args_invalid");
+    assert_eq!(
+        membership_role_3707(&su, p, x3).await,
+        None,
+        "the swapped-in member"
+    );
+    assert_eq!(membership_role_3707(&su, p, x2).await, None);
+
+    // ---- a channel renamed away and its name reused ------------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.member.add",
+        json!({"channel": p_name, "memberHandles": [x2_handle]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let (decoy, _) = seed_channel_3707(
+        &su,
+        &fixture,
+        "private",
+        &[(fixture.hosted_agent, "member")],
+    )
+    .await;
+    sqlx::query("UPDATE channel SET name=$2 WHERE id=$1")
+        .bind(p)
+        .bind(format!("renamed-{}", &p.simple().to_string()[..8]))
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE channel SET name=$2 WHERE id=$1")
+        .bind(decoy)
+        .bind(&p_name)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(stale["status"], "action_args_invalid");
+    assert_eq!(membership_role_3707(&su, decoy, x3).await, None);
+
+    // ---- an agent as the member to add is marked on the card ---------------
+    let agent_handle = format!("bot-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    sqlx::query("UPDATE member SET handle=$2 WHERE id=$1")
+        .bind(fixture.managed_agent)
+        .bind(&agent_handle)
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO workspace_membership(workspace_id, member_id, role) VALUES($1,$2,'member') \
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.managed_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.member.add",
+        json!({"channel": p_name, "memberHandles": [agent_handle]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap())
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    let shown = card["action"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["label"] == "추가할 멤버")
+        .unwrap()["value"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        shown.contains("에이전트") && shown.contains(&agent_handle),
+        "{shown}"
+    );
+
+    // ---- unseen channels write nothing and look like a missing one ---------
+    let dm = Uuid::new_v4();
+    let dm_name = format!("dm-{}", &dm.simple().to_string()[..10]);
+    sqlx::query(
+        "INSERT INTO channel(id, workspace_id, kind, name, dm_key, created_by) \
+         VALUES($1,$2,'dm',$3,$4,$5)",
+    )
+    .bind(dm)
+    .bind(fixture.workspace)
+    .bind(&dm_name)
+    .bind(format!("{dm}"))
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .expect("seed dm");
+    sqlx::query("INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)")
+        .bind(fixture.workspace)
+        .bind(dm)
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (left_room, left_name) = seed_channel_3707(
+        &su,
+        &fixture,
+        "private",
+        &[(fixture.hosted_agent, "member")],
+    )
+    .await;
+    sqlx::query("UPDATE membership SET left_at=now() WHERE channel_id=$1 AND member_id=$2")
+        .bind(left_room)
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let twin = format!("twin-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    for archived in [true, false] {
+        let id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO channel(id, workspace_id, kind, name, created_by, archived_at) \
+             VALUES($1,$2,'private',$3,$4, CASE WHEN $5 THEN now() END)",
+        )
+        .bind(id)
+        .bind(fixture.workspace)
+        .bind(&twin)
+        .bind(fixture.human)
+        .bind(archived)
+        .execute(&su)
+        .await
+        .unwrap();
+        if !archived {
+            // The live twin is private and the agent is not in it.
+            continue;
+        }
+    }
+    let count_state = |su: PgPool, ws: Uuid| async move {
+        let rows: (i64, i64, i64) = sqlx::query_as(
+            "SELECT (SELECT count(*) FROM approval WHERE workspace_id=$1), \
+                    (SELECT count(*) FROM message WHERE workspace_id=$1 AND type::text='approval_request'), \
+                    (SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action IN \
+                       ('action.approved','channel.member_added','channel.created',\
+                        'hosted_connection.channels_granted'))",
+        )
+        .bind(ws)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        rows
+    };
+    let before = count_state(su.clone(), fixture.workspace).await;
+    let mut answers = Vec::new();
+    for channel in [dm_name, left_name, twin, "no-such-room-at-all".to_string()] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "channel.member.add",
+            json!({"channel": channel, "memberHandles": [x2_handle]}),
+        )
+        .await;
+        answers.push((status, refused["error"].clone()));
+    }
+    assert!(
+        answers.iter().all(|a| a.0 == 400 && a.1 == answers[0].1),
+        "{answers:?}"
+    );
+    assert_eq!(count_state(su.clone(), fixture.workspace).await, before);
+
+    // ---- nobody new to add is not a proposal -------------------------------
+    sqlx::query("INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)")
+        .bind(fixture.workspace)
+        .bind(decoy)
+        .bind(x3)
+        .execute(&su)
+        .await
+        .unwrap();
+    let x3_handle: String = sqlx::query_scalar("SELECT handle FROM member WHERE id=$1")
+        .bind(x3)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.member.add",
+        json!({"channel": p_name, "memberHandles": [x3_handle]}),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 2026-10-11 S3 (#3708) — agent.rename + PATCH …/agents/{agent}
+// ---------------------------------------------------------------------------
+
+/// A human with a session token, a workspace role and a seat in the fixture's
+/// approved channel (so it can decide approvals raised there).
+async fn seed_human_3708(
+    pool: &PgPool,
+    fixture: &Fixture,
+    tag: &str,
+    role: &str,
+) -> (Uuid, String) {
+    let member = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member(id, workspace_id, kind, display_name, handle) \
+         VALUES($1,$2,'human',$3,$4)",
+    )
+    .bind(member)
+    .bind(fixture.workspace)
+    .bind(format!("Person {tag}"))
+    .bind(format!("{tag}-{}", &member.simple().to_string()[..8]))
+    .execute(pool)
+    .await
+    .expect("seed person");
+    sqlx::query(
+        "INSERT INTO human(member_id, workspace_id, email, email_verified) VALUES($1,$2,$3,true)",
+    )
+    .bind(member)
+    .bind(fixture.workspace)
+    .bind(format!("{member}@tools.test"))
+    .execute(pool)
+    .await
+    .expect("seed person identity");
+    sqlx::query(
+        "INSERT INTO workspace_membership(workspace_id, member_id, role) \
+         VALUES($1,$2,$3::membership_role)",
+    )
+    .bind(fixture.workspace)
+    .bind(member)
+    .bind(role)
+    .execute(pool)
+    .await
+    .expect("seed person role");
+    sqlx::query("INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)")
+        .bind(fixture.workspace)
+        .bind(fixture.channel)
+        .bind(member)
+        .execute(pool)
+        .await
+        .expect("seed person seat");
+    let jwt = momo_auth::sign_access(member, fixture.workspace, &[], TEST_JWT_SECRET)
+        .expect("sign person JWT")
+        .token;
+    sqlx::query(
+        "INSERT INTO token(workspace_id, kind, actor_member_id, token_hash, scopes, label) \
+         VALUES($1,'session',$2,digest($3::text,'sha256'),ARRAY[]::text[],'tools-conformance')",
+    )
+    .bind(fixture.workspace)
+    .bind(member)
+    .bind(&jwt)
+    .execute(pool)
+    .await
+    .expect("record person token");
+    (member, jwt)
+}
+
+async fn set_agent_owner_3708(pool: &PgPool, agent: Uuid, owner: Option<Uuid>) {
+    sqlx::query("UPDATE agent SET owner_human_id=$2 WHERE member_id=$1")
+        .bind(agent)
+        .bind(owner)
+        .execute(pool)
+        .await
+        .expect("set owner");
+}
+
+/// Give an agent a legal short handle and display name (the fixture's are the
+/// long generated ones) and return the handle.
+async fn tidy_agent_3708(pool: &PgPool, agent: Uuid, display: &str) -> String {
+    let handle = format!("bot-{}", &agent.simple().to_string()[..8]);
+    sqlx::query("UPDATE member SET handle=$2, display_name=$3 WHERE id=$1")
+        .bind(agent)
+        .bind(&handle)
+        .bind(display)
+        .execute(pool)
+        .await
+        .expect("tidy agent");
+    handle
+}
+
+async fn display_name_3708(pool: &PgPool, member: Uuid) -> String {
+    sqlx::query_scalar("SELECT display_name FROM member WHERE id=$1")
+        .bind(member)
+        .fetch_one(pool)
+        .await
+        .expect("display name")
+}
+
+async fn approval_status_3708(pool: &PgPool, approval: Uuid) -> String {
+    sqlx::query_scalar("SELECT status::text FROM approval WHERE id=$1")
+        .bind(approval)
+        .fetch_one(pool)
+        .await
+        .expect("approval status")
+}
+
+/// **agent.rename for oneself (증보 V4).** The approver is the agent's *owner*
+/// (not an admin) and the approval executes; a third party who is neither the
+/// owner nor an admin is `role_required`; the strict guard refuses every hostile
+/// spelling; handle and every other member's name stay put; the broadcast and
+/// audit rows are written; the name collision rule covers display names AND
+/// handles under disguise.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_agent_renames_itself_after_its_owner_approves() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (owner, owner_jwt) = seed_human_3708(&su, &fixture, "owner", "member").await;
+    let (_third, third_jwt) = seed_human_3708(&su, &fixture, "third", "member").await;
+    set_agent_owner_3708(&su, fixture.hosted_agent, Some(owner)).await;
+    let _agent_handle = tidy_agent_3708(&su, fixture.hosted_agent, "Hermes").await;
+    let before_other = display_name_3708(&su, fixture.managed_agent).await;
+    let handle_before: String = sqlx::query_scalar("SELECT handle FROM member WHERE id=$1")
+        .bind(fixture.hosted_agent)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+
+    // ---- the hostile spellings, all one refusal ----------------------------
+    let human_name = display_name_3708(&su, fixture.human).await;
+    let mut answers = Vec::new();
+    for hostile in [
+        "[보안 재인증](https://evil.example)".to_string(),
+        "@Person owner".to_string(),
+        "<@Person owner>".to_string(),
+        "Zero\u{200B}Width".to_string(),
+        "admin".to_string(),
+        "oort".to_string(),
+        "x".repeat(40),
+        // Someone else's name, handle, case, width and look-alike variants.
+        human_name.to_lowercase(),
+        human_name.to_uppercase(),
+        "Ｐｅｒｓｏｎ ｏｗｎｅｒ".to_string(),
+        "Pеrson owner".to_string(), // Cyrillic е
+        before_other.clone(),
+        before_other.to_uppercase(),
+        // Reserved words anywhere, ASCII look-alikes, and a whole-word prefix of
+        // another member's name (`@Tools Human` would also mention "Tools").
+        "Admin 2".to_string(),
+        "Adm1n".to_string(),
+        "Oort Support".to_string(),
+        "Tools".to_string(),
+        "Tools Human Bot".to_string(),
+        "T00ls Human".to_string(),
+    ] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "agent.rename",
+            json!({"displayName": hostile}),
+        )
+        .await;
+        answers.push((status, refused["error"].clone()));
+        assert_eq!(status, 400, "{hostile:?} must be refused: {refused}");
+    }
+    assert!(answers.iter().all(|a| a.1 == answers[0].1), "{answers:?}");
+    assert_eq!(display_name_3708(&su, fixture.hosted_agent).await, "Hermes");
+
+    // ---- a good proposal ---------------------------------------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.rename",
+        json!({"displayName": "Navigator 🧭"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap())
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(card["action"]["required_role"], json!("agent_editor"));
+    let rows = card["action"]["rows"].as_array().unwrap().clone();
+    let row = |label: &str| {
+        rows.iter().find(|r| r["label"] == label).unwrap()["value"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert!(row("대상 에이전트").contains("Hermes") && row("대상 에이전트").contains("에이전트"));
+    assert_eq!(row("이름 변경"), "Hermes → Navigator 🧭");
+    assert!(
+        !card["summary"].as_str().unwrap().contains("다른 에이전트"),
+        "a self-rename does not claim to rename another agent"
+    );
+
+    // ---- a third party who is neither the owner nor an admin ---------------
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &third_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert_eq!(display_name_3708(&su, fixture.hosted_agent).await, "Hermes");
+    assert_eq!(approval_status_3708(&su, approval).await, "pending");
+
+    // ---- the agent cannot approve its own rename ---------------------------
+    let agent_try = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/approvals/{approval}/decision",
+            fixture.workspace
+        ))
+        .bearer_auth(&fixture.hosted_bearer)
+        .json(&json!({"approvalId": approval, "approve": true,
+                      "clientDecisionId": Uuid::new_v4()}))
+        .send()
+        .await
+        .expect("agent decision responds");
+    assert!(matches!(agent_try.status().as_u16(), 401 | 403));
+    assert_eq!(display_name_3708(&su, fixture.hosted_agent).await, "Hermes");
+
+    // ---- the OWNER (not an admin) approves ---------------------------------
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &owner_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(approved["result"]["actionId"], json!("agent.rename"));
+    assert_eq!(
+        approved["result"]["ref"],
+        json!({"type": "agent", "id": fixture.hosted_agent.to_string()})
+    );
+    assert!(approved["result"].get("secretOnce").is_none());
+    assert_eq!(
+        display_name_3708(&su, fixture.hosted_agent).await,
+        "Navigator 🧭"
+    );
+    let handle_after: String = sqlx::query_scalar("SELECT handle FROM member WHERE id=$1")
+        .bind(fixture.hosted_agent)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(handle_after, handle_before, "the handle is never renamed");
+    assert_eq!(
+        display_name_3708(&su, fixture.managed_agent).await,
+        before_other
+    );
+
+    let detail: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='member.renamed'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(detail["old"], json!("Hermes"));
+    assert_eq!(detail["new"], json!("Navigator 🧭"));
+    assert_eq!(detail["kind"], json!("agent"));
+    assert_eq!(detail["managed"], json!(false));
+    assert_eq!(detail["via_agent"], json!(fixture.hosted_agent.to_string()));
+    assert_eq!(detail["approval_id"], json!(approval.to_string()));
+    assert_eq!(
+        audit_count_3706(&su, fixture.workspace, "action.approved").await,
+        1
+    );
+
+    let broadcasts: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 \
+           AND payload->'data'->>'type' = 'member.renamed' \
+           AND payload->'data'->'payload'->>'member_id' = upper($2)",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent.to_string())
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let channels: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM membership WHERE member_id=$1 AND left_at IS NULL",
+    )
+    .bind(fixture.hosted_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        broadcasts, channels,
+        "one roster broadcast per channel the agent is in"
+    );
+    assert!(broadcasts > 0);
+
+    // ---- the same name again is a no-op, not an error (own current name) ---
+    let (status, again) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.rename",
+        json!({"displayName": "navigator 🧭"}),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "an agent may propose its own current name: {again}"
+    );
+}
+
+/// **Managing another agent (증보 V4-M).** Only an active agent with the same,
+/// non-NULL, active human owner is a target; everything else is one refusal. The
+/// approver is judged against the TARGET: a person who owns only the proposer is
+/// `role_required`. A target whose owner changed after the card was drawn is
+/// stale. A second pending rename of the same target is a conflict, and
+/// concurrent renames are serialised by the workspace display-name lock.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_agent_can_rename_only_agents_with_the_same_owner() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+    let (owner, owner_jwt) = seed_human_3708(&su, &fixture, "owner", "member").await;
+    let (other, other_jwt) = seed_human_3708(&su, &fixture, "other", "member").await;
+    let _a = tidy_agent_3708(&su, fixture.hosted_agent, "Alpha").await;
+    let b_handle = tidy_agent_3708(&su, fixture.managed_agent, "Beta").await;
+    let c_handle = tidy_agent_3708(&su, fixture.connect_only_agent, "Gamma").await;
+    set_agent_owner_3708(&su, fixture.hosted_agent, Some(owner)).await;
+    set_agent_owner_3708(&su, fixture.managed_agent, Some(owner)).await;
+    set_agent_owner_3708(&su, fixture.connect_only_agent, Some(other)).await;
+    let human_handle: String = sqlx::query_scalar("SELECT handle FROM member WHERE id=$1")
+        .bind(fixture.human)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+
+    // ---- targets that are not managed all look the same --------------------
+    let mut answers = Vec::new();
+    for target in [
+        c_handle.clone(),     // another owner
+        human_handle.clone(), // a human
+        "no-such-handle".to_string(),
+        "Not A Handle".to_string(),
+    ] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "agent.rename",
+            json!({"displayName": "Renamed", "targetHandle": target}),
+        )
+        .await;
+        assert_eq!(status, 400, "{target}: {refused}");
+        answers.push(refused["error"].clone());
+    }
+    // An ownerless target is not managed either.
+    set_agent_owner_3708(&su, fixture.managed_agent, None).await;
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.rename",
+        json!({"displayName": "Renamed", "targetHandle": b_handle}),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+    answers.push(refused["error"].clone());
+    set_agent_owner_3708(&su, fixture.managed_agent, Some(owner)).await;
+    // The proposer cannot take its own name onto the target.
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.rename",
+        json!({"displayName": "alpha", "targetHandle": b_handle}),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+    answers.push(refused["error"].clone());
+    assert!(answers.iter().all(|a| *a == answers[0]), "{answers:?}");
+
+    // ---- a managed target ---------------------------------------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.rename",
+        json!({"displayName": "Beta Prime", "targetHandle": b_handle}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap())
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert!(
+        card["summary"].as_str().unwrap().contains("다른 에이전트"),
+        "the card says it renames ANOTHER agent: {card}"
+    );
+    let rows = card["action"]["rows"].as_array().unwrap();
+    assert!(rows
+        .iter()
+        .any(|r| r["label"] == "이름 변경" && r["value"] == "Beta → Beta Prime"));
+
+    // A second pending rename of the same target is a conflict.
+    let (status, dup) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.rename",
+        json!({"displayName": "Beta Again", "targetHandle": b_handle}),
+    )
+    .await;
+    assert_eq!(status, 409, "{dup}");
+
+    // The owner of the PROPOSER only is not an approver once the target moved:
+    // the target changes hands, `other` (neither owner nor admin) tries, then
+    // the real new owner is judged against the target and the card is stale.
+    set_agent_owner_3708(&su, fixture.managed_agent, Some(other)).await;
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &owner_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "owns the proposer, not the target: {refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert_eq!(display_name_3708(&su, fixture.managed_agent).await, "Beta");
+    // The target's new owner is eligible, but the relationship the card was
+    // drawn from no longer holds: stale, nothing spent.
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &other_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    // A non-admin is told only `role_required` while the card is unresolvable.
+    assert_eq!(status, 403, "{stale}");
+    assert_eq!(stale["status"], "role_required");
+    // An admin sees the truth: the proposal is stale.
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(stale["status"], "action_args_invalid");
+    assert_eq!(approval_status_3708(&su, approval).await, "pending");
+    assert_eq!(display_name_3708(&su, fixture.managed_agent).await, "Beta");
+
+    // ---- restore the relationship: the target's owner approves -------------
+    set_agent_owner_3708(&su, fixture.managed_agent, Some(owner)).await;
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &owner_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        display_name_3708(&su, fixture.managed_agent).await,
+        "Beta Prime"
+    );
+    assert_eq!(display_name_3708(&su, fixture.hosted_agent).await, "Alpha");
+    let detail: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='member.renamed'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(detail["managed"], json!(true));
+    assert_eq!(
+        detail["target_agent"],
+        json!(fixture.managed_agent.to_string())
+    );
+    assert_eq!(detail["owner_member_id"], json!(owner.to_string()));
+    assert_eq!(detail["via_agent"], json!(fixture.hosted_agent.to_string()));
+}
+
+/// The workspace display-name lock is real: while another transaction holds it,
+/// an approved rename waits instead of racing the collision check.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn renames_are_serialised_by_the_workspace_display_name_lock() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let _a = tidy_agent_3708(&su, fixture.hosted_agent, "Alpha").await;
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "agent.rename",
+        json!({"displayName": "Zeta"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+
+    let mut holder = su.begin().await.expect("holder transaction");
+    momo_messaging::lock_display_name_namespace_in_tx(&mut holder, fixture.workspace)
+        .await
+        .expect("take the namespace lock");
+    let (base2, jwt, workspace) = (base.clone(), fixture.human_jwt.clone(), fixture.workspace);
+    let mut decision = tokio::spawn(async move {
+        let client = reqwest::Client::new();
+        decide_as(
+            &client,
+            &base2,
+            workspace,
+            &jwt,
+            approval,
+            true,
+            Uuid::new_v4(),
+        )
+        .await
+    });
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(900), &mut decision)
+            .await
+            .is_err(),
+        "the rename ran while another transaction held the display-name lock"
+    );
+    assert_eq!(display_name_3708(&su, fixture.hosted_agent).await, "Alpha");
+    holder.commit().await.expect("release the lock");
+    let (status, _h, body) = decision.await.expect("decision task");
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(display_name_3708(&su, fixture.hosted_agent).await, "Zeta");
+}
+
+/// **The human route (증보 V4).** Owner or admin only; the person's own choice
+/// follows the join rule (parentheses allowed) but may not collide with another
+/// member's name or handle; an agent bearer cannot use it; only agents can be
+/// renamed through it.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_human_rename_route_is_for_the_owner_or_an_admin_only() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (owner, owner_jwt) = seed_human_3708(&su, &fixture, "owner", "member").await;
+    let (_third, third_jwt) = seed_human_3708(&su, &fixture, "third", "member").await;
+    set_agent_owner_3708(&su, fixture.hosted_agent, Some(owner)).await;
+    let _ = tidy_agent_3708(&su, fixture.hosted_agent, "Hermes").await;
+    let other_name = tidy_agent_3708(&su, fixture.managed_agent, "Managed One").await;
+    let url = format!(
+        "{base}/v1/workspaces/{}/agents/{}",
+        fixture.workspace, fixture.hosted_agent
+    );
+    let patch = |jwt: &str, body: Value| client.patch(&url).bearer_auth(jwt).json(&body).send();
+
+    // A third party: 403. An agent bearer: refused. Nothing changed.
+    let response = patch(&third_jwt, json!({"displayName": "Hijack"}))
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 403);
+    let response = patch(&fixture.hosted_bearer, json!({"displayName": "Self"}))
+        .await
+        .unwrap();
+    assert!(
+        matches!(response.status().as_u16(), 401 | 403),
+        "{}",
+        response.status()
+    );
+    assert_eq!(display_name_3708(&su, fixture.hosted_agent).await, "Hermes");
+
+    // A collision (another member's handle, name, disguise) is 409.
+    for taken in [
+        other_name.clone(),
+        "managed one".to_string(),
+        "ＭＡＮＡＧＥＤ ＯＮＥ".to_string(),
+        "Mаnaged One".to_string(), // Cyrillic а
+    ] {
+        let response = patch(&owner_jwt, json!({"displayName": taken}))
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 409, "{taken}");
+    }
+    // Invisible, reordering and line-breaking characters are refused even though
+    // a person chose them.
+    for hidden in ["Zero\u{200B}Width", "Flip\u{202E}ped", "two\nlines", "ㅤ"] {
+        let response = patch(&owner_jwt, json!({"displayName": hidden}))
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 400, "{hidden:?}");
+    }
+    // A non-admin cannot tell a human id or an unknown id from a real agent:
+    // 403 for all three (the 404 is only for someone allowed to know).
+    for target in [Uuid::new_v4(), fixture.human, fixture.managed_agent] {
+        let response = client
+            .patch(format!(
+                "{base}/v1/workspaces/{}/agents/{target}",
+                fixture.workspace
+            ))
+            .bearer_auth(&third_jwt)
+            .json(&json!({"displayName": "Nope"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 403, "{target}");
+    }
+    // Empty and unknown keys are 400/422, a human id is 404 for an admin.
+    let response = patch(&owner_jwt, json!({"displayName": "   "}))
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 400);
+    let response = patch(
+        &owner_jwt,
+        json!({"displayName": "Ok", "handle": "newhandle"}),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(response.status().as_u16(), 400 | 422));
+    let human_url = format!(
+        "{base}/v1/workspaces/{}/agents/{}",
+        fixture.workspace, fixture.human
+    );
+    let response = client
+        .patch(&human_url)
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"displayName": "Not An Agent"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status().as_u16(),
+        404,
+        "a human is not renamable here"
+    );
+    assert_eq!(display_name_3708(&su, fixture.hosted_agent).await, "Hermes");
+
+    // The owner (not an admin) renames it — the person's choice, parentheses and all.
+    let response = patch(&owner_jwt, json!({"displayName": "  김 인턴 (비서)  "}))
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["member"]["displayName"], json!("김 인턴 (비서)"));
+    assert_eq!(body["member"]["kind"], json!("agent"));
+    assert_eq!(
+        display_name_3708(&su, fixture.hosted_agent).await,
+        "김 인턴 (비서)"
+    );
+    // An admin may too; renaming to its own current name is allowed.
+    let response = client
+        .patch(&url)
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"displayName": "김 인턴 (비서)"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+
+    let detail: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='member.renamed' \
+          ORDER BY created_at LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(detail["kind"], json!("agent"));
+    assert_eq!(detail["new"], json!("김 인턴 (비서)"));
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 2026-10-11 S4 (#3709) — hosted.channels.grant
+// ---------------------------------------------------------------------------
+
+async fn approved_of_3709(pool: &PgPool, agent: Uuid) -> Vec<Uuid> {
+    sqlx::query_scalar(
+        "SELECT approved_channel_ids FROM hosted_agent_connection WHERE agent_member_id=$1",
+    )
+    .bind(agent)
+    .fetch_one(pool)
+    .await
+    .expect("approved channels")
+}
+
+/// **hosted.channels.grant (증보 V5, V11).**
+///
+/// The only way an agent asks for more reach, and the narrowest one: its OWN
+/// connection, channels it can already see (public, or private with it inside),
+/// admin approval, a 50-channel ceiling, one indistinguishable refusal for
+/// everything else. The confirm columns and every other agent's connection are
+/// untouched; the grant also seats the agent, so it can actually post.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_channel_grant_widens_only_the_proposers_own_connection() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+
+    // Q: public, the agent is not in it. R: private, the agent IS in it.
+    // S: private, the agent is not in it. D: a DM the agent is in.
+    let (q, q_name) = seed_channel_3707(&su, &fixture, "public", &[]).await;
+    let (r, r_name) = seed_channel_3707(
+        &su,
+        &fixture,
+        "private",
+        &[(fixture.hosted_agent, "member")],
+    )
+    .await;
+    let (_s, s_name) = seed_channel_3707(&su, &fixture, "private", &[]).await;
+    let dm = Uuid::new_v4();
+    let dm_name = format!("dm-{}", &dm.simple().to_string()[..10]);
+    sqlx::query(
+        "INSERT INTO channel(id, workspace_id, kind, name, dm_key, created_by) \
+         VALUES($1,$2,'dm',$3,$4,$5)",
+    )
+    .bind(dm)
+    .bind(fixture.workspace)
+    .bind(&dm_name)
+    .bind(dm.to_string())
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)")
+        .bind(fixture.workspace)
+        .bind(dm)
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    let own_before = approved_of_3709(&su, fixture.hosted_agent).await;
+    let other_before = approved_of_3709(&su, fixture.connect_only_agent).await;
+    let confirm_before = hosted_confirm_columns_3706(&su, &fixture).await;
+
+    // ---- unseen / ineligible channels: one refusal, nothing written --------
+    let approvals_before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM approval WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    let mut answers = Vec::new();
+    for channels in [
+        json!([s_name]),
+        json!([dm_name]),
+        json!(["no-such-room"]),
+        json!([q_name, s_name]), // one bad name poisons the whole call
+        json!([fixture_channel_name(&su, fixture.channel).await]), // already approved
+    ] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "hosted.channels.grant",
+            json!({"channels": channels}),
+        )
+        .await;
+        answers.push((status, refused["error"].clone()));
+    }
+    assert!(
+        answers.iter().all(|a| a.0 == 400 && a.1 == answers[0].1),
+        "{answers:?}"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM approval WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap(),
+        approvals_before
+    );
+    // No key can point at another agent's connection.
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "hosted.channels.grant",
+        json!({"channels": [q_name], "connectionId": Uuid::new_v4()}),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+
+    // ---- a good proposal: Q (public) and R (private, member) ----------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "hosted.channels.grant",
+        json!({"channels": [format!("#{q_name}"), r_name]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap())
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(card["action"]["required_role"], json!("admin"));
+    let rows = card["action"]["rows"].as_array().unwrap().clone();
+    assert!(rows.iter().any(|r| r["label"] == "채널"
+        && r["value"]
+            .as_str()
+            .unwrap()
+            .starts_with(&format!("#{q_name} · 공개 · "))));
+    assert!(rows.iter().any(|r| r["label"] == "채널"
+        && r["value"]
+            .as_str()
+            .unwrap()
+            .starts_with(&format!("#{r_name} · 비공개 · "))));
+    assert!(rows.iter().any(|r| r["label"] == "승인 채널 수"
+        && r["value"] == format!("{}개 → {}개", own_before.len(), own_before.len() + 2)));
+    assert_eq!(
+        approved_of_3709(&su, fixture.hosted_agent).await,
+        own_before
+    );
+
+    // ---- a non-admin cannot widen the agent's reach ------------------------
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &plain_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert_eq!(
+        approved_of_3709(&su, fixture.hosted_agent).await,
+        own_before
+    );
+    assert_eq!(
+        membership_role_3707(&su, q, fixture.hosted_agent).await,
+        None
+    );
+
+    // ---- the admin approves ------------------------------------------------
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        approved["result"]["actionId"],
+        json!("hosted.channels.grant")
+    );
+    assert_eq!(
+        approved["result"]["ref"],
+        json!({"type": "hosted_connection", "id": fixture.hosted_connection.to_string()})
+    );
+    assert!(approved["result"].get("secretOnce").is_none());
+    let own_after = approved_of_3709(&su, fixture.hosted_agent).await;
+    assert_eq!(own_after.len(), own_before.len() + 2);
+    assert!(own_after.contains(&q) && own_after.contains(&r));
+    assert_eq!(
+        membership_role_3707(&su, q, fixture.hosted_agent)
+            .await
+            .as_deref(),
+        Some("member"),
+        "the grant seats the agent: approved AND a member"
+    );
+    assert_eq!(
+        membership_role_3707(&su, r, fixture.hosted_agent)
+            .await
+            .as_deref(),
+        Some("member")
+    );
+    // The confirm columns and the DM approvals never move; nor does any other
+    // agent's connection.
+    assert_eq!(
+        hosted_confirm_columns_3706(&su, &fixture).await,
+        confirm_before
+    );
+    assert_eq!(
+        approved_of_3709(&su, fixture.connect_only_agent).await,
+        other_before
+    );
+    let covered: Vec<Uuid> =
+        sqlx::query_scalar("SELECT unnest(hosted_connection_channel_ids($1,$2))")
+            .bind(fixture.workspace)
+            .bind(fixture.hosted_connection)
+            .fetch_all(&su)
+            .await
+            .unwrap();
+    assert!(covered.contains(&q) && covered.contains(&r));
+
+    let detail: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 \
+           AND action='hosted_connection.channels_granted'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        detail["connection_id"],
+        json!(fixture.hosted_connection.to_string())
+    );
+    assert_eq!(detail["via_agent"], json!(fixture.hosted_agent.to_string()));
+    let mut granted: Vec<String> = detail["channel_ids"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    granted.sort();
+    let mut expected = vec![q.to_string(), r.to_string()];
+    expected.sort();
+    assert_eq!(granted, expected);
+
+    // The agent reads the ids from its outcome line and can post in Q.
+    let (status, posted) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_message_post",
+        json!({"channelId": q, "clientMsgId": Uuid::new_v4(), "body": "안녕하세요"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{posted}");
+    let line: String = sqlx::query_scalar(
+        "SELECT body FROM message WHERE workspace_id=$1 AND channel_id=$2 \
+           AND props ? 'momo.action_result' ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(
+        line.contains(&q.to_string()) && line.contains(&r.to_string()),
+        "{line}"
+    );
+}
+
+async fn fixture_channel_name(pool: &PgPool, channel: Uuid) -> String {
+    sqlx::query_scalar("SELECT name FROM channel WHERE id=$1")
+        .bind(channel)
+        .fetch_one(pool)
+        .await
+        .expect("channel name")
+}
+
+/// The 50-channel ceiling holds at proposal time AND at the tap, and a refused
+/// grant writes neither the array nor the membership.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_channel_grant_cannot_pass_fifty_approved_channels() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (c1, n1) = seed_channel_3707(&su, &fixture, "public", &[]).await;
+    let (_c2, n2) = seed_channel_3707(&su, &fixture, "public", &[]).await;
+    let (c3, n3) = seed_channel_3707(&su, &fixture, "public", &[]).await;
+    let set_to = |count: usize| {
+        let su = su.clone();
+        let connection = fixture.hosted_connection;
+        let base_channel = fixture.channel;
+        async move {
+            sqlx::query(
+                // The channel the agent is mentioned in stays approved (or no job
+                // would reach it); the rest are filler ids up to `count`.
+                "UPDATE hosted_agent_connection SET approved_channel_ids = \
+                   ARRAY[$3::uuid] || ARRAY(SELECT gen_random_uuid() \
+                                              FROM generate_series(1,$2::int - 1)) \
+                 WHERE id=$1",
+            )
+            .bind(connection)
+            .bind(count as i32)
+            .bind(base_channel)
+            .execute(&su)
+            .await
+            .unwrap();
+        }
+    };
+
+    // 49 + 2 > 50: refused when proposed.
+    set_to(49).await;
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "hosted.channels.grant",
+        json!({"channels": [n1.clone(), n2]}),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+    // 49 + 1 = 50: allowed.
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "hosted.channels.grant",
+        json!({"channels": [n1]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    // …but the set grew to 50 before the tap: stale, nothing written.
+    set_to(50).await;
+    let (status, _h, capped) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{capped}");
+    assert_eq!(capped["status"], "action_args_invalid");
+    assert_eq!(approved_of_3709(&su, fixture.hosted_agent).await.len(), 50);
+    assert_eq!(
+        membership_role_3707(&su, c1, fixture.hosted_agent).await,
+        None
+    );
+
+    // The same at the database function itself: the 51st is refused and the
+    // membership is not written (the array is checked first).
+    let mut tx = su.begin().await.unwrap();
+    let outcome = momo_auth::grant_hosted_channels_in_tx(
+        &mut tx,
+        fixture.workspace,
+        fixture.hosted_connection,
+        fixture.hosted_agent,
+        &[c3],
+    )
+    .await
+    .unwrap();
+    assert!(outcome.is_none(), "the 51st channel must be refused");
+    tx.commit().await.unwrap();
+    assert_eq!(
+        membership_role_3707(&su, c3, fixture.hosted_agent).await,
+        None
+    );
+    let _ = n3;
+
+    // The function also refuses another agent's connection id.
+    let other_connection: Uuid =
+        sqlx::query_scalar("SELECT id FROM hosted_agent_connection WHERE agent_member_id=$1")
+            .bind(fixture.connect_only_agent)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    set_to(1).await;
+    let mut tx = su.begin().await.unwrap();
+    let outcome = momo_auth::grant_hosted_channels_in_tx(
+        &mut tx,
+        fixture.workspace,
+        other_connection,
+        fixture.hosted_agent, // the proposer is NOT this connection's agent
+        &[c3],
+    )
+    .await
+    .unwrap();
+    assert!(
+        outcome.is_none(),
+        "a connection of another agent is not grantable"
+    );
+    tx.commit().await.unwrap();
+    assert_eq!(
+        membership_role_3707(&su, c3, fixture.hosted_agent).await,
+        None
+    );
+}
+
+/// A grant gone stale, or reached by the wrong caller, writes nothing: the
+/// connection stopped being live, the agent left the private room, an agent tries
+/// to decide, and the database function itself refuses a private room the agent is
+/// not in (the visibility rule is enforced there too, not only by the resolver).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_stale_channel_grant_changes_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (q, q_name) = seed_channel_3707(&su, &fixture, "public", &[]).await;
+    let (r, r_name) = seed_channel_3707(
+        &su,
+        &fixture,
+        "private",
+        &[(fixture.hosted_agent, "member")],
+    )
+    .await;
+    let (hidden, _) = seed_channel_3707(&su, &fixture, "private", &[]).await;
+    let before = approved_of_3709(&su, fixture.hosted_agent).await;
+
+    // The connection stops being live before the tap.
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "hosted.channels.grant",
+        json!({"channels": [q_name]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let first = proposed_approval_3706(&proposed);
+    // An agent bearer cannot decide it.
+    let agent_try = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/approvals/{first}/decision",
+            fixture.workspace
+        ))
+        .bearer_auth(&fixture.hosted_bearer)
+        .json(&json!({"approvalId": first, "approve": true, "clientDecisionId": Uuid::new_v4()}))
+        .send()
+        .await
+        .unwrap();
+    assert!(matches!(agent_try.status().as_u16(), 401 | 403));
+    assert_eq!(approved_of_3709(&su, fixture.hosted_agent).await, before);
+
+    // (`proved_at` cannot be cleared on an active connection — the shape check
+    // forbids it — so the credential is revoked instead.)
+    sqlx::query("UPDATE token SET revoked_at = now() WHERE id=$1")
+        .bind(fixture.hosted_token)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        first,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(stale["status"], "action_args_invalid");
+    assert_eq!(approved_of_3709(&su, fixture.hosted_agent).await, before);
+    assert_eq!(
+        membership_role_3707(&su, q, fixture.hosted_agent).await,
+        None
+    );
+    sqlx::query("UPDATE token SET revoked_at = NULL WHERE id=$1")
+        .bind(fixture.hosted_token)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // The agent leaves the private room before the tap.
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "hosted.channels.grant",
+        json!({"channels": [r_name]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    sqlx::query("UPDATE membership SET left_at = now() WHERE channel_id=$1 AND member_id=$2")
+        .bind(r)
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(approved_of_3709(&su, fixture.hosted_agent).await, before);
+
+    // The function refuses a private room the agent is not in, on its own.
+    let mut tx = su.begin().await.unwrap();
+    let outcome = momo_auth::grant_hosted_channels_in_tx(
+        &mut tx,
+        fixture.workspace,
+        fixture.hosted_connection,
+        fixture.hosted_agent,
+        &[hidden],
+    )
+    .await
+    .unwrap();
+    assert!(outcome.is_none(), "a private room the agent cannot see");
+    tx.commit().await.unwrap();
+    assert_eq!(
+        membership_role_3707(&su, hidden, fixture.hosted_agent).await,
+        None
+    );
+    assert_eq!(approved_of_3709(&su, fixture.hosted_agent).await, before);
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 2026-10-11 S5 (#3710) — workspace.settings.update
+// ---------------------------------------------------------------------------
+
+async fn settings_bag_3710(pool: &PgPool, workspace: Uuid) -> Value {
+    sqlx::query_scalar("SELECT settings FROM workspace WHERE id=$1")
+        .bind(workspace)
+        .fetch_one(pool)
+        .await
+        .expect("settings bag")
+}
+
+/// **workspace.settings.update (증보 V7, V11).**
+///
+/// Two keys only, operator-gated, replaced whole for `role_labels`, cleared by
+/// `null`; every other key of the bag is byte-identical before and after; the
+/// audit row names the keys and carries no value; a stale card (the old value
+/// moved) is refused with the approval still pending.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_approved_settings_update_changes_only_the_two_keys() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (_plain, plain_jwt) = seed_human_3708(&su, &fixture, "plain", "member").await;
+    let start = json!({
+        "allowed_agent_models": ["hermes-agent"],
+        "role_labels": {"member": "팀원"},
+        "welcome_prompt": "예전 문구"
+    });
+    sqlx::query("UPDATE workspace SET settings=$2 WHERE id=$1")
+        .bind(fixture.workspace)
+        .bind(&start)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // ---- keys this action does not own: refused before any card ------------
+    let approvals_before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM approval WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    for args in [
+        json!({"allowedAgentModels": ["anything"]}),
+        json!({"welcomeAgentMemberId": fixture.hosted_agent}),
+        json!({"welcomePrompt": "ok", "allowedAgentModels": []}),
+        json!({"welcomePrompt": "가".repeat(501)}),
+        json!({}),
+    ] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "workspace.settings.update",
+            args.clone(),
+        )
+        .await;
+        assert_eq!(status, 400, "{args}: {refused}");
+    }
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM approval WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap(),
+        approvals_before
+    );
+
+    // ---- a good proposal ----------------------------------------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "workspace.settings.update",
+        json!({"welcomePrompt": "새 환영 문구", "roleLabels": {"owner": "대표"}}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap())
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(card["action"]["required_role"], json!("workspace_operator"));
+    let rows = card["action"]["rows"].as_array().unwrap().clone();
+    let row = |label: &str| {
+        rows.iter().find(|r| r["label"] == label).unwrap()["value"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(row("환영 문구"), "\"예전 문구\" → \"새 환영 문구\"");
+    assert_eq!(row("역할 이름"), "member=\"팀원\" → owner=\"대표\"");
+    assert_eq!(settings_bag_3710(&su, fixture.workspace).await, start);
+
+    // ---- a non-operator and an agent cannot approve ------------------------
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &plain_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    let agent_try = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/approvals/{approval}/decision",
+            fixture.workspace
+        ))
+        .bearer_auth(&fixture.hosted_bearer)
+        .json(&json!({"approvalId": approval, "approve": true,
+                      "clientDecisionId": Uuid::new_v4()}))
+        .send()
+        .await
+        .unwrap();
+    assert!(matches!(agent_try.status().as_u16(), 401 | 403));
+    assert_eq!(settings_bag_3710(&su, fixture.workspace).await, start);
+
+    // ---- the admin approves ------------------------------------------------
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        approved["result"]["actionId"],
+        json!("workspace.settings.update")
+    );
+    assert_eq!(
+        approved["result"]["ref"],
+        json!({"type": "workspace_settings", "id": fixture.workspace.to_string()})
+    );
+    assert!(approved["result"].get("secretOnce").is_none());
+    assert_eq!(
+        settings_bag_3710(&su, fixture.workspace).await,
+        json!({
+            "allowed_agent_models": ["hermes-agent"],
+            "role_labels": {"owner": "대표"},
+            "welcome_prompt": "새 환영 문구"
+        }),
+        "role_labels is replaced whole; every other key is untouched"
+    );
+
+    // ---- audit names the keys and carries no value --------------------------
+    let detail: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='workspace_setting.updated'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(detail["keys"], json!(["welcome_prompt", "role_labels"]));
+    assert_eq!(detail["via_agent"], json!(fixture.hosted_agent.to_string()));
+    assert_eq!(detail["approval_id"], json!(approval.to_string()));
+    let rendered = detail.to_string();
+    assert!(
+        !rendered.contains("새 환영 문구")
+            && !rendered.contains("대표")
+            && !rendered.contains("예전"),
+        "the audit row must not carry the values: {rendered}"
+    );
+    assert_eq!(
+        audit_count_3706(&su, fixture.workspace, "action.approved").await,
+        1
+    );
+    let line: String = sqlx::query_scalar(
+        "SELECT body FROM message WHERE workspace_id=$1 AND channel_id=$2 \
+           AND props ? 'momo.action_result' ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(line, "설정을 바꿨어요: 환영 문구, 역할 이름");
+
+    // ---- `null` clears one key and leaves the other -------------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "workspace.settings.update",
+        json!({"welcomePrompt": Value::Null}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let (status, _h, cleared) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{cleared}");
+    assert_eq!(
+        settings_bag_3710(&su, fixture.workspace).await,
+        json!({"allowed_agent_models": ["hermes-agent"], "role_labels": {"owner": "대표"}})
+    );
+
+    // ---- a card whose old value moved is stale ------------------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "workspace.settings.update",
+        json!({"roleLabels": {"admin": "관리자"}}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let stale_approval = proposed_approval_3706(&proposed);
+    sqlx::query(
+        "UPDATE workspace SET settings = jsonb_set(settings, '{role_labels}', '{\"guest\":\"손님\"}') \
+          WHERE id=$1",
+    )
+    .bind(fixture.workspace)
+    .execute(&su)
+    .await
+    .unwrap();
+    let moved = settings_bag_3710(&su, fixture.workspace).await;
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        stale_approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(stale["status"], "action_args_invalid");
+    assert_eq!(settings_bag_3710(&su, fixture.workspace).await, moved);
+    assert_eq!(approval_status_3708(&su, stale_approval).await, "pending");
+}
+
+/// The operator gate is `require_workspace_operator`'s set: a workspace admin OR a
+/// principal carrying the platform operator scope — and a plain member with
+/// neither is refused (covered above). Here: a non-admin member whose session
+/// carries `platform:read` may approve.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_platform_operator_who_is_not_an_admin_may_approve_a_settings_update() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (operator, _plain_jwt) = seed_human_3708(&su, &fixture, "operator", "member").await;
+    let jwt = momo_auth::sign_access(
+        operator,
+        fixture.workspace,
+        &["platform:read".to_string()],
+        TEST_JWT_SECRET,
+    )
+    .expect("sign an operator JWT")
+    .token;
+    sqlx::query(
+        "INSERT INTO token(workspace_id, kind, actor_member_id, token_hash, scopes, label) \
+         VALUES($1,'session',$2,digest($3::text,'sha256'),ARRAY['platform:read']::text[],'operator')",
+    )
+    .bind(fixture.workspace)
+    .bind(operator)
+    .bind(&jwt)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "workspace.settings.update",
+        json!({"roleLabels": {"guest": "손님"}}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        settings_bag_3710(&su, fixture.workspace).await["role_labels"],
+        json!({"guest": "손님"})
+    );
+}

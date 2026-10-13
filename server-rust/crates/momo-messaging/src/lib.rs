@@ -63,6 +63,7 @@ pub mod member_rename;
 /// ADR-0196 / #3164 — team-memory digest + receipt reads and `mem_settings` writes (RLS only).
 pub mod memory;
 pub mod message;
+pub mod name_guard;
 pub mod notification_rule;
 pub mod presence;
 pub mod read_state;
@@ -142,8 +143,10 @@ pub use member_avatar::{
     MEMBER_AVATAR_MIMES,
 };
 pub use member_rename::{
-    build_member_renamed_payload, change_own_handle_in_tx, rename_own_display_name_in_tx,
-    DisplayNameRename, HandleChangeRejected, HandleRename, MEMBER_RENAMED_BROADCAST_TYPE,
+    build_member_renamed_payload, change_own_handle_in_tx, load_roster_names_in_tx,
+    lock_display_name_namespace_in_tx, rename_agent_display_name_in_tx,
+    rename_own_display_name_in_tx, DisplayNameRename, HandleChangeRejected, HandleRename,
+    MEMBER_RENAMED_BROADCAST_TYPE,
 };
 pub use memory::{
     accept_proposal_in_tx, bind_mem_reader_guc, clamp_mem_digest_limit, clamp_mem_item_limit,

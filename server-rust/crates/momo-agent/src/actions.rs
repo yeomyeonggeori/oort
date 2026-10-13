@@ -56,6 +56,28 @@ pub const ACTION_TYPE_WORKSPACE_ACTION: &str = "workspace_action";
 /// 「@hermes 초대 링크 하나 만들어줘」 has no path today (ADR-0186 §1.1).
 pub const ACTION_INVITE_CREATE: &str = "invite.create";
 
+/// `channel.create` — create a channel as the approver and, in the same
+/// transaction, bring the proposing agent into it (ADR-0186 증보 V3).
+pub const ACTION_CHANNEL_CREATE: &str = "channel.create";
+
+/// `channel.member.add` — put named members into a channel the proposing agent
+/// can see (ADR-0186 증보 V1-b).
+pub const ACTION_CHANNEL_MEMBER_ADD: &str = "channel.member.add";
+
+/// `agent.rename` — change an agent's display name: the proposer's own, or that
+/// of another agent of the same owner (ADR-0186 증보 V4 / V4-M).
+pub const ACTION_AGENT_RENAME: &str = "agent.rename";
+
+/// `hosted.channels.grant` — widen the **proposing agent's own** hosted
+/// connection by channels it can already see (ADR-0186 증보 V5). The one action
+/// by which an agent asks for more reach; it is deliberately the narrowest.
+pub const ACTION_HOSTED_CHANNELS_GRANT: &str = "hosted.channels.grant";
+
+/// `workspace.settings.update` — change **two** keys of the workspace settings
+/// bag, `welcome_prompt` and `role_labels`, and nothing else (ADR-0186 증보 V7).
+/// There is no general "set a setting" action; a third key is a new amendment.
+pub const ACTION_WORKSPACE_SETTINGS_UPDATE: &str = "workspace.settings.update";
+
 /// What a person is consenting to when they approve (ADR-0186 D3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Risk {
@@ -85,13 +107,25 @@ impl Risk {
 /// card can say 「관리자가 승인해야 합니다」 before anyone taps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequiredRole {
+    /// A workspace owner/admin (`routes::invites::require_admin`).
     Admin,
+    /// The **target agent's** owner, or a workspace admin — the same judgement
+    /// `PUT …/agents/{agent}/profile` applies (`require_profile_editor_in_tx`).
+    /// Unlike every other role this one is judged against a *subject* the
+    /// decision route resolves from the proposal (ADR-0186 증보 V1-c / V4-M), so
+    /// it cannot be checked before the arguments are re-proved.
+    AgentEditor,
+    /// `routes::shared::require_workspace_operator`'s set: a workspace
+    /// owner/admin, or a principal carrying the platform operator scope.
+    WorkspaceOperator,
 }
 
 impl RequiredRole {
     pub fn as_wire(self) -> &'static str {
         match self {
             RequiredRole::Admin => "admin",
+            RequiredRole::AgentEditor => "agent_editor",
+            RequiredRole::WorkspaceOperator => "workspace_operator",
         }
     }
 
@@ -99,10 +133,25 @@ impl RequiredRole {
     /// wire value and the Korean noun cannot drift into different roles.
     pub fn korean(self) -> &'static str {
         match self {
-            RequiredRole::Admin => "관리자",
+            RequiredRole::Admin | RequiredRole::WorkspaceOperator => "관리자",
+            RequiredRole::AgentEditor => "대상 에이전트의 소유자 또는 관리자",
         }
     }
+
+    /// Every variant, so a test can measure the wire vocabulary against the
+    /// OpenAPI enum without a hand-copied list that could omit a new role.
+    pub const ALL: [RequiredRole; 3] = [
+        RequiredRole::Admin,
+        RequiredRole::AgentEditor,
+        RequiredRole::WorkspaceOperator,
+    ];
 }
+
+/// How many `workspace_action` approvals one agent may have `pending` at once
+/// (ADR-0186 증보 V1-e). A run parks on each proposal, so ordinary use never
+/// reaches it; it exists so a misbehaving agent cannot stack cards by re-calling
+/// `oort_action_propose` from several runs.
+pub const MAX_PENDING_WORKSPACE_ACTIONS: i64 = 3;
 
 /// One action this server can be asked to take.
 #[derive(Debug, Clone, Copy)]
@@ -176,16 +225,198 @@ fn invite_create_args_schema() -> Value {
     })
 }
 
+/// The channel kinds a proposal may ask for. `dm` is never creatable here.
+pub const CHANNEL_CREATE_KINDS: [&str; 2] = ["public", "private"];
+/// What `kind` means when a proposal names none: **private**. An agent that wants
+/// a public channel has to say so, and the card shows it.
+pub const CHANNEL_CREATE_DEFAULT_KIND: &str = "private";
+/// `name` bound in UTF-8 bytes (the domain's 80 is characters, but the accepted
+/// alphabet is ASCII, so the two coincide for every legal name).
+pub const CHANNEL_NAME_MAX_BYTES: u64 = 80;
+/// `topic` bound in UTF-8 bytes: the domain's 280 characters at the 4-byte
+/// worst case. The domain normaliser still enforces the 280 characters.
+pub const CHANNEL_TOPIC_MAX_BYTES: u64 = 1_120;
+/// A proposal names at most this many members to add alongside.
+pub const ACTION_MEMBER_HANDLES_MAX: u64 = 10;
+/// A handle is 2..=32 characters; one leading `@` is tolerated, hence 33.
+pub const MEMBER_HANDLE_MAX_BYTES: u64 = 33;
+
+/// `channel.create` arguments (증보 V2).
+fn channel_create_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+            "name": {"type": "string", "minLength": 1, "maxLength": CHANNEL_NAME_MAX_BYTES},
+            "kind": {"type": "string", "enum": CHANNEL_CREATE_KINDS},
+            "topic": {"type": "string", "maxLength": CHANNEL_TOPIC_MAX_BYTES},
+            "addProposer": {"type": "boolean"},
+            "memberHandles": {
+                "type": "array",
+                "maxItems": ACTION_MEMBER_HANDLES_MAX,
+                "items": {"type": "string", "minLength": 1, "maxLength": MEMBER_HANDLE_MAX_BYTES}
+            }
+        }
+    })
+}
+
+/// `channel.member.add` arguments (증보 V2): the channel by **name**, members by
+/// handle, no role (always `member`).
+fn channel_member_add_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["channel", "memberHandles"],
+        "properties": {
+            "channel": {"type": "string", "minLength": 1, "maxLength": CHANNEL_REF_MAX_BYTES},
+            "memberHandles": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": ACTION_MEMBER_HANDLES_MAX,
+                "items": {"type": "string", "minLength": 1, "maxLength": MEMBER_HANDLE_MAX_BYTES}
+            }
+        }
+    })
+}
+
+/// The raw `displayName` an agent may send, in UTF-8 bytes. The real bound is
+/// 32 characters **after** normalisation (`momo_messaging::name_guard`); this is
+/// the first fence and leaves room for a compatibility form that normalises
+/// shorter.
+pub const AGENT_RENAME_NAME_MAX_BYTES: u64 = 256;
+
+/// `agent.rename` arguments (증보 V2): the new name, and optionally which of the
+/// proposer's managed agents (by handle) — absent means the proposer itself.
+fn agent_rename_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["displayName"],
+        "properties": {
+            "displayName": {"type": "string", "minLength": 1, "maxLength": AGENT_RENAME_NAME_MAX_BYTES},
+            "targetHandle": {"type": "string", "minLength": 1, "maxLength": MEMBER_HANDLE_MAX_BYTES}
+        }
+    })
+}
+
+/// The proposal ceiling on `welcomePrompt`, in characters. The REST surface allows
+/// 2000: this text is read by a *different agent* (the welcome agent), so a
+/// proposal — an agent writing another agent's instructions — gets a quarter.
+pub const WELCOME_PROMPT_PROPOSAL_MAX_CHARS: usize = 500;
+/// The same, as the bytes the tool schema counts (500 characters at the UTF-8
+/// worst case). The domain normaliser enforces the 500 characters.
+pub const WELCOME_PROMPT_PROPOSAL_MAX_BYTES: u64 = 2_000;
+/// Human roles that may carry a display label (`momo_settings::ROLE_LABEL_KEYS`).
+pub const ROLE_LABEL_PROPOSAL_KEYS: [&str; 4] = ["owner", "admin", "member", "guest"];
+/// One role label, in UTF-8 bytes (`momo_settings::MAX_ROLE_LABEL_BYTES`).
+pub const ROLE_LABEL_MAX_BYTES: u64 = 48;
+
+/// `workspace.settings.update` arguments (증보 V2/V7): exactly the two keys, and
+/// at least one. `null` clears a key back to its default; an omitted key is left
+/// alone.
+fn workspace_settings_update_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+            "welcomePrompt": {"type": "string", "maxLength": WELCOME_PROMPT_PROPOSAL_MAX_BYTES},
+            "roleLabels": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "owner": {"type": "string", "minLength": 1, "maxLength": ROLE_LABEL_MAX_BYTES},
+                    "admin": {"type": "string", "minLength": 1, "maxLength": ROLE_LABEL_MAX_BYTES},
+                    "member": {"type": "string", "minLength": 1, "maxLength": ROLE_LABEL_MAX_BYTES},
+                    "guest": {"type": "string", "minLength": 1, "maxLength": ROLE_LABEL_MAX_BYTES}
+                }
+            }
+        }
+    })
+}
+
+/// A proposal names at most this many channels.
+pub const GRANT_CHANNELS_MAX: u64 = 5;
+
+/// `hosted.channels.grant` arguments (증보 V2): channel **names** only. There is
+/// no connection argument — the target is the proposer's own live connection.
+fn hosted_channels_grant_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["channels"],
+        "properties": {
+            "channels": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": GRANT_CHANNELS_MAX,
+                "items": {"type": "string", "minLength": 1, "maxLength": CHANNEL_REF_MAX_BYTES}
+            }
+        }
+    })
+}
+
+/// A channel reference: `#` + the 80-character name.
+pub const CHANNEL_REF_MAX_BYTES: u64 = 81;
+
 /// The complete registry. Order is the catalog's order.
-pub const ACTIONS: &[WorkspaceAction] = &[WorkspaceAction {
-    id: ACTION_INVITE_CREATE,
-    title: "팀원 초대 링크 만들기",
-    summary: "역할과 사용 횟수, 만료를 정해 초대 링크를 하나 만듭니다.",
-    risk: Risk::Approval,
-    required_role: RequiredRole::Admin,
-    effect: "초대 링크를 만듭니다",
-    args_schema: invite_create_args_schema,
-}];
+pub const ACTIONS: &[WorkspaceAction] = &[
+    WorkspaceAction {
+        id: ACTION_INVITE_CREATE,
+        title: "팀원 초대 링크 만들기",
+        summary: "역할과 사용 횟수, 만료를 정해 초대 링크를 하나 만듭니다.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::Admin,
+        effect: "초대 링크를 만듭니다",
+        args_schema: invite_create_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_CHANNEL_CREATE,
+        title: "채널 만들기",
+        summary: "이름과 공개 범위를 정해 채널을 하나 만들고, 이 에이전트와 정한 멤버를 넣습니다.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::Admin,
+        effect: "채널을 만들고, 표시된 대로 이 에이전트와 멤버를 그 채널에 넣습니다",
+        args_schema: channel_create_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_CHANNEL_MEMBER_ADD,
+        title: "채널에 멤버 추가",
+        summary: "이 에이전트가 볼 수 있는 채널에 멤버를 넣습니다. 역할은 멤버로 고정됩니다.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::Admin,
+        effect: "표시된 멤버를 그 채널에 넣습니다",
+        args_schema: channel_member_add_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_AGENT_RENAME,
+        title: "에이전트 이름 바꾸기",
+        summary: "에이전트 한 명의 표시 이름을 바꿉니다. 자기 자신이나 같은 소유자의 에이전트만 대상이 됩니다.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::AgentEditor,
+        effect: "대상 에이전트의 표시 이름을 바꿉니다",
+        args_schema: agent_rename_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_HOSTED_CHANNELS_GRANT,
+        title: "에이전트가 읽고 쓸 채널 늘리기",
+        summary: "이 에이전트의 연결이 읽고 쓸 수 있는 채널을 늘립니다. 이 에이전트 자신의 연결만 대상입니다.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::Admin,
+        effect: "이 에이전트의 연결이 표시된 채널을 읽고 쓸 수 있게 합니다",
+        args_schema: hosted_channels_grant_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_WORKSPACE_SETTINGS_UPDATE,
+        title: "워크스페이스 문구 설정 바꾸기",
+        summary: "환영 문구와 역할 이름, 이 두 가지만 바꿉니다. 지우려면 null을 보냅니다.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::WorkspaceOperator,
+        effect: "표시된 설정(환영 문구·역할 이름)을 바꿉니다",
+        args_schema: workspace_settings_update_args_schema,
+    },
+];
 
 /// An action the product already performs over REST that is **not** proposable
 /// yet, and the sentence that says why.
@@ -212,12 +443,6 @@ pub const DECLARED_NOT_EXECUTABLE: &[DeclaredAction] = &[
         title: "채널 웹훅 발급",
         summary: "채널로 들어오는 웹훅 자격을 하나 발급합니다.",
         unavailable_reason: "웹훅 마스터키 분리(ADR-0004 증보 4)가 랜딩한 뒤에 열립니다.",
-    },
-    DeclaredAction {
-        id: "channel.create",
-        title: "채널 만들기",
-        summary: "이름과 공개 범위를 정해 채널을 하나 만듭니다.",
-        unavailable_reason: "다음 배치에서 열립니다.",
     },
     DeclaredAction {
         id: "member.role.set",
@@ -338,6 +563,272 @@ pub fn invite_create_rows(role: &str, max_uses: i32, expires_in_days: Option<i64
                 expires_in_days.unwrap_or(DEFAULT_INVITE_EXPIRES_IN_DAYS)
             ),
         ),
+    ]
+}
+
+/// The `channel.create` card rows, from the **normalised** arguments and the
+/// members the server resolved (display names are the server's, never the
+/// agent's strings). The 「이 에이전트도 참여」 row is always present and says in
+/// words what `true` widens (증보 V3: approving a channel can widen an agent's
+/// reach, so the person must read it).
+pub fn channel_create_rows(
+    name: &str,
+    kind: &str,
+    topic: Option<&str>,
+    add_proposer: bool,
+    member_names: &[String],
+) -> Vec<Value> {
+    let mut rows = vec![
+        action_row("채널", format!("#{name}")),
+        action_row(
+            "공개 범위",
+            if kind == "public" {
+                "공개"
+            } else {
+                "비공개"
+            },
+        ),
+    ];
+    if let Some(topic) = topic {
+        rows.push(action_row("주제", topic));
+    }
+    rows.push(action_row(
+        "이 에이전트도 참여",
+        if add_proposer {
+            "예 — 이 에이전트가 이 채널을 읽고 쓸 수 있게 돼요"
+        } else {
+            "아니요"
+        },
+    ));
+    if !member_names.is_empty() {
+        rows.push(action_row("함께 넣을 멤버", member_names.join(", ")));
+    }
+    rows
+}
+
+/// `audit_log.action` rows the 증보 actions write beside `action.approved`
+/// (V6), each with its `detail.schema`.
+pub const AUDIT_CHANNEL_CREATED: &str = "channel.created";
+pub const AUDIT_CHANNEL_CREATED_SCHEMA: &str = "momo.channel.created.v1";
+pub const AUDIT_CHANNELS_GRANTED: &str = "hosted_connection.channels_granted";
+pub const AUDIT_CHANNELS_GRANTED_SCHEMA: &str = "momo.hosted_connection.channels_granted.v1";
+
+/// How a member is named on a card: `Display (@handle)`, plus 에이전트 for an
+/// agent. A display name is not unique in a workspace; the handle is.
+pub fn member_card_label(display_name: &str, handle: &str, is_agent: bool) -> String {
+    if is_agent {
+        format!("{display_name} (@{handle}, 에이전트)")
+    } else {
+        format!("{display_name} (@{handle})")
+    }
+}
+
+/// The `channel.member.add` card rows, from what the server found: the
+/// channel's **current** name, kind and live head-count, and the members that
+/// would actually be added (those already in the channel are not listed).
+pub fn channel_member_add_rows(
+    channel_name: &str,
+    kind: &str,
+    member_count: i64,
+    new_member_names: &[String],
+    already_in: usize,
+) -> Vec<Value> {
+    let mut rows = vec![
+        action_row("채널", format!("#{channel_name}")),
+        action_row(
+            "공개 범위",
+            if kind == "public" {
+                "공개"
+            } else {
+                "비공개"
+            },
+        ),
+        action_row("현재 인원", format!("{member_count}명")),
+        action_row("추가할 멤버", new_member_names.join(", ")),
+    ];
+    if already_in > 0 {
+        rows.push(action_row("이미 있는 멤버", format!("{already_in}명")));
+    }
+    rows
+}
+
+/// `audit_log.action` for each member a `channel.member.add` seated (V6).
+pub const AUDIT_CHANNEL_MEMBER_ADDED: &str = "channel.member_added";
+pub const AUDIT_CHANNEL_MEMBER_ADDED_SCHEMA: &str = "momo.channel.member_added.v1";
+
+/// The outcome line of `channel.member.add`.
+pub fn channel_member_add_result_body(
+    channel_name: &str,
+    added: usize,
+    already_in: usize,
+) -> String {
+    if already_in > 0 {
+        format!("#{channel_name}에 멤버 {added}명을 넣었어요(이미 있던 {already_in}명)")
+    } else {
+        format!("#{channel_name}에 멤버 {added}명을 넣었어요")
+    }
+}
+
+/// The audit row a rename writes — the same name and schema the human
+/// self-rename (`PATCH …/members/me`) uses, with `kind:"agent"` in the detail.
+pub const AUDIT_MEMBER_RENAMED: &str = "member.renamed";
+pub const AUDIT_MEMBER_RENAMED_SCHEMA: &str = "momo.member.renamed.v1";
+
+/// `ref.type` for the workspace whose settings changed (the workspace's id).
+pub const REF_TYPE_WORKSPACE_SETTINGS: &str = "workspace_settings";
+
+/// How one settings key reads on the card: `before → after`, plain text.
+/// `None` is 「(기본값)」 — the key is not set.
+pub fn settings_change_row(label: &str, before: Option<&str>, after: Option<&str>) -> Value {
+    // `before` and `after` arrive already rendered by the server's own display
+    // function (`routes::actions::settings_display`), which quotes every
+    // agent-supplied string (JSON string syntax) so that no value can pass itself
+    // off as the arrow, a second setting or a second row.
+    match after {
+        Some(after) => action_row(label, format!("{} → {after}", before.unwrap_or("(기본값)"))),
+        // A clear is labelled as one, in the row's name, so it cannot be read as
+        // just another edit.
+        None => action_row(
+            &format!("{label} — 지움"),
+            format!("{} → (기본값으로 되돌림)", before.unwrap_or("(기본값)")),
+        ),
+    }
+}
+
+/// The outcome line of `workspace.settings.update`: **key names only** — the
+/// welcome prompt is long user text and this body is as durable as the audit row
+/// (the old and new values are on the card the approver read).
+pub fn workspace_settings_result_body(labels: &[&str]) -> String {
+    format!("설정을 바꿨어요: {}", labels.join(", "))
+}
+
+/// `audit_log.action` of a settings write — the REST route's own name.
+pub const AUDIT_WORKSPACE_SETTING_UPDATED: &str = "workspace_setting.updated";
+pub const AUDIT_WORKSPACE_SETTING_UPDATED_SCHEMA: &str = "momo.workspace_setting.updated.v1";
+
+/// `ref.type` for a widened hosted connection (the connection's id).
+pub const REF_TYPE_HOSTED_CONNECTION: &str = "hosted_connection";
+
+/// One card row per channel being granted: the server's name, kind and live
+/// head-count — what the approver is letting the agent read.
+pub fn grant_channel_row(name: &str, kind: &str, member_count: i64) -> Value {
+    action_row(
+        "채널",
+        format!(
+            "#{name} · {} · {member_count}명",
+            if kind == "public" {
+                "공개"
+            } else {
+                "비공개"
+            }
+        ),
+    )
+}
+
+/// The `hosted.channels.grant` card: the channels, then 「현재 승인 채널」
+/// `before개 → after개`.
+pub fn hosted_channels_grant_rows(
+    channels: &[(String, String, i64)],
+    approved_before: usize,
+    approved_after: usize,
+) -> Vec<Value> {
+    let mut rows: Vec<Value> = channels
+        .iter()
+        .map(|(name, kind, count)| grant_channel_row(name, kind, *count))
+        .collect();
+    rows.push(action_row(
+        "승인 채널 수",
+        format!("{approved_before}개 → {approved_after}개"),
+    ));
+    rows
+}
+
+/// The outcome line of `hosted.channels.grant`. **Channel ids are in the body**
+/// so the agent can post there on its next turn; they are not secrets.
+pub fn hosted_channels_grant_result_body(channels: &[(String, Uuid)], total: usize) -> String {
+    let listed: Vec<String> = channels
+        .iter()
+        .map(|(name, id)| format!("#{name} (id {id})"))
+        .collect();
+    format!(
+        "읽고 쓸 채널을 늘렸어요: {} · 총 {total}개",
+        listed.join(", ")
+    )
+}
+
+/// `ref.type` for a renamed agent (the agent's member id).
+pub const REF_TYPE_AGENT: &str = "agent";
+
+/// The summary line when the target is **another** agent. 부록 A's generic line
+/// would say the same thing for a self-rename and for renaming a teammate; the
+/// approver must be told which one this is.
+pub const AGENT_RENAME_MANAGED_SUMMARY: &str = "에이전트가 제안했어요. 승인하면 대상 에이전트의 소유자 또는 관리자 권한으로 다른 에이전트의 이름을 바꿉니다.";
+
+/// The `agent.rename` card rows from the **server's** values: who is being
+/// renamed (name, handle, 에이전트) and 「현재 이름 → 새 이름」. Plain text — a
+/// client must not auto-link or auto-mention either name (부록 A).
+pub fn agent_rename_rows(
+    target_display_name: &str,
+    target_handle: &str,
+    new_display_name: &str,
+) -> Vec<Value> {
+    vec![
+        action_row(
+            "대상 에이전트",
+            member_card_label(target_display_name, target_handle, true),
+        ),
+        action_row(
+            "이름 변경",
+            format!("{target_display_name} → {new_display_name}"),
+        ),
+    ]
+}
+
+/// The outcome line of `agent.rename`.
+pub fn agent_rename_result_body(old: &str, new: &str) -> String {
+    format!("이름을 바꿨어요: {old} → {new}")
+}
+
+/// `ref.type` for a created channel.
+pub const REF_TYPE_CHANNEL: &str = "channel";
+
+/// The outcome line of `channel.create`. **The id is in the body on purpose**:
+/// the agent reads this line on its next turn and needs the channel id to post
+/// there (`oort_message_post` takes a `channelId`), and a channel id is not a
+/// secret (증보 V6).
+pub fn channel_create_result_body(name: &str, kind: &str, channel_id: Uuid) -> String {
+    format!(
+        "채널을 만들었어요: #{name} ({}) · id {channel_id}",
+        if kind == "public" {
+            "공개"
+        } else {
+            "비공개"
+        }
+    )
+}
+
+/// The `channel.create` result rows.
+pub fn channel_create_result_rows(
+    name: &str,
+    kind: &str,
+    proposer_joined: bool,
+    member_count: usize,
+) -> Vec<Value> {
+    vec![
+        action_row("채널", format!("#{name}")),
+        action_row(
+            "공개 범위",
+            if kind == "public" {
+                "공개"
+            } else {
+                "비공개"
+            },
+        ),
+        action_row(
+            "이 에이전트도 참여",
+            if proposer_joined { "예" } else { "아니요" },
+        ),
+        action_row("함께 넣은 멤버", format!("{member_count}명")),
     ]
 }
 
@@ -529,7 +1020,25 @@ pub struct ActionResult<'a> {
     /// decider once. It is a flag, never the value — the card is durable and the
     /// value is not.
     pub secret_shown_once: bool,
+    /// Where the durable half of this action can be found later, or `None` when
+    /// no settings section shows it. Only `invite.create` has one today
+    /// ([`ACTION_RESULT_NEXT_HREF`]); a wrong link on another action's card would
+    /// be worse than none (see the 정오표 on that constant).
+    pub next: Option<ActionResultNext>,
 }
+
+/// 부록 B `next` — a fixed in-app path and its label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActionResultNext {
+    pub label: &'static str,
+    pub href: &'static str,
+}
+
+/// The invite card's `next`: the members settings section.
+pub const INVITE_RESULT_NEXT: ActionResultNext = ActionResultNext {
+    label: ACTION_RESULT_NEXT_LABEL,
+    href: ACTION_RESULT_NEXT_HREF,
+};
 
 /// `message.props` for the `tool_result` row of an executed workspace action.
 ///
@@ -541,19 +1050,23 @@ pub struct ActionResult<'a> {
 /// `secret_shown_once` is a boolean and `next.href` is a fixed in-app path
 /// ([`ACTION_RESULT_NEXT_HREF`]).
 pub fn action_result_props(result: &ActionResult<'_>) -> Value {
-    json!({
-        ACTION_RESULT_PROPS_KEY: {
-            "v": ACTION_RESULT_VERSION,
-            "action_id": result.action_id,
-            "status": result.status,
-            "approval_id": result.approval_id.to_string(),
-            "decided_by": result.decided_by.to_string(),
-            "ref": {"type": result.ref_type, "id": result.ref_id.to_string()},
-            "rows": result.rows,
-            "secret_shown_once": result.secret_shown_once,
-            "next": {"label": ACTION_RESULT_NEXT_LABEL, "href": ACTION_RESULT_NEXT_HREF},
-        }
-    })
+    let mut card = json!({
+        "v": ACTION_RESULT_VERSION,
+        "action_id": result.action_id,
+        "status": result.status,
+        "approval_id": result.approval_id.to_string(),
+        "decided_by": result.decided_by.to_string(),
+        "ref": {"type": result.ref_type, "id": result.ref_id.to_string()},
+        "rows": result.rows,
+        "secret_shown_once": result.secret_shown_once,
+    });
+    if let (Some(next), Some(object)) = (result.next, card.as_object_mut()) {
+        object.insert(
+            "next".into(),
+            json!({"label": next.label, "href": next.href}),
+        );
+    }
+    json!({ ACTION_RESULT_PROPS_KEY: card })
 }
 
 /// The `ref` object of 부록 B and 부록 C — one shape, two carriers.
@@ -604,14 +1117,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn v1_is_exactly_one_executable_action_and_three_declared_ones() {
-        assert_eq!(action_ids(), vec!["invite.create"]);
+    fn the_executable_and_declared_lists_are_what_the_batch_opened() {
+        assert_eq!(
+            action_ids(),
+            vec![
+                "invite.create",
+                "channel.create",
+                "channel.member.add",
+                "agent.rename",
+                "hosted.channels.grant",
+                "workspace.settings.update"
+            ]
+        );
         assert_eq!(
             DECLARED_NOT_EXECUTABLE
                 .iter()
                 .map(|declared| declared.id)
                 .collect::<Vec<_>>(),
-            vec!["webhook.create", "channel.create", "member.role.set"]
+            vec!["webhook.create", "member.role.set"]
         );
     }
 
@@ -795,6 +1318,49 @@ mod tests {
     }
 
     #[test]
+    fn the_channel_card_always_says_whether_the_agent_joins() {
+        let rows = channel_create_rows("계획", "private", None, true, &[]);
+        assert_eq!(rows[0], json!({"label": "채널", "value": "#계획"}));
+        assert_eq!(rows[1], json!({"label": "공개 범위", "value": "비공개"}));
+        let joins = rows
+            .iter()
+            .find(|row| row["label"] == "이 에이전트도 참여")
+            .expect("the row is always present");
+        assert!(joins["value"].as_str().expect("value").starts_with("예"));
+        let rows = channel_create_rows("계획", "public", Some("주제"), false, &["김 인턴".into()]);
+        let joins = rows
+            .iter()
+            .find(|row| row["label"] == "이 에이전트도 참여")
+            .expect("the row is present for `false` too");
+        assert_eq!(joins["value"], json!("아니요"));
+        assert_eq!(rows[1]["value"], json!("공개"));
+        assert!(rows.iter().any(|row| row["label"] == "주제"));
+        assert!(rows
+            .iter()
+            .any(|row| row["label"] == "함께 넣을 멤버" && row["value"] == "김 인턴"));
+    }
+
+    #[test]
+    fn a_member_is_named_by_display_name_handle_and_kind() {
+        assert_eq!(
+            member_card_label("김 인턴", "intern", false),
+            "김 인턴 (@intern)"
+        );
+        assert_eq!(
+            member_card_label("김 인턴", "intern2", true),
+            "김 인턴 (@intern2, 에이전트)"
+        );
+    }
+
+    #[test]
+    fn the_channel_result_line_carries_the_id_and_no_link() {
+        let id = Uuid::from_u128(0xabc);
+        let body = channel_create_result_body("계획", "private", id);
+        assert!(body.contains(&id.to_string()), "{body}");
+        assert!(!body.contains("http"));
+    }
+
+    #[test]
     fn the_request_body_is_readable_without_props() {
         let action = action_by_id(ACTION_INVITE_CREATE).expect("v1");
         assert_eq!(
@@ -815,6 +1381,7 @@ mod tests {
             ref_id: Uuid::from_u128(13),
             rows: invite_result_rows("member", "2026-09-29"),
             secret_shown_once: true,
+            next: Some(INVITE_RESULT_NEXT),
         })
     }
 
@@ -984,12 +1551,50 @@ mod tests {
                 "{} publishes a role the gate does not read",
                 action.id
             );
-            // v1's whole vocabulary is one word. A second variant must reach
-            // the decision route's `match` (routes::approvals) before it
-            // reaches this registry — the match is exhaustive so that adding
-            // one here fails to compile there.
-            assert_eq!(action.required_role, RequiredRole::Admin, "{}", action.id);
-            assert_eq!(action.required_role.as_wire(), "admin");
+            // A role must reach the decision route's `match`
+            // (routes::approvals) before it reaches a registry entry — the
+            // match is exhaustive so adding a variant fails to compile there.
+            assert!(
+                RequiredRole::ALL.contains(&action.required_role),
+                "{}",
+                action.id
+            );
         }
+    }
+
+    /// The wire vocabulary and the Korean noun of every role: distinct wire
+    /// words (a duplicate would make two gates indistinguishable on the card),
+    /// snake_case, and a non-empty noun for the summary sentence.
+    #[test]
+    fn every_required_role_has_a_distinct_wire_word_and_a_noun() {
+        let mut wire: Vec<&str> = RequiredRole::ALL.iter().map(|r| r.as_wire()).collect();
+        assert_eq!(wire, vec!["admin", "agent_editor", "workspace_operator"]);
+        wire.sort_unstable();
+        wire.dedup();
+        assert_eq!(wire.len(), RequiredRole::ALL.len());
+        for role in RequiredRole::ALL {
+            assert!(!role.korean().trim().is_empty(), "{role:?}");
+        }
+        // The agent-scoped role must say whose owner, or a card would read as
+        // 「관리자 권한」 for an action the target's owner can approve.
+        assert!(RequiredRole::AgentEditor.korean().contains("소유자"));
+    }
+
+    /// A result with no `next` carries no `next` key at all (not a null): a
+    /// client reading `"next" in card` must not find a dead link.
+    #[test]
+    fn a_result_without_a_next_step_omits_the_key() {
+        let props = action_result_props(&ActionResult {
+            action_id: ACTION_INVITE_CREATE,
+            status: ACTION_RESULT_EXECUTED,
+            approval_id: Uuid::from_u128(1),
+            decided_by: Uuid::from_u128(2),
+            ref_type: REF_TYPE_INVITE,
+            ref_id: Uuid::from_u128(3),
+            rows: vec![],
+            secret_shown_once: false,
+            next: None,
+        });
+        assert!(props[ACTION_RESULT_PROPS_KEY].get("next").is_none());
     }
 }
