@@ -43,6 +43,7 @@ import {
 } from "@/features/agents/agentWorkingSignal";
 import {
   activityLines,
+  activityDetail,
   activitySuffix,
   activityText,
   TURN_STALE_SENTENCE,
@@ -302,6 +303,17 @@ function AgentActivityBar({
         const body = (
           <>
             <ActivityText line={line} live={live} />
+            {/* 서버가 아는 run의 근거 한 줄(미수령 n분 · 앞에 m건 / 가져간 뒤
+                n분째 소식이 없어요 / 마지막 보고 n분 전). 사실만 적고 판정은
+                하지 않는다 — 「끊김」은 서버가 알릴 때만 나온다. */}
+            {activityDetail(line, nowMs) !== undefined && (
+              <span
+                className="min-w-0 truncate text-timestamp"
+                data-testid="composer-working-detail"
+              >
+                {activityDetail(line, nowMs)}
+              </span>
+            )}
             {live && line.state === "working" && line.startedAtMs !== undefined && (
               <span className="shrink-0 text-timestamp" data-numeric>
                 {elapsedLabel(line.startedAtMs, nowMs)}

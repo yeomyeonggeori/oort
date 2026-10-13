@@ -11,7 +11,12 @@ import {
   isRunOver,
   turnStateOf,
 } from "./agentRail";
-import { IDLE_CUTOFF_MS, type AgentTurnState } from "./workingSignal";
+import { isOpenRunPhase, runPhaseLabel, turnStateOfPhase } from "./runPhase";
+import {
+  IDLE_CUTOFF_MS,
+  type AgentTurnState,
+  type ServerRunFacts,
+} from "./workingSignal";
 
 // =============================================================================
 // workLog — 「작업 패널」의 순수 절반 (goal WEB-WP1, 결정 정본
@@ -41,7 +46,7 @@ import { IDLE_CUTOFF_MS, type AgentTurnState } from "./workingSignal";
 //      관전"을 적는 근거가 이 플래그다.
 //   2. `closed` — 종료 프레임을 실제로 본 run에만 채워진다. 게이트웨이 직송
 //      경로에는 성공 종료 프레임이 없을 수 있고(#994 2R, 선존재 갭), 그럴 때
-//      "완료"를 지어내는 대신 `workLogLiveness`가 TTL로 `signal_lost`를 답한다.
+//      "완료"를 지어내는 대신 `workLogLiveness`가 TTL로 `quiet`를 답한다.
 //      끝난 것을 못 봤다는 사실과 끝나지 않았다는 주장은 다른 것이다.
 // =============================================================================
 
@@ -488,22 +493,42 @@ function appendPartial(
 /**
  * 이 로그가 지금 무엇을 주장할 수 있는가.
  *
- *   - `closed`      종료 프레임을 **봤다**. 성공/실패/취소를 말해도 된다.
- *   - `signal_lost` 종료를 못 본 채 TTL(90s)을 넘겨 조용하다. "완료"가 아니라
- *                   "종료를 보지 못했다"가 참인 문장이다. 게이트웨이 직송 경로에
- *                   성공 종료 프레임이 없을 수 있다는 선존재 갭(#994 2R)이 이
- *                   분기를 상시 경로로 만든다.
- *   - `live`        최근에 프레임이 왔다.
+ *   - `closed` 끝났다. 서버가 끝났다고 답했거나 종료 프레임을 **봤다**. 성공/
+ *              실패/취소를 말해도 된다.
+ *   - `quiet`  서버가 아는 run이 아닌데(관리형·BYOA) 종료를 못 본 채 TTL(90s)을
+ *              넘겨 조용하다. "완료"가 아니라 "종료를 보지 못했다"가 참인 문장
+ *              이고, 「끊김」도 아니다: 조용한 것과 죽은 것은 다른 사실이다.
+ *   - `live`   최근에 프레임이 왔거나, 서버가 이 run을 아직 열려 있다고 답했다.
+ *
+ * `server`가 있으면(ADR-0200 D1) 시계는 판정에 끼지 않는다. 에이전트가 11분 뒤에
+ * 가져가는 run을 90초에 소실로 그리던 것이 이 분기의 이유이고, 「신호 소실」은
+ * 서버가 `lease_abandoned`로 끝냈다고 알릴 때만 나온다(`runPhaseLabel`).
  */
-export type WorkLogLiveness = "live" | "signal_lost" | "closed";
+export type WorkLogLiveness = "live" | "quiet" | "closed";
 
 export function workLogLiveness(
   log: WorkLog,
   nowMs: number,
-  idleCutoffMs: number = IDLE_CUTOFF_MS
+  idleCutoffMs: number = IDLE_CUTOFF_MS,
+  server?: ServerRunFacts | null
 ): WorkLogLiveness {
+  if (server !== undefined && server !== null) {
+    return isOpenRunPhase(server.phase) ? "live" : "closed";
+  }
   if (log.closed !== undefined) return "closed";
-  return nowMs - log.lastActivityAtMs > idleCutoffMs ? "signal_lost" : "live";
+  return nowMs - log.lastActivityAtMs > idleCutoffMs ? "quiet" : "live";
+}
+
+/**
+ * 헤더 칩의 상태. 서버가 답했으면 서버의 phase를, 아니면 이 로그가 프레임에서
+ * 접은 상태를 쓴다. 끝난 run은 상태가 없다.
+ */
+export function workLogTurnState(
+  log: WorkLog,
+  server?: ServerRunFacts | null
+): AgentTurnState | null {
+  if (server !== undefined && server !== null) return turnStateOfPhase(server.phase);
+  return log.closed === undefined ? log.state : null;
 }
 
 /**
@@ -543,9 +568,12 @@ export function toolEntryState(
 export const WORK_LOG_TRUNCATED_HEAD_SENTENCE =
   "이 지점부터 관전합니다. 앞부분은 이 화면에 없습니다.";
 
-/** 종료를 못 본 run. "완료"라고 쓰지 않는 자리다. */
-export const WORK_LOG_SIGNAL_LOST_SENTENCE =
-  "신호가 끊겼습니다. 종료를 보지 못했습니다.";
+/**
+ * 서버가 모르는 run(관리형·BYOA)이 한동안 조용할 때. 「끊겼다」고도 「끝났다」고도
+ * 말하지 않는다: 조용한 것과 끝난 것은 다른 사실이고, 이 화면은 그 차이를 모른다.
+ */
+export const WORK_LOG_QUIET_SENTENCE =
+  "한동안 새 소식이 없어요. 끝났는지는 알 수 없어요.";
 
 /** 패널을 닫으면 기록이 사라진다는 사실(D1). 숨기지 않고 적는다. */
 export const WORK_LOG_VOLATILE_SENTENCE =
@@ -582,8 +610,13 @@ export const WORK_LOG_EMPTY_DETAIL =
  */
 export function workLogStateLabel(
   log: WorkLog,
-  liveness: WorkLogLiveness
+  liveness: WorkLogLiveness,
+  server?: ServerRunFacts | null
 ): string {
+  // 서버가 답한 run은 서버의 낱말을 그대로 쓴다(ADR-0200 D1): 대기 n번째 /
+  // 가져감 / 진행 중 / 승인 대기 / 끝. 이 클라이언트가 프레임에서 접은 것과
+  // 서버가 아는 것이 다르면 서버가 이긴다.
+  if (server !== undefined && server !== null) return runPhaseLabel(server);
   if (liveness === "closed") {
     switch (log.closed?.runStatus) {
       case "succeeded":
@@ -599,7 +632,7 @@ export function workLogStateLabel(
         return log.closed?.phase === "error" ? "실패" : "종료";
     }
   }
-  if (liveness === "signal_lost") return "신호 소실";
+  if (liveness === "quiet") return "조용함";
   return log.state === "awaiting_approval" ? "승인 대기" : "작업 중";
 }
 

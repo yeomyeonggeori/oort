@@ -34,8 +34,16 @@
 //     lost frame cannot strand a badge with a clock running away to hours.
 // =============================================================================
 
+import type { AgentLeaseState, AgentRunPhase } from "../../lib/api";
+
 /** Which realtime source proved the agent is working, in priority order. */
 export type AgentWorkingSource = "run" | "status" | "typing";
+
+const STATE_RANK: Record<AgentTurnState, number> = {
+  working: 3,
+  awaiting_approval: 2,
+  queued: 1,
+};
 
 const SOURCE_RANK: Record<AgentWorkingSource, number> = {
   run: 3,
@@ -46,9 +54,41 @@ const SOURCE_RANK: Record<AgentWorkingSource, number> = {
 /**
  * What the open turn is doing. `working` means the agent is running; the run
  * came back `awaiting_approval`, which means it stopped and the next move
- * belongs to a person.
+ * belongs to a person. `queued` is the third fact (ADR-0200 D1): nobody has
+ * started it yet. That covers a run no agent has taken (`phase=queued`) and one
+ * an agent took but has not reported on (`phase=claimed`), and the word 작업 중
+ * is wrong for both — folding them into `working` is what drew an untouched run
+ * as running for eleven minutes.
  */
-export type AgentTurnState = "working" | "awaiting_approval";
+export type AgentTurnState = "working" | "awaiting_approval" | "queued";
+
+/**
+ * What the SERVER says about a hosted-agent run (`GET …/agent-runs/progress`,
+ * ADR-0200 D1/D3). A signal that carries this is a fact the server derived from
+ * its own tables, not a guess from frame timing, so it is exempt from the 90s
+ * client TTL: a run waiting eleven minutes for an agent to collect it is still
+ * exactly as queued at minute eleven. The server ends runs that really died
+ * (`end_reason=lease_abandoned`), and the client re-reads, so the TTL has
+ * nothing left to protect here.
+ */
+export interface ServerRunFacts {
+  phase: AgentRunPhase;
+  leaseState: AgentLeaseState;
+  /** 1 = next to be taken. Only an untaken, claimable run has one. */
+  queuePosition?: number;
+  /** Untaken runs ahead of this one in the agent's queue, across channels. */
+  aheadTotal?: number;
+  /** When the run entered the queue (server clock). */
+  queuedAtMs: number;
+  claimedAtMs?: number;
+  /** The agent's own latest stage marker: plain text, never trusted. */
+  latestStage?: string;
+  lastEventAtMs?: number;
+  approvalId?: string;
+  approvalExpiresAtMs?: number;
+  /** Closed machine code the server wrote for a finished run. */
+  endReason?: string;
+}
 
 export interface AgentWorkingSignal {
   /** The agent member taking the turn. */
@@ -93,6 +133,12 @@ export interface AgentWorkingSignal {
    * number still exists.
    */
   runCount?: number;
+  /**
+   * The server's own answer for this run, when it is a hosted-agent run the
+   * server reports on. Absent for managed and BYOA agents and on servers that do
+   * not have the progress route yet; those keep the frame-timing rules above.
+   */
+  server?: ServerRunFacts;
 }
 
 // =============================================================================
@@ -186,6 +232,10 @@ export function isStaleSignal(
   nowMs: number,
   idleCutoffMs: number = IDLE_CUTOFF_MS
 ): boolean {
+  // A server-reported run is never expired by OUR clock (ADR-0200 D1): the
+  // server says when a run is over. This is the line the eleven-minute pickup
+  // regression test pins.
+  if (signal.server !== undefined) return false;
   return nowMs - signal.lastActivityAtMs > idleCutoffMs;
 }
 
@@ -204,17 +254,32 @@ export function mergeAgentWorkingSignals(
   if (candidates.length === 0) return null;
   if (candidates.length === 1) return candidates[0];
 
-  const working = candidates.filter((c) => c.state === "working");
+  // working beats awaiting_approval beats queued: the strongest fact any run
+  // proves is the one the agent shows. The reverse would be the lie this whole
+  // module exists to prevent.
+  const strongest = candidates.reduce<AgentTurnState>(
+    (best, c) => (STATE_RANK[c.state] > STATE_RANK[best] ? c.state : best),
+    candidates[0].state
+  );
   // The clock and the headline belong to the state being shown: an agent that
   // is working must not borrow the start time of a run that is parked on an
   // approval.
-  const shown = working.length > 0 ? working : candidates;
+  const shown = candidates.filter((c) => c.state === strongest);
 
   const starts = shown
     .map((c) => c.startedAtMs)
     .filter((v): v is number => typeof v === "number");
   const earliest = starts.length > 0 ? Math.min(...starts) : undefined;
-  const anchor = shown.find((c) => c.startedAtMs === earliest) ?? shown[0];
+  // Among queued runs the anchor is the one that goes first, so the shown
+  // position is the front of the line rather than whichever arrived last.
+  const anchor =
+    strongest === "queued"
+      ? shown.reduce((a, b) =>
+          (b.server?.queuePosition ?? Infinity) < (a.server?.queuePosition ?? Infinity)
+            ? b
+            : a
+        )
+      : (shown.find((c) => c.startedAtMs === earliest) ?? shown[0]);
 
   const headlines: string[] = [];
   for (const candidate of shown) {
@@ -233,7 +298,7 @@ export function mergeAgentWorkingSignals(
   const merged: AgentWorkingSignal = {
     memberId: anchor.memberId,
     channelId: anchor.channelId,
-    state: working.length > 0 ? "working" : "awaiting_approval",
+    state: strongest,
     source,
     headlines: headlines.slice(0, MAX_HEADLINES),
     lastActivityAtMs: Math.max(...candidates.map((c) => c.lastActivityAtMs)),
@@ -243,6 +308,7 @@ export function mergeAgentWorkingSignals(
     runCount: candidates.length,
   };
   if (anchor.runId !== undefined) merged.runId = anchor.runId;
+  if (anchor.server !== undefined) merged.server = anchor.server;
   if (earliest !== undefined) merged.startedAtMs = earliest;
   return merged;
 }

@@ -30,6 +30,7 @@ import {
   useTickingNow,
 } from "@/features/agents/agentWorkingSignal";
 import { AgentTurnBadge } from "@/features/agents/AgentTurnBadge";
+import { turnHubSentence, turnWord } from "@/features/agents/turnCopy";
 import { openWorkPanel } from "@/features/agents/workLogStore";
 import type { AgentWorkingSignal } from "@momo/core/features/agents/workingSignal";
 import {
@@ -247,12 +248,8 @@ function AgentListRow({
             <span className="flex items-center gap-1">
               <AgentTurnBadge
                 state={current.state}
-                text={current.state === "working" ? "작업 중" : "승인 대기"}
-                label={
-                  current.state === "working"
-                    ? `${agent.displayName} 에이전트가 작업 중이에요.`
-                    : `${agent.displayName} 에이전트가 승인을 기다려요.`
-                }
+                text={turnWord(current.state, current.server)}
+                label={turnHubSentence(agent.displayName, current.state, current.server)}
                 live={live}
                 testId="agent-hub-current-work"
               />
@@ -1075,12 +1072,8 @@ function CurrentWorkValue({
   const badge = (
     <AgentTurnBadge
       state={work.state}
-      text={work.state === "working" ? "작업 중" : "승인 대기"}
-      label={
-        work.state === "working"
-          ? `${agentName} 에이전트가 작업 중이에요.`
-          : `${agentName} 에이전트가 승인을 기다려요.`
-      }
+      text={turnWord(work.state, work.server)}
+      label={turnHubSentence(agentName, work.state, work.server)}
       live={live}
     />
   );

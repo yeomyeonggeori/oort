@@ -915,7 +915,9 @@ export function WorkingCard({
     ? palette.textMuted
     : card.state === 'awaiting_approval'
       ? palette.accentText
-      : palette.agent;
+      : card.state === 'queued'
+        ? palette.textMuted
+        : palette.agent;
   const pulse = card.live && card.state === 'working' && !reduceMotion;
   return (
     <Pressable

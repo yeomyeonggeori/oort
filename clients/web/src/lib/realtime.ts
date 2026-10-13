@@ -13,6 +13,7 @@ import {
   asWorkSessionControlFrame,
   asWorkSessionObserverFrame,
   asWorkSessionToolTransitionFrame,
+  asAgentRunEventFrame,
   asWorkRunUpdatedFrame,
   asWorkSessionShareChangedFrame,
   centrifugoAgentChannelName,
@@ -20,6 +21,7 @@ import {
   centrifugoTypingChannelName,
   createReplayGate,
   type AgentProgressEvent,
+  type AgentRunEventFrame,
   type CascadeFallbackFrame,
   type HuddleLifecycleFrame,
   type MessageDeletedEvent,
@@ -510,6 +512,41 @@ export function createRealtime(
     );
   }
 
+  // ADR-0200 D2: the hosted-agent run ledger signal rides the channel topic.
+  // A frame only says "read again" (no stage text, no sequence on the wire), so
+  // a replayed one is dropped and `onResync` heals the gap from REST.
+  function subscribeRunEvents(
+    workspaceId: string,
+    channelId: string,
+    handlers: {
+      onRunEvent: (frame: AgentRunEventFrame) => void;
+      onResync: () => void;
+    }
+  ): () => void {
+    return attach(
+      centrifugoChannelName(workspaceId, channelId),
+      { recoverable: true, positioned: true },
+      (sub) => {
+        const gate = createReplayGate();
+        const onSubscribed = (ctx: SubscribedRecoveryContext) => {
+          gate.onSubscribed(ctx);
+          handlers.onResync();
+        };
+        const onPublication = (ctx: { data?: unknown }) => {
+          if (gate.isReplaying()) return;
+          const frame = asAgentRunEventFrame(ctx.data);
+          if (frame) handlers.onRunEvent(frame);
+        };
+        sub.on("subscribed", onSubscribed);
+        sub.on("publication", onPublication);
+        return () => {
+          sub.off("subscribed", onSubscribed);
+          sub.off("publication", onPublication);
+        };
+      }
+    );
+  }
+
   // ADR-0188 D2 (#2778): the owner's user-limited notice channel. The frame
   // is handed over raw; `asWorkHostNotice` (core) decides what it is.
   function subscribeWorkHostNotices(
@@ -563,6 +600,7 @@ export function createRealtime(
     subscribeTyping,
     subscribeWorkSession,
     subscribeCascade,
+    subscribeRunEvents,
     subscribeHuddle,
     reconnect: () => {
       client.disconnect();
