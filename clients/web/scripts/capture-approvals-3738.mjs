@@ -273,9 +273,9 @@ async function scenes(browser, origin, scheme) {
     check(`${tag} card-${key}: 서버 행 ${CARDS[key].rows.length}개가 그대로 선다`, rows === CARDS[key].rows.length, String(rows));
     const roleText = (await page.getByTestId("approval-action-role").textContent()) ?? "";
     const expectRole = {
-      admin: "관리자만 승인할 수 있습니다.",
-      agent_editor: "대상 에이전트의 소유자 또는 관리자만 승인할 수 있습니다.",
-      workspace_operator: "워크스페이스 운영자(관리자)만 승인할 수 있습니다.",
+      admin: "관리자만 승인할 수 있어요.",
+      agent_editor: "대상 에이전트의 소유자 또는 관리자만 승인할 수 있어요.",
+      workspace_operator: "워크스페이스 운영자(관리자)만 승인할 수 있어요.",
     }[CARDS[key].role];
     check(`${tag} card-${key}: 결정 권한 문장`, roleText.includes(expectRole), roleText);
     if (key === "channel-create") {
