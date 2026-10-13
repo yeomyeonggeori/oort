@@ -727,6 +727,17 @@ async fn jobs_claim(
                         "lease handle issuance failed".into(),
                     ))
                 })?;
+                // ADR-0200 D1/D2: the run's `claimed` fact (time and who) in the
+                // run event ledger, same transaction as the lease. A re-claim after
+                // an expired lease is a new `claimed` row, which is what happened.
+                momo_agent::append_run_event_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    run_id,
+                    momo_agent::AppendedRunEvent::Claimed,
+                    caller.agent_member_id,
+                )
+                .await?;
                 jobs.push(json!({
                     "leaseHandle": handle,
                     "createdAtMs": crate::routes::shared::epoch_ms(job.created_at),

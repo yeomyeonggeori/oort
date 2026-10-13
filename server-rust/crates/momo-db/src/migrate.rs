@@ -589,19 +589,22 @@ mod tests {
     ///
     /// 127 is #3681's inbox realtime event (ADR-0199 E2 D7): the `inbox_item` AFTER INSERT trigger that
     /// puts `inbox_item.created` on the recipient's personal channel through the outbox.
+    ///
+    /// 128 is #3740's run event ledger (ADR-0200 S1): the RLS-FORCE tables `agent_run_event` and
+    /// `hosted_agent_liveness`, `agent_run_event_append`, and the `agent_run`/`approval` lifecycle triggers.
     #[test]
-    fn discovers_contiguous_migrations_001_to_127() {
+    fn discovers_contiguous_migrations_001_to_128() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            127,
-            "expected 127 migrations under {}",
+            128,
+            "expected 128 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 127);
+        assert_eq!(migrations.last().unwrap().version, 128);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

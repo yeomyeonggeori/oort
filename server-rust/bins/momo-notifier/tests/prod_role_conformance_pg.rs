@@ -24,6 +24,7 @@
 //! | `every_notifier_job_iteration_runs_as_its_production_role` | drop a notifier GRANT the job needs (e.g. `work_session_share`), or move a write back onto the notifier pool |
 //! | `the_notifier_role_has_no_delete_and_no_table_it_does_not_name` | add DELETE / `ALL TABLES` for `momo_notifier` |
 //! | `a_hosted_work_run_push_and_run_status_trigger_run_as_the_notifier_role` (#3553) | drop `GRANT SELECT (workspace_id, agent_member_id) ON hosted_agent_connection` — the push judgment `wrun` arm and the migration-120 `agent_run` trigger both read it |
+//! | `a_hosted_work_run_push_and_run_status_trigger_run_as_the_notifier_role` (#3740) | drop `GRANT SELECT, INSERT ON agent_run_event TO momo_notifier` — the migration-128 ledger trigger appends as the invoking role (verified red: `permission denied for table agent_run_event`) |
 //! | `the_personal_agent_member_trigger_runs_as_every_role_that_writes_member` (#3591) | drop `GRANT UPDATE ON agent` from a role that can UPDATE `member` (the migration-123 trigger updates `agent` as the invoking role), or add the trigger's table to a lockdown |
 //! | `the_other_runtime_roles_reach_every_table_the_migrations_created` | a new table that `app`/`relay`/`worker` cannot read or write, or a cloud-box lockdown that drifts |
 //!
