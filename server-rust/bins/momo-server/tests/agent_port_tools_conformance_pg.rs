@@ -10686,4 +10686,35 @@ async fn the_ledger_append_takes_no_lock_and_history_is_immutable() {
         ledger_3740(&su, fixture.workspace, run).await.is_empty(),
         "a deleted run takes its ledger with it"
     );
+
+    // …and under the production API role + RLS (momo_app, bound tenant), not only for the
+    // superuser: the trigger's DELETE runs as the invoker.
+    let app = momo_app_pool().await;
+    let run2: Uuid = sqlx::query_scalar(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status) \
+         VALUES ($1,$2,$3,'queued') RETURNING id",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(ledger_3740(&su, fixture.workspace, run2).await.len(), 1);
+    let mut tx = app.begin().await.unwrap();
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(fixture.workspace.to_string())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM agent_run WHERE id=$1")
+        .bind(run2)
+        .execute(&mut *tx)
+        .await
+        .expect("momo_app may delete a run and fire the ledger delete trigger");
+    tx.commit().await.unwrap();
+    assert!(
+        ledger_3740(&su, fixture.workspace, run2).await.is_empty(),
+        "…as momo_app under RLS too"
+    );
 }

@@ -9,7 +9,7 @@
 //! report) — are written here, through the same SQL function
 //! `agent_run_event_append`, which takes no lock (a lock here closed deadlock cycles with the
 //! claim/approve/cancel paths — migration 128) and folds an immediate stage repeat; the
-//! 200-row cap is `agent_run_event_trim`, called right after a stage append. There is no other INSERT into the table.
+//! 200-row cap is `agent_run_event_trim`, called after every server-side append here (stage or claimed). There is no other INSERT into the table.
 //!
 //! `seq` is an ordering key from a global sequence (gaps, cross-tenant): callers must
 //! not hand it to a client as a count (migration 128).
