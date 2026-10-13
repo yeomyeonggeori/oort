@@ -30,7 +30,7 @@ import {
   useTickingNow,
 } from "@/features/agents/agentWorkingSignal";
 import { AgentTurnBadge } from "@/features/agents/AgentTurnBadge";
-import { AgentLivenessBar } from "@/features/agents/AgentLivenessLabel";
+import { AgentLivenessBar, AgentLivenessLabel } from "@/features/agents/AgentLivenessLabel";
 import { turnHubSentence, turnWord } from "@/features/agents/turnCopy";
 import { openWorkPanel } from "@/features/agents/workLogStore";
 import type { AgentWorkingSignal } from "@momo/core/features/agents/workingSignal";
@@ -245,6 +245,9 @@ function AgentListRow({
             </StatusChip>
           </span>
           <span className="truncate text-meta text-ink-muted">@{agent.handle}</span>
+          {/* 「활성」은 증명이 한 번 성공했다는 뜻이다. 지금 응답하는지는 이 라벨이 따로
+              말한다(ADR-0200 D4): 목록에서 두 낱말이 한 행에 나란히 서야 혼동되지 않는다. */}
+          <AgentLivenessLabel agentId={agent.id} />
           {current && (
             <span className="flex items-center gap-1">
               <AgentTurnBadge

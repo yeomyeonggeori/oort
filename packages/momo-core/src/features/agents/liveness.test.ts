@@ -79,6 +79,9 @@ describe("생존 라벨 (ADR-0200 D4): 「연결됨」이 아니라 「지금 �
 
   it("좁은 자리용 낱말이 있고 접근성 이름은 뜻을 덧붙인다", () => {
     expect(view("responsive", 3).short).toBe("응답함");
+    // 사이드바의 다른 알약(「대기 n번째」)과 낱말이 겹치지 않는다.
+    expect(view("work_waiting").short).toBe("일이 밀림");
+    expect(view("work_waiting").short).not.toContain("대기");
     expect(view("woken_not_collected").short).toBe("안 가져감");
     expect(livenessAccessibleName(view("alive_idle"))).toContain("일은 가져가지 않고 있어요");
   });
@@ -109,9 +112,16 @@ describe("다시 깨우기", () => {
   });
 
   it("거절은 상태별 문장이다", () => {
-    expect(wakeFailureText(new ApiError(404, "x"))).toContain("권한이 없어요");
+    expect(wakeFailureText(new ApiError(404, "x"))).toContain("권한이 없을 수 있어요");
+    expect(wakeFailureText(new ApiError(404, "x"))).toContain("도어벨을 쓰지 않거나");
     expect(wakeFailureText(new ApiError(409, "x"))).toContain("도어벨");
     expect(wakeFailureText(new Error("network"))).toContain("잠시 뒤에");
+  });
+
+  it("429는 60초 쿨다운과 시간당 한도를 가른다", () => {
+    expect(liveness.wakeLimitedText(42)).toBe("방금 깨웠어요.");
+    expect(liveness.wakeLimitedText(60)).toBe("방금 깨웠어요.");
+    expect(liveness.wakeLimitedText(2700)).toBe("시간당 깨우기 한도에 닿았어요.");
   });
 
   it("문장 상수는 해요체다", () => {

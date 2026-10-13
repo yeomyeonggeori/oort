@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { uuidEq, type AgentLivenessState } from "@momo/core/lib/api";
 import {
@@ -10,6 +11,7 @@ import {
   WAKE_REQUESTED_SENTENCE,
   wakeCooldownLabel,
   wakeFailureText,
+  wakeLimitedText,
 } from "@momo/core/features/agents/liveness";
 import { useSession } from "@/app/session";
 import { Button } from "@/design/ui/button";
@@ -58,6 +60,7 @@ export function WakeAgentButton({
     (row) => uuidEq(row.agentMemberId, agentId) && row.status === "active"
   );
   const connectionId = connection?.id ?? null;
+  const noteId = useId();
 
   const coolUntil = useWakeCooldownUntil(connectionId);
   const cooling = coolUntil !== undefined && coolUntil > Date.now();
@@ -86,18 +89,29 @@ export function WakeAgentButton({
 
   const cooldownText =
     coolUntil === undefined ? undefined : wakeCooldownLabel(coolUntil, nowMs);
-  const failed =
-    ring.isError && !(ring.error instanceof DoorbellRingLimitedError)
-      ? wakeFailureText(ring.error)
+  const limited =
+    ring.error instanceof DoorbellRingLimitedError ? ring.error : undefined;
+  const failed = ring.isError && limited === undefined ? wakeFailureText(ring.error) : undefined;
+  // 낭독되는 안내(라이브 영역)는 **상태가 바뀔 때 한 번**이다: 접수됐다 / 한도에 닿았다 /
+  // 깨우지 못했다. 1초마다 바뀌는 쿨다운 숫자는 이 영역에 넣지 않는다 — 스크린리더가
+  // 60번 연달아 읽게 된다(design-review U3 H-1). 이 영역은 눈에는 보이지 않고(sr-only),
+  // 눈이 읽는 것은 버튼 옆 한 줄이다.
+  const announce = limited
+    ? wakeLimitedText(limited.retryAfterSeconds)
+    : (failed ?? (ring.isSuccess ? WAKE_REQUESTED_SENTENCE : ""));
+  // 눈이 읽는 한 줄: 왜 지금 못 누르는가(쿨다운)나 왜 못 깨웠는가. 버튼 옆에 한 줄로
+  // 서서 문구가 나타나도 머리의 높이가 변하지 않는다(design-review U3 M-4).
+  const lead = limited
+    ? wakeLimitedText(limited.retryAfterSeconds).replace(/\.$/, "")
+    : ring.isSuccess
+      ? "깨웠어요"
       : undefined;
-  const status =
-    failed ??
-    cooldownText ??
-    (ring.isSuccess ? WAKE_REQUESTED_SENTENCE : undefined);
+  const note =
+    failed ?? ([lead, cooldownText].filter(Boolean).join(" · ") || undefined);
 
   return (
     <div
-      className={className ?? "flex min-w-0 flex-col items-start gap-1"}
+      className={className ?? "flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1"}
       data-testid="wake-agent"
     >
       <Button
@@ -107,17 +121,21 @@ export function WakeAgentButton({
         disabled={ring.isPending || cooldownText !== undefined}
         onClick={() => ring.mutate()}
         data-testid="wake-agent-button"
+        aria-describedby={note !== undefined ? noteId : undefined}
       >
         {WAKE_LABEL}
       </Button>
-      {/* 접수 결과와 남은 쿨다운. 버튼이 비활성인 이유를 글로 말한다(색만이 아니라). */}
-      <p
-        className="break-keep text-timestamp text-ink-muted"
-        role="status"
-        aria-live="polite"
-        data-testid="wake-agent-status"
-      >
-        {status}
+      {note !== undefined && (
+        <span
+          id={noteId}
+          className="min-w-0 break-keep text-timestamp text-ink-muted"
+          data-testid="wake-agent-cooldown"
+        >
+          {note}
+        </span>
+      )}
+      <p className="sr-only" role="status" aria-live="polite" data-testid="wake-agent-status">
+        {announce}
       </p>
     </div>
   );

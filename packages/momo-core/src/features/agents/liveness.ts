@@ -83,7 +83,7 @@ export function livenessView(
     case "alive_idle":
       return base("살아 있음 · 대기 중", "살아 있음", "neutral");
     case "work_waiting":
-      return base("일이 기다리는 중", "일 대기", "warn");
+      return base("일이 기다리는 중", "일이 밀림", "warn");
     case "woken_not_collected":
       return base("깨웠지만 아직 안 가져감", "안 가져감", "warn");
     case "unresponsive":
@@ -147,11 +147,23 @@ export function wakeCooldownLabel(
 export const WAKE_REQUESTED_SENTENCE =
   "깨우는 신호를 보냈어요. 에이전트가 일을 가져가는지는 잠시 뒤 라벨이 알려 줘요.";
 
+/**
+ * 429의 이유. 서버는 두 한도(연결당 60초 쿨다운 · 시간당 5회)를 같은 429로 답하고 기다릴
+ * 초만 준다. 60초를 넘게 기다려야 하면 쿨다운이 아니라 시간당 한도다.
+ */
+export function wakeLimitedText(retryAfterSeconds: number): string {
+  return retryAfterSeconds > 60
+    ? "시간당 깨우기 한도에 닿았어요."
+    : "방금 깨웠어요.";
+}
+
 /** 깨우기 거절의 문장. 문장은 서버가 아니라 여기서 쓴다(서버는 코드만 준다). */
 export function wakeFailureText(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 404) {
-      return "이 서버에서는 다시 깨우기를 쓸 수 없거나, 이 에이전트를 깨울 권한이 없어요.";
+      // 서버는 「도어벨이 꺼져 있다」와 「깨울 권한이 없다」를 같은 404로 답한다(모르는
+      // 연결을 탐침하지 못하게). 그래서 두 가능성을 모두 말하고 하나를 단정하지 않는다.
+      return "깨우지 못했어요. 이 서버가 도어벨을 쓰지 않거나, 깨울 권한이 없을 수 있어요.";
     }
     if (error.status === 409) {
       return "깨울 수 없어요. 연결이 꺼져 있거나 도어벨이 등록되어 있지 않아요.";

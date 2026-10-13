@@ -1,9 +1,10 @@
 import {
-  livenessAccessibleName,
   livenessView,
   type LivenessTone,
 } from "@momo/core/features/agents/liveness";
+import { useSession } from "@/app/session";
 import { cn } from "@/design/lib/cn";
+import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
 import { useAgentLiveness } from "./useAgentLiveness";
 import { WakeAgentButton } from "./WakeAgentButton";
 
@@ -40,29 +41,42 @@ export function AgentLivenessLabel({
   className?: string;
 }) {
   const { liveness, nowMs } = useAgentLiveness(agentId);
+  const { session, workspaceId } = useSession();
+  const { directory } = useDirectory(workspaceId);
   if (liveness === null || liveness === undefined) return null;
   const view = livenessView(liveness, nowMs);
+  // 경고색은 **사람이 할 수 있는 일이 있는 상태**의 색이다. 다시 깨울 수 있는 사람
+  // (owner/admin)에게만 경고로 읽히고, 그 밖의 멤버에게는 같은 사실이 중립 낱말이다
+  // (할 수 있는 일이 없는 경고는 소음이다, design-review U3 M-3).
+  const role = memberFor(directory, session.member.id)?.role;
+  const mayAct = role === "owner" || role === "admin";
+  const tone: LivenessTone = view.tone === "warn" && !mayAct ? "neutral" : view.tone;
   return (
     <span
       className={cn(
         "inline-flex min-w-0 items-center gap-1 text-timestamp",
-        TEXT_CLASS[view.tone],
+        TEXT_CLASS[tone],
         className
       )}
       data-testid="agent-liveness"
       data-state={view.state}
-      data-tone={view.tone}
+      data-tone={tone}
       data-variant={variant}
-      title={livenessAccessibleName(view)}
+      // 뜻은 마우스를 올린 사람의 것이고, 보조기술은 아래 숨은 글이 읽는다. 둘을 같은
+      // 문장으로 주면 일부 보조기술이 뜻을 두 번 읽는다(design-review U3 M-6): 좁은
+      // 자리에서는 title만 뜻을 갖고 숨은 글은 라벨 한 줄이다.
+      title={variant === "compact" ? view.meaning : undefined}
     >
       <span
         aria-hidden="true"
-        className={cn("size-1.5 shrink-0 rounded-full", DOT_CLASS[view.tone])}
+        className={cn("size-2 shrink-0 rounded-full", DOT_CLASS[tone])}
       />
-      <span className="min-w-0 truncate">
+      <span className="min-w-0 truncate" aria-hidden={variant === "compact" || undefined}>
         {variant === "compact" ? view.short : view.text}
       </span>
-      <span className="sr-only">. {view.meaning}</span>
+      <span className="sr-only">
+        {variant === "compact" ? view.text : `${view.text}. ${view.meaning}`}
+      </span>
     </span>
   );
 }

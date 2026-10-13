@@ -543,13 +543,20 @@ async function u3(browser, origin, scheme) {
   const headerLabel = ((await page.getByTestId("agent-liveness-bar").getByTestId("agent-liveness").textContent()) ?? "");
   check(`${tag} header: 깨웠지만 아직 안 가져감 + 다시 깨우기`, headerLabel.includes("깨웠지만 아직 안 가져감") && (await page.getByTestId("wake-agent-button").isEnabled()), headerLabel);
   await page.screenshot({ path: shot("2-header-wake") });
+  const tabY = () => page.getByTestId("agent-hub-tab-profile").evaluate((el) => Math.round(el.getBoundingClientRect().top));
+  const tabBefore = await tabY();
   await page.getByTestId("wake-agent-button").click();
-  await page.waitForFunction(() => /뒤에 다시 깨울 수 있어요/.test(document.querySelector('[data-testid="wake-agent-status"]')?.textContent ?? ""), null, { timeout: 5_000 });
+  await page.waitForFunction(() => /뒤에 다시 깨울 수 있어요/.test(document.querySelector('[data-testid="wake-agent-cooldown"]')?.textContent ?? ""), null, { timeout: 5_000 });
+  check(`${tag} wake: 쿨다운 문구가 나타나도 머리 높이가 변하지 않는다`, (await tabY()) === tabBefore, `${tabBefore} -> ${await tabY()}`);
   check(`${tag} wake: 눌렀더니 접수되고(1회) 버튼이 잠긴다`, admin.ringCalls === 1 && (await page.getByTestId("wake-agent-button").isDisabled()));
-  const cool = ((await page.getByTestId("wake-agent-status").textContent()) ?? "").trim();
-  check(`${tag} wake: 쿨다운 표시`, /^(\d+초|1분) 뒤에 다시 깨울 수 있어요$/.test(cool), cool);
+  const cool = ((await page.getByTestId("wake-agent-cooldown").textContent()) ?? "").trim();
+  check(`${tag} wake: 쿨다운 표시`, /^깨웠어요 · (\d+초|1분) 뒤에 다시 깨울 수 있어요$/.test(cool), cool);
+  const announced = ((await page.getByTestId("wake-agent-status").textContent()) ?? "").trim();
+  check(`${tag} wake: 낭독 영역에는 접수 문장뿐이고 초 단위 숫자가 없다`, announced.includes("깨우는 신호를 보냈어요") && !/\d+\s*(초|분)/.test(announced), announced);
   await page.screenshot({ path: shot("3-wake-cooldown") });
 
+  const listLabels = await page.locator('[data-testid="agent-liveness"]').evaluateAll((els) => els.length);
+  check(`${tag} hub: 목록 행에도 「활성」 곁에 라벨이 있다`, listLabels >= 6, String(listLabels));
   // ③ 작업 패널 머리
   admin.runs = [progress(now, { id: RUN_A, agentMemberId: A.desk, phase: "queued", status: "queued", queuePosition: 1, createdAtMs: now - 25 * MIN, triggerSummary: "일정 정리" })];
   await serverMoves(page, admin, admin.runs, "queued");
@@ -567,7 +574,7 @@ async function u3(browser, origin, scheme) {
   await page.evaluate((id) => { location.hash = `/c/${id}`; }, admin.dmChannels[0].id);
   await page.waitForFunction(() => document.querySelectorAll('[data-testid="channel-item"] [data-testid="agent-liveness"]').length >= 5, null, { timeout: 15_000 });
   const rowWords = await page.locator('[data-testid="channel-item"] [data-testid="agent-liveness"] .truncate').allTextContents();
-  check(`${tag} sidebar: DM 행마다 한두 낱말`, ["응답함", "살아 있음", "일 대기", "안 가져감", "응답 없음"].every((w) => rowWords.includes(w)), rowWords.join(","));
+  check(`${tag} sidebar: DM 행마다 한두 낱말`, ["응답함", "살아 있음", "일이 밀림", "안 가져감", "응답 없음"].every((w) => rowWords.includes(w)), rowWords.join(","));
   const widest = await page.locator('[data-testid="channel-item"] [data-testid="agent-liveness"]').evaluateAll((els) => Math.max(...els.map((el) => el.getBoundingClientRect().width)));
   check(`${tag} sidebar: 행 안에서 넘치지 않는다`, widest <= 110, String(widest));
   const dmHeader = await page.evaluate(() =>
@@ -587,6 +594,7 @@ async function u3(browser, origin, scheme) {
   await second.page.waitForTimeout(800);
   const memberLabel = ((await second.page.getByTestId("agent-liveness-bar").getByTestId("agent-liveness").textContent()) ?? "");
   check(`${tag} member: 라벨은 보인다`, memberLabel.includes("깨웠지만 아직 안 가져감"), memberLabel);
+  check(`${tag} member: 할 일이 없는 멤버에게는 경고색이 아니다`, (await second.page.getByTestId("agent-liveness-bar").getByTestId("agent-liveness").getAttribute("data-tone")) === "neutral");
   check(`${tag} member: 다시 깨우기는 없다 (연결 목록이 403이다)`, (await second.page.getByTestId("wake-agent-button").count()) === 0);
   await second.page.screenshot({ path: shot("6-member-no-wake") });
   await second.context.close();
@@ -597,8 +605,11 @@ async function u3(browser, origin, scheme) {
   const third = await open(browser, origin, scheme, limited, `/agents?agent=${A.grok}`);
   await third.page.getByTestId("wake-agent-button").waitFor({ timeout: 15_000 });
   await third.page.getByTestId("wake-agent-button").click();
-  await third.page.waitForFunction(() => /45분 뒤에 다시 깨울 수 있어요/.test(document.querySelector('[data-testid="wake-agent-status"]')?.textContent ?? ""), null, { timeout: 5_000 });
-  check(`${tag} limited: 429는 「45분 뒤에 다시 깨울 수 있어요」`, !((await third.page.getByTestId("wake-agent-status").textContent()) ?? "").includes("못했어요"));
+  await third.page.waitForFunction(() => /45분 뒤에 다시 깨울 수 있어요/.test(document.querySelector('[data-testid="wake-agent-cooldown"]')?.textContent ?? ""), null, { timeout: 5_000 });
+  const limitedNote = ((await third.page.getByTestId("wake-agent-cooldown").textContent()) ?? "").trim();
+  check(`${tag} limited: 눈이 읽는 한 줄이 이유와 쿨다운을 함께 말한다`, limitedNote === "시간당 깨우기 한도에 닿았어요 · 45분 뒤에 다시 깨울 수 있어요", limitedNote);
+  const limitedStatus = ((await third.page.getByTestId("wake-agent-status").textContent()) ?? "").trim();
+  check(`${tag} limited: 429는 오류가 아니라 「시간당 깨우기 한도에 닿았어요」와 서버가 준 쿨다운`, limitedStatus === "시간당 깨우기 한도에 닿았어요." && !limitedStatus.includes("못했어요"), limitedStatus);
   await third.page.screenshot({ path: shot("7-wake-limited") });
   await third.context.close();
 }

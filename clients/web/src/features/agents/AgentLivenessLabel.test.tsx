@@ -176,13 +176,42 @@ describe("생존 라벨", () => {
     }
   });
 
-  it("좁은 자리는 한두 낱말이고, 접근성 이름은 뜻을 읽어 준다", async () => {
+  it("좁은 자리는 눈에는 한두 낱말, 보조기술에는 라벨 한 줄이고 뜻은 title뿐이다", async () => {
     answer("woken_not_collected");
     const el = mount(createElement(AgentLivenessLabel, { agentId: AGENT, variant: "compact" }));
     await settle();
     const node = el.querySelector('[data-testid="agent-liveness"]');
     expect(node?.querySelector(".truncate")?.textContent).toBe("안 가져감");
-    expect(node?.querySelector(".sr-only")?.textContent).toContain("다시 깨울 수 있어요");
+    expect(node?.querySelector(".truncate")?.getAttribute("aria-hidden")).toBe("true");
+    expect(node?.querySelector(".sr-only")?.textContent).toBe("깨웠지만 아직 안 가져감");
+    expect(node?.getAttribute("title")).toContain("다시 깨울 수 있어요");
+  });
+
+  it("넓은 자리는 뜻을 보조기술에 한 번만 준다 (title로 또 주지 않는다)", async () => {
+    answer("alive_idle", 1);
+    const el = mount(createElement(AgentLivenessLabel, { agentId: AGENT }));
+    await settle();
+    const node = el.querySelector('[data-testid="agent-liveness"]');
+    expect(node?.getAttribute("title")).toBeNull();
+    expect(node?.querySelector(".sr-only")?.textContent).toContain("일은 가져가지 않고 있어요");
+  });
+
+  it("경고색은 다시 깨울 수 있는 사람(owner/admin)에게만 경고다", async () => {
+    answer("work_waiting");
+    let el = mount(createElement(AgentLivenessLabel, { agentId: AGENT }));
+    await settle();
+    expect(el.querySelector('[data-testid="agent-liveness"]')?.getAttribute("data-tone")).toBe("warn");
+    act(() => root?.unmount());
+    host?.remove();
+
+    roster.members = [person("member")];
+    el = mount(createElement(AgentLivenessLabel, { agentId: AGENT }));
+    await settle();
+    // 같은 사실, 같은 낱말. 할 수 있는 일이 없는 사람에게는 색이 경고하지 않는다.
+    const node = el.querySelector('[data-testid="agent-liveness"]');
+    expect(node?.getAttribute("data-state")).toBe("work_waiting");
+    expect(node?.getAttribute("data-tone")).toBe("neutral");
+    expect(node?.textContent).toContain("일이 기다리는 중");
   });
 });
 
@@ -191,6 +220,8 @@ describe("다시 깨우기", () => {
     el.querySelector('[data-testid="wake-agent-button"]') as HTMLButtonElement | null;
   const status = (el: HTMLElement) =>
     (el.querySelector('[data-testid="wake-agent-status"]')?.textContent ?? "").trim();
+  const cooldown = (el: HTMLElement) =>
+    (el.querySelector('[data-testid="wake-agent-cooldown"]')?.textContent ?? "").trim();
 
   it("관리자에게 보이고, 누르면 접수되고 쿨다운이 선다", async () => {
     answer("woken_not_collected");
@@ -206,7 +237,13 @@ describe("다시 깨우기", () => {
     await settle();
     expect(ring).toHaveBeenCalledWith(WS, CONN);
     expect(button(el)?.disabled).toBe(true);
-    expect(status(el)).toBe("60초 뒤에 다시 깨울 수 있어요");
+    expect(cooldown(el)).toBe("깨웠어요 · 60초 뒤에 다시 깨울 수 있어요");
+    // 낭독되는 안내는 한 번뿐인 접수 문장이고, 1초마다 바뀌는 숫자는 그 영역 밖이다.
+    expect(status(el)).toContain("깨우는 신호를 보냈어요");
+    expect(status(el)).not.toMatch(/\d+초|\d+분/);
+    expect(el.querySelector('[data-testid="wake-agent-cooldown"]')?.closest("[aria-live]")).toBeNull();
+    // 낭독 영역은 눈에 보이지 않고(sr-only), 눈은 버튼 옆 한 줄을 읽는다.
+    expect(el.querySelector('[data-testid="wake-agent-status"]')?.className).toContain("sr-only");
   });
 
   it("owner/admin이 아니면 보이지 않는다: 라벨만 남는다", async () => {
@@ -243,8 +280,9 @@ describe("다시 깨우기", () => {
       button(el)?.click();
     });
     await settle();
-    expect(status(el)).toBe("45분 뒤에 다시 깨울 수 있어요");
-    expect(status(el)).not.toContain("못했어요");
+    expect(cooldown(el)).toBe("시간당 깨우기 한도에 닿았어요 · 45분 뒤에 다시 깨울 수 있어요");
+    // 왜 45분인가: 60초 쿨다운이 아니라 시간당 한도다.
+    expect(status(el)).toBe("시간당 깨우기 한도에 닿았어요.");
     expect(button(el)?.disabled).toBe(true);
   });
 
