@@ -250,7 +250,7 @@ export function PersonalAssistantsList({ className }: { className?: string }) {
           ))}
         </ul>
       )}
-      {!list.isPending && !mayCreate && rosterSettled && (
+      {!list.isPending && !denied && !mayCreate && rosterSettled && (
         <p className="break-keep text-meta text-ink-muted" data-testid="assistants-permission">
           {AI_EXTERNAL_COPY.permission}
         </p>

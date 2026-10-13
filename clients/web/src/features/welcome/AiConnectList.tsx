@@ -292,11 +292,10 @@ function SoonRows() {
             data-selectable="false"
             data-testid="ai-connect-soon-row"
             data-row-id={entry.id}
-            aria-disabled="true"
           >
             <div className="ai-connect-opt-label">
               {/* 라디오 자리: 다른 줄과 타일 줄이 맞게 비워 둔다. */}
-              <span aria-hidden="true" className="ai-connect-radio border-transparent" />
+              <span aria-hidden="true" className="size-4 shrink-0" />
               {/* 중립 타일: 그록봇 줄의 회색 타일 스타일을 빌린다. 브랜드 색·로고는 쓰지 않는다. */}
               <span className="ai-connect-mark" data-mark="grok" aria-hidden="true">
                 {entry.mark}

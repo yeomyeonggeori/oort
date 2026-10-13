@@ -120,7 +120,7 @@ export function OneTimeSecretCard({
             <p className="break-keep text-meta text-ink-muted">{prompt.hint}</p>
           )}
           <pre
-            className="max-h-48 min-w-0 overflow-auto whitespace-pre-wrap break-all rounded-md bg-surface-hover p-3 font-mono text-meta text-ink"
+            className="max-h-48 min-w-0 overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface-hover p-3 font-mono text-meta text-ink"
             aria-label="복사될 프롬프트 미리보기"
             data-testid="hosted-prompt-preview"
           >
