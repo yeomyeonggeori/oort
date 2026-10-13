@@ -469,6 +469,33 @@ struct DecisionInput<'a> {
     deliver_secret_to_agent: bool,
 }
 
+/// Whether the action a `workspace_action` payload names offers its one-time
+/// value to the proposing agent **at the approver's choice**
+/// (`SecretDelivery::OptIn`). An unknown or missing id is `false`: the early
+/// guard refuses, and `execute_workspace_action` keeps its own copy of the check
+/// for the same reason a gate is called, not copied.
+fn payload_offers_opt_in_delivery(payload: &Value) -> bool {
+    payload
+        .get("action")
+        .and_then(|action| action.get("id"))
+        .and_then(Value::as_str)
+        .and_then(action_by_id)
+        .is_some_and(|action| action.secret_delivery == SecretDelivery::OptIn)
+}
+
+/// The early `deliverSecretToAgent` guard as a pure function (so its whole truth
+/// table is measurable, including the `OptIn` row no action occupies yet): a
+/// `true` is honoured only when **approving** a **workspace action** whose
+/// registry entry offers `OptIn` delivery (`offers_opt_in`).
+fn deliver_flag_refused(
+    deliver_requested: bool,
+    action_type: &str,
+    approve: bool,
+    offers_opt_in: bool,
+) -> bool {
+    deliver_requested && !(action_type == ACTION_TYPE_WORKSPACE_ACTION && approve && offers_opt_in)
+}
+
 async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRejectable<Decision> {
     let now = Utc::now();
     let desired_status = if input.approve {
@@ -552,6 +579,28 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
             "forbidden",
             "not a member of this approval channel",
             StatusCode::FORBIDDEN,
+            now,
+        )));
+    }
+
+    // **`deliverSecretToAgent` is only meaningful on the approve half of a
+    // workspace action** (ADR-0186 증보 v3 V3-3a). Anywhere else it is a
+    // malformed request. Judged straight after the membership gate and *before*
+    // the status and expiry arms, so it can never be outranked by an expiry
+    // settlement (which writes) — a security review (#3795) caught the first
+    // draft placing it after that arm.
+    if deliver_flag_refused(
+        input.deliver_secret_to_agent,
+        &approval.action_type,
+        input.approve,
+        payload_offers_opt_in_delivery(&approval.payload),
+    ) {
+        return Ok(Ok(refusal(
+            approval.id,
+            input.member_id,
+            DELIVER_SECRET_NOT_SUPPORTED,
+            "deliverSecretToAgent applies only to approving a workspace action",
+            StatusCode::BAD_REQUEST,
             now,
         )));
     }
@@ -774,22 +823,6 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
     // Placed **after** the expiry settlement above: an already-overdue card
     // still settles as `expired` on a tap rather than minting an invite past its
     // own deadline.
-    //
-    // **`deliverSecretToAgent` is only meaningful on the approve half of a
-    // workspace action** (ADR-0186 증보 v3 V3-3a). Anywhere else it is a
-    // malformed request, refused before any write so the approval stays pending.
-    if input.deliver_secret_to_agent
-        && !(approval.action_type == ACTION_TYPE_WORKSPACE_ACTION && input.approve)
-    {
-        return Ok(Ok(refusal(
-            approval.id,
-            input.member_id,
-            DELIVER_SECRET_NOT_SUPPORTED,
-            "deliverSecretToAgent applies only to approving a workspace action",
-            StatusCode::BAD_REQUEST,
-            now,
-        )));
-    }
     if approval.action_type == ACTION_TYPE_WORKSPACE_ACTION && input.approve {
         return execute_workspace_action(conn, &approval, &input, now).await;
     }
@@ -2625,6 +2658,41 @@ fn refusal(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `deliverSecretToAgent` truth table (ADR-0186 증보 v3, security review of
+    /// #3795): honoured only when approving a workspace action that offers
+    /// opt-in delivery — every other cell is a refusal. The `offers_opt_in` row
+    /// is exercised here because no registry action occupies it yet.
+    #[test]
+    fn the_deliver_flag_is_honoured_in_exactly_one_cell() {
+        for action_type in [ACTION_TYPE_WORKSPACE_ACTION, "tool_call"] {
+            for approve in [true, false] {
+                for offers in [true, false] {
+                    let honoured = !deliver_flag_refused(true, action_type, approve, offers);
+                    assert_eq!(
+                        honoured,
+                        action_type == ACTION_TYPE_WORKSPACE_ACTION && approve && offers,
+                        "{action_type} approve={approve} offers={offers}"
+                    );
+                    // Not asking is never a refusal.
+                    assert!(!deliver_flag_refused(false, action_type, approve, offers));
+                }
+            }
+        }
+    }
+
+    /// No registry action opts in during P0, so the payload reader says no for
+    /// every real, unknown and absent id.
+    #[test]
+    fn nothing_offers_opt_in_delivery_in_p0() {
+        for payload in [
+            json!({"action": {"id": "invite.create"}}),
+            json!({"action": {"id": "no.such.action"}}),
+            json!({}),
+        ] {
+            assert!(!payload_offers_opt_in_delivery(&payload), "{payload}");
+        }
+    }
 
     /// The refusal body must decode as the receipt the client expects, or a 409
     /// would reach the phone as an unparseable success shape.
