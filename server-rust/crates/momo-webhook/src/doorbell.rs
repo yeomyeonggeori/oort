@@ -182,6 +182,154 @@ pub async fn unregister_doorbell_in_tx(
         .map_err(DbError::from)
 }
 
+/// ADR-0200 D4 「다시 깨우기」 abuse bound: at most one manual ring per minute and five
+/// per hour, per connection.
+pub const RING_COOLDOWN_SECONDS: i64 = 60;
+pub const RING_HOURLY_LIMIT: i64 = 5;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RingOutcome {
+    /// The doorbell is re-armed; the sender's next drain fires it. `next_allowed_at`
+    /// is when the cooldown ends.
+    Requested {
+        requested_at: DateTime<Utc>,
+        next_allowed_at: DateTime<Utc>,
+    },
+    NotFound,
+    /// Not an admin and not the person who created the connection.
+    NotAllowed,
+    NotActive,
+    NotRegistered,
+    /// Too soon after the last ring (`retry_after_seconds` ≥ 1).
+    Cooldown {
+        retry_after_seconds: i64,
+    },
+    /// Five already in the last hour.
+    HourlyLimit {
+        retry_after_seconds: i64,
+    },
+}
+
+/// A person asks the doorbell to ring NOW, ahead of any new inbox event.
+///
+/// Allowed for a workspace admin, the person who created the connection, or the
+/// agent's recorded owner — `actor_is_admin` is the caller's verdict on the first, this reads
+/// the second. The doorbell row is locked `FOR UPDATE` (not the connection: a claim
+/// holds `FOR SHARE` there), which also serializes concurrent rings so the cooldown
+/// cannot be raced. A ring re-arms the existing row (`pending_trailing = true`,
+/// `window_started_at = NULL`); the sender then fires the same content-free signal
+/// through the same egress policy as any other ring. Nothing is sent from here.
+pub async fn request_manual_ring_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    connection_id: Uuid,
+    actor_member_id: Uuid,
+    actor_is_admin: bool,
+) -> Result<RingOutcome, DbError> {
+    let connection = sqlx::query(
+        "SELECT hc.status::text AS status, hc.created_by, a.owner_human_id \
+           FROM hosted_agent_connection hc \
+           LEFT JOIN agent a \
+             ON a.workspace_id = hc.workspace_id AND a.member_id = hc.agent_member_id \
+          WHERE hc.workspace_id = $1 AND hc.id = $2",
+    )
+    .bind(workspace_id)
+    .bind(connection_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(connection) = connection else {
+        return Ok(RingOutcome::NotFound);
+    };
+    let created_by: Option<Uuid> = connection.try_get("created_by")?;
+    let owner: Option<Uuid> = connection.try_get("owner_human_id")?;
+    if !actor_is_admin && created_by != Some(actor_member_id) && owner != Some(actor_member_id) {
+        return Ok(RingOutcome::NotAllowed);
+    }
+    let status: String = connection.try_get("status")?;
+    if status != "active" {
+        return Ok(RingOutcome::NotActive);
+    }
+    let registered: Option<i32> = sqlx::query_scalar(
+        "SELECT 1 FROM hosted_agent_doorbell \
+          WHERE workspace_id = $1 AND connection_id = $2 FOR UPDATE",
+    )
+    .bind(workspace_id)
+    .bind(connection_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if registered.is_none() {
+        return Ok(RingOutcome::NotRegistered);
+    }
+
+    // The window is read after the lock, so two concurrent requests see each other.
+    let window = sqlx::query(
+        "SELECT count(*) FILTER (WHERE requested_at > now() - interval '1 hour') AS hour_count, \
+                max(requested_at) AS last_at, \
+                min(requested_at) FILTER (WHERE requested_at > now() - interval '1 hour') AS oldest_in_hour, \
+                now() AS db_now \
+           FROM hosted_agent_doorbell_ring \
+          WHERE workspace_id = $1 AND connection_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(connection_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    let hour_count: i64 = window.try_get("hour_count")?;
+    let last_at: Option<DateTime<Utc>> = window.try_get("last_at")?;
+    let oldest_in_hour: Option<DateTime<Utc>> = window.try_get("oldest_in_hour")?;
+    let now: DateTime<Utc> = window.try_get("db_now")?;
+    if let Some(last_at) = last_at {
+        let elapsed = (now - last_at).num_seconds();
+        if elapsed < RING_COOLDOWN_SECONDS {
+            return Ok(RingOutcome::Cooldown {
+                retry_after_seconds: (RING_COOLDOWN_SECONDS - elapsed).max(1),
+            });
+        }
+    }
+    if hour_count >= RING_HOURLY_LIMIT {
+        let retry = oldest_in_hour
+            .map(|oldest| 3600 - (now - oldest).num_seconds())
+            .unwrap_or(3600)
+            .max(1);
+        return Ok(RingOutcome::HourlyLimit {
+            retry_after_seconds: retry,
+        });
+    }
+
+    sqlx::query(
+        "INSERT INTO hosted_agent_doorbell_ring (workspace_id, connection_id, requested_by) \
+         VALUES ($1, $2, $3)",
+    )
+    .bind(workspace_id)
+    .bind(connection_id)
+    .bind(actor_member_id)
+    .execute(&mut *conn)
+    .await?;
+    // Old rows are only needed for the one-hour window.
+    sqlx::query(
+        "DELETE FROM hosted_agent_doorbell_ring \
+          WHERE workspace_id = $1 AND connection_id = $2 \
+            AND requested_at < now() - interval '1 day'",
+    )
+    .bind(workspace_id)
+    .bind(connection_id)
+    .execute(&mut *conn)
+    .await?;
+    sqlx::query(
+        "UPDATE hosted_agent_doorbell \
+            SET pending_trailing = true, window_started_at = NULL, updated_at = now() \
+          WHERE workspace_id = $1 AND connection_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(connection_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(RingOutcome::Requested {
+        requested_at: now,
+        next_allowed_at: now + chrono::Duration::seconds(RING_COOLDOWN_SECONDS),
+    })
+}
+
 pub async fn load_doorbell_projection_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,

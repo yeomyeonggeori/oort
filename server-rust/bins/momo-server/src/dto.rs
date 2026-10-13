@@ -4579,6 +4579,15 @@ pub struct RegisterHostedDoorbellRequest {
     pub secret: String,
 }
 
+/// openapi `HostedDoorbellRingResponse` — the ring was requested, not delivered: the
+/// sender fires it on its next drain.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostedDoorbellRingResponse {
+    pub requested_at_ms: i64,
+    pub next_allowed_at_ms: i64,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostedDoorbellResponse {
