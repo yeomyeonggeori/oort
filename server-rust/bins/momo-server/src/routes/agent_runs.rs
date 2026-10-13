@@ -73,10 +73,10 @@ use momo_agent::approval::is_active_channel_member_in_tx;
 use momo_agent::{
     agent_run_cursor_is_visible_in_tx, cancel_pending_approvals_for_run_in_tx, cancel_run_in_tx,
     create_agent_run_in_tx, is_active_agent_in_tx, is_active_human_channel_member_in_tx,
-    linked_work_session_ids_in_tx, list_agent_run_summaries_in_tx, list_channel_work_runs_in_tx,
-    load_agent_run_in_tx, load_agent_run_with_visibility_in_tx, load_eligible_agent_in_tx,
-    lock_run_for_cancel_in_tx, validated_run_limit, AgentRunSummaryRow, NewAgentRun,
-    RequestedRouting, RunStatus, RunTrigger,
+    linked_work_session_ids_in_tx, list_agent_run_summaries_in_tx, list_channel_run_progress_in_tx,
+    list_channel_work_runs_in_tx, list_run_events_in_tx, load_agent_run_in_tx,
+    load_agent_run_with_visibility_in_tx, load_eligible_agent_in_tx, lock_run_for_cancel_in_tx,
+    validated_run_limit, AgentRunSummaryRow, NewAgentRun, RequestedRouting, RunStatus, RunTrigger,
 };
 use momo_auth::{Principal, PrincipalKind};
 use momo_db::audit::{write_audit, AuditEntry};
@@ -88,8 +88,10 @@ use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::dto::{
-    AgentRunCancelResponse, AgentRunHistoryQuery, AgentRunListQuery, AgentRunPageResponse,
-    AgentRunResponse, AgentRunSummaryDto, AgentRunSummaryPageResponse, CreateAgentRunRequest,
+    AgentRunCancelResponse, AgentRunEventDto, AgentRunEventsResponse, AgentRunHistoryQuery,
+    AgentRunListQuery, AgentRunPageResponse, AgentRunProgressDto, AgentRunProgressPageResponse,
+    AgentRunProgressQuery, AgentRunResponse, AgentRunSummaryDto, AgentRunSummaryPageResponse,
+    AheadRunDto, CreateAgentRunRequest,
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
@@ -709,6 +711,141 @@ fn can_read_run(
         PrincipalKind::Agent => run_agent_member_id == principal_member_id,
         PrincipalKind::WorkHost => false,
     }
+}
+
+/// `GET /v1/workspaces/{ws}/channels/{ch}/agent-runs/progress` (ADR-0200 D1/D3,
+/// #3741).
+///
+/// What the work panel and the channel "working" line read INSTEAD of inferring
+/// state from a client clock: for each hosted-agent run in the channel (mention
+/// runs and work runs alike) the server's own `phase`, the delivery job's
+/// `leaseState`, the `queuePosition` among the agent's claimable queue, and the
+/// latest reported stage. A separate path from the legacy `agent-runs` list so
+/// that list's wire (`type=work`, `AgentRunResponse`) does not change under the
+/// clients that parse it.
+///
+/// Human members only, and only of this channel: a non-member gets the same 403 the
+/// legacy list gives. The queue never names a run the viewer cannot see — runs ahead
+/// in channels the viewer is not in are a count (`aheadTotal`) and nothing else.
+pub async fn progress(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, channel)): Path<(String, String)>,
+    Query(query): Query<AgentRunProgressQuery>,
+) -> Result<Json<AgentRunProgressPageResponse>, ApiError> {
+    require_human(&principal, "human member required")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let channel_id = path_uuid(&channel, "invalid channel id")?;
+    let active_only = match query.state.as_deref().map(str::trim) {
+        None | Some("") | Some("all") => false,
+        Some("active") => true,
+        Some(_) => return Err(ApiError::bad_request("state must be active or all")),
+    };
+    let limit = validated_run_limit(query.limit.as_deref());
+    let member_id = principal.member_id;
+
+    let rows = settle_db(
+        "agent_runs.progress",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                if !is_active_channel_member_in_tx(conn, channel_id, member_id).await? {
+                    return Ok(Err(ApiError::forbidden("not an active channel member")));
+                }
+                Ok(Ok(list_channel_run_progress_in_tx(
+                    conn,
+                    workspace_id,
+                    channel_id,
+                    member_id,
+                    active_only,
+                    limit,
+                )
+                .await?))
+            })
+        })
+        .await,
+    )?;
+
+    let runs = rows
+        .iter()
+        .map(|row| AgentRunProgressDto {
+            id: row.summary.id.to_string(),
+            channel_id: row.summary.channel_id.to_string(),
+            agent_member_id: row.agent_member_id.to_string(),
+            trigger_message_id: row.summary.trigger_message_id.map(|id| id.to_string()),
+            trigger_summary: row.summary.trigger_summary.clone(),
+            status: row.summary.status.as_db_label().to_string(),
+            phase: row.phase.as_wire().to_string(),
+            lease_state: row.lease_state.as_wire().to_string(),
+            step_count: row.step_count,
+            claimed_at_ms: row.claimed_at.map(epoch_ms),
+            latest_stage: row.latest_stage.clone(),
+            last_event_at_ms: row.last_event_at.map(epoch_ms),
+            approval_id: row.approval_id.map(|id| id.to_string()),
+            approval_expires_at_ms: row.approval_expires_at.map(epoch_ms),
+            end_reason: row.end_reason.clone(),
+            queue_position: row.queue_position,
+            ahead_total: row.queue_position.map(|_| row.ahead_total),
+            ahead: row
+                .ahead
+                .iter()
+                .map(|ahead| AheadRunDto {
+                    run_id: ahead.run_id.to_string(),
+                    channel_id: ahead.channel_id.to_string(),
+                })
+                .collect(),
+            started_at_ms: row.summary.started_at.map(epoch_ms),
+            finished_at_ms: row.summary.finished_at.map(epoch_ms),
+            created_at_ms: epoch_ms(row.summary.created_at),
+            updated_at_ms: epoch_ms(row.summary.updated_at),
+        })
+        .collect();
+    Ok(Json(AgentRunProgressPageResponse { runs }))
+}
+
+/// `GET /v1/workspaces/{ws}/agent-runs/{run}/events` (ADR-0200 D2, #3741).
+///
+/// The run event ledger, whole (it is capped at 200 rows, so there is no cursor to
+/// resume from and no raw sequence to leak), oldest first. A run that is not in
+/// this workspace, and a run whose channel the caller is not an active member of,
+/// are the same **404** — the answer is no existence oracle.
+pub async fn events(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, run)): Path<(String, String)>,
+) -> Result<Json<AgentRunEventsResponse>, ApiError> {
+    require_human(&principal, "human member required")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let run_id = path_uuid(&run, "invalid run id")?;
+    let member_id = principal.member_id;
+
+    let events = settle_db(
+        "agent_runs.events",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                match list_run_events_in_tx(conn, workspace_id, run_id, member_id).await? {
+                    Some(events) => Ok(Ok(events)),
+                    None => Ok(Err(ApiError::not_found("agent run not found"))),
+                }
+            })
+        })
+        .await,
+    )?;
+
+    Ok(Json(AgentRunEventsResponse {
+        run_id: run_id.to_string(),
+        events: events
+            .iter()
+            .map(|event| AgentRunEventDto {
+                ordinal: event.ordinal,
+                kind: event.kind.clone(),
+                stage: event.stage.clone(),
+                code: event.code.clone(),
+                approval_id: event.approval_id.map(|id| id.to_string()),
+                actor_member_id: event.actor_member_id.map(|id| id.to_string()),
+                created_at_ms: epoch_ms(event.created_at),
+            })
+            .collect(),
+    }))
 }
 
 fn summary_dto(row: &AgentRunSummaryRow) -> AgentRunSummaryDto {

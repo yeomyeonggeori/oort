@@ -480,11 +480,13 @@ pub fn validated_run_limit(raw: Option<&str>) -> i64 {
 /// that uses it joins `membership` — and `channel_id` is a column of both tables,
 /// so a bare list is an ambiguous-reference error at runtime rather than a
 /// compile-time one.
-const SUMMARY_COLS: &str = "r.id, r.channel_id, r.trigger_message_id, \
+pub(crate) const SUMMARY_COLS: &str = "r.id, r.channel_id, r.trigger_message_id, \
      r.status::text AS status_label, r.input, r.started_at, r.finished_at, \
      r.created_at, r.updated_at";
 
-fn decode_run_summary(row: &sqlx::postgres::PgRow) -> Result<AgentRunSummaryRow, sqlx::Error> {
+pub(crate) fn decode_run_summary(
+    row: &sqlx::postgres::PgRow,
+) -> Result<AgentRunSummaryRow, sqlx::Error> {
     let label: String = row.try_get("status_label")?;
     let status = RunStatus::from_db_label(&label)
         .ok_or_else(|| sqlx::Error::Decode(format!("unknown run_status '{label}'").into()))?;
