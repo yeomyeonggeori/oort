@@ -79,11 +79,11 @@ use momo_agent::actions::{
 };
 use momo_agent::approval::{
     decided_props_patch, decision_broadcast_payload, decision_event_payload, decision_receipt,
-    default_execution_host, existing_decision_in_tx, is_active_channel_member_in_tx,
-    is_active_human_member_in_tx, list_approvals_in_tx, lock_approval_in_tx,
-    mark_approval_decided_in_tx, mark_approval_expired_in_tx, normalized_reason,
-    offers_host_choice, record_decision_in_tx, resume_job_payload, selectable_host_ids,
-    validated_limit, validated_status, ApprovalListRow, LockedApproval,
+    decision_stamp_in_tx, default_execution_host, existing_decision_in_tx,
+    is_active_channel_member_in_tx, is_active_human_member_in_tx, list_approvals_in_tx,
+    lock_approval_in_tx, mark_approval_decided_in_tx, mark_approval_expired_in_tx,
+    normalized_reason, offers_host_choice, record_decision_in_tx, resume_job_payload,
+    selectable_host_ids, validated_limit, validated_status, ApprovalListRow, LockedApproval,
 };
 use momo_agent::tools::{ToolResult, TOOL_AUDIT_SCHEMA};
 use momo_agent::{
@@ -96,9 +96,10 @@ use momo_auth::{
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
 use momo_messaging::{
-    add_channel_member_in_tx, cent_channel, create_channel_detailed_in_tx, normalize_channel_kind,
-    patch_and_prune_message_props_in_tx, patch_message_props_in_tx,
-    rename_agent_display_name_in_tx, send_message_in_tx, MessageType, NewChannel, NewMessage,
+    add_channel_member_in_tx, cent_channel, create_channel_detailed_in_tx,
+    emit_message_edited_in_tx, normalize_channel_kind, patch_and_prune_message_props_in_tx,
+    patch_message_props_in_tx, rename_agent_display_name_in_tx, send_message_in_tx, MessageType,
+    NewChannel, NewMessage,
 };
 use momo_outbox::{emit_outbox, OutboxKind, RESUME_APPROVAL_JOB_METHOD};
 use momo_settings::{
@@ -550,14 +551,27 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
 
     if approval.status != "pending" {
         let status = approval.status.clone();
-        return Ok(Ok(refusal(
-            approval.id,
-            input.member_id,
-            &status,
-            &format!("approval is already {status}"),
-            StatusCode::CONFLICT,
-            now,
-        )));
+        // The receipt names whoever **settled** it and when — not the person who
+        // pressed the button just now (#3771). A card approved at 22:52 must not
+        // answer a second click with 「승인 · 22:54」. A system settlement keeps
+        // its `NULL` decider; a row that vanished mid-lock falls back to the old
+        // shape (it cannot be reached under `FOR UPDATE`, but the receipt must
+        // still decode).
+        let (decided_by, decided_at) = decision_stamp_in_tx(conn, input.workspace_id, approval.id)
+            .await?
+            .map(|(by, at)| (by, at.unwrap_or(now)))
+            .unwrap_or((Some(input.member_id), now));
+        return Ok(Ok(Decision {
+            receipt: decision_receipt(
+                approval.id,
+                &status,
+                decided_by,
+                decided_at,
+                Some(&format!("approval is already {status}")),
+            ),
+            status: StatusCode::CONFLICT,
+            secret_once: None,
+        }));
     }
 
     // The `work_control` this approval owns, if any (Swift :196). A malformed
@@ -798,6 +812,7 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
             &[LAST_ATTEMPT_PROPS_KEY],
         )
         .await?;
+        announce_card_edit(conn, input.workspace_id, message_id).await?;
     }
 
     record_decision_in_tx(
@@ -985,6 +1000,30 @@ fn gate_plan(role: Option<RequiredRole>) -> GatePlan {
     }
 }
 
+/// Announce a card the decision route just rewrote (#3771).
+///
+/// `patch_message_props_in_tx` and `patch_and_prune_message_props_in_tx` move
+/// `message.props` and, by design, publish nothing. The decision's own
+/// `approval.decided` envelope was meant to carry the news, but the web
+/// timeline renders the `approval_request` card from the **message** it holds
+/// and does not read that envelope, so every viewer kept `status: pending`
+/// until a reload and the 승인/거부 buttons came back on a card that had been
+/// decided (measured on prod, 2026-10-13: the second click got 「이미 승인으로
+/// 기록되어 있었어요」).
+///
+/// This publishes the existing `message.edited` frame — the whole row, props
+/// included, at the message's own `seq` — which every client already applies in
+/// place (`momo_messaging::emit_message_edited_in_tx`, the same door the login
+/// handoff card uses). It stamps no `edited_at`, so no 「수정됨」 appears.
+async fn announce_card_edit(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    message_id: Uuid,
+) -> Result<(), momo_db::DbError> {
+    emit_message_edited_in_tx(conn, workspace_id, message_id).await?;
+    Ok(())
+}
+
 /// The `role_required` refusal: the approval is **not consumed** (ADR-0186 D2) —
 /// no ledger row, no status change, the run stays parked. What changes is the
 /// card, so a person who tapped and was refused sees why on the surface they
@@ -1004,6 +1043,7 @@ async fn role_required_refusal(
             &last_attempt_patch(ROLE_REQUIRED),
         )
         .await?;
+        announce_card_edit(conn, input.workspace_id, message_id).await?;
     }
     Ok(Ok(refusal(
         approval.id,
@@ -1392,6 +1432,7 @@ async fn execute_workspace_action(
             &[LAST_ATTEMPT_PROPS_KEY],
         )
         .await?;
+        announce_card_edit(conn, input.workspace_id, message_id).await?;
     }
 
     record_decision_in_tx(
