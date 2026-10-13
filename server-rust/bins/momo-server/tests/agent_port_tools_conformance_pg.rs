@@ -12666,3 +12666,128 @@ async fn a_rejected_card_is_announced_as_rejected() {
     assert_eq!(frames.len(), 1, "the rejection announces the card once");
     assert_eq!(frames[0]["payload"]["props"]["status"], json!("rejected"));
 }
+
+/// `decide_as` with extra body keys (ADR-0186 증보 v3 P0, #3784).
+async fn decide_with_extra(
+    client: &reqwest::Client,
+    base: &str,
+    workspace: Uuid,
+    bearer: &str,
+    approval_id: Uuid,
+    approve: bool,
+    extra: Value,
+) -> (u16, Value) {
+    let mut body = json!({
+        "approvalId": approval_id,
+        "approve": approve,
+        "clientDecisionId": Uuid::new_v4()
+    });
+    for (key, value) in extra.as_object().expect("extra is an object") {
+        body[key] = value.clone();
+    }
+    let response = client
+        .post(format!(
+            "{base}/v1/workspaces/{workspace}/approvals/{approval_id}/decision"
+        ))
+        .bearer_auth(bearer)
+        .json(&body)
+        .send()
+        .await
+        .expect("decision responds");
+    let status = response.status().as_u16();
+    (status, response.json().await.expect("a decision body"))
+}
+
+/// **#3784 red proof**: `deliverSecretToAgent: true` is refused 400
+/// `deliver_secret_not_supported` — before any write — on every decision that
+/// cannot honour it, and the approval survives. In P0 no action offers
+/// delivery, so `invite.create` must refuse it; a rejection carrying it is
+/// malformed too. A decision without the flag still executes normally.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn deliver_secret_to_agent_is_refused_where_the_action_does_not_offer_it() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+
+    let (approval_id, _card) = propose_invite(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        json!({"role": "member", "maxUses": 1, "expiresInDays": 7}),
+    )
+    .await;
+    let invites_before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM invite_code WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+
+    for (approve, label) in [(true, "approve"), (false, "reject")] {
+        let (status, body) = decide_with_extra(
+            &client,
+            &base,
+            fixture.workspace,
+            &fixture.human_jwt,
+            approval_id,
+            approve,
+            json!({"deliverSecretToAgent": true}),
+        )
+        .await;
+        assert_eq!(status, 400, "{label}: {body}");
+        assert_eq!(
+            body["status"], "deliver_secret_not_supported",
+            "{label}: {body}"
+        );
+        assert!(
+            body.get("result").is_none(),
+            "{label}: executed nothing: {body}"
+        );
+        let state: String =
+            sqlx::query_scalar("SELECT status::text FROM approval WHERE workspace_id=$1 AND id=$2")
+                .bind(fixture.workspace)
+                .bind(approval_id)
+                .fetch_one(&su)
+                .await
+                .unwrap();
+        assert_eq!(state, "pending", "{label}: the approval is not consumed");
+        let ledger: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM approval_decision WHERE workspace_id=$1 AND approval_id=$2",
+        )
+        .bind(fixture.workspace)
+        .bind(approval_id)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        assert_eq!(
+            ledger, 0,
+            "{label}: a refused decision writes no ledger row"
+        );
+        let invites: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM invite_code WHERE workspace_id=$1")
+                .bind(fixture.workspace)
+                .fetch_one(&su)
+                .await
+                .unwrap();
+        assert_eq!(invites, invites_before, "{label}: minted nothing");
+    }
+
+    // `false` is the default spelled out: not an error.
+    let (status, body) = decide_with_extra(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval_id,
+        true,
+        json!({"deliverSecretToAgent": false}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["status"], "approved", "{body}");
+}
